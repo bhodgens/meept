@@ -47,6 +47,16 @@ type busSubscription struct {
 	TopicSubs  []*bus.Subscriber // per-topic subscribers
 	Events     []*busEventRecord
 	MaxEvents  int
+	// nextSeq is the sequence number assigned to the most recent event
+	// appended to Events (monotonic per subscription). It is the poll
+	// cursor: bus.poll with since_seq returns records with Seq > since_seq,
+	// which — unlike the legacy wall-clock `since` filter — can never skip
+	// an event that was buffered before the client observed its cursor.
+	nextSeq int64
+	// trimmed counts records discarded from the tail of Events by the
+	// MaxEvents drop-oldest trim. Drop accounting: surfaced in the
+	// bus.poll response so buffer overflow is never silent.
+	trimmed int64
 	mu         sync.Mutex
 	cancelFunc context.CancelFunc // cancels goroutines when client disconnects
 }
@@ -58,6 +68,10 @@ type busEventRecord struct {
 	Source    string    `json:"source"`
 	Timestamp time.Time `json:"timestamp"`
 	Payload   any       `json:"payload"`
+	// Seq is the per-subscription delivery sequence number (1-based,
+	// assignment order = collector receive order). The poll cursor
+	// (since_seq / next_seq) is built on it.
+	Seq int64 `json:"seq"`
 }
 
 // NewProxyHandler creates a new proxy handler.
@@ -502,28 +516,43 @@ func (p *ProxyHandler) handleBusSubscribe(ctx context.Context, params json.RawMe
 						"msg_topic", msg.Topic,
 						"msg_source", msg.Source,
 					)
-					sub.mu.Lock()
+					// Parse the payload OUTSIDE sub.mu: json.Unmarshal is
+					// the slow part of record construction and the poll
+					// path holds the same mutex — holding it here stalls
+					// polls and backs up the subscriber channel, which
+					// turns load into silent bus-level drops.
+					var payload any
+					if msg.Payload != nil {
+						var decoded any
+						if err := json.Unmarshal(msg.Payload, &decoded); err == nil {
+							payload = decoded
+						}
+					}
 					event := &busEventRecord{
 						Topic:     msg.Topic,
 						Type:      string(msg.Type),
 						Source:    msg.Source,
 						Timestamp: time.Now(),
+						Payload:   payload,
 					}
-					// Parse payload
-					if msg.Payload != nil {
-						var payload any
-						if err := json.Unmarshal(msg.Payload, &payload); err == nil { //nolint:mutexio // unmarshal into local; mutex guards sub.Events append
-							event.Payload = payload
-						}
-					}
+					sub.mu.Lock()
+					// Monotonic per-subscription sequence: the poll cursor
+					// (since_seq/next_seq) never skips a buffered event the
+					// way a wall-clock client cursor can.
+					sub.nextSeq++
+					event.Seq = sub.nextSeq
 					sub.Events = append(sub.Events, event)
 					slog.Debug("Added event to subscription buffer",
 						"subscription_id", subID,
 						"event_count", len(sub.Events),
+						"seq", event.Seq,
 					)
-					// Trim to max size
-					if len(sub.Events) > sub.MaxEvents {
-						sub.Events = sub.Events[len(sub.Events)-sub.MaxEvents:]
+					// Trim to max size — drop-oldest, explicitly counted
+					// so buffer overflow shows up in bus.poll responses
+					// ("dropped") instead of vanishing silently.
+					if over := len(sub.Events) - sub.MaxEvents; over > 0 {
+						sub.Events = sub.Events[over:]
+						sub.trimmed += int64(over)
 					}
 					sub.mu.Unlock()
 				}
@@ -545,10 +574,23 @@ func (p *ProxyHandler) handleBusSubscribe(ctx context.Context, params json.RawMe
 }
 
 // handleBusPoll returns events since the last poll.
+//
+// Cursor semantics: the request may carry `since_seq` (the `next_seq` value
+// from a previous poll response). Seq-cursor filtering compares per-record
+// sequence numbers and can NEVER skip an unread buffered event; the legacy
+// `since` RFC3339 wall-clock filter is kept for old clients but is lossy
+// under load — a client-side time.Now() cursor recorded after a poll
+// response lands strictly after events that were buffered between the
+// server's snapshot and the cursor assignment, and the strict
+// Timestamp.After comparison then excluded them forever (the observed
+// "success with empty buffers" drop). The response always carries
+// `next_seq` (the cursor to echo back) and `dropped` (records lost to
+// buffer overflow or full collector channels — never silent).
 func (p *ProxyHandler) handleBusPoll(ctx context.Context, params json.RawMessage) (any, error) {
 	var req struct {
 		SubscriptionID string `json:"subscription_id"`
-		Since          string `json:"since"` // RFC3339 timestamp
+		Since          string `json:"since"`     // RFC3339 timestamp (legacy cursor)
+		SinceSeq       int64  `json:"since_seq"` // monotonic seq cursor (preferred)
 	}
 	if err := json.Unmarshal(params, &req); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
@@ -562,7 +604,7 @@ func (p *ProxyHandler) handleBusPoll(ctx context.Context, params json.RawMessage
 
 	sub := subVal.(*busSubscription)
 
-	// Parse since timestamp
+	// Parse since timestamp (legacy cursor)
 	var since time.Time
 	if req.Since != "" {
 		var err error
@@ -572,27 +614,45 @@ func (p *ProxyHandler) handleBusPoll(ctx context.Context, params json.RawMessage
 		}
 	}
 
-	// Collect events since timestamp
+	// Collect events + drop accounting under one lock snapshot.
 	sub.mu.Lock()
 	defer sub.mu.Unlock()
 
+	useSeq := req.SinceSeq > 0
 	events := make([]*busEventRecord, 0)
 	for _, e := range sub.Events {
-		if e.Timestamp.After(since) {
+		if useSeq {
+			if e.Seq > req.SinceSeq {
+				events = append(events, e)
+			}
+		} else if e.Timestamp.After(since) {
 			events = append(events, e)
 		}
 	}
 
-	if len(events) > 0 {
+	// Dropped = records trimmed from the buffer (drop-oldest overflow) +
+	// messages the bus discarded because a collector channel was full at
+	// publish time. Explicit, in-band accounting; never silent.
+	dropped := sub.trimmed
+	for _, ts := range sub.TopicSubs {
+		dropped += ts.DroppedCount()
+	}
+
+	if len(events) > 0 || dropped > 0 {
 		slog.Debug("Poll returning events",
 			"subscription_id", req.SubscriptionID,
 			"total_buffered", len(sub.Events),
 			"events_returned", len(events),
+			"cursor", req.SinceSeq,
+			"next_seq", sub.nextSeq,
+			"dropped", dropped,
 		)
 	}
 
 	return map[string]any{
-		"events": events,
+		"events":   events,
+		"next_seq": sub.nextSeq,
+		"dropped":  dropped,
 	}, nil
 }
 

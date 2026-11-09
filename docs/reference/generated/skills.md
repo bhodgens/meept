@@ -19,7 +19,6 @@ Skills are SKILL.md files with YAML frontmatter describing capabilities, require
 - Constants
 - Variables
 - [func CheckPrerequisites\(checker PrerequisiteChecker, prereqs \*HermesPrerequisites\) error](<#CheckPrerequisites>)
-- [func IsClaudeSkillPath\(path string\) bool](<#IsClaudeSkillPath>)
 - [func StopWordSet\(\) map\[string\]bool](<#StopWordSet>)
 - [type CapabilityIndex](<#CapabilityIndex>)
   - [func BuildCapabilityIndex\(skillIndex \*SkillIndex, opts ...CapabilityIndexOption\) \*CapabilityIndex](<#BuildCapabilityIndex>)
@@ -277,13 +276,6 @@ Skills are SKILL.md files with YAML frontmatter describing capabilities, require
 	func CheckPrerequisites(checker PrerequisiteChecker, prereqs *HermesPrerequisites) error
 
 CheckPrerequisites is a convenience function that runs all prerequisite checks for the given HermesPrerequisites. It returns the first error encountered, or nil if all checks pass.
-
-<a name="IsClaudeSkillPath"></a>
-## func IsClaudeSkillPath
-
-	func IsClaudeSkillPath(path string) bool
-
-IsClaudeSkillPath returns true if the path is under a \~/.claude/skills/ directory \(expanded or literal\).
 
 <a name="StopWordSet"></a>
 ## func StopWordSet

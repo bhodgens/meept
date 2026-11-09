@@ -5921,11 +5921,15 @@ VerificationDefaults holds daemon\-level verification defaults.
 	    // (opt-in defaults rule, docs/agents/opt-in-defaults.md). Declared
 	    // here in lieu of an in-field comment, which would split the field
 	    // block's gofmt alignment group.
-	    Enabled              bool     `json:"enabled"                toml:"enabled"`
-	    IdleStopSeconds      int      `json:"idle_stop_seconds"      toml:"idle_stop_seconds"`
-	    OnnxRuntimeLib       string   `json:"onnx_runtime_lib"       toml:"onnx_runtime_lib"`
-	    STTProvider          string   `json:"stt_provider"           toml:"stt_provider"`
-	    TTSProvider          string   `json:"tts_provider"           toml:"tts_provider"`
+	    Enabled         bool   `json:"enabled"                toml:"enabled"`
+	    IdleStopSeconds int    `json:"idle_stop_seconds"      toml:"idle_stop_seconds"`
+	    OnnxRuntimeLib  string `json:"onnx_runtime_lib"       toml:"onnx_runtime_lib"`
+	    STTProvider     string `json:"stt_provider"           toml:"stt_provider"`
+	    TTSProvider     string `json:"tts_provider"           toml:"tts_provider"`
+	    // GreetingLine is the fact-free line spoken once on call connect.
+	    // Empty falls back to Filler[0] (the greeting is filler-class; an
+	    // empty filler list plus empty greeting disables the greeting).
+	    GreetingLine         string   `json:"greeting"               toml:"greeting"`
 	    Filler               []string `json:"filler"                 toml:"filler"`
 	    SupervisorEmployee   string   `json:"supervisor_employee"    toml:"supervisor_employee"`
 	    SupervisorEnabled    bool     `json:"supervisor_enabled"     toml:"supervisor_enabled"`

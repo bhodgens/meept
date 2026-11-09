@@ -383,11 +383,16 @@ func (s *Server) toolWaitTurn(args map[string]any) (any, error) {
 	// timeout_ms bounds TOTAL wait, so a slow daemon cannot stretch the
 	// tool past the harness's own per-turn ceiling.
 	deadline := time.Now().Add(time.Duration(timeoutMS) * time.Millisecond)
-	since := ""
+	// sinceSeq is the daemon-side monotonic cursor (bus.poll since_seq /
+	// next_seq). The former wall-clock `since` cursor skipped events whose
+	// RFC3339Nano timestamp equaled the last examined event's (strict
+	// After comparison) — a silent drop under event bursts recorded
+	// within the same clock tick.
+	sinceSeq := int64(0)
 	for {
 		params := map[string]any{
 			"subscription_id": subscriptionID,
-			"since":           since,
+			"since_seq":       sinceSeq,
 		}
 		result, err := s.client.Call("bus.poll", params)
 		if err != nil {
@@ -397,10 +402,9 @@ func (s *Server) toolWaitTurn(args map[string]any) (any, error) {
 			Events []struct {
 				Topic string `json:"topic"`
 				// Timestamp decodes as time.Time from the RFC3339Nano
-				// string handleBusPoll stores; re-serializing it back to
-				// RFC3339Nano for the replay cursor keeps sub-nanosecond
-				// ordering intact.
+				// string handleBusPoll stores.
 				Timestamp time.Time `json:"timestamp"`
+				Seq       int64     `json:"seq"`
 				Payload   struct {
 					TurnID         string `json:"turn_id"`
 					SessionID      string `json:"session_id"`
@@ -410,15 +414,18 @@ func (s *Server) toolWaitTurn(args map[string]any) (any, error) {
 					Error          string `json:"error"`
 				} `json:"payload"`
 			} `json:"events"`
+			NextSeq int64 `json:"next_seq"`
 		}
 		if err := json.Unmarshal(result, &poll); err != nil {
 			return nil, fmt.Errorf("parse bus.poll response: %w", err)
 		}
+		// Advance the replay cursor to the daemon's next_seq: every event
+		// examined here (matched or not) carries Seq <= next_seq, and the
+		// next poll returns exactly what was buffered after this snapshot.
+		if poll.NextSeq > sinceSeq {
+			sinceSeq = poll.NextSeq
+		}
 		for _, ev := range poll.Events {
-			// Advance the replay cursor past every event we've examined.
-			if !ev.Timestamp.IsZero() {
-				since = ev.Timestamp.Format(time.RFC3339Nano)
-			}
 			if ev.Topic != "turn.terminal" || ev.Payload.TurnID != turnID {
 				continue
 			}
@@ -492,9 +499,16 @@ func (s *Server) toolEvents(args map[string]any) (any, error) {
 	if subID == "" {
 		return nil, fmt.Errorf("subscription_id is required")
 	}
+	// since_seq: daemon-side monotonic cursor from a previous poll's
+	// next_seq. Preferred over `since`: seq filtering never skips an
+	// unread buffered event, the wall-clock filter can under load.
 	params := map[string]any{
 		"subscription_id": subID,
 		"since":           since,
+	}
+	if v, ok := args["since_seq"].(float64); ok && v > 0 {
+		params["since_seq"] = int64(v)
+		delete(params, "since")
 	}
 	result, err := s.client.Call("bus.poll", params)
 	if err != nil {

@@ -158,7 +158,6 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func WithAnthropicLogger\(logger \*slog.Logger\) AnthropicClientOption](<#WithAnthropicLogger>)
   - [func WithAnthropicMetricsStore\(store \*metrics.Store\) AnthropicClientOption](<#WithAnthropicMetricsStore>)
   - [func WithAnthropicTimeout\(timeout time.Duration\) AnthropicClientOption](<#WithAnthropicTimeout>)
-  - [func WithAnthropicTimeoutCalculator\(calc \*metrics.Calculator\) AnthropicClientOption](<#WithAnthropicTimeoutCalculator>)
   - [func WithAnthropicTokenCache\(cache ResponseCache\) AnthropicClientOption](<#WithAnthropicTokenCache>)
   - [func WithAnthropicTokenResolver\(tr TokenResolver, provider string\) AnthropicClientOption](<#WithAnthropicTokenResolver>)
   - [func WithAnthropicUploadStore\(store UploadStore\) AnthropicClientOption](<#WithAnthropicUploadStore>)
@@ -277,7 +276,6 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func WithMetricsStore\(store \*metrics.Store\) ClientOption](<#WithMetricsStore>)
   - [func WithSemanticCache\(cache \*SemanticCache\) ClientOption](<#WithSemanticCache>)
   - [func WithTimeout\(timeout time.Duration\) ClientOption](<#WithTimeout>)
-  - [func WithTimeoutCalculator\(calc \*metrics.Calculator\) ClientOption](<#WithTimeoutCalculator>)
   - [func WithTokenCache\(cache ResponseCache\) ClientOption](<#WithTokenCache>)
   - [func WithTokenResolver\(tr TokenResolver, provider string\) ClientOption](<#WithTokenResolver>)
   - [func WithUploadStore\(store UploadStore\) ClientOption](<#WithUploadStore>)
@@ -2530,13 +2528,6 @@ WithAnthropicMetricsStore sets the metrics store for the client.
 
 WithAnthropicTimeout sets the HTTP timeout for the client.
 
-<a name="WithAnthropicTimeoutCalculator"></a>
-### func WithAnthropicTimeoutCalculator
-
-	func WithAnthropicTimeoutCalculator(calc *metrics.Calculator) AnthropicClientOption
-
-WithAnthropicTimeoutCalculator sets the adaptive timeout calculator for the client.
-
 <a name="WithAnthropicTokenCache"></a>
 ### func WithAnthropicTokenCache
 
@@ -3602,13 +3593,6 @@ WithSemanticCache attaches the opt\-in semantic cache tier \(leaf 02\). A nil ca
 	func WithTimeout(timeout time.Duration) ClientOption
 
 WithTimeout sets the HTTP timeout for the client.
-
-<a name="WithTimeoutCalculator"></a>
-### func WithTimeoutCalculator
-
-	func WithTimeoutCalculator(calc *metrics.Calculator) ClientOption
-
-WithTimeoutCalculator sets the adaptive timeout calculator for the client.
 
 <a name="WithTokenCache"></a>
 ### func WithTokenCache

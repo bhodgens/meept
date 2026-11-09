@@ -31,10 +31,6 @@ Package agent provides the agent loop and related components.
 
 Package agent provides HTTP hook support for external integrations.
 
-Intent\-map engine \(branch 03 leaf 03; design §3.3 in docs/research/dynamic\-tools\-design.md\).
-
-IntentMap is the deterministic intent\-category \-\> tool\-set selection table that drives the "predicted" and "search" tool\-exposure modes. The dispatcher already runs AnalyzeTrueIntent per turn and stores the category label \(internal/agent/intent\_analyzer.go:257 / :372\-377\); the exposure engine \(leaf 05\) keys the predicted subset off that SAME label through For. No LLM call is made here — the whole point is that selection is config\-driven, auditable, and byte\-deterministic for a given \(label, budget, allowed\) triple.
-
 Package agent — loop\_messages.go implements turn\-start injection of inter\-agent messages \(loop\-economics leaf 10\). The daemon wires a MessageDrainer \(backed by the employee message store\); before each turn's system prompt is built, unread queued messages are drained \(queued→delivered, exactly once\) and prepended as an anchored block "\[message from X\]" with message IDs so replies can target them.
 
 The drain is deliberately destructive: because DrainInbox transitions drained rows out of the queued set, a second build of the prompt will not re\-inject them. Delivery is at\-most\-once per recipient turn.
@@ -46,10 +42,6 @@ Session scoping: a signal with a session\_id is delivered only by the loop whose
 Lifecycle: the consumer is armed lazily on the first turn \(RunOnce path\) via sync.Once, and torn down in Close\(\). When no bus is wired, nothing is armed and published signals remain observable to external subscribers only.
 
 Package agent provides the agent loop implementation.
-
-Package agent provides the reasoning\-effort natural\-language parser.
-
-This file implements ParseReasoningDirective per spec §7 of the LLM Reasoning Effort design. It scans user input for directives that adjust the per\-request reasoning/thinking tier \(e.g. "use high reasoning", "\[/reasoning xhigh\]", "think hard", "use 8000 thinking tokens"\) and returns a ReasoningDirective describing the parsed configuration.
 
 Package agent provides utility functions for the agent package.
 
@@ -85,7 +77,6 @@ Package agent provides the agent loop and related components.
 - [func ExecutorAgentIDs\(\) \[\]string](<#ExecutorAgentIDs>)
 - [func ExposureGateRefusal\(ctx context.Context, toolName string\) \(refuse bool, directive string\)](<#ExposureGateRefusal>)
 - [func ExtractJSON\(s string\) string](<#ExtractJSON>)
-- [func FinalSentinelContent\(\) string](<#FinalSentinelContent>)
 - [func FlattenPlanPhasesToSteps\(taskID string, phases \[\]PlanPhaseSpec, maxStepsPerPhase int\) \[\]\*task.TaskStep](<#FlattenPlanPhasesToSteps>)
 - [func FormatDuration\(d time.Duration\) string](<#FormatDuration>)
 - [func GenerateProposalID\(\) string](<#GenerateProposalID>)
@@ -117,9 +108,7 @@ Package agent provides the agent loop and related components.
 - [func ResultsToChatMessages\(results \[\]\*ExecutionResult\) \[\]llm.ChatMessage](<#ResultsToChatMessages>)
 - [func ResumedTurnFromContext\(ctx context.Context\) bool](<#ResumedTurnFromContext>)
 - [func Retryable\(err error, retryable bool, retryAfter time.Duration, reason string\) error](<#Retryable>)
-- [func RoundTo\(f float64, n int\) float64](<#RoundTo>)
 - [func RunWithRetry\[T any\]\(ctx context.Context, config BackoffConfig, fn func\(\) \(T, error\)\) \(T, error\)](<#RunWithRetry>)
-- [func SecurityKeywords\(\) \[\]string](<#SecurityKeywords>)
 - [func SeedSoulIfMissing\(path string\) \(bool, error\)](<#SeedSoulIfMissing>)
 - [func SetDefaultBackoffOverride\(cfg BackoffConfig\)](<#SetDefaultBackoffOverride>)
 - [func SetFailurePolicyDefaults\(cfg llm.FailurePolicyConfig\)](<#SetFailurePolicyDefaults>)
@@ -257,7 +246,6 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) SetContextFirewallConfig\(fw config.LLMContextFirewallConfig\)](<#AgentLoop.SetContextFirewallConfig>)
   - [func \(l \*AgentLoop\) SetContextInjector\(injector \*ContextInjector\)](<#AgentLoop.SetContextInjector>)
   - [func \(l \*AgentLoop\) SetDetectionContext\(dc \*DetectionContext\)](<#AgentLoop.SetDetectionContext>)
-  - [func \(l \*AgentLoop\) SetEpistemicHook\(hook \*EpistemicHook\)](<#AgentLoop.SetEpistemicHook>)
   - [func \(l \*AgentLoop\) SetExecutorDecisionLogLevel\(level string\)](<#AgentLoop.SetExecutorDecisionLogLevel>)
   - [func \(l \*AgentLoop\) SetFileWatcher\(fw \*FileWatcherHook\)](<#AgentLoop.SetFileWatcher>)
   - [func \(l \*AgentLoop\) SetGlobalRefusalModel\(ref string\)](<#AgentLoop.SetGlobalRefusalModel>)
@@ -379,10 +367,8 @@ Package agent provides the agent loop and related components.
   - [func \(m \*AgentStateMachine\) Transition\(to AgentState, reason string, metadata map\[string\]any\) error](<#AgentStateMachine.Transition>)
 - [type AgentStatePersister](<#AgentStatePersister>)
 - [type AgentStateSnapshot](<#AgentStateSnapshot>)
-- [type AggregatedTaskReport](<#AggregatedTaskReport>)
 - [type AllotmentConfig](<#AllotmentConfig>)
   - [func DefaultAllotmentConfig\(\) AllotmentConfig](<#DefaultAllotmentConfig>)
-- [type AmbientExtractorInterface](<#AmbientExtractorInterface>)
 - [type AmendmentSubmitter](<#AmendmentSubmitter>)
 - [type AnalyzeResult](<#AnalyzeResult>)
 - [type Artifact](<#Artifact>)
@@ -513,7 +499,6 @@ Package agent provides the agent loop and related components.
   - [func \(m \*CapabilityMatcher\) MatchWithFallback\(input string, minConfidence float64\) \*MatchResult](<#CapabilityMatcher.MatchWithFallback>)
   - [func \(m \*CapabilityMatcher\) SetCapabilityIndex\(ci \*skills.CapabilityIndex\)](<#CapabilityMatcher.SetCapabilityIndex>)
 - [type CapabilityMatcherConfig](<#CapabilityMatcherConfig>)
-- [type CategorizedRecommendation](<#CategorizedRecommendation>)
 - [type ChatClientDisconnectedData](<#ChatClientDisconnectedData>)
 - [type ChatDelegation](<#ChatDelegation>)
 - [type ChatHandler](<#ChatHandler>)
@@ -550,8 +535,6 @@ Package agent provides the agent loop and related components.
 - [type ChatRequest](<#ChatRequest>)
 - [type ChatResponse](<#ChatResponse>)
 - [type CheckResult](<#CheckResult>)
-- [type Checkpoint](<#Checkpoint>)
-  - [func SnapshotForTurn\(runID, agentID string, depth int, currentTurn, limit int, toolCalls \[\]TurnRecord, messages \[\]LLMMessage, output string\) \*Checkpoint](<#SnapshotForTurn>)
 - [type ChildDescriptor](<#ChildDescriptor>)
   - [func UnmarshalChildDescriptor\(b \[\]byte\) \(ChildDescriptor, error\)](<#UnmarshalChildDescriptor>)
   - [func \(d ChildDescriptor\) Validate\(\) error](<#ChildDescriptor.Validate>)
@@ -797,11 +780,6 @@ Package agent provides the agent loop and related components.
   - [func \(p \*EmbeddingPrefilter\) Reload\(\)](<#EmbeddingPrefilter.Reload>)
   - [func \(p \*EmbeddingPrefilter\) SetEmbeddingObserver\(fn func\(sessionID string, vec \[\]float64\)\)](<#EmbeddingPrefilter.SetEmbeddingObserver>)
   - [func \(p \*EmbeddingPrefilter\) SetVerdictObserver\(fn func\(PrefilterVerdict\)\)](<#EmbeddingPrefilter.SetVerdictObserver>)
-- [type EpistemicHook](<#EpistemicHook>)
-  - [func NewEpistemicHook\(cfg EpistemicHookConfig\) \*EpistemicHook](<#NewEpistemicHook>)
-  - [func \(h \*EpistemicHook\) AfterTurn\(ctx context.Context, intent string, messages \[\]string\) \(\[\]string, error\)](<#EpistemicHook.AfterTurn>)
-- [type EpistemicHookConfig](<#EpistemicHookConfig>)
-- [type ErrorBuilder](<#ErrorBuilder>)
 - [type ErrorPayload](<#ErrorPayload>)
 - [type ErrorSeverity](<#ErrorSeverity>)
 - [type EscalationConfig](<#EscalationConfig>)
@@ -1004,7 +982,6 @@ Package agent provides the agent loop and related components.
 - [type Intent](<#Intent>)
   - [func \(i \*Intent\) MarshalJSON\(\) \(\[\]byte, error\)](<#Intent.MarshalJSON>)
 - [type IntentAnalyzer](<#IntentAnalyzer>)
-  - [func NewIntentAnalyzer\(client \*llm.Client, logger \*slog.Logger\) \*IntentAnalyzer](<#NewIntentAnalyzer>)
   - [func \(ia \*IntentAnalyzer\) AnalyzeTrueIntent\(ctx context.Context, input string, sessionContext \*SessionContextDigest\) \(\*TrueIntentAnalysis, error\)](<#IntentAnalyzer.AnalyzeTrueIntent>)
   - [func \(ia \*IntentAnalyzer\) ResolvedModel\(\) string](<#IntentAnalyzer.ResolvedModel>)
   - [func \(ia \*IntentAnalyzer\) SetBootReadiness\(b \*ClassifierBootReadiness\)](<#IntentAnalyzer.SetBootReadiness>)
@@ -1013,12 +990,6 @@ Package agent provides the agent loop and related components.
 - [type IntentCategory](<#IntentCategory>)
 - [type IntentClassifier](<#IntentClassifier>)
 - [type IntentEntry](<#IntentEntry>)
-- [type IntentMap](<#IntentMap>)
-  - [func LoadIntentMap\(path string, log \*slog.Logger\) \(\*IntentMap, error\)](<#LoadIntentMap>)
-  - [func LoadIntentMapWithUniverse\(path string, log \*slog.Logger, universe map\[string\]struct\{\}\) \(\*IntentMap, error\)](<#LoadIntentMapWithUniverse>)
-  - [func \(m \*IntentMap\) For\(label string, budget int, allowed \[\]string\) \[\]string](<#IntentMap.For>)
-  - [func \(m \*IntentMap\) Names\(\) \[\]string](<#IntentMap.Names>)
-  - [func \(m \*IntentMap\) SetUniverse\(universe map\[string\]struct\{\}\) \[\]string](<#IntentMap.SetUniverse>)
 - [type IntentType](<#IntentType>)
   - [func \(t IntentType\) Category\(\) IntentCategory](<#IntentType.Category>)
   - [func \(t IntentType\) DefaultAgent\(\) string](<#IntentType.DefaultAgent>)
@@ -1063,7 +1034,6 @@ Package agent provides the agent loop and related components.
   - [func WithCompressionPipeline\(pipeline \*compress.Pipeline\) LoopOption](<#WithCompressionPipeline>)
   - [func WithContextInjectorFunc\(injector \*ContextInjector\) LoopOption](<#WithContextInjectorFunc>)
   - [func WithDetectionContext\(dc \*DetectionContext\) LoopOption](<#WithDetectionContext>)
-  - [func WithEpistemicHook\(hook \*EpistemicHook\) LoopOption](<#WithEpistemicHook>)
   - [func WithEventEmitter\(em \*EventEmitter\) LoopOption](<#WithEventEmitter>)
   - [func WithFileWatcher\(fw \*FileWatcherHook\) LoopOption](<#WithFileWatcher>)
   - [func WithGlobalRefusalModel\(ref string\) LoopOption](<#WithGlobalRefusalModel>)
@@ -1224,12 +1194,6 @@ Package agent provides the agent loop and related components.
   - [func \(pm \*PairManager\) RunAllRounds\(ctx context.Context, sessionID string\) \(\*PairSession, error\)](<#PairManager.RunAllRounds>)
   - [func \(pm \*PairManager\) RunRound\(ctx context.Context, sessionID string\) \(\*Attempt, error\)](<#PairManager.RunRound>)
 - [type PairManagerConfig](<#PairManagerConfig>)
-- [type PairModality](<#PairModality>)
-  - [func ParsePairModality\(s string\) PairModality](<#ParsePairModality>)
-  - [func \(m PairModality\) IsActive\(\) bool](<#PairModality.IsActive>)
-  - [func \(m PairModality\) MarshalJSON\(\) \(\[\]byte, error\)](<#PairModality.MarshalJSON>)
-  - [func \(i PairModality\) String\(\) string](<#PairModality.String>)
-  - [func \(m \*PairModality\) UnmarshalJSON\(data \[\]byte\) error](<#PairModality.UnmarshalJSON>)
 - [type PairOrchestrator](<#PairOrchestrator>)
   - [func NewPairOrchestrator\(deps PairOrchestratorDeps\) \*PairOrchestrator](<#NewPairOrchestrator>)
   - [func \(po \*PairOrchestrator\) ActiveSessionCount\(\) int](<#PairOrchestrator.ActiveSessionCount>)
@@ -1303,8 +1267,6 @@ Package agent provides the agent loop and related components.
 - [type PlanPhaseSpec](<#PlanPhaseSpec>)
   - [func PhaseSpecsFromPlan\(in \[\]plan.PhaseSpec\) \[\]PlanPhaseSpec](<#PhaseSpecsFromPlan>)
 - [type PlanRequest](<#PlanRequest>)
-- [type PlannerThresholds](<#PlannerThresholds>)
-  - [func NewDefaultThresholds\(\) \*PlannerThresholds](<#NewDefaultThresholds>)
 - [type PrefilterEmbedder](<#PrefilterEmbedder>)
 - [type PrefilterVerdict](<#PrefilterVerdict>)
 - [type PrepareNextTurnHook](<#PrepareNextTurnHook>)
@@ -1414,17 +1376,12 @@ Package agent provides the agent loop and related components.
   - [func \(rl \*RalphLoop\) TriggerReplan\(ctx context.Context, taskID string, previousEvidence \[\]string\) error](<#RalphLoop.TriggerReplan>)
 - [type RalphLoopConfig](<#RalphLoopConfig>)
   - [func DefaultRalphLoopConfig\(\) RalphLoopConfig](<#DefaultRalphLoopConfig>)
-- [type ReasoningDirective](<#ReasoningDirective>)
-  - [func ParseReasoningDirective\(text string\) \(\*ReasoningDirective, error\)](<#ParseReasoningDirective>)
 - [type ReasoningWatchdog](<#ReasoningWatchdog>)
   - [func NewReasoningWatchdog\(\) \*ReasoningWatchdog](<#NewReasoningWatchdog>)
   - [func \(w \*ReasoningWatchdog\) Breach\(tokenCap, streakTurns int\) bool](<#ReasoningWatchdog.Breach>)
   - [func \(w \*ReasoningWatchdog\) RecordTurn\(hasText, hasToolCalls bool, reasoningTokens int\)](<#ReasoningWatchdog.RecordTurn>)
   - [func \(w \*ReasoningWatchdog\) Reset\(\)](<#ReasoningWatchdog.Reset>)
   - [func \(w \*ReasoningWatchdog\) Streak\(\) int](<#ReasoningWatchdog.Streak>)
-- [type RecoveryConfig](<#RecoveryConfig>)
-  - [func DefaultRecoveryConfig\(\) RecoveryConfig](<#DefaultRecoveryConfig>)
-- [type RecoveryState](<#RecoveryState>)
 - [type ReflectionCollector](<#ReflectionCollector>)
   - [func NewReflectionCollector\(cfg config.ReflectionCollectorConfig, classifier classifierClient, classifierModel string, templateReg \*plannerTemplateLoader, queuePath string, logger \*slog.Logger\) \*ReflectionCollector](<#NewReflectionCollector>)
   - [func \(rc \*ReflectionCollector\) DrainPendingProposals\(\) \(\[\]ReflectionProposal, error\)](<#ReflectionCollector.DrainPendingProposals>)
@@ -1444,13 +1401,7 @@ Package agent provides the agent loop and related components.
 - [type ReflectionTrajectory](<#ReflectionTrajectory>)
   - [func \(t ReflectionTrajectory\) JSON\(\) \(\[\]byte, error\)](<#ReflectionTrajectory.JSON>)
 - [type ReflectionTrajectoryStep](<#ReflectionTrajectoryStep>)
-- [type RefusalSeams](<#RefusalSeams>)
-  - [func ExportedRefusalSeams\(l \*AgentLoop\) \*RefusalSeams](<#ExportedRefusalSeams>)
-  - [func \(s \*RefusalSeams\) Apply\(\)](<#RefusalSeams.Apply>)
 - [type RegistryConfig](<#RegistryConfig>)
-- [type RejectedCandidateLogger](<#RejectedCandidateLogger>)
-  - [func NewRejectedCandidateLogger\(dataDir string, log \*slog.Logger\) \*RejectedCandidateLogger](<#NewRejectedCandidateLogger>)
-  - [func \(r \*RejectedCandidateLogger\) LogRejected\(intent string, threshold float64, rejected \[\]rejectedCandidateRecord\)](<#RejectedCandidateLogger.LogRejected>)
 - [type ReplyFuncSetter](<#ReplyFuncSetter>)
 - [type ReportCapture](<#ReportCapture>)
 - [type ReportRouter](<#ReportRouter>)
@@ -1470,7 +1421,6 @@ Package agent provides the agent loop and related components.
   - [func \(c \*ResultCache\) Stats\(\) map\[string\]any](<#ResultCache.Stats>)
   - [func \(c \*ResultCache\) Stop\(\)](<#ResultCache.Stop>)
 - [type ResultPayload](<#ResultPayload>)
-- [type ResumeResult](<#ResumeResult>)
 - [type RetryBudget](<#RetryBudget>)
   - [func GetRetryBudget\(ctx context.Context\) \*RetryBudget](<#GetRetryBudget>)
   - [func NewRetryBudget\(max int\) \*RetryBudget](<#NewRetryBudget>)
@@ -1484,12 +1434,6 @@ Package agent provides the agent loop and related components.
   - [func \(m \*RetryMetrics\) RecordRetry\(opType string, err error, delay time.Duration\)](<#RetryMetrics.RecordRetry>)
   - [func \(m \*RetryMetrics\) Snapshot\(\) RetryMetricsSnapshot](<#RetryMetrics.Snapshot>)
 - [type RetryMetricsSnapshot](<#RetryMetricsSnapshot>)
-- [type RetryRecovery](<#RetryRecovery>)
-  - [func NewRetryRecovery\(cfg RecoveryConfig\) \*RetryRecovery](<#NewRetryRecovery>)
-  - [func \(r \*RetryRecovery\) ExecuteWithRetry\(ctx context.Context, toolName string, fn func\(\) \(any, error\)\) \(result any, retryErr error\)](<#RetryRecovery.ExecuteWithRetry>)
-  - [func \(r \*RetryRecovery\) GetRecoveryState\(\) RecoveryState](<#RetryRecovery.GetRecoveryState>)
-  - [func \(r \*RetryRecovery\) Reset\(\)](<#RetryRecovery.Reset>)
-  - [func \(r \*RetryRecovery\) ShouldRetry\(err error\) bool](<#RetryRecovery.ShouldRetry>)
 - [type RetryableError](<#RetryableError>)
 - [type ReviewManager](<#ReviewManager>)
   - [func NewReviewManager\(cfg ReviewManagerConfig\) \*ReviewManager](<#NewReviewManager>)
@@ -1532,23 +1476,6 @@ Package agent provides the agent loop and related components.
   - [func \(rt \*RoutingTelemetry\) RecordHintMiss\(stepID, toolHint string\)](<#RoutingTelemetry.RecordHintMiss>)
   - [func \(rt \*RoutingTelemetry\) RecordHintRoute\(stepID, agentID, source string\)](<#RoutingTelemetry.RecordHintRoute>)
 - [type RoutingValidation](<#RoutingValidation>)
-- [type RunRecoverer](<#RunRecoverer>)
-  - [func NewRunRecoverer\(basePath string, checkpointInterval int\) \(\*RunRecoverer, error\)](<#NewRunRecoverer>)
-  - [func \(r \*RunRecoverer\) CleanupAllCompleted\(\) \(int, error\)](<#RunRecoverer.CleanupAllCompleted>)
-  - [func \(r \*RunRecoverer\) CleanupBefore\(cutoff time.Time\) \(int, error\)](<#RunRecoverer.CleanupBefore>)
-  - [func \(r \*RunRecoverer\) CleanupCompleted\(runIDs ...string\) \(int, error\)](<#RunRecoverer.CleanupCompleted>)
-  - [func \(r \*RunRecoverer\) GetCheckpointInterval\(\) int](<#RunRecoverer.GetCheckpointInterval>)
-  - [func \(r \*RunRecoverer\) IncompleteRunCount\(\) \(int, error\)](<#RunRecoverer.IncompleteRunCount>)
-  - [func \(r \*RunRecoverer\) IsComplete\(runID string\) bool](<#RunRecoverer.IsComplete>)
-  - [func \(r \*RunRecoverer\) ListCompletedRuns\(\) \(\[\]string, error\)](<#RunRecoverer.ListCompletedRuns>)
-  - [func \(r \*RunRecoverer\) ListIncompleteRuns\(\) \(\[\]string, error\)](<#RunRecoverer.ListIncompleteRuns>)
-  - [func \(r \*RunRecoverer\) MarkComplete\(runID string\) error](<#RunRecoverer.MarkComplete>)
-  - [func \(r \*RunRecoverer\) ReadCheckpoint\(runID string\) \(\*Checkpoint, error\)](<#RunRecoverer.ReadCheckpoint>)
-  - [func \(r \*RunRecoverer\) Resume\(incompleteRunID string\) \(\*ResumeResult, error\)](<#RunRecoverer.Resume>)
-  - [func \(r \*RunRecoverer\) ResumeFromLatest\(\) \(\*ResumeResult, string, error\)](<#RunRecoverer.ResumeFromLatest>)
-  - [func \(r \*RunRecoverer\) SetCheckpointInterval\(interval int\)](<#RunRecoverer.SetCheckpointInterval>)
-  - [func \(r \*RunRecoverer\) ShouldCheckpoint\(turn int\) bool](<#RunRecoverer.ShouldCheckpoint>)
-  - [func \(r \*RunRecoverer\) WriteCheckpoint\(cp \*Checkpoint\) error](<#RunRecoverer.WriteCheckpoint>)
 - [type SQLiteParkStore](<#SQLiteParkStore>)
   - [func NewSQLiteParkStore\(dbPath string, logger \*slog.Logger\) \(\*SQLiteParkStore, error\)](<#NewSQLiteParkStore>)
   - [func \(s \*SQLiteParkStore\) Close\(\) error](<#SQLiteParkStore.Close>)
@@ -1640,11 +1567,6 @@ Package agent provides the agent loop and related components.
   - [func \(r \*SkillStateRuntime\) Run\(ctx context.Context, skill \*skills.Skill, input, conversationID string\) \(string, error\)](<#SkillStateRuntime.Run>)
   - [func \(r \*SkillStateRuntime\) WithStateTraceWriter\(tw TraceWriter\) \*SkillStateRuntime](<#SkillStateRuntime.WithStateTraceWriter>)
   - [func \(r \*SkillStateRuntime\) WithToolRunner\(runner stateToolRunner\) \*SkillStateRuntime](<#SkillStateRuntime.WithToolRunner>)
-- [type SnowflakeEmbedClient](<#SnowflakeEmbedClient>)
-  - [func NewSnowflakeEmbedClient\(apiKey string\) \*SnowflakeEmbedClient](<#NewSnowflakeEmbedClient>)
-  - [func \(c \*SnowflakeEmbedClient\) Dimension\(\) int](<#SnowflakeEmbedClient.Dimension>)
-  - [func \(c \*SnowflakeEmbedClient\) Embed\(ctx context.Context, text string\) \(\[\]float64, error\)](<#SnowflakeEmbedClient.Embed>)
-  - [func \(c \*SnowflakeEmbedClient\) EmbedBatch\(ctx context.Context, texts \[\]string\) \(\[\]\[\]float64, error\)](<#SnowflakeEmbedClient.EmbedBatch>)
 - [type SoulProvider](<#SoulProvider>)
   - [func NewSoulProvider\(path string, logger \*slog.Logger\) \(\*SoulProvider, error\)](<#NewSoulProvider>)
   - [func NewSoulProviderFromText\(text string\) \*SoulProvider](<#NewSoulProviderFromText>)
@@ -1753,15 +1675,6 @@ Package agent provides the agent loop and related components.
 - [type TaskMessage](<#TaskMessage>)
 - [type TaskPayload](<#TaskPayload>)
 - [type TaskPriority](<#TaskPriority>)
-- [type TaskReportAggregator](<#TaskReportAggregator>)
-  - [func NewTaskReportAggregator\(\) \*TaskReportAggregator](<#NewTaskReportAggregator>)
-  - [func \(a \*TaskReportAggregator\) AddRecommendations\(recs \[\]CategorizedRecommendation\)](<#TaskReportAggregator.AddRecommendations>)
-  - [func \(a \*TaskReportAggregator\) BuildReport\(summary string, stepsCompleted, stepsTotal int, executionTime string\) \*AggregatedTaskReport](<#TaskReportAggregator.BuildReport>)
-  - [func \(a \*TaskReportAggregator\) DeduplicateRecommendations\(\) \[\]CategorizedRecommendation](<#TaskReportAggregator.DeduplicateRecommendations>)
-  - [func \(a \*TaskReportAggregator\) ExtractRecommendations\(stepResult, agentID string\) \[\]CategorizedRecommendation](<#TaskReportAggregator.ExtractRecommendations>)
-  - [func \(a \*TaskReportAggregator\) GetRecommendationsByCategory\(category string\) \[\]CategorizedRecommendation](<#TaskReportAggregator.GetRecommendationsByCategory>)
-  - [func \(a \*TaskReportAggregator\) GetRecommendationsByPriority\(priority string\) \[\]CategorizedRecommendation](<#TaskReportAggregator.GetRecommendationsByPriority>)
-  - [func \(a \*TaskReportAggregator\) RecommendationCount\(\) int](<#TaskReportAggregator.RecommendationCount>)
 - [type TaskSpec](<#TaskSpec>)
   - [func ExtractSpecFromTask\(t \*task.Task\) \*TaskSpec](<#ExtractSpecFromTask>)
   - [func GenerateSpecFromSteps\(steps \[\]\*task.TaskStep\) \*TaskSpec](<#GenerateSpecFromSteps>)
@@ -1823,10 +1736,7 @@ Package agent provides the agent loop and related components.
 - [type ToolDescription](<#ToolDescription>)
   - [func ToolsFromDefinitions\(definitions \[\]ToolDefinitionInfo\) \[\]ToolDescription](<#ToolsFromDefinitions>)
 - [type ToolDescriptor](<#ToolDescriptor>)
-- [type ToolErrorCode](<#ToolErrorCode>)
 - [type ToolExecutionEndData](<#ToolExecutionEndData>)
-- [type ToolExecutionError](<#ToolExecutionError>)
-  - [func \(e \*ToolExecutionError\) Error\(\) string](<#ToolExecutionError.Error>)
 - [type ToolExecutionStartData](<#ToolExecutionStartData>)
 - [type ToolExecutionUpdateData](<#ToolExecutionUpdateData>)
 - [type ToolExposureMode](<#ToolExposureMode>)
@@ -2244,10 +2154,6 @@ DELIVERY CONTRACT: the bus \(internal/bus\) has no latched or buffered topics �
 
 	const ACPTurnsMetric = "acp.persona.turns"
 
-<a name="CheckpointVersion"></a>
-
-	const CheckpointVersion = 1
-
 <a name="DefaultDocBudgetTokens"></a>DefaultDocBudgetTokens is the fallback budget for dynamic doc sections when no allocator\-derived budget is supplied. It matches the scale of MaxMemoryContextTokens \(2000 tokens\) so a caller that has not wired the allocator yet still gets a bounded prompt instead of today's unbounded CLAUDE.md injection.
 
 	const DefaultDocBudgetTokens = 2000
@@ -2586,9 +2492,6 @@ Consumers: prefilter vote\(\) cue guard, LLM\-chain post\-check \(leaf 02, optio
 	    "knowledge_ingest": "memory_write",
 	    "knowledge_impact": "memory_read",
 	
-	    "retain":            "memory_write",
-	    "recall":            "memory_read",
-	    "reflect":           "memory_write",
 	    "retain_claim":      "memory_write",
 	    "retain_decision":   "memory_write",
 	    "retain_prediction": "memory_write",
@@ -2596,7 +2499,6 @@ Consumers: prefilter vote\(\) cue guard, LLM\-chain post\-check \(leaf 02, optio
 	    "mark_resolved":     "memory_write",
 	    "record_review":     "memory_write",
 	    "reject_claim":      "memory_write",
-	    "promote_claim":     "memory_write",
 	
 	    ToolPlatformStatus: "platform_read",
 	    ToolPlatformAgents: "platform_read",
@@ -2903,13 +2805,6 @@ Returns empty string if no valid JSON object is found.
 
 Note: This function only looks for JSON objects \(starting with '\{'\). A bare JSON array like '\[1,2,3\]' will not be matched; this matches the behavior of the legacy extractJSON function and is intentional since the strategic planner always emits object\-shaped JSON.
 
-<a name="FinalSentinelContent"></a>
-## func FinalSentinelContent
-
-	func FinalSentinelContent() string
-
-FinalSentinelContent returns the filename component used as the final\-run sentinel.
-
 <a name="FlattenPlanPhasesToSteps"></a>
 ## func FlattenPlanPhasesToSteps
 
@@ -3131,13 +3026,6 @@ ResumedTurnFromContext reports whether ctx marks a resumed parked turn. False fo
 
 Retryable wraps an error as retryable with the given metadata. Returns nil if err is nil \(nil guard\).
 
-<a name="RoundTo"></a>
-## func RoundTo
-
-	func RoundTo(f float64, n int) float64
-
-RoundTo returns f rounded to n decimal places.
-
 <a name="RunWithRetry"></a>
 ## func RunWithRetry
 
@@ -3146,13 +3034,6 @@ RoundTo returns f rounded to n decimal places.
 RunWithRetry executes a function with exponential backoff retry. It retries when the function returns a retryable error, using the configured backoff between attempts. Non\-retryable errors are returned immediately without waiting. If a retry budget is attached to the context, it is checked before each retry attempt.
 
 The function is called at least once. Retries happen only on retryable errors. If the context is cancelled during a wait, RunWithRetry returns ctx.Err\(\).
-
-<a name="SecurityKeywords"></a>
-## func SecurityKeywords
-
-	func SecurityKeywords() []string
-
-SecurityKeywords returns the list of keywords that trigger pair\-session routing for code/debug intents. This centralizes the list hardcoded at strategic.go:689\-697 so it can be reused and kept in sync.
 
 <a name="SeedSoulIfMissing"></a>
 ## func SeedSoulIfMissing
@@ -4382,13 +4263,6 @@ SetContextInjector wires the ContextInjector that enriches the system prompt wit
 
 SetDetectionContext wires the client\-side detection context \(CWD, detected project, CLI args\) captured at session creation. Nil\-safe per CLAUDE.md setter convention.
 
-<a name="AgentLoop.SetEpistemicHook"></a>
-### func \(\*AgentLoop\) SetEpistemicHook
-
-	func (l *AgentLoop) SetEpistemicHook(hook *EpistemicHook)
-
-SetEpistemicHook wires the post\-turn ambient\-extraction hook. Nil\-safe per CLAUDE.md setter convention. When non\-nil, the hook's AfterTurn method is invoked after each agent turn so the extractor can mine claims/decisions/predictions from the conversation window.
-
 <a name="AgentLoop.SetExecutorDecisionLogLevel"></a>
 ### func \(\*AgentLoop\) SetExecutorDecisionLogLevel
 
@@ -5508,24 +5382,6 @@ AgentStateSnapshot is a serializable snapshot of agent state.
 	    Timestamp      time.Time         `json:"timestamp"`
 	}
 
-<a name="AggregatedTaskReport"></a>
-## type AggregatedTaskReport
-
-AggregatedTaskReport represents the final report for a completed task.
-
-	type AggregatedTaskReport struct {
-	    // Summary is a brief overview of what was accomplished
-	    Summary string `json:"summary"`
-	    // StepsCompleted is the number of steps that completed successfully
-	    StepsCompleted int `json:"steps_completed"`
-	    // StepsTotal is the total number of steps
-	    StepsTotal int `json:"steps_total"`
-	    // Recommendations are categorized recommendations from all agents
-	    Recommendations []CategorizedRecommendation `json:"recommendations"`
-	    // ExecutionTime is the total execution time
-	    ExecutionTime string `json:"execution_time"`
-	}
-
 <a name="AllotmentConfig"></a>
 ## type AllotmentConfig
 
@@ -5552,16 +5408,6 @@ AllotmentConfig controls how a model's context window is converted into work all
 	func DefaultAllotmentConfig() AllotmentConfig
 
 DefaultAllotmentConfig returns the pinned default configuration.
-
-<a name="AmbientExtractorInterface"></a>
-## type AmbientExtractorInterface
-
-AmbientExtractorInterface is the subset of memory.AmbientExtractor used by the epistemic hook. Defined locally so tests can substitute a fake and so we don't import the concrete type by name in the public surface.
-
-	type AmbientExtractorInterface interface {
-	    Extract(ctx context.Context, messages []string) ([]memory.AmbientCandidate, error)
-	    WriteCandidates(ctx context.Context, candidates []memory.AmbientCandidate) ([]string, error)
-	}
 
 <a name="AmendmentSubmitter"></a>
 ## type AmendmentSubmitter
@@ -6664,23 +6510,6 @@ CapabilityMatcherConfig holds configuration for the matcher.
 	    Logger          *slog.Logger
 	}
 
-<a name="CategorizedRecommendation"></a>
-## type CategorizedRecommendation
-
-CategorizedRecommendation represents a recommendation from an agent.
-
-	type CategorizedRecommendation struct {
-	    Category    string  `json:"category"` // "security", "performance", "maintainability", "follow-up"
-	    Priority    string  `json:"priority"` // "critical", "high", "medium", "low"
-	    Description string  `json:"description"`
-	    AgentID     string  `json:"agent_id"`
-	    Confidence  float64 `json:"confidence"`
-	    // Optional fields
-	    CodeSnippet     string   `json:"code_snippet,omitempty"`
-	    RelatedFiles    []string `json:"related_files,omitempty"`
-	    EstimatedEffort string   `json:"estimated_effort,omitempty"` // "small", "medium", "large"
-	}
-
 <a name="ChatClientDisconnectedData"></a>
 ## type ChatClientDisconnectedData
 
@@ -6996,44 +6825,6 @@ CheckResult represents a single verification check performed by the verifier.
 	    // Passed indicates whether this individual check passed.
 	    Passed bool
 	}
-
-<a name="Checkpoint"></a>
-## type Checkpoint
-
-Checkpoint captures the complete state of an agent run so it can be resumed after a crash, timeout, or manual cancellation.
-
-Modeled after HALO's turn\-compaction recovery: checkpoints are written periodically \(controlled by checkpointInterval\) and contain enough state to resume from the last completed turn.
-
-	type Checkpoint struct {
-	    // RunID is the unique identifier for the agent run.
-	    RunID string `json:"run_id"`
-	    // AgentID identifies the employee / agent that owns this run.
-	    AgentID string `json:"agent_id"`
-	    // Depth is the recursion/subagent depth at the time of the checkpoint.
-	    Depth int `json:"depth,omitempty"`
-	    // TurnCounter tracks the current turn and the limit.
-	    TurnCounter struct {
-	        Current int `json:"current"`
-	        Limit   int `json:"limit"`
-	    }   `json:"turn_counter"`
-	    // ToolCalls captures all tool invocations in the current turn.
-	    ToolCalls []TurnRecord `json:"tool_calls"`
-	    // LLMMessages captures the LLM conversation history up to this point.
-	    LLMMessages []LLMMessage `json:"llm_messages"`
-	    // Outputs holds the final output text from the last completed turn.
-	    Outputs string `json:"outputs,omitempty"`
-	    // Timestamp records when the checkpoint was written.
-	    Timestamp time.Time `json:"timestamp"`
-	    // Metadata is an optional free-form map for extra context.
-	    Metadata map[string]string `json:"metadata,omitempty"`
-	}
-
-<a name="SnapshotForTurn"></a>
-### func SnapshotForTurn
-
-	func SnapshotForTurn(runID, agentID string, depth int, currentTurn, limit int, toolCalls []TurnRecord, messages []LLMMessage, output string) *Checkpoint
-
-SnapshotForTurn converts a set of turn records and LLM messages into a Checkpoint suitable for WriteCheckpoint.
 
 <a name="ChildDescriptor"></a>
 ## type ChildDescriptor
@@ -9304,54 +9095,6 @@ SetEmbeddingObserver wires the healthy\-embedding consumer \(issue \#41 session 
 
 SetVerdictObserver wires the Door\-1 verdict consumer. Nil\-guarded \(project invariant, cf. SetPublisher\): a nil fn \-\- including a typed\-nil func \-\- is ignored so a wiring\-order bug cannot strip a live observer. Not lock\-protected: register once during construction, before Match runs.
 
-<a name="EpistemicHook"></a>
-## type EpistemicHook
-
-EpistemicHook is the post\-turn ambient\-extraction hook \(Path B\). It is gated entirely by EpistemicConfig.AmbientExtraction.Enabled and the ExcludeIntents filter.
-
-	type EpistemicHook struct {
-	    // contains filtered or unexported fields
-	}
-
-<a name="NewEpistemicHook"></a>
-### func NewEpistemicHook
-
-	func NewEpistemicHook(cfg EpistemicHookConfig) *EpistemicHook
-
-NewEpistemicHook constructs a hook from the given configuration.
-
-<a name="EpistemicHook.AfterTurn"></a>
-### func \(\*EpistemicHook\) AfterTurn
-
-	func (h *EpistemicHook) AfterTurn(ctx context.Context, intent string, messages []string) ([]string, error)
-
-AfterTurn is called by the agent loop after a turn completes. It extracts candidate claims from the conversation window, filters them, and writes them as auto claims. Returns the IDs of the written claims.
-
-The method is best\-effort: errors are logged but do not propagate unless the underlying extractor fails.
-
-<a name="EpistemicHookConfig"></a>
-## type EpistemicHookConfig
-
-EpistemicHookConfig holds construction parameters for EpistemicHook.
-
-	type EpistemicHookConfig struct {
-	    Cfg       config.EpistemicConfig
-	    Extractor AmbientExtractorInterface
-	    Logger    *slog.Logger
-	    // RejectedLogger, when non-nil, records every candidate the confidence/
-	    // category/max gates drop — the calibration population for the judge
-	    // lane. Nil = logging disabled.
-	    RejectedLogger *RejectedCandidateLogger
-	}
-
-<a name="ErrorBuilder"></a>
-## type ErrorBuilder
-
-ErrorBuilder helps construct detailed ToolExecutionError instances
-
-	type ErrorBuilder struct {
-	}
-
 <a name="ErrorPayload"></a>
 ## type ErrorPayload
 
@@ -11184,13 +10927,6 @@ IntentAnalyzer wraps an LLM client to perform deep intent analysis.
 	    // contains filtered or unexported fields
 	}
 
-<a name="NewIntentAnalyzer"></a>
-### func NewIntentAnalyzer
-
-	func NewIntentAnalyzer(client *llm.Client, logger *slog.Logger) *IntentAnalyzer
-
-NewIntentAnalyzer creates a new IntentAnalyzer with the given LLM client and logger.
-
 <a name="IntentAnalyzer.AnalyzeTrueIntent"></a>
 ### func \(\*IntentAnalyzer\) AnalyzeTrueIntent
 
@@ -11284,54 +11020,6 @@ IntentEntry represents an intent definition for indexing.
 	    Description string
 	    Keywords    []string
 	}
-
-<a name="IntentMap"></a>
-## type IntentMap
-
-IntentMap is the deterministic intent\-\>toolset selection table. Loaded once at daemon start from a JSON5 file \(default template config/tools\_intent\_map.json5, copied into $MEEPT\_HOME by \`make config\-bootstrap\`\). Invalid tool names \(not in the registry universe\) are dropped with one warn at load; a malformed file falls back to a "\_default"\-only safe map, never to an LLM call.
-
-	type IntentMap struct {
-	    // contains filtered or unexported fields
-	}
-
-<a name="LoadIntentMap"></a>
-### func LoadIntentMap
-
-	func LoadIntentMap(path string, log *slog.Logger) (*IntentMap, error)
-
-LoadIntentMap loads a JSON5 intent map at path and validates every entry against the known\-tool universe. It returns the parsed map AND a non\-nil error when the file is malformed or the top level is not an object; in that degraded case the returned \*IntentMap is a usable "\_default"\-only map so callers log one warn and continue — never an LLM fallback, never a panic. A clean parse returns a nil error. An ABSENT file is not an error: a fresh install before the template lands still gets the safe map \(nil error, conservative content\).
-
-Invalid tool names are dropped at load with one warn naming the entry. Malformed files are NOT logged here \(the caller owns that one warn from the returned error, per the §3.3 contract\).
-
-<a name="LoadIntentMapWithUniverse"></a>
-### func LoadIntentMapWithUniverse
-
-	func LoadIntentMapWithUniverse(path string, log *slog.Logger, universe map[string]struct{}) (*IntentMap, error)
-
-LoadIntentMapWithUniverse is LoadIntentMap with an explicit tool universe \(the live registry's name set, once leaf 05 wires it\). A nil universe disables invalid\-name dropping \(every entry accepted as\-is\).
-
-<a name="IntentMap.For"></a>
-### func \(\*IntentMap\) For
-
-	func (m *IntentMap) For(label string, budget int, allowed []string) []string
-
-For returns entry\[label\] \(falling back to entry\["\_default"\] when label is absent\) intersected with allowed, truncated to budget. budget \<= 0 yields a nil slice \(in search mode the caller passes 0\). Deterministic: same inputs give the same slice; stable order = the config order preserved after intersection \(never re\-sorted\).
-
-The result never exceeds the allowed set \(the agent's role ceiling\) and never exceeds the budget. A miss on both label and "\_default", or an empty intersection, yields a nil/empty slice — the caller then proceeds with "core \+ meta\-tools only" \(design §2.1\): never an error, never an LLM call.
-
-<a name="IntentMap.Names"></a>
-### func \(\*IntentMap\) Names
-
-	func (m *IntentMap) Names() []string
-
-Names returns the sorted set of category labels present \(diagnostics / audit surface\). Deterministic.
-
-<a name="IntentMap.SetUniverse"></a>
-### func \(\*IntentMap\) SetUniverse
-
-	func (m *IntentMap) SetUniverse(universe map[string]struct{}) []string
-
-SetUniverse re\-validates the loaded entries against a live registry universe \(leaf 05 calls this at daemon boot with the real registry names, which is the authoritative "registry universe" the §3.3 drop rule refers to\). It mutates in place, dropping out\-of\-universe names, and returns the "entry/name" pairs that were dropped — the caller logs one warn for a non\-nil result \(the load\-time contract, applied after the fact\). A nil universe resets to "accept any" and drops nothing.
 
 <a name="IntentType"></a>
 ## type IntentType
@@ -11794,13 +11482,6 @@ WithContextInjectorFunc sets the context injector for system prompt enrichment.
 	func WithDetectionContext(dc *DetectionContext) LoopOption
 
 WithDetectionContext sets the client\-side detection context captured at session creation \(CWD, detected project, CLI args\). Nil\-safe.
-
-<a name="WithEpistemicHook"></a>
-### func WithEpistemicHook
-
-	func WithEpistemicHook(hook *EpistemicHook) LoopOption
-
-WithEpistemicHook sets the post\-turn ambient\-extraction hook.
 
 <a name="WithEventEmitter"></a>
 ### func WithEventEmitter
@@ -13146,68 +12827,6 @@ PairManagerConfig holds configuration for creating a PairManager.
 	    Logger    *slog.Logger
 	}
 
-<a name="PairModality"></a>
-## type PairModality
-
-PairModality defines the type of agentic pairing applied to a task step. The orchestrator selects a modality based on task complexity, step tool hint, and user preferences. This enum is shared across all agentic pair options.
-
-	type PairModality int
-
-<a name="PairModalityNone"></a>
-
-	const (
-	    // PairModalityNone means no agentic pairing; single-agent execution.
-	    PairModalityNone PairModality = iota // none
-	    // PairModalitySpecReview is Option A: specification-driven review loop
-	    // where acceptance criteria are generated during planning and the reviewer
-	    // checks against them.
-	    PairModalitySpecReview // spec_review
-	    // PairModalityPairSession is Option B: shared-context pair session where
-	    // two agents iterate on a full task with accumulated review history.
-	    PairModalityPairSession // pair_session
-	    // PairModalityDebate is Option C: bus-channel-based dual-agent conversation
-	    // where agents take turns via a shared topic.
-	    PairModalityDebate // debate
-	    // PairModalityInline is Option D: tool-based inline review where the actor
-	    // calls request_review within its own execution loop.
-	    PairModalityInline // inline
-	)
-
-<a name="ParsePairModality"></a>
-### func ParsePairModality
-
-	func ParsePairModality(s string) PairModality
-
-ParsePairModality parses a string into a PairModality, returning PairModalityNone for unrecognized values.
-
-<a name="PairModality.IsActive"></a>
-### func \(PairModality\) IsActive
-
-	func (m PairModality) IsActive() bool
-
-IsActive returns true if the modality represents an active pairing \(not none\).
-
-<a name="PairModality.MarshalJSON"></a>
-### func \(PairModality\) MarshalJSON
-
-	func (m PairModality) MarshalJSON() ([]byte, error)
-
-MarshalJSON implements json.Marshaler for PairModality.
-
-<a name="PairModality.String"></a>
-### func \(PairModality\) String
-
-	func (i PairModality) String() string
-
-
-
-<a name="PairModality.UnmarshalJSON"></a>
-### func \(\*PairModality\) UnmarshalJSON
-
-	func (m *PairModality) UnmarshalJSON(data []byte) error
-
-UnmarshalJSON implements json.Unmarshaler for PairModality.
-
 <a name="PairOrchestrator"></a>
 ## type PairOrchestrator
 
@@ -14092,49 +13711,6 @@ PlanRequest is the input to the strategic planner.
 	    // Empty = no request-level model; unchanged behavior.
 	    RequestModel string `json:"request_model,omitempty"`
 	}
-
-<a name="PlannerThresholds"></a>
-## type PlannerThresholds
-
-PlannerThresholds centralizes all tunable StrategicPlanner parameters that were previously magic numbers scattered across strategic.go.
-
-	type PlannerThresholds struct {
-	    // InterviewAmbiguityThreshold controls when ConductInterview triggers.
-	    // Requests with ambiguity below this skip the interview phase.
-	    // (replaces interviewAmbiguityThreshold const in strategic.go:50)
-	    InterviewAmbiguity float64
-	
-	    // MaxPlanSteps caps the number of steps in a generated plan.
-	    // (replaces StrategicPlanner.maxPlanSteps default in strategic.go:141)
-	    MaxPlanSteps int
-	
-	    // PlannerTimeout is the max duration for a single planner LLM call.
-	    // (replaces StrategicPlanner.plannerTimeout default in strategic.go:144)
-	    PlannerTimeout time.Duration
-	
-	    // SimpleInputMaxChars is the threshold below which a request is
-	    // considered "simple" and may skip LLM decomposition.
-	    // (replaces hardcoded 100 in strategic.go:631)
-	    SimpleInputMaxChars int
-	
-	    // PairInputMinChars is the threshold above which code/debug requests
-	    // are routed to pair sessions.
-	    // (replaces hardcoded 200 in strategic.go:685)
-	    PairInputMinChars int
-	
-	    // ApprovalStepThreshold is the minimum plan size that triggers the
-	    // user approval gate (independent of the interview gate). This is a
-	    // new configurable knob; the current code only gates on
-	    // InterviewCompleted.
-	    ApprovalStepThreshold int
-	}
-
-<a name="NewDefaultThresholds"></a>
-### func NewDefaultThresholds
-
-	func NewDefaultThresholds() *PlannerThresholds
-
-NewDefaultThresholds returns thresholds matching current hardcoded defaults.
 
 <a name="PrefilterEmbedder"></a>
 ## type PrefilterEmbedder
@@ -15082,50 +14658,6 @@ RalphLoopConfig holds configuration for the Ralph loop.
 
 DefaultRalphLoopConfig returns default Ralph loop configuration.
 
-<a name="ReasoningDirective"></a>
-## type ReasoningDirective
-
-ReasoningDirective captures a parsed reasoning\-effort directive from user text. Returned by ParseReasoningDirective.
-
-	type ReasoningDirective struct {
-	    // Config is the parsed ReasoningConfig. Nil when Ambiguous is true and
-	    // the parser couldn't determine a tier (caller decides fallback).
-	    Config *llm.ReasoningConfig
-	
-	    // Scope is one of "session" (default), "next-turn", or "task".
-	    Scope string
-	
-	    // Ambiguous is true when the user wrote "use reasoning" / "enable
-	    // reasoning" without specifying a tier. In that case Config is nil and
-	    // the caller is expected to either pick a sensible default or surface a
-	    // clarifying question.
-	    Ambiguous bool
-	
-	    // ReasoningReq is the substring of the user input that matched the
-	    // directive. Useful for logging and clarification prompts.
-	    ReasoningReq string
-	}
-
-<a name="ParseReasoningDirective"></a>
-### func ParseReasoningDirective
-
-	func ParseReasoningDirective(text string) (*ReasoningDirective, error)
-
-ParseReasoningDirective scans text for reasoning\-effort directives per spec §7.1. Returns \(nil, nil\) when no directive is found.
-
-The first matching pattern wins; the parser does not accumulate multiple directives in a single call. Recognized forms \(case\-insensitive\):
-
-- Tier word \+ "reasoning"/"thinking": "use high reasoning"
-- "reasoning\_effort: X": "reasoning\_effort: low"
-- "\[/reasoning X\]" slash directive
-- Aliases: "think hard" \-\> high, "deep think" \-\> xhigh, etc.
-- Token hints: "use 8000 thinking tokens" \-\> BudgetTokens=8000
-- Disable phrases: "stop thinking", "no reasoning"
-
-Ambiguous matches \("use reasoning" with no tier\) set Ambiguous=true and leave Config nil.
-
-Scope detection looks for "for this task" \(scope=task\), "for next turn" \(scope=next\-turn\); otherwise scope=session.
-
 <a name="ReasoningWatchdog"></a>
 ## type ReasoningWatchdog
 
@@ -15169,47 +14701,6 @@ Reset clears watchdog state.
 	func (w *ReasoningWatchdog) Streak() int
 
 Streak returns the current consecutive reasoning\-only turn count.
-
-<a name="RecoveryConfig"></a>
-## type RecoveryConfig
-
-RecoveryConfig controls how RetryRecovery classifies errors and decides whether to retry tool execution.
-
-	type RecoveryConfig struct {
-	    // MaxRetries is the maximum number of retry attempts (default 3).
-	    MaxRetries int
-	    // RetryDelay is the base delay before the first retry; subsequent
-	    // retries use exponential backoff (default 1s).
-	    RetryDelay time.Duration
-	    // RecoverableErrors are substrings that, when found in an error
-	    // message, mark the error as recoverable (retry with backoff).
-	    RecoverableErrors []string
-	    // NonRecoverableErrors are substrings that, when found, permanently
-	    // disable retry for that error.
-	    NonRecoverableErrors []string
-	}
-
-<a name="DefaultRecoveryConfig"></a>
-### func DefaultRecoveryConfig
-
-	func DefaultRecoveryConfig() RecoveryConfig
-
-DefaultRecoveryConfig returns a sensible default configuration.
-
-<a name="RecoveryState"></a>
-## type RecoveryState
-
-RecoveryState tracks the current progress and history of a recovery attempt.
-
-	type RecoveryState struct {
-	    CurrentRetry     int           `json:"current_retry"`
-	    LastError        string        `json:"last_error,omitempty"`
-	    LastErrorType    string        `json:"last_error_type,omitempty"`
-	    RecoveryAttempts int           `json:"recovery_attempts"`
-	    LastDelay        time.Duration `json:"last_delay,omitempty"`
-	    Completed        bool          `json:"completed"`
-	    Final            bool          `json:"final"`
-	}
 
 <a name="ReflectionCollector"></a>
 ## type ReflectionCollector
@@ -15389,32 +14880,6 @@ ReflectionTrajectoryStep describes one step in the reflection execution trace.
 	    RetryOf    string `json:"retry_of,omitempty"`
 	}
 
-<a name="RefusalSeams"></a>
-## type RefusalSeams
-
-RefusalSeams carries the injectable refusal\-fallback collaborators.
-
-	type RefusalSeams struct {
-	
-	    // EventPublisher installs the agent.model_escalated publisher closure.
-	    EventPublisher func(topic string, payload map[string]any)
-	    // contains filtered or unexported fields
-	}
-
-<a name="ExportedRefusalSeams"></a>
-### func ExportedRefusalSeams
-
-	func ExportedRefusalSeams(l *AgentLoop) *RefusalSeams
-
-ExportedRefusalSeams returns a mutable view of the loop's refusal\-fallback seams. Call Apply to write any set fields back onto the loop.
-
-<a name="RefusalSeams.Apply"></a>
-### func \(\*RefusalSeams\) Apply
-
-	func (s *RefusalSeams) Apply()
-
-Apply writes any configured seams onto the loop. Nil entries are skipped \(plain\-nil guard per repo convention\).
-
 <a name="RegistryConfig"></a>
 ## type RegistryConfig
 
@@ -15567,29 +15032,6 @@ RegistryConfig holds configuration for creating an AgentRegistry.
 	    // keeps filtered registries byte-identical to the pre-union posture.
 	    DynamicExposureEnabled bool
 	}
-
-<a name="RejectedCandidateLogger"></a>
-## type RejectedCandidateLogger
-
-RejectedCandidateLogger appends filtered\-out ambient candidates to a JSONL file under the memory data dir. Nil\-safe: a nil logger \(or an empty path\) disables logging entirely. Writes are serialized; each line is flushed on write so a daemon crash loses at most the in\-flight record.
-
-	type RejectedCandidateLogger struct {
-	    // contains filtered or unexported fields
-	}
-
-<a name="NewRejectedCandidateLogger"></a>
-### func NewRejectedCandidateLogger
-
-	func NewRejectedCandidateLogger(dataDir string, log *slog.Logger) *RejectedCandidateLogger
-
-NewRejectedCandidateLogger creates a logger writing to \<dataDir\>/rejected\_candidates.jsonl. The directory is created on first write, not at construction, so a read\-only environment stays construction\-safe.
-
-<a name="RejectedCandidateLogger.LogRejected"></a>
-### func \(\*RejectedCandidateLogger\) LogRejected
-
-	func (r *RejectedCandidateLogger) LogRejected(intent string, threshold float64, rejected []rejectedCandidateRecord)
-
-LogRejected appends the given filtered\-out candidates. Best\-effort: an unwritable path logs a warning once per writer and stops attempting \(a broken calibration log must never break extraction\).
 
 <a name="ReplyFuncSetter"></a>
 ## type ReplyFuncSetter
@@ -15771,29 +15213,6 @@ ResultPayload is the payload for "result" type messages.
 	    Error string `json:"error,omitempty"`
 	}
 
-<a name="ResumeResult"></a>
-## type ResumeResult
-
-ResumeResult describes what happened when an incomplete run was resumed from a checkpoint.
-
-	type ResumeResult struct {
-	    // Restored is true when a checkpoint was successfully loaded.
-	    Restored bool `json:"restored"`
-	    // Checkpoint is the loaded checkpoint that was resumed from.
-	    Checkpoint *Checkpoint `json:"checkpoint,omitempty"`
-	    // SkippedTurns is the number of turns that were already completed
-	    // before the crash/interruption and will be skipped during resume.
-	    SkippedTurns int `json:"skipped_turns"`
-	    // RunID is the ID of the run that was resumed.
-	    RunID string `json:"run_id"`
-	    // State is the restored agent state (caller-defined value).
-	    State any `json:"-"`
-	    // ResumedAt records when the resume operation occurred.
-	    ResumedAt time.Time `json:"resumed_at"`
-	    // Warning contains any non-fatal issues discovered during resume.
-	    Warning string `json:"warning,omitempty"`
-	}
-
 <a name="RetryBudget"></a>
 ## type RetryBudget
 
@@ -15893,50 +15312,6 @@ RetryMetricsSnapshot is an immutable point\-in\-time copy of RetryMetrics. The m
 	    RetriesByError  map[string]int64
 	    BackoffDuration time.Duration
 	}
-
-<a name="RetryRecovery"></a>
-## type RetryRecovery
-
-RetryRecovery provides HALO\-style retry logic with observable state for tool execution failures mid\-turn.
-
-	type RetryRecovery struct {
-	    // contains filtered or unexported fields
-	}
-
-<a name="NewRetryRecovery"></a>
-### func NewRetryRecovery
-
-	func NewRetryRecovery(cfg RecoveryConfig) *RetryRecovery
-
-NewRetryRecovery creates a RetryRecovery with the given config. If config is zero\-valued, DefaultRecoveryConfig\(\) is applied.
-
-<a name="RetryRecovery.ExecuteWithRetry"></a>
-### func \(\*RetryRecovery\) ExecuteWithRetry
-
-	func (r *RetryRecovery) ExecuteWithRetry(ctx context.Context, toolName string, fn func() (any, error)) (result any, retryErr error)
-
-ExecuteWithRetry runs fn with exponential\-backoff retry on recoverable errors. On max retries, returns the last error without retry. The result of the first successful invocation is returned.
-
-<a name="RetryRecovery.GetRecoveryState"></a>
-### func \(\*RetryRecovery\) GetRecoveryState
-
-	func (r *RetryRecovery) GetRecoveryState() RecoveryState
-
-GetRecoveryState returns a snapshot of the current recovery state.
-
-<a name="RetryRecovery.Reset"></a>
-### func \(\*RetryRecovery\) Reset
-
-	func (r *RetryRecovery) Reset()
-
-Reset clears the recovery state for a new tool invocation.
-
-<a name="RetryRecovery.ShouldRetry"></a>
-### func \(\*RetryRecovery\) ShouldRetry
-
-	func (r *RetryRecovery) ShouldRetry(err error) bool
-
-ShouldRetry determines whether the error indicates a recoverable condition that warrants retry. Authentication/authorization and invalid\-request errors are never retried. Rate\-limit and network errors are retried.
 
 <a name="RetryableError"></a>
 ## type RetryableError
@@ -16361,133 +15736,6 @@ RoutingValidation checks if a task was routed correctly.
 	    ExpectedAgent  string `json:"expected_agent,omitempty"`
 	    Feedback       string `json:"feedback,omitempty"`
 	}
-
-<a name="RunRecoverer"></a>
-## type RunRecoverer
-
-RunRecoverer manages periodic checkpoints for agent runs and provides crash\-recovery capabilities. It stores data under a base directory, creating one checkpoint file per incomplete run plus a sentinel for completed runs.
-
-	type RunRecoverer struct {
-	    // contains filtered or unexported fields
-	}
-
-<a name="NewRunRecoverer"></a>
-### func NewRunRecoverer
-
-	func NewRunRecoverer(basePath string, checkpointInterval int) (*RunRecoverer, error)
-
-NewRunRecoverer creates a recoverer that stores checkpoints under basePath. checkpointInterval controls how often checkpoints are written \(every N turns\). Set to 0 to disable automatic checkpointing \(manual writes only\).
-
-<a name="RunRecoverer.CleanupAllCompleted"></a>
-### func \(\*RunRecoverer\) CleanupAllCompleted
-
-	func (r *RunRecoverer) CleanupAllCompleted() (int, error)
-
-CleanupAllCompleted removes ALL completed run artifacts. Returns error and the number of files removed.
-
-<a name="RunRecoverer.CleanupBefore"></a>
-### func \(\*RunRecoverer\) CleanupBefore
-
-	func (r *RunRecoverer) CleanupBefore(cutoff time.Time) (int, error)
-
-CleanupBefore removes all incomplete checkpoints older than the given cutoff. Returns the number of files removed.
-
-<a name="RunRecoverer.CleanupCompleted"></a>
-### func \(\*RunRecoverer\) CleanupCompleted
-
-	func (r *RunRecoverer) CleanupCompleted(runIDs ...string) (int, error)
-
-CleanupCompleted removes completed run artifacts \(both .json and .done files\) for the given run IDs. Returns the number of files removed.
-
-<a name="RunRecoverer.GetCheckpointInterval"></a>
-### func \(\*RunRecoverer\) GetCheckpointInterval
-
-	func (r *RunRecoverer) GetCheckpointInterval() int
-
-GetCheckpointInterval returns the configured checkpoint interval.
-
-<a name="RunRecoverer.IncompleteRunCount"></a>
-### func \(\*RunRecoverer\) IncompleteRunCount
-
-	func (r *RunRecoverer) IncompleteRunCount() (int, error)
-
-IncompleteRunCount returns the number of incomplete \(not yet completed\) runs.
-
-<a name="RunRecoverer.IsComplete"></a>
-### func \(\*RunRecoverer\) IsComplete
-
-	func (r *RunRecoverer) IsComplete(runID string) bool
-
-IsComplete checks if a run has been marked complete.
-
-<a name="RunRecoverer.ListCompletedRuns"></a>
-### func \(\*RunRecoverer\) ListCompletedRuns
-
-	func (r *RunRecoverer) ListCompletedRuns() ([]string, error)
-
-ListCompletedRuns returns run IDs for runs that have been marked complete via MarkComplete \(they have .done sentinel files\).
-
-<a name="RunRecoverer.ListIncompleteRuns"></a>
-### func \(\*RunRecoverer\) ListIncompleteRuns
-
-	func (r *RunRecoverer) ListIncompleteRuns() ([]string, error)
-
-ListIncompleteRuns returns run IDs for runs that have an active checkpoint \(not yet marked complete via MarkComplete\).
-
-<a name="RunRecoverer.MarkComplete"></a>
-### func \(\*RunRecoverer\) MarkComplete
-
-	func (r *RunRecoverer) MarkComplete(runID string) error
-
-MarkComplete writes an empty sentinel file that marks a run as finished, distinguishing it from incomplete \(crashed\) runs. The previous checkpoint file is renamed to include ".done" suffix.
-
-<a name="RunRecoverer.ReadCheckpoint"></a>
-### func \(\*RunRecoverer\) ReadCheckpoint
-
-	func (r *RunRecoverer) ReadCheckpoint(runID string) (*Checkpoint, error)
-
-ReadCheckpoint loads a checkpoint by run ID.
-
-<a name="RunRecoverer.Resume"></a>
-### func \(\*RunRecoverer\) Resume
-
-	func (r *RunRecoverer) Resume(incompleteRunID string) (*ResumeResult, error)
-
-Resume loads the latest checkpoint for an incomplete run and returns a ResumeResult describing what was restored.
-
-<a name="RunRecoverer.ResumeFromLatest"></a>
-### func \(\*RunRecoverer\) ResumeFromLatest
-
-	func (r *RunRecoverer) ResumeFromLatest() (*ResumeResult, string, error)
-
-ResumeFromLatest resumes from the most recent checkpoint across all incomplete runs. Returns the result and the run ID that was resumed from.
-
-<a name="RunRecoverer.SetCheckpointInterval"></a>
-### func \(\*RunRecoverer\) SetCheckpointInterval
-
-	func (r *RunRecoverer) SetCheckpointInterval(interval int)
-
-SetCheckpointInterval updates the checkpoint interval.
-
-<a name="RunRecoverer.ShouldCheckpoint"></a>
-### func \(\*RunRecoverer\) ShouldCheckpoint
-
-	func (r *RunRecoverer) ShouldCheckpoint(turn int) bool
-
-ShouldCheckpoint returns true when a checkpoint should be written for the given turn number based on the recoverer's checkpointInterval.
-
-When checkpointInterval is 0 \(disabled\), this always returns false. Otherwise it returns true when turn \> 0 and turn % interval == 0.
-
-<a name="RunRecoverer.WriteCheckpoint"></a>
-### func \(\*RunRecoverer\) WriteCheckpoint
-
-	func (r *RunRecoverer) WriteCheckpoint(cp *Checkpoint) error
-
-WriteCheckpoint writes a checkpoint atomically to disk.
-
-The file is written to a temporary path and renamed into place so that any crash mid\-write leaves either the previous checkpoint or no checkpoint, but never a partially\-written one.
-
-Checkpoint files are named \<checkpointPrefix\>\<runID\>.json.
 
 <a name="SQLiteParkStore"></a>
 ## type SQLiteParkStore
@@ -17327,43 +16575,6 @@ WithStateTraceWriter injects the leaf\-01 trace writer \(nil\-safe\).
 	func (r *SkillStateRuntime) WithToolRunner(runner stateToolRunner) *SkillStateRuntime
 
 WithToolRunner injects the tool execution seam.
-
-<a name="SnowflakeEmbedClient"></a>
-## type SnowflakeEmbedClient
-
-SnowflakeEmbedClient implements EmbeddingClient using Snowflake Arctic Embed.
-
-	type SnowflakeEmbedClient struct {
-	    // contains filtered or unexported fields
-	}
-
-<a name="NewSnowflakeEmbedClient"></a>
-### func NewSnowflakeEmbedClient
-
-	func NewSnowflakeEmbedClient(apiKey string) *SnowflakeEmbedClient
-
-NewSnowflakeEmbedClient creates a new Snowflake embedding client.
-
-<a name="SnowflakeEmbedClient.Dimension"></a>
-### func \(\*SnowflakeEmbedClient\) Dimension
-
-	func (c *SnowflakeEmbedClient) Dimension() int
-
-
-
-<a name="SnowflakeEmbedClient.Embed"></a>
-### func \(\*SnowflakeEmbedClient\) Embed
-
-	func (c *SnowflakeEmbedClient) Embed(ctx context.Context, text string) ([]float64, error)
-
-
-
-<a name="SnowflakeEmbedClient.EmbedBatch"></a>
-### func \(\*SnowflakeEmbedClient\) EmbedBatch
-
-	func (c *SnowflakeEmbedClient) EmbedBatch(ctx context.Context, texts []string) ([][]float64, error)
-
-
 
 <a name="SoulProvider"></a>
 ## type SoulProvider
@@ -18444,71 +17655,6 @@ TaskPriority defines task priority levels.
 	    PriorityUrgent TaskPriority = "urgent"
 	)
 
-<a name="TaskReportAggregator"></a>
-## type TaskReportAggregator
-
-TaskReportAggregator aggregates recommendations and results from all sub\-agents into a structured final report.
-
-	type TaskReportAggregator struct {
-	    // contains filtered or unexported fields
-	}
-
-<a name="NewTaskReportAggregator"></a>
-### func NewTaskReportAggregator
-
-	func NewTaskReportAggregator() *TaskReportAggregator
-
-NewTaskReportAggregator creates a new report aggregator.
-
-<a name="TaskReportAggregator.AddRecommendations"></a>
-### func \(\*TaskReportAggregator\) AddRecommendations
-
-	func (a *TaskReportAggregator) AddRecommendations(recs []CategorizedRecommendation)
-
-AddRecommendations adds extracted recommendations to the aggregator.
-
-<a name="TaskReportAggregator.BuildReport"></a>
-### func \(\*TaskReportAggregator\) BuildReport
-
-	func (a *TaskReportAggregator) BuildReport(summary string, stepsCompleted, stepsTotal int, executionTime string) *AggregatedTaskReport
-
-BuildReport creates the final aggregated task report.
-
-<a name="TaskReportAggregator.DeduplicateRecommendations"></a>
-### func \(\*TaskReportAggregator\) DeduplicateRecommendations
-
-	func (a *TaskReportAggregator) DeduplicateRecommendations() []CategorizedRecommendation
-
-DeduplicateRecommendations removes duplicate recommendations based on description.
-
-<a name="TaskReportAggregator.ExtractRecommendations"></a>
-### func \(\*TaskReportAggregator\) ExtractRecommendations
-
-	func (a *TaskReportAggregator) ExtractRecommendations(stepResult, agentID string) []CategorizedRecommendation
-
-ExtractRecommendations extracts recommendations from a step's result text. It looks for structured recommendation blocks in the agent output.
-
-<a name="TaskReportAggregator.GetRecommendationsByCategory"></a>
-### func \(\*TaskReportAggregator\) GetRecommendationsByCategory
-
-	func (a *TaskReportAggregator) GetRecommendationsByCategory(category string) []CategorizedRecommendation
-
-GetRecommendationsByCategory returns recommendations filtered by category.
-
-<a name="TaskReportAggregator.GetRecommendationsByPriority"></a>
-### func \(\*TaskReportAggregator\) GetRecommendationsByPriority
-
-	func (a *TaskReportAggregator) GetRecommendationsByPriority(priority string) []CategorizedRecommendation
-
-GetRecommendationsByPriority returns recommendations filtered by priority.
-
-<a name="TaskReportAggregator.RecommendationCount"></a>
-### func \(\*TaskReportAggregator\) RecommendationCount
-
-	func (a *TaskReportAggregator) RecommendationCount() int
-
-RecommendationCount returns the total number of collected recommendations.
-
 <a name="TaskSpec"></a>
 ## type TaskSpec
 
@@ -19087,26 +18233,6 @@ ToolDescriptor describes a tool with gating constraints across multiple dimensio
 	    RequiresState string
 	}
 
-<a name="ToolErrorCode"></a>
-## type ToolErrorCode
-
-ToolErrorCode represents the type of error that occurred during tool execution
-
-	type ToolErrorCode string
-
-<a name="ErrCodeJSONSyntax"></a>
-
-	const (
-	    ErrCodeJSONSyntax      ToolErrorCode = "json_syntax"
-	    ErrCodeJSONStructure   ToolErrorCode = "json_structure"
-	    ErrCodeMissingRequired ToolErrorCode = "missing_required"
-	    ErrCodeInvalidType     ToolErrorCode = "invalid_type"
-	    ErrCodeInvalidValue    ToolErrorCode = "invalid_value"
-	    ErrCodePermission      ToolErrorCode = "permission_denied"
-	    ErrCodeExecution       ToolErrorCode = "execution_failed"
-	    ErrCodeTimeout         ToolErrorCode = "timeout"
-	)
-
 <a name="ToolExecutionEndData"></a>
 ## type ToolExecutionEndData
 
@@ -19127,29 +18253,6 @@ ToolExecutionEndData is emitted after a tool execution completes or is blocked. 
 	    ArgumentsKeys  string        `json:"arguments_keys,omitempty"`
 	    ArgumentsBytes int           `json:"arguments_bytes,omitempty"`
 	}
-
-<a name="ToolExecutionError"></a>
-## type ToolExecutionError
-
-ToolExecutionError provides detailed, actionable error information
-
-	type ToolExecutionError struct {
-	    Code       ToolErrorCode `json:"code"`
-	    ToolName   string        `json:"tool_name"`
-	    Message    string        `json:"message"`
-	    Suggestion string        `json:"suggestion,omitempty"`
-	    Example    string        `json:"example,omitempty"`
-	    InvalidArg string        `json:"invalid_arg,omitempty"`
-	    Expected   string        `json:"expected,omitempty"`
-	    Received   string        `json:"received,omitempty"`
-	}
-
-<a name="ToolExecutionError.Error"></a>
-### func \(\*ToolExecutionError\) Error
-
-	func (e *ToolExecutionError) Error() string
-
-
 
 <a name="ToolExecutionStartData"></a>
 ## type ToolExecutionStartData

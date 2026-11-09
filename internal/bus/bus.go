@@ -48,6 +48,23 @@ type Subscriber struct {
 	ID      string
 	Topic   string
 	Channel chan *models.BusMessage
+
+	// dropped counts messages this subscriber lost because Channel was
+	// full at publish time on the non-blocking publish path (both direct
+	// and wildcard delivery). Explicit drop accounting: Publish already
+	// logs the drop at WARN, and this counter lets poll consumers surface
+	// the loss in-band instead of leaving it silent in the log stream.
+	dropped atomic.Int64
+}
+
+// DroppedCount returns the number of messages dropped for this subscriber
+// because its channel was full at publish time. Nil-safe (a nil Subscriber
+// has dropped nothing).
+func (s *Subscriber) DroppedCount() int64 {
+	if s == nil {
+		return 0
+	}
+	return s.dropped.Load()
 }
 
 // SubMetadata tracks subscription metadata for debugging dead subscriptions.
@@ -244,9 +261,11 @@ func (b *MessageBus) publish(topic string, msg *models.BusMessage, externalOnly,
 			case sub.Channel <- msg:
 				delivered++
 			default:
+				sub.dropped.Add(1) // drop accounting: surface via Subscriber.DroppedCount
 				b.logger.Warn("bus: dropped message (buffer full)",
 					"topic", topic,
 					"subscriber", sub.ID,
+					"total_dropped", sub.DroppedCount(),
 				)
 			}
 		}
@@ -271,9 +290,11 @@ func (b *MessageBus) publish(topic string, msg *models.BusMessage, externalOnly,
 					case sub.Channel <- msg:
 						delivered++
 					default:
+						sub.dropped.Add(1) // drop accounting: surface via Subscriber.DroppedCount
 						b.logger.Warn("bus: dropped message (buffer full)",
 							"topic", topic,
 							"subscriber", sub.ID,
+							"total_dropped", sub.DroppedCount(),
 						)
 					}
 				}

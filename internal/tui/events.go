@@ -27,10 +27,16 @@ type EventStream struct {
 	mu             sync.Mutex
 	running        bool
 	pollInterval   time.Duration
-	lastPoll       time.Time
-	buffer         []BusEvent // Circular buffer for recent events
-	bufferSize     int
-	bufferIdx      int
+	// lastSeq is the daemon-side monotonic cursor: bus.poll(since_seq)
+	// returns records with Seq > lastSeq and the response's next_seq is
+	// stored back here. Unlike the former client-side wall-clock lastPoll
+	// cursor (strict Timestamp.After comparison), a server-seq cursor can
+	// never skip an event that was buffered before the previous poll
+	// returned — the load-shaped silent-drop bug this replaces.
+	lastSeq     int64
+	buffer      []BusEvent // Circular buffer for recent events
+	bufferSize  int
+	bufferIdx   int
 }
 
 // EventStreamConfig configures the event stream.
@@ -214,7 +220,7 @@ func (es *EventStream) Poll() tea.Cmd {
 			return nil
 		}
 		subID := es.subscriptionID
-		lastPoll := es.lastPoll
+		lastSeq := es.lastSeq
 		es.mu.Unlock()
 
 		if !es.rpc.IsConnected() || subID == "" {
@@ -224,7 +230,7 @@ func (es *EventStream) Poll() tea.Cmd {
 
 		params := map[string]any{
 			"subscription_id": subID,
-			"since":           lastPoll.Format(time.RFC3339Nano),
+			"since_seq":       lastSeq,
 		}
 
 		result, err := es.rpc.Call("bus.poll", params)
@@ -233,14 +239,20 @@ func (es *EventStream) Poll() tea.Cmd {
 		}
 
 		var resp struct {
-			Events []BusEvent `json:"events"`
+			Events  []BusEvent `json:"events"`
+			NextSeq int64      `json:"next_seq"`
 		}
 		if err := json.Unmarshal(result, &resp); err != nil {
 			return EventStreamDataMsg{Events: nil, Err: err}
 		}
 
 		es.mu.Lock()
-		es.lastPoll = time.Now()
+		// Advance the cursor to the daemon's next_seq (monotonic server-side
+		// sequence): events buffered after this poll's snapshot carry higher
+		// seqs and are returned by the next poll — nothing is skipped.
+		if resp.NextSeq > es.lastSeq {
+			es.lastSeq = resp.NextSeq
+		}
 		es.mu.Unlock()
 
 		for _, e := range resp.Events {
