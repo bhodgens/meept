@@ -210,11 +210,14 @@ func (f *fakeStore) GetToolCalls(int64) ([]session.ToolCall, error) { return nil
 func (f *fakeStore) GetToolCallsForMessages([]int64) (map[int64][]session.ToolCall, error) {
 	return nil, nil //nolint:nilnil // test stub: never invoked, only satisfies the interface
 }
-func (f *fakeStore) SetProject(string, string, string) error                         { return nil }
-func (f *fakeStore) SetWorktree(string, string, string) error                        { return nil }
-func (f *fakeStore) SetDetectionContext(string, *session.DetectionContext) error     { return nil }
-func (f *fakeStore) SetGoalID(string, string) error                                  { return nil }
-func (f *fakeStore) SetEmployeeID(string, string) error                              { return nil }
+func (f *fakeStore) SetProject(string, string, string) error                     { return nil }
+func (f *fakeStore) SetWorktree(string, string, string) error                    { return nil }
+func (f *fakeStore) SetDetectionContext(string, *session.DetectionContext) error { return nil }
+func (f *fakeStore) SetGoalID(string, string) error                              { return nil }
+func (f *fakeStore) SetEmployeeID(string, string) error                          { return nil }
+
+// SetPlanMode satisfies session.Store (dsh DSH-9c added it); unused here.
+func (f *fakeStore) SetPlanMode(string, bool) error                                  { return nil }
 func (f *fakeStore) ClearMessages(string) error                                      { return nil }
 func (f *fakeStore) UpdateSessionsProjectPath(context.Context, string, string) error { return nil }
 
