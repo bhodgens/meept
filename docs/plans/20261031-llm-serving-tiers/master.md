@@ -117,6 +117,19 @@ type SemanticCacheConfig struct {
 }
 // Owner: 02-semantic-cache.md
 // Consumers: 05-e2e-llm-serving-tiers.md (config fixture)
+//
+// ADDENDUM (2026-11-08, TIER-3 audit): the Threshold default above was
+// SUPERSEDED by the R0 findings before 02 dispatched - the shipped
+// default is 0.95, NOT 0.92. Code of record:
+// internal/config/schema.go:1317-1318 (DefaultSemanticCacheThreshold =
+// 0.95) and the NormalizeSemanticCacheDefaults clamp at
+// schema.go:1331-1344; the config struct itself sits at
+// schema.go:1284-1313 with a VerifyFloor field (two-stage verifier
+// band, wiring-followups-final leaf 03) that postdates this contract:
+// a candidate scoring in [VerifyFloor, Threshold) is re-embedded and
+// direct-cosine verified (>= Threshold serves, below misses); 0
+// (default) disables the band, values at/above Threshold clamp to 0.
+// The addendum below the Open Questions section is the dated record.
 ```
 
 ### C5: SemanticCache lookup seam
@@ -375,7 +388,9 @@ must pass before COMPLETE):
 
 Statuses: PENDING | DELTA (mismatch, resolution in progress) | VALIDATED
 
-Delta log: none yet.
+Delta log: 2026-11-08 audit TIER-3/TIER-4 addendum below Open Questions
+(C4 default 0.95, VerifyFloor contract, stale manifest-note + anchor
+corrections).
 
 ## Frozen Documents
 
@@ -392,6 +407,50 @@ dated addenda. Never edit a dispatched leaf document mid-execution.
   actually DISPATCH a request and fail (empty response, provider error)
   consume depth. R0 does not need to resolve this; it is a design decision
   recorded here.
+
+## Addendum (2026-11-08, audit TIER-3/TIER-4)
+
+Dated corrections to this master; the dispatched leaves themselves stay
+frozen (Frozen Documents rule).
+
+- **C4 threshold default 0.92 -> 0.95.** R0's findings pinned 0.95 and
+  02 shipped it: `DefaultSemanticCacheThreshold = 0.95`
+  (internal/config/schema.go:1317-1318), clamped by
+  `NormalizeSemanticCacheDefaults` (schema.go:1331-1344; non-positive
+  or >= 1 threshold -> 0.95). The C4 block above carries the inline
+  note; this is the dated record.
+- **VerifyFloor joins the C4/C5 contract.** Wiring-followups-final leaf
+  03 added the two-stage verifier band AFTER this master froze: config
+  field `VerifyFloor` (schema.go:1308-1313), runtime field
+  (internal/llm/semantic_cache.go:83-90), serve-side band check at
+  semantic_cache.go:190,221. A candidate in [VerifyFloor, Threshold)
+  is re-embedded and direct-cosine compared against its stored
+  embedding; >= Threshold serves, below misses. 0 (default) disables
+  the band; negative or >= Threshold clamps to 0 at the load boundary.
+- **Stale e2e manifest note.** The manifest `note` for the
+  llm-serving-tiers suite (e2e/manifest.json:1135) still claims the
+  SetTierPolicy call site is "unwired" and that "ttft_ms assertions
+  land with leaf 04". Both claims are stale: the daemon arm landed at
+  internal/daemon/components.go:1841 (`applyTierPolicyToProviderManager`
+  via pm.SetTierPolicy, tierpolicy_wiring.go), and leaf 04 landed
+  (0827f72c) with the ttft_ms VALUE assertions remaining
+  deferred-to-fake per the leaf-05 suite header. Recorded here rather
+  than editing the manifest note in this docs-only pass.
+- **VERIFIED ANCHORS refresh (re-verified 2026-11-08).** Line numbers
+  drifted since the 2026-10-31 grep: ErrEmptyResponse sentinel rotation
+  client.go:1979 -> **client.go:2199**; cache consulted BEFORE budget
+  gate client.go:649-657 -> **client.go:790-804** (exact-key Get +
+  semantic tier behind the miss; also live on the with-progress variant
+  ~:1063-1075 and the streaming-delta variant ~:2532-2540); resolver
+  precedence comment resolver.go:616 -> **resolver.go:617** (the 660-661
+  pair the task cites is the block-precedence comment inside the
+  stickiness section); llm_calls.latency_ms store.go:260 ->
+  **store.go:261**; llama spawn entries models.json5:282,340 ->
+  **:294,:352** (the "fresh cache per call" comment it referenced was
+  REPLACED by the corrected KV-cache paragraph at ~:361-366). Unchanged
+  and still verified: token_cache.go:70 ResponseCache,
+  token_cache.go:88 coordinator, errors_overflow.go:25,
+  captureFirstDelta at client.go:2211, migration v9 at store.go:530.
 
 ## Notes
 

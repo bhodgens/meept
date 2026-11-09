@@ -8,7 +8,8 @@ summaries; the full contracts live next to the code:
 ```
 internal/llm/     -> internal/llm/AGENTS.md     (quota blocks, refusals, alias resolution,
                                                  session affinity headers, sticky rotation,
-                                                 upstream teardown)
+                                                 upstream teardown, serving-tier policy,
+                                                 semantic cache tier, TTFT)
 internal/session/ -> internal/session/AGENTS.md (lifecycle hooks, idle reaper)
 internal/daemon/  -> internal/daemon/AGENTS.md  (runtime lifecycle, spawn guards)
 internal/agent/   -> internal/agent/AGENTS.md   (chat contracts, output filters, session IDs)
@@ -321,6 +322,22 @@ alias blocks > stickiness; teardown (KV-cache erase on session archive/delete/
 idle/shutdown) is best-effort with the verified route `POST /slots/0?action=erase`
 and NEVER fails a turn, an archive, or a shutdown; cloud providers are an
 explicit no-op.
+
+### Serving tiers, semantic cache, and TTFT
+
+Full rules live in `internal/llm/AGENTS.md` (llm-serving-tiers tree).
+Short form: `llm.tiers` bounds alias-rotation depth — the `TierFloorError`
+floor consumes DEPTH only (pre-dispatch skips — quota/endpoint/alias
+blocks — never consume depth) and never reorders the frozen resolver
+precedence; degraded-tier signaling rides per-step response metadata
+(`llm_tier*` keys), never a new bus topic. The semantic cache tier
+(`llm.cache.semantic`, opt-in default false) sits strictly BEHIND the
+exact-key miss and BEFORE the budget gate on the three chat-variant
+cache paths, NEVER stores or serves a tool-call-bearing response, and
+degrades silently to exact-only on embedder failure; disabled =
+byte-identical. TTFT (`llm_calls.ttft_ms`, migration v9 via
+captureFirstDelta) is -1 when unmeasured — non-streaming, cache hits,
+and errors never write 0.
 
 ### Voice sidecar (phone channel + local leg)
 
