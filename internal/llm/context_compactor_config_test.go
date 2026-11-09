@@ -81,20 +81,9 @@ func TestCompactorNilSummarizer_DoesNotCompact(t *testing.T) {
 	}
 }
 
-func TestModelBroker_ChatterForModel_Empty(t *testing.T) {
-	// Test that ChatterForModel returns nil for unknown models on an empty broker
-	broker := NewModelBroker(BrokerConfig{
-		ProvidersConfig: &ProvidersConfig{},
-		Logger:          nil,
-	})
-	if ch := broker.ChatterForModel("nonexistent/model"); ch != nil {
-		t.Error("expected nil for unknown model")
-	}
-}
-
 func TestTypeAssertion_NonBrokerChatter(t *testing.T) {
 	// Verify the type assertion pattern used in loop.go:
-	// A regular Client should not be a ModelBroker
+	// A regular Client should not type-assert to a composite chatter wrapper.
 	defer func() {
 		if r := recover(); r != nil {
 			t.Errorf("unexpected panic: %v", r)
@@ -106,7 +95,7 @@ func TestTypeAssertion_NonBrokerChatter(t *testing.T) {
 		APIKey:  "test",
 		ModelID: "test",
 	}, WithLogger(nil))
-	if _, ok := chatter.(*ModelBroker); ok {
-		t.Error("Client should not type-assert to *ModelBroker")
+	if _, ok := chatter.(*ProviderManager); ok {
+		t.Error("Client should not type-assert to *ProviderManager")
 	}
 }

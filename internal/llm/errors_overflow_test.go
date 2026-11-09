@@ -240,13 +240,3 @@ func TestQuotaWaitChatter_OverflowPassthrough(t *testing.T) {
 		t.Fatalf("err = %v, want overflow passthrough", err)
 	}
 }
-
-// TestIsRetryableError_OverflowFalse covers the broker gate.
-func TestIsRetryableError_OverflowFalse(t *testing.T) {
-	if isRetryableError(&ContextOverflowError{StatusCode: 500}) {
-		t.Fatal("overflow must not be retryable")
-	}
-	if !isRetryableError(&APIError{StatusCode: 500}) {
-		t.Fatal("control: a plain 5xx must stay retryable")
-	}
-}
