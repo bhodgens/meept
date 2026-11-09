@@ -44,7 +44,17 @@ type PlaybackConfig struct {
 	Volume      float64
 	Rate        float64
 	AudioDevice string
+	// SampleRate is the raw PCM rate the player context opens at.
+	// oto v3 plays bytes at the context rate and parses no WAV
+	// headers, so this MUST match the source PCM rate. Zero keeps
+	// the piper default (22050); the voice local leg passes 16000
+	// (its pinned L16@16k wire format).
+	SampleRate int
 }
+
+// piperSampleRateDefault is the historical oto context rate (piper's
+// native output rate) used when SampleRate is unset.
+const piperSampleRateDefault = 22050
 
 // BehaviorConfig holds TTS behavior settings.
 type BehaviorConfig struct {

@@ -171,9 +171,14 @@ type OtoPlayer struct {
 	inner *tts.AudioPlayer
 }
 
-// NewOtoPlayer returns the oto-backed Player seam.
+// NewOtoPlayer returns the oto-backed Player seam. The context opens at
+// MicSampleRate (16 kHz): the local leg's pair sockets carry raw L16
+// s16le@16k and oto v3 plays bytes at the context rate with no WAV
+// parsing and no resampling - the old hardcoded 22050 Hz context played
+// every burst ~38% fast (chipmunk pitch, unintelligible to ears and to
+// whisper-class STT).
 func NewOtoPlayer() *OtoPlayer {
-	return &OtoPlayer{inner: tts.NewAudioPlayer(tts.PlaybackConfig{})}
+	return &OtoPlayer{inner: tts.NewAudioPlayer(tts.PlaybackConfig{SampleRate: MicSampleRate})}
 }
 
 // Play hands one burst WAV to the oto player.

@@ -1358,6 +1358,7 @@
     "max_call_minutes": 15,                 // hard cap on call length
     "silence_prompt_seconds": 45,           // silence before prompting the caller; the clock pauses while the employee turn is in flight
     "turn_timeout_seconds": 0,              // optional hard cap on one in-flight voice turn (hung LLM bound); 0 = disabled
+    "fresh_session_per_call": false,        // opt-in: each voice call opens a NEW session (no cross-call turn-history snowball); the day brief stays the only cross-call context
     "max_concurrent_calls": 2,              // concurrent voice instances; 0 = unlimited
     "reorder_window_frames": 10,            // audio reorder window (frames)
     "reorder_gap_ms": 60,                   // audio reorder gap (ms)
@@ -1378,7 +1379,7 @@
       "barge_in_rms": 3000,                 // s16 RMS threshold for local-leg barge-in
       "name": ""                            // session label; empty = hostname
     },
-    "employee_leg": [],                     // per-agent routing defaults; entry {employee, leg: "phone"|"local", tts_voice, tts_model}; beats per-leg config, beats provider default
+    "employee_leg": [],                     // per-agent routing defaults; entry {employee, leg: "phone"|"local", tts_voice, tts_model, fresh_session?}; fresh_session overrides voice.fresh_session_per_call per employee (absent = inherit); beats per-leg config, beats provider default
     "child_binary_path": "",                // empty = daemon-adjacent lookup
     "loopback_plain_addr": "",              // empty = no second listener; when set (and enabled), serves plain HTTP on this loopback addr for a TLS-terminating tunnel
   },

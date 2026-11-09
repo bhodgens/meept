@@ -20,6 +20,18 @@ func NewAudioPlayer(cfg PlaybackConfig) *AudioPlayer {
 	return &AudioPlayer{config: cfg}
 }
 
+// resolveSampleRate maps the playback config onto the oto context rate.
+// oto v3 plays raw bytes at the CONTEXT rate (no WAV parsing, no
+// resampling), so this MUST match the source PCM rate: the voice local
+// leg passes 16000 (its pinned L16@16k wire format); zero/negative keeps
+// the historical piper default.
+func resolveSampleRate(cfg PlaybackConfig) int {
+	if cfg.SampleRate <= 0 {
+		return piperSampleRateDefault
+	}
+	return cfg.SampleRate
+}
+
 // Play plays audio data (WAV/PCM) through the system audio output.
 func (p *AudioPlayer) Play(audioData []byte) error {
 	p.mu.Lock()
@@ -28,7 +40,7 @@ func (p *AudioPlayer) Play(audioData []byte) error {
 	// Initialize context if not already done
 	if p.ctx == nil {
 		ctx, ready, err := oto.NewContext(&oto.NewContextOptions{
-			SampleRate:   22050, // Piper default
+			SampleRate:   resolveSampleRate(p.config), // MUST match the source PCM rate: oto plays bytes at the context rate, no header parsing, no resampling
 			ChannelCount: 1,
 			Format:       oto.FormatSignedInt16LE,
 		})
