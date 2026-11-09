@@ -87,9 +87,9 @@ comments cite audit finding IDs (audit 2026-11-09, tree 20261109-statemachine-re
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-queue-tests | TESTS_IN_PROGRESS | 0 | dispatched 2026-11-09 (worktree) |
-| 01-mark-processing-token | PENDING | 0 | blocked on 00T |
-| 02-requeue-column-parity | PENDING | 0 | |
+| 00T-queue-tests | TESTS_VALIDATED | 1 | committed 6e73912b (--no-verify: RED-by-design bypasses U1000/compile gates per tests-first protocol) |
+| 01-mark-processing-token | IN_PROGRESS | 0 | dispatched 2026-11-09 (serialized: all queue leaves touch store.go) |
+| 02-requeue-column-parity | PENDING | 0 | first dispatch STOPPED (store.go collision with leaf 01); re-dispatch after 01 commits |
 | 03-stranded-sweeper | PENDING | 0 | blocked on 00T |
 | 04-state-check-and-immediate | PENDING | 0 | |
 

@@ -74,8 +74,8 @@ Repo conventions; `-p 2`; audit-finding citations in fix comments.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-scheduler-tests | TESTS_IN_PROGRESS | 0 | dispatched 2026-11-09 (worktree) |
-| 01-crash-window | PENDING | 0 | blocked on 00T |
+| 00T-scheduler-tests | TESTS_VALIDATED | 1 | committed 6e73912b; C-S1 restated to real entry point (delta log) |
+| 01-crash-window | PENDING | 0 | queued: 2-leaf cap busy with queue wave |
 
 ## Integration Test Plan
 

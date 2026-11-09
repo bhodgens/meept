@@ -95,6 +95,15 @@ against each branch's Test Gate matrix, commit gate tests, then parallel
 implementation dispatch, in-session review, orchestrator commit per leaf,
 integration review per branch, final merge per the isolation-worktree rule.
 
+FILE-SERIALIZATION OVERRIDES (execution errata 2026-11-09):
+- Branch 01 implementation leaves 01/02/03/04 ALL modify
+  internal/queue/store.go — they dispatch ONE AT A TIME (their A/B group
+  letters describe ordering, not parallelism).
+- Branch 03 leaves 04/06 both touch manager.go — serialize (04 before 06).
+- Branch 03 leaf 06 T6 touches employee store schemas — after leaf 05.
+- Scheduler (02) and parked-turns (04-branch) leaves share no files with
+  queue or plan leaves and may pair with one of those in any wave.
+
 - Execution runs in an isolation worktree:
   `git worktree add .hermes/worktrees/20261109-statemachine-remediation -b plan/20261109-statemachine-remediation`
 - Batch size: 2 concurrent implementation leaves (user standard cap).

@@ -666,15 +666,6 @@ func (s *Scheduler) executeJob(ctx context.Context, job Job, opts ExecutionOptio
 		return
 	}
 
-	// Advance lastWake so a post-crash catch-up window starts after this
-	// delivered tick (only for scheduled fires, not manual RunNow).
-	if explicitTick {
-		if wakeErr := s.advanceLastWake(tick); wakeErr != nil {
-			s.logger.Warn("scheduler: failed to advance last wake",
-				"job_id", jobID, "error", wakeErr)
-		}
-	}
-
 	// Mark as running
 	s.mu.Lock()
 	s.runningJobs[jobID] = true
@@ -740,6 +731,20 @@ func (s *Scheduler) executeJob(ctx context.Context, job Job, opts ExecutionOptio
 	// agent loops drain at their next iteration boundary. Failures do not
 	// rewake — let the error path schedule a retry.
 	if err == nil {
+		// M-5 (audit scheduler F5): advance the last-wake watermark ONLY
+		// after a successful delivery (Q4 default). Advancing before
+		// Execute silently removed failed/crash-interrupted ticks from
+		// the post-crash catch-up window (ProcessMissedTicks scans from
+		// lastWake). AgentJob.Execute records the pending/in_flight
+		// receipt before publishing, so an err==nil return here always
+		// has a receipt persisted at least in_flight. Manual RunNow
+		// (zero tick) never moves the watermark.
+		if explicitTick {
+			if wakeErr := s.advanceLastWake(tick); wakeErr != nil {
+				s.logger.Warn("scheduler: failed to advance last wake",
+					"job_id", jobID, "error", wakeErr)
+			}
+		}
 		s.publishRewake(jobID, job.Name())
 	}
 
