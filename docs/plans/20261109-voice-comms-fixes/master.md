@@ -104,10 +104,10 @@
 
 | Leaf | Status | Notes |
 |------|--------|-------|
-| 01 | PENDING | |
-| 02 | PENDING | |
-| 03 | PENDING | |
-| 04 | PENDING | |
+| 01 | DONE (93064b26) | |
+| 02 | DONE | | |
+| 03 | DONE | | |
+| 04 | DONE | | |
 | 05 | PENDING | |
 
 Statuses: PENDING -> IN_PROGRESS -> REVIEWED -> DONE | BLOCKED.
