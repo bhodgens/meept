@@ -87,9 +87,6 @@ func TestEveryRegisteredToolResolves(t *testing.T) {
 	check("memory_retain")
 	check("memory_recall")
 	check("memory_reflect")
-	check("retain")
-	check("recall")
-	check("reflect")
 	check("retain_claim")
 	check("list_expired_claims")
 	check("retain_decision")
@@ -144,10 +141,9 @@ func TestPinnedGrantedToolsResolve(t *testing.T) {
 		"generate_image", "generate_video",
 		"skills_create", "skills_patch",
 		"schedule_create", "schedule_list", "schedule_get", "schedule_delete",
-		"retain", "recall", "reflect",
 		"retain_claim", "retain_decision", "retain_prediction",
 		"mark_superseded", "mark_resolved",
-		"record_review", "reject_claim", "promote_claim",
+		"record_review", "reject_claim",
 		"remember", "ask",
 		// memory-vote family (daemon-registered via NewMemoryVoteTool;
 		// previously "Unknown action"-denied — tools-memory-02)
