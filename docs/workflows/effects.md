@@ -18,6 +18,24 @@ anything about whether the effect itself already ran. The ledger closes that
 gap: the claim happens before the irreversible call, so a restart can always
 tell "may not have run" from "definitely done".
 
+## Claimant
+
+Claim records a claimant (agent id + session id). `RecordReceipt`,
+`Complete`, and `Abandon` are resolves: they succeed only when the
+caller passes that same claimant. A second principal who knows the key
+cannot finish another agent's pending effect. A zero claimant is
+rejected at Claim, so two unattributed callers cannot share a row.
+Callers pass the identity they actually have — a process-wide constant
+would make the check a no-op.
+
+Pre-claimant rows (`claimant_set=0`) are unclaimed-legacy. A resolve
+against them fails closed. The first Claim adopts the row (first claim
+wins) and still returns `granted=false`, so the effect is not
+re-executed. Operator reconciliation (`meept effects reconcile`) and
+the daemon's designated adopter use the explicit admin methods
+(`CompleteAdmin`, `AbandonAdmin`, `RecordReceiptAdmin`), which skip the
+claimant check. Agent tool paths must not call those methods.
+
 ## The protocol
 
 Every wired tool wraps its external call in the `effects.Run` guard:
@@ -120,16 +138,20 @@ PRIMARY KEY` (the atomicity mechanism), with `state` (CHECK-constrained to
 the four states), `task_id`, `step_id`, `session_id`, `tool`,
 `provider_idempotent`, RFC3339Nano timestamps `claimed_at`/`executed_at`/
 `completed_at`, and `payload`/`receipt` raw-JSON TEXT columns preserved
-byte-for-byte. Index on `state` serves `ReconcilePending`.
+byte-for-byte. Claimant columns `claimant_agent_id`, `claimant_session_id`,
+and `claimant_set` record the principal; `claimant_set=0` is a
+pre-claimant legacy row. Index on `state` serves `ReconcilePending`.
 
 ## Adding a new effect tool
 
 1. Derive a stable key: pick the tool's fixed part order and call
    `effects.EffectKey(toolName, ...)` (same inputs → same key, forever).
-2. Wrap the external call in `effects.Run(ctx, ledger, key, meta, execute)`;
-   `execute` must verify the provider accepted the effect before returning
-   a non-nil receipt.
-3. Call `Complete` after a successful `Run`.
+2. Wrap the external call in `effects.Run(ctx, ledger, key, meta, who, execute)`
+   where `who` is the caller's real claimant (agent id and/or session id,
+   never a process-wide constant). `execute` must verify the provider
+   accepted the effect before returning a non-nil receipt.
+3. Call `Complete(ctx, key, who)` after a successful `Run`, with the same
+   claimant.
 4. Register a reconcile re-executor **only if** the provider accepts the
    same idempotency key (`ProviderIdempotent: true`); otherwise leave the
    record for human reconciliation.

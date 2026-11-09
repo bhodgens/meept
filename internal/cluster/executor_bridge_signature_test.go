@@ -11,8 +11,12 @@ package cluster
 // legacy accept-unsigned path.
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 )
@@ -284,5 +288,218 @@ func TestExecutorBridge_SetSigningKeyLookup_NilGuard(t *testing.T) {
 	bridge.SetSigningKeyLookup(nil)
 	if bridge.signingKeys != nil {
 		t.Fatal("nil lookup must not replace the field")
+	}
+}
+
+// TestPeerSigningKeyDistribution_SignedRemoteDispatch pins issue 105:
+// remote ed25519 signing keys move from the member registry into the
+// gossip key registry (SetPeerSigningKey's production caller), and a
+// signed cross-node dispatch from that peer verifies and executes.
+// Unsigned and unknown-origin dispatches stay rejected. A rotated key
+// keeps the previous key for the grace window so in-flight signatures
+// still verify. Key bytes must not appear in logs.
+func TestPeerSigningKeyDistribution_SignedRemoteDispatch(t *testing.T) {
+	var logBuf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	pubA, privA, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate origin key: %v", err)
+	}
+	pubB, privB, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate local key: %v", err)
+	}
+
+	dir := t.TempDir()
+	now := time.Now().UTC()
+	if err := SaveMember(dir, &Member{
+		NodeID:        "node-a",
+		NodeName:      "origin",
+		WireGuardPub:  "wg-origin",
+		SigningPub:    append([]byte(nil), pubA...),
+		Status:        "active",
+		LastHeartbeat: now,
+	}); err != nil {
+		t.Fatalf("save origin member: %v", err)
+	}
+	if err := SaveMember(dir, &Member{
+		NodeID:        "node-b",
+		NodeName:      "local",
+		WireGuardPub:  "wg-local",
+		Status:        "active",
+		LastHeartbeat: now,
+	}); err != nil {
+		t.Fatalf("save local member: %v", err)
+	}
+
+	cfg := &Config{NodeID: "node-b"}
+	cfg.setDefault()
+	cfg.Security.RequireNodeSignatures = true
+	gs := NewGitSync(cfg, cfg, dir, logger)
+	eng := NewGossipEngine(cfg, "node-b", nil, logger,
+		WithSigningKey(privB, pubB),
+		WithMembersProvider(gs),
+	)
+	// Do not call SetPeerSigningKey. Sync is the production caller.
+	eng.SyncPeerSigningKeys()
+
+	got, ok := eng.PeerSigningKey("node-a")
+	if !ok || !bytes.Equal(got, pubA) {
+		t.Fatal("remote signing key was not distributed into the gossip registry")
+	}
+	loaded, err := LoadMember(dir, "node-b")
+	if err != nil {
+		t.Fatalf("reload local member: %v", err)
+	}
+	if !bytes.Equal(loaded.SigningPub, pubB) {
+		t.Fatal("local signing key was not published into the member registry")
+	}
+
+	handler := NewGossipHandler(nil, "node-b", logger, nil)
+	eng.RegisterHandler(handler)
+	invoker := &fakeAgentInvoker{output: "ok"}
+	pub := &fakeBusPublisher{}
+	bridge := NewExecutorBridge("node-b", logger)
+	bridge.SetAgentInvoker(invoker)
+	bridge.SetBusPublisher(pub)
+	handler.SetExecutorBridge(bridge)
+	if bridge.signingKeys == nil {
+		t.Fatal("executor bridge was not wired to the gossip key registry")
+	}
+
+	job := signedJob(DispatchJob{
+		JobID:           "dist-job-1",
+		OriginNode:      "node-a",
+		TargetNode:      "node-b",
+		AgentID:         "agent-a",
+		TaskDescription: "signed remote dispatch",
+		CreatedAt:       time.Now().UnixNano(),
+	}, privA)
+	event := taskCreateEvent(job)
+	event.NodeID = job.OriginNode
+	if err := bridge.HandleTaskCreate(event); err != nil {
+		t.Fatalf("HandleTaskCreate: %v", err)
+	}
+	waitForInvoker(t, invoker, 1)
+
+	rejectInvoker := &fakeAgentInvoker{output: "nope"}
+	bridge.SetAgentInvoker(rejectInvoker)
+	unsigned := job
+	unsigned.JobID = "dist-unsigned"
+	unsigned.Signature = nil
+	unsignedEvent := taskCreateEvent(unsigned)
+	unsignedEvent.NodeID = unsigned.OriginNode
+	if err := bridge.HandleTaskCreate(unsignedEvent); err != nil {
+		t.Fatalf("unsigned HandleTaskCreate: %v", err)
+	}
+	expectNoExecution(t, rejectInvoker)
+
+	ghost := signedJob(DispatchJob{
+		JobID:           "dist-ghost",
+		OriginNode:      "node-ghost",
+		AgentID:         "agent-a",
+		TaskDescription: "unknown origin",
+		CreatedAt:       time.Now().UnixNano(),
+	}, privA)
+	ghostEvent := taskCreateEvent(ghost)
+	ghostEvent.NodeID = ghost.OriginNode
+	if err := bridge.HandleTaskCreate(ghostEvent); err != nil {
+		t.Fatalf("ghost HandleTaskCreate: %v", err)
+	}
+	expectNoExecution(t, rejectInvoker)
+
+	// Rotation: replace node-a's key. The previous key must still verify
+	// until the grace window is expired.
+	pubA2, privA2, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate rotated key: %v", err)
+	}
+	if err := SaveMember(dir, &Member{
+		NodeID:        "node-a",
+		NodeName:      "origin",
+		WireGuardPub:  "wg-origin",
+		SigningPub:    append([]byte(nil), pubA2...),
+		Status:        "active",
+		LastHeartbeat: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("save rotated member: %v", err)
+	}
+	eng.SyncPeerSigningKeys()
+	if cur, ok := eng.PeerSigningKey("node-a"); !ok || !bytes.Equal(cur, pubA2) {
+		t.Fatal("rotated signing key was not installed as current")
+	}
+
+	graceInvoker := &fakeAgentInvoker{output: "grace"}
+	bridge.SetAgentInvoker(graceInvoker)
+	oldJob := signedJob(DispatchJob{
+		JobID:           "dist-inflight",
+		OriginNode:      "node-a",
+		AgentID:         "agent-a",
+		TaskDescription: "in-flight after rotation",
+		CreatedAt:       time.Now().UnixNano(),
+	}, privA)
+	oldEvent := taskCreateEvent(oldJob)
+	oldEvent.NodeID = oldJob.OriginNode
+	if err := bridge.HandleTaskCreate(oldEvent); err != nil {
+		t.Fatalf("in-flight HandleTaskCreate: %v", err)
+	}
+	waitForInvoker(t, graceInvoker, 1)
+
+	eng.expireSigningKeyGrace("node-a")
+	afterGrace := &fakeAgentInvoker{output: "late"}
+	bridge.SetAgentInvoker(afterGrace)
+	late := signedJob(DispatchJob{
+		JobID:           "dist-after-grace",
+		OriginNode:      "node-a",
+		AgentID:         "agent-a",
+		TaskDescription: "signed with retired key",
+		CreatedAt:       time.Now().UnixNano(),
+	}, privA)
+	lateEvent := taskCreateEvent(late)
+	lateEvent.NodeID = late.OriginNode
+	if err := bridge.HandleTaskCreate(lateEvent); err != nil {
+		t.Fatalf("after-grace HandleTaskCreate: %v", err)
+	}
+	expectNoExecution(t, afterGrace)
+
+	fresh := signedJob(DispatchJob{
+		JobID:           "dist-new-key",
+		OriginNode:      "node-a",
+		AgentID:         "agent-a",
+		TaskDescription: "signed with rotated key",
+		CreatedAt:       time.Now().UnixNano(),
+	}, privA2)
+	freshInvoker := &fakeAgentInvoker{output: "new"}
+	bridge.SetAgentInvoker(freshInvoker)
+	freshEvent := taskCreateEvent(fresh)
+	freshEvent.NodeID = fresh.OriginNode
+	if err := bridge.HandleTaskCreate(freshEvent); err != nil {
+		t.Fatalf("rotated-key HandleTaskCreate: %v", err)
+	}
+	waitForInvoker(t, freshInvoker, 1)
+
+	logs := logBuf.String()
+	for _, secret := range []string{
+		base64.StdEncoding.EncodeToString(pubA),
+		base64.StdEncoding.EncodeToString(pubB),
+		base64.StdEncoding.EncodeToString(privA),
+		base64.StdEncoding.EncodeToString(privB),
+	} {
+		if strings.Contains(logs, secret) {
+			t.Fatal("signing key material was written to logs")
+		}
+	}
+}
+
+func waitForInvoker(t *testing.T, invoker *fakeAgentInvoker, want int) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for int(invoker.calls()) < want {
+		select {
+		case <-time.After(20 * time.Millisecond):
+		case <-deadline:
+			t.Fatalf("invoker calls: want %d, got %d", want, invoker.calls())
+		}
 	}
 }

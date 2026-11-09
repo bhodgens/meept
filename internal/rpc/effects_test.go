@@ -30,10 +30,15 @@ func callEffects(t *testing.T, h *EffectsRPCHandler, method, params string) (any
 	return handler(context.Background(), json.RawMessage(params))
 }
 
+// seedClaimant is the principal seedClaim records. Direct resolves in
+// these tests must pass the same claimant; the RPC handler itself uses
+// the admin override and does not.
+var seedClaimant = effects.Claimant{AgentID: "rpc-test", SessionID: "rpc-sess"}
+
 // seedClaim claims key on ledger as a granted first claim.
 func seedClaim(t *testing.T, ledger effects.Ledger, key string, meta effects.EffectMeta) {
 	t.Helper()
-	granted, _, err := ledger.Claim(context.Background(), key, meta)
+	granted, _, err := ledger.Claim(context.Background(), key, meta, seedClaimant)
 	if err != nil {
 		t.Fatalf("seed claim %s: %v", key, err)
 	}
@@ -79,7 +84,7 @@ func TestEffectsRPC(t *testing.T) {
 		seedClaim(t, ledger, "old", oldMeta)
 		time.Sleep(2 * time.Millisecond)
 		seedClaim(t, ledger, "new", newMeta)
-		if err := ledger.Complete(context.Background(), "old"); err != nil {
+		if err := ledger.Complete(context.Background(), "old", seedClaimant); err != nil {
 			t.Fatalf("complete old: %v", err)
 		}
 
@@ -125,7 +130,7 @@ func TestEffectsRPC(t *testing.T) {
 		seedClaim(t, ledger, "k1", effects.EffectMeta{Tool: "push.notify"})
 		time.Sleep(2 * time.Millisecond)
 		seedClaim(t, ledger, "k2", effects.EffectMeta{Tool: "push.notify"})
-		if err := ledger.Complete(context.Background(), "k1"); err != nil {
+		if err := ledger.Complete(context.Background(), "k1", seedClaimant); err != nil {
 			t.Fatalf("complete k1: %v", err)
 		}
 
@@ -179,7 +184,7 @@ func TestEffectsRPC(t *testing.T) {
 	t.Run("reconcile complete with receipt over receipted refused", func(t *testing.T) {
 		ledger := effects.NewMemoryLedger()
 		seedClaim(t, ledger, "k", effects.EffectMeta{Tool: "push.notify"})
-		if err := ledger.RecordReceipt(context.Background(), "k", json.RawMessage(`{"v":1}`)); err != nil {
+		if err := ledger.RecordReceipt(context.Background(), "k", seedClaimant, json.RawMessage(`{"v":1}`)); err != nil {
 			t.Fatalf("seed receipt: %v", err)
 		}
 

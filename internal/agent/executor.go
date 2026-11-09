@@ -1604,6 +1604,18 @@ func (e *Executor) executeToolWithRetry(ctx context.Context, tool tools.Tool, co
 			defer cancel()
 		}
 	}
+	// Group network class (issue 71): stamp the resolved class onto the
+	// tool context before launch. Empty stays unrestricted (legacy).
+	// Read under the executor lock; do not hold it across Execute.
+	e.mu.RLock()
+	netClass := ""
+	if e.groupResolution != nil {
+		netClass = e.groupResolution.NetworkClass
+	}
+	e.mu.RUnlock()
+	if netClass != "" {
+		execCtx = tools.ContextWithNetworkClass(execCtx, netClass)
+	}
 	// dispatchToolBody runs one attempt (streaming when available) under the
 	// derived deadline and substitutes the structured TOOL_TIMEOUT error ONLY
 	// when THIS tool's own timer fired — turn-level cancellation from the

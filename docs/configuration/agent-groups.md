@@ -34,7 +34,7 @@ fallback uses the same keys. Related files:
 | `tools_denied` | array of string | `[]` | Registered tool names revoked. Deny beats allow. |
 | `memory_max_scope` | string | `""` | Memory retrieval ceiling: `""` (unrestricted), `project`, `user`, `global`. Narrowest wins across groups. DECLARED ONLY: retrieval-side enforcement is not wired yet (plan leaf 05 blocked); see the workflow doc. |
 | `fs_roots` | array of string | `[]` | Additional path-fence roots for members (additive: allowed inside any listed root). |
-| `network_class` | string | `""` | `""`/`unrestricted`, `allowlist`, or `none`. Most restrictive wins. Declared/resolved only today. |
+| `network_class` | string | `""` | `""`/`unrestricted`, `allowlist` (alias `domain-allowlist`), or `none`. Most restrictive wins. Enforced at local shell launch: restrictive classes confine egress. |
 | `allowed_models` | array of string | `[]` | Model aliases; empty = unrestricted. Intersection across constraining groups. Declared/resolved only today. |
 
 ## security.groups.bindings[]

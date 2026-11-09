@@ -100,7 +100,9 @@ func (r *EffectsReconciler) Reconcile(ctx context.Context) ReconcileCounts {
 // DESIGNATED ADOPTER of pending records: effects.Run cannot be used here
 // because its Claim is INSERT-only — re-claiming an existing key is
 // refused as "owned by another caller" (leaf 01 single-owner invariant).
-// The pinned state machine is driven directly instead:
+// The pinned state machine is driven directly, through the admin override
+// (the reconciler is not the claiming agent; a normal Complete would be
+// a claimant mismatch):
 //
 //	claimed  -> execute -> RecordReceipt(new receipt) -> Complete
 //	receipted-> execute (re-verify) ----------------------> Complete
@@ -127,7 +129,7 @@ func (r *EffectsReconciler) retryOne(ctx context.Context, rec effects.EffectReco
 
 	switch rec.State {
 	case effects.StateClaimed:
-		if err := r.ledger.RecordReceipt(ctx, rec.Key, newReceipt); err != nil {
+		if err := r.ledger.RecordReceiptAdmin(ctx, rec.Key, newReceipt); err != nil {
 			r.logger.Warn("effect reconcile record-receipt failed",
 				"key", rec.Key,
 				"tool", rec.Tool,
@@ -146,7 +148,7 @@ func (r *EffectsReconciler) retryOne(ctx context.Context, rec effects.EffectReco
 		return false
 	}
 
-	if err := r.ledger.Complete(ctx, rec.Key); err != nil {
+	if err := r.ledger.CompleteAdmin(ctx, rec.Key); err != nil {
 		r.logger.Warn("effect reconcile complete failed",
 			"key", rec.Key,
 			"tool", rec.Tool,

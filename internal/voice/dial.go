@@ -90,12 +90,13 @@ type AuditWriter interface {
 
 // EffectsLedger is the narrow internal/effects seam (C9). Satisfied
 // structurally by effects.MemoryLedger, effects.SQLiteLedger, and the
-// gate-test capture wrapper.
+// gate-test capture wrapper. Claim records the employee claimant;
+// later resolves must pass the same claimant.
 type EffectsLedger interface {
-	Claim(ctx context.Context, key string, meta effects.EffectMeta) (bool, *effects.EffectRecord, error)
-	RecordReceipt(ctx context.Context, key string, receipt json.RawMessage) error
-	Complete(ctx context.Context, key string) error
-	Abandon(ctx context.Context, key string, reason string) error
+	Claim(ctx context.Context, key string, meta effects.EffectMeta, who effects.Claimant) (bool, *effects.EffectRecord, error)
+	RecordReceipt(ctx context.Context, key string, who effects.Claimant, receipt json.RawMessage) error
+	Complete(ctx context.Context, key string, who effects.Claimant) error
+	Abandon(ctx context.Context, key string, who effects.Claimant, reason string) error
 }
 
 // DialController is the dial-facing seam: telnyx.CallController plus
@@ -250,11 +251,12 @@ func (d *Dialer) Dial(ctx context.Context, req DialRequest) (DialResult, error) 
 	if err != nil {
 		return DialResult{}, fmt.Errorf("voice: dial: encode effect payload: %w", err)
 	}
+	who := effects.Claimant{AgentID: req.EmployeeID}
 	granted, prior, err := d.fx.Claim(ctx, key, effects.EffectMeta{
 		Tool:      "voice.dial_out",
 		SessionID: req.EmployeeID,
 		Payload:   payload,
-	})
+	}, who)
 	if err != nil {
 		return DialResult{}, fmt.Errorf("voice: dial: effect claim: %w", err)
 	}
@@ -270,7 +272,7 @@ func (d *Dialer) Dial(ctx context.Context, req DialRequest) (DialResult, error) 
 	for _, inst := range d.reg.Live() {
 		if NormalizeE164(inst.Target) == target {
 			gateErr := fmt.Errorf("%w: %s", ErrDuplicateTarget, target)
-			d.abandonEffect(ctx, key, gateErr)
+			d.abandonEffect(ctx, key, who, gateErr)
 			return DialResult{}, gateErr
 		}
 	}
@@ -282,19 +284,19 @@ func (d *Dialer) Dial(ctx context.Context, req DialRequest) (DialResult, error) 
 		}
 	}
 	if !allowed {
-		d.abandonEffect(ctx, key, ErrNumberNotAllowed)
+		d.abandonEffect(ctx, key, who, ErrNumberNotAllowed)
 		return DialResult{}, fmt.Errorf("%w: %q", ErrNumberNotAllowed, req.Target)
 	}
 	if d.cfg.PublicStreamURL == "" {
-		d.abandonEffect(ctx, key, ErrNoPublicURL)
+		d.abandonEffect(ctx, key, who, ErrNoPublicURL)
 		return DialResult{}, ErrNoPublicURL
 	}
 	if d.cfg.ConnectionID == "" {
-		d.abandonEffect(ctx, key, ErrNoConnectionID)
+		d.abandonEffect(ctx, key, who, ErrNoConnectionID)
 		return DialResult{}, ErrNoConnectionID
 	}
 	if gateErr := d.registryGate(target, req.EmployeeID); gateErr != nil {
-		d.abandonEffect(ctx, key, gateErr)
+		d.abandonEffect(ctx, key, who, gateErr)
 		return DialResult{}, gateErr
 	}
 
@@ -306,14 +308,14 @@ func (d *Dialer) Dial(ctx context.Context, req DialRequest) (DialResult, error) 
 		if err == nil {
 			err = errors.New("telnyx dial out returned an empty call_control_id")
 		}
-		d.abandonEffect(ctx, key, err)
+		d.abandonEffect(ctx, key, who, err)
 		return DialResult{}, fmt.Errorf("voice: dial: %w", err)
 	}
 
 	// -- 6. TrackOutbound + registry Acquire --
 	if d.mgr != nil {
 		if err := d.mgr.TrackOutbound(ccid); err != nil {
-			d.abandonEffect(ctx, key, err)
+			d.abandonEffect(ctx, key, who, err)
 			return DialResult{}, fmt.Errorf("voice: dial: track outbound: %w", err)
 		}
 	}
@@ -324,7 +326,7 @@ func (d *Dialer) Dial(ctx context.Context, req DialRequest) (DialResult, error) 
 	if _, err := d.reg.Acquire(ccid, req.EmployeeID, target); err != nil {
 		// Lost a race between the gate and the acquire: never leave the
 		// leg ringing untracked - hang up, abandon, release.
-		d.abandonEffect(ctx, key, err)
+		d.abandonEffect(ctx, key, who, err)
 		d.finishCall(ccid)
 		if hErr := d.tel.HangupCall(ctx, ccid); hErr != nil {
 			d.logger.Error("voice: dial: hangup after acquire failure", "ccid", ccid, "err", hErr)
@@ -341,10 +343,10 @@ func (d *Dialer) Dial(ctx context.Context, req DialRequest) (DialResult, error) 
 	// A later retry of this request_id returns this ccid without dialing. --
 	receipt, err := json.Marshal(dialReceipt{CallControlID: ccid})
 	if err == nil {
-		err = d.fx.RecordReceipt(ctx, key, receipt)
+		err = d.fx.RecordReceipt(ctx, key, who, receipt)
 	}
 	if err == nil {
-		err = d.fx.Complete(ctx, key)
+		err = d.fx.Complete(ctx, key, who)
 	}
 	if err != nil {
 		// The ring happened; the ledger row is stuck but the call is live.
@@ -445,8 +447,8 @@ func (d *Dialer) registryCap() int { return d.reg.Cap() }
 
 // abandonEffect marks a claimed effect dead (refused/failed dial: the ring
 // never happened), so ReconcilePending finds no leaked reservation.
-func (d *Dialer) abandonEffect(ctx context.Context, key string, cause error) {
-	if err := d.fx.Abandon(ctx, key, fmt.Sprintf("dial refused or failed: %v", cause)); err != nil {
+func (d *Dialer) abandonEffect(ctx context.Context, key string, who effects.Claimant, cause error) {
+	if err := d.fx.Abandon(ctx, key, who, fmt.Sprintf("dial refused or failed: %v", cause)); err != nil {
 		d.logger.Error("voice: dial: abandon effect", "key", key, "err", err)
 	}
 }

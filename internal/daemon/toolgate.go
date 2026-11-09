@@ -286,11 +286,15 @@ func (g *ExecGateImpl) reserve(ctx context.Context, name string, args map[string
 	if perr != nil {
 		payload = nil
 	}
+	who := effects.Claimant{
+		AgentID:   tools.AgentIDFromContext(ctx),
+		SessionID: tools.SessionIDFromContext(ctx),
+	}
 	granted, _, err := g.cfg.Ledger.Claim(ctx, key, effects.EffectMeta{
 		Tool:               name,
 		Payload:            payload,
 		ProviderIdempotent: false,
-	})
+	}, who)
 	if err != nil {
 		// Fail closed: a ledger that cannot record the claim must not
 		// wave the mutating effect through.
@@ -325,11 +329,15 @@ func (g *ExecGateImpl) AfterExecute(ctx context.Context, tool tools.Tool, args m
 	// responsible for nothing here; the gate owns the reservation.
 	if g.cfg.Ledger != nil {
 		key := effectsGateKey(name, args)
+		who := effects.Claimant{
+			AgentID:   tools.AgentIDFromContext(ctx),
+			SessionID: tools.SessionIDFromContext(ctx),
+		}
 		if outcome == "success" {
 			receipt, rerr := json.Marshal(map[string]any{"outcome": outcome})
 			if rerr == nil {
-				if rerr = g.cfg.Ledger.RecordReceipt(ctx, key, receipt); rerr == nil {
-					if cerr := g.cfg.Ledger.Complete(ctx, key); cerr != nil {
+				if rerr = g.cfg.Ledger.RecordReceipt(ctx, key, who, receipt); rerr == nil {
+					if cerr := g.cfg.Ledger.Complete(ctx, key, who); cerr != nil {
 						g.logger.Warn("tool gate: effects complete failed",
 							"tool", name, "error", cerr)
 					}
@@ -338,7 +346,7 @@ func (g *ExecGateImpl) AfterExecute(ctx context.Context, tool tools.Tool, args m
 						"tool", name, "error", rerr)
 				}
 			}
-		} else if aerr := g.cfg.Ledger.Abandon(ctx, key, outcome+": "+gateErrText(err, res)); aerr != nil {
+		} else if aerr := g.cfg.Ledger.Abandon(ctx, key, who, outcome+": "+gateErrText(err, res)); aerr != nil {
 			// Abandon errors are logged, never fatal: the reconcile sweep
 			// still finds the stuck claimed record.
 			g.logger.Warn("tool gate: effects abandon failed",

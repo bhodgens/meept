@@ -25,11 +25,22 @@ func NewMemoryLedger() *MemoryLedger {
 
 // Claim implements Ledger. Insert-under-lock is the atomicity mechanism:
 // the map membership check and insert happen in one critical section, so
-// concurrent claims of the same key yield exactly one grant.
-func (m *MemoryLedger) Claim(ctx context.Context, key string, meta EffectMeta) (bool, *EffectRecord, error) {
+// concurrent claims of the same key yield exactly one grant. A legacy row
+// (no claimant) is adopted by the first non-zero claimant and returned
+// as a denied prior — the effect must not be re-executed.
+func (m *MemoryLedger) Claim(ctx context.Context, key string, meta EffectMeta, who Claimant) (bool, *EffectRecord, error) {
+	if who.Zero() {
+		return false, nil, fmt.Errorf("effects: claim %s: %w", key, ErrClaimantRequired)
+	}
 	m.mu.Lock()
 	if prior, ok := m.records[key]; ok {
-		priorCopy := copyRecord(prior)
+		if !prior.ClaimantSet {
+			prior.ClaimantAgentID = who.AgentID
+			prior.ClaimantSessionID = who.SessionID
+			prior.ClaimantSet = true
+			m.records[key] = prior
+		}
+		priorCopy := copyRecord(m.records[key])
 		m.mu.Unlock()
 		return false, &priorCopy, nil
 	}
@@ -44,21 +55,35 @@ func (m *MemoryLedger) Claim(ctx context.Context, key string, meta EffectMeta) (
 		ProviderIdempotent: meta.ProviderIdempotent,
 		ClaimedAt:          now,
 		Payload:            copyRaw(meta.Payload),
+		ClaimantAgentID:    who.AgentID,
+		ClaimantSessionID:  who.SessionID,
+		ClaimantSet:        true,
 	}
 	m.mu.Unlock()
 	return true, nil, nil
 }
 
-// RecordReceipt implements Ledger: claimed -> receipted.
-func (m *MemoryLedger) RecordReceipt(ctx context.Context, key string, receipt json.RawMessage) error {
+// RecordReceipt implements Ledger: claimed -> receipted, claimant must match.
+func (m *MemoryLedger) RecordReceipt(ctx context.Context, key string, who Claimant, receipt json.RawMessage) error {
+	return m.recordReceipt(key, who, false, receipt)
+}
+
+// RecordReceiptAdmin implements Ledger. Operator override; skips the claimant check.
+func (m *MemoryLedger) RecordReceiptAdmin(ctx context.Context, key string, receipt json.RawMessage) error {
+	return m.recordReceipt(key, Claimant{}, true, receipt)
+}
+
+func (m *MemoryLedger) recordReceipt(key string, who Claimant, admin bool, receipt json.RawMessage) error {
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	rec, ok := m.records[key]
 	if !ok {
-		m.mu.Unlock()
 		return fmt.Errorf("effects: key %s: %w", key, ErrUnknownKey)
 	}
+	if err := authorizeUnlessAdmin(&rec, who, admin); err != nil {
+		return err
+	}
 	if err := validateTransition(rec.State, "record_receipt"); err != nil {
-		m.mu.Unlock()
 		return err
 	}
 	now := time.Now().UTC()
@@ -66,21 +91,31 @@ func (m *MemoryLedger) RecordReceipt(ctx context.Context, key string, receipt js
 	rec.ExecutedAt = &now
 	rec.Receipt = copyRaw(receipt)
 	m.records[key] = rec
-	m.mu.Unlock()
 	return nil
 }
 
 // Complete implements Ledger: claimed/receipted -> completed; idempotent
-// on completed.
-func (m *MemoryLedger) Complete(ctx context.Context, key string) error {
+// on completed for the owning claimant.
+func (m *MemoryLedger) Complete(ctx context.Context, key string, who Claimant) error {
+	return m.complete(key, who, false)
+}
+
+// CompleteAdmin implements Ledger. Operator override; skips the claimant check.
+func (m *MemoryLedger) CompleteAdmin(ctx context.Context, key string) error {
+	return m.complete(key, Claimant{}, true)
+}
+
+func (m *MemoryLedger) complete(key string, who Claimant, admin bool) error {
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	rec, ok := m.records[key]
 	if !ok {
-		m.mu.Unlock()
 		return fmt.Errorf("effects: key %s: %w", key, ErrUnknownKey)
 	}
+	if err := authorizeUnlessAdmin(&rec, who, admin); err != nil {
+		return err
+	}
 	if err := validateTransition(rec.State, "complete"); err != nil {
-		m.mu.Unlock()
 		return err
 	}
 	if rec.State != StateCompleted {
@@ -89,27 +124,43 @@ func (m *MemoryLedger) Complete(ctx context.Context, key string) error {
 		rec.CompletedAt = &now
 		m.records[key] = rec
 	}
-	m.mu.Unlock()
 	return nil
 }
 
 // Abandon implements Ledger: claimed/receipted -> abandoned.
-func (m *MemoryLedger) Abandon(ctx context.Context, key string, reason string) error {
+func (m *MemoryLedger) Abandon(ctx context.Context, key string, who Claimant, reason string) error {
+	return m.abandon(key, who, false, reason)
+}
+
+// AbandonAdmin implements Ledger. Operator override; skips the claimant check.
+func (m *MemoryLedger) AbandonAdmin(ctx context.Context, key string, reason string) error {
+	return m.abandon(key, Claimant{}, true, reason)
+}
+
+func (m *MemoryLedger) abandon(key string, who Claimant, admin bool, reason string) error {
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	rec, ok := m.records[key]
 	if !ok {
-		m.mu.Unlock()
 		return fmt.Errorf("effects: key %s: %w", key, ErrUnknownKey)
 	}
+	if err := authorizeUnlessAdmin(&rec, who, admin); err != nil {
+		return err
+	}
 	if err := validateTransition(rec.State, "abandon"); err != nil {
-		m.mu.Unlock()
 		return err
 	}
 	rec.State = StateAbandoned
 	rec.AbandonReason = reason
 	m.records[key] = rec
-	m.mu.Unlock()
 	return nil
+}
+
+func authorizeUnlessAdmin(rec *EffectRecord, who Claimant, admin bool) error {
+	if admin {
+		return nil
+	}
+	return authorizeResolve(rec, who)
 }
 
 // ReconcilePending implements Ledger: records in state claimed or

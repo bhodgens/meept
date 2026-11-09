@@ -112,6 +112,21 @@ func TestResolve_Matrix(t *testing.T) {
 			wantManaged: true,
 		},
 		{
+			name:      "domain-allowlist is the issue-71 alias of allowlist",
+			specTools: []string{"file_read"},
+			agentID:   "a6b",
+			policies: []Policy{
+				{Name: "open", NetworkClass: "unrestricted"},
+				{Name: "listed", NetworkClass: "domain-allowlist"},
+			},
+			bindings: []Binding{
+				{Subject: "agent:a6b", Policy: "open"},
+				{Subject: "agent:a6b", Policy: "listed"},
+			},
+			wantNetwork: "domain-allowlist",
+			wantManaged: true,
+		},
+		{
 			name:      "fs_roots union across policies",
 			specTools: []string{"file_read"},
 			agentID:   "a7",

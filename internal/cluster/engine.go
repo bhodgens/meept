@@ -278,6 +278,38 @@ generate:
 	return nil
 }
 
+// loadOrCreateNodeSigningKey reads an ed25519 key pair from dir, or
+// generates and persists one (private key mode 0600). dir must not be the
+// git membership repo — `git add .` would commit the private key. Key
+// bytes are never logged.
+func loadOrCreateNodeSigningKey(dir string) (ed25519.PublicKey, ed25519.PrivateKey, error) {
+	if dir == "" {
+		return nil, nil, fmt.Errorf("engine: empty signing key dir")
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, nil, fmt.Errorf("engine: create signing key dir: %w", err)
+	}
+	privPath := filepath.Join(dir, "signing_priv.ed25519")
+	pubPath := filepath.Join(dir, "signing_pub.ed25519")
+
+	if privData, err := os.ReadFile(privPath); err == nil && len(privData) == ed25519.PrivateKeySize {
+		priv := ed25519.PrivateKey(privData)
+		return priv.Public().(ed25519.PublicKey), priv, nil
+	}
+
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, nil, fmt.Errorf("engine: generate signing key: %w", err)
+	}
+	if err := os.WriteFile(privPath, priv, 0o600); err != nil {
+		return nil, nil, fmt.Errorf("engine: write private key: %w", err)
+	}
+	if err := os.WriteFile(pubPath, pub, 0o600); err != nil {
+		return nil, nil, fmt.Errorf("engine: write public key: %w", err)
+	}
+	return pub, priv, nil
+}
+
 // nodeIDFromPub derives a deterministic node ID from an ed25519 public key.
 func nodeIDFromPub(pub ed25519.PublicKey) string {
 	return fmt.Sprintf("node-%08x", xxhash.Sum64(pub))

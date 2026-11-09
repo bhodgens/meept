@@ -757,11 +757,11 @@ func (c *Client) buildChatRequest(messages []ChatMessage, cfg *ModelConfig, opts
 		applyOpenAICompatReasoning(payload, cfg, chatOpts.reasoning, nil)
 	}
 
-	// Thread LoRA adapter path through to providers that support it.
-	// Providers without adapter support silently ignore this key.
-	if chatOpts.adapterPath != "" {
-		payload["adapter_path"] = chatOpts.adapterPath
-	}
+	// Call the runtime apply path. mlx_lm.server loads adapter weights only
+	// when the body carries "adapters" (see applyRuntimeLoRA). "adapter_path"
+	// is not read by that server or by llama-server, so sending it does not
+	// apply weights.
+	stampRuntimeAdapter(payload, chatOpts.adapterPath)
 
 	c.attachToolGrammar(payload, cfg, chatOpts)
 	attachRawGrammar(payload, cfg, chatOpts)
@@ -1616,10 +1616,10 @@ func WithSystemBlocks(blocks []SystemPromptBlock) ChatOption {
 	}
 }
 
-// WithAdapter sets the LoRA adapter path to use for this request. The
-// path is passed through to providers that support adapter selection
-// (e.g. a local LFM inference server). Providers that do not support
-// adapters silently ignore it.
+// WithAdapter sets the LoRA adapter directory for this request. The
+// OpenAI-compatible client stamps it as the "adapters" field mlx_lm.server
+// applies (load_adapters → model.load_weights). Providers that do not
+// read that field ignore it.
 func WithAdapter(path string) ChatOption {
 	return func(o *chatOptions) {
 		o.adapterPath = path

@@ -54,7 +54,7 @@ func TestEffectsLedger_ExactlyOnceAcrossRestart(t *testing.T) {
 	receipt, reused, err := effects.Run(ctx, l1, key, effects.EffectMeta{
 		Tool: "git_backup", SessionID: "session-e2e",
 		Payload: json.RawMessage(`{"remote":"backup"}`),
-	}, func(_ context.Context) (json.RawMessage, error) {
+	}, effects.Claimant{AgentID: "e2e", SessionID: "session-e2e"}, func(_ context.Context) (json.RawMessage, error) {
 		executions.n++
 		return json.Marshal(map[string]any{"pushed": true})
 	})
@@ -70,7 +70,7 @@ func TestEffectsLedger_ExactlyOnceAcrossRestart(t *testing.T) {
 	if receipt == nil {
 		t.Fatal("generation 1 returned nil receipt")
 	}
-	if err := l1.Complete(ctx, key); err != nil {
+	if err := l1.Complete(ctx, key, effects.Claimant{AgentID: "e2e", SessionID: "session-e2e"}); err != nil {
 		t.Fatalf("generation 1 complete: %v", err)
 	}
 	if err := l1.Close(); err != nil {
@@ -83,7 +83,7 @@ func TestEffectsLedger_ExactlyOnceAcrossRestart(t *testing.T) {
 	var exec2 int32Var
 	receipt2, reused2, err := effects.Run(ctx, l2, key, effects.EffectMeta{
 		Tool: "git_backup", SessionID: "session-e2e",
-	}, func(_ context.Context) (json.RawMessage, error) {
+	}, effects.Claimant{AgentID: "e2e", SessionID: "session-e2e"}, func(_ context.Context) (json.RawMessage, error) {
 		exec2.n++
 		return json.Marshal(map[string]any{"pushed": true, "again": true})
 	})
@@ -121,42 +121,42 @@ func TestEffectsLedger_StateMachineRejectsIllegalTransitions(t *testing.T) {
 
 	// Complete-then-Abandon is the pinned illegal transition.
 	key := effects.EffectKey("push", "s", "1")
-	if _, _, err := l.Claim(ctx, key, effects.EffectMeta{Tool: "t"}); err != nil {
+	if _, _, err := l.Claim(ctx, key, effects.EffectMeta{Tool: "t"}, effects.Claimant{AgentID: "e2e", SessionID: "session-e2e"}); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	if err := l.RecordReceipt(ctx, key, json.RawMessage(`{"ok":true}`)); err != nil {
+	if err := l.RecordReceipt(ctx, key, effects.Claimant{AgentID: "e2e", SessionID: "session-e2e"}, json.RawMessage(`{"ok":true}`)); err != nil {
 		t.Fatalf("receipt: %v", err)
 	}
-	if err := l.Complete(ctx, key); err != nil {
+	if err := l.Complete(ctx, key, effects.Claimant{AgentID: "e2e", SessionID: "session-e2e"}); err != nil {
 		t.Fatalf("complete: %v", err)
 	}
-	err := l.Abandon(ctx, key, "operator changed their mind")
+	err := l.Abandon(ctx, key, effects.Claimant{AgentID: "e2e", SessionID: "session-e2e"}, "operator changed their mind")
 	if !errors.Is(err, effects.ErrInvalidTransition) {
 		t.Fatalf("abandon of completed = %v, want ErrInvalidTransition", err)
 	}
 
 	// Idempotent re-complete of a completed key is legal.
-	if err := l.Complete(ctx, key); err != nil {
+	if err := l.Complete(ctx, key, effects.Claimant{AgentID: "e2e", SessionID: "session-e2e"}); err != nil {
 		t.Fatalf("idempotent re-complete: %v", err)
 	}
 
 	// A receipted record cannot be receipted again.
 	key2 := effects.EffectKey("push", "s", "2")
-	if _, _, err := l.Claim(ctx, key2, effects.EffectMeta{Tool: "t"}); err != nil {
+	if _, _, err := l.Claim(ctx, key2, effects.EffectMeta{Tool: "t"}, effects.Claimant{AgentID: "e2e", SessionID: "session-e2e"}); err != nil {
 		t.Fatalf("claim 2: %v", err)
 	}
-	if err := l.RecordReceipt(ctx, key2, json.RawMessage(`{"ok":true}`)); err != nil {
+	if err := l.RecordReceipt(ctx, key2, effects.Claimant{AgentID: "e2e", SessionID: "session-e2e"}, json.RawMessage(`{"ok":true}`)); err != nil {
 		t.Fatalf("receipt 2: %v", err)
 	}
-	if err := l.RecordReceipt(ctx, key2, json.RawMessage(`{"ok":true,"again":true}`)); !errors.Is(err, effects.ErrInvalidTransition) {
+	if err := l.RecordReceipt(ctx, key2, effects.Claimant{AgentID: "e2e", SessionID: "session-e2e"}, json.RawMessage(`{"ok":true,"again":true}`)); !errors.Is(err, effects.ErrInvalidTransition) {
 		t.Fatalf("double receipt = %v, want ErrInvalidTransition", err)
 	}
 
 	// Abandoned is dead: nothing more may transition it.
-	if err := l.Abandon(ctx, key2, "done"); err != nil {
+	if err := l.Abandon(ctx, key2, effects.Claimant{AgentID: "e2e", SessionID: "session-e2e"}, "done"); err != nil {
 		t.Fatalf("abandon receipted: %v", err)
 	}
-	if err := l.Complete(ctx, key2); !errors.Is(err, effects.ErrInvalidTransition) {
+	if err := l.Complete(ctx, key2, effects.Claimant{AgentID: "e2e", SessionID: "session-e2e"}); !errors.Is(err, effects.ErrInvalidTransition) {
 		t.Fatalf("complete abandoned = %v, want ErrInvalidTransition", err)
 	}
 
@@ -177,7 +177,7 @@ func TestEffectsLedger_StateMachineRejectsIllegalTransitions(t *testing.T) {
 
 	// A crash-window record (claimed, never completed) IS reconcilable.
 	stuckKey := effects.EffectKey("push", "s", "crash")
-	if _, _, err := l.Claim(ctx, stuckKey, effects.EffectMeta{Tool: "t"}); err != nil {
+	if _, _, err := l.Claim(ctx, stuckKey, effects.EffectMeta{Tool: "t"}, effects.Claimant{AgentID: "e2e", SessionID: "session-e2e"}); err != nil {
 		t.Fatalf("claim stuck: %v", err)
 	}
 	pending, err = l.ReconcilePending(ctx)

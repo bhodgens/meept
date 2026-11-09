@@ -8780,6 +8780,7 @@ func (l *AgentLoop) executeToolCallsUngated(ctx context.Context, toolCalls []llm
 	// an empty value stores nothing and the reader behaves exactly as
 	// before this injection — empty stays the no-session posture.
 	ctx = tools.ContextWithSessionID(ctx, l.SessionID())
+	ctx = tools.ContextWithAgentID(ctx, l.agentID)
 
 	// Memory-scope identity (leaf 03-agent-recall-wiring T3): the memory
 	// tools stamp writes and filter reads with the SAME resolved B1 tuple

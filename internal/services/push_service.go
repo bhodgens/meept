@@ -275,11 +275,12 @@ func (s *PushService) Push(ctx context.Context, req *PushRequest) (*PushResult, 
 		return nil, wrapError("push", "Push", err)
 	}
 
+	who := effects.Claimant{AgentID: req.Source}
 	receipt, reused, err := effects.Run(ctx, s.effects, key, effects.EffectMeta{
 		Tool:               "push.notify",
 		ProviderIdempotent: false,
 		Payload:            reqPayload,
-	}, func(ctx context.Context) (json.RawMessage, error) {
+	}, who, func(ctx context.Context) (json.RawMessage, error) {
 		result, pubErr := s.publishToSessions(ctx, req, msgID, payloadBytes)
 		if pubErr != nil {
 			return nil, pubErr
@@ -311,7 +312,7 @@ func (s *PushService) Push(ctx context.Context, req *PushRequest) (*PushResult, 
 	}
 
 	// This caller executed the effect: write the completion marker.
-	if err := s.effects.Complete(ctx, key); err != nil {
+	if err := s.effects.Complete(ctx, key, who); err != nil {
 		return nil, wrapError("push", "Push", fmt.Errorf("effects complete %s: %w", key, err))
 	}
 

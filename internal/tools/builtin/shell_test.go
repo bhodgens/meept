@@ -5,7 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -14,8 +17,10 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/runtime"
 	"github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/internal/tools"
+	pkgsecurity "github.com/caimlas/meept/pkg/security"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -803,4 +808,82 @@ func TestShellSpillFailure(t *testing.T) {
 		`truncated, ` + strconv.Itoa(truncationGateTotal) + ` bytes total; first \d+ bytes omitted\)`)
 	assert.Regexp(t, noteRe, sr.Stdout,
 		"spill-failure note must state total + omitted bytes without a path")
+}
+
+// TestShellExecuteTool_NetworkClassDeniesLocalEgress pins issue 71: a
+// restrictive network class is applied before local backend.Execute, and
+// the child cannot egress. Empty and unrestricted stay open. Removing the
+// class stamp (or ApplyNetworkClass) makes the restrictive cases print
+// "connected".
+func TestShellExecuteTool_NetworkClassDeniesLocalEgress(t *testing.T) {
+	curl, err := exec.LookPath("curl")
+	if err != nil {
+		t.Fatal("curl is required to pin network-class egress")
+	}
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if _, werr := w.Write([]byte("ok")); werr != nil {
+			return
+		}
+	})}
+	go func() {
+		if serveErr := srv.Serve(ln); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+			return
+		}
+	}()
+	t.Cleanup(func() {
+		if closeErr := srv.Close(); closeErr != nil {
+			t.Logf("close probe listener: %v", closeErr)
+		}
+	})
+
+	port := ln.Addr().(*net.TCPAddr).Port
+	probe := fmt.Sprintf("%s -fsS --max-time 2 http://127.0.0.1:%d/ && echo connected", curl, port)
+
+	tool := NewShellExecuteTool(t.TempDir(), 8*time.Second, nil)
+	tool.SetBackend(runtime.NewLocalBackend(runtime.Config{}, nil))
+
+	run := func(t *testing.T, ctx context.Context) (ShellResult, error) {
+		t.Helper()
+		result, err := tool.Execute(ctx, map[string]any{"command": probe})
+		if err != nil {
+			return ShellResult{}, err
+		}
+		return unwrapShellResult(t, result), nil
+	}
+
+	t.Run("unrestricted connects", func(t *testing.T) {
+		sr, err := run(t, tools.ContextWithNetworkClass(context.Background(), "unrestricted"))
+		require.NoError(t, err)
+		assert.Contains(t, sr.Stdout, "connected", "unrestricted class must not confine egress; stdout=%q stderr=%q", sr.Stdout, sr.Stderr)
+	})
+
+	t.Run("empty class connects", func(t *testing.T) {
+		sr, err := run(t, context.Background())
+		require.NoError(t, err)
+		assert.Contains(t, sr.Stdout, "connected", "absent class is the legacy open posture; stdout=%q stderr=%q", sr.Stdout, sr.Stderr)
+	})
+
+	for _, class := range []string{"none", "allowlist", "domain-allowlist"} {
+		t.Run(class+" denies egress", func(t *testing.T) {
+			ctx := tools.ContextWithNetworkClass(context.Background(), class)
+			sr, err := run(t, ctx)
+			if err != nil {
+				require.ErrorIs(t, err, pkgsecurity.ErrCommandBlocked)
+				return
+			}
+			assert.NotContains(t, sr.Stdout, "connected", "class %q allowed egress; stdout=%q stderr=%q", class, sr.Stdout, sr.Stderr)
+		})
+	}
+
+	t.Run("none still runs local commands", func(t *testing.T) {
+		ctx := tools.ContextWithNetworkClass(context.Background(), runtime.NetworkClassNone)
+		result, err := tool.Execute(ctx, map[string]any{"command": "echo still-local"})
+		require.NoError(t, err)
+		sr := unwrapShellResult(t, result)
+		assert.Equal(t, 0, sr.ReturnCode)
+		assert.Contains(t, sr.Stdout, "still-local")
+	})
 }

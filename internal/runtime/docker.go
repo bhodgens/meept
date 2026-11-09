@@ -171,6 +171,12 @@ func (b *DockerBackend) Name() string {
 // under a brief lock, then runs the exec without holding the lock so multiple
 // concurrent Execute calls do not serialize.
 func (b *DockerBackend) Execute(ctx context.Context, cmd Command) (*CommandResult, error) {
+	// The container network mode is fixed at create time. A restrictive
+	// class cannot be applied per exec, so refuse rather than run open.
+	if err := RequireContainerNetwork(b.config.NetworkMode, cmd.NetworkClass); err != nil {
+		return nil, err
+	}
+
 	b.mu.Lock()
 	containerID := b.containerID
 	b.mu.Unlock()

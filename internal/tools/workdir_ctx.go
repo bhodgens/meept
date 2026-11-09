@@ -37,6 +37,29 @@ func ContextWithSessionID(ctx context.Context, sessionID string) context.Context
 	return context.WithValue(ctx, sessionIDCtxKey{}, sessionID)
 }
 
+// agentIDCtxKey is the context key for the calling agent id injected by
+// the agent loop before tool execution. Effects claimants read it so a
+// resolve can be checked against the agent that claimed the key.
+type agentIDCtxKey struct{}
+
+// AgentIDFromContext extracts the caller's agent id from ctx, if set.
+// Returns empty string when not present.
+func AgentIDFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(agentIDCtxKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// ContextWithAgentID returns a new context carrying the caller's agent id.
+// An empty id stores nothing.
+func ContextWithAgentID(ctx context.Context, agentID string) context.Context {
+	if agentID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, agentIDCtxKey{}, agentID)
+}
+
 // WorkingDirFromContext extracts the working directory from ctx, if set.
 // Returns empty string when not present.
 func WorkingDirFromContext(ctx context.Context) string {

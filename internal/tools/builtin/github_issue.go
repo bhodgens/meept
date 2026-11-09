@@ -176,10 +176,11 @@ func (t *GitHubIssueCommentTool) Execute(ctx context.Context, args map[string]an
 	if t.ledger == nil {
 		return nil, githubLedgerGuard("github_issue_comment")
 	}
+	who := effectClaimant(ctx)
 
 	var resID int64
 	var resURL string
-	receipt, reused, runErr := effects.Run(ctx, t.ledger, key, meta, func(ctx context.Context) (json.RawMessage, error) {
+	receipt, reused, runErr := effects.Run(ctx, t.ledger, key, meta, who, func(ctx context.Context) (json.RawMessage, error) {
 		c, _, apiErr := client.Issues.CreateComment(ctx, owner, repo, number,
 			github.IssueCommentRequest{Body: body})
 		if apiErr != nil {
@@ -193,7 +194,7 @@ func (t *GitHubIssueCommentTool) Execute(ctx context.Context, args map[string]an
 		return nil, fmt.Errorf("github_issue_comment: %w", runErr)
 	}
 	if !reused {
-		if err := t.ledger.Complete(ctx, key); err != nil {
+		if err := t.ledger.Complete(ctx, key, who); err != nil {
 			return nil, fmt.Errorf("github_issue_comment: complete: %w", err)
 		}
 	} else {

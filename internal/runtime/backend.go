@@ -13,6 +13,11 @@ type Command struct {
 	Env         map[string]string // Environment variables
 	Timeout     time.Duration     // Execution timeout (0 = no timeout)
 	Interactive bool              // PTY mode for interactive tools
+	// NetworkClass is the resolved agent network class, applied before
+	// the child starts. "" and "unrestricted" leave egress unchanged.
+	// "none", "allowlist", and "domain-allowlist" confine egress.
+	// Backends must honor it; ignoring it is unrestricted egress.
+	NetworkClass string
 }
 
 // CommandResult holds execution results.

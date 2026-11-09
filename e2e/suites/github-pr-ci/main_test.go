@@ -504,7 +504,7 @@ func TestE2EEffectsReconcile(t *testing.T) {
 				Tool: "github_pr_create",
 				Payload: json.RawMessage(
 					`{"owner":"o","repo":"r","head":"feat/x","base":"main","title":"feat/x: add PR"}`),
-			}); err != nil {
+			}, effects.Claimant{AgentID: "e2e-seed", SessionID: "e2e-session"}); err != nil {
 				return fmt.Errorf("seed: claim effect row: %w", err)
 			}
 			if err := l.Close(); err != nil {

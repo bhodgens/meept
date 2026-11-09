@@ -183,22 +183,23 @@ func TestBackupPush_EffectsIdempotent(t *testing.T) {
 		// real flow — the second claim of the same key hits the pending
 		// prior. The production flow treats "prior claimed by another
 		// caller" as an error, so assert that contract here.
+		who := effects.Claimant{AgentID: "backup.git_push", SessionID: originPath}
 		_, _, claimErr := ledger.Claim(context.Background(), key, effects.EffectMeta{
 			Tool:               "backup.git_push",
 			ProviderIdempotent: true,
-		})
+		}, who)
 		if claimErr != nil {
 			t.Fatalf("manual claim: %v", claimErr)
 		}
 
 		// Complete the claim via RecordReceipt+Complete to simulate the
 		// first caller succeeding, then the retry sees a completed prior.
-		if err := ledger.RecordReceipt(context.Background(), key, mustJSON(t, map[string]any{
+		if err := ledger.RecordReceipt(context.Background(), key, who, mustJSON(t, map[string]any{
 			"head": seedSHA, "remote": originPath, "already_up_to_date": false,
 		})); err != nil {
 			t.Fatalf("RecordReceipt: %v", err)
 		}
-		if err := ledger.Complete(context.Background(), key); err != nil {
+		if err := ledger.Complete(context.Background(), key, who); err != nil {
 			t.Fatalf("Complete: %v", err)
 		}
 

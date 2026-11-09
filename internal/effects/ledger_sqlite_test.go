@@ -12,6 +12,7 @@ import (
 // TestSQLiteLedgerPersistenceAcrossReopen pins the durable behavior: a
 // record claimed (and one receipted) before Close is visible after the
 // ledger is reopened, with identical payloads and receipts.
+
 func TestSQLiteLedgerPersistenceAcrossReopen(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -28,16 +29,16 @@ func TestSQLiteLedgerPersistenceAcrossReopen(t *testing.T) {
 
 	if _, _, err := l1.Claim(ctx, keyClaimed, EffectMeta{
 		Tool: "backup.git_push", SessionID: "sess-1", ProviderIdempotent: true, Payload: payload,
-	}); err != nil {
+	}, testWho()); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 	if _, _, err := l1.Claim(ctx, keyReceipted, EffectMeta{
 		Tool: "backup.git_push", SessionID: "sess-1", ProviderIdempotent: true, Payload: payload,
-	}); err != nil {
+	}, testWho()); err != nil {
 		t.Fatalf("claim 2: %v", err)
 	}
 	receipt := json.RawMessage(`{"pushed":true,"ref":"refs/heads/main"}`)
-	if err := l1.RecordReceipt(ctx, keyReceipted, receipt); err != nil {
+	if err := l1.RecordReceipt(ctx, keyReceipted, testWho(), receipt); err != nil {
 		t.Fatalf("record receipt: %v", err)
 	}
 	if err := l1.Close(); err != nil {
@@ -99,7 +100,7 @@ func TestSQLiteLedgerReceiptByteForByte(t *testing.T) {
 
 	key := EffectKey("tool", "sess", "bytes")
 	raw := json.RawMessage(`{"z":1,"a":[1,2],"note":"  spaced  "}`)
-	if _, _, err := l.Claim(ctx, key, EffectMeta{Tool: "tool", Payload: raw}); err != nil {
+	if _, _, err := l.Claim(ctx, key, EffectMeta{Tool: "tool", Payload: raw}, testWho()); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 	out, err := l.Get(ctx, key)
@@ -111,7 +112,7 @@ func TestSQLiteLedgerReceiptByteForByte(t *testing.T) {
 	}
 
 	receipt := json.RawMessage(`{"weird_key_order":true,"x":null}`)
-	if err := l.RecordReceipt(ctx, key, receipt); err != nil {
+	if err := l.RecordReceipt(ctx, key, testWho(), receipt); err != nil {
 		t.Fatalf("record receipt: %v", err)
 	}
 	out, err = l.Get(ctx, key)
@@ -138,10 +139,10 @@ func TestSQLiteLedgerUniqueConstraintPath(t *testing.T) {
 	}()
 
 	key := EffectKey("tool", "sess", "dup")
-	if _, _, err := l.Claim(ctx, key, EffectMeta{Tool: "tool"}); err != nil {
+	if _, _, err := l.Claim(ctx, key, EffectMeta{Tool: "tool"}, testWho()); err != nil {
 		t.Fatalf("first claim: %v", err)
 	}
-	granted, prior, err := l.Claim(ctx, key, EffectMeta{Tool: "tool"})
+	granted, prior, err := l.Claim(ctx, key, EffectMeta{Tool: "tool"}, testWho())
 	if err != nil {
 		t.Fatalf("second claim: %v", err)
 	}
@@ -174,11 +175,11 @@ func TestSQLiteLedgerAbandonReasonPersists(t *testing.T) {
 	key := EffectKey("backup.git_push", "sess-9", "step-1")
 	if _, _, err := l1.Claim(ctx, key, EffectMeta{
 		Tool: "backup.git_push", SessionID: "sess-9", ProviderIdempotent: true,
-	}); err != nil {
+	}, testWho()); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 	const reason = "remote rejected push; needs manual rebase"
-	if err := l1.Abandon(ctx, key, reason); err != nil {
+	if err := l1.Abandon(ctx, key, testWho(), reason); err != nil {
 		t.Fatalf("abandon: %v", err)
 	}
 	if err := l1.Close(); err != nil {

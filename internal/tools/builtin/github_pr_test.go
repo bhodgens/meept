@@ -138,15 +138,26 @@ type prLedgerStub struct {
 
 func newPrLedgerStub() *prLedgerStub { return &prLedgerStub{} }
 
-func (l *prLedgerStub) Claim(ctx context.Context, key string, meta effects.EffectMeta) (bool, *effects.EffectRecord, error) {
+func (l *prLedgerStub) Claim(ctx context.Context, key string, meta effects.EffectMeta, who effects.Claimant) (bool, *effects.EffectRecord, error) {
 	l.claimed = append(l.claimed, key)
 	return true, nil, nil
 }
-func (l *prLedgerStub) RecordReceipt(ctx context.Context, key string, receipt json.RawMessage) error {
+func (l *prLedgerStub) RecordReceipt(ctx context.Context, key string, who effects.Claimant, receipt json.RawMessage) error {
 	return nil
 }
-func (l *prLedgerStub) Complete(ctx context.Context, key string) error               { return nil }
-func (l *prLedgerStub) Abandon(ctx context.Context, key string, reason string) error { return nil }
+func (l *prLedgerStub) Complete(ctx context.Context, key string, who effects.Claimant) error {
+	return nil
+}
+func (l *prLedgerStub) Abandon(ctx context.Context, key string, who effects.Claimant, reason string) error {
+	return nil
+}
+func (l *prLedgerStub) RecordReceiptAdmin(ctx context.Context, key string, receipt json.RawMessage) error {
+	return nil
+}
+func (l *prLedgerStub) CompleteAdmin(ctx context.Context, key string) error { return nil }
+func (l *prLedgerStub) AbandonAdmin(ctx context.Context, key string, reason string) error {
+	return nil
+}
 func (l *prLedgerStub) ReconcilePending(ctx context.Context) ([]effects.EffectRecord, error) {
 	return nil, nil
 }

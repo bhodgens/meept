@@ -88,6 +88,12 @@ func (b *LocalBackend) Execute(ctx context.Context, cmd Command) (*CommandResult
 	// Set environment variables
 	command.Env = b.buildEnv(cmd.Env)
 
+	// Network class is applied before Start. A confinement error refuses
+	// the launch; falling through would be unrestricted egress.
+	if err := ApplyNetworkClass(command, cmd.NetworkClass); err != nil {
+		return nil, err
+	}
+
 	start := time.Now()
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
