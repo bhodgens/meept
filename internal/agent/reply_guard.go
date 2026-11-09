@@ -142,6 +142,16 @@ func toolResultJSONKey(reply string) (string, bool) {
 			return key, true
 		}
 	}
+	// Generic tool-shape keys: platform tool results whose identity key
+	// predates this guard (live defect 2026-11-09: schedule_list's
+	// {"jobs": [...]} array shipped raw to a voice caller and was spoken
+	// aloud as garbage audio). The reply already passed the pure-JSON
+	// structural test above, so any platform-result key here is a dump.
+	for _, key := range []string{`"jobs"`, `"results"`, `"success": true`, `"items"`, `"records"`, `"status": "`} {
+		if strings.Contains(reply, key) {
+			return key, true
+		}
+	}
 	return "", false
 }
 
