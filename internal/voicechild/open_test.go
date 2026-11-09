@@ -75,7 +75,7 @@ func TestOpenRegistersPipelineAndAnswersSetup(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Run returned error on close: %v", err)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(testPollDeadline):
 		t.Fatalf("Run did not return after socket close")
 	}
 }

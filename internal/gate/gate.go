@@ -160,6 +160,20 @@ func workspaceHash(ctx context.Context, backend runtime.ExecutionBackend, workdi
 func RunGate(ctx context.Context, cfg GateConfig, backend runtime.ExecutionBackend, workdir string, prev *GateState) (*GateResult, GateState, error) {
 	logger := slog.Default()
 
+	// Local invariant (audit e25f2512 follow-up): an approval gate NEVER
+	// shells out. The Reflect branches gate on IsApproval() before ever
+	// reaching RunGate, but the guard lives here too so a future call
+	// path cannot turn a human-approval gate into a command execution.
+	// EffectiveCommand() returns "" for approval gates even when a
+	// command string is present in the config JSON.
+	if cfg.IsApproval() {
+		return &GateResult{
+			Passed:  false,
+			Skipped: true,
+			Reason:  "approval gate reached RunGate: human signoff required (approval gates never shell out)",
+		}, GateState{}, nil
+	}
+
 	if backend == nil {
 		logger.Debug("gate: no execution backend configured; falling back to local backend")
 		backend = runtime.NewLocalBackend(runtime.Config{}, os.Environ())

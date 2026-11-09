@@ -100,7 +100,7 @@ func TestBargeInLatchRearmLeaf(t *testing.T) {
 	}
 	select {
 	case <-gate1.enteredPlay:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testPollDeadline):
 		t.Fatalf("utterance 1 playback never started")
 	}
 
@@ -139,7 +139,7 @@ func TestBargeInLatchRearmLeaf(t *testing.T) {
 	}
 	select {
 	case <-gate2.enteredPlay: // latch re-armed before this closed (see utterance 1)
-	case <-time.After(5 * time.Second):
+	case <-time.After(testPollDeadline):
 		t.Fatalf("utterance 2 playback never started")
 	}
 	defer close(gate2.releaseSecond)

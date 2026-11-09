@@ -9,6 +9,7 @@ import (
 	"context"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -178,4 +179,38 @@ func waitForGateRows(t *testing.T, c *Components, want int) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("gate rows did not reach %d within 2s", want)
+}
+
+// Kind-aware resume notification copy (e25f2512 follow-up): plan rows
+// keep the original wording byte-identical; goal rows say the goal gate
+// was approved (never "plan ... approved").
+func TestGateNotificationCopyKindAware(t *testing.T) {
+	planTitle, planBody := gateNotificationCopy(agent.GateParkData{
+		GateKind: "plan",
+		GateID:   "plan-x1",
+	})
+	if planTitle != "plan gate approved" {
+		t.Errorf("plan title = %q, want %q (byte-identical legacy copy)", planTitle, "plan gate approved")
+	}
+	if planBody != `plan "plan-x1" approved -- turn resumed` {
+		t.Errorf("plan body = %q, want legacy wording byte-identical", planBody)
+	}
+
+	goalTitle, goalBody := gateNotificationCopy(agent.GateParkData{
+		GateKind: goalGateApprovalKind,
+		GateID:   "goal-x1",
+		TurnReentry: map[string]any{
+			"goal_title": "keep main shippable",
+			"round":      3,
+		},
+	})
+	if goalTitle != "goal gate approved" {
+		t.Errorf("goal title = %q, want %q", goalTitle, "goal gate approved")
+	}
+	if goalBody != `goal "goal-x1" gate approved -- turn resumed` {
+		t.Errorf("goal body = %q, want goal-gate wording", goalBody)
+	}
+	if strings.Contains(goalTitle+goalBody, "plan") {
+		t.Errorf("goal copy must not be plan-worded: %q / %q", goalTitle, goalBody)
+	}
 }

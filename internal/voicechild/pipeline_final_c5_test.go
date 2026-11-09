@@ -26,7 +26,7 @@ func driveFinal(p *pipeline, ccid, text string) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testPollDeadline):
 		p.cancel()
 		<-done
 	}

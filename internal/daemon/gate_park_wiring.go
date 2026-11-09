@@ -60,11 +60,14 @@ func (c *Components) wireGateParker() {
 			// emitter. SessionID rides the event so the menubar tap
 			// resolves the meept://session/<id> deep link (C6); the HTTP
 			// push channel fans the same event out over /ws/notifications.
+			// Copy is kind-aware (e25f2512 follow-up): plan rows keep the
+			// original plan wording byte-identical; goal rows name the
+			// goal gate instead of pretending a plan was approved.
 			if c.NotificationEmitter != nil {
+				title, body := gateNotificationCopy(data)
 				c.NotificationEmitter.PublishNotification(
 					data.SessionID, "gate", NotificationTypeInfo,
-					"plan gate approved",
-					"plan \""+data.GateID+"\" approved -- turn resumed",
+					title, body,
 				)
 			}
 			// Audit HITL-1: goal-kind rows re-enter the owning loop's
@@ -209,6 +212,19 @@ func (c *Components) StartGateParkPump(ctx context.Context) {
 		"park_topic", "plan.submitting",
 		"resume_topic", "plan.approved",
 	)
+}
+
+// gateNotificationCopy renders the resume notification copy for a drained
+// gate row (e25f2512 follow-up: the fan-out is kind-agnostic, the copy is
+// not). Plan rows keep the original wording byte-identical; goal rows say
+// the goal gate was approved (title/round ride TurnReentry when present).
+func gateNotificationCopy(data agent.GateParkData) (title, body string) {
+	if data.GateKind == goalGateApprovalKind {
+		return "goal gate approved",
+			"goal \"" + data.GateID + "\" gate approved -- turn resumed"
+	}
+	return "plan gate approved",
+		"plan \"" + data.GateID + "\" approved -- turn resumed"
 }
 
 // timeNowUTC is the clock seam for park stamps (kept as a function so a

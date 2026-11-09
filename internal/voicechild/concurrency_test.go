@@ -196,7 +196,7 @@ func TestClearDropsQueuedDrafts(t *testing.T) {
 	d.sendLine(childConn, voiceframe.Frame{CallID: "cd1", Event: voiceframe.EventSay, Text: "current", Last: lastPtr(true)}) //nolint:modernize // newexpr would emit new(bool)=false; true is intended
 	select {
 	case <-gate.enteredPlay:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testPollDeadline):
 		t.Fatalf("playback never started")
 	}
 	d.sendLine(childConn, voiceframe.Frame{CallID: "cd1", Event: voiceframe.EventSay, Text: "queued-1", Last: lastPtr(true)}) //nolint:modernize // newexpr would emit new(bool)=false; true is intended
@@ -217,7 +217,7 @@ func TestClearDropsQueuedDrafts(t *testing.T) {
 	swapTTS(p, stub)
 	defer close(stub.park)
 	d.sendLine(childConn, voiceframe.Frame{CallID: "cd1", Event: voiceframe.EventSay, Text: "after-clear", Last: lastPtr(true)}) //nolint:modernize // newexpr would emit new(bool)=false; true is intended
-	_ = out.SetReadDeadline(time.Now().Add(5 * time.Second))
+	_ = out.SetReadDeadline(time.Now().Add(testPollDeadline))
 	buf := make([]byte, 1280)
 	if n, err := io.ReadFull(out, buf); n != 1280 || err != nil {
 		t.Fatalf("say after clear never played (n=%d err=%v): F-1 re-arm broke in the FIFO rewrite", n, err)
@@ -281,7 +281,7 @@ func TestConcurrentPipelines(t *testing.T) {
 	readOne("cb", outB)
 
 	seen := make(map[string]int, 2)
-	deadline := time.After(5 * time.Second)
+	deadline := time.After(testPollDeadline)
 	for len(seen) < 2 {
 		select {
 		case r := <-got:

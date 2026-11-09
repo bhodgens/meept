@@ -204,7 +204,7 @@ func (d *fakeDaemon) serveText() net.Conn {
 // and returns it.
 func (d *fakeDaemon) waitAuthLine(t *testing.T) string {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(testPollDeadline)
 	for time.Now().Before(deadline) {
 		d.mu.Lock()
 		line := d.authLine
@@ -225,7 +225,7 @@ func (d *fakeDaemon) waitRawLine(t *testing.T) string {
 	t.Helper()
 	select {
 	case <-d.frameSignal:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testPollDeadline):
 		t.Fatalf("timed out waiting for child frame")
 	}
 	d.mu.Lock()
@@ -294,7 +294,7 @@ func TestSetupRegistersPipeline(t *testing.T) {
 		select {
 		case err := <-runDone:
 			return err
-		case <-time.After(5 * time.Second):
+		case <-time.After(testPollDeadline):
 			t.Fatalf("Run did not return after socket close")
 			return nil
 		}
@@ -393,7 +393,7 @@ func TestSayClear(t *testing.T) {
 	var first []byte
 	select {
 	case first = <-gotFirst:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testPollDeadline):
 		t.Fatalf("no audio on .out socket after say")
 	}
 	if len(first) != 640 {
@@ -454,7 +454,7 @@ func TestInterrupt(t *testing.T) {
 	d.sendLine(childConn, voiceframe.Frame{CallID: "cc3", Event: voiceframe.EventSay, Text: "long utterance", Last: lastPtr(true)}) //nolint:modernize // newexpr would emit new(bool)=false; true is intended
 	select {
 	case <-gate.enteredPlay:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testPollDeadline):
 		t.Fatalf("playback never started")
 	}
 	waitFor(t, p.isSpeaking)
@@ -561,7 +561,7 @@ func TestPerFrameErrorKeepsChildAlive(t *testing.T) {
 	d.sendLine(childConn, voiceframe.Frame{CallID: "good", Event: voiceframe.EventSay, Text: "still alive", Last: lastPtr(true)}) //nolint:modernize // newexpr would emit new(bool)=false; true is intended
 	first := make(chan int, 1)
 	go func() {
-		_ = gout.SetReadDeadline(time.Now().Add(5 * time.Second))
+		_ = gout.SetReadDeadline(time.Now().Add(testPollDeadline))
 		buf := make([]byte, 640)
 		n, _ := gout.Read(buf)
 		first <- n
@@ -571,7 +571,7 @@ func TestPerFrameErrorKeepsChildAlive(t *testing.T) {
 		if n != 640 {
 			t.Fatalf("surviving call got %d bytes, want 640", n)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(testPollDeadline):
 		t.Fatalf("FIX 4 VIOLATION: child stopped serving after a bad frame (or the whole suite died with it)")
 	}
 
@@ -588,7 +588,7 @@ func TestPerFrameErrorKeepsChildAlive(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Run returned error after clean close: %v", err)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(testPollDeadline):
 		t.Fatalf("Run did not return after socket close")
 	}
 }
@@ -791,7 +791,7 @@ func TestChildSendsTokenLineFirst(t *testing.T) {
 		if string(b) != "tok-first-42\n" {
 			t.Fatalf("first bytes on the text socket = %q, want %q", string(b), "tok-first-42\n")
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(testPollDeadline):
 		t.Fatal("child never sent its start-token proof line")
 	}
 
@@ -800,7 +800,7 @@ func TestChildSendsTokenLineFirst(t *testing.T) {
 	_ = ln.Close()
 	select {
 	case <-runDone:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testPollDeadline):
 		t.Fatal("Run did not return after the auth listener closed")
 	}
 }

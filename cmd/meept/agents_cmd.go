@@ -16,6 +16,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Gate type values for the --gate-type flag (set-gate, goal-create).
+// Mirrors gate.GateTypeCommand / gate.GateTypeApproval; kept as literals
+// because the CLI is a separate binary surface that must not drag the
+// employee/gate packages in.
+const (
+	gateTypeCommand  = "command"
+	gateTypeApproval = "approval"
+)
+
 // agentsLong is the long help for the agents command. It explains the
 // employee/constitution model and links to the docs.
 const agentsLong = `Manage AI employees: persistent agents bounded by a constitution.
@@ -1259,20 +1268,24 @@ Examples:
 
 func newAgentsSetGateCmd() *cobra.Command {
 	var command string
+	var gateType string
 	var timeout int
 	var skipUnchanged bool
 	var clear bool
 	cmd := &cobra.Command{
 		Use:   "set-gate <goal-id>",
 		Short: "set or clear a goal quality gate",
-		Long: `Set the completion gate for a goal. The gate command must exit 0
-before the goal may be marked complete. Clear with --clear.
+		Long: `Set the completion gate for a goal. A command gate's command must
+exit 0 before the goal may be marked complete. An approval gate pauses
+the goal pending human signoff instead of running a command. Clear with
+--clear.
 
 The global switch employees.defaults.gate.enabled in meept.json5 must
 be true or no gate runs.
 
 Examples:
   meept agents set-gate goal_abc --command="go test ./..."
+  meept agents set-gate goal_abc --gate-type=approval
   meept agents set-gate goal_abc --clear`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -1286,10 +1299,17 @@ Examples:
 			if clear {
 				params["gate"] = nil
 			} else {
-				if command == "" {
+				if gateType != gateTypeCommand && gateType != gateTypeApproval {
+					return fmt.Errorf("--gate-type must be \"command\" or \"approval\"")
+				}
+				if command == "" && gateType != "approval" {
 					return fmt.Errorf("command is required (or pass --clear)")
 				}
+				if command != "" && gateType == "approval" {
+					return fmt.Errorf("--command conflicts with --gate-type=approval (approval gates never run a command)")
+				}
 				params["gate"] = map[string]any{
+					"type":                gateType,
 					"command":             command,
 					"timeout_seconds":     timeout,
 					"skip_when_unchanged": skipUnchanged,
@@ -1310,11 +1330,16 @@ Examples:
 				fmt.Println("gate cleared")
 				return nil
 			}
+			if gateType == "approval" {
+				fmt.Println("gate set: approval (human signoff)")
+				return nil
+			}
 			fmt.Printf("gate set: %s\n", command)
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&command, "command", "", "shell command that must exit 0")
+	cmd.Flags().StringVar(&gateType, "gate-type", "command", "gate type: \"command\" (default) or \"approval\" (human signoff, no command)")
 	cmd.Flags().IntVar(&timeout, "timeout", 300, "timeout seconds")
 	cmd.Flags().BoolVar(&skipUnchanged, "skip-when-unchanged", true, "skip re-run if workspace unchanged after a failure")
 	cmd.Flags().BoolVar(&clear, "clear", false, "remove the per-goal gate")
@@ -1465,6 +1490,7 @@ func newAgentsGoalCreateCmd() *cobra.Command {
 		title       string
 		mandate     string
 		gateCommand string
+		gateType    string
 		source      string
 		maxRounds   int
 	)
@@ -1478,6 +1504,7 @@ Examples:
   meept agents goal-create emp_abc --title "keep main shippable" --mandate "every commit on main passes CI"
   meept agents goal-create emp_abc --title "nightly report" --mandate "..." --source trigger
   meept agents goal-create emp_abc --title "t" --mandate "m" --gate-command "go test ./..."
+  meept agents goal-create emp_abc --title "t" --mandate "m" --gate-type=approval
   meept agents goal-create emp_abc --title "t" --mandate "m" --max-rounds 5`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -1492,6 +1519,12 @@ Examples:
 			}
 			if maxRounds < 0 {
 				return fmt.Errorf("--max-rounds must not be negative")
+			}
+			if gateType != gateTypeCommand && gateType != gateTypeApproval {
+				return fmt.Errorf("--gate-type must be \"command\" or \"approval\"")
+			}
+			if gateCommand != "" && gateType == gateTypeApproval {
+				return fmt.Errorf("--gate-command conflicts with --gate-type=approval (approval gates never run a command)")
 			}
 
 			client, err := connectDaemon()
@@ -1508,8 +1541,8 @@ Examples:
 			if source != "" {
 				params["source"] = source
 			}
-			if gateCommand != "" {
-				params["gate"] = map[string]any{"command": gateCommand}
+			if gateCommand != "" || gateType == gateTypeApproval {
+				params["gate"] = map[string]any{"type": gateType, "command": gateCommand}
 			}
 			if maxRounds > 0 {
 				params["max_rounds"] = maxRounds
@@ -1539,6 +1572,7 @@ Examples:
 	cmd.Flags().StringVar(&title, "title", "", "short goal title")
 	cmd.Flags().StringVar(&mandate, "mandate", "", "durable objective in plain prose")
 	cmd.Flags().StringVar(&gateCommand, "gate-command", "", "optional completion gate command (must exit 0)")
+	cmd.Flags().StringVar(&gateType, "gate-type", "command", "gate type: \"command\" (default) or \"approval\" (human signoff, no command)")
 	cmd.Flags().StringVar(&source, "source", "", "goal source: \"user\" (default) or \"trigger\"")
 	cmd.Flags().IntVar(&maxRounds, "max-rounds", 0, "optional cap on autonomous rounds (positive integer; 0 = the employee default)")
 	if err := cmd.MarkFlagRequired("title"); err != nil {

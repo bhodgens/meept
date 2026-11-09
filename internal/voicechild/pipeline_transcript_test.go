@@ -139,7 +139,7 @@ func TestSTTOpenRetryRecovers(t *testing.T) {
 	// succeeds) without the pipeline ever being torn down.
 	select {
 	case <-f.accepted:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testPollDeadline):
 		t.Fatalf("FIX 5 VIOLATION: STT session never opened after a failed first attempt (call stayed deaf)")
 	}
 	if n := func() int { f.mu.Lock(); defer f.mu.Unlock(); return f.calls }(); n < 2 {

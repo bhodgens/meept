@@ -308,7 +308,7 @@ func TestBargeInViaPartial(t *testing.T) {
 	}
 	select {
 	case <-gate.enteredPlay:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testPollDeadline):
 		t.Fatalf("utterance playback never started")
 	}
 	waitFor(t, func() bool { return p.isSpeaking() })
@@ -357,7 +357,7 @@ func TestBargeInViaPartial(t *testing.T) {
 	}
 	select {
 	case <-gate2.enteredPlay:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testPollDeadline):
 		t.Fatalf("utterance 2 playback never started")
 	}
 	waitFor(t, func() bool { return p.isSpeaking() })
