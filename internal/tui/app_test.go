@@ -36,7 +36,7 @@ func createTestApp() *App {
 		activeModal:  ModalNone,
 	}
 	// Initialize sub-models
-	app.chat = models.NewChatModel(rpc, styles.UserMessage, styles.AssistantMessage, styles.SystemMessage, "once")
+	app.chat = models.NewChatModelWithConfig(rpc, styles.UserMessage, styles.AssistantMessage, styles.SystemMessage, "once", models.InputBehaviorConfig{EnterBehavior: "shift_sends"}, models.ChatConfig{LivenessTimeout: 120 * time.Second})
 	app.sessions = models.NewSessionsModel(rpc)
 	app.tasks = models.NewTasksModel(rpc)
 	app.queue = models.NewQueueModel(rpc)
@@ -167,7 +167,7 @@ func TestApp_RenderTabs(t *testing.T) {
 	app := createTestApp()
 	app.currentView = ViewTasks
 
-	tabs := ansi.Strip(app.renderTabs())
+	tabs := ansi.Strip(app.renderTabsForTest())
 
 	// Check that all tabs are present
 	expectedTabs := []string{"chat", "sessions", "tasks", "queue", "memory", "plans", "agents"}
@@ -495,7 +495,7 @@ func TestApp_Program_BasicRender(t *testing.T) {
 		projectDir:   "/test/project",
 		activeModal:  ModalNone,
 	}
-	app.chat = models.NewChatModel(rpc, styles.UserMessage, styles.AssistantMessage, styles.SystemMessage, "once")
+	app.chat = models.NewChatModelWithConfig(rpc, styles.UserMessage, styles.AssistantMessage, styles.SystemMessage, "once", models.InputBehaviorConfig{EnterBehavior: "shift_sends"}, models.ChatConfig{LivenessTimeout: 120 * time.Second})
 	app.sessions = models.NewSessionsModel(rpc)
 	app.tasks = models.NewTasksModel(rpc)
 	app.queue = models.NewQueueModel(rpc)
@@ -557,7 +557,7 @@ func TestApp_Program_CommandPalette(t *testing.T) {
 		projectDir:   "/test/project",
 		activeModal:  ModalNone,
 	}
-	app.chat = models.NewChatModel(rpc, styles.UserMessage, styles.AssistantMessage, styles.SystemMessage, "once")
+	app.chat = models.NewChatModelWithConfig(rpc, styles.UserMessage, styles.AssistantMessage, styles.SystemMessage, "once", models.InputBehaviorConfig{EnterBehavior: "shift_sends"}, models.ChatConfig{LivenessTimeout: 120 * time.Second})
 	app.sessions = models.NewSessionsModel(rpc)
 	app.tasks = models.NewTasksModel(rpc)
 	app.queue = models.NewQueueModel(rpc)

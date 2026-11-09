@@ -487,9 +487,3 @@ func int64FromPayload(payload map[string]any, key string) int64 {
 	}
 	return 0
 }
-
-// renderTurnStalledText returns the honest lowercase stalled wording for
-// a liveness window (used by tests and the pending line).
-func renderTurnStalledText(liveness time.Duration) string {
-	return fmt.Sprintf(stalledTurnText, int(liveness.Seconds()))
-}

@@ -87,7 +87,7 @@ func TestActivityView_HideStopsTail(t *testing.T) {
 // TestActivityView_TabPresent: the tab bar carries the activity tab.
 func TestActivityView_TabPresent(t *testing.T) {
 	app := createTestApp()
-	tabs := stripANSIForInventory(app.renderTabs())
+	tabs := stripANSIForInventory(app.renderTabsForTest())
 	if !strings.Contains(tabs, "activity") {
 		t.Errorf("expected tabs to contain \"activity\"; tabs: %q", tabs)
 	}

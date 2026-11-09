@@ -321,18 +321,6 @@ func isImageFile(path string) bool {
 	return imageExtensions[ext]
 }
 
-// NewChatModel creates a new chat model.
-func NewChatModel(rpc RPCClient, userStyle, assistantStyle, systemStyle lipgloss.Style, escapeBehavior string) *ChatModel {
-	return NewChatModelWithConfig(rpc, userStyle, assistantStyle, systemStyle, escapeBehavior, InputBehaviorConfig{
-		EnterBehavior: "shift_sends",
-		AutoExpand:    false,
-	}, ChatConfig{
-		AutoCopyOnRelease: false,
-		ScrollSpeed:       3,
-		LivenessTimeout:   defaultTurnLivenessTimeout,
-	})
-}
-
 // NewChatModelWithConfig creates a new chat model with input configuration.
 func NewChatModelWithConfig(rpc RPCClient, userStyle, assistantStyle, systemStyle lipgloss.Style, escapeBehavior string, inputConfig InputBehaviorConfig, chatConfig ChatConfig) *ChatModel {
 	ta := textarea.New()

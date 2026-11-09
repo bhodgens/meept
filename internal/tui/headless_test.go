@@ -260,7 +260,7 @@ func newHeadlessAppSocket(t *testing.T, socketPath string, w, h int) *headlessPr
 	app.projectPicker = NewProjectPickerModal(app.styles, rpc)
 	app.usersModal = NewUsersModal(app.styles)
 	app.pendingChangesModal = modals.NewPendingChangesModal(&changesRPCAPI{rpc: rpc})
-	app.chat = models.NewChatModel(rpc, DefaultStyles().UserMessage, DefaultStyles().AssistantMessage, DefaultStyles().SystemMessage, "once")
+	app.chat = models.NewChatModelWithConfig(rpc, DefaultStyles().UserMessage, DefaultStyles().AssistantMessage, DefaultStyles().SystemMessage, "once", models.InputBehaviorConfig{EnterBehavior: "shift_sends"}, models.ChatConfig{LivenessTimeout: 120 * time.Second})
 	app.sessions = models.NewSessionsModel(rpc)
 	app.tasks = models.NewTasksModel(rpc)
 	app.queue = models.NewQueueModel(rpc)

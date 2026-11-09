@@ -10,6 +10,7 @@ package models
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -328,7 +329,7 @@ func TestChatModel_StalledShowsHonestText(t *testing.T) {
 		TurnID:         "turn-1",
 		ConversationID: model.conversationID,
 		Status:         "stalled",
-		Error:          renderTurnStalledText(model.livenessTimeout),
+		Error:          fmt.Sprintf(stalledTurnText, int(model.livenessTimeout.Seconds())),
 	})
 	// cmd is a re-armed await cmd — never execute it here (it blocks
 	// until a terminal arrives); presence is the assertion.

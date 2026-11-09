@@ -3069,48 +3069,6 @@ func (a *App) getWindowTitle() string {
 	return title
 }
 
-func (a *App) renderTabs() string {
-	tabs := []struct {
-		name string
-		view ViewType
-	}{
-		{"chat", ViewChat},
-		{"sessions", ViewSessions},
-		{"tasks", ViewTasks},
-		{"queue", ViewQueue},
-		{"memory", ViewMemory},
-		{"plans", ViewPlans},
-		{"agents", ViewAgents},
-		{"activity", ViewActivity},
-	}
-
-	renderedTabs := make([]string, 0, len(tabs))
-	for i, t := range tabs {
-		style := a.styles.Tab
-		if t.view == a.currentView {
-			style = a.styles.ActiveTab
-			// Clear flash when viewing the tab
-			delete(a.tabFlash, t.view)
-		}
-		label := fmt.Sprintf("[%d] %s", i+1, t.name)
-		// Add notification indicator if tab has flash
-		if a.tabFlash[t.view] {
-			label += " ●"
-		}
-		renderedTabs = append(renderedTabs, style.Render(label))
-	}
-
-	tabLine := lipgloss.JoinHorizontal(lipgloss.Top, renderedTabs...)
-
-	// Add separator to fill width
-	separatorWidth := max(0, a.width-lipgloss.Width(tabLine))
-	separator := strings.Repeat("─", separatorWidth)
-
-	return lipgloss.NewStyle().
-		Width(a.width).
-		Render(tabLine + a.styles.Muted.Render(separator))
-}
-
 func (a *App) renderStatusBar() string {
 	// Connection status
 	connectionStatus := "●"

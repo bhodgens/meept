@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -211,10 +212,10 @@ func newTestChatModel() *ChatModel {
 	userStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B"))
 	assistantStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#E5E7EB"))
 	systemStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
-	return NewChatModel(mock, userStyle, assistantStyle, systemStyle, "once")
+	return NewChatModelWithConfig(mock, userStyle, assistantStyle, systemStyle, "once", InputBehaviorConfig{EnterBehavior: "shift_sends"}, ChatConfig{LivenessTimeout: 120 * time.Second})
 }
 
-func TestChatModel_NewChatModel(t *testing.T) {
+func TestChatModel_NewChatModelWithConfig(t *testing.T) {
 	model := newTestChatModel()
 
 	if model == nil {
@@ -275,7 +276,7 @@ func TestChatModel_SetSize(t *testing.T) {
 func TestChatModel_SendMessage(t *testing.T) {
 	mock := NewMockChatRPCClient()
 	userStyle := lipgloss.NewStyle()
-	model := NewChatModel(mock, userStyle, userStyle, userStyle, "once")
+	model := NewChatModelWithConfig(mock, userStyle, userStyle, userStyle, "once", InputBehaviorConfig{EnterBehavior: "shift_sends"}, ChatConfig{LivenessTimeout: 120 * time.Second})
 	model.SetSize(80, 24)
 	model.Init()
 
@@ -937,7 +938,7 @@ func TestChatModel_ExtractDescription(t *testing.T) {
 func TestChatModel_AutoDescription(t *testing.T) {
 	mock := NewMockChatRPCClient()
 	userStyle := lipgloss.NewStyle()
-	model := NewChatModel(mock, userStyle, userStyle, userStyle, "once")
+	model := NewChatModelWithConfig(mock, userStyle, userStyle, userStyle, "once", InputBehaviorConfig{EnterBehavior: "shift_sends"}, ChatConfig{LivenessTimeout: 120 * time.Second})
 	model.SetSize(80, 24)
 	model.sessionID = "sess-1"
 
@@ -972,7 +973,7 @@ func TestChatModel_AutoDescription(t *testing.T) {
 func TestChatModel_NoAutoDescriptionOnSecondExchange(t *testing.T) {
 	mock := NewMockChatRPCClient()
 	userStyle := lipgloss.NewStyle()
-	model := NewChatModel(mock, userStyle, userStyle, userStyle, "once")
+	model := NewChatModelWithConfig(mock, userStyle, userStyle, userStyle, "once", InputBehaviorConfig{EnterBehavior: "shift_sends"}, ChatConfig{LivenessTimeout: 120 * time.Second})
 	model.SetSize(80, 24)
 	model.sessionID = "sess-1"
 	model.sessionDescription = "Already set"
@@ -997,7 +998,7 @@ func TestChatModel_NoAutoDescriptionOnSecondExchange(t *testing.T) {
 func TestChatModel_FlushMessages(t *testing.T) {
 	mock := NewMockChatRPCClient()
 	userStyle := lipgloss.NewStyle()
-	model := NewChatModel(mock, userStyle, userStyle, userStyle, "once")
+	model := NewChatModelWithConfig(mock, userStyle, userStyle, userStyle, "once", InputBehaviorConfig{EnterBehavior: "shift_sends"}, ChatConfig{LivenessTimeout: 120 * time.Second})
 	model.SetSize(80, 24)
 	model.sessionID = "sess-1"
 
@@ -1366,7 +1367,7 @@ func TestChatModel_SendMessage_AgentActive_SteerMode(t *testing.T) {
 func TestChatModel_SendMessage_AgentInactive_Normal(t *testing.T) {
 	mock := NewMockChatRPCClient()
 	userStyle := lipgloss.NewStyle()
-	model := NewChatModel(mock, userStyle, userStyle, userStyle, "once")
+	model := NewChatModelWithConfig(mock, userStyle, userStyle, userStyle, "once", InputBehaviorConfig{EnterBehavior: "shift_sends"}, ChatConfig{LivenessTimeout: 120 * time.Second})
 	model.SetSize(80, 24)
 
 	// Agent is idle
@@ -1629,7 +1630,7 @@ func TestChatModel_SendMessage_WithImageAttachment(t *testing.T) {
 	mock.SubmitAccepted = true
 	mock.SubmitTurnID = "turn-1"
 	userStyle := lipgloss.NewStyle()
-	model := NewChatModel(mock, userStyle, userStyle, userStyle, "once")
+	model := NewChatModelWithConfig(mock, userStyle, userStyle, userStyle, "once", InputBehaviorConfig{EnterBehavior: "shift_sends"}, ChatConfig{LivenessTimeout: 120 * time.Second})
 	model.SetSize(80, 24)
 	model.agentActive = false
 	model.sessionID = "sess-1"
@@ -1720,7 +1721,7 @@ func TestChatModel_SendMessage_WithNonImageAttachment(t *testing.T) {
 	mock.SubmitAccepted = true
 	mock.SubmitTurnID = "turn-1"
 	userStyle := lipgloss.NewStyle()
-	model := NewChatModel(mock, userStyle, userStyle, userStyle, "once")
+	model := NewChatModelWithConfig(mock, userStyle, userStyle, userStyle, "once", InputBehaviorConfig{EnterBehavior: "shift_sends"}, ChatConfig{LivenessTimeout: 120 * time.Second})
 	model.SetSize(80, 24)
 	model.agentActive = false
 	model.sessionID = "sess-1"
