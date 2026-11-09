@@ -317,7 +317,10 @@ func drainSpeakerFile(ctx context.Context, sockPath, outPath string) error {
 			return fmt.Errorf("write out header: %w", ferr)
 		}
 		player := &wavFilePlayer{w: f}
-		sink = voice.NewSpeakerSink(player, 0) // gap=0: one burst per Flush, file mode flushes per read
+		// gap 0 = default SinkGap: bursts close on real gaps (sentence
+		// breaks / barge-in) and at Flush/Close; the raw PCM appends into
+		// the single-header file (no per-burst header since 2026-11-09).
+		sink = voice.NewSpeakerSink(player, 0)
 	}
 	done := make(chan error, 1)
 	go func() {
@@ -337,26 +340,32 @@ func drainSpeakerFile(ctx context.Context, sockPath, outPath string) error {
 			}
 			if rerr != nil {
 				// EOF / connection closed = daemon ended the call: normal.
+				// Flush the pending burst BEFORE reporting the end: the
+				// per-read flush is gone (it wrapped every paced chunk in
+				// its own WAV header - live defect 2026-11-09), so the
+				// final burst closes only here, on the gap heuristic at
+				// the next Write, or at sink Close below.
 				done <- nil
 				return
-			}
-			if sink != nil {
-				if ferr := sink.Flush(); ferr != nil {
-					done <- ferr
-					return
-				}
 			}
 		}
 	}()
 	select {
 	case err := <-done:
-		if wavFile != nil {
+		if wavFile != nil && sink != nil {
+			// Close flushes the final pending burst into the file BEFORE
+			// the data-length patch: without it the tail burst after the
+			// last gap heuristic close is dropped (and the header lies).
+			if cerr := sink.Close(); cerr != nil && err == nil {
+				err = cerr
+			}
 			patchWAVDataLen(wavFile)
-			wavFile.Close() //nolint:errcheck // flush already happened per-write
+			wavFile.Close() //nolint:errcheck // flushed above
 		}
 		return err
 	case <-ctx.Done():
-		if wavFile != nil {
+		if wavFile != nil && sink != nil {
+			_ = sink.Close() //nolint:errcheck // signal path: keep what arrived
 			patchWAVDataLen(wavFile)
 			wavFile.Close() //nolint:errcheck // signal path
 		}
@@ -365,7 +374,9 @@ func drainSpeakerFile(ctx context.Context, sockPath, outPath string) error {
 }
 
 // wavFilePlayer adapts an io.Writer onto voice.Player for file mode:
-// Play appends the burst payload (the WAV bytes the sink built).
+// Play appends the burst payload (RAW PCM since the 2026-11-09 contract
+// amendment; the file's one canonical header is written at open and
+// patched at close).
 type wavFilePlayer struct {
 	w io.Writer
 }
@@ -470,7 +481,10 @@ func runVoiceLocalLive(ctx context.Context, open voiceLocalOpenResult) error {
 		micBytes = n
 		done <- err
 	}()
-	// speaker: out socket -> sink (burst WAVs -> oto).
+	// speaker: out socket -> sink (raw PCM bursts -> oto). No per-read
+	// flush: the gap heuristic closes bursts on real sentence breaks, and
+	// the final flush happens in the exit paths (a per-read Flush wrapped
+	// every paced chunk in its own WAV header - the 2026-11-09 jitter).
 	go func() {
 		buf := make([]byte, 8*1024)
 		for {
@@ -482,11 +496,11 @@ func runVoiceLocalLive(ctx context.Context, open voiceLocalOpenResult) error {
 				}
 			}
 			if rerr != nil {
+				if ferr := sink.Flush(); ferr != nil {
+					done <- ferr
+					return
+				}
 				done <- nil // daemon closed the pair: call ended
-				return
-			}
-			if err := sink.Flush(); err != nil {
-				done <- err
 				return
 			}
 		}

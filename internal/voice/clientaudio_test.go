@@ -72,8 +72,11 @@ func TestSpeakerSinkBurst(t *testing.T) {
 	if fp.playN != 1 {
 		t.Fatalf("want 1 play after flush, got %d", fp.playN)
 	}
-	if got := fp.bursts[0]; !bytes.HasPrefix(got, []byte("RIFF")) || !bytes.HasSuffix(got, []byte("pcm-pcm")) {
-		t.Fatalf("burst is not header+pcm: %d bytes", len(got))
+	// 2026-11-09 contract amendment: bursts are RAW PCM (no per-burst
+	// header). The players are raw sinks - oto parses no WAV header and
+	// the --out file carries its one canonical header.
+	if got := fp.bursts[0]; !bytes.Equal(got, []byte("pcm-pcm")) {
+		t.Fatalf("burst is not raw pcm: %d bytes %q", len(got), got)
 	}
 	// Second burst after the gap -> second Play.
 	time.Sleep(60 * time.Millisecond)

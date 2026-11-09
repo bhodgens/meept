@@ -5,15 +5,27 @@ package voice
 // ffmpeg pipe, or a --in file as raw s16le), SpeakerSink drains the
 // .out socket into per-burst WAVs handed to a player seam.
 //
-// Burst contract (leaf 08 spec): buffer PCM between playback bursts and
-// hand each burst to the player as ONE 44-byte-header WAV
-// (s16le@16k mono). A burst ends on Flush() OR on a gap longer than
-// SinkGap - the child paces chunks continuously while speaking and the
-// barge-in clear opens a real gap, so the gap heuristic bounds a burst
-// to one spoken sentence-group. Clear() drops the pending burst (barge-
-// in: never play the interrupted tail). Accepted limitation (spec
-// notes it): oto's Play runs a burst to completion - Clear stops the
-// NEXT burst, not the one already handed to the driver.
+// Burst contract (leaf 08 spec, amended 2026-11-09): buffer PCM between
+// playback bursts and hand each burst to the player as ONE raw s16le@16k
+// PCM block. Bursts end on Flush() OR on a gap longer than SinkGap - the
+// child paces chunks continuously while speaking and the barge-in clear
+// opens a real gap, so the gap heuristic bounds a burst to one spoken
+// sentence-group. Clear() drops the pending burst (barge-in: never play
+// the interrupted tail). Accepted limitation (spec notes it): oto's Play
+// runs a burst to completion - Clear stops the NEXT burst, not the one
+// already handed to the driver.
+//
+// WHY RAW PCM (not per-burst WAV headers): the players are raw-PCM sinks
+// (oto v3 plays bytes at the context rate, parsing NO headers; the file
+// player appends into a file that already carries the one canonical
+// header written at open and patched at close). Prepending a 44-byte
+// header per burst played those bytes as garbage samples between every
+// burst - the live "jittery" noise - and corrupted --out files with
+// nested RIFF headers (live defect 2026-11-09, whisper heard "(buzzing)").
+// The pre-amendment per-read Flush in the CLI drain loops made EVERY
+// 640-byte paced chunk its own header-wrapped burst (stride 684); the
+// CLI loops now flush only on stream end, leaving the gap heuristic to
+// bound bursts to sentence groups.
 
 import (
 	"bytes"
@@ -205,9 +217,11 @@ type Player interface {
 // or a barge-in clear) ends the burst.
 const SinkGap = 350 * time.Millisecond
 
-// SpeakerSink turns the .out PCM stream into per-burst WAVs for the
-// player. NOT concurrency-safe beyond Close/Clear (the CLI drains the
-// out socket from one goroutine).
+// SpeakerSink turns the .out PCM stream into per-burst RAW PCM blocks for
+// the player (no per-burst WAV header: see the amended burst contract
+// above - oto parses no headers and the --out file carries the one
+// canonical header written at open). NOT concurrency-safe beyond
+// Close/Clear (the CLI drains the out socket from one goroutine).
 type SpeakerSink struct {
 	player    Player
 	gap       time.Duration
@@ -238,13 +252,13 @@ func (s *SpeakerSink) Write(pcm []byte) (int, error) {
 	return len(pcm), nil
 }
 
-// Flush hands the pending burst to the player as one 44-byte-header
-// WAV. Empty buffer = no-op (flush-before-every-read stays cheap).
+// Flush hands the pending burst to the player as one RAW PCM block (the
+// burst contract above: no per-burst header). Empty buffer = no-op.
 func (s *SpeakerSink) Flush() error {
 	if s.buf.Len() == 0 {
 		return nil
 	}
-	burst := append(NewWAVHeader(micSampleRate, micChannels, s.buf.Len()), s.buf.Bytes()...)
+	burst := s.buf.Bytes()
 	s.buf.Reset()
 	if s.player == nil {
 		return nil
