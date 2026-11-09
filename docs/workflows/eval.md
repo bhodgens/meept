@@ -137,38 +137,3 @@ Path traversal (`..`, absolute paths, symlink escape) is also denied.
 `MemoryFact` is a typed, time-bounded preference/restriction/account/temporal
 store. Retrieval is via the `memory_fact_search` tool plus optional injection
 (capped). Extraction runs after session close via the reflection path.
-
----
-
-## Trace Analysis Evaluation (HALO)
-
-The `AnalysisSession` type supports multi-turn human-in-the-loop review of trace
-analysis results. Sessions have a lifecycle: **active** → **paused** →
-**completed**. Each turn records a user query, analyst response, and references
-to trace/span IDs.
-
-### State machine
-
-```
-active ──Pause()──> paused ──Resume()──> active
-  │                        │
-  │  Close()               │  Close()
-  └────────────────────────┴──> completed (read-only)
-```
-
-### Usage
-
-```go
-mgr := NewAnalysisSessionManager(basePath)
-session := mgr.CreateSession(traceIDs, failureModes)
-session.AddTurn("What traces are affected?", "3 traces show the issue.", nil, nil)
-session.Close()
-data, _ := session.ExportJSON()
-```
-
-### Edge cases
-
-- Adding turns after `Close()` returns `nil` — caller must check
-- `Resume()` and `Pause()` are no-ops on incompatible states (no panic)
-- `GetFollowUpSuggestions()` returns `nil` for sessions with no turns
-- Follow-up suggestions are generated at turn-commit time, not lazily
