@@ -5,9 +5,11 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
@@ -178,6 +180,10 @@ func OpenExisting(path string) (*VectorShard, error) {
 		efSearch:  DefaultEFSearch,
 		shardID:   filepath.Base(path),
 	}
+	if err := shard.ensureUnitTypeColumn(); err != nil {
+		db.Close()
+		return nil, err
+	}
 
 	return shard, nil
 }
@@ -194,10 +200,16 @@ func (s *VectorShard) createIndex() error {
 			memory_id TEXT PRIMARY KEY,
 			content TEXT NOT NULL,
 			shard_id TEXT,
-			created_at TEXT DEFAULT (datetime('now'))
+			created_at TEXT DEFAULT (datetime('now')),
+			unit_type TEXT
 		)
 	`); err != nil {
 		return fmt.Errorf("failed to create metadata table: %w", err)
+	}
+	// Existing shard files keep the pre-unit_type table (CREATE IF NOT EXISTS
+	// does not add columns). Search reads this column to tag hits.
+	if err := s.ensureUnitTypeColumn(); err != nil {
+		return err
 	}
 
 	if _, err := s.db.Exec(`
@@ -209,6 +221,55 @@ func (s *VectorShard) createIndex() error {
 		return fmt.Errorf("failed to create rowid mapping table: %w", err)
 	}
 
+	return nil
+}
+
+// ensureUnitTypeColumn adds metadata.unit_type on shard files created before
+// the column existed. Idempotent: a present column is a no-op, and a racing
+// ALTER that loses is treated as success.
+func (s *VectorShard) ensureUnitTypeColumn() error {
+	var name string
+	err := s.db.QueryRow(`SELECT name FROM pragma_table_info('metadata') WHERE name = 'unit_type'`).Scan(&name)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("probe metadata.unit_type: %w", err)
+	}
+	if _, err := s.db.Exec(`ALTER TABLE metadata ADD COLUMN unit_type TEXT`); err != nil {
+		if strings.Contains(err.Error(), "duplicate column") {
+			return nil
+		}
+		return fmt.Errorf("add metadata.unit_type: %w", err)
+	}
+	return nil
+}
+
+// SetUnitType persists a unit tag on the metadata row Search already joins.
+// Generic shard hits then carry Metadata[unit_type] so SelectBalanced can
+// apply the bridge cap. Empty unitType clears the tag (source unit).
+func (s *VectorShard) SetUnitType(ctx context.Context, memoryID, unitType string) error {
+	if memoryID == "" {
+		return fmt.Errorf("set unit type: memory_id is empty")
+	}
+	s.mu.Lock() //nolint:mutexio // mutex serializes sqlite connection access across goroutines; write bound to the protected connection
+	defer s.mu.Unlock()
+
+	var tag any
+	if unitType != "" {
+		tag = unitType
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE metadata SET unit_type = ? WHERE memory_id = ?`, tag, memoryID) //nolint:mutexio // mutex serializes sqlite connection access; write bound to protected conn
+	if err != nil {
+		return fmt.Errorf("set unit type: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set unit type: rows affected: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("set unit type: no metadata row for %s", memoryID)
+	}
 	return nil
 }
 
@@ -364,7 +425,7 @@ func (s *VectorShard) Search(ctx context.Context, queryEmbedding []float32, K in
 	queryJSON := JSONFloat32Slice(queryEmbedding)
 
 	query := `
-		SELECT e.rowid, e.distance, r.memory_id, m.content
+		SELECT e.rowid, e.distance, r.memory_id, m.content, m.unit_type
 		FROM embeddings e
 		JOIN embedding_rowids r ON e.rowid = r.rowid
 		LEFT JOIN metadata m ON r.memory_id = m.memory_id
@@ -384,15 +445,25 @@ func (s *VectorShard) Search(ctx context.Context, queryEmbedding []float32, K in
 		var distance float32
 		var memoryID string
 		var content sql.NullString
+		var unitType sql.NullString
 
-		if err := rows.Scan(&rowID, &distance, &memoryID, &content); err != nil {
+		if err := rows.Scan(&rowID, &distance, &memoryID, &content, &unitType); err != nil {
 			continue
+		}
+
+		// NULL/empty unit_type stays nil metadata so untyped rows remain
+		// source units. A persisted tag (unit_type=bridge) rides the hit
+		// so SelectBalanced's k_b cap applies on this generic path.
+		var meta map[string]any
+		if unitType.Valid && unitType.String != "" {
+			meta = map[string]any{BridgeMetadataKey: unitType.String}
 		}
 
 		results = append(results, SearchResult{
 			RawRowID:         rowID,
 			MemoryID:         memoryID,
 			Content:          content.String,
+			Metadata:         meta,
 			VectorSimilarity: cosineSim(float64(distance)),
 			RelevanceScore:   cosineSim(float64(distance)),
 		})
