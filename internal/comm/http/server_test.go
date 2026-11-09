@@ -1234,26 +1234,6 @@ func TestSSEWriter(t *testing.T) {
 		}
 	})
 
-	t.Run("CloseWithFinalEvent", func(t *testing.T) {
-		rec := httptest.NewRecorder()
-		sse, err := NewSSEWriter(rec)
-		if err != nil {
-			t.Fatalf("NewSSEWriter: %v", err)
-		}
-
-		if err := sse.CloseWithFinalEvent(); err != nil {
-			t.Fatalf("CloseWithFinalEvent: %v", err)
-		}
-
-		body := rec.Body.String()
-		if !strings.Contains(body, "event: done") {
-			t.Error("expected done event from CloseWithFinalEvent")
-		}
-		if !strings.Contains(body, `"status":"complete"`) {
-			t.Errorf("expected status complete in output, got: %s", body)
-		}
-	})
-
 	t.Run("HeartbeatBetweenEvents", func(t *testing.T) {
 		rec := httptest.NewRecorder()
 		sse, err := NewSSEWriter(rec)

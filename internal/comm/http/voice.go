@@ -206,19 +206,6 @@ func (v *VoiceRoutes) serveVoiceRoute(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// Register mounts the webhook and media routes on mux. With the public key
-// unset the routes are STILL registered (so callers see a clean 503 rather
-// than a 404) but fail closed; the WARN is logged exactly once here.
-func (v *VoiceRoutes) Register(mux *http.ServeMux) {
-	if !v.cfg.Enabled {
-		v.log.Warn("voice routes disabled: voice.telnyx_public_key is not configured; "+
-			"Telnyx webhook and media endpoints return 503 (fail-closed, never signature-optional)",
-			"webhook_path", v.WebhookPath(), "media_path", v.MediaPath())
-	}
-	mux.HandleFunc("POST "+v.WebhookPath(), v.handleWebhook)
-	mux.HandleFunc("GET "+v.MediaPath(), v.handleMedia)
-}
-
 // failClosed answers 503 for a route whose public key is not configured.
 func (v *VoiceRoutes) failClosed(w http.ResponseWriter) {
 	http.Error(w, "voice routes disabled: telnyx public key not configured", http.StatusServiceUnavailable)
