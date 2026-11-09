@@ -10,7 +10,6 @@ require (
 	charm.land/lipgloss/v2 v2.0.3
 	github.com/alecthomas/chroma/v2 v2.14.0
 	github.com/asg017/sqlite-vec-go-bindings v0.1.7-alpha.2
-	github.com/caimlas/meept/sdk/go v0.0.0-00010101000000-000000000000
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/charmbracelet/glamour v0.8.0
 	github.com/charmbracelet/lipgloss v1.1.0
