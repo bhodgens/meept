@@ -1,11 +1,17 @@
 package agent
 
-import (
-	"fmt"
-	"math"
-	"slices"
-	"strings"
-)
+import "fmt"
+
+// The WIRED half of the turn counter (HALO Phase 4/7): the turnCounter type
+// lives in subagent_pool.go (Increment/Remaining/GetCount/Reset) and feeds
+// the rlm_analyzer Nudge chain. This file keeps only the nudge MESSAGE
+// policy that chain calls (Nudge + nudgeMessageFor + thresholdFor/thresholdTagFor).
+//
+// The unwired remainder — GetRemainingTurns, GetNudgeThreshold, RoundTo,
+// nudgeInfo.String — was deleted per the HALO Phase 7 plan decision
+// (docs/plans/2026-07-17-halo-implementation-status.md:126 "PARTIAL — turn
+// counter exists, nudges missing"; :165 recommendation "Skip Phase 7 — UX
+// polish, not capability gap"): zero production consumers at HEAD.
 
 // turnNudge defines the threshold and message for a self-pacing nudge.
 type turnNudge struct {
@@ -26,22 +32,14 @@ var nudgeTable = []turnNudge{
 }
 
 // nudgeInfo carries the result of a Nudge() call.
-// All fields are exported for JSON serialization through the RLM output path.
 type nudgeInfo struct {
-	// Message is the human-readable nudge text for injection into the agent prompt.
-	Message string `json:"message"`
-	// Threshold is the threshold fraction that was crossed (0.0 if no threshold crossed).
-	Threshold float64 `json:"threshold"`
-	// Tag categorizes the nudge urgency level.
-	Tag string `json:"tag"`
-	// CurrentTurn is the turn at the time of the nudge.
-	CurrentTurn int `json:"current_turn"`
-	// Limit is the configured maximum turn limit.
-	Limit int `json:"limit"`
-	// Remaining is the turns left after increment.
-	Remaining int `json:"remaining"`
-	// Exhausted is true when the turn limit was reached.
-	Exhausted bool `json:"exhausted"`
+	Message     string  `json:"message"`
+	Threshold   float64 `json:"threshold"`
+	Tag         string  `json:"tag"`
+	CurrentTurn int     `json:"current_turn"`
+	Limit       int     `json:"limit"`
+	Remaining   int     `json:"remaining"`
+	Exhausted   bool    `json:"exhausted"`
 }
 
 // thresholdFor returns the highest nudge threshold that applies for turn/tot.
@@ -51,9 +49,9 @@ func thresholdFor(turn, tot int) float64 {
 		return 0.0
 	}
 	frac := float64(turn) / float64(tot)
-	for _, tbl := range slices.Backward(nudgeTable) {
-		if frac >= tbl.Threshold {
-			return tbl.Threshold
+	for i := len(nudgeTable) - 1; i >= 0; i-- {
+		if frac >= nudgeTable[i].Threshold {
+			return nudgeTable[i].Threshold
 		}
 	}
 	return 0.0
@@ -65,9 +63,9 @@ func thresholdTagFor(turn, tot int) string {
 		return ""
 	}
 	frac := float64(turn) / float64(tot)
-	for _, tbl := range slices.Backward(nudgeTable) {
-		if frac >= tbl.Threshold {
-			return tbl.Tag
+	for i := len(nudgeTable) - 1; i >= 0; i-- {
+		if frac >= nudgeTable[i].Threshold {
+			return nudgeTable[i].Tag
 		}
 	}
 	return ""
@@ -89,7 +87,8 @@ func nudgeMessageFor(turn, tot int) string {
 	frac := float64(turn) / float64(tot)
 
 	// Scan thresholds from highest to lowest for progressive urgency.
-	for _, tbl := range slices.Backward(nudgeTable) {
+	for i := len(nudgeTable) - 1; i >= 0; i-- {
+		tbl := nudgeTable[i]
 		if frac >= tbl.Threshold {
 			if tbl.Tag != "" {
 				return fmt.Sprintf(tbl.Message, remaining)
@@ -153,45 +152,4 @@ func (tc *turnCounter) Nudge() nudgeInfo {
 		Remaining:   remaining,
 		Exhausted:   false,
 	}
-}
-
-// GetRemainingTurns returns the number of turns remaining.
-// This method exists so RLM analyzer code can report remaining turns
-// in telemetry without needing to construct the nudge string.
-func (tc *turnCounter) GetRemainingTurns() int {
-	return tc.Remaining()
-}
-
-// GetNudgeThreshold returns the highest threshold fraction that the
-// current turn position has crossed (0.0 if below the first threshold).
-// Callers can use this to decide whether to inject progressive-urgency
-// context into the LLM prompt.
-func (tc *turnCounter) GetNudgeThreshold() float64 {
-	tc.mu.Lock()
-	cur := tc.current
-	lim := tc.limit
-	tc.mu.Unlock()
-
-	return thresholdFor(cur, lim)
-}
-
-// RoundTo returns f rounded to n decimal places.
-func RoundTo(f float64, n int) float64 {
-	pow := math.Pow(10, float64(n))
-	return math.Round(f*pow) / pow
-}
-
-// String returns a compact representation of the nudge info.
-func (n nudgeInfo) String() string {
-	parts := []string{
-		fmt.Sprintf("threshold=%.2f", n.Threshold),
-		fmt.Sprintf("tag=%s", n.Tag),
-		fmt.Sprintf("turn=%d", n.CurrentTurn),
-		fmt.Sprintf("limit=%d", n.Limit),
-		fmt.Sprintf("remaining=%d", n.Remaining),
-	}
-	if n.Exhausted {
-		parts = append(parts, "exhausted=true")
-	}
-	return strings.Join(parts, ", ")
 }
