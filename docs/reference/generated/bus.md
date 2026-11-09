@@ -35,6 +35,7 @@ Package bus provides a channel\-based pub/sub message bus.
 - [type SubMetadata](<#SubMetadata>)
 - [type Subscriber](<#Subscriber>)
   - [func SubscribeT\[T any\]\(b \*MessageBus, id string, t Topic\[T\], fn func\(T\)\) \*Subscriber](<#SubscribeT>)
+  - [func \(s \*Subscriber\) DroppedCount\(\) int64](<#Subscriber.DroppedCount>)
 - [type SubscriptionHandler](<#SubscriptionHandler>)
   - [func NewSubscriptionHandler\(bus \*MessageBus, logger \*slog.Logger\) \*SubscriptionHandler](<#NewSubscriptionHandler>)
   - [func \(h \*SubscriptionHandler\) Start\(parentCtx context.Context\)](<#SubscriptionHandler.Start>)
@@ -297,6 +298,7 @@ Subscriber represents a channel that receives messages.
 	    ID      string
 	    Topic   string
 	    Channel chan *models.BusMessage
+	    // contains filtered or unexported fields
 	}
 
 <a name="SubscribeT"></a>
@@ -309,6 +311,13 @@ SubscribeT subscribes to t and invokes fn with each decoded payload.
 Decode failures are logged at warn level \(topic \+ type name\) and the message is dropped.
 
 Lifetime: SubscribeT starts exactly ONE reader goroutine that runs until the subscriber's channel is closed \(by MessageBus.Close or Unsubscribe\). Callers must Unsubscribe the returned Subscriber when done, exactly as with the raw Subscribe API.
+
+<a name="Subscriber.DroppedCount"></a>
+### func \(\*Subscriber\) DroppedCount
+
+	func (s *Subscriber) DroppedCount() int64
+
+DroppedCount returns the number of messages dropped for this subscriber because its channel was full at publish time. Nil\-safe \(a nil Subscriber has dropped nothing\).
 
 <a name="SubscriptionHandler"></a>
 ## type SubscriptionHandler

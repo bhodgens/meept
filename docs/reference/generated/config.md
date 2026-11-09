@@ -145,6 +145,7 @@ Package config provides configuration loading and validation for meept.
   - [func \(s \*ConfigSyncer\) Status\(\) SyncStatus](<#ConfigSyncer.Status>)
   - [func \(s \*ConfigSyncer\) Stop\(\)](<#ConfigSyncer.Stop>)
 - [type ConflictConfig](<#ConflictConfig>)
+- [type ContactConfig](<#ContactConfig>)
 - [type ContextAssemblerConfig](<#ContextAssemblerConfig>)
 - [type ContextDiscoveryConfig](<#ContextDiscoveryConfig>)
 - [type DaemonConfig](<#DaemonConfig>)
@@ -243,6 +244,7 @@ Package config provides configuration loading and validation for meept.
   - [func NewMerger\(baseDir, checkoutDir, nodeID string, l logger\) \*Merger](<#NewMerger>)
   - [func \(m \*Merger\) FileWouldChange\(path string\) \(bool, error\)](<#Merger.FileWouldChange>)
   - [func \(m \*Merger\) Merge\(commitHash string\) \(\*MergeResult, error\)](<#Merger.Merge>)
+- [type MessagingConfig](<#MessagingConfig>)
 - [type MetricsConfig](<#MetricsConfig>)
 - [type Model](<#Model>)
 - [type ModelParams](<#ModelParams>)
@@ -337,6 +339,7 @@ Package config provides configuration loading and validation for meept.
 - [type ShadowShadowingConfig](<#ShadowShadowingConfig>)
 - [type ShadowTeacherConfig](<#ShadowTeacherConfig>)
 - [type ShellPermissionsConfig](<#ShellPermissionsConfig>)
+- [type SignalConfig](<#SignalConfig>)
 - [type SkillsConfig](<#SkillsConfig>)
 - [type SkillsEvolverConfig](<#SkillsEvolverConfig>)
 - [type SkillsRankingConfig](<#SkillsRankingConfig>)
@@ -1919,7 +1922,9 @@ Config is the root configuration structure loaded from meept.toml.
 	    GitHub              GitHubConfig              `json:"github"               toml:"github"`
 	    Intake              IntakeConfig              `json:"intake"               toml:"intake"`
 	    Slack               SlackConfig               `json:"slack"                toml:"slack"`
+	    Signal              SignalConfig              `json:"signal"               toml:"signal"`
 	    Delegation          DelegationConfig          `json:"delegation,omitzero"  toml:"delegation"`
+	    Contact             ContactConfig             `json:"contact,omitzero"     toml:"contact"`
 	}
 
 <a name="DefaultConfig"></a>
@@ -2136,6 +2141,20 @@ ConflictConfig gates LLM conflict detection on the L1 claim\-extraction path \(t
 	    TopK int `json:"top_k" toml:"top_k"`
 	    // MaxBatch caps candidates per conflict LLM call. Default 20.
 	    MaxBatch int `json:"max_batch" toml:"max_batch"`
+	}
+
+<a name="ContactConfig"></a>
+## type ContactConfig
+
+ContactConfig configures the employee contact chain \(\[contact\], contact\-channels plan leaf 01 T5\). DefaultChannels is the employee default fallback chain applied when a contact record has no policy; HopDelayMS paces the wait before each fallback channel attempt.
+
+	type ContactConfig struct {
+	    // DefaultChannels is the ordered employee default chain (record
+	    // policy empty = this list at chain time).
+	    DefaultChannels []string `json:"default_channels" toml:"default_channels"`
+	    // HopDelayMS is the wait before each fallback channel attempt
+	    // (the chain's pacing; 0 means no inter-channel delay).
+	    HopDelayMS int `json:"hop_delay_ms" toml:"hop_delay_ms"`
 	}
 
 <a name="ContextAssemblerConfig"></a>
@@ -2385,6 +2404,10 @@ EmployeeLegConfig is one per\-agent voice routing default \(voice tree CL4, OQ4 
 	    Leg      string `json:"leg"        toml:"leg"`
 	    TTSVoice string `json:"tts_voice"  toml:"tts_voice"`
 	    TTSModel string `json:"tts_model"  toml:"tts_model"`
+	    // FreshSession is tri-state: nil = inherit voice.fresh_session_per_call;
+	    // true/false = this employee's override. Pointer because JSON5 cannot
+	    // distinguish "absent" from false on a plain bool.
+	    FreshSession *bool `json:"fresh_session" toml:"fresh_session"`
 	}
 
 <a name="EmployeesAuditConfig"></a>
@@ -3717,6 +3740,27 @@ ApplyConfigFile is exposed so callers like the CLI can check if a file would cha
 	func (m *Merger) Merge(commitHash string) (*MergeResult, error)
 
 Merge applies shared \+ per\-node configs, returning applied/skipped/errored files.
+
+<a name="MessagingConfig"></a>
+## type MessagingConfig
+
+MessagingConfig holds the Telnyx SMS messaging settings \(\[voice.messaging\], contact\-channels plan leaf 12 T5\). Same Telnyx account as Call Control \(one API key via the secrets Broker\); the from number must carry a Messaging Profile \(ProfileID\). Enabled is false by default: a disabled block refuses every SMS attempt with ErrMessagingDisabled BEFORE any HTTP call. DLRWaitSeconds is the bounded wait for message.finalized before an attempt reports unavailable \(default 30\).
+
+Ops note \(documented, not coded\): application\-to\-person traffic from local numbers requires 10DLC brand\+campaign registration \(days to weeks\); the toll\-free\-verified path is recommended for this use case.
+
+	type MessagingConfig struct {
+	    // Enabled gates the whole messaging block; false (the default)
+	    // refuses every attempt before any HTTP call.
+	    Enabled bool `json:"enabled"          toml:"enabled"`
+	    // FromNumber is the E.164 sender number (must be bound to the
+	    // Messaging Profile in the Telnyx console).
+	    FromNumber string `json:"from_number"      toml:"from_number"`
+	    // ProfileID is the Telnyx Messaging Profile id sent on every send.
+	    ProfileID string `json:"profile_id"       toml:"profile_id"`
+	    // DLRWaitSeconds bounds the wait for message.finalized; 0 inherits
+	    // the telnyx.DefaultDLRWaitSeconds (30) at adapter construction.
+	    DLRWaitSeconds int `json:"dlr_wait_seconds" toml:"dlr_wait_seconds"`
+	}
 
 <a name="MetricsConfig"></a>
 ## type MetricsConfig
@@ -5312,6 +5356,43 @@ ShellPermissionsConfig configures the declarative shell permission table.
 	    Rules map[string]string `json:"rules" toml:"rules"`
 	}
 
+<a name="SignalConfig"></a>
+## type SignalConfig
+
+SignalConfig configures the signal\-cli sidecar \(\[signal\], contract C3 of the contact\-channels plan, owner leaf 10\): one supervised signal\-cli json\-rpc child per Signal account, serving calls and messages over a unix socket. Opt\-in — disabled by default; when disabled no subprocess is ever spawned. The daemon NEVER handles Signal account credentials: signal\-cli holds its own linked\-device state, and the supervisor only spawns the binary with the configured account handle. SocketPath supports the $\{VAR\} env indirection the JSON5 loader applies; the default resolves under $MEEPT\_HOME \(config.MeeptPath\("signal", "signal.sock"\)\).
+
+	type SignalConfig struct {
+	    // Enabled turns the sidecar on (default: false, opt-in). Disabled
+	    // means: never spawn signal-cli, never bind the socket.
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // Binary is the signal-cli executable (PATH-resolved).
+	    Binary string `json:"binary" toml:"binary"`
+	    // Account is the Signal account handle the child serves (-u);
+	    // signal-cli's own linked-device state holds the credentials.
+	    Account string `json:"account" toml:"account"`
+	    // SocketPath is the json-rpc unix socket the child binds. Empty
+	    // resolves to $MEEPT_HOME/signal/signal.sock at wiring time.
+	    SocketPath string `json:"socket_path" toml:"socket_path"`
+	    // IdleStopSeconds stops the child after this many seconds without
+	    // a client; signal-cli is expensive to keep warm. 0 disables idle
+	    // stop (child stays up while enabled).
+	    IdleStopSeconds int `json:"idle_stop_seconds" toml:"idle_stop_seconds"`
+	    // RestartBackoffMs is the base crash-restart backoff (0 = default
+	    // 1000ms); exponential, capped by RestartMaxBackoffMs.
+	    RestartBackoffMs int `json:"restart_backoff_ms" toml:"restart_backoff_ms"`
+	    // RestartMaxBackoffMs caps the restart backoff (0 = default
+	    // 30000ms).
+	    RestartMaxBackoffMs int `json:"restart_max_backoff_ms" toml:"restart_max_backoff_ms"`
+	    // MsgPerMinute throttles OUTBOUND signal messages (the signal_msg
+	    // contact channel's token bucket, leaf 11b). 0 = default 3.
+	    MsgPerMinute int `json:"msg_per_minute" toml:"msg_per_minute"`
+	    // AllowedUUIDs is the outbound/inbound Signal UUID allowlist both
+	    // signal channels consume (mirror of voice.allowed_numbers
+	    // posture). Empty = deny all (fail-closed; the wiring leaf decides
+	    // the disabled-posture default).
+	    AllowedUUIDs []string `json:"allowed_uuids" toml:"allowed_uuids"`
+	}
+
 <a name="SkillsConfig"></a>
 ## type SkillsConfig
 
@@ -5840,40 +5921,47 @@ VerificationDefaults holds daemon\-level verification defaults.
 	    // (opt-in defaults rule, docs/agents/opt-in-defaults.md). Declared
 	    // here in lieu of an in-field comment, which would split the field
 	    // block's gofmt alignment group.
-	    Enabled              bool                `json:"enabled"                toml:"enabled"`
-	    IdleStopSeconds      int                 `json:"idle_stop_seconds"      toml:"idle_stop_seconds"`
-	    OnnxRuntimeLib       string              `json:"onnx_runtime_lib"       toml:"onnx_runtime_lib"`
-	    STTProvider          string              `json:"stt_provider"           toml:"stt_provider"`
-	    TTSProvider          string              `json:"tts_provider"           toml:"tts_provider"`
-	    Filler               []string            `json:"filler"                 toml:"filler"`
-	    SupervisorEmployee   string              `json:"supervisor_employee"    toml:"supervisor_employee"`
-	    SupervisorEnabled    bool                `json:"supervisor_enabled"     toml:"supervisor_enabled"`
-	    SupervisorModel      string              `json:"supervisor_model"       toml:"supervisor_model"`
-	    SupervisorTimeoutMs  int                 `json:"supervisor_timeout_ms"  toml:"supervisor_timeout_ms"`
-	    VoiceModel           string              `json:"voice_model"            toml:"voice_model"`
-	    PublicStreamURL      string              `json:"public_stream_url"      toml:"public_stream_url"`
-	    ConnectionID         string              `json:"connection_id"          toml:"connection_id"`
-	    FromNumber           string              `json:"from_number"            toml:"from_number"`
-	    AllowedNumbers       []string            `json:"allowed_numbers"        toml:"allowed_numbers"`
-	    TimeoutSecs          int                 `json:"timeout_secs"           toml:"timeout_secs"`
-	    MaxCallMinutes       int                 `json:"max_call_minutes"       toml:"max_call_minutes"`
-	    SilencePromptSeconds int                 `json:"silence_prompt_seconds" toml:"silence_prompt_seconds"`
-	    TurnTimeoutSeconds   int                 `json:"turn_timeout_seconds"   toml:"turn_timeout_seconds"`
-	    MaxConcurrentCalls   int                 `json:"max_concurrent_calls"   toml:"max_concurrent_calls"`
-	    ReorderWindowFrames  int                 `json:"reorder_window_frames"  toml:"reorder_window_frames"`
-	    ReorderGapMs         int                 `json:"reorder_gap_ms"         toml:"reorder_gap_ms"`
-	    TelnyxPublicKey      string              `json:"telnyx_public_key"      toml:"telnyx_public_key"`
-	    ChildBinaryPath      string              `json:"child_binary_path"      toml:"child_binary_path"`
-	    LoopbackPlainAddr    string              `json:"loopback_plain_addr"    toml:"loopback_plain_addr"`
-	    DefaultEmployee      string              `json:"default_employee"       toml:"default_employee"`
-	    DefaultLeg           string              `json:"default_leg"            toml:"default_leg"`
-	    TTSModel             string              `json:"tts_model"              toml:"tts_model"`
-	    TTSVoice             string              `json:"tts_voice"              toml:"tts_voice"`
-	    STTModel             string              `json:"stt_model"              toml:"stt_model"`
-	    TTSBaseURL           string              `json:"tts_base_url"           toml:"tts_base_url"`
-	    STTBaseURL           string              `json:"stt_base_url"           toml:"stt_base_url"`
-	    Local                LocalConfig         `json:"local"                  toml:"local"`
-	    EmployeeLeg          []EmployeeLegConfig `json:"employee_leg"   toml:"employee_leg"`
+	    Enabled              bool     `json:"enabled"                toml:"enabled"`
+	    IdleStopSeconds      int      `json:"idle_stop_seconds"      toml:"idle_stop_seconds"`
+	    OnnxRuntimeLib       string   `json:"onnx_runtime_lib"       toml:"onnx_runtime_lib"`
+	    STTProvider          string   `json:"stt_provider"           toml:"stt_provider"`
+	    TTSProvider          string   `json:"tts_provider"           toml:"tts_provider"`
+	    Filler               []string `json:"filler"                 toml:"filler"`
+	    SupervisorEmployee   string   `json:"supervisor_employee"    toml:"supervisor_employee"`
+	    SupervisorEnabled    bool     `json:"supervisor_enabled"     toml:"supervisor_enabled"`
+	    SupervisorModel      string   `json:"supervisor_model"       toml:"supervisor_model"`
+	    SupervisorTimeoutMs  int      `json:"supervisor_timeout_ms"  toml:"supervisor_timeout_ms"`
+	    VoiceModel           string   `json:"voice_model"            toml:"voice_model"`
+	    PublicStreamURL      string   `json:"public_stream_url"      toml:"public_stream_url"`
+	    ConnectionID         string   `json:"connection_id"          toml:"connection_id"`
+	    FromNumber           string   `json:"from_number"            toml:"from_number"`
+	    AllowedNumbers       []string `json:"allowed_numbers"        toml:"allowed_numbers"`
+	    TimeoutSecs          int      `json:"timeout_secs"           toml:"timeout_secs"`
+	    MaxCallMinutes       int      `json:"max_call_minutes"       toml:"max_call_minutes"`
+	    SilencePromptSeconds int      `json:"silence_prompt_seconds" toml:"silence_prompt_seconds"`
+	    TurnTimeoutSeconds   int      `json:"turn_timeout_seconds"   toml:"turn_timeout_seconds"`
+	    MaxConcurrentCalls   int      `json:"max_concurrent_calls"   toml:"max_concurrent_calls"`
+	    ReorderWindowFrames  int      `json:"reorder_window_frames"  toml:"reorder_window_frames"`
+	    ReorderGapMs         int      `json:"reorder_gap_ms"         toml:"reorder_gap_ms"`
+	    TelnyxPublicKey      string   `json:"telnyx_public_key"      toml:"telnyx_public_key"`
+	    ChildBinaryPath      string   `json:"child_binary_path"      toml:"child_binary_path"`
+	    LoopbackPlainAddr    string   `json:"loopback_plain_addr"    toml:"loopback_plain_addr"`
+	    DefaultEmployee      string   `json:"default_employee"       toml:"default_employee"`
+	    DefaultLeg           string   `json:"default_leg"            toml:"default_leg"`
+	    TTSModel             string   `json:"tts_model"              toml:"tts_model"`
+	    TTSVoice             string   `json:"tts_voice"              toml:"tts_voice"`
+	    STTModel             string   `json:"stt_model"              toml:"stt_model"`
+	    TTSBaseURL           string   `json:"tts_base_url"           toml:"tts_base_url"`
+	    STTBaseURL           string   `json:"stt_base_url"           toml:"stt_base_url"`
+	    // FreshSessionPerCall (opt-in, default false): each voice call opens a
+	    // brand-new session instead of reusing the (employee, target) shared
+	    // conversation, so turn history never snowballs across calls. The day
+	    // brief stays the only cross-call context channel. Per-employee
+	    // override: employee_leg rows carry fresh_session (tri-state).
+	    FreshSessionPerCall bool                `json:"fresh_session_per_call" toml:"fresh_session_per_call"`
+	    Local               LocalConfig         `json:"local"                  toml:"local"`
+	    EmployeeLeg         []EmployeeLegConfig `json:"employee_leg"   toml:"employee_leg"`
+	    Messaging           MessagingConfig     `json:"messaging"              toml:"messaging"`
 	}
 
 <a name="WatchdogConfig"></a>

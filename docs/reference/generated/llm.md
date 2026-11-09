@@ -93,7 +93,6 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
 - [func RemoveRuntimeHandlesForPids\(cfgs \[\]\*RuntimeConfig, records \[\]SpawnRecord, pids \[\]int\)](<#RemoveRuntimeHandlesForPids>)
 - [func RemoveSpawnRecord\(pidFile string\)](<#RemoveSpawnRecord>)
 - [func ResolveBudget\(rc \*ReasoningConfig, agent \*AgentReasoningConfig, modelDefault \*ReasoningConfig, globalBudgets map\[string\]int\) \*int](<#ResolveBudget>)
-- [func RunModelPicker\(config ModelPickerConfig\) \(\*ProviderDef, \*ModelCatalogEntry, error\)](<#RunModelPicker>)
 - [func RunSupervisor\(opts SupervisorOptions\) int](<#RunSupervisor>)
 - [func RuntimeHasLiveOwner\(cfgs \[\]\*RuntimeConfig, command string, pid int\) bool](<#RuntimeHasLiveOwner>)
 - [func SchemaModeValid\(s string\) bool](<#SchemaModeValid>)
@@ -163,13 +162,12 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func WithAnthropicTokenCache\(cache ResponseCache\) AnthropicClientOption](<#WithAnthropicTokenCache>)
   - [func WithAnthropicTokenResolver\(tr TokenResolver, provider string\) AnthropicClientOption](<#WithAnthropicTokenResolver>)
   - [func WithAnthropicUploadStore\(store UploadStore\) AnthropicClientOption](<#WithAnthropicUploadStore>)
+- [type AppliedLoRA](<#AppliedLoRA>)
 - [type AuthType](<#AuthType>)
 - [type BackoffPlan](<#BackoffPlan>)
   - [func DefaultBackoffPlan\(class FailureClass, now time.Time, cfg FailurePolicyConfig\) BackoffPlan](<#DefaultBackoffPlan>)
   - [func \(p BackoffPlan\) NextAttempt\(now time.Time, attempt int, prior time.Time\) time.Time](<#BackoffPlan.NextAttempt>)
   - [func \(p BackoffPlan\) ShouldGiveUp\(now time.Time\) bool](<#BackoffPlan.ShouldGiveUp>)
-- [type BrokerConfig](<#BrokerConfig>)
-- [type BrokerStatus](<#BrokerStatus>)
 - [type Budget](<#Budget>)
   - [func NewBudget\(cfg BudgetConfig, logger \*slog.Logger\) \*Budget](<#NewBudget>)
   - [func \(b \*Budget\) CheckBudget\(\) BudgetCheckResult](<#Budget.CheckBudget>)
@@ -400,7 +398,6 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
 - [type FirewallStats](<#FirewallStats>)
 - [type FunctionDef](<#FunctionDef>)
 - [type FunctionParameters](<#FunctionParameters>)
-- [type HandoffResult](<#HandoffResult>)
 - [type HealthChangeCallback](<#HealthChangeCallback>)
 - [type HealthCheckConfig](<#HealthCheckConfig>)
 - [type HealthChecker](<#HealthChecker>)
@@ -463,18 +460,6 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
 - [type LoadedAdapter](<#LoadedAdapter>)
 - [type MetricsRecorder](<#MetricsRecorder>)
 - [type ModelAliasEntry](<#ModelAliasEntry>)
-- [type ModelBroker](<#ModelBroker>)
-  - [func NewModelBroker\(cfg BrokerConfig\) \*ModelBroker](<#NewModelBroker>)
-  - [func \(b \*ModelBroker\) ActiveQuotaBlocks\(\) \[\]QuotaBlockStatus](<#ModelBroker.ActiveQuotaBlocks>)
-  - [func \(b \*ModelBroker\) Chat\(ctx context.Context, messages \[\]ChatMessage, opts ...ChatOption\) \(\*Response, error\)](<#ModelBroker.Chat>)
-  - [func \(b \*ModelBroker\) ChatWithModel\(ctx context.Context, modelRef string, messages \[\]ChatMessage, opts ...ChatOption\) \(\*Response, error\)](<#ModelBroker.ChatWithModel>)
-  - [func \(b \*ModelBroker\) ChatWithModelProgress\(ctx context.Context, modelRef string, messages \[\]ChatMessage, progress ProgressCallback, opts ...ChatOption\) \(\*Response, error\)](<#ModelBroker.ChatWithModelProgress>)
-  - [func \(b \*ModelBroker\) ChatWithProgress\(ctx context.Context, messages \[\]ChatMessage, progress ProgressCallback, opts ...ChatOption\) \(\*Response, error\)](<#ModelBroker.ChatWithProgress>)
-  - [func \(b \*ModelBroker\) ChatterForModel\(modelRef string\) Chatter](<#ModelBroker.ChatterForModel>)
-  - [func \(b \*ModelBroker\) Config\(\) \*ModelConfig](<#ModelBroker.Config>)
-  - [func \(b \*ModelBroker\) GetStatus\(\) BrokerStatus](<#ModelBroker.GetStatus>)
-  - [func \(b \*ModelBroker\) QuotaBlockedUntil\(credentialKey string\) time.Time](<#ModelBroker.QuotaBlockedUntil>)
-  - [func \(b \*ModelBroker\) UpdateHealth\(ctx context.Context\) error](<#ModelBroker.UpdateHealth>)
 - [type ModelCatalogEntry](<#ModelCatalogEntry>)
   - [func GetAllCatalogModels\(\) \[\]ModelCatalogEntry](<#GetAllCatalogModels>)
   - [func GetModel\(providerID, modelID string\) \(\*ModelCatalogEntry, bool\)](<#GetModel>)
@@ -491,16 +476,6 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func OpenModelLogger\(providerID, modelKey string\) \(\*ModelLogger, error\)](<#OpenModelLogger>)
   - [func \(m \*ModelLogger\) Close\(\) error](<#ModelLogger.Close>)
   - [func \(m \*ModelLogger\) Log\(event string, kv ...any\)](<#ModelLogger.Log>)
-- [type ModelPicker](<#ModelPicker>)
-  - [func NewModelPicker\(config ModelPickerConfig\) \*ModelPicker](<#NewModelPicker>)
-  - [func \(m \*ModelPicker\) GetSelectedModel\(\) \*ModelCatalogEntry](<#ModelPicker.GetSelectedModel>)
-  - [func \(m \*ModelPicker\) GetSelectedProvider\(\) \*ProviderDef](<#ModelPicker.GetSelectedProvider>)
-  - [func \(m \*ModelPicker\) Init\(\) tea.Cmd](<#ModelPicker.Init>)
-  - [func \(m \*ModelPicker\) Update\(msg tea.Msg\) \(tea.Model, tea.Cmd\)](<#ModelPicker.Update>)
-  - [func \(m \*ModelPicker\) View\(\) tea.View](<#ModelPicker.View>)
-  - [func \(m \*ModelPicker\) WasCancelled\(\) bool](<#ModelPicker.WasCancelled>)
-- [type ModelPickerConfig](<#ModelPickerConfig>)
-- [type ModelPickerMode](<#ModelPickerMode>)
 - [type ModelRecord](<#ModelRecord>)
 - [type ModelSlots](<#ModelSlots>)
 - [type ModelStore](<#ModelStore>)
@@ -599,7 +574,6 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
 - [type ProviderManagerConfig](<#ProviderManagerConfig>)
 - [type ProviderOptionsConfig](<#ProviderOptionsConfig>)
 - [type ProviderStatus](<#ProviderStatus>)
-- [type ProviderStatusEntry](<#ProviderStatusEntry>)
 - [type ProviderTransport](<#ProviderTransport>)
 - [type ProvidersConfig](<#ProvidersConfig>)
   - [func LoadProvidersConfig\(path string\) \(\*ProvidersConfig, error\)](<#LoadProvidersConfig>)
@@ -750,7 +724,6 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func \(s \*SemanticCache\) LookupBehindMiss\(ctx context.Context, modelID, prompt string\) \(\*Response, bool, error\)](<#SemanticCache.LookupBehindMiss>)
   - [func \(s \*SemanticCache\) Store\(ctx context.Context, modelID, prompt string, response \*Response\)](<#SemanticCache.Store>)
 - [type SemanticCacheConfig](<#SemanticCacheConfig>)
-- [type SessionSummaryResult](<#SessionSummaryResult>)
 - [type SkillRequirements](<#SkillRequirements>)
 - [type SpawnRecord](<#SpawnRecord>)
   - [func CollectScratchRigSpawnRecords\(dirs \[\]string\) \(\[\]SpawnRecord, error\)](<#CollectScratchRigSpawnRecords>)
@@ -774,12 +747,6 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func ParseSupervisorArgs\(args \[\]string\) \(opts SupervisorOptions, requested bool, err error\)](<#ParseSupervisorArgs>)
 - [type SystemPromptBlock](<#SystemPromptBlock>)
   - [func BuildSystemPromptBlocks\(sections \[\]string\) \[\]SystemPromptBlock](<#BuildSystemPromptBlocks>)
-- [type TaskSummarizer](<#TaskSummarizer>)
-  - [func NewTaskSummarizer\(chatter Chatter, tokenizer Tokenizer\) \*TaskSummarizer](<#NewTaskSummarizer>)
-  - [func \(s \*TaskSummarizer\) SummarizeHandoff\(ctx context.Context, messages \[\]ChatMessage\) \(HandoffResult, error\)](<#TaskSummarizer.SummarizeHandoff>)
-  - [func \(s \*TaskSummarizer\) SummarizeSession\(ctx context.Context, messages \[\]ChatMessage\) \(SessionSummaryResult, error\)](<#TaskSummarizer.SummarizeSession>)
-  - [func \(s \*TaskSummarizer\) SummarizeTaskTitle\(ctx context.Context, messages \[\]ChatMessage, maxLen int\) \(TaskTitleResult, error\)](<#TaskSummarizer.SummarizeTaskTitle>)
-- [type TaskTitleResult](<#TaskTitleResult>)
 - [type TeardownAdapter](<#TeardownAdapter>)
 - [type TeardownCoordinator](<#TeardownCoordinator>)
   - [func NewTeardownCoordinator\(adapters \[\]TeardownAdapter, endpointsFn func\(\) map\[string\]string, timeout time.Duration, logger \*slog.Logger\) \*TeardownCoordinator](<#NewTeardownCoordinator>)
@@ -979,9 +946,7 @@ Empty means the endpoint accepts no grammar constraint; nothing is attached.
 	    MetaKeyLLMTierDepth = "llm_tier_depth"
 	)
 
-<a name="CommandScorePrompt"></a>CommandScorePrompt is the FIXED rubric question \(Contract C6 shape\). The bands are anchored so the label choice is deterministic for a given command context.
-
-TODO\(jev\-gate leaf 02/03\): the authoritative question text \+ rubric freeze into config/jev\-command\-gate.contract.json5 \(C6\) and the threshold is frozen by leaf 03's teacher sweep; keep this constant byte\-identical with the contract file once it lands \(the training manifest hashes it\).
+<a name="CommandScorePrompt"></a>CommandScorePrompt is the FROZEN rubric question \(Contract C6\): its bytes must stay identical with config/jev\-command\-gate.contract.json5's score\_question \(the training manifest hashes that file; the eval harness reads the contract as the authority\).
 
 	const CommandScorePrompt = `Rate how safe it is to execute the shell command described in the context.
 	
@@ -1975,13 +1940,6 @@ Precedence \(highest to lowest\):
 
 Returns nil when rc is nil/zero so callers can omit the budget from wire payloads entirely.
 
-<a name="RunModelPicker"></a>
-## func RunModelPicker
-
-	func RunModelPicker(config ModelPickerConfig) (*ProviderDef, *ModelCatalogEntry, error)
-
-RunModelPicker runs the model picker TUI and returns the selected provider/model.
-
 <a name="RunSupervisor"></a>
 ## func RunSupervisor
 
@@ -2600,6 +2558,17 @@ WithAnthropicTokenResolver sets the OAuth token resolver and provider name for s
 
 WithAnthropicUploadStore sets the upload store for resolving image file references.
 
+<a name="AppliedLoRA"></a>
+## type AppliedLoRA
+
+AppliedLoRA is the weight handle stored on LoadedAdapter.Model after loadAdapter has read the tensors the runtime applies. Field is the chat\-body key stampRuntimeAdapter writes so inference calls that path.
+
+	type AppliedLoRA struct {
+	    Dir     string
+	    Tensors []string
+	    Field   string
+	}
+
 <a name="AuthType"></a>
 ## type AuthType
 
@@ -2651,37 +2620,6 @@ NextAttempt returns the earliest time the next attempt may run:
 	func (p BackoffPlan) ShouldGiveUp(now time.Time) bool
 
 ShouldGiveUp answers the SCHEDULE question only: has now reached GiveUpAt? \(D8 cap.\) The decision to surface a user\-facing error belongs to callers — leaf 03's short loops and tree 03's parking layer.
-
-<a name="BrokerConfig"></a>
-## type BrokerConfig
-
-BrokerConfig configures a ModelBroker.
-
-	type BrokerConfig struct {
-	    ProvidersConfig *ProvidersConfig
-	    MaxErrorRate    float64 // default 0.10
-	    MaxP95LatencyMS float64 // default 30000
-	    FallbackEnabled bool    // default true
-	    MetricsStore    *metrics.Store
-	    TimeoutCalc     *metrics.Calculator
-	    Budget          *Budget
-	    TokenCache      ResponseCache
-	    TokenResolver   TokenResolver
-	    Logger          *slog.Logger
-	    // QuotaRetry gates quota-aware wait+retry wrapping of ChatterForModel
-	    // returned chatters. When enabled, the returned Chatter is a
-	    // quotaWaitChatter. Default: disabled.
-	    QuotaRetry QuotaWaitConfig
-	}
-
-<a name="BrokerStatus"></a>
-## type BrokerStatus
-
-BrokerStatus provides a snapshot of broker health.
-
-	type BrokerStatus struct {
-	    Providers []ProviderStatusEntry
-	}
 
 <a name="Budget"></a>
 ## type Budget
@@ -3217,7 +3155,7 @@ DisableThinking returns a ChatOption that explicitly disables reasoning/thinking
 
 	func WithAdapter(path string) ChatOption
 
-WithAdapter sets the LoRA adapter path to use for this request. The path is passed through to providers that support adapter selection \(e.g. a local LFM inference server\). Providers that do not support adapters silently ignore it.
+WithAdapter sets the LoRA adapter directory for this request. The OpenAI\-compatible client stamps it as the "adapters" field mlx\_lm.server applies \(load\_adapters → model.load\_weights\). Providers that do not read that field ignore it.
 
 <a name="WithAgentScope"></a>
 ### func WithAgentScope
@@ -4794,17 +4732,6 @@ FunctionParameters defines the parameters for a function.
 	    Required   []string                     `json:"required,omitempty"`
 	}
 
-<a name="HandoffResult"></a>
-## type HandoffResult
-
-HandoffResult holds the result of a handoff summary generation.
-
-	type HandoffResult struct {
-	    Summary    string
-	    TokensUsed int
-	    Sections   map[string]string
-	}
-
 <a name="HealthChangeCallback"></a>
 ## type HealthChangeCallback
 
@@ -5312,15 +5239,15 @@ Teardown POSTs the erase route when sessionID is the last session on the endpoin
 <a name="LoadedAdapter"></a>
 ## type LoadedAdapter
 
-LoadedAdapter represents a loaded LoRA adapter and its metadata. PEFT weight tensors live on disk \(trained by Python\); the Go side validates artifacts and routes adapter paths at inference time.
+LoadedAdapter represents a LoRA adapter bound to the runtime apply path. Ready is true only when Model holds an AppliedLoRA \(weights were read\). A directory that merely contains PEFT filenames is not ready.
 
 	type LoadedAdapter struct {
 	    Domain  string
 	    Path    string
-	    Model   any    // reserved for future native PEFT bindings
+	    Model   any    // *AppliedLoRA when weights were read; nil otherwise
 	    ID      string // registry id, e.g. "code-lfm2.5-8b-v2"
 	    Version int    // parsed from path suffix -vN (0 if unknown)
-	    Ready   bool   // true when PEFT artifacts exist on disk
+	    Ready   bool   // true only when Model is a loaded AppliedLoRA
 	}
 
 <a name="MetricsRecorder"></a>
@@ -5346,92 +5273,6 @@ ModelAliasEntry represents a model alias configuration.
 	    DefaultModel           string   `json:"default_model,omitempty"`
 	    BalancedStickyRequests bool     `json:"balanced_sticky_requests,omitempty"`
 	}
-
-<a name="ModelBroker"></a>
-## type ModelBroker
-
-ModelBroker manages multiple LLM providers and routes requests with health awareness.
-
-	type ModelBroker struct {
-	    // contains filtered or unexported fields
-	}
-
-<a name="NewModelBroker"></a>
-### func NewModelBroker
-
-	func NewModelBroker(cfg BrokerConfig) *ModelBroker
-
-NewModelBroker creates a new model broker.
-
-<a name="ModelBroker.ActiveQuotaBlocks"></a>
-### func \(\*ModelBroker\) ActiveQuotaBlocks
-
-	func (b *ModelBroker) ActiveQuotaBlocks() []QuotaBlockStatus
-
-ActiveQuotaBlocks returns any active quota block statuses. Broker stub: always nil.
-
-<a name="ModelBroker.Chat"></a>
-### func \(\*ModelBroker\) Chat
-
-	func (b *ModelBroker) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatOption) (*Response, error)
-
-Chat sends a request to the broker, which routes to a healthy provider. D2 FIX: On runtime failure \(5xx/rate\-limit\), iterates through remaining healthy providers before falling back or failing.
-
-<a name="ModelBroker.ChatWithModel"></a>
-### func \(\*ModelBroker\) ChatWithModel
-
-	func (b *ModelBroker) ChatWithModel(ctx context.Context, modelRef string, messages []ChatMessage, opts ...ChatOption) (*Response, error)
-
-ChatWithModel sends a request to a specific model, bypassing health checks. modelRef is in the format "provider/model\-id".
-
-<a name="ModelBroker.ChatWithModelProgress"></a>
-### func \(\*ModelBroker\) ChatWithModelProgress
-
-	func (b *ModelBroker) ChatWithModelProgress(ctx context.Context, modelRef string, messages []ChatMessage, progress ProgressCallback, opts ...ChatOption) (*Response, error)
-
-ChatWithModelProgress sends a request to a specific model with progress reporting.
-
-<a name="ModelBroker.ChatWithProgress"></a>
-### func \(\*ModelBroker\) ChatWithProgress
-
-	func (b *ModelBroker) ChatWithProgress(ctx context.Context, messages []ChatMessage, progress ProgressCallback, opts ...ChatOption) (*Response, error)
-
-ChatWithProgress sends a request with progress reporting. D2 FIX: On runtime failure \(5xx/rate\-limit\), iterates through remaining healthy providers before falling back or failing.
-
-<a name="ModelBroker.ChatterForModel"></a>
-### func \(\*ModelBroker\) ChatterForModel
-
-	func (b *ModelBroker) ChatterForModel(modelRef string) Chatter
-
-ChatterForModel returns a Chatter for a specific model reference. Returns nil if the model is not found in the broker. The returned Chatter can be used directly for chat operations. If broker.config.QuotaRetry.Enabled, the returned Chatter is wrapped in quotaWaitChatter for quota\-aware wait\+retry.
-
-<a name="ModelBroker.Config"></a>
-### func \(\*ModelBroker\) Config
-
-	func (b *ModelBroker) Config() *ModelConfig
-
-Config returns the model configuration of the primary \(first healthy\) provider.
-
-<a name="ModelBroker.GetStatus"></a>
-### func \(\*ModelBroker\) GetStatus
-
-	func (b *ModelBroker) GetStatus() BrokerStatus
-
-GetStatus returns a snapshot of broker health.
-
-<a name="ModelBroker.QuotaBlockedUntil"></a>
-### func \(\*ModelBroker\) QuotaBlockedUntil
-
-	func (b *ModelBroker) QuotaBlockedUntil(credentialKey string) time.Time
-
-QuotaBlockedUntil returns the earliest time at which the given credential key will be unblocked, zero if never blocked. Broker stub: always zero.
-
-<a name="ModelBroker.UpdateHealth"></a>
-### func \(\*ModelBroker\) UpdateHealth
-
-	func (b *ModelBroker) UpdateHealth(ctx context.Context) error
-
-UpdateHealth re\-evaluates provider health based on metrics. Called periodically \(e.g., every 30 seconds\) by the daemon.
 
 <a name="ModelCatalogEntry"></a>
 ## type ModelCatalogEntry
@@ -5701,92 +5542,6 @@ Close closes the underlying file if owned. Best\-effort.
 	func (m *ModelLogger) Log(event string, kv ...any)
 
 Log writes an event with arbitrary key/value pairs.
-
-<a name="ModelPicker"></a>
-## type ModelPicker
-
-ModelPicker is the TUI model picker.
-
-	type ModelPicker struct {
-	    // contains filtered or unexported fields
-	}
-
-<a name="NewModelPicker"></a>
-### func NewModelPicker
-
-	func NewModelPicker(config ModelPickerConfig) *ModelPicker
-
-NewModelPicker creates a new model picker.
-
-<a name="ModelPicker.GetSelectedModel"></a>
-### func \(\*ModelPicker\) GetSelectedModel
-
-	func (m *ModelPicker) GetSelectedModel() *ModelCatalogEntry
-
-GetSelectedModel returns the selected model.
-
-<a name="ModelPicker.GetSelectedProvider"></a>
-### func \(\*ModelPicker\) GetSelectedProvider
-
-	func (m *ModelPicker) GetSelectedProvider() *ProviderDef
-
-GetSelectedProvider returns the selected provider.
-
-<a name="ModelPicker.Init"></a>
-### func \(\*ModelPicker\) Init
-
-	func (m *ModelPicker) Init() tea.Cmd
-
-Init initializes the model picker.
-
-<a name="ModelPicker.Update"></a>
-### func \(\*ModelPicker\) Update
-
-	func (m *ModelPicker) Update(msg tea.Msg) (tea.Model, tea.Cmd)
-
-Update handles messages and updates the model.
-
-<a name="ModelPicker.View"></a>
-### func \(\*ModelPicker\) View
-
-	func (m *ModelPicker) View() tea.View
-
-View renders the model picker.
-
-<a name="ModelPicker.WasCancelled"></a>
-### func \(\*ModelPicker\) WasCancelled
-
-	func (m *ModelPicker) WasCancelled() bool
-
-WasCancelled returns true if the user cancelled.
-
-<a name="ModelPickerConfig"></a>
-## type ModelPickerConfig
-
-ModelPickerConfig holds configuration for the picker.
-
-	type ModelPickerConfig struct {
-	    Title             string
-	    ShowHelp          bool
-	    AllowCustom       bool
-	    PreselectProvider string
-	    PreselectModel    string
-	    ProvidersConfig   *ProvidersConfig // If set, custom providers from config are merged in
-	}
-
-<a name="ModelPickerMode"></a>
-## type ModelPickerMode
-
-ModelPickerMode defines the current picker mode.
-
-	type ModelPickerMode int
-
-<a name="ModeSelectProvider"></a>
-
-	const (
-	    ModeSelectProvider ModelPickerMode = iota
-	    ModeSelectModel
-	)
 
 <a name="ModelRecord"></a>
 ## type ModelRecord
@@ -6712,21 +6467,6 @@ ProviderStatus represents the health status of a provider.
 	    ProviderStatusUnhealthy ProviderStatus = "unhealthy"
 	    ProviderStatusDisabled  ProviderStatus = "disabled"
 	)
-
-<a name="ProviderStatusEntry"></a>
-## type ProviderStatusEntry
-
-ProviderStatusEntry describes the status of a single provider/model.
-
-	type ProviderStatusEntry struct {
-	    ProviderID     string
-	    ModelID        string
-	    Status         ProviderStatus
-	    ErrorRate      float64
-	    P95LatencyMs   float64
-	    CurrentTimeout time.Duration
-	    TotalRequests  int64
-	}
 
 <a name="ProviderTransport"></a>
 ## type ProviderTransport
@@ -8172,16 +7912,6 @@ SemanticCacheConfig is the llm\-side shape of Contract C4 \(json5 key llm.cache.
 	    VerifyFloor float64
 	}
 
-<a name="SessionSummaryResult"></a>
-## type SessionSummaryResult
-
-SessionSummaryResult holds the result of a session summarization.
-
-	type SessionSummaryResult struct {
-	    Summary    string
-	    TokensUsed int
-	}
-
 <a name="SkillRequirements"></a>
 ## type SkillRequirements
 
@@ -8453,54 +8183,6 @@ SystemPromptBlock is a contiguous chunk of system prompt text tagged with its ca
 	func BuildSystemPromptBlocks(sections []string) []SystemPromptBlock
 
 BuildSystemPromptBlocks groups classified prompt sections into SystemPromptBlock values suitable for prefix\-aware caching. Static sections are joined into a single CacheScopeStatic block; dynamic sections are joined into a single CacheScopeSession block. Empty groups produce no block.
-
-<a name="TaskSummarizer"></a>
-## type TaskSummarizer
-
-TaskSummarizer generates concise summaries for task management.
-
-	type TaskSummarizer struct {
-	    // contains filtered or unexported fields
-	}
-
-<a name="NewTaskSummarizer"></a>
-### func NewTaskSummarizer
-
-	func NewTaskSummarizer(chatter Chatter, tokenizer Tokenizer) *TaskSummarizer
-
-NewTaskSummarizer creates a new summarizer using the provided chatter.
-
-<a name="TaskSummarizer.SummarizeHandoff"></a>
-### func \(\*TaskSummarizer\) SummarizeHandoff
-
-	func (s *TaskSummarizer) SummarizeHandoff(ctx context.Context, messages []ChatMessage) (HandoffResult, error)
-
-SummarizeHandoff generates a structured handoff summary for agent transitions.
-
-<a name="TaskSummarizer.SummarizeSession"></a>
-### func \(\*TaskSummarizer\) SummarizeSession
-
-	func (s *TaskSummarizer) SummarizeSession(ctx context.Context, messages []ChatMessage) (SessionSummaryResult, error)
-
-SummarizeSession generates a medium\-length summary of a coding session.
-
-<a name="TaskSummarizer.SummarizeTaskTitle"></a>
-### func \(\*TaskSummarizer\) SummarizeTaskTitle
-
-	func (s *TaskSummarizer) SummarizeTaskTitle(ctx context.Context, messages []ChatMessage, maxLen int) (TaskTitleResult, error)
-
-SummarizeTaskTitle generates a short, distinctive title for a task or subagent job.
-
-<a name="TaskTitleResult"></a>
-## type TaskTitleResult
-
-TaskTitleResult holds the result of a task title generation.
-
-	type TaskTitleResult struct {
-	    Title      string
-	    TokensUsed int
-	    Truncated  bool
-	}
 
 <a name="TeardownAdapter"></a>
 ## type TeardownAdapter

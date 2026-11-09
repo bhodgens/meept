@@ -12,15 +12,21 @@ Tools are the primary mechanism by which the LLM agent interacts with the system
 
 - Constants
 - Variables
+- [func AgentIDFromContext\(ctx context.Context\) string](<#AgentIDFromContext>)
 - [func AutonomousFromContext\(ctx context.Context\) bool](<#AutonomousFromContext>)
 - [func CanonicalName\(tool Tool\) string](<#CanonicalName>)
+- [func ContextWithAgentID\(ctx context.Context, agentID string\) context.Context](<#ContextWithAgentID>)
 - [func ContextWithAutonomous\(ctx context.Context\) context.Context](<#ContextWithAutonomous>)
+- [func ContextWithConversation\(ctx context.Context, conv any\) context.Context](<#ContextWithConversation>)
+- [func ContextWithNetworkClass\(ctx context.Context, class string\) context.Context](<#ContextWithNetworkClass>)
 - [func ContextWithScopeIdentity\(ctx context.Context, id ScopeIdentity\) context.Context](<#ContextWithScopeIdentity>)
 - [func ContextWithSessionID\(ctx context.Context, sessionID string\) context.Context](<#ContextWithSessionID>)
 - [func ContextWithWorkingDir\(ctx context.Context, dir string\) context.Context](<#ContextWithWorkingDir>)
+- [func ConversationFromContext\(ctx context.Context\) any](<#ConversationFromContext>)
 - [func GetCategory\(t Tool\) string](<#GetCategory>)
 - [func GetMaxResultTokens\(t Tool\) int](<#GetMaxResultTokens>)
 - [func IsNoWorkingDir\(err error\) bool](<#IsNoWorkingDir>)
+- [func NetworkClassFromContext\(ctx context.Context\) string](<#NetworkClassFromContext>)
 - [func NoPathError\(tool string\) error](<#NoPathError>)
 - [func NoWorkingDirError\(tool string\) error](<#NoWorkingDirError>)
 - [func SessionIDFromContext\(ctx context.Context\) string](<#SessionIDFromContext>)
@@ -158,6 +164,13 @@ Before this existed the tools returned the bare "no path specified", which told 
 
 	var ErrToolTimeout = errors.New("tool call timed out")
 
+<a name="AgentIDFromContext"></a>
+## func AgentIDFromContext
+
+	func AgentIDFromContext(ctx context.Context) string
+
+AgentIDFromContext extracts the caller's agent id from ctx, if set. Returns empty string when not present.
+
 <a name="AutonomousFromContext"></a>
 ## func AutonomousFromContext
 
@@ -174,12 +187,33 @@ CanonicalName returns the canonical registration name for a tool. The canonical 
 
 C3: This function exists so that constitution tool references can be validated against canonical names at load time. Callers should use this function when comparing user\-provided or constitution\-declared tool names to the registry — never compare raw strings directly.
 
+<a name="ContextWithAgentID"></a>
+## func ContextWithAgentID
+
+	func ContextWithAgentID(ctx context.Context, agentID string) context.Context
+
+ContextWithAgentID returns a new context carrying the caller's agent id. An empty id stores nothing.
+
 <a name="ContextWithAutonomous"></a>
 ## func ContextWithAutonomous
 
 	func ContextWithAutonomous(ctx context.Context) context.Context
 
 ContextWithAutonomous marks the context as AUTONOMOUS execution: a job\-driven, headless run where no human and no later interactive turn can follow up. Staging tools \(file\_write, file\_edit\) consult this to bypass the preview/accept workflow — a staged change in an autonomous run is a silent no\-op \(e2e run 8, 2026\-09\-11: file\_write direct:"False" staged into the pending\-changes registry, nothing ever resolved it, the step "completed", and the file never existed on disk\).
+
+<a name="ContextWithConversation"></a>
+## func ContextWithConversation
+
+	func ContextWithConversation(ctx context.Context, conv any) context.Context
+
+ContextWithConversation returns a new context carrying the calling loop's live conversation \(an \`any\`\-boxed \*agent.Conversation\). A nil value stores nothing.
+
+<a name="ContextWithNetworkClass"></a>
+## func ContextWithNetworkClass
+
+	func ContextWithNetworkClass(ctx context.Context, class string) context.Context
+
+ContextWithNetworkClass returns ctx carrying the resolved network class. A blank class stores nothing so callers that omit the class stay on the unrestricted path.
 
 <a name="ContextWithScopeIdentity"></a>
 ## func ContextWithScopeIdentity
@@ -202,6 +236,13 @@ ContextWithSessionID returns a new context carrying the caller's session id. An 
 
 ContextWithWorkingDir returns a new context with the working directory injected. Used by the agent loop to give tools access to the session's project path without shared mutable state.
 
+<a name="ConversationFromContext"></a>
+## func ConversationFromContext
+
+	func ConversationFromContext(ctx context.Context) any
+
+ConversationFromContext extracts the calling loop's live conversation from ctx, if set. Returns nil when not present \(no fork\-seed source\). The value stays \`any\`: package tools cannot name \*agent.Conversation \(import cycle\); the single consumer \(builtin delegate\_task\) type\-asserts.
+
 <a name="GetCategory"></a>
 ## func GetCategory
 
@@ -222,6 +263,13 @@ GetMaxResultTokens returns the tool's declared result\-token floor, or 0 when th
 	func IsNoWorkingDir(err error) bool
 
 IsNoWorkingDir reports whether err is, or wraps, ErrNoWorkingDir. This is the detection surface for callers that want to surface a "bind a working directory" hint \(or a distinct user\-language message\) instead of a generic tool failure.
+
+<a name="NetworkClassFromContext"></a>
+## func NetworkClassFromContext
+
+	func NetworkClassFromContext(ctx context.Context) string
+
+NetworkClassFromContext returns the network class stamped for this tool call, or "" when absent.
 
 <a name="NoPathError"></a>
 ## func NoPathError

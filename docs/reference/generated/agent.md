@@ -314,6 +314,7 @@ Package agent provides the agent loop and related components.
   - [func \(r \*AgentRegistry\) Close\(\) error](<#AgentRegistry.Close>)
   - [func \(r \*AgentRegistry\) DB\(\) \*sql.DB](<#AgentRegistry.DB>)
   - [func \(r \*AgentRegistry\) EnsureLateDiscovered\(\)](<#AgentRegistry.EnsureLateDiscovered>)
+  - [func \(r \*AgentRegistry\) ForkSeedWriter\(\) func\(agentID, conversationID string, seed \[\]llm.ChatMessage\)](<#AgentRegistry.ForkSeedWriter>)
   - [func \(r \*AgentRegistry\) Get\(id string\) \(\*AgentLoop, error\)](<#AgentRegistry.Get>)
   - [func \(r \*AgentRegistry\) GetActiveQueue\(conversationID string\) \(queue \*MessageQueue, generation uint64\)](<#AgentRegistry.GetActiveQueue>)
   - [func \(r \*AgentRegistry\) GetActiveQueueLoop\(conversationID string\) \*AgentLoop](<#AgentRegistry.GetActiveQueueLoop>)
@@ -331,6 +332,7 @@ Package agent provides the agent loop and related components.
   - [func \(r \*AgentRegistry\) RegisterSpec\(spec \*AgentSpec\) error](<#AgentRegistry.RegisterSpec>)
   - [func \(r \*AgentRegistry\) ReleaseTaskLoops\(taskID string\)](<#AgentRegistry.ReleaseTaskLoops>)
   - [func \(r \*AgentRegistry\) RunAgent\(ctx context.Context, agentID, message, conversationID string\) \(string, error\)](<#AgentRegistry.RunAgent>)
+  - [func \(r \*AgentRegistry\) SeedChildConversation\(agentID, conversationID string, seed \[\]llm.ChatMessage\)](<#AgentRegistry.SeedChildConversation>)
   - [func \(r \*AgentRegistry\) SetACPExecutor\(e \*ACPExecutor\)](<#AgentRegistry.SetACPExecutor>)
   - [func \(r \*AgentRegistry\) SetCapabilitiesMap\(capMap \*CapabilitiesMap\)](<#AgentRegistry.SetCapabilitiesMap>)
   - [func \(r \*AgentRegistry\) SetCapabilityIndex\(ci \*skills.CapabilityIndex\)](<#AgentRegistry.SetCapabilityIndex>)
@@ -686,6 +688,7 @@ Package agent provides the agent loop and related components.
 - [type Decision](<#Decision>)
 - [type DelegateManager](<#DelegateManager>)
   - [func NewDelegateManager\(reg \*AgentRegistry, publisher func\(string, any\), cancelHook func\(string\) error\) \*DelegateManager](<#NewDelegateManager>)
+  - [func \(m \*DelegateManager\) AllChildren\(\) \[\]ChildRecord](<#DelegateManager.AllChildren>)
   - [func \(m \*DelegateManager\) Cancel\(childID string\) error](<#DelegateManager.Cancel>)
   - [func \(m \*DelegateManager\) Children\(parentSessionID string\) \[\]ChildRecord](<#DelegateManager.Children>)
   - [func \(m \*DelegateManager\) Dispose\(ctx context.Context, parentSessionID, childID string\) error](<#DelegateManager.Dispose>)
@@ -696,6 +699,7 @@ Package agent provides the agent loop and related components.
   - [func \(m \*DelegateManager\) SetACPManager\(acpMgr \*acp.Manager\)](<#DelegateManager.SetACPManager>)
   - [func \(m \*DelegateManager\) SetDescriptorFactory\(f func\(ChildRecord\) ChildDescriptor\)](<#DelegateManager.SetDescriptorFactory>)
   - [func \(m \*DelegateManager\) SetForkSeed\(f func\(\*Conversation\) \[\]llm.ChatMessage\)](<#DelegateManager.SetForkSeed>)
+  - [func \(m \*DelegateManager\) SetForkSeedWriter\(f func\(agentID, conversationID string, seed \[\]llm.ChatMessage\)\)](<#DelegateManager.SetForkSeedWriter>)
   - [func \(m \*DelegateManager\) SetPersist\(f func\(ChildRecord\) error\)](<#DelegateManager.SetPersist>)
   - [func \(m \*DelegateManager\) SetRouteResolver\(f func\(ChildOptions, DelegateRequest\) \(ChildOptions, error\)\)](<#DelegateManager.SetRouteResolver>)
   - [func \(m \*DelegateManager\) SetStore\(store session.Store\)](<#DelegateManager.SetStore>)
@@ -4793,6 +4797,13 @@ DB returns the SQLite connection used for queue persistence, or nil.
 
 EnsureLateDiscovered runs the one\-shot post\-boot discovery rescan if it has not run yet \(leaf 03\-agent\-recall\-wiring\). Called at dispatch entry so definitions seeded after daemon boot \(the e2e harness seeds per\-test agents into the user tier post\-Start\) are in the lane routing index BEFORE classification — a chat lane pinned to a post\-boot agent would otherwise resolve the static chat fallback and the per\-agent scope asymmetry would be unobservable.
 
+<a name="AgentRegistry.ForkSeedWriter"></a>
+### func \(\*AgentRegistry\) ForkSeedWriter
+
+	func (r *AgentRegistry) ForkSeedWriter() func(agentID, conversationID string, seed []llm.ChatMessage)
+
+ForkSeedWriter returns the registry's conversation\-seed adapter for DelegateManager.SetForkSeedWriter binding at daemon wiring.
+
 <a name="AgentRegistry.Get"></a>
 ### func \(\*AgentRegistry\) Get
 
@@ -4918,6 +4929,13 @@ ReleaseTaskLoops removes all loops for the given taskID across all agents. Calle
 RunAgent sends a single message to an agent and returns its response.
 
 Context isolation \(leaf 10\): the message is treated as a structured brief — built by the caller through BuildSpawnContext — and starts a FRESH conversation keyed by conversationID. The child never inherits a parent conversation's transcript; cross\-agent context flows via explicit SpawnContext briefs \(report\-router handoffs, step AccumulatedContext\), not shared message lists.
+
+<a name="AgentRegistry.SeedChildConversation"></a>
+### func \(\*AgentRegistry\) SeedChildConversation
+
+	func (r *AgentRegistry) SeedChildConversation(agentID, conversationID string, seed []llm.ChatMessage)
+
+SeedChildConversation stamps a DSH\-1 fork child's seed messages onto the child agent's conversation \(auto\-vivified — a fork child's loop may never have run a turn, so the fresh conversation becomes its inherited history\) BEFORE the child's first RunOnce. Bound onto DelegateManager.SetForkSeedWriter by the daemon/registry wiring. No\-op on an empty seed or a nil receiver.
 
 <a name="AgentRegistry.SetACPExecutor"></a>
 ### func \(\*AgentRegistry\) SetACPExecutor
@@ -5193,6 +5211,15 @@ AgentSpec defines the specification for creating an agent.
 	    // to project (resolveScopeInputs warns). AGENT.md frontmatter key:
 	    // memory_max_scope.
 	    MemoryMaxScope string `json:"memory_max_scope,omitempty" yaml:"memory_max_scope,omitempty"`
+	    // DelegateContext declares the context handoff scope when this agent
+	    // is spawned as a delegated child (DSH-1 fork-seed gate): "" or
+	    // "task" (default — a fork request degrades to a fresh task brief),
+	    // "full" (a Mode:"fork" spawn seeds the child with the parent's
+	    // completed-turn transcript snapshot). The knob lives on the
+	    // DELEGATED agent's configuration; the parent cannot opt an agent in
+	    // from the request side. Unknown values fail safe to "task" at the
+	    // fork gate. AGENT.md frontmatter key: delegate_context.
+	    DelegateContext string `json:"delegate_context,omitempty" yaml:"delegate_context,omitempty"`
 	    // AdditionalTools are tools beyond the baseline that this agent has access to.
 	    AdditionalTools []string `json:"additional_tools,omitempty"`
 	    // ToolScopeLimit caps how many tools are offered to this agent in the
@@ -7011,7 +7038,7 @@ SnapshotForTurn converts a set of turn records and LLM messages into a Checkpoin
 <a name="ChildDescriptor"></a>
 ## type ChildDescriptor
 
-ChildDescriptor is a durable description of a child that leaf 06 persists for cold resume. Version must be 1; a future build's descriptor is rejected by Validate rather than silently resumed with wrong semantics.
+ChildDescriptor is a durable description of a child that leaf 06 persists for cold resume. Version must be current \(see childDescriptorVersion\); a future build's descriptor is rejected by Validate rather than silently resumed with wrong semantics. Version 1 \(pre\-seed\) descriptors stay readable: they resume brief\-only, exactly as before.
 
 	type ChildDescriptor struct {
 	    Version         int       `json:"version"`
@@ -7024,6 +7051,12 @@ ChildDescriptor is a durable description of a child that leaf 06 persists for co
 	    ParentSessionID string    `json:"parent_session_id"`
 	    SeedPayload     string    `json:"seed_payload,omitempty"`
 	    CreatedAt       time.Time `json:"created_at"`
+	
+	    // SeedMessages is the bounded fork-seed snapshot (v2): the parent's
+	    // completed-turn prefix captured ONCE at spawn, serialized so a cold
+	    // resume replays the parent-context seed instead of only the brief.
+	    // Empty for spawn-mode children and for v1 descriptors.
+	    SeedMessages []llm.ChatMessage `json:"seed_messages,omitempty"`
 	}
 
 <a name="UnmarshalChildDescriptor"></a>
@@ -7031,7 +7064,7 @@ ChildDescriptor is a durable description of a child that leaf 06 persists for co
 
 	func UnmarshalChildDescriptor(b []byte) (ChildDescriptor, error)
 
-UnmarshalChildDescriptor rehydrates a descriptor from its durable JSON form. It is strict: an unknown/newer version is an error \(never silently downgraded or resumed with wrong semantics\). Malformed JSON is also an error.
+UnmarshalChildDescriptor rehydrates a descriptor from its durable JSON form. It is strict: an unknown/newer version is an error \(never silently downgraded or resumed with wrong semantics\). Older\-but\-readable versions \(v1\) unmarshal fine — they simply carry no SeedMessages and resume brief\-only. Malformed JSON is also an error.
 
 <a name="ChildDescriptor.Validate"></a>
 ### func \(ChildDescriptor\) Validate
@@ -8205,6 +8238,13 @@ DelegateManager owns async child delegation for a parent session. It is safe for
 
 NewDelegateManager constructs the manager. A nil registry disables child execution \(children are still registered and can be settled through the test seam / external hooks\); publisher and cancelHook are optional and nil\-safe.
 
+<a name="DelegateManager.AllChildren"></a>
+### func \(\*DelegateManager\) AllChildren
+
+	func (m *DelegateManager) AllChildren() []ChildRecord
+
+AllChildren returns a snapshot \(copies\) of every registered child across ALL parent sessions, in no particular order. Read\-only report surface for the delegate.status RPC \(DSH\-9d\): the operator queries by session id OR agent id, so the manager needs the unfiltered view; callers filter. No secret material rides ChildRecord \(the seed and the live session do not\).
+
 <a name="DelegateManager.Cancel"></a>
 ### func \(\*DelegateManager\) Cancel
 
@@ -8250,7 +8290,7 @@ Resume re\-spawns an interrupted/idle child from its durable descriptor. It work
 - Live: the child still exists in this daemon run \-\> it must be in an Interrupted \(or Pending\) state, and it is re\-run under its recorded descriptor.
 - Cold: the child's record is gone from the run\-state \(parent/daemon restart\) \-\> it is rehydrated from the durable store, re\-registered under its original childID, and re\-run from its persisted descriptor.
 
-Both paths replay the frozen fork seed \(SeedPayload\), re\-pin the descriptor's model/route, set the record back to running, and re\-publish the settlement on completion. Only the parent \(record.ParentSessionID == caller\) may resume.
+Both paths replay the frozen fork seed — the descriptor's SeedMessages snapshot when present \(v2, stamped onto the child's conversation before the first turn\), else brief\-only as v1 always did — re\-pin the descriptor's model/route, set the record back to running, and re\-publish the settlement on completion. Only the parent \(record.ParentSessionID == caller\) may resume.
 
 <a name="DelegateManager.Session"></a>
 ### func \(\*DelegateManager\) Session
@@ -8279,6 +8319,13 @@ SetDescriptorFactory installs the B6 descriptor writer, stamped onto each child 
 	func (m *DelegateManager) SetForkSeed(f func(*Conversation) []llm.ChatMessage)
 
 SetForkSeed installs the B2 fork\-seed seam that materializes a parent transcript for IsolationSharedTranscript. nil keeps a fresh spawn default.
+
+<a name="DelegateManager.SetForkSeedWriter"></a>
+### func \(\*DelegateManager\) SetForkSeedWriter
+
+	func (m *DelegateManager) SetForkSeedWriter(f func(agentID, conversationID string, seed []llm.ChatMessage))
+
+SetForkSeedWriter installs the DSH\-1 conversation\-seed adapter \(wired by AgentRegistry construction\): the adapter stamps a fork child's seed onto its conversation before the first turn. nil keeps the brief\-only path.
 
 <a name="DelegateManager.SetPersist"></a>
 ### func \(\*DelegateManager\) SetPersist

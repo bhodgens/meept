@@ -352,9 +352,6 @@ Package memory provides memory storage and retrieval for meept.
   - [func \(p \*PersonalityMemory\) Update\(ctx context.Context, interactionSummary string\) error](<#PersonalityMemory.Update>)
   - [func \(p \*PersonalityMemory\) UpdateKey\(ctx context.Context, section, key, value string\) error](<#PersonalityMemory.UpdateKey>)
 - [type PersonalityMemoryConfig](<#PersonalityMemoryConfig>)
-- [type PersonalityStore](<#PersonalityStore>)
-  - [func \(s \*PersonalityStore\) Get\(ctx context.Context, key string\) \(string, error\)](<#PersonalityStore.Get>)
-  - [func \(s \*PersonalityStore\) Set\(ctx context.Context, key, value string\) error](<#PersonalityStore.Set>)
 - [type Prediction](<#Prediction>)
 - [type Procedure](<#Procedure>)
   - [func DecodeProcedure\(content string\) \(\*Procedure, error\)](<#DecodeProcedure>)
@@ -3656,29 +3653,6 @@ PersonalityMemoryConfig holds configuration for personality memory.
 	    // Logger for operations.
 	    Logger *slog.Logger
 	}
-
-<a name="PersonalityStore"></a>
-## type PersonalityStore
-
-PersonalityStore provides a key\-value interface over personality data.
-
-	type PersonalityStore struct {
-	    // contains filtered or unexported fields
-	}
-
-<a name="PersonalityStore.Get"></a>
-### func \(\*PersonalityStore\) Get
-
-	func (s *PersonalityStore) Get(ctx context.Context, key string) (string, error)
-
-Get retrieves a preference value.
-
-<a name="PersonalityStore.Set"></a>
-### func \(\*PersonalityStore\) Set
-
-	func (s *PersonalityStore) Set(ctx context.Context, key, value string) error
-
-Set stores a preference value.
 
 <a name="Prediction"></a>
 ## type Prediction
