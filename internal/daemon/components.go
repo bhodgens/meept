@@ -2311,11 +2311,19 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		)
 	}
 	// Wire immediate self-reflection (Turbo Thread E)
-	if cfg.ReflectionCollector.Enabled && c.LLMClient != nil {
+	// Leaf 03 (voice-comms-fixes): reflection used to receive c.LLMClient —
+	// the main chat client resolved from c.ModelsConfig, whose ${VAR}
+	// expansion is process-env-only (internal/config ExpandEnvVars). Under a
+	// launchd-spawned daemon the cloud key in models.json5 expanded to
+	// empty, so every per-turn reflection call hit the default cloud model
+	// unauthenticated and logged "reflection failed: HTTP 401 ... Token not
+	// provided" once per turn. The auxiliary clients are resolver-built
+	// (env-script expansion + noAuth local runtimes); prefer them.
+	if rcClassifier := reflectionClassifierClient(c); cfg.ReflectionCollector.Enabled && rcClassifier != nil {
 		reflectionLoader := agent.NewDaemonPlannerTemplateLoader("config/prompts")
 		reflectionCollector := agent.NewReflectionCollector(
 			cfg.ReflectionCollector,
-			c.LLMClient,
+			rcClassifier,
 			"", // classifierModel -- empty = use Client's configured model
 			reflectionLoader,
 			".meept/improvements.md",

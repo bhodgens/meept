@@ -7,6 +7,7 @@ import (
 
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/skills/lifecycle"
 )
 
@@ -102,4 +103,38 @@ func TestReflectionProposerAdapter_NilSafe(t *testing.T) {
 // in the daemon wiring.
 func TestReflectionProposerAdapter_SatisfiesInterface(t *testing.T) {
 	var _ lifecycle.ReflectionProposer = (*reflectionProposerAdapter)(nil)
+}
+
+// TestReflectionClassifierClient_Priority pins the leaf-03 (voice-comms-
+// fixes) client selection: reflection must NOT ride the main LLMClient when
+// an auxiliary resolver-built client exists. Live defect: the main client's
+// models.json5 cloud default resolved with an empty apiKey (config.ExpandEnv-
+// Vars is process-env-only; a launchd daemon lacks the shell export), so
+// every per-turn reflection call 401'd ("Token not provided") while the
+// resolver-built auxiliary clients (env-script expansion, noAuth locals)
+// served the rest of the classifier chain fine.
+func TestReflectionClassifierClient_Priority(t *testing.T) {
+	llmClient := llm.NewClient(&llm.ModelConfig{ModelID: "cloud-default"}, llm.WithLogger(slog.Default()))
+	classifier := llm.NewClient(&llm.ModelConfig{ModelID: "prompt-router"}, llm.WithLogger(slog.Default()))
+	summarizer := llm.NewClient(&llm.ModelConfig{ModelID: "local-1.2b"}, llm.WithLogger(slog.Default()))
+
+	tests := []struct {
+		name string
+		c    *Components
+		want *llm.Client
+	}{
+		{"nil components", nil, nil},
+		{"summarizer wins (generative chain)", &Components{LLMClient: llmClient, ClassifierClient: classifier, SummarizerClient: summarizer}, summarizer},
+		{"classifier second", &Components{LLMClient: llmClient, ClassifierClient: classifier}, classifier},
+		{"main client is the last-resort fallback", &Components{LLMClient: llmClient}, llmClient},
+		{"all nil", &Components{}, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := reflectionClassifierClient(tt.c)
+			if got != tt.want {
+				t.Errorf("reflectionClassifierClient() = %p, want %p", got, tt.want)
+			}
+		})
+	}
 }
