@@ -110,6 +110,10 @@ func NewController(cfg Config, msgBus *bus.MessageBus, llmClient *llm.Client, pr
 	c.generator = NewPatchGenerator(cfg.AIInfra, cfg.Safety, llmClient, projectRoot, logger)
 	c.validator = NewFixValidator(cfg.Sandbox, cfg.Safety, projectRoot, logger)
 	c.applier = NewChangeApplier(cfg.Safety, projectRoot, msgBus, logger)
+	// Production verify is a package build of the touched file, run inside
+	// the applier's temporary worktree. The live tree is not written unless
+	// that build returns nil. Unit tests inject their own verifier.
+	c.applier.SetVerifier(verifyTouchedPackage)
 
 	return c
 }

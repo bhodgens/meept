@@ -24,6 +24,12 @@ Manual code maintenance is time-consuming and error-prone. The self-improvement 
 - **Safety Constraints**: Prevents dangerous or breaking changes
 - **Incremental Application**: Changes applied gradually
 
+### Apply gate
+
+A validated patch is written into a temporary git worktree, not the live tree. A caller-supplied verifier runs there before any live write. Production runs `go build` of the touched Go package (non-Go files have no package build). The live file is updated only if that verify passes; a failed verify discards the worktree and leaves the live tree unchanged. Human approval is unchanged.
+
+The applier also refuses `Makefile`, `go.mod`, `go.sum`, `Dockerfile` (any depth), `.github/`, and auth handler paths (`internal/auth/`, `internal/comm/http/auth.go`, `internal/comm/http/identity.go`, `internal/comm/http/pairing.go`, `internal/comm/web/auth.go`, `internal/employee/handler_auth.go`), in addition to the existing trusted-root and path-traversal denials.
+
 ### Human Approval Workflow
 - **Critical Changes**: Require explicit human approval
 - **Review Interface**: Changes presented for review
