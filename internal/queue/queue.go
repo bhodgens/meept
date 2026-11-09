@@ -1106,6 +1106,13 @@ func (h *Handler) handleRetry(ctx context.Context, msg *models.BusMessage) (any,
 	}
 
 	if err := h.queue.Retry(ctx, params.JobID); err != nil {
+		// Operator retry budget bound (audit 2026-11-09 F9): surface the
+		// sentinel as an explicit, errors.Is-inspectable refusal. The row was
+		// left unchanged by Store.Retry; RPC/WS callers (queue.retry proxy)
+		// get the sentinel text rather than an opaque internal error.
+		if errors.Is(err, ErrRetryBudgetExhausted) {
+			return nil, fmt.Errorf("%w: job %s", ErrRetryBudgetExhausted, params.JobID)
+		}
 		return nil, err
 	}
 

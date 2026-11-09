@@ -203,6 +203,11 @@ func (s *Server) handleServiceError(w http.ResponseWriter, err error) {
 		// already completed — e.g. requeued for another attempt) is a state
 		// conflict, not a server fault.
 		s.writeError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, queue.ErrRetryBudgetExhausted):
+		// Operator retry of a budget-exhausted job (audit 2026-11-09 F9) is
+		// a state conflict, not a server fault — the queue refused and left
+		// the row unchanged.
+		s.writeError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, services.ErrInternal):
 		s.logger.Error("service error", "error", err)
 		s.writeError(w, http.StatusInternalServerError, "internal server error")

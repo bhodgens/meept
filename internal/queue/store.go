@@ -42,6 +42,17 @@ var ErrJobNotClaimable = errors.New("job not in a claimable state for completion
 // superseded must not resurrect a finished job into 'processing'.
 var ErrJobStateLocked = errors.New("job not in an updatable state")
 
+// ErrRetryBudgetExhausted is returned by Store.Retry — the operator-facing
+// retry surface (bus queue.retry handler, HTTP POST /api/v1/queue/jobs/{id}/retry,
+// RPC proxy) — when the job's retry budget is already spent
+// (retry_count >= max_retries). Audit 2026-11-09 finding F9: without this
+// bound an operator Retry resurrected exhausted jobs to pending forever.
+// The refusal leaves the row COMPLETELY unchanged (no pending-resurrection,
+// no retry_count bump, no backoff rewrite). The worker path is untouched:
+// it guards with Job.CanRetry() upstream and never reaches the bound check
+// with an exhausted count.
+var ErrRetryBudgetExhausted = errors.New("job retry budget exhausted")
+
 // Store provides SQLite persistence for jobs.
 type Store struct {
 	db     *sql.DB
@@ -132,6 +143,7 @@ CREATE TABLE IF NOT EXISTS dead_letter (
 	required_caps TEXT,
 	max_retries   INTEGER,
 	retry_count   INTEGER,
+	interactive   INTEGER DEFAULT 0,
 	error         TEXT,
 	created_at    TEXT NOT NULL,
 	died_at       TEXT NOT NULL,
@@ -189,6 +201,11 @@ func (s *Store) migrate() error {
 		// SQLite applies DEFAULT 0 to pre-existing rows on ADD COLUMN, which
 		// is exactly the required backfill: old jobs are background.
 		{"jobs", "interactive", "ALTER TABLE jobs ADD COLUMN interactive INTEGER DEFAULT 0"},
+		// Dead-letter interactive carrier (audit 2026-11-09 M-4 / leaf 02):
+		// the dead-letter round trip must preserve the interactive flag so a
+		// recovered interactive job keeps its D11 claim ordering. Same
+		// DEFAULT-0 backfill semantics as the jobs column above.
+		{"dead_letter", "interactive", "ALTER TABLE dead_letter ADD COLUMN interactive INTEGER DEFAULT 0"},
 		// Completion epoch/token (audit H4). Existing rows get NULL, which
 		// reads back as "never claimed under a token" — CompleteAttempt then
 		// falls back to the legacy state-only predicate (see
@@ -974,6 +991,17 @@ const retryBackoffCap = 30 * time.Second
 // §4.4): a requeued interactive job stays interactive so claim ordering
 // is undisturbed. The job is left in a claimable state (claimed_by
 // cleared, error cleared) so the next eligible Claim wins it.
+//
+// Column parity (audit 2026-11-09 M-4): a row emerging into 'pending' from
+// ANY path must carry no stale claim fields. Requeue previously cleared only
+// the legacy subset (claimed_by, claim_token) and leaked the cluster columns
+// (claimed_by_node, timeout_at, last_heartbeat_at) — the next claim would
+// overwrite claimed_by/node/timeout, but last_heartbeat_at could be read
+// between claim and stamp, and a node sweeper had no way to tell a requeued
+// row from a live remote claim. The FULL reset set matches ResetToPending /
+// ReclaimRemoteStale: claimed_by, claim_token, claimed_by_node, timeout_at,
+// last_heartbeat_at. retry_count and next_retry_at semantics are unchanged
+// (provider-wait requeue still preserves retry_count AND interactive).
 func (s *Store) Requeue(jobID string, notBefore time.Time) error {
 	now := time.Now().UTC()
 
@@ -996,6 +1024,9 @@ func (s *Store) Requeue(jobID string, notBefore time.Time) error {
 		    interactive = interactive,
 		    next_retry_at = ?,
 		    claim_token = NULL,
+		    claimed_by_node = NULL,
+		    timeout_at = NULL,
+		    last_heartbeat_at = NULL,
 		    updated_at = ?
 		WHERE id = ? AND state IN ('failed', 'claimed', 'processing')`,
 		notBefore.UTC().Format(time.RFC3339), now.Format(time.RFC3339), jobID)
@@ -1022,6 +1053,19 @@ func (s *Store) Requeue(jobID string, notBefore time.Time) error {
 
 // Retry resets a failed job for retry with exponential backoff.
 // Backoff follows: 2s, 4s, 8s, 16s, 30s (capped at 30s).
+//
+// Operator retry budget bound (audit 2026-11-09 F9): when the row's budget is
+// already exhausted (retry_count >= max_retries), Retry refuses with
+// ErrRetryBudgetExhausted and the transaction rolls back WITHOUT touching the
+// row — no pending-resurrection, no retry_count bump, no backoff rewrite.
+// Before this, the operator surfaces (bus queue.retry, HTTP
+// POST /api/v1/queue/jobs/{id}/retry) could loop an exhausted job back to
+// pending forever. Worker callers keep their upstream Job.CanRetry() guard;
+// this check is the store-side backstop on the exact same predicate.
+//
+// Column parity (audit 2026-11-09 M-4): like Requeue, the pending transition
+// clears the FULL claim column set — claimed_by, claim_token, claimed_by_node,
+// timeout_at, last_heartbeat_at — not just the legacy subset.
 func (s *Store) Retry(jobID string) error {
 	now := time.Now().UTC()
 
@@ -1039,11 +1083,19 @@ func (s *Store) Retry(jobID string) error {
 		}
 	}()
 
-	// Get current retry count to calculate backoff
-	var retryCount int
-	row := tx.QueryRow(`SELECT retry_count FROM jobs WHERE id = ?`, jobID)
-	if err := row.Scan(&retryCount); err != nil {
+	// Get current retry count and budget: the count drives backoff, the
+	// budget bounds the operator surface (audit F9).
+	var retryCount, maxRetries int
+	row := tx.QueryRow(`SELECT retry_count, max_retries FROM jobs WHERE id = ?`, jobID)
+	if err := row.Scan(&retryCount, &maxRetries); err != nil {
 		return fmt.Errorf("failed to get retry count: %w", err)
+	}
+
+	// Budget bound (F9): a job whose retry budget is spent must not be
+	// resurrected to pending by an operator retry. The deferred rollback
+	// leaves the row untouched.
+	if retryCount >= maxRetries {
+		return fmt.Errorf("%w: job %s (retry_count=%d, max_retries=%d)", ErrRetryBudgetExhausted, jobID, retryCount, maxRetries)
 	}
 
 	// Calculate exponential backoff: 2s * 2^retryCount, capped at 30s
@@ -1060,6 +1112,9 @@ func (s *Store) Retry(jobID string) error {
 		    error = NULL,
 		    next_retry_at = ?,
 		    claim_token = NULL,
+		    claimed_by_node = NULL,
+		    timeout_at = NULL,
+		    last_heartbeat_at = NULL,
 		    updated_at = ?
 		WHERE id = ? AND state IN ('failed', 'claimed')`,
 		nextRetryAt.Format(time.RFC3339), now.Format(time.RFC3339), jobID)
@@ -1113,6 +1168,7 @@ func (s *Store) ResetToPending(ctx context.Context, jobID string) error {
 		    claimed_by = NULL,
 		    result = NULL,
 		    error = NULL,
+		    claimed_by_node = NULL,
 		    timeout_at = NULL,
 		    last_heartbeat_at = NULL,
 		    claim_token = NULL,
@@ -1197,6 +1253,7 @@ func (s *Store) ResetStaleClaimsAtStartup(ctx context.Context, claimsBefore time
 		    claimed_by = NULL,
 		    result = NULL,
 		    error = NULL,
+		    claimed_by_node = NULL,
 		    timeout_at = NULL,
 		    last_heartbeat_at = NULL,
 		    claim_token = NULL,
@@ -1476,9 +1533,12 @@ func (s *Store) moveToDead(jobID string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	// Insert into dead_letter, preserving due_at from the original job.
+	// interactive rides along (audit 2026-11-09 leaf 02): the dead-letter
+	// row must remember the flag so RecoverFromDeadLetter can restore the
+	// job's D11 claim ordering.
 	_, err = tx.Exec(`
-		INSERT INTO dead_letter (id, task_id, agent_id, type, priority, payload, required_caps, max_retries, retry_count, error, created_at, died_at, due_at)
-		SELECT id, task_id, agent_id, type, priority, payload, required_caps, max_retries, retry_count, error, created_at, ?, due_at
+		INSERT INTO dead_letter (id, task_id, agent_id, type, priority, payload, required_caps, max_retries, retry_count, interactive, error, created_at, died_at, due_at)
+		SELECT id, task_id, agent_id, type, priority, payload, required_caps, max_retries, retry_count, interactive, error, created_at, ?, due_at
 		FROM jobs WHERE id = ?`,
 		now, jobID)
 	if err != nil {
@@ -1506,14 +1566,19 @@ func (s *Store) RecoverFromDeadLetter(jobID string) (*Job, error) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	// Select from dead_letter
+	// Select from dead_letter. interactive rides the round trip (audit
+	// 2026-11-09 leaf 02): a recovered interactive job must reclaim its D11
+	// claim ordering, so the flag is restored onto the new jobs row.
+	// claim_token is deliberately NOT restored — the recovered row starts
+	// unclaimed (benign: no live attempt exists).
 	row := tx.QueryRow(`
-		SELECT id, task_id, agent_id, type, priority, payload, required_caps, max_retries, retry_count, error, created_at, due_at
+		SELECT id, task_id, agent_id, type, priority, payload, required_caps, max_retries, retry_count, interactive, error, created_at, due_at
 		FROM dead_letter WHERE id = ?`, jobID)
 
 	var (
 		id, jobType, payload, capsJSON   string
 		priority, maxRetries, retryCount int
+		interactive                      int
 		taskID, agentID                  sql.NullString
 		errMsg                           sql.NullString
 		createdAt                        string
@@ -1521,7 +1586,7 @@ func (s *Store) RecoverFromDeadLetter(jobID string) (*Job, error) {
 	)
 
 	err = row.Scan(&id, &taskID, &agentID, &jobType, &priority, &payload, &capsJSON,
-		&maxRetries, &retryCount, &errMsg, &createdAt, &dueAt)
+		&maxRetries, &retryCount, &interactive, &errMsg, &createdAt, &dueAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("dead letter job not found: %s", jobID)
@@ -1529,11 +1594,12 @@ func (s *Store) RecoverFromDeadLetter(jobID string) (*Job, error) {
 		return nil, fmt.Errorf("failed to read dead letter: %w", err)
 	}
 
-	// Re-insert into jobs with reset state, preserving due_at from dead_letter.
+	// Re-insert into jobs with reset state, preserving due_at and interactive
+	// from dead_letter.
 	_, err = tx.Exec(`
 		INSERT INTO jobs (id, task_id, agent_id, type, priority, state, payload, required_caps,
-		                  max_retries, retry_count, claimed_by, result, error, created_at, updated_at, due_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                  max_retries, retry_count, interactive, claimed_by, result, error, created_at, updated_at, due_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id,
 		taskID,
 		agentID,
@@ -1544,6 +1610,7 @@ func (s *Store) RecoverFromDeadLetter(jobID string) (*Job, error) {
 		capsJSON,
 		maxRetries,
 		0,              // Reset retry_count
+		interactive,    // Restore interactive (leaf 02)
 		(*string)(nil), // claimed_by
 		(*string)(nil), // result
 		(*string)(nil), // Reset error
