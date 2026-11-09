@@ -45,8 +45,6 @@ type CacheConfig struct {
 	Logger *slog.Logger
 }
 
-
-
 // TagCache is disk-based cache for tags with mtime validation.
 type TagCache struct {
 	cacheDir string
@@ -376,88 +374,12 @@ func (m *MapCache) Size() int {
 	return len(m.cache)
 }
 
-// RenderCache is an in-memory cache for rendered tree output.
-type RenderCache struct {
-	mu     sync.RWMutex
-	cache  map[string]string // Key: file:line hash -> rendered content
-	config CacheConfig
-}
-
-
-
-
-
-
-
-
-// CacheManager manages all three cache layers and provides a unified interface.
-type CacheManager struct {
-	tagCache    *TagCache
-	mapCache    *MapCache
-	renderCache *RenderCache
-	config      CacheConfig
-	logger      *slog.Logger
-}
-
-
-
-
-
-
-
-
-
-
-
-
-// getFileMtime returns the modification time of a file.
-// Helper function for compatibility with the plan.
 func getFileMtime(filePath string) time.Time {
 	info, err := os.Stat(filePath)
 	if err != nil {
 		return time.Time{}
 	}
 	return info.ModTime()
-}
-
-// NewRenderCache creates a new RenderCache with the given configuration.
-func NewRenderCache(config CacheConfig) *RenderCache {
-	if config.MemoryCacheSize == 0 {
-		config.MemoryCacheSize = 100
-	}
-
-	return &RenderCache{
-		cache:  make(map[string]string, config.MemoryCacheSize),
-		config: config,
-	}
-}
-
-// NewCacheManager creates a new CacheManager with all cache layers.
-func NewCacheManager(config CacheConfig, logger *slog.Logger) (*CacheManager, error) {
-	// Validate config
-	if err := ValidateCacheConfig(config); err != nil {
-		return nil, err
-	}
-
-	// Create tag cache (disk-based)
-	tagCache, err := NewTagCache(config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create tag cache: %w", err)
-	}
-
-	// Create map cache (memory-based)
-	mapCache := NewMapCache(config)
-
-	// Create render cache (memory-based)
-	renderCache := NewRenderCache(config)
-
-	return &CacheManager{
-		tagCache:    tagCache,
-		mapCache:    mapCache,
-		renderCache: renderCache,
-		config:      config,
-		logger:      logger,
-	}, nil
 }
 
 // DefaultCacheConfig returns a CacheConfig with default values.
@@ -495,138 +417,3 @@ func ValidateCacheConfig(config CacheConfig) error {
 }
 
 // GetRenderedMap retrieves a cached rendered map.
-func (cm *CacheManager) GetRenderedMap(files []string, identifiers []string, maxAge time.Duration) (*CachedMap, bool) {
-	return cm.mapCache.Get(files, identifiers, maxAge)
-}
-
-// GetTags retrieves cached tags for a file.
-func (cm *CacheManager) GetTags(filePath string, mtime time.Time) ([]Tag, bool, error) {
-	return cm.tagCache.Get(filePath, mtime)
-}
-
-// SetRenderedMap stores a rendered map in the cache.
-func (cm *CacheManager) SetRenderedMap(files []string, identifiers []string, rendered RenderedMap) {
-	cm.mapCache.Set(files, identifiers, rendered)
-}
-
-// SetTags stores tags in the cache for a file.
-func (cm *CacheManager) SetTags(filePath string, mtime time.Time, tags []Tag) error {
-	return cm.tagCache.Set(filePath, mtime, tags)
-}
-
-// Stats returns statistics for all caches.
-func (cm *CacheManager) Stats() (tagFiles int64, tagSize int64, mapEntries int, renderEntries int, err error) {
-	tagFiles, tagSize, err = cm.tagCache.Stats()
-	if err != nil {
-		return 0, 0, 0, 0, err
-	}
-
-	mapEntries = cm.mapCache.Size()
-	renderEntries = cm.renderCache.Size()
-
-	return tagFiles, tagSize, mapEntries, renderEntries, nil
-}
-
-// SetRenderedContext stores rendered context in the cache.
-func (cm *CacheManager) SetRenderedContext(filePath string, line int, content string) {
-	cm.renderCache.Set(filePath, line, content)
-}
-
-// GetRenderedContext retrieves cached rendered context for a symbol.
-func (cm *CacheManager) GetRenderedContext(filePath string, line int) (string, bool) {
-	return cm.renderCache.Get(filePath, line)
-}
-
-// ClearAll clears all caches (both disk and memory).
-func (cm *CacheManager) ClearAll() error {
-	// Clear memory caches
-	cm.mapCache.Clear()
-	cm.renderCache.Clear()
-
-	// Clear disk cache
-	return cm.tagCache.Clear()
-}
-
-// ClearTagCache clears the disk-based tag cache.
-func (cm *CacheManager) ClearTagCache() error {
-	return cm.tagCache.Clear()
-}
-
-// InvalidateTags removes cached tags for a specific file.
-func (cm *CacheManager) InvalidateTags(filePath string) error {
-	return cm.tagCache.Invalidate(filePath)
-}
-
-// renderCacheKey generates a key for render cache based on file and line.
-func (r *RenderCache) renderCacheKey(filePath string, line int) string {
-	keyData := fmt.Sprintf("%s:%d", filePath, line)
-	hash := sha256.Sum256([]byte(keyData))
-	return hex.EncodeToString(hash[:])
-}
-
-// Get retrieves cached rendered content for a file and line.
-func (r *RenderCache) Get(filePath string, line int) (string, bool) {
-	if !r.config.EnableMemoryCache {
-		return "", false
-	}
-
-	key := r.renderCacheKey(filePath, line)
-
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	content, ok := r.cache[key]
-	return content, ok
-}
-
-// Set stores rendered content in the cache.
-func (r *RenderCache) Set(filePath string, line int, content string) {
-	if !r.config.EnableMemoryCache {
-		return
-	}
-
-	key := r.renderCacheKey(filePath, line)
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	// Simple eviction: clear half when full
-	if len(r.cache) >= r.config.MemoryCacheSize {
-		r.evictHalf()
-	}
-
-	r.cache[key] = content
-}
-
-// evictHalf removes approximately half of the cache entries.
-func (r *RenderCache) evictHalf() {
-	targetSize := max(len(r.cache)/2, 10)
-
-	// Create new map with target size
-	newCache := make(map[string]string, targetSize)
-
-	// Copy random entries (approximate eviction)
-	count := 0
-	for key, value := range r.cache {
-		if count < targetSize {
-			newCache[key] = value
-			count++
-		}
-	}
-
-	r.cache = newCache
-}
-
-// Clear removes all entries from the cache.
-func (r *RenderCache) Clear() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.cache = make(map[string]string, r.config.MemoryCacheSize)
-}
-
-// Size returns the number of entries in the cache.
-func (r *RenderCache) Size() int {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return len(r.cache)
-}
