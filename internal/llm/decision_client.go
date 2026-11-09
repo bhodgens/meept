@@ -105,7 +105,7 @@ func (d *DecisionClient) ModelName() string {
 // chatterFor resolves the serving Chatter for the decision model through the
 // classifier's resolution path: the resolver's decision-model ModelConfig is
 // handed to createChatterFor (the same OpenAI/Anthropic/Codex transport
-// selector ProviderManager and ModelBroker use for every serving client).
+// selector ProviderManager uses for every serving client).
 // The Chatter interface is satisfied by the result, so tests can inject a
 // stub instead.
 func (d *DecisionClient) chatterFor() (Chatter, error) {
