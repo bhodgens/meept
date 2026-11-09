@@ -1091,12 +1091,6 @@ type AgentLoop struct {
 	// dispatcher's intent classifier. Consumed once on the next turn.
 	reasoningForNextTurn string
 
-	// epistemicHook is the optional post-turn ambient-extraction hook
-	// (Path B of the epistemic memory platform). When non-nil, AfterTurn
-	// is invoked after each turn with the conversation window so the
-	// extractor can mine claims/decisions/predictions.
-	epistemicHook *EpistemicHook
-
 	// contextInjector is the optional enrichment layer that merges standing
 	// user instructions and learned patterns into the system prompt. When
 	// non-nil, BuildSystemPrompt is invoked from the system-prompt builders
@@ -2566,15 +2560,6 @@ func WithSessionRefresher(r *session.SessionRefresher) LoopOption {
 	}
 }
 
-// WithEpistemicHook sets the post-turn ambient-extraction hook.
-func WithEpistemicHook(hook *EpistemicHook) LoopOption {
-	return func(l *AgentLoop) {
-		if hook != nil {
-			l.epistemicHook = hook
-		}
-	}
-}
-
 // WithContextInjectorFunc sets the context injector for system prompt enrichment.
 func WithContextInjectorFunc(injector *ContextInjector) LoopOption {
 	return func(l *AgentLoop) {
@@ -2915,19 +2900,6 @@ func (l *AgentLoop) SetPrefetchCallback(callback func(query string, maxItems int
 	l.mu.Unlock()
 }
 
-// SetEpistemicHook wires the post-turn ambient-extraction hook. Nil-safe
-// per CLAUDE.md setter convention. When non-nil, the hook's AfterTurn
-// method is invoked after each agent turn so the extractor can mine
-// claims/decisions/predictions from the conversation window.
-func (l *AgentLoop) SetEpistemicHook(hook *EpistemicHook) {
-	if hook == nil {
-		return
-	}
-	l.mu.Lock()
-	l.epistemicHook = hook
-	l.mu.Unlock()
-}
-
 // SetContextInjector wires the ContextInjector that enriches the system
 // prompt with standing user instructions and learned patterns. Nil-safe
 // per CLAUDE.md setter convention. When non-nil, BuildSystemPrompt is
@@ -3100,6 +3072,18 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 // Conversation.AddUserMessageWithParts so that provider serializers emit
 // native image blocks.
 func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, parts []llm.ContentPart, conversationID string) (response string, err error) {
+	// The reply text is stripped of leaked reasoning before it returns -
+	// history-side stripping (conversation.go) keeps it out of the NEXT
+	// prompt but never sanitizes the CURRENT reply, and the voice talk
+	// loop speaks this text sentence-by-sentence (live defect 2026-11-09:
+	// openless </think> leaks reached the caller's speaker). No-op on
+	// clean text: StripThinking is trim-only there, so chat paths that
+	// rely on byte-shape only see behavior change on the leaked form.
+	defer func() {
+		if err == nil {
+			response = llm.StripThinking(response)
+		}
+	}()
 	if l.llm == nil {
 		return "", ErrNoLLMClient
 	}
@@ -3814,42 +3798,6 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 			// decision is explicit and testable in one place.
 			_ = router.Deliver(ctx, kind, finalResponse, l.sessionID, conversationID)
 		}
-	}
-
-	// Invoke epistemic hook (Path B: ambient extraction) after the turn
-	// completes. Best-effort: runs asynchronously with panic recovery so
-	// extraction failures never affect the user-facing response.
-	if l.epistemicHook != nil {
-		// Snapshot the conversation messages under the conversation's read
-		// lock, then release before dispatching the goroutine to avoid
-		// holding the lock across the extractor's I/O.
-		msgs := conv.GetMessages()
-		window := make([]string, 0, len(msgs))
-		for _, m := range msgs {
-			if m.Content != "" {
-				window = append(window, m.Content)
-			}
-		}
-		intent := l.agentID
-		if intent == "" {
-			intent = "chat"
-		}
-		hook := l.epistemicHook // capture to avoid race on l.epistemicHook
-		// G118: goroutine intentionally outlives request context —
-		// background epistemic extraction whose I/O must finish after the
-		// turn's ctx is cancelled. Uses context.Background() because the
-		// parent context may be cancelled before the extractor finishes
-		// its I/O.
-		l.wg.Go(func() {
-			defer func() {
-				if r := recover(); r != nil {
-					l.logger.Warn("epistemic hook panicked", "error", r)
-				}
-			}()
-			if _, err := hook.AfterTurn(context.Background(), intent, window); err != nil {
-				l.logger.Debug("epistemic hook completed with error", "error", err)
-			}
-		})
 	}
 
 	// Queue prefetch for next turn (Hermes pattern)
@@ -9707,8 +9655,7 @@ func (l *AgentLoop) ConfigSnapshot() []LoopOption {
 		// --- Session refresher ---
 		WithSessionRefresher(l.sessionRefresher),
 
-		// --- Epistemic + context enrichment ---
-		WithEpistemicHook(l.epistemicHook),
+		// --- Context enrichment ---
 		WithContextInjectorFunc(l.contextInjector),
 		WithHTTPHooks(l.httpHooks),
 
