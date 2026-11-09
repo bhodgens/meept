@@ -853,12 +853,6 @@ func wireShellToolSandbox(shellTool *builtin.ShellExecuteTool, resolveErr error,
 	}
 }
 
-// newRefusingBackend constructs the fail-closed ExecutionBackend used when
-// sandbox resolution fails under require_sandbox=true.
-func newRefusingBackend(reason error) runtime.ExecutionBackend {
-	return builtin.NewRefusingBackend(reason)
-}
-
 // agentModelBindingFor resolves an agent id to the (model config, alias) pair
 // the AgentHealthAdapter needs to ask the resolver's quota/endpoint health.
 //

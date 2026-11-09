@@ -122,9 +122,15 @@ func TestWireShellToolSandbox_RuntimeDisabledNoOp(t *testing.T) {
 		"runtime disabled must leave the tool in its pre-existing direct-exec posture")
 }
 
-// TestRefusingBackend_Unit pins RefusingBackend semantics directly.
+// TestRefusingBackend_Unit pins the fail-closed backend semantics through
+// the REAL wiring seam (SetRefusingBackend), exercising the same
+// refusingBackend the live fail-closed path installs.
 func TestRefusingBackend_Unit(t *testing.T) {
-	rb := newRefusingBackend(fmt.Errorf("resolving backend: %w", runtime.ErrSandboxRequired))
+	shellTool := builtin.NewShellExecuteTool("", 0, nil)
+	shellTool.SetRefusingBackend(fmt.Errorf("resolving backend: %w", runtime.ErrSandboxRequired))
+
+	rb := shellTool.Backend()
+	require.NotNil(t, rb)
 	assert.Equal(t, "refusing", rb.Name())
 	require.NoError(t, rb.Close())
 

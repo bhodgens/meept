@@ -16,11 +16,6 @@ type refusingBackend struct {
 	reason error
 }
 
-// NewRefusingBackend constructs a refusing backend around a resolve error.
-func NewRefusingBackend(reason error) runtime.ExecutionBackend {
-	return &refusingBackend{reason: reason}
-}
-
 // Name identifies the backend in logs and progress messages.
 func (r *refusingBackend) Name() string { return "refusing" }
 
