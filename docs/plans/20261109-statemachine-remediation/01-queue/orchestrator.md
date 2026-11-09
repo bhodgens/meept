@@ -90,8 +90,8 @@ comments cite audit finding IDs (audit 2026-11-09, tree 20261109-statemachine-re
 | 00T-queue-tests | TESTS_VALIDATED | 1 | committed 6e73912b (--no-verify: RED-by-design bypasses U1000/compile gates per tests-first protocol) |
 | 01-mark-processing-token | REVIEWED | 1 | committed 328945fb; C-Q1 exact; parent tmp-swap verified GREEN; gate file byte-identical |
 | 02-requeue-column-parity | REVIEWED | 1 | committed cf83d64e; 4 gates GREEN + consumers green; dead_letter interactive column added (schema+ALTER); parent-verified tmp-swap |
-| 03-stranded-sweeper | IN_PROGRESS | 0 | dispatched 2026-11-09 (serialized; lands Sweep symbol that un-unblocks the package test build) |
-| 04-state-check-and-immediate | PENDING | 0 | |
+| 03-stranded-sweeper | REVIEWED | 1 | committed 12e93ef6 + daemon wiring 43958b96 (orchestrator task); full queue pkg green except leaf-04 gate; tx-idiom question handed to leaf 04 (F6) |
+| 04-state-check-and-immediate | IN_PROGRESS | 0 | dispatched 2026-11-09 |
 
 ## Integration Test Plan
 
