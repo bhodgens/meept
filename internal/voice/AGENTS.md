@@ -233,8 +233,20 @@ store. Invariants a future agent must NOT break:
   pendingInterrupt handshake keeps the C5 interrupt-before-prompt order
   even though the RMS trip fires on the audio-pump goroutine; mic PCM
   keeps flowing to STT during playback so the employee reforms from what
-  the caller said. RMS must NEVER run on phone legs - they keep the Tier
-  A STT-partial trigger. Never move the trigger to a leg-agnostic branch.
+  the caller said. The trip's STT EVIDENCE is ONE-SHOT: a trip zeroes
+  lastFinalAt, so a second window needs a NEW final transcript (stale
+  evidence cancelling the very turn its own final dispatched was a live
+  defect, call local-2d84c384fd93f447 2026-11-09, leaf 02); non-speech
+  finals ([BLANK_AUDIO]/(sighs) class, nonSpeechTranscript) never dispatch
+  a turn and never stamp evidence. RMS must NEVER run on phone legs -
+  they keep the Tier A STT-partial trigger. Never move the trigger to a
+  leg-agnostic branch.
+- Barge-in must SILENCE the client speakers, not just stop new frames:
+  internal/tts.AudioPlayer retains the live oto burst and Pause()s it on
+  Stop/new Play (Stop was a documented no-op - cancelled audio played
+  under the next answer, leaf 01); SpeakerSink.Clear drops the buffered
+  burst too; the CLI playout caps pending socket audio (~150 ms,
+  liveMaxPendingAudioBytes) so kernel backpressure bounds the tail.
 - LocalSplice has NO reorder and NO transcode by contract:
   unix sockets preserve order (no reorder window), and the local leg
   negotiates L16 s16le@16000 only - any other chunk size is the named

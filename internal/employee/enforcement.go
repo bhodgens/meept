@@ -583,11 +583,14 @@ func (p *PreExecChecker) Check(action, toolName string, details map[string]strin
 	constraints := c.Constraints
 
 	// 1a. tools_forbidden — hard deny. The "*" wildcard denies EVERY
-	// tool: a talk-only employee (companion, secretary) forbids all
-	// tool use with ["*"], and hire-time validation must not strip the
-	// wildcard as an "unknown tool" (it was silently removed, which
-	// re-armed the full toolset on a no-tools employee - live defect
-	// 2026-11-09: a voice companion executed schedule_list mid-call).
+	// tool: a talk-only employee forbids all tool use with ["*"], and
+	// hire-time validation must not strip the wildcard as an "unknown
+	// tool" (it was silently removed, which re-armed the full toolset on
+	// a no-tools employee - live defect 2026-11-09: a voice companion
+	// executed schedule_list mid-call). Employees that need a read-only
+	// reporting toolset (the companion, post-refactor) use an EXPLICIT
+	// deny list instead — a wildcard here would deny their allowed tools,
+	// because this step runs before 1b.
 	if len(constraints.ToolsForbidden) > 0 {
 		if slices.Contains(constraints.ToolsForbidden, toolName) ||
 			slices.Contains(constraints.ToolsForbidden, "*") {
