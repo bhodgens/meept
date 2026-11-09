@@ -39,7 +39,6 @@ var companionReadOnlyTools = []string{
 	"memory_get_context",
 	"platform_status",
 	"platform_agents",
-	"transcript_fetch",
 	"task_list",
 }
 

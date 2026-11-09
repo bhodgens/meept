@@ -103,10 +103,10 @@ is the desk companion for the local leg: a warm, spoken-word conversationalist
 that opens with a "how can I help?" offer and can truthfully report on the
 operator's recent work and on what the platform is running. It holds ONLY
 read-only reporting tools (memory_search, memory_recall, memory_get_context,
-platform_status, platform_agents, transcript_fetch, task_list). Its
+platform_status, platform_agents, task_list). Its
 constitution's `tools_forbidden` is an explicit mutating-tool deny list, not
 the `["*"]` wildcard: enforcement checks the forbid list BEFORE the allow
-list, so a wildcard would deny the seven reporting tools too. The template
+list, so a wildcard would deny the reporting tools too. The template
 ships DISABLED; hire with `meept agents create` after flipping `enabled`.
 
 ## The local leg: how to run it
