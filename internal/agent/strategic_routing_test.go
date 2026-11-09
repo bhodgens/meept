@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"slices"
 	"strings"
 	"testing"
 
@@ -350,35 +349,5 @@ func TestBuildPlannerPromptHint_Format(t *testing.T) {
 	expectedLine := "- \"" + config.AgentIDCoder + "\" → writes code\n"
 	if !strings.Contains(got, expectedLine) {
 		t.Errorf("hint should contain formatted line %q; got:\n%s", expectedLine, got)
-	}
-}
-
-// --- SecurityKeywords tests ---
-
-func TestSecurityKeywords(t *testing.T) {
-	kw := SecurityKeywords()
-
-	if len(kw) == 0 {
-		t.Fatal("SecurityKeywords() returned empty list")
-	}
-
-	// Verify "security" is present.
-	if !slices.Contains(kw, "security") {
-		t.Errorf("SecurityKeywords() should contain \"security\"; got %v", kw)
-	}
-
-	// Verify the full expected list.
-	expected := []string{
-		"security", "authentication", "authorization",
-		"encryption", "credential", "password", "token",
-		"vulnerable", "vulnerability", "cve",
-	}
-	if len(kw) != len(expected) {
-		t.Fatalf("SecurityKeywords() has %d items, want %d", len(kw), len(expected))
-	}
-	for i, want := range expected {
-		if kw[i] != want {
-			t.Errorf("SecurityKeywords()[%d] = %q, want %q", i, kw[i], want)
-		}
 	}
 }

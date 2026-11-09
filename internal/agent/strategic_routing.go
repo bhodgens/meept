@@ -129,14 +129,3 @@ func BuildPlannerPromptHint(registry *AgentRegistry) string {
 
 	return b.String()
 }
-
-// SecurityKeywords returns the list of keywords that trigger pair-session
-// routing for code/debug intents. This centralizes the list hardcoded at
-// strategic.go:689-697 so it can be reused and kept in sync.
-func SecurityKeywords() []string {
-	return []string{
-		"security", "authentication", "authorization",
-		"encryption", "credential", "password", "token",
-		"vulnerable", "vulnerability", "cve",
-	}
-}
