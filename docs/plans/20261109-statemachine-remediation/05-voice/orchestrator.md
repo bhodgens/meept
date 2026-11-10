@@ -100,7 +100,7 @@ touching frames/sockets/release.
 | 00T-voice-tests | TESTS_VALIDATED | 2 | part 1 (terminal_gate_test.go) + part 2 (leg_gate + webhook_gate) both committed; 8 pins, all parent-verified RED for right reasons |
 | 01-dial-leak-and-race | COMPLETE | 1 | committed f9304084 (dial.go) + 47d03b60 (manager tombstone, parent-landed residual) + gofmt fix; finding 2 FULLY closed, finding 9 closed; T3 audit: 0 unpaired paths |
 | 02-signal-leg-parity | COMPLETE | 1 | committed 97c67a59; findings 5/6 closed; nil-seam TRUE posture gate-forced + documented; daemon one-liner flagged & parent-reviewed (sole New site) |
-| 03-ringing-watchdog-and-db-sweep | IN_PROGRESS | 0 | dispatched (leg timer + callstore sweep + OnMediaStart; voice_wiring.go off-limits w/ deferral rule) |
+| 03-ringing-watchdog-and-db-sweep | COMPLETE | 1 | committed 117cd338; findings 3/7/4 closed (voice+signalleg pkgs fully green; gates zero-diff vs HEAD); sweep site=NewCallStore; claimTerminal reuses finding-9 atomicity lesson |
 | 04-webhook-and-teardown | IN_PROGRESS | 0 | dispatched (wiring/employee/docs; T3 dial.go DEFERRED to orchestrator — leaf 01 owns dial.go) |
 
 ## Integration Test Plan
