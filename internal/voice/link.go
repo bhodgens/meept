@@ -97,6 +97,11 @@ var ErrLinkMonitorPathTooLong = errors.New("voice: voice link: monitor socket pa
 // deadline and the tap drops permanently (logged once).
 const monitorWriteDeadline = 250 * time.Millisecond
 
+// monitorFailThreshold disarms a tap only after this many CONSECUTIVE
+// write failures - one backpressured/slow write must not silence the
+// operator's monitor for the rest of the link.
+const monitorFailThreshold = 8
+
 // ErrLinkSameEmployee is the named up-front refusal when both sides name
 // the same employee: the registry's one-live-call-per-employee rule
 // would reject the second Open anyway, but the link checks BEFORE any
@@ -313,8 +318,9 @@ func (ml *monitorListener) close() {
 // written before a client dials are simply gone (the monitor is a live
 // tap, not a recorder - the bytes-may-drop contract).
 type monitorTap struct {
-	ln   *monitorListener
-	dead atomic.Bool
+	ln    *monitorListener
+	dead  atomic.Bool
+	fails atomic.Uint32 // consecutive write failures (reset on success)
 }
 
 func (t *monitorTap) Write(p []byte) (int, error) {
@@ -330,11 +336,17 @@ func (t *monitorTap) Write(p []byte) (int, error) {
 	_ = conn.SetWriteDeadline(time.Now().Add(monitorWriteDeadline))
 	n, err := conn.Write(p)
 	if err != nil {
-		// Stale/unread monitor conn: fall back to dropping for the
-		// rest of the link (logged once by the pump).
-		t.dead.Store(true)
+		// Stale/unread/backpressured monitor conn: drop THIS batch and
+		// disarm only after a run of failures (the monitor client may
+		// reschedule and catch up - one slow write must not silence the
+		// rest of the link; a permanently dead socket keeps failing and
+		// disarms via the threshold, logged once by the pump).
+		if t.fails.Add(1) >= monitorFailThreshold {
+			t.dead.Store(true)
+		}
 		return n, err
 	}
+	t.fails.Store(0)
 	return n, nil
 }
 
