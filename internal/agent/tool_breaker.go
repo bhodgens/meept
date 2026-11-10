@@ -112,6 +112,19 @@ func (b *ToolRetryBreaker) Observe(name string, args map[string]any, failed bool
 	return veto
 }
 
+// snapshotCounts returns a copy of the per-key consecutive-failure counters.
+// Test-support accessor: lets loop-path pins assert the breaker observed the
+// outcomes without reaching into the mutex-guarded map.
+func (b *ToolRetryBreaker) snapshotCounts() map[string]int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make(map[string]int, len(b.counts))
+	for k, v := range b.counts {
+		out[k] = v
+	}
+	return out
+}
+
 // VerifyFromToolResults decides task success from STRUCTURED tool data only
 // (book ch1 "Verify" input-isolation principle): exit codes, success flags,
 // and error fields. It never reads assistant-generated prose, so a model
