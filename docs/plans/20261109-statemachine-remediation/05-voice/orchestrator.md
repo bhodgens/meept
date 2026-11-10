@@ -97,8 +97,8 @@ touching frames/sockets/release.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-voice-tests | PENDING | 0 | BLOCKED-START |
-| 01-dial-leak-and-race | PENDING | 0 | |
+| 00T-voice-tests | TESTS_IN_PROGRESS | 1 | part 1 committed (terminal_gate_test.go; parent-triaged after child timeout: 1 compile fix, 3 RED + 1 pin verified); part 2 in flight (signalleg+webhook) |
+| 01-dial-leak-and-race | IN_PROGRESS | 0 | dispatched 2026-11-09 (dial.go scope; targets committed gate tests) |
 | 02-signal-leg-parity | PENDING | 0 | |
 | 03-ringing-watchdog-and-db-sweep | PENDING | 0 | |
 | 04-webhook-and-teardown | PENDING | 0 | |
