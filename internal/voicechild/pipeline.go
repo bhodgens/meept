@@ -647,7 +647,7 @@ func (p *pipeline) playbackStream(frame voiceframe.Frame, gen uint64) {
 		p.logger.Error("voicechild: tts provider not installed; dropping say", "call_id", p.ccid)
 		return
 	}
-	pcm, err := tts.Speak(p.ctx, frame.Text)
+	pcm, err := tts.Speak(WithTTSContext(p.ctx, p.ccid), frame.Text)
 	if err != nil {
 		p.logger.Error("voicechild: tts speak", "err", err, "call_id", p.ccid)
 		return
@@ -759,6 +759,28 @@ func (p *pipeline) playbackStream(frame voiceframe.Frame, gen uint64) {
 		default:
 		}
 	}
+}
+
+// ttsCallIDKey stamps the voice call id on the Speak context so the TTS
+// provider package (which imports voicechild, never the reverse) can name
+// the call in its transport-retry WARN (leaf 04 hygiene).
+type ttsCallIDKey struct{}
+
+// WithTTSContext returns ctx carrying the call id for provider logging.
+func WithTTSContext(ctx context.Context, callID string) context.Context {
+	if callID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, ttsCallIDKey{}, callID)
+}
+
+// TTSCallIDFromContext extracts the stamped call id ("" when unset).
+// Used by internal/voicechild/providers.
+func TTSCallIDFromContext(ctx context.Context) string {
+	if id, ok := ctx.Value(ttsCallIDKey{}).(string); ok {
+		return id
+	}
+	return ""
 }
 
 // clear drops queued TTS audio for this call and stops pending .out writes
