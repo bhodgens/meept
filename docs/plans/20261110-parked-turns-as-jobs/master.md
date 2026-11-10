@@ -95,8 +95,8 @@ fix comments cite tree 20261110-parked-turns-as-jobs + audit finding C1.
 |-------|--------|------------|-------------|
 | 00T-gate-tests | TESTS_VALIDATED | 1 | committed RED (4 pins); parent-verified build-fail on target symbols only |
 | 01-backend-seam | COMPLETE | 1 | committed fb47ab4c; seam+wrapper refactor, gate1 GREEN (scratch), frozen gates zero-diff; clock deviation adjudicated w/ constraint |
-| 02-queue-backend | IN_PROGRESS | 0 | dispatched (queue backend + config flag + wiring) |
-| 03-parity-test | PENDING | 0 | blocked on 02 |
+| 02-queue-backend | COMPLETE | 1 | committed 3a4964a3; owner-as-claimed_by + due_at-sentinel unclaimable design (no queue-pkg edits); 4 gates parent-verified PASS; flag-off byte-identical |
+| 03-parity-test | IN_PROGRESS | 0 | dispatched (restart parity port + flag-off identity + no-worker-claim pins) |
 
 ## Integration Test Plan
 
