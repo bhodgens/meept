@@ -96,7 +96,9 @@ fix comments cite tree 20261110-parked-turns-as-jobs + audit finding C1.
 | 00T-gate-tests | TESTS_VALIDATED | 1 | committed RED (4 pins); parent-verified build-fail on target symbols only |
 | 01-backend-seam | COMPLETE | 1 | committed fb47ab4c; seam+wrapper refactor, gate1 GREEN (scratch), frozen gates zero-diff; clock deviation adjudicated w/ constraint |
 | 02-queue-backend | COMPLETE | 1 | committed 3a4964a3; owner-as-claimed_by + due_at-sentinel unclaimable design (no queue-pkg edits); 4 gates parent-verified PASS; flag-off byte-identical |
-| 03-parity-test | IN_PROGRESS | 0 | dispatched (restart parity port + flag-off identity + no-worker-claim pins) |
+| 03-parity-test | COMPLETE | 1 | committed + merged; C1 restart parity port GREEN (2.16s), flag-off identity, no-worker-claim sentinel; -race stable -count=3 after real timing-flake fix |
+
+BRANCH MERGED TO MAIN: de39440e (includes main-side fakeEmployeeResolver test fixup + post-merge gates: make test RC=0, graphs-check fresh). Flag parking.queue_backend default false; C1 bug class now structurally impossible on the queue backend.
 
 ## Integration Test Plan
 
