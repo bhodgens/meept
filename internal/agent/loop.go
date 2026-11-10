@@ -885,6 +885,14 @@ type AgentLoop struct {
 	throttleMu      sync.Mutex
 	throttleTurnCtx *throttleTurnContext
 
+	// throttleResumeHandler is the chat handler the throttle resume path
+	// delivers its result through (C-K2 delivery parity, tree 04 leaf 02):
+	// persistExchange + client push + turn.terminal, mirroring the quota
+	// resume. Stamped by SetThrottleParker (daemon wiring + tests); read by
+	// resumeThrottledTurn under l.mu. Nil (bare SetTurnParker wiring) keeps
+	// the resume loop-side only — no client delivery.
+	throttleResumeHandler *ChatHandler
+
 	// Upload store for resolving image file references (vision pre-flight)
 	uploadStore llm.UploadStore
 
@@ -3478,8 +3486,18 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	// NOT a completed turn: skip the post-turn success pipeline entirely.
 	// The resume path re-enters RunOnceWithParts and flows through the
 	// normal pipeline once the turn actually completes.
+	//
+	// F6 (tree 04 leaf 02): detection is the EXPLICIT per-turn parked marker
+	// (stamped by parkThrottledTurn on the turn's dispatch stash) OR'd with
+	// the old state-machine read. The state machine is OPTIONAL — with it
+	// nil (or a rejected transition), CurrentState() can never report
+	// StateQuotaWait and the parked turn used to fall through to the success
+	// pipeline above (the exact defect class this guard exists for). The SM
+	// read is kept as a secondary signal for park paths without the ctx
+	// plumbing (task/skill entries that never passed RunOnceWithParts).
 	turnParked := err == nil && strings.TrimSpace(finalResponse) == "" &&
-		l.stateMachine != nil && l.stateMachine.CurrentState() == StateQuotaWait
+		(turnParkedInContext(ctx) ||
+			(l.stateMachine != nil && l.stateMachine.CurrentState() == StateQuotaWait))
 	if turnParked {
 		l.logger.Info("turn parked on provider wait — skipping post-turn success pipeline",
 			"conversation", conversationID,
@@ -3572,8 +3590,13 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 				// pipeline (empty assistant append, learning, trajectory)
 				// repeats the exact pollution the first-cycle turnParked
 				// guard above exists to skip. Same shape, same skip.
+				// F6 (tree 04 leaf 02): same marker-OR-state-machine read as
+				// the primary guard — the rewrite re-entry parks through the
+				// same parkThrottledTurn, which stamps the marker on this
+				// turn's ctx, so detection holds with a nil state machine.
 				if strings.TrimSpace(retryResponse) == "" &&
-					l.stateMachine != nil && l.stateMachine.CurrentState() == StateQuotaWait {
+					(turnParkedInContext(ctx) ||
+						(l.stateMachine != nil && l.stateMachine.CurrentState() == StateQuotaWait)) {
 					l.logger.Info("reply-guard rewrite retry parked on provider wait — skipping post-turn success pipeline",
 						"conversation_id", conversationID,
 					)
@@ -10428,8 +10451,12 @@ func (l *AgentLoop) applyTerminateReplyGuard(ctx context.Context, conv *Conversa
 	// parked-turn handling by shipping the parked shape, never a canned
 	// line masquerading as an answer. The StateQuotaWait transition
 	// already carried the park reason (throttle_wait).
+	// F6 (tree 04 leaf 02): the marker read is the primary signal — with a
+	// nil state machine the parked rewrite must still ship "" (the parked
+	// shape), never a canned line.
 	if strings.TrimSpace(retryResponse) == "" &&
-		l.stateMachine != nil && l.stateMachine.CurrentState() == StateQuotaWait {
+		(turnParkedInContext(ctx) ||
+			(l.stateMachine != nil && l.stateMachine.CurrentState() == StateQuotaWait)) {
 		l.logger.Info("terminating-tool reply-guard rewrite parked on provider wait",
 			"conversation_id", conversationID,
 		)

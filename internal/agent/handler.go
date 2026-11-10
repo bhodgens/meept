@@ -1157,7 +1157,13 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 		// the session is unknown, or GetOrCreateWired fails.
 		loop := h.sessionLoop(conversationID)
 		h.applyRequestModel(loop, req.Model, conversationID)
-		reply, err = loop.RunOnceWithParts(ctx, req.Message, req.Parts, conversationID)
+		// C-K2 (tree 04 leaf 02): stamp the chat.submit turn identity on the
+		// turn ctx so a mid-turn throttle park encodes it into the resume
+		// payload — the throttle resume then emits the final turn.terminal
+		// under the acked id exactly like the quota/budget parks (F15).
+		// Empty req.TurnID (legacy `chat` RPC) stamps nothing: the park
+		// stays payload-silent and the resume's delivery stays skipped.
+		reply, err = loop.RunOnceWithParts(WithChatTurnID(ctx, req.TurnID), req.Message, req.Parts, conversationID)
 	}
 
 	// Append classification degradation notice when dispatch used a fallback classifier.
