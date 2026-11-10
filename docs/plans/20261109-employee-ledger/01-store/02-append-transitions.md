@@ -283,10 +283,13 @@ skip the chain to keep it a security trail (master C decision).
    UPSERT state (as_of = new rowid); COMMIT. Return stored Record
    (rowid via RETURNING id — SQLite modernc supports RETURNING; verify,
    else lastInsertId).
-3. Emit the after-commit hook seam: `type afterAppendFn func(Record, *State)`
-   stored in an exported Option `WithAfterAppend(func(rec Record, st *State))`
-   — nil-safe; leaf 02-03 wires the bus publish through it. 03-* wires
-   nothing else.
+3. Emit the after-commit hook seam (RATIFIED at gate validation 2026-11-09:
+   a Store METHOD, not an Open option — Open stays `Open(dbPath, logger)`):
+   `func (s *Store) WithAfterAppend(fn func(rec Record, st *State))` —
+   nil-safe setter; leaf 02-03 wires the bus publish through it. Fires
+   exactly once per successful Append with st==nil for log-only rows,
+   zero times for rejected appends (asserted by gate test
+   TestWithAfterAppendHookFiresPerSuccessfulAppend).
 
 ## What This Leaf Exposes to Siblings
 
