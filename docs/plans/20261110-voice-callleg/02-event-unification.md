@@ -32,7 +32,7 @@ teardown (document ownership).
 | T2 | wire each adapter's signal sources to Events() | callleg_*.go | gate 4 GREEN + full voice/signalleg suites | parity |
 | T3 | channel close-once semantics + test | callleg*.go, +new internal/voice/callleg_events_test.go (non-gate) | -race | no double close |
 
-## Self-Verification
+## Self-Verification Checklist
 
 - [ ] all four CallLeg gates GREEN
 - [ ] frozen 20261109 voice gates zero-diff green; releaseOnce untouched
