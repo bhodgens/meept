@@ -44,9 +44,9 @@ func (r *gateAcquireFailRegistry) Acquire(_, _, _ string) (Instance, error) {
 func (r *gateAcquireFailRegistry) AcquireLeg(ccid, employeeID, target, leg string) (Instance, error) {
 	return r.inner.AcquireLeg(ccid, employeeID, target, leg)
 }
-func (r *gateAcquireFailRegistry) Release(ccid string)    { r.inner.Release(ccid) }
-func (r *gateAcquireFailRegistry) Live() []Instance       { return r.inner.Live() }
-func (r *gateAcquireFailRegistry) Cap() int               { return r.inner.Cap() }
+func (r *gateAcquireFailRegistry) Release(ccid string) { r.inner.Release(ccid) }
+func (r *gateAcquireFailRegistry) Live() []Instance    { return r.inner.Live() }
+func (r *gateAcquireFailRegistry) Cap() int            { return r.inner.Cap() }
 
 // gateFixedCCIDController is a DialController with a FIXED ccid (the
 // countingController's timestamp-derived ids are unreadable from outside)
@@ -244,7 +244,7 @@ func TestNoAnswerVsAnsweredRace(t *testing.T) {
 		}
 		select {
 		case <-waitCh:
-			t.Errorf("WaitCall channel of an answered call was closed by the windowed "+
+			t.Errorf("WaitCall channel of an answered call was closed by the windowed " +
 				"no-answer fire (finding 9: teardown of an answered call)")
 		case <-time.After(2 * time.Second):
 		}
