@@ -660,13 +660,36 @@ func newVoiceStatusCmd() *cobra.Command {
 	}
 }
 
-// voiceCallStatusRow mirrors the voice.local.status row shape (CL8).
+// voiceCallStatusRow mirrors the voice.local.status row shape (CL8,
+// contact-display leaf 02 swap).
 type voiceCallStatusRow struct {
-	CallID       string `json:"call_id"`
-	EmployeeID   string `json:"employee_id"`
-	Target       string `json:"target"`
-	SinceRFC3339 string `json:"since_rfc3339"`
-	Leg          string `json:"leg"`
+	CallID        string `json:"call_id"`
+	EmployeeID    string `json:"employee_id"`
+	TargetName    string `json:"target_name"`
+	TargetDisplay string `json:"target_display"`
+	SinceRFC3339  string `json:"since_rfc3339"`
+	Leg           string `json:"leg"`
+	// Deprecated: the raw target. The contact-display daemon never fills
+	// it for phone legs (O4); local-leg rows carry "local:<label>"
+	// verbatim. Read ONLY as a render fallback — never for routing.
+	Target string `json:"target"`
+}
+
+// targetDisplay picks the row's render string (contact-display leaf 03,
+// master O1): display form first, then name, then the legacy raw target
+// (non-empty = an old server or a local-leg label), else "unknown".
+// Pure field preference — no client-side resolution or number formatting.
+func (r voiceCallStatusRow) targetDisplay() string {
+	if r.TargetDisplay != "" {
+		return r.TargetDisplay
+	}
+	if r.TargetName != "" {
+		return r.TargetName
+	}
+	if r.Target != "" {
+		return r.Target
+	}
+	return "unknown"
 }
 
 // voiceStatusTable renders the both-legs status table (T6: unit-tested
@@ -687,7 +710,7 @@ func voiceStatusTable(rows []voiceCallStatusRow) string {
 		if since == "" {
 			since = "-"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", leg, r.CallID, r.EmployeeID, r.Target, since)
+		fmt.Fprintf(w, "%s	%s	%s	%s	%s\n", leg, r.CallID, r.EmployeeID, r.targetDisplay(), since)
 	}
 	//nolint:errcheck // strings.Builder writes never fail
 	w.Flush()

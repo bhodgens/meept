@@ -83,11 +83,15 @@ VoiceSessionRow _row(
   String callId, {
   String employeeId = 'eve',
   String target = 'desk',
+  String? targetName,
+  String? targetDisplay,
   String leg = 'local',
 }) {
   return VoiceSessionRow(
     callId: callId,
     employeeId: employeeId,
+    targetName: targetName,
+    targetDisplay: targetDisplay,
     target: target,
     sinceRfc3339: '2026-11-07T12:00:00Z',
     leg: leg,
@@ -145,14 +149,23 @@ void main() {
       'per row; end calls voice.local.end', (tester) async {
     final service = _FakeVoiceService()
       ..statusRows = [
+        // Legacy-fallback pin (contact-display leaf 03, O1): a row from
+        // an OLD server carries only raw `target` -> renders verbatim.
         _row('c1'),
-        _row('c2', employeeId: 'bob', target: '+15551234', leg: 'phone'),
+        // New wire shape (leaf 02): the display pair renders, no raw
+        // target on the row.
+        _row('c2',
+            employeeId: 'bob',
+            target: '',
+            targetName: 'Jane Doe',
+            targetDisplay: 'Jane Doe (•••5567)',
+            leg: 'phone'),
       ];
     await tester.pumpWidget(_host(service: service));
     await _settle(tester);
 
     expect(find.text('eve -> desk'), findsOneWidget);
-    expect(find.text('bob -> +15551234'), findsOneWidget);
+    expect(find.text('bob -> Jane Doe (•••5567)'), findsOneWidget);
     expect(find.text('local - since 2026-11-07T12:00:00Z'), findsOneWidget);
     expect(find.text('phone - since 2026-11-07T12:00:00Z'), findsOneWidget);
     // end button per row
