@@ -99,13 +99,18 @@ var ErrLinkMonitorPathTooLong = errors.New("voice: voice link: monitor socket pa
 
 // linkFloorFallbackDefault is the FALLBACK drain window the half-duplex
 // coordinator arms on a side's turn_final when the audio-drain signal
-// never arrives (splice gone, seam nil, lost race). The real release is
-// drain-driven (LocalSpliceFor(ccid).ArmDrainWatch -> AudioDrained ->
-// floor released after linkFloorTailPad); turn_final alone no longer
-// frees the floor after the short legacy 600 ms, because the daemon
-// pacer can still hold seconds of that turn's paced audio (measured on
-// link-1108d776b0a1efb3: 335 talk-over windows, 6.70 s total). A stale
-// extra hold is harmless; early release is the bug.
+// never arrives (splice gone, seam nil, lost race, old child binary with
+// no played edge). The real release is drain-driven: turn_final sets the
+// splice's EXPECTED-final state (LocalSpliceFor(ccid).ExpectFinalDrain),
+// the child's C1 played edge arms the watch (MarkFinalPlayed), and the
+// AudioDrained fire releases the floor after linkFloorTailPad. turn_final
+// alone no longer frees the floor after the short legacy 600 ms, because
+// the daemon pacer can still hold seconds of that turn's paced audio
+// (measured on link-1108d776b0a1efb3: 335 talk-over windows, 6.70 s
+// total), and BLIND-arming the watch at turn_final was still early — the
+// child's inter-sentence synth gaps (1.4-3.8 s) exceed the quiescence
+// window and fake a mid-reply drain (link-2fdc3f5fd8d81805: 10.94 s
+// overlap). A stale extra hold is harmless; early release is the bug.
 //
 // 12 s, not the original 4 s: measured tails run 5-10 s (link-
 // 6eb490abd8349958: child cadence write_ms=11136 on one turn — synth
@@ -174,11 +179,12 @@ type linkTurnSideState struct {
 //     floorHeld is set — both the parked-prompt path AND the fresh
 //     claim path check the floor;
 //   - the floor releases on AUDIO DRAIN, not on the turn_final text
-//     edge: turn_final arms the splice's drain watch
-//     (LocalSpliceFor(ccid).ArmDrainWatch) AND a long FALLBACK margin
-//     timer; the first of (drain edge + linkFloorTailPad) or (fallback
-//     fire) releases the floor and flushes the peer's parked prompt.
-//     An idle edge (barge-in cancel, unbind, teardown) releases
+//     edge: turn_final sets the splice's EXPECTED-final state
+//     (LocalSpliceFor(ccid).ExpectFinalDrain) AND arms a long FALLBACK
+//     margin timer; the child's C1 played edge then arms the watch
+//     (MarkFinalPlayed), and the first of (drain edge + linkFloorTailPad)
+//     or (fallback fire) releases the floor and flushes the peer's parked
+//     prompt. An idle edge (barge-in cancel, unbind, teardown) releases
 //     IMMEDIATELY — nothing is playing;
 //   - side B never greets (TalkLoopConfig.SuppressGreeting honored by
 //     the wiring when it constructs B's loop).
@@ -187,8 +193,8 @@ type linkTurnSideState struct {
 // invokes a callback or performs I/O under it (repo mutex-scope rule).
 // The flush edge into a loop is TalkLoop.FlushHeld - a non-blocking send
 // on a buffered channel; the parked dispatch always runs on the loop's
-// own Run goroutine. ArmDrainWatch on the splice takes localSpliceMu +
-// the splice's own mutex briefly - never under c.mu.
+// own Run goroutine. ExpectFinalDrain / MarkFinalPlayed on the splice
+// take localSpliceMu + the splice's own mutex briefly - never under c.mu.
 type LinkTurnCoordinator struct {
 	id     string
 	log    *slog.Logger
@@ -352,23 +358,33 @@ func (c *LinkTurnCoordinator) TurnStateFor(side string) func(ccid string, seq ui
 			// floorHeld STAYS set: the pacer still owns this turn's
 			// audio tail. The release arms below.
 			c.mu.Unlock()
-			// Arm the splice-side drain watch OFF the lock: resolve the
-			// live local splice by ccid (the same package-level
-			// registry HandleInterrupt rides). A plain local call's
-			// splice has no AudioDrained dep -> ArmDrainWatch is a
-			// no-op; no splice (already torn down) -> nil receiver.
-			// Either way the fallback margin below still bounds the
-			// hold.
+			// Expect the splice-side played edge OFF the lock: resolve the
+			// live local splice by ccid (the same package-level registry
+			// HandleInterrupt rides) and record that THIS turn's drain
+			// rides the child's C1 played edge (EventPlayed, sent after
+			// the final byte of the last:true stream left the .out
+			// socket), which arms the watch through MarkFinalPlayed.
 			//
-			// Instrumentation (measured defect: 0/5 drained releases,
-			// every floor release rode the margin): when the drain
-			// signal cannot fire for this turn — no splice under the
-			// ccid, or the splice's drain deps are unwired / the
-			// splice ended — WARN with the reason so the next live run
-			// distinguishes "never armed" from "armed, never
+			// NO BLIND ARM anymore (link-2fdc3f5fd8d81805): at turn_final
+			// the child still has queued sentences synthesizing, and the
+			// inter-sentence gaps (measured 1.4-3.8 s) exceed the watch's
+			// quiescence window — the blind arm fired MID-reply and the
+			// peer started talking over the tail (60 short both-audible
+			// runs, 10.94 s overlap). The played edge is the true end-of-
+			// turn marker; a turn whose edge never arrives (old child
+			// binary, aborted/denied final stream) rides the fallback
+			// margin below — late, never early. A plain local call's
+			// splice has no AudioDrained dep -> expect is a no-op; no
+			// splice (already torn down) -> nil receiver. Either way the
+			// margin still bounds the hold.
+			//
+			// Instrumentation: when the drain signal cannot fire for
+			// this turn — no splice under the ccid, or the splice's drain
+			// deps are unwired / the splice ended — WARN so the next
+			// live run distinguishes "never armed" from "armed, never
 			// quiescent" without log archaeology.
 			sp := LocalSpliceFor(ccid)
-			if !sp.ArmDrainWatch() {
+			if !sp.ExpectFinalDrain() {
 				reason := "no live splice for ccid"
 				if sp != nil {
 					reason = "splice drain deps unwired/ended"
@@ -672,9 +688,11 @@ type LinkDeps struct {
 	Turns *LinkTurnRegistry
 	// TurnMargin is the FALLBACK floor-release window the half-duplex
 	// coordinator arms on a side's turn_final when the audio-drain
-	// signal never fires. The primary release is drain-driven: the
-	// local splice's ArmDrainWatch -> AudioDrained edge -> floor after
-	// linkFloorTailPad. Zero = linkFloorFallbackDefault (12 s).
+	// signal never fires (splice died mid-turn, no played edge from an
+	// old child binary, aborted final stream). The primary release is
+	// drain-driven: the local splice's ExpectFinalDrain at turn_final ->
+	// the C1 played edge arms MarkFinalPlayed -> AudioDrained edge ->
+	// floor after linkFloorTailPad. Zero = linkFloorFallbackDefault (12 s).
 	TurnMargin time.Duration
 	Logger     *slog.Logger
 }

@@ -689,6 +689,20 @@ func (a auditWriterAdapter) WriteAudit(ctx context.Context, row map[string]any) 
 // loop registered for that call_control_id.
 func (w *VoiceWiring) routeFrame(f voice.Frame) {
 	switch f.Event {
+	case voice.EventPlayed:
+		// Child -> daemon end-of-turn AUDIO marker (turn-final drain fix):
+		// the final byte of a last:true say stream left the child's .out
+		// socket. Arm the live local splice's drain watch from this edge
+		// (played-armed mode: nothing more can arrive for the turn, so the
+		// fire is pending==0 + the SHORT final quiet window). The frame is
+		// CONSUMED here — it never reaches the talk loop's frame queue.
+		// No live splice (phone leg, plain local without the seam, torn
+		// down) or a splice without the AudioDrained dep: silent no-op;
+		// plain calls never gate a floor on this edge.
+		if sp := voice.LocalSpliceFor(f.CallID); !sp.MarkFinalPlayed() {
+			w.logger.Debug("voice wiring: played edge with no live drain watch",
+				"ccid", f.CallID)
+		}
 	case voice.EventSetup:
 		// bughunt 2026-11-07 voice F-6: idempotent setup, mirroring the
 		// child's handleSetup ("setup for live call ignored"). Without the

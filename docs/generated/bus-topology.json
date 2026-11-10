@@ -2434,7 +2434,7 @@
     "voice.call.ended": [
       {
         "file": "internal/daemon/voice_wiring.go",
-        "line": 1046,
+        "line": 1106,
         "payload_keys": [],
         "typed": true
       }

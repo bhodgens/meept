@@ -938,7 +938,29 @@ func (p *pipeline) playbackWorker() {
 		// top of the next iteration; the write-start prefetch hook lives
 		// inside playbackStream (OVERLAP POINT 1) so it fires in the
 		// same critical section that raises writingNow.
-		p.playbackStream(res.pcm, item.gen, res.synthDur)
+		drained := p.playbackStream(res.pcm, item.gen, res.synthDur)
+
+		// End-of-turn AUDIO marker (C1 played edge): a last:true say
+		// frame whose stream reached its natural EOF has now handed its
+		// FINAL byte to the .out socket, and no later frame of this turn
+		// can follow it (the turn-final flush is the draft's last say), so
+		// THIS is the truth signal the daemon's drain watch arms from —
+		// not the turn_final TEXT edge, where the child still has queued
+		// sentences whose 1.4-3.8 s synth gaps fake a mid-reply quiescence
+		// (link-2fdc3f5fd8d81805: 10.94 s both-audible overlap). Emitted
+		// ONLY on a natural drain: a stream aborted by clear/barge-in, a
+		// Speak error, or a socket write failure sends nothing (the barge-
+		// in path releases the floor through the coordinator's idle edge;
+		// a denied/aborted final stream rides the 12 s fallback margin —
+		// late, never early, the same posture the old silent-stream guard
+		// took). audioOut.Write is happens-before this frame on the same
+		// goroutine, so the daemon can never see played before the last
+		// PCM byte was handed off.
+		if drained && item.frame.Last != nil && *item.frame.Last && p.child != nil {
+			if perr := p.child.emitPlayed(p.ctx, p.ccid); perr != nil {
+				p.logger.Warn("voicechild: emit played frame", "err", perr, "call_id", p.ccid)
+			}
+		}
 	}
 }
 
@@ -965,7 +987,13 @@ type queuedSay struct {
 // 2026-11-07 voice F-1). `pcm` is the synth goroutine's reader — this
 // function owns closing it. synthDur is how long Speak took before this
 // audio existed (telemetry; see the cadence report).
-func (p *pipeline) playbackStream(pcm io.ReadCloser, gen uint64, synthDur time.Duration) {
+//
+// The bool reports whether the stream DRAINED NATURALLY: every byte the
+// provider produced was handed to audioOut and the reader hit io.EOF.
+// Only that shape may feed the played edge (see playbackWorker); a
+// barge-in drop, a Speak read error, or a socket write failure returns
+// false — none of them is "the turn finished speaking".
+func (p *pipeline) playbackStream(pcm io.ReadCloser, gen uint64, synthDur time.Duration) bool {
 	defer func() { _ = pcm.Close() }() //nolint:mutexio // deferred close, no lock held
 
 	p.playMu.Lock()
@@ -975,7 +1003,7 @@ func (p *pipeline) playbackStream(pcm io.ReadCloser, gen uint64, synthDur time.D
 		// old dropQueued gate — a clear always bumps playGen, so
 		// dropQueued is never true at a matching gen.
 		p.playMu.Unlock()
-		return
+		return false
 	}
 	// Fresh playback restarts the barge-in VAD latch (one interrupt per
 	// barge-in, T5) — the path playbackRestarted() documented but never
@@ -1014,7 +1042,7 @@ func (p *pipeline) playbackStream(pcm io.ReadCloser, gen uint64, synthDur time.D
 	chunk, err := voiceframe.ChunkBytes(p.codec, p.sampleRt)
 	if err != nil {
 		p.logger.Error("voicechild: playback chunk size", "err", err, "call_id", p.ccid)
-		return
+		return false
 	}
 	// Jitter instrumentation (2026-11-09 chop hunt; extended by the
 	// prefetch fix): synth_ms is how long Speak blocked before this
@@ -1052,7 +1080,7 @@ func (p *pipeline) playbackStream(pcm io.ReadCloser, gen uint64, synthDur time.D
 		dropped := p.dropQueued || p.playGen != gen
 		p.playMu.Unlock()
 		if dropped {
-			return // clear: drop queued audio, stop writes (or gen moved on)
+			return false // clear: drop queued audio, stop writes (or gen moved on)
 		}
 		n, readErr := pcm.Read(buf)
 		if n > 0 {
@@ -1064,11 +1092,11 @@ func (p *pipeline) playbackStream(pcm io.ReadCloser, gen uint64, synthDur time.D
 			dropped := p.dropQueued || p.playGen != gen
 			p.playMu.Unlock()
 			if dropped {
-				return // clear arrived while reading: drop the chunk
+				return false // clear arrived while reading: drop the chunk
 			}
 			if _, werr := p.audioOut.Write(buf[:n]); werr != nil {
 				p.logger.Error("voicechild: audio out write", "err", werr, "call_id", p.ccid)
-				return
+				return false
 			}
 			outWrite.Mark(time.Now())
 			outWrite.AddBytes(int64(n))
@@ -1082,14 +1110,18 @@ func (p *pipeline) playbackStream(pcm io.ReadCloser, gen uint64, synthDur time.D
 			p.noteOutgoingChunk(buf[:n])
 		}
 		if readErr != nil {
-			if !errors.Is(readErr, io.EOF) {
-				p.logger.Error("voicechild: tts stream read", "err", readErr, "call_id", p.ccid)
+			if errors.Is(readErr, io.EOF) {
+				// Natural drain: every byte the provider produced is now
+				// on the socket (an EOF that carried a final partial read
+				// wrote it above before this return).
+				return true
 			}
-			return
+			p.logger.Error("voicechild: tts stream read", "err", readErr, "call_id", p.ccid)
+			return false
 		}
 		select {
 		case <-p.ctx.Done():
-			return
+			return false
 		default:
 		}
 	}

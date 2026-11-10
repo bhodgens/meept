@@ -75,7 +75,7 @@ func randText(r *rand.Rand) string {
 }
 
 func randFrame(r *rand.Rand) Frame {
-	events := []string{"setup", "prompt", "interrupt", "end", "say", "clear", "dtmf", "", strings.Repeat("x", 32)}
+	events := []string{"setup", "prompt", "interrupt", "end", "say", "clear", "played", "dtmf", "", strings.Repeat("x", 32)}
 	trueVal, falseVal := true, false
 	bPtr := []*bool{nil, &trueVal, &falseVal}
 	return Frame{

@@ -3,7 +3,10 @@
 **Status**: Implemented
 **Date**: 2026-11-02 (spec rev 2); as-built appended 2026-11-04; rev 3
 (local leg, plan docs/plans/20261106-voice-local-leg/) amended in
-2026-11-07
+2026-11-07; as-built 2026-11-10 adds the C1 `played` end-of-turn audio
+edge (child emits after the final byte of a last:true say stream; the
+link floor's drain watch arms from it instead of the blind turn_final
+arm - kills the mid-synthesis early floor release)
 
 This spec covers both voice legs: the Telnyx phone channel and the local
 (client audio) channel. It is not the client text-to-speech path in
@@ -444,6 +447,13 @@ Text from the child to the daemon:
 - `prompt` - caller text. `last: false` is a partial (transcript preview
   only). `last: true` is final and starts the employee turn
 - `interrupt` - caller spoke over the agent (barge-in contract above)
+- `played` - end-of-turn AUDIO marker: the playback worker wrote the
+  FINAL byte of a `last: true` `say` stream to the call's .out socket
+  (`{"call_id":...,"event":"played","last":true}`, exactly once per
+  turn-final stream, never for a non-final or barge-in-aborted stream).
+  The half-duplex link floor's drain watch arms from this edge - it is
+  the true "the speaker cannot produce more audio this turn" signal the
+  `turn_final` text edge never was (see the turn-taking release rule)
 - `end` - call ended
 
 Text from the daemon to the child:
@@ -997,24 +1007,40 @@ half-answers. The fix lives entirely daemon-side (internal/voice/link.go
   `TalkDeps.HoldPrompt` (a denied final prompt parks in the loop - one
   slot, latest question wins, telemetry `kind=prompt_held`) and
   `TalkDeps.TurnState` (`turn_start` / `turn_final` / `idle` edges).
-- **Release rule (drain-driven, leaf 02).** The floor releases on AUDIO
-  DRAIN, not on the `turn_final` text edge: `turn_final` arms the local
-  splice's drain watch (`LocalSpliceFor(ccid).ArmDrainWatch`) and a long
-  FALLBACK margin (default 12 s, `LinkDeps.TurnMargin`); the first of
-  (the splice's `AudioDrained` edge + 250 ms tail pad) or (the fallback
-  fire) clears the floor and dispatches the parked prompt. The old
-  rule - release `turn_final` + 600 ms - still let the listener speak
-  over the pacing tail: the daemon pacer holds up to seconds of paced
-  audio after the text flush (measured 335 talk-over windows, 6.70 s on
-  link-1108d776b0a1efb3). The drain fires only after audio flowed
-  post-arm AND the pacer backlog (pending chunks) has been
-  quiet for 1 s; the pump's sub-chunk residue never gates the fire (a
-  real TTS stream's byte total is never a multiple of 640, so a
+- **Release rule (drain-driven, leaf 02 + played edge).** The floor
+  releases on AUDIO DRAIN, not on the `turn_final` text edge:
+  `turn_final` sets the local splice's EXPECTED-final state
+  (`LocalSpliceFor(ccid).ExpectFinalDrain`) and arms a long FALLBACK
+  margin (default 12 s, `LinkDeps.TurnMargin`); the child's C1 `played`
+  frame (`{"call_id":...,"event":"played","last":true}`, emitted by the
+  playback worker right after the FINAL byte of the turn's last:true
+  say stream is written to the .out socket) routes through
+  `VoiceWiring.routeFrame` to `MarkFinalPlayed`, which ARMS the watch.
+  The first of (the splice's `AudioDrained` edge + 250 ms tail pad) or
+  (the fallback fire) clears the floor and dispatches the parked
+  prompt. The old rule - release `turn_final` + 600 ms - still let the
+  listener speak over the pacing tail: the daemon pacer holds up to
+  seconds of paced audio after the text flush (measured 335 talk-over
+  windows, 6.70 s on link-1108d776b0a1efb3). BLIND-arming the watch at
+  `turn_final` was STILL early (link-2fdc3f5fd8d81805: drained releases
+  fired 3/4 but mid-reply - the child synthesizes sentence-by-sentence
+  and the inter-sentence gaps of 1.4-3.8 s exceed the 1 s quiescence
+  window, so pending==0+quiet faked a drain while queued sentences
+  still had audio -> 60 short both-audible runs, 10.94 s overlap):
+  `turn_final` means the last say FRAME left the DAEMON, not that the
+  child finished PLAYING. The played edge is the audio truth. A
+  played-armed watch fires at pending==0 + a SHORT 500 ms quiet window
+  and, unlike the blind shape, fires on a silent post-arm stream (the
+  edge is itself the post-arm touch). If the edge never arrives (old
+  child binary, denied/aborted final stream) the turn rides the
+  fallback margin - late, never early; on a barge-in the `idle` edge
+  already released the floor and the child deliberately emits NO
+  played for aborted streams (a phantom edge on dead audio would fake
+  an end-of-turn). The fire's sub-chunk residue gate is gone: a real
+  TTS stream's byte total is never a multiple of 640, so a
   carry==0 gate made the drain structurally unreachable - 0/5 drained
   releases on link-6eb490abd8349958, and the 4 s watchdog beat the tail
-  on every long turn, measured write_ms up to 11.1 s). A silent stream
-  never fires (a denied turn rides the
-  fallback margin - late, never early). `HoldPromptFor` gates on the
+  on every long turn, measured write_ms up to 11.1 s). `HoldPromptFor` gates on the
   floor, so a fresh listener prompt cannot claim it during the tail
   either. An `idle` edge (barge-in cancel, teardown, unbind) releases
   immediately: nothing is playing. A park alive when a loop exits is
@@ -1022,7 +1048,8 @@ half-answers. The fix lives entirely daemon-side (internal/voice/link.go
   dead call. Telemetry: `kind=floor_released` with
   `reason=drained|margin`, plus `kind=prompt_released` on the loop edge.
   The drain watch is LINK-only: `LocalDeps.LinkTurns` resolves per Open
-  by registry target, so plain local/phone splices never arm a watch.
+  by registry target, so plain local/phone splices never arm a watch
+  (a played frame for them is a Debug-logged no-op at the router).
 - **One greeting.** Side A greets on connect; side B's loop is built
   with `TalkLoopConfig.SuppressGreeting` and speaks first only after
   A's greeting arrives at B's mic as a final prompt (the conversation

@@ -85,6 +85,15 @@ const localJoinTimeoutDefault = 10 * time.Second
 // fires.
 const localDrainQuietDefault = 1 * time.Second
 
+// localDrainQuietFinal is the QUIET window of a played-armed watch (armed
+// by the C1 played edge — see runLocalSplice.drainArmedFinal). After the
+// child's final-byte marker, no more audio for the turn CAN arrive, so the
+// window only needs to absorb the last paced writes draining through the
+// pacer: 500 ms of silence past pending==0 is terminal for the turn. The
+// full DrainQuiet stays in force for the blind (non-final) arm shape that
+// non-link/no-marker callers keep.
+const localDrainQuietFinal = 500 * time.Millisecond
+
 // LocalSpliceConfig sizes the local splice. Zero values pick the CL7
 // defaults; ChunkBytes other than 640 (any non-L16@16k negotiation) is a
 // named start error.
@@ -95,6 +104,10 @@ type LocalSpliceConfig struct {
 	// DrainQuiet overrides localDrainQuietDefault for the audio-drain
 	// watch (0 -> default). Tests lower it; production never sets it.
 	DrainQuiet time.Duration
+	// DrainQuietFinal overrides localDrainQuietFinal for the played-armed
+	// (post-C1-played-edge) watch window (0 -> default). Tests lower it;
+	// production never sets it.
+	DrainQuietFinal time.Duration
 }
 
 // LocalSpliceDeps carries the injected edges. CancelDraft is ALWAYS
@@ -162,14 +175,16 @@ type runLocalSplice struct {
 	wake      chan struct{}
 
 	// Drain watch (link half-duplex floor release, turn-taking leaf 02).
-	// ArmDrainWatch is the coordinator's turn_final edge: link.go
-	// resolves the live splice through the package-level LocalSpliceFor
-	// registry (the same seam HandleInterrupt rides) and arms the watch.
-	// The watch goroutine starts lazily on the first arm — plain
-	// local/phone splices (deps.AudioDrained nil, never armed) spawn
-	// nothing and behave byte-identically. Fired evidence (atomics, no
-	// lock: writers must never take s.mu for a counter, the watch polls
-	// off the pacer loop):
+	// The link coordinator's turn_final edge now sets EXPECT mode
+	// (ExpectFinalDrain); the child's C1 played edge arms the watch via
+	// MarkFinalPlayed (resolved through the package-level LocalSpliceFor
+	// registry, the same seam HandleInterrupt rides). ArmDrainWatch (the
+	// blind turn_final-shape arm) is kept for non-link callers and the
+	// existing drain tests. The watch goroutine starts lazily on the
+	// first arm — plain local/phone splices (deps.AudioDrained nil,
+	// never armed) spawn nothing and behave byte-identically. Fired
+	// evidence (atomics, no lock: writers must never take s.mu for a
+	// counter, the watch polls off the pacer loop):
 	//   audioPending - child chunks handed to the pump channel minus
 	//     chunks the pacer finished consuming (the backlog still to
 	//     WRITE to the client socket);
@@ -197,7 +212,27 @@ type runLocalSplice struct {
 	// new child byte reopens the window, so a mid-turn synthesis gap
 	// shorter than the window never fakes a drain; "late" only costs
 	// floor-hold, "early" is the bug being fixed.
+	//
+	// PLAYED-ARMED MODE (drainArmedFinal): the true end-of-turn marker.
+	// The blind arm at the turn_final TEXT edge was still EARLY in
+	// production (link-2fdc3f5fd8d81805: the child's inter-sentence
+	// synth gaps of 1.4-3.8 s exceed the 1 s quiet window, so mid-reply
+	// quiescence released the floor while the speaker still had queued
+	// sentences -> 60 short both-audible runs, 10.94 s overlap). The
+	// child now sends C1 played (EventPlayed, last:true) after the
+	// FINAL byte of the turn's last:true stream reaches the .out
+	// socket; routeFrame hands that edge to MarkFinalPlayed, which
+	// arms the watch in final mode. Final mode drops the post-arm-touch
+	// guard (the played edge IS the touch: nothing more can arrive for
+	// the turn by construction) and shrinks the quiet window to
+	// localDrainQuietFinal - pending==0 + 500 ms of silence after the
+	// edge. ExpectFinalDrain is the coordinator's turn_final edge: it
+	// records that the played edge is expected WITHOUT arming anything;
+	// if it never arrives (old child binary, aborted final stream) the
+	// coordinator's fallback margin still bounds the hold.
 	drainArmed       bool
+	drainArmedFinal  bool // armed by MarkFinalPlayed (played edge), not blindly
+	drainExpectFinal bool // coordinator turn_final: awaiting the played edge
 	watchRunning     bool
 	drainArmedAtNano atomic.Int64
 	audioPending     atomic.Int64
@@ -260,6 +295,9 @@ func RunLocalSplice(ctx context.Context, ccid string, cfg LocalSpliceConfig, dep
 	}
 	if cfg.DrainQuiet <= 0 {
 		cfg.DrainQuiet = localDrainQuietDefault
+	}
+	if cfg.DrainQuietFinal <= 0 {
+		cfg.DrainQuietFinal = localDrainQuietFinal
 	}
 	// L16@16k only (CL7): refuse any other negotiation at start, before
 	// any goroutine exists.
@@ -775,15 +813,16 @@ func (s *runLocalSplice) resumeBargeIn() {
 
 // ---------- audio-drain watch (link half-duplex floor release) ----------
 
-// ArmDrainWatch arms the per-call audio-drain signal for one turn. The
-// link coordinator calls it on its turn_final edge (after resolving the
-// live splice through LocalSpliceFor, the same registry HandleInterrupt
-// rides): every future turn-final flush of THIS call's audio that was
-// still pacing counts as this turn's tail, and the watch fires
-// deps.AudioDrained(ccid) exactly ONCE when the outbound path has gone
-// quiet (see the drainArmed field comment for the fired predicate).
+// ArmDrainWatch arms the per-call audio-drain signal for one turn in the
+// BLIND shape (the pre-played-edge form): it arms straight away and the
+// fire then waits for a post-arm audio touch + the full quiet window.
+// The LINK coordinator no longer calls this on turn_final - that edge is
+// ExpectFinalDrain now, and the arm comes from the child's C1 played
+// frame via MarkFinalPlayed (a blind arm fired MID-REPLY on inter-
+// sentence synth gaps: link-2fdc3f5fd8d81805). Kept for non-link callers
+// and the drain-watch test shapes.
 //
-// Idempotent while a watch is armed (a duplicate turn_final cannot
+// Idempotent while a watch is armed (a duplicate arm cannot
 // double-fire). A splice with no AudioDrained dep (plain local / phone
 // calls — the seam is link-only) is a silent no-op: nothing arms, the
 // coordinator rides its fallback margin alone. Safe from any goroutine;
@@ -805,6 +844,7 @@ func (s *runLocalSplice) ArmDrainWatch() bool {
 		return armed
 	}
 	s.drainArmed = true
+	s.drainArmedFinal = false
 	// Quiet-window floor stored INSIDE the same critical section as the
 	// latch: a running watch that observes drainArmed=true through the
 	// mutex is happens-after this store. A stale floor (previous turn's
@@ -826,11 +866,130 @@ func (s *runLocalSplice) ArmDrainWatch() bool {
 	return true
 }
 
+// ExpectFinalDrain records the coordinator's turn_final edge WITHOUT
+// arming the watch (link half-duplex, played-edge release). The early
+// release it kills: the child synthesizes sentence-by-sentence, and the
+// inter-sentence gaps (measured 1.4-3.8 s) exceed the blind watch's
+// quiescence window, so turn_final-armed quiescence fires MID-reply while
+// queued sentences still have audio to play (link-2fdc3f5fd81805: 60
+// short both-audible runs, 10.94 s overlap). With this flag set, the
+// floor releases only from the C1 played edge (MarkFinalPlayed) or the
+// coordinator's fallback margin. A live blind arm (a non-link caller that
+// still uses ArmDrainWatch, or a race where ArmDrainWatch landed first)
+// is downgraded to expect-mode here: the pending==0 + quiet predicate
+// cannot distinguish "mid-reply synth gap" from "turn over", so the
+// played edge replaces it. Safe from any goroutine; takes s.mu only for
+// the flag swap (no I/O, no callback under the lock — mutex-scope rule).
+// The bool reports drain-signal liveness (same shape as ArmDrainWatch):
+// false = no drain edge can EVER fire for this turn (nil dep / ended
+// splice), which the coordinator turns into its drain_arm_missed WARN.
+func (s *runLocalSplice) ExpectFinalDrain() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	if s.deps.AudioDrained == nil || s.ended {
+		s.mu.Unlock()
+		return false
+	}
+	// A fresh turn_final invalidates ANY live arm: a blind arm is the
+	// early-fire shape this leaf exists to kill, and a live FINAL arm
+	// belongs to the PREVIOUS turn's played edge (its fire would be
+	// cross-turn). This turn releases only from its own played edge —
+	// or the coordinator's margin. Residual (bounded by design): an
+	// edge arriving MORE than a full margin late (11 s+ audio backlog)
+	// could arm during the next turn's drain; the coordinator's busy/
+	// generation guards cover the mid-turn shape, and the release
+	// still requires pending==0 + the quiet window, so the worst case
+	// equals the old blind-arm shape, never worse.
+	if s.drainArmed {
+		s.drainArmed = false
+		s.drainArmedFinal = false
+	}
+	s.drainExpectFinal = true
+	// Keep (or start) the watch goroutine in expect mode: the exit check
+	// holds the slot open while drainExpectFinal is set, so a played edge
+	// arriving on any later tick is picked up without a lost wake-up.
+	startWatch := !s.watchRunning
+	s.watchRunning = true
+	s.mu.Unlock()
+
+	if startWatch {
+		go s.runDrainWatch(s.loopCtx)
+	}
+	s.log.Info("voice: localsplice drain expect-final set", "ccid", s.ccid)
+	return true
+}
+
+// MarkFinalPlayed arms the drain watch from the child's C1 played edge —
+// the true end-of-turn audio marker, sent after the FINAL byte of the
+// turn's last:true stream was written to the .out socket. Unlike the
+// blind arm it fires on a SILENT post-arm stream: the played edge itself
+// is the post-arm touch (the emit happens strictly after the final
+// audioOut.Write on the same worker goroutine, and the routed frame
+// stamps audioLastAct here), and by construction no more audio for this
+// turn can arrive — the quiet window only needs to absorb the last paced
+// writes still in the pacer.
+//
+// Ordering is race-free in both directions: if the played edge beats the
+// coordinator's turn_final (tiny turns; the socket and the bus are
+// separate paths), the arm happens immediately with the expect flag set
+// or not (the edge is authoritative either way); if turn_final lands
+// first, ExpectFinalDrain has the watch ready to accept the edge. A
+// second played edge while a final arm is live re-stamps the quiet floor
+// (conservative: a newer marker means newer audio truth). Returns false
+// when no drain signal can ever fire (nil dep / ended splice), mirroring
+// ArmDrainWatch's liveness report. Safe from any goroutine.
+func (s *runLocalSplice) MarkFinalPlayed() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	if s.deps.AudioDrained == nil || s.ended {
+		s.mu.Unlock()
+		return false
+	}
+	s.drainExpectFinal = true
+	// The played edge IS the post-arm touch: stamp activity first, then
+	// store the floor so the watch's `last < armedAt` guard can never
+	// strand a genuinely drained silent stream.
+	now := time.Now().UnixNano()
+	s.audioLastAct.Store(now)
+	if s.drainArmed {
+		// A final arm is already live: re-stamp the floor to the new
+		// edge (an upgrade from a residual blind arm re-arms final).
+		s.drainArmedFinal = true
+		s.drainArmedAtNano.Store(now)
+		s.mu.Unlock()
+		return true
+	}
+	s.drainArmed = true
+	s.drainArmedFinal = true
+	s.drainArmedAtNano.Store(now)
+	// watchRunning and drainArmed flip in the SAME critical section as
+	// any exit transition (same invariant as ArmDrainWatch): an arm can
+	// never observe a stale watch-running slot whose goroutine already
+	// decided to return.
+	startWatch := !s.watchRunning
+	s.watchRunning = true
+	s.mu.Unlock()
+
+	if startWatch {
+		go s.runDrainWatch(s.loopCtx)
+	}
+	s.log.Info("voice: localsplice drain watch armed on played edge", "ccid", s.ccid)
+	return true
+}
+
 // runDrainWatch polls the drain evidence every window/4 and fires
 // deps.AudioDrained exactly once per arm. It never takes s.mu across
 // the callback (mutex-scope rule), and it exits cleanly when the latch
 // goes unconsumed, the splice ends, or the loop ctx dies - no goroutine
-// outlives RunLocalSplice.
+// outlives RunLocalSplice. The quiet window is per arm mode: full
+// cfg.DrainQuiet for a blind (turn_final-shaped) arm, the shorter
+// cfg.DrainQuietFinal for a played-armed watch — after the C1 played
+// edge nothing more CAN arrive for the turn, so the window only absorbs
+// the last paced writes.
 func (s *runLocalSplice) runDrainWatch(ctx context.Context) {
 	window := s.cfg.DrainQuiet
 	if window <= 0 {
@@ -847,12 +1006,29 @@ func (s *runLocalSplice) runDrainWatch(ctx context.Context) {
 		}
 		s.mu.Lock()
 		armed := s.drainArmed
+		armedFinal := s.drainArmedFinal
+		expect := s.drainExpectFinal
 		stopped := s.interrupt || s.ended
 		drainFn := s.deps.AudioDrained
-		if !armed || drainFn == nil {
+		if (!armed && !expect) || drainFn == nil {
 			s.watchRunning = false
 			s.mu.Unlock()
 			return
+		}
+		if !armed {
+			// Expect-mode park: the played edge has not landed yet and
+			// no watch is armed — hold the slot (never evaluate the fire
+			// predicate against a stale arm floor), keep ticking so
+			// MarkFinalPlayed's arm is visible on the next tick.
+			s.mu.Unlock()
+			continue
+		}
+		quietWindow := s.cfg.DrainQuiet
+		if armedFinal {
+			quietWindow = s.cfg.DrainQuietFinal
+			if quietWindow <= 0 {
+				quietWindow = localDrainQuietFinal
+			}
 		}
 		s.mu.Unlock()
 		if stopped {
@@ -886,7 +1062,7 @@ func (s *runLocalSplice) runDrainWatch(ctx context.Context) {
 			// never early - a stale extra hold is harmless).
 			continue
 		}
-		if time.Since(time.Unix(0, last)) < window {
+		if time.Since(time.Unix(0, last)) < quietWindow {
 			continue // quiet window not yet elapsed (conservative)
 		}
 		// Fire exactly once: consume BOTH latch fields under one lock
@@ -903,15 +1079,17 @@ func (s *runLocalSplice) runDrainWatch(ctx context.Context) {
 		if !s.drainArmed || s.interrupt || s.ended ||
 			s.drainArmedAtNano.Load() != armedAt ||
 			s.audioLastAct.Load() < armedAt ||
-			time.Since(time.Unix(0, s.audioLastAct.Load())) < window {
+			time.Since(time.Unix(0, s.audioLastAct.Load())) < quietWindow {
 			s.mu.Unlock()
 			continue
 		}
 		s.drainArmed = false
+		s.drainArmedFinal = false
+		s.drainExpectFinal = false
 		s.watchRunning = false
 		s.mu.Unlock()
 		s.log.Info("voice: localsplice audio drained", "ccid", s.ccid,
-			"quiet_ms", window.Milliseconds())
+			"quiet_ms", quietWindow.Milliseconds())
 		drainFn(s.ccid)
 		return
 	}

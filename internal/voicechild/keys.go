@@ -151,6 +151,20 @@ func (c *Child) emitInterrupt(ctx context.Context, ccid string) error {
 	})
 }
 
+// emitPlayed sends the end-of-turn audio marker (C1 played edge): the
+// pipeline just wrote the FINAL chunk of a last:true say frame's stream
+// to the .out socket, so no more PCM can arrive for this turn. The
+// daemon arms the splice's drain watch from this edge (exact wire shape
+// {"call_id":"...","event":"played","last":true}).
+func (c *Child) emitPlayed(ctx context.Context, ccid string) error {
+	last := true
+	return c.sendFrame(ctx, voiceframe.Frame{
+		CallID: ccid,
+		Event:  voiceframe.EventPlayed,
+		Last:   &last,
+	})
+}
+
 // sendFrame writes one frame line to the text socket.
 func (c *Child) sendFrame(ctx context.Context, f voiceframe.Frame) error {
 	b, err := voiceframe.EncodeFrame(f)

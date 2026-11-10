@@ -23,8 +23,15 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   (`last:true`) start an employee turn; partials update preview only.
 - DTMF frames decode as a counted no-op - a voicemail-tree "press 1"
   must never error the call.
-- The child sends setup/prompt/interrupt/end; the daemon sends
-  say/clear/end. A `say` frame is sent ONLY after the supervisor allows
+- The child sends setup/prompt/interrupt/end/played; the daemon sends
+  say/clear/end. `played` (EventPlayed) is the child's end-of-turn AUDIO
+  marker: exactly one frame `{"call_id":...,"event":"played","last":true}`
+  after the FINAL byte of a `last:true` say stream is written to the
+  .out socket, never for a non-final stream, a barge-in-aborted stream,
+  or a failed synthesis. The daemon's drain watch arms from this edge
+  (see the release-path bullet below) — it is the true end-of-turn
+  signal the blind turn_final TEXT arm could not be. A `say` frame is
+  sent ONLY after the supervisor allows
   the sentence; filler/greeting lines (fact-free, config list) are the
   sole exception, emitted by the daemon talk loop (greeting on connect,
   filler immediately on each final prompt - order pinned by
@@ -96,25 +103,48 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   still running, and the ccid is not knowable then - the target is.
   Close/unwind unregisters; a stale target must never bind a future
   call.
-- Every release path matters: turn_final NO LONGER releases the floor.
-  The floor releases on AUDIO DRAIN: turn_final arms the splice's drain
-  watch (LocalSpliceFor(ccid).ArmDrainWatch, the same registry
-  HandleInterrupt rides) plus a LONG fallback margin (default 12 s,
-  LinkDeps.TurnMargin); the first of (LocalSpliceDeps.AudioDrained edge
-  + 250 ms tail pad) or (fallback fire) clears the floor and flushes the
-  peer's park (telemetry kind=floor_released, reason=drained|margin).
-  turn_final alone only clears BUSY - the daemon pacer still holds
+- Every release path matters: turn_final NO LONGER releases the floor -
+  and it no longer even BLIND-ARMS the drain watch. The floor releases
+  on AUDIO DRAIN driven by the child's C1 played edge: turn_final sets
+  the splice's EXPECTED-final state (LocalSpliceFor(ccid).ExpectFinalDrain,
+  the same registry HandleInterrupt rides) plus a LONG fallback margin
+  (default 12 s, LinkDeps.TurnMargin); the child's played frame
+  (routeFrame -> MarkFinalPlayed) then ARMS the watch, and the first of
+  (LocalSpliceDeps.AudioDrained edge + 250 ms tail pad) or (fallback
+  fire) clears the floor and flushes the peer's park (telemetry
+  kind=floor_released, reason=drained|margin). Why the blind arm was
+  still early (link-2fdc3f5fd8d81805: 3/4 drained releases fired, but
+  MID-REPLY - the child's inter-sentence synth gaps of 1.4-3.8 s exceed
+  the 1 s quiescence window, so pending==0+quiet faked a drain while
+  queued sentences still had audio to play -> 60 short both-audible
+  runs, 10.94 s overlap): at turn_final the TEXT stream is flushed but
+  the child is only partway through PLAYING it. The played edge is the
+  audio truth: after it nothing more CAN arrive for the turn, so the
+  played-armed watch fires at pending==0 + the SHORT final quiet window
+  (500 ms, localDrainQuietFinal) and DOES fire on a silent post-arm
+  stream (the edge itself is the touch - emitted strictly after the
+  final audioOut.Write on the same worker goroutine). If the edge never
+  arrives (old child binary, denied/aborted final stream), the 12 s
+  margin still releases - watchdog role unchanged; on a barge-in the
+  idle edge already releases the floor immediately (the child emits NO
+  played for aborted streams - deliberate: a phantom edge on dead audio
+  would fake an end-of-turn). turn_final alone only clears BUSY - the
+  daemon pacer still holds
   seconds of paced audio after the text flush (measured 6.70 s
   both-sides talk-over on link-1108d776b0a1efb3), and HoldPromptFor
   gates on floorHeld so a FRESH peer prompt cannot claim the floor
-  during the tail either. The drain fires only after (a) a touch
+  during the tail either. The BLIND arm shape (ArmDrainWatch, kept for
+  non-link callers/tests) fires only after (a) a touch
   POST-DATES the arm (the early-fire guard: the final sentence's TTS
   may still be synthesizing) and (b) the pacer pending backlog is zero
-  and the stream is quiet for the window; the pump's sub-chunk CARRY
+  and the stream is quiet for the FULL window; a silent stream NEVER
+  fires on that shape - denied turns ride the fallback margin (late,
+  never early). The played-armed shape replaces (a) with the edge
+  itself and shortens (b)'s window; both shapes keep the pending==0
+  gate. The pump's sub-chunk CARRY
   never gates the fire (a real TTS stream's byte total is never a
   multiple of 640 - carry==0 was unreachable, 0/5 drained releases on
-  link-6eb490abd8349958). A silent stream NEVER fires - denied
-  turns ride the fallback margin (late, never early). idle (barge-in
+  link-6eb490abd8349958). idle (barge-in
   cancel, unbind, teardown) releases IMMEDIATELY (nothing is playing),
   and a park alive at loop exit is dropped with a log (never dispatched
   into a dead call). The splice-side watch only exists for LINK calls:

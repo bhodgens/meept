@@ -24,7 +24,7 @@ import (
 // breaks the child.
 type Frame struct {
 	CallID     string `json:"call_id"`
-	Event      string `json:"event"` // setup|prompt|interrupt|end|say|clear
+	Event      string `json:"event"` // setup|prompt|interrupt|end|say|clear|played|open
 	Text       string `json:"text,omitempty"`
 	Last       *bool  `json:"last,omitempty"`
 	From       string `json:"from,omitempty"`
@@ -59,6 +59,21 @@ const (
 	// per call, at pipeline registration, for both legs. The child creates
 	// the pipeline, dials the C2 audio pair, and answers with setup.
 	EventOpen = "open"
+
+	// EventPlayed is the child -> daemon end-of-turn audio marker (turn-final
+	// drain fix): the child's playback worker sends exactly ONE played frame
+	// (last:true) after the FINAL successful audioOut.Write of a last:true
+	// say frame's stream, on the text socket. It is the audio-truth signal
+	// that this turn's speech cannot produce any more PCM: the daemon arms
+	// the splice's drain watch from this edge instead of blindly on the
+	// turn_final TEXT edge, where the child still has queued sentences whose
+	// inter-sentence synth gaps (measured 1.4-3.8 s) exceed the quiescence
+	// window and fake a mid-reply drain (link-2fdc3f5fd8d81805: 10.94 s of
+	// both-audible overlap from 60 early drains). Older child binaries never
+	// send it; the coordinator's fallback margin keeps bounding those.
+	// Unknown-event decode tolerance means a daemon that predates this
+	// constant drops the frame silently.
+	EventPlayed = "played"
 )
 
 // EncodeFrame serializes f as one JSON line: compact JSON plus '\n'.

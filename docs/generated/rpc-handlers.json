@@ -1521,19 +1521,19 @@
     "topic": "voice.link.close",
     "handler": "h.handleClose",
     "file": "internal/rpc/voice_link.go",
-    "line": 131
+    "line": 150
   },
   {
     "topic": "voice.link.open",
     "handler": "h.handleOpen",
     "file": "internal/rpc/voice_link.go",
-    "line": 130
+    "line": 149
   },
   {
     "topic": "voice.link.status",
     "handler": "h.handleStatus",
     "file": "internal/rpc/voice_link.go",
-    "line": 132
+    "line": 151
   },
   {
     "topic": "voice.local.end",

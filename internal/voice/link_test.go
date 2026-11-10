@@ -1596,9 +1596,11 @@ func TestLinkCoordinatorStaleDrainIgnored(t *testing.T) {
 // splice (paced child audio to a net.Pipe client) wired through
 // wiredAudioDrain onto a real coordinator, exactly as LocalLeg.Open does
 // for a link leg (registry pre-registered by the link manager before the
-// leg opens). Pins: the floor stays held while audio paces, the drain
-// edge fires from the real outbound quiescence, and the release lands
-// with reason=drained.
+// leg opens). Pins: the floor stays held while audio paces, the turn_final
+// TEXT edge only EXPECTS the C1 played edge (no blind arm - the
+// mid-synth-gap early release it caused on link-2fdc3f5fd8d81805), the
+// played edge arms the watch, the drain fires from the real outbound
+// quiescence, and the release lands with reason=drained.
 func TestLinkDrainSeamEndToEnd(t *testing.T) {
 	var buf syncBuffer
 	c := NewLinkTurnCoordinator("link-drain-e2e", time.Hour, slog.New(slog.NewTextHandler(&buf, nil)))
@@ -1615,7 +1617,8 @@ func TestLinkDrainSeamEndToEnd(t *testing.T) {
 		t.Fatal("a plain local target must resolve NO drain callback")
 	}
 
-	p, micSide, _, _, cancel, done := startDrainSplice(t, ccid, LocalSpliceConfig{DrainQuiet: 150 * time.Millisecond}, drainFn)
+	spliceCfg := LocalSpliceConfig{DrainQuiet: 150 * time.Millisecond, DrainQuietFinal: 60 * time.Millisecond}
+	p, micSide, _, _, cancel, done := startDrainSplice(t, ccid, spliceCfg, drainFn)
 	_ = p
 	waitForSplice(t, ccid) // registration races the splice goroutine; the
 	// production arm (turn_final) always lands long after Leg.Open registered.
@@ -1664,6 +1667,29 @@ func TestLinkDrainSeamEndToEnd(t *testing.T) {
 	}
 	c.TurnStateFor(LinkSideA)(ccid, 1, TurnKindFinal)
 
+	// turn_final alone must NOT arm the watch any more (the played-edge
+	// contract): with the pacer quiet, a blind arm would fire on the
+	// 150 ms quiet window mid-reply. The splice records expect-final
+	// instead; the release only becomes possible once the C1 played
+	// edge lands (here: the same call MarkFinalPlayed that
+	// routeFrame makes for a live local call).
+	if err := feedChild(ccid); err != nil {
+		t.Fatalf("feedChild: %v", err)
+	}
+	sp := LocalSpliceFor(ccid)
+	sp.mu.Lock()
+	expectSet, armedYet := sp.drainExpectFinal, sp.drainArmed
+	sp.mu.Unlock()
+	if !expectSet {
+		t.Fatal("turn_final must set the expect-final state on the splice")
+	}
+	if armedYet {
+		t.Fatal("turn_final must NOT blind-arm the drain watch (mid-synth-gap early release)")
+	}
+	if !sp.MarkFinalPlayed() {
+		t.Fatal("played edge must arm the drain watch on a live link splice")
+	}
+
 	// The floor must still be held while the audio tail paces (8 chunks
 	// ~ 160 ms + the 150 ms quiet window).
 	time.Sleep(80 * time.Millisecond)
@@ -1711,18 +1737,26 @@ func TestLinkDrainSeamEndToEnd(t *testing.T) {
 	if err := feedChildBytes(ccid, 260); err != nil {
 		t.Fatalf("partial tail: %v", err)
 	}
-	splice := LocalSpliceFor(ccid)
+	// The played edge for turn 2 (the child's last stream byte left
+	// the socket): arms the watch in final mode again.
+	if !sp.MarkFinalPlayed() {
+		t.Fatal("played edge must arm the drain watch for turn 2")
+	}
 	waitFor(t, 6*time.Second, "turn-2 floor released via real drain with stuck carry", func() bool {
 		return strings.Count(buf.String(), "kind=floor_released") >= 2
 	})
-	splice.mu.Lock()
-	carryStuck, disarmed := splice.audioCarry.Load(), !splice.drainArmed
-	splice.mu.Unlock()
+	sp.mu.Lock()
+	carryStuck, disarmed := sp.audioCarry.Load(), !sp.drainArmed
+	expectAfterFire := sp.drainExpectFinal
+	sp.mu.Unlock()
 	if carryStuck == 0 {
 		t.Fatal("test shape broken: partial tail must leave non-zero carry")
 	}
 	if !disarmed {
 		t.Fatal("watch must self-disarm after firing (next turn_final re-arms fresh)")
+	}
+	if expectAfterFire {
+		t.Fatal("fire must consume the expect-final flag (a stale park must not re-open the turn)")
 	}
 	if strings.Contains(buf.String(), "reason=margin") {
 		t.Fatal("margin fired before the drain edge (fallback beat the real signal)")
@@ -1760,5 +1794,104 @@ func TestLinkCoordinatorWarnsWhenDrainArmMisses(t *testing.T) {
 	}
 	if strings.Contains(logs, "drain watch armed") {
 		t.Fatal("no splice should produce an armed log")
+	}
+}
+
+// T-DR9: THE measured production defect, end to end on a real splice:
+// a two-sentence reply whose inter-sentence synth gap (here 2 s of
+// silence at the .out socket — the measured band was 1.4-3.8 s) exceeds
+// the quiet window must NOT release the floor at the gap. The old blind
+// arm fired mid-reply here (link-2fdc3f5fd8d81805: 60 short both-audible
+// runs, 10.94 s total overlap). The release happens only after the child's
+// C1 played edge arms the watch.
+func TestLinkCoordinatorNoDrainedReleaseDuringSynthGap(t *testing.T) {
+	var buf syncBuffer
+	c := NewLinkTurnCoordinator("link-synthgap", time.Hour, slog.New(slog.NewTextHandler(&buf, nil)))
+	reg := NewLinkTurnRegistry(linkDiscard())
+	const ccid = "ls-synthgap"
+	const target = "local:link-a-synthgap"
+	reg.Register(target, "link-synthgap", LinkSideB, c)
+
+	drainFn := wiredAudioDrain(reg, target)
+	if drainFn == nil {
+		t.Fatal("link target must resolve a drain callback")
+	}
+	// Production-shaped windows: 1 s blind quiet (never used now) and
+	// the 500 ms final quiet; the synth gap below dwarfs both.
+	spliceCfg := LocalSpliceConfig{DrainQuiet: 300 * time.Millisecond, DrainQuietFinal: 150 * time.Millisecond}
+	_, micSide, _, _, cancel, done := startDrainSplice(t, ccid, spliceCfg, drainFn)
+	waitForSplice(t, ccid)
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("splice did not exit")
+		}
+	}()
+
+	// Client consumes paced audio continuously (the CLI twin).
+	stopRead := make(chan struct{})
+	go func() {
+		b := make([]byte, 640)
+		for {
+			select {
+			case <-stopRead:
+				return
+			default:
+			}
+			_ = micSide.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+			_, _ = micSide.Read(b)
+		}
+	}()
+	defer close(stopRead)
+
+	// A claims and speaks sentence 1.
+	if !c.HoldPromptFor(LinkSideA)(Instance{CallControlID: ccid}, func() {}) {
+		t.Fatal("first A claim must be allowed")
+	}
+	c.TurnStateFor(LinkSideA)(ccid, 1, TurnKindStart)
+	for range 5 {
+		if err := feedChild(ccid); err != nil {
+			t.Fatalf("feedChild sentence 1: %v", err)
+		}
+	}
+	// The daemon's text pipeline flushes (turn_final) while sentence 2 is
+	// still synthesizing at the child — the exact mid-reply edge.
+	c.TurnStateFor(LinkSideA)(ccid, 1, TurnKindFinal)
+
+	// Synth gap: NO further child bytes for 2 s — the measured defect
+	// band (1.4-3.8 s) and more than 13x the final quiet window. The
+	// floor must stay held for the whole gap.
+	gapStart := time.Now()
+	time.Sleep(2 * time.Second)
+	if strings.Contains(buf.String(), "kind=floor_released") {
+		t.Fatalf("floor released during a %v ms synth gap before the played edge:\n%s",
+			time.Since(gapStart).Milliseconds(), buf.String())
+	}
+	c.mu.Lock()
+	held := c.a.floorHeld
+	c.mu.Unlock()
+	if !held {
+		t.Fatal("floor must stay held until the played edge (mid-reply release is the bug)")
+	}
+
+	// Sentence 2 plays and the child sends the played edge after its
+	// final byte (routeFrame's MarkFinalPlayed for a live local call).
+	for range 4 {
+		if err := feedChild(ccid); err != nil {
+			t.Fatalf("feedChild sentence 2: %v", err)
+		}
+	}
+	sp := LocalSpliceFor(ccid)
+	if !sp.MarkFinalPlayed() {
+		t.Fatal("played edge must arm the drain watch")
+	}
+	waitFor(t, 4*time.Second, "floor released only via the played-armed drain", func() bool {
+		logs := buf.String()
+		return strings.Contains(logs, "kind=floor_released") && strings.Contains(logs, "reason=drained")
+	})
+	if strings.Contains(buf.String(), "reason=margin") {
+		t.Fatal("margin released instead of the drain (watchdog beat the real edge)")
 	}
 }

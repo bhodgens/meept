@@ -922,3 +922,239 @@ func TestLocalSpliceDrainWatchNoGoroutineLeak(t *testing.T) {
 	}
 	t.Errorf("drain watch leaked past splice exit: baseline %d now %d", baseline, runtime.NumGoroutine())
 }
+
+// ---------------------------------------------------------------------------
+// Played-armed drain (C1 played edge = true end-of-turn marker).
+// The link floor no longer blind-arms at turn_final (the child's inter-
+// sentence synth gaps of 1.4-3.8 s exceed the quiet window and fake a
+// mid-reply drain - link-2fdc3f5fd8d81805). ExpectFinalDrain records the
+// turn_final edge WITHOUT arming; the child's played edge arms through
+// MarkFinalPlayed, whose fire predicate is pending==0 + the SHORT
+// DrainQuietFinal window (after the edge nothing more CAN arrive).
+// ---------------------------------------------------------------------------
+
+// T-D7: expect-final set + a mid-stream synth gap must NOT release. This
+// is the exact regression the played edge kills: chunks pace out, the
+// stream goes quiet for longer than EVERY window while more sentences are
+// still to come - the old blind arm fired here (proven by the sibling
+// shape below), the expect-only state must stay silent until the edge.
+func TestLocalSpliceExpectFinalDoesNotFireOnSynthGap(t *testing.T) {
+	var fired atomic.Bool
+	drain := func(string) { fired.Store(true) }
+	cfg := LocalSpliceConfig{DrainQuiet: 80 * time.Millisecond, DrainQuietFinal: 40 * time.Millisecond}
+	_, micSide, _, _, cancel, done := startDrainSplice(t, "ls-played-1", cfg, drain)
+	sp := waitForSplice(t, "ls-played-1")
+
+	// Read side so the pacer never blocks (net.Pipe is synchronous).
+	stopRead := make(chan struct{})
+	go func() {
+		buf := make([]byte, 640)
+		for {
+			select {
+			case <-stopRead:
+				return
+			default:
+			}
+			_ = micSide.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+			_, _ = micSide.Read(buf)
+		}
+	}()
+	defer close(stopRead)
+
+	// Sentence 1's audio paced fully, then the coordinator's turn_final
+	// text edge (the employee's last say FRAME left the daemon while the
+	// child still has sentence 2 synthesizing).
+	for range 3 {
+		if err := feedChild("ls-played-1"); err != nil {
+			t.Fatalf("feedChild: %v", err)
+		}
+	}
+	time.Sleep(60 * time.Millisecond)
+	if !sp.ExpectFinalDrain() {
+		t.Fatal("ExpectFinalDrain must report the drain signal live (dep wired)")
+	}
+	// Wait far past BOTH quiet windows with the stream silent - the
+	// expect-only state has nothing armed to fire.
+	time.Sleep(400 * time.Millisecond)
+	sp.mu.Lock()
+	armed := sp.drainArmed
+	expect := sp.drainExpectFinal
+	sp.mu.Unlock()
+	if armed {
+		t.Fatal("ExpectFinalDrain must NOT arm the watch (blind arm is the early-fire bug)")
+	}
+	if !expect {
+		t.Fatal("expect-final flag must stay set until the played edge or a fire")
+	}
+	if fired.Load() {
+		t.Fatal("floor drain fired mid-reply on a synth gap (the 10.94 s overlap bug)")
+	}
+
+	// Now the played edge lands (sentence 2's final byte left the child's
+	// socket - here sentence 1 WAS actually the whole turn): arms in
+	// final mode, fires at pending==0 + the short window.
+	if !sp.MarkFinalPlayed() {
+		t.Fatal("MarkFinalPlayed must arm the drain watch on a live splice")
+	}
+	waitForFire(t, 3*time.Second, "played-armed drain", &fired)
+	sp.mu.Lock()
+	consumed := !sp.drainArmed && !sp.drainExpectFinal
+	sp.mu.Unlock()
+	if !consumed {
+		t.Fatal("fire must consume both the arm and the expect flag")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("splice did not exit after cancel")
+	}
+}
+
+// T-D8: played-armed watch fires on a SILENT post-arm stream - the shape
+// the blind arm deliberately refuses (there the silent stream could still
+// be synthesizing). After the played edge nothing more can arrive, so
+// pending==0 + quiet is terminal even with zero post-arm audio touches.
+func TestLocalSpliceMarkFinalPlayedFiresOnSilentStream(t *testing.T) {
+	var fired atomic.Bool
+	var fireCount atomic.Int64
+	drain := func(string) { fireCount.Add(1); fired.Store(true) }
+	cfg := LocalSpliceConfig{DrainQuiet: time.Second, DrainQuietFinal: 60 * time.Millisecond}
+	_, _, _, _, cancel, done := startDrainSplice(t, "ls-played-2", cfg, drain)
+	sp := waitForSplice(t, "ls-played-2")
+
+	// Nothing ever fed (denied-empty turn that STILL played: the child
+	// drained a zero-chunk final stream and sent the edge).
+	if !sp.ExpectFinalDrain() {
+		t.Fatal("expect must be live with the dep wired")
+	}
+	if !sp.MarkFinalPlayed() {
+		t.Fatal("played edge must arm")
+	}
+	waitForFire(t, 3*time.Second, "silent played-armed drain", &fired)
+	if n := fireCount.Load(); n != 1 {
+		t.Fatalf("played-armed drain fired %d times, want exactly 1", n)
+	}
+	// A second played edge after the fire re-arms (next turn's edge;
+	// stale fires are covered by the coordinator's generation guards).
+	fired.Store(false)
+	sp.MarkFinalPlayed()
+	waitForFire(t, 3*time.Second, "second played edge re-arm", &fired)
+	if n := fireCount.Load(); n != 2 {
+		t.Fatalf("played-armed drain fired %d times after two edges, want 2", n)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("splice did not exit after cancel")
+	}
+}
+
+// T-D9: queued final chunks + a played edge mid-drain: the fire waits for
+// pending==0 even though the edge already landed - the short final window
+// only replaces the post-arm-touch guard, never the backlog gate.
+func TestLocalSplicePlayedArmedWaitsForPendingDrain(t *testing.T) {
+	var fired atomic.Bool
+	drain := func(string) { fired.Store(true) }
+	cfg := LocalSpliceConfig{DrainQuiet: time.Second, DrainQuietFinal: 60 * time.Millisecond}
+	_, micSide, _, _, cancel, done := startDrainSplice(t, "ls-played-3", cfg, drain)
+	sp := waitForSplice(t, "ls-played-3")
+
+	// 10 chunks (~200 ms of pacing at 20 ms each) are in the pacer when
+	// the played edge lands (the child wrote its last byte; the daemon
+	// still has the backlog to pace).
+	for range 10 {
+		if err := feedChild("ls-played-3"); err != nil {
+			t.Fatalf("feedChild: %v", err)
+		}
+	}
+	if !sp.MarkFinalPlayed() {
+		t.Fatal("played edge must arm")
+	}
+	go func() {
+		buf := make([]byte, 640)
+		for range 10 {
+			_ = micSide.SetReadDeadline(time.Now().Add(3 * time.Second))
+			_, _ = io.ReadFull(micSide, buf)
+		}
+	}()
+	arm := time.Now()
+	waitForFire(t, 3*time.Second, "played-armed backlog drain", &fired)
+	if elapsed := time.Since(arm); elapsed < 10*20*time.Millisecond {
+		t.Fatalf("drain fired after %v while 10 paced chunks (~200ms) were still pending", elapsed)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("splice did not exit after cancel")
+	}
+}
+
+// T-D10: nil-dep splice (every plain local / phone call): both new seam
+// methods are no-ops reporting liveness false - no goroutine, no flags.
+func TestLocalSplicePlayedSeamsNilDepIsNoop(t *testing.T) {
+	p := localPairFor(t, "ls-played-4")
+	micSide, daemonSide := net.Pipe()
+	defer func() { _ = micSide.Close(); _ = daemonSide.Close() }()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- RunLocalSplice(ctx, "ls-played-4", LocalSpliceConfig{DrainQuiet: 80 * time.Millisecond}, LocalSpliceDeps{
+			Audio: p, Client: daemonSide, Text: &textSink{},
+			CancelDraft: func(string) {},
+			Logger:      localDiscardLogger(),
+		})
+	}()
+	sp := waitForSplice(t, "ls-played-4")
+	if sp.ExpectFinalDrain() {
+		t.Fatal("nil dep must report expect as dead")
+	}
+	if sp.MarkFinalPlayed() {
+		t.Fatal("nil dep must report the played arm as dead")
+	}
+	sp.mu.Lock()
+	armed, expect, running := sp.drainArmed, sp.drainExpectFinal, sp.watchRunning
+	sp.mu.Unlock()
+	if armed || expect || running {
+		t.Fatalf("nil dep set drain state (armed=%v expect=%v running=%v)", armed, expect, running)
+	}
+	// Nil receiver too (link.go resolves LocalSpliceFor -> may be nil).
+	var nilSp *runLocalSplice
+	if nilSp.ExpectFinalDrain() || nilSp.MarkFinalPlayed() {
+		t.Fatal("nil receiver must report dead")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("splice did not exit after cancel")
+	}
+}
+
+// T-D11: the expect-mode parked watcher does not outlive the splice (a
+// turn whose played edge never arrives must not leak the goroutine the
+// coordinator's margin-release path left parked).
+func TestLocalSpliceExpectFinalParkNoGoroutineLeak(t *testing.T) {
+	drain := func(string) {}
+	_, _, _, _, cancel, done := startDrainSplice(t, "ls-played-5", LocalSpliceConfig{DrainQuiet: 200 * time.Millisecond}, drain)
+	sp := waitForSplice(t, "ls-played-5")
+	sp.ExpectFinalDrain() // parked watcher, never armed, never fires
+	time.Sleep(100 * time.Millisecond)
+	baseline := runtime.NumGoroutine()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("splice did not exit after cancel")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if runtime.NumGoroutine() <= baseline {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Errorf("expect-mode watcher leaked past splice exit: baseline %d now %d", baseline, runtime.NumGoroutine())
+}
