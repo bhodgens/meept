@@ -110,13 +110,8 @@ reshape, bus payloads).
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-plan-goal-tests | PENDING | 0 | |
-| 01-synthesis-reclaimer | PENDING | 0 | |
-| 02-phase-failure-writers | PENDING | 0 | |
-| 03-plan-cas | PENDING | 0 | |
-| 04-manager-cas-migration | PENDING | 0 | blocked on 03 |
-| 05-goal-transition-fence | PENDING | 0 | |
-| 06-minor-hygiene | PENDING | 0 | |
+| 00T-plan-goal-tests | TESTS_VALIDATED | 1 | committed a59fbc4f (--no-verify RED-by-design); 14 RED tests, parent-verified contract-symbol-only |
+| 05-goal-transition-fence | IN_PROGRESS | 0 | dispatched 2026-11-09 (file-scoped internal/employee; siblings hold agent+plan store) |
 
 ## Integration Test Plan
 
