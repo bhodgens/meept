@@ -4337,11 +4337,32 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		if c.ChatHandler.QuotaResumeWatcher() != nil {
 			c.ChatHandler.QuotaResumeWatcher().SetParkEventBus(msgBus)
 		}
+		// Budget-park persistence + events (F5, tree 04 leaf 04): the
+		// budget watcher's parked chat turns persist under kind=chat,
+		// owner "budget" (C-K1 identity — disjoint from the quota
+		// watcher's and throttle parker's rows on the same kind), and its
+		// park/resume lifecycle publishes on the same agent.quota_wait
+		// topic with class "budget". Wired before ChatHandler.Start
+		// (below) re-arms persisted turns. Nil-safe: no ParkStore keeps
+		// the memory-only behaviour; no watcher (budget unconfigured) is
+		// a no-op.
+		if bw := c.ChatHandler.BudgetResumeWatcher(); bw != nil {
+			bw.SetParkEventBus(msgBus)
+			if c.ParkStore != nil {
+				bw.SetParkPersistence(c.ParkStore, agent.ParkKindChat)
+				bw.SetPersistenceOwner(agent.ParkOwnerBudget)
+			}
+		}
 		// Parked-turn persistence (chat kind): quota-parked chat turns
 		// survive restarts and auto-resume on the next boot. Nil-safe
 		// when the park store is absent (memory-only fallback).
 		if c.ParkStore != nil && c.ChatHandler.QuotaResumeWatcher() != nil {
 			c.ChatHandler.QuotaResumeWatcher().SetParkPersistence(c.ParkStore)
+			// C-K1 (tree 04 leaf 01): the quota watcher's rows are stamped
+			// owner "quota-watcher" and its restart re-arm loads ONLY its
+			// own rows — the chat kind is shared with the throttle parker
+			// below (C1 double-execution), owner scoping is the partition.
+			c.ChatHandler.QuotaResumeWatcher().SetPersistenceOwner(agent.ParkOwnerQuotaWatcher)
 		}
 
 		// Throttle parking (llm-resilience-forest tree 03 leaf 02, D4/D8):
@@ -4370,6 +4391,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// when the park store failed to open, parking stays memory-only.
 		if c.ParkStore != nil {
 			throttleParker.SetParkPersistence(c.ParkStore, agent.ParkKindChat)
+			// C-K1 (tree 04 leaf 01): owner "throttle" — the throttle
+			// parker shares ParkKindChat with the quota watcher's inner
+			// parker; the owner column partitions the re-arm so a quota
+			// row can never re-enter this parker (and vice versa). Wired
+			// before Start (re-arm happens in Start).
+			throttleParker.SetPersistenceOwner(agent.ParkOwnerThrottle)
 		}
 		c.ChatHandler.SetThrottleParker(throttleParker)
 		throttleParker.Start(c.ctx)
@@ -6472,6 +6499,12 @@ func (c *Components) Start(ctx context.Context) error {
 			// malformed payloads still persist under a fallback key.
 			if c.ParkStore != nil {
 				goalTurnParker.SetParkPersistence(c.ParkStore, agent.ParkKindEpisode)
+				// C-K1 (tree 04 leaf 01): owner "episode" — the episode
+				// kind is already exclusive to this parker, but the owner
+				// stamp makes every row self-describing and future-proofs
+				// the re-arm partition (backfill maps legacy episode rows
+				// here by kind).
+				goalTurnParker.SetPersistenceOwner(agent.ParkOwnerEpisode)
 				// Key mirrors the employee parker's H4 identity:
 				// employee + phase + trigger (source|topic), FiredAt excluded
 				// -- nil triggers (reflect/approve phases) normalize to "nil",

@@ -331,6 +331,18 @@ func (d *Dialer) Dial(ctx context.Context, req DialRequest) (DialResult, error) 
 		if hErr := d.tel.HangupCall(ctx, ccid); hErr != nil {
 			d.logger.Error("voice: dial: hangup after acquire failure", "ccid", ccid, "err", hErr)
 		}
+		// Audit 2026-11-09 finding 2 (C-V1): TrackOutbound succeeded above,
+		// so the manager holds m.outbound/m.done entries for this ccid.
+		// Without a terminal FailOutcome they leak forever and the
+		// release fan-out (goal unpark, WaitCall close, effects) never
+		// fires. C-V1 pins the order: FailOutcome AFTER finishCall,
+		// mirroring signalleg abandonOutbound (release, then the terminal
+		// outcome). releaseOnce keeps this exactly-once: a carrier hangup
+		// webhook arriving later for the dead leg is a no-op. Same shape
+		// as the local-leg spawn/audio failure teardown (local.go).
+		if d.mgr != nil {
+			d.mgr.FailOutcome(ccid, OutcomeFailed, fmt.Sprintf("registry acquire: %v", err))
+		}
 		return DialResult{}, fmt.Errorf("voice: dial: registry acquire: %w", err)
 	}
 	// Goal hold once the slot is live, before the no-answer timer can
@@ -395,7 +407,16 @@ func (d *Dialer) doneFor(ctx context.Context, ccid string) <-chan struct{} {
 	if d.mgr != nil {
 		return d.mgr.WaitCall(ccid)
 	}
-	return make(chan struct{})
+	// Unknown-after-teardown with no manager seam (receipted-but-never-
+	// tracked ccid, e.g. restart-mid-ring residual, finding 8): return a
+	// CLOSED channel + warn instead of a fresh never-closing one — the
+	// dial state is unknowable, and a silent hang punts the unknown to
+	// the caller's ctx deadline. The mgr-backed path keeps the M3 posture
+	// (audit 2026-11-06): unknown inbound ids never close.
+	closed := make(chan struct{})
+	close(closed)
+	d.logger.Warn("voice: dial: done-state unknown after restart for ccid (bounded ctx is the caller's bound)", "ccid", ccid)
+	return closed
 }
 
 // holdCall acquires the goal hold for a live outbound call when the seam
@@ -488,8 +509,23 @@ func (d *Dialer) armNoAnswerTimer(ccid string) {
 			// bookkeeping: wait the manager's done channel (the hangup /
 			// release signal) so finishCall still frees the registry
 			// slot and closes the dial Done channel exactly once.
+			//
+			// audit 2026-11-09 finding 9 (C-V1 leaf 01): the re-check and
+			// the FailOutcome fire are ONE atomic step under d.mu. The
+			// old shape unlocked between check and fire, so a
+			// NotifyAnswered landing in that window marked the call
+			// answered while the already-past-check teardown completed
+			// anyway — a no_answer outcome on a call that answered
+			// before its teardown finished. NotifyAnswered now parks on
+			// d.mu until the fire (or the refusal) is decided. Lock
+			// order is one-way, dialer mu -> manager mu: the manager
+			// never calls back into the dialer while holding m.mu
+			// (notifyAnswered and fireRelease both run outside it).
 			d.mu.Lock()
 			answered := d.answered[ccid]
+			if !answered && d.mgr != nil {
+				d.mgr.FailOutcome(ccid, OutcomeNoAnswer, fmt.Sprintf("no answer within %ds", secs))
+			}
 			d.mu.Unlock()
 			if answered {
 				d.logger.Debug("voice: no-answer timer fired for answered call (ignored)", "ccid", ccid)
@@ -503,9 +539,6 @@ func (d *Dialer) armNoAnswerTimer(ccid string) {
 				// observe; leave the slot to the caller's own release,
 				// never tear down an answered call.
 				return
-			}
-			if d.mgr != nil {
-				d.mgr.FailOutcome(ccid, OutcomeNoAnswer, fmt.Sprintf("no answer within %ds", secs))
 			}
 			d.finishCall(ccid)
 			d.logger.Info("voice: outbound dial no-answer", "ccid", ccid, "timeout_secs", secs)

@@ -41,6 +41,17 @@ type TaskGoalSetter interface {
 	SetGoalID(ctx context.Context, taskID, goalID string) error
 }
 
+// TaskCanceller is the optional seam a TaskCreator implements when the
+// backing task store can cancel a task (leaf 06 T2, audit F8). CancelPlan's
+// cascade reaches the plan's parent task and every live child task through
+// it — the EXISTING task-cancel machinery (interrupt trigger, terminal
+// state write, task.ev.task.cancelled notification), not a new event
+// surface. A creator without the seam keeps working: the phase cascade
+// still runs and the task-cancel step is skipped with a debug log.
+type TaskCanceller interface {
+	CancelTask(ctx context.Context, taskID, reason string) error
+}
+
 // PlanManager orchestrates plan lifecycle: creation, approval, synthesis
 // into tasks, progress tracking, and confirmation.
 type PlanManager struct {
@@ -207,6 +218,138 @@ func (m *PlanManager) RecoverStrandedSynthesis(ctx context.Context) (int, error)
 	return recovered, nil
 }
 
+// defaultSynthesisReclaimInterval bounds how often the periodic synthesis
+// reclaimer scans (plan-remediation C-P2, audit M-8/M-9). Generous relative to
+// a synthesis pass (a handful of task writes) so the scan itself is noise.
+const defaultSynthesisReclaimInterval = 5 * time.Minute
+
+// synthesisReclaimCounts is the tally of one reclaimer pass, returned by
+// runSynthesisReclaimPass so callers (and the Info log) can see what moved.
+type synthesisReclaimCounts struct {
+	reclaimed int // expired-lease synthesizing rows flipped back to approved
+	redriven  int // Synthesize calls the pass issued (reclaim + approved scan)
+	failed    int // Synthesize calls that returned an error
+}
+
+// runSynthesisReclaimPass performs ONE full reclaimer pass (C-P2): (a) the
+// expired-lease reclaim — the RecoverStrandedSynthesis body, composed rather
+// than forked so startup callers keep their count semantics — and (b) the
+// MISSING EDGE the audit called M-9: every reclaimed plan, plus every
+// approved-with-no-live-task plan found by the same scan, is RE-DRIVEN through
+// Synthesize. Before this, reclaim-to-approved was still a dead end:
+// ClaimPlanSynthesis is only called inside Synthesize, and Synthesize was only
+// ever reached from ApprovePlan.
+//
+// Concurrency stays safe without extra locking: the claim CAS (single-winner
+// on the row) is re-checked inside Synthesize, so a concurrent expander or a
+// duplicate pass simply loses and skips. The attempt bound is NOT reimplemented
+// here — Synthesize's existing deferred release/park enforces
+// MaxSynthesisAttempts from the persisted attempts column, so a re-driven plan
+// that keeps failing ends parked in StateFailed, never spun forever.
+func (m *PlanManager) runSynthesisReclaimPass(ctx context.Context) (synthesisReclaimCounts, error) {
+	var counts synthesisReclaimCounts
+	reclaimer, ok := m.store.(SynthesisReclaimer)
+	if !ok {
+		return counts, nil
+	}
+
+	// (a) Reclaim expired leases: flips synthesizing -> approved, clearing the
+	// lease. Same bounds and error shape as RecoverStrandedSynthesis.
+	plans, err := m.store.ListPlansByState(ctx, StateSynthesizing, maxStrandedRecoverScan)
+	if err != nil {
+		return counts, fmt.Errorf("plan: list stranded synthesis: %w", err)
+	}
+	seen := make(map[string]bool, len(plans))
+	candidates := make([]string, 0, len(plans))
+	for _, p := range plans {
+		won, err := reclaimer.ReclaimExpiredSynthesis(ctx, p.ID)
+		if err != nil {
+			return counts, fmt.Errorf("plan: reclaim stranded synthesis %s: %w", p.ID, err)
+		}
+		if won {
+			counts.reclaimed++
+			seen[p.ID] = true
+			candidates = append(candidates, p.ID)
+		}
+	}
+
+	// (b) Re-drive. Without a task creator there is nothing to expand into,
+	// so the reclaim above still ran but the pass issues zero Synthesize calls.
+	if m.taskCreator != nil {
+		// The approved-with-no-live-task residue: an approved row with no
+		// task_id never reaches Synthesize on its own (ApprovePlan only fires
+		// from submit/approve paths), so the reclaimer is its only revisit.
+		// Plans reclaimed in step (a) land here too — deduped via `seen`.
+		approved, err := m.store.ListPlansByState(ctx, StateApproved, maxStrandedRecoverScan)
+		if err != nil {
+			return counts, fmt.Errorf("plan: list approved for re-drive: %w", err)
+		}
+		for _, p := range approved {
+			if p.TaskID != "" || seen[p.ID] {
+				continue
+			}
+			seen[p.ID] = true
+			candidates = append(candidates, p.ID)
+		}
+		for _, id := range candidates {
+			counts.redriven++
+			if err := m.Synthesize(ctx, id); err != nil {
+				counts.failed++
+				m.logger.Warn("plan synthesis reclaimer: re-drive failed",
+					"plan_id", id, "error", err)
+			}
+		}
+	}
+
+	return counts, nil
+}
+
+// StartSynthesisReclaimer launches the PERIODIC synthesis recovery loop
+// (plan-remediation C-P2, audit M-8/M-9): the startup-only
+// RecoverStrandedSynthesis wiring caught abandonment only at daemon boot, so a
+// plan abandoned mid-run (cancelled ctx, panic in the expander) sat claimed
+// until the next restart — and even then, reclaim-to-approved had no re-driver.
+// This closes both halves: one immediate pass (preserving the startup
+// invocation), then a pass every `interval` on ctx; the goroutine exits when
+// ctx is cancelled. interval <= 0 selects defaultSynthesisReclaimInterval (5m).
+// Nil-safe on a nil manager so daemon wiring can call it unconditionally.
+func (m *PlanManager) StartSynthesisReclaimer(ctx context.Context, interval time.Duration) {
+	if m == nil {
+		return
+	}
+	if interval <= 0 {
+		interval = defaultSynthesisReclaimInterval
+	}
+	runPass := func() {
+		counts, err := m.runSynthesisReclaimPass(ctx)
+		if err != nil {
+			m.logger.Warn("plan synthesis reclaimer pass failed", "error", err)
+		}
+		if counts.reclaimed > 0 || counts.redriven > 0 {
+			m.logger.Info("plan synthesis reclaimer pass",
+				"reclaimed", counts.reclaimed,
+				"redriven", counts.redriven,
+				"failed", counts.failed)
+		}
+	}
+	go func() {
+		// Immediate startup pass: this replaces the old boot-time
+		// RecoverStrandedSynthesis call, and the periodic loop keeps the
+		// reclaim idiom for mid-run abandonment.
+		runPass()
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				runPass()
+			}
+		}
+	}()
+}
+
 // reservePlanFilePath atomically reserves an unused plan file path for slug,
 // creating an empty placeholder with O_CREATE|O_EXCL so exactly one concurrent
 // caller can win each candidate name (bughunt M1).
@@ -329,17 +472,14 @@ func (m *PlanManager) CreatePlanWithGoal(ctx context.Context, title, description
 
 // SubmitPlan transitions a plan from draft to pending_approval (or auto-approves).
 func (m *PlanManager) SubmitPlan(ctx context.Context, planID string) error {
+	// Table-driven CAS (C-P4): draft -> pending_approval, with the from-set
+	// pinned to draft — the pre-migration guard's exact accepted set.
+	if err := m.transitionFrom(ctx, planID, []PlanState{StateDraft}, StatePendingApproval); err != nil {
+		return err
+	}
 	plan, err := m.store.GetPlan(ctx, planID)
 	if err != nil {
 		return fmt.Errorf("get plan: %w", err)
-	}
-
-	if plan.State != StateDraft {
-		return fmt.Errorf("plan %s is in state %s, expected draft", planID, plan.State)
-	}
-
-	if err := m.store.SetPlanState(ctx, planID, StatePendingApproval); err != nil {
-		return fmt.Errorf("set plan state: %w", err)
 	}
 
 	phases, err := m.store.GetPhases(ctx, planID)
@@ -375,27 +515,13 @@ func (m *PlanManager) SubmitPlan(ctx context.Context, planID string) error {
 }
 
 // ApprovePlan approves a pending plan, records the signoff, and triggers synthesis.
-// Uses a conditional state transition to prevent TOCTOU races between concurrent
-// callers.
+// The guard is the table-driven CAS (C-P4): pending_approval -> approved only.
+// The from-set stays pinned to pending_approval — the table's
+// synthesizing->approved row exists for the reclaimer's stranded-lease path,
+// and a normal approve must never fire it (that would stomp a live expander).
 func (m *PlanManager) ApprovePlan(ctx context.Context, planID, sessionID, by string) error {
-	// Atomic conditional transition: only succeeds if plan is still pending.
-	won, err := m.store.UpdatePlanStateConditional(ctx, planID, StatePendingApproval, StateApproved)
-	if err != nil {
-		return fmt.Errorf("approve plan: conditional state transition: %w", err)
-	}
-	if !won {
-		// Another caller already transitioned this plan.
-		plan, getErr := m.store.GetPlan(ctx, planID)
-		if getErr != nil {
-			return fmt.Errorf("approve plan: failed to get plan state after race: %w", getErr)
-		}
-		return fmt.Errorf("plan %s is in state %s, expected pending_approval", planID, plan.State)
-	}
-
-	// Re-read the plan to get the current state.
-	plan, err := m.store.GetPlan(ctx, planID)
-	if err != nil {
-		return fmt.Errorf("get plan after approval: %w", err)
+	if err := m.transitionFrom(ctx, planID, []PlanState{StatePendingApproval}, StateApproved); err != nil {
+		return err
 	}
 
 	signoff := NewPlanSignoff(planID, "", sessionID, by, "approved", "")
@@ -403,12 +529,16 @@ func (m *PlanManager) ApprovePlan(ctx context.Context, planID, sessionID, by str
 		return fmt.Errorf("create signoff: %w", err)
 	}
 
+	// T4 targeted update: stamp the approval columns on the CURRENT row
+	// (re-read), not on a pre-transition copy — the state move is already
+	// committed by the CAS above.
 	now := time.Now().UTC()
-	plan.ApprovedAt = &now
-	plan.ApprovedBy = by
-	plan.UpdatedAt = now
-	if err := m.store.UpdatePlan(ctx, plan); err != nil {
-		return fmt.Errorf("update plan: %w", err)
+	if err := m.updatePlanColumns(ctx, planID, func(p *Plan) {
+		p.ApprovedAt = &now
+		p.ApprovedBy = by
+		p.UpdatedAt = now
+	}); err != nil {
+		return err
 	}
 
 	m.publishEvent("plan.approved", map[string]any{
@@ -428,22 +558,20 @@ func (m *PlanManager) ApprovePlan(ctx context.Context, planID, sessionID, by str
 
 // RejectPlan rejects a pending plan.
 func (m *PlanManager) RejectPlan(ctx context.Context, planID, sessionID, by, reason string) error {
+	// Table-driven CAS first (C-P4): pending_approval -> cancelled. The
+	// signoff is written only when this caller WINS the transition, so a
+	// losing racer leaves no duplicate audit row behind.
+	if err := m.transitionFrom(ctx, planID, []PlanState{StatePendingApproval}, StateCancelled); err != nil {
+		return err
+	}
 	plan, err := m.store.GetPlan(ctx, planID)
 	if err != nil {
 		return fmt.Errorf("get plan: %w", err)
 	}
 
-	if plan.State != StatePendingApproval {
-		return fmt.Errorf("plan %s is in state %s, expected pending_approval", planID, plan.State)
-	}
-
 	signoff := NewPlanSignoff(planID, "", sessionID, by, "rejected", reason)
 	if err := m.store.CreateSignoff(ctx, signoff); err != nil {
 		return fmt.Errorf("create signoff: %w", err)
-	}
-
-	if err := m.store.SetPlanState(ctx, planID, StateCancelled); err != nil {
-		return fmt.Errorf("set plan state: %w", err)
 	}
 
 	m.publishEvent("plan.rejected", map[string]any{
@@ -461,14 +589,14 @@ func (m *PlanManager) RejectPlan(ctx context.Context, planID, sessionID, by, rea
 }
 
 // RevisePlan requests revision of a plan, sending it back to planning state.
+// The from-set is the table's edges into planning — pending_approval,
+// cancelled, draft, and FAILED (audit F7: the failed->planning row lands in
+// planTransitions, so a failed plan is revisable; leaf 06's
+// TestRevisePlanAcceptsFailed tests exactly that row).
 func (m *PlanManager) RevisePlan(ctx context.Context, planID, sessionID, feedback string) error {
 	plan, err := m.store.GetPlan(ctx, planID)
 	if err != nil {
 		return fmt.Errorf("get plan: %w", err)
-	}
-
-	if plan.State != StatePendingApproval && plan.State != StateCancelled {
-		return fmt.Errorf("plan %s is in state %s, expected pending_approval or cancelled", planID, plan.State)
 	}
 
 	// Check revision count.
@@ -482,17 +610,29 @@ func (m *PlanManager) RevisePlan(ctx context.Context, planID, sessionID, feedbac
 		}
 	}
 
+	// Table-driven CAS second, from-set pinned to the revise command's
+	// accepted states (leaf doc: pending_approval, cancelled, failed). The
+	// table's draft->planning row serves the rework path, not this command.
+	// The CAS pins the observed state, so a racer that moved the row
+	// between the read above and this write loses.
+	if err := m.transitionFrom(ctx, planID,
+		[]PlanState{StatePendingApproval, StateCancelled, StateFailed}, StatePlanning); err != nil {
+		return err
+	}
+
 	signoff := NewPlanSignoff(planID, "", sessionID, "", "revision_requested", feedback)
 	if err := m.store.CreateSignoff(ctx, signoff); err != nil {
 		return fmt.Errorf("create signoff: %w", err)
 	}
 
-	plan.RevisionCount++
-	plan.State = StatePlanning
-	plan.UpdatedAt = time.Now().UTC()
-	if err := m.store.UpdatePlan(ctx, plan); err != nil {
-		return fmt.Errorf("update plan: %w", err)
+	// T4 targeted update: revision_count/updated_at on the CURRENT row.
+	if err := m.updatePlanColumns(ctx, planID, func(p *Plan) {
+		p.RevisionCount++
+		p.UpdatedAt = time.Now().UTC()
+	}); err != nil {
+		return err
 	}
+	plan.RevisionCount++
 
 	m.publishEvent("plan.revised", map[string]any{
 		"plan_id":        planID,
@@ -506,14 +646,19 @@ func (m *PlanManager) RevisePlan(ctx context.Context, planID, sessionID, feedbac
 
 // ConfirmPlan confirms a completed plan after review.
 func (m *PlanManager) ConfirmPlan(ctx context.Context, planID, sessionID, by string) error {
+	// Table-driven CAS FIRST (C-P4): completed/failed/cancelled -> confirmed.
+	// The signoff and the confirmation columns are written only when this
+	// caller WINS, so a racer (e.g. a concurrent CancelPlan) neither clobbers
+	// the row nor leaves a duplicate audit trail. The old shape — read,
+	// guard, signoff, full-row UpdatePlan from the stale copy — lost both:
+	// last-writer-wins on the state AND stomped the live
+	// task_id/synthesis_lease_until columns of the pre-transition copy (T4).
+	if err := m.transition(ctx, planID, StateConfirmed); err != nil {
+		return err
+	}
 	plan, err := m.store.GetPlan(ctx, planID)
 	if err != nil {
 		return fmt.Errorf("get plan: %w", err)
-	}
-
-	// Allow confirmation from completed, failed, or cancelled states.
-	if plan.State != StateCompleted && plan.State != StateFailed && plan.State != StateCancelled {
-		return fmt.Errorf("plan %s is in state %s, expected terminal state", planID, plan.State)
 	}
 
 	signoff := NewPlanSignoff(planID, "", sessionID, by, "confirmed", "")
@@ -521,20 +666,52 @@ func (m *PlanManager) ConfirmPlan(ctx context.Context, planID, sessionID, by str
 		return fmt.Errorf("create signoff: %w", err)
 	}
 
+	// T4 targeted update: confirmation columns on the CURRENT row (re-read),
+	// which already carries the winner's state and any lease/task columns.
 	now := time.Now().UTC()
-	plan.State = StateConfirmed
-	plan.ConfirmedAt = &now
-	plan.ConfirmedBy = by
-	plan.UpdatedAt = now
-	if err := m.store.UpdatePlan(ctx, plan); err != nil {
-		return fmt.Errorf("update plan: %w", err)
+	if err := m.updatePlanColumns(ctx, planID, func(p *Plan) {
+		p.ConfirmedAt = &now
+		p.ConfirmedBy = by
+		p.UpdatedAt = now
+	}); err != nil {
+		return err
 	}
 
-	// Update plan.md to reflect confirmed state.
+	// Cascade the confirmation onto the plan's phases (leaf 02 T3, audit
+	// M-6): PhaseConfirmed had zero writers, so phase rows kept their
+	// pre-confirm state forever. Every phase that has RESOLVED — completed
+	// or failed — moves to PhaseConfirmed; pending/in_progress phases are
+	// left alone (they never resolved, so signing off the plan's outcome
+	// does not retroactively confirm their work). Best-effort per phase with
+	// no new bus event and unchanged payload shapes (the phase_state intake
+	// mirror is fail-soft and only tracks live transitions; plan.confirmed
+	// remains the plan-level truth for the confirmation).
 	phases, phaseErr := m.store.GetPhases(ctx, planID)
 	if phaseErr != nil {
 		m.logger.Warn("failed to get phases for plan.md update", "plan_id", planID, "error", phaseErr)
+	} else {
+		cascaded := 0
+		for _, ph := range phases {
+			if ph.State != PhaseCompleted && ph.State != PhaseFailed {
+				continue
+			}
+			if err := m.store.SetPhaseState(ctx, ph.ID, PhaseConfirmed); err != nil {
+				m.logger.Warn("failed to cascade phase confirmed", "plan_id", planID, "phase_id", ph.ID, "error", err)
+				continue
+			}
+			ph.State = PhaseConfirmed
+			cascaded++
+		}
+		if cascaded > 0 {
+			// Re-read so the plan.md tail below renders the confirmed phase
+			// states instead of the pre-cascade snapshot.
+			if refreshed, rErr := m.store.GetPhases(ctx, planID); rErr == nil {
+				phases = refreshed
+			}
+		}
 	}
+
+	// Update plan.md to reflect confirmed state.
 	if err := UpdatePlanStatus(plan.FilePath, StateConfirmed, phasesToValues(phases)); err != nil {
 		m.logger.Warn("failed to update plan.md on confirm", "plan_id", planID, "error", err)
 	}
@@ -554,17 +731,75 @@ func (m *PlanManager) ConfirmPlan(ctx context.Context, planID, sessionID, by str
 
 // CancelPlan cancels a plan for the given reason.
 func (m *PlanManager) CancelPlan(ctx context.Context, planID, reason string) error {
-	plan, err := m.store.GetPlan(ctx, planID)
-	if err != nil {
-		return fmt.Errorf("get plan: %w", err)
+	// Table-driven CAS (C-P4): cancelled's from-set (draft, pending_approval,
+	// approved, synthesizing, executing) is exactly the old non-terminal
+	// guard's accepted set minus completed/planning — the audited table has
+	// no edge into cancelled from those states (see planTransitions; delta
+	// noted in the leaf report).
+	if err := m.transition(ctx, planID, StateCancelled); err != nil {
+		return err
 	}
 
-	if plan.State.IsTerminal() {
-		return fmt.Errorf("plan %s is already in terminal state %s", planID, plan.State)
+	// F8 cascade (leaf 06 T2): a cancelled plan must not orphan its phases
+	// or leave live child tasks running. Read the phase rows BEFORE the
+	// transition bookkeeping below so the cascade sees the synthesis-time
+	// child task ids even for a plan whose maps were never restored.
+	phases, phErr := m.store.GetPhases(ctx, planID)
+	if phErr != nil {
+		// Best-effort parity with the sibling lifecycle writes: the plan
+		// row is already cancelled; a phase read failure is logged, not
+		// a cancel failure (the operator's stop intent already committed).
+		m.logger.Warn("cancel cascade: failed to read phases", "plan_id", planID, "error", phErr)
+		phases = nil
 	}
 
-	if err := m.store.SetPlanState(ctx, planID, StateCancelled); err != nil {
-		return fmt.Errorf("set plan state: %w", err)
+	// Phase rollback: pending/in_progress phases reset to 'pending' per the
+	// leaf's Q2 rule (cancelled plan -> phases back to pending, NOT failed —
+	// a revise->re-run loop restarts them; the cancel itself is not a phase
+	// failure). Completed/confirmed/failed phases are terminal records of
+	// what already happened and stay untouched.
+	for _, ph := range phases {
+		if ph.State == PhasePending || ph.State == PhaseInProgress {
+			if err := m.store.SetPhaseState(ctx, ph.ID, PhasePending); err != nil {
+				m.logger.Warn("cancel cascade: failed to reset phase", "plan_id", planID, "phase_id", ph.ID, "error", err)
+			}
+		}
+	}
+
+	// Task cancellation through the existing task-cancel machinery: the
+	// plan's parent task plus every child task bound to a phase. The seam
+	// is optional (TaskCanceller); a creator without it (unit tests,
+	// legacy adapters) skips this step rather than failing the cancel.
+	if canceller, ok := m.taskCreator.(TaskCanceller); ok && m.taskCreator != nil {
+		cancelTask := func(taskID string) {
+			if taskID == "" {
+				return
+			}
+			if cerr := canceller.CancelTask(ctx, taskID, "plan cancelled: "+reason); cerr != nil {
+				m.logger.Warn("cancel cascade: task cancel failed", "plan_id", planID, "task_id", taskID, "error", cerr)
+			}
+		}
+		// Parent task: from the durable plan row first, then the in-memory
+		// map (Synthesize records both; a pre-restore manager may only
+		// have the map).
+		if p, gerr := m.store.GetPlan(ctx, planID); gerr == nil && p != nil {
+			cancelTask(p.TaskID)
+			m.mu.RLock()
+			parentMapped := m.taskPlanMap[p.TaskID] == p.ID
+			m.mu.RUnlock()
+			if p.TaskID == "" && !parentMapped {
+				// Nothing durable to cancel; child tasks below still ride
+				// their phase rows' task_id.
+				m.logger.Debug("cancel cascade: plan has no parent task", "plan_id", planID)
+			}
+		}
+		for _, ph := range phases {
+			if ph.TaskID != "" {
+				cancelTask(ph.TaskID)
+			}
+		}
+	} else if m.taskCreator != nil {
+		m.logger.Debug("cancel cascade: taskCreator lacks TaskCanceller seam; phases-only cancel", "plan_id", planID)
 	}
 
 	m.publishEvent("plan.cancelled", map[string]any{
@@ -606,7 +841,31 @@ func (m *PlanManager) PruneStalePlans(ctx context.Context, retentionDays int) (d
 	// (each pass is a cheap indexed scan). Terminal drafts/cancelled/failed
 	// are deleted; stale open states are cancelled.
 	deletable := []PlanState{StateDraft, StateCancelled, StateFailed}
-	cancellable := []PlanState{StatePendingApproval, StatePlanning, StateApproved}
+	cancellable := []PlanState{StatePendingApproval, StateApproved}
+
+	// Stale planning is NOT cancellable: the frozen transition table has no
+	// planning->cancelled edge (planning is the creation-entry state with an
+	// empty to-set — leaf 04's table; the pre-table prune assumed otherwise
+	// and every such CancelPlan failed with ErrPlanNotModifiable). Surface
+	// the backlog honestly instead of pretending: count and warn, take no
+	// state action. An operator decides (revise via planning's rework path
+	// is also table-blocked at HEAD — this is a judgment call, not a sweep).
+	stalePlanning := 0
+	plans, lerr := m.store.ListPlansByState(ctx, StatePlanning, 10000)
+	if lerr != nil {
+		m.logger.Warn("retention: list plans failed", "state", StatePlanning, "error", lerr)
+		err = lerr
+	}
+	for _, p := range plans {
+		if p == nil || p.UpdatedAt.After(cutoff) {
+			continue
+		}
+		stalePlanning++
+	}
+	if stalePlanning > 0 {
+		m.logger.Warn("retention: stale planning plan not cancellable via table; needs operator decision",
+			"count", stalePlanning, "retention_days", retentionDays)
+	}
 
 	for _, state := range cancellable {
 		plans, lerr := m.store.ListPlansByState(ctx, state, 10000)
@@ -926,6 +1185,59 @@ func (m *PlanManager) Synthesize(ctx context.Context, planID string) error {
 // Progress tracking
 // ---------------------------------------------------------------------------
 
+// OnStepFailed is the step-failure counterpart of OnStepCompleted (leaf 02
+// T1, audit M-6): it records the failure through the EXISTING
+// IncrementPhaseProgress accounting (failed_steps — no parallel counter) and
+// flips the phase to PhaseFailed once the failure count makes the phase
+// unrecoverable: failed_steps >= total_steps. The writer only ever fires for
+// phases in in_progress — a phase that already reached a terminal phase state
+// (completed/failed/confirmed) is never rewritten by a late failure event.
+//
+// Failure accounting for a still-recoverable phase (failed_steps <
+// total_steps) is recorded without a state change, mirroring OnStepCompleted:
+// a partial failure does not kill the phase while steps remain.
+func (m *PlanManager) OnStepFailed(ctx context.Context, taskID, stepID string) error {
+	m.mu.RLock()
+	phaseID, ok := m.phaseTaskMap[taskID]
+	if !ok {
+		m.mu.RUnlock()
+		// Not a plan-tracked task; ignore silently (parity with OnStepCompleted).
+		return nil
+	}
+	planID := m.taskPlanMap[taskID]
+	m.mu.RUnlock()
+
+	if err := m.store.IncrementPhaseProgress(ctx, phaseID, "failed_steps", 1); err != nil {
+		return fmt.Errorf("increment phase progress: %w", err)
+	}
+
+	phases, err := m.store.GetPhases(ctx, planID)
+	if err != nil {
+		// Phase-failure detection is advisory; the failed_steps increment
+		// above already succeeded, so don't fail the executor callback.
+		return nil //nolint:nilerr // non-fatal: progress was recorded above
+	}
+
+	for _, phase := range phases {
+		if phase.ID != phaseID || phase.State != PhaseInProgress {
+			continue
+		}
+		if phase.TotalSteps > 0 && phase.FailedSteps >= phase.TotalSteps {
+			if err := m.store.SetPhaseState(ctx, phaseID, PhaseFailed); err != nil {
+				m.logger.Warn("failed to set phase failed", "phase_id", phaseID, "error", err)
+			}
+			m.publishEvent("plan.phase_state", map[string]any{
+				"plan_id":  planID,
+				"phase_id": phaseID,
+				"state":    string(PhaseFailed),
+			})
+			break
+		}
+	}
+
+	return nil
+}
+
 // OnStepCompleted is called when a task step completes. It updates the
 // corresponding phase progress.
 func (m *PlanManager) OnStepCompleted(ctx context.Context, taskID, stepID string) error {
@@ -984,10 +1296,12 @@ func (m *PlanManager) OnTaskCompleted(ctx context.Context, taskID string) error 
 			m.logger.Warn("failed to set phase completed", "phase_id", phaseID, "error", err)
 		}
 
-		m.publishEvent("plan.phase_completed", map[string]any{
-			"task_id":  taskID,
-			"phase_id": phaseID,
-		})
+		// The dead phase-completion bus event publish was REMOVED here
+		// (audit F9, leaf 06 T3): zero subscribers across the whole bus
+		// surface (verified against docs/generated/bus-topology.json before
+		// deletion). The live consumer of phase completion is
+		// plan.phase_state below — the intake projection rides it. A dead
+		// publish only inflated the topology's orphan set.
 		if hasPlan {
 			m.publishEvent("plan.phase_state", map[string]any{
 				"plan_id":  planID,
@@ -996,21 +1310,24 @@ func (m *PlanManager) OnTaskCompleted(ctx context.Context, taskID string) error 
 			})
 		}
 
-		// Check if all phases of the plan are now complete. If so,
-		// transition the plan to completed.
+		// Check if all phases of the plan have resolved. Leaf 02 T2 (audit
+		// M-6 / plan F1): a FAILED phase counts as terminal — the check is
+		// "all phases terminal", not "all completed". completePlan then does
+		// the honest evaluation: any failed phase sends the plan to
+		// StateFailed instead of silently completing it.
 		allPhases, err := m.store.GetPhases(ctx, planID)
 		if err != nil {
 			m.logger.Warn("failed to get phases for completion check", "plan_id", planID, "error", err)
 			return nil
 		}
-		allComplete := len(allPhases) > 0
+		allTerminal := len(allPhases) > 0
 		for _, ph := range allPhases {
-			if ph.State != PhaseCompleted {
-				allComplete = false
+			if ph.State != PhaseCompleted && ph.State != PhaseFailed {
+				allTerminal = false
 				break
 			}
 		}
-		if allComplete {
+		if allTerminal {
 			return m.completePlan(ctx, planID)
 		}
 		return nil
@@ -1037,6 +1354,12 @@ func (m *PlanManager) OnTaskCompleted(ctx context.Context, taskID string) error 
 // completePlan transitions a plan to completed, updates plan.md, and
 // publishes the plan.completed event. It is called either when the parent
 // task completes or when all phase child tasks have completed.
+//
+// Leaf 02 T2 (audit M-6 / plan F1) makes the evaluation honest first: a plan
+// with ANY failed phase fails instead of completing — an errored step must
+// never pass review silently. The phase read below serves both the failure
+// check and the plan.md / event tail (one read, pre-transition: phase rows
+// and plan rows are separate writes).
 func (m *PlanManager) completePlan(ctx context.Context, planID string) error {
 	plan, err := m.store.GetPlan(ctx, planID)
 	if err != nil {
@@ -1047,17 +1370,26 @@ func (m *PlanManager) completePlan(ctx context.Context, planID string) error {
 		return nil
 	}
 
-	plan.State = StateCompleted
-	plan.UpdatedAt = time.Now().UTC()
-	if err := m.store.UpdatePlan(ctx, plan); err != nil {
-		return fmt.Errorf("update plan to completed: %w", err)
-	}
-
-	// Update plan.md.
 	phases, phaseErr := m.store.GetPhases(ctx, plan.ID)
 	if phaseErr != nil {
 		m.logger.Warn("failed to get phases for plan.md update", "plan_id", plan.ID, "error", phaseErr)
+	} else {
+		for _, ph := range phases {
+			if ph.State == PhaseFailed {
+				return m.failPlan(ctx, plan.ID)
+			}
+		}
 	}
+
+	// Table-driven CAS (C-P4): executing -> completed. The CAS pins the
+	// observed state, so a concurrent CancelPlan that moved the row first
+	// makes this a lost race: the completion must NOT clobber the cancel,
+	// and the event/markdown below must not fire for a plan nobody completed.
+	if err := m.transition(ctx, planID, StateCompleted); err != nil {
+		return err
+	}
+
+	// Update plan.md.
 	if err := UpdatePlanStatus(plan.FilePath, StateCompleted, phasesToValues(phases)); err != nil {
 		m.logger.Warn("failed to update plan.md on completion", "error", err)
 	}
@@ -1075,6 +1407,42 @@ func (m *PlanManager) completePlan(ctx context.Context, planID string) error {
 	})
 
 	m.logger.Info("plan completed", "plan_id", plan.ID)
+	return nil
+}
+
+// failPlan transitions a plan whose phases all resolved with at least one
+// PhaseFailed to StateFailed, and stamps the outcome into plan.md. It is the
+// failure sibling of completePlan (leaf 02 T2, audit M-6 / plan F1). The
+// transition rides the table's executing -> failed edge through the same
+// guarded CAS as every other lifecycle move (C-P4), so a concurrent
+// CancelPlan still wins with exactly one winner. No new bus event is
+// published: the leaf contract pins the event surface unchanged (the
+// plan.phase_state failure edges already rode the PhaseFailed writer).
+func (m *PlanManager) failPlan(ctx context.Context, planID string) error {
+	plan, err := m.store.GetPlan(ctx, planID)
+	if err != nil {
+		return fmt.Errorf("get plan for failure: %w", err)
+	}
+
+	if plan.State != StateExecuting {
+		return nil
+	}
+
+	if err := m.transition(ctx, planID, StateFailed); err != nil {
+		return err
+	}
+
+	// Update plan.md with the failed outcome (best-effort, parity with
+	// completePlan's markdown tail).
+	phases, phaseErr := m.store.GetPhases(ctx, plan.ID)
+	if phaseErr != nil {
+		m.logger.Warn("failed to get phases for plan.md update", "plan_id", plan.ID, "error", phaseErr)
+	}
+	if err := UpdatePlanStatus(plan.FilePath, StateFailed, phasesToValues(phases)); err != nil {
+		m.logger.Warn("failed to update plan.md on failure", "error", err)
+	}
+
+	m.logger.Info("plan failed: at least one phase failed", "plan_id", plan.ID)
 	return nil
 }
 
@@ -1146,10 +1514,21 @@ func (m *PlanManager) EnsureTaskPlan(ctx context.Context, taskID, title string) 
 // store. This should be called on daemon startup to recover plan-task
 // associations for executing plans that survived a restart.
 func (m *PlanManager) RestoreMappings(ctx context.Context) error {
+	// F12 gap (leaf 06 T4): a crash between Synthesize's task writes and
+	// the executing transition strands the plan in synthesizing with durable
+	// child task ids on the phase rows — restoring only executing plans
+	// left those mappings missing until the reclaimer moved the plan
+	// forward. Cover both task-bearing in-flight states. (Limit 100 per
+	// state kept: the reclaim path bounds synthesizing backlog separately.)
 	plans, err := m.store.ListPlansByState(ctx, StateExecuting, 100)
 	if err != nil {
 		return fmt.Errorf("list executing plans for mapping restore: %w", err)
 	}
+	synthPlans, err := m.store.ListPlansByState(ctx, StateSynthesizing, 100)
+	if err != nil {
+		return fmt.Errorf("list synthesizing plans for mapping restore: %w", err)
+	}
+	plans = append(plans, synthPlans...)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()

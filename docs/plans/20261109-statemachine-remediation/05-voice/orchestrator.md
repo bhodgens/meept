@@ -97,11 +97,11 @@ touching frames/sockets/release.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-voice-tests | PENDING | 0 | BLOCKED-START |
-| 01-dial-leak-and-race | PENDING | 0 | |
-| 02-signal-leg-parity | PENDING | 0 | |
-| 03-ringing-watchdog-and-db-sweep | PENDING | 0 | |
-| 04-webhook-and-teardown | PENDING | 0 | |
+| 00T-voice-tests | TESTS_VALIDATED | 2 | part 1 (terminal_gate_test.go) + part 2 (leg_gate + webhook_gate) both committed; 8 pins, all parent-verified RED for right reasons |
+| 01-dial-leak-and-race | COMPLETE | 1 | committed f9304084 (dial.go) + 47d03b60 (manager tombstone, parent-landed residual) + gofmt fix; finding 2 FULLY closed, finding 9 closed; T3 audit: 0 unpaired paths |
+| 02-signal-leg-parity | COMPLETE | 1 | committed 97c67a59; findings 5/6 closed; nil-seam TRUE posture gate-forced + documented; daemon one-liner flagged & parent-reviewed (sole New site) |
+| 03-ringing-watchdog-and-db-sweep | COMPLETE | 1 | committed 117cd338; findings 3/7/4 closed (voice+signalleg pkgs fully green; gates zero-diff vs HEAD); sweep site=NewCallStore; claimTerminal reuses finding-9 atomicity lesson |
+| 04-webhook-and-teardown | COMPLETE | 1 | committed d0802617 (incl. T3 dial.go closed-channel+warn; holdGate async shape, end frame, rollback pin); BRANCH 05 INTEGRATION DONE — voice+signalleg+daemon scopes green |
 
 ## Integration Test Plan
 

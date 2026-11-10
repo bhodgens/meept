@@ -87,11 +87,13 @@ comments cite audit finding IDs (audit 2026-11-09, tree 20261109-statemachine-re
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-queue-tests | PENDING | 0 | |
-| 01-mark-processing-token | PENDING | 0 | blocked on 00T |
-| 02-requeue-column-parity | PENDING | 0 | |
-| 03-stranded-sweeper | PENDING | 0 | blocked on 00T |
-| 04-state-check-and-immediate | PENDING | 0 | |
+| 00T-queue-tests | TESTS_VALIDATED | 1 | committed 6e73912b (--no-verify: RED-by-design bypasses U1000/compile gates per tests-first protocol) |
+| 01-mark-processing-token | REVIEWED | 1 | committed 328945fb; C-Q1 exact; parent tmp-swap verified GREEN; gate file byte-identical |
+| 02-requeue-column-parity | REVIEWED | 1 | committed cf83d64e; 4 gates GREEN + consumers green; dead_letter interactive column added (schema+ALTER); parent-verified tmp-swap |
+| 03-stranded-sweeper | REVIEWED | 1 | committed 12e93ef6 + daemon wiring 43958b96 (orchestrator task); full queue pkg green except leaf-04 gate; tx-idiom question handed to leaf 04 (F6) |
+| 04-state-check-and-immediate | REVIEWED | 1 | committed 6ef73902; CHECK+rebuild migration+index parity pins; _txlock=immediate verified against modernc driver source by parent; T2 partial index SKIPPED per rule (no natural key) |
+
+BRANCH INTEGRATION (2026-11-09): queue+worker+services+daemon all green at 6ef73902; dead-letter round-trip covered by composition (sweep, duplicate-safe moveToDead, interactive-preserve, retry-bound all individually pinned in gate + migration tests). Branch COMPLETE pending merge gate.
 
 ## Integration Test Plan
 
@@ -104,11 +106,11 @@ Test leaf: 00T-queue-tests.md.
 
 | # | Feature | Source | Unit tests | E2E | Status |
 |---|---------|--------|-----------|-----|--------|
-| F1 | MarkProcessing token CAS | C-Q1 | TestMarkProcessingRequiresToken | n/a | PENDING |
-| F2 | Requeue column parity | 02 | TestRequeueClearsClusterColumns | n/a | PENDING |
-| F3 | Sweeper revisits failed/dead | C-Q2 | TestSweepAbandonedTerminalStates | n/a | PENDING |
-| F4 | CHECK + IMMEDIATE | 04 | TestJobsStateCheck / TestFailAttemptUsesImmediate | n/a | PENDING |
-| F5 | Operator retry budget | 02 T3 | TestRetryRespectsMaxRetries | n/a | PENDING |
+| F1 | MarkProcessing token CAS | C-Q1 | TestMarkProcessingRequiresToken | n/a | VALIDATED |
+| F2 | Requeue column parity | 02 | TestRequeueClearsClusterColumns | n/a | VALIDATED |
+| F3 | Sweeper revisits failed/dead | C-Q2 | TestSweepAbandonedTerminalStates | n/a | VALIDATED |
+| F4 | CHECK + IMMEDIATE | 04 | TestJobsStateCheckRejectsGarbage (plus legacy-migration + moveToDead-duplicate tests) | n/a | VALIDATED |
+| F5 | Operator retry budget | 02 T3 | TestRetryOperatorRespectsMaxRetries | n/a | VALIDATED |
 
 ## Frozen Documents
 

@@ -33,6 +33,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/caimlas/meept/internal/llm"
@@ -165,12 +166,45 @@ func NewGateParker(logger *slog.Logger, turns *TurnParker) *GateParker {
 // lifecycle of its own).
 func (p *GateParker) Turns() *TurnParker { return p.turns }
 
+// dropQueuedByKey removes EVERY in-memory record queued under a
+// persistence key (F9: gate keys dedupe by identity, so at most one
+// should exist -- a legacy duplicate re-armed from an older build is
+// cleaned in the same pass). It does NOT touch persistence: the caller
+// either re-parks under the same key (re-raise: Save upserts the row) or
+// deletes the row itself (release: unpersistPark). Called with the same
+// mutex discipline as resumeByKey: lock, splice, unlock -- no I/O under
+// the lock. The FIRST removed record is returned alongside the count so
+// the caller can emit a lifecycle event describing what was discarded.
+func (p *TurnParker) dropQueuedByKey(key string) (ParkedTurnRecord, int) {
+	if p == nil || key == "" {
+		return ParkedTurnRecord{}, 0
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var first ParkedTurnRecord
+	dropped := 0
+	for i := len(p.parked) - 1; i >= 0; i-- {
+		if p.parkKeys[i] != key {
+			continue
+		}
+		if dropped == 0 {
+			first = p.parked[i]
+		}
+		p.parked = append(p.parked[:i], p.parked[i+1:]...)
+		p.parkKeys = append(p.parkKeys[:i], p.parkKeys[i+1:]...)
+		dropped++
+	}
+	return first, dropped
+}
+
 // ParkGate checkpoints one gate pause. It returns false (nothing
 // parked) when parking is disabled, the payload cannot be encoded, or
 // the shared parker refuses the record. A re-raise of an already-parked
-// gate overwrites the row (same (kind, park_key)) and re-queues the
-// in-memory record -- the approval still resumes exactly once, because
-// ResumeByKey pops one queued record per key.
+// gate REPLACES the queued in-memory record (F9: at-most-one per key --
+// the old append-then-pop shape left a stale copy behind that a second
+// approval could double-resume) and the persistence row upserts under
+// the same (gate_kind|gate_id) key -- the approval still resumes exactly
+// once, because ResumeByKey pops the (single) queued record per key.
 func (p *GateParker) ParkGate(data GateParkData) bool {
 	if p == nil || p.turns == nil {
 		return false
@@ -180,6 +214,12 @@ func (p *GateParker) ParkGate(data GateParkData) bool {
 		p.logger.Warn("gate park refused", "gate_kind", data.GateKind, "gate_id", data.GateID, "error", err)
 		return false
 	}
+	// F9 re-raise = replace: drop any stale in-memory copy under this
+	// key BEFORE the new append. The row itself is overwritten by the
+	// parker's persistPark Save (upsert on the same key), so no
+	// persistence delete happens here -- if Park were to refuse, the
+	// surviving row still re-arms on the next Start (no orphan loss).
+	p.turns.dropQueuedByKey(gateParkKey(data))
 	if !p.turns.Park(rec) {
 		return false
 	}
@@ -210,6 +250,80 @@ func (p *GateParker) PendingGates() int {
 		return 0
 	}
 	return p.turns.Pending()
+}
+
+// ReleaseByKey discards the parked gate identified by gateID (plan
+// rejection / cancellation path, M-12 / C-K3): the persistence row and
+// ALL in-memory records queued under the key are removed WITHOUT running
+// the resume callback (rejection discards the re-entry, it never
+// re-drives it), and the existing parker lifecycle event is emitted on
+// the agent.quota_wait topic carrying the release reason — no new topic,
+// no payload reshape, so quota_wait consumers see it for free.
+//
+// The key identity mirrors gateParkKey (gateKind|gateID): plan and goal
+// gates share one namespace, so both kind-prefixed keys are probed.
+// Returns false (nil error, idempotent) when nothing is parked under the
+// gate id — re-drive safety for unknown / already-released / already-
+// resumed gate ids.
+func (p *GateParker) ReleaseByKey(gateID, reason string) (bool, error) {
+	if p == nil || p.turns == nil || gateID == "" {
+		return false, nil
+	}
+	var rec ParkedTurnRecord
+	released := false
+	for _, kind := range []string{"plan", "goal"} {
+		key := kind + "|" + gateID
+		first, n := p.turns.dropQueuedByKey(key)
+		// Belt-and-braces row cleanup: unpersist is idempotent, so a
+		// disk-only orphan (crash between memory drop and delete) is
+		// removed even when the memory probe missed.
+		p.turns.unpersistPark(key)
+		if n > 0 {
+			rec, released = first, true
+			break
+		}
+	}
+	if !released {
+		return false, nil
+	}
+	p.turns.emitGateReleaseEvent(rec, reason)
+	p.logger.Info("gate park released (no resume)",
+		"gate_id", gateID,
+		"reason", reason,
+		"dropped", true,
+	)
+	return true, nil
+}
+
+// gateReleaseReason maps a release reason to the wire reason string on
+// the parker lifecycle event (leaf contract: "rejected" | "cancelled").
+// Unknown reasons are namespaced rather than dropped so the release stays
+// observable; consumers substring-match, never exact-match.
+func gateReleaseReason(reason string) string {
+	switch strings.ToLower(reason) {
+	case "rejected":
+		return "gate_rejected"
+	case "cancelled", "canceled":
+		return "gate_cancelled"
+	default:
+		return "gate_released_" + strings.ToLower(reason)
+	}
+}
+
+// emitGateReleaseEvent publishes the release on the EXISTING
+// agent.quota_wait topic via the parker's own emitter (zero new topics;
+// the WS "agent.quota" prefix keeps classifying it as agent_progress).
+// To is empty: a release is an abandonment, not a parked-state change
+// (the give-up event shape precedent). Class rides "none" — the gate
+// parker's wire class.
+func (p *TurnParker) emitGateReleaseEvent(rec ParkedTurnRecord, reason string) {
+	p.publishParkEvent(ParkTurnEvent{
+		AgentID:   rec.AgentID,
+		Reason:    gateReleaseReason(reason),
+		Class:     parkClassString(rec.Class),
+		SessionID: rec.SessionID,
+		Timestamp: p.now(),
+	})
 }
 
 // resumeByKey resumes one parked record by its kind-scoped persistence

@@ -22,6 +22,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,7 +42,13 @@ type throttledTurnPayload struct {
 	ProviderID     string            `json:"provider_id,omitempty"`
 	ModelID        string            `json:"model_id,omitempty"`
 	SourceClient   string            `json:"source_client,omitempty"`
-	ParkedAt       time.Time         `json:"parked_at,omitzero"`
+	// TurnID rides the payload (C-K2 compile carrier, tree 04 leaf 01;
+	// delivery parity lands with leaf 02): the chat.submit turn identity so
+	// the throttle resume can emit the final turn.terminal under the acked
+	// id like the quota path does (F15). Empty on legacy rows (omitted key),
+	// which the resume treats as silent.
+	TurnID   string    `json:"turn_id,omitempty"`
+	ParkedAt time.Time `json:"parked_at,omitzero"`
 	// Autonomous mirrors ParkedTurnRecord.Autonomous (F14 follow-up): the
 	// parked turn ran with the AUTONOMOUS marker, so the resume must re-apply
 	// it. It lives HERE, not only on the record, because the SQLite park store
@@ -59,11 +66,14 @@ type throttleParkedTurn struct {
 	ProviderID     string
 	ModelID        string
 	SourceClient   string
-	ParkedAt       time.Time
-	Autonomous     bool
-	SessionID      string
-	AgentID        string
-	Attempt        int
+	// TurnID carries the chat.submit turn identity (C-K2 compile carrier;
+	// leaf 02 wires it into the park site + delivery parity).
+	TurnID     string
+	ParkedAt   time.Time
+	Autonomous bool
+	SessionID  string
+	AgentID    string
+	Attempt    int
 }
 
 // throttleTurnToRecord encodes a throttleParkedTurn as a Class=throttle
@@ -76,6 +86,7 @@ func throttleTurnToRecord(turn throttleParkedTurn) (ParkedTurnRecord, error) {
 		ProviderID:     turn.ProviderID,
 		ModelID:        turn.ModelID,
 		SourceClient:   turn.SourceClient,
+		TurnID:         turn.TurnID,
 		ParkedAt:       turn.ParkedAt,
 		Autonomous:     turn.Autonomous,
 	})
@@ -108,6 +119,7 @@ func recordToThrottleTurn(rec ParkedTurnRecord) (throttleParkedTurn, error) {
 		ProviderID:     p.ProviderID,
 		ModelID:        p.ModelID,
 		SourceClient:   p.SourceClient,
+		TurnID:         p.TurnID,
 		ParkedAt:       p.ParkedAt,
 		Autonomous:     p.Autonomous,
 		SessionID:      rec.SessionID,
@@ -176,10 +188,94 @@ func ThrottleParkAttemptFromContext(ctx context.Context) int {
 // request RunOnceWithParts was entered with, captured so a mid-turn throttle
 // can park a resume payload that re-enters the same path (Task 3). Guarded by
 // throttleMu; a re-entrant resume overwrites it for the resumed turn.
+//
+// F8 (bughunt 2026-11-09, statemachine-remediation tree 04 leaf 01): one
+// slot per LOOP is NOT per-turn safe — two overlapping RunOnceWithParts
+// calls on the same loop race on it (turn B's entry overwrites A's stash;
+// A throttles and parks B's dispatch, and A's deferred clear can blank B's
+// payload). The stash is now ALSO carried on the turn's context via
+// WithThrottleDispatch (keyed by the turn's ctx, immune to overlap); the
+// loop slot remains as a fallback for park sites that run on a context
+// this loop did not enter (defensive; no production path hits it today).
 type throttleTurnContext struct {
 	message        string
 	parts          []llm.ContentPart
 	conversationID string
+	// parked is the F6 explicit per-turn marker (tree 04 leaf 02): set by
+	// parkThrottledTurn on a SUCCESSFUL park, read by RunOnceWithParts'
+	// parked-turn detection. The OPTIONAL state machine (nil / rejected
+	// transition => StateQuotaWait never observable) must not be the only
+	// signal that a turn parked: without the marker a parked turn fell
+	// through to the post-turn success pipeline and appended a blank
+	// assistant message (H2's defect class).
+	//
+	// Threading: written and read on the TURN's goroutine — park happens
+	// inside reasoningCycle (synchronous under RunOnceWithParts), the read
+	// happens in RunOnceWithParts after the cycle returns. No lock needed.
+	parked bool
+}
+
+// markThrottleParked sets the F6 parked marker on the turn ctx's dispatch
+// stash. No-op when the ctx did not pass through RunOnceWithParts.
+func markThrottleParked(ctx context.Context) {
+	if d := throttleDispatchFromContext(ctx); d != nil {
+		d.parked = true
+	}
+}
+
+// turnParkedInContext reports whether THIS turn parked (F6 marker). False
+// for contexts that never entered RunOnceWithParts.
+func turnParkedInContext(ctx context.Context) bool {
+	d := throttleDispatchFromContext(ctx)
+	return d != nil && d.parked
+}
+
+// chatTurnIDKey carries the chat.submit turn identity on the turn context
+// (C-K2, tree 04 leaf 02) so a mid-turn throttle park can stamp the TurnID
+// onto the resume payload — the throttle resume then emits the final
+// turn.terminal under the acked id exactly like the quota path (F15).
+type chatTurnIDKey struct{}
+
+// WithChatTurnID returns ctx carrying the turn's chat.submit identity.
+// Empty turnIDs are not stamped (legacy turns stay payload-silent).
+func WithChatTurnID(ctx context.Context, turnID string) context.Context {
+	if ctx == nil || turnID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, chatTurnIDKey{}, turnID)
+}
+
+// ChatTurnIDFromContext reads the turn identity stamped by the handler
+// seam; "" when absent.
+func ChatTurnIDFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	s, _ := ctx.Value(chatTurnIDKey{}).(string)
+	return s
+}
+
+// throttleDispatchKey carries the per-turn dispatch on the turn context.
+type throttleDispatchKey struct{}
+
+// WithThrottleDispatch returns ctx carrying the turn's original dispatch
+// (RunOnceWithParts entry). SetTurnParker park sites read it first when
+// building the resume payload (F8).
+func WithThrottleDispatch(ctx context.Context, d *throttleTurnContext) context.Context {
+	if ctx == nil || d == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, throttleDispatchKey{}, d)
+}
+
+// throttleDispatchFromContext reads the turn-context dispatch (F8); nil
+// when the ctx did not pass through RunOnceWithParts.
+func throttleDispatchFromContext(ctx context.Context) *throttleTurnContext {
+	if ctx == nil {
+		return nil
+	}
+	d, _ := ctx.Value(throttleDispatchKey{}).(*throttleTurnContext)
+	return d
 }
 
 func (l *AgentLoop) setThrottleTurnContext(message string, parts []llm.ContentPart, conversationID string) {
@@ -202,10 +298,22 @@ func (l *AgentLoop) clearThrottleTurnContext() {
 // ctx is the TURN's context: its AUTONOMOUS marker (daemon step jobs) is
 // recorded in the payload so the resumed turn re-enters autonomously. This is
 // the carrier that survives the SQLite park store.
+//
+// F8 (tree 04 leaf 01): the dispatch is read from the TURN CONTEXT first
+// (WithThrottleDispatch, stamped by RunOnceWithParts with the exact
+// message/parts/conversation the turn was entered with). Overlapping turns
+// on one loop no longer cross-park each other's dispatches — the old shared
+// l.throttleTurnCtx slot let turn B overwrite turn A's stash mid-flight, so
+// A's park carried B's payload and A's deferred clear could blank B's. The
+// loop slot remains only as a fallback for park sites entered without the
+// RunOnceWithParts context plumbing.
 func (l *AgentLoop) captureThrottlePayload(ctx context.Context, conversationID, providerID, modelID string, parkedAt time.Time) json.RawMessage {
-	l.throttleMu.Lock()
-	stash := l.throttleTurnCtx
-	l.throttleMu.Unlock()
+	stash := throttleDispatchFromContext(ctx)
+	if stash == nil {
+		l.throttleMu.Lock()
+		stash = l.throttleTurnCtx
+		l.throttleMu.Unlock()
+	}
 	if stash == nil || stash.message == "" {
 		return nil
 	}
@@ -215,8 +323,14 @@ func (l *AgentLoop) captureThrottlePayload(ctx context.Context, conversationID, 
 		ConversationID: stash.conversationID,
 		ProviderID:     providerID,
 		ModelID:        modelID,
-		ParkedAt:       parkedAt,
-		Autonomous:     tools.AutonomousFromContext(ctx),
+		// C-K2 (tree 04 leaf 02): the chat.submit turn identity rides the
+		// payload (stamped on the turn ctx at the handler seam, preserved
+		// across re-parks by resumeThrottledTurn) so the throttle resume can
+		// emit the final turn.terminal under the acked id like the quota
+		// path does. "" on legacy/unbound entries = payload-silent.
+		TurnID:     ChatTurnIDFromContext(ctx),
+		ParkedAt:   parkedAt,
+		Autonomous: tools.AutonomousFromContext(ctx),
 	})
 	if err != nil {
 		l.logger.Warn("throttle park payload encode failed — parking without payload",
@@ -299,11 +413,17 @@ func (l *AgentLoop) parkThrottledTurn(ctx context.Context, terr *llm.ThrottleBac
 	// backward-compat path), which is correct for an unbound loop.
 	conversationID := sessionID
 	if conversationID == "" {
-		l.throttleMu.Lock()
-		if l.throttleTurnCtx != nil {
-			conversationID = l.throttleTurnCtx.conversationID
+		// F8: prefer the turn's own context-carried dispatch; the shared
+		// loop slot (fallback) can hold ANOTHER overlapping turn's stash.
+		if stash := throttleDispatchFromContext(ctx); stash != nil {
+			conversationID = stash.conversationID
+		} else {
+			l.throttleMu.Lock()
+			if l.throttleTurnCtx != nil {
+				conversationID = l.throttleTurnCtx.conversationID
+			}
+			l.throttleMu.Unlock()
 		}
-		l.throttleMu.Unlock()
 	}
 	payload := l.captureThrottlePayload(ctx, conversationID, terr.ProviderID, terr.ModelID, now)
 
@@ -331,6 +451,16 @@ func (l *AgentLoop) parkThrottledTurn(ctx context.Context, terr *llm.ThrottleBac
 		)
 		return false, nil
 	}
+	// F6 (tree 04 leaf 02): stamp the explicit per-turn parked marker on
+	// the turn ctx's dispatch stash BEFORE anything else. RunOnceWithParts'
+	// parked-turn detection reads this marker and no longer REQUIRES the
+	// optional state machine: with stateMachine nil (or a rejected
+	// transition — safeTransition only logs), the old CurrentState()==
+	// StateQuotaWait read silently missed the park and the parked turn fell
+	// through to the post-turn success pipeline, appending a blank assistant
+	// message (H2's defect class). The state-machine read stays as a
+	// secondary signal for park paths without ctx plumbing.
+	markThrottleParked(ctx)
 	// Park observability (leaf 04): the parked record surfaces on the
 	// existing agent.quota_wait topic with its class + resume time (D9).
 	l.turnParker.emitParkEvent(rec, terr.ModelID, terr.ProviderID)
@@ -472,6 +602,13 @@ func (l *AgentLoop) resumeThrottledTurn(ctx context.Context, rec ParkedTurnRecor
 	// also suppresses the user-message history re-add inside
 	// RunOnceWithParts — the parked attempt already added it.
 	resumeCtx := WithThrottleParkAttempt(WithResumedTurn(ctx), rec.Attempt+1)
+	// C-K2 (tree 04 leaf 02): the park generation's TurnID rides the resume
+	// ctx so a re-park inside this resume re-encodes the SAME turn identity
+	// into the next payload (re-park preserves the acked id, mirroring the
+	// quota path's `TurnID: turn.TurnID // F15` carry).
+	if turn.TurnID != "" {
+		resumeCtx = WithChatTurnID(resumeCtx, turn.TurnID)
+	}
 	// F14 follow-up: re-apply the AUTONOMOUS marker a parked step job's turn
 	// ran under. `ctx` here is the PARKER's context (no turn markers), so
 	// without this the resumed turn re-enters interactive, file_write/
@@ -482,7 +619,7 @@ func (l *AgentLoop) resumeThrottledTurn(ctx context.Context, rec ParkedTurnRecor
 	if parkedAutonomous(rec, turn) {
 		resumeCtx = tools.ContextWithAutonomous(resumeCtx)
 	}
-	_, err = l.RunOnceWithParts(resumeCtx, turn.Message, turn.Parts, turn.ConversationID)
+	reply, err := l.RunOnceWithParts(resumeCtx, turn.Message, turn.Parts, turn.ConversationID)
 	if err != nil {
 		// A ThrottleBackoffError already re-parked inside the loop (grown
 		// attempt, no error surfaced); a ThrottleGiveUpError or any other
@@ -491,11 +628,118 @@ func (l *AgentLoop) resumeThrottledTurn(ctx context.Context, rec ParkedTurnRecor
 			"session_id", rec.SessionID,
 			"error", err,
 		)
+		// M-13 parity with the quota resume's failure branch: an abandoned
+		// resume (give-up / hard failure) resolves the awaiting client's
+		// turn honestly instead of leaving it hanging. Legacy rows (no
+		// TurnID) and unrouted handlers stay silent.
+		if handler := l.throttleResumeDeliveryHandler(); handler != nil && turn.TurnID != "" {
+			handler.sendResponse("throttle-resume-"+rec.SessionID, ChatResponse{
+				ConversationID: rec.SessionID,
+				Error:          "Auto-resume failed: " + err.Error(),
+			})
+			failTraceID, failTurnSpanID := handler.turnRegistry.TraceForTurn(turn.TurnID)
+			handler.publishTurnTerminal(TurnTerminalEvent{
+				ConversationID: turn.ConversationID,
+				SessionID:      rec.SessionID,
+				TurnID:         turn.TurnID,
+				HandlerCase:    "throttle_resume",
+				Status:         "failed",
+				Reply:          "I encountered an error: Auto-resume failed: " + err.Error(),
+				Error:          err.Error(),
+				TraceID:        failTraceID,
+				TurnSpanID:     failTurnSpanID,
+			})
+		}
+		return
+	}
+	if strings.TrimSpace(reply) == "" {
+		// Parked again inside the resume (re-throttle re-park: the loop
+		// returns the parked shape ("", nil) — the next generation's
+		// payload already carries the TurnID via resumeCtx) or an empty
+		// completion. Nothing to deliver; a terminal here would falsely
+		// close a turn that is still parked.
+		l.logger.Info("resumed throttle turn parked again or produced no reply — deferring delivery",
+			"session_id", rec.SessionID,
+			"conversation_id", turn.ConversationID,
+		)
 		return
 	}
 	l.logger.Info("resumed throttle turn completed",
 		"session_id", rec.SessionID,
 		"conversation_id", turn.ConversationID,
+	)
+
+	// M-13 (C-K2 delivery parity, tree 04 leaf 02): a resumed throttle
+	// turn's answer must reach the client and history exactly like the
+	// quota resume (handler.resumeQuotaParkedTurn): persistExchange →
+	// sendResponse (chat.response + chat_message push) → turn.terminal
+	// under the parked TurnID. SAME helpers, SAME topics, SAME event shape
+	// — no new payload invented here.
+	handler := l.throttleResumeDeliveryHandler()
+	if handler == nil {
+		// Bare loop-side parker wiring (no chat handler routed): the turn
+		// completed in the loop but there is no delivery seam to push
+		// through. Loud warn — this is the silent-answer defect class.
+		l.logger.Warn("throttle resume completed with no delivery handler — client not notified",
+			"session_id", rec.SessionID,
+			"conversation_id", turn.ConversationID,
+			"turn_id", turn.TurnID,
+		)
+		return
+	}
+	if turn.TurnID == "" {
+		// Legacy row (parked before C-K2, no turn_id in the payload): the
+		// resume ran and the loop-side history append happened; client
+		// delivery + turn.terminal are SKIPPED (there is no acked turn to
+		// resolve, and a push without a turn identity would race the
+		// eventual legacy RPC reply). Warn once so operators can see rows
+		// draining out of the old schema.
+		l.logger.Warn("throttle resume completed on a legacy row (no TurnID) — client delivery skipped",
+			"session_id", rec.SessionID,
+			"conversation_id", turn.ConversationID,
+		)
+		return
+	}
+	// Routing key: the park record's SessionID (H11: interactive parks leave
+	// it empty — never stamp the conversation id into it). The handler's own
+	// persistID convention applies here: prefer the session id, fall back to
+	// the conversation id, so GUI submits (which carry only conversation_id)
+	// still persist + push the resumed answer (Scopes-2 audit precedent,
+	// handler.go:1198).
+	deliveryID := rec.SessionID
+	if deliveryID == "" {
+		deliveryID = turn.ConversationID
+	}
+	// Persist the exchange (quota parity: the session id keys the store row).
+	handler.persistExchange(deliveryID, turn.Message, turn.Parts, reply, turn.AgentID)
+
+	// Push the result back to the session via the bus (chat.response +
+	// chat_message; the push routes on SessionID like the quota resume).
+	handler.sendResponse("throttle-resume-"+deliveryID, ChatResponse{
+		ConversationID: deliveryID,
+		SessionID:      deliveryID, // for WS push routing
+		Reply:          reply,
+	})
+
+	// Final turn.terminal for the submitted turn (F15 shape, HandlerCase
+	// names the lane): the client's awaiter resolves only if the terminal
+	// event fires under the id the ack returned.
+	resumeTraceID, resumeTurnSpanID := handler.turnRegistry.TraceForTurn(turn.TurnID)
+	handler.publishTurnTerminal(TurnTerminalEvent{
+		ConversationID: turn.ConversationID,
+		SessionID:      rec.SessionID,
+		TurnID:         turn.TurnID,
+		HandlerCase:    "throttle_resume",
+		Status:         "completed",
+		Reply:          reply,
+		TraceID:        resumeTraceID,
+		TurnSpanID:     resumeTurnSpanID,
+	})
+	l.logger.Info("resumed throttle turn delivered",
+		"session_id", rec.SessionID,
+		"conversation_id", turn.ConversationID,
+		"turn_id", turn.TurnID,
+		"reply_length", len(reply),
 	)
 }
 
@@ -534,6 +778,15 @@ func (l *AgentLoop) SetThrottleParker(h *ChatHandler, parker *TurnParker) {
 		return
 	}
 	l.SetTurnParker(parker)
+	// C-K2 delivery parity: remember the handler so resumeThrottledTurn can
+	// deliver a successful resume (persistExchange + client push +
+	// turn.terminal) through the SAME helpers the quota resume uses. A nil
+	// handler (bare loop-side parker wiring) keeps the resume silent.
+	if h != nil {
+		l.mu.Lock()
+		l.throttleResumeHandler = h
+		l.mu.Unlock()
+	}
 	parker.SetResumeFunc(func(ctx context.Context, rec ParkedTurnRecord) {
 		if rec.Class == llm.FailureThrottle {
 			l.resumeThrottledTurn(ctx, rec)
@@ -544,6 +797,14 @@ func (l *AgentLoop) SetThrottleParker(h *ChatHandler, parker *TurnParker) {
 			return
 		}
 	})
+}
+
+// throttleResumeDeliveryHandler reads the C-K2 delivery handler (nil when
+// the parker was wired without a chat handler — resume stays loop-side only).
+func (l *AgentLoop) throttleResumeDeliveryHandler() *ChatHandler {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.throttleResumeHandler
 }
 
 // TurnParker exposes the wired parker (nil when parking is disabled).

@@ -110,13 +110,13 @@ reshape, bus payloads).
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-plan-goal-tests | PENDING | 0 | |
-| 01-synthesis-reclaimer | PENDING | 0 | |
-| 02-phase-failure-writers | PENDING | 0 | |
-| 03-plan-cas | PENDING | 0 | |
-| 04-manager-cas-migration | PENDING | 0 | blocked on 03 |
-| 05-goal-transition-fence | PENDING | 0 | |
-| 06-minor-hygiene | PENDING | 0 | |
+| 00T-plan-goal-tests | TESTS_VALIDATED | 1 | committed a59fbc4f (--no-verify RED-by-design); 14 RED tests, parent-verified contract-symbol-only |
+| 01-synthesis-reclaimer | COMPLETE | 1 | committed 7c626b69; reclaim+re-drive green both gates; T4: no external re-driver; plans.md invariant line |
+| 02-phase-failure-writers | COMPLETE | 1 | committed a94995c8 + producer seam (tactical publisher + handler sub + 3 pins, graphs regenerated); M-6 live not dormant |
+| 03-plan-cas | REVIEWED | 1 | committed d191cb34; gate hashes stable (8981080c/07573760); stub parity + empty-from-set guard parent-verified |
+| 04-manager-cas-migration | COMPLETE | 1 | committed 3b04d3ef; table+observed-state CAS parent-verified; delta flagged: PruneStalePlans stale-planning no-op -> fold into 06 |
+| 05-goal-transition-fence | REVIEWED | 1 | committed 091cc90b; parent-verified employee pkg green, gate hash stable; Retire dead-code kept (frozen gate calls it) |
+| 06-minor-hygiene | COMPLETE | 1 | committed 5950547d; cancel cascade via TaskCanceller seam; CHECKs w/ FK-safe rebuild; BRANCH 03 INTEGRATION GREEN (plan/employee/intake/task/daemon/agent) |
 
 ## Integration Test Plan
 

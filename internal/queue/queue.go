@@ -37,8 +37,11 @@ type Queue interface {
 	// jobs) are claimable. If agentID is empty, any pending job is claimable.
 	Claim(ctx context.Context, workerID string, caps []string, agentID string) (*Job, error)
 
-	// MarkProcessing marks a job as being processed.
-	MarkProcessing(ctx context.Context, jobID string) error
+	// MarkProcessing marks a job as being processed. claimToken must be the
+	// token the claim returned (Job.ClaimToken) — the store CAS-refuses the
+	// write for any writer that does not hold the live attempt's token
+	// (contract C-Q1, audit M-1).
+	MarkProcessing(ctx context.Context, jobID string, claimToken string) error
 
 	// Complete marks a job as completed with a result.
 	Complete(ctx context.Context, jobID string, result any) error
@@ -453,8 +456,11 @@ func (q *PersistentQueue) Claim(ctx context.Context, workerID string, caps []str
 	return claimedJob, nil
 }
 
-// MarkProcessing marks a job as being processed.
-func (q *PersistentQueue) MarkProcessing(ctx context.Context, jobID string) error {
+// MarkProcessing marks a job as being processed, gated on the claim token the
+// worker received from Claim (contract C-Q1, audit M-1). A writer without the
+// live attempt's token gets ErrJobStateLocked — the requeue-vs-MarkProcessing
+// race can no longer strand the row in 'processing' under a dead claim.
+func (q *PersistentQueue) MarkProcessing(ctx context.Context, jobID string, claimToken string) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -462,7 +468,7 @@ func (q *PersistentQueue) MarkProcessing(ctx context.Context, jobID string) erro
 		return fmt.Errorf("queue is closed")
 	}
 
-	return q.store.UpdateState(jobID, StateProcessing)
+	return q.store.MarkProcessing(jobID, claimToken)
 }
 
 // Complete marks a job as completed with a result.
@@ -1100,6 +1106,13 @@ func (h *Handler) handleRetry(ctx context.Context, msg *models.BusMessage) (any,
 	}
 
 	if err := h.queue.Retry(ctx, params.JobID); err != nil {
+		// Operator retry budget bound (audit 2026-11-09 F9): surface the
+		// sentinel as an explicit, errors.Is-inspectable refusal. The row was
+		// left unchanged by Store.Retry; RPC/WS callers (queue.retry proxy)
+		// get the sentinel text rather than an opaque internal error.
+		if errors.Is(err, ErrRetryBudgetExhausted) {
+			return nil, fmt.Errorf("%w: job %s", ErrRetryBudgetExhausted, params.JobID)
+		}
 		return nil, err
 	}
 

@@ -22,7 +22,7 @@ func (s *stampableQueue) Enqueue(_ context.Context, job *queue.Job) error {
 func (s *stampableQueue) Claim(_ context.Context, _ string, _ []string, _ string) (*queue.Job, error) {
 	return nil, queue.ErrNoJobAvailable
 }
-func (s *stampableQueue) MarkProcessing(_ context.Context, _ string) error { return nil }
+func (s *stampableQueue) MarkProcessing(_ context.Context, _ string, _ string) error { return nil }
 func (s *stampableQueue) Complete(_ context.Context, _ string, _ any) error {
 	return nil
 }

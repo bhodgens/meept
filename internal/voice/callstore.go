@@ -105,6 +105,19 @@ func NewCallStore(dbPath string, logger *slog.Logger) (*CallStore, error) {
 	// the expected steady state on migrated databases; anything else is
 	// fatal.
 	s.migrationAddColumn(`ALTER TABLE voice_calls ADD COLUMN outcome TEXT DEFAULT ''`, "outcome")
+	// Boot sweep (audit 2026-11-09 voice finding 7, C-V3): reconcile any
+	// row a previous process stranded at 'live' BEFORE this store can
+	// serve a new call. The store opens in WireVoiceEmployee, which runs
+	// before the webhook routes, the plain listener, and every leg are
+	// armed — no live call can exist yet on this instance (single-
+	// instance posture documented on SweepStaleLive). A sweep failure
+	// does not fail the boot (the store still serves); it lands loud in
+	// the log because stranded rows mislead every later reader.
+	if n, sweepErr := s.SweepStaleLive(context.Background()); sweepErr != nil {
+		logger.Error("voice callstore: boot sweep of stale live rows failed", "error", sweepErr)
+	} else if n > 0 {
+		logger.Info("voice callstore: boot sweep ended stale live rows", "count", n)
+	}
 	logger.Info("voice call store initialized", "path", dbPath)
 	return s, nil
 }
@@ -151,6 +164,42 @@ func (s *CallStore) Start(ctx context.Context, rec CallRecord) error {
 		return fmt.Errorf("voice callstore: start call %s: %w", rec.CallID, err)
 	}
 	return nil
+}
+
+// SweepStaleLive ends every voice_calls row still marked 'live' (audit
+// 2026-11-09 voice finding 7, C-V3). A row only reaches 'ended' through
+// the release fan-out; a process that died mid-call strands its row at
+// 'live' forever, and later readers (day brief, TodayTranscripts,
+// SessionIDFor) would treat a dead call as ongoing. NewCallStore calls
+// this ONCE at store open — the voice boot point: WireVoiceEmployee
+// builds the employee stack (and therefore opens this store) before
+// voice_wiring arms the HTTP routes, the plain listener, or any leg, so
+// no call can be in flight when the sweep runs.
+//
+// Returns the number of rows reconciled. Idempotent: the WHERE clause
+// only matches 'live' rows, so a re-run over already-ended rows is a
+// zero-row no-op that never re-stamps ended_at.
+//
+// SINGLE-INSTANCE POSTURE (documented per the audit and the branch
+// review checklist): the sweep assumes one daemon owns this calls.db.
+// A second instance sharing the same file would have its genuinely-live
+// calls ended here. Meept's voice sidecar is a per-install single
+// instance by construction (the child proc + registry + supervisor all
+// assume sole ownership of the dial state), so the posture holds; a
+// future multi-instance mode must gate the sweep on a lease instead.
+func (s *CallStore) SweepStaleLive(ctx context.Context) (int, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE voice_calls SET state = 'ended', outcome = 'failed', ended_at = ? WHERE state = 'live'`,
+		s.nowFn().UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("voice callstore: sweep stale live: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("voice callstore: sweep stale live count: %w", err)
+	}
+	return int(n), nil
 }
 
 // End marks the call terminal: state 'ended', ended_at now, outcome set.

@@ -28,6 +28,11 @@ const (
 	OutcomeHangup   Outcome = "hangup"
 )
 
+// outboundDoneCap bounds post-teardown WaitCall tombstones for outbound
+// ccids (audit 2026-11-09 finding 2 residual); oldest-first eviction past
+// the cap keeps the map bounded on long-running daemons.
+const outboundDoneCap = 64
+
 // ManagerConfig holds manager-wide call settings.
 type ManagerConfig struct {
 	// StreamURL is the full media-stream URL Telnyx should be told to dial on
@@ -60,7 +65,20 @@ type Manager struct {
 	stream   map[string]context.CancelFunc // media bridge cancels, registered by OnMediaStart
 	outbound map[string]struct{}           // registered by TrackOutbound; NEVER answered by us
 	done     map[string]chan struct{}      // registered on track/initiate; closed once on hangup
+	// doneTomb holds CLOSED done channels retained post-teardown for
+	// outbound-tracked ccids (audit 2026-11-09 finding 2 residual), so a
+	// later WaitCall by ccid observes closure instead of a fresh
+	// never-closing channel. Bounded by outboundDoneCap. Inbound ids keep
+	// the M3 no-retention posture.
+	doneTomb map[string]chan struct{}
 	release  func(ccid string, outcome Outcome)
+	// spliceErrored marks ccids whose LAST OnMediaStart splice failed with
+	// a non-cancellation error (audit 2026-11-09 voice finding 4): the
+	// next media start for a marked id re-splices instead of hitting the
+	// idempotent no-op. Guarded by mu; dropped on a clean splice result
+	// and by releaseOnce with the rest of the per-call state (bounded:
+	// at most one bool per live ccid).
+	spliceErrored map[string]bool
 
 	// answerMu guards answerHook. The hook is the answered-notification
 	// seam (audit 2026-11-06 H1): the daemon wiring registers the dialer's
@@ -81,13 +99,14 @@ func NewManager(cfg ManagerConfig, tel telnyx.CallController, spawn SessionSpawn
 		cfg.Codec.SamplingRate = telnyx.DefaultCodec.SamplingRate
 	}
 	return &Manager{
-		cfg:      cfg,
-		tel:      tel,
-		spawn:    spawn,
-		calls:    make(map[string]context.CancelFunc),
-		stream:   make(map[string]context.CancelFunc),
-		outbound: make(map[string]struct{}),
-		done:     make(map[string]chan struct{}),
+		cfg:           cfg,
+		tel:           tel,
+		spawn:         spawn,
+		calls:         make(map[string]context.CancelFunc),
+		stream:        make(map[string]context.CancelFunc),
+		outbound:      make(map[string]struct{}),
+		done:          make(map[string]chan struct{}),
+		spliceErrored: make(map[string]bool),
 	}
 }
 
@@ -158,6 +177,7 @@ func (m *Manager) releaseOnce(ccid string) (callCancel, streamCancel context.Can
 	delete(m.calls, ccid)
 	streamCancel, hadStream := m.stream[ccid]
 	delete(m.stream, ccid)
+	delete(m.spliceErrored, ccid) // re-splice marker dies with the call (finding 4)
 	_, wasOutbound := m.outbound[ccid]
 	delete(m.outbound, ccid)
 
@@ -165,6 +185,28 @@ func (m *Manager) releaseOnce(ccid string) (callCancel, streamCancel context.Can
 	delete(m.done, ccid)
 	if hadDone {
 		close(ch)
+	}
+	// Outbound tombstone (audit 2026-11-09 finding 2 residual): an
+	// outbound-tracked ccid re-resolved via WaitCall AFTER teardown must
+	// observe closure — the dialer's acquire-failure path leaked exactly
+	// because no post-terminal await was possible. The closed channel is
+	// parked in doneTomb, NEVER back in done (releaseOnce closes what it
+	// finds in done; re-storing a closed channel would double-close on a
+	// late duplicate terminal). Inbound ids keep the M3 posture (no
+	// retention) — the M3 pin uses an inbound ccid.
+	if wasOutbound && hadDone {
+		if m.doneTomb == nil {
+			m.doneTomb = make(map[string]chan struct{}, outboundDoneCap)
+		}
+		if len(m.doneTomb) >= outboundDoneCap {
+			// Arbitrary-entry eviction; the map is a bounded convenience,
+			// not a queue (ccids resolve by exact key).
+			for k := range m.doneTomb {
+				delete(m.doneTomb, k)
+				break
+			}
+		}
+		m.doneTomb[ccid] = ch
 	}
 
 	// Known call = anything we registered. An id we never saw is a no-op.
@@ -281,21 +323,57 @@ func (m *Manager) HandleCallEvent(ctx context.Context, ev telnyx.CallEvent) erro
 }
 
 // OnMediaStart registers the media session for ccid and runs dial (the
-// per-call bridge runner) under a live per-call context. The first start for
-// an id wins; a second start for the same id is a no-op so a Telnyx re-send
-// or a duplicated frame cannot spawn two bridges on one socket. The
-// registered cancel is what a later hangup invokes to tear the bridge down.
+// per-call bridge runner) under a live per-call context. The first start
+// for an id wins; a later start for the same id is an idempotent no-op so
+// a Telnyx re-send or a duplicated frame cannot spawn two bridges on one
+// socket — UNLESS the prior splice FAILED with a non-cancellation error
+// (audit 2026-11-09 voice finding 4): a dead first bridge must not block
+// the reconnect splice forever, so an errored (non-canceled) splice result
+// is tracked per ccid and the next media start re-runs dial. A clean
+// success keeps the strict no-op (error-aware, never count-aware — the
+// review checklist pins that a legitimate duplicate after a CLEAN end
+// must NOT re-splice). The registered cancel is what a later hangup
+// invokes to tear the bridge down; the splice-error marker is dropped by
+// releaseOnce (bounded: exactly one bool per live ccid, same lifetime as
+// the stream entry).
 func (m *Manager) OnMediaStart(ccid string, dial func(context.Context) error) error {
 	m.mu.Lock()
-	if _, ok := m.stream[ccid]; ok {
+	_, registered := m.stream[ccid]
+	priorErrored := m.spliceErrored[ccid]
+	if registered && !priorErrored {
 		m.mu.Unlock()
-		return nil // already registered: idempotent
+		return nil // clean prior splice registered: idempotent
 	}
 	callCtx, cancel := context.WithCancel(context.Background())
+	if m.stream == nil {
+		m.stream = make(map[string]context.CancelFunc)
+	}
+	staleCancel := m.stream[ccid] // the dead bridge's cancel, only set on a re-splice
 	m.stream[ccid] = cancel
 	m.mu.Unlock()
+	if staleCancel != nil {
+		// Release the abandoned context (its dial already returned an
+		// error, so nothing observes it — this only drops the leak).
+		staleCancel()
+	}
 
-	return dial(callCtx)
+	err := dial(callCtx)
+
+	m.mu.Lock()
+	if err != nil && !errors.Is(err, context.Canceled) {
+		// Non-cancellation splice failure: arm the ccid for re-splice.
+		// A cancellation is teardown (hangup), not a dead bridge — the
+		// release path already removed (or is removing) the entry, so
+		// the clean-idempotent posture stays.
+		if m.spliceErrored == nil {
+			m.spliceErrored = make(map[string]bool)
+		}
+		m.spliceErrored[ccid] = true
+	} else {
+		delete(m.spliceErrored, ccid)
+	}
+	m.mu.Unlock()
+	return err
 }
 
 // IsOutbound reports whether ccid is a leg WE dialed (registered by
@@ -375,16 +453,21 @@ func (m *Manager) FailOutcome(ccid string, outcome Outcome, reason string) {
 // IMPORTANT (audit 2026-11-06 M3): per-call channels are deleted from the
 // manager state on release, so a call whose terminal event was processed
 // BEFORE this call (or whose ccid was never tracked) yields a FRESH channel
-// that never closes - retention is NOT guaranteed across teardown. A dialer
+// that never closes - retention is NOT guaranteed across teardown - EXCEPT
+// outbound-tracked ccids, whose closed channel is retained as a bounded
+// tombstone (audit 2026-11-09 finding 2 residual: the dialer's
+// acquire-failure path needs a post-terminal await). A dialer
 // that must observe completion of a call it already holds a channel for is
 // fine (it kept the original channel; that channel is closed once and stays
-// closed), but a caller re-resolving by ccid after teardown cannot rely on
-// seeing closure. Ids that were never tracked return a channel that never
-// closes.
+// closed). Inbound ids re-resolved after teardown and ids that were never
+// tracked return a channel that never closes.
 func (m *Manager) WaitCall(ccid string) <-chan struct{} {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if ch, ok := m.done[ccid]; ok {
+		return ch
+	}
+	if ch, ok := m.doneTomb[ccid]; ok {
 		return ch
 	}
 	return make(chan struct{})

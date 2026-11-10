@@ -27,10 +27,10 @@ func (m *mockQueue) Enqueue(_ context.Context, _ *queue.Job) error { return nil 
 func (m *mockQueue) Claim(_ context.Context, _ string, _ []string, _ string) (*queue.Job, error) {
 	return nil, nil //nolint:nilnil // no-op test mock: "no job" contract
 }
-func (m *mockQueue) MarkProcessing(_ context.Context, _ string) error  { return nil }
-func (m *mockQueue) Complete(_ context.Context, _ string, _ any) error { return nil }
-func (m *mockQueue) Fail(_ context.Context, _ string, _ error) error   { return nil }
-func (m *mockQueue) Retry(_ context.Context, _ string) error           { return nil }
+func (m *mockQueue) MarkProcessing(_ context.Context, _ string, _ string) error { return nil }
+func (m *mockQueue) Complete(_ context.Context, _ string, _ any) error          { return nil }
+func (m *mockQueue) Fail(_ context.Context, _ string, _ error) error            { return nil }
+func (m *mockQueue) Retry(_ context.Context, _ string) error                    { return nil }
 func (m *mockQueue) Get(_ context.Context, _ string) (*queue.Job, error) {
 	return nil, nil //nolint:nilnil // no-op test mock: "not found" contract
 }
