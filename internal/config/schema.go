@@ -1884,6 +1884,13 @@ type MemoryConfig struct {
 	// candidates directly — no recall, no conflict LLM call. See
 	// ConflictConfig.
 	Conflict ConflictConfig `json:"conflict" toml:"conflict"`
+	// VectorHybrid gates the ShardManager-powered hybrid searcher
+	// (vector.HybridSearcher over the live ShardManager + the manager's FTS
+	// keyword lane) and its memory.search.hybrid RPC surface. Opt-in, default
+	// false (docs/agents/opt-in-defaults.md): when disabled the legacy
+	// Manager.SearchHybrid path is byte-identical and no hybrid searcher is
+	// constructed. See VectorHybridConfig.
+	VectorHybrid VectorHybridConfig `json:"vector_hybrid" toml:"vector_hybrid"`
 	// L0Enabled turns on the raw-conversation L0 tier (tree 01 layered
 	// async distillation): conversation turns are appended to
 	// <memory.data_dir>/l0/YYYY-MM-DD.jsonl and distilled asynchronously
@@ -2145,7 +2152,24 @@ type PersonalityConfig struct {
 	UpdateIntervalConversations int  `json:"update_interval_conversations" toml:"update_interval_conversations"`
 }
 
-// EmbeddingConfig holds vector embedding settings for semantic memory search.
+// VectorHybridConfig gates the ShardManager-powered hybrid search surface
+// (memory.vector_hybrid, plan docs/plans/2026-06-07-sharded-vector-memory.md
+// "Wire ShardManager for hybrid search"). Enabled=false (the default) keeps
+// the legacy Manager.SearchHybrid path byte-identical and constructs nothing.
+type VectorHybridConfig struct {
+	// Enabled constructs the hybrid searcher over the live ShardManager at
+	// daemon startup and registers the memory.search.hybrid RPC handler.
+	// Requires memory.embeddings.enabled (no embedder = no vector lane).
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// Alpha is the vector-vs-keyword weighting (0 = pure keyword, 1 = pure
+	// vector). Values outside [0,1] resolve to the searcher's 0.5 default.
+	Alpha float64 `json:"alpha" toml:"alpha"`
+	// Limit is the default result cap for the RPC surface when the request
+	// omits one.
+	Limit int `json:"limit" toml:"limit"`
+}
+
+// EmbeddingConfig holds vector embedding provider settings.
 type EmbeddingConfig struct {
 	Enabled       bool     `json:"enabled"         toml:"enabled"`
 	Provider      string   `json:"provider"        toml:"provider"` // "openai" or "ollama"
@@ -2276,6 +2300,14 @@ type AgentConfig struct {
 	Queues AgentQueuesConfig `json:"queues" toml:"queues"`
 	// Compaction holds context compaction settings
 	Compaction AgentCompactionConfig `json:"compaction" toml:"compaction"`
+	// AtomicCompaction gates the memory.Compactor (HALO Phase 6 atomic
+	// tool-turn compaction, internal/memory/consolidation_compact.go) in the
+	// L0 distill path: L1 extraction prompts see merged tool+observation
+	// records and a summary turn instead of the raw window. Opt-in, default
+	// false (docs/agents/opt-in-defaults.md) — when disabled the distill
+	// prompt is byte-identical to the pre-wiring behavior and no Compactor is
+	// constructed. See AtomicCompactionConfig.
+	AtomicCompaction AtomicCompactionConfig `json:"atomic_compaction" toml:"atomic_compaction"`
 	// Reflection holds auto-fix reflection loop settings
 	Reflection AgentReflectionConfig `json:"reflection" toml:"reflection"`
 	// Lint holds linting and test runner settings
@@ -2610,6 +2642,21 @@ type AgentCompactionConfig struct {
 	SummaryFormat     string `json:"summary_format"      toml:"summary_format"`
 	TrackFileOps      bool   `json:"track_file_ops"       toml:"track_file_ops"`
 	TimeoutSeconds    int    `json:"timeout_seconds"      toml:"timeout_seconds"`
+}
+
+// AtomicCompactionConfig configures the memory.Compactor (HALO Phase 6
+// atomic tool-turn compaction) when agent.atomic_compaction is enabled. Zero
+// fields resolve to the Compactor's own documented defaults.
+type AtomicCompactionConfig struct {
+	// Enabled wires the Compactor into the L1 distill prompt assembly.
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// MaxTurnsBeforeCompact triggers compaction above this turn count
+	// (Compactor default 50).
+	MaxTurnsBeforeCompact int `json:"max_turns_before_compact" toml:"max_turns_before_compact"`
+	// MaxToolCallsPerTurn caps preserved tool calls per turn (default 10).
+	MaxToolCallsPerTurn int `json:"max_tool_calls_per_turn" toml:"max_tool_calls_per_turn"`
+	// KeepLastNTurns is the never-compacted recent tail (default 10).
+	KeepLastNTurns int `json:"keep_last_n_turns" toml:"keep_last_n_turns"`
 }
 
 // AgentReflectionConfig holds reflection settings for auto-lint/test fixing.
@@ -3530,6 +3577,24 @@ type SelfImproveConfig struct {
 	Sandbox               SandboxConfig   `json:"sandbox"                  toml:"sandbox"`
 	Safety                SafetyConfig    `json:"safety"                   toml:"safety"`
 	Detection             DetectionConfig `json:"detection"                toml:"detection"`
+	// TraceAnalysis gates the HALO RLM trace-analysis activation path
+	// (wave-2 wire): a periodic scheduler job loads the memory trace-store
+	// reader over TraceStorePath, runs the agent.RLMAnalyzer over it, and
+	// surfaces selfimprove.IssueDetector.ScanTraces findings. Opt-in,
+	// default false — enabling it is a product decision
+	// (docs/agents/opt-in-defaults.md posture).
+	TraceAnalysis TraceAnalysisConfig `json:"trace_analysis" toml:"trace_analysis"`
+}
+
+// TraceAnalysisConfig configures the [selfimprove].trace_analysis section.
+type TraceAnalysisConfig struct {
+	// Enabled turns on the periodic trace-analysis scan. Default false.
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// TraceStorePath is the trace JSONL source for memory.LoadTraceStore.
+	// Empty resolves at wiring time to <daemon.data_dir>/traces.jsonl.
+	TraceStorePath string `json:"trace_store_path" toml:"trace_store_path"`
+	// Interval is the scan cadence (cron "@every" duration). Default 6h.
+	Interval time.Duration `json:"interval" toml:"interval"`
 }
 
 // LearningConfig holds LoRA learning pipeline settings.
@@ -4239,6 +4304,15 @@ func DefaultConfig() *Config {
 				TopK:     5,
 				MaxBatch: 20,
 			},
+			// ShardManager hybrid search: opt-in, default false (plan
+			// docs/plans/2026-06-07-sharded-vector-memory.md "Wire
+			// ShardManager for hybrid search" — flipping a default is a
+			// product decision per docs/agents/opt-in-defaults.md).
+			VectorHybrid: VectorHybridConfig{
+				Enabled: false,
+				Alpha:   0.5,
+				Limit:   10,
+			},
 			// L0 raw-conversation tier: DEFAULT-ON per D3 (plan
 			// docs/plans/20261030-memory-second-brain: full default-on, L0
 			// capture + L1 extraction + L2 scenes on every daemon; cost is
@@ -4463,6 +4537,16 @@ func DefaultConfig() *Config {
 					"stateful":  {Parallelism: 1},
 					"exclusive": {Parallelism: 1},
 				},
+			},
+			AtomicCompaction: AtomicCompactionConfig{
+				// HALO Phase 6 atomic tool-turn compaction (plan
+				// docs/plans/2026-07-17-halo-implementation-status.md
+				// priority #1): opt-in, default false
+				// (docs/agents/opt-in-defaults.md).
+				Enabled:               false,
+				MaxTurnsBeforeCompact: 50,
+				MaxToolCallsPerTurn:   10,
+				KeepLastNTurns:        10,
 			},
 		},
 		Security: SecurityConfig{
