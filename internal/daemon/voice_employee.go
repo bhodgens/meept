@@ -61,6 +61,13 @@ type VoiceEmployeeWiring struct {
 	ledgerStore *ledger.Store
 	llm         func(prompt string) (string, error)
 
+	// displayLookup is the contact-display resolver seam (leaf 02 §5):
+	// notifyCallRelay resolves the stored caller number through it so the
+	// relay HEADER carries the name/last-4 display form, never the raw
+	// E.164. nil (contact store unavailable) renders the unknown-caller
+	// form — nil-safe via resolveDisplayFor.
+	displayLookup CallerDisplayLookup
+
 	// dayBriefFn (leaf 03-voice/03): the wiring-built day-brief closure
 	// (open-commitments seam included). Only set when the ledger store
 	// is present; holdPhoneCall builds through it and passes an empty
@@ -95,6 +102,11 @@ type VoiceEmployeeDeps struct {
 	// by buildLedger). Nil -> the per-call brief at release is off
 	// (feature off by absence; no config knob in v1).
 	LedgerStore *ledger.Store
+
+	// DisplayLookup (contact-display leaf 02 §5): the resolver seam the
+	// call-relay header keys the stored caller number through. Nil ->
+	// the relay renders the unknown-caller + last-4 form (never raw).
+	DisplayLookup CallerDisplayLookup
 
 	// BriefLLM is the prompt-in/text-out LLM seam the per-call brief
 	// uses — production adapters are built over the daemon's existing
@@ -386,14 +398,15 @@ func WireVoiceEmployee(deps VoiceEmployeeDeps) (*VoiceEmployeeWiring, error) {
 	}
 
 	w := &VoiceEmployeeWiring{
-		Binding:     binding,
-		store:       store,
-		bus:         deps.Bus,
-		logger:      logger,
-		ledgerStore: deps.LedgerStore,
-		llm:         deps.BriefLLM,
-		holds:       make(map[string]*sync.Mutex),
-		heldCalls:   make(map[string]holdEntry),
+		Binding:       binding,
+		store:         store,
+		bus:           deps.Bus,
+		logger:        logger,
+		ledgerStore:   deps.LedgerStore,
+		displayLookup: deps.DisplayLookup,
+		llm:           deps.BriefLLM,
+		holds:         make(map[string]*sync.Mutex),
+		heldCalls:     make(map[string]holdEntry),
 	}
 	return w, nil
 }
@@ -525,7 +538,7 @@ func (w *VoiceEmployeeWiring) notifyCallRelay(ccid string, outcome voice.Outcome
 	if !ok {
 		return
 	}
-	text := renderCallRelay(rec, lines, string(outcome))
+	text := renderCallRelayWithLookup(rec, lines, string(outcome), w.displayLookup, w.logger)
 	if text == "" {
 		return
 	}
@@ -538,20 +551,40 @@ func (w *VoiceEmployeeWiring) notifyCallRelay(ccid string, outcome voice.Outcome
 }
 
 // renderCallRelay builds the notification text: a one-line header
-// (outcome, employee, leg, direction, target) followed by the transcript
-// as "caller: ..." / "reply: ..." lines. Returns "" (notify nothing) when
-// the transcript carries no rendered content. The leg derives from the
-// stored target ("local:<label>" is the local leg; everything else is the
-// phone leg) because the registry instance is already released when the
-// relay runs.
+// (outcome, employee, leg, direction, caller display) followed by the
+// transcript as "caller: ..." / "reply: ..." lines. Returns "" (notify
+// nothing) when the transcript carries no rendered content. The leg
+// derives from the stored target ("local:<label>" is the local leg;
+// everything else is the phone leg) because the registry instance is
+// already released when the relay runs.
+//
+// DISCLOSURE RULE (contact-display master O1/O4, leaf 02 §5): the header
+// is an EGRESS surface. It NEVER embeds the raw stored number — the phone
+// leg shows the boundary-resolved display form (name or "Unknown caller"
+// plus the masked last-4 tail; the local leg keeps its digit-free
+// "local:<label>" target verbatim). The transcript BODY is untouched:
+// spoken digits inside conversation lines stay verbatim.
 func renderCallRelay(rec voice.CallRecord, lines []voice.TranscriptLine, outcome string) string {
+	return renderCallRelayWithLookup(rec, lines, outcome, nil, nil)
+}
+
+// renderCallRelayWithLookup is renderCallRelay with the contact-display
+// resolver seam: a non-nil lookup resolves rec.Number to the Display form
+// for the header; nil (or an unresolvable number) renders the
+// unknown-caller + last-4 form, never the raw number.
+func renderCallRelayWithLookup(rec voice.CallRecord, lines []voice.TranscriptLine, outcome string, lookup CallerDisplayLookup, logger *slog.Logger) string {
 	leg := "phone"
+	target := rec.Number
 	if strings.HasPrefix(rec.Number, "local:") {
 		leg = "local"
+	} else {
+		// Egress header: resolve through the boundary resolver (nil-safe
+		// unknown path). The local-leg label above has no number in it.
+		target = resolveDisplayFor(context.Background(), lookup, logger, rec.Number).Display
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "call ended (%s): employee %s | %s leg | %s | %s",
-		outcome, rec.EmployeeID, leg, rec.Direction, rec.Number)
+		outcome, rec.EmployeeID, leg, rec.Direction, target)
 	used := 0
 	for _, l := range lines {
 		t := strings.TrimSpace(l.Text)

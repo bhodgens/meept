@@ -29,6 +29,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -80,6 +81,18 @@ const (
 // The lookup is keyed by the CALLER-PASSED e164 verbatim (no
 // normalization here — the store-side reads normalize on their own).
 func (w *VoiceWiring) resolveDisplay(ctx context.Context, e164 string) DisplayInfo {
+	if w == nil {
+		return resolveDisplayFor(ctx, nil, nil, e164)
+	}
+	return resolveDisplayFor(ctx, w.displayLookup, w.logger, e164)
+}
+
+// resolveDisplayFor is the shared boundary resolver behind
+// (*VoiceWiring).resolveDisplay, exposed so the VoiceEmployeeWiring relay
+// surface (leaf 02) resolves through the SAME logic without owning a
+// VoiceWiring back-reference. Nil-safe: a nil lookup/logger/ctx degrades
+// to the unknown path.
+func resolveDisplayFor(ctx context.Context, lookup CallerDisplayLookup, logger *slog.Logger, e164 string) DisplayInfo {
 	// The identifying tail comes from the number itself, so the unknown
 	// path can render it even when the store is down (master: "store
 	// error -> render Unknown caller (+last4 from the number itself)").
@@ -89,16 +102,19 @@ func (w *VoiceWiring) resolveDisplay(ctx context.Context, e164 string) DisplayIn
 		rec   *contact.Record
 		found bool
 	)
-	if w != nil && w.displayLookup != nil {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if lookup != nil {
 		lctx, cancel := context.WithTimeout(ctx, displayResolveTimeout)
 		defer cancel()
 		var err error
-		rec, found, err = w.displayLookup.LookupByPhone(lctx, e164)
+		rec, found, err = lookup.LookupByPhone(lctx, e164)
 		if err != nil {
 			// O5 fail-soft: the store error degrades to the unknown
 			// render; WARN keeps the degradation observable.
-			if w.logger != nil {
-				w.logger.Warn("caller display: contact lookup failed, rendering unknown caller",
+			if logger != nil {
+				logger.Warn("caller display: contact lookup failed, rendering unknown caller",
 					"error", err)
 			}
 			rec, found = nil, false
@@ -173,16 +189,25 @@ func digitsFreeLabel(s string) string {
 // seam is wireable in production BEFORE the caller-authz tree lands.
 // TODO(caller-authz merge): (*contact.SQLiteStore) will satisfy
 // CallerDisplayLookup structurally via its own LookupByPhone; this shim
-// then goes away (see the O5 note at the top of this file). It is not
-// wired at construction yet by design: leaf 01's contract is
-// VoiceWiring.displayLookup default-nil; the wiring-site assignment is
-// leaf 02's surface swap.
+// then goes away (see the O5 note at the top of this file). Wired since
+// leaf 02 through newDisplayLookupSeam at the VoiceWiring construction
+// site (deps.ContactDisplayStore).
 
 type sqliteDisplayLookup struct {
 	store *contact.SQLiteStore
 }
 
 var _ CallerDisplayLookup = (*sqliteDisplayLookup)(nil)
+
+// newDisplayLookupSeam adapts an (optional) contacts store onto the
+// resolver seam without the typed-nil trap: a nil *SQLiteStore returns an
+// INTERFACE-nil seam, so every surface takes the unknown-caller path.
+func newDisplayLookupSeam(store *contact.SQLiteStore) CallerDisplayLookup {
+	if store == nil {
+		return nil
+	}
+	return &sqliteDisplayLookup{store: store}
+}
 
 // LookupByPhone adapts GetByPhone to the pinned signature: the store's
 // ErrUnknownContact sentinel becomes (nil, false, nil) — not-found is a

@@ -10,11 +10,11 @@ package rpc
 // (registerVoiceLocalRPC); a nil/unwired leg registers the zero seams
 // and every method refuses with the named disabled-leg error.
 //
-// CL8 shapes (verbatim JSON):
+// CL8 shapes (updated by the contact-display tree, leaf 02 §4):
 //
 //	voice.local.open   req {employee_id, label} -> {call_id, in_path, out_path, session_id}
 //	voice.local.end    req {call_id}            -> {ok}
-//	voice.local.status req {}                   -> {calls:[{call_id, employee_id, target, since_rfc3339, leg}]}
+//	voice.local.status req {}                   -> {calls:[{call_id, employee_id, target_name, target_display, since_rfc3339, leg}]}
 //
 // Named refusals: ErrVoiceLocalDisabled (leg unwired/disabled),
 // ErrVoiceLocalUnknownEmployee (no such employee - checked BEFORE the
@@ -66,12 +66,27 @@ type VoiceLocalEndResult struct {
 // VoiceCallStatus is one live call row (CL8). Leg is "phone" or
 // "local"; status lists BOTH legs (the registry's live snapshot), so a
 // client can show the whole voice state from one method.
+//
+// DISCLOSURE RULE (contact-display master O1/O4, leaf 02): a phone-leg
+// row identifies the target through the boundary-resolved display pair —
+// TargetName (contact name or "Unknown caller") and TargetDisplay
+// (operator-safe, at most the last-4 form). The daemon fill NEVER
+// populates the raw Target any more; the field survives ONLY as an
+// omitempty legacy shim for old fake-driven tests and must not be read
+// for routing (leaf 03 migrates the client renderers to the display
+// pair). Local-leg rows carry the "local:<label>" string, which has no
+// number in it.
 type VoiceCallStatus struct {
-	CallID       string `json:"call_id"`
-	EmployeeID   string `json:"employee_id"`
-	Target       string `json:"target"`
-	SinceRFC3339 string `json:"since_rfc3339"`
-	Leg          string `json:"leg"`
+	CallID        string `json:"call_id"`
+	EmployeeID    string `json:"employee_id"`
+	TargetName    string `json:"target_name"`
+	TargetDisplay string `json:"target_display"`
+	SinceRFC3339  string `json:"since_rfc3339"`
+	Leg           string `json:"leg"`
+	// Deprecated: never filled by the daemon since the leaf 02 swap
+	// (O4 raw-number removal). Present so legacy test fixtures keep
+	// compiling; empty values omit the key from the wire entirely.
+	Target string `json:"target,omitempty"`
 }
 
 // VoiceLocalStatusResult is the voice.local.status result (CL8).

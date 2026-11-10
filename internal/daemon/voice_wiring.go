@@ -41,6 +41,7 @@ import (
 	"github.com/caimlas/meept/internal/bus"
 	commhttp "github.com/caimlas/meept/internal/comm/http"
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/contact"
 	"github.com/caimlas/meept/internal/ledger"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/secrets"
@@ -132,12 +133,18 @@ type VoiceWiring struct {
 
 	// displayLookup is the contact-display boundary resolver seam
 	// (contact-display tree leaf 01): resolveDisplay keys caller numbers
-	// through it. nil (the construction default) takes the unknown-caller
-	// path — the resolver is nil-safe and never panics. Wiring sites
-	// (publish + status fill) land with leaf 02's surface swaps; the
-	// sqliteDisplayLookup adapter in caller_display.go satisfies this
-	// field until the caller-authz tree merges (O5).
+	// through it. Wired at construction (leaf 02) from
+	// WireVoiceDeps.ContactDisplayStore via the sqliteDisplayLookup
+	// adapter; nil (no contact store, or store open failed) keeps the
+	// unknown-caller path — the resolver is nil-safe and never panics.
+	// The caller-authz tree (O5) will satisfy the seam structurally with
+	// the store's own LookupByPhone and retire the adapter.
 	displayLookup CallerDisplayLookup
+
+	// displayStore is the contacts.db handle behind displayLookup (leaf
+	// 02). Owned (opened at the components.go voice block, closed at
+	// Stop). nil when unwired.
+	displayStore *contact.SQLiteStore
 
 	// cfg + logger are construction-time values.
 	cfg    config.VoiceConfig
@@ -202,6 +209,13 @@ type WireVoiceDeps struct {
 	// OnCallStart brief through the SAME builder the local/phone legs use.
 	// Nil -> the signal leg keeps the empty-brief posture (nil store).
 	DayBriefBuilder func(ctx context.Context, employeeID, number string) (voice.DayBrief, error)
+	// ContactDisplayStore (contact-display leaf 02): the contacts.db
+	// handle the boundary resolver keys caller numbers through. Owned by
+	// the caller (components.go opens it beside the voice block, closes
+	// via the wiring's displayStore reference at Stop). Nil -> the
+	// displayLookup seam stays unwired and every surface renders the
+	// unknown-caller form.
+	ContactDisplayStore *contact.SQLiteStore
 }
 
 // WireVoice constructs the voice stack from cfg. It returns (nil, nil)
@@ -330,6 +344,13 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 	if err := os.MkdirAll(config.MeeptPath("voice"), 0o755); err != nil {
 		return nil, fmt.Errorf("voice wiring: voice dir: %w", err)
 	}
+	// Contact-display resolver seam (leaf 02): the components-injected
+	// contacts.db handle adapts through sqliteDisplayLookup (O5 shim)
+	// onto VoiceWiring.displayLookup AND the employee relay's seam, so
+	// every egress surface (ended event, status rows, relay header)
+	// resolves through the SAME boundary. Nil handle -> unwired (unknown-
+	// caller path everywhere, nil-safe).
+	displayLookup := newDisplayLookupSeam(deps.ContactDisplayStore)
 	employee, err := WireVoiceEmployee(VoiceEmployeeDeps{
 		Sessions:      deps.Sessions,
 		LoopManager:   deps.Loops,
@@ -339,6 +360,7 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		Employees:     deps.Employees,
 		CallStorePath: filepath.Join(config.MeeptPath("voice"), "calls.db"),
 		LedgerStore:   deps.LedgerStore,
+		DisplayLookup: displayLookup,
 		BriefLLM:      deps.BriefLLM,
 		Logger:        vlog.With("sub", "employee"),
 	})
@@ -448,6 +470,8 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		bus:            deps.Bus,
 		textSocketPath: textSocketPath,
 		broker:         deps.Broker,
+		displayLookup:  displayLookup,
+		displayStore:   deps.ContactDisplayStore,
 		cfg:            cfg,
 		logger:         vlog,
 		plainOpts: commhttp.PlainListenerOptions{
@@ -916,10 +940,15 @@ func (w *VoiceWiring) releaseCall(ccid string, outcome voice.Outcome) {
 }
 
 // publishCallEnded publishes voice.call.ended (typed topic, WS class
-// event, payload {call_id, employee_id, number, direction, outcome,
-// duration_ms}). The registry's live snapshot supplies the identity
-// fields; a released ccid is gone from it, so the payload degrades to
-// call_id + outcome (never an error). Best-effort: a nil bus drops it.
+// event, payload {call_id, employee_id, caller_name, caller_display,
+// direction, outcome, duration_ms}). The registry's live snapshot supplies
+// the identity fields; a released ccid is gone from it, so the payload
+// degrades to call_id + outcome (never an error). Best-effort: a nil bus
+// drops it. DISCLOSURE (contact-display O1/O4): the raw caller number is
+// NEVER published on this egress surface — the boundary resolver renders
+// the contact name (CallerName) plus the operator-safe last-4 display form
+// (CallerDisplay); an unknown or unresolved number still carries at most
+// its last four digits.
 func (w *VoiceWiring) publishCallEnded(ccid string, outcome voice.Outcome) {
 	if w.Employee == nil {
 		return
@@ -928,7 +957,9 @@ func (w *VoiceWiring) publishCallEnded(ccid string, outcome voice.Outcome) {
 	for _, inst := range w.Registry.Live() {
 		if inst.CallControlID == ccid {
 			ev.EmployeeID = inst.EmployeeID
-			ev.Number = inst.Target
+			info := w.resolveDisplay(context.Background(), inst.Target)
+			ev.CallerName = info.Name
+			ev.CallerDisplay = info.Display
 			break
 		}
 	}
@@ -936,17 +967,25 @@ func (w *VoiceWiring) publishCallEnded(ccid string, outcome voice.Outcome) {
 		bus.PublishT(w.bus, TopicVoiceCallEnded, "voice", ev)
 	}
 	w.logger.Info("voice call ended", "call_id", ccid, "outcome", ev.Outcome,
-		"employee_id", ev.EmployeeID, "number", ev.Number)
+		"employee_id", ev.EmployeeID, "caller_display", ev.CallerDisplay)
 }
 
 // CallEndedEvent is the typed payload of voice.call.ended.
+//
+// DISCLOSURE RULE (contact-display master O1/O4, FROZEN): this payload is
+// an EGRESS surface — it identifies the caller by resolved contact name
+// (CallerName) and the operator-safe last-4 form (CallerDisplay). The raw
+// E.164 number field was REMOVED: no bus/WS/relay consumer routed on it
+// (verified by survey at leaf 02). Nothing beyond a 4-digit tail may ever
+// be added to this shape.
 type CallEndedEvent struct {
-	CallID     string `json:"call_id"`
-	EmployeeID string `json:"employee_id,omitempty"`
-	Number     string `json:"number,omitempty"`
-	Direction  string `json:"direction,omitempty"`
-	Outcome    string `json:"outcome"`
-	DurationMs int64  `json:"duration_ms,omitempty"`
+	CallID        string `json:"call_id"`
+	EmployeeID    string `json:"employee_id,omitempty"`
+	CallerName    string `json:"caller_name"`
+	CallerDisplay string `json:"caller_display"`
+	Direction     string `json:"direction,omitempty"`
+	Outcome       string `json:"outcome"`
+	DurationMs    int64  `json:"duration_ms,omitempty"`
 }
 
 // TopicVoiceCallEnded is the typed voice.call.ended declaration (the
@@ -1152,6 +1191,31 @@ func (w *VoiceWiring) agentIDForTool() builtin.AgentIDFunc {
 	return func(ctx context.Context) string { return agentIDFromContext(ctx) }
 }
 
+// openContactDisplayStore opens the daemon-owned contacts.db handle for
+// the caller-display resolver (components.go voice block, contact-display
+// leaf 02). It reads the SAME database file the contact chain uses
+// (contact_wiring.go's path convention); the store's WAL + busy_timeout
+// pragmas make the concurrent handles safe. Fail-soft by contract: any
+// error logs a WARN and returns nil — the seam stays unwired and every
+// egress surface renders the unknown-caller form (a display nicety must
+// never fail the boot).
+func openContactDisplayStore(logger *slog.Logger) *contact.SQLiteStore {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	baseDir := config.MeeptPath("contact")
+	if err := os.MkdirAll(baseDir, 0o755); err != nil {
+		logger.Warn("caller display: contact store dir unavailable; display resolver unwired", "error", err)
+		return nil
+	}
+	store, err := contact.NewStore(filepath.Join(baseDir, "contacts.db"))
+	if err != nil {
+		logger.Warn("caller display: contact store open failed; display resolver unwired", "error", err)
+		return nil
+	}
+	return store
+}
+
 // Stop tears the stack down in dependency order: child FIRST (it holds the
 // text socket connection), then the text server listener, then the call
 // store. Loop goroutines exit with the daemon lifecycle context. The
@@ -1174,6 +1238,13 @@ func (w *VoiceWiring) Stop(ctx context.Context) {
 	w.TextServer.Close()
 	if err := w.Employee.Close(); err != nil {
 		w.logger.Warn("voice wiring: call store close", "error", err)
+	}
+	if w.displayStore != nil {
+		// Contact-display store (leaf 02): owned via
+		// WireVoiceDeps.ContactDisplayStore (components.go opened it).
+		if err := w.displayStore.Close(); err != nil {
+			w.logger.Warn("voice wiring: display contacts store close", "error", err)
+		}
 	}
 	w.logger.Info("voice wiring: stopped")
 }
