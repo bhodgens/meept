@@ -41,6 +41,7 @@ import (
 	"github.com/caimlas/meept/internal/bus"
 	commhttp "github.com/caimlas/meept/internal/comm/http"
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/ledger"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/secrets"
 	"github.com/caimlas/meept/internal/session"
@@ -180,6 +181,12 @@ type WireVoiceDeps struct {
 	MemorySource       voice.MemorySource
 	GoalSource         voice.GoalSource
 	Logger             *slog.Logger
+	// LedgerStore + BriefLLM (leaf 03-voice/01): the employee ledger
+	// store (buildLedger) and the prompt-in/text-out brief LLM seam over
+	// the daemon's EXISTING llm client. Either nil -> the per-call brief
+	// at release no-ops (feature off by absence, no config knob in v1).
+	LedgerStore *ledger.Store
+	BriefLLM    func(prompt string) (string, error)
 }
 
 // WireVoice constructs the voice stack from cfg. It returns (nil, nil)
@@ -316,6 +323,8 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		Bus:           deps.Bus,
 		Employees:     deps.Employees,
 		CallStorePath: filepath.Join(config.MeeptPath("voice"), "calls.db"),
+		LedgerStore:   deps.LedgerStore,
+		BriefLLM:      deps.BriefLLM,
 		Logger:        vlog.With("sub", "employee"),
 	})
 	if err != nil {
