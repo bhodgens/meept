@@ -67,10 +67,10 @@ Constitution decode/validation behavior must be byte-identical to the existing p
 
 | Leaf | Status |
 |------|--------|
-| 00T-employee-markdown-e2e | PENDING |
-| 01-employee-md-parser | PENDING |
-| 02-cli-wiring | PENDING |
-| 03-docs-template | PENDING |
+| 00T-employee-markdown-e2e | COMPLETE |
+| 01-employee-md-parser | COMPLETE |
+| 02-cli-wiring | COMPLETE |
+| 03-docs-template | COMPLETE |
 
 ## Coding Conventions
 
