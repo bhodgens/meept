@@ -353,7 +353,7 @@ func TestChatModel_StalledShowsHonestText(t *testing.T) {
 
 	// The real terminal later still resolves the stalled turn.
 	router := model.turns
-	router.DeliverTestTerminal("turn-1", "late reply", "completed")
+	router.deliverTestTerminal("turn-1", "late reply", "completed")
 	model.Update(turnTerminalMsg{
 		TurnID:         "turn-1",
 		ConversationID: model.conversationID,
@@ -385,7 +385,7 @@ func TestChatModel_DoubleSubmitIndependentResolution(t *testing.T) {
 	// Simulate the agent being active so the second send queues the same
 	// async submit path for a second concurrent turn (direct registration
 	// keeps the test focused on per-turn resolution).
-	model.turns.Register("turn-2", model.conversationID)
+	model.turns.register("turn-2", model.conversationID, model.sessionID)
 	model.pendingTurns = append(model.pendingTurns, mustGet(t, model, "turn-2"))
 
 	if len(model.pendingTurns) != 2 {

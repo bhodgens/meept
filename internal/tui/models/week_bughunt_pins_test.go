@@ -38,12 +38,12 @@ func TestWeekParentParkedThenCompleted(t *testing.T) {
 // notified mid-await, then the completed terminal lands — the (re-armed)
 // await must yield the completed result, never the parked one.
 func TestWeekParkedKeepsAwaiterArmed(t *testing.T) {
-	r := NewTestTurnRouter()
-	pt, ok := r.Register("turn-pk", "conv-1")
+	r := newTurnRouter(noopTimerSource{})
+	pt, ok := r.register("turn-pk", "conv-1", "")
 	if !ok {
 		t.Fatal("register failed")
 	}
-	cmd := TestAwaitTurnCmd(r, pt, 0)
+	cmd := awaitTurnCmd(r, pt, 0)
 	done := make(chan tea.Msg, 1)
 	go func() { done <- cmd() }()
 
@@ -76,12 +76,12 @@ func TestWeekParkedKeepsAwaiterArmed(t *testing.T) {
 // terminal resolves through it.
 func TestWeekStalledVerdictDoesNotLatch(t *testing.T) {
 	ts := NewManualTimerSource()
-	r := NewTestTurnRouterWithTimers(ts)
-	pt, ok := r.Register("turn-st", "conv-1")
+	r := newTurnRouter(ts)
+	pt, ok := r.register("turn-st", "conv-1", "")
 	if !ok {
 		t.Fatal("register failed")
 	}
-	cmd := TestAwaitTurnCmd(r, pt, 20*time.Millisecond)
+	cmd := awaitTurnCmd(r, pt, 20*time.Millisecond)
 	done := make(chan tea.Msg, 1)
 	go func() { done <- cmd() }()
 
@@ -115,25 +115,25 @@ func TestWeekStalledVerdictDoesNotLatch(t *testing.T) {
 // progress delivery. A turn whose progress just refreshed must NOT stall
 // when the original timer window elapses.
 func TestWeekStallTimerResetsOnProgress(t *testing.T) {
-	r := NewTestTurnRouterWithTimers(NewManualTimerSource())
-	pt, ok := r.Register("turn-live", "conv-1")
+	r := newTurnRouter(NewManualTimerSource())
+	pt, ok := r.register("turn-live", "conv-1", "")
 	if !ok {
 		t.Fatal("register failed")
 	}
 	liveness := time.Hour
-	cmd := TestAwaitTurnCmd(r, pt, liveness)
+	cmd := awaitTurnCmd(r, pt, liveness)
 	done := make(chan tea.Msg, 1)
 	go func() { done <- cmd() }()
 
 	// Wait for the timer to arm, then deliver progress (refreshes
 	// lastActivity) BEFORE firing.
 	deadline := time.Now().Add(time.Second)
-	for r.ArmedTimers() == 0 && time.Now().Before(deadline) {
+	for r.armedTimers() == 0 && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
-	r.DeliverTestProgress("conv-1", "working")
+	r.deliverTestProgress("conv-1", "working")
 	// Simulate the refresh: DeliverTestProgress sets lastActivity=now.
-	r.FireTimers()
+	r.fireTimers()
 
 	select {
 	case msg := <-done:
