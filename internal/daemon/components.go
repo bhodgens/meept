@@ -5761,6 +5761,13 @@ func (c *Components) Start(ctx context.Context) error {
 				} else {
 					c.Voice.Contact = chain
 					builtin.SetContactChain(chain)
+					// Caller-authz (leaf 02): arm the inbound caller
+					// resolver over the SAME contacts.db handle the chain
+					// uses (one store, one system of record). Until this
+					// runs (and on a degraded chain), the answer site
+					// resolves fail-soft to Info{Number} — every call still
+					// answers; unresolved = unapproved (O2).
+					c.Voice.SetCallerResolver(daemonCallerResolver(chain.Store, c.Logger))
 				}
 			}
 			names := enabledToolProviderNames(c.Config, []string{"voice"}, c.Logger)

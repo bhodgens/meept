@@ -283,6 +283,21 @@ func (r *loopTurnRunner) Run(ctx context.Context, sess voice.SessionHandle, prom
 		return "", fmt.Errorf("voice turn runner: wired loop for %s: %w", sess.ID, err)
 	}
 	employeeID := sess.EmployeeID
+	// AgentID fix (caller-authz leaf 02, O5): voice clones execute with
+	// the executor agent id = the bound employee id. The template loop
+	// carries "default" (components.go WithAgentID("default")), clones
+	// inherit it via ConfigSnapshot, and the executor injects
+	// details["agent_id"] from its own id — the PreExecChecker (employee
+	// constitution gate) routes on it, so a "default" voice loop silently
+	// skipped every per-employee tool gate. Stamped BEFORE RunOnce on the
+	// PER-SESSION clone only (GetOrCreateWired never returns the shared
+	// template); empty employee id keeps the inherited id (byte-identical
+	// pre-leaf behavior for non-employee sessions). The Manager cache key
+	// derives from the TEMPLATE's agentID, so restamping never rehashes
+	// the cache.
+	if employeeID != "" {
+		loop.SetAgentID(employeeID)
+	}
 	if override := applyEmployeeDefinition(ctx, loop, employeeID, r.employees, r.logger); override != "" {
 		r.logger.Debug("voice turn runner: employee persona applied",
 			"session_id", sess.ID, "employee_id", employeeID, "prompt_bytes", len(override))
