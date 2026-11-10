@@ -242,11 +242,15 @@ store. Invariants a future agent must NOT break:
   they keep the Tier A STT-partial trigger. Never move the trigger to a
   leg-agnostic branch.
 - Barge-in must SILENCE the client speakers, not just stop new frames:
-  internal/tts.AudioPlayer retains the live oto burst and Pause()s it on
-  Stop/new Play (Stop was a documented no-op - cancelled audio played
+  internal/tts.AudioPlayer tracks ALL live oto bursts and Stop() pauses
+  every one of them (Stop was a documented no-op - cancelled audio played
   under the next answer, leaf 01); SpeakerSink.Clear drops the buffered
   burst too; the CLI playout caps pending socket audio (~150 ms,
   liveMaxPendingAudioBytes) so kernel backpressure bounds the tail.
+  Play NEVER pauses predecessors: bursts overlap in oto's mixer (the
+  leaf-01 per-handoff pause chopped paced real-time audio at every ~150 ms
+  boundary - the same-day chop regression; cancel-time pause only is the
+  contract, pinned by player_recall_test.go).
 - LocalSplice has NO reorder and NO transcode by contract:
   unix sockets preserve order (no reorder window), and the local leg
   negotiates L16 s16le@16000 only - any other chunk size is the named

@@ -49,23 +49,28 @@ var newContext = func(cfg PlaybackConfig) (audioDriver, error) {
 	return otoDriver{c: ctx}, nil
 }
 
-// AudioPlayer handles low-level audio playback using oto.
+// AudioPlayer handles low-level audio output using oto.
 //
-// ONE live burst at a time (leaf 01, recallable playback): the player
-// retains the newest oto player, so Stop()/the voice Player seam's Clear
-// pause exactly what the speakers are holding. A paused player is
-// abandoned from that point on — matching how new players were always
-// created, GC reclaiming it is the driver's concern.
+// Playback model (amended 2026-11-09 after the leaf-01 chop regression):
+// successive bursts OVERLAP in oto's mixer - Play never pauses previous
+// bursts. Pausing the predecessor per-handoff chopped real-time-paced
+// audio at every ~150 ms burst boundary (the tail of burst N died when
+// burst N+1 arrived a hair late) - clear-before, choppy-after regression.
+// Cancellability is kept at the CANCEL boundary only: Stop() pauses
+// EVERY live player, so a barge-in/hangup silences the speakers within
+// ~20 ms while normal consecutive playback stays seamless. A finished
+// or paused player drops out of the live set lazily;oto's own reader-EOF
+// handling stops it and GC reclaims it.
 type AudioPlayer struct {
 	config PlaybackConfig
 	ctx    audioDriver
-	cur    burstPlayer
+	live   map[burstPlayer]struct{}
 	mu     sync.Mutex
 }
 
 // NewAudioPlayer creates a new audio player with the given configuration.
 func NewAudioPlayer(cfg PlaybackConfig) *AudioPlayer {
-	return &AudioPlayer{config: cfg}
+	return &AudioPlayer{config: cfg, live: map[burstPlayer]struct{}{}}
 }
 
 // resolveSampleRate maps the playback config onto the oto context rate.
@@ -80,10 +85,11 @@ func resolveSampleRate(cfg PlaybackConfig) int {
 	return cfg.SampleRate
 }
 
-// Play plays audio data (WAV/PCM) through the system audio output. Any
-// previously retained burst is PAUSED first (one live burst at a time):
-// the tail of the old utterance never keeps playing under the new one
-// (the talk-over defect leaf 01 kills).
+// Play plays audio data (WAV/PCM) through the system audio output.
+// Bursts OVERLAP: previous live bursts are NOT paused (leaf-01's
+// per-handoff pause chopped paced real-time audio at every burst
+// boundary - the 2026-11-09 chop regression). Cancellation lives in
+// Stop(), which pauses every live burst at once.
 func (p *AudioPlayer) Play(audioData []byte) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -96,47 +102,51 @@ func (p *AudioPlayer) Play(audioData []byte) error {
 		}
 		p.ctx = drv
 	}
+	if p.live == nil {
+		p.live = map[burstPlayer]struct{}{}
+	}
 
-	// Pause the previous burst before starting the new one so only the
-	// newest audio reaches the speakers.
-	if p.cur != nil {
-		p.cur.Pause()
+	// Prune finished bursts lazily on each handoff so the live set stays
+	// bounded to the short overlap tail (a burst runs ~150 ms; at most a
+	// couple are ever mid-playback).
+	for pl := range p.live {
+		if !pl.IsPlaying() {
+			delete(p.live, pl)
+		}
 	}
 
 	player := p.ctx.NewPlayer(io.Reader(bytes.NewReader(audioData)))
 	player.Play()
-	p.cur = player
+	p.live[player] = struct{}{}
 
 	return nil
 }
 
-// Stop pauses the current burst (leaf 01: recallable playback). Idempotent
-// and nil-safe: with no burst retained (never played, or already stopped)
-// it is a no-op returning nil. The abandoned player is GC's concern,
-// matching how new players were previously created per burst.
+// Stop pauses EVERY live burst (leaf 01: recallable playback at the
+// CANCEL boundary). Idempotent and safe with nothing live: a no-op
+// returning nil. Finished/paused players are dropped from the set.
 func (p *AudioPlayer) Stop() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.cur == nil {
-		return nil
+	for pl := range p.live {
+		pl.Pause()
+		delete(p.live, pl)
 	}
-	p.cur.Pause()
-	p.cur = nil
 	return nil
 }
 
-// IsPlaying reports whether a burst is currently playing. The retained
-// player is authoritative once a burst was handed off (it goes non-playing
-// when the bytes run out or Stop pauses it).
+// IsPlaying reports whether ANY burst is currently live and playing.
 func (p *AudioPlayer) IsPlaying() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.cur == nil {
-		return false
+	for pl := range p.live {
+		if pl.IsPlaying() {
+			return true
+		}
 	}
-	return p.cur.IsPlaying()
+	return false
 }
 
 // Close releases the oto audio context. oto v3's Context has no Close method,
@@ -151,12 +161,12 @@ func (p *AudioPlayer) Close() error {
 		return nil
 	}
 
-	// Halt the current burst before suspending the driver: a paused
+	// Halt every live burst before suspending the driver: a playing
 	// retained player cannot keep feeding a suspended device.
-	if p.cur != nil {
-		p.cur.Pause()
-		p.cur = nil
+	for pl := range p.live {
+		pl.Pause()
 	}
+	clear(p.live)
 
 	// Suspend the audio context — oto v3 has no Close(); Suspend halts
 	// the audio driver. The GC finalizer handles the rest.

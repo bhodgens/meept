@@ -1,11 +1,18 @@
 package tts
 
-// player_recall_test.go - leaf 01 (recallable playback) bookkeeping,
-// driven through the private burstPlayer/audioDriver seams because oto
-// cannot open a real audio context headlessly (CI has no output device).
-// Pins: one live burst at a time (Play pauses the retained previous
-// player), Stop pauses cur and is idempotent/nil-safe, IsPlaying tracks
-// the retained burst, Close halts the burst before suspending the driver.
+// player_recall_test.go - cancellable-playback bookkeeping, driven
+// through the private burstPlayer/audioDriver seams because oto cannot
+// open a real audio context headlessly (CI has no output device).
+//
+// Contract (amended 2026-11-09 after the leaf-01 chop regression): Play
+// NEVER pauses previous bursts - successive bursts overlap in oto's
+// mixer, which is what makes paced real-time audio seamless. Cancellation
+// lives in Stop()/Close(): they pause EVERY live burst, so a barge-in
+// silences the speakers at once. Finished bursts (IsPlaying false, the
+// mux's EOF behavior) are pruned lazily on the next Play. Pins: overlap,
+// stop-pauses-all + idempotent/nil-safe, prune-then-stop leaves finished
+// bursts untouched, IsPlaying tracks any-live, Close halts all before
+// suspending the driver.
 
 import (
 	"io"
@@ -50,16 +57,13 @@ func withFakeDriver(t *testing.T, d *fakeDriver) {
 	t.Cleanup(func() { newContext = orig })
 }
 
-func TestAudioPlayerPlayPausesPreviousBurst(t *testing.T) {
+func TestAudioPlayerPlayOverlapsPreviousBursts(t *testing.T) {
 	d := &fakeDriver{}
 	withFakeDriver(t, d)
 	p := NewAudioPlayer(PlaybackConfig{SampleRate: 16000})
 
 	if err := p.Play([]byte("burst-one")); err != nil {
 		t.Fatalf("play 1: %v", err)
-	}
-	if len(d.created) != 1 {
-		t.Fatalf("want 1 created player, got %d", len(d.created))
 	}
 	first := d.created[0]
 	if first.playN != 1 || !first.playing {
@@ -69,30 +73,43 @@ func TestAudioPlayerPlayPausesPreviousBurst(t *testing.T) {
 	if err := p.Play([]byte("burst-two")); err != nil {
 		t.Fatalf("play 2: %v", err)
 	}
-	if len(d.created) != 2 {
-		t.Fatalf("want 2 created players, got %d", len(d.created))
-	}
 	second := d.created[1]
-	// The talk-over pin: the old burst is PAUSED the moment the new one
-	// starts - it never keeps playing under the new answer.
-	if first.pauseN != 1 || first.playing {
-		t.Fatalf("previous burst must be paused on new Play: %+v", first)
+	// The chop-regression pin: the old burst is NOT paused when the new
+	// one starts - oto's mixer overlaps them so paced audio never loses
+	// a tail at a burst boundary.
+	if first.pauseN != 0 || !first.playing {
+		t.Fatalf("previous burst must keep playing (overlap contract): %+v", first)
 	}
 	if second.playN != 1 || !second.playing {
 		t.Fatalf("new burst must be playing: %+v", second)
 	}
-	// Only the latest player is retained: IsPlaying tracks it.
 	if !p.IsPlaying() {
-		t.Fatalf("IsPlaying must be true while the retained burst plays")
+		t.Fatalf("IsPlaying true while any burst plays")
 	}
-	// The retained burst running out of bytes = no live playback.
+	// All live bursts finished (mux EOF): nothing playing.
+	first.playing = false
 	second.playing = false
 	if p.IsPlaying() {
-		t.Fatalf("IsPlaying must follow the retained player")
+		t.Fatalf("IsPlaying false when every burst finished")
+	}
+	// The next Play prunes the finished set (verified via Stop below:
+	// pruning must not Pause anything, it only forgets finished players).
+	if err := p.Play([]byte("burst-three")); err != nil {
+		t.Fatalf("play 3: %v", err)
+	}
+	third := d.created[2]
+	if first.pauseN != 0 || second.pauseN != 0 {
+		t.Fatalf("pruning finished bursts must not pause them: first=%d second=%d", first.pauseN, second.pauseN)
+	}
+	if err := p.Stop(); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	if third.pauseN != 1 {
+		t.Fatalf("Stop must pause the live burst: %+v", third)
 	}
 }
 
-func TestAudioPlayerStopPausesCurrentAndIsNilSafe(t *testing.T) {
+func TestAudioPlayerStopPausesAllLiveAndIsNilSafe(t *testing.T) {
 	// Stop before any Play: nil-safe no-op.
 	fresh := NewAudioPlayer(PlaybackConfig{})
 	if err := fresh.Stop(); err != nil {
@@ -105,16 +122,21 @@ func TestAudioPlayerStopPausesCurrentAndIsNilSafe(t *testing.T) {
 	d := &fakeDriver{}
 	withFakeDriver(t, d)
 	p := NewAudioPlayer(PlaybackConfig{SampleRate: 16000})
-	if err := p.Play([]byte("burst")); err != nil {
+	if err := p.Play([]byte("a")); err != nil {
 		t.Fatalf("play: %v", err)
 	}
-	burst := d.created[0]
+	if err := p.Play([]byte("b")); err != nil {
+		t.Fatalf("play: %v", err)
+	}
+	first, second := d.created[0], d.created[1]
 
+	// The barge-in contract: ONE Stop silences every live burst - this
+	// is where recall lives now (not in Play).
 	if err := p.Stop(); err != nil {
 		t.Fatalf("stop: %v", err)
 	}
-	if burst.pauseN != 1 || burst.playing {
-		t.Fatalf("Stop must pause the live burst: %+v", burst)
+	if first.pauseN != 1 || second.pauseN != 1 || first.playing || second.playing {
+		t.Fatalf("Stop must pause ALL live bursts: %+v %+v", first, second)
 	}
 	if p.IsPlaying() {
 		t.Fatalf("IsPlaying false after Stop")
@@ -124,21 +146,20 @@ func TestAudioPlayerStopPausesCurrentAndIsNilSafe(t *testing.T) {
 	if err := p.Stop(); err != nil {
 		t.Fatalf("second stop: %v", err)
 	}
-	if burst.pauseN != 1 {
-		t.Fatalf("Stop must be idempotent: pauseN=%d", burst.pauseN)
+	if first.pauseN != 1 || second.pauseN != 1 {
+		t.Fatalf("Stop must be idempotent: %d %d", first.pauseN, second.pauseN)
 	}
 
-	// Stop clears the retained player: the next Play starts clean and
-	// pauses nothing (reuse keeps the same oto context).
+	// Stop cleared the live set: the next Play starts clean.
 	if err := p.Play([]byte("next")); err != nil {
 		t.Fatalf("play after stop: %v", err)
 	}
-	if burst.pauseN != 1 || d.created[1].playN != 1 {
-		t.Fatalf("post-Stop Play must not pause the old player again")
+	if d.created[2].playN != 1 {
+		t.Fatalf("post-Stop Play must start a fresh burst")
 	}
 }
 
-func TestAudioPlayerClosePausesBurstThenSuspends(t *testing.T) {
+func TestAudioPlayerClosePausesBurstsThenSuspends(t *testing.T) {
 	d := &fakeDriver{}
 	withFakeDriver(t, d)
 	p := NewAudioPlayer(PlaybackConfig{SampleRate: 16000})

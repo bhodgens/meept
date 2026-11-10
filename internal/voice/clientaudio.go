@@ -12,8 +12,9 @@ package voice
 // opens a real gap, so the gap heuristic bounds a burst to one spoken
 // sentence-group. Clear() drops the pending burst (barge-in: never play
 // the interrupted tail) AND silences the burst already handed to the
-// player (leaf 01, recallable playback: tts.AudioPlayer retains the live
-// oto player and its Stop pauses it, so the old tail stops within ~20 ms
+// player (leaf 01, recallable playback: tts.AudioPlayer tracks ALL live
+// oto players and its Stop pauses every one, so the old tail stops within
+// ~20 ms
 // instead of playing out under the new answer - the talk-over defect of
 // transcript local-2d84c384fd93f447).
 //

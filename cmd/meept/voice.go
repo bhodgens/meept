@@ -474,11 +474,12 @@ const liveSpeakerReadChunk = 640
 
 // drainLiveSpeaker pumps the .out socket into the sink with the bounded
 // lookahead above: writes accumulate in the sink, and once the backlog
-// reaches liveMaxPendingAudioBytes the burst is handed off (Play pauses
-// the previous burst, so only the newest ~150 ms ever plays ahead). On
-// socket end the final pending burst is flushed before reporting. Runs
-// until read error / EOF / a sink write error; the error goes to done
-// (buffered: the reader selects on it, so this never blocks on exit).
+// reaches liveMaxPendingAudioBytes the burst is handed off (bursts
+// OVERLAP in oto - a handoff never pauses the predecessor; the bound only
+// caps how far ahead of the speakers audio runs). On socket end the final
+// pending burst is flushed before reporting. Runs until read error / EOF /
+// a sink write error; the error goes to done (buffered: the reader selects
+// on it, so this never blocks on exit).
 func drainLiveSpeaker(r io.Reader, s *voice.SpeakerSink, done chan<- error) {
 	buf := make([]byte, liveSpeakerReadChunk)
 	for {
