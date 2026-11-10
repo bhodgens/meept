@@ -127,6 +127,14 @@ func finalizeLoadedConfig(cfg *Config) (*Config, error) {
 	// final values.
 	NormalizeMemoryTiersDefaults(&cfg.Memory.Tiers)
 
+	// Restore the default unapproved-caller tool list when [voice]
+	// unapproved_caller_allowed_tools loaded empty (plan 20261110-
+	// caller-authz O3: an explicit `[]` must never ship zero message
+	// rights to unknown callers). Load-boundary normalization so the
+	// step-1c enforcement seam sees final values. Non-empty user lists
+	// pass through in order.
+	NormalizeUnapprovedCallerAllowedTools(&cfg.Voice)
+
 	// Normalize the evolver plan sink (empty -> user-scoped default,
 	// ~ expansion, relative rejection) at the load boundary so every
 	// consumer sees an absolute path (evolver plan-sink leaf 01).
@@ -277,6 +285,12 @@ func LoadJSON5Config(path string) (*Config, error) {
 	// daemon T1). Same load-boundary rationale as finalizeLoadedConfig
 	// above.
 	NormalizeMemoryTiersDefaults(&cfg.Memory.Tiers)
+
+	// Restore the default unapproved-caller tool list when [voice]
+	// unapproved_caller_allowed_tools loaded empty (plan 20261110-
+	// caller-authz O3). Same load-boundary rationale as
+	// finalizeLoadedConfig above.
+	NormalizeUnapprovedCallerAllowedTools(&cfg.Voice)
 
 	// Normalize the evolver plan sink (empty -> user-scoped default,
 	// ~ expansion, relative rejection) at the load boundary so every
