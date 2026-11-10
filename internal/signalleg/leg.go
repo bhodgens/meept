@@ -206,6 +206,16 @@ type Leg struct {
 	mu      sync.Mutex
 	calls   map[string]*callState // ccid -> live call state
 	inbound legInbound            // zero-value usable (leaf 11b RouteInbound)
+
+	// termObsMu guards termObs: the ADDITIVE terminal-observer lane
+	// (tree 20261110-voice-callleg leaf 01) that voice's CallLeg signal
+	// adapter probes structurally (voice.SignalTerminalObserver). It
+	// notifies at the claimTerminal-guarded terminal sites (carrier
+	// ENDED / ringing watchdog) AFTER the Manager.FailOutcome fan-out —
+	// releaseOnce stays the single terminal funnel; observers never add
+	// a teardown path.
+	termObsMu sync.Mutex
+	termObs   []func(ccid string, outcome voice.Outcome, reason string)
 }
 
 // callState is one live signal call's leg-owned state.
@@ -462,6 +472,7 @@ func (l *Leg) onEnded(st *callState, reason string) {
 		return
 	}
 	l.deps.Manager.FailOutcome(st.ccid, outcome, "signal call ended: "+reason)
+	l.notifyTerminal(st.ccid, outcome, "signal call ended: "+reason)
 	l.log.Info("signalleg: call ended", "ccid", st.ccid, "reason", reason, "outcome", string(outcome))
 }
 
@@ -556,6 +567,42 @@ func (l *Leg) fireRingingWatchdog(ccid string, timeout time.Duration) {
 	}
 	l.deps.Manager.FailOutcome(ccid, voice.OutcomeNoAnswer,
 		fmt.Sprintf("signal: no answer within %s", timeout.String()))
+	l.notifyTerminal(ccid, voice.OutcomeNoAnswer,
+		fmt.Sprintf("signal: no answer within %s", timeout.String()))
+}
+
+// AddTerminalObserver registers a best-effort terminal observer on the
+// leg's claimTerminal-guarded terminal sites (tree 20261110-voice-callleg
+// leaf 01; satisfies voice.SignalTerminalObserver structurally — the
+// method signature uses voice.Outcome, which is importable this way
+// because signalleg ALREADY imports voice, never the reverse). The
+// Manager's release fan-out remains the single terminal funnel;
+// observers never add a teardown path and are notified after it.
+func (l *Leg) AddTerminalObserver(fn func(ccid string, outcome voice.Outcome, reason string)) {
+	if fn == nil {
+		return
+	}
+	l.termObsMu.Lock()
+	l.termObs = append(l.termObs, fn)
+	l.termObsMu.Unlock()
+}
+
+// notifyTerminal invokes every terminal observer outside l.mu and the
+// observer mutex (snapshot then call — the voice.Manager notifyAnswered
+// pattern). Best-effort: an observer error/panic is the observer's
+// problem, exactly like a release-hook error.
+func (l *Leg) notifyTerminal(ccid string, outcome voice.Outcome, reason string) {
+	l.termObsMu.Lock()
+	if len(l.termObs) == 0 {
+		l.termObsMu.Unlock()
+		return
+	}
+	obs := make([]func(string, voice.Outcome, string), len(l.termObs))
+	copy(obs, l.termObs)
+	l.termObsMu.Unlock()
+	for _, fn := range obs {
+		fn(ccid, outcome, reason)
+	}
 }
 
 // OutcomeByReason maps a signal-cli ENDED reason onto a voice.Outcome.

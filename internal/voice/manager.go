@@ -87,6 +87,15 @@ type Manager struct {
 	// unwired and a no-answer Fail can land on a live, answered call.
 	answerMu   sync.Mutex
 	answerHook func(ccid string)
+
+	// termObsMu guards termObs: the ADDITIVE terminal-observer lane
+	// (tree 20261110-voice-callleg leaf 01). releaseOnce + the release
+	// hook stay the single terminal funnel (frozen 20261109); observers
+	// are notified after the hook, outside the mutex, best-effort. The
+	// CallLeg adapters use this lane for Events() without stealing the
+	// single-occupancy release hook.
+	termObsMu sync.Mutex
+	termObs   []func(ccid string, outcome Outcome, reason string)
 }
 
 // NewManager returns a Manager. spawn may be nil when the caller only uses
@@ -216,13 +225,50 @@ func (m *Manager) releaseOnce(ccid string) (callCancel, streamCancel context.Can
 
 // fireRelease invokes the release hook outside the manager mutex. Hook
 // errors cannot fail call handling (the hook signature has no error), and a
-// missing hook is a no-op.
-func (m *Manager) fireRelease(ccid string, outcome Outcome) {
+// missing hook is a no-op. The additive terminal-observer lane (tree
+// 20261110-voice-callleg leaf 01) is notified AFTER the hook with the
+// outcome + reason: observers are best-effort consumers of the SAME
+// once-per-ccid fire flag releaseOnce produced — they never add a second
+// teardown path and an observer panic is the observer's problem, exactly
+// like a hook error.
+func (m *Manager) fireRelease(ccid string, outcome Outcome, reason string) {
 	m.mu.Lock()
 	hook := m.release
 	m.mu.Unlock()
 	if hook != nil {
 		hook(ccid, outcome)
+	}
+	m.notifyTerminal(ccid, outcome, reason)
+}
+
+// AddTerminalObserver registers a best-effort terminal observer on the
+// manager's release fan-out (ccid, outcome, reason). Unlike the release
+// hook (single-occupancy, the frozen production funnel), observers are
+// additive: any number may register and the hook semantics are
+// unchanged. The CallLeg adapters use this lane for Events() (leaf 01).
+func (m *Manager) AddTerminalObserver(fn func(ccid string, outcome Outcome, reason string)) {
+	if fn == nil {
+		return
+	}
+	m.termObsMu.Lock()
+	m.termObs = append(m.termObs, fn)
+	m.termObsMu.Unlock()
+}
+
+// notifyTerminal invokes every registered terminal observer outside both
+// the manager mutex and the observer mutex (snapshot then call, the same
+// pattern as notifyAnswered).
+func (m *Manager) notifyTerminal(ccid string, outcome Outcome, reason string) {
+	m.termObsMu.Lock()
+	if len(m.termObs) == 0 {
+		m.termObsMu.Unlock()
+		return
+	}
+	obs := make([]func(string, Outcome, string), len(m.termObs))
+	copy(obs, m.termObs)
+	m.termObsMu.Unlock()
+	for _, fn := range obs {
+		fn(ccid, outcome, reason)
 	}
 }
 
@@ -312,7 +358,7 @@ func (m *Manager) HandleCallEvent(ctx context.Context, ev telnyx.CallEvent) erro
 			streamCancel()
 		}
 		if fire {
-			m.fireRelease(ev.CallControlID, OutcomeHangup)
+			m.fireRelease(ev.CallControlID, OutcomeHangup, "call.hangup")
 		}
 		return nil
 	default:
@@ -443,7 +489,7 @@ func (m *Manager) FailOutcome(ccid string, outcome Outcome, reason string) {
 		streamCancel()
 	}
 	if fire {
-		m.fireRelease(ccid, outcome)
+		m.fireRelease(ccid, outcome, reason)
 	}
 }
 
