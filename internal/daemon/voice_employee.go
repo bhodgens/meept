@@ -61,6 +61,12 @@ type VoiceEmployeeWiring struct {
 	ledgerStore *ledger.Store
 	llm         func(prompt string) (string, error)
 
+	// dayBriefFn (leaf 03-voice/03): the wiring-built day-brief closure
+	// (open-commitments seam included). Only set when the ledger store
+	// is present; holdPhoneCall builds through it and passes an empty
+	// DayBrief when nil (nil-store posture unchanged).
+	dayBriefFn func(ctx context.Context, employeeID, number string) (voice.DayBrief, error)
+
 	holdMu    sync.Mutex
 	holds     map[string]*sync.Mutex // employee_id -> serialization mutex
 	heldCalls map[string]holdEntry   // call_control_id -> hold routing entry

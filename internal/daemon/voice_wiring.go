@@ -187,6 +187,12 @@ type WireVoiceDeps struct {
 	// at release no-ops (feature off by absence, no config knob in v1).
 	LedgerStore *ledger.Store
 	BriefLLM    func(prompt string) (string, error)
+	// DayBriefBuilder (leaf 03-voice/03): set by WireVoice to the shared
+	// day-brief closure (with the ledger open-commitments seam) when a
+	// ledger store is present, so the signal leg's bindCall populates its
+	// OnCallStart brief through the SAME builder the local/phone legs use.
+	// Nil -> the signal leg keeps the empty-brief posture (nil store).
+	DayBriefBuilder func(ctx context.Context, employeeID, number string) (voice.DayBrief, error)
 }
 
 // WireVoice constructs the voice stack from cfg. It returns (nil, nil)
@@ -332,6 +338,29 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 	}
 	phoneHold = employee
 
+	// -- 5b. Shared day-brief builder (leaf 03-voice/03): ONE builder
+	// closure over the leaf-04 sources — the SAME sources the local leg
+	// has always used — now extended with the ledger open-commitments
+	// seam. Reused by: the local leg's DayBriefBuilder, the phone leg's
+	// holdPhoneCall (via VoiceEmployeeWiring.dayBriefFn), and the signal
+	// leg (via WireVoiceDeps.DayBriefBuilder). Phone/signal only build a
+	// brief when the ledger store is present (nil store -> those leg
+	// sites keep passing today's empty DayBrief — posture unchanged);
+	// the local leg keeps its pre-existing always-build posture.
+	buildCallBrief := func(ctx context.Context, employeeID, number string) (voice.DayBrief, error) {
+		return voice.BuildDayBrief(ctx, voice.Deps{
+			Activity:    voice.AggregatorSource{Agg: deps.ActivityAggregator},
+			Transcripts: employee.store,
+			Memory:      deps.MemorySource,
+			Goals:       deps.GoalSource,
+			Commitments: ledgerCommitmentsSource(deps.LedgerStore),
+		}, employeeID, number, time.Now(), time.Local)
+	}
+	if deps.LedgerStore != nil {
+		employee.dayBriefFn = buildCallBrief
+		deps.DayBriefBuilder = buildCallBrief
+	}
+
 	// -- 6. Supervisor (C6). The fast-model seam honors
 	// voice.supervisor_model (audit M1): when set, a dedicated client is
 	// resolved for that alias/model through the same resolution path
@@ -443,19 +472,12 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 			Label:      cfg.Local.Name,
 			BargeInRms: cfg.Local.BargeInRms,
 		}, voice.LocalDeps{
-			Registry:   registry,
-			ChildProc:  child,
-			TextServer: textServer,
-			Manager:    manager,
-			Binding:    employee.Binding,
-			DayBriefBuilder: func(ctx context.Context, employeeID, number string) (voice.DayBrief, error) {
-				return voice.BuildDayBrief(ctx, voice.Deps{
-					Activity:    voice.AggregatorSource{Agg: deps.ActivityAggregator},
-					Transcripts: employee.store,
-					Memory:      deps.MemorySource,
-					Goals:       deps.GoalSource,
-				}, employeeID, number, time.Now(), time.Local)
-			},
+			Registry:        registry,
+			ChildProc:       child,
+			TextServer:      textServer,
+			Manager:         manager,
+			Binding:         employee.Binding,
+			DayBriefBuilder: buildCallBrief,
 			Profile: func(employeeID string) voice.Profile {
 				return voice.ResolveProfile(cfg, employeeID, "", voice.LegLocal)
 			},
@@ -806,7 +828,23 @@ func holdPhoneCall(emp *VoiceEmployeeWiring, ccid, employeeID, number, direction
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_, err := emp.Binding.OnCallStart(ctx, ccid, number, employeeID, direction, voice.DayBrief{}, fresh)
+	// Day brief (leaf 03-voice/03): built through the wiring's shared
+	// builder ONLY when the ledger store armed it (nil dayBriefFn = no
+	// store = today's empty-brief posture, byte-identical). A build
+	// failure is fail-soft: the call proceeds with an empty brief —
+	// teardown/call paths never depend on ledger health.
+	brief := voice.DayBrief{}
+	if emp.dayBriefFn != nil {
+		if b, err := emp.dayBriefFn(ctx, employeeID, number); err != nil {
+			if emp.logger != nil {
+				emp.logger.Warn("voice wiring: phone day brief build failed (continuing with an empty brief)",
+					"ccid", ccid, "error", err)
+			}
+		} else {
+			brief = b
+		}
+	}
+	_, err := emp.Binding.OnCallStart(ctx, ccid, number, employeeID, direction, brief, fresh)
 	if err != nil && emp.logger != nil {
 		emp.logger.Warn("voice wiring: phone OnCallStart failed (call continues unbound)",
 			"ccid", ccid, "direction", direction, "error", err)
