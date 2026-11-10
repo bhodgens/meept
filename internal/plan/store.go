@@ -41,6 +41,14 @@ type PlanStore interface {
 	// in the expected state (another caller won the race).
 	UpdatePlanStateConditional(ctx context.Context, id string, fromState, toState PlanState) (bool, error)
 
+	// UpdatePlanStateWhere atomically transitions a plan to toState when its
+	// current state is one of from (C-P1: the single guarded-transition
+	// seam, every manager transition migrates onto it). Returns true only
+	// if exactly one row was affected. Zero rows — missing plan or state
+	// outside the from-set — is a lost race and returns (false, nil), never
+	// an error; the state predicate is part of the UPDATE, not a prior read.
+	UpdatePlanStateWhere(ctx context.Context, id string, from []PlanState, to PlanState) (bool, error)
+
 	// Phase operations
 	CreatePhase(ctx context.Context, p *PlanPhase) error
 	GetPhases(ctx context.Context, planID string) ([]*PlanPhase, error)

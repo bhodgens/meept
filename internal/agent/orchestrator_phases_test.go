@@ -58,6 +58,9 @@ func (s *stubPlanStore) SetPlanState(_ context.Context, _ string, _ plan.PlanSta
 func (s *stubPlanStore) UpdatePlanStateConditional(_ context.Context, _ string, _, _ plan.PlanState) (bool, error) {
 	return true, nil
 }
+func (s *stubPlanStore) UpdatePlanStateWhere(_ context.Context, _ string, _ []plan.PlanState, _ plan.PlanState) (bool, error) {
+	return true, nil
+}
 func (s *stubPlanStore) CreatePhase(_ context.Context, p *plan.PlanPhase) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

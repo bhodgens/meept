@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/caimlas/meept/internal/migrate"
@@ -360,6 +361,37 @@ func (s *SQLiteStore) UpdatePlanStateConditional(ctx context.Context, id string,
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE plans SET state = ?, updated_at = ? WHERE id = ? AND state = ?`,
 		string(toState), now, id, string(fromState))
+	if err != nil {
+		return false, fmt.Errorf("failed to conditionally update plan state: %w", err)
+	}
+	affected, _ := res.RowsAffected()
+	return affected == 1, nil
+}
+
+// UpdatePlanStateWhere atomically transitions a plan to toState when its
+// current state is one of from — the multi-value form of
+// UpdatePlanStateConditional and the single guarded-transition seam (C-P1).
+// Returns true only when exactly one row was affected. Zero rows (the row is
+// missing or already sits outside the from-set) is a lost race, NOT a DB
+// failure: it returns (false, nil) and leaves the row untouched. Error is
+// returned only for a database failure.
+func (s *SQLiteStore) UpdatePlanStateWhere(ctx context.Context, id string, from []PlanState, to PlanState) (bool, error) {
+	if len(from) == 0 {
+		// An empty from-set matches nothing; IN () would be a SQL syntax
+		// error, so report the lost race directly.
+		return false, nil
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	placeholders := make([]string, len(from))
+	args := make([]any, 0, len(from)+3)
+	args = append(args, string(to), now, id)
+	for i, state := range from {
+		placeholders[i] = "?"
+		args = append(args, string(state))
+	}
+	res, err := s.db.ExecContext(ctx, fmt.Sprintf(
+		`UPDATE plans SET state = ?, updated_at = ? WHERE id = ? AND state IN (%s)`,
+		strings.Join(placeholders, ", ")), args...)
 	if err != nil {
 		return false, fmt.Errorf("failed to conditionally update plan state: %w", err)
 	}
