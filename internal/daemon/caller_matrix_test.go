@@ -251,7 +251,12 @@ func newMatrixHarness(t *testing.T, employeeID, number string, contactApproved b
 		t.Fatalf("Binding.OnCallStart: %v", err)
 	}
 	inst := voice.Instance{CallControlID: ccid, EmployeeID: employeeID, Target: number, Caller: caller}
-	if _, err := turnRunnerFor(b, inst).Run(context.Background(), voice.SessionHandle{}, "hello"); err != nil {
+	// 2026-11-10 merge fixup: turnRunnerFor gained the holdTracker gate
+	// param (sibling webhook-hold audit); arm the gate ready before the
+	// turn runs, matching the shipped spawn site.
+	gates := newHoldTracker()
+	gates.arm(ccid).markReady()
+	if _, err := turnRunnerFor(b, gates, inst).Run(context.Background(), voice.SessionHandle{}, "hello"); err != nil {
 		t.Fatalf("bindingTurnRunner.Run: %v", err)
 	}
 	turnCtx := turns.captured(t)
