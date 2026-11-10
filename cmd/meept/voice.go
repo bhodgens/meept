@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"text/tabwriter"
@@ -944,21 +945,26 @@ linkLoop:
 // warning, never aborts the link run; the loops die on socket EOF when
 // the link closes (tap conns close with the bridge's teardown).
 func startVoiceLinkMonitor(open voiceLinkOpenResult, aEmp, bEmp string) {
+	// ONE oto context per process is a hard driver limit (a second
+	// oto.NewContext errors "context is already created" - live
+	// link-d2d7e713a8d914f5 killed side b's player). Both sides share a
+	// single AudioPlayer; bursts from the two sinks OVERLAP in oto's
+	// mixer (the internal/tts playback contract), which is exactly what
+	// a two-voice monitor needs. The monitor never Clears, so sharing
+	// cannot silence one side via the other.
+	player := voice.NewOtoPlayer()
+	// Warm the audio context BEFORE dialing the taps: the tee starts
+	// flowing the instant a dial lands, and lazy context init (~0.3 s
+	// device open + ready wait) stalled the first writes and dropped
+	// the greeting burst behind the 8 KB socket buffer (live
+	// link-d52f032b6e010882). One silent 20 ms burst = pure warm-up.
+	if werr := player.Play(make([]byte, 640)); werr != nil {
+		fmt.Fprintf(os.Stderr, "monitor: speaker warm-up failed: %v (speakers off)\n", werr)
+		return
+	}
 	dialSide := func(label, emp, path string) {
 		if path == "" {
 			fmt.Fprintf(os.Stderr, "monitor %s: daemon returned no tap path (speakers off for that side)\n", label)
-			return
-		}
-		// Open the audio context BEFORE dialing the tap: the tee starts
-		// flowing the instant the dial lands, and the lazy oto context
-		// init (~0.3 s: device open + ready wait, plus CoreAudio's own
-		// first-start latency) stalled the first writes and dropped the
-		// greeting burst behind an 8 KB socket buffer (live
-		// link-d52f032b6e010882). One silent 20 ms burst = pure warm-up,
-		// inaudible.
-		player := voice.NewOtoPlayer()
-		if werr := player.Play(make([]byte, 640)); werr != nil {
-			fmt.Fprintf(os.Stderr, "monitor %s: speaker warm-up failed: %v (speakers off for that side)\n", label, werr)
 			return
 		}
 		conn, err := net.Dial("unix", path)
@@ -974,15 +980,28 @@ func startVoiceLinkMonitor(open voiceLinkOpenResult, aEmp, bEmp string) {
 		go drainLiveSpeaker(&monitorFirstByteReader{r: conn, label: label, emp: emp}, sink, done)
 		go func() {
 			// The drain loop exits on socket EOF/error once the daemon
-			// closes the tap; release the audio device on the way out.
+			// closes the tap. Flush this side's tail; the shared player
+			// is closed once, by the LAST side out (the taps close
+			// together at link end, so either drain finishing first
+			// must not yank the device under the other).
 			<-done
 			_ = conn.Close() //nolint:errcheck // teardown
-			_ = sink.Close()
+			_ = sink.Flush()
+			monitorWG.Done()
 		}()
 	}
+	monitorWG.Add(2)
 	dialSide("a", aEmp, open.MonitorAPath)
 	dialSide("b", bEmp, open.MonitorBPath)
+	go func() {
+		monitorWG.Wait()
+		player.Close()
+	}()
 }
+
+// monitorWG coordinates the shared monitor player's teardown: both side
+// drains must flush before the one audio context is closed.
+var monitorWG sync.WaitGroup
 
 // monitorFirstByteReader announces a side's speech once when tee audio
 // first lands on the monitor socket ("[a companion] speaking"), then
