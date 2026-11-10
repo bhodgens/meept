@@ -70,8 +70,8 @@ same-commit doc updates.
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
 | 00T-gate-tests | TESTS_VALIDATED | 1 | committed b8cd81f6; 4 voice + 3 signal arms (cycle-forced: signalleg imports voice); parent-verified RED=symbols only, frozen gates zero-diff |
-| 01-interface-adapters | IN_PROGRESS | 0 | dispatched (event mechanism constrained: must NOT steal single-occupancy release hook) |
-| 02-event-unification | PENDING | 0 | |
+| 01-interface-adapters | COMPLETE | 1 | committed f3f312c3 (+gate de-mask e4c6871e: tool-redaction artifact repaired via shell capture); terminals-only observer lanes, no releaseOnce change; phone arms GREEN after de-mask |
+| 02-event-unification | IN_PROGRESS | 0 | dispatched (Connected/Reconnecting mapping; single-occupancy hook collision rule in brief) |
 | 03-caller-migration | PENDING | 0 | |
 
 ## Integration Test Plan
