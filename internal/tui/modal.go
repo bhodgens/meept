@@ -33,6 +33,10 @@ const (
 	// (acp-human-permission-relay leaf 04, Contract D). Appended last so
 	// existing enum values are untouched.
 	ModalACPPermission
+	// ModalProjectPrompt is the project-binding confirmation (TUI/GUI
+	// parity: the Flutter GUI's ProjectPromptDialog). Appended last so
+	// existing enum values are untouched.
+	ModalProjectPrompt
 )
 
 // ModalItem represents an item in a modal menu.

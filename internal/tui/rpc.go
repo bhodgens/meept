@@ -1349,6 +1349,18 @@ func (c *RPCClient) SetProject(sessionID, projectID string) error {
 	return err
 }
 
+// SetProjectPath binds a session to a project resolved from an absolute
+// path (project.set with the path param — the daemon CreateOrResolves the
+// path, mirroring the Flutter SDK client's setProject(path:) accept flow).
+func (c *RPCClient) SetProjectPath(sessionID, path string) error {
+	params := map[string]string{
+		ParamSessionID: sessionID,
+		"path":         path,
+	}
+	_, err := c.Call("project.set", params)
+	return err
+}
+
 // CreateWorktree creates a session-scoped git worktree.
 func (c *RPCClient) CreateWorktree(sessionID, projectID string) (*types.WorktreeResponse, error) {
 	params := map[string]string{

@@ -154,6 +154,7 @@ type App struct {
 	memoryReview        *models.MemoryReviewModal
 	memoryReviewPending int // status-bar pending-claims count (0 hides it)
 	pendingChangesModal *modals.PendingChangesModal
+	projectPrompt       *modals.ProjectPromptModal
 	pendingChangesCount int // status bar indicator (0 hides it)
 	acpLive             int // live non-closed acp sessions; 0 hides the token
 	// ACP human-permission relay (acp-human-permission-relay leaf 04,
@@ -366,6 +367,7 @@ func NewApp(socketPath string, cwd string) *App {
 	app.usersModal = NewUsersModal(styles)
 	app.memoryReview = models.NewMemoryReviewModal(rpc)
 	app.pendingChangesModal = modals.NewPendingChangesModal(&changesRPCAPI{rpc: rpc})
+	app.projectPrompt = modals.NewProjectPromptModal("", "")
 
 	// Initialize slash autocomplete
 	app.slashAutocomplete = NewSlashAutocomplete(styles)
@@ -924,6 +926,27 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, a.pendingChangesModal.Show(a.currentSession.ID)
 		}
 
+		// Handle Ctrl+G - open the project-binding prompt for the current
+		// session (TUI/GUI parity with the Flutter ProjectPromptDialog).
+		// The dialog also auto-opens on session switch when the session
+		// carries no project context (see SessionSwitchMsg).
+		if msg.String() == "ctrl+g" {
+			// Already open: ignore instead of resetting selection.
+			if a.activeModal == ModalProjectPrompt {
+				return a, nil
+			}
+			if a.currentSession == nil {
+				a.statusMessage = "no active session"
+				a.statusMessageTime = time.Now()
+				return a, tea.Tick(2*time.Second, func(_ time.Time) tea.Msg {
+					return StatusMessageClearMsg{}
+				})
+			}
+			a.activeModal = ModalProjectPrompt
+			a.projectPrompt.Show(a.currentSession.ID, projectPromptDefaultPath(a.currentSession))
+			return a, nil
+		}
+
 		// Handle modal key input first
 		if a.activeModal != ModalNone {
 			return a.handleModalKey(msg)
@@ -1260,10 +1283,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.SwitchToChat {
 				a.currentView = ViewChat
 			}
+			// TUI/GUI parity: the Flutter GUI prompts for a project binding
+			// when an activated session carries none
+			// (SessionProjectChecker.checkAndPrompt on session activation).
+			promptCmd := maybePromptProject(msg.Session)
+			var cmds []tea.Cmd
 			if sessionCmd != nil {
-				return a, tea.Batch(sessionCmd, clearCmd)
+				cmds = append(cmds, sessionCmd)
 			}
-			return a, clearCmd
+			if promptCmd != nil {
+				cmds = append(cmds, promptCmd)
+			}
+			cmds = append(cmds, clearCmd)
+			return a, tea.Batch(cmds...)
 		}
 		return a, nil
 
@@ -1407,6 +1439,55 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.activeModal = ModalSessionRename
 		a.sessionRename.Show(msg.SessionID, msg.CurrentName)
 		return a, nil
+
+	case modals.OpenProjectPromptMsg:
+		// Open the project-binding prompt (TUI/GUI parity with the
+		// Flutter ProjectPromptDialog). Auto-emitted on session switch
+		// when the session has no project context; also reachable via
+		// ctrl+g.
+		if a.projectPrompt == nil {
+			return a, nil
+		}
+		a.activeModal = ModalProjectPrompt
+		a.projectPrompt.Show(msg.SessionID, msg.DefaultPath)
+		return a, nil
+
+	case modals.ProjectConfirmedMsg:
+		// The modal hid itself before emitting this; mirror that on the
+		// App side so the overlay closes either way.
+		a.activeModal = ModalNone
+		// Bind the session: accepted = use the detected CWD (path-based
+		// project.set, like the GUI's accept path); declined = proceed
+		// unbound (the GUI's skip path).
+		if msg.Accepted {
+			sessionID := msg.SessionID
+			path := a.projectPrompt.SessionDefaultPath()
+			return a, func() tea.Msg {
+				err := a.rpc.SetProjectPath(sessionID, path)
+				return SetProjectResultMsg{Err: err}
+			}
+		}
+		a.statusMessage = "continuing without a project"
+		a.statusMessageTime = time.Now()
+		return a, tea.Tick(2*time.Second, func(_ time.Time) tea.Msg {
+			return StatusMessageClearMsg{}
+		})
+
+	case modals.ProjectPickRequestedMsg:
+		// "Pick project..." opens the existing project picker; selecting a
+		// project there binds it via the ProjectSelectMsg path above.
+		a.activeModal = ModalProjectPicker
+		return a, a.projectPicker.RefreshProjects()
+
+	case modals.ProjectDismissedMsg:
+		// Prompt dismissed (esc): session stays unbound, matching the
+		// GUI's skip path.
+		a.activeModal = ModalNone
+		a.statusMessage = "continuing without a project"
+		a.statusMessageTime = time.Now()
+		return a, tea.Tick(2*time.Second, func(_ time.Time) tea.Msg {
+			return StatusMessageClearMsg{}
+		})
 
 	case SessionRenameMsg:
 		if msg.SessionID == "" {
@@ -2643,6 +2724,19 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		return a, a.handleACPPermissionModalKey(keyStr)
+
+	case ModalProjectPrompt:
+		if a.projectPrompt != nil {
+			// The modal matches on msg.String() (runes and named keys);
+			// forward the original KeyMsg like ModalMemoryReview does.
+			_, cmd := a.projectPrompt.Update(msg)
+			if !a.projectPrompt.IsVisible() {
+				a.activeModal = ModalNone
+			}
+			return a, cmd
+		}
+		a.activeModal = ModalNone
+		return a, nil
 	}
 
 	return a, nil
@@ -2928,6 +3022,12 @@ func (a *App) renderModalOverlay() string {
 			return ""
 		}
 		return a.acpPermissionModal.View(a.width, a.height)
+
+	case ModalProjectPrompt:
+		if a.projectPrompt == nil {
+			return ""
+		}
+		return a.projectPrompt.View().Content
 	}
 	return ""
 }
