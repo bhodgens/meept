@@ -460,15 +460,21 @@ using `golang.org/x/tools/cmd/deadcode`.
 **Triggers on:** Staged `.go` files (any path)
 
 **Checks:**
-- Runs `deadcode -test` on BOTH binaries (`./cmd/meept-daemon`, `./cmd/meept`)
-  and normalizes each unreachable function to `path: func Name` (line numbers
-  stripped, so pure code motion never produces churn).
-- Diffs the current set against the committed baseline
-  `.githooks/deadcode-baseline.txt`. Any function unreachable in the working
-  tree but ABSENT from the baseline FAILS the commit.
-- The baseline starts at ~12k entries (the repo's existing dead-code stock).
-  The gate is a ratchet: it only ever blocks NEW additions. Failing output
-  names the exact function and its file.
+- Runs `deadcode -test` on ALL FIVE production binaries (`./cmd/meept-daemon`,
+  `./cmd/meept`, `./cmd/meept-lite`, `./cmd/meept-classifier-test`,
+  `./tools/bridges-eval`) and INTERSECTS the per-binary unreachable sets
+  (each normalized to `path: func Name`; line numbers stripped, so pure code
+  motion never produces churn). A function counts as unwired only if it is
+  unreachable from EVERY main — wired-in-one-binary code is never flagged.
+- Diffs the current intersection against the committed baseline
+  `.githooks/deadcode-baseline.txt`. Any function unreachable from all mains
+  in the working tree but ABSENT from the baseline FAILS the commit.
+- The baseline was rebaselined at 528 entries after the 2026-11-09 wiring
+  campaign (the old union baseline was 13.3k; 88%+ of it was single-binary
+  linkage artifacts). The gate is a ratchet: it only ever blocks NEW
+  additions. Failing output names the exact function and its file.
+- Override the analyzed mains for testing:
+  `MEEPT_DEADCODE_MAINS="./cmd/meept-daemon" .githooks/pre-commit-deadcode`.
 
 **Re-baselining (deliberate, same policy as the bench regression baseline):**
 ```bash
