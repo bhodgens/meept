@@ -119,6 +119,14 @@ func NoPathError(tool string) error {
 // the detection surface for callers that want to surface a "bind a working
 // directory" hint (or a distinct user-language message) instead of a generic
 // tool failure.
+//
+// STATUS (deadcode wave-3): available-but-unused API surface — zero
+// production callers (tests only). The sentinel-detection contract
+// (internal/agent/AGENTS.md) names this as how a CLIENT should detect the
+// unbound-session refusal, but the TUI/GUI surfaces render the sentinel's
+// message text verbatim today and no RPC/comm layer special-cases it.
+// First caller (a client binding hint, a WS event classifier case, etc.)
+// should keep errors.Is-compatible semantics.
 func IsNoWorkingDir(err error) bool {
 	return errors.Is(err, ErrNoWorkingDir)
 }
