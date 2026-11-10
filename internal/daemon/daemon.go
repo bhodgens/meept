@@ -1555,6 +1555,7 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	// (nil voice wiring / disabled local leg = the named disabled-leg
 	// refusal, never "method not found").
 	registerVoiceLocalRPC(components, rpcServer, logger)
+	registerVoiceLinkRPC(components, rpcServer, logger)
 
 	// Create HTTP server (if enabled)
 	var httpSrv *http.Server

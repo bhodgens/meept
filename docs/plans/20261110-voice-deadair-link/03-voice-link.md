@@ -74,3 +74,52 @@ coherent). Touches cmd/meept/voice.go (nobody else does in this tree).
 
 ## Gates
 go test -count=1 -p 2 ./internal/voice/ ./internal/rpc/ ./internal/daemon/ ./cmd/meept/ green; gofmt/vet. Report the e2e run tail verbatim.
+
+## As-built (leaf 03)
+
+- internal/voice/link.go: LinkManager (Open/Close/Status/LiveLinks) over
+  the LinkLegOpener seam (satisfied by *LocalLeg, UNCHANGED) +
+  LinkTranscriptReader (*CallStore.EndedCall). Bridge = four production
+  dialUnix("unix", pair-path) conns + two crossed io.Copy pumps, byte-
+  exact. Up-front refusals: ErrLinkSameEmployee (a==b, zero side
+  effects), ErrNoEmployee (empty id). Unwind is total on b-open failure
+  (ends a) and on mid-dial failure (closes dialed conns, ends both).
+  Closed links stay status-queryable for RetainEnded (30 min default) -
+  the CLI's post-close final transcript read depends on it.
+- Deliberate link-mode calls (documented at the top of link.go): NO
+  per-call barge_in_rms seam exists (LocalLegConfig bakes it at wiring;
+  local.go frozen for this leaf), so machine speech CAN trip the other
+  leg's RMS window - acceptable by design per the C11 one-shot-evidence
+  STT-gated pins (a real transcript interrupts, the chain re-forms).
+  Operator workaround if a run must not interrupt: voice.employee_leg
+  rows / voice.local.barge_in_rms=0 config-level. Greetings stay ON
+  (seed turn + satisfies the splice's client-join grace: greeting PCM
+  crosses into the other leg's mic within JoinTimeout). Silence reaper
+  stays ON (the dead-air circuit breaker). NOTE: a link consumes TWO
+  registry slots; default max_concurrent_calls=2 means a link fills the
+  instance.
+- internal/rpc/voice_link.go: voice.link.open/close/status, seam-based
+  (VoiceLinkSeams func fields, no internal/voice import - mirror of
+  voice_local.go, loopback trust identical).
+- internal/daemon/voice_link_rpc.go: voiceLinkSeams adapter + lazy
+  per-daemon LinkManager + registerVoiceLinkRPC. Store seam reached via
+  linkTranscriptSourceFor (same-package read of w.Employee.store behind
+  the typed-nil guard - voice_employee.go untouched).
+- ORCHESTRATOR WIRING LINE (daemon.go is outside the leaf fence): add
+  next to registerVoiceLocalRPC in internal/daemon/daemon.go (~:1557):
+      registerVoiceLinkRPC(components, rpcServer, logger)
+- CLI cmd/meept/voice.go: `voice link --a X --b Y [--seconds 60]`;
+  linkFlags.validate() refuses missing a/b, a==b, seconds<=0 BEFORE any
+  RPC; ticker-driven 5 s poll prints per-side user/assistant counts,
+  closes at deadline (SIGINT ends the poll early, close still runs),
+  final post-close status read is authoritative, prints both
+  transcripts, exit 0 iff BOTH sides >= 2 assistant turns
+  (linkRequiredAssistantTurns).
+- Tests: internal/voice/link_test.go (fake leg serving REAL unix pair
+  listeners so the production dialer+pumps run unchanged; refusals zero
+  side effects, b-open unwind, dial-failure unwind + conn close probes,
+  byte-exact cross both directions, Close idempotence, status counts +
+  store-failure degrade, distinct concurrent labels);
+  cmd/meept/voice_link_test.go (flag validation incl. early same-a/b
+  refusal through RunE, --seconds default 60, status wire-shape parse,
+  acceptance gate).
