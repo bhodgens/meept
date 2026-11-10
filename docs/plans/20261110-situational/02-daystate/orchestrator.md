@@ -198,10 +198,10 @@ functions — grep-verify no LLM/HTTP inside internal/daystate.
 
 | Child | Status | Commit | Notes |
 |---|---|---|---|
-| 00T | PENDING | | |
-| 01 | PENDING | | |
-| 02 | PENDING | | |
-| 03 | PENDING | | |
+| 00T | COMPLETE | see master | |
+| 01 | COMPLETE | | |
+| 02 | COMPLETE | | |
+| 03 | COMPLETE | | |
 
 ## Integration Test Plan
 

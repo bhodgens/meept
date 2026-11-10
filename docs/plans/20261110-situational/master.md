@@ -238,24 +238,24 @@ all time-dependent tests.
 
 | Branch | Gate | Status |
 |---|---|---|
-| 01-moment | 00T | PENDING |
-| 02-daystate | 00T | PENDING |
-| 03-weather | 00T | PENDING |
+| 01-moment | 00T | COMPLETE |
+| 02-daystate | 00T | COMPLETE |
+| 03-weather | 00T | COMPLETE |
 
 ## Completion Tracking Table
 
 | Child | Status | Commit | Notes |
 |---|---|---|---|
-| 01/00T | PENDING | | |
-| 01/01 | PENDING | | |
-| 01/02 | PENDING | | |
-| 02/00T | PENDING | | |
-| 02/01 | PENDING | | |
-| 02/02 | PENDING | | |
-| 02/03 | PENDING | | |
-| 03/00T | PENDING | | |
-| 03/01 | PENDING | | |
-| 03/02 | PENDING | | |
+| 01/00T | COMPLETE | 23d5a8e5 | |
+| 01/01 | COMPLETE | 967a861f | |
+| 01/02 | COMPLETE | b333b96f | |
+| 02/00T | COMPLETE | 7cf26830 | |
+| 02/01 | COMPLETE | 03ef9ab8 | |
+| 02/02 | COMPLETE | 9808108a | |
+| 02/03 | COMPLETE | 7b3e02ad | |
+| 03/00T | COMPLETE | c3e727b2 | |
+| 03/01 | COMPLETE | d62f6df0 | |
+| 03/02 | COMPLETE | 9808108a | joined with 02/02 |
 
 ## Integration Test Plan
 
@@ -301,3 +301,18 @@ all time-dependent tests.
       deferred (owner is US; counts in prompts, units can flip later).
 - Q3: multiple employees sharing one shop location -> same weather fetch
       (cache keyed by lat/lon handles it; note in 03-01 doc).
+
+
+## Implementation Record (2026-11-10)
+
+All 10 leaves implemented and reviewed in-session by the orchestrator;
+gates: 23d5a8e5 / 7cf26830 / c3e727b2; impls: 967a861f, b333b96f,
+03ef9ab8, 7b3e02ad, d62f6df0, 9808108a (join), contract amendment
+ratified c3e727b2 (concrete-cold TodayLowC<0). Full-suite verification:
+daystate/moment/weather/config/bot/ledger/agent/voice/tools/employee/
+tui/rpc/callerid/contact all -count=1 green; -race green on daemon+
+weather+agent-moment. Live-boot sanity (integration step 3) exercised
+via gate §F chain tests + DEBUG 'moment render' line rather than a full
+daemon boot; daemon boots with awareness default-off, byte-identical
+prompts per D1 goldens (§3/§4 agent tests). Merged to main following
+this record.

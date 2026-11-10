@@ -198,9 +198,9 @@ production knob).
 
 | Child | Status | Commit | Notes |
 |---|---|---|---|
-| 00T | PENDING | | |
-| 01 | PENDING | | |
-| 02 | PENDING | | |
+| 00T | COMPLETE | see master | |
+| 01 | COMPLETE | | |
+| 02 | COMPLETE | | |
 
 ## Integration Test Plan
 
