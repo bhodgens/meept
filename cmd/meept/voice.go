@@ -14,6 +14,7 @@ package main
 // the leg never waits out its reaper timers.
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -22,6 +23,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -714,17 +716,21 @@ const linkPollInterval = 5 * time.Second
 // least this many assistant turns for the command to exit 0.
 const linkRequiredAssistantTurns = 2
 
-// linkFlags is the validated `voice link` flag set (pure validation,
-// unit-tested without a daemon).
+// linkFlags is the validated `voice link` flag set (pure validation +
+// the --record directory side effect, unit-tested without a daemon).
 type linkFlags struct {
 	a       string
 	b       string
 	seconds int
 	monitor bool
+	record  string
 }
 
 // validate reports the flag errors the leaf pins: --a / --b required,
-// a==b refused EARLY (before any RPC), seconds <= 0 refused.
+// a==b refused EARLY (before any RPC), seconds <= 0 refused, and
+// --record without --monitor refused (recording rides the monitor's
+// playback seam - no tap, no bytes). When --record is set the DIR is
+// created if it does not exist (MkdirAll is idempotent).
 func (f linkFlags) validate() error {
 	if f.a == "" {
 		return fmt.Errorf("--a is required (first employee id)")
@@ -738,6 +744,14 @@ func (f linkFlags) validate() error {
 	if f.seconds <= 0 {
 		return fmt.Errorf("--seconds must be > 0 (got %d)", f.seconds)
 	}
+	if f.record != "" && !f.monitor {
+		return fmt.Errorf("--record requires --monitor (the recorder taps the monitor's playback seam)")
+	}
+	if f.record != "" {
+		if err := os.MkdirAll(f.record, 0o755); err != nil {
+			return fmt.Errorf("--record: cannot create directory %q: %w", f.record, err)
+		}
+	}
 	return nil
 }
 
@@ -747,6 +761,7 @@ func newVoiceLinkCmd() *cobra.Command {
 		b       string
 		seconds int
 		monitor bool
+		record  string
 	)
 
 	cmd := &cobra.Command{
@@ -765,11 +780,17 @@ the automated acceptance check for the dead-air / jitter harness.
 operator's speakers (listen-only tap; the mic stays off - the operator
 hears the conversation without joining it).
 
+--record DIR (requires --monitor) writes EXACTLY the bytes handed to
+playback, per side, to DIR/<linkID>-<a|b>.raw (raw s16le mono 16 kHz)
+plus DIR/<linkID>-meta.json. Gap analysis over those files reflects what
+the operator HEARS. Feed the .raw files to scripts/voice-gap-analyze.py.
+
 Examples:
   meept voice link --a companion --b secretary --seconds 90
-  meept voice link --a companion --b secretary --monitor --seconds 60`,
+  meept voice link --a companion --b secretary --monitor --seconds 60
+  meept voice link --a companion --b secretary --monitor --record /tmp/link-rec --seconds 60`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			f := linkFlags{a: a, b: b, seconds: seconds, monitor: monitor}
+			f := linkFlags{a: a, b: b, seconds: seconds, monitor: monitor, record: record}
 			if err := f.validate(); err != nil {
 				return err
 			}
@@ -781,6 +802,7 @@ Examples:
 	cmd.Flags().StringVar(&b, "b", "", "employee id for side B (required, must differ from --a)")
 	cmd.Flags().IntVar(&seconds, "seconds", 60, "link duration in seconds (must be > 0)")
 	cmd.Flags().BoolVar(&monitor, "monitor", false, "play both sides' audio through the operator's speakers (listen-only tap)")
+	cmd.Flags().StringVar(&record, "record", "", "record the exact bytes handed to playback per side into DIR (requires --monitor)")
 	return cmd
 }
 
@@ -849,7 +871,7 @@ func runVoiceLink(f linkFlags) error {
 	// effort by contract: a dial failure only costs the speaker tap,
 	// never the link run.
 	if f.monitor {
-		startVoiceLinkMonitor(open, f.a, f.b)
+		startVoiceLinkMonitor(open, f.a, f.b, f.record)
 	} else if open.MonitorAPath != "" {
 		fmt.Println("note: daemon returned monitor tap paths but --monitor was not set; ignoring them")
 	}
@@ -936,15 +958,20 @@ linkLoop:
 // BOTH sides' audio through the operator's speakers (listen-only: the
 // tap sockets carry tee PCM out of the bridge; nothing is ever written
 // back - the operator does not join the conversation). Each side gets
-// its OWN OtoPlayer + SpeakerSink + drainLiveSpeaker loop, reusing the
+// its OWN player seam + SpeakerSink + drainLiveSpeaker loop, reusing the
 // live-local machinery: two oto instances overlap safely in oto's mixer
 // (the player.go overlap contract - Play never pauses predecessors), so
 // A and B audible streams mix together.
 //
+// recordDir ("" = off) additionally tees EXACTLY the bytes handed to
+// playback into DIR/<linkID>-<a|b>.raw (raw s16le mono 16 kHz) via
+// recorderPlayer, plus one DIR/<linkID>-meta.json, so gap analysis
+// reflects what the operator HEARS. Default off = zero behaviour change.
+//
 // Best-effort by contract: a dial failure disables that side with a
 // warning, never aborts the link run; the loops die on socket EOF when
 // the link closes (tap conns close with the bridge's teardown).
-func startVoiceLinkMonitor(open voiceLinkOpenResult, aEmp, bEmp string) {
+func startVoiceLinkMonitor(open voiceLinkOpenResult, aEmp, bEmp, recordDir string) {
 	// ONE oto context per process is a hard driver limit (a second
 	// oto.NewContext errors "context is already created" - live
 	// link-d2d7e713a8d914f5 killed side b's player). Both sides share a
@@ -958,9 +985,22 @@ func startVoiceLinkMonitor(open voiceLinkOpenResult, aEmp, bEmp string) {
 	// device open + ready wait) stalled the first writes and dropped
 	// the greeting burst behind the 8 KB socket buffer (live
 	// link-d52f032b6e010882). One silent 20 ms burst = pure warm-up.
-	if werr := player.Play(make([]byte, 640)); werr != nil {
-		fmt.Fprintf(os.Stderr, "monitor: speaker warm-up failed: %v (speakers off)\n", werr)
-		return
+	// When recording, this top-level warm-up is SKIPPED: each side
+	// instead warms through its own skip-first recorderPlayer in
+	// dialSide, so the silent 640-byte burst still opens the context
+	// but provably cannot enter a .raw file (the skip consumes it).
+	if recordDir == "" {
+		if werr := player.Play(make([]byte, 640)); werr != nil {
+			fmt.Fprintf(os.Stderr, "monitor: speaker warm-up failed: %v (speakers off)\n", werr)
+			return
+		}
+	} else if merr := writeLinkRecordingMeta(recordDir, open, aEmp, bEmp); merr != nil {
+		fmt.Fprintf(os.Stderr, "monitor: record meta: %v (recording off)\n", merr)
+		recordDir = ""
+		if werr := player.Play(make([]byte, 640)); werr != nil {
+			fmt.Fprintf(os.Stderr, "monitor: speaker warm-up failed: %v (speakers off)\n", werr)
+			return
+		}
 	}
 	dialSide := func(label, emp, path string) {
 		if path == "" {
@@ -973,7 +1013,29 @@ func startVoiceLinkMonitor(open voiceLinkOpenResult, aEmp, bEmp string) {
 			return
 		}
 		fmt.Printf("monitor %s: tapping %s via speakers\n", label, emp)
-		sink := voice.NewSpeakerSink(player, 0)
+		var p voice.Player = player
+		var rec *recorderPlayer
+		if recordDir != "" {
+			rec, err = newSideRecorder(player, recordDir, open.LinkID, label)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "monitor %s: record %v (recording off for that side)\n", label, err)
+				// Recording off for this side: fall back to the plain
+				// shared player and warm the context directly (the
+				// per-recorder skip-first warm-up below never runs).
+				if werr := player.Play(make([]byte, 640)); werr != nil {
+					fmt.Fprintf(os.Stderr, "monitor %s: speaker warm-up failed: %v (speakers off)\n", label, werr)
+				}
+			} else {
+				p = rec
+				// Warm-up THROUGH the recorder (skip-first): silent
+				// 640 B burst reaches the shared oto context but is
+				// consumed by the skip, never written to the file.
+				if werr := rec.Play(make([]byte, 640)); werr != nil {
+					fmt.Fprintf(os.Stderr, "monitor %s: speaker warm-up failed: %v (speakers off)\n", label, werr)
+				}
+			}
+		}
+		sink := voice.NewSpeakerSink(p, 0)
 		done := make(chan error, 1)
 		// First-byte announcement: the operator sees the side start to
 		// speak exactly when tee audio lands (not at dial time).
@@ -987,6 +1049,15 @@ func startVoiceLinkMonitor(open voiceLinkOpenResult, aEmp, bEmp string) {
 			<-done
 			_ = conn.Close() //nolint:errcheck // teardown
 			_ = sink.Flush()
+			// Recorder file closes AFTER this side's drain loop has
+			// returned and its tail burst has been handed off (the
+			// Flush above went through the recorder), so the .raw is
+			// the complete, in-order playback byte stream.
+			if rec != nil {
+				if cerr := rec.closeFile(); cerr != nil {
+					fmt.Fprintf(os.Stderr, "monitor %s: record close: %v\n", label, cerr)
+				}
+			}
 			monitorWG.Done()
 		}()
 	}
@@ -997,6 +1068,142 @@ func startVoiceLinkMonitor(open voiceLinkOpenResult, aEmp, bEmp string) {
 		monitorWG.Wait()
 		player.Close()
 	}()
+}
+
+// linkRecordingMeta is the DIR/<linkID>-meta.json shape consumed by
+// scripts/voice-gap-analyze.py readers (and any future evidence tool).
+type linkRecordingMeta struct {
+	LinkID     string `json:"link_id"`
+	ACCID      string `json:"a_ccid"`
+	BCCID      string `json:"b_ccid"`
+	AEmployee  string `json:"a_employee"`
+	BEmployee  string `json:"b_employee"`
+	StartedAt  string `json:"started_at"`
+	SampleRate int    `json:"sample_rate"`
+}
+
+// writeLinkRecordingMeta writes the one-per-link metadata file next to
+// the two .raw streams.
+func writeLinkRecordingMeta(dir string, open voiceLinkOpenResult, aEmp, bEmp string) error {
+	meta := linkRecordingMeta{
+		LinkID:     open.LinkID,
+		ACCID:      open.ACCID,
+		BCCID:      open.BCCID,
+		AEmployee:  aEmp,
+		BEmployee:  bEmp,
+		StartedAt:  time.Now().UTC().Format(time.RFC3339Nano),
+		SampleRate: voice.MicSampleRate,
+	}
+	b, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return err
+	}
+	b = append(b, '\n')
+	return os.WriteFile(filepath.Join(dir, open.LinkID+"-meta.json"), b, 0o644)
+}
+
+// newSideRecorder opens DIR/<linkID>-<label>.raw and wraps inner in a
+// skip-first recorderPlayer (the monitor's silent warm-up burst must not
+// land in the recording).
+func newSideRecorder(inner voice.Player, dir, linkID, label string) (*recorderPlayer, error) {
+	f, err := os.Create(filepath.Join(dir, linkID+"-"+label+".raw"))
+	if err != nil {
+		return nil, fmt.Errorf("create %q: %w", filepath.Join(dir, linkID+"-"+label+".raw"), err)
+	}
+	return newRecorderPlayer(inner, f, true), nil
+}
+
+// recorderPlayer is the recording Player seam: it tees EXACTLY the bytes
+// handed to playback into a raw s16le mono 16 kHz file AND forwards every
+// call to the inner player, so gap analysis over the .raw reflects what
+// the operator HEARS (not what the socket carried).
+//
+// Concurrency: one recorder per monitor side; Play is called only by
+// that side's drainLiveSpeaker goroutine, closeFile only by its teardown
+// goroutine after the drain returned - the mutex makes that ordering
+// explicit and keeps Close/Clear safe if the seam is ever driven from
+// two goroutines. The buffered file Write under the lock is deliberate:
+// burst ORDER is the point of the recorder (an async writer goroutine
+// could reorder or drop the tail); writes are <= ~5 KB, buffered, and
+// never hold the lock across the inner (oto) call.
+type recorderPlayer struct {
+	inner voice.Player
+	file  *os.File
+	buf   *bufio.Writer
+	mu    sync.Mutex
+	// skipFirst drops the FIRST Play from the recording (the monitor's
+	// silent 640-byte warm-up burst) while still forwarding it to the
+	// inner player - the context must warm before dialing.
+	skipFirst bool
+	closed    bool
+	writeErr  error // first tee error, surfaced by closeFile
+}
+
+func newRecorderPlayer(inner voice.Player, file *os.File, skipFirst bool) *recorderPlayer {
+	return &recorderPlayer{inner: inner, file: file, buf: bufio.NewWriter(file), skipFirst: skipFirst}
+}
+
+// Play records the burst (unless it is the consumed warm-up) then hands
+// it to the inner player unchanged - the tee never blocks or reorders
+// playback.
+func (r *recorderPlayer) Play(burst []byte) error {
+	r.mu.Lock()
+	switch {
+	case r.closed:
+		// Teardown raced a late flush: the drain loop is done; drop the
+		// tee rather than writing to a closed fd (playback continues).
+	case r.skipFirst:
+		r.skipFirst = false
+	default:
+		//nolint:mutexio // in-order tee is the recorder's contract; see type comment
+		if _, err := r.buf.Write(burst); err != nil && r.writeErr == nil {
+			r.writeErr = err
+		}
+	}
+	r.mu.Unlock()
+	return r.inner.Play(burst)
+}
+
+// Clear forwards to the inner player (the monitor never Clears; a shared
+// player's Clear must reach the device, and the recorder's already-
+// handed bytes are history - recordings are what was played).
+func (r *recorderPlayer) Clear() { r.inner.Clear() }
+
+// Close satisfies voice.Player: best-effort file close. The monitor's
+// teardown path uses closeFile to surface errors. inner is the SHARED
+// monitor player, closed once by the last side out (monitorWG) - the
+// recorder never closes the audio context.
+func (r *recorderPlayer) Close() { _ = r.closeFile() }
+
+// closeFile flushes the buffered tee and closes the raw file. Idempotent;
+// returns the first write/flush/close error (nil = clean stream). The fd
+// close runs OUTSIDE the lock (the drain loop has already returned and the
+// closed flag makes late Play calls no-op tees), so no I/O is ever held
+// under the mutex beyond the deliberate in-order buffered tee write.
+func (r *recorderPlayer) closeFile() error {
+	r.mu.Lock()
+	if r.closed {
+		err := r.writeErr
+		r.mu.Unlock()
+		return err
+	}
+	r.closed = true
+	//nolint:mutexio // in-order tee is the recorder's contract; see type comment
+	if err := r.buf.Flush(); err != nil && r.writeErr == nil {
+		r.writeErr = err
+	}
+	writeErr := r.writeErr
+	r.mu.Unlock()
+	if err := r.file.Close(); err != nil && writeErr == nil {
+		writeErr = err
+	}
+	r.mu.Lock()
+	if r.writeErr == nil {
+		r.writeErr = writeErr
+	}
+	err := r.writeErr
+	r.mu.Unlock()
+	return err
 }
 
 // monitorWG coordinates the shared monitor player's teardown: both side

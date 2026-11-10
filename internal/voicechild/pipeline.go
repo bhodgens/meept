@@ -60,15 +60,6 @@ func (p *pipeline) sttProvider() STTProvider {
 	return p.stt
 }
 
-// ttsProvider returns the pipeline's TTS adapter under the playMu regime
-// (audit fix 2). The stub IS a valid provider for playback (deterministic
-// audio in tests), so no stub filter here.
-func (p *pipeline) ttsProvider() TTSProvider {
-	p.playMu.Lock()
-	defer p.playMu.Unlock()
-	return p.tts
-}
-
 // pipeline is one live call: its jargo worker and the per-call audio pair
 // client sockets (C2). All public entry points are safe for concurrent use;
 // a child hosts N pipelines concurrently (map[ccid]*pipeline in child.go).
@@ -122,12 +113,41 @@ type pipeline struct {
 	// two utterances can never interleave PCM writes on the same audioOut
 	// socket. Concurrent says are the NORMAL path (supervisor checks
 	// sentence N+1 while N plays), so this serialization is load-bearing.
-	playMu       sync.Mutex
-	dropQueued   bool        // clear received: drop queued audio, stop writes
-	interrupted  bool        // one interrupt per barge-in until playback restarts
-	speaking     bool        // playback active (say in flight)
+	//
+	// Synthesis is SPLIT from pacing (TTS pipeline serialization fix): the
+	// worker starts frame N+1's Speak() on a dedicated synth goroutine the
+	// moment frame N's audio enters the write loop, so the provider's
+	// full-generation latency (the qwen3 server does not stream despite
+	// stream=true; Speak blocks 0.7-4.8 s) overlaps the daemon pacer's
+	// real-time drain of N. Without it, synthesis of N+1 only began after
+	// N had FULLY PLAYED and every sentence break was a dead 1-4 s gap at
+	// the speakers (daemon log: "localsplice pacer stall gap_ms=4620").
+	// Prefetch depth is bounded to ONE frame: PCM still leaves audioOut
+	// strictly in dequeue order (one writer), at most one extra utterance
+	// is ever synthesizing/open, and a clear retires the lookahead with
+	// the same playGen gate (its reader is cancelled AND closed, so no
+	// stale bytes reach the socket after the barge-in).
+	playMu      sync.Mutex
+	dropQueued  bool // clear received: drop queued audio, stop writes
+	interrupted bool // one interrupt per barge-in until playback restarts
+	speaking    bool // playback active (say in flight)
+	// writingNow (playMu) is true while the worker is INSIDE a frame's
+	// chunk write loop (set with speaking==true in playbackStream,
+	// cleared on its exit). It gates the enqueueSay prefetch hook: a say
+	// that arrives while sentence N's audio is actively pacing may start
+	// N+1's synthesis immediately; one that arrives while the worker is
+	// between frames (synthesizing N, or parked) stays queued and gets
+	// its prefetch from the worker's own write-start hook instead —
+	// keeping synth depth at ONE frame past the current write.
+	writingNow   bool
 	sayQueue     []queuedSay // pending say frames (gen-stamped), drained FIFO by the worker (audit fix 8: replaces the never-consumed outCh placeholder)
 	playWorkerUp bool        // a playback worker goroutine is draining sayQueue
+	// synthJob (playMu) is the ONE in-flight or prefetched synthesis the
+	// worker owns: nil while no Speak is outstanding. clear() cancels it
+	// (its Speak ctx) so an interrupted turn stops burning provider
+	// latency; awaitSynth/retireSynth nil the slot. See synthJob,
+	// registerSynthLocked, tryLaunchPrefetch.
+	synthJob *synthJob
 	// playGen (bughunt 2026-11-07 voice F-1): bumped by clear(); each
 	// stream carries the gen it started under and aborts when
 	// the gen moves. dropQueued becomes per-barge-in (reset by the next
@@ -586,37 +606,270 @@ func (p *pipeline) enqueueSay(frame voiceframe.Frame) error {
 
 	if !workerUp {
 		go p.playbackWorker()
+	} else {
+		// OVERLAP POINT 2: this draft arrived while the worker is
+		// actively pacing an earlier frame's audio (writingNow) — the
+		// NORMAL supervisor path (sentence N+1 is checked while N
+		// plays). Start its synthesis now instead of waiting for N to
+		// fully drain; the single synth slot keeps depth at one. The
+		// hook is playMu-guarded and lock-free inside Speak; safe to
+		// call from the frame handler. No-op (draft stays queued) when
+		// the worker is between frames — its write-start hook (OVERLAP
+		// POINT 1) will pick it up.
+		p.tryLaunchPrefetch(true)
 	}
 	return nil
 }
 
+// synthResult is what a synthJob delivers when the provider's Speak call
+// returns: the per-frame PCM reader (nil on failure), the error, and how
+// long synthesis itself took (telemetry: synth_ms vs write_ms per stream
+// proves the prefetch overlap in the cadence log).
+type synthResult struct {
+	pcm      io.ReadCloser
+	err      error
+	synthDur time.Duration
+}
+
+// synthJob is one in-flight synthesis: Speak runs on a dedicated
+// goroutine (never on the worker, never across playMu), the worker owns
+// the result via done, and cancel retires the provider request (a clear
+// during synthesis aborts Speak at the transport: the providers all build
+// requests on the passed ctx — http.NewRequestWithContext / killed
+// subprocesses). done is buffered 1 so the synth goroutine never blocks:
+// the job's OWNER — awaitSynth (worker) or retireSynth (background
+// drain) — receives it exactly once per job.
+type synthJob struct {
+	frame  voiceframe.Frame
+	gen    uint64
+	done   chan synthResult
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+// registerSynthLocked claims the playMu synth slot for one dequeued
+// frame and returns the job (unstarted). Caller holds playMu. ONE slot
+// at a time per pipeline is the prefetch bound: while a job is
+// registered, no second synthesis can start, and the worker only
+// registers a prefetch for the frame whose PREDECESSOR has entered the
+// write loop. p.ctx never changes after construction, so deriving the
+// job's cancellable ctx under the lock is safe and keeps clear()
+// (which reads p.synthJob under the same lock) able to cancel a Speak
+// that has launched by the time it fires.
+func (p *pipeline) registerSynthLocked(item queuedSay) *synthJob {
+	jobCtx, cancel := context.WithCancel(p.ctx)
+	job := &synthJob{
+		frame:  item.frame,
+		gen:    item.gen,
+		done:   make(chan synthResult, 1),
+		ctx:    jobCtx,
+		cancel: cancel,
+	}
+	p.synthJob = job
+	return job
+}
+
+// runSynth starts the registered job's Speak on a dedicated goroutine
+// (or resolves it synchronously when no provider is installed). Captures
+// the provider the caller read under playMu — the same regime as every
+// other p.tts read (audit fix 2). No lock is held across Speak (mutexio).
+func (p *pipeline) runSynth(tts TTSProvider, job *synthJob) {
+	if tts == nil {
+		job.done <- synthResult{err: errNoTTSProvider}
+		return
+	}
+	go func() {
+		start := time.Now()
+		r, err := tts.Speak(WithTTSContext(job.ctx, p.ccid), job.frame.Text)
+		job.done <- synthResult{pcm: r, err: err, synthDur: time.Since(start)}
+	}()
+}
+
+// awaitSynth blocks for the job's Speak result and releases the playMu
+// slot (the worker owns the reader from here). ok=false means the
+// pipeline died while Speak was running: a background drain still
+// receives the result (exactly one receiver per job, always) and closes
+// any late reader, so nothing leaks and nothing hangs.
+func (p *pipeline) awaitSynth(job *synthJob) (synthResult, bool) {
+	select {
+	case res := <-job.done:
+		p.releaseSynthSlot(job)
+		return res, true
+	case <-p.ctx.Done():
+		p.releaseSynthSlot(job)
+		go func() {
+			res := <-job.done
+			if res.pcm != nil {
+				_ = res.pcm.Close() //nolint:mutexio // teardown drain, no lock held
+			}
+		}()
+		return synthResult{err: p.ctx.Err()}, false
+	}
+}
+
+// releaseSynthSlot clears the playMu slot if it still points at this job
+// (clear() never nils it; retireSynth's drain may have done it first).
+func (p *pipeline) releaseSynthSlot(job *synthJob) {
+	p.playMu.Lock()
+	if p.synthJob == job {
+		p.synthJob = nil
+	}
+	p.playMu.Unlock()
+}
+
+// retireSynth drops a job the worker will never play (a prefetch killed
+// by a clear or a torn-down ctx): take the slot synchronously — the
+// worker is the ONLY caller, and it never retires the same job twice —
+// then cancel Speak at the transport and drain the result in the
+// background, closing a reader that lands too late to play. The
+// prefetched PCM NEVER reaches the socket. Safe on an already-delivered
+// job (cancel is idempotent; done is buffered 1, so the drain receive
+// never blocks on a Speak that already answered).
+func (p *pipeline) retireSynth(job *synthJob) {
+	job.cancel()
+	p.releaseSynthSlot(job)
+	go func() {
+		res := <-job.done
+		if res.pcm != nil {
+			_ = res.pcm.Close() //nolint:mutexio // retire drain, no lock held
+		}
+	}()
+}
+
+// errNoTTSProvider surfaces the "provider not installed" drop through
+// the job result so the worker logs the same error line the old inline
+// check did.
+var errNoTTSProvider = errors.New("voicechild: tts provider not installed; dropping say")
+
+// tryLaunchPrefetch starts the NEXT queued draft's synthesis while a
+// frame's audio is being (or is about to be) paced to the .out socket.
+// This is the overlap: sentence N+1's Speak begins during sentence N's
+// playback instead of after it has fully drained, so the provider's full-
+// generation latency (qwen3 does not stream; 0.7-4.8 s) hides inside the
+// daemon pacer's real-time drain of N. The draft STAYS-POP from sayQueue
+// but keeps its gen stamp: a clear retires it exactly like an unpopped
+// queued draft, and the prefetched reader is cancelled and closed,
+// never written.
+//
+// Depth is ONE frame (the single p.synthJob slot): nothing is
+// synthesized while a synthesis is outstanding, so frame N+2 never
+// starts before N+1's write phase began — memory stays ~one utterance.
+//
+// fromEnqueue=true is the enqueueSay path: the new draft may only
+// prefetch while the worker is actively writing (writingNow) — the same
+// depth contract. fromEnqueue=false is the worker's own hook fired
+// right before it enters the write loop for frame N (N+1 may start
+// generating even though N's first chunk has not left yet — there is no
+// second reader to collide with, and Speak calls that overlap a live
+// READER would need a real pacing stall to occur, which is exactly the
+// gap this prefetch removes).
+func (p *pipeline) tryLaunchPrefetch(fromEnqueue bool) {
+	p.playMu.Lock()
+	if !p.playWorkerUp || p.synthJob != nil || p.ctx.Err() != nil {
+		p.playMu.Unlock()
+		return
+	}
+	if fromEnqueue && !p.writingNow {
+		p.playMu.Unlock()
+		return
+	}
+	if len(p.sayQueue) == 0 || p.sayQueue[0].gen != p.playGen {
+		p.playMu.Unlock()
+		return
+	}
+	item := p.sayQueue[0]
+	p.sayQueue = p.sayQueue[1:]
+	tts := p.tts
+	job := p.registerSynthLocked(item)
+	p.playMu.Unlock()
+	p.runSynth(tts, job)
+}
+
 // playbackWorker is the single drain loop for sayQueue (audit fix 1). It
-// processes frames strictly one at a time, so audioOut.Write is only ever
-// reached from one goroutine at a time per pipeline. The worker exits when
+// writes frames strictly one at a time, so audioOut.Write is only ever
+// reached from one goroutine at a time per pipeline — PCM leaves in
+// dequeue order, one writer. Synthesis is split off the write path: a
+// frame's Speak ran on a dedicated goroutine while the PREVIOUS frame
+// was still pacing (claimed from the synth slot at the top of the
+// iteration), so the worker only blocks on generation when there was no
+// playback to overlap it with (head of a burst). The worker exits when
 // the queue empties or the pipeline ctx dies; a concurrent enqueueSay
 // re-launches it (playWorkerUp is released under playMu in the same
-// critical section that observes an empty queue, so no frame is ever
-// stranded).
+// critical section that observes an empty queue and no outstanding
+// synth slot, so no frame is ever stranded).
 func (p *pipeline) playbackWorker() {
 	for {
+		var item queuedSay
+		var job *synthJob
+		var tts TTSProvider
 		p.playMu.Lock()
-		if len(p.sayQueue) == 0 || p.ctx.Err() != nil {
-			// Release the slot atomically with the emptiness check:
-			// an enqueueSay after this point spawns a fresh worker.
-			p.playWorkerUp = false
+		job = p.synthJob
+		if job != nil {
+			// A prefetch launched during the previous write — this
+			// frame's synthesis is already running. The slot stays
+			// registered until awaitSynth completes so a clear racing
+			// the remaining Speak latency still cancels it.
+			item = queuedSay{frame: job.frame, gen: job.gen}
+			retired := job.gen != p.playGen || p.ctx.Err() != nil
 			p.playMu.Unlock()
-			return
+			if retired {
+				p.retireSynth(job)
+				continue
+			}
+		} else {
+			if len(p.sayQueue) == 0 || p.ctx.Err() != nil {
+				// Release the slot atomically with the emptiness check:
+				// an enqueueSay after this point spawns a fresh worker.
+				p.playWorkerUp = false
+				p.playMu.Unlock()
+				return
+			}
+			item = p.sayQueue[0]
+			p.sayQueue = p.sayQueue[1:]
+			retired := item.gen != p.playGen
+			if retired {
+				p.playMu.Unlock()
+				continue
+			}
+			// Head of a burst (nothing was playing to overlap against):
+			// synthesize now and wait — the old behavior for the first
+			// sentence of every turn.
+			job = p.registerSynthLocked(item)
+			tts = p.tts
+			p.playMu.Unlock()
+			p.runSynth(tts, job)
 		}
-		item := p.sayQueue[0]
-		p.sayQueue = p.sayQueue[1:]
-		// A clear received between enqueue and dequeue bumped playGen:
-		// this queued draft is dropped (C1 barge-in contract).
-		retired := item.gen != p.playGen
+		res, ok := p.awaitSynth(job)
+		if !ok {
+			return // pipeline torn down mid-synth; awaitSynth drained
+		}
+		p.playMu.Lock()
+		genRetired := p.playGen != job.gen
 		p.playMu.Unlock()
-		if retired {
+		if genRetired {
+			// A clear landed while Speak was generating: the draft is
+			// retired — close the reader, never touch the socket, and
+			// do NOT error-log: a cancelled Speak is the EXPECTED
+			// outcome of a barge-in during synthesis (clear() cancels
+			// the registered job).
+			if res.pcm != nil {
+				_ = res.pcm.Close() //nolint:mutexio // abort path, no lock held
+			}
 			continue
 		}
-		p.playbackStream(item.frame, item.gen)
+		if res.err != nil {
+			p.logger.Error("voicechild: tts speak", "err", res.err, "call_id", p.ccid)
+			if res.pcm != nil {
+				_ = res.pcm.Close() //nolint:mutexio // error path, no lock held
+			}
+			continue
+		}
+
+		// The synth slot (if a prefetch is registered) is claimed at the
+		// top of the next iteration; the write-start prefetch hook lives
+		// inside playbackStream (OVERLAP POINT 1) so it fires in the
+		// same critical section that raises writingNow.
+		p.playbackStream(res.pcm, item.gen, res.synthDur)
 	}
 }
 
@@ -633,34 +886,25 @@ type queuedSay struct {
 	gen   uint64
 }
 
-// playbackStream synthesizes one frame's text and writes its PCM to the
-// .out socket (child->daemon). Called ONLY from playbackWorker — never
-// concurrently for the same pipeline, so audioOut writes are serialized by
-// construction (audit fix 1). A clear received mid-stream drops the
-// remaining audio and stops writes (T4): the stream carries the playGen it
-// started under, and clear() bumps the gen, so an interrupted stream aborts
-// even after a later say re-opens the dropQueued gate (bughunt 2026-11-07
-// voice F-1).
-func (p *pipeline) playbackStream(frame voiceframe.Frame, gen uint64) {
-	tts := p.ttsProvider()
-	if tts == nil {
-		p.logger.Error("voicechild: tts provider not installed; dropping say", "call_id", p.ccid)
-		return
-	}
-	pcm, err := tts.Speak(WithTTSContext(p.ctx, p.ccid), frame.Text)
-	if err != nil {
-		p.logger.Error("voicechild: tts speak", "err", err, "call_id", p.ccid)
-		return
-	}
+// playbackStream writes one frame's already-synthesized PCM to the .out
+// socket (child->daemon). Called ONLY from playbackWorker — never
+// concurrently for the same pipeline, so audioOut writes are serialized
+// by construction (audit fix 1). A clear received mid-stream drops the
+// remaining audio and stops writes (T4): the stream carries the playGen
+// it started under, and clear() bumps the gen, so an interrupted stream
+// aborts even after a later say re-opens the dropQueued gate (bughunt
+// 2026-11-07 voice F-1). `pcm` is the synth goroutine's reader — this
+// function owns closing it. synthDur is how long Speak took before this
+// audio existed (telemetry; see the cadence report).
+func (p *pipeline) playbackStream(pcm io.ReadCloser, gen uint64, synthDur time.Duration) {
 	defer func() { _ = pcm.Close() }() //nolint:mutexio // deferred close, no lock held
 
 	p.playMu.Lock()
 	if p.playGen != gen {
-		// A clear retired this stream's generation between dequeue and
-		// here (or between Speak() and here): it must not start. The
-		// stamped-gen check subsumes the old dropQueued gate — a clear
-		// always bumps playGen, so dropQueued is never true at a
-		// matching gen.
+		// A clear retired this stream's generation between synth and
+		// here: it must not start. The stamped-gen check subsumes the
+		// old dropQueued gate — a clear always bumps playGen, so
+		// dropQueued is never true at a matching gen.
 		p.playMu.Unlock()
 		return
 	}
@@ -674,9 +918,11 @@ func (p *pipeline) playbackStream(frame voiceframe.Frame, gen uint64) {
 	p.rmsRun = 0
 	p.rmsEnergyRun = 0
 	p.speaking = true
+	p.writingNow = true
 	p.playMu.Unlock()
 	defer func() {
 		p.playMu.Lock()
+		p.writingNow = false
 		// Only the current generation may clear `speaking` (a stale,
 		// aborted stream must not mute the barge-in VAD of a newer say).
 		if p.playGen == gen {
@@ -685,24 +931,42 @@ func (p *pipeline) playbackStream(frame voiceframe.Frame, gen uint64) {
 		p.playMu.Unlock()
 	}()
 
+	// OVERLAP POINT 1: this frame's audio is about to enter the pacing
+	// loop, so the NEXT queued draft's full generation may start now —
+	// sentence N+1's Speak runs while the daemon pacer drains N at real
+	// time instead of starting only after N fully played (the serial
+	// chain that put a 0.7-4.8 s dead gap at every sentence break).
+	// Depth one: the slot is empty here (awaitSynth released it), so
+	// this registers at most ONE lookahead synth; nothing further starts
+	// until this draft's write phase begins.
+	p.tryLaunchPrefetch(false)
+
 	chunk, err := voiceframe.ChunkBytes(p.codec, p.sampleRt)
 	if err != nil {
 		p.logger.Error("voicechild: playback chunk size", "err", err, "call_id", p.ccid)
 		return
 	}
-	// Jitter instrumentation (2026-11-09 chop hunt): ttsRead measures the
-	// provider stream's chunk ARRIVALS (network + synth side), outWrite
-	// the .out socket hand-off cadence. speakStart is set by the caller
-	// around Speak(); firstRead counts down on the first byte. One INFO
-	// report per finished stream goes to the child's stderr (inherited
-	// into the daemon log under -f).
+	// Jitter instrumentation (2026-11-09 chop hunt; extended by the
+	// prefetch fix): synth_ms is how long Speak blocked before this
+	// audio existed; write_ms is this stream's wall-clock pacing time;
+	// ttsRead measures the provider stream's chunk ARRIVALS (network +
+	// synth side), outWrite the .out socket hand-off cadence. With the
+	// one-frame prefetch working, stream N+1's synth_ms overlaps stream
+	// N's write_ms, so the next runs can prove the overlap from the log
+	// alone: a dead gap at a sentence break survives only when
+	// synth_ms(N+1) > write_ms(N). One INFO report per finished stream
+	// goes to the child's stderr (inherited into the daemon log under
+	// -f).
 	ttsRead := voiceframe.NewCadence(20*time.Millisecond, 8192)
 	outWrite := voiceframe.NewCadence(20*time.Millisecond, 8192)
+	streamStart := time.Now()
 	defer func() {
 		tr := ttsRead.Report()
 		ow := outWrite.Report()
 		p.logger.Info("voicechild: playback cadence", "call_id", p.ccid,
 			"events", tr.Events, "bytes", tr.BytesTotal,
+			"synth_ms", synthDur.Milliseconds(),
+			"write_ms", time.Since(streamStart).Milliseconds(),
 			"read_mean_ms", tr.MeanGap.Milliseconds(),
 			"read_med_ms", tr.MedianGap.Milliseconds(),
 			"read_p95_ms", tr.P95Gap.Milliseconds(),
@@ -802,7 +1066,16 @@ func (p *pipeline) clear() {
 	// for speaking==true synchronize with the next playback's latch
 	// re-arm, which happens in the same critical section).
 	p.speaking = false
+	// Prefetch fix: the one in-flight synthesis (the prefetched frame,
+	// or the head-of-burst Speak still generating) belongs to the
+	// retired generation — cancel its Speak ctx so an interrupted turn
+	// stops burning provider latency, and its reader — if one still
+	// lands — is closed by the worker's retire path, never written.
+	job := p.synthJob
 	p.playMu.Unlock()
+	if job != nil {
+		job.cancel()
+	}
 }
 
 // noteBargeIn records caller speech during playback and reports whether an

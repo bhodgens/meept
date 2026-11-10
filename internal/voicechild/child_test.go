@@ -665,6 +665,20 @@ func (p *pipeline) isDropped() bool {
 	return p.dropQueued
 }
 
+// assertNoBytesWithin fails if the .out socket delivers ANY bytes within
+// the window — the post-clear silence contract (barge-in drops the
+// interrupted generation's audio, prefetched or otherwise, and stale
+// bytes must never reach the daemon).
+func assertNoBytesWithin(t *testing.T, out net.Conn, window time.Duration, msg string) {
+	t.Helper()
+	_ = out.SetReadDeadline(time.Now().Add(window))
+	buf := make([]byte, 4096)
+	n, _ := out.Read(buf)
+	if n != 0 {
+		t.Fatalf("%s: got %d bytes on .out within %s", msg, n, window)
+	}
+}
+
 // isTransStarted reports whether the transcript session claim landed
 // (transMu regime — tests must not read the field bare under -race).
 func (p *pipeline) isTransStarted() bool {
@@ -679,6 +693,32 @@ func (p *pipeline) queuedSayCount() int {
 	p.playMu.Lock()
 	defer p.playMu.Unlock()
 	return len(p.sayQueue)
+}
+
+// pendingSayCount reports every say frame the worker still owes audio
+// to: queued drafts PLUS the one prefetch whose synthesis is in flight
+// (it left sayQueue at prefetch launch but is still an unplayed frame).
+// Tests that pin "clear drops everything queued" must count this, not
+// len(sayQueue): with bounded prefetch the queue alone no longer holds
+// the whole pending set.
+func (p *pipeline) pendingSayCount() int {
+	p.playMu.Lock()
+	defer p.playMu.Unlock()
+	n := len(p.sayQueue)
+	if p.synthJob != nil {
+		n++
+	}
+	return n
+}
+
+// synthActive reports whether a synthesis is outstanding (head frame
+// generating or prefetch in flight) — the test seam for the prefetch
+// depth bound: never more than one, and only ever the frame whose
+// predecessor has entered the write loop.
+func (p *pipeline) synthActive() bool {
+	p.playMu.Lock()
+	defer p.playMu.Unlock()
+	return p.synthJob != nil
 }
 
 // swapTTS installs a test TTS under playMu — the same lock regime the
