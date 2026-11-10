@@ -30,6 +30,7 @@ import (
 	"log/slog"
 
 	"github.com/caimlas/meept/internal/agent"
+	"github.com/caimlas/meept/internal/callerid"
 	"github.com/caimlas/meept/internal/ledger"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tools"
@@ -206,6 +207,29 @@ func (t *LedgerAppendTool) Execute(ctx context.Context, args map[string]any) (an
 
 	setStatus := ledgerArgStr(args, "set_status")
 	summary := ledgerArgStr(args, "summary")
+
+	// Q1 stranger-lane gate (owner decision, plan 20261110-caller-authz):
+	// an UNAPPROVED voice caller may RECORD on the message lane — that is
+	// exactly what step 1c was widened for — but must never move a
+	// subject's STATE. Step 1c adjudicates on the tool NAME only, so the
+	// payload-aware check lives here, at the tool boundary, where the
+	// executor's callerid stamp (callerid.With at the daemon's per-turn
+	// site) is already visible. Absent stamp (ok=false) means a non-voice
+	// turn: the gate is inert, behavior byte-identical to before. A set
+	// stamp with Approved=false (unknown or unapproved number) plus a
+	// non-empty set_status refuses the WHOLE call — nothing is written,
+	// the model is told to re-append without set_status so the note still
+	// records. Provenance of the refused attempt is this WARN only.
+	if caller, hasCaller := callerid.From(ctx); hasCaller && !caller.Approved && setStatus != "" {
+		t.logger.Warn("ledger_append refused set_status from unapproved voice caller",
+			"employee_id", employeeID,
+			"caller_known", caller.Known,
+			"subject", subject,
+			"set_status", setStatus,
+		)
+		return tools.NewErrorResult("ledger_append: caller is not approved to change subject state; drop set_status/summary and re-append — message recorded instead, subject state not changed"), nil
+	}
+
 	// Frozen pairing rule: the two travel together or not at all.
 	if setStatus != "" && summary == "" {
 		return tools.NewErrorResult("ledger_append: set_status requires a summary (one-line current truth)"), nil
