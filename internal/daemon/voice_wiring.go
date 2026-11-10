@@ -536,7 +536,16 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 			Hold: func(ccid, emp string) {
 				employee.AcquireCallHold(ccid, emp)
 			},
-			Logger: vlog.With("sub", "local-leg"),
+			// Drain-driven floor (turn-taking leaf 02): the local leg
+			// resolves each opened call's registry target against the
+			// SAME coordinator registry routeFrame uses for talk loops
+			// (link targets are pre-registered by LinkManager.Open
+			// before Leg.Open). A link leg's splice gets the
+			// AudioDrained dep -> the floor releases on the paced
+			// tail's actual drain, not on turn_final alone. Plain
+			// local calls never match -> nil dep -> byte-identical.
+			LinkTurns: w.linkTurns,
+			Logger:    vlog.With("sub", "local-leg"),
 		})
 		if lerr != nil {
 			return nil, fmt.Errorf("voice wiring: local leg: %w", lerr)

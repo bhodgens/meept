@@ -121,8 +121,18 @@ type LocalDeps struct {
 	// row ended; without it the row stays 'live' forever. Nil degrades
 	// to no hold (the row then never reaches 'ended'), mirroring the
 	// "do not claim ended-state behavior" posture.
-	Hold   func(ccid, employeeID string)
-	Logger *slog.Logger
+	Hold func(ccid, employeeID string)
+	// LinkTurns is the half-duplex coordinator registry (turn-taking
+	// leaf 02, drain-driven floor). LocalLeg.Open resolves the call's
+	// registry target against it BEFORE spawning the splice: a LINK
+	// leg's target was pre-registered by LinkManager.Open (which runs
+	// before Leg.Open by contract), so the splice's AudioDrained dep
+	// lands on that call's coordinator and nothing else. Plain
+	// (non-link) local calls never match a target -> dep nil -> the
+	// splice never arms a drain watch - byte-identical to before.
+	// Nil (tests / degraded wiring) = the same no-seam posture.
+	LinkTurns *LinkTurnRegistry
+	Logger    *slog.Logger
 }
 
 // holdCall acquires the goal hold for a live call when the seam is
@@ -386,13 +396,22 @@ func (l *LocalLeg) Open(ctx context.Context, employeeID, label string, voiceOver
 	// terminal: ReadFromClient surfaces "not connected" while the accept
 	// is pending and the splice's own JoinTimeout bounds that grace
 	// (ErrNoClient), so a never-dialed leg still self-reaps. --
+	//
+	// Drain seam (turn-taking leaf 02): resolve the coordinator for
+	// THIS call's target at Open time (LinkManager.Open pre-registers
+	// both link targets before Leg.Open runs, so a link leg resolves
+	// here; a plain local target never matches). A resolved coordinator
+	// gets the splice's AudioDrained edge -> floor release after the
+	// paced tail actually leaves the socket.
 	go func() {
+		drainFn := wiredAudioDrain(l.deps.LinkTurns, target)
 		err := RunLocalSplice(spliceCtx, ccid, LocalSpliceConfig{}, LocalSpliceDeps{
-			Audio:       pair,
-			Client:      localClientIO{cli: cliPair},
-			Text:        rawTextSender{srv: l.deps.TextServer},
-			CancelDraft: func(cancelCcid string) { l.cancelDraft(cancelCcid) },
-			Logger:      l.log.With("sub", "localsplice", "ccid", ccid),
+			Audio:        pair,
+			Client:       localClientIO{cli: cliPair},
+			Text:         rawTextSender{srv: l.deps.TextServer},
+			CancelDraft:  func(cancelCcid string) { l.cancelDraft(cancelCcid) },
+			AudioDrained: drainFn,
+			Logger:       l.log.With("sub", "localsplice", "ccid", ccid),
 		})
 		if err != nil && !errors.Is(err, context.Canceled) && spliceCtx.Err() == nil && !isNotConnected(err) && !errors.Is(err, ErrMicSpeechEnded) {
 			l.log.Error("voice: local leg: splice ended", "ccid", ccid, "err", err)
@@ -488,6 +507,27 @@ func (l *LocalLeg) cancelDraft(ccid string) {
 	if hook != nil {
 		hook(ccid)
 	}
+}
+
+// wiredAudioDrain resolves one local call's drain-edge callback: the
+// splice fires it (AudioDrained dep) when the turn's paced audio has
+// fully left the client socket, and the coordinator's floor releases
+// after its tail pad. Resolution happens ONCE at Open, keyed by the
+// call's REGISTRY TARGET through the same LinkTurnRegistry the talk
+// loops use (link targets are pre-registered by LinkManager.Open before
+// Leg.Open; a plain local target never matches -> nil dep -> the
+// splice never arms a watch). The returned closure re-checks the
+// coordinator per fire (the link may have closed between arm and fire;
+// NoteAudioDrained on a closed coordinator is a guarded no-op).
+func wiredAudioDrain(reg *LinkTurnRegistry, target string) func(string) {
+	if reg == nil {
+		return nil
+	}
+	coord, _ := reg.Lookup(target)
+	if coord == nil {
+		return nil
+	}
+	return func(drainCcid string) { coord.NoteAudioDrained(drainCcid) }
 }
 
 // End tears the call down: Manager.FailOutcome(ccid, OutcomeHangup,

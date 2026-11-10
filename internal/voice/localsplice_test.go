@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -568,4 +569,248 @@ func TestLocalSpliceNoLeakOnCancel(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Errorf("goroutines did not settle after ctx cancel: baseline %d, now %d", baseline, runtime.NumGoroutine())
+}
+
+// ---------------------------------------------------------------------------
+// Audio-drain watch (turn-taking leaf 02: drain-driven floor release).
+// The splice fires deps.AudioDrained(ccid) once per ArmDrainWatch when the
+// outbound path has WRITTEN every child chunk of the turn and gone quiet
+// for cfg.DrainQuiet, with the early-fire guard: no touch since the arm =
+// no fire (the final sentence may still be synthesizing).
+// ---------------------------------------------------------------------------
+
+func startDrainSplice(t *testing.T, ccid string, cfg LocalSpliceConfig, drained func(string)) (*AudioPair, net.Conn, net.Conn, *textSink, context.CancelFunc, <-chan error) {
+	t.Helper()
+	p := localPairFor(t, ccid)
+	micSide, daemonSide := net.Pipe()
+	t.Cleanup(func() { _ = micSide.Close(); _ = daemonSide.Close() })
+	text := &textSink{}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- RunLocalSplice(ctx, ccid, cfg, LocalSpliceDeps{
+			Audio:        p,
+			Client:       daemonSide,
+			Text:         text,
+			CancelDraft:  func(string) {},
+			AudioDrained: drained,
+			Logger:       localDiscardLogger(),
+		})
+	}()
+	return p, micSide, daemonSide, text, cancel, done
+}
+
+// waitForSplice polls the package registry until the splice registers
+// (registration happens inside the splice goroutine).
+func waitForSplice(t *testing.T, ccid string) *runLocalSplice {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if sp := LocalSpliceFor(ccid); sp != nil {
+			return sp
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("splice for %s never registered", ccid)
+	return nil
+}
+
+func waitForFire(t *testing.T, deadline time.Duration, what string, fired *atomic.Bool) {
+	t.Helper()
+	end := time.Now().Add(deadline)
+	for time.Now().Before(end) {
+		if fired.Load() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("%s: drain signal never fired", what)
+}
+
+// T-D1: fed audio paced to the client + quiescence -> exactly one fire,
+// AFTER the last paced write (never early), and re-arming for a second
+// turn fires again. The watch goroutine must not outlive the splice.
+func TestLocalSpliceDrainWatchFiresAfterQuiescence(t *testing.T) {
+	var fired atomic.Bool
+	var fireCount atomic.Int64
+	drain := func(ccid string) {
+		fireCount.Add(1)
+		fired.Store(true)
+	}
+	cfg := LocalSpliceConfig{DrainQuiet: 120 * time.Millisecond}
+	p, micSide, _, _, cancel, done := startDrainSplice(t, "ls-drain-1", cfg, drain)
+	_ = p
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("splice did not exit after cancel")
+		}
+	}()
+	sp := waitForSplice(t, "ls-drain-1")
+
+	// Turn 1: 5 chunks paced (100 ms), then arm at the text-side
+	// turn_final. The watch must hold until the backlog drains AND the
+	// quiet window elapses after the LAST write.
+	for range 5 {
+		if err := feedChild("ls-drain-1"); err != nil {
+			t.Fatalf("feedChild: %v", err)
+		}
+	}
+	arm := time.Now()
+	sp.ArmDrainWatch()
+
+	// Read the paced bytes so the pacer is not blocked on net.Pipe (the
+	// client side must consume; net.Pipe is synchronous).
+	go func() {
+		buf := make([]byte, 640)
+		for range 5 {
+			_ = micSide.SetReadDeadline(time.Now().Add(3 * time.Second))
+			_, _ = io.ReadFull(micSide, buf)
+		}
+	}()
+
+	waitForFire(t, 3*time.Second, "turn-1 drain", &fired)
+	elapsed := time.Since(arm)
+	if elapsed < cfg.DrainQuiet {
+		t.Fatalf("drain fired after %v < quiet window %v (early release is the bug)", elapsed, cfg.DrainQuiet)
+	}
+	if n := fireCount.Load(); n != 1 {
+		t.Fatalf("drain fired %d times for one arm, want exactly 1", n)
+	}
+
+	// Re-arm with nothing flowing: the post-arm-touch guard means a
+	// silent stream NEVER fires - the second arm must NOT emit.
+	fired.Store(false)
+	sp.ArmDrainWatch()
+	time.Sleep(3 * cfg.DrainQuiet)
+	if fired.Load() {
+		t.Fatal("drain fired on a silent post-arm stream (early-fire guard broken)")
+	}
+	// Fresh audio after the guard-held arm -> the watch fires again
+	// (the guard lifts on the first post-arm touch + quiet window).
+	if err := feedChild("ls-drain-1"); err != nil {
+		t.Fatalf("feedChild 2: %v", err)
+	}
+	go func() {
+		buf := make([]byte, 640)
+		_ = micSide.SetReadDeadline(time.Now().Add(3 * time.Second))
+		_, _ = io.ReadFull(micSide, buf)
+	}()
+	waitForFire(t, 3*time.Second, "post-guard drain", &fired)
+	if n := fireCount.Load(); n != 2 {
+		t.Fatalf("drain fired %d times total, want 2 (one per armed turn with audio)", n)
+	}
+}
+
+// T-D2: arm BEFORE any audio (the final sentence still synthesizing at
+// turn_final) - no fire while silent; when the audio finally flows, the
+// fire lands after THAT audio is written + quiet, never before.
+func TestLocalSpliceDrainWatchNoEarlyFireDuringSynthGap(t *testing.T) {
+	var fired atomic.Bool
+	drain := func(string) { fired.Store(true) }
+	cfg := LocalSpliceConfig{DrainQuiet: 120 * time.Millisecond}
+	_, micSide, _, _, cancel, done := startDrainSplice(t, "ls-drain-2", cfg, drain)
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("splice did not exit after cancel")
+		}
+	}()
+	sp := waitForSplice(t, "ls-drain-2")
+
+	// Arm with the channel EMPTY and no post-arm touch yet (mirrors
+	// turn_final racing the child's last TTS request).
+	sp.ArmDrainWatch()
+	time.Sleep(4 * cfg.DrainQuiet)
+	if fired.Load() {
+		t.Fatal("drain fired before any post-arm audio existed (the measured talk-over bug)")
+	}
+
+	// The late sentence's PCM arrives now; reader drains the paced chunk.
+	go func() {
+		buf := make([]byte, 640)
+		_ = micSide.SetReadDeadline(time.Now().Add(3 * time.Second))
+		_, _ = io.ReadFull(micSide, buf)
+	}()
+	start := time.Now()
+	if err := feedChild("ls-drain-2"); err != nil {
+		t.Fatalf("feedChild: %v", err)
+	}
+	waitForFire(t, 3*time.Second, "late-audio drain", &fired)
+	if elapsed := time.Since(start); elapsed < cfg.DrainQuiet {
+		t.Fatalf("drain fired %v after the late PCM, want >= quiet window %v", elapsed, cfg.DrainQuiet)
+	}
+}
+
+// T-D3: nil AudioDrained dep (every plain local / phone call) - arming is
+// a silent no-op, no goroutine, no fire, splice unaffected.
+func TestLocalSpliceDrainWatchNilDepIsNoop(t *testing.T) {
+	p := localPairFor(t, "ls-drain-3")
+	micSide, daemonSide := net.Pipe()
+	defer func() { _ = micSide.Close(); _ = daemonSide.Close() }()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- RunLocalSplice(ctx, "ls-drain-3", LocalSpliceConfig{DrainQuiet: 80 * time.Millisecond}, LocalSpliceDeps{
+			Audio: p, Client: daemonSide, Text: &textSink{},
+			CancelDraft: func(string) {},
+			Logger:      localDiscardLogger(),
+		})
+	}()
+	sp := waitForSplice(t, "ls-drain-3")
+	sp.ArmDrainWatch() // nil dep: must no-op without starting a watch
+	sp.mu.Lock()
+	armed, running := sp.drainArmed, sp.watchRunning
+	sp.mu.Unlock()
+	if armed || running {
+		t.Fatalf("nil AudioDrained dep armed a watch (armed=%v running=%v)", armed, running)
+	}
+	// The splice still carries audio normally.
+	if err := feedChild("ls-drain-3"); err != nil {
+		t.Fatalf("feedChild: %v", err)
+	}
+	buf := make([]byte, 640)
+	_ = micSide.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if _, err := io.ReadFull(micSide, buf); err != nil {
+		t.Fatalf("paced write lost: %v", err)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("splice did not exit after cancel")
+	}
+}
+
+// T-D4: watch goroutine does not outlive RunLocalSplice (ctx-cancel exit).
+func TestLocalSpliceDrainWatchNoGoroutineLeak(t *testing.T) {
+	var fired atomic.Bool
+	drain := func(string) { fired.Store(true) }
+	p, _, _, _, cancel, done := startDrainSplice(t, "ls-drain-4", LocalSpliceConfig{DrainQuiet: 200 * time.Millisecond}, drain)
+	sp := waitForSplice(t, "ls-drain-4")
+	sp.ArmDrainWatch() // armed, never fires (silent) - the goroutine parks on ticks
+	time.Sleep(100 * time.Millisecond)
+	// Baseline AFTER every setup goroutine (pair listeners, dial capture,
+	// splice loops, the watch itself) is live: the assertion is that the
+	// count never EXCEEDS the warm steady state after exit.
+	baseline := runtime.NumGoroutine()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("splice did not exit after cancel")
+	}
+	_ = p
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if runtime.NumGoroutine() <= baseline {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Errorf("drain watch leaked past splice exit: baseline %d now %d", baseline, runtime.NumGoroutine())
 }

@@ -997,14 +997,27 @@ half-answers. The fix lives entirely daemon-side (internal/voice/link.go
   `TalkDeps.HoldPrompt` (a denied final prompt parks in the loop - one
   slot, latest question wins, telemetry `kind=prompt_held`) and
   `TalkDeps.TurnState` (`turn_start` / `turn_final` / `idle` edges).
-- **Release rule.** The parked prompt dispatches only after the
-  speaker's `turn_final` plus the drain margin (default 600 ms,
-  `LinkDeps.TurnMargin`) - trailing sentences and the paced-TTS tail
-  must leave the bridge before the listener may speak. An `idle` edge
-  (barge-in cancel, teardown, unbind) releases immediately: nothing is
-  playing. A park alive when a loop exits is logged and dropped
-  (`kind=prompt_dropped`), never dispatched into a dead call. Telemetry
-  release edge: `kind=prompt_released`.
+- **Release rule (drain-driven, leaf 02).** The floor releases on AUDIO
+  DRAIN, not on the `turn_final` text edge: `turn_final` arms the local
+  splice's drain watch (`LocalSpliceFor(ccid).ArmDrainWatch`) and a long
+  FALLBACK margin (default 4 s, `LinkDeps.TurnMargin`); the first of
+  (the splice's `AudioDrained` edge + 250 ms tail pad) or (the fallback
+  fire) clears the floor and dispatches the parked prompt. The old
+  rule - release `turn_final` + 600 ms - still let the listener speak
+  over the pacing tail: the daemon pacer holds up to seconds of paced
+  audio after the text flush (measured 335 talk-over windows, 6.70 s on
+  link-1108d776b0a1efb3). The drain fires only after audio flowed
+  post-arm AND the outbound stream (pump backlog + carry) has been
+  quiet for 1 s; a silent stream never fires (a denied turn rides the
+  fallback margin - late, never early). `HoldPromptFor` gates on the
+  floor, so a fresh listener prompt cannot claim it during the tail
+  either. An `idle` edge (barge-in cancel, teardown, unbind) releases
+  immediately: nothing is playing. A park alive when a loop exits is
+  logged and dropped (`kind=prompt_dropped`), never dispatched into a
+  dead call. Telemetry: `kind=floor_released` with
+  `reason=drained|margin`, plus `kind=prompt_released` on the loop edge.
+  The drain watch is LINK-only: `LocalDeps.LinkTurns` resolves per Open
+  by registry target, so plain local/phone splices never arm a watch.
 - **One greeting.** Side A greets on connect; side B's loop is built
   with `TalkLoopConfig.SuppressGreeting` and speaks first only after
   A's greeting arrives at B's mic as a final prompt (the conversation

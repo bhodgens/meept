@@ -6,7 +6,6 @@ package voice
 // cancelled draft must never emit zombie filler after the grace elapses.
 
 import (
-	"bytes"
 	"log/slog"
 	"strings"
 	"testing"
@@ -107,7 +106,12 @@ func TestTalkLoopCancelledDraftNeverEmitsZombieFiller(t *testing.T) {
 }
 
 func TestTalkLoopTurnTelemetryLines(t *testing.T) {
-	var buf bytes.Buffer
+	// syncBuffer, not bytes.Buffer: the loop's Run goroutine keeps
+	// logging (turn-final telemetry lands after the last say) while
+	// this test reads the buffer - an unsynchronized bytes.Buffer is a
+	// data race under -race -count=2 (pre-existing flake, caught while
+	// gating the drain-driven floor work).
+	var buf syncBuffer
 	logger := slog.New(slog.NewTextHandler(&buf, nil))
 	sink := &recordSink{}
 	sup := &cannedSupervisor{}

@@ -70,6 +70,18 @@ const localChunkBytes = 640
 // localJoinTimeoutDefault bounds the Open-side client join grace.
 const localJoinTimeoutDefault = 10 * time.Second
 
+// localDrainQuietDefault is the outbound quiescence window: watch
+// armed + pump backlog empty + carry empty + NO child read and NO
+// pacer consume/write for this long = the turn's audio is DONE (every
+// chunk the child sent has been written to the client socket).
+// Deliberately conservative (better late than early): the window must
+// exceed a realistic inter-sentence cloud-TTS gap (a turn streams
+// sentence after sentence; a mid-turn synthesis lull shorter than this
+// must never fake a drain). The coordinator adds its own tail pad on
+// top, and the long fallback margin bounds the worst case if this never
+// fires.
+const localDrainQuietDefault = 1 * time.Second
+
 // LocalSpliceConfig sizes the local splice. Zero values pick the CL7
 // defaults; ChunkBytes other than 640 (any non-L16@16k negotiation) is a
 // named start error.
@@ -77,17 +89,34 @@ type LocalSpliceConfig struct {
 	Pace        time.Duration // 20ms default; 0 -> 20ms
 	ChunkBytes  int           // 0 -> 640 (L16@16k enforced)
 	JoinTimeout time.Duration // 0 -> 10s; client must connect/first-byte within it or ErrNoClient
+	// DrainQuiet overrides localDrainQuietDefault for the audio-drain
+	// watch (0 -> default). Tests lower it; production never sets it.
+	DrainQuiet time.Duration
 }
 
 // LocalSpliceDeps carries the injected edges. CancelDraft is ALWAYS
 // injected by callers (never a direct manager call from the splice); a
 // nil value is tolerated as a counted no-op for tests.
+//
+// AudioDrained is the LINK half-duplex drain seam (optional, nil for
+// every plain local/phone call): fired per turn with the ccid once the
+// outbound pacer has WRITTEN every child chunk of the turn to the
+// client socket and the child stream has gone quiet. The turn-final
+// say frame only flushes the talk loop's TEXT pipeline - the daemon
+// pacer still has seconds of paced audio to write after it - so the
+// coordinator must not release the floor on turn_final alone; this
+// edge is the audio-truth release signal (measured talk-over: 6.7 s
+// across 335 windows on link-1108d776b0a1efb3).
 type LocalSpliceDeps struct {
 	Audio       *AudioPair
 	Client      io.ReadWriter // mic bytes in, speaker bytes out
 	Text        TextSender    // clear frame to child on barge-in
 	CancelDraft func(ccid string)
-	Logger      *slog.Logger
+	// AudioDrained fires once per turn when the turn's audio is fully
+	// written + quiescent (see ArmDrainWatch). Nil (every plain call) =
+	// zero emissions, byte-identical splice.
+	AudioDrained func(ccid string)
+	Logger       *slog.Logger
 }
 
 // localReadItem is one unit on the inbound pump channel: mic bytes, or a
@@ -128,6 +157,45 @@ type runLocalSplice struct {
 	cancelOne bool // CancelDraft fired exactly once per barge-in
 	ended     bool // teardown latched: the latch must never re-arm after end
 	wake      chan struct{}
+
+	// Drain watch (link half-duplex floor release, turn-taking leaf 02).
+	// ArmDrainWatch is the coordinator's turn_final edge: link.go
+	// resolves the live splice through the package-level LocalSpliceFor
+	// registry (the same seam HandleInterrupt rides) and arms the watch.
+	// The watch goroutine starts lazily on the first arm — plain
+	// local/phone splices (deps.AudioDrained nil, never armed) spawn
+	// nothing and behave byte-identically. Fired evidence (atomics, no
+	// lock: writers must never take s.mu for a counter, the watch polls
+	// off the pacer loop):
+	//   audioPending - child chunks handed to the pump channel minus
+	//     chunks the pacer finished consuming (the backlog still to
+	//     WRITE to the client socket);
+	//   audioCarry   - sub-chunk residue the read pump holds (bytes not
+	//     yet a whole 20 ms frame);
+	//   audioLastAct - unix-nano of the last outbound touch (pump read
+	//     OR pacer consume/write).
+	// Drain (fire once, then the latch self-disarms) = armed && the
+	// barge-in latch is NOT set && not ended && pending<=0 && carry==0
+	// && a touch happened AFTER the arm (drainArmedAtNano floor - the
+	// early-fire guard: at turn_final the LAST sentence has only just
+	// reached the child, its TTS may take hundreds of ms to produce a
+	// byte, and the splice cannot tell "synthesizing" from "will never
+	// speak" (fully denied draft) - so it NEVER fires on a silent
+	// stream; denied turns ride the coordinator's fallback margin) &&
+	// no touch for cfg.DrainQuiet. Conservative by construction: every
+	// new child byte reopens the window, so a mid-turn synthesis gap
+	// shorter than the window never fakes a drain; "late" only costs
+	// floor-hold, "early" is the bug being fixed.
+	drainArmed       bool
+	watchRunning     bool
+	drainArmedAtNano atomic.Int64
+	audioPending     atomic.Int64
+	audioCarry       atomic.Int64
+	audioLastAct     atomic.Int64
+	// loopCtx bounds the watch goroutine (assigned BEFORE the splice
+	// registers itself in localSpliceByCcid: LocalSpliceFor readers get
+	// a happens-before edge through the registry mutex).
+	loopCtx context.Context
 }
 
 // Registry of live local splices by ccid so leaf 07's frame path can reach
@@ -179,6 +247,9 @@ func RunLocalSplice(ctx context.Context, ccid string, cfg LocalSpliceConfig, dep
 	if cfg.JoinTimeout <= 0 {
 		cfg.JoinTimeout = localJoinTimeoutDefault
 	}
+	if cfg.DrainQuiet <= 0 {
+		cfg.DrainQuiet = localDrainQuietDefault
+	}
 	// L16@16k only (CL7): refuse any other negotiation at start, before
 	// any goroutine exists.
 	if cfg.ChunkBytes == 0 {
@@ -198,9 +269,17 @@ func RunLocalSplice(ctx context.Context, ccid string, cfg LocalSpliceConfig, dep
 		wake:       make(chan struct{}, 1),
 	}
 
+	// Drain-watch parent context: assigned BEFORE the registration
+	// below so a LocalSpliceFor reader (which takes localSpliceMu, the
+	// same mutex the writer holds) sees a fully initialized struct,
+	// loopCtx included - no lock-free field race on the arm path.
+	loopCtx, loopCancel := context.WithCancel(ctx)
+	s.loopCtx = loopCtx
+
 	localSpliceMu.Lock()
 	if _, dup := localSpliceByCcid[ccid]; dup {
 		localSpliceMu.Unlock()
+		loopCancel()
 		return fmt.Errorf("voice: RunLocalSplice %s: a splice is already live for this ccid", ccid)
 	}
 	localSpliceByCcid[ccid] = s
@@ -211,7 +290,6 @@ func RunLocalSplice(ctx context.Context, ccid string, cfg LocalSpliceConfig, dep
 		localSpliceMu.Unlock()
 	}()
 
-	loopCtx, loopCancel := context.WithCancel(ctx)
 	defer loopCancel()
 
 	inboundDone := make(chan error, 1)
@@ -420,6 +498,13 @@ func (s *runLocalSplice) outboundLoop(ctx context.Context) error {
 				// chunk count (the daemon-side middle the chop hunt
 				// was missing).
 				s.pumpChunks.Add(1)
+				// Drain evidence: the child produced bytes NOW (reopens
+				// the quiet window — the store happens before carry/
+				// pending are touched, so the watch can never read a
+				// quiet window over a just-filled backlog). The carry
+				// residue is stored accurately after the chunk-forming
+				// loop below.
+				s.audioLastAct.Store(time.Now().UnixNano())
 				if pumpFirst.IsZero() {
 					pumpFirst = time.Now()
 					s.log.Info("voice: localsplice first child PCM", "ccid", s.ccid)
@@ -433,12 +518,16 @@ func (s *runLocalSplice) outboundLoop(ctx context.Context) error {
 					chunk := make([]byte, s.chunkBytes)
 					copy(chunk, carry[:s.chunkBytes])
 					carry = carry[s.chunkBytes:]
+					s.audioCarry.Store(int64(len(carry)))
+					s.audioPending.Add(1)
 					select {
 					case pump <- localReadItem{data: chunk}:
 					case <-ctx.Done():
+						s.audioPending.Add(-1)
 						return
 					}
 				}
+				s.audioCarry.Store(int64(len(carry)))
 			}
 			if err != nil {
 				select {
@@ -472,6 +561,16 @@ func (s *runLocalSplice) outboundLoop(ctx context.Context) error {
 		// Surface a terminal pump error if it died.
 		select {
 		case item := <-pump:
+			// Drain evidence: a DATA chunk consumed off the pump channel
+			// is audio the pacer now OWNS (either written to the client
+			// or abandoned at the latch — either way it is no longer
+			// backlog). Error items never incremented pending, so they
+			// must not decrement it. The activity stamp records the
+			// consume; paceOne stamps again after the socket write.
+			if item.err == nil {
+				s.audioPending.Add(-1)
+			}
+			s.audioLastAct.Store(time.Now().UnixNano())
 			if item.err != nil {
 				if ctx.Err() != nil {
 					return ctx.Err()
@@ -501,6 +600,10 @@ func (s *runLocalSplice) outboundLoop(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case item := <-pump:
+			if item.err == nil {
+				s.audioPending.Add(-1)
+			}
+			s.audioLastAct.Store(time.Now().UnixNano())
 			if item.err != nil {
 				if ctx.Err() != nil {
 					return ctx.Err()
@@ -567,6 +670,10 @@ func (s *runLocalSplice) paceOne(ctx context.Context, chunk []byte) error {
 		// named error.
 		return fmt.Errorf("voice: localsplice %s client write: %w", s.ccid, err)
 	}
+	// Drain evidence: this chunk has LEFT the pacer for the client
+	// socket. Stamp AFTER the write so a slow client socket write keeps
+	// the quiet window open (conservative: late, never early).
+	s.audioLastAct.Store(time.Now().UnixNano())
 	// Jitter instrumentation: the pacer's client-write cadence. A gap of
 	// more than 2x the pace interval means the pacer STARVED waiting for
 	// child PCM (upstream jitter) rather than paced deliberately.
@@ -653,4 +760,141 @@ func (s *runLocalSplice) resumeBargeIn() {
 		s.notify()
 		s.log.Info("voice: local barge-in resumed for next utterance")
 	}
+}
+
+// ---------- audio-drain watch (link half-duplex floor release) ----------
+
+// ArmDrainWatch arms the per-call audio-drain signal for one turn. The
+// link coordinator calls it on its turn_final edge (after resolving the
+// live splice through LocalSpliceFor, the same registry HandleInterrupt
+// rides): every future turn-final flush of THIS call's audio that was
+// still pacing counts as this turn's tail, and the watch fires
+// deps.AudioDrained(ccid) exactly ONCE when the outbound path has gone
+// quiet (see the drainArmed field comment for the fired predicate).
+//
+// Idempotent while a watch is armed (a duplicate turn_final cannot
+// double-fire). A splice with no AudioDrained dep (plain local / phone
+// calls — the seam is link-only) is a silent no-op: nothing arms, the
+// coordinator rides its fallback margin alone. Safe from any goroutine;
+// takes s.mu only for the latch swap (repo mutex-scope rule: no I/O,
+// no callback under it).
+func (s *runLocalSplice) ArmDrainWatch() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	if s.deps.AudioDrained == nil || s.ended || s.drainArmed {
+		s.mu.Unlock()
+		return
+	}
+	s.drainArmed = true
+	// Quiet-window floor stored INSIDE the same critical section as the
+	// latch: a running watch that observes drainArmed=true through the
+	// mutex is happens-after this store. A stale floor (previous turn's
+	// arm time) would let the very first tick read "audio touched long
+	// ago, now quiet" and fire BEFORE this turn's last say even reached
+	// the child - the early-release bug this watch exists to kill.
+	s.drainArmedAtNano.Store(time.Now().UnixNano())
+	// watchRunning and drainArmed flip in the SAME critical section as
+	// any exit transition: an arm can never observe a stale
+	// watch-running slot whose goroutine already decided to return.
+	startWatch := !s.watchRunning
+	s.watchRunning = true
+	s.mu.Unlock()
+
+	if startWatch {
+		go s.runDrainWatch(s.loopCtx)
+	}
+	s.log.Info("voice: localsplice drain watch armed", "ccid", s.ccid)
+}
+
+// runDrainWatch polls the drain evidence every window/4 and fires
+// deps.AudioDrained exactly once per arm. It never takes s.mu across
+// the callback (mutex-scope rule), and it exits cleanly when the latch
+// goes unconsumed, the splice ends, or the loop ctx dies - no goroutine
+// outlives RunLocalSplice.
+func (s *runLocalSplice) runDrainWatch(ctx context.Context) {
+	window := s.cfg.DrainQuiet
+	if window <= 0 {
+		window = localDrainQuietDefault
+	}
+	tick := time.NewTicker(window / 4)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			s.releaseWatchSlot()
+			return
+		case <-tick.C:
+		}
+		s.mu.Lock()
+		armed := s.drainArmed
+		stopped := s.interrupt || s.ended
+		drainFn := s.deps.AudioDrained
+		if !armed || drainFn == nil {
+			s.watchRunning = false
+			s.mu.Unlock()
+			return
+		}
+		s.mu.Unlock()
+		if stopped {
+			// Barge-in latched (audio deliberately not pacing) or the
+			// call ended: keep waiting - the resume re-arms pacing and
+			// the next quiet window drains. An ENDED splice never
+			// resumes, so the ctx-cancel exit above reaps it.
+			continue
+		}
+		if s.audioPending.Load() > 0 || s.audioCarry.Load() > 0 {
+			continue // backlog still inside the pacer
+		}
+		last := s.audioLastAct.Load()
+		armedAt := s.drainArmedAtNano.Load()
+		if last < armedAt {
+			// NO outbound touch since the arm. Two indistinguishable
+			// shapes: the final sentence's cloud TTS has not produced a
+			// single byte yet (synth latency - firing now would be
+			// EARLY, the exact bug), or the turn genuinely produces no
+			// audio at all (fully denied draft / empty reply). The
+			// watch never fires on silence-only: the denied-turn case
+			// rides the coordinator's fallback margin instead (late,
+			// never early - a stale extra hold is harmless).
+			continue
+		}
+		if time.Since(time.Unix(0, last)) < window {
+			continue // quiet window not yet elapsed (conservative)
+		}
+		// Fire exactly once: consume BOTH latch fields under one lock
+		// so a concurrent arm either joins this watch (slot still
+		// held) or starts a fresh one (slot released) - never a lost
+		// arm with no goroutine behind it. The arm-identity re-check
+		// closes the gap between the lock-free predicate read above and
+		// this consumption: a FRESH ArmDrainWatch in that window stores
+		// a new floor under s.mu, and firing against it without its own
+		// quiet window would be an early release for the NEW turn.
+		// (Re-reading audioLastAct here is still conservative: the
+		// lock-free writers only ever push the fire LATER.)
+		s.mu.Lock()
+		if !s.drainArmed || s.interrupt || s.ended ||
+			s.drainArmedAtNano.Load() != armedAt ||
+			s.audioLastAct.Load() < armedAt ||
+			time.Since(time.Unix(0, s.audioLastAct.Load())) < window {
+			s.mu.Unlock()
+			continue
+		}
+		s.drainArmed = false
+		s.watchRunning = false
+		s.mu.Unlock()
+		s.log.Info("voice: localsplice audio drained", "ccid", s.ccid,
+			"quiet_ms", window.Milliseconds())
+		drainFn(s.ccid)
+		return
+	}
+}
+
+// releaseWatchSlot frees the running slot (ctx-cancel exit). A later
+// arm starts a fresh goroutine; the splice is dying anyway.
+func (s *runLocalSplice) releaseWatchSlot() {
+	s.mu.Lock()
+	s.watchRunning = false
+	s.mu.Unlock()
 }

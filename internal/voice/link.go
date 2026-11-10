@@ -97,12 +97,22 @@ const maxMonitorSocketPathLen = 100
 // overflow the kernel sun_path limit.
 var ErrLinkMonitorPathTooLong = errors.New("voice: voice link: monitor socket path exceeds the unix sun_path limit")
 
-// linkTurnMarginDefault is the drain window the half-duplex coordinator
-// waits after one side's turn_final before releasing the other side's
-// parked prompt: the last sentence must finish its paced TTS + bridge
-// transit (and the listener's STT must NOT hear it as a new prompt
-// mid-turn) before the listener may speak.
-const linkTurnMarginDefault = 600 * time.Millisecond
+// linkFloorFallbackDefault is the FALLBACK drain window the half-duplex
+// coordinator arms on a side's turn_final when the audio-drain signal
+// never arrives (splice gone, seam nil, lost race). The real release is
+// drain-driven (LocalSpliceFor(ccid).ArmDrainWatch -> AudioDrained ->
+// floor released after linkFloorTailPad); turn_final alone no longer
+// frees the floor after the short legacy 600 ms, because the daemon
+// pacer can still hold seconds of that turn's paced audio (measured on
+// link-1108d776b0a1efb3: 335 talk-over windows, 6.70 s total). A stale
+// extra hold is harmless; early release is the bug.
+const linkFloorFallbackDefault = 4 * time.Second
+
+// linkFloorTailPad is the small gap added after the audio-drain edge
+// before the floor releases: the last paced chunk plus bridge transit
+// must fully leave the peer's mic path before the parked listener
+// dispatches.
+const linkFloorTailPad = 250 * time.Millisecond
 
 // linkSilenceSeedChunks is the mic-join seed length in exact 640 B
 // L16@16k chunks (5 chunks = 100 ms of digital silence per side).
@@ -121,30 +131,45 @@ const (
 
 // linkTurnSideState is one side's half-duplex slot: its bound talk loop
 // (nil until the wiring's routeFrame constructs it, and again on
-// teardown), whether it is mid-turn, the seq of the live turn, and the
-// armed drain-margin timer from its last turn_final. marginGen is the
-// timer identity: every re-arm bumps it, and a stale timer's callback
-// fire (Stop racing a buffered signal) compares its captured gen and
-// no-ops, so a superseded margin can never release on the wrong edge.
+// teardown), whether it is mid-turn (busy: turn_start..turn_final),
+// whether it still HOLDS THE AUDIO FLOOR (floorHeld: turn_start..floor
+// release — turn_final alone does NOT clear it because the daemon pacer
+// may still hold seconds of that turn's paced audio), the ccid of the
+// side's last turn (the AudioDrained signal resolves by ccid), and the
+// armed floor-release timer. releaseGen is the timer identity: every
+// re-arm bumps it, and a stale timer's callback fire (Stop racing a
+// buffered signal) compares its captured gen and no-ops, so a
+// superseded margin can never release on the wrong edge.
 type linkTurnSideState struct {
-	loop        *TalkLoop
-	busy        bool
-	marginTimer *time.Timer
-	marginGen   uint64
+	loop         *TalkLoop
+	busy         bool
+	floorHeld    bool
+	ccid         string
+	seq          uint64
+	releaseTimer *time.Timer
+	releaseGen   uint64
 }
 
 // LinkTurnCoordinator enforces one-speaker-at-a-time on ONE voice link
 // (turn-taking leaf, live-run defect link-6a3f3b65: two independent
 // talk loops greeted at once and each side's STT dispatched while the
-// other was still speaking -> simultaneous audio + half-answers).
+// other was still speaking -> simultaneous audio + half-answers;
+// link-1108d776b0a1efb3: releasing the floor on turn_final + 600 ms
+// still let side B start while A's pacing tail ran -> 335 talk-over
+// windows, 6.70 s total).
 //
 // Contract:
-//   - at most ONE side is busy (mid-turn) at a time;
-//   - the listener's final prompt parks (HoldPrompt returns false, the
-//     loop stores ONE pending dispatch - latest question wins) until the
-//     speaker's turn_final rides the drain margin, or the speaker goes
-//     idle without a final (barge-in cancel: release is immediate,
-//     nothing is playing);
+//   - at most ONE side holds the floor (mid-turn OR draining its
+//     audio tail) at a time: the peer's final prompt parks while
+//     floorHeld is set — both the parked-prompt path AND the fresh
+//     claim path check the floor;
+//   - the floor releases on AUDIO DRAIN, not on the turn_final text
+//     edge: turn_final arms the splice's drain watch
+//     (LocalSpliceFor(ccid).ArmDrainWatch) AND a long FALLBACK margin
+//     timer; the first of (drain edge + linkFloorTailPad) or (fallback
+//     fire) releases the floor and flushes the peer's parked prompt.
+//     An idle edge (barge-in cancel, unbind, teardown) releases
+//     IMMEDIATELY — nothing is playing;
 //   - side B never greets (TalkLoopConfig.SuppressGreeting honored by
 //     the wiring when it constructs B's loop).
 //
@@ -152,11 +177,13 @@ type linkTurnSideState struct {
 // invokes a callback or performs I/O under it (repo mutex-scope rule).
 // The flush edge into a loop is TalkLoop.FlushHeld - a non-blocking send
 // on a buffered channel; the parked dispatch always runs on the loop's
-// own Run goroutine.
+// own Run goroutine. ArmDrainWatch on the splice takes localSpliceMu +
+// the splice's own mutex briefly - never under c.mu.
 type LinkTurnCoordinator struct {
 	id     string
 	log    *slog.Logger
-	margin time.Duration
+	margin time.Duration // fallback floor-release window after turn_final
+	pad    time.Duration // release delay after the drain edge (linkFloorTailPad)
 
 	mu     sync.Mutex
 	a      linkTurnSideState
@@ -164,14 +191,14 @@ type LinkTurnCoordinator struct {
 	closed bool // link Closed/unwound: parks DROP at loop exit, never dispatch into a dying peer
 }
 
-func NewLinkTurnCoordinator(linkID string, margin time.Duration, logger *slog.Logger) *LinkTurnCoordinator {
-	if margin <= 0 {
-		margin = linkTurnMarginDefault
+func NewLinkTurnCoordinator(linkID string, fallbackMargin time.Duration, logger *slog.Logger) *LinkTurnCoordinator {
+	if fallbackMargin <= 0 {
+		fallbackMargin = linkFloorFallbackDefault
 	}
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &LinkTurnCoordinator{id: linkID, log: logger.With("sub", "link-turn", "link_id", linkID), margin: margin}
+	return &LinkTurnCoordinator{id: linkID, log: logger.With("sub", "link-turn", "link_id", linkID), margin: fallbackMargin, pad: linkFloorTailPad}
 }
 
 // side returns the state slot for one side id. Callers hold c.mu.
@@ -201,18 +228,24 @@ func (c *LinkTurnCoordinator) Bind(side string, loop *TalkLoop) {
 }
 
 // Unbind detaches a side at loop exit: the side goes idle (it will never
-// finish another turn), its margin timer stands down, and the PEER's
-// parked prompt is released immediately - a prompt held by a dead side
-// would otherwise wait forever. FlushHeld on a dead peer loop is a
-// no-op (the loop's Run already dropped its park with the
-// prompt_dropped telemetry line).
+// finish another turn, and no audio tail can still be pacing on its
+// behalf - the leg teardown closes the pair), its floor-release timer
+// stands down, and the PEER's parked prompt is released immediately - a
+// prompt held by a dead side would otherwise wait forever. FlushHeld on
+// a dead peer loop is a no-op (the loop's Run already dropped its park
+// with the prompt_dropped telemetry line).
 func (c *LinkTurnCoordinator) Unbind(side string) {
 	c.mu.Lock()
 	st := c.sideLocked(side)
 	st.loop = nil
 	st.busy = false
-	st.marginTimer = nil
-	st.marginGen++ // any armed margin from this side is now stale
+	st.floorHeld = false
+	st.ccid = ""
+	if st.releaseTimer != nil {
+		st.releaseTimer.Stop()
+		st.releaseTimer = nil
+	}
+	st.releaseGen++ // any armed release from this side is now stale
 	peer := c.peerLocked(side)
 	peerLoop := peer.loop
 	release := peerLoop != nil && !c.closed
@@ -235,14 +268,19 @@ func (c *LinkTurnCoordinator) SuppressesGreeting(side string) bool {
 
 // HoldPromptFor returns the side's TalkDeps.HoldPrompt closure (nil on a
 // nil coordinator: plain local/phone calls never bind here). Allow is a
-// CLAIM, not just a vote: when the peer is NOT mid-turn, this side marks
-// itself busy BEFORE returning true, so two prompts arriving at both
-// sides near-simultaneously cannot each observe an idle peer and
-// dispatch together - the loser of the mutex race parks instead. The
-// claim is confirmed by the loop's own turn_start (same side, idempotent)
-// and cleared by every terminal edge (turn_final, idle, unbind); a
-// claimed dispatch always runs synchronously in the loop's EventPrompt
-// branch right after this returns true.
+// CLAIM, not just a vote: when the peer holds NEITHER the turn NOR the
+// audio floor, this side marks itself busy + floor-held BEFORE returning
+// true, so two prompts arriving at both sides near-simultaneously cannot
+// each observe an idle peer and dispatch together - the loser of the
+// mutex race parks instead. The floor check (floorHeld) is the
+// talk-over fix: under the old busy-only rule a peer could CLAIM the
+// floor the moment turn_final fired, while seconds of paced audio from
+// the finished turn were still leaving the bridge (measured 6.70 s of
+// both-sides-audible on link-1108d776b0a1efb3). The claim is confirmed
+// by the loop's own turn_start (same side, idempotent) and cleared by
+// every terminal edge (floor release after drain/margin, idle, unbind);
+// a claimed dispatch always runs synchronously in the loop's
+// EventPrompt branch right after this returns true.
 func (c *LinkTurnCoordinator) HoldPromptFor(side string) func(Instance, func()) bool {
 	if c == nil {
 		return nil
@@ -250,7 +288,7 @@ func (c *LinkTurnCoordinator) HoldPromptFor(side string) func(Instance, func()) 
 	return func(call Instance, _ func()) bool {
 		c.mu.Lock()
 		peer := c.peerLocked(side)
-		if peer.busy {
+		if peer.busy || peer.floorHeld {
 			c.mu.Unlock()
 			c.log.Info("voice: link turn: hold decision", "side", side,
 				"kind", "hold_decision", "ccid", call.CallControlID, "peer_side_held", true)
@@ -258,17 +296,21 @@ func (c *LinkTurnCoordinator) HoldPromptFor(side string) func(Instance, func()) 
 		}
 		st := c.sideLocked(side)
 		st.busy = true
+		st.floorHeld = true
+		st.ccid = call.CallControlID
 		c.mu.Unlock()
 		return true
 	}
 }
 
 // TurnStateFor returns the side's TalkDeps.TurnState closure - the
-// half-duplex observation edge (turn_start -> this side is the speaker;
-// turn_final -> it just flushed, arm the margin then release the peer;
-// idle -> it stopped speaking without a final, release the peer now).
-// A second turn_start on the same side (supersede inside one side) also
-// cancels a previously armed margin: the side is speaking again.
+// half-duplex observation edge (turn_start -> this side is the speaker
+// and holds the floor; turn_final -> its say stream flushed TEXT-side,
+// arm the splice drain watch + the long fallback margin - the floor
+// stays held until one of them releases it; idle -> it stopped speaking
+// without a final, release the peer now). A second turn_start on the
+// same side (supersede inside one side) cancels a previously armed
+// release: the side is speaking again.
 func (c *LinkTurnCoordinator) TurnStateFor(side string) func(ccid string, seq uint64, kind string) {
 	if c == nil {
 		return nil
@@ -280,53 +322,54 @@ func (c *LinkTurnCoordinator) TurnStateFor(side string) func(ccid string, seq ui
 		switch kind {
 		case TurnKindStart:
 			st.busy = true
-			if st.marginTimer != nil {
-				st.marginTimer.Stop()
-				st.marginTimer = nil
+			st.floorHeld = true
+			st.ccid = ccid
+			st.seq = seq
+			if st.releaseTimer != nil {
+				st.releaseTimer.Stop()
+				st.releaseTimer = nil
 			}
-			st.marginGen++ // invalidate any armed margin from this side
+			st.releaseGen++ // invalidate any armed release from this side
 			c.mu.Unlock()
 		case TurnKindFinal:
 			st.busy = false
-			if st.marginTimer != nil {
-				st.marginTimer.Stop()
+			if st.releaseTimer != nil {
+				st.releaseTimer.Stop()
+				st.releaseTimer = nil
 			}
-			gen := st.marginGen + 1
-			st.marginGen = gen
-			peerLoop := peer.loop
+			gen := st.releaseGen + 1
+			st.releaseGen = gen
+			// floorHeld STAYS set: the pacer still owns this turn's
+			// audio tail. The release arms below.
 			c.mu.Unlock()
-			if peerLoop == nil {
-				// Peer has no loop under us - nothing parked to release.
-				return
-			}
-			// Drain margin: trailing sentences + TTS tail leave the
-			// bridge before the parked listener dispatches. A second
-			// turn_start on this side before the fire bumps marginGen
-			// and the stale fire no-ops; the release itself is
-			// idempotent (FlushHeld is a buffered non-blocking signal
-			// and releaseHeld no-ops with nothing parked).
+			// Arm the splice-side drain watch OFF the lock: resolve the
+			// live local splice by ccid (the same package-level
+			// registry HandleInterrupt rides). A plain local call's
+			// splice has no AudioDrained dep -> ArmDrainWatch is a
+			// no-op; no splice (already torn down) -> nil receiver.
+			// Either way the fallback margin below still bounds the
+			// hold.
+			LocalSpliceFor(ccid).ArmDrainWatch()
 			c.mu.Lock()
-			if st.marginGen == gen {
-				st.marginTimer = time.AfterFunc(c.margin, func() {
-					c.mu.Lock()
-					stillCurrent := st.marginGen == gen && !st.busy
-					loop := peer.loop
-					c.mu.Unlock()
-					if stillCurrent && loop != nil {
-						c.log.Info("voice: link turn: margin released", "side", side,
-							"kind", "margin_release", "ccid", ccid, "seq", seq)
-						loop.FlushHeld()
-					}
+			if st.releaseGen == gen && !st.busy {
+				// Fallback margin: protects against the drain signal
+				// never firing (splice died mid-turn, child stalled
+				// without audio). Stale-drain guard: the fire compares
+				// the generation, so a turn_start on this side between
+				// arm and fire invalidates it.
+				st.releaseTimer = time.AfterFunc(c.margin, func() {
+					c.releaseFloor(side, ccid, seq, gen, "margin")
 				})
 			}
 			c.mu.Unlock()
 		case TurnKindIdle:
 			st.busy = false
-			if st.marginTimer != nil {
-				st.marginTimer.Stop()
-				st.marginTimer = nil
+			st.floorHeld = false
+			if st.releaseTimer != nil {
+				st.releaseTimer.Stop()
+				st.releaseTimer = nil
 			}
-			st.marginGen++ // no pending release rides an idle side
+			st.releaseGen++ // no pending release rides an idle side
 			peerLoop := peer.loop
 			c.mu.Unlock()
 			if peerLoop != nil {
@@ -335,6 +378,81 @@ func (c *LinkTurnCoordinator) TurnStateFor(side string) func(ccid string, seq ui
 		default:
 			c.mu.Unlock()
 		}
+	}
+}
+
+// NoteAudioDrained is the floor's audio-truth release input: the local
+// splice fires it (wired per-call through LocalDeps -> the daemon
+// wiring's hook -> here) once the turn's last paced chunk has been
+// WRITTEN to the client socket and the child stream went quiet. A
+// stale/foreign ccid (no side holds it, or the side went mid-turn
+// again) is a no-op. Matching drains schedule the release after
+// linkFloorTailPad - the tiny transit gap so the last chunk clears the
+// bridge before the peer may speak.
+func (c *LinkTurnCoordinator) NoteAudioDrained(ccid string) {
+	if c == nil || ccid == "" {
+		return
+	}
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return
+	}
+	var match *linkTurnSideState
+	var side string
+	for _, s := range []struct {
+		id string
+		st *linkTurnSideState
+	}{{LinkSideA, &c.a}, {LinkSideB, &c.b}} {
+		st := s.st
+		if st.ccid == ccid && st.floorHeld && !st.busy {
+			match = st
+			side = s.id
+		}
+	}
+	if match == nil {
+		c.mu.Unlock()
+		return
+	}
+	seq := match.seq
+	if match.releaseTimer != nil {
+		match.releaseTimer.Stop()
+	}
+	gen := match.releaseGen + 1
+	match.releaseGen = gen
+	match.releaseTimer = time.AfterFunc(c.pad, func() {
+		c.releaseFloor(side, ccid, seq, gen, "drained")
+	})
+	c.mu.Unlock()
+	c.log.Info("voice: link turn: drain noted", "side", side,
+		"kind", "floor_drain_noted", "ccid", ccid, "seq", seq, "pad_ms", c.pad.Milliseconds())
+}
+
+// releaseFloor is the single floor-release funnel: the pad-after-drain
+// and the fallback-margin timers both route here. It re-checks under
+// the lock that the fire belongs to the LIVE arm (generation match,
+// side not mid-turn again, floor still held), clears the floor, logs
+// the telemetry edge (kind=floor_released, reason=drained|margin), and
+// flushes the peer's parked prompt. The release itself is idempotent
+// (FlushHeld is a buffered non-blocking signal and releaseHeld no-ops
+// with nothing parked).
+func (c *LinkTurnCoordinator) releaseFloor(side, ccid string, seq, gen uint64, reason string) {
+	c.mu.Lock()
+	st := c.sideLocked(side)
+	stillCurrent := st.releaseGen == gen && !st.busy && st.floorHeld && !c.closed
+	if stillCurrent {
+		st.floorHeld = false
+		st.releaseTimer = nil
+	}
+	peerLoop := c.peerLocked(side).loop
+	c.mu.Unlock()
+	if !stillCurrent {
+		return
+	}
+	c.log.Info("voice: link turn: floor released", "side", side,
+		"kind", "floor_released", "reason", reason, "ccid", ccid, "seq", seq)
+	if peerLoop != nil {
+		peerLoop.FlushHeld()
 	}
 }
 
@@ -437,12 +555,14 @@ func (c *LinkTurnCoordinator) Shutdown() {
 	c.closed = true
 	for _, side := range []string{LinkSideA, LinkSideB} {
 		st := c.sideLocked(side)
-		if st.marginTimer != nil {
-			st.marginTimer.Stop()
-			st.marginTimer = nil
+		if st.releaseTimer != nil {
+			st.releaseTimer.Stop()
+			st.releaseTimer = nil
 		}
 		st.busy = false
-		st.marginGen++ // no pending release rides a dead coordinator
+		st.floorHeld = false
+		st.ccid = ""
+		st.releaseGen++ // no pending release rides a dead coordinator
 	}
 	c.mu.Unlock()
 }
@@ -524,10 +644,11 @@ type LinkDeps struct {
 	// half-duplex among themselves but nothing in the wiring can bind
 	// loops to it (tests-only shape; production wiring always shares).
 	Turns *LinkTurnRegistry
-	// TurnMargin is the drain window the half-duplex coordinator waits
-	// after a side's turn_final before releasing the other side's parked
-	// prompt (trailing sentences + paced TTS audio must leave the bridge
-	// before the listener may speak). Zero = linkTurnMarginDefault.
+	// TurnMargin is the FALLBACK floor-release window the half-duplex
+	// coordinator arms on a side's turn_final when the audio-drain
+	// signal never fires. The primary release is drain-driven: the
+	// local splice's ArmDrainWatch -> AudioDrained edge -> floor after
+	// linkFloorTailPad. Zero = linkFloorFallbackDefault (4 s).
 	TurnMargin time.Duration
 	Logger     *slog.Logger
 }
@@ -787,7 +908,7 @@ func NewLinkManager(deps LinkDeps) (*LinkManager, error) {
 		m.turns = NewLinkTurnRegistry(deps.Logger)
 	}
 	if m.turnMargin <= 0 {
-		m.turnMargin = linkTurnMarginDefault
+		m.turnMargin = linkFloorFallbackDefault
 	}
 	if m.dialTimeout <= 0 {
 		m.dialTimeout = linkDialTimeoutDefault

@@ -75,12 +75,13 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
 
 - A voice link carries TWO independent talk loops; a live run proved
   they greet at once and dispatch over each other's speech. The
-  contract the coordinator enforces: at most ONE side is mid-turn at a
-  time, the listener's final prompt dispatches only after the speaker's
-  turn FINALIZES plus the drain margin (LinkDeps.TurnMargin, default
-  linkTurnMarginDefault 600 ms), and exactly ONE side greets - side A
-  (side B's loop is built with TalkLoopConfig.SuppressGreeting; A's
-  greeting audio crossing into B's mic is the conversation seed).
+  contract the coordinator enforces: at most ONE side holds the floor
+  (mid-turn OR draining its paced audio tail) at a time, the
+  listener's final prompt dispatches only after the speaker's audio
+  DRAINS (the splice's AudioDrained edge + tail pad, or the fallback
+  margin - see the release-path bullet), and exactly ONE side greets -
+  side A (side B's loop is built with TalkLoopConfig.SuppressGreeting;
+  A's greeting audio crossing into B's mic is the conversation seed).
 - The seams are OPTIONAL and nil-by-default: TalkDeps.HoldPrompt parks
   a denied final (one slot, latest question wins, telemetry
   kind=prompt_held / prompt_released / prompt_dropped), TalkDeps.
@@ -95,10 +96,27 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   still running, and the ccid is not knowable then - the target is.
   Close/unwind unregisters; a stale target must never bind a future
   call.
-- Every release path matters: turn_final arms the margin before
-  releasing, idle (barge-in cancel, unbind, teardown) releases
-  IMMEDIATELY (nothing is playing), and a park alive at loop exit is
-  dropped with a log (never dispatched into a dead call). The bridge
+- Every release path matters: turn_final NO LONGER releases the floor.
+  The floor releases on AUDIO DRAIN: turn_final arms the splice's drain
+  watch (LocalSpliceFor(ccid).ArmDrainWatch, the same registry
+  HandleInterrupt rides) plus a LONG fallback margin (default 4 s,
+  LinkDeps.TurnMargin); the first of (LocalSpliceDeps.AudioDrained edge
+  + 250 ms tail pad) or (fallback fire) clears the floor and flushes the
+  peer's park (telemetry kind=floor_released, reason=drained|margin).
+  turn_final alone only clears BUSY - the daemon pacer still holds
+  seconds of paced audio after the text flush (measured 6.70 s
+  both-sides talk-over on link-1108d776b0a1efb3), and HoldPromptFor
+  gates on floorHeld so a FRESH peer prompt cannot claim the floor
+  during the tail either. The drain fires only after (a) a touch
+  POST-DATES the arm (the early-fire guard: the final sentence's TTS
+  may still be synthesizing) and (b) pending/carry are zero and the
+  stream is quiet for the window; a silent stream NEVER fires - denied
+  turns ride the fallback margin (late, never early). idle (barge-in
+  cancel, unbind, teardown) releases IMMEDIATELY (nothing is playing),
+  and a park alive at loop exit is dropped with a log (never dispatched
+  into a dead call). The splice-side watch only exists for LINK calls:
+  LocalDeps.LinkTurns resolves per Open by registry target (plain local
+  -> nil dep -> no watch goroutine, byte-identical). The bridge
   seeds each mic with linkSilenceSeedChunks exact zero chunks at dial:
   with B silent on open, the splice's first-byte JoinTimeout gate must
   not depend on greeting audio (0-byte reads never satisfy it).

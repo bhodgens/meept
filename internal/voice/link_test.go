@@ -1084,28 +1084,46 @@ func TestLinkCoordinatorHoldDecision(t *testing.T) {
 		t.Fatal("bound sides must get a non-nil HoldPrompt")
 	}
 	// Idle link: A may speak, and the allow CLAIMS the speaker slot.
-	if !holdA(Instance{CallControlID: "a"}, func() {}) {
+	if !holdA(Instance{CallControlID: "cc-a"}, func() {}) {
 		t.Fatal("first A prompt with an idle peer must be allowed")
 	}
 	// While A holds the floor, B's prompt parks.
-	if holdB(Instance{CallControlID: "b"}, func() {}) {
+	if holdB(Instance{CallControlID: "cc-b"}, func() {}) {
 		t.Fatal("B prompt while A holds the floor must be held")
 	}
 	// A's own second prompt is NOT held by itself (same-side supersede
 	// is the loop's legacy rule, not the coordinator's).
-	if !holdA(Instance{CallControlID: "a"}, func() {}) {
+	if !holdA(Instance{CallControlID: "cc-a"}, func() {}) {
 		t.Fatal("same-side prompt must not be held by its own turn")
 	}
-	// A's turn_final frees the floor: B's next prompt is allowed.
+	// A's turn_final clears BUSY but NOT the floor: the pacer may still
+	// hold A's paced audio tail (drain-driven floor, leaf 02). B's next
+	// prompt must still park until the drain edge (or the fallback
+	// margin) releases the floor.
 	finalA("cc-a", 1, TurnKindFinal)
 	c.mu.Lock()
 	busyA := c.a.busy
+	heldA := c.a.floorHeld
 	c.mu.Unlock()
 	if busyA {
 		t.Fatal("A still busy after turn_final")
 	}
-	if !holdB(Instance{CallControlID: "b"}, func() {}) {
-		t.Fatal("B prompt after A's turn_final must be allowed")
+	if !heldA {
+		t.Fatal("A floor must stay held after turn_final (audio tail still pacing)")
+	}
+	if holdB(Instance{CallControlID: "cc-b"}, func() {}) {
+		t.Fatal("B prompt right after A's turn_final must stay held (pre-drain talk-over guard)")
+	}
+	// The drain edge + tail pad frees the floor: B's next prompt lands.
+	c.NoteAudioDrained("cc-a")
+	waitFor(t, 2*time.Second, "floor freed after drain+pad", func() bool {
+		c.mu.Lock()
+		held := c.a.floorHeld
+		c.mu.Unlock()
+		return !held
+	})
+	if !holdB(Instance{CallControlID: "cc-b"}, func() {}) {
+		t.Fatal("B prompt after A's drained floor must be allowed")
 	}
 }
 
@@ -1383,5 +1401,293 @@ func TestLinkOpenUnwindUnregisters(t *testing.T) {
 	reg.mu.Unlock()
 	if n != 0 {
 		t.Fatalf("%d coordinator targets leaked past an unwound Open", n)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Drain-driven floor (turn-taking leaf 02): the floor releases on the
+// splice's AudioDrained edge (+ tail pad) or on the LONG fallback margin,
+// whichever comes first. turn_final alone must never free the floor early.
+// ---------------------------------------------------------------------------
+
+// bindSideBLoop wires a REAL B loop to the coordinator (park path) and
+// parks a prompt under a mid-turn A. Returns the loop + turn counters.
+func bindSideBLoop(t *testing.T, c *LinkTurnCoordinator, buf *syncBuffer, turnsB *holdTurns) *TalkLoop {
+	t.Helper()
+	logger := slog.New(slog.NewTextHandler(buf, nil))
+	loopB := NewTalkLoop(TalkDeps{
+		Supervisor: &cannedSupervisor{},
+		Turns:      turnsB,
+		SessionFor: constSession(SessionHandle{ID: "s", ConversationID: "c"}),
+		Send:       (&recordSink{}).Send,
+		OnEnd:      func(ccid, reason string) {},
+		Logger:     logger,
+		HoldPrompt: c.HoldPromptFor(LinkSideB),
+		TurnState:  c.TurnStateFor(LinkSideB),
+	}, TalkLoopConfig{})
+	c.Bind(LinkSideB, loopB)
+	cancelB, doneB := runLoop(t, loopB, "cc-b-drain")
+	t.Cleanup(func() { cancelB(); <-doneB })
+	stateA := c.TurnStateFor(LinkSideA)
+	stateA("cc-a-drain", 1, TurnKindStart)
+	loopB.frames <- finalPrompt("cc-b-drain", "parked under A")
+	waitFor(t, 2*time.Second, "park", func() bool { return loopHeldPrompt(loopB) })
+	return loopB
+}
+
+// T-DR1: the drain edge fires LATE (longer than the legacy 600 ms margin
+// would have allowed) - the coordinator must ride the drain, not a short
+// margin: B stays parked while the floor is held, releases at
+// drain + pad (never before), and the telemetry carries reason=drained.
+func TestLinkCoordinatorFloorReleasesOnLateDrain(t *testing.T) {
+	var buf syncBuffer
+	turnsB := &holdTurns{reply: "ok."}
+	// Fallback margin deliberately LONG: proves the release is the DRAIN's
+	// doing, not the margin's. (Production default is 4 s; same shape.) The
+	// coordinator shares the buffer logger: floor_released telemetry is
+	// asserted from it.
+	c := newTestCoordinator(time.Hour, slog.New(slog.NewTextHandler(&buf, nil)))
+	bindSideBLoop(t, c, &buf, turnsB)
+
+	stateA := c.TurnStateFor(LinkSideA)
+	stateA("cc-a-drain", 1, TurnKindFinal) // text-side final: floor STAYS held
+
+	// A fake "pacing tail" outlasts the old 600 ms window entirely.
+	time.Sleep(300 * time.Millisecond)
+	if turnsB.count() != 0 {
+		t.Fatal("B dispatched on turn_final alone: the drain contract is broken")
+	}
+
+	// The drain edge lands late; release must follow at pad (250 ms),
+	// and NOT earlier.
+	c.NoteAudioDrained("cc-a-drain")
+	time.Sleep(120 * time.Millisecond)
+	if turnsB.count() != 0 {
+		t.Fatal("B released before the tail pad elapsed")
+	}
+	waitFor(t, 3*time.Second, "B released after drain+pad", func() bool { return turnsB.count() == 1 })
+	logs := buf.String()
+	if !strings.Contains(logs, "kind=floor_released") {
+		t.Fatalf("telemetry missing floor_released:\n%s", logs)
+	}
+	if !strings.Contains(logs, "reason=drained") {
+		t.Fatalf("telemetry reason must be drained:\n%s", logs)
+	}
+	if strings.Contains(logs, "reason=margin") {
+		t.Fatalf("margin must not have fired (fallback was 1h):\n%s", logs)
+	}
+}
+
+// T-DR2: the drain edge fires EARLY (right after turn_final) - the floor
+// releases promptly at drain + pad, well before the fallback margin.
+func TestLinkCoordinatorFloorReleasesPromptlyOnEarlyDrain(t *testing.T) {
+	var buf syncBuffer
+	turnsB := &holdTurns{reply: "ok."}
+	c := newTestCoordinator(time.Hour, slog.New(slog.NewTextHandler(&buf, nil)))
+	bindSideBLoop(t, c, &buf, turnsB)
+
+	stateA := c.TurnStateFor(LinkSideA)
+	start := time.Now()
+	stateA("cc-a-drain", 1, TurnKindFinal)
+	c.NoteAudioDrained("cc-a-drain") // drained immediately (short turn)
+	waitFor(t, 3*time.Second, "prompt drain release", func() bool { return turnsB.count() == 1 })
+	elapsed := time.Since(start)
+	if elapsed > 2*time.Second {
+		t.Fatalf("drain release took %v, want promptly after pad (250ms)", elapsed)
+	}
+	if elapsed < linkFloorTailPad {
+		t.Fatalf("drain release at %v < tail pad %v", elapsed, linkFloorTailPad)
+	}
+	if logs := buf.String(); !strings.Contains(logs, "reason=drained") {
+		t.Fatalf("telemetry missing reason=drained:\n%s", logs)
+	}
+}
+
+// T-DR3: no drain signal at all (splice died mid-turn) - the LONG
+// fallback margin bounds the hold and releases with reason=margin.
+func TestLinkCoordinatorFloorFallbackMarginReleases(t *testing.T) {
+	var buf syncBuffer
+	turnsB := &holdTurns{reply: "ok."}
+	c := newTestCoordinator(150*time.Millisecond, slog.New(slog.NewTextHandler(&buf, nil))) // short fallback for the test
+	bindSideBLoop(t, c, &buf, turnsB)
+
+	stateA := c.TurnStateFor(LinkSideA)
+	stateA("cc-a-drain", 1, TurnKindFinal)
+	time.Sleep(60 * time.Millisecond)
+	if turnsB.count() != 0 {
+		t.Fatal("B released before the fallback margin")
+	}
+	waitFor(t, 3*time.Second, "fallback margin release", func() bool { return turnsB.count() == 1 })
+	if logs := buf.String(); !strings.Contains(logs, "reason=margin") {
+		t.Fatalf("telemetry missing reason=margin:\n%s", logs)
+	}
+}
+
+// T-DR4 (both-sides race): A finalizes AND A's audio drains while B's
+// flush signal is already queued - B's parked prompt re-gates against the
+// floor, and B dispatches only after A's drain + pad. Also pins the FRESH
+// claim path: a brand-new B prompt during A's drain tail parks instead of
+// claiming (the measured talk-over channel).
+func TestLinkCoordinatorDrainRaceGatesFreshClaims(t *testing.T) {
+	var buf syncBuffer
+	turnsB := &holdTurns{reply: "ok."}
+	c := newTestCoordinator(time.Hour, linkDiscard())
+	loopB := bindSideBLoop(t, c, &buf, turnsB)
+
+	stateA := c.TurnStateFor(LinkSideA)
+	stateA("cc-a-drain", 1, TurnKindFinal)
+	// Drain + queued flush race: fire the drain and ping the loop
+	// simultaneously - the floor stays held until pad, then releases.
+	c.NoteAudioDrained("cc-a-drain")
+	loopB.FlushHeld()
+	time.Sleep(120 * time.Millisecond)
+	if turnsB.count() != 0 {
+		t.Fatal("B dispatched during A's drain tail (both-sides bug)")
+	}
+	waitFor(t, 3*time.Second, "release after drain+pad despite queued flush", func() bool { return turnsB.count() == 1 })
+
+	// Fresh-claim gate: A speaks again (floor held), finalizes, and does
+	// NOT drain yet - a brand-new B prompt must park, not claim.
+	stateA("cc-a-drain", 2, TurnKindStart)
+	stateA("cc-a-drain", 2, TurnKindFinal)
+	holdB := c.HoldPromptFor(LinkSideB)
+	if holdB(Instance{CallControlID: "cc-b-fresh"}, func() {}) {
+		t.Fatal("fresh B prompt claimed the floor while A's audio tail still paced")
+	}
+	// Drain A's second turn -> the floor frees and the claim lands.
+	c.NoteAudioDrained("cc-a-drain")
+	waitFor(t, 3*time.Second, "second drain frees the floor", func() bool {
+		c.mu.Lock()
+		held := c.a.floorHeld
+		c.mu.Unlock()
+		return !held
+	})
+	if !holdB(Instance{CallControlID: "cc-b-fresh"}, func() {}) {
+		t.Fatal("fresh B prompt must be allowed once A's floor drained")
+	}
+}
+
+// T-DR5: stale drain edges are no-ops - a drain for a ccid that does not
+// match any floor-holding side, or arriving after that side went mid-turn
+// again, must not release anything.
+func TestLinkCoordinatorStaleDrainIgnored(t *testing.T) {
+	var buf syncBuffer
+	turnsB := &holdTurns{reply: "ok."}
+	c := newTestCoordinator(time.Hour, linkDiscard())
+	bindSideBLoop(t, c, &buf, turnsB)
+
+	// Foreign ccid: no side holds it.
+	c.NoteAudioDrained("cc-nobody")
+	// A re-took the floor (mid-turn): a drain for A is stale while busy.
+	stateA := c.TurnStateFor(LinkSideA)
+	stateA("cc-a-drain", 2, TurnKindStart)
+	c.NoteAudioDrained("cc-a-drain")
+	time.Sleep(400 * time.Millisecond)
+	if turnsB.count() != 0 {
+		t.Fatal("stale drain released the floor")
+	}
+	// The live chain still releases: final + drain.
+	stateA("cc-a-drain", 2, TurnKindFinal)
+	c.NoteAudioDrained("cc-a-drain")
+	waitFor(t, 3*time.Second, "live drain release after re-take", func() bool { return turnsB.count() == 1 })
+}
+
+// T-DR6: the FULL seam end to end inside the package - a real local
+// splice (paced child audio to a net.Pipe client) wired through
+// wiredAudioDrain onto a real coordinator, exactly as LocalLeg.Open does
+// for a link leg (registry pre-registered by the link manager before the
+// leg opens). Pins: the floor stays held while audio paces, the drain
+// edge fires from the real outbound quiescence, and the release lands
+// with reason=drained.
+func TestLinkDrainSeamEndToEnd(t *testing.T) {
+	var buf syncBuffer
+	c := NewLinkTurnCoordinator("link-drain-e2e", time.Hour, slog.New(slog.NewTextHandler(&buf, nil)))
+	reg := NewLinkTurnRegistry(linkDiscard())
+	const ccid = "ls-drain-e2e"
+	const target = "local:link-a-e2e"
+	reg.Register(target, "link-drain-e2e", LinkSideA, c)
+
+	drainFn := wiredAudioDrain(reg, target)
+	if drainFn == nil {
+		t.Fatal("link target must resolve a drain callback")
+	}
+	if wiredAudioDrain(reg, "local:plain") != nil {
+		t.Fatal("a plain local target must resolve NO drain callback")
+	}
+
+	p, micSide, _, _, cancel, done := startDrainSplice(t, ccid, LocalSpliceConfig{DrainQuiet: 150 * time.Millisecond}, drainFn)
+	_ = p
+	waitForSplice(t, ccid) // registration races the splice goroutine; the
+	// production arm (turn_final) always lands long after Leg.Open registered.
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("splice did not exit")
+		}
+	}()
+
+	// Side A claims the floor (fresh prompt path - no loop needed for
+	// the state machine), speaks, and finalizes.
+	holdA := c.HoldPromptFor(LinkSideA)
+	if !holdA(Instance{CallControlID: ccid}, func() {}) {
+		t.Fatal("first A claim must be allowed")
+	}
+	c.TurnStateFor(LinkSideA)(ccid, 1, TurnKindStart)
+
+	// Feed paced audio: the pump chunks must drain to the client.
+	stopRead := make(chan struct{})
+	go func() {
+		buf := make([]byte, 640)
+		for {
+			select {
+			case <-stopRead:
+				return
+			default:
+			}
+			_ = micSide.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+			if _, err := micSide.Read(buf); err != nil {
+				var ne net.Error
+				if errors.As(err, &ne) && ne.Timeout() {
+					continue
+				}
+				return
+			}
+		}
+	}()
+	defer close(stopRead)
+	for range 8 {
+		if err := feedChild(ccid); err != nil {
+			t.Fatalf("feedChild: %v", err)
+		}
+	}
+	c.TurnStateFor(LinkSideA)(ccid, 1, TurnKindFinal)
+
+	// The floor must still be held while the audio tail paces (8 chunks
+	// ~ 160 ms + the 150 ms quiet window).
+	time.Sleep(80 * time.Millisecond)
+	c.mu.Lock()
+	heldDuringTail := c.a.floorHeld
+	c.mu.Unlock()
+	if !heldDuringTail {
+		t.Fatal("floor released while paced audio was still in the pacer")
+	}
+
+	// Real drain -> real release with reason=drained. Poll the
+	// TELEMETRY (not the latch flip: releaseFloor clears floorHeld
+	// under the lock before logging, so a state poll can win the log
+	// write).
+	waitFor(t, 4*time.Second, "floor released via real drain edge", func() bool {
+		logs := buf.String()
+		return strings.Contains(logs, "kind=floor_released") && strings.Contains(logs, "reason=drained")
+	})
+	// A stale re-fire (same ccid, floor no longer held) is a no-op.
+	c.NoteAudioDrained(ccid)
+	c.mu.Lock()
+	reHeld := c.a.floorHeld
+	c.mu.Unlock()
+	if reHeld {
+		t.Fatal("stale drain re-held the floor")
 	}
 }
