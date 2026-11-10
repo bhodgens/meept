@@ -44,6 +44,10 @@ A Goal is a long-lived mandate owned by an employee. "Keep CI green for main bra
 - A Goal has health: `green`, `yellow` (at risk), `red` (broken), or `unknown`.
 - Each Goal tracks its active Plan and plan history.
 - Goals are stored in the `employee_goals` SQLite table alongside `bot_definitions`.
+- Goal state changes are enforced by a store-level transition fence (contract C-P3):
+  `blocked -> active` only via the human-gated `goal_update` resume, `retired` is
+  terminal, every retired write stamps `retired_at`, and paused/blocked goals reject
+  assessment write-backs (employee delete soft-retires goal rows — audit trail preserved).
 
 **Standalone employee databases.** When `bots.enabled=false`, the goal and
 audit stores open their own SQLite files under `employees/`

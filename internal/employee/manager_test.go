@@ -367,6 +367,11 @@ func TestHirePostInsertFailureRollsBack(t *testing.T) {
 // TestRetireLeavesNoRows covers the DeleteEmployee path end-to-end: after a
 // successful hire (with goals) and Retire, NOTHING keyed by the id remains
 // in the bot store or the employee stores (fix 1 + explicit goal sweep).
+//
+// Leaf 05 (M-11 Q3) changed the GOAL sweep from hard-DELETE to
+// soft-retirement: goal rows SURVIVE with state='retired' + retired_at
+// stamped (the gate TestRetireSetsRetiredAt pins that). This test now pins
+// the rest of the sweep stays hard-deleted.
 func TestRetireLeavesNoRows(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -392,7 +397,22 @@ func TestRetireLeavesNoRows(t *testing.T) {
 	if err := m.Retire(ctx, "emp-retire"); err != nil {
 		t.Fatalf("Retire: %v", err)
 	}
-	assertNoEmployeeRows(t, dbPath, "emp-retire")
+	// Leaf 05: goals are SOFT-retired now, so the shared helper must run
+	// without the employee_goals table (the gate test asserts rows survive
+	// with state=retired). Check everything else is gone + goals survived.
+	for table, q := range map[string]string{
+		"bot_definitions":        `SELECT COUNT(*) FROM bot_definitions WHERE id = ?`,
+		"bot_states":             `SELECT COUNT(*) FROM bot_states WHERE definition_id = ?`,
+		"employee_constitutions": `SELECT COUNT(*) FROM employee_constitutions WHERE employee_id = ?`,
+	} {
+		if n := countRows(t, dbPath, q, "emp-retire"); n != 0 {
+			t.Errorf("%s: %d rows for %q, want 0", table, n, "emp-retire")
+		}
+	}
+	if n := countRows(t, dbPath,
+		`SELECT COUNT(*) FROM employee_goals WHERE employee_id = ? AND state = 'retired'`, "emp-retire"); n != 1 {
+		t.Errorf("soft-retired goal rows = %d, want 1 (M-11 Q3: rows survive, state=retired)", n)
+	}
 
 	// Re-hire of the retired id must succeed (covers fix 1 via the full
 	// employee path: no orphan bot_states row blocks re-creation).

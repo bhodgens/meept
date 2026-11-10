@@ -245,14 +245,17 @@ func (s *MessageStore) DrainInbox(to string, limit int) ([]AgentMessage, error) 
 	return msgs, nil
 }
 
-// MarkRead transitions the given delivered messages to "read".
+// MarkRead transitions the given delivered messages to "read". Only
+// DELIVERED rows advance: a queued message may not skip to read (leaf 06
+// T5) — that would erase the delivery receipt the DrainInbox stamp is the
+// record of.
 func (s *MessageStore) MarkRead(ids []string) error {
 	if len(ids) == 0 {
 		return nil
 	}
 	for _, id := range ids {
 		if _, err := s.db.Exec(
-			`UPDATE agent_messages SET state = 'read' WHERE id = ? AND state != 'read'`, id,
+			`UPDATE agent_messages SET state = 'read' WHERE id = ? AND state = 'delivered'`, id,
 		); err != nil {
 			return fmt.Errorf("message mark read: %w", err)
 		}

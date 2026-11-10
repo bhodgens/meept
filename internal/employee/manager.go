@@ -1291,14 +1291,14 @@ func (m *Manager) Hire(ctx context.Context, req HireRequest) (*Employee, error) 
 }
 
 // rollbackHiredBot removes every row Hire wrote for employeeID after a
-// post-insert step failed. Retire is the single sweep: bot definition +
-// state rows, constitution row, goals, audit findings, standalone-DB
-// mirrors, and the in-memory caches. Best-effort, logged — its whole purpose
-// is to leave the id free so a corrected re-hire is not blocked by a UNIQUE
-// violation.
+// post-insert step failed. The retire sweep is the single cleanup — in the
+// HARD-DELETE variant: a rolled-back hire was never a real employee, so
+// unlike operator-facing Retire (soft-goal-retirement, M-11 Q3) its goal
+// rows are deleted outright, leaving the id free so a corrected re-hire is
+// not blocked by a UNIQUE violation. Best-effort, logged.
 func (m *Manager) rollbackHiredBot(ctx context.Context, employeeID string, cause error) {
 	// botManager is non-nil here — Hire's guard runs before any write.
-	if err := m.Retire(ctx, employeeID); err != nil {
+	if err := m.retireEmployee(ctx, employeeID, true); err != nil {
 		m.logger.Warn("hire rollback: retire failed; id may stay blocked",
 			"employee_id", employeeID, "cause", cause, "error", err)
 	} else {
@@ -1342,15 +1342,26 @@ func (m *Manager) UpdateEmployee(ctx context.Context, req UpdateRequest) (*Emplo
 	return m.GetEmployee(ctx, req.ID)
 }
 
-// Retire stops and deletes an employee (spec: agents.delete). Deletes every
-// row keyed by the employee id: bot definition + state (store.Delete),
-// constitution, goals, audit findings, and the standalone-DB
-// bot_definitions mirrors. The employee_goals/employee_audit_findings FKs
-// say ON DELETE CASCADE, but the cascade is inert on shared-DB wiring — the
-// DELETE runs on the bot store's connection, which opens SQLite without the
-// foreign_keys pragma — so those rows are removed explicitly here. Plans
-// survive in the separate plans table.
+// Retire stops and deletes an employee (spec: agents.delete). The bot
+// definition + state (store.Delete), constitution, and the standalone-DB
+// bot_definitions mirrors are hard-deleted; the employee's GOALS are
+// SOFT-retired (M-11 Q3 default, leaf 05): rows survive with
+// state='retired' + retired_at stamped so the audit trail is preserved.
+// Audit findings are still swept explicitly (they are per-employee audit
+// detail keyed by a deleted bot id). The employee_goals/employee_audit_findings
+// FKs say ON DELETE CASCADE, but the cascade is inert on shared-DB wiring —
+// the DELETE runs on the bot store's connection, which opens SQLite without
+// the foreign_keys pragma — so those rows are handled explicitly here.
+// Plans survive in the separate plans table.
 func (m *Manager) Retire(ctx context.Context, id string) error {
+	return m.retireEmployee(ctx, id, false)
+}
+
+// retireEmployee is the shared sweep. hardDeleteGoals=true is the
+// hire-rollback path: a partial hire was never a real employee, so its
+// rows must leave NO trace (the id stays free and the tables stay clean);
+// the operator-facing Retire uses soft-retirement instead.
+func (m *Manager) retireEmployee(ctx context.Context, id string, hardDeleteGoals bool) error {
 	if m.botManager == nil {
 		return fmt.Errorf("retire employee %q: bot backend not configured (enable bots.enabled to manage employees)", id)
 	}
@@ -1360,7 +1371,7 @@ func (m *Manager) Retire(ctx context.Context, id string) error {
 	}
 	// Cascade clean: constitution, goals, findings, standalone mirrors,
 	// caches. The FK cascades cannot be relied on (inert pragma, see doc
-	// comment), so goals/findings get explicit DELETEs.
+	// comment), so goals/findings get explicit handling here.
 	if m.constitutionStore != nil {
 		if err := m.constitutionStore.Delete(ctx, id); err != nil {
 			m.logger.Warn("retire: constitution delete failed",
@@ -1368,10 +1379,24 @@ func (m *Manager) Retire(ctx context.Context, id string) error {
 		}
 	}
 	if m.goalStore != nil {
-		if _, err := m.goalStore.db.ExecContext(ctx,
-			`DELETE FROM employee_goals WHERE employee_id = ?`, id); err != nil {
-			m.logger.Warn("retire: goal delete failed",
-				"employee_id", id, "error", err)
+		if hardDeleteGoals {
+			if _, err := m.goalStore.db.ExecContext(ctx,
+				`DELETE FROM employee_goals WHERE employee_id = ?`, id); err != nil {
+				m.logger.Warn("retire: goal delete failed",
+					"employee_id", id, "error", err)
+			}
+		} else {
+			// M-11 Q3: SOFT retirement — keep the rows, flip state + stamp
+			// retired_at (already-retired rows keep their original stamp).
+			if _, err := m.goalStore.db.ExecContext(ctx,
+				`UPDATE employee_goals
+                 SET state = ?, retired_at = ?
+                 WHERE employee_id = ? AND state != ?`,
+				GoalRetired.String(), time.Now().UTC().Format(time.RFC3339),
+				id, GoalRetired.String()); err != nil {
+				m.logger.Warn("retire: goal soft-retire failed",
+					"employee_id", id, "error", err)
+			}
 		}
 	}
 	if m.auditStore != nil {
@@ -2063,11 +2088,19 @@ func (m *Manager) CreateGoal(ctx context.Context, spec GoalSpec) (*Goal, error) 
 // health) via the goal store. Nil-goalStore degrades to ErrNotImplemented
 // (same posture as CreateGoal). The github-intake-factory tree's
 // GoalCreator seam requires it for re-dispatch (leaf 02).
+//
+// C-P3 (leaf 05): this is the ONE allowHumanBypass=true call site in the
+// repo. Every path through it is human-gated at the edge — the goal_update
+// tool's resume action runs requireDirectHuman() before reaching here, and
+// the intake re-dispatch is a human ticket event — so the bypass only
+// legalizes blocked -> active at the store fence. All other writers go
+// through the plain GoalStore.Update (grep: UpdateWithTransition has no
+// other true caller).
 func (m *Manager) UpdateGoal(ctx context.Context, goal *Goal) error {
 	if m.goalStore == nil {
 		return ErrNotImplemented
 	}
-	if err := m.goalStore.Update(ctx, goal); err != nil {
+	if err := m.goalStore.UpdateWithTransition(ctx, goal, true); err != nil {
 		return fmt.Errorf("update goal: %w", err)
 	}
 	return nil

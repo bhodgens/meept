@@ -84,6 +84,49 @@ func ParseGoalState(s string) (GoalState, error) {
 	}
 }
 
+// ErrGoalTransition is returned when a GoalStore write attempts a state
+// change the transition fence forbids (contract C-P3, audit M-10): the
+// durable blocked phase and terminal retired state are enforced by the
+// store, not by caller convention.
+var ErrGoalTransition = errors.New("employee: invalid goal state transition")
+
+// goalTransitions is the validFrom table for GoalState (C-P3):
+//
+//	active  -> {paused, blocked, retired}
+//	paused  -> {active, blocked, retired}
+//	blocked -> {active, retired}   // active ONLY via the human-gated resume path
+//	retired -> {}                  // terminal, even for the human bypass
+var goalTransitions = map[GoalState]map[GoalState]bool{
+	GoalActive:  {GoalPaused: true, GoalBlocked: true, GoalRetired: true},
+	GoalPaused:  {GoalActive: true, GoalBlocked: true, GoalRetired: true},
+	GoalBlocked: {GoalActive: true, GoalRetired: true},
+	GoalRetired: {},
+}
+
+// goalTransitionLegal reports whether from -> to passes the fence.
+// Same-state writes are always legal (they are field updates, not
+// transitions). allowHumanBypass is the C-P3 resume gate: it legalizes
+// blocked -> active for the human-gated goal_update resume/complete path
+// and NOTHING else — retired stays terminal even with the bypass, and no
+// other edge needs it.
+func goalTransitionLegal(from, to GoalState, allowHumanBypass bool) bool {
+	if from == to {
+		return true
+	}
+	if from == GoalBlocked && to == GoalActive {
+		return allowHumanBypass
+	}
+	return goalTransitions[from][to]
+}
+
+// validGoalState reports whether s is one of the defined GoalState
+// constants (the fence rejects writes to an undefined state rather than
+// persisting a row no loader can decode).
+func validGoalState(s GoalState) bool {
+	_, ok := goalTransitions[s]
+	return ok
+}
+
 // GoalHealth reflects how well a mandate is being met at the most recent
 // assessment.
 type GoalHealth int
@@ -857,17 +900,69 @@ func (s *GoalStore) ListActive(ctx context.Context, employeeID string) ([]*Goal,
 	return collectRows(ctx, rows)
 }
 
-// Update writes all mutable fields of g. ID is used as the key; if no row is
-// updated, Update returns ErrGoalNotFound. g.mu is acquired for a read
-// snapshot before the SQL write so concurrent in-memory mutations do not
-// produce a torn row.
+// Update writes all mutable fields of g under the C-P3 transition fence
+// (no human bypass: blocked -> active and anything leaving retired are
+// refused here). ID is used as the key; if no row is updated, Update
+// returns ErrGoalNotFound. g.mu is acquired for a read snapshot before the
+// SQL write so concurrent in-memory mutations do not produce a torn row.
 func (s *GoalStore) Update(ctx context.Context, g *Goal) error {
+	return s.UpdateWithTransition(ctx, g, false)
+}
+
+// UpdateWithTransition is the fenced store write (contract C-P3, audit
+// M-10). It loads the persisted row and validates the state change against
+// the goalTransitions table before writing:
+//
+//   - an illegal edge returns ErrGoalTransition and touches nothing;
+//   - allowHumanBypass legalizes exactly ONE edge, blocked -> active — the
+//     human-gated goal_update resume (requireDirectHuman is the outer gate).
+//     retired stays terminal even with the bypass;
+//   - F16: a same-state write onto a non-active goal (paused/blocked/retired)
+//     has its assessment columns (health, last_assessed, recent_findings,
+//     rounds_started) silently clamped to the persisted values — frozen goals
+//     receive no assessment write-backs. Legitimate state-change writes are
+//     NOT blocked (only assessment deltas on unchanged-state rows);
+//   - M-11: any write landing the row in retired stamps retired_at when the
+//     caller left it zero, so every retired row satisfies IsRetired().
+//
+// The only allowHumanBypass=true caller in this repo is Manager.UpdateGoal
+// (the goal_update tool's backing write path — grep-provable).
+func (s *GoalStore) UpdateWithTransition(ctx context.Context, g *Goal, allowHumanBypass bool) error {
 	if g == nil {
 		return errors.New("update: nil goal")
 	}
+	if !validGoalState(g.State) {
+		return fmt.Errorf("update: invalid goal state %d", g.State)
+	}
+
+	cur, err := s.Get(ctx, g.ID)
+	if err != nil {
+		if errors.Is(err, ErrGoalNotFound) {
+			return ErrGoalNotFound
+		}
+		return fmt.Errorf("update: load current: %w", err)
+	}
+	if !goalTransitionLegal(cur.State, g.State, allowHumanBypass) {
+		return fmt.Errorf("%w: %s -> %s (goal %s)", ErrGoalTransition, cur.State, g.State, g.ID)
+	}
+
+	// F16: clamp assessment columns on unchanged-state writes to non-active goals.
+	clampAssessment := cur.State != GoalActive && g.State == cur.State
+
 	activePlanID, activePlanIDs, history, lastAssessed, retiredAt, recentFindings := g.snapshot()
 	maxRounds, roundsStarted, blockedReason := g.autonomySnapshot()
 	revision := g.bumpRevision()
+	health := g.Health
+	if clampAssessment {
+		health = cur.Health
+		lastAssessed = cur.LastAssessed
+		recentFindings = cur.RecentFindingsList()
+		roundsStarted = cur.RoundsStarted
+	}
+	if g.State == GoalRetired && retiredAt.IsZero() {
+		// M-11: every retired-state write carries retired_at.
+		retiredAt = time.Now().UTC()
+	}
 
 	historyJSON, err := marshalHistory(history)
 	if err != nil {
@@ -898,7 +993,7 @@ UPDATE employee_goals SET
     revision = ?
 WHERE id = ?`,
 		g.Title, g.Mandate, g.State.String(), string(g.Source),
-		goalNullableString(g.TriggerRef), g.Health.String(),
+		goalNullableString(g.TriggerRef), health.String(),
 		goalNullableTime(lastAssessed), goalNullableString(activePlanID),
 		historyJSON, goalNullableTime(retiredAt), findingsJSON,
 		activePlanIDsJSON, g.MaxPlanHistory, marshalGate(g.Gate),
