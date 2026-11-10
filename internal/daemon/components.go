@@ -5325,6 +5325,10 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	if c.EmployeeLedger != nil && c.ToolRegistry != nil {
 		builtin.RegisterLedgerTools(c.ToolRegistry, c.EmployeeLedger, logger.With("component", "ledger-tools"))
 	}
+	// Ledger integrity job (leaf 04-ops/01): scheduled VerifyState pass
+	// over [ledger] (auto_repair default false, interval_hours default
+	// 168). Guarded: nil store (ledger disabled) -> no job registered.
+	c.registerLedgerIntegrityJob(cfg, logger.With("component", "ledger-integrity-wiring"))
 
 	// Voice sidecar ([voice] block, voice-sidecar leaf 14): the whole-
 	// daemon wiring - call manager, registry, dialer, talk loops,
