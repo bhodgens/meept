@@ -28,6 +28,11 @@ const (
 	OutcomeHangup   Outcome = "hangup"
 )
 
+// outboundDoneCap bounds post-teardown WaitCall tombstones for outbound
+// ccids (audit 2026-11-09 finding 2 residual); oldest-first eviction past
+// the cap keeps the map bounded on long-running daemons.
+const outboundDoneCap = 64
+
 // ManagerConfig holds manager-wide call settings.
 type ManagerConfig struct {
 	// StreamURL is the full media-stream URL Telnyx should be told to dial on
@@ -60,6 +65,12 @@ type Manager struct {
 	stream   map[string]context.CancelFunc // media bridge cancels, registered by OnMediaStart
 	outbound map[string]struct{}           // registered by TrackOutbound; NEVER answered by us
 	done     map[string]chan struct{}      // registered on track/initiate; closed once on hangup
+	// doneTomb holds CLOSED done channels retained post-teardown for
+	// outbound-tracked ccids (audit 2026-11-09 finding 2 residual), so a
+	// later WaitCall by ccid observes closure instead of a fresh
+	// never-closing channel. Bounded by outboundDoneCap. Inbound ids keep
+	// the M3 no-retention posture.
+	doneTomb map[string]chan struct{}
 	release  func(ccid string, outcome Outcome)
 
 	// answerMu guards answerHook. The hook is the answered-notification
@@ -165,6 +176,28 @@ func (m *Manager) releaseOnce(ccid string) (callCancel, streamCancel context.Can
 	delete(m.done, ccid)
 	if hadDone {
 		close(ch)
+	}
+	// Outbound tombstone (audit 2026-11-09 finding 2 residual): an
+	// outbound-tracked ccid re-resolved via WaitCall AFTER teardown must
+	// observe closure — the dialer's acquire-failure path leaked exactly
+	// because no post-terminal await was possible. The closed channel is
+	// parked in doneTomb, NEVER back in done (releaseOnce closes what it
+	// finds in done; re-storing a closed channel would double-close on a
+	// late duplicate terminal). Inbound ids keep the M3 posture (no
+	// retention) — the M3 pin uses an inbound ccid.
+	if wasOutbound && hadDone {
+		if m.doneTomb == nil {
+			m.doneTomb = make(map[string]chan struct{}, outboundDoneCap)
+		}
+		if len(m.doneTomb) >= outboundDoneCap {
+			// Arbitrary-entry eviction; the map is a bounded convenience,
+			// not a queue (ccids resolve by exact key).
+			for k := range m.doneTomb {
+				delete(m.doneTomb, k)
+				break
+			}
+		}
+		m.doneTomb[ccid] = ch
 	}
 
 	// Known call = anything we registered. An id we never saw is a no-op.
@@ -375,16 +408,21 @@ func (m *Manager) FailOutcome(ccid string, outcome Outcome, reason string) {
 // IMPORTANT (audit 2026-11-06 M3): per-call channels are deleted from the
 // manager state on release, so a call whose terminal event was processed
 // BEFORE this call (or whose ccid was never tracked) yields a FRESH channel
-// that never closes - retention is NOT guaranteed across teardown. A dialer
+// that never closes - retention is NOT guaranteed across teardown - EXCEPT
+// outbound-tracked ccids, whose closed channel is retained as a bounded
+// tombstone (audit 2026-11-09 finding 2 residual: the dialer's
+// acquire-failure path needs a post-terminal await). A dialer
 // that must observe completion of a call it already holds a channel for is
 // fine (it kept the original channel; that channel is closed once and stays
-// closed), but a caller re-resolving by ccid after teardown cannot rely on
-// seeing closure. Ids that were never tracked return a channel that never
-// closes.
+// closed). Inbound ids re-resolved after teardown and ids that were never
+// tracked return a channel that never closes.
 func (m *Manager) WaitCall(ccid string) <-chan struct{} {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if ch, ok := m.done[ccid]; ok {
+		return ch
+	}
+	if ch, ok := m.doneTomb[ccid]; ok {
 		return ch
 	}
 	return make(chan struct{})
