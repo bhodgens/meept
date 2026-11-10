@@ -196,7 +196,14 @@ mirrors it — the wired store only derives park keys and stays empty);
 `SetBackend(nil)` is nil-safe and the no-backend default path stays
 byte-identical, with backend-mode drains on the real clock (the seam's
 `LoadOwned` carries no `now` param). Give-up/attempt-cap logic stays in the
-TurnParker, never in a backend.
+TurnParker, never in a backend. **Queue backend (C-A2, leaf 02):**
+`parking.queue_backend=true` swaps the store path for a `QueueParkBackend`
+over the job queue — a `parked_turn` jobs row per park with the record
+JSON payload (`park_key` + `owner` explicit), wake time in `next_retry_at`,
+and the C-K1 owner verbatim in `claimed_by` (`park:` naming space); rows
+carry a far-future `due_at` sentinel so worker pools can never claim them
+and give-up can never reach dead_letter. Flag off = no `SetBackend` call
+= byte-identical sqlite path.
 
 ## Classifier boot readiness: no silent degradation during the boot window
 

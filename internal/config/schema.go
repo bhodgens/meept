@@ -127,6 +127,17 @@ type Config struct {
 	Delegation          DelegationConfig          `json:"delegation,omitzero"  toml:"delegation"`
 	Contact             ContactConfig             `json:"contact,omitzero"     toml:"contact"`
 	Ledger              LedgerConfig              `json:"ledger"               toml:"ledger"`
+	Parking             ParkingConfig             `json:"parking"              toml:"parking"`
+}
+
+// ParkingConfig groups parked-turn persistence options (tree
+// 20261110-parked-turns-as-jobs).
+type ParkingConfig struct {
+	// QueueBackend stores parked turns as queue jobs (type "parked_turn",
+	// wake = next_retry_at, owner = claimed_by) instead of parks.db.
+	// Opt-in, default false: disabled keeps the sqlite park path
+	// byte-identical (docs/agents/opt-in-defaults.md).
+	QueueBackend bool `json:"queue_backend" toml:"queue_backend"`
 }
 
 // GitHubConfig configures the GitHub PR/CI tool set ([github]). Disabled by
@@ -4678,6 +4689,12 @@ func DefaultConfig() *Config {
 				Enabled:       false,
 				MaxStateChars: 2000,
 			},
+		},
+		Parking: ParkingConfig{
+			// Queue-backed parks are opt-in (tree 20261110-parked-turns-
+			// as-jobs): false keeps the sqlite parks.db path
+			// byte-identical.
+			QueueBackend: false,
 		},
 		SelfImprove: SelfImproveConfig{
 			Enabled:               false,

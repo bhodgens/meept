@@ -4352,6 +4352,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				bw.SetParkPersistence(c.ParkStore, agent.ParkKindChat)
 				bw.SetPersistenceOwner(agent.ParkOwnerBudget)
 			}
+			// C-A2 (tree 20261110 leaf 02): opt-in queue park backend
+			// for the budget watcher's own persistence path.
+			if be := c.parkQueueBackend(agent.ParkKindChat, agent.ParkOwnerBudget); be != nil {
+				bw.SetParkBackend(be)
+			}
 		}
 		// Parked-turn persistence (chat kind): quota-parked chat turns
 		// survive restarts and auto-resume on the next boot. Nil-safe
@@ -4363,6 +4368,14 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// own rows — the chat kind is shared with the throttle parker
 			// below (C1 double-execution), owner scoping is the partition.
 			c.ChatHandler.QuotaResumeWatcher().SetPersistenceOwner(agent.ParkOwnerQuotaWatcher)
+			// C-A2 (tree 20261110 leaf 02): opt-in queue park backend —
+			// when [parking] queue_backend is on, quota parks persist as
+			// parked_turn queue jobs (the backend REPLACES the store path;
+			// the ParkStore above still derives park keys). Flag off =
+			// no SetBackend call = byte-identical sqlite path.
+			if be := c.parkQueueBackend(agent.ParkKindChat, agent.ParkOwnerQuotaWatcher); be != nil {
+				c.ChatHandler.QuotaResumeWatcher().SetParkBackend(be)
+			}
 		}
 
 		// Throttle parking (llm-resilience-forest tree 03 leaf 02, D4/D8):
@@ -4397,6 +4410,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// row can never re-enter this parker (and vice versa). Wired
 			// before Start (re-arm happens in Start).
 			throttleParker.SetPersistenceOwner(agent.ParkOwnerThrottle)
+		}
+		// C-A2 (tree 20261110 leaf 02): opt-in queue park backend for the
+		// throttle parker (same owner partition over the queue rows).
+		if be := c.parkQueueBackend(agent.ParkKindChat, agent.ParkOwnerThrottle); be != nil {
+			throttleParker.SetBackend(be)
 		}
 		c.ChatHandler.SetThrottleParker(throttleParker)
 		throttleParker.Start(c.ctx)
@@ -6531,6 +6549,12 @@ func (c *Components) Start(ctx context.Context) error {
 					return rec.AgentID + "|" + p.Phase + "|" + triggerID
 				})
 			}
+			// C-A2 (tree 20261110 leaf 02): opt-in queue park backend
+			// for the episode parker (wired before goalTurnParker.Start
+			// below; nil = no call = byte-identical sqlite path).
+			if be := c.parkQueueBackend(agent.ParkKindEpisode, agent.ParkOwnerEpisode); be != nil {
+				goalTurnParker.SetBackend(be)
+			}
 			goalEpisodeParker := employee.NewEpisodeParker(goalTurnParker, policyCfg,
 				c.Logger.With("component", "goal-episode-parker"))
 
@@ -7620,6 +7644,25 @@ func getQueueDB(c *Components) *sql.DB {
 		return pq.DB()
 	}
 	return nil
+}
+
+// parkQueueBackend returns the C-A2 queue park backend (tree 20261110-
+// parked-turns-as-jobs leaf 02) for one parker when [parking]
+// queue_backend is enabled AND a persistent job queue is available —
+// parked turns then persist as "parked_turn" queue jobs (wake =
+// next_retry_at, owner = claimed_by) instead of parks.db rows. Returns
+// nil when the flag is off (the default): callers skip the SetBackend
+// call entirely, so the sqlite park path stays byte-identical (opt-in
+// defaults invariant, docs/agents/opt-in-defaults.md).
+func (c *Components) parkQueueBackend(kind agent.ParkKind, owner string) *agent.QueueParkBackend {
+	if c.Config == nil || !c.Config.Parking.QueueBackend {
+		return nil
+	}
+	pq, ok := c.Queue.(*queue.PersistentQueue)
+	if !ok {
+		return nil
+	}
+	return agent.NewQueueParkBackend(pq.Store(), kind, owner)
 }
 
 // createLLMConfig creates an LLM model config from the models configuration.
