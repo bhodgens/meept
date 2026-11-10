@@ -8,23 +8,36 @@ import (
 	"github.com/caimlas/meept/pkg/id"
 )
 
-// VoiceAttempt is the signal_voice contact.ChannelAttempt (leaf 02):
-// Place a Signal call through the Leg (the full C4 gate stack: allowlist,
-// capacity, effects, audit) and classify the terminal outcome. CONNECTED
-// stops the chain (the call continues on its own session); busy, timeout,
-// no-answer, and failed advance.
+// VoiceAttempt is the signal_voice contact.ChannelAttempt (leaf 02;
+// migrated onto the CallLeg contract by tree 20261110-voice-callleg
+// leaf 03): Place a Signal call through the caller's voice.CallLeg (the
+// daemon wires voice.NewSignalAdapter(l) here — the adapter calls
+// through the SAME Leg, so the full C4 gate stack — allowlist, capacity,
+// effects, audit — is untouched) and classify the terminal outcome.
+// CONNECTED stops the chain (the call continues on its own session);
+// busy, timeout, no-answer, and failed advance.
+//
+// The adapter's Events() lane is deliberately UNCONSUMED by the chain
+// today (leaf-03 behavior-preserving rule): terminal classification
+// keeps riding the outcome observer below. No second terminal funnel is
+// introduced; the adapter only ADDS an observer at construction.
 //
 // outcome observes the ENDED event's mapped outcome (OutcomeByReason).
 // The wiring adapts it onto the same collector the phone attempt uses
 // (voice.OutcomeRegistry fed from the Manager release hook), or the
 // leg-local stream - both carry voice.Outcome.
-func (l *Leg) VoiceAttempt(outcome func(ctx context.Context, ccid string) (voice.Outcome, bool)) contact.ChannelAttempt {
-	return &signalVoiceAttempt{leg: l, outcome: outcome}
+func (l *Leg) VoiceAttempt(caller voice.CallLeg, outcome func(ctx context.Context, ccid string) (voice.Outcome, bool)) contact.ChannelAttempt {
+	return &signalVoiceAttempt{caller: caller, employeeID: l.deps.EmployeeID, outcome: outcome}
 }
 
 type signalVoiceAttempt struct {
-	leg     *Leg
-	outcome func(ctx context.Context, ccid string) (voice.Outcome, bool)
+	caller voice.CallLeg
+	// employeeID snapshots the leg's Deps employee (Place would
+	// otherwise read l.deps.EmployeeID directly; the adapter cannot
+	// see leg internals). Deps are immutable after New, so the
+	// snapshot is value-identical to the pre-migration read.
+	employeeID string
+	outcome    func(ctx context.Context, ccid string) (voice.Outcome, bool)
 }
 
 // Channel pins the seam key (C1 vocabulary).
@@ -37,13 +50,22 @@ func (a *signalVoiceAttempt) Channel() contact.Channel { return contact.ChannelS
 // shape, voice/voiceattempt.go) — the chain's repeated outreach to one
 // contact must never collide on a completed receipt, while a caller
 // WITH retry context passes the SAME id through Place to reuse it
-// (C-V2).
+// (C-V2). Leaf 03: the Place rides the caller's voice.CallLeg (the
+// signal adapter forwards (employee, uuid, firstLine, requestID) 1:1
+// onto the leg's seam Place — same fields, same effect key, no
+// re-keying).
 func (a *signalVoiceAttempt) Attempt(ctx context.Context, rec contact.Record, message string) (string, error) {
-	if a == nil || a.leg == nil {
+	if a == nil || a.caller == nil {
 		return string(voice.OutcomeFailed), errSignalAttemptUnwired
 	}
 	requestID := "contact-" + id.Generate("sv")
-	ccid, err := a.leg.Place(ctx, a.leg.deps.EmployeeID, rec.SignalUUID, message, requestID)
+	h, err := a.caller.Place(ctx, voice.PlaceRequest{
+		EmployeeID: a.employeeID,
+		Target:     rec.SignalUUID,
+		Leg:        voice.LegSignal,
+		RequestID:  requestID,
+		FirstLine:  message,
+	})
 	if err != nil {
 		// Place refusals (disabled, allowlist, capacity) are honest
 		// per-attempt failures: the chain advances.
@@ -54,7 +76,7 @@ func (a *signalVoiceAttempt) Attempt(ctx context.Context, rec contact.Record, me
 		// terminal rather than blocking the chain forever.
 		return string(voice.OutcomeAnswered), nil
 	}
-	out, ok := a.outcome(ctx, ccid)
+	out, ok := a.outcome(ctx, h.CCID)
 	if !ok {
 		return string(voice.OutcomeNoAnswer), errSignalOutcomeUnknown
 	}

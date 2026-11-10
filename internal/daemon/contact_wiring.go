@@ -116,7 +116,16 @@ func BuildContactChain(cfg *config.Config, w *VoiceWiring, ledger effects.Ledger
 		// signal_voice + signal_msg: the Signal leg (nil when disabled).
 		if w.Signal != nil && w.Signal.Leg != nil {
 			leg := w.Signal.Leg
-			m[contact.ChannelSignalVoice] = leg.VoiceAttempt(w.outcomes.Lookup)
+			// Leaf 03 (tree 20261110-voice-callleg): the voice
+			// attempt places through the CallLeg contract —
+			// voice.NewSignalAdapter(leg), constructed HERE at
+			// the single leg-construction site (signal_wiring.go
+			// arms the leg; this is its only production caller).
+			// The adapter calls THROUGH the same leg: identical
+			// gates, identical effect keys. Its Events() lane is
+			// intentionally unconsumed by the chain today
+			// (terminal classification still rides w.outcomes).
+			m[contact.ChannelSignalVoice] = leg.VoiceAttempt(voice.NewSignalAdapter(leg), w.outcomes.Lookup)
 			m[contact.ChannelSignalMsg] = leg.MessageAttempt()
 		}
 		// telnyx_sms: the leaf-12 attempt (broker key; disabled config =

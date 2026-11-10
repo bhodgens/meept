@@ -58,3 +58,18 @@ adapters' Events() shape equivalence against today's observable surfaces
 2. voicechild C1 frame protocol unaffected (adapter speaks frames via the
    existing TextServer sink — releaseCall end frame 20261109 leaf 04 stays).
 3. calls.db schema unchanged; state values stay live/ended.
+
+## Implementation status (updated by tree 20261110-voice-callleg leaves as they land)
+
+- FIRST PRODUCTION CALLER MIGRATED — DONE (leaf 03). The contact-chain
+  signal_voice attempt now Places through the CallLeg contract:
+  `voice.NewSignalAdapter(leg)` constructed at the single daemon site
+  internal/daemon/contact_wiring.go:128, consumed at
+  internal/signalleg/voiceattempt.go:62 (`a.caller.Place(...)`; the
+  seam-taking constructor is voiceattempt.go:29). Observable behavior
+  unchanged (same PlaceRequest fields, same C9 effect keys — pinned by
+  internal/signalleg/callleg_chain_pin_test.go); the adapter's
+  Events() lane is added-but-unconsumed by the chain. Survey item 3
+  (calls.db schema untouched) holds: the adapter calls through the
+  same leg paths. builtin voice_call tool stays on the Dialer per
+  Q-B1 default.
