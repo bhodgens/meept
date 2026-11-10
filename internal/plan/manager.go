@@ -666,11 +666,41 @@ func (m *PlanManager) ConfirmPlan(ctx context.Context, planID, sessionID, by str
 		return err
 	}
 
-	// Update plan.md to reflect confirmed state.
+	// Cascade the confirmation onto the plan's phases (leaf 02 T3, audit
+	// M-6): PhaseConfirmed had zero writers, so phase rows kept their
+	// pre-confirm state forever. Every phase that has RESOLVED — completed
+	// or failed — moves to PhaseConfirmed; pending/in_progress phases are
+	// left alone (they never resolved, so signing off the plan's outcome
+	// does not retroactively confirm their work). Best-effort per phase with
+	// no new bus event and unchanged payload shapes (the phase_state intake
+	// mirror is fail-soft and only tracks live transitions; plan.confirmed
+	// remains the plan-level truth for the confirmation).
 	phases, phaseErr := m.store.GetPhases(ctx, planID)
 	if phaseErr != nil {
 		m.logger.Warn("failed to get phases for plan.md update", "plan_id", planID, "error", phaseErr)
+	} else {
+		cascaded := 0
+		for _, ph := range phases {
+			if ph.State != PhaseCompleted && ph.State != PhaseFailed {
+				continue
+			}
+			if err := m.store.SetPhaseState(ctx, ph.ID, PhaseConfirmed); err != nil {
+				m.logger.Warn("failed to cascade phase confirmed", "plan_id", planID, "phase_id", ph.ID, "error", err)
+				continue
+			}
+			ph.State = PhaseConfirmed
+			cascaded++
+		}
+		if cascaded > 0 {
+			// Re-read so the plan.md tail below renders the confirmed phase
+			// states instead of the pre-cascade snapshot.
+			if refreshed, rErr := m.store.GetPhases(ctx, planID); rErr == nil {
+				phases = refreshed
+			}
+		}
 	}
+
+	// Update plan.md to reflect confirmed state.
 	if err := UpdatePlanStatus(plan.FilePath, StateConfirmed, phasesToValues(phases)); err != nil {
 		m.logger.Warn("failed to update plan.md on confirm", "plan_id", planID, "error", err)
 	}
@@ -1059,13 +1089,56 @@ func (m *PlanManager) Synthesize(ctx context.Context, planID string) error {
 // ---------------------------------------------------------------------------
 
 // OnStepFailed is the step-failure counterpart of OnStepCompleted (leaf 02
-// T1 owns the real PhaseFailed writer). KEYSTONE STUB, added by leaf
-// 03-plans-goals/01 solely to unblock the plan package test-build for the
-// committed reclaimer gate tests: it is deliberately INERT (no progress
-// accounting, no state change) and TestPhaseFailedWriter stays behavioral RED
-// for leaf 02. Do NOT extend this — implement the real writer in leaf 02.
+// T1, audit M-6): it records the failure through the EXISTING
+// IncrementPhaseProgress accounting (failed_steps — no parallel counter) and
+// flips the phase to PhaseFailed once the failure count makes the phase
+// unrecoverable: failed_steps >= total_steps. The writer only ever fires for
+// phases in in_progress — a phase that already reached a terminal phase state
+// (completed/failed/confirmed) is never rewritten by a late failure event.
+//
+// Failure accounting for a still-recoverable phase (failed_steps <
+// total_steps) is recorded without a state change, mirroring OnStepCompleted:
+// a partial failure does not kill the phase while steps remain.
 func (m *PlanManager) OnStepFailed(ctx context.Context, taskID, stepID string) error {
-	return nil //nolint:revive,unparam // inert keystone stub, replaced by leaf 02
+	m.mu.RLock()
+	phaseID, ok := m.phaseTaskMap[taskID]
+	if !ok {
+		m.mu.RUnlock()
+		// Not a plan-tracked task; ignore silently (parity with OnStepCompleted).
+		return nil
+	}
+	planID := m.taskPlanMap[taskID]
+	m.mu.RUnlock()
+
+	if err := m.store.IncrementPhaseProgress(ctx, phaseID, "failed_steps", 1); err != nil {
+		return fmt.Errorf("increment phase progress: %w", err)
+	}
+
+	phases, err := m.store.GetPhases(ctx, planID)
+	if err != nil {
+		// Phase-failure detection is advisory; the failed_steps increment
+		// above already succeeded, so don't fail the executor callback.
+		return nil //nolint:nilerr // non-fatal: progress was recorded above
+	}
+
+	for _, phase := range phases {
+		if phase.ID != phaseID || phase.State != PhaseInProgress {
+			continue
+		}
+		if phase.TotalSteps > 0 && phase.FailedSteps >= phase.TotalSteps {
+			if err := m.store.SetPhaseState(ctx, phaseID, PhaseFailed); err != nil {
+				m.logger.Warn("failed to set phase failed", "phase_id", phaseID, "error", err)
+			}
+			m.publishEvent("plan.phase_state", map[string]any{
+				"plan_id":  planID,
+				"phase_id": phaseID,
+				"state":    string(PhaseFailed),
+			})
+			break
+		}
+	}
+
+	return nil
 }
 
 // OnStepCompleted is called when a task step completes. It updates the
@@ -1138,21 +1211,24 @@ func (m *PlanManager) OnTaskCompleted(ctx context.Context, taskID string) error 
 			})
 		}
 
-		// Check if all phases of the plan are now complete. If so,
-		// transition the plan to completed.
+		// Check if all phases of the plan have resolved. Leaf 02 T2 (audit
+		// M-6 / plan F1): a FAILED phase counts as terminal — the check is
+		// "all phases terminal", not "all completed". completePlan then does
+		// the honest evaluation: any failed phase sends the plan to
+		// StateFailed instead of silently completing it.
 		allPhases, err := m.store.GetPhases(ctx, planID)
 		if err != nil {
 			m.logger.Warn("failed to get phases for completion check", "plan_id", planID, "error", err)
 			return nil
 		}
-		allComplete := len(allPhases) > 0
+		allTerminal := len(allPhases) > 0
 		for _, ph := range allPhases {
-			if ph.State != PhaseCompleted {
-				allComplete = false
+			if ph.State != PhaseCompleted && ph.State != PhaseFailed {
+				allTerminal = false
 				break
 			}
 		}
-		if allComplete {
+		if allTerminal {
 			return m.completePlan(ctx, planID)
 		}
 		return nil
@@ -1179,6 +1255,12 @@ func (m *PlanManager) OnTaskCompleted(ctx context.Context, taskID string) error 
 // completePlan transitions a plan to completed, updates plan.md, and
 // publishes the plan.completed event. It is called either when the parent
 // task completes or when all phase child tasks have completed.
+//
+// Leaf 02 T2 (audit M-6 / plan F1) makes the evaluation honest first: a plan
+// with ANY failed phase fails instead of completing — an errored step must
+// never pass review silently. The phase read below serves both the failure
+// check and the plan.md / event tail (one read, pre-transition: phase rows
+// and plan rows are separate writes).
 func (m *PlanManager) completePlan(ctx context.Context, planID string) error {
 	plan, err := m.store.GetPlan(ctx, planID)
 	if err != nil {
@@ -1187,6 +1269,17 @@ func (m *PlanManager) completePlan(ctx context.Context, planID string) error {
 
 	if plan.State != StateExecuting {
 		return nil
+	}
+
+	phases, phaseErr := m.store.GetPhases(ctx, plan.ID)
+	if phaseErr != nil {
+		m.logger.Warn("failed to get phases for plan.md update", "plan_id", plan.ID, "error", phaseErr)
+	} else {
+		for _, ph := range phases {
+			if ph.State == PhaseFailed {
+				return m.failPlan(ctx, plan.ID)
+			}
+		}
 	}
 
 	// Table-driven CAS (C-P4): executing -> completed. The CAS pins the
@@ -1198,10 +1291,6 @@ func (m *PlanManager) completePlan(ctx context.Context, planID string) error {
 	}
 
 	// Update plan.md.
-	phases, phaseErr := m.store.GetPhases(ctx, plan.ID)
-	if phaseErr != nil {
-		m.logger.Warn("failed to get phases for plan.md update", "plan_id", plan.ID, "error", phaseErr)
-	}
 	if err := UpdatePlanStatus(plan.FilePath, StateCompleted, phasesToValues(phases)); err != nil {
 		m.logger.Warn("failed to update plan.md on completion", "error", err)
 	}
@@ -1219,6 +1308,42 @@ func (m *PlanManager) completePlan(ctx context.Context, planID string) error {
 	})
 
 	m.logger.Info("plan completed", "plan_id", plan.ID)
+	return nil
+}
+
+// failPlan transitions a plan whose phases all resolved with at least one
+// PhaseFailed to StateFailed, and stamps the outcome into plan.md. It is the
+// failure sibling of completePlan (leaf 02 T2, audit M-6 / plan F1). The
+// transition rides the table's executing -> failed edge through the same
+// guarded CAS as every other lifecycle move (C-P4), so a concurrent
+// CancelPlan still wins with exactly one winner. No new bus event is
+// published: the leaf contract pins the event surface unchanged (the
+// plan.phase_state failure edges already rode the PhaseFailed writer).
+func (m *PlanManager) failPlan(ctx context.Context, planID string) error {
+	plan, err := m.store.GetPlan(ctx, planID)
+	if err != nil {
+		return fmt.Errorf("get plan for failure: %w", err)
+	}
+
+	if plan.State != StateExecuting {
+		return nil
+	}
+
+	if err := m.transition(ctx, planID, StateFailed); err != nil {
+		return err
+	}
+
+	// Update plan.md with the failed outcome (best-effort, parity with
+	// completePlan's markdown tail).
+	phases, phaseErr := m.store.GetPhases(ctx, plan.ID)
+	if phaseErr != nil {
+		m.logger.Warn("failed to get phases for plan.md update", "plan_id", plan.ID, "error", phaseErr)
+	}
+	if err := UpdatePlanStatus(plan.FilePath, StateFailed, phasesToValues(phases)); err != nil {
+		m.logger.Warn("failed to update plan.md on failure", "error", err)
+	}
+
+	m.logger.Info("plan failed: at least one phase failed", "plan_id", plan.ID)
 	return nil
 }
 
