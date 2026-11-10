@@ -103,8 +103,8 @@ Flutter parse unblock_at etc.); cite finding IDs.
 | 00T-park-tests | TESTS_VALIDATED | 1 | committed 222578ac (--no-verify RED-by-design); parent-verified 35 missing-impl errors only |
 | 01-parker-identity | REVIEWED | 1 | committed bb24843f; C1 killer tests PASS parent-verified; legacy backfill by stored class column; inert sibling stubs documented |
 | 02-throttle-resume-delivery | IN_PROGRESS | 0 | dispatched 2026-11-09 (file-scoped loop_park/loop/handler; gate_park+budget reserved to leaves 03/04) |
-| 03-gate-release-on-rejection | IN_PROGRESS | 0 | dispatched 2026-11-09 (gate_park+wiring scope; conflict-guard: no manager.go edit, wiring-BLOCKED close allowed) |
-| 04-park-bounds-and-budget | PENDING | 0 | blocked on 01 (landed) — next wave; owns budget_resume.go |
+| 03-gate-release-on-rejection | REVIEWED | 1 | committed 407932d6; M-12+F9 closed; wiring DONE (plan.rejected/:449 + plan.cancelled/:570 pre-existing); parent-verified both gates + 6 pre-existing green |
+| 04-park-bounds-and-budget | PENDING | 0 | HELD until delivery leaf returns (handler.go overlap); owns budget_resume.go+parked_turn.go drain |
 
 ## Integration Test Plan
 
