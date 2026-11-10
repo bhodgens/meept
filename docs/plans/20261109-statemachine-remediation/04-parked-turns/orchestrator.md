@@ -102,9 +102,9 @@ Flutter parse unblock_at etc.); cite finding IDs.
 |-------|--------|------------|-------------|
 | 00T-park-tests | TESTS_VALIDATED | 1 | committed 222578ac (--no-verify RED-by-design); parent-verified 35 missing-impl errors only |
 | 01-parker-identity | REVIEWED | 1 | committed bb24843f; C1 killer tests PASS parent-verified; legacy backfill by stored class column; inert sibling stubs documented |
-| 02-throttle-resume-delivery | IN_PROGRESS | 0 | dispatched 2026-11-09 (file-scoped loop_park/loop/handler; gate_park+budget reserved to leaves 03/04) |
+| 02-throttle-resume-delivery | REVIEWED | 1 | committed fa5720fa; M-13+F6 closed; delivery parity + nil-SM marker parent-verified; full agent pkg fails only 3 sibling gates at review time |
 | 03-gate-release-on-rejection | REVIEWED | 1 | committed 407932d6; M-12+F9 closed; wiring DONE (plan.rejected/:449 + plan.cancelled/:570 pre-existing); parent-verified both gates + 6 pre-existing green |
-| 04-park-bounds-and-budget | PENDING | 0 | HELD until delivery leaf returns (handler.go overlap); owns budget_resume.go+parked_turn.go drain |
+| 04-park-bounds-and-budget | IN_PROGRESS | 0 | dispatched 2026-11-09 (unheld after fa5720fa; budget stubs replaced real; last park leaf) |
 
 ## Integration Test Plan
 
