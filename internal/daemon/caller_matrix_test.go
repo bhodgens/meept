@@ -43,13 +43,11 @@ package daemon
 //	    auto-pause; exactly one voice.unapproved_action audit row (with
 //	    tool + ccid evidence); an allow writes no further row.
 //	(b) unknown caller + send_agent_message and + ledger_append -> the
-//	    step-1c gate ALLOWS both (O3 message lane). The ledger_append leg
-//	    additionally pins the shipped end-to-end outcome: 1c never denies
-//	    it even with a state-setting set_status payload (O4 pinned —
-//	    owner Q1 pending, see the case comment), and today the executor's
-//	    base-rule layer refuses it with "Unknown action" (a pkg/security
-//	    ToolActionMap/BuiltinRules gap from the employee-ledger tree,
-//	    H7 class — NOT a caller-gate deny).
+//	    step-1c gate ALLOWS both (O3 message lane). For the
+//	    ledger_append leg the executor's base-rule layer ADMITS it: the
+//	    H7 ToolActionMap/BuiltinRules rows (ledger_write/ledger_read)
+//	    landed 2026-11-10, so ledger_append executes end-to-end for the
+//	    message lane — the O4 residual risk is live by design (owner Q1).
 //	(c) approved caller + a tool the employee constitution forbids ->
 //	    denied by step 1b, not 1c (Reason carries tools_allowed, never
 //	    caller_not_approved; composed CheckResult.RuleSource ==
@@ -452,15 +450,14 @@ func TestCallerMatrix_UnknownCallerShellDenied(t *testing.T) {
 //     lands a payload-kind check in 1c, this subcase is the one that
 //     must flip. Do not silently narrow.
 //
-//     Additionally pinned, as shipped reality: past the 1c gate, the
-//     executor's base-rule layer currently refuses ledger_append with
-//     "Unknown action: ledger_append" — the tool has no ToolActionMap/
-//     BuiltinRules row (H7-class gap left by the employee-ledger tree;
-//     internal/agent/tool_action_completeness_test.go does not enumerate
-//     it either). That deny is NOT a caller-gate deny (same outcome for
-//     an approved caller — asserted below). When the H7 row lands,
-//     update this base-layer pin; the 1c pin (no caller_not_approved on
-//     ledger_append, any payload) must hold either way.
+//     2026-11-10 base-layer re-pin: the H7 ToolActionMap/BuiltinRules
+//     rows (ledger_append -> ledger_write RiskLow, ledger_query ->
+//     ledger_read RiskSafe) landed, so past the 1c gate the executor
+//     now EXECUTES ledger_append end-to-end (asserted below, mock run
+//     once). The completeness gate
+//     internal/agent/tool_action_completeness_test.go enumerates both
+//     names. The 1c pin above (no caller_not_approved on ledger_append,
+//     any payload) holds either way and remains the O4 contract.
 // ---------------------------------------------------------------------------
 
 func TestCallerMatrix_UnknownCallerMessageLaneAllowed(t *testing.T) {
@@ -481,16 +478,17 @@ func TestCallerMatrix_UnknownCallerMessageLaneAllowed(t *testing.T) {
 	statePayload := `{"kind":"observation","subject":"acme-roof","payload":{"note":"caller demands refund"},` +
 		`"set_status":"waiting_on_me","summary":"angry unknown caller, refund demanded","conversation_id":"cc-matrix-1"}`
 	led := h.executor.Execute(h.turnCtx, matrixToolCall("ledger_append", statePayload))
-	if led.Success {
-		// If this ever goes green, the H7 base-rule gap was closed — the
-		// full O4 residual risk is then live end-to-end; re-pin below.
-		t.Log("ledger_append executed end-to-end: employee-ledger H7 base-rule gap appears CLOSED")
+	if strings.Contains(led.Error, "caller_not_approved") {
+		t.Errorf("step 1c must NEVER deny ledger_append (O3 message lane): %q", led.Error)
+	}
+	if !led.Success {
+		// 2026-11-10 re-pin: the H7 base-rule rows (ledger_read/
+		// ledger_write) landed; end-to-end execution is now the required
+		// outcome. The 1c pin below must hold either way.
+		t.Errorf("ledger_append must execute end-to-end for the message lane now that the H7 rows exist (1c allows, base rules admit): %+v", led)
 	} else {
-		if strings.Contains(led.Error, "caller_not_approved") {
-			t.Errorf("step 1c must NEVER deny ledger_append (O3 message lane): %q", led.Error)
-		}
-		if want := "permission denied: Unknown action: ledger_append"; led.Error != want {
-			t.Errorf("ledger_append end-to-end Error = %q, want %q (1c allows; base rule H7-denies)", led.Error, want)
+		if got := h.runCount("ledger_append"); got != 1 {
+			t.Errorf("ledger_append mock ran %d times, want 1", got)
 		}
 	}
 	// The 1c gate itself, byte-exact: state-setting payload, Allowed.

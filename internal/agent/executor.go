@@ -499,6 +499,17 @@ var ToolActionMap = map[string]string{
 	"goal_get":    "goal_read",
 	"goal_create": "goal_write",
 	"goal_update": "goal_write",
+
+	// Employee ledger (plan 20261109-employee-ledger, H7-class gap pinned
+	// by the caller-authz matrix): ledger_append writes immutable rows +
+	// guarded subject state (ledger_write, RiskLow); ledger_query is a
+	// read-only projection of the caller employee's own log (ledger_read,
+	// RiskSafe). Explicit entries matter beyond the platform category
+	// fallback: step-1c grants unapproved callers ledger_append for the
+	// message lane, and that lane must land on a low-risk action, not on
+	// the read-only platform bucket.
+	"ledger_append": "ledger_write",
+	"ledger_query":  "ledger_read",
 }
 
 // WorkingDirSetter is implemented by tools that accept a session-scoped
