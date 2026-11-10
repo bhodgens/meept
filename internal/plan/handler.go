@@ -36,6 +36,7 @@ func (h *PlanHandler) Start(ctx context.Context) error {
 
 	topics := map[string]func(context.Context, *models.BusMessage){
 		"task.step_completed": h.handleStepCompleted,
+		"task.step_failed":    h.handleStepFailed,
 		"task.completed":      h.handleTaskCompleted,
 	}
 
@@ -86,10 +87,39 @@ func (h *PlanHandler) handleStepCompleted(ctx context.Context, msg *models.BusMe
 	}
 	// Retry transient (SQLite busy/locked) errors with exponential backoff
 	// before giving up and logging (S2-16).
+	h.retryOnTransientDBError(ctx, "step completed", payload.TaskID, func() error {
+		return h.manager.OnStepCompleted(ctx, payload.TaskID, payload.StepID)
+	})
+}
+
+// handleStepFailed routes a task.step_failed event (the tactical scheduler's
+// per-step terminal-failure publish — statemachine-remediation follow-on to
+// a94995c8) to PlanManager.OnStepFailed, the PhaseFailed writer (audit M-6).
+// Same payload decode and same transient-DB retry shape as
+// handleStepCompleted.
+func (h *PlanHandler) handleStepFailed(ctx context.Context, msg *models.BusMessage) {
+	var payload struct {
+		TaskID string `json:"task_id"`
+		StepID string `json:"step_id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		h.logger.Error("plan handler: failed to parse step failed event", "error", err)
+		return
+	}
+	h.retryOnTransientDBError(ctx, "step failed", payload.TaskID, func() error {
+		return h.manager.OnStepFailed(ctx, payload.TaskID, payload.StepID)
+	})
+}
+
+// retryOnTransientDBError runs op with the S2-16 exponential backoff
+// (50/100/200ms) on transient SQLite errors, logging the final error under
+// the given description once it gives up. Shared by the step-completed and
+// step-failed handlers so both seam halves keep the identical retry shape.
+func (h *PlanHandler) retryOnTransientDBError(ctx context.Context, desc, taskID string, op func() error) {
 	backoffs := []time.Duration{50 * time.Millisecond, 100 * time.Millisecond, 200 * time.Millisecond}
 	var lastErr error
 	for attempt := 0; attempt <= len(backoffs); attempt++ {
-		err := h.manager.OnStepCompleted(ctx, payload.TaskID, payload.StepID)
+		err := op()
 		if err == nil {
 			return
 		}
@@ -106,8 +136,8 @@ func (h *PlanHandler) handleStepCompleted(ctx context.Context, msg *models.BusMe
 		}
 	}
 	if lastErr != nil {
-		h.logger.Error("plan handler: failed to process step completed",
-			"task_id", payload.TaskID, "error", lastErr)
+		h.logger.Error("plan handler: failed to process "+desc,
+			"task_id", taskID, "error", lastErr)
 	}
 }
 

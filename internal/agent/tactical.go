@@ -1285,6 +1285,18 @@ func (ts *TacticalScheduler) terminalizeStepFailedAfterFilter(step *task.TaskSte
 		"result":  truncateString(step.FilterError, 200),
 	})
 
+	// Failure-seam mirror (statemachine-remediation follow-on to a94995c8):
+	// task.step_failed is the producer the plan handler's OnStepFailed
+	// (PhaseFailed writer, audit M-6) subscribes to. Same payload keys as
+	// the completed publish above — the failure reason rides `result`, the
+	// completed payload's analog; no schema invention.
+	ts.publishEvent("task.step_failed", map[string]any{
+		KeyTaskID: step.TaskID,
+		KeyStepID: step.ID,
+		"state":   string(task.StepFailed),
+		"result":  truncateString(step.FilterError, 200),
+	})
+
 	if err := ts.taskStore.IncrementFailedJobs(step.TaskID); err != nil {
 		ts.logger.Error("Failed to increment failed jobs after filter exhaustion",
 			"step_id", step.ID, "error", err)
@@ -2002,6 +2014,23 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 		"state":       string(stepEventState),
 		"duration":    time.Since(startTime).String(),
 	})
+
+	// Failure-seam mirror (statemachine-remediation follow-on to
+	// a94995c8): when this terminal event reports a FAILED step (the
+	// validation-exhaustion branch above terminalizes and falls through),
+	// also publish task.step_failed so the plan handler's OnStepFailed
+	// (PhaseFailed writer, audit M-6) sees the failure in production. The
+	// validation-exhaustion payload has no duration analog in the failure
+	// text, so keys stay task_id/step_id/result (the completed payload's
+	// analog carries the failure reason) + state — no schema invention.
+	if stepEventState == task.StepFailed {
+		ts.publishEvent("task.step_failed", map[string]any{
+			KeyTaskID: step.TaskID,
+			KeyStepID: step.ID,
+			"result":  truncateString(resultStr, 200),
+			"state":   string(task.StepFailed),
+		})
+	}
 
 	// Check if review is needed. A step already terminalized by the
 	// validation-exhaustion branch above must NOT be pushed through the
