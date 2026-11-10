@@ -293,6 +293,14 @@ func (b *Binding) RunTurn(ctx context.Context, ccid, text string) (string, error
 	}
 	b.deps.Progress.PublishProgress(ev)
 
+	// The caller's utterance is recorded BEFORE the LLM step (defect B
+	// handoff, 2026-11-10): a turn that errors or is cancelled mid-draft
+	// must never lose the user row - live evidence showed 0 user / 0
+	// assistant polls while filler audio had already played.
+	if uErr := b.deps.Calls.AppendTranscript(ctx, ccid, TranscriptLine{Role: "user", Text: text, At: time.Now().UTC()}); uErr != nil {
+		b.logger.Error("voice binding: transcript user append", "ccid", ccid, "error", uErr)
+	}
+
 	reply, err := b.deps.Turns.Run(ctx, SessionHandle{
 		ID:             st.session.ID,
 		ConversationID: st.session.ConversationID,
@@ -303,9 +311,9 @@ func (b *Binding) RunTurn(ctx context.Context, ccid, text string) (string, error
 	}
 
 	now := time.Now().UTC()
-	appendErr := b.deps.Calls.AppendTranscript(ctx, ccid, TranscriptLine{Role: "user", Text: text, At: now})
+	appendErr := error(nil)
 	if reply != "" {
-		if aErr := b.deps.Calls.AppendTranscript(ctx, ccid, TranscriptLine{Role: "assistant", Text: reply, At: now}); aErr != nil && appendErr == nil {
+		if aErr := b.deps.Calls.AppendTranscript(ctx, ccid, TranscriptLine{Role: "assistant", Text: reply, At: now}); aErr != nil {
 			appendErr = aErr
 		}
 	}

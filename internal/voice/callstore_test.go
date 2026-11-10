@@ -150,12 +150,7 @@ func TestBindingFailedTurnStillRecordsUserRow(t *testing.T) {
 		t.Fatalf("EndedCall = ok:%v err:%v", ok, err)
 	}
 	if len(lines) == 0 {
-		// Current binding.go behavior (pre-fix): the early error return
-		// in RunTurn skips BOTH appends, so a failed turn records
-		// nothing. The user-row-first fix lives in binding.go (sibling
-		// fence) — remove this skip in the same change that applies the
-		// handoff diff; the assertions below then gate it.
-		t.Skip("binding.go still returns before the user append on a failed turn; see the defect-B handoff diff")
+		t.Fatal("failed turn recorded NO rows - binding.go must append the user row BEFORE the LLM step (defect B)")
 	}
 	if len(lines) != 1 || lines[0].Role != "user" || lines[0].Text != "hello, can you hear me" {
 		t.Fatalf("after failed turn: transcript = %+v; want exactly one user row (the caller's spoken question)", lines)
