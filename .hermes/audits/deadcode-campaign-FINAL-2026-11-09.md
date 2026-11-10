@@ -41,3 +41,12 @@ Run: deadcode-wiring-triage skill campaign, user-approved 'wire + do all of what
    union-artifact false-positive class permanently.
 2. Owner review: treectx.go, taint/patterns.go, runtime docker/harness, SkillMCPTool intent.
 3. secrets.Proxy.Stop shutdown wiring has no dedicated pin (covered indirectly).
+
+## Follow-up executed (2026-11-10): 5-main gate (a7c47404, 05e596eb)
+
+pre-commit-deadcode now analyzes all five production mains and baselines
+the INTERSECTION: stock 13,296 -> 528 (-96%). Verified both directions:
+clean tree passes; a staged intentionally-unwired func blocks (exit 1).
+Mechanics notes baked into the hook: mktemp -d (old -t created a file),
+LC_ALL=C export (locale sort broke comm's sorted-input contract),
+accumulator-in-subdir (cp onto the dir path is self-copy).
