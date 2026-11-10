@@ -99,6 +99,10 @@ The rules that stop it:
 - **Retries are bounded.** `synthesis_attempts` counts failed passes; after
   `MaxSynthesisAttempts` (3) the plan is parked in `failed`, a terminal state
   that neither the auto-approver nor `Synthesize` will re-enter.
+- **A periodic reclaimer re-drives stranded plans.** `StartSynthesisReclaimer`
+  (daemon ctx, 5m default) reclaims expired `synthesizing` leases and calls
+  `Synthesize` again for every reclaimed or `approved`-without-task plan —
+  recovery no longer waits for a daemon restart (audit 2026-11-09 M-8/M-9).
 
 Successful synthesis clears the lease in the same write that records
 `task_id`, so a completed expansion never looks claimed.

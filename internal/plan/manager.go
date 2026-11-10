@@ -207,6 +207,138 @@ func (m *PlanManager) RecoverStrandedSynthesis(ctx context.Context) (int, error)
 	return recovered, nil
 }
 
+// defaultSynthesisReclaimInterval bounds how often the periodic synthesis
+// reclaimer scans (plan-remediation C-P2, audit M-8/M-9). Generous relative to
+// a synthesis pass (a handful of task writes) so the scan itself is noise.
+const defaultSynthesisReclaimInterval = 5 * time.Minute
+
+// synthesisReclaimCounts is the tally of one reclaimer pass, returned by
+// runSynthesisReclaimPass so callers (and the Info log) can see what moved.
+type synthesisReclaimCounts struct {
+	reclaimed int // expired-lease synthesizing rows flipped back to approved
+	redriven  int // Synthesize calls the pass issued (reclaim + approved scan)
+	failed    int // Synthesize calls that returned an error
+}
+
+// runSynthesisReclaimPass performs ONE full reclaimer pass (C-P2): (a) the
+// expired-lease reclaim — the RecoverStrandedSynthesis body, composed rather
+// than forked so startup callers keep their count semantics — and (b) the
+// MISSING EDGE the audit called M-9: every reclaimed plan, plus every
+// approved-with-no-live-task plan found by the same scan, is RE-DRIVEN through
+// Synthesize. Before this, reclaim-to-approved was still a dead end:
+// ClaimPlanSynthesis is only called inside Synthesize, and Synthesize was only
+// ever reached from ApprovePlan.
+//
+// Concurrency stays safe without extra locking: the claim CAS (single-winner
+// on the row) is re-checked inside Synthesize, so a concurrent expander or a
+// duplicate pass simply loses and skips. The attempt bound is NOT reimplemented
+// here — Synthesize's existing deferred release/park enforces
+// MaxSynthesisAttempts from the persisted attempts column, so a re-driven plan
+// that keeps failing ends parked in StateFailed, never spun forever.
+func (m *PlanManager) runSynthesisReclaimPass(ctx context.Context) (synthesisReclaimCounts, error) {
+	var counts synthesisReclaimCounts
+	reclaimer, ok := m.store.(SynthesisReclaimer)
+	if !ok {
+		return counts, nil
+	}
+
+	// (a) Reclaim expired leases: flips synthesizing -> approved, clearing the
+	// lease. Same bounds and error shape as RecoverStrandedSynthesis.
+	plans, err := m.store.ListPlansByState(ctx, StateSynthesizing, maxStrandedRecoverScan)
+	if err != nil {
+		return counts, fmt.Errorf("plan: list stranded synthesis: %w", err)
+	}
+	seen := make(map[string]bool, len(plans))
+	candidates := make([]string, 0, len(plans))
+	for _, p := range plans {
+		won, err := reclaimer.ReclaimExpiredSynthesis(ctx, p.ID)
+		if err != nil {
+			return counts, fmt.Errorf("plan: reclaim stranded synthesis %s: %w", p.ID, err)
+		}
+		if won {
+			counts.reclaimed++
+			seen[p.ID] = true
+			candidates = append(candidates, p.ID)
+		}
+	}
+
+	// (b) Re-drive. Without a task creator there is nothing to expand into,
+	// so the reclaim above still ran but the pass issues zero Synthesize calls.
+	if m.taskCreator != nil {
+		// The approved-with-no-live-task residue: an approved row with no
+		// task_id never reaches Synthesize on its own (ApprovePlan only fires
+		// from submit/approve paths), so the reclaimer is its only revisit.
+		// Plans reclaimed in step (a) land here too — deduped via `seen`.
+		approved, err := m.store.ListPlansByState(ctx, StateApproved, maxStrandedRecoverScan)
+		if err != nil {
+			return counts, fmt.Errorf("plan: list approved for re-drive: %w", err)
+		}
+		for _, p := range approved {
+			if p.TaskID != "" || seen[p.ID] {
+				continue
+			}
+			seen[p.ID] = true
+			candidates = append(candidates, p.ID)
+		}
+		for _, id := range candidates {
+			counts.redriven++
+			if err := m.Synthesize(ctx, id); err != nil {
+				counts.failed++
+				m.logger.Warn("plan synthesis reclaimer: re-drive failed",
+					"plan_id", id, "error", err)
+			}
+		}
+	}
+
+	return counts, nil
+}
+
+// StartSynthesisReclaimer launches the PERIODIC synthesis recovery loop
+// (plan-remediation C-P2, audit M-8/M-9): the startup-only
+// RecoverStrandedSynthesis wiring caught abandonment only at daemon boot, so a
+// plan abandoned mid-run (cancelled ctx, panic in the expander) sat claimed
+// until the next restart — and even then, reclaim-to-approved had no re-driver.
+// This closes both halves: one immediate pass (preserving the startup
+// invocation), then a pass every `interval` on ctx; the goroutine exits when
+// ctx is cancelled. interval <= 0 selects defaultSynthesisReclaimInterval (5m).
+// Nil-safe on a nil manager so daemon wiring can call it unconditionally.
+func (m *PlanManager) StartSynthesisReclaimer(ctx context.Context, interval time.Duration) {
+	if m == nil {
+		return
+	}
+	if interval <= 0 {
+		interval = defaultSynthesisReclaimInterval
+	}
+	runPass := func() {
+		counts, err := m.runSynthesisReclaimPass(ctx)
+		if err != nil {
+			m.logger.Warn("plan synthesis reclaimer pass failed", "error", err)
+		}
+		if counts.reclaimed > 0 || counts.redriven > 0 {
+			m.logger.Info("plan synthesis reclaimer pass",
+				"reclaimed", counts.reclaimed,
+				"redriven", counts.redriven,
+				"failed", counts.failed)
+		}
+	}
+	go func() {
+		// Immediate startup pass: this replaces the old boot-time
+		// RecoverStrandedSynthesis call, and the periodic loop keeps the
+		// reclaim idiom for mid-run abandonment.
+		runPass()
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				runPass()
+			}
+		}
+	}()
+}
+
 // reservePlanFilePath atomically reserves an unused plan file path for slug,
 // creating an empty placeholder with O_CREATE|O_EXCL so exactly one concurrent
 // caller can win each candidate name (bughunt M1).
@@ -925,6 +1057,16 @@ func (m *PlanManager) Synthesize(ctx context.Context, planID string) error {
 // ---------------------------------------------------------------------------
 // Progress tracking
 // ---------------------------------------------------------------------------
+
+// OnStepFailed is the step-failure counterpart of OnStepCompleted (leaf 02
+// T1 owns the real PhaseFailed writer). KEYSTONE STUB, added by leaf
+// 03-plans-goals/01 solely to unblock the plan package test-build for the
+// committed reclaimer gate tests: it is deliberately INERT (no progress
+// accounting, no state change) and TestPhaseFailedWriter stays behavioral RED
+// for leaf 02. Do NOT extend this — implement the real writer in leaf 02.
+func (m *PlanManager) OnStepFailed(ctx context.Context, taskID, stepID string) error {
+	return nil //nolint:revive,unparam // inert keystone stub, replaced by leaf 02
+}
 
 // OnStepCompleted is called when a task step completes. It updates the
 // corresponding phase progress.

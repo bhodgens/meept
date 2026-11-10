@@ -1069,15 +1069,12 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			logger.Warn("failed to restore plan-task mappings", "error", err)
 		}
 
-		// Recover stranded synthesis (bughunt M10): return plans left in
-		// StateSynthesizing with an EXPIRED lease to StateApproved so the
-		// normal path re-drives them. Without this a crash/cancel between the
-		// claim and the task_id write stranded the plan permanently. Best-effort.
-		if recovered, err := planManagerInst.RecoverStrandedSynthesis(context.Background()); err != nil {
-			logger.Warn("failed to recover stranded plan synthesis", "error", err)
-		} else if recovered > 0 {
-			logger.Info("recovered stranded plan synthesis", "count", recovered)
-		}
+		// Recover stranded synthesis (bughunt M10) is now PERIODIC: the
+		// startup-only pass here was replaced by StartSynthesisReclaimer in
+		// Daemon.Run (plan-remediation C-P2, audit M-8/M-9 — mid-run
+		// abandonment plus the reclaim-to-approved re-drive). Do not
+		// re-add a boot-time RecoverStrandedSynthesis call; the reclaimer's
+		// immediate first pass covers startup.
 	}
 
 	// Construct the skill evolver + scheduler here (NOT inside NewComponents'
@@ -2423,6 +2420,16 @@ func (d *Daemon) Run(ctx context.Context) error {
 			d.logger.Error("Failed to start plan handler", "error", err)
 		}
 	}
+
+	// Periodic synthesis reclaimer (plan-remediation C-P2, audit M-8/M-9):
+	// replaces the startup-only RecoverStrandedSynthesis call — an immediate
+	// reclaim-and-re-drive pass on boot, then every default interval (5m) on
+	// the Run-scoped ctx, so a plan abandoned mid-run recovers without a
+	// restart and reclaim-to-approved plans get Synthesize re-invoked
+	// (bounded by MaxSynthesisAttempts via Synthesize's existing park path).
+	// Nil-safe: no plan manager (plan system disabled) is a no-op; the
+	// goroutine exits when ctx cancels at shutdown.
+	d.planManager.StartSynthesisReclaimer(ctx, 0)
 
 	// Sync WireGuard configuration for cluster mesh (best-effort)
 	if d.components != nil && d.components.ClusterWireGuard != nil && d.components.ClusterConfig != nil && d.components.ClusterGitSync != nil {
