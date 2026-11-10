@@ -39,6 +39,7 @@ import (
 	"io"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -106,12 +107,17 @@ type runLocalSplice struct {
 
 	chunkBytes int
 
-	// Jitter instrumentation (2026-11-09 chop hunt): lastClientWrite +
-	// paceGaps measure the daemon pacer's WRITE cadence toward the
-	// client socket. A gap > 2x pace means the pacer starved (child PCM
-	// arrived late - upstream jitter reaching the speakers). Owned by
-	// the single outboundLoop goroutine; no lock needed.
+	// Pump-side counters (same hunt): first bytes from the child, chunk
+	// count, and paced-to-client count - the missing middle when the
+	// CLI sees 0 bytes and the child's stream stalls. pumpChunks is
+	// written by the pump goroutine and read by the loop's summary:
+	// atomic. The pace* fields are owned by the single outboundLoop
+	// goroutine (paceOne runs there), no lock needed.
+	pumpChunks      atomic.Uint64
 	lastClientWrite time.Time
+	paceWrites      int // client writes completed this call
+	paceFirstAt     time.Time
+	paceDropped     int // frames abandoned at the barge-in latch
 	paceSamples     int
 	paceSumMs       int64
 	paceMaxMs       int64
@@ -356,12 +362,30 @@ func (s *runLocalSplice) inboundLoop(ctx context.Context) error {
 // waiting on the latch it alone must clear.
 func (s *runLocalSplice) outboundLoop(ctx context.Context) error {
 	pump := make(chan localReadItem, 64)
+	var pumpFirst time.Time // pump-goroutine-owned (instrumentation)
+	// Jitter instrumentation: one INFO summary per call splice (the
+	// middle hop's totals between the child's cadence line and the CLI's
+	// trace line).
+	defer func() {
+		s.log.Info("voice: localsplice cadence summary", "ccid", s.ccid,
+			"pump_chunks", s.pumpChunks.Load(), "pace_writes", s.paceWrites,
+			"pace_dropped", s.paceDropped, "pace_stalls", s.paceOverruns,
+			"pace_max_gap_ms", s.paceMaxMs, "first_child_pcm_set", !pumpFirst.IsZero())
+	}()
 	go func() {
 		carry := make([]byte, 0, 4*s.chunkBytes)
 		for {
 			rb := make([]byte, s.chunkBytes)
 			n, err := s.deps.Audio.ReadFromChild(rb)
 			if n > 0 {
+				// Jitter instrumentation: first child PCM arrival +
+				// chunk count (the daemon-side middle the chop hunt
+				// was missing).
+				s.pumpChunks.Add(1)
+				if pumpFirst.IsZero() {
+					pumpFirst = time.Now()
+					s.log.Info("voice: localsplice first child PCM", "ccid", s.ccid)
+				}
 				// Fresh child PCM means the call-level side started
 				// speaking again: re-arm the barge-in latch so the
 				// pacer resumes writing toward the client.
@@ -431,6 +455,7 @@ func (s *runLocalSplice) outboundLoop(ctx context.Context) error {
 		if stopped {
 			// Deliberate stop: drop the cadence anchor (see paceOne) so
 			// the resume is not recorded as one giant stall.
+			s.paceDropped++
 			s.lastClientWrite = time.Time{}
 			continue
 		}
@@ -470,6 +495,7 @@ func (s *runLocalSplice) paceOne(ctx context.Context, chunk []byte) error {
 			// The barge-in dead window is a DELIBERATE stop, not
 			// jitter: drop the cadence anchor so the first post-resume
 			// write does not record one giant "stall" gap.
+			s.paceDropped++
 			s.lastClientWrite = time.Time{}
 			return nil // frame abandoned: barge-in means interrupted audio is dead
 		}
@@ -519,6 +545,10 @@ func (s *runLocalSplice) paceOne(ctx context.Context, chunk []byte) error {
 			}
 			s.paceSamples++
 		}
+	}
+	s.paceWrites++
+	if s.paceFirstAt.IsZero() {
+		s.paceFirstAt = now
 	}
 	s.lastClientWrite = now
 	return nil
