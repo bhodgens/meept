@@ -106,6 +106,17 @@ type runLocalSplice struct {
 
 	chunkBytes int
 
+	// Jitter instrumentation (2026-11-09 chop hunt): lastClientWrite +
+	// paceGaps measure the daemon pacer's WRITE cadence toward the
+	// client socket. A gap > 2x pace means the pacer starved (child PCM
+	// arrived late - upstream jitter reaching the speakers). Owned by
+	// the single outboundLoop goroutine; no lock needed.
+	lastClientWrite time.Time
+	paceSamples     int
+	paceSumMs       int64
+	paceMaxMs       int64
+	paceOverruns    int
+
 	mu        sync.Mutex
 	interrupt bool // outbound writes latched off for the current barge-in
 	cancelOne bool // CancelDraft fired exactly once per barge-in
@@ -418,6 +429,9 @@ func (s *runLocalSplice) outboundLoop(ctx context.Context) error {
 		stopped = s.interrupt
 		s.mu.Unlock()
 		if stopped {
+			// Deliberate stop: drop the cadence anchor (see paceOne) so
+			// the resume is not recorded as one giant stall.
+			s.lastClientWrite = time.Time{}
 			continue
 		}
 		select {
@@ -453,6 +467,10 @@ func (s *runLocalSplice) paceOne(ctx context.Context, chunk []byte) error {
 		stopped := s.interrupt || s.ended
 		s.mu.Unlock()
 		if stopped {
+			// The barge-in dead window is a DELIBERATE stop, not
+			// jitter: drop the cadence anchor so the first post-resume
+			// write does not record one giant "stall" gap.
+			s.lastClientWrite = time.Time{}
 			return nil // frame abandoned: barge-in means interrupted audio is dead
 		}
 		wait := time.Until(deadline)
@@ -485,6 +503,24 @@ func (s *runLocalSplice) paceOne(ctx context.Context, chunk []byte) error {
 		// named error.
 		return fmt.Errorf("voice: localsplice %s client write: %w", s.ccid, err)
 	}
+	// Jitter instrumentation: the pacer's client-write cadence. A gap of
+	// more than 2x the pace interval means the pacer STARVED waiting for
+	// child PCM (upstream jitter) rather than paced deliberately.
+	now := time.Now()
+	if !s.lastClientWrite.IsZero() {
+		if g := now.Sub(s.lastClientWrite); g > 2*s.cfg.Pace {
+			s.paceOverruns++
+			s.log.Warn("voice: localsplice pacer stall", "ccid", s.ccid,
+				"gap_ms", g.Milliseconds(), "pace_ms", s.cfg.Pace.Milliseconds())
+		} else if g > 0 {
+			s.paceSumMs += g.Milliseconds()
+			if g.Milliseconds() > s.paceMaxMs {
+				s.paceMaxMs = g.Milliseconds()
+			}
+			s.paceSamples++
+		}
+	}
+	s.lastClientWrite = now
 	return nil
 }
 

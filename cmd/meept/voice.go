@@ -26,6 +26,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"text/tabwriter"
+	"time"
 
 	"github.com/caimlas/meept/internal/voice"
 	"github.com/spf13/cobra"
@@ -480,17 +481,54 @@ const liveSpeakerReadChunk = 640
 // pending burst is flushed before reporting. Runs until read error / EOF /
 // a sink write error; the error goes to done (buffered: the reader selects
 // on it, so this never blocks on exit).
+//
+// Jitter instrumentation (2026-11-09 chop hunt): with MEEPT_VOICE_TRACE=1
+// each loop iteration's socket-read gap and each burst handoff size are
+// printed to stderr at call end as a compact cadence line. Read gaps >
+// ~50 ms while a call is speaking mean the daemon pacer under-supplied
+// the client (upstream stall); burst sizes pinned at the 4800 B bound
+// mean handoffs are bound-driven (expected), sizes < ~1000 B mean the
+// 350 ms sink-gap heuristic is splitting sentences (audible seams).
 func drainLiveSpeaker(r io.Reader, s *voice.SpeakerSink, done chan<- error) {
+	trace := os.Getenv("MEEPT_VOICE_TRACE") == "1"
+	var (
+		lastRead   time.Time
+		maxReadGap time.Duration
+		sumReadGap time.Duration
+		gapSamples int
+		boundHands int
+		bytesTotal int64
+	)
 	buf := make([]byte, liveSpeakerReadChunk)
 	for {
 		n, rerr := r.Read(buf)
 		if n > 0 {
+			now := time.Now()
+			if trace {
+				bytesTotal += int64(n)
+				if !lastRead.IsZero() {
+					if g := now.Sub(lastRead); g > 20*time.Millisecond {
+						sumReadGap += g
+						gapSamples++
+						if g > maxReadGap {
+							maxReadGap = g
+						}
+					}
+				}
+				lastRead = now
+			}
 			if _, werr := s.Write(buf[:n]); werr != nil {
 				done <- werr
 				return
 			}
 			if s.Pending() >= liveMaxPendingAudioBytes {
-				if ferr := s.Flush(); ferr != nil {
+				if trace {
+					boundHands++
+					if ferr := s.Flush(); ferr != nil {
+						done <- ferr
+						return
+					}
+				} else if ferr := s.Flush(); ferr != nil {
 					done <- ferr
 					return
 				}
@@ -506,6 +544,14 @@ func drainLiveSpeaker(r io.Reader, s *voice.SpeakerSink, done chan<- error) {
 			if ferr := s.Flush(); ferr != nil {
 				done <- ferr
 				return
+			}
+			if trace {
+				avg := time.Duration(0)
+				if gapSamples > 0 {
+					avg = sumReadGap / time.Duration(gapSamples)
+				}
+				fmt.Fprintf(os.Stderr, "voice trace: bytes=%d gap_reads=%d read_gap_avg=%v read_gap_max=%v bound_flushes=%d\n",
+					bytesTotal, gapSamples, avg, maxReadGap, boundHands)
 			}
 			done <- nil
 			return

@@ -628,6 +628,28 @@ func (p *pipeline) playbackStream(frame voiceframe.Frame, gen uint64) {
 		p.logger.Error("voicechild: playback chunk size", "err", err, "call_id", p.ccid)
 		return
 	}
+	// Jitter instrumentation (2026-11-09 chop hunt): ttsRead measures the
+	// provider stream's chunk ARRIVALS (network + synth side), outWrite
+	// the .out socket hand-off cadence. speakStart is set by the caller
+	// around Speak(); firstRead counts down on the first byte. One INFO
+	// report per finished stream goes to the child's stderr (inherited
+	// into the daemon log under -f).
+	ttsRead := voiceframe.NewCadence(20*time.Millisecond, 8192)
+	outWrite := voiceframe.NewCadence(20*time.Millisecond, 8192)
+	defer func() {
+		tr := ttsRead.Report()
+		ow := outWrite.Report()
+		p.logger.Info("voicechild: playback cadence", "call_id", p.ccid,
+			"events", tr.Events, "bytes", tr.BytesTotal,
+			"read_mean_ms", tr.MeanGap.Milliseconds(),
+			"read_med_ms", tr.MedianGap.Milliseconds(),
+			"read_p95_ms", tr.P95Gap.Milliseconds(),
+			"read_max_ms", tr.MaxGap.Milliseconds(),
+			"read_overruns", tr.Overruns,
+			"write_mean_ms", ow.MeanGap.Milliseconds(),
+			"write_max_ms", ow.MaxGap.Milliseconds(),
+			"write_overruns", ow.Overruns)
+	}()
 	buf := make([]byte, chunk)
 	for {
 		p.playMu.Lock()
@@ -638,6 +660,10 @@ func (p *pipeline) playbackStream(frame voiceframe.Frame, gen uint64) {
 		}
 		n, readErr := pcm.Read(buf)
 		if n > 0 {
+			if rg := ttsRead.Mark(time.Now()); rg > 100*time.Millisecond {
+				p.logger.Warn("voicechild: tts chunk arrival stall", "call_id", p.ccid, "gap_ms", rg.Milliseconds())
+			}
+			ttsRead.AddBytes(int64(n))
 			p.playMu.Lock()
 			dropped := p.dropQueued || p.playGen != gen
 			p.playMu.Unlock()
@@ -648,6 +674,8 @@ func (p *pipeline) playbackStream(frame voiceframe.Frame, gen uint64) {
 				p.logger.Error("voicechild: audio out write", "err", werr, "call_id", p.ccid)
 				return
 			}
+			outWrite.Mark(time.Now())
+			outWrite.AddBytes(int64(n))
 			// Local-leg echo reference (CL3): record this outbound
 			// chunk's energy so the INCOMING-side VAD tap can tell a
 			// speaker echo from a caller talking over the agent. This is
