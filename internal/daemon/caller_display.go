@@ -14,26 +14,20 @@ package daemon
 //   - Unknown / errored / empty lookups all render "Unknown caller" plus
 //     the last-4 tail when the number has digits (O3).
 //
-// O5 MERGE-ORDER NOTE: contact.LookupByPhone ships with the sibling tree
-// plan/caller-authz (20261110-caller-authz) and does NOT exist in this
-// tree yet. Per master O5 the resolver is vendored daemon-local behind the
-// pinned CallerDisplayLookup interface below, whose signature mirrors
-// (*contact.SQLiteStore).LookupByPhone verbatim — when the authz tree
-// merges, the store satisfies the seam STRUCTURALLY and the local
-// sqliteDisplayLookup shim becomes dead code:
-//
-//	TODO(caller-authz merge): delete sqliteDisplayLookup and wire
-//	*contact.SQLiteStore (which will gain LookupByPhone) directly into
-//	VoiceWiring.displayLookup; the interface + resolver stay unchanged.
+// O5 MERGE NOTE (resolved 2026-11-10): contact.LookupByPhone shipped with
+// plan/caller-authz and is merged; the daemon resolves display identity
+// through the store STRUCTURALLY (no vendored shim anymore). Callers
+// normalize the E.164 via voice.NormalizeE164 before lookup, matching
+// daemonCallerResolver.
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/caimlas/meept/internal/contact"
+	"github.com/caimlas/meept/internal/voice"
 )
 
 // CallerDisplayLookup is the pinned resolver seam (gate header comment):
@@ -184,45 +178,41 @@ func digitsFreeLabel(s string) string {
 	return strings.Join(strings.Fields(b.String()), " ")
 }
 
-// sqliteDisplayLookup is the O5-vendored daemon-local adapter over the
-// EXISTING contact read API — (*contact.SQLiteStore).GetByPhone — so the
-// seam is wireable in production BEFORE the caller-authz tree lands.
-// TODO(caller-authz merge): (*contact.SQLiteStore) will satisfy
-// CallerDisplayLookup structurally via its own LookupByPhone; this shim
-// then goes away (see the O5 note at the top of this file). Wired since
-// leaf 02 through newDisplayLookupSeam at the VoiceWiring construction
-// site (deps.ContactDisplayStore).
-
-type sqliteDisplayLookup struct {
-	store *contact.SQLiteStore
-}
-
-var _ CallerDisplayLookup = (*sqliteDisplayLookup)(nil)
+// (2026-11-10 O5 swap: the vendored sqliteDisplayLookup shim is deleted —
+// *contact.SQLiteStore satisfies CallerDisplayLookup structurally via its
+// exact-match LookupByPhone, wired directly by newDisplayLookupSeam.)
 
 // newDisplayLookupSeam adapts an (optional) contacts store onto the
 // resolver seam without the typed-nil trap: a nil *SQLiteStore returns an
 // INTERFACE-nil seam, so every surface takes the unknown-caller path.
+// Since the authz merge the store satisfies CallerDisplayLookup directly;
+// lookups are exact-match on the stored E.164, so call sites normalize the
+// number via voice.NormalizeE164 before resolving (matching
+// daemonCallerResolver).
 func newDisplayLookupSeam(store *contact.SQLiteStore) CallerDisplayLookup {
 	if store == nil {
 		return nil
 	}
-	return &sqliteDisplayLookup{store: store}
+	return normalizingDisplayLookup{store: store}
 }
 
-// LookupByPhone adapts GetByPhone to the pinned signature: the store's
-// ErrUnknownContact sentinel becomes (nil, false, nil) — not-found is a
-// render path, not an error — while every other failure surfaces as an
-// error so resolveDisplay can WARN + fail soft.
-func (a *sqliteDisplayLookup) LookupByPhone(ctx context.Context, e164 string) (*contact.Record, bool, error) {
-	if a == nil || a.store == nil {
-		return nil, false, nil
+// normalizingDisplayLookup adapts the store's EXACT-match LookupByPhone
+// for display callers, which may hand raw-form numbers (the registry
+// target is the carrier's from-string). The raw string is tried first;
+// on a miss the voice.NormalizeE164 form (spaces/dashes/parens stripped,
+// country code folded) is retried when it differs, so both storage
+// conventions resolve.
+type normalizingDisplayLookup struct{ store *contact.SQLiteStore }
+
+var _ CallerDisplayLookup = normalizingDisplayLookup{}
+
+func (n normalizingDisplayLookup) LookupByPhone(ctx context.Context, e164 string) (*contact.Record, bool, error) {
+	rec, found, err := n.store.LookupByPhone(ctx, e164)
+	if err != nil || found {
+		return rec, found, err
 	}
-	rec, err := a.store.GetByPhone(ctx, e164)
-	switch {
-	case errors.Is(err, contact.ErrUnknownContact):
-		return nil, false, nil
-	case err != nil:
-		return nil, false, err
+	if norm := voice.NormalizeE164(e164); norm != "" && norm != e164 {
+		return n.store.LookupByPhone(ctx, norm)
 	}
-	return &rec, true, nil
+	return nil, false, nil
 }
