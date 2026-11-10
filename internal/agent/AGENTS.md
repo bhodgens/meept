@@ -208,6 +208,22 @@ resume decode stays strict (unknown fields / malformed payloads DROP with a
 warn — never resume). Unknown `class` values drop the row at Load; they are
 never silently mapped to quota.
 
+**Backend seam (C-A1, tree 20261110-parked-turns-as-jobs):** `SetBackend`
+routes ALL persistence traffic (Park Save, drain Delete, re-arm LoadOwned,
+Start Arm) through a `parkBackend`, which REPLACES the store path (never
+mirrors it — the wired store only derives park keys and stays empty);
+`SetBackend(nil)` is nil-safe and the no-backend default path stays
+byte-identical, with backend-mode drains on the real clock (the seam's
+`LoadOwned` carries no `now` param). Give-up/attempt-cap logic stays in the
+TurnParker, never in a backend. **Queue backend (C-A2, leaf 02):**
+`parking.queue_backend=true` swaps the store path for a `QueueParkBackend`
+over the job queue — a `parked_turn` jobs row per park with the record
+JSON payload (`park_key` + `owner` explicit), wake time in `next_retry_at`,
+and the C-K1 owner verbatim in `claimed_by` (`park:` naming space); rows
+carry a far-future `due_at` sentinel so worker pools can never claim them
+and give-up can never reach dead_letter. Flag off = no `SetBackend` call
+= byte-identical sqlite path.
+
 ## Classifier boot readiness: no silent degradation during the boot window
 
 The RPC socket serves `chat.submit` BEFORE the F-D8 classifier-boot gate
