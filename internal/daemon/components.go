@@ -91,6 +91,7 @@ import (
 	"github.com/caimlas/meept/internal/tools/builtin"
 	"github.com/caimlas/meept/internal/tools/mcp"
 	"github.com/caimlas/meept/internal/validator"
+	"github.com/caimlas/meept/internal/weather"
 	"github.com/caimlas/meept/internal/worker"
 	"github.com/caimlas/meept/internal/workspace"
 	"github.com/caimlas/meept/pkg/id"
@@ -644,6 +645,19 @@ type Components struct {
 	// inert posture: no renderer is ever stamped, prompts stay
 	// byte-identical. Keyed by the loop agent id / bound employee id.
 	momentRendererFor func(employeeID string) func() string
+	// WeatherFetcher is the upstream weather source for the shared
+	// cache + refresh job (plan 20261110-situational leaf 03-weather/02).
+	// NewComponents fills the production weather.New default when nil
+	// and awareness is enabled; nil at registration time registers the
+	// job anyway (it WARNs and skips each pass — frozen §W4 note).
+	// Tests inject a counting fake.
+	WeatherFetcher weather.Fetcher
+	// WeatherCache is the ONE shared lat/lon-keyed weather cache per
+	// daemon (master Q3: employees at one shop share a fetch). Built
+	// when [awareness] is enabled; the moment resolver only peeks it
+	// (cold cache -> no weather line, never a per-turn fetch) and the
+	// weather-refresh job warms it. Nil = no Weather feed.
+	WeatherCache *weather.Cache
 	// EmployeeMessageStore persists inter-agent messages (leaf 10).
 	// Nil when the employee stack is disabled.
 	EmployeeMessageStore *employee.MessageStore
@@ -5347,12 +5361,35 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// renderers on the session clones (voice_employee.go MomentResolver).
 	// Ordered here because it needs c.EmployeeManager (BotDefinition
 	// source) live; reads cfg.Awareness (default disabled).
-	if _, resolveMoment := buildAwareness(cfg, c.EmployeeManager,
-		logger.With("component", "awareness-wiring")); resolveMoment != nil {
-		c.momentRendererFor = resolveMoment
-		c.AgentLoop.SetMomentRenderer(resolveMoment(c.AgentLoop.GetAgentID()))
-		logger.Info("situational awareness wired (moment block opt-in enabled)",
-			"refresh_minutes", cfg.Awareness.RefreshMinutes)
+	//
+	// Leaves 02-daystate/02 + 03-weather/02 attach the feeds: the
+	// composite daystate.Source (lazy store adapters — the ledger/voice/
+	// activity handles land later in this constructor / daemon.go, and
+	// unwired deps fail soft to zero contribution) and ONE shared
+	// lat/lon-keyed weather.Cache (master Q3) that the resolver only
+	// peeks; the weather-refresh job below is the sole warming path.
+	if cfg.Awareness.Enabled && c.EmployeeManager != nil {
+		awLogger := logger.With("component", "awareness-wiring")
+		if c.WeatherFetcher == nil {
+			c.WeatherFetcher = weather.New(weather.Config{})
+		}
+		acfg := cfg.Awareness
+		config.NormalizeAwarenessDefaults(&acfg)
+		c.WeatherCache = weather.NewCache(c.WeatherFetcher,
+			time.Duration(acfg.RefreshMinutes)*time.Minute,
+			awLogger.With("component", "weather-cache"))
+		// The refresh pass fetches THROUGH the shared cache (Cache is
+		// itself a Fetcher): its Fetch warms entries + dedupes within
+		// TTL, and the moment resolver only peeks the same cache.
+		c.WeatherFetcher = c.WeatherCache
+		dsSrc := buildDayStateSource(c, aw2SchedulerLoc(cfg, awLogger), awLogger)
+		if _, resolveMoment := buildAwareness(cfg, c.EmployeeManager, awLogger,
+			aw2Feeds{DayState: dsSrc, WCache: c.WeatherCache}); resolveMoment != nil {
+			c.momentRendererFor = resolveMoment
+			c.AgentLoop.SetMomentRenderer(resolveMoment(c.AgentLoop.GetAgentID()))
+			logger.Info("situational awareness wired (moment block opt-in enabled)",
+				"refresh_minutes", cfg.Awareness.RefreshMinutes)
+		}
 	}
 
 	// dsh-convergence daemon integration (leaf seams): wire the goal /
@@ -5484,6 +5521,15 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			)
 		}
 	}
+
+	// Weather refresh job (plan 20261110-situational leaf 03-weather/02):
+	// scheduled pass warming the shared c.WeatherCache for every trade-
+	// listed employee location (gate §W4 guards inside: awareness
+	// disabled, nil BotStore, or zero Weather.Trades defs register
+	// NOTHING). Ordered after the voice block so c.Voice (and the day
+	// state source's lazy call-count dep) is final; the cache is built
+	// at the awareness site above only when enabled.
+	c.registerWeatherRefreshJob(cfg, logger.With("component", "weather-refresh-wiring"))
 
 	// Initialize backup scheduler (if configured and enabled)
 	if cfg.Backup.IsValidated() {

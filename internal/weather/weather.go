@@ -273,6 +273,21 @@ func (c *Cache) Fetch(ctx context.Context, lat, lon float64) (Outlook, error) {
 // alerts (frozen thresholds + frozen strings)
 // ---------------------------------------------------------------------------
 
+// PeekOutlook returns the last GOOD Outlook stored for (lat,lon) — inside
+// TTL or past it — without triggering any upstream fetch. This is the
+// moment-feed seam: the renderer may only show weather the refresh job
+// already warmed (cold cache -> absent, never a per-turn fetch). The bool
+// is false when nothing is cached for the bucket.
+func (c *Cache) PeekOutlook(lat, lon float64) (Outlook, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.entries[cacheKey(lat, lon)]
+	if !ok {
+		return Outlook{}, false
+	}
+	return e.outlook, true
+}
+
 // Frozen, owner-tunable-later thresholds.
 const (
 	// ConcreteColdThresholdC: concrete alerts when TodayLowC < this.
