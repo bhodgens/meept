@@ -41,7 +41,13 @@ type throttledTurnPayload struct {
 	ProviderID     string            `json:"provider_id,omitempty"`
 	ModelID        string            `json:"model_id,omitempty"`
 	SourceClient   string            `json:"source_client,omitempty"`
-	ParkedAt       time.Time         `json:"parked_at,omitzero"`
+	// TurnID rides the payload (C-K2 compile carrier, tree 04 leaf 01;
+	// delivery parity lands with leaf 02): the chat.submit turn identity so
+	// the throttle resume can emit the final turn.terminal under the acked
+	// id like the quota path does (F15). Empty on legacy rows (omitted key),
+	// which the resume treats as silent.
+	TurnID   string    `json:"turn_id,omitempty"`
+	ParkedAt time.Time `json:"parked_at,omitzero"`
 	// Autonomous mirrors ParkedTurnRecord.Autonomous (F14 follow-up): the
 	// parked turn ran with the AUTONOMOUS marker, so the resume must re-apply
 	// it. It lives HERE, not only on the record, because the SQLite park store
@@ -59,11 +65,14 @@ type throttleParkedTurn struct {
 	ProviderID     string
 	ModelID        string
 	SourceClient   string
-	ParkedAt       time.Time
-	Autonomous     bool
-	SessionID      string
-	AgentID        string
-	Attempt        int
+	// TurnID carries the chat.submit turn identity (C-K2 compile carrier;
+	// leaf 02 wires it into the park site + delivery parity).
+	TurnID     string
+	ParkedAt   time.Time
+	Autonomous bool
+	SessionID  string
+	AgentID    string
+	Attempt    int
 }
 
 // throttleTurnToRecord encodes a throttleParkedTurn as a Class=throttle
@@ -76,6 +85,7 @@ func throttleTurnToRecord(turn throttleParkedTurn) (ParkedTurnRecord, error) {
 		ProviderID:     turn.ProviderID,
 		ModelID:        turn.ModelID,
 		SourceClient:   turn.SourceClient,
+		TurnID:         turn.TurnID,
 		ParkedAt:       turn.ParkedAt,
 		Autonomous:     turn.Autonomous,
 	})
@@ -108,6 +118,7 @@ func recordToThrottleTurn(rec ParkedTurnRecord) (throttleParkedTurn, error) {
 		ProviderID:     p.ProviderID,
 		ModelID:        p.ModelID,
 		SourceClient:   p.SourceClient,
+		TurnID:         p.TurnID,
 		ParkedAt:       p.ParkedAt,
 		Autonomous:     p.Autonomous,
 		SessionID:      rec.SessionID,
@@ -176,10 +187,42 @@ func ThrottleParkAttemptFromContext(ctx context.Context) int {
 // request RunOnceWithParts was entered with, captured so a mid-turn throttle
 // can park a resume payload that re-enters the same path (Task 3). Guarded by
 // throttleMu; a re-entrant resume overwrites it for the resumed turn.
+//
+// F8 (bughunt 2026-11-09, statemachine-remediation tree 04 leaf 01): one
+// slot per LOOP is NOT per-turn safe — two overlapping RunOnceWithParts
+// calls on the same loop race on it (turn B's entry overwrites A's stash;
+// A throttles and parks B's dispatch, and A's deferred clear can blank B's
+// payload). The stash is now ALSO carried on the turn's context via
+// WithThrottleDispatch (keyed by the turn's ctx, immune to overlap); the
+// loop slot remains as a fallback for park sites that run on a context
+// this loop did not enter (defensive; no production path hits it today).
 type throttleTurnContext struct {
 	message        string
 	parts          []llm.ContentPart
 	conversationID string
+}
+
+// throttleDispatchKey carries the per-turn dispatch on the turn context.
+type throttleDispatchKey struct{}
+
+// WithThrottleDispatch returns ctx carrying the turn's original dispatch
+// (RunOnceWithParts entry). SetTurnParker park sites read it first when
+// building the resume payload (F8).
+func WithThrottleDispatch(ctx context.Context, d *throttleTurnContext) context.Context {
+	if ctx == nil || d == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, throttleDispatchKey{}, d)
+}
+
+// throttleDispatchFromContext reads the turn-context dispatch (F8); nil
+// when the ctx did not pass through RunOnceWithParts.
+func throttleDispatchFromContext(ctx context.Context) *throttleTurnContext {
+	if ctx == nil {
+		return nil
+	}
+	d, _ := ctx.Value(throttleDispatchKey{}).(*throttleTurnContext)
+	return d
 }
 
 func (l *AgentLoop) setThrottleTurnContext(message string, parts []llm.ContentPart, conversationID string) {
@@ -202,10 +245,22 @@ func (l *AgentLoop) clearThrottleTurnContext() {
 // ctx is the TURN's context: its AUTONOMOUS marker (daemon step jobs) is
 // recorded in the payload so the resumed turn re-enters autonomously. This is
 // the carrier that survives the SQLite park store.
+//
+// F8 (tree 04 leaf 01): the dispatch is read from the TURN CONTEXT first
+// (WithThrottleDispatch, stamped by RunOnceWithParts with the exact
+// message/parts/conversation the turn was entered with). Overlapping turns
+// on one loop no longer cross-park each other's dispatches — the old shared
+// l.throttleTurnCtx slot let turn B overwrite turn A's stash mid-flight, so
+// A's park carried B's payload and A's deferred clear could blank B's. The
+// loop slot remains only as a fallback for park sites entered without the
+// RunOnceWithParts context plumbing.
 func (l *AgentLoop) captureThrottlePayload(ctx context.Context, conversationID, providerID, modelID string, parkedAt time.Time) json.RawMessage {
-	l.throttleMu.Lock()
-	stash := l.throttleTurnCtx
-	l.throttleMu.Unlock()
+	stash := throttleDispatchFromContext(ctx)
+	if stash == nil {
+		l.throttleMu.Lock()
+		stash = l.throttleTurnCtx
+		l.throttleMu.Unlock()
+	}
 	if stash == nil || stash.message == "" {
 		return nil
 	}
@@ -299,11 +354,17 @@ func (l *AgentLoop) parkThrottledTurn(ctx context.Context, terr *llm.ThrottleBac
 	// backward-compat path), which is correct for an unbound loop.
 	conversationID := sessionID
 	if conversationID == "" {
-		l.throttleMu.Lock()
-		if l.throttleTurnCtx != nil {
-			conversationID = l.throttleTurnCtx.conversationID
+		// F8: prefer the turn's own context-carried dispatch; the shared
+		// loop slot (fallback) can hold ANOTHER overlapping turn's stash.
+		if stash := throttleDispatchFromContext(ctx); stash != nil {
+			conversationID = stash.conversationID
+		} else {
+			l.throttleMu.Lock()
+			if l.throttleTurnCtx != nil {
+				conversationID = l.throttleTurnCtx.conversationID
+			}
+			l.throttleMu.Unlock()
 		}
-		l.throttleMu.Unlock()
 	}
 	payload := l.captureThrottlePayload(ctx, conversationID, terr.ProviderID, terr.ModelID, now)
 

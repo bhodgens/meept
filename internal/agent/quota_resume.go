@@ -1,8 +1,10 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -26,6 +28,12 @@ type QuotaParkedTurn struct {
 	ProviderID     string            // provider that hit the quota
 	CredentialKey  string            // credential fingerprint of the blocked pool
 	UnblockAt      time.Time         // earliest time the quota window lifts
+	// Attempt/MaxAttempts carry the re-park generation and its cap
+	// (M-4-park encode carrier, tree 04 leaf 04). The record columns
+	// persist them across restarts; the drain-side give-up at the cap is
+	// owned by leaf 04. Zero MaxAttempts encodes as DefaultQuotaMaxAttempts.
+	Attempt     int
+	MaxAttempts int
 	// TurnID is the chat.submit turn identity (week bughunt 2026-09-17
 	// F15): recorded at park time so the resume can emit the FINAL
 	// turn.terminal event under the id the client's ack returned.
@@ -33,6 +41,11 @@ type QuotaParkedTurn struct {
 	TurnID   string
 	ParkedAt time.Time // when the turn was parked
 }
+
+// DefaultQuotaMaxAttempts bounds the quota re-park generations (M-4-park).
+// The encode side stamps it onto every quota record; the drain-side give-up
+// lands with tree 04 leaf 04.
+const DefaultQuotaMaxAttempts = 5
 
 // DefaultQuotaResumePollInterval is the re-check cadence for parked turns.
 // Mirrors config llm.quota_retry.defer_check_interval's 10m default; the
@@ -78,22 +91,49 @@ func quotaTurnToRecord(turn QuotaParkedTurn) (ParkedTurnRecord, error) {
 	if err != nil {
 		return ParkedTurnRecord{}, err
 	}
+	maxAttempts := turn.MaxAttempts
+	if maxAttempts <= 0 {
+		maxAttempts = DefaultQuotaMaxAttempts
+	}
 	return ParkedTurnRecord{
 		ConversationID: turn.ConversationID,
 		SessionID:      turn.SessionID,
 		AgentID:        turn.AgentID,
 		Class:          llm.FailureQuota,
 		ResumeAt:       turn.UnblockAt,
-		TurnPayload:    raw,
+		// M-4-park encode carrier (tree 04 leaf 04): the re-park generation
+		// rides the record so the attempt grows across park generations and
+		// every quota row carries its give-up cap. The drain-side enforcement
+		// at the cap lands with leaf 04; this leaf carries the data.
+		Attempt:     turn.Attempt,
+		MaxAttempts: maxAttempts,
+		TurnPayload: raw,
 	}, nil
 }
 
 // recordToQuotaTurn decodes a Class=quota ParkedTurnRecord back into the
 // QuotaParkedTurn the resume callback expects.
+//
+// STRICT decode (C-K1 defense in depth, tree 04 leaf 01): the tolerant
+// json.Unmarshal was the second half of the C1 double-execution — throttle
+// payloads share the message/conversation_id/provider_id/credential_key/
+// source_client/parked_at keys, so a foreign row decoded "successfully"
+// and the message re-executed through the quota router. Now: unknown keys
+// (a foreign payload shape), trailing garbage, and missing REQUIRED fields
+// all return an error, and the callback DROPs (never resumes) on error.
 func recordToQuotaTurn(rec ParkedTurnRecord) (QuotaParkedTurn, error) {
+	raw := []byte(rec.TurnPayload)
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return QuotaParkedTurn{}, fmt.Errorf("quota payload empty")
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
 	var p quotaTurnPayload
-	if err := json.Unmarshal(rec.TurnPayload, &p); err != nil {
-		return QuotaParkedTurn{}, err
+	if err := dec.Decode(&p); err != nil {
+		return QuotaParkedTurn{}, fmt.Errorf("quota payload strict decode: %w", err)
+	}
+	if dec.More() {
+		return QuotaParkedTurn{}, fmt.Errorf("quota payload strict decode: trailing data after JSON object")
 	}
 	return QuotaParkedTurn{
 		SessionID:      rec.SessionID,
@@ -107,6 +147,7 @@ func recordToQuotaTurn(rec ParkedTurnRecord) (QuotaParkedTurn, error) {
 		TurnID:         p.TurnID,
 		UnblockAt:      rec.ResumeAt,
 		ParkedAt:       p.ParkedAt,
+		Attempt:        rec.Attempt,
 	}, nil
 }
 
@@ -316,6 +357,19 @@ func (w *QuotaResumeWatcher) SetParkPersistence(store ParkPersistence) {
 		return
 	}
 	w.turns.SetParkPersistence(store, ParkKindChat)
+}
+
+// SetPersistenceOwner forwards the C-K1 parker identity (tree 04 leaf 01)
+// to the inner TurnParker: persisted quota rows are stamped with owner
+// (default wiring: ParkOwnerQuotaWatcher = "quota-watcher") and the
+// restart re-arm loads ONLY this watcher's rows — the partition that stops
+// the throttle parker's rows from being re-executed through the quota
+// router (C1). Wiring-time setter: call before Start.
+func (w *QuotaResumeWatcher) SetPersistenceOwner(owner string) {
+	if w == nil {
+		return
+	}
+	w.turns.SetPersistenceOwner(owner)
 }
 
 // drainDue resumes every parked turn whose unblock time has passed,

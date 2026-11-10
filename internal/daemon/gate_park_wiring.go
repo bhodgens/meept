@@ -85,6 +85,10 @@ func (c *Components) wireGateParker() {
 		},
 	)
 	parker.SetParkPersistence(c.ParkStore, agent.ParkKindGate)
+	// C-K1 (tree 04 leaf 01): owner "gate" — ParkKindGate is already this
+	// parker's exclusive kind, but the owner stamp keeps every row
+	// self-describing and matches the migrate backfill (kind=gate -> 'gate').
+	parker.SetPersistenceOwner(agent.ParkOwnerGate)
 	c.GateParker = agent.NewGateParker(c.Logger.With("component", "gate-parker"), parker)
 }
 

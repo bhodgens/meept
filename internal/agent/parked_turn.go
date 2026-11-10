@@ -93,6 +93,15 @@ type ParkedTurnRecord struct {
 	// resume path re-applies the marker when EITHER is set (parkedAutonomous),
 	// so the two can never disagree in a way that matters.
 	Autonomous bool
+	// Owner is the C-K1 parker identity (statemachine-remediation tree 04
+	// leaf 01): the ONE parker allowed to Load/resume this record's persisted
+	// row. The TurnParker stamps it at Save from SetPersistenceOwner; the
+	// store's owner-scoped Load returns only rows whose owner matches. Additive
+	// to the frozen record shape (same regime as Autonomous above); zero value
+	// "" = unowned (memory-only records and legacy rows pre-backfill — the
+	// parker treats an empty owner as "no filter" so an unwired store stays
+	// byte-identical). See ParkOwner* constants in park_store_sqlite.go.
+	Owner string
 }
 
 // TurnParker parks ParkedTurnRecords and retries them once their resume
@@ -130,6 +139,12 @@ type TurnParker struct {
 	// parkKind scopes this parker's persisted rows (chat vs episode);
 	// meaningful only when parkPersistence is set.
 	parkKind ParkKind
+	// persistenceOwner is the C-K1 parker identity (tree 04 leaf 01):
+	// stamped onto every Save (via ParkedTurnRecord.Owner) and used to
+	// load ONLY this parker's rows at re-arm. Empty = unfiltered
+	// (legacy kind-only contract preserved for unwired/test parkers).
+	// Installed at wiring time like the fields above.
+	persistenceOwner string
 	// parkKeyOverride, when set, derives a record's persistence key
 	// (dedup identity) instead of the chat-side default. Episode wiring
 	// uses it so a re-parked episode overwrites its own row (the
@@ -328,6 +343,12 @@ func (p *TurnParker) Park(turn ParkedTurnRecord) bool {
 		)
 	}
 	turn.ResumeAt = scheduledAt
+	if p.persistenceOwner != "" {
+		// C-K1: every persisted row carries exactly its owning parker.
+		// Stamped before the queue append so the re-armed in-memory copy
+		// and the persistence row agree.
+		turn.Owner = p.persistenceOwner
+	}
 	p.mu.Lock()
 	p.parked = append(p.parked, turn)
 	// Persistence key: chat parkers (no payload context here) use the
@@ -601,6 +622,36 @@ func (p *TurnParker) SetParkPersistence(store ParkPersistence, kind ParkKind) {
 	p.parkKind = kind
 }
 
+// OwnerScopedPersistence is the OPTIONAL capability seam (C-K1, tree 04
+// leaf 01) a ParkPersistence may implement to load only one owner's rows:
+// LoadOwned returns exactly the records Save stamped with that owner.
+// SQLiteParkStore implements it; fakes that don't degrade to the
+// kind-only Load (the parker's owner stamp still persists, it just cannot
+// be filtered at load). Interface-at-consumer, like ParkPersistence
+// itself.
+type OwnerScopedPersistence interface {
+	LoadOwned(ctx context.Context, kind ParkKind, owner string, now time.Time) ([]ParkedTurnRecord, []string, error)
+}
+
+// SetPersistenceOwner installs the parker's C-K1 identity (e.g.
+// "quota-watcher", "throttle", "gate", "episode"). When set:
+//   - every Park stamps rec.Owner before persisting, so each row carries
+//     exactly one owning parker, and
+//   - re-arm loads ONLY this parker's rows (when the store implements
+//     OwnerScopedPersistence), closing the C1 cross-feed: two parkers
+//     sharing one kind (the daemon's quota watcher + throttle parker on
+//     ParkKindChat) can never re-arm each other's rows.
+//
+// Empty owner (the default) preserves the legacy kind-only contract
+// byte-identically: no stamp, unfiltered Load. Wiring-time setter — call
+// once before Start, like SetParkPersistence.
+func (p *TurnParker) SetPersistenceOwner(owner string) {
+	if p == nil {
+		return
+	}
+	p.persistenceOwner = owner
+}
+
 // SetParkKey installs a per-record persistence-key override (episode
 // wiring: the H4 employee+phase+trigger identity derived from
 // goalTurnPayload). Nil disables the override (chat-side default keys).
@@ -627,7 +678,21 @@ func (p *TurnParker) reArm(ctx context.Context) {
 		return
 	}
 	now := p.now()
-	records, keys, err := p.parkPersistence.Load(ctx, p.parkKind, now)
+	var records []ParkedTurnRecord
+	var keys []string
+	var err error
+	if p.persistenceOwner != "" {
+		if osp, ok := p.parkPersistence.(OwnerScopedPersistence); ok {
+			records, keys, err = osp.LoadOwned(ctx, p.parkKind, p.persistenceOwner, now)
+		} else {
+			// Store cannot filter by owner: fall back to the kind-only
+			// load (legacy semantics). The owner stamp still persists, so
+			// a later store upgrade re-partitions correctly.
+			records, keys, err = p.parkPersistence.Load(ctx, p.parkKind, now)
+		}
+	} else {
+		records, keys, err = p.parkPersistence.Load(ctx, p.parkKind, now)
+	}
 	if err != nil {
 		p.logger.Warn("park persistence: re-arm load failed — records left for next boot",
 			"kind", string(p.parkKind),

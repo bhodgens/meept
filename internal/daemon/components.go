@@ -4279,6 +4279,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// when the park store is absent (memory-only fallback).
 		if c.ParkStore != nil && c.ChatHandler.QuotaResumeWatcher() != nil {
 			c.ChatHandler.QuotaResumeWatcher().SetParkPersistence(c.ParkStore)
+			// C-K1 (tree 04 leaf 01): the quota watcher's rows are stamped
+			// owner "quota-watcher" and its restart re-arm loads ONLY its
+			// own rows — the chat kind is shared with the throttle parker
+			// below (C1 double-execution), owner scoping is the partition.
+			c.ChatHandler.QuotaResumeWatcher().SetPersistenceOwner(agent.ParkOwnerQuotaWatcher)
 		}
 
 		// Throttle parking (llm-resilience-forest tree 03 leaf 02, D4/D8):
@@ -4307,6 +4312,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// when the park store failed to open, parking stays memory-only.
 		if c.ParkStore != nil {
 			throttleParker.SetParkPersistence(c.ParkStore, agent.ParkKindChat)
+			// C-K1 (tree 04 leaf 01): owner "throttle" — the throttle
+			// parker shares ParkKindChat with the quota watcher's inner
+			// parker; the owner column partitions the re-arm so a quota
+			// row can never re-enter this parker (and vice versa). Wired
+			// before Start (re-arm happens in Start).
+			throttleParker.SetPersistenceOwner(agent.ParkOwnerThrottle)
 		}
 		c.ChatHandler.SetThrottleParker(throttleParker)
 		throttleParker.Start(c.ctx)
@@ -6366,6 +6377,12 @@ func (c *Components) Start(ctx context.Context) error {
 			// malformed payloads still persist under a fallback key.
 			if c.ParkStore != nil {
 				goalTurnParker.SetParkPersistence(c.ParkStore, agent.ParkKindEpisode)
+				// C-K1 (tree 04 leaf 01): owner "episode" — the episode
+				// kind is already exclusive to this parker, but the owner
+				// stamp makes every row self-describing and future-proofs
+				// the re-arm partition (backfill maps legacy episode rows
+				// here by kind).
+				goalTurnParker.SetPersistenceOwner(agent.ParkOwnerEpisode)
 				// Key mirrors the employee parker's H4 identity:
 				// employee + phase + trigger (source|topic), FiredAt excluded
 				// -- nil triggers (reflect/approve phases) normalize to "nil",

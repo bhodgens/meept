@@ -174,6 +174,21 @@ sends `session_id` as `conversation_id` in chat requests. WS subscriptions use
 MUST handle both. The WS filter in `internal/comm/http/server.go` falls back
 from `session_id` to `conversation_id` — preserve this.
 
+## Parked-turn persistence: every row has exactly one owner (C-K1)
+
+Persisted parked turns (`park_store_sqlite.go`, table `parked_turns`) carry an
+`owner` column — the ONE parker allowed to Save/Load/resume the row
+(`quota-watcher`, `throttle`, `gate`, `episode`). Kind scoping alone is NOT
+an identity boundary: the quota watcher's inner parker and the daemon's
+throttle parker share `ParkKindChat`, and a kind-only Load re-armed each
+into the other's queue — with the overlapping quota/throttle payload keys a
+foreign row decoded "successfully" and the message executed twice (C1
+CRITICAL). Rule: any parker wired with `SetParkPersistence` MUST also call
+`SetPersistenceOwner` (before `Start`) with its owner string, and the quota
+resume decode stays strict (unknown fields / malformed payloads DROP with a
+warn — never resume). Unknown `class` values drop the row at Load; they are
+never silently mapped to quota.
+
 ## Classifier boot readiness: no silent degradation during the boot window
 
 The RPC socket serves `chat.submit` BEFORE the F-D8 classifier-boot gate

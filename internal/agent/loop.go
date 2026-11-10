@@ -3117,8 +3117,14 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	// throttles mid-turn, parkThrottledTurn needs the ORIGINAL dispatch
 	// (message/parts/conversation) to build the resume payload. Set for the
 	// turn's duration; cleared on exit. Consumed only by the park branch.
+	// F8 (tree 04 leaf 01): ALSO carried on the turn's context — the loop
+	// slot is shared across overlapping RunOnceWithParts calls on one loop
+	// (turn B's entry clobbers A's stash; A's exit clears B's), so
+	// parkThrottledTurn reads the context copy first and parks exactly the
+	// dispatch THIS turn was entered with.
 	l.setThrottleTurnContext(userMessage, parts, conversationID)
 	defer l.clearThrottleTurnContext()
+	ctx = WithThrottleDispatch(ctx, &throttleTurnContext{message: userMessage, parts: parts, conversationID: conversationID})
 
 	// Scope this turn's LLM calls to the conversation for per-session token
 	// accounting (metrics.db llm_calls.session_id, budget per-session

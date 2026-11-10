@@ -158,6 +158,42 @@ func (w *BudgetResumeWatcher) Pending() int {
 	return len(w.parked)
 }
 
+// --- C-K1 compile stubs (statemachine-remediation tree 04) ------------------
+//
+// The committed leaf-00T gate tests (TestBudgetParkPersists /
+// TestBudgetParkEmitsEvent, F5) reference these setters, so the symbols
+// must exist for the package to build. Budget park PERSISTENCE and park
+// EVENTS are owned by tree 04 leaf 04 (park-bounds-and-budget) — budget
+// persistence is explicitly OUT OF SCOPE for leaf 01 — and those tests are
+// expected to stay RED until it lands. These stubs are inert: they store
+// the wiring so a future leaf can consume it, but persist/emit nothing.
+
+// SetParkPersistence COMPILE STUB (owner: tree 04 leaf 04) — inert: budget
+// parks stay memory-only until leaf 04 implements persistence.
+func (w *BudgetResumeWatcher) SetParkPersistence(store ParkPersistence, kind ParkKind) {
+	if w == nil || store == nil {
+		return
+	}
+	_ = kind
+}
+
+// SetPersistenceOwner COMPILE STUB (owner: tree 04 leaf 04) — inert:
+// nothing is stamped yet.
+func (w *BudgetResumeWatcher) SetPersistenceOwner(owner string) {
+	if w == nil {
+		return
+	}
+	_ = owner
+}
+
+// SetParkEventBus COMPILE STUB (owner: tree 04 leaf 04) — inert: no
+// park/resume events are published yet.
+func (w *BudgetResumeWatcher) SetParkEventBus(b parkEventBus) {
+	if w == nil || b == nil {
+		return
+	}
+}
+
 // drainIfClear checks the budget and, if it is no longer exceeded, resumes all
 // parked turns oldest-first. Each resume runs in its own goroutine so a slow
 // turn does not block the polling loop.

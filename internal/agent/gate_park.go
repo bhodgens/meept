@@ -212,6 +212,23 @@ func (p *GateParker) PendingGates() int {
 	return p.turns.Pending()
 }
 
+// ReleaseByKey discards the parked gate identified by gateID (plan
+// rejection / cancellation path, M-12): the row and its queued record are
+// removed WITHOUT running the resume callback, and a lifecycle event
+// carries the release reason.
+//
+// COMPILE STUB (statemachine-remediation tree 04): the gate is referenced
+// by the committed leaf-00T gate tests (TestRejectReleasesGatePark, C-K3),
+// so the symbol must exist for the package to build; the real
+// delete-row + drop-record + event implementation lands with tree 04 leaf
+// 03 (gate-release-on-rejection), which owns that RED test. This stub is
+// intentionally inert: it reports "no gate released".
+func (p *GateParker) ReleaseByKey(gateID, reason string) (bool, error) {
+	_ = gateID
+	_ = reason
+	return false, nil
+}
+
 // resumeByKey resumes one parked record by its kind-scoped persistence
 // key, bypassing the time-based drain. It is the mechanism the gate
 // approval path uses (an approval is an event, not a schedule): the
