@@ -65,13 +65,12 @@ func buildLedger(cfg *config.Config, msgBus *bus.MessageBus, chain *auditlog.Sto
 	}
 
 	// After-append hook composition (post-commit, Store-internal):
-	// publish first (S4), audit chained next by leaf 04-02 in this same
-	// composition point.
-	store.WithAfterAppend(buildLedgerAfterAppendHook(msgBus, logger.With("component", "ledger-publish")))
-
-	// `chain` is intentionally unused until leaf 04-02 folds the
-	// audit-chain hook into the composition above (nil chain -> skip).
-	_ = chain
+	// publish first (S4), audit chained next (leaf 04-02) — one fused
+	// hook; nil chain -> the audit half skips silently.
+	store.WithAfterAppend(composeLedgerAfterAppendHooks(
+		buildLedgerAfterAppendHook(msgBus, logger.With("component", "ledger-publish")),
+		buildLedgerAuditHook(chain, logger.With("component", "ledger-audit")),
+	))
 
 	logger.Info("ledger wiring: employee ledger store ready", "path", filepath.Join(dir, "ledger.db"))
 	return store
