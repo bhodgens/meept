@@ -206,6 +206,25 @@ type Leg struct {
 	mu      sync.Mutex
 	calls   map[string]*callState // ccid -> live call state
 	inbound legInbound            // zero-value usable (leaf 11b RouteInbound)
+
+	// termObsMu guards termObs: the ADDITIVE terminal-observer lane
+	// (tree 20261110-voice-callleg leaf 01) that voice's CallLeg signal
+	// adapter probes structurally (voice.SignalTerminalObserver). It
+	// notifies at the claimTerminal-guarded terminal sites (carrier
+	// ENDED / ringing watchdog) AFTER the Manager.FailOutcome fan-out —
+	// releaseOnce stays the single terminal funnel; observers never add
+	// a teardown path.
+	termObsMu sync.Mutex
+	termObs   []func(ccid string, outcome voice.Outcome, reason string)
+
+	// transObsMu guards transObs: the ADDITIVE non-terminal transition
+	// lane (tree 20261110-voice-callleg leaf 02) that voice's CallLeg
+	// signal adapter probes structurally (voice.SignalTransitionObserver).
+	// It notifies the carrier CONNECTED / RECONNECTING edges only —
+	// observation, never a state-machine input: the handleCallEvent arms
+	// are unchanged and an observer can neither gate nor delay them.
+	transObsMu sync.Mutex
+	transObs   []func(ccid string, transition voice.SignalTransition)
 }
 
 // callState is one live signal call's leg-owned state.
@@ -321,6 +340,7 @@ func (l *Leg) handleCallEvent(ev signal.CallEvent) {
 		// Tolerated: no teardown. The carrier re-establishes media;
 		// tearing down here would kill every healthy reconnection.
 		l.log.Info("signalleg: call reconnecting (tolerated)", "ccid", st.ccid)
+		l.notifyTransition(st.ccid, voice.SignalTransitionReconnecting)
 	case signal.CallEventStateEnded:
 		l.onEnded(st, ev.Reason)
 	default:
@@ -386,6 +406,39 @@ func (l *Leg) onConnected(st *callState) {
 	l.startAudioAdapter(live)
 	l.log.Info("signalleg: call connected, talk loop armed via open frame",
 		"ccid", live.ccid, "employee_id", live.employee, "target", live.target)
+	l.notifyTransition(st.ccid, voice.SignalTransitionConnected)
+}
+
+// AddTransitionObserver registers a best-effort NON-terminal transition
+// observer (tree 20261110-voice-callleg leaf 02; satisfies
+// voice.SignalTransitionObserver structurally — voice.Outcome's import
+// direction applies: signalleg imports voice, never the reverse). The
+// carrier CONNECTED / RECONNECTING edges only; terminals ride
+// AddTerminalObserver. Observation never gates the state machine.
+func (l *Leg) AddTransitionObserver(fn func(ccid string, transition voice.SignalTransition)) {
+	if fn == nil {
+		return
+	}
+	l.transObsMu.Lock()
+	l.transObs = append(l.transObs, fn)
+	l.transObsMu.Unlock()
+}
+
+// notifyTransition invokes every transition observer outside l.mu and
+// the observer mutex (snapshot then call — the notifyTerminal pattern).
+// Best-effort, like the terminal lane.
+func (l *Leg) notifyTransition(ccid string, transition voice.SignalTransition) {
+	l.transObsMu.Lock()
+	if len(l.transObs) == 0 {
+		l.transObsMu.Unlock()
+		return
+	}
+	obs := make([]func(string, voice.SignalTransition), len(l.transObs))
+	copy(obs, l.transObs)
+	l.transObsMu.Unlock()
+	for _, fn := range obs {
+		fn(ccid, transition)
+	}
 }
 
 // bindCall runs Binding.OnCallStart for a connected call through the
@@ -462,6 +515,7 @@ func (l *Leg) onEnded(st *callState, reason string) {
 		return
 	}
 	l.deps.Manager.FailOutcome(st.ccid, outcome, "signal call ended: "+reason)
+	l.notifyTerminal(st.ccid, outcome, "signal call ended: "+reason)
 	l.log.Info("signalleg: call ended", "ccid", st.ccid, "reason", reason, "outcome", string(outcome))
 }
 
@@ -556,6 +610,42 @@ func (l *Leg) fireRingingWatchdog(ccid string, timeout time.Duration) {
 	}
 	l.deps.Manager.FailOutcome(ccid, voice.OutcomeNoAnswer,
 		fmt.Sprintf("signal: no answer within %s", timeout.String()))
+	l.notifyTerminal(ccid, voice.OutcomeNoAnswer,
+		fmt.Sprintf("signal: no answer within %s", timeout.String()))
+}
+
+// AddTerminalObserver registers a best-effort terminal observer on the
+// leg's claimTerminal-guarded terminal sites (tree 20261110-voice-callleg
+// leaf 01; satisfies voice.SignalTerminalObserver structurally — the
+// method signature uses voice.Outcome, which is importable this way
+// because signalleg ALREADY imports voice, never the reverse). The
+// Manager's release fan-out remains the single terminal funnel;
+// observers never add a teardown path and are notified after it.
+func (l *Leg) AddTerminalObserver(fn func(ccid string, outcome voice.Outcome, reason string)) {
+	if fn == nil {
+		return
+	}
+	l.termObsMu.Lock()
+	l.termObs = append(l.termObs, fn)
+	l.termObsMu.Unlock()
+}
+
+// notifyTerminal invokes every terminal observer outside l.mu and the
+// observer mutex (snapshot then call — the voice.Manager notifyAnswered
+// pattern). Best-effort: an observer error/panic is the observer's
+// problem, exactly like a release-hook error.
+func (l *Leg) notifyTerminal(ccid string, outcome voice.Outcome, reason string) {
+	l.termObsMu.Lock()
+	if len(l.termObs) == 0 {
+		l.termObsMu.Unlock()
+		return
+	}
+	obs := make([]func(string, voice.Outcome, string), len(l.termObs))
+	copy(obs, l.termObs)
+	l.termObsMu.Unlock()
+	for _, fn := range obs {
+		fn(ccid, outcome, reason)
+	}
 }
 
 // OutcomeByReason maps a signal-cli ENDED reason onto a voice.Outcome.

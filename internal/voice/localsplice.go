@@ -132,6 +132,12 @@ type LocalSpliceDeps struct {
 	// written + quiescent (see ArmDrainWatch). Nil (every plain call) =
 	// zero emissions, byte-identical splice.
 	AudioDrained func(ccid string)
+	// OnClientJoin fires EXACTLY ONCE when the client produces its
+	// first mic byte — the same edge that satisfies the join gate
+	// (leaf 02, tree 20261110-voice-callleg: the local CallLeg adapter
+	// maps it to Connected). Observability only: nil = zero emissions,
+	// the join gate is unchanged and never waits on an observer.
+	OnClientJoin func(ccid string)
 	Logger       *slog.Logger
 }
 
@@ -406,7 +412,17 @@ func (s *runLocalSplice) inboundLoop(ctx context.Context) error {
 	// ctx cancel ends the wait as ctx.Err (not ErrNoClient).
 	joined := make(chan struct{})
 	var joinOnce sync.Once
-	recordFirst := func() { joinOnce.Do(func() { close(joined) }) }
+	recordFirst := func() {
+		joinOnce.Do(func() {
+			close(joined)
+			// Leaf 02 observability edge: the client's first byte IS
+			// the join — fire the optional observer after the gate
+			// channel closes (the splice itself never waits on it).
+			if s.deps.OnClientJoin != nil {
+				s.deps.OnClientJoin(s.ccid)
+			}
+		})
+	}
 
 	pump := make(chan localReadItem, 1)
 	go func() {

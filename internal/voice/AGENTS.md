@@ -355,6 +355,50 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   to their ctx deadline. Until that lands, treat an unbounded Done wait
   after a restart as expected and rely on the caller timeout.
 
+## CallLeg adapters (tree 20261110-voice-callleg, leaf 01)
+
+- The `CallLeg` interface (`callleg.go`) + three adapters
+  (`callleg_phone.go`, `callleg_local.go`, `callleg_signal.go`) are
+  OBSERVABILITY + facade only: every method is a call-through onto the
+  leg's existing public API (Dial/Open/End). `Manager.releaseOnce` +
+  the release hook remain the SINGLE terminal funnel (frozen 20261109)
+  — the adapters never add a second teardown path. `Events()` rides the
+  ADDITIVE terminal-observer lanes: `Manager.AddTerminalObserver`
+  (phone/local; notified after the hook, outside the mutex) and
+  `signalleg.Leg.AddTerminalObserver` (signal; claimTerminal-guarded
+  sites only). DO NOT steal the single-occupancy `SetReleaseHook` for
+  adapter events.
+- Events coverage (tree 20261110-voice-callleg leaf 02, shipped per
+  leg): terminals (Ended / Errored, mapped from the Manager Outcome:
+  OutcomeFailed -> Errored, everything else -> Ended) on all three
+  legs, plus NON-terminal kinds where the leg has an observable seam:
+  phone `Connected` rides the ADDITIVE answered-observer lane
+  (`Manager.AddAnsweredObserver`, notified after the single-occupancy
+  answerHook — the H1 timer-cancel seam is untouched); local
+  `Connected` rides the client-join edge (`LocalLeg.AddClientJoinObserver`,
+  fired once by the splice's first mic byte via `LocalSpliceDeps.OnClientJoin`
+  — observability only, the join gate never waits on an observer);
+  signal `Reconnecting` rides `Leg.AddTransitionObserver` (the same
+  lane carries CONNECTED, which the signal adapter deliberately does
+  NOT write to the bus: the frozen 00T parity gate reads Ended as the
+  FIRST signal-bus event after an injected CONNECTED). Ringing is
+  unmapped on every leg (no observable ring edge: Telnyx delivers no
+  outbound-ring webhook event, and a Place-time emit would pre-empt
+  the frozen gates' terminal reads). A non-terminal emit observed
+  AFTER the ccid's terminal latched is dropped by the bus — terminals
+  win the ordering.
+- Import-cycle rule (build binding): `internal/signalleg` imports
+  `internal/voice`, so `internal/voice` may NEVER import signalleg.
+  The signal adapter consumes the voice-defined `SignalLegSeam`
+  interface; `*signalleg.Leg` satisfies it structurally. Nothing in
+  voice names signalleg.
+- `Accept` on legs without a string-id inbound path is a NAMED refusal:
+  local returns `ErrNoInbound` (contract); phone/signal return
+  `errInboundAdoptionUnwired` until leaf 02 extends the seam.
+- Event delivery is best-effort non-blocking (buffered bus, drop on
+  full): a stalled or absent Events() reader can NEVER block call
+  teardown.
+
 ## Process lifecycle (C-lifecycle, leaf 13)
 
 - Child spawn WRAPS llm.RuntimeProcess (pid files, kill logic, orphan
