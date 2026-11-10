@@ -103,11 +103,12 @@ func (f *linkFakeLeg) Open(_ context.Context, employeeID, label string, _ ...str
 			return LocalCall{}, fmt.Errorf("fake listen in: %w", err)
 		}
 		f.listens = append(f.listens, inLn)
-		f.acceptIn[ccid] = make(chan net.Conn, 1)
+		inCh := make(chan net.Conn, 1)
+		f.acceptIn[ccid] = inCh
 		go func() {
 			c, aerr := inLn.Accept()
 			if aerr == nil {
-				f.acceptIn[ccid] <- c
+				inCh <- c
 			}
 		}()
 		outPath = filepath.Join(f.dir, "gone-"+ccid+".c.out")
@@ -126,18 +127,24 @@ func (f *linkFakeLeg) Open(_ context.Context, employeeID, label string, _ ...str
 		return LocalCall{}, fmt.Errorf("fake listen out: %w", err)
 	}
 	f.listens = append(f.listens, inLn, outLn)
-	f.acceptIn[ccid] = make(chan net.Conn, 1)
-	f.acceptOu[ccid] = make(chan net.Conn, 1)
+	inCh := make(chan net.Conn, 1)
+	outCh := make(chan net.Conn, 1)
+	f.acceptIn[ccid] = inCh
+	f.acceptOu[ccid] = outCh
+	// The goroutines close over the LOCAL channel refs: touching the
+	// f.acceptIn/f.acceptOu maps from the accept goroutine without the
+	// mutex is a map race (found under -race; the map access belongs
+	// to Open, the send to the goroutine).
 	go func() {
 		c, aerr := inLn.Accept()
 		if aerr == nil {
-			f.acceptIn[ccid] <- c
+			inCh <- c
 		}
 	}()
 	go func() {
 		c, aerr := outLn.Accept()
 		if aerr == nil {
-			f.acceptOu[ccid] <- c
+			outCh <- c
 		}
 	}()
 	return LocalCall{CallID: ccid, InPath: inPath, OutPath: outPath}, nil
@@ -494,6 +501,223 @@ func TestLinkStatusCountsTurns(t *testing.T) {
 	if res.A.AssistantTurns != 0 || len(res.A.Transcript) != 0 {
 		t.Fatalf("store failure leaked counts into status: %+v", res.A)
 	}
+}
+
+// linkRecorder is a tiny slog handler that keeps INFO+ records in memory
+// so a test can assert the pump telemetry lines.
+type linkRecorder struct {
+	mu      sync.Mutex
+	records []slog.Record
+}
+
+func (r *linkRecorder) Enabled(_ context.Context, level slog.Level) bool {
+	return level >= slog.LevelInfo
+}
+
+func (r *linkRecorder) Handle(_ context.Context, rec slog.Record) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.records = append(r.records, rec.Clone())
+	return nil
+}
+
+func (r *linkRecorder) WithAttrs(_ []slog.Attr) slog.Handler { return r }
+func (r *linkRecorder) WithGroup(_ string) slog.Handler      { return r }
+
+// lines snapshots "msg k=v" strings for assertions.
+func (r *linkRecorder) lines() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]string, 0, len(r.records))
+	for _, rec := range r.records {
+		line := rec.Message
+		rec.Attrs(func(a slog.Attr) bool {
+			line += " " + a.Key + "=" + a.Value.String()
+			return true
+		})
+		out = append(out, line)
+	}
+	return out
+}
+
+func (r *linkRecorder) contains(msgAndAttr string) bool {
+	msg, attr, _ := strings.Cut(msgAndAttr, "|")
+	for _, l := range r.lines() {
+		if strings.Contains(l, msg) && strings.Contains(l, attr) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestLinkRealLegEndToEndBothDirections is the link-72a04aebac963cdb
+// regression: TWO REAL LocalLeg calls (real splice, real AudioPairs, the
+// fixture's fake child dialing each pair after Open - exactly the live
+// ordering that half-killed side B), driven through the real
+// LinkManager.Open/dialUnix/pumps. Child-side PCM written on A's .out
+// must arrive at B's child .in (and vice versa), i.e. the WHOLE crossed
+// path: splice outbound (pump survives the pre-accept child-dial window)
+// -> pace -> client conn -> io.Copy pump -> other leg's client conn ->
+// splice inbound -> child .in. It also pins the pump telemetry: both
+// directions log their first byte while both legs are live.
+func TestLinkRealLegEndToEndBothDirections(t *testing.T) {
+	f := newLegFixture(t)
+	ctx := context.Background()
+
+	rec := &linkRecorder{}
+	m, err := NewLinkManager(LinkDeps{
+		Leg:         f.leg,
+		DialTimeout: 3 * time.Second,
+		RetainEnded: time.Hour,
+		Logger:      slog.New(rec),
+	})
+	if err != nil {
+		t.Fatalf("NewLinkManager: %v", err)
+	}
+	link, err := m.Open(ctx, "companion", "secretary")
+	if err != nil {
+		t.Fatalf("link Open: %v", err)
+	}
+
+	// Fake children dial their pairs AFTER Open (live ordering: the
+	// splice's outbound pump hits the pre-accept window first - the
+	// link-72a04aebac963cdb race) and CAPTURE everything written
+	// toward them on .in.
+	aChildOut := linkDialChildPairCapturing(t, link.ACCID)
+	bChildOut := linkDialChildPairCapturing(t, link.BCCID)
+
+	// A's child speaks (greeting-equivalent): 8 exact 640 B chunks.
+	sentA := linkWriteChunks(t, aChildOut, 8)
+	// B's child .in must receive them byte-exact - proves A's paced
+	// outbound survived the pre-accept window AND the a->b pump moved
+	// bytes into B's splice inbound.
+	gotB := linkWaitBytes(t, func() []byte { return localChildInBytes(link.BCCID) }, len(sentA))
+	if string(gotB) != string(sentA) {
+		t.Fatalf("a->b e2e corrupted: got %d B, want %d B exact", len(gotB), len(sentA))
+	}
+
+	// Mirror direction: B's child speaks, A's child .in receives.
+	sentB := linkWriteChunks(t, bChildOut, 8)
+	gotA := linkWaitBytes(t, func() []byte { return localChildInBytes(link.ACCID) }, len(sentB))
+	// A's capture may also hold... nothing else writes toward A's child;
+	// the ONLY source is the b->a pump. Check the trailing exact match.
+	if string(gotA[len(gotA)-len(sentB):]) != string(sentB) {
+		t.Fatalf("b->a e2e corrupted: got %d B tail, want %d B exact", len(gotA), len(sentB))
+	}
+
+	// Telemetry: BOTH pump directions demonstrated a first byte while
+	// both legs are live (the link-run self-explanation the post-mortem
+	// asked for).
+	if !rec.contains("voice: link pump first byte|dir=a->b") {
+		t.Errorf("missing a->b pump first-byte telemetry; lines=%v", rec.lines())
+	}
+	if !rec.contains("voice: link pump first byte|dir=b->a") {
+		t.Errorf("missing b->a pump first-byte telemetry; lines=%v", rec.lines())
+	}
+
+	if err := m.Close(link.ID, "test teardown"); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	// Pump end-lines carry the copied totals (bytes= > 0 on a healthy
+	// direction). Poll briefly: Close cancels the pumps but does not
+	// join them (same posture as the production teardown).
+	endedDeadline := time.Now().Add(3 * time.Second)
+	for {
+		ended := 0
+		for _, l := range rec.lines() {
+			if strings.Contains(l, "voice: link pump ended") && !strings.Contains(l, "with error") {
+				ended++
+			}
+		}
+		if ended >= 2 {
+			break
+		}
+		if time.Now().After(endedDeadline) {
+			t.Fatalf("pump end telemetry lines = %d, want 2; lines=%v", ended, rec.lines())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// linkDialChildPairCapturing dials the LOCAL LEG's child pair under
+// SocketDir like the fixture's dialPair, but captures everything the
+// splice writes toward the child on .in (the shared childInCapture map
+// used by localChildInBytes) instead of discarding it. Returns the
+// child-side .out conn — the injection point for that leg's speech.
+// This is what makes the crossed end-to-end assertion possible: bytes
+// OUT of one leg's child socket must land IN the other leg's child
+// socket after two splices + two bridge pumps.
+func linkDialChildPairCapturing(t *testing.T, ccid string) net.Conn {
+	t.Helper()
+	dir := SocketDir()
+	childInMu.Lock()
+	delete(childInCapture, ccid)
+	childInMu.Unlock()
+	var c1, c2 net.Conn
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		var e1, e2 error
+		if c1 == nil {
+			c1, e1 = net.Dial("unix", filepath.Join(dir, ccid+".in"))
+		}
+		if c2 == nil {
+			c2, e2 = net.Dial("unix", filepath.Join(dir, ccid+".out"))
+		}
+		if e1 == nil && e2 == nil {
+			go func() {
+				buf := make([]byte, 8192)
+				for {
+					n, err := c1.Read(buf)
+					if n > 0 {
+						childInMu.Lock()
+						childInCapture[ccid] = append(childInCapture[ccid], buf[:n]...)
+						childInMu.Unlock()
+					}
+					if err != nil {
+						return
+					}
+				}
+			}()
+			t.Cleanup(func() { _ = c1.Close(); _ = c2.Close() })
+			return c2
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("could not dial child pair for %s", ccid)
+	return nil
+}
+
+// linkWriteChunks writes n deterministic 640 B chunks and returns the
+// exact bytes sent.
+func linkWriteChunks(t *testing.T, w io.Writer, n int) []byte {
+	t.Helper()
+	var payload []byte
+	for i := 0; i < n; i++ {
+		chunk := make([]byte, 640)
+		for j := range chunk {
+			chunk[j] = byte((i*640 + j) % 251)
+		}
+		if _, err := w.Write(chunk); err != nil {
+			t.Fatalf("write child chunk: %v", err)
+		}
+		payload = append(payload, chunk...)
+	}
+	return payload
+}
+
+// linkWaitBytes polls snap until it holds >= want bytes (bounded).
+func linkWaitBytes(t *testing.T, snap func() []byte, want int) []byte {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		got := snap()
+		if len(got) >= want {
+			return got
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %d bytes downstream (have %d)", want, len(snap()))
+	return nil
 }
 
 func TestLinkConcurrentLabelsAreDistinct(t *testing.T) {

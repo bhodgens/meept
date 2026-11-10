@@ -10,8 +10,10 @@ package voice
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"net"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"testing"
@@ -336,6 +338,152 @@ func TestLocalSpliceJoinTimeout(t *testing.T) {
 	}
 	if elapsed > 5*time.Second {
 		t.Errorf("join took %v, want the configured 150ms window (not the default 10s)", elapsed)
+	}
+}
+
+// T2b (link-72a04aebac963cdb root-cause repro): the splice starts while
+// the child has NOT yet dialed the pair's .out socket — the exact live
+// ordering inside LocalLeg.Open (splice goroutine vs the child's
+// setup-triggered dial). The outbound pump must treat the pre-accept
+// "child not connected" shape as a WAIT (the phone splice polls it at
+// splice.go:906), not a terminal error. Before the fix, whichever leg
+// lost the dial race had its outboundLoop return at +0 ms (cadence
+// summary logged with pump_chunks=0 first_child_pcm_set=false while the
+// call stayed "alive" for 90 s): the client-side pacer died, the OTHER
+// leg never received a first mic byte, and its join grace reaped it.
+func TestLocalSpliceLateChildDialCarries(t *testing.T) {
+	dir := shortDir(t)
+	const ccid = "ls-late-1"
+	p, err := NewAudioPair(dir, ccid)
+	if err != nil {
+		t.Fatalf("NewAudioPair: %v", err)
+	}
+	defer func() { _ = p.Close() }()
+
+	micSide, daemonSide := net.Pipe()
+	defer func() { _ = micSide.Close(); _ = daemonSide.Close() }()
+
+	deps := LocalSpliceDeps{Audio: p, Client: daemonSide, Text: &textSink{}, CancelDraft: func(string) {}, Logger: localDiscardLogger()}
+	cancel, done := startLocalSplice(t, ccid, LocalSpliceConfig{}, deps)
+	defer stopLocalSplice(t, cancel, done)
+
+	// Join the client side (inbound gate) — the dial RACE we are testing
+	// is the outbound child read, so the client must be live to prove the
+	// splice itself stays up.
+	if _, err := micSide.Write(make([]byte, 640)); err != nil {
+		t.Fatalf("mic write: %v", err)
+	}
+
+	// Let the outbound pump hit the pre-accept window several times over
+	// (a terminal 'child read' fires within microseconds of the splice
+	// goroutine starting; 200 ms is generous).
+	time.Sleep(200 * time.Millisecond)
+
+	// NOW the child dials, like the live child does after answering setup.
+	childIn, err := net.Dial("unix", filepath.Join(dir, ccid+".in"))
+	if err != nil {
+		t.Fatalf("dial child .in: %v", err)
+	}
+	defer func() { _ = childIn.Close() }()
+	childOut, err := net.Dial("unix", filepath.Join(dir, ccid+".out"))
+	if err != nil {
+		t.Fatalf("dial child .out: %v", err)
+	}
+	defer func() { _ = childOut.Close() }()
+	// The pair's Accept goroutines claim the first conn per socket; give
+	// them a settle window (same shape as dialAudioPair).
+	time.Sleep(100 * time.Millisecond)
+
+	// The splice must still be running — the pre-accept window is NOT a
+	// call end.
+	select {
+	case err := <-done:
+		t.Fatalf("splice ended on the pre-accept child read (the link-72a04aebac963cdb half-death): err=%v", err)
+	default:
+	}
+
+	// Feed 5 child chunks; they must reach the client paced.
+	payload := make([]byte, 0, 5*640)
+	for i := range 5 {
+		chunk := make([]byte, 640)
+		for j := range chunk {
+			chunk[j] = byte((i*640 + j) % 251)
+		}
+		if _, err := childOut.Write(chunk); err != nil {
+			t.Fatalf("child .out write: %v", err)
+		}
+		payload = append(payload, chunk...)
+	}
+
+	got := make([]byte, len(payload))
+	_ = micSide.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := io.ReadFull(micSide, got); err != nil {
+		t.Fatalf("paced bytes never reached the client after the late child dial (outbound loop was dead): %v", err)
+	}
+	for i := range got {
+		if got[i] != payload[i] {
+			t.Fatalf("client byte %d: got %d want %d", i, got[i], payload[i])
+		}
+	}
+}
+
+// T2c (half-death observability regression): once the child HAS dialed,
+// a terminal child-read failure (child conn breaks mid-call) must end the
+// WHOLE splice promptly — not leave a zombie with a dead outbound while
+// the inbound blocks forever on the alive client (link-72a04aebac963cdb:
+// B's splice never returned; local.go's ERROR branch never logged, so the
+// run post-mortem had to infer the death from the +0 ms cadence summary).
+func TestLocalSpliceOutboundFailureEndsSplice(t *testing.T) {
+	dir := shortDir(t)
+	const ccid = "ls-outfail-1"
+	p, err := NewAudioPair(dir, ccid)
+	if err != nil {
+		t.Fatalf("NewAudioPair: %v", err)
+	}
+	defer func() { _ = p.Close() }()
+
+	// Child dialed BEFORE the splice starts (isolates this test from the
+	// pre-accept race that T2b pins).
+	childIn, err := net.Dial("unix", filepath.Join(dir, ccid+".in"))
+	if err != nil {
+		t.Fatalf("dial child .in: %v", err)
+	}
+	defer func() { _ = childIn.Close() }()
+	childOut, err := net.Dial("unix", filepath.Join(dir, ccid+".out"))
+	if err != nil {
+		t.Fatalf("dial child .out: %v", err)
+	}
+	time.Sleep(100 * time.Millisecond) // let the pair's Accept goroutines claim
+
+	micSide, daemonSide := net.Pipe()
+	defer func() { _ = micSide.Close(); _ = daemonSide.Close() }()
+
+	deps := LocalSpliceDeps{Audio: p, Client: daemonSide, Text: &textSink{}, CancelDraft: func(string) {}, Logger: localDiscardLogger()}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- RunLocalSplice(context.Background(), ccid, LocalSpliceConfig{}, deps)
+	}()
+
+	// Join the client side, then break the child's .out: the accepted
+	// daemon-side read sees EOF and the outbound pump dies terminally.
+	if _, err := micSide.Write(make([]byte, 640)); err != nil {
+		t.Fatalf("mic write: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if err := childOut.Close(); err != nil {
+		t.Fatalf("close child .out: %v", err)
+	}
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("RunLocalSplice returned nil after a terminal child EOF, want the child-read error")
+		}
+		if !errors.Is(err, io.EOF) {
+			t.Fatalf("RunLocalSplice err = %v, want a child-read failure wrapping io.EOF", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("splice stayed half-dead 5 s after the child .out broke (terminal outbound error must end the splice)")
 	}
 }
 

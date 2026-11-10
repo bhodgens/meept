@@ -219,16 +219,33 @@ func RunLocalSplice(ctx context.Context, ccid string, cfg LocalSpliceConfig, dep
 	go func() { inboundDone <- s.inboundLoop(loopCtx) }()
 	go func() { outboundDone <- s.outboundLoop(loopCtx) }()
 
-	errIn := <-inboundDone
-	if !errors.Is(errIn, ErrMicSpeechEnded) {
-		// A terminal inbound error stops the peer loop now; a clean
-		// end-of-speech does NOT - the outbound side must stay live so
-		// the reply (whisper flush -> employee turn -> TTS) still
-		// reaches the client after the mic stream closed (file mode
-		// half-closes at end of utterance; live mode never EOFs).
+	// Whichever loop ends first must stop the peer NOW. The old shape
+	// read inboundDone FIRST and blocked there: an outbound terminal
+	// (a real child-read failure) left the loop half-dead — inbound
+	// parked on an alive client forever, RunLocalSplice never
+	// returned, local.go's teardown never fired, and the link ran 90 s
+	// with one side mute (link-72a04aebac963cdb post-mortem: B logged
+	// no 'splice ended err=' line because the splice never returned).
+	var errIn, errOut error
+	select {
+	case errIn = <-inboundDone:
+		if !errors.Is(errIn, ErrMicSpeechEnded) {
+			// A terminal inbound error stops the peer loop now; a
+			// clean end-of-speech does NOT - the outbound side must
+			// stay live so the reply (whisper flush -> employee turn
+			// -> TTS) still reaches the client after the mic stream
+			// closed (file mode half-closes at end of utterance;
+			// live mode never EOFs).
+			loopCancel()
+		}
+		errOut = <-outboundDone
+	case errOut = <-outboundDone:
+		// Outbound terminal (child socket broke / leg closed): the
+		// reply path is dead, so the whole call ends - tear the
+		// inbound down with it.
 		loopCancel()
+		errIn = <-inboundDone
 	}
-	errOut := <-outboundDone
 
 	// Caller cancellation wins, mirroring RunSplice's contract.
 	if ctx.Err() != nil && (errors.Is(errIn, context.Canceled) || errors.Is(errOut, context.Canceled)) {
@@ -377,6 +394,27 @@ func (s *runLocalSplice) outboundLoop(ctx context.Context) error {
 		for {
 			rb := make([]byte, s.chunkBytes)
 			n, err := s.deps.Audio.ReadFromChild(rb)
+			if n == 0 && err != nil && isNotConnected(err) {
+				// Pre-accept: the child has not dialed .out yet.
+				// LocalLeg.Open starts the splice the instant the
+				// pair exists, while the child dials only after it
+				// builds its pipeline and answers setup — seconds of
+				// head start for the pump's first read. This is a
+				// WAIT, never a call end (the phone splice polls the
+				// same condition at splice.go's read pump). Treating
+				// it as terminal was the link-72a04aebac963cdb
+				// half-death: the leg that lost the race had its
+				// outboundLoop return at +0 ms (cadence summary with
+				// pump_chunks=0 first_child_pcm_set=false), its
+				// speech never reached the bridge, and the OTHER
+				// leg's client never saw a first byte.
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(5 * time.Millisecond):
+				}
+				continue
+			}
 			if n > 0 {
 				// Jitter instrumentation: first child PCM arrival +
 				// chunk count (the daemon-side middle the chop hunt
