@@ -373,20 +373,20 @@ rebase re-check each).
 
 | Child | Status | Commit | Notes |
 |---|---|---|---|
-| 01-store/00T | PENDING | | |
-| 01-store/01 | PENDING | | |
-| 01-store/02 | PENDING | | |
-| 01-store/03 | PENDING | | |
-| 02/00T | PENDING | | |
-| 02/01 | PENDING | | |
-| 02/02 | PENDING | | |
-| 02/03 | PENDING | | |
-| 03/00T | PENDING | | |
-| 03/01 | PENDING | | |
-| 03/02 | PENDING | | |
-| 03/03 | PENDING | | |
-| 04/01 | PENDING | | |
-| 04/02 | PENDING | | |
+| 01-store/00T | COMPLETE | 5cc91064 | |
+| 01-store/01 | COMPLETE | f3d5262f | |
+| 01-store/02 | COMPLETE | a978bafd | |
+| 01-store/03 | IN_PROGRESS | | |
+| 02/00T | COMPLETE | a6e458a0 | |
+| 02/01 | COMPLETE | 3ba45197 | |
+| 02/02 | COMPLETE | efb4a9b9 | |
+| 02/03 | COMPLETE | bd0ef770 | |
+| 03/00T | COMPLETE | a6e458a0 | |
+| 03/01 | COMPLETE | 77b87bcc | |
+| 03/02 | COMPLETE | bd0ef770 | |
+| 03/03 | COMPLETE | c070899c | |
+| 04/01 | COMPLETE | bb1f4343 | |
+| 04/02 | COMPLETE | 58f6d30c | |
 
 ## Integration Test Plan
 

@@ -304,8 +304,8 @@ work (everything ledger is best-effort, logged, AFTER release).
 
 | Child | Status | Commit | Notes |
 |---|---|---|---|
-| 04/01 | PENDING | | |
-| 04/02 | PENDING | | |
+| 04/01 | COMPLETE | bb1f4343 | |
+| 04/02 | COMPLETE | 58f6d30c | |
 
 ## Integration Test Plan
 

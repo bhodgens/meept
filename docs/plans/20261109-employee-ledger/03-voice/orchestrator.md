@@ -312,10 +312,10 @@ work (everything ledger is best-effort, logged, AFTER release).
 
 | Child | Status | Commit | Notes |
 |---|---|---|---|
-| 00T-voice | PENDING | | |
-| 01-brief | PENDING | | |
-| 02-commitments | PENDING | | |
-| 03-daybrief-consumer | PENDING | | |
+| 00T-voice | COMPLETE | a6e458a0 | |
+| 01-brief | COMPLETE | 77b87bcc | |
+| 02-commitments | COMPLETE | bd0ef770 | |
+| 03-daybrief-consumer | COMPLETE | c070899c | |
 
 ## Integration Test Plan
 

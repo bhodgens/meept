@@ -126,6 +126,7 @@ type Config struct {
 	Signal              SignalConfig              `json:"signal"               toml:"signal"`
 	Delegation          DelegationConfig          `json:"delegation,omitzero"  toml:"delegation"`
 	Contact             ContactConfig             `json:"contact,omitzero"     toml:"contact"`
+	Ledger              LedgerConfig              `json:"ledger"               toml:"ledger"`
 }
 
 // GitHubConfig configures the GitHub PR/CI tool set ([github]). Disabled by
@@ -5085,6 +5086,10 @@ func DefaultConfig() *Config {
 			DefaultChannels: []string{"telnyx_voice", "signal_voice", "signal_msg", "telnyx_sms"},
 			HopDelayMS:      5000,
 		},
+		Ledger: LedgerConfig{
+			AutoRepair:    false,
+			IntervalHours: DefaultLedgerIntervalHours,
+		},
 		ReflectionCollector: ReflectionCollectorConfig{
 			Enabled:              true,
 			AutoQueue:            true,
@@ -5532,6 +5537,42 @@ type ContactConfig struct {
 	// HopDelayMS is the wait before each fallback channel attempt
 	// (the chain's pacing; 0 means no inter-channel delay).
 	HopDelayMS int `json:"hop_delay_ms" toml:"hop_delay_ms"`
+}
+
+// LedgerConfig configures the employee ledger ops subsystem ([ledger],
+// plan 20261109-employee-ledger leaf 04-ops/01). It gates the scheduled
+// integrity pass over the ledger store (internal/daemon/ledger_integrity.go):
+// the job runs ledger.VerifyState on IntervalHours and, only when
+// AutoRepair is true, follows a divergent report with RepairState.
+//
+//gendoc:section ledger
+//gendoc:desc Employee ledger integrity job: auto_repair opt-in and the verify interval in hours.
+//gendoc:example [ledger] auto_repair = true, interval_hours = 24
+type LedgerConfig struct {
+	// AutoRepair opts in to automatic RepairState when the integrity
+	// pass finds divergence. Default FALSE (opt-in per
+	// docs/agents/opt-in-defaults.md): a divergent report logs ERROR
+	// and leaves the store untouched unless this is explicitly true.
+	AutoRepair bool `json:"auto_repair" toml:"auto_repair"`
+	// IntervalHours is how often the ledger-integrity scheduler job
+	// fires. Default 168 (weekly) — set in DefaultConfig and clamped
+	// at the load boundary by NormalizeLedgerDefaults. A non-positive
+	// value falls back to the default.
+	IntervalHours int `json:"interval_hours" toml:"interval_hours"`
+}
+
+// DefaultLedgerIntervalHours is the [ledger] verify interval default
+// (168h = weekly; plan 20261109-employee-ledger leaf 04-ops/01).
+const DefaultLedgerIntervalHours = 168
+
+// NormalizeLedgerDefaults clamps invalid [ledger] values to defaults at
+// the load boundary so every consumer sees final values: a non-positive
+// interval_hours falls back to DefaultLedgerIntervalHours. AutoRepair's
+// zero value (false) is the shipped default — no clamping.
+func NormalizeLedgerDefaults(c *LedgerConfig) {
+	if c.IntervalHours <= 0 {
+		c.IntervalHours = DefaultLedgerIntervalHours
+	}
 }
 
 // LocalConfig holds the local voice leg sub-block (voice.local, local-leg

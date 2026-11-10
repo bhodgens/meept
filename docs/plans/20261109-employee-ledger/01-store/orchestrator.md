@@ -305,10 +305,10 @@ skip the chain to keep it a security trail (master C decision).
 
 | Child | Status | Commit | Notes |
 |---|---|---|---|
-| 00T-store-tests | PENDING | | |
-| 01-schema | PENDING | | |
-| 02-append-transitions | PENDING | | |
-| 03-query-verify-tail | PENDING | | |
+| 00T-store-tests | COMPLETE | 5cc91064 | 26 green |
+| 01-schema | COMPLETE | f3d5262f | §1-§2 green |
+| 02-append-transitions | COMPLETE | a978bafd | 25/26 green; GetState early |
+| 03-query-verify-tail | COMPLETE | 3782b780 | -race clean |
 
 ## Integration Test Plan
 

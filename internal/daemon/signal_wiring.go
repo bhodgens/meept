@@ -156,16 +156,17 @@ func WireSignalLeg(ctx context.Context, cfg config.SignalConfig, deps WireVoiceD
 		audit = auditAuditSeam{w: auditWriterAdapter{store: deps.Audit}}
 	}
 	leg, err := signalleg.New(signalleg.Deps{
-		Client:     client,
-		Registry:   registry,
-		Manager:    manager,
-		TextServer: textServer,
-		Binding:    binding,
-		Allowlist:  allow,
-		Effects:    fx,
-		Audit:      audit,
-		EmployeeID: deps.Config.Voice.DefaultEmployee,
-		Logger:     logger.With("component", "signalleg"),
+		Client:          client,
+		Registry:        registry,
+		Manager:         manager,
+		TextServer:      textServer,
+		Binding:         binding,
+		Allowlist:       allow,
+		Effects:         fx,
+		Audit:           audit,
+		EmployeeID:      deps.Config.Voice.DefaultEmployee,
+		DayBriefBuilder: deps.DayBriefBuilder,
+		Logger:          logger.With("component", "signalleg"),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("signal wiring: leg construction: %w", err)

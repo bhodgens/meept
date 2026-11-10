@@ -132,6 +132,13 @@ type Deps struct {
 	// consulted, EmployeeID first - the field name the wiring pins is
 	// whichever it populates).
 	DefaultEmployeeID string
+	// DayBriefBuilder (leaf 03-voice/03) populates the OnCallStart brief
+	// for connected calls - the SAME daemon-built day-brief closure the
+	// local/phone legs use (open-commitments seam included). Nil keeps
+	// the pre-leaf empty-brief posture (no ledger store; byte-identical
+	// OnCallStart call). A build failure is fail-soft: the call binds
+	// with an empty brief, never blocks the call.
+	DayBriefBuilder func(ctx context.Context, employeeID, number string) (voice.DayBrief, error)
 	// MsgPerMinute is [signal].msg_per_minute (the signal_msg throttle;
 	// 0 = msgchannel's default clamp of 3/min).
 	MsgPerMinute int
@@ -319,7 +326,20 @@ func (l *Leg) bindCall(st *callState) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if _, err := vb.OnCallStart(ctx, st.ccid, st.target, st.employee, st.direction, voice.DayBrief{}); err != nil {
+	// Day brief (leaf 03-voice/03): populated through the wiring's
+	// shared builder when armed; nil seam = the pre-leaf empty brief.
+	// A build failure logs and binds with the empty brief (fail-soft,
+	// the local-leg posture) — the call never blocks on brief health.
+	brief := voice.DayBrief{}
+	if l.deps.DayBriefBuilder != nil {
+		if b, err := l.deps.DayBriefBuilder(ctx, st.employee, st.target); err != nil {
+			l.log.Warn("signalleg: day brief build failed (continuing with an empty brief)",
+				"ccid", st.ccid, "err", err)
+		} else {
+			brief = b
+		}
+	}
+	if _, err := vb.OnCallStart(ctx, st.ccid, st.target, st.employee, st.direction, brief); err != nil {
 		l.log.Warn("signalleg: binding OnCallStart failed (call continues unbound)",
 			"ccid", st.ccid, "err", err)
 	}

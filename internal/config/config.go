@@ -103,6 +103,11 @@ func finalizeLoadedConfig(cfg *Config) (*Config, error) {
 	// normalization so every consumer sees normalized values.
 	NormalizeFailurePolicyDefaults(&cfg.LLM.FailurePolicy)
 
+	// Clamp invalid [ledger] values to defaults (leaf 04-ops/01:
+	// non-positive interval_hours -> 168). Load-boundary normalization
+	// so the integrity-job wiring sees final values.
+	NormalizeLedgerDefaults(&cfg.Ledger)
+
 	// Clamp llm.tiers to defaults (llm-serving-tiers leaf 01, Contract
 	// C1: enabled + unset max_depth -> DefaultTierPolicyMaxDepth; a
 	// disabled policy stays inert with MaxDepth 0). Load-boundary
@@ -253,6 +258,10 @@ func LoadJSON5Config(path string) (*Config, error) {
 	// zero/negative durations, non-positive ShortRetries). Load-boundary
 	// normalization so every consumer sees normalized values.
 	NormalizeFailurePolicyDefaults(&cfg.LLM.FailurePolicy)
+
+	// Clamp invalid [ledger] values to defaults (leaf 04-ops/01).
+	// Same load-boundary rationale as finalizeLoadedConfig above.
+	NormalizeLedgerDefaults(&cfg.Ledger)
 
 	// Clamp llm.tiers to defaults (llm-serving-tiers leaf 01, Contract
 	// C1). Same load-boundary rationale as finalizeLoadedConfig above.

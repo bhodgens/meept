@@ -50,6 +50,7 @@ import (
 	"github.com/caimlas/meept/internal/intake"
 	"github.com/caimlas/meept/internal/jevgate"
 	"github.com/caimlas/meept/internal/learning"
+	"github.com/caimlas/meept/internal/ledger"
 	"github.com/caimlas/meept/internal/lint"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory"
@@ -230,6 +231,13 @@ type Components struct {
 	// as ParkStore). Owned here so stopComponents closes the handle after
 	// the tools and reconciler have stopped.
 	EffectsLedger effects.Ledger
+
+	// EmployeeLedger is the employee ledger store (leaf 03-voice/01,
+	// buildLedger over <data_dir>/ledger/ledger.db). Nil when the store
+	// failed to open -- the pinned degrade posture: the per-call brief
+	// no-ops, ledger tools stay unregistered, the daemon boots unchanged.
+	// Owned here so stopComponents closes the handle.
+	EmployeeLedger *ledger.Store
 
 	// ToolGate is the daemon-side ExecGate wired into ToolRegistry via
 	// SetGate (wave A leaf 02, plan docs/plans/20261031-tool-provider-seam).
@@ -5303,6 +5311,25 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// typed-nil guarded inside wireDSHConvergence.
 	wireDSHConvergence(c, cfg, msgBus, logger)
 
+	// Employee ledger (leaf 03-voice/01): ONE store at
+	// <data_dir>/ledger/ledger.db built via buildLedger (pinned degrade
+	// posture: open failure -> WARN + nil, everything downstream runs
+	// unchanged — the per-call brief no-ops off-by-absence). Ordered
+	// after the employee framework so activityChainDB(c) resolves the
+	// shared audit-chain handle for the hook composition (04-02 folds
+	// the audit row into it). When the store is live, register the
+	// ledger tool surface here — the site that has the ToolRegistry
+	// handle (03-voice/01 task 1: "return the store and register at the
+	// site that has it").
+	c.EmployeeLedger = buildLedger(cfg, msgBus, ledgerAuditChain(c, logger), logger.With("component", "ledger-wiring"))
+	if c.EmployeeLedger != nil && c.ToolRegistry != nil {
+		builtin.RegisterLedgerTools(c.ToolRegistry, c.EmployeeLedger, logger.With("component", "ledger-tools"))
+	}
+	// Ledger integrity job (leaf 04-ops/01): scheduled VerifyState pass
+	// over [ledger] (auto_repair default false, interval_hours default
+	// 168). Guarded: nil store (ledger disabled) -> no job registered.
+	c.registerLedgerIntegrityJob(cfg, logger.With("component", "ledger-integrity-wiring"))
+
 	// Voice sidecar ([voice] block, voice-sidecar leaf 14): the whole-
 	// daemon wiring - call manager, registry, dialer, talk loops,
 	// supervisor, child proc, text server, employee binding, and the two
@@ -5330,6 +5357,13 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			Employees: c.EmployeeManager,
 			Logger:    logger,
 		}
+		// Ledger brief seams (leaf 03-voice/01): the ONE store built
+		// above plus the prompt-in/text-out adapter over the daemon's
+		// default LLM client (no new HTTP client; the leaf pins the
+		// fallback). Nil store or nil client -> the per-call brief no-ops
+		// off-by-absence at release.
+		vdeps.LedgerStore = c.EmployeeLedger
+		vdeps.BriefLLM = ledgerBriefLLMFunc(c.LLMClient)
 		// Audit chain: the employee wiring hands the Manager the chain DB
 		// handle; voice dial audit rows append through a store opened over
 		// the same pool (shared-DB convention, OpenStoreFromDB's Close is
@@ -7113,6 +7147,21 @@ func (c *Components) stopComponents(ctx context.Context) error {
 		}
 		c.EffectsLedger = nil
 		c.EffectsReconciler = nil
+	}
+
+	// Close the employee ledger AFTER the voice stack and tools have
+	// stopped (same ordering rationale as the effects ledger; leaf
+	// 03-voice/01 owns the handle on Components). Rows stay on disk.
+	if c.EmployeeLedger != nil {
+		if err := c.EmployeeLedger.Close(); err != nil {
+			c.Logger.Error("Failed to close employee ledger", "error", err)
+			if lastErr == nil {
+				lastErr = err
+			}
+		} else {
+			c.Logger.Info("Employee ledger closed")
+		}
+		c.EmployeeLedger = nil
 	}
 
 	// Close the pii swap store AFTER the loops have stopped ([security.pii],

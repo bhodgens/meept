@@ -64,6 +64,25 @@ type GoalSource interface {
 	ActiveGoalTitles(ctx context.Context, employeeID string) ([]string, error)
 }
 
+// CommitmentBrief is one open commitment from the employee ledger
+// (leaf 03-voice/03, frozen shape). LastAt is the RFC3339 timestamp of
+// the last state write, already formatted by the daemon-side source
+// (voice never imports internal/ledger or time-of-state handling).
+type CommitmentBrief struct {
+	Subject string
+	Summary string
+	Status  string
+	LastAt  string
+}
+
+// OpenCommitmentsSource lists the employee's open commitments (ledger
+// state rows not done/cancelled). The seam is implemented daemon-side
+// over ledger.Store.QueryOpen (internal/daemon ledgerBriefSource); the
+// dependency direction is daemon -> voice, never voice -> internal/ledger.
+type OpenCommitmentsSource interface {
+	OpenCommitments(ctx context.Context, employeeID string) ([]CommitmentBrief, error)
+}
+
 // Deps carries the day brief's sources. A nil source (including a typed
 // nil) omits its section, never an error.
 type Deps struct {
@@ -71,6 +90,11 @@ type Deps struct {
 	Transcripts CallTranscriptSource
 	Memory      MemorySource
 	Goals       GoalSource
+	// Commitments (leaf 03-voice/03) lists open ledger commitments. When
+	// the seam is non-nil AND returns rows, PromptBlock replaces the raw
+	// prior-transcript section (which embeds phone numbers) with the
+	// open-commitment lines. Nil keeps the transcript section as-is.
+	Commitments OpenCommitmentsSource
 }
 
 // DayBrief is one call's today-so-far context (C7).
@@ -79,6 +103,10 @@ type DayBrief struct {
 	PriorCallTranscripts []CallTranscript
 	DurableMemory        string
 	ActiveGoals          []string
+	// Open carries ledger commitments that replace the raw
+	// prior-transcript section in PromptBlock when non-empty
+	// (leaf 03-voice/03). Empty/nil keeps the pre-edit rendering.
+	Open []CommitmentBrief
 }
 
 // AggregatorSource adapts the real *activity.Aggregator (3-value Query
@@ -167,6 +195,20 @@ func Build(ctx context.Context, deps Deps, employeeID, number string, now time.T
 		}
 	}
 
+	// Open-commitments seam (leaf 03-voice/03): rows here REPLACE the raw
+	// prior-transcript section in PromptBlock (the transcripts embed phone
+	// numbers; the ledger summaries are masked at write since 03-02). A
+	// seam error drops only this section — transcript posture preserved,
+	// same per-source failure rule as every other section.
+	if !isNilSource(deps.Commitments) {
+		rows, err := deps.Commitments.OpenCommitments(ctx, employeeID)
+		if err != nil {
+			errs = append(errs, err)
+		} else {
+			brief.Open = rows
+		}
+	}
+
 	return brief, errors.Join(errs...)
 }
 
@@ -200,11 +242,23 @@ func (b DayBrief) PromptBlock() string {
 	}
 	writeSection("[activity today]", activityLines)
 
-	callLines := make([]string, 0, len(b.PriorCallTranscripts))
-	for _, c := range b.PriorCallTranscripts {
-		callLines = append(callLines, c.At.Format("15:04")+" "+c.Number+": "+c.Summary)
+	// Prior calls vs open commitments (leaf 03-voice/03): when the
+	// ledger seam returned rows, they REPLACE the raw transcript section
+	// — transcripts embed phone numbers, the block must never render one.
+	// Empty/nil Open keeps the byte-identical pre-edit rendering.
+	if len(b.Open) > 0 {
+		openLines := make([]string, 0, len(b.Open))
+		for _, c := range b.Open {
+			openLines = append(openLines, "[open] "+c.Subject+" — "+c.Summary+" ("+c.Status+")")
+		}
+		writeSection("[open commitments]", openLines)
+	} else {
+		callLines := make([]string, 0, len(b.PriorCallTranscripts))
+		for _, c := range b.PriorCallTranscripts {
+			callLines = append(callLines, c.At.Format("15:04")+" "+c.Number+": "+c.Summary)
+		}
+		writeSection("[prior calls today]", callLines)
 	}
-	writeSection("[prior calls today]", callLines)
 
 	if b.DurableMemory != "" {
 		mem := strings.Split(strings.TrimRight(b.DurableMemory, "\n"), "\n")

@@ -29,6 +29,7 @@ import (
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/employee"
+	"github.com/caimlas/meept/internal/ledger"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/voice"
 )
@@ -54,6 +55,18 @@ type VoiceEmployeeWiring struct {
 	bus    *bus.MessageBus
 	logger *slog.Logger
 
+	// Ledger brief seams (leaf 03-voice/01): nil ledgerStore = the
+	// per-call brief no-ops (feature off by absence, no config knob in
+	// v1); nil llm has the same effect. Set via VoiceEmployeeDeps.
+	ledgerStore *ledger.Store
+	llm         func(prompt string) (string, error)
+
+	// dayBriefFn (leaf 03-voice/03): the wiring-built day-brief closure
+	// (open-commitments seam included). Only set when the ledger store
+	// is present; holdPhoneCall builds through it and passes an empty
+	// DayBrief when nil (nil-store posture unchanged).
+	dayBriefFn func(ctx context.Context, employeeID, number string) (voice.DayBrief, error)
+
 	holdMu    sync.Mutex
 	holds     map[string]*sync.Mutex // employee_id -> serialization mutex
 	heldCalls map[string]holdEntry   // call_control_id -> hold routing entry
@@ -77,6 +90,17 @@ type VoiceEmployeeDeps struct {
 
 	// CallStorePath is $MEEPT_HOME/voice/calls.db (config.MeeptPath).
 	CallStorePath string
+
+	// LedgerStore is the employee ledger store (leaf 03-voice/01, built
+	// by buildLedger). Nil -> the per-call brief at release is off
+	// (feature off by absence; no config knob in v1).
+	LedgerStore *ledger.Store
+
+	// BriefLLM is the prompt-in/text-out LLM seam the per-call brief
+	// uses — production adapters are built over the daemon's existing
+	// llm client by ledger_wiring.go (no new HTTP client). Nil with a
+	// non-nil LedgerStore still no-ops the brief.
+	BriefLLM func(prompt string) (string, error)
 }
 
 // sessionStoreAdapter adapts session.Store onto voice.SessionStore via
@@ -362,12 +386,14 @@ func WireVoiceEmployee(deps VoiceEmployeeDeps) (*VoiceEmployeeWiring, error) {
 	}
 
 	w := &VoiceEmployeeWiring{
-		Binding:   binding,
-		store:     store,
-		bus:       deps.Bus,
-		logger:    logger,
-		holds:     make(map[string]*sync.Mutex),
-		heldCalls: make(map[string]holdEntry),
+		Binding:     binding,
+		store:       store,
+		bus:         deps.Bus,
+		logger:      logger,
+		ledgerStore: deps.LedgerStore,
+		llm:         deps.BriefLLM,
+		holds:       make(map[string]*sync.Mutex),
+		heldCalls:   make(map[string]holdEntry),
 	}
 	return w, nil
 }
@@ -449,6 +475,12 @@ func (w *VoiceEmployeeWiring) ReleaseHook(ccid string, outcome voice.Outcome) {
 		}
 		w.ReleaseForCall(ccid)
 		w.logger.Info("voice call released", "ccid", ccid, "outcome", string(outcome))
+		// Best-effort per-call ledger brief (leaf 03-voice/01): runs
+		// AFTER the release + log line, inside the same once-guard, and
+		// NEVER fails or delays the teardown — every failure is WARN/INFO
+		// only, mirroring the notifyCallRelay contract. nil store/llm =
+		// complete no-op (feature off by absence).
+		w.runCallBrief(ctx, ccid)
 	}
 	// Best-effort and last: the relay must never delay or fail the
 	// teardown above (the notification contract, pinned by the unit test).
