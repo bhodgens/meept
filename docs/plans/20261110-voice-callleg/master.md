@@ -69,8 +69,8 @@ same-commit doc updates.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-gate-tests | TESTS_IN_PROGRESS | 0 | dispatched (internal/voice gate file; frozen-gate zero-diff guards in brief) |
-| 01-interface-adapters | PENDING | 0 | |
+| 00T-gate-tests | TESTS_VALIDATED | 1 | committed b8cd81f6; 4 voice + 3 signal arms (cycle-forced: signalleg imports voice); parent-verified RED=symbols only, frozen gates zero-diff |
+| 01-interface-adapters | IN_PROGRESS | 0 | dispatched (event mechanism constrained: must NOT steal single-occupancy release hook) |
 | 02-event-unification | PENDING | 0 | |
 | 03-caller-migration | PENDING | 0 | |
 
