@@ -130,6 +130,15 @@ type VoiceWiring struct {
 	// probe and Stop cleanup).
 	textSocketPath string
 
+	// displayLookup is the contact-display boundary resolver seam
+	// (contact-display tree leaf 01): resolveDisplay keys caller numbers
+	// through it. nil (the construction default) takes the unknown-caller
+	// path — the resolver is nil-safe and never panics. Wiring sites
+	// (publish + status fill) land with leaf 02's surface swaps; the
+	// sqliteDisplayLookup adapter in caller_display.go satisfies this
+	// field until the caller-authz tree merges (O5).
+	displayLookup CallerDisplayLookup
+
 	// cfg + logger are construction-time values.
 	cfg    config.VoiceConfig
 	logger *slog.Logger
