@@ -521,7 +521,7 @@ func TestPersistentQueue_ReclaimedReexecutionPublishesOnlyTheLiveAttempt(t *test
 	if err != nil {
 		t.Fatalf("Claim failed: %v", err)
 	}
-	if err := q.MarkProcessing(ctx, job.ID); err != nil {
+	if err := q.MarkProcessing(ctx, job.ID, abandoned.ClaimToken); err != nil {
 		t.Fatalf("MarkProcessing failed: %v", err)
 	}
 

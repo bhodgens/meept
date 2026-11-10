@@ -230,13 +230,21 @@ func dialAudioPair(t *testing.T, dir, ccid string) {
 // socket (the splice's outbound source). The chunk's first four bytes stamp
 // the given value so tests can trace byte provenance.
 func feedChild(ccid string) error {
+	return feedChildBytes(ccid, 640)
+}
+
+// feedChildBytes writes n bytes on the child side of the pair's .out
+// socket — n need not be a multiple of 640, so tests can reproduce the
+// real child's non-stream-aligned tail (partial PCM that the pump holds
+// as carry forever mid-call).
+func feedChildBytes(ccid string, n int) error {
 	childOutMu.Lock()
 	c, ok := childOut[ccid]
 	childOutMu.Unlock()
 	if !ok {
 		return errChildConnClosed
 	}
-	chunk := make([]byte, 640)
+	chunk := make([]byte, n)
 	_, err := c.Write(chunk)
 	return err
 }

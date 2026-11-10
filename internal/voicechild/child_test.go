@@ -665,6 +665,20 @@ func (p *pipeline) isDropped() bool {
 	return p.dropQueued
 }
 
+// assertNoBytesWithin fails if the .out socket delivers ANY bytes within
+// the window — the post-clear silence contract (barge-in drops the
+// interrupted generation's audio, prefetched or otherwise, and stale
+// bytes must never reach the daemon).
+func assertNoBytesWithin(t *testing.T, out net.Conn, window time.Duration, msg string) {
+	t.Helper()
+	_ = out.SetReadDeadline(time.Now().Add(window))
+	buf := make([]byte, 4096)
+	n, _ := out.Read(buf)
+	if n != 0 {
+		t.Fatalf("%s: got %d bytes on .out within %s", msg, n, window)
+	}
+}
+
 // isTransStarted reports whether the transcript session claim landed
 // (transMu regime — tests must not read the field bare under -race).
 func (p *pipeline) isTransStarted() bool {
@@ -679,6 +693,36 @@ func (p *pipeline) queuedSayCount() int {
 	p.playMu.Lock()
 	defer p.playMu.Unlock()
 	return len(p.sayQueue)
+}
+
+// pendingSayCount reports every say frame the worker still owes audio
+// to: queued drafts PLUS the prefetch syntheses in flight (they left
+// sayQueue at prefetch launch but are still unplayed frames).
+// Tests that pin "clear drops everything queued" must count this, not
+// len(sayQueue): with bounded prefetch the queue alone no longer holds
+// the whole pending set.
+func (p *pipeline) pendingSayCount() int {
+	p.playMu.Lock()
+	defer p.playMu.Unlock()
+	return len(p.sayQueue) + len(p.synthJobs)
+}
+
+// synthActive reports whether a synthesis is outstanding (head frame
+// generating or prefetch in flight) — the test seam for the prefetch
+// depth bound: never more than prefetchDepth, and only ever frames
+// whose predecessor entered the synth queue (strict dequeue order).
+func (p *pipeline) synthActive() bool {
+	p.playMu.Lock()
+	defer p.playMu.Unlock()
+	return len(p.synthJobs) > 0
+}
+
+// synthQueueDepth reports the number of outstanding synth jobs — the
+// test seam that pins the bounded queue (prefetchDepth).
+func (p *pipeline) synthQueueDepth() int {
+	p.playMu.Lock()
+	defer p.playMu.Unlock()
+	return len(p.synthJobs)
 }
 
 // swapTTS installs a test TTS under playMu — the same lock regime the

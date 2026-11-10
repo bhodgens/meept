@@ -3,7 +3,10 @@
 **Status**: Implemented
 **Date**: 2026-11-02 (spec rev 2); as-built appended 2026-11-04; rev 3
 (local leg, plan docs/plans/20261106-voice-local-leg/) amended in
-2026-11-07
+2026-11-07; as-built 2026-11-10 adds the C1 `played` end-of-turn audio
+edge (child emits after the final byte of a last:true say stream; the
+link floor's drain watch arms from it instead of the blind turn_final
+arm - kills the mid-synthesis early floor release)
 
 This spec covers both voice legs: the Telnyx phone channel and the local
 (client audio) channel. It is not the client text-to-speech path in
@@ -234,16 +237,127 @@ Flow:
 
 ## Inbound answer
 
-1. Webhook `call.initiated`, signature verified. `from`/`to` arrive flat or
-   as `{"phone_number": ...}`; parse both shapes.
-2. Caller must be in `voice.allowed_numbers`. An unknown number is not
-   answered.
-3. `AnswerCall`, spawn or attach the call session, then on `call.answered`
+As shipped by plan docs/plans/20261110-caller-authz (issue #125), the
+inbound gate is an ACTION gate, not an ANSWER gate (decision O1). This
+section replaces the earlier "caller must be in voice.allowed_numbers"
+spec, which the shipped chain deliberately dropped:
+
+1. Webhook `call.initiated`, Telnyx Ed25519 signature verified (see
+   "Signatures"). `from`/`to` arrive flat or as `{"phone_number": ...}`;
+   parse both shapes.
+2. Answer EVERY call. `voice.allowed_numbers` does NOT gate inbound —
+   it is OUTBOUND-only (see "Outbound dial"). An unknown number gets an
+   employee to talk to; it does not get an open action surface.
+3. Resolve the caller ONCE at the answer site
+   (`internal/daemon/voice_wiring.go` spawn seam, 2 s budget): the
+   contacts store lookup yields `callerid.Info{Number, Name, Approved,
+   Known}`. Approved = the contact row's `voice_approved` column
+   (decision O2; default FALSE). An unknown number is NOT approved
+   (`Known=false`). Every failure mode (contact feature off, store
+   error, expired budget) degrades fail-soft to `Info{Number}` with a
+   WARN — answering is never blocked (O1).
+4. The identity rides the registry `Instance.Caller`;
+   `bindingTurnRunner.Run` stamps it onto EVERY turn context
+   (`callerid.With`, alongside the employee-id stamp). Voice loops
+   execute as the employee id (decision O5), so the per-employee
+   constitution tool gates (steps 1a/1b) finally apply on call turns —
+   voice loops used to run under agent id `default` and skipped them.
+5. The agent executor injects the presence-only details keys
+   `caller_approved` / `caller_known` (never the number or name) into
+   every tool-call permission check; the employee `PreExecChecker`
+   step 1c (`internal/employee/enforcement.go`) then trims an
+   unapproved or unknown caller to the message lane
+   (`[ledger_append, send_agent_message]`, config
+   `voice.unapproved_caller_allowed_tools`, decision O3). Anything the
+   employee constitution already forbids is denied even earlier —
+   steps 1a/1b run first and their deny wins (O5); a constitution
+   allow does NOT rescue an unapproved caller. Every other tool is
+   denied with the frozen model-facing text: "This caller is not
+   approved for that action. Take a message instead." (reason token
+   `caller_not_approved`).
+6. The 1c denial is warning severity with NO auto-pause (contrast
+   `never[]`, which is a critical stop): refusing a stranger caller is
+   a routing decision, not an employee emergency. Each denial emits
+   one `voice.unapproved_action` audit row (tool + call_control_id)
+   through the checker's audit seam — nil-safe by contract.
+   `RegisterPreExecCheckers` arms each checker's seam from the
+   manager's audit store at registration, so a stock daemon persists
+   the row (nil manager store leaves the seam inert, matching
+   pre-wiring behavior).
+   `internal/daemon/caller_matrix_test.go` pins the frozen row shape.
+7. `AnswerCall`, spawn or attach the call session, then on `call.answered`
    run `streaming_start`.
-4. Telnyx opens the media socket; the lifecycle in "Socket lifecycle"
+8. Telnyx opens the media socket; the lifecycle in "Socket lifecycle"
    applies.
-5. A `call.hangup` for an unknown id is a nil no-op. Teardown is idempotent
+9. A `call.hangup` for an unknown id is a nil no-op. Teardown is idempotent
    against duplicate or late hangups.
+
+**The webhook never waits on the goal hold (audit 2026-11-09 finding 1).**
+The spawn answers the call, acquires the registry slot, then hands the
+goal hold + call-row start (`holdPhoneCall`) to its own goroutine and
+returns immediately — a webhook response blocked on the per-employee
+mutex (a prior live call or assess round) would time out Telnyx's POST
+and invite a redelivery storm on a leg that is already answered. The
+employee's FIRST turn still waits for the hold: the talk loop's turn
+runner gates on the call's hold-ready signal before touching the
+employee loop, so per-employee serialization is unchanged — only the
+delivery became asynchronous. Fact-free filler/greeting lines may play
+while the hold pends (they read no employee state). If the call
+hangs up while its hold is still queued behind the prior round, the
+teardown is done by exactly one of the two racing paths (the release
+hook, or the hold goroutine observing the release and rolling its own
+registration back) — the employee mutex is never left parked.
+
+**Redelivery storms are accepted posture (finding 11).** The webhook
+maps manager errors to 500 precisely so Telnyx redelivers while the
+failure may be transient (carrier API unreachable). A redelivered
+`call.initiated` for an already-answered leg therefore re-enters the
+spawn: the registry's one-live-per-employee/target rule refuses the
+duplicate Acquire, the manager hangs that redelivered leg up, and
+Telnyx stops redelivering once the leg is hung up. There is no
+webhook-side dedupe of seen `call_control_id`s, deliberately — a
+correct one would have to survive restarts (the carrier sends no
+idempotency key), and the cost of the storm is bounded refused
+duplicates, not corrupted state.
+
+## Teardown end frame (audit 2026-11-09 finding 10)
+
+`releaseCall` sends the C1 `end` frame (`{"call_id":...,"event":"end",
+"reason":"<outcome>"}`, `last` omitted per the frames contract) to the
+child as the FIRST step of the release fan-out, before the talk-loop
+drop and context cancel, so the child tears its pipeline down through
+the frame protocol instead of only noticing socket EOF. The send is
+best-effort: no child connected or a dead socket logs and continues —
+EOF remains the fallback signal, and frame failure can never block or
+fail a release.
+
+**Restart mid-ring: "state unknown" residual (finding 8).** The dial
+completion channels (`Dialer.dones`, the manager's per-call done
+channels) are in-process only. If the daemon restarts while an outbound
+call is ringing, the effects ledger correctly reports the dial completed
+(a retry never re-rings), but `Dialer.doneFor` re-resolves the ccid
+through `Manager.WaitCall` — an id the new process never tracked — and
+gets a fresh channel that never closes. The caller's bounded context is
+the safety net: waiting past it is the expected, documented outcome, and
+the state of the pre-restart carrier leg is genuinely unknown (the new
+process has no media bridge for it). Reporting "ended" for such a ccid
+would be a guess that could unpark an employee goal while the leg is
+still live on the carrier, so the daemon does not guess. Hardening
+landed (leaf 04 T3): `doneFor` returns an
+already-closed channel + a WARN "state unknown" for receipted-but-
+untracked ccids, so waiters observe the unknown terminal immediately
+instead of burning their whole timeout.
+
+Residual risk (decision O4, owner Open Question Q1): `ledger_append`
+sits in the message lane, and step 1c cannot distinguish a
+state-setting (`set_status`) append from a note-taking one, so an
+unknown caller CAN drive employee-ledger rows including state changes
+until Q1 is settled. Accepted for this tree; pinned in the shipped
+behavior by `internal/daemon/caller_matrix_test.go`. The signal leg
+shares the turn-stamp site but not the phone leg's contact-resolve site
+(master Q2 fast-follow): signal instances carry a zero `Info`, which
+step 1c treats as unknown = unapproved — fail-closed, never an open
+gate.
 
 ## Barge-in contract
 
@@ -388,6 +502,13 @@ Text from the child to the daemon:
 - `prompt` - caller text. `last: false` is a partial (transcript preview
   only). `last: true` is final and starts the employee turn
 - `interrupt` - caller spoke over the agent (barge-in contract above)
+- `played` - end-of-turn AUDIO marker: the playback worker wrote the
+  FINAL byte of a `last: true` `say` stream to the call's .out socket
+  (`{"call_id":...,"event":"played","last":true}`, exactly once per
+  turn-final stream, never for a non-final or barge-in-aborted stream).
+  The half-duplex link floor's drain watch arms from this edge - it is
+  the true "the speaker cannot produce more audio this turn" signal the
+  `turn_final` text edge never was (see the turn-taking release rule)
 - `end` - call ended
 
 Text from the daemon to the child:
@@ -404,8 +525,9 @@ The greeting on connect is also filler-class: fact-free, interruptible.
 
 ## Call flow (inbound, condensed)
 
-1. Telnyx sends `call.initiated`. The daemon checks the Ed25519 signature
-   and the caller allowlist.
+1. Telnyx sends `call.initiated`. The daemon verifies the Ed25519
+   signature (inbound is answer-all; see "Inbound answer" — the caller
+   allowlist is OUTBOUND-only).
 2. The daemon starts the child if needed, answers the call, and starts the
    media stream with L16/16000.
 3. The media socket opens. The daemon verifies the socket signature, reads
@@ -447,7 +569,9 @@ Proposed keys, all under `voice`:
 - `public_stream_url` - public wss URL fronting the loopback listener
 - `connection_id` - Telnyx Call Control application id
 - `from_number` - caller id for outbound dials
-- `allowed_numbers` - E.164 list; inbound and outbound both gated
+- `allowed_numbers` - E.164 list; OUTBOUND-only gate (plan
+  20261110-caller-authz: inbound is answer-all, actions are gated per
+  caller by the contacts `voice_approved` flag + PreExec step 1c)
 - `timeout_secs` - outbound ring timeout, default 30
 - `max_call_minutes` - int, default 15
 - `silence_prompt_seconds` - int, default 45; the clock pauses while the
@@ -736,7 +860,7 @@ reorder/transcode policy differ per leg:
 | --- | --- | --- | --- |
 | Audio source | Telnyx media socket | Telnyx media socket | client dials the C2 unix pair (mic/speaker) |
 | Identity (`direction`) | `inbound` | `outbound` | `local` |
-| Target shape | caller E.164 (allowlist) | allowlisted E.164 | `local:<label>` (label = config name or hostname), never E.164-normalized (internal/voice/dial.go:629-633) |
+| Target shape | caller E.164 (resolved to `callerid.Info` at answer; NOT allowlisted — plan 20261110-caller-authz) | allowlisted E.164 | `local:<label>` (label = config name or hostname), never E.164-normalized (internal/voice/dial.go:629-633) |
 | ccid shape | `call_control_id` | `call_control_id` | `"local-" + pkg/id.Generate()` (internal/voice/local.go:237) |
 | Registry leg | `phone` | `phone` | `local` (`Instance.Leg`, internal/voice/dial.go:555-569) |
 | Effects reservation | no (inbound) | YES, before POST | NO (deliberate: no paid side effect) |
@@ -917,7 +1041,80 @@ transcripts. Two scenarios are registered in e2e/manifest.json
 `Binding.OnCallEnd` marks calls.db rows ended. It rides
 `ReleaseHook -> heldCalls`, and the hold is registered by
 `AcquireCallHold` on every live leg: local (`LocalDeps.Hold`), phone
-inbound (spawn seam), and phone outbound (`DialConfig.Hold`). Release
+inbound (spawn seam — async behind the hold gate, finding 1; the
+hold goroutine rolls its own registration back if the call releases
+while the hold pends), and phone outbound (`DialConfig.Hold`). Release
 is the manager hook exactly once; a nil hold seam degrades to no
 ended-state. The phone leg also calls `Binding.OnCallStart` from
 `holdPhoneCall` — without that row, OnCallEnd is a no-op.
+
+## As-built (2026-11-09, turn-taking leaf): link half-duplex
+
+Live link runs (link-6a3f3b65) proved the two link legs talked over
+each other: both employees greeted at once, and either leg's STT
+dispatched while the other was still speaking - simultaneous audio and
+half-answers. The fix lives entirely daemon-side (internal/voice/link.go
++ talkloop.go seams):
+
+- **One speaker at a time.** `LinkTurnCoordinator` (created per link in
+  `LinkManager.Open`, registered by registry target -
+  `local:link-a-<suffix>` / `local:link-b-<suffix>` - BEFORE the legs
+  open, because a setup frame can reach the frame router while Open is
+  still running). Each link side's talk loop is built by
+  `VoiceWiring.routeFrame` with two optional seams:
+  `TalkDeps.HoldPrompt` (a denied final prompt parks in the loop - one
+  slot, latest question wins, telemetry `kind=prompt_held`) and
+  `TalkDeps.TurnState` (`turn_start` / `turn_final` / `idle` edges).
+- **Release rule (drain-driven, leaf 02 + played edge).** The floor
+  releases on AUDIO DRAIN, not on the `turn_final` text edge:
+  `turn_final` sets the local splice's EXPECTED-final state
+  (`LocalSpliceFor(ccid).ExpectFinalDrain`) and arms a long FALLBACK
+  margin (default 12 s, `LinkDeps.TurnMargin`); the child's C1 `played`
+  frame (`{"call_id":...,"event":"played","last":true}`, emitted by the
+  playback worker right after the FINAL byte of the turn's last:true
+  say stream is written to the .out socket) routes through
+  `VoiceWiring.routeFrame` to `MarkFinalPlayed`, which ARMS the watch.
+  The first of (the splice's `AudioDrained` edge + 250 ms tail pad) or
+  (the fallback fire) clears the floor and dispatches the parked
+  prompt. The old rule - release `turn_final` + 600 ms - still let the
+  listener speak over the pacing tail: the daemon pacer holds up to
+  seconds of paced audio after the text flush (measured 335 talk-over
+  windows, 6.70 s on link-1108d776b0a1efb3). BLIND-arming the watch at
+  `turn_final` was STILL early (link-2fdc3f5fd8d81805: drained releases
+  fired 3/4 but mid-reply - the child synthesizes sentence-by-sentence
+  and the inter-sentence gaps of 1.4-3.8 s exceed the 1 s quiescence
+  window, so pending==0+quiet faked a drain while queued sentences
+  still had audio -> 60 short both-audible runs, 10.94 s overlap):
+  `turn_final` means the last say FRAME left the DAEMON, not that the
+  child finished PLAYING. The played edge is the audio truth. A
+  played-armed watch fires at pending==0 + a SHORT 500 ms quiet window
+  and, unlike the blind shape, fires on a silent post-arm stream (the
+  edge is itself the post-arm touch). If the edge never arrives (old
+  child binary, denied/aborted final stream) the turn rides the
+  fallback margin - late, never early; on a barge-in the `idle` edge
+  already released the floor and the child deliberately emits NO
+  played for aborted streams (a phantom edge on dead audio would fake
+  an end-of-turn). The fire's sub-chunk residue gate is gone: a real
+  TTS stream's byte total is never a multiple of 640, so a
+  carry==0 gate made the drain structurally unreachable - 0/5 drained
+  releases on link-6eb490abd8349958, and the 4 s watchdog beat the tail
+  on every long turn, measured write_ms up to 11.1 s). `HoldPromptFor` gates on the
+  floor, so a fresh listener prompt cannot claim it during the tail
+  either. An `idle` edge (barge-in cancel, teardown, unbind) releases
+  immediately: nothing is playing. A park alive when a loop exits is
+  logged and dropped (`kind=prompt_dropped`), never dispatched into a
+  dead call. Telemetry: `kind=floor_released` with
+  `reason=drained|margin`, plus `kind=prompt_released` on the loop edge.
+  The drain watch is LINK-only: `LocalDeps.LinkTurns` resolves per Open
+  by registry target, so plain local/phone splices never arm a watch
+  (a played frame for them is a Debug-logged no-op at the router).
+- **One greeting.** Side A greets on connect; side B's loop is built
+  with `TalkLoopConfig.SuppressGreeting` and speaks first only after
+  A's greeting arrives at B's mic as a final prompt (the conversation
+  seed). Because B opens silent, the bridge seeds each leg's mic with
+  5 exact 640 B zero chunks at dial so the splice's first-byte
+  JoinTimeout gate never depends on greeting audio.
+- **Blast radius.** All seams nil/false by default: phone, plain-local,
+  and signal calls construct their talk loops exactly as before (the
+  target-keyed registry lookup only matches link legs). Non-link tests
+  (grace/filler pins) run through the untouched path.

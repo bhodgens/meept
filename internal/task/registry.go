@@ -211,6 +211,55 @@ func (r *Registry) UpdateState(ctx context.Context, taskID string, state TaskSta
 	return nil
 }
 
+// CancelTask cancels a task through the SAME machinery the "task.cancel" bus
+// handler uses (leaf 06 T2, audit F8): trigger the interrupt token so
+// in-flight work observes the cancellation, drive the task to its terminal
+// cancelled state, and publish the task.ev.task.cancelled notification. It
+// is the direct-call sibling of handleCancel — the plan package reaches it
+// via the optional plan.TaskCanceller seam (daemon's taskCreatorAdapter).
+// A task that is already terminal is a no-op success (parity with the
+// handler's "noop" status): the caller's intent — not-live — holds.
+func (r *Registry) CancelTask(ctx context.Context, taskID, reason string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.closed {
+		return fmt.Errorf("registry is closed")
+	}
+
+	t, err := r.store.GetByID(taskID)
+	if err != nil {
+		return err
+	}
+	if t == nil {
+		return fmt.Errorf("task not found: %s", taskID)
+	}
+	if t.State.IsTerminal() {
+		return nil
+	}
+
+	ir := InterruptReason(reason)
+	if ir == "" {
+		ir = ReasonUserCancelled
+	}
+	if err := r.interruptMgr.Trigger(taskID, ir, "Cancelled by plan manager"); err != nil {
+		r.logger.Warn("Failed to trigger interrupt", KeyTaskID, taskID, "error", err)
+	}
+
+	t.SetState(StateCancelled)
+	if err := r.store.Update(t); err != nil {
+		return err
+	}
+
+	// MUST go through taskEventTopic — same self-replication guard as the
+	// handler's publish (see handleCancel).
+	r.publishEvent(taskEventTopic("task.cancelled"), map[string]any{
+		KeyTaskID: taskID,
+		"reason":  ir,
+	})
+	return nil
+}
+
 // SetGoalID stamps the owning goal onto a task (goal-completion C3): the
 // task's GoalID is persisted in the same UPDATE the registry already owns,
 // so a plan-level goal survives synthesis (bughunt 2026-10-14: Plan rows

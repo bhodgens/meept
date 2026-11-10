@@ -84,8 +84,8 @@ D. TWO-AGENT VOICE LINK: a test mode where two employees converse over
 
 | Leaf | Status | Notes |
 |------|--------|-------|
-| 01 | PENDING | |
-| 02 | PENDING | |
-| 03 | PENDING | |
+| 01 | DONE (623c17c7) | |
+| 02 | DONE (05819379) | |
+| 03 | DONE (72418c51) | |
 | 04 | DONE (providers hygiene + call-id ctx stamp moved voicechild-side) | |
-| 05 | PENDING | |
+| 05 | DONE (splice late-dial fix; LIVE LINK VERIFIED: both sides >=2 alternating assistant turns, pacer max_gap 23ms) | |

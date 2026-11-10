@@ -39,6 +39,7 @@ import (
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/auditlog"
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/callerid"
 	commhttp "github.com/caimlas/meept/internal/comm/http"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/contact"
@@ -114,6 +115,15 @@ type VoiceWiring struct {
 	loops       map[string]*voice.TalkLoop
 	loopCancels map[string]context.CancelFunc
 
+	// linkTurns is the half-duplex coordinator registry shared with the
+	// LinkManager (voice_link_rpc.go passes it into LinkDeps.Turns): the
+	// link's two legs pre-register by registry target BEFORE their leg
+	// opens, so routeFrame resolves each setup'd link call to its
+	// coordinator and constructs a turn-locked talk loop. Plain
+	// (phone/local) calls never match a target and keep the legacy
+	// uncoordinated construction byte-for-byte.
+	linkTurns *voice.LinkTurnRegistry
+
 	// bus publishes voice.call.ended (typed topic); nil drops events.
 	bus *bus.MessageBus
 
@@ -149,6 +159,13 @@ type VoiceWiring struct {
 	// cfg + logger are construction-time values.
 	cfg    config.VoiceConfig
 	logger *slog.Logger
+
+	// caller is the inbound caller-authz resolver slot (caller-authz
+	// leaf 02). Nil resolver reads fail-soft to Info{Number} at the
+	// answer site; components.go arms it with the contact-store resolver
+	// right after BuildContactChain succeeds (the store handle does not
+	// exist at WireVoice time - the chain is built over the live wiring).
+	caller *callerResolverSlot
 
 	// plainOpts configures the optional plain-HTTP loopback listener's
 	// middleware (rate limit + access log parity with the main listener;
@@ -309,6 +326,13 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 	// the later assignment is visible. A nil read degrades to no
 	// ended-state rather than panicking.
 	var phoneHold *VoiceEmployeeWiring
+	// Caller-authz slot (leaf 02): captured by the spawn closure below
+	// (the inbound answer site) and handed to VoiceWiring at construction.
+	// components.go arms the contact-store resolver into it once the
+	// contact chain builds; a call that lands before arming (or with the
+	// contact feature off) resolves fail-soft to Info{Number} — the call
+	// still answers (O1).
+	callerSlot := &callerResolverSlot{}
 	spawn := func(callCtx context.Context, ev telnyx.CallEvent) (context.CancelFunc, error) {
 		if err := child.EnsureRunning(callCtx); err != nil {
 			return nil, err
@@ -325,13 +349,64 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		if _, err := registry.Acquire(ev.CallControlID, cfg.DefaultEmployee, ev.From); err != nil {
 			return nil, fmt.Errorf("voice wiring: registry acquire: %w", err)
 		}
+		// Caller-authz (leaf 02): resolve the inbound caller ONCE here,
+		// BEFORE holdPhoneCall arms the call row. The 2s budget bounds the
+		// sqlite read; every failure mode (resolver not armed, store error,
+		// expired budget) degrades to fail-soft Info{Number} with a WARN
+		// and the call PROCEEDS — answering is never gated (O1). The
+		// identity rides the registry row (SetCaller) so the setup router
+		// hands the SAME instance (Caller populated) to the talk loop ->
+		// bindingTurnRunner stamps it on every turn ctx. Registry fakes
+		// without the SetCaller lane keep the zero Info (the legal
+		// "unresolved caller" posture; TestBindingTurnRunnerStampsZeroCaller
+		// pins the stamp's behavior there).
+		//
+		// Master Q2: the TURN-STAMP site (bindingTurnRunner) is shared
+		// across legs, but this RESOLVE site is the phone leg's answer.
+		// The signal leg's Instance.Caller stays zero — signal targets are
+		// uuids, and contact resolution over signal_uuid is the flagged
+		// fast-follow; enforcement (step 1c) treats an unresolved caller as
+		// unapproved (O2 posture), never as an open gate.
+		{
+			resolveCtx, resolveCancel := context.WithTimeout(context.Background(), callerResolveBudget)
+			caller := voice.ResolveCallerOrFailSoft(resolveCtx, callerSlot.get(), ev.From, vlog.With("ccid", ev.CallControlID))
+			resolveCancel()
+			registry.SetCaller(ev.CallControlID, caller)
+		}
 		// Goal-hold + call row (ended-state gap): same acquire the local
 		// leg's Hold seam does. Release rides ReleaseHook exactly once;
 		// do not keep AcquireCallHold's release func (a second release
 		// would be a double-unlock without the once-guard, and the
 		// contract is hook-only, matching the local wiring).
-		holdPhoneCall(phoneHold, ev.CallControlID, cfg.DefaultEmployee, ev.From, voice.DirectionIncoming,
-			voice.FreshSessionFor(cfg, cfg.DefaultEmployee))
+		//
+		// audit 2026-11-09 finding 1: holdPhoneCall (AcquireCallHold ->
+		// mu.Lock) can block a FULL prior goal round. It must never run
+		// on this goroutine — HandleCallEvent rides the carrier webhook
+		// handler, and a stall there buys a Telnyx redelivery storm on a
+		// 500 after the leg was already answered. The spawn arms a
+		// per-call hold gate and runs the hold + OnCallStart on its own
+		// goroutine; the webhook returns immediately. Serialization of
+		// the GOAL ROUND is unchanged: the talk loop's turn runner
+		// awaits this same gate before the employee's FIRST turn
+		// (holdReady), so the hold is still taken before any employee
+		// state the call could race is touched. fact-free filler/
+		// greeting lines may play while the gate pends (they read no
+		// employee state; the supervisor-gate contract keeps `say`
+		// gated on the supervisor, not on the goal hold).
+		fresh := voice.FreshSessionFor(cfg, cfg.DefaultEmployee)
+		if phoneHold != nil && phoneHold.gates != nil {
+			gate := phoneHold.gates.arm(ev.CallControlID)
+			go func() {
+				defer gate.markReady()
+				holdPhoneCall(phoneHold, ev.CallControlID, cfg.DefaultEmployee, ev.From,
+					voice.DirectionIncoming, fresh, gate)
+			}()
+		} else {
+			// Degraded posture (hand-built wirings without the tracker):
+			// the pre-leaf synchronous hold — correct, just unbounded.
+			holdPhoneCall(phoneHold, ev.CallControlID, cfg.DefaultEmployee, ev.From,
+				voice.DirectionIncoming, fresh)
+		}
 		return func() {}, nil
 	}
 	manager := voice.NewManager(voice.ManagerConfig{
@@ -370,8 +445,8 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 	phoneHold = employee
 
 	// -- 5b. Shared day-brief builder (leaf 03-voice/03): ONE builder
-	// closure over the leaf-04 sources — the SAME sources the local leg
-	// has always used — now extended with the ledger open-commitments
+	// closure over the leaf-04 sources - the SAME sources the local leg
+	// has always used - now extended with the ledger open-commitments
 	// seam. Reused by: the local leg's DayBriefBuilder, the phone leg's
 	// holdPhoneCall (via VoiceEmployeeWiring.dayBriefFn), and the signal
 	// leg (via WireVoiceDeps.DayBriefBuilder). Phone/signal only build a
@@ -467,6 +542,7 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		supervisor:     supervisor,
 		loops:          make(map[string]*voice.TalkLoop),
 		loopCancels:    make(map[string]context.CancelFunc),
+		linkTurns:      voice.NewLinkTurnRegistry(vlog.With("sub", "link-turns")),
 		bus:            deps.Bus,
 		textSocketPath: textSocketPath,
 		broker:         deps.Broker,
@@ -474,6 +550,7 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		displayStore:   deps.ContactDisplayStore,
 		cfg:            cfg,
 		logger:         vlog,
+		caller:         callerSlot,
 		plainOpts: commhttp.PlainListenerOptions{
 			RateLimitPerMinute: deps.Config.Transport.HTTP.RateLimitRPM,
 			RateLimitBurst:     deps.Config.Transport.HTTP.RateLimitBurst,
@@ -532,7 +609,16 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 			Hold: func(ccid, emp string) {
 				employee.AcquireCallHold(ccid, emp)
 			},
-			Logger: vlog.With("sub", "local-leg"),
+			// Drain-driven floor (turn-taking leaf 02): the local leg
+			// resolves each opened call's registry target against the
+			// SAME coordinator registry routeFrame uses for talk loops
+			// (link targets are pre-registered by LinkManager.Open
+			// before Leg.Open). A link leg's splice gets the
+			// AudioDrained dep -> the floor releases on the paced
+			// tail's actual drain, not on turn_final alone. Plain
+			// local calls never match -> nil dep -> byte-identical.
+			LinkTurns: w.linkTurns,
+			Logger:    vlog.With("sub", "local-leg"),
 		})
 		if lerr != nil {
 			return nil, fmt.Errorf("voice wiring: local leg: %w", lerr)
@@ -676,6 +762,20 @@ func (a auditWriterAdapter) WriteAudit(ctx context.Context, row map[string]any) 
 // loop registered for that call_control_id.
 func (w *VoiceWiring) routeFrame(f voice.Frame) {
 	switch f.Event {
+	case voice.EventPlayed:
+		// Child -> daemon end-of-turn AUDIO marker (turn-final drain fix):
+		// the final byte of a last:true say stream left the child's .out
+		// socket. Arm the live local splice's drain watch from this edge
+		// (played-armed mode: nothing more can arrive for the turn, so the
+		// fire is pending==0 + the SHORT final quiet window). The frame is
+		// CONSUMED here — it never reaches the talk loop's frame queue.
+		// No live splice (phone leg, plain local without the seam, torn
+		// down) or a splice without the AudioDrained dep: silent no-op;
+		// plain calls never gate a floor on this edge.
+		if sp := voice.LocalSpliceFor(f.CallID); !sp.MarkFinalPlayed() {
+			w.logger.Debug("voice wiring: played edge with no live drain watch",
+				"ccid", f.CallID)
+		}
 	case voice.EventSetup:
 		// bughunt 2026-11-07 voice F-6: idempotent setup, mirroring the
 		// child's handleSetup ("setup for live call ignored"). Without the
@@ -704,16 +804,33 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 			w.logger.Warn("voice wiring: setup for unknown call", "ccid", f.CallID)
 			return
 		}
+		// Link half-duplex (turn-taking leaf): a link leg's registry
+		// target resolves to its coordinator (pre-registered by
+		// LinkManager.Open BEFORE the leg opened). Bound loops carry the
+		// HoldPrompt/TurnState seams and side B suppresses its greeting
+		// (single-greeting contract). A nil lookup = phone/plain-local =
+		// the legacy uncoordinated construction, seams nil.
+		coord, turnSide := w.linkTurns.Lookup(inst.Target)
+		var holdPrompt func(voice.Instance, func()) bool
+		var turnState func(ccid string, seq uint64, kind string)
+		suppressGreeting := false
+		if coord != nil {
+			holdPrompt = coord.HoldPromptFor(turnSide)
+			turnState = coord.TurnStateFor(turnSide)
+			suppressGreeting = coord.SuppressesGreeting(turnSide)
+		}
 		loop := voice.NewTalkLoop(voice.TalkDeps{
 			Supervisor: w.supervisor,
-			Turns:      turnRunnerFor(w.Employee.Binding, inst),
+			Turns:      turnRunnerFor(w.Employee.Binding, w.Employee.gates, inst),
 			SessionFor: func(call voice.Instance) voice.SessionHandle {
 				return w.sessionFor(call)
 			},
-			Binding: w.Employee.Binding,
-			Send:    textFrameSender{srv: w.TextServer}.Send,
-			OnEnd:   func(ccid, reason string) { w.managerHangup(ccid, reason) },
-			Logger:  w.logger.With("sub", "talk", "ccid", f.CallID),
+			Binding:    w.Employee.Binding,
+			Send:       textFrameSender{srv: w.TextServer}.Send,
+			OnEnd:      func(ccid, reason string) { w.managerHangup(ccid, reason) },
+			Logger:     w.logger.With("sub", "talk", "ccid", f.CallID),
+			HoldPrompt: holdPrompt,
+			TurnState:  turnState,
 		}, voice.TalkLoopConfig{
 			FillerLines:          w.cfg.Filler,
 			GreetingLine:         w.cfg.GreetingLine,
@@ -722,7 +839,11 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 			SilencePromptSeconds: w.cfg.SilencePromptSeconds,
 			TurnTimeoutSeconds:   w.cfg.TurnTimeoutSeconds,
 			FillerGrace:          time.Duration(w.cfg.FillerGraceMs) * time.Millisecond,
+			SuppressGreeting:     suppressGreeting,
 		})
+		if coord != nil {
+			coord.Bind(turnSide, loop)
+		}
 		w.loopsMu.Lock()
 		w.loops[f.CallID] = loop
 		// H4: arm the per-call context. releaseCall cancels it so a
@@ -750,6 +871,12 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 			// Own the cancel either way: a self-ended loop releases its
 			// context slot; a released loop was already cancelled.
 			loopCancel()
+			if coord != nil {
+				// Half-duplex: the side is gone - release the peer's
+				// parked prompt (it can no longer be answered by this
+				// side going idle) and drop the dead loop reference.
+				coord.Unbind(turnSide)
+			}
 			w.loopsMu.Lock()
 			delete(w.loops, f.CallID)
 			delete(w.loopCancels, f.CallID)
@@ -852,11 +979,48 @@ func (w *VoiceWiring) spliceHangup(ccid, reason string) {
 // fresh-session flag from the voice config (voice.FreshSessionFor) and
 // passes it through to the binding; false is byte-identical to the
 // pre-leaf-02 shared-session behavior.
-func holdPhoneCall(emp *VoiceEmployeeWiring, ccid, employeeID, number, direction string, fresh bool) {
+//
+// gate (audit 2026-11-09 finding 1, optional variadic): set only by the
+// ASYNC inbound path — the webhook spawn goroutine passes the call's hold
+// gate. AcquireCallHold may block here for a FULL prior goal round; that
+// is by design on this goroutine (not the webhook's). After the hold
+// registers, the gate's released flag is re-checked: if the call
+// terminal-fired while the hold pended, releaseCall's gate drop already
+// ran BEFORE the ReleaseHook peek, so the hook saw an unregistered hold
+// and skipped it — this side rolls the registration back instead
+// (ReleaseForCall + OnCallEnd). Both sides are once-guarded (map delete +
+// binding live check), so an interleaving where the hook DID see the
+// registration makes the rollback a clean no-op. No gate = today's
+// synchronous posture with no rollback check.
+func holdPhoneCall(emp *VoiceEmployeeWiring, ccid, employeeID, number, direction string, fresh bool, gate ...*holdGate) {
 	if emp == nil || ccid == "" || employeeID == "" {
 		return
 	}
+	// NB: mu.Lock() below is the ONE place a long unbounded block is
+	// legitimate on this stack — callers guarantee it is either the
+	// webhook's decoupled goroutine (gate variant) or the dialer's own
+	// goroutine (outbound). never hold any per-wiring lock across it
+	// (mutexio).
 	emp.AcquireCallHold(ccid, employeeID)
+	if len(gate) > 0 && gate[0] != nil && emp.Binding != nil {
+		if released, outcome := gate[0].releaseState(); released {
+			// The call died while this hold pended and releaseCall's
+			// hook-side teardown already skipped the (then-unregistered)
+			// hold: no OnCallStart ran, so only the registration needs
+			// rolling back. OnCallEnd is no-op-safe without a live
+			// binding entry; run it anyway for the pathological
+			// ordering where the start landed first.
+			if emp.logger != nil {
+				emp.logger.Info("voice wiring: phone hold rolled back — call released while the hold pended",
+					"ccid", ccid, "outcome", outcome)
+			}
+			rollbackCtx, rbCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_ = emp.Binding.OnCallEnd(rollbackCtx, ccid, outcome)
+			rbCancel()
+			emp.ReleaseForCall(ccid)
+			return
+		}
+	}
 	if emp.Binding == nil {
 		return
 	}
@@ -883,6 +1047,24 @@ func holdPhoneCall(emp *VoiceEmployeeWiring, ccid, employeeID, number, direction
 		emp.logger.Warn("voice wiring: phone OnCallStart failed (call continues unbound)",
 			"ccid", ccid, "direction", direction, "error", err)
 	}
+	// Second gate re-check AFTER the start (closes the narrow window where
+	// releaseCall's drop + hook-side OnCallEnd landed between the pre-check
+	// and b.calls registration — the hook would have skipped the then-
+	// unbound row, and without this check the row strands 'live'). Both
+	// rollback sinks are idempotent (heldCalls map-delete once-guard,
+	// binding live check), so racing the hook again is a clean no-op.
+	if len(gate) > 0 && gate[0] != nil && emp.Binding != nil {
+		if released, outcome := gate[0].releaseState(); released {
+			if emp.logger != nil {
+				emp.logger.Info("voice wiring: phone call row rolled back — released during hold start",
+					"ccid", ccid, "outcome", outcome)
+			}
+			endCtx, endCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_ = emp.Binding.OnCallEnd(endCtx, ccid, outcome)
+			endCancel()
+			emp.ReleaseForCall(ccid)
+		}
+	}
 }
 
 // livePhoneTarget returns the registry target for ccid, or "" when the
@@ -902,13 +1084,24 @@ func livePhoneTarget(reg voice.Registry, ccid string) string {
 
 // releaseCall is the Manager release hook fan-out. Order matters for
 // observability, not correctness (each sink is once-guarded):
-//  1. childproc NoteCallEnd (idle timer accounting)
-//  2. talk-loop cancel (per-call ctx, audit H4 — the loop's Run select
+//  1. hold-gate drop (audit 2026-11-09 finding 1): mark the pending-hold
+//     gate released and remove it BEFORE the ReleaseHook peek, so exactly
+//     one side (the hook, or the hold goroutine's rollback) tears the
+//     registration down when a hold was still pending on the mutex
+//  2. C1 end frame (audit 2026-11-09 finding 10): the child learns the
+//     call ended through the frame protocol, best-effort BEFORE the talk
+//     loop is dropped and the transport closes
+//  3. childproc NoteCallEnd (idle timer accounting)
+//  4. talk-loop cancel (per-call ctx, audit H4 — the loop's Run select
 //     sees ctx.Done and exits promptly, cancelling its in-flight turn
 //     pipeline)
-//  3. registry Release (frees the C8 slot + target)
-//  4. binding OnCallEnd (leaf-12 ReleaseHook: call row + goal hold)
+//  5. registry Release (frees the C8 slot + target)
+//  6. binding OnCallEnd (leaf-12 ReleaseHook: call row + goal hold)
 func (w *VoiceWiring) releaseCall(ccid string, outcome voice.Outcome) {
+	if w.Employee != nil && w.Employee.gates != nil {
+		w.Employee.gates.drop(ccid, string(outcome))
+	}
+	w.sendEndFrame(ccid, outcome)
 	w.ChildProc.NoteCallEnd(ccid)
 
 	w.loopsMu.Lock()
@@ -937,6 +1130,32 @@ func (w *VoiceWiring) releaseCall(ccid string, outcome voice.Outcome) {
 	w.Registry.Release(ccid)
 	w.Employee.ReleaseHook(ccid, outcome)
 	w.publishCallEnded(ccid, outcome)
+}
+
+// sendEndFrame ships the C1 end frame (finding 10: teardown parity — the
+// child used to learn release only through socket EOF; internal/voicechild
+// handleEnd tears the pipeline down on this frame). Frame contract per
+// internal/voice/AGENTS.md: byte-exact JSON line, call_id carried, `last`
+// OMITTED for end (nil pointer, not explicit false). Reason carries the
+// terminal outcome so child logs name why the call ended.
+//
+// Best-effort by contract: TextServer.Send fails fast when no child is
+// connected (it never queues, unlike SendRaw's child-readiness wait), and
+// a write error means the transport is already dead — either way the
+// failure is logged and the release fan-out continues. It must NEVER
+// block or fail teardown: socket EOF remains the fallback signal.
+func (w *VoiceWiring) sendEndFrame(ccid string, outcome voice.Outcome) {
+	if w.TextServer == nil || ccid == "" {
+		return
+	}
+	if err := w.TextServer.Send(voice.Frame{
+		CallID: ccid,
+		Event:  voice.EventEnd,
+		Reason: string(outcome),
+	}); err != nil {
+		w.logger.Debug("voice wiring: end frame not delivered (child gone; socket EOF is the fallback)",
+			"ccid", ccid, "outcome", string(outcome), "err", err)
+	}
 }
 
 // publishCallEnded publishes voice.call.ended (typed topic, WS class
@@ -1254,8 +1473,8 @@ func (w *VoiceWiring) Stop(ctx context.Context) {
 // WireVoice itself (via deps.SupervisorChatterClient, the
 // createAuxiliaryLLMClientWithResolver resolution path shared with the
 // classifier chain); when the model ref is empty, unresolvable, or no
-// factory was injected, this returns the classifier client — else the main
-// LLM client — as the legacy fallback. nil when neither exists (the gate
+// factory was injected, this returns the classifier client - else the main
+// LLM client - as the legacy fallback. nil when neither exists (the gate
 // then runs disabled - NewSupervisor logs it once).
 func voiceSupervisorChatter(c *Components) voice.SupervisorChatter {
 	if c == nil {
@@ -1295,18 +1514,38 @@ func (a *chatterAdapter) Ask(ctx context.Context, prompt string) (string, error)
 // employee's id onto the turn context so a voice_call executed DURING the
 // call is attributable to this employee (the turn ctx reaches tool
 // execution unbroken through RunOnce -> executeToolCalls -> Execute).
-func turnRunnerFor(b *voice.Binding, inst voice.Instance) voice.TurnRunner {
-	return bindingTurnRunner{b: b, inst: inst}
+//
+// gates (audit 2026-11-09 finding 1): for ASYNC-held inbound calls the
+// runner awaits the call's goal-hold gate before the FIRST employee turn,
+// so the per-employee serialization the synchronous hold provided is
+// preserved even though the hold now runs off the webhook goroutine. A
+// nil tracker or a never-armed ccid (outbound leg, local leg, sync-
+// degraded wirings) is an immediate no-op.
+func turnRunnerFor(b *voice.Binding, gates *holdTracker, inst voice.Instance) voice.TurnRunner {
+	return bindingTurnRunner{b: b, gates: gates, inst: inst}
 }
 
 type bindingTurnRunner struct {
-	b    *voice.Binding
-	inst voice.Instance
+	b     *voice.Binding
+	gates *holdTracker
+	inst  voice.Instance
 }
 
 // Run implements voice.TurnRunner.
 func (r bindingTurnRunner) Run(ctx context.Context, _ voice.SessionHandle, prompt string) (string, error) {
+	if r.gates != nil && !r.gates.await(ctx, r.inst.CallControlID) {
+		// The call released while the hold was still pending (or the
+		// turn ctx was otherwise cancelled): never start an employee
+		// turn for a dead call.
+		return "", ctx.Err()
+	}
 	turnCtx := context.WithValue(ctx, employeeIDContextKey{}, r.inst.EmployeeID)
+	// Caller-authz (leaf 02): the caller identity rides EVERY turn ctx
+	// alongside the employee stamp. The stamp is unconditional — a zero
+	// Info is a legal "voice turn, caller unresolved" mark (enforcement
+	// distinguishes stamped-zero from absent; never-stamped is only
+	// possible off the voice path).
+	turnCtx = callerid.With(turnCtx, r.inst.Caller)
 	return r.b.RunTurn(turnCtx, r.inst.CallControlID, prompt)
 }
 
@@ -1349,4 +1588,96 @@ func agentIDFromContext(ctx context.Context) string {
 		return v
 	}
 	return ""
+}
+
+// ---- inbound caller resolution (caller-authz leaf 02) ----
+
+// callerResolveBudget bounds the answer-time identity lookup. Resolution
+// rides the INBOUND ANSWER path but must never delay it: the budget is
+// generous for a local sqlite read and tiny against ringing timeouts, and
+// an expiry degrades to the same fail-soft Info{Number} as any error.
+const callerResolveBudget = 2 * time.Second
+
+// callerResolverSlot is the late-bound resolver seam. The spawn closure
+// (the inbound answer site) is constructed inside WireVoice, BEFORE the
+// contact chain exists (BuildContactChain runs over the live wiring, so
+// the contacts.db handle arrives after WireVoice returns). The slot lets
+// the answer site read the resolver at CALL time — components.go arms it
+// via VoiceWiring.SetCallerResolver — without a pointer-capture-order
+// hazard. A zero slot (never armed) reads fail-soft.
+type callerResolverSlot struct {
+	mu       sync.Mutex
+	resolver voice.CallerResolver
+}
+
+func (s *callerResolverSlot) set(r voice.CallerResolver) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.resolver = r
+}
+
+func (s *callerResolverSlot) get() voice.CallerResolver {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.resolver
+}
+
+// SetCallerResolver arms the inbound caller-authz resolver (components.go
+// calls it after the contact chain builds). Nil-safe on a nil wiring/slot;
+// re-setting replaces the resolver (the daemon arms exactly once at boot).
+func (w *VoiceWiring) SetCallerResolver(r voice.CallerResolver) {
+	if w == nil {
+		return
+	}
+	w.caller.set(r)
+}
+
+// daemonCallerResolver builds the voice.CallerResolver over the contact
+// store (contacts.db is the system of record, decision O2). A nil store is
+// tolerated: the resolver degrades to the fail-soft Number-only Info with a
+// WARN per call (never-wired posture, pinned by the gate).
+func daemonCallerResolver(store *contact.SQLiteStore, logger *slog.Logger) voice.CallerResolver {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &contactCallerResolver{store: store, logger: logger.With("sub", "caller-resolver")}
+}
+
+type contactCallerResolver struct {
+	store  *contact.SQLiteStore
+	logger *slog.Logger
+}
+
+// ResolveCaller implements voice.CallerResolver. Fail-soft by contract:
+// every lookup failure (nil store, db error, expired budget) returns
+// callerid.Info{Number} with a WARN and a NIL error - the answer path has
+// no failure branch to take (decision O1: gate actions, never answering).
+// An unknown number is NOT an error: Known=false, Name="", Approved=false
+// (decision O2), the Number-only Info.
+func (r *contactCallerResolver) ResolveCaller(ctx context.Context, e164 string) (callerid.Info, error) {
+	number := voice.NormalizeE164(e164)
+	info := callerid.Info{Number: number}
+	if r.store == nil {
+		r.logger.Warn("daemon: caller resolver has no contact store; fail-soft unapproved caller")
+		return info, nil
+	}
+	rec, found, err := r.store.LookupByPhone(ctx, number)
+	if err != nil {
+		// Includes the expired/cancelled answer budget: same fail-soft.
+		r.logger.Warn("daemon: caller lookup failed; fail-soft unapproved caller", "err", err)
+		return info, nil
+	}
+	if !found {
+		return info, nil
+	}
+	info.Name = rec.DisplayName
+	info.Approved = rec.VoiceApproved
+	info.Known = true
+	return info, nil
 }

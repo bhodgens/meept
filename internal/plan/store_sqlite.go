@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/caimlas/meept/internal/migrate"
@@ -69,7 +70,11 @@ func (s *SQLiteStore) migrate() error {
 		description TEXT,
 		file_path TEXT NOT NULL,
 		project_id TEXT,
-		state TEXT NOT NULL DEFAULT 'planning',
+		-- state is pinned to the PlanState enum (audit F6, leaf 06 T6) the
+		-- same way queue jobs.state is: the DB refuses garbage the code
+		-- would never write; migrateStateChecks carries pre-CHECK databases
+		-- through a guarded table rebuild.
+		state TEXT NOT NULL DEFAULT 'planning' CHECK (state IN ` + plansStateEnumSQL + `),
 		task_id TEXT,
 		source_session TEXT,
 		approved_at TEXT,
@@ -94,7 +99,7 @@ func (s *SQLiteStore) migrate() error {
 		total_steps INTEGER NOT NULL DEFAULT 0,
 		completed_steps INTEGER NOT NULL DEFAULT 0,
 		failed_steps INTEGER NOT NULL DEFAULT 0,
-		state TEXT NOT NULL DEFAULT 'pending'
+		state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ` + phasesStateEnumSQL + `)
 	);
 	CREATE INDEX IF NOT EXISTS idx_plan_phases_plan ON plan_phases(plan_id);
 
@@ -129,6 +134,15 @@ func (s *SQLiteStore) migrate() error {
 	// user_version 0; the guards skip the DDL and record the version.
 	if err := storeMigrations.Apply(s.db.DB, s.logger); err != nil {
 		return fmt.Errorf("failed to apply schema migrations: %w", err)
+	}
+
+	// plans.state + plan_phases.state CHECK enforcement (audit F6, leaf 06
+	// T6). Runs AFTER the registry migrations so the rebuild sees the live,
+	// current column set (goal_id, synthesis lease columns, produces/
+	// consumes/task_id). No-op on databases created with the CHECK already
+	// in the base schema.
+	if err := s.migrateStateChecks(); err != nil {
+		return err
 	}
 
 	// Normalize legacy NULL project_id rows to ''. The store used to write
@@ -360,6 +374,37 @@ func (s *SQLiteStore) UpdatePlanStateConditional(ctx context.Context, id string,
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE plans SET state = ?, updated_at = ? WHERE id = ? AND state = ?`,
 		string(toState), now, id, string(fromState))
+	if err != nil {
+		return false, fmt.Errorf("failed to conditionally update plan state: %w", err)
+	}
+	affected, _ := res.RowsAffected()
+	return affected == 1, nil
+}
+
+// UpdatePlanStateWhere atomically transitions a plan to toState when its
+// current state is one of from — the multi-value form of
+// UpdatePlanStateConditional and the single guarded-transition seam (C-P1).
+// Returns true only when exactly one row was affected. Zero rows (the row is
+// missing or already sits outside the from-set) is a lost race, NOT a DB
+// failure: it returns (false, nil) and leaves the row untouched. Error is
+// returned only for a database failure.
+func (s *SQLiteStore) UpdatePlanStateWhere(ctx context.Context, id string, from []PlanState, to PlanState) (bool, error) {
+	if len(from) == 0 {
+		// An empty from-set matches nothing; IN () would be a SQL syntax
+		// error, so report the lost race directly.
+		return false, nil
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	placeholders := make([]string, len(from))
+	args := make([]any, 0, len(from)+3)
+	args = append(args, string(to), now, id)
+	for i, state := range from {
+		placeholders[i] = "?"
+		args = append(args, string(state))
+	}
+	res, err := s.db.ExecContext(ctx, fmt.Sprintf(
+		`UPDATE plans SET state = ?, updated_at = ? WHERE id = ? AND state IN (%s)`,
+		strings.Join(placeholders, ", ")), args...)
 	if err != nil {
 		return false, fmt.Errorf("failed to conditionally update plan state: %w", err)
 	}

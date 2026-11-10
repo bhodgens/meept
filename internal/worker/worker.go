@@ -310,13 +310,16 @@ func (w *Worker) tryProcessJob(ctx context.Context) (bool, error) {
 		"agent_id", agentID,
 	)
 
-	// Mark as processing. ErrJobStateLocked means this attempt lost the race
-	// to a terminal state (the job was completed or dead-lettered by someone
-	// else, audit L8) — the work is pointless, so skip execution entirely
-	// rather than running a job nobody will accept a result for. Any other
-	// error is non-fatal and logged, exactly as before: the claim is already
-	// ours and Complete's own guard is the authority on the write.
-	markErr := qh.MarkProcessing(ctx, job.ID)
+	// Mark as processing, presenting our claim token (contract C-Q1, audit
+	// M-1): the store CAS-refuses the write unless the row is still claimed/
+	// processing under OUR token. ErrJobStateLocked now means this attempt
+	// lost the race — either to a terminal state (audit L8) or to a requeue/
+	// reclaim that retired our token — so the work is pointless, and we skip
+	// execution entirely rather than running a job nobody will accept a
+	// result for. Any other error is non-fatal and logged, exactly as before:
+	// the claim is already ours and Complete's own guard is the authority on
+	// the write.
+	markErr := qh.MarkProcessing(ctx, job.ID, job.ClaimToken)
 	if markErr != nil && errors.Is(markErr, queue.ErrJobStateLocked) {
 		w.mu.Lock()
 		w.CurrentJob = nil

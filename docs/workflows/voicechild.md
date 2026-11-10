@@ -29,6 +29,10 @@ without touching the main process.
   (stdlib-only; pinned by a test).
 - internal/voicechild: Child connects the shared text socket, routes
   setup/say/clear/end per call, one jargo-backed pipeline per call.
+  The playback worker emits the C1 `played` frame (last:true) once per
+  turn-final (`last:true` say) stream, strictly after its final byte
+  reaches the .out socket - the daemon's link-floor drain watch arms
+  from that edge; aborted/error/non-final streams emit nothing.
   Providers: Deepgram streaming STT and OpenAI TTS adapters behind the
   STTProvider/TTSProvider seams (internal/voicechild/providers), with a
   single reconnect per call, streamed first audio, and chunked s16le

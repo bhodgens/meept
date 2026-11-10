@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caimlas/meept/internal/callerid"
 	"github.com/caimlas/meept/internal/effects"
 	"github.com/caimlas/meept/internal/voice/telnyx"
 )
@@ -331,6 +332,18 @@ func (d *Dialer) Dial(ctx context.Context, req DialRequest) (DialResult, error) 
 		if hErr := d.tel.HangupCall(ctx, ccid); hErr != nil {
 			d.logger.Error("voice: dial: hangup after acquire failure", "ccid", ccid, "err", hErr)
 		}
+		// Audit 2026-11-09 finding 2 (C-V1): TrackOutbound succeeded above,
+		// so the manager holds m.outbound/m.done entries for this ccid.
+		// Without a terminal FailOutcome they leak forever and the
+		// release fan-out (goal unpark, WaitCall close, effects) never
+		// fires. C-V1 pins the order: FailOutcome AFTER finishCall,
+		// mirroring signalleg abandonOutbound (release, then the terminal
+		// outcome). releaseOnce keeps this exactly-once: a carrier hangup
+		// webhook arriving later for the dead leg is a no-op. Same shape
+		// as the local-leg spawn/audio failure teardown (local.go).
+		if d.mgr != nil {
+			d.mgr.FailOutcome(ccid, OutcomeFailed, fmt.Sprintf("registry acquire: %v", err))
+		}
 		return DialResult{}, fmt.Errorf("voice: dial: registry acquire: %w", err)
 	}
 	// Goal hold once the slot is live, before the no-answer timer can
@@ -395,7 +408,16 @@ func (d *Dialer) doneFor(ctx context.Context, ccid string) <-chan struct{} {
 	if d.mgr != nil {
 		return d.mgr.WaitCall(ccid)
 	}
-	return make(chan struct{})
+	// Unknown-after-teardown with no manager seam (receipted-but-never-
+	// tracked ccid, e.g. restart-mid-ring residual, finding 8): return a
+	// CLOSED channel + warn instead of a fresh never-closing one — the
+	// dial state is unknowable, and a silent hang punts the unknown to
+	// the caller's ctx deadline. The mgr-backed path keeps the M3 posture
+	// (audit 2026-11-06): unknown inbound ids never close.
+	closed := make(chan struct{})
+	close(closed)
+	d.logger.Warn("voice: dial: done-state unknown after restart for ccid (bounded ctx is the caller's bound)", "ccid", ccid)
+	return closed
 }
 
 // holdCall acquires the goal hold for a live outbound call when the seam
@@ -488,8 +510,23 @@ func (d *Dialer) armNoAnswerTimer(ccid string) {
 			// bookkeeping: wait the manager's done channel (the hangup /
 			// release signal) so finishCall still frees the registry
 			// slot and closes the dial Done channel exactly once.
+			//
+			// audit 2026-11-09 finding 9 (C-V1 leaf 01): the re-check and
+			// the FailOutcome fire are ONE atomic step under d.mu. The
+			// old shape unlocked between check and fire, so a
+			// NotifyAnswered landing in that window marked the call
+			// answered while the already-past-check teardown completed
+			// anyway — a no_answer outcome on a call that answered
+			// before its teardown finished. NotifyAnswered now parks on
+			// d.mu until the fire (or the refusal) is decided. Lock
+			// order is one-way, dialer mu -> manager mu: the manager
+			// never calls back into the dialer while holding m.mu
+			// (notifyAnswered and fireRelease both run outside it).
 			d.mu.Lock()
 			answered := d.answered[ccid]
+			if !answered && d.mgr != nil {
+				d.mgr.FailOutcome(ccid, OutcomeNoAnswer, fmt.Sprintf("no answer within %ds", secs))
+			}
 			d.mu.Unlock()
 			if answered {
 				d.logger.Debug("voice: no-answer timer fired for answered call (ignored)", "ccid", ccid)
@@ -503,9 +540,6 @@ func (d *Dialer) armNoAnswerTimer(ccid string) {
 				// observe; leave the slot to the caller's own release,
 				// never tear down an answered call.
 				return
-			}
-			if d.mgr != nil {
-				d.mgr.FailOutcome(ccid, OutcomeNoAnswer, fmt.Sprintf("no answer within %ds", secs))
 			}
 			d.finishCall(ccid)
 			d.logger.Info("voice: outbound dial no-answer", "ccid", ccid, "timeout_secs", secs)
@@ -594,11 +628,30 @@ const (
 // Instance is one live voice instance: the registry's unit of capacity.
 // Leg is which leg the instance rides ("phone" or "local"; CL6). The zero
 // value of Leg means "phone" so existing composite literals stay valid.
+//
+// Caller carries the resolved inbound-caller identity (caller-authz plan,
+// frozen contract): stamped at the inbound answer site, read on every turn
+// context. The zero Info is legal — "voice turn, caller unresolved" is a
+// distinct state the enforcement layer gates as unapproved (decision O2),
+// never a crash and never a prompt-rendered value (redaction is issue #126).
 type Instance struct {
 	CallControlID string
 	EmployeeID    string
 	Target        string
 	Leg           string
+	Caller        callerid.Info
+}
+
+// CallerResolver is the answer-time identity seam (caller-authz leaf 02):
+// given the inbound leg number (E.164 on the phone leg), it resolves the
+// caller's identity. The daemon implements it over the contact store
+// (contacts.db is the system of record, decision O2); internal/voice never
+// imports internal/contact. Fail-soft contract: a nil resolver or any
+// error degrades to callerid.Info{Number: e164} with a WARN — answering
+// is NEVER gated (decision O1), so no call path may block on or fail
+// because of identity resolution.
+type CallerResolver interface {
+	ResolveCaller(ctx context.Context, e164 string) (callerid.Info, error)
 }
 
 // Registry tracks live calls: N concurrent calls need N slots
@@ -693,6 +746,49 @@ func (r *CallRegistry) Release(ccid string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.live, ccid)
+}
+
+// SetCaller attaches the resolved inbound-caller identity (caller-authz
+// leaf 02) to a live instance. The answer site Acquires first and resolves
+// identity AFTER that (resolution is fail-soft and must never race the
+// slot), so the identity rides the registry row the setup router reads.
+// Unknown ccid is a no-op — a released call has no loop to stamp.
+func (r *CallRegistry) SetCaller(ccid string, caller callerid.Info) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if inst, ok := r.live[ccid]; ok {
+		inst.Caller = caller
+		r.live[ccid] = inst
+	}
+}
+
+// ResolveCallerOrFailSoft runs the resolver seam for one inbound answer and
+// enforces the fail-soft contract in ONE place: nil resolver, a resolver
+// error, or an empty resolution all degrade to callerid.Info{Number: e164}
+// (unknown = unapproved, decision O2) with a WARN. It never returns an
+// error — answering is never gated (decision O1), so the answer site can
+// call it inline before holdPhoneCall without any failure branch.
+func ResolveCallerOrFailSoft(ctx context.Context, res CallerResolver, e164 string, logger *slog.Logger) callerid.Info {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	info := callerid.Info{Number: e164}
+	if res == nil {
+		logger.Warn("voice: caller resolver not wired; caller fail-soft (unapproved)", "number_present", e164 != "")
+		return info
+	}
+	resolved, err := res.ResolveCaller(ctx, e164)
+	if err != nil {
+		logger.Warn("voice: caller resolution failed; caller fail-soft (unapproved)",
+			"number_present", e164 != "", "err", err)
+		return info
+	}
+	// Number always carries the leg number even if the resolver left it
+	// blank (the gate's audit row keys on it).
+	if resolved.Number == "" {
+		resolved.Number = e164
+	}
+	return resolved
 }
 
 // Live snapshots the live instances. Each Instance carries its Leg

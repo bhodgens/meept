@@ -6,6 +6,7 @@ package voice
 
 import (
 	"context"
+	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -913,4 +914,388 @@ func TestTalkLoopTurnTimeoutCap(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("turn timeout cap never fired on a hung turn")
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Link half-duplex loop-side pins (turn-taking leaf): the HoldPrompt
+// park/replace/flush/drop semantics run against a FAKE hold (no
+// coordinator), so the TalkLoop seam contract is pinned independently of
+// the link wiring. Pins: nil HoldPrompt = the legacy dispatch path (every
+// pre-existing TestTalkLoop* run already builds zero-value deps); a
+// denied final parks (no turn starts, kind=prompt_held); a SECOND held
+// final REPLACES the pending one (latest question wins); FlushHeld
+// releases on the Run goroutine with kind=prompt_released and re-consults
+// the gate (a stale flush against a busy peer re-parks); an allowed
+// prompt DROPS a stale park; a park alive at loop exit drops with reason
+// "loop ended" and never dispatches into the dead call; SuppressGreeting
+// opens silent; TurnState fires turn_start at dispatch + turn_final at
+// drain.
+// ---------------------------------------------------------------------------
+
+// holdTurns counts dispatched turns (parked prompts must never reach it).
+type holdTurns struct {
+	mu     sync.Mutex
+	starts int
+	reply  string
+}
+
+func (h *holdTurns) Run(_ context.Context, _ SessionHandle, _ string) (string, error) {
+	h.mu.Lock()
+	h.starts++
+	h.mu.Unlock()
+	return h.reply, nil
+}
+
+func (h *holdTurns) count() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.starts
+}
+
+// fakeHold is the coordinator stand-in: the gate returns the current
+// allow flag and counts denials (parks).
+type fakeHold struct {
+	mu        sync.Mutex
+	allowNext bool
+	parks     int
+}
+
+func (f *fakeHold) hold(_ Instance, _ func()) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	allow := f.allowNext
+	if !allow {
+		f.parks++
+	}
+	return allow
+}
+
+func (f *fakeHold) allow() {
+	f.mu.Lock()
+	f.allowNext = true
+	f.mu.Unlock()
+}
+
+func (f *fakeHold) deny() {
+	f.mu.Lock()
+	f.allowNext = false
+	f.mu.Unlock()
+}
+
+func (f *fakeHold) parkCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.parks
+}
+
+func newHoldTalkLoop(t *testing.T, sink *recordSink, sup Supervisor, turns TurnRunner, hold func(Instance, func()) bool, logger *slog.Logger, cfg TalkLoopConfig) *TalkLoop {
+	t.Helper()
+	return NewTalkLoop(TalkDeps{
+		Supervisor: sup,
+		Turns:      turns,
+		SessionFor: constSession(SessionHandle{ID: "s-hold", ConversationID: "c-hold"}),
+		Send:       sink.Send,
+		OnEnd:      func(ccid, reason string) {},
+		Logger:     logger,
+		HoldPrompt: hold,
+	}, cfg)
+}
+
+func finalPrompt(ccid, text string) Frame {
+	last := true
+	return Frame{CallID: ccid, Event: EventPrompt, Text: text, Last: &last}
+}
+
+func logContains(buf interface{ String() string }, wants ...string) bool {
+	s := buf.String()
+	for _, w := range wants {
+		if !strings.Contains(s, w) {
+			return false
+		}
+	}
+	return true
+}
+
+// TestTalkLoopHeldPromptParksAndFlushes pins the core park/release: a
+// denied final parks (no dispatch, prompt_held logged), FlushHeld
+// releases it (prompt_released logged, the turn dispatches with the
+// parked text).
+func TestTalkLoopHeldPromptParksAndFlushes(t *testing.T) {
+	var buf syncBuffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	sink := &recordSink{}
+	sup := &cannedSupervisor{}
+	turns := &holdTurns{reply: "The report is ready."}
+	hold := &fakeHold{allowNext: true}
+	loop := newHoldTalkLoop(t, sink, sup, turns, hold.hold, logger, TalkLoopConfig{
+		GreetingLine: "Hello.",
+	})
+
+	cancel, done := runLoop(t, loop, "cc-park")
+	defer cancel()
+	waitFor(t, 2*time.Second, "no greeting", func() bool { return len(sink.sayTexts()) >= 1 })
+
+	hold.deny()
+	loop.frames <- finalPrompt("cc-park", "is it done?")
+	waitFor(t, 2*time.Second, "prompt_held line", func() bool {
+		return logContains(&buf, `kind=prompt_held`, `text_preview="is it done?"`)
+	})
+	if n := turns.count(); n != 0 {
+		t.Fatalf("turn started while held (%d), want 0", n)
+	}
+	if len(sink.sayTexts()) != 1 {
+		t.Fatalf("says after park = %v, want greeting only", sink.sayTexts())
+	}
+
+	hold.allow()
+	loop.FlushHeld()
+	waitFor(t, 2*time.Second, "prompt_released line", func() bool {
+		return logContains(&buf, `kind=prompt_released`, `text_preview="is it done?"`)
+	})
+	waitFor(t, 2*time.Second, "released turn dispatches", func() bool { return turns.count() == 1 })
+	waitFor(t, 2*time.Second, "reply spoken", func() bool { return len(sink.sayTexts()) >= 2 })
+	if sink.sayTexts()[1] != "The report is ready." {
+		t.Fatalf("second say = %q, want the released turn's reply", sink.sayTexts()[1])
+	}
+	cancel()
+	<-done
+}
+
+// TestTalkLoopHeldPromptLatestWins pins the one-slot park: a second held
+// final REPLACES the pending one (latest question wins) - the release
+// dispatches ONLY the newest text and the stale park never runs.
+func TestTalkLoopHeldPromptLatestWins(t *testing.T) {
+	var buf syncBuffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	sink := &recordSink{}
+	sup := &cannedSupervisor{}
+	turns := &holdTurns{reply: "The report is ready."}
+	hold := &fakeHold{allowNext: false} // park from the first prompt on
+	loop := newHoldTalkLoop(t, sink, sup, turns, hold.hold, logger, TalkLoopConfig{
+		GreetingLine: "Hello.",
+	})
+
+	cancel, done := runLoop(t, loop, "cc-latest")
+	defer cancel()
+	waitFor(t, 2*time.Second, "no greeting", func() bool { return len(sink.sayTexts()) >= 1 })
+
+	loop.frames <- finalPrompt("cc-latest", "stale question")
+	waitFor(t, 2*time.Second, "stale park", func() bool {
+		return logContains(&buf, `kind=prompt_held`, `text_preview="stale question"`)
+	})
+	loop.frames <- finalPrompt("cc-latest", "newest question")
+	waitFor(t, 2*time.Second, "replace park", func() bool {
+		return logContains(&buf, `text_preview="newest question"`, `replaced_pending=true`)
+	})
+	if n := turns.count(); n != 0 {
+		t.Fatalf("turn starts = %d while both prompts held, want 0", n)
+	}
+	if hold.parkCount() != 2 {
+		t.Fatalf("hold denials = %d, want 2", hold.parkCount())
+	}
+
+	hold.allow()
+	loop.FlushHeld()
+	waitFor(t, 2*time.Second, "newest released", func() bool {
+		return logContains(&buf, `kind=prompt_released`, `text_preview="newest question"`)
+	})
+	waitFor(t, 2*time.Second, "newest dispatched", func() bool { return turns.count() == 1 })
+	time.Sleep(50 * time.Millisecond)
+	if n := turns.count(); n != 1 {
+		t.Fatalf("turn starts = %d after release, want exactly 1 (the stale park leaked)", n)
+	}
+	loop.frames <- Frame{CallID: "cc-latest", Event: EventEnd}
+	<-done
+}
+
+// TestTalkLoopHeldPromptDroppedByNewerDispatch pins the other
+// latest-question-wins edge: the coordinator ALLOWS a fresher prompt
+// while one is parked - the parked question drops with a named reason
+// and never dispatches behind the fresher one.
+func TestTalkLoopHeldPromptDroppedByNewerDispatch(t *testing.T) {
+	var buf syncBuffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	sink := &recordSink{}
+	sup := &cannedSupervisor{}
+	turns := &holdTurns{reply: "The report is ready."}
+	hold := &fakeHold{allowNext: false}
+	loop := newHoldTalkLoop(t, sink, sup, turns, hold.hold, logger, TalkLoopConfig{
+		GreetingLine: "Hello.",
+	})
+
+	cancel, done := runLoop(t, loop, "cc-floor")
+	defer cancel()
+	waitFor(t, 2*time.Second, "no greeting", func() bool { return len(sink.sayTexts()) >= 1 })
+
+	loop.frames <- finalPrompt("cc-floor", "parked question")
+	waitFor(t, 2*time.Second, "park", func() bool {
+		return logContains(&buf, `text_preview="parked question"`)
+	})
+
+	hold.allow() // the fresher prompt takes the floor
+	loop.frames <- finalPrompt("cc-floor", "fresher question")
+	waitFor(t, 2*time.Second, "fresher dispatch", func() bool { return turns.count() == 1 })
+	waitFor(t, 2*time.Second, "stale drop log", func() bool {
+		return logContains(&buf, `kind=prompt_dropped`, `reason="newer prompt took the floor"`)
+	})
+	if hold.parkCount() != 1 {
+		t.Fatalf("hold denials = %d, want 1 (the fresher prompt was allowed)", hold.parkCount())
+	}
+
+	// A late flush signal (a coordinator still believing a park is
+	// pending) finds nothing parked: no dispatch, no release line.
+	loop.FlushHeld()
+	time.Sleep(50 * time.Millisecond)
+	if n := turns.count(); n != 1 {
+		t.Fatalf("turn starts = %d after stale flush, want 1", n)
+	}
+	if strings.Contains(buf.String(), "kind=prompt_released") {
+		t.Fatalf("a release line appeared for a dropped park:\n%s", buf.String())
+	}
+	loop.frames <- Frame{CallID: "cc-floor", Event: EventEnd}
+	<-done
+}
+
+// TestTalkLoopHeldPromptDroppedAtLoopEnd pins the exit rule: a park
+// alive when the call ends is logged and dropped - never dispatched into
+// a dead loop.
+func TestTalkLoopHeldPromptDroppedAtLoopEnd(t *testing.T) {
+	var buf syncBuffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	sink := &recordSink{}
+	sup := &cannedSupervisor{}
+	turns := &holdTurns{reply: "never"}
+	hold := &fakeHold{allowNext: false}
+	loop := newHoldTalkLoop(t, sink, sup, turns, hold.hold, logger, TalkLoopConfig{
+		GreetingLine: "Hello.",
+	})
+
+	cancel, done := runLoop(t, loop, "cc-exit")
+	defer cancel()
+	waitFor(t, 2*time.Second, "no greeting", func() bool { return len(sink.sayTexts()) >= 1 })
+
+	loop.frames <- finalPrompt("cc-exit", "parked at hangup")
+	waitFor(t, 2*time.Second, "park", func() bool {
+		return logContains(&buf, `text_preview="parked at hangup"`)
+	})
+	loop.frames <- Frame{CallID: "cc-exit", Event: EventEnd}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("loop did not exit on end frame")
+	}
+	if !logContains(&buf, `kind=prompt_dropped`, `reason="loop ended"`) {
+		t.Fatalf("no loop-end drop line:\n%s", buf.String())
+	}
+	if n := turns.count(); n != 0 {
+		t.Fatalf("turn starts = %d, want 0 - parked prompt dispatched into a dead call", n)
+	}
+}
+
+// TestTalkLoopReleaseRegateReholdsOnBusyPeer pins the flush race: a
+// stale flush signal whose re-gate finds the peer busy AGAIN re-parks
+// (prompt_reheld) and does not dispatch; the next flush with the gate
+// open releases for real.
+func TestTalkLoopReleaseRegateReholdsOnBusyPeer(t *testing.T) {
+	var buf syncBuffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	sink := &recordSink{}
+	sup := &cannedSupervisor{}
+	turns := &holdTurns{reply: "ok."}
+	hold := &fakeHold{allowNext: false}
+	loop := newHoldTalkLoop(t, sink, sup, turns, hold.hold, logger, TalkLoopConfig{
+		GreetingLine: "Hello.",
+	})
+
+	cancel, done := runLoop(t, loop, "cc-regate")
+	defer cancel()
+	waitFor(t, 2*time.Second, "no greeting", func() bool { return len(sink.sayTexts()) >= 1 })
+
+	loop.frames <- finalPrompt("cc-regate", "question under a new turn")
+	waitFor(t, 2*time.Second, "park", func() bool { return strings.Contains(buf.String(), "kind=prompt_held") })
+
+	// Flush while the gate still denies: re-gate re-parks.
+	loop.FlushHeld()
+	waitFor(t, 2*time.Second, "re-held line", func() bool {
+		return strings.Contains(buf.String(), "kind=prompt_reheld")
+	})
+	if n := turns.count(); n != 0 {
+		t.Fatalf("turn started on a denied re-gate flush (%d), want 0", n)
+	}
+
+	// Gate opens: the re-parked prompt rides the next release.
+	hold.allow()
+	loop.FlushHeld()
+	waitFor(t, 2*time.Second, "dispatched", func() bool { return turns.count() == 1 })
+	loop.frames <- Frame{CallID: "cc-regate", Event: EventEnd}
+	<-done
+}
+
+// TestTalkLoopTurnStateEdges pins the observation seam: turn_start at
+// dispatch, turn_final at drain. Nil seam = zero emissions = the legacy
+// path (every existing TestTalkLoop* run already proves that shape).
+func TestTalkLoopTurnStateEdges(t *testing.T) {
+	var mu sync.Mutex
+	var states []string
+	record := func(ccid string, seq uint64, kind string) {
+		mu.Lock()
+		states = append(states, ccid+":"+kind)
+		mu.Unlock()
+	}
+	sink := &recordSink{}
+	turns := &holdTurns{reply: "Done."}
+	loop := NewTalkLoop(TalkDeps{
+		Supervisor: &cannedSupervisor{},
+		Turns:      turns,
+		SessionFor: constSession(SessionHandle{ID: "s", ConversationID: "c"}),
+		Send:       sink.Send,
+		OnEnd:      func(ccid, reason string) {},
+		Logger:     testLogger(),
+		TurnState:  record,
+	}, TalkLoopConfig{})
+
+	cancel, done := runLoop(t, loop, "cc-state")
+	defer cancel()
+
+	loop.frames <- finalPrompt("cc-state", "status?")
+	waitFor(t, 2*time.Second, "turn_final", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(states) >= 2
+	})
+	cancel()
+	<-done
+	mu.Lock()
+	defer mu.Unlock()
+	if states[0] != "cc-state:turn_start" || states[1] != "cc-state:turn_final" {
+		t.Fatalf("turn-state edges = %v, want [turn_start turn_final]", states)
+	}
+}
+
+// TestTalkLoopSuppressGreeting pins the single-greeting rule: with
+// SuppressGreeting the loop opens silent (no say frames at connect), and
+// prompts still flow normally.
+func TestTalkLoopSuppressGreeting(t *testing.T) {
+	sink := &recordSink{}
+	turns := &holdTurns{reply: "Answer."}
+	loop := newTestTalkLoop(t, sink.Send, &cannedSupervisor{}, turns, TalkLoopConfig{
+		GreetingLine:     "Hello, how can I help?",
+		FillerLines:      []string{"One moment."},
+		SuppressGreeting: true,
+	})
+
+	cancel, done := runLoop(t, loop, "cc-silent")
+	defer cancel()
+	time.Sleep(80 * time.Millisecond)
+	if says := sink.sayTexts(); len(says) != 0 {
+		t.Fatalf("suppressed-greeting loop said %v at connect, want silence", says)
+	}
+
+	loop.frames <- finalPrompt("cc-silent", "question")
+	waitFor(t, 2*time.Second, "answer after prompt", func() bool { return len(sink.sayTexts()) >= 1 })
+	if got := strings.Join(sink.sayTexts(), " | "); strings.Contains(got, "Hello, how can I help?") {
+		t.Fatalf("greeting leaked into a suppressed run: %v", sink.sayTexts())
+	}
+	cancel()
+	<-done
 }

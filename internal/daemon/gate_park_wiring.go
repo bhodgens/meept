@@ -14,6 +14,10 @@
 //     the agents.goals.approve RPC path (Manager.ApprovePlan -> the same
 //     plan.approved event covers tier-2 goal plans, since the employee
 //     PlanDisposer delegates to the same PlanManager);
+//   - gate RELEASES ride the plan terminal-decision events (M-12 / C-K3):
+//     plan.rejected / plan.cancelled (both published by PlanManager with
+//     plan_id) discard the parked gate WITHOUT resuming it, so no gate
+//     row outlives its plan's terminal decision;
 //   - the TurnParker's Start re-arm (components.Start, after goal-loop
 //     registration) re-arms gate rows parked before a restart, so a
 //     late approval still resumes (T3).
@@ -85,6 +89,10 @@ func (c *Components) wireGateParker() {
 		},
 	)
 	parker.SetParkPersistence(c.ParkStore, agent.ParkKindGate)
+	// C-K1 (tree 04 leaf 01): owner "gate" — ParkKindGate is already this
+	// parker's exclusive kind, but the owner stamp keeps every row
+	// self-describing and matches the migrate backfill (kind=gate -> 'gate').
+	parker.SetPersistenceOwner(agent.ParkOwnerGate)
 	c.GateParker = agent.NewGateParker(c.Logger.With("component", "gate-parker"), parker)
 }
 
@@ -189,6 +197,62 @@ func (c *Components) handleGateSubmit(msg *models.BusMessage) {
 	}
 }
 
+// handleGateRelease processes one plan.rejected / plan.cancelled event
+// (M-12 / C-K3): discard the gate park keyed to that plan WITHOUT
+// resuming it. Re-drive safety: an unknown or already-resumed gate id is
+// a silent no-op (ReleaseByKey returns false). The event reason rides
+// through so the lifecycle emission distinguishes rejection from
+// cancellation.
+func (c *Components) handleGateRelease(msg *models.BusMessage, reason string) {
+	if msg == nil || c.GateParker == nil {
+		return
+	}
+	var payload struct {
+		PlanID string `json:"plan_id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil || payload.PlanID == "" {
+		c.Logger.Warn("gate release: undecodable plan terminal payload",
+			"reason", reason, "error", err)
+		return
+	}
+	released, err := c.GateParker.ReleaseByKey(payload.PlanID, reason)
+	if err != nil {
+		c.Logger.Warn("gate release failed",
+			"gate_id", payload.PlanID, "reason", reason, "error", err)
+		return
+	}
+	if released {
+		c.Logger.Info("gate park released on plan terminal decision",
+			"gate_id", payload.PlanID,
+			"reason", reason,
+		)
+	}
+}
+
+// pumpGateReleases drains the plan.rejected / plan.cancelled
+// subscriptions and releases the matching gate parks (M-12: no gate row
+// outlives its plan's terminal decision).
+func (c *Components) pumpGateReleases(ctx context.Context, subRejected, subCancelled *bus.Subscriber) {
+	for {
+		select {
+		case <-ctx.Done():
+			c.msgBus.Unsubscribe(subRejected)
+			c.msgBus.Unsubscribe(subCancelled)
+			return
+		case msg, ok := <-subRejected.Channel:
+			if !ok {
+				return
+			}
+			c.handleGateRelease(msg, "rejected")
+		case msg, ok := <-subCancelled.Channel:
+			if !ok {
+				return
+			}
+			c.handleGateRelease(msg, "cancelled")
+		}
+	}
+}
+
 // StartGateParkPump subscribes the gate park/resume pumps on the
 // components lifecycle context and Starts the gate parker (its re-arm
 // loads gate rows parked before this boot). Called from Components.Start
@@ -203,6 +267,12 @@ func (c *Components) StartGateParkPump(ctx context.Context) {
 	go func() { c.pumpGateApprovals(ctx, subApproved) }()
 	subSubmit := c.msgBus.Subscribe("gate-park-pump", "plan.submitting")
 	go func() { c.pumpGateSubmits(ctx, subSubmit) }()
+	// M-12 / C-K3: a rejected or cancelled plan must not strand its gate
+	// park. Both terminal plan events carry plan_id; the release pump
+	// discards the row + queued record WITHOUT resuming.
+	subRejected := c.msgBus.Subscribe("gate-release-pump", "plan.rejected")
+	subCancelled := c.msgBus.Subscribe("gate-release-pump", "plan.cancelled")
+	go func() { c.pumpGateReleases(ctx, subRejected, subCancelled) }()
 	c.GateParker.Turns().Start(ctx)
 	// Audit HITL-1: arm the goal-loop human-approval gate seams (park +
 	// resume) over the SAME parker — the goal-kind branch of the checkpoint
@@ -211,6 +281,7 @@ func (c *Components) StartGateParkPump(ctx context.Context) {
 	c.Logger.Info("gate checkpoint pump wired",
 		"park_topic", "plan.submitting",
 		"resume_topic", "plan.approved",
+		"release_topics", "plan.rejected,plan.cancelled",
 	)
 }
 

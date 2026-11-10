@@ -45,6 +45,7 @@ type voiceLinkState struct {
 	mgr    *voice.LinkManager
 	leg    *voice.LocalLeg
 	store  linkTranscriptSource
+	turns  *voice.LinkTurnRegistry
 	logger *slog.Logger
 }
 
@@ -61,6 +62,7 @@ func (s *voiceLinkState) manager() *voice.LinkManager {
 		m, err := voice.NewLinkManager(voice.LinkDeps{
 			Leg:         s.leg,
 			Store:       s.store,
+			Turns:       s.turns,
 			DialTimeout: 5 * time.Second,
 			RetainEnded: 30 * time.Minute,
 			Logger:      s.logger.With("sub", "voice-link"),
@@ -88,25 +90,28 @@ func voiceLinkSeams(w *VoiceWiring, store linkTranscriptSource, mgr *employee.Ma
 	state := &voiceLinkState{
 		leg:    w.Local,
 		store:  store,
+		turns:  w.linkTurns,
 		logger: logger,
 	}
 	// Registry rules (busy / duplicate target) surface from inside
 	// LocalLeg.Open as voice.ErrBusy / voice.ErrDuplicateTarget and are
 	// mapped by mapVoiceLinkOpenErr - no registry read needed here.
 
-	open := func(ctx context.Context, employeeA, employeeB string) (rpc.VoiceLinkOpen, error) {
+	open := func(ctx context.Context, employeeA, employeeB string, opts rpc.VoiceLinkOpenOptions) (rpc.VoiceLinkOpen, error) {
 		m := state.manager()
 		if m == nil {
 			return rpc.VoiceLinkOpen{}, rpc.ErrVoiceLinkDisabled
 		}
-		link, err := m.Open(ctx, employeeA, employeeB)
+		link, err := m.Open(ctx, employeeA, employeeB, voice.LinkOpenOptions{Monitor: opts.Monitor})
 		if err != nil {
 			return rpc.VoiceLinkOpen{}, mapVoiceLinkOpenErr(err)
 		}
 		return rpc.VoiceLinkOpen{
-			LinkID: link.ID,
-			ACCID:  link.ACCID,
-			BCCID:  link.BCCID,
+			LinkID:       link.ID,
+			ACCID:        link.ACCID,
+			BCCID:        link.BCCID,
+			MonitorAPath: link.MonitorAPath,
+			MonitorBPath: link.MonitorBPath,
 		}, nil
 	}
 

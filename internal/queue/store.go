@@ -42,6 +42,17 @@ var ErrJobNotClaimable = errors.New("job not in a claimable state for completion
 // superseded must not resurrect a finished job into 'processing'.
 var ErrJobStateLocked = errors.New("job not in an updatable state")
 
+// ErrRetryBudgetExhausted is returned by Store.Retry — the operator-facing
+// retry surface (bus queue.retry handler, HTTP POST /api/v1/queue/jobs/{id}/retry,
+// RPC proxy) — when the job's retry budget is already spent
+// (retry_count >= max_retries). Audit 2026-11-09 finding F9: without this
+// bound an operator Retry resurrected exhausted jobs to pending forever.
+// The refusal leaves the row COMPLETELY unchanged (no pending-resurrection,
+// no retry_count bump, no backoff rewrite). The worker path is untouched:
+// it guards with Job.CanRetry() upstream and never reaches the bound check
+// with an exhausted count.
+var ErrRetryBudgetExhausted = errors.New("job retry budget exhausted")
+
 // Store provides SQLite persistence for jobs.
 type Store struct {
 	db     *sql.DB
@@ -59,13 +70,27 @@ func NewStore(dbPath string, logger *slog.Logger) (*Store, error) {
 	// were silently ignored (see internal/plan/store_sqlite.go for the same
 	// rationale). WAL + busy_timeout keep parallel job claims/acks from
 	// turning into a SQLITE_BUSY storm.
-	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)")
+	//
+	// `_txlock=immediate` is the TRUE BEGIN IMMEDIATE mechanism (audit F6):
+	// the modernc driver ignores database/sql TxOptions isolation levels
+	// entirely — only this DSN param makes the driver issue
+	// "BEGIN IMMEDIATE" instead of "BEGIN" (modernc.org/sqlite
+	// sqlite.go `_txlock` -> conn.beginMode, tx.go newTx). Every
+	// Begin/BeginTx on this pool now takes the write lock up front, which is
+	// what the FailAttempt/Retry/moveToDead comments have always claimed.
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)&_txlock=immediate")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 	// Serialize writes at the connection-pool level: sqlite allows exactly
 	// one writer at a time, so a pool wider than the writer count only adds
 	// BUSY handoffs. Multiple *readers* remain allowed under WAL.
+	//
+	// NOTE: the deferred-vs-immediate distinction is behaviorally invisible
+	// today because this pool is width-1 (every transaction is the single
+	// connection's). Widening SetMaxOpenConns must revisit transaction modes
+	// and reader concurrency before landing — the `_txlock=immediate` above
+	// then becomes the active writer serialization, not just documentation.
 	db.SetMaxOpenConns(1)
 	if err := db.Ping(); err != nil {
 		db.Close()
@@ -94,7 +119,12 @@ CREATE TABLE IF NOT EXISTS jobs (
 	agent_id      TEXT,
 	type          TEXT NOT NULL,
 	priority      INTEGER DEFAULT 2,
-	state         TEXT DEFAULT 'pending',
+	-- state is pinned to the JobState enum (audit 2026-11-09 F7), the same
+	-- way effects_ledger.state is: the DB refuses garbage the code would
+	-- never write. migrate() carries pre-CHECK databases through a guarded
+	-- table rebuild. NULL passes the CHECK (SQL three-valued logic) for
+	-- legacy rows that never set a state.
+	state         TEXT DEFAULT 'pending' CHECK (state IN ('pending','claimed','processing','completed','failed','dead')),
 	payload       TEXT NOT NULL,
 	required_caps TEXT DEFAULT '[]',
 	max_retries   INTEGER DEFAULT 3,
@@ -132,6 +162,7 @@ CREATE TABLE IF NOT EXISTS dead_letter (
 	required_caps TEXT,
 	max_retries   INTEGER,
 	retry_count   INTEGER,
+	interactive   INTEGER DEFAULT 0,
 	error         TEXT,
 	created_at    TEXT NOT NULL,
 	died_at       TEXT NOT NULL,
@@ -189,6 +220,11 @@ func (s *Store) migrate() error {
 		// SQLite applies DEFAULT 0 to pre-existing rows on ADD COLUMN, which
 		// is exactly the required backfill: old jobs are background.
 		{"jobs", "interactive", "ALTER TABLE jobs ADD COLUMN interactive INTEGER DEFAULT 0"},
+		// Dead-letter interactive carrier (audit 2026-11-09 M-4 / leaf 02):
+		// the dead-letter round trip must preserve the interactive flag so a
+		// recovered interactive job keeps its D11 claim ordering. Same
+		// DEFAULT-0 backfill semantics as the jobs column above.
+		{"dead_letter", "interactive", "ALTER TABLE dead_letter ADD COLUMN interactive INTEGER DEFAULT 0"},
 		// Completion epoch/token (audit H4). Existing rows get NULL, which
 		// reads back as "never claimed under a token" — CompleteAttempt then
 		// falls back to the legacy state-only predicate (see
@@ -214,6 +250,13 @@ func (s *Store) migrate() error {
 			s.logger.Warn("Legacy migration failed",
 				"migration", mig.declSQL, "error", err)
 		}
+	}
+
+	// jobs.state CHECK migration (audit 2026-11-09 F7, leaf 04). Runs AFTER
+	// the legacy column migrations so the table rebuild sees the live,
+	// current column set — not a stale baseSchema assumption.
+	if err := s.migrateJobsStateCheck(); err != nil {
+		return err
 	}
 
 	// Claim-covering index for interactive-first ordering (tree 04 leaf 02,
@@ -254,6 +297,188 @@ func (s *Store) columnExists(table, column string) (bool, error) {
 		}
 	}
 	return false, rows.Err()
+}
+
+// jobsStateEnumSQL lists the six JobState values pinned by the jobs.state
+// CHECK constraint (audit 2026-11-09 F7). Kept in sync with the constants in
+// job.go (StatePending..StateDead); the migration and the base schema both
+// interpolate it so there is exactly one source of truth.
+const jobsStateEnumSQL = `('pending','claimed','processing','completed','failed','dead')`
+
+// migrateJobsStateCheck enforces the jobs.state CHECK on databases created
+// before the constraint existed (audit 2026-11-09 F7). SQLite cannot ALTER
+// TABLE ADD CONSTRAINT, so a pre-CHECK jobs table is rebuilt: create a new
+// table carrying the same live column set (captured from PRAGMA table_info,
+// which includes every legacy/cluster column migrated so far) PLUS the state
+// CHECK, copy all rows across, swap names, and recreate every index the old
+// table owned from their captured sqlite_master SQL — DROP TABLE takes the
+// indexes with it, so a rebuild that forgets to re-create them silently
+// degrades claim scans to full-table scans.
+//
+// The whole swap runs in one transaction (the store's DSN sets
+// _txlock=immediate, so the BEGIN takes the write lock up front). Pre-flight:
+// if any existing row's state is outside the enum, the migration FAILS with a
+// clear error and rolls back — data is never deleted or rewritten to make a
+// constraint fit. The probe (sqlite_master SQL containing CHECK) makes this a
+// no-op on fresh databases and on already-migrated ones.
+func (s *Store) migrateJobsStateCheck() error {
+	var tableSQL string
+	err := s.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='jobs'`).Scan(&tableSQL)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil // no jobs table at all (base schema runs first; defensive)
+	}
+	if err != nil {
+		return fmt.Errorf("jobs CHECK migration probe: %w", err)
+	}
+	if strings.Contains(strings.ToUpper(tableSQL), "CHECK") {
+		return nil // fresh schema or already migrated — nothing to do
+	}
+
+	// Live column set, in table order. The rebuild must carry every column
+	// forward (audit lesson: the legacy ALTERs add columns the CREATE would
+	// otherwise drop), so this is read from the database, not assumed.
+	colRows, err := s.db.Query(`PRAGMA table_info(jobs)`)
+	if err != nil {
+		return fmt.Errorf("jobs CHECK migration table_info: %w", err)
+	}
+	type colDef struct {
+		name    string
+		ctype   string
+		notnull int
+		dflt    sql.NullString
+		pk      int
+	}
+	var cols []colDef
+	for colRows.Next() {
+		var (
+			cid       int
+			c         colDef
+			notnull   int
+			dfltValue sql.NullString
+			pk        int
+		)
+		if err := colRows.Scan(&cid, &c.name, &c.ctype, &notnull, &dfltValue, &pk); err != nil {
+			colRows.Close()
+			return fmt.Errorf("jobs CHECK migration table_info scan: %w", err)
+		}
+		c.notnull = notnull
+		c.dflt = dfltValue
+		c.pk = pk
+		cols = append(cols, c)
+	}
+	if err := colRows.Err(); err != nil {
+		colRows.Close()
+		return fmt.Errorf("jobs CHECK migration table_info iteration: %w", err)
+	}
+	colRows.Close()
+	if len(cols) == 0 {
+		return fmt.Errorf("jobs CHECK migration: PRAGMA table_info(jobs) returned no columns")
+	}
+
+	// Captured index SQL for jobs (explicit indexes only; the implicit
+	// sqlite_autoindex for the PRIMARY KEY travels with the new CREATE).
+	idxRows, err := s.db.Query(`SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name='jobs' AND sql IS NOT NULL`)
+	if err != nil {
+		return fmt.Errorf("jobs CHECK migration index capture: %w", err)
+	}
+	var indexSQL []string
+	for idxRows.Next() {
+		var sqlText string
+		if err := idxRows.Scan(&sqlText); err != nil {
+			idxRows.Close()
+			return fmt.Errorf("jobs CHECK migration index scan: %w", err)
+		}
+		indexSQL = append(indexSQL, sqlText)
+	}
+	if err := idxRows.Err(); err != nil {
+		idxRows.Close()
+		return fmt.Errorf("jobs CHECK migration index iteration: %w", err)
+	}
+	idxRows.Close()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin jobs CHECK migration: %w", err)
+	}
+	defer func() {
+		if rErr := tx.Rollback(); rErr != nil && !errors.Is(rErr, sql.ErrTxDone) {
+			s.logger.Debug("jobs CHECK migration rollback (no-op after commit)", "error", rErr)
+		}
+	}()
+
+	// Pre-flight data check: refuse rather than destroy. Any row outside the
+	// enum fails the migration with the offending values listed.
+	var badCount int
+	var badStates sql.NullString
+	if err := tx.QueryRow(fmt.Sprintf(`SELECT
+		(SELECT COUNT(*) FROM jobs WHERE state IS NOT NULL AND state NOT IN %[1]s),
+		(SELECT group_concat(s, ', ') FROM
+			(SELECT DISTINCT state AS s FROM jobs WHERE state IS NOT NULL AND state NOT IN %[1]s))`,
+		jobsStateEnumSQL)).Scan(&badCount, &badStates); err != nil {
+		return fmt.Errorf("jobs CHECK migration pre-flight: %w", err)
+	}
+	if badCount > 0 {
+		return fmt.Errorf("jobs CHECK migration refused: %d row(s) have state outside the JobState enum (values: %s); repair them before upgrading", badCount, badStates.String)
+	}
+
+	// Build the replacement CREATE from the live columns.
+	var create strings.Builder
+	create.WriteString("CREATE TABLE jobs_new (\n")
+	for _, c := range cols {
+		create.WriteString("  ")
+		create.WriteString(quoteSQLIdent(c.name))
+		if c.ctype != "" {
+			create.WriteString(" " + c.ctype)
+		}
+		if c.pk == 1 {
+			create.WriteString(" PRIMARY KEY")
+		}
+		if c.notnull == 1 {
+			create.WriteString(" NOT NULL")
+		}
+		if c.dflt.Valid {
+			create.WriteString(" DEFAULT " + c.dflt.String)
+		}
+		create.WriteString(",\n")
+	}
+	create.WriteString(fmt.Sprintf("  CHECK (state IN %s)\n)", jobsStateEnumSQL))
+
+	colList := make([]string, len(cols))
+	for i, c := range cols {
+		colList[i] = quoteSQLIdent(c.name)
+	}
+	colsJoined := strings.Join(colList, ", ")
+
+	if _, err := tx.Exec(create.String()); err != nil {
+		return fmt.Errorf("jobs CHECK migration create jobs_new: %w", err)
+	}
+	if _, err := tx.Exec(fmt.Sprintf("INSERT INTO jobs_new (%s) SELECT %s FROM jobs", colsJoined, colsJoined)); err != nil {
+		return fmt.Errorf("jobs CHECK migration copy rows: %w", err)
+	}
+	if _, err := tx.Exec(`DROP TABLE jobs`); err != nil {
+		return fmt.Errorf("jobs CHECK migration drop old jobs: %w", err)
+	}
+	if _, err := tx.Exec(`ALTER TABLE jobs_new RENAME TO jobs`); err != nil {
+		return fmt.Errorf("jobs CHECK migration rename: %w", err)
+	}
+	for _, stmt := range indexSQL {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("jobs CHECK migration recreate index %q: %w", stmt, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit jobs CHECK migration: %w", err)
+	}
+	s.logger.Info("Migrated jobs table: added state CHECK constraint", "indexes_preserved", len(indexSQL))
+	return nil
+}
+
+// quoteSQLIdent double-quotes a SQL identifier (column/table names here come
+// from SQLite's own PRAGMA output, so this is belt-and-braces against names
+// needing quoting).
+func quoteSQLIdent(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
 // applyClusterSchema applies the cluster portion of clusterSchema one
@@ -523,6 +748,41 @@ func (s *Store) ClaimNextForAgent(workerID string, caps []string, agentID string
 	return claimableJob, nil
 }
 
+// MarkProcessing promotes a claimed attempt to 'processing' — but only for
+// the writer that HOLDS the current claim token (contract C-Q1, audit M-1).
+// The CAS predicate (id + claim_token + state IN claimed/processing) closes
+// the requeue-vs-MarkProcessing race: a superseded or foreign attempt can
+// never flip the row forward, and neither can a token-less writer (an empty
+// token matches no row — claim_token is NULL or a minted token, never the
+// empty string).
+//
+// 0 rows affected means one of: the token is not the live attempt's, the row
+// left the claimed/processing window (requeued, completed, dead-lettered), or
+// the row is gone. All of them mean "my attempt lost the race", so the
+// caller-facing error is ErrJobStateLocked, symmetric with UpdateState's L8
+// terminal guard.
+func (s *Store) MarkProcessing(jobID, claimToken string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	res, err := s.db.Exec(`
+		UPDATE jobs SET state = 'processing', updated_at = ?
+		WHERE id = ? AND claim_token = ? AND state IN ('claimed', 'processing')`,
+		now, jobID, claimToken)
+	if err != nil {
+		return fmt.Errorf("failed to mark job processing: %w", err)
+	}
+
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to read mark-processing rows affected: %w", err)
+	}
+	if affected == 0 {
+		s.logger.Warn("Refused MarkProcessing from a non-owner or superseded attempt",
+			"id", jobID)
+		return ErrJobStateLocked
+	}
+	return nil
+}
+
 // UpdateState updates a job's state.
 //
 // State guard (audit L8): the write is refused when the row is TERMINAL
@@ -532,9 +792,12 @@ func (s *Store) ClaimNextForAgent(workerID string, caps []string, agentID string
 // own guard. Callers treat ErrJobStateLocked as "my attempt lost the race",
 // which is exactly what it is.
 //
-// Only UpdateState's single production caller (MarkProcessing) touches a
-// claimed/processing row, so the predicate stays general rather than pinning
-// the exact old state: any non-terminal state is updatable.
+// TOKEN-LESS / test-only surface since audit M-1 (leaf 01-queue/01): the
+// production path (PersistentQueue.MarkProcessing -> Store.MarkProcessing)
+// predicates on the claim token; this generic writer has no production
+// callers left and is kept solely for the pre-M-1 state-transition pins in
+// store_complete_guard_test.go. Do not wire new production callers here —
+// use MarkProcessing(jobID, claimToken) (C-Q1).
 func (s *Store) UpdateState(jobID string, state JobState) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	res, err := s.db.Exec(`
@@ -936,6 +1199,17 @@ const retryBackoffCap = 30 * time.Second
 // §4.4): a requeued interactive job stays interactive so claim ordering
 // is undisturbed. The job is left in a claimable state (claimed_by
 // cleared, error cleared) so the next eligible Claim wins it.
+//
+// Column parity (audit 2026-11-09 M-4): a row emerging into 'pending' from
+// ANY path must carry no stale claim fields. Requeue previously cleared only
+// the legacy subset (claimed_by, claim_token) and leaked the cluster columns
+// (claimed_by_node, timeout_at, last_heartbeat_at) — the next claim would
+// overwrite claimed_by/node/timeout, but last_heartbeat_at could be read
+// between claim and stamp, and a node sweeper had no way to tell a requeued
+// row from a live remote claim. The FULL reset set matches ResetToPending /
+// ReclaimRemoteStale: claimed_by, claim_token, claimed_by_node, timeout_at,
+// last_heartbeat_at. retry_count and next_retry_at semantics are unchanged
+// (provider-wait requeue still preserves retry_count AND interactive).
 func (s *Store) Requeue(jobID string, notBefore time.Time) error {
 	now := time.Now().UTC()
 
@@ -958,6 +1232,9 @@ func (s *Store) Requeue(jobID string, notBefore time.Time) error {
 		    interactive = interactive,
 		    next_retry_at = ?,
 		    claim_token = NULL,
+		    claimed_by_node = NULL,
+		    timeout_at = NULL,
+		    last_heartbeat_at = NULL,
 		    updated_at = ?
 		WHERE id = ? AND state IN ('failed', 'claimed', 'processing')`,
 		notBefore.UTC().Format(time.RFC3339), now.Format(time.RFC3339), jobID)
@@ -984,6 +1261,19 @@ func (s *Store) Requeue(jobID string, notBefore time.Time) error {
 
 // Retry resets a failed job for retry with exponential backoff.
 // Backoff follows: 2s, 4s, 8s, 16s, 30s (capped at 30s).
+//
+// Operator retry budget bound (audit 2026-11-09 F9): when the row's budget is
+// already exhausted (retry_count >= max_retries), Retry refuses with
+// ErrRetryBudgetExhausted and the transaction rolls back WITHOUT touching the
+// row — no pending-resurrection, no retry_count bump, no backoff rewrite.
+// Before this, the operator surfaces (bus queue.retry, HTTP
+// POST /api/v1/queue/jobs/{id}/retry) could loop an exhausted job back to
+// pending forever. Worker callers keep their upstream Job.CanRetry() guard;
+// this check is the store-side backstop on the exact same predicate.
+//
+// Column parity (audit 2026-11-09 M-4): like Requeue, the pending transition
+// clears the FULL claim column set — claimed_by, claim_token, claimed_by_node,
+// timeout_at, last_heartbeat_at — not just the legacy subset.
 func (s *Store) Retry(jobID string) error {
 	now := time.Now().UTC()
 
@@ -1001,11 +1291,19 @@ func (s *Store) Retry(jobID string) error {
 		}
 	}()
 
-	// Get current retry count to calculate backoff
-	var retryCount int
-	row := tx.QueryRow(`SELECT retry_count FROM jobs WHERE id = ?`, jobID)
-	if err := row.Scan(&retryCount); err != nil {
+	// Get current retry count and budget: the count drives backoff, the
+	// budget bounds the operator surface (audit F9).
+	var retryCount, maxRetries int
+	row := tx.QueryRow(`SELECT retry_count, max_retries FROM jobs WHERE id = ?`, jobID)
+	if err := row.Scan(&retryCount, &maxRetries); err != nil {
 		return fmt.Errorf("failed to get retry count: %w", err)
+	}
+
+	// Budget bound (F9): a job whose retry budget is spent must not be
+	// resurrected to pending by an operator retry. The deferred rollback
+	// leaves the row untouched.
+	if retryCount >= maxRetries {
+		return fmt.Errorf("%w: job %s (retry_count=%d, max_retries=%d)", ErrRetryBudgetExhausted, jobID, retryCount, maxRetries)
 	}
 
 	// Calculate exponential backoff: 2s * 2^retryCount, capped at 30s
@@ -1022,6 +1320,9 @@ func (s *Store) Retry(jobID string) error {
 		    error = NULL,
 		    next_retry_at = ?,
 		    claim_token = NULL,
+		    claimed_by_node = NULL,
+		    timeout_at = NULL,
+		    last_heartbeat_at = NULL,
 		    updated_at = ?
 		WHERE id = ? AND state IN ('failed', 'claimed')`,
 		nextRetryAt.Format(time.RFC3339), now.Format(time.RFC3339), jobID)
@@ -1075,6 +1376,7 @@ func (s *Store) ResetToPending(ctx context.Context, jobID string) error {
 		    claimed_by = NULL,
 		    result = NULL,
 		    error = NULL,
+		    claimed_by_node = NULL,
 		    timeout_at = NULL,
 		    last_heartbeat_at = NULL,
 		    claim_token = NULL,
@@ -1159,6 +1461,7 @@ func (s *Store) ResetStaleClaimsAtStartup(ctx context.Context, claimsBefore time
 		    claimed_by = NULL,
 		    result = NULL,
 		    error = NULL,
+		    claimed_by_node = NULL,
 		    timeout_at = NULL,
 		    last_heartbeat_at = NULL,
 		    claim_token = NULL,
@@ -1428,7 +1731,20 @@ func boolToInt(b bool) int {
 }
 
 // moveToDead moves a job to the dead letter table.
+//
+// Audit 2026-11-09 M-2 (contract C-Q2): the INSERT and the DELETE compose
+// under ONE immediate-write transaction, and a duplicate dead_letter id (the
+// crash residue of an earlier move that inserted but never deleted) is
+// downgraded from a hard PRIMARY KEY error to "insert ignored, ensure the
+// jobs row is deleted". That makes the move both atomic and idempotent:
+// SweepAbandonedTerminalStates can safely re-apply it to stranded rows, and a
+// second moveToDead for an already-dead-lettered id is a no-op instead of a
+// permanent error.
 func (s *Store) moveToDead(jobID string) error {
+	// Repo idiom (see FailAttempt/Retry): with SetMaxOpenConns(1) the pool
+	// hands every Begin a fresh IMMEDIATE write transaction — the write lock
+	// is held up front, so the INSERT..SELECT and the DELETE cannot interleave
+	// with a concurrent claim or Fail on the same row.
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -1438,22 +1754,168 @@ func (s *Store) moveToDead(jobID string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	// Insert into dead_letter, preserving due_at from the original job.
+	// interactive rides along (audit 2026-11-09 leaf 02): the dead-letter
+	// row must remember the flag so RecoverFromDeadLetter can restore the
+	// job's D11 claim ordering.
+	//
+	// INSERT OR IGNORE (M-2): if a dead_letter row for this id already
+	// exists — a prior moveToDead crashed between the INSERT and the DELETE,
+	// or a sweep re-applies the move — the earlier shadow stands and the
+	// collision downgrades to a skip. The pre-existing row is the older,
+	// more faithful record of the death, so it is deliberately NOT
+	// overwritten.
 	_, err = tx.Exec(`
-		INSERT INTO dead_letter (id, task_id, agent_id, type, priority, payload, required_caps, max_retries, retry_count, error, created_at, died_at, due_at)
-		SELECT id, task_id, agent_id, type, priority, payload, required_caps, max_retries, retry_count, error, created_at, ?, due_at
+		INSERT OR IGNORE INTO dead_letter (id, task_id, agent_id, type, priority, payload, required_caps, max_retries, retry_count, interactive, error, created_at, died_at, due_at)
+		SELECT id, task_id, agent_id, type, priority, payload, required_caps, max_retries, retry_count, interactive, error, created_at, ?, due_at
 		FROM jobs WHERE id = ?`,
 		now, jobID)
 	if err != nil {
 		return err
 	}
 
-	// Delete from jobs
+	// Delete from jobs — this is the "ensure deleted" half of the duplicate
+	// path: even when the INSERT above was ignored, the jobs row must not
+	// stay stranded beside its dead_letter shadow.
 	_, err = tx.Exec(`DELETE FROM jobs WHERE id = ?`, jobID)
 	if err != nil {
 		return err
 	}
 
 	return tx.Commit()
+}
+
+// sweepDefaultInterval and sweepDefaultOlderThan are the package defaults for
+// the StartSweeper ticker (contract C-Q2). They live beside the retry/backoff
+// constants rather than in config: the queue package has no config section,
+// and adding one for the sweeper would be config-surface creep (leaf doc
+// Notes). The daemon wiring can pass its own values.
+const (
+	sweepDefaultInterval  = 15 * time.Minute
+	sweepDefaultOlderThan = 1 * time.Hour
+)
+
+// SweepAbandonedTerminalStates re-applies the dead-letter move to rows the
+// write paths stranded (audit 2026-11-09 M-2/M-3, contract C-Q2):
+//
+//   - 'failed' rows whose retry budget is EXHAUSTED (retry_count >=
+//     max_retries) and whose updated_at is older than the cutoff: FailAttempt
+//     computes StateDead but the post-commit moveToDead is log-only, so a
+//     crash/lock between them leaves the row failed-forever in jobs.
+//   - 'dead' rows still sitting in jobs past the cutoff: moveToDead never
+//     completed its INSERT+DELETE pair.
+//
+// 'failed' rows WITH budget remaining are deliberately untouched — the
+// Retry/worker requeue path owns them; sweeping them would dead-letter
+// recoverable work. The cutoff is the ONLY age bound: a stranded 'dead' row
+// only needs updated_at < cutoff, which the write paths always age.
+//
+// Idempotent by construction: moveToDead is a single-transaction INSERT OR
+// IGNORE + DELETE, so a row already in dead_letter and still in jobs is
+// completed (deleted) without duplicating the shadow, and a row already fully
+// moved is never re-selected (it is gone from jobs). A second sweep after a
+// clean first sweep moves 0.
+//
+// Returns the number of rows successfully moved (or completed). Per-row
+// failures are logged and skipped — one poisoned row must not block the rest
+// of the sweep — and the first such error is surfaced alongside the count.
+func (s *Store) SweepAbandonedTerminalStates(ctx context.Context, olderThan time.Duration) (int, error) {
+	if olderThan < 0 {
+		olderThan = 0
+	}
+	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id FROM jobs
+		WHERE updated_at < ?
+		  AND (
+		        (state = 'failed' AND retry_count >= max_retries)
+		     OR (state = 'dead')
+		  )
+		ORDER BY updated_at`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("sweep: select abandoned rows: %w", err)
+	}
+
+	var stranded []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, fmt.Errorf("sweep: scan abandoned row: %w", err)
+		}
+		stranded = append(stranded, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, fmt.Errorf("sweep: iterate abandoned rows: %w", err)
+	}
+	rows.Close()
+
+	moved := 0
+	var sweepErr error
+	for _, id := range stranded {
+		if ctx.Err() != nil {
+			if sweepErr == nil {
+				sweepErr = ctx.Err()
+			}
+			break
+		}
+		if err := s.moveToDead(id); err != nil {
+			if sweepErr == nil {
+				sweepErr = fmt.Errorf("sweep: move job %s to dead letter: %w", id, err)
+			}
+			s.logger.Warn("sweep: failed to move abandoned row to dead letter",
+				"id", id, "error", err)
+			continue
+		}
+		moved++
+	}
+
+	if moved > 0 {
+		s.logger.Info("sweeper moved abandoned rows to dead letter",
+			"moved", moved, "candidates", len(stranded), "cutoff", cutoff)
+	}
+	return moved, sweepErr
+}
+
+// StartSweeper launches the stranded-state sweeper goroutine (contract C-Q2
+// wrapper): every interval it calls SweepAbandonedTerminalStates(olderThan)
+// and logs the moved count at debug. Non-positive durations fall back to the
+// package defaults (sweepDefaultInterval / sweepDefaultOlderThan); a nil ctx
+// falls back to context.Background(). The goroutine exits when ctx is
+// cancelled. Nil-safe: a nil store or closed pool never starts the loop and
+// never panics. Callers own cancellation; there is no second-instance guard
+// because the sweep is idempotent.
+func (s *Store) StartSweeper(ctx context.Context, interval, olderThan time.Duration) {
+	if s == nil || s.db == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if interval <= 0 {
+		interval = sweepDefaultInterval
+	}
+	if olderThan <= 0 {
+		olderThan = sweepDefaultOlderThan
+	}
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				moved, err := s.SweepAbandonedTerminalStates(ctx, olderThan)
+				if err != nil {
+					s.logger.Warn("sweeper pass failed", "error", err, "moved", moved)
+					continue
+				}
+				s.logger.Debug("sweeper pass completed", "moved", moved)
+			}
+		}
+	}()
 }
 
 // RecoverFromDeadLetter recovers a dead-lettered job by re-inserting it into the active queue.
@@ -1468,14 +1930,19 @@ func (s *Store) RecoverFromDeadLetter(jobID string) (*Job, error) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	// Select from dead_letter
+	// Select from dead_letter. interactive rides the round trip (audit
+	// 2026-11-09 leaf 02): a recovered interactive job must reclaim its D11
+	// claim ordering, so the flag is restored onto the new jobs row.
+	// claim_token is deliberately NOT restored — the recovered row starts
+	// unclaimed (benign: no live attempt exists).
 	row := tx.QueryRow(`
-		SELECT id, task_id, agent_id, type, priority, payload, required_caps, max_retries, retry_count, error, created_at, due_at
+		SELECT id, task_id, agent_id, type, priority, payload, required_caps, max_retries, retry_count, interactive, error, created_at, due_at
 		FROM dead_letter WHERE id = ?`, jobID)
 
 	var (
 		id, jobType, payload, capsJSON   string
 		priority, maxRetries, retryCount int
+		interactive                      int
 		taskID, agentID                  sql.NullString
 		errMsg                           sql.NullString
 		createdAt                        string
@@ -1483,7 +1950,7 @@ func (s *Store) RecoverFromDeadLetter(jobID string) (*Job, error) {
 	)
 
 	err = row.Scan(&id, &taskID, &agentID, &jobType, &priority, &payload, &capsJSON,
-		&maxRetries, &retryCount, &errMsg, &createdAt, &dueAt)
+		&maxRetries, &retryCount, &interactive, &errMsg, &createdAt, &dueAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("dead letter job not found: %s", jobID)
@@ -1491,11 +1958,12 @@ func (s *Store) RecoverFromDeadLetter(jobID string) (*Job, error) {
 		return nil, fmt.Errorf("failed to read dead letter: %w", err)
 	}
 
-	// Re-insert into jobs with reset state, preserving due_at from dead_letter.
+	// Re-insert into jobs with reset state, preserving due_at and interactive
+	// from dead_letter.
 	_, err = tx.Exec(`
 		INSERT INTO jobs (id, task_id, agent_id, type, priority, state, payload, required_caps,
-		                  max_retries, retry_count, claimed_by, result, error, created_at, updated_at, due_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                  max_retries, retry_count, interactive, claimed_by, result, error, created_at, updated_at, due_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id,
 		taskID,
 		agentID,
@@ -1506,6 +1974,7 @@ func (s *Store) RecoverFromDeadLetter(jobID string) (*Job, error) {
 		capsJSON,
 		maxRetries,
 		0,              // Reset retry_count
+		interactive,    // Restore interactive (leaf 02)
 		(*string)(nil), // claimed_by
 		(*string)(nil), // result
 		(*string)(nil), // Reset error

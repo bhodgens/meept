@@ -14,12 +14,18 @@ package rpc
 //
 // Shapes (mirror of the CL8 local shape):
 //
-//	voice.link.open   req {employee_a, employee_b} -> {link_id, a_ccid, b_ccid}
+//	voice.link.open   req {employee_a, employee_b, monitor?} ->
+//	                  {link_id, a_ccid, b_ccid, a_mon_path?, b_mon_path?}
 //	voice.link.close  req {link_id}                 -> {ok}
 //	voice.link.status req {link_id}   -> {link_id, ended,
 //	                                       a: {call_id, employee_id, assistant_turns,
 //	                                           user_turns, transcript:[{role,text,at}]},
 //	                                       b: {...}}
+//
+// The monitor fields appear ONLY when the open carried monitor:true (the
+// daemon's bridge tapped each direction into two unix listeners). Audio
+// still NEVER rides RPC - the tap paths are pointers for the CLI to dial
+// the local socket pair, exactly like the local leg's in/out paths.
 
 import (
 	"context"
@@ -47,11 +53,22 @@ var (
 )
 
 // VoiceLinkOpen is the voice.link.open result. Routing ids only - the
-// audio pair stays inside the daemon bridge.
+// audio pair stays inside the daemon bridge. MonitorAPath/MonitorBPath
+// carry the monitor tap socket paths when the open requested
+// monitor:true ("" + omitted from JSON when not - older callers see the
+// exact pre-monitor shape).
 type VoiceLinkOpen struct {
-	LinkID string `json:"link_id"`
-	ACCID  string `json:"a_ccid"`
-	BCCID  string `json:"b_ccid"`
+	LinkID       string `json:"link_id"`
+	ACCID        string `json:"a_ccid"`
+	BCCID        string `json:"b_ccid"`
+	MonitorAPath string `json:"a_mon_path,omitempty"`
+	MonitorBPath string `json:"b_mon_path,omitempty"`
+}
+
+// VoiceLinkOpenOptions carries the optional voice.link.open knobs to the
+// seam. Zero value = the pre-monitor shape.
+type VoiceLinkOpenOptions struct {
+	Monitor bool
 }
 
 // VoiceLinkCloseResult is the voice.link.close result.
@@ -92,8 +109,10 @@ type VoiceLinkStatusResult struct {
 type VoiceLinkSeams struct {
 	// Open cross-connects two local legs. Registry refusals surface
 	// mapped by the adapter (busy/duplicate -> the local names,
-	// same-employee -> ErrVoiceLinkSameEmployee).
-	Open func(ctx context.Context, employeeA, employeeB string) (VoiceLinkOpen, error)
+	// same-employee -> ErrVoiceLinkSameEmployee). opts carries the
+	// monitor knob (seam-side; the adapter maps it onto
+	// voice.LinkOpenOptions).
+	Open func(ctx context.Context, employeeA, employeeB string, opts VoiceLinkOpenOptions) (VoiceLinkOpen, error)
 	// Close ends the link (both legs). A nil return from the seam-side
 	// leg End is the idempotent success; an unknown link id maps to
 	// ErrVoiceLinkUnknownLink.
@@ -142,6 +161,7 @@ func (h *VoiceLinkHandler) handleOpen(ctx context.Context, params json.RawMessag
 	var req struct {
 		EmployeeA string `json:"employee_a"`
 		EmployeeB string `json:"employee_b"`
+		Monitor   bool   `json:"monitor"`
 	}
 	if len(params) > 0 {
 		if err := json.Unmarshal(params, &req); err != nil {
@@ -165,7 +185,7 @@ func (h *VoiceLinkHandler) handleOpen(ctx context.Context, params json.RawMessag
 			}
 		}
 	}
-	return h.seams.Open(ctx, req.EmployeeA, req.EmployeeB)
+	return h.seams.Open(ctx, req.EmployeeA, req.EmployeeB, VoiceLinkOpenOptions{Monitor: req.Monitor})
 }
 
 // handleClose implements voice.link.close. A missing link_id refuses

@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 )
 
@@ -118,25 +119,75 @@ func (s *Scheduler) Shutdown(ctx context.Context) error {
 	return s.Stop(ctx)
 }
 
+// receiptAttemptTime is the ordering key for recovery: when a receipt was
+// attempted. DeliveredAt (for already-delivered rows, never recovered) falls
+// back to OccurrenceAt, then ScheduledAt.
+func receiptAttemptTime(r ScheduleDeliveryReceipt) time.Time {
+	switch {
+	case !r.DeliveredAt.IsZero():
+		return r.DeliveredAt
+	case !r.OccurrenceAt.IsZero():
+		return r.OccurrenceAt
+	default:
+		return r.ScheduledAt
+	}
+}
+
 // recoverInFlightDeliveries re-delivers receipts left pending/in_flight by a
 // previous run (crash between claim and session ack). Recovery scans
 // RECEIPTS, not ticks: the claimed tick will not re-fire, so this is the
 // only at-least-once path. Re-delivery reuses the SAME MessageID, which the
 // chat.request handler treats idempotently via turn_id dedupe.
+//
+// M-5 / C-S1 (audit scheduler F5): walks the FULL DeliveryHistory per job,
+// not cfg.LastDelivery only — a stuck earlier receipt hidden behind a newer
+// delivered mirror must still be recovered. Stuck receipts are re-delivered
+// in attempt-time order, deduped by MessageID within one recovery run
+// (pending and in_flight rows for the same occurrence count once);
+// delivered receipts are never touched.
 func (s *Scheduler) recoverInFlightDeliveries() error {
 	for _, cfg := range s.store.List() {
-		if cfg.LastDelivery == nil {
+		// Collect every stuck receipt for this job, oldest attempt first.
+		var stuck []ScheduleDeliveryReceipt
+		if cfg.DeliveryHistory != nil {
+			for _, r := range cfg.DeliveryHistory.Records {
+				if r.Status == DeliveryPending || r.Status == DeliveryInFlight {
+					stuck = append(stuck, r)
+				}
+			}
+		}
+		// The LastDelivery mirror is normally also a history row; include
+		// it only if it's stuck and absent from history (dedup by MessageID
+		// below makes double-counting impossible).
+		if cfg.LastDelivery != nil {
+			ls := *cfg.LastDelivery
+			if ls.Status == DeliveryPending || ls.Status == DeliveryInFlight {
+				seen := false
+				for _, r := range stuck {
+					if r.MessageID == ls.MessageID {
+						seen = true
+						break
+					}
+				}
+				if !seen {
+					stuck = append(stuck, ls)
+				}
+			}
+		}
+		if len(stuck) == 0 {
 			continue
 		}
-		stuck := *cfg.LastDelivery
-		if stuck.Status != DeliveryPending && stuck.Status != DeliveryInFlight {
-			continue
-		}
+		sort.SliceStable(stuck, func(i, j int) bool {
+			return receiptAttemptTime(stuck[i]).Before(receiptAttemptTime(stuck[j]))
+		})
+
 		if cfg.AgentConfig == nil || cfg.AgentConfig.TargetSessionID == "" {
-			s.logger.Warn("scheduler: skipping receipt recovery for job without a target session",
-				"job_id", cfg.ID,
-				"message_id", stuck.MessageID,
-			)
+			for _, r := range stuck {
+				s.logger.Warn("scheduler: skipping receipt recovery for job without a target session",
+					"job_id", cfg.ID,
+					"message_id", r.MessageID,
+				)
+			}
 			continue
 		}
 
@@ -151,29 +202,41 @@ func (s *Scheduler) recoverInFlightDeliveries() error {
 			continue
 		}
 
-		s.logger.Info("scheduler: recovering in-flight delivery",
-			"job_id", cfg.ID,
-			"message_id", stuck.MessageID,
-			"target_session_id", stuck.TargetSessionID,
-		)
+		deliveredIDs := make(map[string]bool, len(stuck))
+		// Re-read the persisted history as we go: a successful re-delivery
+		// flips the row to delivered, so a later stuck row sharing the same
+		// MessageID (pending+in_flight pair for one occurrence) must not be
+		// sent twice in this run.
+		for _, r := range stuck {
+			if deliveredIDs[r.MessageID] {
+				continue
+			}
 
-		if err := agentJob.deliver(context.Background(), stuck.MessageID); err != nil {
-			// Leave the receipt in_flight so the next Start retries.
-			s.logger.Warn("scheduler: in-flight delivery recovery failed; receipt stays re-dispatchable",
+			s.logger.Info("scheduler: recovering in-flight delivery",
 				"job_id", cfg.ID,
-				"message_id", stuck.MessageID,
-				"error", err,
+				"message_id", r.MessageID,
+				"target_session_id", r.TargetSessionID,
 			)
-			continue
-		}
 
-		stuck.Status = DeliveryDelivered
-		stuck.DeliveredAt = time.Now().UTC()
-		if err := s.recordDelivery(cfg.ID, stuck); err != nil {
-			s.logger.Warn("scheduler: failed to persist recovered-delivery receipt",
-				"job_id", cfg.ID,
-				"error", err,
-			)
+			if err := agentJob.deliver(context.Background(), r.MessageID); err != nil {
+				// Leave the receipt in_flight/pending so the next Start retries.
+				s.logger.Warn("scheduler: in-flight delivery recovery failed; receipt stays re-dispatchable",
+					"job_id", cfg.ID,
+					"message_id", r.MessageID,
+					"error", err,
+				)
+				continue
+			}
+
+			deliveredIDs[r.MessageID] = true
+			r.Status = DeliveryDelivered
+			r.DeliveredAt = time.Now().UTC()
+			if err := s.recordDelivery(cfg.ID, r); err != nil {
+				s.logger.Warn("scheduler: failed to persist recovered-delivery receipt",
+					"job_id", cfg.ID,
+					"error", err,
+				)
+			}
 		}
 	}
 	return nil

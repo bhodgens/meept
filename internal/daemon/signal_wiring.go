@@ -16,11 +16,29 @@ package daemon
 // supervisor that has not armed (no client yet) degrades the leg to
 // nil with a logged warning - the leg never dials through a half-open
 // transport.
+//
+// Signal-leg parity seams (audit 2026-11-09 voice, plan 20261109-
+// statemachine-remediation leaves 02 + 03; leaf 02 deferred this note
+// here because internal/voice/AGENTS.md is a sibling-scope file): this
+// wiring is where the signal leg inherits the phone/local contract —
+// FreshSession resolves voice.fresh_session_per_call + the employee_leg
+// override per call (finding 5; the leg's nil-seam posture is one
+// session per call, so an unwired leg must not silently share),
+// DayBriefBuilder feeds the same daemon-built brief the phone/local legs
+// carry, the effect key is (employee, target, requestID) via Place's
+// requestIDs variadic so a retried request reuses the ledger receipt
+// (finding 6 / C-V2), and RingingTimeout passes [voice].timeout_secs —
+// the phone dialer's single no-answer duration source — into the leg's
+// bounded ringing watchdog (finding 3 / C-V3: an unanswered signal call
+// FailOutcomes(no_answer) and releases its registry slot without a
+// carrier event). Changing any parity seam here or in signalleg must
+// keep the leg_gate_test.go pins green.
 
 import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/effects"
@@ -166,7 +184,22 @@ func WireSignalLeg(ctx context.Context, cfg config.SignalConfig, deps WireVoiceD
 		Audit:           audit,
 		EmployeeID:      deps.Config.Voice.DefaultEmployee,
 		DayBriefBuilder: deps.DayBriefBuilder,
-		Logger:          logger.With("component", "signalleg"),
+		// Fresh-session flag (audit 2026-11-09 finding 5, signal-leg
+		// parity): resolve voice.fresh_session_per_call + the
+		// employee_leg override once per call, daemon-side, exactly
+		// like the local leg (voice_wiring.go LocalDeps.FreshSession).
+		// Without this closure the leg's nil-seam posture (fresh=true)
+		// would ignore the global false default.
+		FreshSession: func(employeeID string) bool {
+			return voice.FreshSessionFor(deps.Config.Voice, employeeID)
+		},
+		// Ringing watchdog (audit 2026-11-09 finding 3, C-V3): the SAME
+		// config source the phone dialer reads — [voice].timeout_secs,
+		// folded into DialConfig.TimeoutSecs at voice_wiring.go:416. One
+		// knob, both legs; 0/unset resolves leg-side to
+		// voice.DefaultNoAnswerSecs (dialer parity).
+		RingingTimeout: time.Duration(deps.Config.Voice.TimeoutSecs) * time.Second,
+		Logger:         logger.With("component", "signalleg"),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("signal wiring: leg construction: %w", err)

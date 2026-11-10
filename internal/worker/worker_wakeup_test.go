@@ -43,10 +43,10 @@ func (q *wakeFakeQueue) Claim(_ context.Context, _ string, _ []string, _ string)
 	return job, nil
 }
 
-func (q *wakeFakeQueue) MarkProcessing(context.Context, string) error { return nil }
-func (q *wakeFakeQueue) Complete(context.Context, string, any) error  { return nil }
-func (q *wakeFakeQueue) Fail(context.Context, string, error) error    { return nil }
-func (q *wakeFakeQueue) Retry(context.Context, string) error          { return nil }
+func (q *wakeFakeQueue) MarkProcessing(context.Context, string, string) error { return nil }
+func (q *wakeFakeQueue) Complete(context.Context, string, any) error          { return nil }
+func (q *wakeFakeQueue) Fail(context.Context, string, error) error            { return nil }
+func (q *wakeFakeQueue) Retry(context.Context, string) error                  { return nil }
 func (q *wakeFakeQueue) Get(context.Context, string) (*queue.Job, error) {
 	return nil, nil //nolint:nilnil // test stub: "job not found" is the intended shape
 }

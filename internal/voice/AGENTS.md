@@ -23,8 +23,15 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   (`last:true`) start an employee turn; partials update preview only.
 - DTMF frames decode as a counted no-op - a voicemail-tree "press 1"
   must never error the call.
-- The child sends setup/prompt/interrupt/end; the daemon sends
-  say/clear/end. A `say` frame is sent ONLY after the supervisor allows
+- The child sends setup/prompt/interrupt/end/played; the daemon sends
+  say/clear/end. `played` (EventPlayed) is the child's end-of-turn AUDIO
+  marker: exactly one frame `{"call_id":...,"event":"played","last":true}`
+  after the FINAL byte of a `last:true` say stream is written to the
+  .out socket, never for a non-final stream, a barge-in-aborted stream,
+  or a failed synthesis. The daemon's drain watch arms from this edge
+  (see the release-path bullet below) — it is the true end-of-turn
+  signal the blind turn_final TEXT arm could not be. A `say` frame is
+  sent ONLY after the supervisor allows
   the sentence; filler/greeting lines (fact-free, config list) are the
   sole exception, emitted by the daemon talk loop (greeting on connect,
   filler immediately on each final prompt - order pinned by
@@ -62,6 +69,113 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   bytes on macOS). Production paths live under `$MEEPT_HOME` and are
   fine; e2e sandboxes shorten the test process TMPDIR for this (leaf
   15). Do not move the socket dir deeper without re-checking the limit.
+- The voice LINK monitor tap (link.go LinkOpenOptions.Monitor) creates
+  two extra unix listeners beside the pair sockets
+  (`<dir>/<link id>.mon-a` / `.mon-b`) and tees each pump direction
+  NON-BLOCKING: no attached client, a lagging client, or a dead tap
+  conn only ever DROPS tap bytes (250 ms write deadline, latest-batch-
+  wins channel) - monitor traffic NEVER stalls or gates the bridge.
+  The derived path is length-checked at create against a 100-byte cap
+  (ErrLinkMonitorPathTooLong) since link ids ride to the sun_path edge.
+
+## Voice link: half-duplex turn-taking (turn-taking leaf)
+
+- A voice link carries TWO independent talk loops; a live run proved
+  they greet at once and dispatch over each other's speech. The
+  contract the coordinator enforces: at most ONE side holds the floor
+  (mid-turn OR draining its paced audio tail) at a time, the
+  listener's final prompt dispatches only after the speaker's audio
+  DRAINS (the splice's AudioDrained edge + tail pad, or the fallback
+  margin - see the release-path bullet), and exactly ONE side greets -
+  side A (side B's loop is built with TalkLoopConfig.SuppressGreeting;
+  A's greeting audio crossing into B's mic is the conversation seed).
+- The seams are OPTIONAL and nil-by-default: TalkDeps.HoldPrompt parks
+  a denied final (one slot, latest question wins, telemetry
+  kind=prompt_held / prompt_released / prompt_dropped), TalkDeps.
+  TurnState publishes turn_start/turn_final/idle edges. Non-link calls
+  (phone, plain local, signal) NEVER receive them - routeFrame's
+  registry lookup on the call's TARGET returns nil and the loop
+  constructs exactly as before. Do not wire these seams onto phone or
+  plain-local loops.
+- The coordinator rides LinkTurnRegistry keyed by the REGISTRY TARGET
+  ("local:link-a-<suffix>"), registered by LinkManager.Open BEFORE the
+  leg opens: the child's setup frame can reach routeFrame while Open is
+  still running, and the ccid is not knowable then - the target is.
+  Close/unwind unregisters; a stale target must never bind a future
+  call.
+- Every release path matters: turn_final NO LONGER releases the floor -
+  and it no longer even BLIND-ARMS the drain watch. The floor releases
+  on AUDIO DRAIN driven by the child's C1 played edge: the HOLDER's
+  turn_final sets
+  the splice's EXPECTED-final state (LocalSpliceFor(ccid).ExpectFinalDrain,
+  the same registry HandleInterrupt rides) plus a LONG fallback margin
+  (default 12 s, LinkDeps.TurnMargin); the child's played frame
+  (routeFrame -> MarkFinalPlayed) then ARMS the watch, and the first of
+  (LocalSpliceDeps.AudioDrained edge + 250 ms tail pad) or (fallback
+  fire) clears the floor and flushes the peer's park (telemetry
+  kind=floor_released, reason=drained|margin). HOLDER-ONLY RELEASE
+  (link-b9d221d8d8cddcce, measured 13.70 s overlap): the coordinator
+  tracks c.holder (set on claim/turn_start); a NON-holder's turn_final
+  is a listening side's chained response to speech it heard and records
+  bookkeeping ONLY - no expect-final, no margin arm, no release (the
+  live defect: B's non-holder final armed its own margin, and the 12 s
+  fire released a side=b floor while holder A was still audible; the
+  release funnel refuses when c.holder != side). A bare turn_start from
+  a side whose peer holds the floor is a LISTENER edge (bookkeeping
+  only) - a real loop never emits one while parked - and must NEVER
+  steal the floor. Only the holder's idle edge releases the peer now.
+  MARGIN AUDIO-AWARENESS: the margin's fire consults the holder's live
+  splice tail (runLocalSplice.TailActive: pending>0 or an outbound
+  touch inside the margin window); a fire while the tail is still
+  AUDIBLE RE-ARMS once (kind=margin_rearmed) instead of cutting it, and
+  the second consecutive fire releases regardless - the hold stays
+  bounded at 2 x margin. HOLDER CHAINING: a holder's turn_start AFTER
+  its own turn_final marks reDispatched; a drained/margin edge then
+  DEFERS the release (kind=floor_release_deferred) - the floor stays
+  with the holder and the peer flush waits for the holder's next
+  quiet-final release, so a parked prompt can never flush between the
+  holder's sub-turns (the release->reclaim window of the 07:32-07:34
+  chain). Why the blind arm was
+  still early (link-2fdc3f5fd8d81805: 3/4 drained releases fired, but
+  MID-REPLY - the child's inter-sentence synth gaps of 1.4-3.8 s exceed
+  the 1 s quiescence window, so pending==0+quiet faked a drain while
+  queued sentences still had audio to play -> 60 short both-audible
+  runs, 10.94 s overlap): at turn_final the TEXT stream is flushed but
+  the child is only partway through PLAYING it. The played edge is the
+  audio truth: after it nothing more CAN arrive for the turn, so the
+  played-armed watch fires at pending==0 + the SHORT final quiet window
+  (500 ms, localDrainQuietFinal) and DOES fire on a silent post-arm
+  stream (the edge itself is the touch - emitted strictly after the
+  final audioOut.Write on the same worker goroutine). If the edge never
+  arrives (old child binary, denied/aborted final stream), the 12 s
+  margin still releases - watchdog role unchanged; on a barge-in the
+  idle edge already releases the floor immediately (the child emits NO
+  played for aborted streams - deliberate: a phantom edge on dead audio
+  would fake an end-of-turn). turn_final alone only clears BUSY - the
+  daemon pacer still holds
+  seconds of paced audio after the text flush (measured 6.70 s
+  both-sides talk-over on link-1108d776b0a1efb3), and HoldPromptFor
+  gates on floorHeld so a FRESH peer prompt cannot claim the floor
+  during the tail either. The BLIND arm shape (ArmDrainWatch, kept for
+  non-link callers/tests) fires only after (a) a touch
+  POST-DATES the arm (the early-fire guard: the final sentence's TTS
+  may still be synthesizing) and (b) the pacer pending backlog is zero
+  and the stream is quiet for the FULL window; a silent stream NEVER
+  fires on that shape - denied turns ride the fallback margin (late,
+  never early). The played-armed shape replaces (a) with the edge
+  itself and shortens (b)'s window; both shapes keep the pending==0
+  gate. The pump's sub-chunk CARRY
+  never gates the fire (a real TTS stream's byte total is never a
+  multiple of 640 - carry==0 was unreachable, 0/5 drained releases on
+  link-6eb490abd8349958). idle (barge-in
+  cancel, unbind, teardown) releases IMMEDIATELY (nothing is playing),
+  and a park alive at loop exit is dropped with a log (never dispatched
+  into a dead call). The splice-side watch only exists for LINK calls:
+  LocalDeps.LinkTurns resolves per Open by registry target (plain local
+  -> nil dep -> no watch goroutine, byte-identical). The bridge
+  seeds each mic with linkSilenceSeedChunks exact zero chunks at dial:
+  with B silent on open, the splice's first-byte JoinTimeout gate must
+  not depend on greeting audio (0-byte reads never satisfy it).
 
 ## Media splice: reorder, pacing, barge-in
 
@@ -103,8 +217,53 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   outbound effects reservation exactly once. `FailOutcome` exists so
   no-answer is distinct from hard failure (leaf 05/11); use it for any
   new terminal-not-failure outcome.
+- The daemon sends a C1 `end` frame (`{"call_id":...,"event":"end",
+  "reason":"<outcome>"}`, `last` OMITTED per the frames contract) as the
+  FIRST sink of `VoiceWiring.releaseCall`, best-effort before the loop
+  drop and ctx cancel: the child's `handleEnd` tears the pipeline down
+  through the frame protocol instead of only noticing socket EOF
+  (audit 2026-11-09 finding 10). A send failure (no child, dead conn)
+  is logged and NEVER blocks or fails the teardown — EOF stays the
+  fallback. Do not move the send behind the loop cancel.
+- Webhook decoupling of the goal hold (audit 2026-11-09 finding 1): the
+  inbound spawn seam (`voice_wiring.go`) must NEVER run `holdPhoneCall`
+  synchronously — `AcquireCallHold` blocks for a full prior goal round,
+  and stalling `HandleCallEvent` pins the carrier webhook handler until
+  Telnyx times the POST out and redelivers an already-answered call. The
+  spawn arms a per-call hold gate (`VoiceEmployeeWiring.gates`,
+  `holdTracker`) and runs hold + `OnCallStart` on a goroutine. The
+  serialization the synchronous hold provided is preserved at the only
+  place it matters: the talk loop's turn runner (`turnRunnerFor`) awaits
+  the gate before the employee's FIRST turn. Fact-free filler/greeting
+  lines MAY play while the gate pends (they read no employee state; the
+  supervisor gate stays the `say` contract). Release ordering is
+  load-bearing: `releaseCall` drops the gate BEFORE the `ReleaseHook`
+  heldCalls peek, so a hold still pending on the mutex at terminal time
+  is torn down by EXACTLY one side — the hook when the hold already
+  registered, the hold goroutine's rollback (re-checked after
+  `AcquireCallHold` AND after `OnCallStart`: `ReleaseForCall` +
+  `OnCallEnd`) when it had not. Both sides ride the same once-guards
+  (heldCalls map delete, binding live check). Keep the rollback
+  re-checks if you touch either path — without them a
+  released-while-pending call parks the employee mutex forever.
+- Deliberate redelivery-storm posture (audit 2026-11-09 finding 11): the
+  webhook handler answers 500 on manager errors so Telnyx redelivers
+  (the mapping choice, leaf 10 Notes, still "500 until observed
+  live"). A redelivered `call.initiated` for a leg already answered can
+  therefore re-enter the spawn seam while the first attempt is live:
+  the registry Acquire fails (`ErrDuplicateTarget`/`ErrBusy` employee
+  already live), the manager hangs the leg up, and Telnyx eventually
+  stops redelivering a call that is answered-then-hung-up. Accepted:
+  no webhook-path dedupe by ccid exists on purpose (a persisted
+  seen-set across restarts would be the only sound version, and the
+  carrier gives no idempotency key). Do not "fix" the storm with a
+  synchronous dedupe on the handler goroutine.
 - `call.answered` for an untracked id is refused; hangup for an unknown
-  id is nil (idempotent teardown). `OnMediaStart` is idempotent.
+  id is nil (idempotent teardown). `OnMediaStart` is ERROR-AWARE
+  idempotent (audit 2026-11-09 finding 4): a registered CLEAN splice
+  stays a no-op on re-send, but a splice that failed with a
+  non-cancellation error re-arms — the next media start re-splices
+  (media reconnect restores audio); the marker dies with releaseOnce.
 - Outbound legs are NEVER AnswerCall'd (404 aborts the session);
   `call.answered` triggers StartStreaming only.
 
@@ -175,6 +334,26 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
 - Outbound dials reserve internal/effects keyed (employee_id, target,
   request_id) BEFORE the POST and write the audit row BEFORE DialOut;
   a retry never rings twice.
+- Restart-mid-ring residual (audit 2026-11-09 finding 8, documented
+  posture): the dialer's ccid -> done map and the manager's per-call done
+  channels are in-process. After a daemon restart, an effect ledger
+  row reads completed + receipt, and `Dialer.doneFor` re-resolves the
+  ccid through `Manager.WaitCall` — which for an id this process never
+  tracked returns a FRESH channel that never closes (M3: no retention
+  across teardown/restart; the outbound tombstone covers only SAME-
+  process post-teardown re-resolution). The caller's bounded ctx is the
+  ONLY safety net by design: a mid-ring call whose carrier leg survived
+  the restart is genuinely "state unknown" — the new process has no
+  media bridge for it and no way to know if the leg answered elsewhere.
+  Do NOT close the gap by guessing "ended": a false terminal would
+  unpark/release state for a call that may still be live on the
+  carrier. Hardening landed (leaf 04 T3): in `doneFor`, when
+  neither `d.dones[ccid]` nor a tracked/tombstoned `WaitCall` channel
+  exists for a receipted ccid, return an ALREADY-CLOSED channel + WARN
+  "state unknown" instead of `make(chan struct{})`, so WaitCall-based
+  callers observe the unknown terminal immediately rather than hanging
+  to their ctx deadline. Until that lands, treat an unbounded Done wait
+  after a restart as expected and rely on the caller timeout.
 
 ## Process lifecycle (C-lifecycle, leaf 13)
 
@@ -279,9 +458,13 @@ store. Invariants a future agent must NOT break:
     `internal/daemon/voice_wiring.go`). Nil Hold degrades to no
     ended-state. Do not change this contract; do not add a second
     OnCallStart on the local path.
-  - phone inbound: the spawn seam in `voice_wiring.go` calls
-    `holdPhoneCall` after registry Acquire (the closure reads the
-    employee pointer filled after `WireVoiceEmployee`).
+  - phone inbound: the spawn seam in `voice_wiring.go` arms the call's
+    hold gate and runs `holdPhoneCall` (AcquireCallHold + OnCallStart)
+    ASYNC on a goroutine after registry Acquire — never on the webhook
+    goroutine (finding 1, see Release fan-out above). The gate is
+    awaited by the talk loop's turn runner before the first employee
+    turn, so the hold still serializes the goal round. The closure reads
+    the employee pointer filled after `WireVoiceEmployee`.
   - phone outbound: `Dialer.holdCall` after a successful Acquire, via
     `DialConfig.Hold` (nil degrades to no ended-state). Refusals and
     the idempotent retry path do not hold.

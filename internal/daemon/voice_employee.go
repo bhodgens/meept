@@ -78,6 +78,15 @@ type VoiceEmployeeWiring struct {
 	holds     map[string]*sync.Mutex // employee_id -> serialization mutex
 	heldCalls map[string]holdEntry   // call_control_id -> hold routing entry
 
+	// gates tracks the async goal-hold readiness per inbound call
+	// (audit 2026-11-09 finding 1): the webhook spawn seam arms a gate
+	// and runs holdPhoneCall on a goroutine; the talk loop's turn
+	// runner awaits the gate before the employee's FIRST turn, so the
+	// hold still serializes the goal round while the carrier webhook
+	// returns promptly. Always non-nil on the WireVoiceEmployee path;
+	// hand-built test wirings may leave it nil (degrades to the
+	// synchronous-hold posture at the spawn seam).
+	gates *holdTracker
 }
 
 // VoiceEmployeeDeps carries the daemon components the wiring needs. All
@@ -295,6 +304,21 @@ func (r *loopTurnRunner) Run(ctx context.Context, sess voice.SessionHandle, prom
 		return "", fmt.Errorf("voice turn runner: wired loop for %s: %w", sess.ID, err)
 	}
 	employeeID := sess.EmployeeID
+	// AgentID fix (caller-authz leaf 02, O5): voice clones execute with
+	// the executor agent id = the bound employee id. The template loop
+	// carries "default" (components.go WithAgentID("default")), clones
+	// inherit it via ConfigSnapshot, and the executor injects
+	// details["agent_id"] from its own id — the PreExecChecker (employee
+	// constitution gate) routes on it, so a "default" voice loop silently
+	// skipped every per-employee tool gate. Stamped BEFORE RunOnce on the
+	// PER-SESSION clone only (GetOrCreateWired never returns the shared
+	// template); empty employee id keeps the inherited id (byte-identical
+	// pre-leaf behavior for non-employee sessions). The Manager cache key
+	// derives from the TEMPLATE's agentID, so restamping never rehashes
+	// the cache.
+	if employeeID != "" {
+		loop.SetAgentID(employeeID)
+	}
 	if override := applyEmployeeDefinition(ctx, loop, employeeID, r.employees, r.logger); override != "" {
 		r.logger.Debug("voice turn runner: employee persona applied",
 			"session_id", sess.ID, "employee_id", employeeID, "prompt_bytes", len(override))
@@ -407,6 +431,7 @@ func WireVoiceEmployee(deps VoiceEmployeeDeps) (*VoiceEmployeeWiring, error) {
 		llm:           deps.BriefLLM,
 		holds:         make(map[string]*sync.Mutex),
 		heldCalls:     make(map[string]holdEntry),
+		gates:         newHoldTracker(),
 	}
 	return w, nil
 }
@@ -416,6 +441,127 @@ type progressPublisherFunc func(ev voice.ProgressEvent)
 
 // PublishProgress implements voice.ProgressPublisher.
 func (f progressPublisherFunc) PublishProgress(ev voice.ProgressEvent) { f(ev) }
+
+// ---- async goal-hold gate (audit 2026-11-09 finding 1) ----
+
+// holdGate is one inbound call's goal-hold readiness signal. The webhook
+// spawn seam arms it BEFORE launching holdPhoneCall on a goroutine; the
+// goroutine marks it ready (defer, so even a failed hold releases turn
+// waiters) once AcquireCallHold + OnCallStart have completed. The talk
+// loop's turn runner awaits it before the employee's FIRST turn, so the
+// per-employee serialization the synchronous hold provided is preserved
+// while the carrier webhook returns promptly.
+//
+// released is set by releaseCall (through the tracker) when the call's
+// terminal outcome fires while the hold is still pending: the hold
+// goroutine sees it after the mutex is finally acquired and rolls the
+// registration back (ReleaseForCall + OnCallEnd) so a hung-up-during-
+// pending call cannot leak the employee mutex or a stuck 'live' row. The
+// rollback is once-guarded by the same map-delete/live checks the normal
+// fan-out uses, so the two paths racing is safe.
+type holdGate struct {
+	ready    chan struct{}
+	once     sync.Once
+	mu       sync.Mutex
+	released bool
+	reason   string
+}
+
+// markReady closes the gate exactly once.
+func (g *holdGate) markReady() { g.once.Do(func() { close(g.ready) }) }
+
+// markReleased records that the call terminal-fired while the hold pends
+// (with the outcome reason for the rollback row). Idempotent.
+func (g *holdGate) markReleased(outcome string) {
+	g.mu.Lock()
+	if !g.released {
+		g.released = true
+		g.reason = outcome
+	}
+	g.mu.Unlock()
+}
+
+// releaseState reports the recorded terminal state for a rollback.
+func (g *holdGate) releaseState() (bool, string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.released, g.reason
+}
+
+// holdTracker is the ccid -> holdGate index shared by the spawn seam,
+// the turn runner, and releaseCall. All methods are nil-receiver safe
+// except arm: a nil tracker means "no async gating" and the caller
+// degrades to the synchronous hold.
+type holdTracker struct {
+	mu    sync.Mutex
+	gates map[string]*holdGate
+}
+
+func newHoldTracker() *holdTracker {
+	return &holdTracker{gates: make(map[string]*holdGate)}
+}
+
+// arm registers a fresh gate for ccid (a replayed call.initiated replaces
+// the prior gate; the prior hold goroutine keeps its own pointer, and the
+// replacement only re-points the lookups) and returns it.
+func (t *holdTracker) arm(ccid string) *holdGate {
+	g := &holdGate{ready: make(chan struct{})}
+	t.mu.Lock()
+	if t.gates == nil {
+		t.gates = make(map[string]*holdGate)
+	}
+	t.gates[ccid] = g
+	t.mu.Unlock()
+	return g
+}
+
+// peek returns the current gate for ccid (nil when absent or tracker nil).
+func (t *holdTracker) peek(ccid string) *holdGate {
+	if t == nil {
+		return nil
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.gates[ccid]
+}
+
+// drop removes ccid's gate and marks it released (outcome carried for the
+// hold goroutine's rollback). Called from releaseCall BEFORE the ReleaseHook
+// fan-out: any hold still pending on the mutex sees released=true the
+// moment it registers, and rolls back; the ReleaseHook's heldCalls peek
+// happens after this, so the two once-guarded paths cannot BOTH skip the
+// teardown. A nil tracker / unknown ccid is a no-op (synchronous-posture
+// calls and outbound legs never arm).
+func (t *holdTracker) drop(ccid, outcome string) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	g := t.gates[ccid]
+	delete(t.gates, ccid)
+	t.mu.Unlock()
+	if g != nil {
+		g.markReleased(outcome)
+	}
+}
+
+// await gates a call's first employee turn: blocks until ccid's hold gate
+// is marked ready (hold acquired + OnCallStart applied), the gate is
+// absent/never armed (nothing to wait for), or ctx is cancelled (the call
+// was released mid-pend). Returns true when the caller may proceed after
+// the hold (or no hold is pending); false on ctx cancellation.
+func (t *holdTracker) await(ctx context.Context, ccid string) bool {
+	g := t.peek(ccid)
+	if g == nil {
+		return true
+	}
+	select {
+	case <-g.ready:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
 
 // AcquireCallHold is round entry: it takes the per-employee serialization
 // mutex (the triggerViaGoalLoop pattern), registers the call as the

@@ -12,36 +12,53 @@ import (
 	"github.com/caimlas/meept/internal/voiceframe"
 )
 
-// serialTTS is a TTS whose Speak calls must never overlap AND whose audio
-// carries a per-stream ordinal byte: every 640-byte chunk its reader
-// hands out is filled with the Speak call number (1-based). The test
-// decodes the .out socket stream and asserts the chunks form exactly one
-// contiguous run of N chunks per ordinal, in ascending order — the FIFO
-// drain signature. With the old per-say goroutines, two streams wrote PCM
-// to the same audioOut socket unsynchronized and the daemon heard
-// interleaved chunks; overlapping Speak calls are also recorded directly.
+// serialTTS is a TTS whose audio carries a per-FRAME ordinal byte,
+// derived from the frame text ("sentence %d" -> ordinal d+1) rather than
+// the Speak call time: with the bounded depth-2 prefetch, two Speak
+// CALLS may enter the provider in either order (launch races), so a
+// call-time stamp could flag a legal depth-2 interleaving as a FIFO
+// violation. The invariant under test is the WRITE order: PCM must
+// leave audioOut in sayQueue dequeue order, one whole stream per run.
+// Every 640-byte chunk a reader hands out is filled with the frame's
+// ordinal; the test decodes the .out stream and asserts the chunks form
+// exactly one contiguous run of 3 ordinals per burst position — the
+// FIFO drain signature. With the old per-say goroutines, two streams
+// wrote PCM to the same audioOut socket unsynchronized and the daemon
+// heard interleaved chunks.
+//
+// The LOAD-BEARING invariant is reader-serialization: at most ONE Speak
+// reader may be open (handing out chunks) at a time, because every read
+// feeds audioOut.Write. Speak CALLS themselves MAY now overlap a live
+// reader — that is the bounded prefetch (sentence N+1's synthesis starts
+// while N paces out, the TTS pipeline serialization fix): Speak returns
+// only after full generation, so no chunk exists until the previous
+// reader is closed anyway.
 type serialTTS struct {
-	mu       sync.Mutex
-	active   bool
-	overlaps int
-	speaks   int
+	mu              sync.Mutex
+	openReaders     int
+	readerOverlaps  int // two readers live at once (the real interleave bug)
+	speakOverreader int // Speak started while a reader was live (prefetch, expected)
+	speaks          int
 }
 
 func (s *serialTTS) Speak(ctx context.Context, text string) (io.ReadCloser, error) {
+	ordinal := byte(0)
+	if n, err := fmt.Sscanf(text, "sentence %d", &ordinal); n == 1 && err == nil {
+		ordinal++ // frame 0 -> ordinal 1
+	}
 	s.mu.Lock()
 	s.speaks++
-	ordinal := s.speaks
-	if s.active {
-		s.overlaps++
+	if s.openReaders > 0 {
+		s.speakOverreader++
 	}
 	s.mu.Unlock()
-	return &serialReader{s: s, chunks: 3, ordinal: byte(ordinal)}, nil //nolint:gosec // G115: ordinal is a small test counter, fits a byte
+	return &serialReader{s: s, chunks: 3, ordinal: ordinal}, nil
 }
 
-func (s *serialTTS) counts() (speaks, overlaps int) {
+func (s *serialTTS) counts() (speaks, readerOverlaps, speakOverreader int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.speaks, s.overlaps
+	return s.speaks, s.readerOverlaps, s.speakOverreader
 }
 
 type serialReader struct {
@@ -58,7 +75,10 @@ func (r *serialReader) Read(p []byte) (int, error) {
 	if !r.started {
 		r.started = true
 		r.s.mu.Lock()
-		r.s.active = true
+		r.s.openReaders++
+		if r.s.openReaders > 1 {
+			r.s.readerOverlaps++
+		}
 		r.s.mu.Unlock()
 	}
 	r.chunks--
@@ -72,19 +92,20 @@ func (r *serialReader) Read(p []byte) (int, error) {
 func (r *serialReader) Close() error {
 	if r.started {
 		r.s.mu.Lock()
-		r.s.active = false
+		r.s.openReaders--
 		r.s.mu.Unlock()
 	}
 	return nil
 }
 
-// TestConcurrentSaysSerialize (audit fix 1): many say frames arriving at
-// once (the normal supervisor path — sentence N+1 checked while N plays)
-// must be drained by ONE playback worker per pipeline. With the old
-// per-say goroutines, two streams wrote PCM to the same audioOut socket
-// unsynchronized and the daemon heard interleaved chunks. The serial TTS
-// pins the invariant structurally: Speak must never be live while another
-// Speak's reader is live, for the whole burst.
+// TestConcurrentSaysSerialize (audit fix 1 + prefetch rework): many say
+// frames arriving at once (the normal supervisor path — sentence N+1
+// checked while N plays) must be drained by ONE playback worker per
+// pipeline. With the old per-say goroutines, two streams wrote PCM to
+// the same audioOut socket unsynchronized and the daemon heard
+// interleaved chunks. The serial TTS pins the invariant structurally: no
+// two readers are ever live at once, for the whole burst. PCM still
+// leaves in strict dequeue order (byte-run signature below).
 func TestConcurrentSaysSerialize(t *testing.T) {
 	dir := shortTempDir(t)
 	d := newFakeDaemon(t, dir)
@@ -107,20 +128,20 @@ func TestConcurrentSaysSerialize(t *testing.T) {
 	swapTTS(p, tts)
 
 	const burst = 8
-	// Fire the whole burst through the REAL handler concurrently, exactly
-	// as the daemon read loop would deliver back-to-back say frames.
-	var wg sync.WaitGroup
+	// Fire the whole burst through the REAL handler back-to-back, exactly
+	// as the production C1 read loop delivers say frames (one reader
+	// goroutine, sequential handleSay). The concurrency that matters is
+	// the worker-vs-enqueue race: these calls land while the worker is
+	// already draining frame 1, exercising the prefetch launch hooks.
+	// (A multi-goroutine enqueue storm would make sayQueue ORDER itself
+	// a race, and the FIFO decode below asserts dequeue order — the
+	// load-bearing fix-1 invariant — against a known enqueue order.)
 	for i := range burst {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			frame := voiceframe.Frame{CallID: "cs1", Event: voiceframe.EventSay, Text: fmt.Sprintf("sentence %d", i), Last: lastPtr(true)} //nolint:modernize // newexpr would emit new(bool)=false; true is intended
-			if err := child.handleSay(frame); err != nil {
-				t.Errorf("handleSay %d: %v", i, err)
-			}
-		}(i)
+		frame := voiceframe.Frame{CallID: "cs1", Event: voiceframe.EventSay, Text: fmt.Sprintf("sentence %d", i), Last: lastPtr(true)} //nolint:modernize // newexpr would emit new(bool)=false; true is intended
+		if err := child.handleSay(frame); err != nil {
+			t.Errorf("handleSay %d: %v", i, err)
+		}
 	}
-	wg.Wait()
 
 	// Drain everything the worker writes: 3 chunks x burst frames x 640 B.
 	total := burst * 3 * 640
@@ -151,12 +172,20 @@ func TestConcurrentSaysSerialize(t *testing.T) {
 			t.Fatalf("FIX 1 VIOLATION: byte %d = %d, want ordinal %d — playback streams interleaved on audioOut (not FIFO-serialized)", i, b, wantRun)
 		}
 	}
-	speaks, overlaps := tts.counts()
-	if overlaps != 0 {
-		t.Fatalf("FIX 1 VIOLATION: %d Speak overlaps — two playback streams hit audioOut concurrently", overlaps)
+	speaks, readerOverlaps, speakOverreader := tts.counts()
+	if readerOverlaps != 0 {
+		t.Fatalf("FIX 1 VIOLATION: %d reader overlaps — two playback streams hit audioOut concurrently", readerOverlaps)
 	}
 	if speaks != burst {
 		t.Fatalf("Speak called %d times, want %d (every queued frame played exactly once)", speaks, burst)
+	}
+	// The prefetch bound: with instant Speak, synthesis of a queued
+	// frame overlaps the CURRENT frame's read phase, but depth stays
+	// bounded (prefetchDepth=2 synth jobs max) — a burst never opens
+	// two readers, and the byte runs prove dequeue order held
+	// regardless of Speak-call interleaving.
+	if speakOverreader < 0 || speakOverreader > burst-1 {
+		t.Fatalf("speakOverreader = %d, want <= %d (bounded one-frame prefetch)", speakOverreader, burst-1)
 	}
 
 	if err := childConn.Close(); err != nil {
@@ -194,6 +223,10 @@ func TestClearDropsQueuedDrafts(t *testing.T) {
 	gate := newGatedTTS()
 	swapTTS(p, gate)
 	d.sendLine(childConn, voiceframe.Frame{CallID: "cd1", Event: voiceframe.EventSay, Text: "current", Last: lastPtr(true)}) //nolint:modernize // newexpr would emit new(bool)=false; true is intended
+	// Stream 1's first chunk reaches the socket before the gate parks
+	// the second read; drain it so the post-clear silence assertion sees
+	// only bytes that arrived AFTER the clear.
+	drainOut(t, out, 640)
 	select {
 	case <-gate.enteredPlay:
 	case <-time.After(testPollDeadline):
@@ -201,16 +234,29 @@ func TestClearDropsQueuedDrafts(t *testing.T) {
 	}
 	d.sendLine(childConn, voiceframe.Frame{CallID: "cd1", Event: voiceframe.EventSay, Text: "queued-1", Last: lastPtr(true)}) //nolint:modernize // newexpr would emit new(bool)=false; true is intended
 	d.sendLine(childConn, voiceframe.Frame{CallID: "cd1", Event: voiceframe.EventSay, Text: "queued-2", Last: lastPtr(true)}) //nolint:modernize // newexpr would emit new(bool)=false; true is intended
-	waitFor(t, func() bool { return p.queuedSayCount() == 2 })
+	// pending = queued drafts + the one synth-slot prefetch: with the
+	// write-start hook fired, queued-1's synthesis is already registered
+	// and queued-2 waits in the FIFO. Either way both are unplayed.
+	waitFor(t, func() bool { return p.pendingSayCount() == 2 })
 
-	// Clear: retire stream 1 and the two queued drafts of the old gen.
+	// Stream 1 parks the worker mid-write; drafts 2+3 queue behind it —
+	// except that the bounded prefetch (TTS serialization fix) starts
+	// draft 2's synthesis the moment stream 1's audio began pacing, so
+	// draft 2 left sayQueue and rides the single synth slot. The drop
+	// contract is unchanged: EVERYTHING the worker still owes audio to
+	// (queued drafts + the prefetched draft) belongs to the old gen and
+	// must be dropped by the clear, prefetched reader cancelled/closed,
+	// never written to the socket.
 	d.sendLine(childConn, voiceframe.Frame{CallID: "cd1", Event: voiceframe.EventClear})
 	waitFor(t, p.isDropped)
 	close(gate.releaseSecond) // stale stream aborts on gen mismatch
 
-	// The two queued drafts must be dropped, not played after the current
-	// stream ends: wait for the queue to drain (worker skips retired drafts).
-	waitFor(t, func() bool { return p.queuedSayCount() == 0 })
+	// The queued draft AND the prefetch draft must be dropped, not played
+	// after the current stream ends: wait for the pending set (queue +
+	// synth slot) to drain (worker skips retired drafts, closes the
+	// retired prefetched reader).
+	waitFor(t, func() bool { return p.pendingSayCount() == 0 })
+	assertNoBytesWithin(t, out, 150*time.Millisecond, "clear let the prefetched draft's PCM reach the socket")
 
 	// F-1 re-arm through the FIFO: a fresh say after the clear plays.
 	stub := newChunkedTTS(quietSample, 2)

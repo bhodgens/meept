@@ -885,6 +885,14 @@ type AgentLoop struct {
 	throttleMu      sync.Mutex
 	throttleTurnCtx *throttleTurnContext
 
+	// throttleResumeHandler is the chat handler the throttle resume path
+	// delivers its result through (C-K2 delivery parity, tree 04 leaf 02):
+	// persistExchange + client push + turn.terminal, mirroring the quota
+	// resume. Stamped by SetThrottleParker (daemon wiring + tests); read by
+	// resumeThrottledTurn under l.mu. Nil (bare SetTurnParker wiring) keeps
+	// the resume loop-side only — no client delivery.
+	throttleResumeHandler *ChatHandler
+
 	// Upload store for resolving image file references (vision pre-flight)
 	uploadStore llm.UploadStore
 
@@ -3117,8 +3125,14 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	// throttles mid-turn, parkThrottledTurn needs the ORIGINAL dispatch
 	// (message/parts/conversation) to build the resume payload. Set for the
 	// turn's duration; cleared on exit. Consumed only by the park branch.
+	// F8 (tree 04 leaf 01): ALSO carried on the turn's context — the loop
+	// slot is shared across overlapping RunOnceWithParts calls on one loop
+	// (turn B's entry clobbers A's stash; A's exit clears B's), so
+	// parkThrottledTurn reads the context copy first and parks exactly the
+	// dispatch THIS turn was entered with.
 	l.setThrottleTurnContext(userMessage, parts, conversationID)
 	defer l.clearThrottleTurnContext()
+	ctx = WithThrottleDispatch(ctx, &throttleTurnContext{message: userMessage, parts: parts, conversationID: conversationID})
 
 	// Scope this turn's LLM calls to the conversation for per-session token
 	// accounting (metrics.db llm_calls.session_id, budget per-session
@@ -3502,8 +3516,18 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	// NOT a completed turn: skip the post-turn success pipeline entirely.
 	// The resume path re-enters RunOnceWithParts and flows through the
 	// normal pipeline once the turn actually completes.
+	//
+	// F6 (tree 04 leaf 02): detection is the EXPLICIT per-turn parked marker
+	// (stamped by parkThrottledTurn on the turn's dispatch stash) OR'd with
+	// the old state-machine read. The state machine is OPTIONAL — with it
+	// nil (or a rejected transition), CurrentState() can never report
+	// StateQuotaWait and the parked turn used to fall through to the success
+	// pipeline above (the exact defect class this guard exists for). The SM
+	// read is kept as a secondary signal for park paths without the ctx
+	// plumbing (task/skill entries that never passed RunOnceWithParts).
 	turnParked := err == nil && strings.TrimSpace(finalResponse) == "" &&
-		l.stateMachine != nil && l.stateMachine.CurrentState() == StateQuotaWait
+		(turnParkedInContext(ctx) ||
+			(l.stateMachine != nil && l.stateMachine.CurrentState() == StateQuotaWait))
 	if turnParked {
 		l.logger.Info("turn parked on provider wait — skipping post-turn success pipeline",
 			"conversation", conversationID,
@@ -3596,8 +3620,13 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 				// pipeline (empty assistant append, learning, trajectory)
 				// repeats the exact pollution the first-cycle turnParked
 				// guard above exists to skip. Same shape, same skip.
+				// F6 (tree 04 leaf 02): same marker-OR-state-machine read as
+				// the primary guard — the rewrite re-entry parks through the
+				// same parkThrottledTurn, which stamps the marker on this
+				// turn's ctx, so detection holds with a nil state machine.
 				if strings.TrimSpace(retryResponse) == "" &&
-					l.stateMachine != nil && l.stateMachine.CurrentState() == StateQuotaWait {
+					(turnParkedInContext(ctx) ||
+						(l.stateMachine != nil && l.stateMachine.CurrentState() == StateQuotaWait)) {
 					l.logger.Info("reply-guard rewrite retry parked on provider wait — skipping post-turn success pipeline",
 						"conversation_id", conversationID,
 					)
@@ -10100,6 +10129,35 @@ func (l *AgentLoop) GetAgentID() string {
 	return l.agentID
 }
 
+// SetAgentID rebinds the agent identity on a live loop and forwards it to
+// the loop's executor (the WithExecutorAgentID lane, snapshotted into
+// details["agent_id"] at every permission check). The voice turn runner
+// (caller-authz leaf 02, O5) stamps per-session VOICE clones with the
+// bound employee id so the PreExecChecker routes the employee
+// constitution gate; loops built without an identity or turned with no
+// employee keep their construction-time id. Rebinding does NOT touch the
+// Manager cache key — that derives from the TEMPLATE's agentID, and the
+// template is never mutated here (the voice lane clones, the daemon
+// template stays "default"). Nil-safe; empty id is a no-op.
+func (l *AgentLoop) SetAgentID(id string) {
+	if l == nil || id == "" {
+		return
+	}
+	l.mu.Lock()
+	if l.agentID == id {
+		l.mu.Unlock()
+		return
+	}
+	l.agentID = id
+	exec := l.executor
+	l.mu.Unlock()
+	// Executor forward outside the loop lock (lock order l.mu -> e.mu is
+	// the ConfigSnapshot precedent; never held together here).
+	if exec != nil {
+		exec.SetAgentID(id)
+	}
+}
+
 // SetDetectionContext wires the client-side detection context (CWD, detected
 // project, CLI args) captured at session creation. Nil-safe per CLAUDE.md
 // setter convention.
@@ -10452,8 +10510,12 @@ func (l *AgentLoop) applyTerminateReplyGuard(ctx context.Context, conv *Conversa
 	// parked-turn handling by shipping the parked shape, never a canned
 	// line masquerading as an answer. The StateQuotaWait transition
 	// already carried the park reason (throttle_wait).
+	// F6 (tree 04 leaf 02): the marker read is the primary signal — with a
+	// nil state machine the parked rewrite must still ship "" (the parked
+	// shape), never a canned line.
 	if strings.TrimSpace(retryResponse) == "" &&
-		l.stateMachine != nil && l.stateMachine.CurrentState() == StateQuotaWait {
+		(turnParkedInContext(ctx) ||
+			(l.stateMachine != nil && l.stateMachine.CurrentState() == StateQuotaWait)) {
 		l.logger.Info("terminating-tool reply-guard rewrite parked on provider wait",
 			"conversation_id", conversationID,
 		)

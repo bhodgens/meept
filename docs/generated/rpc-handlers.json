@@ -387,31 +387,31 @@
     "topic": "groups.assign",
     "handler": "h.handleAssign",
     "file": "internal/rpc/groups.go",
-    "line": 154
+    "line": 161
   },
   {
     "topic": "groups.check",
     "handler": "h.handleCheck",
     "file": "internal/rpc/groups.go",
-    "line": 156
+    "line": 163
   },
   {
     "topic": "groups.explain",
     "handler": "h.handleExplain",
     "file": "internal/rpc/groups.go",
-    "line": 153
+    "line": 160
   },
   {
     "topic": "groups.list",
     "handler": "h.handleList",
     "file": "internal/rpc/groups.go",
-    "line": 152
+    "line": 159
   },
   {
     "topic": "groups.remove",
     "handler": "h.handleRemove",
     "file": "internal/rpc/groups.go",
-    "line": 155
+    "line": 162
   },
   {
     "topic": "instruction.add",
@@ -442,6 +442,18 @@
     "handler": "h.handleIntakeStatus",
     "file": "internal/rpc/intake_status.go",
     "line": 67
+  },
+  {
+    "topic": "ledger.query",
+    "handler": "h.handleQuery",
+    "file": "internal/rpc/ledger.go",
+    "line": 135
+  },
+  {
+    "topic": "ledger.state",
+    "handler": "h.handleState",
+    "file": "internal/rpc/ledger.go",
+    "line": 136
   },
   {
     "topic": "mcp.list",
@@ -568,6 +580,12 @@
     "handler": "h.handleReviewQueue",
     "file": "internal/rpc/epistemic.go",
     "line": 48
+  },
+  {
+    "topic": "memory.search.hybrid",
+    "handler": "func(ctx context.Context, params json.RawMessage",
+    "file": "internal/daemon/vector_hybrid_wiring.go",
+    "line": 106
   },
   {
     "topic": "memory.vector.search",
@@ -1498,6 +1516,24 @@
     "handler": "h.handleUpload",
     "file": "internal/daemon/upload_rpc.go",
     "line": 29
+  },
+  {
+    "topic": "voice.link.close",
+    "handler": "h.handleClose",
+    "file": "internal/rpc/voice_link.go",
+    "line": 150
+  },
+  {
+    "topic": "voice.link.open",
+    "handler": "h.handleOpen",
+    "file": "internal/rpc/voice_link.go",
+    "line": 149
+  },
+  {
+    "topic": "voice.link.status",
+    "handler": "h.handleStatus",
+    "file": "internal/rpc/voice_link.go",
+    "line": 151
   },
   {
     "topic": "voice.local.end",
