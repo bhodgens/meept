@@ -112,7 +112,8 @@ reshape, bus payloads).
 |-------|--------|------------|-------------|
 | 00T-plan-goal-tests | TESTS_VALIDATED | 1 | committed a59fbc4f (--no-verify RED-by-design); 14 RED tests, parent-verified contract-symbol-only |
 | 05-goal-transition-fence | REVIEWED | 1 | committed 091cc90b; parent-verified employee pkg green, gate hash stable; Retire dead-code kept (frozen gate calls it) |
-| 03-plan-cas | IN_PROGRESS | 0 | dispatched 2026-11-09 (store_sqlite+interface only; table+manager migration is leaf 04 after) |
+| 03-plan-cas | REVIEWED | 1 | committed d191cb34; gate hashes stable (8981080c/07573760); stub parity + empty-from-set guard parent-verified |
+| 04-manager-cas-migration | IN_PROGRESS | 0 | dispatched 2026-11-09 (TABLE-DRIVEN per C-P4 amendment; manager.go+transitions.go scope) |
 
 ## Integration Test Plan
 
