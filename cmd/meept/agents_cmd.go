@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/employeemd"
 	"github.com/spf13/cobra"
 )
 
@@ -225,6 +227,34 @@ func readDefinitionFile(path string, v any) error {
 		return fmt.Errorf("invalid JSON5 in definition file: %w", err)
 	}
 	return nil
+}
+
+// isMarkdownDef reports whether path denotes an EMPLOYEE.md definition.
+func isMarkdownDef(path string) bool {
+	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(path), "."))
+	return ext == "md" || ext == "markdown"
+}
+
+// readEmployeeDefinition reads a definition file into a map[string]any,
+// dispatching on extension: markdown goes through employeemd.Parse, all
+// other extensions (json5/json) go through readDefinitionFile.
+func readEmployeeDefinition(path string) (map[string]any, error) {
+	if isMarkdownDef(path) {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read definition file: %w", err)
+		}
+		m, err := employeemd.Parse(data)
+		if err != nil {
+			return nil, fmt.Errorf("invalid EMPLOYEE.md: %w", err)
+		}
+		return m, nil
+	}
+	var def map[string]any
+	if err := readDefinitionFile(path, &def); err != nil {
+		return nil, err
+	}
+	return def, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -473,7 +503,7 @@ func newAgentsCreateCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "create <definition.json>",
 		Short: "create an employee from a definition file",
-		Long: `Create a new AI employee from a JSON5 definition file.
+		Long: `Create a new AI employee from a definition file (.json5 or .md).
 
 The definition must include a constitution block. The daemon validates
 the constitution before creating the employee; creation is refused if
@@ -504,8 +534,8 @@ Note: autonomy_tier is the string form ("tier_2_propose"), never numeric.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			defPath := args[0]
 
-			var def map[string]any
-			if err := readDefinitionFile(defPath, &def); err != nil {
+			def, err := readEmployeeDefinition(defPath)
+			if err != nil {
 				return err
 			}
 
@@ -562,8 +592,8 @@ message directing you to the amend command.`,
 			agentID := args[0]
 			defPath := args[1]
 
-			var def map[string]any
-			if err := readDefinitionFile(defPath, &def); err != nil {
+			def, err := readEmployeeDefinition(defPath)
+			if err != nil {
 				return err
 			}
 
