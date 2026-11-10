@@ -92,6 +92,11 @@ type DistillWorkerConfig struct {
 	// over each L1 extraction batch before storing (tree 02 leaf L2). Nil or
 	// disabled: candidates are stored directly — no recall, no LLM call.
 	Conflict *ConflictWiring
+	// Compactor, when non-nil, compacts the L0 window (merge tool +
+	// observation pairs, dedup observations, summary middle) before the L1
+	// extraction prompt is assembled — HALO Phase 6 atomic compaction
+	// (agent.atomic_compaction, default false). Nil = disabled.
+	Compactor *Compactor
 	// Now supplies the worker's wall clock in the LOCAL frame (the L0/L2
 	// calendar convention above). Nil = time.Now. Test seam for the L2 day
 	// derivation: without it the chained day is unassertable off the wall
@@ -109,12 +114,25 @@ type DistillWorker struct {
 	conflict *ConflictWiring
 	now      func() time.Time
 	logger   *slog.Logger
+	// compactor is the optional HALO Phase 6 atomic tool-turn compactor
+	// (agent.atomic_compaction; internal/memory/consolidation_compact.go).
+	// Nil = disabled: the L1 prompt sees the raw window, byte-identical to
+	// the pre-wiring behavior.
+	compactor *Compactor
 	// noModelWarned dedups the models-less Warn (T4 of the memory-defaults
 	// leaf): ONE Warn per worker lifetime, not one per retry cycle — a
 	// models-less default-on daemon must not spam the log on every queued
 	// distill job. Guarded by noModelMu.
 	noModelMu     sync.Mutex
 	noModelWarned bool
+}
+
+// AtomicCompactor returns the worker's optional atomic compactor (HALO
+// Phase 6, agent.atomic_compaction). Nil when disabled. Read-only accessor:
+// the daemon wiring test pins construction through it; compaction itself is
+// transparent to job processing.
+func (w *DistillWorker) AtomicCompactor() *Compactor {
+	return w.compactor
 }
 
 // warnNoModelOnce logs the models-less skip warning at most once per worker.
@@ -137,13 +155,14 @@ func (w *DistillWorker) warnNoModelOnce(stage string) {
 // NewDistillWorker constructs a distill worker.
 func NewDistillWorker(cfg DistillWorkerConfig) *DistillWorker {
 	w := &DistillWorker{
-		manager:  cfg.Manager,
-		llm:      cfg.LLM,
-		dataDir:  cfg.DataDir,
-		enqueuer: cfg.Enqueuer,
-		conflict: cfg.Conflict,
-		now:      cfg.Now,
-		logger:   cfg.Logger,
+		manager:   cfg.Manager,
+		llm:       cfg.LLM,
+		dataDir:   cfg.DataDir,
+		enqueuer:  cfg.Enqueuer,
+		conflict:  cfg.Conflict,
+		now:       cfg.Now,
+		logger:    cfg.Logger,
+		compactor: cfg.Compactor,
 	}
 	if w.now == nil {
 		w.now = time.Now
@@ -256,7 +275,21 @@ func (w *DistillWorker) handleL1Extract(ctx context.Context, payload []byte) (an
 	stored := 0
 	merged := 0
 	if len(recs) > 0 {
-		prompt := fmt.Sprintf(ambientExtractionPromptTemplate, strings.Join(formatL0Conversation(recs), "\n"))
+		// Atomic compaction (HALO Phase 6, agent.atomic_compaction): when
+		// wired, the prompt sees the compacted turn list — tool + observation
+		// pairs merged, adjacent observations deduped, a large middle
+		// replaced by one summary turn. Nil compactor = raw window,
+		// byte-identical to the pre-wiring prompt.
+		window := formatL0Conversation(recs)
+		if w.compactor != nil {
+			compacted := w.compactor.CompactTurns(toTurnRecords(recs))
+			window = formatCompactedTurns(compacted)
+			w.logger.Debug("l1 window compacted",
+				"records", len(recs),
+				"compacted_turns", len(compacted),
+			)
+		}
+		prompt := fmt.Sprintf(ambientExtractionPromptTemplate, strings.Join(window, "\n"))
 		raw, err := w.llm.DistillComplete(ctx, prompt)
 		if err != nil {
 			return nil, fmt.Errorf("distill l1: llm extraction: %w", err)
@@ -794,4 +827,42 @@ func markerPosCoversFileEnd(l0Path, sessionID, marker string) bool {
 		return false
 	}
 	return recs[len(recs)-1].ID == marker
+}
+
+// toTurnRecords converts L0 records into memory-level TurnRecords for the
+// atomic compactor (HALO Phase 6). L0 roles map directly: "user" stays a
+// user turn, "assistant" becomes a final turn, and meta-carried roles
+// (tool/thinking/observation, as written by richer capture paths) pass
+// through. Index mirrors slice position so compacted ordering is stable.
+func toTurnRecords(recs []l0Record) []TurnRecord {
+	out := make([]TurnRecord, 0, len(recs))
+	for i, r := range recs {
+		typ := r.Role
+		switch typ {
+		case "user", "tool", "thinking", "observation", "final", "summary":
+			// known types pass through
+		case "assistant":
+			typ = "final"
+		default:
+			typ = "observation"
+		}
+		out = append(out, TurnRecord{
+			Index:   i,
+			Type:    typ,
+			Content: r.Role + ": " + r.Content,
+			Tokens:  len(r.Content),
+		})
+	}
+	return out
+}
+
+// formatCompactedTurns renders a compacted turn list in the same
+// "role: content" shape the raw L0 window uses, so the extraction prompt's
+// format contract is unchanged — only the number of lines differs.
+func formatCompactedTurns(turns []TurnRecord) []string {
+	out := make([]string, 0, len(turns))
+	for _, t := range turns {
+		out = append(out, t.Content)
+	}
+	return out
 }

@@ -187,12 +187,28 @@ func l0cEnqueuer(l0c *l0Components) memory.JobEnqueuer {
 // shape — direct, dispatched/task-scoped, relayed — where the old
 // hook-registry seam missed task-scoped loops entirely
 // (.github/ISSUES/task-loops-no-hook-registry-l0-ambient.md). Memory-manager
-// nil (memory disabled) stays a no-op — no worker.
-func wireL0Distill(l0c *l0Components, memoryMgr *memory.Manager, chatter llm.Chatter, memCfg config.MemoryConfig, logger *slog.Logger) *memory.DistillWorker {
+// nil (memory disabled) stays a no-op — no worker. agentCfg drives the
+// opt-in HALO Phase 6 atomic compactor (agent.atomic_compaction, default
+// false: nil compactor = raw window prompt, byte-identical).
+func wireL0Distill(l0c *l0Components, memoryMgr *memory.Manager, chatter llm.Chatter, memCfg config.MemoryConfig, agentCfg config.AgentConfig, logger *slog.Logger) *memory.DistillWorker {
 	if l0c == nil || memoryMgr == nil || !memCfg.L0Enabled {
 		return nil
 	}
 	dataDir := l0c.dataDir
+
+	var compactor *memory.Compactor
+	if agentCfg.AtomicCompaction.Enabled {
+		compactor = memory.NewCompactor(memory.CompactionConfig{
+			MaxTurnsBeforeCompact: agentCfg.AtomicCompaction.MaxTurnsBeforeCompact,
+			MaxToolCallsPerTurn:   agentCfg.AtomicCompaction.MaxToolCallsPerTurn,
+			KeepLastNTurns:        agentCfg.AtomicCompaction.KeepLastNTurns,
+		})
+		logger.Info("atomic compaction wired into l1 distill",
+			"max_turns_before_compact", agentCfg.AtomicCompaction.MaxTurnsBeforeCompact,
+			"max_tool_calls_per_turn", agentCfg.AtomicCompaction.MaxToolCallsPerTurn,
+			"keep_last_n_turns", agentCfg.AtomicCompaction.KeepLastNTurns,
+		)
+	}
 
 	worker := memory.NewDistillWorker(memory.DistillWorkerConfig{
 		Manager: memoryMgr,
@@ -204,8 +220,9 @@ func wireL0Distill(l0c *l0Components, memoryMgr *memory.Manager, chatter llm.Cha
 		Enqueuer: l0c.enqueuer,
 		// Conflict: live, configured detector when memory.conflict.enabled
 		// is set (bughunt M1); nil otherwise keeps the pre-detector path.
-		Conflict: conflictWiring(memCfg, chatter, logger),
-		Logger:   logger.With("component", "distill-worker"),
+		Conflict:  conflictWiring(memCfg, chatter, logger),
+		Compactor: compactor,
+		Logger:    logger.With("component", "distill-worker"),
 	})
 	logger.Info("l0 distill wired", "data_dir", dataDir, "retention_days", memCfg.L0RetentionDays)
 	return worker
