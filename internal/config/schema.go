@@ -128,6 +128,7 @@ type Config struct {
 	Contact             ContactConfig             `json:"contact,omitzero"     toml:"contact"`
 	Ledger              LedgerConfig              `json:"ledger"               toml:"ledger"`
 	Parking             ParkingConfig             `json:"parking"              toml:"parking"`
+	Awareness           AwarenessConfig           `json:"awareness"            toml:"awareness"`
 }
 
 // ParkingConfig groups parked-turn persistence options (tree
@@ -5111,6 +5112,10 @@ func DefaultConfig() *Config {
 			AutoRepair:    false,
 			IntervalHours: DefaultLedgerIntervalHours,
 		},
+		Awareness: AwarenessConfig{
+			Enabled:        false, // D1 opt-in (plan 20261110-situational)
+			RefreshMinutes: DefaultAwarenessRefreshMinutes,
+		},
 		ReflectionCollector: ReflectionCollectorConfig{
 			Enabled:              true,
 			AutoQueue:            true,
@@ -5630,6 +5635,38 @@ const DefaultLedgerIntervalHours = 168
 func NormalizeLedgerDefaults(c *LedgerConfig) {
 	if c.IntervalHours <= 0 {
 		c.IntervalHours = DefaultLedgerIntervalHours
+	}
+}
+
+// AwarenessConfig is the [awareness] table (plan 20261110-situational D1):
+// the employee situational-awareness feed (moment block: local time,
+// weather risk alerts, day-state + tone). Enabled defaults FALSE — opt-in
+// per docs/agents/opt-in-defaults.md, so a daemon that never opts in
+// renders byte-identical prompts. RefreshMinutes is the scheduler cadence
+// for the weather-refresh/daystate-warm jobs.
+//
+//gendoc:section awareness
+//gendoc:desc Employee situational-awareness feed (moment block): opt-in enable flag and scheduler refresh cadence in minutes.
+//gendoc:example [awareness] enabled = true, refresh_minutes = 30
+type AwarenessConfig struct {
+	Enabled        bool `json:"enabled"         toml:"enabled"`
+	RefreshMinutes int  `json:"refresh_minutes" toml:"refresh_minutes"`
+}
+
+// DefaultAwarenessRefreshMinutes is the [awareness] refresh cadence
+// default (30 minutes; matches the weather cache TTL so a refresh never
+// outlives its cached Outlook — plan 20261110-situational leaf 01/01).
+const DefaultAwarenessRefreshMinutes = 30
+
+// NormalizeAwarenessDefaults clamps invalid [awareness] values at the load
+// boundary so every consumer sees final values: a non-positive
+// refresh_minutes (0 means unset; negative is invalid) falls back to
+// DefaultAwarenessRefreshMinutes. Enabled is NEVER forced — explicit
+// true/false and the omitted-key default (false) are both honored
+// (mirrors the LedgerConfig AutoRepair posture).
+func NormalizeAwarenessDefaults(c *AwarenessConfig) {
+	if c.RefreshMinutes <= 0 {
+		c.RefreshMinutes = DefaultAwarenessRefreshMinutes
 	}
 }
 

@@ -93,6 +93,12 @@ type DraftRecord struct {
 	SetStatus Status
 	// Summary (optional, requires SetStatus): one-line current truth.
 	Summary string
+	// Due (optional): deadline for the subject. Zero = no due. Only
+	// meaningful when SetStatus != "" — the state UPSERT writes due_at
+	// on every state-setting append, so a later state-setting append
+	// WITHOUT a due CLEARS it (frozen overwrite semantics, plan
+	// 20261110-situational 02-daystate/01).
+	Due time.Time
 }
 
 // State is the current-truth row (one per employee+subject).
@@ -103,6 +109,10 @@ type State struct {
 	Summary    string
 	UpdatedAt  time.Time
 	AsOf       int64 // ledger.id of the row that last set it
+	// Due is the subject's deadline (ledger_state.due_at); zero when no
+	// due is set. Overwritten by every state-setting append (a
+	// state-setting append with DraftRecord.Due zero clears it).
+	Due time.Time
 }
 
 // Errors (frozen names).
@@ -112,14 +122,18 @@ var ErrResolveNotFound = errors.New("ledger: resolves references unknown or fore
 // payloadEnvelope is the frozen wrapper Append writes into ledger.payload
 // when DraftRecord.SetStatus is set:
 //
-//	{"v":1,"status":"done","summary":"...","data":<user payload or null>}
+//	{"v":1,"status":"done","summary":"...","due":"<RFC3339 or empty>","data":<user payload or null>}
 //
 // The fold in VerifyState identifies status-carrying rows solely by this
-// envelope; log-only rows store the user payload verbatim.
+// envelope; log-only rows store the user payload verbatim. The "due" key
+// is the 02-daystate/01 additive extension — legacy envelopes written
+// before the extension simply omit the key and decode to "" (backward
+// compat per the frozen contract).
 type payloadEnvelope struct {
 	V       int             `json:"v"`
 	Status  string          `json:"status"`
 	Summary string          `json:"summary"`
+	Due     string          `json:"due"`
 	Data    json.RawMessage `json:"data"`
 }
 
@@ -183,6 +197,22 @@ CREATE VIRTUAL TABLE IF NOT EXISTS ledger_fts USING fts5(
                                              -- of payload) at Append time
 `
 
+// ledgerDueAtAlter + ledgerDueIndex add the 02-daystate/01 due_at
+// extension (plan 20261110-situational, frozen contract):
+//
+//	ALTER TABLE ledger_state ADD COLUMN due_at TEXT NOT NULL DEFAULT ''
+//	CREATE INDEX IF NOT EXISTS idx_ledger_state_due ON ledger_state(due_at) WHERE due_at <> ''
+//
+// It rides as a guarded-ALTER follow-on on purpose — the frozen
+// ledgerSchema block stays character-for-character — so pre-extension
+// databases migrate on Open and already-migrated ones tolerate the
+// duplicate-column steady state (contact/store.go:58 +
+// voice/callstore.go:126 idiom).
+const (
+	ledgerDueAtAlter = `ALTER TABLE ledger_state ADD COLUMN due_at TEXT NOT NULL DEFAULT ''`
+	ledgerDueIndex   = `CREATE INDEX IF NOT EXISTS idx_ledger_state_due ON ledger_state(due_at) WHERE due_at <> ''`
+)
+
 // Store is the SQLite employee-ledger store. A single connection
 // (SetMaxOpenConns(1)) serializes writers in-process, the same
 // convention as the effects ledger and voice call store; mu guards the
@@ -215,10 +245,22 @@ func Open(dbPath string, logger *slog.Logger) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("ledger: failed to migrate ledger: %w", err)
 	}
-	s := &Store{db: db, logger: logger, nowFn: time.Now}
 	// Guarded-ALTER migration idiom (internal/voice/callstore.go:118-130):
-	// reserved for future columns — duplicate-column errors are the
-	// expected steady state on migrated databases; anything else is fatal.
+	// duplicate-column errors are the expected steady state on migrated
+	// databases; anything else is fatal. The due_at extension (plan
+	// 20261110-situational 02-daystate/01) rides this seam; the partial
+	// due index is CREATE IF NOT EXISTS and needs no guard.
+	if _, err := db.Exec(ledgerDueAtAlter); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			db.Close()
+			return nil, fmt.Errorf("ledger: failed to migrate due_at column: %w", err)
+		}
+	}
+	if _, err := db.Exec(ledgerDueIndex); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("ledger: failed to create due index: %w", err)
+	}
+	s := &Store{db: db, logger: logger, nowFn: time.Now}
 	logger.Info("ledger store initialized", "path", dbPath)
 	return s, nil
 }
@@ -299,6 +341,7 @@ func (s *Store) Append(ctx context.Context, d DraftRecord) (*Record, error) {
 		storedPayload = d.Payload
 		newState      *State
 		reopened      bool
+		dueAt         string
 	)
 	if d.SetStatus != "" {
 		var from Status
@@ -316,6 +359,13 @@ func (s *Store) Append(ctx context.Context, d DraftRecord) (*Record, error) {
 		}
 		reopened = (from == StatusDone || from == StatusCancelled) && d.SetStatus == StatusOpen
 
+		// dueAt is the RFC3339 UTC form of DraftRecord.Due, "" when zero
+		// (frozen: every state-setting append rewrites due_at, so a
+		// no-due append CLEARS a previously set due).
+		if !d.Due.IsZero() {
+			dueAt = d.Due.UTC().Format(time.RFC3339)
+		}
+
 		data := json.RawMessage(d.Payload)
 		if len(d.Payload) == 0 {
 			// A nil RawMessage marshals as an ABSENT key; the frozen
@@ -326,6 +376,7 @@ func (s *Store) Append(ctx context.Context, d DraftRecord) (*Record, error) {
 			V:       1,
 			Status:  string(d.SetStatus),
 			Summary: d.Summary,
+			Due:     dueAt,
 			Data:    data,
 		})
 		if err != nil {
@@ -357,13 +408,14 @@ func (s *Store) Append(ctx context.Context, d DraftRecord) (*Record, error) {
 
 	if d.SetStatus != "" {
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO ledger_state (employee_id, subject, status, summary, updated_at, as_of)
-             VALUES (?, ?, ?, ?, ?, ?)
+			`INSERT INTO ledger_state (employee_id, subject, status, summary, updated_at, as_of, due_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(employee_id, subject) DO UPDATE SET
                  status=excluded.status, summary=excluded.summary,
-                 updated_at=excluded.updated_at, as_of=excluded.as_of`,
+                 updated_at=excluded.updated_at, as_of=excluded.as_of,
+                 due_at=excluded.due_at`,
 			d.EmployeeID, d.Subject, string(d.SetStatus), d.Summary,
-			at.Format(time.RFC3339), id); err != nil {
+			at.Format(time.RFC3339), id, dueAt); err != nil {
 			return nil, fmt.Errorf("ledger: append: upsert state: %w", err)
 		}
 		newState = &State{
@@ -373,6 +425,7 @@ func (s *Store) Append(ctx context.Context, d DraftRecord) (*Record, error) {
 			Summary:    d.Summary,
 			UpdatedAt:  at,
 			AsOf:       id,
+			Due:        d.Due.UTC(),
 		}
 	}
 
@@ -535,11 +588,12 @@ func (s *Store) GetState(ctx context.Context, employeeID, subject string) (State
 		status  string
 		at      string
 		summary string
+		dueAt   string
 	)
 	err := s.db.QueryRowContext(ctx,
-		`SELECT employee_id, subject, status, summary, updated_at, as_of
+		`SELECT employee_id, subject, status, summary, updated_at, as_of, due_at
          FROM ledger_state WHERE employee_id = ? AND subject = ?`,
-		employeeID, subject).Scan(&st.EmployeeID, &st.Subject, &status, &summary, &at, &st.AsOf)
+		employeeID, subject).Scan(&st.EmployeeID, &st.Subject, &status, &summary, &at, &st.AsOf, &dueAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return State{}, false, nil
 	}
@@ -557,6 +611,10 @@ func (s *Store) GetState(ctx context.Context, employeeID, subject string) (State
 	st.Status = Status(status)
 	st.Summary = summary
 	st.UpdatedAt = parsedAt
+	st.Due, err = parseDueAt(dueAt)
+	if err != nil {
+		return State{}, false, fmt.Errorf("ledger: get state: %w", err)
+	}
 	return st, true, nil
 }
 

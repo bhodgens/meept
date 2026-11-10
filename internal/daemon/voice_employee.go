@@ -122,6 +122,14 @@ type VoiceEmployeeDeps struct {
 	// llm client by ledger_wiring.go (no new HTTP client). Nil with a
 	// non-nil LedgerStore still no-ops the brief.
 	BriefLLM func(prompt string) (string, error)
+
+	// MomentResolver builds the per-employee "# Moment" renderer for the
+	// voice clone loop (plan 20261110-situational leaf 01-moment/02;
+	// internal/daemon/awareness_wiring.go). nil (awareness disabled) =
+	// no renderer is ever stamped and voice prompts stay byte-identical
+	// (D1). Keyed by the bound employee id — the same id SetAgentID
+	// stamps (caller-authz leaf 02 precedent).
+	MomentResolver func(employeeID string) func() string
 }
 
 // sessionStoreAdapter adapts session.Store onto voice.SessionStore via
@@ -218,6 +226,9 @@ type loopTurnRunner struct {
 	// the Hold seam).
 	employees EmployeeDefinitionResolver
 	logger    *slog.Logger
+	// momentResolver builds the per-employee "# Moment" renderer stamped
+	// onto session clones each turn (awareness leaf 01/02). nil = inert.
+	momentResolver func(employeeID string) func() string
 }
 
 // EmployeeDefinitionResolver resolves one employee's runtime definition:
@@ -328,6 +339,19 @@ func (r *loopTurnRunner) Run(ctx context.Context, sess voice.SessionHandle, prom
 	// the cache.
 	if employeeID != "" {
 		loop.SetAgentID(employeeID)
+	}
+	// Moment renderer stamp (plan 20261110-situational leaf 01-moment/02):
+	// the voice override lane appends the employee's "# Moment" block
+	// (buildSystemPromptWithOverride, gate §4). Resolved per bound
+	// employee id — the same id the authz stamp above carries — and set
+	// BEFORE RunOnce so the first turn's prompt already has the block. A
+	// nil resolver (awareness off) explicitly sets nil: cached clones may
+	// carry an id rebound to another employee (or none), and nil = the
+	// pinned D1 inert shape.
+	if r.momentResolver != nil {
+		loop.SetMomentRenderer(r.momentResolver(employeeID))
+	} else {
+		loop.SetMomentRenderer(nil)
 	}
 	if override := applyEmployeeDefinition(ctx, loop, employeeID, r.employees, r.logger); override != "" {
 		r.logger.Debug("voice turn runner: employee persona applied",
@@ -459,6 +483,9 @@ func WireVoiceEmployee(deps VoiceEmployeeDeps) (*VoiceEmployeeWiring, error) {
 			sessions:   deps.Sessions,
 			employees:  deps.Employees,
 			logger:     logger.With("component", "voice-turns"),
+			// Moment renderer seam (awareness leaf 01/02): resolved per
+			// bound employee id at turn time on the session clone.
+			momentResolver: deps.MomentResolver,
 		},
 		Progress: progressPublisherFunc(progressFn),
 		Logger:   logger.With("component", "voice-binding"),

@@ -99,9 +99,30 @@ type BotDefinition struct {
 	// see selectEmployeeExecutor in internal/daemon). Empty = no ACP
 	// executor; persistence is the JSON definition blob so the field
 	// round-trips with no schema change.
-	ExecutorAgent string    `json:"executor_agent,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ExecutorAgent string `json:"executor_agent,omitempty"`
+	// Situational-awareness fields (plan 20261110-situational, master.md
+	// frozen contract). Persistence is the JSON definition blob only —
+	// zero schema ALTER (executor-agent precedent above). The daemon
+	// treats the all-zero shape as "no awareness": empty Timezone falls
+	// back to the scheduler tz (bad IANA name -> UTC + WARN at render),
+	// zero Weather (Lat/Lon 0, no Trades) skips the weather line, and a
+	// nil PersonaDayState leaves tone on the daystate built-ins.
+	Timezone        string            `json:"timezone,omitempty"`
+	LocationLabel   string            `json:"location_label,omitempty"`
+	Weather         BotWeather        `json:"weather,omitzero"`
+	PersonaDayState map[string]string `json:"persona_day_state,omitempty"`
+	CreatedAt       time.Time         `json:"created_at"`
+	UpdatedAt       time.Time         `json:"updated_at"`
+}
+
+// BotWeather pins a worker's job-site for the weather feed (open-meteo,
+// internal/weather). Trades select the risk-alert rule set ("concrete",
+// "roofing", "earthwork"); unknown trades never fabricate alerts. JSON
+// shape pinned by the 00T-moment gate §5 (lat/lon/trades, snake_case).
+type BotWeather struct {
+	Lat    float64  `json:"lat"`
+	Lon    float64  `json:"lon"`
+	Trades []string `json:"trades,omitempty"`
 }
 
 func (d *BotDefinition) Validate() error {
