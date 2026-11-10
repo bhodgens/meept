@@ -96,6 +96,19 @@ The template ships DISABLED. To hire it: run
 `voice.default_employee = "secretary"`, and flip its top-level `enabled`
 to `true`.
 
+## The companion employee (desk conversation, read-only reporting)
+
+[`config/employees/companion.json5`](../../config/employees/companion.json5)
+is the desk companion for the local leg: a warm, spoken-word conversationalist
+that opens with a "how can I help?" offer and can truthfully report on the
+operator's recent work and on what the platform is running. It holds ONLY
+read-only reporting tools (memory_search, memory_recall, memory_get_context,
+platform_status, platform_agents, task_list). Its
+constitution's `tools_forbidden` is an explicit mutating-tool deny list, not
+the `["*"]` wildcard: enforcement checks the forbid list BEFORE the allow
+list, so a wildcard would deny the reporting tools too. The template
+ships DISABLED; hire with `meept agents create` after flipping `enabled`.
+
 ## The local leg: how to run it
 
 Prereqs: daemon running with `voice.enabled = true` and
@@ -124,7 +137,11 @@ meept voice local --employee eve --label desk
 Your mic is captured through ffmpeg (avfoundation, raw s16le 16 kHz
 mono) and replies play through the speaker. Talk over the employee to
 barge in - the local leg detects your speech by RMS level
-(`local.barge_in_rms`). Ctrl-C ends the call cleanly (`voice.local.end`
+(`local.barge_in_rms`). The barge-in SILENCES the speaker: the queued
+tail is dropped and the burst already playing is paused within ~20 ms
+(recallable playback), and live mode keeps at most ~150 ms of
+not-yet-played audio ahead of the speakers, so the old answer never
+talks over the new one. Ctrl-C ends the call cleanly (`voice.local.end`
 fires before exit, so the registry slot and call row are released
 exactly once). The first live capture on macOS triggers the standard
 system mic-permission prompt for the terminal app; grant it once.

@@ -165,12 +165,17 @@ func TestProjectPromptModalUpdateEsc(t *testing.T) {
 	m := NewProjectPromptModal("s1", "/p")
 	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if cmd == nil {
-		t.Fatal("pressing esc should return a non-nil command (tea.Quit)")
+		t.Fatal("pressing esc should return a non-nil command (ProjectDismissedMsg)")
 	}
-	// tea.Quit returns a command that produces a tea.QuitMsg.
+	// Since the wave-2 embedding (3b3eba0c) esc DISMISSES instead of
+	// quitting: an embedded App modal must not tear down the program. The
+	// dismissal emits ProjectDismissedMsg and hides the modal.
 	msg := cmd()
-	if _, ok := msg.(tea.QuitMsg); !ok {
-		t.Fatalf("expected tea.QuitMsg from esc, got %T: %v", msg, msg)
+	if _, ok := msg.(ProjectDismissedMsg); !ok {
+		t.Fatalf("expected ProjectDismissedMsg from esc, got %T: %v", msg, msg)
+	}
+	if m.IsVisible() {
+		t.Error("esc should hide the modal")
 	}
 }
 

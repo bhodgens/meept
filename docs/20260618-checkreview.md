@@ -144,9 +144,14 @@ audit log).
 These require a mix of:
 - Permission-bit normalization (G301/G302/G306): standardize on `0o600`/`0o700`
 - Context propagation (G118): thread request context into a handful of goroutines
-- Hardcoded-credential allowlist (G101): the dev API key constant
-  (`pkg/constants/api_key.go`) is intentional and already gated by `#if DEBUG`
-  in release builds — add `//nolint:gosec` with justification; the provider
+- Hardcoded-credential allowlist (G101): the dev-key material left in
+  `pkg/constants/api_key.go` / `internal/comm/http/server.go` is the
+  legacy migration-detection constant (`meept_dev_default_key_CHANGE_ME`)
+  plus the menubar's Swift `LegacyPublicDevAPIKey` — both intentional and
+  only ever COMPARED against, never served (a configured legacy key is a
+  fatal startup error). The exported Go accessor `constants.DefaultDevAPIKey`
+  was deleted (deadcode wave-1, dc8560e5; zero callers). Add
+  `//nolint:gosec` with justification; the provider
   registry template strings in `internal/llm/provider_registry.go` are not
   secrets
 - Integer-overflow guards (G115): `pty/session.go` (4 sites) and

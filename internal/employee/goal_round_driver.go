@@ -456,6 +456,12 @@ func (d *GoalRoundDriver) isArmed(goal *Goal) bool {
 // current revision matches. Anything else (stale revision, skipped/replayed
 // round) is rejected so a reserved-but-stale round can never enter a changed
 // goal. It does not require a live manager and is safe on any Goal.
+//
+// STATUS (deadcode wave-3): available-but-unused API surface — no
+// production caller exists (tests only). The round driver's reserve path
+// relies on load-once/mutate/Update instead. Kept as the documented fence
+// for future callers that admit a round against a possibly-changed goal;
+// a caller landing here should replace this note, not the function.
 func ValidGoalRound(goal *Goal, round, revision int64) bool {
 	if goal == nil {
 		return false
@@ -534,8 +540,9 @@ func (d *GoalRoundDriver) OnRoundSettled(ctx context.Context, employeeID string)
 	// Reserve round N+1: increment RoundsStarted under this driver's review
 	// and mark the round autonomous for the goal tools. CAS is enforced
 	// structurally — we load once, mutate, and Update (the store bumps the
-	// revision); ValidGoalRound fences a stale reservation before it enters
-	// the loop.
+	// revision); a stale-reservation fence (ValidGoalRound) exists for
+	// callers that admit a round against a possibly-changed goal, though
+	// this driver currently does not call it (available API surface).
 	goal.StartRound()
 	d.MarkAutonomousRound(true)
 	defer d.MarkAutonomousRound(false)

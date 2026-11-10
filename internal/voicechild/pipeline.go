@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"net"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -153,11 +155,25 @@ type pipeline struct {
 	// a moment before the STT partial lands.
 	pendingInterrupt chan struct{}
 	// lastFinalAt (playMu) is when the STT session produced its most
-	// recent non-empty FINAL transcript. The local leg's RMS VAD trip is
-	// gated on it (see rmsBargeInCheck): loudness alone is echo/noise
-	// evidence, not speech evidence, so a trip without a recent final
-	// must not cancel an in-flight answer.
+	// recent DISPATCHED non-empty FINAL transcript. The local leg's RMS
+	// VAD trip is gated on it (see rmsBargeInCheck): loudness alone is
+	// echo/noise evidence, not speech evidence, so a trip without a
+	// recent final must not cancel an in-flight answer. The trip
+	// CONSUMES the evidence (one-shot, defect 2026-11-09): an
+	// authorized trip zeroes this field, so a second trip needs a NEW
+	// final — a stale stamp must never re-authorize cancelling the
+	// very turn the final already dispatched. Non-speech finals (see
+	// isRealSpeech) and duplicate finals never stamp it (see
+	// lastFinalText).
 	lastFinalAt time.Time
+	// lastFinalText (playMu) is the trimmed text of the most recent
+	// DISPATCHED final transcript. whisper repeats the same final when
+	// the caller re-voices an utterance's tail; an exact duplicate
+	// inside the evidence window is that SAME utterance, not new
+	// speech, so consumeTranscripts drops it (defect 2026-11-09: the
+	// repeat re-stamped lastFinalAt and re-authorized stale barge-in
+	// trips).
+	lastFinalText string
 
 	// cancel cancels the pipeline's internal context (workers, streams).
 	cancel context.CancelFunc
@@ -302,6 +318,87 @@ func (p *pipeline) openTranscriptSession(stt STTProvider, attempts int) {
 	}
 }
 
+// nonSpeechTranscript reports whether a FINAL transcript is one of
+// whisper's no-speech markers rather than caller words (defect
+// 2026-11-09, call local-2d84c384fd93f447: three "[BLANK_AUDIO]" finals
+// and a "(sighs)" were dispatched as user prompts and the employee
+// answered silence). The match is on the TRIMMED text, case-insensitive,
+// against a fixed marker set; whitespace-only text counts as non-speech.
+// consumeTranscripts drops these finals entirely (no prompt frame, no
+// RMS barge-in evidence stamp). Partials never route through this —
+// they stay preview-only prompts and the daemon never starts a turn on
+// one.
+func nonSpeechTranscript(text string) bool {
+	t := strings.ToLower(strings.TrimSpace(text))
+	if t == "" {
+		return true
+	}
+	switch t {
+	case "[blank_audio]", "<blank_audio>", "[blank audio]", "<blank audio>",
+		"(sighs)", "(sigh)",
+		"(laughing)", "(laughs)",
+		"(no speech)", "[no speech]",
+		"(background noise)", "(background noises)", "[background noise]", "[background noises]":
+		return true
+	}
+	return false
+}
+
+// bracketedTokenRe matches one whisper paralinguistic bracket token: an
+// opening ( [ followed by 1-60 non-']' / non-newline characters and a
+// closing ) ]. The 60-char cap keeps a bracket token bracket-sized — a long
+// parenthetical containing real words is caller speech, not an artifact.
+// (?i) is spec fidelity: the class is shape-based, so case never binds.
+var bracketedTokenRe = regexp.MustCompile(`(?i)[\[(][^\]\n]{1,60}[\])]`)
+
+// punctuationOnlyRe matches residue that carries no word characters at all:
+// only Unicode punctuation, symbols, and whitespace.
+var punctuationOnlyRe = regexp.MustCompile(`^[\p{P}\p{S}\s]*$`)
+
+// isRealSpeech reports whether a FINAL transcript carries real words
+// OUTSIDE whisper's bracket artifacts (defect 2026-11-10, call
+// local-376ee373022f7663: the exact-marker set of nonSpeechTranscript only
+// covers a fixed list, whisper emits dozens of paralinguistic tokens —
+// "(farting)", "(mouse clicking)", "(squeaking)", "[clears throat]",
+// "(inhales deeply)" — and the companion answered each as a user prompt).
+// The guard classifies by SHAPE, wrapping the exact set:
+//
+//  1. exact no-speech marker set (fast path — blank/sigh variants land
+//     here already, and whitespace-only text counts as non-speech);
+//  2. strip every maximal bracketed-token run (regex above). Paren
+//     characters live INSIDE the body class, so nesting collapses into
+//     one run ending at the FIRST closer: "[music (fade)]" and the
+//     unbalanced "[music (fade)" both strip whole; an opener with NO
+//     closer anywhere ("hello [music (fade") matches nothing and stays
+//     as residue — leftover words outside any run always keep the
+//     transcript real, so the rule errs toward hearing the caller;
+//  3. punctuation/symbol/whitespace-only residue is not speech.
+//
+// A single-bracket word ("yeah", "mmm") stays REAL: only bracketed and
+// blank forms drop, so filler words the caller genuinely voiced still
+// dispatch a turn.
+func isRealSpeech(text string) bool {
+	// Fast path: the exact set from leaf 02 (3a755a84) stays first — its
+	// semantics and TestNonSpeechTranscriptTable are unchanged.
+	if nonSpeechTranscript(text) {
+		return false
+	}
+	residue := strings.TrimSpace(bracketedTokenRe.ReplaceAllString(text, " "))
+	return !punctuationOnlyRe.MatchString(residue)
+}
+
+// transcriptPreview bounds a dropped transcript to <=40 runes for the
+// drop log. Transcript text carries nothing sensitive by contract, but the
+// log line stays bounded regardless (telemetry leaf 02 counts these drops
+// from the same line).
+func transcriptPreview(text string) string {
+	r := []rune(text)
+	if len(r) > 40 {
+		return string(r[:40])
+	}
+	return text
+}
+
 // consumeTranscripts turns STT transcripts into C1 prompt frames: a final
 // transcript is last:true (starts an employee turn), a partial is last:false
 // (preview only), and empty-text silence results emit nothing (C5). A
@@ -316,10 +413,40 @@ func (p *pipeline) consumeTranscripts(trans <-chan Transcript) {
 			continue // Deepgram silence results produce no frame
 		}
 		if tr.Final {
+			trimmed := strings.TrimSpace(tr.Text)
+			// Non-speech filter (defect 2026-11-09 exact set, extended to
+			// the SHAPE class 2026-11-10): whisper emits no-speech markers
+			// and paralinguistic bracket tokens — "[BLANK_AUDIO]",
+			// "(sighs)", "(farting)", "[clears throat]" — as FINAL
+			// transcripts. Those are not user prompts; dispatching them
+			// made the employee answer silence and mouse clicks. Drop them
+			// entirely: no prompt frame, no speech-evidence stamp, no
+			// dedupe state change. Partials keep passing through as
+			// previews (the daemon never starts a turn on one, and the
+			// partial branch below never touches lastFinalAt — evidence
+			// stamping is finals-only by contract).
+			if !isRealSpeech(trimmed) {
+				p.logger.Info("voicechild: non-speech final dropped",
+					"call_id", p.ccid, "text", transcriptPreview(trimmed))
+				continue
+			}
 			// Speech evidence for the local leg's RMS barge-in gate
 			// (see rmsBargeInCheck): whisper heard actual words.
+			// Exact-duplicate dedupe (defect 2026-11-09): whisper
+			// repeats the same final when the caller re-voices an
+			// utterance's tail. That repeat is the SAME utterance, not
+			// new speech: dropping it here is the single choke point —
+			// the daemon talk loop never sees a duplicate final prompt,
+			// so no daemon-side guard is needed (the repeat cannot
+			// dispatch a second turn or re-authorize a stale RMS trip).
 			p.playMu.Lock()
+			if trimmed == p.lastFinalText && !p.lastFinalAt.IsZero() &&
+				time.Since(p.lastFinalAt) <= rmsSttEvidenceWindow {
+				p.playMu.Unlock()
+				continue
+			}
 			p.lastFinalAt = time.Now()
+			p.lastFinalText = trimmed
 			speaking := p.speaking
 			p.playMu.Unlock()
 			// C5 for the local leg's whisper adapter: whisper emits
@@ -520,7 +647,7 @@ func (p *pipeline) playbackStream(frame voiceframe.Frame, gen uint64) {
 		p.logger.Error("voicechild: tts provider not installed; dropping say", "call_id", p.ccid)
 		return
 	}
-	pcm, err := tts.Speak(p.ctx, frame.Text)
+	pcm, err := tts.Speak(WithTTSContext(p.ctx, p.ccid), frame.Text)
 	if err != nil {
 		p.logger.Error("voicechild: tts speak", "err", err, "call_id", p.ccid)
 		return
@@ -563,6 +690,28 @@ func (p *pipeline) playbackStream(frame voiceframe.Frame, gen uint64) {
 		p.logger.Error("voicechild: playback chunk size", "err", err, "call_id", p.ccid)
 		return
 	}
+	// Jitter instrumentation (2026-11-09 chop hunt): ttsRead measures the
+	// provider stream's chunk ARRIVALS (network + synth side), outWrite
+	// the .out socket hand-off cadence. speakStart is set by the caller
+	// around Speak(); firstRead counts down on the first byte. One INFO
+	// report per finished stream goes to the child's stderr (inherited
+	// into the daemon log under -f).
+	ttsRead := voiceframe.NewCadence(20*time.Millisecond, 8192)
+	outWrite := voiceframe.NewCadence(20*time.Millisecond, 8192)
+	defer func() {
+		tr := ttsRead.Report()
+		ow := outWrite.Report()
+		p.logger.Info("voicechild: playback cadence", "call_id", p.ccid,
+			"events", tr.Events, "bytes", tr.BytesTotal,
+			"read_mean_ms", tr.MeanGap.Milliseconds(),
+			"read_med_ms", tr.MedianGap.Milliseconds(),
+			"read_p95_ms", tr.P95Gap.Milliseconds(),
+			"read_max_ms", tr.MaxGap.Milliseconds(),
+			"read_overruns", tr.Overruns,
+			"write_mean_ms", ow.MeanGap.Milliseconds(),
+			"write_max_ms", ow.MaxGap.Milliseconds(),
+			"write_overruns", ow.Overruns)
+	}()
 	buf := make([]byte, chunk)
 	for {
 		p.playMu.Lock()
@@ -573,6 +722,10 @@ func (p *pipeline) playbackStream(frame voiceframe.Frame, gen uint64) {
 		}
 		n, readErr := pcm.Read(buf)
 		if n > 0 {
+			if rg := ttsRead.Mark(time.Now()); rg > 100*time.Millisecond {
+				p.logger.Warn("voicechild: tts chunk arrival stall", "call_id", p.ccid, "gap_ms", rg.Milliseconds())
+			}
+			ttsRead.AddBytes(int64(n))
 			p.playMu.Lock()
 			dropped := p.dropQueued || p.playGen != gen
 			p.playMu.Unlock()
@@ -583,6 +736,8 @@ func (p *pipeline) playbackStream(frame voiceframe.Frame, gen uint64) {
 				p.logger.Error("voicechild: audio out write", "err", werr, "call_id", p.ccid)
 				return
 			}
+			outWrite.Mark(time.Now())
+			outWrite.AddBytes(int64(n))
 			// Local-leg echo reference (CL3): record this outbound
 			// chunk's energy so the INCOMING-side VAD tap can tell a
 			// speaker echo from a caller talking over the agent. This is
@@ -604,6 +759,28 @@ func (p *pipeline) playbackStream(frame voiceframe.Frame, gen uint64) {
 		default:
 		}
 	}
+}
+
+// ttsCallIDKey stamps the voice call id on the Speak context so the TTS
+// provider package (which imports voicechild, never the reverse) can name
+// the call in its transport-retry WARN (leaf 04 hygiene).
+type ttsCallIDKey struct{}
+
+// WithTTSContext returns ctx carrying the call id for provider logging.
+func WithTTSContext(ctx context.Context, callID string) context.Context {
+	if callID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, ttsCallIDKey{}, callID)
+}
+
+// TTSCallIDFromContext extracts the stamped call id ("" when unset).
+// Used by internal/voicechild/providers.
+func TTSCallIDFromContext(ctx context.Context) string {
+	if id, ok := ctx.Value(ttsCallIDKey{}).(string); ok {
+		return id
+	}
+	return ""
 }
 
 // clear drops queued TTS audio for this call and stops pending .out writes
@@ -729,6 +906,10 @@ func rmsChunkOver(b []byte, threshold int) bool {
 // Loudness without recent STT evidence is echo/noise — it must never
 // cancel an in-flight answer or stop playback — so those trips are
 // suppressed with a Debug log and latch/playback state untouched.
+// The evidence is ONE-SHOT (defect 2026-11-09): an authorized trip
+// clears lastFinalAt, so re-tripping inside the same 10 s tail needs a
+// NEW final; the final that authorized the first trip already dispatched
+// the very turn the trip cancelled.
 func (p *pipeline) rmsBargeInCheck(chunk []byte) {
 	if !p.local || p.bargeInRms <= 0 {
 		return // phone legs keep the STT-partial trigger; VAD never runs
@@ -805,6 +986,16 @@ func (p *pipeline) rmsBargeInCheck(chunk []byte) {
 	// speaking drops so playback stops presenting as live (R3).
 	p.interrupted = true
 	p.speaking = false
+	// Evidence is CONSUMED (defect 2026-11-09, one-shot): the final
+	// that authorized this trip already dispatched its own turn — the
+	// live in-flight answer this trip is cancelling. Leaving the stamp
+	// set let a second sustained-loud window re-trip off the SAME stale
+	// evidence inside the 10 s tail (five barge-in kills in call
+	// local-2d84c384fd93f447). Zeroing lastFinalAt means a second trip
+	// needs a NEW final from consumeTranscripts; genuine new caller
+	// speech re-stamps within seconds of talking, so real barge-ins
+	// keep working.
+	p.lastFinalAt = time.Time{}
 	// C5 guard: the write below is in flight; the transcript consumer
 	// waits on this channel before emitting any prompt frame.
 	done := make(chan struct{})

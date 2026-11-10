@@ -116,3 +116,72 @@ must clear it.
 
 RTA-IMPRECISION records: none new — all five re-greps found zero real callers. (The
 scope's trace_store.go RTA note was honored by omission.)
+
+---
+
+## Wave-2 disposition (2026-11-09, WIRE wave)
+
+Both HOLD'd wire candidates landed, each behind an opt-in config gate
+(default false, docs/agents/opt-in-defaults.md):
+
+**A) Vector hybrid search (hybrid.go + cross_shard_join.go + dimension_slice.go).**
+Plan site honored verbatim — docs/plans/2026-06-07-sharded-vector-memory.md:161
+"Needed: Wire ShardManager for hybrid search". Wired surface:
+- `internal/daemon/vector_hybrid_wiring.go` — newVectorHybridWiring constructs
+  `vector.NewHybridSearcher` over the manager's live ShardManager via
+  `vector.NewVectorSearcherAdapter`, plus `managerKeywordSearcher` bridging
+  Manager.Search (FTS5) into vector.KeywordSearcher (daemon-side seam;
+  internal/memory cannot import internal/memory/vector).
+- `internal/daemon/components.go` constructs it inside the existing
+  embeddings-gated block when `[memory].vector_hybrid.enabled`
+  (VectorHybridConfig in internal/config/schema.go: enabled/alpha/limit,
+  default false); no embedder = warn + legacy Manager.SearchHybrid path
+  byte-identical.
+- `internal/daemon/daemon.go` registers `memory.search.hybrid` RPC only when
+  the wiring is non-nil (disabled = method-not-found, honest absence).
+- Functional pin: TestHybridSearcher_JoinsAcrossShards
+  (internal/memory/vector/hybrid_wiring_test.go) — two same-dimension shards
+  on a fixture, joined results from BOTH shards through the real
+  NewVectorSearcherAdapter path with nonzero combined scores. Config default,
+  fails-closed construction, and RPC-gate pins in
+  internal/daemon/vector_hybrid_wiring_test.go.
+
+**B) HALO Phase 6 atomic compaction (consolidation_compact.go, 13 funcs).**
+Status-doc priority #1 honored — the Compactor now has a production caller:
+- `internal/memory/distill_async.go` — DistillWorkerConfig.Compactor;
+  handleL1Extract compacts the L0 window (toTurnRecords →
+  CompactTurns → formatCompactedTurns) before prompt assembly. Nil
+  compactor = raw window, byte-identical prompt. New exported read-only
+  accessor DistillWorker.AtomicCompactor for the wiring pin.
+- `internal/daemon/l0_wiring.go` wireL0Distill constructs the Compactor from
+  `[agent].atomic_compaction` (AtomicCompactionConfig in
+  internal/config/schema.go: enabled + the three documented thresholds,
+  default false).
+- Functional pins (internal/memory/atomic_compaction_wiring_test.go):
+  fixture-window compaction strictly reduces turn count (ratio < 1.0);
+  enabled worker feeds the compacted summary-marked prompt; disabled worker
+  feeds the exact raw-window prompt; daemon gate pins nil compactor at
+  DefaultConfig.
+
+Commits: 464b666d (config knobs), ddc041ff (vector functional pin + test
+seam), c4fb7aba (daemon hybrid wiring + RPC), 203e71a3 (atomic compactor
+into L1 distill).
+
+Gates: go build ./... OK; go vet ./internal/memory ./internal/memory/vector
+./internal/daemon ./internal/config ./internal/rpc ./internal/services OK;
+go test -count=1 ./internal/memory ./internal/memory/vector
+./internal/daemon ./internal/config all OK (run twice — a mid-flight
+compile break from a sibling wave's in-progress files resolved before the
+final run; none of it was in this wave's scope).
+
+--no-verify disclosure: used on all four commits (shared-tree policy allows
+it with own-gates-passed). The pre-commit chain was bypassed because the
+tree carries sibling waves' in-flight untracked files; this wave's own
+gates were green at each commit, and commits carry explicit paths only.
+internal/agent was NOT touched (the compaction integration point chosen is
+the daemon-side L1 distill path — the sibling-dirty agent loop is off-limits
+per wave instructions and needs no changes for this seam).
+
+Rows resolved: hybrid.go, cross_shard_join.go, dimension_slice.go
+(WIRE-CANDIDATE → WIRED), consolidation_compact.go (WIRE-CANDIDATE → WIRED).
+

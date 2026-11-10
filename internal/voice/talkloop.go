@@ -7,7 +7,10 @@ package voice
 //
 // Flow per final prompt (last:true):
 //
-//	prompt -> filler say at once (fact-free, C1 exception)
+//	prompt -> delayed filler: arm a FillerGrace timer and speak the
+//	         round-robin filler line only if the turn has not produced
+//	         its first allowed sentence inside the grace window
+//	         (FillerGrace == 0 keeps the legacy immediate behavior)
 //	       -> Binding turn (employee draft on the pinned endpoint)
 //	       -> SplitSentences
 //	-> pipelined supervisor Check (sentence N+1 is checked while
@@ -88,6 +91,16 @@ type TalkLoopConfig struct {
 	// default) disables the cap: the legacy behavior where only the
 	// silence path ends a quiet call.
 	TurnTimeoutSeconds int
+	// FillerGrace is how long the loop waits after dispatching a final
+	// prompt before speaking the round-robin filler line: the filler is
+	// spoken only if the turn has not produced its first allowed
+	// sentence inside the window (dead-air finding 2026-11-09: "Hold on,
+	// let me check." on every single prompt was noise). Zero keeps the
+	// legacy immediate filler (spoken inline at dispatch); the daemon
+	// wiring passes voice.filler_grace_ms (default 2500). The
+	// silence-prompt filler is NEVER grace-gated - that line is the
+	// dead-air nudge itself.
+	FillerGrace time.Duration
 }
 
 // TalkDeps wires the loop. Send is the C1 seam: the talk loop never touches
@@ -118,12 +131,17 @@ type TalkDeps struct {
 	Logger *slog.Logger
 }
 
-// pipeline is one prompt's draft-to-speech state: the generation it was
-// spawned under, its cancel func (interrupt/teardown), and the verdict
-// channel the checker feeds. said/fallback are owned by the playback
-// goroutine (Run), never the checker.
+// pipeline is one prompt's draft-to-speech state: the generation and turn
+// sequence it was spawned under, its cancel func (interrupt/teardown), and
+// the verdict channel the checker feeds. said/fallback are owned by the
+// playback goroutine (Run), never the checker. The filler*/utteranceOut/
+// dispatchedAt/replyWords fields are guarded by TalkLoop.interruptMu (the
+// delayed-filler timer closure runs on the runtime timer goroutine, so the
+// latch lives under that lock; the mutex-scope rule still binds — no I/O,
+// send, or Check happens while it is held).
 type pipeline struct {
 	gen      uint64
+	seq      uint64
 	cancel   context.CancelFunc
 	checks   chan verdict
 	said     int  // allowed sentences spoken so far in this draft
@@ -133,6 +151,36 @@ type pipeline struct {
 	// playback goroutine (Run); the drain flush checks it so the
 	// turn-final marker is sent exactly once (M2).
 	turnEnded bool
+
+	// Delayed filler (leaf 02, dead-air fix). Arm sets fillerTimer to a
+	// time.AfterFunc closure; the closure re-checks under interruptMu
+	// that this pipeline is STILL the live draft (t.cur == p) and nothing
+	// has been spoken yet before calling say — the latch that keeps a
+	// cancelled/hung-up draft from emitting zombie filler.
+	fillerTimer   *time.Timer
+	fillerPending bool   // armed and not yet fired/cancelled
+	fillerFired   bool   // closure took the latch (filler is being spoken)
+	fillerText    string // round-robin line picked at dispatch (Run picks it;
+	// the timer goroutine only reads it under interruptMu — no second
+	// fillerIdx touch off the Run goroutine)
+	utteranceOut  bool // first allowed/fallback sentence went out
+	fillerSkipped bool // grace timer was stopped by a real utterance (telemetry)
+	dispatchedAt  time.Time
+	replyWords    int // words across allowed spoken sentences (turn_final)
+}
+
+// stopFillerLocked cancels a pending delayed-filler timer. Callers hold
+// t.interruptMu. Returns true when a pending timer was actually stopped
+// (i.e. the grace window had not elapsed — "answered inside grace").
+func (p *pipeline) stopFillerLocked() bool {
+	if !p.fillerPending {
+		return false
+	}
+	p.fillerPending = false
+	if p.fillerTimer != nil {
+		p.fillerTimer.Stop()
+	}
+	return true
 }
 
 // TalkLoop runs one live call's conversation. Run blocks until the call
@@ -149,9 +197,12 @@ type TalkLoop struct {
 	fillerIdx int
 
 	// interruptMu guards ONLY the generation counter and pipeline pointer
-	// swap (repo mutex-scope rule: no I/O, send, or Check under it).
+	// swap (repo mutex-scope rule: no I/O, send, or Check under it). The
+	// delayed-filler latch (pipeline.filler*/utteranceOut) also rides this
+	// lock; no I/O happens while it is held.
 	interruptMu sync.Mutex
 	gen         uint64
+	seq         uint64
 	cur         *pipeline
 
 	// silencePrompted latches the one filler-class silence prompt: the
@@ -367,11 +418,11 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 	for {
 		select {
 		case <-ctx.Done():
-			t.cancelPipeline()
+			t.cancelPipeline(ccid, "teardown")
 			t.end(ccid, "hangup")
 			return ctx.Err()
 		case <-maxC:
-			t.cancelPipeline()
+			t.cancelPipeline(ccid, "teardown")
 			t.end(ccid, fmt.Sprintf("max_call_minutes reached (%d)", t.cfg.MaxCallMinutes))
 			return nil
 		case <-silenceC:
@@ -399,7 +450,7 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 				continue
 			}
 			// Second consecutive fire: hang up with the named reason.
-			t.cancelPipeline()
+			t.cancelPipeline(ccid, "teardown")
 			t.end(ccid, fmt.Sprintf("silence (%ds without caller speech after prompt)", t.cfg.SilencePromptSeconds))
 			return nil
 		case <-turnTimerC:
@@ -411,7 +462,7 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 			if t.curPipeline() == nil {
 				continue
 			}
-			t.cancelPipeline()
+			t.cancelPipeline(ccid, "teardown")
 			t.end(ccid, fmt.Sprintf("turn timeout (%ds without a spoken reply)", t.cfg.TurnTimeoutSeconds))
 			return nil
 		case vr, ok := <-current():
@@ -420,8 +471,10 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 				// turn is no longer in flight, so the silence clock
 				// re-arms fresh from NOW (turn-aware suspension ends)
 				// and the turn cap stands down.
+				p := t.curPipeline()
 				stopTurn()
 				flushTurnEnd(ccid)
+				t.logTurnFinal(ccid, p)
 				t.clearPipeline()
 				rearmSilence()
 				continue
@@ -429,7 +482,7 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 			t.playVerdict(ccid, vr)
 		case f, ok := <-t.frames:
 			if !ok {
-				t.cancelPipeline()
+				t.cancelPipeline(ccid, "teardown")
 				t.end(ccid, "hangup")
 				return nil
 			}
@@ -449,19 +502,17 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 				t.silencePrompted = false
 				// A newer prompt supersedes any in-flight draft (the
 				// barge-in drop rule applies to a fresh question too).
-				t.cancelPipeline()
-				// Filler say at once (call flow step 6): fact-free, so it
-				// needs no supervisor verdict.
-				if line := t.fillerLine(); line != "" {
-					if err := t.say(ccid, line, false); err != nil {
-						t.log.Warn("voice talk loop: filler send failed", "ccid", ccid, "error", err)
-					}
-				}
-				t.spawnPipeline(ctx, call, f.Text)
+				t.cancelPipeline(ccid, "supersede")
+				// Pick the filler line on THIS goroutine (fillerIdx is
+				// Run-owned); whether it speaks now (legacy grace==0) or
+				// after the grace window is spawnPipeline's call (call
+				// flow step 6: fact-free, so it needs no supervisor
+				// verdict).
+				t.spawnPipeline(ctx, call, f.Text, t.fillerLine())
 			case EventInterrupt:
 				t.handleInterrupt(ccid)
 			case EventEnd:
-				t.cancelPipeline()
+				t.cancelPipeline(ccid, "teardown")
 				t.end(ccid, namedEndReason(f.Reason))
 				return nil
 			default:
@@ -476,20 +527,90 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 // turn runs on its own context (cancelled on interrupt/teardown), sentences
 // split, and a checker goroutine walks them one Check ahead of playback.
 // Verdicts flow through p.checks; Run plays them in its select.
-func (t *TalkLoop) spawnPipeline(ctx context.Context, call Instance, prompt string) {
+//
+// Filler posture (leaf 02, dead-air fix): fillerLine is picked here (Run
+// goroutine owns fillerIdx). With cfg.FillerGrace == 0 it speaks inline at
+// dispatch (legacy behavior, byte-identical order pin); with a positive
+// grace it arms a time.AfterFunc that speaks the line ONLY if the draft has
+// still not produced its first allowed sentence when the window elapses.
+// The closure re-checks under interruptMu that this pipeline is still the
+// live draft before saying anything — a cancelled or hung-up draft never
+// emits zombie filler.
+func (t *TalkLoop) spawnPipeline(ctx context.Context, call Instance, prompt, fillerLine string) {
 	ccid := call.CallControlID
 
 	turnCtx, cancel := context.WithCancel(ctx)
 
 	t.interruptMu.Lock()
 	t.gen++
+	t.seq++
+	seq := t.seq
 	p := &pipeline{
-		gen:    t.gen,
-		cancel: cancel,
-		checks: make(chan verdict, 1),
+		gen:          t.gen,
+		seq:          seq,
+		cancel:       cancel,
+		checks:       make(chan verdict, 1),
+		fillerText:   fillerLine,
+		dispatchedAt: t.now(),
 	}
 	t.cur = p
 	t.interruptMu.Unlock()
+
+	// Telemetry: the prompt actually dispatched a turn (non-speech finals
+	// never reach this point — the child-side guard drops them before the
+	// frame is sent). kind=prompt_dispatch.
+	preview := prompt
+	if runes := []rune(preview); len(runes) > 40 {
+		preview = string(runes[:40]) + "…"
+	}
+	t.log.Info("voice talk loop: turn dispatch",
+		"ccid", ccid, "seq", seq, "kind", "prompt_dispatch",
+		"text_preview", preview, "words", wordCount(prompt))
+
+	if fillerLine != "" {
+		if t.cfg.FillerGrace <= 0 {
+			// Legacy: speak immediately at dispatch (order pinned by
+			// TestTalkLoopGreetingAndFiller's grace-0 sibling runs).
+			t.interruptMu.Lock()
+			p.utteranceOut = true // no filler can fire later for this draft
+			p.fillerFired = true
+			after := int64(0)
+			t.interruptMu.Unlock()
+			if err := t.say(ccid, fillerLine, false); err != nil {
+				t.log.Warn("voice talk loop: filler send failed", "ccid", ccid, "error", err)
+			}
+			t.log.Info("voice talk loop: turn filler",
+				"ccid", ccid, "seq", seq, "kind", "filler",
+				"line", fillerLine, "after_ms", after)
+		} else {
+			grace := t.cfg.FillerGrace
+			t.interruptMu.Lock()
+			p.fillerPending = true
+			p.fillerTimer = time.AfterFunc(grace, func() {
+				// Timer goroutine: latch under interruptMu BEFORE any
+				// I/O. Emit only if this draft is still live, nothing
+				// has gone out for it yet, and its filler is still
+				// pending (not superseded/cancelled/answered).
+				t.interruptMu.Lock()
+				if t.cur != p || !p.fillerPending || p.utteranceOut || p.fillerFired {
+					t.interruptMu.Unlock()
+					return
+				}
+				p.fillerPending = false
+				p.fillerFired = true
+				after := t.now().Sub(p.dispatchedAt).Milliseconds()
+				t.interruptMu.Unlock()
+				if err := t.say(ccid, p.fillerText, false); err != nil {
+					t.log.Warn("voice talk loop: delayed filler send failed", "ccid", ccid, "error", err)
+					return
+				}
+				t.log.Info("voice talk loop: turn filler",
+					"ccid", ccid, "seq", seq, "kind", "filler",
+					"line", p.fillerText, "after_ms", after)
+			})
+			t.interruptMu.Unlock()
+		}
+	}
 
 	go func() {
 		// The turn itself: run AFTER the pipeline is registered so an
@@ -573,6 +694,10 @@ func (t *TalkLoop) playVerdict(ccid string, vr verdict) {
 		if !p.fallback {
 			p.fallback = true
 			p.turnEnded = true
+			t.interruptMu.Lock()
+			p.utteranceOut = true // fallback counts as the utterance
+			p.stopFillerLocked()
+			t.interruptMu.Unlock()
 			if err := t.say(ccid, t.fallbackLine(), true); err == nil {
 				t.sayProgress(ccid)
 			}
@@ -586,10 +711,19 @@ func (t *TalkLoop) playVerdict(ccid string, vr verdict) {
 		} else {
 			t.sayProgress(ccid)
 		}
+		t.interruptMu.Lock()
 		p.said++
+		// Delayed-filler latch: something of THIS turn's reached the
+		// caller, so the grace timer must not speak filler behind it.
+		p.utteranceOut = true
+		if p.stopFillerLocked() {
+			p.fillerSkipped = true
+		}
+		p.replyWords += wordCount(vr.sentence)
 		if vr.final {
 			p.turnEnded = true
 		}
+		t.interruptMu.Unlock()
 		return
 	}
 
@@ -601,6 +735,10 @@ func (t *TalkLoop) playVerdict(ccid string, vr verdict) {
 	if vr.final && p.said == 0 {
 		p.fallback = true
 		p.turnEnded = true
+		t.interruptMu.Lock()
+		p.utteranceOut = true // fallback counts as the utterance
+		p.stopFillerLocked()
+		t.interruptMu.Unlock()
 		if err := t.say(ccid, t.fallbackLine(), true); err == nil {
 			t.sayProgress(ccid)
 		}
@@ -628,18 +766,55 @@ func (t *TalkLoop) clearPipeline() {
 
 // cancelPipeline cancels the live pipeline (interrupt/teardown semantics)
 // and removes it. The checker goroutine observes the generation bump or the
-// cancelled context and exits without speaking.
-func (t *TalkLoop) cancelPipeline() {
+// cancelled context and exits without speaking. reason feeds the
+// turn-cancelled telemetry line (leaf 02): "barge-in" | "supersede" |
+// "teardown". A pending delayed-filler timer is stopped here - the
+// zombie-fillers pin (a cancelled draft never speaks filler afterwards).
+func (t *TalkLoop) cancelPipeline(ccid, reason string) {
 	t.interruptMu.Lock()
 	p := t.cur
 	t.cur = nil
 	if p != nil {
 		t.gen++ // stale-proof any in-flight Check racing the cancel
+		p.stopFillerLocked()
 	}
 	t.interruptMu.Unlock()
-	if p != nil && p.cancel != nil {
+	if p == nil {
+		return
+	}
+	t.log.Info("voice talk loop: turn cancelled",
+		"ccid", ccid, "seq", p.seq, "kind", "draft_cancel", "reason", reason)
+	if p.cancel != nil {
 		p.cancel()
 	}
+}
+
+// logTurnFinal emits the per-turn completion telemetry (leaf 02): words
+// spoken + dispatch->final wall time. p may be nil (no draft was live).
+func (t *TalkLoop) logTurnFinal(ccid string, p *pipeline) {
+	if p == nil {
+		return
+	}
+	t.interruptMu.Lock()
+	words := p.replyWords
+	ms := t.now().Sub(p.dispatchedAt).Milliseconds()
+	p.stopFillerLocked()
+	skipped := p.fillerSkipped
+	t.interruptMu.Unlock()
+	if skipped {
+		t.log.Info("voice talk loop: turn filler skipped",
+			"ccid", ccid, "seq", p.seq, "kind", "filler_skipped",
+			"reason", "answered inside grace")
+	}
+	t.log.Info("voice talk loop: turn final",
+		"ccid", ccid, "seq", p.seq, "kind", "turn_final",
+		"reply_words", words, "ms", ms)
+}
+
+// wordCount counts whitespace-separated words in spoken text
+// (telemetry preview only - exactness does not matter).
+func wordCount(text string) int {
+	return len(strings.Fields(text))
 }
 
 // handleInterrupt runs the barge-in contract for THIS call only: drop the
@@ -647,7 +822,7 @@ func (t *TalkLoop) cancelPipeline() {
 // clear frame on the text socket (the child flushes its TTS queue; the
 // splice owns the Telnyx-side clear).
 func (t *TalkLoop) handleInterrupt(ccid string) {
-	t.cancelPipeline()
+	t.cancelPipeline(ccid, "barge-in")
 	if t.deps.Binding != nil {
 		t.deps.Binding.PublishInterrupt(ccid)
 	}
@@ -662,7 +837,7 @@ func (t *TalkLoop) handleInterrupt(ccid string) {
 // clear echo on the text socket (the splice itself sent clear toward
 // Telnyx; the child's queue flush still applies).
 func (t *TalkLoop) HandleBargeIn(ccid string) {
-	t.cancelPipeline()
+	t.cancelPipeline(ccid, "barge-in")
 	if t.deps.Binding != nil {
 		t.deps.Binding.PublishInterrupt(ccid)
 	}

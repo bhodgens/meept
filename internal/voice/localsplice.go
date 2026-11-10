@@ -39,6 +39,7 @@ import (
 	"io"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -105,6 +106,22 @@ type runLocalSplice struct {
 	log  *slog.Logger
 
 	chunkBytes int
+
+	// Pump-side counters (same hunt): first bytes from the child, chunk
+	// count, and paced-to-client count - the missing middle when the
+	// CLI sees 0 bytes and the child's stream stalls. pumpChunks is
+	// written by the pump goroutine and read by the loop's summary:
+	// atomic. The pace* fields are owned by the single outboundLoop
+	// goroutine (paceOne runs there), no lock needed.
+	pumpChunks      atomic.Uint64
+	lastClientWrite time.Time
+	paceWrites      int // client writes completed this call
+	paceFirstAt     time.Time
+	paceDropped     int // frames abandoned at the barge-in latch
+	paceSamples     int
+	paceSumMs       int64
+	paceMaxMs       int64
+	paceOverruns    int
 
 	mu        sync.Mutex
 	interrupt bool // outbound writes latched off for the current barge-in
@@ -202,16 +219,33 @@ func RunLocalSplice(ctx context.Context, ccid string, cfg LocalSpliceConfig, dep
 	go func() { inboundDone <- s.inboundLoop(loopCtx) }()
 	go func() { outboundDone <- s.outboundLoop(loopCtx) }()
 
-	errIn := <-inboundDone
-	if !errors.Is(errIn, ErrMicSpeechEnded) {
-		// A terminal inbound error stops the peer loop now; a clean
-		// end-of-speech does NOT - the outbound side must stay live so
-		// the reply (whisper flush -> employee turn -> TTS) still
-		// reaches the client after the mic stream closed (file mode
-		// half-closes at end of utterance; live mode never EOFs).
+	// Whichever loop ends first must stop the peer NOW. The old shape
+	// read inboundDone FIRST and blocked there: an outbound terminal
+	// (a real child-read failure) left the loop half-dead — inbound
+	// parked on an alive client forever, RunLocalSplice never
+	// returned, local.go's teardown never fired, and the link ran 90 s
+	// with one side mute (link-72a04aebac963cdb post-mortem: B logged
+	// no 'splice ended err=' line because the splice never returned).
+	var errIn, errOut error
+	select {
+	case errIn = <-inboundDone:
+		if !errors.Is(errIn, ErrMicSpeechEnded) {
+			// A terminal inbound error stops the peer loop now; a
+			// clean end-of-speech does NOT - the outbound side must
+			// stay live so the reply (whisper flush -> employee turn
+			// -> TTS) still reaches the client after the mic stream
+			// closed (file mode half-closes at end of utterance;
+			// live mode never EOFs).
+			loopCancel()
+		}
+		errOut = <-outboundDone
+	case errOut = <-outboundDone:
+		// Outbound terminal (child socket broke / leg closed): the
+		// reply path is dead, so the whole call ends - tear the
+		// inbound down with it.
 		loopCancel()
+		errIn = <-inboundDone
 	}
-	errOut := <-outboundDone
 
 	// Caller cancellation wins, mirroring RunSplice's contract.
 	if ctx.Err() != nil && (errors.Is(errIn, context.Canceled) || errors.Is(errOut, context.Canceled)) {
@@ -345,12 +379,51 @@ func (s *runLocalSplice) inboundLoop(ctx context.Context) error {
 // waiting on the latch it alone must clear.
 func (s *runLocalSplice) outboundLoop(ctx context.Context) error {
 	pump := make(chan localReadItem, 64)
+	var pumpFirst time.Time // pump-goroutine-owned (instrumentation)
+	// Jitter instrumentation: one INFO summary per call splice (the
+	// middle hop's totals between the child's cadence line and the CLI's
+	// trace line).
+	defer func() {
+		s.log.Info("voice: localsplice cadence summary", "ccid", s.ccid,
+			"pump_chunks", s.pumpChunks.Load(), "pace_writes", s.paceWrites,
+			"pace_dropped", s.paceDropped, "pace_stalls", s.paceOverruns,
+			"pace_max_gap_ms", s.paceMaxMs, "first_child_pcm_set", !pumpFirst.IsZero())
+	}()
 	go func() {
 		carry := make([]byte, 0, 4*s.chunkBytes)
 		for {
 			rb := make([]byte, s.chunkBytes)
 			n, err := s.deps.Audio.ReadFromChild(rb)
+			if n == 0 && err != nil && isNotConnected(err) {
+				// Pre-accept: the child has not dialed .out yet.
+				// LocalLeg.Open starts the splice the instant the
+				// pair exists, while the child dials only after it
+				// builds its pipeline and answers setup — seconds of
+				// head start for the pump's first read. This is a
+				// WAIT, never a call end (the phone splice polls the
+				// same condition at splice.go's read pump). Treating
+				// it as terminal was the link-72a04aebac963cdb
+				// half-death: the leg that lost the race had its
+				// outboundLoop return at +0 ms (cadence summary with
+				// pump_chunks=0 first_child_pcm_set=false), its
+				// speech never reached the bridge, and the OTHER
+				// leg's client never saw a first byte.
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(5 * time.Millisecond):
+				}
+				continue
+			}
 			if n > 0 {
+				// Jitter instrumentation: first child PCM arrival +
+				// chunk count (the daemon-side middle the chop hunt
+				// was missing).
+				s.pumpChunks.Add(1)
+				if pumpFirst.IsZero() {
+					pumpFirst = time.Now()
+					s.log.Info("voice: localsplice first child PCM", "ccid", s.ccid)
+				}
 				// Fresh child PCM means the call-level side started
 				// speaking again: re-arm the barge-in latch so the
 				// pacer resumes writing toward the client.
@@ -418,6 +491,10 @@ func (s *runLocalSplice) outboundLoop(ctx context.Context) error {
 		stopped = s.interrupt
 		s.mu.Unlock()
 		if stopped {
+			// Deliberate stop: drop the cadence anchor (see paceOne) so
+			// the resume is not recorded as one giant stall.
+			s.paceDropped++
+			s.lastClientWrite = time.Time{}
 			continue
 		}
 		select {
@@ -453,6 +530,11 @@ func (s *runLocalSplice) paceOne(ctx context.Context, chunk []byte) error {
 		stopped := s.interrupt || s.ended
 		s.mu.Unlock()
 		if stopped {
+			// The barge-in dead window is a DELIBERATE stop, not
+			// jitter: drop the cadence anchor so the first post-resume
+			// write does not record one giant "stall" gap.
+			s.paceDropped++
+			s.lastClientWrite = time.Time{}
 			return nil // frame abandoned: barge-in means interrupted audio is dead
 		}
 		wait := time.Until(deadline)
@@ -485,6 +567,28 @@ func (s *runLocalSplice) paceOne(ctx context.Context, chunk []byte) error {
 		// named error.
 		return fmt.Errorf("voice: localsplice %s client write: %w", s.ccid, err)
 	}
+	// Jitter instrumentation: the pacer's client-write cadence. A gap of
+	// more than 2x the pace interval means the pacer STARVED waiting for
+	// child PCM (upstream jitter) rather than paced deliberately.
+	now := time.Now()
+	if !s.lastClientWrite.IsZero() {
+		if g := now.Sub(s.lastClientWrite); g > 2*s.cfg.Pace {
+			s.paceOverruns++
+			s.log.Warn("voice: localsplice pacer stall", "ccid", s.ccid,
+				"gap_ms", g.Milliseconds(), "pace_ms", s.cfg.Pace.Milliseconds())
+		} else if g > 0 {
+			s.paceSumMs += g.Milliseconds()
+			if g.Milliseconds() > s.paceMaxMs {
+				s.paceMaxMs = g.Milliseconds()
+			}
+			s.paceSamples++
+		}
+	}
+	s.paceWrites++
+	if s.paceFirstAt.IsZero() {
+		s.paceFirstAt = now
+	}
+	s.lastClientWrite = now
 	return nil
 }
 

@@ -151,3 +151,63 @@ tool_breaker, and rlm_telemetry (all WIRE-CANDIDATE).
   transiently red from SIBLING sessions' in-flight edits (internal/llm,
   internal/tools/builtin); each commit's message discloses this, and my own
   gates passed immediately before every commit.
+
+## Wave-2 disposition (scope: internal/agent wiring)
+
+Executed 2026-11-09. Commits 11307a18 (tool_breaker) + 19964f50
+(QueuePersister). Gates per concern: go build ./..., go vet
+./internal/agent, go test -count=1 ./internal/agent (-race on the new
+pins), gofmt clean on touched files.
+
+| Report row | Disposition | Evidence |
+|---|---|---|
+| `tool_breaker.go` (WIRE-CANDIDATE, F14/F15) | WIRED-ALREADY + PIN | The F15 wiring landed in a8843bed: `observeToolBreaker` (loop.go:8862) is called on BOTH recall paths of `executeToolCallsUngated` (loop.go:8817 default recall path + :8853 RecallModeDisabled tail), constructed unconditionally in NewAgentLoop (loop.go:2790). The triage verdict was driven by a stale master.md row. Added the missing unit pin through the REAL path: `tool_breaker_loop_test.go` drives RunOnce with 6 identical failing calls, asserts the breaker observed all 6 and the 5th/6th conversation tool results carry the veto annotation (the e2e twin is TestBreakers04PersistentToolFailureHaltsBounded). master.md F14/F15 rows -> VALIDATED with landed-commit citations (11307a18). New test-support accessor `ToolRetryBreaker.snapshotCounts`. `VerifyFromToolResults` remains caller-less but is leaf-05's sanctioned "narrow helper" (the leaf allowed helper OR hook; not in F14/F15 scope). |
+| `queue_persister.go` (WIRE-CANDIDATE) | WIRED | Restored the historical per-conversation attach (lost in the 2c8221cb-era RunOnce refactor): RunOnceWithParts (loop.go, 19964f50) constructs `NewQueuePersister` on `agentRegistry.DB()` when `queue.config.PersistFollowUp`, attaches via `SetPersister`, and flushes/stops/clears on turn end beside the queue registration. Round-trip pins (`queue_persister_wiring_test.go`) through the REAL path: a wired turn creates the queued_followups schema; a follow-up injected mid-turn (blocking chatter holds the model call open) is persisted through the attached persister, round-trips through the raw table, and is recovered by the boot-side reader (loadAndClear, the function RecoverPendingFollowUps uses). |
+
+Notes: `registry.DB()` is fed by the daemon (`components.go` `getQueueDB`)
+and the registry-built loops always carry a message queue when queues are
+enabled, so the attach is live on the production path. The wires did not
+touch delegate*.go / reply_guard* — no sibling-dirty conflicts.
+
+## Wave-2 disposition (scope: HALO RLM trace-analysis + selfimprove.IssueDetector)
+
+Executed 2026-11-09. Commits bb27ebb8 (config knob) + ad15ded1 (daemon
+wiring) + a607b5ca (pins). Full reachability audit:
+`.hermes/audits/wave2-halo-trace-analysis-disposition.md`. Gates:
+go build ./..., go vet on internal/{agent,selfimprove,memory,daemon,
+config}, go test -count=1 -p 2 on all five (all ok).
+
+Wired the plan-intended recurring consumer that never landed
+(docs/plans/2026-07-16-halo-augmentation-plan.md Task 2): config
+kill-switch `selfimprove.trace_analysis` (enabled default FALSE,
+opt-in), `internal/daemon/trace_analysis_wiring.go` registers the
+periodic `traceAnalysisJob` on the daemon scheduler when enabled;
+the callback runs memory.LoadTraceStore →
+agent.NewRLMAnalyzerFromTraceStore → selfimprove.IssueDetector.
+ScanTraces and logs findings. Wired through the REAL NewComponents
+path (pins: disabled-by-default, enabled-registers-interval-job,
+no-scheduler guard, path resolution) + ScanTraces fixture e2e
+(tool_error/refusal_loop/redundant_args).
+
+Reachability at HEAD (deadcode -test, cmd/meept-daemon): the
+Analyze-time chain is now live — NewRLMAnalyzerFromTraceStore,
+traceStoreReaderAdapter, guardedInvoke/executeAgent/registerRootTools,
+per_depth_semaphore.go (0 remaining), subagent_pool drive path,
+memory.LoadTraceStore, IssueDetector.ScanTraces (0 remaining from the
+daemon binary), turn_counter Nudge path. Remaining flagged funcs are
+auxiliary, verified and left per scope discipline (analyzer internals
+untouched): trace_tools.go 32 (names registered into the prompt only;
+TraceQueryTool implementations need the analyzer LLM tool-call loop —
+WIRE-CANDIDATE stays), tool_registry.go 32 (DepthToolRegistry
+dispatcher gating layer, untouched), trace_store_reader.go 7
+(InMemoryTraceStore/LoadJSONLTraces test+fixture seams),
+rlm_analyzer.go 4 (SeverityAsIssueSeverity, hasFinalSentinel,
+SetScopeProvider loop-affinity seam, NewTestRLMAnalyzer),
+subagent_pool.go 7 (analyzerRun metrics accessors + turnCounter
+Remaining/GetCount/Reset). Net: 108 → ~82 still unreachable, all
+confirmed auxiliary or test seams.
+
+Shared-tree note: --no-verify disclosed on each commit (pre-commit e2e
++ deadcode checks red from sibling agents' in-flight edits in other
+packages); bb27ebb8 also carries a sibling's [memory].vector_hybrid
+config block (whole-file staging), disclosed in its message.

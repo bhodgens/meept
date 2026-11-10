@@ -73,13 +73,92 @@ func TestRMSTripNoSTTEvidence(t *testing.T) {
 // window -> interrupt emitted (existing behavior preserved).
 func TestRMSTripWithRecentSTTEvidence(t *testing.T) {
 	const ccid = "rmsgate2"
-	d, _, _, gate := tripLocal(t, ccid, 500*time.Millisecond) // whisper heard words moments ago
+	d, _, p, gate := tripLocal(t, ccid, 500*time.Millisecond) // whisper heard words moments ago
 
 	f := d.waitFrame(t)
 	if f.Event != voiceframe.EventInterrupt {
 		t.Fatalf("RMS trip with recent STT final emitted %q, want interrupt", f.Event)
 	}
+	// Leaf 02 (defect 2026-11-09): the trip CONSUMED the evidence —
+	// lastFinalAt is zeroed so a second trip needs a NEW final.
+	if zero, _ := finalEvidence(p); !zero {
+		t.Fatal("authorized RMS trip left lastFinalAt set (evidence must be one-shot)")
+	}
 	close(gate.park)
+}
+
+// TestRMSTripEvidenceIsOneShot: the live defect (call
+// local-2d84c384fd93f447) — five barge-ins cancelled the turn a PRIOR
+// final had already dispatched, because the 10 s window stayed
+// re-authorized by a stale lastFinalAt. Contract: an authorized trip
+// clears the evidence, so a second sustained-loud window after the next
+// say re-arms the latch is SUPPRESSED until a new final re-stamps it;
+// then the trip fires again. Genuine new speech still interrupts.
+func TestRMSTripEvidenceIsOneShot(t *testing.T) {
+	const ccid = "rmsgate4"
+	const chunks = 12
+	d, child, p, in, out, _ := newRMSChild(t, ccid, true, rmsThresh)
+
+	// Trip 1: recent final (stamp) + loud mic -> interrupt, evidence consumed.
+	gate1 := newChunkedTTS(quietSample, chunks)
+	swapTTS(p, gate1)
+	if err := child.handleSay(voiceframe.Frame{CallID: ccid, Event: voiceframe.EventSay, Text: "first answer"}); err != nil {
+		t.Fatalf("handleSay 1: %v", err)
+	}
+	waitFor(t, func() bool { return p.isSpeaking() })
+	stampRecentFinal(p) // the final that dispatched the in-flight turn
+	writeMic(t, in, callerSample, chunks)
+	f := d.waitFrame(t)
+	if f.Event != voiceframe.EventInterrupt {
+		t.Fatalf("trip 1 emitted %q, want interrupt", f.Event)
+	}
+	if zero, _ := finalEvidence(p); !zero {
+		t.Fatal("trip 1 did not consume the STT evidence (lastFinalAt still set)")
+	}
+	close(gate1.park)
+	drainOut(t, out, chunks*640) // gate1's whole stream wrote out (buffer stays clean)
+
+	// Trip 2 (the defect): a NEW say re-arms the latch; the SAME loud mic
+	// audio keeps arriving, but NO new final has landed — the evidence
+	// was consumed by trip 1, so this window must NOT cancel the new
+	// in-flight answer. Sync on gate2's FIRST outbound chunk (the
+	// TestRMSBargeIn barge-in 2 pattern: isSpeaking() alone can race the
+	// retired stream's deferred clear, so a first-chunk observation is the
+	// deterministic proof the re-arm is live).
+	gate2 := newChunkedTTS(quietSample, chunks)
+	swapTTS(p, gate2)
+	if err := child.handleSay(voiceframe.Frame{CallID: ccid, Event: voiceframe.EventSay, Text: "second answer"}); err != nil {
+		t.Fatalf("handleSay 2: %v", err)
+	}
+	drainOut(t, out, 640) // gate2's first chunk: the re-arm is live
+	writeMic(t, in, callerSample, chunks)
+	assertNoInterruptWithin(t, d, 80*time.Millisecond,
+		"second RMS window re-tripped off consumed evidence (one-shot: a trip must clear lastFinalAt)")
+	if !p.isSpeaking() {
+		t.Fatal("suppressed second trip stopped playback")
+	}
+	close(gate2.park)
+	drainOut(t, out, (chunks-1)*640) // drain gate2's remaining chunks
+
+	// Trip 3: a NEW final re-authorizes — genuine new speech interrupts.
+	stampRecentFinal(p)
+	gate3 := newChunkedTTS(quietSample, chunks)
+	swapTTS(p, gate3)
+	defer close(gate3.park)
+	if err := child.handleSay(voiceframe.Frame{CallID: ccid, Event: voiceframe.EventSay, Text: "third answer"}); err != nil {
+		t.Fatalf("handleSay 3: %v", err)
+	}
+	drainOut(t, out, 640) // gate3's first chunk: re-armed
+	writeMic(t, in, callerSample, chunks)
+	f = d.waitFrame(t)
+	if f.Event != voiceframe.EventInterrupt {
+		t.Fatalf("trip after a NEW final emitted %q, want interrupt (new speech must still barge in)", f.Event)
+	}
+	// Whole scenario: exactly 2 interrupts (trips 1 and 3, both popped;
+	// trip 2's window stayed silent — nothing else in the FIFO).
+	if n := countQueuedInterrupts(d); n != 0 {
+		t.Fatalf("scenario queued %d unexpected interrupts beyond the 2 popped, want 2 total", n)
+	}
 }
 
 // TestRMSTripStaleSTTEvidence: final older than rmsSttEvidenceWindow -> no

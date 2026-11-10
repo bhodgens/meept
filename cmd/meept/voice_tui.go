@@ -74,27 +74,10 @@ func dialTUIVoiceAudio(inPath, outPath string) (models.VoiceAudioSession, error)
 		_, err := io.Copy(inConn, capture)
 		s.done <- err
 	}()
-	// speaker: out socket -> sink (burst WAVs -> oto).
-	go func() {
-		buf := make([]byte, 8*1024)
-		for {
-			n, rerr := outConn.Read(buf)
-			if n > 0 {
-				if _, werr := sink.Write(buf[:n]); werr != nil {
-					s.done <- werr
-					return
-				}
-			}
-			if rerr != nil {
-				s.done <- nil // daemon closed the pair: call ended
-				return
-			}
-			if err := sink.Flush(); err != nil {
-				s.done <- err
-				return
-			}
-		}
-	}()
+	// speaker: out socket -> sink (raw PCM bursts -> oto), with the same
+	// bounded lookahead as the CLI live loop (leaf 01: drainLiveSpeaker
+	// is the single implementation - no new audio code here either).
+	go drainLiveSpeaker(outConn, s.sink, s.done)
 	// Drain pump errors into a quiet teardown; the TUI session is
 	// ended by the user (/voice stop) or the daemon (call end), so a
 	// pump error here just releases the resources.

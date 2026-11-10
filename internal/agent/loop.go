@@ -3240,6 +3240,36 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	// Register queue for external access if both queue and registry are available
 	queueRegistered := false
 	if l.agentRegistry != nil && l.queue != nil {
+		// Queue persistence write-side (steering/followup-queues plan):
+		// attach a per-conversation QueuePersister when the registry carries
+		// the shared SQLite DB and persistence is enabled. This restores the
+		// producer for queued_followups — the daemon boot path
+		// (daemon.go RecoverPendingFollowUps) READS that table, but without
+		// this attach the only writer was never constructed and the read
+		// side was silently dead. The persister flushes + stops and is
+		// cleared when the turn ends (defer below), mirroring the queue
+		// registration lifetime.
+		if db := l.agentRegistry.DB(); db != nil && l.queue.config.PersistFollowUp {
+			persister, pErr := NewQueuePersister(db, conversationID, l.logger.With("component", "queue-persister"))
+			if pErr != nil {
+				l.logger.Warn("failed to create queue persister, persistence disabled",
+					"conversation_id", conversationID,
+					"error", pErr,
+				)
+			} else {
+				if l.bus != nil {
+					persister.WithBus(l.bus)
+				}
+				l.queue.SetPersister(persister)
+				defer func() {
+					// Flush and stop persister before unregistering the queue.
+					persister.Flush()
+					persister.Stop()
+					l.queue.ClearPersister()
+				}()
+			}
+		}
+
 		gen := l.agentRegistry.RegisterActiveQueue(conversationID, l.queue, l)
 		queueRegistered = true
 		l.logger.Debug("registered queue for conversation",

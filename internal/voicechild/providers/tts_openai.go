@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/caimlas/meept/internal/voicechild"
 )
@@ -30,7 +33,70 @@ const (
 
 // ttsRoundTripper issues the vendor HTTP request. A package-level var so
 // the httptest fake swaps the transport (never the live vendor in CI).
-var ttsTransport = http.DefaultTransport
+//
+// Connection hygiene (leaf 04 / link-72a04aebac963cdb): the local
+// OpenAI-compatible TTS servers (uvicorn faster-qwen3-tts) drop idle
+// keep-alives after ~5 s, and the provider is constructed at call setup —
+// the greeting POST can land on a stale pooled connection a second later
+// and die with "http: server closed idle connection" (silently dead
+// greeting). Every utterance is exactly one POST and a drip stream gains
+// nothing from pooling, so keep-alives are disabled outright: each Speak
+// dials fresh. The timeout set mirrors http.DefaultTransport's sane
+// defaults (no IdleConnTimeout: with keep-alives off there are no idle
+// connections to time out).
+var ttsTransport http.RoundTripper = &http.Transport{
+	DisableKeepAlives: true,
+	Proxy:             http.ProxyFromEnvironment,
+	DialContext: (&net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}).DialContext,
+	ForceAttemptHTTP2:     true,
+	TLSHandshakeTimeout:   10 * time.Second,
+	ExpectContinueTimeout: 1 * time.Second,
+	ResponseHeaderTimeout: 30 * time.Second,
+}
+
+// ttsMaxSpeakAttempts bounds the transport-error retry: one fresh-dial
+// retry, never more (leaf 04).
+const ttsMaxSpeakAttempts = 2
+
+// WithCallID stamps the call id via the voicechild-owned ctx key
+// (providers imports voicechild, never the reverse).
+func WithCallID(ctx context.Context, callID string) context.Context {
+	return voicechild.WithTTSContext(ctx, callID)
+}
+
+// callIDFromContext reads the voicechild-stamped call id (leaf 04:
+// voicechild owns the ctx key - providers imports voicechild, never the
+// reverse). Empty when the call site did not stamp.
+func callIDFromContext(ctx context.Context) string {
+	return voicechild.TTSCallIDFromContext(ctx)
+}
+
+// isTTSTransportError classifies narrow: only dial/keep-alive-class
+// transport failures are worth a fresh-dial retry. HTTP status failures
+// never reach here (they return after the response is received); a
+// cancelled/deadline-exceeded context is never retried.
+func isTTSTransportError(ctx context.Context, err error) bool {
+	if err == nil || ctx.Err() != nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		return true
+	}
+	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "idle connection") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "EOF")
+}
 
 // openAITTSRequest is the /audio/speech request body. Every request is
 // streaming (stream=true, response_format=pcm): the adapter never issues
@@ -146,19 +212,35 @@ func (t *OpenAITTS) Speak(ctx context.Context, text string) (io.ReadCloser, erro
 	if err != nil {
 		return nil, fmt.Errorf("openai tts: encode request: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.speechURL(), bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("openai tts: build request: %w", err)
-	}
-	if t.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+t.apiKey)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
 	client := &http.Client{Transport: t.transport}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("openai tts: request: %w", err)
+	var resp *http.Response
+	for attempt := 1; ; attempt++ {
+		// Rebuild the request each attempt: the marshalled body bytes
+		// are stable (fresh bytes.Reader), so a retry never replays a
+		// half-consumed body.
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.speechURL(), bytes.NewReader(body))
+		if err != nil {
+			return nil, fmt.Errorf("openai tts: build request: %w", err)
+		}
+		if t.apiKey != "" {
+			req.Header.Set("Authorization", "Bearer "+t.apiKey)
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err = client.Do(req)
+		if err == nil {
+			break
+		}
+		// One narrow retry (leaf 04): a stale-keep-alive/dial-class
+		// transport failure gets exactly one fresh attempt. Never retry
+		// on HTTP status (those errors return below, after a response
+		// was received) and never on a cancelled context
+		// (isTTSTransportError checks ctx.Err()).
+		if attempt >= ttsMaxSpeakAttempts || !isTTSTransportError(ctx, err) {
+			return nil, fmt.Errorf("openai tts: request: %w", err)
+		}
+		slog.Warn("openai tts: retrying failed speech request",
+			"err", err, "call_id", callIDFromContext(ctx), "attempt", attempt+1)
 	}
 	if resp.StatusCode != http.StatusOK {
 		if closeErr := resp.Body.Close(); closeErr != nil {

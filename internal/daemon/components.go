@@ -50,6 +50,7 @@ import (
 	"github.com/caimlas/meept/internal/intake"
 	"github.com/caimlas/meept/internal/jevgate"
 	"github.com/caimlas/meept/internal/learning"
+	"github.com/caimlas/meept/internal/ledger"
 	"github.com/caimlas/meept/internal/lint"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory"
@@ -231,6 +232,13 @@ type Components struct {
 	// the tools and reconciler have stopped.
 	EffectsLedger effects.Ledger
 
+	// EmployeeLedger is the employee ledger store (leaf 03-voice/01,
+	// buildLedger over <data_dir>/ledger/ledger.db). Nil when the store
+	// failed to open -- the pinned degrade posture: the per-call brief
+	// no-ops, ledger tools stay unregistered, the daemon boots unchanged.
+	// Owned here so stopComponents closes the handle.
+	EmployeeLedger *ledger.Store
+
 	// ToolGate is the daemon-side ExecGate wired into ToolRegistry via
 	// SetGate (wave A leaf 02, plan docs/plans/20261031-tool-provider-seam).
 	// Nil when construction degraded - the registry then runs the legacy
@@ -346,6 +354,14 @@ type Components struct {
 	// memory.l0_enabled is set. Routed through the worker pool's
 	// processor via distillRouter (see l0_wiring.go).
 	DistillWorker *memory.DistillWorker
+
+	// VectorHybrid is the ShardManager-powered hybrid search surface
+	// (memory.vector_hybrid, plan
+	// docs/plans/2026-06-07-sharded-vector-memory.md). Nil unless
+	// memory.vector_hybrid.enabled is set AND the embeddings stack is
+	// wired — the legacy Manager.SearchHybrid path serves everything
+	// when nil (see vector_hybrid_wiring.go).
+	VectorHybrid *vectorHybridWiring
 
 	// TiersEngine is the memory-tier policy engine (wiring-gap leaf
 	// 03-tierpolicy-daemon T4): constructed AFTER the memory manager
@@ -602,6 +618,19 @@ type Components struct {
 	// Bot framework
 	BotManager *bot.Manager
 	BotStore   *bot.Store
+
+	// Proactive notification bot stack (automation plan 2026-06-21
+	// Plans 1.x/3.x; deadcode wave-2 WIRE). All nil when
+	// [notifications].enabled is false (the default kill-switch).
+	// Constructed by wireNotificationBot (notification_bot_wiring.go);
+	// NotificationBot is started in Components.Start and stopped in
+	// stopComponents.
+	NotificationBot         *bot.NotificationBot
+	CostTracker             *bot.CostTracker
+	NotificationPrefs       *services.NotificationPreferences
+	NotificationRateLimiter *services.NotificationRateLimiter
+	PushHistory             *services.PushHistory
+	PushChannels            *services.ChannelRegistry
 
 	// Employee framework (AI Employee Design spec). Wraps BotManager with
 	// constitution enforcement, goal loops, and audit semantics. The
@@ -2311,11 +2340,19 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		)
 	}
 	// Wire immediate self-reflection (Turbo Thread E)
-	if cfg.ReflectionCollector.Enabled && c.LLMClient != nil {
+	// Leaf 03 (voice-comms-fixes): reflection used to receive c.LLMClient —
+	// the main chat client resolved from c.ModelsConfig, whose ${VAR}
+	// expansion is process-env-only (internal/config ExpandEnvVars). Under a
+	// launchd-spawned daemon the cloud key in models.json5 expanded to
+	// empty, so every per-turn reflection call hit the default cloud model
+	// unauthenticated and logged "reflection failed: HTTP 401 ... Token not
+	// provided" once per turn. The auxiliary clients are resolver-built
+	// (env-script expansion + noAuth local runtimes); prefer them.
+	if rcClassifier := reflectionClassifierClient(c); cfg.ReflectionCollector.Enabled && rcClassifier != nil {
 		reflectionLoader := agent.NewDaemonPlannerTemplateLoader("config/prompts")
 		reflectionCollector := agent.NewReflectionCollector(
 			cfg.ReflectionCollector,
-			c.LLMClient,
+			rcClassifier,
 			"", // classifierModel -- empty = use Client's configured model
 			reflectionLoader,
 			".meept/improvements.md",
@@ -2595,6 +2632,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// channels (HTTP WebSocket, TUI, Telegram, CLI). The HTTPPushChannel
 	// uses the EventEmitter as its notifier bridge.
 	pushRegistry := services.NewChannelRegistry(logger.With("component", "push-channels"))
+	c.PushChannels = pushRegistry
 	if c.NotificationEmitter != nil {
 		httpCh, err := services.NewHTTPPushChannel(
 			pushNotifierAdapter{emitter: c.NotificationEmitter},
@@ -2645,6 +2683,15 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// BotContextImpl implements bot.BotContext interface, exposing PushNotification
 	c.BotContext = services.NewBotContext(c.PushService,
 		logger.With("component", "bot-context"))
+
+	// Proactive notification bot stack (automation plan 2026-06-21
+	// Plans 1.x/3.x; deadcode wave-2 WIRE). Gated on
+	// [notifications].enabled (default false — additive opt-in like
+	// [intake]): disabled means zero new surfaces and the existing
+	// HTTP+Slack push channels above stay byte-identical. Enabled adds
+	// NotificationBot + CostTracker + prefs + push history + the
+	// Telegram push channel ALONGSIDE the existing registrations.
+	wireNotificationBot(c)
 
 	// Start progress synthesizer for tiered agent activity summaries.
 	// Subscribes to all agent events via wildcard and republishes condensed
@@ -2843,6 +2890,22 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// bridges_wiring.go.
 		bridgeChatter := epistemicChatter
 		wireBridges(c.MemoryManager, bridgeChatter, cfg.Memory, cfg.Daemon.DataDir, logger)
+
+		// ShardManager hybrid search (memory.vector_hybrid, plan
+		// docs/plans/2026-06-07-sharded-vector-memory.md "Wire ShardManager
+		// for hybrid search"). Opt-in, default false: nil wiring keeps the
+		// legacy Manager.SearchHybrid path byte-identical. Requires the
+		// embeddings stack (the manager's ShardManager vector adapter).
+		// RPC handler registration happens in daemon.go over svcRegistry —
+		// this site only constructs the searcher.
+		if cfg.Memory.VectorHybrid.Enabled {
+			vh, vhErr := newVectorHybridWiring(c.MemoryManager, cfg.Memory.VectorHybrid.Alpha, logger.With("component", "vector-hybrid"))
+			if vhErr != nil {
+				logger.Warn("vector hybrid search not wired", "error", vhErr)
+			} else {
+				c.VectorHybrid = vh
+			}
+		}
 	}
 
 	// L0 raw-conversation tier (tree 01 L3). Gated on memory.l0_enabled
@@ -3426,7 +3489,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		distillChatter = c.LLMClient
 	}
 	l0c := buildL0Components(c.MemoryManager, l0Enqueuer, cfg.Memory, logger)
-	c.DistillWorker = wireL0Distill(l0c, c.MemoryManager, distillChatter, cfg.Memory, logger)
+	c.DistillWorker = wireL0Distill(l0c, c.MemoryManager, distillChatter, cfg.Memory, cfg.Agent, logger)
 
 	// Memory-tier policy engine (wiring-gap leaf 03-tierpolicy-daemon
 	// T4). Same AFTER-queue placement rule as the L0 wiring above: the
@@ -4987,6 +5050,15 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		}
 	}
 
+	// HALO RLM trace-analysis activation (deadcode wave-2 WIRE): the
+	// memory trace-store reader + agent.RLMAnalyzer +
+	// selfimprove.IssueDetector.ScanTraces path, registered as a periodic
+	// scheduler job. Gated on [selfimprove].trace_analysis.enabled
+	// (default false): disabled = no job, no constructions, byte-identical
+	// boot. Runs after the scheduler exists; must stay before Start (jobs
+	// registered at construction are picked up by Scheduler.Start).
+	c.wireTraceAnalysis(cfg, logger.With("component", "trace-analysis"))
+
 	// Register scheduler tools now that scheduler exists (scheduler is nil at
 	// initial registerBuiltinTools call because it is created after tools).
 	// Tool-provider seam (03-migrate.md T1): the eight schedule_*/cron_create
@@ -5266,6 +5338,25 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// typed-nil guarded inside wireDSHConvergence.
 	wireDSHConvergence(c, cfg, msgBus, logger)
 
+	// Employee ledger (leaf 03-voice/01): ONE store at
+	// <data_dir>/ledger/ledger.db built via buildLedger (pinned degrade
+	// posture: open failure -> WARN + nil, everything downstream runs
+	// unchanged — the per-call brief no-ops off-by-absence). Ordered
+	// after the employee framework so activityChainDB(c) resolves the
+	// shared audit-chain handle for the hook composition (04-02 folds
+	// the audit row into it). When the store is live, register the
+	// ledger tool surface here — the site that has the ToolRegistry
+	// handle (03-voice/01 task 1: "return the store and register at the
+	// site that has it").
+	c.EmployeeLedger = buildLedger(cfg, msgBus, ledgerAuditChain(c, logger), logger.With("component", "ledger-wiring"))
+	if c.EmployeeLedger != nil && c.ToolRegistry != nil {
+		builtin.RegisterLedgerTools(c.ToolRegistry, c.EmployeeLedger, logger.With("component", "ledger-tools"))
+	}
+	// Ledger integrity job (leaf 04-ops/01): scheduled VerifyState pass
+	// over [ledger] (auto_repair default false, interval_hours default
+	// 168). Guarded: nil store (ledger disabled) -> no job registered.
+	c.registerLedgerIntegrityJob(cfg, logger.With("component", "ledger-integrity-wiring"))
+
 	// Voice sidecar ([voice] block, voice-sidecar leaf 14): the whole-
 	// daemon wiring - call manager, registry, dialer, talk loops,
 	// supervisor, child proc, text server, employee binding, and the two
@@ -5293,6 +5384,13 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			Employees: c.EmployeeManager,
 			Logger:    logger,
 		}
+		// Ledger brief seams (leaf 03-voice/01): the ONE store built
+		// above plus the prompt-in/text-out adapter over the daemon's
+		// default LLM client (no new HTTP client; the leaf pins the
+		// fallback). Nil store or nil client -> the per-call brief no-ops
+		// off-by-absence at release.
+		vdeps.LedgerStore = c.EmployeeLedger
+		vdeps.BriefLLM = ledgerBriefLLMFunc(c.LLMClient)
 		// Audit chain: the employee wiring hands the Manager the chain DB
 		// handle; voice dial audit rows append through a store opened over
 		// the same pool (shared-DB convention, OpenStoreFromDB's Close is
@@ -6034,6 +6132,14 @@ func (c *Components) Start(ctx context.Context) error {
 			c.Logger.Info("Bot framework started")
 			startedHandlers = append(startedHandlers, "bot")
 		}
+	}
+
+	// Start the proactive notification bot's event loop (Plans 1.x/3.x
+	// wiring; passive no-op when the stack is kill-switched off —
+	// NotificationBot is nil there).
+	startNotificationBot(c, ctx)
+	if c.NotificationBot != nil {
+		startedHandlers = append(startedHandlers, "notification-bot")
 	}
 
 	// Start employee framework (AI Employee Design spec). Prime the
@@ -6876,7 +6982,21 @@ func (c *Components) stopComponents(ctx context.Context) error {
 	// process) but stop cleanly here for test/shutdown determinism.
 	if c.QuotaNotifier != nil {
 		c.QuotaNotifier.Stop()
+		// Cleanup prunes the dedup map (deadcode wave-2: Cleanup had zero
+		// callers; wiring it here bounds memory across in-process
+		// restarts and keeps the shutdown path the single teardown seam).
+		c.QuotaNotifier.Cleanup()
 		c.Logger.Info("Quota notifier stopped")
+	}
+
+	// Stop the secrets egress proxy listener (deadcode wave-3: Stop had
+	// zero callers). The proxy's own goroutine is lifecycle-ctx bound, but
+	// Stop() is the graceful path — it drains in-flight requests within
+	// the shutdown grace before the process tears down. Nil on every
+	// proxy-disabled boot (wireSecretsProxy leaves it unset).
+	if c.SecretsProxy != nil {
+		c.SecretsProxy.Stop()
+		c.Logger.Info("Secrets egress proxy stopped")
 	}
 
 	// Stop the gate checkpoint parker (hitl-notifications leaf 02):
@@ -6969,6 +7089,10 @@ func (c *Components) stopComponents(ctx context.Context) error {
 		c.BotManager.StopAll()
 		c.Logger.Info("Bot framework stopped")
 	}
+
+	// Stop the proactive notification bot's event loop (Plans 1.x/3.x
+	// wiring). Nil-safe: no-op when the stack is kill-switched off.
+	stopNotificationBot(c)
 	if c.BotStore != nil {
 		if err := c.BotStore.Close(); err != nil {
 			c.Logger.Error("Failed to close bot store", "error", err)
@@ -7056,6 +7180,21 @@ func (c *Components) stopComponents(ctx context.Context) error {
 		}
 		c.EffectsLedger = nil
 		c.EffectsReconciler = nil
+	}
+
+	// Close the employee ledger AFTER the voice stack and tools have
+	// stopped (same ordering rationale as the effects ledger; leaf
+	// 03-voice/01 owns the handle on Components). Rows stay on disk.
+	if c.EmployeeLedger != nil {
+		if err := c.EmployeeLedger.Close(); err != nil {
+			c.Logger.Error("Failed to close employee ledger", "error", err)
+			if lastErr == nil {
+				lastErr = err
+			}
+		} else {
+			c.Logger.Info("Employee ledger closed")
+		}
+		c.EmployeeLedger = nil
 	}
 
 	// Close the pii swap store AFTER the loops have stopped ([security.pii],

@@ -1338,6 +1338,15 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			logger.Info("Memory RPC handlers registered")
 		}
 
+		// ShardManager hybrid search RPC (memory.search.hybrid). Only
+		// registered when memory.vector_hybrid.enabled wired the searcher
+		// in components; otherwise calls fail with "method not found"
+		// rather than pretending the feature exists.
+		if components.VectorHybrid != nil {
+			registerVectorHybridRPCHandler(rpcServer, components.VectorHybrid, fullCfg.Memory.VectorHybrid.Limit)
+			logger.Info("Vector hybrid search RPC handler registered")
+		}
+
 		// Eval RPC handlers (eval.run/show/list). Direct registration on
 		// the shared evalHandler's DiskStore, so CLI-over-daemon and HTTP
 		// clients see the same run records.
@@ -1543,6 +1552,7 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	// (nil voice wiring / disabled local leg = the named disabled-leg
 	// refusal, never "method not found").
 	registerVoiceLocalRPC(components, rpcServer, logger)
+	registerVoiceLinkRPC(components, rpcServer, logger)
 
 	// Create HTTP server (if enabled)
 	var httpSrv *http.Server

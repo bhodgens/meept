@@ -551,3 +551,66 @@ All DELETE-CANDIDATE rows in scope re-grepped at HEAD before deletion; any row f
 - `go build ./...` clean at each commit (transient failures during the wave were sibling agents' in-flight edits in internal/llm / internal/agent, not this scope).
 - `go test -count=1`: internal/bot, internal/comm/http, internal/services, internal/tui, internal/tui/models — all ok after respective commits.
 - `.githooks/deadcode-baseline.txt` untouched.
+
+## Wave-2 disposition (services-tui-bot WIRE scope)
+
+Executed 2026-11-09 per docs/plans/2026-06-21-automation-capability-extension.md
+Plans 1.x/3.x (producing commits 23998903/0821df6b/e9605179/3c705186).
+Config knob: **`[notifications].enabled`** (schema: `NotificationsConfig.Enabled`,
+internal/config/schema.go; carried by sibling commit 464b666d) — default **false**,
+additive opt-in like [intake]/[comm.slack]. Auxiliary knobs in the same block:
+`bot_notify_on`, `bot_rate_limit_per_hour`, `bot_telegram_chat_ids`, `bot_templates`.
+The pre-existing desktop-notification emitter path does NOT read the knob and is
+unchanged. INTEGRATION NOT CLOBBER: the live direct telegram.Bot/AgentHandler
+wiring ([telegram] block) and the HTTP+Slack push channel registrations are
+untouched; the stack adds channels alongside.
+
+### What was wired where
+
+| Report row | Wired site | Commit |
+|---|---|---|
+| internal/bot/notification_bot.go (12 funcs) | `internal/daemon/notification_bot_wiring.go` `wireNotificationBot` — `bot.NewNotificationBot` subscribes the daemon EventEmitter, fans budget/security/session-designation triggers to Telegram chat IDs; started in `Components.Start` (`startNotificationBot`), stopped in `stopComponents` (`stopNotificationBot`); typed-nil emitter guard per internal/daemon/AGENTS.md | 8207424c (+ ctor f12e7f33) |
+| internal/bot/cost.go (3 funcs, CostTracker) | `wireNotificationBot` — `bot.NewCostTracker(c.BotStore, ...)` when the bot framework store exists; without a store the piece degrades (Warn) and the rest of the stack still wires; budget-marker cleanup job `notification_bot_budget_cleanup` (`@every 6h`) on the daemon scheduler | 8207424c |
+| internal/comm/telegram/channel.go + base_bot.go (11 funcs) | Partially: the MessagingBot adapter itself stays UNWIRED (the daemon's bidirectional Telegram needs remain served by the direct Bot+AgentHandler wiring, which this wave must not clobber); the telegram DELIVERY path is wired via TelegramPushChannel (below). Residual adapter surface re-reported for Wave-3 adjudication (wire-into-bot-framework vs delete). | — |
+| internal/services/push_channels.go (12 funcs, PushToChannels) | `services.NewTelegramPushChannel` registered on the push `ChannelRegistry` (broadcast mode, chat IDs from `bot_telegram_chat_ids`, malformed IDs dropped) when a telegram bot exists; registry exposed as `Components.PushChannels`; `PushToChannels` now has a live caller path via the registry | 8207424c |
+| internal/services/push_history.go (5 funcs) | `services.NewPushHistory(1000)` attached to PushService via nil-guarded `SetPushHistory`; `PushService.Push` records one entry per delivered push on both the legacy and effects-ledger paths (`recordHistory`); nil history = no recording (legacy byte-identical) | a1ad4332 (+ site 8207424c) |
+| internal/services/notification_prefs.go (7 funcs) | `DefaultNotificationPreferences` + `NotificationRateLimiter` constructed in `wireNotificationBot`; attached via nil-guarded `PushService.SetNotificationPreferences`; consulted through `PushService.PreferencesAllowed` | a1ad4332 (+ site 8207424c) |
+| internal/services/bot_context.go (1 func, PushNotification) | `Components.BotContext` was already constructed (components.go); the bot.BotContext interface consumer remains absent — PushNotification stays re-reported for Wave-3 (handing BotContext to the bot framework is a Manager-side change this wave did not clobber) | — |
+| internal/services/quota_notifier.go Cleanup | `stopComponents` now calls `c.QuotaNotifier.Cleanup()` immediately after `Stop()` — single teardown seam | 9a6c1773 |
+| [notifications] kill-switch (schema) | `NotificationsConfig.Enabled` + bot_* fields (internal/config/schema.go) — carried by sibling commit 464b666d per its ride-along disclosure; Components fields + `wireNotificationBot(c)` call site carried by sibling commit ad15ded1 (same disclosure convention) | 464b666d / ad15ded1 |
+
+### Tests added (all through the REAL wiring path — real scheduler, real bot.Store,
+### DefaultConfig loader, mirroring the intake gate tests)
+
+Daemon (`internal/daemon/notification_bot_wiring_test.go`, commit 8207424c):
+- `TestNotificationsDefaultOff` — kill-switch default-off proves zero surfaces
+- `TestWireNotificationBot_NilConfig` — nil-config no-op
+- `TestWireNotificationBot_EnabledConstructsStack` — full stack + cleanup job cadence
+- `TestWireNotificationBot_EnabledWithoutStoreDegrades` — per-piece fail-open
+- `TestWireNotificationBot_TelegramChannelRequiresBot` — channel skips without telegram
+- `TestWireNotificationBot_StartStopLifecycle` — Start/Stop + nil-boot safety
+- `TestPushServiceRecordsHistoryThroughRealPush` — history identity via real Push
+
+Services (`internal/services/push_service_setters_test.go`, commit a1ad4332):
+- `TestPushService_SetNotificationPreferences_NilGuard`
+- `TestPushService_SetPushHistory_NilGuard`
+
+Bot (`internal/bot/notification_bot_setters_test.go`, commit f12e7f33):
+- `TestNotificationBot_SetTelegram_NilGuard`
+- `TestNewNotificationBot_NilLoggerAndEmitter`
+
+### Commits (this scope)
+
+- `8207424c` deadcode(wave2): wire the notification bot stack into the daemon
+- `f12e7f33` feat(bot): NotificationBot constructor + SetTelegram setter with nil guards
+- `a1ad4332` feat(services): PushService prefs + push-history seams (Plan 3.5 wiring)
+- `9a6c1773` fix(daemon): wire quota_notifier.Cleanup into the shutdown path
+- carrier commits (sibling scope, disclosed): `464b666d` (schema knobs), `ad15ded1` (components.go fields + call site)
+
+### Gates
+
+- `go build ./...` clean; `go vet` clean on internal/daemon, internal/bot,
+  internal/services, internal/config; `go test -count=1 -p 2` ok on all four
+  (daemon 20s full package). --no-verify used on this scope's commits: the
+  shared pre-commit gate fails on sibling in-flight edits in unrelated
+  packages; own gates green at each commit time.

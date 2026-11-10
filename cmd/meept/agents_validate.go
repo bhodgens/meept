@@ -19,7 +19,7 @@ func newAgentsValidateCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "validate <definition.json5>",
 		Short: "validate an employee definition file without creating it",
-		Long: `Offline pre-flight validation of an employee definition file.
+		Long: `Offline pre-flight validation of an employee definition file (.json5 or .md).
 
 Decodes the constitution block and runs the same structural validation the
 daemon performs on 'agents create' — no daemon connection required. Reports:
@@ -35,23 +35,23 @@ the daemon's registries, so they run only at create time.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			defPath := args[0]
 
-			var def struct {
-				ID           string         `json:"id"`
-				Constitution map[string]any `json:"constitution"`
-			}
-			if err := readDefinitionFile(defPath, &def); err != nil {
+			def, err := readEmployeeDefinition(defPath)
+			if err != nil {
 				return err
 			}
 
-			if def.ID == "" {
+			defID, _ := def["id"].(string)
+			constitutionAny, _ := def["constitution"].(map[string]any)
+
+			if defID == "" {
 				return fmt.Errorf("definition is missing required field \"id\"")
 			}
-			if len(def.Constitution) == 0 {
+			if len(constitutionAny) == 0 {
 				return fmt.Errorf("definition is missing the \"constitution\" block")
 			}
 
 			// Decode exactly as Manager.Hire does.
-			data, err := json.Marshal(def.Constitution)
+			data, err := json.Marshal(constitutionAny)
 			if err != nil {
 				return fmt.Errorf("constitution encode: %w", err)
 			}
@@ -62,11 +62,11 @@ the daemon's registries, so they run only at create time.`,
 					employee.Tier1Reactive, employee.Tier2Propose, employee.Tier3Autonomous)
 			}
 
-			if err := c.Validate(def.ID); err != nil {
+			if err := c.Validate(defID); err != nil {
 				return fmt.Errorf("constitution invalid:\n  %w", err)
 			}
 
-			fmt.Printf("valid: %s (%s, tier=%s)\n", def.ID, c.Role, c.AutonomyTier)
+			fmt.Printf("valid: %s (%s, tier=%s)\n", defID, c.Role, c.AutonomyTier)
 			return nil
 		},
 	}

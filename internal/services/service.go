@@ -253,12 +253,19 @@ func NewRegistry(cfg Config, logger *slog.Logger) (*ServiceRegistry, error) {
 // no-ops — there are no background goroutines or resources owned by the
 // registry itself. If a future service needs background lifecycle management,
 // it should be added to internal/daemon/components.go instead.
+//
+// STATUS (deadcode wave-3): deliberately unwired API surface. The daemon
+// never calls Start/Stop on the registry (boot: daemon.go wires each
+// service's RPC handlers; shutdown: Daemon.Stop runs registry.StopAll for
+// internal/registry components and Components.Stop/stopComponents for the
+// owned subsystems). They are kept as the documented seam where a future
+// registry-owned lifecycle would hook in — not dead code to delete.
 func (r *ServiceRegistry) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop stops all services gracefully. See Start doc for the design rationale
-// on why this is a no-op.
+// Stop stops all services gracefully (intentional no-op, never called —
+// see Start's DESIGN NOTE and STATUS for the rationale).
 func (r *ServiceRegistry) Stop(ctx context.Context) error {
 	slog.Info("Stopping service registry")
 	return nil

@@ -411,8 +411,8 @@ Status values: PENDING | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCK
 | F11 | Bundled AGENT.md | 04-coder-gates.md | (pending) | (pending) | PENDING |
 | F12 | Run gate after mutating turn | 04-coder-gates.md | (pending) | (pending) | PENDING |
 | F13 | Docs line | 04-coder-gates.md | (pending) | (pending) | PENDING |
-| F14 | ToolRetryBreaker tests + impl | 05-verify-breaker.md | (pending) | (pending) | PENDING |
-| F15 | Wire Observe on tool failure | 05-verify-breaker.md | (pending) | (pending) | PENDING |
+| F14 | ToolRetryBreaker tests + impl | 05-verify-breaker.md | e8eb57df | e8eb57df (tests+impl) | VALIDATED |
+| F15 | Wire Observe on tool failure | 05-verify-breaker.md | a8843bed | a8843bed (observeToolBreaker both recall paths + breakers-04 e2e pin; wave-2 unit pin: tool_breaker_loop_test.go) | VALIDATED |
 | ... | +43 more features (expand from leaf task headers at dispatch) | various | (pending) | (pending) | PENDING |
 
 Statuses: PENDING | DELTA | VALIDATED

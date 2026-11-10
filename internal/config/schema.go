@@ -126,6 +126,7 @@ type Config struct {
 	Signal              SignalConfig              `json:"signal"               toml:"signal"`
 	Delegation          DelegationConfig          `json:"delegation,omitzero"  toml:"delegation"`
 	Contact             ContactConfig             `json:"contact,omitzero"     toml:"contact"`
+	Ledger              LedgerConfig              `json:"ledger"               toml:"ledger"`
 }
 
 // GitHubConfig configures the GitHub PR/CI tool set ([github]). Disabled by
@@ -1884,6 +1885,13 @@ type MemoryConfig struct {
 	// candidates directly — no recall, no conflict LLM call. See
 	// ConflictConfig.
 	Conflict ConflictConfig `json:"conflict" toml:"conflict"`
+	// VectorHybrid gates the ShardManager-powered hybrid searcher
+	// (vector.HybridSearcher over the live ShardManager + the manager's FTS
+	// keyword lane) and its memory.search.hybrid RPC surface. Opt-in, default
+	// false (docs/agents/opt-in-defaults.md): when disabled the legacy
+	// Manager.SearchHybrid path is byte-identical and no hybrid searcher is
+	// constructed. See VectorHybridConfig.
+	VectorHybrid VectorHybridConfig `json:"vector_hybrid" toml:"vector_hybrid"`
 	// L0Enabled turns on the raw-conversation L0 tier (tree 01 layered
 	// async distillation): conversation turns are appended to
 	// <memory.data_dir>/l0/YYYY-MM-DD.jsonl and distilled asynchronously
@@ -2145,7 +2153,24 @@ type PersonalityConfig struct {
 	UpdateIntervalConversations int  `json:"update_interval_conversations" toml:"update_interval_conversations"`
 }
 
-// EmbeddingConfig holds vector embedding settings for semantic memory search.
+// VectorHybridConfig gates the ShardManager-powered hybrid search surface
+// (memory.vector_hybrid, plan docs/plans/2026-06-07-sharded-vector-memory.md
+// "Wire ShardManager for hybrid search"). Enabled=false (the default) keeps
+// the legacy Manager.SearchHybrid path byte-identical and constructs nothing.
+type VectorHybridConfig struct {
+	// Enabled constructs the hybrid searcher over the live ShardManager at
+	// daemon startup and registers the memory.search.hybrid RPC handler.
+	// Requires memory.embeddings.enabled (no embedder = no vector lane).
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// Alpha is the vector-vs-keyword weighting (0 = pure keyword, 1 = pure
+	// vector). Values outside [0,1] resolve to the searcher's 0.5 default.
+	Alpha float64 `json:"alpha" toml:"alpha"`
+	// Limit is the default result cap for the RPC surface when the request
+	// omits one.
+	Limit int `json:"limit" toml:"limit"`
+}
+
+// EmbeddingConfig holds vector embedding provider settings.
 type EmbeddingConfig struct {
 	Enabled       bool     `json:"enabled"         toml:"enabled"`
 	Provider      string   `json:"provider"        toml:"provider"` // "openai" or "ollama"
@@ -2276,6 +2301,14 @@ type AgentConfig struct {
 	Queues AgentQueuesConfig `json:"queues" toml:"queues"`
 	// Compaction holds context compaction settings
 	Compaction AgentCompactionConfig `json:"compaction" toml:"compaction"`
+	// AtomicCompaction gates the memory.Compactor (HALO Phase 6 atomic
+	// tool-turn compaction, internal/memory/consolidation_compact.go) in the
+	// L0 distill path: L1 extraction prompts see merged tool+observation
+	// records and a summary turn instead of the raw window. Opt-in, default
+	// false (docs/agents/opt-in-defaults.md) — when disabled the distill
+	// prompt is byte-identical to the pre-wiring behavior and no Compactor is
+	// constructed. See AtomicCompactionConfig.
+	AtomicCompaction AtomicCompactionConfig `json:"atomic_compaction" toml:"atomic_compaction"`
 	// Reflection holds auto-fix reflection loop settings
 	Reflection AgentReflectionConfig `json:"reflection" toml:"reflection"`
 	// Lint holds linting and test runner settings
@@ -2610,6 +2643,21 @@ type AgentCompactionConfig struct {
 	SummaryFormat     string `json:"summary_format"      toml:"summary_format"`
 	TrackFileOps      bool   `json:"track_file_ops"       toml:"track_file_ops"`
 	TimeoutSeconds    int    `json:"timeout_seconds"      toml:"timeout_seconds"`
+}
+
+// AtomicCompactionConfig configures the memory.Compactor (HALO Phase 6
+// atomic tool-turn compaction) when agent.atomic_compaction is enabled. Zero
+// fields resolve to the Compactor's own documented defaults.
+type AtomicCompactionConfig struct {
+	// Enabled wires the Compactor into the L1 distill prompt assembly.
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// MaxTurnsBeforeCompact triggers compaction above this turn count
+	// (Compactor default 50).
+	MaxTurnsBeforeCompact int `json:"max_turns_before_compact" toml:"max_turns_before_compact"`
+	// MaxToolCallsPerTurn caps preserved tool calls per turn (default 10).
+	MaxToolCallsPerTurn int `json:"max_tool_calls_per_turn" toml:"max_tool_calls_per_turn"`
+	// KeepLastNTurns is the never-compacted recent tail (default 10).
+	KeepLastNTurns int `json:"keep_last_n_turns" toml:"keep_last_n_turns"`
 }
 
 // AgentReflectionConfig holds reflection settings for auto-lint/test fixing.
@@ -3530,6 +3578,24 @@ type SelfImproveConfig struct {
 	Sandbox               SandboxConfig   `json:"sandbox"                  toml:"sandbox"`
 	Safety                SafetyConfig    `json:"safety"                   toml:"safety"`
 	Detection             DetectionConfig `json:"detection"                toml:"detection"`
+	// TraceAnalysis gates the HALO RLM trace-analysis activation path
+	// (wave-2 wire): a periodic scheduler job loads the memory trace-store
+	// reader over TraceStorePath, runs the agent.RLMAnalyzer over it, and
+	// surfaces selfimprove.IssueDetector.ScanTraces findings. Opt-in,
+	// default false — enabling it is a product decision
+	// (docs/agents/opt-in-defaults.md posture).
+	TraceAnalysis TraceAnalysisConfig `json:"trace_analysis" toml:"trace_analysis"`
+}
+
+// TraceAnalysisConfig configures the [selfimprove].trace_analysis section.
+type TraceAnalysisConfig struct {
+	// Enabled turns on the periodic trace-analysis scan. Default false.
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// TraceStorePath is the trace JSONL source for memory.LoadTraceStore.
+	// Empty resolves at wiring time to <daemon.data_dir>/traces.jsonl.
+	TraceStorePath string `json:"trace_store_path" toml:"trace_store_path"`
+	// Interval is the scan cadence (cron "@every" duration). Default 6h.
+	Interval time.Duration `json:"interval" toml:"interval"`
 }
 
 // LearningConfig holds LoRA learning pipeline settings.
@@ -4239,6 +4305,15 @@ func DefaultConfig() *Config {
 				TopK:     5,
 				MaxBatch: 20,
 			},
+			// ShardManager hybrid search: opt-in, default false (plan
+			// docs/plans/2026-06-07-sharded-vector-memory.md "Wire
+			// ShardManager for hybrid search" — flipping a default is a
+			// product decision per docs/agents/opt-in-defaults.md).
+			VectorHybrid: VectorHybridConfig{
+				Enabled: false,
+				Alpha:   0.5,
+				Limit:   10,
+			},
 			// L0 raw-conversation tier: DEFAULT-ON per D3 (plan
 			// docs/plans/20261030-memory-second-brain: full default-on, L0
 			// capture + L1 extraction + L2 scenes on every daemon; cost is
@@ -4463,6 +4538,16 @@ func DefaultConfig() *Config {
 					"stateful":  {Parallelism: 1},
 					"exclusive": {Parallelism: 1},
 				},
+			},
+			AtomicCompaction: AtomicCompactionConfig{
+				// HALO Phase 6 atomic tool-turn compaction (plan
+				// docs/plans/2026-07-17-halo-implementation-status.md
+				// priority #1): opt-in, default false
+				// (docs/agents/opt-in-defaults.md).
+				Enabled:               false,
+				MaxTurnsBeforeCompact: 50,
+				MaxToolCallsPerTurn:   10,
+				KeepLastNTurns:        10,
 			},
 		},
 		Security: SecurityConfig{
@@ -4985,6 +5070,7 @@ func DefaultConfig() *Config {
 			MaxConcurrentCalls:   2,
 			MaxCallMinutes:       15,
 			SilencePromptSeconds: 45,
+			FillerGraceMs:        2500,
 			// turn_timeout_seconds is opt-in: default 0 = disabled
 			// (docs/agents/opt-in-defaults.md). The silence timer is
 			// suspended while a voice turn is in flight, so an operator
@@ -4999,6 +5085,10 @@ func DefaultConfig() *Config {
 		Contact: ContactConfig{
 			DefaultChannels: []string{"telnyx_voice", "signal_voice", "signal_msg", "telnyx_sms"},
 			HopDelayMS:      5000,
+		},
+		Ledger: LedgerConfig{
+			AutoRepair:    false,
+			IntervalHours: DefaultLedgerIntervalHours,
 		},
 		ReflectionCollector: ReflectionCollectorConfig{
 			Enabled:              true,
@@ -5140,6 +5230,20 @@ type NotificationsConfig struct {
 	// this flag is checked at the EventEmitter dispatch layer and blocks
 	// every notification regardless of type, priority, or source.
 	DoNotDisturb bool `json:"do_not_disturb,omitempty" toml:"do_not_disturb"`
+
+	// Enabled is the kill-switch for the proactive notification bot
+	// stack (automation plan 2026-06-21 Plans 1.x/3.x):
+	// NotificationBot + CostTracker budget enforcement + push history +
+	// notification preferences + telegram push channel. Default zero
+	// value = OFF (additive opt-in, same posture as [intake]) so a
+	// wiring bug can never break message delivery at boot. The desktop
+	// notification emitter path above does NOT read this flag — it stays
+	// always-on exactly as before. Constructed by
+	// internal/daemon/notification_bot_wiring.go (wireNotificationBot).
+	BotNotifyOn         []string          `json:"bot_notify_on,omitempty"           toml:"bot_notify_on"`
+	BotRateLimitPerHour int               `json:"bot_rate_limit_per_hour,omitempty" toml:"bot_rate_limit_per_hour"`
+	BotTelegramChatIDs  []string          `json:"bot_telegram_chat_ids,omitempty"   toml:"bot_telegram_chat_ids"`
+	BotTemplates        map[string]string `json:"bot_templates,omitempty"           toml:"bot_templates"`
 }
 
 // ResolverConfig configures sandboxed-backend selection for [runtime]. It
@@ -5333,6 +5437,11 @@ type VoiceConfig struct {
 	// empty filler list plus empty greeting disables the greeting).
 	GreetingLine         string   `json:"greeting"               toml:"greeting"`
 	Filler               []string `json:"filler"                 toml:"filler"`
+	// FillerGraceMs is how long a dispatched turn may run before the
+	// talk loop speaks a filler line (dead-air defect 2026-11-10:
+	// filler fired immediately on EVERY prompt, so "give me a second"
+	// preceded fast answers). 0 = speak immediately (legacy).
+	FillerGraceMs        int      `json:"filler_grace_ms"        toml:"filler_grace_ms"`
 	SupervisorEmployee   string   `json:"supervisor_employee"    toml:"supervisor_employee"`
 	SupervisorEnabled    bool     `json:"supervisor_enabled"     toml:"supervisor_enabled"`
 	SupervisorModel      string   `json:"supervisor_model"       toml:"supervisor_model"`
@@ -5428,6 +5537,42 @@ type ContactConfig struct {
 	// HopDelayMS is the wait before each fallback channel attempt
 	// (the chain's pacing; 0 means no inter-channel delay).
 	HopDelayMS int `json:"hop_delay_ms" toml:"hop_delay_ms"`
+}
+
+// LedgerConfig configures the employee ledger ops subsystem ([ledger],
+// plan 20261109-employee-ledger leaf 04-ops/01). It gates the scheduled
+// integrity pass over the ledger store (internal/daemon/ledger_integrity.go):
+// the job runs ledger.VerifyState on IntervalHours and, only when
+// AutoRepair is true, follows a divergent report with RepairState.
+//
+//gendoc:section ledger
+//gendoc:desc Employee ledger integrity job: auto_repair opt-in and the verify interval in hours.
+//gendoc:example [ledger] auto_repair = true, interval_hours = 24
+type LedgerConfig struct {
+	// AutoRepair opts in to automatic RepairState when the integrity
+	// pass finds divergence. Default FALSE (opt-in per
+	// docs/agents/opt-in-defaults.md): a divergent report logs ERROR
+	// and leaves the store untouched unless this is explicitly true.
+	AutoRepair bool `json:"auto_repair" toml:"auto_repair"`
+	// IntervalHours is how often the ledger-integrity scheduler job
+	// fires. Default 168 (weekly) — set in DefaultConfig and clamped
+	// at the load boundary by NormalizeLedgerDefaults. A non-positive
+	// value falls back to the default.
+	IntervalHours int `json:"interval_hours" toml:"interval_hours"`
+}
+
+// DefaultLedgerIntervalHours is the [ledger] verify interval default
+// (168h = weekly; plan 20261109-employee-ledger leaf 04-ops/01).
+const DefaultLedgerIntervalHours = 168
+
+// NormalizeLedgerDefaults clamps invalid [ledger] values to defaults at
+// the load boundary so every consumer sees final values: a non-positive
+// interval_hours falls back to DefaultLedgerIntervalHours. AutoRepair's
+// zero value (false) is the shipped default — no clamping.
+func NormalizeLedgerDefaults(c *LedgerConfig) {
+	if c.IntervalHours <= 0 {
+		c.IntervalHours = DefaultLedgerIntervalHours
+	}
 }
 
 // LocalConfig holds the local voice leg sub-block (voice.local, local-leg

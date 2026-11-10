@@ -202,6 +202,7 @@
       "boundary-hardening"
     ],
     "internal/employee/": [
+      "employee-markdown",
       "goal-completion",
       "goal-loop",
       "goals-plans"
@@ -223,7 +224,8 @@
     ],
     "cmd/meept/": [
       "cli-surface",
-      "skills-refresh-origin"
+      "skills-refresh-origin",
+      "employee-markdown"
     ],
     "cmd/meept-daemon/": [
       "daemon-lifecycle"
@@ -664,6 +666,9 @@
     ],
     "config/skills/": [
       "office-skills"
+    ],
+    "e2e/suites/employee-markdown": [
+      "employee-markdown"
     ]
   },
   "suites": [
@@ -1306,6 +1311,19 @@
       "name": "session-storage",
       "dir": "e2e/suites/session-storage",
       "status": "implemented"
+    },
+    {
+      "name": "employee-markdown",
+      "dir": "e2e/suites/employee-markdown",
+      "status": "implemented",
+      "diff": "M",
+      "scenarios": [
+        "employee-markdown-01 agents validate companion.md accepts a markdown employee definition and reports it valid, naming the id",
+        "employee-markdown-02 agents create companion.md registers the employee (visible in agents list) and persists a constitution whose purpose matches the fixture frontmatter",
+        "employee-markdown-03 the .md frontmatter constitution round-trips unchanged through agents.get (purpose, autonomy_tier= tier_2_propose, constraints.risk_ceiling= low)",
+        "employee-markdown-04 agents update companion <companion_updated.md> adopts the updated file's body as the new prompt, read back over agents.get"
+      ],
+      "note": "RED gate for the employee-markdown tree: an EMPLOYEE.md definition (frontmatter -> employee definition, body -> prompt) flowing through agents validate/create/update to a persisted employee, asserted over the live harness daemon (CLI + agents.get RPC). Fails RED today for the missing-implementation reason - the employeemd parser and the CLI .md dispatch do not exist (readDefinitionFile JSON5-parses the file, so a .md path is rejected); no rigging or assertion bug makes these fail. Goes GREEN when the .md parse + dispatch land."
     }
   ],
   "scenarios": [
@@ -4869,6 +4887,45 @@
         "internal/session/",
         "internal/context/sessionref/",
         "e2e/suites/session-storage"
+      ]
+    },
+    {
+      "id": "employee-markdown-01",
+      "suite": "employee-markdown",
+      "diff": "M",
+      "title": "agents validate accepts an EMPLOYEE.md markdown definition and reports valid, naming the id",
+      "paths": [
+        "cmd/meept/agents_validate.go",
+        "cmd/meept/agents_cmd.go"
+      ]
+    },
+    {
+      "id": "employee-markdown-02",
+      "suite": "employee-markdown",
+      "diff": "M",
+      "title": "agents create companion.md registers a persisted employee (agents list + constitution.purpose via agents.get)",
+      "paths": [
+        "cmd/meept/agents_cmd.go",
+        "internal/employee/constitution.go"
+      ]
+    },
+    {
+      "id": "employee-markdown-03",
+      "suite": "employee-markdown",
+      "diff": "M",
+      "title": "the .md frontmatter constitution round-trips unchanged through agents.get (purpose, autonomy_tier tier_2_propose, constraints.risk_ceiling low)",
+      "paths": [
+        "cmd/meept/agents_cmd.go",
+        "internal/employee/constitution.go"
+      ]
+    },
+    {
+      "id": "employee-markdown-04",
+      "suite": "employee-markdown",
+      "diff": "M",
+      "title": "agents update companion <companion_updated.md> adopts the updated file's body as the new prompt via agents.get",
+      "paths": [
+        "cmd/meept/agents_cmd.go"
       ]
     }
   ]

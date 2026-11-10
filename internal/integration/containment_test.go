@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -546,8 +547,21 @@ func TestSurfacesSeeSameState(t *testing.T) {
 
 	certFile := filepath.Join(dir, "tls-cert.pem")
 	keyFile := filepath.Join(dir, "tls-key.pem")
+	// Bind a pre-picked free port instead of :0: the wave-1 removal of the
+	// production Server.Addr accessor (14e189b0) left no cross-package way
+	// to read the :0-resolved address (TestAddr is a _test.go shim visible
+	// only inside comm/http's own tests), and this suite must not re-add
+	// the accessor. net.Listen(:0)→Close has the usual TOCTOU window but
+	// is the accepted cross-package test pattern; the readiness poll below
+	// still bounds and retries.
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve port: %v", err)
+	}
+	prepicked := l.Addr().String()
+	_ = l.Close()
 	srv := commhttp.NewServer(commhttp.ServerConfig{
-		Addr:            "127.0.0.1:0",
+		Addr:            prepicked,
 		RequireAuth:     false, // test-local parity check, not an auth test
 		RESTEnabled:     true,
 		TLSCertFile:     certFile,
@@ -586,7 +600,7 @@ ready:
 		if time.Now().After(deadline) {
 			t.Fatal("HTTP server did not become ready within 10s")
 		}
-		addr := srv.Addr()
+		addr := prepicked
 		if addr == "" || addr == "127.0.0.1:0" {
 			<-ticker.C
 			continue
