@@ -116,7 +116,7 @@ reshape, bus payloads).
 | 03-plan-cas | REVIEWED | 1 | committed d191cb34; gate hashes stable (8981080c/07573760); stub parity + empty-from-set guard parent-verified |
 | 04-manager-cas-migration | COMPLETE | 1 | committed 3b04d3ef; table+observed-state CAS parent-verified; delta flagged: PruneStalePlans stale-planning no-op -> fold into 06 |
 | 05-goal-transition-fence | REVIEWED | 1 | committed 091cc90b; parent-verified employee pkg green, gate hash stable; Retire dead-code kept (frozen gate calls it) |
-| 06-minor-hygiene | DEFERRED | 0 | open items incl. stale-planning prune disposition — follow-on |
+| 06-minor-hygiene | COMPLETE | 1 | committed 5950547d; cancel cascade via TaskCanceller seam; CHECKs w/ FK-safe rebuild; BRANCH 03 INTEGRATION GREEN (plan/employee/intake/task/daemon/agent) |
 
 ## Integration Test Plan
 
