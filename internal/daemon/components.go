@@ -347,6 +347,14 @@ type Components struct {
 	// processor via distillRouter (see l0_wiring.go).
 	DistillWorker *memory.DistillWorker
 
+	// VectorHybrid is the ShardManager-powered hybrid search surface
+	// (memory.vector_hybrid, plan
+	// docs/plans/2026-06-07-sharded-vector-memory.md). Nil unless
+	// memory.vector_hybrid.enabled is set AND the embeddings stack is
+	// wired — the legacy Manager.SearchHybrid path serves everything
+	// when nil (see vector_hybrid_wiring.go).
+	VectorHybrid *vectorHybridWiring
+
 	// TiersEngine is the memory-tier policy engine (wiring-gap leaf
 	// 03-tierpolicy-daemon T4): constructed AFTER the memory manager
 	// and the persistent queue exist (same AFTER-queue rule as the L0
@@ -602,6 +610,19 @@ type Components struct {
 	// Bot framework
 	BotManager *bot.Manager
 	BotStore   *bot.Store
+
+	// Proactive notification bot stack (automation plan 2026-06-21
+	// Plans 1.x/3.x; deadcode wave-2 WIRE). All nil when
+	// [notifications].enabled is false (the default kill-switch).
+	// Constructed by wireNotificationBot (notification_bot_wiring.go);
+	// NotificationBot is started in Components.Start and stopped in
+	// stopComponents.
+	NotificationBot         *bot.NotificationBot
+	CostTracker             *bot.CostTracker
+	NotificationPrefs       *services.NotificationPreferences
+	NotificationRateLimiter *services.NotificationRateLimiter
+	PushHistory             *services.PushHistory
+	PushChannels            *services.ChannelRegistry
 
 	// Employee framework (AI Employee Design spec). Wraps BotManager with
 	// constitution enforcement, goal loops, and audit semantics. The
@@ -2603,6 +2624,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// channels (HTTP WebSocket, TUI, Telegram, CLI). The HTTPPushChannel
 	// uses the EventEmitter as its notifier bridge.
 	pushRegistry := services.NewChannelRegistry(logger.With("component", "push-channels"))
+	c.PushChannels = pushRegistry
 	if c.NotificationEmitter != nil {
 		httpCh, err := services.NewHTTPPushChannel(
 			pushNotifierAdapter{emitter: c.NotificationEmitter},
@@ -2653,6 +2675,15 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// BotContextImpl implements bot.BotContext interface, exposing PushNotification
 	c.BotContext = services.NewBotContext(c.PushService,
 		logger.With("component", "bot-context"))
+
+	// Proactive notification bot stack (automation plan 2026-06-21
+	// Plans 1.x/3.x; deadcode wave-2 WIRE). Gated on
+	// [notifications].enabled (default false — additive opt-in like
+	// [intake]): disabled means zero new surfaces and the existing
+	// HTTP+Slack push channels above stay byte-identical. Enabled adds
+	// NotificationBot + CostTracker + prefs + push history + the
+	// Telegram push channel ALONGSIDE the existing registrations.
+	wireNotificationBot(c)
 
 	// Start progress synthesizer for tiered agent activity summaries.
 	// Subscribes to all agent events via wildcard and republishes condensed
@@ -2851,6 +2882,22 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// bridges_wiring.go.
 		bridgeChatter := epistemicChatter
 		wireBridges(c.MemoryManager, bridgeChatter, cfg.Memory, cfg.Daemon.DataDir, logger)
+
+		// ShardManager hybrid search (memory.vector_hybrid, plan
+		// docs/plans/2026-06-07-sharded-vector-memory.md "Wire ShardManager
+		// for hybrid search"). Opt-in, default false: nil wiring keeps the
+		// legacy Manager.SearchHybrid path byte-identical. Requires the
+		// embeddings stack (the manager's ShardManager vector adapter).
+		// RPC handler registration happens in daemon.go over svcRegistry —
+		// this site only constructs the searcher.
+		if cfg.Memory.VectorHybrid.Enabled {
+			vh, vhErr := newVectorHybridWiring(c.MemoryManager, cfg.Memory.VectorHybrid.Alpha, logger.With("component", "vector-hybrid"))
+			if vhErr != nil {
+				logger.Warn("vector hybrid search not wired", "error", vhErr)
+			} else {
+				c.VectorHybrid = vh
+			}
+		}
 	}
 
 	// L0 raw-conversation tier (tree 01 L3). Gated on memory.l0_enabled
@@ -3434,7 +3481,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		distillChatter = c.LLMClient
 	}
 	l0c := buildL0Components(c.MemoryManager, l0Enqueuer, cfg.Memory, logger)
-	c.DistillWorker = wireL0Distill(l0c, c.MemoryManager, distillChatter, cfg.Memory, logger)
+	c.DistillWorker = wireL0Distill(l0c, c.MemoryManager, distillChatter, cfg.Memory, cfg.Agent, logger)
 
 	// Memory-tier policy engine (wiring-gap leaf 03-tierpolicy-daemon
 	// T4). Same AFTER-queue placement rule as the L0 wiring above: the
@@ -4968,6 +5015,15 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		}
 	}
 
+	// HALO RLM trace-analysis activation (deadcode wave-2 WIRE): the
+	// memory trace-store reader + agent.RLMAnalyzer +
+	// selfimprove.IssueDetector.ScanTraces path, registered as a periodic
+	// scheduler job. Gated on [selfimprove].trace_analysis.enabled
+	// (default false): disabled = no job, no constructions, byte-identical
+	// boot. Runs after the scheduler exists; must stay before Start (jobs
+	// registered at construction are picked up by Scheduler.Start).
+	c.wireTraceAnalysis(cfg, logger.With("component", "trace-analysis"))
+
 	// Register scheduler tools now that scheduler exists (scheduler is nil at
 	// initial registerBuiltinTools call because it is created after tools).
 	// Tool-provider seam (03-migrate.md T1): the eight schedule_*/cron_create
@@ -6017,6 +6073,14 @@ func (c *Components) Start(ctx context.Context) error {
 		}
 	}
 
+	// Start the proactive notification bot's event loop (Plans 1.x/3.x
+	// wiring; passive no-op when the stack is kill-switched off —
+	// NotificationBot is nil there).
+	startNotificationBot(c, ctx)
+	if c.NotificationBot != nil {
+		startedHandlers = append(startedHandlers, "notification-bot")
+	}
+
 	// Start employee framework (AI Employee Design spec). Prime the
 	// constitution cache and prepare the manager for runtime. The
 	// underlying bot manager is started above; this method only primes
@@ -6944,6 +7008,10 @@ func (c *Components) stopComponents(ctx context.Context) error {
 		c.BotManager.StopAll()
 		c.Logger.Info("Bot framework stopped")
 	}
+
+	// Stop the proactive notification bot's event loop (Plans 1.x/3.x
+	// wiring). Nil-safe: no-op when the stack is kill-switched off.
+	stopNotificationBot(c)
 	if c.BotStore != nil {
 		if err := c.BotStore.Close(); err != nil {
 			c.Logger.Error("Failed to close bot store", "error", err)
