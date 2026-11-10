@@ -659,6 +659,7 @@ Audit scripts in `scripts/`:
 | `verify-gui-connect.sh` | Prove a fresh install's GUI reaches the daemon (config, key, TLS pin, WS upgrade) |
 | `research-harness-lit.py` | Verifies harness-technique catalog evidence and markdown freshness (`make research-harness-check`) |
 | `config-drift-check.py` | Diffs config templates vs the installed `$MEEPT_HOME`; classifies drift via `// drift:` annotations; report-only, exit 1 on unclassified drift |
+| `voice-gap-analyze.py` | Measures voice-playback jitter from `meept voice link --record` `.raw` files: silence gaps >=200 ms per side + both-sides talk-over windows (acceptance evidence for the prefetch/turn-taking fixes) |
 | `release.sh` | Release pipeline (DRY_RUN=1 default): clean-tree gate, stamped sanity build, `goreleaser` snapshot/publish per `.goreleaser.yml` (Dockerfile + SBOM included) |
 
 All analyzers and audit scripts run via `make lint-ci`.
