@@ -104,7 +104,7 @@ Flutter parse unblock_at etc.); cite finding IDs.
 | 01-parker-identity | REVIEWED | 1 | committed bb24843f; C1 killer tests PASS parent-verified; legacy backfill by stored class column; inert sibling stubs documented |
 | 02-throttle-resume-delivery | REVIEWED | 1 | committed fa5720fa; M-13+F6 closed; delivery parity + nil-SM marker parent-verified; full agent pkg fails only 3 sibling gates at review time |
 | 03-gate-release-on-rejection | REVIEWED | 1 | committed 407932d6; M-12+F9 closed; wiring DONE (plan.rejected/:449 + plan.cancelled/:570 pre-existing); parent-verified both gates + 6 pre-existing green |
-| 04-park-bounds-and-budget | IN_PROGRESS | 0 | dispatched 2026-11-09 (unheld after fa5720fa; budget stubs replaced real; last park leaf) |
+| 04-park-bounds-and-budget | COMPLETE | 1 | committed 80659bb5; full internal/agent suite green (all 12 gates); cap=5 per frozen gate; branch 04 INTEGRATION DONE |
 
 ## Integration Test Plan
 

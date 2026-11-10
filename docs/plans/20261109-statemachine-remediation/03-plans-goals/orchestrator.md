@@ -111,9 +111,12 @@ reshape, bus payloads).
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
 | 00T-plan-goal-tests | TESTS_VALIDATED | 1 | committed a59fbc4f (--no-verify RED-by-design); 14 RED tests, parent-verified contract-symbol-only |
-| 05-goal-transition-fence | REVIEWED | 1 | committed 091cc90b; parent-verified employee pkg green, gate hash stable; Retire dead-code kept (frozen gate calls it) |
+| 01-synthesis-reclaimer | DEFERRED | 0 | M-8/M-9 open — lands in follow-on execution (tree docs on main; fresh worktree) |
+| 02-phase-failure-writers | DEFERRED | 0 | M-6 open — follow-on |
 | 03-plan-cas | REVIEWED | 1 | committed d191cb34; gate hashes stable (8981080c/07573760); stub parity + empty-from-set guard parent-verified |
-| 04-manager-cas-migration | IN_PROGRESS | 0 | dispatched 2026-11-09 (TABLE-DRIVEN per C-P4 amendment; manager.go+transitions.go scope) |
+| 04-manager-cas-migration | COMPLETE | 1 | committed 3b04d3ef; table+observed-state CAS parent-verified; delta flagged: PruneStalePlans stale-planning no-op -> fold into 06 |
+| 05-goal-transition-fence | REVIEWED | 1 | committed 091cc90b; parent-verified employee pkg green, gate hash stable; Retire dead-code kept (frozen gate calls it) |
+| 06-minor-hygiene | DEFERRED | 0 | open items incl. stale-planning prune disposition — follow-on |
 
 ## Integration Test Plan
 
