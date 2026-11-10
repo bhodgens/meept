@@ -549,7 +549,7 @@ func TestSetStatusNullDataEnvelope(t *testing.T) {
 	if env.V != 1 || env.Status != string(StatusOpen) || env.Summary != "just opened" {
 		t.Fatalf("envelope drifted: %+v", env)
 	}
-	if len(env.Data) != 0 || string(env.Data) != "null" {
+	if string(env.Data) != "null" {
 		t.Fatalf("envelope data = %s, want JSON null for nil user payload", env.Data)
 	}
 }

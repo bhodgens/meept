@@ -14,12 +14,14 @@ package ledger
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	_ "modernc.org/sqlite" // driver registration (house convention)
 )
@@ -58,25 +60,8 @@ const (
 	StatusWaitingThem Status = "waiting_on_them"
 )
 
-// AllowedTransitions: the legal state machine for subject status.
-//
-//	open            -> done | cancelled | waiting_on_me | waiting_on_them
-//	waiting_on_me   -> open | done | cancelled
-//	waiting_on_them -> open | done | cancelled
-//	done            -> open          (reopen; store logs INFO "ledger reopen")
-//	cancelled       -> open          (reopen; same log)
-//	"" (new subject) -> any
-//
-// NOTE (leaf 01-store/01): the contract sketches this map in
-// transitions.go; the test gate references it at compile time, so it is
-// declared here until leaf 02 lands and relocates it.
-var AllowedTransitions = map[Status][]Status{
-	StatusOpen:        {StatusDone, StatusCancelled, StatusWaitingMe, StatusWaitingThem},
-	StatusWaitingMe:   {StatusOpen, StatusDone, StatusCancelled},
-	StatusWaitingThem: {StatusOpen, StatusDone, StatusCancelled},
-	StatusDone:        {StatusOpen},
-	StatusCancelled:   {StatusOpen},
-}
+// AllowedTransitions and legalTransition live in transitions.go
+// (relocated here by leaf 01-store/02 per the frozen contract).
 
 // Record is one appended, immutable log row. ID is SQLite rowid = the
 // monotonic per-store offset used by Tail.
@@ -125,11 +110,25 @@ var ErrIllegalTransition = errors.New("ledger: illegal status transition")
 var ErrResolveNotFound = errors.New("ledger: resolves references unknown or foreign record")
 
 // errNotImplemented backs the read-path methods whose full semantics
-// land with leaves 02-store/02 (Append transition/state machine,
-// Resolves validation) and 03-query-verify-tail (GetState/QueryOpen/
-// VerifyState/RepairState/Tail). The methods exist so the package
-// builds and §1-§2 run; they fail with a 'ledger:'-prefixed error.
+// land with leaf 01-store/03 (QueryOpen/VerifyState/RepairState/Tail).
+// Append (transitions, Resolves, envelope/state upsert) and GetState are
+// implemented as of leaf 01-store/02. The methods exist so the package
+// builds; they fail with a 'ledger:'-prefixed error.
 var errNotImplemented = errors.New("ledger: not implemented; pending leaves 01-store/02-03")
+
+// payloadEnvelope is the frozen wrapper Append writes into ledger.payload
+// when DraftRecord.SetStatus is set:
+//
+//	{"v":1,"status":"done","summary":"...","data":<user payload or null>}
+//
+// The fold in VerifyState identifies status-carrying rows solely by this
+// envelope; log-only rows store the user payload verbatim.
+type payloadEnvelope struct {
+	V       int             `json:"v"`
+	Status  string          `json:"status"`
+	Summary string          `json:"summary"`
+	Data    json.RawMessage `json:"data"`
+}
 
 // LogQuery filters for QueryLog.
 type LogQuery struct {
@@ -248,14 +247,14 @@ func (s *Store) WithAfterAppend(fn func(rec Record, st *State)) {
 	s.afterAppend = fn
 }
 
-// Append validates kinds/sources, then INSERTs the log row and returns
-// the stored Record.
-//
-// NOTE (leaf 01-store/01 minimal body): transition enforcement
-// (AllowedTransitions + PayloadEnvelope wrapping), Resolves validation,
-// the state upsert, and the afterAppend publish are leaf 02's scope;
-// this body intentionally ignores SetStatus/Summary/Resolves so §1-§2
-// of the gate run while §3+ stay RED until 02 lands.
+// Append validates the DraftRecord, then runs ONE transaction: resolves
+// check, transition check, INSERT ledger row, and (for SetStatus appends)
+// UPSERT of the ledger_state row with as_of = the new rowid. Status-carrying
+// rows store the frozen PayloadEnvelope wrap of the user payload; log-only
+// rows store it verbatim. After COMMIT the afterAppend hook fires exactly
+// once with the stored Record and the resulting *State (nil for log-only
+// appends). Rejected appends write zero rows in both tables and fire zero
+// hooks.
 func (s *Store) Append(ctx context.Context, d DraftRecord) (*Record, error) {
 	if !validKind(d.Kind) {
 		return nil, fmt.Errorf("ledger: invalid kind %q", d.Kind)
@@ -266,12 +265,76 @@ func (s *Store) Append(ctx context.Context, d DraftRecord) (*Record, error) {
 	if d.EmployeeID == "" {
 		return nil, errors.New("ledger: append: employee_id is required")
 	}
+	if d.SetStatus != "" && !validStatus(d.SetStatus) {
+		return nil, fmt.Errorf("ledger: invalid status %q", d.SetStatus)
+	}
 
 	at := s.nowFn().UTC()
-	res, err := s.db.ExecContext(ctx,
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("ledger: append: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }() // no-op after Commit
+
+	// Resolves must reference an existing row of the SAME employee.
+	if d.Resolves != 0 {
+		var found int64
+		if err := tx.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM ledger WHERE id = ? AND employee_id = ?`,
+			d.Resolves, d.EmployeeID).Scan(&found); err != nil {
+			return nil, fmt.Errorf("ledger: append: resolves check: %w", err)
+		}
+		if found == 0 {
+			return nil, fmt.Errorf("%w: id %d by employee %q", ErrResolveNotFound, d.Resolves, d.EmployeeID)
+		}
+	}
+
+	// SetStatus appends: read current status, enforce the state machine,
+	// and wrap the payload in the frozen envelope.
+	var (
+		storedPayload = d.Payload
+		newState      *State
+		reopened      bool
+	)
+	if d.SetStatus != "" {
+		var from Status
+		err := tx.QueryRowContext(ctx,
+			`SELECT status FROM ledger_state WHERE employee_id = ? AND subject = ?`,
+			d.EmployeeID, d.Subject).Scan(&from)
+		if errors.Is(err, sql.ErrNoRows) {
+			from = "" // new subject — always legal
+		} else if err != nil {
+			return nil, fmt.Errorf("ledger: append: read current state: %w", err)
+		}
+		if !legalTransition(from, d.SetStatus) {
+			return nil, fmt.Errorf("%w: employee %q subject %q: %q -> %q",
+				ErrIllegalTransition, d.EmployeeID, d.Subject, from, d.SetStatus)
+		}
+		reopened = (from == StatusDone || from == StatusCancelled) && d.SetStatus == StatusOpen
+
+		data := json.RawMessage(d.Payload)
+		if len(d.Payload) == 0 {
+			// A nil RawMessage marshals as an ABSENT key; the frozen
+			// envelope requires the literal JSON null for no user payload.
+			data = json.RawMessage("null")
+		}
+		wrapped, err := json.Marshal(payloadEnvelope{
+			V:       1,
+			Status:  string(d.SetStatus),
+			Summary: d.Summary,
+			Data:    data,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("ledger: append: encode payload envelope: %w", err)
+		}
+		storedPayload = wrapped
+	}
+
+	res, err := tx.ExecContext(ctx,
 		`INSERT INTO ledger (employee_id, at, kind, subject, payload, source, source_ref, resolves)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		d.EmployeeID, at.Format(time.RFC3339), string(d.Kind), d.Subject, d.Payload,
+		d.EmployeeID, at.Format(time.RFC3339), string(d.Kind), d.Subject, storedPayload,
 		string(d.Source), d.SourceRef, d.Resolves)
 	if err != nil {
 		return nil, fmt.Errorf("ledger: append: %w", err)
@@ -281,22 +344,70 @@ func (s *Store) Append(ctx context.Context, d DraftRecord) (*Record, error) {
 		return nil, fmt.Errorf("ledger: append: last insert id: %w", err)
 	}
 
+	// FTS index row (subject, first 512 bytes of the stored payload) keyed
+	// by the ledger rowid — contentless table, explicit-rowid insert.
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO ledger_fts (rowid, subject, payload_snippet) VALUES (?, ?, ?)`,
+		id, d.Subject, string(truncateUTF8(storedPayload, 512))); err != nil {
+		return nil, fmt.Errorf("ledger: append: fts index: %w", err)
+	}
+
+	if d.SetStatus != "" {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO ledger_state (employee_id, subject, status, summary, updated_at, as_of)
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON CONFLICT(employee_id, subject) DO UPDATE SET
+                 status=excluded.status, summary=excluded.summary,
+                 updated_at=excluded.updated_at, as_of=excluded.as_of`,
+			d.EmployeeID, d.Subject, string(d.SetStatus), d.Summary,
+			at.Format(time.RFC3339), id); err != nil {
+			return nil, fmt.Errorf("ledger: append: upsert state: %w", err)
+		}
+		newState = &State{
+			EmployeeID: d.EmployeeID,
+			Subject:    d.Subject,
+			Status:     d.SetStatus,
+			Summary:    d.Summary,
+			UpdatedAt:  at,
+			AsOf:       id,
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("ledger: append: commit: %w", err)
+	}
+
 	rec := Record{
 		ID:         id,
 		EmployeeID: d.EmployeeID,
 		At:         at,
 		Kind:       d.Kind,
 		Subject:    d.Subject,
-		Payload:    d.Payload,
+		Payload:    storedPayload,
 		Source:     d.Source,
 		SourceRef:  d.SourceRef,
 		Resolves:   d.Resolves,
 	}
 
+	if reopened {
+		s.logger.Info("ledger reopen", "employee_id", d.EmployeeID, "subject", d.Subject, "as_of", id)
+	}
 	if fn := s.hook(); fn != nil {
-		fn(rec, nil)
+		fn(rec, newState)
 	}
 	return &rec, nil
+}
+
+// truncateUTF8 caps b at max bytes, backing off to a UTF-8 rune boundary.
+func truncateUTF8(b []byte, max int) []byte {
+	if len(b) <= max {
+		return b
+	}
+	cut := max
+	for cut > 0 && !utf8.RuneStart(b[cut]) {
+		cut--
+	}
+	return b[:cut]
 }
 
 func (s *Store) hook() func(rec Record, st *State) {
@@ -405,18 +516,48 @@ func scanRecord(rows rowScanner) (Record, error) {
 	return rec, nil
 }
 
+// GetState returns the current-truth row for (employeeID, subject);
+// ok=false with the zero State and nil error when none exists. Leaf
+// 01-store/02 implements the frozen read because its own gate tests
+// (transition rejection "state untouched", envelope/state upsert,
+// log-only "state untouched") assert GetState results; leaf 03 owns no
+// further GetState work.
+func (s *Store) GetState(ctx context.Context, employeeID, subject string) (State, bool, error) {
+	var (
+		st      State
+		status  string
+		at      string
+		summary string
+	)
+	err := s.db.QueryRowContext(ctx,
+		`SELECT employee_id, subject, status, summary, updated_at, as_of
+         FROM ledger_state WHERE employee_id = ? AND subject = ?`,
+		employeeID, subject).Scan(&st.EmployeeID, &st.Subject, &status, &summary, &at, &st.AsOf)
+	if errors.Is(err, sql.ErrNoRows) {
+		return State{}, false, nil
+	}
+	if err != nil {
+		return State{}, false, fmt.Errorf("ledger: get state: %w", err)
+	}
+	parsedAt, err := time.Parse(time.RFC3339, at)
+	if err != nil {
+		// tolerate fractional-second RFC3339Nano rows (raw writers)
+		parsedAt, err = time.Parse(time.RFC3339Nano, at)
+		if err != nil {
+			return State{}, false, fmt.Errorf("ledger: get state: bad updated_at %q: %w", at, err)
+		}
+	}
+	st.Status = Status(status)
+	st.Summary = summary
+	st.UpdatedAt = parsedAt
+	return st, true, nil
+}
+
 // QueryOpen returns state rows with Status not in {done, cancelled} for
 // the employee, newest-updated first. Full implementation is leaf
 // 03-store/03 (query-verify-tail).
 func (s *Store) QueryOpen(ctx context.Context, employeeID string) ([]State, error) {
 	return nil, errNotImplemented
-}
-
-// GetState returns the current-truth row for (employeeID, subject);
-// ok=false with the zero State when none exists. Full implementation is
-// leaf 03-store/03 (query-verify-tail).
-func (s *Store) GetState(ctx context.Context, employeeID, subject string) (State, bool, error) {
-	return State{}, false, errNotImplemented
 }
 
 // Tail yields records with ID > sinceID: catch-up from SQLite, then live
