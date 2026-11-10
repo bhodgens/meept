@@ -103,8 +103,53 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   outbound effects reservation exactly once. `FailOutcome` exists so
   no-answer is distinct from hard failure (leaf 05/11); use it for any
   new terminal-not-failure outcome.
+- The daemon sends a C1 `end` frame (`{"call_id":...,"event":"end",
+  "reason":"<outcome>"}`, `last` OMITTED per the frames contract) as the
+  FIRST sink of `VoiceWiring.releaseCall`, best-effort before the loop
+  drop and ctx cancel: the child's `handleEnd` tears the pipeline down
+  through the frame protocol instead of only noticing socket EOF
+  (audit 2026-11-09 finding 10). A send failure (no child, dead conn)
+  is logged and NEVER blocks or fails the teardown — EOF stays the
+  fallback. Do not move the send behind the loop cancel.
+- Webhook decoupling of the goal hold (audit 2026-11-09 finding 1): the
+  inbound spawn seam (`voice_wiring.go`) must NEVER run `holdPhoneCall`
+  synchronously — `AcquireCallHold` blocks for a full prior goal round,
+  and stalling `HandleCallEvent` pins the carrier webhook handler until
+  Telnyx times the POST out and redelivers an already-answered call. The
+  spawn arms a per-call hold gate (`VoiceEmployeeWiring.gates`,
+  `holdTracker`) and runs hold + `OnCallStart` on a goroutine. The
+  serialization the synchronous hold provided is preserved at the only
+  place it matters: the talk loop's turn runner (`turnRunnerFor`) awaits
+  the gate before the employee's FIRST turn. Fact-free filler/greeting
+  lines MAY play while the gate pends (they read no employee state; the
+  supervisor gate stays the `say` contract). Release ordering is
+  load-bearing: `releaseCall` drops the gate BEFORE the `ReleaseHook`
+  heldCalls peek, so a hold still pending on the mutex at terminal time
+  is torn down by EXACTLY one side — the hook when the hold already
+  registered, the hold goroutine's rollback (re-checked after
+  `AcquireCallHold` AND after `OnCallStart`: `ReleaseForCall` +
+  `OnCallEnd`) when it had not. Both sides ride the same once-guards
+  (heldCalls map delete, binding live check). Keep the rollback
+  re-checks if you touch either path — without them a
+  released-while-pending call parks the employee mutex forever.
+- Deliberate redelivery-storm posture (audit 2026-11-09 finding 11): the
+  webhook handler answers 500 on manager errors so Telnyx redelivers
+  (the mapping choice, leaf 10 Notes, still "500 until observed
+  live"). A redelivered `call.initiated` for a leg already answered can
+  therefore re-enter the spawn seam while the first attempt is live:
+  the registry Acquire fails (`ErrDuplicateTarget`/`ErrBusy` employee
+  already live), the manager hangs the leg up, and Telnyx eventually
+  stops redelivering a call that is answered-then-hung-up. Accepted:
+  no webhook-path dedupe by ccid exists on purpose (a persisted
+  seen-set across restarts would be the only sound version, and the
+  carrier gives no idempotency key). Do not "fix" the storm with a
+  synchronous dedupe on the handler goroutine.
 - `call.answered` for an untracked id is refused; hangup for an unknown
-  id is nil (idempotent teardown). `OnMediaStart` is idempotent.
+  id is nil (idempotent teardown). `OnMediaStart` is ERROR-AWARE
+  idempotent (audit 2026-11-09 finding 4): a registered CLEAN splice
+  stays a no-op on re-send, but a splice that failed with a
+  non-cancellation error re-arms — the next media start re-splices
+  (media reconnect restores audio); the marker dies with releaseOnce.
 - Outbound legs are NEVER AnswerCall'd (404 aborts the session);
   `call.answered` triggers StartStreaming only.
 

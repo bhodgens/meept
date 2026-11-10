@@ -158,7 +158,17 @@ type Deps struct {
 	// MsgPerMinute is [signal].msg_per_minute (the signal_msg throttle;
 	// 0 = msgchannel's default clamp of 3/min).
 	MsgPerMinute int
-	Logger       *slog.Logger
+	// RingingTimeout bounds the no-answer watchdog Place arms for a
+	// placed call (audit 2026-11-09 finding 3, C-V3): CONNECTED never
+	// landing must not hold the registry slot forever. The duration
+	// reuses the PHONE dialer's single config source — the daemon wiring
+	// passes [voice].timeout_secs (the same value the dialer folds into
+	// DialConfig.TimeoutSecs; voice/dial.go NoAnswerSecs), no new knob.
+	// <= 0 resolves to voice.DefaultNoAnswerSecs (the dialer's unset
+	// default). Short values serve as the gate rig's test knob
+	// (leg_gate_test.go T7).
+	RingingTimeout time.Duration
+	Logger         *slog.Logger
 }
 
 // legInbound is the Leg-owned inbound-message router state (leaf 11b's
@@ -188,6 +198,11 @@ type Leg struct {
 	// default clamp); wired at construction, read by MessageAttempt.
 	cfgMsgPerMinute int
 
+	// ringingTimeout is the resolved no-answer watchdog duration
+	// (C-V3): Deps.RingingTimeout or the dialer-parity default
+	// (voice.DefaultNoAnswerSecs). Immutable after construction.
+	ringingTimeout time.Duration
+
 	mu      sync.Mutex
 	calls   map[string]*callState // ccid -> live call state
 	inbound legInbound            // zero-value usable (leaf 11b RouteInbound)
@@ -203,10 +218,22 @@ type callState struct {
 	callID    string // signal-cli call id (events key on it)
 	connected bool
 	ended     bool // teardown latched: End is idempotent past this
-	effectKey string
-	cancel    context.CancelFunc
-	ctx       context.Context // adapter lifetime context (cancel owns it)
-	pair      *voice.AudioPair
+	// terminalLatched (C-V3, finding 3): the first terminal — the ringing
+	// watchdog firing OR a carrier ENDED — claims this state under l.mu.
+	// Every later terminal path checks-and-sets here, so the
+	// FailOutcome(release fan-out) runs exactly once no matter which
+	// racers arrived late (watchdog vs ENDED vs End-with-cancel).
+	terminalLatched bool
+	// ringWatchdogTimer is the armed no-answer timer, owned by the
+	// Place-time arm (C-V3) and stopped/retired by onConnected (CONNECTED
+	// cancels the watchdog) or by the terminal latches. Guarded by l.mu
+	// whenever read/cleared from the event paths; the fire goroutine
+	// re-resolves the state under l.mu and latches before it can fire.
+	ringWatchdogTimer *time.Timer
+	effectKey         string
+	cancel            context.CancelFunc
+	ctx               context.Context // adapter lifetime context (cancel owns it)
+	pair              *voice.AudioPair
 	// socket is the signal-cli socket-audio transport (set by the
 	// daemon wiring once the tunnel helper hands its path over). Nil
 	// degrades to stub audio (the pinned warn-and-continue posture).
@@ -240,8 +267,21 @@ func New(deps Deps) (*Leg, error) {
 		deps:            deps,
 		log:             deps.Logger,
 		cfgMsgPerMinute: deps.MsgPerMinute,
+		ringingTimeout:  resolveRingingTimeout(deps.RingingTimeout),
 		calls:           make(map[string]*callState),
 	}, nil
+}
+
+// resolveRingingTimeout folds the Deps knob onto the dialer-parity
+// default: unset (<= 0) resolves to voice.DefaultNoAnswerSecs, the same
+// value voice.Dialer.NoAnswerSecs applies when config leaves
+// [voice].timeout_secs unset. Single duration source (leaf 05/03
+// review checklist: "Timer duration shared with dialer config").
+func resolveRingingTimeout(d time.Duration) time.Duration {
+	if d <= 0 {
+		return time.Duration(voice.DefaultNoAnswerSecs) * time.Second
+	}
+	return d
 }
 
 // RegisterCallEvents arms the call-event state machine on the signal
@@ -302,18 +342,34 @@ func (l *Leg) stateByCallID(callID string) *callState {
 
 // onConnected arms the talk loop: mark answered, bind the call, emit the
 // open frame, then start the audio adapter goroutines. The child answers
-// the open frame with setup; the daemon wiring's routeFrame arms the
-// talk loop from Registry.Live() and emits the keys line at its existing
+// the open frame with setup; the daemon wiring's routeFrame arms the loop
+// from Registry.Live() and emits the keys line at its existing
 // Tier A site (voice_wiring.go:683-745) - the signal leg REUSES those
 // seams and invents no second protocol.
+//
+// CONNECTED is also the ringing watchdog's cancellation point (C-V3,
+// finding 3): an answered call must never be torn down as no-answer, so
+// the timer is stopped and retired under the SAME lock that sets
+// connected — the fire path re-checks connected under that lock, which
+// makes the check+latch one atomic step (the dial-side finding-9 lesson:
+// never unlock between the re-check and the terminal fire).
 func (l *Leg) onConnected(st *callState) {
 	l.mu.Lock()
 	live := l.calls[st.ccid]
-	if live != nil {
+	proceed := false
+	if live != nil && !live.ended && !live.terminalLatched {
 		live.connected = true
+		if live.ringWatchdogTimer != nil {
+			live.ringWatchdogTimer.Stop()
+			live.ringWatchdogTimer = nil
+		}
+		proceed = true
 	}
 	l.mu.Unlock()
-	if live == nil || live.ended {
+	if !proceed {
+		// End (or the watchdog) already latched the terminal while the
+		// CONNECTED event was in flight: the call is gone, arming the
+		// talk loop on a dead state would resurrect adapters/pair writes.
 		return
 	}
 	// Binding: OnCallStart resolves the ONE session per
@@ -389,14 +445,117 @@ func isNilBinding(b any) bool {
 // distinct from hard failure per leaf 05/11), then leg-local teardown
 // through End (idempotent; the registry release, goal unpark, and
 // binding end ride the wiring's release hook fired by FailOutcome).
+//
+// C-V3 (finding 3): the carrier ENDED claims the terminal through the
+// same latch as the ringing watchdog — a late/duplicate ENDED after the
+// watchdog already tore the call down is a no-op (exactly one terminal
+// fan-out per call, gate-pinned: leg_gate_test.go T7).
 func (l *Leg) onEnded(st *callState, reason string) {
 	outcome := OutcomeByReason(reason)
+	if !l.claimTerminal(st.ccid, false) {
+		l.log.Debug("signalleg: late ENDED ignored (terminal already latched)",
+			"ccid", st.ccid, "reason", reason)
+		return
+	}
 	if err := l.End(st.ccid); err != nil {
 		l.log.Warn("signalleg: end on ENDED event", "ccid", st.ccid, "err", err)
 		return
 	}
 	l.deps.Manager.FailOutcome(st.ccid, outcome, "signal call ended: "+reason)
 	l.log.Info("signalleg: call ended", "ccid", st.ccid, "reason", reason, "outcome", string(outcome))
+}
+
+// claimTerminal atomically claims the first terminal for ccid (C-V3):
+// the live state must still be present, not ended, and un-latched. On a
+// successful claim the ringing watchdog is stopped and retired under the
+// same lock, so no fire path can decide mid-race against this claim
+// (finding-9 lesson from the dial side: the check, the latch, and the
+// timer cancellation are ONE atomic step — never unlocked between them).
+//
+// refuseIfConnected is true ONLY for the watchdog fire (a CONNECTED call
+// is answered — no_answer must never land on it); the carrier ENDED
+// claims normally-connected calls too (CONNECTED-then-ENDED is the happy
+// hangup path, TestStateMachineEndedBusy).
+func (l *Leg) claimTerminal(ccid string, refuseIfConnected bool) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	st, ok := l.calls[ccid]
+	if !ok || st.ended || st.terminalLatched || (refuseIfConnected && st.connected) {
+		return false
+	}
+	st.terminalLatched = true
+	if st.ringWatchdogTimer != nil {
+		st.ringWatchdogTimer.Stop()
+		st.ringWatchdogTimer = nil
+	}
+	return true
+}
+
+// armRingingWatchdog arms the bounded no-answer timer for a freshly
+// placed call (C-V3, finding 3 — the signal-leg mirror of the phone
+// dialer's armNoAnswerTimer, voice/dial.go:473). On fire with CONNECTED
+// never having landed: FailOutcome(OutcomeNoAnswer) through the manager
+// — which fires the release hook once, and the hook carries the registry
+// Release, goal unpark, and binding end (the wiring's releaseCall) —
+// plus the leg-local teardown through End (the same abandon/teardown
+// ordering the ENDED path uses).
+//
+// Cancellation points: CONNECTED (onConnected stops+retires the timer
+// atomically under l.mu) and any claimed terminal (claimTerminal / End).
+// Timer duration: Deps.RingingTimeout from the daemon wiring — the
+// phone dialer's [voice].timeout_secs, one config source (leaf
+// review checklist: "no new knob"); <= 0 resolves to
+// voice.DefaultNoAnswerSecs, the dialer's own unset default.
+func (l *Leg) armRingingWatchdog(st *callState) {
+	timeout := l.ringingTimeout
+	if timeout <= 0 {
+		timeout = resolveRingingTimeout(0)
+	}
+	ccid := st.ccid
+	timer := time.AfterFunc(timeout, func() { l.fireRingingWatchdog(ccid, timeout) })
+	l.mu.Lock()
+	live, ok := l.calls[ccid]
+	switch {
+	case !ok, live.ended, live.terminalLatched:
+		// Already gone or already terminal between the arm site and
+		// here (a fast ENDED beat the arm): stop the timer, never store.
+		l.mu.Unlock()
+		timer.Stop()
+		return
+	case live.connected:
+		// CONNECTED landed between StartCall and this arm — the dialer
+		// hits the same shape (F-2: answered before the arm site) and
+		// skips arming entirely.
+		l.mu.Unlock()
+		timer.Stop()
+		return
+	}
+	live.ringWatchdogTimer = timer
+	l.mu.Unlock()
+}
+
+// fireRingingWatchdog is the timer's fire path: re-resolve the state
+// under l.mu, latch the terminal (no-op when CONNECTED or any other
+// terminal beat the fire), then run the teardown + FailOutcome OUTSIDE
+// the lock (releaseOnce and the release hook take manager/registry
+// locks; l.mu must not be held across them). The check+latch is atomic
+// under l.mu, so an answered call can never be torn down as no-answer.
+func (l *Leg) fireRingingWatchdog(ccid string, timeout time.Duration) {
+	if !l.claimTerminal(ccid, true) {
+		return
+	}
+	l.log.Info("signalleg: ringing watchdog fired (no CONNECTED)",
+		"ccid", ccid, "timeout", timeout.String())
+	// Leg-local teardown FIRST, mirroring the ENDED path (onEnded) and
+	// the local-leg terminal ordering: End cancels the adapter ctx (which
+	// unblocks any audio pump holding on socket EOF — T4's backstop) and
+	// closes the pair; the reservation stays Complete (the ring happened
+	// — StartCall landed before the arm, dialer parity).
+	if err := l.End(ccid); err != nil {
+		l.log.Warn("signalleg: end on ringing watchdog", "ccid", ccid, "err", err)
+	}
+	l.deps.Manager.FailOutcome(ccid, voice.OutcomeNoAnswer,
+		fmt.Sprintf("signal: no answer within %s", timeout.String()))
 }
 
 // OutcomeByReason maps a signal-cli ENDED reason onto a voice.Outcome.
@@ -551,6 +710,12 @@ func (l *Leg) Place(ctx context.Context, employeeID, targetUUID, firstLine strin
 	l.mu.Lock()
 	st.callID = callID
 	l.mu.Unlock()
+	// -- 11. ringing watchdog (C-V3, finding 3): armed AFTER StartCall
+	// succeeded — the ring happened (the reservation stays Complete;
+	// the dialer arms at the same point, dial.go:369). CONNECTED cancels
+	// it; a fire without CONNECTED = FailOutcome(no_answer) + teardown
+	// (the release hook carries the registry Release).
+	l.armRingingWatchdog(st)
 	l.log.Info("signalleg: outbound call placed", "ccid", ccid, "target", target,
 		"employee_id", employeeID, "call_id", callID)
 	return ccid, nil
@@ -634,6 +799,15 @@ func (l *Leg) End(ccid string) error {
 	st, ok := l.calls[ccid]
 	if ok {
 		delete(l.calls, ccid)
+		// Latch under the lock (the ended flag is read under it by
+		// onConnected/claimTerminal; a post-delete unlocked write races
+		// them under -race). A still-pending ringing watchdog is retired
+		// here too — the call is gone, the timer must never fire.
+		st.ended = true
+		if st.ringWatchdogTimer != nil {
+			st.ringWatchdogTimer.Stop()
+			st.ringWatchdogTimer = nil
+		}
 	}
 	l.mu.Unlock()
 	if !ok {
@@ -644,7 +818,6 @@ func (l *Leg) End(ccid string) error {
 		}
 		return nil
 	}
-	st.ended = true
 	// An outbound reservation whose call ended BEFORE its StartCall
 	// completed is abandoned here (a connected-and-completed call keeps
 	// its Complete from Place). st.callID == "" means StartCall never

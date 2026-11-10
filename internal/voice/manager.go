@@ -72,6 +72,13 @@ type Manager struct {
 	// the M3 no-retention posture.
 	doneTomb map[string]chan struct{}
 	release  func(ccid string, outcome Outcome)
+	// spliceErrored marks ccids whose LAST OnMediaStart splice failed with
+	// a non-cancellation error (audit 2026-11-09 voice finding 4): the
+	// next media start for a marked id re-splices instead of hitting the
+	// idempotent no-op. Guarded by mu; dropped on a clean splice result
+	// and by releaseOnce with the rest of the per-call state (bounded:
+	// at most one bool per live ccid).
+	spliceErrored map[string]bool
 
 	// answerMu guards answerHook. The hook is the answered-notification
 	// seam (audit 2026-11-06 H1): the daemon wiring registers the dialer's
@@ -92,13 +99,14 @@ func NewManager(cfg ManagerConfig, tel telnyx.CallController, spawn SessionSpawn
 		cfg.Codec.SamplingRate = telnyx.DefaultCodec.SamplingRate
 	}
 	return &Manager{
-		cfg:      cfg,
-		tel:      tel,
-		spawn:    spawn,
-		calls:    make(map[string]context.CancelFunc),
-		stream:   make(map[string]context.CancelFunc),
-		outbound: make(map[string]struct{}),
-		done:     make(map[string]chan struct{}),
+		cfg:           cfg,
+		tel:           tel,
+		spawn:         spawn,
+		calls:         make(map[string]context.CancelFunc),
+		stream:        make(map[string]context.CancelFunc),
+		outbound:      make(map[string]struct{}),
+		done:          make(map[string]chan struct{}),
+		spliceErrored: make(map[string]bool),
 	}
 }
 
@@ -169,6 +177,7 @@ func (m *Manager) releaseOnce(ccid string) (callCancel, streamCancel context.Can
 	delete(m.calls, ccid)
 	streamCancel, hadStream := m.stream[ccid]
 	delete(m.stream, ccid)
+	delete(m.spliceErrored, ccid) // re-splice marker dies with the call (finding 4)
 	_, wasOutbound := m.outbound[ccid]
 	delete(m.outbound, ccid)
 
@@ -314,21 +323,57 @@ func (m *Manager) HandleCallEvent(ctx context.Context, ev telnyx.CallEvent) erro
 }
 
 // OnMediaStart registers the media session for ccid and runs dial (the
-// per-call bridge runner) under a live per-call context. The first start for
-// an id wins; a second start for the same id is a no-op so a Telnyx re-send
-// or a duplicated frame cannot spawn two bridges on one socket. The
-// registered cancel is what a later hangup invokes to tear the bridge down.
+// per-call bridge runner) under a live per-call context. The first start
+// for an id wins; a later start for the same id is an idempotent no-op so
+// a Telnyx re-send or a duplicated frame cannot spawn two bridges on one
+// socket — UNLESS the prior splice FAILED with a non-cancellation error
+// (audit 2026-11-09 voice finding 4): a dead first bridge must not block
+// the reconnect splice forever, so an errored (non-canceled) splice result
+// is tracked per ccid and the next media start re-runs dial. A clean
+// success keeps the strict no-op (error-aware, never count-aware — the
+// review checklist pins that a legitimate duplicate after a CLEAN end
+// must NOT re-splice). The registered cancel is what a later hangup
+// invokes to tear the bridge down; the splice-error marker is dropped by
+// releaseOnce (bounded: exactly one bool per live ccid, same lifetime as
+// the stream entry).
 func (m *Manager) OnMediaStart(ccid string, dial func(context.Context) error) error {
 	m.mu.Lock()
-	if _, ok := m.stream[ccid]; ok {
+	_, registered := m.stream[ccid]
+	priorErrored := m.spliceErrored[ccid]
+	if registered && !priorErrored {
 		m.mu.Unlock()
-		return nil // already registered: idempotent
+		return nil // clean prior splice registered: idempotent
 	}
 	callCtx, cancel := context.WithCancel(context.Background())
+	if m.stream == nil {
+		m.stream = make(map[string]context.CancelFunc)
+	}
+	staleCancel := m.stream[ccid] // the dead bridge's cancel, only set on a re-splice
 	m.stream[ccid] = cancel
 	m.mu.Unlock()
+	if staleCancel != nil {
+		// Release the abandoned context (its dial already returned an
+		// error, so nothing observes it — this only drops the leak).
+		staleCancel()
+	}
 
-	return dial(callCtx)
+	err := dial(callCtx)
+
+	m.mu.Lock()
+	if err != nil && !errors.Is(err, context.Canceled) {
+		// Non-cancellation splice failure: arm the ccid for re-splice.
+		// A cancellation is teardown (hangup), not a dead bridge — the
+		// release path already removed (or is removing) the entry, so
+		// the clean-idempotent posture stays.
+		if m.spliceErrored == nil {
+			m.spliceErrored = make(map[string]bool)
+		}
+		m.spliceErrored[ccid] = true
+	} else {
+		delete(m.spliceErrored, ccid)
+	}
+	m.mu.Unlock()
+	return err
 }
 
 // IsOutbound reports whether ccid is a leg WE dialed (registered by

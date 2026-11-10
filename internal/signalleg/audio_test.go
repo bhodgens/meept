@@ -528,7 +528,12 @@ func newTestLeg(t *testing.T, allow func(string) bool) (*Leg, *fakeEffects, *fak
 		Allowlist:  allow,
 		Effects:    fx,
 		Audit:      audit,
-		Logger:     discardLog(),
+		// Short ringing watchdog (C-V3 gate knob, leg_gate_test.go T7):
+		// well under the gate's 2s poll, and far above the milliseconds
+		// the event-driven tests take between Place and their terminal
+		// assertion, so no test's call times out mid-scenario.
+		RingingTimeout: time.Second,
+		Logger:         discardLog(),
 	})
 	if lerr != nil {
 		t.Fatalf("New: %v", lerr)
