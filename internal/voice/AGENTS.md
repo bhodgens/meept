@@ -62,6 +62,14 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   bytes on macOS). Production paths live under `$MEEPT_HOME` and are
   fine; e2e sandboxes shorten the test process TMPDIR for this (leaf
   15). Do not move the socket dir deeper without re-checking the limit.
+- The voice LINK monitor tap (link.go LinkOpenOptions.Monitor) creates
+  two extra unix listeners beside the pair sockets
+  (`<dir>/<link id>.mon-a` / `.mon-b`) and tees each pump direction
+  NON-BLOCKING: no attached client, a lagging client, or a dead tap
+  conn only ever DROPS tap bytes (250 ms write deadline, latest-batch-
+  wins channel) - monitor traffic NEVER stalls or gates the bridge.
+  The derived path is length-checked at create against a 100-byte cap
+  (ErrLinkMonitorPathTooLong) since link ids ride to the sun_path edge.
 
 ## Media splice: reorder, pacing, barge-in
 

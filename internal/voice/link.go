@@ -23,6 +23,12 @@ package voice
 //     frame, or registry change.
 //   - Close ends both calls (LocalLeg.End, idempotent), cancels the pump
 //     ctx, and closes the four dialed conns.
+//   - Optional audible monitor (Open opts.Monitor): two extra unix
+//     listeners <pair dir>/<link id>.mon-a / .mon-b carry a NON-BLOCKING
+//     tee of each pump direction so the operator's CLI can play BOTH
+//     employees through speakers. The tap drops bytes whenever no
+//     client is attached or a tap write fails - monitor traffic NEVER
+//     stalls or gates the bridge itself.
 //
 // Deliberate link-mode notes (pinned here, not accidents):
 //
@@ -65,12 +71,31 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/caimlas/meept/pkg/id"
 )
+
+// maxMonitorSocketPathLen bounds a monitor socket path's byte length.
+// Unix sockaddr_un sun_path is 103 usable bytes on macOS (socket.go C2
+// note); the monitor suffix is checked at CREATE time and a longer path
+// is the named ErrLinkMonitorPathTooLong refusal (zero side effects:
+// no listener is created, both legs are unwound).
+const maxMonitorSocketPathLen = 100
+
+// ErrLinkMonitorPathTooLong is the named Monitor refusal when the
+// derived monitor socket path (<pair dir>/<link id>.mon-a|.mon-b) would
+// overflow the kernel sun_path limit.
+var ErrLinkMonitorPathTooLong = errors.New("voice: voice link: monitor socket path exceeds the unix sun_path limit")
+
+// monitorWriteDeadline bounds one tap write. A monitor client that
+// stops draining must NEVER stall the bridge: the write fails at the
+// deadline and the tap drops permanently (logged once).
+const monitorWriteDeadline = 250 * time.Millisecond
 
 // ErrLinkSameEmployee is the named up-front refusal when both sides name
 // the same employee: the registry's one-live-call-per-employee rule
@@ -99,6 +124,18 @@ const (
 type LinkLegOpener interface {
 	Open(ctx context.Context, employeeID, label string, voiceOverride ...string) (LocalCall, error)
 	End(ccid, reason string) error
+}
+
+// LinkOpenOptions tunes one Open. Zero value = the pre-monitor shape
+// (byte-compatible: the Open variadic keeps old callers compiling).
+type LinkOpenOptions struct {
+	// Monitor stands up two unix listeners (one per side) that carry a
+	// NON-BLOCKING tee of each direction's PCM to the operator's
+	// speakers. The listener paths derive from the pair-socket dir:
+	// <dir>/<linkID>.mon-a / .mon-b. A monitor client is OPTIONAL:
+	// nothing ever stalls the bridge waiting for one, and tap bytes are
+	// dropped while no client is attached or after a tap write error.
+	Monitor bool
 }
 
 // LinkTranscriptReader is the call-store seam for per-side turn counts.
@@ -141,6 +178,9 @@ type LinkStatusResult struct {
 
 // linkEntry is the manager's per-link state. Conns and ctx are set once
 // at Open; mu (the manager's) guards the ended flag and retention clock.
+// monA/monB are the optional monitor listeners (nil when Monitor=false);
+// the tapA/tapB writers read the accepted conn through each listener's
+// own mutex, never the manager's.
 type linkEntry struct {
 	id         string
 	aCall      LocalCall
@@ -156,15 +196,161 @@ type linkEntry struct {
 	ended      bool
 	endedAt    time.Time
 	closeConns sync.Once
+	monA       *monitorListener // tee sink for the a->b direction
+	monB       *monitorListener // tee sink for the b->a direction
+}
+
+// tapA/tapB hand the pump the tee sink for one direction. A nil
+// listener (Monitor off) yields a nil tap, which pumpStream skips
+// entirely - the zero-monitor path stays the plain io.Copy it always
+// was.
+func (e *linkEntry) tapA() *monitorTap {
+	if e.monA == nil {
+		return nil
+	}
+	return &monitorTap{ln: e.monA}
+}
+
+func (e *linkEntry) tapB() *monitorTap {
+	if e.monB == nil {
+		return nil
+	}
+	return &monitorTap{ln: e.monB}
+}
+
+// monitorListener is one direction's monitor unix listener: a single
+// accept goroutine stores exactly ONE accepted conn (set-once; a second
+// client is accepted and immediately closed - the pair-socket posture
+// from AudioPair, mirrored). close() is idempotent.
+type monitorListener struct {
+	path string
+	ln   net.Listener
+
+	mu     sync.Mutex
+	conn   net.Conn // set once by the accept goroutine; nil until a client dials
+	closed bool
+}
+
+func newMonitorListener(path string) (*monitorListener, error) {
+	// Stale files from a crashed previous daemon must not wedge Listen
+	// (NewAudioPair's defensive remove, mirrored).
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("voice: voice link: remove stale monitor socket %s: %w", path, err)
+	}
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		return nil, fmt.Errorf("voice: voice link: listen monitor socket %s: %w", path, err)
+	}
+	// Owner-only: the tap carries call audio, the pair sockets' dir-mode
+	// posture applies. A failed chmod is cosmetic (the dir is already
+	// user-owned), not fatal - mirror AudioPair's tolerance.
+	_ = os.Chmod(path, 0o600)
+	ml := &monitorListener{path: path, ln: ln}
+	go func() {
+		conn, acceptErr := ln.Accept()
+		if acceptErr != nil {
+			// Listener closed during teardown: the expected path.
+			return
+		}
+		ml.mu.Lock()
+		if ml.closed || ml.conn != nil {
+			ml.mu.Unlock()
+			_ = conn.Close()
+			return
+		}
+		ml.conn = conn
+		ml.mu.Unlock()
+		// A second client still needs retiring: after the first is
+		// stored, keep accepting ONLY to close extras fast (no backlog
+		// of half-open monitor conns).
+		for {
+			extra, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			_ = extra.Close()
+		}
+	}()
+	return ml, nil
+}
+
+// current returns the accepted conn (nil when no client has dialed).
+func (ml *monitorListener) current() net.Conn {
+	ml.mu.Lock()
+	defer ml.mu.Unlock()
+	return ml.conn
+}
+
+// close tears down the listener + accepted conn and removes the socket
+// file. Idempotent; safe concurrently with the accept goroutine.
+func (ml *monitorListener) close() {
+	ml.mu.Lock()
+	if ml.closed {
+		ml.mu.Unlock()
+		return
+	}
+	ml.closed = true
+	conn := ml.conn
+	ml.conn = nil
+	ln := ml.ln
+	ml.mu.Unlock()
+	if ln != nil {
+		_ = ln.Close()
+	}
+	if conn != nil {
+		_ = conn.Close()
+	}
+	_ = os.Remove(ml.path)
+}
+
+// monitorTap is pumpStream's tee destination for one direction. It is
+// NOT an io.Writer with normal semantics: a Write NEVER returns an error
+// the pump should act on (the bridge must not stall or die over monitor
+// audio). Instead it resolves the accepted conn per write, bounds every
+// write with monitorWriteDeadline, and on ANY failure (no conn yet,
+// deadline, socket error) marks itself dead - later Writes become
+// no-ops, and the drop is logged once by pumpStream's observer. Bytes
+// written before a client dials are simply gone (the monitor is a live
+// tap, not a recorder - the bytes-may-drop contract).
+type monitorTap struct {
+	ln   *monitorListener
+	dead atomic.Bool
+}
+
+func (t *monitorTap) Write(p []byte) (int, error) {
+	if t == nil || t.dead.Load() {
+		return len(p), nil
+	}
+	conn := t.ln.current()
+	if conn == nil {
+		// No monitor client yet: drop silently (attaching is
+		// on-demand; this is not an error state).
+		return len(p), nil
+	}
+	_ = conn.SetWriteDeadline(time.Now().Add(monitorWriteDeadline))
+	n, err := conn.Write(p)
+	if err != nil {
+		// Stale/unread monitor conn: fall back to dropping for the
+		// rest of the link (logged once by the pump).
+		t.dead.Store(true)
+		return n, err
+	}
+	return n, nil
 }
 
 // Link is one live link handle: both ccids plus Close/Status sugar.
+// MonitorAPath/MonitorBPath name the monitor tee sockets when
+// LinkOpenOptions.Monitor was set ("" otherwise); a CLI monitor client
+// dials them like any pair socket. The a->b direction (A's speech into
+// B's mic) rides MonitorAPath; b->a rides MonitorBPath.
 type Link struct {
-	ID        string
-	ACCID     string
-	BCCID     string
-	AEmployee string
-	BEmployee string
+	ID           string
+	ACCID        string
+	BCCID        string
+	AEmployee    string
+	BEmployee    string
+	MonitorAPath string
+	MonitorBPath string
 
 	mgr *LinkManager
 }
@@ -235,7 +421,17 @@ func (m *LinkManager) dialUnix(ctx context.Context, path string) (net.Conn, erro
 // effects before each): empty ids -> same employee. Every later failure
 // unwinds fully (dialed conns closed, opened legs ended) so a partial
 // link never leaks a live call.
-func (m *LinkManager) Open(ctx context.Context, employeeA, employeeB string) (*Link, error) {
+//
+// opts (variadic; first entry only) carries LinkOpenOptions. With
+// Monitor=true the bridge additionally stands up two unix listeners in
+// the pair-socket dir and tees each pump direction's PCM into them
+// (see monitorTap below). The variadic keeps every pre-monitor caller
+// byte-compatible.
+func (m *LinkManager) Open(ctx context.Context, employeeA, employeeB string, opts ...LinkOpenOptions) (*Link, error) {
+	var option LinkOpenOptions
+	if len(opts) > 0 {
+		option = opts[0]
+	}
 	if employeeA == "" || employeeB == "" {
 		return nil, fmt.Errorf("%w: both employee ids are required", ErrNoEmployee)
 	}
@@ -263,15 +459,44 @@ func (m *LinkManager) Open(ctx context.Context, employeeA, employeeB string) (*L
 		return nil, fmt.Errorf("voice: voice link: open side b (%s): %w", employeeB, err)
 	}
 
+	// Monitor listeners BEFORE dialing (the pair dir comes from the
+	// opened legs; both legs share SocketDir so either OutPath works).
+	// A sun_path overflow refuses here with ZERO side effects beyond the
+	// two legs, which the shared unwind below ends.
+	var monA, monB *monitorListener
+	var monAPath, monBPath string
+	if option.Monitor {
+		dir := filepath.Dir(aCall.OutPath)
+		monAPath = filepath.Join(dir, linkID+".mon-a")
+		monBPath = filepath.Join(dir, linkID+".mon-b")
+		if len(monAPath) > maxMonitorSocketPathLen || len(monBPath) > maxMonitorSocketPathLen {
+			m.unwindBoth(aCall, bCall, "link: monitor path too long")
+			return nil, fmt.Errorf("%w: %s", ErrLinkMonitorPathTooLong, monAPath)
+		}
+		var lerr error
+		monA, lerr = newMonitorListener(monAPath)
+		if lerr != nil {
+			m.unwindBoth(aCall, bCall, "link: monitor listen failed")
+			return nil, fmt.Errorf("voice: voice link: %w", lerr)
+		}
+		monB, lerr = newMonitorListener(monBPath)
+		if lerr != nil {
+			monA.close()
+			m.unwindBoth(aCall, bCall, "link: monitor listen failed")
+			return nil, fmt.Errorf("voice: voice link: %w", lerr)
+		}
+	}
+
 	conns, derr := m.dialAll(ctx, aCall, bCall)
 	if derr != nil {
 		m.closeConns(conns)
-		if endErr := m.deps.Leg.End(aCall.CallID, "link: dial failed"); endErr != nil {
-			m.log.Debug("voice: link unwind: end side a on dial failure", "ccid", aCall.CallID, "err", endErr)
+		if monA != nil {
+			monA.close()
 		}
-		if endErr := m.deps.Leg.End(bCall.CallID, "link: dial failed"); endErr != nil {
-			m.log.Debug("voice: link unwind: end side b on dial failure", "ccid", bCall.CallID, "err", endErr)
+		if monB != nil {
+			monB.close()
 		}
+		m.unwindBoth(aCall, bCall, "link: dial failed")
 		return nil, fmt.Errorf("voice: voice link: %w", derr)
 	}
 
@@ -287,18 +512,23 @@ func (m *LinkManager) Open(ctx context.Context, employeeA, employeeB string) (*L
 		bMic:      conns[2],
 		bSpk:      conns[3],
 		cancel:    pumpCancel,
+		monA:      monA,
+		monB:      monB,
 	}
 	// CROSS-connect, byte-exact: A's speaker -> B's mic, B's speaker ->
 	// A's mic. io.Copy is the whole contract (no re-chunking: the daemon
 	// already paces each leg's outbound at one 640 B chunk per 20 ms).
+	// The monitor tap (nil when Monitor=false) copies every byte the
+	// pump moves, non-blocking: a slow or absent monitor client only
+	// ever loses tap bytes, never bridge bytes.
 	entry.pumps.Add(2)
 	go func() {
 		defer entry.pumps.Done()
-		m.pumpStream(pumpCtx, entry.aSpk, entry.bMic, linkID, "a->b")
+		m.pumpStream(pumpCtx, entry.aSpk, entry.bMic, linkID, "a->b", entry.tapA())
 	}()
 	go func() {
 		defer entry.pumps.Done()
-		m.pumpStream(pumpCtx, entry.bSpk, entry.aMic, linkID, "b->a")
+		m.pumpStream(pumpCtx, entry.bSpk, entry.aMic, linkID, "b->a", entry.tapB())
 	}()
 
 	m.mu.Lock()
@@ -308,15 +538,29 @@ func (m *LinkManager) Open(ctx context.Context, employeeA, employeeB string) (*L
 
 	m.log.Info("voice: link open", "link_id", linkID,
 		"a_ccid", aCall.CallID, "b_ccid", bCall.CallID,
-		"a_employee", employeeA, "b_employee", employeeB)
+		"a_employee", employeeA, "b_employee", employeeB,
+		"monitor", option.Monitor)
 	return &Link{
-		ID:        linkID,
-		ACCID:     aCall.CallID,
-		BCCID:     bCall.CallID,
-		AEmployee: employeeA,
-		BEmployee: employeeB,
-		mgr:       m,
+		ID:           linkID,
+		ACCID:        aCall.CallID,
+		BCCID:        bCall.CallID,
+		AEmployee:    employeeA,
+		BEmployee:    employeeB,
+		MonitorAPath: monAPath,
+		MonitorBPath: monBPath,
+		mgr:          m,
 	}, nil
+}
+
+// unwindBoth ends both legs with the same reason (each End is
+// idempotent; a failure on one never masks the other - debug-logged).
+func (m *LinkManager) unwindBoth(aCall, bCall LocalCall, reason string) {
+	if endErr := m.deps.Leg.End(aCall.CallID, reason); endErr != nil {
+		m.log.Debug("voice: link unwind: end side a", "ccid", aCall.CallID, "err", endErr)
+	}
+	if endErr := m.deps.Leg.End(bCall.CallID, reason); endErr != nil {
+		m.log.Debug("voice: link unwind: end side b", "ccid", bCall.CallID, "err", endErr)
+	}
 }
 
 // dialAll dials the four client pair sockets in a fixed order:
@@ -358,7 +602,15 @@ func (m *LinkManager) closeConns(conns [4]net.Conn) {
 // FIRST byte at INFO (the moment a direction demonstrably carries PCM)
 // and its end with the total bytes copied, so the next live link run
 // self-explains which direction died and when.
-func (m *LinkManager) pumpStream(ctx context.Context, src, dst net.Conn, linkID, direction string) {
+//
+// tee (optional, nil = no monitor) is the monitor tap: every byte read
+// from src is copied into it through a separate writer goroutine fed by
+// a capacity-1 channel (latest-batch-wins when the tap lags), so a
+// stalled monitor client can never slow or stall the io.Copy - the
+// bridge's byte-exact contract is untouched by the tap. A tap write
+// error marks the tap dead (drop for the rest of the link, logged
+// once). Monitor bytes NEVER gate link correctness.
+func (m *LinkManager) pumpStream(ctx context.Context, src, dst net.Conn, linkID, direction string, tee *monitorTap) {
 	var bytes atomic.Uint64
 	var firstOnce sync.Once
 	started := time.Now()
@@ -368,11 +620,68 @@ func (m *LinkManager) pumpStream(ctx context.Context, src, dst net.Conn, linkID,
 				"dir", direction, "after_ms", time.Since(started).Milliseconds())
 		})
 	}}
+
+	var (
+		teeDone  chan struct{}
+		teeBatch chan []byte
+		teeStop  chan struct{}
+		teeDrop  atomic.Uint64
+	)
+	if tee != nil {
+		teeBatch = make(chan []byte, 1)
+		teeDone = make(chan struct{})
+		teeStop = make(chan struct{})
+		cs.onTee = func(p []byte) {
+			// Copy first: the buffer belongs to io.Copy's read loop and
+			// is reused on the next read.
+			cp := make([]byte, len(p))
+			copy(cp, p)
+			select {
+			case teeBatch <- cp:
+			default:
+				// Tap writer is behind: drop THIS batch (live-tap
+				// semantics, never block the bridge).
+				teeDrop.Add(1)
+			}
+		}
+		go func() {
+			defer close(teeDone)
+			for {
+				select {
+				case batch := <-teeBatch:
+					if _, err := tee.Write(batch); err != nil {
+						// First (and only) tap socket death: log once,
+						// the tap self-disarms to drops afterwards.
+						m.log.Info("voice: link monitor tap dropped", "link_id", linkID,
+							"dir", direction, "err", err)
+					}
+				case <-teeStop:
+					// Pump finished (EOF, socket error, or teardown):
+					// drain whatever already queued best-effort - each
+					// tap Write is deadline-bounded, so this never
+					// hangs the pump's exit.
+					for {
+						select {
+						case batch := <-teeBatch:
+							_, _ = tee.Write(batch)
+						default:
+							return
+						}
+					}
+				}
+			}
+		}()
+	}
+
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		_, err := io.Copy(dst, cs)
 		copied := bytes.Load()
+		if teeDrop.Load() > 0 {
+			m.log.Debug("voice: link monitor tap drops", "link_id", linkID,
+				"dir", direction, "drops", teeDrop.Load())
+		}
 		if err != nil && ctx.Err() == nil {
 			// A real mid-stream break while the link is supposed to be
 			// live. Copy stops either way; the legs stay up (their own
@@ -391,15 +700,23 @@ func (m *LinkManager) pumpStream(ctx context.Context, src, dst net.Conn, linkID,
 		_ = dst.Close()
 		<-done
 	}
+	if teeStop != nil {
+		// Pump is finished: stop the tap writer (it drains the last
+		// queued batch), then join it before returning.
+		close(teeStop)
+		<-teeDone
+	}
 	_ = started
 }
 
 // countingSrc is an io.Reader wrapper that counts bytes and fires onFirst
-// the first time it hands out a non-empty read.
+// the first time it hands out a non-empty read. onTee (optional) mirrors
+// every non-empty read to the monitor tap.
 type countingSrc struct {
 	src     io.Reader
 	n       *atomic.Uint64
 	onFirst func()
+	onTee   func([]byte)
 }
 
 func (c *countingSrc) Read(p []byte) (int, error) {
@@ -407,6 +724,9 @@ func (c *countingSrc) Read(p []byte) (int, error) {
 	if n > 0 {
 		c.n.Add(uint64(n))
 		c.onFirst()
+		if c.onTee != nil {
+			c.onTee(p[:n])
+		}
 	}
 	return n, err
 }
@@ -433,10 +753,19 @@ func (m *LinkManager) Close(linkID, reason string) error {
 	// Teardown OUTSIDE the lock (repo rule: no I/O under mutex). Order
 	// mirrors a client hangup: kill the pumps + conns first so nothing
 	// writes into a closing pair, then End the legs (idempotent; the
-	// FailOutcome fan-out owns registry/binding/childproc release).
+	// FailOutcome fan-out owns registry/binding/childproc release). The
+	// monitor listeners + tapped conns go last: closing them while a
+	// pump still drains its tee channel only drops bytes (the tap is
+	// non-gating by contract).
 	entry.cancel()
 	entry.closeConns.Do(func() {
 		m.closeConns([4]net.Conn{entry.aMic, entry.aSpk, entry.bMic, entry.bSpk})
+		if entry.monA != nil {
+			entry.monA.close()
+		}
+		if entry.monB != nil {
+			entry.monB.close()
+		}
 	})
 	if err := m.deps.Leg.End(aCCID, reason); err != nil {
 		m.log.Debug("voice: link close: end side a", "ccid", aCCID, "err", err)
@@ -524,6 +853,12 @@ func (m *LinkManager) LiveLinks() []Link {
 			BEmployee: entry.bEmployee,
 			mgr:       m,
 		})
+		if entry.monA != nil {
+			out[len(out)-1].MonitorAPath = entry.monA.path
+		}
+		if entry.monB != nil {
+			out[len(out)-1].MonitorBPath = entry.monB.path
+		}
 	}
 	return out
 }

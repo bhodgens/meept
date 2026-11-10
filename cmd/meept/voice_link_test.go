@@ -133,3 +133,55 @@ func TestVoiceLinkAcceptanceGate(t *testing.T) {
 		t.Fatalf("both sides >= 2 must pass: %v", err)
 	}
 }
+
+// TestVoiceLinkMonitorFlag pins the --monitor surface: flag exists with
+// default false, the parse lands on linkFlags.monitor, and the open
+// result mirrors the daemon's a_mon_path/b_mon_path wire keys.
+func TestVoiceLinkMonitorFlag(t *testing.T) {
+	cmd := newVoiceLinkCmd()
+	mon, err := cmd.Flags().GetBool("monitor")
+	if err != nil {
+		t.Fatalf("monitor flag not registered: %v", err)
+	}
+	if mon {
+		t.Fatal("--monitor default = true, want false (opt-in tap)")
+	}
+
+	// Parse through the command surface: --monitor flips the flag value.
+	cmd.SetArgs([]string{"--a", "x", "--b", "x", "--monitor"})
+	_ = cmd.Execute() // same-employee refuses early (no daemon); the flag parse already happened
+	mon, err = cmd.Flags().GetBool("monitor")
+	if err != nil || !mon {
+		t.Fatalf("--monitor parse = %v (err %v), want true", mon, err)
+	}
+
+	// linkFlags carries the knob; validate() never rejects it (pure
+	// pass-through - the monitor flag has no constraints of its own).
+	f := linkFlags{a: "companion", b: "secretary", seconds: 60, monitor: true}
+	if err := f.validate(); err != nil {
+		t.Fatalf("validate with monitor = %v, want nil", err)
+	}
+}
+
+// TestVoiceLinkOpenResultMonitorPaths pins the CLI mirror of the
+// monitor-augmented voice.link.open shape: fields parse, and an
+// envelope WITHOUT them (an old daemon / non-monitor open) leaves them
+// empty.
+func TestVoiceLinkOpenResultMonitorPaths(t *testing.T) {
+	withMon := `{"link_id":"link-1","a_ccid":"local-1","b_ccid":"local-2","a_mon_path":"/s/link-1.mon-a","b_mon_path":"/s/link-1.mon-b"}`
+	var o voiceLinkOpenResult
+	if err := json.Unmarshal([]byte(withMon), &o); err != nil {
+		t.Fatalf("unmarshal monitor open result: %v", err)
+	}
+	if o.MonitorAPath != "/s/link-1.mon-a" || o.MonitorBPath != "/s/link-1.mon-b" {
+		t.Fatalf("monitor paths = %q/%q", o.MonitorAPath, o.MonitorBPath)
+	}
+	without := `{"link_id":"link-2","a_ccid":"local-3","b_ccid":"local-4"}`
+	var o2 voiceLinkOpenResult
+	if err := json.Unmarshal([]byte(without), &o2); err != nil {
+		t.Fatalf("unmarshal legacy open result: %v", err)
+	}
+	if o2.MonitorAPath != "" || o2.MonitorBPath != "" {
+		t.Fatalf("legacy shape leaked monitor paths: %+v", o2)
+	}
+}

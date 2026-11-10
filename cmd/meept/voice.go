@@ -719,6 +719,7 @@ type linkFlags struct {
 	a       string
 	b       string
 	seconds int
+	monitor bool
 }
 
 // validate reports the flag errors the leaf pins: --a / --b required,
@@ -744,6 +745,7 @@ func newVoiceLinkCmd() *cobra.Command {
 		a       string
 		b       string
 		seconds int
+		monitor bool
 	)
 
 	cmd := &cobra.Command{
@@ -758,10 +760,15 @@ the link at --seconds, prints both transcripts, and exits 0 only when
 BOTH sides logged at least 2 assistant turns - so the command doubles as
 the automated acceptance check for the dead-air / jitter harness.
 
+--monitor additionally plays BOTH employees' spoken audio through the
+operator's speakers (listen-only tap; the mic stays off - the operator
+hears the conversation without joining it).
+
 Examples:
-  meept voice link --a companion --b secretary --seconds 90`,
+  meept voice link --a companion --b secretary --seconds 90
+  meept voice link --a companion --b secretary --monitor --seconds 60`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			f := linkFlags{a: a, b: b, seconds: seconds}
+			f := linkFlags{a: a, b: b, seconds: seconds, monitor: monitor}
 			if err := f.validate(); err != nil {
 				return err
 			}
@@ -772,14 +779,17 @@ Examples:
 	cmd.Flags().StringVar(&a, "a", "", "employee id for side A (required)")
 	cmd.Flags().StringVar(&b, "b", "", "employee id for side B (required, must differ from --a)")
 	cmd.Flags().IntVar(&seconds, "seconds", 60, "link duration in seconds (must be > 0)")
+	cmd.Flags().BoolVar(&monitor, "monitor", false, "play both sides' audio through the operator's speakers (listen-only tap)")
 	return cmd
 }
 
 // voiceLinkOpenResult mirrors the voice.link.open wire shape.
 type voiceLinkOpenResult struct {
-	LinkID string `json:"link_id"`
-	ACCID  string `json:"a_ccid"`
-	BCCID  string `json:"b_ccid"`
+	LinkID       string `json:"link_id"`
+	ACCID        string `json:"a_ccid"`
+	BCCID        string `json:"b_ccid"`
+	MonitorAPath string `json:"a_mon_path"`
+	MonitorBPath string `json:"b_mon_path"`
 }
 
 // voiceLinkSideStatus mirrors one voice.link.status side row.
@@ -817,6 +827,7 @@ func runVoiceLink(f linkFlags) error {
 	raw, err := client.Call("voice.link.open", map[string]any{
 		"employee_a": f.a,
 		"employee_b": f.b,
+		"monitor":    f.monitor,
 	})
 	if err != nil {
 		return fmt.Errorf("voice.link.open: %w", err)
@@ -830,6 +841,17 @@ func runVoiceLink(f linkFlags) error {
 	}
 	fmt.Printf("link %s open: a=%s(%s) b=%s(%s), %ds\n",
 		open.LinkID, f.a, open.ACCID, f.b, open.BCCID, f.seconds)
+
+	// Audible monitor: dial the daemon's tap sockets and play BOTH
+	// directions through the operator's speakers (listen-only - nothing
+	// is ever written back, the .in mic side stays untouched). Best-
+	// effort by contract: a dial failure only costs the speaker tap,
+	// never the link run.
+	if f.monitor {
+		startVoiceLinkMonitor(open, f.a, f.b)
+	} else if open.MonitorAPath != "" {
+		fmt.Println("note: daemon returned monitor tap paths but --monitor was not set; ignoring them")
+	}
 
 	// SIGINT ends the poll early; the close below still runs, so the
 	// daemon's release fan-out fires exactly once per leg.
@@ -907,6 +929,68 @@ linkLoop:
 	}
 	fmt.Printf("link verified: both employees exchanged >=%d assistant turns.\n", linkRequiredAssistantTurns)
 	return nil
+}
+
+// startVoiceLinkMonitor dials the daemon's monitor tap sockets and plays
+// BOTH sides' audio through the operator's speakers (listen-only: the
+// tap sockets carry tee PCM out of the bridge; nothing is ever written
+// back - the operator does not join the conversation). Each side gets
+// its OWN OtoPlayer + SpeakerSink + drainLiveSpeaker loop, reusing the
+// live-local machinery: two oto instances overlap safely in oto's mixer
+// (the player.go overlap contract - Play never pauses predecessors), so
+// A and B audible streams mix together.
+//
+// Best-effort by contract: a dial failure disables that side with a
+// warning, never aborts the link run; the loops die on socket EOF when
+// the link closes (tap conns close with the bridge's teardown).
+func startVoiceLinkMonitor(open voiceLinkOpenResult, aEmp, bEmp string) {
+	dialSide := func(label, emp, path string) {
+		if path == "" {
+			fmt.Fprintf(os.Stderr, "monitor %s: daemon returned no tap path (speakers off for that side)\n", label)
+			return
+		}
+		conn, err := net.Dial("unix", path)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "monitor %s: dial %s: %v (speakers off for that side)\n", label, path, err)
+			return
+		}
+		fmt.Printf("monitor %s: tapping %s via speakers\n", label, emp)
+		player := voice.NewOtoPlayer()
+		sink := voice.NewSpeakerSink(player, 0)
+		done := make(chan error, 1)
+		// First-byte announcement: the operator sees the side start to
+		// speak exactly when tee audio lands (not at dial time).
+		go drainLiveSpeaker(&monitorFirstByteReader{r: conn, label: label, emp: emp}, sink, done)
+		go func() {
+			// The drain loop exits on socket EOF/error once the daemon
+			// closes the tap; release the audio device on the way out.
+			<-done
+			_ = conn.Close() //nolint:errcheck // teardown
+			_ = sink.Close()
+		}()
+	}
+	dialSide("a", aEmp, open.MonitorAPath)
+	dialSide("b", bEmp, open.MonitorBPath)
+}
+
+// monitorFirstByteReader announces a side's speech once when tee audio
+// first lands on the monitor socket ("[a companion] speaking"), then
+// passes every read through untouched. One instance per side; the drain
+// loop is its only reader, so no lock is needed.
+type monitorFirstByteReader struct {
+	r         io.Reader
+	label     string
+	emp       string
+	announced bool
+}
+
+func (m *monitorFirstByteReader) Read(p []byte) (int, error) {
+	n, err := m.r.Read(p)
+	if n > 0 && !m.announced {
+		m.announced = true
+		fmt.Printf("[%s %s] speaking\n", m.label, m.emp)
+	}
+	return n, err
 }
 
 // callVoiceLinkStatus issues one voice.link.status round-trip.

@@ -53,11 +53,20 @@ type linkFakeLeg struct {
 	// non-existent socket file -> the bridge's dial fails mid-way and
 	// the unwind must clean up everything.
 	badOutPathFor string
+	// barePaths records Opens + returns pair paths WITHOUT standing up
+	// listeners (for the monitor path-limit test: a dir too long for
+	// sun_path must still let both legs "open" so the guard, which
+	// runs before dialAll, is what fires).
+	barePaths bool
 }
 
 func newLinkFakeLeg(t *testing.T) *linkFakeLeg {
 	t.Helper()
-	dir := filepath.Join(shortDir(t), "linkpairs")
+	return newLinkFakeLegWithDir(t, filepath.Join(shortDir(t), "linkpairs"))
+}
+
+func newLinkFakeLegWithDir(t *testing.T, dir string) *linkFakeLeg {
+	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("pairs dir: %v", err)
 	}
@@ -86,6 +95,13 @@ func (f *linkFakeLeg) Open(_ context.Context, employeeID, label string, _ ...str
 	f.opens = append(f.opens, employeeID+"|"+label)
 	f.seq++
 	ccid := fmt.Sprintf("local-link%04d", f.seq)
+	if f.barePaths {
+		return LocalCall{
+			CallID:  ccid,
+			InPath:  filepath.Join(f.dir, ccid+".c.in"),
+			OutPath: filepath.Join(f.dir, ccid+".c.out"),
+		}, nil
+	}
 	if f.failOpenN > 0 && len(f.opens) == f.failOpenN {
 		return LocalCall{}, f.openErr
 	}
@@ -750,5 +766,219 @@ func TestLinkConcurrentLabelsAreDistinct(t *testing.T) {
 	}
 	if l1.ID == l2.ID {
 		t.Fatal("link ids collided")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Monitor tap (audible speaker tap): Monitor=true stands up two unix
+// listeners in the pair dir and tees each pump direction's bytes. Pinned:
+// both directions carry the driven PCM to dialed monitor clients; no
+// stall / no error when no client is attached (late dialer gets LIVE
+// bytes, old ones may drop - the bytes-may-drop contract); teardown
+// removes the socket files; a sun_path overflow refuses with the named
+// error and unwinds both legs.
+// ---------------------------------------------------------------------------
+
+// monitorDial dials one tap path with a bounded retry (the listener
+// exists before Open returns, so one dial normally succeeds instantly)
+// and waits until the bridge's accept goroutine has STORED the conn -
+// without that wait the first tee batch could race the accept and drop
+// (the bytes-may-drop contract makes that legal, so assertions that
+// demand exact bytes must pin attachment first).
+func monitorDial(t *testing.T, m *LinkManager, linkID, path string, sideA bool) net.Conn {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		c, err := net.Dial("unix", path)
+		if err == nil {
+			t.Cleanup(func() { _ = c.Close() })
+			waitMonitorStored(t, m, linkID, sideA)
+			return c
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("dial monitor socket %s: %v", path, err)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// waitMonitorStored polls the link entry's monitor listener until the
+// accepted conn is stored (same-package test access; the manager mutex
+// guards the map, the listener mutex guards the conn).
+func waitMonitorStored(t *testing.T, m *LinkManager, linkID string, sideA bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		m.mu.Lock()
+		entry := m.links[linkID]
+		var ml *monitorListener
+		if entry != nil {
+			if sideA {
+				ml = entry.monA
+			} else {
+				ml = entry.monB
+			}
+		}
+		m.mu.Unlock()
+		if ml != nil && ml.current() != nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("monitor tap conn never stored for %s (sideA=%v)", linkID, sideA)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+func TestLinkMonitorTeesBothDirections(t *testing.T) {
+	leg := newLinkFakeLeg(t)
+	m := newLinkTestManager(t, leg, &linkFakeStore{calls: map[string][]TranscriptLine{}})
+	link, err := m.Open(context.Background(), "alice", "bob", LinkOpenOptions{Monitor: true})
+	if err != nil {
+		t.Fatalf("Open(monitor): %v", err)
+	}
+	t.Cleanup(func() { _ = m.Close(link.ID, "test teardown") })
+	if link.MonitorAPath == "" || link.MonitorBPath == "" {
+		t.Fatalf("monitor paths empty: %+v", link)
+	}
+
+	// The tap socket files live in the pair dir with the .mon-a/.mon-b
+	// suffix beside the link id.
+	if filepath.Dir(link.MonitorAPath) != leg.dir ||
+		!strings.HasSuffix(link.MonitorAPath, ".mon-a") ||
+		!strings.HasSuffix(link.MonitorBPath, ".mon-b") ||
+		!strings.Contains(filepath.Base(link.MonitorAPath), link.ID) {
+		t.Fatalf("monitor paths %q/%q not <pairdir %q>/%s.mon-{a,b}", link.MonitorAPath, link.MonitorBPath, leg.dir, link.ID)
+	}
+
+	aMon := monitorDial(t, m, link.ID, link.MonitorAPath, true)
+	bMon := monitorDial(t, m, link.ID, link.MonitorBPath, false)
+
+	aSpk := leg.accepted(link.ACCID, false)
+	defer aSpk.Close()
+	bSpk := leg.accepted(link.BCCID, false)
+	defer bSpk.Close()
+
+	// A speaks: bytes ride BOTH the bridge (B's mic) and the a->b tap.
+	sentA := linkSpeakerChunks(t, aSpk)
+	gotTapA := linkReadN(t, aMon, len(sentA))
+	if string(gotTapA) != string(sentA) {
+		t.Fatalf("monitor a->b tee corrupted: got %d B, want %d B exact", len(gotTapA), len(sentA))
+	}
+	// B speaks: the b->a tap mirrors.
+	sentB := linkSpeakerChunks(t, bSpk)
+	gotTapB := linkReadN(t, bMon, len(sentB))
+	if string(gotTapB) != string(sentB) {
+		t.Fatalf("monitor b->a tee corrupted: got %d B, want %d B exact", len(gotTapB), len(sentB))
+	}
+
+	// Teardown: Close kills listeners + tapped conns (the monitor client
+	// sees EOF, the socket files vanish).
+	if err := m.Close(link.ID, "test close"); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	_ = aMon.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if _, err := aMon.Read(make([]byte, 1)); err == nil {
+		t.Fatal("monitor a conn still live after Close")
+	}
+	for _, p := range []string{link.MonitorAPath, link.MonitorBPath} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Fatalf("monitor socket %s survived Close (err=%v)", p, err)
+		}
+	}
+}
+
+// TestLinkMonitorNoClientNoStall pins the bytes-may-drop contract: PCM
+// flows across the bridge with NO monitor client attached, the pumps
+// never stall or error, and a late dialer receives live bytes afterwards
+// (the pre-dial bytes are gone - asserted loosely on purpose).
+func TestLinkMonitorNoClientNoStall(t *testing.T) {
+	leg := newLinkFakeLeg(t)
+	m := newLinkTestManager(t, leg, &linkFakeStore{calls: map[string][]TranscriptLine{}})
+	link, err := m.Open(context.Background(), "alice", "bob", LinkOpenOptions{Monitor: true})
+	if err != nil {
+		t.Fatalf("Open(monitor): %v", err)
+	}
+	t.Cleanup(func() { _ = m.Close(link.ID, "test teardown") })
+
+	aSpk := leg.accepted(link.ACCID, false)
+	defer aSpk.Close()
+	bMic := leg.accepted(link.BCCID, true)
+	defer bMic.Close()
+
+	// Drive 20 chunks while nobody listens on the tap socket. The
+	// bridge must stay byte-exact regardless.
+	var sent []byte
+	sent = append(sent, linkSpeakerChunks(t, aSpk)...)
+	sent = append(sent, linkSpeakerChunks(t, aSpk)...)
+	got := linkReadN(t, bMic, len(sent))
+	if string(got) != string(sent) {
+		t.Fatalf("bridge corrupted with no monitor client: got %d B, want %d B", len(got), len(sent))
+	}
+
+	// Late dialer: new speech must reach the tap (pre-dial bytes may be
+	// dropped - no assertion on them).
+	late := monitorDial(t, m, link.ID, link.MonitorAPath, true)
+	sentLate := linkSpeakerChunks(t, aSpk)
+	gotLate := linkReadN(t, late, len(sentLate))
+	if string(gotLate) != string(sentLate) {
+		t.Fatalf("late monitor dialer missed live bytes: got %d B, want %d B exact tail", len(gotLate), len(sentLate))
+	}
+}
+
+// TestLinkMonitorSecondClientRefused pins set-once: after one tap
+// client, a second dialer is accepted-then-closed (the AudioPair
+// posture) while the first keeps its stream.
+func TestLinkMonitorSecondClientRefused(t *testing.T) {
+	leg := newLinkFakeLeg(t)
+	m := newLinkTestManager(t, leg, &linkFakeStore{calls: map[string][]TranscriptLine{}})
+	link, err := m.Open(context.Background(), "alice", "bob", LinkOpenOptions{Monitor: true})
+	if err != nil {
+		t.Fatalf("Open(monitor): %v", err)
+	}
+	t.Cleanup(func() { _ = m.Close(link.ID, "test teardown") })
+
+	first := monitorDial(t, m, link.ID, link.MonitorAPath, true)
+	second := monitorDial(t, m, link.ID, link.MonitorAPath, true)
+	_ = second.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, err := second.Read(make([]byte, 1)); err == nil {
+		t.Fatal("second monitor client kept alive; want immediate close")
+	}
+
+	aSpk := leg.accepted(link.ACCID, false)
+	defer aSpk.Close()
+	sent := linkSpeakerChunks(t, aSpk)
+	got := linkReadN(t, first, len(sent))
+	if string(got) != string(sent) {
+		t.Fatalf("first monitor client lost bytes after a refused second dial")
+	}
+}
+
+// TestLinkMonitorPathTooLong drives the sun_path guard: a pair dir whose
+// prefix sits right at the limit makes the derived .mon-a path overflow,
+// and Open must refuse with the named error AFTER unwinding both legs
+// with zero listeners created.
+func TestLinkMonitorPathTooLong(t *testing.T) {
+	dir := filepath.Join(shortDir(t), strings.Repeat("d", 95)) // dir itself < limit, joined path > 100
+	leg := newLinkFakeLegWithDir(t, dir)
+	leg.barePaths = true // no real sockets: the guard must fire BEFORE any dial
+	m := newLinkTestManager(t, leg, &linkFakeStore{calls: map[string][]TranscriptLine{}})
+	_, err := m.Open(context.Background(), "alice", "bob", LinkOpenOptions{Monitor: true})
+	if !errors.Is(err, ErrLinkMonitorPathTooLong) {
+		t.Fatalf("Open = %v, want ErrLinkMonitorPathTooLong", err)
+	}
+	ends := leg.endSnap()
+	if len(ends) != 2 {
+		t.Fatalf("path refusal unwound %d legs, want 2 (both): %v", len(ends), ends)
+	}
+	// Zero monitor listeners: nothing matching *.mon-* exists in the dir.
+	entries, rerr := os.ReadDir(dir)
+	if rerr != nil {
+		t.Fatalf("readdir: %v", rerr)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".mon-") {
+			t.Fatalf("monitor socket leaked past the path guard: %s", e.Name())
+		}
 	}
 }
