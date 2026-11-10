@@ -98,6 +98,16 @@ var BuiltinRules = map[string]ActionRule{
 	// effects reservation), so the gate class only needs to admit the
 	// action for constitution-granted employees.
 	"voice_call": {Action: "voice_call", RiskLevel: RiskMedium, RequiresConfirmation: false},
+
+	// Employee ledger (plan 20261109-employee-ledger; H7-class gap found
+	// by the caller-authz acceptance matrix): ledger_query reads the
+	// employee's own log/state (ledger_read, RiskSafe, like goal_read);
+	// ledger_append writes immutable rows + guarded state (ledger_write,
+	// RiskLow, like goal_write/memory_write). Without these rows unknown
+	// actions DENY by default and every ledger tool call fails "Unknown
+	// action" despite registration + grant.
+	"ledger_read":  {Action: "ledger_read", RiskLevel: RiskSafe, RequiresConfirmation: false},
+	"ledger_write": {Action: "ledger_write", RiskLevel: RiskLow, RequiresConfirmation: false},
 }
 
 // Dangerous command patterns that elevate shell_execute to HIGH risk.

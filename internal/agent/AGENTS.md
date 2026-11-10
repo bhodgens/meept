@@ -71,6 +71,25 @@ are guarded by `scripts/e2e-naive-user-chat.sh`:
   only a second guard trip (or an errored retry) ships the canned
   line. The handler choke point (`handleChatRequest`) stays
   single-shot — it cannot continue a loop.
+  **Spoken-lane superset (defect A, 2026-11-10):** the text lane
+  DELIBERATELY ships the loop's honesty label
+  (`[unverified: no tools were executed this turn]`,
+  `TestChainStability_NudgeBudgetRecovery`) — readable in chat,
+  garbage read aloud by TTS (recorded leak: the secretary's spoken
+  reply carried the label + evidence-template vocabulary
+  `tool_call_id`/`success=true`/`memory_id`). `SpokenReplyViolation`
+  (voice_spoken_guard.go) is the voice adapter's classifier: the
+  shared shapes PLUS spoken-only markers, with the same one-bounded-
+  rewrite posture (`RunVoiceSpokenRewriteRetry`, canned speakable
+  line on a second trip). The shared detectors stay byte-identical;
+  the seam is `loopTurnRunner.Run` (internal/daemon/voice_employee.go),
+  NOT `RunOnceWithParts` — the chat lane shares that seam and its
+  pinned label-delivery posture must not change. The Validation &
+  Escalation anchor also drops its JSON evidence-format TEMPLATE for
+  zero-tool definitions (`AgentConfig.OmitEvidenceFormatTemplate`,
+  set by the voice persona stamp) — a tools-less employee echoing the
+  template into a spoken reply was the leak's root cause; chat/task
+  anchors ship unchanged.
 - **Prompt scaffolding never renders to the user.** Step descriptions
   carry the strategic planner's session-context injection
   (`strategic.go`: `## Session context ...` block + `## Your Task`

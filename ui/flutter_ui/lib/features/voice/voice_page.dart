@@ -626,7 +626,10 @@ class _VoiceSessionRowTile extends ConsumerWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '${row.employeeId} -> ${row.target}',
+                  // contact-display leaf 03: render the display pair
+                  // (displayTarget falls back to the legacy raw target,
+                  // then 'unknown') — never a client-side number.
+                  '${row.employeeId} -> ${row.displayTarget}',
                   style: CyberpunkTypography.bodySmall.copyWith(
                     color: CyberpunkColors.lightGray,
                   ),

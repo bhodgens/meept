@@ -160,6 +160,11 @@ func TestPinnedGrantedToolsResolve(t *testing.T) {
 		// file_edit/spreadsheet_write/pdf_read/remember (roster grants) and
 		// tool_view (coder grant + platform_read mapping)
 		"file_edit", "spreadsheet_write", "pdf_read", "tool_view",
+		// employee ledger family (plan 20261109-employee-ledger; H7 gap
+		// found by the caller-authz matrix, rows landed 2026-11-10):
+		// daemon-registered via RegisterLedgerTools behind the ledger
+		// store, so the registry enumeration cannot see them.
+		"ledger_append", "ledger_query",
 	}
 	seen := map[string]bool{}
 	for _, name := range pinned {

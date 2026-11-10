@@ -39,8 +39,10 @@ import (
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/auditlog"
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/callerid"
 	commhttp "github.com/caimlas/meept/internal/comm/http"
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/contact"
 	"github.com/caimlas/meept/internal/ledger"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/secrets"
@@ -139,9 +141,31 @@ type VoiceWiring struct {
 	// probe and Stop cleanup).
 	textSocketPath string
 
+	// displayLookup is the contact-display boundary resolver seam
+	// (contact-display tree leaf 01): resolveDisplay keys caller numbers
+	// through it. Wired at construction (leaf 02) from
+	// WireVoiceDeps.ContactDisplayStore via the sqliteDisplayLookup
+	// adapter; nil (no contact store, or store open failed) keeps the
+	// unknown-caller path — the resolver is nil-safe and never panics.
+	// The caller-authz tree (O5) will satisfy the seam structurally with
+	// the store's own LookupByPhone and retire the adapter.
+	displayLookup CallerDisplayLookup
+
+	// displayStore is the contacts.db handle behind displayLookup (leaf
+	// 02). Owned (opened at the components.go voice block, closed at
+	// Stop). nil when unwired.
+	displayStore *contact.SQLiteStore
+
 	// cfg + logger are construction-time values.
 	cfg    config.VoiceConfig
 	logger *slog.Logger
+
+	// caller is the inbound caller-authz resolver slot (caller-authz
+	// leaf 02). Nil resolver reads fail-soft to Info{Number} at the
+	// answer site; components.go arms it with the contact-store resolver
+	// right after BuildContactChain succeeds (the store handle does not
+	// exist at WireVoice time - the chain is built over the live wiring).
+	caller *callerResolverSlot
 
 	// plainOpts configures the optional plain-HTTP loopback listener's
 	// middleware (rate limit + access log parity with the main listener;
@@ -202,6 +226,13 @@ type WireVoiceDeps struct {
 	// OnCallStart brief through the SAME builder the local/phone legs use.
 	// Nil -> the signal leg keeps the empty-brief posture (nil store).
 	DayBriefBuilder func(ctx context.Context, employeeID, number string) (voice.DayBrief, error)
+	// ContactDisplayStore (contact-display leaf 02): the contacts.db
+	// handle the boundary resolver keys caller numbers through. Owned by
+	// the caller (components.go opens it beside the voice block, closes
+	// via the wiring's displayStore reference at Stop). Nil -> the
+	// displayLookup seam stays unwired and every surface renders the
+	// unknown-caller form.
+	ContactDisplayStore *contact.SQLiteStore
 }
 
 // WireVoice constructs the voice stack from cfg. It returns (nil, nil)
@@ -295,6 +326,13 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 	// the later assignment is visible. A nil read degrades to no
 	// ended-state rather than panicking.
 	var phoneHold *VoiceEmployeeWiring
+	// Caller-authz slot (leaf 02): captured by the spawn closure below
+	// (the inbound answer site) and handed to VoiceWiring at construction.
+	// components.go arms the contact-store resolver into it once the
+	// contact chain builds; a call that lands before arming (or with the
+	// contact feature off) resolves fail-soft to Info{Number} — the call
+	// still answers (O1).
+	callerSlot := &callerResolverSlot{}
 	spawn := func(callCtx context.Context, ev telnyx.CallEvent) (context.CancelFunc, error) {
 		if err := child.EnsureRunning(callCtx); err != nil {
 			return nil, err
@@ -310,6 +348,30 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		}
 		if _, err := registry.Acquire(ev.CallControlID, cfg.DefaultEmployee, ev.From); err != nil {
 			return nil, fmt.Errorf("voice wiring: registry acquire: %w", err)
+		}
+		// Caller-authz (leaf 02): resolve the inbound caller ONCE here,
+		// BEFORE holdPhoneCall arms the call row. The 2s budget bounds the
+		// sqlite read; every failure mode (resolver not armed, store error,
+		// expired budget) degrades to fail-soft Info{Number} with a WARN
+		// and the call PROCEEDS — answering is never gated (O1). The
+		// identity rides the registry row (SetCaller) so the setup router
+		// hands the SAME instance (Caller populated) to the talk loop ->
+		// bindingTurnRunner stamps it on every turn ctx. Registry fakes
+		// without the SetCaller lane keep the zero Info (the legal
+		// "unresolved caller" posture; TestBindingTurnRunnerStampsZeroCaller
+		// pins the stamp's behavior there).
+		//
+		// Master Q2: the TURN-STAMP site (bindingTurnRunner) is shared
+		// across legs, but this RESOLVE site is the phone leg's answer.
+		// The signal leg's Instance.Caller stays zero — signal targets are
+		// uuids, and contact resolution over signal_uuid is the flagged
+		// fast-follow; enforcement (step 1c) treats an unresolved caller as
+		// unapproved (O2 posture), never as an open gate.
+		{
+			resolveCtx, resolveCancel := context.WithTimeout(context.Background(), callerResolveBudget)
+			caller := voice.ResolveCallerOrFailSoft(resolveCtx, callerSlot.get(), ev.From, vlog.With("ccid", ev.CallControlID))
+			resolveCancel()
+			registry.SetCaller(ev.CallControlID, caller)
 		}
 		// Goal-hold + call row (ended-state gap): same acquire the local
 		// leg's Hold seam does. Release rides ReleaseHook exactly once;
@@ -357,6 +419,13 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 	if err := os.MkdirAll(config.MeeptPath("voice"), 0o755); err != nil {
 		return nil, fmt.Errorf("voice wiring: voice dir: %w", err)
 	}
+	// Contact-display resolver seam (leaf 02): the components-injected
+	// contacts.db handle adapts through sqliteDisplayLookup (O5 shim)
+	// onto VoiceWiring.displayLookup AND the employee relay's seam, so
+	// every egress surface (ended event, status rows, relay header)
+	// resolves through the SAME boundary. Nil handle -> unwired (unknown-
+	// caller path everywhere, nil-safe).
+	displayLookup := newDisplayLookupSeam(deps.ContactDisplayStore)
 	employee, err := WireVoiceEmployee(VoiceEmployeeDeps{
 		Sessions:      deps.Sessions,
 		LoopManager:   deps.Loops,
@@ -366,6 +435,7 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		Employees:     deps.Employees,
 		CallStorePath: filepath.Join(config.MeeptPath("voice"), "calls.db"),
 		LedgerStore:   deps.LedgerStore,
+		DisplayLookup: displayLookup,
 		BriefLLM:      deps.BriefLLM,
 		Logger:        vlog.With("sub", "employee"),
 	})
@@ -476,8 +546,11 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		bus:            deps.Bus,
 		textSocketPath: textSocketPath,
 		broker:         deps.Broker,
+		displayLookup:  displayLookup,
+		displayStore:   deps.ContactDisplayStore,
 		cfg:            cfg,
 		logger:         vlog,
+		caller:         callerSlot,
 		plainOpts: commhttp.PlainListenerOptions{
 			RateLimitPerMinute: deps.Config.Transport.HTTP.RateLimitRPM,
 			RateLimitBurst:     deps.Config.Transport.HTTP.RateLimitBurst,
@@ -1086,10 +1159,15 @@ func (w *VoiceWiring) sendEndFrame(ccid string, outcome voice.Outcome) {
 }
 
 // publishCallEnded publishes voice.call.ended (typed topic, WS class
-// event, payload {call_id, employee_id, number, direction, outcome,
-// duration_ms}). The registry's live snapshot supplies the identity
-// fields; a released ccid is gone from it, so the payload degrades to
-// call_id + outcome (never an error). Best-effort: a nil bus drops it.
+// event, payload {call_id, employee_id, caller_name, caller_display,
+// direction, outcome, duration_ms}). The registry's live snapshot supplies
+// the identity fields; a released ccid is gone from it, so the payload
+// degrades to call_id + outcome (never an error). Best-effort: a nil bus
+// drops it. DISCLOSURE (contact-display O1/O4): the raw caller number is
+// NEVER published on this egress surface — the boundary resolver renders
+// the contact name (CallerName) plus the operator-safe last-4 display form
+// (CallerDisplay); an unknown or unresolved number still carries at most
+// its last four digits.
 func (w *VoiceWiring) publishCallEnded(ccid string, outcome voice.Outcome) {
 	if w.Employee == nil {
 		return
@@ -1098,7 +1176,9 @@ func (w *VoiceWiring) publishCallEnded(ccid string, outcome voice.Outcome) {
 	for _, inst := range w.Registry.Live() {
 		if inst.CallControlID == ccid {
 			ev.EmployeeID = inst.EmployeeID
-			ev.Number = inst.Target
+			info := w.resolveDisplay(context.Background(), inst.Target)
+			ev.CallerName = info.Name
+			ev.CallerDisplay = info.Display
 			break
 		}
 	}
@@ -1106,17 +1186,25 @@ func (w *VoiceWiring) publishCallEnded(ccid string, outcome voice.Outcome) {
 		bus.PublishT(w.bus, TopicVoiceCallEnded, "voice", ev)
 	}
 	w.logger.Info("voice call ended", "call_id", ccid, "outcome", ev.Outcome,
-		"employee_id", ev.EmployeeID, "number", ev.Number)
+		"employee_id", ev.EmployeeID, "caller_display", ev.CallerDisplay)
 }
 
 // CallEndedEvent is the typed payload of voice.call.ended.
+//
+// DISCLOSURE RULE (contact-display master O1/O4, FROZEN): this payload is
+// an EGRESS surface — it identifies the caller by resolved contact name
+// (CallerName) and the operator-safe last-4 form (CallerDisplay). The raw
+// E.164 number field was REMOVED: no bus/WS/relay consumer routed on it
+// (verified by survey at leaf 02). Nothing beyond a 4-digit tail may ever
+// be added to this shape.
 type CallEndedEvent struct {
-	CallID     string `json:"call_id"`
-	EmployeeID string `json:"employee_id,omitempty"`
-	Number     string `json:"number,omitempty"`
-	Direction  string `json:"direction,omitempty"`
-	Outcome    string `json:"outcome"`
-	DurationMs int64  `json:"duration_ms,omitempty"`
+	CallID        string `json:"call_id"`
+	EmployeeID    string `json:"employee_id,omitempty"`
+	CallerName    string `json:"caller_name"`
+	CallerDisplay string `json:"caller_display"`
+	Direction     string `json:"direction,omitempty"`
+	Outcome       string `json:"outcome"`
+	DurationMs    int64  `json:"duration_ms,omitempty"`
 }
 
 // TopicVoiceCallEnded is the typed voice.call.ended declaration (the
@@ -1322,6 +1410,31 @@ func (w *VoiceWiring) agentIDForTool() builtin.AgentIDFunc {
 	return func(ctx context.Context) string { return agentIDFromContext(ctx) }
 }
 
+// openContactDisplayStore opens the daemon-owned contacts.db handle for
+// the caller-display resolver (components.go voice block, contact-display
+// leaf 02). It reads the SAME database file the contact chain uses
+// (contact_wiring.go's path convention); the store's WAL + busy_timeout
+// pragmas make the concurrent handles safe. Fail-soft by contract: any
+// error logs a WARN and returns nil — the seam stays unwired and every
+// egress surface renders the unknown-caller form (a display nicety must
+// never fail the boot).
+func openContactDisplayStore(logger *slog.Logger) *contact.SQLiteStore {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	baseDir := config.MeeptPath("contact")
+	if err := os.MkdirAll(baseDir, 0o755); err != nil {
+		logger.Warn("caller display: contact store dir unavailable; display resolver unwired", "error", err)
+		return nil
+	}
+	store, err := contact.NewStore(filepath.Join(baseDir, "contacts.db"))
+	if err != nil {
+		logger.Warn("caller display: contact store open failed; display resolver unwired", "error", err)
+		return nil
+	}
+	return store
+}
+
 // Stop tears the stack down in dependency order: child FIRST (it holds the
 // text socket connection), then the text server listener, then the call
 // store. Loop goroutines exit with the daemon lifecycle context. The
@@ -1344,6 +1457,13 @@ func (w *VoiceWiring) Stop(ctx context.Context) {
 	w.TextServer.Close()
 	if err := w.Employee.Close(); err != nil {
 		w.logger.Warn("voice wiring: call store close", "error", err)
+	}
+	if w.displayStore != nil {
+		// Contact-display store (leaf 02): owned via
+		// WireVoiceDeps.ContactDisplayStore (components.go opened it).
+		if err := w.displayStore.Close(); err != nil {
+			w.logger.Warn("voice wiring: display contacts store close", "error", err)
+		}
 	}
 	w.logger.Info("voice wiring: stopped")
 }
@@ -1420,6 +1540,12 @@ func (r bindingTurnRunner) Run(ctx context.Context, _ voice.SessionHandle, promp
 		return "", ctx.Err()
 	}
 	turnCtx := context.WithValue(ctx, employeeIDContextKey{}, r.inst.EmployeeID)
+	// Caller-authz (leaf 02): the caller identity rides EVERY turn ctx
+	// alongside the employee stamp. The stamp is unconditional — a zero
+	// Info is a legal "voice turn, caller unresolved" mark (enforcement
+	// distinguishes stamped-zero from absent; never-stamped is only
+	// possible off the voice path).
+	turnCtx = callerid.With(turnCtx, r.inst.Caller)
 	return r.b.RunTurn(turnCtx, r.inst.CallControlID, prompt)
 }
 
@@ -1462,4 +1588,96 @@ func agentIDFromContext(ctx context.Context) string {
 		return v
 	}
 	return ""
+}
+
+// ---- inbound caller resolution (caller-authz leaf 02) ----
+
+// callerResolveBudget bounds the answer-time identity lookup. Resolution
+// rides the INBOUND ANSWER path but must never delay it: the budget is
+// generous for a local sqlite read and tiny against ringing timeouts, and
+// an expiry degrades to the same fail-soft Info{Number} as any error.
+const callerResolveBudget = 2 * time.Second
+
+// callerResolverSlot is the late-bound resolver seam. The spawn closure
+// (the inbound answer site) is constructed inside WireVoice, BEFORE the
+// contact chain exists (BuildContactChain runs over the live wiring, so
+// the contacts.db handle arrives after WireVoice returns). The slot lets
+// the answer site read the resolver at CALL time — components.go arms it
+// via VoiceWiring.SetCallerResolver — without a pointer-capture-order
+// hazard. A zero slot (never armed) reads fail-soft.
+type callerResolverSlot struct {
+	mu       sync.Mutex
+	resolver voice.CallerResolver
+}
+
+func (s *callerResolverSlot) set(r voice.CallerResolver) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.resolver = r
+}
+
+func (s *callerResolverSlot) get() voice.CallerResolver {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.resolver
+}
+
+// SetCallerResolver arms the inbound caller-authz resolver (components.go
+// calls it after the contact chain builds). Nil-safe on a nil wiring/slot;
+// re-setting replaces the resolver (the daemon arms exactly once at boot).
+func (w *VoiceWiring) SetCallerResolver(r voice.CallerResolver) {
+	if w == nil {
+		return
+	}
+	w.caller.set(r)
+}
+
+// daemonCallerResolver builds the voice.CallerResolver over the contact
+// store (contacts.db is the system of record, decision O2). A nil store is
+// tolerated: the resolver degrades to the fail-soft Number-only Info with a
+// WARN per call (never-wired posture, pinned by the gate).
+func daemonCallerResolver(store *contact.SQLiteStore, logger *slog.Logger) voice.CallerResolver {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &contactCallerResolver{store: store, logger: logger.With("sub", "caller-resolver")}
+}
+
+type contactCallerResolver struct {
+	store  *contact.SQLiteStore
+	logger *slog.Logger
+}
+
+// ResolveCaller implements voice.CallerResolver. Fail-soft by contract:
+// every lookup failure (nil store, db error, expired budget) returns
+// callerid.Info{Number} with a WARN and a NIL error - the answer path has
+// no failure branch to take (decision O1: gate actions, never answering).
+// An unknown number is NOT an error: Known=false, Name="", Approved=false
+// (decision O2), the Number-only Info.
+func (r *contactCallerResolver) ResolveCaller(ctx context.Context, e164 string) (callerid.Info, error) {
+	number := voice.NormalizeE164(e164)
+	info := callerid.Info{Number: number}
+	if r.store == nil {
+		r.logger.Warn("daemon: caller resolver has no contact store; fail-soft unapproved caller")
+		return info, nil
+	}
+	rec, found, err := r.store.LookupByPhone(ctx, number)
+	if err != nil {
+		// Includes the expired/cancelled answer budget: same fail-soft.
+		r.logger.Warn("daemon: caller lookup failed; fail-soft unapproved caller", "err", err)
+		return info, nil
+	}
+	if !found {
+		return info, nil
+	}
+	info.Name = rec.DisplayName
+	info.Approved = rec.VoiceApproved
+	info.Known = true
+	return info, nil
 }

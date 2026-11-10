@@ -5096,8 +5096,12 @@ func DefaultConfig() *Config {
 			ReorderWindowFrames: 10,
 			ReorderGapMs:        60,
 			DefaultLeg:          "phone",
-			Local:               LocalConfig{Enabled: false, BargeInRms: 3000},
-			Messaging:           MessagingConfig{Enabled: false, FromNumber: "", ProfileID: "", DLRWaitSeconds: 30},
+			// O3 (plan 20261110-caller-authz): unapproved callers keep the
+			// message lane + ledger. Fresh slice per call via the helper so
+			// consumers may mutate without aliasing the default.
+			UnapprovedCallerAllowedTools: DefaultUnapprovedCallerAllowedTools(),
+			Local:                        LocalConfig{Enabled: false, BargeInRms: 3000},
+			Messaging:                    MessagingConfig{Enabled: false, FromNumber: "", ProfileID: "", DLRWaitSeconds: 30},
 		},
 		Contact: ContactConfig{
 			DefaultChannels: []string{"telnyx_voice", "signal_voice", "signal_msg", "telnyx_sms"},
@@ -5452,39 +5456,50 @@ type VoiceConfig struct {
 	// GreetingLine is the fact-free line spoken once on call connect.
 	// Empty falls back to Filler[0] (the greeting is filler-class; an
 	// empty filler list plus empty greeting disables the greeting).
-	GreetingLine         string   `json:"greeting"               toml:"greeting"`
-	Filler               []string `json:"filler"                 toml:"filler"`
+	GreetingLine string   `json:"greeting"               toml:"greeting"`
+	Filler       []string `json:"filler"                 toml:"filler"`
 	// FillerGraceMs is how long a dispatched turn may run before the
 	// talk loop speaks a filler line (dead-air defect 2026-11-10:
 	// filler fired immediately on EVERY prompt, so "give me a second"
 	// preceded fast answers). 0 = speak immediately (legacy).
-	FillerGraceMs        int      `json:"filler_grace_ms"        toml:"filler_grace_ms"`
-	SupervisorEmployee   string   `json:"supervisor_employee"    toml:"supervisor_employee"`
-	SupervisorEnabled    bool     `json:"supervisor_enabled"     toml:"supervisor_enabled"`
-	SupervisorModel      string   `json:"supervisor_model"       toml:"supervisor_model"`
-	SupervisorTimeoutMs  int      `json:"supervisor_timeout_ms"  toml:"supervisor_timeout_ms"`
-	VoiceModel           string   `json:"voice_model"            toml:"voice_model"`
-	PublicStreamURL      string   `json:"public_stream_url"      toml:"public_stream_url"`
-	ConnectionID         string   `json:"connection_id"          toml:"connection_id"`
-	FromNumber           string   `json:"from_number"            toml:"from_number"`
-	AllowedNumbers       []string `json:"allowed_numbers"        toml:"allowed_numbers"`
-	TimeoutSecs          int      `json:"timeout_secs"           toml:"timeout_secs"`
-	MaxCallMinutes       int      `json:"max_call_minutes"       toml:"max_call_minutes"`
-	SilencePromptSeconds int      `json:"silence_prompt_seconds" toml:"silence_prompt_seconds"`
-	TurnTimeoutSeconds   int      `json:"turn_timeout_seconds"   toml:"turn_timeout_seconds"`
-	MaxConcurrentCalls   int      `json:"max_concurrent_calls"   toml:"max_concurrent_calls"`
-	ReorderWindowFrames  int      `json:"reorder_window_frames"  toml:"reorder_window_frames"`
-	ReorderGapMs         int      `json:"reorder_gap_ms"         toml:"reorder_gap_ms"`
-	TelnyxPublicKey      string   `json:"telnyx_public_key"      toml:"telnyx_public_key"`
-	ChildBinaryPath      string   `json:"child_binary_path"      toml:"child_binary_path"`
-	LoopbackPlainAddr    string   `json:"loopback_plain_addr"    toml:"loopback_plain_addr"`
-	DefaultEmployee      string   `json:"default_employee"       toml:"default_employee"`
-	DefaultLeg           string   `json:"default_leg"            toml:"default_leg"`
-	TTSModel             string   `json:"tts_model"              toml:"tts_model"`
-	TTSVoice             string   `json:"tts_voice"              toml:"tts_voice"`
-	STTModel             string   `json:"stt_model"              toml:"stt_model"`
-	TTSBaseURL           string   `json:"tts_base_url"           toml:"tts_base_url"`
-	STTBaseURL           string   `json:"stt_base_url"           toml:"stt_base_url"`
+	FillerGraceMs       int      `json:"filler_grace_ms"        toml:"filler_grace_ms"`
+	SupervisorEmployee  string   `json:"supervisor_employee"    toml:"supervisor_employee"`
+	SupervisorEnabled   bool     `json:"supervisor_enabled"     toml:"supervisor_enabled"`
+	SupervisorModel     string   `json:"supervisor_model"       toml:"supervisor_model"`
+	SupervisorTimeoutMs int      `json:"supervisor_timeout_ms"  toml:"supervisor_timeout_ms"`
+	VoiceModel          string   `json:"voice_model"            toml:"voice_model"`
+	PublicStreamURL     string   `json:"public_stream_url"      toml:"public_stream_url"`
+	ConnectionID        string   `json:"connection_id"          toml:"connection_id"`
+	FromNumber          string   `json:"from_number"           toml:"from_number"`
+	AllowedNumbers      []string `json:"allowed_numbers"       toml:"allowed_numbers"`
+	// UnapprovedCallerAllowedTools is the step-1c action gate for
+	// inbound callers NOT voice-approved in contacts.db (plan
+	// 20261110-caller-authz, decision O3): the only tools an unapproved
+	// caller's turn may execute are the message-leaving lane plus the
+	// ledger. Default ["ledger_append", "send_agent_message"] (the REAL
+	// builtin message tool, internal/tools/builtin/agent_message.go);
+	// an explicitly empty list normalizes back to the default at the
+	// load boundary — unknown callers must never ship with zero message
+	// rights. Explicit non-empty lists pass through in user order, no
+	// reordering, no default injection.
+	UnapprovedCallerAllowedTools []string `json:"unapproved_caller_allowed_tools" toml:"unapproved_caller_allowed_tools"`
+	TimeoutSecs                  int      `json:"timeout_secs"           toml:"timeout_secs"`
+	MaxCallMinutes               int      `json:"max_call_minutes"       toml:"max_call_minutes"`
+	SilencePromptSeconds         int      `json:"silence_prompt_seconds" toml:"silence_prompt_seconds"`
+	TurnTimeoutSeconds           int      `json:"turn_timeout_seconds"   toml:"turn_timeout_seconds"`
+	MaxConcurrentCalls           int      `json:"max_concurrent_calls"   toml:"max_concurrent_calls"`
+	ReorderWindowFrames          int      `json:"reorder_window_frames"  toml:"reorder_window_frames"`
+	ReorderGapMs                 int      `json:"reorder_gap_ms"         toml:"reorder_gap_ms"`
+	TelnyxPublicKey              string   `json:"telnyx_public_key"      toml:"telnyx_public_key"`
+	ChildBinaryPath              string   `json:"child_binary_path"      toml:"child_binary_path"`
+	LoopbackPlainAddr            string   `json:"loopback_plain_addr"    toml:"loopback_plain_addr"`
+	DefaultEmployee              string   `json:"default_employee"       toml:"default_employee"`
+	DefaultLeg                   string   `json:"default_leg"            toml:"default_leg"`
+	TTSModel                     string   `json:"tts_model"             toml:"tts_model"`
+	TTSVoice                     string   `json:"tts_voice"             toml:"tts_voice"`
+	STTModel                     string   `json:"stt_model"             toml:"stt_model"`
+	TTSBaseURL                   string   `json:"tts_base_url"          toml:"tts_base_url"`
+	STTBaseURL                   string   `json:"stt_base_url"          toml:"stt_base_url"`
 	// FreshSessionPerCall (opt-in, default false): each voice call opens a
 	// brand-new session instead of reusing the (employee, target) shared
 	// conversation, so turn history never snowballs across calls. The day
@@ -5494,6 +5509,32 @@ type VoiceConfig struct {
 	Local               LocalConfig         `json:"local"                  toml:"local"`
 	EmployeeLeg         []EmployeeLegConfig `json:"employee_leg"   toml:"employee_leg"`
 	Messaging           MessagingConfig     `json:"messaging"              toml:"messaging"`
+}
+
+// DefaultUnapprovedCallerAllowedTools is the [voice]
+// unapproved_caller_allowed_tools default (plan 20261110-caller-authz,
+// decision O3): the message-leaving lane plus the ledger append — the
+// only actions an unapproved inbound caller may take. The tool names are
+// the REAL builtin registry names (internal/tools/builtin/agent_message.go
+// Name() == "send_agent_message", the daemon's message-taking lane wired
+// via builtin.NewSendAgentMessageTool; internal/tools/builtin/ledger.go
+// Name() == "ledger_append"). Returns a fresh slice on every call so
+// consumers may mutate the loaded config freely (DefaultAlwaysFullTools
+// precedent).
+func DefaultUnapprovedCallerAllowedTools() []string {
+	return []string{"ledger_append", "send_agent_message"}
+}
+
+// NormalizeUnapprovedCallerAllowedTools restores the default list when the
+// loaded [voice] block carries an EMPTY unapproved_caller_allowed_tools
+// (master: "normalize at load (empty -> default)"). A nil or explicit
+// `[]` must NOT ship zero message rights to unknown callers. Non-empty
+// user lists pass through untouched, in user order — no reordering, no
+// default injection (review checklist). Idempotent on valid values.
+func NormalizeUnapprovedCallerAllowedTools(v *VoiceConfig) {
+	if len(v.UnapprovedCallerAllowedTools) == 0 {
+		v.UnapprovedCallerAllowedTools = DefaultUnapprovedCallerAllowedTools()
+	}
 }
 
 // MessagingConfig holds the Telnyx SMS messaging settings

@@ -5402,6 +5402,15 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			Employees: c.EmployeeManager,
 			Logger:    logger,
 		}
+		// Contact-display store (contact-display leaf 02): a second
+		// handle on the SAME contacts.db the chain uses (WAL +
+		// busy_timeout make concurrent handles safe;
+		// contact.NewStore's single-writer convention is per-handle).
+		// The voice wiring resolves caller numbers through it at the
+		// egress boundaries (ended event, status rows, relay header).
+		// Fail-soft: an open failure leaves the seam unwired (every
+		// surface renders the unknown-caller form) — never a boot error.
+		vdeps.ContactDisplayStore = openContactDisplayStore(logger)
 		// Ledger brief seams (leaf 03-voice/01): the ONE store built
 		// above plus the prompt-in/text-out adapter over the daemon's
 		// default LLM client (no new HTTP client; the leaf pins the
@@ -5438,12 +5447,20 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		vdeps.SupervisorChatter = voiceSupervisorChatter(c)
 		wiring, err := WireVoice(c.ctx, vdeps)
 		if err != nil {
+			if vdeps.ContactDisplayStore != nil {
+				_ = vdeps.ContactDisplayStore.Close()
+			}
 			logger.Error("FATAL: voice wiring failed", "error", err)
 			return nil, err
 		}
 		if wiring == nil {
 			// Degraded to disabled (missing secrets broker/token): the
 			// daemon boots without voice; every call path stays refused.
+			// Nobody owns the display store the vdeps block opened —
+			// close it here (the wiring's Stop would have).
+			if vdeps.ContactDisplayStore != nil {
+				_ = vdeps.ContactDisplayStore.Close()
+			}
 			c.Voice = nil
 			logger.Warn("voice sidecar disabled: wiring degraded (see voice wiring WARN above)")
 		} else {
@@ -5806,6 +5823,13 @@ func (c *Components) Start(ctx context.Context) error {
 				} else {
 					c.Voice.Contact = chain
 					builtin.SetContactChain(chain)
+					// Caller-authz (leaf 02): arm the inbound caller
+					// resolver over the SAME contacts.db handle the chain
+					// uses (one store, one system of record). Until this
+					// runs (and on a degraded chain), the answer site
+					// resolves fail-soft to Info{Number} — every call still
+					// answers; unresolved = unapproved (O2).
+					c.Voice.SetCallerResolver(daemonCallerResolver(chain.Store, c.Logger))
 				}
 			}
 			names := enabledToolProviderNames(c.Config, []string{"voice"}, c.Logger)
@@ -6175,7 +6199,16 @@ func (c *Components) Start(ctx context.Context) error {
 		// so Checkpoint 1 (constitution gate) fires on the active path.
 		// See docs/superpowers/specs/2026-06-23-ai-employee-design.md (Gap A).
 		if c.SecurityChecker != nil {
-			c.EmployeeManager.RegisterPreExecCheckers(c.SecurityChecker)
+			// Thread the [voice] unapproved_caller_allowed_tools list
+			// (plan 20261110-caller-authz, step 1c / decision O3) into
+			// every employee checker. Nil/empty config list falls back to
+			// the checker's built-in default (message lane preserved).
+			var callerOpts []employee.PreExecOption
+			if c.Config != nil && len(c.Config.Voice.UnapprovedCallerAllowedTools) > 0 {
+				callerOpts = append(callerOpts,
+					employee.WithUnapprovedCallerAllowedTools(c.Config.Voice.UnapprovedCallerAllowedTools))
+			}
+			c.EmployeeManager.RegisterPreExecCheckers(c.SecurityChecker, callerOpts...)
 			c.Logger.Info("Employee pre-exec checkers registered with permission checker")
 		}
 

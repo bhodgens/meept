@@ -410,10 +410,17 @@ func TestVoiceEmployeeNotifyRelayOnRelease(t *testing.T) {
 	if p.SessionID == "" {
 		t.Error("payload session_id is empty")
 	}
-	for _, want := range []string{"caller: please take a message", "reply: I will pass that along", "emp-relay", "+15551230001", "incoming"} {
+	// Updated 2026-11-10 (contact-display leaf 02, owner decision O1/O4):
+	// the push relay is an EGRESS surface — the full number must NOT appear.
+	// With no displayLookup wired in this fixture, the header degrades to
+	// the unknown-caller form carrying only the last-4 tail.
+	for _, want := range []string{"caller: please take a message", "reply: I will pass that along", "emp-relay", "Unknown caller", "incoming"} {
 		if !strings.Contains(p.Text, want) {
 			t.Errorf("payload text %q missing %q", p.Text, want)
 		}
+	}
+	if strings.Contains(p.Text, "+15551234567") {
+		t.Errorf("egress payload leaks the raw number: %q", p.Text)
 	}
 }
 

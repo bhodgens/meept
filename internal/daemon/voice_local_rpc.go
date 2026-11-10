@@ -60,6 +60,12 @@ func voiceLocalSeams(w *VoiceWiring, mgr *employee.Manager, logger *slog.Logger)
 		// employee resolved) come from this one snapshot - deduped by
 		// call id so a local call is never listed twice (leg.Live()
 		// below only fills gaps).
+		//
+		// DISCLOSURE (contact-display leaf 02 §4, O1/O4): phone-leg rows
+		// carry the boundary-resolved display pair; the raw registry
+		// Target is never copied to the wire. Local-leg "local:<label>"
+		// targets have no number, so they pass through verbatim as the
+		// display (O3 identifies them without digits-of-record concerns).
 		if registry != nil {
 			for _, inst := range registry.Live() {
 				legName := inst.Leg
@@ -67,12 +73,14 @@ func voiceLocalSeams(w *VoiceWiring, mgr *employee.Manager, logger *slog.Logger)
 					legName = voice.LegPhone
 				}
 				seen[inst.CallControlID] = true
+				name, display := statusTargetDisplay(w, legName, inst.Target)
 				rows = append(rows, rpc.VoiceCallStatus{
-					CallID:       inst.CallControlID,
-					EmployeeID:   inst.EmployeeID,
-					Target:       inst.Target,
-					SinceRFC3339: "", // the registry carries no start time (C8); the CLI renders "-"
-					Leg:          legName,
+					CallID:        inst.CallControlID,
+					EmployeeID:    inst.EmployeeID,
+					TargetName:    name,
+					TargetDisplay: display,
+					SinceRFC3339:  "", // the registry carries no start time (C8); the CLI renders "-"
+					Leg:           legName,
 				})
 			}
 		}
@@ -86,11 +94,12 @@ func voiceLocalSeams(w *VoiceWiring, mgr *employee.Manager, logger *slog.Logger)
 			}
 			seen[call.CallID] = true
 			rows = append(rows, rpc.VoiceCallStatus{
-				CallID:       call.CallID,
-				EmployeeID:   localEmployeeFor(registry, call.CallID),
-				Target:       "local:",
-				SinceRFC3339: "",
-				Leg:          voice.LegLocal,
+				CallID:        call.CallID,
+				EmployeeID:    localEmployeeFor(registry, call.CallID),
+				TargetName:    "local:",
+				TargetDisplay: "local:",
+				SinceRFC3339:  "",
+				Leg:           voice.LegLocal,
 			})
 		}
 		return rows
@@ -119,6 +128,20 @@ func voiceLocalSeams(w *VoiceWiring, mgr *employee.Manager, logger *slog.Logger)
 		Status:         status,
 		EmployeeExists: exists,
 	}
+}
+
+// statusTargetDisplay renders one registry row's disclosure-shaped target
+// pair (contact-display leaf 02 §4, O1/O4). The phone leg resolves the
+// E.164 through the boundary resolver (name + last-4 display; raw number
+// NEVER reaches the wire). The local leg's "local:<label>" target carries
+// no number, so it passes through verbatim as both fields — clients get a
+// single uniform display pair per row.
+func statusTargetDisplay(w *VoiceWiring, legName, target string) (string, string) {
+	if legName != voice.LegPhone {
+		return target, target
+	}
+	info := w.resolveDisplay(context.Background(), target)
+	return info.Name, info.Display
 }
 
 // localEmployeeFor resolves the employee id for a live local call from

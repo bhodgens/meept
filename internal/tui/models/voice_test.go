@@ -221,16 +221,30 @@ func TestVoiceModelListRendersTable(t *testing.T) {
 			{
 				"call_id":       "call-1",
 				"employee_id":   "eve",
-				"target":        "eve",
 				"since_rfc3339": "2026-11-07T10:00:00Z",
 				"leg":           "local",
+				// contact-display leaf 03 (O1): an old-server fixture
+				// carries only the raw target — the renderer's legacy
+				// fallback must still print it (local-leg labels).
+				"target": "eve",
 			},
 			{
 				"call_id":       "call-2",
 				"employee_id":   "adam",
-				"target":        "+15551234",
 				"since_rfc3339": "2026-11-07T10:05:00Z",
 				"leg":           "phone",
+				// contact-display leaf 03: the leaf 02 wire shape —
+				// the display pair renders, no raw target on the row.
+				"target_name":    "Jane Doe",
+				"target_display": "Jane Doe (•••5567)",
+			},
+			{
+				"call_id":       "call-3",
+				"employee_id":   "zoe",
+				"since_rfc3339": "2026-11-07T10:10:00Z",
+				"leg":           "phone",
+				// contact-display leaf 03: a row with NO target info
+				// at all renders the "unknown" fallback.
 			},
 		},
 	}
@@ -242,11 +256,19 @@ func TestVoiceModelListRendersTable(t *testing.T) {
 	if !strings.Contains(out, "eve") || !strings.Contains(out, "call-1") {
 		t.Fatalf("list output missing local row:\n%s", out)
 	}
+	// leaf 03: the display form renders (name + last-4), never a raw
+	// number (the fixture has none to leak).
+	if !strings.Contains(out, "Jane Doe (•••5567)") {
+		t.Fatalf("list output missing display pair on phone row:\n%s", out)
+	}
 	if !strings.Contains(out, "adam") || !strings.Contains(out, "phone") {
 		t.Fatalf("list output missing phone row:\n%s", out)
 	}
 	if !strings.Contains(out, "local") {
 		t.Fatalf("list output missing leg column value:\n%s", out)
+	}
+	if !strings.Contains(out, "unknown") {
+		t.Fatalf("list output missing unknown fallback for infoless row:\n%s", out)
 	}
 }
 

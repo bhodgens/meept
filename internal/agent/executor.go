@@ -8,11 +8,13 @@ import (
 	"log/slog"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/callerid"
 	"github.com/caimlas/meept/internal/code/ast"
 	"github.com/caimlas/meept/internal/groups"
 	"github.com/caimlas/meept/internal/llm"
@@ -497,6 +499,17 @@ var ToolActionMap = map[string]string{
 	"goal_get":    "goal_read",
 	"goal_create": "goal_write",
 	"goal_update": "goal_write",
+
+	// Employee ledger (plan 20261109-employee-ledger, H7-class gap pinned
+	// by the caller-authz matrix): ledger_append writes immutable rows +
+	// guarded subject state (ledger_write, RiskLow); ledger_query is a
+	// read-only projection of the caller employee's own log (ledger_read,
+	// RiskSafe). Explicit entries matter beyond the platform category
+	// fallback: step-1c grants unapproved callers ledger_append for the
+	// message lane, and that lane must land on a low-risk action, not on
+	// the read-only platform bucket.
+	"ledger_append": "ledger_write",
+	"ledger_query":  "ledger_read",
 }
 
 // WorkingDirSetter is implemented by tools that accept a session-scoped
@@ -1409,7 +1422,7 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 			}
 		}
 	} else {
-		result := e.checkPermission(toolName, args)
+		result := e.checkPermission(ctx, toolName, args)
 		if !result.Allowed {
 			// Include the path (and args) in the deny log: an opaque deny
 			// reason cost a full e2e debugging run (2026-09-10) because the
@@ -1959,7 +1972,7 @@ func (e *Executor) ExecuteSequential(ctx context.Context, toolCalls []llm.ToolCa
 }
 
 // checkPermission checks if a tool call is permitted.
-func (e *Executor) checkPermission(toolName string, args map[string]any) security.CheckResult {
+func (e *Executor) checkPermission(ctx context.Context, toolName string, args map[string]any) security.CheckResult {
 	// Map tool name to action category
 	action, ok := ToolActionMap[toolName]
 	if !ok {
@@ -1993,6 +2006,19 @@ func (e *Executor) checkPermission(toolName string, args map[string]any) securit
 	e.mu.RUnlock()
 	if agentID != "" {
 		details["agent_id"] = agentID
+	}
+
+	// Inject the inbound-caller stamp (plan 20261110-caller-authz §5,
+	// frozen contract): when the voice turn context carries a resolved
+	// caller (callerid.With at the daemon's per-turn stamp site), add the
+	// two PRESENCE-ONLY keys that the employee PreExecChecker's step-1c
+	// caller gate reads. Values are strconv.FormatBool — Number/Name never
+	// reach this map (details flows into prompts/logs; display-surface
+	// redaction is issue #126). No stamp = non-voice turn: the keys are
+	// absent and step 1c stays inert.
+	if info, ok := callerid.From(ctx); ok {
+		details["caller_approved"] = strconv.FormatBool(info.Approved)
+		details["caller_known"] = strconv.FormatBool(info.Known)
 	}
 
 	result := e.security.CheckPermission(action, details)
