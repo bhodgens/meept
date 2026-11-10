@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
@@ -45,6 +47,15 @@ type PushService struct {
 	// effects is the external-effect idempotency ledger. Nil (tests,
 	// feature off) means Push runs its legacy unclaimed path.
 	effects effects.Ledger
+	// prefs is the per-user notification gate (Plan 3 Phase 5). Nil
+	// (feature off) means delivery is unrestricted — legacy behavior.
+	// Guarded by mu; set once at wiring time via SetNotificationPreferences.
+	mu    sync.Mutex
+	prefs *NotificationPreferences
+	// history records delivered pushes (Plan 3 Phase 5). Nil (feature
+	// off) means Push does not record. Guarded by mu; set once at
+	// wiring time via SetPushHistory.
+	history *PushHistory
 }
 
 // PushRequest describes a push notification to send.
@@ -129,6 +140,30 @@ func (s *PushService) SetEffectsLedger(l effects.Ledger) {
 	if l != nil {
 		s.effects = l
 	}
+}
+
+// SetNotificationPreferences attaches the per-user delivery gate (Plan 3
+// Phase 5 user controls). Nil-safe: a nil prefs value is ignored so a
+// bad wiring call can never replace a live gate with a nil deref. When
+// unset, Push delivery is unrestricted (legacy behavior).
+func (s *PushService) SetNotificationPreferences(p *NotificationPreferences) {
+	if p == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.prefs = p
+}
+
+// SetPushHistory attaches the push history ring (Plan 3 Phase 5
+// history/query API). Nil-safe. When unset, Push does not record.
+func (s *PushService) SetPushHistory(h *PushHistory) {
+	if h == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.history = h
 }
 
 // pushEffectsKey derives the pinned effect key for a push. Fixed order
@@ -232,6 +267,7 @@ func (s *PushService) Push(ctx context.Context, req *PushRequest) (*PushResult, 
 		if pubErr != nil {
 			return &result, pubErr
 		}
+		s.recordHistory(req, result.Delivered)
 		s.logPushResult(msgID, req, result)
 		return &result, nil
 	}
@@ -303,8 +339,45 @@ func (s *PushService) Push(ctx context.Context, req *PushRequest) (*PushResult, 
 		return nil, wrapError("push", "Push", fmt.Errorf("parse push receipt: %w", err))
 	}
 	result := PushResult{Delivered: receiptOut.Delivered}
+	s.recordHistory(req, result.Delivered)
 	s.logPushResult(msgID, req, result)
 	return &result, nil
+}
+
+// recordHistory appends a delivered push to the attached history ring.
+// Best-effort: no history attached (feature off) is a no-op; recording
+// never fails the push.
+func (s *PushService) recordHistory(req *PushRequest, delivered int) {
+	if s.history == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.history.Record(PushEntry{
+		ID:        id.Generate("push-"),
+		SessionID: strings.Join(req.SessionIDs, ","),
+		Source:    req.Source,
+		Type:      req.Type,
+		Content:   req.Content,
+		Priority:  req.Priority,
+		Timestamp: time.Now(),
+		Delivered: delivered > 0,
+	})
+}
+
+// PreferencesAllowed consults the attached notification preferences gate.
+// No prefs attached (feature off) = always allowed (legacy behavior).
+// Not currently enforced per-session inside Push (session-targeted
+// delivery is bus-consumer territory); the gate is consulted by the
+// notification bot wiring for its own sends.
+func (s *PushService) PreferencesAllowed(notifType, channel string) bool {
+	s.mu.Lock()
+	p := s.prefs
+	s.mu.Unlock()
+	if p == nil {
+		return true
+	}
+	return p.IsTypeEnabled(notifType) && p.IsChannelEnabled(channel)
 }
 
 func (s *PushService) logPushResult(msgID string, req *PushRequest, result PushResult) {
