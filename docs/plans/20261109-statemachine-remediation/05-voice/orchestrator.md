@@ -97,11 +97,11 @@ touching frames/sockets/release.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-voice-tests | TESTS_IN_PROGRESS | 1 | part 1 committed (terminal_gate_test.go; parent-triaged after child timeout: 1 compile fix, 3 RED + 1 pin verified); part 2 in flight (signalleg+webhook) |
-| 01-dial-leak-and-race | IN_PROGRESS | 0 | dispatched 2026-11-09 (dial.go scope; targets committed gate tests) |
-| 02-signal-leg-parity | PENDING | 0 | |
-| 03-ringing-watchdog-and-db-sweep | PENDING | 0 | |
-| 04-webhook-and-teardown | PENDING | 0 | |
+| 00T-voice-tests | TESTS_VALIDATED | 2 | part 1 (terminal_gate_test.go) + part 2 (leg_gate + webhook_gate) both committed; 8 pins, all parent-verified RED for right reasons |
+| 01-dial-leak-and-race | IN_PROGRESS | 0 | running (dial.go) |
+| 02-signal-leg-parity | IN_PROGRESS | 0 | dispatched (leg.go; daemon one-liner allowed w/ flag — watch voice_wiring.go overlap w/ leaf 04 at commit) |
+| 03-ringing-watchdog-and-db-sweep | PENDING | 0 | waits for 02 (leg.go) + 04 (boot/callstore adjacent) |
+| 04-webhook-and-teardown | IN_PROGRESS | 0 | dispatched (wiring/employee/docs; T3 dial.go DEFERRED to orchestrator — leaf 01 owns dial.go) |
 
 ## Integration Test Plan
 
