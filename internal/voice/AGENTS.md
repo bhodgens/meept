@@ -71,6 +71,38 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   The derived path is length-checked at create against a 100-byte cap
   (ErrLinkMonitorPathTooLong) since link ids ride to the sun_path edge.
 
+## Voice link: half-duplex turn-taking (turn-taking leaf)
+
+- A voice link carries TWO independent talk loops; a live run proved
+  they greet at once and dispatch over each other's speech. The
+  contract the coordinator enforces: at most ONE side is mid-turn at a
+  time, the listener's final prompt dispatches only after the speaker's
+  turn FINALIZES plus the drain margin (LinkDeps.TurnMargin, default
+  linkTurnMarginDefault 600 ms), and exactly ONE side greets - side A
+  (side B's loop is built with TalkLoopConfig.SuppressGreeting; A's
+  greeting audio crossing into B's mic is the conversation seed).
+- The seams are OPTIONAL and nil-by-default: TalkDeps.HoldPrompt parks
+  a denied final (one slot, latest question wins, telemetry
+  kind=prompt_held / prompt_released / prompt_dropped), TalkDeps.
+  TurnState publishes turn_start/turn_final/idle edges. Non-link calls
+  (phone, plain local, signal) NEVER receive them - routeFrame's
+  registry lookup on the call's TARGET returns nil and the loop
+  constructs exactly as before. Do not wire these seams onto phone or
+  plain-local loops.
+- The coordinator rides LinkTurnRegistry keyed by the REGISTRY TARGET
+  ("local:link-a-<suffix>"), registered by LinkManager.Open BEFORE the
+  leg opens: the child's setup frame can reach routeFrame while Open is
+  still running, and the ccid is not knowable then - the target is.
+  Close/unwind unregisters; a stale target must never bind a future
+  call.
+- Every release path matters: turn_final arms the margin before
+  releasing, idle (barge-in cancel, unbind, teardown) releases
+  IMMEDIATELY (nothing is playing), and a park alive at loop exit is
+  dropped with a log (never dispatched into a dead call). The bridge
+  seeds each mic with linkSilenceSeedChunks exact zero chunks at dial:
+  with B silent on open, the splice's first-byte JoinTimeout gate must
+  not depend on greeting audio (0-byte reads never satisfy it).
+
 ## Media splice: reorder, pacing, barge-in
 
 - Reorder window (`reorder_window_frames`, default 10) with silence

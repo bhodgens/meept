@@ -921,3 +921,39 @@ inbound (spawn seam), and phone outbound (`DialConfig.Hold`). Release
 is the manager hook exactly once; a nil hold seam degrades to no
 ended-state. The phone leg also calls `Binding.OnCallStart` from
 `holdPhoneCall` — without that row, OnCallEnd is a no-op.
+
+## As-built (2026-11-09, turn-taking leaf): link half-duplex
+
+Live link runs (link-6a3f3b65) proved the two link legs talked over
+each other: both employees greeted at once, and either leg's STT
+dispatched while the other was still speaking - simultaneous audio and
+half-answers. The fix lives entirely daemon-side (internal/voice/link.go
++ talkloop.go seams):
+
+- **One speaker at a time.** `LinkTurnCoordinator` (created per link in
+  `LinkManager.Open`, registered by registry target -
+  `local:link-a-<suffix>` / `local:link-b-<suffix>` - BEFORE the legs
+  open, because a setup frame can reach the frame router while Open is
+  still running). Each link side's talk loop is built by
+  `VoiceWiring.routeFrame` with two optional seams:
+  `TalkDeps.HoldPrompt` (a denied final prompt parks in the loop - one
+  slot, latest question wins, telemetry `kind=prompt_held`) and
+  `TalkDeps.TurnState` (`turn_start` / `turn_final` / `idle` edges).
+- **Release rule.** The parked prompt dispatches only after the
+  speaker's `turn_final` plus the drain margin (default 600 ms,
+  `LinkDeps.TurnMargin`) - trailing sentences and the paced-TTS tail
+  must leave the bridge before the listener may speak. An `idle` edge
+  (barge-in cancel, teardown, unbind) releases immediately: nothing is
+  playing. A park alive when a loop exits is logged and dropped
+  (`kind=prompt_dropped`), never dispatched into a dead call. Telemetry
+  release edge: `kind=prompt_released`.
+- **One greeting.** Side A greets on connect; side B's loop is built
+  with `TalkLoopConfig.SuppressGreeting` and speaks first only after
+  A's greeting arrives at B's mic as a final prompt (the conversation
+  seed). Because B opens silent, the bridge seeds each leg's mic with
+  5 exact 640 B zero chunks at dial so the splice's first-byte
+  JoinTimeout gate never depends on greeting audio.
+- **Blast radius.** All seams nil/false by default: phone, plain-local,
+  and signal calls construct their talk loops exactly as before (the
+  target-keyed registry lookup only matches link legs). Non-link tests
+  (grace/filler pins) run through the untouched path.

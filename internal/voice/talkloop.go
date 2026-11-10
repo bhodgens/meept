@@ -58,6 +58,18 @@ import (
 	"time"
 )
 
+// Turn-state kinds for the link half-duplex seam (TalkDeps.TurnState).
+// Emitted ONLY when deps.TurnState is non-nil - a plain (phone or local)
+// call never carries turn-state traffic. turn_start = a draft dispatched
+// (this side is about to speak); turn_final = the draft's say stream fully
+// flushed (this side just finished speaking); idle = the side stopped
+// speaking without a final (barge-in cancel, or loop teardown).
+const (
+	TurnKindStart = "turn_start"
+	TurnKindFinal = "turn_final"
+	TurnKindIdle  = "idle"
+)
+
 // fallbackSentence is the C6 fail-closed line spoken when a supervisor
 // check fails or when a draft ends with nothing allowed. FallbackLine is
 // the operator override; this constant is the wiring default.
@@ -101,6 +113,12 @@ type TalkLoopConfig struct {
 	// silence-prompt filler is NEVER grace-gated - that line is the
 	// dead-air nudge itself.
 	FillerGrace time.Duration
+	// SuppressGreeting skips the on-connect greeting say (link
+	// half-duplex, turn-taking leaf: exactly ONE side of a link greets
+	// - side A. Side B opens silent and speaks first only after A's
+	// greeting crosses its mic as a final prompt). False (the default,
+	// every non-link call) keeps the greeting byte-identical.
+	SuppressGreeting bool
 }
 
 // TalkDeps wires the loop. Send is the C1 seam: the talk loop never touches
@@ -129,6 +147,24 @@ type TalkDeps struct {
 	Now func() time.Time
 	// Logger is optional; nil falls back to slog.Default.
 	Logger *slog.Logger
+	// HoldPrompt is the link half-duplex seam (turn-taking leaf): when
+	// non-nil, every final prompt routes through it BEFORE dispatch.
+	// Returning true = dispatch now (the legacy path); false = the
+	// coordinator holds the turn because the other side of the link is
+	// speaking, and the loop parks the dispatch closure (at most ONE
+	// pending held prompt - a second held final REPLACES the pending
+	// one, latest question wins, telemetry kind=prompt_held). The
+	// coordinator releases via TalkLoop.FlushHeld. Nil (every non-link
+	// call) keeps dispatch byte-identical.
+	HoldPrompt func(call Instance, dispatch func()) bool
+	// TurnState is the link half-duplex observation seam: when non-nil
+	// the loop publishes (ccid, seq, kind) at turn start / turn final /
+	// idle (barge-in cancel or teardown), so a coordinator can tell when
+	// this side is speaking. Nil (every non-link call) = zero emissions.
+	// Binding progress was considered and rejected: it carries no seq,
+	// has no turn_start/idle kind, and rides the bus (the coordinator
+	// needs a synchronous in-process edge).
+	TurnState func(ccid string, seq uint64, kind string)
 }
 
 // pipeline is one prompt's draft-to-speech state: the generation and turn
@@ -209,6 +245,19 @@ type TalkLoop struct {
 	// first silence fire speaks, the second hangs up.
 	silencePrompted bool
 
+	// Link half-duplex state (turn-taking leaf). held is the ONE parked
+	// prompt (a second held final replaces the pending one, latest
+	// question wins); heldMu guards ONLY the swap - the closure itself is
+	// always invoked on the Run goroutine, drained from the flush
+	// channel (repo mutex-scope rule). flush is buffered(1): FlushHeld
+	// signals from the coordinator's goroutine and the signal survives
+	// until Run's select drains it, which closes the park-vs-release race
+	// (a flush that lands before the park store is still in the buffer
+	// when the park completes).
+	flush  chan struct{}
+	heldMu sync.Mutex
+	held   *heldPrompt
+
 	endOnce sync.Once
 }
 
@@ -231,12 +280,124 @@ func NewTalkLoop(deps TalkDeps, cfg TalkLoopConfig) *TalkLoop {
 		log:    logger,
 		now:    now,
 		frames: make(chan Frame, 16),
+		flush:  make(chan struct{}, 1),
 	}
 }
 
 // Frames returns the inbound frame sink. The wiring routes this call's C1
-// frames (prompt/interrupt/end) from the TextServer handler here.
+// frames (prompt/interrupt/end frames) from the TextServer handler here.
 func (t *TalkLoop) Frames() chan<- Frame { return t.frames }
+
+// FlushHeld signals the loop that a coordinator wants its parked prompt
+// released. Safe from any goroutine: the signal is a non-blocking send on
+// a buffered channel; the Run goroutine drains it and performs the
+// dispatch (the parked closure is NEVER invoked off the Run goroutine -
+// the silence/turn timer discipline and fillerIdx ownership stay intact).
+func (t *TalkLoop) FlushHeld() {
+	select {
+	case t.flush <- struct{}{}:
+	default:
+	}
+}
+
+// publishTurnState emits one turn-state edge when the seam is wired
+// (link calls only). Never called with deps.TurnState == nil by callers
+// behind this helper.
+func (t *TalkLoop) publishTurnState(ccid string, seq uint64, kind string) {
+	if t.deps.TurnState != nil {
+		t.deps.TurnState(ccid, seq, kind)
+	}
+}
+
+// heldPrompt is ONE parked final-prompt dispatch: the Run-owned closure,
+// its text (telemetry preview), and the call Instance the re-gate needs.
+type heldPrompt struct {
+	dispatch func()
+	text     string
+	call     Instance
+}
+
+// nextSeq reads the seq the NEXT spawnPipeline will claim (telemetry
+// correlation only - the authoritative seq still increments at dispatch).
+func (t *TalkLoop) nextSeq() uint64 {
+	t.interruptMu.Lock()
+	defer t.interruptMu.Unlock()
+	return t.seq + 1
+}
+
+// parkPrompt stores the pending held dispatch (at most ONE: a second
+// held final REPLACES the pending one - latest question wins) and logs
+// the prompt_held telemetry line. Called on the Run goroutine after
+// deps.HoldPrompt returned false.
+func (t *TalkLoop) parkPrompt(call Instance, dispatch func(), text string) {
+	t.heldMu.Lock()
+	replaced := t.held != nil
+	t.held = &heldPrompt{dispatch: dispatch, text: text, call: call}
+	t.heldMu.Unlock()
+
+	ccid := call.CallControlID
+	t.log.Info("voice talk loop: prompt held",
+		"ccid", ccid, "seq", t.nextSeq(), "kind", "prompt_held",
+		"text_preview", previewPrompt(text), "replaced_pending", replaced)
+}
+
+// releaseHeld dispatches the parked prompt (if any) with the
+// prompt_released telemetry line. Runs on the Run goroutine (flush
+// channel consumer). A stale signal with nothing parked is a no-op.
+//
+// Re-gate: when HoldPrompt is wired, the coordinator is consulted once
+// more before dispatch - a flush signal that raced the peer starting a
+// NEW turn (margin fired, then the peer spoke again) must re-park, not
+// speak over the fresh turn. Re-parked prompts ride the next terminal
+// edge (every turn ends in turn_final or idle, both signal a release),
+// so the re-gate cannot strand a prompt.
+func (t *TalkLoop) releaseHeld(ccid string) {
+	t.heldMu.Lock()
+	h := t.held
+	t.held = nil
+	t.heldMu.Unlock()
+	if h == nil {
+		return
+	}
+	if t.deps.HoldPrompt != nil && !t.deps.HoldPrompt(h.call, h.dispatch) {
+		t.heldMu.Lock()
+		t.held = h
+		t.heldMu.Unlock()
+		t.log.Info("voice talk loop: release re-held (peer busy again)",
+			"ccid", ccid, "kind", "prompt_reheld",
+			"text_preview", previewPrompt(h.text))
+		return
+	}
+	t.log.Info("voice talk loop: prompt released",
+		"ccid", ccid, "seq", t.nextSeq(), "kind", "prompt_released",
+		"text_preview", previewPrompt(h.text))
+	h.dispatch()
+}
+
+// dropHeld logs and discards a parked prompt (a newer prompt took the
+// floor, or loop exit). heldMu is taken so a racing FlushHeld's later
+// signal finds nothing.
+func (t *TalkLoop) dropHeld(ccid, reason string) {
+	t.heldMu.Lock()
+	h := t.held
+	t.held = nil
+	t.heldMu.Unlock()
+	if h == nil {
+		return
+	}
+	t.log.Info("voice talk loop: held prompt dropped",
+		"ccid", ccid, "kind", "prompt_dropped", "reason", reason,
+		"text_preview", previewPrompt(h.text))
+}
+
+// previewPrompt truncates prompt text for a telemetry line.
+func previewPrompt(text string) string {
+	preview := text
+	if runes := []rune(preview); len(runes) > 40 {
+		preview = string(runes[:40]) + "…"
+	}
+	return preview
+}
 
 // greetingLine returns the configured greeting, falling back to the first
 // filler line (the greeting is filler-class; an operator who configured no
@@ -306,11 +467,20 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 
 	// Greeting first (spec call flow: the agent speaks first on a
 	// connected call; fact-free, interruptible, never supervisor-gated).
-	if line := t.greetingLine(); line != "" {
+	// SuppressGreeting (link half-duplex B side): exactly ONE side of a
+	// link greets - A's greeting crosses B's mic as B's first final
+	// prompt (the conversation seed), so B opening silent prevents the
+	// live-run defect of two employees saying hello at once.
+	if line := t.greetingLine(); line != "" && !t.cfg.SuppressGreeting {
 		if err := t.say(ccid, line, false); err != nil {
 			t.log.Warn("voice talk loop: greeting send failed", "ccid", ccid, "error", err)
 		}
 	}
+
+	// Link half-duplex: a prompt parked at loop exit is logged and
+	// dropped, never silently leaked into a dead call (the closure would
+	// dispatch into a loop nobody is selecting on).
+	defer t.dropHeld(ccid, "loop ended")
 
 	// Max-duration timer (voice.max_call_minutes).
 	var maxC <-chan time.Time
@@ -415,6 +585,31 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 		}
 	}
 
+	// dispatchPrompt is the EventPrompt final-prompt body, hoisted
+	// into a Run-owned closure so the link half-duplex seam can park
+	// it verbatim: held dispatch runs LATER on this same goroutine
+	// (timer discipline + fillerIdx ownership untouched). stopSilence/
+	// armTurn close over Run's timer locals, so this MUST live here.
+	dispatchPrompt := func(text string) {
+		// The clock stops while the turn runs: the silence window
+		// is turn-aware, and the draft-drain branch re-arms it
+		// fresh once the reply is fully spoken (a slow 30-90s LLM
+		// must not lose the call mid-generation). The turn cap
+		// (opt-in) arms fresh per prompt for the same window.
+		stopSilence()
+		armTurn()
+		t.silencePrompted = false
+		// A newer prompt supersedes any in-flight draft (the
+		// barge-in drop rule applies to a fresh question too).
+		t.cancelPipeline(ccid, "supersede")
+		// Pick the filler line on THIS goroutine (fillerIdx is
+		// Run-owned); whether it speaks now (legacy grace==0) or
+		// after the grace window is spawnPipeline's call (call
+		// flow step 6: fact-free, so it needs no supervisor
+		// verdict).
+		t.spawnPipeline(ctx, call, text, t.fillerLine())
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -477,9 +672,20 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 				t.logTurnFinal(ccid, p)
 				t.clearPipeline()
 				rearmSilence()
+				if p != nil {
+					// Link half-duplex: the speaker's stream is fully
+					// flushed - the coordinator arms its drain margin
+					// on this edge and releases the held side.
+					t.publishTurnState(ccid, p.seq, TurnKindFinal)
+				}
 				continue
 			}
 			t.playVerdict(ccid, vr)
+		case <-t.flush:
+			// Link half-duplex release signal (coordinator's margin
+			// fired, or teardown flush): dispatch the parked prompt on
+			// THIS goroutine, preserving the Run-owned timer discipline.
+			t.releaseHeld(ccid)
 		case f, ok := <-t.frames:
 			if !ok {
 				t.cancelPipeline(ccid, "teardown")
@@ -492,23 +698,27 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 					// Partial transcript: preview only, never a turn.
 					continue
 				}
-				// The clock stops while the turn runs: the silence window
-				// is turn-aware, and the draft-drain branch re-arms it
-				// fresh once the reply is fully spoken (a slow 30-90s LLM
-				// must not lose the call mid-generation). The turn cap
-				// (opt-in) arms fresh per prompt for the same window.
-				stopSilence()
-				armTurn()
-				t.silencePrompted = false
-				// A newer prompt supersedes any in-flight draft (the
-				// barge-in drop rule applies to a fresh question too).
-				t.cancelPipeline(ccid, "supersede")
-				// Pick the filler line on THIS goroutine (fillerIdx is
-				// Run-owned); whether it speaks now (legacy grace==0) or
-				// after the grace window is spawnPipeline's call (call
-				// flow step 6: fact-free, so it needs no supervisor
-				// verdict).
-				t.spawnPipeline(ctx, call, f.Text, t.fillerLine())
+				// Link half-duplex seam: when a coordinator holds (the
+				// other side of the link is mid-turn), park the dispatch
+				// closure instead of running it - the prompt waits for
+				// the speaker's turn_final + margin, then releases on
+				// THIS goroutine via the flush channel. Nil HoldPrompt
+				// (every non-link call) dispatches inline, byte-identical.
+				if t.deps.HoldPrompt != nil {
+					text := f.Text
+					dispatch := func() { dispatchPrompt(text) }
+					if !t.deps.HoldPrompt(call, dispatch) {
+						t.parkPrompt(call, dispatch, text)
+						continue
+					}
+					// Coordinator allows dispatch NOW: a prompt parked
+					// from an earlier question is stale under the
+					// latest-question-wins rule - drop it, then speak.
+					t.dropHeld(ccid, "newer prompt took the floor")
+					dispatch()
+					continue
+				}
+				dispatchPrompt(f.Text)
 			case EventInterrupt:
 				t.handleInterrupt(ccid)
 			case EventEnd:
@@ -566,6 +776,13 @@ func (t *TalkLoop) spawnPipeline(ctx context.Context, call Instance, prompt, fil
 	t.log.Info("voice talk loop: turn dispatch",
 		"ccid", ccid, "seq", seq, "kind", "prompt_dispatch",
 		"text_preview", preview, "words", wordCount(prompt))
+
+	// Link half-duplex: this side is now the speaker (the turn will
+	// emit say frames) - the coordinator marks it busy so the OTHER
+	// side's next final prompt parks instead of talking over it.
+	if t.deps.TurnState != nil {
+		t.publishTurnState(ccid, seq, TurnKindStart)
+	}
 
 	if fillerLine != "" {
 		if t.cfg.FillerGrace <= 0 {
@@ -784,6 +1001,15 @@ func (t *TalkLoop) cancelPipeline(ccid, reason string) {
 	}
 	t.log.Info("voice talk loop: turn cancelled",
 		"ccid", ccid, "seq", p.seq, "kind", "draft_cancel", "reason", reason)
+	// Link half-duplex: a barge-in/teardown cancel means THIS side
+	// stopped speaking without a turn_final - the coordinator releases
+	// the peer's parked prompt immediately (nothing is playing anymore).
+	// A "supersede" cancel does NOT idle: the same side immediately
+	// spawns a newer draft (turn_start follows), so the speaker slot
+	// stays held and no premature release fires.
+	if t.deps.TurnState != nil && reason != "supersede" {
+		t.publishTurnState(ccid, p.seq, TurnKindIdle)
+	}
 	if p.cancel != nil {
 		p.cancel()
 	}

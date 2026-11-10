@@ -113,6 +113,15 @@ type VoiceWiring struct {
 	loops       map[string]*voice.TalkLoop
 	loopCancels map[string]context.CancelFunc
 
+	// linkTurns is the half-duplex coordinator registry shared with the
+	// LinkManager (voice_link_rpc.go passes it into LinkDeps.Turns): the
+	// link's two legs pre-register by registry target BEFORE their leg
+	// opens, so routeFrame resolves each setup'd link call to its
+	// coordinator and constructs a turn-locked talk loop. Plain
+	// (phone/local) calls never match a target and keep the legacy
+	// uncoordinated construction byte-for-byte.
+	linkTurns *voice.LinkTurnRegistry
+
 	// bus publishes voice.call.ended (typed topic); nil drops events.
 	bus *bus.MessageBus
 
@@ -339,8 +348,8 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 	phoneHold = employee
 
 	// -- 5b. Shared day-brief builder (leaf 03-voice/03): ONE builder
-	// closure over the leaf-04 sources — the SAME sources the local leg
-	// has always used — now extended with the ledger open-commitments
+	// closure over the leaf-04 sources - the SAME sources the local leg
+	// has always used - now extended with the ledger open-commitments
 	// seam. Reused by: the local leg's DayBriefBuilder, the phone leg's
 	// holdPhoneCall (via VoiceEmployeeWiring.dayBriefFn), and the signal
 	// leg (via WireVoiceDeps.DayBriefBuilder). Phone/signal only build a
@@ -436,6 +445,7 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		supervisor:     supervisor,
 		loops:          make(map[string]*voice.TalkLoop),
 		loopCancels:    make(map[string]context.CancelFunc),
+		linkTurns:      voice.NewLinkTurnRegistry(vlog.With("sub", "link-turns")),
 		bus:            deps.Bus,
 		textSocketPath: textSocketPath,
 		broker:         deps.Broker,
@@ -671,16 +681,33 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 			w.logger.Warn("voice wiring: setup for unknown call", "ccid", f.CallID)
 			return
 		}
+		// Link half-duplex (turn-taking leaf): a link leg's registry
+		// target resolves to its coordinator (pre-registered by
+		// LinkManager.Open BEFORE the leg opened). Bound loops carry the
+		// HoldPrompt/TurnState seams and side B suppresses its greeting
+		// (single-greeting contract). A nil lookup = phone/plain-local =
+		// the legacy uncoordinated construction, seams nil.
+		coord, turnSide := w.linkTurns.Lookup(inst.Target)
+		var holdPrompt func(voice.Instance, func()) bool
+		var turnState func(ccid string, seq uint64, kind string)
+		suppressGreeting := false
+		if coord != nil {
+			holdPrompt = coord.HoldPromptFor(turnSide)
+			turnState = coord.TurnStateFor(turnSide)
+			suppressGreeting = coord.SuppressesGreeting(turnSide)
+		}
 		loop := voice.NewTalkLoop(voice.TalkDeps{
 			Supervisor: w.supervisor,
 			Turns:      turnRunnerFor(w.Employee.Binding, inst),
 			SessionFor: func(call voice.Instance) voice.SessionHandle {
 				return w.sessionFor(call)
 			},
-			Binding: w.Employee.Binding,
-			Send:    textFrameSender{srv: w.TextServer}.Send,
-			OnEnd:   func(ccid, reason string) { w.managerHangup(ccid, reason) },
-			Logger:  w.logger.With("sub", "talk", "ccid", f.CallID),
+			Binding:    w.Employee.Binding,
+			Send:       textFrameSender{srv: w.TextServer}.Send,
+			OnEnd:      func(ccid, reason string) { w.managerHangup(ccid, reason) },
+			Logger:     w.logger.With("sub", "talk", "ccid", f.CallID),
+			HoldPrompt: holdPrompt,
+			TurnState:  turnState,
 		}, voice.TalkLoopConfig{
 			FillerLines:          w.cfg.Filler,
 			GreetingLine:         w.cfg.GreetingLine,
@@ -689,7 +716,11 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 			SilencePromptSeconds: w.cfg.SilencePromptSeconds,
 			TurnTimeoutSeconds:   w.cfg.TurnTimeoutSeconds,
 			FillerGrace:          time.Duration(w.cfg.FillerGraceMs) * time.Millisecond,
+			SuppressGreeting:     suppressGreeting,
 		})
+		if coord != nil {
+			coord.Bind(turnSide, loop)
+		}
 		w.loopsMu.Lock()
 		w.loops[f.CallID] = loop
 		// H4: arm the per-call context. releaseCall cancels it so a
@@ -717,6 +748,12 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 			// Own the cancel either way: a self-ended loop releases its
 			// context slot; a released loop was already cancelled.
 			loopCancel()
+			if coord != nil {
+				// Half-duplex: the side is gone - release the peer's
+				// parked prompt (it can no longer be answered by this
+				// side going idle) and drop the dead loop reference.
+				coord.Unbind(turnSide)
+			}
 			w.loopsMu.Lock()
 			delete(w.loops, f.CallID)
 			delete(w.loopCancels, f.CallID)
@@ -1174,8 +1211,8 @@ func (w *VoiceWiring) Stop(ctx context.Context) {
 // WireVoice itself (via deps.SupervisorChatterClient, the
 // createAuxiliaryLLMClientWithResolver resolution path shared with the
 // classifier chain); when the model ref is empty, unresolvable, or no
-// factory was injected, this returns the classifier client — else the main
-// LLM client — as the legacy fallback. nil when neither exists (the gate
+// factory was injected, this returns the classifier client - else the main
+// LLM client - as the legacy fallback. nil when neither exists (the gate
 // then runs disabled - NewSupervisor logs it once).
 func voiceSupervisorChatter(c *Components) voice.SupervisorChatter {
 	if c == nil {

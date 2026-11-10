@@ -13,6 +13,7 @@ package voice
 // close, unknown-link named errors, distinct per-link labels.
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -324,6 +325,14 @@ func TestLinkBridgeByteExact(t *testing.T) {
 	bSpk := leg.accepted(link.BCCID, false)
 	defer bSpk.Close()
 
+	// Mic-join silence seed (turn-taking leaf): the bridge leads each
+	// mic with exact zero chunks BEFORE the pumps run, so both splices'
+	// first-byte join gate never depends on greeting audio (B no longer
+	// greets). Drain + assert the seed, then the byte-exact pins run
+	// against the real speech tail.
+	linkDrainSilenceSeed(t, bMic)
+	linkDrainSilenceSeed(t, aMic)
+
 	// A speaks -> B's mic receives, byte-exact.
 	sentA := linkSpeakerChunks(t, aSpk)
 	gotB := linkReadN(t, bMic, len(sentA))
@@ -335,6 +344,29 @@ func TestLinkBridgeByteExact(t *testing.T) {
 	gotA := linkReadN(t, aMic, len(sentB))
 	if string(gotA) != string(sentB) {
 		t.Fatalf("b->a bridge corrupted bytes: got %d B, want %d B exact", len(gotA), len(sentB))
+	}
+}
+
+// linkDrainSilenceSeed consumes the bridge's mic-join silence seed
+// (linkSilenceSeedChunks exact 640 B L16 chunks of digital silence) and
+// pins it is silent + whole-chunk (torn chunk framing would corrupt the
+// downstream splice).
+func linkDrainSilenceSeed(t *testing.T, mic io.Reader) {
+	t.Helper()
+	want := linkSilenceSeedChunks * 640
+	got := linkReadN(t, mic, want)
+	linkAssertSilencePrefix(t, got, "bridge mic seed")
+}
+
+// linkAssertSilencePrefix pins a captured byte run is all zeros (the
+// digital-silence mic-join seed - any non-zero byte there means the
+// bridge injected audio the contract says it must not).
+func linkAssertSilencePrefix(t *testing.T, got []byte, what string) {
+	t.Helper()
+	for i, b := range got {
+		if b != 0 {
+			t.Fatalf("%s byte %d = %d, want 0 (seed must be digital silence)", what, i, b)
+		}
 	}
 }
 
@@ -602,21 +634,28 @@ func TestLinkRealLegEndToEndBothDirections(t *testing.T) {
 	aChildOut := linkDialChildPairCapturing(t, link.ACCID)
 	bChildOut := linkDialChildPairCapturing(t, link.BCCID)
 
+	// Mic-join silence seed (turn-taking leaf): the bridge leads each
+	// mic with exact zero chunks so a leg's join gate never depends on
+	// greeting audio (B no longer greets). The seed therefore arrives at
+	// each child .in BEFORE the crossed speech - wait for seed + payload
+	// and compare the payload tail, pinning the seed prefix is silence.
+	seedBytes := linkSilenceSeedChunks * 640
+
 	// A's child speaks (greeting-equivalent): 8 exact 640 B chunks.
 	sentA := linkWriteChunks(t, aChildOut, 8)
 	// B's child .in must receive them byte-exact - proves A's paced
 	// outbound survived the pre-accept window AND the a->b pump moved
 	// bytes into B's splice inbound.
-	gotB := linkWaitBytes(t, func() []byte { return localChildInBytes(link.BCCID) }, len(sentA))
-	if string(gotB) != string(sentA) {
-		t.Fatalf("a->b e2e corrupted: got %d B, want %d B exact", len(gotB), len(sentA))
+	gotB := linkWaitBytes(t, func() []byte { return localChildInBytes(link.BCCID) }, seedBytes+len(sentA))
+	linkAssertSilencePrefix(t, gotB[:seedBytes], "a->b seed")
+	if string(gotB[seedBytes:seedBytes+len(sentA)]) != string(sentA) {
+		t.Fatalf("a->b e2e corrupted: got %d B, want %d B exact after seed", len(gotB), seedBytes+len(sentA))
 	}
 
 	// Mirror direction: B's child speaks, A's child .in receives.
 	sentB := linkWriteChunks(t, bChildOut, 8)
-	gotA := linkWaitBytes(t, func() []byte { return localChildInBytes(link.ACCID) }, len(sentB))
-	// A's capture may also hold... nothing else writes toward A's child;
-	// the ONLY source is the b->a pump. Check the trailing exact match.
+	gotA := linkWaitBytes(t, func() []byte { return localChildInBytes(link.ACCID) }, seedBytes+len(sentB))
+	linkAssertSilencePrefix(t, gotA[:seedBytes], "b->a seed")
 	if string(gotA[len(gotA)-len(sentB):]) != string(sentB) {
 		t.Fatalf("b->a e2e corrupted: got %d B tail, want %d B exact", len(gotA), len(sentB))
 	}
@@ -906,6 +945,10 @@ func TestLinkMonitorNoClientNoStall(t *testing.T) {
 	bMic := leg.accepted(link.BCCID, true)
 	defer bMic.Close()
 
+	// Drain the bridge's mic-join silence seed first (see
+	// TestLinkBridgeByteExact).
+	linkDrainSilenceSeed(t, bMic)
+
 	// Drive 20 chunks while nobody listens on the tap socket. The
 	// bridge must stay byte-exact regardless.
 	var sent []byte
@@ -980,5 +1023,365 @@ func TestLinkMonitorPathTooLong(t *testing.T) {
 		if strings.Contains(e.Name(), ".mon-") {
 			t.Fatalf("monitor socket leaked past the path guard: %s", e.Name())
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Half-duplex turn-taking coordinator (turn-taking leaf): the coordinator
+// pins drive a FAKE turn-state stream against the real seam closures; the
+// loop-side park/flush semantics are pinned above (fake HoldPrompt, no
+// coordinator).
+// ---------------------------------------------------------------------------
+
+// loopHeldPrompt reads the loop's parked-prompt slot (in-package test
+// seam - heldMu guards only the swap).
+func loopHeldPrompt(l *TalkLoop) bool {
+	l.heldMu.Lock()
+	defer l.heldMu.Unlock()
+	return l.held != nil
+}
+
+// syncBuffer is a mutex-guarded bytes.Buffer: the coordinator tests read
+// log lines while the bound loops' goroutines still write them.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func newTestCoordinator(margin time.Duration, logger *slog.Logger) *LinkTurnCoordinator {
+	return NewLinkTurnCoordinator("link-test", margin, logger)
+}
+
+func TestLinkCoordinatorGreetingSuppression(t *testing.T) {
+	c := newTestCoordinator(10*time.Millisecond, linkDiscard())
+	if c.SuppressesGreeting(LinkSideA) {
+		t.Fatal("side A must NOT suppress its greeting (A greets, B opens silent)")
+	}
+	if !c.SuppressesGreeting(LinkSideB) {
+		t.Fatal("side B must suppress its greeting (single-greeting contract)")
+	}
+}
+
+func TestLinkCoordinatorHoldDecision(t *testing.T) {
+	c := newTestCoordinator(time.Hour, linkDiscard()) // margin never fires in this test
+	holdA := c.HoldPromptFor(LinkSideA)
+	holdB := c.HoldPromptFor(LinkSideB)
+	finalA := c.TurnStateFor(LinkSideA)
+
+	if holdA == nil || holdB == nil {
+		t.Fatal("bound sides must get a non-nil HoldPrompt")
+	}
+	// Idle link: A may speak, and the allow CLAIMS the speaker slot.
+	if !holdA(Instance{CallControlID: "a"}, func() {}) {
+		t.Fatal("first A prompt with an idle peer must be allowed")
+	}
+	// While A holds the floor, B's prompt parks.
+	if holdB(Instance{CallControlID: "b"}, func() {}) {
+		t.Fatal("B prompt while A holds the floor must be held")
+	}
+	// A's own second prompt is NOT held by itself (same-side supersede
+	// is the loop's legacy rule, not the coordinator's).
+	if !holdA(Instance{CallControlID: "a"}, func() {}) {
+		t.Fatal("same-side prompt must not be held by its own turn")
+	}
+	// A's turn_final frees the floor: B's next prompt is allowed.
+	finalA("cc-a", 1, TurnKindFinal)
+	c.mu.Lock()
+	busyA := c.a.busy
+	c.mu.Unlock()
+	if busyA {
+		t.Fatal("A still busy after turn_final")
+	}
+	if !holdB(Instance{CallControlID: "b"}, func() {}) {
+		t.Fatal("B prompt after A's turn_final must be allowed")
+	}
+}
+
+// TestLinkCoordinatorHeldPromptReleasesAfterMargin wires TWO real talk
+// loops to the coordinator exactly like the daemon's routeFrame does for
+// a link, drives a fake A turn-state stream, and pins the full release
+// path: B parks while A is mid-turn, the drain margin must elapse before
+// the release, and the parked dispatch then runs with prompt_released.
+func TestLinkCoordinatorHeldPromptReleasesAfterMargin(t *testing.T) {
+	var buf syncBuffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	sink := &recordSink{}
+	sup := &cannedSupervisor{}
+	turnsB := &holdTurns{reply: "Answer for B."}
+	turnsA := &holdTurns{reply: "Answer for A."}
+
+	c := newTestCoordinator(80*time.Millisecond, linkDiscard())
+
+	// REAL B loop, bound like routeFrame does (HoldPrompt + TurnState +
+	// Bind).
+	loopB := NewTalkLoop(TalkDeps{
+		Supervisor: sup,
+		Turns:      turnsB,
+		SessionFor: constSession(SessionHandle{ID: "s", ConversationID: "c"}),
+		Send:       sink.Send,
+		OnEnd:      func(ccid, reason string) {},
+		Logger:     logger,
+		HoldPrompt: c.HoldPromptFor(LinkSideB),
+		TurnState:  c.TurnStateFor(LinkSideB),
+	}, TalkLoopConfig{})
+	c.Bind(LinkSideB, loopB)
+	// REAL A loop with the single-greeting suppression honored.
+	loopA := NewTalkLoop(TalkDeps{
+		Supervisor: sup,
+		Turns:      turnsA,
+		SessionFor: constSession(SessionHandle{ID: "s", ConversationID: "c"}),
+		Send:       sink.Send,
+		OnEnd:      func(ccid, reason string) {},
+		Logger:     logger,
+		HoldPrompt: c.HoldPromptFor(LinkSideA),
+		TurnState:  c.TurnStateFor(LinkSideA),
+	}, TalkLoopConfig{SuppressGreeting: true})
+	c.Bind(LinkSideA, loopA)
+
+	cancelB, doneB := runLoop(t, loopB, "cc-b")
+	defer func() { cancelB(); <-doneB }()
+	cancelA, doneA := runLoop(t, loopA, "cc-a")
+	defer func() { cancelA(); <-doneA }()
+
+	// B parks its question while A is mid-turn (the fake stream marks
+	// the floor taken).
+	c.TurnStateFor(LinkSideA)("cc-a", 1, TurnKindStart)
+	loopB.frames <- finalPrompt("cc-b", "question while A talks")
+	waitFor(t, 2*time.Second, "park", func() bool {
+		return loopHeldPrompt(loopB) && turnsB.count() == 0
+	})
+
+	// A finalizes; the margin must elapse BEFORE the release: sample
+	// early and assert still parked.
+	start := time.Now()
+	c.TurnStateFor(LinkSideA)("cc-a", 1, TurnKindFinal)
+	time.Sleep(20 * time.Millisecond)
+	if turnsB.count() != 0 || !loopHeldPrompt(loopB) {
+		t.Fatal("B released before the drain margin elapsed")
+	}
+	waitFor(t, 3*time.Second, "B released after margin", func() bool { return turnsB.count() == 1 })
+	if elapsed := time.Since(start); elapsed < 80*time.Millisecond {
+		t.Fatalf("release at %v < margin 80ms", elapsed)
+	}
+
+	// Telemetry pins: prompt_held then prompt_released, each with ccid.
+	logs := buf.String()
+	for _, want := range []string{`kind=prompt_held`, `ccid=cc-b`, `kind=prompt_released`} {
+		if !strings.Contains(logs, want) {
+			t.Errorf("telemetry missing %q:\n%s", want, logs)
+		}
+	}
+	// B's released turn spoke its reply.
+	waitFor(t, 2*time.Second, "B reply spoken", func() bool { return len(sink.sayTexts()) >= 1 })
+}
+
+// TestLinkCoordinatorIdleReleasesHeldPromptImmediately pins the barge-in
+// edge: a speaker going idle WITHOUT a final (nothing is playing)
+// releases the parked prompt at once - no margin wait.
+func TestLinkCoordinatorIdleReleasesHeldPromptImmediately(t *testing.T) {
+	turnsB := &holdTurns{reply: "ok."}
+	c := newTestCoordinator(time.Hour, linkDiscard()) // margin never fires
+	loopB := NewTalkLoop(TalkDeps{
+		Supervisor: &cannedSupervisor{},
+		Turns:      turnsB,
+		SessionFor: constSession(SessionHandle{ID: "s", ConversationID: "c"}),
+		Send:       (&recordSink{}).Send,
+		OnEnd:      func(ccid, reason string) {},
+		Logger:     testLogger(),
+		HoldPrompt: c.HoldPromptFor(LinkSideB),
+		TurnState:  c.TurnStateFor(LinkSideB),
+	}, TalkLoopConfig{})
+	c.Bind(LinkSideB, loopB)
+	cancelB, doneB := runLoop(t, loopB, "cc-b2")
+	defer func() { cancelB(); <-doneB }()
+
+	c.TurnStateFor(LinkSideA)("cc-a", 1, TurnKindStart)
+	loopB.frames <- finalPrompt("cc-b2", "parked under A")
+	waitFor(t, 2*time.Second, "park", func() bool { return loopHeldPrompt(loopB) })
+
+	c.TurnStateFor(LinkSideA)("cc-a", 1, TurnKindIdle)
+	waitFor(t, 2*time.Second, "idle release", func() bool { return turnsB.count() == 1 })
+}
+
+// TestLinkCoordinatorUnbindReleasesHeldPrompt pins teardown: A's loop
+// dying must not strand B's parked prompt.
+func TestLinkCoordinatorUnbindReleasesHeldPrompt(t *testing.T) {
+	turnsB := &holdTurns{reply: "ok."}
+	c := newTestCoordinator(time.Hour, linkDiscard())
+	loopB := NewTalkLoop(TalkDeps{
+		Supervisor: &cannedSupervisor{},
+		Turns:      turnsB,
+		SessionFor: constSession(SessionHandle{ID: "s", ConversationID: "c"}),
+		Send:       (&recordSink{}).Send,
+		OnEnd:      func(ccid, reason string) {},
+		Logger:     testLogger(),
+		HoldPrompt: c.HoldPromptFor(LinkSideB),
+		TurnState:  c.TurnStateFor(LinkSideB),
+	}, TalkLoopConfig{})
+	c.Bind(LinkSideB, loopB)
+	cancelB, doneB := runLoop(t, loopB, "cc-b3")
+	defer func() { cancelB(); <-doneB }()
+
+	c.TurnStateFor(LinkSideA)("cc-a", 1, TurnKindStart)
+	loopB.frames <- finalPrompt("cc-b3", "parked under A")
+	waitFor(t, 2*time.Second, "park", func() bool { return loopHeldPrompt(loopB) })
+
+	c.Unbind(LinkSideA)
+	waitFor(t, 2*time.Second, "unbind release", func() bool { return turnsB.count() == 1 })
+}
+
+// TestLinkCoordinatorStaleMarginFireNoRelease pins the generation
+// guard: A finalizes (margin armed), then A starts a NEW turn before
+// the fire - the stale margin must NOT release B's park (the floor is
+// taken again).
+func TestLinkCoordinatorStaleMarginFireNoRelease(t *testing.T) {
+	turnsB := &holdTurns{reply: "ok."}
+	c := newTestCoordinator(40*time.Millisecond, linkDiscard())
+	loopB := NewTalkLoop(TalkDeps{
+		Supervisor: &cannedSupervisor{},
+		Turns:      turnsB,
+		SessionFor: constSession(SessionHandle{ID: "s", ConversationID: "c"}),
+		Send:       (&recordSink{}).Send,
+		OnEnd:      func(ccid, reason string) {},
+		Logger:     testLogger(),
+		HoldPrompt: c.HoldPromptFor(LinkSideB),
+		TurnState:  c.TurnStateFor(LinkSideB),
+	}, TalkLoopConfig{})
+	c.Bind(LinkSideB, loopB)
+	cancelB, doneB := runLoop(t, loopB, "cc-b4")
+	defer func() { cancelB(); <-doneB }()
+
+	stateA := c.TurnStateFor(LinkSideA)
+	stateA("cc-a", 1, TurnKindStart)
+	loopB.frames <- finalPrompt("cc-b4", "parked")
+	waitFor(t, 2*time.Second, "park", func() bool { return loopHeldPrompt(loopB) })
+
+	stateA("cc-a", 1, TurnKindFinal)
+	stateA("cc-a", 2, TurnKindStart) // A speaks again before the margin fires
+	time.Sleep(120 * time.Millisecond)
+	if turnsB.count() != 0 {
+		t.Fatal("stale margin released B while A re-took the floor")
+	}
+	if !loopHeldPrompt(loopB) {
+		t.Fatal("park vanished without a release")
+	}
+	// A's second turn finalizes -> THIS margin releases.
+	stateA("cc-a", 2, TurnKindFinal)
+	waitFor(t, 2*time.Second, "second margin releases", func() bool { return turnsB.count() == 1 })
+}
+
+func TestLinkCoordinatorRegistryRoundTrip(t *testing.T) {
+	reg := NewLinkTurnRegistry(linkDiscard())
+	c := newTestCoordinator(time.Second, linkDiscard())
+	reg.Register("local:link-a-x", "link-x", LinkSideA, c)
+	reg.Register("local:link-b-x", "link-x", LinkSideB, c)
+
+	got, side := reg.Lookup("local:link-a-x")
+	if got != c || side != LinkSideA {
+		t.Fatalf("Lookup a = %v/%q", got, side)
+	}
+	// Non-link targets never match (plain local/phone calls are
+	// unaffected by the seam).
+	if got, _ := reg.Lookup("local:plain"); got != nil {
+		t.Fatal("plain target must not resolve a coordinator")
+	}
+	if got, _ := reg.Lookup(""); got != nil {
+		t.Fatal("empty target must not resolve")
+	}
+	reg.Unregister("local:link-a-x", "local:link-b-x")
+	if got, _ := reg.Lookup("local:link-a-x"); got != nil {
+		t.Fatal("unregistered target still resolves")
+	}
+	// Idempotent second unregister.
+	reg.Unregister("local:link-a-x", "local:link-b-x")
+}
+
+// TestLinkOpenRegistersCoordinatorTargets drives the real LinkManager:
+// a link's registry targets resolve to a live coordinator BEFORE the
+// legs' setup frames could arrive, side b carries the greeting
+// suppression, and Close tears the registration down.
+func TestLinkOpenRegistersCoordinatorTargets(t *testing.T) {
+	leg := newLinkFakeLeg(t)
+	reg := NewLinkTurnRegistry(linkDiscard())
+	m, err := NewLinkManager(LinkDeps{
+		Leg:         leg,
+		Store:       &linkFakeStore{calls: map[string][]TranscriptLine{}},
+		DialTimeout: 3 * time.Second,
+		RetainEnded: time.Hour,
+		Turns:       reg,
+		TurnMargin:  25 * time.Millisecond,
+		Logger:      linkDiscard(),
+	})
+	if err != nil {
+		t.Fatalf("NewLinkManager: %v", err)
+	}
+	link, err := m.Open(context.Background(), "alice", "bob")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	suffix := link.ID[len("link-"):]
+	coordA, sideA := reg.Lookup("local:link-a-" + suffix)
+	coordB, sideB := reg.Lookup("local:link-b-" + suffix)
+	if coordA == nil || coordB == nil || coordA != coordB {
+		t.Fatalf("link targets unresolved: a=%v b=%v", coordA, coordB)
+	}
+	if sideA != LinkSideA || sideB != LinkSideB {
+		t.Fatalf("sides = %q/%q, want a/b", sideA, sideB)
+	}
+	if !coordB.SuppressesGreeting(sideB) {
+		t.Fatal("greeting suppression must land on side b")
+	}
+	if coordA.SuppressesGreeting(sideA) {
+		t.Fatal("side a must greet (exactly one greeting per link)")
+	}
+	if err := m.Close(link.ID, "test close"); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if got, _ := reg.Lookup("local:link-a-" + suffix); got != nil {
+		t.Fatal("Close left the coordinator registered")
+	}
+	if got, _ := reg.Lookup("local:link-b-" + suffix); got != nil {
+		t.Fatal("Close left the b-side coordinator registered")
+	}
+}
+
+// TestLinkOpenUnwindUnregisters covers the refusal path: a failed second
+// leg open must drop the pre-registered targets (no stale coordinator
+// for a never-existing link).
+func TestLinkOpenUnwindUnregisters(t *testing.T) {
+	leg := newLinkFakeLeg(t)
+	leg.failOpenN = 2
+	reg := NewLinkTurnRegistry(linkDiscard())
+	m, err := NewLinkManager(LinkDeps{
+		Leg:         leg,
+		Store:       &linkFakeStore{calls: map[string][]TranscriptLine{}},
+		DialTimeout: 3 * time.Second,
+		RetainEnded: time.Hour,
+		Turns:       reg,
+		Logger:      linkDiscard(),
+	})
+	if err != nil {
+		t.Fatalf("NewLinkManager: %v", err)
+	}
+	if _, err := m.Open(context.Background(), "alice", "bob"); err == nil {
+		t.Fatal("Open must refuse")
+	}
+	reg.mu.Lock()
+	n := len(reg.byTarget)
+	reg.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("%d coordinator targets leaked past an unwound Open", n)
 	}
 }

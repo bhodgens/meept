@@ -48,11 +48,16 @@ package voice
 //     rows / voice.local.barge_in_rms=0); leaf 03 deliberately ships no
 //     per-call knob because the seam does not exist and local.go is
 //     frozen for this leaf.
-//   - Greetings still play (fact-free, talk-loop seeded) - the greeting
-//     audio crossing into the other leg's mic is the conversation SEED:
-//     it also satisfies the splice's client-join grace (a first mic
-//     byte within JoinTimeout, default 10 s), so neither leg reaps with
-//     ErrNoClient as long as the child answers setup promptly.
+//   - Greetings. The half-duplex coordinator (turn-taking leaf) hands
+//     side B a SuppressGreeting loop: exactly ONE side (A) greets on
+//     connect, and A's greeting audio crossing into B's mic is the
+//     conversation SEED prompt for B (both-greeting was the live-run
+//     defect link-6a3f3b65: two employees saying hello at once). The
+//     splice's client-join grace (a first mic byte within JoinTimeout,
+//     default 10 s) is satisfied by the bridge's deterministic silence
+//     seed at dial (linkSilenceSeedChunks) - with B silent on open, A's
+//     mic would otherwise starve until B's first LLM reply, which a
+//     slow model could push past the gate.
 //   - The silence reaper (45 s talk-loop timer) stays ENABLED: it is the
 //     dead-air circuit breaker, and the acceptance run must prove it
 //     fires or never has to.
@@ -91,6 +96,356 @@ const maxMonitorSocketPathLen = 100
 // derived monitor socket path (<pair dir>/<link id>.mon-a|.mon-b) would
 // overflow the kernel sun_path limit.
 var ErrLinkMonitorPathTooLong = errors.New("voice: voice link: monitor socket path exceeds the unix sun_path limit")
+
+// linkTurnMarginDefault is the drain window the half-duplex coordinator
+// waits after one side's turn_final before releasing the other side's
+// parked prompt: the last sentence must finish its paced TTS + bridge
+// transit (and the listener's STT must NOT hear it as a new prompt
+// mid-turn) before the listener may speak.
+const linkTurnMarginDefault = 600 * time.Millisecond
+
+// linkSilenceSeedChunks is the mic-join seed length in exact 640 B
+// L16@16k chunks (5 chunks = 100 ms of digital silence per side).
+// Enough to satisfy the splice's first-byte join gate, short enough to
+// stay inside a unix socket buffer alongside the first pumped speech
+// (the pumps must never block on an unread seeded mic).
+const linkSilenceSeedChunks = 5
+
+// Link turn side ids - side A greets, side B opens silent (the
+// single-greeting contract: A's greeting audio crosses into B's mic and
+// arrives as B's first final prompt, the conversation seed).
+const (
+	LinkSideA = "a"
+	LinkSideB = "b"
+)
+
+// linkTurnSideState is one side's half-duplex slot: its bound talk loop
+// (nil until the wiring's routeFrame constructs it, and again on
+// teardown), whether it is mid-turn, the seq of the live turn, and the
+// armed drain-margin timer from its last turn_final. marginGen is the
+// timer identity: every re-arm bumps it, and a stale timer's callback
+// fire (Stop racing a buffered signal) compares its captured gen and
+// no-ops, so a superseded margin can never release on the wrong edge.
+type linkTurnSideState struct {
+	loop        *TalkLoop
+	busy        bool
+	marginTimer *time.Timer
+	marginGen   uint64
+}
+
+// LinkTurnCoordinator enforces one-speaker-at-a-time on ONE voice link
+// (turn-taking leaf, live-run defect link-6a3f3b65: two independent
+// talk loops greeted at once and each side's STT dispatched while the
+// other was still speaking -> simultaneous audio + half-answers).
+//
+// Contract:
+//   - at most ONE side is busy (mid-turn) at a time;
+//   - the listener's final prompt parks (HoldPrompt returns false, the
+//     loop stores ONE pending dispatch - latest question wins) until the
+//     speaker's turn_final rides the drain margin, or the speaker goes
+//     idle without a final (barge-in cancel: release is immediate,
+//     nothing is playing);
+//   - side B never greets (TalkLoopConfig.SuppressGreeting honored by
+//     the wiring when it constructs B's loop).
+//
+// Thread shape: every method takes c.mu ONLY for state swaps and never
+// invokes a callback or performs I/O under it (repo mutex-scope rule).
+// The flush edge into a loop is TalkLoop.FlushHeld - a non-blocking send
+// on a buffered channel; the parked dispatch always runs on the loop's
+// own Run goroutine.
+type LinkTurnCoordinator struct {
+	id     string
+	log    *slog.Logger
+	margin time.Duration
+
+	mu     sync.Mutex
+	a      linkTurnSideState
+	b      linkTurnSideState
+	closed bool // link Closed/unwound: parks DROP at loop exit, never dispatch into a dying peer
+}
+
+func NewLinkTurnCoordinator(linkID string, margin time.Duration, logger *slog.Logger) *LinkTurnCoordinator {
+	if margin <= 0 {
+		margin = linkTurnMarginDefault
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &LinkTurnCoordinator{id: linkID, log: logger.With("sub", "link-turn", "link_id", linkID), margin: margin}
+}
+
+// side returns the state slot for one side id. Callers hold c.mu.
+func (c *LinkTurnCoordinator) sideLocked(side string) *linkTurnSideState {
+	if side == LinkSideB {
+		return &c.b
+	}
+	return &c.a
+}
+
+func (c *LinkTurnCoordinator) peerLocked(side string) *linkTurnSideState {
+	if side == LinkSideB {
+		return &c.a
+	}
+	return &c.b
+}
+
+// Bind attaches a constructed talk loop to one side (the wiring calls it
+// right after the loop registers). Re-binding replaces the loop (a
+// duplicate setup was already refused upstream; this is the defensive
+// shape, not a live path).
+func (c *LinkTurnCoordinator) Bind(side string, loop *TalkLoop) {
+	c.mu.Lock()
+	st := c.sideLocked(side)
+	st.loop = loop
+	c.mu.Unlock()
+}
+
+// Unbind detaches a side at loop exit: the side goes idle (it will never
+// finish another turn), its margin timer stands down, and the PEER's
+// parked prompt is released immediately - a prompt held by a dead side
+// would otherwise wait forever. FlushHeld on a dead peer loop is a
+// no-op (the loop's Run already dropped its park with the
+// prompt_dropped telemetry line).
+func (c *LinkTurnCoordinator) Unbind(side string) {
+	c.mu.Lock()
+	st := c.sideLocked(side)
+	st.loop = nil
+	st.busy = false
+	st.marginTimer = nil
+	st.marginGen++ // any armed margin from this side is now stale
+	peer := c.peerLocked(side)
+	peerLoop := peer.loop
+	release := peerLoop != nil && !c.closed
+	c.mu.Unlock()
+	if release {
+		// The link is still alive: a dead side can no longer answer, so
+		// the peer's parked prompt must not strand - flush it. On a
+		// CLOSED coordinator the park instead rides the dying peer loop's
+		// own exit drop (never dispatched into a torn-down call).
+		peerLoop.FlushHeld()
+	}
+	c.log.Info("voice: link turn: side unbound", "ccid_side", side)
+}
+
+// SuppressesGreeting is the single-greeting rule the wiring consults
+// when constructing a side's loop: side A greets, side B opens silent.
+func (c *LinkTurnCoordinator) SuppressesGreeting(side string) bool {
+	return side == LinkSideB
+}
+
+// HoldPromptFor returns the side's TalkDeps.HoldPrompt closure (nil on a
+// nil coordinator: plain local/phone calls never bind here). Allow is a
+// CLAIM, not just a vote: when the peer is NOT mid-turn, this side marks
+// itself busy BEFORE returning true, so two prompts arriving at both
+// sides near-simultaneously cannot each observe an idle peer and
+// dispatch together - the loser of the mutex race parks instead. The
+// claim is confirmed by the loop's own turn_start (same side, idempotent)
+// and cleared by every terminal edge (turn_final, idle, unbind); a
+// claimed dispatch always runs synchronously in the loop's EventPrompt
+// branch right after this returns true.
+func (c *LinkTurnCoordinator) HoldPromptFor(side string) func(Instance, func()) bool {
+	if c == nil {
+		return nil
+	}
+	return func(call Instance, _ func()) bool {
+		c.mu.Lock()
+		peer := c.peerLocked(side)
+		if peer.busy {
+			c.mu.Unlock()
+			c.log.Info("voice: link turn: hold decision", "side", side,
+				"kind", "hold_decision", "ccid", call.CallControlID, "peer_side_held", true)
+			return false
+		}
+		st := c.sideLocked(side)
+		st.busy = true
+		c.mu.Unlock()
+		return true
+	}
+}
+
+// TurnStateFor returns the side's TalkDeps.TurnState closure - the
+// half-duplex observation edge (turn_start -> this side is the speaker;
+// turn_final -> it just flushed, arm the margin then release the peer;
+// idle -> it stopped speaking without a final, release the peer now).
+// A second turn_start on the same side (supersede inside one side) also
+// cancels a previously armed margin: the side is speaking again.
+func (c *LinkTurnCoordinator) TurnStateFor(side string) func(ccid string, seq uint64, kind string) {
+	if c == nil {
+		return nil
+	}
+	return func(ccid string, seq uint64, kind string) {
+		c.mu.Lock()
+		st := c.sideLocked(side)
+		peer := c.peerLocked(side)
+		switch kind {
+		case TurnKindStart:
+			st.busy = true
+			if st.marginTimer != nil {
+				st.marginTimer.Stop()
+				st.marginTimer = nil
+			}
+			st.marginGen++ // invalidate any armed margin from this side
+			c.mu.Unlock()
+		case TurnKindFinal:
+			st.busy = false
+			if st.marginTimer != nil {
+				st.marginTimer.Stop()
+			}
+			gen := st.marginGen + 1
+			st.marginGen = gen
+			peerLoop := peer.loop
+			c.mu.Unlock()
+			if peerLoop == nil {
+				// Peer has no loop under us - nothing parked to release.
+				return
+			}
+			// Drain margin: trailing sentences + TTS tail leave the
+			// bridge before the parked listener dispatches. A second
+			// turn_start on this side before the fire bumps marginGen
+			// and the stale fire no-ops; the release itself is
+			// idempotent (FlushHeld is a buffered non-blocking signal
+			// and releaseHeld no-ops with nothing parked).
+			c.mu.Lock()
+			if st.marginGen == gen {
+				st.marginTimer = time.AfterFunc(c.margin, func() {
+					c.mu.Lock()
+					stillCurrent := st.marginGen == gen && !st.busy
+					loop := peer.loop
+					c.mu.Unlock()
+					if stillCurrent && loop != nil {
+						c.log.Info("voice: link turn: margin released", "side", side,
+							"kind", "margin_release", "ccid", ccid, "seq", seq)
+						loop.FlushHeld()
+					}
+				})
+			}
+			c.mu.Unlock()
+		case TurnKindIdle:
+			st.busy = false
+			if st.marginTimer != nil {
+				st.marginTimer.Stop()
+				st.marginTimer = nil
+			}
+			st.marginGen++ // no pending release rides an idle side
+			peerLoop := peer.loop
+			c.mu.Unlock()
+			if peerLoop != nil {
+				peerLoop.FlushHeld()
+			}
+		default:
+			c.mu.Unlock()
+		}
+	}
+}
+
+// LinkTurnRegistry maps a live call's REGISTRY TARGET (the
+// deterministic "local:link-a-<suffix>" / "local:link-b-<suffix>" the
+// leg records) to its coordinator + side. The pre-registration rides
+// the target, NOT the ccid, because the child's setup frame can reach
+// the daemon's frame router while LinkManager.Open is still executing -
+// by target both sides are knowable BEFORE either leg opens (the suffix
+// is minted in Open). Non-link calls (phone, plain local) never match:
+// Lookup returns nil and the wiring builds a legacy uncoordinated loop.
+type LinkTurnRegistry struct {
+	mu       sync.Mutex
+	byTarget map[string]linkedTurnSide
+	log      *slog.Logger
+}
+
+type linkedTurnSide struct {
+	coord *LinkTurnCoordinator
+	side  string
+}
+
+// NewLinkTurnRegistry constructs the shared registry. A nil logger falls
+// back to slog.Default.
+func NewLinkTurnRegistry(logger *slog.Logger) *LinkTurnRegistry {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &LinkTurnRegistry{
+		byTarget: make(map[string]linkedTurnSide),
+		log:      logger,
+	}
+}
+
+// Register pre-binds one link side's target to its coordinator. Safe to
+// call before the leg opens (that is the point). Re-registering a target
+// overwrites (defensive; the registry's one-live-per-target rule makes
+// collisions a stale-entry path only).
+func (r *LinkTurnRegistry) Register(target, linkID, side string, coord *LinkTurnCoordinator) {
+	if r == nil || target == "" || coord == nil {
+		return
+	}
+	r.mu.Lock()
+	r.byTarget[target] = linkedTurnSide{coord: coord, side: side}
+	r.mu.Unlock()
+}
+
+// Lookup resolves a target to its coordinator + side (nil = no
+// coordinator, the legacy construction path).
+func (r *LinkTurnRegistry) Lookup(target string) (*LinkTurnCoordinator, string) {
+	if r == nil || target == "" {
+		return nil, ""
+	}
+	r.mu.Lock()
+	entry, ok := r.byTarget[target]
+	r.mu.Unlock()
+	if !ok {
+		return nil, ""
+	}
+	return entry.coord, entry.side
+}
+
+// Unregister drops a link's two targets, flushing both sides (a parked
+// prompt must not sit on a dead coordinator). Idempotent.
+func (r *LinkTurnRegistry) Unregister(targets ...string) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	var coords []*LinkTurnCoordinator
+	for _, t := range targets {
+		if entry, ok := r.byTarget[t]; ok {
+			delete(r.byTarget, t)
+			seen := false
+			for _, c := range coords {
+				if c == entry.coord {
+					seen = true
+					break
+				}
+			}
+			if !seen {
+				coords = append(coords, entry.coord)
+			}
+		}
+	}
+	r.mu.Unlock()
+	for _, c := range coords {
+		c.Shutdown()
+	}
+}
+
+// Shutdown marks the coordinator closed and stops every margin timer
+// (link Close / unwind path). It does NOT flush parked prompts: both
+// loops die moments later through the Leg.End fan-out, and each run's
+// exit drops its own park with the prompt_dropped line - dispatching a
+// held turn into a call the operator just closed would be a half-answer
+// on a dead line.
+func (c *LinkTurnCoordinator) Shutdown() {
+	c.mu.Lock()
+	c.closed = true
+	for _, side := range []string{LinkSideA, LinkSideB} {
+		st := c.sideLocked(side)
+		if st.marginTimer != nil {
+			st.marginTimer.Stop()
+			st.marginTimer = nil
+		}
+		st.busy = false
+		st.marginGen++ // no pending release rides a dead coordinator
+	}
+	c.mu.Unlock()
+}
 
 // monitorWriteDeadline bounds one tap write. A monitor client that
 // stops draining must NEVER stall the bridge: the write fails at the
@@ -160,7 +515,21 @@ type LinkDeps struct {
 	Dial        func(ctx context.Context, path string) (net.Conn, error)
 	DialTimeout time.Duration
 	RetainEnded time.Duration
-	Logger      *slog.Logger
+	// Turns is the half-duplex coordinator registry shared with the
+	// daemon's frame router: the wiring's VoiceWiring owns the registry
+	// (it is the only component that constructs talk loops, on setup)
+	// and passes the SAME instance here, so a link's two talk loops
+	// resolve their coordinator by registry target at construction.
+	// Nil: the manager constructs its own private registry - links stay
+	// half-duplex among themselves but nothing in the wiring can bind
+	// loops to it (tests-only shape; production wiring always shares).
+	Turns *LinkTurnRegistry
+	// TurnMargin is the drain window the half-duplex coordinator waits
+	// after a side's turn_final before releasing the other side's parked
+	// prompt (trailing sentences + paced TTS audio must leave the bridge
+	// before the listener may speak). Zero = linkTurnMarginDefault.
+	TurnMargin time.Duration
+	Logger     *slog.Logger
 }
 
 // LinkSide is one side's live status: routing ids plus turn counts read
@@ -201,8 +570,11 @@ type linkEntry struct {
 	ended      bool
 	endedAt    time.Time
 	closeConns sync.Once
-	monA       *monitorListener // tee sink for the a->b direction
-	monB       *monitorListener // tee sink for the b->a direction
+	monA       *monitorListener     // tee sink for the a->b direction
+	monB       *monitorListener     // tee sink for the b->a direction
+	turns      *LinkTurnCoordinator // half-duplex coordinator (never nil)
+	aTarget    string               // registry targets the coordinator
+	bTarget    string               // is registered/unregistered under
 }
 
 // tapA/tapB hand the pump the tee sink for one direction. A nil
@@ -382,6 +754,8 @@ type LinkManager struct {
 	log         *slog.Logger
 	dialTimeout time.Duration
 	retain      time.Duration
+	turns       *LinkTurnRegistry
+	turnMargin  time.Duration
 
 	mu    sync.Mutex
 	links map[string]*linkEntry
@@ -402,7 +776,18 @@ func NewLinkManager(deps LinkDeps) (*LinkManager, error) {
 		log:         deps.Logger,
 		dialTimeout: deps.DialTimeout,
 		retain:      deps.RetainEnded,
+		turns:       deps.Turns,
+		turnMargin:  deps.TurnMargin,
 		links:       make(map[string]*linkEntry),
+	}
+	if m.turns == nil {
+		// Private registry: links are half-duplex among themselves but
+		// nothing outside the manager can resolve their coordinators
+		// (tests; production wiring always shares VoiceWiring's).
+		m.turns = NewLinkTurnRegistry(deps.Logger)
+	}
+	if m.turnMargin <= 0 {
+		m.turnMargin = linkTurnMarginDefault
 	}
 	if m.dialTimeout <= 0 {
 		m.dialTimeout = linkDialTimeoutDefault
@@ -457,14 +842,28 @@ func (m *LinkManager) Open(ctx context.Context, employeeA, employeeB string, opt
 	// "link-a"/"link-b" shapes the leaf doc pins.
 	suffix := linkID[len("link-"):]
 
+	// Half-duplex coordinator (turn-taking leaf): registered under the
+	// deterministic registry targets BEFORE either leg opens - the
+	// child's setup frame can reach the daemon's frame router while Open
+	// is still executing, and by target both sides are knowable now. The
+	// wiring's routeFrame binds each constructed talk loop to its side
+	// through this registry (shared instance via LinkDeps.Turns).
+	aTarget := "local:link-a-" + suffix
+	bTarget := "local:link-b-" + suffix
+	coord := NewLinkTurnCoordinator(linkID, m.turnMargin, m.log)
+	m.turns.Register(aTarget, linkID, LinkSideA, coord)
+	m.turns.Register(bTarget, linkID, LinkSideB, coord)
+
 	aCall, err := m.deps.Leg.Open(ctx, employeeA, "link-a-"+suffix)
 	if err != nil {
+		m.turns.Unregister(aTarget, bTarget)
 		return nil, fmt.Errorf("voice: voice link: open side a (%s): %w", employeeA, err)
 	}
 	bCall, err := m.deps.Leg.Open(ctx, employeeB, "link-b-"+suffix)
 	if err != nil {
 		// Unwind the first leg: End is idempotent, the release fan-out
 		// does the rest. The unwind error never masks the refusal.
+		m.turns.Unregister(aTarget, bTarget)
 		if endErr := m.deps.Leg.End(aCall.CallID, "link: side b open failed"); endErr != nil {
 			m.log.Debug("voice: link unwind: end side a", "ccid", aCall.CallID, "err", endErr)
 		}
@@ -482,18 +881,21 @@ func (m *LinkManager) Open(ctx context.Context, employeeA, employeeB string, opt
 		monAPath = filepath.Join(dir, linkID+".mon-a")
 		monBPath = filepath.Join(dir, linkID+".mon-b")
 		if len(monAPath) > maxMonitorSocketPathLen || len(monBPath) > maxMonitorSocketPathLen {
+			m.turns.Unregister(aTarget, bTarget)
 			m.unwindBoth(aCall, bCall, "link: monitor path too long")
 			return nil, fmt.Errorf("%w: %s", ErrLinkMonitorPathTooLong, monAPath)
 		}
 		var lerr error
 		monA, lerr = newMonitorListener(monAPath)
 		if lerr != nil {
+			m.turns.Unregister(aTarget, bTarget)
 			m.unwindBoth(aCall, bCall, "link: monitor listen failed")
 			return nil, fmt.Errorf("voice: voice link: %w", lerr)
 		}
 		monB, lerr = newMonitorListener(monBPath)
 		if lerr != nil {
 			monA.close()
+			m.turns.Unregister(aTarget, bTarget)
 			m.unwindBoth(aCall, bCall, "link: monitor listen failed")
 			return nil, fmt.Errorf("voice: voice link: %w", lerr)
 		}
@@ -501,6 +903,7 @@ func (m *LinkManager) Open(ctx context.Context, employeeA, employeeB string, opt
 
 	conns, derr := m.dialAll(ctx, aCall, bCall)
 	if derr != nil {
+		m.turns.Unregister(aTarget, bTarget)
 		m.closeConns(conns)
 		if monA != nil {
 			monA.close()
@@ -513,6 +916,23 @@ func (m *LinkManager) Open(ctx context.Context, employeeA, employeeB string, opt
 	}
 
 	pumpCtx, pumpCancel := context.WithCancel(context.Background())
+	// Mic silence seed (turn-taking leaf): with B's greeting suppressed,
+	// A's mic would receive NOTHING until B's first LLM reply is spoken
+	// - and the local splice's JoinTimeout (first client byte, 10 s)
+	// used to be satisfied by the OTHER side's greeting crossing the
+	// bridge (link.go header note). A short exact-chunk run of zero PCM
+	// into each mic joins both legs deterministically at dial time.
+	// Safe by the local-leg contract: full 640 B chunks never tear the
+	// splice's chunk framing (written BEFORE the pumps start, so nothing
+	// interleaves), zero energy never trips the RMS barge-in window or
+	// its echo guard, and a non-speech ([BLANK_AUDIO]) STT final from
+	// silence never dispatches a turn (C11 nonSpeechTranscript guard).
+	seedMic := make([]byte, linkSilenceSeedChunks*640)
+	for _, mic := range []net.Conn{conns[0], conns[2]} {
+		if _, serr := mic.Write(seedMic); serr != nil {
+			m.log.Debug("voice: link mic silence seed write", "err", serr)
+		}
+	}
 	entry := &linkEntry{
 		id:        linkID,
 		aCall:     aCall,
@@ -526,6 +946,9 @@ func (m *LinkManager) Open(ctx context.Context, employeeA, employeeB string, opt
 		cancel:    pumpCancel,
 		monA:      monA,
 		monB:      monB,
+		turns:     coord,
+		aTarget:   aTarget,
+		bTarget:   bTarget,
 	}
 	// CROSS-connect, byte-exact: A's speaker -> B's mic, B's speaker ->
 	// A's mic. io.Copy is the whole contract (no re-chunking: the daemon
@@ -761,6 +1184,17 @@ func (m *LinkManager) Close(linkID, reason string) error {
 	entry.endedAt = time.Now()
 	aCCID, bCCID := entry.aCall.CallID, entry.bCall.CallID
 	m.mu.Unlock()
+
+	// Half-duplex coordinator teardown: drop the registry entries (a
+	// stale target must never bind a FUTURE call) and release/stop any
+	// parked prompt + margin timer. The talk loops themselves end via
+	// the Leg.End fan-out below (loop ctx cancel -> Run exit drops any
+	// park with the prompt_dropped line).
+	m.turns.Unregister(entry.aTarget, entry.bTarget)
+	if entry.turns != nil {
+		entry.turns.Unbind(LinkSideA)
+		entry.turns.Unbind(LinkSideB)
+	}
 
 	// Teardown OUTSIDE the lock (repo rule: no I/O under mutex). Order
 	// mirrors a client hangup: kill the pumps + conns first so nothing
