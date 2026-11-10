@@ -5224,6 +5224,20 @@ type NotificationsConfig struct {
 	// this flag is checked at the EventEmitter dispatch layer and blocks
 	// every notification regardless of type, priority, or source.
 	DoNotDisturb bool `json:"do_not_disturb,omitempty" toml:"do_not_disturb"`
+
+	// Enabled is the kill-switch for the proactive notification bot
+	// stack (automation plan 2026-06-21 Plans 1.x/3.x):
+	// NotificationBot + CostTracker budget enforcement + push history +
+	// notification preferences + telegram push channel. Default zero
+	// value = OFF (additive opt-in, same posture as [intake]) so a
+	// wiring bug can never break message delivery at boot. The desktop
+	// notification emitter path above does NOT read this flag — it stays
+	// always-on exactly as before. Constructed by
+	// internal/daemon/notification_bot_wiring.go (wireNotificationBot).
+	BotNotifyOn         []string          `json:"bot_notify_on,omitempty"           toml:"bot_notify_on"`
+	BotRateLimitPerHour int               `json:"bot_rate_limit_per_hour,omitempty" toml:"bot_rate_limit_per_hour"`
+	BotTelegramChatIDs  []string          `json:"bot_telegram_chat_ids,omitempty"   toml:"bot_telegram_chat_ids"`
+	BotTemplates        map[string]string `json:"bot_templates,omitempty"           toml:"bot_templates"`
 }
 
 // ResolverConfig configures sandboxed-backend selection for [runtime]. It
