@@ -111,7 +111,8 @@ reshape, bus payloads).
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
 | 00T-plan-goal-tests | TESTS_VALIDATED | 1 | committed a59fbc4f (--no-verify RED-by-design); 14 RED tests, parent-verified contract-symbol-only |
-| 05-goal-transition-fence | IN_PROGRESS | 0 | dispatched 2026-11-09 (file-scoped internal/employee; siblings hold agent+plan store) |
+| 05-goal-transition-fence | REVIEWED | 1 | committed 091cc90b; parent-verified employee pkg green, gate hash stable; Retire dead-code kept (frozen gate calls it) |
+| 03-plan-cas | IN_PROGRESS | 0 | dispatched 2026-11-09 (store_sqlite+interface only; table+manager migration is leaf 04 after) |
 
 ## Integration Test Plan
 
