@@ -28,7 +28,7 @@ func (s *Store) QueryOpen(ctx context.Context, employeeID string) ([]State, erro
 		return nil, errors.New("ledger: query open: employee_id is required")
 	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT employee_id, subject, status, summary, updated_at, as_of
+		`SELECT employee_id, subject, status, summary, updated_at, as_of, due_at
          FROM ledger_state
          WHERE employee_id = ? AND status IN ('open', 'waiting_on_me', 'waiting_on_them')
          ORDER BY updated_at DESC, as_of DESC`,
@@ -132,7 +132,7 @@ func (s *Store) SearchLog(ctx context.Context, q LogQuery, term string) ([]Recor
 // the envelope, as_of from that row's id. Log-only rows never change
 // Want. A state key with no envelope rows at all has no derivable Want
 // and is counted in Checked but never flagged. Have vs Want compares
-// status, summary, and as_of (never updated_at).
+// status, summary, as_of, and due (never updated_at).
 //
 // The pool is single-connection (SetMaxOpenConns(1)), so the fold and
 // the state scan run as two SEQUENTIAL passes — one full ledger scan
@@ -145,7 +145,7 @@ func (s *Store) VerifyState(ctx context.Context) (*VerifyReport, error) {
 	}
 
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT employee_id, subject, status, summary, updated_at, as_of
+		`SELECT employee_id, subject, status, summary, updated_at, as_of, due_at
          FROM ledger_state ORDER BY employee_id ASC, subject ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("ledger: verify state: %w", err)
@@ -163,7 +163,8 @@ func (s *Store) VerifyState(ctx context.Context) (*VerifyReport, error) {
 		if !ok {
 			continue
 		}
-		if have.Status != want.Status || have.Summary != want.Summary || have.AsOf != want.AsOf {
+		if have.Status != want.Status || have.Summary != want.Summary || have.AsOf != want.AsOf ||
+			!have.Due.Equal(want.Due) {
 			report.Divergent++
 			report.Diffs = append(report.Diffs, StateDiff{
 				EmployeeID: have.EmployeeID,
@@ -217,6 +218,10 @@ func (s *Store) foldAll(ctx context.Context) (map[stateKey]State, error) {
 		if err != nil {
 			return nil, fmt.Errorf("ledger: verify state: fold: row %d: %w", id, err)
 		}
+		due, err := parseDueAt(env.Due)
+		if err != nil {
+			return nil, fmt.Errorf("ledger: verify state: fold: row %d: bad envelope due %q: %w", id, env.Due, err)
+		}
 		folded[stateKey{employeeID, subject}] = State{
 			EmployeeID: employeeID,
 			Subject:    subject,
@@ -224,6 +229,7 @@ func (s *Store) foldAll(ctx context.Context) (map[stateKey]State, error) {
 			Summary:    env.Summary,
 			UpdatedAt:  t,
 			AsOf:       id,
+			Due:        due,
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -253,14 +259,19 @@ func (s *Store) RepairState(ctx context.Context) (int, error) {
 	defer func() { _ = tx.Rollback() }() // no-op after Commit
 
 	for _, d := range report.Diffs {
+		dueAt := ""
+		if !d.Want.Due.IsZero() {
+			dueAt = d.Want.Due.UTC().Format(time.RFC3339)
+		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO ledger_state (employee_id, subject, status, summary, updated_at, as_of)
-             VALUES (?, ?, ?, ?, ?, ?)
+			`INSERT INTO ledger_state (employee_id, subject, status, summary, updated_at, as_of, due_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(employee_id, subject) DO UPDATE SET
                  status=excluded.status, summary=excluded.summary,
-                 updated_at=excluded.updated_at, as_of=excluded.as_of`,
+                 updated_at=excluded.updated_at, as_of=excluded.as_of,
+                 due_at=excluded.due_at`,
 			d.EmployeeID, d.Subject, string(d.Want.Status), d.Want.Summary,
-			d.Want.UpdatedAt.UTC().Format(time.RFC3339), d.Want.AsOf); err != nil {
+			d.Want.UpdatedAt.UTC().Format(time.RFC3339), d.Want.AsOf, dueAt); err != nil {
 			return 0, fmt.Errorf("ledger: repair state: upsert %s/%s: %w", d.EmployeeID, d.Subject, err)
 		}
 	}
@@ -270,26 +281,47 @@ func (s *Store) RepairState(ctx context.Context) (int, error) {
 	return len(report.Diffs), nil
 }
 
-// scanState reads one ledger_state row from a rowScanner in the frozen
-// column order (employee_id, subject, status, summary, updated_at, as_of).
+// scanState reads one ledger_state row from a rowScanner in the extended
+// column order (employee_id, subject, status, summary, updated_at, as_of,
+// due_at) — the due_at tail is the 02-daystate/01 additive extension.
 func scanState(rows rowScanner) (State, error) {
 	var (
 		st      State
 		status  string
 		at      string
 		summary string
+		dueAt   string
 	)
-	if err := rows.Scan(&st.EmployeeID, &st.Subject, &status, &summary, &at, &st.AsOf); err != nil {
+	if err := rows.Scan(&st.EmployeeID, &st.Subject, &status, &summary, &at, &st.AsOf, &dueAt); err != nil {
 		return State{}, err
 	}
 	t, err := parseStoredTime(at)
 	if err != nil {
 		return State{}, fmt.Errorf("bad updated_at %q: %w", at, err)
 	}
+	due, err := parseDueAt(dueAt)
+	if err != nil {
+		return State{}, fmt.Errorf("bad due_at: %w", err)
+	}
 	st.Status = Status(status)
 	st.Summary = summary
 	st.UpdatedAt = t
+	st.Due = due
 	return st, nil
+}
+
+// parseDueAt reads a stored due_at TEXT value: "" (or absent) is the zero
+// time — "no due" — any other value must parse as RFC3339 (with the same
+// fractional-second tolerance as parseStoredTime).
+func parseDueAt(dueAt string) (time.Time, error) {
+	if dueAt == "" {
+		return time.Time{}, nil
+	}
+	t, err := parseStoredTime(dueAt)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return t.UTC(), nil
 }
 
 // parseStoredTime reads a stored RFC3339 TEXT timestamp, tolerating the
