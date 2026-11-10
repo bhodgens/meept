@@ -10,14 +10,35 @@ import (
 
 func TestVoiceStatusTableBothLegs(t *testing.T) {
 	rows := []voiceCallStatusRow{
-		{CallID: "cc-phone", EmployeeID: "eve", Target: "+15551234", SinceRFC3339: "2026-11-07T10:00:00Z", Leg: "phone"},
-		{CallID: "local-abc", EmployeeID: "eve", Target: "local:desk", SinceRFC3339: "2026-11-07T10:05:00Z", Leg: "local"},
+		// contact-display leaf 03 (O1): a phone row on the leaf 02 wire
+		// shape carries the display pair, not the raw target.
+		{CallID: "cc-phone", EmployeeID: "eve", TargetName: "Jane Doe", TargetDisplay: "Jane Doe (•••5567)", SinceRFC3339: "2026-11-07T10:00:00Z", Leg: "phone"},
+		// The local leg's "local:<label>" passes through verbatim in the
+		// display pair (leaf 02); the legacy Target fallback is pinned
+		// separately in TestVoiceStatusTableLegacyTarget.
+		{CallID: "local-abc", EmployeeID: "eve", TargetName: "local:desk", TargetDisplay: "local:desk", SinceRFC3339: "2026-11-07T10:05:00Z", Leg: "local"},
 	}
 	out := voiceStatusTable(rows)
-	for _, want := range []string{"LEG", "phone", "local", "cc-phone", "local-abc", "+15551234", "local:desk", "2026-11-07T10:00:00Z"} {
+	for _, want := range []string{"LEG", "phone", "local", "cc-phone", "local-abc", "Jane Doe (•••5567)", "local:desk", "2026-11-07T10:00:00Z"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("status table missing %q:\n%s", want, out)
 		}
+	}
+}
+
+// TestVoiceStatusTableLegacyTarget pins the old-server fallback (leaf 03,
+// O1): a row with ONLY the deprecated raw target renders it verbatim; a
+// row with no target info at all renders "unknown".
+func TestVoiceStatusTableLegacyTarget(t *testing.T) {
+	out := voiceStatusTable([]voiceCallStatusRow{
+		{CallID: "old", EmployeeID: "eve", Target: "local:desk"},
+		{CallID: "bare", EmployeeID: "eve"},
+	})
+	if !strings.Contains(out, "local:desk") {
+		t.Fatalf("legacy target fallback not rendered:\n%s", out)
+	}
+	if !strings.Contains(out, "unknown") {
+		t.Fatalf("unknown fallback not rendered:\n%s", out)
 	}
 }
 

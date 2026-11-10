@@ -18,17 +18,34 @@
 // RPC shapes (internal/rpc/voice_local.go, CL8 verbatim):
 //   voice.local.open   {employee_id, label} -> {call_id, in_path, out_path, session_id}
 //   voice.local.end    {call_id}            -> {ok}
-//   voice.local.status {}                   -> {calls: [{call_id, employee_id, target, since_rfc3339, leg}]}
+//   voice.local.status {}                   -> {calls: [{call_id, employee_id,
+//                                              target_name, target_display,
+//                                              since_rfc3339, leg}]}
+//     (contact-display leaf 02: display pair; old servers still send the
+//     raw `target` — the decode below stays tolerant of both.)
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
 
 import '../core/constants.dart';
 import 'storage_service.dart';
 
-/// One live voice call row from voice.local.status (CL8 shape).
+/// One live voice call row from voice.local.status (CL8 shape,
+/// contact-display leaf 02/03: name + display pair; `target` is the
+/// deprecated raw string an OLD server still sends — nullable, and
+/// NEVER used for routing, only as the legacy render fallback).
 class VoiceSessionRow {
   final String callId;
   final String employeeId;
+
+  /// Boundary-resolved contact name (leaf 02). Absent on old servers.
+  final String? targetName;
+
+  /// Operator-safe display form (name + last-4, or "local:<label>"
+  /// verbatim on local legs). Absent on old servers.
+  final String? targetDisplay;
+
+  /// Deprecated raw target; non-empty only from an old server or a
+  /// local-leg label.
   final String target;
   final String sinceRfc3339;
 
@@ -38,15 +55,34 @@ class VoiceSessionRow {
   const VoiceSessionRow({
     required this.callId,
     required this.employeeId,
+    this.targetName,
+    this.targetDisplay,
     required this.target,
     required this.sinceRfc3339,
     required this.leg,
   });
 
+  /// The render string for this row (contact-display leaf 03, master
+  /// O1): display form first, then the name, then the legacy raw
+  /// target, else 'unknown'. Pure field preference — no client-side
+  /// resolution or number formatting.
+  String get displayTarget {
+    final display = targetDisplay;
+    if (display != null && display.isNotEmpty) return display;
+    final name = targetName;
+    if (name != null && name.isNotEmpty) return name;
+    if (target.isNotEmpty) return target;
+    return 'unknown';
+  }
+
   factory VoiceSessionRow.fromJson(Map<String, dynamic> json) {
     return VoiceSessionRow(
       callId: json['call_id'] as String? ?? '',
       employeeId: json['employee_id'] as String? ?? '',
+      targetName: json['target_name'] as String?,
+      targetDisplay: json['target_display'] as String?,
+      // Tolerant decode: old servers still send `target`; the contact-
+      // display daemon omits it entirely.
       target: json['target'] as String? ?? '',
       sinceRfc3339: json['since_rfc3339'] as String? ?? '',
       leg: json['leg'] as String? ?? '',

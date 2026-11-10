@@ -74,9 +74,12 @@ void main() {
                 'leg': 'local',
               },
               {
+                // contact-display leaf 03: tolerant decode of the NEW
+                // wire shape — display pair present, raw target absent.
                 'call_id': 'c2',
                 'employee_id': 'bob',
-                'target': '+15551234',
+                'target_name': 'Jane Doe',
+                'target_display': 'Jane Doe (•••5567)',
                 'since_rfc3339': '2026-11-07T12:01:00Z',
                 'leg': 'phone',
               },
@@ -92,6 +95,11 @@ void main() {
       expect(rows, hasLength(2));
       expect(rows[0].leg, 'local');
       expect(rows[1].leg, 'phone');
+      // leaf 03: old-server row falls back to raw target; new row
+      // renders the display pair.
+      expect(rows[0].displayTarget, 'desk');
+      expect(rows[1].displayTarget, 'Jane Doe (•••5567)');
+      expect(rows[1].target, isEmpty);
     });
 
     test('status tolerates a malformed calls body (empty list)', () async {

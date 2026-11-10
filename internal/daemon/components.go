@@ -5384,6 +5384,15 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			Employees: c.EmployeeManager,
 			Logger:    logger,
 		}
+		// Contact-display store (contact-display leaf 02): a second
+		// handle on the SAME contacts.db the chain uses (WAL +
+		// busy_timeout make concurrent handles safe;
+		// contact.NewStore's single-writer convention is per-handle).
+		// The voice wiring resolves caller numbers through it at the
+		// egress boundaries (ended event, status rows, relay header).
+		// Fail-soft: an open failure leaves the seam unwired (every
+		// surface renders the unknown-caller form) — never a boot error.
+		vdeps.ContactDisplayStore = openContactDisplayStore(logger)
 		// Ledger brief seams (leaf 03-voice/01): the ONE store built
 		// above plus the prompt-in/text-out adapter over the daemon's
 		// default LLM client (no new HTTP client; the leaf pins the
@@ -5420,12 +5429,20 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		vdeps.SupervisorChatter = voiceSupervisorChatter(c)
 		wiring, err := WireVoice(c.ctx, vdeps)
 		if err != nil {
+			if vdeps.ContactDisplayStore != nil {
+				_ = vdeps.ContactDisplayStore.Close()
+			}
 			logger.Error("FATAL: voice wiring failed", "error", err)
 			return nil, err
 		}
 		if wiring == nil {
 			// Degraded to disabled (missing secrets broker/token): the
 			// daemon boots without voice; every call path stays refused.
+			// Nobody owns the display store the vdeps block opened —
+			// close it here (the wiring's Stop would have).
+			if vdeps.ContactDisplayStore != nil {
+				_ = vdeps.ContactDisplayStore.Close()
+			}
 			c.Voice = nil
 			logger.Warn("voice sidecar disabled: wiring degraded (see voice wiring WARN above)")
 		} else {

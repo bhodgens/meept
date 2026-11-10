@@ -42,14 +42,38 @@ type VoiceAudioSession interface {
 // voice.NewSpeakerSink (leaf 08); tests inject fakes.
 type VoiceAudioDialer func(inPath, outPath string) (VoiceAudioSession, error)
 
-// voiceCallStatus mirrors the voice.local.status row shape (CL8) for
-// the /voice list table.
+// voiceCallStatus mirrors the voice.local.status row shape (CL8,
+// contact-display leaf 02 swap) for the /voice list table.
 type voiceCallStatus struct {
-	CallID       string `json:"call_id"`
-	EmployeeID   string `json:"employee_id"`
-	Target       string `json:"target"`
-	SinceRFC3339 string `json:"since_rfc3339"`
-	Leg          string `json:"leg"`
+	CallID        string `json:"call_id"`
+	EmployeeID    string `json:"employee_id"`
+	TargetName    string `json:"target_name"`
+	TargetDisplay string `json:"target_display"`
+	SinceRFC3339  string `json:"since_rfc3339"`
+	Leg           string `json:"leg"`
+	// Deprecated: the raw target. A contact-display daemon never fills
+	// it for phone legs (O4) and local-leg rows carry their verbatim
+	// "local:<label>" here too (leaf 02). Read ONLY as a render fallback
+	// for old servers / local-leg labels — never for routing.
+	Target string `json:"target"`
+}
+
+// targetDisplay picks the row's render string (contact-display leaf 03,
+// master O1): the boundary-resolved display first, then the name, then
+// the legacy raw target (non-empty = an old server or a local-leg
+// label), else "unknown". NO client-side resolution or number
+// formatting — this is pure field preference.
+func (c voiceCallStatus) targetDisplay() string {
+	if c.TargetDisplay != "" {
+		return c.TargetDisplay
+	}
+	if c.TargetName != "" {
+		return c.TargetName
+	}
+	if c.Target != "" {
+		return c.Target
+	}
+	return "unknown"
 }
 
 // voiceStatusResult mirrors the voice.local.status envelope (CL8).
@@ -272,7 +296,7 @@ func (m *VoiceSessionModel) List() (string, error) {
 		if since == "" {
 			since = "-"
 		}
-		fmt.Fprintf(&b, "%-8s %-10s %-10s %-12s %s\n", leg, c.CallID, c.EmployeeID, c.Target, since)
+		fmt.Fprintf(&b, "%-8s %-10s %-10s %-12s %s\n", leg, c.CallID, c.EmployeeID, c.targetDisplay(), since)
 	}
 	return strings.TrimRight(b.String(), "\n"), nil
 }
