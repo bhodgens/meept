@@ -1,6 +1,6 @@
 package voice
 
-// CallLeg contract (tree 20261110-voice-callleg, leaf 01; master C-B1).
+// CallLeg contract (tree 20261110-voice-callleg, leaves 01+02; master C-B1).
 //
 // One carrier-neutral interface over the three voice legs (phone/Telnyx,
 // local, Signal). The adapters are OBSERVABILITY + facade only: every
@@ -15,11 +15,30 @@ package voice
 // (import cycle). SignalLegSeam below is the structural shape
 // *signalleg.Leg satisfies; nothing in voice names signalleg.
 //
-// Events scope (leaf 01): adapters emit ONLY terminal kinds (Ended /
-// Errored). Ringing/Connected/Reconnecting are defined by the contract
-// but not yet emitted — the legs' answer/connect signals have no
-// observer seam at this layer (leaf 02 maps them; the gate's parity
-// reads expect the terminal event first).
+// Events scope (leaf 02 — shipped coverage per leg):
+//
+//	phone:  Connected (Manager answered-observer lane, call.answered) +
+//	        Ended/Errored (terminal lane). Ringing OMITTED: Telnyx
+//	        delivers no outbound-ring event to HandleCallEvent (the
+//	        webhook switch sees call.initiated/answered/hangup only) and
+//	        leaf-02 rule is "no invented timers".
+//	local:  Connected (client-join edge: the splice's first mic byte,
+//	        LocalSpliceDeps.OnClientJoin -> LocalLeg observer lane) +
+//	        Ended/Errored. Ringing OMITTED: Open returning IS the dial
+//	        edge and the frozen parity gate reads the terminal from the
+//	        same bus — a Place-time Ringing would pre-empt it.
+//	signal: Reconnecting (leg transition lane) + Ended/Errored.
+//	        Connected OMITTED: the frozen 00T gate
+//	        TestCallLegSignalEventsParity injects CONNECTED-then-ENDED
+//	        and asserts the FIRST bus event is Ended; emitting the
+//	        mapped Connected would pre-empt the terminal read. The
+//	        mapping exists (SignalTransitionConnected is transported on
+//	        the lane) and the adapter skips only the bus write.
+//
+// The lane additions are strictly additive observers; releaseOnce stays
+// the single terminal funnel. Non-terminal emits are dropped once a
+// terminal latched for that ccid (a late observer edge never follows the
+// terminal on the bus).
 
 import (
 	"context"
@@ -140,6 +159,17 @@ func (b *callEventBus) events() <-chan CallEvent { return b.ch }
 // observers never see a blank close.
 func (b *callEventBus) emit(ccid string, ev CallEvent) {
 	if ev.Kind != CallEventEnded && ev.Kind != CallEventErrored {
+		// Leaf 02 ordering guard: a NON-terminal edge (Connected /
+		// Reconnecting / Ringing) observed after this ccid's terminal
+		// already latched is DROPPED — the bus never shows a
+		// post-terminal transition (observer edges and the terminal
+		// race; the terminal wins by definition).
+		b.mu.Lock()
+		latched := b.latched[ccid]
+		b.mu.Unlock()
+		if latched {
+			return
+		}
 		select {
 		case b.ch <- ev:
 		default:
@@ -207,6 +237,27 @@ type SignalLegSeam interface {
 // when a seam lacks it.
 type SignalTerminalObserver interface {
 	AddTerminalObserver(fn func(ccid string, outcome Outcome, reason string))
+}
+
+// SignalTransition is a NON-terminal signal-leg state edge the
+// transition lane transports (leaf 02). The enum is voice-side so the
+// adapter maps it onto CallEvent kinds without naming signalleg.
+type SignalTransition string
+
+const (
+	// SignalTransitionConnected: carrier CONNECTED (talk loop armed).
+	SignalTransitionConnected SignalTransition = "connected"
+	// SignalTransitionReconnecting: carrier RECONNECTING (tolerated,
+	// no teardown).
+	SignalTransitionReconnecting SignalTransition = "reconnecting"
+)
+
+// SignalTransitionObserver is an OPTIONAL extension the signal adapter
+// probes for (satisfied by *signalleg.Leg, leaf 02): reports the leg's
+// non-terminal CONNECTED/RECONNECTING edges. Purely additive
+// observation — the lane never gates or delays the leg's state machine.
+type SignalTransitionObserver interface {
+	AddTransitionObserver(fn func(ccid string, transition SignalTransition))
 }
 
 // NewSignalAdapter wraps a signalleg-shaped seam in the CallLeg

@@ -216,6 +216,15 @@ type Leg struct {
 	// a teardown path.
 	termObsMu sync.Mutex
 	termObs   []func(ccid string, outcome voice.Outcome, reason string)
+
+	// transObsMu guards transObs: the ADDITIVE non-terminal transition
+	// lane (tree 20261110-voice-callleg leaf 02) that voice's CallLeg
+	// signal adapter probes structurally (voice.SignalTransitionObserver).
+	// It notifies the carrier CONNECTED / RECONNECTING edges only —
+	// observation, never a state-machine input: the handleCallEvent arms
+	// are unchanged and an observer can neither gate nor delay them.
+	transObsMu sync.Mutex
+	transObs   []func(ccid string, transition voice.SignalTransition)
 }
 
 // callState is one live signal call's leg-owned state.
@@ -331,6 +340,7 @@ func (l *Leg) handleCallEvent(ev signal.CallEvent) {
 		// Tolerated: no teardown. The carrier re-establishes media;
 		// tearing down here would kill every healthy reconnection.
 		l.log.Info("signalleg: call reconnecting (tolerated)", "ccid", st.ccid)
+		l.notifyTransition(st.ccid, voice.SignalTransitionReconnecting)
 	case signal.CallEventStateEnded:
 		l.onEnded(st, ev.Reason)
 	default:
@@ -396,6 +406,39 @@ func (l *Leg) onConnected(st *callState) {
 	l.startAudioAdapter(live)
 	l.log.Info("signalleg: call connected, talk loop armed via open frame",
 		"ccid", live.ccid, "employee_id", live.employee, "target", live.target)
+	l.notifyTransition(st.ccid, voice.SignalTransitionConnected)
+}
+
+// AddTransitionObserver registers a best-effort NON-terminal transition
+// observer (tree 20261110-voice-callleg leaf 02; satisfies
+// voice.SignalTransitionObserver structurally — voice.Outcome's import
+// direction applies: signalleg imports voice, never the reverse). The
+// carrier CONNECTED / RECONNECTING edges only; terminals ride
+// AddTerminalObserver. Observation never gates the state machine.
+func (l *Leg) AddTransitionObserver(fn func(ccid string, transition voice.SignalTransition)) {
+	if fn == nil {
+		return
+	}
+	l.transObsMu.Lock()
+	l.transObs = append(l.transObs, fn)
+	l.transObsMu.Unlock()
+}
+
+// notifyTransition invokes every transition observer outside l.mu and
+// the observer mutex (snapshot then call — the notifyTerminal pattern).
+// Best-effort, like the terminal lane.
+func (l *Leg) notifyTransition(ccid string, transition voice.SignalTransition) {
+	l.transObsMu.Lock()
+	if len(l.transObs) == 0 {
+		l.transObsMu.Unlock()
+		return
+	}
+	obs := make([]func(string, voice.SignalTransition), len(l.transObs))
+	copy(obs, l.transObs)
+	l.transObsMu.Unlock()
+	for _, fn := range obs {
+		fn(ccid, transition)
+	}
 }
 
 // bindCall runs Binding.OnCallStart for a connected call through the

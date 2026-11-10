@@ -9,7 +9,12 @@ package voice
 // exactly-once so double Hangup is the idempotent nil). Events rides
 // the Manager's additive terminal-observer lane — the single-occupancy
 // release hook is NOT stolen (existing wiring owns it; the observer is
-// notified after the hook, outside the manager mutex).
+// notified after the hook, outside the mutex). Leaf 02 adds the
+// Connected kind on the additive answered-observer lane (call.answered
+// on a placed ccid); the single-occupancy answerHook stays the dialer's
+// timer-cancel seam. Ringing stays unmapped PER LEG: Telnyx gives the
+// webhook no outbound-ring event (only call.initiated/answered/hangup
+// reach HandleCallEvent) and the leaf-02 rule forbids inventing timers.
 
 import (
 	"context"
@@ -35,8 +40,31 @@ func newPhoneAdapter(d *Dialer, m *Manager) *phoneAdapter {
 	a := &phoneAdapter{d: d, m: m, b: newCallEventBus()}
 	if m != nil {
 		m.AddTerminalObserver(a.onTerminal)
+		// Leaf 02: the ADDITIVE answered lane (call.answered) maps to
+		// Connected. The single-occupancy answerHook (H1 timer cancel)
+		// is untouched.
+		m.AddAnsweredObserver(a.onAnswered)
 	}
 	return a
+}
+
+// onAnswered is the Manager answered-observer lane: a call.answered on
+// a ccid THIS adapter placed maps to CallEventConnected. The bus
+// drops it if the terminal already latched (answer vs hangup race —
+// the terminal wins).
+func (a *phoneAdapter) onAnswered(ccid string) {
+	if !a.has(ccid) {
+		return
+	}
+	a.b.emit(ccid, CallEvent{Kind: CallEventConnected, Reason: "answered"})
+}
+
+// has reports whether ccid belongs to this adapter WITHOUT dropping it
+// (non-terminal edges peek; only terminals forget).
+func (a *phoneAdapter) has(ccid string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.placed[ccid]
 }
 
 // onTerminal is the Manager terminal-observer lane: translate the

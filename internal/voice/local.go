@@ -204,6 +204,47 @@ type LocalLeg struct {
 	// cancelDraftHook is the daemon glue's draft-cancel seam (the
 	// wiring's loop.HandleBargeIn for this ccid). Set at wiring time.
 	cancelDraftHook func(ccid string)
+
+	// joinObsMu guards joinObs: the ADDITIVE client-join observer lane
+	// (tree 20261110-voice-callleg leaf 02). The edge is the splice's
+	// first client mic byte (the join gate that satisfies JoinTimeout)
+	// — the local leg's last-mile observable "the call is live"
+	// moment. The child-answers-setup edge itself is daemon-side
+	// (voice_wiring routeFrame EventSetup, off-limits to this leaf),
+	// so the adapter maps the join edge to Connected. Pure observation:
+	// observers never gate the splice.
+	joinObsMu sync.Mutex
+	joinObs   []func(ccid string)
+}
+
+// AddClientJoinObserver registers a best-effort observer fired once per
+// call when the client produces its first mic byte (leaf 02; the local
+// CallLeg adapter maps it to Connected). Additive: any number may
+// register; the splice's join gate is unchanged.
+func (l *LocalLeg) AddClientJoinObserver(fn func(ccid string)) {
+	if fn == nil {
+		return
+	}
+	l.joinObsMu.Lock()
+	l.joinObs = append(l.joinObs, fn)
+	l.joinObsMu.Unlock()
+}
+
+// notifyClientJoin invokes every join observer outside l.mu and the
+// observer mutex (snapshot then call — the Manager.notifyAnswered
+// pattern). Called from the splice's pump goroutine; best-effort.
+func (l *LocalLeg) notifyClientJoin(ccid string) {
+	l.joinObsMu.Lock()
+	if len(l.joinObs) == 0 {
+		l.joinObsMu.Unlock()
+		return
+	}
+	obs := make([]func(string), len(l.joinObs))
+	copy(obs, l.joinObs)
+	l.joinObsMu.Unlock()
+	for _, fn := range obs {
+		fn(ccid)
+	}
 }
 
 // NewLocalLeg constructs the leg. Typed-nil guards on the load-bearing
@@ -411,6 +452,7 @@ func (l *LocalLeg) Open(ctx context.Context, employeeID, label string, voiceOver
 			Text:         rawTextSender{srv: l.deps.TextServer},
 			CancelDraft:  func(cancelCcid string) { l.cancelDraft(cancelCcid) },
 			AudioDrained: drainFn,
+			OnClientJoin: l.notifyClientJoin,
 			Logger:       l.log.With("sub", "localsplice", "ccid", ccid),
 		})
 		if err != nil && !errors.Is(err, context.Canceled) && spliceCtx.Err() == nil && !isNotConnected(err) && !errors.Is(err, ErrMicSpeechEnded) {

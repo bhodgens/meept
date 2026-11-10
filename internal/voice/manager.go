@@ -96,6 +96,15 @@ type Manager struct {
 	// single-occupancy release hook.
 	termObsMu sync.Mutex
 	termObs   []func(ccid string, outcome Outcome, reason string)
+
+	// ansObsMu guards ansObs: the ADDITIVE answered-observer lane
+	// (tree 20261110-voice-callleg leaf 02). answerHook stays the
+	// single-occupancy timer-cancel seam (audit 2026-11-06 H1) — this
+	// lane never replaces it; notifyAnswered invokes both (hook first,
+	// then observers, outside the mutex). The phone CallLeg adapter uses
+	// it for the Connected event.
+	ansObsMu sync.Mutex
+	ansObs   []func(ccid string)
 }
 
 // NewManager returns a Manager. spawn may be nil when the caller only uses
@@ -161,7 +170,9 @@ func (m *Manager) SetAnsweredHook(fn func(ccid string)) {
 
 // notifyAnswered invokes the answered hook outside the manager mutex. A
 // missing hook is a no-op (the H1 defect shape: the seam existed only as a
-// manager-side field before the wiring landed).
+// manager-side field before the wiring landed). The ADDITIVE answered-
+// observer lane (leaf 02) is invoked after the hook — the hook stays
+// the single-occupancy timer-cancel seam; observers never replace it.
 func (m *Manager) notifyAnswered(ccid string) {
 	m.answerMu.Lock()
 	hook := m.answerHook
@@ -169,6 +180,32 @@ func (m *Manager) notifyAnswered(ccid string) {
 	if hook != nil {
 		hook(ccid)
 	}
+	m.ansObsMu.Lock()
+	if len(m.ansObs) == 0 {
+		m.ansObsMu.Unlock()
+		return
+	}
+	obs := make([]func(string), len(m.ansObs))
+	copy(obs, m.ansObs)
+	m.ansObsMu.Unlock()
+	for _, fn := range obs {
+		fn(ccid)
+	}
+}
+
+// AddAnsweredObserver registers a best-effort observer on the manager's
+// call.answered notification (ccid). Like AddTerminalObserver it is
+// ADDITIVE — any number may register and the single-occupancy
+// answerHook semantics are unchanged (the hook still runs first). The
+// phone CallLeg adapter uses this lane for the Connected event without
+// stealing the H1 timer-cancel seam.
+func (m *Manager) AddAnsweredObserver(fn func(ccid string)) {
+	if fn == nil {
+		return
+	}
+	m.ansObsMu.Lock()
+	m.ansObs = append(m.ansObs, fn)
+	m.ansObsMu.Unlock()
 }
 
 // releaseOnce removes every per-call trace of ccid under the lock (so a

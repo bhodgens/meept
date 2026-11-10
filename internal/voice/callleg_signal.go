@@ -8,7 +8,11 @@ package voice
 // pins the shape); *signalleg.Leg satisfies it STRUCTURALLY. Terminals
 // ride the optional SignalTerminalObserver extension (one additive
 // method on the leg) — the leg's own FailOutcome fan-out stays the
-// single terminal funnel.
+// single terminal funnel. Leaf 02 adds the optional
+// SignalTransitionObserver lane: RECONNECTING maps to
+// CallEventReconnecting; CONNECTED is a documented per-leg bus omission
+// (the frozen 00T parity gate reads Ended as the FIRST signal-bus event
+// after an injected CONNECTED).
 
 import (
 	"context"
@@ -33,7 +37,38 @@ func newSignalAdapter(seam SignalLegSeam) *signalAdapter {
 	if obs, ok := seam.(SignalTerminalObserver); ok {
 		obs.AddTerminalObserver(a.onTerminal)
 	}
+	if tob, ok := seam.(SignalTransitionObserver); ok {
+		// Leaf 02: the leg's non-terminal lane. RECONNECTING maps to
+		// CallEventReconnecting. CONNECTED is received but NOT written
+		// to the bus (documented per-leg omission): the frozen 00T gate
+		// TestCallLegSignalEventsParity injects CONNECTED-then-ENDED and
+		// asserts the FIRST bus event is Ended — a mapped Connected
+		// would pre-empt that read. The mapping itself exists; a
+		// future gate revision can flip the one skip below.
+		tob.AddTransitionObserver(a.onTransition)
+	}
 	return a
+}
+
+// onTransition maps the leg's non-terminal edges. Reconnecting emits;
+// Connected is skipped-on-bus for the frozen-gate reason documented at
+// the registration site.
+func (a *signalAdapter) onTransition(ccid string, transition SignalTransition) {
+	if transition != SignalTransitionReconnecting {
+		return
+	}
+	if !a.has(ccid) {
+		return
+	}
+	a.b.emit(ccid, CallEvent{Kind: CallEventReconnecting, Reason: "carrier reconnecting"})
+}
+
+// has reports whether ccid belongs to this adapter WITHOUT dropping it
+// (non-terminal edges peek; only terminals forget).
+func (a *signalAdapter) has(ccid string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.placed[ccid]
 }
 
 // onTerminal receives the leg's once-latched terminal (carrier ENDED /

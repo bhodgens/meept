@@ -8,7 +8,9 @@ package voice
 // Accept is the named ErrNoInbound (the leg has no inbound concept).
 // Events rides the leg's Manager terminal-observer lane — the SAME
 // additive seam the phone adapter uses (releaseOnce stays the single
-// terminal funnel; the release hook is untouched).
+// terminal funnel; the release hook is untouched). Leaf 02 adds the
+// Connected kind from the leg's client-join edge (LocalLeg
+// AddClientJoinObserver, fired by the splice's first mic byte).
 
 import (
 	"context"
@@ -33,7 +35,28 @@ func newLocalAdapter(l *LocalLeg) *localAdapter {
 	if l != nil && l.deps.Manager != nil {
 		l.deps.Manager.AddTerminalObserver(a.onTerminal)
 	}
+	if l != nil {
+		// Leaf 02: Connected from the client-join edge (the splice's
+		// first mic byte) — the leg-local last-mile seam. The child's
+		// setup answer rides daemon-side routeFrame (off-limits here).
+		// Ringing stays unmapped PER LEG: Open returning IS the dial
+		// edge and the frozen parity gate reads the terminal from this
+		// same bus — a Place-time Ringing would pre-empt it.
+		l.AddClientJoinObserver(a.onClientJoin)
+	}
 	return a
+}
+
+// onClientJoin maps the join edge to Connected for ccids THIS adapter
+// placed. The bus drops it if the terminal already latched.
+func (a *localAdapter) onClientJoin(ccid string) {
+	a.mu.Lock()
+	placed := a.placed[ccid]
+	a.mu.Unlock()
+	if !placed {
+		return
+	}
+	a.b.emit(ccid, CallEvent{Kind: CallEventConnected, Reason: "client joined"})
 }
 
 // onTerminal translates the shared release fan-out into a CallEvent,

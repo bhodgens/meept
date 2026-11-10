@@ -368,10 +368,25 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   `signalleg.Leg.AddTerminalObserver` (signal; claimTerminal-guarded
   sites only). DO NOT steal the single-occupancy `SetReleaseHook` for
   adapter events.
-- Leaf-01 Events scope: adapters emit ONLY terminal kinds (Ended /
-  Errored, mapped from the Manager Outcome: OutcomeFailed -> Errored,
-  everything else -> Ended). Ringing/Connected/Reconnecting are defined
-  but unemitted (no answer/connect observer seam yet — leaf 02).
+- Events coverage (tree 20261110-voice-callleg leaf 02, shipped per
+  leg): terminals (Ended / Errored, mapped from the Manager Outcome:
+  OutcomeFailed -> Errored, everything else -> Ended) on all three
+  legs, plus NON-terminal kinds where the leg has an observable seam:
+  phone `Connected` rides the ADDITIVE answered-observer lane
+  (`Manager.AddAnsweredObserver`, notified after the single-occupancy
+  answerHook — the H1 timer-cancel seam is untouched); local
+  `Connected` rides the client-join edge (`LocalLeg.AddClientJoinObserver`,
+  fired once by the splice's first mic byte via `LocalSpliceDeps.OnClientJoin`
+  — observability only, the join gate never waits on an observer);
+  signal `Reconnecting` rides `Leg.AddTransitionObserver` (the same
+  lane carries CONNECTED, which the signal adapter deliberately does
+  NOT write to the bus: the frozen 00T parity gate reads Ended as the
+  FIRST signal-bus event after an injected CONNECTED). Ringing is
+  unmapped on every leg (no observable ring edge: Telnyx delivers no
+  outbound-ring webhook event, and a Place-time emit would pre-empt
+  the frozen gates' terminal reads). A non-terminal emit observed
+  AFTER the ccid's terminal latched is dropped by the bus — terminals
+  win the ordering.
 - Import-cycle rule (build binding): `internal/signalleg` imports
   `internal/voice`, so `internal/voice` may NEVER import signalleg.
   The signal adapter consumes the voice-defined `SignalLegSeam`
