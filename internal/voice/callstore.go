@@ -25,6 +25,13 @@ import (
 // row (a transcript line for an unknown or already-ended call).
 var ErrCallNotFound = errors.New("voice callstore: call not found")
 
+// transcriptAppendTimeout bounds one transcript append once it is
+// detached from the caller's context (AppendTranscript): the write must
+// still be able to fail fast against a wedged database, but it must NOT
+// die because the voice turn's context was cancelled at teardown —
+// defect B's lost late-final rows (see AppendTranscript).
+const transcriptAppendTimeout = 5 * time.Second
+
 // callStoreSchema creates the voice_calls table. Times are RFC3339 TEXT
 // (same convention as the effects ledger / sessions.created_at). The
 // outcome column is NOT in the base schema: it is added by the guarded
@@ -69,8 +76,9 @@ type TranscriptLine struct {
 
 // CallStore is the SQLite call-session store. A single connection
 // (SetMaxOpenConns(1)) serializes writers in-process, the same convention
-// as the effects ledger; a package mutex guards the read-modify-write
-// transcript append.
+// as the effects ledger; the transcript append is a single atomic UPDATE
+// (json_insert), so no in-process read-modify-write guard exists or is
+// needed (see AppendTranscript).
 type CallStore struct {
 	db     *sql.DB
 	logger *slog.Logger
@@ -216,48 +224,50 @@ func (s *CallStore) End(ctx context.Context, callID string, outcome string) erro
 }
 
 // AppendTranscript appends one line to the call's transcript JSON array.
-// The read-modify-write is atomic via a BEGIN IMMEDIATE transaction: the
-// write lock is taken at the SQL layer, so no in-process mutex is held
-// across the database I/O (mutexio rule) and concurrent appenders from
-// other goroutines serialize correctly.
+//
+// Two properties defect B (voice link status lagging spoken audio) needs:
+//
+//  1. ATOMIC: the append is a single UPDATE whose value is SQLite's own
+//     json_insert on the column — no SELECT/decode/UPDATE read-modify-
+//     write, so no lost-update window exists at any layer (in-process
+//     goroutines AND any future second writer), and the row stays valid
+//     JSON under every interleaving. The write lock is taken at the SQL
+//     layer for the one statement (mutexio rule: nothing in-process is
+//     held across the I/O).
+//  2. CANCELLATION-RESILIENT: the binding calls this AFTER a turn's
+//     reply returns, and that turn's context is routinely cancelled by
+//     then — a barge-in supersede or a hangup racing a late final (live
+//     defect link-393ebd86996a0dfd side b seq=5: the caller's audio had
+//     already been heard, the reply landed after teardown, and the
+//     append died with "context canceled", so the rows were LOST, not
+//     late, and voice.link.status undercounted the spoken turns
+//     forever). Recording a line the caller already heard is a
+//     bookkeeping write, not a live-call action: detach from the
+//     caller's cancellation (context.WithoutCancel) and bound the commit
+//     with its own timeout so a wedged database can never hang the
+//     writer goroutine.
 func (s *CallStore) AppendTranscript(ctx context.Context, callID string, line TranscriptLine) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("voice callstore: begin transcript tx for %s: %w", callID, err)
-	}
-	defer func() {
-		if rollErr := tx.Rollback(); rollErr != nil && !errors.Is(rollErr, sql.ErrTxDone) {
-			s.logger.Debug("voice callstore: rollback", "err", rollErr)
-		}
-	}()
-
-	var raw string
-	err = tx.QueryRowContext(ctx,
-		`SELECT transcript FROM voice_calls WHERE call_id = ?`, callID,
-	).Scan(&raw)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrCallNotFound
-	}
-	if err != nil {
-		return fmt.Errorf("voice callstore: read transcript for %s: %w", callID, err)
-	}
-	var lines []TranscriptLine
-	if raw != "" {
-		if err := json.Unmarshal([]byte(raw), &lines); err != nil {
-			return fmt.Errorf("voice callstore: decode transcript for %s: %w", callID, err)
-		}
-	}
-	lines = append(lines, line)
-	encoded, err := json.Marshal(lines)
+	encoded, err := json.Marshal(line)
 	if err != nil {
 		return fmt.Errorf("voice callstore: encode transcript for %s: %w", callID, err)
 	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE voice_calls SET transcript = ? WHERE call_id = ?`, string(encoded), callID,
-	); err != nil {
-		return fmt.Errorf("voice callstore: write transcript for %s: %w", callID, err)
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), transcriptAppendTimeout)
+	defer cancel()
+	res, err := s.db.ExecContext(writeCtx,
+		`UPDATE voice_calls SET transcript = json_insert(COALESCE(NULLIF(transcript, ''), '[]'), '$[#]', json(?)) WHERE call_id = ?`,
+		string(encoded), callID,
+	)
+	if err != nil {
+		return fmt.Errorf("voice callstore: append transcript for %s: %w", callID, err)
 	}
-	return tx.Commit()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("voice callstore: append transcript rows for %s: %w", callID, err)
+	}
+	if n == 0 {
+		return ErrCallNotFound
+	}
+	return nil
 }
 
 // TodayTranscripts implements leaf 04's CallTranscriptSource: prior calls
