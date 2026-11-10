@@ -120,7 +120,9 @@ type Fetcher interface { Fetch(ctx context.Context, lat, lon float64) (Outlook, 
 // stale-on-error allowed.
 func AlertsFor(trades []string, o Outlook) []string
 // FROZEN thresholds (concrete/roofing domain, owner-tunable later):
-// "concrete": NowC<5 || (TodayHighC-TodayLowC drop) -> TodayLowC<0 => "cold — concrete pour at risk"
+// "concrete": TodayLowC<0 => "cold — concrete pour at risk" (freezing
+//             forecast is the pour killer; ratified at gate validation
+//             2026-11-10 replacing the garbled NowC<5 draft)
 //             RainProbToday>=40 => "rain — exposed concrete work at risk"
 // "roofing":  WindKph>=50 => "high wind — roofing work at risk"
 //             RainProbToday>=40 => "rain — roofing work at risk"
