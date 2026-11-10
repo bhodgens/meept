@@ -163,6 +163,25 @@ type linkTurnSideState struct {
 	seq          uint64
 	releaseTimer *time.Timer
 	releaseGen   uint64
+
+	// Holder-only release bookkeeping (link-b9d221d8d8cddcce, measured
+	// 13.70 s overlap): the drained/margin arms live on the FLOOR
+	// HOLDER's stream only. lastFinalCcid is the chain-tracking anchor
+	// (a turn_start after a non-empty lastFinalCcid marks reDispatched);
+	// marginTimer/marginGen/marginCcid/marginSeq are the margin arm's
+	// OWN identity (the drained arm keeps releaseTimer/releaseGen — one
+	// timer per shape so the two arms can never cancel each other's
+	// pending fire).
+	// reDispatched marks "turn_start seen after this side's turn_final":
+	// the holder's LLM chained a new sub-turn while the tail drained, so
+	// the drained release must KEEP the floor with the holder and defer
+	// the peer flush (see releaseFloor).
+	lastFinalCcid string
+	marginTimer   *time.Timer
+	marginGen     uint64
+	marginCcid    string
+	marginSeq     uint64
+	reDispatched  bool
 }
 
 // LinkTurnCoordinator enforces one-speaker-at-a-time on ONE voice link
@@ -177,15 +196,30 @@ type linkTurnSideState struct {
 //   - at most ONE side holds the floor (mid-turn OR draining its
 //     audio tail) at a time: the peer's final prompt parks while
 //     floorHeld is set — both the parked-prompt path AND the fresh
-//     claim path check the floor;
+//     claim path check the floor; exactly one side is the FLOOR
+//     HOLDER (c.holder, set on claim/turn_start, mirrors floorHeld);
 //   - the floor releases on AUDIO DRAIN, not on the turn_final text
-//     edge: turn_final sets the splice's EXPECTED-final state
-//     (LocalSpliceFor(ccid).ExpectFinalDrain) AND arms a long FALLBACK
-//     margin timer; the child's C1 played edge then arms the watch
-//     (MarkFinalPlayed), and the first of (drain edge + linkFloorTailPad)
-//     or (fallback fire) releases the floor and flushes the peer's parked
-//     prompt. An idle edge (barge-in cancel, unbind, teardown) releases
-//     IMMEDIATELY — nothing is playing;
+//     edge, and ONLY EVER for the HOLDER: the holder's turn_final
+//     sets the splice's EXPECTED-final state (LocalSpliceFor(ccid).
+//     ExpectFinalDrain) AND arms a long FALLBACK margin timer; the
+//     child's C1 played edge then arms the watch (MarkFinalPlayed),
+//     and the first of (drain edge + linkFloorTailPad) or (margin
+//     fire with the tail provably quiet) releases the floor and
+//     flushes the peer's parked prompt. A NON-holder's turn_final is
+//     a LISTENING side's chained response to speech it heard (the
+//     live defect link-b9d221d8d8cddcce: B's non-holder final armed
+//     its own margin, and the 12 s fire released a side=b floor while
+//     holder A was still audible) — it records bookkeeping only, never
+//     arms expect/margin, never releases. An idle edge (barge-in
+//     cancel, unbind, teardown) on the HOLDER releases IMMEDIATELY —
+//     nothing is playing; a non-holder's idle edge releases nothing;
+//   - holder chaining: while a holder's LLM dispatches new sub-turns
+//     (turn_start after its turn_final -> reDispatched), a drained/
+//     margin edge for the finished burst DEFERS the release
+//     (kind=floor_release_deferred): the floor stays with the holder
+//     and the peer flush waits for the holder's next quiet-final
+//     release, so a parked prompt can never flush between sub-turns
+//     and talk over the holder's next sentence;
 //   - side B never greets (TalkLoopConfig.SuppressGreeting honored by
 //     the wiring when it constructs B's loop).
 //
@@ -204,7 +238,8 @@ type LinkTurnCoordinator struct {
 	mu     sync.Mutex
 	a      linkTurnSideState
 	b      linkTurnSideState
-	closed bool // link Closed/unwound: parks DROP at loop exit, never dispatch into a dying peer
+	holder string // the side currently holding the floor ("" = free); mirrors floorHeld exactly (holder-only release, link-b9d221d8d8cddcce)
+	closed bool   // link Closed/unwound: parks DROP at loop exit, never dispatch into a dying peer
 }
 
 func NewLinkTurnCoordinator(linkID string, fallbackMargin time.Duration, logger *slog.Logger) *LinkTurnCoordinator {
@@ -257,11 +292,21 @@ func (c *LinkTurnCoordinator) Unbind(side string) {
 	st.busy = false
 	st.floorHeld = false
 	st.ccid = ""
+	st.lastFinalCcid = ""
+	st.reDispatched = false
 	if st.releaseTimer != nil {
 		st.releaseTimer.Stop()
 		st.releaseTimer = nil
 	}
+	if st.marginTimer != nil {
+		st.marginTimer.Stop()
+		st.marginTimer = nil
+	}
 	st.releaseGen++ // any armed release from this side is now stale
+	st.marginGen++
+	if c.holder == side {
+		c.holder = ""
+	}
 	peer := c.peerLocked(side)
 	peerLoop := peer.loop
 	release := peerLoop != nil && !c.closed
@@ -311,9 +356,22 @@ func (c *LinkTurnCoordinator) HoldPromptFor(side string) func(Instance, func()) 
 			return false
 		}
 		st := c.sideLocked(side)
+		if c.holder == side && st.lastFinalCcid != "" {
+			// HOLDER CHAIN: this side already holds the floor AND just
+			// finalized a turn - the LLM dispatched a new sub-turn while
+			// the previous burst's tail was still draining. Flag the
+			// chain so a pending release defers the peer flush (see
+			// releaseFloor).
+			st.reDispatched = true
+		}
 		st.busy = true
 		st.floorHeld = true
 		st.ccid = call.CallControlID
+		st.lastFinalCcid = ""
+		if c.holder != side {
+			st.reDispatched = false
+			c.holder = side
+		}
 		c.mu.Unlock()
 		return true
 	}
@@ -327,6 +385,26 @@ func (c *LinkTurnCoordinator) HoldPromptFor(side string) func(Instance, func()) 
 // without a final, release the peer now). A second turn_start on the
 // same side (supersede inside one side) cancels a previously armed
 // release: the side is speaking again.
+//
+// HOLDER-ONLY RELEASE (link-b9d221d8d8cddcce, measured 13.70 s overlap):
+// a turn_final from a NON-holder is a LISTENING side's chained response
+// to speech it heard while the peer still holds the floor. It must
+// record bookkeeping ONLY - no expect-final on its own splice, no
+// margin arm, no release path. The live defect: side B's non-holder
+// final armed its own 12 s margin, and the fire released a side=b floor
+// 12 s after B's turn_final while A (the real holder) was STILL AUDIBLE
+// (A's played edge came 11 s later) - handing B the floor mid-A-tail.
+// Release/margin timers belong ONLY to the holder's edge stream; the
+// release funnel additionally refuses when c.holder != side.
+//
+// MARGIN SEMANTICS (holder-no-played watchdog): the fallback margin is
+// armed only on the HOLDER's final, and its fire consults the holder's
+// splice audio truth before releasing: while the outbound stream is
+// still active (backlog pending, or an outbound touch inside the margin
+// window) the fire REARMS once instead of cutting the tail short (that
+// is exactly how the 07:33:20 margin release talked A under). A second
+// consecutive fire releases regardless - the hold is bounded at
+// 2 x margin even against a stalled stream, never unbounded.
 func (c *LinkTurnCoordinator) TurnStateFor(side string) func(ccid string, seq uint64, kind string) {
 	if c == nil {
 		return nil
@@ -335,28 +413,103 @@ func (c *LinkTurnCoordinator) TurnStateFor(side string) func(ccid string, seq ui
 		c.mu.Lock()
 		st := c.sideLocked(side)
 		peer := c.peerLocked(side)
+		holderAtEdge := c.holder
 		switch kind {
 		case TurnKindStart:
-			st.busy = true
-			st.floorHeld = true
-			st.ccid = ccid
-			st.seq = seq
-			if st.releaseTimer != nil {
-				st.releaseTimer.Stop()
-				st.releaseTimer = nil
+			chain := st.lastFinalCcid != ""
+			if c.holder == "" || c.holder == side {
+				// This side owns (or freshly takes) the floor: the full
+				// claim — busy + floor + holder, cancel its own arms.
+				st.busy = true
+				st.floorHeld = true
+				st.ccid = ccid
+				st.seq = seq
+				if chain {
+					// Chain marker: a turn_start AFTER this side's
+					// turn_final — the holder's LLM dispatched a new
+					// sub-turn while the previous burst's tail was
+					// still draining (see releaseFloor's chain guard).
+					st.reDispatched = true
+				}
+				st.lastFinalCcid = ""
+				c.holder = side
+				c.cancelSideArmsLocked(st) // the side is speaking again
+				c.mu.Unlock()
+			} else if chain && st.floorHeld {
+				// Same-side chained turn_start while the OTHER side
+				// carries the holder marker AND this slot still holds
+				// a floor (a stale-shape recovery: this side's release
+				// was lost). Corrected semantics
+				// (link-b9d221d8d8cddcce): a final does NOT free the
+				// floor — the speaker re-claims it, clearing the peer's
+				// stale floor + arms and handing the holder marker over,
+				// WARN. A slot WITHOUT its own floorHeld is a pure
+				// LISTENER (bookkeeping branch below) and must NEVER
+				// take the floor off the real holder — that was the
+				// measured defect shape (B's chained final edges armed
+				// a side=b release while A still held and paced).
+				peer.floorHeld = false
+				if peer.releaseTimer != nil {
+					peer.releaseTimer.Stop()
+					peer.releaseTimer = nil
+				}
+				if peer.marginTimer != nil {
+					peer.marginTimer.Stop()
+					peer.marginTimer = nil
+				}
+				peer.ccid = ""
+				st.busy = true
+				st.floorHeld = true
+				st.ccid = ccid
+				st.seq = seq
+				st.reDispatched = false // the take-over supersedes the chain marker
+				st.lastFinalCcid = ""
+				c.holder = side
+				c.cancelSideArmsLocked(st)
+				c.mu.Unlock()
+				c.log.Warn("voice: link turn: holder takeover (same-side chain)", "side", side,
+					"kind", "holder_takeover", "ccid", ccid, "seq", seq)
+			} else {
+				// Peer holds the floor: a real loop's turn_start NEVER
+				// fires while its prompts park (parking happens before
+				// dispatch), so a bare edge with no claim is test/
+				// fixture shorthand for the loop's claim — bookkeeping
+				// ONLY. The peer keeps floor + holder + every armed
+				// release; this side becomes a LISTENER: busy=false
+				// (a live holder busy would deadlock the link past the
+				// peer's release — the peer could never re-claim), the
+				// side's own ccid/seq/lastFinalCcid recorded so its
+				// splice still resolves drain edges, but NO floorHeld
+				// (floorHeld stays holder-only — the invariant Hold,
+				// NoteAudioDrained, and releaseFloor all rely on).
+				st.busy = false
+				st.ccid = ccid
+				st.seq = seq
+				c.mu.Unlock()
+				c.log.Info("voice: link turn: turn_start while peer holds (listener)",
+					"side", side, "kind", "listener_start", "ccid", ccid, "seq", seq,
+					"holder", holderAtEdge)
 			}
-			st.releaseGen++ // invalidate any armed release from this side
-			c.mu.Unlock()
 		case TurnKindFinal:
 			st.busy = false
-			if st.releaseTimer != nil {
-				st.releaseTimer.Stop()
-				st.releaseTimer = nil
+			st.lastFinalCcid = ccid
+			if holderAtEdge != side || !st.floorHeld {
+				// NON-holder final: listening-side bookkeeping ONLY. No
+				// expect, no margin, no release - and it must not touch
+				// the holder's floor. (Real defect shape: B's final
+				// armed a side=b margin release while A still held and
+				// paced audio.)
+				c.mu.Unlock()
+				c.log.Info("voice: link turn: non-holder final (bookkeeping only)",
+					"side", side, "kind", "final_non_holder", "ccid", ccid, "seq", seq,
+					"holder", holderAtEdge)
+				return
 			}
-			gen := st.releaseGen + 1
-			st.releaseGen = gen
-			// floorHeld STAYS set: the pacer still owns this turn's
-			// audio tail. The release arms below.
+			st.reDispatched = false // this final closes subturn N: the guard now tracks only a NEW turn_start after this edge
+			st.lastFinalCcid = ccid // chain marker input: a later turn_start reDispatches
+			gen := st.marginGen + 1
+			st.marginGen = gen
+			st.marginCcid, st.marginSeq = ccid, seq
 			c.mu.Unlock()
 			// Expect the splice-side played edge OFF the lock: resolve the
 			// live local splice by ccid (the same package-level registry
@@ -393,28 +546,35 @@ func (c *LinkTurnCoordinator) TurnStateFor(side string) func(ccid string, seq ui
 					"side", side, "kind", "drain_arm_missed", "reason", reason, "ccid", ccid, "seq", seq)
 			}
 			c.mu.Lock()
-			if st.releaseGen == gen && !st.busy {
-				// Fallback margin: protects against the drain signal
-				// never firing (splice died mid-turn, child stalled
-				// without audio). Stale-drain guard: the fire compares
-				// the generation, so a turn_start on this side between
-				// arm and fire invalidates it.
-				st.releaseTimer = time.AfterFunc(c.margin, func() {
-					c.releaseFloor(side, ccid, seq, gen, "margin")
+			if st.marginGen == gen && !st.busy && st.floorHeld && c.holder == side {
+				// Fallback margin (HOLDER ONLY): watchdog against the
+				// drain signal never firing. The fire is audio-aware
+				// (marginFire): it rearms once while the outbound
+				// stream is still active, so a long audio tail can no
+				// longer be cut by a text-side timer.
+				st.marginTimer = time.AfterFunc(c.margin, func() {
+					c.marginFire(side, gen)
 				})
 			}
 			c.mu.Unlock()
 		case TurnKindIdle:
 			st.busy = false
 			st.floorHeld = false
-			if st.releaseTimer != nil {
-				st.releaseTimer.Stop()
-				st.releaseTimer = nil
+			st.reDispatched = false
+			st.lastFinalCcid = ""
+			c.cancelSideArmsLocked(st)
+			flushPeer := c.holder == side
+			if flushPeer {
+				c.holder = ""
 			}
-			st.releaseGen++ // no pending release rides an idle side
 			peerLoop := peer.loop
 			c.mu.Unlock()
-			if peerLoop != nil {
+			// Only the HOLDER's idle releases the peer: a non-holder's
+			// idle edge is a listening side, and flushing the real
+			// holder's would strand its floor behind a live peer turn.
+			// A non-holder idle still unbinds bookkeeping; if the
+			// holder later releases, that release flushes the parks.
+			if flushPeer && peerLoop != nil {
 				peerLoop.FlushHeld()
 			}
 		default:
@@ -423,14 +583,32 @@ func (c *LinkTurnCoordinator) TurnStateFor(side string) func(ccid string, seq ui
 	}
 }
 
+// cancelSideArmsLocked stops BOTH release arms (the drained pad timer
+// and the fallback margin timer) and invalidates their generations.
+// Callers hold c.mu.
+func (c *LinkTurnCoordinator) cancelSideArmsLocked(st *linkTurnSideState) {
+	if st.releaseTimer != nil {
+		st.releaseTimer.Stop()
+		st.releaseTimer = nil
+	}
+	if st.marginTimer != nil {
+		st.marginTimer.Stop()
+		st.marginTimer = nil
+	}
+	st.releaseGen++
+	st.marginGen++
+}
+
 // NoteAudioDrained is the floor's audio-truth release input: the local
 // splice fires it (wired per-call through LocalDeps -> the daemon
 // wiring's hook -> here) once the turn's last paced chunk has been
 // WRITTEN to the client socket and the child stream went quiet. A
 // stale/foreign ccid (no side holds it, or the side went mid-turn
-// again) is a no-op. Matching drains schedule the release after
-// linkFloorTailPad - the tiny transit gap so the last chunk clears the
-// bridge before the peer may speak.
+// again) is a no-op — as is a drain for a side that is NOT the floor
+// holder (holder-only release: a non-holder's splice quieting can never
+// hand its side a floor the peer owns). Matching drains schedule the
+// release after linkFloorTailPad - the tiny transit gap so the last
+// chunk clears the bridge before the peer may speak.
 func (c *LinkTurnCoordinator) NoteAudioDrained(ccid string) {
 	if c == nil || ccid == "" {
 		return
@@ -447,7 +625,7 @@ func (c *LinkTurnCoordinator) NoteAudioDrained(ccid string) {
 		st *linkTurnSideState
 	}{{LinkSideA, &c.a}, {LinkSideB, &c.b}} {
 		st := s.st
-		if st.ccid == ccid && st.floorHeld && !st.busy {
+		if st.ccid == ccid && st.floorHeld && !st.busy && c.holder == s.id {
 			match = st
 			side = s.id
 		}
@@ -470,21 +648,135 @@ func (c *LinkTurnCoordinator) NoteAudioDrained(ccid string) {
 		"kind", "floor_drain_noted", "ccid", ccid, "seq", seq, "pad_ms", c.pad.Milliseconds())
 }
 
+// marginFire is the holder's fallback-margin fire (armed at the
+// HOLDER's turn_final, generation-checked against this side's margin
+// arm). Audio-aware watchdog: before cutting the floor it consults the
+// holder's LIVE splice tail activity (TailActive: an outbound touch —
+// pump byte or paced client write — inside the margin window). A fire
+// while the tail is still AUDIBLE means the drain edge is merely slow
+// or lost (old child binary, dropped C1 frame) — releasing now is
+// exactly the measured 07:33:20 defect (a 12 s text-side timer cutting
+// an A tail whose played edge came 11 s later). The fire REARMS once
+// for the same generation instead. A stream that has gone quiet beyond
+// the margin window (stale touches, denied/empty turn, dead splice)
+// releases normally: the hold is bounded, never unbounded, and the
+// rearm keeps extending ONLY while audio is provably still playing.
+func (c *LinkTurnCoordinator) marginFire(side string, gen uint64) {
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return
+	}
+	st := c.sideLocked(side)
+	if st.marginGen != gen || c.holder != side || st.busy || !st.floorHeld {
+		c.mu.Unlock()
+		return
+	}
+	ccid, seq := st.marginCcid, st.marginSeq
+	releaseGen := st.releaseGen // drained-arm identity for the funnel check
+	c.mu.Unlock()
+
+	if sp := LocalSpliceFor(ccid); sp.TailActive(c.margin) {
+		c.mu.Lock()
+		st := c.sideLocked(side)
+		armed := false
+		if st.marginGen == gen && c.holder == side && !st.busy && st.floorHeld && !c.closed {
+			st.marginTimer = time.AfterFunc(c.margin, func() {
+				c.marginFireRearmed(side, gen)
+			})
+			armed = true
+		}
+		c.mu.Unlock()
+		if armed {
+			c.log.Info("voice: link turn: margin re-armed (holder tail still audible)",
+				"side", side, "kind", "margin_rearmed", "ccid", ccid, "seq", seq,
+				"tail_ms", sp.TailAge().Milliseconds())
+		}
+		return
+	}
+	c.releaseFloor(side, ccid, seq, releaseGen, "margin")
+}
+
+// marginFireRearmed is the SECOND consecutive fire of the same margin
+// generation. The rearm already proved the tail was audible once; a
+// second fire releases regardless — the hold is bounded at 2 x margin
+// even against a stream that keeps touching forever (a stalled client
+// socket ends the leg via the splice's own backpressure error, so this
+// is belt-and-braces, not the expected path).
+func (c *LinkTurnCoordinator) marginFireRearmed(side string, gen uint64) {
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return
+	}
+	st := c.sideLocked(side)
+	if st.marginGen != gen || c.holder != side || st.busy || !st.floorHeld {
+		c.mu.Unlock()
+		return
+	}
+	ccid, seq := st.marginCcid, st.marginSeq
+	releaseGen := st.releaseGen
+	c.mu.Unlock()
+	c.releaseFloor(side, ccid, seq, releaseGen, "margin")
+}
+
 // releaseFloor is the single floor-release funnel: the pad-after-drain
-// and the fallback-margin timers both route here. It re-checks under
-// the lock that the fire belongs to the LIVE arm (generation match,
-// side not mid-turn again, floor still held), clears the floor, logs
-// the telemetry edge (kind=floor_released, reason=drained|margin), and
-// flushes the peer's parked prompt. The release itself is idempotent
-// (FlushHeld is a buffered non-blocking signal and releaseHeld no-ops
-// with nothing parked).
+// timer and the audio-aware fallback-margin fires both route here. It
+// re-checks under the lock that the fire belongs to the LIVE arm AND to
+// the FLOOR HOLDER (c.holder == side — a non-holder's arm can exist
+// only from before the holder switched; releasing through it would cut
+// the real holder's floor, the measured link-b9d221d8d8cddcce shape),
+// that the side is not mid-turn again, and — the HOLDER-CHAIN guard —
+// that the holder did not dispatch a new sub-turn since its last quiet
+// final (reDispatched). A chained holder's drained/margin edge is the
+// end of THAT audio burst, not of the holder's turn-taking: the floor
+// stays with the holder (its live sub-turn re-claimed it at turn_start)
+// and the peer flush is DEFERRED to the holder's next quiet-final
+// release. Flushing here would let the peer's parked prompt dispatch
+// between the holder's sub-turns and talk over its next sentence.
+// When the guard does release: clears the floor, drops the holder
+// marker + the side's ccid (a stale drain for a floor-less slot must
+// never re-match), logs the telemetry edge (kind=floor_released,
+// reason=drained|margin), and flushes the peer's parked prompt. The
+// release itself is idempotent (FlushHeld is a buffered non-blocking
+// signal and releaseHeld no-ops with nothing parked).
 func (c *LinkTurnCoordinator) releaseFloor(side, ccid string, seq, gen uint64, reason string) {
 	c.mu.Lock()
 	st := c.sideLocked(side)
-	stillCurrent := st.releaseGen == gen && !st.busy && st.floorHeld && !c.closed
+	stillCurrent := st.releaseGen == gen && !st.busy && st.floorHeld && !c.closed && c.holder == side
+	if stillCurrent && st.reDispatched {
+		// Holder chained: keep the floor with the holder and defer the
+		// peer flush to the holder's next release. NO watchdog re-arm
+		// here: the live subturn's own turn_final arms a fresh margin
+		// (and its own played edge arms a fresh drain), so the retained
+		// floor always has a release path through the holder's stream.
+		// Re-arming a margin from this branch would loop forever — the
+		// fire would hit the same reDispatched guard and defer again.
+		if st.releaseTimer != nil {
+			st.releaseTimer.Stop()
+		}
+		st.releaseTimer = nil
+		st.releaseGen++ // this arm is consumed; the chain's next edges own the floor
+		chainCcid, chainSeq := st.ccid, st.seq
+		c.mu.Unlock()
+		c.log.Info("voice: link turn: release deferred (holder chained)", "side", side,
+			"kind", "floor_release_deferred", "reason", reason, "ccid", chainCcid, "seq", chainSeq)
+		return
+	}
 	if stillCurrent {
 		st.floorHeld = false
+		if st.releaseTimer != nil {
+			st.releaseTimer.Stop()
+		}
 		st.releaseTimer = nil
+		if st.marginTimer != nil {
+			st.marginTimer.Stop()
+			st.marginTimer = nil
+		}
+		st.ccid = ""
+		st.reDispatched = false
+		st.lastFinalCcid = ""
+		c.holder = ""
 	}
 	peerLoop := c.peerLocked(side).loop
 	c.mu.Unlock()
@@ -595,16 +887,15 @@ func (r *LinkTurnRegistry) Unregister(targets ...string) {
 func (c *LinkTurnCoordinator) Shutdown() {
 	c.mu.Lock()
 	c.closed = true
+	c.holder = ""
 	for _, side := range []string{LinkSideA, LinkSideB} {
 		st := c.sideLocked(side)
-		if st.releaseTimer != nil {
-			st.releaseTimer.Stop()
-			st.releaseTimer = nil
-		}
+		c.cancelSideArmsLocked(st)
 		st.busy = false
 		st.floorHeld = false
 		st.ccid = ""
-		st.releaseGen++ // no pending release rides a dead coordinator
+		st.lastFinalCcid = ""
+		st.reDispatched = false
 	}
 	c.mu.Unlock()
 }

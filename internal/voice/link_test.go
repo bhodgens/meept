@@ -1548,7 +1548,38 @@ func TestLinkCoordinatorDrainRaceGatesFreshClaims(t *testing.T) {
 
 	// Fresh-claim gate: A speaks again (floor held), finalizes, and does
 	// NOT drain yet - a brand-new B prompt must park, not claim.
-	stateA("cc-a-drain", 2, TurnKindStart)
+	//
+	// CORRECTED-CONTRACT UPDATE (holder-only release, link-b9d221d8d8cddcce):
+	// B's flushed turn above made B the real HOLDER (its loop's claim
+	// gated through, its dispatch ran a full turn, and its turn_final
+	// armed B's margin). The old phase-2 shape drove A's seq-2 through a
+	// BARE turn_start edge that silently overwrote the floor - the exact
+	// uncoordinated-edge channel the fix closes: a turn_start from a side
+	// whose peer holds the floor is a LISTENER edge and must NOT steal
+	// the floor. The gate is now driven through the CLAIM path like a
+	// real loop does: drain B's tail first (the holder's audio truth),
+	// then A claims, finals, and does NOT drain yet.
+	// Wait for B's dispatched turn to reach its quiet final (holder=b,
+	// not busy) BEFORE draining it: a drain that lands while B is still
+	// mid-turn is a no-op by design, and under package load the loop's
+	// turn_final edge can lag the dispatch.
+	waitFor(t, 3*time.Second, "b's turn reached its quiet final", func() bool {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return c.holder == LinkSideB && !c.b.busy && c.b.floorHeld
+	})
+	c.NoteAudioDrained("cc-b-drain") // B's dispatched turn drains
+	waitFor(t, 3*time.Second, "b's drained tail releases the floor", func() bool {
+		c.mu.Lock()
+		free := c.holder == "" && !c.b.floorHeld
+		c.mu.Unlock()
+		return free
+	})
+	holdA := c.HoldPromptFor(LinkSideA)
+	if !holdA(Instance{CallControlID: "cc-a-drain"}, func() {}) {
+		t.Fatal("A claim after B's drained release must be allowed")
+	}
+	stateA("cc-a-drain", 2, TurnKindStart) // idempotent confirmation of A's claim
 	stateA("cc-a-drain", 2, TurnKindFinal)
 	holdB := c.HoldPromptFor(LinkSideB)
 	if holdB(Instance{CallControlID: "cc-b-fresh"}, func() {}) {
@@ -1895,3 +1926,539 @@ func TestLinkCoordinatorNoDrainedReleaseDuringSynthGap(t *testing.T) {
 		t.Fatal("margin released instead of the drain (watchdog beat the real edge)")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Holder-only release (link-b9d221d8d8cddcce, measured 13.70 s overlap /
+// 685 both-sides windows): the coordinator must ONLY ever release the
+// floor held by the SPEAKER side. A non-holder's turn_final is a
+// LISTENING side's chained response to speech it heard while the peer
+// still holds - it arms no expect-final, no margin, and no release for
+// itself. The live defect: side B (not the holder - A had been speaking
+// since ~07:32:54) set expect-final on ITS splice at 07:33:08 and a
+// reason=margin release fired 'side=b' at 07:33:20, twelve seconds after
+// B's own turn_final and eleven seconds BEFORE A's played edge
+// (07:33:31) - handing B the floor while A was still audible.
+// ---------------------------------------------------------------------------
+
+// assertFloorInvariant reads the coordinator's slots under the lock and
+// pins the holder-only shape: at most one side floorHeld, floorHeld is
+// exactly the holder marker's mirror, and a busy side never coexists
+// with the PEER's held floor (the both-speak precondition).
+func assertFloorInvariant(t *testing.T, c *LinkTurnCoordinator, where string) {
+	t.Helper()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.a.floorHeld && c.b.floorHeld {
+		t.Fatalf("%s: both sides floorHeld", where)
+	}
+	if c.holder == LinkSideA && !c.a.floorHeld {
+		t.Fatalf("%s: holder=a but a.floorHeld=false", where)
+	}
+	if c.holder == LinkSideB && !c.b.floorHeld {
+		t.Fatalf("%s: holder=b but b.floorHeld=false", where)
+	}
+	if c.holder == "" && (c.a.floorHeld || c.b.floorHeld) {
+		t.Fatalf("%s: floor held with no holder marker", where)
+	}
+	if c.a.busy && c.b.floorHeld {
+		t.Fatalf("%s: a busy while b holds the floor", where)
+	}
+	if c.b.busy && c.a.floorHeld {
+		t.Fatalf("%s: b busy while a holds the floor", where)
+	}
+}
+
+// T-HR1 (task test a): the exact live bug. A is the floor HOLDER and
+// speaking; B's chained LISTENER turn_final edge (the non-holder's
+// response to speech it heard) must NOT arm any release path for
+// itself, must NOT release a side=b floor, and must NOT clear A's
+// floor. After 2x margin elapses B's parked prompt is STILL parked;
+// A's drained edge then releases A's floor and flushes B.
+func TestLinkCoordinatorNonHolderFinalCannotReleaseFloor(t *testing.T) {
+	var buf syncBuffer
+	turnsB := &holdTurns{reply: "ok."}
+	c := newTestCoordinator(80*time.Millisecond, slog.New(slog.NewTextHandler(&buf, nil)))
+	loopB := bindSideBLoop(t, c, &buf, turnsB)
+
+	stateA := c.TurnStateFor(LinkSideA)
+	stateB := c.TurnStateFor(LinkSideB)
+
+	// B's chained listener edges: a bare turn_start + turn_final while
+	// A holds (the 07:33:08 expect-final shape). Bookkeeping only.
+	stateB("cc-b-drain", 2, TurnKindStart)
+	stateB("cc-b-drain", 2, TurnKindFinal)
+
+	c.mu.Lock()
+	bArmed := c.b.marginTimer != nil || c.b.releaseTimer != nil
+	bFloor := c.b.floorHeld
+	aFloor := c.a.floorHeld
+	holder := c.holder
+	c.mu.Unlock()
+	if bArmed {
+		t.Fatal("non-holder final armed a release/margin timer (the 07:33:20 bug)")
+	}
+	if bFloor {
+		t.Fatal("non-holder side must not hold the floor")
+	}
+	if !aFloor || holder != LinkSideA {
+		t.Fatalf("non-holder edges cleared the holder's floor: floor=%v holder=%q", aFloor, holder)
+	}
+	assertFloorInvariant(t, c, "after non-holder final")
+
+	// Let 2x the margin elapse: the old code would have fired a
+	// side=b margin release by now. Nothing may release.
+	time.Sleep(200 * time.Millisecond)
+	logs := buf.String()
+	if strings.Contains(logs, "kind=floor_released") {
+		t.Fatalf("floor released while the holder still spoke:\n%s", logs)
+	}
+	if turnsB.count() != 0 && !loopHeldPrompt(loopB) {
+		t.Fatal("B's parked prompt vanished without a release")
+	}
+
+	// A's audio drains -> A (the holder) releases -> B flushes.
+	stateA("cc-a-drain", 1, TurnKindFinal)
+	c.NoteAudioDrained("cc-a-drain")
+	waitFor(t, 3*time.Second, "holder drain releases and flushes B", func() bool {
+		return turnsB.count() == 1
+	})
+	logs = buf.String()
+	if !strings.Contains(logs, "side=a") || !strings.Contains(logs, "kind=floor_released") {
+		t.Fatalf("release telemetry must name the holder side:\n%s", logs)
+	}
+	// The FIRST floor_released line must name the holder (side=a). The
+	// measured defect emitted `side=b kind=floor_released` while A still
+	// held; a LATER side=b release is legitimate (B's own turn becomes
+	// the holder's after its flushed dispatch), so only the first
+	// release is pinned.
+	first := ""
+	for _, line := range strings.Split(logs, "\n") {
+		if strings.Contains(line, "kind=floor_released") {
+			first = line
+			break
+		}
+	}
+	if !strings.Contains(first, "side=a") {
+		t.Fatalf("first floor_released must be the holder side a (measured defect was side=b): %s", first)
+	}
+	assertFloorInvariant(t, c, "after holder release")
+}
+
+// T-HR2 (task test b): HOLDER CHAINING. A's LLM keeps dispatching new
+// sub-turns while B's speech arrives: A's subturn N+1 dispatches while
+// subturn N's tail drains. The floor must STAY with the holder (its
+// live subturn re-claims it at turn_start) and the peer flush is
+// DEFERRED to the holder's next drained release with no new dispatch
+// (task rule 2). Behavioral pin: after the chained turn_start, a drain
+// edge for the previous burst may not release; B stays parked; when A
+// finally ends its chain (quiet final, no new dispatch) the next drain
+// releases side=a and flushes B.
+func TestLinkCoordinatorHolderChainKeepsFloorAndDefersPeer(t *testing.T) {
+	var buf syncBuffer
+	turnsB := &holdTurns{reply: "ok."}
+	c := newTestCoordinator(time.Hour, slog.New(slog.NewTextHandler(&buf, nil)))
+	loopB := bindSideBLoop(t, c, &buf, turnsB)
+
+	stateA := c.TurnStateFor(LinkSideA)
+
+	// A subturn 1 finalizes; the LLM chains subturn 2 BEFORE the tail
+	// drains (the 07:32:54 -> 07:32:55 chain shape: seq 3 dispatch 1.2
+	// s after the release that should have been A's quiet point).
+	stateA("cc-a-drain", 1, TurnKindFinal)
+	stateA("cc-a-drain", 2, TurnKindStart)
+	c.mu.Lock()
+	chainOK := c.a.busy && c.a.reDispatched && c.holder == LinkSideA && c.a.floorHeld
+	c.mu.Unlock()
+	if !chainOK {
+		t.Fatal("chained holder must stay busy + reDispatched + floor + holder")
+	}
+
+	// Subturn 1's drain edge lands while subturn 2 is LIVE: the busy
+	// gate rejects the match, so nothing arms a release; the floor
+	// stays with A and B stays parked.
+	c.NoteAudioDrained("cc-a-drain")
+	time.Sleep(120 * time.Millisecond)
+	if strings.Contains(buf.String(), "kind=floor_released") {
+		t.Fatalf("floor released mid-chain (peer would flush between subturns):\n%s", buf.String())
+	}
+	if !loopHeldPrompt(loopB) || turnsB.count() != 0 {
+		t.Fatal("B's park dispatched or vanished during the holder chain")
+	}
+	assertFloorInvariant(t, c, "mid-chain")
+
+	// A's chain ends: subturn 2 finalizes with NO new dispatch, then
+	// its drained edge fires -> the release lands, floor + holder
+	// clear, B flushes.
+	stateA("cc-a-drain", 2, TurnKindFinal)
+	c.NoteAudioDrained("cc-a-drain")
+	waitFor(t, 3*time.Second, "chain-close drain releases + flushes B", func() bool {
+		return turnsB.count() == 1
+	})
+	// A's floor is gone; B's dispatched turn may already have RE-CLAIMED
+	// the floor (holder=b is legal the moment B's claim gates through) —
+	// assert only that A no longer holds and the invariant still binds.
+	c.mu.Lock()
+	aClear := !c.a.floorHeld && !c.a.busy && (c.holder == "" || c.holder == LinkSideB)
+	c.mu.Unlock()
+	if !aClear {
+		t.Fatal("quiet-final drain release must clear A's floor + holder marker")
+	}
+	logs := buf.String()
+	if !strings.Contains(logs, "side=a") || !strings.Contains(logs, "kind=floor_released") {
+		t.Fatalf("release telemetry must name the holder side a:\n%s", logs)
+	}
+	for _, line := range strings.Split(logs, "\n") {
+		if strings.Contains(line, "kind=floor_released") && strings.Contains(line, "side=b") {
+			t.Fatalf("a side=b release fired during an a-held chain: %s", line)
+		}
+	}
+	assertFloorInvariant(t, c, "after chain close")
+}
+
+// T-HR2b: the releaseFloor chain GUARD itself (defensive second gate):
+// a pad-armed release whose holder reDispatched flag is set (the
+// interleaving where the live subturn's drain raced the pad timer) must
+// DEFER: kind=floor_release_deferred, floor stays with the holder, peer
+// flush skipped, the consumed arm invalidated. The chain's live
+// subturn then finalizes and its own margin watchdog (50 ms here)
+// provides the bounded release - the defer branch never re-arms a
+// timer itself (that would loop: the fire would hit the same
+// reDispatched guard and defer again).
+func TestLinkCoordinatorReleaseFloorChainGuardDefers(t *testing.T) {
+	var buf syncBuffer
+	turnsB := &holdTurns{reply: "ok."}
+	c := newTestCoordinator(80*time.Millisecond, slog.New(slog.NewTextHandler(&buf, nil)))
+	loopB := bindSideBLoop(t, c, &buf, turnsB)
+
+	stateA := c.TurnStateFor(LinkSideA)
+	stateA("cc-a-drain", 1, TurnKindFinal)
+	c.NoteAudioDrained("cc-a-drain") // pad-armed release for subturn 1
+
+	// A chains subturn 2 (turn_start after the final -> reDispatched),
+	// then the pad timer's arm fires while subturn 2 is LIVE: the busy
+	// gate rejects the arm match... to pin the GUARD itself, fire the
+	// funnel directly at the live arm instead (exactly what the pad
+	// timer callback would do if busy had cleared in between).
+	stateA("cc-a-drain", 2, TurnKindStart)
+	c.mu.Lock()
+	c.a.busy = false // subturn 2's text stream flushed early: busy=false, floor+chain still set
+	gen := c.a.releaseGen
+	c.mu.Unlock()
+	c.releaseFloor(LinkSideA, "cc-a-drain", 1, gen, "drained")
+
+	waitFor(t, 2*time.Second, "deferred telemetry", func() bool {
+		return strings.Contains(buf.String(), "kind=floor_release_deferred")
+	})
+	c.mu.Lock()
+	held := c.a.floorHeld && c.holder == LinkSideA
+	c.mu.Unlock()
+	if !held {
+		t.Fatal("deferred release must keep the floor with the chained holder")
+	}
+	if turnsB.count() != 0 || !loopHeldPrompt(loopB) {
+		t.Fatal("peer flush fired despite chained-holder defer")
+	}
+
+	// Subturn 2 finalizes with NO new dispatch: its own margin arms and
+	// the bounded watchdog releases for real.
+	stateA("cc-a-drain", 2, TurnKindFinal)
+	waitFor(t, 3*time.Second, "chain-close margin releases", func() bool {
+		return strings.Contains(buf.String(), "kind=floor_released")
+	})
+	waitFor(t, 3*time.Second, "deferred flush lands on release", func() bool {
+		return turnsB.count() == 1
+	})
+	assertFloorInvariant(t, c, "after guard-deferred release")
+}
+
+// startSeamSplice stands up a REAL local splice for one coordinator
+// side, exactly like LocalLeg.Open wires a link leg: registry target
+// pre-registered, drain callback resolved through wiredAudioDrain,
+// client pipe drained by a reader goroutine. The caller feeds child
+// PCM with feedChild(ccid) and can arm the drain watch with
+// LocalSpliceFor(ccid).MarkFinalPlayed().
+func startSeamSplice(t *testing.T, c *LinkTurnCoordinator, side, ccid string) *runLocalSplice {
+	t.Helper()
+	target := "local:link-" + side + "-" + ccid
+	reg := NewLinkTurnRegistry(linkDiscard())
+	reg.Register(target, "link-seam", side, c)
+	drainFn := wiredAudioDrain(reg, target)
+	if drainFn == nil {
+		t.Fatal("link target must resolve a drain callback")
+	}
+	cfg := LocalSpliceConfig{DrainQuiet: 150 * time.Millisecond, DrainQuietFinal: 60 * time.Millisecond}
+	p, micSide, _, _, cancel, done := startDrainSplice(t, ccid, cfg, drainFn)
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Error("seam splice did not exit")
+		}
+		_ = p
+	})
+	// Client consumer: paced audio must leave the pipe or the pacer
+	// stalls and pending never reaches zero.
+	stopRead := make(chan struct{})
+	go func() {
+		b := make([]byte, 640)
+		for {
+			select {
+			case <-stopRead:
+				return
+			default:
+			}
+			_ = micSide.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+			if _, err := micSide.Read(b); err != nil {
+				var ne net.Error
+				if !errors.As(err, &ne) || !ne.Timeout() {
+					return
+				}
+			}
+		}
+	}()
+	t.Cleanup(func() { close(stopRead) })
+	return waitForSplice(t, ccid)
+}
+
+// T-HR3 (task test c): the margin fires ONLY for the HOLDER, and is
+// audio-aware (holder-no-played watchdog). (1) A non-holder's final
+// arms no margin timer at all (the 07:33:20 side=b margin shape).
+// (2) A holder with no live splice (old-child/denied shape) rides the
+// margin to a normal reason=margin release. (3) A holder whose splice
+// tail is still AUDIBLE at the fire gets ONE re-arm (kind=
+// margin_rearmed) instead of a talk-over cut, and the second
+// consecutive fire releases anyway - the hold is bounded at 2 x
+// margin even when the played edge is lost forever.
+func TestLinkCoordinatorMarginIsHolderOnlyAndAudioAware(t *testing.T) {
+	var buf syncBuffer
+	turnsB := &holdTurns{reply: "ok."}
+	c := newTestCoordinator(120*time.Millisecond, slog.New(slog.NewTextHandler(&buf, nil)))
+	bindSideBLoop(t, c, &buf, turnsB)
+
+	// (1) B's chained non-holder final: bookkeeping only, NO margin.
+	c.TurnStateFor(LinkSideB)("cc-b-drain", 2, TurnKindFinal)
+	c.mu.Lock()
+	bMargin := c.b.marginTimer != nil
+	c.mu.Unlock()
+	if bMargin {
+		t.Fatal("non-holder final armed a margin timer (the 07:33:20 bug)")
+	}
+
+	// (2) Holder A finalizes with NO live splice for cc-a-drain ->
+	// TailActive false -> the margin releases normally (watchdog role).
+	stateA := c.TurnStateFor(LinkSideA)
+	stateA("cc-a-drain", 1, TurnKindFinal)
+	time.Sleep(60 * time.Millisecond)
+	if turnsB.count() != 0 {
+		t.Fatal("B released before the fallback margin")
+	}
+	waitFor(t, 3*time.Second, "holder margin watchdog releases", func() bool {
+		return turnsB.count() == 1
+	})
+	if !strings.Contains(buf.String(), "reason=margin") {
+		t.Fatalf("margin telemetry missing:\n%s", buf.String())
+	}
+
+	// (3) Live-tail shape on a REAL splice: A holds and finalizes; the
+	// child keeps pumping bytes across the margin window so the first
+	// fire finds TailActive true -> rearm only, floor stays held. A
+	// FRESH buffer: stage (2)'s released floor lets B's own turn run
+	// and arm its own margin on the shared coordinator's loop set —
+	// counting floor_released lines from the old buffer would race
+	// those unrelated releases.
+	var tailBuf syncBuffer
+	c2 := newTestCoordinator(150*time.Millisecond, slog.New(slog.NewTextHandler(&tailBuf, nil)))
+	const ccid = "ls-margin-tail"
+	startSeamSplice(t, c2, LinkSideA, ccid)
+	if !c2.HoldPromptFor(LinkSideA)(Instance{CallControlID: ccid}, func() {}) {
+		t.Fatal("A claim must be allowed on the idle coordinator")
+	}
+	c2.TurnStateFor(LinkSideA)(ccid, 1, TurnKindStart)
+	c2.TurnStateFor(LinkSideA)(ccid, 1, TurnKindFinal)
+	deadline := time.Now().Add(220 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		_ = feedChild(ccid)
+		time.Sleep(20 * time.Millisecond)
+	}
+	// First fire (~150 ms post-final) landed inside the live window.
+	waitFor(t, 2*time.Second, "margin re-armed for a live tail", func() bool {
+		return strings.Contains(tailBuf.String(), "kind=margin_rearmed")
+	})
+	c2.mu.Lock()
+	stillHeld := c2.a.floorHeld && c2.holder == LinkSideA
+	c2.mu.Unlock()
+	if !stillHeld {
+		t.Fatal("re-armed margin must keep the holder's floor (no tail cut)")
+	}
+	if strings.Contains(tailBuf.String(), "kind=floor_released") {
+		t.Fatalf("margin cut a live tail (floor_released despite TailActive):\n%s", tailBuf.String())
+	}
+	// Feeding stopped: the second fire releases regardless - bounded.
+	waitFor(t, 4*time.Second, "second margin fire releases (bounded hold)", func() bool {
+		return strings.Contains(tailBuf.String(), "kind=floor_released")
+	})
+	if !strings.Contains(tailBuf.String(), "reason=margin") {
+		t.Fatalf("bounded release must carry reason=margin:\n%s", tailBuf.String())
+	}
+}
+
+// T-HR4 (task test d): the full fake conversation through the real
+// seams, reproducing the 07:32-07:34 window of link-b9d221d8d8cddcce:
+// A (fake state machine on the claim path + a REAL splice) holds the
+// floor and chains sub-turns while a long synth backlog keeps its audio
+// tail alive; B is a REAL talk loop whose final prompt parks. The
+// measured defect: A's subturn-5 margin fired while A's tail was still
+// audible (played edge came 11 s later) and B dispatched over A's next
+// sentences. Corrected shape asserted here:
+//   - B parks while A holds;
+//   - A's margin fires DURING the live tail -> RE-ARM only (no release),
+//     B stays parked, zero both-speak;
+//   - A's tail finishes + played edge -> drained release, holder clears;
+//   - B's parked prompt then dispatches with A quiet; every B dispatch
+//     observes an A-floor-free coordinator (the zero-both-speak gate).
+func TestLinkCoordinatorConversationNoBothSpeakWindows(t *testing.T) {
+	var buf syncBuffer
+	c := newTestCoordinator(200*time.Millisecond, slog.New(slog.NewTextHandler(&buf, nil)))
+	const ccidA, ccidB = "ls-conv-a", "ls-conv-b"
+	startSeamSplice(t, c, LinkSideA, ccidA)
+	startSeamSplice(t, c, LinkSideB, ccidB)
+
+	// B: real loop, counting dispatches with the both-speak gate: no
+	// dispatch may run while A's slot holds the floor.
+	var bGateMu sync.Mutex
+	bViolations := 0
+	gatedB := &speakGateTurns{
+		inner:      &holdTurns{reply: "B answer."},
+		floorA:     func() bool { c.mu.Lock(); defer c.mu.Unlock(); return c.a.floorHeld || c.a.busy },
+		violations: &bViolations,
+		gateMu:     &bGateMu,
+	}
+	loopB := NewTalkLoop(TalkDeps{
+		Supervisor: &cannedSupervisor{},
+		Turns:      gatedB,
+		SessionFor: constSession(SessionHandle{ID: "s", ConversationID: "c"}),
+		Send:       (&recordSink{}).Send,
+		OnEnd:      func(ccid, reason string) {},
+		Logger:     slog.New(slog.NewTextHandler(&buf, nil)),
+		HoldPrompt: c.HoldPromptFor(LinkSideB),
+		TurnState:  c.TurnStateFor(LinkSideB),
+	}, TalkLoopConfig{})
+	c.Bind(LinkSideB, loopB)
+	cancelB, doneB := runLoop(t, loopB, ccidB)
+	defer func() { cancelB(); <-doneB }()
+
+	// A claims the floor and starts subturn 1 (the 07:32:54 shape).
+	if !c.HoldPromptFor(LinkSideA)(Instance{CallControlID: ccidA}, func() {}) {
+		t.Fatal("A's first claim must be allowed on the idle link")
+	}
+	stateA := c.TurnStateFor(LinkSideA)
+	stateA(ccidA, 1, TurnKindStart)
+
+	// B's question arrives mid-A-turn: parks (prompt_held).
+	loopB.frames <- finalPrompt(ccidB, "question while A talks")
+	waitFor(t, 2*time.Second, "B parks under A", func() bool {
+		return loopHeldPrompt(loopB) && gatedB.count() == 0
+	})
+
+	// A finalizes subturn 1 and CHAINS subturn 2 (the 07:33:06->07:33:08
+	// chain shape). The chained turn_start CANCELS subturn 1's margin arm
+	// (A is speaking again) - the only live margin from here belongs to
+	// the chain's LAST final.
+	stateA(ccidA, 1, TurnKindFinal)
+	stateA(ccidA, 2, TurnKindStart)
+	for range 6 {
+		if err := feedChild(ccidA); err != nil {
+			t.Fatalf("feedChild A: %v", err)
+		}
+	}
+
+	// A's chain ENDS: subturn 2 finalizes with no further dispatch ->
+	// the holder's margin re-arms off this final. One batched child
+	// feed of 30 chunks = 600 ms of paced backlog (all pumped into the
+	// splice instantly, paced out at 20 ms/chunk): the margin fires at
+	// 200 ms with pending>0 -> TailActive -> RE-ARM only (no cut), B
+	// stays parked; the second fire at ~400 ms also sees pending>0 ->
+	// releases regardless (the bounded hold: the played edge was lost,
+	// old-child shape). The release beats the drain watch on purpose:
+	// the watch needs pending==0 first (the backlog is ~200 ms deep at
+	// fire2), so fire2 is provably the margin's bounded release.
+	// (Under -race load the paced backlog only shrinks at real time
+	// (20 ms/chunk), so fire1 at ~200 ms sees ~20 chunks pending with
+	// any scheduler drift — TailActive is deterministic while the
+	// backlog plays out.)
+	stateA(ccidA, 2, TurnKindFinal)
+	for range 30 {
+		if err := feedChild(ccidA); err != nil {
+			t.Fatalf("feedChild backlog: %v", err)
+		}
+	}
+	waitFor(t, 2*time.Second, "margin re-armed over A's live backlog", func() bool {
+		for _, line := range strings.Split(buf.String(), "\n") {
+			if strings.Contains(line, "kind=margin_rearmed") && strings.Contains(line, "side=a") {
+				return true
+			}
+		}
+		return false
+	})
+	if gatedB.count() != 0 || !loopHeldPrompt(loopB) {
+		t.Fatal("B dispatched while A's tail was still audible (both-speak)")
+	}
+	c.mu.Lock()
+	stillHeld := c.a.floorHeld && c.holder == LinkSideA
+	c.mu.Unlock()
+	if !stillHeld {
+		t.Fatal("re-armed margin must keep A's floor")
+	}
+
+	// The SECOND consecutive fire releases regardless - the hold is
+	// bounded at 2 x margin even with a lost played edge (the
+	// old-child-binary shape the margin exists for). Poll the
+	// TELEMETRY line (not the state flip): releaseFloor clears the
+	// floor under the lock and logs AFTER unlocking, so a state poll
+	// can win the log write under package load.
+	//
+	// The measured defect is the FIRST release naming side=b while A
+	// still held; B's OWN later release (after it became the holder
+	// through a gated claim) is legal. Pin: the first floor_released
+	// line must name side=a.
+	waitFor(t, 4*time.Second, "first floor_released names the holder side a", func() bool {
+		for _, line := range strings.Split(buf.String(), "\n") {
+			if strings.Contains(line, "kind=floor_released") {
+				return strings.Contains(line, "side=a")
+			}
+		}
+		return false
+	})
+
+	// B's parked prompt flushes and dispatches while A is quiet.
+	waitFor(t, 3*time.Second, "B flushes and dispatches after A's release", func() bool {
+		return gatedB.count() == 1
+	})
+	if bViolations != 0 {
+		t.Fatalf("%d both-speak dispatch windows (B ran while A busy/held)", bViolations)
+	}
+	assertFloorInvariant(t, c, "end of conversation")
+}
+
+// speakGateTurns wraps a TurnRunner and counts every dispatch that starts
+// while the gate predicate still reports the PEER speaking (busy or
+// floor-held): the zero-both-speak-windows assertion for the
+// conversation test.
+type speakGateTurns struct {
+	inner      TurnRunner
+	floorA     func() bool
+	gateMu     *sync.Mutex
+	violations *int
+}
+
+func (g *speakGateTurns) Run(ctx context.Context, sess SessionHandle, prompt string) (string, error) {
+	if g.floorA() {
+		g.gateMu.Lock()
+		*g.violations++
+		g.gateMu.Unlock()
+	}
+	return g.inner.Run(ctx, sess, prompt)
+}
+
+func (g *speakGateTurns) count() int { return g.inner.(*holdTurns).count() }

@@ -981,6 +981,44 @@ func (s *runLocalSplice) MarkFinalPlayed() bool {
 	return true
 }
 
+// TailActive reports whether this splice's OUTBOUND stream was audio-
+// active within the last `window`: bytes still queued in the pacer
+// (audioPending > 0) or an outbound touch (pump read / paced client
+// write, audioLastAct) fresher than window. The link coordinator's
+// fallback-margin fire consults it before cutting a holder's floor:
+// a live tail means the drain edge is merely slow or lost (old child
+// binary, dropped C1 played frame), and a text-side timer releasing
+// mid-tail is the measured talk-over (link-b9d221d8d8cddcce). A nil
+// receiver (no live splice) reports false — nothing is playing. Takes
+// NO lock: audioPending and audioLastAct are atomics the pump/pacer
+// stamp lock-free by design (same reads runDrainWatch makes).
+func (s *runLocalSplice) TailActive(window time.Duration) bool {
+	if s == nil {
+		return false
+	}
+	if s.audioPending.Load() > 0 {
+		return true
+	}
+	last := s.audioLastAct.Load()
+	if last == 0 {
+		return false
+	}
+	return time.Since(time.Unix(0, last)) < window
+}
+
+// TailAge is the time since the splice's last outbound touch (0 when
+// never touched). Telemetry only (margin_rearmed's tail_ms); nil-safe.
+func (s *runLocalSplice) TailAge() time.Duration {
+	if s == nil {
+		return 0
+	}
+	last := s.audioLastAct.Load()
+	if last == 0 {
+		return 0
+	}
+	return time.Since(time.Unix(0, last))
+}
+
 // runDrainWatch polls the drain evidence every window/4 and fires
 // deps.AudioDrained exactly once per arm. It never takes s.mu across
 // the callback (mutex-scope rule), and it exits cleanly when the latch

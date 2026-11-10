@@ -105,14 +105,37 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   call.
 - Every release path matters: turn_final NO LONGER releases the floor -
   and it no longer even BLIND-ARMS the drain watch. The floor releases
-  on AUDIO DRAIN driven by the child's C1 played edge: turn_final sets
+  on AUDIO DRAIN driven by the child's C1 played edge: the HOLDER's
+  turn_final sets
   the splice's EXPECTED-final state (LocalSpliceFor(ccid).ExpectFinalDrain,
   the same registry HandleInterrupt rides) plus a LONG fallback margin
   (default 12 s, LinkDeps.TurnMargin); the child's played frame
   (routeFrame -> MarkFinalPlayed) then ARMS the watch, and the first of
   (LocalSpliceDeps.AudioDrained edge + 250 ms tail pad) or (fallback
   fire) clears the floor and flushes the peer's park (telemetry
-  kind=floor_released, reason=drained|margin). Why the blind arm was
+  kind=floor_released, reason=drained|margin). HOLDER-ONLY RELEASE
+  (link-b9d221d8d8cddcce, measured 13.70 s overlap): the coordinator
+  tracks c.holder (set on claim/turn_start); a NON-holder's turn_final
+  is a listening side's chained response to speech it heard and records
+  bookkeeping ONLY - no expect-final, no margin arm, no release (the
+  live defect: B's non-holder final armed its own margin, and the 12 s
+  fire released a side=b floor while holder A was still audible; the
+  release funnel refuses when c.holder != side). A bare turn_start from
+  a side whose peer holds the floor is a LISTENER edge (bookkeeping
+  only) - a real loop never emits one while parked - and must NEVER
+  steal the floor. Only the holder's idle edge releases the peer now.
+  MARGIN AUDIO-AWARENESS: the margin's fire consults the holder's live
+  splice tail (runLocalSplice.TailActive: pending>0 or an outbound
+  touch inside the margin window); a fire while the tail is still
+  AUDIBLE RE-ARMS once (kind=margin_rearmed) instead of cutting it, and
+  the second consecutive fire releases regardless - the hold stays
+  bounded at 2 x margin. HOLDER CHAINING: a holder's turn_start AFTER
+  its own turn_final marks reDispatched; a drained/margin edge then
+  DEFERS the release (kind=floor_release_deferred) - the floor stays
+  with the holder and the peer flush waits for the holder's next
+  quiet-final release, so a parked prompt can never flush between the
+  holder's sub-turns (the release->reclaim window of the 07:32-07:34
+  chain). Why the blind arm was
   still early (link-2fdc3f5fd8d81805: 3/4 drained releases fired, but
   MID-REPLY - the child's inter-sentence synth gaps of 1.4-3.8 s exceed
   the 1 s quiescence window, so pending==0+quiet faked a drain while
