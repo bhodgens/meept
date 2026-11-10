@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -161,8 +162,8 @@ type pipeline struct {
 	// CONSUMES the evidence (one-shot, defect 2026-11-09): an
 	// authorized trip zeroes this field, so a second trip needs a NEW
 	// final — a stale stamp must never re-authorize cancelling the
-	// very turn the final already dispatched. Non-speech-marker and
-	// duplicate finals never stamp it (see nonSpeechTranscript and
+	// very turn the final already dispatched. Non-speech finals (see
+	// isRealSpeech) and duplicate finals never stamp it (see
 	// lastFinalText).
 	lastFinalAt time.Time
 	// lastFinalText (playMu) is the trimmed text of the most recent
@@ -343,6 +344,61 @@ func nonSpeechTranscript(text string) bool {
 	return false
 }
 
+// bracketedTokenRe matches one whisper paralinguistic bracket token: an
+// opening ( [ followed by 1-60 non-']' / non-newline characters and a
+// closing ) ]. The 60-char cap keeps a bracket token bracket-sized — a long
+// parenthetical containing real words is caller speech, not an artifact.
+// (?i) is spec fidelity: the class is shape-based, so case never binds.
+var bracketedTokenRe = regexp.MustCompile(`(?i)[\[(][^\]\n]{1,60}[\])]`)
+
+// punctuationOnlyRe matches residue that carries no word characters at all:
+// only Unicode punctuation, symbols, and whitespace.
+var punctuationOnlyRe = regexp.MustCompile(`^[\p{P}\p{S}\s]*$`)
+
+// isRealSpeech reports whether a FINAL transcript carries real words
+// OUTSIDE whisper's bracket artifacts (defect 2026-11-10, call
+// local-376ee373022f7663: the exact-marker set of nonSpeechTranscript only
+// covers a fixed list, whisper emits dozens of paralinguistic tokens —
+// "(farting)", "(mouse clicking)", "(squeaking)", "[clears throat]",
+// "(inhales deeply)" — and the companion answered each as a user prompt).
+// The guard classifies by SHAPE, wrapping the exact set:
+//
+//  1. exact no-speech marker set (fast path — blank/sigh variants land
+//     here already, and whitespace-only text counts as non-speech);
+//  2. strip every maximal bracketed-token run (regex above). Paren
+//     characters live INSIDE the body class, so nesting collapses into
+//     one run ending at the FIRST closer: "[music (fade)]" and the
+//     unbalanced "[music (fade)" both strip whole; an opener with NO
+//     closer anywhere ("hello [music (fade") matches nothing and stays
+//     as residue — leftover words outside any run always keep the
+//     transcript real, so the rule errs toward hearing the caller;
+//  3. punctuation/symbol/whitespace-only residue is not speech.
+//
+// A single-bracket word ("yeah", "mmm") stays REAL: only bracketed and
+// blank forms drop, so filler words the caller genuinely voiced still
+// dispatch a turn.
+func isRealSpeech(text string) bool {
+	// Fast path: the exact set from leaf 02 (3a755a84) stays first — its
+	// semantics and TestNonSpeechTranscriptTable are unchanged.
+	if nonSpeechTranscript(text) {
+		return false
+	}
+	residue := strings.TrimSpace(bracketedTokenRe.ReplaceAllString(text, " "))
+	return !punctuationOnlyRe.MatchString(residue)
+}
+
+// transcriptPreview bounds a dropped transcript to <=40 runes for the
+// drop log. Transcript text carries nothing sensitive by contract, but the
+// log line stays bounded regardless (telemetry leaf 02 counts these drops
+// from the same line).
+func transcriptPreview(text string) string {
+	r := []rune(text)
+	if len(r) > 40 {
+		return string(r[:40])
+	}
+	return text
+}
+
 // consumeTranscripts turns STT transcripts into C1 prompt frames: a final
 // transcript is last:true (starts an employee turn), a partial is last:false
 // (preview only), and empty-text silence results emit nothing (C5). A
@@ -358,14 +414,20 @@ func (p *pipeline) consumeTranscripts(trans <-chan Transcript) {
 		}
 		if tr.Final {
 			trimmed := strings.TrimSpace(tr.Text)
-			// Non-speech filter (defect 2026-11-09): whisper emits its
-			// no-speech markers as FINAL transcripts ("[BLANK_AUDIO]",
-			// "(sighs)"). Those are not user prompts — dispatching them
-			// made the employee answer silence. Drop them entirely: no
-			// prompt frame, no speech-evidence stamp, no dedupe state.
-			// Partials keep passing through as previews (the daemon
-			// never starts a turn on one).
-			if nonSpeechTranscript(trimmed) {
+			// Non-speech filter (defect 2026-11-09 exact set, extended to
+			// the SHAPE class 2026-11-10): whisper emits no-speech markers
+			// and paralinguistic bracket tokens — "[BLANK_AUDIO]",
+			// "(sighs)", "(farting)", "[clears throat]" — as FINAL
+			// transcripts. Those are not user prompts; dispatching them
+			// made the employee answer silence and mouse clicks. Drop them
+			// entirely: no prompt frame, no speech-evidence stamp, no
+			// dedupe state change. Partials keep passing through as
+			// previews (the daemon never starts a turn on one, and the
+			// partial branch below never touches lastFinalAt — evidence
+			// stamping is finals-only by contract).
+			if !isRealSpeech(trimmed) {
+				p.logger.Info("voicechild: non-speech final dropped",
+					"call_id", p.ccid, "text", transcriptPreview(trimmed))
 				continue
 			}
 			// Speech evidence for the local leg's RMS barge-in gate
