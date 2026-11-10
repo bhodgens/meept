@@ -10,6 +10,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -125,6 +126,19 @@ func toolsEmployeeDefinition() *employee.Employee {
 	def.ID = "reporter"
 	def.Tools = []string{"file_read"}
 	return def
+}
+
+// fakeEmployeeResolver is the in-test EmployeeDefinitionResolver:
+// byID maps employee ids to definitions; unknown ids error.
+type fakeEmployeeResolver struct {
+	byID map[string]*employee.Employee
+}
+
+func (f *fakeEmployeeResolver) GetEmployee(_ context.Context, id string) (*employee.Employee, error) {
+	if def, ok := f.byID[id]; ok {
+		return def, nil
+	}
+	return nil, errors.New("unknown employee " + id)
 }
 
 // (a) The recorded leak shape must never reach the caller: the adapter
