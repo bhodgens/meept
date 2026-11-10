@@ -331,7 +331,8 @@ func TestBindingTurnRunnerStampsCallerOnTurnCtx(t *testing.T) {
 		Caller:        caller,
 	}
 
-	runner := turnRunnerFor(b, inst)
+	gates := readyGatesFor(inst.CallControlID)
+	runner := turnRunnerFor(b, gates, inst)
 	if _, err := runner.Run(context.Background(), voice.SessionHandle{}, "hello"); err != nil {
 		t.Fatalf("bindingTurnRunner.Run: %v", err)
 	}
@@ -360,6 +361,16 @@ func TestBindingTurnRunnerStampsCallerOnTurnCtx(t *testing.T) {
 	}
 }
 
+// readyGatesFor builds a holdTracker with ccid's gate already ready.
+// (2026-11-10 merge fixup: turnRunnerFor gained the hold-gate param
+// from the sibling webhook-hold audit; tests that drive a single turn
+// arm the gate ready before running.)
+func readyGatesFor(ccid string) *holdTracker {
+	ht := newHoldTracker()
+	ht.arm(ccid).markReady()
+	return ht
+}
+
 // TestBindingTurnRunnerStampsZeroCaller pins the zero-Info posture:
 // master says Instance.Caller zero is legal, and the stamp is
 // unconditional - enforcement must be able to distinguish "unknown
@@ -372,7 +383,7 @@ func TestBindingTurnRunnerStampsZeroCaller(t *testing.T) {
 		t.Fatalf("OnCallStart: %v", err)
 	}
 	inst := voice.Instance{CallControlID: ccid, EmployeeID: "emp-voice-1", Caller: callerid.Info{}}
-	if _, err := turnRunnerFor(b, inst).Run(context.Background(), voice.SessionHandle{}, "hi"); err != nil {
+	if _, err := turnRunnerFor(b, readyGatesFor(ccid), inst).Run(context.Background(), voice.SessionHandle{}, "hi"); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	captured := turns.captured()
