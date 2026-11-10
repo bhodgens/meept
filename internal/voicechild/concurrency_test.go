@@ -12,13 +12,19 @@ import (
 	"github.com/caimlas/meept/internal/voiceframe"
 )
 
-// serialTTS is a TTS whose audio carries a per-stream ordinal byte:
-// every 640-byte chunk its reader hands out is filled with the Speak call
-// number (1-based). The test decodes the .out socket stream and asserts
-// the chunks form exactly one contiguous run of N chunks per ordinal, in
-// ascending order — the FIFO drain signature. With the old per-say
-// goroutines, two streams wrote PCM to the same audioOut socket
-// unsynchronized and the daemon heard interleaved chunks.
+// serialTTS is a TTS whose audio carries a per-FRAME ordinal byte,
+// derived from the frame text ("sentence %d" -> ordinal d+1) rather than
+// the Speak call time: with the bounded depth-2 prefetch, two Speak
+// CALLS may enter the provider in either order (launch races), so a
+// call-time stamp could flag a legal depth-2 interleaving as a FIFO
+// violation. The invariant under test is the WRITE order: PCM must
+// leave audioOut in sayQueue dequeue order, one whole stream per run.
+// Every 640-byte chunk a reader hands out is filled with the frame's
+// ordinal; the test decodes the .out stream and asserts the chunks form
+// exactly one contiguous run of 3 ordinals per burst position — the
+// FIFO drain signature. With the old per-say goroutines, two streams
+// wrote PCM to the same audioOut socket unsynchronized and the daemon
+// heard interleaved chunks.
 //
 // The LOAD-BEARING invariant is reader-serialization: at most ONE Speak
 // reader may be open (handing out chunks) at a time, because every read
@@ -36,14 +42,17 @@ type serialTTS struct {
 }
 
 func (s *serialTTS) Speak(ctx context.Context, text string) (io.ReadCloser, error) {
+	ordinal := byte(0)
+	if n, err := fmt.Sscanf(text, "sentence %d", &ordinal); n == 1 && err == nil {
+		ordinal++ // frame 0 -> ordinal 1
+	}
 	s.mu.Lock()
 	s.speaks++
-	ordinal := s.speaks
 	if s.openReaders > 0 {
 		s.speakOverreader++
 	}
 	s.mu.Unlock()
-	return &serialReader{s: s, chunks: 3, ordinal: byte(ordinal)}, nil //nolint:gosec // G115: ordinal is a small test counter, fits a byte
+	return &serialReader{s: s, chunks: 3, ordinal: ordinal}, nil
 }
 
 func (s *serialTTS) counts() (speaks, readerOverlaps, speakOverreader int) {
@@ -119,20 +128,20 @@ func TestConcurrentSaysSerialize(t *testing.T) {
 	swapTTS(p, tts)
 
 	const burst = 8
-	// Fire the whole burst through the REAL handler concurrently, exactly
-	// as the daemon read loop would deliver back-to-back say frames.
-	var wg sync.WaitGroup
+	// Fire the whole burst through the REAL handler back-to-back, exactly
+	// as the production C1 read loop delivers say frames (one reader
+	// goroutine, sequential handleSay). The concurrency that matters is
+	// the worker-vs-enqueue race: these calls land while the worker is
+	// already draining frame 1, exercising the prefetch launch hooks.
+	// (A multi-goroutine enqueue storm would make sayQueue ORDER itself
+	// a race, and the FIFO decode below asserts dequeue order — the
+	// load-bearing fix-1 invariant — against a known enqueue order.)
 	for i := range burst {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			frame := voiceframe.Frame{CallID: "cs1", Event: voiceframe.EventSay, Text: fmt.Sprintf("sentence %d", i), Last: lastPtr(true)} //nolint:modernize // newexpr would emit new(bool)=false; true is intended
-			if err := child.handleSay(frame); err != nil {
-				t.Errorf("handleSay %d: %v", i, err)
-			}
-		}(i)
+		frame := voiceframe.Frame{CallID: "cs1", Event: voiceframe.EventSay, Text: fmt.Sprintf("sentence %d", i), Last: lastPtr(true)} //nolint:modernize // newexpr would emit new(bool)=false; true is intended
+		if err := child.handleSay(frame); err != nil {
+			t.Errorf("handleSay %d: %v", i, err)
+		}
 	}
-	wg.Wait()
 
 	// Drain everything the worker writes: 3 chunks x burst frames x 640 B.
 	total := burst * 3 * 640
@@ -171,9 +180,10 @@ func TestConcurrentSaysSerialize(t *testing.T) {
 		t.Fatalf("Speak called %d times, want %d (every queued frame played exactly once)", speaks, burst)
 	}
 	// The prefetch bound: with instant Speak, synthesis of a queued
-	// frame overlaps the CURRENT frame's read phase, but depth stays at
-	// one — a burst never opens two readers, and the byte runs prove
-	// dequeue order held regardless of Speak-call interleaving.
+	// frame overlaps the CURRENT frame's read phase, but depth stays
+	// bounded (prefetchDepth=2 synth jobs max) — a burst never opens
+	// two readers, and the byte runs prove dequeue order held
+	// regardless of Speak-call interleaving.
 	if speakOverreader < 0 || speakOverreader > burst-1 {
 		t.Fatalf("speakOverreader = %d, want <= %d (bounded one-frame prefetch)", speakOverreader, burst-1)
 	}

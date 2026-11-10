@@ -71,9 +71,12 @@ const localChunkBytes = 640
 const localJoinTimeoutDefault = 10 * time.Second
 
 // localDrainQuietDefault is the outbound quiescence window: watch
-// armed + pump backlog empty + carry empty + NO child read and NO
+// armed + pump backlog empty + NO child read and NO
 // pacer consume/write for this long = the turn's audio is DONE (every
-// chunk the child sent has been written to the client socket).
+// whole chunk the child sent has been written to the client socket;
+// the pump's sub-chunk residue is NOT part of the predicate - a real
+// child stream's byte total is never a multiple of 640, so gating on
+// carry==0 made the drain unreachable in production).
 // Deliberately conservative (better late than early): the window must
 // exceed a realistic inter-sentence cloud-TTS gap (a turn streams
 // sentence after sentence; a mid-turn synthesis lull shorter than this
@@ -171,12 +174,20 @@ type runLocalSplice struct {
 	//     chunks the pacer finished consuming (the backlog still to
 	//     WRITE to the client socket);
 	//   audioCarry   - sub-chunk residue the read pump holds (bytes not
-	//     yet a whole 20 ms frame);
+	//     yet a whole 20 ms frame). NOT part of the drain predicate:
+	//     a real child's TTS stream length is never a multiple of 640
+	//     (measured: every playback cadence line had bytes % 640 != 0),
+	//     so the pump's held residue ends every turn non-zero and the
+	//     old `carry==0` gate made the fire UNREACHABLE in production
+	//     (link-6eb490abd8349958: 0/5 drained releases, every floor
+	//     release rode the margin). The residue is never playable audio
+	//     mid-call (the pump contract holds partials, never flushes a
+	//     torn frame), so it must not pin the floor.
 	//   audioLastAct - unix-nano of the last outbound touch (pump read
 	//     OR pacer consume/write).
 	// Drain (fire once, then the latch self-disarms) = armed && the
-	// barge-in latch is NOT set && not ended && pending<=0 && carry==0
-	// && a touch happened AFTER the arm (drainArmedAtNano floor - the
+	// barge-in latch is NOT set && not ended && pending<=0 &&
+	// a touch happened AFTER the arm (drainArmedAtNano floor - the
 	// early-fire guard: at turn_final the LAST sentence has only just
 	// reached the child, its TTS may take hundreds of ms to produce a
 	// byte, and the splice cannot tell "synthesizing" from "will never
@@ -778,14 +789,20 @@ func (s *runLocalSplice) resumeBargeIn() {
 // coordinator rides its fallback margin alone. Safe from any goroutine;
 // takes s.mu only for the latch swap (repo mutex-scope rule: no I/O,
 // no callback under it).
-func (s *runLocalSplice) ArmDrainWatch() {
+//
+// The bool reports whether the drain signal is now LIVE for this turn
+// (armed fresh or joined an armed watch): false means the fire can
+// NEVER come (nil dep / ended splice), so the caller can log the
+// degraded path instead of silently waiting for a margin release.
+func (s *runLocalSplice) ArmDrainWatch() bool {
 	if s == nil {
-		return
+		return false
 	}
 	s.mu.Lock()
 	if s.deps.AudioDrained == nil || s.ended || s.drainArmed {
+		armed := s.deps.AudioDrained != nil && !s.ended
 		s.mu.Unlock()
-		return
+		return armed
 	}
 	s.drainArmed = true
 	// Quiet-window floor stored INSIDE the same critical section as the
@@ -806,6 +823,7 @@ func (s *runLocalSplice) ArmDrainWatch() {
 		go s.runDrainWatch(s.loopCtx)
 	}
 	s.log.Info("voice: localsplice drain watch armed", "ccid", s.ccid)
+	return true
 }
 
 // runDrainWatch polls the drain evidence every window/4 and fires
@@ -844,9 +862,17 @@ func (s *runLocalSplice) runDrainWatch(ctx context.Context) {
 			// resumes, so the ctx-cancel exit above reaps it.
 			continue
 		}
-		if s.audioPending.Load() > 0 || s.audioCarry.Load() > 0 {
+		if s.audioPending.Load() > 0 {
 			continue // backlog still inside the pacer
 		}
+		// audioCarry is deliberately NOT in this predicate (measured
+		// root cause of the never-firing drain, link-6eb490abd8349958):
+		// a real child's TTS byte total is never a multiple of 640, so
+		// the pump's sub-chunk residue sits non-zero after EVERY turn
+		// and `carry==0` could never be met — zero reason=drained
+		// releases while the 4 s margin fired each time. The residue
+		// is bytes the pump will never emit as a torn frame; the floor
+		// must ride pending==0 + the quiet window instead.
 		last := s.audioLastAct.Load()
 		armedAt := s.drainArmedAtNano.Load()
 		if last < armedAt {

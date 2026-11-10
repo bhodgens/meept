@@ -99,7 +99,7 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
 - Every release path matters: turn_final NO LONGER releases the floor.
   The floor releases on AUDIO DRAIN: turn_final arms the splice's drain
   watch (LocalSpliceFor(ccid).ArmDrainWatch, the same registry
-  HandleInterrupt rides) plus a LONG fallback margin (default 4 s,
+  HandleInterrupt rides) plus a LONG fallback margin (default 12 s,
   LinkDeps.TurnMargin); the first of (LocalSpliceDeps.AudioDrained edge
   + 250 ms tail pad) or (fallback fire) clears the floor and flushes the
   peer's park (telemetry kind=floor_released, reason=drained|margin).
@@ -109,8 +109,11 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   gates on floorHeld so a FRESH peer prompt cannot claim the floor
   during the tail either. The drain fires only after (a) a touch
   POST-DATES the arm (the early-fire guard: the final sentence's TTS
-  may still be synthesizing) and (b) pending/carry are zero and the
-  stream is quiet for the window; a silent stream NEVER fires - denied
+  may still be synthesizing) and (b) the pacer pending backlog is zero
+  and the stream is quiet for the window; the pump's sub-chunk CARRY
+  never gates the fire (a real TTS stream's byte total is never a
+  multiple of 640 - carry==0 was unreachable, 0/5 drained releases on
+  link-6eb490abd8349958). A silent stream NEVER fires - denied
   turns ride the fallback margin (late, never early). idle (barge-in
   cancel, unbind, teardown) releases IMMEDIATELY (nothing is playing),
   and a park alive at loop exit is dropped with a log (never dispatched

@@ -106,7 +106,17 @@ var ErrLinkMonitorPathTooLong = errors.New("voice: voice link: monitor socket pa
 // pacer can still hold seconds of that turn's paced audio (measured on
 // link-1108d776b0a1efb3: 335 talk-over windows, 6.70 s total). A stale
 // extra hold is harmless; early release is the bug.
-const linkFloorFallbackDefault = 4 * time.Second
+//
+// 12 s, not the original 4 s: measured tails run 5-10 s (link-
+// 6eb490abd8349958: child cadence write_ms=11136 on one turn — synth
+// backlog + paced audio AFTER the daemon-side turn_final is real, since
+// turn_final means the last say FRAME left the daemon, not that the
+// child finished playing). A 4 s watchdog beat the drain edge to the
+// release on every long turn (all 5 margin releases landed at exactly
+// +4 s while audio still paced), reintroducing the talk-over the drain
+// seam exists to kill. The drain must be the NORMAL release path; the
+// margin only bounds a dead-splice worst case.
+const linkFloorFallbackDefault = 12 * time.Second
 
 // linkFloorTailPad is the small gap added after the audio-drain edge
 // before the floor releases: the last paced chunk plus bridge transit
@@ -349,7 +359,23 @@ func (c *LinkTurnCoordinator) TurnStateFor(side string) func(ccid string, seq ui
 			// no-op; no splice (already torn down) -> nil receiver.
 			// Either way the fallback margin below still bounds the
 			// hold.
-			LocalSpliceFor(ccid).ArmDrainWatch()
+			//
+			// Instrumentation (measured defect: 0/5 drained releases,
+			// every floor release rode the margin): when the drain
+			// signal cannot fire for this turn — no splice under the
+			// ccid, or the splice's drain deps are unwired / the
+			// splice ended — WARN with the reason so the next live run
+			// distinguishes "never armed" from "armed, never
+			// quiescent" without log archaeology.
+			sp := LocalSpliceFor(ccid)
+			if !sp.ArmDrainWatch() {
+				reason := "no live splice for ccid"
+				if sp != nil {
+					reason = "splice drain deps unwired/ended"
+				}
+				c.log.Warn("voice: link turn: drain watch NOT armed",
+					"side", side, "kind", "drain_arm_missed", "reason", reason, "ccid", ccid, "seq", seq)
+			}
 			c.mu.Lock()
 			if st.releaseGen == gen && !st.busy {
 				// Fallback margin: protects against the drain signal
@@ -648,7 +674,7 @@ type LinkDeps struct {
 	// coordinator arms on a side's turn_final when the audio-drain
 	// signal never fires. The primary release is drain-driven: the
 	// local splice's ArmDrainWatch -> AudioDrained edge -> floor after
-	// linkFloorTailPad. Zero = linkFloorFallbackDefault (4 s).
+	// linkFloorTailPad. Zero = linkFloorFallbackDefault (12 s).
 	TurnMargin time.Duration
 	Logger     *slog.Logger
 }

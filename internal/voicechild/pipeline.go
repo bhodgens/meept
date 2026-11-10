@@ -122,11 +122,15 @@ type pipeline struct {
 	// real-time drain of N. Without it, synthesis of N+1 only began after
 	// N had FULLY PLAYED and every sentence break was a dead 1-4 s gap at
 	// the speakers (daemon log: "localsplice pacer stall gap_ms=4620").
-	// Prefetch depth is bounded to ONE frame: PCM still leaves audioOut
-	// strictly in dequeue order (one writer), at most one extra utterance
-	// is ever synthesizing/open, and a clear retires the lookahead with
-	// the same playGen gate (its reader is cancelled AND closed, so no
-	// stale bytes reach the socket after the barge-in).
+	// Prefetch depth is bounded to TWO frames (prefetchDepth): PCM still
+	// leaves audioOut strictly in dequeue order (one worker drains
+	// synthJobs FIFO — the await order, never the completion order), at
+	// most TWO extra utterances are ever synthesizing/open, and a clear
+	// retires BOTH queued synths with the same playGen gate (their
+	// readers are cancelled AND closed, so no stale bytes reach the
+	// socket after the barge-in). Reader-serialization is unchanged:
+	// Speak CALLS may overlap, but a reader is only ever opened inside
+	// playbackStream, which the single worker runs one frame at a time.
 	playMu      sync.Mutex
 	dropQueued  bool // clear received: drop queued audio, stop writes
 	interrupted bool // one interrupt per barge-in until playback restarts
@@ -142,12 +146,16 @@ type pipeline struct {
 	writingNow   bool
 	sayQueue     []queuedSay // pending say frames (gen-stamped), drained FIFO by the worker (audit fix 8: replaces the never-consumed outCh placeholder)
 	playWorkerUp bool        // a playback worker goroutine is draining sayQueue
-	// synthJob (playMu) is the ONE in-flight or prefetched synthesis the
-	// worker owns: nil while no Speak is outstanding. clear() cancels it
-	// (its Speak ctx) so an interrupted turn stops burning provider
-	// latency; awaitSynth/retireSynth nil the slot. See synthJob,
+	// synthJobs (playMu) is the bounded FIFO queue of in-flight or
+	// prefetched syntheses the worker owns (prefetchDepth entries max):
+	// empty while no Speak is outstanding. The HEAD is always the next
+	// frame to play — launches append in dequeue order and only the
+	// worker pops/retires — so await order is strict FIFO regardless of
+	// Speak completion order. clear() cancels ALL queued jobs (their
+	// Speak ctx) so an interrupted turn stops burning provider latency;
+	// awaitSynth/retireSynth remove the slot. See synthJob,
 	// registerSynthLocked, tryLaunchPrefetch.
-	synthJob *synthJob
+	synthJobs []*synthJob
 	// playGen (bughunt 2026-11-07 voice F-1): bumped by clear(); each
 	// stream carries the gen it started under and aborts when
 	// the gen moves. dropQueued becomes per-barge-in (reset by the next
@@ -611,7 +619,7 @@ func (p *pipeline) enqueueSay(frame voiceframe.Frame) error {
 		// actively pacing an earlier frame's audio (writingNow) — the
 		// NORMAL supervisor path (sentence N+1 is checked while N
 		// plays). Start its synthesis now instead of waiting for N to
-		// fully drain; the single synth slot keeps depth at one. The
+		// fully drain; the bounded synth queue keeps depth at TWO. The
 		// hook is playMu-guarded and lock-free inside Speak; safe to
 		// call from the frame handler. No-op (draft stays queued) when
 		// the worker is between frames — its write-start hook (OVERLAP
@@ -647,15 +655,26 @@ type synthJob struct {
 	cancel context.CancelFunc
 }
 
-// registerSynthLocked claims the playMu synth slot for one dequeued
-// frame and returns the job (unstarted). Caller holds playMu. ONE slot
-// at a time per pipeline is the prefetch bound: while a job is
-// registered, no second synthesis can start, and the worker only
-// registers a prefetch for the frame whose PREDECESSOR has entered the
-// write loop. p.ctx never changes after construction, so deriving the
-// job's cancellable ctx under the lock is safe and keeps clear()
-// (which reads p.synthJob under the same lock) able to cancel a Speak
-// that has launched by the time it fires.
+// prefetchDepth is the bounded synth queue: at most TWO utterances may
+// be synthesizing (or synthesized-but-unplayed) beyond the frame the
+// worker is playing. Depth 1 left the second lookahead waiting for the
+// first's Speak to RETURN before starting, so a long generation (qwen3:
+// 0.7-5.5 s per sentence) still leaked into the next sentence break;
+// depth 2 keeps one more utterance in flight. Memory stays ~two
+// utterances of unplayed audio, and the reader-serialization invariant
+// is untouched: only the single playback worker ever opens a reader,
+// strictly after the previous reader closed.
+const prefetchDepth = 2
+
+// registerSynthLocked claims one playMu synth queue slot for one
+// dequeued frame and returns the job (unstarted). Caller holds playMu,
+// and the queue must have a free slot (len(p.synthJobs) <
+// prefetchDepth — tryLaunchPrefetch and the worker check before
+// calling). The job is APPENDED: the queue stays in dequeue order, so
+// the head is always the next frame to play. p.ctx never changes after
+// construction, so deriving the job's cancellable ctx under the lock is
+// safe and keeps clear() (which reads p.synthJobs under the same lock)
+// able to cancel a Speak that has launched by the time it fires.
 func (p *pipeline) registerSynthLocked(item queuedSay) *synthJob {
 	jobCtx, cancel := context.WithCancel(p.ctx)
 	job := &synthJob{
@@ -665,7 +684,7 @@ func (p *pipeline) registerSynthLocked(item queuedSay) *synthJob {
 		ctx:    jobCtx,
 		cancel: cancel,
 	}
-	p.synthJob = job
+	p.synthJobs = append(p.synthJobs, job)
 	return job
 }
 
@@ -685,18 +704,20 @@ func (p *pipeline) runSynth(tts TTSProvider, job *synthJob) {
 	}()
 }
 
-// awaitSynth blocks for the job's Speak result and releases the playMu
-// slot (the worker owns the reader from here). ok=false means the
-// pipeline died while Speak was running: a background drain still
-// receives the result (exactly one receiver per job, always) and closes
-// any late reader, so nothing leaks and nothing hangs.
+// awaitSynth blocks for the job's Speak result and removes it from the
+// playMu synth queue (the worker owns the reader from here; the job is
+// the queue HEAD — the worker only ever awaits the head, so a retired
+// Speak of a LATER slot never jumps the queue on the write path).
+// ok=false means the pipeline died while Speak was running: a background
+// drain still receives the result (exactly one receiver per job, always)
+// and closes any late reader, so nothing leaks and nothing hangs.
 func (p *pipeline) awaitSynth(job *synthJob) (synthResult, bool) {
 	select {
 	case res := <-job.done:
-		p.releaseSynthSlot(job)
+		p.unqueueSynth(job)
 		return res, true
 	case <-p.ctx.Done():
-		p.releaseSynthSlot(job)
+		p.unqueueSynth(job)
 		go func() {
 			res := <-job.done
 			if res.pcm != nil {
@@ -707,19 +728,30 @@ func (p *pipeline) awaitSynth(job *synthJob) (synthResult, bool) {
 	}
 }
 
-// releaseSynthSlot clears the playMu slot if it still points at this job
-// (clear() never nils it; retireSynth's drain may have done it first).
-func (p *pipeline) releaseSynthSlot(job *synthJob) {
+// unqueueSynth removes the job from the playMu synth queue if still
+// queued (the worker may have retired it first via the clear path).
+func (p *pipeline) unqueueSynth(job *synthJob) {
 	p.playMu.Lock()
-	if p.synthJob == job {
-		p.synthJob = nil
-	}
+	p.unqueueSynthLocked(job)
 	p.playMu.Unlock()
 }
 
+// unqueueSynthLocked drops one job from the bounded synth queue.
+// Caller holds playMu. The slice is rebuilt with a fresh backing array
+// (three-index head slice) so the removed job never keeps its frame/
+// reader slot alive through slice aliasing.
+func (p *pipeline) unqueueSynthLocked(job *synthJob) {
+	for i, j := range p.synthJobs {
+		if j == job {
+			p.synthJobs = append(p.synthJobs[:0:0], p.synthJobs[i+1:]...)
+			return
+		}
+	}
+}
+
 // retireSynth drops a job the worker will never play (a prefetch killed
-// by a clear or a torn-down ctx): take the slot synchronously — the
-// worker is the ONLY caller, and it never retires the same job twice —
+// by a clear or a torn-down ctx): take it out of the queue synchronously —
+// the worker is the ONLY caller, and it never retires the same job twice —
 // then cancel Speak at the transport and drain the result in the
 // background, closing a reader that lands too late to play. The
 // prefetched PCM NEVER reaches the socket. Safe on an already-delivered
@@ -727,7 +759,7 @@ func (p *pipeline) releaseSynthSlot(job *synthJob) {
 // never blocks on a Speak that already answered).
 func (p *pipeline) retireSynth(job *synthJob) {
 	job.cancel()
-	p.releaseSynthSlot(job)
+	p.unqueueSynth(job)
 	go func() {
 		res := <-job.done
 		if res.pcm != nil {
@@ -736,24 +768,44 @@ func (p *pipeline) retireSynth(job *synthJob) {
 	}()
 }
 
+// drainSynthQueue retires every job still in the synth queue (the worker
+// is exiting on a torn-down ctx: late readers must be cancelled and
+// closed, never written). The worker is the only caller.
+func (p *pipeline) drainSynthQueue() {
+	p.playMu.Lock()
+	jobs := p.synthJobs
+	p.synthJobs = nil
+	p.playMu.Unlock()
+	for _, job := range jobs {
+		job.cancel()
+		go func(j *synthJob) {
+			res := <-j.done
+			if res.pcm != nil {
+				_ = res.pcm.Close() //nolint:mutexio // teardown drain, no lock held
+			}
+		}(job)
+	}
+}
+
 // errNoTTSProvider surfaces the "provider not installed" drop through
 // the job result so the worker logs the same error line the old inline
 // check did.
 var errNoTTSProvider = errors.New("voicechild: tts provider not installed; dropping say")
 
-// tryLaunchPrefetch starts the NEXT queued draft's synthesis while a
-// frame's audio is being (or is about to be) paced to the .out socket.
-// This is the overlap: sentence N+1's Speak begins during sentence N's
-// playback instead of after it has fully drained, so the provider's full-
+// tryLaunchPrefetch starts queued drafts' synthesis while a frame's
+// audio is being (or is about to be) paced to the .out socket. This is
+// the overlap: sentence N+1's Speak begins during sentence N's playback
+// instead of after it has fully drained, so the provider's full-
 // generation latency (qwen3 does not stream; 0.7-4.8 s) hides inside the
 // daemon pacer's real-time drain of N. The draft STAYS-POP from sayQueue
 // but keeps its gen stamp: a clear retires it exactly like an unpopped
 // queued draft, and the prefetched reader is cancelled and closed,
 // never written.
 //
-// Depth is ONE frame (the single p.synthJob slot): nothing is
-// synthesized while a synthesis is outstanding, so frame N+2 never
-// starts before N+1's write phase began — memory stays ~one utterance.
+// Depth is bounded by prefetchDepth (TWO frames beyond the one playing):
+// launches append to the synth queue in strict dequeue order, so the
+// head stays the next frame to play and a slow Speak for N+1 never lets
+// N+2 jump ahead on the write path. Memory stays ~two utterances.
 //
 // fromEnqueue=true is the enqueueSay path: the new draft may only
 // prefetch while the worker is actively writing (writingNow) — the same
@@ -765,7 +817,7 @@ var errNoTTSProvider = errors.New("voicechild: tts provider not installed; dropp
 // gap this prefetch removes).
 func (p *pipeline) tryLaunchPrefetch(fromEnqueue bool) {
 	p.playMu.Lock()
-	if !p.playWorkerUp || p.synthJob != nil || p.ctx.Err() != nil {
+	if !p.playWorkerUp || p.ctx.Err() != nil {
 		p.playMu.Unlock()
 		return
 	}
@@ -773,16 +825,19 @@ func (p *pipeline) tryLaunchPrefetch(fromEnqueue bool) {
 		p.playMu.Unlock()
 		return
 	}
-	if len(p.sayQueue) == 0 || p.sayQueue[0].gen != p.playGen {
-		p.playMu.Unlock()
-		return
-	}
-	item := p.sayQueue[0]
-	p.sayQueue = p.sayQueue[1:]
+	// Fill the bounded synth queue from the FIFO head, current-gen
+	// drafts only (a retired stamp means a clear raced the queue — the
+	// draft drops at dequeue, same as the unpopped path).
 	tts := p.tts
-	job := p.registerSynthLocked(item)
+	for len(p.synthJobs) < prefetchDepth && len(p.sayQueue) > 0 && p.sayQueue[0].gen == p.playGen {
+		item := p.sayQueue[0]
+		p.sayQueue = p.sayQueue[1:]
+		job := p.registerSynthLocked(item)
+		p.playMu.Unlock()
+		p.runSynth(tts, job)
+		p.playMu.Lock()
+	}
 	p.playMu.Unlock()
-	p.runSynth(tts, job)
 }
 
 // playbackWorker is the single drain loop for sayQueue (audit fix 1). It
@@ -790,25 +845,29 @@ func (p *pipeline) tryLaunchPrefetch(fromEnqueue bool) {
 // reached from one goroutine at a time per pipeline — PCM leaves in
 // dequeue order, one writer. Synthesis is split off the write path: a
 // frame's Speak ran on a dedicated goroutine while the PREVIOUS frame
-// was still pacing (claimed from the synth slot at the top of the
+// was still pacing (claimed from the synth queue HEAD at the top of the
 // iteration), so the worker only blocks on generation when there was no
 // playback to overlap it with (head of a burst). The worker exits when
-// the queue empties or the pipeline ctx dies; a concurrent enqueueSay
-// re-launches it (playWorkerUp is released under playMu in the same
-// critical section that observes an empty queue and no outstanding
-// synth slot, so no frame is ever stranded).
+// the queue empties with NO outstanding synth jobs (a queued prefetch is
+// an unplayed frame — exiting would strand it) or the pipeline ctx
+// dies; a concurrent enqueueSay re-launches it (playWorkerUp is released
+// under playMu in the same critical section that observes an empty
+// queue AND empty synth queue, so no frame is ever stranded).
 func (p *pipeline) playbackWorker() {
 	for {
 		var item queuedSay
 		var job *synthJob
 		var tts TTSProvider
 		p.playMu.Lock()
-		job = p.synthJob
-		if job != nil {
-			// A prefetch launched during the previous write — this
-			// frame's synthesis is already running. The slot stays
-			// registered until awaitSynth completes so a clear racing
-			// the remaining Speak latency still cancels it.
+		if len(p.synthJobs) > 0 {
+			// The synth queue HEAD is the next frame to play: its
+			// synthesis is already running (prefetched during the
+			// previous write, or registered below on the last
+			// turn). The entry stays queued until awaitSynth
+			// completes so a clear racing the remaining Speak
+			// latency still cancels it. FIFO by construction:
+			// launches only APPEND in dequeue order.
+			job = p.synthJobs[0]
 			item = queuedSay{frame: job.frame, gen: job.gen}
 			retired := job.gen != p.playGen || p.ctx.Err() != nil
 			p.playMu.Unlock()
@@ -818,8 +877,17 @@ func (p *pipeline) playbackWorker() {
 			}
 		} else {
 			if len(p.sayQueue) == 0 || p.ctx.Err() != nil {
-				// Release the slot atomically with the emptiness check:
-				// an enqueueSay after this point spawns a fresh worker.
+				if p.ctx.Err() != nil {
+					// Torn-down pipeline: nothing is queued here,
+					// but drain on the exit paths uniformly.
+					p.playWorkerUp = false
+					p.playMu.Unlock()
+					p.drainSynthQueue()
+					return
+				}
+				// Release the slot atomically with the emptiness
+				// check: an enqueueSay after this point spawns a
+				// fresh worker.
 				p.playWorkerUp = false
 				p.playMu.Unlock()
 				return
@@ -841,7 +909,8 @@ func (p *pipeline) playbackWorker() {
 		}
 		res, ok := p.awaitSynth(job)
 		if !ok {
-			return // pipeline torn down mid-synth; awaitSynth drained
+			p.drainSynthQueue() // late prefetched readers: cancel + close, never write
+			return              // pipeline torn down mid-synth; awaitSynth drained its job
 		}
 		p.playMu.Lock()
 		genRetired := p.playGen != job.gen
@@ -936,9 +1005,10 @@ func (p *pipeline) playbackStream(pcm io.ReadCloser, gen uint64, synthDur time.D
 	// sentence N+1's Speak runs while the daemon pacer drains N at real
 	// time instead of starting only after N fully played (the serial
 	// chain that put a 0.7-4.8 s dead gap at every sentence break).
-	// Depth one: the slot is empty here (awaitSynth released it), so
-	// this registers at most ONE lookahead synth; nothing further starts
-	// until this draft's write phase begins.
+	// Depth TWO: the current frame's entry left the queue at
+	// awaitSynth, so this tops the bounded synth queue up to two
+	// lookahead synths (N+1, N+2); nothing beyond prefetchDepth starts
+	// until a slot frees.
 	p.tryLaunchPrefetch(false)
 
 	chunk, err := voiceframe.ChunkBytes(p.codec, p.sampleRt)
@@ -1066,14 +1136,19 @@ func (p *pipeline) clear() {
 	// for speaking==true synchronize with the next playback's latch
 	// re-arm, which happens in the same critical section).
 	p.speaking = false
-	// Prefetch fix: the one in-flight synthesis (the prefetched frame,
+	// Prefetch fix: every in-flight synthesis (the queued prefetches,
 	// or the head-of-burst Speak still generating) belongs to the
-	// retired generation — cancel its Speak ctx so an interrupted turn
-	// stops burning provider latency, and its reader — if one still
-	// lands — is closed by the worker's retire path, never written.
-	job := p.synthJob
+	// retired generation — cancel their Speak ctxs so an interrupted
+	// turn stops burning provider latency, and their readers — if any
+	// still land — are closed by the worker's retire path, never
+	// written. The queue itself stays intact: the worker drains it
+	// iteration by iteration (each head fails the gen check and
+	// retires), which preserves the single-owner receive discipline on
+	// every job's done channel. Cancel OFF the lock (same posture as
+	// the depth-1 code: no provider-side teardown inside playMu).
+	jobs := p.synthJobs
 	p.playMu.Unlock()
-	if job != nil {
+	for _, job := range jobs {
 		job.cancel()
 	}
 }

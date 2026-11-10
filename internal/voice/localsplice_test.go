@@ -704,6 +704,114 @@ func TestLocalSpliceDrainWatchFiresAfterQuiescence(t *testing.T) {
 	}
 }
 
+// T-D5 (measured production defect, link-6eb490abd8349958): a real
+// child's TTS stream length is NEVER a multiple of 640 — the last write
+// leaves sub-chunk residue in the pump's carry, permanently non-zero
+// mid-call (every playback cadence line in the daemon log had
+// bytes % 640 != 0). The drain watch must still fire on that turn: the
+// old `carry==0` predicate term made reason=drained structurally
+// unreachable (0/5 drained releases, every floor release rode the
+// margin). Pins: feed whole chunks PLUS a partial tail, arm, and the
+// fire lands after pending drains + the quiet window even though carry
+// stays non-zero.
+func TestLocalSpliceDrainFiresWithNonAlignedTail(t *testing.T) {
+	var fired atomic.Bool
+	var fireCount atomic.Int64
+	drain := func(string) {
+		fireCount.Add(1)
+		fired.Store(true)
+	}
+	cfg := LocalSpliceConfig{DrainQuiet: 150 * time.Millisecond}
+	_, micSide, _, _, cancel, done := startDrainSplice(t, "ls-drain-5", cfg, drain)
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("splice did not exit after cancel")
+		}
+	}()
+	sp := waitForSplice(t, "ls-drain-5")
+
+	// Three whole chunks, then arm (turn_final), THEN the 300-byte
+	// partial tail arrives — the real shape: the final sentence's PCM
+	// lands after the text edge. The tail forms no frame, so carry
+	// stays at 300 for the rest of the call (the exact residue every
+	// real turn leaves behind) and its pump read is the guaranteed
+	// post-arm touch.
+	for range 3 {
+		if err := feedChild("ls-drain-5"); err != nil {
+			t.Fatalf("feedChild: %v", err)
+		}
+	}
+
+	go func() {
+		buf := make([]byte, 640)
+		for range 3 {
+			_ = micSide.SetReadDeadline(time.Now().Add(3 * time.Second))
+			_, _ = io.ReadFull(micSide, buf)
+		}
+	}()
+
+	arm := time.Now()
+	if !sp.ArmDrainWatch() {
+		t.Fatal("ArmDrainWatch must report the drain signal as live")
+	}
+	if err := feedChildBytes("ls-drain-5", 300); err != nil {
+		t.Fatalf("partial tail write: %v", err)
+	}
+	// The carry gate is gone: with residue stuck at 300, the fire must
+	// still land on pending==0 + quiet.
+	waitForFire(t, 3*time.Second, "non-aligned-tail drain", &fired)
+	if elapsed := time.Since(arm); elapsed < cfg.DrainQuiet {
+		t.Fatalf("drain fired after %v < quiet window %v (early)", elapsed, cfg.DrainQuiet)
+	}
+	sp.mu.Lock()
+	carry := sp.audioCarry.Load()
+	sp.mu.Unlock()
+	if carry == 0 {
+		t.Fatal("test shape broken: expected non-zero carry residue with a partial tail")
+	}
+	if n := fireCount.Load(); n != 1 {
+		t.Fatalf("drain fired %d times, want 1", n)
+	}
+}
+
+// T-D6: ArmDrainWatch's bool reports seam liveness for the coordinator's
+// WARN instrumentation — nil dep -> false (plain local/phone calls),
+// wired dep -> true (fresh arm AND a join onto an armed watch), ended
+// splice -> false.
+func TestLocalSpliceArmDrainWatchReportsLiveness(t *testing.T) {
+	p := localPairFor(t, "ls-drain-6")
+	micSide, daemonSide := net.Pipe()
+	defer func() { _ = micSide.Close(); _ = daemonSide.Close() }()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- RunLocalSplice(ctx, "ls-drain-6", LocalSpliceConfig{DrainQuiet: 80 * time.Millisecond}, LocalSpliceDeps{
+			Audio: p, Client: daemonSide, Text: &textSink{},
+			CancelDraft: func(string) {},
+			Logger:      localDiscardLogger(),
+		})
+	}()
+	sp := waitForSplice(t, "ls-drain-6")
+	if sp.ArmDrainWatch() {
+		t.Fatal("nil AudioDrained dep must report the drain signal as DEAD")
+	}
+	sp.mu.Lock()
+	armed, running := sp.drainArmed, sp.watchRunning
+	sp.mu.Unlock()
+	if armed || running {
+		t.Fatalf("nil dep armed a watch (armed=%v running=%v)", armed, running)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("splice did not exit after cancel")
+	}
+}
+
 // T-D2: arm BEFORE any audio (the final sentence still synthesizing at
 // turn_final) - no fire while silent; when the audio finally flows, the
 // fire lands after THAT audio is written + quiet, never before.

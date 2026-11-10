@@ -1690,4 +1690,75 @@ func TestLinkDrainSeamEndToEnd(t *testing.T) {
 	if reHeld {
 		t.Fatal("stale drain re-held the floor")
 	}
+
+	// TURN 2 (the measured production shape): A claims again and
+	// finalizes with a NON-640-ALIGNED tail — 4 whole chunks plus a
+	// 260-byte partial. A real child's stream length is never
+	// 640-aligned, so the pump's carry stays non-zero for the rest of
+	// the call; the old carry==0 predicate made this release ride the
+	// margin every time (0/5 drained across link-6eb490abd8349958).
+	// The floor must still free on the real drain edge.
+	if !c.HoldPromptFor(LinkSideA)(Instance{CallControlID: ccid}, func() {}) {
+		t.Fatal("A re-claim after the first drain must be allowed")
+	}
+	c.TurnStateFor(LinkSideA)(ccid, 2, TurnKindStart)
+	for range 4 {
+		if err := feedChild(ccid); err != nil {
+			t.Fatalf("feedChild turn-2: %v", err)
+		}
+	}
+	c.TurnStateFor(LinkSideA)(ccid, 2, TurnKindFinal)
+	if err := feedChildBytes(ccid, 260); err != nil {
+		t.Fatalf("partial tail: %v", err)
+	}
+	splice := LocalSpliceFor(ccid)
+	waitFor(t, 6*time.Second, "turn-2 floor released via real drain with stuck carry", func() bool {
+		return strings.Count(buf.String(), "kind=floor_released") >= 2
+	})
+	splice.mu.Lock()
+	carryStuck, disarmed := splice.audioCarry.Load(), !splice.drainArmed
+	splice.mu.Unlock()
+	if carryStuck == 0 {
+		t.Fatal("test shape broken: partial tail must leave non-zero carry")
+	}
+	if !disarmed {
+		t.Fatal("watch must self-disarm after firing (next turn_final re-arms fresh)")
+	}
+	if strings.Contains(buf.String(), "reason=margin") {
+		t.Fatal("margin fired before the drain edge (fallback beat the real signal)")
+	}
+}
+
+// T-DR7: the fallback margin DEFAULT is the watchdog, not the normal
+// release path — measured tails run 5-10 s (write_ms=11136), so a 4 s
+// margin beat the drain to every long turn's release.
+func TestLinkFloorFallbackDefaultIsWatchdogOnly(t *testing.T) {
+	if linkFloorFallbackDefault != 12*time.Second {
+		t.Fatalf("fallback margin = %v, want 12 s (drain must be the normal release; margin only bounds a dead splice)", linkFloorFallbackDefault)
+	}
+	c := NewLinkTurnCoordinator("link-margin-default", 0, linkDiscard())
+	if c.margin != linkFloorFallbackDefault {
+		t.Fatalf("zero-margin coordinator fell back to %v, want %v", c.margin, linkFloorFallbackDefault)
+	}
+}
+
+// T-DR8: a turn_final whose splice is missing (never registered) must
+// WARN with kind=drain_arm_missed — the instrumentation that separates
+// "never armed" from "armed, never quiescent" in the live logs.
+func TestLinkCoordinatorWarnsWhenDrainArmMisses(t *testing.T) {
+	var buf syncBuffer
+	c := newTestCoordinator(time.Second, slog.New(slog.NewTextHandler(&buf, nil)))
+	stateA := c.TurnStateFor(LinkSideA)
+	stateA("cc-no-splice", 1, TurnKindStart)
+	stateA("cc-no-splice", 1, TurnKindFinal)
+	waitFor(t, 3*time.Second, "margin release", func() bool {
+		return strings.Contains(buf.String(), "kind=floor_released")
+	})
+	logs := buf.String()
+	if !strings.Contains(logs, "kind=drain_arm_missed") || !strings.Contains(logs, "no live splice") {
+		t.Fatalf("missing-splice arm must WARN with the reason:\n%s", logs)
+	}
+	if strings.Contains(logs, "drain watch armed") {
+		t.Fatal("no splice should produce an armed log")
+	}
 }

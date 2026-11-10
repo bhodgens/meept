@@ -696,29 +696,33 @@ func (p *pipeline) queuedSayCount() int {
 }
 
 // pendingSayCount reports every say frame the worker still owes audio
-// to: queued drafts PLUS the one prefetch whose synthesis is in flight
-// (it left sayQueue at prefetch launch but is still an unplayed frame).
+// to: queued drafts PLUS the prefetch syntheses in flight (they left
+// sayQueue at prefetch launch but are still unplayed frames).
 // Tests that pin "clear drops everything queued" must count this, not
 // len(sayQueue): with bounded prefetch the queue alone no longer holds
 // the whole pending set.
 func (p *pipeline) pendingSayCount() int {
 	p.playMu.Lock()
 	defer p.playMu.Unlock()
-	n := len(p.sayQueue)
-	if p.synthJob != nil {
-		n++
-	}
-	return n
+	return len(p.sayQueue) + len(p.synthJobs)
 }
 
 // synthActive reports whether a synthesis is outstanding (head frame
 // generating or prefetch in flight) — the test seam for the prefetch
-// depth bound: never more than one, and only ever the frame whose
-// predecessor has entered the write loop.
+// depth bound: never more than prefetchDepth, and only ever frames
+// whose predecessor entered the synth queue (strict dequeue order).
 func (p *pipeline) synthActive() bool {
 	p.playMu.Lock()
 	defer p.playMu.Unlock()
-	return p.synthJob != nil
+	return len(p.synthJobs) > 0
+}
+
+// synthQueueDepth reports the number of outstanding synth jobs — the
+// test seam that pins the bounded queue (prefetchDepth).
+func (p *pipeline) synthQueueDepth() int {
+	p.playMu.Lock()
+	defer p.playMu.Unlock()
+	return len(p.synthJobs)
 }
 
 // swapTTS installs a test TTS under playMu — the same lock regime the

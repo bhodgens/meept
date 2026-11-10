@@ -18,13 +18,15 @@ package voicechild
 // the provider-side read timestamps spread over the real pacing window.
 //
 //   TestPrefetchOverlapsPacing               — overlap contract + FIFO bytes.
-//   TestPrefetchDepthBound                   — at most ONE Speak in flight.
+//   TestPrefetchDepthBound                   — at most TWO Speak in flight.
+//   TestPrefetchSecondSlotLaunchesDuringPlay — depth-2 lookahead overlap.
 //   TestClearDuringPrefetchDiscardsLookahead — prefetched PCM discarded.
 //   TestClearDuringSynthAbortsSpeak          — synth aborts on clear, next turn plays.
 //   TestPlaybackCadenceReportsSynthWriteMs   — synth_ms/write_ms telemetry.
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"path/filepath"
@@ -44,8 +46,9 @@ type pacedTTS struct {
 	delay     time.Duration
 	chunks    int
 	calls     []*pacedCall
+	callsMade int // total Speak calls started (call-time ordinals for untagged texts)
 	inFlight  int // Speak calls generating right now
-	maxFlight int // high-water mark: the prefetch depth bound must keep this 1
+	maxFlight int // high-water mark: the prefetch depth bound must keep this <=2
 }
 
 type pacedCall struct {
@@ -63,12 +66,24 @@ func newPacedTTS(delay time.Duration, chunks int) *pacedTTS {
 }
 
 func (t *pacedTTS) Speak(ctx context.Context, text string) (io.ReadCloser, error) {
+	// Frame-derived ordinal when the text carries one ("sentence %d"):
+	// with the bounded depth-2 prefetch, two Speak CALLS may enter the
+	// provider in either launch order (separate goroutines), so a
+	// call-time stamp could mislabel legal ordering. Text-stamped tests
+	// pin the FRAME identity; untagged texts keep the call-time ordinal
+	// (single-in-flight shapes where entry order is deterministic).
 	t.mu.Lock()
 	t.inFlight++
 	if t.inFlight > t.maxFlight {
 		t.maxFlight = t.inFlight
 	}
-	call := &pacedCall{ordinal: byte(len(t.calls) + 1), start: time.Now(), tts: t} //nolint:gosec // G115: test ordinal is a small counter, fits a byte
+	t.callsMade++
+	ordinal := t.callsMade
+	var n int
+	if _, err := fmt.Sscanf(text, "sentence %d", &n); err == nil {
+		ordinal = n + 1 // frame 0 -> ordinal 1 (runs stay 1-based for the FIFO decode)
+	}
+	call := &pacedCall{ordinal: byte(ordinal), start: time.Now(), tts: t} //nolint:gosec // G115: test ordinal is a small counter, fits a byte
 	t.calls = append(t.calls, call)
 	delay := t.delay
 	chunks := t.chunks
@@ -296,21 +311,22 @@ func TestPrefetchOverlapsPacing(t *testing.T) {
 		snap.lastRead[0].Sub(snap.starts[1]), gap, delay)
 }
 
-// TestPrefetchDepthBound: three rapid says. The single synth slot means
-// at most ONE Speak is ever in flight (frame N+2 never synthesizes
-// before N+1's write phase begins), while PCM still leaves the socket in
-// strict dequeue order.
+// TestPrefetchDepthBound: five rapid says. The bounded synth queue means
+// at most TWO Speak calls are ever in flight (the prefetchDepth bound),
+// while PCM still leaves the socket in strict dequeue order.
 func TestPrefetchDepthBound(t *testing.T) {
 	const ccid = "pf2"
 	d, _, childConn, p, out := newPaceChild(t, ccid)
 	tts := newPacedTTS(20*time.Millisecond, 5)
 	swapTTS(p, tts)
 
-	sayLine(t, d, childConn, ccid, "one")
-	sayLine(t, d, childConn, ccid, "two")
-	sayLine(t, d, childConn, ccid, "three")
+	sayLine(t, d, childConn, ccid, "sentence 0")
+	sayLine(t, d, childConn, ccid, "sentence 1")
+	sayLine(t, d, childConn, ccid, "sentence 2")
+	sayLine(t, d, childConn, ccid, "sentence 3")
+	sayLine(t, d, childConn, ccid, "sentence 4")
 
-	buf := make([]byte, 5*3*640)
+	buf := make([]byte, 5*5*640)
 	_ = out.SetReadDeadline(time.Now().Add(testPollDeadline))
 	if _, err := io.ReadFull(out, buf); err != nil {
 		t.Fatalf("burst never fully drained: %v", err)
@@ -322,21 +338,84 @@ func TestPrefetchDepthBound(t *testing.T) {
 		}
 	}
 	snap := tts.snapshot()
-	if snap.speaks != 3 {
-		t.Fatalf("Speak calls = %d, want 3", snap.speaks)
+	if snap.speaks != 5 {
+		t.Fatalf("Speak calls = %d, want 5", snap.speaks)
 	}
-	if snap.maxFlight > 1 {
-		t.Fatalf("prefetch depth violated: %d Speak in flight at once (single synth slot bound broken)", snap.maxFlight)
+	if snap.maxFlight > 2 {
+		t.Fatalf("prefetch depth violated: %d Speak in flight at once (prefetchDepth=2 bound broken)", snap.maxFlight)
+	}
+	if snap.maxFlight < 2 {
+		t.Fatalf("depth-2 prefetch never engaged: max %d in flight — the second slot stays idle (regression to depth 1)", snap.maxFlight)
+	}
+	// The synth queue never exceeded its bound at any observable point.
+	if p.synthQueueDepth() > prefetchDepth {
+		t.Fatalf("synth queue depth %d > prefetchDepth %d", p.synthQueueDepth(), prefetchDepth)
+	}
+}
+
+// TestPrefetchSecondSlotLaunchesDuringPlay pins the depth-2 overlap the
+// bound exists for: while stream N paces out, BOTH N+1 and N+2 may be
+// synthesizing at once, so a long generation for N+1 (0.7-5 s, no
+// stream) no longer delays N+2's start until N+1's write phase — with
+// depth 1 it did, and the third sentence still paid a synth-delay gap.
+// Test shape: the test-side pacer applies backpressure so stream 1 parks
+// inside its write loop; then a slow synth for 2 and a slow synth for 3
+// must be IN FLIGHT simultaneously (speak#3 starts while speak#2 is
+// still generating), and the queue holds exactly two jobs.
+func TestPrefetchSecondSlotLaunchesDuringPlay(t *testing.T) {
+	const (
+		ccid     = "pf2b"
+		chunks   = 30
+		interval = 8 * time.Millisecond
+		delay    = 500 * time.Millisecond // long enough that #3 starts while #2 generates
+	)
+	d, _, childConn, p, out := newPaceChild(t, ccid)
+	tts := newPacedTTS(delay, chunks)
+	swapTTS(p, tts)
+
+	sayLine(t, d, childConn, ccid, "sentence 0")
+	// Head-of-burst: worker registers Speak#1 and blocks awaiting it.
+	waitFor(t, func() bool { return p.synthQueueDepth() == 1 })
+
+	// Drafts 2 and 3 arrive while stream 1 paces out (backpressure via
+	// the bounded test pacer). Both must prefetch concurrently.
+	sayLine(t, d, childConn, ccid, "sentence 1")
+	sayLine(t, d, childConn, ccid, "sentence 2")
+
+	// Drain stream 1's chunks with the pacer so writingNow stays true.
+	paceDrain(t, out, chunks, interval)
+
+	waitFor(t, func() bool { return p.synthQueueDepth() == 2 || tts.snapshot().speaks >= 3 })
+	// THE depth-2 evidence: Speak#3 started while Speak#2 was still
+	// generating (both in flight) — impossible under depth 1.
+	snap := tts.snapshot()
+	if snap.speaks < 3 {
+		t.Fatalf("Speak calls = %d, want >=3 (second lookahead must launch during stream 1's pacing)", snap.speaks)
+	}
+	if snap.maxFlight < 2 {
+		t.Fatalf("depth-2 prefetch never engaged: max %d Speak in flight at once", snap.maxFlight)
+	}
+	if snap.maxFlight > 2 {
+		t.Fatalf("prefetchDepth bound broken: %d Speak in flight", snap.maxFlight)
+	}
+	// Strict dequeue order on the socket: ordinal runs ascend even
+	// though Speak#2 and #3 overlapped.
+	ordinals := paceDrain(t, out, 2*chunks, interval)
+	for i, ord := range ordinals {
+		if want := byte(i/chunks + 2); ord != want {
+			t.Fatalf("FIFO VIOLATION: chunk %d carries ordinal %d, want %d", i, ord, want)
+		}
 	}
 }
 
 // TestClearDuringPrefetchDiscardsLookahead: while stream 1 paces out
-// (test-side backpressure), stream 2's synthesis is prefetched into the
-// single slot and stream 3 sits queued. A clear must retire ALL of it:
-// no byte of ordinal >= 2 ever reaches the socket (the prefetched PCM is
-// cancelled/closed, the queued draft never dequeued), the pending set
-// drains, and the next say still plays (F-1 re-arm through the prefetch
-// machinery — the pipeline is not muted by a cancelled lookahead).
+// (test-side backpressure), streams 2 AND 3's syntheses are prefetched
+// into the bounded queue (depth TWO). A clear must retire ALL of it:
+// no byte of ordinal >= 2 ever reaches the socket (both prefetched
+// readers are cancelled/closed, the queued drafts never dequeued), the
+// pending set drains, and the next say still plays (F-1 re-arm through
+// the prefetch machinery — the pipeline is not muted by a cancelled
+// lookahead).
 func TestClearDuringPrefetchDiscardsLookahead(t *testing.T) {
 	const (
 		ccid     = "pf3"
