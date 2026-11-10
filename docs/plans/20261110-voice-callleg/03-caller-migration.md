@@ -25,7 +25,7 @@ Consumes C-B1 fully (leaf 02 state).
 | Task ID | Objective | Files | Verify | PASS |
 |---------|-----------|-------|--------|------|
 | T1 | migrate chain caller | internal/signalleg/voiceattempt.go (+ small constructor plumbing) | existing chain/signalleg tests GREEN unchanged + a new pin that chain uses the adapter (grep/behavior) | identical outcomes |
-| T2 | DESIGN.md status update: item 3 survey answered, interface validated by production caller | docs/plans/20261110-voice-callleg/DESIGN.md | - | marked |
+| T2 | ../20261110-voice-callleg-design.md status update: item 3 survey answered, interface validated by production caller | docs/plans/20261110-voice-callleg/DESIGN.md | - | marked |
 
 ## Self-Verification
 

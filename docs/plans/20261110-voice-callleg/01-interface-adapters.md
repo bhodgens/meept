@@ -20,7 +20,7 @@ migration in this leaf (03 does that); NO releaseOnce/fan-out changes
 
 ### What This Leaf Exposes
 ```
-C-B1 (DESIGN.md verbatim):
+C-B1 (../20261110-voice-callleg-design.md verbatim):
 type CallLeg interface { Place(ctx, PlaceRequest) (CallHandle, error); Accept(ctx, id string) (CallHandle, error); Hangup(ctx, h CallHandle, reason string) error; Events() <-chan CallEvent }
 CallEvent kinds: Ringing/Connected/Reconnecting/Ended/Errored (+Reason string).
 phoneAdapter{d *Dialer or mgr}, localAdapter{*LocalLeg}, signalAdapter{*signalleg.Leg or Deps seam}.

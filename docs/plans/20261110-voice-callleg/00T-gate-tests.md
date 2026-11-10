@@ -18,7 +18,7 @@ same CallEvent enum values.
 
 ## Verified Anchors (re-grep at dispatch)
 
-DESIGN.md contract block; fake rigs: internal/voice test fakes (fakeController/telnyx rig in dial_test/manager tests; newTestLeg fake-cli in signalleg audio_test; local rig in local_test/localsplice tests).
+../20261110-voice-callleg-design.md contract block; fake rigs: internal/voice test fakes (fakeController/telnyx rig in dial_test/manager tests; newTestLeg fake-cli in signalleg audio_test; local rig in local_test/localsplice tests).
 
 ## Interface Contracts (From Parent)
 

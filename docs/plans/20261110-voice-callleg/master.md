@@ -7,7 +7,7 @@
 - **Role:** Root
 - **Parent:** none
 - **Children:** 4 leaves
-- **Scope:** DESIGN.md (in this dir) is the accepted design, unblocked 2026-11-10 by the voice-deadair-link merge (all sibling trees now on main). Extract one CallLeg contract + per-leg adapters; Manager terminal fan-out (releaseOnce) stays UNTOUCHED — verified-clean 20261109.
+- **Scope:** DESIGN.md (../20261110-voice-callleg-design.md, outside the tree dir for scanner reasons) is the accepted design, unblocked 2026-11-10 by the voice-deadair-link merge (all sibling trees now on main). Extract one CallLeg contract + per-leg adapters; Manager terminal fan-out (releaseOnce) stays UNTOUCHED — verified-clean 20261109.
 
 ## Goal
 
