@@ -449,20 +449,74 @@ type PreExecChecker struct {
 	autoPause      AutoPauseFunc
 	auditStore     *AuditStore
 	turnBudget     *TurnBudgetTracker
+	// unapprovedCallerAllowedTools is the step-1c caller-gate allow-list
+	// (plan 20261110-caller-authz, decision O3). nil means "option not
+	// passed" and falls back to defaultUnapprovedCallerAllowedTools; a
+	// non-nil list (INCLUDING empty) is honored verbatim.
+	unapprovedCallerAllowedTools []string
+}
+
+// Frozen strings for the step-1c caller gate (plan 20261110-caller-authz
+// master.md §Interface Contracts; mirrored byte-identically in
+// internal/agent/caller_details_test.go and internal/employee/caller_gate_test.go).
+const (
+	// unapprovedCallerDenyText is the model-facing denial sentence.
+	unapprovedCallerDenyText = "This caller is not approved for that action. Take a message instead."
+	// unapprovedCallerDenyReason is the exact Decision.Reason the security
+	// pipeline propagates (executor renders "permission denied: <Reason>").
+	unapprovedCallerDenyReason = "caller_not_approved: " + unapprovedCallerDenyText
+	// unapprovedCallerAuditType is the audit finding's ViolatedRule marker.
+	unapprovedCallerAuditType = "voice.unapproved_action"
+	// unapprovedCallerApprovedKey / unapprovedCallerKnownKey are the
+	// presence-only details keys the agent executor injects when a caller
+	// is stamped on the turn context (strconv.FormatBool values).
+	unapprovedCallerApprovedKey = "caller_approved"
+	unapprovedCallerKnownKey    = "caller_known"
+)
+
+// defaultUnapprovedCallerAllowedTools is the shipped [voice]
+// unapproved_caller_allowed_tools default (config.DefaultUnapprovedCaller-
+// AllowedTools; REAL builtin names pinned by leaf 01-identity/01:
+// internal/tools/builtin/ledger.go + agent_message.go). Inlined rather
+// than imported — internal/employee must not depend on internal/config
+// (cycle risk via internal/config -> internal/bus, goal_loop.go note).
+var defaultUnapprovedCallerAllowedTools = []string{"ledger_append", "send_agent_message"}
+
+// PreExecOption customizes a PreExecChecker at construction time
+// (functional-options pattern; keeps NewPreExecChecker's call sites stable).
+type PreExecOption func(*PreExecChecker)
+
+// WithUnapprovedCallerAllowedTools pins the tool list that an unapproved or
+// unknown inbound voice caller may still execute (step 1c, decision O3).
+// The list is honored VERBATIM — an explicit EMPTY list revokes all caller
+// tool rights (config normalizes empty -> default at the load boundary, so
+// this only happens when a caller passes one deliberately). A checker built
+// WITHOUT this option falls back to defaultUnapprovedCallerAllowedTools:
+// a wiring miss must never revoke the message lane (O3 intent).
+func WithUnapprovedCallerAllowedTools(tools []string) PreExecOption {
+	return func(p *PreExecChecker) {
+		p.unapprovedCallerAllowedTools = tools
+	}
 }
 
 // NewPreExecChecker constructs a PreExecChecker for the given employee. The
 // constitution may be nil initially; SetConstitution must be called before
 // Check returns meaningful decisions. A nil constitution yields an allow-all
 // Decision (the employee is unconstrained) so that wiring does not block
-// existing agents.
-func NewPreExecChecker(employeeID string, c *Constitution) *PreExecChecker {
-	return &PreExecChecker{
+// existing agents. Options are applied in order; nil options are skipped.
+func NewPreExecChecker(employeeID string, c *Constitution, opts ...PreExecOption) *PreExecChecker {
+	p := &PreExecChecker{
 		constitution:   c,
 		employeeID:     employeeID,
 		budgetChecker:  noopBudgetChecker{},
 		convTokenStore: noopConversationTokenStore{},
 	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(p)
+		}
+	}
+	return p
 }
 
 // SetConstitution atomically replaces the constitution used for checks.
@@ -539,6 +593,9 @@ func (p *PreExecChecker) SetTurnBudgetTracker(t *TurnBudgetTracker) {
 //
 // Evaluation order (spec lines 342-356):
 //  1. tools_forbidden / tools_allowed (hard gating)
+//     1c. caller gate: unapproved/unknown inbound voice callers are denied
+//     every tool outside the message lane (plan 20261110-caller-authz,
+//     steps 1a/1b first, never[] and everything after last)
 //  2. never[] (substring scan; critical deny + auto-pause trumps all)
 //  3. escalation_triggers (route to plan signoff; not a denial)
 //  4. risk_ceiling (compared against details["risk_level"])
@@ -550,6 +607,10 @@ func (p *PreExecChecker) SetTurnBudgetTracker(t *TurnBudgetTracker) {
 // must hit the never-rule, not get queued as a plan). escalation_triggers run
 // before risk_ceiling so a configured trigger (e.g. on risk_level=critical)
 // routes to signoff instead of being shadowed by the generic ceiling deny.
+// Step 1c runs AFTER the constitution tool gates (a constitution deny wins
+// over the caller gate; a constitution allow does NOT rescue an unapproved
+// caller) and BEFORE never[], so the caller deny carries NO auto-pause —
+// refusing an unapproved caller is a routing decision, not a critical stop.
 func (p *PreExecChecker) Check(action, toolName string, details map[string]string) (dec Decision) {
 	// Fail-safe: if the checker panics, deny + auto-pause (spec lines 601-602).
 	// Also record an audit finding at SeverityCritical.
@@ -612,6 +673,38 @@ func (p *PreExecChecker) Check(action, toolName string, details map[string]strin
 			return Decision{
 				Allowed:  false,
 				Reason:   fmt.Sprintf("tool %q is not in tools_allowed list", toolName),
+				Severity: string(SeverityWarning),
+			}
+		}
+	}
+
+	// 1c. caller gate (plan 20261110-caller-authz, decisions O1/O2/O3). An
+	// inbound voice caller stamped on the turn context has presence-only
+	// keys injected by the agent executor (details["caller_approved"] /
+	// details["caller_known"], strconv.FormatBool values — see
+	// internal/agent/executor.go checkPermission). NO keys = non-voice
+	// turn: 1c is inert and behavior is byte-identical to pre-1c.
+	// Approved caller: inert. Unapproved OR unknown caller (zero-Info
+	// stamp, O2): deny every tool NOT in the caller allow-list — the
+	// message lane (O3). The tool compare is case-sensitive against the
+	// registry name, matching 1a/1b.
+	//
+	// Deny shape (FROZEN): warning severity, no RequiresPlan/EscalateTo,
+	// and deliberately NO auto-pause (contrast never[] in step 2) — an
+	// unapproved caller is refused, not an employee emergency stop. One
+	// audit row per deny via the existing recordDenial seam, nil-safe.
+	if approved, ok := details[unapprovedCallerApprovedKey]; ok && approved != "true" {
+		p.mu.RLock()
+		allowed := p.unapprovedCallerAllowedTools
+		p.mu.RUnlock()
+		if allowed == nil {
+			allowed = defaultUnapprovedCallerAllowedTools
+		}
+		if !slices.Contains(allowed, toolName) {
+			p.recordCallerDenial(context.Background(), action, toolName, details)
+			return Decision{
+				Allowed:  false,
+				Reason:   unapprovedCallerDenyReason,
 				Severity: string(SeverityWarning),
 			}
 		}
@@ -828,6 +921,37 @@ func (p *PreExecChecker) recordDenial(ctx context.Context, employeeID, action, t
 		Checkpoint:   CheckpointPreExec,
 		ViolatedRule: reason,
 		Evidence:     action + "/" + toolName,
+		DetectedAt:   time.Now().UTC(),
+	}
+	_ = store.Create(ctx, finding)
+}
+
+// recordCallerDenial persists the step-1c audit row for an unapproved-caller
+// deny: ViolatedRule is the frozen "voice.unapproved_action" type and
+// Evidence carries the tool name plus the conversation id (ccid,
+// details["conversation_id"]) so the finding is traceable to the voice call.
+// Same best-effort, nil-safe, panic-contained posture as recordDenial.
+func (p *PreExecChecker) recordCallerDenial(ctx context.Context, action, toolName string, details map[string]string) {
+	defer func() {
+		// Never let an audit-write failure propagate into the checker.
+		_ = recover()
+	}()
+
+	p.mu.RLock()
+	store := p.auditStore
+	p.mu.RUnlock()
+
+	if store == nil {
+		return
+	}
+
+	finding := AuditFinding{
+		ID:           id.Generate("audit_"),
+		EmployeeID:   p.employeeID,
+		Severity:     SeverityWarning,
+		Checkpoint:   CheckpointPreExec,
+		ViolatedRule: unapprovedCallerAuditType,
+		Evidence:     action + "/" + toolName + "/ccid=" + details["conversation_id"],
 		DetectedAt:   time.Now().UTC(),
 	}
 	_ = store.Create(ctx, finding)

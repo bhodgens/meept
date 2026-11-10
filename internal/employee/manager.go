@@ -977,7 +977,12 @@ func (m *Manager) StopAll() {
 // Call this after StartAll has primed the constitution cache. Safe to call
 // multiple times (each call replaces the registration). Employees without a
 // constitution are skipped (they have no constraints to enforce).
-func (m *Manager) RegisterPreExecCheckers(pc *security.PermissionChecker) {
+//
+// opts are forwarded to every NewPreExecChecker built here, so daemon
+// wiring can pin per-deployment gate options (e.g.
+// WithUnapprovedCallerAllowedTools) without changing this method's call
+// sites — existing callers pass nothing and keep today's behavior.
+func (m *Manager) RegisterPreExecCheckers(pc *security.PermissionChecker, opts ...PreExecOption) {
 	if pc == nil {
 		return
 	}
@@ -985,9 +990,20 @@ func (m *Manager) RegisterPreExecCheckers(pc *security.PermissionChecker) {
 	snapshot := make(map[string]Constitution, len(m.constitutions))
 	maps.Copy(snapshot, m.constitutions)
 	m.mu.RUnlock()
+	m.mu.RLock()
+	audit := m.auditStore
+	m.mu.RUnlock()
 	for id, c := range snapshot {
 		constCopy := c
-		checker := NewPreExecChecker(id, &constCopy)
+		checker := NewPreExecChecker(id, &constCopy, opts...)
+		// Arm the finding-persistence seam (2026-11-10, caller-authz
+		// integration): without this the voice.unapproved_action audit
+		// row is a nil-seam no-op on a stock daemon (deny itself
+		// unaffected). Nil manager audit store leaves the checker's
+		// seam nil, matching pre-wiring behavior.
+		if audit != nil {
+			checker.SetAuditStore(audit)
+		}
 		pc.SetPreExecChecker(id, NewPreExecAdapter(checker))
 	}
 	m.logger.Info("registered pre-exec checkers with permission checker",

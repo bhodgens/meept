@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caimlas/meept/internal/callerid"
 	"github.com/caimlas/meept/internal/effects"
 	"github.com/caimlas/meept/internal/voice/telnyx"
 )
@@ -627,11 +628,30 @@ const (
 // Instance is one live voice instance: the registry's unit of capacity.
 // Leg is which leg the instance rides ("phone" or "local"; CL6). The zero
 // value of Leg means "phone" so existing composite literals stay valid.
+//
+// Caller carries the resolved inbound-caller identity (caller-authz plan,
+// frozen contract): stamped at the inbound answer site, read on every turn
+// context. The zero Info is legal — "voice turn, caller unresolved" is a
+// distinct state the enforcement layer gates as unapproved (decision O2),
+// never a crash and never a prompt-rendered value (redaction is issue #126).
 type Instance struct {
 	CallControlID string
 	EmployeeID    string
 	Target        string
 	Leg           string
+	Caller        callerid.Info
+}
+
+// CallerResolver is the answer-time identity seam (caller-authz leaf 02):
+// given the inbound leg number (E.164 on the phone leg), it resolves the
+// caller's identity. The daemon implements it over the contact store
+// (contacts.db is the system of record, decision O2); internal/voice never
+// imports internal/contact. Fail-soft contract: a nil resolver or any
+// error degrades to callerid.Info{Number: e164} with a WARN — answering
+// is NEVER gated (decision O1), so no call path may block on or fail
+// because of identity resolution.
+type CallerResolver interface {
+	ResolveCaller(ctx context.Context, e164 string) (callerid.Info, error)
 }
 
 // Registry tracks live calls: N concurrent calls need N slots
@@ -726,6 +746,49 @@ func (r *CallRegistry) Release(ccid string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.live, ccid)
+}
+
+// SetCaller attaches the resolved inbound-caller identity (caller-authz
+// leaf 02) to a live instance. The answer site Acquires first and resolves
+// identity AFTER that (resolution is fail-soft and must never race the
+// slot), so the identity rides the registry row the setup router reads.
+// Unknown ccid is a no-op — a released call has no loop to stamp.
+func (r *CallRegistry) SetCaller(ccid string, caller callerid.Info) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if inst, ok := r.live[ccid]; ok {
+		inst.Caller = caller
+		r.live[ccid] = inst
+	}
+}
+
+// ResolveCallerOrFailSoft runs the resolver seam for one inbound answer and
+// enforces the fail-soft contract in ONE place: nil resolver, a resolver
+// error, or an empty resolution all degrade to callerid.Info{Number: e164}
+// (unknown = unapproved, decision O2) with a WARN. It never returns an
+// error — answering is never gated (decision O1), so the answer site can
+// call it inline before holdPhoneCall without any failure branch.
+func ResolveCallerOrFailSoft(ctx context.Context, res CallerResolver, e164 string, logger *slog.Logger) callerid.Info {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	info := callerid.Info{Number: e164}
+	if res == nil {
+		logger.Warn("voice: caller resolver not wired; caller fail-soft (unapproved)", "number_present", e164 != "")
+		return info
+	}
+	resolved, err := res.ResolveCaller(ctx, e164)
+	if err != nil {
+		logger.Warn("voice: caller resolution failed; caller fail-soft (unapproved)",
+			"number_present", e164 != "", "err", err)
+		return info
+	}
+	// Number always carries the leg number even if the resolver left it
+	// blank (the gate's audit row keys on it).
+	if resolved.Number == "" {
+		resolved.Number = e164
+	}
+	return resolved
 }
 
 // Live snapshots the live instances. Each Instance carries its Leg

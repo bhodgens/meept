@@ -10129,6 +10129,35 @@ func (l *AgentLoop) GetAgentID() string {
 	return l.agentID
 }
 
+// SetAgentID rebinds the agent identity on a live loop and forwards it to
+// the loop's executor (the WithExecutorAgentID lane, snapshotted into
+// details["agent_id"] at every permission check). The voice turn runner
+// (caller-authz leaf 02, O5) stamps per-session VOICE clones with the
+// bound employee id so the PreExecChecker routes the employee
+// constitution gate; loops built without an identity or turned with no
+// employee keep their construction-time id. Rebinding does NOT touch the
+// Manager cache key — that derives from the TEMPLATE's agentID, and the
+// template is never mutated here (the voice lane clones, the daemon
+// template stays "default"). Nil-safe; empty id is a no-op.
+func (l *AgentLoop) SetAgentID(id string) {
+	if l == nil || id == "" {
+		return
+	}
+	l.mu.Lock()
+	if l.agentID == id {
+		l.mu.Unlock()
+		return
+	}
+	l.agentID = id
+	exec := l.executor
+	l.mu.Unlock()
+	// Executor forward outside the loop lock (lock order l.mu -> e.mu is
+	// the ConfigSnapshot precedent; never held together here).
+	if exec != nil {
+		exec.SetAgentID(id)
+	}
+}
+
 // SetDetectionContext wires the client-side detection context (CWD, detected
 // project, CLI args) captured at session creation. Nil-safe per CLAUDE.md
 // setter convention.

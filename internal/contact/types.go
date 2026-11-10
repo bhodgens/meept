@@ -31,8 +31,14 @@ type Record struct {
 	Phone       string    `json:"phone"`                 // E.164, normalized at write; required
 	SignalUUID  string    `json:"signal_uuid,omitempty"` // empty until observed; settable by config
 	Policy      []Channel `json:"policy,omitempty"`      // ordered fallback chain; empty = employee default
-	CreatedAt   time.Time `json:"created_at"`            // RFC3339 at the store boundary
-	UpdatedAt   time.Time `json:"updated_at"`            // bumped on every Put
+	// VoiceApproved is the inbound voice-action approval bit (plan
+	// 20261110-caller-authz O2: contacts.db is the system of record;
+	// default FALSE = unapproved, and an unknown number never reaches a
+	// record at all). Enforced downstream by the step-1c action gate;
+	// the store persists it as INTEGER NOT NULL DEFAULT 0.
+	VoiceApproved bool      `json:"voice_approved"`
+	CreatedAt     time.Time `json:"created_at"` // RFC3339 at the store boundary
+	UpdatedAt     time.Time `json:"updated_at"` // bumped on every Put
 }
 
 // ErrUnknownContact is the named sentinel for absent records (Get /

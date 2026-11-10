@@ -28,6 +28,12 @@ import (
 // injected). phone is UNIQUE: the upsert is the identity rule (one row
 // per reachable phone number; SignalUUID may arrive later and updates
 // the same row).
+//
+// voice_approved is NOT in the base schema (callstore.go outcome-column
+// idiom): the guarded ALTER in migrateContacts adds it to fresh AND
+// pre-existing databases alike, exercising the house migration path on
+// every open. idx_contacts_phone is IF NOT EXISTS so re-runs on databases
+// created before the index existed migrate it in place.
 const contactsSchema = `
 CREATE TABLE IF NOT EXISTS contacts (
     id           TEXT PRIMARY KEY,
@@ -41,7 +47,32 @@ CREATE TABLE IF NOT EXISTS contacts (
 
 CREATE INDEX IF NOT EXISTS idx_contacts_signal_uuid
     ON contacts(signal_uuid);
+
+CREATE INDEX IF NOT EXISTS idx_contacts_phone
+    ON contacts(phone);
 `
+
+// contactsVoiceApprovedAlter adds the inbound voice-action approval column
+// (plan 20261110-caller-authz O2: unknown/unapproved = 0, the SQLite
+// default for every pre-existing row).
+const contactsVoiceApprovedAlter = `ALTER TABLE contacts ADD COLUMN voice_approved INTEGER NOT NULL DEFAULT 0`
+
+// migrateContacts runs the additive contacts migration: base schema (with
+// phone index) + guarded ALTER. Duplicate-column is the expected steady
+// state on already-migrated databases and is tolerated (callstore.go
+// migrationAddColumn idiom); anything else fails the open — silently
+// missing the column would only surface later as query errors.
+func migrateContacts(db *sql.DB) error {
+	if _, err := db.Exec(contactsSchema); err != nil {
+		return fmt.Errorf("contact store: migrate contacts: %w", err)
+	}
+	if _, err := db.Exec(contactsVoiceApprovedAlter); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("contact store: migrate voice_approved column: %w", err)
+		}
+	}
+	return nil
+}
 
 // e164Pattern is the strict post-normalization validation (leaf contract:
 // ^\+[1-9]\d{7,15}$). A phone that does not normalize into this shape is
@@ -58,6 +89,10 @@ type Store interface {
 	Get(ctx context.Context, id string) (Record, error)
 	GetByPhone(ctx context.Context, e164 string) (Record, error)
 	GetBySignalUUID(ctx context.Context, uuid string) (Record, error)
+	// LookupByPhone is the exact-match, miss-is-not-an-error reader
+	// (caller-authz): the inbound resolver distinguishes known/unapproved
+	// from unknown without sentinel-error plumbing.
+	LookupByPhone(ctx context.Context, e164 string) (*Record, bool, error)
 	List(ctx context.Context) ([]Record, error)
 	Delete(ctx context.Context, id string) error
 }
@@ -85,8 +120,8 @@ func NewSQLiteStore(db *sql.DB, log *slog.Logger) (*SQLiteStore, error) {
 	if log == nil {
 		log = slog.Default()
 	}
-	if _, err := db.Exec(contactsSchema); err != nil {
-		return nil, fmt.Errorf("contact store: migrate contacts: %w", err)
+	if err := migrateContacts(db); err != nil {
+		return nil, err
 	}
 	return &SQLiteStore{db: db, logger: log}, nil
 }
@@ -183,16 +218,20 @@ func (s *SQLiteStore) Put(ctx context.Context, rec Record) error {
 	}
 	// Upsert on phone: the phone UNIQUE constraint is the identity rule;
 	// ON CONFLICT updates every mutable column and keeps created_at.
+	// VoiceApproved is second-wins like the other mutable columns (the
+	// owner revokes approval by Puts the record with the flag false).
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO contacts (id, display_name, phone, signal_uuid, policy, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO contacts (id, display_name, phone, signal_uuid, policy, voice_approved, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(phone) DO UPDATE SET
 		   id = excluded.id,
 		   display_name = excluded.display_name,
 		   signal_uuid = excluded.signal_uuid,
 		   policy = excluded.policy,
+		   voice_approved = excluded.voice_approved,
 		   updated_at = excluded.updated_at`,
 		stored.ID, stored.DisplayName, stored.Phone, stored.SignalUUID, policy,
+		boolToInt(stored.VoiceApproved),
 		stored.CreatedAt.UTC().Format(time.RFC3339Nano),
 		stored.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	)
@@ -215,17 +254,34 @@ func marshalPolicy(policy []Channel) (string, error) {
 	return string(encoded), nil
 }
 
-// scanRecord decodes one contacts row.
+// boolToInt maps the approval flag onto the SQLite INTEGER column
+// (0/1 — the read side scans with an int and compares != 0).
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// contactColumns is the shared SELECT list for every reader (scanRecord
+// below is the matching scan order). One SSOT keeps Get / GetByPhone /
+// GetBySignalUUID / List / LookupByPhone from drifting apart when the
+// column set grows.
+const contactColumns = `id, display_name, phone, signal_uuid, policy, voice_approved, created_at, updated_at`
+
+// scanRecord decodes one contacts row (column order = contactColumns).
 func scanRecord(row interface{ Scan(...any) error }) (Record, error) {
 	var (
-		rec       Record
-		policyRaw string
-		createdAt string
-		updatedAt string
+		rec         Record
+		policyRaw   string
+		voiceApprov int
+		createdAt   string
+		updatedAt   string
 	)
-	if err := row.Scan(&rec.ID, &rec.DisplayName, &rec.Phone, &rec.SignalUUID, &policyRaw, &createdAt, &updatedAt); err != nil {
+	if err := row.Scan(&rec.ID, &rec.DisplayName, &rec.Phone, &rec.SignalUUID, &policyRaw, &voiceApprov, &createdAt, &updatedAt); err != nil {
 		return Record{}, err
 	}
+	rec.VoiceApproved = voiceApprov != 0
 	if policyRaw != "" && policyRaw != "[]" {
 		if err := json.Unmarshal([]byte(policyRaw), &rec.Policy); err != nil {
 			return Record{}, fmt.Errorf("contact store: decode policy for %s: %w", rec.ID, err)
@@ -246,7 +302,7 @@ func scanRecord(row interface{ Scan(...any) error }) (Record, error) {
 // Get resolves one record by id. Absent is ErrUnknownContact.
 func (s *SQLiteStore) Get(ctx context.Context, id string) (Record, error) {
 	rec, err := scanRecord(s.db.QueryRowContext(ctx,
-		`SELECT id, display_name, phone, signal_uuid, policy, created_at, updated_at
+		`SELECT `+contactColumns+`
 		 FROM contacts WHERE id = ?`, id,
 	))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -263,7 +319,7 @@ func (s *SQLiteStore) Get(ctx context.Context, id string) (Record, error) {
 func (s *SQLiteStore) GetByPhone(ctx context.Context, e164 string) (Record, error) {
 	phone := NormalizeE164(e164)
 	rec, err := scanRecord(s.db.QueryRowContext(ctx,
-		`SELECT id, display_name, phone, signal_uuid, policy, created_at, updated_at
+		`SELECT `+contactColumns+`
 		 FROM contacts WHERE phone = ?`, phone,
 	))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -275,6 +331,28 @@ func (s *SQLiteStore) GetByPhone(ctx context.Context, e164 string) (Record, erro
 	return rec, nil
 }
 
+// LookupByPhone resolves by E.164 phone with an EXACT compare — no
+// normalization (frozen contract, plan 20261110-caller-authz). This is
+// deliberately distinct from GetByPhone: the inbound caller resolver feeds
+// Telnyx's ev.From, already canonical, and a dial-shape input must MISS,
+// never silently normalize into a different identity. Absent is NOT an
+// error: the miss posture is (nil, false, nil) so the resolver fail-softs
+// to "unapproved unknown caller" without propagating a lookup error
+// upward (O1: the call always proceeds).
+func (s *SQLiteStore) LookupByPhone(ctx context.Context, e164 string) (*Record, bool, error) {
+	rec, err := scanRecord(s.db.QueryRowContext(ctx,
+		`SELECT `+contactColumns+`
+		 FROM contacts WHERE phone = ?`, e164,
+	))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("contact store: lookup by phone: %w", err)
+	}
+	return &rec, true, nil
+}
+
 // GetBySignalUUID resolves by Signal UUID (empty uuid is unknown: the
 // column defaults ” and an empty lookup would match unbound rows).
 func (s *SQLiteStore) GetBySignalUUID(ctx context.Context, uuid string) (Record, error) {
@@ -282,7 +360,7 @@ func (s *SQLiteStore) GetBySignalUUID(ctx context.Context, uuid string) (Record,
 		return Record{}, fmt.Errorf("%w: empty signal uuid", ErrUnknownContact)
 	}
 	rec, err := scanRecord(s.db.QueryRowContext(ctx,
-		`SELECT id, display_name, phone, signal_uuid, policy, created_at, updated_at
+		`SELECT `+contactColumns+`
 		 FROM contacts WHERE signal_uuid = ?`, uuid,
 	))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -298,7 +376,7 @@ func (s *SQLiteStore) GetBySignalUUID(ctx context.Context, uuid string) (Record,
 // order for the tool/report layers).
 func (s *SQLiteStore) List(ctx context.Context) ([]Record, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, display_name, phone, signal_uuid, policy, created_at, updated_at
+		`SELECT `+contactColumns+`
 		 FROM contacts ORDER BY display_name, id`,
 	)
 	if err != nil {
