@@ -657,6 +657,7 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 			MaxCallMinutes:       w.cfg.MaxCallMinutes,
 			SilencePromptSeconds: w.cfg.SilencePromptSeconds,
 			TurnTimeoutSeconds:   w.cfg.TurnTimeoutSeconds,
+			FillerGrace:          time.Duration(w.cfg.FillerGraceMs) * time.Millisecond,
 		})
 		w.loopsMu.Lock()
 		w.loops[f.CallID] = loop

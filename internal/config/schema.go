@@ -5069,6 +5069,7 @@ func DefaultConfig() *Config {
 			MaxConcurrentCalls:   2,
 			MaxCallMinutes:       15,
 			SilencePromptSeconds: 45,
+			FillerGraceMs:        2500,
 			// turn_timeout_seconds is opt-in: default 0 = disabled
 			// (docs/agents/opt-in-defaults.md). The silence timer is
 			// suspended while a voice turn is in flight, so an operator
@@ -5431,6 +5432,11 @@ type VoiceConfig struct {
 	// empty filler list plus empty greeting disables the greeting).
 	GreetingLine         string   `json:"greeting"               toml:"greeting"`
 	Filler               []string `json:"filler"                 toml:"filler"`
+	// FillerGraceMs is how long a dispatched turn may run before the
+	// talk loop speaks a filler line (dead-air defect 2026-11-10:
+	// filler fired immediately on EVERY prompt, so "give me a second"
+	// preceded fast answers). 0 = speak immediately (legacy).
+	FillerGraceMs        int      `json:"filler_grace_ms"        toml:"filler_grace_ms"`
 	SupervisorEmployee   string   `json:"supervisor_employee"    toml:"supervisor_employee"`
 	SupervisorEnabled    bool     `json:"supervisor_enabled"     toml:"supervisor_enabled"`
 	SupervisorModel      string   `json:"supervisor_model"       toml:"supervisor_model"`
