@@ -491,6 +491,88 @@ serializes against an in-flight round on the same per-employee invoke mutex as
 
 ---
 
+## Authoring employees as markdown
+
+Employees have two surfaces. The first is a **human-authored configuration** - a
+markdown file (`EMPLOYEE.md`, YAML frontmatter plus a markdown body) in the same
+style as the `AGENT.md` agent definitions. This section describes that surface.
+The second is **runtime state in SQLite** - the constitution, goals store, audit
+findings, and messages all live in the database and are daemon-managed. This
+section does not describe those; they are unchanged.
+
+The markdown file is an **input** to `meept agents create <file>`,
+`meept agents update <id> <file>`, and `meept agents validate <file>`. It is
+**not auto-discovered**: the daemon does not watch it. Editing the file does not
+mutate a running employee - you must run `create` (a new employee) or `update`
+(an existing one) to apply your changes. If your employee is already hired, run
+`meept agents update <id> config/employees/example-employee.md` after editing.
+
+Dispatch is by file extension: `.md` (and `.markdown`) routes through the
+markdown parser; `.json5`/`.json` keeps the existing path. The file location is
+your choice (for example `~/.meept/employees/secretary.md` or this repo's
+`config/employees/`).
+
+### Format
+
+The file is YAML frontmatter delimited by `---` markers, followed by a markdown
+body. The **entire body after the closing `---` becomes the employee's `prompt`**
+(leading and trailing blank lines are trimmed; internal markdown is preserved
+verbatim). Comments (lines starting with `#`) are legal anywhere in the
+frontmatter.
+
+### Frontmatter keys
+
+All keys are optional except `id`.
+
+| Key | Type | Notes |
+|-----|------|-------|
+| `id` | string | **required**; the employee's identity and DB primary key |
+| `name` | string | display name |
+| `description` | string | one-line summary |
+| `model` | string | per-employee model override; omitted = inherit |
+| `memory_scope` | string: `private\|shared\|read_only` | memory isolation |
+| `tools` | list[string] | tools the employee may invoke |
+| `additional_tools` | list[string] | agent-style alias, **merged into** `tools` on parse |
+| `constraints` | map | hard caps (see below) |
+| `triggers` | list of maps `{type, schedule?, topic?, prompt_template?, enabled}` | trigger definitions |
+| `enabled` | bool | masters whether the employee is active |
+| `executor_agent` | string | optional executor override |
+| `constitution` | map | **passed through** verbatim and validated by `agents create`/`validate` |
+| `goals` | list of maps | optional goals, passed through verbatim |
+
+`constraints` sub-keys (all optional): `max_iterations` (int),
+`timeout_seconds` (int, converted to a duration), `max_tokens_per_turn` (int),
+`daily_budget_cents` (int), `max_invocations_per_day` (int).
+
+The agent-style top-level aliases `max_iterations` (int) and `timeout_seconds`
+(int) are also accepted and are folded into `constraints` - but only when the
+matching canonical key inside `constraints` is absent.
+
+### Constitution is validated, not bypassed
+
+The `constitution` block is **passed through verbatim** and validated by
+`agents create` and `agents validate` exactly as the JSON5 path does - markdown
+does not bypass validation. The daemon requires `amendment_policy.
+requires_approval: true` and an `escalates_to` list, so include both. The nested
+constitution `constraints` are their own map; they are not merged with the
+top-level `constraints`.
+
+### Worked example
+
+`config/employees/example-employee.md` is a fully commented reference template
+mirroring `config/employees/secretary.json5`. It ships with `enabled: false` -
+hiring is an operator opt-in. Check it offline, then hire it:
+
+```bash
+meept agents validate config/employees/example-employee.md   # offline, no daemon needed
+meept agents create config/employees/example-employee.md     # registers the employee
+```
+
+.`json5` definitions remain fully supported - `.md` is an additional surface,
+not a replacement.
+
+---
+
 ## TUI
 
 Bubbletea panel, accessed via `ctl-x e` (new keybinding, alongside existing `ctl-x o` for MCP).
