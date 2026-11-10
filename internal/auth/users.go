@@ -84,11 +84,12 @@ type User struct {
 	Keys       []Key  `json:"keys"`
 	OriginNode string `json:"origin_node,omitempty"` // empty = local
 	// Groups lists the named group policies the account belongs to (C4).
-	// Consumed by groups.EffectiveGroups via the store lookup seam when a
-	// request carries this user's Identity; never derived from key
-	// material. Additive JSON with omitempty — old stores load unchanged
-	// and a user with no groups persists no "groups" key (the pattern
-	// Key.Role established).
+	// groups.EffectiveGroups (the store-lookup seam) is the documented
+	// consumer but is NOT yet wired: no production caller joins user
+	// groups today (tests only). The field persists so the human-identity
+	// group-join path can land without a store migration. Additive JSON
+	// with omitempty — old stores load unchanged and a user with no
+	// groups persists no "groups" key (the pattern Key.Role established).
 	Groups []string `json:"groups,omitempty"`
 }
 
