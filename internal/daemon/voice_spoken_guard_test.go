@@ -10,6 +10,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -127,12 +128,25 @@ func toolsEmployeeDefinition() *employee.Employee {
 	return def
 }
 
+// spokenGuardEmployeeResolver is the in-test EmployeeDefinitionResolver:
+// byID maps employee ids to definitions; unknown ids error.
+type spokenGuardEmployeeResolver struct {
+	byID map[string]*employee.Employee
+}
+
+func (f *spokenGuardEmployeeResolver) GetEmployee(_ context.Context, id string) (*employee.Employee, error) {
+	if def, ok := f.byID[id]; ok {
+		return def, nil
+	}
+	return nil, errors.New("unknown employee " + id)
+}
+
 // (a) The recorded leak shape must never reach the caller: the adapter
 // rewrites it once, the recovered prose ships, and the machine-shaped text
 // never persists as the assistant line.
 func TestVoiceSpokenGuard_RewritesLeakBeforeSay(t *testing.T) {
 	chatter := &scriptedChatter{replies: []string{leakShapedReply, cleanSpokenReply}}
-	r, sessions := spokenGuardRunner(t, chatter, &fakeEmployeeResolver{byID: map[string]*employee.Employee{
+	r, sessions := spokenGuardRunner(t, chatter, &spokenGuardEmployeeResolver{byID: map[string]*employee.Employee{
 		"secretary": secretaryDefinition(),
 	}})
 	sess, err := sessions.Create("voice call")
@@ -215,7 +229,7 @@ func TestVoiceSpokenGuard_CleanReplyUntouched(t *testing.T) {
 // (pinned in internal/agent TestValidationAnchor_ChatLaneByteIdentical).
 func TestVoicePersona_ToolsLessEmployeeOmitsEvidenceTemplate(t *testing.T) {
 	chatter := &scriptedChatter{replies: []string{cleanSpokenReply}}
-	r, sessions := spokenGuardRunner(t, chatter, &fakeEmployeeResolver{byID: map[string]*employee.Employee{
+	r, sessions := spokenGuardRunner(t, chatter, &spokenGuardEmployeeResolver{byID: map[string]*employee.Employee{
 		"secretary": secretaryDefinition(),
 	}})
 	sess, err := sessions.Create("voice call")
@@ -241,7 +255,7 @@ func TestVoicePersona_ToolsLessEmployeeOmitsEvidenceTemplate(t *testing.T) {
 
 func TestVoicePersona_ToolsEmployeeKeepsEvidenceTemplate(t *testing.T) {
 	chatter := &scriptedChatter{replies: []string{cleanSpokenReply}}
-	r, sessions := spokenGuardRunner(t, chatter, &fakeEmployeeResolver{byID: map[string]*employee.Employee{
+	r, sessions := spokenGuardRunner(t, chatter, &spokenGuardEmployeeResolver{byID: map[string]*employee.Employee{
 		"reporter": toolsEmployeeDefinition(),
 	}})
 	sess, err := sessions.Create("voice call")

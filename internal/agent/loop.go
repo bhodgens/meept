@@ -919,6 +919,15 @@ type AgentLoop struct {
 	// Nil by default: the refresh is a no-op unless the daemon wires it.
 	capabilitiesBuilder *CapabilitiesBuilder
 
+	// momentRenderer, when set via SetMomentRenderer, renders the volatile
+	// "# Moment" situational block (plan 20261110-situational leaf 01/02).
+	// The daemon wires a closure over moment.Provider.Render keyed by the
+	// loop's employee id; the agent package stays moment-free (the seam is
+	// a plain func() string). nil = inert (D1: byte-identical prompts).
+	// Guarded by mu (assemble/voice reads under RLock, like
+	// capabilitiesBuilder).
+	momentRenderer func() string
+
 	// Prefetch callback for memory context (Hermes pattern)
 	// Called at turn completion to prefetch context for next turn
 	prefetchCallback func(query string, maxItems int)
@@ -9123,10 +9132,25 @@ func (l *AgentLoop) buildSessionContextSection() string {
 // Global rules are appended even when an override is set.
 // Tool descriptions are omitted because they are sent via the API's tools parameter.
 func (l *AgentLoop) buildSystemPromptWithOverride() string {
-	if l.config.GlobalRules == "" {
-		return l.config.SystemPromptOveride
+	base := l.config.SystemPromptOveride
+	if l.config.GlobalRules != "" {
+		base = base + "\n\n## Global Rules\n\n" + l.config.GlobalRules
 	}
-	return l.config.SystemPromptOveride + "\n\n## Global Rules\n\n" + l.config.GlobalRules
+	// Moment block (plan 20261110-situational leaf 01/02, gate §4): voice
+	// turns short-circuit the whole PromptBuilder, so the override lane
+	// appends the SAME rendered block the chat lane adds as a volatile
+	// section. The override still LEADS the prompt; the block lands last,
+	// after any Global Rules suffix. nil renderer / empty render = no
+	// append (D1: byte-identical to the pre-tree concatenation).
+	l.mu.RLock()
+	render := l.momentRenderer
+	l.mu.RUnlock()
+	if render != nil {
+		if block := render(); block != "" {
+			base = base + "\n\n" + block
+		}
+	}
+	return base
 }
 
 // assembleSystemPrompt finalizes a PromptBuilder into a system prompt. When
@@ -9140,6 +9164,21 @@ func (l *AgentLoop) buildSystemPromptWithOverride() string {
 func (l *AgentLoop) assembleSystemPrompt(builder *PromptBuilder) string {
 	// Inject status bar (leaf 13, unstable section for turn-level info)
 	builder.AddSectionWithStability("[status]", StatusBar(l.turnStatus()), false)
+
+	// Inject the volatile moment block (plan 20261110-situational leaf
+	// 01/02, gate §3): a builder custom section titled EXACTLY "moment",
+	// stability=false — it rides the volatile tail and NEVER joins the
+	// cacheable stable prefix (prompt-cache discipline; StatusBar
+	// precedent). Rendered once per turn build (fresh clock each turn);
+	// nil renderer or empty render adds no section (D1 inert).
+	l.mu.RLock()
+	render := l.momentRenderer
+	l.mu.RUnlock()
+	if render != nil {
+		if block := render(); block != "" {
+			builder.AddSectionWithStability("moment", block, false)
+		}
+	}
 
 	// Turn boundary (branch 01 #103 / C1): attach the loop's refresh-capable
 	// capabilities builder so this per-turn build settles a mid-session
@@ -9606,6 +9645,20 @@ func (l *AgentLoop) ConfigSnapshot() []LoopOption {
 		// components.go on the template itself.
 		WithGlobalRefusalModel(l.globalRefusalModel),
 
+		// --- Moment renderer (plan 20261110-situational leaf 01/02):
+		// per-session clones (chat manager + voice GetOrCreateWired) must
+		// inherit the daemon-wired renderer so both lanes render the
+		// employee's moment block. Read under the snapshot lock; a nil
+		// template renderer (awareness off) clones as nil = inert (D1).
+		func(l2 *AgentLoop) {
+			l.mu.RLock()
+			render := l.momentRenderer
+			l.mu.RUnlock()
+			if render != nil {
+				l2.SetMomentRenderer(render)
+			}
+		},
+
 		// --- Config ---
 		WithAgentConfig(l.config),
 		// --- Repeat-error breaker budget (agent.repeat_error_limit):
@@ -9898,6 +9951,23 @@ func (l *AgentLoop) SetCapabilitiesBuilder(cb *CapabilitiesBuilder) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.capabilitiesBuilder = cb
+}
+
+// SetMomentRenderer installs the per-turn moment-block renderer on the
+// lane-neutral seam (plan 20261110-situational leaf 01/02; pinned by gate
+// 00T-moment §3/§4). nil fn = inert: prompts stay byte-for-byte identical
+// to the pre-tree shape (D1). Both lanes consume the SAME func: the chat
+// lane via the assembleSystemPrompt "moment" volatile section, the voice
+// lane via the buildSystemPromptWithOverride append. The daemon builds this
+// closure over moment.Provider.Render (internal/daemon/awareness_wiring.go);
+// the agent package does NOT import internal/moment — the seam is a plain
+// func() string. Unlike SetCapabilitiesBuilder, nil ACCEPTS: it explicitly
+// clears a previously installed renderer (the gate pins nil = inert, and
+// daemon reload paths can turn awareness off on a live loop).
+func (l *AgentLoop) SetMomentRenderer(fn func() string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.momentRenderer = fn
 }
 
 // SetSkillLoader sets the lazy skill loader for on-demand loading.

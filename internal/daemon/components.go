@@ -638,6 +638,12 @@ type Components struct {
 	// May be nil when the employee subsystem is not configured; the RPC
 	// handler layer handles nil gracefully (returns errNotConfigured).
 	EmployeeManager *employee.Manager
+	// momentRendererFor resolves the per-employee "# Moment" renderer
+	// (plan 20261110-situational leaf 01-moment/02; buildAwareness in
+	// awareness_wiring.go). nil when [awareness] is disabled — the D1
+	// inert posture: no renderer is ever stamped, prompts stay
+	// byte-identical. Keyed by the loop agent id / bound employee id.
+	momentRendererFor func(employeeID string) func() string
 	// EmployeeMessageStore persists inter-agent messages (leaf 10).
 	// Nil when the employee stack is disabled.
 	EmployeeMessageStore *employee.MessageStore
@@ -5329,6 +5335,26 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		}
 	}
 
+	// Situational awareness ([awareness] block, plan 20261110-situational
+	// leaf 01-moment/02): build the moment.Provider + per-employee def
+	// resolver (internal/daemon/awareness_wiring.go) and install the
+	// renderer seam on the daemon template loop. Disabled (default) ->
+	// buildAwareness returns (nil, nil) -> no renderer set anywhere ->
+	// every prompt byte-identical to the pre-tree shape (D1 golden,
+	// 00T-moment §3/§4). The template carries agent id "default" (not an
+	// employee id), so its static resolution is normally inert — the real
+	// consumer is the voice turn runner, which stamps per-employee
+	// renderers on the session clones (voice_employee.go MomentResolver).
+	// Ordered here because it needs c.EmployeeManager (BotDefinition
+	// source) live; reads cfg.Awareness (default disabled).
+	if _, resolveMoment := buildAwareness(cfg, c.EmployeeManager,
+		logger.With("component", "awareness-wiring")); resolveMoment != nil {
+		c.momentRendererFor = resolveMoment
+		c.AgentLoop.SetMomentRenderer(resolveMoment(c.AgentLoop.GetAgentID()))
+		logger.Info("situational awareness wired (moment block opt-in enabled)",
+			"refresh_minutes", cfg.Awareness.RefreshMinutes)
+	}
+
 	// dsh-convergence daemon integration (leaf seams): wire the goal /
 	// delegate / plan-mode tool providers and the plan-mode per-session
 	// controller NOW that the agent registry, dispatcher, ACP manager, and
@@ -5383,6 +5409,10 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// bots both disabled) degrades to the template persona.
 			Employees: c.EmployeeManager,
 			Logger:    logger,
+			// Moment renderer seam (awareness leaf 01/02): set only when
+			// [awareness] is enabled (nil otherwise -> the turn runner
+			// stamps nothing, voice prompts byte-identical, D1).
+			MomentResolver: c.momentRendererFor,
 		}
 		// Contact-display store (contact-display leaf 02): a second
 		// handle on the SAME contacts.db the chain uses (WAL +
