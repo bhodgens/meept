@@ -109,13 +109,6 @@ type State struct {
 var ErrIllegalTransition = errors.New("ledger: illegal status transition")
 var ErrResolveNotFound = errors.New("ledger: resolves references unknown or foreign record")
 
-// errNotImplemented backs the read-path methods whose full semantics
-// land with leaf 01-store/03 (QueryOpen/VerifyState/RepairState/Tail).
-// Append (transitions, Resolves, envelope/state upsert) and GetState are
-// implemented as of leaf 01-store/02. The methods exist so the package
-// builds; they fail with a 'ledger:'-prefixed error.
-var errNotImplemented = errors.New("ledger: not implemented; pending leaves 01-store/02-03")
-
 // payloadEnvelope is the frozen wrapper Append writes into ledger.payload
 // when DraftRecord.SetStatus is set:
 //
@@ -202,6 +195,8 @@ type Store struct {
 
 	mu          sync.Mutex
 	afterAppend func(rec Record, st *State) // seam used by 02-03 publish; set via WithAfterAppend
+	tailers     []*tailer                   // live Tail subscriptions (ops.go fan-out)
+	closed      bool                        // set by Close; Tail refuses new registrations
 }
 
 // Open opens (and migrates) the ledger store at dbPath. The migration is
@@ -228,11 +223,19 @@ func Open(dbPath string, logger *slog.Logger) (*Store, error) {
 	return s, nil
 }
 
-// Close closes the underlying database.
+// Close closes the underlying database. Live Tail subscriptions are
+// woken and torn down first (their delivery goroutines exit and their
+// channels close), and later Tail calls fail fast.
 func (s *Store) Close() error {
 	if s == nil || s.db == nil {
 		return nil
 	}
+	s.mu.Lock()
+	if !s.closed {
+		s.closed = true
+		s.wakeTailersLocked()
+	}
+	s.mu.Unlock()
 	return s.db.Close()
 }
 
@@ -395,6 +398,10 @@ func (s *Store) Append(ctx context.Context, d DraftRecord) (*Record, error) {
 	if fn := s.hook(); fn != nil {
 		fn(rec, newState)
 	}
+	// Live Tail fan-out (leaf 03): after the afterAppend hook, push the
+	// committed record to every registered tailer (registry snapshotted
+	// under the store mutex; non-blocking teardown-safe sends — ops.go).
+	s.fanoutTailers(rec)
 	return &rec, nil
 }
 
@@ -553,30 +560,5 @@ func (s *Store) GetState(ctx context.Context, employeeID, subject string) (State
 	return st, true, nil
 }
 
-// QueryOpen returns state rows with Status not in {done, cancelled} for
-// the employee, newest-updated first. Full implementation is leaf
-// 03-store/03 (query-verify-tail).
-func (s *Store) QueryOpen(ctx context.Context, employeeID string) ([]State, error) {
-	return nil, errNotImplemented
-}
-
-// Tail yields records with ID > sinceID: catch-up from SQLite, then live
-// from the in-process fan-out registered at Append commit. Full
-// implementation is leaf 03-store/03 (query-verify-tail).
-func (s *Store) Tail(ctx context.Context, sinceID int64) (<-chan Record, error) {
-	return nil, errNotImplemented
-}
-
-// VerifyState folds the ledger and diffs ledger_state; report lists
-// divergences. Full implementation is leaf 03-store/03
-// (query-verify-tail).
-func (s *Store) VerifyState(ctx context.Context) (*VerifyReport, error) {
-	return nil, errNotImplemented
-}
-
-// RepairState rebuilds divergent state rows from the fold and returns
-// the repaired count. Full implementation is leaf 03-store/03
-// (query-verify-tail).
-func (s *Store) RepairState(ctx context.Context) (int, error) {
-	return 0, errNotImplemented
-}
+// QueryOpen, SearchLog, VerifyState, RepairState, and Tail landed with
+// leaf 01-store/03 in ops.go (query-verify-tail).

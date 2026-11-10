@@ -373,10 +373,10 @@ rebase re-check each).
 
 | Child | Status | Commit | Notes |
 |---|---|---|---|
-| 01-store/00T | PENDING | | |
-| 01-store/01 | PENDING | | |
-| 01-store/02 | PENDING | | |
-| 01-store/03 | PENDING | | |
+| 01-store/00T | COMPLETE | 5cc91064 | |
+| 01-store/01 | COMPLETE | f3d5262f | |
+| 01-store/02 | COMPLETE | a978bafd | |
+| 01-store/03 | IN_PROGRESS | | |
 | 02/00T | PENDING | | |
 | 02/01 | PENDING | | |
 | 02/02 | PENDING | | |
