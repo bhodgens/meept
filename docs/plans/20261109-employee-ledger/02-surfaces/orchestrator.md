@@ -302,10 +302,10 @@ internals beyond its exported API (tables stay package-private).
 
 | Child | Status | Commit | Notes |
 |---|---|---|---|
-| 00T-surfaces | PENDING | | |
-| 01-tools | PENDING | | |
-| 02-rpc | PENDING | | |
-| 03-publish | PENDING | | |
+| 00T-surfaces | COMPLETE | a6e458a0 | 18 tests green |
+| 01-tools | COMPLETE | 3ba45197 | |
+| 02-rpc | COMPLETE | efb4a9b9 | |
+| 03-publish | COMPLETE | bd0ef770 | |
 
 ## Integration Test Plan
 
