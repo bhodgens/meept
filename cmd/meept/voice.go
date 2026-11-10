@@ -949,13 +949,24 @@ func startVoiceLinkMonitor(open voiceLinkOpenResult, aEmp, bEmp string) {
 			fmt.Fprintf(os.Stderr, "monitor %s: daemon returned no tap path (speakers off for that side)\n", label)
 			return
 		}
+		// Open the audio context BEFORE dialing the tap: the tee starts
+		// flowing the instant the dial lands, and the lazy oto context
+		// init (~0.3 s: device open + ready wait, plus CoreAudio's own
+		// first-start latency) stalled the first writes and dropped the
+		// greeting burst behind an 8 KB socket buffer (live
+		// link-d52f032b6e010882). One silent 20 ms burst = pure warm-up,
+		// inaudible.
+		player := voice.NewOtoPlayer()
+		if werr := player.Play(make([]byte, 640)); werr != nil {
+			fmt.Fprintf(os.Stderr, "monitor %s: speaker warm-up failed: %v (speakers off for that side)\n", label, werr)
+			return
+		}
 		conn, err := net.Dial("unix", path)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "monitor %s: dial %s: %v (speakers off for that side)\n", label, path, err)
 			return
 		}
 		fmt.Printf("monitor %s: tapping %s via speakers\n", label, emp)
-		player := voice.NewOtoPlayer()
 		sink := voice.NewSpeakerSink(player, 0)
 		done := make(chan error, 1)
 		// First-byte announcement: the operator sees the side start to
