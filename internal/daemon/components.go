@@ -6915,6 +6915,10 @@ func (c *Components) stopComponents(ctx context.Context) error {
 	// process) but stop cleanly here for test/shutdown determinism.
 	if c.QuotaNotifier != nil {
 		c.QuotaNotifier.Stop()
+		// Cleanup prunes the dedup map (deadcode wave-2: Cleanup had zero
+		// callers; wiring it here bounds memory across in-process
+		// restarts and keeps the shutdown path the single teardown seam).
+		c.QuotaNotifier.Cleanup()
 		c.Logger.Info("Quota notifier stopped")
 	}
 
