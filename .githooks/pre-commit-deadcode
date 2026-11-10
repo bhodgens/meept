@@ -1,17 +1,27 @@
 #!/bin/bash
 # Pre-commit hook: deadcode reachability gate (blocks NEW unwired functions)
 #
-# Runs golang.org/x/tools/cmd/deadcode on both binaries (cmd/meept-daemon,
-# cmd/meept) and diffs the unreachable-function set against the committed
-# baseline (.githooks/deadcode-baseline.txt). Commit is blocked when a
-# function is unreachable in the working tree but absent from the baseline —
-# i.e. newly added code nothing calls ("implemented but never wired").
+# Runs golang.org/x/tools/cmd/deadcode on ALL FIVE production binaries
+# (cmd/meept-daemon, cmd/meept, cmd/meept-lite, cmd/meept-classifier-test,
+# tools/bridges-eval) and intersects the per-binary unreachable sets, then
+# diffs the intersection against the committed baseline
+# (.githooks/deadcode-baseline.txt). Commit is blocked when a function is
+# unreachable from EVERY main in the working tree but absent from the
+# baseline — i.e. newly added code nothing calls ("implemented but never
+# wired").
 #
-# Why a baseline: the repo already carries ~12k unreachable functions. A
-# "must be empty" gate would block every commit forever. New-code-only
-# ratchets the count down instead of up; re-baseline deliberately when you
-# INTEND to remove or wire dead code (same policy as the bench regression
-# baseline in .githooks/README.md).
+# Why the intersection (not the union): a function wired in one binary but
+# merely LINKED (never called) in another is live code. Union baselining
+# counted such functions as dead — 88% of the pre-campaign stock (13,610
+# entries shrank to a 1,452 true intersection in the 2026-11-09 triage;
+# adding the three smaller mains shrank it further to ~590). Only the
+# both/ALL-binaries intersection is genuinely unwired code.
+#
+# Why a baseline: the repo already carries thousands of unreachable
+# functions. A "must be empty" gate would block every commit forever.
+# New-code-only ratchets the count down instead of up; re-baseline
+# deliberately when you INTEND to remove or wire dead code (same policy as
+# the bench regression baseline in .githooks/README.md).
 #
 # Line numbers are stripped from the comparison key (path + func name only)
 # so pure code motion never produces false new/removed churn.
@@ -22,6 +32,9 @@
 #
 # Env overrides (testing/CI):
 #   MEEPT_DEADCODE_BASELINE=/path/to/file   baseline location
+#   MEEPT_DEADCODE_MAINS="a b c"            binary targets (space-separated
+#                                           go list patterns; default: all
+#                                           five production mains)
 #
 # Requires: deadcode in PATH (or $GOPATH/bin). Skips with a warning when
 # missing: go install golang.org/x/tools/cmd/deadcode@latest
@@ -30,6 +43,10 @@
 # runs pin from go.mod below).
 
 set -euo pipefail
+
+# Byte-order collation for sort/comm (baseline files are C-locale sorted;
+# locale-aware sort produces a different order and comm fails on it).
+export LC_ALL=C
 
 RED='\033[0;31m'
 YELLOW='\033[1;33m'
@@ -77,31 +94,50 @@ normalize() {
     sed -E 's/:[0-9]+:[0-9]+: unreachable func:/ unreachable func:/'
 }
 
-TMPDIR_CURRENT="$(mktemp -t meept-deadcode.XXXXXX)"
-trap 'rm -f "$TMPDIR_CURRENT" "$TMPDIR_CURRENT.daemon" "$TMPDIR_CURRENT.cli"' EXIT
+TMPDIR_CURRENT="$(mktemp -d -t meept-deadcode.XXXXXX)"
+CURRENT="$TMPDIR_CURRENT/current"
+trap 'rm -rf "$TMPDIR_CURRENT"' EXIT
 
-# Analyze both binaries. A deadcode failure here means the working tree does
-# not typecheck/build — fail closed (pre-commit-build runs earlier and should
+# Production mains to analyze. Override with MEEPT_DEADCODE_MAINS for
+# testing/CI. A function counts as unwired only if unreachable from EVERY
+# one of these entry points.
+MAINS_DEFAULT="./cmd/meept-daemon ./cmd/meept ./cmd/meept-lite ./cmd/meept-classifier-test ./tools/bridges-eval"
+MAINS="${MEEPT_DEADCODE_MAINS:-$MAINS_DEFAULT}"
+
+# Analyze every binary, then intersect: a function is only "currently
+# unwired" if it appears in ALL per-binary outputs (comm-style incremental
+# intersection). A deadcode failure here means the working tree does not
+# typecheck/build — fail closed (pre-commit-build runs earlier and should
 # have caught it, so reaching this failure is unexpected).
-"$DEADCODE_BIN" -test ./cmd/meept-daemon > "$TMPDIR_CURRENT.daemon" || {
-    echo -e "${RED}✗ deadcode failed on ./cmd/meept-daemon (build/typecheck problem?)${NC}"
-    head -20 "$TMPDIR_CURRENT.daemon"
-    exit 1
-}
-"$DEADCODE_BIN" -test ./cmd/meept > "$TMPDIR_CURRENT.cli" || {
-    echo -e "${RED}✗ deadcode failed on ./cmd/meept (build/typecheck problem?)${NC}"
-    head -20 "$TMPDIR_CURRENT.cli"
-    exit 1
-}
+FIRST=1
+for MAIN in $MAINS; do
+    TAG=$(echo "$MAIN" | tr '/.' '__')
+    OUT="$TMPDIR_CURRENT/run$TAG"
+    if ! "$DEADCODE_BIN" -test "$MAIN" > "$OUT"; then
+        echo -e "${RED}✗ deadcode failed on $MAIN (build/typecheck problem?)${NC}"
+        head -20 "$OUT"
+        exit 1
+    fi
+    normalize < "$OUT" > "$OUT.norm"
+    if [ "$FIRST" -eq 1 ]; then
+        sort -u "$OUT.norm" > "$TMPDIR_CURRENT/acc"
+        FIRST=0
+    else
+        # Intersection so far: entries present in BOTH the accumulator and
+        # this binary's set (comm -12 needs LC_ALL=C-sorted inputs).
+        LC_ALL=C sort -u -o "$TMPDIR_CURRENT/acc" "$TMPDIR_CURRENT/acc"
+        LC_ALL=C sort -u -o "$OUT.norm" "$OUT.norm"
+        comm -12 "$TMPDIR_CURRENT/acc" "$OUT.norm" > "$TMPDIR_CURRENT/acc.next"
+        mv "$TMPDIR_CURRENT/acc.next" "$TMPDIR_CURRENT/acc"
+    fi
+done
+sort -u -o "$TMPDIR_CURRENT/acc" "$TMPDIR_CURRENT/acc"
+cp "$TMPDIR_CURRENT/acc" "$CURRENT"
 
-normalize < "$TMPDIR_CURRENT.daemon" > "$TMPDIR_CURRENT"
-normalize < "$TMPDIR_CURRENT.cli" >> "$TMPDIR_CURRENT"
-sort -u -o "$TMPDIR_CURRENT" "$TMPDIR_CURRENT"
-
-CURRENT_COUNT=$(wc -l < "$TMPDIR_CURRENT" | tr -d ' ')
+CURRENT_COUNT=$(wc -l < "$CURRENT" | tr -d ' ')
 
 if [ "$REBASELINE" -eq 1 ]; then
-    cp "$TMPDIR_CURRENT" "$BASELINE"
+    cp "$CURRENT" "$BASELINE"
     echo -e "${GREEN}✓ deadcode baseline regenerated: $BASELINE ($CURRENT_COUNT unreachable funcs)${NC}"
     echo "  Stage it: git add $BASELINE"
     exit 0
@@ -114,7 +150,7 @@ if [ ! -f "$BASELINE" ]; then
 fi
 
 # New = in the current set but not in the baseline (comm -13).
-NEW_FUNCS=$(comm -13 "$BASELINE" "$TMPDIR_CURRENT" || true)
+NEW_FUNCS=$(comm -13 "$BASELINE" "$CURRENT" || true)
 if [ -n "$NEW_FUNCS" ]; then
     NEW_COUNT=$(printf '%s\n' "$NEW_FUNCS" | grep -c . || true)
     echo -e "${RED}✗ deadcode gate: $NEW_COUNT newly unwired function(s) — commit blocked${NC}"
