@@ -6137,7 +6137,16 @@ func (c *Components) Start(ctx context.Context) error {
 		// so Checkpoint 1 (constitution gate) fires on the active path.
 		// See docs/superpowers/specs/2026-06-23-ai-employee-design.md (Gap A).
 		if c.SecurityChecker != nil {
-			c.EmployeeManager.RegisterPreExecCheckers(c.SecurityChecker)
+			// Thread the [voice] unapproved_caller_allowed_tools list
+			// (plan 20261110-caller-authz, step 1c / decision O3) into
+			// every employee checker. Nil/empty config list falls back to
+			// the checker's built-in default (message lane preserved).
+			var callerOpts []employee.PreExecOption
+			if c.Config != nil && len(c.Config.Voice.UnapprovedCallerAllowedTools) > 0 {
+				callerOpts = append(callerOpts,
+					employee.WithUnapprovedCallerAllowedTools(c.Config.Voice.UnapprovedCallerAllowedTools))
+			}
+			c.EmployeeManager.RegisterPreExecCheckers(c.SecurityChecker, callerOpts...)
 			c.Logger.Info("Employee pre-exec checkers registered with permission checker")
 		}
 

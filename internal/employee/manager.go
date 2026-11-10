@@ -977,7 +977,12 @@ func (m *Manager) StopAll() {
 // Call this after StartAll has primed the constitution cache. Safe to call
 // multiple times (each call replaces the registration). Employees without a
 // constitution are skipped (they have no constraints to enforce).
-func (m *Manager) RegisterPreExecCheckers(pc *security.PermissionChecker) {
+//
+// opts are forwarded to every NewPreExecChecker built here, so daemon
+// wiring can pin per-deployment gate options (e.g.
+// WithUnapprovedCallerAllowedTools) without changing this method's call
+// sites — existing callers pass nothing and keep today's behavior.
+func (m *Manager) RegisterPreExecCheckers(pc *security.PermissionChecker, opts ...PreExecOption) {
 	if pc == nil {
 		return
 	}
@@ -987,7 +992,7 @@ func (m *Manager) RegisterPreExecCheckers(pc *security.PermissionChecker) {
 	m.mu.RUnlock()
 	for id, c := range snapshot {
 		constCopy := c
-		checker := NewPreExecChecker(id, &constCopy)
+		checker := NewPreExecChecker(id, &constCopy, opts...)
 		pc.SetPreExecChecker(id, NewPreExecAdapter(checker))
 	}
 	m.logger.Info("registered pre-exec checkers with permission checker",

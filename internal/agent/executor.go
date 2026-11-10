@@ -8,11 +8,13 @@ import (
 	"log/slog"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/callerid"
 	"github.com/caimlas/meept/internal/code/ast"
 	"github.com/caimlas/meept/internal/groups"
 	"github.com/caimlas/meept/internal/llm"
@@ -1409,7 +1411,7 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 			}
 		}
 	} else {
-		result := e.checkPermission(toolName, args)
+		result := e.checkPermission(ctx, toolName, args)
 		if !result.Allowed {
 			// Include the path (and args) in the deny log: an opaque deny
 			// reason cost a full e2e debugging run (2026-09-10) because the
@@ -1959,7 +1961,7 @@ func (e *Executor) ExecuteSequential(ctx context.Context, toolCalls []llm.ToolCa
 }
 
 // checkPermission checks if a tool call is permitted.
-func (e *Executor) checkPermission(toolName string, args map[string]any) security.CheckResult {
+func (e *Executor) checkPermission(ctx context.Context, toolName string, args map[string]any) security.CheckResult {
 	// Map tool name to action category
 	action, ok := ToolActionMap[toolName]
 	if !ok {
@@ -1993,6 +1995,19 @@ func (e *Executor) checkPermission(toolName string, args map[string]any) securit
 	e.mu.RUnlock()
 	if agentID != "" {
 		details["agent_id"] = agentID
+	}
+
+	// Inject the inbound-caller stamp (plan 20261110-caller-authz §5,
+	// frozen contract): when the voice turn context carries a resolved
+	// caller (callerid.With at the daemon's per-turn stamp site), add the
+	// two PRESENCE-ONLY keys that the employee PreExecChecker's step-1c
+	// caller gate reads. Values are strconv.FormatBool — Number/Name never
+	// reach this map (details flows into prompts/logs; display-surface
+	// redaction is issue #126). No stamp = non-voice turn: the keys are
+	// absent and step 1c stays inert.
+	if info, ok := callerid.From(ctx); ok {
+		details["caller_approved"] = strconv.FormatBool(info.Approved)
+		details["caller_known"] = strconv.FormatBool(info.Known)
 	}
 
 	result := e.security.CheckPermission(action, details)
