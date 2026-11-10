@@ -3429,6 +3429,13 @@ func (a *taskCreatorAdapter) SetTaskJobCount(ctx context.Context, taskID string,
 	return a.registry.Update(ctx, t)
 }
 
+// CancelTask forwards the plan system's TaskCanceller seam onto the registry
+// (leaf 06 T2, audit F8): CancelPlan's cascade reaches live parent/child
+// tasks through the existing task-cancel machinery.
+func (a *taskCreatorAdapter) CancelTask(ctx context.Context, taskID, reason string) error {
+	return a.registry.CancelTask(ctx, taskID, reason)
+}
+
 func (a *taskCreatorAdapter) ScheduleSteps(ctx context.Context, taskID string) error {
 	// Promote ready steps (root steps with no deps) to StepReady.
 	if _, err := a.registry.StepStore().PromoteReadySteps(taskID); err != nil {

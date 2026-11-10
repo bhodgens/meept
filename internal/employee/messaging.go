@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -47,13 +48,155 @@ CREATE TABLE IF NOT EXISTS agent_messages (
     sender       TEXT NOT NULL,
     recipient    TEXT NOT NULL,
     body         TEXT NOT NULL,
-    state        TEXT NOT NULL DEFAULT 'queued',
+    -- state is pinned to the message enum (audit F6, leaf 06 T6), the same
+    -- pattern as queue jobs.state: the DB refuses garbage the code would
+    -- never write; migrateMessageStateCheck carries pre-CHECK databases
+    -- through a guarded table rebuild.
+    state        TEXT NOT NULL DEFAULT 'queued' CHECK (state IN ('queued','delivered','read')),
     created_at   TEXT NOT NULL,
     delivered_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_agent_messages_recipient_state
     ON agent_messages (recipient, state);
 `
+
+func (s *MessageStore) migrate() error {
+	if _, err := s.db.Exec(messageSchema); err != nil {
+		return err
+	}
+	return s.migrateMessageStateCheck()
+}
+
+// migrateMessageStateCheck adds the state CHECK to a pre-CHECK
+// agent_messages table (leaf 06 T6, mirroring the queue jobs F7 pattern).
+// SQLite cannot ALTER TABLE ADD CONSTRAINT, so: probe sqlite_master for
+// CHECK (no-op on fresh + already-migrated DBs), pre-flight refuse any row
+// outside the enum (data is never deleted or rewritten to fit), then rebuild
+// in one transaction — new table, copy, swap names, recreate the captured
+// indexes. agent_messages has no child references, so the plain rename-swap
+// is FK-safe without the pragma dance the plan store needs.
+func (s *MessageStore) migrateMessageStateCheck() error {
+	var tableSQL string
+	err := s.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='agent_messages'`).Scan(&tableSQL)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil // table just created by messageSchema (with CHECK); defensive
+	}
+	if err != nil {
+		return fmt.Errorf("message CHECK migration probe: %w", err)
+	}
+	if strings.Contains(strings.ToUpper(tableSQL), "CHECK") {
+		return nil // fresh schema or already migrated — nothing to do
+	}
+
+	// Live column set from PRAGMA (the rebuild must carry every column).
+	colRows, err := s.db.Query(`PRAGMA table_info(agent_messages)`)
+	if err != nil {
+		return fmt.Errorf("message CHECK migration table_info: %w", err)
+	}
+	var cols []string
+	for colRows.Next() {
+		var (
+			cid     int
+			name    string
+			ctype   string
+			notnull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := colRows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			colRows.Close()
+			return fmt.Errorf("message CHECK migration table_info scan: %w", err)
+		}
+		cols = append(cols, name)
+	}
+	if err := colRows.Err(); err != nil {
+		colRows.Close()
+		return fmt.Errorf("message CHECK migration table_info iteration: %w", err)
+	}
+	colRows.Close()
+	if len(cols) == 0 {
+		return fmt.Errorf("message CHECK migration: PRAGMA table_info(agent_messages) returned no columns")
+	}
+
+	idxRows, err := s.db.Query(`SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name='agent_messages' AND sql IS NOT NULL`)
+	if err != nil {
+		return fmt.Errorf("message CHECK migration index capture: %w", err)
+	}
+	var indexSQL []string
+	for idxRows.Next() {
+		var sqlText string
+		if err := idxRows.Scan(&sqlText); err != nil {
+			idxRows.Close()
+			return fmt.Errorf("message CHECK migration index scan: %w", err)
+		}
+		indexSQL = append(indexSQL, sqlText)
+	}
+	if err := idxRows.Err(); err != nil {
+		idxRows.Close()
+		return fmt.Errorf("message CHECK migration index iteration: %w", err)
+	}
+	idxRows.Close()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin message CHECK migration: %w", err)
+	}
+	defer func() {
+		if rErr := tx.Rollback(); rErr != nil && !errors.Is(rErr, sql.ErrTxDone) {
+			s.log.Debug("message CHECK migration rollback (no-op after commit)", "error", rErr)
+		}
+	}()
+
+	var badCount int
+	var badStates sql.NullString
+	if err := tx.QueryRow(`SELECT
+		(SELECT COUNT(*) FROM agent_messages WHERE state NOT IN ('queued','delivered','read')),
+		(SELECT group_concat(s, ', ') FROM
+			(SELECT DISTINCT state AS s FROM agent_messages WHERE state NOT IN ('queued','delivered','read')))`,
+	).Scan(&badCount, &badStates); err != nil {
+		return fmt.Errorf("message CHECK migration pre-flight: %w", err)
+	}
+	if badCount > 0 {
+		return fmt.Errorf("message CHECK migration refused: %d row(s) have state outside the message enum (values: %s); repair them before upgrading",
+			badCount, badStates.String)
+	}
+
+	if _, err := tx.Exec(`CREATE TABLE agent_messages_new (
+		id           TEXT PRIMARY KEY,
+		sender       TEXT NOT NULL,
+		recipient    TEXT NOT NULL,
+		body         TEXT NOT NULL,
+		state        TEXT NOT NULL DEFAULT 'queued' CHECK (state IN ('queued','delivered','read')),
+		created_at   TEXT NOT NULL,
+		delivered_at TEXT
+	)`); err != nil {
+		return fmt.Errorf("message CHECK migration create agent_messages_new: %w", err)
+	}
+	quoted := make([]string, len(cols))
+	for i, c := range cols {
+		quoted[i] = `"` + strings.ReplaceAll(c, `"`, `""`) + `"`
+	}
+	colsJoined := strings.Join(quoted, ", ")
+	if _, err := tx.Exec(fmt.Sprintf("INSERT INTO agent_messages_new (%s) SELECT %s FROM agent_messages", colsJoined, colsJoined)); err != nil {
+		return fmt.Errorf("message CHECK migration copy rows: %w", err)
+	}
+	if _, err := tx.Exec(`DROP TABLE agent_messages`); err != nil {
+		return fmt.Errorf("message CHECK migration drop old agent_messages: %w", err)
+	}
+	if _, err := tx.Exec(`ALTER TABLE agent_messages_new RENAME TO agent_messages`); err != nil {
+		return fmt.Errorf("message CHECK migration rename: %w", err)
+	}
+	for _, stmt := range indexSQL {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("message CHECK migration recreate index %q: %w", stmt, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit message CHECK migration: %w", err)
+	}
+	s.log.Warn("message CHECK migration: rebuilt agent_messages with state CHECK")
+	return nil
+}
 
 // MessageStore persists agent messages in a dedicated SQLite table
 // (agent_messages). Safe for concurrent use: the underlying *sql.DB is
@@ -93,11 +236,6 @@ func NewMessageStoreFromDB(db *sql.DB, log *slog.Logger) (*MessageStore, error) 
 		return nil, fmt.Errorf("migrate message db: %w", err)
 	}
 	return s, nil
-}
-
-func (s *MessageStore) migrate() error {
-	_, err := s.db.Exec(messageSchema)
-	return err
 }
 
 // Close closes the underlying database handle.

@@ -70,7 +70,11 @@ func (s *SQLiteStore) migrate() error {
 		description TEXT,
 		file_path TEXT NOT NULL,
 		project_id TEXT,
-		state TEXT NOT NULL DEFAULT 'planning',
+		-- state is pinned to the PlanState enum (audit F6, leaf 06 T6) the
+		-- same way queue jobs.state is: the DB refuses garbage the code
+		-- would never write; migrateStateChecks carries pre-CHECK databases
+		-- through a guarded table rebuild.
+		state TEXT NOT NULL DEFAULT 'planning' CHECK (state IN ` + plansStateEnumSQL + `),
 		task_id TEXT,
 		source_session TEXT,
 		approved_at TEXT,
@@ -95,7 +99,7 @@ func (s *SQLiteStore) migrate() error {
 		total_steps INTEGER NOT NULL DEFAULT 0,
 		completed_steps INTEGER NOT NULL DEFAULT 0,
 		failed_steps INTEGER NOT NULL DEFAULT 0,
-		state TEXT NOT NULL DEFAULT 'pending'
+		state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ` + phasesStateEnumSQL + `)
 	);
 	CREATE INDEX IF NOT EXISTS idx_plan_phases_plan ON plan_phases(plan_id);
 
@@ -130,6 +134,15 @@ func (s *SQLiteStore) migrate() error {
 	// user_version 0; the guards skip the DDL and record the version.
 	if err := storeMigrations.Apply(s.db.DB, s.logger); err != nil {
 		return fmt.Errorf("failed to apply schema migrations: %w", err)
+	}
+
+	// plans.state + plan_phases.state CHECK enforcement (audit F6, leaf 06
+	// T6). Runs AFTER the registry migrations so the rebuild sees the live,
+	// current column set (goal_id, synthesis lease columns, produces/
+	// consumes/task_id). No-op on databases created with the CHECK already
+	// in the base schema.
+	if err := s.migrateStateChecks(); err != nil {
+		return err
 	}
 
 	// Normalize legacy NULL project_id rows to ''. The store used to write

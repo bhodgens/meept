@@ -89,7 +89,8 @@ sharing the serial "current phase" slot.
 
 **Observability.** Each phase start fires the existing phase-transition
 hook (the same one serial mode uses; frontier activations report an empty
-`fromPhase`). Completion still publishes `plan.phase_completed` and step
+`fromPhase`). Completion publishes `plan.phase_state` (the dead
+`plan.phase_completed` event was removed — audit F9, no subscribers) and step
 progress still publishes `task.progress`. **No new bus topics** were added
 for parallel dispatch.
 

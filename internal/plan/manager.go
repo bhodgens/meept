@@ -41,6 +41,17 @@ type TaskGoalSetter interface {
 	SetGoalID(ctx context.Context, taskID, goalID string) error
 }
 
+// TaskCanceller is the optional seam a TaskCreator implements when the
+// backing task store can cancel a task (leaf 06 T2, audit F8). CancelPlan's
+// cascade reaches the plan's parent task and every live child task through
+// it — the EXISTING task-cancel machinery (interrupt trigger, terminal
+// state write, task.ev.task.cancelled notification), not a new event
+// surface. A creator without the seam keeps working: the phase cascade
+// still runs and the task-cancel step is skipped with a debug log.
+type TaskCanceller interface {
+	CancelTask(ctx context.Context, taskID, reason string) error
+}
+
 // PlanManager orchestrates plan lifecycle: creation, approval, synthesis
 // into tasks, progress tracking, and confirmation.
 type PlanManager struct {
@@ -729,6 +740,68 @@ func (m *PlanManager) CancelPlan(ctx context.Context, planID, reason string) err
 		return err
 	}
 
+	// F8 cascade (leaf 06 T2): a cancelled plan must not orphan its phases
+	// or leave live child tasks running. Read the phase rows BEFORE the
+	// transition bookkeeping below so the cascade sees the synthesis-time
+	// child task ids even for a plan whose maps were never restored.
+	phases, phErr := m.store.GetPhases(ctx, planID)
+	if phErr != nil {
+		// Best-effort parity with the sibling lifecycle writes: the plan
+		// row is already cancelled; a phase read failure is logged, not
+		// a cancel failure (the operator's stop intent already committed).
+		m.logger.Warn("cancel cascade: failed to read phases", "plan_id", planID, "error", phErr)
+		phases = nil
+	}
+
+	// Phase rollback: pending/in_progress phases reset to 'pending' per the
+	// leaf's Q2 rule (cancelled plan -> phases back to pending, NOT failed —
+	// a revise->re-run loop restarts them; the cancel itself is not a phase
+	// failure). Completed/confirmed/failed phases are terminal records of
+	// what already happened and stay untouched.
+	for _, ph := range phases {
+		if ph.State == PhasePending || ph.State == PhaseInProgress {
+			if err := m.store.SetPhaseState(ctx, ph.ID, PhasePending); err != nil {
+				m.logger.Warn("cancel cascade: failed to reset phase", "plan_id", planID, "phase_id", ph.ID, "error", err)
+			}
+		}
+	}
+
+	// Task cancellation through the existing task-cancel machinery: the
+	// plan's parent task plus every child task bound to a phase. The seam
+	// is optional (TaskCanceller); a creator without it (unit tests,
+	// legacy adapters) skips this step rather than failing the cancel.
+	if canceller, ok := m.taskCreator.(TaskCanceller); ok && m.taskCreator != nil {
+		cancelTask := func(taskID string) {
+			if taskID == "" {
+				return
+			}
+			if cerr := canceller.CancelTask(ctx, taskID, "plan cancelled: "+reason); cerr != nil {
+				m.logger.Warn("cancel cascade: task cancel failed", "plan_id", planID, "task_id", taskID, "error", cerr)
+			}
+		}
+		// Parent task: from the durable plan row first, then the in-memory
+		// map (Synthesize records both; a pre-restore manager may only
+		// have the map).
+		if p, gerr := m.store.GetPlan(ctx, planID); gerr == nil && p != nil {
+			cancelTask(p.TaskID)
+			m.mu.RLock()
+			parentMapped := m.taskPlanMap[p.TaskID] == p.ID
+			m.mu.RUnlock()
+			if p.TaskID == "" && !parentMapped {
+				// Nothing durable to cancel; child tasks below still ride
+				// their phase rows' task_id.
+				m.logger.Debug("cancel cascade: plan has no parent task", "plan_id", planID)
+			}
+		}
+		for _, ph := range phases {
+			if ph.TaskID != "" {
+				cancelTask(ph.TaskID)
+			}
+		}
+	} else if m.taskCreator != nil {
+		m.logger.Debug("cancel cascade: taskCreator lacks TaskCanceller seam; phases-only cancel", "plan_id", planID)
+	}
+
 	m.publishEvent("plan.cancelled", map[string]any{
 		"plan_id": planID,
 		"reason":  reason,
@@ -768,7 +841,31 @@ func (m *PlanManager) PruneStalePlans(ctx context.Context, retentionDays int) (d
 	// (each pass is a cheap indexed scan). Terminal drafts/cancelled/failed
 	// are deleted; stale open states are cancelled.
 	deletable := []PlanState{StateDraft, StateCancelled, StateFailed}
-	cancellable := []PlanState{StatePendingApproval, StatePlanning, StateApproved}
+	cancellable := []PlanState{StatePendingApproval, StateApproved}
+
+	// Stale planning is NOT cancellable: the frozen transition table has no
+	// planning->cancelled edge (planning is the creation-entry state with an
+	// empty to-set — leaf 04's table; the pre-table prune assumed otherwise
+	// and every such CancelPlan failed with ErrPlanNotModifiable). Surface
+	// the backlog honestly instead of pretending: count and warn, take no
+	// state action. An operator decides (revise via planning's rework path
+	// is also table-blocked at HEAD — this is a judgment call, not a sweep).
+	stalePlanning := 0
+	plans, lerr := m.store.ListPlansByState(ctx, StatePlanning, 10000)
+	if lerr != nil {
+		m.logger.Warn("retention: list plans failed", "state", StatePlanning, "error", lerr)
+		err = lerr
+	}
+	for _, p := range plans {
+		if p == nil || p.UpdatedAt.After(cutoff) {
+			continue
+		}
+		stalePlanning++
+	}
+	if stalePlanning > 0 {
+		m.logger.Warn("retention: stale planning plan not cancellable via table; needs operator decision",
+			"count", stalePlanning, "retention_days", retentionDays)
+	}
 
 	for _, state := range cancellable {
 		plans, lerr := m.store.ListPlansByState(ctx, state, 10000)
@@ -1199,10 +1296,12 @@ func (m *PlanManager) OnTaskCompleted(ctx context.Context, taskID string) error 
 			m.logger.Warn("failed to set phase completed", "phase_id", phaseID, "error", err)
 		}
 
-		m.publishEvent("plan.phase_completed", map[string]any{
-			"task_id":  taskID,
-			"phase_id": phaseID,
-		})
+		// The dead phase-completion bus event publish was REMOVED here
+		// (audit F9, leaf 06 T3): zero subscribers across the whole bus
+		// surface (verified against docs/generated/bus-topology.json before
+		// deletion). The live consumer of phase completion is
+		// plan.phase_state below — the intake projection rides it. A dead
+		// publish only inflated the topology's orphan set.
 		if hasPlan {
 			m.publishEvent("plan.phase_state", map[string]any{
 				"plan_id":  planID,
@@ -1415,10 +1514,21 @@ func (m *PlanManager) EnsureTaskPlan(ctx context.Context, taskID, title string) 
 // store. This should be called on daemon startup to recover plan-task
 // associations for executing plans that survived a restart.
 func (m *PlanManager) RestoreMappings(ctx context.Context) error {
+	// F12 gap (leaf 06 T4): a crash between Synthesize's task writes and
+	// the executing transition strands the plan in synthesizing with durable
+	// child task ids on the phase rows — restoring only executing plans
+	// left those mappings missing until the reclaimer moved the plan
+	// forward. Cover both task-bearing in-flight states. (Limit 100 per
+	// state kept: the reclaim path bounds synthesizing backlog separately.)
 	plans, err := m.store.ListPlansByState(ctx, StateExecuting, 100)
 	if err != nil {
 		return fmt.Errorf("list executing plans for mapping restore: %w", err)
 	}
+	synthPlans, err := m.store.ListPlansByState(ctx, StateSynthesizing, 100)
+	if err != nil {
+		return fmt.Errorf("list synthesizing plans for mapping restore: %w", err)
+	}
+	plans = append(plans, synthPlans...)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
