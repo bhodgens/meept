@@ -276,6 +276,16 @@ func applyEmployeeDefinition(ctx context.Context, loop *agent.AgentLoop, employe
 	} else {
 		cfg.SystemPromptOveride = ""
 	}
+	// Evidence-format template slim (defect A, 2026-11-10): the Validation
+	// & Escalation anchor carries a JSON claims/evidence TEMPLATE. An
+	// employee with NO tools in its definition (secretary: tools: []) can
+	// never produce tool evidence, so the model had nothing to summarize —
+	// it echoed the template itself into the SPOKEN reply, which TTS read
+	// to the caller (link-rec-1794333239 transcript b). Drop the template
+	// block for zero-tool definitions; the prose validation rules stay.
+	// Chat-lane loops never route through here, so their anchor ships
+	// byte-identical (flag default false).
+	cfg.OmitEvidenceFormatTemplate = len(def.Tools) == 0
 	if def.HasConstitution() {
 		c := def.Constitution
 		cfg.Purpose = c.Purpose
@@ -326,6 +336,43 @@ func (r *loopTurnRunner) Run(ctx context.Context, sess voice.SessionHandle, prom
 	reply, err := loop.RunOnce(ctx, prompt, sess.ConversationID)
 	if err != nil {
 		return "", err
+	}
+	// Machine-shaped output guard for the SPOKEN lane (defect A,
+	// 2026-11-10): the chat lane's reply guard at RunOnceWithParts
+	// (internal/agent/loop.go response assembly) DOES run for voice turns
+	// — voice reaches it through RunOnce — but its detectors deliberately
+	// TOLERATE the loop's honesty label ("[unverified: no tools were
+	// executed this turn]", pinned by TestChainStability_NudgeBudgetRecovery
+	// as the text-lane delivery) and evidence-prose shapes that are fine to
+	// READ but garbage to HEAR: the recorded secretary reply carried the
+	// label, the JSON-template vocabulary (tool_call_id / success=true /
+	// memory_id), and TTS spoke it all to the caller. The voice lane gets
+	// the spoken SUPERSET (agent.SpokenReplyViolation — shared shapes plus
+	// spoken-only markers) with the SAME bounded posture as the chat
+	// guard: ONE rewrite nudge re-entering the loop's turn producer, and a
+	// second trip (or an errored/parked rewrite) ships the canned speakable
+	// line. SEAM CHOICE: this adapter, NOT RunOnceWithParts — the chat
+	// lane shares that seam and its pinned label-delivery behavior must not
+	// change; internal/voice may not import internal/agent (import pin),
+	// so the daemon adapter between the loop reply and the say frames is
+	// the only legal shared choke point every voice reply passes through
+	// (phone, local, and link legs all route Turns.Run here). The check is
+	// pure/idempotent, and the rewrite budget is consumed at most once per
+	// turn, so the guard effectively runs exactly once per reply.
+	if violation, trips := agent.SpokenReplyViolation(reply); trips {
+		r.logger.Warn("voice spoken guard replaced a machine-shaped reply; retrying once with a rewrite nudge",
+			"session_id", sess.ID,
+			"conversation_id", sess.ConversationID,
+			"matched", violation,
+		)
+		retry, retryErr := loop.RunVoiceSpokenRewriteRetry(ctx, sess.ConversationID)
+		if retryErr != nil {
+			r.logger.Warn("voice spoken-guard rewrite retry failed; shipping the canned spoken line",
+				"session_id", sess.ID, "error", retryErr)
+			reply = agent.VoiceSpokenFallbackLine
+		} else {
+			reply = retry
+		}
 	}
 	r.persistExchange(sess.ID, prompt, reply)
 	return reply, nil

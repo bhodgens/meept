@@ -533,6 +533,18 @@ type AgentConfig struct {
 	// sections are hoisted before volatile ones via AssembleOrdered and
 	// LastStablePrefixHash() is updated on every build.
 	StablePrefixDisabled bool
+	// OmitEvidenceFormatTemplate slims the Validation & Escalation anchor:
+	// the anchor's JSON evidence-format TEMPLATE is dropped (the prose
+	// rules stay) for employees with no file/tool that produces evidence.
+	// Root cause of defect A (2026-11-10 link recording, transcript b): a
+	// tools-LESS voice employee (secretary: tools: []) still received the
+	// template in its conversation anchor and echoed it into the SPOKEN
+	// reply ("Verified evidence ... tool_call_id ... success=true ...
+	// memory_id"), which TTS read to the caller. The voice turn adapter
+	// sets this for zero-tool employees (internal/daemon
+	// voice_employee.go applyEmployeeDefinition). The zero value keeps the
+	// template (text-lane byte-identity).
+	OmitEvidenceFormatTemplate bool
 }
 
 // CompactionAgentConfig holds per-agent compaction settings.
@@ -8944,8 +8956,16 @@ func (l *AgentLoop) observeToolBreaker(toolCalls []llm.ToolCall, results []*Exec
 // buildValidationAnchorInstructions builds the validation/escalation anchor message
 // that persists through context truncation. This ensures agents always have access
 // to validation requirements and escalation procedures.
+//
+// The anchor is ONE template string; only the JSON evidence-format block is
+// conditional (defect A, 2026-11-10): a tools-LESS voice employee echoed the
+// template into its SPOKEN reply (TTS read "claims/evidence/tool_call_id" to
+// the caller). When OmitEvidenceFormatTemplate is set the block is dropped —
+// the prose rules ("tool use comes first", the completion checklist, the
+// partial/failed reporting lines) stay byte-identical. Chat/task loops never
+// set the flag: their anchor ships exactly as before.
 func (l *AgentLoop) buildValidationAnchorInstructions() string {
-	return `## Validation & Escalation Instructions
+	prose := `## Validation & Escalation Instructions
 
 **Tool use comes first.** If the task requires reading, writing, running, or
 extracting anything, you MUST call the appropriate tool. A tool call is the
@@ -8958,7 +8978,13 @@ JSON blob in prose: call the tool that does the extraction.
 2. Evidence (file hashes, exit codes, command output) supports your claims
 3. No error indicators remain in the output
 
-**Evidence format** (include in your final response, AFTER any tool calls have
+`
+	if l.config.OmitEvidenceFormatTemplate {
+		prose += `**If you cannot complete the task**: Report status as "partial" or "failed" with specific reasons.
+**If blocked**: Describe what you need and suggest next steps.`
+		return prose
+	}
+	return prose + `**Evidence format** (include in your final response, AFTER any tool calls have
 returned — this summarizes work already done, it is not a substitute for it):
 ` + "```" + `json
 {
