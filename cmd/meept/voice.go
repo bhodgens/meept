@@ -38,6 +38,7 @@ func newVoiceCmd() *cobra.Command {
 		Short: "voice calls: local leg status and live local calls",
 	}
 	cmd.AddCommand(newVoiceLocalCmd())
+	cmd.AddCommand(newVoiceLinkCmd())
 	cmd.AddCommand(newVoiceStatusCmd())
 	return cmd
 }
@@ -691,4 +692,257 @@ func voiceStatusTable(rows []voiceCallStatusRow) string {
 	//nolint:errcheck // strings.Builder writes never fail
 	w.Flush()
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// ---------------------------------------------------------------------------
+// meept voice link
+// ---------------------------------------------------------------------------
+
+// voice link (deadair-link plan leaf 03): cross-connect TWO employees'
+// local legs inside the daemon via the voice.link.* RPC and let them
+// talk. The CLI NEVER touches audio - it opens the link, polls
+// voice.link.status every linkPollInterval printing per-side turn
+// counts, closes at the deadline, prints both transcripts, and exits 0
+// iff BOTH sides logged >= linkRequiredAssistantTurns assistant turns
+// (this doubles as the automated acceptance check).
+
+// linkPollInterval is the status poll cadence while the link runs.
+const linkPollInterval = 5 * time.Second
+
+// linkRequiredAssistantTurns is the acceptance bar: both sides need at
+// least this many assistant turns for the command to exit 0.
+const linkRequiredAssistantTurns = 2
+
+// linkFlags is the validated `voice link` flag set (pure validation,
+// unit-tested without a daemon).
+type linkFlags struct {
+	a       string
+	b       string
+	seconds int
+}
+
+// validate reports the flag errors the leaf pins: --a / --b required,
+// a==b refused EARLY (before any RPC), seconds <= 0 refused.
+func (f linkFlags) validate() error {
+	if f.a == "" {
+		return fmt.Errorf("--a is required (first employee id)")
+	}
+	if f.b == "" {
+		return fmt.Errorf("--b is required (second employee id)")
+	}
+	if f.a == f.b {
+		return fmt.Errorf("--a and --b must be different employees (got %q twice)", f.a)
+	}
+	if f.seconds <= 0 {
+		return fmt.Errorf("--seconds must be > 0 (got %d)", f.seconds)
+	}
+	return nil
+}
+
+func newVoiceLinkCmd() *cobra.Command {
+	var (
+		a       string
+		b       string
+		seconds int
+	)
+
+	cmd := &cobra.Command{
+		Use:   "link",
+		Short: "cross-connect two employees' local voice legs and let them talk",
+		Long: `Open a two-agent voice link in the daemon: employee A's spoken
+audio becomes employee B's microphone and vice versa (real TTS -> real
+socket PCM -> real STT -> real turns on both sides). No human, no mic.
+
+Polls voice.link.status every 5 s printing both sides' turn counts, ends
+the link at --seconds, prints both transcripts, and exits 0 only when
+BOTH sides logged at least 2 assistant turns - so the command doubles as
+the automated acceptance check for the dead-air / jitter harness.
+
+Examples:
+  meept voice link --a companion --b secretary --seconds 90`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			f := linkFlags{a: a, b: b, seconds: seconds}
+			if err := f.validate(); err != nil {
+				return err
+			}
+			return runVoiceLink(f)
+		},
+	}
+
+	cmd.Flags().StringVar(&a, "a", "", "employee id for side A (required)")
+	cmd.Flags().StringVar(&b, "b", "", "employee id for side B (required, must differ from --a)")
+	cmd.Flags().IntVar(&seconds, "seconds", 60, "link duration in seconds (must be > 0)")
+	return cmd
+}
+
+// voiceLinkOpenResult mirrors the voice.link.open wire shape.
+type voiceLinkOpenResult struct {
+	LinkID string `json:"link_id"`
+	ACCID  string `json:"a_ccid"`
+	BCCID  string `json:"b_ccid"`
+}
+
+// voiceLinkSideStatus mirrors one voice.link.status side row.
+type voiceLinkSideStatus struct {
+	CallID         string `json:"call_id"`
+	EmployeeID     string `json:"employee_id"`
+	AssistantTurns int    `json:"assistant_turns"`
+	UserTurns      int    `json:"user_turns"`
+	Transcript     []struct {
+		Role string `json:"role"`
+		Text string `json:"text"`
+		At   string `json:"at"`
+	} `json:"transcript"`
+}
+
+// voiceLinkStatusResult mirrors the voice.link.status wire shape.
+type voiceLinkStatusResult struct {
+	LinkID string              `json:"link_id"`
+	Ended  bool                `json:"ended"`
+	A      voiceLinkSideStatus `json:"a"`
+	B      voiceLinkSideStatus `json:"b"`
+}
+
+// runVoiceLink drives the whole link lifecycle. Exit contract (leaf
+// doc): nil (exit 0) iff both sides reach linkRequiredAssistantTurns
+// assistant turns; a descriptive error otherwise (exit 1). An RPC-level
+// failure (daemon down, link refused) is returned as-is with context.
+func runVoiceLink(f linkFlags) error {
+	client, err := connectDaemon()
+	if err != nil {
+		return fmt.Errorf("failed to connect to daemon: %w", err)
+	}
+	defer client.Close()
+
+	raw, err := client.Call("voice.link.open", map[string]any{
+		"employee_a": f.a,
+		"employee_b": f.b,
+	})
+	if err != nil {
+		return fmt.Errorf("voice.link.open: %w", err)
+	}
+	var open voiceLinkOpenResult
+	if err := json.Unmarshal(raw, &open); err != nil {
+		return fmt.Errorf("failed to parse open response: %w", err)
+	}
+	if open.LinkID == "" {
+		return fmt.Errorf("daemon refused the link (no link id returned)")
+	}
+	fmt.Printf("link %s open: a=%s(%s) b=%s(%s), %ds\n",
+		open.LinkID, f.a, open.ACCID, f.b, open.BCCID, f.seconds)
+
+	// SIGINT ends the poll early; the close below still runs, so the
+	// daemon's release fan-out fires exactly once per leg.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+
+	deadline := time.Now().Add(time.Duration(f.seconds) * time.Second)
+	var last voiceLinkStatusResult
+	pollErr := error(nil)
+	pollTick := time.NewTicker(linkPollInterval)
+	defer pollTick.Stop()
+	deadlineTimer := time.NewTimer(time.Until(deadline))
+	defer deadlineTimer.Stop()
+
+linkLoop:
+	for {
+		select {
+		case <-sigCh:
+			fmt.Println("\nsignal received; ending link...")
+			break linkLoop
+		case <-deadlineTimer.C:
+			break linkLoop
+		case <-pollTick.C:
+			st, err := callVoiceLinkStatus(client, open.LinkID)
+			if err != nil {
+				// A transient status failure never kills the harness
+				// run: keep the last good snapshot, remember the error,
+				// and report it only if no later poll succeeds.
+				if pollErr == nil {
+					pollErr = err
+				}
+				continue
+			}
+			pollErr = nil
+			last = st
+			fmt.Printf("[%s] a: %d user / %d assistant | b: %d user / %d assistant\n",
+				time.Now().Format("15:04:05"),
+				st.A.UserTurns, st.A.AssistantTurns,
+				st.B.UserTurns, st.B.AssistantTurns)
+			if st.Ended {
+				// The daemon closed the link already (an operator
+				// voice.link.close, or the harness reaped a leg): stop
+				// early, the final read follows.
+				break linkLoop
+			}
+		}
+	}
+
+	// Close the link (idempotent; the daemon may have reaped a leg via
+	// the silence reaper first).
+	if _, closeErr := client.Call("voice.link.close", map[string]any{"link_id": open.LinkID}); closeErr != nil {
+		fmt.Fprintf(os.Stderr, "voice.link.close: %v\n", closeErr)
+	}
+
+	// Final status AFTER close: the daemon retains the entry (and the
+	// calls.db rows live on), so this is the authoritative transcript
+	// snapshot.
+	if st, err := callVoiceLinkStatus(client, open.LinkID); err == nil {
+		last = st
+		pollErr = nil
+	} else if pollErr == nil {
+		pollErr = err
+	}
+
+	printLinkTranscript("a", last.A)
+	printLinkTranscript("b", last.B)
+
+	if pollErr != nil {
+		return fmt.Errorf("voice.link.status: %w", pollErr)
+	}
+	if last.A.AssistantTurns < linkRequiredAssistantTurns || last.B.AssistantTurns < linkRequiredAssistantTurns {
+		return fmt.Errorf("link did not converge: side a logged %d assistant turns, side b %d (need >=%d each)",
+			last.A.AssistantTurns, last.B.AssistantTurns, linkRequiredAssistantTurns)
+	}
+	fmt.Printf("link verified: both employees exchanged >=%d assistant turns.\n", linkRequiredAssistantTurns)
+	return nil
+}
+
+// callVoiceLinkStatus issues one voice.link.status round-trip.
+func callVoiceLinkStatus(client interface {
+	Call(method string, params any) (json.RawMessage, error)
+}, linkID string) (voiceLinkStatusResult, error) {
+	var res voiceLinkStatusResult
+	raw, err := client.Call("voice.link.status", map[string]any{"link_id": linkID})
+	if err != nil {
+		return res, fmt.Errorf("voice.link.status: %w", err)
+	}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return res, fmt.Errorf("failed to parse status response: %w", err)
+	}
+	return res, nil
+}
+
+// printLinkTranscript prints one side's transcript compactly (role-tagged
+// lines). An empty transcript prints an explicit "no lines" - the
+// honest degrade when the daemon's store seam is unwired.
+func printLinkTranscript(name string, side voiceLinkSideStatus) {
+	emp := side.EmployeeID
+	if emp == "" {
+		emp = "?"
+	}
+	fmt.Printf("\n--- transcript %s (%s / %s): %d user / %d assistant ---\n",
+		name, emp, side.CallID, side.UserTurns, side.AssistantTurns)
+	if len(side.Transcript) == 0 {
+		fmt.Println("(no transcript lines)")
+		return
+	}
+	for _, l := range side.Transcript {
+		at := l.At
+		if len(at) >= 8 {
+			at = at[11:19]
+		}
+		fmt.Printf("%s %s: %s\n", at, l.Role, strings.TrimSpace(l.Text))
+	}
 }
