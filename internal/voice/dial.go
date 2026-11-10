@@ -407,7 +407,16 @@ func (d *Dialer) doneFor(ctx context.Context, ccid string) <-chan struct{} {
 	if d.mgr != nil {
 		return d.mgr.WaitCall(ccid)
 	}
-	return make(chan struct{})
+	// Unknown-after-teardown with no manager seam (receipted-but-never-
+	// tracked ccid, e.g. restart-mid-ring residual, finding 8): return a
+	// CLOSED channel + warn instead of a fresh never-closing one — the
+	// dial state is unknowable, and a silent hang punts the unknown to
+	// the caller's ctx deadline. The mgr-backed path keeps the M3 posture
+	// (audit 2026-11-06): unknown inbound ids never close.
+	closed := make(chan struct{})
+	close(closed)
+	d.logger.Warn("voice: dial: done-state unknown after restart for ccid (bounded ctx is the caller's bound)", "ccid", ccid)
+	return closed
 }
 
 // holdCall acquires the goal hold for a live outbound call when the seam

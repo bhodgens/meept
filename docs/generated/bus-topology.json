@@ -2434,7 +2434,7 @@
     "voice.call.ended": [
       {
         "file": "internal/daemon/voice_wiring.go",
-        "line": 927,
+        "line": 1046,
         "payload_keys": [],
         "typed": true
       }
@@ -2442,7 +2442,7 @@
     "voice.call.progress": [
       {
         "file": "internal/daemon/voice_employee.go",
-        "line": 339,
+        "line": 348,
         "payload_keys": [],
         "typed": true
       }

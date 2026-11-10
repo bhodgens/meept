@@ -220,6 +220,26 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
 - Outbound dials reserve internal/effects keyed (employee_id, target,
   request_id) BEFORE the POST and write the audit row BEFORE DialOut;
   a retry never rings twice.
+- Restart-mid-ring residual (audit 2026-11-09 finding 8, documented
+  posture): the dialer's ccid -> done map and the manager's per-call done
+  channels are in-process. After a daemon restart, an effect ledger
+  row reads completed + receipt, and `Dialer.doneFor` re-resolves the
+  ccid through `Manager.WaitCall` — which for an id this process never
+  tracked returns a FRESH channel that never closes (M3: no retention
+  across teardown/restart; the outbound tombstone covers only SAME-
+  process post-teardown re-resolution). The caller's bounded ctx is the
+  ONLY safety net by design: a mid-ring call whose carrier leg survived
+  the restart is genuinely "state unknown" — the new process has no
+  media bridge for it and no way to know if the leg answered elsewhere.
+  Do NOT close the gap by guessing "ended": a false terminal would
+  unpark/release state for a call that may still be live on the
+  carrier. Hardening landed (leaf 04 T3): in `doneFor`, when
+  neither `d.dones[ccid]` nor a tracked/tombstoned `WaitCall` channel
+  exists for a receipted ccid, return an ALREADY-CLOSED channel + WARN
+  "state unknown" instead of `make(chan struct{})`, so WaitCall-based
+  callers observe the unknown terminal immediately rather than hanging
+  to their ctx deadline. Until that lands, treat an unbounded Done wait
+  after a restart as expected and rely on the caller timeout.
 
 ## Process lifecycle (C-lifecycle, leaf 13)
 
@@ -324,9 +344,13 @@ store. Invariants a future agent must NOT break:
     `internal/daemon/voice_wiring.go`). Nil Hold degrades to no
     ended-state. Do not change this contract; do not add a second
     OnCallStart on the local path.
-  - phone inbound: the spawn seam in `voice_wiring.go` calls
-    `holdPhoneCall` after registry Acquire (the closure reads the
-    employee pointer filled after `WireVoiceEmployee`).
+  - phone inbound: the spawn seam in `voice_wiring.go` arms the call's
+    hold gate and runs `holdPhoneCall` (AcquireCallHold + OnCallStart)
+    ASYNC on a goroutine after registry Acquire — never on the webhook
+    goroutine (finding 1, see Release fan-out above). The gate is
+    awaited by the talk loop's turn runner before the first employee
+    turn, so the hold still serializes the goal round. The closure reads
+    the employee pointer filled after `WireVoiceEmployee`.
   - phone outbound: `Dialer.holdCall` after a successful Acquire, via
     `DialConfig.Hold` (nil degrades to no ended-state). Refusals and
     the idempotent retry path do not hold.

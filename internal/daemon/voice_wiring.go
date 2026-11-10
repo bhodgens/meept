@@ -307,8 +307,35 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		// do not keep AcquireCallHold's release func (a second release
 		// would be a double-unlock without the once-guard, and the
 		// contract is hook-only, matching the local wiring).
-		holdPhoneCall(phoneHold, ev.CallControlID, cfg.DefaultEmployee, ev.From, voice.DirectionIncoming,
-			voice.FreshSessionFor(cfg, cfg.DefaultEmployee))
+		//
+		// audit 2026-11-09 finding 1: holdPhoneCall (AcquireCallHold ->
+		// mu.Lock) can block a FULL prior goal round. It must never run
+		// on this goroutine — HandleCallEvent rides the carrier webhook
+		// handler, and a stall there buys a Telnyx redelivery storm on a
+		// 500 after the leg was already answered. The spawn arms a
+		// per-call hold gate and runs the hold + OnCallStart on its own
+		// goroutine; the webhook returns immediately. Serialization of
+		// the GOAL ROUND is unchanged: the talk loop's turn runner
+		// awaits this same gate before the employee's FIRST turn
+		// (holdReady), so the hold is still taken before any employee
+		// state the call could race is touched. fact-free filler/
+		// greeting lines may play while the gate pends (they read no
+		// employee state; the supervisor-gate contract keeps `say`
+		// gated on the supervisor, not on the goal hold).
+		fresh := voice.FreshSessionFor(cfg, cfg.DefaultEmployee)
+		if phoneHold != nil && phoneHold.gates != nil {
+			gate := phoneHold.gates.arm(ev.CallControlID)
+			go func() {
+				defer gate.markReady()
+				holdPhoneCall(phoneHold, ev.CallControlID, cfg.DefaultEmployee, ev.From,
+					voice.DirectionIncoming, fresh, gate)
+			}()
+		} else {
+			// Degraded posture (hand-built wirings without the tracker):
+			// the pre-leaf synchronous hold — correct, just unbounded.
+			holdPhoneCall(phoneHold, ev.CallControlID, cfg.DefaultEmployee, ev.From,
+				voice.DirectionIncoming, fresh)
+		}
 		return func() {}, nil
 	}
 	manager := voice.NewManager(voice.ManagerConfig{
@@ -673,7 +700,7 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 		}
 		loop := voice.NewTalkLoop(voice.TalkDeps{
 			Supervisor: w.supervisor,
-			Turns:      turnRunnerFor(w.Employee.Binding, inst),
+			Turns:      turnRunnerFor(w.Employee.Binding, w.Employee.gates, inst),
 			SessionFor: func(call voice.Instance) voice.SessionHandle {
 				return w.sessionFor(call)
 			},
@@ -819,11 +846,48 @@ func (w *VoiceWiring) spliceHangup(ccid, reason string) {
 // fresh-session flag from the voice config (voice.FreshSessionFor) and
 // passes it through to the binding; false is byte-identical to the
 // pre-leaf-02 shared-session behavior.
-func holdPhoneCall(emp *VoiceEmployeeWiring, ccid, employeeID, number, direction string, fresh bool) {
+//
+// gate (audit 2026-11-09 finding 1, optional variadic): set only by the
+// ASYNC inbound path — the webhook spawn goroutine passes the call's hold
+// gate. AcquireCallHold may block here for a FULL prior goal round; that
+// is by design on this goroutine (not the webhook's). After the hold
+// registers, the gate's released flag is re-checked: if the call
+// terminal-fired while the hold pended, releaseCall's gate drop already
+// ran BEFORE the ReleaseHook peek, so the hook saw an unregistered hold
+// and skipped it — this side rolls the registration back instead
+// (ReleaseForCall + OnCallEnd). Both sides are once-guarded (map delete +
+// binding live check), so an interleaving where the hook DID see the
+// registration makes the rollback a clean no-op. No gate = today's
+// synchronous posture with no rollback check.
+func holdPhoneCall(emp *VoiceEmployeeWiring, ccid, employeeID, number, direction string, fresh bool, gate ...*holdGate) {
 	if emp == nil || ccid == "" || employeeID == "" {
 		return
 	}
+	// NB: mu.Lock() below is the ONE place a long unbounded block is
+	// legitimate on this stack — callers guarantee it is either the
+	// webhook's decoupled goroutine (gate variant) or the dialer's own
+	// goroutine (outbound). never hold any per-wiring lock across it
+	// (mutexio).
 	emp.AcquireCallHold(ccid, employeeID)
+	if len(gate) > 0 && gate[0] != nil && emp.Binding != nil {
+		if released, outcome := gate[0].releaseState(); released {
+			// The call died while this hold pended and releaseCall's
+			// hook-side teardown already skipped the (then-unregistered)
+			// hold: no OnCallStart ran, so only the registration needs
+			// rolling back. OnCallEnd is no-op-safe without a live
+			// binding entry; run it anyway for the pathological
+			// ordering where the start landed first.
+			if emp.logger != nil {
+				emp.logger.Info("voice wiring: phone hold rolled back — call released while the hold pended",
+					"ccid", ccid, "outcome", outcome)
+			}
+			rollbackCtx, rbCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_ = emp.Binding.OnCallEnd(rollbackCtx, ccid, outcome)
+			rbCancel()
+			emp.ReleaseForCall(ccid)
+			return
+		}
+	}
 	if emp.Binding == nil {
 		return
 	}
@@ -850,6 +914,24 @@ func holdPhoneCall(emp *VoiceEmployeeWiring, ccid, employeeID, number, direction
 		emp.logger.Warn("voice wiring: phone OnCallStart failed (call continues unbound)",
 			"ccid", ccid, "direction", direction, "error", err)
 	}
+	// Second gate re-check AFTER the start (closes the narrow window where
+	// releaseCall's drop + hook-side OnCallEnd landed between the pre-check
+	// and b.calls registration — the hook would have skipped the then-
+	// unbound row, and without this check the row strands 'live'). Both
+	// rollback sinks are idempotent (heldCalls map-delete once-guard,
+	// binding live check), so racing the hook again is a clean no-op.
+	if len(gate) > 0 && gate[0] != nil && emp.Binding != nil {
+		if released, outcome := gate[0].releaseState(); released {
+			if emp.logger != nil {
+				emp.logger.Info("voice wiring: phone call row rolled back — released during hold start",
+					"ccid", ccid, "outcome", outcome)
+			}
+			endCtx, endCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_ = emp.Binding.OnCallEnd(endCtx, ccid, outcome)
+			endCancel()
+			emp.ReleaseForCall(ccid)
+		}
+	}
 }
 
 // livePhoneTarget returns the registry target for ccid, or "" when the
@@ -869,13 +951,24 @@ func livePhoneTarget(reg voice.Registry, ccid string) string {
 
 // releaseCall is the Manager release hook fan-out. Order matters for
 // observability, not correctness (each sink is once-guarded):
-//  1. childproc NoteCallEnd (idle timer accounting)
-//  2. talk-loop cancel (per-call ctx, audit H4 — the loop's Run select
+//  1. hold-gate drop (audit 2026-11-09 finding 1): mark the pending-hold
+//     gate released and remove it BEFORE the ReleaseHook peek, so exactly
+//     one side (the hook, or the hold goroutine's rollback) tears the
+//     registration down when a hold was still pending on the mutex
+//  2. C1 end frame (audit 2026-11-09 finding 10): the child learns the
+//     call ended through the frame protocol, best-effort BEFORE the talk
+//     loop is dropped and the transport closes
+//  3. childproc NoteCallEnd (idle timer accounting)
+//  4. talk-loop cancel (per-call ctx, audit H4 — the loop's Run select
 //     sees ctx.Done and exits promptly, cancelling its in-flight turn
 //     pipeline)
-//  3. registry Release (frees the C8 slot + target)
-//  4. binding OnCallEnd (leaf-12 ReleaseHook: call row + goal hold)
+//  5. registry Release (frees the C8 slot + target)
+//  6. binding OnCallEnd (leaf-12 ReleaseHook: call row + goal hold)
 func (w *VoiceWiring) releaseCall(ccid string, outcome voice.Outcome) {
+	if w.Employee != nil && w.Employee.gates != nil {
+		w.Employee.gates.drop(ccid, string(outcome))
+	}
+	w.sendEndFrame(ccid, outcome)
 	w.ChildProc.NoteCallEnd(ccid)
 
 	w.loopsMu.Lock()
@@ -904,6 +997,32 @@ func (w *VoiceWiring) releaseCall(ccid string, outcome voice.Outcome) {
 	w.Registry.Release(ccid)
 	w.Employee.ReleaseHook(ccid, outcome)
 	w.publishCallEnded(ccid, outcome)
+}
+
+// sendEndFrame ships the C1 end frame (finding 10: teardown parity — the
+// child used to learn release only through socket EOF; internal/voicechild
+// handleEnd tears the pipeline down on this frame). Frame contract per
+// internal/voice/AGENTS.md: byte-exact JSON line, call_id carried, `last`
+// OMITTED for end (nil pointer, not explicit false). Reason carries the
+// terminal outcome so child logs name why the call ended.
+//
+// Best-effort by contract: TextServer.Send fails fast when no child is
+// connected (it never queues, unlike SendRaw's child-readiness wait), and
+// a write error means the transport is already dead — either way the
+// failure is logged and the release fan-out continues. It must NEVER
+// block or fail teardown: socket EOF remains the fallback signal.
+func (w *VoiceWiring) sendEndFrame(ccid string, outcome voice.Outcome) {
+	if w.TextServer == nil || ccid == "" {
+		return
+	}
+	if err := w.TextServer.Send(voice.Frame{
+		CallID: ccid,
+		Event:  voice.EventEnd,
+		Reason: string(outcome),
+	}); err != nil {
+		w.logger.Debug("voice wiring: end frame not delivered (child gone; socket EOF is the fallback)",
+			"ccid", ccid, "outcome", string(outcome), "err", err)
+	}
 }
 
 // publishCallEnded publishes voice.call.ended (typed topic, WS class
@@ -1215,17 +1334,31 @@ func (a *chatterAdapter) Ask(ctx context.Context, prompt string) (string, error)
 // employee's id onto the turn context so a voice_call executed DURING the
 // call is attributable to this employee (the turn ctx reaches tool
 // execution unbroken through RunOnce -> executeToolCalls -> Execute).
-func turnRunnerFor(b *voice.Binding, inst voice.Instance) voice.TurnRunner {
-	return bindingTurnRunner{b: b, inst: inst}
+//
+// gates (audit 2026-11-09 finding 1): for ASYNC-held inbound calls the
+// runner awaits the call's goal-hold gate before the FIRST employee turn,
+// so the per-employee serialization the synchronous hold provided is
+// preserved even though the hold now runs off the webhook goroutine. A
+// nil tracker or a never-armed ccid (outbound leg, local leg, sync-
+// degraded wirings) is an immediate no-op.
+func turnRunnerFor(b *voice.Binding, gates *holdTracker, inst voice.Instance) voice.TurnRunner {
+	return bindingTurnRunner{b: b, gates: gates, inst: inst}
 }
 
 type bindingTurnRunner struct {
-	b    *voice.Binding
-	inst voice.Instance
+	b     *voice.Binding
+	gates *holdTracker
+	inst  voice.Instance
 }
 
 // Run implements voice.TurnRunner.
 func (r bindingTurnRunner) Run(ctx context.Context, _ voice.SessionHandle, prompt string) (string, error) {
+	if r.gates != nil && !r.gates.await(ctx, r.inst.CallControlID) {
+		// The call released while the hold was still pending (or the
+		// turn ctx was otherwise cancelled): never start an employee
+		// turn for a dead call.
+		return "", ctx.Err()
+	}
 	turnCtx := context.WithValue(ctx, employeeIDContextKey{}, r.inst.EmployeeID)
 	return r.b.RunTurn(turnCtx, r.inst.CallControlID, prompt)
 }

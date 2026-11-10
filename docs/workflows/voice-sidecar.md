@@ -245,6 +245,62 @@ Flow:
 5. A `call.hangup` for an unknown id is a nil no-op. Teardown is idempotent
    against duplicate or late hangups.
 
+**The webhook never waits on the goal hold (audit 2026-11-09 finding 1).**
+The spawn answers the call, acquires the registry slot, then hands the
+goal hold + call-row start (`holdPhoneCall`) to its own goroutine and
+returns immediately — a webhook response blocked on the per-employee
+mutex (a prior live call or assess round) would time out Telnyx's POST
+and invite a redelivery storm on a leg that is already answered. The
+employee's FIRST turn still waits for the hold: the talk loop's turn
+runner gates on the call's hold-ready signal before touching the
+employee loop, so per-employee serialization is unchanged — only the
+delivery became asynchronous. Fact-free filler/greeting lines may play
+while the hold pends (they read no employee state). If the call
+hangs up while its hold is still queued behind the prior round, the
+teardown is done by exactly one of the two racing paths (the release
+hook, or the hold goroutine observing the release and rolling its own
+registration back) — the employee mutex is never left parked.
+
+**Redelivery storms are accepted posture (finding 11).** The webhook
+maps manager errors to 500 precisely so Telnyx redelivers while the
+failure may be transient (carrier API unreachable). A redelivered
+`call.initiated` for an already-answered leg therefore re-enters the
+spawn: the registry's one-live-per-employee/target rule refuses the
+duplicate Acquire, the manager hangs that redelivered leg up, and
+Telnyx stops redelivering once the leg is hung up. There is no
+webhook-side dedupe of seen `call_control_id`s, deliberately — a
+correct one would have to survive restarts (the carrier sends no
+idempotency key), and the cost of the storm is bounded refused
+duplicates, not corrupted state.
+
+## Teardown end frame (audit 2026-11-09 finding 10)
+
+`releaseCall` sends the C1 `end` frame (`{"call_id":...,"event":"end",
+"reason":"<outcome>"}`, `last` omitted per the frames contract) to the
+child as the FIRST step of the release fan-out, before the talk-loop
+drop and context cancel, so the child tears its pipeline down through
+the frame protocol instead of only noticing socket EOF. The send is
+best-effort: no child connected or a dead socket logs and continues —
+EOF remains the fallback signal, and frame failure can never block or
+fail a release.
+
+**Restart mid-ring: "state unknown" residual (finding 8).** The dial
+completion channels (`Dialer.dones`, the manager's per-call done
+channels) are in-process only. If the daemon restarts while an outbound
+call is ringing, the effects ledger correctly reports the dial completed
+(a retry never re-rings), but `Dialer.doneFor` re-resolves the ccid
+through `Manager.WaitCall` — an id the new process never tracked — and
+gets a fresh channel that never closes. The caller's bounded context is
+the safety net: waiting past it is the expected, documented outcome, and
+the state of the pre-restart carrier leg is genuinely unknown (the new
+process has no media bridge for it). Reporting "ended" for such a ccid
+would be a guess that could unpark an employee goal while the leg is
+still live on the carrier, so the daemon does not guess. Hardening
+landed (leaf 04 T3): `doneFor` returns an
+already-closed channel + a WARN "state unknown" for receipted-but-
+untracked ccids, so waiters observe the unknown terminal immediately
+instead of burning their whole timeout.
+
 ## Barge-in contract
 
 Barge-in is kept end to end. The pieces, in order:
@@ -917,7 +973,9 @@ transcripts. Two scenarios are registered in e2e/manifest.json
 `Binding.OnCallEnd` marks calls.db rows ended. It rides
 `ReleaseHook -> heldCalls`, and the hold is registered by
 `AcquireCallHold` on every live leg: local (`LocalDeps.Hold`), phone
-inbound (spawn seam), and phone outbound (`DialConfig.Hold`). Release
+inbound (spawn seam — async behind the hold gate, finding 1; the
+hold goroutine rolls its own registration back if the call releases
+while the hold pends), and phone outbound (`DialConfig.Hold`). Release
 is the manager hook exactly once; a nil hold seam degrades to no
 ended-state. The phone leg also calls `Binding.OnCallStart` from
 `holdPhoneCall` — without that row, OnCallEnd is a no-op.
