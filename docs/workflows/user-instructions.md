@@ -131,12 +131,6 @@ meept instructions preview "Every morning at 9am, run linter"
 - Matches trigger patterns against events
 - Executes actions on match
 
-### Git Hooks (`internal/preferences/git_hooks.go`)
-
-- `GeneratePreCommitHook()` creates `.git/hooks/pre-commit-user`
-- `GeneratePostCommitHook()` creates `.git/hooks/post-commit-user`
-- Hooks dispatch to RPC `instruction.execute_git_hook`
-
 ## Implementation Status
 
 | Phase | Status | Completion |
