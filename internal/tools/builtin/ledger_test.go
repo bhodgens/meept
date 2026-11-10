@@ -32,6 +32,7 @@ import (
 	"testing"
 
 	"github.com/caimlas/meept/internal/agent"
+	"github.com/caimlas/meept/internal/callerid"
 	"github.com/caimlas/meept/internal/ledger"
 	"github.com/caimlas/meept/internal/tools"
 )
@@ -487,6 +488,237 @@ func decodeQueryShape(t *testing.T, result any) queryShape {
 		}
 	}
 	return q
+}
+
+// --- Q1 stranger-lane gate: unapproved voice callers may RECORD but must
+//     never move subject state (owner decision, plan 20261110-caller-authz
+//     residual risk O4). Tests appended; existing cases untouched.
+
+// voiceCallerCtx stamps BOTH the employee identity (turn path) and the
+// caller identity (voice path: callerid.With at the daemon's per-turn
+// stamp site, internal/daemon/voice_wiring.go).
+func voiceCallerCtx(employeeID string, info callerid.Info) context.Context {
+	return callerid.With(employeeCtx(employeeID), info)
+}
+
+// (1) unknown/unapproved caller + set_status -> named refusal, ZERO rows,
+//
+//	NO state row.
+func TestLedgerAppendExecute_UnapprovedVoiceCallerSetStatusRefused(t *testing.T) {
+	st := ledgerTestStore(t)
+	tool := NewLedgerAppendTool(st, slog.New(slog.DiscardHandler))
+	ctx := voiceCallerCtx("eve", callerid.Info{Number: "+15550001111"}) // unknown number => Approved=false
+
+	res, err := tool.Execute(ctx, map[string]any{
+		"kind":       "action",
+		"subject":    "acme-roof",
+		"payload":    map[string]any{"note": "caller demands refund"},
+		"set_status": "waiting_on_me",
+		"summary":    "angry unknown caller, refund demanded",
+	})
+	if err != nil {
+		t.Fatalf("Execute returned Go error (want ToolResult refusal): %v", err)
+	}
+	tr, ok := res.(*tools.ToolResult)
+	if !ok {
+		t.Fatalf("result type = %T, want *tools.ToolResult", res)
+	}
+	if tr.Success {
+		t.Fatalf("unapproved caller + set_status must refuse, got success: %+v", tr.Result)
+	}
+	// Nameable refusal: names the tool AND the reason token the owner
+	// pinned (Q1: strangers may record, not change subject state).
+	if !strings.Contains(tr.Error, "ledger_append") {
+		t.Errorf("refusal must be nameable: Error = %q", tr.Error)
+	}
+	if !strings.Contains(tr.Error, "not approved to change subject state") {
+		t.Errorf("refusal must state the reason: Error = %q", tr.Error)
+	}
+	if !strings.Contains(tr.Error, "message recorded instead") {
+		t.Errorf("refusal must carry the Q1 guidance token: Error = %q", tr.Error)
+	}
+
+	// Zero side effects: NO log row written, NO state row created.
+	rows, err := st.QueryLog(context.Background(), ledger.LogQuery{EmployeeID: "eve"})
+	if err != nil {
+		t.Fatalf("QueryLog: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("refused append must write ZERO rows, got %d", len(rows))
+	}
+	if _, found, err := st.GetState(context.Background(), "eve", "acme-roof"); err != nil || found {
+		t.Fatalf("refused append must not touch state (found=%v err=%v)", found, err)
+	}
+}
+
+// (2) unknown caller WITHOUT set_status (plain observation/committal) ->
+//
+//	succeeds; the tool keeps writing Source=tool (the Source=voice rows
+//	are the daemon brief path's job, never the tool's).
+func TestLedgerAppendExecute_UnapprovedVoiceCallerPlainNoteAllowed(t *testing.T) {
+	st := ledgerTestStore(t)
+	tool := NewLedgerAppendTool(st, slog.New(slog.DiscardHandler))
+	ctx := voiceCallerCtx("eve", callerid.Info{}) // zero Info with ok=true: unresolved caller, still gated
+
+	res, err := tool.Execute(ctx, map[string]any{
+		"kind":    "committal",
+		"subject": "acme-roof",
+		"payload": map[string]any{"said": "caller reported a leak"},
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	tr, ok := res.(*tools.ToolResult)
+	if !ok || !tr.Success {
+		t.Fatalf("plain note from unknown caller must succeed (message lane): %+v", res)
+	}
+	rows, err := st.QueryLog(context.Background(), ledger.LogQuery{EmployeeID: "eve"})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("want 1 row, got %d (err %v)", len(rows), err)
+	}
+	if rows[0].Source != ledger.SourceTool {
+		t.Errorf("Source = %q, want fixed %q (voice provenance stays a daemon-path concern)", rows[0].Source, ledger.SourceTool)
+	}
+	if _, found, _ := st.GetState(context.Background(), "eve", "acme-roof"); found {
+		t.Errorf("observation append must not create a state row")
+	}
+}
+
+// (3) approved caller + set_status -> succeeds exactly as today.
+func TestLedgerAppendExecute_ApprovedVoiceCallerSetStatusAllowed(t *testing.T) {
+	st := ledgerTestStore(t)
+	tool := NewLedgerAppendTool(st, slog.New(slog.DiscardHandler))
+	ctx := voiceCallerCtx("eve", callerid.Info{Number: "+15550002222", Name: "boss", Approved: true, Known: true})
+
+	res, err := tool.Execute(ctx, map[string]any{
+		"kind":       "action",
+		"subject":    "acme-roof",
+		"payload":    map[string]any{},
+		"set_status": "open",
+		"summary":    "quote requested",
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if tr, ok := res.(*tools.ToolResult); !ok || !tr.Success {
+		t.Fatalf("approved caller + set_status must succeed: %+v", res)
+	}
+	stRow, found, err := st.GetState(context.Background(), "eve", "acme-roof")
+	if err != nil || !found {
+		t.Fatalf("approved set_status must write state (found=%v err=%v)", found, err)
+	}
+	if stRow.Status != ledger.StatusOpen || stRow.Summary != "quote requested" {
+		t.Errorf("state = %+v, want open/quote requested", stRow)
+	}
+}
+
+// (4) non-voice turn (no callerid stamp at all) + set_status -> succeeds
+//
+//	byte-identical to today: the no-regression golden for every
+//	chat/worker turn that never passes through callerid.With.
+func TestLedgerAppendExecute_NonVoiceSetStatusGoldenUnchanged(t *testing.T) {
+	st := ledgerTestStore(t)
+	tool := NewLedgerAppendTool(st, slog.New(slog.DiscardHandler))
+	ctx := employeeCtx("eve") // no callerid.With — From(ctx) reports ok=false
+
+	res, err := tool.Execute(ctx, map[string]any{
+		"kind":       "action",
+		"subject":    "acme-roof",
+		"payload":    map[string]any{"did": "scheduled crew"},
+		"set_status": "open",
+		"summary":    "crew scheduled",
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	tr, ok := res.(*tools.ToolResult)
+	if !ok || !tr.Success {
+		t.Fatalf("non-voice set_status append must be untouched by the gate: %+v", res)
+	}
+	// Same result shape as the pre-gate contract: id/kind/subject/status/summary.
+	out, ok := tr.Result.(LedgerAppendResult)
+	if !ok {
+		t.Fatalf("success result = %T, want LedgerAppendResult", tr.Result)
+	}
+	if out.Status != string(ledger.StatusOpen) || out.Summary != "crew scheduled" || out.ID == 0 {
+		t.Errorf("result = %+v, want full set_status echo (status/summary/id)", out)
+	}
+	if _, found, err := st.GetState(context.Background(), "eve", "acme-roof"); err != nil || !found {
+		t.Fatalf("state row expected for non-voice set_status (found=%v err=%v)", found, err)
+	}
+}
+
+// (5) the gate must not regress arg handling on allowed paths: after a
+//
+//	REFUSED set_status attempt (zero rows), the same caller's plain
+//	re-append with resolves_id still passes through untouched.
+func TestLedgerAppendExecute_RefusalDoesNotCorruptArgHandling(t *testing.T) {
+	st := ledgerTestStore(t)
+	tool := NewLedgerAppendTool(st, slog.New(slog.DiscardHandler))
+	ctx := voiceCallerCtx("eve", callerid.Info{Number: "+15550003333"})
+
+	// Seed a commitment (plain append — message lane allows it).
+	if _, err := tool.Execute(ctx, map[string]any{
+		"kind":    "commitment",
+		"subject": "acme-roof",
+		"payload": map[string]any{"owe": "call back"},
+	}); err != nil {
+		t.Fatalf("seed Execute: %v", err)
+	}
+	rows, err := st.QueryLog(context.Background(), ledger.LogQuery{EmployeeID: "eve"})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("want 1 seed row, got %d (err %v)", len(rows), err)
+	}
+	targetID := rows[0].ID
+
+	// Resolution WITH set_status from the stranger -> refused, still 1 row.
+	res, err := tool.Execute(ctx, map[string]any{
+		"kind":        "resolution",
+		"subject":     "acme-roof",
+		"payload":     map[string]any{"sent": "callback"},
+		"resolves_id": float64(targetID),
+		"set_status":  "done",
+		"summary":     "callback made",
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if tr, ok := res.(*tools.ToolResult); !ok || tr.Success {
+		t.Fatalf("stranger resolution+set_status must refuse: %+v", res)
+	}
+	rows, _ = st.QueryLog(context.Background(), ledger.LogQuery{EmployeeID: "eve"})
+	if len(rows) != 1 {
+		t.Fatalf("refusal must leave exactly the seed row, got %d", len(rows))
+	}
+
+	// Re-append WITHOUT set_status -> succeeds, resolves_id passthrough intact.
+	res, err = tool.Execute(ctx, map[string]any{
+		"kind":        "resolution",
+		"subject":     "acme-roof",
+		"payload":     map[string]any{"sent": "callback"},
+		"resolves_id": float64(targetID),
+	})
+	if err != nil {
+		t.Fatalf("Execute re-append: %v", err)
+	}
+	tr, ok := res.(*tools.ToolResult)
+	if !ok || !tr.Success {
+		t.Fatalf("plain re-append must succeed: %+v", res)
+	}
+	rows, err = st.QueryLog(context.Background(), ledger.LogQuery{EmployeeID: "eve"})
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("want 2 rows after re-append, got %d (err %v)", len(rows), err)
+	}
+	if rows[1].Resolves != targetID {
+		t.Errorf("Resolves = %d, want numeric passthrough %d", rows[1].Resolves, targetID)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(rows[1].Payload, &got); err != nil {
+		t.Fatalf("payload not stored verbatim JSON: %v", err)
+	}
+	if got["sent"] != "callback" {
+		t.Errorf("payload = %v, want sent=callback", got)
+	}
 }
 
 // --- §1 matrix: registration smoke --------------------------------------
