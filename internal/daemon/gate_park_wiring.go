@@ -273,6 +273,14 @@ func (c *Components) StartGateParkPump(ctx context.Context) {
 	subRejected := c.msgBus.Subscribe("gate-release-pump", "plan.rejected")
 	subCancelled := c.msgBus.Subscribe("gate-release-pump", "plan.cancelled")
 	go func() { c.pumpGateReleases(ctx, subRejected, subCancelled) }()
+	// C-A2 (tree 20261110 leaf 02): opt-in queue park backend for the
+	// gate parker — wired here (not in wireGateParker) because the job
+	// queue only exists after NewComponents; flag off returns nil and
+	// this is a no-op (byte-identical sqlite path). Before Start: the
+	// re-arm + Arm hook fire inside Turns().Start below.
+	if be := c.parkQueueBackend(agent.ParkKindGate, agent.ParkOwnerGate); be != nil {
+		c.GateParker.Turns().SetBackend(be)
+	}
 	c.GateParker.Turns().Start(ctx)
 	// Audit HITL-1: arm the goal-loop human-approval gate seams (park +
 	// resume) over the SAME parker — the goal-kind branch of the checkpoint

@@ -174,11 +174,15 @@ type BudgetResumeWatcher struct {
 	pollInterval time.Duration
 
 	// Wiring-time fields (installed once before Start, like the TurnParker's
-	// parkEventBus/parkPersistence — read without the mutex).
+	// parkEventBus/parkPersistence — read without the mutex afterwards).
 	parkEventBus     parkEventBus
 	parkPersistence  ParkPersistence
 	parkKind         ParkKind
 	persistenceOwner string
+	// backend, when set via SetParkBackend (tree 20261110 leaf 02,
+	// [parking] queue_backend), REPLACES parkPersistence for all storage
+	// traffic (C-A1 contract) — the sqlite store stays empty.
+	backend parkBackend
 
 	mu         sync.Mutex
 	parked     []ParkedTurn
@@ -330,6 +334,18 @@ func (w *BudgetResumeWatcher) SetParkPersistence(store ParkPersistence, kind Par
 	w.parkKind = kind
 }
 
+// SetParkBackend installs the C-A1 backend seam (tree 20261110 leaf 02)
+// on the budget watcher's own persistence path: with a backend set it
+// REPLACES parkPersistence for Save/Delete/Load (C-A1 contract — the
+// sqlite store stays empty and only derives keys). Wiring-time setter:
+// call once before Start. Nil-guarded per repo convention.
+func (w *BudgetResumeWatcher) SetParkBackend(b parkBackend) {
+	if w == nil || b == nil {
+		return
+	}
+	w.backend = b
+}
+
 // SetPersistenceOwner installs the C-K1 parker identity for budget parks
 // (daemon wiring: ParkOwnerBudget = "budget"). Every persisted row is
 // stamped with it and the restart re-arm loads ONLY this owner's rows, so
@@ -369,7 +385,7 @@ func (w *BudgetResumeWatcher) budgetParkKey(turn ParkedTurn) string {
 // is logged and the turn stays parked in memory only. Returns the key the
 // row was saved under ("" when nothing was written, so unpersist no-ops).
 func (w *BudgetResumeWatcher) persistPark(turn ParkedTurn) string {
-	if w.parkPersistence == nil {
+	if w.backend == nil && w.parkPersistence == nil {
 		return ""
 	}
 	rec, err := budgetTurnToRecord(turn, w.persistenceOwner)
@@ -383,6 +399,28 @@ func (w *BudgetResumeWatcher) persistPark(turn ParkedTurn) string {
 	key := w.budgetParkKey(turn)
 	ctx, cancel := context.WithTimeout(context.Background(), parkPersistTimeout)
 	defer cancel()
+	if w.backend != nil {
+		// C-A1 seam (tree 20261110 leaf 02): the backend REPLACES the
+		// store path — the sqlite row is never written in backend mode.
+		// The queue backend implements keyedParkBackend, so the budget
+		// park key survives the Save boundary; a plain-only backend
+		// falls back to Save (idempotent-resurrection contract, same
+		// posture as the TurnParker's persistPark).
+		var err error
+		if kb, ok := w.backend.(keyedParkBackend); ok {
+			err = kb.SaveKeyed(ctx, w.parkKind, key, rec)
+		} else {
+			err = w.backend.Save(ctx, rec)
+		}
+		if err != nil {
+			w.logger.Warn("budget park backend: save failed — turn parked in memory only",
+				"kind", string(w.parkKind),
+				"session_id", turn.SessionID,
+				"error", err,
+			)
+		}
+		return key
+	}
 	if err := w.parkPersistence.Save(ctx, w.parkKind, key, rec); err != nil {
 		w.logger.Warn("budget park persistence: save failed — turn parked in memory only",
 			"kind", string(w.parkKind),
@@ -396,11 +434,20 @@ func (w *BudgetResumeWatcher) persistPark(turn ParkedTurn) string {
 // unpersistPark removes a turn's row. Called on resume BEFORE the callback
 // (at-most-once resume — the same contract as the TurnParker). Best-effort.
 func (w *BudgetResumeWatcher) unpersistPark(key string) {
-	if w.parkPersistence == nil || key == "" {
+	if (w.backend == nil && w.parkPersistence == nil) || key == "" {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), parkPersistTimeout)
 	defer cancel()
+	if w.backend != nil {
+		if err := w.backend.Delete(ctx, w.parkKind, key); err != nil {
+			w.logger.Warn("budget park backend: delete failed — turn may re-arm on next boot",
+				"kind", string(w.parkKind),
+				"error", err,
+			)
+		}
+		return
+	}
 	if err := w.parkPersistence.Delete(ctx, w.parkKind, key); err != nil {
 		w.logger.Warn("budget park persistence: delete failed — turn may re-arm on next boot",
 			"kind", string(w.parkKind),
@@ -414,20 +461,30 @@ func (w *BudgetResumeWatcher) unpersistPark(key string) {
 // Start. Load-best-effort: a store failure logs and leaves the queue empty;
 // expired rows are pruned by the store itself.
 func (w *BudgetResumeWatcher) reArm(ctx context.Context) {
-	if w.parkPersistence == nil {
+	if w.backend == nil && w.parkPersistence == nil {
 		return
 	}
 	now := time.Now()
 	var records []ParkedTurnRecord
 	var keys []string
 	var err error
-	if w.persistenceOwner != "" {
+	switch {
+	case w.backend != nil:
+		// C-A1 seam (tree 20261110 leaf 02): loads go to the backend
+		// ONLY. A keyed backend (the queue backend) keeps the budget
+		// park keys so drain deletes resolve exactly the re-armed rows.
+		if kb, ok := w.backend.(keyedParkBackend); ok {
+			records, keys, err = kb.LoadOwnedKeyed(ctx, w.parkKind, w.persistenceOwner, now)
+		} else {
+			records, err = w.backend.LoadOwned(ctx, w.parkKind, w.persistenceOwner)
+		}
+	case w.persistenceOwner != "":
 		if osp, ok := w.parkPersistence.(OwnerScopedPersistence); ok {
 			records, keys, err = osp.LoadOwned(ctx, w.parkKind, w.persistenceOwner, now)
 		} else {
 			records, keys, err = w.parkPersistence.Load(ctx, w.parkKind, now)
 		}
-	} else {
+	default:
 		records, keys, err = w.parkPersistence.Load(ctx, w.parkKind, now)
 	}
 	if err != nil {

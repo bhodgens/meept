@@ -689,6 +689,17 @@
     "max_retries": 3,
   },
 
+  // Parked-turn persistence.
+  "parking": {
+    // drift: commented template block; absent from installed homes by
+    // design (queue_backend defaults false = sqlite parks.db path).
+    // Uncomment to persist quota/throttle/gate/episode parks as
+    // "parked_turn" queue jobs (wake = next_retry_at, owner =
+    // claimed_by) instead of parks.db (tree 20261110-parked-turns-as-
+    // jobs; the old path stays until the flag ships).
+    // "queue_backend": true,
+  },
+
   // Worker pool
   "workers": {
     "pool_size": 4,

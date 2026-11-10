@@ -145,6 +145,22 @@ type TurnParker struct {
 	// (legacy kind-only contract preserved for unwired/test parkers).
 	// Installed at wiring time like the fields above.
 	persistenceOwner string
+	// backend, when set via SetBackend, REPLACES the store path for all
+	// persistence traffic (C-A1 seam, tree 20261110-parked-turns-as-jobs
+	// leaf 01): Park saves, drain deletes, re-arm loads and the Start Arm
+	// hook all go to the backend ONLY — the parkPersistence store then
+	// merely derives park keys and stays byte-identical empty. Nil (the
+	// default, and after SetBackend(nil)) keeps the pre-seam store path
+	// byte-identically. Wiring-time setter like the fields above.
+	//
+	// Backend mode also switches drainDue's due-check to the REAL clock:
+	// a backend prunes/wakes on its own clock (C-A1's LoadOwned carries no
+	// now param, TestParkBackendSeamWrapped pins it), so the parker's
+	// injected test clock cannot gate backend-mode drains. The no-backend
+	// path keeps reading nowFunc (existing frozen gates depend on it).
+	// MaxAttempts give-up logic stays in the parker either way — a backend
+	// only stores rows (gate pin M-4-park, leaf 02).
+	backend parkBackend
 	// parkKeyOverride, when set, derives a record's persistence key
 	// (dedup identity) instead of the chat-side default. Episode wiring
 	// uses it so a re-parked episode overwrites its own row (the
@@ -266,6 +282,12 @@ func (p *TurnParker) Start(ctx context.Context) {
 	p.mu.Unlock()
 
 	p.reArm(ctx)
+	if p.backend != nil {
+		// C-A1: the backend starts its own drain/claim loop at Start
+		// (no-op for the sqlite wrapper — the parker's poller owns the
+		// drain there; a queue backend launches its claim loop here).
+		p.backend.Arm(ctx)
+	}
 
 	p.wg.Go(func() {
 		ticker := time.NewTicker(p.pollInterval)
@@ -302,7 +324,7 @@ func (p *TurnParker) Stop() {
 
 	p.wg.Wait()
 	if remaining > 0 {
-		if p.parkPersistence != nil {
+		if p.backend != nil || p.parkPersistence != nil {
 			p.logger.Info("turn parker stopped — parked records persisted for next start",
 				"parked", remaining,
 				"kind", string(p.parkKind),
@@ -490,6 +512,16 @@ func (p *TurnParker) drainDue(ctx context.Context) {
 	p.mu.Lock()
 	resume := p.resumeFunc
 	now := p.now()
+	if p.backend != nil {
+		// Backend mode drains on the REAL clock: the C-A1 seam gives
+		// backends no now param (LoadOwned prunes on the backend's own
+		// clock), so the parker's injected test clock cannot gate
+		// backend-mode due-checks without desynchronising the two
+		// (TestParkBackendSeamWrapped pins this by awaiting drain+Delete
+		// before advancing its fake clock). The no-backend path keeps
+		// reading nowFunc — frozen 20261109 gates depend on it.
+		now = time.Now()
+	}
 	dueIdx := 0
 	for dueIdx < len(p.parked) && !p.parked[dueIdx].ResumeAt.After(now) {
 		dueIdx++
@@ -742,6 +774,24 @@ func (p *TurnParker) SetPersistenceOwner(owner string) {
 	p.persistenceOwner = owner
 }
 
+// SetBackend installs the C-A1 parkBackend seam (tree 20261110-parked-
+// turns-as-jobs leaf 01). NON-NIL: every persistence call site routes to
+// the backend ONLY — Park's save (via keyedParkBackend.SaveKeyed when the
+// backend implements it, else plain Save), drain's delete, re-arm's load,
+// and an Arm(ctx) at Start. The store wired by SetParkPersistence is then
+// consulted only to derive park keys (parkKeyForNewRecord) and stays
+// byte-identical empty (TestParkBackendSeamWrapped pins "backend REPLACES
+// the store path, not mirrors"). NIL: nil-safe no-op — the current default
+// sqlite store path keeps running byte-identically (the baseline pins in
+// the gate: no SetBackend call AND SetBackend(nil) both leave the store
+// traffic unchanged). Wiring-time setter, like SetParkPersistence.
+func (p *TurnParker) SetBackend(b parkBackend) {
+	if p == nil || b == nil {
+		return
+	}
+	p.backend = b
+}
+
 // SetParkKey installs a per-record persistence-key override (episode
 // wiring: the H4 employee+phase+trigger identity derived from
 // goalTurnPayload). Nil disables the override (chat-side default keys).
@@ -764,14 +814,27 @@ func (p *TurnParker) SetParkKey(keyFn func(rec ParkedTurnRecord) string) {
 // in-memory queue empty (the daemon still runs; the records are retried on
 // the next boot).
 func (p *TurnParker) reArm(ctx context.Context) {
-	if p.parkPersistence == nil {
+	if p.backend == nil && p.parkPersistence == nil {
 		return
 	}
 	now := p.now()
 	var records []ParkedTurnRecord
 	var keys []string
 	var err error
-	if p.persistenceOwner != "" {
+	switch {
+	case p.backend != nil:
+		// C-A1 seam: re-arm loads through the backend ONLY. A keyed
+		// backend keeps the parker's persistence keys (byte-identical
+		// delete/re-arm identity with the store path); a plain backend
+		// returns records without keys — drain then cannot Delete them
+		// (empty keys skip), so such backends must be idempotent on
+		// resurrection themselves (leaf 02's queue backend owns that).
+		if kb, ok := p.backend.(keyedParkBackend); ok {
+			records, keys, err = kb.LoadOwnedKeyed(ctx, p.parkKind, p.persistenceOwner, now)
+		} else {
+			records, err = p.backend.LoadOwned(ctx, p.parkKind, p.persistenceOwner)
+		}
+	case p.persistenceOwner != "":
 		if osp, ok := p.parkPersistence.(OwnerScopedPersistence); ok {
 			records, keys, err = osp.LoadOwned(ctx, p.parkKind, p.persistenceOwner, now)
 		} else {
@@ -780,7 +843,7 @@ func (p *TurnParker) reArm(ctx context.Context) {
 			// a later store upgrade re-partitions correctly.
 			records, keys, err = p.parkPersistence.Load(ctx, p.parkKind, now)
 		}
-	} else {
+	default:
 		records, keys, err = p.parkPersistence.Load(ctx, p.parkKind, now)
 	}
 	if err != nil {
@@ -813,10 +876,32 @@ func (p *TurnParker) reArm(ctx context.Context) {
 	p.drainDue(ctx)
 }
 
-// persistPark mirrors an accepted park to the store. Best-effort: a
-// failure is logged and the turn stays parked in memory only (matching
-// the legacy no-persistence behaviour for that record).
+// persistPark mirrors an accepted park to the store or, with the C-A1 seam
+// wired (SetBackend), to the backend ONLY — the store is never touched in
+// backend mode. Best-effort: a failure is logged and the turn stays parked
+// in memory only (matching the legacy no-persistence behaviour for that
+// record).
 func (p *TurnParker) persistPark(key string, rec ParkedTurnRecord) {
+	if p.backend != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), parkPersistTimeout)
+		defer cancel()
+		var err error
+		if kb, ok := p.backend.(keyedParkBackend); ok && key != "" {
+			err = kb.SaveKeyed(ctx, p.parkKind, key, rec)
+		} else {
+			// Plain C-A1 Save carries no key: the backend derives its own
+			// row identity (sqlite wrapper: the chat-style default key).
+			err = p.backend.Save(ctx, rec)
+		}
+		if err != nil {
+			p.logger.Warn("park backend: save failed — record parked in memory only",
+				"kind", string(p.parkKind),
+				"session_id", rec.SessionID,
+				"error", err,
+			)
+		}
+		return
+	}
 	if p.parkPersistence == nil || key == "" {
 		return
 	}
@@ -836,6 +921,20 @@ func (p *TurnParker) persistPark(key string, rec ParkedTurnRecord) {
 // post-restart drops. Best-effort: a failure is logged and never blocks
 // the drain loop.
 func (p *TurnParker) unpersistPark(key string) {
+	if p.backend != nil {
+		if key == "" {
+			return // no identity to delete (memory-only park, no store wired)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), parkPersistTimeout)
+		defer cancel()
+		if err := p.backend.Delete(ctx, p.parkKind, key); err != nil {
+			p.logger.Warn("park backend: delete failed — record may re-arm on next boot",
+				"kind", string(p.parkKind),
+				"error", err,
+			)
+		}
+		return
+	}
 	if p.parkPersistence == nil || key == "" {
 		return
 	}

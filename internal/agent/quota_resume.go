@@ -363,6 +363,19 @@ func (w *QuotaResumeWatcher) SetParkPersistence(store ParkPersistence) {
 	w.turns.SetParkPersistence(store, ParkKindChat)
 }
 
+// SetParkBackend forwards the C-A1 backend seam (tree 20261110-parked-
+// turns-as-jobs leaf 02) to the inner TurnParker: with parking.
+// queue_backend enabled the daemon installs a queueParkBackend so quota
+// parks persist as parked_turn queue jobs instead of parks.db rows.
+// Nil-guarded per repo setter convention; wiring-time — call before
+// Start (re-arm + Arm happen in Start).
+func (w *QuotaResumeWatcher) SetParkBackend(b parkBackend) {
+	if w == nil || b == nil {
+		return
+	}
+	w.turns.SetBackend(b)
+}
+
 // SetPersistenceOwner forwards the C-K1 parker identity (tree 04 leaf 01)
 // to the inner TurnParker: persisted quota rows are stamped with owner
 // (default wiring: ParkOwnerQuotaWatcher = "quota-watcher") and the
