@@ -6922,6 +6922,16 @@ func (c *Components) stopComponents(ctx context.Context) error {
 		c.Logger.Info("Quota notifier stopped")
 	}
 
+	// Stop the secrets egress proxy listener (deadcode wave-3: Stop had
+	// zero callers). The proxy's own goroutine is lifecycle-ctx bound, but
+	// Stop() is the graceful path — it drains in-flight requests within
+	// the shutdown grace before the process tears down. Nil on every
+	// proxy-disabled boot (wireSecretsProxy leaves it unset).
+	if c.SecretsProxy != nil {
+		c.SecretsProxy.Stop()
+		c.Logger.Info("Secrets egress proxy stopped")
+	}
+
 	// Stop the gate checkpoint parker (hitl-notifications leaf 02):
 	// surviving gate rows stay in the park store and re-arm on the next
 	// Start (Stop only logs the count). Nil on checkpointing-off boots.
