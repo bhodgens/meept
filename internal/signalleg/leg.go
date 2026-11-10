@@ -139,6 +139,22 @@ type Deps struct {
 	// OnCallStart call). A build failure is fail-soft: the call binds
 	// with an empty brief, never blocks the call.
 	DayBriefBuilder func(ctx context.Context, employeeID, number string) (voice.DayBrief, error)
+	// FreshSession resolves the per-call fresh-session flag for the
+	// binding (audit 2026-11-09 finding 5, C-V2 — phone/local parity):
+	// true makes Binding.OnCallStart create a NEW per-call session
+	// instead of reusing the shared (target, employee) one. The daemon
+	// wiring resolves voice.FreshSessionFor over the live config
+	// (voice.fresh_session_per_call + the employee_leg override), the
+	// same closure shape as the local leg (local.go Deps.FreshSession,
+	// voice_wiring.go).
+	//
+	// Degrade posture DIFFERS from the local leg on purpose (gate-
+	// pinned, leg_gate_test.go T5): a nil seam resolves fresh=true —
+	// the signal leg's contract posture is one session per call. Wire
+	// the seam to honor the config's false default (the daemon always
+	// does); an unwired leg never silently shares one session across
+	// every call to the same contact.
+	FreshSession func(employeeID string) bool
 	// MsgPerMinute is [signal].msg_per_minute (the signal_msg throttle;
 	// 0 = msgchannel's default clamp of 3/min).
 	MsgPerMinute int
@@ -339,10 +355,25 @@ func (l *Leg) bindCall(st *callState) {
 			brief = b
 		}
 	}
-	if _, err := vb.OnCallStart(ctx, st.ccid, st.target, st.employee, st.direction, brief); err != nil {
+	if _, err := vb.OnCallStart(ctx, st.ccid, st.target, st.employee, st.direction, brief,
+		l.freshSessionFor(st.employee)); err != nil {
 		l.log.Warn("signalleg: binding OnCallStart failed (call continues unbound)",
 			"ccid", st.ccid, "err", err)
 	}
+}
+
+// freshSessionFor resolves the fresh-session flag for one call
+// (finding 5, phone/local parity — mirrors local.go's Deps.FreshSession
+// use at its OnCallStart). The seam-false case honours the resolved
+// config; the NIL case defaults to TRUE on this leg (gate-pinned,
+// leg_gate_test.go T5): an unwired signal leg keeps the one-session-
+// per-call contract posture instead of silently sharing one session
+// across every call to the same contact.
+func (l *Leg) freshSessionFor(employeeID string) bool {
+	if l.deps.FreshSession == nil {
+		return true
+	}
+	return l.deps.FreshSession(employeeID)
 }
 
 // isNilBinding guards the typed-nil trap on the capability-viewed
@@ -392,7 +423,17 @@ func OutcomeByReason(reason string) voice.Outcome {
 // contact chain carried (the talk-loop greeting serves it once the
 // wiring arms the loop on setup; the leg itself never says before
 // setup).
-func (l *Leg) Place(ctx context.Context, employeeID, targetUUID, firstLine string) (string, error) {
+//
+// The optional requestIDs[0] is the IDEMPOTENCY identity for the
+// effects reservation (C-V2, finding 6): the phone dialer's shape
+// (employee, target, request_id) — a same-request retry reuses the
+// ledger receipt instead of reserving a fresh key. Production callers
+// MUST pass a fresh request id per user request (the contact-chain
+// attempt does); an omitted request id keys the reservation over
+// (employee, target) alone, so repeated un-labelled dials to the same
+// target collide on one receipt. ccid stays the CALL identity either
+// way — never conflated with the request id (AGENTS.md).
+func (l *Leg) Place(ctx context.Context, employeeID, targetUUID, firstLine string, requestIDs ...string) (string, error) {
 	_ = firstLine // spoken by the talk loop's greeting seam, not here
 	// -- 1. enabled gate --
 	if !l.enabled() {
@@ -414,6 +455,14 @@ func (l *Leg) Place(ctx context.Context, employeeID, targetUUID, firstLine strin
 	// "signal:<uuid>" (registry stores it verbatim for leg "signal") --
 	ccid := id.Generate("signal-")
 	target := "signal:" + targetUUID
+	// -- 4b. idempotency identity (C-V2, finding 6): the caller's
+	// request id when supplied; empty keys the reservation over
+	// (employee, target) alone. ccid stays the CALL identity (never
+	// part of the ledger key). --
+	requestID := ""
+	if len(requestIDs) > 0 {
+		requestID = requestIDs[0]
+	}
 	// -- 5. capacity (shared rules via the registry; ErrBusy /
 	// ErrDuplicateTarget surface unchanged) --
 	if _, err := l.deps.Registry.AcquireLeg(ccid, employeeID, target, voice.LegSignal); err != nil {
@@ -426,10 +475,11 @@ func (l *Leg) Place(ctx context.Context, employeeID, targetUUID, firstLine strin
 		return "", fmt.Errorf("signalleg: track outbound: %w", err)
 	}
 	// -- 7. effects reservation (phone-outbound posture: BEFORE
-	// StartCall; a retry never rings twice). Nil seam degrades. --
+	// StartCall; a retry of the same request never rings twice —
+	// C-V2). Nil seam degrades. --
 	var key string
 	if l.deps.Effects != nil {
-		key = effectKey(employeeID, target, ccid)
+		key = effectKey(employeeID, target, requestID)
 		granted, err := l.deps.Effects.Reserve(ctx, key, employeeID)
 		if err != nil {
 			l.deps.Registry.Release(ccid)
@@ -448,6 +498,11 @@ func (l *Leg) Place(ctx context.Context, employeeID, targetUUID, firstLine strin
 			"target":      target,
 			"employee_id": employeeID,
 			"channel":     "signal_voice",
+		}
+		if requestID != "" {
+			// Phone-dialer parity (C-V2): the attempt stays
+			// attributable to the request whose retry it is.
+			row["request_id"] = requestID
 		}
 		if err := l.deps.Audit.WriteAudit(ctx, row); err != nil {
 			l.abandonOutbound(ctx, key, employeeID, ccid, fmt.Sprintf("audit: %v", err))
@@ -686,9 +741,13 @@ func isSignalCcid(ccid string) bool {
 const abandonTimeout = 5 * time.Second
 
 // effectKey builds the outbound reservation key over the same parts the
-// phone dialer hashes (employee_id, target, request id). The daemon
-// wiring injects the seam and folds both sides through effects.EffectKey
-// so ledger rows collide on identical parts; this package never imports
+// phone dialer hashes (employee_id, target, request id) — C-V2: a
+// retried REQUEST reuses the receipt (one ring), never a fresh key per
+// Place attempt. requestID may be empty (an unlabelled caller): the key
+// then spans (employee, target). ccid is deliberately NOT a part — it
+// is the call identity, not the idempotency identity (AGENTS.md). The
+// daemon wiring folds both sides through effects.EffectKey so ledger
+// rows collide on identical parts; this package never imports
 // internal/effects.
 func effectKey(employeeID, target, requestID string) string {
 	return employeeID + "\x1f" + target + "\x1f" + requestID

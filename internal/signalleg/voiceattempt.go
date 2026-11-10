@@ -5,6 +5,7 @@ import (
 
 	"github.com/caimlas/meept/internal/contact"
 	"github.com/caimlas/meept/internal/voice"
+	"github.com/caimlas/meept/pkg/id"
 )
 
 // VoiceAttempt is the signal_voice contact.ChannelAttempt (leaf 02):
@@ -32,11 +33,17 @@ func (a *signalVoiceAttempt) Channel() contact.Channel { return contact.ChannelS
 // Attempt places the call and classifies the terminal outcome. The
 // firstLine is the chain's message (the wiring serves it as the talk
 // loop's greeting line - the only sanctioned pre-supervisor speech).
+// request_id: a fresh per-attempt identity (the telnyx voice attempt's
+// shape, voice/voiceattempt.go) — the chain's repeated outreach to one
+// contact must never collide on a completed receipt, while a caller
+// WITH retry context passes the SAME id through Place to reuse it
+// (C-V2).
 func (a *signalVoiceAttempt) Attempt(ctx context.Context, rec contact.Record, message string) (string, error) {
 	if a == nil || a.leg == nil {
 		return string(voice.OutcomeFailed), errSignalAttemptUnwired
 	}
-	ccid, err := a.leg.Place(ctx, a.leg.deps.EmployeeID, rec.SignalUUID, message)
+	requestID := "contact-" + id.Generate("sv")
+	ccid, err := a.leg.Place(ctx, a.leg.deps.EmployeeID, rec.SignalUUID, message, requestID)
 	if err != nil {
 		// Place refusals (disabled, allowlist, capacity) are honest
 		// per-attempt failures: the chain advances.

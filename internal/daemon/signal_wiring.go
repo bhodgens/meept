@@ -166,7 +166,16 @@ func WireSignalLeg(ctx context.Context, cfg config.SignalConfig, deps WireVoiceD
 		Audit:           audit,
 		EmployeeID:      deps.Config.Voice.DefaultEmployee,
 		DayBriefBuilder: deps.DayBriefBuilder,
-		Logger:          logger.With("component", "signalleg"),
+		// Fresh-session flag (audit 2026-11-09 finding 5, signal-leg
+		// parity): resolve voice.fresh_session_per_call + the
+		// employee_leg override once per call, daemon-side, exactly
+		// like the local leg (voice_wiring.go LocalDeps.FreshSession).
+		// Without this closure the leg's nil-seam posture (fresh=true)
+		// would ignore the global false default.
+		FreshSession: func(employeeID string) bool {
+			return voice.FreshSessionFor(deps.Config.Voice, employeeID)
+		},
+		Logger: logger.With("component", "signalleg"),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("signal wiring: leg construction: %w", err)
