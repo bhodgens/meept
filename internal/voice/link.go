@@ -66,6 +66,7 @@ import (
 	"log/slog"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/caimlas/meept/pkg/id"
@@ -351,19 +352,36 @@ func (m *LinkManager) closeConns(conns [4]net.Conn) {
 // the pair Close breaks the copy - the expected teardown path, logged at
 // debug only), or ctx cancel (which closes both conns to unblock the
 // copy, never holding a lock across that I/O).
+//
+// Telemetry (link-72a04aebac963cdb post-mortem: a half-dead splice was
+// only inferable from a +0 ms cadence summary): every pump logs its
+// FIRST byte at INFO (the moment a direction demonstrably carries PCM)
+// and its end with the total bytes copied, so the next live link run
+// self-explains which direction died and when.
 func (m *LinkManager) pumpStream(ctx context.Context, src, dst net.Conn, linkID, direction string) {
+	var bytes atomic.Uint64
+	var firstOnce sync.Once
+	started := time.Now()
+	cs := &countingSrc{src: src, n: &bytes, onFirst: func() {
+		firstOnce.Do(func() {
+			m.log.Info("voice: link pump first byte", "link_id", linkID,
+				"dir", direction, "after_ms", time.Since(started).Milliseconds())
+		})
+	}}
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_, err := io.Copy(dst, src)
+		_, err := io.Copy(dst, cs)
+		copied := bytes.Load()
 		if err != nil && ctx.Err() == nil {
 			// A real mid-stream break while the link is supposed to be
 			// live. Copy stops either way; the legs stay up (their own
 			// reapers bound the wreckage) but this is loud enough to
 			// catch in a harness run.
-			m.log.Warn("voice: link pump ended with error", "link_id", linkID, "dir", direction, "err", err)
+			m.log.Warn("voice: link pump ended with error", "link_id", linkID, "dir", direction,
+				"bytes", copied, "err", err)
 		} else {
-			m.log.Debug("voice: link pump ended", "link_id", linkID, "dir", direction)
+			m.log.Info("voice: link pump ended", "link_id", linkID, "dir", direction, "bytes", copied)
 		}
 	}()
 	select {
@@ -373,6 +391,24 @@ func (m *LinkManager) pumpStream(ctx context.Context, src, dst net.Conn, linkID,
 		_ = dst.Close()
 		<-done
 	}
+	_ = started
+}
+
+// countingSrc is an io.Reader wrapper that counts bytes and fires onFirst
+// the first time it hands out a non-empty read.
+type countingSrc struct {
+	src     io.Reader
+	n       *atomic.Uint64
+	onFirst func()
+}
+
+func (c *countingSrc) Read(p []byte) (int, error) {
+	n, err := c.src.Read(p)
+	if n > 0 {
+		c.n.Add(uint64(n))
+		c.onFirst()
+	}
+	return n, err
 }
 
 // Close ends both calls and kills the pumps. Idempotent (a second Close

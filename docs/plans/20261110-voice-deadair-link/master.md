@@ -87,5 +87,5 @@ D. TWO-AGENT VOICE LINK: a test mode where two employees converse over
 | 01 | PENDING | |
 | 02 | PENDING | |
 | 03 | PENDING | |
-| 04 | PENDING | |
+| 04 | DONE (providers hygiene + call-id ctx stamp moved voicechild-side) | |
 | 05 | PENDING | |
