@@ -104,7 +104,7 @@ func TestCallLegPlacePin(t *testing.T) {
 		pad := NewPhoneAdapter(d, mgr)
 		req := PlaceRequest{
 			EmployeeID: "emp-gate-phone",
-			Target:     "+155****0001",
+			Target:     "+15551230001",
 			Leg:        LegPhone,
 			RequestID:  "req-gate-place-1",
 		}
@@ -217,7 +217,7 @@ func TestCallLegHangupIdempotentPin(t *testing.T) {
 
 		pad := NewPhoneAdapter(d, mgr)
 		h, err := pad.Place(ctx, PlaceRequest{
-			EmployeeID: "emp-gate-hup", Target: "+155****0001",
+			EmployeeID: "emp-gate-hup", Target: "+15551230001",
 			Leg: LegPhone, RequestID: "req-gate-hangup-1",
 		})
 		if err != nil {
@@ -278,7 +278,7 @@ func TestCallLegEventsParityAcrossLegs(t *testing.T) {
 	d := NewDialer(dialConfig(), tel, mgr, reg, newTestLedger(t), nil, testLogger())
 	pad := NewPhoneAdapter(d, mgr)
 	ph, err := pad.Place(ctx, PlaceRequest{
-		EmployeeID: "emp-gate-parity", Target: "+155****0001",
+		EmployeeID: "emp-gate-parity", Target: "+15551230001",
 		Leg: LegPhone, RequestID: "req-gate-events-1",
 	})
 	if err != nil {
