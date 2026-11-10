@@ -1,12 +1,12 @@
 package bot
 
 import (
-	"strings"
-	"encoding/hex"
-	"crypto/sha256"
-	"slices"
-	"fmt"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"slices"
+	"strings"
 
 	"log/slog"
 	"sync"
@@ -15,7 +15,6 @@ import (
 	"github.com/caimlas/meept/internal/comm/http"
 	"github.com/caimlas/meept/internal/comm/telegram"
 )
-
 
 // NotificationTriggerType identifies the kind of notification.
 type NotificationTriggerType string
@@ -38,6 +37,32 @@ type NotificationBotConfig struct {
 	TelegramPollTimeout int                 `json:"telegram_poll_timeout,omitempty"`
 }
 
+// NewNotificationBot constructs a NotificationBot from the given config.
+// It subscribes to the emitter (nil emitter = passive mode: Start logs and
+// returns, no goroutine) and fans budget/security/session-designation
+// notifications out to the configured Telegram chat IDs. Production
+// construction site: internal/daemon/notification_bot_wiring.go
+// (wireNotificationBot, [notifications].enabled gate).
+func NewNotificationBot(cfg NotificationBotConfig, emitter EventEmitterAdapter, logger *slog.Logger) *NotificationBot {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &NotificationBot{
+		config:  cfg,
+		emitter: emitter,
+		logger:  logger,
+	}
+}
+
+// SetTelegram attaches the telegram client used for outbound
+// notification delivery. Nil-safe (the bot simply keeps logging-only
+// delivery); call before Start.
+func (nb *NotificationBot) SetTelegram(tb *telegram.Bot) {
+	if nb == nil {
+		return
+	}
+	nb.telegram = tb
+}
 
 // NotificationBot is a bot type that sends proactive notifications when
 // specific daemon events occur (budget exhausted, security alerts,
@@ -67,21 +92,16 @@ type EventEmitterAdapter interface {
 	Unsubscribe(ch chan *http.NotificationEvent)
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-// Start begins listening for notification events.
+// Start begins listening for notification events. A nil logger falls
+// back to slog.Default (NewNotificationBot guarantees a logger; this
+// guards struct-literal construction in tests).
 func (nb *NotificationBot) Start(ctx context.Context) {
+	if nb == nil {
+		return
+	}
+	if nb.logger == nil {
+		nb.logger = slog.Default()
+	}
 	if nb.emitter == nil {
 		nb.logger.Info("notification bot started (no emitter, passive mode)")
 		return
