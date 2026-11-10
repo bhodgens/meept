@@ -28,6 +28,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/callerid"
@@ -86,6 +87,26 @@ func ledgerArgInt(args map[string]any, key string) (int64, bool, bool) {
 	}
 }
 
+// parseLedgerDue parses the ledger_append "due" argument per the frozen
+// 02-daystate/01 contract: a full RFC3339 timestamp (RFC3339Nano
+// tolerated) is used as-is; a date-only "YYYY-MM-DD" normalizes to 12:00
+// UTC on that day; anything else is an error the tool turns into a
+// validation refusal.
+func parseLedgerDue(s string) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t, nil
+	}
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		return t, nil
+	}
+	t, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid due %q", s)
+	}
+	// date-only normalized to 12:00 UTC same day (frozen contract).
+	return time.Date(t.Year(), t.Month(), t.Day(), 12, 0, 0, 0, time.UTC), nil
+}
+
 // =========================================================================
 // ledger_append
 // =========================================================================
@@ -111,7 +132,7 @@ func (t *LedgerAppendTool) Name() string { return "ledger_append" }
 func (t *LedgerAppendTool) Category() string { return "platform" }
 
 func (t *LedgerAppendTool) Description() string {
-	return "Append one record to YOUR OWN employee ledger (the append-only memory of what you did, observed, promised, and owe). kind: committal (what was said/promised), action (something done), observation (noted fact, no state implication), commitment (an obligation you owe — opens work), resolution (closes/answers a commitment — pass resolves_id = the commitment's ledger id). subject namespaces the record (e.g. \"acme-roof\"); payload is any JSON object describing the record. Optionally set_status (open|done|cancelled|waiting_on_me|waiting_on_them) plus summary (one-line current truth) to move the subject's state — these two must always travel together, and the transition is rejected if the ledger state machine forbids it. Your identity is stamped automatically; it is never an argument. Returns the new record id."
+	return "Append one record to YOUR OWN employee ledger (the append-only memory of what you did, observed, promised, and owe). kind: committal (what was said/promised), action (something done), observation (noted fact, no state implication), commitment (an obligation you owe — opens work), resolution (closes/answers a commitment — pass resolves_id = the commitment's ledger id). subject namespaces the record (e.g. \"acme-roof\"); payload is any JSON object describing the record. Optionally set_status (open|done|cancelled|waiting_on_me|waiting_on_them) plus summary (one-line current truth) to move the subject's state — these two must always travel together, and the transition is rejected if the ledger state machine forbids it. With set_status you may also pass due: an RFC3339 timestamp or a date (\"2026-11-15\" = 12:00 UTC) deadline for the subject — every state-setting append rewrites it, so a later state change without due clears it. Your identity is stamped automatically; it is never an argument. Returns the new record id."
 }
 
 func (t *LedgerAppendTool) Parameters() llm.FunctionParameters {
@@ -160,6 +181,10 @@ func (t *LedgerAppendTool) Parameters() llm.FunctionParameters {
 				Type:        "string",
 				Description: "One-line current truth for the subject. Only valid together with set_status.",
 			},
+			"due": {
+				Type:        "string",
+				Description: "Optional deadline for the subject, ONLY meaningful together with set_status (the state row carries it). Full RFC3339 timestamp (e.g. \"2026-11-15T17:00:00Z\") is used as-is; a date-only form (\"2026-11-15\") is normalized to 12:00 UTC that day. Every state-setting append rewrites the due — appending a later state change WITHOUT due CLEARS it. Invalid formats are refused.",
+			},
 		},
 		Required: []string{"kind"},
 	}
@@ -173,6 +198,7 @@ type LedgerAppendResult struct {
 	Resolves   int64  `json:"resolves,omitempty"`
 	Status     string `json:"status,omitempty"`
 	Summary    string `json:"summary,omitempty"`
+	Due        string `json:"due,omitempty"`
 	RecordedAt string `json:"recorded_at"`
 }
 
@@ -252,6 +278,23 @@ func (t *LedgerAppendTool) Execute(ctx context.Context, args map[string]any) (an
 	if setStatus != "" {
 		d.SetStatus = ledger.Status(setStatus)
 		d.Summary = summary
+		// due (optional, plan 20261110-situational 02-daystate/01): a
+		// deadline carried only by state-setting appends. Full RFC3339
+		// parses as-is; date-only ("2026-11-15") normalizes to 12:00 UTC
+		// that day (frozen contract); anything else refuses the whole
+		// call — zero rows. Absent/empty due on a state-setting append
+		// means "no deadline" and CLEARS any previously set one.
+		if dueStr := ledgerArgStr(args, "due"); dueStr != "" {
+			due, err := parseLedgerDue(dueStr)
+			if err != nil {
+				return tools.NewErrorResult(fmt.Sprintf(
+					`ledger_append: due must be an RFC3339 timestamp (e.g. "2026-11-15T17:00:00Z") or a date ("2026-11-15", read as 12:00 UTC): %v`, err)), nil
+			}
+			d.Due = due
+		}
+	} else if _, present := args["due"]; present && ledgerArgStr(args, "due") != "" {
+		// Log-only appends have no state row to carry a deadline.
+		return tools.NewErrorResult("ledger_append: due is only valid together with set_status"), nil
 	}
 
 	rec, err := t.store.Append(ctx, d)
@@ -271,6 +314,9 @@ func (t *LedgerAppendTool) Execute(ctx context.Context, args map[string]any) (an
 	if d.SetStatus != "" {
 		out.Status = string(d.SetStatus)
 		out.Summary = d.Summary
+		if !d.Due.IsZero() {
+			out.Due = d.Due.UTC().Format(time.RFC3339)
+		}
 	}
 	return tools.NewSuccessResult(out), nil
 }
@@ -356,13 +402,16 @@ type ledgerRecordView struct {
 	EmployeeID string          `json:"-"` // ctx-stamped scope; never echoed
 }
 
-// ledgerStateView is the wire shape of one ledger_state row.
+// ledgerStateView is the wire shape of one ledger_state row. due is the
+// 02-daystate/01 extension — omitted when the subject has no deadline so
+// pre-extension response shapes stay byte-identical.
 type ledgerStateView struct {
 	Subject   string `json:"subject"`
 	Status    string `json:"status"`
 	Summary   string `json:"summary"`
 	UpdatedAt string `json:"updated_at"`
 	AsOf      int64  `json:"as_of"`
+	Due       string `json:"due,omitempty"`
 }
 
 func (t *LedgerQueryTool) Execute(ctx context.Context, args map[string]any) (any, error) {
@@ -404,13 +453,17 @@ func (t *LedgerQueryTool) Execute(ctx context.Context, args map[string]any) (any
 			return tools.NewErrorResultErr(fmt.Errorf("ledger_query: %w", err)), nil
 		}
 		for _, st := range states {
-			res.Open = append(res.Open, ledgerStateView{
+			view := ledgerStateView{
 				Subject:   st.Subject,
 				Status:    string(st.Status),
 				Summary:   st.Summary,
 				UpdatedAt: st.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 				AsOf:      st.AsOf,
-			})
+			}
+			if !st.Due.IsZero() {
+				view.Due = st.Due.UTC().Format(time.RFC3339)
+			}
+			res.Open = append(res.Open, view)
 			if st.AsOf > res.Head {
 				res.Head = st.AsOf
 			}

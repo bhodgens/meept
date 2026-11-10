@@ -233,6 +233,12 @@ type WireVoiceDeps struct {
 	// displayLookup seam stays unwired and every surface renders the
 	// unknown-caller form.
 	ContactDisplayStore *contact.SQLiteStore
+	// MomentResolver (plan 20261110-situational leaf 01-moment/02): the
+	// per-employee "# Moment" renderer resolver from buildAwareness
+	// (awareness_wiring.go), threaded to the voice turn runner so each
+	// session clone gets the bound employee's renderer before its turn.
+	// Nil (awareness disabled — the default) = the inert D1 posture.
+	MomentResolver func(employeeID string) func() string
 }
 
 // WireVoice constructs the voice stack from cfg. It returns (nil, nil)
@@ -427,17 +433,18 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 	// caller path everywhere, nil-safe).
 	displayLookup := newDisplayLookupSeam(deps.ContactDisplayStore)
 	employee, err := WireVoiceEmployee(VoiceEmployeeDeps{
-		Sessions:      deps.Sessions,
-		LoopManager:   deps.Loops,
-		TemplateLoop:  deps.Template,
-		WorkingDir:    config.MeeptPath("voice"),
-		Bus:           deps.Bus,
-		Employees:     deps.Employees,
-		CallStorePath: filepath.Join(config.MeeptPath("voice"), "calls.db"),
-		LedgerStore:   deps.LedgerStore,
-		DisplayLookup: displayLookup,
-		BriefLLM:      deps.BriefLLM,
-		Logger:        vlog.With("sub", "employee"),
+		Sessions:       deps.Sessions,
+		LoopManager:    deps.Loops,
+		TemplateLoop:   deps.Template,
+		WorkingDir:     config.MeeptPath("voice"),
+		Bus:            deps.Bus,
+		Employees:      deps.Employees,
+		CallStorePath:  filepath.Join(config.MeeptPath("voice"), "calls.db"),
+		LedgerStore:    deps.LedgerStore,
+		DisplayLookup:  displayLookup,
+		BriefLLM:       deps.BriefLLM,
+		MomentResolver: deps.MomentResolver,
+		Logger:         vlog.With("sub", "employee"),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("voice wiring: employee stack: %w", err)

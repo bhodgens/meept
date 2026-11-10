@@ -108,6 +108,12 @@ func finalizeLoadedConfig(cfg *Config) (*Config, error) {
 	// so the integrity-job wiring sees final values.
 	NormalizeLedgerDefaults(&cfg.Ledger)
 
+	// Clamp invalid [awareness] values to defaults (plan
+	// 20261110-situational leaf 01/01: non-positive refresh_minutes ->
+	// 30; Enabled NEVER forced). Load-boundary normalization so the
+	// awareness wiring sees final values.
+	NormalizeAwarenessDefaults(&cfg.Awareness)
+
 	// Clamp llm.tiers to defaults (llm-serving-tiers leaf 01, Contract
 	// C1: enabled + unset max_depth -> DefaultTierPolicyMaxDepth; a
 	// disabled policy stays inert with MaxDepth 0). Load-boundary
@@ -270,6 +276,11 @@ func LoadJSON5Config(path string) (*Config, error) {
 	// Clamp invalid [ledger] values to defaults (leaf 04-ops/01).
 	// Same load-boundary rationale as finalizeLoadedConfig above.
 	NormalizeLedgerDefaults(&cfg.Ledger)
+
+	// Clamp invalid [awareness] values to defaults (plan
+	// 20261110-situational leaf 01/01). Same load-boundary rationale as
+	// finalizeLoadedConfig above.
+	NormalizeAwarenessDefaults(&cfg.Awareness)
 
 	// Clamp llm.tiers to defaults (llm-serving-tiers leaf 01, Contract
 	// C1). Same load-boundary rationale as finalizeLoadedConfig above.

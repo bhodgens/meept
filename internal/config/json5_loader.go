@@ -35,10 +35,13 @@ func LoadJSON5(path string, v any) error {
 	// (found via [skills.evolver] interval in a -c config, 2026-08-29).
 	content = preprocessDurations(content)
 
-	// Standardize JSON5 to JSON
-	stdJSON, err := hujson.Standardize([]byte(content))
+	// Standardize JSON5 to JSON. Bare (unquoted) object keys are JSON5
+	// proper but hujson rejects them, so quote them first — same
+	// tolerance as LoadJSON5Bytes (plan 20261110-situational gate §5
+	// pins LoadJSON5Config parsing bare-keyed tables).
+	stdJSON, err := hujson.Standardize([]byte(quoteBareKeys(content)))
 	if err != nil {
-		return fmt.Errorf("failed to parse JSON5 config %s: %w (hujson accepts comments (// and /* */) and trailing commas; keys must be quoted; check for syntax errors near the reported position)", path, err)
+		return fmt.Errorf("failed to parse JSON5 config %s: %w (hujson accepts comments (// and /* */) and trailing commas; check for syntax errors near the reported position)", path, err)
 	}
 
 	// Promote a top-level "groups" alias into security.groups (agent-groups
@@ -506,10 +509,9 @@ func extractTypeMismatch(errMsg string) string {
 // shipped template format) and fall back to legacy TOML without re-reading
 // the file.
 //
-// Unlike LoadJSON5, this path also quotes JSON5 bare (unquoted) object
-// keys before standardizing: JSON5 proper allows them, hujson does not.
-// Bare-key tolerance lives here and not in LoadJSON5 so existing callers
-// keep their exact strictness; meept.json5 itself quotes every key.
+// Unlike LoadJSON5's file path, this variant predates the file path's
+// bare-key adoption; both now tolerate unquoted JSON5 keys via
+// quoteBareKeys.
 func LoadJSON5Bytes(data []byte, v any) error {
 	content := preprocessDurations(string(data))
 	stdJSON, err := hujson.Standardize([]byte(quoteBareKeys(content)))
