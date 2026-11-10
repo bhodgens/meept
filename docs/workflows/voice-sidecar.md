@@ -234,16 +234,72 @@ Flow:
 
 ## Inbound answer
 
-1. Webhook `call.initiated`, signature verified. `from`/`to` arrive flat or
-   as `{"phone_number": ...}`; parse both shapes.
-2. Caller must be in `voice.allowed_numbers`. An unknown number is not
-   answered.
-3. `AnswerCall`, spawn or attach the call session, then on `call.answered`
+As shipped by plan docs/plans/20261110-caller-authz (issue #125), the
+inbound gate is an ACTION gate, not an ANSWER gate (decision O1). This
+section replaces the earlier "caller must be in voice.allowed_numbers"
+spec, which the shipped chain deliberately dropped:
+
+1. Webhook `call.initiated`, Telnyx Ed25519 signature verified (see
+   "Signatures"). `from`/`to` arrive flat or as `{"phone_number": ...}`;
+   parse both shapes.
+2. Answer EVERY call. `voice.allowed_numbers` does NOT gate inbound —
+   it is OUTBOUND-only (see "Outbound dial"). An unknown number gets an
+   employee to talk to; it does not get an open action surface.
+3. Resolve the caller ONCE at the answer site
+   (`internal/daemon/voice_wiring.go` spawn seam, 2 s budget): the
+   contacts store lookup yields `callerid.Info{Number, Name, Approved,
+   Known}`. Approved = the contact row's `voice_approved` column
+   (decision O2; default FALSE). An unknown number is NOT approved
+   (`Known=false`). Every failure mode (contact feature off, store
+   error, expired budget) degrades fail-soft to `Info{Number}` with a
+   WARN — answering is never blocked (O1).
+4. The identity rides the registry `Instance.Caller`;
+   `bindingTurnRunner.Run` stamps it onto EVERY turn context
+   (`callerid.With`, alongside the employee-id stamp). Voice loops
+   execute as the employee id (decision O5), so the per-employee
+   constitution tool gates (steps 1a/1b) finally apply on call turns —
+   voice loops used to run under agent id `default` and skipped them.
+5. The agent executor injects the presence-only details keys
+   `caller_approved` / `caller_known` (never the number or name) into
+   every tool-call permission check; the employee `PreExecChecker`
+   step 1c (`internal/employee/enforcement.go`) then trims an
+   unapproved or unknown caller to the message lane
+   (`[ledger_append, send_agent_message]`, config
+   `voice.unapproved_caller_allowed_tools`, decision O3). Anything the
+   employee constitution already forbids is denied even earlier —
+   steps 1a/1b run first and their deny wins (O5); a constitution
+   allow does NOT rescue an unapproved caller. Every other tool is
+   denied with the frozen model-facing text: "This caller is not
+   approved for that action. Take a message instead." (reason token
+   `caller_not_approved`).
+6. The 1c denial is warning severity with NO auto-pause (contrast
+   `never[]`, which is a critical stop): refusing a stranger caller is
+   a routing decision, not an employee emergency. Each denial emits
+   one `voice.unapproved_action` audit row (tool + call_control_id)
+   through the checker's audit seam — nil-safe by contract. Wiring
+   caveat as shipped: the daemon's `RegisterPreExecCheckers` boot site
+   does not call `SetAuditStore` on the per-employee checkers, so on a
+   stock daemon the seam is uninstrumented and the row is a silent
+   no-op (the deny itself is unaffected);
+   `internal/daemon/caller_matrix_test.go` pins the frozen row shape
+   with the seam armed. Flagged to the owner (leaf 02-02 report).
+7. `AnswerCall`, spawn or attach the call session, then on `call.answered`
    run `streaming_start`.
-4. Telnyx opens the media socket; the lifecycle in "Socket lifecycle"
+8. Telnyx opens the media socket; the lifecycle in "Socket lifecycle"
    applies.
-5. A `call.hangup` for an unknown id is a nil no-op. Teardown is idempotent
+9. A `call.hangup` for an unknown id is a nil no-op. Teardown is idempotent
    against duplicate or late hangups.
+
+Residual risk (decision O4, owner Open Question Q1): `ledger_append`
+sits in the message lane, and step 1c cannot distinguish a
+state-setting (`set_status`) append from a note-taking one, so an
+unknown caller CAN drive employee-ledger rows including state changes
+until Q1 is settled. Accepted for this tree; pinned in the shipped
+behavior by `internal/daemon/caller_matrix_test.go`. The signal leg
+shares the turn-stamp site but not the phone leg's contact-resolve site
+(master Q2 fast-follow): signal instances carry a zero `Info`, which
+step 1c treats as unknown = unapproved — fail-closed, never an open
+gate.
 
 ## Barge-in contract
 
@@ -404,8 +460,9 @@ The greeting on connect is also filler-class: fact-free, interruptible.
 
 ## Call flow (inbound, condensed)
 
-1. Telnyx sends `call.initiated`. The daemon checks the Ed25519 signature
-   and the caller allowlist.
+1. Telnyx sends `call.initiated`. The daemon verifies the Ed25519
+   signature (inbound is answer-all; see "Inbound answer" — the caller
+   allowlist is OUTBOUND-only).
 2. The daemon starts the child if needed, answers the call, and starts the
    media stream with L16/16000.
 3. The media socket opens. The daemon verifies the socket signature, reads
@@ -447,7 +504,9 @@ Proposed keys, all under `voice`:
 - `public_stream_url` - public wss URL fronting the loopback listener
 - `connection_id` - Telnyx Call Control application id
 - `from_number` - caller id for outbound dials
-- `allowed_numbers` - E.164 list; inbound and outbound both gated
+- `allowed_numbers` - E.164 list; OUTBOUND-only gate (plan
+  20261110-caller-authz: inbound is answer-all, actions are gated per
+  caller by the contacts `voice_approved` flag + PreExec step 1c)
 - `timeout_secs` - outbound ring timeout, default 30
 - `max_call_minutes` - int, default 15
 - `silence_prompt_seconds` - int, default 45; the clock pauses while the
@@ -736,7 +795,7 @@ reorder/transcode policy differ per leg:
 | --- | --- | --- | --- |
 | Audio source | Telnyx media socket | Telnyx media socket | client dials the C2 unix pair (mic/speaker) |
 | Identity (`direction`) | `inbound` | `outbound` | `local` |
-| Target shape | caller E.164 (allowlist) | allowlisted E.164 | `local:<label>` (label = config name or hostname), never E.164-normalized (internal/voice/dial.go:629-633) |
+| Target shape | caller E.164 (resolved to `callerid.Info` at answer; NOT allowlisted — plan 20261110-caller-authz) | allowlisted E.164 | `local:<label>` (label = config name or hostname), never E.164-normalized (internal/voice/dial.go:629-633) |
 | ccid shape | `call_control_id` | `call_control_id` | `"local-" + pkg/id.Generate()` (internal/voice/local.go:237) |
 | Registry leg | `phone` | `phone` | `local` (`Instance.Leg`, internal/voice/dial.go:555-569) |
 | Effects reservation | no (inbound) | YES, before POST | NO (deliberate: no paid side effect) |

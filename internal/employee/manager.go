@@ -990,9 +990,20 @@ func (m *Manager) RegisterPreExecCheckers(pc *security.PermissionChecker, opts .
 	snapshot := make(map[string]Constitution, len(m.constitutions))
 	maps.Copy(snapshot, m.constitutions)
 	m.mu.RUnlock()
+	m.mu.RLock()
+	audit := m.auditStore
+	m.mu.RUnlock()
 	for id, c := range snapshot {
 		constCopy := c
 		checker := NewPreExecChecker(id, &constCopy, opts...)
+		// Arm the finding-persistence seam (2026-11-10, caller-authz
+		// integration): without this the voice.unapproved_action audit
+		// row is a nil-seam no-op on a stock daemon (deny itself
+		// unaffected). Nil manager audit store leaves the checker's
+		// seam nil, matching pre-wiring behavior.
+		if audit != nil {
+			checker.SetAuditStore(audit)
+		}
 		pc.SetPreExecChecker(id, NewPreExecAdapter(checker))
 	}
 	m.logger.Info("registered pre-exec checkers with permission checker",
