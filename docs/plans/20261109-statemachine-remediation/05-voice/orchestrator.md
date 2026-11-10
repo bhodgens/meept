@@ -98,7 +98,7 @@ touching frames/sockets/release.
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
 | 00T-voice-tests | TESTS_VALIDATED | 2 | part 1 (terminal_gate_test.go) + part 2 (leg_gate + webhook_gate) both committed; 8 pins, all parent-verified RED for right reasons |
-| 01-dial-leak-and-race | IN_PROGRESS | 0 | running (dial.go) |
+| 01-dial-leak-and-race | COMPLETE | 1 | committed f9304084 (dial.go) + 47d03b60 (manager tombstone, parent-landed residual) + gofmt fix; finding 2 FULLY closed, finding 9 closed; T3 audit: 0 unpaired paths |
 | 02-signal-leg-parity | IN_PROGRESS | 0 | dispatched (leg.go; daemon one-liner allowed w/ flag — watch voice_wiring.go overlap w/ leaf 04 at commit) |
 | 03-ringing-watchdog-and-db-sweep | PENDING | 0 | waits for 02 (leg.go) + 04 (boot/callstore adjacent) |
 | 04-webhook-and-teardown | IN_PROGRESS | 0 | dispatched (wiring/employee/docs; T3 dial.go DEFERRED to orchestrator — leaf 01 owns dial.go) |
