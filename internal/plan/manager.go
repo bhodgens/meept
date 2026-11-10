@@ -329,17 +329,14 @@ func (m *PlanManager) CreatePlanWithGoal(ctx context.Context, title, description
 
 // SubmitPlan transitions a plan from draft to pending_approval (or auto-approves).
 func (m *PlanManager) SubmitPlan(ctx context.Context, planID string) error {
+	// Table-driven CAS (C-P4): draft -> pending_approval, with the from-set
+	// pinned to draft — the pre-migration guard's exact accepted set.
+	if err := m.transitionFrom(ctx, planID, []PlanState{StateDraft}, StatePendingApproval); err != nil {
+		return err
+	}
 	plan, err := m.store.GetPlan(ctx, planID)
 	if err != nil {
 		return fmt.Errorf("get plan: %w", err)
-	}
-
-	if plan.State != StateDraft {
-		return fmt.Errorf("plan %s is in state %s, expected draft", planID, plan.State)
-	}
-
-	if err := m.store.SetPlanState(ctx, planID, StatePendingApproval); err != nil {
-		return fmt.Errorf("set plan state: %w", err)
 	}
 
 	phases, err := m.store.GetPhases(ctx, planID)
@@ -375,27 +372,13 @@ func (m *PlanManager) SubmitPlan(ctx context.Context, planID string) error {
 }
 
 // ApprovePlan approves a pending plan, records the signoff, and triggers synthesis.
-// Uses a conditional state transition to prevent TOCTOU races between concurrent
-// callers.
+// The guard is the table-driven CAS (C-P4): pending_approval -> approved only.
+// The from-set stays pinned to pending_approval — the table's
+// synthesizing->approved row exists for the reclaimer's stranded-lease path,
+// and a normal approve must never fire it (that would stomp a live expander).
 func (m *PlanManager) ApprovePlan(ctx context.Context, planID, sessionID, by string) error {
-	// Atomic conditional transition: only succeeds if plan is still pending.
-	won, err := m.store.UpdatePlanStateConditional(ctx, planID, StatePendingApproval, StateApproved)
-	if err != nil {
-		return fmt.Errorf("approve plan: conditional state transition: %w", err)
-	}
-	if !won {
-		// Another caller already transitioned this plan.
-		plan, getErr := m.store.GetPlan(ctx, planID)
-		if getErr != nil {
-			return fmt.Errorf("approve plan: failed to get plan state after race: %w", getErr)
-		}
-		return fmt.Errorf("plan %s is in state %s, expected pending_approval", planID, plan.State)
-	}
-
-	// Re-read the plan to get the current state.
-	plan, err := m.store.GetPlan(ctx, planID)
-	if err != nil {
-		return fmt.Errorf("get plan after approval: %w", err)
+	if err := m.transitionFrom(ctx, planID, []PlanState{StatePendingApproval}, StateApproved); err != nil {
+		return err
 	}
 
 	signoff := NewPlanSignoff(planID, "", sessionID, by, "approved", "")
@@ -403,12 +386,16 @@ func (m *PlanManager) ApprovePlan(ctx context.Context, planID, sessionID, by str
 		return fmt.Errorf("create signoff: %w", err)
 	}
 
+	// T4 targeted update: stamp the approval columns on the CURRENT row
+	// (re-read), not on a pre-transition copy — the state move is already
+	// committed by the CAS above.
 	now := time.Now().UTC()
-	plan.ApprovedAt = &now
-	plan.ApprovedBy = by
-	plan.UpdatedAt = now
-	if err := m.store.UpdatePlan(ctx, plan); err != nil {
-		return fmt.Errorf("update plan: %w", err)
+	if err := m.updatePlanColumns(ctx, planID, func(p *Plan) {
+		p.ApprovedAt = &now
+		p.ApprovedBy = by
+		p.UpdatedAt = now
+	}); err != nil {
+		return err
 	}
 
 	m.publishEvent("plan.approved", map[string]any{
@@ -428,22 +415,20 @@ func (m *PlanManager) ApprovePlan(ctx context.Context, planID, sessionID, by str
 
 // RejectPlan rejects a pending plan.
 func (m *PlanManager) RejectPlan(ctx context.Context, planID, sessionID, by, reason string) error {
+	// Table-driven CAS first (C-P4): pending_approval -> cancelled. The
+	// signoff is written only when this caller WINS the transition, so a
+	// losing racer leaves no duplicate audit row behind.
+	if err := m.transitionFrom(ctx, planID, []PlanState{StatePendingApproval}, StateCancelled); err != nil {
+		return err
+	}
 	plan, err := m.store.GetPlan(ctx, planID)
 	if err != nil {
 		return fmt.Errorf("get plan: %w", err)
 	}
 
-	if plan.State != StatePendingApproval {
-		return fmt.Errorf("plan %s is in state %s, expected pending_approval", planID, plan.State)
-	}
-
 	signoff := NewPlanSignoff(planID, "", sessionID, by, "rejected", reason)
 	if err := m.store.CreateSignoff(ctx, signoff); err != nil {
 		return fmt.Errorf("create signoff: %w", err)
-	}
-
-	if err := m.store.SetPlanState(ctx, planID, StateCancelled); err != nil {
-		return fmt.Errorf("set plan state: %w", err)
 	}
 
 	m.publishEvent("plan.rejected", map[string]any{
@@ -461,14 +446,14 @@ func (m *PlanManager) RejectPlan(ctx context.Context, planID, sessionID, by, rea
 }
 
 // RevisePlan requests revision of a plan, sending it back to planning state.
+// The from-set is the table's edges into planning — pending_approval,
+// cancelled, draft, and FAILED (audit F7: the failed->planning row lands in
+// planTransitions, so a failed plan is revisable; leaf 06's
+// TestRevisePlanAcceptsFailed tests exactly that row).
 func (m *PlanManager) RevisePlan(ctx context.Context, planID, sessionID, feedback string) error {
 	plan, err := m.store.GetPlan(ctx, planID)
 	if err != nil {
 		return fmt.Errorf("get plan: %w", err)
-	}
-
-	if plan.State != StatePendingApproval && plan.State != StateCancelled {
-		return fmt.Errorf("plan %s is in state %s, expected pending_approval or cancelled", planID, plan.State)
 	}
 
 	// Check revision count.
@@ -482,17 +467,29 @@ func (m *PlanManager) RevisePlan(ctx context.Context, planID, sessionID, feedbac
 		}
 	}
 
+	// Table-driven CAS second, from-set pinned to the revise command's
+	// accepted states (leaf doc: pending_approval, cancelled, failed). The
+	// table's draft->planning row serves the rework path, not this command.
+	// The CAS pins the observed state, so a racer that moved the row
+	// between the read above and this write loses.
+	if err := m.transitionFrom(ctx, planID,
+		[]PlanState{StatePendingApproval, StateCancelled, StateFailed}, StatePlanning); err != nil {
+		return err
+	}
+
 	signoff := NewPlanSignoff(planID, "", sessionID, "", "revision_requested", feedback)
 	if err := m.store.CreateSignoff(ctx, signoff); err != nil {
 		return fmt.Errorf("create signoff: %w", err)
 	}
 
-	plan.RevisionCount++
-	plan.State = StatePlanning
-	plan.UpdatedAt = time.Now().UTC()
-	if err := m.store.UpdatePlan(ctx, plan); err != nil {
-		return fmt.Errorf("update plan: %w", err)
+	// T4 targeted update: revision_count/updated_at on the CURRENT row.
+	if err := m.updatePlanColumns(ctx, planID, func(p *Plan) {
+		p.RevisionCount++
+		p.UpdatedAt = time.Now().UTC()
+	}); err != nil {
+		return err
 	}
+	plan.RevisionCount++
 
 	m.publishEvent("plan.revised", map[string]any{
 		"plan_id":        planID,
@@ -506,14 +503,19 @@ func (m *PlanManager) RevisePlan(ctx context.Context, planID, sessionID, feedbac
 
 // ConfirmPlan confirms a completed plan after review.
 func (m *PlanManager) ConfirmPlan(ctx context.Context, planID, sessionID, by string) error {
+	// Table-driven CAS FIRST (C-P4): completed/failed/cancelled -> confirmed.
+	// The signoff and the confirmation columns are written only when this
+	// caller WINS, so a racer (e.g. a concurrent CancelPlan) neither clobbers
+	// the row nor leaves a duplicate audit trail. The old shape — read,
+	// guard, signoff, full-row UpdatePlan from the stale copy — lost both:
+	// last-writer-wins on the state AND stomped the live
+	// task_id/synthesis_lease_until columns of the pre-transition copy (T4).
+	if err := m.transition(ctx, planID, StateConfirmed); err != nil {
+		return err
+	}
 	plan, err := m.store.GetPlan(ctx, planID)
 	if err != nil {
 		return fmt.Errorf("get plan: %w", err)
-	}
-
-	// Allow confirmation from completed, failed, or cancelled states.
-	if plan.State != StateCompleted && plan.State != StateFailed && plan.State != StateCancelled {
-		return fmt.Errorf("plan %s is in state %s, expected terminal state", planID, plan.State)
 	}
 
 	signoff := NewPlanSignoff(planID, "", sessionID, by, "confirmed", "")
@@ -521,13 +523,15 @@ func (m *PlanManager) ConfirmPlan(ctx context.Context, planID, sessionID, by str
 		return fmt.Errorf("create signoff: %w", err)
 	}
 
+	// T4 targeted update: confirmation columns on the CURRENT row (re-read),
+	// which already carries the winner's state and any lease/task columns.
 	now := time.Now().UTC()
-	plan.State = StateConfirmed
-	plan.ConfirmedAt = &now
-	plan.ConfirmedBy = by
-	plan.UpdatedAt = now
-	if err := m.store.UpdatePlan(ctx, plan); err != nil {
-		return fmt.Errorf("update plan: %w", err)
+	if err := m.updatePlanColumns(ctx, planID, func(p *Plan) {
+		p.ConfirmedAt = &now
+		p.ConfirmedBy = by
+		p.UpdatedAt = now
+	}); err != nil {
+		return err
 	}
 
 	// Update plan.md to reflect confirmed state.
@@ -554,17 +558,13 @@ func (m *PlanManager) ConfirmPlan(ctx context.Context, planID, sessionID, by str
 
 // CancelPlan cancels a plan for the given reason.
 func (m *PlanManager) CancelPlan(ctx context.Context, planID, reason string) error {
-	plan, err := m.store.GetPlan(ctx, planID)
-	if err != nil {
-		return fmt.Errorf("get plan: %w", err)
-	}
-
-	if plan.State.IsTerminal() {
-		return fmt.Errorf("plan %s is already in terminal state %s", planID, plan.State)
-	}
-
-	if err := m.store.SetPlanState(ctx, planID, StateCancelled); err != nil {
-		return fmt.Errorf("set plan state: %w", err)
+	// Table-driven CAS (C-P4): cancelled's from-set (draft, pending_approval,
+	// approved, synthesizing, executing) is exactly the old non-terminal
+	// guard's accepted set minus completed/planning — the audited table has
+	// no edge into cancelled from those states (see planTransitions; delta
+	// noted in the leaf report).
+	if err := m.transition(ctx, planID, StateCancelled); err != nil {
+		return err
 	}
 
 	m.publishEvent("plan.cancelled", map[string]any{
@@ -1047,10 +1047,12 @@ func (m *PlanManager) completePlan(ctx context.Context, planID string) error {
 		return nil
 	}
 
-	plan.State = StateCompleted
-	plan.UpdatedAt = time.Now().UTC()
-	if err := m.store.UpdatePlan(ctx, plan); err != nil {
-		return fmt.Errorf("update plan to completed: %w", err)
+	// Table-driven CAS (C-P4): executing -> completed. The CAS pins the
+	// observed state, so a concurrent CancelPlan that moved the row first
+	// makes this a lost race: the completion must NOT clobber the cancel,
+	// and the event/markdown below must not fire for a plan nobody completed.
+	if err := m.transition(ctx, planID, StateCompleted); err != nil {
+		return err
 	}
 
 	// Update plan.md.
