@@ -318,6 +318,44 @@ func (s *CallStore) TodayTranscripts(ctx context.Context, number string) ([]Call
 	return out, nil
 }
 
+// CallDayCounts is one employee's call counts for the current local day
+// (02-daystate leaf 03): Today = every row started at/after local
+// midnight for that employee (live rows with an empty outcome included,
+// per the gate fixture), Failed = the subset whose outcome is EXACTLY
+// OutcomeFailed — the only string SweepStaleLive also stamps, so
+// stranded rows fold into the failed count.
+type CallDayCounts struct {
+	Today  int
+	Failed int
+}
+
+// TodayCountsByEmployee powers the daystate Signals source: calls for
+// one employee since LOCAL midnight of loc (the TodayTranscripts
+// idiom — RFC3339 string comparison against a UTC-rendered local
+// midnight, never a UTC-derived day key). An employee with no rows
+// yields zeroed counts and a nil error (the daemon composite fail-soft
+// wants a clean zero, not an error). nil loc falls back to the store's
+// zone like TodayTranscripts.
+func (s *CallStore) TodayCountsByEmployee(ctx context.Context, employeeID string, loc *time.Location) (CallDayCounts, error) {
+	if loc == nil {
+		loc = s.loc
+	}
+	now := s.nowFn().In(loc)
+	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+
+	var counts CallDayCounts
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*), COALESCE(SUM(CASE WHEN outcome = ? THEN 1 ELSE 0 END), 0)
+		 FROM voice_calls
+		 WHERE employee_id = ? AND started_at >= ?`,
+		string(OutcomeFailed), employeeID, midnight.UTC().Format(time.RFC3339Nano),
+	).Scan(&counts.Today, &counts.Failed)
+	if err != nil {
+		return CallDayCounts{}, fmt.Errorf("voice callstore: today counts for employee %s: %w", employeeID, err)
+	}
+	return counts, nil
+}
+
 // EndedCall returns one terminal call's record plus its decoded
 // transcript, ok=false for an unknown call_id. Read-only: it exists for
 // the daemon's call-end notification relay
