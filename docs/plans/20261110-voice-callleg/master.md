@@ -69,7 +69,7 @@ same-commit doc updates.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-gate-tests | PENDING | 0 | |
+| 00T-gate-tests | TESTS_IN_PROGRESS | 0 | dispatched (internal/voice gate file; frozen-gate zero-diff guards in brief) |
 | 01-interface-adapters | PENDING | 0 | |
 | 02-event-unification | PENDING | 0 | |
 | 03-caller-migration | PENDING | 0 | |
