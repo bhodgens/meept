@@ -50,6 +50,13 @@ type callerIdentityKey struct{}
 
 // ContextWithCallerIdentity attaches a store-validated identity to ctx.
 // Nil identities are ignored (typed-nil rule).
+//
+// STATUS (deadcode wave-3): the HTTP bridge this seam exists for was never
+// built — zero production callers (tests only). internal/comm/http does not
+// attach a validated Identity to the dispatch ctx today, so RPC handlers
+// currently see only the socket/no-identity case. Wire the bridge in the
+// HTTP auth middleware (attach via this func after auth.Store.Validate)
+// when the human-privilege groups path goes live.
 func ContextWithCallerIdentity(ctx context.Context, idn *auth.Identity) context.Context {
 	if idn == nil {
 		return ctx
