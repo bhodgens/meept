@@ -148,6 +148,10 @@ func recordToQuotaTurn(rec ParkedTurnRecord) (QuotaParkedTurn, error) {
 		UnblockAt:      rec.ResumeAt,
 		ParkedAt:       p.ParkedAt,
 		Attempt:        rec.Attempt,
+		// M-4-park (tree 04 leaf 04): the cap rides the decoded turn so a
+		// re-park preserves the row's MaxAttempts (a restart re-armed row
+		// keeps its give-up horizon instead of resetting to the default).
+		MaxAttempts: rec.MaxAttempts,
 	}, nil
 }
 
@@ -370,6 +374,41 @@ func (w *QuotaResumeWatcher) SetPersistenceOwner(owner string) {
 		return
 	}
 	w.turns.SetPersistenceOwner(owner)
+}
+
+// SetGiveUpFunc installs the attempt-cap give-up callback (M-4-park, tree
+// 04 leaf 04) on the inner TurnParker: a quota record whose drain reaches
+// MaxAttempts never reaches the resume callback (no LLM replay past the
+// horizon) — it lands here instead, and the owner (the ChatHandler) marks
+// the turn failed-terminal through the SAME give-up shape as the ordinary
+// quota resume failure. A nil fn restores event-only give-ups.
+func (w *QuotaResumeWatcher) SetGiveUpFunc(fn func(ctx context.Context, turn QuotaParkedTurn)) {
+	if w == nil {
+		return
+	}
+	if fn == nil {
+		w.turns.SetGiveUpFunc(nil)
+		return
+	}
+	w.turns.SetGiveUpFunc(func(ctx context.Context, rec ParkedTurnRecord) {
+		turn, err := recordToQuotaTurn(rec)
+		if err != nil {
+			w.logger.Error("give-up quota turn payload undecodable — surfacing bare record failure",
+				"session_id", rec.SessionID,
+				"err", err,
+			)
+			fn(ctx, QuotaParkedTurn{
+				SessionID:      rec.SessionID,
+				ConversationID: rec.ConversationID,
+				AgentID:        rec.AgentID,
+				UnblockAt:      rec.ResumeAt,
+				Attempt:        rec.Attempt,
+				MaxAttempts:    rec.MaxAttempts,
+			})
+			return
+		}
+		fn(ctx, turn)
+	})
 }
 
 // drainDue resumes every parked turn whose unblock time has passed,

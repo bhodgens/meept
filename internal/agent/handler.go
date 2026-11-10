@@ -1226,7 +1226,10 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 					Parts:          req.Parts,
 					AgentID:        req.AgentID,
 					SourceClient:   req.SourceClient,
-					TurnID:         turnID, // F15: the resume emits the final terminal event under this id
+					// F5: the limit rides the park so the persisted payload
+					// records WHICH window the turn waits on.
+					Limit:  budgetErr.Reason,
+					TurnID: turnID, // F15: the resume emits the final terminal event under this id
 				}) {
 					response.Reply = budgetErr.UserMessage() +
 						"\n\nYour message has been queued and will be sent automatically when the budget window resets."
@@ -2608,6 +2611,16 @@ func (h *ChatHandler) SetBudget(budget *llm.Budget) {
 	h.budgetResumeWatcher = NewBudgetResumeWatcher(budget, h.logger, h.resumeParkedTurn)
 }
 
+// BudgetResumeWatcher exposes the configured budget watcher so the daemon
+// can wire parked-turn persistence/events (F5, tree 04 leaf 04) before the
+// handler starts. Returns nil when budget auto-resume is not wired.
+func (h *ChatHandler) BudgetResumeWatcher() *BudgetResumeWatcher {
+	if h == nil {
+		return nil
+	}
+	return h.budgetResumeWatcher
+}
+
 // SetThrottleParker wires the loop's throttle-resume parker (tree 03 leaf 02
 // Task 3): the parker's resume callback routes by record class — throttle
 // records re-enter the loop via resumeThrottledTurn; quota records (when a
@@ -2632,6 +2645,60 @@ func (h *ChatHandler) resumeRouterDefault(ctx context.Context, rec ParkedTurnRec
 	)
 }
 
+// failQuotaResumeTurn pushes the quota-resume failed shape to the session
+// and emits the final failed turn.terminal (F15). It is the ONE give-up
+// terminal surface for quota-parked turns: both the ordinary resume failure
+// (re-park declined) and the attempt-cap give-up (M-4-park) route through
+// it, so a turn abandoned at the cap is reported exactly like any other
+// failed quota resume — same reply text, same HandlerCase.
+func (h *ChatHandler) failQuotaResumeTurn(turn QuotaParkedTurn, err error) {
+	h.logger.Error("resumed turn failed",
+		"session_id", turn.SessionID,
+		"error", err,
+	)
+	h.sendResponse("quota-resume-"+turn.SessionID, ChatResponse{
+		ConversationID: turn.SessionID,
+		Error:          "Auto-resume failed: " + err.Error(),
+	})
+
+	// Final turn.terminal for the submitted turn (F15): the resume
+	// failed after the re-park declined — report it honestly so the
+	// awaiter resolves as failed. Legacy parked turns stay silent.
+	if turn.TurnID != "" {
+		resumeTraceID, resumeTurnSpanID := h.turnRegistry.TraceForTurn(turn.TurnID)
+		h.publishTurnTerminal(TurnTerminalEvent{
+			ConversationID: turn.ConversationID,
+			SessionID:      turn.SessionID,
+			TurnID:         turn.TurnID,
+			HandlerCase:    "quota_resume",
+			Status:         "failed",
+			Reply:          "I encountered an error: Auto-resume failed: " + err.Error(),
+			Error:          err.Error(),
+			TraceID:        resumeTraceID,
+			TurnSpanID:     resumeTurnSpanID,
+		})
+	}
+}
+
+// giveUpQuotaParkedTurn is the attempt-cap give-up callback (M-4-park, tree
+// 04 leaf 04) installed on the quota watcher's parker. The parker already
+// deleted the persisted row and published the give-up event before calling
+// this; the handler's job is the user-visible half: mark the turn
+// failed-terminal through the SAME quota give-up shape (failQuotaResumeTurn
+// — the handler.go quota_resume failed-terminal site). No LLM call happens
+// here: the whole point of the cap is that a turn that has re-parked
+// MaxAttempts times stops replaying.
+func (h *ChatHandler) giveUpQuotaParkedTurn(_ context.Context, turn QuotaParkedTurn) {
+	h.logger.Warn("quota-parked turn reached the attempt cap — giving up",
+		"session_id", turn.SessionID,
+		"conversation_id", turn.ConversationID,
+		"attempt", turn.Attempt,
+		"max_attempts", turn.MaxAttempts,
+	)
+	errText := fmt.Sprintf("quota re-park cap reached after %d attempts; turn abandoned", turn.Attempt)
+	h.failQuotaResumeTurn(turn, errors.New(errText))
+}
+
 // SetQuotaResumeConfig wires the quota deferral watcher
 // (quota-reset-resilience leaf 06) from llm.quota_retry settings. The
 // watcher's resume callback is bound internally (mirrors SetBudget).
@@ -2641,6 +2708,10 @@ func (h *ChatHandler) SetQuotaResumeConfig(maxWait time.Duration) {
 		return // already wired; idempotent
 	}
 	h.quotaResumeWatcher = NewQuotaResumeWatcher(h.logger, h.resumeQuotaParkedTurn, maxWait)
+	// M-4-park (tree 04 leaf 04): a quota turn that hits its re-park cap
+	// gives up through the handler's quota give-up terminal shape instead
+	// of replaying forever.
+	h.quotaResumeWatcher.SetGiveUpFunc(h.giveUpQuotaParkedTurn)
 }
 
 // QuotaResumeWatcher exposes the configured watcher so the daemon can Start
@@ -2686,40 +2757,22 @@ func (h *ChatHandler) resumeQuotaParkedTurn(ctx context.Context, turn QuotaParke
 				TurnID:         turn.TurnID, // F15: preserve the turn identity across re-parks
 				ProviderID:     quotaErr.ProviderID,
 				UnblockAt:      unblockAt,
+				// M-4-park (tree 04 leaf 04): the re-park generation grows so
+				// the drain's attempt cap (MaxAttempts) eventually gives up
+				// instead of looping forever; the row's cap rides along (a
+				// re-armed row keeps its horizon instead of resetting).
+				Attempt:     turn.Attempt + 1,
+				MaxAttempts: turn.MaxAttempts,
 			}) {
 				h.logger.Info("re-parked turn after fresh quota error",
 					"session_id", turn.SessionID,
 					"provider", quotaErr.ProviderID,
+					"attempt", turn.Attempt+1,
 				)
 				return
 			}
 		}
-		h.logger.Error("resumed turn failed",
-			"session_id", turn.SessionID,
-			"error", err,
-		)
-		h.sendResponse("quota-resume-"+turn.SessionID, ChatResponse{
-			ConversationID: turn.SessionID,
-			Error:          "Auto-resume failed: " + err.Error(),
-		})
-
-		// Final turn.terminal for the submitted turn (F15): the resume
-		// failed after the re-park declined — report it honestly so the
-		// awaiter resolves as failed. Legacy parked turns stay silent.
-		if turn.TurnID != "" {
-			resumeTraceID, resumeTurnSpanID := h.turnRegistry.TraceForTurn(turn.TurnID)
-			h.publishTurnTerminal(TurnTerminalEvent{
-				ConversationID: turn.ConversationID,
-				SessionID:      turn.SessionID,
-				TurnID:         turn.TurnID,
-				HandlerCase:    "quota_resume",
-				Status:         "failed",
-				Reply:          "I encountered an error: Auto-resume failed: " + err.Error(),
-				Error:          err.Error(),
-				TraceID:        resumeTraceID,
-				TurnSpanID:     resumeTurnSpanID,
-			})
-		}
+		h.failQuotaResumeTurn(turn, err)
 		return
 	}
 

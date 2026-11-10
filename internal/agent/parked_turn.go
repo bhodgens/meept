@@ -158,6 +158,15 @@ type TurnParker struct {
 	// record is queued; "" for records parked without persistence).
 	parkKeys   []string
 	resumeFunc func(ctx context.Context, turn ParkedTurnRecord)
+	// giveUpFunc, when set, receives every record the drain abandons at the
+	// attempt cap (M-4-park, tree 04 leaf 04): rec.MaxAttempts > 0 &&
+	// rec.Attempt >= rec.MaxAttempts. Cap records NEVER reach resumeFunc
+	// (no LLM replay past the horizon); they get the give-up event plus
+	// this callback, through which the owner (the quota watcher's handler)
+	// marks the turn failed-terminal. Nil = give up silently (event only).
+	// Installed via SetGiveUpFunc under the mutex, read under it in
+	// drainDue.
+	giveUpFunc func(ctx context.Context, turn ParkedTurnRecord)
 
 	cancel   context.CancelFunc
 	wg       sync.WaitGroup // polling + resume goroutines (Stop barrier)
@@ -221,6 +230,20 @@ func (p *TurnParker) SetResumeFunc(resume func(context.Context, ParkedTurnRecord
 	}
 	p.mu.Lock()
 	p.resumeFunc = resume
+	p.mu.Unlock()
+}
+
+// SetGiveUpFunc installs the attempt-cap give-up callback (M-4-park, tree
+// 04 leaf 04). Called once per record the drain abandons at the cap, right
+// after its give-up event is published and its persisted row is deleted.
+// A nil fn clears it (give-ups go back to event-only). Takes effect from
+// the next drainDue pass.
+func (p *TurnParker) SetGiveUpFunc(fn func(ctx context.Context, turn ParkedTurnRecord)) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	p.giveUpFunc = fn
 	p.mu.Unlock()
 }
 
@@ -483,7 +506,29 @@ func (p *TurnParker) drainDue(ctx context.Context) {
 	copy(remainingKeys, p.parkKeys[dueIdx:])
 	p.parked = remaining
 	p.parkKeys = remainingKeys
+	giveUp := p.giveUpFunc
 	p.mu.Unlock()
+
+	// Attempt-cap split (M-4-park, tree 04 leaf 04): a record with
+	// MaxAttempts > 0 that has reached its cap gives up instead of
+	// resuming — NO resume callback (no LLM replay past the horizon).
+	// The row is still deleted below (at-most-once), the give-up event is
+	// published, and the give-up callback (owner handler) marks the turn
+	// failed-terminal. MaxAttempts <= 0 stays unlimited (legacy rows and
+	// parkers that never stamp a cap keep byte-identical behaviour).
+	var capped []ParkedTurnRecord
+	var live []ParkedTurnRecord
+	if giveUp != nil || p.parkEventBus != nil {
+		for _, turn := range due {
+			if turn.MaxAttempts > 0 && turn.Attempt >= turn.MaxAttempts {
+				capped = append(capped, turn)
+			} else {
+				live = append(live, turn)
+			}
+		}
+	} else {
+		live = due
+	}
 	// Persistence delete happens BEFORE each resume callback: if the
 	// daemon dies mid-resume the row is already gone, so the record
 	// re-arms on the next boot exactly zero times (at-most-once resume —
@@ -492,9 +537,35 @@ func (p *TurnParker) drainDue(ctx context.Context) {
 	for _, key := range dueKeys {
 		p.unpersistPark(key)
 	}
+	for _, turn := range capped {
+		p.logger.Info("parked record at attempt cap — giving up (no resume)",
+			"class", turn.Class,
+			"session_id", turn.SessionID,
+			"attempt", turn.Attempt,
+			"max_attempts", turn.MaxAttempts,
+		)
+		p.emitCapGiveUpEvent(turn)
+		if giveUp != nil {
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						p.logger.Error("give-up callback panicked — record dropped",
+							"class", turn.Class,
+							"session_id", turn.SessionID,
+							"panic", r,
+						)
+					}
+				}()
+				giveUp(ctx, turn)
+			}()
+		}
+	}
+	if len(live) == 0 {
+		return
+	}
 	p.logger.Info("resume window passed — resuming parked records",
-		"class", due[0].Class,
-		"count", len(due),
+		"class", live[0].Class,
+		"count", len(live),
 	)
 	// Resume sequentially: the doc contract (and the ordering test) is
 	// oldest-first, which parallel goroutine launches cannot guarantee.
@@ -503,7 +574,7 @@ func (p *TurnParker) drainDue(ctx context.Context) {
 	// barrier and is already complete when this returns. A panicking
 	// callback is recovered and its record dropped so one bad resume
 	// cannot take down the watcher (or the daemon).
-	for _, turn := range due {
+	for _, turn := range live {
 		p.wg.Add(1)
 		p.resumeWG.Add(1)
 		func() {
@@ -575,6 +646,25 @@ const (
 	ReasonThrottleWait    = "throttle_wait"    // park (class=throttle)
 	ReasonThrottleResumed = "throttle_resumed" // resume (class=throttle)
 	ReasonThrottleGiveUp  = "throttle_give_up" // give-up past MaxWait
+	// ReasonQuotaGiveUp is the attempt-cap give-up for quota records
+	// (M-4-park, tree 04 leaf 04): the re-park generation reached
+	// MaxAttempts, so the drain abandons instead of replaying the turn.
+	ReasonQuotaGiveUp = "quota_give_up"
+	// Budget park class + reasons (F5, tree 04 leaf 04). The budget watcher
+	// is not a provider-failure parker, so it has no llm.FailureClass: its
+	// wire class is the literal "budget", riding the SAME agent.quota_wait
+	// topic and ParkTurnEvent schema (no new topic, no payload reshape).
+	// The TUI/GUI wait label renders from to=quota_wait + unblock_at.
+)
+
+// ParkClassBudget is the agent.quota_wait wire class for budget-parked
+// turns (F5). parkClassString only maps provider-failure classes; budget
+// waits are a distinct wire class with no FailureClass equivalent.
+const ParkClassBudget = "budget"
+
+const (
+	ReasonBudgetWait    = "budget_wait"    // park (class=budget)
+	ReasonBudgetResumed = "budget_resumed" // resume (class=budget)
 )
 
 // parkClassString is the wire vocabulary for a FailureClass on park events
@@ -842,6 +932,27 @@ func (p *TurnParker) emitGiveUpEvent(agentID, modelID, providerID string, waited
 		ModelID:    modelID,
 		ProviderID: providerID,
 		Timestamp:  p.now(),
+	})
+}
+
+// emitCapGiveUpEvent publishes the attempt-cap give-up for a record the
+// drain abandoned past MaxAttempts (M-4-park). The class rides the record's
+// own wire class (quota rows → "quota") so surfaces attribute the give-up;
+// reason is quota_give_up for class=quota records and throttle_give_up for
+// class=throttle records (the established give-up vocabulary — the gate
+// asserts a reason containing "give_up" either way).
+func (p *TurnParker) emitCapGiveUpEvent(rec ParkedTurnRecord) {
+	reason := ReasonQuotaGiveUp
+	if rec.Class == llm.FailureThrottle {
+		reason = ReasonThrottleGiveUp
+	}
+	p.publishParkEvent(ParkTurnEvent{
+		AgentID:   rec.AgentID,
+		Reason:    reason,
+		Class:     parkClassString(rec.Class),
+		SessionID: rec.SessionID,
+		Waited:    p.now().Sub(rec.ResumeAt).String(),
+		Timestamp: p.now(),
 	})
 }
 

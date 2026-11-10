@@ -115,6 +115,11 @@ const (
 	ParkOwnerThrottle     = "throttle"      // daemon chat throttle TurnParker
 	ParkOwnerGate         = "gate"          // dedicated ParkKindGate parker
 	ParkOwnerEpisode      = "episode"       // goal-loop ParkKindEpisode parker
+	// ParkOwnerBudget is the BudgetResumeWatcher's C-K1 identity (F5, tree
+	// 04 leaf 04): budget-parked chat turns persist under ParkKindChat like
+	// the quota watcher and throttle parker, and the owner column keeps the
+	// three re-arms disjoint.
+	ParkOwnerBudget = "budget"
 )
 
 const parkedTurnsSchema = `

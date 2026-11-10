@@ -4274,6 +4274,22 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		if c.ChatHandler.QuotaResumeWatcher() != nil {
 			c.ChatHandler.QuotaResumeWatcher().SetParkEventBus(msgBus)
 		}
+		// Budget-park persistence + events (F5, tree 04 leaf 04): the
+		// budget watcher's parked chat turns persist under kind=chat,
+		// owner "budget" (C-K1 identity — disjoint from the quota
+		// watcher's and throttle parker's rows on the same kind), and its
+		// park/resume lifecycle publishes on the same agent.quota_wait
+		// topic with class "budget". Wired before ChatHandler.Start
+		// (below) re-arms persisted turns. Nil-safe: no ParkStore keeps
+		// the memory-only behaviour; no watcher (budget unconfigured) is
+		// a no-op.
+		if bw := c.ChatHandler.BudgetResumeWatcher(); bw != nil {
+			bw.SetParkEventBus(msgBus)
+			if c.ParkStore != nil {
+				bw.SetParkPersistence(c.ParkStore, agent.ParkKindChat)
+				bw.SetPersistenceOwner(agent.ParkOwnerBudget)
+			}
+		}
 		// Parked-turn persistence (chat kind): quota-parked chat turns
 		// survive restarts and auto-resume on the next boot. Nil-safe
 		// when the park store is absent (memory-only fallback).
