@@ -151,12 +151,18 @@ func BuildContactChain(cfg *config.Config, w *VoiceWiring, ledger effects.Ledger
 			if cerr != nil {
 				log.Warn("contact wiring: telnyx messaging client failed; sms channel skipped", "error", cerr)
 			} else {
-				m[contact.ChannelTelnyxSMS] = telnyx.NewSMSAttempt(client, telnyx.SMSAttemptConfig{
+				att := telnyx.NewSMSAttempt(client, telnyx.SMSAttemptConfig{
 					FromNumber:  cfg.Voice.Messaging.FromNumber,
 					ProfileID:   cfg.Voice.Messaging.ProfileID,
 					WaitSeconds: cfg.Voice.Messaging.DLRWaitSeconds,
 					WebhookURL:  webhookURL,
 				}, log)
+				// D6 late-arming (leaf 03/02): the chain is built AFTER
+				// WireVoice, so hand the live DLR pending-map owner to
+				// the armed messaging OnFinalized seam through the slot
+				// the closure reads per event.
+				w.setSMSAttempt(att)
+				m[contact.ChannelTelnyxSMS] = att
 			}
 		}
 		return m

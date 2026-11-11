@@ -209,6 +209,34 @@ func (s *SMSAttempt) Outcome(id string) (DLROutcome, bool) {
 	return s.pending.Outcome(id)
 }
 
+// ResolvePending feeds a terminal DLR status for a provider message id
+// (the webhook's data.payload.id — the send-returned uuid) into the
+// pending map. Exported seam (plan 20261110-telnyx-texting master.md §6,
+// leaf 03-inbound-store/02): the daemon's armed OnFinalized webhook glue
+// calls this so a blocked Attempt returns the real outcome instead of
+// timing out to "unavailable" — the D6 dead-seam bug this closes.
+//
+// Non-terminal intermediate ack statuses ("" / sent / queued / sending)
+// are IGNORED: the pending map tracks the TERMINAL finalized DLR only,
+// and resolving an interack would flip an in-flight send to a failed
+// outcome (the waiter treats any resolved non-"delivered" status as
+// failure). An unknown id (late DLR, evicted entry, or a message this
+// process never sent) is a logged debug event, never an error surfaced
+// to the provider — the same posture as OnFinalized's legacy seam.
+func (s *SMSAttempt) ResolvePending(providerMessageID string, status string) {
+	if providerMessageID == "" {
+		return
+	}
+	switch status {
+	case "", "sent", "queued", "sending":
+		return
+	}
+	if err := s.pending.ResolveFinalized(providerMessageID, status); err != nil {
+		s.log.Debug("telnyx sms attempt: unresolved DLR (resolve seam)",
+			"message_id", providerMessageID, "status", status, "error", err)
+	}
+}
+
 // DisabledSMSAttempt is the wired adapter used when
 // [voice].messaging.enabled is false: every Attempt returns
 // ("unavailable", ErrMessagingDisabled) BEFORE any HTTP call (T5 gate).
