@@ -30,11 +30,15 @@ the sibling repo `meept-uptractor` and is NOT part of this tree.
   404 => Known=false) and typed `IgnoredEventError` for non-lifecycle call.*
   webhook events (ack quietly, log debug; non-call.* events stay hard errors).
 - `internal/voice/` gains a reaper goroutine in the Manager: probes sessions
-  older than MinAge, feeds a synthetic `call.hangup` through the EXISTING
-  releaseOnce funnel (frozen 20261109 — the reaper adds an input edge, never
-  a second teardown path), enforces MaxDuration, and emits a `CallEventErrored`
+  older than MinAge, releases them via the EXISTING `FailOutcome` funnel
+  (manager.go:539 — same releaseOnce path, frozen 20261109; the reaper adds an
+  input edge, never a second teardown path; it does NOT go through
+  HandleCallEvent, whose hangup branch hard-codes reason "call.hangup" at
+  manager.go:417), enforces MaxDuration, and emits a `CallEventErrored`
   (reason "reaped:hangup-lost" / "reaped:max-duration") on the CallLeg bus so
-  faults are observable.
+  faults are observable. The reaper keeps its OWN {ccid: startedAt} map fed
+  by the existing AddAnsweredObserver/AddTerminalObserver lanes — the Manager
+  gains no new session state (its maps carry no timestamps).
 - `internal/voice/` gains the structured call brief: stub row at answer
   (state 'live' already exists in callstore), finalized brief at release,
   idempotent across webhook replay and restart; brief JSON stored in a new
@@ -65,7 +69,7 @@ the sibling repo `meept-uptractor` and is NOT part of this tree.
 
 - C1 CallStatus: `func (c *Client) GetCallStatus(ctx context.Context, callControlID string) (CallStatus, error)`; `type CallStatus struct { Known, Alive bool }`. 404 => Known=false, Alive=false, err=nil. Empty id => error. (Ported verbatim in shape from phone/core/internal/telnyx/callstatus.go.)
 - C2 IgnoredEvent: `type IgnoredEventError struct{ EventType string }`; `func IsIgnoredEvent(err error) bool` (errors.As). Only for `call.*` non-lifecycle events; non-call.* remain plain errors.
-- C3 ReaperConfig: `type ReaperConfig struct { Status CallStatusChecker; Interval, MinAge, MaxDuration time.Duration }` with defaults Interval 30s, MinAge 60s, MaxDuration 30m (values frozen from phone/core/internal/callsvc/reaper.go). `func (m *Manager) RunReaper(ctx context.Context, cfg ReaperConfig)` — no-op + Error log when Status nil.
+- C3 ReaperConfig: `type ReaperConfig struct { Status CallStatusChecker; Interval, MinAge, MaxDuration time.Duration }` with defaults Interval 30s, MinAge 60s, MaxDuration 30m (values frozen from phone/core/internal/callsvc/reaper.go). `func (m *Manager) RunReaper(ctx context.Context, cfg ReaperConfig)` — no-op + Error log when Status nil. CallStatusChecker is a STANDALONE interface satisfied by *telnyx.Client; do NOT extend telnyx.CallController (adding GetCallStatus there breaks every existing test fake). Reaper releases via `FailOutcome(ccid, outcome, reason)` (manager.go:539) so the frozen reason strings ride the release; the reaper tracks {ccid: startedAt} itself via the answered/terminal observer lanes — no Manager state or constructor change.
 - C4 Brief JSON (frozen wire shape; matches Uptractor README-callbrief record):
   `{"status":"in_progress|completed|failed|abandoned","error":"...","from":"+1...","to":"+1...","brief":{"transcript":"","summary":"","action_items":[],"commitments":[],"risk_flags":[]},"ext":{...}}`
   Go type `voice.CallBrief` mirrors this; `ext` is `json.RawMessage`, opaque to meept.
@@ -81,10 +85,10 @@ Coverage matrix (gate leaf 00T writes ALL of these BEFORE any impl dispatch; tes
 |---|---|---|---|
 | C1 GetCallStatus | internal/voice/telnyx callstatus_test.go (200 alive/dead, 404, empty id, HTTP error) | — | PENDING |
 | C2 IgnoredEvent | telnyx webhook parse tests (call.analyzed ignored+acked; non-call.* hard error) | — | PENDING |
-| C3 Reaper | internal/voice reaper_test.go (dead call reaped via synthetic hangup; alive untouched; MinAge respected; MaxDuration force-hangup; nil Status no-op) | manager-level: tracked session + fake Status => releaseOnce fired exactly once, CallEventErrored on bus | PENDING |
+| C3 Reaper | internal/voice reaper_test.go (dead call reaped via FailOutcome with reason "reaped:hangup-lost"; alive untouched; MinAge respected; MaxDuration force-hangup; nil Status no-op) | manager-level: tracked session + fake Status => releaseOnce fired exactly once, CallEventErrored on bus | PENDING |
 | C4 Brief | callstore brief column migration idempotence; CallBrief JSON round-trip; stub-at-answer/final-at-release | replayed hangup webhook => still exactly one brief; restart mid-call => abandoned brief | PENDING |
 | Commitments->ledger | dedupe exactly-once per (ccid,index) | — | PENDING |
-| C5 Fuzzy | canonical table from SPEECH-ROBUSTNESS.md verbatim ("Meadow Rich"->Meadow Ridge; "summer plans"->no match; etc.) | — | PENDING |
+| C5 Fuzzy | canonical table from SPEECH-ROBUSTNESS.md verbatim ("Meadow Rich"->Meadow Ridge; "summer planes"->no match; etc.) | — | PENDING |
 | C6 Normalize | filler collapse, known-name preservation, idempotence | voicechild pipeline: garbled final reaches LLM normalized | PENDING |
 | Guided intake | refuse-and-list on ambiguous fuzzy; confirm-then-save gate | — | PENDING |
 | Recording | StartRecording request shape; recording.saved capture; disabled-by-default; consent pin required | — | PENDING |
@@ -99,7 +103,7 @@ Coverage matrix (gate leaf 00T writes ALL of these BEFORE any impl dispatch; tes
 | 02 | 02-call-reaper.md | C3 + errored events | 01 | 85K |
 | 03 | 03-fuzzy-and-normalize.md | C5+C6 | 00T | 75K |
 | 04 | 04-call-brief-and-commitments.md | C4+C7 | 00T | 95K |
-| 05 | 05-guided-intake.md | intake preset for secretary | 03 | 80K |
+| 05 | 05-guided-intake.md | guided intake for secretary (internal/voiceintake pkg) | 03 | 80K |
 | 06 | 06-call-recording.md | recording + consent gate | 01 | 70K |
 | 07 | 07-sidecar-eval-harness.md | persistent eval lane | 00T | 75K |
 | 08 | 08-research-docs-import.md | docs-only: 4 research docs -> docs/research/ | none | 35K |
@@ -127,8 +131,17 @@ commits per leaf with pathspec, updates the tracking table.
 - No new dependencies without necessity; modernc driver for any new SQL.
 - slog structured logging; no fmt.Println.
 - Tests: table-driven, testify not required; -p 2 for package sweeps.
-- Frozen shapes (releaseOnce funnel, CallLeg enum) are additive-only: new
-  observer/input edges, never a second teardown path.
+- Frozen shapes (releaseOnce funnel, CallLeg enum, telnyx.CallController) are
+  additive-only: new observer/input edges, never a second teardown path;
+  GetCallStatus goes on *Client + a standalone CallStatusChecker, NOT onto
+  CallController.
+- Package naming: internal/intake is TAKEN (GitHub intake-factory) — guided
+  intake is internal/voiceintake; internal/voice/eval coexists with the
+  existing top-level internal/eval (name-similar, no conflict — import paths
+  must be explicit).
+- internal/voice deliberately does not import internal/ledger today; leaf 04
+  keeps commitment filing in daemon wiring (internal/daemon) to preserve that
+  posture.
 
 ## Completion Tracking Table
 

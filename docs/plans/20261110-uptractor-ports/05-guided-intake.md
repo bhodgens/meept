@@ -32,9 +32,10 @@ create new (subject to the employee's constitution/tools_allowed).
 ## Context
 
 - internal/callerid/ — Info{Number,Name,Known,Approved} stamp already on every voice turn ctx
-- internal/employee/ — constitution, tools_allowed, presets (locate via grep ApplyPreset)
+- internal/employee/ — constitution and tools_allowed enforcement are real (internal/employee/enforcement.go:678, constitution-gated); there is NO preset mechanism in internal/employee (ApplyPreset exists only in internal/config/presets.go:135 for model presets and internal/agent/team_presets.go:109 for TeamConfig) — this leaf introduces a small `voice.guided_intake` employee-config gate + prompt-extension seam instead of applying an existing preset
 - internal/ledger/ — subjects registry (dispatch-board Q1: canonical key exists before filing)
 - internal/contact/store.go — contacts registry for caller resolution
+- NAME COLLISION: internal/intake/ ALREADY EXISTS (GitHub-intake-factory projection package: project.go, linkage.go, poller.go, writeback.go, github.go, wired from internal/daemon/intake_wiring.go) — this leaf's package is internal/voiceintake, distinct and voice-scoped
 - Source behavior spec: cat phone/core/README-intake.md (both behaviors; only guided intake ports here — set_work_order_status is Uptractor-domain and stays out)
 
 ## Verified Anchors
@@ -48,7 +49,7 @@ create new (subject to the employee's constitution/tools_allowed).
 ### What This Leaf Exposes
 
 ```go
-// internal/employee (or internal/intake if employee pkg rejects the dep — orchestrator decides)
+// internal/voiceintake (NEW package; internal/intake is taken by the GitHub intake-factory)
 type IntakeField struct {
     Name     string   // canonical field name
     Question string   // spoken prompt when missing
@@ -77,23 +78,23 @@ tool checks a confirm flag set only by an explicit confirmation turn).
 
 ### What This Leaf Consumes
 
-- C5 fuzzy (leaf 03). Gate tests: internal/voice/guided_intake_test.go.
+- C5 fuzzy (leaf 03). Gate tests: internal/voiceintake/guided_intake_test.go (moved from internal/voice — the package rename is audit-mandated).
 
 ## Tasks
 
 | Task ID | Objective | Files | Verify command | RED reason | PASS state | Given/When/Then |
 |---|---|---|---|---|---|---|
-| T1 | ResolveSubject over fuzzy with the four outcomes + threshold 0.60 | Create internal/intake/resolve.go | `go test ./internal/intake` | gate RED | green | Given candidates ["Meadow Ridge","Meadow Brook"] and query "meadow ridg e"; When resolve; Then Ambiguous with both listed |
-| T2 | intake_save tool: schema-validated payload, confirm-flag gate, ledger append | Create internal/intake/tool.go; register in employee toolset | `go test ./internal/intake -run Save` | gate RED | green | Given no confirm turn yet; When tool called; Then refused with reason |
-| T3 | Employee preset wiring: guided_intake flag -> prompt extension + tool grant; secretary default preset opts in | Modify internal/employee preset files (grep ApplyPreset) | `go test ./internal/employee` + build | n/a | green | Given secretary hired with guided_intake; When voice turn; Then intake prompt present |
-| T4 | One-question-at-a-time prompt block: missing required fields drive the next question; read-back assembled from collected fields | Create internal/intake/prompt.go | `go test ./internal/intake -run Prompt` | gate RED | green | Given 2 of 3 fields collected; When prompt built; Then exactly the missing field's question |
+| T1 | ResolveSubject over fuzzy with the four outcomes + threshold 0.60 | Create internal/voiceintake/resolve.go | `go test ./internal/voiceintake` | gate RED | green | Given candidates ["Meadow Ridge","Meadow Brook"] and query "meadow ridg e"; When resolve; Then Ambiguous with both listed |
+| T2 | intake_save tool: schema-validated payload, confirm-flag gate, ledger append | Create internal/voiceintake/tool.go; register in employee toolset | `go test ./internal/voiceintake -run Save` | gate RED | green | Given no confirm turn yet; When tool called; Then refused with reason |
+| T3 | Employee config gate wiring: voice.guided_intake flag -> prompt extension + intake_save tool grant; enforcement rides the EXISTING tools_allowed constitution path (internal/employee/enforcement.go:678) — no new enforcement machinery | Modify internal/employee config/enforcement seam files (grep tools_allowed) | `go test ./internal/employee` + build | n/a | green | Given secretary hired with guided_intake; When voice turn; Then intake prompt present |
+| T4 | One-question-at-a-time prompt block: missing required fields drive the next question; read-back assembled from collected fields | Create internal/voiceintake/prompt.go | `go test ./internal/voiceintake -run Prompt` | gate RED | green | Given 2 of 3 fields collected; When prompt built; Then exactly the missing field's question |
 
 ## Self-Verification Checklist
 
 - [ ] Ambiguous NEVER auto-picks (test asserts refusal, not best-effort)
 - [ ] Save without confirm impossible at the tool layer (not just prompt layer)
 - [ ] No Uptractor vocabulary (jobs/work orders) — generic subjects only
-- [ ] `go test -p 2 ./internal/intake ./internal/employee ./internal/voice` green
+- [ ] `go test -p 2 ./internal/voiceintake ./internal/employee ./internal/voice` green
 - [ ] tools_allowed still governs: intake_save absent for employees without the preset
 
 **DO NOT COMMIT.** The orchestrator handles all git operations after review.

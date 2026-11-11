@@ -40,7 +40,7 @@ exactly-once per (ccid, commitment index). Uptractor-domain fields
 ## Verified Anchors
 
 - internal/voice/callstore.go:92 — NewCallStore — migration point for brief+ext columns
-- internal/voice/callstore.go:178 — SweepStaleLive — abandoned-brief hook
+- internal/voice/callstore.go:198 — SweepStaleLive (func) — abandoned-brief hook
 - internal/ledger/store.go:316 — Append — commitment filing
 - internal/voice/manager.go:271 — fireRelease — finalize trigger point
 
@@ -87,7 +87,7 @@ Additive schema: `ALTER TABLE voice_calls ADD COLUMN brief TEXT NOT NULL DEFAULT
 | T1 | Schema migration + CallBrief types + WriteBriefStub/FinalizeBrief/Brief/SetBriefExt | Modify internal/voice/callstore.go; Create internal/voice/callbrief.go | `go test ./internal/voice -run Brief` | gate RED | green incl. double-open idempotence | Given store opened twice on same file; When second open; Then no migration error |
 | T2 | Wire stub at answer + finalize at release; BriefAnalyzer seam on the wiring (employee LLM; nil analyzer => brief stays stub, log warn, no failure) | Modify internal/daemon/voice_wiring.go, internal/voice/manager.go (fireRelease observer, additive) | `go test ./internal/voice && go build ./...` | gate RED | green | Given answered call; When release fires; Then analyzer called once, brief completed |
 | T3 | Idempotence: replayed hangup + restart-mid-call => exactly one brief; failed analysis => status=failed stored, never retried | covered by gate tests | `go test ./internal/voice -run Brief` | gate RED | green | Given finalize called twice; When second call; Then no change, no error |
-| T4 | Commitments -> ledger: on finalize(completed), for each commitment index i, if no ledger row (source=voice, source_ref=ccid, kind=commitment, payload idx=i) exists, Append it | Create internal/voice/brief_commitments.go | `go test ./internal/voice -run Commitments` | gate RED | green, dedupe exact | Given brief with 2 commitments finalized twice; When done; Then exactly 2 ledger rows |
+| T4 | Commitments -> ledger: on finalize(completed), for each commitment index i, if no ledger row (source=voice, source_ref=ccid, kind=commitment, payload idx=i) exists, Append it. POSTURE: the ledger-append adapter lives in internal/daemon wiring (internal/voice must not import internal/ledger — existing repo posture); internal/voice exposes only a CommitmentFiler seam interface | Create internal/daemon/brief_commitments.go; Create internal/voice/brief_seam.go (CommitmentFiler interface) | `go test ./internal/voice -run Commitments && go test ./internal/daemon -run BriefCommitments` | gate RED | green, dedupe exact | Given brief with 2 commitments finalized twice; When done; Then exactly 2 ledger rows |
 | T5 | SweepStaleLive hook: rows swept at startup get brief status abandoned (only if stub present); leaf-02 reaped calls reach abandoned through the same finalize path via outcome/reason mapping | Modify internal/voice/callstore.go | `go test ./internal/voice` full | gate RED | green | Given live row with stub at startup; When SweepStaleLive; Then brief abandoned |
 
 ## Self-Verification Checklist

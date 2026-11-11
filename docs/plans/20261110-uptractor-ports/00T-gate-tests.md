@@ -33,7 +33,7 @@ meept packages, keep every case).
 
 - internal/voice/telnyx/client.go — existing client shape (NewClient(baseURL, apiKey), postCall)
 - internal/voice/manager.go:218 releaseOnce, :271 fireRelease, :321 HandleCallEvent
-- internal/voice/callstore.go:41 voice_calls schema, :92 NewCallStore, :178 SweepStaleLive
+- internal/voice/callstore.go:41 voice_calls schema, :92 NewCallStore, :198 SweepStaleLive (func; :178 is the doc comment)
 - internal/ledger/store.go:316 Append(ctx, DraftRecord)
 - internal/voicechild/pipeline.go — STT final -> LLM turn path (where Normalize hooks)
 
@@ -59,7 +59,7 @@ internal/voice/callbrief_test.go                (C4)
 internal/voice/brief_commitments_test.go        (C7)
 internal/util/fuzzy/fuzzy_test.go               (C5)
 internal/voicechild/normalize_test.go           (C6)
-internal/voice/guided_intake_test.go            (intake)
+internal/voiceintake/guided_intake_test.go       (intake)
 internal/voice/recording_test.go                (recording)
 ```
 
@@ -73,12 +73,12 @@ internal/voice/recording_test.go                (recording)
 |---|---|---|---|---|---|
 | T1 | C1 tests: 200 alive, 200 dead, 404=>Known=false/Alive=false/nil err, empty id err, HTTP 500 err; httptest server | Create internal/voice/telnyx/callstatus_test.go | `go test ./internal/voice/telnyx -run CallStatus` | undefined: GetCallStatus/CallStatus | compiles after leaf 01, all pass |
 | T2 | C2 tests: ParseCallEvent("call.analyzed") => IsIgnoredEvent true; ("call.hangup") => normal; ("sms.inbound") => plain error NOT ignorable | Create internal/voice/telnyx/ignored_event_test.go | `go test ./internal/voice/telnyx -run Ignored` | undefined: IgnoredEventError | pass after leaf 01 |
-| T3 | C3 tests: port reaper_test.go cases from uptractor repo verbatim (adapt package): dead call => synthetic hangup through releaseOnce exactly once + CallEventErrored on bus reason "reaped:hangup-lost"; alive call untouched; session younger than MinAge not probed; MaxDuration => force hangup reason "reaped:max-duration"; nil Status => no goroutine work, Error logged; defaults 30s/60s/30m | Create internal/voice/reaper_test.go | `go test ./internal/voice -run Reaper` | undefined: ReaperConfig/RunReaper | pass after leaf 02 |
+| T3 | C3 tests: port reaper_test.go cases from uptractor repo verbatim (adapt package): dead call => released via FailOutcome exactly once with CallEventErrored on bus reason "reaped:hangup-lost"; alive call untouched; session younger than MinAge not probed; MaxDuration => FailOutcome reason "reaped:max-duration"; nil Status => no goroutine work, Error logged; defaults 30s/60s/30m; reaper's own {ccid:startedAt} map fed via answered/terminal observers (no Manager state change) | Create internal/voice/reaper_test.go | `go test ./internal/voice -run Reaper` | undefined: ReaperConfig/RunReaper | pass after leaf 02 |
 | T4 | C4 tests: NewCallStore adds brief+ext columns idempotently (open twice, no error, old rows get ''); CallBrief JSON round-trip with frozen shape incl. opaque ext; stub-at-answer status in_progress; final-at-release status completed; replayed hangup => one brief; restart with live row => SweepStaleLive marks failed AND brief status abandoned per O1 decision | Create internal/voice/callbrief_test.go | `go test ./internal/voice -run Brief` | undefined: CallBrief | pass after leaf 04 |
 | T5 | C7 tests: brief with 2 commitments => 2 ledger rows kind=commitment source=voice source_ref=ccid; re-finalize => still 2 (dedupe); zero commitments => zero rows | Create internal/voice/brief_commitments_test.go | `go test ./internal/voice -run Commitments` | undefined symbols | pass after leaf 04 |
-| T6 | C5 tests: canonical SPEECH-ROBUSTNESS.md table verbatim (Meadow Ridge/Rich/Ridg, summer plans no-match, Oak Street/St, siding, "mark the siding done", roof flashing) + EditDistance known pairs + FuzzyFind sort order + float epsilon comparisons | Create internal/util/fuzzy/fuzzy_test.go | `go test ./internal/util/fuzzy` | package does not exist | pass after leaf 03 |
+| T6 | C5 tests: canonical SPEECH-ROBUSTNESS.md table verbatim (Meadow Ridge/Rich/Ridg, summer planes no-match, Oak Street/St, siding, "mark the siding done", roof flashing) + EditDistance known pairs + FuzzyFind sort order + float epsilon comparisons | Create internal/util/fuzzy/fuzzy_test.go | `go test ./internal/util/fuzzy` | package does not exist | pass after leaf 03 |
 | T7 | C6 tests: "the the the"=>"the"; "yeah yeah yeah"=>"yeah"; "um um um"=>"um"; preserve-list keeps unknown proper noun; idempotence property over all canonical fixtures | Create internal/voicechild/normalize_test.go | `go test ./internal/voicechild -run Normalize` | undefined: NormalizeUtterance | pass after leaf 03 |
-| T8 | Intake tests: ambiguous fuzzy (two candidates >= threshold) => refuse result listing both; single match => proceed; save blocked until explicit confirm flag | Create internal/voice/guided_intake_test.go | `go test ./internal/voice -run Intake` | undefined | pass after leaf 05 |
+| T8 | Intake tests: ambiguous fuzzy (two candidates >= threshold) => refuse result listing both; single match => proceed; save blocked until explicit confirm flag | Create internal/voiceintake/guided_intake_test.go | `go test ./internal/voiceintake -run Intake` | undefined | pass after leaf 05 |
 | T9 | Recording tests: config default off => no StartRecording call on answer; on + consent pin set => StartRecording(dual-channel mp3) at answer; on + no consent pin => refuse + Error log; recording.saved webhook => URL stored on call record | Create internal/voice/recording_test.go | `go test ./internal/voice -run Recording` | undefined | pass after leaf 06 |
 | T10 | Eval harness test: `make test-voice-eval` target exists and runs; planted prompt-leak fixture fails the lane; clean fixture passes | Create magefiles or Makefile target + eval fixture dir per leaf 07 brief | `make test-voice-eval` | target missing | pass after leaf 07 |
 
