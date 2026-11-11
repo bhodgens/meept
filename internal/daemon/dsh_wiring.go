@@ -312,6 +312,14 @@ func wireDelegateProvider(c *Components, cfg *config.Config, msgBus *bus.Message
 	if c.AgentRegistry != nil {
 		dm.SetRunFunc(c.AgentRegistry.RunAgentWithModelRef)
 	}
+	// R3-3: resolve the child's recorded route BEFORE the turn launches,
+	// fail-closed — an unresolvable route fails the child turn with a clear
+	// error instead of the pre-C10 warn-and-degrade (spec-model allowlist
+	// bypass). ResolveEscalationRef accepts both alias names and
+	// "provider/model" refs and errors on unknown refs.
+	if c.LLMResolver != nil {
+		dm.SetModelRefResolver(c.LLMResolver.ResolveEscalationRef)
+	}
 	// DSH-1 fork-seed: bind the registry's conversation-seed adapter so a
 	// full-context fork child's seed is stamped onto its conversation before
 	// its first turn (delegate.go's gate already restricts seeding to agents

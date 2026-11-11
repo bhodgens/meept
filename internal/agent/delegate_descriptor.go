@@ -361,6 +361,12 @@ func (m *DelegateManager) Resume(ctx context.Context, parentSessionID, childID s
 		if err != nil {
 			releaseClaim()
 		}
+		// Success: the C11 claim is SUPERSEDED by the children-map entry
+		// (resumeRegister inserted the running entry before returning), so
+		// the reservation must be released here too. Keeping it held made
+		// every future Resume of the child refuse with "already being
+		// resumed" after one success + later cancel (R3 regression): the
+		// stale claim outlived the run it guarded.
 		return res, err
 	}
 	// Cold path: rehydrate from the durable store.
@@ -459,6 +465,13 @@ func (m *DelegateManager) resumeRegister(ctx context.Context, parentSessionID st
 	// any goroutine launches, so a concurrent second Resume observes the
 	// claimed entry and is refused with a clear error instead of
 	// double-executing the child (the first execution owns the settle).
+	//
+	// SUPERSEDE (R3-1): inserting the children entry also releases the
+	// Resume entry claim in the SAME critical section. The claim's job is
+	// only to serialize pre-registration; once the entry exists, the entry's
+	// own running/settled state gates every future Resume. Returning with
+	// the claim still held permanently refused all later Resumes of the
+	// child ("already being resumed") after one success + later cancel.
 	m.mu.Lock()
 	if e, exists := m.children[rec.ChildID]; exists {
 		if e.rec.State == ChildStateRunning && !e.settled {
@@ -467,6 +480,7 @@ func (m *DelegateManager) resumeRegister(ctx context.Context, parentSessionID st
 		}
 		// A stale terminal/interrupted entry is replaced by the claim.
 	}
+	delete(m.resuming, rec.ChildID)
 	ctx2, cancel := context.WithCancel(ctx)
 	e := &childEntry{rec: rec, settle: make(chan struct{}), cancel: cancel}
 	e.rec.State = ChildStateRunning

@@ -1163,11 +1163,34 @@ func (r *AgentRegistry) RunAgent(ctx context.Context, agentID, message, conversa
 // pin. Empty modelRef behaves exactly like RunAgent (no override armed). The
 // override is one-shot: it auto-clears after the first reasoning cycle and
 // never persists onto the agent's other conversations.
+//
+// R3-2 (turn-scoped override): the override is armed on the SHARED per-agent
+// loop, so a child run that parks or errors BEFORE the reasoning cycle
+// consumes it used to leave the override stuck — the next unrelated turn on
+// that loop silently ran the child's route. The override is cleared as soon
+// as this run returns (defer ClearModelOverride-style): if the turn consumed
+// it, the one-shot clear already ran and this is a no-op; if it never did,
+// nothing leaks to the next turn. The armed window (arm → RunOnce) is the
+// same slot the dispatcher's ApplyRequestModel uses for user directives; a
+// full per-turn context-carried mechanism does not exist on the RunOnce API
+// (the consumption site reads loop state in reasoningCycle), so the
+// defer-clear shape is the turn-scoping mechanism chosen here.
 func (r *AgentRegistry) RunAgentWithModelRef(ctx context.Context, agentID, message, conversationID, modelRef string) (string, error) {
 	loop, err := r.Get(agentID)
 	if err != nil {
 		return "", err
 	}
+	// Turn-scoped (R3-2): no transient override survives past THIS run —
+	// armed here by ApplyRequestModel below, or left stuck by an earlier
+	// child run that parked/errored before consumption (which would
+	// otherwise route the NEXT delegation turn on the shared loop down the
+	// dead child's route). A persistent override (shadow hot-swap) is NOT
+	// demoted: the guard matches SetModelOverride's own anti-demotion rule.
+	defer func() {
+		if !loop.IsModelOverridePersistent() {
+			loop.ClearModelOverride()
+		}
+	}()
 	if modelRef != "" {
 		loop.ApplyRequestModel(modelRef)
 	}

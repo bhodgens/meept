@@ -220,6 +220,13 @@ type DelegateManager struct {
 	// default closure never arms an override.
 	runFn func(ctx context.Context, agentID, message, conversationID, modelRef string) (string, error)
 
+	// modelRefResolver is the R3-3 route-resolution seam (SetModelRefResolver):
+	// runChildTurn resolves the child's composed route through it BEFORE the
+	// turn launches, fail-closed — an unresolvable ref errors the child turn
+	// instead of silently degrading to the spec's own model pin. Nil-safe
+	// (legacy pass-through). Immutable after daemon wiring.
+	modelRefResolver func(ref string) (string, error)
+
 	mu       sync.RWMutex
 	children map[string]*childEntry // childID -> entry
 	// resuming holds the in-flight resume claims (C11): childIDs between
@@ -297,14 +304,42 @@ func (m *DelegateManager) SetRunFunc(f func(ctx context.Context, agentID, messag
 	m.runFn = f
 }
 
+// SetModelRefResolver installs the delegate route-resolution seam (R3-3):
+// runChildTurn resolves the child's recorded route through it BEFORE the turn
+// launches, and an unresolvable ref FAILS the child turn instead of silently
+// degrading to the spec's own model pin (the pre-C10 allowlist bypass).
+// Satisfied structurally by *llm.Resolver's ResolveEscalationRef (an alias
+// name or "provider/model" ref -> usable loop model ref, errors when unknown).
+// nil keeps the legacy pass-through (the ref rides raw; tests and unwired
+// registries never regress).
+func (m *DelegateManager) SetModelRefResolver(f func(ref string) (string, error)) {
+	if f == nil {
+		return
+	}
+	m.modelRefResolver = f
+}
+
 // runChildTurn executes one child turn through the run seam with the
 // record's resolved route as the model override (a no-op override when the
 // route is empty — the identity-resolution default).
+//
+// R3-3 (fail-closed route resolution): when a resolver seam is wired, the
+// composed ref is resolved BEFORE the turn runs; an unresolvable ref returns
+// a clear route error so the child turn FAILS rather than silently running
+// the spec model with the recorded route dropped (warn-and-degrade let a
+// mistyped or since-removed route bypass the C10 allowlist gate silently).
 func (m *DelegateManager) runChildTurn(ctx context.Context, rec ChildRecord, message string) (string, error) {
 	modelRef := rec.Model
 	if rec.Provider != "" && rec.Model != "" {
 		// provider/model form — the resolver's direct-reference shape.
 		modelRef = rec.Provider + "/" + rec.Model
+	}
+	if m.modelRefResolver != nil && modelRef != "" {
+		resolved, err := m.modelRefResolver(modelRef)
+		if err != nil {
+			return "", fmt.Errorf("delegate: route %q for child %s does not resolve: %w", modelRef, rec.ChildID, err)
+		}
+		modelRef = resolved
 	}
 	if m.runFn == nil {
 		if m.reg == nil {
