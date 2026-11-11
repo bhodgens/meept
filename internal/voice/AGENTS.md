@@ -64,7 +64,16 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   codec-derived, 20 ms: L16@16k = 640 bytes (s16le, NOT big-endian RTP
   L16), PCMU@8k = 160 bytes. The Telnyx start frame
   (`start.media_format`) is the authority for what was negotiated; PCMU
-  triggers mu-law transcode both directions.
+  triggers mu-law transcode both directions. The client pair namespace
+  (`<ccid>.c.in` / `<ccid>.c.out`, local-leg client transport) is NEVER
+  swept by ChildProc.spawn's stale sweep - only child-pair files are
+  (a respawn concurrent with another live call must not delete the
+  client transport; bughunt 2026-11-10 A9). Daemon->child TEXT writes
+  (TextServer.Send/SendRaw) are bounded by a 2 s write deadline, the
+  child's own textWriteTimeout posture mirrored: a wedged child conn
+  degrades to a write error, never blocks the talk loop or releaseCall's
+  end-frame send (bughunt 2026-11-10 A4; the end-frame send must NEVER
+  block teardown).
 - Unix socket paths bind only under the kernel sun_path limit (103
   bytes on macOS). Production paths live under `$MEEPT_HOME` and are
   fine; e2e sandboxes shorten the test process TMPDIR for this (leaf
@@ -135,7 +144,12 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   with the holder and the peer flush waits for the holder's next
   quiet-final release, so a parked prompt can never flush between the
   holder's sub-turns (the release->reclaim window of the 07:32-07:34
-  chain). Why the blind arm was
+  chain). The defer branch arms a ONE-SHOT watchdog at one margin
+  (reason=floor_watchdog): a live chain's own edges invalidate it (gen
+  bump on every terminal edge), but a holder whose LLM hangs forever
+  after chaining (turn cap 0, reaper suspended mid-turn) dispatches no
+  further edges, so the watchdog is the bounded backstop - the fire
+  bypasses the chain guard AND the busy gate and releases for real. Why the blind arm was
   still early (link-2fdc3f5fd8d81805: 3/4 drained releases fired, but
   MID-REPLY - the child's inter-sentence synth gaps of 1.4-3.8 s exceed
   the 1 s quiescence window, so pending==0+quiet faked a drain while
@@ -452,8 +466,14 @@ store. Invariants a future agent must NOT break:
   average, so speaker-through-mic echo never self-trips and the agent's
   own loud TTS never interrupts itself (feeding the VAD outgoing PCM was
   a pinned bug, fixed 615808e3). The trip shares the noteBargeIn latch
-  (one interrupt per barge-in, F-1 re-arm by the next say) and the
-  pendingInterrupt handshake keeps the C5 interrupt-before-prompt order
+  (per-barge-in, F-1 re-arm by the next say); the splice re-arms
+  ONLY on FRESH audio of the new turn (bughunt 2026-11-10 A6): the
+  interrupt bumps the splice's barge generation; chunks read before the
+  bump or within the post-cancel residue window (when playback was live
+  at the cancel) are tagged stale and DISCARDED by the pacer - the
+  interrupted stream's buffered tail can neither re-arm the latch nor
+  replay over the new answer. The pendingInterrupt handshake keeps the
+  C5 interrupt-before-prompt order
   even though the RMS trip fires on the audio-pump goroutine; mic PCM
   keeps flowing to STT during playback so the employee reforms from what
   the caller said. The trip's STT EVIDENCE is ONE-SHOT: a trip zeroes

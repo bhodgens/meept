@@ -309,25 +309,18 @@ func (p *ChildProc) spawn(ctx context.Context) error {
 	// The text socket is NOT cleaned here: it is the daemon's OWN live
 	// listener (TextServer.Start removes stale state at bind time), and
 	// removing the live socket file would break every future dial to it.
-	// Only the per-call audio pair files (leaf 03 AudioPair removes its own
+	// Only the CHILD-pair audio files (leaf 03 AudioPair removes its own
 	// pair at Close; leftovers come from a crashed call) are swept.
+	// The CLIENT pair namespace (<ccid>.c.in / <ccid>.c.out, local-leg
+	// client transport) is EXCLUDED (bughunt 2026-11-10 A9): those files
+	// are LIVE while another local call runs — a respawn concurrent with
+	// a second call used to delete them mid-stream. Client pairs clean up
+	// through their own AudioPair.Close, exactly like the child pairs;
+	// the sweep only ever owned the crashed-child leftovers.
 	if err := os.MkdirAll(p.cfg.AudioDir, 0o755); err != nil {
 		return fmt.Errorf("voice child: create audio dir %s: %w", p.cfg.AudioDir, err)
 	}
-	if stale, err := filepath.Glob(filepath.Join(p.cfg.AudioDir, "*.in")); err == nil {
-		for _, f := range stale {
-			if rmErr := os.Remove(f); rmErr != nil { //nolint:mutexio // best-effort stale cleanup, no lock held
-				p.log.Debug("voice: stale audio remove", "path", f, "err", rmErr)
-			}
-		}
-	}
-	if stale, err := filepath.Glob(filepath.Join(p.cfg.AudioDir, "*.out")); err == nil {
-		for _, f := range stale {
-			if rmErr := os.Remove(f); rmErr != nil { //nolint:mutexio // best-effort stale cleanup, no lock held
-				p.log.Debug("voice: stale audio remove", "path", f, "err", rmErr)
-			}
-		}
-	}
+	sweepChildPairStale(p.log, p.cfg.AudioDir)
 
 	// Start token: crypto/rand, delivered through STDIN only (never argv,
 	// never env). Generation failure fails the spawn - an empty token is a
@@ -410,6 +403,28 @@ func (p *ChildProc) spawn(ctx context.Context) error {
 
 	p.logRSS("spawn", pid)
 	return nil
+}
+
+// sweepChildPairStale removes stale CHILD-pair socket files (<ccid>.in /
+// <ccid>.out) under dir, skipping the client-pair namespace (<ccid>.c.in /
+// <ccid>.c.out — suffix ".c" before ".in"/".out"; local.go creates those as
+// the LIVE client transport of concurrent local calls). Best-effort:
+// removal errors are logged and never fail the spawn.
+func sweepChildPairStale(log *slog.Logger, dir string) {
+	for _, pattern := range []string{"*.in", "*.out"} {
+		stale, err := filepath.Glob(filepath.Join(dir, pattern))
+		if err != nil {
+			continue
+		}
+		for _, f := range stale {
+			if strings.HasSuffix(f, ".c.in") || strings.HasSuffix(f, ".c.out") {
+				continue // live client-pair namespace: never swept
+			}
+			if rmErr := os.Remove(f); rmErr != nil { //nolint:mutexio // best-effort stale cleanup, no lock held
+				log.Debug("voice: stale audio remove", "path", f, "err", rmErr)
+			}
+		}
+	}
 }
 
 // newStartToken generates 32 hex-encoded random bytes.

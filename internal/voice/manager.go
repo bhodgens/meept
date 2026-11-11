@@ -357,9 +357,28 @@ func (m *Manager) HandleCallEvent(ctx context.Context, ev telnyx.CallEvent) erro
 				m.failUntracked(ev.CallControlID, fmt.Sprintf("inbound spawn failed: %v", err))
 				return err
 			}
+			// Spawn-completion re-check (bughunt 2026-11-10 A3, HIGH): the
+			// done channel was registered BEFORE the spawn, so a hangup
+			// racing the in-flight spawn ran releaseOnce (closed + deleted
+			// done, fired the fan-out) before this late m.calls insert.
+			// Registering the call anyway leaked its cancel forever — for
+			// a phone leg with no media WS there is no spliceRunner/reaper
+			// to ever tear it down, pinning the employee ErrBusy until
+			// restart. If the done entry is gone the call was already
+			// released: unwind immediately — cancel the session and push
+			// the registry/goal/effects release through the SAME funnel
+			// (FailOutcome -> releaseOnce -> fireRelease; the hook's
+			// per-key once-guards make the second fire safe).
 			m.mu.Lock()
-			m.calls[ev.CallControlID] = cancel
+			_, doneLive := m.done[ev.CallControlID]
+			if doneLive {
+				m.calls[ev.CallControlID] = cancel
+			}
 			m.mu.Unlock()
+			if !doneLive {
+				cancel()
+				m.FailOutcome(ev.CallControlID, OutcomeFailed, "released during inbound spawn")
+			}
 		}
 		return nil
 	case "call.answered":

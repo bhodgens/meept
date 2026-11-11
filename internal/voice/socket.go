@@ -79,6 +79,16 @@ type TextServer struct {
 // child to send its start-token line when an expected token is armed.
 const textAuthTimeoutDefault = 5 * time.Second
 
+// textWriteTimeout bounds a single daemon->child text-socket write
+// (bughunt 2026-11-10 A4): the daemon's Send/SendRaw serialize on the
+// snapshot mutex by necessity (whole JSON lines must not interleave), so
+// the safety property comes from the deadline, matching the child's
+// voicechild.textWriteTimeout posture. A wedged child conn (kernel buffer
+// full because the child never reads) would otherwise block the talk loop
+// and releaseCall's best-effort end-frame send FOREVER — the release
+// contract says the end-frame send must NEVER block teardown.
+const textWriteTimeout = 2 * time.Second
+
 // SetExpectedToken arms the start-token authentication gate: a connecting
 // child must send token as its FIRST newline-terminated line before any C1
 // frame to be claimed (see TextServer doc). An empty token clears the gate
@@ -320,11 +330,33 @@ func (s *TextServer) Send(f Frame) error {
 	if conn == nil {
 		return errors.New("voice: no child connected on text socket")
 	}
+	return s.writeChild(conn, b, f.CallID, f.Event)
+}
+
+// writeChild performs the deadline-bounded write shared by Send and
+// SendRaw (bughunt 2026-11-10 A4). The deadline is the bound that keeps a
+// wedged child conn from stalling the talk loop or teardown: on timeout
+// the write is logged and surfaced as a write error — the same path a dead
+// conn takes, so readLoop's clearing of s.child and the caller's
+// error handling both behave identically.
+func (s *TextServer) writeChild(conn net.Conn, b []byte, callID, event string) error {
+	if err := conn.SetWriteDeadline(time.Now().Add(textWriteTimeout)); err != nil {
+		return fmt.Errorf("voice: set child write deadline: %w", err)
+	}
 	if _, err := conn.Write(b); err != nil {
 		// Surface the dead connection to the caller; readLoop will also
-		// notice and clear s.child.
+		// notice and clear s.child. A deadline expiry reads as a timeout
+		// error here: log it loudly since the conn is almost certainly
+		// wedged, not gone.
+		var ne net.Error
+		if errors.As(err, &ne) && ne.Timeout() {
+			s.logger.Warn("voice: child text write deadline exceeded (wedged conn)",
+				"call_id", callID, "event", event, "timeout", textWriteTimeout.String())
+		}
 		return fmt.Errorf("voice: write to child: %w", err)
 	}
+	// Clear the deadline so a later writer never inherits a stale bound.
+	_ = conn.SetWriteDeadline(time.Time{})
 	return nil
 }
 
@@ -359,12 +391,7 @@ func (s *TextServer) SendRaw(line []byte) error {
 	if conn == nil {
 		return errors.New("voice: no child connected on text socket")
 	}
-	if _, err := conn.Write(line); err != nil {
-		// Surface the dead connection to the caller; readLoop will also
-		// notice and clear s.child.
-		return fmt.Errorf("voice: write to child: %w", err)
-	}
-	return nil
+	return s.writeChild(conn, line, "", "keys")
 }
 
 // isClosed reports whether Close has been called.

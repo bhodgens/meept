@@ -382,8 +382,10 @@ func (l *LocalLeg) Open(ctx context.Context, employeeID, label string, voiceOver
 	// returns the CLIENT pair paths; the child pair paths never leave
 	// the daemon. Suffix ".c" (not ".cli"): the macOS sun_path limit is
 	// 103 bytes and e2e sandboxes run close to it. The spawn's stale
-	// sweep only removes *.in|*.out under AudioDir at spawn time, which
-	// runs BEFORE either pair is created.
+	// sweep runs BEFORE either pair is created here, and it skips the
+	// client-pair namespace entirely (bughunt 2026-11-10 A9): a spawn
+	// concurrent with another live local call must not delete that
+	// call's <ccid>.c.in/.c.out transport files.
 	cliPair, err := NewAudioPair(SocketDir(), ccid+".c")
 	if err != nil {
 		l.deps.Manager.FailOutcome(ccid, OutcomeFailed, fmt.Sprintf("client pair: %v", err))

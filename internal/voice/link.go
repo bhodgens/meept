@@ -129,6 +129,16 @@ const linkFloorFallbackDefault = 12 * time.Second
 // dispatches.
 const linkFloorTailPad = 250 * time.Millisecond
 
+// linkWatchdogReason is the releaseFloor reason carried by the
+// deferred-chain watchdog's own fire (bughunt 2026-11-10 A8): the
+// funnel must NOT re-defer on its own watchdog (the reDispatched guard
+// would loop forever), so the watchdog fire bypasses the chain branch
+// and releases the floor for real. The hold stays bounded at roughly
+// one margin past the deferred edge even when a chained holder's LLM
+// hangs forever (no further turn edges — turn cap 0, reaper suspended
+// mid-turn).
+const linkWatchdogReason = "floor_watchdog"
+
 // linkSilenceSeedChunks is the mic-join seed length in exact 640 B
 // L16@16k chunks (5 chunks = 100 ms of digital silence per side).
 // Enough to satisfy the splice's first-byte join gate, short enough to
@@ -734,6 +744,20 @@ func (c *LinkTurnCoordinator) marginFireRearmed(side string, gen uint64) {
 // and the peer flush is DEFERRED to the holder's next quiet-final
 // release. Flushing here would let the peer's parked prompt dispatch
 // between the holder's sub-turns and talk over its next sentence.
+//
+// The defer branch arms a ONE-SHOT bounded watchdog at c.margin
+// (bughunt 2026-11-10 A8): the contract says the chain's LIVE sub-turn
+// provides the release path (its turn_final re-arms the margin, its
+// played edge arms a fresh drain), but a holder whose LLM hangs forever
+// after chaining dispatches NO further edges — turn cap 0 disables the
+// turn cap and the silence reaper is suspended mid-turn, so the floor
+// would be held indefinitely. The watchdog is the backstop, not a
+// behavior change for live chains: a live sub-turn's own arms fire
+// first or cancel it (every terminal edge bumps releaseGen, which
+// invalidates the watchdog arm). On fire it releases through the same
+// funnel — kind=floor_watchdog, telemetry distinguishes it from a
+// drained/margin release.
+//
 // When the guard does release: clears the floor, drops the holder
 // marker + the side's ccid (a stale drain for a floor-less slot must
 // never re-match), logs the telemetry edge (kind=floor_released,
@@ -744,26 +768,39 @@ func (c *LinkTurnCoordinator) releaseFloor(side, ccid string, seq, gen uint64, r
 	c.mu.Lock()
 	st := c.sideLocked(side)
 	stillCurrent := st.releaseGen == gen && !st.busy && st.floorHeld && !c.closed && c.holder == side
-	if stillCurrent && st.reDispatched {
+	if stillCurrent && st.reDispatched && reason != linkWatchdogReason {
 		// Holder chained: keep the floor with the holder and defer the
-		// peer flush to the holder's next release. NO watchdog re-arm
-		// here: the live subturn's own turn_final arms a fresh margin
-		// (and its own played edge arms a fresh drain), so the retained
-		// floor always has a release path through the holder's stream.
-		// Re-arming a margin from this branch would loop forever — the
-		// fire would hit the same reDispatched guard and defer again.
+		// peer flush to the holder's next release. The LIVE sub-turn's
+		// own turn_final arms a fresh margin (and its own played edge
+		// arms a fresh drain), so a live chain always has a release
+		// path through the holder's stream, and every live edge bumps
+		// releaseGen, invalidating the watchdog armed below. The
+		// watchdog is the A8 backstop for a holder whose LLM hangs
+		// forever after chaining (no further edges: turn cap 0
+		// disables the turn cap, the silence reaper is suspended
+		// mid-turn). Its fire carries reason=linkWatchdogReason, which
+		// bypasses BOTH the chain branch and the busy gate (a hung
+		// sub-turn is busy forever by definition) and releases for
+		// real — without the bypass the fire would land on the same
+		// reDispatched guard, defer again, and loop forever.
 		if st.releaseTimer != nil {
 			st.releaseTimer.Stop()
 		}
-		st.releaseTimer = nil
-		st.releaseGen++ // this arm is consumed; the chain's next edges own the floor
+		st.releaseGen++ // this arm is consumed; the watchdog owns the floor until a live edge supersedes it
+		watchGen := st.releaseGen
+		watchCcid := st.ccid
+		st.releaseTimer = time.AfterFunc(c.margin, func() {
+			c.releaseFloor(side, watchCcid, seq, watchGen, linkWatchdogReason)
+		})
 		chainCcid, chainSeq := st.ccid, st.seq
 		c.mu.Unlock()
-		c.log.Info("voice: link turn: release deferred (holder chained)", "side", side,
-			"kind", "floor_release_deferred", "reason", reason, "ccid", chainCcid, "seq", chainSeq)
+		c.log.Info("voice: link turn: release deferred (holder chained, watchdog armed)", "side", side,
+			"kind", "floor_release_deferred", "reason", reason, "ccid", chainCcid, "seq", chainSeq,
+			"watchdog_ms", c.margin.Milliseconds())
 		return
 	}
-	if stillCurrent {
+	watchdog := reason == linkWatchdogReason && st.releaseGen == gen
+	if stillCurrent || watchdog {
 		st.floorHeld = false
 		if st.releaseTimer != nil {
 			st.releaseTimer.Stop()
@@ -773,10 +810,16 @@ func (c *LinkTurnCoordinator) releaseFloor(side, ccid string, seq, gen uint64, r
 			st.marginTimer.Stop()
 			st.marginTimer = nil
 		}
+		st.busy = false // a watchdog release ends the hung sub-turn's floor claim
 		st.ccid = ""
 		st.reDispatched = false
 		st.lastFinalCcid = ""
-		c.holder = ""
+		if c.holder == side {
+			c.holder = ""
+		}
+	}
+	if watchdog {
+		stillCurrent = true
 	}
 	peerLoop := c.peerLocked(side).loop
 	c.mu.Unlock()

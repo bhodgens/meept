@@ -181,15 +181,25 @@ func (c *RawMicCapture) StderrTail() string {
 	return strings.TrimSpace(t.String())
 }
 
-// Read implements io.Reader over the armed source.
+// Read implements io.Reader over the armed source. The blocking read runs
+// OUTSIDE c.mu (bughunt 2026-11-10 A7): the old shape held the mutex
+// across pipe.Read, so a stalled ffmpeg (pipe never fills) made Close —
+// which needs the same mutex for cancel+Wait — hang forever. Instead the
+// source is snapshotted under the lock and the read races only with the
+// snapshot: after Close kills ffmpeg the in-flight read returns EOF/error
+// on the dead pipe, which is exactly the contract. File mode is identical
+// (the snapshot reader survives Close's file=nil; a read after Close just
+// errors on the closed fd).
 func (c *RawMicCapture) Read(p []byte) (int, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.file != nil {
-		return c.file.Read(p)
+	file := c.file
+	pipe := c.pipe
+	c.mu.Unlock()
+	if file != nil {
+		return file.Read(p)
 	}
-	if c.pipe != nil {
-		return c.pipe.Read(p)
+	if pipe != nil {
+		return pipe.Read(p)
 	}
 	return 0, io.EOF
 }
