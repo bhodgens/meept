@@ -2785,11 +2785,33 @@ func (h *ChatHandler) resumeQuotaParkedTurn(ctx context.Context, turn QuotaParke
 	// completes. Defer delivery exactly like resumeThrottledTurn does
 	// (loop_park.go): the later resume owns persistExchange + sendResponse +
 	// turn.terminal.
+	//
+	// R2-2 (regression-review 2026-11-11): the parked shape is AMBIGUOUS —
+	// loop.go's reasoningCycle also returns ("", nil) when the state layer
+	// silently ABSORBS an LLM failure (the old
+	// `handled == nil -> return "", nil` fall-through). Deferring on that
+	// shape hung the client forever: no response, no terminal, no park.
+	// Disambiguate by PARKED-RECORD PRESENCE: defer ONLY when a park row for
+	// THIS conversation actually exists on the loop's parker (a genuine
+	// re-park); otherwise terminalize honestly (failed, user-visible).
 	if strings.TrimSpace(reply) == "" && err == nil {
-		h.logger.Info("quota resume re-parked mid-flight — deferring delivery",
+		if loop.TurnParker().HasPendingForConversation(turn.ConversationID) {
+			h.logger.Info("quota resume re-parked mid-flight — deferring delivery",
+				"session_id", turn.SessionID,
+				"conversation_id", turn.ConversationID,
+			)
+			return
+		}
+		// Absorbed-error shape: no park row anywhere — the turn is NOT
+		// parked and will never resume. Terminalize honestly instead of
+		// hanging the awaiting client (same failed-terminal shape as the
+		// re-park-declined failure branch above).
+		absorbed := errors.New("turn produced no reply and is not parked (state layer absorbed an LLM failure)")
+		h.logger.Warn("quota resume returned the empty shape with no parked record — terminalizing (absorbed failure)",
 			"session_id", turn.SessionID,
 			"conversation_id", turn.ConversationID,
 		)
+		h.failQuotaResumeTurn(turn, absorbed)
 		return
 	}
 
@@ -3236,11 +3258,46 @@ func (h *ChatHandler) resumeParkedTurn(ctx context.Context, turn ParkedTurn) {
 	// completed turn. Defer delivery exactly like resumeThrottledTurn — an
 	// empty reply persisted/sent/terminalized here would close a turn that
 	// is actually parked (duplicate delivery under one TurnID later).
+	//
+	// R2-2 (regression-review 2026-11-11): parked-record-presence
+	// disambiguation, mirroring the quota resume guard above — the same
+	// ("", nil) shape also arises when the state layer silently ABSORBS an
+	// LLM failure (no park row anywhere). Defer ONLY on a real park row for
+	// this conversation; otherwise emit the honest failed terminal instead
+	// of hanging the client.
 	if strings.TrimSpace(reply) == "" && err == nil {
-		h.logger.Info("budget resume re-parked mid-flight — deferring delivery",
+		if loop.TurnParker().HasPendingForConversation(turn.ConversationID) {
+			h.logger.Info("budget resume re-parked mid-flight — deferring delivery",
+				"session_id", turn.SessionID,
+				"conversation_id", turn.ConversationID,
+			)
+			return
+		}
+		// Absorbed-error shape with no park row: terminalize honestly
+		// (failed, user-visible) rather than leaving the awaiter hanging.
+		absorbed := errors.New("turn produced no reply and is not parked (state layer absorbed an LLM failure)")
+		h.logger.Warn("budget resume returned the empty shape with no parked record — terminalizing (absorbed failure)",
 			"session_id", turn.SessionID,
 			"conversation_id", turn.ConversationID,
 		)
+		h.sendResponse("budget-resume-"+turn.SessionID, ChatResponse{
+			ConversationID: turn.SessionID,
+			Error:          "Auto-resume failed: " + absorbed.Error(),
+		})
+		if turn.TurnID != "" {
+			failTraceID, failTurnSpanID := h.turnRegistry.TraceForTurn(turn.TurnID)
+			h.publishTurnTerminal(TurnTerminalEvent{
+				ConversationID: turn.ConversationID,
+				SessionID:      turn.SessionID,
+				TurnID:         turn.TurnID,
+				HandlerCase:    "budget_resume",
+				Status:         "failed",
+				Reply:          "I encountered an error: Auto-resume failed: " + absorbed.Error(),
+				Error:          absorbed.Error(),
+				TraceID:        failTraceID,
+				TurnSpanID:     failTurnSpanID,
+			})
+		}
 		return
 	}
 

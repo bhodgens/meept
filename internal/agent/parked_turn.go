@@ -433,6 +433,28 @@ func (p *TurnParker) Pending() int {
 	return len(p.parked)
 }
 
+// HasPendingForConversation reports whether any parked record targets the
+// given conversation (ParkedTurnRecord.ConversationID). This is the parked-
+// presence probe the C3 resume guards consult (regression-review R2,
+// 2026-11-11): the parked shape ("", nil) from RunOnceWithParts is ambiguous
+// between a genuine mid-flight re-park (a record for THIS conversation now
+// sits on the parker) and a state layer that silently ABSORBED an LLM
+// failure (no park row at all). Only the former may defer delivery; the
+// latter must terminalize or the awaiting client hangs forever.
+func (p *TurnParker) HasPendingForConversation(conversationID string) bool {
+	if p == nil || conversationID == "" {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, turn := range p.parked {
+		if turn.ConversationID == conversationID {
+			return true
+		}
+	}
+	return false
+}
+
 // Next returns the earliest resume time among parked records of the given
 // failure class (leaf 04's per-class surface), and whether any exist.
 func (p *TurnParker) Next(class llm.FailureClass) (time.Time, bool) {

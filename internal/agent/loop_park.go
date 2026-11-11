@@ -688,12 +688,37 @@ func (l *AgentLoop) resumeThrottledTurn(ctx context.Context, rec ParkedTurnRecor
 		return
 	}
 	if strings.TrimSpace(reply) == "" {
-		// Parked again inside the resume (re-throttle re-park: the loop
-		// returns the parked shape ("", nil) — the next generation's
-		// payload already carries the TurnID via resumeCtx) or an empty
-		// completion. Nothing to deliver; a terminal here would falsely
-		// close a turn that is still parked.
-		l.logger.Info("resumed throttle turn parked again or produced no reply — deferring delivery",
+		// Ambiguous parked shape, same class as the C3 resume guards
+		// (regression-review R2): ("", nil) is a genuine mid-flight
+		// re-park (re-throttle) only when a park record for THIS
+		// conversation now sits on the parker; an empty completion from
+		// an absorbed failure has no park row and must terminalize or
+		// the awaiting client hangs forever.
+		if !l.TurnParker().HasPendingForConversation(turn.ConversationID) {
+			l.logger.Warn("resumed throttle turn produced an empty reply with no park row — terminalizing",
+				"session_id", rec.SessionID,
+				"conversation_id", turn.ConversationID,
+			)
+			if handler := l.throttleResumeDeliveryHandler(); handler != nil && turn.TurnID != "" {
+				tID, tSID := handler.turnRegistry.TraceForTurn(turn.TurnID)
+				handler.publishTurnTerminal(TurnTerminalEvent{
+					ConversationID: turn.ConversationID,
+					SessionID:      rec.SessionID,
+					TurnID:         turn.TurnID,
+					HandlerCase:    "throttle_resume",
+					Status:         "failed",
+					Reply:          "I encountered an error: the resumed turn completed without a reply.",
+					Error:          "empty reply, no re-park record",
+					TraceID:        tID,
+					TurnSpanID:     tSID,
+				})
+			}
+			return
+		}
+		// Genuine re-park: the next generation's payload already carries
+		// the TurnID via resumeCtx. Nothing to deliver; a terminal here
+		// would falsely close a turn that is still parked.
+		l.logger.Info("resumed throttle turn parked again — deferring delivery",
 			"session_id", rec.SessionID,
 			"conversation_id", turn.ConversationID,
 		)

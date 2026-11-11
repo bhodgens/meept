@@ -260,6 +260,16 @@ func (s *Scheduler) recoverInFlightDeliveries() error {
 // the tick's occurrence means the delivery actually completed — the crash
 // was AFTER delivery), and re-delivers the rest exactly once per pass
 // (at-least-once; downstream turn_id dedupe absorbs duplicates).
+//
+// R2 (regression-review 2026-11-11): the at-least-once guarantee honestly
+// applies ONLY to receipt-writing (session-pinned) jobs. A legacy
+// fire-and-forget agent job (AgentConfig.TargetSessionID == "",
+// jobs.go Execute) writes NO receipts and mints a FRESH turn id per
+// delivery, so hasReceiptForTick is permanently false for every claim —
+// sweeping it re-delivered every historical claim on EVERY daemon Start
+// with a new, dedupe-proof turn id. Receipt-less job kinds are excluded
+// from this sweep (logged); their claim rows simply age out through
+// pruneExpiredClaims.
 func (s *Scheduler) recoverClaimedTicksWithoutReceipt() error {
 	if s.claims == nil {
 		return nil
@@ -273,6 +283,20 @@ func (s *Scheduler) recoverClaimedTicksWithoutReceipt() error {
 		cfg, ok := s.store.Get(c.JobID)
 		if !ok {
 			continue // job deleted since the claim; nothing to recover
+		}
+		if !jobKindWritesReceipts(cfg) {
+			// Fire-and-forget (or non-agent) job: no receipts are ever
+			// written, so no-receipt says nothing about delivery — the
+			// sweep cannot distinguish a lost tick from a delivered one
+			// and would re-deliver with an un-dedupable fresh turn id on
+			// every Start. Skip with a log (debug: this fires for every
+			// legacy claim on every boot).
+			s.logger.Debug("scheduler: skipping claim recovery for receipt-less job kind",
+				"job_id", c.JobID,
+				"tick", c.Tick,
+				"reason", "job delivery mode records no receipts (fire-and-forget); no at-least-once recovery possible",
+			)
+			continue
 		}
 		if hasReceiptForTick(cfg, c.Tick) {
 			continue // receipt exists: recoverInFlightDeliveries owns it
@@ -293,6 +317,18 @@ func (s *Scheduler) recoverClaimedTicksWithoutReceipt() error {
 		s.dispatchMissed(job, c.Tick, 0)
 	}
 	return nil
+}
+
+// jobKindWritesReceipts reports whether the job config's delivery mode
+// records durable delivery receipts. Only session-pinned agent jobs
+// (AgentConfig.TargetSessionID set) write them — AgentJob.Execute (jobs.go)
+// skips every recordDelivery call for fire-and-forget dispatch and the
+// non-agent job kinds (shell/reminder/optimization/security/learning) have
+// no delivery-receipt path at all. Recovery sweeps consult this so the
+// at-least-once claim stays honest: a job that never writes receipts has no
+// no-receipt signal for the sweep to act on.
+func jobKindWritesReceipts(cfg JobConfig) bool {
+	return cfg.AgentConfig != nil && cfg.AgentConfig.TargetSessionID != ""
 }
 
 // hasReceiptForTick reports whether the job's delivery history carries a

@@ -2332,9 +2332,18 @@ func (l *AgentLoop) scopeDefinitionsToActive(defs []llm.ToolDefinition, active [
 const maxTransformFixpointPasses = 5
 
 // cloneMessagesForTransform copies the message slice (including ToolCalls
-// slices) so transform hooks that mutate elements in place cannot write
-// placeholders into conversation history. GetWindowedMessages results feed
-// later turns; the transform lane must only reshape what THIS LLM call sees.
+// slices and Parts slices) so transform hooks that mutate elements in place
+// cannot write placeholders into conversation history. GetWindowedMessages
+// results feed later turns; the transform lane must only reshape what THIS
+// LLM call sees.
+//
+// R2-3 (regression-review 2026-11-11): the clone previously shared the Parts
+// backing array — AddUserMessageWithParts stores Parts in history, and the
+// C18 pre-LLM masking (MaskOutboundScoped writes p.Text through &Parts[j])
+// then wrote [PII:*] tokens through the shared slice into the stored
+// history. Parts are deep-copied here like ToolCalls, so masking a
+// provider-bound message leaves the history-stored Parts byte-identical
+// (HISTORY NON-MUTATION).
 func cloneMessagesForTransform(messages []llm.ChatMessage) []llm.ChatMessage {
 	cloned := make([]llm.ChatMessage, len(messages))
 	copy(cloned, messages)
@@ -2343,6 +2352,11 @@ func cloneMessagesForTransform(messages []llm.ChatMessage) []llm.ChatMessage {
 			tc := make([]llm.ToolCall, len(cloned[i].ToolCalls))
 			copy(tc, cloned[i].ToolCalls)
 			cloned[i].ToolCalls = tc
+		}
+		if len(cloned[i].Parts) > 0 {
+			parts := make([]llm.ContentPart, len(cloned[i].Parts))
+			copy(parts, cloned[i].Parts)
+			cloned[i].Parts = parts
 		}
 	}
 	return cloned
@@ -7286,29 +7300,6 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 				// Feature off / one-hop give-up: surface the ORIGINAL
 				// refusal unchanged.
 				return nil, rerr
-			}
-			return nil, err
-		}
-
-		// Tier-floor verdict (llm-serving-tiers, errors_tier.go): a
-		// *TierFloorError is a CLASSIFIED terminal error (NonRetryable,
-		// ErrAllModelsQuotaBlocked family) — the tier policy refused the
-		// NEXT rotation hop because it would exceed the configured
-		// degradation depth. It must NEVER fall into the generic
-		// RecordAliasFailure+RotateToNextModel branch below: that would
-		// cooldown-damage healthy members for a policy verdict and
-		// amplify the degraded-tier spray the floor exists to bound.
-		// No rotation retry: surface the typed error verbatim so the
-		// caller decides (relax the tier policy or accept the failure).
-		if llm.IsTierFloorError(err) {
-			if floorErr, ok := llm.AsTierFloorError(err); ok {
-				l.logger.Warn("tier degradation floor reached — surfacing without rotation",
-					"provider", floorErr.ProviderID,
-					"model", floorErr.ModelID,
-					"depth", floorErr.Depth,
-					"limit", floorErr.Limit,
-					"capability", floorErr.Capability,
-				)
 			}
 			return nil, err
 		}

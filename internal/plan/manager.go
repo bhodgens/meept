@@ -2,6 +2,7 @@ package plan
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -471,7 +472,25 @@ func (m *PlanManager) CreatePlanWithGoal(ctx context.Context, title, description
 }
 
 // SubmitPlan transitions a plan from draft to pending_approval (or auto-approves).
+//
+// R2-5 (regression-review 2026-11-11): a plan sitting in PLANNING (the
+// RevisePlan rework state) is accepted here via the guarded table's
+// planning->draft edge — CompletePlanningRevision's transition is fired
+// FIRST, so the revised plan re-enters the normal draft lifecycle instead of
+// stranding in planning (SubmitPlan was draft-only and no production caller
+// ever invoked CompletePlanningRevision). A non-planning plan keeps the
+// byte-identical draft->pending_approval CAS. Without retention pruning
+// touching planning rows promptly, the pre-fix behavior left every revised
+// plan permanently unsubmitable.
 func (m *PlanManager) SubmitPlan(ctx context.Context, planID string) error {
+	// Planning-strand rescue: a revised plan reaches submit through the
+	// ONE legal planning->draft writer. No-op (table-refused, CAS-guarded)
+	// for every other state, so draft/pending_approval/... rows are
+	// untouched and a concurrent racer that moved the row loses cleanly.
+	// A missing row is surfaced by the draft CAS below, not silenced here.
+	if err := m.CompletePlanningRevision(ctx, planID); err != nil && !errors.Is(err, ErrPlanNotFound) {
+		m.logger.Debug("submit: plan not in planning — normal submit path", "plan_id", planID)
+	}
 	// Table-driven CAS (C-P4): draft -> pending_approval, with the from-set
 	// pinned to draft — the pre-migration guard's exact accepted set.
 	if err := m.transitionFrom(ctx, planID, []PlanState{StateDraft}, StatePendingApproval); err != nil {
