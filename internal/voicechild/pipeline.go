@@ -202,6 +202,21 @@ type pipeline struct {
 	// repeat re-stamped lastFinalAt and re-authorized stale barge-in
 	// trips).
 	lastFinalText string
+	// lastDispatchAt (playMu) is when consumeTranscripts last succeeded
+	// dispatching a FINAL prompt frame (emitPrompt with tr.Final==true)
+	// — the start of the currently in-flight turn. The RMS STT-evidence
+	// gate additionally requires lastFinalAt to POST-DATE it (defect
+	// 2026-11-11, live call local-611f46b1c3fe5c5b): evidence older
+	// than the current turn's dispatch is the user's OWN prompt that
+	// started that turn, never new speech — so any echo/noise RMS
+	// window inside the 10 s tail after dispatch was auto-authorized
+	// and cancelled the reply mid-sentence (observed at 2.9 s and 1.2 s
+	// into answers). Genuine new caller speech re-stamps lastFinalAt
+	// through consumeTranscripts and re-earns the trip; whisper finals
+	// also carry their own interrupt directly via the C5 speaking-final
+	// path in consumeTranscripts, so the RMS lane stays purely an
+	// early-warning lane that must never self-authorize.
+	lastDispatchAt time.Time
 
 	// cancel cancels the pipeline's internal context (workers, streams).
 	cancel context.CancelFunc
@@ -507,6 +522,17 @@ func (p *pipeline) consumeTranscripts(trans <-chan Transcript) {
 		p.awaitPendingInterrupt()
 		if err := p.child.emitPrompt(p.ctx, p.ccid, tr.Text, tr.Final); err != nil {
 			p.logger.Error("voicechild: emit prompt", "err", err, "call_id", p.ccid)
+		} else if tr.Final {
+			// Dispatch watermark (defect 2026-11-11): a successfully
+			// dispatched FINAL prompt STARTS the in-flight turn, so
+			// the turn's dispatch epoch is stamped right after the
+			// emit. rmsBargeInCheck then refuses to let evidence that
+			// predates this watermark authorize a trip: it is the
+			// prompt that started this turn, never new speech (see
+			// lastDispatchAt).
+			p.playMu.Lock()
+			p.lastDispatchAt = time.Now()
+			p.playMu.Unlock()
 		}
 	}
 }
@@ -1290,6 +1316,21 @@ func rmsChunkOver(b []byte, threshold int) bool {
 // clears lastFinalAt, so re-tripping inside the same 10 s tail needs a
 // NEW final; the final that authorized the first trip already dispatched
 // the very turn the trip cancelled.
+// DISPATCH-WATERMARK rule (defect 2026-11-11, live call
+// local-611f46b1c3fe5c5b): the evidence must also POST-DATE the current
+// turn's dispatch (lastDispatchAt, stamped by consumeTranscripts right
+// after a final prompt emit succeeds). Evidence older than the dispatch
+// is the user's OWN prompt that STARTED this turn, never new speech —
+// without the watermark any echo/noise RMS window inside the 10 s tail
+// after dispatch was auto-authorized by that prompt's own final and
+// killed the reply mid-sentence (observed 2.9 s and 1.2 s into answers).
+// Genuine new caller speech re-stamps lastFinalAt via consumeTranscripts
+// and re-earns the trip. A zero (or pre-first-dispatch) watermark
+// suppresses too: no turn has been dispatched, so there is no
+// evidence-backed proof a new utterance is talking over a live answer.
+// The C5 speaking-final path (consumeTranscripts) carries a final's
+// interrupt directly and is untouched — RMS remains only the
+// early-warning lane, which must never self-cancel.
 func (p *pipeline) rmsBargeInCheck(chunk []byte) {
 	if !p.local || p.bargeInRms <= 0 {
 		return // phone legs keep the STT-partial trigger; VAD never runs
@@ -1356,6 +1397,31 @@ func (p *pipeline) rmsBargeInCheck(chunk []byte) {
 					return -1
 				}
 				return time.Since(p.lastFinalAt).Milliseconds()
+			}())
+		p.playMu.Unlock()
+		return
+	}
+	// Dispatch watermark (defect 2026-11-11, live call
+	// local-611f46b1c3fe5c5b): the recent final above must also POST-DATE
+	// the current turn's dispatch. Evidence older than lastDispatchAt is
+	// the user's OWN prompt that STARTED this turn — never new speech —
+	// so an echo/noise window in the first 10 s of a fast answer was
+	// auto-authorized by that prompt's own final and cancelled the reply
+	// mid-sentence. A zero watermark (no final has successfully dispatched
+	// yet this call) suppresses too: RMS is only the early-warning lane,
+	// and the C5 speaking-final path handles a real final's interrupt
+	// directly. Genuine new caller speech re-stamps lastFinalAt via
+	// consumeTranscripts, lands after the watermark, and re-earns the
+	// trip. Same suppression shape as the window gate above: latch and
+	// playback untouched, the window accumulators were already reset.
+	if p.lastDispatchAt.IsZero() || !p.lastFinalAt.After(p.lastDispatchAt) {
+		p.logger.Debug("voicechild: rms barge-in suppressed (evidence predates turn dispatch)",
+			"call_id", p.ccid,
+			"since_dispatch_ms", func() int64 {
+				if p.lastDispatchAt.IsZero() {
+					return -1
+				}
+				return time.Since(p.lastDispatchAt).Milliseconds()
 			}())
 		p.playMu.Unlock()
 		return

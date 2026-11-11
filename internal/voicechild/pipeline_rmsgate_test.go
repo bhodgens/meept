@@ -19,6 +19,14 @@ import (
 
 // rmsGateEvidence sets the pipeline's last-final timestamp as
 // consumeTranscripts would, under the same lock regime (playMu).
+//
+// Dispatch watermark (defect 2026-11-11): a real evidence final arrives
+// AFTER the current turn's prompt dispatched, so the helper lays a
+// watermark 2 s before the stamp as well — evidence that post-dates the
+// dispatch is what the rmsBargeInCheck gate requires. Tests that want to
+// pin the predates-dispatch suppression call dispatchWatermark after
+// stamping (a stamp taken AFTER the helper resets the watermark to a
+// later time than the evidence).
 func rmsGateEvidence(p *pipeline, age time.Duration) {
 	p.playMu.Lock()
 	defer p.playMu.Unlock()
@@ -26,7 +34,22 @@ func rmsGateEvidence(p *pipeline, age time.Duration) {
 		p.lastFinalAt = time.Time{} // zero: never saw a final
 		return
 	}
+	p.lastDispatchAt = time.Now().Add(-(age + 2*time.Second))
 	p.lastFinalAt = time.Now().Add(-age)
+}
+
+// dispatchWatermark sets the pipeline's last-dispatch timestamp the way
+// consumeTranscripts does after a final prompt emits successfully (playMu
+// regime). Positive `age` = the dispatch happened that long ago; negative
+// = zero watermark (no final has dispatched this call yet).
+func dispatchWatermark(p *pipeline, age time.Duration) {
+	p.playMu.Lock()
+	defer p.playMu.Unlock()
+	if age < 0 {
+		p.lastDispatchAt = time.Time{}
+		return
+	}
+	p.lastDispatchAt = time.Now().Add(-age)
 }
 
 // stampRecentFinal is the tests' shorthand for "whisper just finalized
