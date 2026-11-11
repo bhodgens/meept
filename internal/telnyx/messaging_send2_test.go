@@ -194,7 +194,7 @@ func TestSendSMS2CapturesRequest(t *testing.T) {
 		t.Errorf("Idempotency-Key %q is neither a dashed uuid nor 32-hex", key)
 	}
 	for _, kv := range [][2]string{
-		{"to", "+155****0099"},
+		{"to", "+15555510099"},
 		{"from", send2From},
 		{"text", "meept ack: received"},
 		{"messaging_profile_id", send2Profile},
