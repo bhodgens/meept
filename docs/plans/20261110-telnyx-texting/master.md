@@ -235,27 +235,27 @@ provenance is auditable in-tree.
 
 | Branch | Gate | Status |
 |---|---|---|
-| 01-webhook-hardening | 00T | PENDING |
-| 02-send-leg | 00T | PENDING |
-| 03-inbound-store | 00T | PENDING |
-| 04-replies-consent | 00T | PENDING (after 03-arming) |
+| 01-webhook-hardening | 00T | COMPLETE |
+| 02-send-leg | 00T | COMPLETE |
+| 03-inbound-store | 00T | COMPLETE |
+| 04-replies-consent | 00T | COMPLETE |
 
 ## Completion Tracking Table
 
 | Child | Status | Commit | Notes |
 |---|---|---|---|
-| 01/00T | PENDING | | |
-| 01/01 | PENDING | | |
-| 01/02 | PENDING | | |
-| 02/00T | PENDING | | |
-| 02/01 | PENDING | | |
-| 02/02 | PENDING | | |
-| 03/00T | PENDING | | |
-| 03/01 | PENDING | | |
-| 03/02 | PENDING | | |
-| 04/00T | PENDING | | |
-| 04/01 | PENDING | | |
-| 04/02 | PENDING | | |
+| 01/00T | COMPLETE | 63482243 | |
+| 01/01 | COMPLETE | 3837ff9a | ghost-window LRU ratified |
+| 01/02 | COMPLETE | e8e2dfa4 | incl gate amendment: legacy webhook test supersession |
+| 02/00T | COMPLETE | da648093 | line-197 mask repaired |
+| 02/01 | COMPLETE | 48f635e8 | |
+| 02/02 | COMPLETE | a8186602 | |
+| 03/00T | COMPLETE | fe478143 | |
+| 03/01 | COMPLETE | 044228ac | |
+| 03/02 | COMPLETE | 065337b3 | closes D6 |
+| 04/00T | COMPLETE | 4d0a0687 | |
+| 04/01 | COMPLETE | dc560d0f | |
+| 04/02 | COMPLETE | 99326c6c | |
 
 ## Integration Test Plan
 
@@ -298,3 +298,22 @@ provenance is auditable in-tree.
 - Q3: Should inbound non-STOP/YES messages publish a generic contact
   note to the ledger (employees "aware of texts")? Deferred to the
   dispatch tree.
+
+
+## Implementation Record (2026-11-10)
+
+All 12 nodes COMPLETE; commits 63482243/3837ff9a/e8e2dfa4 (webhook),
+da648093/48f635e8/a8186602 (send), fe478143/044228ac/065337b3 (inbound
++ D6 close), 4d0a0687/dc560d0f/99326c6c (replies). Orchestrator
+amendments: legacy webhook-test supersession (202->202 posture, unknown
+200) shipped in e8e2dfa4; gate mask-corruption repair on
+messaging_send2_test.go:197 in 48f635e8. Two contract readings ratified
+at gates: finalized status verbatim pass-through; YES split from START
+(A1). NonceStore eviction-ghost policy documented in 3837ff9a for
+review. Master integration steps 2-5 executed: 9-package suite
+-count=1 green; -race green on telnyx/sms/voice-telnyx (+daemon arming
+-race green at leaf validation); the fake-Telnyx end-to-end (step 3) is
+realized by the §T3/§T4 + §K3 daemon gates driving the armed handler
+against httptest stubs — incl. DLR-resolve, redelivery dedupe,
+STOP->opt-out, refused-send-before-dial. Merged to main after this
+record.
