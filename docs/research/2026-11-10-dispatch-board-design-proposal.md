@@ -130,3 +130,31 @@ board: unacked_count=0…1 → integrity job scans due_at < now     ▼
 ## (5) Two-lane permission model (why this shape makes it natural)
 
 The secretary lane **files facts**: `dispatch_file` is a thin wrapper over one Append — everything lands in the immutable log with `employee_id`=secretary, exactly the ctx-stamping precedent. The dispatcher lane **executes and confirms**: `dispatch_execute`/`record_ack` only ever mutate `dispatch_delivery` and append voice/tool-source rows with `employee_id`=dispatcher. The constitution's per-employee `tools_allowed` grants this with zero new machinery (secretary never gets `voice_call`; dispatcher's calls still ride Dialer policy gates). Because every row is attributed, the board answers *"was Mike told, by whom, when, through what, and who confirmed it"* as a single deterministic fold — which is precisely what a one-employee ledger could not say and what makes the lanes auditable instead of tribal.
+
+
+---
+
+## Owner Ratifications (2026-11-10)
+
+- **Q1 subject authority: jobs registry with hard FK, PLUS fuzzy
+  resolution.** The curated subjects/jobs table is authoritative; filing
+  against an unknown or near-miss name must return a "do you mean X?"
+  resolution (fuzzy match over the registry) instead of silently minting
+  a new key. The canonical key exists before a dispatch is filed.
+- **Q2 ack policy: EVERYTHING is relayed.** No delivered-is-enough tier
+  in v1: every dispatch delivery requires acknowledged state, so every
+  delivery row eventually resolves by ack or escalates to the dispatcher
+  lane. The per-class/per-severity ack knob the proposal sketched is
+  explicitly NOT taken; revisit only if escalation cost demands it.
+- **Q3 supersession: superseded events are DISTINCT events.** A
+  superseded announcement's follow-up information/confirmation obligation
+  survives supersession; the successor announcement re-notifies prior
+  recipients rather than silently replacing the obligation.
+- **Future extension (tracked as a GitHub issue):** brief outgoing ack
+  confirmations ride SMS (Telnyx Messaging), not voice calls — cheap
+  per-recipient confirmation texts with reply-keyword ack; voice
+  escalation remains the fallback.
+- **Ledger -> dialing:** ledger-stored numbers MAY flow into the outbound
+  dispatcher dial; the contacts registry serves BOTH the inbound caller
+  gate and outbound recipient resolution (one system of record, two
+  gates).
