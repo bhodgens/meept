@@ -138,8 +138,19 @@ func TestPlanTransitionTable(t *testing.T) {
 	if len(planTransitions[StateConfirmed]) != 0 {
 		t.Errorf("confirmed must be terminal: to-set = %v, want empty", planTransitions[StateConfirmed])
 	}
-	if len(planTransitions[StatePlanning]) != 0 {
-		t.Errorf("planning is a creation-entry state with no forward edges: to-set = %v, want empty", planTransitions[StatePlanning])
+	// planning carries exactly the rework-forward + retention edges
+	// (bughunt 2026-11-10 B3): revised plans re-enter planning via
+	// RevisePlan and must be able to reach draft again (or be cancelled
+	// by retention) instead of stranding forever. Nothing else may leave
+	// planning.
+	wantPlanning := map[PlanState]bool{StateDraft: true, StateCancelled: true}
+	if len(planTransitions[StatePlanning]) != len(wantPlanning) {
+		t.Errorf("planning to-set = %v, want exactly {draft, cancelled}", planTransitions[StatePlanning])
+	}
+	for _, to := range planTransitions[StatePlanning] {
+		if !wantPlanning[to] {
+			t.Errorf("planning edge to %q is not one of the two legitimate edges (draft, cancelled)", to)
+		}
 	}
 
 	// (3) Every audited edge is a member — the audited state machine == table.
@@ -172,6 +183,8 @@ func TestPlanTransitionTable(t *testing.T) {
 	}
 
 	// (4) Non-members are absent.
+	// planning carries the B3 forward edges only — everything else stays
+	// refused.
 	nonMembers := []struct{ from, to PlanState }{
 		{StateDraft, StateExecuting},
 		{StateDraft, StateConfirmed},
@@ -181,7 +194,9 @@ func TestPlanTransitionTable(t *testing.T) {
 		{StateCompleted, StateExecuting},
 		{StateConfirmed, StateDraft},
 		{StateConfirmed, StateCancelled},
-		{StatePlanning, StateDraft},
+		{StatePlanning, StatePendingApproval},
+		{StatePlanning, StateExecuting},
+		{StatePlanning, StateApproved},
 	}
 	for _, e := range nonMembers {
 		if gateTableAllows(e.from, e.to) {
@@ -421,7 +436,7 @@ func TestPhaseFailedWriter(t *testing.T) {
 	// Completing the healthy last phase resolves the evaluation: all
 	// terminal, but one is FAILED -> the plan must be failed, not completed
 	// and not stuck.
-	if err := mgr.OnTaskCompleted(ctx, "task-ok-phase"); err != nil {
+	if err := mgr.OnTaskCompleted(ctx, "task-ok-phase", ""); err != nil {
 		t.Fatalf("OnTaskCompleted: %v", err)
 	}
 	final, err := mgr.store.GetPlan(ctx, p.ID)

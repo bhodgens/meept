@@ -278,11 +278,21 @@ func (s *SQLiteParkStore) columnExists(table, column string) (bool, error) {
 // journal + 5s busy timeout. modernc.org/sqlite honors only
 // `_pragma=`-style DSN parameters (the queue/task stores use the same
 // form), so `_journal_mode=`-style keys would be silently ignored.
+//
+// `_txlock=immediate` (bughunt 2026-11-10 B7, queue store.go precedent):
+// load() documents a transactional prune guarantee — BeginTx, SELECT,
+// DELETE expired, Commit. With a DEFERRED transaction that guarantee
+// loses to a concurrent writer: the deferred BEGIN takes no lock, the
+// read snapshots WAL, and the mid-transaction DELETE then needs the write
+// lock another conn took meanwhile — an unretryable SQLITE_BUSY /
+// BUSY_SNAPSHOT (busy_timeout cannot retry a deadlock-shaped snapshot
+// conflict). Taking the write lock at BEGIN makes load()'s
+// read-prune-commit a serialized critical section.
 func NewSQLiteParkStore(dbPath string, logger *slog.Logger) (*SQLiteParkStore, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)")
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)&_txlock=immediate")
 	if err != nil {
 		return nil, fmt.Errorf("park store: failed to open database: %w", err)
 	}

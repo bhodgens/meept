@@ -218,7 +218,7 @@ func TestRestoreMappingsCoversSynthesizing(t *testing.T) {
 	if err := mgr.RestoreMappings(ctx); err != nil {
 		t.Fatalf("RestoreMappings: %v", err)
 	}
-	if err := mgr.OnTaskCompleted(ctx, "task-restore-child"); err != nil {
+	if err := mgr.OnTaskCompleted(ctx, "task-restore-child", ""); err != nil {
 		t.Fatalf("OnTaskCompleted: %v", err)
 	}
 

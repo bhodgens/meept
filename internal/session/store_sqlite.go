@@ -163,13 +163,30 @@ func (s *SQLiteStore) migrate() error {
 	// Add description column if not present (migration for existing databases)
 	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN description TEXT DEFAULT ''", "description")
 
-	// Add the per-session format version (contract S1, leaf 03/01). The
-	// DEFAULT back-fills existing rows without a rewrite; the constant
-	// keeps the DDL in sync with SessionFormatVersion.
-	s.migrationAddColumn(fmt.Sprintf(
-		"ALTER TABLE sessions ADD COLUMN schema_version INTEGER NOT NULL DEFAULT %d",
-		SessionFormatVersion,
-	), "schema_version")
+	// Add the per-session format version (contract S1, leaf 03/01).
+	//
+	// The column is created with DEFAULT 0 — the pre-v1 LEGACY sentinel,
+	// NOT the current version (bughunt 2026-11-10 B6): the DEFAULT clause
+	// back-fills PRE-EXISTING rows at column-add time, and those rows were
+	// written before the schema_version machinery existed, i.e. before any
+	// forward-only hop ran. Stamping them at SessionFormatVersion made the
+	// catalog's Plan(current) a no-op, so every future format hop would
+	// silently skip exactly the rows that need it. Fresh rows are stamped
+	// at SessionFormatVersion explicitly by Create/CreateForOwner, so the
+	// catalog correctly treats them as no-op.
+	//
+	// Re-run safety: migrationAddColumn no-ops once the column exists, so
+	// re-opening never re-stamps. Rows already stamped 1 by the OLD
+	// migration (DEFAULT = SessionFormatVersion) cannot be distinguished
+	// from genuinely v1 rows — at this build, format v1 is the only format
+	// that ever shipped, so a 1-stamped legacy row carries the correct
+	// format value anyway; the mis-stamp's only cost is a skipped no-op
+	// stamp hop. Going forward (a future 1->2 hop) this DDL never again
+	// manufactures current-version stamps, which is what B6 fixes.
+	s.migrationAddColumn(
+		"ALTER TABLE sessions ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 0",
+		"schema_version",
+	)
 
 	// Add leaf_message_id column to sessions
 	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN leaf_message_id INTEGER", "leaf_message_id")

@@ -150,12 +150,17 @@ func isTransientDBError(err error) bool {
 func (h *PlanHandler) handleTaskCompleted(ctx context.Context, msg *models.BusMessage) {
 	var payload struct {
 		TaskID string `json:"task_id"`
+		Status string `json:"status"`
 	}
 	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 		h.logger.Error("plan handler: failed to parse task completed event", "error", err)
 		return
 	}
-	if err := h.manager.OnTaskCompleted(ctx, payload.TaskID); err != nil {
+	// Status-aware completion (bughunt 2026-11-10 B1): the tactical
+	// scheduler's honest-completion payload stamps status "failed" on a
+	// task whose steps errored; passing it through lets OnTaskCompleted
+	// fail the phase instead of stamping a false PhaseCompleted over it.
+	if err := h.manager.OnTaskCompleted(ctx, payload.TaskID, payload.Status); err != nil {
 		h.logger.Error("plan handler: failed to process task completed", "task_id", payload.TaskID, "error", err)
 	}
 }

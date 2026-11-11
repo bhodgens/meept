@@ -230,6 +230,15 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	// Recover deliveries left pending/in_flight by a previous run. Scans
 	// receipt rows (not ticks — a claimed tick never re-fires) and
 	// re-delivers the same MessageID, idempotent via turn_id dedupe.
+	//
+	// The claimed-tick sweep runs FIRST (bughunt 2026-11-10 B2): a crash
+	// between ClaimTick and the first receipt write left a claim row with
+	// NO receipt — invisible to the receipt scan and skipped by
+	// ProcessMissedTicks. This re-delivers it at-least-once; a tick that
+	// does have a receipt stays with the scan below (dedupe by MessageID).
+	if err := s.recoverClaimedTicksWithoutReceipt(); err != nil {
+		s.logger.Warn("scheduler: claimed-tick recovery failed", "error", err)
+	}
 	if err := s.recoverInFlightDeliveries(); err != nil {
 		s.logger.Warn("scheduler: in-flight delivery recovery failed", "error", err)
 	}

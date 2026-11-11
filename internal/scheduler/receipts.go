@@ -66,6 +66,13 @@ func NewDeliveryHistory() *DeliveryHistory {
 // than DeliveryHistoryRetentionDays (measured on DeliveredAt, falling back
 // to ScheduledAt) and records beyond the MaxDeliveryHistoryRecords most
 // recent are dropped. Any drop sets EarlierRecordsPruned.
+//
+// Non-terminal statuses (pending/in_flight) are EXEMPT from the age prune
+// (bughunt 2026-11-10 B8): recoverInFlightDeliveries re-delivers FROM
+// pending/in_flight rows, so pruning a stuck receipt older than retention
+// permanently lost the tick it represents. Age-retention is for delivered
+// history only; a stuck row survives until recovery resolves it. The
+// count bound still applies (bounded memory), keeping newest stuck rows.
 func (h *DeliveryHistory) Append(r ScheduleDeliveryReceipt) {
 	h.Records = append(h.Records, r)
 
@@ -77,7 +84,8 @@ func (h *DeliveryHistory) Append(r ScheduleDeliveryReceipt) {
 		if ts.IsZero() {
 			ts = rec.ScheduledAt
 		}
-		if ts.Before(cutoff) {
+		stuck := rec.Status == DeliveryPending || rec.Status == DeliveryInFlight
+		if ts.Before(cutoff) && !stuck {
 			pruned = true
 			continue
 		}
@@ -240,4 +248,87 @@ func (s *Scheduler) recoverInFlightDeliveries() error {
 		}
 	}
 	return nil
+}
+
+// recoverClaimedTicksWithoutReceipt re-delivers claimed ticks that have NO
+// delivery receipt (bughunt 2026-11-10 B2). A crash in the window between
+// ClaimTick (claims.go, scheduler_claims.db) and the first receipt write
+// (AgentJob.Execute -> recordDelivery, jobs.json) permanently lost the tick:
+// recoverInFlightDeliveries scans receipts only, and ProcessMissedTicks
+// skips already-claimed ticks. This sweep walks the claim store, matches
+// each claim against the job's DeliveryHistory (a delivered receipt for
+// the tick's occurrence means the delivery actually completed — the crash
+// was AFTER delivery), and re-delivers the rest exactly once per pass
+// (at-least-once; downstream turn_id dedupe absorbs duplicates).
+func (s *Scheduler) recoverClaimedTicksWithoutReceipt() error {
+	if s.claims == nil {
+		return nil
+	}
+	cutoff := time.Now().UTC().AddDate(0, 0, -s.claimRetentionDays)
+	claims, err := s.claims.ListClaimsSince(cutoff)
+	if err != nil {
+		return err
+	}
+	for _, c := range claims {
+		cfg, ok := s.store.Get(c.JobID)
+		if !ok {
+			continue // job deleted since the claim; nothing to recover
+		}
+		if hasReceiptForTick(cfg, c.Tick) {
+			continue // receipt exists: recoverInFlightDeliveries owns it
+		}
+		s.mu.RLock()
+		job, known := s.jobs[c.JobID]
+		s.mu.RUnlock()
+		if !known {
+			continue
+		}
+		s.logger.Info("scheduler: recovering claimed tick with no delivery receipt",
+			"job_id", c.JobID,
+			"tick", c.Tick,
+		)
+		// PreClaimed: the tick is already claimed — re-claiming would
+		// dedupe-skip. Exactly one pass per recovery; delivery failure
+		// leaves no receipt, so the NEXT Start retries (at-least-once).
+		s.dispatchMissed(job, c.Tick, 0)
+	}
+	return nil
+}
+
+// hasReceiptForTick reports whether the job's delivery history carries a
+// receipt for the given tick — matched on OccurrenceAt, falling back to
+// ScheduledAt (the two timestamps AgentJob.Execute stamps). Any status
+// counts: a pending/in_flight receipt means the crash happened AFTER the
+// first write, and recoverInFlightDeliveries re-delivers those with
+// turn_id dedupe; delivered means it completed.
+func hasReceiptForTick(cfg JobConfig, tick time.Time) bool {
+	if cfg.DeliveryHistory != nil {
+		for _, r := range cfg.DeliveryHistory.Records {
+			if receiptMatchesTick(r, tick) {
+				return true
+			}
+		}
+	}
+	if cfg.LastDelivery != nil && receiptMatchesTick(*cfg.LastDelivery, tick) {
+		return true
+	}
+	return false
+}
+
+func receiptMatchesTick(r ScheduleDeliveryReceipt, tick time.Time) bool {
+	if !r.OccurrenceAt.IsZero() && receiptTimesEqual(r.OccurrenceAt, tick) {
+		return true
+	}
+	return receiptTimesEqual(r.ScheduledAt, tick)
+}
+
+// receiptTimesEqual compares two timestamps at the claim store's stored
+// precision (milliseconds — claimTickTimeFormat carries exactly 9 digits
+// but wall-clock writes round-trip through RFC3339Nano; a sub-ms drift
+// would otherwise miss the match). Zero times never match.
+func receiptTimesEqual(a, b time.Time) bool {
+	if a.IsZero() || b.IsZero() {
+		return false
+	}
+	return a.UnixMilli() == b.UnixMilli()
 }

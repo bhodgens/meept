@@ -36,7 +36,14 @@ func NewSQLiteStore(dbPath string, logger *slog.Logger) (*SQLiteStore, error) {
 	// ignored): enable WAL + busy_timeout so concurrent readers (e.g. the
 	// evolver approval bridge) never collide with write transactions as
 	// instant SQLITE_BUSY.
-	rawDB, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
+	//
+	// foreign_keys MUST ride the DSN (bughunt 2026-11-10 B4): PRAGMA
+	// foreign_keys is per-connection, and sql.DB pools connections freely,
+	// so a pool-level Exec only ever enabled it on the one connection that
+	// happened to run it (migrate()'s). Every other pooled conn silently
+	// no-op'd ON DELETE CASCADE. The _pragma form applies per opened
+	// connection, mirroring internal/session/store_sqlite.go.
+	rawDB, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
@@ -58,10 +65,11 @@ func NewSQLiteStore(dbPath string, logger *slog.Logger) (*SQLiteStore, error) {
 }
 
 func (s *SQLiteStore) migrate() error {
-	// Enable foreign key enforcement so ON DELETE CASCADE works.
-	if _, err := s.db.Exec("PRAGMA foreign_keys = ON"); err != nil {
-		return fmt.Errorf("failed to enable foreign keys: %w", err)
-	}
+	// FK enforcement rides the DSN (`_pragma=foreign_keys(1)` in
+	// NewSQLiteStore) so EVERY pooled connection enforces it — PRAGMA
+	// foreign_keys is per-connection and a pool-level Exec only armed
+	// migrate()'s single conn (bughunt 2026-11-10 B4), silently no-op'ing
+	// the ON DELETE CASCADE on the rest.
 
 	schema := `
 	CREATE TABLE IF NOT EXISTS plans (

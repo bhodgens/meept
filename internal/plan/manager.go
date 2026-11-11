@@ -644,6 +644,26 @@ func (m *PlanManager) RevisePlan(ctx context.Context, planID, sessionID, feedbac
 	return nil
 }
 
+// CompletePlanningRevision returns a revised plan from planning to draft
+// (bughunt 2026-11-10 B3): RevisePlan legally moves plans INTO planning, but
+// the frozen table previously had NO edges out of it, so every revised plan
+// stranded forever — SubmitPlan requires draft, ApprovePlan requires
+// pending_approval, and PruneStalePlans declined to touch planning rows. The
+// revision writer (the plan-compiler / revision rework path) calls this once
+// the revised content is written back, handing the plan to the normal draft
+// lifecycle (SubmitPlan -> ApprovePlan -> ...). The table's planning->draft
+// row is the only legal writer; anything else is refused by the guarded CAS.
+func (m *PlanManager) CompletePlanningRevision(ctx context.Context, planID string) error {
+	if err := m.transitionFrom(ctx, planID, []PlanState{StatePlanning}, StateDraft); err != nil {
+		return err
+	}
+	m.publishEvent("plan.revision_completed", map[string]any{
+		"plan_id": planID,
+	})
+	m.logger.Info("plan revision completed, returned to draft", "plan_id", planID)
+	return nil
+}
+
 // ConfirmPlan confirms a completed plan after review.
 func (m *PlanManager) ConfirmPlan(ctx context.Context, planID, sessionID, by string) error {
 	// Table-driven CAS FIRST (C-P4): completed/failed/cancelled -> confirmed.
@@ -841,31 +861,13 @@ func (m *PlanManager) PruneStalePlans(ctx context.Context, retentionDays int) (d
 	// (each pass is a cheap indexed scan). Terminal drafts/cancelled/failed
 	// are deleted; stale open states are cancelled.
 	deletable := []PlanState{StateDraft, StateCancelled, StateFailed}
-	cancellable := []PlanState{StatePendingApproval, StateApproved}
+	cancellable := []PlanState{StatePendingApproval, StateApproved, StatePlanning}
 
-	// Stale planning is NOT cancellable: the frozen transition table has no
-	// planning->cancelled edge (planning is the creation-entry state with an
-	// empty to-set — leaf 04's table; the pre-table prune assumed otherwise
-	// and every such CancelPlan failed with ErrPlanNotModifiable). Surface
-	// the backlog honestly instead of pretending: count and warn, take no
-	// state action. An operator decides (revise via planning's rework path
-	// is also table-blocked at HEAD — this is a judgment call, not a sweep).
-	stalePlanning := 0
-	plans, lerr := m.store.ListPlansByState(ctx, StatePlanning, 10000)
-	if lerr != nil {
-		m.logger.Warn("retention: list plans failed", "state", StatePlanning, "error", lerr)
-		err = lerr
-	}
-	for _, p := range plans {
-		if p == nil || p.UpdatedAt.After(cutoff) {
-			continue
-		}
-		stalePlanning++
-	}
-	if stalePlanning > 0 {
-		m.logger.Warn("retention: stale planning plan not cancellable via table; needs operator decision",
-			"count", stalePlanning, "retention_days", retentionDays)
-	}
+	// Stale planning rows are cancellable since B3 (bughunt 2026-11-10):
+	// the transition table now carries planning -> cancelled exactly so
+	// retention can prune the backlog of revised plans that were never
+	// returned to draft. The old behavior — count-and-warn, no action —
+	// existed only because the frozen table had no edge to fire.
 
 	for _, state := range cancellable {
 		plans, lerr := m.store.ListPlansByState(ctx, state, 10000)
@@ -1061,22 +1063,35 @@ func (m *PlanManager) Synthesize(ctx context.Context, planID string) error {
 		}
 	}
 
-	// Store the parent TaskID on the plan.
-	plan.TaskID = parentTask.ID
-	plan.State = StateExecuting
+	// Store the parent TaskID on the plan via the T4 re-read seam
+	// (bughunt 2026-11-10 B5): the local `plan` snapshot was taken BEFORE
+	// the (possibly slow) task-creation calls, so a full-row UpdatePlan
+	// from it reverts columns stamped concurrently — SetPlanGoal's goal_id,
+	// RevisePlan's revision_count. updatePlanColumns re-reads the CURRENT
+	// row and mutates only the synthesis-owned columns.
 	// The claim is discharged by this write: the lease column is cleared in the
 	// SAME statement that records task_id, so there is no window in which a
 	// successful expansion still looks claimed.
+	taskID := parentTask.ID
+	newState := StateExecuting
+	if err := m.updatePlanColumns(ctx, planID, func(p *Plan) {
+		p.TaskID = taskID
+		p.State = newState
+		p.SynthesisLeaseUntil = nil
+		p.UpdatedAt = time.Now().UTC()
+	}); err != nil {
+		return fmt.Errorf("update plan with task ID: %w", err)
+	}
+	// Keep the in-memory copy usable for the tail writes below without
+	// letting it back onto the persistence path.
+	plan.TaskID = taskID
+	plan.State = newState
 	plan.SynthesisLeaseUntil = nil
 
 	// Track parent task -> plan mapping for OnTaskCompleted.
 	m.mu.Lock()
 	m.taskPlanMap[parentTask.ID] = planID
 	m.mu.Unlock()
-	plan.UpdatedAt = time.Now().UTC()
-	if err := m.store.UpdatePlan(ctx, plan); err != nil {
-		return fmt.Errorf("update plan with task ID: %w", err)
-	}
 
 	// Create child tasks for each phase and steps within them.
 	for _, phase := range phases {
@@ -1283,17 +1298,79 @@ func (m *PlanManager) OnStepCompleted(ctx context.Context, taskID, stepID string
 }
 
 // OnTaskCompleted is called when a task completes. If the task maps to a phase,
-// it updates the phase state. If the task is the plan's parent task, it marks
-// the plan as completed.
-func (m *PlanManager) OnTaskCompleted(ctx context.Context, taskID string) error {
+// it updates the phase state — honoring the completion STATUS (bughunt
+// 2026-11-10 B1): the tactical scheduler publishes task.completed with
+// status "completed" OR "failed" (internal/agent/tactical.go honest-completion
+// payload, a94995c8 lineage), so a failed completion must land in PhaseFailed,
+// never overwrite an existing PhaseFailed back to PhaseCompleted, and never
+// silently pass review. If the task is the plan's parent task, it marks the
+// plan completed. The status parameter defaults unknown/"completed"-shaped
+// payloads to genuine success (legacy callers that have no status carry one);
+// any other value (notably "failed") is treated as a failed completion.
+func (m *PlanManager) OnTaskCompleted(ctx context.Context, taskID, status string) error {
 	m.mu.RLock()
 	phaseID, isPhase := m.phaseTaskMap[taskID]
 	planID, hasPlan := m.taskPlanMap[taskID]
 	m.mu.RUnlock()
+
+	failed := status == "failed"
 	if isPhase {
-		// Child task (phase) completed.
-		if err := m.store.SetPhaseState(ctx, phaseID, PhaseCompleted); err != nil {
-			m.logger.Warn("failed to set phase completed", "phase_id", phaseID, "error", err)
+		// Child task (phase) completed. A failed completion records the
+		// failure honestly: increment the phase's failed_steps accounting
+		// and flip the phase to PhaseFailed — but never overwrite a
+		// terminal PhaseFailed already written by OnStepFailed. Only a
+		// genuinely-successful completion writes PhaseCompleted.
+		if failed {
+			phases, gerr := m.store.GetPhases(ctx, planID)
+			if gerr != nil {
+				m.logger.Warn("failed to get phases for failed completion", "phase_id", phaseID, "error", gerr)
+			} else {
+				for _, ph := range phases {
+					if ph.ID != phaseID {
+						continue
+					}
+					// Terminal PhaseFailed already recorded: a duplicate
+					// failure event must not stomp the honest record.
+					if ph.State == PhaseFailed {
+						break
+					}
+					if ierr := m.store.IncrementPhaseProgress(ctx, phaseID, "failed_steps", 1); ierr != nil {
+						m.logger.Warn("failed to record failed completion", "phase_id", phaseID, "error", ierr)
+					}
+					if serr := m.store.SetPhaseState(ctx, phaseID, PhaseFailed); serr != nil {
+						m.logger.Warn("failed to set phase failed", "phase_id", phaseID, "error", serr)
+					}
+					break
+				}
+			}
+			// The failure tail below is identical to the success tail
+			// (all-phases-terminal eval -> completePlan's honest check),
+			// so fall through to it with the failure state persisted.
+		} else {
+			// Success path: only write PhaseCompleted when the phase has
+			// not already resolved terminal-failed — a success event
+			// arriving after OnStepFailed recorded honest failure must
+			// not resurrect the phase (same false-success B1 forbids).
+			phases, gerr := m.store.GetPhases(ctx, planID)
+			alreadyFailed := false
+			if gerr == nil {
+				for _, ph := range phases {
+					if ph.ID == phaseID && ph.State == PhaseFailed {
+						alreadyFailed = true
+						break
+					}
+				}
+			}
+			if alreadyFailed {
+				m.logger.Warn("success completion arrived for an already-failed phase; preserving PhaseFailed",
+					"phase_id", phaseID)
+			} else if err := m.store.SetPhaseState(ctx, phaseID, PhaseCompleted); err != nil {
+				m.logger.Warn("failed to set phase completed", "phase_id", phaseID, "error", err)
+			}
+		}
+		finalState := PhaseCompleted
+		if failed {
+			finalState = PhaseFailed
 		}
 
 		// The dead phase-completion bus event publish was REMOVED here
@@ -1306,7 +1383,7 @@ func (m *PlanManager) OnTaskCompleted(ctx context.Context, taskID string) error 
 			m.publishEvent("plan.phase_state", map[string]any{
 				"plan_id":  planID,
 				"phase_id": phaseID,
-				"state":    string(PhaseCompleted),
+				"state":    string(finalState),
 			})
 		}
 

@@ -44,7 +44,16 @@ var ErrPlanNotModifiable = errors.New("plan state not modifiable")
 //     to pending_approval precisely so a normal approve can never stomp a
 //     live synthesis lease through the synthesizing->approved row).
 var planTransitions = map[PlanState][]PlanState{
-	StatePlanning:        {},
+	// planning is no longer a dead-end (bughunt 2026-11-10 B3): RevisePlan
+	// legally moves plans INTO planning, so the row needs forward edges or
+	// revised plans strand forever — SubmitPlan needs draft, ApprovePlan
+	// needs pending_approval, and PruneStalePlans declines to touch them.
+	//   planning -> draft: the revision rework completes (the pre-plan or
+	//     revised content is written back to the draft lifecycle); the
+	//     writer is PlanManager.CompletePlanningRevision.
+	//   planning -> cancelled: age-based retention prunes a stale planning
+	//     row (PruneStalePlans), mirroring its pending_approval handling.
+	StatePlanning:        {StateDraft, StateCancelled},
 	StateDraft:           {StatePendingApproval, StatePlanning, StateCancelled},
 	StatePendingApproval: {StateApproved, StateCancelled, StatePlanning},
 	StateApproved:        {StateSynthesizing, StateCancelled},

@@ -145,6 +145,46 @@ func (cs *claimStore) ClaimCount() (int64, error) {
 	return n, nil
 }
 
+// ClaimedTick is one claimed tick row surfaced for crash recovery.
+type ClaimedTick struct {
+	JobID string
+	Tick  time.Time
+}
+
+// ListClaimsSince returns every claimed tick at or after cutoff, oldest
+// first. This is the crash-recovery read (bughunt 2026-11-10 B2): a claim
+// row whose delivery crashed before the FIRST receipt write is otherwise
+// invisible — recoverInFlightDeliveries scans receipts only, and
+// ProcessMissedTicks skips already-claimed ticks, so without this sweep the
+// tick is permanently lost.
+func (cs *claimStore) ListClaimsSince(cutoff time.Time) ([]ClaimedTick, error) {
+	rows, err := cs.db.Query(
+		"SELECT job_id, tick_time FROM scheduler_claimed_ticks WHERE tick_time >= ? ORDER BY tick_time ASC",
+		cutoff.UTC().Format(claimTickTimeFormat),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list claimed ticks: %w", err)
+	}
+	defer rows.Close()
+
+	var claims []ClaimedTick
+	for rows.Next() {
+		var jobID, tickRaw string
+		if err := rows.Scan(&jobID, &tickRaw); err != nil {
+			return nil, fmt.Errorf("failed to scan claimed tick: %w", err)
+		}
+		tick, perr := time.Parse(claimTickTimeFormat, tickRaw)
+		if perr != nil {
+			return nil, fmt.Errorf("failed to parse claimed tick_time %q: %w", tickRaw, perr)
+		}
+		claims = append(claims, ClaimedTick{JobID: jobID, Tick: tick})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate claimed ticks: %w", err)
+	}
+	return claims, nil
+}
+
 func (cs *claimStore) close() error {
 	if err := cs.db.Close(); err != nil {
 		return fmt.Errorf("failed to close claim database: %w", err)
