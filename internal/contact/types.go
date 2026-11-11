@@ -31,6 +31,12 @@ type Record struct {
 	Phone       string    `json:"phone"`                 // E.164, normalized at write; required
 	SignalUUID  string    `json:"signal_uuid,omitempty"` // empty until observed; settable by config
 	Policy      []Channel `json:"policy,omitempty"`      // ordered fallback chain; empty = employee default
+	// MessagingOptOut is the SMS/messaging consent guard (telnyx-texting
+	// plan D5): STOP reply sets it, START reply clears it, and ALL
+	// outbound send paths consult it BEFORE dialing. Second-wins on Put
+	// like VoiceApproved (the consent glue re-Puts the record). Stored
+	// as the guarded INTEGER column messaging_opt_out (default 0).
+	MessagingOptOut bool `json:"messaging_opt_out"`
 	// VoiceApproved is the inbound voice-action approval bit (plan
 	// 20261110-caller-authz O2: contacts.db is the system of record;
 	// default FALSE = unapproved, and an unknown number never reaches a
@@ -45,6 +51,15 @@ type Record struct {
 // GetByPhone / GetBySignalUUID / Delete on an unknown id). errors.Is-
 // checkable by every consumer.
 var ErrUnknownContact = errorString("contact: unknown contact")
+
+// ErrOptedOut is the named consent refusal (telnyx-texting D5): the
+// record has MessagingOptOut set, so outbound sends on the affected
+// channel must refuse BEFORE any provider call. It lives in the contact
+// package (not a channel package) because the guard is per-contact
+// consent state that every channel consults, not a provider error.
+// errors.Is-checkable by every consumer, same posture as
+// ErrUnknownContact.
+var ErrOptedOut = errorString("contact: messaging opt-out")
 
 // errorString is the minimal error implementation for the package-level
 // sentinel; wrapping happens at call sites with %w so errors.Is still

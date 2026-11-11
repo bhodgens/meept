@@ -129,13 +129,23 @@ func BuildContactChain(cfg *config.Config, w *VoiceWiring, ledger effects.Ledger
 			m[contact.ChannelSignalMsg] = leg.MessageAttempt()
 		}
 		// telnyx_sms: the leaf-12 attempt (broker key; disabled config =
-		// DisabledSMSAttempt refuses before any HTTP).
+		// DisabledSMSAttempt refuses before any HTTP). Leaf 02-send-leg/02:
+		// the attempt sends through SendSMS2 with a per-message
+		// webhook_url derived from [voice.messaging].webhook_base_url —
+		// exactly the path internal/comm/http registers the messaging
+		// webhook on. Empty base -> empty WebhookURL -> the body key is
+		// omitted and Telnyx's account-level webhook applies (D3:
+		// disabled-default posture stays byte-identical).
 		if cfg.Voice.Messaging.Enabled {
 			apiKey := ""
 			if broker != nil {
 				if v, err := broker("telnyx_api_key"); err == nil {
 					apiKey = v
 				}
+			}
+			var webhookURL string
+			if base := strings.TrimRight(cfg.Voice.Messaging.WebhookBaseURL, "/"); base != "" {
+				webhookURL = base + "/api/v1/voice/messaging/webhook"
 			}
 			client, cerr := telnyx.NewClient("https://api.telnyx.com", telnyx.WithAPIKey(apiKey))
 			if cerr != nil {
@@ -145,6 +155,7 @@ func BuildContactChain(cfg *config.Config, w *VoiceWiring, ledger effects.Ledger
 					FromNumber:  cfg.Voice.Messaging.FromNumber,
 					ProfileID:   cfg.Voice.Messaging.ProfileID,
 					WaitSeconds: cfg.Voice.Messaging.DLRWaitSeconds,
+					WebhookURL:  webhookURL,
 				}, log)
 			}
 		}

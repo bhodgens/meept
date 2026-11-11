@@ -268,6 +268,11 @@ type sendSMSResponse struct {
 // SendSMS sends one outbound SMS and returns the Telnyx message id
 // (data.id). Both numbers pass the strict E.164 gate BEFORE any HTTP
 // call; a violation is ErrInvalidE164 (errors.Is-checkable).
+//
+// Deprecated: the hardened SendSMS2 (Idempotency-Key + per-message
+// webhook_url + typed RateLimitError) replaced every production caller
+// in leaf 02-send-leg/02. This method stays for the pinned legacy tests
+// only; new code must use SendSMS2.
 func (c *Client) SendSMS(ctx context.Context, from, to, text string) (string, error) {
 	if !ValidE164(from) {
 		return "", fmt.Errorf("telnyx messaging: from %q: %w", from, ErrInvalidE164)
