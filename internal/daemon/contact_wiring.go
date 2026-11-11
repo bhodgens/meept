@@ -13,9 +13,22 @@ import (
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/contact"
 	"github.com/caimlas/meept/internal/effects"
+	"github.com/caimlas/meept/internal/sms"
 	"github.com/caimlas/meept/internal/telnyx"
 	"github.com/caimlas/meept/internal/tools/builtin"
 	"github.com/caimlas/meept/internal/voice"
+	voicetelnyx "github.com/caimlas/meept/internal/voice/telnyx"
+)
+
+// consentHelpWindow is the per-contact HELP auto-reply throttle window
+// (master §7: one HELP reply per contact per 24h — NonceStore ttl reuse,
+// CheckFresh == send). consentHelpMax bounds the in-memory window.
+const (
+	consentHelpWindow = 24 * time.Hour
+	consentHelpMax    = 10000
+	// consentPendingTTL bounds a pending #132 confirmation: Resolve
+	// drops older entries (lazy expiry in sms.PendingConfirms).
+	consentPendingTTL = 30 * time.Minute
 )
 
 // ContactChainWiring assembles the employee contact chain (leaf 02 T4):
@@ -28,6 +41,14 @@ import (
 type ContactChainWiring struct {
 	Store  *contact.SQLiteStore
 	Runner *contact.ChainRunner
+
+	// SMSConfirms (leaf 04/02): the pending-confirmation registry the
+	// armed consent hook consumes on YES. #132's dispatch tree
+	// REGISTERs here (Register(ref, to, text)) before asking a contact
+	// to confirm; the inbound YES reply resolves + acks it on
+	// sms.StateTopic. Nil when the sms channel never armed (messaging
+	// disabled / client failure) — dispatch treats nil as "no ack lane".
+	SMSConfirms *sms.PendingConfirms
 }
 
 // Run implements builtin.ContactChainRunner (the string-shaped seam:
@@ -105,6 +126,64 @@ func BuildContactChain(cfg *config.Config, w *VoiceWiring, ledger effects.Ledger
 		return nil, fmt.Errorf("contact wiring: store: %w", err)
 	}
 
+	// telnyx_sms client + consent glue (leaf 04/02 hoist): the leaf-12
+	// attempt (broker key; disabled config = DisabledSMSAttempt refuses
+	// before any HTTP). Leaf 02-send-leg/02: the attempt sends through
+	// SendSMS2 with a per-message webhook_url derived from
+	// [voice.messaging].webhook_base_url — exactly the path
+	// internal/comm/http registers the messaging webhook on. Empty base
+	// -> empty WebhookURL -> the body key is omitted and Telnyx's
+	// account-level webhook applies (D3: disabled-default posture stays
+	// byte-identical). Leaf 04/02 hoists the construction out of the
+	// attempts closure: the SAME client doubles as the consent hook's
+	// DIRECT sender (the TCPA courtesy-confirmation path that bypasses
+	// the D5 opt-out consult — sms_reply_glue.go), so one key
+	// resolution, one client per enabled messaging block.
+	var smsClient *telnyx.Client
+	var smsConfirms *sms.PendingConfirms
+	if cfg.Voice.Messaging.Enabled {
+		apiKey := ""
+		if broker != nil {
+			if v, err := broker("telnyx_api_key"); err == nil {
+				apiKey = v
+			}
+		}
+		client, cerr := telnyx.NewClient(telnyxBaseURL(),
+			telnyx.WithAPIKey(apiKey),
+			telnyx.WithProfileID(cfg.Voice.Messaging.ProfileID),
+			telnyx.WithFromNumber(cfg.Voice.Messaging.FromNumber))
+		if cerr != nil {
+			log.Warn("contact wiring: telnyx messaging client failed; sms channel skipped", "error", cerr)
+		} else {
+			smsClient = client
+			smsConfirms = sms.NewPendingConfirms(nil, consentPendingTTL)
+			// Consent reply glue (leaf 04/02): build the production
+			// ReplyHook over the chain's live parts (ONE contacts.db
+			// handle, the hoisted sender client, the wiring's bus) and
+			// late-arm it through the slot the armed OnInbound closure
+			// reads per event — same D6 timing as setSMSAttempt: the
+			// chain is built AFTER WireVoice returns. Empty StopReply
+			// falls back to the sms-pkg wording defaults; empty
+			// HelpReply keeps HELP silent (the hook's own guards).
+			// Arming is INDEPENDENT of inbound_enabled at the hook
+			// level: the webhook seam itself only fires when armed
+			// (voice_wiring.go §6), so a hook built for an enabled
+			// messaging block is inert until the D3 switch opens.
+			w.setConsentReplyHook(newConsentReplyHook(consentReplyDeps{
+				Contacts:     store,
+				Sender:       client,
+				Bus:          w.bus,
+				HelpThrottle: voicetelnyx.NewNonceStore(consentHelpWindow, consentHelpMax),
+				Confirms:     smsConfirms,
+				StopReply:    cfg.Voice.Messaging.StopReply,
+				HelpReply:    cfg.Voice.Messaging.HelpReply,
+				Logger:       log,
+			}))
+			log.Info("contact wiring: consent reply hook armed",
+				"inbound_enabled", cfg.Voice.Messaging.InboundEnabled)
+		}
+	}
+
 	attempts := func(store *contact.SQLiteStore) map[contact.Channel]contact.ChannelAttempt {
 		m := make(map[contact.Channel]contact.ChannelAttempt, 4)
 		// telnyx_voice: the EXISTING dial path (dialForTool, gated by
@@ -128,42 +207,26 @@ func BuildContactChain(cfg *config.Config, w *VoiceWiring, ledger effects.Ledger
 			m[contact.ChannelSignalVoice] = leg.VoiceAttempt(voice.NewSignalAdapter(leg), w.outcomes.Lookup)
 			m[contact.ChannelSignalMsg] = leg.MessageAttempt()
 		}
-		// telnyx_sms: the leaf-12 attempt (broker key; disabled config =
-		// DisabledSMSAttempt refuses before any HTTP). Leaf 02-send-leg/02:
-		// the attempt sends through SendSMS2 with a per-message
-		// webhook_url derived from [voice.messaging].webhook_base_url —
-		// exactly the path internal/comm/http registers the messaging
-		// webhook on. Empty base -> empty WebhookURL -> the body key is
-		// omitted and Telnyx's account-level webhook applies (D3:
-		// disabled-default posture stays byte-identical).
-		if cfg.Voice.Messaging.Enabled {
-			apiKey := ""
-			if broker != nil {
-				if v, err := broker("telnyx_api_key"); err == nil {
-					apiKey = v
-				}
-			}
+		// telnyx_sms: the attempt over the hoisted client (nil client —
+		// messaging disabled or client construction failure — leaves
+		// the channel unregistered, the historical degraded posture).
+		if smsClient != nil {
 			var webhookURL string
 			if base := strings.TrimRight(cfg.Voice.Messaging.WebhookBaseURL, "/"); base != "" {
 				webhookURL = base + "/api/v1/voice/messaging/webhook"
 			}
-			client, cerr := telnyx.NewClient("https://api.telnyx.com", telnyx.WithAPIKey(apiKey))
-			if cerr != nil {
-				log.Warn("contact wiring: telnyx messaging client failed; sms channel skipped", "error", cerr)
-			} else {
-				att := telnyx.NewSMSAttempt(client, telnyx.SMSAttemptConfig{
-					FromNumber:  cfg.Voice.Messaging.FromNumber,
-					ProfileID:   cfg.Voice.Messaging.ProfileID,
-					WaitSeconds: cfg.Voice.Messaging.DLRWaitSeconds,
-					WebhookURL:  webhookURL,
-				}, log)
-				// D6 late-arming (leaf 03/02): the chain is built AFTER
-				// WireVoice, so hand the live DLR pending-map owner to
-				// the armed messaging OnFinalized seam through the slot
-				// the closure reads per event.
-				w.setSMSAttempt(att)
-				m[contact.ChannelTelnyxSMS] = att
-			}
+			att := telnyx.NewSMSAttempt(smsClient, telnyx.SMSAttemptConfig{
+				FromNumber:  cfg.Voice.Messaging.FromNumber,
+				ProfileID:   cfg.Voice.Messaging.ProfileID,
+				WaitSeconds: cfg.Voice.Messaging.DLRWaitSeconds,
+				WebhookURL:  webhookURL,
+			}, log)
+			// D6 late-arming (leaf 03/02): the chain is built AFTER
+			// WireVoice, so hand the live DLR pending-map owner to
+			// the armed messaging OnFinalized seam through the slot
+			// the closure reads per event.
+			w.setSMSAttempt(att)
+			m[contact.ChannelTelnyxSMS] = att
 		}
 		return m
 	}
@@ -178,7 +241,7 @@ func BuildContactChain(cfg *config.Config, w *VoiceWiring, ledger effects.Ledger
 	if ledger != nil || audit != nil {
 		runner = runner.WithSinks(contact.ChainSinks{Effects: ledger, Audit: audit})
 	}
-	return &ContactChainWiring{Store: store, Runner: runner}, nil
+	return &ContactChainWiring{Store: store, Runner: runner, SMSConfirms: smsConfirms}, nil
 }
 
 // Close releases the contacts store (daemon Stop path).

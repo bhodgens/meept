@@ -161,6 +161,23 @@ func ClassifyReply(text string) ReplyAction {
 	return ReplyOther
 }
 
+// Consent reply WORDING defaults (config gate pins stop_reply/help_reply
+// zero defaults: "wording defaults live in sms pkg", messaging_texting_
+// test.go:42). Ported verbatim from strategist-usa go-shard-runner
+// internal/workers/incoming_message.go:386 (opt_out_confirmation) and
+// :395 (opt_in_confirmation) — owner's own repo, no third-party license.
+// The STOP default references START to resubscribe, so a STOP confirmation
+// always names the re-subscribe path even with no operator config.
+const (
+	// ConsentDefaultStopReply is the STOP/START confirmation text used
+	// when cfg [voice.messaging].stop_reply is empty (master §7: STOP and
+	// START share the one key; no separate start_reply exists).
+	ConsentDefaultStopReply = "You have been opted out. Reply START to resubscribe."
+	// ConsentDefaultStartReply is the START confirmation used when
+	// stop_reply is empty — the symmetric opt-in wording (:395).
+	ConsentDefaultStartReply = "You have been subscribed. Reply STOP to opt out."
+)
+
 // ---------------------------------------------------------------------------
 // PendingConfirms — in-memory one-shot confirmation registry (v1; the
 // dispatch tree persists later). Daemon glue registers a pending when it

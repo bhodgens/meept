@@ -183,6 +183,15 @@ type VoiceWiring struct {
 	// store after the voice stack, matching the callstore ordering
 	// precedent).
 	dlrSlot *dlrAttemptSlot
+
+	// replySlot hands the production consent reply hook (leaf 04/02) to
+	// the armed OnInbound seam. Same late-arming rationale as dlrSlot:
+	// the hook closes over the contacts.db handle + messaging
+	// telnyx.Client that only BuildContactChain has, so it registers
+	// through this slot after WireVoice returns. nil-safe: an unarmed
+	// slot reads nil and OnInbound does no reply handling (the inert
+	// posture every pre-04/02 test pins).
+	replySlot *consentReplySlot
 }
 
 // WireVoiceDeps carries the components WireVoice captures. All pointer
@@ -575,6 +584,7 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		loopCancels:    make(map[string]context.CancelFunc),
 		linkTurns:      voice.NewLinkTurnRegistry(vlog.With("sub", "link-turns")),
 		dlrSlot:        &dlrAttemptSlot{},
+		replySlot:      &consentReplySlot{},
 		bus:            deps.Bus,
 		textSocketPath: textSocketPath,
 		broker:         deps.Broker,
@@ -742,12 +752,13 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		}
 		if armed {
 			consumer := buildMessagingDeps(messagingArmingDeps{
-				Store:    deps.MessagingStore,
-				Nonce:    deps.MessagingNonces,
-				Bus:      deps.Bus,
-				Attempts: nil, // late-armed through w.dlrSlot (see above)
-				Logger:   vlog.With("sub", "messaging-arming"),
-				slot:     w.dlrSlot,
+				Store:     deps.MessagingStore,
+				Nonce:     deps.MessagingNonces,
+				Bus:       deps.Bus,
+				Attempts:  nil, // late-armed through w.dlrSlot (see above)
+				Logger:    vlog.With("sub", "messaging-arming"),
+				slot:      w.dlrSlot,
+				replySlot: w.replySlot, // late-armed by BuildContactChain (leaf 04/02)
 			})
 			msgDeps.OnInbound = consumer.OnInbound
 			msgDeps.OnFinalized = consumer.OnFinalized

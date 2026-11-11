@@ -58,6 +58,23 @@ type messagingArmingDeps struct {
 	Attempts *telnyx.SMSAttempt
 	Logger   *slog.Logger
 
+	// ReplyHook (leaf 04/02, §K3 pin): the consent reply glue, invoked
+	// SYNCHRONOUSLY with (msg, ClassifyReply(msg.Text)) for every action
+	// — including ReplyOther — after the store append + InboundTopic
+	// publish. Errors are logged + swallowed (never a redelivery storm).
+	// Nil => no reply handling at all (the pre-04/02 arming shape,
+	// byte-identical). Production late-arms through replySlot instead
+	// (same D6 reasoning as slot below: the contact chain — which owns
+	// the store handle + messaging client the hook closes over — is
+	// built AFTER WireVoice returns); direct field wins when both set.
+	ReplyHook func(voicetelnyx.Message, sms.ReplyAction) error
+
+	// replySlot is the late-registration seam for the production consent
+	// hook (wiring-only; the gates inject ReplyHook directly). Read
+	// per-event so BuildContactChain's newConsentReplyHook arm takes
+	// effect without rebuilding the route.
+	replySlot *consentReplySlot
+
 	// slot is the late-registration seam for the live SMSAttempt
 	// (wiring-only; the gate injects Attempts directly). Read per-event
 	// so a BuildContactChain registration after WireVoice takes effect
@@ -89,6 +106,47 @@ func (s *dlrAttemptSlot) get() *telnyx.SMSAttempt {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.att
+}
+
+// consentReplySlot carries the production *consent reply hook* to the
+// armed OnInbound closure (leaf 04/02). Same mutex-guarded pointer
+// handoff shape as dlrAttemptSlot — no I/O under the lock (repo rule).
+// nil-safe both ways: an unwired slot reads nil, i.e. no reply handling.
+type consentReplySlot struct {
+	mu   sync.Mutex
+	hook func(voicetelnyx.Message, sms.ReplyAction) error
+}
+
+func (s *consentReplySlot) set(h func(voicetelnyx.Message, sms.ReplyAction) error) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.hook = h
+	s.mu.Unlock()
+}
+
+func (s *consentReplySlot) get() func(voicetelnyx.Message, sms.ReplyAction) error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.hook
+}
+
+// setConsentReplyHook registers the production consent reply hook into
+// the voice wiring's arming slot (leaf 04/02). Called from
+// BuildContactChain — the chain is the single construction site that has
+// BOTH the contacts store handle and the messaging telnyx.Client the hook
+// closes over, and it runs AFTER WireVoice armed the route. Nil wiring:
+// no-op (voice never wired). A nil hook on a disabled block keeps the
+// slot inert: OnInbound skips reply handling entirely.
+func (w *VoiceWiring) setConsentReplyHook(h func(voicetelnyx.Message, sms.ReplyAction) error) {
+	if w == nil {
+		return
+	}
+	w.replySlot.set(h)
 }
 
 // setSMSAttempt registers the contact chain's live SMSAttempt (the DLR
@@ -178,6 +236,23 @@ func buildMessagingDeps(d messagingArmingDeps) commhttp.MessagingWebhookDeps {
 		// placed after the store+publish so classification can never
 		// drop a durably-received message, and its failures cannot turn
 		// an already-stored event into a redelivery storm.
+		//
+		// Leaf 04/02 arms it: ClassifyReply runs on every NEWLY-APPLIED
+		// inbound (the dup-ack above returned before this point), and a
+		// non-nil hook is invoked synchronously for EVERY action — the
+		// hook switches internally. A hook error is logged and swallowed
+		// (§K3 poison pin): the row is durable, the fan-out fired, so
+		// 200-ack is the honest posture and redelivery would only spin
+		// the nonce guard.
+		hook := d.ReplyHook
+		if hook == nil {
+			hook = d.replySlot.get()
+		}
+		if hook != nil {
+			if err := hook(msg, sms.ClassifyReply(msg.Text)); err != nil {
+				logger.Warn("daemon: messaging reply hook failed", "event_id", msg.EventID, "error", err)
+			}
+		}
 
 		return nil
 	}
