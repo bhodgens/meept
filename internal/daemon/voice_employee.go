@@ -51,6 +51,10 @@ var TopicVoiceCallProgress = bus.NewTopic[voice.ProgressEvent]("voice.call.progr
 type VoiceEmployeeWiring struct {
 	Binding *voice.Binding
 
+	// storePath is the calls.db path (kept for the Stop-path pin test
+	// and diagnostics; the store handle itself stays unexported).
+	storePath string
+
 	store  *voice.CallStore
 	bus    *bus.MessageBus
 	logger *slog.Logger
@@ -498,6 +502,7 @@ func WireVoiceEmployee(deps VoiceEmployeeDeps) (*VoiceEmployeeWiring, error) {
 	w := &VoiceEmployeeWiring{
 		Binding:       binding,
 		store:         store,
+		storePath:     deps.CallStorePath,
 		bus:           deps.Bus,
 		logger:        logger,
 		ledgerStore:   deps.LedgerStore,

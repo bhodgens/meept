@@ -166,7 +166,25 @@ func (w *WriteBack) Report(ctx context.Context, t Ticket, o Outcome) (int64, str
 		return json.Marshal(map[string]any{"id": c.GetID(), "html_url": c.GetHTMLURL()})
 	})
 	if runErr != nil {
-		return 0, "", fmt.Errorf("intake: WriteBack.Report: %w", runErr)
+		// bughunt D7 retry lane: a RECEIPTED prior from OUR OWN claimant
+		// (the label-failure window above — comment landed, label failed,
+		// record left receipted so the failure stays retryable) refuses
+		// re-execution by design. Adopt it: re-run ONLY the label, then
+		// complete. Anything else (claimed by another caller, unknown
+		// state) still fails the call.
+		if prior, gerr := w.ledger.Get(ctx, key); gerr == nil && prior != nil &&
+			prior.State == effects.StateReceipted && who.Matches(effects.Claimant{
+			AgentID: prior.ClaimantAgentID, SessionID: prior.ClaimantSessionID,
+		}) {
+			receipt = prior.Receipt
+			var adoptErr error
+			receipt, reused, adoptErr = w.retryLabelOnly(ctx, client, num, o, key, who, prior.Receipt)
+			if adoptErr != nil {
+				return 0, "", fmt.Errorf("intake: WriteBack.Report: %w", adoptErr)
+			}
+		} else {
+			return 0, "", fmt.Errorf("intake: WriteBack.Report: %w", runErr)
+		}
 	}
 
 	if reused {
@@ -194,21 +212,27 @@ func (w *WriteBack) Report(ctx context.Context, t Ticket, o Outcome) (int64, str
 		return 0, "", fmt.Errorf("intake: WriteBack.Report: decode receipt %s: %w", string(receipt), err)
 	}
 
-	// Complete the effect so the next poll with the same outcome collides
-	// on the completed key and reuses this receipt (storm guard).
-	if err := w.ledger.Complete(ctx, key, who); err != nil {
-		return rc.ID, rc.HTMLURL, fmt.Errorf("intake: WriteBack.Report: complete %s: %w", key, err)
-	}
-
-	// Fresh execution. Healthy adds the done label; other states never
-	// touch the labels endpoint. The label call is idempotent upstream
-	// and part of the same logical effect as the comment.
+	// Fresh execution. Healthy adds the done label BEFORE the effects
+	// record completes (bughunt D7): Complete is the dedupe gate — the
+	// reused-receipt path NEVER re-runs anything — so completing first
+	// made a failed label call permanent while the old comment claimed
+	// "the next poll re-adds the label harmlessly". The label call is
+	// idempotent upstream, so a retry after a label failure (record left
+	// receipted, not completed) is safe: the comment is NOT re-posted
+	// because the effects Run short-circuits only on COMPLETED priors —
+	// a receipted prior is refused as owned-by-another... which means
+	// the poller's own next attempt must be the completing one. Leave
+	// the record receipted on label failure: Complete below runs only
+	// after the label succeeded (or the state is non-healthy, where no
+	// label is part of the effect).
 	if o.State == "healthy" {
 		if _, _, apiErr := client.Issues.AddLabelsToIssue(ctx, w.repo.Owner, w.repo.Repo, num, []string{w.doneLabel}); apiErr != nil {
-			// The comment landed; a failed label ride must not lose
-			// the receipt. Surface the label failure on top of the
-			// completed effect — the next poll with the same outcome
-			// re-adds the label harmlessly.
+			// The comment landed and its receipt is stored (receipted,
+			// not completed). Surface the label failure WITHOUT
+			// completing: the next poll with the same outcome retries
+			// the label (and only the label — the receipted prior
+			// refuses re-execution, and the reconcile path can adopt
+			// + complete it once the label lands).
 			err := fmt.Errorf("intake: WriteBack.Report: done label %q on %s#%s: %w", w.doneLabel, t.Repo, t.ID, apiErr)
 			if attemptErr != nil {
 				return rc.ID, rc.HTMLURL, errors.Join(attemptErr, err)
@@ -217,10 +241,35 @@ func (w *WriteBack) Report(ctx context.Context, t Ticket, o Outcome) (int64, str
 		}
 	}
 
+	// Complete the effect so the next poll with the same outcome collides
+	// on the completed key and reuses this receipt (storm guard). Runs
+	// AFTER the label (bughunt D7): completion is the dedupe gate, so
+	// everything inside the effect's logical scope must succeed first.
+	if err := w.ledger.Complete(ctx, key, who); err != nil {
+		return rc.ID, rc.HTMLURL, fmt.Errorf("intake: WriteBack.Report: complete %s: %w", key, err)
+	}
+
 	if attemptErr != nil {
 		// 4xx recorded-outcome: receipt stored + completed; surface the
 		// provider rejection to the caller.
 		return rc.ID, rc.HTMLURL, attemptErr
 	}
 	return rc.ID, rc.HTMLURL, nil
+}
+
+// retryLabelOnly adopts a RECEIPTED prior written by the same claimant
+// (the D7 label-failure window: the comment landed and its receipt was
+// recorded, but the done label failed and the record was deliberately
+// left uncompleted so the failure stays retryable). The comment is NOT
+// re-posted — the stored receipt is returned verbatim; ONLY the label
+// re-runs (idempotent upstream), after which the caller completes the
+// record. On a second label failure the error wraps the receipted-prior
+// refusal so the record stays receipted for the next poll.
+func (w *WriteBack) retryLabelOnly(ctx context.Context, client *github.Client, num int, o Outcome, key string, who effects.Claimant, priorReceipt json.RawMessage) (json.RawMessage, bool, error) {
+	if o.State == "healthy" {
+		if _, _, apiErr := client.Issues.AddLabelsToIssue(ctx, w.repo.Owner, w.repo.Repo, num, []string{w.doneLabel}); apiErr != nil {
+			return nil, false, fmt.Errorf("intake: writeback: retry done label %q on %s: %w", w.doneLabel, key, apiErr)
+		}
+	}
+	return priorReceipt, false, nil
 }

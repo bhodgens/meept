@@ -37,7 +37,7 @@ func TestVectorHybrid_NewWiringWithoutVectorStoreFailsClosed(t *testing.T) {
 	mgr := memory.NewManager(memory.ManagerConfig{
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
-	wiring, err := newVectorHybridWiring(mgr, 0.5, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	wiring, err := newVectorHybridWiring(mgr, 0.5, false, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err == nil {
 		t.Fatal("expected error when the manager has no ShardManager vector searcher")
 	}

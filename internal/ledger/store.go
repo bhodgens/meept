@@ -265,6 +265,19 @@ func Open(dbPath string, logger *slog.Logger) (*Store, error) {
 	return s, nil
 }
 
+// QueryHead returns the store-wide max ledger id (0 on an empty store).
+// Read seam for the daemon's ledger.* RPC adapter (bughunt D6): the RPC
+// surface's frozen {records, open, head} triple answers head from here
+// instead of a full-log scan.
+func (s *Store) QueryHead(ctx context.Context) (int64, error) {
+	var head int64
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(id), 0) FROM ledger`).Scan(&head); err != nil {
+		return 0, fmt.Errorf("ledger: query head: %w", err)
+	}
+	return head, nil
+}
+
 // Close closes the underlying database. Live Tail subscriptions are
 // woken and torn down first (their delivery goroutines exit and their
 // channels close), and later Tail calls fail fast.

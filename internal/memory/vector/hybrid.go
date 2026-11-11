@@ -35,6 +35,10 @@ type HybridSearcher struct {
 	vectorSearcher  VectorSearcher
 	keywordSearcher KeywordSearcher
 	alpha           float64 // Weight for vector similarity (0-1)
+	// scope is the C2 predicate over raw row metadata (nil = unfiltered
+	// legacy behavior). Applied to BOTH lanes' results before merge, so
+	// a scoped caller can never see a row its purview excludes.
+	scope ScopeFilter
 }
 
 // HybridSearcherConfig holds configuration for the hybrid searcher.
@@ -42,7 +46,45 @@ type HybridSearcherConfig struct {
 	VectorSearcher  VectorSearcher
 	KeywordSearcher KeywordSearcher
 	Alpha           float64 // Weight for vector similarity: 0 = pure keyword, 1 = pure vector
+	// Scope, when non-nil, filters BOTH lanes' results through the
+	// committed C2 predicate (bughunt D11/C35: the searcher used to
+	// return every row it saw — cross-user/project rows leaked to any
+	// caller). The predicate type lives in internal/memory (the C2
+	// implementation is single-sourced there); internal/memory/vector
+	// cannot import internal/memory (the memory package imports THIS
+	// package), so the seam is a function over raw row metadata.
+	Scope ScopeFilter
 }
+
+// ScopeFilter is the C2 predicate seam: reports whether one raw row
+// (identified by its metadata) is recallable for the bound caller.
+// Wired from memory.VisibleScopeRow at construction; nil = unfiltered
+// legacy behavior.
+type ScopeFilter func(meta map[string]any) bool
+
+// MaxSearchLimit caps the per-request limit (bughunt D11: the RPC path
+// forwarded the caller's limit verbatim — limit=1e9 meant an unbounded
+// FTS5 scan plus an embedding fan-out over every row). Matches the
+// sibling surfaces' cap (ledger.LogQuery's max is 1000; the Manager
+// search path bounds the same way).
+const MaxSearchLimit = 1000
+
+// clampLimit bounds a caller-supplied limit to MaxSearchLimit; <= 0
+// resolves to the default. Exported as ClampLimit so the daemon's RPC
+// registration site clamps with the SAME rule the searcher applies
+// internally (one constant, one helper).
+func ClampLimit(limit, def int) int {
+	if limit <= 0 {
+		return def
+	}
+	if limit > MaxSearchLimit {
+		return MaxSearchLimit
+	}
+	return limit
+}
+
+// clampLimit is the internal alias used inside the package.
+func clampLimit(limit, def int) int { return ClampLimit(limit, def) }
 
 // NewHybridSearcher creates a new hybrid searcher.
 func NewHybridSearcher(cfg HybridSearcherConfig) (*HybridSearcher, error) {
@@ -60,6 +102,7 @@ func NewHybridSearcher(cfg HybridSearcherConfig) (*HybridSearcher, error) {
 		vectorSearcher:  cfg.VectorSearcher,
 		keywordSearcher: cfg.KeywordSearcher,
 		alpha:           cfg.Alpha,
+		scope:           cfg.Scope,
 	}, nil
 }
 
@@ -74,7 +117,15 @@ type HybridResult struct {
 }
 
 // Search performs a hybrid search combining keyword and vector similarity.
+// The limit is clamped to MaxSearchLimit (bughunt D11: an unbounded
+// request limit meant an unbounded FTS5 scan + embedding fan-out per
+// call). Results from BOTH lanes pass the configured scope predicate
+// (bughunt C35) before the merge, so a scoped caller sees only rows its
+// purview permits.
 func (h *HybridSearcher) Search(ctx context.Context, query string, limit int) ([]HybridResult, error) {
+	limit = clampLimit(limit, 10)
+	// Fetch limit*2 per lane (the merge re-ranks; the pre-D11 shape) but
+	// bounded by the clamp above.
 	// Get keyword search results
 	keywordResults, err := h.keywordSearcher.SearchKeyword(ctx, query, limit*2)
 	if err != nil {
@@ -85,6 +136,25 @@ func (h *HybridSearcher) Search(ctx context.Context, query string, limit int) ([
 	vectorResults, err := h.vectorSearcher.Search(ctx, query, limit*2)
 	if err != nil {
 		vectorResults = []SearchResult{}
+	}
+
+	// Scope filter (bughunt C35): drop rows the caller's purview excludes
+	// BEFORE the merge, on both lanes.
+	if h.scope != nil {
+		filteredKeyword := keywordResults[:0]
+		for _, r := range keywordResults {
+			if h.scope(r.Metadata) {
+				filteredKeyword = append(filteredKeyword, r)
+			}
+		}
+		keywordResults = filteredKeyword
+		filteredVector := vectorResults[:0]
+		for _, r := range vectorResults {
+			if h.scope(r.Metadata) {
+				filteredVector = append(filteredVector, r)
+			}
+		}
+		vectorResults = filteredVector
 	}
 
 	// Build score maps

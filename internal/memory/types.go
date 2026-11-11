@@ -96,6 +96,33 @@ func scopeFromMetadata(meta map[string]any) Scope {
 	return ScopeGlobal
 }
 
+// RowOwner reads an identity key (project_id / user_id) a scope row was
+// stamped with at store time. Exported for recall surfaces that fetch
+// raw rows outside the Manager's option-aware paths (the vector hybrid
+// searcher's two lanes, bughunt D11) and must apply the C2 predicate
+// with the same owner-matching semantics as filterScopeResults.
+func RowOwner(meta map[string]any, key string) string {
+	return scopeRowOwner(meta, key)
+}
+
+// VisibleScopeRow reports whether one raw row passes the committed C2
+// predicate for a caller whose purview is maxScope (project/user/global,
+// the WithScopeFilter vocabulary) with the given multiuser bit. Rows
+// without an explicit scope stamp read as global (legacy backfill —
+// never hidden). This is the exported one-row form of filterScopeResults
+// for the same out-of-band recall surfaces RowOwner serves.
+func VisibleScopeRow(meta map[string]any, maxScope Scope, projectID, userID string, multiUser bool) bool {
+	f := &scopeRecallFilter{
+		maxScope:  maxScope,
+		projectID: projectID,
+		userID:    userID,
+		multiUser: multiUser,
+	}
+	mem := Memory{Metadata: meta}
+	mem.Scope = scopeFromMetadata(meta)
+	return f.visible(mem)
+}
+
 // MemoryResult is a memory item returned from a search with relevance info.
 //
 //nolint:revive // stutter with package name is intentional for API clarity

@@ -32,6 +32,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -172,6 +173,12 @@ type VoiceWiring struct {
 	// zero values take the server.go defaults). Set by WireVoice from the
 	// transport.http block.
 	plainOpts commhttp.PlainListenerOptions
+
+	// plainServe is the plain-listener serve seam (bughunt D9 test
+	// hook): production leaves it nil (the real commhttp listener);
+	// tests inject an immediately-returning Serve to pin the
+	// immediate-exit-is-fatal contract.
+	plainServe func(ctx context.Context, addr string) error
 }
 
 // WireVoiceDeps carries the components WireVoice captures. All pointer
@@ -752,16 +759,59 @@ type auditWriterAdapter struct {
 
 // WriteAudit implements voice.AuditWriter. One canonical row per dial
 // attempt, written BEFORE the POST by the dialer's own order.
+//
+// bughunt D10 (disclosure): the dialer hands this adapter the FULL
+// normalized E.164 target, and the naive append put it verbatim into the
+// hash chain — a permanent egress surface the tree's disclosure rule
+// (contact-display master O1/O4, pinned here by publishCallEnded's
+// CallerDisplay contract) restricts to contact name + last-4. The
+// payload is sanitized BEFORE the append: `target` becomes the masked
+// last-4 form ("•••NNNN"), `target_e164_len` records the digit count so
+// the row stays attributable without carrying the number. The chain hash
+// covers the sanitized payload, so the full number is unrecoverable from
+// the stored row by construction.
 func (a auditWriterAdapter) WriteAudit(ctx context.Context, row map[string]any) error {
+	sanitized := make(map[string]any, len(row)+1)
+	for k, v := range row {
+		sanitized[k] = v
+	}
+	if target, ok := row["target"].(string); ok && target != "" {
+		digits := dialAuditDigits(target)
+		sanitized["target"] = dialAuditMaskedTarget(target)
+		sanitized["target_e164_len"] = len(digits)
+	}
 	rec := auditlog.Record{
 		Type:    "voice.dial",
-		Payload: row,
+		Payload: sanitized,
 	}
 	if emp, ok := row["employee_id"].(string); ok {
 		rec.EmployeeID = emp
 	}
 	_, err := a.store.Append(ctx, rec)
 	return err
+}
+
+// dialAuditDigits returns the digit-only content of a target number.
+func dialAuditDigits(target string) string {
+	digits := make([]rune, 0, len(target))
+	for _, r := range target {
+		if r >= '0' && r <= '9' {
+			digits = append(digits, r)
+		}
+	}
+	return string(digits)
+}
+
+// dialAuditMaskedTarget renders the operator-safe last-4 form of a
+// target number ("•••5567"); fewer than five digits renders the whole
+// digit tail (a non-sensitive degenerate case the display resolver's
+// short-number rule shares).
+func dialAuditMaskedTarget(target string) string {
+	digits := dialAuditDigits(target)
+	if len(digits) <= 4 {
+		return digits
+	}
+	return "•••" + digits[len(digits)-4:]
 }
 
 // routeFrame is the C1 frame router (TextServer handler). Setup frames
@@ -791,13 +841,20 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 		// unreached (router looks up by map), received no frames, and its
 		// silence timer eventually fired t.end -> managerHangup on the
 		// CURRENT live call. The lost cancel func also leaked the ctx.
-		w.loopsMu.Lock()
-		if _, exists := w.loops[f.CallID]; exists {
-			w.loopsMu.Unlock()
-			w.logger.Debug("voice wiring: setup for live call ignored", "ccid", f.CallID)
-			return
-		}
-		w.loopsMu.Unlock()
+		//
+		// bughunt A10: the ORIGINAL shape checked-then-inserted in TWO
+		// separate critical sections. A hangup (releaseCall drops the map
+		// entry + registry row) between them found no loop entry and the
+		// setup armed a ZOMBIE talk loop on a dead call — the loop's
+		// silence timers then fired managerHangup on the released id and
+		// its registry row was already gone. The fix: build the loop and
+		// resolve the instance OUTSIDE the lock, then make
+		// check + insert + liveness-recheck ONE critical section. The
+		// re-check consults the registry (releaseCall's Release runs
+		// under the registry's own mutex, so a released call is absent
+		// from Live()); a zombie arming is refused and the loop is never
+		// registered, started, or sent keys.
+		//
 		// Setup carries the call identity the talk loop needs. The
 		// registry instance was acquired at answer/dial time; find it.
 		var inst voice.Instance
@@ -848,25 +905,47 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 			FillerGrace:          time.Duration(w.cfg.FillerGraceMs) * time.Millisecond,
 			SuppressGreeting:     suppressGreeting,
 		})
-		if coord != nil {
-			coord.Bind(turnSide, loop)
-		}
+		// H4 + A10: arm the per-call context and install the loop in ONE
+		// critical section. releaseCall cancels the ctx so a released
+		// call's talk loop exits promptly instead of self-reaping after
+		// silence timers; loopContext owns the daemon-lifecycle parent.
+		// The registry re-check inside the SAME section closes the A10
+		// window: a releaseCall that ran (registry row dropped) before we
+		// took loopsMu refuses the arming outright — no zombie loop, no
+		// keys frame, no goroutine.
 		w.loopsMu.Lock()
+		if _, exists := w.loops[f.CallID]; exists {
+			w.loopsMu.Unlock()
+			w.logger.Debug("voice wiring: setup for live call ignored", "ccid", f.CallID)
+			return
+		}
+		stillLive := false
+		for _, live := range w.Registry.Live() {
+			if live.CallControlID == f.CallID {
+				stillLive = true
+				break
+			}
+		}
+		if !stillLive {
+			w.loopsMu.Unlock()
+			w.logger.Warn("voice wiring: setup raced a hangup; loop not armed",
+				"ccid", f.CallID)
+			return
+		}
 		w.loops[f.CallID] = loop
-		// H4: arm the per-call context. releaseCall cancels it so a
-		// released call's talk loop exits promptly instead of
-		// self-reaping after silence timers. loopContext owns the
-		// daemon-lifecycle parent.
 		loopCtx, loopCancel := context.WithCancel(w.loopContext(f.CallID))
 		w.loopCancels[f.CallID] = loopCancel
 		w.loopsMu.Unlock()
+		if coord != nil {
+			coord.Bind(turnSide, loop)
+		}
 		// Leaf 03 (C4): the extended keys frame goes out right after the
 		// loop registers, once per call, on the setup goroutine. The
 		// idempotency guard above returned on duplicate setups before
 		// reaching this line, so a replayed setup never re-sends keys;
-		// the unknown-ccid return also precedes it (refused setups send
-		// nothing). Send failure degrades inside sendKeysFrame (warn,
-		// no teardown).
+		// the unknown-ccid and raced-hangup returns also precede it
+		// (refused setups send nothing). Send failure degrades inside
+		// sendKeysFrame (warn, no teardown).
 		w.sendKeysFrame(f.CallID)
 		go func() {
 			// Talk loop lives for the call; Run returns at end (end
@@ -1442,28 +1521,45 @@ func openContactDisplayStore(logger *slog.Logger) *contact.SQLiteStore {
 	return store
 }
 
-// Stop tears the stack down in dependency order: child FIRST (it holds the
-// text socket connection), then the text server listener, then the call
-// store. Loop goroutines exit with the daemon lifecycle context. The
-// Signal sidecar stops before the text server (its client holds a
-// signal-cli socket conn, not the C1 socket - but the order keeps the
-// leg's call paths quiesced before the shared transport closes).
+// Stop tears the stack down in dependency order: live calls first (each
+// release fires the release-hook fan-out — end frame, talk-loop cancel,
+// registry release, binding OnCallEnd, per-call brief — so terminal call
+// rows land while the call store is still open), then the signal sidecar,
+// the child (it holds the text socket connection), the text server
+// listener, and finally the stores.
+//
+// bughunt D2 (HIGH): Stop previously went straight to w.Employee.Close()
+// with live calls untouched — their release hooks then wrote terminal call
+// rows into a CLOSED store (rows stranded 'live' + sql.ErrConnDone). The
+// pre-close drain below drives every live call through the release funnel
+// BEFORE any store closes.
+//
+// The Signal sidecar stops after the drain (its client holds a signal-cli
+// socket conn, not the C1 socket — but the order keeps the leg's call
+// paths quiesced before the shared transport closes).
 func (w *VoiceWiring) Stop(ctx context.Context) {
 	if w == nil {
 		return
 	}
 	stopCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	w.drainLiveCalls(stopCtx)
 	StopSignalLeg(stopCtx, w.Signal)
-	if err := w.ChildProc.Stop(stopCtx); err != nil {
-		w.logger.Warn("voice wiring: child stop", "error", err)
+	if w.ChildProc != nil {
+		if err := w.ChildProc.Stop(stopCtx); err != nil {
+			w.logger.Warn("voice wiring: child stop", "error", err)
+		}
 	}
 	if w.stopCancel != nil {
 		w.stopCancel() // unblocks the TextServer.Start lifetime goroutine
 	}
-	w.TextServer.Close()
-	if err := w.Employee.Close(); err != nil {
-		w.logger.Warn("voice wiring: call store close", "error", err)
+	if w.TextServer != nil {
+		w.TextServer.Close()
+	}
+	if w.Employee != nil {
+		if err := w.Employee.Close(); err != nil {
+			w.logger.Warn("voice wiring: call store close", "error", err)
+		}
 	}
 	if w.displayStore != nil {
 		// Contact-display store (leaf 02): owned via
@@ -1473,6 +1569,37 @@ func (w *VoiceWiring) Stop(ctx context.Context) {
 		}
 	}
 	w.logger.Info("voice wiring: stopped")
+}
+
+// drainLiveCalls terminates every live call before the stores close. Each
+// registry row is driven through the manager's once-per-ccid release
+// funnel (FailOutcome -> releaseOnce -> fireRelease -> the release hook),
+// which runs SYNCHRONOUSLY: end frame to the child, talk-loop ctx cancel,
+// registry release, binding OnCallEnd (the terminal call-row write), and
+// the per-call ledger brief all complete before FailOutcome returns — so
+// every terminal row lands while the call store is still open. Unknown
+// ids (loop self-reaped between the snapshot and the drain) are idempotent
+// no-ops per the manager contract. ctx is honored only by the downstream
+// hooks' own bounded contexts; the drain itself never blocks on it
+// (releaseCall never waits on this caller).
+func (w *VoiceWiring) drainLiveCalls(ctx context.Context) {
+	if w.Manager == nil || w.Registry == nil {
+		return
+	}
+	live := w.Registry.Live()
+	if len(live) == 0 {
+		return
+	}
+	ccids := make([]string, 0, len(live))
+	for _, inst := range live {
+		ccids = append(ccids, inst.CallControlID)
+	}
+	sort.Strings(ccids)
+	w.logger.Info("voice wiring: draining live calls before store close",
+		"count", len(ccids))
+	for _, ccid := range ccids {
+		w.Manager.FailOutcome(ccid, voice.OutcomeHangup, "daemon shutdown")
+	}
 }
 
 // voiceSupervisorChatter resolves the C6 gate's fast-model seam for the

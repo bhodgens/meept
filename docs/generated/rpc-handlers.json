@@ -183,7 +183,7 @@
     "topic": "chat.submit",
     "handler": "chatSubmitHandler.Submit",
     "file": "internal/daemon/daemon.go",
-    "line": 337
+    "line": 336
   },
   {
     "topic": "chat.submit",
@@ -585,7 +585,7 @@
     "topic": "memory.search.hybrid",
     "handler": "func(ctx context.Context, params json.RawMessage",
     "file": "internal/daemon/vector_hybrid_wiring.go",
-    "line": 106
+    "line": 147
   },
   {
     "topic": "memory.vector.search",

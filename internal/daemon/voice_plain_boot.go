@@ -32,8 +32,12 @@ const plainBootProbeWindow = 250 * time.Millisecond
 // startPlainListener boots the optional plain-HTTP loopback voice listener
 // when voice.loopback_plain_addr is set (no-op when empty — the knob is
 // opt-in, default off). Returns an error ONLY for boot-fatal conditions:
-// a refused address (wrapping commhttp.ErrNonLoopbackVoiceAddr) or an
-// immediate bind failure. Post-boot serve failures land on the Error log.
+// a refused address (wrapping commhttp.ErrNonLoopbackVoiceAddr), an
+// immediate bind failure, or an immediate clean exit within the probe
+// window (D9: a listener that exits at once is silently unserved — that
+// violates the file's never-degrade-silently contract, so BOTH exit modes
+// within the window fail the boot). Post-boot serve failures land on the
+// Error log.
 func (w *VoiceWiring) startPlainListener(ctx context.Context) error {
 	addr := w.cfg.LoopbackPlainAddr
 	if addr == "" {
@@ -50,19 +54,32 @@ func (w *VoiceWiring) startPlainListener(ctx context.Context) error {
 		return fmt.Errorf("voice wiring: plain listener: %w", err)
 	}
 
+	// plainServe is the serve seam (test hook): tests inject a Serve
+	// that exits immediately to pin the D9 fatal-exit contract without
+	// racing a real socket. nil = the production listener.
 	opts := w.plainOpts
+	plainServe := w.plainServe
+	if plainServe == nil {
+		plainServe = func(ctx context.Context, addr string) error {
+			return commhttp.StartVoicePlainListener(ctx, addr, w.Routes, &opts)
+		}
+	}
+
 	resCh := make(chan error, 1)
-	go func() { resCh <- commhttp.StartVoicePlainListener(ctx, addr, w.Routes, &opts) }()
+	go func() { resCh <- plainServe(ctx, addr) }()
 
 	select {
 	case err := <-resCh:
-		// Listener already returned: either a bind/refusal error (fatal
-		// for boot) or an immediate clean exit — report both loudly.
+		// Listener already returned: either a bind/refusal error or an
+		// immediate clean exit — BOTH are fatal for the voice boot path
+		// (leaf-10 T6 never-degrade-silently contract). A listener that
+		// exits cleanly within the probe window is functionally unserved:
+		// booting on would leave the configured knob silently dead.
+		// bughunt D9: a nil return used to only WARN and continue.
 		if err != nil {
 			return fmt.Errorf("voice wiring: plain listener: %w", err)
 		}
-		w.logger.Warn("voice wiring: plain listener exited immediately", "addr", addr)
-		return nil
+		return fmt.Errorf("voice wiring: plain listener exited immediately within %s; refusing silent degradation (voice.loopback_plain_addr=%s)", plainBootProbeWindow, addr)
 	case <-time.After(plainBootProbeWindow):
 	}
 

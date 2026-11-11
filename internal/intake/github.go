@@ -10,9 +10,11 @@ package intake
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/google/go-github/v93/github"
@@ -27,18 +29,34 @@ const githubPollerPageSize = 50
 // the intake Filter, and maps them to Tickets. The watermark is
 // persisted in-memory on the struct; daemon restarts re-scan once —
 // acceptable for v1, the dedup layer makes it a no-op.
+//
+// bughunt D8: overlapping Poll calls used to race the unsynchronized
+// watermark (the cron fires each tick on a fresh goroutine) AND duplicate
+// the API paging. In-flight now single-flights: a concurrent Poll
+// returns (nil, ErrPollInProgress) instead of paging the same window a
+// second time; the watermark read/write is guarded by the same mutex.
 type GitHubPoller struct {
 	pool   *githubsvc.ClientPool
 	repo   githubsvc.OwnerRepo
 	filter Filter
 	logger *slog.Logger
 
-	// watermark is the max UpdatedAt seen across all successful polls.
-	// Nil until the first successful poll completes; a nil watermark
-	// means "first poll — return everything currently matching".
+	// pollMu guards watermark/hasWatermark AND the single-flight flag:
+	// the mutex scope is memory-only (watermark bookkeeping), never held
+	// across the HTTP call (mutexio rule) — the in-flight flag, checked
+	// + set under the lock and cleared after the page, is what
+	// serializes polls.
+	pollMu       sync.Mutex
 	watermark    time.Time
 	hasWatermark bool
+	pollRunning  bool
 }
+
+// ErrPollInProgress is returned to a Poll call that overlaps an
+// in-flight one (single-flight skip). The cron's fresh-goroutine-per-tick
+// model treats it as "nothing new this tick" — the NEXT tick re-reads
+// the watermark the in-flight poll will have advanced.
+var ErrPollInProgress = errors.New("intake: poll already in flight; skipped")
 
 // NewGitHubPoller builds a GitHub Issues poller for the given repo.
 // The logger parameter takes a Handler (the committed gate tests pass
@@ -62,8 +80,28 @@ func NewGitHubPoller(pool *githubsvc.ClientPool, repo githubsvc.OwnerRepo,
 // through the label gate, and maps survivors to Tickets. PR entries
 // are skipped — the issues API returns PRs too and intake tickets are
 // issues only. The watermark advances to the max UpdatedAt seen across
-// a successful poll.
+// a successful poll. Overlapping calls (bughunt D8): a Poll that
+// overlaps an in-flight one returns ErrPollInProgress without paging.
 func (p *GitHubPoller) Poll(ctx context.Context) ([]Ticket, error) {
+	// Single-flight gate + watermark snapshot, one critical section.
+	// The mutex is released BEFORE any I/O (mutexio rule); the in-flight
+	// flag makes overlapping ticks no-ops instead of duplicate pages.
+	p.pollMu.Lock()
+	if p.pollRunning {
+		p.pollMu.Unlock()
+		return nil, ErrPollInProgress
+	}
+	p.pollRunning = true
+	watermark := p.watermark
+	hasWatermark := p.hasWatermark
+	p.pollMu.Unlock()
+
+	defer func() {
+		p.pollMu.Lock()
+		p.pollRunning = false
+		p.pollMu.Unlock()
+	}()
+
 	client, err := p.pool.For(ctx, p.repo.Owner, p.repo.Repo)
 	if err != nil {
 		return nil, fmt.Errorf("intake: client pool: %w", err)
@@ -78,8 +116,8 @@ func (p *GitHubPoller) Poll(ctx context.Context) ([]Ticket, error) {
 			PerPage: githubPollerPageSize,
 		},
 	}
-	if p.hasWatermark {
-		opts.Since = p.watermark
+	if hasWatermark {
+		opts.Since = watermark
 	}
 
 	issues, resp, err := client.Issues.ListByRepo(ctx, p.repo.Owner, p.repo.Repo, opts)
@@ -108,7 +146,7 @@ func (p *GitHubPoller) Poll(ctx context.Context) ([]Ticket, error) {
 		// sub-second watermark could otherwise re-surface an issue whose
 		// UpdatedAt sits inside the same second. Issue 1 of the fixture
 		// sits exactly ON the watermark (t0) and must not re-surface.
-		if p.hasWatermark && !updatedAt.After(p.watermark) {
+		if hasWatermark && !updatedAt.After(watermark) {
 			continue
 		}
 		if !sawAny || updatedAt.After(maxUpdated) {
@@ -128,8 +166,14 @@ func (p *GitHubPoller) Poll(ctx context.Context) ([]Ticket, error) {
 	}
 
 	if sawAny {
-		p.watermark = maxUpdated
-		p.hasWatermark = true
+		p.pollMu.Lock()
+		// Monotonic guard: a skipped overlapping poll can never rewind a
+		// watermark a concurrent (post-single-flight) writer advanced.
+		if !p.hasWatermark || maxUpdated.After(p.watermark) {
+			p.watermark = maxUpdated
+			p.hasWatermark = true
+		}
+		p.pollMu.Unlock()
 	}
 	p.logger.Debug("intake: github poll",
 		slog.String("repo", p.repo.Owner+"/"+p.repo.Repo),

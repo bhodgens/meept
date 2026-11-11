@@ -138,6 +138,15 @@ func (s *Store) SearchLog(ctx context.Context, q LogQuery, term string) ([]Recor
 // the state scan run as two SEQUENTIAL passes — one full ledger scan
 // building the fold map, then a ledger_state scan diffing against it —
 // never a nested query under an open cursor.
+//
+// bughunt D5 (snapshot consistency): the two passes are not one
+// transaction, so an Append can commit BETWEEN the fold and the state
+// scan — Have is then NEWER than the fold's Want (Have.AsOf > Want.AsOf).
+// That is PROGRESS, not divergence: the row is skipped (counted Checked
+// only). Without the guard, RepairState's auto-repair path would rewind
+// a fresh append with the stale fold. A row whose Have.AsOf <= Want.AsOf
+// that still disagrees IS a real divergence (the state was written by a
+// fold-era row and does not match the fold).
 func (s *Store) VerifyState(ctx context.Context) (*VerifyReport, error) {
 	folded, err := s.foldAll(ctx)
 	if err != nil {
@@ -161,6 +170,12 @@ func (s *Store) VerifyState(ctx context.Context) (*VerifyReport, error) {
 		report.Checked++
 		want, ok := folded[stateKey{have.EmployeeID, have.Subject}]
 		if !ok {
+			continue
+		}
+		// Snapshot guard (D5): Have is newer than the fold's snapshot —
+		// an Append committed between the two passes landed this state.
+		// Progress, never divergence; never repaired.
+		if have.AsOf > want.AsOf {
 			continue
 		}
 		if have.Status != want.Status || have.Summary != want.Summary || have.AsOf != want.AsOf ||
@@ -240,9 +255,17 @@ func (s *Store) foldAll(ctx context.Context) (map[stateKey]State, error) {
 
 // RepairState rebuilds divergent state rows from the fold. It runs
 // VerifyState first and writes ONLY the rows that diverge (healthy rows
-// are guarded and left byte-identical), in one transaction; returns the
-// repaired count. Idempotent: a second run after a clean repair finds no
-// divergence and returns 0.
+// are guarded and left byte-identical; rows NEWER than the fold's
+// snapshot — Have.AsOf > Want.AsOf, D5's progress-not-divergence guard —
+// are never candidates), in one transaction; returns the repaired count.
+// Idempotent: a second run after a clean repair finds no divergence and
+// returns 0.
+//
+// bughunt D5: because repair writes ONLY VerifyState-flagged rows, and
+// VerifyState now skips rows newer than the fold's snapshot, a fresh
+// append that lands between verify and repair can no longer be rewound —
+// the stale fold never reaches it. The one transaction here also bounds
+// the write pass so a mid-repair append lands wholly before or after it.
 func (s *Store) RepairState(ctx context.Context) (int, error) {
 	report, err := s.VerifyState(ctx)
 	if err != nil {
