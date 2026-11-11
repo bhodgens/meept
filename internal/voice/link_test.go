@@ -138,12 +138,15 @@ func (f *linkFakeLeg) Open(_ context.Context, employeeID, label string, _ ...str
 	if err != nil {
 		return LocalCall{}, fmt.Errorf("fake listen in: %w", err)
 	}
+	f.listens = append(f.listens, inLn)
 	outLn, err := net.Listen("unix", outPath)
 	if err != nil {
-		_ = inLn.Close()
+		// inLn stays in f.listens: the test cleanup owns listener
+		// lifetimes. Closing it here held the mutex across socket I/O
+		// and tripped the mutexio gate (2026-11-10).
 		return LocalCall{}, fmt.Errorf("fake listen out: %w", err)
 	}
-	f.listens = append(f.listens, inLn, outLn)
+	f.listens = append(f.listens, outLn)
 	inCh := make(chan net.Conn, 1)
 	outCh := make(chan net.Conn, 1)
 	f.acceptIn[ccid] = inCh

@@ -166,6 +166,16 @@ type runLocalSplice struct {
 	// goroutine (paceOne runs there), no lock needed.
 	pumpChunks      atomic.Uint64
 	lastClientWrite time.Time
+	// paceAnchor is the deadline clock for the CURRENT paced stream
+	// (2026-11-10 chop fix): each chunk's deadline advances by exactly
+	// Pace from this anchor instead of now()+Pace per chunk. Per-chunk
+	// now()+Pace accumulates the timer-wake and bookkeeping overhead
+	// (~1.7 ms per 20 ms tick measured on the live loop), so delivery
+	// runs ~8% slower than the speakers drain: the client backlog
+	// slowly starves and burst handoffs lose their mixer overlap -
+	// audible micro-gaps ("words cut into segments"). Zeroed alongside
+	// lastClientWrite at every deliberate-stop anchor drop.
+	paceAnchor      time.Time
 	paceWrites      int // client writes completed this call
 	paceFirstAt     time.Time
 	paceDropped     int // frames abandoned at the barge-in latch
@@ -692,7 +702,18 @@ func (s *runLocalSplice) outboundLoop(ctx context.Context) error {
 // consumed mid-wait only re-checks the latch; the deadline is honored
 // regardless, so the send rate never accelerates.
 func (s *runLocalSplice) paceOne(ctx context.Context, chunk []byte) error {
-	deadline := time.Now().Add(s.cfg.Pace)
+	deadline := s.paceAnchor.Add(s.cfg.Pace)
+	if s.paceAnchor.IsZero() {
+		deadline = time.Now() // first chunk of a stream: start the clock now
+	} else if lag := time.Since(deadline); lag >= s.cfg.Pace {
+		// The anchor fell a full interval behind (a slow socket write
+		// or a long wake overshoot): re-anchor to now rather than
+		// burst-writing the backlog to "catch up" - the pinned rule is
+		// that the send rate never accelerates. A lag SHORTER than one
+		// interval still rides the anchor: the next paced write fires
+		// immediately and the clock self-corrects without a gap burst.
+		deadline = time.Now()
+	}
 	for {
 		s.mu.Lock()
 		stopped := s.interrupt || s.ended
@@ -703,6 +724,7 @@ func (s *runLocalSplice) paceOne(ctx context.Context, chunk []byte) error {
 			// write does not record one giant "stall" gap.
 			s.paceDropped++
 			s.lastClientWrite = time.Time{}
+			s.paceAnchor = time.Time{} // restart the deadline clock on resume
 			return nil // frame abandoned: barge-in means interrupted audio is dead
 		}
 		wait := time.Until(deadline)
@@ -761,6 +783,10 @@ func (s *runLocalSplice) paceOne(ctx context.Context, chunk []byte) error {
 		s.paceFirstAt = now
 	}
 	s.lastClientWrite = now
+	// Advance the paced deadline clock by exactly one interval from the
+	// deadline that just fired (see paceOne's anchor comment): timer
+	// wake overhead is absorbed by the NEXT wait, never accumulated.
+	s.paceAnchor = deadline
 	return nil
 }
 

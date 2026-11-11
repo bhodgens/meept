@@ -460,17 +460,27 @@ func classifyMicDeath(micErr error, micBytes int64) error {
 // recallable playback). The old loop let the sink's gap heuristic buffer
 // a whole utterance before the first handoff, so seconds of audio stayed
 // queued behind a barge-in and talked over the new answer (live defect,
-// transcript local-2d84c384fd93f447). The bound is the leaf's ~150 ms
-// ceiling: 16000 samples/s x 2 bytes x 150 ms = 4800 B (the daemon paces
-// 640 B per 20 ms, so 7.5 chunks). drainLiveSpeaker flushes the sink as
-// soon as its backlog reaches the bound; the steady-state overshoot is
-// one read (liveSpeakerReadChunk) on top. The hard recall of what the
-// player ALREADY holds is tts.AudioPlayer's Pause (Play pauses the
-// previous burst; the Player seam's Clear/Stop pauses the current one) -
-// that is what kills the tail. Socket backpressure then stalls the
-// daemon outbound loop, which stops writing at the barge-in latch
-// anyway.
-const liveMaxPendingAudioBytes = 16000 * 2 * 150 / 1000 // 4800 B = 150 ms @ L16@16k mono
+// transcript local-2d84c384fd93f447).
+//
+// The bound MUST stay comfortably above one oto burst's play time. The
+// daemon paces 640 B per 20 ms — exactly real time — so a cap equal to
+// the drain rate makes burst k finish at the same instant burst k+1 is
+// flushed: zero mixer overlap, and every handoff pays the fresh-player
+// start latency as an audible micro-gap every ~150 ms of speech
+// ("words cut into segments", 2026-11-10; the MEEPT_VOICE_TRACE
+// underrun counters proved it with early_overlaps=0). 375 ms = 3x the
+// 150 ms burst drain keeps ~225 ms of predecessor audio live at every
+// handoff, which is what makes successive bursts seamless in oto's
+// mixer. Recallability is unchanged by the bound: Clear() drops the
+// buffered burst and Stop() pauses every live player, so a barge-in
+// still silences the speakers within ~20 ms; the bound only sizes the
+// queued-but-unplayed tail (375 ms, versus the whole-utterance backlog
+// that was the original defect).
+//
+// The recorded lanes (--out, link --record) are structurally blind to
+// this class: they never open oto, so a clean recording does NOT certify
+// live smoothness. Verify playout-contract changes on the audible layer.
+const liveMaxPendingAudioBytes = 16000 * 2 * 375 / 1000 // 12000 B = 375 ms @ L16@16k mono
 
 // liveSpeakerReadChunk is one paced daemon chunk (L16@16k, 20 ms):
 // sizing the drain read this way keeps the backlog overshoot past the
@@ -500,10 +510,25 @@ func drainLiveSpeaker(r io.Reader, s *voice.SpeakerSink, done chan<- error) {
 		maxReadGap time.Duration
 		sumReadGap time.Duration
 		gapSamples int
-		boundHands int
 		bytesTotal int64
 	)
 	buf := make([]byte, liveSpeakerReadChunk)
+	var (
+		// Audible-layer instrumentation (2026-11-10 seam delta hunt):
+		// the earlier acceptance lane measured RECORDED byte streams,
+		// which never pass through oto. These counters measure the
+		// DEVICE-CLOCK playout: handoff interval vs the previous
+		// burst's audio duration. A positive residual = a silent gap
+		// at the speakers (oto had finished burst k-1 and waited for
+		// burst k) that a file recording structurally cannot show.
+		lastFlushAt     time.Time
+		lastFlushBytes  int
+		underrunCount   int
+		underrunSumMs   int64
+		underrunMaxMs   int64
+		burstCount      int
+		earlyCount      int // interval < duration (overlap, normal oto mixing)
+	)
 	for {
 		n, rerr := r.Read(buf)
 		if n > 0 {
@@ -527,12 +552,25 @@ func drainLiveSpeaker(r io.Reader, s *voice.SpeakerSink, done chan<- error) {
 			}
 			if s.Pending() >= liveMaxPendingAudioBytes {
 				if trace {
-					boundHands++
-					if ferr := s.Flush(); ferr != nil {
-						done <- ferr
-						return
+					burstCount++
+					now := time.Now()
+					durMs := int64(float64(lastFlushBytes) / 2 / 16000 * 1000)
+					if !lastFlushAt.IsZero() {
+						residual := now.Sub(lastFlushAt).Milliseconds() - durMs
+						if residual > 20 { // >20 ms silent gap at the speakers
+							underrunCount++
+							underrunSumMs += residual
+							if residual > underrunMaxMs {
+								underrunMaxMs = residual
+							}
+						} else if residual < -20 {
+							earlyCount++ // overlap: next burst started before previous ended (normal)
+						}
 					}
-				} else if ferr := s.Flush(); ferr != nil {
+					lastFlushAt = now
+					lastFlushBytes = s.Pending()
+				}
+				if ferr := s.Flush(); ferr != nil {
 					done <- ferr
 					return
 				}
@@ -554,8 +592,8 @@ func drainLiveSpeaker(r io.Reader, s *voice.SpeakerSink, done chan<- error) {
 				if gapSamples > 0 {
 					avg = sumReadGap / time.Duration(gapSamples)
 				}
-				fmt.Fprintf(os.Stderr, "voice trace: bytes=%d gap_reads=%d read_gap_avg=%v read_gap_max=%v bound_flushes=%d\n",
-					bytesTotal, gapSamples, avg, maxReadGap, boundHands)
+				fmt.Fprintf(os.Stderr, "voice trace: bytes=%d gap_reads=%d read_gap_avg=%v read_gap_max=%v bursts=%d underruns=%d underrun_sum_ms=%d underrun_max_ms=%d early_overlaps=%d\n",
+					bytesTotal, gapSamples, avg, maxReadGap, burstCount, underrunCount, underrunSumMs, underrunMaxMs, earlyCount)
 			}
 			done <- nil
 			return
