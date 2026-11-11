@@ -100,7 +100,8 @@ type GoalRoundDriver struct {
 	mu           sync.Mutex
 	armed        map[string]*bool
 	cancel       context.CancelFunc
-	inflight     map[string]bool // employeeID -> deferred turn not yet settled
+	inflight     map[string]bool   // employeeID -> deferred turn not yet settled
+	deferredGoal map[string]string // employeeID -> goal id of its last deferred turn (C27 disarm key)
 	pollCancel   context.CancelFunc
 	pollDone     chan struct{} // closed when the poll loop exits
 	pollStopping bool
@@ -142,6 +143,7 @@ func NewGoalRoundDriver(mgr *Manager, log *slog.Logger) *GoalRoundDriver {
 		log:          log.With("component", "goal-round-driver"),
 		armed:        make(map[string]*bool),
 		inflight:     make(map[string]bool),
+		deferredGoal: make(map[string]string),
 		autoAdvance:  true,
 		pollInterval: DefaultGoalRoundPollInterval,
 	}
@@ -366,15 +368,31 @@ func (d *GoalRoundDriver) scheduleDeferredTurn(employeeID string) {
 	}
 	name := goalRoundDeferredJobPrefix + employeeID
 	d.deferred.ScheduleOneShot(name, func() {
+		// C31: the DEFERRED round is the autonomous continuation — raise
+		// the goal-tools flag for this turn's execution window and clear
+		// it when the turn settles (success or failure), so complete/
+		// blocked are legal exactly while the driver-driven round runs.
+		d.MarkAutonomousRound(true)
+		defer d.MarkAutonomousRound(false)
 		defer d.markInflight(employeeID, false)
 		payload := d.goalRoundPayload(context.Background(), employeeID)
 		if payload == nil {
 			return
 		}
+		// C26: the round is a real invocation — record it against the
+		// persisted budget counters so MaxInvocationsPerDay survives
+		// restarts (nil checker = unwired, no-op).
+		d.mgr.RecordGoalRound(employeeID)
 		if _, err := d.mgr.Trigger(context.Background(), employeeID, payload); err != nil {
 			// An errored round disarms the goal (leaf T4): no further
 			// autonomous advance until something re-arms it.
-			d.disarm(employeeID)
+			// C27 (bughunt): the disarm keys on the GOAL id (Arm/isArmed
+			// key d.armed[goal.ID]) — the employee-id key never matched,
+			// so the errored-round disarm never fired and persistently
+			// failing employees were re-driven every tick to the cap.
+			if goalID := d.lastDeferredGoalID(employeeID); goalID != "" {
+				d.disarm(goalID)
+			}
 			d.log.Warn("goal round driver: deferred round failed; goal disarmed",
 				"employee_id", employeeID, "error", err)
 			return
@@ -396,12 +414,28 @@ func (d *GoalRoundDriver) goalRoundPayload(ctx context.Context, employeeID strin
 	if err != nil || goal == nil {
 		return nil
 	}
+	// Remember the goal id this deferred turn carries (C27: the
+	// errored-round disarm must key the GOAL id, matching Arm/isArmed).
+	d.mu.Lock()
+	d.deferredGoal[employeeID] = goal.ID
+	d.mu.Unlock()
 	return map[string]any{
 		"source":   "goal",
 		"goal_id":  goal.ID,
 		"round":    goal.RoundsStarted,
 		"revision": goal.Revision,
 	}
+}
+
+// lastDeferredGoalID returns the goal id carried by this employee's most
+// recent deferred turn, or "" when none was recorded. Guarded by mu.
+func (d *GoalRoundDriver) lastDeferredGoalID(employeeID string) string {
+	if d == nil {
+		return ""
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.deferredGoal[employeeID]
 }
 
 // Arm marks the goal for automatic continuation in this process. It mirrors
@@ -538,14 +572,12 @@ func (d *GoalRoundDriver) OnRoundSettled(ctx context.Context, employeeID string)
 	}
 
 	// Reserve round N+1: increment RoundsStarted under this driver's review
-	// and mark the round autonomous for the goal tools. CAS is enforced
-	// structurally — we load once, mutate, and Update (the store bumps the
-	// revision); a stale-reservation fence (ValidGoalRound) exists for
-	// callers that admit a round against a possibly-changed goal, though
-	// this driver currently does not call it (available API surface).
+	// and persist. CAS is enforced structurally — we load once, mutate, and
+	// Update (the store bumps the revision); a stale-reservation fence
+	// (ValidGoalRound) exists for callers that admit a round against a
+	// possibly-changed goal, though this driver currently does not call it
+	// (available API surface).
 	goal.StartRound()
-	d.MarkAutonomousRound(true)
-	defer d.MarkAutonomousRound(false)
 	d.Arm(goal)
 	if err := d.mgr.UpdateGoal(ctx, goal); err != nil {
 		d.disarm(goal.ID)
@@ -557,6 +589,14 @@ func (d *GoalRoundDriver) OnRoundSettled(ctx context.Context, employeeID string)
 	// with zero human turns. Both the autonomous loop and the manual
 	// agents.goals.round.advance RPC land here; the in-flight dedup marks
 	// the employee until the scheduled turn settles.
+	//
+	// C31 (bughunt): the autonomous flag was set/cleared HERE, inside
+	// OnRoundSettled — but the marked round executes LATER, in the
+	// deferred turn's window, so the flag read false during the actual
+	// autonomous continuation (inverting the fail-safe contract:
+	// complete/blocked stayed refused on continuation turns). The flag is
+	// now raised by scheduleDeferredTurn at job execution and cleared when
+	// the turn settles (see the deferred closure and markInflight(false)).
 	d.markInflight(employeeID, true)
 	d.scheduleDeferredTurn(employeeID)
 	return GoalRoundAdvanced, nil

@@ -522,8 +522,9 @@ type PlanLookup interface {
 // bot.Manager calls) happens outside the lock per the CLAUDE.md mutex-scope
 // rule. Methods snapshot under the lock, release, then operate.
 type Manager struct {
-	botManager *bot.Manager
-	botStore   *bot.Store
+	botManager  *bot.Manager
+	botStore    *bot.Store
+	roundBudget *botStoreBudgetChecker // C26: store-backed budget checker (nil = noop default)
 
 	// seen tracks per-employee heartbeats for roster reachability
 	// (leaf 10). In-memory only.
@@ -2112,6 +2113,13 @@ func (m *Manager) CreateGoal(ctx context.Context, spec GoalSpec) (*Goal, error) 
 // legalizes blocked -> active at the store fence. All other writers go
 // through the plain GoalStore.Update (grep: UpdateWithTransition has no
 // other true caller).
+//
+// C28 (bughunt): the bypass fence alone could not stop a stale driver copy
+// from legalizing blocked -> active and resurrecting a human-blocked goal
+// (BlockGoal / OnRoundSettled writes ride this path). The store's C29
+// revision CAS now pairs with it: the stale copy's write fails with
+// ErrGoalRevisionConflict instead of landing, and the human block survives.
+// The bypass use is NOT widened — only blocked -> active remains legal.
 func (m *Manager) UpdateGoal(ctx context.Context, goal *Goal) error {
 	if m.goalStore == nil {
 		return ErrNotImplemented
@@ -2215,6 +2223,16 @@ func (m *Manager) SetGoalGateParker(parkFn goalGateParkFn) {
 // drained. The loop re-entry itself rides the parker's resume callback
 // (the daemon's goal-gate dispatch decodes the row there — at-most-once);
 // this method is the coordination half that answers the approval RPC.
+//
+// C30 (bughunt): the drain runs under the employee's per-employee invoke
+// mutex — the SAME serialization triggerViaGoalLoop/SteerEmployee hold
+// across Decide. Without it, the resume's Reflect ran concurrently with a
+// deferred round: counters double-advanced and a marker set by this
+// approval (approvalGatePassedGoal) could pass an UNAPPROVED concurrent
+// round. Deadlock-safe: the parker invokes the resume callback in its own
+// goroutine (agent resumeByKey's wg-wrapped call), never while holding the
+// invoke mutex itself, and this method holds no other lock across the
+// drain.
 func (m *Manager) ResumeGoalGateParked(ctx context.Context, employeeID, goalID string) (bool, error) {
 	m.mu.Lock()
 	resumeFn := m.goalGateResume
@@ -2222,7 +2240,10 @@ func (m *Manager) ResumeGoalGateParked(ctx context.Context, employeeID, goalID s
 	if resumeFn == nil {
 		return false, errGoalGateResumeUnwired
 	}
+	invokeMu := m.acquireInvokeMutex(employeeID)
+	invokeMu.Lock()
 	resumed := resumeFn(ctx, goalID)
+	invokeMu.Unlock()
 	if resumed {
 		m.logger.Info("goal gate approved",
 			"goal_id", goalID,

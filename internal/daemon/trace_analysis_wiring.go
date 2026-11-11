@@ -166,6 +166,9 @@ func (c *Components) wireTraceAnalysis(cfg *config.Config, logger *slog.Logger) 
 			if c.LLMClient != nil {
 				analyzerCfg := agent.DefaultRLMConfig()
 				llm = agent.NewRLMAnalyzerFromTraceStore(analyzerCfg, store, c.LLMClient, logger.With("component", "rlm-analyzer"))
+				if c.PiiRestoreHook != nil {
+					llm.SetPiiMaskHook(c.PiiRestoreHook)
+				}
 			}
 			detector := selfimprove.NewIssueDetector(detectionCfgFromSchema(cfg.SelfImprove.Detection), "", logger.With("component", "issue-detector"))
 			runTraceAnalysis(store, detector, llm, tracePath, logger)

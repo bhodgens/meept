@@ -250,6 +250,13 @@ type StrategicPlanner struct {
 	// ConductInterview. Test seam only — lets the interview-gate test
 	// observe the call without an LLM.
 	interviewProbe func()
+	// piiMask is the session-scoped PII mask lane applied to user-derived
+	// plan content before the critique loop's raw-chatter side send
+	// (finding C21: the main-turn mask in loop.go never reaches this
+	// send). Nil = masking disabled, byte-identical. Set via
+	// SetPiiMaskHook. Session scope resolves through the planner loop's
+	// sessionID at call time.
+	piiMask *PiiRestoreHook
 }
 
 // StrategicPlannerConfig holds configuration for the strategic planner.

@@ -375,6 +375,14 @@ type GoalLoop struct {
 	speakConversationID string
 	speakNotifiedRound  bool
 
+	// promptMask carries the session-scoped PII mask lane over the
+	// reflector-bound sends (bughunt C20: Assess / Reflect carry the
+	// constitution + raw execution results to the model unmasked — the
+	// main chat turn's mask lane never reached these employee-side sends).
+	// Nil (unwired / feature off) = byte-identical passthrough. Set once
+	// via SetPiiPromptMaskHook at wiring time; read-only afterwards.
+	promptMask PromptMaskHook
+
 	// Steer-of-episode state (leaf 04, contract C5). pendingSteer holds
 	// steer TriggerEvents queued by Steer while no Decide re-entry has
 	// consumed them yet; lastDrainedSteer is the most recent drain (test +
@@ -719,11 +727,20 @@ func (l *GoalLoop) Assess(ctx context.Context, trigger TriggerEvent) ([]Candidat
 	}
 
 	// Build the ASSESS prompt: constitution context + trigger payload.
+	// C20: the trigger payload (steering text, user-derived content) and
+	// constitution render into the prompt — mask through the wired PII
+	// lane before the send (nil hook = byte-identical).
 	userMsg := buildAssessUserPrompt(constitution, trigger)
+	l.mu.Lock()
+	maskHook := l.promptMask
+	maskScope := l.speakSessionID
+	l.mu.Unlock()
+	userMsg = maskPromptText(maskHook, userMsg, maskScope)
 	messages := []llm.ChatMessage{
 		{Role: llm.RoleSystem, Content: assessSystemPrompt},
 		{Role: llm.RoleUser, Content: userMsg},
 	}
+	messages = maskPromptMessages(maskHook, messages, maskScope)
 
 	resp, err := reflector.Chat(ctx, messages, llm.WithTemperature(0.2), llm.WithMaxTokens(2048))
 	if err != nil {
@@ -1049,27 +1066,27 @@ func (l *GoalLoop) Reflect(ctx context.Context, plan PlanRef, result *bot.BotExe
 		// gate — the loop must not treat it as a command check. It parks
 		// the turn through the gate checkpoint parker (GateKind "goal")
 		// and stays parked until agents.goals.approve_gate resumes it.
-	if gateCfg != nil && gateCfg.IsApproval() && health == GoalHealthy {
-		// Audit HITL-1 re-entry: a goal-gate approval resume marks the
-		// approval as granted — the gate passes without a fresh park.
-		goalIDForGate := l.activeGoalID(ctx)
-		if l.reflectApprovalGateApproved(goalIDForGate) {
-			logger.Info("goal approval gate satisfied by operator approval",
-				"goal_id", goalIDForGate)
-		} else if parked := l.parkGateApproval(ctx, *gateCfg, plan, result); parked {
-			// Parked: Reflect completes without a completion claim.
-			// The resume (approve path) re-runs the completion by
-			// re-entering Reflect via the goal gate resume payload.
-			return GoalUnknown, nil
-		} else {
-			// Park refused (checkpointing disabled / encode failure):
-			// degrade to the legacy at-risk verdict so the round does
-			// NOT claim goal completion past an unapproved human gate.
-			logger.Warn("goal approval gate park refused — marking at_risk",
-				"goal_id", goalIDForGate)
-			health = GoalAtRisk
-		}
-	} else if gateCfg != nil && gateCfg.EffectiveCommand() != "" && health == GoalHealthy {
+		if gateCfg != nil && gateCfg.IsApproval() && health == GoalHealthy {
+			// Audit HITL-1 re-entry: a goal-gate approval resume marks the
+			// approval as granted — the gate passes without a fresh park.
+			goalIDForGate := l.activeGoalID(ctx)
+			if l.reflectApprovalGateApproved(goalIDForGate) {
+				logger.Info("goal approval gate satisfied by operator approval",
+					"goal_id", goalIDForGate)
+			} else if parked := l.parkGateApproval(ctx, *gateCfg, plan, result); parked {
+				// Parked: Reflect completes without a completion claim.
+				// The resume (approve path) re-runs the completion by
+				// re-entering Reflect via the goal gate resume payload.
+				return GoalUnknown, nil
+			} else {
+				// Park refused (checkpointing disabled / encode failure):
+				// degrade to the legacy at-risk verdict so the round does
+				// NOT claim goal completion past an unapproved human gate.
+				logger.Warn("goal approval gate park refused — marking at_risk",
+					"goal_id", goalIDForGate)
+				health = GoalAtRisk
+			}
+		} else if gateCfg != nil && gateCfg.EffectiveCommand() != "" && health == GoalHealthy {
 			gateRes, gateErr := l.runCompletionGate(ctx, *gateCfg, logger)
 			switch {
 			case gateErr != nil:
@@ -1189,6 +1206,21 @@ type goalGateResumePayload struct {
 	PlanID string                  `json:"plan_id,omitempty"`
 	Prompt string                  `json:"prompt,omitempty"`
 	Result *bot.BotExecutionResult `json:"result,omitempty"`
+}
+
+// SetPiiPromptMaskHook attaches the session-scoped PII mask lane used for
+// the reflector-bound sends (bughunt C20). Nil is a no-op (setter
+// nil-guard rule): with no hook the Assess/Reflect prompts pass through
+// byte-identically. The session scope is the loop's goal-round
+// conversation identity (speakSessionID, set by SetSpeakContext on every
+// round entry) — the same scope the speak lane and the parker use.
+func (l *GoalLoop) SetPiiPromptMaskHook(hook PromptMaskHook) {
+	if l == nil || hook == nil {
+		return
+	}
+	l.mu.Lock()
+	l.promptMask = hook
+	l.mu.Unlock()
 }
 
 // SetGoalGateParker wires the gate-checkpoint park seam (audit HITL-1).
@@ -1491,11 +1523,20 @@ func (l *GoalLoop) SetDefaultGate(cfg *GateConfig) {
 
 // reflectViaLLM asks the reflector LLM to assess the execution outcome.
 func (l *GoalLoop) reflectViaLLM(ctx context.Context, reflector Reflector, c *Constitution, plan PlanRef, result *bot.BotExecutionResult) (GoalHealth, error) {
+	// C20: the execution result (raw tool output) renders into the
+	// reflect prompt — mask through the wired PII lane before the send
+	// (nil hook = byte-identical).
+	l.mu.Lock()
+	maskHook := l.promptMask
+	maskScope := l.speakSessionID
+	l.mu.Unlock()
 	userMsg := buildReflectUserPrompt(c, result)
+	userMsg = maskPromptText(maskHook, userMsg, maskScope)
 	messages := []llm.ChatMessage{
 		{Role: llm.RoleSystem, Content: reflectSystemPrompt},
 		{Role: llm.RoleUser, Content: userMsg},
 	}
+	messages = maskPromptMessages(maskHook, messages, maskScope)
 	resp, err := reflector.Chat(ctx, messages, llm.WithTemperature(0.1), llm.WithMaxTokens(1024))
 	if err != nil {
 		// Tree 03 leaf 03 (D9): a provider wait during the post-execution

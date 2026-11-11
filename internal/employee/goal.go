@@ -90,6 +90,14 @@ func ParseGoalState(s string) (GoalState, error) {
 // store, not by caller convention.
 var ErrGoalTransition = errors.New("employee: invalid goal state transition")
 
+// ErrGoalRevisionConflict is returned when a GoalStore write's stale-copy
+// revision no longer matches the persisted row (bughunt C29): a concurrent
+// writer (typically a human mandate edit racing a driver round) landed
+// first, and replaying this stale copy would destroy that update. Callers
+// re-load the goal and retry on a fresh copy; they must never force the
+// write through.
+var ErrGoalRevisionConflict = errors.New("goal revision conflict: concurrent update detected")
+
 // goalTransitions is the validFrom table for GoalState (C-P3):
 //
 //	active  -> {paused, blocked, retired}
@@ -917,6 +925,12 @@ func (s *GoalStore) Update(ctx context.Context, g *Goal) error {
 //   - allowHumanBypass legalizes exactly ONE edge, blocked -> active — the
 //     human-gated goal_update resume (requireDirectHuman is the outer gate).
 //     retired stays terminal even with the bypass;
+//   - C29/C28: every write carries a WHERE revision = (loaded revision)
+//     predicate, so a stale caller copy can never resurrect a human-blocked
+//     goal — the bypass fence may legalize blocked -> active on the STALE
+//     copy's snapshot, but the CAS predicate denies the write when the
+//     persisted row moved (the human block bumped the revision). Stale
+//     writes fail with ErrGoalRevisionConflict, never force through;
 //   - F16: a same-state write onto a non-active goal (paused/blocked/retired)
 //     has its assessment columns (health, last_assessed, recent_findings,
 //     rounds_started) silently clamped to the persisted values — frozen goals
@@ -951,7 +965,6 @@ func (s *GoalStore) UpdateWithTransition(ctx context.Context, g *Goal, allowHuma
 
 	activePlanID, activePlanIDs, history, lastAssessed, retiredAt, recentFindings := g.snapshot()
 	maxRounds, roundsStarted, blockedReason := g.autonomySnapshot()
-	revision := g.bumpRevision()
 	health := g.Health
 	if clampAssessment {
 		health = cur.Health
@@ -970,6 +983,30 @@ func (s *GoalStore) UpdateWithTransition(ctx context.Context, g *Goal, allowHuma
 	}
 	findingsJSON := marshalFindings(recentFindings)
 	activePlanIDsJSON := marshalPlanIDs(activePlanIDs)
+
+	// C29 (bughunt): revision CAS — the write carries a WHERE revision =
+	// (caller snapshot revision) predicate so a copy loaded before a
+	// concurrent writer's commit can no longer overwrite that writer's
+	// fields (the old shape wrote all columns WHERE id = ? and destroyed
+	// interleaved human mandate edits despite this comment's CAS claim).
+	//
+	// The predicate anchors on the CALLER'S snapshot revision, not the
+	// fresh `cur` load: the fresh load exists for the transition fence,
+	// and by definition it already carries the latest revision — gating
+	// on it would make every stale write silently pass. A caller copy
+	// loaded at revision R may write only while the row still sits at R.
+	// Zero (never-loaded / constructed-in-memory goals, e.g. tests or
+	// tool-created drafts) falls back to the loaded revision so the
+	// pre-C29 "last-write-wins" behavior is preserved for callers that
+	// never held a CAS snapshot.
+	callerRevision := g.Revision
+	if callerRevision == 0 {
+		callerRevision = cur.Revision
+	}
+	revision := callerRevision + 1
+	g.mu.Lock()
+	g.Revision = revision
+	g.mu.Unlock()
 
 	res, err := s.db.ExecContext(ctx, `
 UPDATE employee_goals SET
@@ -991,20 +1028,24 @@ UPDATE employee_goals SET
     rounds_started = ?,
     blocked_reason_json = ?,
     revision = ?
-WHERE id = ?`,
+WHERE id = ? AND revision = ?`,
 		g.Title, g.Mandate, g.State.String(), string(g.Source),
 		goalNullableString(g.TriggerRef), health.String(),
 		goalNullableTime(lastAssessed), goalNullableString(activePlanID),
 		historyJSON, goalNullableTime(retiredAt), findingsJSON,
 		activePlanIDsJSON, g.MaxPlanHistory, marshalGate(g.Gate),
-		maxRounds, roundsStarted, marshalBlockedReason(blockedReason), revision, g.ID,
+		maxRounds, roundsStarted, marshalBlockedReason(blockedReason), revision, g.ID, callerRevision,
 	)
 	if err != nil {
 		return fmt.Errorf("update: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return ErrGoalNotFound
+		// Distinguish missing row from lost race: re-probe cheaply.
+		if _, getErr := s.Get(ctx, g.ID); getErr != nil {
+			return ErrGoalNotFound
+		}
+		return fmt.Errorf("%w: goal %s caller snapshot at revision %d, persisted revision changed under this write", ErrGoalRevisionConflict, g.ID, callerRevision)
 	}
 	return nil
 }

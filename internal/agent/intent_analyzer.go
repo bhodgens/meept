@@ -55,6 +55,12 @@ type IntentAnalyzer struct {
 	// scope for LLM calls (leaf 01 session-affinity).
 	scopeProvider chatScopeProvider
 
+	// piiMask is the session-scoped PII mask lane applied to user-derived
+	// content before the analysis send (finding C21: the main-turn mask
+	// in loop.go never reaches secondary classifier sends). Nil = masking
+	// disabled, byte-identical. Set via SetPiiMaskHook.
+	piiMask *PiiRestoreHook
+
 	// servedModel is the resolved "provider/model" of the endpoint the
 	// analyzer is currently configured to serve from (provenance, leaf 01
 	// of classifier-observability). Initialized from the constructor's
@@ -247,6 +253,16 @@ func (ia *IntentAnalyzer) SetBootReadiness(b *ClassifierBootReadiness) {
 	}
 }
 
+// SetPiiMaskHook attaches the session-scoped PII mask lane used for the
+// analysis side send (finding C21). Nil is a no-op (setter nil-guard rule):
+// with no hook the raw content passes through byte-identically.
+func (ia *IntentAnalyzer) SetPiiMaskHook(hook *PiiRestoreHook) {
+	if ia == nil || hook == nil {
+		return
+	}
+	ia.piiMask = hook
+}
+
 // AnalyzeTrueIntent performs a lightweight LLM-based analysis of the user's
 // true intent. sessionContext, when non-nil and non-empty, appends a compact
 // [Recent session activity] block to the user message so pronouns and
@@ -259,6 +275,11 @@ func (ia *IntentAnalyzer) AnalyzeTrueIntent(ctx context.Context, input string, s
 
 	ia.awaitBootReadiness(ctx)
 	messages := ia.buildAnalysisMessages(input, sessionContext)
+	// Finding C21: mask PII in the user-derived content before the side
+	// send crosses to the provider (same lane as the main turn; session
+	// scope resolves through the owning loop's scope provider). Nil hook
+	// or empty session -> messages unchanged, byte-identical.
+	messages = maskSideSendMessages(ia.piiMask, messages, sideSendSessionID(ia.scopeProvider))
 
 	opts := resolveCallScope(ctx, ia.scopeProvider, []llm.ChatOption{
 		llm.WithMaxTokens(ia.tokenCap),

@@ -575,8 +575,13 @@ type DispatcherConfig struct {
 	// production keeps rotation; for testing/iteration
 	// (classifier-observability leaf 02).
 	ClassifierFailFast bool
-	CapabilityMatcher  *CapabilityMatcher
-	EmbeddingClient    EmbeddingClient
+	// PiiMask is the session-scoped PII mask lane applied to classifier
+	// prompts before the side sends (bughunt C21: the main-turn mask in
+	// the loop never reaches these sends). Nil = masking disabled,
+	// byte-identical.
+	PiiMask           *PiiRestoreHook
+	CapabilityMatcher *CapabilityMatcher
+	EmbeddingClient   EmbeddingClient
 	// PrefilterConfig enables the Stage-0 embedding prefilter
 	// (classifier-observability follow-up). When Enabled, the dispatcher
 	// constructs an EmbeddingPrefilter (OpenAI-compatible embeddings
@@ -686,6 +691,11 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 		}, classifierClient, cfg.Logger)
 		if cfg.AmbiguityThreshold > 0 {
 			ia = ia.WithAmbiguityThreshold(cfg.AmbiguityThreshold)
+		}
+		// PII mask lane for the classifier side sends (bughunt C21).
+		if cfg.PiiMask != nil {
+			ia.SetPiiMaskHook(cfg.PiiMask)
+			d.llmClassifier.SetPiiMaskHook(cfg.PiiMask)
 		}
 		d.intentAnalyzer = ia
 	}

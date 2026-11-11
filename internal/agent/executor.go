@@ -510,6 +510,30 @@ var ToolActionMap = map[string]string{
 	// the read-only platform bucket.
 	"ledger_append": "ledger_write",
 	"ledger_query":  "ledger_read",
+
+	// Delegate provider family (bughunt C32, the H7 "Unknown action"
+	// class): the delegate toolprov provider's five tools were registered
+	// and granted but had NO ToolActionMap entry, so checkPermission fell
+	// back to the tool name, BuiltinRules had no matching row, and every
+	// call DENIED "Unknown action" — all five dead on arrival. Mappings:
+	// workflow_status and subagent_list_children are read-only
+	// introspection (platform_read, RiskSafe); subagent_send_message and
+	// subagent_interrupt steer/interrupt child agents (the dedicated
+	// subagent_control row, RiskMedium — same dedicated-row pattern as
+	// voice_call); workflow fans out delegate children (agent_delegate,
+	// RiskLow, consistent with delegate_task).
+	"workflow":               "agent_delegate",
+	"workflow_status":        "platform_read",
+	"subagent_send_message":  "subagent_control",
+	"subagent_interrupt":     "subagent_control",
+	"subagent_list_children": "platform_read",
+
+	// Contact chain (bughunt C33, same H7 class): the contact tool rides
+	// the voice provider group and has its OWN BuiltinRules row (unknown
+	// actions DENY by default, so a mapping to a nonexistent action would
+	// dead-map exactly like the H7 entries above). RiskMedium like
+	// send_message/voice_call — outbound third-party communication.
+	"contact": "contact",
 }
 
 // WorkingDirSetter is implemented by tools that accept a session-scoped

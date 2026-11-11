@@ -24,7 +24,6 @@ type ReflectionConfig struct {
 	WorkDir  string // Working directory for lint/test commands
 }
 
-
 // ReflectionEngine manages the auto-fix loop
 type ReflectionEngine struct {
 	config     ReflectionConfig
@@ -36,8 +35,12 @@ type ReflectionEngine struct {
 	// scopeProvider, when set, supplies the owning loop's task/session
 	// scope for the fix-request LLM call (leaf 01 session-affinity).
 	scopeProvider chatScopeProvider
+	// piiMask is the session-scoped PII mask lane applied to user-derived
+	// error context before the fix-request send (finding C21: the
+	// main-turn mask in loop.go never reaches this side send). Nil =
+	// masking disabled, byte-identical. Set via SetPiiMaskHook.
+	piiMask *PiiRestoreHook
 }
-
 
 // NewReflectionEngineWithConfig creates a new reflection engine with custom configuration.
 // Multi-pass retry is handled externally by the orchestrator (see orchestrator.go:654-744).
@@ -240,7 +243,11 @@ func (re *ReflectionEngine) requestFix(ctx context.Context, fixRequest string, f
 	}
 
 	// Build prompt with error context
-	prompt := re.buildFixPrompt(fixRequest)
+	// Finding C21: mask PII in the user-derived fix context before it is
+	// interpolated into the fix prompt (nil hook or empty session -> the
+	// raw context, byte-identical).
+	maskedRequest := maskSideSendText(re.piiMask, fixRequest, sideSendSessionID(re.scopeProvider))
+	prompt := re.buildFixPrompt(maskedRequest)
 
 	// Get fix from LLM
 	re.logger.Debug("requesting fix from LLM")

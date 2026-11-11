@@ -849,6 +849,17 @@ func (sp *StrategicPlanner) critiqueChatterFor() llm.Chatter {
 	return sp.critiqueChatter
 }
 
+// SetPiiMaskHook attaches the session-scoped PII mask lane used for the
+// critique loop's raw-chatter side send (finding C21). Nil is a no-op
+// (setter nil-guard rule): with no hook the raw prompt passes through
+// byte-identically.
+func (sp *StrategicPlanner) SetPiiMaskHook(hook *PiiRestoreHook) {
+	if sp == nil || hook == nil {
+		return
+	}
+	sp.piiMask = hook
+}
+
 // draftWithPlanner makes the initial fill call: the planner renders the
 // seeded scaffold into a full plan-dialect v1 document (goals/decisions/
 // phases in prose) grounded in the request.
@@ -1008,7 +1019,16 @@ func (sp *StrategicPlanner) runPlannerChat(ctx context.Context, plannerLoop *Age
 	planCtx, cancel := context.WithTimeout(ctx, sp.plannerTimeout)
 	defer cancel()
 	if ch := sp.critiqueChatterFor(); ch != nil {
-		resp, err := ch.Chat(planCtx, []llm.ChatMessage{{Role: "user", Content: prompt}})
+		// Finding C21: the critique-loop prompt embeds the user's raw
+		// plan request — mask it before the side send crosses to the
+		// provider (nil hook or empty session -> unchanged). The
+		// plannerLoop is the owning loop and answers SessionID; it is
+		// the caller's (agent loop's) session scope.
+		sessionID := ""
+		if plannerLoop != nil {
+			sessionID = plannerLoop.SessionID()
+		}
+		resp, err := ch.Chat(planCtx, []llm.ChatMessage{{Role: "user", Content: maskSideSendText(sp.piiMask, prompt, sessionID)}})
 		if err != nil {
 			return "", err
 		}

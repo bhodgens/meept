@@ -252,6 +252,59 @@ func (p *GateParker) PendingGates() int {
 	return p.turns.Pending()
 }
 
+// HasParkedGate reports whether a gate row is currently parked under the
+// given kind+id (bughunt C25): the goal-round driver consults this through
+// the daemon wiring's quiescence predicate so an employee whose goal gate
+// awaits human approval counts as NOT quiet — without it every poll tick
+// ran a full autonomous round (LLM spend + side effects) while the
+// approval pended. False on a nil parker or empty id (fail-open, matching
+// the disabled-parking posture).
+//
+// The probe decodes the QUEUED records (the same in-memory queue
+// ResumeByKey drains) rather than the persistence key index, so it works
+// with and without park persistence wired: a memory-only parker (tests,
+// degraded boots) still reports the pending approval.
+func (p *GateParker) HasParkedGate(gateKind, gateID string) bool {
+	if p == nil || p.turns == nil || gateKind == "" || gateID == "" {
+		return false
+	}
+	want := gateKind + "|" + gateID
+	// Collect payloads under the lock; decode OUTSIDE it (mutexio rule:
+	// no Unmarshal while holding a mutex).
+	var payloads [][]byte
+	p.turns.mu.Lock()
+	for _, rec := range p.turns.parked {
+		payloads = append(payloads, rec.TurnPayload)
+	}
+	p.turns.mu.Unlock()
+	for _, payload := range payloads {
+		var data GateParkData
+		if err := json.Unmarshal(payload, &data); err != nil {
+			continue
+		}
+		if gateParkKey(data) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// HasParkedGateForID is the kind-agnostic probe: it reports whether ANY
+// gate park (plan or goal namespace) exists under the given gate id. The
+// goal-round driver's quiescence predicate only knows the goal id, not
+// which kind raised the gate, so it walks both shared-namespace keys.
+func (p *GateParker) HasParkedGateForID(gateID string) bool {
+	if p == nil || gateID == "" {
+		return false
+	}
+	for _, kind := range []string{"plan", "goal"} {
+		if p.HasParkedGate(kind, gateID) {
+			return true
+		}
+	}
+	return false
+}
+
 // ReleaseByKey discards the parked gate identified by gateID (plan
 // rejection / cancellation path, M-12 / C-K3): the persistence row and
 // ALL in-memory records queued under the key are removed WITHOUT running

@@ -38,6 +38,15 @@ type WiringResult struct {
 	AuditStore        *AuditStore
 	EmployeesDataDir  string
 	SharedDBPath      string
+
+	// StopAnchor cancels the periodic anchor job's context (bughunt D4).
+	// The anchor goroutine is started with the WIRING's ctx (usually the
+	// caller's context.Background()), which no daemon shutdown path
+	// cancels — stopComponents must call this so the hourly ticker exits
+	// instead of reading a closed pool forever (one leaked goroutine per
+	// restart). Nil when the chain store never built (no anchor job).
+	// Safe to call multiple times.
+	StopAnchor context.CancelFunc
 }
 
 // WiringOption configures optional behaviour on NewManagerFromConfig.
@@ -253,11 +262,18 @@ func NewManagerFromConfig(
 	if chainStore != nil {
 		mgr.SetAuditChain(chainStore.ChainDB())
 
-		// Periodic off-host anchoring (master.md C6). Hourly by default;
-		// runs on the daemon lifecycle context and exits on Stop.
+		// Periodic off-host anchoring (master.md C6). Hourly by default.
+		// bughunt D4: the job used to run on the raw wiring ctx (the
+		// daemon passes context.Background() into NewManagerFromConfig),
+		// which no shutdown path cancels — the hourly ticker kept reading
+		// the store's pool after every stop (one leaked goroutine per
+		// restart). Derive a child ctx, run the job on it, and hand the
+		// cancel back as StopAnchor so stopComponents can end it.
+		anchorCtx, anchorCancel := context.WithCancel(ctx)
 		anchorJob := auditlog.NewAnchorJob(chainStore,
 			employeesDir, auditlog.DefaultAnchorInterval, logger)
-		go anchorJob.Run(ctx)
+		go anchorJob.Run(anchorCtx)
+		result.StopAnchor = anchorCancel
 	}
 
 	// Apply optional wiring (e.g. migrator LLM injection). Each option is

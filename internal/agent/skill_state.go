@@ -408,6 +408,12 @@ type SkillStateRuntime struct {
 	chatter     llmChatter
 	toolRunner  stateToolRunner
 	traceWriter TraceWriter // nil-safe; leaf 01's loop writer when wired
+	// piiMask is the session-scoped PII mask lane applied to user-derived
+	// observations before they are interpolated into the state prompt
+	// (finding C21: the main-turn mask in loop.go never reaches these
+	// side sends). Nil = masking disabled, byte-identical. Set via
+	// SetPiiMaskHook.
+	piiMask *PiiRestoreHook
 }
 
 // NewSkillStateRuntime builds a runtime bound to loop. The LLM chatter is
@@ -458,6 +464,26 @@ func (r *SkillStateRuntime) WithToolRunner(runner stateToolRunner) *SkillStateRu
 func (r *SkillStateRuntime) WithStateTraceWriter(tw TraceWriter) *SkillStateRuntime {
 	r.traceWriter = tw
 	return r
+}
+
+// SetPiiMaskHook attaches the session-scoped PII mask lane used for the
+// state-runtime side sends (finding C21). Nil is a no-op (setter
+// nil-guard rule): with no hook the raw observation passes through
+// byte-identically.
+func (r *SkillStateRuntime) SetPiiMaskHook(hook *PiiRestoreHook) {
+	if r == nil || hook == nil {
+		return
+	}
+	r.piiMask = hook
+}
+
+// stateSessionID resolves the PII-mask session scope from the owning
+// loop (nil-safe: a runtime built with a nil loop has no scope).
+func (r *SkillStateRuntime) stateSessionID() string {
+	if r == nil || r.loop == nil {
+		return ""
+	}
+	return r.loop.SessionID()
 }
 
 // stateStepMaxChars bounds the trace-record prompt digest.
@@ -513,6 +539,11 @@ func (r *SkillStateRuntime) Run(ctx context.Context, skill *skills.Skill, input,
 			break
 		}
 
+		// Finding C21: the observation O_t is user/tool-derived content
+		// interpolated verbatim into the state prompt — mask it before
+		// the side send crosses to the provider (nil hook or empty
+		// session -> the raw observation, byte-identical).
+		observation = maskSideSendText(r.piiMask, observation, r.stateSessionID())
 		prompt := buildStatePrompt(skill.Body, state, observation, r.cfg.MaxStateChars)
 		messages := []llm.ChatMessage{
 			{Role: llm.RoleSystem, Content: stateSystemNote},

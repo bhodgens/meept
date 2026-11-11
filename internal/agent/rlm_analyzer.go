@@ -58,6 +58,11 @@ type RLMAnalyzer struct {
 	// scopeProvider, when set, supplies the owning loop's task/session
 	// scope for LLM calls (leaf 01 session-affinity).
 	scopeProvider chatScopeProvider
+	// piiMask is the session-scoped PII mask lane applied to the
+	// analysis prompt before each LLM side send (finding C21: the
+	// main-turn mask in loop.go never reaches these sends). Nil =
+	// masking disabled, byte-identical. Set via SetPiiMaskHook.
+	piiMask *PiiRestoreHook
 }
 
 // NewRLMAnalyzer creates an analyzer for the given trace store.
@@ -297,6 +302,10 @@ func (a *RLMAnalyzer) executeAgent(run *analyzerRun, traceIDs []string, prompt s
 		} else {
 			turnPrompt = fmt.Sprintf("Trace analysis root agent.\n%s\n\n%s", prompt, toolCtx)
 		}
+		// Finding C21: the analysis prompt embeds the session's trace
+		// content (user-derived) — mask it before the side send crosses
+		// to the provider (nil hook or empty session -> unchanged).
+		turnPrompt = maskSideSendText(a.piiMask, turnPrompt, sideSendSessionID(a.scopeProvider))
 
 		// If we have an LLM client, use it. Otherwise, do a simple scan.
 		if a.llmClient != nil {
@@ -615,6 +624,17 @@ func (a *RLMAnalyzer) SetScopeProvider(provider chatScopeProvider) {
 		return
 	}
 	a.scopeProvider = provider
+}
+
+// SetPiiMaskHook attaches the session-scoped PII mask lane used for the
+// analyzer's LLM side sends (finding C21). Nil is a no-op (setter
+// nil-guard rule): with no hook the raw prompt passes through
+// byte-identically.
+func (a *RLMAnalyzer) SetPiiMaskHook(hook *PiiRestoreHook) {
+	if a == nil || hook == nil {
+		return
+	}
+	a.piiMask = hook
 }
 
 // -----------------------------------------------------------------------

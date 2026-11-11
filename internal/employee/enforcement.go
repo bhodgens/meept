@@ -652,9 +652,19 @@ func (p *PreExecChecker) Check(action, toolName string, details map[string]strin
 	// reporting toolset (the companion, post-refactor) use an EXPLICIT
 	// deny list instead — a wildcard here would deny their allowed tools,
 	// because this step runs before 1b.
+	//
+	// C34 (bughunt): hire-time validation canonicalizes tool names
+	// (canonicalToolName: lower + trim), but this compare ran RAW — a
+	// mis-cased "Shell" in tools_forbidden never matched the "shell"
+	// registry name and silently FAILED OPEN. Both sides canonicalize
+	// here so the enforcement compare sees the same normal form hire
+	// validation stored.
 	if len(constraints.ToolsForbidden) > 0 {
-		if slices.Contains(constraints.ToolsForbidden, toolName) ||
-			slices.Contains(constraints.ToolsForbidden, "*") {
+		canonicalTool := canonicalToolName(toolName)
+		forbidden := slices.ContainsFunc(constraints.ToolsForbidden, func(entry string) bool {
+			return canonicalToolName(entry) == canonicalTool
+		})
+		if forbidden || slices.Contains(constraints.ToolsForbidden, "*") {
 			p.recordDenial(context.Background(), p.employeeID, action, toolName,
 				"tools_forbidden", SeverityWarning)
 			return Decision{
@@ -666,8 +676,15 @@ func (p *PreExecChecker) Check(action, toolName string, details map[string]strin
 	}
 
 	// 1b. tools_allowed — if non-empty and tool not in list, hard deny.
+	// C34: same canonicalization as 1a — a mis-cased entry must still
+	// admit the tool, mirroring the forbidden-side fix (fail-closed stays
+	// fail-closed, fail-open stays fail-open, both case-insensitively).
 	if len(constraints.ToolsAllowed) > 0 {
-		if !slices.Contains(constraints.ToolsAllowed, toolName) {
+		canonicalTool := canonicalToolName(toolName)
+		allowed := slices.ContainsFunc(constraints.ToolsAllowed, func(entry string) bool {
+			return canonicalToolName(entry) == canonicalTool
+		})
+		if !allowed {
 			p.recordDenial(context.Background(), p.employeeID, action, toolName,
 				"tools_allowed", SeverityWarning)
 			return Decision{
@@ -1209,6 +1226,12 @@ type PostTurnAuditor struct {
 	// per employee. Guarded by turnCacheMu.
 	turnCache   map[string][]TurnRecord
 	turnCacheMu sync.RWMutex
+
+	// promptMask carries the session-scoped PII mask lane over the audit
+	// send (bughunt C20: the post-turn audit prompt carries the
+	// constitution + raw turn output to the model unmasked). Nil
+	// (unwired / feature off) = byte-identical passthrough. Guarded by mu.
+	promptMask PromptMaskHook
 }
 
 // NewPostTurnAuditor constructs a PostTurnAuditor. The model must be non-nil
@@ -1222,6 +1245,20 @@ func NewPostTurnAuditor(model llm.Chatter, store *AuditStore, prompt string) *Po
 		retryWithStricter: true,
 		turnCache:         make(map[string][]TurnRecord),
 	}
+}
+
+// SetPromptMaskHook attaches the session-scoped PII mask lane used for the
+// audit send (bughunt C20). Nil is a no-op (setter nil-guard rule): with
+// no hook the audit prompt passes through byte-identically. The session
+// scope is the audited turn's employee id — audit prompts never carry
+// cross-employee content.
+func (a *PostTurnAuditor) SetPromptMaskHook(hook PromptMaskHook) {
+	if a == nil || hook == nil {
+		return
+	}
+	a.mu.Lock()
+	a.promptMask = hook
+	a.mu.Unlock()
 }
 
 // SetAutoPause wires the auto-pause callback (nil-guarded).
@@ -1296,6 +1333,7 @@ func (a *PostTurnAuditor) Audit(ctx context.Context, turn TurnRecord) (*AuditFin
 	retry := a.retryWithStricter
 	onFinding := a.onFindingAttached
 	busPub := a.busPublisher
+	maskHook := a.promptMask
 	a.mu.Unlock()
 
 	// Cache the turn for the periodic auditor's bulk review (spec line
@@ -1323,7 +1361,10 @@ func (a *PostTurnAuditor) Audit(ctx context.Context, turn TurnRecord) (*AuditFin
 	}
 
 	// Build the audit prompt from the constitution + turn record.
+	// C20: the turn record carries raw execution output — mask through
+	// the wired PII lane before the send (nil hook = byte-identical).
 	userMsg := buildPostTurnPrompt(basePrompt, turn)
+	userMsg = maskPromptText(maskHook, userMsg, turn.EmployeeID)
 
 	messages := []llm.ChatMessage{
 		{Role: llm.RoleSystem, Content: postTurnSystemPrompt},
@@ -1531,6 +1572,11 @@ type PeriodicAuditor struct {
 	failMu              sync.Mutex
 	consecutiveFailures int
 	lastFailureAt       time.Time
+
+	// promptMask carries the session-scoped PII mask lane over the
+	// periodic audit send (bughunt C20: the bulk prompt carries raw turn
+	// output unmasked). Nil = byte-identical passthrough. Guarded by mu.
+	promptMask PromptMaskHook
 }
 
 // DefaultPeriodicAuditSampleSize is the default number of turns sampled
@@ -1574,6 +1620,18 @@ func (a *PeriodicAuditor) SetAutoPause(fn AutoPauseFunc) {
 	a.mu.Unlock()
 }
 
+// SetPromptMaskHook attaches the session-scoped PII mask lane used for the
+// periodic audit send (bughunt C20). Nil is a no-op (setter nil-guard
+// rule): with no hook the bulk prompt passes through byte-identically.
+func (a *PeriodicAuditor) SetPromptMaskHook(hook PromptMaskHook) {
+	if a == nil || hook == nil {
+		return
+	}
+	a.mu.Lock()
+	a.promptMask = hook
+	a.mu.Unlock()
+}
+
 // AuditReview reviews the last N turns and returns any findings plus a drift
 // score (0.0-1.0). If the drift score exceeds the threshold, the employee is
 // auto-paused (spec lines 393-396).
@@ -1590,6 +1648,7 @@ func (a *PeriodicAuditor) Audit(ctx context.Context, turns []TurnRecord) ([]Audi
 	store := a.store
 	autoPause := a.autoPause
 	threshold := a.driftThreshold
+	maskHook := a.promptMask
 	sampleSize := a.sampleSize
 	a.mu.Unlock()
 
@@ -1618,6 +1677,10 @@ func (a *PeriodicAuditor) Audit(ctx context.Context, turns []TurnRecord) ([]Audi
 	}
 
 	userMsg := buildPeriodicPrompt(turns)
+	// C20: the bulk prompt carries raw turn output — mask through the
+	// wired PII lane before the send (nil hook = byte-identical). Scope is
+	// the first turn's employee (bulk review is per-employee).
+	userMsg = maskPromptText(maskHook, userMsg, turns[0].EmployeeID)
 	messages := []llm.ChatMessage{
 		{Role: llm.RoleSystem, Content: periodicSystemPrompt},
 		{Role: llm.RoleUser, Content: userMsg},

@@ -99,6 +99,25 @@ var BuiltinRules = map[string]ActionRule{
 	// action for constitution-granted employees.
 	"voice_call": {Action: "voice_call", RiskLevel: RiskMedium, RequiresConfirmation: false},
 
+	// Delegate control (bughunt C32, the H7 "Unknown action" class): the
+	// delegate toolprov provider's mutating tools were registered and
+	// granted but had no BuiltinRules row, so every call DENIED with
+	// "Unknown action" despite registration + grant. subagent_send_message
+	// and subagent_interrupt steer/interrupt child agent subprocesses, so
+	// they get a dedicated row (MEDIUM like send_message/voice_call, no
+	// confirmation gate — the real policy lives in the DelegateController's
+	// fail-closed caller-session authorization, not this gate class).
+	"subagent_control": {Action: "subagent_control", RiskLevel: RiskMedium, RequiresConfirmation: false},
+
+	// Contact chain (bughunt C33, same H7 class): ONE employee action
+	// ("reach this person") that fans out over the configured channels
+	// (voice/signal/SMS) behind a fallback policy. Outbound third-party
+	// communication — MEDIUM exactly like send_message/voice_call, no
+	// confirmation gate: the real policy lives in the contact chain
+	// runner's per-channel rules, so the gate class only needs to admit
+	// the action for constitution-granted employees.
+	"contact": {Action: "contact", RiskLevel: RiskMedium, RequiresConfirmation: false},
+
 	// Employee ledger (plan 20261109-employee-ledger; H7-class gap found
 	// by the caller-authz acceptance matrix): ledger_query reads the
 	// employee's own log/state (ledger_read, RiskSafe, like goal_read);

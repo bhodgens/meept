@@ -97,3 +97,13 @@ func (re *ReflectionEngine) SetScopeProvider(provider chatScopeProvider) {
 	}
 	re.scopeProvider = provider
 }
+
+// SetPiiMaskHook attaches the session-scoped PII mask lane used for the
+// fix-request side send (finding C21). Nil is a no-op (setter nil-guard
+// rule): with no hook the raw context passes through byte-identically.
+func (re *ReflectionEngine) SetPiiMaskHook(hook *PiiRestoreHook) {
+	if re == nil || hook == nil {
+		return
+	}
+	re.piiMask = hook
+}

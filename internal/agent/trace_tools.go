@@ -611,6 +611,11 @@ type SynthesizeTracesTool struct {
 	// scopeProvider, when set, supplies the owning loop's task/session
 	// scope for the synthesis LLM call (leaf 01 session-affinity).
 	scopeProvider chatScopeProvider
+	// piiMask is the session-scoped PII mask lane applied to the
+	// synthesis prompt before the LLM side send (finding C21: the
+	// main-turn mask in loop.go never reaches this send). Nil = masking
+	// disabled, byte-identical. Set via SetPiiMaskHook.
+	piiMask *PiiRestoreHook
 }
 
 // NewSynthesizeTracesTool creates the synthesis tool.
@@ -632,6 +637,16 @@ func (t *SynthesizeTracesTool) SetScopeProvider(provider chatScopeProvider) {
 		return
 	}
 	t.scopeProvider = provider
+}
+
+// SetPiiMaskHook attaches the session-scoped PII mask lane used for the
+// synthesis side send (finding C21). Nil is a no-op (setter nil-guard
+// rule): with no hook the raw prompt passes through byte-identically.
+func (t *SynthesizeTracesTool) SetPiiMaskHook(hook *PiiRestoreHook) {
+	if t == nil || hook == nil {
+		return
+	}
+	t.piiMask = hook
 }
 
 // Invoke executes the synthesis tool.
@@ -677,9 +692,13 @@ func (t *SynthesizeTracesTool) Invoke(ctx context.Context, args map[string]any) 
 
 	if t.llmClient != nil {
 		// LLM-backed synthesis.
+		// Finding C21: the synthesis prompt embeds the session's trace
+		// content (user-derived) — mask it before the side send crosses
+		// to the provider (nil hook or empty session -> unchanged).
+		maskedPrompt := maskSideSendText(t.piiMask, fmt.Sprintf("%s\n\n%s", prompt, combined), sideSendSessionID(t.scopeProvider))
 		messages := []llm.ChatMessage{
 			{Role: llm.RoleSystem, Content: "You are a trace analysis synthesizer. Summarize patterns, anomalies, and insights across multiple execution traces."},
-			{Role: llm.RoleUser, Content: fmt.Sprintf("%s\n\n%s", prompt, combined)},
+			{Role: llm.RoleUser, Content: maskedPrompt},
 		}
 		result, err := t.llmClient.Chat(ctx, messages, resolveCallScope(ctx, t.scopeProvider, nil)...)
 		if err != nil {

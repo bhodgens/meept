@@ -19,9 +19,11 @@
 package agent_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/caimlas/meept/internal/agent"
+	"github.com/caimlas/meept/internal/toolprov"
 	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/internal/tools/builtin"
 	"github.com/caimlas/meept/pkg/security"
@@ -198,6 +200,107 @@ func TestNamedConstructorsMatchPinnedList(t *testing.T) {
 	// enumeration fails loudly instead of passing vacuously.
 	if len(collectedToolNames) < 40 {
 		t.Fatalf("completeness harness collected only %d tool names; enumeration is broken", len(collectedToolNames))
+	}
+}
+
+// stubChain satisfies builtin.ContactChainRunner for the voice-provider
+// walk below (a function literal cannot: the seam is a named interface).
+type stubChain struct{}
+
+func (stubChain) Run(person, message string, channels []string) string { return "" }
+
+// TestToolprovProviderToolsResolve (bughunt C32/C33) extends the
+// completeness gate to the tool-provider seam: the enumeration above only
+// sees tools builtin constructors can build directly, but the delegate and
+// voice providers' tools reach a registry ONLY through toolprov
+// (Factory(name) -> Discover()), which the daemon wires at boot. A provider
+// tool with no ToolActionMap entry + no BuiltinRules row is dead on arrival
+// ("Unknown action" denial, the exact C32 gap that hit all five delegate
+// tools and the C33 gap that hit contact).
+//
+// Every provider registered in the compiled-in seam must be constructible
+// in this test: the delegate provider binds via
+// builtin.SetDelegateProvider(builtin.NewDelegateController(nil, nil, nil))
+// (the controller tolerates nil primitives and its methods fail closed),
+// and the voice provider binds via builtin.SetVoiceProvider with stub
+// closures. A provider that cannot be constructed must be enumerated here
+// with a comment saying why — never silently skipped.
+func TestToolprovProviderToolsResolve(t *testing.T) {
+	// Restore the fail-closed (unbound) factory state on the way out so
+	// other tests in this package observe the default posture.
+	t.Cleanup(func() {
+		builtin.ResetDelegateProviderForTest()
+	})
+	// manager/dispatcher/acp-manager at construction (NewDelegateController
+	// doc comment): its tool methods fail closed on the nil primitive, which
+	// is fine — this test only needs Name() to resolve canonical names.
+	builtin.SetDelegateProvider(builtin.NewDelegateController(nil, nil, nil))
+
+	// The voice provider needs only stub closures. SetContactChain arms
+	// the contact tool inside Discover (nil chain = contact absent, which
+	// would silently drop the C33 pin). stubChain satisfies
+	// builtin.ContactChainRunner (a function literal cannot: the seam is a
+	// named interface).
+	builtin.SetVoiceProvider(
+		func(context.Context, string, string, string) (string, error) { return "cc-test", nil },
+		func(context.Context) string { return "emp-test" },
+		nil,
+	)
+	builtin.SetContactChain(stubChain{})
+	t.Cleanup(func() { builtin.SetVoiceProvider(nil, nil, nil) })
+
+	// walkProvider constructs one registered provider via the seam and runs
+	// every discovered tool through checkName. A factory that returns nil
+	// (unbound) is a TEST HARNESS failure — the provider must be bound
+	// above, because an unbound provider contributes zero tools and the
+	// completeness gate would pass vacuously over its whole tool group.
+	walkProvider := func(t *testing.T, name string, minTools int) {
+		t.Helper()
+		f, ok := toolprov.Factory(name)
+		if !ok {
+			t.Fatalf("toolprov provider %q not registered (known: %v); if it moved, update this test", name, toolprov.Names())
+		}
+		p := f()
+		if p == nil {
+			t.Fatalf("toolprov provider %q factory returned nil (unbound): bind it at the top of this test — an unbound provider contributes zero tools and this gate passes vacuously", name)
+		}
+		discovered := p.Discover()
+		if len(discovered) < minTools {
+			t.Fatalf("toolprov provider %q Discover returned %d tools, want >= %d; the enumeration lost coverage", name, len(discovered), minTools)
+		}
+		for _, tool := range discovered {
+			if tool == nil {
+				continue
+			}
+			checkName(t, tools.CanonicalName(tool))
+		}
+	}
+
+	// The two providers the findings cover. minTools pins the expected
+	// group sizes so a provider silently losing tools (e.g. an unbound
+	// contact chain dropping contact from voice.Discover) fails loudly.
+	walkProvider(t, "delegate", 5) // subagent_send_message, subagent_interrupt, subagent_list_children, workflow, workflow_status
+	walkProvider(t, "voice", 2)    // voice_call, contact
+}
+
+// TestDelegateAndVoiceProviderToolNamesPinned (bughunt C32/C33 pin): each of
+// the six finding tools must resolve to a non-denied action through the
+// checkName helper (ToolActionMap entry -> BuiltinRules row). This is the
+// explicit pin the bughunt requires; the provider-walk test above derives
+// the same names from Discover(), this one states them verbatim so a
+// renamed/removed tool cannot slip through a walk that no longer sees it.
+func TestDelegateAndVoiceProviderToolNamesPinned(t *testing.T) {
+	for _, name := range []string{
+		// C32: the delegate provider family
+		"workflow",
+		"workflow_status",
+		"subagent_send_message",
+		"subagent_interrupt",
+		"subagent_list_children",
+		// C33: the voice provider's contact chain tool
+		"contact",
+	} {
+		checkName(t, name)
 	}
 }
 

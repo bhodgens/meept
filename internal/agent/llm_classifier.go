@@ -346,6 +346,13 @@ type LLMClassifier struct {
 	// scope for classification LLM calls (leaf 01 session-affinity).
 	scopeProvider chatScopeProvider
 
+	// piiMask is the session-scoped PII mask lane applied to user-derived
+	// content before classification sends (finding C21: the main-turn mask
+	// in loop.go never reaches secondary classifier sends). Nil = masking
+	// disabled, byte-identical. Set via SetPiiMaskHook or the config's
+	// PiiMask field.
+	piiMask *PiiRestoreHook
+
 	// bootReadiness, when set, carries the daemon's F-D8 classifier
 	// boot-gate outcome (see classifier_boot_readiness.go). Classification
 	// calls arriving while the gate is still open wait — bounded by
@@ -399,6 +406,11 @@ type LLMClassifierConfig struct {
 	// scope for classification LLM calls (leaf 01 session-affinity).
 	ScopeProvider chatScopeProvider
 
+	// PiiMask, when set, masks PII in the user input before it is
+	// interpolated into the classification prompts (finding C21).
+	// Nil = masking disabled, byte-identical to prior behavior.
+	PiiMask *PiiRestoreHook
+
 	// BootReadiness, when set, makes classification calls wait (bounded by
 	// BootWait, then by the call context) for the daemon's F-D8 classifier
 	// boot gate to resolve before dialing the classifier endpoint. This
@@ -446,11 +458,24 @@ func NewLLMClassifier(cfg LLMClassifierConfig, logger *slog.Logger) *LLMClassifi
 
 		scopeProvider: cfg.ScopeProvider,
 
+		piiMask: cfg.PiiMask,
+
 		servedModel: resolvedModelID(cfg.ModelConfig),
 
 		bootReadiness: cfg.BootReadiness,
 		bootWait:      bootWait,
 	}
+}
+
+// SetPiiMaskHook attaches the session-scoped PII mask lane used for the
+// classification side sends (finding C21). Nil is a no-op (setter
+// nil-guard rule): with no hook the raw input passes through
+// byte-identically.
+func (c *LLMClassifier) SetPiiMaskHook(hook *PiiRestoreHook) {
+	if c == nil || hook == nil {
+		return
+	}
+	c.piiMask = hook
 }
 
 // ResolvedModel returns the resolved "provider/model" of the LLM that served
@@ -540,7 +565,9 @@ func (c *LLMClassifier) Classify(ctx context.Context, input string, memCtx *Memo
 	classificationPrompt := c.buildClassificationPrompt(input)
 	messages := []llm.ChatMessage{
 		{Role: llm.RoleSystem, Content: "You are an intent classifier for an AI agent system. Classify user inputs into one of these intents: " + laneList() + ". Return ONLY valid JSON with fields: intent (lowercase), confidence (0.0-1.0), and optional reasoning."},
-		{Role: llm.RoleUser, Content: classificationPrompt},
+		// Finding C21: the user message carries the raw input — mask it
+		// before the side send (nil hook or empty session -> unchanged).
+		{Role: llm.RoleUser, Content: maskSideSendText(c.piiMask, classificationPrompt, sideSendSessionID(c.scopeProvider))},
 	}
 
 	timeoutCtx, cancel := context.WithTimeout(ctx, c.timeout)
@@ -655,7 +682,10 @@ func (c *LLMClassifier) ClassifyMulti(ctx context.Context, input string, ctxMemo
 	}
 
 	// Use a prompt that asks LLM to detect ALL intents
-	prompt := buildClassifyMultiPrompt(input)
+	// Finding C21: mask the user-derived input before it is interpolated
+	// into the multi-intent prompt (nil hook or empty session -> the raw
+	// input, byte-identical).
+	prompt := buildClassifyMultiPrompt(maskSideSendText(c.piiMask, input, sideSendSessionID(c.scopeProvider)))
 
 	messages := []llm.ChatMessage{
 		{Role: llm.RoleSystem, Content: "You are a multi-intent detector for an AI agent system. Identify ALL distinct intents in user requests."},
