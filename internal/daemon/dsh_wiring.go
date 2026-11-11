@@ -27,6 +27,7 @@ import (
 	"github.com/caimlas/meept/internal/scheduler"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/toolprov"
+	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/internal/tools/builtin"
 	"github.com/caimlas/meept/pkg/models"
 )
@@ -49,6 +50,29 @@ func wireDSHConvergence(c *Components, cfg *config.Config, msgBus *bus.MessageBu
 	wireDelegateProvider(c, cfg, msgBus, logger)
 	wirePlanMode(c, logger)
 	wireGoalRoundDriver(c, cfg, logger)
+}
+
+// goalGateParkedForEmployee reports whether any ACTIVE goal of this
+// employee has a parked approval gate on the daemon's GateParker (C25).
+// Nil parker / nil manager / listing failure report false (fail-open: the
+// pre-C25 behavior must not regress when parking is disabled).
+func goalGateParkedForEmployee(mgr *employee.Manager, parker *agent.GateParker, employeeID string) bool {
+	if mgr == nil || parker == nil {
+		return false
+	}
+	goals, err := mgr.ListGoals(context.Background(), employeeID)
+	if err != nil {
+		return false
+	}
+	for _, g := range goals {
+		if g == nil || g.State != employee.GoalActive {
+			continue
+		}
+		if parker.HasParkedGateForID(g.ID) {
+			return true
+		}
+	}
+	return false
 }
 
 // wireGoalRoundDriver constructs the autonomous continuation driver over the
@@ -89,10 +113,22 @@ func wireGoalRoundDriver(c *Components, cfg *config.Config, logger *slog.Logger)
 		// Manager accessors delegate to the per-employee GoalLoop; a
 		// loop without a wired parker (nil-safe seam, leaf G4) reports
 		// quiet.
+		//
+		// C25: a parked GOAL-approval gate is also not-quiet. While a
+		// human approval pends on the daemon's GateParker, every poll
+		// tick would otherwise run a FULL autonomous round (LLM spend
+		// + side effects) up to the 256-round cap, and tier-2 verdicts
+		// could drop on a BLOCKED goal. The predicate probes the gate
+		// parker per active goal id (nil parker / nil manager fail
+		// open — disabled parking stays byte-identical).
 		mgr := c.EmployeeManager
+		gateParker := c.GateParker
 		driver = driver.WithQuiescenceCheck(func(employeeID string) bool {
-			return !mgr.HasParkedEpisode(employeeID) &&
-				mgr.PendingSteerCount(employeeID) == 0
+			if !mgr.HasParkedEpisode(employeeID) &&
+				mgr.PendingSteerCount(employeeID) == 0 {
+				return !goalGateParkedForEmployee(mgr, gateParker, employeeID)
+			}
+			return false
 		})
 	}
 	c.GoalRoundDriver = driver
@@ -123,6 +159,24 @@ func (c *Components) StopGoalRoundDriverLoop() {
 		return
 	}
 	c.GoalRoundDriver.Stop()
+}
+
+// StartDelegateResumeSweep cold-resumes in-flight delegated children left in
+// the durable child-descriptor store by a previous run (bughunt C13). Called
+// from Daemon.Run right next to StartGoalRoundDriverLoop — AFTER
+// Components.Start so the agent registry and dispatcher exist (resumed
+// children execute against them) and the session store is live. Bounded
+// (maxResumeSweep), logged, best-effort: sweep failures warn and never fail
+// the boot. nil manager / nil store = no-op.
+func (c *Components) StartDelegateResumeSweep(ctx context.Context) {
+	if c == nil || c.DelegateManager == nil {
+		return
+	}
+	resumed, failed := c.DelegateManager.ResumeInFlightDescriptors(ctx, "")
+	if len(resumed) > 0 || len(failed) > 0 {
+		slog.Info("delegate resume sweep: startup cold-resume pass complete",
+			"resumed", len(resumed), "failed", len(failed))
+	}
 }
 
 // goalRoundDeferredScheduler adapts *scheduler.Scheduler onto the round
@@ -252,6 +306,12 @@ func wireDelegateProvider(c *Components, cfg *config.Config, msgBus *bus.Message
 
 	dm := agent.NewDelegateManager(c.AgentRegistry, delegateBusPublisher(msgBus, logger), nil)
 	dm.SetRouteResolver(delegateRouteResolver(cfg, c.LLMResolver, logger))
+	// C10: enforce the resolved route at EXECUTION — the child's first LLM
+	// call runs the allowlist-gated route (one-shot ApplyRequestModel) rather
+	// than silently falling through to the child spec's own model pin.
+	if c.AgentRegistry != nil {
+		dm.SetRunFunc(c.AgentRegistry.RunAgentWithModelRef)
+	}
 	// DSH-1 fork-seed: bind the registry's conversation-seed adapter so a
 	// full-context fork child's seed is stamped onto its conversation before
 	// its first turn (delegate.go's gate already restricts seeding to agents
@@ -271,12 +331,16 @@ func wireDelegateProvider(c *Components, cfg *config.Config, msgBus *bus.Message
 	// child descriptors; a second hook would be a redundant sink.
 
 	// Build the controller over the manager, dispatcher, and ACP manager
-	// (plain-data, fail-closed per primitive). The caller-session resolver seam
-	// is left UNBOUND: the tool-execution context carries no session id today,
-	// and resolving it would require inventing a context key. The controller
-	// fails closed safely without it (subagent_interrupt denies; list_children
-	// requires an explicit parent_session_id).
+	// (plain-data, fail-closed per primitive). The caller-session resolver
+	// (C14) is bound to the loop-injected tool-context session id
+	// (tools.ContextWithSessionID — the same carrier delegate_task's spawn
+	// attribution uses): interrupt/send/list enforce parent-of against it.
+	// UNBOUND it stays fail-closed (interrupt/send deny; list denies) —
+	// cross-session control is never open, resolver bound or not.
 	ctrl := builtin.NewDelegateController(dm, c.Dispatcher, c.ACPManager)
+	ctrl.SetCallerSessionResolver(func(ctx context.Context) string {
+		return tools.SessionIDFromContext(ctx)
+	})
 	if msgBus != nil {
 		// DSH-8: background workflow runs deliver completion on the same
 		// bus lane as child settlements (agent.delegate.result).

@@ -106,6 +106,42 @@ func (s *SQLiteStore) RemoveChildDescriptor(ctx context.Context, childID string)
 	return nil
 }
 
+// ListChildDescriptors returns every durable child record (no ordering
+// guarantee). Enumeration capability for the daemon's startup cold-resume
+// sweep (bughunt C13): the sweep type-asserts the store onto
+// agent.ChildDescriptorLister, so this is an additive concrete method — the
+// session.Store interface itself is unchanged and existing implementers and
+// test fakes stay untouched.
+func (s *SQLiteStore) ListChildDescriptors(ctx context.Context) ([]ChildDescriptorRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT child_id, parent_session_id, agent_id, state, descriptor_json, created_at, updated_at
+		FROM child_descriptors`)
+	if err != nil {
+		return nil, fmt.Errorf("session: list child descriptors: %w", err)
+	}
+	defer rows.Close()
+	var out []ChildDescriptorRecord
+	for rows.Next() {
+		var rec ChildDescriptorRecord
+		var jsonBlob, createdAt, updatedAt string
+		if err := rows.Scan(&rec.ChildID, &rec.ParentSessionID, &rec.AgentID, &rec.State, &jsonBlob, &createdAt, &updatedAt); err != nil {
+			return nil, fmt.Errorf("session: list child descriptors: %w", err)
+		}
+		rec.DescriptorJSON = []byte(jsonBlob)
+		if ts, err := time.Parse(time.RFC3339Nano, createdAt); err == nil {
+			rec.CreatedAt = ts
+		}
+		if ts, err := time.Parse(time.RFC3339Nano, updatedAt); err == nil {
+			rec.UpdatedAt = ts
+		}
+		out = append(out, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("session: list child descriptors: %w", err)
+	}
+	return out, nil
+}
+
 // SaveChildDescriptor upserts a child record for the in-memory store. It
 // mirrors the SQLite semantics (missing child_id/descriptor rejected; timestamps
 // defaulted) so the two stores behave identically.
@@ -150,4 +186,17 @@ func (s *MemoryStore) RemoveChildDescriptor(_ context.Context, childID string) e
 	defer s.mu.Unlock()
 	delete(s.childDescs, childID)
 	return nil
+}
+
+// ListChildDescriptors returns every durable child record for the in-memory
+// store (snapshot under the store lock; no ordering guarantee). The
+// enumeration capability for the startup cold-resume sweep (C13).
+func (s *MemoryStore) ListChildDescriptors(_ context.Context) ([]ChildDescriptorRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]ChildDescriptorRecord, 0, len(s.childDescs))
+	for _, rec := range s.childDescs {
+		out = append(out, rec)
+	}
+	return out, nil
 }

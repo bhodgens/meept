@@ -48,8 +48,12 @@ var (
 //
 //   - enabled=false: request selection fields are ignored; the configured route
 //     wins (nil configured -> nil, meaning the caller keeps the parent route).
-//   - with a policy in force (non-nil) and no selection fields on the request,
-//     an empty route is rejected rather than silently defaulted.
+//   - with a policy in force and no selection fields on the request, the
+//     FIRST (primary) allowlist route is resolved as the default (C9: the
+//     delegate_task tool schema may not carry route fields on every caller,
+//     so "no route supplied" must resolve to an ALLOWED route instead of
+//     failing every spawn when an allowlist is enforced). Only a policy with
+//     NO routes (allow-all) falls back to the configured route / parent route.
 //   - a selection requests that provider+model be supplied together (exactly one
 //     set is an error); empty strings are rejected.
 //   - policy nil permits only the parent route; a non-nil policy requires the
@@ -70,11 +74,13 @@ func ResolveChildRoute(parent agent.ChildOptions, configured *agent.ChildOptions
 
 	hasSelection := req.Provider != "" || req.Model != "" || req.ReasoningEffort != ""
 	if !hasSelection {
-		// No selection requested: fall back to the configured route. But when an
-		// allowlist is in force, an empty route must error rather than silently
-		// default through the policy.
-		if policy != nil {
-			return nil, fmt.Errorf("%w: model selection enforced, but no provider/model supplied", ErrEmptyRoute)
+		// No selection requested. With an allowlist in force, resolve the
+		// FIRST (primary) allowed route as the default (C9); a policy with an
+		// empty route list means no restriction — keep the configured (or
+		// parent) route.
+		if policy != nil && len(policy.Routes) > 0 {
+			primary := policy.Routes[0]
+			return &agent.ChildOptions{Provider: primary.Provider, Model: primary.Model}, nil
 		}
 		return cloneOptions(configured), nil
 	}

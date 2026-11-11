@@ -19,7 +19,6 @@ import (
 
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/agent/turnjournal"
-	"github.com/caimlas/meept/internal/auditlog"
 	"github.com/caimlas/meept/internal/auth"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/calendar"
@@ -340,18 +339,15 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	// groups.* surface (agent-groups 03-mutation-gate, C5): direct Go
 	// handlers — no bus path. Registered AFTER components exist (this
 	// block needs the live registry, the shared users store, and the tool
-	// registry for C6 validation). The audit chain store opens on the
-	// shared tool-audit db (WAL + busy timeout make multi-connection
-	// appends safe); a failed open degrades auditing, never the gate.
+	// registry for C6 validation). bughunt D3: the groups audit lane
+	// rides components.ToolGateAudit — the ONE shared audit-chain store
+	// over tool_audit_chain.db (the tool gate's G2 lane shares the same
+	// pool) — instead of opening a SECOND pool over the same file, whose
+	// two MaxOpenConns(1) pools lost rows under cross-pool concurrent
+	// appends. A degraded open (nil store) degrades auditing, never the
+	// gate.
 	if rpcServer != nil && proxy != nil && fullCfg != nil && components != nil {
-		groupsAudit, gaErr := auditlog.OpenStore(
-			filepath.Join(fullCfg.Daemon.DataDir, "tool_audit_chain.db"),
-			logger.With("component", "groups-audit"))
-		if gaErr != nil {
-			logger.Warn("groups: audit chain store unavailable; membership-change auditing degraded",
-				"error", gaErr)
-			groupsAudit = nil
-		}
+		groupsAudit := components.ToolGateAudit
 		groupsHandler := rpc.NewGroupsHandler(fullCfg, defaultConfigFilePath(), components.AgentRegistry, components.AuthUsersStore, groupsAudit)
 		if components.ToolRegistry != nil {
 			groupsHandler.SetToolValidation(components.ToolRegistry.CanonicalNames(), agent.CanonicalToolName)
@@ -1341,7 +1337,8 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		// ShardManager hybrid search RPC (memory.search.hybrid). Only
 		// registered when memory.vector_hybrid.enabled wired the searcher
 		// in components; otherwise calls fail with "method not found"
-		// rather than pretending the feature exists.
+		// rather than pretending the feature exists. The C2 scope
+		// predicate + limit clamp live in the wiring (bughunt D11/C35).
 		if components.VectorHybrid != nil {
 			registerVectorHybridRPCHandler(rpcServer, components.VectorHybrid, fullCfg.Memory.VectorHybrid.Limit)
 			logger.Info("Vector hybrid search RPC handler registered")
@@ -1553,6 +1550,17 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	// refusal, never "method not found").
 	registerVoiceLocalRPC(components, rpcServer, logger)
 	registerVoiceLinkRPC(components, rpcServer, logger)
+
+	// ledger.query / ledger.state (plan 20261109-employee-ledger, leaf
+	// 02-surfaces/02; bughunt D6): the handler existed in internal/rpc
+	// with the surface documented and present in the generated
+	// rpc-handlers.json, but RegisterLedgerMethods had ZERO production
+	// callers — clients always got "method not found". Register at this
+	// same site, per the wiring note in internal/rpc/ledger.go: the
+	// daemon adapts components.EmployeeLedger onto the narrow
+	// LedgerReader seam. Always registers (nil store = the handler's
+	// ErrLedgerDisabled envelope, never "method not found").
+	registerLedgerRPC(components, rpcServer, logger)
 
 	// Create HTTP server (if enabled)
 	var httpSrv *http.Server
@@ -2299,6 +2307,10 @@ func (d *Daemon) Run(ctx context.Context) error {
 		// goal_auto_advance (default true — the leaf's zero-human-turns
 		// contract); stopped in shutdown().
 		d.components.StartGoalRoundDriverLoop(ctx)
+		// Delegate cold-resume sweep (bughunt C13): pick up in-flight
+		// delegated children persisted by a previous run. Bounded, logged,
+		// best-effort — a sweep failure never fails the boot.
+		d.components.StartDelegateResumeSweep(ctx)
 		d.logger.Info("daemon: agent components started",
 			"tools", d.components.ToolRegistry.Count(),
 			"llm_configured", d.components.LLMClient != nil,

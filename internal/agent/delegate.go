@@ -32,6 +32,29 @@ import (
 // ceiling and floors it at 1, mirroring dsh's depth cap posture.
 const maxDelegateDepth = 4
 
+// delegateDepthKey carries the CALLING child's nesting depth in the
+// tool-execution context (set by runChild on the child's own turn context), so
+// a delegated child that itself calls delegate_task threads its depth into the
+// next spawn (parent depth + 1) and the runtime nesting cap is real — depth
+// above the structural ceiling is REFUSED, not clamped (C16: previously the
+// depth was normalized then ignored).
+type delegateDepthKey struct{}
+
+// DepthFromContext returns the calling child's nesting depth from ctx (0 when
+// unset — the caller is a top-level parent).
+func delegateDepthFromContext(ctx context.Context) int {
+	if v, ok := ctx.Value(delegateDepthKey{}).(int); ok && v > 0 {
+		return v
+	}
+	return 0
+}
+
+// ContextWithDelegateDepth returns a context carrying the child's nesting
+// depth, threaded into the child's own turn context so nested spawns chain.
+func contextWithDelegateDepth(ctx context.Context, depth int) context.Context {
+	return context.WithValue(ctx, delegateDepthKey{}, depth)
+}
+
 // ChildState is the lifecycle state of a delegated child.
 type ChildState string
 
@@ -65,6 +88,15 @@ type ChildDescriptor struct {
 	SeedPayload     string    `json:"seed_payload,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`
 
+	// Context and OutputSchema carry the spawn request's caller context and
+	// output-schema directive (C17) so a cold resume re-renders the brief
+	// through the SAME childPrompt pipeline as a fresh spawn (spawn-context
+	// render + Context prefix + output_schema instruction) instead of
+	// replaying a raw SeedPayload with only a preamble. Empty for pre-C17
+	// descriptors (brief-only resume, unchanged).
+	Context      string          `json:"context,omitempty"`
+	OutputSchema json.RawMessage `json:"output_schema,omitempty"`
+
 	// SeedMessages is the bounded fork-seed snapshot (v2): the parent's
 	// completed-turn prefix captured ONCE at spawn, serialized so a cold
 	// resume replays the parent-context seed instead of only the brief.
@@ -90,12 +122,22 @@ type ChildRecord struct {
 	Provider        string
 	ReasoningEffort string
 	ConversationID  string
-	State           ChildState
-	CreatedAt       time.Time
-	Result          string
-	Err             string
-	Descriptor      ChildDescriptor
-
+	// State is the durable lifecycle state; see ChildState.
+	State      ChildState
+	CreatedAt  time.Time
+	Result     string
+	Err        string
+	Descriptor ChildDescriptor
+	// Depth is the runtime nesting depth of this child (1 = a top-level
+	// spawn): parent depth (threaded through the spawn context) + 1,
+	// refused beyond maxDelegateDepth. Recorded for observability; the
+	// cap itself is enforced at Spawn (delegateDepthKey).
+	Depth int
+	// Context and OutputSchema ride the spawn request so the resume brief
+	// can be re-rendered through the same childPrompt pipeline as a fresh
+	// spawn (no drift between fork and resume briefs).
+	Context      string
+	OutputSchema json.RawMessage
 	// seed is the B2 history-seeded fork snapshot, captured ONCE at spawn
 	// (not re-derived from the parent's newer history on resume). It rides
 	// the child descriptor for cold resume (leaf 06 serializes it); here it
@@ -170,8 +212,19 @@ type DelegateManager struct {
 	reg *AgentRegistry
 	acp *acp.Manager
 
+	// runFn is the child-execution seam (C10): it runs one child turn,
+	// optionally with a model override. It defaults to RunAgent; the daemon
+	// wiring (SetRunFunc) binds RunAgentWithModelRef so the RESOLVED route
+	// (the allowlist-gated ChildOptions) actually gates the child's first
+	// LLM call instead of being recorded as metadata only. Nil-safe: the
+	// default closure never arms an override.
+	runFn func(ctx context.Context, agentID, message, conversationID, modelRef string) (string, error)
+
 	mu       sync.RWMutex
 	children map[string]*childEntry // childID -> entry
+	// resuming holds the in-flight resume claims (C11): childIDs between
+	// Resume entry and run registration. Guarded by mu.
+	resuming map[string]struct{}
 
 	// Impossible-by-contract: these wiring seams are set once at daemon
 	// startup (NewDelegateManager / Set*) and never mutated afterwards, so
@@ -209,11 +262,20 @@ type DelegateManager struct {
 // test seam / external hooks); publisher and cancelHook are optional and
 // nil-safe.
 func NewDelegateManager(reg *AgentRegistry, publisher func(string, any), cancelHook func(string) error) *DelegateManager {
-	return &DelegateManager{
+	m := &DelegateManager{
 		reg:        reg,
 		publisher:  publisher,
 		cancelHook: cancelHook,
 		children:   make(map[string]*childEntry),
+		// C10 default run seam: plain RunAgent (no model override). The
+		// daemon wiring upgrades it via SetRunFunc when route enforcement
+		// is configured.
+		runFn: func(ctx context.Context, agentID, message, conversationID, _ string) (string, error) {
+			if reg == nil {
+				return "", fmt.Errorf("delegate: no agent registry wired")
+			}
+			return reg.RunAgent(ctx, agentID, message, conversationID)
+		},
 		// B2: register the history-seeded fork slicer as the default so
 		// every spawn path seeds Mode:"fork" without waiting for daemon
 		// wiring. It is pure and nil-safe (nil conversation -> nil seed ->
@@ -221,6 +283,36 @@ func NewDelegateManager(reg *AgentRegistry, publisher func(string, any), cancelH
 		// still resets to that default no-op behavior.
 		forkSeed: completedTurnPrefix,
 	}
+	return m
+}
+
+// SetRunFunc installs the child-execution seam (C10). The daemon binds
+// reg.RunAgentWithModelRef here so a spawn's resolved route is enforced as a
+// one-shot model override on the child's first LLM call. A nil f resets to
+// the default RunAgent path (no override).
+func (m *DelegateManager) SetRunFunc(f func(ctx context.Context, agentID, message, conversationID, modelRef string) (string, error)) {
+	if f == nil {
+		return
+	}
+	m.runFn = f
+}
+
+// runChildTurn executes one child turn through the run seam with the
+// record's resolved route as the model override (a no-op override when the
+// route is empty — the identity-resolution default).
+func (m *DelegateManager) runChildTurn(ctx context.Context, rec ChildRecord, message string) (string, error) {
+	modelRef := rec.Model
+	if rec.Provider != "" && rec.Model != "" {
+		// provider/model form — the resolver's direct-reference shape.
+		modelRef = rec.Provider + "/" + rec.Model
+	}
+	if m.runFn == nil {
+		if m.reg == nil {
+			return "", fmt.Errorf("delegate: no agent registry wired")
+		}
+		return m.reg.RunAgent(ctx, rec.AgentID, message, rec.ConversationID)
+	}
+	return m.runFn(ctx, rec.AgentID, message, rec.ConversationID, modelRef)
 }
 
 // SetRouteResolver installs the B4 per-child route resolver. nil resets to the
@@ -351,13 +443,17 @@ func (m *DelegateManager) Spawn(ctx context.Context, req DelegateRequest, parent
 			"agent_id", req.AgentID)
 	}
 
-	// Depth: default 1, never above the structural ceiling.
-	depth := req.Depth
-	if depth <= 0 {
-		depth = 1
-	}
+	// Depth: the child's nesting depth is the CALLER's depth (threaded
+	// through the tool-execution context) + 1. An explicit req.Depth (the
+	// legacy pin field) may only request a shallower chain, never a deeper
+	// one. Beyond the structural ceiling the spawn is REFUSED (never
+	// clamped — a silently-narrower chain hides runaway nesting).
+	parentDepth := max(delegateDepthFromContext(ctx), req.Depth)
+	depth := parentDepth + 1
 	if depth > maxDelegateDepth {
-		depth = maxDelegateDepth
+		return DelegateResult{AgentID: req.AgentID, Success: false,
+			Error: fmt.Sprintf("delegate: max nesting depth %d exceeded (caller depth %d)", maxDelegateDepth, parentDepth),
+		}, nil
 	}
 
 	childID := id.Generate("delegate-")
@@ -375,6 +471,9 @@ func (m *DelegateManager) Spawn(ctx context.Context, req DelegateRequest, parent
 		ConversationID:  conversationID,
 		State:           ChildStateRunning,
 		CreatedAt:       now,
+		Depth:           depth,
+		Context:         req.Context,
+		OutputSchema:    req.OutputSchema,
 	}
 	rec.seed = forkSeedMsgs
 
@@ -396,6 +495,8 @@ func (m *DelegateManager) Spawn(ctx context.Context, req DelegateRequest, parent
 			Reasoning:       opts.ReasoningEffort,
 			ParentSessionID: parentSessionID,
 			SeedPayload:     req.Message,
+			Context:         req.Context,
+			OutputSchema:    req.OutputSchema,
 			CreatedAt:       now,
 		}
 	}
@@ -413,14 +514,12 @@ func (m *DelegateManager) Spawn(ctx context.Context, req DelegateRequest, parent
 	// Launch the child ONLY when a registry is wired; unwired/test children
 	// remain pending settlement through the test seam / external hooks.
 	if m.reg != nil {
-		go m.runChild(childCtx, req, childID, rec)
+		go m.runChild(contextWithDelegateDepth(childCtx, depth), req, childID, rec)
 	} else {
 		go func() {
 			<-childCtx.Done()
 		}()
 	}
-
-	_ = depth // depth is a per-child routing pin for B4; recorded, not yet a runtime gate
 
 	return DelegateResult{AgentID: req.AgentID, ChildID: childID, Status: "running", Success: true}, nil
 }
@@ -467,7 +566,7 @@ func (m *DelegateManager) runChild(ctx context.Context, req DelegateRequest, chi
 		fullMessage = forkSeedPreamble(len(rec.seed)) + fullMessage
 	}
 
-	resp, err := m.reg.RunAgent(ctx, spec.ID, fullMessage, rec.ConversationID)
+	resp, err := m.runChildTurn(ctx, rec, fullMessage)
 	if err != nil {
 		m.settle(childID, ChildStateFailed, "", err.Error())
 		return
@@ -628,7 +727,11 @@ func (m *DelegateManager) Join(ctx context.Context, parentSessionID, childID str
 
 // Cancel interrupts a running child: it invokes the external cancel hook, the
 // per-child run context, and any live ACP session, then marks the record
-// interrupted and publishes settlement.
+// interrupted and publishes settlement. The interrupted state is DURABLE: the
+// descriptor is persisted with state=interrupted before the settle channel
+// closes (C6 — previously Cancel mutated only the in-memory record, so a
+// restart lost the interruption and a previously-persisted running row would
+// re-execute a cancelled task).
 func (m *DelegateManager) Cancel(childID string) error {
 	m.mu.Lock()
 	e, ok := m.children[childID]
@@ -638,16 +741,28 @@ func (m *DelegateManager) Cancel(childID string) error {
 	}
 	var cancel context.CancelFunc
 	var sess *acp.Session
+	var rec ChildRecord
+	cancelled := false
 	if !e.settled {
 		e.settled = true
 		e.rec.State = ChildStateInterrupted
 		cancel = e.cancel
 		sess = e.sess
-		close(e.settle)
+		rec = e.rec
+		cancelled = true
 	}
 	hook := m.cancelHook
 	m.mu.Unlock()
 
+	// Persist the interruption BEFORE closing the settle channel (same
+	// ordering as settle(): a resume observer of the settled child must see
+	// the durable interrupted row). Runs on the caller's goroutine but
+	// outside the mutex (no I/O under lock — mutexio invariant); best-effort.
+	if cancelled {
+		m.persistRecord(rec)
+		m.publishResult(rec)
+		close(e.settle)
+	}
 	if cancel != nil {
 		cancel()
 	}

@@ -48,6 +48,10 @@ type DelegateController struct {
 	jobMu    sync.Mutex
 	jobOrder []string
 	jobReg   map[string]*WorkflowEngine
+	// jobOwners maps jobID -> the session id that started the job (C15).
+	// An empty string means ownerless (session-less caller): visible to
+	// any status query. Guarded by jobMu.
+	jobOwners map[string]string
 	// settledCache holds the first-observed settlement per job (the engine
 	// seam is single-consumption; this makes status idempotent).
 	settledCache map[string]jobStatusView
@@ -108,6 +112,10 @@ type childView struct {
 // the B6 resume seam lands — SendMessage surfaces a clear error instead of
 // silently dropping. It returns a DELIVERY ACK (message_id), never the
 // child's answer, per dsh semantics.
+//
+// Authorization (C14): only the child's parent session may steer it. When the
+// caller session cannot be resolved (no resolver bound / session-less ctx),
+// the send is DENIED — fail-closed, matching the interrupt rule.
 func (c *DelegateController) SendMessage(ctx context.Context, childID, message string) (any, error) {
 	if c.mgr == nil {
 		return tools.NewErrorResult("subagent_send_message: delegate manager not available"), nil
@@ -118,6 +126,15 @@ func (c *DelegateController) SendMessage(ctx context.Context, childID, message s
 	rec, ok := c.mgr.Lookup(childID)
 	if !ok {
 		return tools.NewErrorResult("subagent_send_message: child not found: " + childID), nil
+	}
+
+	caller := c.resolveCallerSession(ctx)
+	if caller == "" {
+		return tools.NewErrorResult("subagent_send_message: caller session could not be resolved; send denied"), nil
+	}
+	if rec.ParentSessionID != caller {
+		return tools.NewErrorResult(
+			"subagent_send_message: unauthorized: only the child's parent session may steer it"), nil
 	}
 
 	switch rec.State {
@@ -200,17 +217,28 @@ func (c *DelegateController) Interrupt(ctx context.Context, childID string) (any
 // registry, returning a sanitized projection (child_id, agent_id, mode,
 // state, model) — never an internal record or secret material. The parent
 // defaults to the caller's session when parentSessionID is empty.
+//
+// Authorization (C14): an explicit parent_session_id is honored only from the
+// caller's OWN session — a caller may never list another session's children by
+// naming it. When the caller session cannot be resolved (no resolver bound /
+// session-less ctx), the list is DENIED (fail-closed) instead of trusting the
+// unvalidated argument.
 func (c *DelegateController) ListChildren(ctx context.Context, parentSessionID string) (any, error) {
 	if c.mgr == nil {
 		return tools.NewErrorResult("subagent_list_children: delegate manager not available"), nil
 	}
+	caller := c.resolveCallerSession(ctx)
+	if caller == "" {
+		return tools.NewErrorResult(
+			"subagent_list_children: caller session could not be resolved; list denied"), nil
+	}
 	parent := parentSessionID
 	if parent == "" {
-		parent = c.resolveCallerSession(ctx)
+		parent = caller
 	}
-	if parent == "" {
+	if parent != caller {
 		return tools.NewErrorResult(
-			"subagent_list_children: no parent session; pass parent_session_id or run within a session context"), nil
+			"subagent_list_children: unauthorized: only the caller's own session children may be listed"), nil
 	}
 
 	views := []childView{}

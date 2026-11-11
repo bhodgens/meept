@@ -324,6 +324,18 @@ func (t *DelegateTaskTool) Parameters() llm.FunctionParameters {
 				Type:        schemaTypeString,
 				Description: "Optional context handoff scope: \"full\" requests the child be seeded with this conversation's completed-turn transcript (only honored when the target agent's config sets delegate_context: full), \"task\" (default) starts the child from this task alone.",
 			},
+			"provider": {
+				Type:        schemaTypeString,
+				Description: "Optional LLM provider for the child's route (must be supplied together with model). Omit to use the delegation policy's default (first allowed route when an allowlist is enforced).",
+			},
+			"model": {
+				Type:        schemaTypeString,
+				Description: "Optional model reference/alias for the child's route (must be supplied together with provider). Omit to use the delegation policy's default (first allowed route when an allowlist is enforced).",
+			},
+			"reasoning_effort": {
+				Type:        schemaTypeString,
+				Description: "Optional reasoning effort for the child's route (e.g. \"low\", \"high\").",
+			},
 		},
 		Required: []string{"agent_id", "message"},
 	}
@@ -485,6 +497,16 @@ func (t *DelegateTaskTool) executeAsync(ctx context.Context, args map[string]any
 		Message: message,
 		Context: contextStr,
 	}
+	// Route fields (C9): provider/model must be supplied together; they ride
+	// the request into the B4 route resolver, which asserts them against the
+	// [delegation] allowed_routes allowlist (an omitted route resolves to the
+	// allowlist's primary entry when one is enforced).
+	provider, _ := args["provider"].(string)
+	model, _ := args["model"].(string)
+	effort, _ := args["reasoning_effort"].(string)
+	req.Provider = provider
+	req.Model = model
+	req.ReasoningEffort = effort
 	switch mode {
 	case "full":
 		req.Mode = "fork"

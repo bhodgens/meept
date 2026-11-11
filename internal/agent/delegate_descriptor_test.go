@@ -122,7 +122,7 @@ func TestDelegateManager_DescriptorPersistResume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("spawn: %v", err)
 	}
-	mgr.SettleForTest(res.ChildID, ChildStateCompleted, "done", "")
+	mgr.SettleForTest(res.ChildID, ChildStateInterrupted, "", "cancelled")
 
 	// The durable store now holds the child descriptor.
 	stored, err := store.GetChildDescriptor(ctx, res.ChildID)
@@ -141,7 +141,10 @@ func TestDelegateManager_DescriptorPersistResume(t *testing.T) {
 	}
 
 	// Cold resume: a fresh manager holding only the store must NOT see the live
-	// child, and must refuse a non-parent resumer.
+	// child, and must refuse a non-parent resumer. The child is settled
+	// INTERRUPTED first (C5: a completed child is terminal and refused on the
+	// cold path — see TestDelegateManager_ResumeRefusesCompletedChild).
+	mgr.SettleForTest(res.ChildID, ChildStateInterrupted, "", "cancelled")
 	fresh := NewDelegateManager(nil, nil, nil)
 	fresh.SetStore(store)
 	if _, ok := fresh.Lookup(res.ChildID); ok {
@@ -284,6 +287,17 @@ func TestDelegateManager_ResumeStampsSeed(t *testing.T) {
 	}
 	if _, err := mgr.Join(context.Background(), "sess-parent", res.ChildID, 5*time.Second); err != nil {
 		t.Fatalf("join: %v", err)
+	}
+	// The child settled FAILED (unwired RunAgent) in this rig and is already
+	// settled, so SettleForTest no-ops. Rewrite the durable row to
+	// INTERRUPTED through the real persist seam so the cold resume below is
+	// permitted under the C5 terminal-state contract (only interrupted/
+	// pending rows resume — a failed/completed row is refused).
+	if e, ok := mgr.children[res.ChildID]; ok {
+		e.rec.State = ChildStateInterrupted
+	}
+	if err := mgr.saveDescriptorToStore(mgr.children[res.ChildID].rec); err != nil {
+		t.Fatalf("persist interrupted row: %v", err)
 	}
 
 	// The durable descriptor carries the seed snapshot.

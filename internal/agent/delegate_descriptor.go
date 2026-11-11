@@ -53,17 +53,71 @@ const (
 // captureSeed materializes the spawn-time fork seed into the descriptor
 // (bounded; newest-tail kept). nil/empty seed is a no-op (spawn-mode and
 // degraded-fork children carry no seed).
+//
+// C7: the shrink boundary is aligned to a TURN boundary. A blind front-drop
+// can leave a tool-role result as the seed's FIRST message (its preceding
+// assistant tool_calls dropped), and the resumed child's first LLM call then
+// 400s (tool result with no preceding tool call). The shrink drops whole
+// turns: it walks forward from the cut using lastCompletedTurn on the
+// remaining suffix until both caps fit, so the kept seed always starts on a
+// non-tool message with balanced tool calls.
 func (d *ChildDescriptor) captureSeed(seed []llm.ChatMessage) {
 	if len(seed) == 0 {
 		return
 	}
 	msgs := append([]llm.ChatMessage(nil), seed...)
-	// Keep the newest messages under both caps: drop from the front (oldest)
-	// until the message count and total byte budget fit.
-	for len(msgs) > seedDescriptorMaxMessages {
-		msgs = msgs[1:]
+	// Keep the newest whole turns under both caps. lastCompletedTurn finds
+	// the LAST balanced cut; the shrink needs the LARGEST balanced cut that
+	// FITS the caps, so it re-cuts on the prefix progressively: drop the
+	// head turn-by-turn until the suffix fits, keeping turn alignment.
+	for len(msgs) > seedDescriptorMaxMessages || seedJSONBytes(msgs) > seedDescriptorMaxBytes {
+		// Find the smallest balanced cut > 0 (the first completed turn's
+		// end): dropping exactly one head turn per iteration keeps the
+		// remainder's tool calls balanced (cut points are balanced
+		// prefixes).
+		cut := -1
+		outstanding := make(map[string]struct{}, 8)
+		for i, m := range msgs {
+			if len(m.ToolCalls) > 0 {
+				for _, tc := range m.ToolCalls {
+					outstanding[tc.ID] = struct{}{}
+				}
+			}
+			if m.Role == llm.RoleTool && m.ToolCallID != "" {
+				delete(outstanding, m.ToolCallID)
+			}
+			if m.Role == llm.RoleAssistant && len(outstanding) == 0 {
+				cut = i + 1
+				break
+			}
+		}
+		if cut <= 0 {
+			// No complete head turn in the remainder: drop leading messages
+			// up to the next non-tool message (never leave an orphan tool
+			// result as the seed's head) and re-check the caps.
+			drop := 0
+			for drop < len(msgs) && msgs[drop].Role == llm.RoleTool {
+				drop++
+			}
+			if drop == 0 {
+				drop = 1 // assistant/user head still over-cap: drop it
+			}
+			msgs = msgs[drop:]
+			if len(msgs) == 0 {
+				break
+			}
+			continue
+		}
+		msgs = msgs[cut:]
 	}
-	for len(msgs) > 0 && seedJSONBytes(msgs) > seedDescriptorMaxBytes {
+	if len(msgs) == 0 {
+		return
+	}
+	// Final safety: the seed must never START on an orphan tool result (a
+	// tool result whose assistant tool_calls precede the seed). The turn-
+	// aligned shrink above guarantees it structurally; this drops any
+	// leading tool messages defensively.
+	for len(msgs) > 0 && msgs[0].Role == llm.RoleTool {
 		msgs = msgs[1:]
 	}
 	if len(msgs) == 0 {
@@ -193,6 +247,64 @@ func (m *DelegateManager) saveDescriptorToStore(rec ChildRecord) error {
 // does not permit a cold resume (e.g. it is already running or completed).
 var ErrChildNotResumable = errors.New("delegate: child not resumable")
 
+// ChildDescriptorLister is the optional enumeration capability a durable
+// store may expose for the daemon's startup cold-resume sweep (C13). Both
+// production stores (session.SQLiteStore / session.MemoryStore) satisfy it;
+// session.Store itself does not require it, so test fakes stay untouched.
+type ChildDescriptorLister interface {
+	ListChildDescriptors(ctx context.Context) ([]session.ChildDescriptorRecord, error)
+}
+
+// ResumeInFlightDescriptors scans the durable child-descriptor store for
+// in-flight rows (state running/interrupted — a child executing or cancelled
+// when its parent/daemon died) and cold-resumes each, up to maxResumeSweep.
+// This is the production entry point for the startup sweep (C13): without it
+// the cold-resume machinery is unreachable after a restart.
+//
+// Contract: bounded (maxResumeSweep rows per call), logged, best-effort — a
+// row that cannot be resumed (corrupt descriptor, unknown agent, parent
+// mismatch) is logged at Warn and skipped, never fatal to the sweep or the
+// daemon boot. Resumed children settle asynchronously like any other child.
+// parentSessionID is passed through to Resume verbatim ("" = skip the
+// parent-match check — the sweep runs with daemon authority at boot).
+func (m *DelegateManager) ResumeInFlightDescriptors(ctx context.Context, parentSessionID string) (resumed []string, failed []string) {
+	lister, ok := m.store.(ChildDescriptorLister)
+	if !ok || m.store == nil {
+		return nil, nil
+	}
+	rows, err := lister.ListChildDescriptors(ctx)
+	if err != nil {
+		m.log().Warn("delegate resume sweep: list failed", "error", err)
+		return nil, nil
+	}
+	for _, row := range rows {
+		if len(resumed) >= maxResumeSweep {
+			m.log().Warn("delegate resume sweep: cap reached; remaining in-flight rows left for manual resume",
+				"cap", maxResumeSweep)
+			break
+		}
+		switch ChildState(row.State) {
+		case ChildStateRunning, ChildStateInterrupted:
+			// in-flight: eligible for cold resume
+		default:
+			continue
+		}
+		if _, err := m.Resume(ctx, parentSessionID, row.ChildID); err != nil {
+			m.log().Warn("delegate resume sweep: cold resume failed",
+				"child_id", row.ChildID, "state", row.State, "error", err)
+			failed = append(failed, row.ChildID)
+			continue
+		}
+		m.log().Info("delegate resume sweep: cold-resumed in-flight child",
+			"child_id", row.ChildID, "state", row.State, "agent_id", row.AgentID)
+		resumed = append(resumed, row.ChildID)
+	}
+	return resumed, failed
+}
+
+// maxResumeSweep bounds one startup sweep's cold resumes (C13: "bounded").
+const maxResumeSweep = 32
+
 // ErrResumeParentMismatch is returned by Resume when the caller is not the
 // child's parent session. Auth contract: only the parent may resume a child.
 var ErrResumeParentMismatch = errors.New("delegate: resume denied: caller is not the child's parent")
@@ -205,31 +317,82 @@ var ErrResumeParentMismatch = errors.New("delegate: resume denied: caller is not
 //     descriptor.
 //   - Cold: the child's record is gone from the run-state (parent/daemon
 //     restart) -> it is rehydrated from the durable store, re-registered under
-//     its original childID, and re-run from its persisted descriptor.
+//     its original childID, and re-run from its persisted descriptor. The
+//     durable record's OWN state gates the resume exactly like the live path
+//     (C5): only Interrupted/Pending rows are resumable — a terminal
+//     (completed/failed) row is refused, so a completed child can never
+//     re-execute from its frozen seed.
 //
 // Both paths replay the frozen fork seed — the descriptor's SeedMessages
 // snapshot when present (v2, stamped onto the child's conversation before the
 // first turn), else brief-only as v1 always did — re-pin the descriptor's
 // model/route, set the record back to running, and re-publish the settlement
 // on completion. Only the parent (record.ParentSessionID == caller) may resume.
+//
+// Claiming (C11): the in-map claim happens atomically under the manager lock
+// inside resumeRegister — the first Resume inserts the running entry before
+// launching the goroutine; a concurrent second caller observes the entry and
+// joins the existing execution instead of double-spawning.
 func (m *DelegateManager) Resume(ctx context.Context, parentSessionID, childID string) (DelegateResult, error) {
+	// C11 claim reservation: taken BEFORE any lookup/store read and held
+	// until the run is registered (or the resume fails), so two concurrent
+	// post-restart Resumes can never both reach the execution launch —
+	// the map-insert claim inside resumeRegister alone is too late (both
+	// callers pass Lookup/store before either inserts).
+	m.mu.Lock()
+	if _, claimed := m.resuming[childID]; claimed {
+		m.mu.Unlock()
+		return DelegateResult{}, fmt.Errorf("delegate: resume: child %s is already being resumed", childID)
+	}
+	if m.resuming == nil {
+		m.resuming = make(map[string]struct{})
+	}
+	m.resuming[childID] = struct{}{}
+	m.mu.Unlock()
+	releaseClaim := func() {
+		m.mu.Lock()
+		delete(m.resuming, childID)
+		m.mu.Unlock()
+	}
+
 	// Live path.
 	if rec, ok := m.Lookup(childID); ok {
-		return m.resumeRecord(ctx, parentSessionID, rec)
+		res, err := m.resumeRecord(ctx, parentSessionID, rec)
+		if err != nil {
+			releaseClaim()
+		}
+		return res, err
 	}
 	// Cold path: rehydrate from the durable store.
 	if m.store == nil {
+		releaseClaim()
 		return DelegateResult{}, ErrChildNotFound
 	}
 	stored, err := m.store.GetChildDescriptor(ctx, childID)
 	if err != nil {
+		releaseClaim()
 		if errors.Is(err, session.ErrChildDescriptorNotFound) {
 			return DelegateResult{}, ErrChildNotFound
 		}
 		return DelegateResult{}, fmt.Errorf("delegate: resume: load %s: %w", childID, err)
 	}
+	// C5: the durable row's state is authoritative — enforce the same
+	// resumable-state contract the live path enforces (Interrupted/Pending
+	// only). Without this gate a completed child would re-execute from its
+	// frozen seed on every cold resume.
+	switch ChildState(stored.State) {
+	case ChildStateInterrupted, ChildStatePending:
+		// resumable
+	case "":
+		// A legacy row with no state recorded: treat as pending (the
+		// schema default), resumable.
+	default:
+		releaseClaim()
+		return DelegateResult{}, fmt.Errorf("%w: %s is in state %s", ErrChildNotResumable, childID, stored.State)
+	}
 	d, err := UnmarshalChildDescriptor(stored.DescriptorJSON)
 	if err != nil {
+		releaseClaim()
 		return DelegateResult{}, fmt.Errorf("delegate: resume: %w", err)
 	}
 	rec := ChildRecord{
@@ -244,10 +407,21 @@ func (m *DelegateManager) Resume(ctx context.Context, parentSessionID, childID s
 		CreatedAt:       stored.CreatedAt,
 		Descriptor:      d,
 	}
-	// AgentID is not part of the descriptor shape; it is recovered from the
-	// durable record (persisted alongside the descriptor).
+	// AgentID is recovered from the durable record (persisted alongside the
+	// descriptor) — and PRESERVED on the resume-time persist (C12): the
+	// upsert replaces every column, so an omitted AgentID would blank the
+	// NOT NULL DEFAULT '' column and permanently refuse any second resume.
 	rec.AgentID = stored.AgentID
-	return m.resumeRegister(ctx, parentSessionID, rec, d, stored.AgentID)
+	// C17: the spawn-request context rides the descriptor fields; the resume
+	// brief is re-rendered through childPrompt (spawn context + Context
+	// prefix + output_schema directive) exactly like a fresh fork's.
+	rec.Context = d.Context
+	rec.OutputSchema = d.OutputSchema
+	res, err := m.resumeRegister(ctx, parentSessionID, rec, d, stored.AgentID)
+	if err != nil {
+		releaseClaim()
+	}
+	return res, err
 }
 
 // resumeRegister registers a child under its original childID and launches the
@@ -280,12 +454,18 @@ func (m *DelegateManager) resumeRegister(ctx context.Context, parentSessionID st
 		return DelegateResult{}, fmt.Errorf("%w: %s has no agent to resume", ErrChildNotResumable, rec.ChildID)
 	}
 
-	// Re-register / update to running under the SAME childID.
+	// Re-register / update to running under the SAME childID. The map write
+	// is the RESUME CLAIM (C11): it happens atomically under the lock before
+	// any goroutine launches, so a concurrent second Resume observes the
+	// claimed entry and is refused with a clear error instead of
+	// double-executing the child (the first execution owns the settle).
 	m.mu.Lock()
-	if _, exists := m.children[rec.ChildID]; exists && rec.AgentID == "" {
-		// Unreachable in practice; guard keeps a stale entry from leaking.
-		m.mu.Unlock()
-		return DelegateResult{}, fmt.Errorf("delegate: resume: child %s already tracked", rec.ChildID)
+	if e, exists := m.children[rec.ChildID]; exists {
+		if e.rec.State == ChildStateRunning && !e.settled {
+			m.mu.Unlock()
+			return DelegateResult{}, fmt.Errorf("delegate: resume: child %s is already resuming/running", rec.ChildID)
+		}
+		// A stale terminal/interrupted entry is replaced by the claim.
 	}
 	ctx2, cancel := context.WithCancel(ctx)
 	e := &childEntry{rec: rec, settle: make(chan struct{}), cancel: cancel}
@@ -293,13 +473,17 @@ func (m *DelegateManager) resumeRegister(ctx context.Context, parentSessionID st
 	m.children[rec.ChildID] = e
 	m.mu.Unlock()
 
-	// Mark the durable record running (best-effort; the settle path overwrites).
+	// Mark the durable record running (best-effort; the settle path
+	// overwrites). AgentID is carried (C12): the store upsert replaces every
+	// column, so omitting it would blank the agent_id column and make the
+	// NEXT cold resume permanently refuse ("no agent to resume").
 	if m.store != nil {
 		dRunning := rec.Descriptor
 		dRunning.Version = childDescriptorVersion
 		_ = m.store.SaveChildDescriptor(ctx, session.ChildDescriptorRecord{
 			ChildID:         rec.ChildID,
 			ParentSessionID: rec.ParentSessionID,
+			AgentID:         agentID,
 			State:           string(ChildStateRunning),
 			DescriptorJSON:  mustDescriptorJSON(dRunning, rec),
 			CreatedAt:       rec.CreatedAt,
@@ -356,14 +540,30 @@ func (m *DelegateManager) resumeChild(ctx context.Context, childID string, rec C
 	// The brief rides the recorded SeedPayload; the seed carries the parent
 	// context. A seed-less resume (v1 descriptor / spawn-mode child) runs the
 	// plain payload byte-identically.
-	fullMessage := seedPayload
+	//
+	// C17: the brief itself is re-rendered through the SAME childPrompt
+	// pipeline a fresh spawn uses (spawn-context render + optional Context
+	// prefix + optional output_schema directive), so a resumed child's brief
+	// carries the spawn context and the JSON output instruction the original
+	// spawn had. Pre-C17 descriptors (no Context, no OutputSchema) render
+	// identically to the old raw-payload path (their payload was already the
+	// rendered spawn brief).
+	fullMessage, err := m.childPrompt(rec, DelegateRequest{
+		Message:      seedPayload,
+		Context:      rec.Context,
+		OutputSchema: rec.OutputSchema,
+	})
+	if err != nil {
+		m.settle(childID, ChildStateFailed, "", err.Error())
+		return
+	}
 	if len(rec.seed) > 0 {
 		if m.seedWriter != nil {
 			m.seedWriter(spec.ID, rec.ConversationID, rec.seed)
 		}
 		fullMessage = forkSeedPreamble(len(rec.seed)) + fullMessage
 	}
-	resp, err := m.reg.RunAgent(ctx, spec.ID, fullMessage, rec.ConversationID)
+	resp, err := m.runChildTurn(ctx, rec, fullMessage)
 	if err != nil {
 		m.settle(childID, ChildStateFailed, "", err.Error())
 		return

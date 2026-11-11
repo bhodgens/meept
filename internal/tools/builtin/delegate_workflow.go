@@ -813,8 +813,10 @@ func (t *WorkflowTool) Execute(ctx context.Context, args map[string]any) (any, e
 		engine.SetCompletionBus(t.ctrl.completionBus)
 		jobID := engine.RunBackground(p.Script, args)
 		// Leaf 07-workflow-status: keep the job answerable to the model via
-		// workflow_status(job_id) — bounded per-controller registry.
-		t.ctrl.registerWorkflowJob(jobID, engine)
+		// workflow_status(job_id) — bounded per-controller registry. The
+		// starting session is recorded (C15): only that session's later
+		// workflow_status call reads the result/error.
+		t.ctrl.registerWorkflowJobForSession(jobID, engine, parent)
 		return map[string]any{
 			"kind":  "background",
 			"jobId": jobID,
@@ -882,8 +884,21 @@ type jobStatusView struct {
 // registerWorkflowJob records a background job's engine so a later
 // workflow_status(job_id) can read it. Bounded: registering over the cap
 // evicts the OLDEST job (a model-recent id stays answerable; the evicted
-// status becomes the clean unknown-job error).
+// status becomes the clean unknown-job error). ownerSession records the
+// session that started the job (C15): workflow_status enforces owner-only
+// reads of the settled result/error.
 func (c *DelegateController) registerWorkflowJob(jobID string, e *WorkflowEngine) {
+	if c == nil || jobID == "" || e == nil {
+		return
+	}
+	c.registerWorkflowJobForSession(jobID, e, "")
+}
+
+// registerWorkflowJobForSession is registerWorkflowJob with the owning
+// session recorded (C15). An empty owner (a session-less caller) leaves the
+// job visible to any caller — the historical behavior for tests and legacy
+// wiring — but a job started BY a session is readable only by that session.
+func (c *DelegateController) registerWorkflowJobForSession(jobID string, e *WorkflowEngine, ownerSession string) {
 	if c == nil || jobID == "" || e == nil {
 		return
 	}
@@ -892,14 +907,19 @@ func (c *DelegateController) registerWorkflowJob(jobID string, e *WorkflowEngine
 	if c.jobReg == nil {
 		c.jobReg = make(map[string]*WorkflowEngine)
 	}
+	if c.jobOwners == nil {
+		c.jobOwners = make(map[string]string)
+	}
 	if _, exists := c.jobReg[jobID]; !exists {
 		c.jobOrder = append(c.jobOrder, jobID)
 	}
 	c.jobReg[jobID] = e
+	c.jobOwners[jobID] = ownerSession
 	for len(c.jobOrder) > workflowJobRegistryCap {
 		oldest := c.jobOrder[0]
 		c.jobOrder = c.jobOrder[1:]
 		delete(c.jobReg, oldest)
+		delete(c.jobOwners, oldest)
 		delete(c.settledCache, oldest)
 	}
 }
@@ -972,14 +992,30 @@ func (c *DelegateController) workflowJobStatus(jobID string) (jobStatusView, boo
 // WorkflowStatus reports a background workflow job's status to the model.
 // An unknown job id is a clean error envelope (never a panic, never a hang);
 // the id namespace is the wf-job-* ids RunBackground returned.
-func (c *DelegateController) WorkflowStatus(_ context.Context, jobID string) (any, error) {
+//
+// Authorization (C15): a job started BY a session is readable only by that
+// session — the full result/error is not world-readable to any holder of the
+// job id. Ownerless jobs (registered with no owning session) stay visible to
+// every caller, preserving the pre-C15 behavior where no session was recorded.
+// An unresolvable caller is refused for owned jobs (fail-closed).
+func (c *DelegateController) WorkflowStatus(ctx context.Context, jobID string) (any, error) {
 	if strings.TrimSpace(jobID) == "" {
 		return tools.NewErrorResult("workflow_status: job_id is required"), nil
 	}
 	view, ok := c.workflowJobStatus(jobID)
 	if !ok {
 		return tools.NewErrorResult(
-			"workflow_status: unknown job_id: "+jobID+" (background job ids come from the workflow tool's run_in_background result)"), nil
+			"workflow_status: unknown job_id: " + jobID + " (background job ids come from the workflow tool's run_in_background result)"), nil
+	}
+	c.jobMu.Lock()
+	owner := c.jobOwners[jobID]
+	c.jobMu.Unlock()
+	if owner != "" {
+		caller := c.resolveCallerSession(ctx)
+		if caller == "" || caller != owner {
+			return tools.NewErrorResult(
+				"workflow_status: unauthorized: this workflow job belongs to another session"), nil
+		}
 	}
 	return view, nil
 }

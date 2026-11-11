@@ -103,8 +103,8 @@ func TestResolveChildRoute_ProviderModelTogether(t *testing.T) {
 		t.Error("provider without model must error")
 	}
 	if _, err := ResolveChildRoute(parentRoute(), nil,
-		agent.DelegateRequest{Provider: "", Model: ""}, policy, true); err == nil {
-		t.Error("explicit empty provider+model must error, not fall through")
+		agent.DelegateRequest{Provider: "", Model: ""}, policy, true); err != nil {
+		t.Errorf("no route supplied with an allowlist in force must resolve the primary allowed route (C9), got err: %v", err)
 	}
 }
 
