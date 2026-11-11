@@ -786,6 +786,21 @@ func (l *Leg) Place(ctx context.Context, employeeID, targetUUID, firstLine strin
 	callID, err := l.deps.Client.StartCall(targetUUID, signal.CallAudioModeSocket)
 	if err != nil {
 		l.abandonOutbound(ctx, key, employeeID, ccid, fmt.Sprintf("startCall: %v", err))
+		// A5: reap the tracked state BEFORE teardown - a StartCall
+		// failure must not leave the ccid in l.calls (Live() would
+		// report a dead call forever) nor the state un-latched (a late
+		// carrier event could still fan a terminal out of it).
+		l.mu.Lock()
+		if live, ok := l.calls[ccid]; ok && live == st {
+			delete(l.calls, ccid)
+			live.ended = true
+			live.terminalLatched = true
+			if live.ringWatchdogTimer != nil {
+				live.ringWatchdogTimer.Stop()
+				live.ringWatchdogTimer = nil
+			}
+		}
+		l.mu.Unlock()
 		l.teardownPair(st)
 		return "", fmt.Errorf("signalleg: start call: %w", err)
 	}
@@ -869,6 +884,20 @@ func (l *Leg) Accept(ctx context.Context, callEvent signal.CallEvent, employeeID
 	l.calls[ccid] = st
 	l.mu.Unlock()
 	if err := l.deps.Client.AcceptCall(callEvent.CallID); err != nil {
+		// A5: reap the tracked state BEFORE teardown - an AcceptCall
+		// failure must not leave the ccid in l.calls (Live() would
+		// report a dead call forever) nor the state un-latched.
+		l.mu.Lock()
+		if live, ok := l.calls[ccid]; ok && live == st {
+			delete(l.calls, ccid)
+			live.ended = true
+			live.terminalLatched = true
+			if live.ringWatchdogTimer != nil {
+				live.ringWatchdogTimer.Stop()
+				live.ringWatchdogTimer = nil
+			}
+		}
+		l.mu.Unlock()
 		l.teardownPair(st)
 		l.deps.Registry.Release(ccid)
 		l.deps.Manager.FailOutcome(ccid, voice.OutcomeFailed, fmt.Sprintf("acceptCall: %v", err))

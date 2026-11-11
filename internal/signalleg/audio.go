@@ -143,6 +143,12 @@ type resampler struct {
 	dstRate int
 
 	pos int64 // fractional read position in SOURCE samples (fixed-point 32.32)
+	// carry holds the odd tail byte of the previous Write (A1): an s16
+	// sample a stream Read split across two Writes must survive - the
+	// byte is prepended to the next Write instead of being dropped
+	// (dropping it would permanently byte-misalign the whole stream).
+	carry    byte
+	hasCarry bool
 }
 
 // NewResampler builds a linear resampler. Same rates pass bytes through
@@ -158,15 +164,26 @@ func NewResampler(srcRate, dstRate int) (*resampler, error) {
 func (r *resampler) passthrough() bool { return r.srcRate == r.dstRate }
 
 // Write resamples one s16le chunk. Input length must be even (whole
-// samples); a trailing odd byte is held for the next Write (s16le
-// chunks are always even on the wire, but a stream Read can split a
-// sample across reads).
+// samples); a trailing odd byte is HELD in the resampler and prepended
+// to the next Write (s16le chunks are always even on the wire, but a
+// stream Read can split a sample across reads).
 func (r *resampler) Write(pcm []byte) []byte {
+	if r.hasCarry {
+		// Fold the held odd tail byte in front of the new data: the
+		// s16 sample it belongs to spans two Writes.
+		joined := make([]byte, 0, len(pcm)+1)
+		joined = append(joined, r.carry)
+		joined = append(joined, pcm...)
+		pcm = joined
+		r.hasCarry = false
+	}
 	if len(pcm) == 0 {
 		return nil
 	}
 	if len(pcm)%2 != 0 {
-		// Hold the odd tail byte; fold it into the next Write.
+		// Hold the odd tail byte for the next Write.
+		r.carry = pcm[len(pcm)-1]
+		r.hasCarry = true
 		pcm = pcm[:len(pcm)-1]
 		if len(pcm) == 0 {
 			return nil
@@ -279,6 +296,10 @@ func runOutboundAudio(ctx context.Context, pair *voice.AudioPair, socket audioSo
 			if errors.Is(err, io.EOF) {
 				// Child half-close: end-of-turn for the reply path; the
 				// adapter keeps running (inbound side still live).
+				// A11: the read below blocks with no deadline once the
+				// child conn is gone, so the trailing poll sleep keeps
+				// this loop off a tight CPU spin until leg End.
+				time.Sleep(audioReadDeadline)
 				continue
 			}
 			if strings.Contains(err.Error(), "not connected") {
@@ -289,7 +310,14 @@ func runOutboundAudio(ctx context.Context, pair *voice.AudioPair, socket audioSo
 			}
 			return fmt.Errorf("%w: child read: %v", ErrAudioBackpressure, err)
 		}
-		time.Sleep(audioReadDeadline) // bounded poll; no busy spin between frames
+		if n == 0 {
+			// A2: no data this iteration - bounded poll only. When data
+			// flowed, continue immediately: the 32 kB/s realtime child
+			// stream must not be capped by a per-iteration sleep (a
+			// 200 ms sleep per chunk would throttle the pump to
+			// ~2.9 kB/s and play chopped/slow-motion audio).
+			time.Sleep(audioReadDeadline) // bounded poll; no busy spin between frames
+		}
 	}
 }
 
