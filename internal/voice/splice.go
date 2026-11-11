@@ -742,7 +742,7 @@ func (s *runSplice) bargeIn() {
 	// passes. With NO recent touch there is no in-flight stream, so no
 	// residue is possible — the next PCM is unconditionally fresh and
 	// the immediate re-arm of the silent-then-say shape is preserved.
-	s.gate.Bump(s.lastPacedTouchNano(), bargeResidueQuiet)
+	s.gate.Bump(s.lastPacedTouchNano())
 	s.mu.Unlock()
 	s.notify() // audit m3: wake the pacer to stop writing now
 

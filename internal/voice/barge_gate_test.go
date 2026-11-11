@@ -29,7 +29,7 @@ func TestBargeGateBumpInvalidatesSnapshots(t *testing.T) {
 	}
 	// Bump with NO recent touch: generation moves, NO residue stamps
 	// (the silent-then-say shape — next PCM is unconditionally fresh).
-	g.Bump(0, bargeResidueQuiet)
+	g.Bump(0)
 	gen1, res1 := g.Snapshot()
 	if gen1 != 1 || res1 != 0 {
 		t.Fatalf("post-bump snapshot = (%d, %d), want (1, 0)", gen1, res1)
@@ -54,7 +54,7 @@ func TestBargeGateResidueWindowExpiry(t *testing.T) {
 	var g bargeGate
 	g.nowNano = func() int64 { return now }
 	touch := now
-	g.Bump(touch, bargeResidueQuiet) // stream flowing at cancel: residue stamped
+	g.Bump(touch) // stream flowing at cancel: residue stamped
 	_, res := g.Snapshot()
 	if res == 0 {
 		t.Fatal("bump with a recent touch did not stamp the residue deadline")
@@ -77,7 +77,7 @@ func TestBargeGateResidueWindowExpiry(t *testing.T) {
 		t.Fatal("expired residue window still marks consumes stale")
 	}
 	// ...and a NEW bump with a silent stream clears residue entirely.
-	g.Bump(0, bargeResidueQuiet)
+	g.Bump(0)
 	gen, res := g.Snapshot()
 	if res != 0 {
 		t.Fatalf("silent bump kept residue %d, want 0", res)
@@ -92,7 +92,7 @@ func TestBargeGateNoResidueWhenStreamSilent(t *testing.T) {
 	// A stale touch (older than the window) is the silent-then-say
 	// shape: bump moves the generation but stamps NO residue.
 	old := time.Now().Add(-2 * bargeResidueQuiet).UnixNano()
-	g.Bump(old, bargeResidueQuiet)
+	g.Bump(old)
 	gen, res := g.Snapshot()
 	if res != 0 {
 		t.Fatalf("bump with a stale touch stamped residue %d, want 0 (immediate re-arm posture)", res)
@@ -114,7 +114,7 @@ func TestBargeGateZeroValueAndNilSafe(t *testing.T) {
 		t.Fatal("zero-value gate misjudged a same-generation chunk")
 	}
 	var nilGate *bargeGate
-	nilGate.Bump(time.Now().UnixNano(), bargeResidueQuiet) // must not panic
+	nilGate.Bump(time.Now().UnixNano()) // must not panic
 	if _, res := nilGate.Snapshot(); res != 0 {
 		t.Fatal("nil gate snapshot returned a residue deadline")
 	}

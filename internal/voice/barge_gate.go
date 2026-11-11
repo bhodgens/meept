@@ -96,20 +96,22 @@ func (g *bargeGate) Current() uint64 {
 }
 
 // Bump invalidates every snapshot taken so far (the cancel path). When a
-// stream was actively flowing at cancel time — lastTouchNano non-zero
-// and within residueWindow of now — the residue deadline is stamped so
+// stream was actively flowing at cancel time — lastTouchNano non-zero and
+// within bargeResidueQuiet of now — the residue deadline is stamped so
 // post-cancel reads of the interrupted stream's socket-buffer tail stay
 // stale until it passes. With no recent touch there is no in-flight
 // stream, no residue is possible, and the next PCM is unconditionally
-// fresh (the silent-then-say shape). Nil gate: no-op.
-func (g *bargeGate) Bump(lastTouchNano int64, residueWindow time.Duration) {
+// fresh (the silent-then-say shape). The window is owned HERE, not a
+// parameter: both media splices must share one residue policy, and a
+// call site cannot silently tune its own. Nil gate: no-op.
+func (g *bargeGate) Bump(lastTouchNano int64) {
 	if g == nil {
 		return
 	}
+	const residueWindow = bargeResidueQuiet
 	g.mu.Lock()
 	g.gen++
 	if lastTouchNano != 0 &&
-		residueWindow > 0 &&
 		g.clockNano()-lastTouchNano < int64(residueWindow) {
 		g.residueUntilNano = g.clockNano() + int64(residueWindow)
 	} else {

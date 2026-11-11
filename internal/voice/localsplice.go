@@ -892,7 +892,7 @@ func (s *runLocalSplice) HandleInterrupt(ccid string) {
 	// touch there is no in-flight stream, so no residue is possible —
 	// the next PCM is unconditionally fresh and the immediate re-arm of
 	// the silent-then-say shape is preserved.
-	s.gate.Bump(s.audioLastAct.Load(), bargeResidueQuiet)
+	s.gate.Bump(s.audioLastAct.Load())
 	s.mu.Unlock()
 	s.notify() // stop the pacer's in-flight wait now
 
