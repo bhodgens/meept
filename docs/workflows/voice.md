@@ -204,6 +204,22 @@ ended-state transition fires on every leg that registered
 `AcquireCallHold` (local Hold seam, phone inbound spawn, phone outbound
 `DialConfig.Hold`); release is once, through ReleaseHook.
 
+Operator telemetry (voice-events tree): every call carries a small
+fixed-size event ring inside the daemon (internal/voice/events.go,
+64 events per call, rings for the 32 most recent calls). The talk loop
+appends dispatch/final/barge-in/ended (and the link park lifecycle) at
+its existing log sites through the OPTIONAL TalkDeps.OnEvent hook — nil
+on any wiring that has not armed it, byte-identical loop either way —
+and the frame router appends a `heard` event when a FINAL prompt frame
+arrives (mic-speech evidence preceding the dispatch). The ring is read
+back over `voice.local.events` (params {call_id, cursor, limit?},
+seam-based like every other voice.local method — no new bus topic) and
+`meept voice link` / `meept voice local` poll it every 500 ms printing
+per-side lines: `heard:` / `thinking (N words)` / `replied (N words,
+Xms)` / `>> barge-in` / `call ended: <reason>`. Best-effort by
+contract: the poller never fails a run, and a final synchronous drain
+after close prints the tail events (rings outlive the call).
+
 ## Edge Cases
 
 - No-answer outbound releases the plan slot within timeout_secs.

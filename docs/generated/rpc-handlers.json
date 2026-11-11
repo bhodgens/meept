@@ -1539,19 +1539,25 @@
     "topic": "voice.local.end",
     "handler": "h.handleEnd",
     "file": "internal/rpc/voice_local.go",
-    "line": 144
+    "line": 185
+  },
+  {
+    "topic": "voice.local.events",
+    "handler": "h.handleEvents",
+    "file": "internal/rpc/voice_local.go",
+    "line": 187
   },
   {
     "topic": "voice.local.open",
     "handler": "h.handleOpen",
     "file": "internal/rpc/voice_local.go",
-    "line": 143
+    "line": 184
   },
   {
     "topic": "voice.local.status",
     "handler": "h.handleStatus",
     "file": "internal/rpc/voice_local.go",
-    "line": 145
+    "line": 186
   },
   {
     "topic": "worker.add",

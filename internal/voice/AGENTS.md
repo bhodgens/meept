@@ -479,7 +479,14 @@ store. Invariants a future agent must NOT break:
   the caller said. The trip's STT EVIDENCE is ONE-SHOT: a trip zeroes
   lastFinalAt, so a second window needs a NEW final transcript (stale
   evidence cancelling the very turn its own final dispatched was a live
-  defect, call local-2d84c384fd93f447 2026-11-09, leaf 02); non-speech
+  defect, call local-2d84c384fd93f447 2026-11-09, leaf 02). The evidence
+  must additionally POST-DATE the turn's DISPATCH watermark
+  (lastDispatchAt, stamped by consumeTranscripts after a FINAL prompt
+  emit succeeds; dispatch-watermark defect call local-611f46b1c3fe5c5b
+  2026-11-11): the prompt that started the in-flight turn is never
+  evidence of NEW speech, so a suppressed trip keeps the evidence and
+  the playback intact. A suppressed trip NEVER consumes the watermark
+  evidence (pinned by pipeline_rmsdispatch_test.go). non-speech
   finals ([BLANK_AUDIO]/(sighs) class, nonSpeechTranscript) never dispatch
   a turn and never stamp evidence. RMS must NEVER run on phone legs -
   they keep the Tier A STT-partial trigger. Never move the trigger to a
@@ -547,4 +554,36 @@ store. Invariants a future agent must NOT break:
   daemon adapts in internal/daemon/voice_local_rpc.go). No audio ever
   rides RPC - clients dial the C2 pair paths directly (internal/rpc/
   voice_local.go:23-24).
+
+## Operator telemetry (voice-events tree)
+
+- Every live call carries a fixed-size per-call event ring
+  (`internal/voice/events.go`, `TelemetryRing`; 64 events/call, rings for
+  the last 32 call ids, FIFO evicted). Producers: the talk loop's
+  OPTIONAL `TalkDeps.OnEvent` hook (nil default = zero emissions, the
+  loop is byte-identical when unset - mirror rule of the link seams above:
+  NEVER make it mandatory) appended at the existing telemetry log sites
+  (prompt_dispatch / turn_final / barge-in (both trigger paths) /
+  call_ended / the link park lifecycle), plus `VoiceWiring.routeFrame`,
+  which appends `heard` when a FINAL (last:true) prompt frame arrives -
+  the mic-speech evidence that precedes the loop's dispatch of the same
+  text (partials never record). `releaseCall` appends a terminal
+  `call_ended` ONLY for a call that never armed a talk loop AND has an
+  empty ring (the double guard keeps a self-ended loop's own end()
+  emission un-duplicated: end() fires synchronously before the release
+  hook ever sees the map).
+- Egress is the seam-based `voice.local.events` RPC (cursor-poll over the
+  existing socket). NO new bus topic, NO new WS class: the ring is
+  in-process control-plane state. The daemon adapter (`callEventsSeam` in
+  voice_local_rpc.go) projects onto `rpc.VoiceCallEvent` rows - the ring
+  event's `Seq` is the cursor domain (per-call, 1-based, monotonic).
+  A ring-less or unwired read answers the empty envelope (found:false),
+  never an error: the CLI poller ticks at 500 ms and teardown races must
+  not surface as failures.
+- Consumers: `cmd/meept/voice.go` `voiceEventTracker` - one poller
+  goroutine per known call id printing `[<label> <employee>] <line>`;
+  best-effort by contract (a failed poll retries, never fails the run);
+  `voice link` (auto-on, a/b prefixes) and `voice local` (auto-on) both
+  drain the tail synchronously after close/end so the final seconds'
+  events print before the transcripts.
 

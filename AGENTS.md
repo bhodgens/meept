@@ -363,7 +363,12 @@ gated by allowlist + effects reservation + audit-before-dial. The
 LOCAL leg (phone + local run concurrently on one child/registry/store)
 never imports telnyx and skips effects + audit by contract; its
 barge-in is RMS VAD gated to `Local==true`; `LocalSplice` has no
-reorder window and negotiates L16@16k only. The optional SECOND
+reorder window and negotiates L16@16k only. Operator telemetry:
+each live call carries a fixed per-call event ring
+(`internal/voice/events.go`) fed by the talk loop's optional
+`TalkDeps.OnEvent` hook + the frame router's `heard` append (nil-safe,
+no new bus topic), read over the seam-based `voice.local.events` RPC and
+printed live by `meept voice link` / `voice local`. The optional SECOND
 cleartext listener (`voice.loopback_plain_addr`, leaf 10 T6) is booted by
 `internal/daemon/voice_plain_boot.go` from `VoiceWiring.Start` when the
 knob is non-empty, rides the voice subsystem's stop context, and MUST

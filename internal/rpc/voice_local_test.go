@@ -23,6 +23,11 @@ type fakeSeams struct {
 	statusRows  []VoiceCallStatus
 	employeeOK  bool
 	employeeErr error
+	// voice.local.events fakes (operator telemetry).
+	eventsCalls     int
+	eventsRows      []VoiceCallEvent
+	eventsTruncated bool
+	eventsFound     bool
 }
 
 func (f *fakeSeams) seams() VoiceLocalSeams {
@@ -40,6 +45,10 @@ func (f *fakeSeams) seams() VoiceLocalSeams {
 		},
 		EmployeeExists: func(_ context.Context, _ string) (bool, error) {
 			return f.employeeOK, f.employeeErr
+		},
+		Events: func(_ string, _ uint64, _ int) ([]VoiceCallEvent, bool, bool) {
+			f.eventsCalls++
+			return f.eventsRows, f.eventsTruncated, f.eventsFound
 		},
 	}
 }

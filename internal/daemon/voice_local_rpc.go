@@ -2,9 +2,9 @@ package daemon
 
 // voice_local_rpc.go - the daemon-side adapter for the voice.local.*
 // RPC surface (local-leg leaf 08): maps *voice.LocalLeg (+ registry +
-// employee store) onto rpc.VoiceLocalSeams. internal/rpc must not
-// import internal/voice (the voice -> activity -> rpc chain), so the
-// concrete types stop HERE.
+// employee store + the per-call telemetry ring) onto rpc.VoiceLocalSeams.
+// internal/rpc must not import internal/voice (the voice -> activity ->
+// rpc chain), so the concrete types stop HERE.
 //
 // Every seam is nil-safe per the repo rule: no voice wiring, no local
 // leg, or no employee manager degrades its METHOD to a clean named
@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/caimlas/meept/internal/employee"
 	"github.com/caimlas/meept/internal/rpc"
@@ -23,17 +24,24 @@ import (
 )
 
 // voiceLocalSeams adapts the wiring's voice pieces onto the RPC seam
-// set. leg may be nil (voice.local.enabled false, wiring degraded):
-// the returned seams are then all-nil = the handler's disabled posture.
+// set. leg may be nil (voice.local.enabled false, wiring degraded): the
+// returned seams are then all-nil = the handler's disabled posture, EXCEPT
+// Events, which arms whenever the telemetry ring exists (a degraded local
+// leg still carries phone-call rings worth reading).
 func voiceLocalSeams(w *VoiceWiring, mgr *employee.Manager, logger *slog.Logger) rpc.VoiceLocalSeams {
-	if w == nil || w.Local == nil {
+	if w == nil {
 		return rpc.VoiceLocalSeams{}
 	}
-	leg := w.Local
-	registry := w.Registry
 	if logger == nil {
 		logger = slog.Default()
 	}
+	if w.Local == nil {
+		// Disabled leg: mutations refuse, but the ring (if built) still
+		// answers voice.local.events for phone calls.
+		return rpc.VoiceLocalSeams{Events: callEventsSeam(w)}
+	}
+	leg := w.Local
+	registry := w.Registry
 
 	open := func(ctx context.Context, employeeID, label string) (rpc.VoiceLocalOpen, error) {
 		call, err := leg.Open(ctx, employeeID, label)
@@ -127,6 +135,34 @@ func voiceLocalSeams(w *VoiceWiring, mgr *employee.Manager, logger *slog.Logger)
 		End:            end,
 		Status:         status,
 		EmployeeExists: exists,
+		Events:         callEventsSeam(w),
+	}
+}
+
+// callEventsSeam adapts the wiring's per-call TelemetryRing onto the
+// voice.local.events seam: a plain projection of the ring read onto the
+// rpc row shape. A nil ring (wiring built without telemetry) returns all
+// - false: the handler answers the empty envelope, never an error.
+func callEventsSeam(w *VoiceWiring) func(callID string, cursor uint64, limit int) ([]rpc.VoiceCallEvent, bool, bool) {
+	if w == nil || w.callEvents == nil {
+		return nil
+	}
+	ring := w.callEvents
+	return func(callID string, cursor uint64, limit int) ([]rpc.VoiceCallEvent, bool, bool) {
+		events, truncated, found := ring.Since(callID, cursor, limit)
+		out := make([]rpc.VoiceCallEvent, 0, len(events))
+		for _, ev := range events {
+			out = append(out, rpc.VoiceCallEvent{
+				Seq:    ev.Seq,
+				Kind:   ev.Kind,
+				At:     ev.At.Format(time.RFC3339Nano),
+				Text:   ev.Text,
+				Words:  ev.Words,
+				Ms:     ev.Ms,
+				Reason: ev.Reason,
+			})
+		}
+		return out, truncated, found
 	}
 }
 

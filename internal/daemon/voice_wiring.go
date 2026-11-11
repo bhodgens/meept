@@ -33,6 +33,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -124,6 +125,13 @@ type VoiceWiring struct {
 	// (phone/local) calls never match a target and keep the legacy
 	// uncoordinated construction byte-for-byte.
 	linkTurns *voice.LinkTurnRegistry
+
+	// callEvents is the operator-telemetry ring shared by every talk loop
+	// (routeFrame arms TalkDeps.OnEvent from it) and read back over
+	// voice.local.events (voice_local_rpc.go adapts it onto the seam).
+	// Best-effort observability: append-only under its own mutex, FIFO
+	// evicted per call id, NEVER consulted on any call-path decision.
+	callEvents *voice.TelemetryRing
 
 	// bus publishes voice.call.ended (typed topic); nil drops events.
 	bus *bus.MessageBus
@@ -557,6 +565,7 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		loops:          make(map[string]*voice.TalkLoop),
 		loopCancels:    make(map[string]context.CancelFunc),
 		linkTurns:      voice.NewLinkTurnRegistry(vlog.With("sub", "link-turns")),
+		callEvents:     voice.NewTelemetryRing(voice.DefaultCallEvents, voice.DefaultCallEventRings),
 		bus:            deps.Bus,
 		textSocketPath: textSocketPath,
 		broker:         deps.Broker,
@@ -895,6 +904,11 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 			Logger:     w.logger.With("sub", "talk", "ccid", f.CallID),
 			HoldPrompt: holdPrompt,
 			TurnState:  turnState,
+			// Operator telemetry (voice-events): append the loop's
+			// dispatch/final/barge-in/ended events to the shared per-call
+			// ring, polled via voice.local.events. Pure bookkeeping;
+			// never gates the loop (the seam is nil-safe in voice).
+			OnEvent: w.appendCallEvent,
 		}, voice.TalkLoopConfig{
 			FillerLines:          w.cfg.Filler,
 			GreetingLine:         w.cfg.GreetingLine,
@@ -979,6 +993,19 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 			// is a no-op (the manager owns teardown idempotency).
 			w.logger.Debug("voice wiring: frame for call without talk loop", "ccid", f.CallID, "event", f.Event)
 			return
+		}
+		// Operator telemetry (voice-events): a FINAL prompt frame landing
+		// here is the mic-speech evidence - the transcript reached the
+		// daemon BEFORE the talk loop's dispatch of the same text. Partials
+		// (last != true) never record: they are preview traffic, and the
+		// ring's "heard" line is the operator's "speech detected" signal.
+		// Best-effort and non-gating: the append cannot block delivery.
+		if f.Event == voice.EventPrompt && f.Last != nil && *f.Last {
+			w.callEvents.Append(f.CallID, voice.EventInput{
+				Kind:  voice.EventKindHeard,
+				Text:  voice.PreviewEventText(f.Text),
+				Words: len(strings.Fields(f.Text)),
+			})
 		}
 		select {
 		case loop.Frames() <- f:
@@ -1168,6 +1195,13 @@ func livePhoneTarget(reg voice.Registry, ccid string) string {
 	return ""
 }
 
+// appendCallEvent is the talk loop's OnEvent seam (voice-events operator
+// telemetry): the shared per-call ring append. Nil-safe (a nil ring drops
+// the event); pure bookkeeping, never I/O (mutexio-safe).
+func (w *VoiceWiring) appendCallEvent(ccid string, in voice.EventInput) uint64 {
+	return w.callEvents.Append(ccid, in)
+}
+
 // releaseCall is the Manager release hook fan-out. Order matters for
 // observability, not correctness (each sink is once-guarded):
 //  1. hold-gate drop (audit 2026-11-09 finding 1): mark the pending-hold
@@ -1196,6 +1230,23 @@ func (w *VoiceWiring) releaseCall(ccid string, outcome voice.Outcome) {
 	delete(w.loops, ccid)
 	delete(w.loopCancels, ccid)
 	w.loopsMu.Unlock()
+	// Operator telemetry (voice-events): the call_ended line normally
+	// comes from the talk loop's own end() (rich reason, endOnce-guarded).
+	// A call that never armed a loop AND recorded nothing (a dial failure
+	// before setup, a no-answer reaper) gets its terminal here instead, so
+	// every ring-visible call has a named end. The double guard (loop gone
+	// AND no ring) keeps self-ended loops un-duplicated: their end() runs
+	// synchronously BEFORE this hook sees the map, so by here the ring
+	// already carries the loop's call_ended and the loop is still in the
+	// map until its goroutine exits.
+	if loop == nil {
+		if _, _, ringed := w.callEvents.Since(ccid, 0, 1); !ringed {
+			w.callEvents.Append(ccid, voice.EventInput{
+				Kind:   voice.EventKindCallEnded,
+				Reason: string(outcome),
+			})
+		}
+	}
 	if loop == nil {
 		// The loop's frames channel is not closed here (close would race
 		// a concurrent routeFrame send); the drop from the map stops

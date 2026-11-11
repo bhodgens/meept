@@ -1,7 +1,8 @@
 package rpc
 
 // voice_local.go - the voice.local.* RPC surface (local-leg plan CL8,
-// leaf 08): voice.local.open / voice.local.end / voice.local.status.
+// leaf 08): voice.local.open / voice.local.end / voice.local.status, plus
+// voice.local.events (operator telemetry: poll a per-call event ring).
 //
 // The handler is SEAM-BASED (func fields, not voice types): internal/rpc
 // must not import internal/voice - the voice package imports activity,
@@ -15,6 +16,8 @@ package rpc
 //	voice.local.open   req {employee_id, label} -> {call_id, in_path, out_path, session_id}
 //	voice.local.end    req {call_id}            -> {ok}
 //	voice.local.status req {}                   -> {calls:[{call_id, employee_id, target_name, target_display, since_rfc3339, leg}]}
+//	voice.local.events req {call_id, cursor?, limit?}
+//	                   -> {call_id, events:[{seq, kind, at, text?, words?, ms?, reason?}], cursor, truncated?, found}
 //
 // Named refusals: ErrVoiceLocalDisabled (leg unwired/disabled),
 // ErrVoiceLocalUnknownEmployee (no such employee - checked BEFORE the
@@ -96,6 +99,37 @@ type VoiceLocalStatusResult struct {
 	Calls []VoiceCallStatus `json:"calls"`
 }
 
+// VoiceCallEvent is one operator-telemetry ring entry (voice.local.events).
+// The daemon's internal/voice telemetry ring is the producer; the RPC
+// mirror stays seam-typed (internal/rpc never imports internal/voice).
+// Kind is one of: heard, prompt_dispatch, prompt_held, prompt_released,
+// prompt_dropped, turn_final, barge_in, call_ended. Text is always a
+// truncated preview; Words/Ms/Reason are kind-dependent (0/"" omitted).
+type VoiceCallEvent struct {
+	Seq  uint64 `json:"seq"`
+	Kind string `json:"kind"`
+	// At is RFC3339Nano (daemon clock); clients render the time part.
+	At     string `json:"at"`
+	Text   string `json:"text,omitempty"`
+	Words  int    `json:"words,omitempty"`
+	Ms     int64  `json:"ms,omitempty"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// VoiceLocalEventsResult is the voice.local.events result. Events is
+// never nil (empty list, not absent). Cursor is the highest Seq returned
+// (echoing the request cursor when nothing new), so a client advances by
+// assignment. Truncated reports that events between the old cursor and
+// the returned window were evicted (or a limit cut the backlog): the
+// poller should note the gap, not treat it as an error.
+type VoiceLocalEventsResult struct {
+	CallID    string           `json:"call_id"`
+	Events    []VoiceCallEvent `json:"events"`
+	Cursor    uint64           `json:"cursor"`
+	Truncated bool             `json:"truncated,omitempty"`
+	Found     bool             `json:"found"`
+}
+
 // VoiceLocalSeams carries the daemon-side operations the handler calls.
 // ALL fields optional: a nil field degrades THAT operation to the named
 // refusal (never a panic, never "method not found"). The daemon wiring
@@ -119,6 +153,13 @@ type VoiceLocalSeams struct {
 	// folds that onto (false, nil). An error here fails the open with
 	// a wrapped plain error (infrastructure, not a named refusal).
 	EmployeeExists func(ctx context.Context, employeeID string) (bool, error)
+	// Events reads the operator-telemetry ring for one call: events with
+	// Seq > cursor, capped at limit (limit <= 0 = server default).
+	// truncated reports evicted backlog; found reports whether the call
+	// id has a ring (a ring-less read is an empty list, never an error -
+	// the poller must stay quiet on teardown races instead of erroring
+	// every tick).
+	Events func(callID string, cursor uint64, limit int) (events []VoiceCallEvent, truncated bool, found bool)
 }
 
 // VoiceLocalHandler serves voice.local.open / .end / .status.
@@ -133,7 +174,7 @@ func NewVoiceLocalHandler(seams VoiceLocalSeams) *VoiceLocalHandler {
 	return &VoiceLocalHandler{seams: seams}
 }
 
-// RegisterVoiceLocalMethods registers the three methods on the server.
+// RegisterVoiceLocalMethods registers the methods on the server.
 // Always registers (even with zero seams) so clients get the named
 // disabled error instead of "method not found" - the acp.list posture.
 func (h *VoiceLocalHandler) RegisterVoiceLocalMethods(server *Server) {
@@ -143,6 +184,7 @@ func (h *VoiceLocalHandler) RegisterVoiceLocalMethods(server *Server) {
 	server.RegisterHandler("voice.local.open", h.handleOpen)
 	server.RegisterHandler("voice.local.end", h.handleEnd)
 	server.RegisterHandler("voice.local.status", h.handleStatus)
+	server.RegisterHandler("voice.local.events", h.handleEvents)
 }
 
 // handleOpen implements voice.local.open (CL8). Order: parse -> gates
@@ -211,4 +253,43 @@ func (h *VoiceLocalHandler) handleStatus(_ context.Context, _ json.RawMessage) (
 		rows = []VoiceCallStatus{}
 	}
 	return VoiceLocalStatusResult{Calls: rows}, nil
+}
+
+// handleEvents implements voice.local.events (operator telemetry): one
+// ring read for a single call since a cursor. Params
+// {call_id, cursor?, limit?}; a missing call_id refuses with the named
+// unknown-call error. Unwired seam / ring-less call = the empty envelope
+// (found:false), never "method not found" and never an error - the CLI
+// poller ticks every ~500 ms and a teardown race must not spam failures.
+func (h *VoiceLocalHandler) handleEvents(_ context.Context, params json.RawMessage) (any, error) {
+	var req struct {
+		CallID string `json:"call_id"`
+		Cursor uint64 `json:"cursor"`
+		Limit  int    `json:"limit"`
+	}
+	if len(params) > 0 {
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, fmt.Errorf("voice.local.events: invalid parameters: %w", err)
+		}
+	}
+	if req.CallID == "" {
+		return nil, fmt.Errorf("%w: call_id is required", ErrVoiceLocalUnknownCall)
+	}
+	res := VoiceLocalEventsResult{CallID: req.CallID, Events: []VoiceCallEvent{}}
+	if h.seams.Events == nil {
+		return res, nil
+	}
+	events, truncated, found := h.seams.Events(req.CallID, req.Cursor, req.Limit)
+	if events == nil {
+		events = []VoiceCallEvent{}
+	}
+	res.Events = events
+	res.Truncated = truncated
+	res.Found = found
+	for _, ev := range events {
+		if ev.Seq > res.Cursor {
+			res.Cursor = ev.Seq
+		}
+	}
+	return res, nil
 }

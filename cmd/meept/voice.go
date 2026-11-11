@@ -24,6 +24,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -168,6 +169,16 @@ func runVoiceLocal(employee, label, inPath, outPath string) error {
 	}
 	fmt.Printf("call %s open: mic %s / speaker %s\n", open.CallID, open.InPath, open.OutPath)
 
+	// Operator telemetry: live event lines (heard / thinking / replied /
+	// barge-in / ended) from the daemon's per-call ring. Best-effort: the
+	// poller never fails the call.
+	teleCtx, teleCancel := context.WithCancel(context.Background())
+	defer teleCancel()
+	events := newVoiceEventTracker(client, map[string][2]string{
+		open.CallID: {"local", employee},
+	})
+	events.start(teleCtx)
+
 	// SIGINT -> voice.local.end (graceful: the daemon's release fan-out
 	// runs before we exit; no double teardown because End is idempotent).
 	ctx, cancel := context.WithCancel(context.Background())
@@ -196,6 +207,12 @@ func runVoiceLocal(employee, label, inPath, outPath string) error {
 	if _, endErr := client.Call("voice.local.end", map[string]any{"call_id": open.CallID}); endErr != nil && err == nil {
 		err = fmt.Errorf("voice.local.end: %w", endErr)
 	}
+
+	// Flush the telemetry tail after the end call (the ring's call_ended
+	// lands during teardown): stop the live poller, print whatever is new.
+	teleCancel()
+	events.stop()
+	events.drainOnce()
 	if err == nil {
 		fmt.Println("call ended.")
 	}
@@ -521,13 +538,13 @@ func drainLiveSpeaker(r io.Reader, s *voice.SpeakerSink, done chan<- error) {
 		// burst's audio duration. A positive residual = a silent gap
 		// at the speakers (oto had finished burst k-1 and waited for
 		// burst k) that a file recording structurally cannot show.
-		lastFlushAt     time.Time
-		lastFlushBytes  int
-		underrunCount   int
-		underrunSumMs   int64
-		underrunMaxMs   int64
-		burstCount      int
-		earlyCount      int // interval < duration (overlap, normal oto mixing)
+		lastFlushAt    time.Time
+		lastFlushBytes int
+		underrunCount  int
+		underrunSumMs  int64
+		underrunMaxMs  int64
+		burstCount     int
+		earlyCount     int // interval < duration (overlap, normal oto mixing)
 	)
 	for {
 		n, rerr := r.Read(buf)
@@ -667,6 +684,178 @@ func runVoiceLocalLive(ctx context.Context, open voiceLocalOpenResult) error {
 		return err
 	case <-ctx.Done():
 		return nil
+	}
+}
+
+// ---------------------------------------------------------------------------
+// operator telemetry poller (voice-events)
+// ---------------------------------------------------------------------------
+
+// voiceEventPollInterval is the CLI's voice.local.events cadence. 500 ms
+// is well under any human-perceptible turn latency and cheap on the
+// loopback RPC socket (the client's callMu serialises calls with the
+// status poll / transcript reads, so the two pollers interleave safely).
+const voiceEventPollInterval = 500 * time.Millisecond
+
+// voiceEventRow mirrors one voice.local.events event on the wire.
+type voiceEventRow struct {
+	Seq    uint64 `json:"seq"`
+	Kind   string `json:"kind"`
+	At     string `json:"at"`
+	Text   string `json:"text"`
+	Words  int    `json:"words"`
+	Ms     int64  `json:"ms"`
+	Reason string `json:"reason"`
+}
+
+// voiceEventRender turns one telemetry event into the operator line body
+// (pure, unit-tested): what the CLI prints after the "[side employee] "
+// prefix. Unknown kinds render the raw kind so a future daemon-side kind
+// never disappears silently.
+func voiceEventRender(ev voiceEventRow) string {
+	at := ev.At
+	if len(at) >= 19 {
+		at = at[11:19]
+	}
+	switch ev.Kind {
+	case "heard":
+		return at + " heard: " + ev.Text
+	case "prompt_dispatch":
+		return at + " thinking (" + itoa(ev.Words) + " words): " + ev.Text
+	case "turn_final":
+		return at + " replied (" + itoa(ev.Words) + " words, " + itoa64(ev.Ms) + "ms)"
+	case "barge_in":
+		return at + " >> barge-in"
+	case "call_ended":
+		return at + " call ended: " + ev.Reason
+	case "prompt_held":
+		return at + " held (peer speaking): " + ev.Text
+	case "prompt_released":
+		return at + " released: " + ev.Text
+	case "prompt_dropped":
+		return at + " dropped (" + ev.Reason + "): " + ev.Text
+	default:
+		return at + " " + ev.Kind
+	}
+}
+
+func itoa(n int) string     { return strconv.Itoa(n) }
+func itoa64(n int64) string { return strconv.FormatInt(n, 10) }
+
+// voiceEventTracker owns the per-call cursors so the live poller loop and
+// the end-of-run synchronous drain never re-print the same event. It polls
+// voice.local.events for each known call id and prints one line per event,
+// prefixed "[<label> <employee>] ". Best-effort by contract (like the
+// monitor tap): a failed poll is silently retried on the next tick - the
+// link/local run must NEVER die because telemetry could not be read.
+// start() spawns the ticker goroutines (they exit when ctx ends; a
+// terminal "call_ended" line does NOT stop the poller - the other side of
+// a link may keep going); drainOnce() flushes the tail synchronously after
+// cancelling (the shared cursor keeps that race from double-printing).
+type voiceEventTracker struct {
+	client interface {
+		Call(method string, params any) (json.RawMessage, error)
+	}
+	// calls: call_id -> {label, employee}.
+	calls   map[string][2]string
+	mu      sync.Mutex
+	cursors map[string]uint64
+	wg      sync.WaitGroup
+}
+
+func newVoiceEventTracker(client interface {
+	Call(method string, params any) (json.RawMessage, error)
+}, calls map[string][2]string) *voiceEventTracker {
+	return &voiceEventTracker{
+		client:  client,
+		calls:   calls,
+		cursors: make(map[string]uint64, len(calls)),
+	}
+}
+
+// start spawns one ticker poller goroutine per known call id. The
+// goroutines exit when ctx is cancelled; stop() (after the cancel) joins
+// them so a drain that follows never races a live poller's prints.
+func (t *voiceEventTracker) start(ctx context.Context) {
+	for ccid, side := range t.calls {
+		if ccid == "" {
+			continue // an old daemon returned no id for that side
+		}
+		t.wg.Add(1)
+		go func(ccid, label, emp string) {
+			defer t.wg.Done()
+			t.poll(ctx, ccid, label, emp)
+		}(ccid, side[0], side[1])
+	}
+}
+
+// stop joins the live poller goroutines. Call after cancelling their ctx.
+func (t *voiceEventTracker) stop() { t.wg.Wait() }
+
+// pollVoiceEvents drives one call's telemetry line loop (ticker cadence).
+func (t *voiceEventTracker) poll(ctx context.Context, ccid, label, emp string) {
+	tick := time.NewTicker(voiceEventPollInterval)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+		// One tick: print + advance. Errors are best-effort retried.
+		t.pollOnce(ccid, label, emp)
+	}
+}
+
+// pollOnce issues one voice.local.events round-trip and prints its rows.
+// Returns the number of events printed.
+func (t *voiceEventTracker) pollOnce(ccid, label, emp string) int {
+	t.mu.Lock()
+	cursor := t.cursors[ccid]
+	t.mu.Unlock()
+	raw, err := t.client.Call("voice.local.events", map[string]any{
+		"call_id": ccid, "cursor": cursor,
+	})
+	if err != nil {
+		return 0 // best-effort: a dead socket / transient error retries next tick
+	}
+	var res struct {
+		Events    []voiceEventRow `json:"events"`
+		Cursor    uint64          `json:"cursor"`
+		Truncated bool            `json:"truncated"`
+	}
+	if json.Unmarshal(raw, &res) != nil {
+		return 0
+	}
+	for _, ev := range res.Events {
+		fmt.Printf("[%s %s] %s\n", label, emp, voiceEventRender(ev))
+	}
+	if res.Truncated {
+		fmt.Printf("[%s %s] note: telemetry backlog truncated (poller fell behind)\n", label, emp)
+	}
+	if res.Cursor > cursor {
+		t.mu.Lock()
+		if res.Cursor > t.cursors[ccid] {
+			t.cursors[ccid] = res.Cursor
+		}
+		t.mu.Unlock()
+	}
+	return len(res.Events)
+}
+
+// drainOnce flushes each call's unread telemetry synchronously (after the
+// live poller's ctx was cancelled): poll until a call reports no new
+// events, bounded to a few rounds so a wedged daemon cannot hang the CLI.
+func (t *voiceEventTracker) drainOnce() {
+	for ccid, side := range t.calls {
+		if ccid == "" {
+			continue
+		}
+		for round := 0; round < 8; round++ {
+			if t.pollOnce(ccid, side[0], side[1]) == 0 {
+				break
+			}
+		}
 	}
 }
 
@@ -926,6 +1115,17 @@ func runVoiceLink(f linkFlags) error {
 	fmt.Printf("link %s open: a=%s(%s) b=%s(%s), %ds\n",
 		open.LinkID, f.a, open.ACCID, f.b, open.BCCID, f.seconds)
 
+	// Operator telemetry: live per-side event lines (heard / thinking /
+	// replied / barge-in / ended) polled from the daemon's per-call rings
+	// over voice.local.events. Best-effort: the poller never fails the run.
+	teleCtx, teleCancel := context.WithCancel(context.Background())
+	defer teleCancel()
+	events := newVoiceEventTracker(client, map[string][2]string{
+		open.ACCID: {"a", f.a},
+		open.BCCID: {"b", f.b},
+	})
+	events.start(teleCtx)
+
 	// Audible monitor: dial the daemon's tap sockets and play BOTH
 	// directions through the operator's speakers (listen-only - nothing
 	// is ever written back, the .in mic side stays untouched). Best-
@@ -990,6 +1190,14 @@ linkLoop:
 	if _, closeErr := client.Call("voice.link.close", map[string]any{"link_id": open.LinkID}); closeErr != nil {
 		fmt.Fprintf(os.Stderr, "voice.link.close: %v\n", closeErr)
 	}
+
+	// Stop the live telemetry poller and flush each side's tail
+	// synchronously: the rings outlive the call (the daemon evicts only
+	// after 32 newer calls), so the end/barge-in events of the final
+	// seconds still land on the console before the transcripts.
+	teleCancel()
+	events.stop()
+	events.drainOnce()
 
 	// Final status AFTER close: the daemon retains the entry (and the
 	// calls.db rows live on), so this is the authoritative transcript

@@ -165,6 +165,18 @@ type TalkDeps struct {
 	// has no turn_start/idle kind, and rides the bus (the coordinator
 	// needs a synchronous in-process edge).
 	TurnState func(ccid string, seq uint64, kind string)
+	// OnEvent is the operator-telemetry append hook (voice-events tree):
+	// when non-nil the loop records dispatch / final / barge-in / held /
+	// released / dropped / call-ended events at its existing log sites
+	// through the shared per-call ring (TalkDeps.OnEvent returns the
+	// assigned seq, which the loop never consumes). Nil (the default on
+	// every wiring that has not armed the ring) = zero emissions and a
+	// byte-identical loop: this seam is observability-only and NEVER
+	// gates dispatch, playback, or teardown. The hook is synchronous and
+	// must be cheap (a ring append is pure bookkeeping; the repo mutex-
+	// scope rule forbids I/O here anyway - the daemon adapter only appends
+	// to the in-process TelemetryRing).
+	OnEvent func(ccid string, in EventInput) uint64
 }
 
 // pipeline is one prompt's draft-to-speech state: the generation and turn
@@ -309,6 +321,17 @@ func (t *TalkLoop) publishTurnState(ccid string, seq uint64, kind string) {
 	}
 }
 
+// emitEvent appends one operator-telemetry event when the OnEvent seam is
+// wired (nil = zero work, byte-identical loop). The hook is the daemon's
+// per-call ring append - pure bookkeeping, never I/O, and its return
+// value (the assigned seq) is deliberately ignored: the loop's own seq
+// space (pipeline.seq) and the ring's cursor space are independent.
+func (t *TalkLoop) emitEvent(ccid string, in EventInput) {
+	if t.deps.OnEvent != nil {
+		t.deps.OnEvent(ccid, in)
+	}
+}
+
 // heldPrompt is ONE parked final-prompt dispatch: the Run-owned closure,
 // its text (telemetry preview), and the call Instance the re-gate needs.
 type heldPrompt struct {
@@ -339,6 +362,7 @@ func (t *TalkLoop) parkPrompt(call Instance, dispatch func(), text string) {
 	t.log.Info("voice talk loop: prompt held",
 		"ccid", ccid, "seq", t.nextSeq(), "kind", "prompt_held",
 		"text_preview", previewPrompt(text), "replaced_pending", replaced)
+	t.emitEvent(ccid, EventInput{Kind: EventKindHeld, Text: previewPrompt(text), Words: wordCount(text)})
 }
 
 // releaseHeld dispatches the parked prompt (if any) with the
@@ -366,11 +390,13 @@ func (t *TalkLoop) releaseHeld(ccid string) {
 		t.log.Info("voice talk loop: release re-held (peer busy again)",
 			"ccid", ccid, "kind", "prompt_reheld",
 			"text_preview", previewPrompt(h.text))
+		t.emitEvent(ccid, EventInput{Kind: EventKindHeld, Text: previewPrompt(h.text), Words: wordCount(h.text)})
 		return
 	}
 	t.log.Info("voice talk loop: prompt released",
 		"ccid", ccid, "seq", t.nextSeq(), "kind", "prompt_released",
 		"text_preview", previewPrompt(h.text))
+	t.emitEvent(ccid, EventInput{Kind: EventKindReleased, Text: previewPrompt(h.text), Words: wordCount(h.text)})
 	h.dispatch()
 }
 
@@ -388,6 +414,7 @@ func (t *TalkLoop) dropHeld(ccid, reason string) {
 	t.log.Info("voice talk loop: held prompt dropped",
 		"ccid", ccid, "kind", "prompt_dropped", "reason", reason,
 		"text_preview", previewPrompt(h.text))
+	t.emitEvent(ccid, EventInput{Kind: EventKindDropped, Text: previewPrompt(h.text), Reason: reason})
 }
 
 // previewPrompt truncates prompt text for a telemetry line.
@@ -454,6 +481,7 @@ func (t *TalkLoop) sayProgress(ccid string) {
 func (t *TalkLoop) end(ccid, reason string) {
 	t.endOnce.Do(func() {
 		t.log.Info("voice talk loop: call ended", "ccid", ccid, "reason", reason)
+		t.emitEvent(ccid, EventInput{Kind: EventKindCallEnded, Reason: reason})
 		t.deps.OnEnd(ccid, reason)
 	})
 }
@@ -776,6 +804,7 @@ func (t *TalkLoop) spawnPipeline(ctx context.Context, call Instance, prompt, fil
 	t.log.Info("voice talk loop: turn dispatch",
 		"ccid", ccid, "seq", seq, "kind", "prompt_dispatch",
 		"text_preview", preview, "words", wordCount(prompt))
+	t.emitEvent(ccid, EventInput{Kind: EventKindDispatch, Text: preview, Words: wordCount(prompt)})
 
 	// Link half-duplex: this side is now the speaker (the turn will
 	// emit say frames) - the coordinator marks it busy so the OTHER
@@ -1035,6 +1064,7 @@ func (t *TalkLoop) logTurnFinal(ccid string, p *pipeline) {
 	t.log.Info("voice talk loop: turn final",
 		"ccid", ccid, "seq", p.seq, "kind", "turn_final",
 		"reply_words", words, "ms", ms)
+	t.emitEvent(ccid, EventInput{Kind: EventKindFinal, Words: words, Ms: ms})
 }
 
 // wordCount counts whitespace-separated words in spoken text
@@ -1056,6 +1086,7 @@ func (t *TalkLoop) handleInterrupt(ccid string) {
 		t.log.Warn("voice talk loop: clear send failed", "ccid", ccid, "error", err)
 	}
 	t.log.Info("voice talk loop: barge-in", "ccid", ccid)
+	t.emitEvent(ccid, EventInput{Kind: EventKindBargeIn})
 }
 
 // HandleBargeIn is the media-side barge-in seam (the splice's
@@ -1071,6 +1102,7 @@ func (t *TalkLoop) HandleBargeIn(ccid string) {
 		t.log.Warn("voice talk loop: media clear send failed", "ccid", ccid, "error", err)
 	}
 	t.log.Info("voice talk loop: media barge-in", "ccid", ccid)
+	t.emitEvent(ccid, EventInput{Kind: EventKindBargeIn})
 }
 
 // verdict is one supervisor outcome flowing from the checker to playback.
