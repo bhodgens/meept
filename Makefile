@@ -794,6 +794,15 @@ gosec:
 lint-ci: lint analyzers audit-scripts fmt-check-gui
 	@echo "All CI lint checks passed."
 
+# Doherty Threshold (IBM ~400ms UX latency budget) enforcement lane: p95
+# synchronous-RPC dispatch latency under 400ms (T1) and state-toggle acks
+# under 100ms (T0). Skipped by -short, so this runs the tests explicitly.
+# CI runners: DOHERTY_BUDGET_SCALE=2 make test-doherty
+test-doherty:
+	@echo "Running Doherty latency-budget tests (p95 < 400ms feedback / 100ms ack)..."
+	go test -p 2 ./internal/rpc/ -run TestDoherty -v
+
+
 fmt:
 	@echo "Formatting code..."
 	go fmt ./...
