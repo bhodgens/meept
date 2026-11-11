@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/caimlas/meept/internal/voicechild"
 )
@@ -31,12 +32,29 @@ const (
 	// whisperSilenceMs closes an utterance after this much continuous
 	// trailing silence (~500 ms of no speech).
 	whisperSilenceMs = 500
+	// whisperWallIdleMs is the WALL-CLOCK twin of whisperSilenceMs: an
+	// open voiced window that receives NO audio at all for this long is
+	// also closed. The pump-fed paths (voice link bridge, live mic)
+	// simply stop forwarding bytes when the speaker goes quiet — no
+	// silence chunks are injected — so an audio-ms-only rule can never
+	// accumulate 500 ms of trailing silence and the utterance hangs
+	// until teardown cancels the (never-started) recognition (link
+	// regression 2026-11-10: 0/0 turns, side-A greeting never
+	// dispatched). Fast producers (file-mode copyMicFile) always have
+	// >=1 chunk in flight per 20 ms of wall clock, so this timer only
+	// fires after a REAL pause, adding no extra latency there.
+	whisperWallIdleMs = 500
 	// whisperMaxWindowS caps one buffered utterance at N seconds of
 	// audio regardless of silence; on overflow the window flushes.
 	whisperMaxWindowS = 10
 	// whisperStderrTailBytes caps the stderr tail carried into errors.
 	whisperStderrTailBytes = 200
 )
+
+// whisperWallIdle is the duration form of whisperWallIdleMs. A package
+// var so unit tests can shrink the wall-idle wait; production uses the
+// constant.
+var whisperWallIdle = time.Duration(whisperWallIdleMs) * time.Millisecond
 
 // ErrWhisperBinMissing is a constructor error: the whisper-cli binary is
 // not in PATH. It fails ONLY that call; the child and other calls survive.
@@ -89,9 +107,12 @@ func (s *WhisperSTT) Stream(ctx context.Context, pcm <-chan []byte) (<-chan voic
 	return out, nil
 }
 
-// run is the segmentation loop. Silence is measured in AUDIO ms (chunk
-// sample counts), not wall clock, so results are independent of how fast
-// the producer pushes chunks.
+// run is the segmentation loop. Trailing silence is measured in AUDIO
+// ms (chunk sample counts) so a fast producer flushes on the same audio
+// boundary a slow one does; a producer that STOPS sending bytes at all
+// (the pump bridge's silence is an absence of chunks) is caught by the
+// whisperWallIdle wall-clock timer instead — an utterance flushes when
+// either kind of pause closes it.
 func (s *WhisperSTT) run(ctx context.Context, pcm <-chan []byte, out chan<- voicechild.Transcript, dir string) {
 	defer close(out)
 	defer func() {
@@ -146,10 +167,52 @@ func (s *WhisperSTT) run(ctx context.Context, pcm <-chan []byte, out chan<- voic
 		}
 	}
 
+	// Wall-idle timer (see whisperWallIdleMs): closes an OPEN voiced
+	// window when the producer stops sending bytes altogether (the pump
+	// bridge's silence is an ABSENCE of chunks, not zero-amplitude
+	// chunks, so the audio-ms rule above can never see it). Armed on
+	// every chunk while a voiced window is open, disarmed whenever the
+	// window closes. One reusable timer; the stop/drain dance keeps a
+	// stale fire out of the channel so idleC only ever carries a REAL
+	// expiry.
+	idleTimer := time.NewTimer(whisperWallIdle)
+	if !idleTimer.Stop() {
+		<-idleTimer.C
+	}
+	var idleC <-chan time.Time
+	armIdle := func() {
+		if !idleTimer.Stop() {
+			select {
+			case <-idleTimer.C:
+			default:
+			}
+		}
+		idleTimer.Reset(whisperWallIdle)
+		idleC = idleTimer.C
+	}
+	disarmIdle := func() {
+		if !idleTimer.Stop() {
+			select {
+			case <-idleTimer.C:
+			default:
+			}
+		}
+		idleC = nil
+	}
+	defer idleTimer.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-idleC:
+			// Audio stopped arriving with a voiced window open: the
+			// speaker finished (or paused); close the utterance on the
+			// wall clock exactly as trailing silence would.
+			disarmIdle()
+			if !recognize() {
+				return
+			}
 		case chunk, ok := <-pcm:
 			if !ok {
 				recognize() // flush the tail if anything voiced is open
@@ -167,7 +230,14 @@ func (s *WhisperSTT) run(ctx context.Context, pcm <-chan []byte, out chan<- voic
 			} else {
 				silenceSamples += n
 			}
+			// Any byte arriving while a window is open proves the
+			// producer is still streaming: re-arm the wall-idle timer
+			// so it can only fire on a REAL gap in delivery.
+			if voicedSamples > 0 {
+				armIdle()
+			}
 			if silenceSamples >= silenceCutoff || len(buf) >= maxWindow {
+				disarmIdle()
 				if !recognize() {
 					return
 				}

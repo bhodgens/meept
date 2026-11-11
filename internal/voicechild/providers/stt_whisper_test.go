@@ -253,3 +253,100 @@ func TestWhisperConstructorGuards(t *testing.T) {
 		t.Fatalf("local vendor with empty key: %v", err)
 	}
 }
+
+// T-G (link no-dispatch regression, 2026-11-10): a paced producer that
+// stops sending bytes WITHOUT closing the stream must still flush the
+// open utterance. This is exactly the voice-link shape: the bridge pump
+// (internal/voice/link.go pumpStream) forwards only real PCM — when the
+// peer stops playing, ZERO chunks arrive — so the audio-ms silence rule
+// never trips and every link run recorded 0/0 dispatched turns. The wall-
+// idle timer is the fix; this test pins it deterministically with a
+// shrunken whisperWallIdle (fake recognizer, no real whisper-cli).
+func TestWhisperPacedStreamFlushesWithoutClose(t *testing.T) {
+	captureDir := writeFakeWhisper(t)
+	old := whisperWallIdle
+	whisperWallIdle = 60 * time.Millisecond
+	t.Cleanup(func() { whisperWallIdle = old })
+
+	s, err := newWhisperSTT(whisperCfg(whisperTestRate))
+	if err != nil {
+		t.Fatalf("construct: %v", err)
+	}
+	pcm := make(chan []byte)
+	trs := streamOf(t, s, pcm)
+
+	// Pace 10 x 20 ms chunks at ~real time (200 ms of audio total —
+	// 2.5x LESS than the 500 ms audio-ms cutoff, so the old rule could
+	// never have flushed this window), then go SILENT: no more chunks,
+	// channel stays open.
+	go func() {
+		tick := time.NewTicker(20 * time.Millisecond)
+		defer tick.Stop()
+		for range 10 {
+			<-tick.C
+			pcm <- chunkOf(20, loudAmplitude)
+		}
+	}()
+
+	select {
+	case tr := <-trs:
+		if !tr.Final || tr.Text != "utt 1" {
+			t.Fatalf("want final utt 1 from the idle flush, got %+v", tr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("paced stream went idle but no segment flushed without close")
+	}
+	if _, err := os.Stat(filepath.Join(captureDir, "utt0.wav")); err != nil {
+		t.Fatalf("recognizer never received the WAV: %v", err)
+	}
+
+	// A second paced burst + close still flushes exactly one more.
+	go func() {
+		tick := time.NewTicker(20 * time.Millisecond)
+		defer tick.Stop()
+		for range 10 {
+			<-tick.C
+			pcm <- chunkOf(20, loudAmplitude)
+		}
+		time.Sleep(150 * time.Millisecond) // let the idle flush land first
+		close(pcm)
+	}()
+	got := drainTranscripts(t, trs)
+	if len(got) != 1 || got[0].Text != "utt 2" {
+		t.Fatalf("want exactly 1 more final (utt 2) after the idle flush, got %v", textsOf(got))
+	}
+}
+
+// T-H: a CONTINUOUS producer (file-mode copyMicFile shape: bytes always
+// in flight) must NOT flush mid-utterance on the wall-idle timer — only
+// the audio-ms silence/EOF rules may close it.
+func TestWhisperFastStreamNotSplitByIdleTimer(t *testing.T) {
+	writeFakeWhisper(t)
+	old := whisperWallIdle
+	whisperWallIdle = 30 * time.Millisecond
+	t.Cleanup(func() { whisperWallIdle = old })
+
+	s, err := newWhisperSTT(whisperCfg(whisperTestRate))
+	if err != nil {
+		t.Fatalf("construct: %v", err)
+	}
+	pcm := make(chan []byte)
+	trs := streamOf(t, s, pcm)
+	go func() {
+		// 3 s of continuous audio pushed faster than real time (a chunk
+		// every 2 ms) — well beyond the idle window, but the timer must
+		// never fire while bytes keep arriving.
+		for range 150 {
+			pcm <- chunkOf(20, loudAmplitude)
+			time.Sleep(2 * time.Millisecond)
+		}
+		for range minSilenceChunks {
+			pcm <- chunkOf(silenceChunkMs, 0)
+		}
+		close(pcm)
+	}()
+	got := drainTranscripts(t, trs)
+	if len(got) != 1 {
+		t.Fatalf("want 1 final from the silence flush, got %d: %v", len(got), textsOf(got))
+	}
+}
