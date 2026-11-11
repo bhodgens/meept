@@ -128,6 +128,15 @@ type AgentRegistry struct {
 	// registry-built loop (bughunt F5).
 	globalRefusalModel string
 
+	// piiRestore mirrors RegistryConfig.PiiRestore: the shared PII
+	// unmasking restore lane stamped onto every registry-built loop
+	// (bughunt C19). Without it, registry-built loops (delegate children
+	// via RunAgent, specialists) shipped provider-bound context unmasked
+	// and never restored [PII:*] tokens in their replies — only the
+	// daemon template lane had the hook via GetOrCreateWired. Nil =
+	// feature off (byte-identical legacy behavior). Guarded by mu.
+	piiRestore *PiiRestoreHook
+
 	// plannerChatter mirrors RegistryConfig.PlannerChatter: the dedicated
 	// models.json5 planner_model client used ONLY when createLoop builds
 	// the planner agent's loop (issue #53 direction 4). Nil = the planner
@@ -321,6 +330,13 @@ type RegistryConfig struct {
 	// groups config: byte-identical legacy behavior (D7).
 	GroupsResolver *groups.Resolver
 
+	// PiiRestore is the shared PII-unmasking restore lane (bughunt C19).
+	// When set, every registry-built loop inherits it via SetPiiRestoreHook
+	// so specialist/delegate-child turns mask provider-bound context and
+	// restore [PII:*] tokens exactly like the daemon template lane. Nil =
+	// feature off (byte-identical legacy behavior).
+	PiiRestore *PiiRestoreHook
+
 	// DecisionLogLevel is security.groups.decision_log_level (agent-groups
 	// leaf 04 daemon wiring): applied to every registry-built loop's
 	// executor so the C2 decision-audit lines honor the knob on
@@ -385,6 +401,7 @@ func NewAgentRegistry(cfg RegistryConfig) *AgentRegistry {
 		decisionLogLevel:       cfg.DecisionLogLevel,
 		codemodeEnabled:        cfg.CodemodeEnabled,
 		dynamicExposureEnabled: cfg.DynamicExposureEnabled,
+		piiRestore:             cfg.PiiRestore,
 	}
 
 	// DSH-1 fork-seed: expose the conversation-seed adapter so a wired
@@ -883,6 +900,17 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
 		opts = append(opts, WithGlobalRefusalModel(r.globalRefusalModel))
 	}
 
+	// PII restore lane (bughunt C19): registry-built loops inherit the
+	// shared *PiiRestoreHook so specialist/delegate-child turns mask
+	// provider-bound context (MaskOutboundScoped) and restore [PII:*]
+	// tokens in replies (RestoreOutput at the ScanOutput choke point)
+	// exactly like the daemon template lane. Nil = feature off.
+	if r.piiRestore != nil {
+		opts = append(opts, func(l *AgentLoop) {
+			l.SetPiiRestoreHook(r.piiRestore)
+		})
+	}
+
 	// Create a message queue for steering/follow-up support (unless disabled).
 	if r.queueConfig.Enabled {
 		queueCfg := DefaultQueueConfig()
@@ -1126,6 +1154,26 @@ func (r *AgentRegistry) RunAgent(ctx context.Context, agentID, message, conversa
 	return loop.RunOnce(ctx, message, conversationID)
 }
 
+// RunAgentWithModelRef sends a single message to an agent with a per-run model
+// override (delegation route enforcement, C10): the resolved child route is
+// armed through the loop's ONE-SHOT ApplyRequestModel seam (the same precedence
+// slot as a client-supplied per-request model) so the delegated child's FIRST
+// LLM call runs the RESOLVED route — the allowlist-gated route the manager
+// recorded — instead of silently falling through to the child spec's own model
+// pin. Empty modelRef behaves exactly like RunAgent (no override armed). The
+// override is one-shot: it auto-clears after the first reasoning cycle and
+// never persists onto the agent's other conversations.
+func (r *AgentRegistry) RunAgentWithModelRef(ctx context.Context, agentID, message, conversationID, modelRef string) (string, error) {
+	loop, err := r.Get(agentID)
+	if err != nil {
+		return "", err
+	}
+	if modelRef != "" {
+		loop.ApplyRequestModel(modelRef)
+	}
+	return loop.RunOnce(ctx, message, conversationID)
+}
+
 // Close shuts down all agent loops and releases resources.
 func (r *AgentRegistry) Close() error {
 	r.mu.Lock()
@@ -1233,6 +1281,22 @@ func (r *AgentRegistry) SetUsageTracker(ut lifecycleUsageTracker) {
 	}
 	r.mu.Lock()
 	r.usageTracker = ut
+	r.mu.Unlock()
+}
+
+// SetPiiRestoreHook wires the shared PII-unmasking restore lane into every
+// loop this registry creates (bughunt C19): registry-built loops (delegate
+// children via RunAgent, specialists) then mask provider-bound context and
+// restore [PII:*] tokens exactly like the daemon template lane. Nil is a
+// no-op. Loops already created keep their wiring (the lane is stateless per
+// call, scoped by the sessionID argument); loops created afterwards inherit
+// the hook at construction.
+func (r *AgentRegistry) SetPiiRestoreHook(hook *PiiRestoreHook) {
+	if hook == nil {
+		return
+	}
+	r.mu.Lock()
+	r.piiRestore = hook
 	r.mu.Unlock()
 }
 

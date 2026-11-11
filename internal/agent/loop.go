@@ -3684,7 +3684,13 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 		finalResponse = l.piiRestore.RestoreOutput(finalResponse, l.sessionID)
 	}
 	if l.securityOrch != nil {
-		scannedText, hasCredentials, warnings := l.securityOrch.ScanOutput(response)
+		// C22 (bughunt 2026-11-10): scan finalResponse — the POST-restore
+		// text, after the reply-guard substitution — not the stale
+		// pre-restore `response`. Scanning the stale variable both missed
+		// guard substitutions and, on detection, assigned the scanned
+		// stale text over finalResponse — discarding the restore lane's
+		// work and re-shipping restored [PII:*] tokens raw.
+		scannedText, hasCredentials, warnings := l.securityOrch.ScanOutput(finalResponse)
 		if hasCredentials {
 			l.logger.Warn("Credentials detected in output",
 				"conversation", conversationID,
@@ -7280,6 +7286,52 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 				// Feature off / one-hop give-up: surface the ORIGINAL
 				// refusal unchanged.
 				return nil, rerr
+			}
+			return nil, err
+		}
+
+		// Tier-floor verdict (llm-serving-tiers, errors_tier.go): a
+		// *TierFloorError is a CLASSIFIED terminal error (NonRetryable,
+		// ErrAllModelsQuotaBlocked family) — the tier policy refused the
+		// NEXT rotation hop because it would exceed the configured
+		// degradation depth. It must NEVER fall into the generic
+		// RecordAliasFailure+RotateToNextModel branch below: that would
+		// cooldown-damage healthy members for a policy verdict and
+		// amplify the degraded-tier spray the floor exists to bound.
+		// No rotation retry: surface the typed error verbatim so the
+		// caller decides (relax the tier policy or accept the failure).
+		if llm.IsTierFloorError(err) {
+			if floorErr, ok := llm.AsTierFloorError(err); ok {
+				l.logger.Warn("tier degradation floor reached — surfacing without rotation",
+					"provider", floorErr.ProviderID,
+					"model", floorErr.ModelID,
+					"depth", floorErr.Depth,
+					"limit", floorErr.Limit,
+					"capability", floorErr.Capability,
+				)
+			}
+			return nil, err
+		}
+
+		// Tier-floor verdict (llm-serving-tiers, errors_tier.go): a
+		// *TierFloorError is a CLASSIFIED terminal error (NonRetryable,
+		// ErrAllModelsQuotaBlocked family) — the tier policy refused the
+		// NEXT rotation hop because it would exceed the configured
+		// degradation depth. It must NEVER fall into the generic
+		// RecordAliasFailure+RotateToNextModel branch below: that would
+		// cooldown-damage healthy members for a policy verdict and
+		// amplify the degraded-tier spray the floor exists to bound.
+		// No rotation retry: surface the typed error verbatim so the
+		// caller decides (relax the tier policy or accept the failure).
+		if llm.IsTierFloorError(err) {
+			if floorErr, ok := llm.AsTierFloorError(err); ok {
+				l.logger.Warn("tier degradation floor reached — surfacing without rotation",
+					"provider", floorErr.ProviderID,
+					"model", floorErr.ModelID,
+					"depth", floorErr.Depth,
+					"limit", floorErr.Limit,
+					"capability", floorErr.Capability,
+				)
 			}
 			return nil, err
 		}

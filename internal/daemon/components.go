@@ -195,6 +195,10 @@ type Components struct {
 	// AgentLoopPiiCfg snapshots the [security.pii] section the loop was
 	// wired with (wiring tests assert on it without re-reading config).
 	AgentLoopPiiCfg config.PiiConfig
+	// PiiRestoreHook is the shared PII-unmasking restore lane (bughunt C19).
+	// Non-nil only when the feature is enabled; wired onto the agent
+	// registry so registry-built loops mask/restore like the template lane.
+	PiiRestoreHook  *agent.PiiRestoreHook
 	Soul            *agent.SoulProvider
 	ChatHandler     *agent.ChatHandler
 	StatusHandler   *StatusHandler
@@ -240,11 +244,33 @@ type Components struct {
 	// Owned here so stopComponents closes the handle.
 	EmployeeLedger *ledger.Store
 
+	// EmployeeStopAnchor cancels the employee audit-chain anchor job's
+	// context (bughunt D4). The job runs on a child of the wiring ctx
+	// (context.Background() at the daemon call site), which no shutdown
+	// path cancels — stopComponents calls this so the hourly ticker
+	// exits instead of one leaked goroutine per restart. Nil when the
+	// chain store never built.
+	EmployeeStopAnchor context.CancelFunc
+
 	// ToolGate is the daemon-side ExecGate wired into ToolRegistry via
 	// SetGate (wave A leaf 02, plan docs/plans/20261031-tool-provider-seam).
 	// Nil when construction degraded - the registry then runs the legacy
 	// ungated path (all-or-nothing: never a half-gate).
 	ToolGate *ExecGateImpl
+
+	// ToolGateAudit is the ONE shared audit-chain store over
+	// tool_audit_chain.db, feeding BOTH audit lanes: the tool gate's G2
+	// emission (GateConfig.Audit) and the groups RPC surface's
+	// membership-change auditing (NewGroupsHandler). bughunt D3: the two
+	// lanes previously each opened their OWN *auditlog.Store pool over
+	// the SAME file, each SetMaxOpenConns(1) — a deferred-tx Append
+	// racing across the two pools lost rows (BUSY_SNAPSHOT / seq UNIQUE
+	// contention). One store, one pool: appends serialize at the SQLite
+	// layer and the chain stays contiguous. Nil when the open degraded
+	// (both lanes run audit-less, exactly the pre-D3 degraded posture).
+	// Owned here so stopComponents closes the handle ONCE (auditlog
+	// Close is not idempotent across two handles over one pool).
+	ToolGateAudit *auditlog.Store
 
 	// GateCapture is the jev-command-gate leaf-02 capture sink
 	// (internal/gatecapture): records human gate verdicts paired with prior
@@ -2469,6 +2495,9 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 					"secret_restore", cfg.Security.Pii.SecretRestore,
 				)
 			}
+			// C19: remember the hook so the agent registry construction
+			// below can thread it into every registry-built loop.
+			c.PiiRestoreHook = restoreHook
 			agentOpts = append(agentOpts, func(l *agent.AgentLoop) {
 				l.SetPiiRestoreHook(restoreHook)
 			})
@@ -2536,6 +2565,9 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				)
 			}
 			c.SkillStateRuntime = stateRuntime
+			if c.PiiRestoreHook != nil {
+				stateRuntime.SetPiiMaskHook(c.PiiRestoreHook)
+			}
 			agent.WithSkillStateRuntime(stateRuntime)(l)
 			logger.Info("Agent loop configured with skill state runtime",
 				"max_state_chars", cfg.Skills.State.MaxStateChars,
@@ -2919,7 +2951,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// RPC handler registration happens in daemon.go over svcRegistry —
 		// this site only constructs the searcher.
 		if cfg.Memory.VectorHybrid.Enabled {
-			vh, vhErr := newVectorHybridWiring(c.MemoryManager, cfg.Memory.VectorHybrid.Alpha, logger.With("component", "vector-hybrid"))
+			vh, vhErr := newVectorHybridWiring(c.MemoryManager, cfg.Memory.VectorHybrid.Alpha, cfg.MultiUser.Enabled, logger.With("component", "vector-hybrid"))
 			if vhErr != nil {
 				logger.Warn("vector hybrid search not wired", "error", vhErr)
 			} else {
@@ -3277,14 +3309,25 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// G2 audit is best-effort by design: a failed chain store logs a
 	// warning and arms the gate without emission, exactly like every
 	// other auditlog wiring site.
-	gateAudit, gateAuditErr := auditlog.OpenStore(
+	// bughunt D3: ONE shared audit-chain store over tool_audit_chain.db
+	// for BOTH audit lanes (the tool gate's G2 emission here and the
+	// groups RPC surface's membership-change auditing in daemon.go, which
+	// reads components.ToolGateAudit). Two separate pools over one file,
+	// each MaxOpenConns(1), lost rows under cross-pool concurrent
+	// appends (deferred-tx BUSY_SNAPSHOT / seq UNIQUE). G2 audit is
+	// best-effort by design: a failed open logs a warning and arms the
+	// gate without emission, exactly like every other auditlog wiring
+	// site.
+	var gateAuditErr error
+	c.ToolGateAudit, gateAuditErr = auditlog.OpenStore(
 		filepath.Join(cfg.Daemon.DataDir, "tool_audit_chain.db"),
 		logger.With("component", "tool-gate-audit"))
 	if gateAuditErr != nil {
 		logger.Warn("tool gate: audit chain store unavailable; G2 emission degraded",
 			"error", gateAuditErr)
-		gateAudit = nil
+		c.ToolGateAudit = nil
 	}
+	gateAudit := c.ToolGateAudit
 
 	engineDB := cfg.Security.AuditDBPath
 	if engineDB == "" {
@@ -4049,6 +4092,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// enforce the same security-before-tool deny, decision gate,
 			// and transform hooks as the daemon template loop.
 			HookRegistry: hookRegistry,
+			// PII restore lane inheritance (bughunt C19): registry-built
+			// specialists/delegate children must mask provider-bound
+			// context and restore [PII:*] tokens exactly like the daemon
+			// template loop. Nil (feature off) = legacy hook-less behavior.
+			PiiRestore: c.PiiRestoreHook,
 			// Compaction config carried BEFORE loop construction so each
 			// registry-built loop's ContextFirewall bakes the
 			// decision-compaction lane (resolver + decision_enabled).
@@ -4200,6 +4248,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		c.Dispatcher = agent.NewDispatcher(agent.DispatcherConfig{
 			Registry:              c.AgentRegistry,
 			MemvidClient:          c.MemvidClient,
+			PiiMask:               c.PiiRestoreHook,
 			MemoryMgr:             c.MemoryManager,
 			TaskStore:             taskStore,
 			TaskRegistry:          c.TaskRegistry,
@@ -4532,6 +4581,9 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				}
 				strategicPlanner.SetValidToolNames(names)
 			}
+			if c.PiiRestoreHook != nil {
+				strategicPlanner.SetPiiMaskHook(c.PiiRestoreHook)
+			}
 
 			reviewManager := agent.NewReviewManager(agent.ReviewManagerConfig{
 				Registry:  c.AgentRegistry,
@@ -4802,6 +4854,9 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			c.LLMClient,
 			reflectionConfig,
 		)
+		if c.PiiRestoreHook != nil {
+			c.ReflectionEngine.SetPiiMaskHook(c.PiiRestoreHook)
+		}
 		if c.Orchestrator != nil {
 			c.Orchestrator.SetReflectionEngine(c.ReflectionEngine)
 		}
@@ -5287,6 +5342,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			c.ConstitutionStore = wiring.ConstitutionStore
 			c.EmployeeGoalStore = wiring.GoalStore
 			c.EmployeeAuditStore = wiring.AuditStore
+			// Anchor-job teardown (bughunt D4): the hourly anchor ticker
+			// runs on a child of the WIRING ctx, which no shutdown path
+			// cancels — stopComponents calls StopAnchor so the goroutine
+			// exits instead of reading a closed pool forever. Nil (and a
+			// no-op at stop) when the chain store never built.
+			c.EmployeeStopAnchor = wiring.StopAnchor
 
 			// Inter-agent message store (loop-economics leaf 10).
 			// Shares the shared DB when available, else employees dir.
@@ -6284,6 +6345,16 @@ func (c *Components) Start(ctx context.Context) error {
 				callerOpts = append(callerOpts,
 					employee.WithUnapprovedCallerAllowedTools(c.Config.Voice.UnapprovedCallerAllowedTools))
 			}
+			// C26 (bughunt): wire the store-backed budget checker so the
+			// constitution's DailyBudgetCents / MaxInvocationsPerDay
+			// enforce on the goal-round path. Counters ride the bot
+			// states row the CostTracker already persists, so restart
+			// re-arms respect them. Nil store => nil checker => the noop
+			// default stays (limits unset are unenforced by design).
+			if budgetChecker := employee.NewBotStoreBudgetChecker(c.EmployeeManager.BotStore(), c.Logger); budgetChecker != nil {
+				callerOpts = append(callerOpts, employee.WithBudgetChecker(budgetChecker))
+				c.EmployeeManager.SetRoundBudgetChecker(budgetChecker)
+			}
 			c.EmployeeManager.RegisterPreExecCheckers(c.SecurityChecker, callerOpts...)
 			c.Logger.Info("Employee pre-exec checkers registered with permission checker")
 		}
@@ -6334,6 +6405,15 @@ func (c *Components) Start(ctx context.Context) error {
 				})
 				postTurn.SetAutoPause(autoPauseFn)
 				periodic.SetAutoPause(autoPauseFn)
+
+				// C20 (bughunt): thread the shared PII mask lane over the
+				// audit sends — the audit prompts carry the constitution +
+				// raw turn output to the model. Nil hook (feature off) is
+				// a no-op (setter nil-guard).
+				if c.PiiRestoreHook != nil {
+					postTurn.SetPromptMaskHook(c.PiiRestoreHook)
+					periodic.SetPromptMaskHook(c.PiiRestoreHook)
+				}
 
 				// E4: wire the bus publisher to PostTurnAuditor so it
 				// publishes employee.critical_finding events (in addition
@@ -6774,6 +6854,14 @@ func (c *Components) Start(ctx context.Context) error {
 					if postTurn != nil {
 						loop = loop.WithAuditor(postTurn)
 					}
+					// C20 (bughunt): thread the shared PII mask lane over
+					// the reflector-bound Assess/Reflect sends — they
+					// carry the constitution + raw execution results to
+					// the model. Nil hook (feature off) is a no-op
+					// (setter nil-guard).
+					if c.PiiRestoreHook != nil {
+						loop.SetPiiPromptMaskHook(c.PiiRestoreHook)
+					}
 					if goalStore != nil {
 						loop = loop.WithGoalLookup(&storeBackedGoalLookup{store: goalStore})
 					}
@@ -7195,6 +7283,14 @@ func (c *Components) stopComponents(ctx context.Context) error {
 	// wraps the bot layer). Stores are closed here; the manager's
 	// in-flight invocations drain via the bot manager's StopAll below.
 	if c.EmployeeManager != nil {
+		// Anchor job first (bughunt D4): cancel the hourly ticker's ctx
+		// so it exits before the stores close, instead of reading a
+		// closed pool forever. Nil-safe (no chain store = no anchor job).
+		if c.EmployeeStopAnchor != nil {
+			c.EmployeeStopAnchor()
+			c.EmployeeStopAnchor = nil
+			c.Logger.Info("Employee audit anchor job stopped")
+		}
 		c.EmployeeManager.StopAll()
 		c.Logger.Info("Employee framework stopped")
 	}
@@ -7315,19 +7411,21 @@ func (c *Components) stopComponents(ctx context.Context) error {
 		c.EffectsReconciler = nil
 	}
 
-	// Close the employee ledger AFTER the voice stack and tools have
-	// stopped (same ordering rationale as the effects ledger; leaf
-	// 03-voice/01 owns the handle on Components). Rows stay on disk.
-	if c.EmployeeLedger != nil {
-		if err := c.EmployeeLedger.Close(); err != nil {
-			c.Logger.Error("Failed to close employee ledger", "error", err)
+	// Close the shared tool-audit chain store (bughunt D3) AFTER the tool
+	// gate and the groups RPC surface have stopped. ONE handle for both
+	// lanes over tool_audit_chain.db — close it exactly once (a second
+	// Close over the same pool would fail with sql.ErrConnDone). Rows
+	// stay on disk.
+	if c.ToolGateAudit != nil {
+		if err := c.ToolGateAudit.Close(); err != nil {
+			c.Logger.Error("Failed to close tool audit chain store", "error", err)
 			if lastErr == nil {
 				lastErr = err
 			}
 		} else {
-			c.Logger.Info("Employee ledger closed")
+			c.Logger.Info("Tool audit chain store closed")
 		}
-		c.EmployeeLedger = nil
+		c.ToolGateAudit = nil
 	}
 
 	// Close the pii swap store AFTER the loops have stopped ([security.pii],
@@ -7396,8 +7494,43 @@ func (c *Components) stopComponents(ctx context.Context) error {
 	// still find the store open.
 	if c.Voice != nil {
 		c.Voice.Stop(ctx)
+		// Contact chain (D2): the contacts.db handle is owned on the
+		// voice block — close it AFTER the voice stack has fully stopped
+		// (its paths resolve callers through this store) and alongside the
+		// employee-ledger close below. Previously
+		// ContactChainWiring.Close had zero production callers and the
+		// handle leaked per restart. No-op when the chain never built
+		// (degraded-contact-tool boot).
+		if c.Voice.Contact != nil {
+			c.Voice.Contact.Close()
+			c.Voice.Contact = nil
+		}
 		c.Voice = nil
 		c.Logger.Info("voice sidecar stopped")
+	}
+
+	// Close the employee ledger AFTER the voice stack and tools have
+	// stopped (same ordering rationale as the effects ledger; leaf
+	// 03-voice/01 owns the handle on Components). Rows stay on disk.
+	//
+	// bughunt D1 (HIGH): this close previously ran ~70 lines EARLIER,
+	// before the Voice.Stop block above, while the comment here claimed
+	// the opposite order. Live-call release hooks (VoiceEmployeeWiring.
+	// ReleaseHook -> runCallBrief -> appendBriefRecordsFn) append brief
+	// rows to this store: with the store already closed those appends
+	// failed with sql.ErrConnDone (warn-only) and the commitments were
+	// permanently lost. Keep the close strictly AFTER c.Voice.Stop —
+	// pinned by TestStopComponentsClosesEmployeeLedgerAfterVoiceStop.
+	if c.EmployeeLedger != nil {
+		if err := c.EmployeeLedger.Close(); err != nil {
+			c.Logger.Error("Failed to close employee ledger", "error", err)
+			if lastErr == nil {
+				lastErr = err
+			}
+		} else {
+			c.Logger.Info("Employee ledger closed")
+		}
+		c.EmployeeLedger = nil
 	}
 
 	// Close stores

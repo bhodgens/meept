@@ -127,6 +127,25 @@ func (l *AgentLoop) RunVoiceSpokenRewriteRetry(ctx context.Context, conversation
 	// the outer seam); the spoken lane was the reason that fix shipped, so
 	// this seam owns it for the rewrite text.
 	retry = llm.StripThinking(retry)
+	// C23 (bughunt 2026-11-10): the rewrite text must pass through the SAME
+	// output-side lanes the chat lane's rewrite posture runs at its seam
+	// (loop.go response assembly): PII/secret restore FIRST (the rewrite can
+	// parrot [PII:*] tokens minted by the masking lane — placeholders must
+	// never be persisted raw or read aloud), then the credential scan
+	// (restored credentials are redacted before the adapter persists and
+	// speaks the text). Nil/disabled hook keeps the restore a passthrough.
+	if hook := l.PiiRestoreHook(); hook != nil {
+		retry = hook.RestoreOutput(retry, l.SessionID())
+	}
+	if l.securityOrch != nil {
+		if scannedText, hasCredentials, warnings := l.securityOrch.ScanOutput(retry); hasCredentials {
+			l.logger.Warn("Credentials detected in voice spoken rewrite",
+				"conversation_id", conversationID,
+				"warnings", len(warnings),
+			)
+			retry = scannedText
+		}
+	}
 	final := retry
 	_, secondTrip := SpokenReplyViolation(retry)
 	switch {

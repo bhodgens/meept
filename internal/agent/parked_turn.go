@@ -548,18 +548,19 @@ func (p *TurnParker) drainDue(ctx context.Context) {
 	// published, and the give-up callback (owner handler) marks the turn
 	// failed-terminal. MaxAttempts <= 0 stays unlimited (legacy rows and
 	// parkers that never stamp a cap keep byte-identical behaviour).
+	// C4 (bughunt 2026-11-10): the split is UNCONDITIONAL — gating it on
+	// giveUp/parkEventBus wiring let a bare parker (no bus, no give-up
+	// callback) replay capped records forever. Without callbacks the cap
+	// still stops the resume: the row is deleted and the give-up event
+	// publish is a nil-safe no-op.
 	var capped []ParkedTurnRecord
 	var live []ParkedTurnRecord
-	if giveUp != nil || p.parkEventBus != nil {
-		for _, turn := range due {
-			if turn.MaxAttempts > 0 && turn.Attempt >= turn.MaxAttempts {
-				capped = append(capped, turn)
-			} else {
-				live = append(live, turn)
-			}
+	for _, turn := range due {
+		if turn.MaxAttempts > 0 && turn.Attempt >= turn.MaxAttempts {
+			capped = append(capped, turn)
+		} else {
+			live = append(live, turn)
 		}
-	} else {
-		live = due
 	}
 	// Persistence delete happens BEFORE each resume callback: if the
 	// daemon dies mid-resume the row is already gone, so the record

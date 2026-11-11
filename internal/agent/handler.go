@@ -2776,6 +2776,23 @@ func (h *ChatHandler) resumeQuotaParkedTurn(ctx context.Context, turn QuotaParke
 		return
 	}
 
+	// C3 (bughunt 2026-11-10): a resume that re-parks MID-FLIGHT (the turn
+	// re-entered RunOnceWithParts and parked again on the throttle parker,
+	// loop.go's parked-turn guard) returns the parked shape ("", nil). That
+	// is NOT a completed turn: persisting/sending an empty reply and
+	// terminalizing here would close the turn while it is actually parked —
+	// duplicate delivery under one TurnID once the throttle resume finally
+	// completes. Defer delivery exactly like resumeThrottledTurn does
+	// (loop_park.go): the later resume owns persistExchange + sendResponse +
+	// turn.terminal.
+	if strings.TrimSpace(reply) == "" && err == nil {
+		h.logger.Info("quota resume re-parked mid-flight — deferring delivery",
+			"session_id", turn.SessionID,
+			"conversation_id", turn.ConversationID,
+		)
+		return
+	}
+
 	// Persist the exchange
 	h.persistExchange(turn.SessionID, turn.Message, turn.Parts, reply, turn.AgentID)
 
@@ -3211,6 +3228,19 @@ func (h *ChatHandler) resumeParkedTurn(ctx context.Context, turn ParkedTurn) {
 				TurnSpanID:     resumeTurnSpanID,
 			})
 		}
+		return
+	}
+
+	// C3 (bughunt 2026-11-10): parked shape ("", nil) = the turn re-parked
+	// mid-flight (throttle parker via loop.go's parked-turn guard), not a
+	// completed turn. Defer delivery exactly like resumeThrottledTurn — an
+	// empty reply persisted/sent/terminalized here would close a turn that
+	// is actually parked (duplicate delivery under one TurnID later).
+	if strings.TrimSpace(reply) == "" && err == nil {
+		h.logger.Info("budget resume re-parked mid-flight — deferring delivery",
+			"session_id", turn.SessionID,
+			"conversation_id", turn.ConversationID,
+		)
 		return
 	}
 

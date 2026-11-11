@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"log/slog"
+	"strings"
 
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
@@ -164,8 +165,18 @@ func (h *PiiRestoreHook) TransformContext(_ context.Context, messages []llm.Chat
 //
 // Tool-call arguments are NOT masked: they are data addressed at this
 // session's tools, and masking them would corrupt tool semantics while the
-// responses they produce flow back only into this session. Content only —
+// responses they produce flow back only into this session. Content and text
+// content parts — the same surfaces the serializers emit (Parts take
+// precedence over Content in every provider serializer, llm/models.go), and
 // the same surface the restore lane un-masks.
+//
+// C18 (bughunt 2026-11-10): Parts-bearing messages (multimodal turns, resume
+// replays carrying turn.Parts) previously crossed to the provider UNMASKED —
+// the mask touched only Content while every serializer PREFERS Parts. Text
+// parts now go through the same swapper; non-text parts (image URLs) are
+// left alone; and when Parts were masked the flat Content is masked with the
+// SAME session scope so both representations stay consistent (the model may
+// see either wire form, and the tokens resolve through one store).
 func (h *PiiRestoreHook) MaskOutboundScoped(messages []llm.ChatMessage, sessionID string) []llm.ChatMessage {
 	if h == nil || !h.cfg.Enabled || sessionID == "" || len(messages) == 0 {
 		return messages
@@ -173,13 +184,35 @@ func (h *PiiRestoreHook) MaskOutboundScoped(messages []llm.ChatMessage, sessionI
 
 	total := 0
 	for i := range messages {
-		if messages[i].Content == "" {
-			continue
+		if messages[i].Content != "" {
+			masked, n := h.swapper.Mask(messages[i].Content, sessionID)
+			if n > 0 {
+				messages[i].Content = masked
+				total += n
+			}
 		}
-		masked, n := h.swapper.Mask(messages[i].Content, sessionID)
-		if n > 0 {
-			messages[i].Content = masked
-			total += n
+		// C18: text-bearing parts through the same swapper/session scope.
+		for j := range messages[i].Parts {
+			p := &messages[i].Parts[j]
+			if p.Type != "text" || p.Text == "" {
+				continue
+			}
+			masked, n := h.swapper.Mask(p.Text, sessionID)
+			if n > 0 {
+				p.Text = masked
+				total += n
+				// Content/Parts consistency: the parts representation now
+				// differs from the flat Content (the serializer prefers
+				// Parts, so the wire is correct), but Content must not keep
+				// raw text the parts lane just masked — mask it with the
+				// same scope too.
+				if messages[i].Content != "" && !strings.Contains(messages[i].Content, "[PII:") {
+					if cMasked, cn := h.swapper.Mask(messages[i].Content, sessionID); cn > 0 {
+						messages[i].Content = cMasked
+						total += cn
+					}
+				}
+			}
 		}
 	}
 

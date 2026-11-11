@@ -22,6 +22,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"time"
@@ -621,6 +622,40 @@ func (l *AgentLoop) resumeThrottledTurn(ctx context.Context, rec ParkedTurnRecor
 	}
 	reply, err := l.RunOnceWithParts(resumeCtx, turn.Message, turn.Parts, turn.ConversationID)
 	if err != nil {
+		// D9 park-not-fail parity (quota resume, handler.go): a classified
+		// provider wait that surfaces DURING the resume must re-park, not
+		// terminalize. RunOnceWithParts parks ThrottleBackoffError waits
+		// internally (returning the parked shape), but a QuotaResetError (or
+		// any other classified provider wait the loop passes through) reaches
+		// THIS seam as an error — the quota resume at handler.go:2751 re-parks
+		// its QuotaResetError, and the throttle resume mirrors that posture
+		// through the SAME parkThrottledTurn machinery (grown attempt carried
+		// in resumeCtx). A ThrottleGiveUpError or any unclassified failure
+		// still ends the resume below — logged, no second retry path.
+		if quotaErr, ok := errors.AsType[*llm.QuotaResetError](err); ok {
+			unblockAt := quotaErr.ResetAt
+			if unblockAt.IsZero() && quotaErr.RetryAfter > 0 {
+				unblockAt = time.Now().Add(quotaErr.RetryAfter)
+			}
+			if !unblockAt.IsZero() && l.TurnParker() != nil {
+				rec2 := rec
+				rec2.ResumeAt = unblockAt
+				rec2.Attempt = rec.Attempt + 1
+				rec2.TurnPayload = rec.TurnPayload
+				if p := l.TurnParker(); p.Park(rec2) {
+					l.logger.Info("resumed throttle turn hit a fresh quota error — re-parked",
+						"session_id", rec.SessionID,
+						"provider", quotaErr.ProviderID,
+						"attempt", rec.Attempt+1,
+					)
+					return
+				}
+				l.logger.Warn("throttle resume quota re-park refused — failing the resume",
+					"session_id", rec.SessionID,
+					"error", err,
+				)
+			}
+		}
 		// A ThrottleBackoffError already re-parked inside the loop (grown
 		// attempt, no error surfaced); a ThrottleGiveUpError or any other
 		// failure ends the resume here — logged, no second retry path.
