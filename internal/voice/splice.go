@@ -41,6 +41,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -140,6 +141,20 @@ type runSplice struct {
 	// ended latches the end frame (bughunt 2026-11-07 voice F-1): after
 	// teardown begins the barge-in latch must never re-arm again.
 	ended bool
+	// Fresh-audio gate for resumeBargeIn (bughunt 2026-11-10 A6, the
+	// SHARED bargeGate — the same gate the local splice rides). bargeIn
+	// bumps it and — when a stream was actively flowing at cancel time
+	// (recent paced outbound touch) — stamps the residue window. The
+	// read pump snapshots the gate BEFORE each child-socket read; a
+	// chunk whose snapshot is behind the CURRENT generation was in
+	// flight when the cancel landed, and socket-buffer residue read
+	// inside a live residue window may still be the interrupted
+	// stream's tail. Stale chunks are DISCARDED at the pump (never
+	// enqueued) and can never re-arm the latch — the interrupted
+	// utterance can neither replay over the new turn nor park on the
+	// overflow slot to trip the backpressure grace hangup. See
+	// barge_gate.go for the full contract.
+	gate bargeGate
 
 	outboundMu      sync.Mutex
 	outbound        [][]byte
@@ -147,8 +162,14 @@ type runSplice struct {
 	degraded        bool      // degraded log emitted for the current saturation
 	lowWaterSince   time.Time // when the queue first dropped under half full
 	lowWaterSinceMu sync.Mutex
-	hangupSent      bool        // HangupFn fired at most once
-	overflow        chan []byte // producer blocks here when the queue is full
+	// lastPacedWriteNano is a lock-free outbound-activity stamp for the
+	// barge gate's residue decision (the A6 "was a stream flowing at
+	// cancel time" touch). Stamped by the pacer ONLY — bargeIn reads it
+	// lock-free; the single-writer shape keeps the race detector quiet
+	// without routing every paced write through a second mutex.
+	lastPacedWriteNano atomic.Int64
+	hangupSent         bool        // HangupFn fired at most once
+	overflow           chan []byte // producer blocks here when the queue is full
 	// wake (audit m3) pokes the outbound pacer on every state change:
 	// chunk enqueued, chunk parked on overflow, barge-in latch tripped
 	// or re-armed, terminal pump error. It replaces the old 5/20 ms
@@ -711,6 +732,17 @@ func (s *runSplice) bargeIn() {
 	}
 	s.cancelSent = true
 	s.interrupt = true
+	// Fresh-audio gate (A6, shared bargeGate): every chunk the pump read
+	// BEFORE this point carries an old generation snapshot and can never
+	// re-arm the latch or reach the wire. When a stream was actively
+	// flowing at cancel time (a paced outbound touch within the residue
+	// window — playback live), the gate also stamps the residue
+	// deadline: socket-buffer backlog read shortly after the cancel is
+	// still the interrupted stream's tail and is discarded until it
+	// passes. With NO recent touch there is no in-flight stream, so no
+	// residue is possible — the next PCM is unconditionally fresh and
+	// the immediate re-arm of the silent-then-say shape is preserved.
+	s.gate.Bump(s.lastPacedTouchNano(), bargeResidueQuiet)
 	s.mu.Unlock()
 	s.notify() // audit m3: wake the pacer to stop writing now
 
@@ -763,23 +795,29 @@ func (s *runSplice) HandleText(raw []byte) error {
 	return nil
 }
 
-// resumeBargeIn re-arms the outbound latch for the NEXT barge-in
-// (bughunt 2026-11-07 voice F-1, HIGH). Before this, `interrupt` and
-// `cancelSent` were once-per-CALL latches: after the first barge-in the
-// pacer idle-waited forever (the agent was muted for the rest of the call
-// while conversation logic kept running) and bargeIn() early-returned on
-// cancelSent, so even the Telnyx clear frame stopped being sent. The
-// contract (docs/workflows/voice-sidecar.md C1, "per call_id") is
-// per-barge-in, not per-call: a resume decision lands when the call-level
-// side streams FRESH child audio (only a new supervisor-allowed say
-// produces PCM — the child aborted the interrupted utterance's stream),
-// so new bytes at the read pump mean "speak again": drop the held
-// mid-pace chunk and the queue (barge-in means interrupted audio is
-// abandoned, matching the child's clear()), and re-arm both latch fields.
-// After end the splice stays stopped (ended guard).
-func (s *runSplice) resumeBargeIn() {
+// lastPacedTouchNano returns the pacer's last successful Telnyx write as
+// unix nanos (0 = never written). The barge gate's residue decision uses
+// it as the "was a stream flowing at cancel time" touch. Lock-free: the
+// pacer is the only writer.
+func (s *runSplice) lastPacedTouchNano() int64 {
+	return s.lastPacedWriteNano.Load()
+}
+
+// resumeBargeIn re-arms the outbound latch for the NEXT barge-in — but
+// only from FRESH audio of the new turn (bughunt 2026-11-10 A6, the
+// shared bargeGate; before the gate the phone splice re-armed on ANY
+// pump read, so stale in-flight audio of the interrupted utterance
+// re-armed the latch and replayed over the new turn). The gate is the
+// snapshot the pump took BEFORE its read: bargeIn bumps the gate under
+// its lock, so a snapshot equal to the CURRENT generation means the
+// chunk was read strictly after the cancel — only a new
+// supervisor-allowed say produces PCM then (the child aborted the
+// interrupted utterance's stream). After end the splice stays stopped
+// (ended guard). Mirrors the local splice's resume shape (F-1, per
+// barge-in, not per call).
+func (s *runSplice) resumeBargeIn(readGen uint64) {
 	s.mu.Lock()
-	armed := s.interrupt && !s.ended
+	armed := s.interrupt && !s.ended && s.gate.FreshSnapshot(readGen)
 	if armed {
 		s.interrupt = false
 		s.cancelSent = false
@@ -880,17 +918,39 @@ func (s *runSplice) outboundLoop(ctx context.Context) error {
 	go func() {
 		carry := make([]byte, 0, 4*s.chunkBytes)
 		for {
+			// Fresh-audio gate snapshot (A6, shared bargeGate): taken
+			// BEFORE the read so the stamp reflects exactly what this
+			// read saw. A chunk whose snapshot is behind the current
+			// generation was in flight when bargeIn landed (stale,
+			// discarded below); a post-cancel read before the residue
+			// deadline may still be socket residue of the interrupted
+			// stream (stale too).
+			readGen, residueUntil := s.gate.Snapshot()
 			rb := make([]byte, s.chunkBytes)
 			n, err := s.deps.Audio.ReadFromChild(rb)
 			if n > 0 {
-				// bughunt 2026-11-07 voice F-1: fresh child PCM means the
-				// call-level side started speaking again (only a new
-				// supervisor-allowed say produces a stream — the child
-				// aborted the interrupted utterance). Re-arm the barge-in
-				// latch so the pacer resumes writing toward Telnyx. At
-				// most one stale chunk (~20 ms) can ride past the child's
-				// abort check; bounded double-talk beats a muted call.
-				s.resumeBargeIn()
+				// Fresh-audio verdict (A6, shared bargeGate): stale
+				// when the chunk was read before the cancel bumped
+				// the generation (in-flight audio of the interrupted
+				// stream) OR, when playback was live at the cancel,
+				// read before the residue deadline (socket-buffer
+				// backlog the child wrote before it saw the clear
+				// frame). Stale chunks are DISCARDED at the pump:
+				// they never enqueue (so they cannot replay over the
+				// new turn NOR park on the overflow slot to trip the
+				// backpressure grace hangup) and never re-arm the
+				// latch.
+				if s.gate.ReadStale(readGen, residueUntil) {
+					s.log.Debug("voice: stale barge-in audio discarded",
+						"ccid", s.ccid, "read_gen", readGen, "bytes", n)
+					continue
+				}
+				// Genuinely FRESH child PCM (post-cancel, past the
+				// residue window) means the next say is speaking:
+				// re-arm the barge-in latch so the pacer resumes
+				// writing toward Telnyx (bughunt F-1: per barge-in,
+				// not per call).
+				s.resumeBargeIn(readGen)
 				carry = append(carry, rb[:n]...)
 				for len(carry) >= s.chunkBytes {
 					chunk := transcodeOutbound(carry[:s.chunkBytes], s.codec())
@@ -1050,6 +1110,10 @@ func (s *runSplice) paceOne(ctx context.Context) error {
 		}
 		return fmt.Errorf("voice: splice %s ws write: %w", s.ccid, werr)
 	}
+	// Paced outbound touch (A6 residue decision): a successful Telnyx
+	// write is the "a stream was flowing" evidence bargeIn consults.
+	// Stamped AFTER the write, pacer-only (single writer, read lock-free).
+	s.lastPacedWriteNano.Store(time.Now().UnixNano())
 	return nil
 }
 

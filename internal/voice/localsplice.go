@@ -94,15 +94,17 @@ const localDrainQuietDefault = 1 * time.Second
 // non-link/no-marker callers keep.
 const localDrainQuietFinal = 500 * time.Millisecond
 
-// localBargeResidueQuiet is the post-cancel residue window of the
+// localBargeResidueQuiet is the local leg's name for the shared
+// post-cancel residue window (bargeResidueQuiet, barge_gate.go) of the
 // fresh-audio barge-in gate (bughunt 2026-11-10 A6): chunks READ within
 // this window after HandleInterrupt are treated as socket-buffer residue
 // of the interrupted stream even when they carry the new generation —
 // the child had audio in flight when its abort path ran, and that audio
 // must not re-arm the latch or replay over the new answer. Chunks read
 // after the window are FRESH (the interrupted stream is long dead; only
-// a new say writes PCM by then).
-const localBargeResidueQuiet = 250 * time.Millisecond
+// a new say writes PCM by then). Kept as a named alias so the A6 pin
+// test's window reference stays legible.
+const localBargeResidueQuiet = bargeResidueQuiet
 
 // LocalSpliceConfig sizes the local splice. Zero values pick the CL7
 // defaults; ChunkBytes other than 640 (any non-L16@16k negotiation) is a
@@ -209,24 +211,24 @@ type runLocalSplice struct {
 	cancelOne bool // CancelDraft fired exactly once per barge-in
 	ended     bool // teardown latched: the latch must never re-arm after end
 	wake      chan struct{}
-	// Fresh-audio gate for resumeBargeIn (bughunt 2026-11-10 A6).
-	// HandleInterrupt bumps bargeGen and — when a stream was actively
-	// flowing at cancel time (recent outbound touch) — stamps
-	// residueUntilNano. The read pump snapshots bargeGen BEFORE each
-	// socket read; a chunk whose snapshot is behind the CURRENT
-	// generation was in flight when the cancel landed and can never
-	// re-arm the latch. A post-cancel read may still be socket-buffer
-	// residue of the interrupted stream (written by the child before it
-	// saw the clear frame), so chunks read before residueUntilNano are
-	// stale too — but ONLY when playback was live at the cancel: with
-	// no recent outbound touch there is no in-flight stream, so no
-	// residue is possible and the very first post-cancel PCM is fresh
-	// (the phase-1-then-say shape). Stale chunks are tagged on
-	// localReadItem and DISCARDED by the pacer, so neither the pump
-	// channel backlog nor in-flight reads can replay the interrupted
-	// stream over the new turn.
-	bargeGen         uint64
-	residueUntilNano int64
+	// Fresh-audio gate for resumeBargeIn (bughunt 2026-11-10 A6), now
+	// the SHARED bargeGate type (barge_gate.go) — the same gate the
+	// phone splice rides. HandleInterrupt bumps it and — when a stream
+	// was actively flowing at cancel time (recent outbound touch) —
+	// stamps the residue window onto it. The read pump snapshots the
+	// gate BEFORE each socket read; a chunk whose snapshot is behind
+	// the CURRENT generation was in flight when the cancel landed and
+	// can never re-arm the latch. A post-cancel read may still be
+	// socket-buffer residue of the interrupted stream (written by the
+	// child before it saw the clear frame), so chunks read before the
+	// residue deadline are stale too — but ONLY when playback was live
+	// at the cancel: with no recent outbound touch there is no
+	// in-flight stream, so no residue is possible and the very first
+	// post-cancel PCM is fresh (the phase-1-then-say shape). Stale
+	// chunks are tagged on localReadItem and DISCARDED by the pacer, so
+	// neither the pump channel backlog nor in-flight reads can replay
+	// the interrupted stream over the new turn.
+	gate bargeGate
 
 	// Drain watch (link half-duplex floor release, turn-taking leaf 02).
 	// The link coordinator's turn_final edge now sets EXPECT mode
@@ -583,16 +585,14 @@ func (s *runLocalSplice) outboundLoop(ctx context.Context) error {
 	go func() {
 		carry := make([]byte, 0, 4*s.chunkBytes)
 		for {
-			// Fresh-audio gate snapshot (A6): taken BEFORE the read so the
-			// stamp reflects exactly what this read saw. A chunk whose
-			// snapshot is behind the current bargeGen was in flight when
-			// HandleInterrupt landed (stale, tagged below); a post-cancel
-			// read before residueUntilNano may still be socket residue of
-			// the interrupted stream (stale too).
-			s.mu.Lock()
-			readGen := s.bargeGen
-			residueUntil := s.residueUntilNano
-			s.mu.Unlock()
+			// Fresh-audio gate snapshot (A6, shared bargeGate): taken
+			// BEFORE the read so the stamp reflects exactly what this
+			// read saw. A chunk whose snapshot is behind the current
+			// generation was in flight when HandleInterrupt landed
+			// (stale, tagged below); a post-cancel read before the
+			// residue deadline may still be socket residue of the
+			// interrupted stream (stale too).
+			readGen, residueUntil := s.gate.Snapshot()
 			rb := make([]byte, s.chunkBytes)
 			n, err := s.deps.Audio.ReadFromChild(rb)
 			if n == 0 && err != nil && isNotConnected(err) {
@@ -621,14 +621,15 @@ func (s *runLocalSplice) outboundLoop(ctx context.Context) error {
 				// chunk count (the daemon-side middle the chop hunt
 				// was missing).
 				s.pumpChunks.Add(1)
-				// Fresh-audio verdict (A6): stale when the chunk was
-				// read before the cancel bumped bargeGen (in-flight
-				// audio of the interrupted stream) OR, when playback
-				// was live at the cancel, read before the residue
-				// deadline (socket-buffer backlog the child wrote
-				// before it saw the clear frame).
-				stale := readGen != s.currentBargeGen() ||
-					(residueUntil != 0 && time.Now().UnixNano() < residueUntil)
+				// Fresh-audio verdict (A6, shared bargeGate):
+				// stale when the chunk was read before the
+				// cancel bumped the generation (in-flight
+				// audio of the interrupted stream) OR, when
+				// playback was live at the cancel, read
+				// before the residue deadline (socket-buffer
+				// backlog the child wrote before it saw the
+				// clear frame).
+				stale := s.gate.ReadStale(readGen, residueUntil)
 				// Drain evidence: the child produced bytes NOW (reopens
 				// the quiet window — the store happens before carry/
 				// pending are touched, so the watch can never read a
@@ -881,23 +882,17 @@ func (s *runLocalSplice) HandleInterrupt(ccid string) {
 	}
 	s.cancelOne = true
 	s.interrupt = true
-	// Fresh-audio gate (A6): every chunk the pump read BEFORE this point
-	// carries the old generation snapshot and can never re-arm the
-	// latch. When a stream was actively flowing at cancel time (an
-	// outbound touch within the residue window — playback live), also
-	// stamp the residue deadline: socket-buffer backlog read shortly
-	// after the cancel is still the interrupted stream's tail and is
-	// discarded until it passes. With NO recent touch there is no
-	// in-flight stream, so no residue is possible — the next PCM is
-	// unconditionally fresh and the immediate re-arm of the
-	// silent-then-say shape is preserved.
-	s.bargeGen++
-	lastTouch := s.audioLastAct.Load()
-	if lastTouch != 0 && time.Since(time.Unix(0, lastTouch)) < localBargeResidueQuiet {
-		s.residueUntilNano = time.Now().Add(localBargeResidueQuiet).UnixNano()
-	} else {
-		s.residueUntilNano = 0
-	}
+	// Fresh-audio gate (A6, shared bargeGate): every chunk the pump read
+	// BEFORE this point carries an old generation snapshot and can never
+	// re-arm the latch. When a stream was actively flowing at cancel
+	// time (an outbound touch within the residue window — playback
+	// live), the gate also stamps the residue deadline: socket-buffer
+	// backlog read shortly after the cancel is still the interrupted
+	// stream's tail and is discarded until it passes. With NO recent
+	// touch there is no in-flight stream, so no residue is possible —
+	// the next PCM is unconditionally fresh and the immediate re-arm of
+	// the silent-then-say shape is preserved.
+	s.gate.Bump(s.audioLastAct.Load(), bargeResidueQuiet)
 	s.mu.Unlock()
 	s.notify() // stop the pacer's in-flight wait now
 
@@ -925,45 +920,33 @@ func (s *runLocalSplice) HandleInterrupt(ccid string) {
 	s.log.Info("voice: local barge-in")
 }
 
-// currentBargeGen reads the fresh-audio generation under mu (the pump's
-// staleness verdict, A6).
-func (s *runLocalSplice) currentBargeGen() uint64 {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.bargeGen
-}
-
 // itemStale is the pacer-side staleness re-check (bughunt 2026-11-10 A6,
-// pacer-owned single goroutine: no lock needed). A chunk is stale when
-// its pre-read generation is behind the CURRENT generation (it was read
-// before HandleInterrupt bumped bargeGen — pre-cancel audio, whether
-// still in the pump backlog or read in flight), or when the residue
-// deadline is still live at consume time (socket-buffer residue of the
-// interrupted stream; the deadline only exists when playback was active
-// at the cancel). Stale chunks are dropped, never written to the client.
+// pacer-owned single goroutine: no lock needed on the caller side) over
+// the shared bargeGate. A chunk is stale when its pre-read generation is
+// behind the CURRENT generation (it was read before HandleInterrupt
+// bumped the gate — pre-cancel audio, whether still in the pump backlog
+// or read in flight), or when the gate's residue deadline is still live
+// at consume time (socket-buffer residue of the interrupted stream; the
+// deadline only exists when playback was active at the cancel). Stale
+// chunks are dropped, never written to the client.
 func (s *runLocalSplice) itemStale(gen uint64) bool {
-	if gen != s.currentBargeGen() {
-		return true
-	}
-	s.mu.Lock()
-	residueUntil := s.residueUntilNano
-	s.mu.Unlock()
-	return residueUntil != 0 && time.Now().UnixNano() < residueUntil
+	return s.gate.ConsumeStale(gen)
 }
 
 // resumeBargeIn re-arms the outbound latch for the NEXT barge-in — but
-// only from FRESH audio of the new turn (bughunt 2026-11-10 A6): stale
-// in-flight PCM of the interrupted stream (buffered in the socket or the
-// pump's carry when the cancel landed) must NOT re-arm the latch, or the
-// pacer replays the stale backlog over the new answer. The gate is the
-// generation the pump snapshotted BEFORE its read: HandleInterrupt bumps
-// bargeGen under mu, so a snapshot equal to the CURRENT generation means
-// the chunk was read strictly after the cancel — the child's next
-// supervisor-allowed say is the only writer at that point. After end the
-// splice stays stopped (ended guard, bughunt F-1 spirit).
+// only from FRESH audio of the new turn (bughunt 2026-11-10 A6, shared
+// bargeGate): stale in-flight PCM of the interrupted stream (buffered in
+// the socket or the pump's carry when the cancel landed) must NOT re-arm
+// the latch, or the pacer replays the stale backlog over the new answer.
+// The gate is the snapshot the pump took BEFORE its read:
+// HandleInterrupt bumps the gate under its lock, so a snapshot equal to
+// the CURRENT generation means the chunk was read strictly after the
+// cancel — the child's next supervisor-allowed say is the only writer at
+// that point. After end the splice stays stopped (ended guard, bughunt
+// F-1 spirit).
 func (s *runLocalSplice) resumeBargeIn(readGen uint64) {
 	s.mu.Lock()
-	armed := s.interrupt && !s.ended && s.bargeGen == readGen
+	armed := s.interrupt && !s.ended && s.gate.FreshSnapshot(readGen)
 	if armed {
 		s.interrupt = false
 		s.cancelOne = false
