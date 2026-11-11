@@ -60,6 +60,10 @@ var spokenLeakTokens = []string{
 	`"claims"`, `"evidence"`, // evidence-format JSON keys (template echo)
 	"success=true", // tool-result narration shape
 	"[system:",     // a nudge echoed back as an answer
+	// the voice-turn clock stamp echoed as an answer (same class as the
+	// [system: nudge: bracketed user-role scaffolding; injected by
+	// loopTurnRunner.Run in internal/daemon/voice_employee.go)
+	"[Context: current date/time",
 }
 
 // SpokenReplyViolation reports whether a reply is machine-shaped for the

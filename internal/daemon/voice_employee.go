@@ -322,6 +322,20 @@ func applyEmployeeDefinition(ctx context.Context, loop *agent.AgentLoop, employe
 	return override
 }
 
+// voiceTurnTimeLayout is the RFC1123-style clock layout for the voice-turn
+// stamp: weekday, date, wall time, zone abbreviation, and explicit numeric
+// offset so the model can do timezone arithmetic. Round-trips time.Parse
+// (pinned by voice_turn_context_test.go).
+const voiceTurnTimeLayout = "Mon 2006-01-02 15:04 MST (UTC-07:00)"
+
+// voiceTurnContextStamp renders the bracketed scaffolding line prepended to
+// a voice turn's spoken prompt (see Run for why). The stamp is model-facing
+// scaffolding: persistExchange still stores the raw spoken prompt, and the
+// reply's echo is backstopped by agent.SpokenReplyViolation on the way out.
+func voiceTurnContextStamp(now time.Time) string {
+	return "[Context: current date/time is " + now.Format(voiceTurnTimeLayout) + "] "
+}
+
 // Run implements voice.TurnRunner.
 func (r *loopTurnRunner) Run(ctx context.Context, sess voice.SessionHandle, prompt string) (string, error) {
 	loop, err := r.mgr.GetOrCreateWired(sess.ID, r.workingDir, r.template)
@@ -361,7 +375,17 @@ func (r *loopTurnRunner) Run(ctx context.Context, sess voice.SessionHandle, prom
 		r.logger.Debug("voice turn runner: employee persona applied",
 			"session_id", sess.ID, "employee_id", employeeID, "prompt_bytes", len(override))
 	}
-	reply, err := loop.RunOnce(ctx, prompt, sess.ConversationID)
+	// Clock stamp (live defect 2026-11-11: asked "what time is it?" the
+	// companion answered "I can't check the current time" — the voice turn
+	// carried no clock, and the model honestly reported what its prompt
+	// knew). Mirror the chat lane's injection idiom (strategic.go prepends
+	// its session-context scaffolding to the task text): a short
+	// date/time line is prepended to the USER prompt at turn start, on the
+	// voice seam only. Persisted history keeps the raw spoken prompt, and
+	// the spoken-reply guard (agent.SpokenReplyViolation, applied to the
+	// reply below) stays the echo backstop — the stamp is scaffolding for
+	// the model, never something TTS should read.
+	reply, err := loop.RunOnce(ctx, voiceTurnContextStamp(time.Now())+prompt, sess.ConversationID)
 	if err != nil {
 		return "", err
 	}
