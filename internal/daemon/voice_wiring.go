@@ -705,6 +705,15 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		w.releaseCall(ccid, out)
 	})
 
+	// -- 8b. Structured call brief + commitments (leaf 04, C4/C7):
+	// ADDITIVE observers on the answered + terminal lanes. The stub is
+	// written at answer; the finalize (analyzer + idempotent store write
+	// + C7 commitment filing) runs on a post-release goroutine, off the
+	// hot path. The frozen releaseOnce funnel above is untouched. Fail-
+	// soft throughout: nil analyzer or nil ledger store = stub stays /
+	// filing skipped, never a release failure.
+	wireBriefObservers(w, employee, manager, vlog.With("sub", "callbrief"))
+
 	// -- 9. C1 frame router: frames from the child land on the right
 	// call's talk loop; a setup frame registers a fresh loop.
 	textServer.SetHandler(w.routeFrame)

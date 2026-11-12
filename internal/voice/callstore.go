@@ -122,6 +122,12 @@ func NewCallStore(dbPath string, logger *slog.Logger) (*CallStore, error) {
 	// the expected steady state on migrated databases; anything else is
 	// fatal.
 	s.migrationAddColumn(`ALTER TABLE voice_calls ADD COLUMN outcome TEXT DEFAULT ''`, "outcome")
+	// Leaf 04 (C4): the brief column carries the FULL frozen C4 JSON
+	// envelope (status + ext travel together), ext stays opaque.
+	s.migrationAddColumn(`ALTER TABLE voice_calls ADD COLUMN brief TEXT NOT NULL DEFAULT ''`, "brief")
+	s.migrationAddColumn(`ALTER TABLE voice_calls ADD COLUMN ext TEXT NOT NULL DEFAULT ''`, "ext")
+	// Leaf 06 gate-compile prerequisite: recording.saved webhook target.
+	s.migrationAddColumn(`ALTER TABLE voice_calls ADD COLUMN recording_url TEXT NOT NULL DEFAULT ''`, "recording_url")
 	// Boot sweep (audit 2026-11-09 voice finding 7, C-V3): reconcile any
 	// row a previous process stranded at 'live' BEFORE this store can
 	// serve a new call. The store opens in WireVoiceEmployee, which runs
@@ -215,6 +221,12 @@ func (s *CallStore) SweepStaleLive(ctx context.Context) (int, error) {
 	n, err := res.RowsAffected()
 	if err != nil {
 		return 0, fmt.Errorf("voice callstore: sweep stale live count: %w", err)
+	}
+	// Leaf 04 (O1): a stub brief on a swept row means the process died
+	// mid-call — mark the stub abandoned. Terminal briefs (completed /
+	// failed) are untouched; rows without a stub get no brief.
+	if err := s.abandonStubs(ctx); err != nil {
+		return int(n), err
 	}
 	return int(n), nil
 }
