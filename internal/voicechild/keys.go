@@ -112,6 +112,25 @@ func scrubURL(u string) string {
 	return u[:i+3] + Redacted + authority[at:]
 }
 
+// openVocabularyPreserve is the pipeline's default C6 preserve hook (leaf
+// 03): the child side has no employee-context catalog, so every token is
+// presumed meaningful EXCEPT the known STT filler set — normalization
+// collapses duplicates and filler runs and drops only bare fillers.
+// Callers with a real catalog install a narrower hook via
+// SetNormalizePreserve.
+func openVocabularyPreserve(token string) bool {
+	return !fillerTokens[token]
+}
+
+// SetNormalizePreserve installs the C6 preserve hook on one call's
+// pipeline (leaf 03): tokens for which the hook returns true survive
+// NormalizeUtterance's noise-token drop. Set-once semantics: the hook is
+// config-shaped (employee context names), so later calls overwrite; the
+// hook is read by the transcript consumer, which starts after setup.
+func (p *pipeline) SetNormalizePreserve(preserve func(token string) bool) {
+	p.normalizePreserve = preserve
+}
+
 // applyKeys stores provider key material and the vendor/model/base_url/
 // voice selectors for the call in memory only (playMu-guarded, like the
 // keys themselves). The setup frame's negotiated sample rate is stamped
@@ -145,11 +164,17 @@ func (p *pipeline) applyKeys(k KeysFrame) {
 
 // emitPrompt sends a C1 prompt frame to the daemon: final transcripts
 // (last:true) start an employee turn; partials update the preview only.
-func (c *Child) emitPrompt(ctx context.Context, ccid, text string, final bool) error {
+// raw (leaf 03 T3): for finals, the RAW (un-normalized) transcript rides
+// the From field — the daemon's binding persists the caller's actual
+// words via AppendTranscript while the LLM turn runs on Text (already
+// normalized by the caller). Empty raw (partials, or a normalize pass)
+// omits the wire field (omitempty) so partial frames stay byte-identical.
+func (c *Child) emitPrompt(ctx context.Context, ccid, text string, final bool, raw string) error {
 	f := voiceframe.Frame{
 		CallID: ccid,
 		Event:  voiceframe.EventPrompt,
 		Text:   text,
+		From:   raw,
 	}
 	if final {
 		last := true

@@ -320,10 +320,10 @@ func TestPromptFrames(t *testing.T) {
 	waitFor(t, child.textConnected)
 
 	// no setup frame: emit directly against the connected child
-	if err := child.emitPrompt(context.Background(), "cc9", "partial words", false); err != nil {
+	if err := child.emitPrompt(context.Background(), "cc9", "partial words", false, ""); err != nil {
 		t.Fatalf("emitPrompt partial: %v", err)
 	}
-	if err := child.emitPrompt(context.Background(), "cc9", "final words", true); err != nil {
+	if err := child.emitPrompt(context.Background(), "cc9", "final words", true, "final words"); err != nil {
 		t.Fatalf("emitPrompt final: %v", err)
 	}
 
@@ -339,12 +339,14 @@ func TestPromptFrames(t *testing.T) {
 		t.Fatalf("final frame wrong: %+v", got)
 	}
 
-	// Byte-exact C1 shape check.
+	// Byte-exact C1 shape check (leaf 03: a final prompt now carries the
+	// RAW transcript in `from` so the daemon binding can persist the
+	// caller's actual words).
 	b, encErr := voiceframe.EncodeFrame(got)
 	if encErr != nil {
 		t.Fatalf("encode final prompt frame: %v", encErr)
 	}
-	want := `{"call_id":"cc9","event":"prompt","text":"final words","last":true}` + "\n"
+	want := `{"call_id":"cc9","event":"prompt","text":"final words","last":true,"from":"final words"}` + "\n"
 	if string(b) != want {
 		t.Fatalf("final prompt wire bytes:\n got %s\nwant %s", b, want)
 	}

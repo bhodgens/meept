@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/caimlas/meept/internal/voice/telnyx"
@@ -105,6 +106,25 @@ type Manager struct {
 	// it for the Connected event.
 	ansObsMu sync.Mutex
 	ansObs   []func(ccid string)
+
+	// actObsMu guards actObs: the ADDITIVE caller-activity observer lane
+	// (leaf 02, plan 20261110-uptractor-ports): the dead-air call reaper
+	// refreshes its own {ccid: lastActivity} map from it. The reaper keeps
+	// NO state here — this lane only carries notifications, additive
+	// exactly like ansObs/termObs; the Manager's per-ccid maps are
+	// untouched.
+	actObsMu sync.Mutex
+	actObs   []func(ccid string)
+
+	// recordingMu guards the leaf-06 recording seam (ADDITIVE, same
+	// pattern as the observer lanes): the consent policy the answer path
+	// consults and the URL sink the recording.saved webhook routes to.
+	// Both stay nil unless the daemon wiring arms them — the zero Manager
+	// never records (default-off is structural).
+	recordingMu      sync.Mutex
+	policy           RecordingPolicy
+	recordingStarter RecordingStarter
+	urlSink          func(ctx context.Context, ccid, url string) error
 }
 
 // NewManager returns a Manager. spawn may be nil when the caller only uses
@@ -309,6 +329,68 @@ func (m *Manager) notifyTerminal(ccid string, outcome Outcome, reason string) {
 	}
 }
 
+// AddActivityObserver registers a best-effort observer on the manager's
+// caller-activity notifications (ccid): every caller-side audio/turn edge
+// (final prompt frames from the frame router). ADDITIVE like
+// AddAnsweredObserver/AddTerminalObserver — any number may register and no
+// existing seam changes. The dead-air reaper (leaf 02) refreshes its own
+// {ccid: lastActivity} map from this lane; the manager holds no reaper
+// state. Nil fn is ignored.
+func (m *Manager) AddActivityObserver(fn func(ccid string)) {
+	if fn == nil {
+		return
+	}
+	m.actObsMu.Lock()
+	m.actObs = append(m.actObs, fn)
+	m.actObsMu.Unlock()
+}
+
+// NotifyCallActivity fires the caller-activity lane for ccid, outside all
+// mutexes (snapshot then call). The frame router invokes it on every
+// caller-side audio edge; a reaper not running costs one nil-check.
+func (m *Manager) NotifyCallActivity(ccid string) {
+	m.actObsMu.Lock()
+	if len(m.actObs) == 0 {
+		m.actObsMu.Unlock()
+		return
+	}
+	obs := make([]func(string), len(m.actObs))
+	copy(obs, m.actObs)
+	m.actObsMu.Unlock()
+	for _, fn := range obs {
+		fn(ccid)
+	}
+}
+
+// trackedCallIDs snapshots the ccids the manager currently tracks (the
+// calls map + outbound set, which together cover inbound and outbound
+// phone legs), excluding local/signal legs (their ids carry the
+// "local:"/"signal:" prefixes; they have no Telnyx authority and are never
+// probed). The reaper seeds its own dead-air map from this at startup;
+// lock is held only for the copy.
+func (m *Manager) trackedCallIDs() []string {
+	m.mu.Lock()
+	ids := make([]string, 0, len(m.calls)+len(m.outbound))
+	for ccid := range m.calls {
+		if isPhoneCCID(ccid) {
+			ids = append(ids, ccid)
+		}
+	}
+	for ccid := range m.outbound {
+		if isPhoneCCID(ccid) {
+			ids = append(ids, ccid)
+		}
+	}
+	m.mu.Unlock()
+	return ids
+}
+
+// isPhoneCCID reports whether ccid is a phone-leg id: NOT a local-leg
+// ("local:<label>") or signal-leg ("signal:<uuid>") id.
+func isPhoneCCID(ccid string) bool {
+	return !strings.HasPrefix(ccid, "local:") && !strings.HasPrefix(ccid, "signal:")
+}
+
 // HandleCallEvent drives the call lifecycle:
 //
 //	call.initiated (incoming) -> AnswerCall, then build the session
@@ -402,7 +484,24 @@ func (m *Manager) HandleCallEvent(ctx context.Context, ev telnyx.CallEvent) erro
 		streamURL := m.cfg.StreamURL
 		codec := m.cfg.Codec
 		m.mu.Unlock()
-		return m.tel.StartStreaming(ctx, ev.CallControlID, streamURL, codec)
+		err := m.tel.StartStreaming(ctx, ev.CallControlID, streamURL, codec)
+		if err == nil {
+			// Leaf 06: consent-gated recording starts ADDITIVELY after a
+			// clean streaming start. The policy's zero value (never wired)
+			// makes this a no-op — default-off is structural, not a
+			// config check. A recording-start failure is logged, never
+			// fatal: failing the webhook here would 500 the answered
+			// event and buy a Telnyx redelivery storm on a live call.
+			m.startRecordingIfArmed(ctx, ev.CallControlID)
+		}
+		return err
+	case telnyx.RecordingSavedEvent:
+		// Leaf 06: the finished recording's URL lands on the call
+		// row. ParseCallEvent classified this event explicitly (leaf
+		// 01 kept it out of IgnoredEventError), so it reaches this
+		// switch and routes through the armed sink (idempotent no-op
+		// when unwired — the webhook ACKs 200, no redelivery).
+		return m.HandleRecordingSaved(ctx, ev)
 	case "call.hangup":
 		callCancel, streamCancel, fire := m.releaseOnce(ev.CallControlID)
 		// Cancel the spawn session first (idempotent), then the media bridge

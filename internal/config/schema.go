@@ -5518,11 +5518,11 @@ type VoiceConfig struct {
 	// dead air => nudge at silence_prompt_seconds (S), hangup at S+H.
 	// Default 45 with S default 45 => nudge@45, hangup@90, exactly the
 	// legacy double-window endpoints. 0/negative reuses S (legacy shape).
-	SilenceHangupAfterSeconds int    `json:"silence_hangup_after_seconds" toml:"silence_hangup_after_seconds"`
-	TurnTimeoutSeconds        int    `json:"turn_timeout_seconds"   toml:"turn_timeout_seconds"`
-	MaxConcurrentCalls        int    `json:"max_concurrent_calls"   toml:"max_concurrent_calls"`
-	ReorderWindowFrames       int    `json:"reorder_window_frames"  toml:"reorder_window_frames"`
-	ReorderGapMs              int    `json:"reorder_gap_ms"         toml:"reorder_gap_ms"`
+	SilenceHangupAfterSeconds int `json:"silence_hangup_after_seconds" toml:"silence_hangup_after_seconds"`
+	TurnTimeoutSeconds        int `json:"turn_timeout_seconds"   toml:"turn_timeout_seconds"`
+	MaxConcurrentCalls        int `json:"max_concurrent_calls"   toml:"max_concurrent_calls"`
+	ReorderWindowFrames       int `json:"reorder_window_frames"  toml:"reorder_window_frames"`
+	ReorderGapMs              int `json:"reorder_gap_ms"         toml:"reorder_gap_ms"`
 	TelnyxPublicKey           string `json:"telnyx_public_key"      toml:"telnyx_public_key"`
 	ChildBinaryPath           string `json:"child_binary_path"      toml:"child_binary_path"`
 	LoopbackPlainAddr         string `json:"loopback_plain_addr"    toml:"loopback_plain_addr"`
@@ -5533,15 +5533,38 @@ type VoiceConfig struct {
 	STTModel                  string `json:"stt_model"             toml:"stt_model"`
 	TTSBaseURL                string `json:"tts_base_url"          toml:"tts_base_url"`
 	STTBaseURL                string `json:"stt_base_url"          toml:"stt_base_url"`
+	// ReaperIntervalS (leaf 02, C3): the dead-air reaper's sweep cadence.
+	// 0 => default 30s (frozen from the uptractor source); NEGATIVE
+	// disables the reaper entirely (opt-out without removing the key).
+	ReaperIntervalS int `json:"reaper_interval_s"      toml:"reaper_interval_s"`
+	// ReaperDeadAirS: release a call only after this much caller silence.
+	// 0 => default 60s; never reaped on age alone (owner-ratified
+	// DEAD-AIR semantics, master C3).
+	ReaperDeadAirS int `json:"reaper_dead_air_s"      toml:"reaper_dead_air_s"`
+	// ReaperMaxCallMinutes: the absolute cap from call start. 0 => default
+	// 30m (the talk-loop's max_call_minutes is a separate, older knob);
+	// negative values disable the reaper (same posture as interval).
+	ReaperMaxCallMinutes int `json:"reaper_max_call_minutes" toml:"reaper_max_call_minutes"`
 	// FreshSessionPerCall (opt-in, default false): each voice call opens a
 	// brand-new session instead of reusing the (employee, target) shared
 	// conversation, so turn history never snowballs across calls. The day
 	// brief stays the only cross-call context channel. Per-employee
 	// override: employee_leg rows carry fresh_session (tri-state).
-	FreshSessionPerCall bool                `json:"fresh_session_per_call" toml:"fresh_session_per_call"`
-	Local               LocalConfig         `json:"local"                  toml:"local"`
-	EmployeeLeg         []EmployeeLegConfig `json:"employee_leg"   toml:"employee_leg"`
-	Messaging           MessagingConfig     `json:"messaging"              toml:"messaging"`
+	FreshSessionPerCall bool `json:"fresh_session_per_call" toml:"fresh_session_per_call"`
+	// RecordCalls (leaf 06, opt-in, default false): start a dual-channel
+	// mp3 recording at call.answered. HARD-GATED by RecordConsentPin:
+	// enabling without a non-empty pin is a startup REFUSAL (Error log,
+	// recording forced off — fail-closed in the daemon wiring), never a
+	// silent record-without-consent (all-party-consent states).
+	RecordCalls bool `json:"record_calls" toml:"record_calls"`
+	// RecordConsentPin is REQUIRED non-empty when RecordCalls is true:
+	// the call must announce that it is being recorded (and driven by AI)
+	// before any record_start. Empty + RecordCalls=true => recording
+	// disabled with an Error log at wiring time.
+	RecordConsentPin string              `json:"record_consent_pin" toml:"record_consent_pin"`
+	Local            LocalConfig         `json:"local"                  toml:"local"`
+	EmployeeLeg      []EmployeeLegConfig `json:"employee_leg"   toml:"employee_leg"`
+	Messaging        MessagingConfig     `json:"messaging"              toml:"messaging"`
 }
 
 // DefaultUnapprovedCallerAllowedTools is the [voice]
@@ -5611,6 +5634,17 @@ type EmployeeLegConfig struct {
 	// true/false = this employee's override. Pointer because JSON5 cannot
 	// distinguish "absent" from false on a plain bool.
 	FreshSession *bool `json:"fresh_session" toml:"fresh_session"`
+	// GuidedIntake (leaf 05 uptractor-ports, opt-in per employee row,
+	// default false): run this employee's calls as guided intake —
+	// identify the caller, collect missing fields ONE question at a
+	// time, read the record back verbatim, and save only after the
+	// caller confirms (intake_save; confirm-flag gated at the tool
+	// layer). Scoped per employee_leg row deliberately: guided intake is
+	// the SECRETARY employee's call behavior (owner decision
+	// 2026-11-11), not a generic employee knob — an employee opts in by
+	// its own row, and the prompt extension + intake_save grant follow
+	// that row only. Pointer (tri-state like FreshSession).
+	GuidedIntake *bool `json:"guided_intake" toml:"guided_intake"`
 }
 
 // ContactConfig configures the employee contact chain ([contact],

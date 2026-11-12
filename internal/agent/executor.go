@@ -510,6 +510,12 @@ var ToolActionMap = map[string]string{
 	// the read-only platform bucket.
 	"ledger_append": "ledger_write",
 	"ledger_query":  "ledger_read",
+	// intake_save (leaf 05, guided intake): one CONFIRMED ledger append
+	// per intake record. Same ledger_write row as ledger_append (RiskLow,
+	// no generic confirmation gate — intake_save carries its own stricter
+	// confirm-flag gate at the tool layer, a full caller turn later by
+	// design).
+	"intake_save": "ledger_write",
 
 	// Delegate provider family (bughunt C32, the H7 "Unknown action"
 	// class): the delegate toolprov provider's five tools were registered

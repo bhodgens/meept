@@ -272,6 +272,12 @@ func (b *Binding) OnCallStart(ctx context.Context, ccid, number, employeeID, dir
 // interrupt progress events are published by the talk loop via
 // PublishSay / PublishInterrupt.
 func (b *Binding) RunTurn(ctx context.Context, ccid, text string) (string, error) {
+	// Leaf 03 (T3 raw-capture): text arrives NORMALIZED (the child's
+	// normalize pass + the wiring's From->Text swap). The RAW caller
+	// words ride ctx (rawTranscriptContextKey) and are what the call
+	// transcript stores — eval replays need the un-normalized audio
+	// transcript, while the LLM session sees the cleaned prompt.
+	raw := RawTranscriptFrom(ctx)
 	b.mu.Lock()
 	st, ok := b.calls[ccid]
 	if !ok {
@@ -296,8 +302,14 @@ func (b *Binding) RunTurn(ctx context.Context, ccid, text string) (string, error
 	// The caller's utterance is recorded BEFORE the LLM step (defect B
 	// handoff, 2026-11-10): a turn that errors or is cancelled mid-draft
 	// must never lose the user row - live evidence showed 0 user / 0
-	// assistant polls while filler audio had already played.
-	if uErr := b.deps.Calls.AppendTranscript(ctx, ccid, TranscriptLine{Role: "user", Text: text, At: time.Now().UTC()}); uErr != nil {
+	// assistant polls while filler audio had already played. The STORED
+	// text is the RAW transcript when one rode the frame (leaf 03), else
+	// the normalized text (older callers, tests).
+	stored := text
+	if raw != "" {
+		stored = raw
+	}
+	if uErr := b.deps.Calls.AppendTranscript(ctx, ccid, TranscriptLine{Role: "user", Text: stored, At: time.Now().UTC()}); uErr != nil {
 		b.logger.Error("voice binding: transcript user append", "ccid", ccid, "error", uErr)
 	}
 

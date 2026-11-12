@@ -802,6 +802,17 @@ test-doherty:
 	@echo "Running Doherty latency-budget tests (p95 < 400ms feedback / 100ms ack)..."
 	go test -p 2 ./internal/rpc/ -run TestDoherty -v
 
+# Voice sidecar eval lane (leaf 07 of plan 20261110-uptractor-ports).
+# Persistent lane: committed WAV fixtures (testdata/voice-eval/) through
+# the real local whisper path (internal/voicechild/providers, vendor
+# "whisper"), scored against thresholds + needles ported verbatim from
+# uptractor phone/core/sidecar-cloud/eval/{accuracy.py,prompt_leak.py}.
+# Weights absent (~/.meept/models/ggml-base.en.bin) => the lane SKIPS
+# LOUDLY: WARNING naming the missing path, exit 0. Never a silent pass.
+# Deterministic: fixed fixtures, pinned thresholds, no network.
+test-voice-eval:
+	@go test -p 2 ./internal/voice/eval/ -run 'TestLaneEndToEnd' -v
+
 
 fmt:
 	@echo "Formatting code..."

@@ -167,6 +167,11 @@ func TestPinnedGrantedToolsResolve(t *testing.T) {
 		// daemon-registered via RegisterLedgerTools behind the ledger
 		// store, so the registry enumeration cannot see them.
 		"ledger_append", "ledger_query",
+		// guided intake (leaf 05, secretary): registered through the
+		// voice provider only when SetIntakeSaveSaver is armed, so the
+		// provider walk cannot see it — this pin is its completeness
+		// coverage (H7 class).
+		"intake_save",
 	}
 	seen := map[string]bool{}
 	for _, name := range pinned {

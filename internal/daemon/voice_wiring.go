@@ -107,6 +107,14 @@ type VoiceWiring struct {
 	// concrete client) keeps the wiring testable with a fake seam.
 	tel telnyx.CallController
 
+	// telClient is the CONCRETE client behind tel (leaf 02): the reaper's
+	// standalone CallStatusChecker is satisfied by *telnyx.Client, which
+	// the narrow controller interface does not carry. nil in test wirings
+	// (a fake controller has no status authority; RunReaper's nil-Status
+	// guard then keeps the reaper a logged no-op — exactly the
+	// TestReaperWithoutCheckerDoesNothing contract).
+	telClient *telnyx.Client
+
 	// loops maps call_control_id -> live talk loop so the C1 frame
 	// handler routes frames and teardown cancels the right goroutine.
 	// loopCancels (same lock) holds the per-call context cancel armed at
@@ -164,6 +172,11 @@ type VoiceWiring struct {
 	// 02). Owned (opened at the components.go voice block, closed at
 	// Stop). nil when unwired.
 	displayStore *contact.SQLiteStore
+
+	// reaperCancel stops the dead-air reaper goroutine at shutdown (leaf
+	// 02, T4). nil when the reaper never started (phone leg disabled, or
+	// a negative config knob = explicitly off).
+	reaperCancel context.CancelFunc
 
 	// cfg + logger are construction-time values.
 	cfg    config.VoiceConfig
@@ -261,6 +274,10 @@ type WireVoiceDeps struct {
 // boot). A configuration error returns a named error: voice is opt-in, so
 // a HALF-configured voice block must fail the boot loudly, never degrade
 // to half-wired.
+// Config returns the resolved [voice] config block (read-only; the
+// guided-intake arming seam reads the employee_leg rows).
+func (w *VoiceWiring) Config() config.VoiceConfig { return w.cfg }
+
 func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 	cfg := deps.Config.Voice
 	logger := deps.Logger
@@ -464,7 +481,13 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		// moment block resolves via aw2SchedulerLoc) instead of the raw
 		// daemon local zone.
 		SchedulerTZ: deps.Config.Scheduler.Timezone,
-		Logger:      vlog.With("sub", "employee"),
+		// Guided intake prompt seam (leaf 05, secretary-scoped): resolved
+		// per bound employee id from the [voice.employee_leg] rows; an
+		// employee whose row lacks guided_intake gets an empty extension.
+		GuidedIntakePromptFor: func(employeeID string) string {
+			return guidedIntakePromptExtension(cfg, employeeID)
+		},
+		Logger: vlog.With("sub", "employee"),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("voice wiring: employee stack: %w", err)
@@ -594,6 +617,36 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 	w.auditStore = deps.Audit
 	if phoneEnabled {
 		w.tel = tel
+		w.telClient = tel
+	}
+
+	// -- 7a-b. Call recording (leaf 06, T3): consent gate evaluated at
+	// STARTUP, never lazily at first call. record_calls=true with an
+	// empty record_consent_pin is a refusal: Error log + recording forced
+	// off (fail-closed — a silent record-without-consent is the one
+	// outcome this gate exists to make impossible; all-party-consent
+	// states). Recording rides the PHONE leg only: with the carrier
+	// client unresolvable there is nothing to record, so the wiring
+	// degrades to unwired (same nil-tel posture as the reaper).
+	{
+		policy := voice.RecordingPolicy{
+			Enabled:          cfg.RecordCalls,
+			ConsentAnnounced: cfg.RecordConsentPin != "",
+		}
+		switch {
+		case policy.ConsentRefused():
+			vlog.Error("voice wiring: record_calls enabled but record_consent_pin is empty; "+
+				"recording FORCED OFF — set voice.record_consent_pin (the call must announce "+
+				"recording and AI before any record_start)",
+				"record_calls", true)
+		case policy.Enabled && phoneEnabled:
+			store := employee.store
+			manager.ArmRecording(policy, tel, func(ctx context.Context, ccid, url string) error {
+				return store.SetRecordingURL(ctx, ccid, url)
+			})
+			vlog.Info("voice wiring: call recording armed (consent pin set)",
+				"format", "mp3", "channels", "dual")
+		}
 	}
 
 	// -- 7b. LocalLeg (local-leg plan CL5/leaf 07): constructed when
@@ -695,6 +748,15 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		w.outcomes.Record(ccid, out)
 		w.releaseCall(ccid, out)
 	})
+
+	// -- 8b. Structured call brief + commitments (leaf 04, C4/C7):
+	// ADDITIVE observers on the answered + terminal lanes. The stub is
+	// written at answer; the finalize (analyzer + idempotent store write
+	// + C7 commitment filing) runs on a post-release goroutine, off the
+	// hot path. The frozen releaseOnce funnel above is untouched. Fail-
+	// soft throughout: nil analyzer or nil ledger store = stub stays /
+	// filing skipped, never a release failure.
+	wireBriefObservers(w, employee, manager, vlog.With("sub", "callbrief"))
 
 	// -- 9. C1 frame router: frames from the child land on the right
 	// call's talk loop; a setup frame registers a fresh loop.
@@ -1027,17 +1089,33 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 		// must never be recorded as heard - the telemetry would lie about
 		// delivery. The enqueue itself stays non-gating (never blocks).
 		if f.Event == voice.EventPrompt && f.Last != nil && *f.Last {
+			// Dead-air reaper refresh (leaf 02): a caller-side turn event
+			// resets that call's dead-air clock. The manager fans this to
+			// the additive activity observers (one nil-check when no
+			// reaper runs); the notify itself is pure bookkeeping.
+			w.Manager.NotifyCallActivity(f.CallID)
 			select {
 			case loop.Frames() <- f:
 				w.callEvents.Append(f.CallID, voice.EventInput{
 					Kind:  voice.EventKindHeard,
-					Text:  voice.PreviewEventText(f.Text),
-					Words: len(strings.Fields(f.Text)),
+					Text:  voice.PreviewEventText(f.From),
+					Words: len(strings.Fields(f.From)),
 				})
 			default:
 				w.logger.Warn("voice wiring: talk loop frame queue full", "ccid", f.CallID, "event", f.Event)
 			}
 			return
+		}
+		// Leaf 03 (T3 raw-capture): a FINAL prompt's From field carries
+		// the RAW (un-normalized) transcript. The talk loop must dispatch
+		// the NORMALIZED Text (that is what the LLM turn runs on), so the
+		// frame is rewritten here with raw text in From, normalized in
+		// Text — the binding's RunTurn then appends the RAW text to the
+		// call transcript (AppendTranscript keeps RAW) while the turn
+		// prompt stays normalized. Partials keep Text as-is (preview
+		// traffic) and carry no From payload.
+		if f.Event == voice.EventPrompt && f.Last != nil && *f.Last && f.From != "" && f.From != f.Text {
+			f.Text, f.From = f.From, ""
 		}
 		select {
 		case loop.Frames() <- f:
@@ -1253,6 +1331,10 @@ func (w *VoiceWiring) releaseCall(ccid string, outcome voice.Outcome) {
 	if w.Employee != nil && w.Employee.gates != nil {
 		w.Employee.gates.drop(ccid, string(outcome))
 	}
+	// Guided intake (leaf 05): the call's confirm state dies with the
+	// call — a replayed outcome or a new call on a recycled ccid can
+	// never inherit a confirmation.
+	clearIntakeSession(ccid)
 	w.sendEndFrame(ccid, outcome)
 	w.ChildProc.NoteCallEnd(ccid)
 
@@ -1517,6 +1599,35 @@ func (w *VoiceWiring) spliceRunner() func(context.Context, string, commhttp.WebS
 // failure still fails the boot.
 func (w *VoiceWiring) Start(ctx context.Context, registerTool func(dial builtin.DialerFunc, agentID builtin.AgentIDFunc)) error {
 	w.stopCtx, w.stopCancel = context.WithCancel(ctx)
+	// Dead-air call reaper (leaf 02, T4): phone-led only — the reaper
+	// probes Telnyx, so it is meaningless without the carrier client.
+	// A NEGATIVE knob (interval or max minutes) explicitly disables it;
+	// 0 takes the frozen defaults (interval 30s / dead air 60s / max 30m).
+	// Runs on its own goroutine bound to the daemon lifecycle ctx, stopped
+	// by reaperCancel at Stop.
+	if w.tel != nil && (w.cfg.ReaperIntervalS >= 0 || w.cfg.ReaperMaxCallMinutes >= 0) {
+		reaperCtx, reaperCancel := context.WithCancel(ctx)
+		w.reaperCancel = reaperCancel
+		// Status rides the CONCRETE *telnyx.Client (the standalone
+		// CallStatusChecker is satisfied by *Client, not by the narrow
+		// CallController interface the wiring carries — the manager's
+		// client field is the same instance).
+		var status voice.CallStatusChecker
+		if w.telClient != nil {
+			status = w.telClient
+		}
+		go w.Manager.RunReaper(reaperCtx, voice.ReaperConfig{
+			Status:      status,
+			Errors:      w.Employee.store,
+			Interval:    time.Duration(w.cfg.ReaperIntervalS) * time.Second,
+			DeadAir:     time.Duration(w.cfg.ReaperDeadAirS) * time.Second,
+			MaxDuration: time.Duration(w.cfg.ReaperMaxCallMinutes) * time.Minute,
+		})
+		w.logger.Info("voice reaper started",
+			"interval_s", w.cfg.ReaperIntervalS,
+			"dead_air_s", w.cfg.ReaperDeadAirS,
+			"max_call_minutes", w.cfg.ReaperMaxCallMinutes)
+	}
 	srvErr := make(chan error, 1)
 	go func() { srvErr <- w.TextServer.Start(w.stopCtx) }()
 	// Wait for the socket file (listener bound) or a bind failure.
@@ -1623,6 +1734,11 @@ func (w *VoiceWiring) Stop(ctx context.Context) {
 	}
 	stopCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	// Stop the reaper FIRST (leaf 02): its sweep must not release calls
+	// while the drain below is running the funnel itself.
+	if w.reaperCancel != nil {
+		w.reaperCancel()
+	}
 	w.drainLiveCalls(stopCtx)
 	StopSignalLeg(stopCtx, w.Signal)
 	if w.ChildProc != nil {
@@ -1760,6 +1876,14 @@ func (r bindingTurnRunner) Run(ctx context.Context, _ voice.SessionHandle, promp
 	// distinguishes stamped-zero from absent; never-stamped is only
 	// possible off the voice path).
 	turnCtx = callerid.With(turnCtx, r.inst.Caller)
+	// Guided intake (leaf 05): the ccid rides the turn ctx (the
+	// intake_save tool's callID seam keys the confirm state by it), and
+	// the caller-turn boundary advances the confirm state machine — a
+	// save demanded last turn becomes confirmable THIS turn (the
+	// uptractor turn-count rule: one full caller exchange between the
+	// read-back and the commit).
+	turnCtx = WithIntakeCCID(turnCtx, r.inst.CallControlID)
+	advanceIntakeTurn(r.inst.CallControlID)
 	return r.b.RunTurn(turnCtx, r.inst.CallControlID, prompt)
 }
 
