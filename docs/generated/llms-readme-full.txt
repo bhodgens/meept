@@ -2,7 +2,7 @@
 
 This document is a complete flattening of all Meept documentation into a single text file, designed to be fed to LLMs as context. It covers installation, architecture, configuration, workflows, and API reference.
 
-Generated: 2026-11-10T01:36:25Z
+Generated: 2026-11-12T01:23:09Z
 Source: https://github.com/caimlas/meept
 
 ---
@@ -18283,7 +18283,8 @@ sharing the serial "current phase" slot.
 
 **Observability.** Each phase start fires the existing phase-transition
 hook (the same one serial mode uses; frontier activations report an empty
-`fromPhase`). Completion still publishes `plan.phase_completed` and step
+`fromPhase`). Completion publishes `plan.phase_state` (the dead
+`plan.phase_completed` event was removed — audit F9, no subscribers) and step
 progress still publishes `task.progress`. **No new bus topics** were added
 for parallel dispatch.
 
@@ -22506,6 +22507,10 @@ A Goal is a long-lived mandate owned by an employee. "Keep CI green for main bra
 - A Goal has health: `green`, `yellow` (at risk), `red` (broken), or `unknown`.
 - Each Goal tracks its active Plan and plan history.
 - Goals are stored in the `employee_goals` SQLite table alongside `bot_definitions`.
+- Goal state changes are enforced by a store-level transition fence (contract C-P3):
+  `blocked -> active` only via the human-gated `goal_update` resume, `retired` is
+  terminal, every retired write stamps `retired_at`, and paused/blocked goals reject
+  assessment write-backs (employee delete soft-retires goal rows — audit trail preserved).
 
 **Standalone employee databases.** When `bots.enabled=false`, the goal and
 audit stores open their own SQLite files under `employees/`
@@ -29975,6 +29980,10 @@ The rules that stop it:
 - **Retries are bounded.** `synthesis_attempts` counts failed passes; after
   `MaxSynthesisAttempts` (3) the plan is parked in `failed`, a terminal state
   that neither the auto-approver nor `Synthesize` will re-enter.
+- **A periodic reclaimer re-drives stranded plans.** `StartSynthesisReclaimer`
+  (daemon ctx, 5m default) reclaims expired `synthesizing` leases and calls
+  `Synthesize` again for every reclaimed or `approved`-without-task plan —
+  recovery no longer waits for a daemon restart (audit 2026-11-09 M-8/M-9).
 
 Successful synthesis clears the lease in the same write that records
 `task_id`, so a completed expansion never looks claimed.
@@ -36447,7 +36456,10 @@ meept instructions preview "Every morning at 9am, run linter"
 **Status**: Implemented
 **Date**: 2026-11-02 (spec rev 2); as-built appended 2026-11-04; rev 3
 (local leg, plan docs/plans/20261106-voice-local-leg/) amended in
-2026-11-07
+2026-11-07; as-built 2026-11-10 adds the C1 `played` end-of-turn audio
+edge (child emits after the final byte of a last:true say stream; the
+link floor's drain watch arms from it instead of the blind turn_final
+arm - kills the mid-synthesis early floor release)
 
 This spec covers both voice legs: the Telnyx phone channel and the local
 (client audio) channel. It is not the client text-to-speech path in
@@ -36678,16 +36690,127 @@ Flow:
 
 ## Inbound answer
 
-1. Webhook `call.initiated`, signature verified. `from`/`to` arrive flat or
-   as `{"phone_number": ...}`; parse both shapes.
-2. Caller must be in `voice.allowed_numbers`. An unknown number is not
-   answered.
-3. `AnswerCall`, spawn or attach the call session, then on `call.answered`
+As shipped by plan docs/plans/20261110-caller-authz (issue #125), the
+inbound gate is an ACTION gate, not an ANSWER gate (decision O1). This
+section replaces the earlier "caller must be in voice.allowed_numbers"
+spec, which the shipped chain deliberately dropped:
+
+1. Webhook `call.initiated`, Telnyx Ed25519 signature verified (see
+   "Signatures"). `from`/`to` arrive flat or as `{"phone_number": ...}`;
+   parse both shapes.
+2. Answer EVERY call. `voice.allowed_numbers` does NOT gate inbound —
+   it is OUTBOUND-only (see "Outbound dial"). An unknown number gets an
+   employee to talk to; it does not get an open action surface.
+3. Resolve the caller ONCE at the answer site
+   (`internal/daemon/voice_wiring.go` spawn seam, 2 s budget): the
+   contacts store lookup yields `callerid.Info{Number, Name, Approved,
+   Known}`. Approved = the contact row's `voice_approved` column
+   (decision O2; default FALSE). An unknown number is NOT approved
+   (`Known=false`). Every failure mode (contact feature off, store
+   error, expired budget) degrades fail-soft to `Info{Number}` with a
+   WARN — answering is never blocked (O1).
+4. The identity rides the registry `Instance.Caller`;
+   `bindingTurnRunner.Run` stamps it onto EVERY turn context
+   (`callerid.With`, alongside the employee-id stamp). Voice loops
+   execute as the employee id (decision O5), so the per-employee
+   constitution tool gates (steps 1a/1b) finally apply on call turns —
+   voice loops used to run under agent id `default` and skipped them.
+5. The agent executor injects the presence-only details keys
+   `caller_approved` / `caller_known` (never the number or name) into
+   every tool-call permission check; the employee `PreExecChecker`
+   step 1c (`internal/employee/enforcement.go`) then trims an
+   unapproved or unknown caller to the message lane
+   (`[ledger_append, send_agent_message]`, config
+   `voice.unapproved_caller_allowed_tools`, decision O3). Anything the
+   employee constitution already forbids is denied even earlier —
+   steps 1a/1b run first and their deny wins (O5); a constitution
+   allow does NOT rescue an unapproved caller. Every other tool is
+   denied with the frozen model-facing text: "This caller is not
+   approved for that action. Take a message instead." (reason token
+   `caller_not_approved`).
+6. The 1c denial is warning severity with NO auto-pause (contrast
+   `never[]`, which is a critical stop): refusing a stranger caller is
+   a routing decision, not an employee emergency. Each denial emits
+   one `voice.unapproved_action` audit row (tool + call_control_id)
+   through the checker's audit seam — nil-safe by contract.
+   `RegisterPreExecCheckers` arms each checker's seam from the
+   manager's audit store at registration, so a stock daemon persists
+   the row (nil manager store leaves the seam inert, matching
+   pre-wiring behavior).
+   `internal/daemon/caller_matrix_test.go` pins the frozen row shape.
+7. `AnswerCall`, spawn or attach the call session, then on `call.answered`
    run `streaming_start`.
-4. Telnyx opens the media socket; the lifecycle in "Socket lifecycle"
+8. Telnyx opens the media socket; the lifecycle in "Socket lifecycle"
    applies.
-5. A `call.hangup` for an unknown id is a nil no-op. Teardown is idempotent
+9. A `call.hangup` for an unknown id is a nil no-op. Teardown is idempotent
    against duplicate or late hangups.
+
+**The webhook never waits on the goal hold (audit 2026-11-09 finding 1).**
+The spawn answers the call, acquires the registry slot, then hands the
+goal hold + call-row start (`holdPhoneCall`) to its own goroutine and
+returns immediately — a webhook response blocked on the per-employee
+mutex (a prior live call or assess round) would time out Telnyx's POST
+and invite a redelivery storm on a leg that is already answered. The
+employee's FIRST turn still waits for the hold: the talk loop's turn
+runner gates on the call's hold-ready signal before touching the
+employee loop, so per-employee serialization is unchanged — only the
+delivery became asynchronous. Fact-free filler/greeting lines may play
+while the hold pends (they read no employee state). If the call
+hangs up while its hold is still queued behind the prior round, the
+teardown is done by exactly one of the two racing paths (the release
+hook, or the hold goroutine observing the release and rolling its own
+registration back) — the employee mutex is never left parked.
+
+**Redelivery storms are accepted posture (finding 11).** The webhook
+maps manager errors to 500 precisely so Telnyx redelivers while the
+failure may be transient (carrier API unreachable). A redelivered
+`call.initiated` for an already-answered leg therefore re-enters the
+spawn: the registry's one-live-per-employee/target rule refuses the
+duplicate Acquire, the manager hangs that redelivered leg up, and
+Telnyx stops redelivering once the leg is hung up. There is no
+webhook-side dedupe of seen `call_control_id`s, deliberately — a
+correct one would have to survive restarts (the carrier sends no
+idempotency key), and the cost of the storm is bounded refused
+duplicates, not corrupted state.
+
+## Teardown end frame (audit 2026-11-09 finding 10)
+
+`releaseCall` sends the C1 `end` frame (`{"call_id":...,"event":"end",
+"reason":"<outcome>"}`, `last` omitted per the frames contract) to the
+child as the FIRST step of the release fan-out, before the talk-loop
+drop and context cancel, so the child tears its pipeline down through
+the frame protocol instead of only noticing socket EOF. The send is
+best-effort: no child connected or a dead socket logs and continues —
+EOF remains the fallback signal, and frame failure can never block or
+fail a release.
+
+**Restart mid-ring: "state unknown" residual (finding 8).** The dial
+completion channels (`Dialer.dones`, the manager's per-call done
+channels) are in-process only. If the daemon restarts while an outbound
+call is ringing, the effects ledger correctly reports the dial completed
+(a retry never re-rings), but `Dialer.doneFor` re-resolves the ccid
+through `Manager.WaitCall` — an id the new process never tracked — and
+gets a fresh channel that never closes. The caller's bounded context is
+the safety net: waiting past it is the expected, documented outcome, and
+the state of the pre-restart carrier leg is genuinely unknown (the new
+process has no media bridge for it). Reporting "ended" for such a ccid
+would be a guess that could unpark an employee goal while the leg is
+still live on the carrier, so the daemon does not guess. Hardening
+landed (leaf 04 T3): `doneFor` returns an
+already-closed channel + a WARN "state unknown" for receipted-but-
+untracked ccids, so waiters observe the unknown terminal immediately
+instead of burning their whole timeout.
+
+Residual risk (decision O4, owner Open Question Q1): `ledger_append`
+sits in the message lane, and step 1c cannot distinguish a
+state-setting (`set_status`) append from a note-taking one, so an
+unknown caller CAN drive employee-ledger rows including state changes
+until Q1 is settled. Accepted for this tree; pinned in the shipped
+behavior by `internal/daemon/caller_matrix_test.go`. The signal leg
+shares the turn-stamp site but not the phone leg's contact-resolve site
+(master Q2 fast-follow): signal instances carry a zero `Info`, which
+step 1c treats as unknown = unapproved — fail-closed, never an open
+gate.
 
 ## Barge-in contract
 
@@ -36736,8 +36859,15 @@ verdict) is the latency risk. Mitigations, all required:
   turn. Partials update the transcript preview only. Firing a model turn
   per partial fragment cannot keep up on a local model.
 - Per-call limits: max call duration (`voice.max_call_minutes`, default
-  15) and a silence prompt at `voice.silence_prompt_seconds` (default 45),
-  then hangup. The silence clock is TURN-AWARE: while an employee turn is
+  15) and a silence nudge at `voice.silence_prompt_seconds` (S, default
+  45) speaking the dedicated `voice.silence_prompt` line ("Are you still
+  there?" by default — dead air has nothing pending, so the filler
+  round-robin's answer-pending promises were the wrong semantics; an
+  explicitly empty `silence_prompt` falls back to the legacy filler line),
+  then hangup after `voice.silence_hangup_after_seconds` (H, default 45)
+  more silence: nudge@S, hangup@(S+H). Defaults 45/45 reproduce the legacy
+  double-window endpoints (nudge@45, hangup@90) exactly. The silence clock
+  is TURN-AWARE: while an employee turn is
   in flight (final prompt dispatched, reply not yet fully spoken) the
   silence window is suspended, so a slow cloud model (30-90s) is never
   reaped mid-generation; the window re-arms fresh once the reply is
@@ -36832,6 +36962,13 @@ Text from the child to the daemon:
 - `prompt` - caller text. `last: false` is a partial (transcript preview
   only). `last: true` is final and starts the employee turn
 - `interrupt` - caller spoke over the agent (barge-in contract above)
+- `played` - end-of-turn AUDIO marker: the playback worker wrote the
+  FINAL byte of a `last: true` `say` stream to the call's .out socket
+  (`{"call_id":...,"event":"played","last":true}`, exactly once per
+  turn-final stream, never for a non-final or barge-in-aborted stream).
+  The half-duplex link floor's drain watch arms from this edge - it is
+  the true "the speaker cannot produce more audio this turn" signal the
+  `turn_final` text edge never was (see the turn-taking release rule)
 - `end` - call ended
 
 Text from the daemon to the child:
@@ -36848,8 +36985,9 @@ The greeting on connect is also filler-class: fact-free, interruptible.
 
 ## Call flow (inbound, condensed)
 
-1. Telnyx sends `call.initiated`. The daemon checks the Ed25519 signature
-   and the caller allowlist.
+1. Telnyx sends `call.initiated`. The daemon verifies the Ed25519
+   signature (inbound is answer-all; see "Inbound answer" — the caller
+   allowlist is OUTBOUND-only).
 2. The daemon starts the child if needed, answers the call, and starts the
    media stream with L16/16000.
 3. The media socket opens. The daemon verifies the socket signature, reads
@@ -36891,11 +37029,21 @@ Proposed keys, all under `voice`:
 - `public_stream_url` - public wss URL fronting the loopback listener
 - `connection_id` - Telnyx Call Control application id
 - `from_number` - caller id for outbound dials
-- `allowed_numbers` - E.164 list; inbound and outbound both gated
+- `allowed_numbers` - E.164 list; OUTBOUND-only gate (plan
+  20261110-caller-authz: inbound is answer-all, actions are gated per
+  caller by the contacts `voice_approved` flag + PreExec step 1c)
 - `timeout_secs` - outbound ring timeout, default 30
 - `max_call_minutes` - int, default 15
-- `silence_prompt_seconds` - int, default 45; the clock pauses while the
-  employee turn is in flight and re-arms after the reply is spoken
+- `silence_prompt_seconds` - int, default 45; the nudge window (S): dead
+  air for S fires the nudge, another H (below) with no caller speech
+  hangs up. The clock pauses while the employee turn is in flight and
+  re-arms after the reply is spoken
+- `silence_prompt` - string, default "Are you still there?"; the dedicated
+  dead-air nudge line spoken on the first silence fire. Empty falls back
+  to the `filler` round-robin (legacy behavior)
+- `silence_hangup_after_seconds` - int, default 45; the hangup window (H)
+  after the nudge: hangup at S+H. 45+45 == the legacy double-window
+  endpoints (nudge@45, hangup@90); 0 reuses S
 - `turn_timeout_seconds` - int, default 0 (disabled); optional hard cap
   on one in-flight voice turn (bounds a hung employee LLM)
 - `fresh_session_per_call` - bool, default false (opt-in). When true,
@@ -37180,7 +37328,7 @@ reorder/transcode policy differ per leg:
 | --- | --- | --- | --- |
 | Audio source | Telnyx media socket | Telnyx media socket | client dials the C2 unix pair (mic/speaker) |
 | Identity (`direction`) | `inbound` | `outbound` | `local` |
-| Target shape | caller E.164 (allowlist) | allowlisted E.164 | `local:<label>` (label = config name or hostname), never E.164-normalized (internal/voice/dial.go:629-633) |
+| Target shape | caller E.164 (resolved to `callerid.Info` at answer; NOT allowlisted — plan 20261110-caller-authz) | allowlisted E.164 | `local:<label>` (label = config name or hostname), never E.164-normalized (internal/voice/dial.go:629-633) |
 | ccid shape | `call_control_id` | `call_control_id` | `"local-" + pkg/id.Generate()` (internal/voice/local.go:237) |
 | Registry leg | `phone` | `phone` | `local` (`Instance.Leg`, internal/voice/dial.go:555-569) |
 | Effects reservation | no (inbound) | YES, before POST | NO (deliberate: no paid side effect) |
@@ -37361,10 +37509,83 @@ transcripts. Two scenarios are registered in e2e/manifest.json
 `Binding.OnCallEnd` marks calls.db rows ended. It rides
 `ReleaseHook -> heldCalls`, and the hold is registered by
 `AcquireCallHold` on every live leg: local (`LocalDeps.Hold`), phone
-inbound (spawn seam), and phone outbound (`DialConfig.Hold`). Release
+inbound (spawn seam — async behind the hold gate, finding 1; the
+hold goroutine rolls its own registration back if the call releases
+while the hold pends), and phone outbound (`DialConfig.Hold`). Release
 is the manager hook exactly once; a nil hold seam degrades to no
 ended-state. The phone leg also calls `Binding.OnCallStart` from
 `holdPhoneCall` — without that row, OnCallEnd is a no-op.
+
+## As-built (2026-11-09, turn-taking leaf): link half-duplex
+
+Live link runs (link-6a3f3b65) proved the two link legs talked over
+each other: both employees greeted at once, and either leg's STT
+dispatched while the other was still speaking - simultaneous audio and
+half-answers. The fix lives entirely daemon-side (internal/voice/link.go
++ talkloop.go seams):
+
+- **One speaker at a time.** `LinkTurnCoordinator` (created per link in
+  `LinkManager.Open`, registered by registry target -
+  `local:link-a-<suffix>` / `local:link-b-<suffix>` - BEFORE the legs
+  open, because a setup frame can reach the frame router while Open is
+  still running). Each link side's talk loop is built by
+  `VoiceWiring.routeFrame` with two optional seams:
+  `TalkDeps.HoldPrompt` (a denied final prompt parks in the loop - one
+  slot, latest question wins, telemetry `kind=prompt_held`) and
+  `TalkDeps.TurnState` (`turn_start` / `turn_final` / `idle` edges).
+- **Release rule (drain-driven, leaf 02 + played edge).** The floor
+  releases on AUDIO DRAIN, not on the `turn_final` text edge:
+  `turn_final` sets the local splice's EXPECTED-final state
+  (`LocalSpliceFor(ccid).ExpectFinalDrain`) and arms a long FALLBACK
+  margin (default 12 s, `LinkDeps.TurnMargin`); the child's C1 `played`
+  frame (`{"call_id":...,"event":"played","last":true}`, emitted by the
+  playback worker right after the FINAL byte of the turn's last:true
+  say stream is written to the .out socket) routes through
+  `VoiceWiring.routeFrame` to `MarkFinalPlayed`, which ARMS the watch.
+  The first of (the splice's `AudioDrained` edge + 250 ms tail pad) or
+  (the fallback fire) clears the floor and dispatches the parked
+  prompt. The old rule - release `turn_final` + 600 ms - still let the
+  listener speak over the pacing tail: the daemon pacer holds up to
+  seconds of paced audio after the text flush (measured 335 talk-over
+  windows, 6.70 s on link-1108d776b0a1efb3). BLIND-arming the watch at
+  `turn_final` was STILL early (link-2fdc3f5fd8d81805: drained releases
+  fired 3/4 but mid-reply - the child synthesizes sentence-by-sentence
+  and the inter-sentence gaps of 1.4-3.8 s exceed the 1 s quiescence
+  window, so pending==0+quiet faked a drain while queued sentences
+  still had audio -> 60 short both-audible runs, 10.94 s overlap):
+  `turn_final` means the last say FRAME left the DAEMON, not that the
+  child finished PLAYING. The played edge is the audio truth. A
+  played-armed watch fires at pending==0 + a SHORT 500 ms quiet window
+  and, unlike the blind shape, fires on a silent post-arm stream (the
+  edge is itself the post-arm touch). If the edge never arrives (old
+  child binary, denied/aborted final stream) the turn rides the
+  fallback margin - late, never early; on a barge-in the `idle` edge
+  already released the floor and the child deliberately emits NO
+  played for aborted streams (a phantom edge on dead audio would fake
+  an end-of-turn). The fire's sub-chunk residue gate is gone: a real
+  TTS stream's byte total is never a multiple of 640, so a
+  carry==0 gate made the drain structurally unreachable - 0/5 drained
+  releases on link-6eb490abd8349958, and the 4 s watchdog beat the tail
+  on every long turn, measured write_ms up to 11.1 s). `HoldPromptFor` gates on the
+  floor, so a fresh listener prompt cannot claim it during the tail
+  either. An `idle` edge (barge-in cancel, teardown, unbind) releases
+  immediately: nothing is playing. A park alive when a loop exits is
+  logged and dropped (`kind=prompt_dropped`), never dispatched into a
+  dead call. Telemetry: `kind=floor_released` with
+  `reason=drained|margin`, plus `kind=prompt_released` on the loop edge.
+  The drain watch is LINK-only: `LocalDeps.LinkTurns` resolves per Open
+  by registry target, so plain local/phone splices never arm a watch
+  (a played frame for them is a Debug-logged no-op at the router).
+- **One greeting.** Side A greets on connect; side B's loop is built
+  with `TalkLoopConfig.SuppressGreeting` and speaks first only after
+  A's greeting arrives at B's mic as a final prompt (the conversation
+  seed). Because B opens silent, the bridge seeds each leg's mic with
+  5 exact 640 B zero chunks at dial so the splice's first-byte
+  JoinTimeout gate never depends on greeting audio.
+- **Blast radius.** All seams nil/false by default: phone, plain-local,
+  and signal calls construct their talk loops exactly as before (the
+  target-keyed registry lookup only matches link legs). Non-link tests
+  (grace/filler pins) run through the untouched path.
 
 ---
 
@@ -37577,6 +37798,22 @@ ended-state transition fires on every leg that registered
 `AcquireCallHold` (local Hold seam, phone inbound spawn, phone outbound
 `DialConfig.Hold`); release is once, through ReleaseHook.
 
+Operator telemetry (voice-events tree): every call carries a small
+fixed-size event ring inside the daemon (internal/voice/events.go,
+64 events per call, rings for the 32 most recent calls). The talk loop
+appends dispatch/final/barge-in/ended (and the link park lifecycle) at
+its existing log sites through the OPTIONAL TalkDeps.OnEvent hook — nil
+on any wiring that has not armed it, byte-identical loop either way —
+and the frame router appends a `heard` event when a FINAL prompt frame
+arrives (mic-speech evidence preceding the dispatch). The ring is read
+back over `voice.local.events` (params {call_id, cursor, limit?},
+seam-based like every other voice.local method — no new bus topic) and
+`meept voice link` / `meept voice local` poll it every 500 ms printing
+per-side lines: `heard:` / `thinking (N words)` / `replied (N words,
+Xms)` / `>> barge-in` / `call ended: <reason>`. Best-effort by
+contract: the poller never fails a run, and a final synchronous drain
+after close prints the tail events (rings outlive the call).
+
 ## Edge Cases
 
 - No-answer outbound releases the plan slot within timeout_secs.
@@ -37630,6 +37867,10 @@ without touching the main process.
   (stdlib-only; pinned by a test).
 - internal/voicechild: Child connects the shared text socket, routes
   setup/say/clear/end per call, one jargo-backed pipeline per call.
+  The playback worker emits the C1 `played` frame (last:true) once per
+  turn-final (`last:true` say) stream, strictly after its final byte
+  reaches the .out socket - the daemon's link-floor drain watch arms
+  from that edge; aborted/error/non-final streams emit nothing.
   Providers: Deepgram streaming STT and OpenAI TTS adapters behind the
   STTProvider/TTSProvider seams (internal/voicechild/providers), with a
   single reconnect per call, streamed first audio, and chunked s16le
@@ -39568,6 +39809,7 @@ Package agent provides the agent loop and related components.
 - [func BuildSystemPromptWithOverride\(override string, tools \[\]ToolDescription\) string](<#BuildSystemPromptWithOverride>)
 - [func BusTopic\(eventType AgentEventType\) string](<#BusTopic>)
 - [func CanonicalToolName\(name string\) string](<#CanonicalToolName>)
+- [func ChatTurnIDFromContext\(ctx context.Context\) string](<#ChatTurnIDFromContext>)
 - [func ClearPerOperationBackoffOverrideForTest\(key string\)](<#ClearPerOperationBackoffOverrideForTest>)
 - [func ContextWithToolRegistry\(ctx context.Context, reg ToolRegistry\) context.Context](<#ContextWithToolRegistry>)
 - [func ContinuationDescription\(desc string, k, n int\) string](<#ContinuationDescription>)
@@ -39624,6 +39866,7 @@ Package agent provides the agent loop and related components.
 - [func SoulPath\(\) string](<#SoulPath>)
 - [func SplitMemoryItems\(context string\) \[\]string](<#SplitMemoryItems>)
 - [func SplitStepsByAllotment\(steps \[\]\*task.TaskStep, allotmentTokens int, cfg AllotmentConfig\) \[\]\[\]\*task.TaskStep](<#SplitStepsByAllotment>)
+- [func SpokenReplyViolation\(reply string\) \(string, bool\)](<#SpokenReplyViolation>)
 - [func StatusBar\(s TurnStatus\) string](<#StatusBar>)
 - [func StoreSpecInTask\(t \*task.Task, spec \*TaskSpec\)](<#StoreSpecInTask>)
 - [func StripClaimsEvidence\(response string\) string](<#StripClaimsEvidence>)
@@ -39641,10 +39884,12 @@ Package agent provides the agent loop and related components.
 - [func VerifyFromToolResults\(results \[\]tools.ToolResult\) bool](<#VerifyFromToolResults>)
 - [func WarnToolsWithoutProperties\(reg ToolRegistry, logger \*slog.Logger\) \[\]string](<#WarnToolsWithoutProperties>)
 - [func WithACPTurnSource\(ctx context.Context, kind, employeeID string\) context.Context](<#WithACPTurnSource>)
+- [func WithChatTurnID\(ctx context.Context, turnID string\) context.Context](<#WithChatTurnID>)
 - [func WithExposurePlan\(ctx context.Context, plan \*ExposurePlan\) context.Context](<#WithExposurePlan>)
 - [func WithResumedTurn\(ctx context.Context\) context.Context](<#WithResumedTurn>)
 - [func WithRetryBudget\(ctx context.Context, budget \*RetryBudget\) context.Context](<#WithRetryBudget>)
 - [func WithScopeOptions\(ctx context.Context, opts \[\]llm.ChatOption\) context.Context](<#WithScopeOptions>)
+- [func WithThrottleDispatch\(ctx context.Context, d \*throttleTurnContext\) context.Context](<#WithThrottleDispatch>)
 - [func WithThrottleParkAttempt\(ctx context.Context, attempt int\) context.Context](<#WithThrottleParkAttempt>)
 - [func WithTraceContext\(ctx context.Context, traceID string\) context.Context](<#WithTraceContext>)
 - [type ACPExecutor](<#ACPExecutor>)
@@ -39730,6 +39975,7 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) Run\(ctx context.Context, messages \<\-chan \*AgentMessage, responses chan\<\- \*AgentResponse\) error](<#AgentLoop.Run>)
   - [func \(l \*AgentLoop\) RunOnce\(ctx context.Context, userMessage, conversationID string\) \(response string, err error\)](<#AgentLoop.RunOnce>)
   - [func \(l \*AgentLoop\) RunOnceWithParts\(ctx context.Context, userMessage string, parts \[\]llm.ContentPart, conversationID string\) \(response string, err error\)](<#AgentLoop.RunOnceWithParts>)
+  - [func \(l \*AgentLoop\) RunVoiceSpokenRewriteRetry\(ctx context.Context, conversationID string\) \(string, error\)](<#AgentLoop.RunVoiceSpokenRewriteRetry>)
   - [func \(l \*AgentLoop\) RunWithSkill\(ctx context.Context, skill \*skills.Skill, input string, conversationID string\) \(string, error\)](<#AgentLoop.RunWithSkill>)
   - [func \(l \*AgentLoop\) RunWithTask\(ctx context.Context, t \*task.Task\) \(string, error\)](<#AgentLoop.RunWithTask>)
   - [func \(l \*AgentLoop\) Security\(\) \*security.PermissionChecker](<#AgentLoop.Security>)
@@ -39737,6 +39983,7 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) SessionID\(\) string](<#AgentLoop.SessionID>)
   - [func \(l \*AgentLoop\) SetACPExecutor\(e \*ACPExecutor\)](<#AgentLoop.SetACPExecutor>)
   - [func \(l \*AgentLoop\) SetActive\(v bool\)](<#AgentLoop.SetActive>)
+  - [func \(l \*AgentLoop\) SetAgentID\(id string\)](<#AgentLoop.SetAgentID>)
   - [func \(l \*AgentLoop\) SetAutonomous\(autonomous bool\)](<#AgentLoop.SetAutonomous>)
   - [func \(l \*AgentLoop\) SetBeforeToolCallHook\(name string, priority HookPriority, hook BeforeToolCallHook\)](<#AgentLoop.SetBeforeToolCallHook>)
   - [func \(l \*AgentLoop\) SetBranchManager\(mgr any\)](<#AgentLoop.SetBranchManager>)
@@ -39762,6 +40009,7 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) SetMemvidClient\(client \*memvid.Client\)](<#AgentLoop.SetMemvidClient>)
   - [func \(l \*AgentLoop\) SetMessageDrainer\(d MessageDrainer\)](<#AgentLoop.SetMessageDrainer>)
   - [func \(l \*AgentLoop\) SetModelOverride\(modelRef string\)](<#AgentLoop.SetModelOverride>)
+  - [func \(l \*AgentLoop\) SetMomentRenderer\(fn func\(\) string\)](<#AgentLoop.SetMomentRenderer>)
   - [func \(l \*AgentLoop\) SetMultiUserScopeEnabled\(enabled bool\)](<#AgentLoop.SetMultiUserScopeEnabled>)
   - [func \(l \*AgentLoop\) SetNotificationPublisher\(publisher NotificationPublisher\)](<#AgentLoop.SetNotificationPublisher>)
   - [func \(l \*AgentLoop\) SetParallelismConfig\(baseParallelism int, profiles map\[string\]int\)](<#AgentLoop.SetParallelismConfig>)
@@ -39825,12 +40073,14 @@ Package agent provides the agent loop and related components.
   - [func \(r \*AgentRegistry\) RegisterSpec\(spec \*AgentSpec\) error](<#AgentRegistry.RegisterSpec>)
   - [func \(r \*AgentRegistry\) ReleaseTaskLoops\(taskID string\)](<#AgentRegistry.ReleaseTaskLoops>)
   - [func \(r \*AgentRegistry\) RunAgent\(ctx context.Context, agentID, message, conversationID string\) \(string, error\)](<#AgentRegistry.RunAgent>)
+  - [func \(r \*AgentRegistry\) RunAgentWithModelRef\(ctx context.Context, agentID, message, conversationID, modelRef string\) \(string, error\)](<#AgentRegistry.RunAgentWithModelRef>)
   - [func \(r \*AgentRegistry\) SeedChildConversation\(agentID, conversationID string, seed \[\]llm.ChatMessage\)](<#AgentRegistry.SeedChildConversation>)
   - [func \(r \*AgentRegistry\) SetACPExecutor\(e \*ACPExecutor\)](<#AgentRegistry.SetACPExecutor>)
   - [func \(r \*AgentRegistry\) SetCapabilitiesMap\(capMap \*CapabilitiesMap\)](<#AgentRegistry.SetCapabilitiesMap>)
   - [func \(r \*AgentRegistry\) SetCapabilityIndex\(ci \*skills.CapabilityIndex\)](<#AgentRegistry.SetCapabilityIndex>)
   - [func \(r \*AgentRegistry\) SetGlobalRules\(rules string\)](<#AgentRegistry.SetGlobalRules>)
   - [func \(r \*AgentRegistry\) SetLearningPipeline\(lp LearningPipeline\)](<#AgentRegistry.SetLearningPipeline>)
+  - [func \(r \*AgentRegistry\) SetPiiRestoreHook\(hook \*PiiRestoreHook\)](<#AgentRegistry.SetPiiRestoreHook>)
   - [func \(r \*AgentRegistry\) SetSchemaModeConfig\(cfg config.AgentToolsConfig\)](<#AgentRegistry.SetSchemaModeConfig>)
   - [func \(r \*AgentRegistry\) SetSkillLoader\(loader \*skills.LazySkillLoader\)](<#AgentRegistry.SetSkillLoader>)
   - [func \(r \*AgentRegistry\) SetTTSRManager\(mgr \*TTSRManager\)](<#AgentRegistry.SetTTSRManager>)
@@ -39965,6 +40215,10 @@ Package agent provides the agent loop and related components.
   - [func NewBudgetResumeWatcher\(budget \*llm.Budget, logger \*slog.Logger, resumeFunc func\(ctx context.Context, turn ParkedTurn\)\) \*BudgetResumeWatcher](<#NewBudgetResumeWatcher>)
   - [func \(w \*BudgetResumeWatcher\) Park\(turn ParkedTurn\) bool](<#BudgetResumeWatcher.Park>)
   - [func \(w \*BudgetResumeWatcher\) Pending\(\) int](<#BudgetResumeWatcher.Pending>)
+  - [func \(w \*BudgetResumeWatcher\) SetParkBackend\(b parkBackend\)](<#BudgetResumeWatcher.SetParkBackend>)
+  - [func \(w \*BudgetResumeWatcher\) SetParkEventBus\(b parkEventBus\)](<#BudgetResumeWatcher.SetParkEventBus>)
+  - [func \(w \*BudgetResumeWatcher\) SetParkPersistence\(store ParkPersistence, kind ParkKind\)](<#BudgetResumeWatcher.SetParkPersistence>)
+  - [func \(w \*BudgetResumeWatcher\) SetPersistenceOwner\(owner string\)](<#BudgetResumeWatcher.SetPersistenceOwner>)
   - [func \(w \*BudgetResumeWatcher\) Start\(ctx context.Context\)](<#BudgetResumeWatcher.Start>)
   - [func \(w \*BudgetResumeWatcher\) Stop\(\)](<#BudgetResumeWatcher.Stop>)
 - [type BudgetStatus](<#BudgetStatus>)
@@ -40008,6 +40262,7 @@ Package agent provides the agent loop and related components.
 - [type ChatDelegation](<#ChatDelegation>)
 - [type ChatHandler](<#ChatHandler>)
   - [func NewChatHandler\(loop \*AgentLoop, dispatcher \*Dispatcher, msgBus \*bus.MessageBus, logger \*slog.Logger\) \*ChatHandler](<#NewChatHandler>)
+  - [func \(h \*ChatHandler\) BudgetResumeWatcher\(\) \*BudgetResumeWatcher](<#ChatHandler.BudgetResumeWatcher>)
   - [func \(h \*ChatHandler\) ClearConversation\(conversationID string\)](<#ChatHandler.ClearConversation>)
   - [func \(h \*ChatHandler\) EmitTurnTerminal\(ev TurnTerminalEvent\)](<#ChatHandler.EmitTurnTerminal>)
   - [func \(h \*ChatHandler\) FormatAsyncTaskAck\(result \*DispatchResult\) string](<#ChatHandler.FormatAsyncTaskAck>)
@@ -40043,6 +40298,7 @@ Package agent provides the agent loop and related components.
 - [type ChildDescriptor](<#ChildDescriptor>)
   - [func UnmarshalChildDescriptor\(b \[\]byte\) \(ChildDescriptor, error\)](<#UnmarshalChildDescriptor>)
   - [func \(d ChildDescriptor\) Validate\(\) error](<#ChildDescriptor.Validate>)
+- [type ChildDescriptorLister](<#ChildDescriptorLister>)
 - [type ChildOptions](<#ChildOptions>)
 - [type ChildRecord](<#ChildRecord>)
 - [type ChildState](<#ChildState>)
@@ -40183,13 +40439,16 @@ Package agent provides the agent loop and related components.
   - [func \(m \*DelegateManager\) Join\(ctx context.Context, parentSessionID, childID string, timeout time.Duration\) \(DelegateResult, error\)](<#DelegateManager.Join>)
   - [func \(m \*DelegateManager\) Lookup\(childID string\) \(ChildRecord, bool\)](<#DelegateManager.Lookup>)
   - [func \(m \*DelegateManager\) Resume\(ctx context.Context, parentSessionID, childID string\) \(DelegateResult, error\)](<#DelegateManager.Resume>)
+  - [func \(m \*DelegateManager\) ResumeInFlightDescriptors\(ctx context.Context, parentSessionID string\) \(resumed \[\]string, failed \[\]string\)](<#DelegateManager.ResumeInFlightDescriptors>)
   - [func \(m \*DelegateManager\) Session\(childID string\) \(\*acp.Session, bool\)](<#DelegateManager.Session>)
   - [func \(m \*DelegateManager\) SetACPManager\(acpMgr \*acp.Manager\)](<#DelegateManager.SetACPManager>)
   - [func \(m \*DelegateManager\) SetDescriptorFactory\(f func\(ChildRecord\) ChildDescriptor\)](<#DelegateManager.SetDescriptorFactory>)
   - [func \(m \*DelegateManager\) SetForkSeed\(f func\(\*Conversation\) \[\]llm.ChatMessage\)](<#DelegateManager.SetForkSeed>)
   - [func \(m \*DelegateManager\) SetForkSeedWriter\(f func\(agentID, conversationID string, seed \[\]llm.ChatMessage\)\)](<#DelegateManager.SetForkSeedWriter>)
+  - [func \(m \*DelegateManager\) SetModelRefResolver\(f func\(ref string\) \(string, error\)\)](<#DelegateManager.SetModelRefResolver>)
   - [func \(m \*DelegateManager\) SetPersist\(f func\(ChildRecord\) error\)](<#DelegateManager.SetPersist>)
   - [func \(m \*DelegateManager\) SetRouteResolver\(f func\(ChildOptions, DelegateRequest\) \(ChildOptions, error\)\)](<#DelegateManager.SetRouteResolver>)
+  - [func \(m \*DelegateManager\) SetRunFunc\(f func\(ctx context.Context, agentID, message, conversationID, modelRef string\) \(string, error\)\)](<#DelegateManager.SetRunFunc>)
   - [func \(m \*DelegateManager\) SetStore\(store session.Store\)](<#DelegateManager.SetStore>)
   - [func \(m \*DelegateManager\) SettleForTest\(childID string, state ChildState, result, errStr string\)](<#DelegateManager.SettleForTest>)
   - [func \(m \*DelegateManager\) Spawn\(ctx context.Context, req DelegateRequest, parentSessionID string\) \(DelegateResult, error\)](<#DelegateManager.Spawn>)
@@ -40376,8 +40635,11 @@ Package agent provides the agent loop and related components.
   - [func DecodeGatePark\(rec ParkedTurnRecord\) \(GateParkData, string, error\)](<#DecodeGatePark>)
 - [type GateParker](<#GateParker>)
   - [func NewGateParker\(logger \*slog.Logger, turns \*TurnParker\) \*GateParker](<#NewGateParker>)
+  - [func \(p \*GateParker\) HasParkedGate\(gateKind, gateID string\) bool](<#GateParker.HasParkedGate>)
+  - [func \(p \*GateParker\) HasParkedGateForID\(gateID string\) bool](<#GateParker.HasParkedGateForID>)
   - [func \(p \*GateParker\) ParkGate\(data GateParkData\) bool](<#GateParker.ParkGate>)
   - [func \(p \*GateParker\) PendingGates\(\) int](<#GateParker.PendingGates>)
+  - [func \(p \*GateParker\) ReleaseByKey\(gateID, reason string\) \(bool, error\)](<#GateParker.ReleaseByKey>)
   - [func \(p \*GateParker\) ResumeByKey\(ctx context.Context, gateKind, gateID string\) bool](<#GateParker.ResumeByKey>)
   - [func \(p \*GateParker\) Turns\(\) \*TurnParker](<#GateParker.Turns>)
 - [type GatedExecutionRegistry](<#GatedExecutionRegistry>)
@@ -40490,6 +40752,7 @@ Package agent provides the agent loop and related components.
   - [func \(ia \*IntentAnalyzer\) AnalyzeTrueIntent\(ctx context.Context, input string, sessionContext \*SessionContextDigest\) \(\*TrueIntentAnalysis, error\)](<#IntentAnalyzer.AnalyzeTrueIntent>)
   - [func \(ia \*IntentAnalyzer\) ResolvedModel\(\) string](<#IntentAnalyzer.ResolvedModel>)
   - [func \(ia \*IntentAnalyzer\) SetBootReadiness\(b \*ClassifierBootReadiness\)](<#IntentAnalyzer.SetBootReadiness>)
+  - [func \(ia \*IntentAnalyzer\) SetPiiMaskHook\(hook \*PiiRestoreHook\)](<#IntentAnalyzer.SetPiiMaskHook>)
   - [func \(ia \*IntentAnalyzer\) WithAmbiguityThreshold\(threshold float64\) \*IntentAnalyzer](<#IntentAnalyzer.WithAmbiguityThreshold>)
 - [type IntentAnalyzerConfig](<#IntentAnalyzerConfig>)
 - [type IntentCategory](<#IntentCategory>)
@@ -40516,6 +40779,7 @@ Package agent provides the agent loop and related components.
   - [func \(c \*LLMClassifier\) MarkUnavailable\(\)](<#LLMClassifier.MarkUnavailable>)
   - [func \(c \*LLMClassifier\) ResolvedModel\(\) string](<#LLMClassifier.ResolvedModel>)
   - [func \(c \*LLMClassifier\) SetBootReadiness\(b \*ClassifierBootReadiness\)](<#LLMClassifier.SetBootReadiness>)
+  - [func \(c \*LLMClassifier\) SetPiiMaskHook\(hook \*PiiRestoreHook\)](<#LLMClassifier.SetPiiMaskHook>)
   - [func \(c \*LLMClassifier\) UnmarkUnavailable\(\)](<#LLMClassifier.UnmarkUnavailable>)
 - [type LLMClassifierConfig](<#LLMClassifierConfig>)
 - [type LLMMessage](<#LLMMessage>)
@@ -40681,6 +40945,7 @@ Package agent provides the agent loop and related components.
   - [func \(o \*Orchestrator\) Tactical\(\) \*TacticalScheduler](<#Orchestrator.Tactical>)
 - [type OrchestratorDeps](<#OrchestratorDeps>)
 - [type OverrideResult](<#OverrideResult>)
+- [type OwnerScopedPersistence](<#OwnerScopedPersistence>)
 - [type PPConversation](<#PPConversation>)
 - [type PairContext](<#PairContext>)
   - [func \(pc \*PairContext\) ActorPrompt\(\) string](<#PairContext.ActorPrompt>)
@@ -40817,6 +41082,14 @@ Package agent provides the agent loop and related components.
 - [type QueueEntry](<#QueueEntry>)
 - [type QueueEventPayload](<#QueueEventPayload>)
 - [type QueueInjectedPayload](<#QueueInjectedPayload>)
+- [type QueueParkBackend](<#QueueParkBackend>)
+  - [func NewQueueParkBackend\(q \*queue.Store, kind ParkKind, owner string\) \*QueueParkBackend](<#NewQueueParkBackend>)
+  - [func \(b \*QueueParkBackend\) Arm\(context.Context\)](<#QueueParkBackend.Arm>)
+  - [func \(b \*QueueParkBackend\) Delete\(ctx context.Context, kind ParkKind, key string\) error](<#QueueParkBackend.Delete>)
+  - [func \(b \*QueueParkBackend\) LoadOwned\(ctx context.Context, kind ParkKind, owner string\) \(\[\]ParkedTurnRecord, error\)](<#QueueParkBackend.LoadOwned>)
+  - [func \(b \*QueueParkBackend\) LoadOwnedKeyed\(ctx context.Context, kind ParkKind, owner string, now time.Time\) \(\[\]ParkedTurnRecord, \[\]string, error\)](<#QueueParkBackend.LoadOwnedKeyed>)
+  - [func \(b \*QueueParkBackend\) Save\(ctx context.Context, rec ParkedTurnRecord\) error](<#QueueParkBackend.Save>)
+  - [func \(b \*QueueParkBackend\) SaveKeyed\(ctx context.Context, kind ParkKind, key string, rec ParkedTurnRecord\) error](<#QueueParkBackend.SaveKeyed>)
 - [type QueuePersister](<#QueuePersister>)
   - [func NewQueuePersister\(db \*sql.DB, conversationID string, logger \*slog.Logger\) \(\*QueuePersister, error\)](<#NewQueuePersister>)
   - [func \(p \*QueuePersister\) ClearPending\(\) error](<#QueuePersister.ClearPending>)
@@ -40855,8 +41128,11 @@ Package agent provides the agent loop and related components.
   - [func NewQuotaResumeWatcher\(logger \*slog.Logger, resumeFunc func\(ctx context.Context, turn QuotaParkedTurn\), maxWait time.Duration\) \*QuotaResumeWatcher](<#NewQuotaResumeWatcher>)
   - [func \(w \*QuotaResumeWatcher\) Park\(turn QuotaParkedTurn\) bool](<#QuotaResumeWatcher.Park>)
   - [func \(w \*QuotaResumeWatcher\) Pending\(\) int](<#QuotaResumeWatcher.Pending>)
+  - [func \(w \*QuotaResumeWatcher\) SetGiveUpFunc\(fn func\(ctx context.Context, turn QuotaParkedTurn\)\)](<#QuotaResumeWatcher.SetGiveUpFunc>)
+  - [func \(w \*QuotaResumeWatcher\) SetParkBackend\(b parkBackend\)](<#QuotaResumeWatcher.SetParkBackend>)
   - [func \(w \*QuotaResumeWatcher\) SetParkEventBus\(b parkEventBus\)](<#QuotaResumeWatcher.SetParkEventBus>)
   - [func \(w \*QuotaResumeWatcher\) SetParkPersistence\(store ParkPersistence\)](<#QuotaResumeWatcher.SetParkPersistence>)
+  - [func \(w \*QuotaResumeWatcher\) SetPersistenceOwner\(owner string\)](<#QuotaResumeWatcher.SetPersistenceOwner>)
   - [func \(w \*QuotaResumeWatcher\) SetPollInterval\(d time.Duration\)](<#QuotaResumeWatcher.SetPollInterval>)
   - [func \(w \*QuotaResumeWatcher\) Start\(ctx context.Context\)](<#QuotaResumeWatcher.Start>)
   - [func \(w \*QuotaResumeWatcher\) Stop\(\)](<#QuotaResumeWatcher.Stop>)
@@ -40865,6 +41141,7 @@ Package agent provides the agent loop and related components.
   - [func NewRLMAnalyzerFromTraceStore\(cfg RLMAnalyzerConfig, store \*memory.TraceStore, llmClient \*llm.Client, logger \*slog.Logger\) \*RLMAnalyzer](<#NewRLMAnalyzerFromTraceStore>)
   - [func NewTestRLMAnalyzer\(cfg RLMAnalyzerConfig, store TraceStoreReader, llmClient \*llm.Client\) \*RLMAnalyzer](<#NewTestRLMAnalyzer>)
   - [func \(a \*RLMAnalyzer\) Analyze\(ctx context.Context, prompt string\) \(\*AnalyzeResult, error\)](<#RLMAnalyzer.Analyze>)
+  - [func \(a \*RLMAnalyzer\) SetPiiMaskHook\(hook \*PiiRestoreHook\)](<#RLMAnalyzer.SetPiiMaskHook>)
   - [func \(a \*RLMAnalyzer\) SetScopeProvider\(provider chatScopeProvider\)](<#RLMAnalyzer.SetScopeProvider>)
 - [type RLMAnalyzerConfig](<#RLMAnalyzerConfig>)
   - [func DefaultRLMConfig\(\) RLMAnalyzerConfig](<#DefaultRLMConfig>)
@@ -40900,6 +41177,7 @@ Package agent provides the agent loop and related components.
   - [func NewReflectionEngineWithConfig\(logger \*slog.Logger, linter \*lint.Registry, testRunner \*lint.TestRunner, llmClient llm.Chatter, config ReflectionConfig\) \*ReflectionEngine](<#NewReflectionEngineWithConfig>)
   - [func \(re \*ReflectionEngine\) RunReflection\(ctx context.Context, editedFiles \[\]string\) \(\*ReflectionResult, error\)](<#ReflectionEngine.RunReflection>)
   - [func \(re \*ReflectionEngine\) SetEditAvailability\(avail bool\)](<#ReflectionEngine.SetEditAvailability>)
+  - [func \(re \*ReflectionEngine\) SetPiiMaskHook\(hook \*PiiRestoreHook\)](<#ReflectionEngine.SetPiiMaskHook>)
   - [func \(re \*ReflectionEngine\) SetScopeProvider\(provider chatScopeProvider\)](<#ReflectionEngine.SetScopeProvider>)
 - [type ReflectionProposal](<#ReflectionProposal>)
 - [type ReflectionResult](<#ReflectionResult>)
@@ -40986,7 +41264,9 @@ Package agent provides the agent loop and related components.
   - [func \(s \*SQLiteParkStore\) Close\(\) error](<#SQLiteParkStore.Close>)
   - [func \(s \*SQLiteParkStore\) Delete\(ctx context.Context, kind ParkKind, persistenceKey string\) error](<#SQLiteParkStore.Delete>)
   - [func \(s \*SQLiteParkStore\) Load\(ctx context.Context, kind ParkKind, now time.Time\) \(\[\]ParkedTurnRecord, \[\]string, error\)](<#SQLiteParkStore.Load>)
+  - [func \(s \*SQLiteParkStore\) LoadOwned\(ctx context.Context, kind ParkKind, owner string, now time.Time\) \(\[\]ParkedTurnRecord, \[\]string, error\)](<#SQLiteParkStore.LoadOwned>)
   - [func \(s \*SQLiteParkStore\) Save\(ctx context.Context, kind ParkKind, persistenceKey string, rec ParkedTurnRecord\) error](<#SQLiteParkStore.Save>)
+  - [func \(s \*SQLiteParkStore\) SetOwnerFilter\(owner string\)](<#SQLiteParkStore.SetOwnerFilter>)
 - [type SQLiteStatePersister](<#SQLiteStatePersister>)
   - [func NewSQLiteStatePersister\(db \*sql.DB\) \(\*SQLiteStatePersister, error\)](<#NewSQLiteStatePersister>)
   - [func \(p \*SQLiteStatePersister\) Delete\(ctx context.Context, agentID string\) error](<#SQLiteStatePersister.Delete>)
@@ -41070,6 +41350,7 @@ Package agent provides the agent loop and related components.
 - [type SkillStateRuntime](<#SkillStateRuntime>)
   - [func NewSkillStateRuntime\(loop \*AgentLoop, cfg SkillStateConfig, logger \*slog.Logger\) \*SkillStateRuntime](<#NewSkillStateRuntime>)
   - [func \(r \*SkillStateRuntime\) Run\(ctx context.Context, skill \*skills.Skill, input, conversationID string\) \(string, error\)](<#SkillStateRuntime.Run>)
+  - [func \(r \*SkillStateRuntime\) SetPiiMaskHook\(hook \*PiiRestoreHook\)](<#SkillStateRuntime.SetPiiMaskHook>)
   - [func \(r \*SkillStateRuntime\) WithStateTraceWriter\(tw TraceWriter\) \*SkillStateRuntime](<#SkillStateRuntime.WithStateTraceWriter>)
   - [func \(r \*SkillStateRuntime\) WithToolRunner\(runner stateToolRunner\) \*SkillStateRuntime](<#SkillStateRuntime.WithToolRunner>)
 - [type SoulProvider](<#SoulProvider>)
@@ -41130,6 +41411,7 @@ Package agent provides the agent loop and related components.
   - [func \(sp \*StrategicPlanner\) SetInterviewOptionGates\(enabled bool\)](<#StrategicPlanner.SetInterviewOptionGates>)
   - [func \(sp \*StrategicPlanner\) SetInterviewProbe\(fn func\(\)\)](<#StrategicPlanner.SetInterviewProbe>)
   - [func \(sp \*StrategicPlanner\) SetMetricsStore\(store \*metrics.Store\)](<#StrategicPlanner.SetMetricsStore>)
+  - [func \(sp \*StrategicPlanner\) SetPiiMaskHook\(hook \*PiiRestoreHook\)](<#StrategicPlanner.SetPiiMaskHook>)
   - [func \(sp \*StrategicPlanner\) SetPlanCompilerEnabled\(enabled bool\)](<#StrategicPlanner.SetPlanCompilerEnabled>)
   - [func \(sp \*StrategicPlanner\) SetPlanPhaseSink\(fn func\(taskID string, phases \[\]PlanPhaseSpec\)\)](<#StrategicPlanner.SetPlanPhaseSink>)
   - [func \(sp \*StrategicPlanner\) SetRegistry\(reg \*AgentRegistry\)](<#StrategicPlanner.SetRegistry>)
@@ -41142,6 +41424,7 @@ Package agent provides the agent loop and related components.
 - [type SynthesizeTracesTool](<#SynthesizeTracesTool>)
   - [func NewSynthesizeTracesTool\(store TraceStoreReader, llmClient \*llm.Client\) \*SynthesizeTracesTool](<#NewSynthesizeTracesTool>)
   - [func \(t \*SynthesizeTracesTool\) Invoke\(ctx context.Context, args map\[string\]any\) \(map\[string\]any, error\)](<#SynthesizeTracesTool.Invoke>)
+  - [func \(t \*SynthesizeTracesTool\) SetPiiMaskHook\(hook \*PiiRestoreHook\)](<#SynthesizeTracesTool.SetPiiMaskHook>)
   - [func \(t \*SynthesizeTracesTool\) SetScopeProvider\(provider chatScopeProvider\)](<#SynthesizeTracesTool.SetScopeProvider>)
 - [type SynthesizedProgressEvent](<#SynthesizedProgressEvent>)
 - [type TTSRManager](<#TTSRManager>)
@@ -41322,12 +41605,16 @@ Package agent provides the agent loop and related components.
   - [func NewTurnParker\(logger \*slog.Logger, resume func\(context.Context, ParkedTurnRecord\), maxWait time.Duration\) \*TurnParker](<#NewTurnParker>)
   - [func \(p \*TurnParker\) EmitParkEvent\(rec ParkedTurnRecord, modelID, providerID string\)](<#TurnParker.EmitParkEvent>)
   - [func \(p \*TurnParker\) EmitResumeEvent\(rec ParkedTurnRecord, trueParkAt time.Time\)](<#TurnParker.EmitResumeEvent>)
+  - [func \(p \*TurnParker\) HasPendingForConversation\(conversationID string\) bool](<#TurnParker.HasPendingForConversation>)
   - [func \(p \*TurnParker\) Next\(class llm.FailureClass\) \(time.Time, bool\)](<#TurnParker.Next>)
   - [func \(p \*TurnParker\) Park\(turn ParkedTurnRecord\) bool](<#TurnParker.Park>)
   - [func \(p \*TurnParker\) Pending\(\) int](<#TurnParker.Pending>)
+  - [func \(p \*TurnParker\) SetBackend\(b parkBackend\)](<#TurnParker.SetBackend>)
+  - [func \(p \*TurnParker\) SetGiveUpFunc\(fn func\(ctx context.Context, turn ParkedTurnRecord\)\)](<#TurnParker.SetGiveUpFunc>)
   - [func \(p \*TurnParker\) SetParkEventBus\(b parkEventBus\)](<#TurnParker.SetParkEventBus>)
   - [func \(p \*TurnParker\) SetParkKey\(keyFn func\(rec ParkedTurnRecord\) string\)](<#TurnParker.SetParkKey>)
   - [func \(p \*TurnParker\) SetParkPersistence\(store ParkPersistence, kind ParkKind\)](<#TurnParker.SetParkPersistence>)
+  - [func \(p \*TurnParker\) SetPersistenceOwner\(owner string\)](<#TurnParker.SetPersistenceOwner>)
   - [func \(p \*TurnParker\) SetPollInterval\(d time.Duration\)](<#TurnParker.SetPollInterval>)
   - [func \(p \*TurnParker\) SetResumeFunc\(resume func\(context.Context, ParkedTurnRecord\)\)](<#TurnParker.SetResumeFunc>)
   - [func \(p \*TurnParker\) Start\(ctx context.Context\)](<#TurnParker.Start>)
@@ -41617,6 +41904,20 @@ DELIVERY CONTRACT: the bus \(internal/bus\) has no latched or buffered topics �
 	    TopicPairError = "pair.error"
 	)
 
+<a name="ParkOwnerQuotaWatcher"></a>parkedTurnsSchema creates the parked\-turn table. Times are RFC3339 TEXT \(same convention as sessions.created\_at\); turn\_payload is the raw ParkedTurnRecord.TurnPayload JSON preserved byte\-for\-byte so the class\-specific decoders \(quotaTurnPayload / goalTurnPayload\) see exactly what the pre\-restart parker held. Park\-owner identifiers \(C\-K1, statemachine\-remediation tree 04 leaf 01\): every persisted parked turn carries exactly ONE owning parker, stamped at Save and enforced at Load. Kind scoping alone was the C1 CRITICAL: the quota watcher's inner parker and the daemon's throttle parker BOTH persist under ParkKindChat, so a kind\-only Load re\-armed each parker's Start with the OTHER's rows — and because quota/throttle payload keys overlap, a throttle row decoded "successfully" into quotaTurnPayload and the message executed a second time. Owners make the re\-arm partition disjoint: a row can only ever be loaded \(and resumed\) by its owner.
+
+	const (
+	    ParkOwnerQuotaWatcher = "quota-watcher" // QuotaResumeWatcher's inner parker
+	    ParkOwnerThrottle     = "throttle"      // daemon chat throttle TurnParker
+	    ParkOwnerGate         = "gate"          // dedicated ParkKindGate parker
+	    ParkOwnerEpisode      = "episode"       // goal-loop ParkKindEpisode parker
+	    // ParkOwnerBudget is the BudgetResumeWatcher's C-K1 identity (F5, tree
+	    // 04 leaf 04): budget-parked chat turns persist under ParkKindChat like
+	    // the quota watcher and throttle parker, and the owner column keeps the
+	    // three re-arms disjoint.
+	    ParkOwnerBudget = "budget"
+	)
+
 <a name="ReasonQuotaWait"></a>Park lifecycle reason strings \(leaf contract\): parked on a provider wait \(reason follows the class — "quota\_wait" | "throttle\_wait"\), resumed into the loop, or abandoned past MaxWait.
 
 	const (
@@ -41624,6 +41925,17 @@ DELIVERY CONTRACT: the bus \(internal/bus\) has no latched or buffered topics �
 	    ReasonThrottleWait    = "throttle_wait"    // park (class=throttle)
 	    ReasonThrottleResumed = "throttle_resumed" // resume (class=throttle)
 	    ReasonThrottleGiveUp  = "throttle_give_up" // give-up past MaxWait
+	    // ReasonQuotaGiveUp is the attempt-cap give-up for quota records
+	    // (M-4-park, tree 04 leaf 04): the re-park generation reached
+	    // MaxAttempts, so the drain abandons instead of replaying the turn.
+	    ReasonQuotaGiveUp = "quota_give_up"
+	)
+
+<a name="ReasonBudgetWait"></a>
+
+	const (
+	    ReasonBudgetWait    = "budget_wait"    // park (class=budget)
+	    ReasonBudgetResumed = "budget_resumed" // resume (class=budget)
 	)
 
 <a name="DefaultConstitution"></a>Default prompt sections \(used as fallbacks\).
@@ -41684,6 +41996,10 @@ DELIVERY CONTRACT: the bus \(internal/bus\) has no latched or buffered topics �
 	    DefaultPrefilterThreshold = 0.70
 	)
 
+<a name="DefaultQuotaMaxAttempts"></a>DefaultQuotaMaxAttempts bounds the quota re\-park generations \(M\-4\-park\). The encode side stamps it onto every quota record; the drain\-side give\-up lands with tree 04 leaf 04.
+
+	const DefaultQuotaMaxAttempts = 5
+
 <a name="DefaultQuotaResumePollInterval"></a>DefaultQuotaResumePollInterval is the re\-check cadence for parked turns. Mirrors config llm.quota\_retry.defer\_check\_interval's 10m default; the field is exported on the watcher for tests and config wiring. It is an alias of the TurnParker default \(parked\_turn.go\) — one source of truth.
 
 	const DefaultQuotaResumePollInterval = DefaultTurnParkerPollInterval
@@ -41719,6 +42035,10 @@ DELIVERY CONTRACT: the bus \(internal/bus\) has no latched or buffered topics �
 
 	const MaxSoulBytes = 64 * 1024
 
+<a name="ParkClassBudget"></a>ParkClassBudget is the agent.quota\_wait wire class for budget\-parked turns \(F5\). parkClassString only maps provider\-failure classes; budget waits are a distinct wire class with no FailureClass equivalent.
+
+	const ParkClassBudget = "budget"
+
 <a name="SoulFileName"></a>SoulFileName is the soul file's name inside the meept home directory.
 
 	const SoulFileName = "SOUL.md"
@@ -41740,6 +42060,14 @@ DELIVERY CONTRACT: the bus \(internal/bus\) has no latched or buffered topics �
 <a name="TurnSnapshotVersion"></a>
 
 	const TurnSnapshotVersion = 1
+
+<a name="VoiceSpokenFallbackLine"></a>VoiceSpokenFallbackLine replaces a spoken reply when the ONE bounded rewrite also trips \(or errors\): an honest, speakable line — never the machine\-shaped original. Lowercase per the repo UI\-text convention, matching the chat guard's canned lines.
+
+	const VoiceSpokenFallbackLine = "sorry, that answer came out tangled — could you ask me one more time?"
+
+<a name="VoiceSpokenRewriteNudge"></a>VoiceSpokenRewriteNudge is the user\-role nudge the voice adapter sends when a reply trips the spoken guard: same bracketed \[system: ...\] convention as replyGuardRewriteNudge, spoken\-specific remedy.
+
+	const VoiceSpokenRewriteNudge = "[system: your previous reply reached the caller as machine-shaped text (tool identifiers, evidence templates, bracketed status labels) read aloud through text-to-speech. rewrite your answer as plain spoken language: short sentences, no identifiers, no JSON, no code blocks, no bracketed labels. say only what the caller needs to hear.]"
 
 ## Variables
 
@@ -42089,6 +42417,17 @@ Consumers: prefilter vote\(\) cue guard, LLM\-chain post\-check \(leaf 02, optio
 	    "goal_get":    "goal_read",
 	    "goal_create": "goal_write",
 	    "goal_update": "goal_write",
+	
+	    "ledger_append": "ledger_write",
+	    "ledger_query":  "ledger_read",
+	
+	    "workflow":               "agent_delegate",
+	    "workflow_status":        "platform_read",
+	    "subagent_send_message":  "subagent_control",
+	    "subagent_interrupt":     "subagent_control",
+	    "subagent_list_children": "platform_read",
+	
+	    "contact": "contact",
 	}
 
 <a name="TopicTurnTerminal"></a>TopicTurnTerminal is the typed declaration for the turn.terminal bus topic \(typed\-bus\-topics leaf 02\). Publishers MUST use bus.PublishT with this declaration; future subscribers MUST use bus.SubscribeT with it. Payload is the frozen TurnTerminalEvent \- see its doc comment \(CLOSED field set\).
@@ -42192,6 +42531,13 @@ BusTopic returns the bus topic for a given agent event type. Convention: "agent.
 	func CanonicalToolName(name string) string
 
 CanonicalToolName returns the registered tool name for an agent grant. Unknown names pass through unchanged.
+
+<a name="ChatTurnIDFromContext"></a>
+## func ChatTurnIDFromContext
+
+	func ChatTurnIDFromContext(ctx context.Context) string
+
+ChatTurnIDFromContext reads the turn identity stamped by the handler seam; "" when absent.
 
 <a name="ClearPerOperationBackoffOverrideForTest"></a>
 ## func ClearPerOperationBackoffOverrideForTest
@@ -42610,6 +42956,13 @@ SplitMemoryItems splits an assembled memory context string back into its structu
 
 SplitStepsByAllotment greedily partitions ordered steps into batches whose estimated token totals fit within allotmentTokens. An oversize step \(its own estimate exceeds the allotment\) gets its own batch. MaxBatchSteps \> 0 additionally caps steps per batch. allotmentTokens \<= 0 returns a single batch containing every step.
 
+<a name="SpokenReplyViolation"></a>
+## func SpokenReplyViolation
+
+	func SpokenReplyViolation(reply string) (string, bool)
+
+SpokenReplyViolation reports whether a reply is machine\-shaped for the SPOKEN lane, naming the trigger for the WARN. It classifies the shared reply\-guard shapes FIRST \(a raw dump is garbage aloud too — defense in depth for adapters that receive a reply before the loop seam ran\) plus the spoken\-lane extension above. Pure and idempotent: a clean prose reply returns \("", false\) with no side effects, so calling it twice on the same text is safe \(the "guard runs exactly once" posture at the adapter is about the rewrite budget, not classification\).
+
 <a name="StatusBar"></a>
 ## func StatusBar
 
@@ -42747,6 +43100,13 @@ WarnToolsWithoutProperties logs a warning listing every property\-less tool in r
 
 WithACPTurnSource stamps who is driving an acp turn onto ctx so ACPExecutor.recordTurn can tag acp.persona.turns without the executor knowing about employees. kind is ACPTurnSourceEmployee for employee turns \(employeeID names the employee; an empty id just omits the employee\_id tag\); an empty kind returns ctx unchanged — the chat default — so a mis\-wired caller can never emit source:"".
 
+<a name="WithChatTurnID"></a>
+## func WithChatTurnID
+
+	func WithChatTurnID(ctx context.Context, turnID string) context.Context
+
+WithChatTurnID returns ctx carrying the turn's chat.submit identity. Empty turnIDs are not stamped \(legacy turns stay payload\-silent\).
+
 <a name="WithExposurePlan"></a>
 ## func WithExposurePlan
 
@@ -42774,6 +43134,13 @@ WithRetryBudget attaches a retry budget to a context.
 	func WithScopeOptions(ctx context.Context, opts []llm.ChatOption) context.Context
 
 WithScopeOptions attaches caller\-captured task/session scope options to ctx for secondary LLM call sites \(resolveCallScope\). Nil/empty opts are a no\-op passthrough.
+
+<a name="WithThrottleDispatch"></a>
+## func WithThrottleDispatch
+
+	func WithThrottleDispatch(ctx context.Context, d *throttleTurnContext) context.Context
+
+WithThrottleDispatch returns ctx carrying the turn's original dispatch \(RunOnceWithParts entry\). SetTurnParker park sites read it first when building the resume payload \(F8\).
 
 <a name="WithThrottleParkAttempt"></a>
 ## func WithThrottleParkAttempt
@@ -43094,6 +43461,18 @@ AgentConfig holds configuration for the agent loop.
 	    // sections are hoisted before volatile ones via AssembleOrdered and
 	    // LastStablePrefixHash() is updated on every build.
 	    StablePrefixDisabled bool
+	    // OmitEvidenceFormatTemplate slims the Validation & Escalation anchor:
+	    // the anchor's JSON evidence-format TEMPLATE is dropped (the prose
+	    // rules stay) for employees with no file/tool that produces evidence.
+	    // Root cause of defect A (2026-11-10 link recording, transcript b): a
+	    // tools-LESS voice employee (secretary: tools: []) still received the
+	    // template in its conversation anchor and echoed it into the SPOKEN
+	    // reply ("Verified evidence ... tool_call_id ... success=true ...
+	    // memory_id"), which TTS read to the caller. The voice turn adapter
+	    // sets this for zero-tool employees (internal/daemon
+	    // voice_employee.go applyEmployeeDefinition). The zero value keeps the
+	    // template (text-lane byte-identity).
+	    OmitEvidenceFormatTemplate bool
 	}
 
 <a name="DefaultAgentConfig"></a>
@@ -43621,6 +44000,15 @@ RunOnce processes a single user turn through the full reasoning loop. This is a 
 
 RunOnceWithParts processes a single user turn through the full reasoning loop, optionally carrying multimodal content parts \(e.g. image attachments\). When parts is non\-empty the underlying ChatMessage is created via Conversation.AddUserMessageWithParts so that provider serializers emit native image blocks.
 
+<a name="AgentLoop.RunVoiceSpokenRewriteRetry"></a>
+### func \(\*AgentLoop\) RunVoiceSpokenRewriteRetry
+
+	func (l *AgentLoop) RunVoiceSpokenRewriteRetry(ctx context.Context, conversationID string) (string, error)
+
+RunVoiceSpokenRewriteRetry is the voice lane's bounded rewrite retry — the adapter\-facing twin of the loop seam's guardRetried retry \(loop.go response assembly\). The voice TurnRunner adapter calls it when SpokenReplyViolation trips on a completed turn's reply: the conversation already holds the assistant's leaked reply \(RunOnceWithParts appends the shipped text before returning\), so appending the user\-role nudge keeps the loop protocol and re\-entering the turn producer sends it. ONE retry only \(the caller owns the budget\); the re\-entered cycle re\-runs the shared machine\-shaped guard at its own seam. A retry that trips the spoken guard AGAIN, or errors, ships VoiceSpokenFallbackLine — the same "second trip ships the canned line" posture as the chat lane, bounded.
+
+Why the method lives on the loop: the retry must re\-enter runTurnProducer \(the LLM reasoning cycle OR the ACP harness lane\), which is loop\-private. The conversation is fetched by id from the loop's own manager; a missing conversation \(cleared mid\-call\) re\-seeds the anchor so the rewrite turn still carries the persona's validation prose.
+
 <a name="AgentLoop.RunWithSkill"></a>
 ### func \(\*AgentLoop\) RunWithSkill
 
@@ -43669,6 +44057,13 @@ SetACPExecutor injects the external ACP turn producer after construction \(daemo
 	func (l *AgentLoop) SetActive(v bool)
 
 SetActive atomically sets the has\-pending\-work flag.
+
+<a name="AgentLoop.SetAgentID"></a>
+### func \(\*AgentLoop\) SetAgentID
+
+	func (l *AgentLoop) SetAgentID(id string)
+
+SetAgentID rebinds the agent identity on a live loop and forwards it to the loop's executor \(the WithExecutorAgentID lane, snapshotted into details\["agent\_id"\] at every permission check\). The voice turn runner \(caller\-authz leaf 02, O5\) stamps per\-session VOICE clones with the bound employee id so the PreExecChecker routes the employee constitution gate; loops built without an identity or turned with no employee keep their construction\-time id. Rebinding does NOT touch the Manager cache key — that derives from the TEMPLATE's agentID, and the template is never mutated here \(the voice lane clones, the daemon template stays "default"\). Nil\-safe; empty id is a no\-op.
 
 <a name="AgentLoop.SetAutonomous"></a>
 ### func \(\*AgentLoop\) SetAutonomous
@@ -43844,6 +44239,13 @@ SetMessageDrainer wires the inbox drain source. Nil disables injection \(the def
 	func (l *AgentLoop) SetModelOverride(modelRef string)
 
 SetModelOverride sets the model override at runtime \(thread\-safe\). This is a one\-shot override: it auto\-clears after one reasoning cycle via the consumption site in reasoningCycle. Used by the dispatcher for user\-driven model reassignment.
+
+<a name="AgentLoop.SetMomentRenderer"></a>
+### func \(\*AgentLoop\) SetMomentRenderer
+
+	func (l *AgentLoop) SetMomentRenderer(fn func() string)
+
+SetMomentRenderer installs the per\-turn moment\-block renderer on the lane\-neutral seam \(plan 20261110\-situational leaf 01/02; pinned by gate 00T\-moment §3/§4\). nil fn = inert: prompts stay byte\-for\-byte identical to the pre\-tree shape \(D1\). Both lanes consume the SAME func: the chat lane via the assembleSystemPrompt "moment" volatile section, the voice lane via the buildSystemPromptWithOverride append. The daemon builds this closure over moment.Provider.Render \(internal/daemon/awareness\_wiring.go\); the agent package does NOT import internal/moment — the seam is a plain func\(\) string. Unlike SetCapabilitiesBuilder, nil ACCEPTS: it explicitly clears a previously installed renderer \(the gate pins nil = inert, and daemon reload paths can turn awareness off on a live loop\).
 
 <a name="AgentLoop.SetMultiUserScopeEnabled"></a>
 ### func \(\*AgentLoop\) SetMultiUserScopeEnabled
@@ -44309,6 +44711,15 @@ RunAgent sends a single message to an agent and returns its response.
 
 Context isolation \(leaf 10\): the message is treated as a structured brief — built by the caller through BuildSpawnContext — and starts a FRESH conversation keyed by conversationID. The child never inherits a parent conversation's transcript; cross\-agent context flows via explicit SpawnContext briefs \(report\-router handoffs, step AccumulatedContext\), not shared message lists.
 
+<a name="AgentRegistry.RunAgentWithModelRef"></a>
+### func \(\*AgentRegistry\) RunAgentWithModelRef
+
+	func (r *AgentRegistry) RunAgentWithModelRef(ctx context.Context, agentID, message, conversationID, modelRef string) (string, error)
+
+RunAgentWithModelRef sends a single message to an agent with a per\-run model override \(delegation route enforcement, C10\): the resolved child route is armed through the loop's ONE\-SHOT ApplyRequestModel seam \(the same precedence slot as a client\-supplied per\-request model\) so the delegated child's FIRST LLM call runs the RESOLVED route — the allowlist\-gated route the manager recorded — instead of silently falling through to the child spec's own model pin. Empty modelRef behaves exactly like RunAgent \(no override armed\). The override is one\-shot: it auto\-clears after the first reasoning cycle and never persists onto the agent's other conversations.
+
+R3\-2 \(turn\-scoped override\): the override is armed on the SHARED per\-agent loop, so a child run that parks or errors BEFORE the reasoning cycle consumes it used to leave the override stuck — the next unrelated turn on that loop silently ran the child's route. The override is cleared as soon as this run returns \(defer ClearModelOverride\-style\): if the turn consumed it, the one\-shot clear already ran and this is a no\-op; if it never did, nothing leaks to the next turn. The armed window \(arm → RunOnce\) is the same slot the dispatcher's ApplyRequestModel uses for user directives; a full per\-turn context\-carried mechanism does not exist on the RunOnce API \(the consumption site reads loop state in reasoningCycle\), so the defer\-clear shape is the turn\-scoping mechanism chosen here.
+
 <a name="AgentRegistry.SeedChildConversation"></a>
 ### func \(\*AgentRegistry\) SeedChildConversation
 
@@ -44350,6 +44761,13 @@ SetGlobalRules sets the global rules content.
 	func (r *AgentRegistry) SetLearningPipeline(lp LearningPipeline)
 
 SetLearningPipeline wires the learning pipeline \(Judge/Distill\) into every loop this registry creates. Nil is a no\-op.
+
+<a name="AgentRegistry.SetPiiRestoreHook"></a>
+### func \(\*AgentRegistry\) SetPiiRestoreHook
+
+	func (r *AgentRegistry) SetPiiRestoreHook(hook *PiiRestoreHook)
+
+SetPiiRestoreHook wires the shared PII\-unmasking restore lane into every loop this registry creates \(bughunt C19\): registry\-built loops \(delegate children via RunAgent, specialists\) then mask provider\-bound context and restore \[PII:\*\] tokens exactly like the daemon template lane. Nil is a no\-op. Loops already created keep their wiring \(the lane is stateless per call, scoped by the sessionID argument\); loops created afterwards inherit the hook at construction.
 
 <a name="AgentRegistry.SetSchemaModeConfig"></a>
 ### func \(\*AgentRegistry\) SetSchemaModeConfig
@@ -45653,7 +46071,9 @@ String returns a human\-readable name for the budget level.
 
 BudgetResumeWatcher parks chat turns interrupted by budget exhaustion and retries them once the budget window clears. It polls the budget on a fixed interval; when the budget is no longer exceeded, it drains the parked queue \(oldest first\) by invoking the resume callback supplied by the ChatHandler.
 
-The watcher is best\-effort: if the daemon shuts down while turns are parked, those turns are dropped \(logged at warn\). Turns are not persisted across restarts.
+Persistence \(F5, tree 04 leaf 04\): when a ParkPersistence is wired via SetParkPersistence, every accepted Park mirrors its record to the store \(kind\-scoped, stamped with the SetPersistenceOwner identity — daemon wiring: owner "budget"\), Stop keeps the rows for the next Start, and Start re\-arms this watcher's OWN rows \(expired ones are pruned at Load\). Each resume deletes the row BEFORE invoking the callback \(at\-most\-once, same contract as TurnParker\). Without a wired store the watcher stays best\-effort in memory: turns parked when Stop runs are dropped \(logged at warn\).
+
+Events \(F5 observability\): when a park event bus is wired via SetParkEventBus, park and resume publish on the EXISTING agent.quota\_wait topic with class "budget" \(ParkTurnEvent schema, no new topic, no payload reshape\), so the TUI/GUI wait labels see budget\-parked turns like every other park class.
 
 	type BudgetResumeWatcher struct {
 	    // contains filtered or unexported fields
@@ -45671,7 +46091,7 @@ NewBudgetResumeWatcher creates a watcher. resumeFunc is invoked \(in a backgroun
 
 	func (w *BudgetResumeWatcher) Park(turn ParkedTurn) bool
 
-Park enqueues a turn for later retry. Returns false \(and does nothing\) if auto\-resume is not configured.
+Park enqueues a turn for later retry. Returns false \(and does nothing\) if auto\-resume is not configured. With persistence wired, the accepted turn is mirrored to the store \(best\-effort: a save failure logs and the turn stays memory\-only\); with an event bus wired, the park publishes on the agent.quota\_wait topic with class "budget".
 
 <a name="BudgetResumeWatcher.Pending"></a>
 ### func \(\*BudgetResumeWatcher\) Pending
@@ -45680,19 +46100,47 @@ Park enqueues a turn for later retry. Returns false \(and does nothing\) if auto
 
 Pending returns the number of currently parked turns.
 
+<a name="BudgetResumeWatcher.SetParkBackend"></a>
+### func \(\*BudgetResumeWatcher\) SetParkBackend
+
+	func (w *BudgetResumeWatcher) SetParkBackend(b parkBackend)
+
+SetParkBackend installs the C\-A1 backend seam \(tree 20261110 leaf 02\) on the budget watcher's own persistence path: with a backend set it REPLACES parkPersistence for Save/Delete/Load \(C\-A1 contract — the sqlite store stays empty and only derives keys\). Wiring\-time setter: call once before Start. Nil\-guarded per repo convention.
+
+<a name="BudgetResumeWatcher.SetParkEventBus"></a>
+### func \(\*BudgetResumeWatcher\) SetParkEventBus
+
+	func (w *BudgetResumeWatcher) SetParkEventBus(b parkEventBus)
+
+SetParkEventBus installs the bus the budget park/resume events publish to on the EXISTING agent.quota\_wait topic with class "budget" \(F5 — no new topic, no payload reshape: the WS "agent.quota" prefix keeps classifying them as agent\_progress\). Nil disables publishing \(the default; parking stays silent\). Wiring\-time setter: call once before Start.
+
+<a name="BudgetResumeWatcher.SetParkPersistence"></a>
+### func \(\*BudgetResumeWatcher\) SetParkPersistence
+
+	func (w *BudgetResumeWatcher) SetParkPersistence(store ParkPersistence, kind ParkKind)
+
+SetParkPersistence wires durable budget\-park storage. Wiring\-time setter: call once before Start \(re\-arm happens in Start\), so the fields are read without the mutex afterwards. Nil store or watcher keeps the memory\-only behaviour. kind scopes the rows \(daemon wiring: ParkKindChat; an empty kind defaults to it — the budget parker only ever parks chat turns\).
+
+<a name="BudgetResumeWatcher.SetPersistenceOwner"></a>
+### func \(\*BudgetResumeWatcher\) SetPersistenceOwner
+
+	func (w *BudgetResumeWatcher) SetPersistenceOwner(owner string)
+
+SetPersistenceOwner installs the C\-K1 parker identity for budget parks \(daemon wiring: ParkOwnerBudget = "budget"\). Every persisted row is stamped with it and the restart re\-arm loads ONLY this owner's rows, so the quota watcher / throttle parker \(which share ParkKindChat\) can never re\-arm budget turns — and vice versa. Empty owner keeps the legacy unfiltered Load. Wiring\-time setter: call once before Start.
+
 <a name="BudgetResumeWatcher.Start"></a>
 ### func \(\*BudgetResumeWatcher\) Start
 
 	func (w *BudgetResumeWatcher) Start(ctx context.Context)
 
-Start begins the background polling loop. Safe to call once; subsequent calls are no\-ops.
+Start begins the background polling loop. Safe to call once; subsequent calls are no\-ops. With persistence wired \(SetParkPersistence\), the first Start also re\-arms turns persisted by the previous run under this watcher's owner: survivors are queued, and if the budget already cleared they resume immediately \(before the first tick\).
 
 <a name="BudgetResumeWatcher.Stop"></a>
 ### func \(\*BudgetResumeWatcher\) Stop
 
 	func (w *BudgetResumeWatcher) Stop()
 
-Stop halts the polling loop and waits for it to exit. Parked turns that have not yet resumed are logged and dropped.
+Stop halts the polling loop and waits for it to exit. With persistence wired, parked turns STAY in the store and re\-arm on the next Start \(F5: Stop no longer silently drops them — the rows survive, logged at Info\). Without persistence they are logged and dropped \(legacy warn\).
 
 <a name="BudgetStatus"></a>
 ## type BudgetStatus
@@ -46060,6 +46508,13 @@ ChatHandler bridges the message bus to the AgentLoop. It subscribes to chat.requ
 
 NewChatHandler creates a new ChatHandler. The dispatcher parameter is optional; if nil, requests go directly to the loop.
 
+<a name="ChatHandler.BudgetResumeWatcher"></a>
+### func \(\*ChatHandler\) BudgetResumeWatcher
+
+	func (h *ChatHandler) BudgetResumeWatcher() *BudgetResumeWatcher
+
+BudgetResumeWatcher exposes the configured budget watcher so the daemon can wire parked\-turn persistence/events \(F5, tree 04 leaf 04\) before the handler starts. Returns nil when budget auto\-resume is not wired.
+
 <a name="ChatHandler.ClearConversation"></a>
 ### func \(\*ChatHandler\) ClearConversation
 
@@ -46348,6 +46803,15 @@ ChildDescriptor is a durable description of a child that leaf 06 persists for co
 	    SeedPayload     string    `json:"seed_payload,omitempty"`
 	    CreatedAt       time.Time `json:"created_at"`
 	
+	    // Context and OutputSchema carry the spawn request's caller context and
+	    // output-schema directive (C17) so a cold resume re-renders the brief
+	    // through the SAME childPrompt pipeline as a fresh spawn (spawn-context
+	    // render + Context prefix + output_schema instruction) instead of
+	    // replaying a raw SeedPayload with only a preamble. Empty for pre-C17
+	    // descriptors (brief-only resume, unchanged).
+	    Context      string          `json:"context,omitempty"`
+	    OutputSchema json.RawMessage `json:"output_schema,omitempty"`
+	
 	    // SeedMessages is the bounded fork-seed snapshot (v2): the parent's
 	    // completed-turn prefix captured ONCE at spawn, serialized so a cold
 	    // resume replays the parent-context seed instead of only the brief.
@@ -46368,6 +46832,15 @@ UnmarshalChildDescriptor rehydrates a descriptor from its durable JSON form. It 
 	func (d ChildDescriptor) Validate() error
 
 Validate reports whether the descriptor is well\-formed and current. Full implementation \(version \+ mode\) lives in delegate\_descriptor.go; kept here as a thin wrapper for symmetry with the struct it documents.
+
+<a name="ChildDescriptorLister"></a>
+## type ChildDescriptorLister
+
+ChildDescriptorLister is the optional enumeration capability a durable store may expose for the daemon's startup cold\-resume sweep \(C13\). Both production stores \(session.SQLiteStore / session.MemoryStore\) satisfy it; session.Store itself does not require it, so test fakes stay untouched.
+
+	type ChildDescriptorLister interface {
+	    ListChildDescriptors(ctx context.Context) ([]session.ChildDescriptorRecord, error)
+	}
 
 <a name="ChildOptions"></a>
 ## type ChildOptions
@@ -46394,11 +46867,22 @@ ChildRecord is the per\-session registry entry for a delegated child.
 	    Provider        string
 	    ReasoningEffort string
 	    ConversationID  string
-	    State           ChildState
-	    CreatedAt       time.Time
-	    Result          string
-	    Err             string
-	    Descriptor      ChildDescriptor
+	    // State is the durable lifecycle state; see ChildState.
+	    State      ChildState
+	    CreatedAt  time.Time
+	    Result     string
+	    Err        string
+	    Descriptor ChildDescriptor
+	    // Depth is the runtime nesting depth of this child (1 = a top-level
+	    // spawn): parent depth (threaded through the spawn context) + 1,
+	    // refused beyond maxDelegateDepth. Recorded for observability; the
+	    // cap itself is enforced at Spawn (delegateDepthKey).
+	    Depth int
+	    // Context and OutputSchema ride the spawn request so the resume brief
+	    // can be re-rendered through the same childPrompt pipeline as a fresh
+	    // spawn (no drift between fork and resume briefs).
+	    Context      string
+	    OutputSchema json.RawMessage
 	    // contains filtered or unexported fields
 	}
 
@@ -47546,7 +48030,7 @@ AllChildren returns a snapshot \(copies\) of every registered child across ALL p
 
 	func (m *DelegateManager) Cancel(childID string) error
 
-Cancel interrupts a running child: it invokes the external cancel hook, the per\-child run context, and any live ACP session, then marks the record interrupted and publishes settlement.
+Cancel interrupts a running child: it invokes the external cancel hook, the per\-child run context, and any live ACP session, then marks the record interrupted and publishes settlement. The interrupted state is DURABLE: the descriptor is persisted with state=interrupted before the settle channel closes \(C6 — previously Cancel mutated only the in\-memory record, so a restart lost the interruption and a previously\-persisted running row would re\-execute a cancelled task\).
 
 <a name="DelegateManager.Children"></a>
 ### func \(\*DelegateManager\) Children
@@ -47584,9 +48068,20 @@ Lookup returns a copy of a child record by childID.
 Resume re\-spawns an interrupted/idle child from its durable descriptor. It works in two layers:
 
 - Live: the child still exists in this daemon run \-\> it must be in an Interrupted \(or Pending\) state, and it is re\-run under its recorded descriptor.
-- Cold: the child's record is gone from the run\-state \(parent/daemon restart\) \-\> it is rehydrated from the durable store, re\-registered under its original childID, and re\-run from its persisted descriptor.
+- Cold: the child's record is gone from the run\-state \(parent/daemon restart\) \-\> it is rehydrated from the durable store, re\-registered under its original childID, and re\-run from its persisted descriptor. The durable record's OWN state gates the resume exactly like the live path \(C5\): only Interrupted/Pending rows are resumable — a terminal \(completed/failed\) row is refused, so a completed child can never re\-execute from its frozen seed.
 
 Both paths replay the frozen fork seed — the descriptor's SeedMessages snapshot when present \(v2, stamped onto the child's conversation before the first turn\), else brief\-only as v1 always did — re\-pin the descriptor's model/route, set the record back to running, and re\-publish the settlement on completion. Only the parent \(record.ParentSessionID == caller\) may resume.
+
+Claiming \(C11\): the in\-map claim happens atomically under the manager lock inside resumeRegister — the first Resume inserts the running entry before launching the goroutine; a concurrent second caller observes the entry and joins the existing execution instead of double\-spawning.
+
+<a name="DelegateManager.ResumeInFlightDescriptors"></a>
+### func \(\*DelegateManager\) ResumeInFlightDescriptors
+
+	func (m *DelegateManager) ResumeInFlightDescriptors(ctx context.Context, parentSessionID string) (resumed []string, failed []string)
+
+ResumeInFlightDescriptors scans the durable child\-descriptor store for in\-flight rows \(state running/interrupted — a child executing or cancelled when its parent/daemon died\) and cold\-resumes each, up to maxResumeSweep. This is the production entry point for the startup sweep \(C13\): without it the cold\-resume machinery is unreachable after a restart.
+
+Contract: bounded \(maxResumeSweep rows per call\), logged, best\-effort — a row that cannot be resumed \(corrupt descriptor, unknown agent, parent mismatch\) is logged at Warn and skipped, never fatal to the sweep or the daemon boot. Resumed children settle asynchronously like any other child. parentSessionID is passed through to Resume verbatim \("" = skip the parent\-match check — the sweep runs with daemon authority at boot\).
 
 <a name="DelegateManager.Session"></a>
 ### func \(\*DelegateManager\) Session
@@ -47623,6 +48118,13 @@ SetForkSeed installs the B2 fork\-seed seam that materializes a parent transcrip
 
 SetForkSeedWriter installs the DSH\-1 conversation\-seed adapter \(wired by AgentRegistry construction\): the adapter stamps a fork child's seed onto its conversation before the first turn. nil keeps the brief\-only path.
 
+<a name="DelegateManager.SetModelRefResolver"></a>
+### func \(\*DelegateManager\) SetModelRefResolver
+
+	func (m *DelegateManager) SetModelRefResolver(f func(ref string) (string, error))
+
+SetModelRefResolver installs the delegate route\-resolution seam \(R3\-3\): runChildTurn resolves the child's recorded route through it BEFORE the turn launches, and an unresolvable ref FAILS the child turn instead of silently degrading to the spec's own model pin \(the pre\-C10 allowlist bypass\). Satisfied structurally by \*llm.Resolver's ResolveEscalationRef \(an alias name or "provider/model" ref \-\> usable loop model ref, errors when unknown\). nil keeps the legacy pass\-through \(the ref rides raw; tests and unwired registries never regress\).
+
 <a name="DelegateManager.SetPersist"></a>
 ### func \(\*DelegateManager\) SetPersist
 
@@ -47636,6 +48138,13 @@ SetPersist installs the B6 persistence hook called on settlement. nil makes pers
 	func (m *DelegateManager) SetRouteResolver(f func(ChildOptions, DelegateRequest) (ChildOptions, error))
 
 SetRouteResolver installs the B4 per\-child route resolver. nil resets to the identity default \(request values pass through unchanged\).
+
+<a name="DelegateManager.SetRunFunc"></a>
+### func \(\*DelegateManager\) SetRunFunc
+
+	func (m *DelegateManager) SetRunFunc(f func(ctx context.Context, agentID, message, conversationID, modelRef string) (string, error))
+
+SetRunFunc installs the child\-execution seam \(C10\). The daemon binds reg.RunAgentWithModelRef here so a spawn's resolved route is enforced as a one\-shot model override on the child's first LLM call. A nil f resets to the default RunAgent path \(no override\).
 
 <a name="DelegateManager.SetStore"></a>
 ### func \(\*DelegateManager\) SetStore
@@ -48413,8 +48922,13 @@ DispatcherConfig holds configuration for creating a Dispatcher.
 	    // production keeps rotation; for testing/iteration
 	    // (classifier-observability leaf 02).
 	    ClassifierFailFast bool
-	    CapabilityMatcher  *CapabilityMatcher
-	    EmbeddingClient    EmbeddingClient
+	    // PiiMask is the session-scoped PII mask lane applied to classifier
+	    // prompts before the side sends (bughunt C21: the main-turn mask in
+	    // the loop never reaches these sends). Nil = masking disabled,
+	    // byte-identical.
+	    PiiMask           *PiiRestoreHook
+	    CapabilityMatcher *CapabilityMatcher
+	    EmbeddingClient   EmbeddingClient
 	    // PrefilterConfig enables the Stage-0 embedding prefilter
 	    // (classifier-observability follow-up). When Enabled, the dispatcher
 	    // constructs an EmbeddingPrefilter (OpenAI-compatible embeddings
@@ -49415,12 +49929,28 @@ resume is invoked \(in a background goroutine\) at most once per gate park, afte
 
 NewGateParker wraps an existing TurnParker for gate checkpoints. The parker must be DEDICATED to gate parks \(ParkKindGate scoping via SetParkPersistence happens in the daemon wiring, before Start\) \-\- the same one\-parker\-per\-kind layout the chat/throttle/episode parkers already use, sharing the one parked\_turns table. Construction installs the gate persistence\-key override \(\(gate\_kind|gate\_id\) derived from the payload\), so a re\-raised gate overwrites its own row and ResumeByKey resolves rows by the C5 identity.
 
+<a name="GateParker.HasParkedGate"></a>
+### func \(\*GateParker\) HasParkedGate
+
+	func (p *GateParker) HasParkedGate(gateKind, gateID string) bool
+
+HasParkedGate reports whether a gate row is currently parked under the given kind\+id \(bughunt C25\): the goal\-round driver consults this through the daemon wiring's quiescence predicate so an employee whose goal gate awaits human approval counts as NOT quiet — without it every poll tick ran a full autonomous round \(LLM spend \+ side effects\) while the approval pended. False on a nil parker or empty id \(fail\-open, matching the disabled\-parking posture\).
+
+The probe decodes the QUEUED records \(the same in\-memory queue ResumeByKey drains\) rather than the persistence key index, so it works with and without park persistence wired: a memory\-only parker \(tests, degraded boots\) still reports the pending approval.
+
+<a name="GateParker.HasParkedGateForID"></a>
+### func \(\*GateParker\) HasParkedGateForID
+
+	func (p *GateParker) HasParkedGateForID(gateID string) bool
+
+HasParkedGateForID is the kind\-agnostic probe: it reports whether ANY gate park \(plan or goal namespace\) exists under the given gate id. The goal\-round driver's quiescence predicate only knows the goal id, not which kind raised the gate, so it walks both shared\-namespace keys.
+
 <a name="GateParker.ParkGate"></a>
 ### func \(\*GateParker\) ParkGate
 
 	func (p *GateParker) ParkGate(data GateParkData) bool
 
-ParkGate checkpoints one gate pause. It returns false \(nothing parked\) when parking is disabled, the payload cannot be encoded, or the shared parker refuses the record. A re\-raise of an already\-parked gate overwrites the row \(same \(kind, park\_key\)\) and re\-queues the in\-memory record \-\- the approval still resumes exactly once, because ResumeByKey pops one queued record per key.
+ParkGate checkpoints one gate pause. It returns false \(nothing parked\) when parking is disabled, the payload cannot be encoded, or the shared parker refuses the record. A re\-raise of an already\-parked gate REPLACES the queued in\-memory record \(F9: at\-most\-one per key \-\- the old append\-then\-pop shape left a stale copy behind that a second approval could double\-resume\) and the persistence row upserts under the same \(gate\_kind|gate\_id\) key \-\- the approval still resumes exactly once, because ResumeByKey pops the \(single\) queued record per key.
 
 <a name="GateParker.PendingGates"></a>
 ### func \(\*GateParker\) PendingGates
@@ -49428,6 +49958,15 @@ ParkGate checkpoints one gate pause. It returns false \(nothing parked\) when pa
 	func (p *GateParker) PendingGates() int
 
 PendingGates returns the number of currently parked gate rows \(observability surface; mirrors TurnParker.Pending\).
+
+<a name="GateParker.ReleaseByKey"></a>
+### func \(\*GateParker\) ReleaseByKey
+
+	func (p *GateParker) ReleaseByKey(gateID, reason string) (bool, error)
+
+ReleaseByKey discards the parked gate identified by gateID \(plan rejection / cancellation path, M\-12 / C\-K3\): the persistence row and ALL in\-memory records queued under the key are removed WITHOUT running the resume callback \(rejection discards the re\-entry, it never re\-drives it\), and the existing parker lifecycle event is emitted on the agent.quota\_wait topic carrying the release reason — no new topic, no payload reshape, so quota\_wait consumers see it for free.
+
+The key identity mirrors gateParkKey \(gateKind|gateID\): plan and goal gates share one namespace, so both kind\-prefixed keys are probed. Returns false \(nil error, idempotent\) when nothing is parked under the gate id — re\-drive safety for unknown / already\-released / already\- resumed gate ids.
 
 <a name="GateParker.ResumeByKey"></a>
 ### func \(\*GateParker\) ResumeByKey
@@ -50453,6 +50992,13 @@ ResolvedModel returns the resolved "provider/model" of the LLM that served the a
 
 SetBootReadiness wires the daemon's F\-D8 classifier boot\-gate signal onto an already\-constructed analyzer. Nil is a no\-op \(setter nil\-guard rule\).
 
+<a name="IntentAnalyzer.SetPiiMaskHook"></a>
+### func \(\*IntentAnalyzer\) SetPiiMaskHook
+
+	func (ia *IntentAnalyzer) SetPiiMaskHook(hook *PiiRestoreHook)
+
+SetPiiMaskHook attaches the session\-scoped PII mask lane used for the analysis side send \(finding C21\). Nil is a no\-op \(setter nil\-guard rule\): with no hook the raw content passes through byte\-identically.
+
 <a name="IntentAnalyzer.WithAmbiguityThreshold"></a>
 ### func \(\*IntentAnalyzer\) WithAmbiguityThreshold
 
@@ -50754,6 +51300,13 @@ ResolvedModel returns the resolved "provider/model" of the LLM that served this 
 
 SetBootReadiness wires the daemon's F\-D8 classifier boot\-gate signal onto an already\-constructed classifier \(the daemon creates the dispatcher in NewComponents, before Run\(\) knows the gate outcome\). Nil is a no\-op per the repo's setter nil\-guard rule; the wait bound falls back to defaultClassifierBootWait when unset.
 
+<a name="LLMClassifier.SetPiiMaskHook"></a>
+### func \(\*LLMClassifier\) SetPiiMaskHook
+
+	func (c *LLMClassifier) SetPiiMaskHook(hook *PiiRestoreHook)
+
+SetPiiMaskHook attaches the session\-scoped PII mask lane used for the classification side sends \(finding C21\). Nil is a no\-op \(setter nil\-guard rule\): with no hook the raw input passes through byte\-identically.
+
 <a name="LLMClassifier.UnmarkUnavailable"></a>
 ### func \(\*LLMClassifier\) UnmarkUnavailable
 
@@ -50788,6 +51341,11 @@ UnmarkUnavailable clears the unavailable flag, allowing immediate retries.
 	    // ScopeProvider, when set, supplies the owning loop's task/session
 	    // scope for classification LLM calls (leaf 01 session-affinity).
 	    ScopeProvider chatScopeProvider
+	
+	    // PiiMask, when set, masks PII in the user input before it is
+	    // interpolated into the classification prompts (finding C21).
+	    // Nil = masking disabled, byte-identical to prior behavior.
+	    PiiMask *PiiRestoreHook
 	
 	    // BootReadiness, when set, makes classification calls wait (bounded by
 	    // BootWait, then by the call context) for the daemon's F-D8 classifier
@@ -52178,6 +52736,15 @@ OverrideResult is returned by AfterToolCallHook.
 	    Reason   string
 	}
 
+<a name="OwnerScopedPersistence"></a>
+## type OwnerScopedPersistence
+
+OwnerScopedPersistence is the OPTIONAL capability seam \(C\-K1, tree 04 leaf 01\) a ParkPersistence may implement to load only one owner's rows: LoadOwned returns exactly the records Save stamped with that owner. SQLiteParkStore implements it; fakes that don't degrade to the kind\-only Load \(the parker's owner stamp still persists, it just cannot be filtered at load\). Interface\-at\-consumer, like ParkPersistence itself.
+
+	type OwnerScopedPersistence interface {
+	    LoadOwned(ctx context.Context, kind ParkKind, owner string, now time.Time) ([]ParkedTurnRecord, []string, error)
+	}
+
 <a name="PPConversation"></a>
 ## type PPConversation
 
@@ -52829,6 +53396,11 @@ ParkedTurn captures a chat turn that was interrupted by budget exhaustion and is
 	    Parts          []llm.ContentPart // multimodal parts, if any
 	    AgentID        string            // agent override, if any
 	    SourceClient   string            // originating client identifier
+	    // Limit is the budget limit that fired the park (hourly_token, ...).
+	    // Additive (tree 04 leaf 04): carried into the persisted payload and
+	    // the park event so surfaces can say WHICH window is being waited on.
+	    // Zero on legacy parks (unknown reason), which stay silent on the field.
+	    Limit llm.BudgetLimit
 	    // TurnID is the chat.submit turn identity (week bughunt 2026-09-17
 	    // F15): recorded at park time so the resume can emit the FINAL
 	    // turn.terminal event under the id the client's ack returned —
@@ -52872,6 +53444,15 @@ TurnPayload carries the class\-specific original request as JSON so the resume r
 	    // resume path re-applies the marker when EITHER is set (parkedAutonomous),
 	    // so the two can never disagree in a way that matters.
 	    Autonomous bool
+	    // Owner is the C-K1 parker identity (statemachine-remediation tree 04
+	    // leaf 01): the ONE parker allowed to Load/resume this record's persisted
+	    // row. The TurnParker stamps it at Save from SetPersistenceOwner; the
+	    // store's owner-scoped Load returns only rows whose owner matches. Additive
+	    // to the frozen record shape (same regime as Autonomous above); zero value
+	    // "" = unowned (memory-only records and legacy rows pre-backfill — the
+	    // parker treats an empty owner as "no filter" so an unwired store stays
+	    // byte-identical). See ParkOwner* constants in park_store_sqlite.go.
+	    Owner string
 	}
 
 <a name="ParseResult"></a>
@@ -52974,7 +53555,9 @@ Refusals \(each returns the input unchanged — the disabled\-path discipline\):
 - empty sessionID: tokens minted without a session scope can never be restored \(the store refuses empty\-session resolution\), so scope\-less masking is refused, not degraded.
 - empty message slice.
 
-Tool\-call arguments are NOT masked: they are data addressed at this session's tools, and masking them would corrupt tool semantics while the responses they produce flow back only into this session. Content only — the same surface the restore lane un\-masks.
+Tool\-call arguments are NOT masked: they are data addressed at this session's tools, and masking them would corrupt tool semantics while the responses they produce flow back only into this session. Content and text content parts — the same surfaces the serializers emit \(Parts take precedence over Content in every provider serializer, llm/models.go\), and the same surface the restore lane un\-masks.
+
+C18 \(bughunt 2026\-11\-10\): Parts\-bearing messages \(multimodal turns, resume replays carrying turn.Parts\) previously crossed to the provider UNMASKED — the mask touched only Content while every serializer PREFERS Parts. Text parts now go through the same swapper; non\-text parts \(image URLs\) are left alone; and when Parts were masked the flat Content is masked with the SAME session scope so both representations stay consistent \(the model may see either wire form, and the tokens resolve through one store\).
 
 <a name="PiiRestoreHook.RestoreOutput"></a>
 ### func \(\*PiiRestoreHook\) RestoreOutput
@@ -53589,6 +54172,64 @@ QueueInjectedPayload is attached to bus events when the agent loop injects queue
 	    Iteration      int       `json:"iteration"`
 	}
 
+<a name="QueueParkBackend"></a>
+## type QueueParkBackend
+
+QueueParkBackend is the C\-A2 parkBackend over internal/queue.Store. Exported so internal/daemon can construct it in the wiring; consumers pass it to \(\*TurnParker\).SetBackend \(the C\-A1 interface itself stays unexported per its frozen shape\).
+
+	type QueueParkBackend struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewQueueParkBackend"></a>
+### func NewQueueParkBackend
+
+	func NewQueueParkBackend(q *queue.Store, kind ParkKind, owner string) *QueueParkBackend
+
+NewQueueParkBackend constructs the exported form for daemon wiring.
+
+<a name="QueueParkBackend.Arm"></a>
+### func \(\*QueueParkBackend\) Arm
+
+	func (b *QueueParkBackend) Arm(context.Context)
+
+Arm is a documented no\-op \(see the file header\): the TurnParker's existing poller owns the drain and the backend\-mode drain is pinned to the REAL clock, so launching a second claim/wake loop here would put two owners on one wake decision — the C1 bug class.
+
+<a name="QueueParkBackend.Delete"></a>
+### func \(\*QueueParkBackend\) Delete
+
+	func (b *QueueParkBackend) Delete(ctx context.Context, kind ParkKind, key string) error
+
+Delete removes the parked\_turn row whose id == key. SaveKeyed stored the row under kind\+"|"\+key \(the parker's fresh\-park identity\) while LoadOwnedKeyed returns bare row ids \(the re\-arm identity\), so both spellings resolve: the raw kind\-prefixed form and the key as\-is \(a plain\-Save park\-\<hex\> id, or an already\-prefixed re\-armed key\). Absent rows are a no\-op \(idempotent, same contract as ParkPersistence.Delete\). Terminal management: this is the ONLY way a parked\_turn job dies — resume and give\-up both flow through the parker's Delete, never through queue failure accounting.
+
+<a name="QueueParkBackend.LoadOwned"></a>
+### func \(\*QueueParkBackend\) LoadOwned
+
+	func (b *QueueParkBackend) LoadOwned(ctx context.Context, kind ParkKind, owner string) ([]ParkedTurnRecord, error)
+
+LoadOwned is the plain C\-A1 entry \(no now param\): prune on the backend's own clock.
+
+<a name="QueueParkBackend.LoadOwnedKeyed"></a>
+### func \(\*QueueParkBackend\) LoadOwnedKeyed
+
+	func (b *QueueParkBackend) LoadOwnedKeyed(ctx context.Context, kind ParkKind, owner string, now time.Time) ([]ParkedTurnRecord, []string, error)
+
+LoadOwnedKeyed is the owner\-scoped load, one transaction \(the sqlite store's load contract ported\): SELECT jobs rows of type parked\_turn with claimed\_by = normalizeParkOwner\(owner\) \(empty owner = no filter, the parker's C\-K1 convention\), kind\-filtered on the payload discriminator; rows whose wake has passed \(resume\_at \<= now\) are pruned by DELETE INSIDE the same transaction \(at\-most\-once resurrection — a concurrent re\-arm can never see a row both prune and return\); survivors come back oldest\-wake\-first WITH their row ids as park keys. An undecodable row is left in place: its owner/kind cannot be attributed safely, and Delete\-by\-id \(the parker's terminal path\) still resolves it — pruning blind could destroy another owner's row.
+
+<a name="QueueParkBackend.Save"></a>
+### func \(\*QueueParkBackend\) Save
+
+	func (b *QueueParkBackend) Save(ctx context.Context, rec ParkedTurnRecord) error
+
+Save is the plain C\-A1 entry \(no key argument\): like the sqlite wrapper's Save it derives a fresh row identity — here a crypto\-random park job id \(two parked turns are two rows, never deduped\). The parker never reaches this method while the store\-derived park key is non\-empty \(it prefers SaveKeyed\).
+
+<a name="QueueParkBackend.SaveKeyed"></a>
+### func \(\*QueueParkBackend\) SaveKeyed
+
+	func (b *QueueParkBackend) SaveKeyed(ctx context.Context, kind ParkKind, key string, rec ParkedTurnRecord) error
+
+SaveKeyed mirrors ParkPersistence.Save: the parker\-derived persistence key becomes the job row id, kind\-scoped — so the store's UNIQUE\(kind, park\_key\) dedup semantics survive: a re\-parked episode or gate overwrites its own row \(ON CONFLICT upsert\) instead of accumulating duplicates across restarts.
+
 <a name="QueuePersister"></a>
 ## type QueuePersister
 
@@ -53918,6 +54559,12 @@ Since tree 03 leaf 01 the scheduling machinery lives on the class\-agnostic Turn
 	    ProviderID     string            // provider that hit the quota
 	    CredentialKey  string            // credential fingerprint of the blocked pool
 	    UnblockAt      time.Time         // earliest time the quota window lifts
+	    // Attempt/MaxAttempts carry the re-park generation and its cap
+	    // (M-4-park encode carrier, tree 04 leaf 04). The record columns
+	    // persist them across restarts; the drain-side give-up at the cap is
+	    // owned by leaf 04. Zero MaxAttempts encodes as DefaultQuotaMaxAttempts.
+	    Attempt     int
+	    MaxAttempts int
 	    // TurnID is the chat.submit turn identity (week bughunt 2026-09-17
 	    // F15): recorded at park time so the resume can emit the FINAL
 	    // turn.terminal event under the id the client's ack returned.
@@ -53966,6 +54613,20 @@ Park enqueues a turn for later retry once the quota window lifts. Returns false 
 
 Pending returns the number of currently parked turns.
 
+<a name="QuotaResumeWatcher.SetGiveUpFunc"></a>
+### func \(\*QuotaResumeWatcher\) SetGiveUpFunc
+
+	func (w *QuotaResumeWatcher) SetGiveUpFunc(fn func(ctx context.Context, turn QuotaParkedTurn))
+
+SetGiveUpFunc installs the attempt\-cap give\-up callback \(M\-4\-park, tree 04 leaf 04\) on the inner TurnParker: a quota record whose drain reaches MaxAttempts never reaches the resume callback \(no LLM replay past the horizon\) — it lands here instead, and the owner \(the ChatHandler\) marks the turn failed\-terminal through the SAME give\-up shape as the ordinary quota resume failure. A nil fn restores event\-only give\-ups.
+
+<a name="QuotaResumeWatcher.SetParkBackend"></a>
+### func \(\*QuotaResumeWatcher\) SetParkBackend
+
+	func (w *QuotaResumeWatcher) SetParkBackend(b parkBackend)
+
+SetParkBackend forwards the C\-A1 backend seam \(tree 20261110\-parked\- turns\-as\-jobs leaf 02\) to the inner TurnParker: with parking. queue\_backend enabled the daemon installs a queueParkBackend so quota parks persist as parked\_turn queue jobs instead of parks.db rows. Nil\-guarded per repo setter convention; wiring\-time — call before Start \(re\-arm \+ Arm happen in Start\).
+
 <a name="QuotaResumeWatcher.SetParkEventBus"></a>
 ### func \(\*QuotaResumeWatcher\) SetParkEventBus
 
@@ -53979,6 +54640,13 @@ SetParkEventBus forwards the park\-event bus to the inner TurnParker so handler\
 	func (w *QuotaResumeWatcher) SetParkPersistence(store ParkPersistence)
 
 SetParkPersistence forwards parked\-turn persistence to the inner TurnParker \(chat kind\), so quota\-parked chat turns survive daemon restarts and re\-arm on the next start. Nil\-guarded; wiring\-time setter — call before Start \(re\-arm happens in Start\).
+
+<a name="QuotaResumeWatcher.SetPersistenceOwner"></a>
+### func \(\*QuotaResumeWatcher\) SetPersistenceOwner
+
+	func (w *QuotaResumeWatcher) SetPersistenceOwner(owner string)
+
+SetPersistenceOwner forwards the C\-K1 parker identity \(tree 04 leaf 01\) to the inner TurnParker: persisted quota rows are stamped with owner \(default wiring: ParkOwnerQuotaWatcher = "quota\-watcher"\) and the restart re\-arm loads ONLY this watcher's rows — the partition that stops the throttle parker's rows from being re\-executed through the quota router \(C1\). Wiring\-time setter: call before Start.
 
 <a name="QuotaResumeWatcher.SetPollInterval"></a>
 ### func \(\*QuotaResumeWatcher\) SetPollInterval
@@ -54037,6 +54705,13 @@ NewTestRLMAnalyzer creates an analyzer for use in tests.
 	func (a *RLMAnalyzer) Analyze(ctx context.Context, prompt string) (*AnalyzeResult, error)
 
 Analyze runs the RLM over traces and returns failure modes. Implements structural depth gating \(no call\_subagent tool at max depth\).
+
+<a name="RLMAnalyzer.SetPiiMaskHook"></a>
+### func \(\*RLMAnalyzer\) SetPiiMaskHook
+
+	func (a *RLMAnalyzer) SetPiiMaskHook(hook *PiiRestoreHook)
+
+SetPiiMaskHook attaches the session\-scoped PII mask lane used for the analyzer's LLM side sends \(finding C21\). Nil is a no\-op \(setter nil\-guard rule\): with no hook the raw prompt passes through byte\-identically.
 
 <a name="RLMAnalyzer.SetScopeProvider"></a>
 ### func \(\*RLMAnalyzer\) SetScopeProvider
@@ -54310,6 +54985,13 @@ RunReflection executes a single\-pass reflection check after code edits. Note: T
 
 SetEditAvailability sets whether file edit is available
 
+<a name="ReflectionEngine.SetPiiMaskHook"></a>
+### func \(\*ReflectionEngine\) SetPiiMaskHook
+
+	func (re *ReflectionEngine) SetPiiMaskHook(hook *PiiRestoreHook)
+
+SetPiiMaskHook attaches the session\-scoped PII mask lane used for the fix\-request side send \(finding C21\). Nil is a no\-op \(setter nil\-guard rule\): with no hook the raw context passes through byte\-identically.
+
 <a name="ReflectionEngine.SetScopeProvider"></a>
 ### func \(\*ReflectionEngine\) SetScopeProvider
 
@@ -54510,6 +55192,13 @@ RegistryConfig holds configuration for creating an AgentRegistry.
 	    // it (dispatch gate; D8 deny-all via the explicit marker). Nil = no
 	    // groups config: byte-identical legacy behavior (D7).
 	    GroupsResolver *groups.Resolver
+	
+	    // PiiRestore is the shared PII-unmasking restore lane (bughunt C19).
+	    // When set, every registry-built loop inherits it via SetPiiRestoreHook
+	    // so specialist/delegate-child turns mask provider-bound context and
+	    // restore [PII:*] tokens exactly like the daemon template lane. Nil =
+	    // feature off (byte-identical legacy behavior).
+	    PiiRestore *PiiRestoreHook
 	
 	    // DecisionLogLevel is security.groups.decision_log_level (agent-groups
 	    // leaf 04 daemon wiring): applied to every registry-built loop's
@@ -55258,6 +55947,8 @@ SQLiteParkStore is the default ParkPersistence over the daemon's parks.db.
 
 NewSQLiteParkStore opens \(and migrates\) the parked\-turn table on the database at dbPath. The DSN matches the session/queue stores: WAL journal \+ 5s busy timeout. modernc.org/sqlite honors only \`\_pragma=\`\-style DSN parameters \(the queue/task stores use the same form\), so \`\_journal\_mode=\`\-style keys would be silently ignored.
 
+\`\_txlock=immediate\` \(bughunt 2026\-11\-10 B7, queue store.go precedent\): load\(\) documents a transactional prune guarantee — BeginTx, SELECT, DELETE expired, Commit. With a DEFERRED transaction that guarantee loses to a concurrent writer: the deferred BEGIN takes no lock, the read snapshots WAL, and the mid\-transaction DELETE then needs the write lock another conn took meanwhile — an unretryable SQLITE\_BUSY / BUSY\_SNAPSHOT \(busy\_timeout cannot retry a deadlock\-shaped snapshot conflict\). Taking the write lock at BEGIN makes load\(\)'s read\-prune\-commit a serialized critical section.
+
 <a name="SQLiteParkStore.Close"></a>
 ### func \(\*SQLiteParkStore\) Close
 
@@ -55279,12 +55970,28 @@ Delete implements ParkStore. Idempotent: deleting an absent row affects 0 rows a
 
 Load implements ParkStore: one transaction reads the kind's rows, deletes expired ones, and returns the survivors oldest\-resume\-first with their park keys \(so the caller can delete them by identity on resume\). A transaction is required so a concurrent Load \(second parker sharing the file\) can never see a row both prune and re\-arm.
 
+Owner filtering \(C\-K1\): a sticky SetOwnerFilter \(test/observability seam\) narrows the visible rows; parkers wanting their OWN rows should use LoadOwned \(the OwnerScopedPersistence capability\), which never touches the sticky filter. An unfiltered Load keeps the pre\-owner kind\-only contract byte\-identical for unwired callers.
+
+<a name="SQLiteParkStore.LoadOwned"></a>
+### func \(\*SQLiteParkStore\) LoadOwned
+
+	func (s *SQLiteParkStore) LoadOwned(ctx context.Context, kind ParkKind, owner string, now time.Time) ([]ParkedTurnRecord, []string, error)
+
+LoadOwned is the C\-K1 owner\-scoped Load: same semantics as Load but restricted to rows whose owner column equals owner. Rows stamped by a different parker are invisible — the partition that closes the C1 double\-execution window \(quota watcher and throttle parker sharing ParkKindChat can no longer re\-arm each other's rows\).
+
 <a name="SQLiteParkStore.Save"></a>
 ### func \(\*SQLiteParkStore\) Save
 
 	func (s *SQLiteParkStore) Save(ctx context.Context, kind ParkKind, persistenceKey string, rec ParkedTurnRecord) error
 
 Save implements ParkStore.
+
+<a name="SQLiteParkStore.SetOwnerFilter"></a>
+### func \(\*SQLiteParkStore\) SetOwnerFilter
+
+	func (s *SQLiteParkStore) SetOwnerFilter(owner string)
+
+SetOwnerFilter installs a store\-level owner filter on Load \(C\-K1\). Empty string restores the unfiltered, kind\-only view \(the pre\-migration contract — park\_store tests and any parker without an owner rely on it\).
 
 <a name="SQLiteStatePersister"></a>
 ## type SQLiteStatePersister
@@ -56067,6 +56774,13 @@ NewSkillStateRuntime builds a runtime bound to loop. The LLM chatter is taken fr
 
 Run executes skill in state mode \(paper Algorithm 1\): per step build the prompt → chat → parse \(malformed ⇒ ONE corrective retry, then error\) → validate \+ merge Σ → execute tool or return answer. Terminates on an answer action, when MaxIterations steps are exhausted \(error naming the step count\), or when ctx is cancelled.
 
+<a name="SkillStateRuntime.SetPiiMaskHook"></a>
+### func \(\*SkillStateRuntime\) SetPiiMaskHook
+
+	func (r *SkillStateRuntime) SetPiiMaskHook(hook *PiiRestoreHook)
+
+SetPiiMaskHook attaches the session\-scoped PII mask lane used for the state\-runtime side sends \(finding C21\). Nil is a no\-op \(setter nil\-guard rule\): with no hook the raw observation passes through byte\-identically.
+
 <a name="SkillStateRuntime.WithStateTraceWriter"></a>
 ### func \(\*SkillStateRuntime\) WithStateTraceWriter
 
@@ -56611,6 +57325,13 @@ SetInterviewProbe installs the interview observation seam \(tests only\).
 
 SetMetricsStore installs \(or replaces\) the metrics store used for failure/replan outcome capture \(classifier\-outcome\-loop leaf 03, Signal B at the quickplan\-fallback site\). The planner also accepts a store via StrategicPlannerConfig.MetricsStore; this setter covers the daemon wiring order where the store is created after NewComponents. nil is ignored per the CLAUDE.md setter convention.
 
+<a name="StrategicPlanner.SetPiiMaskHook"></a>
+### func \(\*StrategicPlanner\) SetPiiMaskHook
+
+	func (sp *StrategicPlanner) SetPiiMaskHook(hook *PiiRestoreHook)
+
+SetPiiMaskHook attaches the session\-scoped PII mask lane used for the critique loop's raw\-chatter side send \(finding C21\). Nil is a no\-op \(setter nil\-guard rule\): with no hook the raw prompt passes through byte\-identically.
+
 <a name="StrategicPlanner.SetPlanCompilerEnabled"></a>
 ### func \(\*StrategicPlanner\) SetPlanCompilerEnabled
 
@@ -56760,6 +57481,13 @@ NewSynthesizeTracesTool creates the synthesis tool.
 	func (t *SynthesizeTracesTool) Invoke(ctx context.Context, args map[string]any) (map[string]any, error)
 
 Invoke executes the synthesis tool.
+
+<a name="SynthesizeTracesTool.SetPiiMaskHook"></a>
+### func \(\*SynthesizeTracesTool\) SetPiiMaskHook
+
+	func (t *SynthesizeTracesTool) SetPiiMaskHook(hook *PiiRestoreHook)
+
+SetPiiMaskHook attaches the session\-scoped PII mask lane used for the synthesis side send \(finding C21\). Nil is a no\-op \(setter nil\-guard rule\): with no hook the raw prompt passes through byte\-identically.
 
 <a name="SynthesizeTracesTool.SetScopeProvider"></a>
 ### func \(\*SynthesizeTracesTool\) SetScopeProvider
@@ -58511,6 +59239,13 @@ EmitParkEvent is the exported park\-event hook for park sites outside the agent 
 
 EmitResumeEvent is the exported resume\-event hook, symmetric to EmitParkEvent: call it from external resume sites right before the turn re\-enters its loop. trueParkAt may be zero when the caller has no park timestamp \(Waited then measures from the scheduled ResumeAt — see emitResumeEvent for the D\-M3 accuracy note\).
 
+<a name="TurnParker.HasPendingForConversation"></a>
+### func \(\*TurnParker\) HasPendingForConversation
+
+	func (p *TurnParker) HasPendingForConversation(conversationID string) bool
+
+HasPendingForConversation reports whether any parked record targets the given conversation \(ParkedTurnRecord.ConversationID\). This is the parked\- presence probe the C3 resume guards consult \(regression\-review R2, 2026\-11\-11\): the parked shape \("", nil\) from RunOnceWithParts is ambiguous between a genuine mid\-flight re\-park \(a record for THIS conversation now sits on the parker\) and a state layer that silently ABSORBED an LLM failure \(no park row at all\). Only the former may defer delivery; the latter must terminalize or the awaiting client hangs forever.
+
 <a name="TurnParker.Next"></a>
 ### func \(\*TurnParker\) Next
 
@@ -58538,6 +59273,20 @@ A record whose wait exceeds MaxWait is soft\-stopped rather than refused: it is 
 
 Pending returns the number of currently parked records.
 
+<a name="TurnParker.SetBackend"></a>
+### func \(\*TurnParker\) SetBackend
+
+	func (p *TurnParker) SetBackend(b parkBackend)
+
+SetBackend installs the C\-A1 parkBackend seam \(tree 20261110\-parked\- turns\-as\-jobs leaf 01\). NON\-NIL: every persistence call site routes to the backend ONLY — Park's save \(via keyedParkBackend.SaveKeyed when the backend implements it, else plain Save\), drain's delete, re\-arm's load, and an Arm\(ctx\) at Start. The store wired by SetParkPersistence is then consulted only to derive park keys \(parkKeyForNewRecord\) and stays byte\-identical empty \(TestParkBackendSeamWrapped pins "backend REPLACES the store path, not mirrors"\). NIL: nil\-safe no\-op — the current default sqlite store path keeps running byte\-identically \(the baseline pins in the gate: no SetBackend call AND SetBackend\(nil\) both leave the store traffic unchanged\). Wiring\-time setter, like SetParkPersistence.
+
+<a name="TurnParker.SetGiveUpFunc"></a>
+### func \(\*TurnParker\) SetGiveUpFunc
+
+	func (p *TurnParker) SetGiveUpFunc(fn func(ctx context.Context, turn ParkedTurnRecord))
+
+SetGiveUpFunc installs the attempt\-cap give\-up callback \(M\-4\-park, tree 04 leaf 04\). Called once per record the drain abandons at the cap, right after its give\-up event is published and its persisted row is deleted. A nil fn clears it \(give\-ups go back to event\-only\). Takes effect from the next drainDue pass.
+
 <a name="TurnParker.SetParkEventBus"></a>
 ### func \(\*TurnParker\) SetParkEventBus
 
@@ -58558,6 +59307,18 @@ SetParkKey installs a per\-record persistence\-key override \(episode wiring: th
 	func (p *TurnParker) SetParkPersistence(store ParkPersistence, kind ParkKind)
 
 SetParkPersistence wires durable parked\-turn storage \(park\_store\_sqlite.go\) and the ParkKind scoping its rows. Nil store restores memory\-only behaviour. Like SetParkEventBus this is a wiring\-time setter: call it once, before Start \(re\-arm happens in Start\), so no lock is needed afterwards.
+
+<a name="TurnParker.SetPersistenceOwner"></a>
+### func \(\*TurnParker\) SetPersistenceOwner
+
+	func (p *TurnParker) SetPersistenceOwner(owner string)
+
+SetPersistenceOwner installs the parker's C\-K1 identity \(e.g. "quota\-watcher", "throttle", "gate", "episode"\). When set:
+
+- every Park stamps rec.Owner before persisting, so each row carries exactly one owning parker, and
+- re\-arm loads ONLY this parker's rows \(when the store implements OwnerScopedPersistence\), closing the C1 cross\-feed: two parkers sharing one kind \(the daemon's quota watcher \+ throttle parker on ParkKindChat\) can never re\-arm each other's rows.
+
+Empty owner \(the default\) preserves the legacy kind\-only contract byte\-identically: no stamp, unfiltered Load. Wiring\-time setter — call once before Start, like SetParkPersistence.
 
 <a name="TurnParker.SetPollInterval"></a>
 ### func \(\*TurnParker\) SetPollInterval
@@ -59915,6 +60676,7 @@ Package config provides configuration loading and validation for meept.
 - Variables
 - [func DeepMerge\(dst, src map\[string\]any\) map\[string\]any](<#DeepMerge>)
 - [func DefaultAlwaysFullTools\(\) \[\]string](<#DefaultAlwaysFullTools>)
+- [func DefaultUnapprovedCallerAllowedTools\(\) \[\]string](<#DefaultUnapprovedCallerAllowedTools>)
 - [func EnsureDataDir\(cfg \*Config\) error](<#EnsureDataDir>)
 - [func ExpandEnvVars\(s string\) \(string, error\)](<#ExpandEnvVars>)
 - [func ExpandMeeptPath\(path string\) string](<#ExpandMeeptPath>)
@@ -59926,11 +60688,13 @@ Package config provides configuration loading and validation for meept.
 - [func MeeptPath\(elem ...string\) string](<#MeeptPath>)
 - [func NormalizeAgentGuardsDefaults\(g \*AgentGuardsConfig\)](<#NormalizeAgentGuardsDefaults>)
 - [func NormalizeAgentToolsDefaults\(c \*AgentToolsConfig\)](<#NormalizeAgentToolsDefaults>)
+- [func NormalizeAwarenessDefaults\(c \*AwarenessConfig\)](<#NormalizeAwarenessDefaults>)
 - [func NormalizeClusterSecurityDefaults\(c \*ClusterConfig\)](<#NormalizeClusterSecurityDefaults>)
 - [func NormalizeContextDiscoveryDefaults\(c \*ContextDiscoveryConfig\)](<#NormalizeContextDiscoveryDefaults>)
 - [func NormalizeDecisionLogDefaults\(g \*SecurityGroupsConfig\)](<#NormalizeDecisionLogDefaults>)
 - [func NormalizeEvolverDefaults\(e \*SkillsEvolverConfig\) error](<#NormalizeEvolverDefaults>)
 - [func NormalizeFailurePolicyDefaults\(f \*FailurePolicyConfig\)](<#NormalizeFailurePolicyDefaults>)
+- [func NormalizeLedgerDefaults\(c \*LedgerConfig\)](<#NormalizeLedgerDefaults>)
 - [func NormalizeMemoryTiersDefaults\(mt \*MemoryTiersConfig\)](<#NormalizeMemoryTiersDefaults>)
 - [func NormalizeOTLPMetricsDefaults\(c \*OTLPMetricsConfig\)](<#NormalizeOTLPMetricsDefaults>)
 - [func NormalizeOTLPTracesDefaults\(c \*OTLPTracesConfig\)](<#NormalizeOTLPTracesDefaults>)
@@ -59939,6 +60703,7 @@ Package config provides configuration loading and validation for meept.
 - [func NormalizeRuntimeDefaults\(rc \*RuntimeConfig\)](<#NormalizeRuntimeDefaults>)
 - [func NormalizeSemanticCacheDefaults\(sc \*SemanticCacheConfig\)](<#NormalizeSemanticCacheDefaults>)
 - [func NormalizeTierPolicyDefaults\(tp \*TierPolicyConfig\)](<#NormalizeTierPolicyDefaults>)
+- [func NormalizeUnapprovedCallerAllowedTools\(v \*VoiceConfig\)](<#NormalizeUnapprovedCallerAllowedTools>)
 - [func ParseLogLevel\(level string\) slog.Level](<#ParseLogLevel>)
 - [func ParseLogLevelValue\(level string\) \(slog.Level, bool\)](<#ParseLogLevelValue>)
 - [func ReadMainConfig\(\) \(string, bool, error\)](<#ReadMainConfig>)
@@ -59980,6 +60745,8 @@ Package config provides configuration loading and validation for meept.
 - [type AllowedModelRouteConfig](<#AllowedModelRouteConfig>)
 - [type AmbientExtractionConfig](<#AmbientExtractionConfig>)
 - [type AnalyticsConfig](<#AnalyticsConfig>)
+- [type AtomicCompactionConfig](<#AtomicCompactionConfig>)
+- [type AwarenessConfig](<#AwarenessConfig>)
 - [type BackupConfig](<#BackupConfig>)
   - [func DefaultBackupConfig\(\) BackupConfig](<#DefaultBackupConfig>)
   - [func \(c \*BackupConfig\) IsValidated\(\) bool](<#BackupConfig.IsValidated>)
@@ -60105,6 +60872,7 @@ Package config provides configuration loading and validation for meept.
 - [type LearningConfig](<#LearningConfig>)
 - [type LearningRetentionConfig](<#LearningRetentionConfig>)
 - [type LearningTrainingConfig](<#LearningTrainingConfig>)
+- [type LedgerConfig](<#LedgerConfig>)
 - [type LocalConfig](<#LocalConfig>)
 - [type MCPConfig](<#MCPConfig>)
 - [type MCPServersConfig](<#MCPServersConfig>)
@@ -60155,6 +60923,7 @@ Package config provides configuration loading and validation for meept.
 - [type PTYConfig](<#PTYConfig>)
 - [type PacingConfig](<#PacingConfig>)
 - [type ParakeetConfig](<#ParakeetConfig>)
+- [type ParkingConfig](<#ParkingConfig>)
 - [type PeerSyncConfig](<#PeerSyncConfig>)
   - [func DefaultPeerSyncConfig\(\) PeerSyncConfig](<#DefaultPeerSyncConfig>)
   - [func \(c \*PeerSyncConfig\) IsValidated\(\) bool](<#PeerSyncConfig.IsValidated>)
@@ -60254,12 +61023,14 @@ Package config provides configuration loading and validation for meept.
 - [type ToolProvidersConfig](<#ToolProvidersConfig>)
   - [func \(c ToolProvidersConfig\) EnabledNames\(all \[\]string\) \[\]string](<#ToolProvidersConfig.EnabledNames>)
 - [type ToolingConfig](<#ToolingConfig>)
+- [type TraceAnalysisConfig](<#TraceAnalysisConfig>)
 - [type TranscriptConfig](<#TranscriptConfig>)
   - [func DefaultTranscriptConfig\(\) TranscriptConfig](<#DefaultTranscriptConfig>)
 - [type TransportConfig](<#TransportConfig>)
 - [type TurnWatchdogConfig](<#TurnWatchdogConfig>)
 - [type UploadsConfig](<#UploadsConfig>)
 - [type ValidationConfig](<#ValidationConfig>)
+- [type VectorHybridConfig](<#VectorHybridConfig>)
 - [type VerificationDefaults](<#VerificationDefaults>)
 - [type VoiceConfig](<#VoiceConfig>)
 - [type WatchdogConfig](<#WatchdogConfig>)
@@ -60398,6 +61169,10 @@ Package config provides configuration loading and validation for meept.
 
 	const AgentIDExplore = "explore"
 
+<a name="DefaultAwarenessRefreshMinutes"></a>DefaultAwarenessRefreshMinutes is the \[awareness\] refresh cadence default \(30 minutes; matches the weather cache TTL so a refresh never outlives its cached Outlook — plan 20261110\-situational leaf 01/01\).
+
+	const DefaultAwarenessRefreshMinutes = 30
+
 <a name="DefaultContextDiscoveryInterval"></a>Defaults for llm.context\_discovery \(tree 05 leaf 01\).
 
 	const (
@@ -60411,6 +61186,10 @@ Package config provides configuration loading and validation for meept.
 <a name="DefaultHomeRel"></a>DefaultHomeRel is the home\-relative default directory.
 
 	const DefaultHomeRel = ".meept"
+
+<a name="DefaultLedgerIntervalHours"></a>DefaultLedgerIntervalHours is the \[ledger\] verify interval default \(168h = weekly; plan 20261109\-employee\-ledger leaf 04\-ops/01\).
+
+	const DefaultLedgerIntervalHours = 168
 
 <a name="DefaultOTLPTracesEndpoint"></a>DefaultOTLPTracesEndpoint is the base URL used when Endpoint is empty at normalization time \(a plain OTLP receiver; a Langfuse install would point at http://langfuse:3000/api/public/otel\).
 
@@ -60493,6 +61272,13 @@ Implements RFC 7396 JSON Merge Patch semantics.
 
 DefaultAlwaysFullTools returns the curated core\-tool list that keeps its full parameter schema under indexed schema mode. Returns a fresh copy on every call so callers may mutate the result freely.
 
+<a name="DefaultUnapprovedCallerAllowedTools"></a>
+## func DefaultUnapprovedCallerAllowedTools
+
+	func DefaultUnapprovedCallerAllowedTools() []string
+
+DefaultUnapprovedCallerAllowedTools is the \[voice\] unapproved\_caller\_allowed\_tools default \(plan 20261110\-caller\-authz, decision O3\): the message\-leaving lane plus the ledger append — the only actions an unapproved inbound caller may take. The tool names are the REAL builtin registry names \(internal/tools/builtin/agent\_message.go Name\(\) == "send\_agent\_message", the daemon's message\-taking lane wired via builtin.NewSendAgentMessageTool; internal/tools/builtin/ledger.go Name\(\) == "ledger\_append"\). Returns a fresh slice on every call so consumers may mutate the loaded config freely \(DefaultAlwaysFullTools precedent\).
+
 <a name="EnsureDataDir"></a>
 ## func EnsureDataDir
 
@@ -60537,7 +61323,7 @@ LoadJSON5 reads a JSON5 file, expands environment variables, standardizes to JSO
 
 LoadJSON5Bytes parses JSON5 config content \(already env\-expanded\) into v, applying the same duration preprocessing and JSON5 standardization as LoadJSON5. It exists so Load can try the JSON5 grammar first \(the shipped template format\) and fall back to legacy TOML without re\-reading the file.
 
-Unlike LoadJSON5, this path also quotes JSON5 bare \(unquoted\) object keys before standardizing: JSON5 proper allows them, hujson does not. Bare\-key tolerance lives here and not in LoadJSON5 so existing callers keep their exact strictness; meept.json5 itself quotes every key.
+Unlike LoadJSON5's file path, this variant predates the file path's bare\-key adoption; both now tolerate unquoted JSON5 keys via quoteBareKeys.
 
 <a name="MainConfigPath"></a>
 ## func MainConfigPath
@@ -60576,6 +61362,13 @@ NormalizeAgentGuardsDefaults fills ship\-on defaults for zero\-valued fields.
 
 NormalizeAgentToolsDefaults fills load\-boundary defaults for \[agent.tools\] \(branch 03 leaf 01, design §3.4\): PredictedBudget 0/negative \-\> default 25; \>30 \-\> clamped to 30 with one warn \(N=31 costs more than the indexed baseline, so it can never be the better choice\).
 
+<a name="NormalizeAwarenessDefaults"></a>
+## func NormalizeAwarenessDefaults
+
+	func NormalizeAwarenessDefaults(c *AwarenessConfig)
+
+NormalizeAwarenessDefaults clamps invalid \[awareness\] values at the load boundary so every consumer sees final values: a non\-positive refresh\_minutes \(0 means unset; negative is invalid\) falls back to DefaultAwarenessRefreshMinutes. Enabled is NEVER forced — explicit true/false and the omitted\-key default \(false\) are both honored \(mirrors the LedgerConfig AutoRepair posture\).
+
 <a name="NormalizeClusterSecurityDefaults"></a>
 ## func NormalizeClusterSecurityDefaults
 
@@ -60610,6 +61403,13 @@ NormalizeEvolverDefaults normalizes the skills.evolver section: an empty PlanDir
 	func NormalizeFailurePolicyDefaults(f *FailurePolicyConfig)
 
 NormalizeFailurePolicyDefaults clamps invalid failure\_policy values to defaults: negative durations become the field default, zero means unset and takes the default; non\-positive ShortRetries takes the default; pacing intervals normalize the same way and max \< min lifts max to min. Idempotent on valid values. Pacing.Enabled is left as\-is: the default\-on value is applied by DefaultConfig\(\) \(which load unmarshal runs onto\), and an explicit pacing.enabled = false must survive every load.
+
+<a name="NormalizeLedgerDefaults"></a>
+## func NormalizeLedgerDefaults
+
+	func NormalizeLedgerDefaults(c *LedgerConfig)
+
+NormalizeLedgerDefaults clamps invalid \[ledger\] values to defaults at the load boundary so every consumer sees final values: a non\-positive interval\_hours falls back to DefaultLedgerIntervalHours. AutoRepair's zero value \(false\) is the shipped default — no clamping.
 
 <a name="NormalizeMemoryTiersDefaults"></a>
 ## func NormalizeMemoryTiersDefaults
@@ -60666,6 +61466,13 @@ NormalizeSemanticCacheDefaults clamps invalid semantic\-cache values to defaults
 	func NormalizeTierPolicyDefaults(tp *TierPolicyConfig)
 
 NormalizeTierPolicyDefaults clamps the tier policy to defaults at the load boundary: when Enabled, a non\-positive MaxDepth takes DefaultTierPolicyMaxDepth and a nil TurnCeilings map becomes empty \(never nil, so consumers can index safely\). When disabled, MaxDepth stays 0 — the policy is inactive and must not carry an effective limit. SignalDegraded is left as\-is: its default\-true value is applied by DefaultConfig\(\) \(which load unmarshal runs onto\), and an explicit signal\_degraded = false must survive every load. Idempotent.
+
+<a name="NormalizeUnapprovedCallerAllowedTools"></a>
+## func NormalizeUnapprovedCallerAllowedTools
+
+	func NormalizeUnapprovedCallerAllowedTools(v *VoiceConfig)
+
+NormalizeUnapprovedCallerAllowedTools restores the default list when the loaded \[voice\] block carries an EMPTY unapproved\_caller\_allowed\_tools \(master: "normalize at load \(empty \-\> default\)"\). A nil or explicit \`\[\]\` must NOT ship zero message rights to unknown callers. Non\-empty user lists pass through untouched, in user order — no reordering, no default injection \(review checklist\). Idempotent on valid values.
 
 <a name="ParseLogLevel"></a>
 ## func ParseLogLevel
@@ -61021,6 +61828,14 @@ AgentConfig holds agent loop settings.
 	    Queues AgentQueuesConfig `json:"queues" toml:"queues"`
 	    // Compaction holds context compaction settings
 	    Compaction AgentCompactionConfig `json:"compaction" toml:"compaction"`
+	    // AtomicCompaction gates the memory.Compactor (HALO Phase 6 atomic
+	    // tool-turn compaction, internal/memory/consolidation_compact.go) in the
+	    // L0 distill path: L1 extraction prompts see merged tool+observation
+	    // records and a summary turn instead of the raw window. Opt-in, default
+	    // false (docs/agents/opt-in-defaults.md) — when disabled the distill
+	    // prompt is byte-identical to the pre-wiring behavior and no Compactor is
+	    // constructed. See AtomicCompactionConfig.
+	    AtomicCompaction AtomicCompactionConfig `json:"atomic_compaction" toml:"atomic_compaction"`
 	    // Reflection holds auto-fix reflection loop settings
 	    Reflection AgentReflectionConfig `json:"reflection" toml:"reflection"`
 	    // Lint holds linting and test runner settings
@@ -61333,6 +62148,33 @@ AnalyticsConfig holds configuration for the analytics system.
 	type AnalyticsConfig struct {
 	    Enabled       bool `json:"enabled,omitempty"          toml:"enabled"`
 	    RetentionDays int  `json:"retention_days,omitempty"   toml:"retention_days"`
+	}
+
+<a name="AtomicCompactionConfig"></a>
+## type AtomicCompactionConfig
+
+AtomicCompactionConfig configures the memory.Compactor \(HALO Phase 6 atomic tool\-turn compaction\) when agent.atomic\_compaction is enabled. Zero fields resolve to the Compactor's own documented defaults.
+
+	type AtomicCompactionConfig struct {
+	    // Enabled wires the Compactor into the L1 distill prompt assembly.
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // MaxTurnsBeforeCompact triggers compaction above this turn count
+	    // (Compactor default 50).
+	    MaxTurnsBeforeCompact int `json:"max_turns_before_compact" toml:"max_turns_before_compact"`
+	    // MaxToolCallsPerTurn caps preserved tool calls per turn (default 10).
+	    MaxToolCallsPerTurn int `json:"max_tool_calls_per_turn" toml:"max_tool_calls_per_turn"`
+	    // KeepLastNTurns is the never-compacted recent tail (default 10).
+	    KeepLastNTurns int `json:"keep_last_n_turns" toml:"keep_last_n_turns"`
+	}
+
+<a name="AwarenessConfig"></a>
+## type AwarenessConfig
+
+AwarenessConfig is the \[awareness\] table \(plan 20261110\-situational D1\): the employee situational\-awareness feed \(moment block: local time, weather risk alerts, day\-state \+ tone\). Enabled defaults FALSE — opt\-in per docs/agents/opt\-in\-defaults.md, so a daemon that never opts in renders byte\-identical prompts. RefreshMinutes is the scheduler cadence for the weather\-refresh/daystate\-warm jobs.
+
+	type AwarenessConfig struct {
+	    Enabled        bool `json:"enabled"         toml:"enabled"`
+	    RefreshMinutes int  `json:"refresh_minutes" toml:"refresh_minutes"`
 	}
 
 <a name="BackupConfig"></a>
@@ -61814,6 +62656,9 @@ Config is the root configuration structure loaded from meept.toml.
 	    Signal              SignalConfig              `json:"signal"               toml:"signal"`
 	    Delegation          DelegationConfig          `json:"delegation,omitzero"  toml:"delegation"`
 	    Contact             ContactConfig             `json:"contact,omitzero"     toml:"contact"`
+	    Ledger              LedgerConfig              `json:"ledger"               toml:"ledger"`
+	    Parking             ParkingConfig             `json:"parking"              toml:"parking"`
+	    Awareness           AwarenessConfig           `json:"awareness"            toml:"awareness"`
 	}
 
 <a name="DefaultConfig"></a>
@@ -62269,7 +63114,7 @@ EmbedHealthCheckConfig configures the embedding\-pipeline health gate \(issue \#
 <a name="EmbeddingConfig"></a>
 ## type EmbeddingConfig
 
-EmbeddingConfig holds vector embedding settings for semantic memory search.
+EmbeddingConfig holds vector embedding provider settings.
 
 	type EmbeddingConfig struct {
 	    Enabled       bool     `json:"enabled"         toml:"enabled"`
@@ -63203,6 +64048,24 @@ LearningTrainingConfig holds settings for LoRA training.
 	    ManualOnly         bool   `json:"manual_only"            toml:"manual_only"`
 	}
 
+<a name="LedgerConfig"></a>
+## type LedgerConfig
+
+LedgerConfig configures the employee ledger ops subsystem \(\[ledger\], plan 20261109\-employee\-ledger leaf 04\-ops/01\). It gates the scheduled integrity pass over the ledger store \(internal/daemon/ledger\_integrity.go\): the job runs ledger.VerifyState on IntervalHours and, only when AutoRepair is true, follows a divergent report with RepairState.
+
+	type LedgerConfig struct {
+	    // AutoRepair opts in to automatic RepairState when the integrity
+	    // pass finds divergence. Default FALSE (opt-in per
+	    // docs/agents/opt-in-defaults.md): a divergent report logs ERROR
+	    // and leaves the store untouched unless this is explicitly true.
+	    AutoRepair bool `json:"auto_repair" toml:"auto_repair"`
+	    // IntervalHours is how often the ledger-integrity scheduler job
+	    // fires. Default 168 (weekly) — set in DefaultConfig and clamped
+	    // at the load boundary by NormalizeLedgerDefaults. A non-positive
+	    // value falls back to the default.
+	    IntervalHours int `json:"interval_hours" toml:"interval_hours"`
+	}
+
 <a name="LocalConfig"></a>
 ## type LocalConfig
 
@@ -63403,6 +64266,13 @@ MemoryConfig holds memory subsystem settings.
 	    // candidates directly — no recall, no conflict LLM call. See
 	    // ConflictConfig.
 	    Conflict ConflictConfig `json:"conflict" toml:"conflict"`
+	    // VectorHybrid gates the ShardManager-powered hybrid searcher
+	    // (vector.HybridSearcher over the live ShardManager + the manager's FTS
+	    // keyword lane) and its memory.search.hybrid RPC surface. Opt-in, default
+	    // false (docs/agents/opt-in-defaults.md): when disabled the legacy
+	    // Manager.SearchHybrid path is byte-identical and no hybrid searcher is
+	    // constructed. See VectorHybridConfig.
+	    VectorHybrid VectorHybridConfig `json:"vector_hybrid" toml:"vector_hybrid"`
 	    // L0Enabled turns on the raw-conversation L0 tier (tree 01 layered
 	    // async distillation): conversation turns are appended to
 	    // <memory.data_dir>/l0/YYYY-MM-DD.jsonl and distilled asynchronously
@@ -63839,6 +64709,20 @@ NotificationsConfig holds configuration for desktop notifications.
 	    // this flag is checked at the EventEmitter dispatch layer and blocks
 	    // every notification regardless of type, priority, or source.
 	    DoNotDisturb bool `json:"do_not_disturb,omitempty" toml:"do_not_disturb"`
+	
+	    // Enabled is the kill-switch for the proactive notification bot
+	    // stack (automation plan 2026-06-21 Plans 1.x/3.x):
+	    // NotificationBot + CostTracker budget enforcement + push history +
+	    // notification preferences + telegram push channel. Default zero
+	    // value = OFF (additive opt-in, same posture as [intake]) so a
+	    // wiring bug can never break message delivery at boot. The desktop
+	    // notification emitter path above does NOT read this flag — it stays
+	    // always-on exactly as before. Constructed by
+	    // internal/daemon/notification_bot_wiring.go (wireNotificationBot).
+	    BotNotifyOn         []string          `json:"bot_notify_on,omitempty"           toml:"bot_notify_on"`
+	    BotRateLimitPerHour int               `json:"bot_rate_limit_per_hour,omitempty" toml:"bot_rate_limit_per_hour"`
+	    BotTelegramChatIDs  []string          `json:"bot_telegram_chat_ids,omitempty"   toml:"bot_telegram_chat_ids"`
+	    BotTemplates        map[string]string `json:"bot_templates,omitempty"           toml:"bot_templates"`
 	}
 
 <a name="OAuthConfig"></a>
@@ -64093,6 +64977,19 @@ ParakeetConfig holds parakeet.cpp engine settings.
 	type ParakeetConfig struct {
 	    BinPath   string `json:"bin_path"   toml:"bin_path"`
 	    ModelPath string `json:"model_path" toml:"model_path"`
+	}
+
+<a name="ParkingConfig"></a>
+## type ParkingConfig
+
+ParkingConfig groups parked\-turn persistence options \(tree 20261110\-parked\-turns\-as\-jobs\).
+
+	type ParkingConfig struct {
+	    // QueueBackend stores parked turns as queue jobs (type "parked_turn",
+	    // wake = next_retry_at, owner = claimed_by) instead of parks.db.
+	    // Opt-in, default false: disabled keeps the sqlite park path
+	    // byte-identical (docs/agents/opt-in-defaults.md).
+	    QueueBackend bool `json:"queue_backend" toml:"queue_backend"`
 	}
 
 <a name="PeerSyncConfig"></a>
@@ -64943,6 +65840,13 @@ SelfImproveConfig holds self\-improvement settings.
 	    Sandbox               SandboxConfig   `json:"sandbox"                  toml:"sandbox"`
 	    Safety                SafetyConfig    `json:"safety"                   toml:"safety"`
 	    Detection             DetectionConfig `json:"detection"                toml:"detection"`
+	    // TraceAnalysis gates the HALO RLM trace-analysis activation path
+	    // (wave-2 wire): a periodic scheduler job loads the memory trace-store
+	    // reader over TraceStorePath, runs the agent.RLMAnalyzer over it, and
+	    // surfaces selfimprove.IssueDetector.ScanTraces findings. Opt-in,
+	    // default false — enabling it is a product decision
+	    // (docs/agents/opt-in-defaults.md posture).
+	    TraceAnalysis TraceAnalysisConfig `json:"trace_analysis" toml:"trace_analysis"`
 	}
 
 <a name="SemanticCacheConfig"></a>
@@ -65685,6 +66589,21 @@ ToolingConfig holds tool call serialization sidecar settings. Used for delegatin
 	    LogUnknownTools bool `json:"log_unknown_tools" toml:"log_unknown_tools"`
 	}
 
+<a name="TraceAnalysisConfig"></a>
+## type TraceAnalysisConfig
+
+TraceAnalysisConfig configures the \[selfimprove\].trace\_analysis section.
+
+	type TraceAnalysisConfig struct {
+	    // Enabled turns on the periodic trace-analysis scan. Default false.
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // TraceStorePath is the trace JSONL source for memory.LoadTraceStore.
+	    // Empty resolves at wiring time to <daemon.data_dir>/traces.jsonl.
+	    TraceStorePath string `json:"trace_store_path" toml:"trace_store_path"`
+	    // Interval is the scan cadence (cron "@every" duration). Default 6h.
+	    Interval time.Duration `json:"interval" toml:"interval"`
+	}
+
 <a name="TranscriptConfig"></a>
 ## type TranscriptConfig
 
@@ -65780,6 +66699,24 @@ ValidationConfig holds task completion validation settings.
 	    MaxValidationLoops int `json:"max_validation_loops" toml:"max_validation_loops"`
 	}
 
+<a name="VectorHybridConfig"></a>
+## type VectorHybridConfig
+
+VectorHybridConfig gates the ShardManager\-powered hybrid search surface \(memory.vector\_hybrid, plan docs/plans/2026\-06\-07\-sharded\-vector\-memory.md "Wire ShardManager for hybrid search"\). Enabled=false \(the default\) keeps the legacy Manager.SearchHybrid path byte\-identical and constructs nothing.
+
+	type VectorHybridConfig struct {
+	    // Enabled constructs the hybrid searcher over the live ShardManager at
+	    // daemon startup and registers the memory.search.hybrid RPC handler.
+	    // Requires memory.embeddings.enabled (no embedder = no vector lane).
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // Alpha is the vector-vs-keyword weighting (0 = pure keyword, 1 = pure
+	    // vector). Values outside [0,1] resolve to the searcher's 0.5 default.
+	    Alpha float64 `json:"alpha" toml:"alpha"`
+	    // Limit is the default result cap for the RPC surface when the request
+	    // omits one.
+	    Limit int `json:"limit" toml:"limit"`
+	}
+
 <a name="VerificationDefaults"></a>
 ## type VerificationDefaults
 
@@ -65818,34 +66755,61 @@ VerificationDefaults holds daemon\-level verification defaults.
 	    // GreetingLine is the fact-free line spoken once on call connect.
 	    // Empty falls back to Filler[0] (the greeting is filler-class; an
 	    // empty filler list plus empty greeting disables the greeting).
-	    GreetingLine         string   `json:"greeting"               toml:"greeting"`
-	    Filler               []string `json:"filler"                 toml:"filler"`
-	    SupervisorEmployee   string   `json:"supervisor_employee"    toml:"supervisor_employee"`
-	    SupervisorEnabled    bool     `json:"supervisor_enabled"     toml:"supervisor_enabled"`
-	    SupervisorModel      string   `json:"supervisor_model"       toml:"supervisor_model"`
-	    SupervisorTimeoutMs  int      `json:"supervisor_timeout_ms"  toml:"supervisor_timeout_ms"`
-	    VoiceModel           string   `json:"voice_model"            toml:"voice_model"`
-	    PublicStreamURL      string   `json:"public_stream_url"      toml:"public_stream_url"`
-	    ConnectionID         string   `json:"connection_id"          toml:"connection_id"`
-	    FromNumber           string   `json:"from_number"            toml:"from_number"`
-	    AllowedNumbers       []string `json:"allowed_numbers"        toml:"allowed_numbers"`
-	    TimeoutSecs          int      `json:"timeout_secs"           toml:"timeout_secs"`
-	    MaxCallMinutes       int      `json:"max_call_minutes"       toml:"max_call_minutes"`
-	    SilencePromptSeconds int      `json:"silence_prompt_seconds" toml:"silence_prompt_seconds"`
-	    TurnTimeoutSeconds   int      `json:"turn_timeout_seconds"   toml:"turn_timeout_seconds"`
-	    MaxConcurrentCalls   int      `json:"max_concurrent_calls"   toml:"max_concurrent_calls"`
-	    ReorderWindowFrames  int      `json:"reorder_window_frames"  toml:"reorder_window_frames"`
-	    ReorderGapMs         int      `json:"reorder_gap_ms"         toml:"reorder_gap_ms"`
-	    TelnyxPublicKey      string   `json:"telnyx_public_key"      toml:"telnyx_public_key"`
-	    ChildBinaryPath      string   `json:"child_binary_path"      toml:"child_binary_path"`
-	    LoopbackPlainAddr    string   `json:"loopback_plain_addr"    toml:"loopback_plain_addr"`
-	    DefaultEmployee      string   `json:"default_employee"       toml:"default_employee"`
-	    DefaultLeg           string   `json:"default_leg"            toml:"default_leg"`
-	    TTSModel             string   `json:"tts_model"              toml:"tts_model"`
-	    TTSVoice             string   `json:"tts_voice"              toml:"tts_voice"`
-	    STTModel             string   `json:"stt_model"              toml:"stt_model"`
-	    TTSBaseURL           string   `json:"tts_base_url"           toml:"tts_base_url"`
-	    STTBaseURL           string   `json:"stt_base_url"           toml:"stt_base_url"`
+	    GreetingLine string   `json:"greeting"               toml:"greeting"`
+	    Filler       []string `json:"filler"                 toml:"filler"`
+	    // FillerGraceMs is how long a dispatched turn may run before the
+	    // talk loop speaks a filler line (dead-air defect 2026-11-10:
+	    // filler fired immediately on EVERY prompt, so "give me a second"
+	    // preceded fast answers). 0 = speak immediately (legacy).
+	    FillerGraceMs       int      `json:"filler_grace_ms"        toml:"filler_grace_ms"`
+	    SupervisorEmployee  string   `json:"supervisor_employee"    toml:"supervisor_employee"`
+	    SupervisorEnabled   bool     `json:"supervisor_enabled"     toml:"supervisor_enabled"`
+	    SupervisorModel     string   `json:"supervisor_model"       toml:"supervisor_model"`
+	    SupervisorTimeoutMs int      `json:"supervisor_timeout_ms"  toml:"supervisor_timeout_ms"`
+	    VoiceModel          string   `json:"voice_model"            toml:"voice_model"`
+	    PublicStreamURL     string   `json:"public_stream_url"      toml:"public_stream_url"`
+	    ConnectionID        string   `json:"connection_id"          toml:"connection_id"`
+	    FromNumber          string   `json:"from_number"           toml:"from_number"`
+	    AllowedNumbers      []string `json:"allowed_numbers"       toml:"allowed_numbers"`
+	    // UnapprovedCallerAllowedTools is the step-1c action gate for
+	    // inbound callers NOT voice-approved in contacts.db (plan
+	    // 20261110-caller-authz, decision O3): the only tools an unapproved
+	    // caller's turn may execute are the message-leaving lane plus the
+	    // ledger. Default ["ledger_append", "send_agent_message"] (the REAL
+	    // builtin message tool, internal/tools/builtin/agent_message.go);
+	    // an explicitly empty list normalizes back to the default at the
+	    // load boundary — unknown callers must never ship with zero message
+	    // rights. Explicit non-empty lists pass through in user order, no
+	    // reordering, no default injection.
+	    UnapprovedCallerAllowedTools []string `json:"unapproved_caller_allowed_tools" toml:"unapproved_caller_allowed_tools"`
+	    TimeoutSecs                  int      `json:"timeout_secs"           toml:"timeout_secs"`
+	    MaxCallMinutes               int      `json:"max_call_minutes"       toml:"max_call_minutes"`
+	    SilencePromptSeconds         int      `json:"silence_prompt_seconds" toml:"silence_prompt_seconds"`
+	    // SilencePrompt is the dedicated dead-air nudge line spoken on the
+	    // FIRST silence fire (replaces the legacy filler round-robin on the
+	    // silence path - an answer-pending promise like "give me a second on
+	    // that" is wrong semantics when nothing is pending). Empty falls back
+	    // to the filler list for byte-compat with callers that never set it.
+	    SilencePrompt string `json:"silence_prompt" toml:"silence_prompt"`
+	    // SilenceHangupAfterSeconds is the hangup window H after the nudge:
+	    // dead air => nudge at silence_prompt_seconds (S), hangup at S+H.
+	    // Default 45 with S default 45 => nudge@45, hangup@90, exactly the
+	    // legacy double-window endpoints. 0/negative reuses S (legacy shape).
+	    SilenceHangupAfterSeconds int    `json:"silence_hangup_after_seconds" toml:"silence_hangup_after_seconds"`
+	    TurnTimeoutSeconds        int    `json:"turn_timeout_seconds"   toml:"turn_timeout_seconds"`
+	    MaxConcurrentCalls        int    `json:"max_concurrent_calls"   toml:"max_concurrent_calls"`
+	    ReorderWindowFrames       int    `json:"reorder_window_frames"  toml:"reorder_window_frames"`
+	    ReorderGapMs              int    `json:"reorder_gap_ms"         toml:"reorder_gap_ms"`
+	    TelnyxPublicKey           string `json:"telnyx_public_key"      toml:"telnyx_public_key"`
+	    ChildBinaryPath           string `json:"child_binary_path"      toml:"child_binary_path"`
+	    LoopbackPlainAddr         string `json:"loopback_plain_addr"    toml:"loopback_plain_addr"`
+	    DefaultEmployee           string `json:"default_employee"       toml:"default_employee"`
+	    DefaultLeg                string `json:"default_leg"            toml:"default_leg"`
+	    TTSModel                  string `json:"tts_model"             toml:"tts_model"`
+	    TTSVoice                  string `json:"tts_voice"             toml:"tts_voice"`
+	    STTModel                  string `json:"stt_model"             toml:"stt_model"`
+	    TTSBaseURL                string `json:"tts_base_url"          toml:"tts_base_url"`
+	    STTBaseURL                string `json:"stt_base_url"          toml:"stt_base_url"`
 	    // FreshSessionPerCall (opt-in, default false): each voice call opens a
 	    // brand-new session instead of reusing the (employee, target) shared
 	    // conversation, so turn history never snowballs across calls. The day
@@ -74696,6 +75660,7 @@ Package memory provides memory storage and retrieval for meept.
 - [func ReasonHash\(reason string\) string](<#ReasonHash>)
 - [func ReplyTokens\(text string\) \[\]string](<#ReplyTokens>)
 - [func RotateIfNeeded\(path string, maxBytes int64\) error](<#RotateIfNeeded>)
+- [func RowOwner\(meta map\[string\]any, key string\) string](<#RowOwner>)
 - [func SalientTokens\(text string\) \[\]string](<#SalientTokens>)
 - [func SanitizeForStore\(s string\) string](<#SanitizeForStore>)
 - [func ScoreCandidate\(mem Memory, netVotes int, accesses int, now time.Time, w Weights\) float64](<#ScoreCandidate>)
@@ -74704,6 +75669,7 @@ Package memory provides memory storage and retrieval for meept.
 - [func Usefulness\(sumVotes, accesses int, ageDays float64, w Weights\) float64](<#Usefulness>)
 - [func ValidateDistilledContent\(category, content string\) error](<#ValidateDistilledContent>)
 - [func VerifyBridges\(ctx context.Context, store \*BridgeStore, verifier BridgeVerifier, cfg BridgesConfig\) \(kept int, dropped int, err error\)](<#VerifyBridges>)
+- [func VisibleScopeRow\(meta map\[string\]any, maxScope Scope, projectID, userID string, multiUser bool\) bool](<#VisibleScopeRow>)
 - [type AmbientCandidate](<#AmbientCandidate>)
   - [func ParseAmbientCandidates\(raw \[\]byte\) \(\[\]AmbientCandidate, error\)](<#ParseAmbientCandidates>)
 - [type AmbientClassifierLLM](<#AmbientClassifierLLM>)
@@ -74775,6 +75741,7 @@ Package memory provides memory storage and retrieval for meept.
 - [type DistillSummarizer](<#DistillSummarizer>)
 - [type DistillWorker](<#DistillWorker>)
   - [func NewDistillWorker\(cfg DistillWorkerConfig\) \*DistillWorker](<#NewDistillWorker>)
+  - [func \(w \*DistillWorker\) AtomicCompactor\(\) \*Compactor](<#DistillWorker.AtomicCompactor>)
   - [func \(w \*DistillWorker\) Process\(ctx context.Context, job \*queue.Job\) \(any, error\)](<#DistillWorker.Process>)
 - [type DistillWorkerConfig](<#DistillWorkerConfig>)
 - [type DualStore](<#DualStore>)
@@ -75528,6 +76495,13 @@ ReplyTokens returns the lowercase word tokens of a reply, kept WITH multiplicity
 
 RotateIfNeeded rotates path to path\+".1" when the file currently exceeds maxBytes. The previous .1 generation is overwritten, so at most two generations of the log exist \(current \+ .1\). Rename on the same filesystem is atomic, so a crash mid\-rotation leaves either the old file or the rotated one, never a partial copy. A missing file is not an error \(nothing to rotate\).
 
+<a name="RowOwner"></a>
+## func RowOwner
+
+	func RowOwner(meta map[string]any, key string) string
+
+RowOwner reads an identity key \(project\_id / user\_id\) a scope row was stamped with at store time. Exported for recall surfaces that fetch raw rows outside the Manager's option\-aware paths \(the vector hybrid searcher's two lanes, bughunt D11\) and must apply the C2 predicate with the same owner\-matching semantics as filterScopeResults.
+
 <a name="SalientTokens"></a>
 ## func SalientTokens
 
@@ -75595,6 +76569,13 @@ VerifyBridges runs the entailment\-verification pass over every persisted bridge
 - cfg.Verify true: one verifier call per bridge \(v1; batching is a follow\-up\). Unsupported verdicts DELETE the bridge before it can ever be retrievable; survivors get verified=true re\-persisted.
 
 Returns \(kept, dropped\) counts. A verifier transport error aborts the pass with an error wrapping ErrBridgeVerify; bridges already processed keep their state \(best\-effort partial progress is preserved\).
+
+<a name="VisibleScopeRow"></a>
+## func VisibleScopeRow
+
+	func VisibleScopeRow(meta map[string]any, maxScope Scope, projectID, userID string, multiUser bool) bool
+
+VisibleScopeRow reports whether one raw row passes the committed C2 predicate for a caller whose purview is maxScope \(project/user/global, the WithScopeFilter vocabulary\) with the given multiuser bit. Rows without an explicit scope stamp read as global \(legacy backfill — never hidden\). This is the exported one\-row form of filterScopeResults for the same out\-of\-band recall surfaces RowOwner serves.
 
 <a name="AmbientCandidate"></a>
 ## type AmbientCandidate
@@ -76363,6 +77344,13 @@ DistillWorker consumes memory.l1\_extract / memory.l2\_scene queue jobs.
 
 NewDistillWorker constructs a distill worker.
 
+<a name="DistillWorker.AtomicCompactor"></a>
+### func \(\*DistillWorker\) AtomicCompactor
+
+	func (w *DistillWorker) AtomicCompactor() *Compactor
+
+AtomicCompactor returns the worker's optional atomic compactor \(HALO Phase 6, agent.atomic\_compaction\). Nil when disabled. Read\-only accessor: the daemon wiring test pins construction through it; compaction itself is transparent to job processing.
+
 <a name="DistillWorker.Process"></a>
 ### func \(\*DistillWorker\) Process
 
@@ -76390,6 +77378,11 @@ DistillWorkerConfig holds construction parameters for DistillWorker.
 	    // over each L1 extraction batch before storing (tree 02 leaf L2). Nil or
 	    // disabled: candidates are stored directly — no recall, no LLM call.
 	    Conflict *ConflictWiring
+	    // Compactor, when non-nil, compacts the L0 window (merge tool +
+	    // observation pairs, dedup observations, summary middle) before the L1
+	    // extraction prompt is assembled — HALO Phase 6 atomic compaction
+	    // (agent.atomic_compaction, default false). Nil = disabled.
+	    Compactor *Compactor
 	    // Now supplies the worker's wall clock in the LOCAL frame (the L0/L2
 	    // calendar convention above). Nil = time.Now. Test seam for the L2 day
 	    // derivation: without it the chained day is unassertable off the wall
@@ -79593,6 +80586,7 @@ Session mapping: scheduler jobs carry no conversation/session identity \(a timer
   - [func NewAgentJob\(cfg JobConfig, msgBus \*bus.MessageBus\) \(\*AgentJob, error\)](<#NewAgentJob>)
   - [func \(j \*AgentJob\) Execute\(ctx context.Context\) error](<#AgentJob.Execute>)
 - [type AgentJobConfig](<#AgentJobConfig>)
+- [type ClaimedTick](<#ClaimedTick>)
 - [type DeliveryHistory](<#DeliveryHistory>)
   - [func NewDeliveryHistory\(\) \*DeliveryHistory](<#NewDeliveryHistory>)
   - [func \(h \*DeliveryHistory\) Append\(r ScheduleDeliveryReceipt\)](<#DeliveryHistory.Append>)
@@ -79871,6 +80865,16 @@ AgentJobConfig holds configuration for agent jobs.
 	    TargetSessionID string `json:"target_session_id,omitempty"`
 	}
 
+<a name="ClaimedTick"></a>
+## type ClaimedTick
+
+ClaimedTick is one claimed tick row surfaced for crash recovery.
+
+	type ClaimedTick struct {
+	    JobID string
+	    Tick  time.Time
+	}
+
 <a name="DeliveryHistory"></a>
 ## type DeliveryHistory
 
@@ -79894,6 +80898,8 @@ NewDeliveryHistory returns an empty delivery history.
 	func (h *DeliveryHistory) Append(r ScheduleDeliveryReceipt)
 
 Append adds a receipt and enforces the retention bounds: records older than DeliveryHistoryRetentionDays \(measured on DeliveredAt, falling back to ScheduledAt\) and records beyond the MaxDeliveryHistoryRecords most recent are dropped. Any drop sets EarlierRecordsPruned.
+
+Non\-terminal statuses \(pending/in\_flight\) are EXEMPT from the age prune \(bughunt 2026\-11\-10 B8\): recoverInFlightDeliveries re\-delivers FROM pending/in\_flight rows, so pruning a stuck receipt older than retention permanently lost the tick it represents. Age\-retention is for delivered history only; a stuck row survives until recovery resolves it. The count bound still applies \(bounded memory\), keeping newest stuck rows.
 
 <a name="DeliveryStatus"></a>
 ## type DeliveryStatus
@@ -85131,6 +86137,8 @@ GetMaxResultTokens returns the tool's declared result\-token floor, or 0 when th
 	func IsNoWorkingDir(err error) bool
 
 IsNoWorkingDir reports whether err is, or wraps, ErrNoWorkingDir. This is the detection surface for callers that want to surface a "bind a working directory" hint \(or a distinct user\-language message\) instead of a generic tool failure.
+
+STATUS \(deadcode wave\-3\): available\-but\-unused API surface — zero production callers \(tests only\). The sentinel\-detection contract \(internal/agent/AGENTS.md\) names this as how a CLIENT should detect the unbound\-session refusal, but the TUI/GUI surfaces render the sentinel's message text verbatim today and no RPC/comm layer special\-cases it. First caller \(a client binding hint, a WS event classifier case, etc.\) should keep errors.Is\-compatible semantics.
 
 <a name="NetworkClassFromContext"></a>
 ## func NetworkClassFromContext

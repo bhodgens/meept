@@ -31,6 +31,8 @@ func buildVoiceFields() []Field {
 		NewNumberField("voice.timeout_secs", "timeout secs", s.TimeoutSecs),
 		NewNumberField("voice.max_call_minutes", "max call minutes", s.MaxCallMinutes),
 		NewNumberField("voice.silence_prompt_seconds", "silence prompt seconds", s.SilencePromptSeconds),
+		NewTextField("voice.silence_prompt", "silence prompt line", s.SilencePrompt),
+		NewNumberField("voice.silence_hangup_after_seconds", "silence hangup after seconds", s.SilenceHangupAfterSeconds),
 		NewNumberField("voice.max_concurrent_calls", "max concurrent calls", s.MaxConcurrentCalls),
 		NewNumberField("voice.reorder_window_frames", "reorder window frames", s.ReorderWindowFrames),
 		NewNumberField("voice.reorder_gap_ms", "reorder gap ms", s.ReorderGapMs),

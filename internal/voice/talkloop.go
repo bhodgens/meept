@@ -38,8 +38,12 @@ package voice
 // Check, or the frame loop.
 //
 // Timers with named reasons: max_call_minutes bounds the call; the silence
-// path (silence_prompt_seconds) speaks one filler-class prompt after the
-// first quiet window and hangs up if the silence persists another window.
+// path (silence_prompt_seconds) speaks one dedicated nudge line (voice.
+// silence_prompt, "Are you still there?" by default; empty config falls
+// back to the legacy filler round-robin) after the first quiet window and
+// hangs up if the silence persists voice.silence_hangup_after_seconds (H)
+// longer - nudge@S, hangup@(S+H). H unset (<=0) reuses S, reproducing the
+// legacy double-window shape byte-for-byte.
 // The silence clock is TURN-AWARE: while a prompt's employee turn is in
 // flight (final prompt dispatched, reply not yet fully spoken), the
 // silence window is suspended - a slow cloud LLM (30-90s) must never lose
@@ -76,6 +80,15 @@ const (
 // the operator override; this constant is the wiring default.
 const fallbackSentence = "I cannot confirm that yet."
 
+// silenceWindowUnit converts the integer silence-window config values
+// (seconds) into timer durations. It is second-scale in production; the
+// test suite shrinks it to millisecond scale so the two-window
+// nudge->hangup sequence pins run fast without sleeping 90 s. Tests that
+// mutate it run sequentially (no package test in the silence path calls
+// t.Parallel - go test runs same-package tests one at a time unless a test
+// opts in).
+var silenceWindowUnit = time.Second
+
 // TalkLoopConfig carries the leaf-01 config values the loop enforces.
 // Zero MaxCallMinutes or SilencePromptSeconds disables the corresponding
 // timer (tests and disabled-config cases).
@@ -93,10 +106,25 @@ type TalkLoopConfig struct {
 	// MaxCallMinutes bounds the call length; zero disables the timer.
 	MaxCallMinutes int
 	// SilencePromptSeconds arms the silence path: after this long with no
-	// final prompt, the loop speaks one filler-class prompt; if the
-	// silence persists another full window, the call hangs up. Zero
-	// disables.
+	// final prompt, the loop speaks the silence nudge line; if the
+	// silence persists another SilenceHangupAfterSeconds window, the
+	// call hangs up. Zero disables.
 	SilencePromptSeconds int
+	// SilencePromptLine is the dedicated dead-air nudge spoken on the
+	// FIRST silence fire (voice.silence_prompt, "Are you still there?"
+	// by default). Dead air has nothing pending, so an answer-pending
+	// filler promise ("give me a second on that") is the wrong semantics
+	// (operator complaint, live call local-4dcfb291c2094ec9). Fallback
+	// chain: configured line; empty line -> fillerLine() round-robin
+	// (legacy byte-compat for callers that never set this field); empty
+	// filler list -> no line spoken (the fire still latches + re-arms).
+	SilencePromptLine string
+	// SilenceHangupAfterSeconds is the SECOND silence window: how long
+	// after the nudge the hangup fires when the caller stays quiet
+	// (voice.silence_hangup_after_seconds) - nudge@S, hangup@(S+H).
+	// Zero or negative reuses SilencePromptSeconds, reproducing the
+	// legacy double-window (hangup at 2x S) exactly.
+	SilenceHangupAfterSeconds int
 	// TurnTimeoutSeconds is the opt-in hard cap on one in-flight turn
 	// (final prompt dispatched -> turn-final say flushed). While a turn
 	// is in flight the silence timer is suspended, so without a cap a
@@ -110,9 +138,9 @@ type TalkLoopConfig struct {
 	// sentence inside the window (dead-air finding 2026-11-09: "Hold on,
 	// let me check." on every single prompt was noise). Zero keeps the
 	// legacy immediate filler (spoken inline at dispatch); the daemon
-	// wiring passes voice.filler_grace_ms (default 2500). The
-	// silence-prompt filler is NEVER grace-gated - that line is the
-	// dead-air nudge itself.
+	// wiring passes voice.filler_grace_ms (default 2500). The silence
+	// nudge is NEVER grace-gated - that line is the dead-air prompt
+	// itself.
 	FillerGrace time.Duration
 	// SuppressGreeting skips the on-connect greeting say (link
 	// half-duplex, turn-taking leaf: exactly ONE side of a link greets
@@ -260,8 +288,8 @@ type TalkLoop struct {
 	// Atomic because Bind can run just before or after Run starts.
 	runCcid atomic.Value // string
 
-	// silencePrompted latches the one filler-class silence prompt: the
-	// first silence fire speaks, the second hangs up.
+	// silencePrompted latches the one silence nudge: the first silence
+	// fire speaks SilencePromptLine, the second hangs up.
 	silencePrompted bool
 
 	// Link half-duplex state (turn-taking leaf). held is the ONE parked
@@ -469,6 +497,20 @@ func (t *TalkLoop) fillerLine() string {
 	return line
 }
 
+// silencePromptLine picks the line for the FIRST silence fire (the
+// dead-air nudge). Fallback chain (contract: no filler-class promise on
+// the silence path when a dedicated line is configured): configured
+// SilencePromptLine; empty line -> fillerLine() round-robin (legacy
+// callers that never set the new field keep byte-compatible behavior,
+// INCLUDING consuming a filler index); empty filler -> "" (no line —
+// the fire still latches and re-arms the hangup window).
+func (t *TalkLoop) silencePromptLine() string {
+	if t.cfg.SilencePromptLine != "" {
+		return t.cfg.SilencePromptLine
+	}
+	return t.fillerLine()
+}
+
 // fallbackLine returns the configured C6 fallback line or the default.
 func (t *TalkLoop) fallbackLine() string {
 	if t.cfg.FallbackLine != "" {
@@ -552,7 +594,8 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 	// spoken. Concretely: the final-prompt handler stops the silence timer
 	// instead of re-arming it; the draft-drain branch re-arms a fresh
 	// window once the reply is out. Between prompts (caller quiet), the
-	// legacy two-fire silence path is byte-identical.
+	// two-fire silence structure is unchanged: first fire nudges, second
+	// hangs up.
 	//
 	// Timer discipline (M5): never Reset a timer whose fire may already
 	// be buffered (or racing Stop) — the stale value would be consumed
@@ -560,17 +603,37 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 	// re-arm abandons the old timer and arms a FRESH one: a stale fire
 	// lands in an orphaned channel nobody reads and is GC'd with the old
 	// timer; the new window starts clean.
+	//
+	// Two windows: the FIRST window (and every re-arm after a spoken
+	// turn) is S = SilencePromptSeconds; after the nudge fires the re-arm
+	// uses H = SilenceHangupAfterSeconds (S when H <= 0 - legacy
+	// double-window equivalence). silenceWindowUnit is the ms-tunable
+	// seam for tests (second scale by default; the package test suite
+	// mutates it only from silence-window tests, which never run in
+	// parallel - go test runs package tests sequentially).
 	var silenceTimer *time.Timer
 	var silenceC <-chan time.Time
-	rearmSilence := func() {
-		if t.cfg.SilencePromptSeconds <= 0 {
+	// silenceArmedAt stamps when the live window was armed, so the fire
+	// telemetry can report the REAL elapsed window (after_s) - with H
+	// configured the two windows differ and the log line alone would
+	// under-report the gap since the nudge.
+	var silenceArmedAt time.Time
+	rearmSilenceWindow := func(seconds int) {
+		if seconds <= 0 {
 			return
 		}
 		if silenceTimer != nil {
 			silenceTimer.Stop()
 		}
-		silenceTimer = time.NewTimer(time.Duration(t.cfg.SilencePromptSeconds) * time.Second)
+		silenceTimer = time.NewTimer(time.Duration(seconds) * silenceWindowUnit)
 		silenceC = silenceTimer.C
+		silenceArmedAt = t.now()
+	}
+	rearmSilence := func() {
+		if t.cfg.SilencePromptSeconds <= 0 {
+			return
+		}
+		rearmSilenceWindow(t.cfg.SilencePromptSeconds)
 	}
 	stopSilence := func() {
 		if silenceTimer != nil {
@@ -686,19 +749,35 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 				continue
 			}
 			if !t.silencePrompted {
-				// First fire: one filler-class prompt, then re-arm.
+				// First fire: the dedicated dead-air nudge, then re-arm
+				// with the hangup window H (S when H unset - legacy
+				// double-window). Fallback chain inside
+				// silencePromptLine: configured line -> fillerLine() ->
+				// nothing.
 				t.silencePrompted = true
-				if line := t.fillerLine(); line != "" {
+				line := t.silencePromptLine()
+				afterS := t.now().Sub(silenceArmedAt).Seconds()
+				t.log.Info("voice talk loop: silence prompt",
+					"ccid", ccid, "line", line, "after_s", afterS)
+				if line != "" {
 					if sayErr := t.say(ccid, line, false); sayErr != nil {
 						t.log.Debug("talkloop: partial say dropped", "ccid", ccid, "err", sayErr)
 					}
 				}
-				rearmSilence()
+				hangupWindow := t.cfg.SilenceHangupAfterSeconds
+				if hangupWindow <= 0 {
+					hangupWindow = t.cfg.SilencePromptSeconds
+				}
+				rearmSilenceWindow(hangupWindow)
 				continue
 			}
 			// Second consecutive fire: hang up with the named reason.
 			t.cancelPipeline(ccid, "teardown")
-			t.end(ccid, fmt.Sprintf("silence (%ds without caller speech after prompt)", t.cfg.SilencePromptSeconds))
+			hangupWindow := t.cfg.SilenceHangupAfterSeconds
+			if hangupWindow <= 0 {
+				hangupWindow = t.cfg.SilencePromptSeconds
+			}
+			t.end(ccid, fmt.Sprintf("silence (%ds without caller speech after prompt)", hangupWindow))
 			return nil
 		case <-turnTimerC:
 			// Hard cap on ONE in-flight turn (opt-in). The fire is

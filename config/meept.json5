@@ -1370,6 +1370,8 @@
     "timeout_secs": 30,                     // per-step call timeout
     "max_call_minutes": 15,                 // hard cap on call length
     "silence_prompt_seconds": 45,           // silence before prompting the caller; the clock pauses while the employee turn is in flight
+    "silence_prompt": "Are you still there?", // dedicated dead-air nudge line on the first silence fire; empty = legacy filler round-robin
+    "silence_hangup_after_seconds": 45,     // quiet time AFTER the nudge before hangup: nudge@silence_prompt_seconds, hangup@S+H (45+45 = the legacy 45/90 endpoints; 0 = reuse S)
     "turn_timeout_seconds": 0,              // optional hard cap on one in-flight voice turn (hung LLM bound); 0 = disabled
     "fresh_session_per_call": false,        // opt-in: each voice call opens a NEW session (no cross-call turn-history snowball); the day brief stays the only cross-call context
     "max_concurrent_calls": 2,              // concurrent voice instances; 0 = unlimited

@@ -5088,7 +5088,14 @@ func DefaultConfig() *Config {
 			MaxConcurrentCalls:   2,
 			MaxCallMinutes:       15,
 			SilencePromptSeconds: 45,
-			FillerGraceMs:        2500,
+			// Dedicated dead-air nudge + the hangup window after it.
+			// H default 45 == S default 45 => nudge@45, hangup@90:
+			// byte-identical endpoints to the legacy double-window
+			// (docs/agents/opt-in-defaults.md: the template reproduces
+			// today's behavior; the operator sets S=10 for the live ask).
+			SilencePrompt:             "Are you still there?",
+			SilenceHangupAfterSeconds: 45,
+			FillerGraceMs:             2500,
 			// turn_timeout_seconds is opt-in: default 0 = disabled
 			// (docs/agents/opt-in-defaults.md). The silence timer is
 			// suspended while a voice turn is in flight, so an operator
@@ -5491,20 +5498,31 @@ type VoiceConfig struct {
 	TimeoutSecs                  int      `json:"timeout_secs"           toml:"timeout_secs"`
 	MaxCallMinutes               int      `json:"max_call_minutes"       toml:"max_call_minutes"`
 	SilencePromptSeconds         int      `json:"silence_prompt_seconds" toml:"silence_prompt_seconds"`
-	TurnTimeoutSeconds           int      `json:"turn_timeout_seconds"   toml:"turn_timeout_seconds"`
-	MaxConcurrentCalls           int      `json:"max_concurrent_calls"   toml:"max_concurrent_calls"`
-	ReorderWindowFrames          int      `json:"reorder_window_frames"  toml:"reorder_window_frames"`
-	ReorderGapMs                 int      `json:"reorder_gap_ms"         toml:"reorder_gap_ms"`
-	TelnyxPublicKey              string   `json:"telnyx_public_key"      toml:"telnyx_public_key"`
-	ChildBinaryPath              string   `json:"child_binary_path"      toml:"child_binary_path"`
-	LoopbackPlainAddr            string   `json:"loopback_plain_addr"    toml:"loopback_plain_addr"`
-	DefaultEmployee              string   `json:"default_employee"       toml:"default_employee"`
-	DefaultLeg                   string   `json:"default_leg"            toml:"default_leg"`
-	TTSModel                     string   `json:"tts_model"             toml:"tts_model"`
-	TTSVoice                     string   `json:"tts_voice"             toml:"tts_voice"`
-	STTModel                     string   `json:"stt_model"             toml:"stt_model"`
-	TTSBaseURL                   string   `json:"tts_base_url"          toml:"tts_base_url"`
-	STTBaseURL                   string   `json:"stt_base_url"          toml:"stt_base_url"`
+	// SilencePrompt is the dedicated dead-air nudge line spoken on the
+	// FIRST silence fire (replaces the legacy filler round-robin on the
+	// silence path - an answer-pending promise like "give me a second on
+	// that" is wrong semantics when nothing is pending). Empty falls back
+	// to the filler list for byte-compat with callers that never set it.
+	SilencePrompt string `json:"silence_prompt" toml:"silence_prompt"`
+	// SilenceHangupAfterSeconds is the hangup window H after the nudge:
+	// dead air => nudge at silence_prompt_seconds (S), hangup at S+H.
+	// Default 45 with S default 45 => nudge@45, hangup@90, exactly the
+	// legacy double-window endpoints. 0/negative reuses S (legacy shape).
+	SilenceHangupAfterSeconds int    `json:"silence_hangup_after_seconds" toml:"silence_hangup_after_seconds"`
+	TurnTimeoutSeconds        int    `json:"turn_timeout_seconds"   toml:"turn_timeout_seconds"`
+	MaxConcurrentCalls        int    `json:"max_concurrent_calls"   toml:"max_concurrent_calls"`
+	ReorderWindowFrames       int    `json:"reorder_window_frames"  toml:"reorder_window_frames"`
+	ReorderGapMs              int    `json:"reorder_gap_ms"         toml:"reorder_gap_ms"`
+	TelnyxPublicKey           string `json:"telnyx_public_key"      toml:"telnyx_public_key"`
+	ChildBinaryPath           string `json:"child_binary_path"      toml:"child_binary_path"`
+	LoopbackPlainAddr         string `json:"loopback_plain_addr"    toml:"loopback_plain_addr"`
+	DefaultEmployee           string `json:"default_employee"       toml:"default_employee"`
+	DefaultLeg                string `json:"default_leg"            toml:"default_leg"`
+	TTSModel                  string `json:"tts_model"             toml:"tts_model"`
+	TTSVoice                  string `json:"tts_voice"             toml:"tts_voice"`
+	STTModel                  string `json:"stt_model"             toml:"stt_model"`
+	TTSBaseURL                string `json:"tts_base_url"          toml:"tts_base_url"`
+	STTBaseURL                string `json:"stt_base_url"          toml:"stt_base_url"`
 	// FreshSessionPerCall (opt-in, default false): each voice call opens a
 	// brand-new session instead of reusing the (employee, target) shared
 	// conversation, so turn history never snowballs across calls. The day

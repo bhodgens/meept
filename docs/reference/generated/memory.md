@@ -47,6 +47,7 @@ Package memory provides memory storage and retrieval for meept.
 - [func ReasonHash\(reason string\) string](<#ReasonHash>)
 - [func ReplyTokens\(text string\) \[\]string](<#ReplyTokens>)
 - [func RotateIfNeeded\(path string, maxBytes int64\) error](<#RotateIfNeeded>)
+- [func RowOwner\(meta map\[string\]any, key string\) string](<#RowOwner>)
 - [func SalientTokens\(text string\) \[\]string](<#SalientTokens>)
 - [func SanitizeForStore\(s string\) string](<#SanitizeForStore>)
 - [func ScoreCandidate\(mem Memory, netVotes int, accesses int, now time.Time, w Weights\) float64](<#ScoreCandidate>)
@@ -55,6 +56,7 @@ Package memory provides memory storage and retrieval for meept.
 - [func Usefulness\(sumVotes, accesses int, ageDays float64, w Weights\) float64](<#Usefulness>)
 - [func ValidateDistilledContent\(category, content string\) error](<#ValidateDistilledContent>)
 - [func VerifyBridges\(ctx context.Context, store \*BridgeStore, verifier BridgeVerifier, cfg BridgesConfig\) \(kept int, dropped int, err error\)](<#VerifyBridges>)
+- [func VisibleScopeRow\(meta map\[string\]any, maxScope Scope, projectID, userID string, multiUser bool\) bool](<#VisibleScopeRow>)
 - [type AmbientCandidate](<#AmbientCandidate>)
   - [func ParseAmbientCandidates\(raw \[\]byte\) \(\[\]AmbientCandidate, error\)](<#ParseAmbientCandidates>)
 - [type AmbientClassifierLLM](<#AmbientClassifierLLM>)
@@ -126,6 +128,7 @@ Package memory provides memory storage and retrieval for meept.
 - [type DistillSummarizer](<#DistillSummarizer>)
 - [type DistillWorker](<#DistillWorker>)
   - [func NewDistillWorker\(cfg DistillWorkerConfig\) \*DistillWorker](<#NewDistillWorker>)
+  - [func \(w \*DistillWorker\) AtomicCompactor\(\) \*Compactor](<#DistillWorker.AtomicCompactor>)
   - [func \(w \*DistillWorker\) Process\(ctx context.Context, job \*queue.Job\) \(any, error\)](<#DistillWorker.Process>)
 - [type DistillWorkerConfig](<#DistillWorkerConfig>)
 - [type DualStore](<#DualStore>)
@@ -879,6 +882,13 @@ ReplyTokens returns the lowercase word tokens of a reply, kept WITH multiplicity
 
 RotateIfNeeded rotates path to path\+".1" when the file currently exceeds maxBytes. The previous .1 generation is overwritten, so at most two generations of the log exist \(current \+ .1\). Rename on the same filesystem is atomic, so a crash mid\-rotation leaves either the old file or the rotated one, never a partial copy. A missing file is not an error \(nothing to rotate\).
 
+<a name="RowOwner"></a>
+## func RowOwner
+
+	func RowOwner(meta map[string]any, key string) string
+
+RowOwner reads an identity key \(project\_id / user\_id\) a scope row was stamped with at store time. Exported for recall surfaces that fetch raw rows outside the Manager's option\-aware paths \(the vector hybrid searcher's two lanes, bughunt D11\) and must apply the C2 predicate with the same owner\-matching semantics as filterScopeResults.
+
 <a name="SalientTokens"></a>
 ## func SalientTokens
 
@@ -946,6 +956,13 @@ VerifyBridges runs the entailment\-verification pass over every persisted bridge
 - cfg.Verify true: one verifier call per bridge \(v1; batching is a follow\-up\). Unsupported verdicts DELETE the bridge before it can ever be retrievable; survivors get verified=true re\-persisted.
 
 Returns \(kept, dropped\) counts. A verifier transport error aborts the pass with an error wrapping ErrBridgeVerify; bridges already processed keep their state \(best\-effort partial progress is preserved\).
+
+<a name="VisibleScopeRow"></a>
+## func VisibleScopeRow
+
+	func VisibleScopeRow(meta map[string]any, maxScope Scope, projectID, userID string, multiUser bool) bool
+
+VisibleScopeRow reports whether one raw row passes the committed C2 predicate for a caller whose purview is maxScope \(project/user/global, the WithScopeFilter vocabulary\) with the given multiuser bit. Rows without an explicit scope stamp read as global \(legacy backfill — never hidden\). This is the exported one\-row form of filterScopeResults for the same out\-of\-band recall surfaces RowOwner serves.
 
 <a name="AmbientCandidate"></a>
 ## type AmbientCandidate
@@ -1714,6 +1731,13 @@ DistillWorker consumes memory.l1\_extract / memory.l2\_scene queue jobs.
 
 NewDistillWorker constructs a distill worker.
 
+<a name="DistillWorker.AtomicCompactor"></a>
+### func \(\*DistillWorker\) AtomicCompactor
+
+	func (w *DistillWorker) AtomicCompactor() *Compactor
+
+AtomicCompactor returns the worker's optional atomic compactor \(HALO Phase 6, agent.atomic\_compaction\). Nil when disabled. Read\-only accessor: the daemon wiring test pins construction through it; compaction itself is transparent to job processing.
+
 <a name="DistillWorker.Process"></a>
 ### func \(\*DistillWorker\) Process
 
@@ -1741,6 +1765,11 @@ DistillWorkerConfig holds construction parameters for DistillWorker.
 	    // over each L1 extraction batch before storing (tree 02 leaf L2). Nil or
 	    // disabled: candidates are stored directly — no recall, no LLM call.
 	    Conflict *ConflictWiring
+	    // Compactor, when non-nil, compacts the L0 window (merge tool +
+	    // observation pairs, dedup observations, summary middle) before the L1
+	    // extraction prompt is assembled — HALO Phase 6 atomic compaction
+	    // (agent.atomic_compaction, default false). Nil = disabled.
+	    Compactor *Compactor
 	    // Now supplies the worker's wall clock in the LOCAL frame (the L0/L2
 	    // calendar convention above). Nil = time.Now. Test seam for the L2 day
 	    // derivation: without it the chained day is unassertable off the wall

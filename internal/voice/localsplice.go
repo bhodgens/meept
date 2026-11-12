@@ -21,7 +21,13 @@ package voice
 // writes, sends Frame{call_id, event:"clear"} to the CHILD via deps.Text
 // (there is no carrier playout to clear - the child's TTS queue is what
 // needs flushing), invokes deps.CancelDraft once, and re-arms when fresh
-// child PCM arrives. One RunLocalSplice instance owns only its own state,
+// child PCM arrives. HandleInterrupt ALSO drains the stale outbound PCM
+// the cancel never covered (turn-2 leaf 01): up to 64 already-read child
+// chunks sit in the pump channel (1.28 s at 640 B / 20 ms), plus the
+// pump's sub-chunk carry - without the drain the resume on the NEXT say
+// paces that old-answer backlog out FIRST (live local-4dcfb291c2094ec9:
+// the operator heard ~1.3 s of the interrupted answer after barge-in).
+// Only the ~1 chunk already inside paceOne may still land. One RunLocalSplice instance owns only its own state,
 // so other calls' splices are structurally untouched; HandleInterrupt also
 // refuses a foreign ccid outright.
 //
@@ -153,9 +159,14 @@ type LocalSpliceDeps struct {
 	Logger       *slog.Logger
 }
 
-// localReadItem is one unit on the inbound pump channel: mic bytes, or a
-// terminal read error. (A single channel of interface items keeps the
-// pump join race-free without a second select arm per event.)
+// localReadItem is one unit on an inbound/outbound pump channel: mic
+// bytes, or a terminal read error. (A single channel of interface items
+// keeps the INBOUND pump's join race-free without a second select arm
+// per event.) The OUTBOUND pump is DATA-ONLY since the leaf-01 drain:
+// its terminal read error rides the s.pumpErr stash + notify instead of
+// the queue, because the barge-in drain consumes that queue under a
+// latch and a queued error item behind the drain would be swallowed
+// until ctx cancel (CL7 forbids).
 //
 // gen (bughunt 2026-11-10 A6) is the fresh-audio generation the pump
 // snapshotted BEFORE the read that produced this chunk. The pacer
@@ -174,6 +185,12 @@ type LocalSpliceDeps struct {
 // stream's tail replay (~1.28 s of stale audio in the live capture).
 // The carry is additionally dropped pre-enqueue; the tag covers chunks
 // already on the channel when the verdict landed.
+//
+// The leaf-01 drain (LatchBargeIn/HandleInterrupt -> drainStalePump)
+// makes most of that discard happen AT THE LATCH instead of paced-out
+// one 20 ms slot at a time, and the pump drops read-time-stale bytes
+// before the carry append — but the drop-on-consume shape above stays:
+// it catches anything enqueued between the drain and the resume.
 type localReadItem struct {
 	data         []byte
 	err          error
@@ -240,6 +257,31 @@ type runLocalSplice struct {
 	// neither the pump channel backlog nor in-flight reads can replay
 	// the interrupted stream over the new turn.
 	gate bargeGate
+
+	// Stale-audio drain (turn-2 leaf 01). The A6 gate makes queued
+	// chunks DROP ON CONSUME (silently, ~20 ms each through the paced
+	// select arms) — the resume on the next say still paced the stale
+	// pump queue out before the new answer, just discarded. These make
+	// the discard explicit and immediate at the latch:
+	//   pumpCh        - the outbound pump channel, published by
+	//     outboundLoop before its pump goroutine starts, so
+	//     HandleInterrupt can drain the backlog without reaching into
+	//     the loop's closure. Nil until the loop starts; the drain is
+	//     nil-safe.
+	//   drainSeq      - bumped under s.mu at every barge-in latch; the
+	//     pump's read loop watches it and resets its sub-chunk carry
+	//     (carry lives in the pump goroutine's closure — the pump owns
+	//     its own reset, keeping the field single-writer and the
+	//     analyzer quiet on mutexio).
+	//   pumpErr       - a terminal child-read error stashed by the pump
+	//     goroutine AT DEATH (atomic handoff — the drain consumes the
+	//     queue under a latch and an error item behind it would be
+	//     swallowed until ctx cancel), surfaced by the pacer's loop-top
+	//     Swap so the leg still ends with the named error (CL7
+	//     backpressure rule).
+	pumpCh   atomic.Pointer[chan localReadItem]
+	drainSeq atomic.Uint64
+	pumpErr  atomic.Pointer[error]
 
 	// Drain watch (link half-duplex floor release, turn-taking leaf 02).
 	// The link coordinator's turn_final edge now sets EXPECT mode
@@ -583,6 +625,21 @@ func (s *runLocalSplice) inboundLoop(ctx context.Context) error {
 // waiting on the latch it alone must clear.
 func (s *runLocalSplice) outboundLoop(ctx context.Context) error {
 	pump := make(chan localReadItem, 64)
+	// pumpDead closes when the read pump dies terminally (level-
+	// triggered death signal; the pumpErr stash carries the error). A
+	// single notify token is NOT enough: paceOne's wait can consume the
+	// wake before the loop parks, and a latched park with no pump can
+	// never see the fresh PCM that normally ends it — the terminal
+	// error would sit un-surfaced until ctx cancel (CL7 forbids). Every
+	// park selects on pumpDead, so the park-after-the-store always
+	// wakes.
+	pumpDead := make(chan struct{})
+	// Expose the pump channel for the barge-in drain (turn-2 leaf 01)
+	// BEFORE the pump goroutine starts: HandleInterrupt (frame-router
+	// goroutine) loads it atomically and drains the stale backlog. A
+	// drain that lands before this store finds an empty queue anyway
+	// (no pump, no chunks), so the nil window is harmless.
+	s.pumpCh.Store(&pump)
 	var pumpFirst time.Time // pump-goroutine-owned (instrumentation)
 	// Jitter instrumentation: one INFO summary per call splice (the
 	// middle hop's totals between the child's cadence line and the CLI's
@@ -595,6 +652,15 @@ func (s *runLocalSplice) outboundLoop(ctx context.Context) error {
 	}()
 	go func() {
 		carry := make([]byte, 0, 4*s.chunkBytes)
+		// carryDrainSeq is the last barge-in drain generation this
+		// goroutine has honoured (turn-2 leaf 01). carry lives in THIS
+		// closure — the pump owns its reset: every HandleInterrupt bumps
+		// s.drainSeq, and the next read iteration here drops the
+		// sub-chunk residue BEFORE appending, so the new turn's first
+		// chunk is never assembled on top of the interrupted stream's
+		// tail. (Single-writer on carry is preserved — no cross-goroutine
+		// carry mutation, analyzer-quiet.)
+		carryDrainSeq := s.drainSeq.Load()
 		for {
 			// Fresh-audio gate snapshot (A6, shared bargeGate): taken
 			// BEFORE the read so the stamp reflects exactly what this
@@ -606,6 +672,13 @@ func (s *runLocalSplice) outboundLoop(ctx context.Context) error {
 			readGen, residueUntil := s.gate.Snapshot()
 			rb := make([]byte, s.chunkBytes)
 			n, err := s.deps.Audio.ReadFromChild(rb)
+			if seq := s.drainSeq.Load(); seq != carryDrainSeq {
+				carryDrainSeq = seq
+				if len(carry) > 0 {
+					carry = carry[:0]
+					s.audioCarry.Store(0)
+				}
+			}
 			if n == 0 && err != nil && isNotConnected(err) {
 				// Pre-accept: the child has not dialed .out yet.
 				// LocalLeg.Open starts the splice the instant the
@@ -663,54 +736,87 @@ func (s *runLocalSplice) outboundLoop(ctx context.Context) error {
 				if stale {
 					s.log.Debug("voice: localsplice stale barge-in audio discarded",
 						"ccid", s.ccid, "read_gen", readGen, "bytes", n)
+					// Leaf-01: dead audio of the interrupted stream never
+					// enters the carry or the queue at all (the old shape
+					// queued it for paced drop-on-consume). Skipping the
+					// append also keeps a residue fragment from aligning
+					// the new turn's first chunk onto old-stream bytes.
 				} else {
 					// Genuinely FRESH child PCM (post-cancel, past the
 					// residue window) means the next say is speaking:
 					// re-arm the barge-in latch so the pacer resumes
 					// writing toward the client.
 					s.resumeBargeIn(readGen)
-				}
-				carry = append(carry, rb[:n]...)
-				if stale {
-					// C-2: a read judged stale NEVER becomes pacer
-					// audio — the carry tail is dropped whole, and
-					// the chunk forms that were already enqueued
-					// under older carries are covered by the
-					// generation arm of ConsumeStale (their snapshot
-					// gen is behind the bump that made this read
-					// stale). Mirrors splice.go's pre-enqueue
-					// discard for the phone leg.
-					carry = carry[:0]
-					s.audioCarry.Store(0)
-				}
-				for len(carry) >= s.chunkBytes {
-					chunk := make([]byte, s.chunkBytes)
-					copy(chunk, carry[:s.chunkBytes])
-					carry = carry[s.chunkBytes:]
-					s.audioCarry.Store(int64(len(carry)))
-					s.audioPending.Add(1)
-					select {
-					case pump <- localReadItem{data: chunk, gen: readGen, residueUntil: residueUntil, stale: stale}:
-					case <-ctx.Done():
-						s.audioPending.Add(-1)
-						return
+					carry = append(carry, rb[:n]...)
+					for len(carry) >= s.chunkBytes {
+						chunk := make([]byte, s.chunkBytes)
+						copy(chunk, carry[:s.chunkBytes])
+						carry = carry[s.chunkBytes:]
+						s.audioCarry.Store(int64(len(carry)))
+						s.audioPending.Add(1)
+						select {
+						case pump <- localReadItem{data: chunk, gen: readGen, residueUntil: residueUntil}:
+						case <-ctx.Done():
+							s.audioPending.Add(-1)
+							return
+						}
 					}
+					s.audioCarry.Store(int64(len(carry)))
 				}
-				s.audioCarry.Store(int64(len(carry)))
 			}
 			if err != nil {
-				select {
-				case pump <- localReadItem{err: err}:
-				case <-ctx.Done():
-				}
+				// Terminal child-read failure (turn-2 leaf 01): hand the
+				// error over the s.pumpErr STASH + notify, not (only) the
+				// pump channel. The barge-in drain consumes the queue
+				// under a latch, and a latched pacer never reads the
+				// queue at all — a queued-only error could leave the leg
+				// parked until ctx cancel with no resume signal (the
+				// swallow CL7 forbids). The pacer's loop-top Swap
+				// surfaces it on every path; the stash is non-blocking,
+				// so the pump cannot wedge on a full queue at death.
+				e := err
+				s.pumpErr.Store(&e)
+				close(pumpDead)
+				s.notify()
 				return
 			}
 		}
 	}()
 
+	// Consume the pump queue. The pump goroutine is DATA-ONLY since
+	// the leaf-01 rework: a terminal read error rides the s.pumpErr
+	// stash + close(pumpDead) + notify, never the queue — a barge-in
+	// drain consumes the queue under a latch, and an error item that
+	// landed behind the drain would be swallowed (a latched pacer
+	// never reads the queue; the old queued-error shape could park a
+	// dead leg until ctx cancel). Surfacing waits for the queue to
+	// empty, preserving the old order: every child chunk already read
+	// paces out BEFORE the terminal error ends the leg (file-mode
+	// turns end exactly that way). Deadlock is impossible: both parks
+	// select on pumpDead (level-triggered — a wake token paceOne's
+	// wait consumed can never strand the death); the non-latched park
+	// drains the queue itself chunk by chunk, and the latched park
+	// drains it via drainStalePump on the death arm, so the loop top
+	// always reaches len(pump)==0 with the stash set.
+	surfacePumpErr := func() (bool, error) {
+		if len(pump) != 0 {
+			return false, nil
+		}
+		if perr := s.pumpErr.Swap(nil); perr != nil {
+			if ctx.Err() != nil {
+				return true, ctx.Err()
+			}
+			return true, fmt.Errorf("voice: localsplice %s child read: %w", s.ccid, *perr)
+		}
+		return false, nil
+	}
+
 	for {
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		if done, err := surfacePumpErr(); done {
+			return err
 		}
 
 		s.mu.Lock()
@@ -718,36 +824,40 @@ func (s *runLocalSplice) outboundLoop(ctx context.Context) error {
 		s.mu.Unlock()
 		if stopped {
 			// Barge-in latched: wait for re-arm (fresh child PCM via
-			// the pump), end, or ctx. No idle polling.
+			// the pump), a terminal pump death, end, or ctx. No idle
+			// polling. pumpDead while latched drains the queue via the
+			// same path (nothing can resume — the pump is dead, so no
+			// fresh PCM can ever land; queued chunks are dead audio)
+			// and the loop top then surfaces the stashed error. The
+			// old shape parked here forever on that race (notify's
+			// single token can be consumed by paceOne's wait before
+			// the park, and a queued error item is never consumed
+			// while latched).
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
+			case <-pumpDead:
+				s.drainStalePump()
+				continue
 			case <-s.wake:
 				continue
 			}
 		}
 
-		// Surface a terminal pump error if it died.
+		// Consume the pump queue. The pump goroutine is DATA-ONLY since
+		// the leaf-01 drain landed: a terminal read error rides the
+		// s.pumpErr stash + notify (surface at the loop top above), so
+		// the queue never carries an err item — a drained-then-parked
+		// leg could otherwise swallow it until ctx cancel.
 		select {
 		case item := <-pump:
 			// Drain evidence: a DATA chunk consumed off the pump channel
 			// is audio the pacer now OWNS (either written to the client
 			// or abandoned at the latch — either way it is no longer
-			// backlog). Error items never incremented pending, so they
-			// must not decrement it. The activity stamp records the
-			// consume; paceOne stamps again after the socket write.
-			if item.err == nil {
-				s.audioPending.Add(-1)
-			}
+			// backlog). The activity stamp records the consume; paceOne
+			// stamps again after the socket write.
+			s.audioPending.Add(-1)
 			s.audioLastAct.Store(time.Now().UnixNano())
-			if item.err != nil {
-				if ctx.Err() != nil {
-					return ctx.Err()
-				}
-				// CL7 backpressure rule: a socket error ends the leg
-				// with a named error.
-				return fmt.Errorf("voice: localsplice %s child read: %w", s.ccid, item.err)
-			}
 			if s.itemStale(item) {
 				// Interrupted-stream audio (A6): discarded, never
 				// written to the client.
@@ -773,17 +883,14 @@ func (s *runLocalSplice) outboundLoop(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-pumpDead:
+			// Pump died while idle-parked (its notify token may have
+			// been consumed by an earlier paceOne wait): loop top
+			// surfaces the stash.
+			continue
 		case item := <-pump:
-			if item.err == nil {
-				s.audioPending.Add(-1)
-			}
+			s.audioPending.Add(-1)
 			s.audioLastAct.Store(time.Now().UnixNano())
-			if item.err != nil {
-				if ctx.Err() != nil {
-					return ctx.Err()
-				}
-				return fmt.Errorf("voice: localsplice %s child read: %w", s.ccid, item.err)
-			}
 			if s.itemStale(item) {
 				// Interrupted-stream audio (A6): discarded, never
 				// written to the client.
@@ -794,7 +901,7 @@ func (s *runLocalSplice) outboundLoop(ctx context.Context) error {
 				return perr
 			}
 		case <-s.wake:
-			// Re-check the latch on the next turn.
+			// Re-check the latch / the pumpErr stash on the next turn.
 		}
 	}
 }
@@ -897,6 +1004,118 @@ func (s *runLocalSplice) paceOne(ctx context.Context, chunk []byte) error {
 
 // ---------- barge-in (per call, per barge-in) ----------
 
+// drainStalePump empties the outbound pump backlog at a barge-in latch
+// (turn-2 leaf 01) and returns the chunk/byte counts dropped. This is the
+// audio-plane half of barge-in: the A6 gate already guarantees stale
+// chunks are never WRITTEN, but it discards them one paced select per 20
+// ms — so on resume (the next say's fresh PCM) the pacer drained the up
+// to 64-chunk stale queue FIRST and the old answer's tail paced out
+// UNDER the new turn before the new audio started (live
+// local-4dcfb291c2094ec9: the operator heard ~1.3 s of the interrupted
+// answer after barge-in; the 968 ms pacer-stall WARN at 17:15:16.021 is
+// that backlog pacing its way out). Draining the queue non-blockingly at
+// the latch makes the stale backlog zero before the resume can happen:
+// after the clear the client hears at most the ~1 chunk paceOne had
+// already consumed (its pre-write latch re-check abandons it in all but
+// the check-write race window — the documented floor).
+//
+// The pump's sub-chunk carry is dropped through the s.drainSeq signal
+// (the pump goroutine owns its closure's carry; see outboundLoop), and
+// audioCarry is reported from its atomic mirror. Terminal read errors
+// never appear on this queue: since the leaf-01 rework the pump hands a
+// read failure over the s.pumpErr stash + notify INSTEAD of queueing it,
+// because a latched/drain-consumed queue could otherwise swallow the
+// error until ctx cancel (CL7: a socket error ends the leg with a named
+// error — the pacer's loop-top Swap surfaces it on every path).
+//
+// Safe from any goroutine (the frame-router path takes s.mu for the
+// latch; the channel is multi-consumer-safe and every counter touched
+// here is atomic — the pacer-owned pace* fields are NOT).
+func (s *runLocalSplice) drainStalePump() (chunks int, bytes int) {
+	pp := s.pumpCh.Load()
+	if pp == nil {
+		return 0, 0 // outboundLoop not started: nothing was ever queued
+	}
+	pump := *pp
+	for {
+		select {
+		case it := <-pump:
+			// The pacer's consume sites decrement pending; a drained
+			// chunk left the backlog here instead, so decrement on its
+			// behalf — the drain watch's pending==0 predicate must see
+			// the emptied queue (and TailActive must stop reporting a
+			// phantom tail). Everything queued before the gate bump
+			// this latch made is stale by construction; a chunk that
+			// races in AFTER the latch belongs to the next say, which
+			// cannot exist seconds before the clear frame lands, so
+			// the unconditional drain is safe on the real timeline.
+			s.audioPending.Add(-1)
+			chunks++
+			bytes += len(it.data)
+		default:
+			if chunks > 0 {
+				// The queue went empty under a latch that a parked
+				// pacer may not have seen yet (its park arm was chosen
+				// before the drain finished): wake it so the loop top
+				// re-evaluates — a stashed terminal pump error is then
+				// surfaced (len(pump)==0 holds now), or the park simply
+				// re-checks the latch. Harmless on the normal path.
+				s.notify()
+			}
+			return chunks, bytes
+		}
+	}
+}
+
+// logStaleDrain runs drainStalePump and emits the operator-telemetry line
+// when it actually dropped something (a zero-chunk drain is silent — the
+// queue is empty at barge-in far more often than not, and a log per
+// interrupt would be noise; pinned by
+// TestLocalSpliceBargeInDrainSkipsEmptyQueue).
+func (s *runLocalSplice) logStaleDrain() {
+	chunks, bytes := s.drainStalePump()
+	if chunks == 0 {
+		return
+	}
+	s.log.Info("voice: localsplice barge-in drained stale chunks",
+		"ccid", s.ccid, "chunks", chunks, "bytes", bytes,
+		"carry_bytes", s.audioCarry.Load())
+}
+
+// LatchBargeIn is the production audio-plane trip for a local-leg barge-in
+// (turn-2 leaf 01). The C1 interrupt frame routes through the wiring's
+// talk loop (routeFrame's default branch) and historically NOTHING told
+// the live local splice: HandleInterrupt — the leaf-05 latch entry point
+// the unit tests drive — had no production caller (no "voice: local
+// barge-in" line ever reached ~/.meept/meept.log), so barge-in cancelled
+// the control plane while the splice kept pacing the old answer's queue,
+// and even the A6 latch could not have saved the backlog: the resume on
+// the next say paces the stale pump queue out FIRST (1.28 s at 64 chunks
+// x 20 ms — the operator's complaint). VoiceWiring.routeFrame calls this
+// on EventInterrupt for the call's LocalSpliceFor(ccid) BEFORE queueing
+// the frame, latching + draining the audio plane while the loop keeps
+// sole ownership of the control plane (clear frame, draft cancel,
+// telemetry): no duplicate emits. Phone legs have no local splice (nil
+// receiver -> no-op); a second trip while latched is a no-op (interrupt
+// is the guard — the resume path clears it with the fresh-PCM re-arm).
+func (s *runLocalSplice) LatchBargeIn() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	if s.interrupt || s.ended {
+		s.mu.Unlock()
+		return
+	}
+	s.interrupt = true
+	s.drainSeq.Add(1)
+	s.gate.Bump(s.audioLastAct.Load())
+	s.mu.Unlock()
+	s.notify() // stop the pacer's in-flight wait now
+	s.logStaleDrain()
+	s.log.Info("voice: local barge-in")
+}
+
 // HandleInterrupt is the leaf 07 entry point: the C1 interrupt frame path
 // resolves the live splice by ccid (LocalSpliceFor) and calls this. A
 // foreign ccid is a no-op (per-call isolation), and a second interrupt
@@ -913,6 +1132,10 @@ func (s *runLocalSplice) HandleInterrupt(ccid string) {
 	}
 	s.cancelOne = true
 	s.interrupt = true
+	// Stale-audio drain generation (turn-2 leaf 01): bumped under the
+	// same lock as the latch so the pump goroutine's next read
+	// iteration resets its sub-chunk carry before appending fresh PCM.
+	s.drainSeq.Add(1)
 	// Fresh-audio gate (A6, shared bargeGate): every chunk the pump read
 	// BEFORE this point carries an old generation snapshot and can never
 	// re-arm the latch. When a stream was actively flowing at cancel
@@ -926,6 +1149,15 @@ func (s *runLocalSplice) HandleInterrupt(ccid string) {
 	s.gate.Bump(s.audioLastAct.Load())
 	s.mu.Unlock()
 	s.notify() // stop the pacer's in-flight wait now
+
+	// Stale-audio drain (turn-2 leaf 01): AFTER the latch + notify so a
+	// queued chunk can neither be consumed into paceOne nor re-arm — the
+	// pacer is parked or abandons its frame at the stopped re-check. The
+	// A6 gate drops stale chunks at CONSUME time only, one paced select
+	// per 20 ms, so without this drain the resume on the NEXT say paces
+	// the up-to-64-chunk (1.28 s) stale queue out FIRST — the exact
+	// ~1.3 s old-answer tail the operator heard on local-4dcfb291c2094ec9.
+	s.logStaleDrain()
 
 	// Byte-exact clear frame to the CHILD via the text seam (review
 	// checklist pins the exact bytes; there is no carrier playout to

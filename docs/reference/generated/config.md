@@ -26,6 +26,7 @@ Package config provides configuration loading and validation for meept.
 - Variables
 - [func DeepMerge\(dst, src map\[string\]any\) map\[string\]any](<#DeepMerge>)
 - [func DefaultAlwaysFullTools\(\) \[\]string](<#DefaultAlwaysFullTools>)
+- [func DefaultUnapprovedCallerAllowedTools\(\) \[\]string](<#DefaultUnapprovedCallerAllowedTools>)
 - [func EnsureDataDir\(cfg \*Config\) error](<#EnsureDataDir>)
 - [func ExpandEnvVars\(s string\) \(string, error\)](<#ExpandEnvVars>)
 - [func ExpandMeeptPath\(path string\) string](<#ExpandMeeptPath>)
@@ -37,11 +38,13 @@ Package config provides configuration loading and validation for meept.
 - [func MeeptPath\(elem ...string\) string](<#MeeptPath>)
 - [func NormalizeAgentGuardsDefaults\(g \*AgentGuardsConfig\)](<#NormalizeAgentGuardsDefaults>)
 - [func NormalizeAgentToolsDefaults\(c \*AgentToolsConfig\)](<#NormalizeAgentToolsDefaults>)
+- [func NormalizeAwarenessDefaults\(c \*AwarenessConfig\)](<#NormalizeAwarenessDefaults>)
 - [func NormalizeClusterSecurityDefaults\(c \*ClusterConfig\)](<#NormalizeClusterSecurityDefaults>)
 - [func NormalizeContextDiscoveryDefaults\(c \*ContextDiscoveryConfig\)](<#NormalizeContextDiscoveryDefaults>)
 - [func NormalizeDecisionLogDefaults\(g \*SecurityGroupsConfig\)](<#NormalizeDecisionLogDefaults>)
 - [func NormalizeEvolverDefaults\(e \*SkillsEvolverConfig\) error](<#NormalizeEvolverDefaults>)
 - [func NormalizeFailurePolicyDefaults\(f \*FailurePolicyConfig\)](<#NormalizeFailurePolicyDefaults>)
+- [func NormalizeLedgerDefaults\(c \*LedgerConfig\)](<#NormalizeLedgerDefaults>)
 - [func NormalizeMemoryTiersDefaults\(mt \*MemoryTiersConfig\)](<#NormalizeMemoryTiersDefaults>)
 - [func NormalizeOTLPMetricsDefaults\(c \*OTLPMetricsConfig\)](<#NormalizeOTLPMetricsDefaults>)
 - [func NormalizeOTLPTracesDefaults\(c \*OTLPTracesConfig\)](<#NormalizeOTLPTracesDefaults>)
@@ -50,6 +53,7 @@ Package config provides configuration loading and validation for meept.
 - [func NormalizeRuntimeDefaults\(rc \*RuntimeConfig\)](<#NormalizeRuntimeDefaults>)
 - [func NormalizeSemanticCacheDefaults\(sc \*SemanticCacheConfig\)](<#NormalizeSemanticCacheDefaults>)
 - [func NormalizeTierPolicyDefaults\(tp \*TierPolicyConfig\)](<#NormalizeTierPolicyDefaults>)
+- [func NormalizeUnapprovedCallerAllowedTools\(v \*VoiceConfig\)](<#NormalizeUnapprovedCallerAllowedTools>)
 - [func ParseLogLevel\(level string\) slog.Level](<#ParseLogLevel>)
 - [func ParseLogLevelValue\(level string\) \(slog.Level, bool\)](<#ParseLogLevelValue>)
 - [func ReadMainConfig\(\) \(string, bool, error\)](<#ReadMainConfig>)
@@ -91,6 +95,8 @@ Package config provides configuration loading and validation for meept.
 - [type AllowedModelRouteConfig](<#AllowedModelRouteConfig>)
 - [type AmbientExtractionConfig](<#AmbientExtractionConfig>)
 - [type AnalyticsConfig](<#AnalyticsConfig>)
+- [type AtomicCompactionConfig](<#AtomicCompactionConfig>)
+- [type AwarenessConfig](<#AwarenessConfig>)
 - [type BackupConfig](<#BackupConfig>)
   - [func DefaultBackupConfig\(\) BackupConfig](<#DefaultBackupConfig>)
   - [func \(c \*BackupConfig\) IsValidated\(\) bool](<#BackupConfig.IsValidated>)
@@ -216,6 +222,7 @@ Package config provides configuration loading and validation for meept.
 - [type LearningConfig](<#LearningConfig>)
 - [type LearningRetentionConfig](<#LearningRetentionConfig>)
 - [type LearningTrainingConfig](<#LearningTrainingConfig>)
+- [type LedgerConfig](<#LedgerConfig>)
 - [type LocalConfig](<#LocalConfig>)
 - [type MCPConfig](<#MCPConfig>)
 - [type MCPServersConfig](<#MCPServersConfig>)
@@ -266,6 +273,7 @@ Package config provides configuration loading and validation for meept.
 - [type PTYConfig](<#PTYConfig>)
 - [type PacingConfig](<#PacingConfig>)
 - [type ParakeetConfig](<#ParakeetConfig>)
+- [type ParkingConfig](<#ParkingConfig>)
 - [type PeerSyncConfig](<#PeerSyncConfig>)
   - [func DefaultPeerSyncConfig\(\) PeerSyncConfig](<#DefaultPeerSyncConfig>)
   - [func \(c \*PeerSyncConfig\) IsValidated\(\) bool](<#PeerSyncConfig.IsValidated>)
@@ -365,12 +373,14 @@ Package config provides configuration loading and validation for meept.
 - [type ToolProvidersConfig](<#ToolProvidersConfig>)
   - [func \(c ToolProvidersConfig\) EnabledNames\(all \[\]string\) \[\]string](<#ToolProvidersConfig.EnabledNames>)
 - [type ToolingConfig](<#ToolingConfig>)
+- [type TraceAnalysisConfig](<#TraceAnalysisConfig>)
 - [type TranscriptConfig](<#TranscriptConfig>)
   - [func DefaultTranscriptConfig\(\) TranscriptConfig](<#DefaultTranscriptConfig>)
 - [type TransportConfig](<#TransportConfig>)
 - [type TurnWatchdogConfig](<#TurnWatchdogConfig>)
 - [type UploadsConfig](<#UploadsConfig>)
 - [type ValidationConfig](<#ValidationConfig>)
+- [type VectorHybridConfig](<#VectorHybridConfig>)
 - [type VerificationDefaults](<#VerificationDefaults>)
 - [type VoiceConfig](<#VoiceConfig>)
 - [type WatchdogConfig](<#WatchdogConfig>)
@@ -509,6 +519,10 @@ Package config provides configuration loading and validation for meept.
 
 	const AgentIDExplore = "explore"
 
+<a name="DefaultAwarenessRefreshMinutes"></a>DefaultAwarenessRefreshMinutes is the \[awareness\] refresh cadence default \(30 minutes; matches the weather cache TTL so a refresh never outlives its cached Outlook — plan 20261110\-situational leaf 01/01\).
+
+	const DefaultAwarenessRefreshMinutes = 30
+
 <a name="DefaultContextDiscoveryInterval"></a>Defaults for llm.context\_discovery \(tree 05 leaf 01\).
 
 	const (
@@ -522,6 +536,10 @@ Package config provides configuration loading and validation for meept.
 <a name="DefaultHomeRel"></a>DefaultHomeRel is the home\-relative default directory.
 
 	const DefaultHomeRel = ".meept"
+
+<a name="DefaultLedgerIntervalHours"></a>DefaultLedgerIntervalHours is the \[ledger\] verify interval default \(168h = weekly; plan 20261109\-employee\-ledger leaf 04\-ops/01\).
+
+	const DefaultLedgerIntervalHours = 168
 
 <a name="DefaultOTLPTracesEndpoint"></a>DefaultOTLPTracesEndpoint is the base URL used when Endpoint is empty at normalization time \(a plain OTLP receiver; a Langfuse install would point at http://langfuse:3000/api/public/otel\).
 
@@ -604,6 +622,13 @@ Implements RFC 7396 JSON Merge Patch semantics.
 
 DefaultAlwaysFullTools returns the curated core\-tool list that keeps its full parameter schema under indexed schema mode. Returns a fresh copy on every call so callers may mutate the result freely.
 
+<a name="DefaultUnapprovedCallerAllowedTools"></a>
+## func DefaultUnapprovedCallerAllowedTools
+
+	func DefaultUnapprovedCallerAllowedTools() []string
+
+DefaultUnapprovedCallerAllowedTools is the \[voice\] unapproved\_caller\_allowed\_tools default \(plan 20261110\-caller\-authz, decision O3\): the message\-leaving lane plus the ledger append — the only actions an unapproved inbound caller may take. The tool names are the REAL builtin registry names \(internal/tools/builtin/agent\_message.go Name\(\) == "send\_agent\_message", the daemon's message\-taking lane wired via builtin.NewSendAgentMessageTool; internal/tools/builtin/ledger.go Name\(\) == "ledger\_append"\). Returns a fresh slice on every call so consumers may mutate the loaded config freely \(DefaultAlwaysFullTools precedent\).
+
 <a name="EnsureDataDir"></a>
 ## func EnsureDataDir
 
@@ -648,7 +673,7 @@ LoadJSON5 reads a JSON5 file, expands environment variables, standardizes to JSO
 
 LoadJSON5Bytes parses JSON5 config content \(already env\-expanded\) into v, applying the same duration preprocessing and JSON5 standardization as LoadJSON5. It exists so Load can try the JSON5 grammar first \(the shipped template format\) and fall back to legacy TOML without re\-reading the file.
 
-Unlike LoadJSON5, this path also quotes JSON5 bare \(unquoted\) object keys before standardizing: JSON5 proper allows them, hujson does not. Bare\-key tolerance lives here and not in LoadJSON5 so existing callers keep their exact strictness; meept.json5 itself quotes every key.
+Unlike LoadJSON5's file path, this variant predates the file path's bare\-key adoption; both now tolerate unquoted JSON5 keys via quoteBareKeys.
 
 <a name="MainConfigPath"></a>
 ## func MainConfigPath
@@ -687,6 +712,13 @@ NormalizeAgentGuardsDefaults fills ship\-on defaults for zero\-valued fields.
 
 NormalizeAgentToolsDefaults fills load\-boundary defaults for \[agent.tools\] \(branch 03 leaf 01, design §3.4\): PredictedBudget 0/negative \-\> default 25; \>30 \-\> clamped to 30 with one warn \(N=31 costs more than the indexed baseline, so it can never be the better choice\).
 
+<a name="NormalizeAwarenessDefaults"></a>
+## func NormalizeAwarenessDefaults
+
+	func NormalizeAwarenessDefaults(c *AwarenessConfig)
+
+NormalizeAwarenessDefaults clamps invalid \[awareness\] values at the load boundary so every consumer sees final values: a non\-positive refresh\_minutes \(0 means unset; negative is invalid\) falls back to DefaultAwarenessRefreshMinutes. Enabled is NEVER forced — explicit true/false and the omitted\-key default \(false\) are both honored \(mirrors the LedgerConfig AutoRepair posture\).
+
 <a name="NormalizeClusterSecurityDefaults"></a>
 ## func NormalizeClusterSecurityDefaults
 
@@ -721,6 +753,13 @@ NormalizeEvolverDefaults normalizes the skills.evolver section: an empty PlanDir
 	func NormalizeFailurePolicyDefaults(f *FailurePolicyConfig)
 
 NormalizeFailurePolicyDefaults clamps invalid failure\_policy values to defaults: negative durations become the field default, zero means unset and takes the default; non\-positive ShortRetries takes the default; pacing intervals normalize the same way and max \< min lifts max to min. Idempotent on valid values. Pacing.Enabled is left as\-is: the default\-on value is applied by DefaultConfig\(\) \(which load unmarshal runs onto\), and an explicit pacing.enabled = false must survive every load.
+
+<a name="NormalizeLedgerDefaults"></a>
+## func NormalizeLedgerDefaults
+
+	func NormalizeLedgerDefaults(c *LedgerConfig)
+
+NormalizeLedgerDefaults clamps invalid \[ledger\] values to defaults at the load boundary so every consumer sees final values: a non\-positive interval\_hours falls back to DefaultLedgerIntervalHours. AutoRepair's zero value \(false\) is the shipped default — no clamping.
 
 <a name="NormalizeMemoryTiersDefaults"></a>
 ## func NormalizeMemoryTiersDefaults
@@ -777,6 +816,13 @@ NormalizeSemanticCacheDefaults clamps invalid semantic\-cache values to defaults
 	func NormalizeTierPolicyDefaults(tp *TierPolicyConfig)
 
 NormalizeTierPolicyDefaults clamps the tier policy to defaults at the load boundary: when Enabled, a non\-positive MaxDepth takes DefaultTierPolicyMaxDepth and a nil TurnCeilings map becomes empty \(never nil, so consumers can index safely\). When disabled, MaxDepth stays 0 — the policy is inactive and must not carry an effective limit. SignalDegraded is left as\-is: its default\-true value is applied by DefaultConfig\(\) \(which load unmarshal runs onto\), and an explicit signal\_degraded = false must survive every load. Idempotent.
+
+<a name="NormalizeUnapprovedCallerAllowedTools"></a>
+## func NormalizeUnapprovedCallerAllowedTools
+
+	func NormalizeUnapprovedCallerAllowedTools(v *VoiceConfig)
+
+NormalizeUnapprovedCallerAllowedTools restores the default list when the loaded \[voice\] block carries an EMPTY unapproved\_caller\_allowed\_tools \(master: "normalize at load \(empty \-\> default\)"\). A nil or explicit \`\[\]\` must NOT ship zero message rights to unknown callers. Non\-empty user lists pass through untouched, in user order — no reordering, no default injection \(review checklist\). Idempotent on valid values.
 
 <a name="ParseLogLevel"></a>
 ## func ParseLogLevel
@@ -1132,6 +1178,14 @@ AgentConfig holds agent loop settings.
 	    Queues AgentQueuesConfig `json:"queues" toml:"queues"`
 	    // Compaction holds context compaction settings
 	    Compaction AgentCompactionConfig `json:"compaction" toml:"compaction"`
+	    // AtomicCompaction gates the memory.Compactor (HALO Phase 6 atomic
+	    // tool-turn compaction, internal/memory/consolidation_compact.go) in the
+	    // L0 distill path: L1 extraction prompts see merged tool+observation
+	    // records and a summary turn instead of the raw window. Opt-in, default
+	    // false (docs/agents/opt-in-defaults.md) — when disabled the distill
+	    // prompt is byte-identical to the pre-wiring behavior and no Compactor is
+	    // constructed. See AtomicCompactionConfig.
+	    AtomicCompaction AtomicCompactionConfig `json:"atomic_compaction" toml:"atomic_compaction"`
 	    // Reflection holds auto-fix reflection loop settings
 	    Reflection AgentReflectionConfig `json:"reflection" toml:"reflection"`
 	    // Lint holds linting and test runner settings
@@ -1444,6 +1498,33 @@ AnalyticsConfig holds configuration for the analytics system.
 	type AnalyticsConfig struct {
 	    Enabled       bool `json:"enabled,omitempty"          toml:"enabled"`
 	    RetentionDays int  `json:"retention_days,omitempty"   toml:"retention_days"`
+	}
+
+<a name="AtomicCompactionConfig"></a>
+## type AtomicCompactionConfig
+
+AtomicCompactionConfig configures the memory.Compactor \(HALO Phase 6 atomic tool\-turn compaction\) when agent.atomic\_compaction is enabled. Zero fields resolve to the Compactor's own documented defaults.
+
+	type AtomicCompactionConfig struct {
+	    // Enabled wires the Compactor into the L1 distill prompt assembly.
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // MaxTurnsBeforeCompact triggers compaction above this turn count
+	    // (Compactor default 50).
+	    MaxTurnsBeforeCompact int `json:"max_turns_before_compact" toml:"max_turns_before_compact"`
+	    // MaxToolCallsPerTurn caps preserved tool calls per turn (default 10).
+	    MaxToolCallsPerTurn int `json:"max_tool_calls_per_turn" toml:"max_tool_calls_per_turn"`
+	    // KeepLastNTurns is the never-compacted recent tail (default 10).
+	    KeepLastNTurns int `json:"keep_last_n_turns" toml:"keep_last_n_turns"`
+	}
+
+<a name="AwarenessConfig"></a>
+## type AwarenessConfig
+
+AwarenessConfig is the \[awareness\] table \(plan 20261110\-situational D1\): the employee situational\-awareness feed \(moment block: local time, weather risk alerts, day\-state \+ tone\). Enabled defaults FALSE — opt\-in per docs/agents/opt\-in\-defaults.md, so a daemon that never opts in renders byte\-identical prompts. RefreshMinutes is the scheduler cadence for the weather\-refresh/daystate\-warm jobs.
+
+	type AwarenessConfig struct {
+	    Enabled        bool `json:"enabled"         toml:"enabled"`
+	    RefreshMinutes int  `json:"refresh_minutes" toml:"refresh_minutes"`
 	}
 
 <a name="BackupConfig"></a>
@@ -1925,6 +2006,9 @@ Config is the root configuration structure loaded from meept.toml.
 	    Signal              SignalConfig              `json:"signal"               toml:"signal"`
 	    Delegation          DelegationConfig          `json:"delegation,omitzero"  toml:"delegation"`
 	    Contact             ContactConfig             `json:"contact,omitzero"     toml:"contact"`
+	    Ledger              LedgerConfig              `json:"ledger"               toml:"ledger"`
+	    Parking             ParkingConfig             `json:"parking"              toml:"parking"`
+	    Awareness           AwarenessConfig           `json:"awareness"            toml:"awareness"`
 	}
 
 <a name="DefaultConfig"></a>
@@ -2380,7 +2464,7 @@ EmbedHealthCheckConfig configures the embedding\-pipeline health gate \(issue \#
 <a name="EmbeddingConfig"></a>
 ## type EmbeddingConfig
 
-EmbeddingConfig holds vector embedding settings for semantic memory search.
+EmbeddingConfig holds vector embedding provider settings.
 
 	type EmbeddingConfig struct {
 	    Enabled       bool     `json:"enabled"         toml:"enabled"`
@@ -3314,6 +3398,24 @@ LearningTrainingConfig holds settings for LoRA training.
 	    ManualOnly         bool   `json:"manual_only"            toml:"manual_only"`
 	}
 
+<a name="LedgerConfig"></a>
+## type LedgerConfig
+
+LedgerConfig configures the employee ledger ops subsystem \(\[ledger\], plan 20261109\-employee\-ledger leaf 04\-ops/01\). It gates the scheduled integrity pass over the ledger store \(internal/daemon/ledger\_integrity.go\): the job runs ledger.VerifyState on IntervalHours and, only when AutoRepair is true, follows a divergent report with RepairState.
+
+	type LedgerConfig struct {
+	    // AutoRepair opts in to automatic RepairState when the integrity
+	    // pass finds divergence. Default FALSE (opt-in per
+	    // docs/agents/opt-in-defaults.md): a divergent report logs ERROR
+	    // and leaves the store untouched unless this is explicitly true.
+	    AutoRepair bool `json:"auto_repair" toml:"auto_repair"`
+	    // IntervalHours is how often the ledger-integrity scheduler job
+	    // fires. Default 168 (weekly) — set in DefaultConfig and clamped
+	    // at the load boundary by NormalizeLedgerDefaults. A non-positive
+	    // value falls back to the default.
+	    IntervalHours int `json:"interval_hours" toml:"interval_hours"`
+	}
+
 <a name="LocalConfig"></a>
 ## type LocalConfig
 
@@ -3514,6 +3616,13 @@ MemoryConfig holds memory subsystem settings.
 	    // candidates directly — no recall, no conflict LLM call. See
 	    // ConflictConfig.
 	    Conflict ConflictConfig `json:"conflict" toml:"conflict"`
+	    // VectorHybrid gates the ShardManager-powered hybrid searcher
+	    // (vector.HybridSearcher over the live ShardManager + the manager's FTS
+	    // keyword lane) and its memory.search.hybrid RPC surface. Opt-in, default
+	    // false (docs/agents/opt-in-defaults.md): when disabled the legacy
+	    // Manager.SearchHybrid path is byte-identical and no hybrid searcher is
+	    // constructed. See VectorHybridConfig.
+	    VectorHybrid VectorHybridConfig `json:"vector_hybrid" toml:"vector_hybrid"`
 	    // L0Enabled turns on the raw-conversation L0 tier (tree 01 layered
 	    // async distillation): conversation turns are appended to
 	    // <memory.data_dir>/l0/YYYY-MM-DD.jsonl and distilled asynchronously
@@ -3950,6 +4059,20 @@ NotificationsConfig holds configuration for desktop notifications.
 	    // this flag is checked at the EventEmitter dispatch layer and blocks
 	    // every notification regardless of type, priority, or source.
 	    DoNotDisturb bool `json:"do_not_disturb,omitempty" toml:"do_not_disturb"`
+	
+	    // Enabled is the kill-switch for the proactive notification bot
+	    // stack (automation plan 2026-06-21 Plans 1.x/3.x):
+	    // NotificationBot + CostTracker budget enforcement + push history +
+	    // notification preferences + telegram push channel. Default zero
+	    // value = OFF (additive opt-in, same posture as [intake]) so a
+	    // wiring bug can never break message delivery at boot. The desktop
+	    // notification emitter path above does NOT read this flag — it stays
+	    // always-on exactly as before. Constructed by
+	    // internal/daemon/notification_bot_wiring.go (wireNotificationBot).
+	    BotNotifyOn         []string          `json:"bot_notify_on,omitempty"           toml:"bot_notify_on"`
+	    BotRateLimitPerHour int               `json:"bot_rate_limit_per_hour,omitempty" toml:"bot_rate_limit_per_hour"`
+	    BotTelegramChatIDs  []string          `json:"bot_telegram_chat_ids,omitempty"   toml:"bot_telegram_chat_ids"`
+	    BotTemplates        map[string]string `json:"bot_templates,omitempty"           toml:"bot_templates"`
 	}
 
 <a name="OAuthConfig"></a>
@@ -4204,6 +4327,19 @@ ParakeetConfig holds parakeet.cpp engine settings.
 	type ParakeetConfig struct {
 	    BinPath   string `json:"bin_path"   toml:"bin_path"`
 	    ModelPath string `json:"model_path" toml:"model_path"`
+	}
+
+<a name="ParkingConfig"></a>
+## type ParkingConfig
+
+ParkingConfig groups parked\-turn persistence options \(tree 20261110\-parked\-turns\-as\-jobs\).
+
+	type ParkingConfig struct {
+	    // QueueBackend stores parked turns as queue jobs (type "parked_turn",
+	    // wake = next_retry_at, owner = claimed_by) instead of parks.db.
+	    // Opt-in, default false: disabled keeps the sqlite park path
+	    // byte-identical (docs/agents/opt-in-defaults.md).
+	    QueueBackend bool `json:"queue_backend" toml:"queue_backend"`
 	}
 
 <a name="PeerSyncConfig"></a>
@@ -5054,6 +5190,13 @@ SelfImproveConfig holds self\-improvement settings.
 	    Sandbox               SandboxConfig   `json:"sandbox"                  toml:"sandbox"`
 	    Safety                SafetyConfig    `json:"safety"                   toml:"safety"`
 	    Detection             DetectionConfig `json:"detection"                toml:"detection"`
+	    // TraceAnalysis gates the HALO RLM trace-analysis activation path
+	    // (wave-2 wire): a periodic scheduler job loads the memory trace-store
+	    // reader over TraceStorePath, runs the agent.RLMAnalyzer over it, and
+	    // surfaces selfimprove.IssueDetector.ScanTraces findings. Opt-in,
+	    // default false — enabling it is a product decision
+	    // (docs/agents/opt-in-defaults.md posture).
+	    TraceAnalysis TraceAnalysisConfig `json:"trace_analysis" toml:"trace_analysis"`
 	}
 
 <a name="SemanticCacheConfig"></a>
@@ -5796,6 +5939,21 @@ ToolingConfig holds tool call serialization sidecar settings. Used for delegatin
 	    LogUnknownTools bool `json:"log_unknown_tools" toml:"log_unknown_tools"`
 	}
 
+<a name="TraceAnalysisConfig"></a>
+## type TraceAnalysisConfig
+
+TraceAnalysisConfig configures the \[selfimprove\].trace\_analysis section.
+
+	type TraceAnalysisConfig struct {
+	    // Enabled turns on the periodic trace-analysis scan. Default false.
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // TraceStorePath is the trace JSONL source for memory.LoadTraceStore.
+	    // Empty resolves at wiring time to <daemon.data_dir>/traces.jsonl.
+	    TraceStorePath string `json:"trace_store_path" toml:"trace_store_path"`
+	    // Interval is the scan cadence (cron "@every" duration). Default 6h.
+	    Interval time.Duration `json:"interval" toml:"interval"`
+	}
+
 <a name="TranscriptConfig"></a>
 ## type TranscriptConfig
 
@@ -5891,6 +6049,24 @@ ValidationConfig holds task completion validation settings.
 	    MaxValidationLoops int `json:"max_validation_loops" toml:"max_validation_loops"`
 	}
 
+<a name="VectorHybridConfig"></a>
+## type VectorHybridConfig
+
+VectorHybridConfig gates the ShardManager\-powered hybrid search surface \(memory.vector\_hybrid, plan docs/plans/2026\-06\-07\-sharded\-vector\-memory.md "Wire ShardManager for hybrid search"\). Enabled=false \(the default\) keeps the legacy Manager.SearchHybrid path byte\-identical and constructs nothing.
+
+	type VectorHybridConfig struct {
+	    // Enabled constructs the hybrid searcher over the live ShardManager at
+	    // daemon startup and registers the memory.search.hybrid RPC handler.
+	    // Requires memory.embeddings.enabled (no embedder = no vector lane).
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // Alpha is the vector-vs-keyword weighting (0 = pure keyword, 1 = pure
+	    // vector). Values outside [0,1] resolve to the searcher's 0.5 default.
+	    Alpha float64 `json:"alpha" toml:"alpha"`
+	    // Limit is the default result cap for the RPC surface when the request
+	    // omits one.
+	    Limit int `json:"limit" toml:"limit"`
+	}
+
 <a name="VerificationDefaults"></a>
 ## type VerificationDefaults
 
@@ -5929,34 +6105,61 @@ VerificationDefaults holds daemon\-level verification defaults.
 	    // GreetingLine is the fact-free line spoken once on call connect.
 	    // Empty falls back to Filler[0] (the greeting is filler-class; an
 	    // empty filler list plus empty greeting disables the greeting).
-	    GreetingLine         string   `json:"greeting"               toml:"greeting"`
-	    Filler               []string `json:"filler"                 toml:"filler"`
-	    SupervisorEmployee   string   `json:"supervisor_employee"    toml:"supervisor_employee"`
-	    SupervisorEnabled    bool     `json:"supervisor_enabled"     toml:"supervisor_enabled"`
-	    SupervisorModel      string   `json:"supervisor_model"       toml:"supervisor_model"`
-	    SupervisorTimeoutMs  int      `json:"supervisor_timeout_ms"  toml:"supervisor_timeout_ms"`
-	    VoiceModel           string   `json:"voice_model"            toml:"voice_model"`
-	    PublicStreamURL      string   `json:"public_stream_url"      toml:"public_stream_url"`
-	    ConnectionID         string   `json:"connection_id"          toml:"connection_id"`
-	    FromNumber           string   `json:"from_number"            toml:"from_number"`
-	    AllowedNumbers       []string `json:"allowed_numbers"        toml:"allowed_numbers"`
-	    TimeoutSecs          int      `json:"timeout_secs"           toml:"timeout_secs"`
-	    MaxCallMinutes       int      `json:"max_call_minutes"       toml:"max_call_minutes"`
-	    SilencePromptSeconds int      `json:"silence_prompt_seconds" toml:"silence_prompt_seconds"`
-	    TurnTimeoutSeconds   int      `json:"turn_timeout_seconds"   toml:"turn_timeout_seconds"`
-	    MaxConcurrentCalls   int      `json:"max_concurrent_calls"   toml:"max_concurrent_calls"`
-	    ReorderWindowFrames  int      `json:"reorder_window_frames"  toml:"reorder_window_frames"`
-	    ReorderGapMs         int      `json:"reorder_gap_ms"         toml:"reorder_gap_ms"`
-	    TelnyxPublicKey      string   `json:"telnyx_public_key"      toml:"telnyx_public_key"`
-	    ChildBinaryPath      string   `json:"child_binary_path"      toml:"child_binary_path"`
-	    LoopbackPlainAddr    string   `json:"loopback_plain_addr"    toml:"loopback_plain_addr"`
-	    DefaultEmployee      string   `json:"default_employee"       toml:"default_employee"`
-	    DefaultLeg           string   `json:"default_leg"            toml:"default_leg"`
-	    TTSModel             string   `json:"tts_model"              toml:"tts_model"`
-	    TTSVoice             string   `json:"tts_voice"              toml:"tts_voice"`
-	    STTModel             string   `json:"stt_model"              toml:"stt_model"`
-	    TTSBaseURL           string   `json:"tts_base_url"           toml:"tts_base_url"`
-	    STTBaseURL           string   `json:"stt_base_url"           toml:"stt_base_url"`
+	    GreetingLine string   `json:"greeting"               toml:"greeting"`
+	    Filler       []string `json:"filler"                 toml:"filler"`
+	    // FillerGraceMs is how long a dispatched turn may run before the
+	    // talk loop speaks a filler line (dead-air defect 2026-11-10:
+	    // filler fired immediately on EVERY prompt, so "give me a second"
+	    // preceded fast answers). 0 = speak immediately (legacy).
+	    FillerGraceMs       int      `json:"filler_grace_ms"        toml:"filler_grace_ms"`
+	    SupervisorEmployee  string   `json:"supervisor_employee"    toml:"supervisor_employee"`
+	    SupervisorEnabled   bool     `json:"supervisor_enabled"     toml:"supervisor_enabled"`
+	    SupervisorModel     string   `json:"supervisor_model"       toml:"supervisor_model"`
+	    SupervisorTimeoutMs int      `json:"supervisor_timeout_ms"  toml:"supervisor_timeout_ms"`
+	    VoiceModel          string   `json:"voice_model"            toml:"voice_model"`
+	    PublicStreamURL     string   `json:"public_stream_url"      toml:"public_stream_url"`
+	    ConnectionID        string   `json:"connection_id"          toml:"connection_id"`
+	    FromNumber          string   `json:"from_number"           toml:"from_number"`
+	    AllowedNumbers      []string `json:"allowed_numbers"       toml:"allowed_numbers"`
+	    // UnapprovedCallerAllowedTools is the step-1c action gate for
+	    // inbound callers NOT voice-approved in contacts.db (plan
+	    // 20261110-caller-authz, decision O3): the only tools an unapproved
+	    // caller's turn may execute are the message-leaving lane plus the
+	    // ledger. Default ["ledger_append", "send_agent_message"] (the REAL
+	    // builtin message tool, internal/tools/builtin/agent_message.go);
+	    // an explicitly empty list normalizes back to the default at the
+	    // load boundary — unknown callers must never ship with zero message
+	    // rights. Explicit non-empty lists pass through in user order, no
+	    // reordering, no default injection.
+	    UnapprovedCallerAllowedTools []string `json:"unapproved_caller_allowed_tools" toml:"unapproved_caller_allowed_tools"`
+	    TimeoutSecs                  int      `json:"timeout_secs"           toml:"timeout_secs"`
+	    MaxCallMinutes               int      `json:"max_call_minutes"       toml:"max_call_minutes"`
+	    SilencePromptSeconds         int      `json:"silence_prompt_seconds" toml:"silence_prompt_seconds"`
+	    // SilencePrompt is the dedicated dead-air nudge line spoken on the
+	    // FIRST silence fire (replaces the legacy filler round-robin on the
+	    // silence path - an answer-pending promise like "give me a second on
+	    // that" is wrong semantics when nothing is pending). Empty falls back
+	    // to the filler list for byte-compat with callers that never set it.
+	    SilencePrompt string `json:"silence_prompt" toml:"silence_prompt"`
+	    // SilenceHangupAfterSeconds is the hangup window H after the nudge:
+	    // dead air => nudge at silence_prompt_seconds (S), hangup at S+H.
+	    // Default 45 with S default 45 => nudge@45, hangup@90, exactly the
+	    // legacy double-window endpoints. 0/negative reuses S (legacy shape).
+	    SilenceHangupAfterSeconds int    `json:"silence_hangup_after_seconds" toml:"silence_hangup_after_seconds"`
+	    TurnTimeoutSeconds        int    `json:"turn_timeout_seconds"   toml:"turn_timeout_seconds"`
+	    MaxConcurrentCalls        int    `json:"max_concurrent_calls"   toml:"max_concurrent_calls"`
+	    ReorderWindowFrames       int    `json:"reorder_window_frames"  toml:"reorder_window_frames"`
+	    ReorderGapMs              int    `json:"reorder_gap_ms"         toml:"reorder_gap_ms"`
+	    TelnyxPublicKey           string `json:"telnyx_public_key"      toml:"telnyx_public_key"`
+	    ChildBinaryPath           string `json:"child_binary_path"      toml:"child_binary_path"`
+	    LoopbackPlainAddr         string `json:"loopback_plain_addr"    toml:"loopback_plain_addr"`
+	    DefaultEmployee           string `json:"default_employee"       toml:"default_employee"`
+	    DefaultLeg                string `json:"default_leg"            toml:"default_leg"`
+	    TTSModel                  string `json:"tts_model"             toml:"tts_model"`
+	    TTSVoice                  string `json:"tts_voice"             toml:"tts_voice"`
+	    STTModel                  string `json:"stt_model"             toml:"stt_model"`
+	    TTSBaseURL                string `json:"tts_base_url"          toml:"tts_base_url"`
+	    STTBaseURL                string `json:"stt_base_url"          toml:"stt_base_url"`
 	    // FreshSessionPerCall (opt-in, default false): each voice call opens a
 	    // brand-new session instead of reusing the (employee, target) shared
 	    // conversation, so turn history never snowballs across calls. The day

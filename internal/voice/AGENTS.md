@@ -212,6 +212,25 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   voice F-1 — both latches used to be once-per-call, muting the agent
   after its first interrupt). One interrupt latch per barge-in in the
   child pipeline.
+- Barge-in drains the local splice's STALE AUDIO at the latch (turn-2
+  leaf 01): the pump channel holds up to 64 already-read child chunks
+  (1.28 s at 640 B / 20 ms) and drop-on-consume paced that backlog out
+  AFTER the resume, so the operator heard the old answer under the new
+  turn (live local-4dcfb291c2094ec9). `drainStalePump` empties the queue
+  non-blockingly + the pump resets its sub-chunk carry via the
+  `drainSeq` signal (the pump goroutine owns carry), counted by the INFO
+  line "voice: localsplice barge-in drained stale chunks". After the
+  clear the client hears at most the ~1 chunk already in paceOne. The
+  outbound pump is DATA-ONLY: a terminal child-read error rides the
+  `pumpErr` stash + `pumpDead` close, never the queue (a drained queue
+  behind a latch would otherwise swallow it until ctx cancel — CL7);
+  the pacer surfaces it once the queue is empty. ALSO production wiring:
+  before this leaf NOTHING ever tripped the local splice's audio latch
+  in production (`HandleInterrupt` had no caller outside tests) —
+  `routeFrame` now calls `LocalSpliceFor(ccid).LatchBargeIn()` on every
+  C1 interrupt frame BEFORE the talk-loop queue handoff (audio plane:
+  latch + gate bump + drain; the loop keeps the control plane — clear
+  frame, draft cancel). Pinned by TestVoiceRouteFrameInterruptLatchesLocalSplice.
 - The barge-in TRIGGER is the child's STT-partial transcript branch
   (voice-tierA leaves 05/06, D1): pumpAudioIn feeds the bound STT
   session; a non-empty partial while playback is live emits interrupt
@@ -280,6 +299,34 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   (media reconnect restores audio); the marker dies with releaseOnce.
 - Outbound legs are NEVER AnswerCall'd (404 aborts the session);
   `call.answered` triggers StartStreaming only.
+
+## Per-call silence path (plan 20261111-voice-turn2 leaf 02): dedicated nudge, S+H windows
+
+- The FIRST silence fire speaks the DEDICATED nudge line
+  (`TalkLoopConfig.SilencePromptLine` / `voice.silence_prompt`, default
+  "Are you still there?"), NEVER the filler round-robin: dead air has no
+  pending answer, so a filler promise ("give me a second on that") is
+  wrong semantics (operator complaint, live call local-4dcfb291c2094ec9).
+  Fallback chain: empty configured line -> `fillerLine()` (byte-compat for
+  zero-config callers, INCLUDING consuming a filler index); empty filler
+  list -> no line (the fire still latches and re-arms). Telemetry: the
+  fire logs INFO "voice talk loop: silence prompt" with `line` +
+  `after_s` (elapsed since the window was armed) so live logs answer
+  "what triggered this" without guessing.
+- Two windows, not one doubled: nudge fires at S =
+  `voice.silence_prompt_seconds`, hangup fires after the caller stays
+  quiet ANOTHER H = `voice.silence_hangup_after_seconds` (the post-nudge
+  re-arm uses H, not the full window). H <= 0 reuses S (legacy double-
+  window). Template defaults S=H=45 reproduce the legacy nudge@45 /
+  hangup@90 endpoints exactly (opt-in-defaults rule); the operator's live
+  config sets S=10 for nudge@10 / hangup@55. The hangup reason names the
+  live window (max(H,0 else S)).
+- Turn-aware suspension is unchanged: a dispatched prompt STOPS the timer
+  (the silence path never reaps an in-flight turn) and the draft-drain
+  branch re-arms a fresh S window; `silencePrompted` resets per dispatch.
+  Test seam: `silenceWindowUnit` (package var, second scale in production,
+  ms scale inside the silence pins) — tests mutating it must never run in
+  parallel with each other.
 
 ## Supervisor gate (C6): fail-open per sentence, never parked
 

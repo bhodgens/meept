@@ -1,6 +1,10 @@
 package config
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 // TestVoiceConfigDefaults pins the C3 voice config defaults verbatim from
 // docs/plans/20261102-voice-sidecar/master.md. Every value below is quoted
@@ -32,6 +36,16 @@ func TestVoiceConfigDefaults(t *testing.T) {
 	}
 	if v.SilencePromptSeconds != 45 {
 		t.Errorf("voice.silence_prompt_seconds default = %d, want 45", v.SilencePromptSeconds)
+	}
+	// Leaf 02 (plan 20261111-voice-turn2): dedicated dead-air nudge + the
+	// hangup window after it. H default 45 == S default 45, so the
+	// endpoints (nudge@45, hangup@90) are byte-identical to the legacy
+	// double-window — flipping them is a contract change, not a tweak.
+	if v.SilencePrompt != "Are you still there?" {
+		t.Errorf("voice.silence_prompt default = %q, want \"Are you still there?\"", v.SilencePrompt)
+	}
+	if v.SilenceHangupAfterSeconds != 45 {
+		t.Errorf("voice.silence_hangup_after_seconds default = %d, want 45 (S+H = the legacy 45/90 endpoints)", v.SilenceHangupAfterSeconds)
 	}
 	if v.TurnTimeoutSeconds != 0 {
 		t.Errorf("voice.turn_timeout_seconds default = %d, want 0 (opt-in: disabled unless configured)", v.TurnTimeoutSeconds)
@@ -100,5 +114,68 @@ func TestVoiceConfigDefaults(t *testing.T) {
 	}
 	if v.Local.Name != "" {
 		t.Errorf("voice.local.name default = %q, want empty (= hostname)", v.Local.Name)
+	}
+}
+
+// TestSilenceNudgeConfig_TemplateParses keeps the shipped config/meept.json5
+// template honest for the leaf-02 silence keys (plan 20261111-voice-turn2):
+// the template must parse AND carry the legacy-reproducing defaults
+// (S=45, H=45 => nudge@45, hangup@90 exactly as before the split). Mirrors
+// TestTurnWatchdogConfig_TemplateParses.
+func TestSilenceNudgeConfig_TemplateParses(t *testing.T) {
+	const templatePath = "../../config/meept.json5"
+	if _, err := os.Stat(templatePath); err != nil {
+		t.Skipf("template not found from test cwd: %v", err)
+	}
+	abs, err := filepath.Abs(templatePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c := DefaultConfig()
+	if err := LoadJSON5(abs, c); err != nil {
+		t.Fatalf("template meept.json5 failed to parse: %v", err)
+	}
+
+	if c.Voice.SilencePromptSeconds != 45 {
+		t.Errorf("template voice.silence_prompt_seconds = %d, want 45 (template reproduces today's endpoint)", c.Voice.SilencePromptSeconds)
+	}
+	if c.Voice.SilencePrompt != "Are you still there?" {
+		t.Errorf("template voice.silence_prompt = %q, want \"Are you still there?\"", c.Voice.SilencePrompt)
+	}
+	if c.Voice.SilenceHangupAfterSeconds != 45 {
+		t.Errorf("template voice.silence_hangup_after_seconds = %d, want 45 (S+H = legacy 45/90)", c.Voice.SilenceHangupAfterSeconds)
+	}
+}
+
+// TestSilenceNudgeConfig_ExplicitValuesSurviveLoad proves an operator who
+// sets the live-config shape (S=10, H=45 -> nudge@10, hangup@55) is not
+// clobbered back to the defaults by the load machinery.
+func TestSilenceNudgeConfig_ExplicitValuesSurviveLoad(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "meept.json5")
+	body := `{
+  "voice": {
+    "silence_prompt_seconds": 10,
+    "silence_prompt": "Are you still there?",
+    "silence_hangup_after_seconds": 45,
+  },
+}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	c := DefaultConfig()
+	if err := LoadJSON5(path, c); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if c.Voice.SilencePromptSeconds != 10 {
+		t.Errorf("silence_prompt_seconds = %d, want 10 (explicit value must survive)", c.Voice.SilencePromptSeconds)
+	}
+	if c.Voice.SilencePrompt != "Are you still there?" {
+		t.Errorf("silence_prompt = %q, want the configured line", c.Voice.SilencePrompt)
+	}
+	if c.Voice.SilenceHangupAfterSeconds != 45 {
+		t.Errorf("silence_hangup_after_seconds = %d, want 45", c.Voice.SilenceHangupAfterSeconds)
 	}
 }
