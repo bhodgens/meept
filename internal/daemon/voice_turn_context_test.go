@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/agent"
+	"github.com/caimlas/meept/internal/employee"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/voice"
@@ -183,20 +184,110 @@ func TestVoiceTurnClockStampEchoTripsGuard(t *testing.T) {
 }
 
 // TestVoiceTurnContextStampRoundTripsTimeParse: the layout the daemon
-// formats with must parse back with time.Parse for every zone Go renders.
+// formats with must parse back with time.Parse for every zone Go renders —
+// including NUMERIC zone names (FixedZone("+0530")) and LONG IANA names
+// (a LoadLocation-shaped FixedZone), which the pre-C-7 layout ("... MST
+// (UTC-07:00)") failed because Go's MST element only matches three-letter
+// or UTC+-hh zone text.
 func TestVoiceTurnContextStampRoundTripsTimeParse(t *testing.T) {
 	for _, now := range []time.Time{
 		time.Date(2026, 11, 11, 12, 20, 0, 0, time.Local),
 		time.Date(2026, 11, 10, 0, 24, 0, 0, time.FixedZone("MST", -7*3600)),
 		time.Date(2026, 6, 1, 8, 0, 0, 0, time.UTC),
+		// C-7: numeric abbreviation (India-style half-hour offset).
+		time.Date(2026, 11, 10, 0, 24, 0, 0, time.FixedZone("+0530", 5*3600+1800)),
+		// C-7: long IANA-style zone name (Go renders these verbatim
+		// for FixedZone-named locations).
+		time.Date(2026, 11, 10, 0, 24, 0, 0, time.FixedZone("America/Denver", -7*3600)),
 	} {
 		stamp := voiceTurnContextStamp(now)
 		inner, _, ok := strings.Cut(strings.TrimPrefix(stamp, clockStampMarker), "] ")
 		if !ok {
 			t.Fatalf("stamp %q missing closing bracket", stamp)
 		}
-		if _, err := time.Parse(voiceTurnTimeLayout, inner); err != nil {
+		parsed, err := time.Parse(voiceTurnTimeLayout, inner)
+		if err != nil {
 			t.Errorf("stamp %q does not round-trip time.Parse: %v", stamp, err)
+			continue
 		}
+		// The numeric offset must survive the round-trip (the model does
+		// timezone arithmetic on it — C-7 keeps the actionable part).
+		_, off := parsed.Zone()
+		_, wantOff := now.Zone()
+		if off != wantOff {
+			t.Errorf("stamp %q round-tripped to offset %d, want %d", stamp, off, wantOff)
+		}
+	}
+}
+
+// stampedEmployeeResolver is a minimal EmployeeDefinitionResolver stub that
+// answers with one employee carrying the given timezone.
+type stampedEmployeeResolver struct {
+	tz string
+}
+
+func (r stampedEmployeeResolver) GetEmployee(_ context.Context, _ string) (*employee.Employee, error) {
+	e := &employee.Employee{}
+	e.Timezone = r.tz
+	return e, nil
+}
+
+// TestVoiceTurnStampUsesEmployeeTimezone pins C-8: the stamp clock is
+// resolved in the BOUND EMPLOYEE's timezone (the same zone the "# Moment"
+// awareness block renders), falling back scheduler-tz -> time.Local —
+// never silently the daemon's clock when the employee carries a zone.
+func TestVoiceTurnStampUsesEmployeeTimezone(t *testing.T) {
+	// Employee tz: America/Denver = UTC-7; at 2026-11-11 19:00 UTC the
+	// employee wall clock is 12:00 (-0700), New York is 14:00 (-0500).
+	r, chatter, sessions := clockStampRunner(t, "noon here")
+	r.employees = stampedEmployeeResolver{tz: "America/Denver"}
+	sess := newVoiceSession(t, sessions)
+
+	utcNow := time.Date(2026, 11, 11, 19, 0, 30, 0, time.UTC)
+	stamp := voiceTurnContextStamp(utcNow.In(r.resolveVoiceTurnLocation(context.Background(), "emp-tz")))
+	if !strings.Contains(stamp, "(UTC-07:00)") {
+		t.Errorf("stamp with America/Denver employee = %q, want the -07:00 employee offset", stamp)
+	}
+
+	// End-to-end: a Run with the same resolver renders the employee's
+	// offset in the model-facing prompt (now-injected clock, so only the
+	// OFFSET can be pinned deterministically).
+	if _, err := r.Run(context.Background(), sess, "what time is it"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	var stamped string
+	for _, m := range chatter.lastUserMessages() {
+		if strings.Contains(m, clockStampMarker) {
+			stamped = m
+		}
+	}
+	if stamped == "" {
+		t.Fatalf("voice turn prompt lost the clock stamp: %#v", chatter.lastUserMessages())
+	}
+	if !strings.Contains(stamped, "(UTC-07:00)") {
+		t.Errorf("Run stamp = %.160q, want the employee's (UTC-07:00) offset", stamped)
+	}
+}
+
+// TestVoiceTurnStampFallsBackToSchedulerTZ pins the middle of the C-8
+// fallback chain: an employee with NO timezone falls to the runner's
+// schedulerTZ; both empty falls to time.Local.
+func TestVoiceTurnStampFallsBackToSchedulerTZ(t *testing.T) {
+	r, _, _ := clockStampRunner(t, "x")
+	r.employees = stampedEmployeeResolver{tz: ""} // no def zone
+	r.schedulerTZ = "Asia/Kolkata"                // UTC+5:30
+	loc := r.resolveVoiceTurnLocation(context.Background(), "emp")
+	if _, off := time.Now().In(loc).Zone(); off != 5*3600+1800 {
+		t.Errorf("fallback location offset = %d, want the scheduler tz +19800", off)
+	}
+	// Bad scheduler tz + no def zone -> time.Local.
+	r.schedulerTZ = "Not/AZone"
+	if loc := r.resolveVoiceTurnLocation(context.Background(), "emp"); loc != time.Local {
+		t.Errorf("bad scheduler tz must fall to time.Local, got %v", loc)
+	}
+	// Nil resolver -> time.Local (pre-C-8 posture for anonymous sessions).
+	r2, _, _ := clockStampRunner(t, "x")
+	if loc := r2.resolveVoiceTurnLocation(context.Background(), ""); loc != time.Local {
+		t.Errorf("nil resolver/empty employee must fall to time.Local, got %v", loc)
 	}
 }

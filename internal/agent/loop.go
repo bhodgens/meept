@@ -3109,6 +3109,43 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 	return l.RunOnceWithParts(ctx, userMessage, nil, conversationID)
 }
 
+// stripVoiceContextStamp removes the daemon voice lane's clock-stamp
+// prefix ("[Context: current date/time is ...] ", injected at the
+// loopTurnRunner seam in internal/daemon/voice_employee.go) from a turn's
+// prompt text. The stamp is MODEL-FACING scaffolding only — the LLM
+// request message must carry it (that is the feature), but every DERIVED
+// field built from the prompt (turnUserPrompt, the learning capture's
+// intent, the reflection trajectory's UserInput) must receive the RAW
+// spoken prompt: deliverableFileEffectRe is ^-anchored, so a stamped
+// prompt never matched the file-deliverable shape and fabricated file
+// claims on voice turns took the labelled branch instead of the honest
+// failure (C-3, 2026-11-11 bughunt). The exact prefix shape is duplicated
+// here DELIBERATELY: the two packages cannot share a constant without an
+// import cycle (internal/daemon imports internal/agent), and the pin test
+// in each package keeps them in lockstep. A prompt that merely CONTAINS a
+// bracketed line mid-text is untouched — only the leading prefix strips.
+//
+// StripVoiceContextStamp is the exported pin seam for the daemon package's
+// lockstep test (the daemon cannot import agent's test files); the
+// unexported wrapper below is what the loop itself calls.
+func StripVoiceContextStamp(prompt string) string {
+	const stampPrefix = "[Context: current date/time is "
+	if !strings.HasPrefix(prompt, stampPrefix) {
+		return prompt
+	}
+	_, rest, ok := strings.Cut(prompt, "] ")
+	if !ok {
+		return prompt
+	}
+	return rest
+}
+
+// stripVoiceContextStamp is the in-package call site (RunOnceWithParts
+// turn capture and the derived-field snapshots).
+func stripVoiceContextStamp(prompt string) string {
+	return StripVoiceContextStamp(prompt)
+}
+
 // RunOnceWithParts processes a single user turn through the full reasoning loop,
 // optionally carrying multimodal content parts (e.g. image attachments).
 // When parts is non-empty the underlying ChatMessage is created via
@@ -3144,7 +3181,7 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	// analyze/answer turn (labelled delivery). Captured right after the
 	// guard reset; cleared with the rest of the per-turn state.
 	l.mu.Lock()
-	l.turnUserPrompt = userMessage
+	l.turnUserPrompt = stripVoiceContextStamp(userMessage)
 	l.mu.Unlock()
 
 	// AUDIT FIX H3 (bughunt 2026-09-03): a RESUMED parked turn re-enters
@@ -3732,7 +3769,10 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 		convID := conversationID
 		response := finalResponse
 		agentID := l.agentID
-		userMsg := userMessage
+		// Derived field (C-3): the trajectory's UserInput carries the RAW
+		// prompt — the model-facing clock stamp never enters reflection
+		// training/reflection data.
+		userMsg := stripVoiceContextStamp(userMessage)
 		duration := time.Since(begin)
 		scopeSnapshot := l.scopeOptions()
 
@@ -3795,7 +3835,9 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 		lc := l.learningCapture
 		convSnapshot := conv
 		convID := conversationID
-		intent := userMessage
+		// Derived field (C-3): the capture intent is the RAW prompt —
+		// the model-facing clock stamp never enters training data.
+		intent := stripVoiceContextStamp(userMessage)
 		synthesis := finalResponse
 		success := err == nil
 

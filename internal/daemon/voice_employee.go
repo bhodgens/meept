@@ -134,6 +134,12 @@ type VoiceEmployeeDeps struct {
 	// (D1). Keyed by the bound employee id — the same id SetAgentID
 	// stamps (caller-authz leaf 02 precedent).
 	MomentResolver func(employeeID string) func() string
+
+	// SchedulerTZ is the daemon's [scheduler] timezone (C-8, stamp-clock
+	// fallback chain): used for the voice turn stamp when the bound
+	// employee's definition carries no usable Timezone. Empty keeps
+	// time.Local (the daemon clock).
+	SchedulerTZ string
 }
 
 // sessionStoreAdapter adapts session.Store onto voice.SessionStore via
@@ -233,6 +239,11 @@ type loopTurnRunner struct {
 	// momentResolver builds the per-employee "# Moment" renderer stamped
 	// onto session clones each turn (awareness leaf 01/02). nil = inert.
 	momentResolver func(employeeID string) func() string
+	// schedulerTZ is the daemon's [scheduler] timezone — the MIDDLE of
+	// the C-8 stamp-clock fallback chain (employee def tz -> scheduler tz
+	// -> time.Local). Empty keeps time.Local. Set by WireVoiceEmployee
+	// from the daemon config; hand-built test runners may leave it "".
+	schedulerTZ string
 }
 
 // EmployeeDefinitionResolver resolves one employee's runtime definition:
@@ -322,18 +333,70 @@ func applyEmployeeDefinition(ctx context.Context, loop *agent.AgentLoop, employe
 	return override
 }
 
-// voiceTurnTimeLayout is the RFC1123-style clock layout for the voice-turn
-// stamp: weekday, date, wall time, zone abbreviation, and explicit numeric
-// offset so the model can do timezone arithmetic. Round-trips time.Parse
-// (pinned by voice_turn_context_test.go).
-const voiceTurnTimeLayout = "Mon 2006-01-02 15:04 MST (UTC-07:00)"
+// voiceTurnTimeLayout is the clock layout for the voice-turn stamp:
+// weekday, date, wall time, and an explicit numeric UTC offset so the
+// model can do timezone arithmetic. The zone ABBREVIATION is deliberately
+// NOT part of the layout (the numeric offset carries the actionable
+// information): Go's time.Parse only accepts "MST" elements matching
+// three-letter or "UTC+-hh"-style zone text, so a numeric zone name
+// (FixedZone("+0530", ...)) or a long IANA name (time.LoadLocation's
+// "America/Denver") once failed the round-trip the pin test pins (C-7,
+// 2026-11-11 bughunt). With the abbreviation gone, the SAME layout
+// formats and parses: every zone Go renders round-trips (pinned by
+// TestVoiceTurnContextStampRoundTripsTimeParse, FixedZone("+0530") and a
+// long-name zone included). The exact prefix the stamp prepends is
+// mirrored by agent.stripVoiceContextStamp (loop.go) — the pin tests in
+// both packages keep the shapes in lockstep.
+const voiceTurnTimeLayout = "Mon 2006-01-02 15:04 (UTC-07:00)"
 
 // voiceTurnContextStamp renders the bracketed scaffolding line prepended to
 // a voice turn's spoken prompt (see Run for why). The stamp is model-facing
 // scaffolding: persistExchange still stores the raw spoken prompt, and the
 // reply's echo is backstopped by agent.SpokenReplyViolation on the way out.
+//
+// C-4 (2026-11-11 bughunt) — model history vs. store divergence, PINNED
+// as-is: the STAMPED prompt is what RunOnce puts in the model-visible
+// Conversation (and thus what a conversation restore replays), while
+// persistExchange below stores the RAW spoken prompt in the session
+// store. The divergence is deliberate: each turn re-stamps a FRESH clock
+// at the seam, so the model always carries a current date/time even when
+// later turns replay earlier stamped history; the store keeps the user's
+// actual words so transcripts/relays never read scaffolding aloud. Do NOT
+// "fix" one side to match the other without re-deriving both consumers —
+// changing the store content changes transcripts and relays, and removing
+// the stamp from the model lane re-opens the live 2026-11-11 defect
+// ("what time is it?" -> "I can't check the current time").
 func voiceTurnContextStamp(now time.Time) string {
 	return "[Context: current date/time is " + now.Format(voiceTurnTimeLayout) + "] "
+}
+
+// resolveVoiceTurnLocation resolves the CLOCK location for a voice turn's
+// stamp (C-8, 2026-11-11 bughunt): the stamp should show the EMPLOYEE's
+// wall clock, not the daemon's, so the resolution mirrors the awareness
+// lane's zone chain (internal/daemon/awareness_wiring.go aw2SchedulerLoc /
+// moment.EmployeeDef.Timezone): the bound employee's BotDefinition.Timezone
+// (the same field the "# Moment" block renders) wins; empty/unparseable
+// falls to the daemon scheduler timezone; that too empty/unparseable falls
+// to time.Local (the pre-fix behavior — daemon clock). Never fails a turn:
+// every fallback is silent here (the def-level bad-zone WARN belongs to
+// the moment render path, and a clock stamp is best-effort scaffolding).
+func (r *loopTurnRunner) resolveVoiceTurnLocation(ctx context.Context, employeeID string) *time.Location {
+	if r.employees != nil && employeeID != "" {
+		ctx2, cancel := context.WithTimeout(ctx, 2*time.Second)
+		def, err := r.employees.GetEmployee(ctx2, employeeID)
+		cancel()
+		if err == nil && def != nil && def.Timezone != "" {
+			if loc, tzErr := time.LoadLocation(def.Timezone); tzErr == nil {
+				return loc
+			}
+		}
+	}
+	if r.schedulerTZ != "" {
+		if loc, err := time.LoadLocation(r.schedulerTZ); err == nil {
+			return loc
+		}
+	}
+	return time.Local
 }
 
 // Run implements voice.TurnRunner.
@@ -381,11 +444,18 @@ func (r *loopTurnRunner) Run(ctx context.Context, sess voice.SessionHandle, prom
 	// knew). Mirror the chat lane's injection idiom (strategic.go prepends
 	// its session-context scaffolding to the task text): a short
 	// date/time line is prepended to the USER prompt at turn start, on the
-	// voice seam only. Persisted history keeps the raw spoken prompt, and
-	// the spoken-reply guard (agent.SpokenReplyViolation, applied to the
-	// reply below) stays the echo backstop — the stamp is scaffolding for
-	// the model, never something TTS should read.
-	reply, err := loop.RunOnce(ctx, voiceTurnContextStamp(time.Now())+prompt, sess.ConversationID)
+	// voice seam only. The clock is resolved in the BOUND EMPLOYEE's
+	// timezone (C-8 fix: the "# Moment" awareness block renders the
+	// employee's zone; the stamp previously used the daemon's clock —
+	// resolveVoiceTurnLocation mirrors the awareness fallback chain).
+	// Persisted history keeps the raw spoken prompt, and the spoken-reply
+	// guard (agent.SpokenReplyViolation, applied to the reply below) stays
+	// the echo backstop — the stamp is scaffolding for the model, never
+	// something TTS should read. RunOnceWithParts strips the stamp from
+	// every DERIVED prompt field (agent.stripVoiceContextStamp, C-3) while
+	// keeping it on the model-visible message.
+	now := time.Now().In(r.resolveVoiceTurnLocation(ctx, employeeID))
+	reply, err := loop.RunOnce(ctx, voiceTurnContextStamp(now)+prompt, sess.ConversationID)
 	if err != nil {
 		return "", err
 	}
@@ -511,9 +581,10 @@ func WireVoiceEmployee(deps VoiceEmployeeDeps) (*VoiceEmployeeWiring, error) {
 			sessions:   deps.Sessions,
 			employees:  deps.Employees,
 			logger:     logger.With("component", "voice-turns"),
-			// Moment renderer seam (awareness leaf 01/02): resolved per
-			// bound employee id at turn time on the session clone.
+			// Moment renderer seam (awareness leaf 01/02): resolved per bound
+			// employee id at turn time on the session clone.
 			momentResolver: deps.MomentResolver,
+			schedulerTZ:    deps.SchedulerTZ,
 		},
 		Progress: progressPublisherFunc(progressFn),
 		Logger:   logger.With("component", "voice-binding"),
