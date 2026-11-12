@@ -56,11 +56,17 @@ type ReaperConfig struct {
     Status      CallStatusChecker // required; nil => Error log, no goroutine
     Errors      CallErrorLogger   // optional
     Interval    time.Duration     // default 30s
-    MinAge      time.Duration     // default 60s
+    DeadAir     time.Duration     // default 60s — release only after this much caller silence
     MaxDuration time.Duration     // default 30m
 }
 func (m *Manager) RunReaper(ctx context.Context, cfg ReaperConfig)
 ```
+
+DEAD-AIR SEMANTICS (owner-ratified 2026-11-11): the reaper does NOT reap by
+call age. Its {ccid: lastActivity} map seeds at the answered observer and
+REFRESHES on every caller-side audio/turn event; a session becomes reaper-
+eligible only when now-lastActivity > DeadAir. MaxDuration stays an absolute
+cap from call start.
 
 ### What This Leaf Consumes
 
@@ -71,10 +77,10 @@ func (m *Manager) RunReaper(ctx context.Context, cfg ReaperConfig)
 
 | Task ID | Objective | Files | Verify command | RED reason | PASS state | Given/When/Then |
 |---|---|---|---|---|---|---|
-| T1 | ReaperConfig + defaults + RunReaper loop (ticker, ctx cancel; own {ccid: startedAt} map fed by AddAnsweredObserver/AddTerminalObserver; sweep copies the map then probes serially — never hold locks across HTTP) | Create internal/voice/reaper.go | `go test ./internal/voice -run Reaper` | gate RED | green | Given fake Status returns Alive=false for ccid X older than MinAge; When one sweep; Then X released exactly once |
+| T1 | ReaperConfig + defaults + RunReaper loop (ticker, ctx cancel; own {ccid: lastActivity} map seeded at answered observer and REFRESHED on every caller-side audio/turn event; sweep copies the map then probes serially — never hold locks across HTTP) | Create internal/voice/reaper.go | `go test ./internal/voice -run Reaper` | gate RED | green | Given fake Status returns Alive=false for ccid X whose lastActivity is older than DeadAir; When one sweep; Then X released exactly once |
 | T2 | Release via FailOutcome(ccid, outcome, "reaped:hangup-lost") — same releaseOnce funnel, custom reason rides; errored bus event on the leg; single release even if a real call.hangup lands concurrently (releaseOnce dedupes) | Modify internal/voice/reaper.go | `go test ./internal/voice -run Reaper` | gate RED | green | Given dead call reaped; When release fires; Then CallEventErrored reason "reaped:hangup-lost" on leg Events |
 | T3 | MaxDuration force-hangup (carrier HangupCall best-effort, then release, reason "reaped:max-duration"); LogCallError when Errors set | Modify internal/voice/reaper.go | `go test ./internal/voice -run Reaper` | gate RED | green | Given session age > MaxDuration and Alive=true; When sweep; Then hung up + errored event |
-| T4 | Wire: voice_wiring starts RunReaper for phone leg when telnyx configured; config keys voice.reaper_interval_s / reaper_min_age_s / reaper_max_call_minutes (0 => defaults; negative disables) | Modify internal/daemon/voice_wiring.go; internal/config | `go build ./... && go test ./internal/daemon -run Voice` | n/a | green | Given daemon boots with telnyx; When startup; Then log "voice reaper started" with resolved values |
+| T4 | Wire: voice_wiring starts RunReaper for phone leg when telnyx configured; config keys voice.reaper_interval_s / reaper_dead_air_s / reaper_max_call_minutes (0 => defaults; negative disables) | Modify internal/daemon/voice_wiring.go; internal/config | `go build ./... && go test ./internal/daemon -run Voice` | n/a | green | Given daemon boots with telnyx; When startup; Then log "voice reaper started" with resolved values |
 | T5 | callstore.LogCallError: append call_error row (additive table CREATE IF NOT EXISTS call_errors(ccid, at, message)) | Modify internal/voice/callstore.go | `go test ./internal/voice -run CallError` | gate RED | green | Given Errors logger set; When reap; Then row exists |
 
 ## Self-Verification Checklist
@@ -83,7 +89,7 @@ func (m *Manager) RunReaper(ctx context.Context, cfg ReaperConfig)
 - [ ] releaseOnce untouched in behavior; reaper is an input edge only (FailOutcome path)
 - [ ] CallController interface NOT extended (GetCallStatus lives on *Client + standalone CallStatusChecker only)
 - [ ] No Manager state/constructor change (reaper's own observer-fed map)
-- [ ] Defaults exactly 30s/60s/30m; frozen reason strings exact
+- [ ] Defaults exactly 30s/60s/30m; frozen reason strings exact; DEAD-AIR semantics (age alone never reaps; caller activity refreshes lastActivity)
 - [ ] No lock held across an HTTP probe (snapshot-and-release pattern)
 - [ ] gofmt + staticcheck clean
 

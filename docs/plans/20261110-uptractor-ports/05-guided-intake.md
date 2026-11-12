@@ -69,8 +69,10 @@ const (
 func ResolveSubject(query string, candidates []string, threshold float64) (outcome ResolveOutcome, match string, matches []string)
 ```
 
-Config: `voice.guided_intake` bool on the employee record (O2 rec). When on,
-the employee's voice system prompt is extended with the intake procedure and
+Config: `voice.guided_intake` bool scoped to the SECRETARY employee definition
+(owner instruction 2026-11-11: "secretary not employee" — the gate lands on
+the secretary's config/profile only, not as a generic employee knob). When on,
+the secretary's voice system prompt is extended with the intake procedure and
 an `intake_save` tool exists that requires a confirmed record payload; the
 tool appends to the ledger (kind per spec, source=voice, source_ref=ccid).
 Saving without a prior read-back+confirm turn is refused by the tool (the

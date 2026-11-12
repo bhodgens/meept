@@ -69,7 +69,7 @@ the sibling repo `meept-uptractor` and is NOT part of this tree.
 
 - C1 CallStatus: `func (c *Client) GetCallStatus(ctx context.Context, callControlID string) (CallStatus, error)`; `type CallStatus struct { Known, Alive bool }`. 404 => Known=false, Alive=false, err=nil. Empty id => error. (Ported verbatim in shape from phone/core/internal/telnyx/callstatus.go.)
 - C2 IgnoredEvent: `type IgnoredEventError struct{ EventType string }`; `func IsIgnoredEvent(err error) bool` (errors.As). Only for `call.*` non-lifecycle events; non-call.* remain plain errors.
-- C3 ReaperConfig: `type ReaperConfig struct { Status CallStatusChecker; Interval, MinAge, MaxDuration time.Duration }` with defaults Interval 30s, MinAge 60s, MaxDuration 30m (values frozen from phone/core/internal/callsvc/reaper.go). `func (m *Manager) RunReaper(ctx context.Context, cfg ReaperConfig)` — no-op + Error log when Status nil. CallStatusChecker is a STANDALONE interface satisfied by *telnyx.Client; do NOT extend telnyx.CallController (adding GetCallStatus there breaks every existing test fake). Reaper releases via `FailOutcome(ccid, outcome, reason)` (manager.go:539) so the frozen reason strings ride the release; the reaper tracks {ccid: startedAt} itself via the answered/terminal observer lanes — no Manager state or constructor change.
+- C3 ReaperConfig: `type ReaperConfig struct { Status CallStatusChecker; Interval, DeadAir, MaxDuration time.Duration }` — SEMANTICS per owner 2026-11-11: the reaper releases a call only after DEAD AIR — no caller-side audio/response for `DeadAir` (default 60s), NOT merely age-since-answer. The reaper's {ccid: lastActivity} map is fed by the answered observer AND refreshed on every caller-side audio/turn event; a probe fires only when now-lastActivity > DeadAir. MaxDuration (default 30m, from call start) remains the absolute cap. Interval default 30s (values frozen from phone/core/internal/callsvc/reaper.go). `func (m *Manager) RunReaper(ctx context.Context, cfg ReaperConfig)` — no-op + Error log when Status nil. CallStatusChecker is a STANDALONE interface satisfied by *telnyx.Client; do NOT extend telnyx.CallController (adding GetCallStatus there breaks every existing test fake). Reaper releases via `FailOutcome(ccid, outcome, reason)` (manager.go:539) so the frozen reason strings ride the release; no Manager state or constructor change. Config keys: voice.reaper_interval_s / voice.reaper_dead_air_s / voice.reaper_max_call_minutes (0 => defaults; negative disables the reaper).
 - C4 Brief JSON (frozen wire shape; matches Uptractor README-callbrief record):
   `{"status":"in_progress|completed|failed|abandoned","error":"...","from":"+1...","to":"+1...","brief":{"transcript":"","summary":"","action_items":[],"commitments":[],"risk_flags":[]},"ext":{...}}`
   Go type `voice.CallBrief` mirrors this; `ext` is `json.RawMessage`, opaque to meept.
@@ -85,7 +85,7 @@ Coverage matrix (gate leaf 00T writes ALL of these BEFORE any impl dispatch; tes
 |---|---|---|---|
 | C1 GetCallStatus | internal/voice/telnyx callstatus_test.go (200 alive/dead, 404, empty id, HTTP error) | — | PENDING |
 | C2 IgnoredEvent | telnyx webhook parse tests (call.analyzed ignored+acked; non-call.* hard error) | — | PENDING |
-| C3 Reaper | internal/voice reaper_test.go (dead call reaped via FailOutcome with reason "reaped:hangup-lost"; alive untouched; MinAge respected; MaxDuration force-hangup; nil Status no-op) | manager-level: tracked session + fake Status => releaseOnce fired exactly once, CallEventErrored on bus | PENDING |
+| C3 Reaper | internal/voice reaper_test.go (DEAD-AIR semantics per owner: call with fresh caller activity NOT reaped regardless of age; call silent > DeadAir reaped via FailOutcome reason "reaped:hangup-lost"; MaxDuration force-hangup; nil Status no-op; defaults 30s/60s/30m) | manager-level: tracked session + fake Status => releaseOnce fired exactly once, CallEventErrored on bus | PENDING |
 | C4 Brief | callstore brief column migration idempotence; CallBrief JSON round-trip; stub-at-answer/final-at-release | replayed hangup webhook => still exactly one brief; restart mid-call => abandoned brief | PENDING |
 | Commitments->ledger | dedupe exactly-once per (ccid,index) | — | PENDING |
 | C5 Fuzzy | canonical table from SPEECH-ROBUSTNESS.md verbatim ("Meadow Rich"->Meadow Ridge; "summer planes"->no match; etc.) | — | PENDING |
@@ -103,7 +103,7 @@ Coverage matrix (gate leaf 00T writes ALL of these BEFORE any impl dispatch; tes
 | 02 | 02-call-reaper.md | C3 + errored events | 01 | 85K |
 | 03 | 03-fuzzy-and-normalize.md | C5+C6 | 00T | 75K |
 | 04 | 04-call-brief-and-commitments.md | C4+C7 | 00T | 95K |
-| 05 | 05-guided-intake.md | guided intake for secretary (internal/voiceintake pkg) | 03 | 80K |
+| 05 | 05-guided-intake.md | guided intake for the SECRETARY (internal/voiceintake pkg; scoped to the secretary employee definition, not a generic employee knob) | 03 | 80K |
 | 06 | 06-call-recording.md | recording + consent gate | 01 | 70K |
 | 07 | 07-sidecar-eval-harness.md | persistent eval lane | 00T | 75K |
 | 08 | 08-research-docs-import.md | docs-only: 4 research docs -> docs/research/ | none | 35K |
@@ -182,5 +182,8 @@ lane green; (4) merge worktree to main per skill step 4.
   (meept SweepStaleLive outcome)? Rec: keep both distinct — startup sweep =
   'failed' (process died), live reaper = 'abandoned' (hangup lost). Affects C4
   status enum only; both values already in the frozen enum.
-- O2: Guided intake — employee preset name and config key. Rec:
-  `voice.guided_intake` bool on the employee record; naming ratified at leaf 05 dispatch.
+- O2: RESOLVED per owner 2026-11-11 — guided intake is scoped to the
+  SECRETARY employee definition (not a generic employee knob); reaper uses
+  DEAD-AIR semantics (DeadAir 60s default) instead of age-since-answer.
+  Reaped-call briefs: startup sweep = 'failed' (process died), live reaper =
+  'abandoned' (hangup lost) — both values in the frozen enum.
