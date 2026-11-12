@@ -56,6 +56,12 @@ func TestVoiceConfigDefaults(t *testing.T) {
 	if v.ReorderGapMs != 60 {
 		t.Errorf("voice.reorder_gap_ms default = %d, want 60", v.ReorderGapMs)
 	}
+	if v.TurnConfirmMs != 900 {
+		t.Errorf("voice.turn_confirm_ms default = %d, want 900 (startguard C1: aggregation ON out of the box; 0 = legacy per-final dispatch)", v.TurnConfirmMs)
+	}
+	if v.FillerGraceMs != 2500 {
+		t.Errorf("voice.filler_grace_ms default = %d, want 2500", v.FillerGraceMs)
+	}
 	if len(v.Filler) != 1 || v.Filler[0] != "Hold on, let me check." {
 		t.Errorf("voice.filler default = %q, want exactly [\"Hold on, let me check.\"]", v.Filler)
 	}

@@ -5096,6 +5096,7 @@ func DefaultConfig() *Config {
 			SilencePrompt:             "Are you still there?",
 			SilenceHangupAfterSeconds: 45,
 			FillerGraceMs:             2500,
+			TurnConfirmMs:             900,
 			// turn_timeout_seconds is opt-in: default 0 = disabled
 			// (docs/agents/opt-in-defaults.md). The silence timer is
 			// suspended while a voice turn is in flight, so an operator
@@ -5474,7 +5475,16 @@ type VoiceConfig struct {
 	// talk loop speaks a filler line (dead-air defect 2026-11-10:
 	// filler fired immediately on EVERY prompt, so "give me a second"
 	// preceded fast answers). 0 = speak immediately (legacy).
-	FillerGraceMs       int      `json:"filler_grace_ms"        toml:"filler_grace_ms"`
+	FillerGraceMs int `json:"filler_grace_ms" toml:"filler_grace_ms"`
+	// TurnConfirmMs is the child-side turn-aggregation confirm window
+	// (startguard C1, live call local-496a3fd0d2ab3fc6): consecutive
+	// FINAL transcripts arriving within this window of each other are
+	// aggregated into ONE employee-turn prompt instead of dispatching
+	// a turn per breath-pause fragment (the provider flushes segments
+	// at 500 ms wall-idle; a normal mid-sentence breath is 300-600 ms,
+	// so per-final dispatch answered fragments of one sentence).
+	// Default 900; 0 = legacy per-final dispatch.
+	TurnConfirmMs       int      `json:"turn_confirm_ms"        toml:"turn_confirm_ms"`
 	SupervisorEmployee  string   `json:"supervisor_employee"    toml:"supervisor_employee"`
 	SupervisorEnabled   bool     `json:"supervisor_enabled"     toml:"supervisor_enabled"`
 	SupervisorModel     string   `json:"supervisor_model"       toml:"supervisor_model"`

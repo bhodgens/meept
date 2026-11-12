@@ -1358,6 +1358,7 @@
     "greeting": "",                          // fact-free line spoken once on connect; empty = first filler line; an empty filler list disables the greeting
     "filler": ["Hold on, let me check."],   // spoken filler lines while working
     "filler_grace_ms": 2500,                // wait this long after a prompt before speaking filler (0 = immediate)
+    "turn_confirm_ms": 900,                 // child-side turn aggregation: consecutive final transcripts inside this window dispatch ONE employee turn (kills the breath-pause fragment fence); 0 = legacy per-final dispatch
     "supervisor_employee": "",              // employee id supervising calls
     "supervisor_enabled": true,             // run the call supervisor
     "supervisor_model": "",                 // empty = use small_model

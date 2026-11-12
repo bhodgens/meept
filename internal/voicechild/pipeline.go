@@ -88,9 +88,40 @@ type pipeline struct {
 	trStart      chan struct{} // closed when the transcript consumer exits (teardown wait)
 	trStartOnce  sync.Once     // exactly-once close of trStart (consumer exit OR permanent open failure)
 	pumpOnce     sync.Once     // start() is idempotent: exactly one pump goroutine
-	audioOut     net.Conn      // child->daemon PCM (C2 <ccid>.out)
-	audioIn      net.Conn      // daemon->child PCM (C2 <ccid>.in)
-	audioDir     string
+
+	// Turn aggregation (voice-startguard C1, live call
+	// local-496a3fd0d2ab3fc6): the whisper provider flushes a segment
+	// after 500 ms of wall-idle — right for segmentation latency, wrong
+	// as a DISPATCH threshold: a normal mid-sentence breath-pause is
+	// 300-600 ms, so each breath fragment finalized a full employee
+	// turn and the agent answered pieces of one sentence while the
+	// operator was still talking. Fix at the dispatch layer: consecutive
+	// finals arriving inside voice.turn_confirm_ms aggregate into ONE
+	// prompt frame, dispatched only after the window passes with no new
+	// final (and no active mic, see lastMicLoudAt). All fields below are
+	// guarded by playMu; no I/O under the lock (the timer closure and
+	// the cap-overflow path call flushPendingFinal, which takes playMu,
+	// releases it, THEN emits — the same off-lock emit posture as the
+	// rmsBargeInCheck interrupt goroutine).
+	turnConfirm       time.Duration // confirm window; 0 = legacy per-final dispatch (backward-compat)
+	pendingFinal      string        // aggregated trimmed final texts, single-space joined
+	pendingFinalParts int           // how many finals are in pendingFinal (telemetry)
+	pendingFirstAt    time.Time     // arrival of the FIRST pending part (8 s cap reference)
+	pendingFinalTimer *time.Timer   // armed/re-armed per arriving final; stopped on dispatch/clear
+	pendingFinalSeq   uint64        // timer identity: bumped on every arm AND every retire, so a stale closure that fired just before its Stop sees a mismatch and returns (never dispatches a fresh window early)
+	micHoldRearms     int           // bounded mic-hold re-arms for the current pending (maxMicHoldRearms)
+	// lastMicLoudAt (playMu) is when pumpAudioIn last saw an incoming
+	// mic chunk above the loose speaking floor (bargeInRms/4). Timer
+	// expiry with a fresh stamp (< micLoudHoldWindow) means the operator
+	// likely paused for breath and may resume: the flush re-arms once,
+	// bounded (maxMicHoldRearms), instead of dispatching. Local-leg only
+	// in practice: phone legs carry bargeInRms == 0, the floor compare
+	// never trips, and the field stays zero — a plain confirm window.
+	lastMicLoudAt time.Time
+
+	audioOut net.Conn // child->daemon PCM (C2 <ccid>.out)
+	audioIn  net.Conn // daemon->child PCM (C2 <ccid>.in)
+	audioDir string
 
 	// open-frame profile (local-leg plan CL1/CL3), set once by handleOpen
 	// before the pipeline starts; read-only afterwards (no lock needed).
@@ -253,6 +284,11 @@ func (c *Child) newPipeline(frame voiceframe.Frame) (*pipeline, error) {
 		logger:   c.logger,
 		stt:      stubSTT{},
 		tts:      stubTTS{},
+		// Aggregation on by default (C1): the keys frame may override
+		// this with the daemon's voice.turn_confirm_ms (0 = legacy)
+		// BEFORE any transcript can arrive (the STT session only binds
+		// once a real provider constructs after applyKeys).
+		turnConfirm: time.Duration(defaultTurnConfirmMs) * time.Millisecond,
 		// Bounded to 8 chunks (160 ms at the L16/16k default). On overflow
 		// the OLDEST chunk is dropped (see pumpAudioIn): for a phone call,
 		// audio latency beats completeness.
@@ -442,6 +478,221 @@ func transcriptPreview(text string) string {
 	return text
 }
 
+// Turn-aggregation constants (voice-startguard C1).
+const (
+	// defaultTurnConfirmMs is the child-side fallback when the keys
+	// frame carries no turn_confirm_ms selector (an old daemon): the
+	// same default as config voice.turn_confirm_ms. A 900 ms window
+	// covers the 300-600 ms breath-pause that fragmented the live call
+	// while staying far under a "did you mean...?" turn latency budget.
+	defaultTurnConfirmMs = 900
+	// turnAggregationMaxAge bounds the buffer at ~8 s of speech: a
+	// caller who never pauses 900 ms for eight seconds force-dispatches
+	// what has aggregated (defensive; a monologue still reaches the
+	// employee). The bound is the AGE of the first pending part.
+	turnAggregationMaxAge = 8 * time.Second
+	// micLoudHoldWindow: if the incoming mic was loud within this window
+	// when the confirm timer expires, the pause looks like a breath
+	// mid-sentence — re-arm instead of dispatching.
+	micLoudHoldWindow = 400 * time.Millisecond
+	// micHoldRecheckExtra is the small grace added to a mic-hold re-arm
+	// so the re-check lands at confirm+50 ms, past the breath that
+	// triggered it (contract C1 point 4).
+	micHoldRecheckExtra = 50 * time.Millisecond
+	// maxMicHoldRearms bounds the hold: at most TWO re-arms per pending
+	// aggregation, so a perpetually-noisy line can never stall dispatch
+	// forever (the dispatch must land within 3 windows).
+	maxMicHoldRearms = 2
+)
+
+// confirmWindow reads the aggregation window (playMu regime). <= 0
+// (unset or explicitly legacy) means per-final dispatch.
+func (p *pipeline) confirmWindow() time.Duration {
+	p.playMu.Lock()
+	defer p.playMu.Unlock()
+	if p.turnConfirm <= 0 {
+		return 0
+	}
+	return p.turnConfirm
+}
+
+// accumulateFinal adds one trimmed FINAL transcript to the pending
+// aggregation buffer and re-arms the confirm timer. It reports
+// (aggregatedText, parts, flushed=true) when the 8 s age cap forced an
+// immediate dispatch (the returned text INCLUDES this final); otherwise
+// the caller must not emit anything — the timer owns the dispatch.
+// No I/O under playMu: the AfterFunc closure only ever calls
+// finalConfirmFired, which captures under the lock and emits OFF it.
+func (p *pipeline) accumulateFinal(text string) (string, int, bool) {
+	now := time.Now()
+	p.playMu.Lock()
+	starting := p.pendingFinal == ""
+	overflow := !starting && !p.pendingFirstAt.IsZero() && now.Sub(p.pendingFirstAt) >= turnAggregationMaxAge
+	if starting {
+		p.pendingFirstAt = now
+		p.micHoldRearms = 0
+	}
+	if starting {
+		p.pendingFinal = text
+	} else {
+		p.pendingFinal = p.pendingFinal + " " + text
+	}
+	p.pendingFinalParts++
+	agg, parts := p.pendingFinal, p.pendingFinalParts
+	if overflow {
+		p.clearPendingFinalLocked()
+		p.playMu.Unlock()
+		return agg, parts, true
+	}
+	if p.pendingFinalTimer != nil {
+		p.pendingFinalTimer.Stop()
+	}
+	// Timer identity (pendingFinalSeq): the closure captures the seq
+	// VALUE (no shared mutable cell — race-free), and finalConfirmFired
+	// only acts while the seq still matches. A stale AfterFunc that
+	// fired just before this Stop (and blocked on playMu) sees the
+	// bumped seq and returns instead of dispatching the freshly
+	// re-armed window early.
+	p.pendingFinalSeq++
+	seq := p.pendingFinalSeq
+	p.pendingFinalTimer = time.AfterFunc(p.turnConfirm, func() { p.finalConfirmFired(seq) })
+	p.playMu.Unlock()
+	return "", 0, false
+}
+
+// mergeAndTakeFinal appends one trimmed final to the pending buffer and
+// captures+clears the merged text in ONE playMu critical section,
+// returning (aggregatedText, parts). Used for the barge-in final: the
+// dispatch must land before any clear arriving over the daemon round-trip
+// can race a separate capture (see the consumeTranscripts aggregation
+// branch). A lone barge-in final with an empty buffer merges to just its
+// own text (parts=1).
+func (p *pipeline) mergeAndTakeFinal(text string) (string, int) {
+	p.playMu.Lock()
+	if p.pendingFinal == "" {
+		p.pendingFinal = text
+	} else {
+		p.pendingFinal = p.pendingFinal + " " + text
+	}
+	p.pendingFinalParts++
+	agg, parts := p.pendingFinal, p.pendingFinalParts
+	p.clearPendingFinalLocked()
+	p.playMu.Unlock()
+	return agg, parts
+}
+
+// clearPendingFinalLocked drops the pending buffer, its timer, and the
+// mic-hold budget. The seq bump (on every retire, not only on arm)
+// makes the identity total: a closure captured under an old seq can
+// never match after any clear/dispatch, so no stale timer can ever
+// dispatch a buffer that a newer window owns. Caller holds playMu.
+func (p *pipeline) clearPendingFinalLocked() {
+	if p.pendingFinalTimer != nil {
+		p.pendingFinalTimer.Stop()
+		p.pendingFinalTimer = nil
+	}
+	p.pendingFinalSeq++
+	p.pendingFinal = ""
+	p.pendingFinalParts = 0
+	p.pendingFirstAt = time.Time{}
+	p.micHoldRearms = 0
+}
+
+// finalConfirmFired is the confirm-timer closure (firedSeq is the
+// pendingFinalSeq captured when the window was armed; any arm/retire
+// under playMu bumps the seq, so a stale closure that raced a Stop
+// sees the mismatch and returns). Mic hold: a fresh lastMicLoudAt stamp
+// (< micLoudHoldWindow) re-arms the window once more (bounded
+// maxMicHoldRearms) instead of dispatching, so the fragment does not
+// land the instant a breath ends while speech resumes; the re-arms are
+// the ONLY bound and dispatch is guaranteed after three windows.
+// Otherwise it captures the buffer under playMu and dispatches off-lock
+// (mutexio: no I/O under the lock).
+func (p *pipeline) finalConfirmFired(firedSeq uint64) {
+	p.playMu.Lock()
+	if p.pendingFinal == "" || p.pendingFinalSeq != firedSeq {
+		// clear()/cap-flush retired the buffer, or a newer window owns
+		// it (this closure is the stale timer of a re-armed window).
+		p.playMu.Unlock()
+		return
+	}
+	if !p.lastMicLoudAt.IsZero() && time.Since(p.lastMicLoudAt) < micLoudHoldWindow && p.micHoldRearms < maxMicHoldRearms {
+		p.micHoldRearms++
+		window := p.turnConfirm
+		if window <= 0 {
+			window = time.Duration(defaultTurnConfirmMs) * time.Millisecond
+		}
+		p.pendingFinalSeq++
+		rearmSeq := p.pendingFinalSeq
+		p.pendingFinalTimer = time.AfterFunc(window+micHoldRecheckExtra, func() { p.finalConfirmFired(rearmSeq) })
+		p.playMu.Unlock()
+		return
+	}
+	agg, parts := p.pendingFinal, p.pendingFinalParts
+	p.clearPendingFinalLocked()
+	p.playMu.Unlock()
+	p.dispatchAggregated(p.ctx, agg, parts, "confirm-window")
+}
+
+// flushPendingFinal dispatches any pending aggregated text NOW (EOF of
+// the transcript stream, or pipeline close/hangup — contract C1 point
+// 5). It is a no-op when nothing is pending or aggregation is off
+// (legacy mode never buffers). clear() deliberately does NOT call this:
+// an interrupted operator's partial utterance is cancelled exactly like
+// the old per-final dispatch cancel (the barge-in that produced the
+// clear means the daemon is already tearing the turn down).
+func (p *pipeline) flushPendingFinal(ctx context.Context, reason string) {
+	p.playMu.Lock()
+	agg, parts := p.pendingFinal, p.pendingFinalParts
+	p.clearPendingFinalLocked()
+	p.playMu.Unlock()
+	if agg == "" {
+		return
+	}
+	p.dispatchAggregated(ctx, agg, parts, reason)
+}
+
+// dispatchAggregated emits ONE final prompt frame (last:true) for the
+// aggregated buffer and logs the C1 telemetry line. The emit runs
+// off-lock like every other frame path; awaitPendingInterrupt keeps the
+// C5 interrupt-before-prompt order even when the flush races an RMS trip.
+func (p *pipeline) dispatchAggregated(ctx context.Context, text string, parts int, reason string) {
+	if text == "" {
+		return
+	}
+	p.awaitPendingInterrupt()
+	if err := p.child.emitPrompt(ctx, p.ccid, text, true); err != nil {
+		p.logger.Error("voicechild: emit aggregated prompt", "err", err, "call_id", p.ccid)
+		return
+	}
+	p.playMu.Lock()
+	p.lastDispatchAt = time.Now()
+	p.playMu.Unlock()
+	p.logger.Info("voicechild: final prompt dispatched aggregated",
+		"call_id", p.ccid, "parts", parts, "chars", len([]rune(text)), "reason", reason)
+}
+
+// noteMicEnergy stamps lastMicLoudAt when an incoming mic chunk is above
+// the loose speaking floor (bargeInRms/4 — a floor WELL below the barge
+// threshold, catching conversational-level speech, not just shouting).
+// This is the active-mic hold evidence for finalConfirmFired (C1 point
+// 4). Phone legs carry bargeInRms == 0 (the open frame sets it on the
+// local leg only), so the floor never trips there and the confirm window
+// dispatches on schedule — documented limitation of the hold lane.
+func (p *pipeline) noteMicEnergy(chunk []byte) {
+	floor := p.bargeInRms / 4
+	if floor <= 0 {
+		return
+	}
+	if !rmsChunkOver(chunk, floor) {
+		return
+	}
+	now := time.Now()
+	p.playMu.Lock()
+	p.lastMicLoudAt = now
+	p.playMu.Unlock()
+}
+
 // consumeTranscripts turns STT transcripts into C1 prompt frames: a final
 // transcript is last:true (starts an employee turn), a partial is last:false
 // (preview only), and empty-text silence results emit nothing (C5). A
@@ -450,6 +701,17 @@ func transcriptPreview(text string) string {
 // so playback stops before the new turn's say can start; the latch keeps
 // it exactly-once per barge-in until a new say restarts playback. No lock
 // is held across channel reads or socket writes (mutexio).
+//
+// Turn aggregation (voice-startguard C1): when the confirm window is on,
+// FINAL transcripts are NOT dispatched inline — they accumulate into one
+// pending buffer (see accumulateFinal) and ONE last:true prompt frame
+// leaves when the window expires without a newer final or active mic.
+// The per-final filters (non-speech, dedupe, blank) keep working per
+// FINAL, before aggregation; the barge-in interrupt for a final that
+// arrives during live playback still fires on ARRIVAL (the operator
+// talking over the answer must stop it immediately — only the turn
+// dispatch waits for the window). Partials are untouched previews.
+// Transcript-stream EOF flushes the pending buffer exactly once.
 func (p *pipeline) consumeTranscripts(trans <-chan Transcript) {
 	for tr := range trans {
 		if tr.Text == "" {
@@ -482,6 +744,8 @@ func (p *pipeline) consumeTranscripts(trans <-chan Transcript) {
 			// the daemon talk loop never sees a duplicate final prompt,
 			// so no daemon-side guard is needed (the repeat cannot
 			// dispatch a second turn or re-authorize a stale RMS trip).
+			// Both filters run per-FINAL, before aggregation (C1): a
+			// dropped part never enters the pending buffer.
 			p.playMu.Lock()
 			if trimmed == p.lastFinalText && !p.lastFinalAt.IsZero() &&
 				time.Since(p.lastFinalAt) <= rmsSttEvidenceWindow {
@@ -491,6 +755,14 @@ func (p *pipeline) consumeTranscripts(trans <-chan Transcript) {
 			p.lastFinalAt = time.Now()
 			p.lastFinalText = trimmed
 			speaking := p.speaking
+			// interruptedLatched: the RMS VAD (or an earlier partial)
+			// already tripped this barge-in — speaking dropped with the
+			// trip, but the caller is clearly ON the floor. A final
+			// landing in this state dispatches inline like a
+			// speaking-final: aggregating it could let the barge-in's
+			// clear (in flight from the daemon) drop the caller's
+			// utterance before the window ever lands.
+			interruptedLatched := p.interrupted
 			p.playMu.Unlock()
 			// C5 for the local leg's whisper adapter: whisper emits
 			// FINALS only (no partials), and the RMS gate now suppresses
@@ -498,11 +770,40 @@ func (p *pipeline) consumeTranscripts(trans <-chan Transcript) {
 			// live must therefore carry the interrupt itself - stop the
 			// old playback BEFORE the new prompt's reply can start, or
 			// the old say plays over the new turn's answer. Same
-			// exactly-once latch as the partial path.
+			// exactly-once latch as the partial path. The interrupt
+			// stays on ARRIVAL even with aggregation on: the operator
+			// talking over the answer must stop it now; only the turn
+			// DISPATCH waits for the confirm window.
 			if speaking && p.noteBargeIn() {
 				if err := p.child.emitInterrupt(p.ctx, p.ccid); err != nil {
 					p.logger.Error("voicechild: emit interrupt", "err", err, "call_id", p.ccid)
 				}
+			}
+			// Turn aggregation (voice-startguard C1): inside the confirm
+			// window, finals append to one pending buffer and the timer
+			// owns the dispatch; nothing emits here. Legacy mode
+			// (window == 0) falls through to the per-final emit below,
+			// byte-identical to pre-C1 behavior (emits tr.Text, not the
+			// trim). A final that arrives while playback is LIVE is
+			// dispatched immediately (merged with any pending buffer):
+			// the operator talking over the answer must start a new
+			// turn NOW, and waiting the window would let the daemon's
+			// clear-for-barge-in (the reply to the interrupt we just
+			// emitted) DROP the pending aggregation — losing the
+			// caller's interrupting utterance entirely. Aggregating a
+			// barge-in final into one merged dispatch keeps the fence
+			// ("one sentence, one turn") and the barge-in contract
+			// (C5 speaking-final path) intact.
+			if p.confirmWindow() > 0 {
+				if speaking || interruptedLatched {
+					agg, parts := p.mergeAndTakeFinal(trimmed)
+					p.dispatchAggregated(p.ctx, agg, parts, "barge-in-final")
+				} else if agg, parts, flushed := p.accumulateFinal(trimmed); flushed {
+					// 8 s age cap: dispatch the aggregated buffer NOW
+					// (already cleared) rather than waiting the window.
+					p.dispatchAggregated(p.ctx, agg, parts, "aggregation-cap")
+				}
+				continue
 			}
 		} else {
 			// Barge-in first (C5): interrupt stops playback before the
@@ -535,6 +836,14 @@ func (p *pipeline) consumeTranscripts(trans <-chan Transcript) {
 			p.playMu.Unlock()
 		}
 	}
+	// Transcript-stream EOF (C1 point 5): the provider's session ended
+	// (whisper wss drop, pcmCh close from the pump) with text still
+	// aggregated — dispatch it exactly once rather than swallowing the
+	// caller's last utterance. The pipeline ctx may already be dead
+	// (close() flushed + cancelled first): the emit fails with an
+	// error log and the buffer is already cleared, so this stays
+	// exactly-once and never re-arms anything.
+	p.flushPendingFinal(p.ctx, "stream-eof")
 }
 
 // pumpAudioIn reads daemon->child PCM from <ccid>.in and feeds the STT
@@ -564,6 +873,11 @@ func (p *pipeline) pumpAudioIn() {
 			// to STT. No-op unless local && bargeInRms > 0; takes playMu
 			// briefly, never blocks the socket drain beyond that.
 			p.rmsBargeInCheck(data)
+			// Turn aggregation C1 point 4: the LOOSER speaking-floor tap
+			// (bargeInRms/4) stamps lastMicLoudAt so a confirm-window
+			// expiry during a breath can tell "silence resumed" from "the
+			// mic is still live". No-op on phone legs (bargeInRms == 0).
+			p.noteMicEnergy(data)
 			p.forwardPCM(data)
 		}
 		if err != nil {
@@ -1187,6 +1501,16 @@ func (p *pipeline) clear() {
 	p.playMu.Lock()
 	p.dropQueued = true
 	p.playGen++
+	// Turn aggregation (C1 point 5): a clear DROPS the pending
+	// aggregated buffer — the documented choice. Old semantics: the
+	// final had already dispatched a prompt and the barge-in cancel
+	// killed that turn; an interrupted operator's partial utterance
+	// rides the same cancel. An aggregated (undispatched) buffer at a
+	// barge-in is exactly that partial utterance: dropping it keeps
+	// "interrupted turn's text is cancelled" byte-faithful. A
+	// speaking-final is NOT aggregated (consumeTranscripts dispatches
+	// it inline), so a barge-in never loses its own triggering text.
+	p.clearPendingFinalLocked()
 	// Playback stopped with the clear: drop the stale `speaking` flag.
 	// The aborted stream's deferred reset skips itself on the gen
 	// mismatch (playbackStream), so without this the flag would stay true
@@ -1528,6 +1852,13 @@ func (p *pipeline) noteOutgoingChunk(chunk []byte) {
 // closes trStart through the same once, so teardown never waits on a
 // consumer that never ran. Idempotent.
 func (p *pipeline) close(ctx context.Context) {
+	// Hangup flush (C1 point 5): dispatch the pending aggregated text
+	// while the ctx and the text socket are still live — BEFORE the
+	// cancel below, which would fail the emit. EOF of the transcript
+	// stream takes the same path from inside consumeTranscripts; the
+	// clear-pending on the flush makes it idempotent (a racing
+	// confirm-timer sees an empty buffer and returns).
+	p.flushPendingFinal(p.ctx, "hangup")
 	p.cancel()
 	_ = ctx // kept for future graceful-drain variants
 	_ = p.audioIn.Close()

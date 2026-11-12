@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/caimlas/meept/internal/voiceframe"
 )
@@ -38,6 +39,12 @@ type KeysFrame struct {
 	TTSModel   string
 	TTSBaseURL string
 	TTSVoice   string
+	// TurnConfirmMs is the voice-startguard C1 aggregation window in
+	// milliseconds (see pipeline.turnConfirm): the daemon sends config
+	// voice.turn_confirm_ms; an ABSENT selector on an old daemon's line
+	// decodes as defaultTurnConfirmMs (900) at handleKeysFrame, and an
+	// explicit 0 selects legacy per-final dispatch.
+	TurnConfirmMs int
 }
 
 // Redacted is what String prints instead of key material.
@@ -114,6 +121,14 @@ func (p *pipeline) applyKeys(k KeysFrame) {
 	p.playMu.Lock()
 	p.sttKey = k.STTKey
 	p.ttsKey = k.TTSKey
+	// Turn-aggregation window (C1): the keys frame carries the daemon's
+	// resolved voice.turn_confirm_ms; absent-on-wire already decoded to
+	// defaultTurnConfirmMs at handleKeysFrame. Applied before the
+	// transcript session can produce any final (constructProviders +
+	// startTranscripts run after applyKeys in handleKeys), and the
+	// pipeline constructor seeds the same default so a keys-less call
+	// still aggregates.
+	p.turnConfirm = time.Duration(k.TurnConfirmMs) * time.Millisecond
 	p.sttCfg = ProviderConfig{
 		Vendor:  k.STTVendor,
 		Model:   k.STTModel,

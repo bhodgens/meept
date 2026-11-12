@@ -194,6 +194,67 @@ func TestVoiceKeysEmissionUsesProfileResolution(t *testing.T) {
 	t.Cleanup(func() { f.w.releaseCall(ccid, voice.OutcomeHangup) })
 }
 
+// TestVoiceKeysEmissionTurnConfirmSelector (voice-startguard C1): the
+// keys line carries turn_confirm_ms from voice.turn_confirm_ms — a
+// hand-built fixture config (unset) sends 0 (legacy per-final dispatch,
+// the pre-C1 behavior), and a config-set value threads through to the
+// wire. The key is present even at 0 (no omitempty: the child decodes
+// ABSENT as its own default, 0 as explicit legacy).
+func TestVoiceKeysEmissionTurnConfirmSelector(t *testing.T) {
+	f := newKeysEmitFixture(t)
+	const ccid = "cc-keys-tc"
+	acquireFor(f.w, ccid)
+
+	f.w.routeFrame(voice.Frame{CallID: ccid, Event: voice.EventSetup})
+	line := readKeysLine(t, f.lines)
+	var wire map[string]any
+	if err := json.Unmarshal([]byte(line), &wire); err != nil {
+		t.Fatalf("keys line not JSON: %v: %s", err, line)
+	}
+	if got, present := wire["turn_confirm_ms"]; !present {
+		t.Fatal("keys wire lacks turn_confirm_ms (C1 selector must ride the frame)")
+	} else if v, ok := got.(float64); !ok || v != 0 {
+		t.Errorf("wire turn_confirm_ms = %v, want 0 for an unset fixture VoiceConfig (0 = legacy per-final dispatch)", got)
+	}
+	f.w.releaseCall(ccid, voice.OutcomeHangup)
+
+	// Config-set value threads through.
+	const ccid2 = "cc-keys-tc2"
+	acquireFor(f.w, ccid2)
+	f.w.cfg.TurnConfirmMs = 1234
+	f.w.routeFrame(voice.Frame{CallID: ccid2, Event: voice.EventSetup})
+	line2 := readKeysLine(t, f.lines)
+	wire2 := map[string]any{}
+	if err := json.Unmarshal([]byte(line2), &wire2); err != nil {
+		t.Fatalf("keys line not JSON: %v: %s", err, line2)
+	}
+	if got, _ := wire2["turn_confirm_ms"].(float64); got != 1234 {
+		t.Errorf("wire turn_confirm_ms = %v, want 1234 (voice.turn_confirm_ms threaded to the keys frame)", wire2["turn_confirm_ms"])
+	}
+	t.Cleanup(func() { f.w.releaseCall(ccid2, voice.OutcomeHangup) })
+}
+
+// TestVoiceKeysEmissionDefaultConfigSends900 (C1 default threading): a
+// DefaultConfig-shaped VoiceConfig — what the daemon actually runs with
+// an unmodified install — puts 900 on the wire, proving the load
+// boundary default reaches the child (aggregation ON out of the box).
+func TestVoiceKeysEmissionDefaultConfigSends900(t *testing.T) {
+	f := newKeysEmitFixture(t)
+	const ccid = "cc-keys-tc3"
+	acquireFor(f.w, ccid)
+	f.w.cfg.TurnConfirmMs = config.DefaultConfig().Voice.TurnConfirmMs
+	f.w.routeFrame(voice.Frame{CallID: ccid, Event: voice.EventSetup})
+	line := readKeysLine(t, f.lines)
+	var wire map[string]any
+	if err := json.Unmarshal([]byte(line), &wire); err != nil {
+		t.Fatalf("keys line not JSON: %v: %s", err, line)
+	}
+	if got, _ := wire["turn_confirm_ms"].(float64); got != 900 {
+		t.Errorf("wire turn_confirm_ms = %v, want 900 (DefaultConfig.Voice.TurnConfirmMs)", wire["turn_confirm_ms"])
+	}
+	t.Cleanup(func() { f.w.releaseCall(ccid, voice.OutcomeHangup) })
+}
+
 // TestVoiceKeysEmissionEmptyCloudKeys sends "" for BOTH cloud keys when
 // the broker lacks them: the line is still emitted (the child factory
 // fails the call; the child and other calls stay up).

@@ -29,6 +29,18 @@ without touching the main process.
   (stdlib-only; pinned by a test).
 - internal/voicechild: Child connects the shared text socket, routes
   setup/say/clear/end per call, one jargo-backed pipeline per call.
+  Dispatch shape (voice-startguard C1): consecutive FINAL transcripts
+  inside `voice.turn_confirm_ms` (default 900, keys-frame selector; 0 =
+  legacy per-final dispatch) aggregate into ONE last:true prompt frame,
+  dispatched after the window passes with no newer final and no active
+  mic (the pumpAudioIn speaking-floor tap re-arms the window, bounded
+  at two re-arms); the 8 s buffer cap force-dispatches; transcript-
+  stream EOF and hangup flush the pending text; `clear` (barge-in)
+  drops it. Finals arriving during live playback or with the barge-in
+  latch tripped dispatch immediately (merged with the pending buffer)
+  — the interrupt path stays on arrival. Partials stay per-preview.
+  Telemetry: one INFO 'voicechild: final prompt dispatched aggregated'
+  per dispatch with call_id, parts, chars, reason.
   The playback worker emits the C1 `played` frame (last:true) once per
   turn-final (`last:true` say) stream, strictly after its final byte
   reaches the .out socket - the daemon's link-floor drain watch arms
