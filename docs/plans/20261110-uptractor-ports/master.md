@@ -155,7 +155,7 @@ commits per leaf with pathspec, updates the tracking table.
 | 05 | PENDING | |
 | 06 | PENDING | |
 | 07 | PENDING | |
-| 08 | PENDING | |
+| 08 | REVIEWED → COMPLETE | All 4 docs byte-identical below provenance headers (diff-verified against source branch); committed |
 
 ## Integration Test Plan
 
