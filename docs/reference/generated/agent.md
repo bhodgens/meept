@@ -63,6 +63,7 @@ Package agent provides the agent loop and related components.
 - [func BuildSystemPromptWithOverride\(override string, tools \[\]ToolDescription\) string](<#BuildSystemPromptWithOverride>)
 - [func BusTopic\(eventType AgentEventType\) string](<#BusTopic>)
 - [func CanonicalToolName\(name string\) string](<#CanonicalToolName>)
+- [func ChatTurnIDFromContext\(ctx context.Context\) string](<#ChatTurnIDFromContext>)
 - [func ClearPerOperationBackoffOverrideForTest\(key string\)](<#ClearPerOperationBackoffOverrideForTest>)
 - [func ContextWithToolRegistry\(ctx context.Context, reg ToolRegistry\) context.Context](<#ContextWithToolRegistry>)
 - [func ContinuationDescription\(desc string, k, n int\) string](<#ContinuationDescription>)
@@ -119,6 +120,7 @@ Package agent provides the agent loop and related components.
 - [func SoulPath\(\) string](<#SoulPath>)
 - [func SplitMemoryItems\(context string\) \[\]string](<#SplitMemoryItems>)
 - [func SplitStepsByAllotment\(steps \[\]\*task.TaskStep, allotmentTokens int, cfg AllotmentConfig\) \[\]\[\]\*task.TaskStep](<#SplitStepsByAllotment>)
+- [func SpokenReplyViolation\(reply string\) \(string, bool\)](<#SpokenReplyViolation>)
 - [func StatusBar\(s TurnStatus\) string](<#StatusBar>)
 - [func StoreSpecInTask\(t \*task.Task, spec \*TaskSpec\)](<#StoreSpecInTask>)
 - [func StripClaimsEvidence\(response string\) string](<#StripClaimsEvidence>)
@@ -136,10 +138,12 @@ Package agent provides the agent loop and related components.
 - [func VerifyFromToolResults\(results \[\]tools.ToolResult\) bool](<#VerifyFromToolResults>)
 - [func WarnToolsWithoutProperties\(reg ToolRegistry, logger \*slog.Logger\) \[\]string](<#WarnToolsWithoutProperties>)
 - [func WithACPTurnSource\(ctx context.Context, kind, employeeID string\) context.Context](<#WithACPTurnSource>)
+- [func WithChatTurnID\(ctx context.Context, turnID string\) context.Context](<#WithChatTurnID>)
 - [func WithExposurePlan\(ctx context.Context, plan \*ExposurePlan\) context.Context](<#WithExposurePlan>)
 - [func WithResumedTurn\(ctx context.Context\) context.Context](<#WithResumedTurn>)
 - [func WithRetryBudget\(ctx context.Context, budget \*RetryBudget\) context.Context](<#WithRetryBudget>)
 - [func WithScopeOptions\(ctx context.Context, opts \[\]llm.ChatOption\) context.Context](<#WithScopeOptions>)
+- [func WithThrottleDispatch\(ctx context.Context, d \*throttleTurnContext\) context.Context](<#WithThrottleDispatch>)
 - [func WithThrottleParkAttempt\(ctx context.Context, attempt int\) context.Context](<#WithThrottleParkAttempt>)
 - [func WithTraceContext\(ctx context.Context, traceID string\) context.Context](<#WithTraceContext>)
 - [type ACPExecutor](<#ACPExecutor>)
@@ -225,6 +229,7 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) Run\(ctx context.Context, messages \<\-chan \*AgentMessage, responses chan\<\- \*AgentResponse\) error](<#AgentLoop.Run>)
   - [func \(l \*AgentLoop\) RunOnce\(ctx context.Context, userMessage, conversationID string\) \(response string, err error\)](<#AgentLoop.RunOnce>)
   - [func \(l \*AgentLoop\) RunOnceWithParts\(ctx context.Context, userMessage string, parts \[\]llm.ContentPart, conversationID string\) \(response string, err error\)](<#AgentLoop.RunOnceWithParts>)
+  - [func \(l \*AgentLoop\) RunVoiceSpokenRewriteRetry\(ctx context.Context, conversationID string\) \(string, error\)](<#AgentLoop.RunVoiceSpokenRewriteRetry>)
   - [func \(l \*AgentLoop\) RunWithSkill\(ctx context.Context, skill \*skills.Skill, input string, conversationID string\) \(string, error\)](<#AgentLoop.RunWithSkill>)
   - [func \(l \*AgentLoop\) RunWithTask\(ctx context.Context, t \*task.Task\) \(string, error\)](<#AgentLoop.RunWithTask>)
   - [func \(l \*AgentLoop\) Security\(\) \*security.PermissionChecker](<#AgentLoop.Security>)
@@ -232,6 +237,7 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) SessionID\(\) string](<#AgentLoop.SessionID>)
   - [func \(l \*AgentLoop\) SetACPExecutor\(e \*ACPExecutor\)](<#AgentLoop.SetACPExecutor>)
   - [func \(l \*AgentLoop\) SetActive\(v bool\)](<#AgentLoop.SetActive>)
+  - [func \(l \*AgentLoop\) SetAgentID\(id string\)](<#AgentLoop.SetAgentID>)
   - [func \(l \*AgentLoop\) SetAutonomous\(autonomous bool\)](<#AgentLoop.SetAutonomous>)
   - [func \(l \*AgentLoop\) SetBeforeToolCallHook\(name string, priority HookPriority, hook BeforeToolCallHook\)](<#AgentLoop.SetBeforeToolCallHook>)
   - [func \(l \*AgentLoop\) SetBranchManager\(mgr any\)](<#AgentLoop.SetBranchManager>)
@@ -257,6 +263,7 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) SetMemvidClient\(client \*memvid.Client\)](<#AgentLoop.SetMemvidClient>)
   - [func \(l \*AgentLoop\) SetMessageDrainer\(d MessageDrainer\)](<#AgentLoop.SetMessageDrainer>)
   - [func \(l \*AgentLoop\) SetModelOverride\(modelRef string\)](<#AgentLoop.SetModelOverride>)
+  - [func \(l \*AgentLoop\) SetMomentRenderer\(fn func\(\) string\)](<#AgentLoop.SetMomentRenderer>)
   - [func \(l \*AgentLoop\) SetMultiUserScopeEnabled\(enabled bool\)](<#AgentLoop.SetMultiUserScopeEnabled>)
   - [func \(l \*AgentLoop\) SetNotificationPublisher\(publisher NotificationPublisher\)](<#AgentLoop.SetNotificationPublisher>)
   - [func \(l \*AgentLoop\) SetParallelismConfig\(baseParallelism int, profiles map\[string\]int\)](<#AgentLoop.SetParallelismConfig>)
@@ -320,12 +327,14 @@ Package agent provides the agent loop and related components.
   - [func \(r \*AgentRegistry\) RegisterSpec\(spec \*AgentSpec\) error](<#AgentRegistry.RegisterSpec>)
   - [func \(r \*AgentRegistry\) ReleaseTaskLoops\(taskID string\)](<#AgentRegistry.ReleaseTaskLoops>)
   - [func \(r \*AgentRegistry\) RunAgent\(ctx context.Context, agentID, message, conversationID string\) \(string, error\)](<#AgentRegistry.RunAgent>)
+  - [func \(r \*AgentRegistry\) RunAgentWithModelRef\(ctx context.Context, agentID, message, conversationID, modelRef string\) \(string, error\)](<#AgentRegistry.RunAgentWithModelRef>)
   - [func \(r \*AgentRegistry\) SeedChildConversation\(agentID, conversationID string, seed \[\]llm.ChatMessage\)](<#AgentRegistry.SeedChildConversation>)
   - [func \(r \*AgentRegistry\) SetACPExecutor\(e \*ACPExecutor\)](<#AgentRegistry.SetACPExecutor>)
   - [func \(r \*AgentRegistry\) SetCapabilitiesMap\(capMap \*CapabilitiesMap\)](<#AgentRegistry.SetCapabilitiesMap>)
   - [func \(r \*AgentRegistry\) SetCapabilityIndex\(ci \*skills.CapabilityIndex\)](<#AgentRegistry.SetCapabilityIndex>)
   - [func \(r \*AgentRegistry\) SetGlobalRules\(rules string\)](<#AgentRegistry.SetGlobalRules>)
   - [func \(r \*AgentRegistry\) SetLearningPipeline\(lp LearningPipeline\)](<#AgentRegistry.SetLearningPipeline>)
+  - [func \(r \*AgentRegistry\) SetPiiRestoreHook\(hook \*PiiRestoreHook\)](<#AgentRegistry.SetPiiRestoreHook>)
   - [func \(r \*AgentRegistry\) SetSchemaModeConfig\(cfg config.AgentToolsConfig\)](<#AgentRegistry.SetSchemaModeConfig>)
   - [func \(r \*AgentRegistry\) SetSkillLoader\(loader \*skills.LazySkillLoader\)](<#AgentRegistry.SetSkillLoader>)
   - [func \(r \*AgentRegistry\) SetTTSRManager\(mgr \*TTSRManager\)](<#AgentRegistry.SetTTSRManager>)
@@ -460,6 +469,10 @@ Package agent provides the agent loop and related components.
   - [func NewBudgetResumeWatcher\(budget \*llm.Budget, logger \*slog.Logger, resumeFunc func\(ctx context.Context, turn ParkedTurn\)\) \*BudgetResumeWatcher](<#NewBudgetResumeWatcher>)
   - [func \(w \*BudgetResumeWatcher\) Park\(turn ParkedTurn\) bool](<#BudgetResumeWatcher.Park>)
   - [func \(w \*BudgetResumeWatcher\) Pending\(\) int](<#BudgetResumeWatcher.Pending>)
+  - [func \(w \*BudgetResumeWatcher\) SetParkBackend\(b parkBackend\)](<#BudgetResumeWatcher.SetParkBackend>)
+  - [func \(w \*BudgetResumeWatcher\) SetParkEventBus\(b parkEventBus\)](<#BudgetResumeWatcher.SetParkEventBus>)
+  - [func \(w \*BudgetResumeWatcher\) SetParkPersistence\(store ParkPersistence, kind ParkKind\)](<#BudgetResumeWatcher.SetParkPersistence>)
+  - [func \(w \*BudgetResumeWatcher\) SetPersistenceOwner\(owner string\)](<#BudgetResumeWatcher.SetPersistenceOwner>)
   - [func \(w \*BudgetResumeWatcher\) Start\(ctx context.Context\)](<#BudgetResumeWatcher.Start>)
   - [func \(w \*BudgetResumeWatcher\) Stop\(\)](<#BudgetResumeWatcher.Stop>)
 - [type BudgetStatus](<#BudgetStatus>)
@@ -503,6 +516,7 @@ Package agent provides the agent loop and related components.
 - [type ChatDelegation](<#ChatDelegation>)
 - [type ChatHandler](<#ChatHandler>)
   - [func NewChatHandler\(loop \*AgentLoop, dispatcher \*Dispatcher, msgBus \*bus.MessageBus, logger \*slog.Logger\) \*ChatHandler](<#NewChatHandler>)
+  - [func \(h \*ChatHandler\) BudgetResumeWatcher\(\) \*BudgetResumeWatcher](<#ChatHandler.BudgetResumeWatcher>)
   - [func \(h \*ChatHandler\) ClearConversation\(conversationID string\)](<#ChatHandler.ClearConversation>)
   - [func \(h \*ChatHandler\) EmitTurnTerminal\(ev TurnTerminalEvent\)](<#ChatHandler.EmitTurnTerminal>)
   - [func \(h \*ChatHandler\) FormatAsyncTaskAck\(result \*DispatchResult\) string](<#ChatHandler.FormatAsyncTaskAck>)
@@ -538,6 +552,7 @@ Package agent provides the agent loop and related components.
 - [type ChildDescriptor](<#ChildDescriptor>)
   - [func UnmarshalChildDescriptor\(b \[\]byte\) \(ChildDescriptor, error\)](<#UnmarshalChildDescriptor>)
   - [func \(d ChildDescriptor\) Validate\(\) error](<#ChildDescriptor.Validate>)
+- [type ChildDescriptorLister](<#ChildDescriptorLister>)
 - [type ChildOptions](<#ChildOptions>)
 - [type ChildRecord](<#ChildRecord>)
 - [type ChildState](<#ChildState>)
@@ -678,13 +693,16 @@ Package agent provides the agent loop and related components.
   - [func \(m \*DelegateManager\) Join\(ctx context.Context, parentSessionID, childID string, timeout time.Duration\) \(DelegateResult, error\)](<#DelegateManager.Join>)
   - [func \(m \*DelegateManager\) Lookup\(childID string\) \(ChildRecord, bool\)](<#DelegateManager.Lookup>)
   - [func \(m \*DelegateManager\) Resume\(ctx context.Context, parentSessionID, childID string\) \(DelegateResult, error\)](<#DelegateManager.Resume>)
+  - [func \(m \*DelegateManager\) ResumeInFlightDescriptors\(ctx context.Context, parentSessionID string\) \(resumed \[\]string, failed \[\]string\)](<#DelegateManager.ResumeInFlightDescriptors>)
   - [func \(m \*DelegateManager\) Session\(childID string\) \(\*acp.Session, bool\)](<#DelegateManager.Session>)
   - [func \(m \*DelegateManager\) SetACPManager\(acpMgr \*acp.Manager\)](<#DelegateManager.SetACPManager>)
   - [func \(m \*DelegateManager\) SetDescriptorFactory\(f func\(ChildRecord\) ChildDescriptor\)](<#DelegateManager.SetDescriptorFactory>)
   - [func \(m \*DelegateManager\) SetForkSeed\(f func\(\*Conversation\) \[\]llm.ChatMessage\)](<#DelegateManager.SetForkSeed>)
   - [func \(m \*DelegateManager\) SetForkSeedWriter\(f func\(agentID, conversationID string, seed \[\]llm.ChatMessage\)\)](<#DelegateManager.SetForkSeedWriter>)
+  - [func \(m \*DelegateManager\) SetModelRefResolver\(f func\(ref string\) \(string, error\)\)](<#DelegateManager.SetModelRefResolver>)
   - [func \(m \*DelegateManager\) SetPersist\(f func\(ChildRecord\) error\)](<#DelegateManager.SetPersist>)
   - [func \(m \*DelegateManager\) SetRouteResolver\(f func\(ChildOptions, DelegateRequest\) \(ChildOptions, error\)\)](<#DelegateManager.SetRouteResolver>)
+  - [func \(m \*DelegateManager\) SetRunFunc\(f func\(ctx context.Context, agentID, message, conversationID, modelRef string\) \(string, error\)\)](<#DelegateManager.SetRunFunc>)
   - [func \(m \*DelegateManager\) SetStore\(store session.Store\)](<#DelegateManager.SetStore>)
   - [func \(m \*DelegateManager\) SettleForTest\(childID string, state ChildState, result, errStr string\)](<#DelegateManager.SettleForTest>)
   - [func \(m \*DelegateManager\) Spawn\(ctx context.Context, req DelegateRequest, parentSessionID string\) \(DelegateResult, error\)](<#DelegateManager.Spawn>)
@@ -871,8 +889,11 @@ Package agent provides the agent loop and related components.
   - [func DecodeGatePark\(rec ParkedTurnRecord\) \(GateParkData, string, error\)](<#DecodeGatePark>)
 - [type GateParker](<#GateParker>)
   - [func NewGateParker\(logger \*slog.Logger, turns \*TurnParker\) \*GateParker](<#NewGateParker>)
+  - [func \(p \*GateParker\) HasParkedGate\(gateKind, gateID string\) bool](<#GateParker.HasParkedGate>)
+  - [func \(p \*GateParker\) HasParkedGateForID\(gateID string\) bool](<#GateParker.HasParkedGateForID>)
   - [func \(p \*GateParker\) ParkGate\(data GateParkData\) bool](<#GateParker.ParkGate>)
   - [func \(p \*GateParker\) PendingGates\(\) int](<#GateParker.PendingGates>)
+  - [func \(p \*GateParker\) ReleaseByKey\(gateID, reason string\) \(bool, error\)](<#GateParker.ReleaseByKey>)
   - [func \(p \*GateParker\) ResumeByKey\(ctx context.Context, gateKind, gateID string\) bool](<#GateParker.ResumeByKey>)
   - [func \(p \*GateParker\) Turns\(\) \*TurnParker](<#GateParker.Turns>)
 - [type GatedExecutionRegistry](<#GatedExecutionRegistry>)
@@ -985,6 +1006,7 @@ Package agent provides the agent loop and related components.
   - [func \(ia \*IntentAnalyzer\) AnalyzeTrueIntent\(ctx context.Context, input string, sessionContext \*SessionContextDigest\) \(\*TrueIntentAnalysis, error\)](<#IntentAnalyzer.AnalyzeTrueIntent>)
   - [func \(ia \*IntentAnalyzer\) ResolvedModel\(\) string](<#IntentAnalyzer.ResolvedModel>)
   - [func \(ia \*IntentAnalyzer\) SetBootReadiness\(b \*ClassifierBootReadiness\)](<#IntentAnalyzer.SetBootReadiness>)
+  - [func \(ia \*IntentAnalyzer\) SetPiiMaskHook\(hook \*PiiRestoreHook\)](<#IntentAnalyzer.SetPiiMaskHook>)
   - [func \(ia \*IntentAnalyzer\) WithAmbiguityThreshold\(threshold float64\) \*IntentAnalyzer](<#IntentAnalyzer.WithAmbiguityThreshold>)
 - [type IntentAnalyzerConfig](<#IntentAnalyzerConfig>)
 - [type IntentCategory](<#IntentCategory>)
@@ -1011,6 +1033,7 @@ Package agent provides the agent loop and related components.
   - [func \(c \*LLMClassifier\) MarkUnavailable\(\)](<#LLMClassifier.MarkUnavailable>)
   - [func \(c \*LLMClassifier\) ResolvedModel\(\) string](<#LLMClassifier.ResolvedModel>)
   - [func \(c \*LLMClassifier\) SetBootReadiness\(b \*ClassifierBootReadiness\)](<#LLMClassifier.SetBootReadiness>)
+  - [func \(c \*LLMClassifier\) SetPiiMaskHook\(hook \*PiiRestoreHook\)](<#LLMClassifier.SetPiiMaskHook>)
   - [func \(c \*LLMClassifier\) UnmarkUnavailable\(\)](<#LLMClassifier.UnmarkUnavailable>)
 - [type LLMClassifierConfig](<#LLMClassifierConfig>)
 - [type LLMMessage](<#LLMMessage>)
@@ -1176,6 +1199,7 @@ Package agent provides the agent loop and related components.
   - [func \(o \*Orchestrator\) Tactical\(\) \*TacticalScheduler](<#Orchestrator.Tactical>)
 - [type OrchestratorDeps](<#OrchestratorDeps>)
 - [type OverrideResult](<#OverrideResult>)
+- [type OwnerScopedPersistence](<#OwnerScopedPersistence>)
 - [type PPConversation](<#PPConversation>)
 - [type PairContext](<#PairContext>)
   - [func \(pc \*PairContext\) ActorPrompt\(\) string](<#PairContext.ActorPrompt>)
@@ -1312,6 +1336,14 @@ Package agent provides the agent loop and related components.
 - [type QueueEntry](<#QueueEntry>)
 - [type QueueEventPayload](<#QueueEventPayload>)
 - [type QueueInjectedPayload](<#QueueInjectedPayload>)
+- [type QueueParkBackend](<#QueueParkBackend>)
+  - [func NewQueueParkBackend\(q \*queue.Store, kind ParkKind, owner string\) \*QueueParkBackend](<#NewQueueParkBackend>)
+  - [func \(b \*QueueParkBackend\) Arm\(context.Context\)](<#QueueParkBackend.Arm>)
+  - [func \(b \*QueueParkBackend\) Delete\(ctx context.Context, kind ParkKind, key string\) error](<#QueueParkBackend.Delete>)
+  - [func \(b \*QueueParkBackend\) LoadOwned\(ctx context.Context, kind ParkKind, owner string\) \(\[\]ParkedTurnRecord, error\)](<#QueueParkBackend.LoadOwned>)
+  - [func \(b \*QueueParkBackend\) LoadOwnedKeyed\(ctx context.Context, kind ParkKind, owner string, now time.Time\) \(\[\]ParkedTurnRecord, \[\]string, error\)](<#QueueParkBackend.LoadOwnedKeyed>)
+  - [func \(b \*QueueParkBackend\) Save\(ctx context.Context, rec ParkedTurnRecord\) error](<#QueueParkBackend.Save>)
+  - [func \(b \*QueueParkBackend\) SaveKeyed\(ctx context.Context, kind ParkKind, key string, rec ParkedTurnRecord\) error](<#QueueParkBackend.SaveKeyed>)
 - [type QueuePersister](<#QueuePersister>)
   - [func NewQueuePersister\(db \*sql.DB, conversationID string, logger \*slog.Logger\) \(\*QueuePersister, error\)](<#NewQueuePersister>)
   - [func \(p \*QueuePersister\) ClearPending\(\) error](<#QueuePersister.ClearPending>)
@@ -1350,8 +1382,11 @@ Package agent provides the agent loop and related components.
   - [func NewQuotaResumeWatcher\(logger \*slog.Logger, resumeFunc func\(ctx context.Context, turn QuotaParkedTurn\), maxWait time.Duration\) \*QuotaResumeWatcher](<#NewQuotaResumeWatcher>)
   - [func \(w \*QuotaResumeWatcher\) Park\(turn QuotaParkedTurn\) bool](<#QuotaResumeWatcher.Park>)
   - [func \(w \*QuotaResumeWatcher\) Pending\(\) int](<#QuotaResumeWatcher.Pending>)
+  - [func \(w \*QuotaResumeWatcher\) SetGiveUpFunc\(fn func\(ctx context.Context, turn QuotaParkedTurn\)\)](<#QuotaResumeWatcher.SetGiveUpFunc>)
+  - [func \(w \*QuotaResumeWatcher\) SetParkBackend\(b parkBackend\)](<#QuotaResumeWatcher.SetParkBackend>)
   - [func \(w \*QuotaResumeWatcher\) SetParkEventBus\(b parkEventBus\)](<#QuotaResumeWatcher.SetParkEventBus>)
   - [func \(w \*QuotaResumeWatcher\) SetParkPersistence\(store ParkPersistence\)](<#QuotaResumeWatcher.SetParkPersistence>)
+  - [func \(w \*QuotaResumeWatcher\) SetPersistenceOwner\(owner string\)](<#QuotaResumeWatcher.SetPersistenceOwner>)
   - [func \(w \*QuotaResumeWatcher\) SetPollInterval\(d time.Duration\)](<#QuotaResumeWatcher.SetPollInterval>)
   - [func \(w \*QuotaResumeWatcher\) Start\(ctx context.Context\)](<#QuotaResumeWatcher.Start>)
   - [func \(w \*QuotaResumeWatcher\) Stop\(\)](<#QuotaResumeWatcher.Stop>)
@@ -1360,6 +1395,7 @@ Package agent provides the agent loop and related components.
   - [func NewRLMAnalyzerFromTraceStore\(cfg RLMAnalyzerConfig, store \*memory.TraceStore, llmClient \*llm.Client, logger \*slog.Logger\) \*RLMAnalyzer](<#NewRLMAnalyzerFromTraceStore>)
   - [func NewTestRLMAnalyzer\(cfg RLMAnalyzerConfig, store TraceStoreReader, llmClient \*llm.Client\) \*RLMAnalyzer](<#NewTestRLMAnalyzer>)
   - [func \(a \*RLMAnalyzer\) Analyze\(ctx context.Context, prompt string\) \(\*AnalyzeResult, error\)](<#RLMAnalyzer.Analyze>)
+  - [func \(a \*RLMAnalyzer\) SetPiiMaskHook\(hook \*PiiRestoreHook\)](<#RLMAnalyzer.SetPiiMaskHook>)
   - [func \(a \*RLMAnalyzer\) SetScopeProvider\(provider chatScopeProvider\)](<#RLMAnalyzer.SetScopeProvider>)
 - [type RLMAnalyzerConfig](<#RLMAnalyzerConfig>)
   - [func DefaultRLMConfig\(\) RLMAnalyzerConfig](<#DefaultRLMConfig>)
@@ -1395,6 +1431,7 @@ Package agent provides the agent loop and related components.
   - [func NewReflectionEngineWithConfig\(logger \*slog.Logger, linter \*lint.Registry, testRunner \*lint.TestRunner, llmClient llm.Chatter, config ReflectionConfig\) \*ReflectionEngine](<#NewReflectionEngineWithConfig>)
   - [func \(re \*ReflectionEngine\) RunReflection\(ctx context.Context, editedFiles \[\]string\) \(\*ReflectionResult, error\)](<#ReflectionEngine.RunReflection>)
   - [func \(re \*ReflectionEngine\) SetEditAvailability\(avail bool\)](<#ReflectionEngine.SetEditAvailability>)
+  - [func \(re \*ReflectionEngine\) SetPiiMaskHook\(hook \*PiiRestoreHook\)](<#ReflectionEngine.SetPiiMaskHook>)
   - [func \(re \*ReflectionEngine\) SetScopeProvider\(provider chatScopeProvider\)](<#ReflectionEngine.SetScopeProvider>)
 - [type ReflectionProposal](<#ReflectionProposal>)
 - [type ReflectionResult](<#ReflectionResult>)
@@ -1481,7 +1518,9 @@ Package agent provides the agent loop and related components.
   - [func \(s \*SQLiteParkStore\) Close\(\) error](<#SQLiteParkStore.Close>)
   - [func \(s \*SQLiteParkStore\) Delete\(ctx context.Context, kind ParkKind, persistenceKey string\) error](<#SQLiteParkStore.Delete>)
   - [func \(s \*SQLiteParkStore\) Load\(ctx context.Context, kind ParkKind, now time.Time\) \(\[\]ParkedTurnRecord, \[\]string, error\)](<#SQLiteParkStore.Load>)
+  - [func \(s \*SQLiteParkStore\) LoadOwned\(ctx context.Context, kind ParkKind, owner string, now time.Time\) \(\[\]ParkedTurnRecord, \[\]string, error\)](<#SQLiteParkStore.LoadOwned>)
   - [func \(s \*SQLiteParkStore\) Save\(ctx context.Context, kind ParkKind, persistenceKey string, rec ParkedTurnRecord\) error](<#SQLiteParkStore.Save>)
+  - [func \(s \*SQLiteParkStore\) SetOwnerFilter\(owner string\)](<#SQLiteParkStore.SetOwnerFilter>)
 - [type SQLiteStatePersister](<#SQLiteStatePersister>)
   - [func NewSQLiteStatePersister\(db \*sql.DB\) \(\*SQLiteStatePersister, error\)](<#NewSQLiteStatePersister>)
   - [func \(p \*SQLiteStatePersister\) Delete\(ctx context.Context, agentID string\) error](<#SQLiteStatePersister.Delete>)
@@ -1565,6 +1604,7 @@ Package agent provides the agent loop and related components.
 - [type SkillStateRuntime](<#SkillStateRuntime>)
   - [func NewSkillStateRuntime\(loop \*AgentLoop, cfg SkillStateConfig, logger \*slog.Logger\) \*SkillStateRuntime](<#NewSkillStateRuntime>)
   - [func \(r \*SkillStateRuntime\) Run\(ctx context.Context, skill \*skills.Skill, input, conversationID string\) \(string, error\)](<#SkillStateRuntime.Run>)
+  - [func \(r \*SkillStateRuntime\) SetPiiMaskHook\(hook \*PiiRestoreHook\)](<#SkillStateRuntime.SetPiiMaskHook>)
   - [func \(r \*SkillStateRuntime\) WithStateTraceWriter\(tw TraceWriter\) \*SkillStateRuntime](<#SkillStateRuntime.WithStateTraceWriter>)
   - [func \(r \*SkillStateRuntime\) WithToolRunner\(runner stateToolRunner\) \*SkillStateRuntime](<#SkillStateRuntime.WithToolRunner>)
 - [type SoulProvider](<#SoulProvider>)
@@ -1625,6 +1665,7 @@ Package agent provides the agent loop and related components.
   - [func \(sp \*StrategicPlanner\) SetInterviewOptionGates\(enabled bool\)](<#StrategicPlanner.SetInterviewOptionGates>)
   - [func \(sp \*StrategicPlanner\) SetInterviewProbe\(fn func\(\)\)](<#StrategicPlanner.SetInterviewProbe>)
   - [func \(sp \*StrategicPlanner\) SetMetricsStore\(store \*metrics.Store\)](<#StrategicPlanner.SetMetricsStore>)
+  - [func \(sp \*StrategicPlanner\) SetPiiMaskHook\(hook \*PiiRestoreHook\)](<#StrategicPlanner.SetPiiMaskHook>)
   - [func \(sp \*StrategicPlanner\) SetPlanCompilerEnabled\(enabled bool\)](<#StrategicPlanner.SetPlanCompilerEnabled>)
   - [func \(sp \*StrategicPlanner\) SetPlanPhaseSink\(fn func\(taskID string, phases \[\]PlanPhaseSpec\)\)](<#StrategicPlanner.SetPlanPhaseSink>)
   - [func \(sp \*StrategicPlanner\) SetRegistry\(reg \*AgentRegistry\)](<#StrategicPlanner.SetRegistry>)
@@ -1637,6 +1678,7 @@ Package agent provides the agent loop and related components.
 - [type SynthesizeTracesTool](<#SynthesizeTracesTool>)
   - [func NewSynthesizeTracesTool\(store TraceStoreReader, llmClient \*llm.Client\) \*SynthesizeTracesTool](<#NewSynthesizeTracesTool>)
   - [func \(t \*SynthesizeTracesTool\) Invoke\(ctx context.Context, args map\[string\]any\) \(map\[string\]any, error\)](<#SynthesizeTracesTool.Invoke>)
+  - [func \(t \*SynthesizeTracesTool\) SetPiiMaskHook\(hook \*PiiRestoreHook\)](<#SynthesizeTracesTool.SetPiiMaskHook>)
   - [func \(t \*SynthesizeTracesTool\) SetScopeProvider\(provider chatScopeProvider\)](<#SynthesizeTracesTool.SetScopeProvider>)
 - [type SynthesizedProgressEvent](<#SynthesizedProgressEvent>)
 - [type TTSRManager](<#TTSRManager>)
@@ -1817,12 +1859,16 @@ Package agent provides the agent loop and related components.
   - [func NewTurnParker\(logger \*slog.Logger, resume func\(context.Context, ParkedTurnRecord\), maxWait time.Duration\) \*TurnParker](<#NewTurnParker>)
   - [func \(p \*TurnParker\) EmitParkEvent\(rec ParkedTurnRecord, modelID, providerID string\)](<#TurnParker.EmitParkEvent>)
   - [func \(p \*TurnParker\) EmitResumeEvent\(rec ParkedTurnRecord, trueParkAt time.Time\)](<#TurnParker.EmitResumeEvent>)
+  - [func \(p \*TurnParker\) HasPendingForConversation\(conversationID string\) bool](<#TurnParker.HasPendingForConversation>)
   - [func \(p \*TurnParker\) Next\(class llm.FailureClass\) \(time.Time, bool\)](<#TurnParker.Next>)
   - [func \(p \*TurnParker\) Park\(turn ParkedTurnRecord\) bool](<#TurnParker.Park>)
   - [func \(p \*TurnParker\) Pending\(\) int](<#TurnParker.Pending>)
+  - [func \(p \*TurnParker\) SetBackend\(b parkBackend\)](<#TurnParker.SetBackend>)
+  - [func \(p \*TurnParker\) SetGiveUpFunc\(fn func\(ctx context.Context, turn ParkedTurnRecord\)\)](<#TurnParker.SetGiveUpFunc>)
   - [func \(p \*TurnParker\) SetParkEventBus\(b parkEventBus\)](<#TurnParker.SetParkEventBus>)
   - [func \(p \*TurnParker\) SetParkKey\(keyFn func\(rec ParkedTurnRecord\) string\)](<#TurnParker.SetParkKey>)
   - [func \(p \*TurnParker\) SetParkPersistence\(store ParkPersistence, kind ParkKind\)](<#TurnParker.SetParkPersistence>)
+  - [func \(p \*TurnParker\) SetPersistenceOwner\(owner string\)](<#TurnParker.SetPersistenceOwner>)
   - [func \(p \*TurnParker\) SetPollInterval\(d time.Duration\)](<#TurnParker.SetPollInterval>)
   - [func \(p \*TurnParker\) SetResumeFunc\(resume func\(context.Context, ParkedTurnRecord\)\)](<#TurnParker.SetResumeFunc>)
   - [func \(p \*TurnParker\) Start\(ctx context.Context\)](<#TurnParker.Start>)
@@ -2112,6 +2158,20 @@ DELIVERY CONTRACT: the bus \(internal/bus\) has no latched or buffered topics �
 	    TopicPairError = "pair.error"
 	)
 
+<a name="ParkOwnerQuotaWatcher"></a>parkedTurnsSchema creates the parked\-turn table. Times are RFC3339 TEXT \(same convention as sessions.created\_at\); turn\_payload is the raw ParkedTurnRecord.TurnPayload JSON preserved byte\-for\-byte so the class\-specific decoders \(quotaTurnPayload / goalTurnPayload\) see exactly what the pre\-restart parker held. Park\-owner identifiers \(C\-K1, statemachine\-remediation tree 04 leaf 01\): every persisted parked turn carries exactly ONE owning parker, stamped at Save and enforced at Load. Kind scoping alone was the C1 CRITICAL: the quota watcher's inner parker and the daemon's throttle parker BOTH persist under ParkKindChat, so a kind\-only Load re\-armed each parker's Start with the OTHER's rows — and because quota/throttle payload keys overlap, a throttle row decoded "successfully" into quotaTurnPayload and the message executed a second time. Owners make the re\-arm partition disjoint: a row can only ever be loaded \(and resumed\) by its owner.
+
+	const (
+	    ParkOwnerQuotaWatcher = "quota-watcher" // QuotaResumeWatcher's inner parker
+	    ParkOwnerThrottle     = "throttle"      // daemon chat throttle TurnParker
+	    ParkOwnerGate         = "gate"          // dedicated ParkKindGate parker
+	    ParkOwnerEpisode      = "episode"       // goal-loop ParkKindEpisode parker
+	    // ParkOwnerBudget is the BudgetResumeWatcher's C-K1 identity (F5, tree
+	    // 04 leaf 04): budget-parked chat turns persist under ParkKindChat like
+	    // the quota watcher and throttle parker, and the owner column keeps the
+	    // three re-arms disjoint.
+	    ParkOwnerBudget = "budget"
+	)
+
 <a name="ReasonQuotaWait"></a>Park lifecycle reason strings \(leaf contract\): parked on a provider wait \(reason follows the class — "quota\_wait" | "throttle\_wait"\), resumed into the loop, or abandoned past MaxWait.
 
 	const (
@@ -2119,6 +2179,17 @@ DELIVERY CONTRACT: the bus \(internal/bus\) has no latched or buffered topics �
 	    ReasonThrottleWait    = "throttle_wait"    // park (class=throttle)
 	    ReasonThrottleResumed = "throttle_resumed" // resume (class=throttle)
 	    ReasonThrottleGiveUp  = "throttle_give_up" // give-up past MaxWait
+	    // ReasonQuotaGiveUp is the attempt-cap give-up for quota records
+	    // (M-4-park, tree 04 leaf 04): the re-park generation reached
+	    // MaxAttempts, so the drain abandons instead of replaying the turn.
+	    ReasonQuotaGiveUp = "quota_give_up"
+	)
+
+<a name="ReasonBudgetWait"></a>
+
+	const (
+	    ReasonBudgetWait    = "budget_wait"    // park (class=budget)
+	    ReasonBudgetResumed = "budget_resumed" // resume (class=budget)
 	)
 
 <a name="DefaultConstitution"></a>Default prompt sections \(used as fallbacks\).
@@ -2179,6 +2250,10 @@ DELIVERY CONTRACT: the bus \(internal/bus\) has no latched or buffered topics �
 	    DefaultPrefilterThreshold = 0.70
 	)
 
+<a name="DefaultQuotaMaxAttempts"></a>DefaultQuotaMaxAttempts bounds the quota re\-park generations \(M\-4\-park\). The encode side stamps it onto every quota record; the drain\-side give\-up lands with tree 04 leaf 04.
+
+	const DefaultQuotaMaxAttempts = 5
+
 <a name="DefaultQuotaResumePollInterval"></a>DefaultQuotaResumePollInterval is the re\-check cadence for parked turns. Mirrors config llm.quota\_retry.defer\_check\_interval's 10m default; the field is exported on the watcher for tests and config wiring. It is an alias of the TurnParker default \(parked\_turn.go\) — one source of truth.
 
 	const DefaultQuotaResumePollInterval = DefaultTurnParkerPollInterval
@@ -2214,6 +2289,10 @@ DELIVERY CONTRACT: the bus \(internal/bus\) has no latched or buffered topics �
 
 	const MaxSoulBytes = 64 * 1024
 
+<a name="ParkClassBudget"></a>ParkClassBudget is the agent.quota\_wait wire class for budget\-parked turns \(F5\). parkClassString only maps provider\-failure classes; budget waits are a distinct wire class with no FailureClass equivalent.
+
+	const ParkClassBudget = "budget"
+
 <a name="SoulFileName"></a>SoulFileName is the soul file's name inside the meept home directory.
 
 	const SoulFileName = "SOUL.md"
@@ -2235,6 +2314,14 @@ DELIVERY CONTRACT: the bus \(internal/bus\) has no latched or buffered topics �
 <a name="TurnSnapshotVersion"></a>
 
 	const TurnSnapshotVersion = 1
+
+<a name="VoiceSpokenFallbackLine"></a>VoiceSpokenFallbackLine replaces a spoken reply when the ONE bounded rewrite also trips \(or errors\): an honest, speakable line — never the machine\-shaped original. Lowercase per the repo UI\-text convention, matching the chat guard's canned lines.
+
+	const VoiceSpokenFallbackLine = "sorry, that answer came out tangled — could you ask me one more time?"
+
+<a name="VoiceSpokenRewriteNudge"></a>VoiceSpokenRewriteNudge is the user\-role nudge the voice adapter sends when a reply trips the spoken guard: same bracketed \[system: ...\] convention as replyGuardRewriteNudge, spoken\-specific remedy.
+
+	const VoiceSpokenRewriteNudge = "[system: your previous reply reached the caller as machine-shaped text (tool identifiers, evidence templates, bracketed status labels) read aloud through text-to-speech. rewrite your answer as plain spoken language: short sentences, no identifiers, no JSON, no code blocks, no bracketed labels. say only what the caller needs to hear.]"
 
 ## Variables
 
@@ -2584,6 +2671,17 @@ Consumers: prefilter vote\(\) cue guard, LLM\-chain post\-check \(leaf 02, optio
 	    "goal_get":    "goal_read",
 	    "goal_create": "goal_write",
 	    "goal_update": "goal_write",
+	
+	    "ledger_append": "ledger_write",
+	    "ledger_query":  "ledger_read",
+	
+	    "workflow":               "agent_delegate",
+	    "workflow_status":        "platform_read",
+	    "subagent_send_message":  "subagent_control",
+	    "subagent_interrupt":     "subagent_control",
+	    "subagent_list_children": "platform_read",
+	
+	    "contact": "contact",
 	}
 
 <a name="TopicTurnTerminal"></a>TopicTurnTerminal is the typed declaration for the turn.terminal bus topic \(typed\-bus\-topics leaf 02\). Publishers MUST use bus.PublishT with this declaration; future subscribers MUST use bus.SubscribeT with it. Payload is the frozen TurnTerminalEvent \- see its doc comment \(CLOSED field set\).
@@ -2687,6 +2785,13 @@ BusTopic returns the bus topic for a given agent event type. Convention: "agent.
 	func CanonicalToolName(name string) string
 
 CanonicalToolName returns the registered tool name for an agent grant. Unknown names pass through unchanged.
+
+<a name="ChatTurnIDFromContext"></a>
+## func ChatTurnIDFromContext
+
+	func ChatTurnIDFromContext(ctx context.Context) string
+
+ChatTurnIDFromContext reads the turn identity stamped by the handler seam; "" when absent.
 
 <a name="ClearPerOperationBackoffOverrideForTest"></a>
 ## func ClearPerOperationBackoffOverrideForTest
@@ -3105,6 +3210,13 @@ SplitMemoryItems splits an assembled memory context string back into its structu
 
 SplitStepsByAllotment greedily partitions ordered steps into batches whose estimated token totals fit within allotmentTokens. An oversize step \(its own estimate exceeds the allotment\) gets its own batch. MaxBatchSteps \> 0 additionally caps steps per batch. allotmentTokens \<= 0 returns a single batch containing every step.
 
+<a name="SpokenReplyViolation"></a>
+## func SpokenReplyViolation
+
+	func SpokenReplyViolation(reply string) (string, bool)
+
+SpokenReplyViolation reports whether a reply is machine\-shaped for the SPOKEN lane, naming the trigger for the WARN. It classifies the shared reply\-guard shapes FIRST \(a raw dump is garbage aloud too — defense in depth for adapters that receive a reply before the loop seam ran\) plus the spoken\-lane extension above. Pure and idempotent: a clean prose reply returns \("", false\) with no side effects, so calling it twice on the same text is safe \(the "guard runs exactly once" posture at the adapter is about the rewrite budget, not classification\).
+
 <a name="StatusBar"></a>
 ## func StatusBar
 
@@ -3242,6 +3354,13 @@ WarnToolsWithoutProperties logs a warning listing every property\-less tool in r
 
 WithACPTurnSource stamps who is driving an acp turn onto ctx so ACPExecutor.recordTurn can tag acp.persona.turns without the executor knowing about employees. kind is ACPTurnSourceEmployee for employee turns \(employeeID names the employee; an empty id just omits the employee\_id tag\); an empty kind returns ctx unchanged — the chat default — so a mis\-wired caller can never emit source:"".
 
+<a name="WithChatTurnID"></a>
+## func WithChatTurnID
+
+	func WithChatTurnID(ctx context.Context, turnID string) context.Context
+
+WithChatTurnID returns ctx carrying the turn's chat.submit identity. Empty turnIDs are not stamped \(legacy turns stay payload\-silent\).
+
 <a name="WithExposurePlan"></a>
 ## func WithExposurePlan
 
@@ -3269,6 +3388,13 @@ WithRetryBudget attaches a retry budget to a context.
 	func WithScopeOptions(ctx context.Context, opts []llm.ChatOption) context.Context
 
 WithScopeOptions attaches caller\-captured task/session scope options to ctx for secondary LLM call sites \(resolveCallScope\). Nil/empty opts are a no\-op passthrough.
+
+<a name="WithThrottleDispatch"></a>
+## func WithThrottleDispatch
+
+	func WithThrottleDispatch(ctx context.Context, d *throttleTurnContext) context.Context
+
+WithThrottleDispatch returns ctx carrying the turn's original dispatch \(RunOnceWithParts entry\). SetTurnParker park sites read it first when building the resume payload \(F8\).
 
 <a name="WithThrottleParkAttempt"></a>
 ## func WithThrottleParkAttempt
@@ -3589,6 +3715,18 @@ AgentConfig holds configuration for the agent loop.
 	    // sections are hoisted before volatile ones via AssembleOrdered and
 	    // LastStablePrefixHash() is updated on every build.
 	    StablePrefixDisabled bool
+	    // OmitEvidenceFormatTemplate slims the Validation & Escalation anchor:
+	    // the anchor's JSON evidence-format TEMPLATE is dropped (the prose
+	    // rules stay) for employees with no file/tool that produces evidence.
+	    // Root cause of defect A (2026-11-10 link recording, transcript b): a
+	    // tools-LESS voice employee (secretary: tools: []) still received the
+	    // template in its conversation anchor and echoed it into the SPOKEN
+	    // reply ("Verified evidence ... tool_call_id ... success=true ...
+	    // memory_id"), which TTS read to the caller. The voice turn adapter
+	    // sets this for zero-tool employees (internal/daemon
+	    // voice_employee.go applyEmployeeDefinition). The zero value keeps the
+	    // template (text-lane byte-identity).
+	    OmitEvidenceFormatTemplate bool
 	}
 
 <a name="DefaultAgentConfig"></a>
@@ -4116,6 +4254,15 @@ RunOnce processes a single user turn through the full reasoning loop. This is a 
 
 RunOnceWithParts processes a single user turn through the full reasoning loop, optionally carrying multimodal content parts \(e.g. image attachments\). When parts is non\-empty the underlying ChatMessage is created via Conversation.AddUserMessageWithParts so that provider serializers emit native image blocks.
 
+<a name="AgentLoop.RunVoiceSpokenRewriteRetry"></a>
+### func \(\*AgentLoop\) RunVoiceSpokenRewriteRetry
+
+	func (l *AgentLoop) RunVoiceSpokenRewriteRetry(ctx context.Context, conversationID string) (string, error)
+
+RunVoiceSpokenRewriteRetry is the voice lane's bounded rewrite retry — the adapter\-facing twin of the loop seam's guardRetried retry \(loop.go response assembly\). The voice TurnRunner adapter calls it when SpokenReplyViolation trips on a completed turn's reply: the conversation already holds the assistant's leaked reply \(RunOnceWithParts appends the shipped text before returning\), so appending the user\-role nudge keeps the loop protocol and re\-entering the turn producer sends it. ONE retry only \(the caller owns the budget\); the re\-entered cycle re\-runs the shared machine\-shaped guard at its own seam. A retry that trips the spoken guard AGAIN, or errors, ships VoiceSpokenFallbackLine — the same "second trip ships the canned line" posture as the chat lane, bounded.
+
+Why the method lives on the loop: the retry must re\-enter runTurnProducer \(the LLM reasoning cycle OR the ACP harness lane\), which is loop\-private. The conversation is fetched by id from the loop's own manager; a missing conversation \(cleared mid\-call\) re\-seeds the anchor so the rewrite turn still carries the persona's validation prose.
+
 <a name="AgentLoop.RunWithSkill"></a>
 ### func \(\*AgentLoop\) RunWithSkill
 
@@ -4164,6 +4311,13 @@ SetACPExecutor injects the external ACP turn producer after construction \(daemo
 	func (l *AgentLoop) SetActive(v bool)
 
 SetActive atomically sets the has\-pending\-work flag.
+
+<a name="AgentLoop.SetAgentID"></a>
+### func \(\*AgentLoop\) SetAgentID
+
+	func (l *AgentLoop) SetAgentID(id string)
+
+SetAgentID rebinds the agent identity on a live loop and forwards it to the loop's executor \(the WithExecutorAgentID lane, snapshotted into details\["agent\_id"\] at every permission check\). The voice turn runner \(caller\-authz leaf 02, O5\) stamps per\-session VOICE clones with the bound employee id so the PreExecChecker routes the employee constitution gate; loops built without an identity or turned with no employee keep their construction\-time id. Rebinding does NOT touch the Manager cache key — that derives from the TEMPLATE's agentID, and the template is never mutated here \(the voice lane clones, the daemon template stays "default"\). Nil\-safe; empty id is a no\-op.
 
 <a name="AgentLoop.SetAutonomous"></a>
 ### func \(\*AgentLoop\) SetAutonomous
@@ -4339,6 +4493,13 @@ SetMessageDrainer wires the inbox drain source. Nil disables injection \(the def
 	func (l *AgentLoop) SetModelOverride(modelRef string)
 
 SetModelOverride sets the model override at runtime \(thread\-safe\). This is a one\-shot override: it auto\-clears after one reasoning cycle via the consumption site in reasoningCycle. Used by the dispatcher for user\-driven model reassignment.
+
+<a name="AgentLoop.SetMomentRenderer"></a>
+### func \(\*AgentLoop\) SetMomentRenderer
+
+	func (l *AgentLoop) SetMomentRenderer(fn func() string)
+
+SetMomentRenderer installs the per\-turn moment\-block renderer on the lane\-neutral seam \(plan 20261110\-situational leaf 01/02; pinned by gate 00T\-moment §3/§4\). nil fn = inert: prompts stay byte\-for\-byte identical to the pre\-tree shape \(D1\). Both lanes consume the SAME func: the chat lane via the assembleSystemPrompt "moment" volatile section, the voice lane via the buildSystemPromptWithOverride append. The daemon builds this closure over moment.Provider.Render \(internal/daemon/awareness\_wiring.go\); the agent package does NOT import internal/moment — the seam is a plain func\(\) string. Unlike SetCapabilitiesBuilder, nil ACCEPTS: it explicitly clears a previously installed renderer \(the gate pins nil = inert, and daemon reload paths can turn awareness off on a live loop\).
 
 <a name="AgentLoop.SetMultiUserScopeEnabled"></a>
 ### func \(\*AgentLoop\) SetMultiUserScopeEnabled
@@ -4804,6 +4965,15 @@ RunAgent sends a single message to an agent and returns its response.
 
 Context isolation \(leaf 10\): the message is treated as a structured brief — built by the caller through BuildSpawnContext — and starts a FRESH conversation keyed by conversationID. The child never inherits a parent conversation's transcript; cross\-agent context flows via explicit SpawnContext briefs \(report\-router handoffs, step AccumulatedContext\), not shared message lists.
 
+<a name="AgentRegistry.RunAgentWithModelRef"></a>
+### func \(\*AgentRegistry\) RunAgentWithModelRef
+
+	func (r *AgentRegistry) RunAgentWithModelRef(ctx context.Context, agentID, message, conversationID, modelRef string) (string, error)
+
+RunAgentWithModelRef sends a single message to an agent with a per\-run model override \(delegation route enforcement, C10\): the resolved child route is armed through the loop's ONE\-SHOT ApplyRequestModel seam \(the same precedence slot as a client\-supplied per\-request model\) so the delegated child's FIRST LLM call runs the RESOLVED route — the allowlist\-gated route the manager recorded — instead of silently falling through to the child spec's own model pin. Empty modelRef behaves exactly like RunAgent \(no override armed\). The override is one\-shot: it auto\-clears after the first reasoning cycle and never persists onto the agent's other conversations.
+
+R3\-2 \(turn\-scoped override\): the override is armed on the SHARED per\-agent loop, so a child run that parks or errors BEFORE the reasoning cycle consumes it used to leave the override stuck — the next unrelated turn on that loop silently ran the child's route. The override is cleared as soon as this run returns \(defer ClearModelOverride\-style\): if the turn consumed it, the one\-shot clear already ran and this is a no\-op; if it never did, nothing leaks to the next turn. The armed window \(arm → RunOnce\) is the same slot the dispatcher's ApplyRequestModel uses for user directives; a full per\-turn context\-carried mechanism does not exist on the RunOnce API \(the consumption site reads loop state in reasoningCycle\), so the defer\-clear shape is the turn\-scoping mechanism chosen here.
+
 <a name="AgentRegistry.SeedChildConversation"></a>
 ### func \(\*AgentRegistry\) SeedChildConversation
 
@@ -4845,6 +5015,13 @@ SetGlobalRules sets the global rules content.
 	func (r *AgentRegistry) SetLearningPipeline(lp LearningPipeline)
 
 SetLearningPipeline wires the learning pipeline \(Judge/Distill\) into every loop this registry creates. Nil is a no\-op.
+
+<a name="AgentRegistry.SetPiiRestoreHook"></a>
+### func \(\*AgentRegistry\) SetPiiRestoreHook
+
+	func (r *AgentRegistry) SetPiiRestoreHook(hook *PiiRestoreHook)
+
+SetPiiRestoreHook wires the shared PII\-unmasking restore lane into every loop this registry creates \(bughunt C19\): registry\-built loops \(delegate children via RunAgent, specialists\) then mask provider\-bound context and restore \[PII:\*\] tokens exactly like the daemon template lane. Nil is a no\-op. Loops already created keep their wiring \(the lane is stateless per call, scoped by the sessionID argument\); loops created afterwards inherit the hook at construction.
 
 <a name="AgentRegistry.SetSchemaModeConfig"></a>
 ### func \(\*AgentRegistry\) SetSchemaModeConfig
@@ -6148,7 +6325,9 @@ String returns a human\-readable name for the budget level.
 
 BudgetResumeWatcher parks chat turns interrupted by budget exhaustion and retries them once the budget window clears. It polls the budget on a fixed interval; when the budget is no longer exceeded, it drains the parked queue \(oldest first\) by invoking the resume callback supplied by the ChatHandler.
 
-The watcher is best\-effort: if the daemon shuts down while turns are parked, those turns are dropped \(logged at warn\). Turns are not persisted across restarts.
+Persistence \(F5, tree 04 leaf 04\): when a ParkPersistence is wired via SetParkPersistence, every accepted Park mirrors its record to the store \(kind\-scoped, stamped with the SetPersistenceOwner identity — daemon wiring: owner "budget"\), Stop keeps the rows for the next Start, and Start re\-arms this watcher's OWN rows \(expired ones are pruned at Load\). Each resume deletes the row BEFORE invoking the callback \(at\-most\-once, same contract as TurnParker\). Without a wired store the watcher stays best\-effort in memory: turns parked when Stop runs are dropped \(logged at warn\).
+
+Events \(F5 observability\): when a park event bus is wired via SetParkEventBus, park and resume publish on the EXISTING agent.quota\_wait topic with class "budget" \(ParkTurnEvent schema, no new topic, no payload reshape\), so the TUI/GUI wait labels see budget\-parked turns like every other park class.
 
 	type BudgetResumeWatcher struct {
 	    // contains filtered or unexported fields
@@ -6166,7 +6345,7 @@ NewBudgetResumeWatcher creates a watcher. resumeFunc is invoked \(in a backgroun
 
 	func (w *BudgetResumeWatcher) Park(turn ParkedTurn) bool
 
-Park enqueues a turn for later retry. Returns false \(and does nothing\) if auto\-resume is not configured.
+Park enqueues a turn for later retry. Returns false \(and does nothing\) if auto\-resume is not configured. With persistence wired, the accepted turn is mirrored to the store \(best\-effort: a save failure logs and the turn stays memory\-only\); with an event bus wired, the park publishes on the agent.quota\_wait topic with class "budget".
 
 <a name="BudgetResumeWatcher.Pending"></a>
 ### func \(\*BudgetResumeWatcher\) Pending
@@ -6175,19 +6354,47 @@ Park enqueues a turn for later retry. Returns false \(and does nothing\) if auto
 
 Pending returns the number of currently parked turns.
 
+<a name="BudgetResumeWatcher.SetParkBackend"></a>
+### func \(\*BudgetResumeWatcher\) SetParkBackend
+
+	func (w *BudgetResumeWatcher) SetParkBackend(b parkBackend)
+
+SetParkBackend installs the C\-A1 backend seam \(tree 20261110 leaf 02\) on the budget watcher's own persistence path: with a backend set it REPLACES parkPersistence for Save/Delete/Load \(C\-A1 contract — the sqlite store stays empty and only derives keys\). Wiring\-time setter: call once before Start. Nil\-guarded per repo convention.
+
+<a name="BudgetResumeWatcher.SetParkEventBus"></a>
+### func \(\*BudgetResumeWatcher\) SetParkEventBus
+
+	func (w *BudgetResumeWatcher) SetParkEventBus(b parkEventBus)
+
+SetParkEventBus installs the bus the budget park/resume events publish to on the EXISTING agent.quota\_wait topic with class "budget" \(F5 — no new topic, no payload reshape: the WS "agent.quota" prefix keeps classifying them as agent\_progress\). Nil disables publishing \(the default; parking stays silent\). Wiring\-time setter: call once before Start.
+
+<a name="BudgetResumeWatcher.SetParkPersistence"></a>
+### func \(\*BudgetResumeWatcher\) SetParkPersistence
+
+	func (w *BudgetResumeWatcher) SetParkPersistence(store ParkPersistence, kind ParkKind)
+
+SetParkPersistence wires durable budget\-park storage. Wiring\-time setter: call once before Start \(re\-arm happens in Start\), so the fields are read without the mutex afterwards. Nil store or watcher keeps the memory\-only behaviour. kind scopes the rows \(daemon wiring: ParkKindChat; an empty kind defaults to it — the budget parker only ever parks chat turns\).
+
+<a name="BudgetResumeWatcher.SetPersistenceOwner"></a>
+### func \(\*BudgetResumeWatcher\) SetPersistenceOwner
+
+	func (w *BudgetResumeWatcher) SetPersistenceOwner(owner string)
+
+SetPersistenceOwner installs the C\-K1 parker identity for budget parks \(daemon wiring: ParkOwnerBudget = "budget"\). Every persisted row is stamped with it and the restart re\-arm loads ONLY this owner's rows, so the quota watcher / throttle parker \(which share ParkKindChat\) can never re\-arm budget turns — and vice versa. Empty owner keeps the legacy unfiltered Load. Wiring\-time setter: call once before Start.
+
 <a name="BudgetResumeWatcher.Start"></a>
 ### func \(\*BudgetResumeWatcher\) Start
 
 	func (w *BudgetResumeWatcher) Start(ctx context.Context)
 
-Start begins the background polling loop. Safe to call once; subsequent calls are no\-ops.
+Start begins the background polling loop. Safe to call once; subsequent calls are no\-ops. With persistence wired \(SetParkPersistence\), the first Start also re\-arms turns persisted by the previous run under this watcher's owner: survivors are queued, and if the budget already cleared they resume immediately \(before the first tick\).
 
 <a name="BudgetResumeWatcher.Stop"></a>
 ### func \(\*BudgetResumeWatcher\) Stop
 
 	func (w *BudgetResumeWatcher) Stop()
 
-Stop halts the polling loop and waits for it to exit. Parked turns that have not yet resumed are logged and dropped.
+Stop halts the polling loop and waits for it to exit. With persistence wired, parked turns STAY in the store and re\-arm on the next Start \(F5: Stop no longer silently drops them — the rows survive, logged at Info\). Without persistence they are logged and dropped \(legacy warn\).
 
 <a name="BudgetStatus"></a>
 ## type BudgetStatus
@@ -6555,6 +6762,13 @@ ChatHandler bridges the message bus to the AgentLoop. It subscribes to chat.requ
 
 NewChatHandler creates a new ChatHandler. The dispatcher parameter is optional; if nil, requests go directly to the loop.
 
+<a name="ChatHandler.BudgetResumeWatcher"></a>
+### func \(\*ChatHandler\) BudgetResumeWatcher
+
+	func (h *ChatHandler) BudgetResumeWatcher() *BudgetResumeWatcher
+
+BudgetResumeWatcher exposes the configured budget watcher so the daemon can wire parked\-turn persistence/events \(F5, tree 04 leaf 04\) before the handler starts. Returns nil when budget auto\-resume is not wired.
+
 <a name="ChatHandler.ClearConversation"></a>
 ### func \(\*ChatHandler\) ClearConversation
 
@@ -6843,6 +7057,15 @@ ChildDescriptor is a durable description of a child that leaf 06 persists for co
 	    SeedPayload     string    `json:"seed_payload,omitempty"`
 	    CreatedAt       time.Time `json:"created_at"`
 	
+	    // Context and OutputSchema carry the spawn request's caller context and
+	    // output-schema directive (C17) so a cold resume re-renders the brief
+	    // through the SAME childPrompt pipeline as a fresh spawn (spawn-context
+	    // render + Context prefix + output_schema instruction) instead of
+	    // replaying a raw SeedPayload with only a preamble. Empty for pre-C17
+	    // descriptors (brief-only resume, unchanged).
+	    Context      string          `json:"context,omitempty"`
+	    OutputSchema json.RawMessage `json:"output_schema,omitempty"`
+	
 	    // SeedMessages is the bounded fork-seed snapshot (v2): the parent's
 	    // completed-turn prefix captured ONCE at spawn, serialized so a cold
 	    // resume replays the parent-context seed instead of only the brief.
@@ -6863,6 +7086,15 @@ UnmarshalChildDescriptor rehydrates a descriptor from its durable JSON form. It 
 	func (d ChildDescriptor) Validate() error
 
 Validate reports whether the descriptor is well\-formed and current. Full implementation \(version \+ mode\) lives in delegate\_descriptor.go; kept here as a thin wrapper for symmetry with the struct it documents.
+
+<a name="ChildDescriptorLister"></a>
+## type ChildDescriptorLister
+
+ChildDescriptorLister is the optional enumeration capability a durable store may expose for the daemon's startup cold\-resume sweep \(C13\). Both production stores \(session.SQLiteStore / session.MemoryStore\) satisfy it; session.Store itself does not require it, so test fakes stay untouched.
+
+	type ChildDescriptorLister interface {
+	    ListChildDescriptors(ctx context.Context) ([]session.ChildDescriptorRecord, error)
+	}
 
 <a name="ChildOptions"></a>
 ## type ChildOptions
@@ -6889,11 +7121,22 @@ ChildRecord is the per\-session registry entry for a delegated child.
 	    Provider        string
 	    ReasoningEffort string
 	    ConversationID  string
-	    State           ChildState
-	    CreatedAt       time.Time
-	    Result          string
-	    Err             string
-	    Descriptor      ChildDescriptor
+	    // State is the durable lifecycle state; see ChildState.
+	    State      ChildState
+	    CreatedAt  time.Time
+	    Result     string
+	    Err        string
+	    Descriptor ChildDescriptor
+	    // Depth is the runtime nesting depth of this child (1 = a top-level
+	    // spawn): parent depth (threaded through the spawn context) + 1,
+	    // refused beyond maxDelegateDepth. Recorded for observability; the
+	    // cap itself is enforced at Spawn (delegateDepthKey).
+	    Depth int
+	    // Context and OutputSchema ride the spawn request so the resume brief
+	    // can be re-rendered through the same childPrompt pipeline as a fresh
+	    // spawn (no drift between fork and resume briefs).
+	    Context      string
+	    OutputSchema json.RawMessage
 	    // contains filtered or unexported fields
 	}
 
@@ -8041,7 +8284,7 @@ AllChildren returns a snapshot \(copies\) of every registered child across ALL p
 
 	func (m *DelegateManager) Cancel(childID string) error
 
-Cancel interrupts a running child: it invokes the external cancel hook, the per\-child run context, and any live ACP session, then marks the record interrupted and publishes settlement.
+Cancel interrupts a running child: it invokes the external cancel hook, the per\-child run context, and any live ACP session, then marks the record interrupted and publishes settlement. The interrupted state is DURABLE: the descriptor is persisted with state=interrupted before the settle channel closes \(C6 — previously Cancel mutated only the in\-memory record, so a restart lost the interruption and a previously\-persisted running row would re\-execute a cancelled task\).
 
 <a name="DelegateManager.Children"></a>
 ### func \(\*DelegateManager\) Children
@@ -8079,9 +8322,20 @@ Lookup returns a copy of a child record by childID.
 Resume re\-spawns an interrupted/idle child from its durable descriptor. It works in two layers:
 
 - Live: the child still exists in this daemon run \-\> it must be in an Interrupted \(or Pending\) state, and it is re\-run under its recorded descriptor.
-- Cold: the child's record is gone from the run\-state \(parent/daemon restart\) \-\> it is rehydrated from the durable store, re\-registered under its original childID, and re\-run from its persisted descriptor.
+- Cold: the child's record is gone from the run\-state \(parent/daemon restart\) \-\> it is rehydrated from the durable store, re\-registered under its original childID, and re\-run from its persisted descriptor. The durable record's OWN state gates the resume exactly like the live path \(C5\): only Interrupted/Pending rows are resumable — a terminal \(completed/failed\) row is refused, so a completed child can never re\-execute from its frozen seed.
 
 Both paths replay the frozen fork seed — the descriptor's SeedMessages snapshot when present \(v2, stamped onto the child's conversation before the first turn\), else brief\-only as v1 always did — re\-pin the descriptor's model/route, set the record back to running, and re\-publish the settlement on completion. Only the parent \(record.ParentSessionID == caller\) may resume.
+
+Claiming \(C11\): the in\-map claim happens atomically under the manager lock inside resumeRegister — the first Resume inserts the running entry before launching the goroutine; a concurrent second caller observes the entry and joins the existing execution instead of double\-spawning.
+
+<a name="DelegateManager.ResumeInFlightDescriptors"></a>
+### func \(\*DelegateManager\) ResumeInFlightDescriptors
+
+	func (m *DelegateManager) ResumeInFlightDescriptors(ctx context.Context, parentSessionID string) (resumed []string, failed []string)
+
+ResumeInFlightDescriptors scans the durable child\-descriptor store for in\-flight rows \(state running/interrupted — a child executing or cancelled when its parent/daemon died\) and cold\-resumes each, up to maxResumeSweep. This is the production entry point for the startup sweep \(C13\): without it the cold\-resume machinery is unreachable after a restart.
+
+Contract: bounded \(maxResumeSweep rows per call\), logged, best\-effort — a row that cannot be resumed \(corrupt descriptor, unknown agent, parent mismatch\) is logged at Warn and skipped, never fatal to the sweep or the daemon boot. Resumed children settle asynchronously like any other child. parentSessionID is passed through to Resume verbatim \("" = skip the parent\-match check — the sweep runs with daemon authority at boot\).
 
 <a name="DelegateManager.Session"></a>
 ### func \(\*DelegateManager\) Session
@@ -8118,6 +8372,13 @@ SetForkSeed installs the B2 fork\-seed seam that materializes a parent transcrip
 
 SetForkSeedWriter installs the DSH\-1 conversation\-seed adapter \(wired by AgentRegistry construction\): the adapter stamps a fork child's seed onto its conversation before the first turn. nil keeps the brief\-only path.
 
+<a name="DelegateManager.SetModelRefResolver"></a>
+### func \(\*DelegateManager\) SetModelRefResolver
+
+	func (m *DelegateManager) SetModelRefResolver(f func(ref string) (string, error))
+
+SetModelRefResolver installs the delegate route\-resolution seam \(R3\-3\): runChildTurn resolves the child's recorded route through it BEFORE the turn launches, and an unresolvable ref FAILS the child turn instead of silently degrading to the spec's own model pin \(the pre\-C10 allowlist bypass\). Satisfied structurally by \*llm.Resolver's ResolveEscalationRef \(an alias name or "provider/model" ref \-\> usable loop model ref, errors when unknown\). nil keeps the legacy pass\-through \(the ref rides raw; tests and unwired registries never regress\).
+
 <a name="DelegateManager.SetPersist"></a>
 ### func \(\*DelegateManager\) SetPersist
 
@@ -8131,6 +8392,13 @@ SetPersist installs the B6 persistence hook called on settlement. nil makes pers
 	func (m *DelegateManager) SetRouteResolver(f func(ChildOptions, DelegateRequest) (ChildOptions, error))
 
 SetRouteResolver installs the B4 per\-child route resolver. nil resets to the identity default \(request values pass through unchanged\).
+
+<a name="DelegateManager.SetRunFunc"></a>
+### func \(\*DelegateManager\) SetRunFunc
+
+	func (m *DelegateManager) SetRunFunc(f func(ctx context.Context, agentID, message, conversationID, modelRef string) (string, error))
+
+SetRunFunc installs the child\-execution seam \(C10\). The daemon binds reg.RunAgentWithModelRef here so a spawn's resolved route is enforced as a one\-shot model override on the child's first LLM call. A nil f resets to the default RunAgent path \(no override\).
 
 <a name="DelegateManager.SetStore"></a>
 ### func \(\*DelegateManager\) SetStore
@@ -8908,8 +9176,13 @@ DispatcherConfig holds configuration for creating a Dispatcher.
 	    // production keeps rotation; for testing/iteration
 	    // (classifier-observability leaf 02).
 	    ClassifierFailFast bool
-	    CapabilityMatcher  *CapabilityMatcher
-	    EmbeddingClient    EmbeddingClient
+	    // PiiMask is the session-scoped PII mask lane applied to classifier
+	    // prompts before the side sends (bughunt C21: the main-turn mask in
+	    // the loop never reaches these sends). Nil = masking disabled,
+	    // byte-identical.
+	    PiiMask           *PiiRestoreHook
+	    CapabilityMatcher *CapabilityMatcher
+	    EmbeddingClient   EmbeddingClient
 	    // PrefilterConfig enables the Stage-0 embedding prefilter
 	    // (classifier-observability follow-up). When Enabled, the dispatcher
 	    // constructs an EmbeddingPrefilter (OpenAI-compatible embeddings
@@ -9910,12 +10183,28 @@ resume is invoked \(in a background goroutine\) at most once per gate park, afte
 
 NewGateParker wraps an existing TurnParker for gate checkpoints. The parker must be DEDICATED to gate parks \(ParkKindGate scoping via SetParkPersistence happens in the daemon wiring, before Start\) \-\- the same one\-parker\-per\-kind layout the chat/throttle/episode parkers already use, sharing the one parked\_turns table. Construction installs the gate persistence\-key override \(\(gate\_kind|gate\_id\) derived from the payload\), so a re\-raised gate overwrites its own row and ResumeByKey resolves rows by the C5 identity.
 
+<a name="GateParker.HasParkedGate"></a>
+### func \(\*GateParker\) HasParkedGate
+
+	func (p *GateParker) HasParkedGate(gateKind, gateID string) bool
+
+HasParkedGate reports whether a gate row is currently parked under the given kind\+id \(bughunt C25\): the goal\-round driver consults this through the daemon wiring's quiescence predicate so an employee whose goal gate awaits human approval counts as NOT quiet — without it every poll tick ran a full autonomous round \(LLM spend \+ side effects\) while the approval pended. False on a nil parker or empty id \(fail\-open, matching the disabled\-parking posture\).
+
+The probe decodes the QUEUED records \(the same in\-memory queue ResumeByKey drains\) rather than the persistence key index, so it works with and without park persistence wired: a memory\-only parker \(tests, degraded boots\) still reports the pending approval.
+
+<a name="GateParker.HasParkedGateForID"></a>
+### func \(\*GateParker\) HasParkedGateForID
+
+	func (p *GateParker) HasParkedGateForID(gateID string) bool
+
+HasParkedGateForID is the kind\-agnostic probe: it reports whether ANY gate park \(plan or goal namespace\) exists under the given gate id. The goal\-round driver's quiescence predicate only knows the goal id, not which kind raised the gate, so it walks both shared\-namespace keys.
+
 <a name="GateParker.ParkGate"></a>
 ### func \(\*GateParker\) ParkGate
 
 	func (p *GateParker) ParkGate(data GateParkData) bool
 
-ParkGate checkpoints one gate pause. It returns false \(nothing parked\) when parking is disabled, the payload cannot be encoded, or the shared parker refuses the record. A re\-raise of an already\-parked gate overwrites the row \(same \(kind, park\_key\)\) and re\-queues the in\-memory record \-\- the approval still resumes exactly once, because ResumeByKey pops one queued record per key.
+ParkGate checkpoints one gate pause. It returns false \(nothing parked\) when parking is disabled, the payload cannot be encoded, or the shared parker refuses the record. A re\-raise of an already\-parked gate REPLACES the queued in\-memory record \(F9: at\-most\-one per key \-\- the old append\-then\-pop shape left a stale copy behind that a second approval could double\-resume\) and the persistence row upserts under the same \(gate\_kind|gate\_id\) key \-\- the approval still resumes exactly once, because ResumeByKey pops the \(single\) queued record per key.
 
 <a name="GateParker.PendingGates"></a>
 ### func \(\*GateParker\) PendingGates
@@ -9923,6 +10212,15 @@ ParkGate checkpoints one gate pause. It returns false \(nothing parked\) when pa
 	func (p *GateParker) PendingGates() int
 
 PendingGates returns the number of currently parked gate rows \(observability surface; mirrors TurnParker.Pending\).
+
+<a name="GateParker.ReleaseByKey"></a>
+### func \(\*GateParker\) ReleaseByKey
+
+	func (p *GateParker) ReleaseByKey(gateID, reason string) (bool, error)
+
+ReleaseByKey discards the parked gate identified by gateID \(plan rejection / cancellation path, M\-12 / C\-K3\): the persistence row and ALL in\-memory records queued under the key are removed WITHOUT running the resume callback \(rejection discards the re\-entry, it never re\-drives it\), and the existing parker lifecycle event is emitted on the agent.quota\_wait topic carrying the release reason — no new topic, no payload reshape, so quota\_wait consumers see it for free.
+
+The key identity mirrors gateParkKey \(gateKind|gateID\): plan and goal gates share one namespace, so both kind\-prefixed keys are probed. Returns false \(nil error, idempotent\) when nothing is parked under the gate id — re\-drive safety for unknown / already\-released / already\- resumed gate ids.
 
 <a name="GateParker.ResumeByKey"></a>
 ### func \(\*GateParker\) ResumeByKey
@@ -10948,6 +11246,13 @@ ResolvedModel returns the resolved "provider/model" of the LLM that served the a
 
 SetBootReadiness wires the daemon's F\-D8 classifier boot\-gate signal onto an already\-constructed analyzer. Nil is a no\-op \(setter nil\-guard rule\).
 
+<a name="IntentAnalyzer.SetPiiMaskHook"></a>
+### func \(\*IntentAnalyzer\) SetPiiMaskHook
+
+	func (ia *IntentAnalyzer) SetPiiMaskHook(hook *PiiRestoreHook)
+
+SetPiiMaskHook attaches the session\-scoped PII mask lane used for the analysis side send \(finding C21\). Nil is a no\-op \(setter nil\-guard rule\): with no hook the raw content passes through byte\-identically.
+
 <a name="IntentAnalyzer.WithAmbiguityThreshold"></a>
 ### func \(\*IntentAnalyzer\) WithAmbiguityThreshold
 
@@ -11249,6 +11554,13 @@ ResolvedModel returns the resolved "provider/model" of the LLM that served this 
 
 SetBootReadiness wires the daemon's F\-D8 classifier boot\-gate signal onto an already\-constructed classifier \(the daemon creates the dispatcher in NewComponents, before Run\(\) knows the gate outcome\). Nil is a no\-op per the repo's setter nil\-guard rule; the wait bound falls back to defaultClassifierBootWait when unset.
 
+<a name="LLMClassifier.SetPiiMaskHook"></a>
+### func \(\*LLMClassifier\) SetPiiMaskHook
+
+	func (c *LLMClassifier) SetPiiMaskHook(hook *PiiRestoreHook)
+
+SetPiiMaskHook attaches the session\-scoped PII mask lane used for the classification side sends \(finding C21\). Nil is a no\-op \(setter nil\-guard rule\): with no hook the raw input passes through byte\-identically.
+
 <a name="LLMClassifier.UnmarkUnavailable"></a>
 ### func \(\*LLMClassifier\) UnmarkUnavailable
 
@@ -11283,6 +11595,11 @@ UnmarkUnavailable clears the unavailable flag, allowing immediate retries.
 	    // ScopeProvider, when set, supplies the owning loop's task/session
 	    // scope for classification LLM calls (leaf 01 session-affinity).
 	    ScopeProvider chatScopeProvider
+	
+	    // PiiMask, when set, masks PII in the user input before it is
+	    // interpolated into the classification prompts (finding C21).
+	    // Nil = masking disabled, byte-identical to prior behavior.
+	    PiiMask *PiiRestoreHook
 	
 	    // BootReadiness, when set, makes classification calls wait (bounded by
 	    // BootWait, then by the call context) for the daemon's F-D8 classifier
@@ -12673,6 +12990,15 @@ OverrideResult is returned by AfterToolCallHook.
 	    Reason   string
 	}
 
+<a name="OwnerScopedPersistence"></a>
+## type OwnerScopedPersistence
+
+OwnerScopedPersistence is the OPTIONAL capability seam \(C\-K1, tree 04 leaf 01\) a ParkPersistence may implement to load only one owner's rows: LoadOwned returns exactly the records Save stamped with that owner. SQLiteParkStore implements it; fakes that don't degrade to the kind\-only Load \(the parker's owner stamp still persists, it just cannot be filtered at load\). Interface\-at\-consumer, like ParkPersistence itself.
+
+	type OwnerScopedPersistence interface {
+	    LoadOwned(ctx context.Context, kind ParkKind, owner string, now time.Time) ([]ParkedTurnRecord, []string, error)
+	}
+
 <a name="PPConversation"></a>
 ## type PPConversation
 
@@ -13324,6 +13650,11 @@ ParkedTurn captures a chat turn that was interrupted by budget exhaustion and is
 	    Parts          []llm.ContentPart // multimodal parts, if any
 	    AgentID        string            // agent override, if any
 	    SourceClient   string            // originating client identifier
+	    // Limit is the budget limit that fired the park (hourly_token, ...).
+	    // Additive (tree 04 leaf 04): carried into the persisted payload and
+	    // the park event so surfaces can say WHICH window is being waited on.
+	    // Zero on legacy parks (unknown reason), which stay silent on the field.
+	    Limit llm.BudgetLimit
 	    // TurnID is the chat.submit turn identity (week bughunt 2026-09-17
 	    // F15): recorded at park time so the resume can emit the FINAL
 	    // turn.terminal event under the id the client's ack returned —
@@ -13367,6 +13698,15 @@ TurnPayload carries the class\-specific original request as JSON so the resume r
 	    // resume path re-applies the marker when EITHER is set (parkedAutonomous),
 	    // so the two can never disagree in a way that matters.
 	    Autonomous bool
+	    // Owner is the C-K1 parker identity (statemachine-remediation tree 04
+	    // leaf 01): the ONE parker allowed to Load/resume this record's persisted
+	    // row. The TurnParker stamps it at Save from SetPersistenceOwner; the
+	    // store's owner-scoped Load returns only rows whose owner matches. Additive
+	    // to the frozen record shape (same regime as Autonomous above); zero value
+	    // "" = unowned (memory-only records and legacy rows pre-backfill — the
+	    // parker treats an empty owner as "no filter" so an unwired store stays
+	    // byte-identical). See ParkOwner* constants in park_store_sqlite.go.
+	    Owner string
 	}
 
 <a name="ParseResult"></a>
@@ -13469,7 +13809,9 @@ Refusals \(each returns the input unchanged — the disabled\-path discipline\):
 - empty sessionID: tokens minted without a session scope can never be restored \(the store refuses empty\-session resolution\), so scope\-less masking is refused, not degraded.
 - empty message slice.
 
-Tool\-call arguments are NOT masked: they are data addressed at this session's tools, and masking them would corrupt tool semantics while the responses they produce flow back only into this session. Content only — the same surface the restore lane un\-masks.
+Tool\-call arguments are NOT masked: they are data addressed at this session's tools, and masking them would corrupt tool semantics while the responses they produce flow back only into this session. Content and text content parts — the same surfaces the serializers emit \(Parts take precedence over Content in every provider serializer, llm/models.go\), and the same surface the restore lane un\-masks.
+
+C18 \(bughunt 2026\-11\-10\): Parts\-bearing messages \(multimodal turns, resume replays carrying turn.Parts\) previously crossed to the provider UNMASKED — the mask touched only Content while every serializer PREFERS Parts. Text parts now go through the same swapper; non\-text parts \(image URLs\) are left alone; and when Parts were masked the flat Content is masked with the SAME session scope so both representations stay consistent \(the model may see either wire form, and the tokens resolve through one store\).
 
 <a name="PiiRestoreHook.RestoreOutput"></a>
 ### func \(\*PiiRestoreHook\) RestoreOutput
@@ -14084,6 +14426,64 @@ QueueInjectedPayload is attached to bus events when the agent loop injects queue
 	    Iteration      int       `json:"iteration"`
 	}
 
+<a name="QueueParkBackend"></a>
+## type QueueParkBackend
+
+QueueParkBackend is the C\-A2 parkBackend over internal/queue.Store. Exported so internal/daemon can construct it in the wiring; consumers pass it to \(\*TurnParker\).SetBackend \(the C\-A1 interface itself stays unexported per its frozen shape\).
+
+	type QueueParkBackend struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewQueueParkBackend"></a>
+### func NewQueueParkBackend
+
+	func NewQueueParkBackend(q *queue.Store, kind ParkKind, owner string) *QueueParkBackend
+
+NewQueueParkBackend constructs the exported form for daemon wiring.
+
+<a name="QueueParkBackend.Arm"></a>
+### func \(\*QueueParkBackend\) Arm
+
+	func (b *QueueParkBackend) Arm(context.Context)
+
+Arm is a documented no\-op \(see the file header\): the TurnParker's existing poller owns the drain and the backend\-mode drain is pinned to the REAL clock, so launching a second claim/wake loop here would put two owners on one wake decision — the C1 bug class.
+
+<a name="QueueParkBackend.Delete"></a>
+### func \(\*QueueParkBackend\) Delete
+
+	func (b *QueueParkBackend) Delete(ctx context.Context, kind ParkKind, key string) error
+
+Delete removes the parked\_turn row whose id == key. SaveKeyed stored the row under kind\+"|"\+key \(the parker's fresh\-park identity\) while LoadOwnedKeyed returns bare row ids \(the re\-arm identity\), so both spellings resolve: the raw kind\-prefixed form and the key as\-is \(a plain\-Save park\-\<hex\> id, or an already\-prefixed re\-armed key\). Absent rows are a no\-op \(idempotent, same contract as ParkPersistence.Delete\). Terminal management: this is the ONLY way a parked\_turn job dies — resume and give\-up both flow through the parker's Delete, never through queue failure accounting.
+
+<a name="QueueParkBackend.LoadOwned"></a>
+### func \(\*QueueParkBackend\) LoadOwned
+
+	func (b *QueueParkBackend) LoadOwned(ctx context.Context, kind ParkKind, owner string) ([]ParkedTurnRecord, error)
+
+LoadOwned is the plain C\-A1 entry \(no now param\): prune on the backend's own clock.
+
+<a name="QueueParkBackend.LoadOwnedKeyed"></a>
+### func \(\*QueueParkBackend\) LoadOwnedKeyed
+
+	func (b *QueueParkBackend) LoadOwnedKeyed(ctx context.Context, kind ParkKind, owner string, now time.Time) ([]ParkedTurnRecord, []string, error)
+
+LoadOwnedKeyed is the owner\-scoped load, one transaction \(the sqlite store's load contract ported\): SELECT jobs rows of type parked\_turn with claimed\_by = normalizeParkOwner\(owner\) \(empty owner = no filter, the parker's C\-K1 convention\), kind\-filtered on the payload discriminator; rows whose wake has passed \(resume\_at \<= now\) are pruned by DELETE INSIDE the same transaction \(at\-most\-once resurrection — a concurrent re\-arm can never see a row both prune and return\); survivors come back oldest\-wake\-first WITH their row ids as park keys. An undecodable row is left in place: its owner/kind cannot be attributed safely, and Delete\-by\-id \(the parker's terminal path\) still resolves it — pruning blind could destroy another owner's row.
+
+<a name="QueueParkBackend.Save"></a>
+### func \(\*QueueParkBackend\) Save
+
+	func (b *QueueParkBackend) Save(ctx context.Context, rec ParkedTurnRecord) error
+
+Save is the plain C\-A1 entry \(no key argument\): like the sqlite wrapper's Save it derives a fresh row identity — here a crypto\-random park job id \(two parked turns are two rows, never deduped\). The parker never reaches this method while the store\-derived park key is non\-empty \(it prefers SaveKeyed\).
+
+<a name="QueueParkBackend.SaveKeyed"></a>
+### func \(\*QueueParkBackend\) SaveKeyed
+
+	func (b *QueueParkBackend) SaveKeyed(ctx context.Context, kind ParkKind, key string, rec ParkedTurnRecord) error
+
+SaveKeyed mirrors ParkPersistence.Save: the parker\-derived persistence key becomes the job row id, kind\-scoped — so the store's UNIQUE\(kind, park\_key\) dedup semantics survive: a re\-parked episode or gate overwrites its own row \(ON CONFLICT upsert\) instead of accumulating duplicates across restarts.
+
 <a name="QueuePersister"></a>
 ## type QueuePersister
 
@@ -14413,6 +14813,12 @@ Since tree 03 leaf 01 the scheduling machinery lives on the class\-agnostic Turn
 	    ProviderID     string            // provider that hit the quota
 	    CredentialKey  string            // credential fingerprint of the blocked pool
 	    UnblockAt      time.Time         // earliest time the quota window lifts
+	    // Attempt/MaxAttempts carry the re-park generation and its cap
+	    // (M-4-park encode carrier, tree 04 leaf 04). The record columns
+	    // persist them across restarts; the drain-side give-up at the cap is
+	    // owned by leaf 04. Zero MaxAttempts encodes as DefaultQuotaMaxAttempts.
+	    Attempt     int
+	    MaxAttempts int
 	    // TurnID is the chat.submit turn identity (week bughunt 2026-09-17
 	    // F15): recorded at park time so the resume can emit the FINAL
 	    // turn.terminal event under the id the client's ack returned.
@@ -14461,6 +14867,20 @@ Park enqueues a turn for later retry once the quota window lifts. Returns false 
 
 Pending returns the number of currently parked turns.
 
+<a name="QuotaResumeWatcher.SetGiveUpFunc"></a>
+### func \(\*QuotaResumeWatcher\) SetGiveUpFunc
+
+	func (w *QuotaResumeWatcher) SetGiveUpFunc(fn func(ctx context.Context, turn QuotaParkedTurn))
+
+SetGiveUpFunc installs the attempt\-cap give\-up callback \(M\-4\-park, tree 04 leaf 04\) on the inner TurnParker: a quota record whose drain reaches MaxAttempts never reaches the resume callback \(no LLM replay past the horizon\) — it lands here instead, and the owner \(the ChatHandler\) marks the turn failed\-terminal through the SAME give\-up shape as the ordinary quota resume failure. A nil fn restores event\-only give\-ups.
+
+<a name="QuotaResumeWatcher.SetParkBackend"></a>
+### func \(\*QuotaResumeWatcher\) SetParkBackend
+
+	func (w *QuotaResumeWatcher) SetParkBackend(b parkBackend)
+
+SetParkBackend forwards the C\-A1 backend seam \(tree 20261110\-parked\- turns\-as\-jobs leaf 02\) to the inner TurnParker: with parking. queue\_backend enabled the daemon installs a queueParkBackend so quota parks persist as parked\_turn queue jobs instead of parks.db rows. Nil\-guarded per repo setter convention; wiring\-time — call before Start \(re\-arm \+ Arm happen in Start\).
+
 <a name="QuotaResumeWatcher.SetParkEventBus"></a>
 ### func \(\*QuotaResumeWatcher\) SetParkEventBus
 
@@ -14474,6 +14894,13 @@ SetParkEventBus forwards the park\-event bus to the inner TurnParker so handler\
 	func (w *QuotaResumeWatcher) SetParkPersistence(store ParkPersistence)
 
 SetParkPersistence forwards parked\-turn persistence to the inner TurnParker \(chat kind\), so quota\-parked chat turns survive daemon restarts and re\-arm on the next start. Nil\-guarded; wiring\-time setter — call before Start \(re\-arm happens in Start\).
+
+<a name="QuotaResumeWatcher.SetPersistenceOwner"></a>
+### func \(\*QuotaResumeWatcher\) SetPersistenceOwner
+
+	func (w *QuotaResumeWatcher) SetPersistenceOwner(owner string)
+
+SetPersistenceOwner forwards the C\-K1 parker identity \(tree 04 leaf 01\) to the inner TurnParker: persisted quota rows are stamped with owner \(default wiring: ParkOwnerQuotaWatcher = "quota\-watcher"\) and the restart re\-arm loads ONLY this watcher's rows — the partition that stops the throttle parker's rows from being re\-executed through the quota router \(C1\). Wiring\-time setter: call before Start.
 
 <a name="QuotaResumeWatcher.SetPollInterval"></a>
 ### func \(\*QuotaResumeWatcher\) SetPollInterval
@@ -14532,6 +14959,13 @@ NewTestRLMAnalyzer creates an analyzer for use in tests.
 	func (a *RLMAnalyzer) Analyze(ctx context.Context, prompt string) (*AnalyzeResult, error)
 
 Analyze runs the RLM over traces and returns failure modes. Implements structural depth gating \(no call\_subagent tool at max depth\).
+
+<a name="RLMAnalyzer.SetPiiMaskHook"></a>
+### func \(\*RLMAnalyzer\) SetPiiMaskHook
+
+	func (a *RLMAnalyzer) SetPiiMaskHook(hook *PiiRestoreHook)
+
+SetPiiMaskHook attaches the session\-scoped PII mask lane used for the analyzer's LLM side sends \(finding C21\). Nil is a no\-op \(setter nil\-guard rule\): with no hook the raw prompt passes through byte\-identically.
 
 <a name="RLMAnalyzer.SetScopeProvider"></a>
 ### func \(\*RLMAnalyzer\) SetScopeProvider
@@ -14805,6 +15239,13 @@ RunReflection executes a single\-pass reflection check after code edits. Note: T
 
 SetEditAvailability sets whether file edit is available
 
+<a name="ReflectionEngine.SetPiiMaskHook"></a>
+### func \(\*ReflectionEngine\) SetPiiMaskHook
+
+	func (re *ReflectionEngine) SetPiiMaskHook(hook *PiiRestoreHook)
+
+SetPiiMaskHook attaches the session\-scoped PII mask lane used for the fix\-request side send \(finding C21\). Nil is a no\-op \(setter nil\-guard rule\): with no hook the raw context passes through byte\-identically.
+
 <a name="ReflectionEngine.SetScopeProvider"></a>
 ### func \(\*ReflectionEngine\) SetScopeProvider
 
@@ -15005,6 +15446,13 @@ RegistryConfig holds configuration for creating an AgentRegistry.
 	    // it (dispatch gate; D8 deny-all via the explicit marker). Nil = no
 	    // groups config: byte-identical legacy behavior (D7).
 	    GroupsResolver *groups.Resolver
+	
+	    // PiiRestore is the shared PII-unmasking restore lane (bughunt C19).
+	    // When set, every registry-built loop inherits it via SetPiiRestoreHook
+	    // so specialist/delegate-child turns mask provider-bound context and
+	    // restore [PII:*] tokens exactly like the daemon template lane. Nil =
+	    // feature off (byte-identical legacy behavior).
+	    PiiRestore *PiiRestoreHook
 	
 	    // DecisionLogLevel is security.groups.decision_log_level (agent-groups
 	    // leaf 04 daemon wiring): applied to every registry-built loop's
@@ -15753,6 +16201,8 @@ SQLiteParkStore is the default ParkPersistence over the daemon's parks.db.
 
 NewSQLiteParkStore opens \(and migrates\) the parked\-turn table on the database at dbPath. The DSN matches the session/queue stores: WAL journal \+ 5s busy timeout. modernc.org/sqlite honors only \`\_pragma=\`\-style DSN parameters \(the queue/task stores use the same form\), so \`\_journal\_mode=\`\-style keys would be silently ignored.
 
+\`\_txlock=immediate\` \(bughunt 2026\-11\-10 B7, queue store.go precedent\): load\(\) documents a transactional prune guarantee — BeginTx, SELECT, DELETE expired, Commit. With a DEFERRED transaction that guarantee loses to a concurrent writer: the deferred BEGIN takes no lock, the read snapshots WAL, and the mid\-transaction DELETE then needs the write lock another conn took meanwhile — an unretryable SQLITE\_BUSY / BUSY\_SNAPSHOT \(busy\_timeout cannot retry a deadlock\-shaped snapshot conflict\). Taking the write lock at BEGIN makes load\(\)'s read\-prune\-commit a serialized critical section.
+
 <a name="SQLiteParkStore.Close"></a>
 ### func \(\*SQLiteParkStore\) Close
 
@@ -15774,12 +16224,28 @@ Delete implements ParkStore. Idempotent: deleting an absent row affects 0 rows a
 
 Load implements ParkStore: one transaction reads the kind's rows, deletes expired ones, and returns the survivors oldest\-resume\-first with their park keys \(so the caller can delete them by identity on resume\). A transaction is required so a concurrent Load \(second parker sharing the file\) can never see a row both prune and re\-arm.
 
+Owner filtering \(C\-K1\): a sticky SetOwnerFilter \(test/observability seam\) narrows the visible rows; parkers wanting their OWN rows should use LoadOwned \(the OwnerScopedPersistence capability\), which never touches the sticky filter. An unfiltered Load keeps the pre\-owner kind\-only contract byte\-identical for unwired callers.
+
+<a name="SQLiteParkStore.LoadOwned"></a>
+### func \(\*SQLiteParkStore\) LoadOwned
+
+	func (s *SQLiteParkStore) LoadOwned(ctx context.Context, kind ParkKind, owner string, now time.Time) ([]ParkedTurnRecord, []string, error)
+
+LoadOwned is the C\-K1 owner\-scoped Load: same semantics as Load but restricted to rows whose owner column equals owner. Rows stamped by a different parker are invisible — the partition that closes the C1 double\-execution window \(quota watcher and throttle parker sharing ParkKindChat can no longer re\-arm each other's rows\).
+
 <a name="SQLiteParkStore.Save"></a>
 ### func \(\*SQLiteParkStore\) Save
 
 	func (s *SQLiteParkStore) Save(ctx context.Context, kind ParkKind, persistenceKey string, rec ParkedTurnRecord) error
 
 Save implements ParkStore.
+
+<a name="SQLiteParkStore.SetOwnerFilter"></a>
+### func \(\*SQLiteParkStore\) SetOwnerFilter
+
+	func (s *SQLiteParkStore) SetOwnerFilter(owner string)
+
+SetOwnerFilter installs a store\-level owner filter on Load \(C\-K1\). Empty string restores the unfiltered, kind\-only view \(the pre\-migration contract — park\_store tests and any parker without an owner rely on it\).
 
 <a name="SQLiteStatePersister"></a>
 ## type SQLiteStatePersister
@@ -16562,6 +17028,13 @@ NewSkillStateRuntime builds a runtime bound to loop. The LLM chatter is taken fr
 
 Run executes skill in state mode \(paper Algorithm 1\): per step build the prompt → chat → parse \(malformed ⇒ ONE corrective retry, then error\) → validate \+ merge Σ → execute tool or return answer. Terminates on an answer action, when MaxIterations steps are exhausted \(error naming the step count\), or when ctx is cancelled.
 
+<a name="SkillStateRuntime.SetPiiMaskHook"></a>
+### func \(\*SkillStateRuntime\) SetPiiMaskHook
+
+	func (r *SkillStateRuntime) SetPiiMaskHook(hook *PiiRestoreHook)
+
+SetPiiMaskHook attaches the session\-scoped PII mask lane used for the state\-runtime side sends \(finding C21\). Nil is a no\-op \(setter nil\-guard rule\): with no hook the raw observation passes through byte\-identically.
+
 <a name="SkillStateRuntime.WithStateTraceWriter"></a>
 ### func \(\*SkillStateRuntime\) WithStateTraceWriter
 
@@ -17106,6 +17579,13 @@ SetInterviewProbe installs the interview observation seam \(tests only\).
 
 SetMetricsStore installs \(or replaces\) the metrics store used for failure/replan outcome capture \(classifier\-outcome\-loop leaf 03, Signal B at the quickplan\-fallback site\). The planner also accepts a store via StrategicPlannerConfig.MetricsStore; this setter covers the daemon wiring order where the store is created after NewComponents. nil is ignored per the CLAUDE.md setter convention.
 
+<a name="StrategicPlanner.SetPiiMaskHook"></a>
+### func \(\*StrategicPlanner\) SetPiiMaskHook
+
+	func (sp *StrategicPlanner) SetPiiMaskHook(hook *PiiRestoreHook)
+
+SetPiiMaskHook attaches the session\-scoped PII mask lane used for the critique loop's raw\-chatter side send \(finding C21\). Nil is a no\-op \(setter nil\-guard rule\): with no hook the raw prompt passes through byte\-identically.
+
 <a name="StrategicPlanner.SetPlanCompilerEnabled"></a>
 ### func \(\*StrategicPlanner\) SetPlanCompilerEnabled
 
@@ -17255,6 +17735,13 @@ NewSynthesizeTracesTool creates the synthesis tool.
 	func (t *SynthesizeTracesTool) Invoke(ctx context.Context, args map[string]any) (map[string]any, error)
 
 Invoke executes the synthesis tool.
+
+<a name="SynthesizeTracesTool.SetPiiMaskHook"></a>
+### func \(\*SynthesizeTracesTool\) SetPiiMaskHook
+
+	func (t *SynthesizeTracesTool) SetPiiMaskHook(hook *PiiRestoreHook)
+
+SetPiiMaskHook attaches the session\-scoped PII mask lane used for the synthesis side send \(finding C21\). Nil is a no\-op \(setter nil\-guard rule\): with no hook the raw prompt passes through byte\-identically.
 
 <a name="SynthesizeTracesTool.SetScopeProvider"></a>
 ### func \(\*SynthesizeTracesTool\) SetScopeProvider
@@ -19006,6 +19493,13 @@ EmitParkEvent is the exported park\-event hook for park sites outside the agent 
 
 EmitResumeEvent is the exported resume\-event hook, symmetric to EmitParkEvent: call it from external resume sites right before the turn re\-enters its loop. trueParkAt may be zero when the caller has no park timestamp \(Waited then measures from the scheduled ResumeAt — see emitResumeEvent for the D\-M3 accuracy note\).
 
+<a name="TurnParker.HasPendingForConversation"></a>
+### func \(\*TurnParker\) HasPendingForConversation
+
+	func (p *TurnParker) HasPendingForConversation(conversationID string) bool
+
+HasPendingForConversation reports whether any parked record targets the given conversation \(ParkedTurnRecord.ConversationID\). This is the parked\- presence probe the C3 resume guards consult \(regression\-review R2, 2026\-11\-11\): the parked shape \("", nil\) from RunOnceWithParts is ambiguous between a genuine mid\-flight re\-park \(a record for THIS conversation now sits on the parker\) and a state layer that silently ABSORBED an LLM failure \(no park row at all\). Only the former may defer delivery; the latter must terminalize or the awaiting client hangs forever.
+
 <a name="TurnParker.Next"></a>
 ### func \(\*TurnParker\) Next
 
@@ -19033,6 +19527,20 @@ A record whose wait exceeds MaxWait is soft\-stopped rather than refused: it is 
 
 Pending returns the number of currently parked records.
 
+<a name="TurnParker.SetBackend"></a>
+### func \(\*TurnParker\) SetBackend
+
+	func (p *TurnParker) SetBackend(b parkBackend)
+
+SetBackend installs the C\-A1 parkBackend seam \(tree 20261110\-parked\- turns\-as\-jobs leaf 01\). NON\-NIL: every persistence call site routes to the backend ONLY — Park's save \(via keyedParkBackend.SaveKeyed when the backend implements it, else plain Save\), drain's delete, re\-arm's load, and an Arm\(ctx\) at Start. The store wired by SetParkPersistence is then consulted only to derive park keys \(parkKeyForNewRecord\) and stays byte\-identical empty \(TestParkBackendSeamWrapped pins "backend REPLACES the store path, not mirrors"\). NIL: nil\-safe no\-op — the current default sqlite store path keeps running byte\-identically \(the baseline pins in the gate: no SetBackend call AND SetBackend\(nil\) both leave the store traffic unchanged\). Wiring\-time setter, like SetParkPersistence.
+
+<a name="TurnParker.SetGiveUpFunc"></a>
+### func \(\*TurnParker\) SetGiveUpFunc
+
+	func (p *TurnParker) SetGiveUpFunc(fn func(ctx context.Context, turn ParkedTurnRecord))
+
+SetGiveUpFunc installs the attempt\-cap give\-up callback \(M\-4\-park, tree 04 leaf 04\). Called once per record the drain abandons at the cap, right after its give\-up event is published and its persisted row is deleted. A nil fn clears it \(give\-ups go back to event\-only\). Takes effect from the next drainDue pass.
+
 <a name="TurnParker.SetParkEventBus"></a>
 ### func \(\*TurnParker\) SetParkEventBus
 
@@ -19053,6 +19561,18 @@ SetParkKey installs a per\-record persistence\-key override \(episode wiring: th
 	func (p *TurnParker) SetParkPersistence(store ParkPersistence, kind ParkKind)
 
 SetParkPersistence wires durable parked\-turn storage \(park\_store\_sqlite.go\) and the ParkKind scoping its rows. Nil store restores memory\-only behaviour. Like SetParkEventBus this is a wiring\-time setter: call it once, before Start \(re\-arm happens in Start\), so no lock is needed afterwards.
+
+<a name="TurnParker.SetPersistenceOwner"></a>
+### func \(\*TurnParker\) SetPersistenceOwner
+
+	func (p *TurnParker) SetPersistenceOwner(owner string)
+
+SetPersistenceOwner installs the parker's C\-K1 identity \(e.g. "quota\-watcher", "throttle", "gate", "episode"\). When set:
+
+- every Park stamps rec.Owner before persisting, so each row carries exactly one owning parker, and
+- re\-arm loads ONLY this parker's rows \(when the store implements OwnerScopedPersistence\), closing the C1 cross\-feed: two parkers sharing one kind \(the daemon's quota watcher \+ throttle parker on ParkKindChat\) can never re\-arm each other's rows.
+
+Empty owner \(the default\) preserves the legacy kind\-only contract byte\-identically: no stamp, unfiltered Load. Wiring\-time setter — call once before Start, like SetParkPersistence.
 
 <a name="TurnParker.SetPollInterval"></a>
 ### func \(\*TurnParker\) SetPollInterval

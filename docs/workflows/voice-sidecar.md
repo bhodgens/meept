@@ -406,8 +406,15 @@ verdict) is the latency risk. Mitigations, all required:
   turn. Partials update the transcript preview only. Firing a model turn
   per partial fragment cannot keep up on a local model.
 - Per-call limits: max call duration (`voice.max_call_minutes`, default
-  15) and a silence prompt at `voice.silence_prompt_seconds` (default 45),
-  then hangup. The silence clock is TURN-AWARE: while an employee turn is
+  15) and a silence nudge at `voice.silence_prompt_seconds` (S, default
+  45) speaking the dedicated `voice.silence_prompt` line ("Are you still
+  there?" by default — dead air has nothing pending, so the filler
+  round-robin's answer-pending promises were the wrong semantics; an
+  explicitly empty `silence_prompt` falls back to the legacy filler line),
+  then hangup after `voice.silence_hangup_after_seconds` (H, default 45)
+  more silence: nudge@S, hangup@(S+H). Defaults 45/45 reproduce the legacy
+  double-window endpoints (nudge@45, hangup@90) exactly. The silence clock
+  is TURN-AWARE: while an employee turn is
   in flight (final prompt dispatched, reply not yet fully spoken) the
   silence window is suspended, so a slow cloud model (30-90s) is never
   reaped mid-generation; the window re-arms fresh once the reply is
@@ -574,8 +581,16 @@ Proposed keys, all under `voice`:
   caller by the contacts `voice_approved` flag + PreExec step 1c)
 - `timeout_secs` - outbound ring timeout, default 30
 - `max_call_minutes` - int, default 15
-- `silence_prompt_seconds` - int, default 45; the clock pauses while the
-  employee turn is in flight and re-arms after the reply is spoken
+- `silence_prompt_seconds` - int, default 45; the nudge window (S): dead
+  air for S fires the nudge, another H (below) with no caller speech
+  hangs up. The clock pauses while the employee turn is in flight and
+  re-arms after the reply is spoken
+- `silence_prompt` - string, default "Are you still there?"; the dedicated
+  dead-air nudge line spoken on the first silence fire. Empty falls back
+  to the `filler` round-robin (legacy behavior)
+- `silence_hangup_after_seconds` - int, default 45; the hangup window (H)
+  after the nudge: hangup at S+H. 45+45 == the legacy double-window
+  endpoints (nudge@45, hangup@90); 0 reuses S
 - `turn_timeout_seconds` - int, default 0 (disabled); optional hard cap
   on one in-flight voice turn (bounds a hung employee LLM)
 - `fresh_session_per_call` - bool, default false (opt-in). When true,

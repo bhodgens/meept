@@ -264,6 +264,8 @@ GetMaxResultTokens returns the tool's declared result\-token floor, or 0 when th
 
 IsNoWorkingDir reports whether err is, or wraps, ErrNoWorkingDir. This is the detection surface for callers that want to surface a "bind a working directory" hint \(or a distinct user\-language message\) instead of a generic tool failure.
 
+STATUS \(deadcode wave\-3\): available\-but\-unused API surface — zero production callers \(tests only\). The sentinel\-detection contract \(internal/agent/AGENTS.md\) names this as how a CLIENT should detect the unbound\-session refusal, but the TUI/GUI surfaces render the sentinel's message text verbatim today and no RPC/comm layer special\-cases it. First caller \(a client binding hint, a WS event classifier case, etc.\) should keep errors.Is\-compatible semantics.
+
 <a name="NetworkClassFromContext"></a>
 ## func NetworkClassFromContext
 

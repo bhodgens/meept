@@ -24,6 +24,7 @@ Session mapping: scheduler jobs carry no conversation/session identity \(a timer
   - [func NewAgentJob\(cfg JobConfig, msgBus \*bus.MessageBus\) \(\*AgentJob, error\)](<#NewAgentJob>)
   - [func \(j \*AgentJob\) Execute\(ctx context.Context\) error](<#AgentJob.Execute>)
 - [type AgentJobConfig](<#AgentJobConfig>)
+- [type ClaimedTick](<#ClaimedTick>)
 - [type DeliveryHistory](<#DeliveryHistory>)
   - [func NewDeliveryHistory\(\) \*DeliveryHistory](<#NewDeliveryHistory>)
   - [func \(h \*DeliveryHistory\) Append\(r ScheduleDeliveryReceipt\)](<#DeliveryHistory.Append>)
@@ -302,6 +303,16 @@ AgentJobConfig holds configuration for agent jobs.
 	    TargetSessionID string `json:"target_session_id,omitempty"`
 	}
 
+<a name="ClaimedTick"></a>
+## type ClaimedTick
+
+ClaimedTick is one claimed tick row surfaced for crash recovery.
+
+	type ClaimedTick struct {
+	    JobID string
+	    Tick  time.Time
+	}
+
 <a name="DeliveryHistory"></a>
 ## type DeliveryHistory
 
@@ -325,6 +336,8 @@ NewDeliveryHistory returns an empty delivery history.
 	func (h *DeliveryHistory) Append(r ScheduleDeliveryReceipt)
 
 Append adds a receipt and enforces the retention bounds: records older than DeliveryHistoryRetentionDays \(measured on DeliveredAt, falling back to ScheduledAt\) and records beyond the MaxDeliveryHistoryRecords most recent are dropped. Any drop sets EarlierRecordsPruned.
+
+Non\-terminal statuses \(pending/in\_flight\) are EXEMPT from the age prune \(bughunt 2026\-11\-10 B8\): recoverInFlightDeliveries re\-delivers FROM pending/in\_flight rows, so pruning a stuck receipt older than retention permanently lost the tick it represents. Age\-retention is for delivered history only; a stuck row survives until recovery resolves it. The count bound still applies \(bounded memory\), keeping newest stuck rows.
 
 <a name="DeliveryStatus"></a>
 ## type DeliveryStatus

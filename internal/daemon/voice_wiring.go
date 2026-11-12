@@ -915,14 +915,16 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 			// never gates the loop (the seam is nil-safe in voice).
 			OnEvent: w.appendCallEvent,
 		}, voice.TalkLoopConfig{
-			FillerLines:          w.cfg.Filler,
-			GreetingLine:         w.cfg.GreetingLine,
-			FallbackLine:         "I cannot confirm that yet.",
-			MaxCallMinutes:       w.cfg.MaxCallMinutes,
-			SilencePromptSeconds: w.cfg.SilencePromptSeconds,
-			TurnTimeoutSeconds:   w.cfg.TurnTimeoutSeconds,
-			FillerGrace:          time.Duration(w.cfg.FillerGraceMs) * time.Millisecond,
-			SuppressGreeting:     suppressGreeting,
+			FillerLines:               w.cfg.Filler,
+			GreetingLine:              w.cfg.GreetingLine,
+			FallbackLine:              "I cannot confirm that yet.",
+			MaxCallMinutes:            w.cfg.MaxCallMinutes,
+			SilencePromptSeconds:      w.cfg.SilencePromptSeconds,
+			SilencePromptLine:         w.cfg.SilencePrompt,
+			SilenceHangupAfterSeconds: w.cfg.SilenceHangupAfterSeconds,
+			TurnTimeoutSeconds:        w.cfg.TurnTimeoutSeconds,
+			FillerGrace:               time.Duration(w.cfg.FillerGraceMs) * time.Millisecond,
+			SuppressGreeting:          suppressGreeting,
 		})
 		// H4 + A10: arm the per-call context and install the loop in ONE
 		// critical section. releaseCall cancels the ctx so a released
