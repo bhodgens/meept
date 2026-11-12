@@ -10,11 +10,13 @@ package voice
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1157,4 +1159,381 @@ func TestLocalSpliceExpectFinalParkNoGoroutineLeak(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Errorf("expect-mode watcher leaked past splice exit: baseline %d now %d", baseline, runtime.NumGoroutine())
+}
+
+// ---------------------------------------------------------------------------
+// Turn-2 leaf 01: barge-in drains the stale pump backlog AT THE LATCH.
+// The A6 gate dropped stale chunks only at CONSUME time — one paced select
+// per 20 ms — so the resume on the NEXT say paced the up-to-64-chunk
+// (1.28 s) stale queue out before the new answer started (live
+// local-4dcfb291c2094ec9: the operator heard ~1.3 s of the old answer
+// after barge-in; the 968 ms pacer-stall WARN at 17:15:16.021 is that
+// backlog pacing its way out). HandleInterrupt now drains the pump
+// channel + resets the carry, logs the drop, and the client hears at most
+// the ~1 chunk already in paceOne.
+// ---------------------------------------------------------------------------
+
+// feedChildStamped writes one 640-byte child chunk whose every byte is
+// `stamp`, so a client-side reader can attribute every received chunk to
+// its generation (1 = interrupted stream, 2 = new say).
+func feedChildStamped(t *testing.T, ccid string, stamp byte) {
+	t.Helper()
+	childOutMu.Lock()
+	defer childOutMu.Unlock()
+	c, ok := childOut[ccid]
+	if !ok {
+		t.Fatalf("feedChildStamped %s: child .out not dialed", ccid)
+	}
+	buf := make([]byte, 640)
+	for i := range buf {
+		buf[i] = stamp
+	}
+	if _, err := c.Write(buf); err != nil {
+		t.Fatalf("feedChildStamped %s: %v", ccid, err)
+	}
+}
+
+// localSpliceLogger builds a splice logger over a syncBuffer for the
+// drain-telemetry pins (pattern copied from the link coordinator tests).
+func localSpliceLogger(buf *syncBuffer) *slog.Logger {
+	return slog.New(slog.NewTextHandler(buf, nil))
+}
+
+// startStampedReader reads 640-byte chunks off the client side and
+// records each chunk's stamp byte under mu. Returns a snapshot func.
+func startStampedReader(t *testing.T, micSide net.Conn) func() ([]byte, int) {
+	t.Helper()
+	var mu sync.Mutex
+	var stamps []byte
+	stop := make(chan struct{})
+	t.Cleanup(func() { close(stop) })
+	go func() {
+		buf := make([]byte, 640)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if err := localReadFull(micSide, buf); err != nil {
+				return
+			}
+			mu.Lock()
+			stamps = append(stamps, buf[0])
+			mu.Unlock()
+		}
+	}()
+	return func() ([]byte, int) {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]byte(nil), stamps...), len(stamps)
+	}
+}
+
+// TestLocalSpliceBargeInDrainsStalePump: (a) the latch drains the queued
+// stale backlog with a counted INFO line, the client sees at most ONE
+// more chunk (the in-flight frame), and after the resume via the next
+// say the client receives ONLY the new-generation chunks.
+func TestLocalSpliceBargeInDrainsStalePump(t *testing.T) {
+	const ccid = "ls-drain-1"
+	p := localPairFor(t, ccid)
+	micSide, daemonSide := net.Pipe()
+	defer func() { _ = micSide.Close(); _ = daemonSide.Close() }()
+	text := &textSink{}
+
+	var logBuf syncBuffer
+	deps := LocalSpliceDeps{
+		Audio: p, Client: daemonSide, Text: text,
+		CancelDraft: func(string) {},
+		Logger:      localSpliceLogger(&logBuf),
+	}
+	cancel, done := startLocalSplice(t, ccid, LocalSpliceConfig{}, deps)
+	defer stopLocalSplice(t, cancel, done)
+
+	sp := waitForSplice(t, ccid)
+	snapshot := startStampedReader(t, micSide)
+
+	// Join the client (the join gate needs one mic byte).
+	if _, err := micSide.Write(make([]byte, 640)); err != nil {
+		t.Fatalf("mic write: %v", err)
+	}
+
+	// Old say: 50 stamped chunks land in the 64-slot pump queue far
+	// faster than the 20 ms pacer drains them.
+	for range 50 {
+		feedChildStamped(t, ccid, 1)
+	}
+	// Playback live: at least one chunk paced out.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, n := snapshot(); n >= 1 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	stampsBefore, nBefore := snapshot()
+	if nBefore < 1 || stampsBefore[0] != 1 {
+		t.Fatalf("precondition: playback never went live (chunks=%d)", nBefore)
+	}
+
+	sp.HandleInterrupt(ccid)
+
+	// Telemetry: the drain counted the backlog drop.
+	drainLine := ""
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, line := range strings.Split(logBuf.String(), "\n") {
+			if strings.Contains(line, "barge-in drained stale chunks") {
+				drainLine = line
+			}
+		}
+		if drainLine != "" {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if drainLine == "" {
+		t.Fatalf("no drain telemetry line; log:\n%s", logBuf.String())
+	}
+	// The backlog at latch time is 50 fed minus ~nBefore paced minus at
+	// most 2 still arriving; the drain line counted it. Require a real
+	// queue drop (>= 10 chunks — the defect's dominant term was seconds
+	// of backlog, not one chunk).
+	if !strings.Contains(drainLine, "chunks=") {
+		t.Fatalf("drain telemetry missing chunks=N field: %q", drainLine)
+	}
+	chunksStr := drainLine[strings.Index(drainLine, "chunks=")+len("chunks="):]
+	if space := strings.IndexAny(chunksStr, " 	"); space >= 0 {
+		chunksStr = chunksStr[:space]
+	}
+	var drained int
+	if _, err := fmt.Sscanf(chunksStr, "%d", &drained); err != nil || drained < 10 {
+		t.Fatalf("drain counted %d chunks (%q), want >= 10 — the backlog was not drained", drained, drainLine)
+	}
+
+	// Post-latch tail: at most the ONE chunk already committed inside
+	// paceOne may still land; then total silence until resume.
+	_, tailStart := snapshot()
+	time.Sleep(300 * time.Millisecond)
+	tailStamps, tailTotal := snapshot()
+	if grew := tailTotal - tailStart; grew > 1 {
+		t.Fatalf("post-latch tail paced %d chunks, want <= 1 (in-flight only): stale queue was NOT drained", grew)
+	}
+	for i := tailStart; i < tailTotal; i++ {
+		if tailStamps[i] != 1 {
+			t.Fatalf("post-latch chunk %d is not the in-flight gen-1 frame", i)
+		}
+	}
+
+	// Fresh say PAST the residue window: only gen-2 audio may reach the
+	// client from here (nothing stale was left in the queue or carry).
+	time.Sleep(localBargeResidueQuiet + 100*time.Millisecond)
+	for range 4 {
+		feedChildStamped(t, ccid, 2)
+	}
+	_, preResume := snapshot()
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, n := snapshot(); n >= preResume+3 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	finalStamps, finalTotal := snapshot()
+	if finalTotal < preResume+3 {
+		t.Fatalf("resume did not pace the new say (chunks %d, want >= %d)", finalTotal, preResume+3)
+	}
+	for i := preResume; i < finalTotal; i++ {
+		if finalStamps[i] != 2 {
+			t.Fatalf("chunk %d after the fresh say carries stamp %d, want 2: stale audio replayed under the new turn", i, finalStamps[i])
+		}
+	}
+}
+
+// TestLocalSpliceBargeInDrainPreservesTerminalError: a terminal child-read
+// error that lands while the barge-in latch parks the pacer must still end
+// the leg with the named error (CL7), never get swallowed behind the
+// drained queue.
+func TestLocalSpliceBargeInDrainPreservesTerminalError(t *testing.T) {
+	const ccid = "ls-drain-err-1"
+	p := localPairFor(t, ccid)
+	micSide, daemonSide := net.Pipe()
+	defer func() { _ = micSide.Close(); _ = daemonSide.Close() }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- RunLocalSplice(ctx, ccid, LocalSpliceConfig{}, LocalSpliceDeps{
+			Audio: p, Client: daemonSide, Text: &textSink{},
+			CancelDraft: func(string) {}, Logger: localDiscardLogger(),
+		})
+	}()
+
+	sp := waitForSplice(t, ccid)
+	// Client joins and playback goes live (net.Pipe needs a reader).
+	readStop := make(chan struct{})
+	t.Cleanup(func() { close(readStop) })
+	go func() {
+		buf := make([]byte, 640)
+		for {
+			select {
+			case <-readStop:
+				return
+			default:
+			}
+			_ = micSide.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
+			if _, err := micSide.Read(buf); err != nil {
+				var ne net.Error
+				if errors.As(err, &ne) && ne.Timeout() {
+					continue
+				}
+				return
+			}
+		}
+	}()
+	if _, err := micSide.Write(make([]byte, 640)); err != nil {
+		t.Fatalf("mic write: %v", err)
+	}
+	for range 40 {
+		feedChild(ccid)
+	}
+	time.Sleep(100 * time.Millisecond) // backlog builds in the pump queue
+
+	sp.HandleInterrupt(ccid) // latch + drain
+
+	// NOW break the child .out: the pump read returns EOF, stashes it,
+	// closes pumpDead — the parked pacer must wake and END the leg with
+	// the named error, not sit latched until ctx cancel.
+	childOutMu.Lock()
+	c := childOut[ccid]
+	childOutMu.Unlock()
+	if c == nil {
+		t.Fatal("child .out conn missing")
+	}
+	if err := c.Close(); err != nil {
+		t.Fatalf("close child .out: %v", err)
+	}
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("RunLocalSplice returned nil after the drained-then-terminal child EOF, want the child-read error")
+		}
+		if !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v, want the wrapped io.EOF child-read failure", err)
+		}
+		if errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v: the terminal EOF was swallowed and only ctx cancel ended the leg", err)
+		}
+		if !errors.Is(err, io.EOF) {
+			t.Fatalf("err = %v, want child-read failure wrapping io.EOF", err)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("leg stayed latched 4 s after the child .out broke past the drain: terminal error swallowed")
+	}
+}
+
+// TestLocalSpliceBargeInDrainSkipsEmptyQueue: an interrupt with nothing
+// queued emits NO drain line (telemetry stays quiet for the common empty
+// case) — pinned per the leaf's "(c) no drain when queue empty — your
+// call, pin it".
+func TestLocalSpliceBargeInDrainSkipsEmptyQueue(t *testing.T) {
+	const ccid = "ls-drain-empty-1"
+	p := localPairFor(t, ccid)
+	micSide, daemonSide := net.Pipe()
+	defer func() { _ = micSide.Close(); _ = daemonSide.Close() }()
+
+	var logBuf syncBuffer
+	deps := LocalSpliceDeps{
+		Audio: p, Client: daemonSide, Text: &textSink{},
+		CancelDraft: func(string) {}, Logger: localSpliceLogger(&logBuf),
+	}
+	cancel, done := startLocalSplice(t, ccid, LocalSpliceConfig{}, deps)
+	defer stopLocalSplice(t, cancel, done)
+
+	sp := waitForSplice(t, ccid)
+	// Join the client, feed nothing: the pump queue is empty.
+	if _, err := micSide.Write(make([]byte, 640)); err != nil {
+		t.Fatalf("mic write: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	sp.HandleInterrupt(ccid)
+	// The latch itself still logs.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && !strings.Contains(logBuf.String(), "voice: local barge-in") {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !strings.Contains(logBuf.String(), "voice: local barge-in") {
+		t.Fatalf("barge-in latch line missing; log:\n%s", logBuf.String())
+	}
+	if strings.Contains(logBuf.String(), "drained stale chunks") {
+		t.Fatalf("empty queue emitted a drain line (telemetry must stay quiet):\n%s", logBuf.String())
+	}
+}
+
+// TestLocalSpliceLatchBargeInAudioPlaneOnly: LatchBargeIn — the
+// production trip — latches + drains WITHOUT emitting the control-plane
+// frames (no clear, no CancelDraft: the talk loop owns those, and the
+// frame that trips this latch is the SAME frame the loop handles).
+func TestLocalSpliceLatchBargeInAudioPlaneOnly(t *testing.T) {
+	const ccid = "ls-latch-audio-1"
+	p := localPairFor(t, ccid)
+	micSide, daemonSide := net.Pipe()
+	defer func() { _ = micSide.Close(); _ = daemonSide.Close() }()
+	text := &textSink{}
+	var cancels atomic.Int32
+	var logBuf syncBuffer
+
+	deps := LocalSpliceDeps{
+		Audio: p, Client: daemonSide, Text: text,
+		CancelDraft: func(string) { cancels.Add(1) },
+		Logger:      localSpliceLogger(&logBuf),
+	}
+	cancel, done := startLocalSplice(t, ccid, LocalSpliceConfig{}, deps)
+	defer stopLocalSplice(t, cancel, done)
+
+	sp := waitForSplice(t, ccid)
+	// Drain the client side so paceOne's net.Pipe writes never block.
+	startStampedReader(t, micSide)
+	if _, err := micSide.Write(make([]byte, 640)); err != nil {
+		t.Fatalf("mic write: %v", err)
+	}
+	for range 30 {
+		feedChild(ccid)
+	}
+	time.Sleep(80 * time.Millisecond)
+
+	// Trip + drain. A nil receiver is the phone-leg no-op too.
+	(*runLocalSplice)(nil).LatchBargeIn()
+	sp.LatchBargeIn()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && !strings.Contains(logBuf.String(), "voice: local barge-in") {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !strings.Contains(logBuf.String(), "voice: local barge-in") {
+		t.Fatalf("LatchBargeIn did not latch; log:\n%s", logBuf.String())
+	}
+	if !strings.Contains(logBuf.String(), "drained stale chunks") {
+		t.Fatalf("LatchBargeIn did not drain the backlog; log:\n%s", logBuf.String())
+	}
+	// No control-plane emits.
+	text.mu.Lock()
+	nFrames := len(text.frames)
+	text.mu.Unlock()
+	if nFrames != 0 {
+		t.Fatalf("LatchBargeIn sent %d text frames, want 0 (clear belongs to HandleInterrupt/talk loop)", nFrames)
+	}
+	if c := cancels.Load(); c != 0 {
+		t.Fatalf("LatchBargeIn fired CancelDraft %d times, want 0", c)
+	}
+	// Duplicate trips while latched are no-ops (no second latch line).
+	sp.LatchBargeIn()
+	sp.LatchBargeIn()
+	time.Sleep(100 * time.Millisecond)
+	if got := strings.Count(logBuf.String(), "voice: local barge-in"); got != 1 {
+		t.Fatalf("latch line fired %d times, want 1 (per-barge-in guard)", got)
+	}
 }

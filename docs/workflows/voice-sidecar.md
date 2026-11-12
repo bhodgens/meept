@@ -1000,6 +1000,23 @@ media path - simpler sibling of splice.RunSplice:
   child's TTS queue is what needs flushing), cancels the draft once,
   and re-arms on fresh child PCM (:19-26). Same per-barge-in latch
   contract the phone splice pins.
+- Barge-in ALSO drains the stale audio at the latch (turn-2 leaf 01):
+  the pump channel holds up to 64 already-read child chunks (1.28 s at
+  20 ms pacing) and the pre-leaf drop-on-consume shape paced that whole
+  stale queue out AFTER the resume - the operator heard ~1.3 s of the
+  interrupted answer under the new turn (live local-4dcfb291c2094ec9).
+  `drainStalePump` empties the queue non-blockingly and the pump resets
+  its sub-chunk carry through the `drainSeq` signal; the drop is counted
+  by the INFO line "voice: localsplice barge-in drained stale chunks".
+  After the clear only the ~1 chunk already inside paceOne may still
+  land. The outbound pump is DATA-ONLY: a terminal read error rides the
+  `pumpErr` stash + `pumpDead` signal, never the drained queue (CL7: the
+  error must not be swallowed). Production trip: routeFrame latches the
+  live splice (`LocalSpliceFor(ccid).LatchBargeIn()`) on every C1
+  interrupt frame - before this leaf the audio latch had no production
+  caller at all; the talk loop keeps the control plane (clear frame,
+  draft cancel).
+  contract the phone splice pins.
 - Join grace: the client must produce its first byte within 10 s or the
   splice ends with ErrNoClient (:28-30) - a never-dialed leg cannot
   wedge the registry slot.

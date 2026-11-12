@@ -991,6 +991,22 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 		}()
 		w.logger.Info("voice wiring: talk loop armed", "ccid", f.CallID, "employee_id", inst.EmployeeID)
 	default:
+		// turn-2 leaf 01: the local leg's AUDIO-plane barge-in trip.
+		// The child's interrupt frame historically only reached the talk
+		// loop (control plane); the live local splice was never latched,
+		// so up to 64 already-read child chunks kept pacing the old
+		// answer's tail toward the client. Latch + drain the splice's
+		// outbound pump HERE, BEFORE the frame enters the loop queue
+		// (the queue wait can be seconds; the resume on the next say
+		// would otherwise pace the stale backlog out first). Phone legs
+		// have no local splice (nil receiver -> no-op); a second trip
+		// while latched is a no-op. The frame is still forwarded below:
+		// the talk loop keeps sole ownership of the control plane
+		// (draft cancel, clear frame to the child, binding publish,
+		// telemetry) — the latch here emits none of those.
+		if f.Event == voice.EventInterrupt {
+			voice.LocalSpliceFor(f.CallID).LatchBargeIn()
+		}
 		w.loopsMu.Lock()
 		loop := w.loops[f.CallID]
 		w.loopsMu.Unlock()
