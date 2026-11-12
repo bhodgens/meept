@@ -18,9 +18,9 @@ func TestTelemetryRingAppendAndCursor(t *testing.T) {
 			t.Fatalf("seq = %d, want %d", seq, i+1)
 		}
 	}
-	events, truncated, found := r.Since("cc-1", 0, 0)
-	if !found || truncated {
-		t.Fatalf("found=%v truncated=%v, want true/false", found, truncated)
+	events, truncated, hasMore, found := r.Since("cc-1", 0, 0)
+	if !found || truncated || hasMore {
+		t.Fatalf("found=%v truncated=%v hasMore=%v, want true/false/false", found, truncated, hasMore)
 	}
 	if len(events) != 3 {
 		t.Fatalf("len(events) = %d, want 3", len(events))
@@ -31,17 +31,17 @@ func TestTelemetryRingAppendAndCursor(t *testing.T) {
 		}
 	}
 	// Cursor advances: only seq > cursor returns.
-	events, _, _ = r.Since("cc-1", 2, 0)
+	events, _, _, _ = r.Since("cc-1", 2, 0)
 	if len(events) != 1 || events[0].Seq != 3 {
 		t.Fatalf("cursor read = %+v, want [seq 3]", events)
 	}
 	// Fully consumed cursor -> empty list (found stays true).
-	events, truncated, found = r.Since("cc-1", 3, 0)
-	if len(events) != 0 || truncated || !found {
-		t.Fatalf("drained read = %d events, truncated=%v found=%v", len(events), truncated, found)
+	events, truncated, hasMore, found = r.Since("cc-1", 3, 0)
+	if len(events) != 0 || truncated || hasMore || !found {
+		t.Fatalf("drained read = %d events, truncated=%v hasMore=%v found=%v", len(events), truncated, hasMore, found)
 	}
 	// Unknown call -> not found, empty.
-	events, _, found = r.Since("cc-nope", 0, 0)
+	events, _, _, found = r.Since("cc-nope", 0, 0)
 	if found || len(events) != 0 {
 		t.Fatalf("unknown call: found=%v events=%d", found, len(events))
 	}
@@ -53,7 +53,7 @@ func TestTelemetryRingOverflowDropsOldest(t *testing.T) {
 		r.Append("cc-1", EventInput{Kind: EventKindHeard, Text: "t"})
 	}
 	// Full window: last 4 events retained (seqs 7..10).
-	events, truncated, found := r.Since("cc-1", 0, 0)
+	events, truncated, _, found := r.Since("cc-1", 0, 0)
 	if !found {
 		t.Fatal("ring vanished after overflow")
 	}
@@ -64,14 +64,16 @@ func TestTelemetryRingOverflowDropsOldest(t *testing.T) {
 		t.Fatalf("overflow window = %+v, want seqs 7..10", events)
 	}
 	// A cursor at the retained boundary is NOT truncated.
-	_, truncated, _ = r.Since("cc-1", 6, 0)
+	_, truncated, _, _ = r.Since("cc-1", 6, 0)
 	if truncated {
 		t.Fatal("cursor 6 (droppedEnd) must not report truncated")
 	}
-	// Limit truncates a fresh backlog too (bounded reads).
-	events, truncated, _ = r.Since("cc-1", 6, 2)
-	if len(events) != 2 || !truncated {
-		t.Fatalf("limited read = %d events truncated=%v, want 2/true", len(events), truncated)
+	// A limit-capped read is NOT truncated (C-10): the rows are all
+	// retained, the client just reads again - hasMore is the signal.
+	var hasMore bool
+	events, truncated, hasMore, _ = r.Since("cc-1", 6, 2)
+	if len(events) != 2 || truncated || !hasMore {
+		t.Fatalf("limited read = %d events truncated=%v hasMore=%v, want 2/false/true", len(events), truncated, hasMore)
 	}
 }
 
@@ -80,10 +82,10 @@ func TestTelemetryRingCallEviction(t *testing.T) {
 	r.Append("cc-1", EventInput{Kind: EventKindHeard})
 	r.Append("cc-2", EventInput{Kind: EventKindHeard})
 	r.Append("cc-3", EventInput{Kind: EventKindHeard}) // evicts cc-1
-	if _, _, found := r.Since("cc-1", 0, 0); found {
+	if _, _, _, found := r.Since("cc-1", 0, 0); found {
 		t.Fatal("cc-1 must be evicted once 2 newer calls exist")
 	}
-	if _, _, found := r.Since("cc-3", 0, 0); !found {
+	if _, _, _, found := r.Since("cc-3", 0, 0); !found {
 		t.Fatal("cc-3 must be retained")
 	}
 }
@@ -93,8 +95,11 @@ func TestTelemetryRingNilSafe(t *testing.T) {
 	if seq := r.Append("cc", EventInput{}); seq != 0 {
 		t.Fatalf("nil Append = %d, want 0", seq)
 	}
-	if _, _, found := r.Since("cc", 0, 0); found {
+	if _, _, _, found := r.Since("cc", 0, 0); found {
 		t.Fatal("nil Since must report not-found")
+	}
+	if r.HasRing("cc") {
+		t.Fatal("nil HasRing must report no ring")
 	}
 }
 

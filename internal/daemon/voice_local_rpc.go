@@ -143,13 +143,13 @@ func voiceLocalSeams(w *VoiceWiring, mgr *employee.Manager, logger *slog.Logger)
 // voice.local.events seam: a plain projection of the ring read onto the
 // rpc row shape. A nil ring (wiring built without telemetry) returns all
 // - false: the handler answers the empty envelope, never an error.
-func callEventsSeam(w *VoiceWiring) func(callID string, cursor uint64, limit int) ([]rpc.VoiceCallEvent, bool, bool) {
+func callEventsSeam(w *VoiceWiring) func(callID string, cursor uint64, limit int) ([]rpc.VoiceCallEvent, bool, bool, bool) {
 	if w == nil || w.callEvents == nil {
 		return nil
 	}
 	ring := w.callEvents
-	return func(callID string, cursor uint64, limit int) ([]rpc.VoiceCallEvent, bool, bool) {
-		events, truncated, found := ring.Since(callID, cursor, limit)
+	return func(callID string, cursor uint64, limit int) ([]rpc.VoiceCallEvent, bool, bool, bool) {
+		events, truncated, hasMore, found := ring.Since(callID, cursor, limit)
 		out := make([]rpc.VoiceCallEvent, 0, len(events))
 		for _, ev := range events {
 			out = append(out, rpc.VoiceCallEvent{
@@ -162,7 +162,7 @@ func callEventsSeam(w *VoiceWiring) func(callID string, cursor uint64, limit int
 				Reason: ev.Reason,
 			})
 		}
-		return out, truncated, found
+		return out, truncated, hasMore, found
 	}
 }
 

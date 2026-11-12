@@ -96,3 +96,40 @@ func TestVoiceLocalEventsTruncatedPassesThrough(t *testing.T) {
 		t.Fatalf("truncated flag lost: %+v", out)
 	}
 }
+
+// C-9 pin: a poll with nothing new ECHOES the request cursor (the doc's
+// advance-by-assignment contract) - not 0.
+func TestVoiceLocalEventsCursorEcho(t *testing.T) {
+	f := &fakeSeams{eventsFound: true} // seam returns no rows
+	h := NewVoiceLocalHandler(f.seams())
+	res, err := h.handleEvents(context.Background(), []byte(`{"call_id":"local-x","cursor":9}`))
+	if err != nil {
+		t.Fatalf("events: %v", err)
+	}
+	out := res.(VoiceLocalEventsResult)
+	if out.Cursor != 9 {
+		t.Fatalf("cursor = %d, want 9 (request echo)", out.Cursor)
+	}
+}
+
+// C-10 pin: hasMore rides the wire separately from truncated; the
+// truncation tag stays boolean-compatible.
+func TestVoiceLocalEventsHasMoreWire(t *testing.T) {
+	f := &fakeSeams{eventsFound: true, eventsHasMore: true}
+	h := NewVoiceLocalHandler(f.seams())
+	res, _ := h.handleEvents(context.Background(), []byte(`{"call_id":"local-x","cursor":0}`))
+	out := res.(VoiceLocalEventsResult)
+	if !out.HasMore || out.Truncated {
+		t.Fatalf("hasMore=%v truncated=%v, want true/false", out.HasMore, out.Truncated)
+	}
+	b, _ := json.Marshal(out)
+	for _, key := range []string{`"has_more"`, `"cursor"`} {
+		if !strings.Contains(string(b), key) {
+			t.Fatalf("json missing %s: %s", key, b)
+		}
+	}
+	// truncated is omitempty: absent when false (backward-compatible wire).
+	if strings.Contains(string(b), `"truncated":false`) {
+		t.Fatalf("truncated:false must be omitted on the wire: %s", b)
+	}
+}

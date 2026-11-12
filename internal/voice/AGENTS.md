@@ -585,23 +585,35 @@ store. Invariants a future agent must NOT break:
   call_ended / the link park lifecycle), plus `VoiceWiring.routeFrame`,
   which appends `heard` when a FINAL (last:true) prompt frame arrives -
   the mic-speech evidence that precedes the loop's dispatch of the same
-  text (partials never record). `releaseCall` appends a terminal
-  `call_ended` ONLY for a call that never armed a talk loop AND has an
-  empty ring (the double guard keeps a self-ended loop's own end()
-  emission un-duplicated: end() fires synchronously before the release
-  hook ever sees the map).
+  text (partials never record). The `heard` append rides a SUCCESSFUL
+  enqueue: a prompt frame the full-queue default branch drops is never
+  recorded as heard (the telemetry must not lie about delivery).
+  `releaseCall` appends a terminal `call_ended` ONLY for a call that
+  never armed a talk loop AND never recorded anything (`TelemetryRing.
+  HasRing` - the ever-recorded set, which SURVIVES FIFO eviction: a
+  live-map miss cannot tell "evicted" from "never existed", so probing
+  Since/found there resurrects evicted rings with synthetic ends).
 - Egress is the seam-based `voice.local.events` RPC (cursor-poll over the
   existing socket). NO new bus topic, NO new WS class: the ring is
   in-process control-plane state. The daemon adapter (`callEventsSeam` in
   voice_local_rpc.go) projects onto `rpc.VoiceCallEvent` rows - the ring
   event's `Seq` is the cursor domain (per-call, 1-based, monotonic).
-  A ring-less or unwired read answers the empty envelope (found:false),
-  never an error: the CLI poller ticks at 500 ms and teardown races must
-  not surface as failures.
+  The result's `cursor` ECHOES the request cursor when nothing new came
+  back (advance-by-assignment is safe). `truncated` means ONLY genuine
+  eviction (rows the cursor pointed at were overwritten); a limit-capped
+  backlog reads as `has_more` instead (add fields, never remove, on this
+  wire). A ring-less or unwired read answers the empty envelope
+  (found:false), never an error: the CLI poller ticks at 500 ms and
+  teardown races must not surface as failures.
 - Consumers: `cmd/meept/voice.go` `voiceEventTracker` - one poller
   goroutine per known call id printing `[<label> <employee>] <line>`;
   best-effort by contract (a failed poll retries, never fails the run);
-  `voice link` (auto-on, a/b prefixes) and `voice local` (auto-on) both
-  drain the tail synchronously after close/end so the final seconds'
-  events print before the transcripts.
+  a found=false answer ends THAT ccid's poller (one feed-ended line when
+  it had consumed events; silent when never seen - an evicted/unknown id
+  must not tick forever); each round-trip is bounded (5 s) so stop()
+  cannot hang on the RPC client's multi-minute retry ladder, and an
+  abandoned poll never prints after stop returns. `voice link` (auto-on,
+  a/b prefixes) and `voice local` (auto-on) both drain the tail
+  synchronously after close/end so the final seconds' events print before
+  the transcripts.
 

@@ -27,6 +27,7 @@ type fakeSeams struct {
 	eventsCalls     int
 	eventsRows      []VoiceCallEvent
 	eventsTruncated bool
+	eventsHasMore   bool
 	eventsFound     bool
 }
 
@@ -46,9 +47,9 @@ func (f *fakeSeams) seams() VoiceLocalSeams {
 		EmployeeExists: func(_ context.Context, _ string) (bool, error) {
 			return f.employeeOK, f.employeeErr
 		},
-		Events: func(_ string, _ uint64, _ int) ([]VoiceCallEvent, bool, bool) {
+		Events: func(_ string, _ uint64, _ int) ([]VoiceCallEvent, bool, bool, bool) {
 			f.eventsCalls++
-			return f.eventsRows, f.eventsTruncated, f.eventsFound
+			return f.eventsRows, f.eventsTruncated, f.eventsHasMore, f.eventsFound
 		},
 	}
 }

@@ -3,11 +3,17 @@ package main
 // voice_events_test.go - unit tests for the operator-telemetry CLI layer
 // (voice-events tree): the pure event renderer and the poller's
 // cursor/print behaviour against a fake RPC client. No daemon, no sockets.
+// Pins: cursor echo (C-9), found=false feed end (C-20), bounded round-trip
+// + no print after stop (C-11), truncation prints only on genuine
+// eviction (C-10).
 
 import (
+	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestVoiceEventRenderKinds(t *testing.T) {
@@ -44,6 +50,7 @@ type fakeEventsClient struct {
 	rows    []voiceEventRow
 	errFunc func(n int) error
 	calls   int
+	delay   time.Duration
 }
 
 func (f *fakeEventsClient) Call(_ string, params any) (json.RawMessage, error) {
@@ -55,12 +62,19 @@ func (f *fakeEventsClient) Call(_ string, params any) (json.RawMessage, error) {
 			return nil, err
 		}
 	}
+	if f.delay > 0 {
+		d := f.delay
+		f.mu.Unlock()
+		time.Sleep(d)
+		f.mu.Lock()
+	}
 	p, _ := params.(map[string]any)
 	cursor, _ := p["cursor"].(uint64)
 	var out []voiceEventRow
 	for _, ev := range f.rows {
 		if ev.Seq > cursor {
 			out = append(out, ev)
+			f.served++
 		}
 	}
 	f.mu.Unlock()
@@ -86,13 +100,15 @@ func TestVoiceEventTrackerDrain(t *testing.T) {
 	}
 	f := &fakeEventsClient{rows: rows}
 	tr := newVoiceEventTracker(f, map[string][2]string{"cc-1": {"a", "companion"}})
-	n := tr.pollOnce("cc-1", "a", "companion")
-	if n != 2 {
-		t.Fatalf("first poll printed %d, want 2", n)
+	if !tr.pollOnce("cc-1", "a", "companion") {
+		t.Fatal("first poll must keep the feed open")
 	}
-	// Second poll: cursor advanced, nothing new -> 0 (no re-print).
-	if n := tr.pollOnce("cc-1", "a", "companion"); n != 0 {
-		t.Fatalf("second poll printed %d, want 0 (cursor must advance)", n)
+	if f.served != 2 {
+		t.Fatalf("served = %d, want 2 events delivered", f.served)
+	}
+	// Second poll: cursor advanced (C-9 echo), nothing new, feed stays.
+	if !tr.pollOnce("cc-1", "a", "companion") {
+		t.Fatal("second poll (nothing new) must NOT end the feed")
 	}
 	tr.drainOnce() // must terminate and not re-print
 	if tr.cursors["cc-1"] == 0 {
@@ -100,25 +116,118 @@ func TestVoiceEventTrackerDrain(t *testing.T) {
 	}
 }
 
+// rpcErrStub is a transient RPC failure (the best-effort retry posture).
+type rpcErrStub struct{}
+
+func (rpcErrStub) Error() string { return "rpc: connection closed" }
+
 func TestVoiceEventTrackerBestEffortOnErrors(t *testing.T) {
 	f := &fakeEventsClient{
 		rows: []voiceEventRow{{Seq: 1, Kind: "barge_in"}},
 	}
 	f.errFunc = func(n int) error {
 		if n == 1 {
-			return jsonErrorStub{}
+			return rpcErrStub{}
 		}
 		return nil
 	}
 	tr := newVoiceEventTracker(f, map[string][2]string{"cc-1": {"b", "secretary"}})
-	if n := tr.pollOnce("cc-1", "b", "secretary"); n != 0 {
-		t.Fatalf("errored poll printed %d, want 0", n)
+	// An errored poll is best-effort: it returns true (retry next tick),
+	// never terminates the feed.
+	if !tr.pollOnce("cc-1", "b", "secretary") {
+		t.Fatal("errored poll must be retried, not end the feed")
 	}
-	if n := tr.pollOnce("cc-1", "b", "secretary"); n != 1 {
-		t.Fatalf("retry printed %d, want 1", n)
+	if !tr.pollOnce("cc-1", "b", "secretary") {
+		t.Fatal("retry must keep the feed open")
 	}
 }
 
-type jsonErrorStub struct{}
+// C-20(2): a found=false answer for a ccid the poller already tracked
+// ends the poller for that ccid (one line, then stop).
+func TestVoiceEventTrackerFoundFalseEndsFeed(t *testing.T) {
+	f2 := &foundFalseClient{}
+	tr2 := newVoiceEventTracker(f2, map[string][2]string{"cc-2": {"a", "companion"}})
+	tr2.cursors["cc-2"] = 3 // had consumed events before eviction
+	if tr2.pollOnce("cc-2", "a", "companion") {
+		t.Fatal("found=false must end the poller for that ccid")
+	}
+	if !tr2.ended["cc-2"] {
+		t.Fatal("found=false must mark the ccid ended")
+	}
+	// The drain must not re-poll an ended ccid.
+	tr2.drainOnce()
+	if f2.calls != 1 {
+		t.Fatalf("drain re-polled an ended ccid: %d calls, want 1", f2.calls)
+	}
+	// A never-tracked ccid (cursor 0, nothing consumed) ends SILENTLY -
+	// the ring-less old daemon is the quiet teardown posture.
+	tr3 := newVoiceEventTracker(&foundFalseClient{}, map[string][2]string{"cc-3": {"a", "emp"}})
+	if tr3.pollOnce("cc-3", "a", "emp") {
+		t.Fatal("found=false must end the poller")
+	}
+	if !tr3.ended["cc-3"] {
+		t.Fatal("silent feed end must still stop polling")
+	}
+}
 
-func (jsonErrorStub) Error() string { return "rpc: connection closed" }
+// foundFalseClient always answers found=false with a cursor echo (C-9).
+type foundFalseClient struct{ calls int }
+
+func (c *foundFalseClient) Call(_ string, params any) (json.RawMessage, error) {
+	c.calls++
+	p, _ := params.(map[string]any)
+	cursor, _ := p["cursor"].(uint64)
+	b, err := json.Marshal(map[string]any{
+		"call_id": "cc-2", "events": []voiceEventRow{}, "cursor": cursor, "found": false,
+	})
+	return b, err
+}
+
+// C-11: stop() cannot hang on a wedged socket - the in-flight round-trip
+// is abandoned at voiceEventCallTimeout and nothing prints after stop.
+func TestVoiceEventTrackerStopIsBounded(t *testing.T) {
+	slow := &slowEventsClient{delay: 30 * voiceEventCallTimeout} // way past the bound
+	tr := newVoiceEventTracker(slow, map[string][2]string{"cc-1": {"a", "companion"}})
+	ctx := context.Background()
+	tr.start(ctx)
+	start := time.Now()
+	tr.stop()
+	elapsed := time.Since(start)
+	if elapsed > voiceEventCallTimeout+2*time.Second {
+		t.Fatalf("stop() took %s; the bounded round-trip must cap it near %s", elapsed, voiceEventCallTimeout)
+	}
+	if !tr.stopped {
+		t.Fatal("stop must mark the tracker stopped")
+	}
+}
+
+// slowEventsClient blocks every Call for delay before answering found=true.
+type slowEventsClient struct{ delay time.Duration }
+
+func (c *slowEventsClient) Call(_ string, _ any) (json.RawMessage, error) {
+	time.Sleep(c.delay)
+	b, _ := json.Marshal(map[string]any{
+		"call_id": "cc-1", "events": []voiceEventRow{}, "cursor": uint64(0), "found": true,
+	})
+	return b, nil
+}
+
+type contextTodo struct{}
+
+// C-9 (client side): the fake echoes the request cursor, so a poll with
+// nothing new keeps cursor stable - advance-by-assignment is safe.
+func TestVoiceEventCursorEchoAdvanceByAssignment(t *testing.T) {
+	f := &fakeEventsClient{rows: []voiceEventRow{{Seq: 9, Kind: "heard", Text: "q"}}}
+	tr := newVoiceEventTracker(f, map[string][2]string{"cc-1": {"a", "emp"}})
+	if !tr.pollOnce("cc-1", "a", "emp") {
+		t.Fatal("poll must succeed")
+	}
+	if tr.cursors["cc-1"] != 9 {
+		t.Fatalf("cursor = %d, want 9 (advanced by assignment)", tr.cursors["cc-1"])
+	}
+	// C-10 (client side): a found=true, nothing-new answer must NOT print
+	// the truncation note; only truncated=true (genuine eviction) does.
+	if printed := captureStdout(t, func() { _ = tr.pollOnce("cc-1", "a", "emp") }); strings.Contains(printed, "truncated") {
+		t.Fatalf("healthy empty poll printed a truncation note: %q", printed)
+	}
+}

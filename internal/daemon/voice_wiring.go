@@ -999,13 +999,22 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 		// daemon BEFORE the talk loop's dispatch of the same text. Partials
 		// (last != true) never record: they are preview traffic, and the
 		// ring's "heard" line is the operator's "speech detected" signal.
-		// Best-effort and non-gating: the append cannot block delivery.
+		// The append rides the SUCCESSFUL enqueue (C-13): a frame the
+		// full-queue default branch DROPS never reached the loop, so it
+		// must never be recorded as heard - the telemetry would lie about
+		// delivery. The enqueue itself stays non-gating (never blocks).
 		if f.Event == voice.EventPrompt && f.Last != nil && *f.Last {
-			w.callEvents.Append(f.CallID, voice.EventInput{
-				Kind:  voice.EventKindHeard,
-				Text:  voice.PreviewEventText(f.Text),
-				Words: len(strings.Fields(f.Text)),
-			})
+			select {
+			case loop.Frames() <- f:
+				w.callEvents.Append(f.CallID, voice.EventInput{
+					Kind:  voice.EventKindHeard,
+					Text:  voice.PreviewEventText(f.Text),
+					Words: len(strings.Fields(f.Text)),
+				})
+			default:
+				w.logger.Warn("voice wiring: talk loop frame queue full", "ccid", f.CallID, "event", f.Event)
+			}
+			return
 		}
 		select {
 		case loop.Frames() <- f:
@@ -1232,20 +1241,17 @@ func (w *VoiceWiring) releaseCall(ccid string, outcome voice.Outcome) {
 	w.loopsMu.Unlock()
 	// Operator telemetry (voice-events): the call_ended line normally
 	// comes from the talk loop's own end() (rich reason, endOnce-guarded).
-	// A call that never armed a loop AND recorded nothing (a dial failure
-	// before setup, a no-answer reaper) gets its terminal here instead, so
-	// every ring-visible call has a named end. The double guard (loop gone
-	// AND no ring) keeps self-ended loops un-duplicated: their end() runs
-	// synchronously BEFORE this hook sees the map, so by here the ring
-	// already carries the loop's call_ended and the loop is still in the
-	// map until its goroutine exits.
-	if loop == nil {
-		if _, _, ringed := w.callEvents.Since(ccid, 0, 1); !ringed {
-			w.callEvents.Append(ccid, voice.EventInput{
-				Kind:   voice.EventKindCallEnded,
-				Reason: string(outcome),
-			})
-		}
+	// A call that never armed a loop AND never recorded anything (a dial
+	// failure before setup, a no-answer reaper) gets its terminal here
+	// instead, so every ring-visible call has a named end. The probe is
+	// HasRing (C-20): "no ring" must mean never-created, not FIFO-EVICTED
+	// - a Since/!found probe resurrects an evicted call's ring with a
+	// synthetic call_ended, inflating the live-ring map with dead calls.
+	if loop == nil && !w.callEvents.HasRing(ccid) {
+		w.callEvents.Append(ccid, voice.EventInput{
+			Kind:   voice.EventKindCallEnded,
+			Reason: string(outcome),
+		})
 	}
 	if loop == nil {
 		// The loop's frames channel is not closed here (close would race

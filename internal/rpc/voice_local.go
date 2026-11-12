@@ -117,16 +117,20 @@ type VoiceCallEvent struct {
 }
 
 // VoiceLocalEventsResult is the voice.local.events result. Events is
-// never nil (empty list, not absent). Cursor is the highest Seq returned
-// (echoing the request cursor when nothing new), so a client advances by
-// assignment. Truncated reports that events between the old cursor and
-// the returned window were evicted (or a limit cut the backlog): the
-// poller should note the gap, not treat it as an error.
+// never nil (empty list, not absent). Cursor is the highest Seq returned,
+// ECHOING the request cursor when nothing new was returned, so a client
+// advances by assignment (cursor = res.Cursor) in both directions.
+// Truncated reports ONLY genuine eviction (events between the request
+// cursor and the ring's retained window were overwritten by newer rows -
+// a slow poller lost them): the poller should note the gap, not treat it
+// as an error. HasMore reports a limit-capped backlog (rows exist beyond
+// the returned window; read again with the returned cursor).
 type VoiceLocalEventsResult struct {
 	CallID    string           `json:"call_id"`
 	Events    []VoiceCallEvent `json:"events"`
 	Cursor    uint64           `json:"cursor"`
 	Truncated bool             `json:"truncated,omitempty"`
+	HasMore   bool             `json:"has_more,omitempty"`
 	Found     bool             `json:"found"`
 }
 
@@ -155,11 +159,12 @@ type VoiceLocalSeams struct {
 	EmployeeExists func(ctx context.Context, employeeID string) (bool, error)
 	// Events reads the operator-telemetry ring for one call: events with
 	// Seq > cursor, capped at limit (limit <= 0 = server default).
-	// truncated reports evicted backlog; found reports whether the call
-	// id has a ring (a ring-less read is an empty list, never an error -
-	// the poller must stay quiet on teardown races instead of erroring
-	// every tick).
-	Events func(callID string, cursor uint64, limit int) (events []VoiceCallEvent, truncated bool, found bool)
+	// truncated reports ONLY evicted backlog (rows the cursor points at
+	// no longer exist); hasMore reports a limit-capped backlog; found
+	// reports whether the call id has a ring (a ring-less read is an
+	// empty list, never an error - the poller must stay quiet on
+	// teardown races instead of erroring every tick).
+	Events func(callID string, cursor uint64, limit int) (events []VoiceCallEvent, truncated bool, hasMore bool, found bool)
 }
 
 // VoiceLocalHandler serves voice.local.open / .end / .status.
@@ -275,16 +280,17 @@ func (h *VoiceLocalHandler) handleEvents(_ context.Context, params json.RawMessa
 	if req.CallID == "" {
 		return nil, fmt.Errorf("%w: call_id is required", ErrVoiceLocalUnknownCall)
 	}
-	res := VoiceLocalEventsResult{CallID: req.CallID, Events: []VoiceCallEvent{}}
+	res := VoiceLocalEventsResult{CallID: req.CallID, Events: []VoiceCallEvent{}, Cursor: req.Cursor}
 	if h.seams.Events == nil {
 		return res, nil
 	}
-	events, truncated, found := h.seams.Events(req.CallID, req.Cursor, req.Limit)
+	events, truncated, hasMore, found := h.seams.Events(req.CallID, req.Cursor, req.Limit)
 	if events == nil {
 		events = []VoiceCallEvent{}
 	}
 	res.Events = events
 	res.Truncated = truncated
+	res.HasMore = hasMore
 	res.Found = found
 	for _, ev := range events {
 		if ev.Seq > res.Cursor {

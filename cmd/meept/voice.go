@@ -760,10 +760,13 @@ func itoa64(n int64) string { return strconv.FormatInt(n, 10) }
 // prefixed "[<label> <employee>] ". Best-effort by contract (like the
 // monitor tap): a failed poll is silently retried on the next tick - the
 // link/local run must NEVER die because telemetry could not be read.
-// start() spawns the ticker goroutines (they exit when ctx ends; a
-// terminal "call_ended" line does NOT stop the poller - the other side of
-// a link may keep going); drainOnce() flushes the tail synchronously after
-// cancelling (the shared cursor keeps that race from double-printing).
+// start() spawns the ticker goroutines (they exit when ctx ends, when the
+// call's feed reports found=false, or on the bounded-call timeout);
+// stop() (after the cancel) joins them so a drain that follows never
+// races a live poller's prints. Each round-trip is bounded (C-11): a
+// client.Call that would block for minutes (retry ladder) is abandoned
+// at voiceEventCallTimeout and its result discarded - stop() can never
+// hang on a wedged socket.
 type voiceEventTracker struct {
 	client interface {
 		Call(method string, params any) (json.RawMessage, error)
@@ -772,8 +775,20 @@ type voiceEventTracker struct {
 	calls   map[string][2]string
 	mu      sync.Mutex
 	cursors map[string]uint64
-	wg      sync.WaitGroup
+	// stopped guards printing once stop() has begun joining: an
+	// abandoned-but-still-running poll must never print after stop
+	// returns (C-11).
+	stopped bool
+	// ended records the first found=false observation per ccid (C-20):
+	// the poller prints one "feed ended" line and stops polling it.
+	ended map[string]bool
+	wg    sync.WaitGroup
 }
+
+// voiceEventCallTimeout bounds one voice.local.events round-trip (C-11):
+// the RPC client's own retry ladder can hold a call for minutes, so the
+// poller abandons at this window and retries on the next tick instead.
+const voiceEventCallTimeout = 5 * time.Second
 
 func newVoiceEventTracker(client interface {
 	Call(method string, params any) (json.RawMessage, error)
@@ -782,6 +797,7 @@ func newVoiceEventTracker(client interface {
 		client:  client,
 		calls:   calls,
 		cursors: make(map[string]uint64, len(calls)),
+		ended:   make(map[string]bool, len(calls)),
 	}
 }
 
@@ -802,7 +818,14 @@ func (t *voiceEventTracker) start(ctx context.Context) {
 }
 
 // stop joins the live poller goroutines. Call after cancelling their ctx.
-func (t *voiceEventTracker) stop() { t.wg.Wait() }
+// Every in-flight round-trip is bounded by voiceEventCallTimeout, so this
+// join waits at most ~one timeout per poller, never minutes (C-11).
+func (t *voiceEventTracker) stop() {
+	t.mu.Lock()
+	t.stopped = true
+	t.mu.Unlock()
+	t.wg.Wait()
+}
 
 // pollVoiceEvents drives one call's telemetry line loop (ticker cadence).
 func (t *voiceEventTracker) poll(ctx context.Context, ccid, label, emp string) {
@@ -815,60 +838,177 @@ func (t *voiceEventTracker) poll(ctx context.Context, ccid, label, emp string) {
 		case <-tick.C:
 		}
 		// One tick: print + advance. Errors are best-effort retried.
-		t.pollOnce(ccid, label, emp)
+		// found=false ends THIS ccid's poller (C-20: the call is no
+		// longer tracked - an evicted/unknown id would otherwise tick
+		// forever); a link's other side keeps its own poller.
+		if !t.pollOnce(ccid, label, emp) {
+			return
+		}
 	}
 }
 
 // pollOnce issues one voice.local.events round-trip and prints its rows.
-// Returns the number of events printed.
-func (t *voiceEventTracker) pollOnce(ccid, label, emp string) int {
+// Returns false when this ccid's feed has ended (found=false observed, or
+// the tracker stopped): the caller stops polling it. An errored/timed-out
+// round-trip returns true (best-effort: retry on the next tick).
+func (t *voiceEventTracker) pollOnce(ccid, label, emp string) bool {
 	t.mu.Lock()
+	if t.stopped || t.ended[ccid] {
+		t.mu.Unlock()
+		return false
+	}
 	cursor := t.cursors[ccid]
 	t.mu.Unlock()
-	raw, err := t.client.Call("voice.local.events", map[string]any{
-		"call_id": ccid, "cursor": cursor,
-	})
-	if err != nil {
-		return 0 // best-effort: a dead socket / transient error retries next tick
+	res, ok, dead := t.callBounded(ccid, cursor)
+	if dead {
+		// The daemon answered found=false: the feed is over (C-20).
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		if t.stopped {
+			return false
+		}
+		if cursor > 0 && !t.ended[ccid] {
+			fmt.Printf("[%s %s] telemetry feed ended (call no longer tracked)\n", label, emp)
+		}
+		t.ended[ccid] = true
+		return false
 	}
-	var res struct {
-		Events    []voiceEventRow `json:"events"`
-		Cursor    uint64          `json:"cursor"`
-		Truncated bool            `json:"truncated"`
+	if !ok {
+		return true // best-effort: error/timeout retries on the next tick
 	}
-	if json.Unmarshal(raw, &res) != nil {
-		return 0
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.stopped {
+		return false // abandoned window: never print after stop began
 	}
 	for _, ev := range res.Events {
 		fmt.Printf("[%s %s] %s\n", label, emp, voiceEventRender(ev))
 	}
 	if res.Truncated {
-		fmt.Printf("[%s %s] note: telemetry backlog truncated (poller fell behind)\n", label, emp)
+		fmt.Printf("[%s %s] note: telemetry backlog truncated (poller fell behind; rows were lost)\n", label, emp)
 	}
-	if res.Cursor > cursor {
-		t.mu.Lock()
-		if res.Cursor > t.cursors[ccid] {
-			t.cursors[ccid] = res.Cursor
+	if res.Cursor > cursor && res.Cursor > t.cursors[ccid] {
+		t.cursors[ccid] = res.Cursor
+	}
+	return true
+}
+
+// voiceEventRes is the voice.local.events wire result (the fields the CLI
+// consumes; found=false is the daemon's ring-less/evicted answer).
+type voiceEventRes struct {
+	Events    []voiceEventRow `json:"events"`
+	Cursor    uint64          `json:"cursor"`
+	Truncated bool            `json:"truncated"`
+	HasMore   bool            `json:"has_more"`
+	Found     bool            `json:"found"`
+}
+
+// callBounded runs one voice.local.events round-trip on a child goroutine
+// bounded by voiceEventCallTimeout (C-11): a wedged socket cannot hold the
+// poller (and stop's join) for the client's multi-minute retry ladder. An
+// abandoned child's result is discarded; it prints nothing (printing is
+// guarded by pollOnce's stopped check under mu). Returns
+// (res, ok=true) on success, (_, false, false) on error/timeout, and
+// (_, false, true) when the envelope carries found=false.
+func (t *voiceEventTracker) callBounded(ccid string, cursor uint64) (res voiceEventRes, ok bool, feedEnded bool) {
+	type result struct {
+		res voiceEventRes
+		ok  bool
+	}
+	ch := make(chan result, 1)
+	go func() {
+		raw, err := t.client.Call("voice.local.events", map[string]any{
+			"call_id": ccid, "cursor": cursor,
+		})
+		if err != nil {
+			ch <- result{}
+			return
 		}
-		t.mu.Unlock()
+		var r voiceEventRes
+		if json.Unmarshal(raw, &r) != nil {
+			ch <- result{}
+			return
+		}
+		ch <- result{res: r, ok: true}
+	}()
+	select {
+	case r := <-ch:
+		if r.ok && !r.res.Found {
+			return voiceEventRes{}, false, true
+		}
+		return r.res, r.ok, false
+	case <-time.After(voiceEventCallTimeout):
+		return voiceEventRes{}, false, false
 	}
-	return len(res.Events)
 }
 
 // drainOnce flushes each call's unread telemetry synchronously (after the
-// live poller's ctx was cancelled): poll until a call reports no new
-// events, bounded to a few rounds so a wedged daemon cannot hang the CLI.
+// live poller's ctx was cancelled and stop() joined them): poll until a
+// call reports no new events or its feed has ended, bounded to a few
+// rounds so a wedged daemon cannot hang the CLI. The drain intentionally
+// runs while the tracker is marked stopped - its polls must still print
+// (stop only silences the LIVE pollers) - so it uses drainPollOnce, which
+// skips the stopped gate but keeps the bounded round-trip (C-11) and the
+// per-call ended state.
 func (t *voiceEventTracker) drainOnce() {
 	for ccid, side := range t.calls {
-		if ccid == "" {
+		if ccid == "" || t.ended[ccid] {
 			continue
 		}
 		for round := 0; round < 8; round++ {
-			if t.pollOnce(ccid, side[0], side[1]) == 0 {
+			if !t.drainPollOnce(ccid, side[0], side[1]) {
 				break
 			}
 		}
 	}
+}
+
+// drainPollOnce is pollOnce's post-stop twin: identical result handling
+// (including the C-20 feed-end transition) but it ignores the stopped
+// flag - the drain IS the stopping phase's printer. Bounded like pollOnce
+// (C-11): one voiceEventCallTimeout per round, 8 rounds per call worst
+// case, never minutes.
+func (t *voiceEventTracker) drainPollOnce(ccid, label, emp string) bool {
+	t.mu.Lock()
+	if t.ended[ccid] {
+		t.mu.Unlock()
+		return false
+	}
+	cursor := t.cursors[ccid]
+	t.mu.Unlock()
+	res, ok, dead := t.callBounded(ccid, cursor)
+	if dead {
+		t.mu.Lock()
+		if cursor > 0 && !t.ended[ccid] {
+			fmt.Printf("[%s %s] telemetry feed ended (call no longer tracked)\n", label, emp)
+		}
+		t.ended[ccid] = true
+		t.mu.Unlock()
+		return false
+	}
+	if !ok {
+		return true // timeout: leave the tail for a possible later drain
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if res.Found {
+		for _, ev := range res.Events {
+			fmt.Printf("[%s %s] %s\n", label, emp, voiceEventRender(ev))
+		}
+		if res.Truncated {
+			fmt.Printf("[%s %s] note: telemetry backlog truncated (poller fell behind; rows were lost)\n", label, emp)
+		}
+		if res.Cursor > cursor && res.Cursor > t.cursors[ccid] {
+			t.cursors[ccid] = res.Cursor
+		}
+		return true
+	}
+	// found=false during drain: the feed ended before the tail flushed.
+	if cursor > 0 && !t.ended[ccid] {
+		fmt.Printf("[%s %s] telemetry feed ended (call no longer tracked)\n", label, emp)
+	}
+	t.ended[ccid] = true
+	return false
 }
 
 // ---------------------------------------------------------------------------

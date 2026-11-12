@@ -102,6 +102,16 @@ type TelemetryRing struct {
 	maxRings int
 	calls    map[string]*telemetryRing
 	order    []string // FIFO of call ids by first append (eviction order)
+	// everSeen records every ccid that EVER created a ring (survives
+	// FIFO eviction). HasRing reads it: the release fan-out's "never
+	// recorded anything" probe must not resurrect an EVICTED call's
+	// ring, and a live-map miss alone cannot tell "evicted" from
+	// "never existed" (C-20). Bounded like the rings themselves: a
+	// ccid re-entering after eviction re-arms its entry (map write,
+	// no growth) and long-lived daemons carry one small map entry per
+	// distinct call id over the process lifetime - the same class of
+	// bound the call store already accepts.
+	everSeen map[string]struct{}
 }
 
 // NewTelemetryRing constructs the ring set. perCall <= 0 falls back to
@@ -117,6 +127,7 @@ func NewTelemetryRing(perCall, maxRings int) *TelemetryRing {
 		perCall:  perCall,
 		maxRings: maxRings,
 		calls:    make(map[string]*telemetryRing),
+		everSeen: make(map[string]struct{}),
 	}
 }
 
@@ -133,6 +144,10 @@ func (r *TelemetryRing) Append(ccid string, in EventInput) uint64 {
 	if cr == nil {
 		cr = &telemetryRing{events: make([]TelemetryEvent, r.perCall)}
 		r.calls[ccid] = cr
+		if r.everSeen == nil {
+			r.everSeen = make(map[string]struct{})
+		}
+		r.everSeen[ccid] = struct{}{}
 		r.order = append(r.order, ccid)
 		for len(r.order) > r.maxRings {
 			oldest := r.order[0]
@@ -158,24 +173,30 @@ func (r *TelemetryRing) Append(ccid string, in EventInput) uint64 {
 }
 
 // Since returns this call's events with Seq > cursor in seq order, capped
-// at limit (limit <= 0 means the ring capacity). truncated reports that
-// events after cursor were already evicted from the ring (a slow poller
-// lost rows). found reports whether the call id has a ring at all.
-func (r *TelemetryRing) Since(ccid string, cursor uint64, limit int) (events []TelemetryEvent, truncated bool, found bool) {
+// at limit (limit <= 0 means the ring capacity). truncated reports ONLY
+// genuine eviction: events after cursor were already overwritten in the
+// ring (a slow poller lost rows). A limit-capped backlog read is NOT
+// truncated - hasMore reports that matching events exist beyond the cap
+// (the client just reads again with the returned cursor). found reports
+// whether the call id has a LIVE ring; HasRing is the broader
+// ever-recorded probe the release fan-out uses.
+func (r *TelemetryRing) Since(ccid string, cursor uint64, limit int) (events []TelemetryEvent, truncated bool, hasMore bool, found bool) {
 	if r == nil || ccid == "" {
-		return nil, false, false
+		return nil, false, false, false
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	cr := r.calls[ccid]
 	if cr == nil {
-		return nil, false, false
+		return nil, false, false, false
 	}
 	if limit <= 0 || limit > r.perCall {
 		limit = r.perCall
 	}
 	// Retained window: seqs (total-count+1 .. total). A cursor below the
-	// window's start means un-consumed events were already overwritten.
+	// window's start means un-consumed events were already overwritten -
+	// the ONLY truncated condition (the ring is append-ordered, so any
+	// cursor above droppedEnd sees every retained match in full).
 	droppedEnd := cr.total - uint64(cr.count)
 	if cursor < droppedEnd {
 		truncated = true
@@ -188,12 +209,28 @@ func (r *TelemetryRing) Since(ccid string, cursor uint64, limit int) (events []T
 			continue
 		}
 		if len(out) >= limit {
-			truncated = true
+			hasMore = true
 			break
 		}
 		out = append(out, ev)
 	}
-	return out, truncated, true
+	return out, truncated, hasMore, true
+}
+
+// HasRing reports whether ccid EVER recorded telemetry: a live ring (even
+// an empty one) or an evicted one. It is the release fan-out's "never
+// recorded anything" probe (C-20): a live-map miss alone cannot tell
+// "FIFO-evicted" from "never existed" - both read false on calls - so the
+// ever-created set is the authority. An evicted call's release must NOT
+// resurrect a ring with a synthetic call_ended.
+func (r *TelemetryRing) HasRing(ccid string) bool {
+	if r == nil || ccid == "" {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, seen := r.everSeen[ccid]
+	return seen
 }
 
 // PreviewEventText truncates free text for a telemetry line (the same

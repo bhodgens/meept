@@ -21,9 +21,9 @@ func TestCallEventsSeamProjection(t *testing.T) {
 	if seam == nil {
 		t.Fatal("callEventsSeam nil with a ring")
 	}
-	events, truncated, found := seam("cc-1", 0, 0)
-	if !found || truncated {
-		t.Fatalf("found=%v truncated=%v", found, truncated)
+	events, truncated, hasMore, found := seam("cc-1", 0, 0)
+	if !found || truncated || hasMore {
+		t.Fatalf("found=%v truncated=%v hasMore=%v", found, truncated, hasMore)
 	}
 	if len(events) != 2 || events[0].Kind != "heard" || events[1].Kind != "turn_final" {
 		t.Fatalf("projection = %+v", events)
@@ -33,7 +33,7 @@ func TestCallEventsSeamProjection(t *testing.T) {
 	}
 	// Unknown ccid: found=false, empty list (never nil - the handler
 	// normalises but the seam must not surprise it).
-	events, _, found = seam("cc-nope", 0, 0)
+	events, _, _, found = seam("cc-nope", 0, 0)
 	if found || len(events) != 0 {
 		t.Fatalf("unknown ccid: found=%v events=%+v", found, events)
 	}
@@ -56,7 +56,7 @@ func TestCallEventsSeamNilSafe(t *testing.T) {
 	if seams.Events == nil {
 		t.Fatal("a ring present must arm voice.local.events even with the local leg disabled")
 	}
-	_, _, found := seams.Events("cc-x", 0, 0)
+	_, _, _, found := seams.Events("cc-x", 0, 0)
 	if found {
 		t.Fatal("empty ring: found must stay false")
 	}
