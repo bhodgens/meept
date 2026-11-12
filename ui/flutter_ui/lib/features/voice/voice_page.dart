@@ -25,6 +25,10 @@ import '../../widgets/tool_panel_shell.dart';
 /// Poll cadence for the live status list (leaf 13b T2: 2s).
 const Duration voiceStatusPollInterval = Duration(seconds: 2);
 
+/// Rendered telemetry rows kept per call (bughunt C-12): the feed buffer
+/// is bounded so a chatty call cannot grow the widget tree forever.
+const int voiceEventFeedMaxRows = 200;
+
 /// Voice page state held by [VoicePageNotifier].
 class VoicePageState {
   /// Employees offered by the picker (employee roster ids/names).
@@ -43,6 +47,12 @@ class VoicePageState {
   /// Last one-line status note (start/end outcomes).
   final String? note;
 
+  /// Telemetry rows per live call (bughunt C-12), call_id -> newest-last
+  /// lines from the bounded voice.local.events poller. The map carries
+  /// ONLY live calls; a call that leaves the status snapshot drops its
+  /// subscription and its rows on the next status refresh.
+  final Map<String, List<VoiceEventRow>> events;
+
   const VoicePageState({
     this.employees = const [],
     this.sessions = const [],
@@ -50,6 +60,7 @@ class VoicePageState {
     this.opening = false,
     this.error,
     this.note,
+    this.events = const {},
   });
 
   VoicePageState copyWith({
@@ -59,6 +70,7 @@ class VoicePageState {
     bool? opening,
     Object? error = _unset,
     Object? note = _unset,
+    Map<String, List<VoiceEventRow>>? events,
   }) {
     return VoicePageState(
       employees: employees ?? this.employees,
@@ -67,6 +79,7 @@ class VoicePageState {
       opening: opening ?? this.opening,
       error: identical(error, _unset) ? this.error : (error as String?),
       note: identical(note, _unset) ? this.note : (note as String?),
+      events: events ?? this.events,
     );
   }
 }
@@ -90,6 +103,7 @@ class VoicePageNotifier extends StateNotifier<VoicePageState> {
 
   Timer? _pollTimer;
   bool _disposed = false;
+  final Map<String, VoiceEventsSubscription> _eventSubs = {};
 
   void _checkMounted() {
     assert(() {
@@ -112,6 +126,10 @@ class VoicePageNotifier extends StateNotifier<VoicePageState> {
   void dispose() {
     _disposed = true;
     _pollTimer?.cancel();
+    for (final sub in _eventSubs.values) {
+      sub.stop();
+    }
+    _eventSubs.clear();
     super.dispose();
   }
 
@@ -152,11 +170,15 @@ class VoicePageNotifier extends StateNotifier<VoicePageState> {
   /// One voice.local.status refresh. An error here does NOT kill the
   /// poll: the next tick retries (transient daemon reconnects are
   /// normal), the message just surfaces until the next good snapshot.
+  /// Each good snapshot reconciles the telemetry subscriptions against
+  /// the live call set (bughunt C-12): new call ids gain a bounded
+  /// poller, vanished call ids lose theirs (and their rendered rows).
   Future<void> _refreshStatus() async {
     _checkMounted();
     try {
       final sessions = await voiceService.status();
       if (_disposed) return;
+      _reconcileEventSubscriptions(sessions);
       state = state.copyWith(sessions: sessions, error: null);
     } on VoiceServiceException catch (e) {
       if (_disposed) return;
@@ -165,6 +187,45 @@ class VoicePageNotifier extends StateNotifier<VoicePageState> {
       if (_disposed) return;
       state = state.copyWith(error: e.toString());
     }
+  }
+
+  /// Start/stop the per-call telemetry pollers so they exactly cover the
+  /// live call set (bughunt C-12). Rows append into state.events keyed
+  /// by call id (newest last, bounded).
+  void _reconcileEventSubscriptions(List<VoiceSessionRow> sessions) {
+    final live = <String>{};
+    for (final row in sessions) {
+      if (row.callId.isEmpty) continue;
+      live.add(row.callId);
+      if (!_eventSubs.containsKey(row.callId)) {
+        final sub = VoiceEventsSubscription(
+          voiceService: voiceService,
+          callId: row.callId,
+          onRows: (rows) => _appendEventRows(row.callId, rows),
+        )..start();
+        _eventSubs[row.callId] = sub;
+      }
+    }
+    for (final id in _eventSubs.keys.toList(growable: false)) {
+      if (!live.contains(id)) {
+        _eventSubs.remove(id)?.stop();
+        final events = Map.of(state.events)..remove(id);
+        state = state.copyWith(events: events);
+      }
+    }
+  }
+
+  /// Append one poll batch to a call's telemetry feed (newest last),
+  /// keeping the rendered buffer bounded.
+  void _appendEventRows(String callId, List<VoiceEventRow> rows) {
+    if (_disposed) return;
+    final existing = state.events[callId] ?? const <VoiceEventRow>[];
+    final merged = <VoiceEventRow>[...existing, ...rows];
+    if (merged.length > voiceEventFeedMaxRows) {
+      merged.removeRange(0, merged.length - voiceEventFeedMaxRows);
+    }
+    final events = Map.of(state.events)..[callId] = List.unmodifiable(merged);
+    state = state.copyWith(events: events);
   }
 
   /// voice.local.open for the picked employee, then an immediate status
@@ -324,7 +385,12 @@ class _VoiceBody extends ConsumerWidget {
           ),
         ),
         const SizedBox(height: 4),
-        Expanded(child: _VoiceSessionList(sessions: state.sessions)),
+        Expanded(
+          child: _VoiceSessionList(
+            sessions: state.sessions,
+            events: state.events,
+          ),
+        ),
       ],
     );
   }
@@ -568,11 +634,13 @@ class _VoiceStartRowState extends ConsumerState<_VoiceStartRow> {
   }
 }
 
-/// Live session list with an end button per row.
+/// Live session list with an end button per row and the per-call
+/// telemetry feed beneath each call's header (bughunt C-12).
 class _VoiceSessionList extends StatelessWidget {
   final List<VoiceSessionRow> sessions;
+  final Map<String, List<VoiceEventRow>> events;
 
-  const _VoiceSessionList({required this.sessions});
+  const _VoiceSessionList({required this.sessions, required this.events});
 
   @override
   Widget build(BuildContext context) {
@@ -592,7 +660,10 @@ class _VoiceSessionList extends StatelessWidget {
       itemCount: sessions.length,
       itemBuilder: (context, index) {
         final row = sessions[index];
-        return _VoiceSessionRowTile(row: row);
+        return _VoiceSessionRowTile(
+          row: row,
+          events: events[row.callId] ?? const <VoiceEventRow>[],
+        );
       },
     );
   }
@@ -600,8 +671,9 @@ class _VoiceSessionList extends StatelessWidget {
 
 class _VoiceSessionRowTile extends ConsumerWidget {
   final VoiceSessionRow row;
+  final List<VoiceEventRow> events;
 
-  const _VoiceSessionRowTile({required this.row});
+  const _VoiceSessionRowTile({required this.row, required this.events});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -613,50 +685,90 @@ class _VoiceSessionRowTile extends ConsumerWidget {
         border: Border.all(color: CyberpunkColors.midGray, width: 1),
         borderRadius: BorderRadius.circular(4),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            row.leg == 'local' ? Icons.graphic_eq : Icons.phone,
-            size: 16,
-            color: CyberpunkColors.orangePrimary,
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  // contact-display leaf 03: render the display pair
-                  // (displayTarget falls back to the legacy raw target,
-                  // then 'unknown') — never a client-side number.
-                  '${row.employeeId} -> ${row.displayTarget}',
-                  style: CyberpunkTypography.bodySmall.copyWith(
-                    color: CyberpunkColors.lightGray,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-                Text(
-                  '${row.leg} - since ${row.sinceRfc3339}',
-                  style: CyberpunkTypography.bodySmall.copyWith(
-                    color: CyberpunkColors.midGray,
-                    fontSize: 10,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          TextButton(
-            onPressed: () =>
-                unawaited(ref.read(voiceProvider.notifier).endCall(row.callId)),
-            child: Text(
-              'end',
-              style: CyberpunkTypography.bodySmall.copyWith(
-                color: CyberpunkColors.redAlert,
+          Row(
+            children: [
+              Icon(
+                row.leg == 'local' ? Icons.graphic_eq : Icons.phone,
+                size: 16,
+                color: CyberpunkColors.orangePrimary,
               ),
-            ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      // contact-display leaf 03: render the display pair
+                      // (displayTarget falls back to the legacy raw
+                      // target, then 'unknown') - never a client-side
+                      // number.
+                      '${row.employeeId} -> ${row.displayTarget}',
+                      style: CyberpunkTypography.bodySmall.copyWith(
+                        color: CyberpunkColors.lightGray,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      '${row.leg} - since ${row.sinceRfc3339}',
+                      style: CyberpunkTypography.bodySmall.copyWith(
+                        color: CyberpunkColors.midGray,
+                        fontSize: 10,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              TextButton(
+                onPressed: () => unawaited(
+                  ref.read(voiceProvider.notifier).endCall(row.callId),
+                ),
+                child: Text(
+                  'end',
+                  style: CyberpunkTypography.bodySmall.copyWith(
+                    color: CyberpunkColors.redAlert,
+                  ),
+                ),
+              ),
+            ],
           ),
+          // Telemetry feed (bughunt C-12): one line per event,
+          // newest last, empty while the ring has not produced any.
+          if (events.isNotEmpty) ...[
+            const Divider(height: 12),
+            for (final ev in events)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 1),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (ev.isBargeIn) ...[
+                      Icon(
+                        Icons.bolt,
+                        size: 12,
+                        color: CyberpunkColors.redAlert,
+                      ),
+                      const SizedBox(width: 4),
+                    ],
+                    Expanded(
+                      child: Text(
+                        ev.line,
+                        style: CyberpunkTypography.bodySmall.copyWith(
+                          color: ev.isBargeIn
+                              ? CyberpunkColors.redAlert
+                              : CyberpunkColors.midGray,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
         ],
       ),
     );

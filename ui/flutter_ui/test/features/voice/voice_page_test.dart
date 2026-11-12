@@ -23,12 +23,17 @@ class _FakeVoiceService implements VoiceServiceContract {
   VoiceServiceException? openError;
   VoiceLocalOpenResult? openResult;
 
+  // Telemetry (bughunt C-12): batches returned per call, in order; the
+  // fake pops one batch per events() call, then repeats the last entry.
+  final Map<String, List<VoiceLocalEventsResult>> eventBatches = {};
   int openCalls = 0;
   int endCalls = 0;
   int statusCalls = 0;
+  int eventsCalls = 0;
   String? lastOpenedEmployee;
   String? lastOpenedLabel;
   final List<String> endedCallIds = <String>[];
+  final List<String> eventsCallIds = <String>[];
 
   @override
   Future<VoiceLocalOpenResult> open(String employeeId, String label) async {
@@ -57,6 +62,23 @@ class _FakeVoiceService implements VoiceServiceContract {
   Future<List<VoiceSessionRow>> status() async {
     statusCalls++;
     return statusRows;
+  }
+
+  @override
+  Future<VoiceLocalEventsResult> events(String callId, {int? limit}) async {
+    eventsCalls++;
+    eventsCallIds.add(callId);
+    final batches = eventBatches[callId];
+    if (batches == null || batches.isEmpty) {
+      return VoiceLocalEventsResult(
+        callId: callId,
+        events: const [],
+        cursor: 0,
+        found: false,
+      );
+    }
+    if (batches.length == 1) return batches.first;
+    return batches.removeAt(0);
   }
 }
 
@@ -154,12 +176,14 @@ void main() {
         _row('c1'),
         // New wire shape (leaf 02): the display pair renders, no raw
         // target on the row.
-        _row('c2',
-            employeeId: 'bob',
-            target: '',
-            targetName: 'Jane Doe',
-            targetDisplay: 'Jane Doe (•••5567)',
-            leg: 'phone'),
+        _row(
+          'c2',
+          employeeId: 'bob',
+          target: '',
+          targetName: 'Jane Doe',
+          targetDisplay: 'Jane Doe (•••5567)',
+          leg: 'phone',
+        ),
       ];
     await tester.pumpWidget(_host(service: service));
     await _settle(tester);
@@ -246,6 +270,126 @@ void main() {
 
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 3));
+  });
+
+  group('voice telemetry feed (bughunt C-12)', () {
+    testWidgets('live call renders telemetry lines from the events poll', (
+      tester,
+    ) async {
+      final service = _FakeVoiceService()
+        ..statusRows = [_row('c1')]
+        ..eventBatches['c1'] = [
+          const VoiceLocalEventsResult(
+            callId: 'c1',
+            events: [
+              VoiceCallEvent(
+                seq: 1,
+                kind: 'heard',
+                at: '2026-11-07T12:00:01.5Z',
+                text: 'hello there',
+              ),
+              VoiceCallEvent(
+                seq: 2,
+                kind: 'turn_final',
+                at: '2026-11-07T12:00:02.5Z',
+                words: 12,
+                ms: 850,
+              ),
+            ],
+            cursor: 2,
+            found: true,
+          ),
+        ];
+      await tester.pumpWidget(_host(service: service));
+      await _settle(tester);
+      // Let the 500ms telemetry timer fire and its future complete
+      // (fake async: each await needs its own pump).
+      await tester.pump(voiceEventsPollInterval);
+      await tester.pump();
+
+      // One subscription started for the live call; the batch rendered.
+      expect(service.eventsCalls, greaterThanOrEqualTo(1));
+      expect(service.eventsCallIds, contains('c1'));
+      // CLI-shaped lines (voiceEventRender parity).
+      expect(find.text('12:00:01 heard: hello there'), findsOneWidget);
+      expect(find.text('12:00:02 replied (12 words, 850ms)'), findsOneWidget);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(seconds: 3));
+    });
+
+    testWidgets('barge-in renders as an attention row', (tester) async {
+      final service = _FakeVoiceService()
+        ..statusRows = [_row('c1')]
+        ..eventBatches['c1'] = [
+          const VoiceLocalEventsResult(
+            callId: 'c1',
+            events: [
+              VoiceCallEvent(
+                seq: 1,
+                kind: 'barge_in',
+                at: '2026-11-07T12:00:03Z',
+              ),
+            ],
+            cursor: 1,
+            found: true,
+          ),
+        ];
+      await tester.pumpWidget(_host(service: service));
+      await _settle(tester);
+      await tester.pump(voiceEventsPollInterval);
+      await tester.pump();
+
+      expect(find.text('12:00:03 >> barge-in'), findsOneWidget);
+      // The attention marker rides the row: a bolt icon next to it.
+      expect(find.byIcon(Icons.bolt), findsOneWidget);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(seconds: 3));
+    });
+
+    testWidgets('call leaving the status snapshot drops its feed', (
+      tester,
+    ) async {
+      final service = _FakeVoiceService()
+        ..statusRows = [_row('c1')]
+        ..eventBatches['c1'] = [
+          const VoiceLocalEventsResult(
+            callId: 'c1',
+            events: [
+              VoiceCallEvent(
+                seq: 1,
+                kind: 'heard',
+                at: '2026-11-07T12:00:01Z',
+                text: 'hi',
+              ),
+            ],
+            cursor: 1,
+            found: true,
+          ),
+        ];
+      await tester.pumpWidget(_host(service: service));
+      await _settle(tester);
+      await tester.pump(voiceEventsPollInterval);
+      await tester.pump();
+      expect(find.textContaining('heard: hi'), findsOneWidget);
+
+      // Call ends -> status no longer lists it -> feed row disappears
+      // and the poller stops (no further events() calls). Ticks that
+      // fire in the same pump window as the status refresh are legal;
+      // the counter resets only after the reconcile has run.
+      service.statusRows = const [];
+      await tester.pump(voiceStatusPollInterval);
+      await tester.pump();
+      service.eventsCallIds.clear();
+      await tester.pump(voiceEventsPollInterval * 3);
+      await tester.pump();
+      expect(find.textContaining('heard: hi'), findsNothing);
+      expect(service.eventsCallIds, isEmpty);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(seconds: 3));
+    });
   });
 
   group('audio capture/playback lifecycle (T4, behind a fake)', () {
