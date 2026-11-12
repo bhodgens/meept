@@ -29,6 +29,7 @@ import (
 	"github.com/caimlas/meept/internal/secrets"
 	"github.com/caimlas/meept/internal/toolprov"
 	"github.com/caimlas/meept/internal/tools"
+	"github.com/caimlas/meept/internal/voiceintake"
 	"github.com/caimlas/meept/pkg/id"
 )
 
@@ -319,6 +320,17 @@ func (p *voiceProvider) Discover() []tools.Tool {
 	if contactChainFunc != nil {
 		out = append(out, NewContactTool(contactChainFunc))
 	}
+	// Guided intake (leaf 05, secretary-scoped): intake_save joins the
+	// voice group ONLY when the ledger seam is armed
+	// (SetIntakeSaveSaver, daemon wiring). Unarmed = unregistered =
+	// absent from every toolset (the ledgerAppend-off-by-absence
+	// posture); the constitution's tools_allowed still gates execution
+	// for employees that CAN see it.
+	if intakeSaveSaver != nil {
+		intake := NewIntakeSaveTool(intakeSaveSaver)
+		foldIntakeSeams(intake)
+		out = append(out, intake)
+	}
 	return out
 }
 
@@ -335,6 +347,24 @@ func SetContactChain(fn ContactChainRunner) {
 		return
 	}
 	contactChainFunc = fn
+}
+
+// intakeSaveSaver is the guided-intake ledger seam (leaf 05), bound by
+// the daemon wiring (SetIntakeSaveSaver) over the employee ledger store.
+// nil = the intake_save tool is not registered at all (guided intake
+// off-by-absence).
+var intakeSaveSaver voiceintake.IntakeSaver
+
+// SetIntakeSaveSaver binds the guided-intake ledger append seam. nil fn
+// is ignored (repo Set* nil-guard rule). Bound ONLY when the daemon's
+// guided-intake gate is on (secretary config); the binding closure maps
+// onto ledger.Store.Append with kind per record, source=voice,
+// source_ref=ccid.
+func SetIntakeSaveSaver(fn voiceintake.IntakeSaver) {
+	if fn == nil {
+		return
+	}
+	intakeSaveSaver = fn
 }
 
 // PermissionClass implements toolprov.Provider. Placing a phone call

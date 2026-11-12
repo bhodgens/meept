@@ -274,6 +274,10 @@ type WireVoiceDeps struct {
 // boot). A configuration error returns a named error: voice is opt-in, so
 // a HALF-configured voice block must fail the boot loudly, never degrade
 // to half-wired.
+// Config returns the resolved [voice] config block (read-only; the
+// guided-intake arming seam reads the employee_leg rows).
+func (w *VoiceWiring) Config() config.VoiceConfig { return w.cfg }
+
 func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 	cfg := deps.Config.Voice
 	logger := deps.Logger
@@ -472,7 +476,13 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		DisplayLookup:  displayLookup,
 		BriefLLM:       deps.BriefLLM,
 		MomentResolver: deps.MomentResolver,
-		Logger:         vlog.With("sub", "employee"),
+		// Guided intake prompt seam (leaf 05, secretary-scoped): resolved
+		// per bound employee id from the [voice.employee_leg] rows; an
+		// employee whose row lacks guided_intake gets an empty extension.
+		GuidedIntakePromptFor: func(employeeID string) string {
+			return guidedIntakePromptExtension(cfg, employeeID)
+		},
+		Logger: vlog.With("sub", "employee"),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("voice wiring: employee stack: %w", err)
@@ -1289,6 +1299,10 @@ func (w *VoiceWiring) releaseCall(ccid string, outcome voice.Outcome) {
 	if w.Employee != nil && w.Employee.gates != nil {
 		w.Employee.gates.drop(ccid, string(outcome))
 	}
+	// Guided intake (leaf 05): the call's confirm state dies with the
+	// call — a replayed outcome or a new call on a recycled ccid can
+	// never inherit a confirmation.
+	clearIntakeSession(ccid)
 	w.sendEndFrame(ccid, outcome)
 	w.ChildProc.NoteCallEnd(ccid)
 
@@ -1833,6 +1847,14 @@ func (r bindingTurnRunner) Run(ctx context.Context, _ voice.SessionHandle, promp
 	// distinguishes stamped-zero from absent; never-stamped is only
 	// possible off the voice path).
 	turnCtx = callerid.With(turnCtx, r.inst.Caller)
+	// Guided intake (leaf 05): the ccid rides the turn ctx (the
+	// intake_save tool's callID seam keys the confirm state by it), and
+	// the caller-turn boundary advances the confirm state machine — a
+	// save demanded last turn becomes confirmable THIS turn (the
+	// uptractor turn-count rule: one full caller exchange between the
+	// read-back and the commit).
+	turnCtx = WithIntakeCCID(turnCtx, r.inst.CallControlID)
+	advanceIntakeTurn(r.inst.CallControlID)
 	return r.b.RunTurn(turnCtx, r.inst.CallControlID, prompt)
 }
 

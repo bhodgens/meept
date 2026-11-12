@@ -1392,7 +1392,7 @@
       "barge_in_rms": 3000,                 // s16 RMS threshold for local-leg barge-in
       "name": ""                            // session label; empty = hostname
     },
-    "employee_leg": [],                     // per-agent routing defaults; entry {employee, leg: "phone"|"local", tts_voice, tts_model, fresh_session?}; fresh_session overrides voice.fresh_session_per_call per employee (absent = inherit); beats per-leg config, beats provider default
+    "employee_leg": [],                     // per-agent routing defaults; entry {employee, leg: "phone"|"local", tts_voice, tts_model, fresh_session?, guided_intake?}; fresh_session overrides voice.fresh_session_per_call per employee (absent = inherit); guided_intake opts that employee's calls into guided intake (uptractor-ports leaf 05: intake_save tool + one-question-at-a-time prompt; the secretary's row opts in), default absent = off; beats per-leg config, beats provider default
     "child_binary_path": "",                // empty = daemon-adjacent lookup
     "loopback_plain_addr": "",              // empty = no second listener; when set (and enabled), serves plain HTTP on this loopback addr for a TLS-terminating tunnel
     "messaging": {                          // Telnyx SMS messaging (contact channels); disabled by default

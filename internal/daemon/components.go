@@ -5934,6 +5934,11 @@ func (c *Components) Start(ctx context.Context) error {
 	if c.Voice != nil {
 		if err := c.Voice.Start(ctx, func(dial builtin.DialerFunc, agentID builtin.AgentIDFunc) {
 			builtin.SetVoiceProvider(dial, agentID, c.SecretBroker)
+			// Guided intake (uptractor-ports leaf 05): arm the
+			// intake_save ledger seams when an employee_leg row opts in.
+			// Nil ledger store / no row = tool unregistered
+			// (off-by-absence); tools_allowed still governs execution.
+			armIntakeSave(c.EmployeeLedger, c.Voice.Config(), c.Logger)
 			// local-leg leaf 08 T4: arm the voice_call tool's local seam
 			// when the leg exists (nil seam = the tool fails closed with
 			// the disabled-leg error, exactly the voice.local.enabled=false

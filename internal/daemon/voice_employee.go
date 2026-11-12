@@ -134,6 +134,15 @@ type VoiceEmployeeDeps struct {
 	// (D1). Keyed by the bound employee id — the same id SetAgentID
 	// stamps (caller-authz leaf 02 precedent).
 	MomentResolver func(employeeID string) func() string
+
+	// GuidedIntakePromptFor (uptractor-ports leaf 05): resolves the
+	// guided-intake prompt extension for the bound employee (the
+	// one-question-at-a-time procedure block). Empty result = no
+	// extension (the employee_leg row did not opt in — guided intake is
+	// the secretary's call behavior, secretary-scoped per the owner
+	// decision). nil seam = the extension is never stamped
+	// (off-by-absence, D1 posture same as MomentResolver).
+	GuidedIntakePromptFor func(employeeID string) string
 }
 
 // sessionStoreAdapter adapts session.Store onto voice.SessionStore via
@@ -233,6 +242,9 @@ type loopTurnRunner struct {
 	// momentResolver builds the per-employee "# Moment" renderer stamped
 	// onto session clones each turn (awareness leaf 01/02). nil = inert.
 	momentResolver func(employeeID string) func() string
+	// guidedIntakePromptFor resolves the guided-intake procedure block
+	// for the bound employee (leaf 05). nil = never stamped.
+	guidedIntakePromptFor func(employeeID string) string
 }
 
 // EmployeeDefinitionResolver resolves one employee's runtime definition:
@@ -375,6 +387,26 @@ func (r *loopTurnRunner) Run(ctx context.Context, sess voice.SessionHandle, prom
 		r.logger.Debug("voice turn runner: employee persona applied",
 			"session_id", sess.ID, "employee_id", employeeID, "prompt_bytes", len(override))
 	}
+	// Guided intake (leaf 05, secretary-scoped): when the employee's
+	// employee_leg row opts in, append the one-question-at-a-time
+	// procedure block to the persona override lane. Runs after
+	// applyEmployeeDefinition so the extension rides the SAME
+	// SystemPromptOveride override (buildSystemPromptWithOverride wins
+	// over SOUL.md on every prompt build site). An empty extension (row
+	// off) leaves the prompt byte-identical to pre-leaf behavior.
+	if r.guidedIntakePromptFor != nil {
+		if ext := r.guidedIntakePromptFor(employeeID); ext != "" {
+			cfg := loop.GetConfig()
+			if cfg.SystemPromptOveride != "" {
+				cfg.SystemPromptOveride = cfg.SystemPromptOveride + "\n\n" + ext
+			} else {
+				cfg.SystemPromptOveride = ext
+			}
+			loop.SetConfig(cfg)
+			r.logger.Debug("voice turn runner: guided intake prompt applied",
+				"session_id", sess.ID, "employee_id", employeeID)
+		}
+	}
 	// Clock stamp (live defect 2026-11-11: asked "what time is it?" the
 	// companion answered "I can't check the current time" — the voice turn
 	// carried no clock, and the model honestly reported what its prompt
@@ -514,6 +546,9 @@ func WireVoiceEmployee(deps VoiceEmployeeDeps) (*VoiceEmployeeWiring, error) {
 			// Moment renderer seam (awareness leaf 01/02): resolved per
 			// bound employee id at turn time on the session clone.
 			momentResolver: deps.MomentResolver,
+			// Guided intake prompt seam (leaf 05): resolved per bound
+			// employee id; empty = no extension.
+			guidedIntakePromptFor: deps.GuidedIntakePromptFor,
 		},
 		Progress: progressPublisherFunc(progressFn),
 		Logger:   logger.With("component", "voice-binding"),

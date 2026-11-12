@@ -87,3 +87,17 @@ func FreshSessionFor(cfg config.VoiceConfig, employeeID string) bool {
 	}
 	return cfg.FreshSessionPerCall
 }
+
+// GuidedIntakeFor resolves one call's guided-intake gate (uptractor-ports
+// leaf 05): the employee_leg row's tri-state GuidedIntake; absent (nil)
+// or no row = OFF. There is deliberately NO global default: guided intake
+// is the secretary employee's call behavior (owner decision 2026-11-11),
+// so only an employee whose own row opts in runs the intake procedure.
+// Pure config read (ResolveProfile shape) — the daemon resolves it once
+// per call and drives the prompt extension + intake_save grant from it.
+func GuidedIntakeFor(cfg config.VoiceConfig, employeeID string) bool {
+	if entry := employeeEntry(cfg, employeeID); entry != nil && entry.GuidedIntake != nil {
+		return *entry.GuidedIntake
+	}
+	return false
+}

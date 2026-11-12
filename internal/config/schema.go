@@ -5606,6 +5606,17 @@ type EmployeeLegConfig struct {
 	// true/false = this employee's override. Pointer because JSON5 cannot
 	// distinguish "absent" from false on a plain bool.
 	FreshSession *bool `json:"fresh_session" toml:"fresh_session"`
+	// GuidedIntake (leaf 05 uptractor-ports, opt-in per employee row,
+	// default false): run this employee's calls as guided intake —
+	// identify the caller, collect missing fields ONE question at a
+	// time, read the record back verbatim, and save only after the
+	// caller confirms (intake_save; confirm-flag gated at the tool
+	// layer). Scoped per employee_leg row deliberately: guided intake is
+	// the SECRETARY employee's call behavior (owner decision
+	// 2026-11-11), not a generic employee knob — an employee opts in by
+	// its own row, and the prompt extension + intake_save grant follow
+	// that row only. Pointer (tri-state like FreshSession).
+	GuidedIntake *bool `json:"guided_intake" toml:"guided_intake"`
 }
 
 // ContactConfig configures the employee contact chain ([contact],
