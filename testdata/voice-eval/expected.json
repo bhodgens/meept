@@ -1,0 +1,66 @@
+{
+  "threshold_note": "Thresholds frozen from uptractor phone/core/sidecar-cloud/eval/accuracy.py (branch fix/coordinator-missed-hangup-watchdog): metric = word WER over norm(a-z0-9, '-'->space), distance/max(1,len(ref)); pass bar pegged to the recorded small.en+prompt run (WER 9%, key terms 14/14) with headroom for the recorded phone-line substitution classes (base.en+prompt: 'siding'->'fighting', 'Meadow Ridge'->'metal ridge' at WER 12%). Key-terms floor uses accuracy.py KEY via KeyHits(). Leak needles frozen from eval/prompt_leak.py (PROMPT vocabulary; any needle substring in a NON-SPEECH-fixture transcript = FAIL, ported as LeakNeedles).",
+  "prompt": "Uptractor site coordinator. Jobs: Meadow Ridge, Dakota Drywall. Work order, siding, drywall, roof flashing, delivery, crew, message.",
+  "cases": [
+    {
+      "wav": "demo-utterance.wav",
+      "expected": "Hi, this is Mike. Please move the pool to Friday morning and add 10 yards of gravel to the job.",
+      "max_wer": 0.34,
+      "min_key_hits": 1
+    },
+    {
+      "wav": "work-order-02.wav",
+      "expected": "I need to add a work order for Dakota Drywall.",
+      "max_wer": 0.34,
+      "min_key_hits": 1
+    },
+    {
+      "wav": "delivery-friday-03.wav",
+      "expected": "Move the drywall delivery to Friday at eight a.m.",
+      "max_wer": 0.45,
+      "min_key_hits": 1
+    },
+    {
+      "wav": "open-orders-04.wav",
+      "expected": "Can you read me the open work orders?",
+      "max_wer": 0.34,
+      "min_key_hits": 1
+    },
+    {
+      "wav": "crew-late-05.wav",
+      "expected": "Leave a message for the crew, I'll be late tomorrow.",
+      "max_wer": 0.34,
+      "min_key_hits": 0
+    },
+    {
+      "wav": "meadow-open-06.wav",
+      "expected": "What's open on the Meadow Ridge job?",
+      "max_wer": 0.34,
+      "min_key_hits": 0
+    },
+    {
+      "wav": "roof-flashing-07.wav",
+      "expected": "The roof flashing at Meadow Ridge is finished.",
+      "max_wer": 0.34,
+      "min_key_hits": 1
+    },
+    {
+      "wav": "log-drywall-08.wav",
+      "expected": "Log forty sheets of drywall for Dakota Drywall.",
+      "max_wer": 0.34,
+      "min_key_hits": 1
+    }
+  ],
+  "leak_cases": [
+    {
+      "wav": "leak-silence.wav",
+      "expect_empty": true
+    },
+    {
+      "wav": "leak-hiss.wav"
+    },
+    {
+      "wav": "leak-music.wav"
+    }
+  ]
+}
