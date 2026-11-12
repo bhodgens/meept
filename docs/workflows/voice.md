@@ -184,7 +184,12 @@ mic capture/playback (`lib/services/voice_audio.dart`) provides the
 capture/playback lifecycle via getUserMedia/MediaRecorder and the
 WebAudio API; a browser tab cannot dial the local leg's unix socket
 pair (no audio over RPC, CL8), so audio streaming to the daemon is a
-future transport change, not a GUI gap. Parity note: TUI (`/voice`
+future transport change, not a GUI gap. Each live call also streams
+telemetry: a bounded per-call poller (500 ms, the CLI cadence) reads
+`voice.local.events` through `VoiceService.events()` and renders the
+feed under the call's row — heard / thinking / replied / held /
+released / dropped / barge-in / call ended, barge-in rows highlighted.
+Parity note: TUI (`/voice`
 slash command), CLI (`meept voice local`), and this GUI page all drive
 the same `voice.local.*` RPC methods - leaf 13a + 13b.
 
@@ -217,7 +222,10 @@ seam-based like every other voice.local method — no new bus topic) and
 `meept voice link` / `meept voice local` poll it every 500 ms printing
 per-side lines: `heard:` / `thinking (N words)` / `replied (N words,
 Xms)` / `>> barge-in` / `call ended: <reason>` / `silence deferred (...)`.
-Best-effort by
+The Flutter GUI reads the same ring for parity (bughunt C-12):
+`VoiceService.events()` over the same RPC, one bounded 500 ms poller
+per live call, rendering the same operator lines under each call's row
+in `/tools/voice`. Best-effort by
 contract: the poller never fails a run, and a final synchronous drain
 after close prints the tail events (rings outlive the call). A
 found=false answer at cursor > 0 ends that ccid's poller (eviction /

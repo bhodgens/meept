@@ -90,6 +90,16 @@ are guarded by `scripts/e2e-naive-user-chat.sh`:
   set by the voice persona stamp) — a tools-less employee echoing the
   template into a spoken reply was the leak's root cause; chat/task
   anchors ship unchanged.
+  **Clock-stamp boundary (C-6, 2026-11-11 bughunt):** the voice lane's
+  `[Context: current date/time is ...]` clock stamp rides OUTSIDE the
+  `<<<USER_INPUT>>>` boundary, trusted scaffolding only when its
+  PRODUCER declares it — the voice turn runner passes the raw spoken
+  prompt plus `WithVoiceClockStamp(ctx, stamp)` and the loop prepends
+  that exact (shape-validated) stamp via
+  `Orchestrator.WrapVoiceStampedUserInput`; a chat-lane caller who
+  pre-stamps their own prompt gets no seam, so their forged bracketed
+  context line is bracket-escaped INSIDE the boundary like any other
+  user text.
 - **Prompt scaffolding never renders to the user.** Step descriptions
   carry the strategic planner's session-context injection
   (`strategic.go`: `## Session context ...` block + `## Your Task`
