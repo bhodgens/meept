@@ -48,6 +48,14 @@ type keysWire struct {
 	TTSModel   string `json:"tts_model"`
 	TTSBaseURL string `json:"tts_base_url"`
 	TTSVoice   string `json:"tts_voice"`
+	// TurnConfirmMs is the voice-startguard C1 selector: config
+	// voice.turn_confirm_ms (default 900) — the child aggregates
+	// consecutive FINAL transcripts into ONE employee-turn prompt while
+	// finals keep landing inside this window. Sent always (no omitempty,
+	// the keys-wire convention); an old child ignores the extra field,
+	// and an old DAEMON line (field absent child-side) leaves the child
+	// on its own default. 0 = legacy per-final dispatch.
+	TurnConfirmMs int `json:"turn_confirm_ms"`
 }
 
 // Default vendor adapters when the config fields are empty (C4: preserves
@@ -98,6 +106,13 @@ func (w *VoiceWiring) sendKeysFrame(ccid string) {
 		TTSModel:   p.TtsModel,
 		TTSBaseURL: w.cfg.TTSBaseURL,
 		TTSVoice:   p.TtsVoice,
+		// Turn-aggregation window (voice-startguard C1): global config
+		// like the base URLs — not per-agent routing. A loaded config
+		// carries voice.turn_confirm_ms (DefaultConfig: 900; explicit 0
+		// = legacy per-final dispatch). A hand-built VoiceConfig that
+		// never set the field sends 0: the legacy shape, which is the
+		// exact pre-C1 behavior old call sites had.
+		TurnConfirmMs: w.cfg.TurnConfirmMs,
 	}
 	if kw.STTVendor == "" {
 		kw.STTVendor = defaultSTTVendor

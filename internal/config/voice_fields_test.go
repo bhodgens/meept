@@ -168,4 +168,7 @@ func TestVoiceTemplateDocumentsTTSFields(t *testing.T) {
 	if !strings.Contains(s, `"tts_base_url"`) {
 		t.Error("missing template key voice.tts_base_url (leaf 01 T2: document the new field)")
 	}
+	if !strings.Contains(s, `"turn_confirm_ms"`) {
+		t.Error("missing template key voice.turn_confirm_ms (startguard C1: document the aggregation window)")
+	}
 }

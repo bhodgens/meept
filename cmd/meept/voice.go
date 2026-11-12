@@ -52,13 +52,7 @@ func newVoiceCmd() *cobra.Command {
 // ---------------------------------------------------------------------------
 
 func newVoiceLocalCmd() *cobra.Command {
-	var (
-		employee string
-		label    string
-		inPath   string
-		outPath  string
-		list     bool
-	)
+	f := localFlags{}
 
 	cmd := &cobra.Command{
 		Use:   "local",
@@ -68,27 +62,70 @@ no carrier, no cloud. With --in/--out the call reads mic input from a
 WAV file and writes the reply to a WAV file; without them the mic is
 captured via ffmpeg and the reply plays through the speaker.
 
+--record DIR (live mode only) tees EXACTLY the bytes handed to your
+own speaker playback into DIR/<call-id>.raw (raw s16le mono 16 kHz)
+plus DIR/<call-id>-meta.json, so head truncation and jitter on the
+human leg are measurable with scripts/voice-gap-analyze.py. The
+recorder taps the oto playback path, which file mode never opens, so
+--record with --in/--out is refused.
+
 Examples:
   meept voice local --list                        # employees you can call
   meept voice local --employee eve --in q.wav --out a.wav
-  meept voice local --employee eve --label desk   # live mic + speaker`,
+  meept voice local --employee eve --label desk   # live mic + speaker
+  meept voice local --employee eve --record /tmp/local-rec   # + human-leg evidence`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if list {
+			if err := f.validate(); err != nil {
+				return err
+			}
+			if f.list {
 				return runVoiceLocalList()
 			}
-			if employee == "" {
-				return fmt.Errorf("--employee is required (or use --list)")
-			}
-			return runVoiceLocal(employee, label, inPath, outPath)
+			return runVoiceLocal(f.employee, f.label, f.inPath, f.outPath, f.record)
 		},
 	}
 
-	cmd.Flags().StringVar(&employee, "employee", "", "employee id to call (required unless --list)")
-	cmd.Flags().StringVar(&label, "label", "", "session label (default: hostname)")
-	cmd.Flags().StringVar(&inPath, "in", "", "read mic input from this WAV file (file mode)")
-	cmd.Flags().StringVar(&outPath, "out", "", "write the reply to this WAV file (file mode)")
-	cmd.Flags().BoolVar(&list, "list", false, "list employees available for local calls")
+	cmd.Flags().StringVar(&f.employee, "employee", "", "employee id to call (required unless --list)")
+	cmd.Flags().StringVar(&f.label, "label", "", "session label (default: hostname)")
+	cmd.Flags().StringVar(&f.inPath, "in", "", "read mic input from this WAV file (file mode)")
+	cmd.Flags().StringVar(&f.outPath, "out", "", "write the reply to this WAV file (file mode)")
+	cmd.Flags().BoolVar(&f.list, "list", false, "list employees available for local calls")
+	cmd.Flags().StringVar(&f.record, "record", "", "live mode only: record the exact bytes handed to speaker playback into DIR (raw s16le mono 16 kHz + meta JSON)")
 	return cmd
+}
+
+// localFlags is the validated `voice local` flag set (pure validation +
+// the --record directory side effect, unit-tested without a daemon —
+// same shape as linkFlags).
+type localFlags struct {
+	employee string
+	label    string
+	inPath   string
+	outPath  string
+	list     bool
+	record   string
+}
+
+// validate reports the flag errors the leaf pins: --employee required
+// (unless --list), and --record refused in file mode (--in/--out): the
+// recorder taps the oto playback seam (recorderPlayer wraps the live
+// speaker's player) — file mode is pure io.Copy into a WAV and never
+// constructs a player, so there are no playback bytes to tee. When
+// --record is set the DIR is created if it does not exist (MkdirAll is
+// idempotent, mirroring linkFlags.validate).
+func (f localFlags) validate() error {
+	if !f.list && f.employee == "" {
+		return fmt.Errorf("--employee is required (or use --list)")
+	}
+	if f.record != "" {
+		if f.inPath != "" || f.outPath != "" {
+			return fmt.Errorf("--record requires live mode (no --in/--out): the recorder taps the oto playback path, which file mode never opens")
+		}
+		if err := os.MkdirAll(f.record, 0o755); err != nil {
+			return fmt.Errorf("--record: cannot create directory %q: %w", f.record, err)
+		}
+	}
+	return nil
 }
 
 // runVoiceLocalList lists employees via agents.list (the same surface
@@ -144,8 +181,11 @@ type voiceLocalOpenResult struct {
 }
 
 // runVoiceLocal opens the call, wires the audio paths, and blocks until
-// the call ends (daemon hangup, SIGINT, or file exhaustion).
-func runVoiceLocal(employee, label, inPath, outPath string) error {
+// the call ends (daemon hangup, SIGINT, or file exhaustion). recordDir
+// ("" = off) is live-mode only — localFlags.validate refuses --record
+// with --in/--out — and tees the operator's own speaker playback into
+// DIR/<call-id>.raw for gap analysis (leaf 02, C2).
+func runVoiceLocal(employee, label, inPath, outPath, recordDir string) error {
 	client, err := connectDaemon()
 	if err != nil {
 		return fmt.Errorf("failed to connect to daemon: %w", err)
@@ -199,7 +239,7 @@ func runVoiceLocal(employee, label, inPath, outPath string) error {
 	if inPath != "" || outPath != "" {
 		err = runVoiceLocalFileMode(ctx, client, open, inPath, outPath)
 	} else {
-		err = runVoiceLocalLive(ctx, open)
+		err = runVoiceLocalLive(ctx, open, employee, recordDir)
 	}
 
 	// The call ends here no matter how the loop exited (the daemon may
@@ -618,26 +658,161 @@ func drainLiveSpeaker(r io.Reader, s *voice.SpeakerSink, done chan<- error) {
 	}
 }
 
-func runVoiceLocalLive(ctx context.Context, open voiceLocalOpenResult) error {
+// liveWarmBurstBytes is one silent 20 ms burst (L16@16k mono) used to
+// open the oto audio context before any real audio can land.
+const liveWarmBurstBytes = 640
+
+// liveSpeaker is the warmed + (optionally) recorded speaker chain for a
+// live local call: the player seam, the sink the drain pumps into, the
+// dialed .out conn, and the recorder whose file closes at teardown.
+type liveSpeaker struct {
+	conn   net.Conn
+	player voice.Player
+	sink   *voice.SpeakerSink
+	rec    *recorderPlayer // nil when --record is off
+}
+
+// setupLiveSpeaker constructs the CLI's oto player, WARMS the audio
+// context with a silent burst, and only then dials the .out socket —
+// the same fix shape the link monitor received (startVoiceLinkMonitor).
+// Without the pre-dial warm-up, oto's lazy context init (~0.3 s device
+// open + ready wait + CoreAudio first-start latency) hits the first
+// ~150 ms burst of the greeting and drops/distorts it: the audible
+// "beginning gets truncated" the operator reported on live call
+// local-496a3fd0d2ab3fc6 (the monitor's twin defect was
+// link-d52f032b6e010882).
+//
+// recordDir ("" = off) wraps the player in the monitor's skip-first
+// recorderPlayer: the tee records EXACTLY the bytes handed to playback
+// (so scripts/voice-gap-analyze.py measures what the operator HEARS),
+// and the warm-up goes THROUGH the recorder so the silent burst opens
+// the context but provably never enters the .raw (monitor convention).
+// A meta-write or recorder-create failure degrades recording off (with
+// a stderr warning) exactly like the monitor, never the call.
+//
+// newPlayer and dial are seams (mirroring how drainLiveSpeaker takes an
+// io.Reader): production passes voice.NewOtoPlayer + net.Dial; the unit
+// test passes a fake player and a fake dial to pin the warm-before-dial
+// ORDER, which a real dial cannot exercise headlessly.
+func setupLiveSpeaker(open voiceLocalOpenResult, employee, recordDir string,
+	newPlayer func() voice.Player, dial func(network, addr string) (net.Conn, error),
+) (*liveSpeaker, error) {
+	player := newPlayer()
+	var (
+		rec  *recorderPlayer
+		p    voice.Player = player
+		warm              = func() error { return player.Play(make([]byte, liveWarmBurstBytes)) }
+	)
+	if recordDir != "" {
+		// Belt-and-braces: validate() already MkdirAlls; this keeps the
+		// seam safe for any caller. Then meta, then the recorder file.
+		if rerr := os.MkdirAll(recordDir, 0o755); rerr != nil {
+			fmt.Fprintf(os.Stderr, "record: dir: %v (recording off)\n", rerr)
+			recordDir = ""
+		} else if merr := writeLocalRecordingMeta(recordDir, open, employee); merr != nil { //nolint:nestif // degrade recording, never the call
+			fmt.Fprintf(os.Stderr, "record: meta: %v (recording off)\n", merr)
+			recordDir = ""
+		} else {
+			rc, cerr := newSideRecorder(player, recordDir, open.CallID, "")
+			if cerr != nil {
+				fmt.Fprintf(os.Stderr, "record: %v (recording off)\n", cerr)
+				recordDir = ""
+			} else {
+				rec = rc
+				p = rc
+				// Warm THROUGH the recorder: skipFirst consumes the
+				// silent burst from the tee but forwards it to oto.
+				warm = func() error { return rc.Play(make([]byte, liveWarmBurstBytes)) }
+			}
+		}
+	}
+	// Warm BEFORE dialing: the order is the whole point of the fix —
+	// the daemon starts teeing audio out of the splice the instant the
+	// dial lands, so a cold player here = a clipped greeting.
+	if werr := warm(); werr != nil {
+		if rec != nil {
+			_ = rec.closeFile()
+		}
+		return nil, fmt.Errorf("speaker warm-up failed: %w", werr)
+	}
+	conn, err := dial("unix", open.OutPath)
+	if err != nil {
+		if rec != nil {
+			_ = rec.closeFile()
+		}
+		return nil, fmt.Errorf("dial speaker socket %s: %w", open.OutPath, err)
+	}
+	return &liveSpeaker{
+		conn:   conn,
+		player: player,
+		sink:   voice.NewSpeakerSink(p, 0),
+		rec:    rec,
+	}, nil
+}
+
+// teardownLiveSpeaker is the live-local speaker teardown, mirroring the
+// monitor's per-side goroutine (dialSide): close the .out conn (ends the
+// drain loop at socket EOF), wait for the drain to RETURN, then flush
+// the sink tail (hands the final burst through the recorder) and close
+// the recorder file — so the .raw is the complete, gap-free, in-order
+// playback byte stream. The Player seam's Close (the oto device) runs
+// last, once nothing can Play. The drain wait is bounded: a closed unix
+// conn makes the drain's Read return at once; the timeout only guards a
+// wedged oto call, and a timed-out drain is left to die on the closed
+// conn rather than hanging the CLI's exit (a late recorder Play after
+// closeFile is a no-op tee by recorderPlayer contract, never a panic).
+func teardownLiveSpeaker(lspk *liveSpeaker, spkReturned chan struct{}) {
+	_ = lspk.conn.Close() //nolint:errcheck // teardown
+	select {
+	case <-spkReturned:
+	case <-time.After(2 * time.Second):
+	}
+	_ = lspk.sink.Flush() //nolint:errcheck // best-effort tail; drain is done
+	if lspk.rec != nil {
+		if cerr := lspk.rec.closeFile(); cerr != nil {
+			fmt.Fprintf(os.Stderr, "record: close: %v\n", cerr)
+		}
+	}
+	lspk.player.Close()
+}
+
+// writeLocalRecordingMeta writes DIR/<call-id>-meta.json describing the
+// human-leg recording (the local sibling of writeLinkRecordingMeta —
+// one call, one side, so its own slim shape).
+func writeLocalRecordingMeta(dir string, open voiceLocalOpenResult, employee string) error {
+	meta := struct {
+		CallID     string `json:"call_id"`
+		Employee   string `json:"employee"`
+		StartedAt  string `json:"started_at"`
+		SampleRate int    `json:"sample_rate"`
+	}{
+		CallID:     open.CallID,
+		Employee:   employee,
+		StartedAt:  time.Now().UTC().Format(time.RFC3339Nano),
+		SampleRate: voice.MicSampleRate,
+	}
+	b, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return err
+	}
+	b = append(b, '\n')
+	return os.WriteFile(filepath.Join(dir, open.CallID+"-meta.json"), b, 0o644)
+}
+
+func runVoiceLocalLive(ctx context.Context, open voiceLocalOpenResult, employee, recordDir string) error {
 	cap, err := voice.NewRawMicCapture("", "")
 	if err != nil {
 		return err
 	}
 	defer cap.Close() //nolint:errcheck // teardown; ffmpeg reaped via ctx cancel
 
-	player := voice.NewOtoPlayer()
-	sink := voice.NewSpeakerSink(player, 0)
-	// Warm the audio context BEFORE dialing the pair sockets: the child
-	// starts streaming the reply the instant the .out dial lands, and
-	// the player's FIRST Play lazily opens the oto context (~0.3 s
-	// device open). Without this, the greeting's head lands in that
-	// window and the ear hears the response start clipped/truncated
-	// (the same cold-context defect the link monitor lane fixed after
-	// live link-d52f032b6e010882; "the beginning gets truncated" user
-	// report 2026-11-11). One silent 20 ms burst = pure warm-up; the
-	// sink is not involved, so nothing audible plays.
-	if werr := player.Play(make([]byte, 640)); werr != nil {
-		return fmt.Errorf("speaker warm-up failed: %w (speakers off?)", werr)
+	// speaker chain: construct + warm the oto context BEFORE dialing
+	// (leaf 02, C2 — see setupLiveSpeaker), with the optional
+	// human-leg recorder tee.
+	lspk, err := setupLiveSpeaker(open, employee, recordDir,
+		func() voice.Player { return voice.NewOtoPlayer() }, net.Dial)
+	if err != nil {
+		return err
 	}
 
 	inConn, err := net.Dial("unix", open.InPath)
@@ -646,14 +821,13 @@ func runVoiceLocalLive(ctx context.Context, open voiceLocalOpenResult) error {
 	}
 	defer inConn.Close() //nolint:errcheck // teardown
 
-	outConn, err := net.Dial("unix", open.OutPath)
-	if err != nil {
-		return fmt.Errorf("dial speaker socket %s: %w", open.OutPath, err)
-	}
-	defer outConn.Close() //nolint:errcheck // teardown
-
 	micDone := make(chan error, 1)
 	spkDone := make(chan error, 1)
+	// spkReturned closes when the drain goroutine RETURNS (not when it
+	// sends on spkDone — the main select consumes that value on the
+	// call-ended path, and the teardown must still know the goroutine
+	// is gone before it touches the non-thread-safe sink).
+	spkReturned := make(chan struct{})
 	// mic: capture -> in socket. Byte-counted atomically so the count is
 	// live even while io.Copy is running, and a capture death can be
 	// DISTINGUISHED from a user hangup: only a zero-byte death while the
@@ -671,7 +845,21 @@ func runVoiceLocalLive(ctx context.Context, open voiceLocalOpenResult) error {
 	// lookahead (leaf 01). No unbounded per-utterance buffering: the old
 	// gap-only flush let seconds of audio queue behind a barge-in and
 	// talk over the new answer.
-	go drainLiveSpeaker(outConn, sink, spkDone)
+	go func() {
+		drainLiveSpeaker(lspk.conn, lspk.sink, spkDone)
+		close(spkReturned)
+	}()
+	// Registered AFTER the drain starts (the only code between dialing
+	// and here has no error return, so the teardown never waits on a
+	// drain that was never spawned): close the .out conn to end the
+	// drain loop, WAIT for it to return, then flush the sink tail and
+	// close the recorder file — the monitor's dialSide teardown order —
+	// so the .raw is the complete, in-order playback byte stream and the
+	// non-thread-safe SpeakerSink is never touched while the drain is
+	// still writing it. The wait is bounded (2 s): a closed unix socket
+	// makes the drain's Read return immediately; the timeout only guards
+	// a wedged oto call.
+	defer teardownLiveSpeaker(lspk, spkReturned)
 	select {
 	case err := <-micDone:
 		// The mic pipe ended: an ffmpeg death. While the call is still
@@ -1523,13 +1711,18 @@ func writeLinkRecordingMeta(dir string, open voiceLinkOpenResult, aEmp, bEmp str
 	return os.WriteFile(filepath.Join(dir, open.LinkID+"-meta.json"), b, 0o644)
 }
 
-// newSideRecorder opens DIR/<linkID>-<label>.raw and wraps inner in a
-// skip-first recorderPlayer (the monitor's silent warm-up burst must not
-// land in the recording).
+// newSideRecorder opens DIR/<linkID>-<label>.raw (DIR/<callID>.raw when
+// label is "" — the single-sided local live leg) and wraps inner in a
+// skip-first recorderPlayer (the silent warm-up burst must not land in
+// the recording).
 func newSideRecorder(inner voice.Player, dir, linkID, label string) (*recorderPlayer, error) {
-	f, err := os.Create(filepath.Join(dir, linkID+"-"+label+".raw"))
+	name := linkID
+	if label != "" {
+		name += "-" + label
+	}
+	f, err := os.Create(filepath.Join(dir, name+".raw"))
 	if err != nil {
-		return nil, fmt.Errorf("create %q: %w", filepath.Join(dir, linkID+"-"+label+".raw"), err)
+		return nil, fmt.Errorf("create %q: %w", filepath.Join(dir, name+".raw"), err)
 	}
 	return newRecorderPlayer(inner, f, true), nil
 }

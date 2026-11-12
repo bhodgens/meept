@@ -324,6 +324,8 @@ func (c *Child) handleLine(ctx context.Context, line string) {
 	case voiceframe.EventClear:
 		c.handleClear(frame)
 	case voiceframe.EventEnd:
+		// Hangup flush: the pipeline's close() drains the transcript
+		// lane (pump EOF -> consumer EOF flush); nothing to emit here.
 		c.handleEnd(frame)
 	case "keys": // voiceframe keys event (leaf-07 C1 shape; constant lives here: the shared codec carries no key fields)
 		c.failCall(frame.CallID, c.handleKeysFrame(line), "keys")

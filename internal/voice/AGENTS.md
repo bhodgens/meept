@@ -20,7 +20,17 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   below).
 - `Last` is `*bool`: an omitted `last` (setup, interrupt, end) must stay
   distinguishable from an explicit false. Only final prompts
-  (`last:true`) start an employee turn; partials update preview only.
+  (`last:true`) start an employee turn; partials update preview only;
+  final transcripts within the `voice.turn_confirm_ms` confirm window
+  aggregate into ONE turn (voice-startguard C1: the provider keeps
+  flushing segments at 500 ms wall-idle - link pumps need it - but the
+  child's dispatch layer aggregates the breath-pause fragments instead
+  of answering each). A final that lands while playback is live (or
+  the barge-in latch is tripped) dispatches immediately, merged with
+  any pending buffer; `clear` DROPS the pending buffer (the
+  interrupted partial rides the dispatch-cancel); stream EOF and
+  hangup flush it; `turn_confirm_ms=0` restores legacy per-final
+  dispatch.
 - DTMF frames decode as a counted no-op - a voicemail-tree "press 1"
   must never error the call.
 - The child sends setup/prompt/interrupt/end/played; the daemon sends
@@ -43,7 +53,11 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   `tts_vendor`/`tts_model`/`tts_base_url`/`tts_voice` (absent = "" = the
   hardcoded deepgram/openai defaults; a non-empty `stt_base_url`/`tts_base_url`
   is dialed instead of the cloud default - `[voice].stt_base_url` /
-  `[voice].tts_base_url` feed them daemon-side, global config by design).
+  `[voice].tts_base_url` feed them daemon-side, global config by design)
+  plus the startguard C1 selector `turn_confirm_ms` (global
+  `[voice].turn_confirm_ms` like the base URLs; the child decodes an
+  ABSENT field as its own 900 ms default and an explicit 0 as legacy
+  per-final dispatch).
   The vendor/model/voice selectors resolve per call through
   `voice.ResolveProfile` (local-leg CL4: `voice.employee_leg` row >
   per-leg config > provider default) over the call's registry row

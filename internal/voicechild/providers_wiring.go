@@ -93,6 +93,11 @@ type keysWire struct {
 	TTSModel   string `json:"tts_model"`
 	TTSBaseURL string `json:"tts_base_url"`
 	TTSVoice   string `json:"tts_voice"`
+	// TurnConfirmMs is a pointer so the child can tell an ABSENT
+	// selector (old daemon line -> the aggregation default,
+	// defaultTurnConfirmMs) from an explicit 0 (operator chose legacy
+	// per-final dispatch). A negative value clamps to 0 at decode.
+	TurnConfirmMs *int `json:"turn_confirm_ms"`
 }
 
 // handleKeysFrame decodes one raw keys line into the redacting KeysFrame
@@ -102,17 +107,29 @@ func (c *Child) handleKeysFrame(line string) error {
 	if err := json.Unmarshal([]byte(line), &w); err != nil {
 		return fmt.Errorf("voicechild: decode keys frame: %w", err)
 	}
+	// Absent turn_confirm_ms (old daemon line) = the aggregation
+	// default; explicit 0 = legacy per-final dispatch; negative clamps
+	// to legacy (the config load boundary clamps too — belt and braces
+	// on a wire value).
+	turnConfirmMs := defaultTurnConfirmMs
+	if w.TurnConfirmMs != nil {
+		turnConfirmMs = *w.TurnConfirmMs
+		if turnConfirmMs < 0 {
+			turnConfirmMs = 0
+		}
+	}
 	return c.handleKeys(KeysFrame{
-		CallID:     w.CallID,
-		STTKey:     w.STTKey,
-		TTSKey:     w.TTSKey,
-		STTVendor:  w.STTVendor,
-		STTModel:   w.STTModel,
-		STTBaseURL: w.STTBaseURL,
-		TTSVendor:  w.TTSVendor,
-		TTSModel:   w.TTSModel,
-		TTSBaseURL: w.TTSBaseURL,
-		TTSVoice:   w.TTSVoice,
+		CallID:        w.CallID,
+		STTKey:        w.STTKey,
+		TTSKey:        w.TTSKey,
+		STTVendor:     w.STTVendor,
+		STTModel:      w.STTModel,
+		STTBaseURL:    w.STTBaseURL,
+		TTSVendor:     w.TTSVendor,
+		TTSModel:      w.TTSModel,
+		TTSBaseURL:    w.TTSBaseURL,
+		TTSVoice:      w.TTSVoice,
+		TurnConfirmMs: turnConfirmMs,
 	})
 }
 
