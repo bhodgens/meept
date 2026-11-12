@@ -13,7 +13,28 @@ const (
 	ToolOutputEndTag = "<<<END_TOOL_OUTPUT>>>"
 
 	DefaultReminderInterval = 15
+
+	// VoiceContextStampPrefix / VoiceContextStampSuffix delimit the daemon
+	// voice lane's clock stamp ("[Context: current date/time is <Mon
+	// 2006-01-02 15:04 (UTC-07:00)>] ", rendered by daemon
+	// voiceTurnContextStamp). The exact time layout is the daemon's business
+	// (voiceTurnTimeLayout); the guard only needs the bracket shape to
+	// recognize its ONE exempted leading occurrence inside user input
+	// (C-6, 2026-11-11 bughunt).
+	VoiceContextStampPrefix = "[Context: current date/time is "
+	VoiceContextStampSuffix = "] "
 )
+
+// bracketedScaffoldRE matches a full line that OPENS with a
+// scaffolding-looking bracket ("[Context", "[System", "[Note",
+// "[Instruction", case-insensitive) and closes on the same line. Any such
+// line inside user input is attacker-controllable text masquerading as
+// system scaffolding and gets its opening bracket escaped so no rendered
+// bracketed context line can be forged around the authoritative stamp
+// (C-6). Ordinary bracketed text that does not start a line with these
+// tokens — "see [1] reference", "the [draft] version" — is untouched, so
+// prompts with NO bracketed scaffolding lines wrap byte-identically.
+var bracketedScaffoldRE = regexp.MustCompile(`(?im)^[ 	]*(?:\[\s*(?:context|system|note|instruction)\b[^\]\n]*\])`)
 
 // Pre-compiled regex for tool output boundary markers.
 var toolOutputStartRE = regexp.MustCompile(`<<<TOOL_OUTPUT:[^>]+>>>`)
@@ -83,15 +104,77 @@ func NewPromptGuardWithInterval(interval int) *PromptGuard {
 	return pg
 }
 
+// voiceContextStampShape reports whether s OPENS with the daemon voice
+// lane's clock-stamp shape: an optional leading-whitespace-free start at
+// "[Context: current date/time is " whose bracket closes at the first "] "
+// (the suffix voiceTurnContextStamp renders). The stamp's inner time layout
+// is NOT validated here — the exemption only ever applies at the seam where
+// the loop itself re-renders the stamp, so a caller-supplied lookalike line
+// never earns the exemption.
+func voiceContextStampShape(s string) bool {
+	if !strings.HasPrefix(s, VoiceContextStampPrefix) {
+		return false
+	}
+	_, _, ok := strings.Cut(s, VoiceContextStampSuffix)
+	return ok
+}
+
+// neutralizeBracketedScaffolding escapes the OPENING bracket of every
+// bracketed-scaffolding line matched by bracketedScaffoldRE (C-6, 2026-11-11
+// bughunt). A forged stamp line, a paraphrase, or a different scaffolding
+// token all get escaped — they render as escaped-bracket prose the model
+// reads as user data, never as a second authoritative context line. The
+// AUTHORITATIVE stamp never needs an exemption here: the voice seam
+// (WrapVoiceStampedUserInput) keeps it OUTSIDE the boundary entirely, so
+// trust follows the producer's declaration, never a content-shape sniff.
+func neutralizeBracketedScaffolding(text string) string {
+	return bracketedScaffoldRE.ReplaceAllStringFunc(text, func(match string) string {
+		return strings.Replace(match, "[", "\\[", 1)
+	})
+}
+
 // WrapUserInput wraps text in user-input boundary markers.
 // It neutralizes embedded boundary markers in the input to prevent
-// prompt injection attacks that attempt to prematurely close the boundary.
+// prompt injection attacks that attempt to prematurely close the boundary,
+// and escapes bracketed-scaffolding lines (C-6) so attacker text can never
+// render as a system context line inside the untrusted boundary.
 func (pg *PromptGuard) WrapUserInput(text string) string {
+	// C-6: escape forged bracketed-scaffolding lines ("[Context: ...]",
+	// "[System: ...]", ...) BEFORE wrapping. No exemption here — the
+	// authoritative voice stamp never reaches this method through the
+	// chat lane, and the voice seam wraps the raw prompt via
+	// wrapVoiceStampedUserInput instead.
+	neutralized := neutralizeBracketedScaffolding(text)
 	// Neutralize embedded end markers by escaping them with zero-width space
 	// to prevent attackers from closing the boundary early
-	neutralized := strings.ReplaceAll(text, UserInputEnd, "<"+UserInputEnd)
+	neutralized = strings.ReplaceAll(neutralized, UserInputEnd, "<"+UserInputEnd)
 	neutralized = strings.ReplaceAll(neutralized, UserInputStart, UserInputStart[:len(UserInputStart)-3]+"\u200c>>>")
 	return fmt.Sprintf("%s\n%s\n%s", UserInputStart, neutralized, UserInputEnd)
+}
+
+// WrapVoiceStampedUserInput is the C-6 loop seam for the daemon's VOICE
+// turn lane: it wraps ONLY the raw user-authored prompt in the untrusted
+// boundary, then PREPENDS the daemon-rendered clock stamp OUTSIDE it, so
+// the authoritative clock is trusted scaffolding on its own line and any
+// bracketed-scaffolding line the caller smuggled inside stays escaped user
+// data. prompt must be the RAW spoken prompt (no stamp prepended); render
+// stamp is called exactly once to produce that outside-boundary line.
+// Chat-lane callers keep WrapUserInput.
+func (pg *PromptGuard) WrapVoiceStampedUserInput(prompt, stamp string) string {
+	if !voiceContextStampShape(stamp) {
+		// Defensive: a malformed stamp is scaffolding-shaped text; treat it
+		// as untrusted input rather than trusting it outside the boundary.
+		return pg.WrapUserInput(stamp + prompt)
+	}
+	return stamp + "\n" + pg.WrapUserInput(prompt)
+}
+
+// IsVoiceContextStampShape reports whether s opens with the daemon voice
+// clock stamp's exact bracket shape ("[Context: current date/time is ...] ").
+// Exported for the daemon package's lockstep pins (the packages cannot share
+// test helpers across the import boundary without one).
+func IsVoiceContextStampShape(s string) bool {
+	return voiceContextStampShape(s)
 }
 
 // WrapToolOutput wraps output from a tool in tool-output boundary markers.

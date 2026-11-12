@@ -486,8 +486,20 @@ func (r *loopTurnRunner) Run(ctx context.Context, sess voice.SessionHandle, prom
 	// something TTS should read. RunOnceWithParts strips the stamp from
 	// every DERIVED prompt field (agent.stripVoiceContextStamp, C-3) while
 	// keeping it on the model-visible message.
+	//
+	// C-6 (2026-11-11 bughunt): the stamp is declared on the turn context
+	// via agent.WithVoiceClockStamp, so the loop wraps ONLY the raw spoken
+	// prompt in the <<<USER_INPUT>>> boundary and prepends the stamp
+	// OUTSIDE it as trusted scaffolding — inside the boundary the stamp
+	// was formally "DATA only" (the system prompt's own words), and a
+	// caller-supplied second bracketed context line was indistinguishable
+	// from the authoritative one. The prompt carries the RAW spoken text
+	// (the stamp rides the context alone; the loop renders the final
+	// model-visible message), and persisted history / derived fields
+	// (C-3) see the same raw prompt as before.
 	now := time.Now().In(r.resolveVoiceTurnLocation(ctx, employeeID))
-	reply, err := loop.RunOnce(ctx, voiceTurnContextStamp(now)+prompt, sess.ConversationID)
+	stamp := voiceTurnContextStamp(now)
+	reply, err := loop.RunOnce(agent.WithVoiceClockStamp(ctx, stamp), prompt, sess.ConversationID)
 	if err != nil {
 		return "", err
 	}

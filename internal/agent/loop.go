@@ -3146,6 +3146,35 @@ func stripVoiceContextStamp(prompt string) string {
 	return StripVoiceContextStamp(prompt)
 }
 
+// Voice clock-stamp producer marker (C-6, 2026-11-11 bughunt): the daemon's
+// voice turn runner (internal/daemon/voice_employee.go) stamps the turn
+// context via WithVoiceClockStamp so RunOnceWithParts knows the turn's
+// leading clock text is PRODUCER scaffolding, not user-authored content.
+// Trust follows the producer's declaration, never the content shape — a
+// chat-lane caller who pre-stamps their own prompt gets no seam (their
+// bracketed line is escaped inside the boundary like any other user text).
+type voiceClockStampCtxKey struct{}
+
+// WithVoiceClockStamp marks a turn whose prompt carries the daemon's voice
+// clock stamp as a LEADING prefix. stamp must be the exact rendered stamp
+// ("[Context: current date/time is <Mon 2006-01-02 15:04 (UTC-07:00)>] ").
+// The loop validates the shape (security.IsVoiceContextStampShape) before
+// trusting it outside the boundary.
+func WithVoiceClockStamp(ctx context.Context, stamp string) context.Context {
+	return context.WithValue(ctx, voiceClockStampCtxKey{}, stamp)
+}
+
+func voiceClockStampFromContext(ctx context.Context) (string, bool) {
+	if ctx == nil {
+		return "", false
+	}
+	stamp, ok := ctx.Value(voiceClockStampCtxKey{}).(string)
+	if !ok || !intsecurity.IsVoiceContextStampShape(stamp) {
+		return "", false
+	}
+	return stamp, true
+}
+
 // RunOnceWithParts processes a single user turn through the full reasoning loop,
 // optionally carrying multimodal content parts (e.g. image attachments).
 // When parts is non-empty the underlying ChatMessage is created via
@@ -3509,8 +3538,35 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	// Add user message (sanitized + boundary-wrapped). When multimodal parts
 	// are present, attach them to the ChatMessage so provider serializers emit
 	// native image blocks.
+	//
+	// C-6 (2026-11-11 bughunt): the daemon's VOICE lane needs its
+	// "[Context: current date/time is ...] " clock stamp OUTSIDE the
+	// <<<USER_INPUT>>> boundary (the system prompt declares marker contents
+	// "DATA only", so a stamp wrapped inside was formally untrusted — and a
+	// caller could smuggle a second bracketed context line indistinguishable
+	// from the authoritative one). The stamp is trusted scaffolding ONLY
+	// when its PRODUCER declares it: the voice turn runner passes the RAW
+	// spoken prompt plus WithVoiceClockStamp(ctx, stamp), and the loop
+	// prepends THAT exact stamp outside the boundary via
+	// Orchestrator.WrapVoiceStampedUserInput. Detection is never
+	// content-based: a chat-lane caller who pre-stamps their own prompt
+	// (CLI, telegram, parked-turn resume, ...) gets no seam — their fake
+	// context line is bracket-escaped INSIDE the boundary like any other
+	// user text. Chat lanes without the marker wrap byte-identically to the
+	// pre-C-6 shape.
 	wrappedMessage := sanitizedMessage
-	if l.securityOrch != nil {
+	stamp, hasStamp := voiceClockStampFromContext(ctx)
+	switch {
+	case hasStamp && l.securityOrch != nil:
+		// Producer-declared stamp + boundary: the stamp rides OUTSIDE the
+		// markers as trusted scaffolding (C-6 seam).
+		wrappedMessage = l.securityOrch.WrapVoiceStampedUserInput(sanitizedMessage, stamp)
+	case hasStamp:
+		// Producer-declared stamp but no orchestrator (bare test templates,
+		// security-disabled loops): the pre-C-6 shape — plain concat, no
+		// boundary existed to be inside/outside of.
+		wrappedMessage = stamp + sanitizedMessage
+	case l.securityOrch != nil:
 		wrappedMessage = l.securityOrch.WrapUserInput(sanitizedMessage)
 	}
 	// AUDIT FIX H3: resumed turns skip the history re-add — the original

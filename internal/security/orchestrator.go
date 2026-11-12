@@ -429,6 +429,18 @@ func (o *Orchestrator) WrapUserInput(text string) string {
 	return o.promptGuard.WrapUserInput(text)
 }
 
+// WrapVoiceStampedUserInput is the C-6 voice-lane seam: wraps ONLY the raw
+// user prompt inside the untrusted boundary and prepends the daemon's clock
+// stamp OUTSIDE it (prompt_guard.WrapVoiceStampedUserInput). A nil prompt
+// guard degrades to the legacy stamped-then-unwrapped shape (no boundaries
+// existed to be inside/outside of).
+func (o *Orchestrator) WrapVoiceStampedUserInput(prompt, stamp string) string {
+	if o.promptGuard == nil {
+		return stamp + prompt
+	}
+	return o.promptGuard.WrapVoiceStampedUserInput(prompt, stamp)
+}
+
 // WrapToolOutput wraps output from a tool in tool-output boundary markers.
 func (o *Orchestrator) WrapToolOutput(toolName, output string) string {
 	if o.promptGuard == nil {
