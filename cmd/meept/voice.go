@@ -627,6 +627,18 @@ func runVoiceLocalLive(ctx context.Context, open voiceLocalOpenResult) error {
 
 	player := voice.NewOtoPlayer()
 	sink := voice.NewSpeakerSink(player, 0)
+	// Warm the audio context BEFORE dialing the pair sockets: the child
+	// starts streaming the reply the instant the .out dial lands, and
+	// the player's FIRST Play lazily opens the oto context (~0.3 s
+	// device open). Without this, the greeting's head lands in that
+	// window and the ear hears the response start clipped/truncated
+	// (the same cold-context defect the link monitor lane fixed after
+	// live link-d52f032b6e010882; "the beginning gets truncated" user
+	// report 2026-11-11). One silent 20 ms burst = pure warm-up; the
+	// sink is not involved, so nothing audible plays.
+	if werr := player.Play(make([]byte, 640)); werr != nil {
+		return fmt.Errorf("speaker warm-up failed: %w (speakers off?)", werr)
+	}
 
 	inConn, err := net.Dial("unix", open.InPath)
 	if err != nil {
