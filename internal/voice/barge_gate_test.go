@@ -60,21 +60,37 @@ func TestBargeGateResidueWindowExpiry(t *testing.T) {
 		t.Fatal("bump with a recent touch did not stamp the residue deadline")
 	}
 	// Same-generation reads INSIDE the window are stale (socket-buffer
-	// residue of the interrupted stream).
+	// residue of the interrupted stream). The verdict is READ-TIME
+	// (bughunt 2026-11-11 C-2): it is bound to the chunk at the read and
+	// re-judged by nothing — the pump drops the read (pre-enqueue or via
+	// the localReadItem.stale tag), never the consume side (pinned by
+	// TestLocalSpliceBargeInWindowExpiredBacklogDroppedAtConsume).
 	if !g.ReadStale(1, res) {
 		t.Fatal("same-generation read inside the live residue window read fresh")
 	}
-	if !g.ConsumeStale(1) {
-		t.Fatal("same-generation consume inside the live residue window read fresh")
+	// ConsumeStale stays GENERATION-ONLY: the old consume-time residue
+	// re-check re-judged a stale-tagged chunk against the gate's window
+	// AFTER it expired and wrote the tail — the C-2 defect shape. A
+	// chunk read inside the window is dropped by its read-time tag; the
+	// consume gate only ever answers the generation question.
+	if g.ConsumeStale(1) {
+		t.Fatal("consume-time gate re-judged residue; staleness must be decided at read time")
 	}
 	// Walk the clock PAST the deadline: the interrupted stream is long
-	// dead — same-generation chunks are FRESH again.
+	// dead — same-generation reads are FRESH again...
 	now += int64(2 * bargeResidueQuiet)
 	if g.ReadStale(1, res) {
 		t.Fatal("expired residue window still marks reads stale")
 	}
-	if g.ConsumeStale(1) {
-		t.Fatal("expired residue window still marks consumes stale")
+	// ...but the verdict a chunk CARRIED from its stale read does not
+	// expire: a chunk tagged stale at read time (inside the window)
+	// stays dropped at consume, however long the backlog held it. That
+	// binding is pinned end-to-end on the live splice (the C-2 pin
+	// test); this unit arm pins the gate's own consumed-side half: the
+	// generation arm keeps firing for pre-cancel chunks even past the
+	// window.
+	if !g.ConsumeStale(0) {
+		t.Fatal("pre-cancel generation consumed fresh past the expired window")
 	}
 	// ...and a NEW bump with a silent stream clears residue entirely.
 	g.Bump(0)

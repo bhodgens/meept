@@ -40,9 +40,11 @@ package voice
 // audio pair. Double End is idempotent.
 //
 // Interrupt: nothing extra here - the C1 interrupt frame routes by ccid
-// through the wiring's talk loop, and the splice's HandleInterrupt
-// (leaf 05) resolves LocalSpliceFor(ccid). A foreign ccid is a no-op on
-// both paths.
+// through the wiring's talk loop, whose handleInterrupt resolves
+// LocalSpliceFor(ccid).HandleInterrupt (leaf 07 entry point; the splice's
+// latched cancel then fires the cancelDraftHook -> loop.HandleBargeIn for
+// the RMS-seam parity drop; see bughunt 2026-11-11 C-1). A foreign ccid
+// is a no-op on both paths.
 //
 // Reaping: no silence-based auto-hangup override - the talk loop's
 // normal silence / max-call timers apply (same config as a phone call),
@@ -543,7 +545,11 @@ func (l *LocalLeg) sendOpenFrame(st *localCallState) error {
 // daemon wiring (routeFrame armed it from Registry.Live() when the child
 // answered the open frame with setup), so the leg reaches it through the
 // hook the glue installs. LocalSpliceFor(ccid).HandleInterrupt already
-// latches per barge-in (leaf 05), so this runs at most once per barge-in.
+// latches per barge-in (leaf 05), so this runs at most once per barge-in
+// per trigger source: the RMS trip path calls it once via the splice's
+// CancelDraft dep, and the child interrupt frame path runs the SAME
+// latched HandleInterrupt through the talk loop (bughunt 2026-11-11 C-1)
+// — which also fires this hook, idempotently, after the latch.
 func (l *LocalLeg) cancelDraft(ccid string) {
 	l.mu.Lock()
 	hook := l.cancelDraftHook

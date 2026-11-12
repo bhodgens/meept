@@ -473,11 +473,33 @@ store. Invariants a future agent must NOT break:
   generation before the socket read and carries it with the chunk).
   Chunks whose snapshot is behind the bump, or whose read landed inside
   the post-cancel residue window (stamped only when playback was live at
+  post-cancel residue window (stamped only when playback was live at
   the cancel), are stale: the PHONE leg discards them at the pump
   pre-enqueue (they never join the queue), the LOCAL leg drops them at
   the pacer consume from that same carried verdict (itemStale ->
   ConsumeStale). The interrupted stream's buffered tail can neither
-  re-arm the latch nor replay over the new answer. The pendingInterrupt handshake keeps the
+  re-arm the latch nor replay over the new answer. The verdict is bound
+  to the READ (bughunt 2026-11-11 C-2): it is stamped onto the chunk
+  (localReadItem.stale) and re-judged by NOTHING — the consume side
+  never re-reads the gate's residue state, so a pacer backlog that
+  outlives the 250 ms window cannot convert a stale verdict into a
+  client write (~1.28 s replayed tail in the live capture).
+  ConsumeStale stays GENERATION-ONLY for pre-cancel chunks. The gate's
+  real clock is MONOTONIC (bughunt 2026-11-11 C-19: a lazily-anchored
+  wall<->mono pair under a DEDICATED anchorMu — Bump calls clockNano
+  while holding mu, so the anchor lock must never be the gate lock);
+  the injectable nowNano seam is unchanged, and monoNow lets a test
+  step the wall while mono advances normally
+  (TestBargeGateResidueDeadlineSurvivesWallStep). The child interrupt
+  frame is ALSO the local leg's media cancel (bughunt 2026-11-11 C-1):
+  TalkLoop.handleInterrupt resolves LocalSpliceFor(ccid).HandleInterrupt
+  (ccid-guarded, nil-safe, per-barge-in latched) before its own
+  pipeline drop, so the frame path latches the pacer, bumps the gate,
+  sends the child clear, and fires CancelDraft (the hook then runs
+  loop.HandleBargeIn idempotently behind the latch); pinned by
+  TestTalkLoopInterruptFrameDrivesLocalSplice, which drives the REAL
+  frame path — a direct HandleInterrupt call is exactly how the old
+  pins missed the dead wiring. The pendingInterrupt handshake keeps the
   C5 interrupt-before-prompt order
   even though the RMS trip fires on the audio-pump goroutine; mic PCM
   keeps flowing to STT during playback so the employee reforms from what
@@ -588,6 +610,14 @@ store. Invariants a future agent must NOT break:
   text (partials never record). The `heard` append rides a SUCCESSFUL
   enqueue: a prompt frame the full-queue default branch drops is never
   recorded as heard (the telemetry must not lie about delivery).
+  The link coordinator's floor lifecycle log sites emit the SAME kinds
+  to the ring through `LinkTurnCoordinator.SetEventSink` (bughunt
+  2026-11-11 C-14; optional, nil-default = zero emissions,
+  byte-identical logging): margin_rearmed / floor_release_deferred /
+  floor_released / floor_watchdog, keyed at EMIT time by the side's
+  bound loop's live ccid (TalkLoop.runCcid, stamped at Run start; the
+  link id is the fallback when the slot is unbound) — never a stale
+  Bind-time snapshot. Pinned by TestLinkCoordinatorFloorEventsReachTelemetryRing.
   `releaseCall` appends a terminal `call_ended` ONLY for a call that
   never armed a talk loop AND never recorded anything (`TelemetryRing.
   HasRing` - the ever-recorded set, which SURVIVES FIFO eviction: a

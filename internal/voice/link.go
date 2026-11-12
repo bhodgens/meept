@@ -244,6 +244,18 @@ type LinkTurnCoordinator struct {
 	log    *slog.Logger
 	margin time.Duration // fallback floor-release window after turn_final
 	pad    time.Duration // release delay after the drain edge (linkFloorTailPad)
+	// onEvent is the operator-telemetry append hook (bughunt 2026-11-11
+	// C-14, optional nil-by-default): the floor lifecycle kinds this
+	// coordinator logs (margin_rearmed / floor_release_deferred /
+	// floor_released / floor_watchdog) reach the per-call event ring
+	// through it, so `meept voice link` renders them. Nil = zero
+	// emissions, byte-identical logging (the same mirror rule as the
+	// talk loop's TalkDeps.OnEvent). The ring key resolves at EMIT time
+	// from the side's bound loop (loop.ccidForTelemetry), falling back
+	// to the link id when the slot is unbound or Run has not stamped
+	// its ccid yet — events never drop merely because the slot is
+	// early/late.
+	onEvent func(ccid string, kind, reason string)
 
 	mu     sync.Mutex
 	a      linkTurnSideState
@@ -259,7 +271,45 @@ func NewLinkTurnCoordinator(linkID string, fallbackMargin time.Duration, logger 
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &LinkTurnCoordinator{id: linkID, log: logger.With("sub", "link-turn", "link_id", linkID), margin: fallbackMargin, pad: linkFloorTailPad}
+	return &LinkTurnCoordinator{
+		id:     linkID,
+		log:    logger.With("sub", "link-turn", "link_id", linkID),
+		margin: fallbackMargin,
+		pad:    linkFloorTailPad,
+	}
+}
+
+// SetEventSink wires the operator-telemetry append seam (C-14): after it,
+// the coordinator's floor lifecycle log sites also append to the ring.
+// The sink receives the CCID to ring under (the side's bound loop's live
+// ccid, falling back to the link id so early/late edges are still
+// visible) and the exact log-kind string. Call once at wiring time; nil
+// sink is a no-op (nil-default mirror rule).
+func (c *LinkTurnCoordinator) SetEventSink(sink func(ccid string, kind, reason string)) {
+	if sink == nil {
+		return
+	}
+	c.mu.Lock()
+	c.onEvent = sink
+	c.mu.Unlock()
+}
+
+// emitLocked appends one telemetry event for side under the onEvent seam
+// (no-op when unwired). Callers hold mu (it reads the side slot). The
+// ring key resolves LIVE from the side's bound loop so a re-bound or
+// re-registered side rings under its current call id, never a stale one.
+func (c *LinkTurnCoordinator) emitLocked(side, kind, reason string) {
+	if c.onEvent == nil {
+		return
+	}
+	var ccid string
+	if loop := c.sideLocked(side).loop; loop != nil {
+		ccid = loop.ccidForTelemetry()
+	}
+	if ccid == "" {
+		ccid = c.id
+	}
+	c.onEvent(ccid, kind, reason)
 }
 
 // side returns the state slot for one side id. Callers hold c.mu.
@@ -283,9 +333,9 @@ func (c *LinkTurnCoordinator) peerLocked(side string) *linkTurnSideState {
 // shape, not a live path).
 func (c *LinkTurnCoordinator) Bind(side string, loop *TalkLoop) {
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	st := c.sideLocked(side)
 	st.loop = loop
-	c.mu.Unlock()
 }
 
 // Unbind detaches a side at loop exit: the side goes idle (it will never
@@ -696,6 +746,11 @@ func (c *LinkTurnCoordinator) marginFire(side string, gen uint64) {
 			})
 			armed = true
 		}
+		if armed {
+			// Telemetry ring (bughunt 2026-11-11 C-14): same kind
+			// string as the log line below.
+			c.emitLocked(side, "margin_rearmed", "")
+		}
 		c.mu.Unlock()
 		if armed {
 			c.log.Info("voice: link turn: margin re-armed (holder tail still audible)",
@@ -793,6 +848,9 @@ func (c *LinkTurnCoordinator) releaseFloor(side, ccid string, seq, gen uint64, r
 			c.releaseFloor(side, watchCcid, seq, watchGen, linkWatchdogReason)
 		})
 		chainCcid, chainSeq := st.ccid, st.seq
+		// Telemetry ring (bughunt 2026-11-11 C-14): same kind string
+		// as the log line below.
+		c.emitLocked(side, "floor_release_deferred", reason)
 		c.mu.Unlock()
 		c.log.Info("voice: link turn: release deferred (holder chained, watchdog armed)", "side", side,
 			"kind", "floor_release_deferred", "reason", reason, "ccid", chainCcid, "seq", chainSeq,
@@ -822,6 +880,15 @@ func (c *LinkTurnCoordinator) releaseFloor(side, ccid string, seq, gen uint64, r
 		stillCurrent = true
 	}
 	peerLoop := c.peerLocked(side).loop
+	// Telemetry ring (bughunt 2026-11-11 C-14): the release kind. For a
+	// watchdog fire the ring carries floor_watchdog (the distinct
+	// telemetry kind the funnel doc names); other reasons ride
+	// floor_released.
+	releaseKind := "floor_released"
+	if reason == linkWatchdogReason {
+		releaseKind = linkWatchdogReason
+	}
+	c.emitLocked(side, releaseKind, reason)
 	c.mu.Unlock()
 	if !stillCurrent {
 		return

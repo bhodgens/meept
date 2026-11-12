@@ -159,16 +159,27 @@ type LocalSpliceDeps struct {
 //
 // gen (bughunt 2026-11-10 A6) is the fresh-audio generation the pump
 // snapshotted BEFORE the read that produced this chunk. The pacer
-// re-evaluates staleness AT CONSUME time against the splice's current
-// generation: chunks of the interrupted stream that were already sitting
-// in the channel backlog when HandleInterrupt landed (or socket-buffer
-// residue read inside the residue window) are DISCARDED — never written
-// to the client, even after the latch re-arms — so the interrupted
-// stream cannot replay over the new turn.
+// re-evaluates the generation arm of staleness AT CONSUME time against
+// the splice's current generation: chunks of the interrupted stream that
+// were already sitting in the channel backlog when HandleInterrupt
+// landed are DISCARDED — never written to the client, even after the
+// latch re-arms — so the interrupted stream cannot replay over the new
+// turn.
+//
+// stale (bughunt 2026-11-11 C-2) is the pump's READ-TIME verdict: a
+// chunk judged stale by ReadStale at the read is tagged here and dropped
+// at consume BY THAT VERDICT. The pacer's backlog can hold a chunk past
+// its 250 ms residue window, and re-judging staleness at consume time
+// against the gate's CURRENT residue state used to let the interrupted
+// stream's tail replay (~1.28 s of stale audio in the live capture).
+// The carry is additionally dropped pre-enqueue; the tag covers chunks
+// already on the channel when the verdict landed.
 type localReadItem struct {
-	data []byte
-	err  error
-	gen  uint64
+	data         []byte
+	err          error
+	gen          uint64
+	residueUntil int64
+	stale        bool
 }
 
 // runLocalSplice is the live state of one local call's splice.
@@ -628,7 +639,15 @@ func (s *runLocalSplice) outboundLoop(ctx context.Context) error {
 				// playback was live at the cancel, read
 				// before the residue deadline (socket-buffer
 				// backlog the child wrote before it saw the
-				// clear frame).
+				// clear frame). The verdict is bound to THIS
+				// read (C-2): it is recorded on the chunk and
+				// re-judged by nothing — the chunk tagged
+				// stale is dropped here (the carry tail below
+				// stays out of the pacer) and, for the chunk
+				// forms already on the channel, dropped at
+				// consume by the carried tag, never by a
+				// re-read of the gate's residue state (the
+				// backlog can outlive the 250 ms window).
 				stale := s.gate.ReadStale(readGen, residueUntil)
 				// Drain evidence: the child produced bytes NOW (reopens
 				// the quiet window — the store happens before carry/
@@ -652,6 +671,18 @@ func (s *runLocalSplice) outboundLoop(ctx context.Context) error {
 					s.resumeBargeIn(readGen)
 				}
 				carry = append(carry, rb[:n]...)
+				if stale {
+					// C-2: a read judged stale NEVER becomes pacer
+					// audio — the carry tail is dropped whole, and
+					// the chunk forms that were already enqueued
+					// under older carries are covered by the
+					// generation arm of ConsumeStale (their snapshot
+					// gen is behind the bump that made this read
+					// stale). Mirrors splice.go's pre-enqueue
+					// discard for the phone leg.
+					carry = carry[:0]
+					s.audioCarry.Store(0)
+				}
 				for len(carry) >= s.chunkBytes {
 					chunk := make([]byte, s.chunkBytes)
 					copy(chunk, carry[:s.chunkBytes])
@@ -659,7 +690,7 @@ func (s *runLocalSplice) outboundLoop(ctx context.Context) error {
 					s.audioCarry.Store(int64(len(carry)))
 					s.audioPending.Add(1)
 					select {
-					case pump <- localReadItem{data: chunk, gen: readGen}:
+					case pump <- localReadItem{data: chunk, gen: readGen, residueUntil: residueUntil, stale: stale}:
 					case <-ctx.Done():
 						s.audioPending.Add(-1)
 						return
@@ -717,7 +748,7 @@ func (s *runLocalSplice) outboundLoop(ctx context.Context) error {
 				// with a named error.
 				return fmt.Errorf("voice: localsplice %s child read: %w", s.ccid, item.err)
 			}
-			if s.itemStale(item.gen) {
+			if s.itemStale(item) {
 				// Interrupted-stream audio (A6): discarded, never
 				// written to the client.
 				s.paceDropped++
@@ -753,7 +784,7 @@ func (s *runLocalSplice) outboundLoop(ctx context.Context) error {
 				}
 				return fmt.Errorf("voice: localsplice %s child read: %w", s.ccid, item.err)
 			}
-			if s.itemStale(item.gen) {
+			if s.itemStale(item) {
 				// Interrupted-stream audio (A6): discarded, never
 				// written to the client.
 				s.paceDropped++
@@ -920,17 +951,22 @@ func (s *runLocalSplice) HandleInterrupt(ccid string) {
 	s.log.Info("voice: local barge-in")
 }
 
-// itemStale is the pacer-side staleness re-check (bughunt 2026-11-10 A6,
-// pacer-owned single goroutine: no lock needed on the caller side) over
-// the shared bargeGate. A chunk is stale when its pre-read generation is
-// behind the CURRENT generation (it was read before HandleInterrupt
-// bumped the gate — pre-cancel audio, whether still in the pump backlog
-// or read in flight), or when the gate's residue deadline is still live
-// at consume time (socket-buffer residue of the interrupted stream; the
-// deadline only exists when playback was active at the cancel). Stale
-// chunks are dropped, never written to the client.
-func (s *runLocalSplice) itemStale(gen uint64) bool {
-	return s.gate.ConsumeStale(gen)
+// itemStale is the pacer-side staleness check (bughunt 2026-11-10 A6 +
+// 2026-11-11 C-2; pacer-owned single goroutine: no lock needed on the
+// caller side) over the shared bargeGate. The chunk's READ-TIME verdict
+// decides first: a chunk the pump judged stale (in-flight generation or
+// live read-time residue window) is dropped even if the gate's residue
+// window has since expired — the pacer's backlog must never convert a
+// stale verdict into a client write (~1.28 s replayed tail, live
+// capture). Chunks read while no window was live stay covered by the
+// generation arm (ConsumeStale): a pre-cancel snapshot is behind the
+// current generation after HandleInterrupt bumps the gate. Stale chunks
+// are dropped, never written to the client.
+func (s *runLocalSplice) itemStale(item localReadItem) bool {
+	if item.stale {
+		return true
+	}
+	return s.gate.ConsumeStale(item.gen)
 }
 
 // resumeBargeIn re-arms the outbound latch for the NEXT barge-in — but

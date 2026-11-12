@@ -55,6 +55,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -253,6 +254,12 @@ type TalkLoop struct {
 	seq         uint64
 	cur         *pipeline
 
+	// runCcid is the call id of the live Run (bughunt 2026-11-11 C-14):
+	// the link coordinator's Bind reads it to ring floor-lifecycle
+	// telemetry under the side's REAL ccid (the ring is keyed per call).
+	// Atomic because Bind can run just before or after Run starts.
+	runCcid atomic.Value // string
+
 	// silencePrompted latches the one filler-class silence prompt: the
 	// first silence fire speaks, the second hangs up.
 	silencePrompted bool
@@ -330,6 +337,18 @@ func (t *TalkLoop) emitEvent(ccid string, in EventInput) {
 	if t.deps.OnEvent != nil {
 		t.deps.OnEvent(ccid, in)
 	}
+}
+
+// ccidForTelemetry returns the call id the link coordinator rings this
+// side's floor-lifecycle events under (bughunt 2026-11-11 C-14): the
+// Run call's ccid (the wiring arms Run with the live Instance; before
+// Run starts the zero value surfaces, and the coordinator falls back to
+// the link id). Read-only accessor for link.go's Bind.
+func (t *TalkLoop) ccidForTelemetry() string {
+	if v, ok := t.runCcid.Load().(string); ok {
+		return v
+	}
+	return ""
 }
 
 // heldPrompt is ONE parked final-prompt dispatch: the Run-owned closure,
@@ -492,6 +511,11 @@ func (t *TalkLoop) end(ccid, reason string) {
 // on teardown.
 func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 	ccid := call.CallControlID
+	// Telemetry key (bughunt 2026-11-11 C-14): publish the live ccid for
+	// the link coordinator's floor-lifecycle ring emissions (Bind reads
+	// it). Stored before the greeting so an early idle edge is already
+	// keyed correctly.
+	t.runCcid.Store(ccid)
 
 	// Greeting first (spec call flow: the agent speaks first on a
 	// connected call; fact-free, interruptible, never supervisor-gated).
@@ -1077,7 +1101,24 @@ func wordCount(text string) int {
 // pipeline (generation bump + turn cancel), tell the binding, and send a
 // clear frame on the text socket (the child flushes its TTS queue; the
 // splice owns the Telnyx-side clear).
+//
+// Local-leg media latch (bughunt 2026-11-11 C-1): the child interrupt
+// frame is ALSO the local leg's cancel trigger — the live splice's
+// HandleInterrupt is what latches the outbound pacer, bumps the
+// fresh-audio gate, sends the child clear, and fires CancelDraft. The
+// glue's cancelDraftHook only ever runs from the splice-side CancelDraft
+// dep (RMS trips), so without this call the frame path left the splice
+// un-latched: no gate bump, no CancelDraft, and the pacer kept draining
+// buffered .out audio over the caller's new turn. HandleInterrupt is
+// ccid-guarded (foreign/no live splice = no-op) and per-barge-in latched
+// (a second call for the same cancel is a no-op), so phone and plain
+// local calls resolve to nil and stay byte-identical. The RMS seam never
+// re-runs it: the splice latches cancelOne first, and the loop's
+// cancelPipeline is idempotent per generation.
 func (t *TalkLoop) handleInterrupt(ccid string) {
+	if sp := LocalSpliceFor(ccid); sp != nil {
+		sp.HandleInterrupt(ccid)
+	}
 	t.cancelPipeline(ccid, "barge-in")
 	if t.deps.Binding != nil {
 		t.deps.Binding.PublishInterrupt(ccid)
