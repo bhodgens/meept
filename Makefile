@@ -802,6 +802,19 @@ test-doherty:
 	@echo "Running Doherty latency-budget tests (p95 < 400ms feedback / 100ms ack)..."
 	go test -p 2 ./internal/rpc/ -run TestDoherty -v
 
+# Voice sidecar eval lane (leaf 07 of plan 20261110-uptractor-ports).
+# 00T gate stub: the target exists so `make test-voice-eval` runs NOW and
+# fails RED (exit 1) because the eval lane's Go package
+# (internal/voice/eval) does not exist until leaf 07 lands. Leaf 07
+# replaces the recipe body in place — the TARGET NAME IS FROZEN. Fixtures
+# staged under testdata/voice-eval/ (demo-utterance.wav ported from
+# uptractor phone/core/sidecar/fixtures/; prompt-leak + clean expected
+# cases per leaf 07 brief). Thresholds and needles ported verbatim from
+# phone/core/sidecar-cloud/eval/{accuracy.py,prompt_leak.py}.
+test-voice-eval:
+	@echo "RED GATE: test-voice-eval lane not implemented yet (leaf 07); fixtures staged under testdata/voice-eval/"
+	@exit 1
+
 
 fmt:
 	@echo "Formatting code..."
