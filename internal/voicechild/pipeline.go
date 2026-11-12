@@ -1032,8 +1032,9 @@ func (p *pipeline) playbackStream(pcm io.ReadCloser, gen uint64, synthDur time.D
 		return false
 	}
 	// Fresh playback restarts the barge-in VAD latch (one interrupt per
-	// barge-in, T5) — the path playbackRestarted() documented but never
-	// took in production. The incoming-RMS window accumulators are part
+	// barge-in, T5) — this inlined re-arm IS that path (the old
+	// playbackRestarted() helper had no production caller and was
+	// removed). The incoming-RMS window accumulators are part
 	// of that latch state: a partial run from the retired utterance must
 	// not feed into the new one's window.
 	p.dropQueued = false
@@ -1516,15 +1517,6 @@ func (p *pipeline) noteOutgoingChunk(chunk []byte) {
 	p.playMu.Lock()
 	p.outEnergySum = sum
 	p.outEnergySample = samples
-	p.playMu.Unlock()
-}
-
-// playbackRestarted resets the one-interrupt-per-barge-in latch when a new
-// say begins playback.
-func (p *pipeline) playbackRestarted() {
-	p.playMu.Lock()
-	p.interrupted = false
-	p.speaking = true
 	p.playMu.Unlock()
 }
 

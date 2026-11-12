@@ -468,11 +468,16 @@ store. Invariants a future agent must NOT break:
   a pinned bug, fixed 615808e3). The trip shares the noteBargeIn latch
   (per-barge-in, F-1 re-arm by the next say); the splice re-arms
   ONLY on FRESH audio of the new turn (bughunt 2026-11-10 A6): the
-  interrupt bumps the splice's barge generation; chunks read before the
-  bump or within the post-cancel residue window (when playback was live
-  at the cancel) are tagged stale and DISCARDED by the pacer - the
-  interrupted stream's buffered tail can neither re-arm the latch nor
-  replay over the new answer. The pendingInterrupt handshake keeps the
+  interrupt bumps the SHARED bargeGate generation (barge_gate.go); each
+  chunk's staleness is judged ONCE, at READ time (the pump snapshots the
+  generation before the socket read and carries it with the chunk).
+  Chunks whose snapshot is behind the bump, or whose read landed inside
+  the post-cancel residue window (stamped only when playback was live at
+  the cancel), are stale: the PHONE leg discards them at the pump
+  pre-enqueue (they never join the queue), the LOCAL leg drops them at
+  the pacer consume from that same carried verdict (itemStale ->
+  ConsumeStale). The interrupted stream's buffered tail can neither
+  re-arm the latch nor replay over the new answer. The pendingInterrupt handshake keeps the
   C5 interrupt-before-prompt order
   even though the RMS trip fires on the audio-pump goroutine; mic PCM
   keeps flowing to STT during playback so the employee reforms from what
@@ -495,8 +500,9 @@ store. Invariants a future agent must NOT break:
   internal/tts.AudioPlayer tracks ALL live oto bursts and Stop() pauses
   every one of them (Stop was a documented no-op - cancelled audio played
   under the next answer, leaf 01); SpeakerSink.Clear drops the buffered
-  burst too; the CLI playout caps pending socket audio (~150 ms,
-  liveMaxPendingAudioBytes) so kernel backpressure bounds the tail.
+  burst too; the CLI playout caps pending socket audio
+  (liveMaxPendingAudioBytes, 375 ms at L16/16k, cmd/meept/voice.go) so
+  kernel backpressure bounds the tail.
   Play NEVER pauses predecessors: bursts overlap in oto's mixer (the
   leaf-01 per-handoff pause chopped paced real-time audio at every ~150 ms
   boundary - the same-day chop regression; cancel-time pause only is the
@@ -504,10 +510,22 @@ store. Invariants a future agent must NOT break:
 - LocalSplice has NO reorder and NO transcode by contract:
   unix sockets preserve order (no reorder window), and the local leg
   negotiates L16 s16le@16000 only - any other chunk size is the named
-  ErrL16Only refusal (internal/voice/localsplice.go:58-60, named at
-  :172).
+  ErrL16Only refusal (returned by RunLocalSplice; declared as
+  localsplice.go's ErrL16Only sentinel).
   Outbound stays paced at one 640 B chunk per 20 ms (the uptractor
   rule; localsplice.go:14-16). Do not "harden" it with a reorder buffer.
+- The shared barge gate (barge_gate.go, bughunt 2026-11-10 A6
+  generalized from the local leg to BOTH media splices): bargeGate owns
+  the fresh-audio generation and the post-cancel residue window
+  (bargeResidueQuiet, 250 ms). Bump(lastTouch) is the ONLY
+  generation-increment and is called by the cancel path
+  (HandleInterrupt / bargeIn); it stamps the residue deadline only when
+  playback was live at the cancel (an outbound paced touch within the
+  window) - with no live stream the very first post-cancel PCM is
+  unconditionally fresh (the silent-then-say posture is preserved). The
+  residue window is NOT a parameter: do not plumb it into config, and
+  do not fork a second gate (1c86c369's fork-prevention rule) - both
+  splices ride the one type.
 - Deliberate policy differences, pinned not accidental: the local leg
   skips the effects reservation and the dial audit row (no paid side
   effect, no external party; internal/voice/local.go:11-14 mirror

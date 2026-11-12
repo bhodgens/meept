@@ -670,3 +670,9 @@ These were raised during Phase-1 intake but did not survive verification. They a
 - Empty-cache-dir control (MEEPT_TOOL_CACHE_DIR=/tmp/empty): same URL that hit in run 1 flipped to cache-miss while network was up (LLM calls flowed) — zero outbound fetches. Wrapper returns ErrCacheMiss BEFORE any inner call (cached_fetch_tool.go:131-133/163-175); no scheme escape hatch (file:// intercepted). Cache byte-identical after restore.
 - NEW BUG — daemon PANIC: nil-deref TacticalScheduler.OnJobCompleted (internal/agent/tactical.go:786) after SQLITE_BUSY storm from parallel step jobs; daemon died mid-run. Needs guard + SQLITE_BUSY retry.
 - NEW GAP — no agent has web_fetch+file_write together (BaselineTools carries neither; researcher=web_fetch+shell_execute, specialists.toml:70). Cached-fetch eval tasks need an agent with both; correct mapping exists at tactical.go:1236 but is never selected.
+
+### Voice-events e2e deferral CLOSED (2026-11-11)
+
+- The voice-events tree (operator per-call telemetry ring + `voice.local.events` RPC, commit d0657f4b) landed with unit-tier tests only, and its commit message disclosed the deferral: "a voice-events e2e suite + manifest entry per the all-new-features-e2e policy — unit tier added first per task contract".
+- CLOSED in commit 37fdf1f3: `e2e/suites/voice-local/voice_events_test.go` (scenario `voice-local-events-01` + unknown-call empty-envelope control) drives a real scratch daemon + fakechild through a full local call and asserts the heard → prompt_dispatch → turn_final → barge_in → call_ended lifecycle over the real cursor-polled RPC; the manifest `path_map` gained `internal/voice/events.go` -> voice-local (plus the exact-file daemon-hub key `internal/daemon/voice_local_rpc.go`) and the scenario entry with its four owning paths.
+- Post-closure verification: `make e2e-fast-area AREA=voice-local` green (7/7 tests).

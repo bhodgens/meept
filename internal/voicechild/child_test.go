@@ -476,8 +476,14 @@ func TestInterrupt(t *testing.T) {
 		t.Fatalf("interrupt must fire once per barge-in")
 	}
 
-	// New say restarts playback and re-arms.
-	p.playbackRestarted()
+	// New say restarts playback and re-arms (the inline re-arm in
+	// playbackStream: interrupted/rmsRun/speaking reset under playMu).
+	p.playMu.Lock()
+	p.interrupted = false
+	p.rmsRun = 0
+	p.rmsEnergyRun = 0
+	p.speaking = true
+	p.playMu.Unlock()
 	if !p.noteBargeIn() {
 		t.Fatalf("barge-in after playback restart must arm interrupt again")
 	}

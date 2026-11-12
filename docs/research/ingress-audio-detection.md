@@ -160,8 +160,10 @@ field experience:
 <timeout_ms>`, `detect_audio <thresh> <audio_hits> <timeout_ms>`, `wait_for_silence
 <thresh> <silence_hits> <listen_hits> <timeout_ms>` — the same energy-threshold-plus-N-
 consecutive-20 ms-frame "hits" model (a `hits` count IS the hangover/persistence
-window), and the voicemail profile historically shipped `record-silence-threshold` 200
-with `record-silence-hits` 10 (freeswitch-users thread). Session-level VAD is driven by
+window), and a freeswitch-users thread shows a USER's `voicemail.conf.xml`
+edit setting `record-silence-threshold` 200 with `record-silence-hits` 10 —
+those two numbers are that operator's tuned values, NOT a shipped FreeSWITCH
+default. Session-level VAD is driven by
 channel variables `vad_thresh`, `vad_silence_ms`, `vad_voice_ms` feeding
 `switch_vad_set_param`, with `vad=smart` selecting the energy+spectral ("smart") mode
 over plain energy. For barge-in during playback, `break`-flagged plays (`-break` arg /
@@ -195,15 +197,17 @@ separately configurable.
 - **LiveKit Agents** (docs, verified): `endpointing.min_delay`/`max_delay` — a *range*:
   close the turn no sooner than min_delay, force-close at max_delay "so it never hangs
   forever"; `mode="dynamic"` adapts within the range to the user's pause patterns.
-  Interruptions: `mode "adaptive"` (an acoustic model that separates real barge-ins
-  from **backchannels** — "uh-huh", "okay") vs `"vad"` (any speech interrupts);
-  `min_duration` (default ~0.5 s of speech before an overlap counts), `min_words`
-  (requires STT; raise above 0 to ignore backchannels), `false_interruption_timeout` +
-  `resume_false_interruption` (default true): after an interruption that yields no
-  transcript, the agent **resumes its line** once the configured silence elapses.
-  `backchannel_boundary` `(1.0, 1.0)` s cooldown: in the first second of agent speech,
-  adaptive classification is suppressed (use raw VAD) so a real early correction isn't
-  swallowed as backchannel.
+  Interruptions: `interruption.mode "adaptive"` (an acoustic model that separates real
+  barge-ins from **backchannels** — "uh-huh", "okay") vs `"vad"` (any speech
+  interrupts). The quantitative interruption knobs are **Deepgram Agent API fields,
+  NOT LiveKit's** (attribution corrected 2026-11-11): Deepgram's
+  `interruption.min_duration` (default 0.5 s of speech before an overlap counts) and
+  `false_interruption_timeout` (default 2.0 s, paired with `resume_false_interruption`):
+  after an interruption that yields no transcript, the agent **resumes its line** once
+  the configured silence elapses. LiveKit's own interruption surface is the
+  mode selector plus `backchannel_boundary` `(1.0, 1.0)` s cooldown: in the first
+  second of agent speech, adaptive classification is suppressed (use raw VAD) so a
+  real early correction isn't swallowed as backchannel.
 - **Pipecat** (docs, verified): barge-in = broadcast `InterruptionFrame` on user-turn
   start — cancels in-flight LLM, clears TTS buffers, and **flushes unplayed transport
   audio** ("the bot goes silent within roughly one audio write"). Controls:
@@ -285,8 +289,9 @@ rule.
    min/max_delay, Geigel hold times — independent convergence on hysteresis. An
    instantaneous one-sided threshold with no exit condition is the known-bad design.
 3. **Onset persistence is required but not sufficient for *endpointing*; for
-   *barge-in* the onset trigger IS the interrupt, gated by duration/words.** LiveKit:
-   `min_duration` 0.5 s + optional `min_words`; Pipecat: `MinWordsUserTurnStartStrategy`;
+   *barge-in* the onset trigger IS the interrupt, gated by duration/words.** Deepgram
+   Agent API: `interruption.min_duration` 0.5 s (plus optional word-count policy);
+   Pipecat: `MinWordsUserTurnStartStrategy`;
    Asterisk BackgroundDetect: min-ms non-silence *followed by* sil-ms silence even for
    interruptions during playback. meept's 200 ms persistence is in the right range;
    what's missing is *what kind of energy* (ML speech probability, not RMS) and the
@@ -296,8 +301,9 @@ rule.
    over L past far-end samples; AEC literature is unanimous that single-sample level
    ratios are not a DTD. meept's ">130% of last outbound chunk" is a one-tap Geigel with
    T=1.3 — both the tap count and the constant are off the standard design.
-5. **False interruptions must be reversible.** LiveKit: `resume_false_interruption`
-   (default true) + `false_interruption_timeout`; HF speech-to-speech: speculative
+5. **False interruptions must be reversible.** Deepgram Agent API:
+   `resume_false_interruption` + `false_interruption_timeout` (default 2.0 s); HF
+   speech-to-speech: speculative
    reopen windows. A barge-in that produces no transcript should not burn the turn —
    the agent resumes its line. meept's one-shot evidence latch makes the *second* false
    trip cheap but the *first* one terminal.
@@ -407,7 +413,8 @@ ONNX-runtime availability question is stated as a risk, not an install plan.
    while VAD says speech.
 
 6. **Make false barge-ins recoverable and backchannel-shaped trips ignorable.**
-   Add: (i) `resume_false_interruption` semantics — if X ms (2 s LiveKit-style) pass
+   Add: (i) `resume_false_interruption` semantics — if X ms (2 s Deepgram-default
+   style, `false_interruption_timeout`) pass
    with no qualifying whisper final after a trip, replay/resume the interrupted line's
    tail or re-dispatch the pending say (meept already tracks per-barge generations; the
    splice's stale-discard logic is the hard part — keep it, resume from the word
@@ -454,7 +461,7 @@ Suggested adoption order: 4 → 5 → 2 → 1 (or 1 first if the ONNX lane verif
 13. Asterisk TALK_DETECT (defaults 256 / 2500 ms, audiohook ordering) — https://docs.asterisk.org/Latest_API/API_Documentation/Dialplan_Functions/TALK_DETECT/ ; WaitForSilence — https://github.com/asterisk/asterisk/blob/master/apps/app_waitforsilence.c ; BackgroundDetect — https://docs.asterisk.org/Latest_API/API_Documentation/Dialplan_Applications/BackgroundDetect/ ; noisy-line threshold failure — https://serverfault.com/questions/680500/asterisk-waitforsilence-never-detects-silence
 14. FreeSWITCH mod_dptools detect_silence/detect_audio/wait_for_silence + vad_* vars — https://github.com/signalwire/freeswitch/blob/master/src/mod/applications/mod_dptools/mod_dptools.c ; voicemail record-silence params — https://lists.freeswitch.org/pipermail/freeswitch-users/2015-January/110675.html
 15. OpenAI Realtime server_vad/semantic_vad (defaults 0.5 / 300 / 500 ms; eagerness timeouts) — https://developers.openai.com/api/docs/guides/realtime-vad ; full field defs — https://developers.openai.com/api/reference/resources/realtime/client-events ; LiveKit realtime-plugin overrides — https://cdn.jsdelivr.net/npm/@livekit/agents-plugin-openai@1.7.0/src/stt.ts
-16. LiveKit turn handling/interruption config (adaptive vs vad, min_words, false_interruption_timeout, backchannel_boundary) — https://livekit.com/blog/turn-detection-and-interruption-handling ; https://docs.livekit.io/agents/logic/turns/adaptive-interruption-handling/
+16. LiveKit turn handling/interruption config (interruption.mode adaptive vs vad, backchannel_boundary; the quantitative min_duration/min_words/false_interruption_timeout knobs are Deepgram Agent API fields) — https://livekit.com/blog/turn-detection-and-interruption-handling ; https://docs.livekit.io/agents/logic/turns/adaptive-interruption-handling/
 17. Pipecat interruptions & turn strategies (InterruptionFrame, MinWords, mute strategies) — https://docs.pipecat.ai/pipecat/fundamentals/interruptions ; VADParams + Smart Turn — https://docs.pipecat.ai/pipecat/learn/speech-input ; VAD-first turn opening — https://github.com/pipecat-ai/pipecat/blob/main/examples/voice/voice-soniox-turn-detection.py
 18. AssemblyAI endpointing taxonomy — https://www.assemblyai.com/blog/voice-agent-turn-detection
 19. Barge-in failure-mode corpus (echo bleed, 8 kHz regressions) — https://github.com/quantumCF/voice-agent-barge-in-tests
