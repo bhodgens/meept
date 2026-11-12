@@ -326,3 +326,44 @@ func shortKeysDir(t *testing.T) string {
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	return dir
 }
+
+// TestVoiceKeysEmissionMinTurnWordsSelector (voice-microfrag): the keys
+// line always carries min_turn_words from voice.min_turn_words — a
+// hand-built fixture config (unset) sends 0 (gate disabled = legacy),
+// and a config-set value threads through. Mirrors
+// TestVoiceKeysEmissionTurnConfirmSelector; unlike that selector, 0 is
+// both the absent-default and the disabled value, but the wire sends it
+// always (no omitempty, the keys-wire convention).
+func TestVoiceKeysEmissionMinTurnWordsSelector(t *testing.T) {
+	f := newKeysEmitFixture(t)
+	const ccid = "cc-keys-mtw"
+	acquireFor(f.w, ccid)
+
+	f.w.routeFrame(voice.Frame{CallID: ccid, Event: voice.EventSetup})
+	line := readKeysLine(t, f.lines)
+	var wire map[string]any
+	if err := json.Unmarshal([]byte(line), &wire); err != nil {
+		t.Fatalf("keys line not JSON: %v: %s", err, line)
+	}
+	if got, present := wire["min_turn_words"]; !present {
+		t.Fatal("keys wire lacks min_turn_words (short-final gate selector must ride the frame)")
+	} else if v, ok := got.(float64); !ok || v != 0 {
+		t.Errorf("wire min_turn_words = %v, want 0 for an unset fixture VoiceConfig (0 = gate disabled)", got)
+	}
+	f.w.releaseCall(ccid, voice.OutcomeHangup)
+
+	// Config-set value threads through.
+	const ccid2 = "cc-keys-mtw2"
+	acquireFor(f.w, ccid2)
+	f.w.cfg.MinTurnWords = 2
+	f.w.routeFrame(voice.Frame{CallID: ccid2, Event: voice.EventSetup})
+	line2 := readKeysLine(t, f.lines)
+	wire2 := map[string]any{}
+	if err := json.Unmarshal([]byte(line2), &wire2); err != nil {
+		t.Fatalf("keys line not JSON: %v: %s", err, line2)
+	}
+	if got, _ := wire2["min_turn_words"].(float64); got != 2 {
+		t.Errorf("wire min_turn_words = %v, want 2 (voice.min_turn_words threaded to the keys frame)", got)
+	}
+	t.Cleanup(func() { f.w.releaseCall(ccid2, voice.OutcomeHangup) })
+}

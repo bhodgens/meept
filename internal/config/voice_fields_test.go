@@ -171,4 +171,7 @@ func TestVoiceTemplateDocumentsTTSFields(t *testing.T) {
 	if !strings.Contains(s, `"turn_confirm_ms"`) {
 		t.Error("missing template key voice.turn_confirm_ms (startguard C1: document the aggregation window)")
 	}
+	if !strings.Contains(s, `"min_turn_words"`) {
+		t.Error("missing template key voice.min_turn_words (voice-microfrag: document the short-final gate)")
+	}
 }

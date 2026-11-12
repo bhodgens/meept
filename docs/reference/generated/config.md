@@ -6111,7 +6111,29 @@ VerificationDefaults holds daemon\-level verification defaults.
 	    // talk loop speaks a filler line (dead-air defect 2026-11-10:
 	    // filler fired immediately on EVERY prompt, so "give me a second"
 	    // preceded fast answers). 0 = speak immediately (legacy).
-	    FillerGraceMs       int      `json:"filler_grace_ms"        toml:"filler_grace_ms"`
+	    FillerGraceMs int `json:"filler_grace_ms" toml:"filler_grace_ms"`
+	    // TurnConfirmMs is the child-side turn-aggregation confirm window
+	    // (startguard C1, live call local-496a3fd0d2ab3fc6): consecutive
+	    // FINAL transcripts arriving within this window of each other are
+	    // aggregated into ONE employee-turn prompt instead of dispatching
+	    // a turn per breath-pause fragment (the provider flushes segments
+	    // at 500 ms wall-idle; a normal mid-sentence breath is 300-600 ms,
+	    // so per-final dispatch answered fragments of one sentence).
+	    // Default 900; 0 = legacy per-final dispatch.
+	    TurnConfirmMs int `json:"turn_confirm_ms"        toml:"turn_confirm_ms"`
+	    // MinTurnWords is the child-side short-final gate (voice-microfrag,
+	    // live call local-0627960006a7f3d9): in a loud room, background-TV
+	    // fragments ("The other", "This is...") finalize seconds apart —
+	    // too far for the aggregation window to merge, and a fixed word
+	    // filter is wrong by default because an operator command like
+	    // "Stop." is one word. So the threshold is operator-tunable: the
+	    // child drops a FINAL whose non-speech-stripped text has fewer
+	    // than N whitespace-separated words (dropped finals dispatch
+	    // nothing and never stamp barge-in speech evidence). Default 0 =
+	    // disabled (opt-in defaults rule, docs/agents/opt-in-defaults.md);
+	    // set 2 to tune out short background fragments; 1-word voice
+	    // commands still pass at N=1. A negative value clamps to 0.
+	    MinTurnWords        int      `json:"min_turn_words" toml:"min_turn_words"`
 	    SupervisorEmployee  string   `json:"supervisor_employee"    toml:"supervisor_employee"`
 	    SupervisorEnabled   bool     `json:"supervisor_enabled"     toml:"supervisor_enabled"`
 	    SupervisorModel     string   `json:"supervisor_model"       toml:"supervisor_model"`

@@ -1359,6 +1359,7 @@
     "filler": ["Hold on, let me check."],   // spoken filler lines while working
     "filler_grace_ms": 2500,                // wait this long after a prompt before speaking filler (0 = immediate)
     "turn_confirm_ms": 900,                 // child-side turn aggregation: consecutive final transcripts inside this window dispatch ONE employee turn (kills the breath-pause fragment fence); 0 = legacy per-final dispatch
+    "min_turn_words": 0,                    // drop final transcripts with fewer than N real words after non-speech stripping - tunes out background-fragment chatter (TV) in loud rooms; 1-word voice commands like "Stop." still pass at N<=1 (default 0 = gate off)
     "supervisor_employee": "",              // employee id supervising calls
     "supervisor_enabled": true,             // run the call supervisor
     "supervisor_model": "",                 // empty = use small_model

@@ -57,7 +57,11 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   plus the startguard C1 selector `turn_confirm_ms` (global
   `[voice].turn_confirm_ms` like the base URLs; the child decodes an
   ABSENT field as its own 900 ms default and an explicit 0 as legacy
-  per-final dispatch).
+  per-final dispatch) and the voice-microfrag selector `min_turn_words`
+  (global `[voice].min_turn_words`, default 0 = short-final gate off —
+  at N>0 the child drops a FINAL whose bracket/asterisk-stripped text
+  has fewer than N words, before evidence stamping and aggregation;
+  an ABSENT field decodes as 0 on an old daemon line).
   The vendor/model/voice selectors resolve per call through
   `voice.ResolveProfile` (local-leg CL4: `voice.employee_leg` row >
   per-leg config > provider default) over the call's registry row

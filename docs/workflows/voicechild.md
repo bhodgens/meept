@@ -41,6 +41,18 @@ without touching the main process.
   — the interrupt path stays on arrival. Partials stay per-preview.
   Telemetry: one INFO 'voicechild: final prompt dispatched aggregated'
   per dispatch with call_id, parts, chars, reason.
+  Per-final filters run BEFORE aggregation: the non-speech class guard
+  (isRealSpeech) drops finals that are only whisper paralinguistic
+  tokens — bracket runs and asterisk markers ("(sighs)", "[clears
+  throat]", "*unintelligible*", "*static*"; voice-microfrag added the
+  asterisk class after live call local-0627960006a7f3d9 dispatched
+  "*unintelligible*" as a prompt) or punctuation-only residue, plus the
+  exact-duplicate dedupe. `voice.min_turn_words` (keys-frame selector,
+  default 0 = off) additionally drops a real-speech FINAL whose
+  stripped text has fewer than N words — the loud-room background-
+  fragment gate; a dropped final dispatches nothing, never seeds the
+  pending buffer, and never stamps barge-in speech evidence (INFO
+  'voicechild: short final dropped' per drop).
   The playback worker emits the C1 `played` frame (last:true) once per
   turn-final (`last:true` say) stream, strictly after its final byte
   reaches the .out socket - the daemon's link-floor drain watch arms
