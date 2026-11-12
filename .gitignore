@@ -164,4 +164,3 @@ docs/plans/sealed-plan*.md
 # the repo (they carry stale dev_keys, sockets, sqlite dbs, and binaries).
 .*-probe-home/
 .hermes/worktrees/
-.hermes/worktrees/
