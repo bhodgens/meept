@@ -74,6 +74,16 @@ func (c *captureFail) add(ccid string, o Outcome, reason string) {
 	c.reasons = append(c.reasons, reason)
 }
 
+// snapshot returns a locked copy for assertion reads (dated addendum
+// 2026-11-11: -race flagged unlocked reads of the slices the terminal
+// observer appends from the reaper goroutine; assertions unchanged).
+func (c *captureFail) snapshot() captureFail {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	cp := captureFail{outcome: c.outcome, calls: append([]string(nil), c.calls...), reasons: append([]string(nil), c.reasons...)}
+	return cp
+}
+
 // callStatusCheckerIsStandalone pins the contract: a STANDALONE interface
 // satisfied by *telnyx.Client — NOT an extension of telnyx.CallController
 // (adding GetCallStatus there breaks every existing fake). Compile-time.
@@ -163,16 +173,17 @@ func TestReaperReleasesSilentCallWithFrozenReason(t *testing.T) {
 	// hard-codes reason "call.hangup").
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if len(cap.calls) > 0 {
+		if len(cap.snapshot().calls) > 0 {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if len(cap.calls) != 1 {
-		t.Fatalf("release fan-out fired %d times, want exactly 1", len(cap.calls))
+	snap := cap.snapshot()
+	if len(snap.calls) != 1 {
+		t.Fatalf("release fan-out fired %d times, want exactly 1", len(snap.calls))
 	}
-	if cap.reasons[0] != "reaped:hangup-lost" {
-		t.Errorf("release reason = %q, want frozen %q", cap.reasons[0], "reaped:hangup-lost")
+	if snap.reasons[0] != "reaped:hangup-lost" {
+		t.Errorf("release reason = %q, want frozen %q", snap.reasons[0], "reaped:hangup-lost")
 	}
 	if rig.tel.countHangups() == 0 {
 		t.Error("reaper never asked the carrier to hang up the dead call")
@@ -222,7 +233,7 @@ func TestReaperMaxDurationForceHangup(t *testing.T) {
 
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if len(cap.calls) > 0 {
+		if len(cap.snapshot().calls) > 0 {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
@@ -278,7 +289,7 @@ func TestReaperRaceWithRealHangupReleasesExactlyOnce(t *testing.T) {
 
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		if len(cap.calls) > 0 {
+		if len(cap.snapshot().calls) > 0 {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
@@ -305,7 +316,7 @@ func TestReaperCallEventErroredOnBus(t *testing.T) {
 
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if len(cap.calls) > 0 {
+		if len(cap.snapshot().calls) > 0 {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
