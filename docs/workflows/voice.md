@@ -216,9 +216,19 @@ back over `voice.local.events` (params {call_id, cursor, limit?},
 seam-based like every other voice.local method — no new bus topic) and
 `meept voice link` / `meept voice local` poll it every 500 ms printing
 per-side lines: `heard:` / `thinking (N words)` / `replied (N words,
-Xms)` / `>> barge-in` / `call ended: <reason>`. Best-effort by
+Xms)` / `>> barge-in` / `call ended: <reason>` / `silence deferred (...)`.
+Best-effort by
 contract: the poller never fails a run, and a final synchronous drain
-after close prints the tail events (rings outlive the call).
+after close prints the tail events (rings outlive the call). A
+found=false answer at cursor > 0 ends that ccid's poller (eviction /
+teardown); found=false at cursor 0 is the ring's lazy-creation race on a
+fresh call and keeps ticking (it once silenced the whole live feed —
+call local-53b347f028f0a43f). `meept voice local` additionally reads the
+call's stored transcript over `voice.local.transcript`
+(params {call_id}; the call store, call-scoped) at call end and prints
+role-tagged `HH:MM:SS user|assistant: <text>` lines, reusing the link
+transcript shape — best-effort too: an old daemon or unwired store
+prints "(no transcript lines)" and never changes the run's exit.
 
 ## Edge Cases
 

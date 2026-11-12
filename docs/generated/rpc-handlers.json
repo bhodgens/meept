@@ -1539,25 +1539,31 @@
     "topic": "voice.local.end",
     "handler": "h.handleEnd",
     "file": "internal/rpc/voice_local.go",
-    "line": 190
+    "line": 220
   },
   {
     "topic": "voice.local.events",
     "handler": "h.handleEvents",
     "file": "internal/rpc/voice_local.go",
-    "line": 192
+    "line": 222
   },
   {
     "topic": "voice.local.open",
     "handler": "h.handleOpen",
     "file": "internal/rpc/voice_local.go",
-    "line": 189
+    "line": 219
   },
   {
     "topic": "voice.local.status",
     "handler": "h.handleStatus",
     "file": "internal/rpc/voice_local.go",
-    "line": 191
+    "line": 221
+  },
+  {
+    "topic": "voice.local.transcript",
+    "handler": "h.handleTranscript",
+    "file": "internal/rpc/voice_local.go",
+    "line": 223
   },
   {
     "topic": "worker.add",

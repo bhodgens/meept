@@ -253,6 +253,16 @@ func runVoiceLocal(employee, label, inPath, outPath, recordDir string) error {
 	teleCancel()
 	events.stop()
 	events.drainOnce()
+
+	// The user explicitly asked for the transcript back (event-feed
+	// regression follow-up, call local-53b347f028f0a43f): the live feed
+	// shows WHEN things happened; this shows WHAT was said. Best-effort
+	// like the poller - a failed/absent read never changes the run's
+	// exit (the call already succeeded or failed on its own terms).
+	// Source is voice.local.transcript (the call store, call-scoped —
+	// NOT session.messages.get: without fresh_session_per_call the
+	// session is shared across calls and would print prior calls too).
+	printLocalCallTranscript(client, open.CallID, employee)
 	if err == nil {
 		fmt.Println("call ended.")
 	}
@@ -928,6 +938,8 @@ func voiceEventRender(ev voiceEventRow) string {
 		return at + " >> barge-in"
 	case "call_ended":
 		return at + " call ended: " + ev.Reason
+	case "silence_deferred":
+		return at + " silence deferred (agent audio playing, x" + ev.Reason + ")"
 	case "prompt_held":
 		return at + " held (peer speaking): " + ev.Text
 	case "prompt_released":
@@ -1049,13 +1061,27 @@ func (t *voiceEventTracker) pollOnce(ccid, label, emp string) bool {
 	t.mu.Unlock()
 	res, ok, dead := t.callBounded(ccid, cursor)
 	if dead {
+		// found=false at cursor 0 is NOT the C-20 feed end: the ring is
+		// created LAZILY by the first Append (heard/dispatch events land
+		// only when the first final prompt arrives), so the very first
+		// tick of a fresh call always reads found=false. Treating that
+		// as "feed ended" permanently silenced the live operator feed -
+		// the user saw nothing but the "call open" line for the whole
+		// conversation (regression from fcaa2bab's C-20, live call
+		// local-53b347f028f0a43f). Keep ticking: the ctx cancel at call
+		// end bounds the live loop and the drain terminates the ccid
+		// explicitly. A found=false at cursor > 0 is the real
+		// eviction/teardown signal and still ends THIS ccid's poller.
+		if cursor == 0 {
+			return true
+		}
 		// The daemon answered found=false: the feed is over (C-20).
 		t.mu.Lock()
 		defer t.mu.Unlock()
 		if t.stopped {
 			return false
 		}
-		if cursor > 0 && !t.ended[ccid] {
+		if !t.ended[ccid] {
 			fmt.Printf("[%s %s] telemetry feed ended (call no longer tracked)\n", label, emp)
 		}
 		t.ended[ccid] = true
@@ -1874,10 +1900,79 @@ func printLinkTranscript(name string, side voiceLinkSideStatus) {
 		return
 	}
 	for _, l := range side.Transcript {
-		at := l.At
-		if len(at) >= 8 {
-			at = at[11:19]
-		}
-		fmt.Printf("%s %s: %s\n", at, l.Role, strings.TrimSpace(l.Text))
+		printTranscriptLine(l.Role, l.At, l.Text)
 	}
+}
+
+// voiceLocalTranscriptResult mirrors the voice.local.transcript wire shape.
+type voiceLocalTranscriptResult struct {
+	CallID     string `json:"call_id"`
+	EmployeeID string `json:"employee_id"`
+	SessionID  string `json:"session_id"`
+	Lines      []struct {
+		Role string `json:"role"`
+		Text string `json:"text"`
+		At   string `json:"at"`
+	} `json:"lines"`
+	Found bool `json:"found"`
+}
+
+// printLocalCallTranscript prints the call's stored transcript at call
+// end (the user-facing "what was said" the live event feed also lost in
+// the local-53b347f028f0a43f regression). Reads voice.local.transcript -
+// the call store, call-scoped, so a shared session never leaks prior
+// calls' history. Best-effort by contract: an RPC error, an old daemon
+// without the method, or an unwired store prints the honest "no
+// transcript lines" degrade and NEVER changes the run's outcome.
+func printLocalCallTranscript(client interface {
+	Call(method string, params any) (json.RawMessage, error)
+}, callID, employee string) {
+	var res voiceLocalTranscriptResult
+	raw, err := client.Call("voice.local.transcript", map[string]any{"call_id": callID})
+	if err == nil {
+		err = json.Unmarshal(raw, &res)
+	}
+	if err != nil || !res.Found {
+		emp := employee
+		if res.EmployeeID != "" {
+			emp = res.EmployeeID
+		}
+		fmt.Printf("\n--- transcript (%s / %s) ---\n", emp, callID)
+		fmt.Println("(no transcript lines)")
+		return
+	}
+	var userN, asstN int
+	for _, l := range res.Lines {
+		switch l.Role {
+		case "user":
+			userN++
+		case "assistant":
+			asstN++
+		}
+	}
+	emp := res.EmployeeID
+	if emp == "" {
+		emp = employee
+	}
+	if emp == "" {
+		emp = "?"
+	}
+	fmt.Printf("\n--- transcript (%s / %s): %d user / %d assistant ---\n",
+		emp, res.CallID, userN, asstN)
+	if len(res.Lines) == 0 {
+		fmt.Println("(no transcript lines)")
+		return
+	}
+	for _, l := range res.Lines {
+		printTranscriptLine(l.Role, l.At, l.Text)
+	}
+}
+
+// printTranscriptLine renders one role-tagged transcript line (shared
+// shape of the link/local end-of-call prints: HH:MM:SS <role>: <text>).
+func printTranscriptLine(role, at, text string) {
+	if len(at) >= 19 {
+		at = at[11:19]
+	}
+	fmt.Printf("%s %s: %s\n", at, role, strings.TrimSpace(text))
 }

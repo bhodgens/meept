@@ -29,6 +29,12 @@ type fakeSeams struct {
 	eventsTruncated bool
 	eventsHasMore   bool
 	eventsFound     bool
+	// voice.local.transcript fakes (end-of-call transcript read).
+	transcriptCalls int
+	transcriptEmp   string
+	transcriptSess  string
+	transcriptLines []VoiceCallTranscriptLine
+	transcriptFound bool
 }
 
 func (f *fakeSeams) seams() VoiceLocalSeams {
@@ -50,6 +56,10 @@ func (f *fakeSeams) seams() VoiceLocalSeams {
 		Events: func(_ string, _ uint64, _ int) ([]VoiceCallEvent, bool, bool, bool) {
 			f.eventsCalls++
 			return f.eventsRows, f.eventsTruncated, f.eventsHasMore, f.eventsFound
+		},
+		Transcript: func(_ context.Context, _ string) (string, string, []VoiceCallTranscriptLine, bool) {
+			f.transcriptCalls++
+			return f.transcriptEmp, f.transcriptSess, f.transcriptLines, f.transcriptFound
 		},
 	}
 }
@@ -245,5 +255,68 @@ func TestVoiceLocalRegister(t *testing.T) {
 	}
 	if _, err := s.CallMethod(context.Background(), "voice.local.status", nil); err != nil {
 		t.Fatalf("voice.local.status not registered: %v", err)
+	}
+}
+
+// --- voice.local.transcript (end-of-call transcript read) ---
+
+func TestVoiceLocalTranscriptOK(t *testing.T) {
+	f := &fakeSeams{
+		transcriptEmp:  "companion",
+		transcriptSess: "session-1",
+		transcriptLines: []VoiceCallTranscriptLine{
+			{Role: "user", Text: "hi", At: "2026-11-11T21:39:08Z"},
+			{Role: "assistant", Text: "hello", At: "2026-11-11T21:39:13Z"},
+		},
+		transcriptFound: true,
+	}
+	h := NewVoiceLocalHandler(f.seams())
+	raw, err := json.Marshal(map[string]any{"call_id": "local-x"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	res, err := h.handleTranscript(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("transcript: %v", err)
+	}
+	out, ok := res.(VoiceLocalTranscriptResult)
+	if !ok || !out.Found || len(out.Lines) != 2 || out.EmployeeID != "companion" || out.SessionID != "session-1" {
+		t.Fatalf("unexpected result: %+v", out)
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, key := range []string{"call_id", "employee_id", "session_id", "lines", "found", "role", "text", "at"} {
+		if !strings.Contains(string(b), `"`+key+`"`) {
+			t.Fatalf("json missing %s: %s", key, b)
+		}
+	}
+}
+
+func TestVoiceLocalTranscriptMissingCallID(t *testing.T) {
+	f := &fakeSeams{}
+	h := NewVoiceLocalHandler(f.seams())
+	_, err := h.handleTranscript(context.Background(), []byte(`{}`))
+	if !errors.Is(err, ErrVoiceLocalUnknownCall) {
+		t.Fatalf("want ErrVoiceLocalUnknownCall, got %v", err)
+	}
+	if f.transcriptCalls != 0 {
+		t.Fatalf("seam must not fire without call_id: %d", f.transcriptCalls)
+	}
+}
+
+func TestVoiceLocalTranscriptUnwiredIsEmptyEnvelope(t *testing.T) {
+	// Zero seams (no store wired): the empty envelope, never an error -
+	// the CLI's end-of-call print is best-effort against old/unwired
+	// daemons.
+	h := NewVoiceLocalHandler(VoiceLocalSeams{})
+	res, err := h.handleTranscript(context.Background(), []byte(`{"call_id":"local-x"}`))
+	if err != nil {
+		t.Fatalf("unwired transcript must not error: %v", err)
+	}
+	out := res.(VoiceLocalTranscriptResult)
+	if out.Found || out.Lines == nil || len(out.Lines) != 0 {
+		t.Fatalf("want empty non-nil envelope, got %+v", out)
 	}
 }

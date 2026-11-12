@@ -35,10 +35,14 @@ func voiceLocalSeams(w *VoiceWiring, mgr *employee.Manager, logger *slog.Logger)
 	if logger == nil {
 		logger = slog.Default()
 	}
+	transcript := callTranscriptSeam(w)
 	if w.Local == nil {
 		// Disabled leg: mutations refuse, but the ring (if built) still
-		// answers voice.local.events for phone calls.
-		return rpc.VoiceLocalSeams{Events: callEventsSeam(w)}
+		// answers voice.local.events for phone calls, and the store (if
+		// built) answers voice.local.transcript for terminal calls of
+		// BOTH legs (the CLI end-of-call print is read-only and
+		// call-scoped).
+		return rpc.VoiceLocalSeams{Events: callEventsSeam(w), Transcript: transcript}
 	}
 	leg := w.Local
 	registry := w.Registry
@@ -136,6 +140,37 @@ func voiceLocalSeams(w *VoiceWiring, mgr *employee.Manager, logger *slog.Logger)
 		Status:         status,
 		EmployeeExists: exists,
 		Events:         callEventsSeam(w),
+		Transcript:     transcript,
+	}
+}
+
+// callTranscriptSeam adapts the voice employee wiring's CallStore onto
+// the voice.local.transcript seam (the CLI's end-of-call transcript
+// print): a plain projection of EndedCall onto the RPC row shape. The
+// typed-nil guard binds (a nil *voice.CallStore boxed into the
+// linkTranscriptSource interface reads non-nil): no store = nil seam =
+// the handler's empty envelope. Store read errors degrade the same way
+// (found=false) - the transcript print is best-effort and must never
+// surface as an RPC failure the CLI has to handle.
+func callTranscriptSeam(w *VoiceWiring) func(ctx context.Context, callID string) (string, string, []rpc.VoiceCallTranscriptLine, bool) {
+	store := linkTranscriptSourceFor(w)
+	if store == nil {
+		return nil
+	}
+	return func(ctx context.Context, callID string) (string, string, []rpc.VoiceCallTranscriptLine, bool) {
+		rec, lines, ok, err := store.EndedCall(ctx, callID)
+		if err != nil || !ok {
+			return "", "", nil, false
+		}
+		out := make([]rpc.VoiceCallTranscriptLine, 0, len(lines))
+		for _, l := range lines {
+			out = append(out, rpc.VoiceCallTranscriptLine{
+				Role: l.Role,
+				Text: l.Text,
+				At:   l.At.Format(time.RFC3339),
+			})
+		}
+		return rec.EmployeeID, rec.SessionID, out, true
 	}
 }
 

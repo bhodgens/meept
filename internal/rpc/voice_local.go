@@ -18,6 +18,8 @@ package rpc
 //	voice.local.status req {}                   -> {calls:[{call_id, employee_id, target_name, target_display, since_rfc3339, leg}]}
 //	voice.local.events req {call_id, cursor?, limit?}
 //	                   -> {call_id, events:[{seq, kind, at, text?, words?, ms?, reason?}], cursor, truncated?, found}
+//	voice.local.transcript req {call_id}
+//	                   -> {call_id, employee_id, session_id, lines:[{role,text,at}], found}
 //
 // Named refusals: ErrVoiceLocalDisabled (leg unwired/disabled),
 // ErrVoiceLocalUnknownEmployee (no such employee - checked BEFORE the
@@ -134,6 +136,28 @@ type VoiceLocalEventsResult struct {
 	Found     bool             `json:"found"`
 }
 
+// VoiceCallTranscriptLine is one stored call-transcript row
+// (voice.local.transcript). Role is "user" (caller speech) or "assistant"
+// (the employee's spoken reply); At is RFC3339 (store clock).
+type VoiceCallTranscriptLine struct {
+	Role string `json:"role"`
+	Text string `json:"text"`
+	At   string `json:"at"`
+}
+
+// VoiceLocalTranscriptResult is the voice.local.transcript result (the
+// end-of-call transcript read the CLI prints). Lines is never nil (empty
+// list, not absent). Found reports whether the call id exists in the
+// store at all; an unknown/never-stored call is the empty envelope, never
+// an error - the CLI print is best-effort by contract.
+type VoiceLocalTranscriptResult struct {
+	CallID     string                    `json:"call_id"`
+	EmployeeID string                    `json:"employee_id"`
+	SessionID  string                    `json:"session_id"`
+	Lines      []VoiceCallTranscriptLine `json:"lines"`
+	Found      bool                      `json:"found"`
+}
+
 // VoiceLocalSeams carries the daemon-side operations the handler calls.
 // ALL fields optional: a nil field degrades THAT operation to the named
 // refusal (never a panic, never "method not found"). The daemon wiring
@@ -165,6 +189,12 @@ type VoiceLocalSeams struct {
 	// empty list, never an error - the poller must stay quiet on
 	// teardown races instead of erroring every tick).
 	Events func(callID string, cursor uint64, limit int) (events []VoiceCallEvent, truncated bool, hasMore bool, found bool)
+	// Transcript reads ONE call's stored transcript from the call store
+	// (voice.local.transcript - the end-of-call print). Returns the
+	// call's employee/session ids and its role-tagged lines; found=false
+	// for an unknown call id (empty envelope, never an error). Nil seam
+	// (no store wired) answers the same empty envelope.
+	Transcript func(ctx context.Context, callID string) (employeeID, sessionID string, lines []VoiceCallTranscriptLine, found bool)
 }
 
 // VoiceLocalHandler serves voice.local.open / .end / .status.
@@ -190,6 +220,7 @@ func (h *VoiceLocalHandler) RegisterVoiceLocalMethods(server *Server) {
 	server.RegisterHandler("voice.local.end", h.handleEnd)
 	server.RegisterHandler("voice.local.status", h.handleStatus)
 	server.RegisterHandler("voice.local.events", h.handleEvents)
+	server.RegisterHandler("voice.local.transcript", h.handleTranscript)
 }
 
 // handleOpen implements voice.local.open (CL8). Order: parse -> gates
@@ -297,5 +328,37 @@ func (h *VoiceLocalHandler) handleEvents(_ context.Context, params json.RawMessa
 			res.Cursor = ev.Seq
 		}
 	}
+	return res, nil
+}
+
+// handleTranscript implements voice.local.transcript: one call's stored
+// transcript (role-tagged lines) for the CLI's end-of-call print. Params
+// {call_id}; a missing call_id refuses with the named unknown-call error.
+// Unwired seam / unknown call = the empty envelope (found:false), never an
+// error - the CLI read is best-effort like the telemetry poller.
+func (h *VoiceLocalHandler) handleTranscript(ctx context.Context, params json.RawMessage) (any, error) {
+	var req struct {
+		CallID string `json:"call_id"`
+	}
+	if len(params) > 0 {
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, fmt.Errorf("voice.local.transcript: invalid parameters: %w", err)
+		}
+	}
+	if req.CallID == "" {
+		return nil, fmt.Errorf("%w: call_id is required", ErrVoiceLocalUnknownCall)
+	}
+	res := VoiceLocalTranscriptResult{CallID: req.CallID, Lines: []VoiceCallTranscriptLine{}}
+	if h.seams.Transcript == nil {
+		return res, nil
+	}
+	emp, sess, lines, found := h.seams.Transcript(ctx, req.CallID)
+	if lines == nil {
+		lines = []VoiceCallTranscriptLine{}
+	}
+	res.EmployeeID = emp
+	res.SessionID = sess
+	res.Lines = lines
+	res.Found = found
 	return res, nil
 }

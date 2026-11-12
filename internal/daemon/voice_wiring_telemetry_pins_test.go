@@ -93,3 +93,40 @@ func TestReleaseCallDoesNotResurrectEvictedRing(t *testing.T) {
 		t.Fatalf("synthetic terminal = %+v, want one call_ended", evs)
 	}
 }
+
+// C-13 extension (heard-text fallback, local-53b347f028f0a43f follow-up
+// of the sibling merge's raw-From swap): a FINAL prompt frame with an
+// EMPTY From (legacy per-final mode / older or fake children that never
+// fill raw) must record the heard event with the Text preview, never an
+// empty one - a blank "heard:" line makes the operator feed lie. A frame
+// that DOES carry From keeps the RAW (read before the swap moves it into
+// Text).
+func TestRouteFrameHeardFallsBackToTextWhenFromEmpty(t *testing.T) {
+	w, _ := newVoiceWiringForTest(t)
+	w.callEvents = voice.NewTelemetryRing(8, 8)
+	last := true
+
+	loop := voice.NewTalkLoop(voice.TalkDeps{Logger: w.logger}, voice.TalkLoopConfig{})
+	w.loopsMu.Lock()
+	w.loops["cc-ntx"] = loop
+	w.loopsMu.Unlock()
+	w.routeFrame(voice.Frame{CallID: "cc-ntx", Event: voice.EventPrompt, Text: "local utterance one", Last: &last})
+	evs, _, _, found := w.callEvents.Since("cc-ntx", 0, 0)
+	if !found || len(evs) != 1 {
+		t.Fatalf("no-From final: ring = %+v found=%v, want one heard", evs, found)
+	}
+	if evs[0].Kind != voice.EventKindHeard || evs[0].Text != "local utterance one" || evs[0].Words != 3 {
+		t.Fatalf("no-From heard = %+v, want Text fallback with word count", evs[0])
+	}
+
+	// With From filled (aggregation-mode raw), the RAW is the heard text.
+	loop2 := voice.NewTalkLoop(voice.TalkDeps{Logger: w.logger}, voice.TalkLoopConfig{})
+	w.loopsMu.Lock()
+	w.loops["cc-raw"] = loop2
+	w.loopsMu.Unlock()
+	w.routeFrame(voice.Frame{CallID: "cc-raw", Event: voice.EventPrompt, Text: "normalized prompt", From: "um raw transcript", Last: &last})
+	evs, _, _, _ = w.callEvents.Since("cc-raw", 0, 0)
+	if len(evs) != 1 || evs[0].Text != "um raw transcript" {
+		t.Fatalf("raw-From heard = %+v, want the RAW text (read before the swap)", evs)
+	}
+}
