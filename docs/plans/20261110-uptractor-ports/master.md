@@ -147,7 +147,7 @@ commits per leaf with pathspec, updates the tracking table.
 
 | Leaf | Status | Notes |
 |---|---|---|
-| 00T | PENDING | |
+| 00T | TESTS_VALIDATED | Gate committed in worktree 2026-11-11; 58 tests, all RED undefined-symbol; DEAD-AIR semantics pinned (short explicit DeadAir in race tests, defaults pinned numerically); "summer planes" verbatim; C7 pins FileCommitments/FileCommitmentsFromBrief voice-side seam (daemon wiring lands in leaf 04); recording pins RecordingPolicy + frozen mp3/dual wire shape; Makefile test-voice-eval RED stub + demo-utterance.wav fixture staged |
 | 01 | PENDING | |
 | 02 | PENDING | |
 | 03 | PENDING | |
