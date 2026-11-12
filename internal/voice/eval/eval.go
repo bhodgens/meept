@@ -150,9 +150,9 @@ func FindLeaks(output string) []string {
 // its expected transcript (the accuracy.py LINES text the audio was
 // synthesized from), and the frozen pass threshold for that case.
 type AccuracyCase struct {
-	WAV       string  `json:"wav"`      // file name under testdata/voice-eval/
-	Expected  string  `json:"expected"` // reference transcript (accuracy.py LINES text)
-	MaxWER    float64 `json:"max_wer"`  // pass bar: WER(Expected, actual) <= MaxWER
+	WAV       string  `json:"wav"`                    // file name under testdata/voice-eval/
+	Expected  string  `json:"expected"`               // reference transcript (accuracy.py LINES text)
+	MaxWER    float64 `json:"max_wer"`                // pass bar: WER(Expected, actual) <= MaxWER
 	MinKeyHit *int    `json:"min_key_hits,omitempty"` // optional key-terms floor
 }
 
