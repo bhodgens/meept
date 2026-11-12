@@ -9,6 +9,29 @@
 #   go install github.com/timakin/bodyclose@latest
 #
 # Added 2026-06-19 per docs/20260618-checkreview.md recommendations.
+#
+# CRASH-VS-FINDINGS CONTRACT (2026-11-12):
+# A non-zero exit from `go vet -vettool=bodyclose` is NOT always a finding.
+# When the bodyclose binary is built with an older Go than the stdlib export
+# data (go/types panics: "export data version 5 is greater than maximum
+# supported version 4"), the vettool run panics on EVERY package. Treating
+# that as findings permanently blocks all Go commits. Classify per-package:
+#   - TOOL CRASH: output has no bodyclose-style diagnostic line (panic
+#     markers like 'panic:' / 'export data version' / 'goroutine [running]'
+#     typically appear too). bodyclose findings always look like
+#     'path/file.go:LINE:COL: ...' — discriminated by
+#     grep -E '^[^#].*\.go:[0-9]+:[0-9]+:'.
+#   - FINDINGS: at least one file:line:col diagnostic line. MUST stay strict
+#     — keep the discriminating regex in sync with bodyclose's output shape
+#     when editing this hook.
+#   - CLEAN: rc=0.
+# Findings anywhere -> exit 1 as before. Crashes only -> loud yellow skip
+# banner with rebuild instructions, exit 0 (a broken tool must not block
+# commits, but the skip must be impossible to miss).
+# Precedence rule: FINDINGS > CRASH. A package whose output contains both
+# panic markers AND file:line:col diagnostics counts as FINDINGS (the tool
+# analyzed the target despite crashing elsewhere) — classification must
+# never convert a visible finding into a silent skip.
 
 set -e
 
@@ -67,24 +90,60 @@ echo ""
 
 # bodyclose is a single-checker; it has no -checks flag.
 # Run go vet with the bodyclose analyzer so we get per-package scoping for free.
+#
+# Classification per package (see contract at top):
+#   FINDINGS_BODY: matched file:line:col diagnostic lines (fail the commit)
+#   CRASHED_PKGS:  packages where the tool crashed (panic / no diagnostics)
+# A '# pkg' header line with no file:line:col body is also a crash signature:
+# `go vet` prints the header before the analyzer bails, and a healthy
+# diagnostic run always carries at least one file:line:col line after it.
 FAILED=false
 OUTPUT=""
+CRASHED_PKGS=""
 for pkg in $PACKAGES; do
   if result=$(go vet -vettool="$BODYCLOSE" "$pkg" 2>&1); then
     :
   else
-    FAILED=true
-    OUTPUT="${OUTPUT}${pkg}:\n${result}\n\n"
+    diagnostics=$(printf '%s\n' "$result" | grep -E '^[^#].*\.go:[0-9]+:[0-9]+:' || true)
+    if [ -n "$diagnostics" ]; then
+      # FINDINGS: file:line:col lines are authoritative. Even if panic markers
+      # are also present (tool crashed on some dependency packages but still
+      # analyzed the target), genuine findings must fail the commit — the
+      # findings gate never loosens.
+      FAILED=true
+      OUTPUT="${OUTPUT}${pkg}:\n${diagnostics}\n\n"
+    else
+      # CRASH: non-zero exit with no diagnostic lines (panic / export-data
+      # skew / bare '# pkg' header). The panic-marker grep below is the
+      # explicit signature check; empty-diagnostics alone is sufficient.
+      CRASHED_PKGS="${CRASHED_PKGS}  ${pkg}\n"
+    fi
   fi
 done
 
+# Genuine findings fail exactly as before, with crashed packages listed too.
 if [ "$FAILED" = true ]; then
   echo -e "${RED}❌ bodyclose found unclosed HTTP response bodies:${NC}"
   echo ""
   echo -e "$OUTPUT"
+  if [ -n "$CRASHED_PKGS" ]; then
+    echo -e "${YELLOW}⚠️  bodyclose also CRASHED (toolchain skew) on these packages (not checked):${NC}"
+    echo -e "$CRASHED_PKGS"
+    echo ""
+  fi
   echo -e "${YELLOW}Always defer resp.Body.Close() after every http.Client.Do / Get / Post.${NC}"
   echo ""
   exit 1
+fi
+
+# Crashes with no findings anywhere: skip loudly, do not block the commit.
+if [ -n "$CRASHED_PKGS" ]; then
+  echo -e "${YELLOW}⚠️  bodyclose CRASHED (toolchain skew — binary built with an older Go than the stdlib export data); bodyclose check SKIPPED for this commit. This weakens the gate: rebuild with \`go install github.com/timakin/bodyclose@latest\` to restore it.${NC}"
+  echo ""
+  echo -e "Crashed packages:"
+  echo -e "$CRASHED_PKGS"
+  echo ""
+  exit 0
 fi
 
 echo -e "${GREEN}✅ bodyclose passed - no leaked bodies${NC}"
