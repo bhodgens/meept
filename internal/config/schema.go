@@ -5522,10 +5522,21 @@ type VoiceConfig struct {
 	// conversation, so turn history never snowballs across calls. The day
 	// brief stays the only cross-call context channel. Per-employee
 	// override: employee_leg rows carry fresh_session (tri-state).
-	FreshSessionPerCall bool                `json:"fresh_session_per_call" toml:"fresh_session_per_call"`
-	Local               LocalConfig         `json:"local"                  toml:"local"`
-	EmployeeLeg         []EmployeeLegConfig `json:"employee_leg"   toml:"employee_leg"`
-	Messaging           MessagingConfig     `json:"messaging"              toml:"messaging"`
+	FreshSessionPerCall bool `json:"fresh_session_per_call" toml:"fresh_session_per_call"`
+	// RecordCalls (leaf 06, opt-in, default false): start a dual-channel
+	// mp3 recording at call.answered. HARD-GATED by RecordConsentPin:
+	// enabling without a non-empty pin is a startup REFUSAL (Error log,
+	// recording forced off — fail-closed in the daemon wiring), never a
+	// silent record-without-consent (all-party-consent states).
+	RecordCalls bool `json:"record_calls" toml:"record_calls"`
+	// RecordConsentPin is REQUIRED non-empty when RecordCalls is true:
+	// the call must announce that it is being recorded (and driven by AI)
+	// before any record_start. Empty + RecordCalls=true => recording
+	// disabled with an Error log at wiring time.
+	RecordConsentPin string              `json:"record_consent_pin" toml:"record_consent_pin"`
+	Local            LocalConfig         `json:"local"                  toml:"local"`
+	EmployeeLeg      []EmployeeLegConfig `json:"employee_leg"   toml:"employee_leg"`
+	Messaging        MessagingConfig     `json:"messaging"              toml:"messaging"`
 }
 
 // DefaultUnapprovedCallerAllowedTools is the [voice]

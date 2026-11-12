@@ -605,6 +605,35 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		w.telClient = tel
 	}
 
+	// -- 7a-b. Call recording (leaf 06, T3): consent gate evaluated at
+	// STARTUP, never lazily at first call. record_calls=true with an
+	// empty record_consent_pin is a refusal: Error log + recording forced
+	// off (fail-closed — a silent record-without-consent is the one
+	// outcome this gate exists to make impossible; all-party-consent
+	// states). Recording rides the PHONE leg only: with the carrier
+	// client unresolvable there is nothing to record, so the wiring
+	// degrades to unwired (same nil-tel posture as the reaper).
+	{
+		policy := voice.RecordingPolicy{
+			Enabled:          cfg.RecordCalls,
+			ConsentAnnounced: cfg.RecordConsentPin != "",
+		}
+		switch {
+		case policy.ConsentRefused():
+			vlog.Error("voice wiring: record_calls enabled but record_consent_pin is empty; "+
+				"recording FORCED OFF — set voice.record_consent_pin (the call must announce "+
+				"recording and AI before any record_start)",
+				"record_calls", true)
+		case policy.Enabled && phoneEnabled:
+			store := employee.store
+			manager.ArmRecording(policy, tel, func(ctx context.Context, ccid, url string) error {
+				return store.SetRecordingURL(ctx, ccid, url)
+			})
+			vlog.Info("voice wiring: call recording armed (consent pin set)",
+				"format", "mp3", "channels", "dual")
+		}
+	}
+
 	// -- 7b. LocalLeg (local-leg plan CL5/leaf 07): constructed when
 	// voice.local.enabled; nil otherwise (leaf 08's RPC checks nil before
 	// refusing with the disabled-leg error). The brief builder adapts the

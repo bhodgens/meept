@@ -115,6 +115,16 @@ type Manager struct {
 	// untouched.
 	actObsMu sync.Mutex
 	actObs   []func(ccid string)
+
+	// recordingMu guards the leaf-06 recording seam (ADDITIVE, same
+	// pattern as the observer lanes): the consent policy the answer path
+	// consults and the URL sink the recording.saved webhook routes to.
+	// Both stay nil unless the daemon wiring arms them — the zero Manager
+	// never records (default-off is structural).
+	recordingMu      sync.Mutex
+	policy           RecordingPolicy
+	recordingStarter RecordingStarter
+	urlSink          func(ctx context.Context, ccid, url string) error
 }
 
 // NewManager returns a Manager. spawn may be nil when the caller only uses
@@ -474,7 +484,24 @@ func (m *Manager) HandleCallEvent(ctx context.Context, ev telnyx.CallEvent) erro
 		streamURL := m.cfg.StreamURL
 		codec := m.cfg.Codec
 		m.mu.Unlock()
-		return m.tel.StartStreaming(ctx, ev.CallControlID, streamURL, codec)
+		err := m.tel.StartStreaming(ctx, ev.CallControlID, streamURL, codec)
+		if err == nil {
+			// Leaf 06: consent-gated recording starts ADDITIVELY after a
+			// clean streaming start. The policy's zero value (never wired)
+			// makes this a no-op — default-off is structural, not a
+			// config check. A recording-start failure is logged, never
+			// fatal: failing the webhook here would 500 the answered
+			// event and buy a Telnyx redelivery storm on a live call.
+			m.startRecordingIfArmed(ctx, ev.CallControlID)
+		}
+		return err
+	case telnyx.RecordingSavedEvent:
+		// Leaf 06: the finished recording's URL lands on the call
+		// row. ParseCallEvent classified this event explicitly (leaf
+		// 01 kept it out of IgnoredEventError), so it reaches this
+		// switch and routes through the armed sink (idempotent no-op
+		// when unwired — the webhook ACKs 200, no redelivery).
+		return m.HandleRecordingSaved(ctx, ev)
 	case "call.hangup":
 		callCancel, streamCancel, fire := m.releaseOnce(ev.CallControlID)
 		// Cancel the spawn session first (idempotent), then the media bridge
