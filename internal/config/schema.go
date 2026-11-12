@@ -5097,10 +5097,6 @@ func DefaultConfig() *Config {
 			SilenceHangupAfterSeconds: 45,
 			FillerGraceMs:             2500,
 			TurnConfirmMs:             900,
-			// min_turn_words is opt-in: default 0 = short-final gate
-			// disabled (docs/agents/opt-in-defaults.md). Loud-room
-			// operators set N>=2 to drop background-fragment finals.
-			MinTurnWords: 0,
 			// turn_timeout_seconds is opt-in: default 0 = disabled
 			// (docs/agents/opt-in-defaults.md). The silence timer is
 			// suspended while a voice turn is in flight, so an operator
@@ -5488,20 +5484,7 @@ type VoiceConfig struct {
 	// at 500 ms wall-idle; a normal mid-sentence breath is 300-600 ms,
 	// so per-final dispatch answered fragments of one sentence).
 	// Default 900; 0 = legacy per-final dispatch.
-	TurnConfirmMs int `json:"turn_confirm_ms"        toml:"turn_confirm_ms"`
-	// MinTurnWords is the child-side short-final gate (voice-microfrag,
-	// live call local-0627960006a7f3d9): in a loud room, background-TV
-	// fragments ("The other", "This is...") finalize seconds apart —
-	// too far for the aggregation window to merge, and a fixed word
-	// filter is wrong by default because an operator command like
-	// "Stop." is one word. So the threshold is operator-tunable: the
-	// child drops a FINAL whose non-speech-stripped text has fewer
-	// than N whitespace-separated words (dropped finals dispatch
-	// nothing and never stamp barge-in speech evidence). Default 0 =
-	// disabled (opt-in defaults rule, docs/agents/opt-in-defaults.md);
-	// set 2 to tune out short background fragments; 1-word voice
-	// commands still pass at N=1. A negative value clamps to 0.
-	MinTurnWords        int      `json:"min_turn_words" toml:"min_turn_words"`
+	TurnConfirmMs       int      `json:"turn_confirm_ms"        toml:"turn_confirm_ms"`
 	SupervisorEmployee  string   `json:"supervisor_employee"    toml:"supervisor_employee"`
 	SupervisorEnabled   bool     `json:"supervisor_enabled"     toml:"supervisor_enabled"`
 	SupervisorModel     string   `json:"supervisor_model"       toml:"supervisor_model"`

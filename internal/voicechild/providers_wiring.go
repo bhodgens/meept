@@ -98,13 +98,6 @@ type keysWire struct {
 	// defaultTurnConfirmMs) from an explicit 0 (operator chose legacy
 	// per-final dispatch). A negative value clamps to 0 at decode.
 	TurnConfirmMs *int `json:"turn_confirm_ms"`
-	// MinTurnWords is the voice-microfrag short-final gate selector.
-	// Unlike turn_confirm_ms its ABSENT state is the DISABLED default
-	// (0), the same as an explicit 0 — the gate only does something at
-	// N >= 1, so absent/explicit-0 collapse to legacy behavior and a
-	// pointer is the honest wire shape for "default = zero value". A
-	// negative value clamps to 0.
-	MinTurnWords *int `json:"min_turn_words"`
 }
 
 // handleKeysFrame decodes one raw keys line into the redacting KeysFrame
@@ -125,17 +118,6 @@ func (c *Child) handleKeysFrame(line string) error {
 			turnConfirmMs = 0
 		}
 	}
-	// Absent min_turn_words (old daemon line) = 0 = gate disabled
-	// (legacy behavior); explicit 0 the same; negative clamps to 0 —
-	// the config load boundary clamps too (belt and braces on a wire
-	// value).
-	minTurnWords := 0
-	if w.MinTurnWords != nil {
-		minTurnWords = *w.MinTurnWords
-		if minTurnWords < 0 {
-			minTurnWords = 0
-		}
-	}
 	return c.handleKeys(KeysFrame{
 		CallID:        w.CallID,
 		STTKey:        w.STTKey,
@@ -148,7 +130,6 @@ func (c *Child) handleKeysFrame(line string) error {
 		TTSBaseURL:    w.TTSBaseURL,
 		TTSVoice:      w.TTSVoice,
 		TurnConfirmMs: turnConfirmMs,
-		MinTurnWords:  minTurnWords,
 	})
 }
 

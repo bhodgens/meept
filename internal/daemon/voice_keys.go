@@ -56,13 +56,6 @@ type keysWire struct {
 	// and an old DAEMON line (field absent child-side) leaves the child
 	// on its own default. 0 = legacy per-final dispatch.
 	TurnConfirmMs int `json:"turn_confirm_ms"`
-	// MinTurnWords is the voice-microfrag short-final gate selector:
-	// config voice.min_turn_words (default 0 = disabled). Sent always
-	// (no omitempty, the keys-wire convention); an old child ignores
-	// the extra field, and an old daemon line (field absent child-side)
-	// decodes as 0 — the gate's disabled default, so absent and
-	// explicit-0 are the same legacy behavior.
-	MinTurnWords int `json:"min_turn_words"`
 }
 
 // Default vendor adapters when the config fields are empty (C4: preserves
@@ -120,11 +113,6 @@ func (w *VoiceWiring) sendKeysFrame(ccid string) {
 		// never set the field sends 0: the legacy shape, which is the
 		// exact pre-C1 behavior old call sites had.
 		TurnConfirmMs: w.cfg.TurnConfirmMs,
-		// Short-final gate (voice-microfrag): global config like the
-		// base URLs and the aggregation window. Default 0 = disabled —
-		// a loaded config carries voice.min_turn_words (0 unless the
-		// operator set it); the child clamps negatives at decode.
-		MinTurnWords: w.cfg.MinTurnWords,
 	}
 	if kw.STTVendor == "" {
 		kw.STTVendor = defaultSTTVendor

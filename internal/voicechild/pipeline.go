@@ -89,16 +89,6 @@ type pipeline struct {
 	trStartOnce  sync.Once     // exactly-once close of trStart (consumer exit OR permanent open failure)
 	pumpOnce     sync.Once     // start() is idempotent: exactly one pump goroutine
 
-	// minTurnWords (playMu, keys-frame guarded, like turnConfirm): the
-	// voice-microfrag short-final gate. A FINAL whose stripped text has
-	// FEWER than this many real words drops before evidence stamping and
-	// aggregation — tuned for loud rooms where TV fragments ("The other",
-	// "This is...") dispatch turns seconds apart (aggregation cannot
-	// merge arrivals 3-8 s apart, and word filters are wrong by default:
-	// an operator's "Stop." is one word). 0 = disabled (the default;
-	// byte-identical legacy behavior — opt-in defaults rule).
-	minTurnWords int
-
 	// Turn aggregation (voice-startguard C1, live call
 	// local-496a3fd0d2ab3fc6): the whisper provider flushes a segment
 	// after 500 ms of wall-idle — right for segmentation latency, wrong
@@ -440,22 +430,12 @@ func nonSpeechTranscript(text string) bool {
 	return false
 }
 
-// bracketedTokenRe matches one whisper paralinguistic token run: either a
-// bracket token — opening ( [ followed by 1-60 non-']' / non-newline
-// characters and a closing ) ] — or an asterisk marker — * followed by 1-60
-// non-'*' / non-newline characters and a closing * (voice-microfrag defect
-// 2026-11-11, live call local-0627960006a7f3d9: whisper emits
-// "*unintelligible*", "*static*", "*music*", "*laughter*" and the bracket-
-// only strip let a bare "*unintelligible*" final dispatch as a user
-// prompt). The two classes are ONE alternation so the nesting/unclosed
-// rules carry over identically: the body excludes the closer, so an
-// unclosed run ("*unintelligible" with no second "*") matches nothing and
-// keeps its residue REAL — the rule errs toward hearing the caller, and a
-// lone "*" (empty body, needs 1+ chars) never matches. The 60-char cap
-// keeps a token token-sized — a long parenthetical containing real words
-// is caller speech, not an artifact. (?i) is spec fidelity: the class is
-// shape-based, so case never binds.
-var bracketedTokenRe = regexp.MustCompile(`(?i)[\[(][^\]\n]{1,60}[\])]|\*[^*\n]{1,60}\*`)
+// bracketedTokenRe matches one whisper paralinguistic bracket token: an
+// opening ( [ followed by 1-60 non-']' / non-newline characters and a
+// closing ) ]. The 60-char cap keeps a bracket token bracket-sized — a long
+// parenthetical containing real words is caller speech, not an artifact.
+// (?i) is spec fidelity: the class is shape-based, so case never binds.
+var bracketedTokenRe = regexp.MustCompile(`(?i)[\[(][^\]\n]{1,60}[\])]`)
 
 // punctuationOnlyRe matches residue that carries no word characters at all:
 // only Unicode punctuation, symbols, and whitespace.
@@ -489,32 +469,8 @@ func isRealSpeech(text string) bool {
 	if nonSpeechTranscript(text) {
 		return false
 	}
-	residue := stripNonSpeechTokens(text)
-	// A surviving "*" is an unclosed asterisk run (bare "*", "hello *"):
-	// the shape rule cannot prove it is an artifact — a bracketed empty
-	// marker "()" is a COMPLETE marker shape, a lone asterisk is not —
-	// so it stays REAL, the same "errs toward hearing the caller" rule
-	// that keeps an unclosed bracket's word residue real (leaf doc
-	// 20261111-voice-microfrag pins bare "*" and "hello *" real).
-	if strings.ContainsRune(residue, '*') {
-		return true
-	}
+	residue := strings.TrimSpace(bracketedTokenRe.ReplaceAllString(text, " "))
 	return !punctuationOnlyRe.MatchString(residue)
-}
-
-// stripNonSpeechTokens removes every bracket/asterisk paralinguistic run
-// (bracketedTokenRe) and trims: the residue is what the caller actually
-// said, MINUS whisper's non-speech markers. Shared by isRealSpeech and the
-// min_turn_words gate so the word count and the real-speech check see the
-// SAME stripped text (a "[music] stop that" counts 2 words, not 4).
-func stripNonSpeechTokens(text string) string {
-	return strings.TrimSpace(bracketedTokenRe.ReplaceAllString(text, " "))
-}
-
-// wordCount counts whitespace-separated tokens in already-stripped text
-// (the min_turn_words gate's unit: one "real word" = one token).
-func wordCount(stripped string) int {
-	return len(strings.Fields(stripped))
 }
 
 // transcriptPreview bounds a dropped transcript to <=40 runes for the
@@ -799,31 +755,6 @@ func (p *pipeline) consumeTranscripts(trans <-chan Transcript) {
 				p.logger.Info("voicechild: non-speech final dropped",
 					"call_id", p.ccid, "text", transcriptPreview(trimmed))
 				continue
-			}
-			// Short-final gate (voice-microfrag, live call
-			// local-0627960006a7f3d9): in a loud room the TV's 2-word
-			// tails ("The other", "This is...") arrive seconds apart —
-			// aggregation cannot merge them and each starts an employee
-			// reply. When voice.min_turn_words > 0, a FINAL whose
-			// STRIPPED text (bracket/asterisk artifacts removed — the
-			// same residue isRealSpeech classifies on) carries fewer
-			// than N whitespace-separated words drops entirely here,
-			// AFTER the non-speech filter and BEFORE evidence stamping
-			// and aggregation: a dropped final is invisible to
-			// lastFinalAt/lastFinalText AND to the pending buffer, so it
-			// neither re-authorizes a stale barge-in trip nor seeds an
-			// aggregation. N=0 (default) skips the gate — byte-identical
-			// legacy behavior. Operator commands like "Stop." survive
-			// only at N<=1; the threshold is operator-tunable by design.
-			p.playMu.Lock()
-			minN := p.minTurnWords
-			p.playMu.Unlock()
-			if minN > 0 {
-				if words := wordCount(stripNonSpeechTokens(trimmed)); words < minN {
-					p.logger.Info("voicechild: short final dropped",
-						"call_id", p.ccid, "words", words, "preview", transcriptPreview(trimmed))
-					continue
-				}
 			}
 			// Speech evidence for the local leg's RMS barge-in gate
 			// (see rmsBargeInCheck): whisper heard actual words.

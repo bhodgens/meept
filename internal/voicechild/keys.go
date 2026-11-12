@@ -45,13 +45,6 @@ type KeysFrame struct {
 	// decodes as defaultTurnConfirmMs (900) at handleKeysFrame, and an
 	// explicit 0 selects legacy per-final dispatch.
 	TurnConfirmMs int
-	// MinTurnWords is the voice-microfrag short-final gate (see
-	// pipeline.minTurnWords): the daemon sends config
-	// voice.min_turn_words; an ABSENT selector on an old daemon's line
-	// decodes as 0 (gate disabled, legacy behavior) and an explicit 0
-	// is the same. Positive N drops FINALs whose stripped text has
-	// fewer than N words. A negative value clamps to 0 at decode.
-	MinTurnWords int
 }
 
 // Redacted is what String prints instead of key material.
@@ -155,10 +148,6 @@ func (p *pipeline) applyKeys(k KeysFrame) {
 	// pipeline constructor seeds the same default so a keys-less call
 	// still aggregates.
 	p.turnConfirm = time.Duration(k.TurnConfirmMs) * time.Millisecond
-	// Short-final gate (voice-microfrag): absent-on-wire already decoded
-	// to 0 (disabled) at handleKeysFrame. Same playMu guard as
-	// turnConfirm; applied before any transcript can arrive.
-	p.minTurnWords = k.MinTurnWords
 	p.sttCfg = ProviderConfig{
 		Vendor:  k.STTVendor,
 		Model:   k.STTModel,
