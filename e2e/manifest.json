@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated": "2026-11-07",
-  "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage — behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet. Flutter surface (ui/flutter_ui/**) is covered Dart-side by the gui-flows suite (gui-terminal-01, gui-session-01, gui-quota-01, gui-stream-01, gui-stream-02) against a wire-shape stub: `cd ui/flutter_ui && flutter test test/e2e`. The ui/** path_map keys below make a Flutter change select that suite; scripts/e2e-affected.sh dispatches on suites[].runner to run the Dart command instead of go test (the pre-commit-e2e Go hook does not scan Dart files, so `make e2e-affected-area AREA=gui-flows` / CI's e2e-gui job is the gate).",
+  "generated": "2026-11-11",
+  "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage \u2014 behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet. Flutter surface (ui/flutter_ui/**) is covered Dart-side by the gui-flows suite (gui-terminal-01, gui-session-01, gui-quota-01, gui-stream-01, gui-stream-02) against a wire-shape stub: `cd ui/flutter_ui && flutter test test/e2e`. The ui/** path_map keys below make a Flutter change select that suite; scripts/e2e-affected.sh dispatches on suites[].runner to run the Dart command instead of go test (the pre-commit-e2e Go hook does not scan Dart files, so `make e2e-affected-area AREA=gui-flows` / CI's e2e-gui job is the gate).",
   "path_map": {
     "e2e/suites/smoke": [
       "smoke"
@@ -521,6 +521,9 @@
     "internal/voice/local.go": [
       "voice-local"
     ],
+    "internal/voice/events.go": [
+      "voice-local"
+    ],
     "internal/voice/localsplice.go": [
       "voice-local"
     ],
@@ -669,6 +672,9 @@
     ],
     "e2e/suites/employee-markdown": [
       "employee-markdown"
+    ],
+    "internal/daemon/voice_local_rpc.go": [
+      "voice-local"
     ]
   },
   "suites": [
@@ -903,7 +909,7 @@
         "memory-scoping-02 chief-of-staff: memory_max_scope=global agent recalls the project-A fact in project B; the default (project) agent does not (F3, C3)",
         "memory-scoping-03 fail-closed cell: multiuser enabled + resolved-empty userID hides user-scope rows while global rows stay visible (Flag 3)"
       ],
-      "note": "RED gate for the memory second-brain tree leaf 00T (memory-scoping half; gates branch 01): drives plant/recall through live chat turns and asserts the C1/C2/C3 scoping behavior. Fails RED today — the Scope vocabulary, WithScopeFilter predicate, and the memory_max_scope agent declaration do not exist."
+      "note": "RED gate for the memory second-brain tree leaf 00T (memory-scoping half; gates branch 01): drives plant/recall through live chat turns and asserts the C1/C2/C3 scoping behavior. Fails RED today \u2014 the Scope vocabulary, WithScopeFilter predicate, and the memory_max_scope agent declaration do not exist."
     },
     {
       "name": "memory-layered-distill",
@@ -3024,7 +3030,7 @@
       "id": "naive-user-chat-05",
       "suite": "naive-user-chat",
       "diff": "M",
-      "title": "reply-guard rewrite retry: a chat lane whose first completion is a raw tool-result JSON dump is recovered by one bounded rewrite nudge — the reply is the rewritten prose, never the canned apology, and the nudge reaches the model exactly once",
+      "title": "reply-guard rewrite retry: a chat lane whose first completion is a raw tool-result JSON dump is recovered by one bounded rewrite nudge \u2014 the reply is the rewritten prose, never the canned apology, and the nudge reaches the model exactly once",
       "paths": [
         "internal/agent/loop.go",
         "internal/agent/reply_guard.go"
@@ -3147,7 +3153,7 @@
       "id": "plan-lifecycle-02",
       "suite": "plan-lifecycle",
       "diff": "M",
-      "title": "approval path: dispatch-path plan parks at pending_approval; plan.approve synthesizes a task and flips the file status to executing through the atomic read-parse-write — file parses at every observation",
+      "title": "approval path: dispatch-path plan parks at pending_approval; plan.approve synthesizes a task and flips the file status to executing through the atomic read-parse-write \u2014 file parses at every observation",
       "paths": [
         "internal/plan/manager.go",
         "internal/plan/filelock.go",
@@ -3391,7 +3397,7 @@
       "id": "goal-completion-01",
       "suite": "goal-completion",
       "diff": "L",
-      "title": "declare-fulfil: tier-3 employee with a gated goal fulfils via agents.trigger — plan row goal_id stamped, gate command executes, goal health assessed (no longer unknown)",
+      "title": "declare-fulfil: tier-3 employee with a gated goal fulfils via agents.trigger \u2014 plan row goal_id stamped, gate command executes, goal health assessed (no longer unknown)",
       "paths": [
         "internal/employee/manager.go",
         "internal/employee/goal_loop.go",
@@ -3476,7 +3482,7 @@
       "id": "memory-turn-capture-02",
       "suite": "memory-turn-capture",
       "diff": "M",
-      "title": "DISPATCHED turn (multiagent task lane) regression proof: relay terminal carries the conversation id (store keys by session id) and the subscriber resolves it via GetByConversationID — task reply reaches L0 + status=auto claim",
+      "title": "DISPATCHED turn (multiagent task lane) regression proof: relay terminal carries the conversation id (store keys by session id) and the subscriber resolves it via GetByConversationID \u2014 task reply reaches L0 + status=auto claim",
       "paths": [
         "internal/daemon/memory_capture.go",
         "internal/agent/handler.go"
@@ -3674,7 +3680,7 @@
       "id": "github-pr-ci-04",
       "suite": "github-pr-ci",
       "diff": "M",
-      "title": "CI-wait park + re-arm: with check-runs always in_progress a 1s github_ci_wait parks at its deadline — the tool result carries parked=true and a non-empty wait_id, and the re-arm instruction row github_ci_wait-<waitID>.yaml is persisted under the scratch daemon's instruction tier",
+      "title": "CI-wait park + re-arm: with check-runs always in_progress a 1s github_ci_wait parks at its deadline \u2014 the tool result carries parked=true and a non-empty wait_id, and the re-arm instruction row github_ci_wait-<waitID>.yaml is persisted under the scratch daemon's instruction tier",
       "paths": [
         "internal/tools/builtin/github_ci.go",
         "internal/githubsvc/rearm.go",
@@ -4670,6 +4676,18 @@
       "title": "[voice-local] busy / duplicate-target / unknown-employee refusals surface through the voice.local.open RPC error shapes (named CL8 errors)",
       "paths": [
         "internal/voice/dial.go",
+        "internal/rpc/voice_local.go"
+      ]
+    },
+    {
+      "id": "voice-local-events-01",
+      "suite": "voice-local",
+      "diff": "M",
+      "title": "[voice-local] operator telemetry feed hermetic: a real local call's heard/prompt_dispatch/turn_final/barge_in/call_ended lifecycle surfaces through voice.local.events with 1-based seq, strict cursor monotonicity, and the empty-envelope shape for unknown calls (ring written by the talk loop's OnEvent hook + routeFrame, read through the real daemon adapter)",
+      "paths": [
+        "internal/voice/events.go",
+        "internal/voice/talkloop.go",
+        "internal/daemon/voice_local_rpc.go",
         "internal/rpc/voice_local.go"
       ]
     },
