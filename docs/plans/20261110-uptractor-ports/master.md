@@ -159,6 +159,8 @@ commits per leaf with pathspec, updates the tracking table.
 
 ## Integration Test Plan
 
+INTEGRATION RESULT (2026-11-11): PASSED. (1) build + scoped suites green (voice, telnyx, voicechild, fuzzy, voiceintake, eval, employee, daemon, ledger, config, tools, agent). (2) e2e reaper harness: all 8 reaper gate tests PASS incl. dead-air discriminator + race-with-real-hangup exactly-once; -race clean over 3 runs after a dated gate addendum (captureFail unlocked reads — fixed with snapshot(), assertions unchanged). (3) eval lane green (loud-skip without weights; real run PASS with cached weights). Uptractor-domain leakage grep: follow_up_sms only in gate tests + callbrief docs comments, zero in prod code. Merged to main at top-level completion per skill step 4.
+
 After all leaves REVIEWED: (1) `go build ./... && make lint && go test -p 2
 ./internal/voice ./internal/voice/telnyx ./internal/voicechild ./internal/util/fuzzy ./internal/employee`;
 (2) e2e: fake-Telnyx harness — answer a call, drop the hangup webhook, verify
