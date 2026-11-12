@@ -459,7 +459,12 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		DisplayLookup:  displayLookup,
 		BriefLLM:       deps.BriefLLM,
 		MomentResolver: deps.MomentResolver,
-		Logger:         vlog.With("sub", "employee"),
+		// C-8 (bughunt 2026-11-11): the voice clock stamp falls back to
+		// the scheduler timezone (the same config the awareness lane's
+		// moment block resolves via aw2SchedulerLoc) instead of the raw
+		// daemon local zone.
+		SchedulerTZ: deps.Config.Scheduler.Timezone,
+		Logger:      vlog.With("sub", "employee"),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("voice wiring: employee stack: %w", err)
