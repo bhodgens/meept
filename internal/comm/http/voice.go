@@ -233,6 +233,16 @@ func (v *VoiceRoutes) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	ev, err := telnyx.ParseCallEvent(body)
 	if err != nil {
+		if telnyx.IsIgnoredEvent(err) {
+			// A real Telnyx call.* event this service does not drive
+			// (call.analyzed, call.conversation.*, ...). Not a fault:
+			// ACK it so Telnyx never retries, and log at debug — an
+			// error-level log here caused retry-storm noise in
+			// uptractor.
+			v.log.Debug("voice webhook: ignoring non-lifecycle call event", "error", err)
+			writeVoiceOK(w)
+			return
+		}
 		// Not a call event we recognise (misrouted webhook): 400. This is a
 		// configuration error on the Telnyx side, not a transient failure;
 		// redelivery would not change the answer.

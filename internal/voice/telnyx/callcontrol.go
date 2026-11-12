@@ -22,7 +22,8 @@ var PCMUCodec = Codec{BidirectionalCodec: "PCMU", SamplingRate: 8000}
 
 // CallEvent is one parsed Telnyx call-control webhook. EventType is one of
 // "call.initiated" | "call.answered" | "call.hangup" (plus the streaming.*
-// lifecycle events, which parse as no-ops). From and To are the plain
+// lifecycle events, which parse as no-ops, and call.recording.saved, which
+// carries RecordingURL). From and To are the plain
 // E.164 strings when Telnyx sends them flat; the nested
 // {"phone_number": "..."} shape is also unwrapped by ParseCallEvent.
 type CallEvent struct {
@@ -31,6 +32,8 @@ type CallEvent struct {
 	CallSessionID string
 	From, To      string
 	Direction     string // "incoming" | "outgoing"
+	// RecordingURL is set on "call.recording.saved" only.
+	RecordingURL string
 }
 
 // flexibleString accepts either a plain JSON string ("+15551230000") or an
@@ -80,7 +83,7 @@ func ParseCallEvent(body []byte) (CallEvent, error) {
 		return CallEvent{}, fmt.Errorf("telnyx call event: %w", err)
 	}
 	switch env.Data.EventType {
-	case "call.initiated", "call.answered", "call.hangup",
+	case "call.initiated", "call.answered", "call.hangup", RecordingSavedEvent,
 		// Telnyx reports streaming lifecycle on the call webhook too; they
 		// carry no action for us (the media websocket already knows), so
 		// parse them as no-op events instead of rejecting the webhook and
@@ -88,6 +91,13 @@ func ParseCallEvent(body []byte) (CallEvent, error) {
 		// 2026-10-28).
 		"streaming.started", "streaming.stopped", "streaming.failed":
 	default:
+		if isCallEventType(env.Data.EventType) {
+			// Real Telnyx call.* traffic this service does not drive
+			// (call.analyzed, call.conversation.*, ...): classified, not
+			// refused, so the webhook handler ACKs it and Telnyx never
+			// retries.
+			return CallEvent{}, &IgnoredEventError{EventType: env.Data.EventType}
+		}
 		return CallEvent{}, fmt.Errorf("telnyx call event: unknown event_type %q", env.Data.EventType)
 	}
 	return CallEvent{
@@ -97,6 +107,7 @@ func ParseCallEvent(body []byte) (CallEvent, error) {
 		From:          string(env.Data.Payload.From),
 		To:            string(env.Data.Payload.To),
 		Direction:     env.Data.Payload.Direction,
+		RecordingURL:  recordingURL(body),
 	}, nil
 }
 
