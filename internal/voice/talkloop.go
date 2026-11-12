@@ -194,6 +194,24 @@ type TalkDeps struct {
 	// has no turn_start/idle kind, and rides the bus (the coordinator
 	// needs a synchronous in-process edge).
 	TurnState func(ccid string, seq uint64, kind string)
+	// AudioActive is the OPTIONAL silence-deferral seam (self-talk fix,
+	// call local-53b347f028f0a43f): when non-nil the silence fire checks
+	// whether the AGENT's own audio was active within the expiring
+	// window (window = the armed S/H duration) BEFORE speaking the nudge
+	// or hanging up. A true verdict defers the fire: the window re-arms
+	// (same duration) instead, bounded by silenceAudioDeferralCap
+	// consecutive deferrals - after the cap the fire proceeds so a
+	// permanently-audible stream cannot suppress the nudge forever
+	// (mirrors the link margin's bounded re-arm posture). This kills the
+	// two live defects: (S1) rearmSilence at TEXT drain counted down
+	// while the reply audio still paced, so the nudge fired over the
+	// agent's own voice; (S2) the loop-start window fired while the
+	// greeting's audio tail was still inside the window. Nil (phone
+	// legs, legacy/test callers) = zero behavior change, byte-identical.
+	// The daemon wires it for LOCAL legs to
+	// LocalSpliceFor(ccid).TailActive(window) (nil-safe splice lookup).
+	// It reads audio-truth (pump/pace writes), never the text lane.
+	AudioActive func(ccid string, window time.Duration) bool
 	// OnEvent is the operator-telemetry append hook (voice-events tree):
 	// when non-nil the loop records dispatch / final / barge-in / held /
 	// released / dropped / call-ended events at its existing log sites
@@ -511,6 +529,35 @@ func (t *TalkLoop) silencePromptLine() string {
 	return t.fillerLine()
 }
 
+// silenceAudioDeferralCap bounds CONSECUTIVE audio-aware deferrals of a
+// silence window (self-talk fix, call local-53b347f028f0a43f): after this
+// many deferrals the fire proceeds regardless, so a permanently-audible
+// stream (or a stuck seam) cannot suppress the nudge - and through it the
+// hangup - forever. Mirrors the link margin's bounded re-arm posture
+// (margin_rearmed re-arms ONCE, the second fire releases).
+const silenceAudioDeferralCap = 2
+
+// silenceAudioDefers reports whether a silence fire must DEFER because
+// the agent's own audio was active inside the expiring window. False
+// whenever: the seam is nil (phone/legacy callers stay byte-identical),
+// the consecutive-deferral cap is reached (the nudge must still
+// eventually fire on a permanently-audible stream), or the window length
+// is unrecordable (<= 0 - nothing to consult the seam about).
+func (t *TalkLoop) silenceAudioDefers(ccid string, armedSeconds int) bool {
+	if t.deps.AudioActive == nil || armedSeconds <= 0 {
+		return false
+	}
+	// The seam's window is the LIVE window length in real time: at
+	// production scale armedSeconds are seconds; under the ms test unit
+	// they are ms. TailActive's own clock is wall time, so a test seam
+	// receives the same unit the timer was armed with.
+	return t.deps.AudioActive(ccid, time.Duration(armedSeconds)*silenceWindowUnit)
+}
+
+// itoaSilence renders a deferral count for the telemetry Reason field
+// (additive wire info only; the count never gates behavior).
+func itoaSilence(n int) string { return fmt.Sprintf("%d", n) }
+
 // fallbackLine returns the configured C6 fallback line or the default.
 func (t *TalkLoop) fallbackLine() string {
 	if t.cfg.FallbackLine != "" {
@@ -618,6 +665,14 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 	// configured the two windows differ and the log line alone would
 	// under-report the gap since the nudge.
 	var silenceArmedAt time.Time
+	// silenceArmedSeconds remembers the window length the live timer was
+	// armed with, so an audio-aware DEFERRAL re-arms the SAME window
+	// (self-talk fix, call local-53b347f028f0a43f) instead of guessing.
+	var silenceArmedSeconds int
+	// silenceDeferrals counts CONSECUTIVE audio-aware deferrals of the
+	// live window (capped at silenceAudioDeferralCap): a text-drain
+	// re-arm or a real fire starts a fresh silent stretch and resets it.
+	var silenceDeferrals int
 	rearmSilenceWindow := func(seconds int) {
 		if seconds <= 0 {
 			return
@@ -628,11 +683,16 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 		silenceTimer = time.NewTimer(time.Duration(seconds) * silenceWindowUnit)
 		silenceC = silenceTimer.C
 		silenceArmedAt = t.now()
+		silenceArmedSeconds = seconds
 	}
 	rearmSilence := func() {
 		if t.cfg.SilencePromptSeconds <= 0 {
 			return
 		}
+		// A fresh turn just drained: the audio-deferral streak restarts
+		// with the new window (the fire-time check below still defers
+		// while this turn's reply audio paces - defect S1).
+		silenceDeferrals = 0
 		rearmSilenceWindow(t.cfg.SilencePromptSeconds)
 	}
 	stopSilence := func() {
@@ -748,6 +808,35 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 			if t.curPipeline() != nil {
 				continue
 			}
+			// Audio-aware deferral (self-talk fix, defect S1/S2, call
+			// local-53b347f028f0a43f): the TEXT lane drains seconds
+			// before the reply's AUDIO finishes pacing (measured: the
+			// drain re-arm fired a 10 s window while the pacer was
+			// still stalling chunks 1.3-3.8 s apart, and the nudge
+			// landed on top of the agent's own voice - the operator
+			// heard "two agents talking"). When the seam reports the
+			// call's own audio active inside the expiring window,
+			// DEFER: re-arm the same window instead of speaking.
+			// Bounded at silenceAudioDeferralCap consecutive deferrals
+			// so a permanently-audible stream cannot suppress the
+			// nudge (and through it the hangup) forever. The same
+			// check covers the loop-start window over the greeting's
+			// audio tail (S2): the greeting rides the same pump and
+			// stamps the splice's audio activity.
+			if silenceDeferrals < silenceAudioDeferralCap &&
+				t.silenceAudioDefers(ccid, silenceArmedSeconds) {
+				silenceDeferrals++
+				t.log.Info("voice talk loop: silence window deferred (agent audio active)",
+					"ccid", ccid, "window_s", float64(silenceArmedSeconds),
+					"deferrals", silenceDeferrals)
+				t.emitEvent(ccid, EventInput{
+					Kind:   EventKindSilenceDeferred,
+					Reason: itoaSilence(silenceDeferrals),
+				})
+				rearmSilenceWindow(silenceArmedSeconds)
+				continue
+			}
+			silenceDeferrals = 0
 			if !t.silencePrompted {
 				// First fire: the dedicated dead-air nudge, then re-arm
 				// with the hangup window H (S when H unset - legacy

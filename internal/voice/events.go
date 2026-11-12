@@ -53,6 +53,11 @@ const (
 	EventKindHeld     = "prompt_held"
 	EventKindReleased = "prompt_released"
 	EventKindDropped  = "prompt_dropped"
+	// EventKindSilenceDeferred: a silence-window fire DEFERRED because
+	// the agent's own audio was still active inside the window (self-talk
+	// fix, call local-53b347f028f0a43f). Reason carries the consecutive
+	// deferral count. Local legs with the AudioActive seam only.
+	EventKindSilenceDeferred = "silence_deferred"
 )
 
 // Ring sizing: DefaultCallEvents is the per-call ring capacity the daemon

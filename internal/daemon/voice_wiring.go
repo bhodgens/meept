@@ -971,6 +971,16 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 			Logger:     w.logger.With("sub", "talk", "ccid", f.CallID),
 			HoldPrompt: holdPrompt,
 			TurnState:  turnState,
+			// Silence-clock audio awareness (self-talk fix, defect S1/S2,
+			// call local-53b347f028f0a43f): LOCAL legs only - the
+			// silence fire defers while this call's own reply/greeting
+			// audio is still inside the window (splice tail: pump read +
+			// paced client writes). The splice lookup is nil-safe (no
+			// live splice = nothing audible). Phone legs (Leg zero value)
+			// stay nil = the loop's silence path is byte-identical
+			// (mirror rule of the link seams above: OPTIONAL seams only,
+			// never wire link-era postures onto the phone lane).
+			AudioActive: silenceAudioActiveFor(inst.Leg),
 			// Operator telemetry (voice-events): append the loop's
 			// dispatch/final/barge-in/ended events to the shared per-call
 			// ring, polled via voice.local.events. Pure bookkeeping;
@@ -1094,12 +1104,24 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 			// the additive activity observers (one nil-check when no
 			// reaper runs); the notify itself is pure bookkeeping.
 			w.Manager.NotifyCallActivity(f.CallID)
+			// Heard TEXT source: the RAW transcript rides From in
+			// aggregation mode (leaf 03), and From is read BEFORE the
+			// swap below moves it into Text. A final with NO From —
+			// legacy per-final mode (turn_confirm_ms=0 never fills raw)
+			// or an older/fake child — falls back to Text: an empty
+			// heard event makes the operator's live feed lie
+			// ("heard: " with nothing), the exact user-visible class of
+			// the local-53b347f028f0a43f transcript regression.
+			heardText := f.From
+			if heardText == "" {
+				heardText = f.Text
+			}
 			select {
 			case loop.Frames() <- f:
 				w.callEvents.Append(f.CallID, voice.EventInput{
 					Kind:  voice.EventKindHeard,
-					Text:  voice.PreviewEventText(f.From),
-					Words: len(strings.Fields(f.From)),
+					Text:  voice.PreviewEventText(heardText),
+					Words: len(strings.Fields(heardText)),
 				})
 			default:
 				w.logger.Warn("voice wiring: talk loop frame queue full", "ccid", f.CallID, "event", f.Event)
@@ -1310,6 +1332,22 @@ func livePhoneTarget(reg voice.Registry, ccid string) string {
 // the event); pure bookkeeping, never I/O (mutexio-safe).
 func (w *VoiceWiring) appendCallEvent(ccid string, in voice.EventInput) uint64 {
 	return w.callEvents.Append(ccid, in)
+}
+
+// silenceAudioActiveFor builds the talk loop's AudioActive seam for one
+// leg (self-talk fix, call local-53b347f028f0a43f). LOCAL legs read the
+// live local splice's outbound tail (LocalSpliceFor is nil-safe; an
+// unregistered ccid - splice ended - reports "not audible"). EVERY other
+// leg (phone, signal; Leg zero value = phone) returns nil: the loop's
+// silence path stays byte-identical, per the optional-seam mirror rule
+// (non-link/non-local lanes must not gain new seams implicitly).
+func silenceAudioActiveFor(leg string) func(ccid string, window time.Duration) bool {
+	if leg != voice.LegLocal {
+		return nil
+	}
+	return func(ccid string, window time.Duration) bool {
+		return voice.LocalSpliceFor(ccid).TailActive(window)
+	}
 }
 
 // releaseCall is the Manager release hook fan-out. Order matters for

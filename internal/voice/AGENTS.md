@@ -57,11 +57,7 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   plus the startguard C1 selector `turn_confirm_ms` (global
   `[voice].turn_confirm_ms` like the base URLs; the child decodes an
   ABSENT field as its own 900 ms default and an explicit 0 as legacy
-  per-final dispatch) and the voice-microfrag selector `min_turn_words`
-  (global `[voice].min_turn_words`, default 0 = short-final gate off —
-  at N>0 the child drops a FINAL whose bracket/asterisk-stripped text
-  has fewer than N words, before evidence stamping and aggregation;
-  an ABSENT field decodes as 0 on an old daemon line).
+  per-final dispatch).
   The vendor/model/voice selectors resolve per call through
   `voice.ResolveProfile` (local-leg CL4: `voice.employee_leg` row >
   per-leg config > provider default) over the call's registry row
@@ -345,6 +341,26 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   Test seam: `silenceWindowUnit` (package var, second scale in production,
   ms scale inside the silence pins) — tests mutating it must never run in
   parallel with each other.
+- AUDIO-AWARE DEFERRAL (self-talk fix, live call local-53b347f028f0a43f,
+  defects S1/S2): the TEXT lane drains seconds before the reply's AUDIO
+  finishes pacing (measured pacer stall gaps 1.3-3.8 s), so the drain
+  re-arm's window (S1) and the loop-start window over the greeting tail
+  (S2) could fire the nudge ON TOP of the agent's own voice ("like two
+  agents talking"). The fix is the OPTIONAL `TalkDeps.AudioActive(ccid,
+  window)` seam: at fire time, when it reports the call's own audio
+  active inside the expiring window, the window RE-ARMS (same duration)
+  instead of speaking — telemetry `kind=silence_deferred`, reason = the
+  consecutive-deferral count, INFO "silence window deferred". Bounded at
+  `silenceAudioDeferralCap` (2) CONSECUTIVE deferrals: after the cap the
+  fire proceeds regardless, so a permanently-audible stream cannot
+  suppress the nudge (and through it the hangup) forever — the link
+  margin's bounded-re-arm posture mirrored onto the silence clock. The
+  streak resets at every `rearmSilence` (fresh turn drained) and at every
+  real fire. Daemon wiring arms it for LOCAL legs ONLY
+  (`silenceAudioActiveFor(inst.Leg)` -> `LocalSpliceFor(ccid).TailActive`,
+  nil-safe splice lookup); phone/signal/legacy/test callers keep it nil =
+  byte-identical silence path (mirror rule of the link seams). Pinned by
+  talkloop_silence_audio_test.go + TestSilenceAudioActiveForLegs.
 
 ## Supervisor gate (C6): fail-open per sentence, never parked
 
@@ -703,12 +719,25 @@ store. Invariants a future agent must NOT break:
 - Consumers: `cmd/meept/voice.go` `voiceEventTracker` - one poller
   goroutine per known call id printing `[<label> <employee>] <line>`;
   best-effort by contract (a failed poll retries, never fails the run);
-  a found=false answer ends THAT ccid's poller (one feed-ended line when
-  it had consumed events; silent when never seen - an evicted/unknown id
-  must not tick forever); each round-trip is bounded (5 s) so stop()
-  cannot hang on the RPC client's multi-minute retry ladder, and an
-  abandoned poll never prints after stop returns. `voice link` (auto-on,
-  a/b prefixes) and `voice local` (auto-on) both drain the tail
-  synchronously after close/end so the final seconds' events print before
-  the transcripts.
+  a found=false answer at cursor > 0 ends THAT ccid's poller (one
+  feed-ended line when it had consumed events; silent when never seen -
+  an evicted/unknown id must not tick forever). C-20 REFINEMENT (live
+  regression, call local-53b347f028f0a43f): the ring is created LAZILY by
+  the first Append, so a fresh call's first ticks read found=false at
+  cursor 0 - that is the ring-not-yet-created race, NOT the feed end: the
+  LIVE poller keeps ticking on a cursor-0 found=false (treating it as
+  feed-end permanently silenced the operator's live feed - the user saw
+  only the "call open" line). The DRAIN terminates on any found=false
+  (the live loop is over there; the drain must not spin). Each round-trip
+  is bounded (5 s) so stop() cannot hang on the RPC client's multi-minute
+  retry ladder, and an abandoned poll never prints after stop returns.
+  `voice link` (auto-on, a/b prefixes) and `voice local` (auto-on) both
+  drain the tail synchronously after close/end so the final seconds'
+  events print before the transcripts. `voice local` additionally reads
+  `voice.local.transcript` (the call store's EndedCall - CALL-scoped, so
+  a shared session never leaks prior calls' history) at call end and
+  prints role-tagged transcript lines in the printLinkTranscript shape;
+  best-effort like the poller: an old daemon / unwired store / RPC error
+  prints the honest "(no transcript lines)" and NEVER changes the run's
+  exit.
 

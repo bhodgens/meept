@@ -368,7 +368,13 @@ each live call carries a fixed per-call event ring
 (`internal/voice/events.go`) fed by the talk loop's optional
 `TalkDeps.OnEvent` hook + the frame router's `heard` append (nil-safe,
 no new bus topic), read over the seam-based `voice.local.events` RPC and
-printed live by `meept voice link` / `voice local`. The optional SECOND
+printed live by `meept voice link` / `voice local`; `voice local` also
+prints the call's stored transcript at call end over the read-only
+`voice.local.transcript` RPC (call-scoped, best-effort). The silence
+nudge's clock is AUDIO-AWARE on local legs via the optional
+`TalkDeps.AudioActive` seam (fire re-arms while the agent's own audio is
+active, bounded at 2 deferrals; nil = byte-identical - full contract in
+`internal/voice/AGENTS.md`). The optional SECOND
 cleartext listener (`voice.loopback_plain_addr`, leaf 10 T6) is booted by
 `internal/daemon/voice_plain_boot.go` from `VoiceWiring.Start` when the
 knob is non-empty, rides the voice subsystem's stop context, and MUST

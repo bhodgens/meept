@@ -418,7 +418,12 @@ verdict) is the latency risk. Mitigations, all required:
   in flight (final prompt dispatched, reply not yet fully spoken) the
   silence window is suspended, so a slow cloud model (30-90s) is never
   reaped mid-generation; the window re-arms fresh once the reply is
-  spoken. The optional `voice.turn_timeout_seconds` hard cap (default 0 =
+  spoken. The clock is also AUDIO-AWARE on local legs: the text lane
+  drains seconds before the reply's audio finishes pacing, so a window
+  that expires while the agent's own audio (reply tail or greeting) was
+  still active within it DEFERS — the window re-arms instead of speaking
+  the nudge over the agent's own voice (bounded at 2 consecutive
+  deferrals, after which the nudge fires regardless). The optional `voice.turn_timeout_seconds` hard cap (default 0 =
   disabled) bounds a hung LLM, since the suspended silence clock no
   longer can.
 
