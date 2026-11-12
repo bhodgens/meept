@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/caimlas/meept/internal/voice/telnyx"
@@ -105,6 +106,15 @@ type Manager struct {
 	// it for the Connected event.
 	ansObsMu sync.Mutex
 	ansObs   []func(ccid string)
+
+	// actObsMu guards actObs: the ADDITIVE caller-activity observer lane
+	// (leaf 02, plan 20261110-uptractor-ports): the dead-air call reaper
+	// refreshes its own {ccid: lastActivity} map from it. The reaper keeps
+	// NO state here — this lane only carries notifications, additive
+	// exactly like ansObs/termObs; the Manager's per-ccid maps are
+	// untouched.
+	actObsMu sync.Mutex
+	actObs   []func(ccid string)
 }
 
 // NewManager returns a Manager. spawn may be nil when the caller only uses
@@ -307,6 +317,68 @@ func (m *Manager) notifyTerminal(ccid string, outcome Outcome, reason string) {
 	for _, fn := range obs {
 		fn(ccid, outcome, reason)
 	}
+}
+
+// AddActivityObserver registers a best-effort observer on the manager's
+// caller-activity notifications (ccid): every caller-side audio/turn edge
+// (final prompt frames from the frame router). ADDITIVE like
+// AddAnsweredObserver/AddTerminalObserver — any number may register and no
+// existing seam changes. The dead-air reaper (leaf 02) refreshes its own
+// {ccid: lastActivity} map from this lane; the manager holds no reaper
+// state. Nil fn is ignored.
+func (m *Manager) AddActivityObserver(fn func(ccid string)) {
+	if fn == nil {
+		return
+	}
+	m.actObsMu.Lock()
+	m.actObs = append(m.actObs, fn)
+	m.actObsMu.Unlock()
+}
+
+// NotifyCallActivity fires the caller-activity lane for ccid, outside all
+// mutexes (snapshot then call). The frame router invokes it on every
+// caller-side audio edge; a reaper not running costs one nil-check.
+func (m *Manager) NotifyCallActivity(ccid string) {
+	m.actObsMu.Lock()
+	if len(m.actObs) == 0 {
+		m.actObsMu.Unlock()
+		return
+	}
+	obs := make([]func(string), len(m.actObs))
+	copy(obs, m.actObs)
+	m.actObsMu.Unlock()
+	for _, fn := range obs {
+		fn(ccid)
+	}
+}
+
+// trackedCallIDs snapshots the ccids the manager currently tracks (the
+// calls map + outbound set, which together cover inbound and outbound
+// phone legs), excluding local/signal legs (their ids carry the
+// "local:"/"signal:" prefixes; they have no Telnyx authority and are never
+// probed). The reaper seeds its own dead-air map from this at startup;
+// lock is held only for the copy.
+func (m *Manager) trackedCallIDs() []string {
+	m.mu.Lock()
+	ids := make([]string, 0, len(m.calls)+len(m.outbound))
+	for ccid := range m.calls {
+		if isPhoneCCID(ccid) {
+			ids = append(ids, ccid)
+		}
+	}
+	for ccid := range m.outbound {
+		if isPhoneCCID(ccid) {
+			ids = append(ids, ccid)
+		}
+	}
+	m.mu.Unlock()
+	return ids
+}
+
+// isPhoneCCID reports whether ccid is a phone-leg id: NOT a local-leg
+// ("local:<label>") or signal-leg ("signal:<uuid>") id.
+func isPhoneCCID(ccid string) bool {
+	return !strings.HasPrefix(ccid, "local:") && !strings.HasPrefix(ccid, "signal:")
 }
 
 // HandleCallEvent drives the call lifecycle:

@@ -5505,6 +5505,18 @@ type VoiceConfig struct {
 	STTModel                     string   `json:"stt_model"             toml:"stt_model"`
 	TTSBaseURL                   string   `json:"tts_base_url"          toml:"tts_base_url"`
 	STTBaseURL                   string   `json:"stt_base_url"          toml:"stt_base_url"`
+	// ReaperIntervalS (leaf 02, C3): the dead-air reaper's sweep cadence.
+	// 0 => default 30s (frozen from the uptractor source); NEGATIVE
+	// disables the reaper entirely (opt-out without removing the key).
+	ReaperIntervalS int `json:"reaper_interval_s"      toml:"reaper_interval_s"`
+	// ReaperDeadAirS: release a call only after this much caller silence.
+	// 0 => default 60s; never reaped on age alone (owner-ratified
+	// DEAD-AIR semantics, master C3).
+	ReaperDeadAirS int `json:"reaper_dead_air_s"      toml:"reaper_dead_air_s"`
+	// ReaperMaxCallMinutes: the absolute cap from call start. 0 => default
+	// 30m (the talk-loop's max_call_minutes is a separate, older knob);
+	// negative values disable the reaper (same posture as interval).
+	ReaperMaxCallMinutes int `json:"reaper_max_call_minutes" toml:"reaper_max_call_minutes"`
 	// FreshSessionPerCall (opt-in, default false): each voice call opens a
 	// brand-new session instead of reusing the (employee, target) shared
 	// conversation, so turn history never snowballs across calls. The day

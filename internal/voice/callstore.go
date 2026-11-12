@@ -55,6 +55,15 @@ CREATE INDEX IF NOT EXISTS idx_voice_calls_number_started
 
 CREATE INDEX IF NOT EXISTS idx_voice_calls_employee_session
     ON voice_calls(employee_id, session_id);
+
+CREATE TABLE IF NOT EXISTS call_errors (
+    call_id  TEXT NOT NULL,
+    at       TEXT NOT NULL,
+    message  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_call_errors_call
+    ON call_errors(call_id);
 `
 
 // CallRecord is one new call row. StartedAt zero means "now" (store clock).
@@ -219,6 +228,32 @@ func (s *CallStore) End(ctx context.Context, callID string, outcome string) erro
 	)
 	if err != nil {
 		return fmt.Errorf("voice callstore: end call %s: %w", callID, err)
+	}
+	return nil
+}
+
+// LogCallError appends one fault row for callID to the ADDITIVE call_errors
+// table (leaf 02, uptractor jobfile callerror.go posture): a fault on a
+// call (a reaped dead-air session, a max-duration force-end) is recorded
+// next to the call where an operator can see it, not only in the service
+// journal. The message is trimmed so a huge upstream error cannot bloat
+// the store. An empty id or message is refused (the uptractor contract).
+// Implements voice.CallErrorLogger (the reaper's optional Errors seam).
+func (s *CallStore) LogCallError(callID, message string) error {
+	message = strings.TrimSpace(message)
+	if callID == "" || message == "" {
+		return errors.New("voice callstore: log call error: call_id and message are required")
+	}
+	const maxCallErrorLen = 500
+	if len(message) > maxCallErrorLen {
+		message = message[:maxCallErrorLen]
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO call_errors (call_id, at, message) VALUES (?, ?, ?)`,
+		callID, s.nowFn().UTC().Format(time.RFC3339Nano), message,
+	)
+	if err != nil {
+		return fmt.Errorf("voice callstore: log call error for %s: %w", callID, err)
 	}
 	return nil
 }
