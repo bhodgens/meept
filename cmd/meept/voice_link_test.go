@@ -349,7 +349,7 @@ func TestRecorderPlayerCloseAfterDrainAndIdempotent(t *testing.T) {
 	sink := voice.NewSpeakerSink(rec, 0)
 	r, w := io.Pipe()
 	done := make(chan error, 1)
-	go drainLiveSpeaker(r, sink, done)
+	go drainLiveSpeaker(r, sink, done, nil)
 	tail := bytes.Repeat([]byte{0x01, 0x02}, 320) // one 640 B chunk
 	if _, err := w.Write(tail); err != nil {
 		t.Fatal(err)

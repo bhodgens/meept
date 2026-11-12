@@ -56,11 +56,19 @@ var (
 // VoiceLocalOpen is the voice.local.open result (CL8 verbatim). The
 // paths are the audio-pair unix socket files under $MEEPT_HOME/voice/sock
 // the client dials (mic writes to in_path, speaker reads from out_path).
+//
+// EvPath (omitempty, byte-compatible for old clients) is the daemon's
+// CONTROL listener for the barge-in clear lane (bughunt 2026-11-11
+// defect 1): a unix socket carrying JSON-lines ({"event":"clear"}),
+// NEVER PCM — the pair sockets stay raw-audio-only by contract. An
+// empty/absent EvPath = an old daemon or a degraded lane: the client
+// keeps today's playback behavior (the ghost tail stays), never a crash.
 type VoiceLocalOpen struct {
 	CallID    string `json:"call_id"`
 	InPath    string `json:"in_path"`
 	OutPath   string `json:"out_path"`
 	SessionID string `json:"session_id"`
+	EvPath    string `json:"ev_path,omitempty"`
 }
 
 // VoiceLocalEndResult is the voice.local.end result (CL8).

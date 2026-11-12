@@ -58,6 +58,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -151,12 +152,16 @@ func (l *LocalLeg) holdCall(ccid, employeeID string) {
 // LocalCall is one live local call's handle (CL5 verbatim): the ccid,
 // the resolved meept session id, and the C2 pair PATHS the client dials
 // (leaf 08's clients write mic bytes to InPath and read speaker bytes
-// from OutPath).
+// from OutPath). EvPath is the daemon-owned CONTROL listener for the
+// barge-in clear lane (bughunt 2026-11-11 defect 1): JSON-lines, never
+// PCM. Empty = the lane failed to come up (degraded: the client plays
+// the old way, exactly the pre-fix behavior, never a call failure).
 type LocalCall struct {
 	CallID    string
 	SessionID string
 	InPath    string
 	OutPath   string
+	EvPath    string
 }
 
 // localCallState is one live call's leg-owned state.
@@ -166,6 +171,7 @@ type localCallState struct {
 	target    string
 	pair      *AudioPair         // CHILD pair: the child dials <ccid>.in/.out
 	cliPair   *AudioPair         // CLIENT pair: the client dials <ccid>.cli.in/.out
+	ev        *ClientEventServer // daemon->client control lane (<ccid>.c.ev); nil = degraded
 	cancel    context.CancelFunc // splice ctx cancel (End tears it down)
 	sessionID string
 	// ttsVoiceOverride is the tool's per-call `voice` arg (leaf 09
@@ -398,6 +404,25 @@ func (l *LocalLeg) Open(ctx context.Context, employeeID, label string, voiceOver
 		return LocalCall{}, fmt.Errorf("voice: local leg: client pair: %w", err)
 	}
 	st.cliPair = cliPair
+	// Client CONTROL lane (<ccid>.c.ev, bughunt 2026-11-11 defect 1):
+	// the daemon->client JSON-lines listener that carries the barge-in
+	// clear (the pair sockets stay raw-PCM-only by contract). Same 5
+	// suffix bytes as ".c.in"/".c.out", so if the client pair listened,
+	// the ev path fits the sun_path limit too (the 100-byte cap inside
+	// mirrors the monitor tap's). A listen failure DEGRADES (nil server,
+	// empty EvPath): the call runs exactly like before this fix - the
+	// CLI keeps its ~750 ms ghost tail - but never fails. Stale .c.ev
+	// files from a crashed daemon cannot wedge Listen: newMonitorListener
+	// removes the path first (and the ChildProc stale sweep deliberately
+	// never touches the client-pair namespace - bughunt 2026-11-10 A9).
+	evPath := filepath.Join(SocketDir(), ccid+".c.ev")
+	evSrv, evErr := NewClientEventServer(evPath, l.log.With("sub", "clientev", "ccid", ccid))
+	if evErr != nil {
+		l.log.Warn("voice: local leg: client event lane failed to open (barge-in client silence degraded)",
+			"ccid", ccid, "err", evErr)
+		evSrv, evPath = nil, ""
+	}
+	st.ev = evSrv
 	// Tool-supplied CL4 override (voice_call's `voice` arg): highest
 	// precedence - beats the per-call profile resolver (voice_wiring).
 	if len(voiceOverride) > 0 {
@@ -409,6 +434,7 @@ func (l *LocalLeg) Open(ctx context.Context, employeeID, label string, voiceOver
 	l.mu.Lock()
 	l.calls[ccid] = st
 	l.mu.Unlock()
+	registerClientEvents(ccid, evSrv)
 
 	// Acquire the goal hold ONCE the call is live (gap closure): the
 	// release fan-out's ReleaseHook gates Binding.OnCallEnd on this
@@ -498,12 +524,13 @@ func (l *LocalLeg) Open(ctx context.Context, employeeID, label string, voiceOver
 	inPath := pairInPath(cliPair)
 	outPath := pairOutPath(cliPair)
 	l.log.Info("voice: local call open", "ccid", ccid, "employee_id", employeeID,
-		"target", target, "in", inPath, "out", outPath)
+		"target", target, "in", inPath, "out", outPath, "ev", evPath)
 	return LocalCall{
 		CallID:    ccid,
 		SessionID: st.sessionID,
 		InPath:    inPath,
 		OutPath:   outPath,
+		EvPath:    evPath,
 	}, nil
 }
 
@@ -622,6 +649,11 @@ func (l *LocalLeg) End(ccid, reason string) error {
 			l.log.Debug("voice: local leg: client pair close", "ccid", ccid, "err", err)
 		}
 	}
+	// Control lane down LAST-ish but before the log line: unregister +
+	// close the ev listener (removes <ccid>.c.ev). A CLI still reading
+	// the lane sees socket EOF; no clear can be emitted after this (the
+	// splice is already cancelled, so routeFrame's latch is a no-op).
+	unregisterClientEvents(ccid)
 	l.log.Info("voice: local call ended", "ccid", ccid, "reason", reason)
 	return nil
 }
@@ -638,6 +670,7 @@ func (l *LocalLeg) Live() []LocalCall {
 			SessionID: st.sessionID,
 			InPath:    pairInPath(st.cliPair),
 			OutPath:   pairOutPath(st.cliPair),
+			EvPath:    st.ev.Path(),
 		})
 	}
 	return out

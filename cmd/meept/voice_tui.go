@@ -77,7 +77,10 @@ func dialTUIVoiceAudio(inPath, outPath string) (models.VoiceAudioSession, error)
 	// speaker: out socket -> sink (raw PCM bursts -> oto), with the same
 	// bounded lookahead as the CLI live loop (leaf 01: drainLiveSpeaker
 	// is the single implementation - no new audio code here either).
-	go drainLiveSpeaker(outConn, s.sink, s.done)
+	// clears = nil: the TUI attachment has no ev control lane yet
+	// (bughunt 2026-11-11 defect 1's client-side fix lands on the CLI
+	// live lane; the TUI keeps today's playback path verbatim).
+	go drainLiveSpeaker(outConn, s.sink, s.done, nil)
 	// Drain pump errors into a quiet teardown; the TUI session is
 	// ended by the user (/voice stop) or the daemon (call end), so a
 	// pump error here just releases the resources.

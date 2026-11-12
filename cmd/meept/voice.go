@@ -173,11 +173,16 @@ func runVoiceLocalList() error {
 }
 
 // voiceLocalOpenResult mirrors the voice.local.open wire shape (CL8).
+// EvPath (omitempty) is the daemon's barge-in CONTROL lane listener
+// (bughunt 2026-11-11 defect 1): JSON-lines, never PCM. An old daemon
+// or a degraded lane returns "" / omits the key - the CLI then runs
+// exactly today's playback path (the ghost tail survives), never a crash.
 type voiceLocalOpenResult struct {
 	CallID    string `json:"call_id"`
 	InPath    string `json:"in_path"`
 	OutPath   string `json:"out_path"`
 	SessionID string `json:"session_id"`
+	EvPath    string `json:"ev_path,omitempty"`
 }
 
 // runVoiceLocal opens the call, wires the audio paths, and blocks until
@@ -369,6 +374,13 @@ func copyMicFile(ctx context.Context, sockPath, wavPath string) error {
 // drainSpeakerFile reads the .out socket until the daemon closes it
 // (call end), writing PCM to outPath as a canonical WAV (or discarding
 // when outPath is empty).
+//
+// FILE MODE IS DELIBERATELY EV-LANE-FREE (bughunt 2026-11-11 defect 1):
+// the --out recording has no speakers, so applying a barge-in clear
+// would DELETE recorded bytes. The file intentionally records exactly
+// what the daemon SENT (including a barge-in race tail) - byte-identical
+// to pre-fix file mode. Client silence is a live-audio concern only;
+// live mode rides drainLiveSpeaker + the ev lane instead.
 func drainSpeakerFile(ctx context.Context, sockPath, outPath string) error {
 	conn, err := net.Dial("unix", sockPath)
 	if err != nil {
@@ -559,9 +571,35 @@ const liveSpeakerReadChunk = 640
 // reaches liveMaxPendingAudioBytes the burst is handed off (bursts
 // OVERLAP in oto - a handoff never pauses the predecessor; the bound only
 // caps how far ahead of the speakers audio runs). On socket end the final
-// pending burst is flushed before reporting. Runs until read error / EOF /
-// a sink write error; the error goes to done (buffered: the reader selects
-// on it, so this never blocks on exit).
+// pending burst is flushed before reporting - UNLESS a barge-in clear
+// landed since the last burst handoff (the EOF-after-clear drop below).
+// Runs until read error / EOF / a sink write error; the error goes to
+// done (buffered: the reader selects on it, so this never blocks on exit).
+//
+// clears (nil = no ev lane: old daemon, file/monitor/TUI lanes) carries
+// one token per daemon barge-in latch from the client CONTROL socket
+// (<ccid>.c.ev, JSON-lines {"event":"clear"}; bughunt 2026-11-11 defect
+// 1). The DRAIN goroutine is the sink's only owner (SpeakerSink is NOT
+// concurrency-safe beyond Close/Clear - its doc), so the ev reader
+// goroutine NEVER touches the sink: it just signals, and this loop - the
+// one goroutine already serialized with every Write - calls sink.Clear().
+// The blocking socket Read therefore runs on an inner adapter goroutine
+// feeding a capacity-1 channel, so the loop can select on the clear token
+// while parked on an under-supplied socket (the ghost tail must die
+// within one oto callback, ~20 ms, NOT within the next chunk arrival).
+//
+// BARGE-IN CONTRACT (2026-11-11): post-latch client audio must be
+// silenced within one oto callback (~20 ms) via the daemon's ev-clear ->
+// sink.Clear(); that Clear drops the buffered backlog AND pauses every
+// live oto burst (clientaudio.go: SpeakerSink.Clear() had ZERO
+// production callers before this fix - the ~750 ms ghost-tail defect
+// (375 ms sink backlog + 375 ms last burst) is exactly what their absence
+// cost, and any refactor MUST keep at least one live caller wired to the
+// ev lane). Second half of the contract: this loop must NOT flush a
+// post-clear tail on socket EOF - the sawClear flag below. Clear also
+// resets the flag only at a bound flush: a >=375 ms stream that survived
+// a clear is a genuinely NEW utterance, whose EOF tail plays normally
+// (the no-barge hangup path must never change).
 //
 // Jitter instrumentation (2026-11-09 chop hunt): with MEEPT_VOICE_TRACE=1
 // each loop iteration's socket-read gap and each burst handoff size are
@@ -570,7 +608,7 @@ const liveSpeakerReadChunk = 640
 // the client (upstream stall); burst sizes pinned at the 4800 B bound
 // mean handoffs are bound-driven (expected), sizes < ~1000 B mean the
 // 350 ms sink-gap heuristic is splitting sentences (audible seams).
-func drainLiveSpeaker(r io.Reader, s *voice.SpeakerSink, done chan<- error) {
+func drainLiveSpeaker(r io.Reader, s *voice.SpeakerSink, done chan<- error, clears <-chan struct{}) {
 	trace := os.Getenv("MEEPT_VOICE_TRACE") == "1"
 	var (
 		lastRead   time.Time
@@ -579,8 +617,58 @@ func drainLiveSpeaker(r io.Reader, s *voice.SpeakerSink, done chan<- error) {
 		gapSamples int
 		bytesTotal int64
 	)
-	buf := make([]byte, liveSpeakerReadChunk)
+	// The blocking Read runs on an adapter goroutine (capacity-1
+	// handoff): the loop must select on `clears` WHILE parked on an
+	// under-supplied .out socket, or a barge-in with no further paced
+	// bytes would never silence the speakers (the latch stops the
+	// pacer, so "no next chunk" is the NORMAL post-latch shape).
+	// `quit` releases the adapter once this loop returns: teardown
+	// closes the conn and the adapter's in-flight Read dies, but the
+	// handoff must not block forever into an abandoned channel.
+	// buf lives on the adapter goroutine ONLY; bytes cross in a fresh
+	// copy so the loop's s.Write never aliases a concurrent next Read.
+	type liveRead struct {
+		data []byte
+		err  error
+	}
+	reads := make(chan liveRead, 1)
+	quit := make(chan struct{})
+	defer close(quit)
+	go func() {
+		buf := make([]byte, liveSpeakerReadChunk)
+		for {
+			n, err := r.Read(buf)
+			var data []byte
+			if n > 0 {
+				data = make([]byte, n)
+				copy(data, buf[:n])
+			}
+			select {
+			case reads <- liveRead{data: data, err: err}:
+			case <-quit:
+				return
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
 	var (
+		// sawClear = a barge-in clear landed and NO burst handoff has
+		// replayed new audio since (see the BARGE-IN CONTRACT header).
+		// The ONLY re-arm is a bound flush: >= liveMaxPendingAudioBytes
+		// (375 ms) of post-clear audio crossing the handoff bound is
+		// proof a genuinely NEW utterance is playing (the latch's gate
+		// + drain drop the interrupted stream's backlog daemon-side,
+		// so post-clear bytes are in-transit residue at <= one paced
+		// chunk). Deliberate, bounded tradeoff: a resumed reply SHORTER
+		// than the bound whose call ends at EOF loses its (<=375 ms)
+		// tail rather than risk replaying the aborted stream - the
+		// daemon reaper gives turns seconds, so this shape needs a
+		// hangup within ~1 s of the barge-in. NO timer re-arm: CI
+		// scheduling stalls made a wall-clock resume heuristic
+		// untestable (and would replay race bytes on a stalled lane).
+		sawClear bool
 		// Audible-layer instrumentation (2026-11-10 seam delta hunt):
 		// the earlier acceptance lane measured RECORDED byte streams,
 		// which never pass through oto. These counters measure the
@@ -596,74 +684,112 @@ func drainLiveSpeaker(r io.Reader, s *voice.SpeakerSink, done chan<- error) {
 		burstCount     int
 		earlyCount     int // interval < duration (overlap, normal oto mixing)
 	)
+	end := func(err error) {
+		if trace {
+			avg := time.Duration(0)
+			if gapSamples > 0 {
+				avg = sumReadGap / time.Duration(gapSamples)
+			}
+			fmt.Fprintf(os.Stderr, "voice trace: bytes=%d gap_reads=%d read_gap_avg=%v read_gap_max=%v bursts=%d underruns=%d underrun_sum_ms=%d underrun_max_ms=%d early_overlaps=%d\n",
+				bytesTotal, gapSamples, avg, maxReadGap, burstCount, underrunCount, underrunSumMs, underrunMaxMs, earlyCount)
+		}
+		done <- err
+	}
 	for {
-		n, rerr := r.Read(buf)
-		if n > 0 {
-			now := time.Now()
-			if trace {
-				bytesTotal += int64(n)
-				if !lastRead.IsZero() {
-					if g := now.Sub(lastRead); g > 20*time.Millisecond {
-						sumReadGap += g
-						gapSamples++
-						if g > maxReadGap {
-							maxReadGap = g
-						}
-					}
-				}
-				lastRead = now
-			}
-			if _, werr := s.Write(buf[:n]); werr != nil {
-				done <- werr
-				return
-			}
-			if s.Pending() >= liveMaxPendingAudioBytes {
+		select {
+		case <-clears:
+			// BARGE-IN CONTRACT (2026-11-11): sink.Clear() - the ONLY
+			// production caller chain for the whole client-speaker
+			// silence path (daemon routeFrame latch -> ev {"event":
+			// "clear"} -> token -> HERE). Runs on this goroutine, the
+			// sink's sole owner (SpeakerSink is not concurrency-safe
+			// beyond Close/Clear): drops the buffered backlog AND
+			// pauses every live oto burst within ~20 ms. Keep this
+			// call in any refactor - the ~750 ms ghost tail returns
+			// the moment it is gone.
+			s.Clear()
+			sawClear = true
+			continue
+		case res := <-reads:
+			if len(res.data) > 0 {
+				now := time.Now()
 				if trace {
-					burstCount++
-					now := time.Now()
-					durMs := int64(float64(lastFlushBytes) / 2 / 16000 * 1000)
-					if !lastFlushAt.IsZero() {
-						residual := now.Sub(lastFlushAt).Milliseconds() - durMs
-						if residual > 20 { // >20 ms silent gap at the speakers
-							underrunCount++
-							underrunSumMs += residual
-							if residual > underrunMaxMs {
-								underrunMaxMs = residual
+					bytesTotal += int64(len(res.data))
+					if !lastRead.IsZero() {
+						if g := now.Sub(lastRead); g > 20*time.Millisecond {
+							sumReadGap += g
+							gapSamples++
+							if g > maxReadGap {
+								maxReadGap = g
 							}
-						} else if residual < -20 {
-							earlyCount++ // overlap: next burst started before previous ended (normal)
 						}
 					}
-					lastFlushAt = now
-					lastFlushBytes = s.Pending()
+					lastRead = now
+				}
+				if _, werr := s.Write(res.data); werr != nil {
+					done <- werr
+					return
+				}
+				if s.Pending() >= liveMaxPendingAudioBytes {
+					if trace {
+						burstCount++
+						durMs := int64(float64(lastFlushBytes) / 2 / 16000 * 1000)
+						if !lastFlushAt.IsZero() {
+							residual := now.Sub(lastFlushAt).Milliseconds() - durMs
+							if residual > 20 { // >20 ms silent gap at the speakers
+								underrunCount++
+								underrunSumMs += residual
+								if residual > underrunMaxMs {
+									underrunMaxMs = residual
+								}
+							} else if residual < -20 {
+								earlyCount++ // overlap: next burst started before previous ended (normal)
+							}
+						}
+						lastFlushAt = now
+						lastFlushBytes = s.Pending()
+					}
+					if ferr := s.Flush(); ferr != nil {
+						done <- ferr
+						return
+					}
+					// A handoff AFTER a clear means real NEW audio is
+					// playing (the daemon's gate + drain drop the
+					// interrupted stream's backlog at the latch; only
+					// bytes in transit or the resumed say cross the
+					// bound post-clear). The EOF tail from here on
+					// belongs to that new stream and must play out
+					// normally - the no-barge hangup path.
+					sawClear = false
+				}
+			}
+			if res.err != nil {
+				// EOF / connection closed = daemon ended the call:
+				// normal. Flush the tail burst BEFORE reporting the
+				// end (the per-read flush is gone - live defect
+				// 2026-11-09 jitter; the bound flush above is the only
+				// mid-stream handoff). Flush on an empty buffer is a
+				// no-op, so this is safe on a zero-byte EOF.
+				//
+				// BARGE-IN CONTRACT (2026-11-11), second half: after a
+				// clear with no post-clear handoff, the pending
+				// buffer is ABORTED-STREAM AUDIO that reached the
+				// socket in the latch race - DROP it, never replay it
+				// post-hangup. Clear() (not just a skipped Flush) so
+				// teardownLiveSpeaker's best-effort tail Flush cannot
+				// hand the aborted tail to the player either.
+				if sawClear {
+					s.Clear()
+					end(nil)
+					return
 				}
 				if ferr := s.Flush(); ferr != nil {
 					done <- ferr
 					return
 				}
-			}
-		}
-		if rerr != nil {
-			// EOF / connection closed = daemon ended the call: normal.
-			// Flush the tail burst BEFORE reporting the end (the
-			// per-read flush is gone - live defect 2026-11-09 jitter;
-			// the bound flush above is the only mid-stream handoff).
-			// Flush on an empty buffer is a no-op, so this is safe on
-			// a zero-byte EOF.
-			if ferr := s.Flush(); ferr != nil {
-				done <- ferr
+				end(nil)
 				return
 			}
-			if trace {
-				avg := time.Duration(0)
-				if gapSamples > 0 {
-					avg = sumReadGap / time.Duration(gapSamples)
-				}
-				fmt.Fprintf(os.Stderr, "voice trace: bytes=%d gap_reads=%d read_gap_avg=%v read_gap_max=%v bursts=%d underruns=%d underrun_sum_ms=%d underrun_max_ms=%d early_overlaps=%d\n",
-					bytesTotal, gapSamples, avg, maxReadGap, burstCount, underrunCount, underrunSumMs, underrunMaxMs, earlyCount)
-			}
-			done <- nil
-			return
 		}
 	}
 }
@@ -675,11 +801,22 @@ const liveWarmBurstBytes = 640
 // liveSpeaker is the warmed + (optionally) recorded speaker chain for a
 // live local call: the player seam, the sink the drain pumps into, the
 // dialed .out conn, and the recorder whose file closes at teardown.
+//
+// clears (bughunt 2026-11-11 defect 1) is the barge-in signal lane: the
+// ev reader goroutine (clientClearReader) pushes one token per daemon
+// {"event":"clear"} line and drainLiveSpeaker does the actual
+// sink.Clear() — the sink's sole owner goroutine (SpeakerSink is not
+// concurrency-safe beyond Close/Clear). nil when no ev lane exists
+// (old daemon, degraded lane, EvPath absent): byte-identical pre-fix
+// playback. evConn is the dialed <ccid>.c.ev control socket (nil when
+// the lane is off).
 type liveSpeaker struct {
 	conn   net.Conn
 	player voice.Player
 	sink   *voice.SpeakerSink
 	rec    *recorderPlayer // nil when --record is off
+	evConn net.Conn        // nil when the ev lane is off / dial failed
+	clears chan struct{}   // cap-1 clear tokens for the drain loop
 }
 
 // setupLiveSpeaker constructs the CLI's oto player, WARMS the audio
@@ -752,12 +889,70 @@ func setupLiveSpeaker(open voiceLocalOpenResult, employee, recordDir string,
 		}
 		return nil, fmt.Errorf("dial speaker socket %s: %w", open.OutPath, err)
 	}
-	return &liveSpeaker{
+	// Barge-in CONTROL lane (bughunt 2026-11-11 defect 1): dial the
+	// daemon's <ccid>.c.ev listener when the open result carried one.
+	// EVERY failure mode here is a degrade, never a call failure: an
+	// empty EvPath (old daemon / daemon-side lane failure) or a dial
+	// error leaves clears nil, and drainLiveSpeaker runs exactly the
+	// pre-fix path. The dial is retried-tolerant later by nobody - the
+	// daemon's listener is created before the RPC returns, so a dial
+	// failure here means the lane is gone for this call (honest,
+	// logged).
+	lspk := &liveSpeaker{
 		conn:   conn,
 		player: player,
 		sink:   voice.NewSpeakerSink(p, 0),
 		rec:    rec,
-	}, nil
+	}
+	if open.EvPath != "" {
+		evConn, evErr := dial("unix", open.EvPath)
+		if evErr != nil {
+			fmt.Fprintf(os.Stderr, "voice: barge-in control lane unavailable (%v): the speaker keeps its ~750 ms barge-in tail this call\n", evErr)
+		} else {
+			// Capacity 4 + non-blocking send: a clear must never be
+			// LOST because the drain happened to be mid-Write (the
+			// daemon emits exactly one line per latch, so 4 is far
+			// past any real backlog), and the reader must never block
+			// (its only job is to keep the bufio.Scanner draining).
+			lspk.clears = make(chan struct{}, 4)
+			lspk.evConn = evConn
+			go clientClearReader(evConn, lspk.clears)
+		}
+	}
+	return lspk, nil
+}
+
+// clientClearReader drains the daemon's ev control lane, forwarding only
+// clear events as drain-loop tokens. Protocol (internal/voice/
+// client_events.go): one JSON object per line; unknown "event" kinds are
+// IGNORED (additive protocol - a future daemon kind must not stop the
+// clear lane). Any read error / EOF (daemon gone, call ended) exits the
+// goroutine; the drain loop keeps running without further clears, which
+// is exactly today's behavior.
+func clientClearReader(conn net.Conn, clears chan<- struct{}) {
+	sc := bufio.NewScanner(conn)
+	// Control lines are tiny; bound the line so a corrupt lane can't
+	// balloon the CLI's memory.
+	sc.Buffer(make([]byte, 0, 512), 4096)
+	for sc.Scan() {
+		var ev struct {
+			Event string `json:"event"`
+		}
+		if err := json.Unmarshal(sc.Bytes(), &ev); err != nil {
+			continue // tolerate a malformed line: the lane is best-effort
+		}
+		if ev.Event != "clear" {
+			continue // unknown kind: additive protocol, ignore
+		}
+		select {
+		case clears <- struct{}{}:
+		default:
+			// Drain is mid-Write on many queued clears (pathologically
+			// many interrupts): a pending token already guarantees the
+			// Clear; dropping the duplicate is the drop-never-block
+			// posture mirrored client-side.
+		}
+	}
 }
 
 // teardownLiveSpeaker is the live-local speaker teardown, mirroring the
@@ -773,6 +968,14 @@ func setupLiveSpeaker(open voiceLocalOpenResult, employee, recordDir string,
 // closeFile is a no-op tee by recorderPlayer contract, never a panic).
 func teardownLiveSpeaker(lspk *liveSpeaker, spkReturned chan struct{}) {
 	_ = lspk.conn.Close() //nolint:errcheck // teardown
+	// The ev control socket rides the same teardown: closing it ends
+	// clientClearReader (scanner EOF) before anything else can consume
+	// a stale token. (The drain has already returned or will on the
+	// conn close above; a token posted after that is simply never read -
+	// the channel is per-call, no leak.)
+	if lspk.evConn != nil {
+		_ = lspk.evConn.Close() //nolint:errcheck // teardown
+	}
 	select {
 	case <-spkReturned:
 	case <-time.After(2 * time.Second):
@@ -856,7 +1059,7 @@ func runVoiceLocalLive(ctx context.Context, open voiceLocalOpenResult, employee,
 	// gap-only flush let seconds of audio queue behind a barge-in and
 	// talk over the new answer.
 	go func() {
-		drainLiveSpeaker(lspk.conn, lspk.sink, spkDone)
+		drainLiveSpeaker(lspk.conn, lspk.sink, spkDone, lspk.clears)
 		close(spkReturned)
 	}()
 	// Registered AFTER the drain starts (the only code between dialing
@@ -1674,7 +1877,7 @@ func startVoiceLinkMonitor(open voiceLinkOpenResult, aEmp, bEmp, recordDir strin
 		done := make(chan error, 1)
 		// First-byte announcement: the operator sees the side start to
 		// speak exactly when tee audio lands (not at dial time).
-		go drainLiveSpeaker(&monitorFirstByteReader{r: conn, label: label, emp: emp}, sink, done)
+		go drainLiveSpeaker(&monitorFirstByteReader{r: conn, label: label, emp: emp}, sink, done, nil)
 		go func() {
 			// The drain loop exits on socket EOF/error once the daemon
 			// closes the tap. Flush this side's tail; the shared player

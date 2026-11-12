@@ -62,7 +62,7 @@ func TestDrainLiveSpeakerBoundsBacklog(t *testing.T) {
 	sink := voice.NewSpeakerSink(fp, time.Hour)
 	done := make(chan error, 1)
 
-	drainLiveSpeaker(&pacedReader{data: bytes.Repeat([]byte{0xAB}, total)}, sink, done)
+	drainLiveSpeaker(&pacedReader{data: bytes.Repeat([]byte{0xAB}, total)}, sink, done, nil)
 
 	if err := <-done; err != nil {
 		t.Fatalf("drain: %v", err)
@@ -100,7 +100,7 @@ func TestDrainLiveSpeakerFlushesTailOnEOF(t *testing.T) {
 	done := make(chan error, 1)
 	// Under the bound: the ONLY handoff is the EOF flush.
 	feed := bytes.Repeat([]byte{0x01}, 3*liveSpeakerReadChunk)
-	drainLiveSpeaker(&pacedReader{data: feed}, sink, done)
+	drainLiveSpeaker(&pacedReader{data: feed}, sink, done, nil)
 	if err := <-done; err != nil {
 		t.Fatalf("drain: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestDrainLiveSpeakerPropagatesPlayError(t *testing.T) {
 	fp := &playoutFakePlayer{err: want}
 	sink := voice.NewSpeakerSink(fp, time.Hour)
 	done := make(chan error, 1)
-	drainLiveSpeaker(&pacedReader{data: bytes.Repeat([]byte{0x02}, 3*liveSpeakerReadChunk)}, sink, done)
+	drainLiveSpeaker(&pacedReader{data: bytes.Repeat([]byte{0x02}, 3*liveSpeakerReadChunk)}, sink, done, nil)
 	if err := <-done; !errors.Is(err, want) {
 		t.Fatalf("play error must surface on done, got %v", err)
 	}
@@ -129,7 +129,7 @@ func TestDrainLiveSpeakerEmptyStreamEndsClean(t *testing.T) {
 	fp := &playoutFakePlayer{}
 	sink := voice.NewSpeakerSink(fp, time.Hour)
 	done := make(chan error, 1)
-	drainLiveSpeaker(&pacedReader{data: nil}, sink, done)
+	drainLiveSpeaker(&pacedReader{data: nil}, sink, done, nil)
 	if err := <-done; err != nil {
 		t.Fatalf("zero-byte EOF must end clean, got %v", err)
 	}

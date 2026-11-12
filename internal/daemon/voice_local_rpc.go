@@ -57,6 +57,7 @@ func voiceLocalSeams(w *VoiceWiring, mgr *employee.Manager, logger *slog.Logger)
 			InPath:    call.InPath,
 			OutPath:   call.OutPath,
 			SessionID: call.SessionID,
+			EvPath:    call.EvPath,
 		}, nil
 	}
 

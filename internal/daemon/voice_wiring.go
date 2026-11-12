@@ -1076,8 +1076,32 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 		// the talk loop keeps sole ownership of the control plane
 		// (draft cancel, clear frame to the child, binding publish,
 		// telemetry) — the latch here emits none of those.
+		//
+		// BARGE-IN CONTRACT (2026-11-11): the ONE client ev-clear emit
+		// site. After a SUCCESSFUL latch transition, push {"event":"clear"}
+		// onto the call's <ccid>.c.ev lane so the CLI silences its
+		// speakers within one oto callback (~20 ms): without this the
+		// client keeps playing its SpeakerSink backlog (up to
+		// liveMaxPendingAudioBytes = 375 ms) plus the last handed-off
+		// burst (~375 ms) = the ~750 ms ghost-tail defect this closes
+		// (audit 2026-11-11-voice-fix-regression-review defect 1). WHY
+		// HERE, not talkloop.handleInterrupt: this is the true AUDIO-plane
+		// edge — the splice's outbound stop and the client's speaker stop
+		// must fire as ONE transition on the same goroutine, before the
+		// frame queues behind the loop's turn work (the queue wait can be
+		// seconds; a loop-side emit would inherit that latency). The
+		// bool from LatchBargeIn keeps it one clear per latch (a
+		// duplicate interrupt frame lands on an already-latched splice
+		// and emits nothing). Emit is non-blocking by contract (100 ms
+		// write deadline, drop-never-block): it can NEVER stall frame
+		// routing. ClientAudio side of the contract: SpeakerSink.Clear()
+		// had ZERO production callers before this commit - any refactor
+		// must keep at least this emit -> sink.Clear path alive, and
+		// drainLiveSpeaker must NOT flush a post-clear tail on EOF.
 		if f.Event == voice.EventInterrupt {
-			voice.LocalSpliceFor(f.CallID).LatchBargeIn()
+			if voice.LocalSpliceFor(f.CallID).LatchBargeIn() {
+				voice.ClientEventsFor(f.CallID).Emit(voice.ClientEvent{Event: voice.ClientEventClear})
+			}
 		}
 		w.loopsMu.Lock()
 		loop := w.loops[f.CallID]

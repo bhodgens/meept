@@ -341,6 +341,22 @@ func (s *SpeakerSink) Pending() int { return s.buf.Len() }
 // Clear drops the pending burst and silences the burst already handed
 // to the player (leaf 01: the oto Player's Clear pauses the live player,
 // so neither the queued tail nor the playing head survives a barge-in).
+//
+// BARGE-IN CONTRACT (2026-11-11): post-latch client audio must be
+// silenced within one oto callback (~20 ms) via the daemon's ev-clear
+// lane (internal/voice/client_events.go, <ccid>.c.ev, emitted at
+// VoiceWiring.routeFrame's LatchBargeIn transition) -> drainLiveSpeaker
+// (cmd/meept/voice.go) calling THIS method. Before that commit
+// SpeakerSink.Clear() had ZERO production callers: the daemon stopped
+// writing paced PCM (localsplice LatchBargeIn) while the CLI kept
+// playing its backlog (liveMaxPendingAudioBytes = 375 ms) plus the last
+// handed-off burst (~375 ms) - the ~750 ms ghost-tail defect (audit
+// 2026-11-11-voice-fix-regression-review defect 1). Any refactor MUST
+// keep at least one production caller wired to the ev lane; and
+// drainLiveSpeaker must NOT flush a post-clear tail on socket EOF (the
+// sawClear flag - dropping here is only half the fix, the EOF-after-
+// clear Flush site was the other half: an aborted stream replayed
+// post-hangup).
 func (s *SpeakerSink) Clear() {
 	s.buf.Reset()
 	s.lastWrite = time.Time{}

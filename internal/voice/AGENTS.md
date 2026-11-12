@@ -92,6 +92,21 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   bytes on macOS). Production paths live under `$MEEPT_HOME` and are
   fine; e2e sandboxes shorten the test process TMPDIR for this (leaf
   15). Do not move the socket dir deeper without re-checking the limit.
+- The local leg's CLIENT CONTROL lane (`<ccid>.c.ev`, client_events.go)
+  is a daemon-owned unix LISTENER beside the client pair carrying the
+  barge-in clear as JSON-lines (`{"event":"clear"}`, one object per
+  line, additive kinds allowed) - the pair sockets stay RAW PCM ONLY,
+  so silence CANNOT ride them (bughunt 2026-11-11 defect 1: the ~750 ms
+  ghost tail = the CLI's 375 ms SpeakerSink backlog + the last 375 ms
+  oto burst, played because `SpeakerSink.Clear()` had ZERO production
+  callers). BARGE-IN CONTRACT (2026-11-11): VoiceWiring.routeFrame
+  emits EXACTLY once per LatchBargeIn transition; the CLI's
+  drainLiveSpeaker marshals the token onto the drain goroutine (the
+  sink's sole owner) and calls sink.Clear() - keep at least one
+  production caller wired, and never Flush a post-clear EOF tail.
+  Emit is drop-never-block (100 ms deadline, monitor-tap discipline);
+  a missing/degraded lane = the old ghost-tail behavior, never a call
+  failure.
 - The voice LINK monitor tap (link.go LinkOpenOptions.Monitor) creates
   two extra unix listeners beside the pair sockets
   (`<dir>/<link id>.mon-a` / `.mon-b`) and tees each pump direction

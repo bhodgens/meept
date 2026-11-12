@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-11",
+  "generated": "2026-11-12",
   "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage \u2014 behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet. Flutter surface (ui/flutter_ui/**) is covered Dart-side by the gui-flows suite (gui-terminal-01, gui-session-01, gui-quota-01, gui-stream-01, gui-stream-02) against a wire-shape stub: `cd ui/flutter_ui && flutter test test/e2e`. The ui/** path_map keys below make a Flutter change select that suite; scripts/e2e-affected.sh dispatches on suites[].runner to run the Dart command instead of go test (the pre-commit-e2e Go hook does not scan Dart files, so `make e2e-affected-area AREA=gui-flows` / CI's e2e-gui job is the gate).",
   "path_map": {
     "e2e/suites/smoke": [
@@ -641,7 +641,8 @@
     ],
     "internal/daemon/voice_wiring.go": [
       "voice-bargein",
-      "voice-lifecycle"
+      "voice-lifecycle",
+      "voice-local"
     ],
     "internal/contact/": [
       "contact-chain"
@@ -4688,6 +4689,18 @@
         "internal/voice/events.go",
         "internal/voice/talkloop.go",
         "internal/daemon/voice_local_rpc.go",
+        "internal/rpc/voice_local.go"
+      ]
+    },
+    {
+      "id": "voice-local-bargein-ev-01",
+      "suite": "voice-local",
+      "diff": "M",
+      "title": "[voice-local] barge-in client clear lane: voice.local.open returns ev_path (<ccid>.c.ev listener beside the client pair), a child C1 interrupt latches the splice and the lane delivers exactly one byte-exact {\"event\":\"clear\"} JSON line within 1s of the interrupt, and voice.local.end removes the socket file (bughunt 2026-11-11 defect 1: the ~750ms ghost tail fix - daemon-side emit; the CLI sink.Clear() wiring pinned by cmd/meept unit seams)",
+      "paths": [
+        "internal/voice/client_events.go",
+        "internal/voice/local.go",
+        "internal/daemon/voice_wiring.go",
         "internal/rpc/voice_local.go"
       ]
     },

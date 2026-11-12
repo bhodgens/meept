@@ -186,7 +186,7 @@ func TestSetupLiveSpeakerRecordsWithoutWarmBytes(t *testing.T) {
 	speech := bytes.Repeat([]byte{0x07}, 21*liveSpeakerReadChunk)
 	done := make(chan error, 1)
 	returned := make(chan struct{})
-	go func() { drainLiveSpeaker(lspk.conn, lspk.sink, done); close(returned) }()
+	go func() { drainLiveSpeaker(lspk.conn, lspk.sink, done, lspk.clears); close(returned) }()
 	go func() {
 		_, _ = feed.Write(speech)
 		_ = feed.Close()
@@ -245,7 +245,7 @@ func TestTeardownLiveSpeakerEndsDrain(t *testing.T) {
 	done := make(chan error, 1)
 	returned := make(chan struct{})
 	// The drain blocks on the pipe until teardown's conn.Close ends it.
-	go func() { drainLiveSpeaker(lspk.conn, lspk.sink, done); close(returned) }()
+	go func() { drainLiveSpeaker(lspk.conn, lspk.sink, done, lspk.clears); close(returned) }()
 	if _, err := feed.Write(bytes.Repeat([]byte{0x03}, liveSpeakerReadChunk)); err != nil {
 		t.Fatalf("write: %v", err)
 	}

@@ -363,7 +363,16 @@ gated by allowlist + effects reservation + audit-before-dial. The
 LOCAL leg (phone + local run concurrently on one child/registry/store)
 never imports telnyx and skips effects + audit by contract; its
 barge-in is RMS VAD gated to `Local==true`; `LocalSplice` has no
-reorder window and negotiates L16@16k only. Operator telemetry:
+reorder window and negotiates L16@16k only. BARGE-IN CONTRACT
+(2026-11-11): the client-speaker silence lane is a per-call daemon
+LISTENER `<ccid>.c.ev` beside the client pair (JSON-lines, NEVER PCM -
+the pair stays raw-audio-only) carrying `{"event":"clear"}`, emitted
+by `VoiceWiring.routeFrame` once per latch transition and consumed by
+the CLI drain's `sink.Clear()` (post-latch audio must die within one
+oto callback, ~20 ms - the fixed defect was a ~750 ms ghost tail from
+`SpeakerSink.Clear()` having zero production callers); `drainLiveSpeaker`
+must not flush a post-clear EOF tail. Full contract in
+`internal/voice/AGENTS.md` (Sockets section). Operator telemetry:
 each live call carries a fixed per-call event ring
 (`internal/voice/events.go`) fed by the talk loop's optional
 `TalkDeps.OnEvent` hook + the frame router's `heard` append (nil-safe,

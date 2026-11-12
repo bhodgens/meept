@@ -1098,14 +1098,23 @@ func (s *runLocalSplice) logStaleDrain() {
 // telemetry): no duplicate emits. Phone legs have no local splice (nil
 // receiver -> no-op); a second trip while latched is a no-op (interrupt
 // is the guard — the resume path clears it with the fresh-PCM re-arm).
-func (s *runLocalSplice) LatchBargeIn() {
+//
+// The bool result reports whether THIS call latched on this trip (true =
+// the armed->latched transition happened; false = already latched,
+// ended, or no live splice). VoiceWiring.routeFrame uses it to emit the
+// client ev-lane clear EXACTLY once per barge-in (bughunt 2026-11-11
+// defect 1): a duplicate interrupt frame (STT partial bursts before the
+// child's own noteBargeIn latch settles) must not spam sink.Clear()
+// calls into the client - the client Clear is idempotent, but the lane
+// contract is one clear line per latch.
+func (s *runLocalSplice) LatchBargeIn() bool {
 	if s == nil {
-		return
+		return false
 	}
 	s.mu.Lock()
 	if s.interrupt || s.ended {
 		s.mu.Unlock()
-		return
+		return false
 	}
 	s.interrupt = true
 	s.drainSeq.Add(1)
@@ -1114,6 +1123,7 @@ func (s *runLocalSplice) LatchBargeIn() {
 	s.notify() // stop the pacer's in-flight wait now
 	s.logStaleDrain()
 	s.log.Info("voice: local barge-in")
+	return true
 }
 
 // HandleInterrupt is the leaf 07 entry point: the C1 interrupt frame path
