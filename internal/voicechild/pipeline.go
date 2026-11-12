@@ -202,6 +202,13 @@ type pipeline struct {
 	// repeat re-stamped lastFinalAt and re-authorized stale barge-in
 	// trips).
 	lastFinalText string
+	// normalizePreserve (leaf 03, C6): the caller-supplied preserve hook
+	// for NormalizeUtterance — employee context names/subjects that must
+	// survive the noise-token drop (garbled names feed the fuzzy match
+	// downstream). Set once at pipeline construction (SetNormalizePreserve,
+	// before transcripts start); read-only in consumeTranscripts, so no
+	// lock guards it. nil = nothing preserved (id hook semantics).
+	normalizePreserve func(token string) bool
 	// lastDispatchAt (playMu) is when consumeTranscripts last succeeded
 	// dispatching a FINAL prompt frame (emitPrompt with tr.Final==true)
 	// — the start of the currently in-flight turn. The RMS STT-evidence
@@ -489,7 +496,7 @@ func (p *pipeline) consumeTranscripts(trans <-chan Transcript) {
 				continue
 			}
 			p.lastFinalAt = time.Now()
-			p.lastFinalText = trimmed
+			p.lastFinalText = trimmed // dedupe compares RAW (leaf 03 T3: barge-in/dedupe behavior unchanged)
 			speaking := p.speaking
 			p.playMu.Unlock()
 			// C5 for the local leg's whisper adapter: whisper emits
@@ -520,7 +527,39 @@ func (p *pipeline) consumeTranscripts(trans <-chan Transcript) {
 		}
 		// C5: never let a prompt overtake an in-flight interrupt frame.
 		p.awaitPendingInterrupt()
-		if err := p.child.emitPrompt(p.ctx, p.ccid, tr.Text, tr.Final); err != nil {
+		// Leaf 03 (T3, normalize wiring): ONLY the emitPrompt argument is
+		// normalized — filler collapse + noise-token drop happen here so
+		// the LLM turn receives the cleaned utterance. Everything else in
+		// this loop stays RAW: the dedupe compare above (lastFinalText)
+		// and the non-speech guard both ran on the raw text, and the raw
+		// final rides the From field (below) so the daemon's binding
+		// persists the caller's ACTUAL words (AppendTranscript keeps RAW;
+		// eval needs the un-normalized transcript).
+		//
+		// The preserve hook is the OPEN-VOCABULARY default (leaf 03): the
+		// child has no employee-context catalog, so every token the
+		// recognizer produced is presumed meaningful (preserved) EXCEPT
+		// the known filler set — normalization here collapses duplicate
+		// words and filler runs, and drops only standalone fillers.
+		// Callers with a real context catalog (leaf 05 intake) install a
+		// narrower hook via SetNormalizePreserve.
+		promptText := tr.Text
+		rawText := ""
+		if tr.Final {
+			promptText = NormalizeUtterance(tr.Text, openVocabularyPreserve)
+			rawText = strings.TrimSpace(tr.Text)
+			if promptText == "" {
+				// Normalization collapsed the final to nothing (pure
+				// filler) — an empty prompt would start a turn with an
+				// empty user message. Drop here, AFTER the evidence
+				// stamp: the caller did speak (RMS/barge-in semantics
+				// above already ran on the raw text).
+				p.logger.Info("voicechild: final normalized to empty; dropped",
+					"call_id", p.ccid, "raw", transcriptPreview(rawText))
+				continue
+			}
+		}
+		if err := p.child.emitPrompt(p.ctx, p.ccid, promptText, tr.Final, rawText); err != nil {
 			p.logger.Error("voicechild: emit prompt", "err", err, "call_id", p.ccid)
 		} else if tr.Final {
 			// Dispatch watermark (defect 2026-11-11): a successfully

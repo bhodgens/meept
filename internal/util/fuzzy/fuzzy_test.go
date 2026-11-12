@@ -61,10 +61,16 @@ func TestEditDistanceKnownPairs(t *testing.T) {
 		{"", "abc", 3},
 		{"abc", "", 3},
 		{"abc", "abc", 0},
-		// Canonical-table distances:
-		{"Meadow Rich", "Meadow Ridge", 1}, // "1 deletion"
-		{"Meadow Ridg", "Meadow Ridge", 2}, // "2 deletions"
-		{"Oak St", "Oak Street", 3},
+		// Canonical-table distances. NOTE: the uptractor doc's narrative
+		// numbers ("1 deletion" / "2 deletions") are not real Levenshtein
+		// values for these strings — true distances are 3 / 1 / 4 (and
+		// rich is FURTHER from ridge than ridg is, opposite the doc's
+		// ordering). The similarity vectors (0.70 / 0.667) and match/
+		// no-match rows are the binding spec; these constants are the
+		// verified arithmetic (lowercased, standard Levenshtein).
+		{"Meadow Rich", "Meadow Ridge", 3},
+		{"Meadow Ridg", "Meadow Ridge", 1},
+		{"Oak St", "Oak Street", 4},
 		{"kitten", "sitting", 3},
 		{"flaw", "lawn", 2},
 	}
@@ -191,13 +197,13 @@ func TestFuzzyFindCanonicalWorkOrders(t *testing.T) {
 		if len(got) == 0 {
 			t.Fatalf("FuzzyFind(%q over work orders) = no match, want %q (canonical table)", tc.input, tc.want)
 		}
-		if got[0].ID != tc.want {
-			t.Errorf("FuzzyFind(%q) top match = %q, want %q", tc.input, got[0].ID, tc.want)
+		if got[0].Item.ID != tc.want {
+			t.Errorf("FuzzyFind(%q) top match = %q, want %q", tc.input, got[0].Item.ID, tc.want)
 		}
 	}
 	// "roof flasheeng" (documented STT garble) must still match WO-3.
 	got := FuzzyFind(normString("roof flasheeng"), canonicalWOs, getName, 0.55)
-	if len(got) == 0 || got[0].ID != "WO-3" {
+	if len(got) == 0 || got[0].Item.ID != "WO-3" {
 		t.Errorf("garbled \"roof flasheeng\" => %v, want WO-3", got)
 	}
 }
@@ -220,8 +226,8 @@ func TestFuzzyFindSortedDescending(t *testing.T) {
 		t.Fatalf("FuzzyFind returned %d results, want at least 2 to observe ordering", len(matches))
 	}
 	for i := 1; i < len(matches); i++ {
-		if matches[i].score > matches[i-1].score+epsilon {
-			t.Errorf("results not sorted descending: [%d]=%v > [%d]=%v", i, matches[i].score, i-1, matches[i-1].score)
+		if matches[i].Score > matches[i-1].Score+epsilon {
+			t.Errorf("results not sorted descending: [%d]=%v > [%d]=%v", i, matches[i].Score, i-1, matches[i-1].Score)
 		}
 	}
 }
