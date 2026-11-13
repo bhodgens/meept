@@ -103,7 +103,7 @@ directly at construction (`internal/daemon/voice_wiring.go`).
 | `tts_model` | string | `""` | yes | TTS model for this employee's calls |
 | `fresh_session` | bool | `voice.fresh_session_per_call` = false | yes | new session per call; raise isolation, loses cross-call memory |
 | `guided_intake` | bool | off (no global) | yes | one-question-at-a-time intake procedure |
-| `backchannel_soften` | bool | false (#130 A/B) | yes | soften short-backchannel flush vs the peer tail; ON only when mm-hm reactions interrupt the tail |
+| `backchannel_soften` | bool | false (#130 A/B) | yes | soften short-backchannel flush vs the peer tail. Measured cost 2026-11-12: ON cuts talk-over 4.96 s -> 2.54 s per 90 s link, but turn pace drops (extra tail pad + drained-edge waits) - the operator chose responsiveness and kept false; enable only if double-talk texture bothers you more than slower turn-taking |
 | `turn_confirm_ms` | int | 900 | yes | child-side breath-pause aggregation window; lower = faster turns but more fragments; 0 = legacy per-final dispatch |
 | `min_turn_words` | int | 0 (gate off) | yes | short-final gate: drop finals with < N stripped words; set 2-3 in loud rooms; explicit 0 turns the gate off for this row even when the global gate runs |
 | `exempt_phrases` | []string | stop, cancel, yes, no, thanks, thank you, okay, ok, mm-hm, mmhm, uh-huh, go ahead | yes | phrases the gate never drops (whole-residue, case-insensitive); extend for a domain's voice commands; empty list = no exemptions |
