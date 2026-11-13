@@ -16,14 +16,19 @@
 # data (go/types panics: "export data version 5 is greater than maximum
 # supported version 4"), the vettool run panics on EVERY package. Treating
 # that as findings permanently blocks all Go commits. Classify per-package:
-#   - TOOL CRASH: output has no bodyclose-style diagnostic line (panic
+#   - TOOL CRASH / LOAD FAILURE: output has no bodyclose diagnostic (panic
 #     markers like 'panic:' / 'export data version' / 'goroutine [running]'
-#     typically appear too). bodyclose findings always look like
-#     'path/file.go:LINE:COL: ...' — discriminated by
-#     grep -E '^[^#].*\.go:[0-9]+:[0-9]+:'.
-#   - FINDINGS: at least one file:line:col diagnostic line. MUST stay strict
-#     — keep the discriminating regex in sync with bodyclose's output shape
-#     when editing this hook.
+#     typically appear, and so do plain COMPILE errors from a dirty working
+#     tree — 'x.go:12:3: undefined: field' — which are NOT bodyclose
+#     findings). bodyclose's only diagnostic message is exactly
+#     'response body must be closed' (verified from the binary); findings
+#     are discriminated by file:line:col PLUS that message text, never by
+#     the location shape alone.
+#   - FINDINGS: at least one line matching
+#     grep -E '\.go:[0-9]+:[0-9]+:.*response body must be closed'. MUST stay
+#     strict — keep the discriminating regex in sync with bodyclose's output
+#     shape when editing this hook (string 'response body must be closed'
+#     lives in the binary; a tool version that renames it must update here).
 #   - CLEAN: rc=0.
 # Findings anywhere -> exit 1 as before. Crashes only -> loud yellow skip
 # banner with rebuild instructions, exit 0 (a broken tool must not block
@@ -94,9 +99,11 @@ echo ""
 # Classification per package (see contract at top):
 #   FINDINGS_BODY: matched file:line:col diagnostic lines (fail the commit)
 #   CRASHED_PKGS:  packages where the tool crashed (panic / no diagnostics)
-# A '# pkg' header line with no file:line:col body is also a crash signature:
-# `go vet` prints the header before the analyzer bails, and a healthy
-# diagnostic run always carries at least one file:line:col line after it.
+# A '# pkg' header line with no bodyclose diagnostic after it is a crash/
+# load-failure signature: `go vet` prints the header before the analyzer
+# bails, and an unanalyzable package (panic OR plain compile errors from a
+# sibling's dirty tree) never produces the 'response body must be closed'
+# message. Compile errors are NOT findings — build/vet hooks gate them.
 FAILED=false
 OUTPUT=""
 CRASHED_PKGS=""
@@ -104,12 +111,25 @@ for pkg in $PACKAGES; do
   if result=$(go vet -vettool="$BODYCLOSE" "$pkg" 2>&1); then
     :
   else
-    diagnostics=$(printf '%s\n' "$result" | grep -E '^[^#].*\.go:[0-9]+:[0-9]+:' || true)
+    # A FINDING requires BOTH markers anywhere in the output:
+    #   1. bodyclose's exact message text (covers the text form
+    #      'file.go:L:C: response body must be closed' AND the -json form
+    #      where the message rides its own '"message": "..."' line), and
+    #   2. a .go:L:C position marker (filters any output that merely
+    #      quotes the tool's docs/help text — the analyzer's own name/description
+    #      never appears without a position when it has nothing to report).
+    # Compile errors ('undefined: field') and export-data panics carry
+    # neither pair together, so they classify as CRASH.
+    diagnostics=""
+    if printf '%s\n' "$result" | grep -qE 'response body must be closed' \
+       && printf '%s\n' "$result" | grep -qE '\.go:[0-9]+:[0-9]+'; then
+      diagnostics=$(printf '%s\n' "$result" | grep -E '\.go:[0-9]+:[0-9]+:.*response body must be closed|response body must be closed' | sort -u)
+    fi
     if [ -n "$diagnostics" ]; then
-      # FINDINGS: file:line:col lines are authoritative. Even if panic markers
-      # are also present (tool crashed on some dependency packages but still
-      # analyzed the target), genuine findings must fail the commit — the
-      # findings gate never loosens.
+      # FINDINGS: bodyclose-message lines are authoritative. Even if panic
+      # markers or compile noise are also present (tool crashed on some
+      # dependency packages but still analyzed the target), genuine
+      # findings must fail the commit — the findings gate never loosens.
       FAILED=true
       OUTPUT="${OUTPUT}${pkg}:\n${diagnostics}\n\n"
     else
@@ -138,7 +158,7 @@ fi
 
 # Crashes with no findings anywhere: skip loudly, do not block the commit.
 if [ -n "$CRASHED_PKGS" ]; then
-  echo -e "${YELLOW}⚠️  bodyclose CRASHED (toolchain skew — binary built with an older Go than the stdlib export data); bodyclose check SKIPPED for this commit. This weakens the gate: rebuild with \`go install github.com/timakin/bodyclose@latest\` to restore it.${NC}"
+  echo -e "${YELLOW}⚠️  bodyclose CRASHED or could not load the packages (toolchain skew, or plain compile errors in the working tree); bodyclose check SKIPPED for these packages in this commit. If the tool itself is stale, rebuild with \`go install github.com/timakin/bodyclose@latest\`; if compile errors from a dirty tree are the cause, fix them (the build/vet hooks will also catch them).${NC}"
   echo ""
   echo -e "Crashed packages:"
   echo -e "$CRASHED_PKGS"
