@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/caimlas/meept/internal/voiceframe"
 )
@@ -99,6 +100,65 @@ type pipeline struct {
 	trStart      chan struct{} // closed when the transcript consumer exits (teardown wait)
 	trStartOnce  sync.Once     // exactly-once close of trStart (consumer exit OR permanent open failure)
 	pumpOnce     sync.Once     // start() is idempotent: exactly one pump goroutine
+
+	// minTurnWords (playMu, keys-frame guarded, like turnConfirm): the
+	// voice-microfrag short-final gate. A FINAL whose stripped text has
+	// FEWER than this many real words drops before evidence stamping and
+	// aggregation — tuned for loud rooms where TV fragments ("The other",
+	// "This is...") dispatch turns seconds apart (aggregation cannot
+	// merge arrivals 3-8 s apart, and word filters are wrong by default:
+	// an operator's "Stop." is one word). 0 = disabled (the default;
+	// byte-identical legacy behavior — opt-in defaults rule).
+	minTurnWords int
+
+	// ---- voice-peragent leaf 01: short-final gate improvements ----
+	// All keys-frame guarded under playMu like minTurnWords, and ALL
+	// strictly inert while minTurnWords is 0 — the whole block below
+	// is only ever consulted inside the gate's N>0 branch, so an
+	// old-daemon keys line reproduces the plain word-count gate for
+	// finals that are NOT an exemption-set phrase or a reply-window
+	// arrival (the two behavioral deltas the master's default set is
+	// exactly meant to buy; every existing pre-leaf gate pin holds.
+	//
+	// exemptPhrases: nil/empty (absent on an old-daemon keys line) =
+	// NO exemptions — the pre-leaf gate shape, byte-identical (pinned
+	// by TestShortFinalGateOneWordCommandKept, which drops "Stop." at
+	// N=2 on a lines-without-selector fixture). Real deployments never
+	// see this: the daemon's emit site always sends the effective set
+	// (DefaultConfig ships DefaultVoiceExemptPhrases; a nil resolved
+	// list normalizes to it at sendKeysFrame).
+	//
+	// energyGate + minRMS: with the gate on, a short final drops ONLY
+	// when the utterance window's average mic RMS is BELOW minRMS —
+	// far-field TV fragments are quiet, a near-field "Thank you." is
+	// loud and passes. Absent = false/0 = plain word-count gate.
+	//
+	// fragmentDecayS: after K consecutive drops within this many
+	// seconds, the effective N rises by min(K, 3) — chatter detected
+	// => stricter for a moment. 0 = off. gateDropStreak/gateDropAt are
+	// per-pipeline-instance state (a new call starts fresh: bounded and
+	// stateless-safe across calls by construction).
+	//
+	// replyExemptS: a short final arriving within this many seconds of
+	// the CHILD's own last spoken-audio write (lastSayActivity — the
+	// pipeline already tracks the playback write loop; no new wire
+	// traffic) is a reply to the agent, not background: exempted.
+	// Absent-on-wire decodes to defaultReplyExemptS (15); 0 disables.
+	exemptPhrases   []string
+	energyGate      bool
+	minRMS          int
+	fragmentDecayS  int
+	replyExemptS    int
+	gateDropStreak  int
+	gateDropAt      time.Time
+	lastSayActivity time.Time // playMu: last PCM chunk written to .out by playbackStream
+	// utterEnergySum/utterEnergySamples (playMu): mic-chunk energy
+	// accumulated over the current utterance window for the energy
+	// gate; window = mic chunks since the last gate decision (or the
+	// last dispatch), reset at each decision so each short final is
+	// measured against its own speech, not the call average.
+	utterEnergySum    uint64
+	utterEnergySample uint64
 
 	// Turn aggregation (voice-startguard C1, live call
 	// local-496a3fd0d2ab3fc6): the whisper provider flushes a segment
@@ -460,12 +520,22 @@ func nonSpeechTranscript(text string) bool {
 	return false
 }
 
-// bracketedTokenRe matches one whisper paralinguistic bracket token: an
-// opening ( [ followed by 1-60 non-']' / non-newline characters and a
-// closing ) ]. The 60-char cap keeps a bracket token bracket-sized — a long
-// parenthetical containing real words is caller speech, not an artifact.
-// (?i) is spec fidelity: the class is shape-based, so case never binds.
-var bracketedTokenRe = regexp.MustCompile(`(?i)[\[(][^\]\n]{1,60}[\])]`)
+// bracketedTokenRe matches one whisper paralinguistic token run: either a
+// bracket token — opening ( [ followed by 1-60 non-']' / non-newline
+// characters and a closing ) ] — or an asterisk marker — * followed by 1-60
+// non-'*' / non-newline characters and a closing * (voice-microfrag defect
+// 2026-11-11, live call local-0627960006a7f3d9: whisper emits
+// "*unintelligible*", "*static*", "*music*", "*laughter*" and the bracket-
+// only strip let a bare "*unintelligible*" final dispatch as a user
+// prompt). The two classes are ONE alternation so the nesting/unclosed
+// rules carry over identically: the body excludes the closer, so an
+// unclosed run ("*unintelligible" with no second "*") matches nothing and
+// keeps its residue REAL — the rule errs toward hearing the caller, and a
+// lone "*" (empty body, needs 1+ chars) never matches. The 60-char cap
+// keeps a token token-sized — a long parenthetical containing real words
+// is caller speech, not an artifact. (?i) is spec fidelity: the class is
+// shape-based, so case never binds.
+var bracketedTokenRe = regexp.MustCompile(`(?i)[\[(][^\]\n]{1,60}[\])]|\*[^*\n]{1,60}\*`)
 
 // punctuationOnlyRe matches residue that carries no word characters at all:
 // only Unicode punctuation, symbols, and whitespace.
@@ -499,8 +569,221 @@ func isRealSpeech(text string) bool {
 	if nonSpeechTranscript(text) {
 		return false
 	}
-	residue := strings.TrimSpace(bracketedTokenRe.ReplaceAllString(text, " "))
+	residue := stripNonSpeechTokens(text)
+	// A surviving "*" is an unclosed asterisk run (bare "*", "hello *"):
+	// the shape rule cannot prove it is an artifact — a bracketed empty
+	// marker "()" is a COMPLETE marker shape, a lone asterisk is not —
+	// so it stays REAL, the same "errs toward hearing the caller" rule
+	// that keeps an unclosed bracket's word residue real (leaf doc
+	// 20261111-voice-microfrag pins bare "*" and "hello *" real).
+	if strings.ContainsRune(residue, '*') {
+		return true
+	}
 	return !punctuationOnlyRe.MatchString(residue)
+}
+
+// stripNonSpeechTokens removes every bracket/asterisk paralinguistic run
+// (bracketedTokenRe) and trims: the residue is what the caller actually
+// said, MINUS whisper's non-speech markers. Shared by isRealSpeech and the
+// min_turn_words gate so the word count and the real-speech check see the
+// SAME stripped text (a "[music] stop that" counts 2 words, not 4).
+func stripNonSpeechTokens(text string) string {
+	return strings.TrimSpace(bracketedTokenRe.ReplaceAllString(text, " "))
+}
+
+// wordCount counts whitespace-separated tokens in already-stripped text
+// (the min_turn_words gate's unit: one "real word" = one token).
+func wordCount(stripped string) int {
+	return len(strings.Fields(stripped))
+}
+
+// gateVerdict is one short-final gate decision.
+type gateVerdict int
+
+const (
+	// gatePass: not short at the effective threshold (or gate off) —
+	// NO log, byte-identical to the pre-leaf hot path.
+	gatePass gateVerdict = iota
+	// gateDrop: short and unsaved — INFO 'short final dropped' with
+	// reason=wordcount|energy (master telemetry).
+	gateDrop
+	// gateExempt: short but saved by an improvement — INFO 'short
+	// final exempted' with reason=phrase|reply|energy (loud-pass).
+	gateExempt
+)
+
+// evaluateShortFinal runs the min_turn_words gate plus the four leaf-01
+// improvements for one trimmed FINAL, returning (verdict, word count,
+// reason) — words/reason are only meaningful for non-pass verdicts.
+// The whole improvement block is strictly inert while minTurnWords is
+// 0 (first-line return; zero-config = byte-identical legacy, the pin).
+//
+// Decision order (master: exemptions run against the WORD-COUNT drop,
+// energy only when the gate would otherwise drop):
+//  1. effective N = base N + min(consecutive-drop streak, 3) while a
+//     drop happened within fragment_decay_s (decay off => streak never
+//     binds). words >= effective N passes silently (and resets the
+//     streak — any dispatched final clears the chatter signal).
+//  2. exempt phrases: the whole stripped residue, lowercased and outer
+//     punctuation trimmed, matches one configured phrase — exempted
+//     ("stop!" -> "stop"). Absent/empty set = NO exemptions (legacy).
+//  3. reply window: the final arrived within reply_exempt_s of the
+//     CHILD's own last spoken-audio write (lastSayActivity — the
+//     playback write loop already exists; no new wire traffic). That
+//     is a REPLY to the agent, not background chatter.
+//  4. energy gate: with energy_gate on, a short final drops ONLY when
+//     the utterance window's average mic RMS is below min_rms (quiet
+//     far-field TV -> drop reason=energy; loud near-field "Thank you."
+//     -> exempted reason=energy). With the gate off: drop
+//     reason=wordcount.
+//
+// Streak bookkeeping: a drop increments it and stamps gateDropAt; a
+// pass/exempt resets it. State is per pipeline instance — a new call
+// starts clean (bounded, stateless-safe across calls by construction).
+func (p *pipeline) evaluateShortFinal(trimmed string) (gateVerdict, int, string) {
+	p.playMu.Lock()
+	base := p.minTurnWords
+	if base <= 0 {
+		p.playMu.Unlock()
+		return gatePass, 0, ""
+	}
+	now := time.Now()
+	effN := base
+	if p.fragmentDecayS > 0 && p.gateDropStreak > 0 &&
+		!p.gateDropAt.IsZero() && now.Sub(p.gateDropAt) < time.Duration(p.fragmentDecayS)*time.Second {
+		bump := p.gateDropStreak
+		if bump > 3 {
+			bump = 3
+		}
+		effN = base + bump
+	}
+	words := wordCount(stripNonSpeechTokens(trimmed))
+	if words >= effN {
+		p.gateDropStreak = 0
+		// A dispatched utterance ends the current mic window: reset
+		// the utterance-energy accumulator so the NEXT short final is
+		// measured over its own speech, not this loud one's tail.
+		p.utterEnergySum, p.utterEnergySample = 0, 0
+		p.playMu.Unlock()
+		return gatePass, words, ""
+	}
+	// Short at the effective threshold: run the improvements against
+	// the would-be drop. nil/empty exempt set = no exemptions
+	// (the legacy gate shape on an absent-on-wire line).
+	if matchExemptPhrase(stripNonSpeechTokens(trimmed), p.exemptPhrases) {
+		p.gateDropStreak = 0
+		p.playMu.Unlock()
+		return gateExempt, words, "phrase"
+	}
+	if p.replyExemptS > 0 && !p.lastSayActivity.IsZero() &&
+		now.Sub(p.lastSayActivity) < time.Duration(p.replyExemptS)*time.Second {
+		p.gateDropStreak = 0
+		p.playMu.Unlock()
+		return gateExempt, words, "reply"
+	}
+	if p.energyGate {
+		quiet := utteranceWindowQuiet(p.utterEnergySum, p.utterEnergySample, p.minRMS)
+		// Consume the window either way: each short final is judged
+		// on its own speech.
+		p.utterEnergySum, p.utterEnergySample = 0, 0
+		if !quiet {
+			p.gateDropStreak = 0
+			p.playMu.Unlock()
+			return gateExempt, words, "energy"
+		}
+		p.gateDropStreak++
+		p.gateDropAt = now
+		p.playMu.Unlock()
+		return gateDrop, words, "energy"
+	}
+	p.gateDropStreak++
+	p.gateDropAt = now
+	p.playMu.Unlock()
+	return gateDrop, words, "wordcount"
+}
+
+// matchExemptPhrase reports whether the stripped residue's WHOLE text
+// equals one exemption phrase, case-insensitively and ignoring outer
+// punctuation/whitespace ("Stop!" and "thanks." match; "stop that"
+// does not match "stop" — whole-residue only, per master). Internal
+// whitespace collapses (STT double-spaces between words), so
+// "thank  you" matches "thank you" while inter-word punctuation
+// inside a phrase binds ("mm-hm" needs the hyphen class intact).
+func matchExemptPhrase(residue string, phrases []string) bool {
+	normalized := normalizePhrase(residue)
+	if normalized == "" {
+		return false
+	}
+	for _, ph := range phrases {
+		// The configured phrases are matched on their own normalized
+		// form too, so "Stop" and "stop." in config behave alike.
+		cand := normalizePhrase(ph)
+		if cand != "" && cand == normalized {
+			return true
+		}
+	}
+	return false
+}
+
+// normalizePhrase is the exemption-match canonical form: outer
+// punctuation/whitespace trimmed, inner runs of whitespace collapsed
+// to one space, lowercased.
+func normalizePhrase(s string) string {
+	trimmed := strings.TrimFunc(s, func(r rune) bool {
+		return unicode.IsPunct(r) || unicode.IsSpace(r)
+	})
+	return strings.ToLower(strings.Join(strings.Fields(trimmed), " "))
+}
+
+// utteranceWindowQuiet reports whether the accumulated mic window's
+// average energy sits BELOW the minRMS floor (integer form, same
+// posture as rmsChunkOver: sum < thr^2 * n <=> rms < thr). A window
+// with no samples counts QUIET (nothing loud was heard — the master's
+// far-field posture; minRMS <= 0 never drops: everything reads loud,
+// the documented exemptions-only posture).
+func utteranceWindowQuiet(sum, samples uint64, minRMS int) bool {
+	if minRMS <= 0 {
+		return false
+	}
+	thr := uint64(minRMS)
+	return sum < thr*thr*samples
+}
+
+// noteUtteranceEnergy accumulates one incoming mic chunk's energy for
+// the energy gate's utterance window (voice-peragent leaf 01). Called
+// by pumpAudioIn with EVERY daemon->child chunk BEFORE forwarding,
+// like the barge-in taps. Cheap when the gate is off: one playMu
+// critical section, no PCM math unless energy_gate is on AND the
+// short-final gate is armed (minTurnWords > 0) — so zero-config legs
+// never pay a per-chunk cost beyond the uncontended lock the existing
+// VAD taps already take on local legs (phone legs: a ~20 ns no-op
+// lock per 20 ms chunk, below measurement floor).
+func (p *pipeline) noteUtteranceEnergy(chunk []byte) {
+	p.playMu.Lock()
+	needed := p.minTurnWords > 0 && p.energyGate
+	p.playMu.Unlock()
+	if !needed {
+		return
+	}
+	sum, samples := rmsEnergy(chunk)
+	p.playMu.Lock()
+	p.utterEnergySum += sum
+	p.utterEnergySample += samples
+	p.playMu.Unlock()
+}
+
+// markSayActivity stamps the child's own last spoken-audio write time
+// (voice-peragent leaf 01): called by playbackStream after each PCM
+// chunk reaches the .out socket. Only the reply-window exemption reads
+// it, and only when the short-final gate is armed — inert otherwise.
+// The pipeline ALREADY tracks playback writes here, so this reuses
+// existing state (no new wire traffic, master improvement #1).
+func (p *pipeline) markSayActivity() {
+	p.playMu.Lock()
+	if p.minTurnWords > 0 && p.replyExemptS > 0 {
+		p.lastSayActivity = time.Now()
+	}
+	p.playMu.Unlock()
 }
 
 // transcriptPreview bounds a dropped transcript to <=40 runes for the
@@ -523,6 +806,13 @@ const (
 	// covers the 300-600 ms breath-pause that fragmented the live call
 	// while staying far under a "did you mean...?" turn latency budget.
 	defaultTurnConfirmMs = 900
+	// defaultReplyExemptS is the child-side fallback for an ABSENT
+	// reply_exempt_s selector on an old daemon's keys line
+	// (voice-peragent leaf 01): a short final within 15 s of the
+	// child's own last spoken-audio write is treated as a reply and
+	// exempted from the short-final gate. 0 (explicit on the wire)
+	// disables the exemption.
+	defaultReplyExemptS = 15
 	// turnAggregationMaxAge bounds the buffer at ~8 s of speech: a
 	// caller who never pauses 900 ms for eight seconds force-dispatches
 	// what has aggregated (defensive; a monologue still reaches the
@@ -816,6 +1106,40 @@ func (p *pipeline) consumeTranscripts(trans <-chan Transcript) {
 					"call_id", p.ccid, "text", transcriptPreview(trimmed))
 				continue
 			}
+			// Short-final gate (voice-microfrag, live call
+			// local-0627960006a7f3d9), extended with the four
+			// improvements of voice-peragent leaf 01 (exempt
+			// phrases, reply window, energy, fragment decay —
+			// see evaluateShortFinal). When voice.min_turn_words
+			// > 0, a FINAL whose STRIPPED text (bracket/asterisk
+			// artifacts removed — the same residue isRealSpeech
+			// classifies on) carries fewer than the effective N
+			// whitespace-separated words drops entirely here,
+			// AFTER the non-speech filter and BEFORE evidence
+			// stamping and aggregation: a dropped final is
+			// invisible to lastFinalAt/lastFinalText AND to the
+			// pending buffer, so it neither re-authorizes a stale
+			// barge-in trip nor seeds an aggregation. N=0
+			// (default) skips the gate AND every improvement —
+			// byte-identical legacy behavior, the pin. Operator
+			// commands like "Stop." survive via the exemption set.
+			if verdict, words, reason := p.evaluateShortFinal(trimmed); verdict != gatePass {
+				if verdict == gateDrop {
+					p.logger.Info("voicechild: short final dropped",
+						"call_id", p.ccid, "words", words,
+						"reason", reason,
+						"preview", transcriptPreview(trimmed))
+					continue
+				}
+				// gateExempt: an improvement SAVED a would-be
+				// word-count drop — the INFO line is the operator's
+				// tuning telemetry (leaf 01: log what the exemptions
+				// bought, reason=phrase|reply).
+				p.logger.Info("voicechild: short final exempted",
+					"call_id", p.ccid, "words", words,
+					"reason", reason,
+					"preview", transcriptPreview(trimmed))
+			}
 			// Speech evidence for the local leg's RMS barge-in gate
 			// (see rmsBargeInCheck): whisper heard actual words.
 			// Exact-duplicate dedupe (defect 2026-11-09): whisper
@@ -997,6 +1321,10 @@ func (p *pipeline) pumpAudioIn() {
 			// expiry during a breath can tell "silence resumed" from "the
 			// mic is still live". No-op on phone legs (bargeInRms == 0).
 			p.noteMicEnergy(data)
+			// Short-final energy gate (voice-peragent leaf 01): the
+			// utterance-window mic energy the gate measures. No-op
+			// unless the gate is armed AND energy_gate is on.
+			p.noteUtteranceEnergy(data)
 			p.forwardPCM(data)
 		}
 		if err != nil {
@@ -1567,6 +1895,10 @@ func (p *pipeline) playbackStream(pcm io.ReadCloser, gen uint64, synthDur time.D
 			}
 			outWrite.Mark(time.Now())
 			outWrite.AddBytes(int64(n))
+			// Reply-window exemption (voice-peragent leaf 01): stamp
+			// the child's own last spoken-audio activity. No-op unless
+			// the short-final gate is armed with reply_exempt_s > 0.
+			p.markSayActivity()
 			// Local-leg echo reference (CL3): record this outbound
 			// chunk's energy so the INCOMING-side VAD tap can tell a
 			// speaker echo from a caller talking over the agent. This is

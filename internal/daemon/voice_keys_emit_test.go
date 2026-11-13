@@ -326,3 +326,139 @@ func shortKeysDir(t *testing.T) string {
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	return dir
 }
+
+// TestVoiceKeysEmissionMinTurnWordsSelector (voice-microfrag): the keys
+// line always carries min_turn_words from voice.min_turn_words — a
+// hand-built fixture config (unset) sends 0 (gate disabled = legacy),
+// and a config-set value threads through. Mirrors
+// TestVoiceKeysEmissionTurnConfirmSelector; unlike that selector, 0 is
+// both the absent-default and the disabled value, but the wire sends it
+// always (no omitempty, the keys-wire convention).
+func TestVoiceKeysEmissionMinTurnWordsSelector(t *testing.T) {
+	f := newKeysEmitFixture(t)
+	const ccid = "cc-keys-mtw"
+	acquireFor(f.w, ccid)
+
+	f.w.routeFrame(voice.Frame{CallID: ccid, Event: voice.EventSetup})
+	line := readKeysLine(t, f.lines)
+	var wire map[string]any
+	if err := json.Unmarshal([]byte(line), &wire); err != nil {
+		t.Fatalf("keys line not JSON: %v: %s", err, line)
+	}
+	if got, present := wire["min_turn_words"]; !present {
+		t.Fatal("keys wire lacks min_turn_words (short-final gate selector must ride the frame)")
+	} else if v, ok := got.(float64); !ok || v != 0 {
+		t.Errorf("wire min_turn_words = %v, want 0 for an unset fixture VoiceConfig (0 = gate disabled)", got)
+	}
+	f.w.releaseCall(ccid, voice.OutcomeHangup)
+
+	// Config-set value threads through.
+	const ccid2 = "cc-keys-mtw2"
+	acquireFor(f.w, ccid2)
+	f.w.cfg.MinTurnWords = 2
+	f.w.routeFrame(voice.Frame{CallID: ccid2, Event: voice.EventSetup})
+	line2 := readKeysLine(t, f.lines)
+	wire2 := map[string]any{}
+	if err := json.Unmarshal([]byte(line2), &wire2); err != nil {
+		t.Fatalf("keys line not JSON: %v: %s", err, line2)
+	}
+	if got, _ := wire2["min_turn_words"].(float64); got != 2 {
+		t.Errorf("wire min_turn_words = %v, want 2 (voice.min_turn_words threaded to the keys frame)", got)
+	}
+	t.Cleanup(func() { f.w.releaseCall(ccid2, voice.OutcomeHangup) })
+}
+
+// TestVoiceKeysEmissionGateImprovementSelectors (voice-peragent leaf
+// 01): the keys line carries the gate improvements from the RESOLVED
+// per-employee acoustic set. Pins:
+//   - exempt_phrases is ALWAYS present as an array (the emit site
+//     normalizes a nil global list to config.DefaultVoiceExemptPhrases,
+//     so the child's "absent = no exemptions" legacy default never
+//     binds behind a current daemon);
+//   - energy_gate/min_rms/fragment_decay_s/reply_exempt_s thread from
+//     the globals, alongside the now-resolved turn_confirm_ms and
+//     min_turn_words;
+//   - an employee_leg row override beats the global on EVERY one of
+//     them (row > global, voice.ResolveAcoustics), including an
+//     explicit-false energy_gate overriding a true global.
+func TestVoiceKeysEmissionGateImprovementSelectors(t *testing.T) {
+	f := newKeysEmitFixture(t)
+	const ccid = "cc-keys-gate"
+	acquireFor(f.w, ccid)
+	f.w.cfg.MinTurnWords = 3
+	f.w.cfg.EnergyGate = true
+	f.w.cfg.MinRMS = 1500
+	f.w.cfg.FragmentDecayS = 30
+	f.w.cfg.ReplyExemptS = 8
+	f.w.cfg.TurnConfirmMs = 1200
+
+	f.w.routeFrame(voice.Frame{CallID: ccid, Event: voice.EventSetup})
+	line := readKeysLine(t, f.lines)
+	wire := map[string]any{}
+	if err := json.Unmarshal([]byte(line), &wire); err != nil {
+		t.Fatalf("keys line not JSON: %v: %s", err, line)
+	}
+	nums := map[string]float64{
+		"min_turn_words": 3, "min_rms": 1500,
+		"fragment_decay_s": 30, "reply_exempt_s": 8, "turn_confirm_ms": 1200,
+	}
+	for k, want := range nums {
+		if got, present := wire[k]; !present {
+			t.Errorf("keys wire lacks %s (leaf-01 selector must ride the frame)", k)
+		} else if v, _ := got.(float64); v != want {
+			t.Errorf("wire %s = %v, want %v", k, got, want)
+		}
+	}
+	if wire["energy_gate"] != true {
+		t.Errorf("wire energy_gate = %v, want true", wire["energy_gate"])
+	}
+	phrases, ok := wire["exempt_phrases"].([]any)
+	if !ok || len(phrases) != 12 {
+		t.Fatalf("wire exempt_phrases = %v, want the 12-item default set emitted for a nil global list", wire["exempt_phrases"])
+	}
+	if phrases[0] != "stop" {
+		t.Errorf("exempt_phrases[0] = %v, want \"stop\" (config.DefaultVoiceExemptPhrases order)", phrases[0])
+	}
+	f.w.releaseCall(ccid, voice.OutcomeHangup)
+
+	// Row overrides win on every gate selector.
+	const ccid2 = "cc-keys-gate-row"
+	emp := f.w.cfg.DefaultEmployee
+	f.w.cfg.EmployeeLeg = []config.EmployeeLegConfig{{
+		Employee:       emp,
+		MinTurnWords:   ptrIntTest(5),
+		ExemptPhrases:  []string{"pause playback"},
+		EnergyGate:     ptrBoolTest(false),
+		MinRMS:         ptrIntTest(99),
+		FragmentDecayS: ptrIntTest(11),
+		ReplyExemptS:   ptrIntTest(22),
+		TurnConfirmMs:  ptrIntTest(333),
+	}}
+	acquireFor(f.w, ccid2)
+	f.w.routeFrame(voice.Frame{CallID: ccid2, Event: voice.EventSetup})
+	line2 := readKeysLine(t, f.lines)
+	wire2 := map[string]any{}
+	if err := json.Unmarshal([]byte(line2), &wire2); err != nil {
+		t.Fatalf("keys line not JSON: %v: %s", err, line2)
+	}
+	rowNums := map[string]float64{
+		"min_turn_words": 5, "min_rms": 99, "fragment_decay_s": 11,
+		"reply_exempt_s": 22, "turn_confirm_ms": 333,
+	}
+	for k, want := range rowNums {
+		if v, _ := wire2[k].(float64); v != want {
+			t.Errorf("row-override wire %s = %v, want %v (employee_leg row beats global)", k, wire2[k], want)
+		}
+	}
+	if wire2["energy_gate"] != false {
+		t.Errorf("row energy_gate override = %v, want explicit false overriding the true global", wire2["energy_gate"])
+	}
+	p2, _ := wire2["exempt_phrases"].([]any)
+	if len(p2) != 1 || p2[0] != "pause playback" {
+		t.Errorf("row exempt_phrases = %v, want the row set exactly", wire2["exempt_phrases"])
+	}
+	t.Cleanup(func() { f.w.releaseCall(ccid2, voice.OutcomeHangup) })
+}
+
+func ptrIntTest(n int) *int    { return &n }
+func ptrBoolTest(b bool) *bool { return &b }

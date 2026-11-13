@@ -117,6 +117,13 @@ type LocalDeps struct {
 	// call outside the binding). Nil degrades to false (shared session,
 	// byte-identical to the pre-leaf-02 behavior).
 	FreshSession func(employeeID string) bool
+	// BargeInRms resolves the per-call local-leg barge-in RMS threshold
+	// for the open frame (voice-peragent leaf 01): the employee_leg
+	// row's barge_in_rms override beats voice.local.barge_in_rms. The
+	// daemon wires it to voice.ResolveBargeInRms (same closure shape as
+	// Profile/FreshSession). Nil falls back to the leg-level
+	// LocalLegConfig.BargeInRms — byte-identical to the pre-leaf shape.
+	BargeInRms func(employeeID string) int
 	// Hold is the daemon-glue goal-hold seam (AcquireCallHold). The leg
 	// invokes it once per successfully-opened call so the release
 	// fan-out's ReleaseHook (internal/daemon/voice_employee.go) sees the
@@ -551,6 +558,12 @@ func (l *LocalLeg) sendOpenFrame(st *localCallState) error {
 		SampleRate: 16000,
 		Local:      true,
 		BargeInRms: l.cfg.BargeInRms,
+	}
+	// Per-call barge-in RMS override (voice-peragent leaf 01): the
+	// seam resolves the employee_leg row over the leg-level value;
+	// nil seam = the leg-level value, byte-identical.
+	if l.deps.BargeInRms != nil {
+		f.BargeInRms = l.deps.BargeInRms(st.employee)
 	}
 	if l.deps.Profile != nil {
 		p := l.deps.Profile(st.employee)

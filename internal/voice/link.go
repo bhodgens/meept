@@ -139,6 +139,64 @@ const linkFloorTailPad = 250 * time.Millisecond
 // mid-turn).
 const linkWatchdogReason = "floor_watchdog"
 
+// linkReasonDrained is the releaseFloor reason for the played-drain
+// edge path (drain noted + tail pad). Under backchannel soften the
+// release path treats EVERY OTHER reason (margin fallback, deferred-
+// chain watchdog) as "the holder may still be mid-reply-chain": only a
+// drained release is the audio truth that the tail is gone.
+const linkReasonDrained = "drained"
+
+// ---------------------------------------------------------------------------
+// Backchannel soften (#130) — A/B toggle, default OFF.
+//
+// The toggle resolves config-side (voice.backchannel_soften global +
+// voice.employee_leg row, internal/voice/profile.go
+// BackchannelSoftenFor — sibling leaf 01's schema) and the daemon link
+// adapter (internal/daemon/voice_link_rpc.go) passes the GLOBAL value
+// into LinkDeps.BackchannelSoften at manager construction.
+// When ON the coordinator's release TIMING softens so a short parked
+// backchannel ("Sure.", "mm-hm") never flushes into a peer tail:
+//   - tail pad linkFloorTailPad (250 ms) -> softFloorTailPad (700 ms);
+//   - fallback margin linkFloorFallbackDefault (12 s) ->
+//     softFloorFallbackMargin (15 s) — ONLY when the margin still
+//     carries the production default: an explicitly tuned
+//     LinkDeps.TurnMargin (tests, future per-row config) wins;
+//   - at any release that is NOT a played-drain edge (margin fallback,
+//     deferred-chain watchdog) OR whose holder is still mid-reply
+//     (reDispatched), a parked prompt of <= backchannelMaxWords words
+//     is NOT flushed: it flushes at the holder's NEXT drained release,
+//     or after softenMaxDefer (a bounded forced flush). A full (>2-
+//     word) parked question flushes on ANY release exactly as today.
+//
+// OPERATOR REQUIREMENT: backchannels are NEVER dropped — only their
+// flush TIMING softens. The forced-flush timer is the never-dies
+// backstop, and even it cannot drop: a FlushHeld into a still-held
+// floor rides the loop's re-gate (prompt_reheld), never prompt_dropped.
+//
+// Toggle OFF (the default everywhere): byte-identical coordinator —
+// every branch below is gated on c.soften.
+// ---------------------------------------------------------------------------
+
+// softFloorTailPad is the softened tail pad (drain edge -> floor
+// release) while backchannel soften is ON.
+const softFloorTailPad = 700 * time.Millisecond
+
+// softFloorFallbackMargin is the softened fallback margin while
+// backchannel soften is ON (replaces the 12 s default only when the
+// margin is still the default).
+const softFloorFallbackMargin = 15 * time.Second
+
+// backchannelMaxWords is the word-count ceiling that classifies a
+// parked prompt as a short backchannel (daemon-side len(strings.Fields)
+// of the parked text — the same shape as the talk loop's wordCount).
+const backchannelMaxWords = 2
+
+// softenMaxDefer bounds how long a softened (deferred) parked
+// backchannel may wait for the holder's next drained release before the
+// forced flush fires. A var (not a const) so same-package tests drive
+// the never-drop backstop on short timers; production is 10 s.
+var softenMaxDefer = 10 * time.Second
+
 // linkSilenceSeedChunks is the mic-join seed length in exact 640 B
 // L16@16k chunks (5 chunks = 100 ms of digital silence per side).
 // Enough to satisfy the splice's first-byte join gate, short enough to
@@ -262,6 +320,19 @@ type LinkTurnCoordinator struct {
 	b      linkTurnSideState
 	holder string // the side currently holding the floor ("" = free); mirrors floorHeld exactly (holder-only release, link-b9d221d8d8cddcce)
 	closed bool   // link Closed/unwound: parks DROP at loop exit, never dispatch into a dying peer
+
+	// Backchannel soften (#130, voice.backchannel_soften; OFF = every
+	// field below stays zero and the coordinator is byte-identical to
+	// today): when soften is set, a release that lands while the holder
+	// may still be mid-reply (reDispatched, or a margin/watchdog fire
+	// rather than the played-drain edge) does NOT flush a SHORT parked
+	// backchannel (<= backchannelMaxWords words). softenSide/softenTimer
+	// track the deferred park: it flushes at the next real (drained)
+	// release, or when the one bounded softenMaxDefer force-flush fires —
+	// a softened backchannel never dies, only its timing softens.
+	soften      bool
+	softenSide  string
+	softenTimer *time.Timer
 }
 
 func NewLinkTurnCoordinator(linkID string, fallbackMargin time.Duration, logger *slog.Logger) *LinkTurnCoordinator {
@@ -276,6 +347,107 @@ func NewLinkTurnCoordinator(linkID string, fallbackMargin time.Duration, logger 
 		log:    logger.With("sub", "link-turn", "link_id", linkID),
 		margin: fallbackMargin,
 		pad:    linkFloorTailPad,
+	}
+}
+
+// SetBackchannelSoften arms the #130 soften mode (voice.backchannel_soften;
+// LinkManager.Open calls it when LinkDeps.BackchannelSoften is set). OFF is
+// the zero state = byte-identical today. When ON: the tail pad and fallback
+// margin take their soft values ONLY when they still carry the production
+// defaults (an explicitly tuned LinkDeps.TurnMargin, e.g. a test's short
+// timer or a future per-row knob, is respected untouched), and the flush
+// rule below applies: a release whose reason is NOT the played-drain edge
+// (margin fallback, deferred-chain watchdog) does not flush a SHORT parked
+// backchannel - it rides the next drained release or the softenMaxDefer
+// force-flush. NEVER a drop.
+func (c *LinkTurnCoordinator) SetBackchannelSoften(on bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.soften = on
+	if !on {
+		return
+	}
+	if c.pad == linkFloorTailPad {
+		c.pad = softFloorTailPad
+	}
+	if c.margin == linkFloorFallbackDefault {
+		c.margin = softFloorFallbackMargin
+	}
+}
+
+// parkedPromptIsShort reports whether the side's loop currently holds a
+// parked final prompt of <= backchannelMaxWords words (the #130 short-
+// backchannel classifier - daemon-side wordCount of the parked text the
+// HoldPrompt park keeps; same package, read-only, no talkloop change).
+// Deadlock note: heldMu is only ever held ACROSS a field swap in the loop
+// (parkPrompt / releaseHeld / dropHeld all unlock before calling the
+// HoldPrompt seam, which takes c.mu), so c.mu -> heldMu nesting is safe
+// while the reverse order never exists.
+func parkedPromptIsShort(loop *TalkLoop) bool {
+	if loop == nil {
+		return false
+	}
+	loop.heldMu.Lock()
+	h := loop.held
+	loop.heldMu.Unlock()
+	if h == nil {
+		return false
+	}
+	return wordCount(h.text) <= backchannelMaxWords
+}
+
+// armSoftenedFlushLocked (re-)arms the one bounded force-flush for the
+// peer side's softened backchannel and records the pending state. Callers
+// hold c.mu. The timer flushes via FlushHeld, which the loop re-gates: a
+// force-flush that raced a fresh holder claim RE-PARKS (prompt_reheld),
+// never drops - the operator's never-drop requirement holds even on the
+// backstop path. A pending deferral for the SAME side keeps its original
+// deadline (a live chain's repeated margin/watchdog releases must not
+// starve the backchannel by extending the bound forever); only an
+// un-armed side gets a fresh timer.
+func (c *LinkTurnCoordinator) armSoftenedFlushLocked(side, reason string) {
+	if c.softenTimer != nil && c.softenSide == side {
+		return
+	}
+	if c.softenTimer != nil {
+		c.softenTimer.Stop()
+	}
+	c.softenSide = side
+	c.softenTimer = time.AfterFunc(softenMaxDefer, func() { c.softenForceFlush(side) })
+	c.emitLocked(side, "backchannel_softened", reason)
+}
+
+// clearSoftenedFlushLocked stands the force-flush down for a side whose
+// park just took a REAL flush path (drained release, idle release,
+// unbind). Callers hold c.mu.
+func (c *LinkTurnCoordinator) clearSoftenedFlushLocked(side string) {
+	if c.softenTimer != nil && c.softenSide == side {
+		c.softenTimer.Stop()
+		c.softenTimer = nil
+		c.softenSide = ""
+	}
+}
+
+// softenForceFlush is the bounded never-die backstop: a softened
+// backchannel that never saw the holder's next drained release within
+// softenMaxDefer flushes anyway. A FlushHeld into a still-held floor
+// rides the loop's re-gate (prompt_reheld), so even this fire cannot
+// drop the prompt; a later release re-defers/re-flushes it on its own
+// terms.
+func (c *LinkTurnCoordinator) softenForceFlush(side string) {
+	c.mu.Lock()
+	if c.closed || c.softenSide != side || c.softenTimer == nil {
+		c.mu.Unlock()
+		return
+	}
+	c.softenTimer = nil
+	c.softenSide = ""
+	loop := c.sideLocked(side).loop
+	c.mu.Unlock()
+	c.log.Info("voice: link turn: softened backchannel force-flush", "side", side,
+		"kind", "backchannel_forced_flush", "max_defer_ms", softenMaxDefer.Milliseconds())
+	if loop != nil {
+		loop.FlushHeld()
 	}
 }
 
@@ -327,6 +499,14 @@ func (c *LinkTurnCoordinator) peerLocked(side string) *linkTurnSideState {
 	return &c.b
 }
 
+// peerID returns the id of the OTHER side.
+func (c *LinkTurnCoordinator) peerID(side string) string {
+	if side == LinkSideB {
+		return LinkSideA
+	}
+	return LinkSideB
+}
+
 // Bind attaches a constructed talk loop to one side (the wiring calls it
 // right after the loop registers). Re-binding replaces the loop (a
 // duplicate setup was already refused upstream; this is the defensive
@@ -370,6 +550,12 @@ func (c *LinkTurnCoordinator) Unbind(side string) {
 	peer := c.peerLocked(side)
 	peerLoop := peer.loop
 	release := peerLoop != nil && !c.closed
+	if release {
+		// The unbind flush IS the real release for the peer's park (a
+		// dead side can no longer answer): stand the softened force-
+		// flush down so it cannot log a phantom fire later.
+		c.clearSoftenedFlushLocked(c.peerID(side))
+	}
 	c.mu.Unlock()
 	if release {
 		// The link is still alive: a dead side can no longer answer, so
@@ -628,6 +814,13 @@ func (c *LinkTurnCoordinator) TurnStateFor(side string) func(ccid string, seq ui
 				c.holder = ""
 			}
 			peerLoop := peer.loop
+			if flushPeer {
+				// The idle release is a REAL flush for the peer's park (nothing
+				// is playing: the audio truth is proven): stand any softened
+				// force-flush for the peer side down so it cannot fire later
+				// against an empty slot and log a phantom forced flush.
+				c.clearSoftenedFlushLocked(c.peerID(side))
+			}
 			c.mu.Unlock()
 			// Only the HOLDER's idle releases the peer: a non-holder's
 			// idle edge is a listening side, and flushing the real
@@ -701,7 +894,7 @@ func (c *LinkTurnCoordinator) NoteAudioDrained(ccid string) {
 	gen := match.releaseGen + 1
 	match.releaseGen = gen
 	match.releaseTimer = time.AfterFunc(c.pad, func() {
-		c.releaseFloor(side, ccid, seq, gen, "drained")
+		c.releaseFloor(side, ccid, seq, gen, linkReasonDrained)
 	})
 	c.mu.Unlock()
 	c.log.Info("voice: link turn: drain noted", "side", side,
@@ -848,6 +1041,16 @@ func (c *LinkTurnCoordinator) releaseFloor(side, ccid string, seq, gen uint64, r
 			c.releaseFloor(side, watchCcid, seq, watchGen, linkWatchdogReason)
 		})
 		chainCcid, chainSeq := st.ccid, st.seq
+		// Backchannel soften (#130): a chain-defer is a deferral of the
+		// peer flush too — with soften ON and a SHORT parked prompt,
+		// start the bounded softenMaxDefer force-flush HERE so the
+		// never-die bound counts from the FIRST deferral, not only from
+		// this branch's own watchdog fire. A pending deferral for the
+		// same side keeps its original deadline (no starvation-by-
+		// extension across a long chain).
+		if c.soften && parkedPromptIsShort(c.peerLocked(side).loop) {
+			c.armSoftenedFlushLocked(c.peerID(side), reason)
+		}
 		// Telemetry ring (bughunt 2026-11-11 C-14): same kind string
 		// as the log line below.
 		c.emitLocked(side, "floor_release_deferred", reason)
@@ -879,7 +1082,12 @@ func (c *LinkTurnCoordinator) releaseFloor(side, ccid string, seq, gen uint64, r
 	if watchdog {
 		stillCurrent = true
 	}
-	peerLoop := c.peerLocked(side).loop
+	peerState := c.peerLocked(side)
+	peerLoop := peerState.loop
+	peerSide := LinkSideB
+	if side == LinkSideB {
+		peerSide = LinkSideA
+	}
 	// Telemetry ring (bughunt 2026-11-11 C-14): the release kind. For a
 	// watchdog fire the ring carries floor_watchdog (the distinct
 	// telemetry kind the funnel doc names); other reasons ride
@@ -888,6 +1096,23 @@ func (c *LinkTurnCoordinator) releaseFloor(side, ccid string, seq, gen uint64, r
 	if reason == linkWatchdogReason {
 		releaseKind = linkWatchdogReason
 	}
+	// BACKCHANNEL SOFTEN (#130): a release whose reason is NOT the
+	// played-drain edge (fallback margin, deferred-chain watchdog — the
+	// only two non-drained reasons that can reach this point; a
+	// reDispatched drained edge defers earlier in the funnel) leaves
+	// the holder's reply-chain audio TRUTH unproven: its tail may still
+	// be pacing or a subturn may follow. With soften ON and a SHORT
+	// (<= backchannelMaxWords words) parked prompt on the peer, the
+	// flush is deferred: the park rides the holder's next drained
+	// release, or the bounded softenMaxDefer force-flush (never a
+	// drop). A full question flushes on ANY release exactly as today;
+	// soften OFF is byte-identical (the branch is skipped entirely).
+	softenDefer := c.soften && stillCurrent && reason != linkReasonDrained && parkedPromptIsShort(peerLoop)
+	if softenDefer {
+		c.armSoftenedFlushLocked(peerSide, reason)
+	} else if stillCurrent {
+		c.clearSoftenedFlushLocked(peerSide)
+	}
 	c.emitLocked(side, releaseKind, reason)
 	c.mu.Unlock()
 	if !stillCurrent {
@@ -895,6 +1120,12 @@ func (c *LinkTurnCoordinator) releaseFloor(side, ccid string, seq, gen uint64, r
 	}
 	c.log.Info("voice: link turn: floor released", "side", side,
 		"kind", "floor_released", "reason", reason, "ccid", ccid, "seq", seq)
+	if softenDefer {
+		c.log.Info("voice: link turn: short backchannel flush softened (deferred to drained release or force-flush)",
+			"side", peerSide, "kind", "backchannel_softened", "release_reason", reason,
+			"max_defer_ms", softenMaxDefer.Milliseconds())
+		return
+	}
 	if peerLoop != nil {
 		peerLoop.FlushHeld()
 	}
@@ -998,6 +1229,11 @@ func (c *LinkTurnCoordinator) Shutdown() {
 	c.mu.Lock()
 	c.closed = true
 	c.holder = ""
+	if c.softenTimer != nil {
+		c.softenTimer.Stop()
+		c.softenTimer = nil
+		c.softenSide = ""
+	}
 	for _, side := range []string{LinkSideA, LinkSideB} {
 		st := c.sideLocked(side)
 		c.cancelSideArmsLocked(st)
@@ -1095,7 +1331,16 @@ type LinkDeps struct {
 	// the C1 played edge arms MarkFinalPlayed -> AudioDrained edge ->
 	// floor after linkFloorTailPad. Zero = linkFloorFallbackDefault (12 s).
 	TurnMargin time.Duration
-	Logger     *slog.Logger
+	// BackchannelSoften arms the #130 voice.backchannel_soften toggle
+	// (default false = byte-identical coordinator). When true every
+	// link's coordinator softens the flush TIMING of short parked
+	// backchannels at non-drained releases (tail pad 250 -> 700 ms,
+	// fallback margin 12 s -> 15 s when still the defaults, short-park
+	// defer) — NEVER a drop; see SetBackchannelSoften. The daemon
+	// adapter passes voice.BackchannelSoftenFor(cfg, "") — the
+	// resolved global toggle (row > global, leaf 01's schema).
+	BackchannelSoften bool
+	Logger            *slog.Logger
 }
 
 // LinkSide is one side's live status: routing ids plus turn counts read
@@ -1417,6 +1662,10 @@ func (m *LinkManager) Open(ctx context.Context, employeeA, employeeB string, opt
 	aTarget := "local:link-a-" + suffix
 	bTarget := "local:link-b-" + suffix
 	coord := NewLinkTurnCoordinator(linkID, m.turnMargin, m.log)
+	// Backchannel soften (#130): apply the toggle before registering so
+	// the very first edges ride the soft pad/margin/flush rule.
+	// Default false = today's coordinator, byte-identical.
+	coord.SetBackchannelSoften(m.deps.BackchannelSoften)
 	m.turns.Register(aTarget, linkID, LinkSideA, coord)
 	m.turns.Register(bTarget, linkID, LinkSideB, coord)
 

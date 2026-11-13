@@ -27,6 +27,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/employee"
 	"github.com/caimlas/meept/internal/rpc"
 	"github.com/caimlas/meept/internal/voice"
@@ -46,6 +47,7 @@ type voiceLinkState struct {
 	leg    *voice.LocalLeg
 	store  linkTranscriptSource
 	turns  *voice.LinkTurnRegistry
+	cfg    config.VoiceConfig
 	logger *slog.Logger
 }
 
@@ -66,6 +68,13 @@ func (s *voiceLinkState) manager() *voice.LinkManager {
 			DialTimeout: 5 * time.Second,
 			RetainEnded: 30 * time.Minute,
 			Logger:      s.logger.With("sub", "voice-link"),
+			// Backchannel soften (#130): the resolved GLOBAL toggle
+			// (voice.backchannel_soften; "" employee => no row
+			// override — a link spans two employees, so the row
+			// tri-state only meaningfully resolves per-call on the
+			// non-link legs). Default false = today's coordinator,
+			// byte-identical.
+			BackchannelSoften: voice.BackchannelSoftenFor(s.cfg, ""),
 		})
 		if err != nil {
 			s.logger.Error("voice link manager construction failed", "err", err)
@@ -91,6 +100,7 @@ func voiceLinkSeams(w *VoiceWiring, store linkTranscriptSource, mgr *employee.Ma
 		leg:    w.Local,
 		store:  store,
 		turns:  w.linkTurns,
+		cfg:    w.cfg,
 		logger: logger,
 	}
 	// Registry rules (busy / duplicate target) surface from inside

@@ -204,3 +204,67 @@ func TestNoKeyLogs(t *testing.T) {
 }
 
 var errMissingKeyForLogTest = errors.New("missing STT key for call")
+
+// TestKeysFrameMinTurnWordsSelector (voice-microfrag): the child's keys
+// decode treats min_turn_words exactly as the wire contract specifies —
+// ABSENT (old daemon line) -> 0 (gate disabled, legacy), explicit 0 -> 0,
+// explicit 2 -> 2, negative -> clamped 0. Mirrors the keys-emit selector
+// pins on the daemon side; the semantics differ from turn_confirm_ms only
+// in the absent default (0 vs 900) because the gate's off state IS the
+// zero value.
+func TestKeysFrameMinTurnWordsSelector(t *testing.T) {
+	cases := []struct {
+		name string
+		sel  string
+		want int
+	}{
+		{"absent", "", 0},
+		{"explicit-zero", `,"min_turn_words":0`, 0},
+		{"explicit-two", `,"min_turn_words":2`, 2},
+		{"negative-clamps", `,"min_turn_words":-3`, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := shortTempDir(t)
+			d := newFakeDaemon(t, dir)
+			const ccid = "minw-sel"
+			d.listenPair(ccid)
+			child := newTestChild(t, d, "tok")
+			stt := newRecordingSTT()
+			child.SetProviderFactories(
+				func(cfg ProviderConfig, key string) (STTProvider, error) { return stt, nil },
+				func(cfg ProviderConfig, key string) (TTSProvider, error) { return stubTTS{}, nil },
+			)
+			runDone := make(chan error, 1)
+			go func() { runDone <- child.Run(context.Background()) }()
+			childConn := d.serveText()
+			d.sendLine(childConn, voiceframe.Frame{
+				CallID: ccid, Event: voiceframe.EventSetup,
+				Codec: "L16", SampleRate: 16000,
+			})
+			in, out := d.acceptAll(ccid)
+			defer func() { _ = in.Close() }()
+			defer func() { _ = out.Close() }()
+			waitFor(t, func() bool { return child.pipelineCount() == 1 })
+			sendRaw(t, childConn, `{"call_id":"`+ccid+`","event":"keys","stt_key":"s","tts_key":"t"`+tc.sel+`}`)
+			waitFor(t, func() bool { return stt.streamCalls() == 1 })
+
+			p, ok := child.getPipeline(ccid)
+			if !ok {
+				t.Fatalf("pipeline %s missing after keys", ccid)
+			}
+			p.playMu.Lock()
+			got := p.minTurnWords
+			p.playMu.Unlock()
+			if got != tc.want {
+				t.Errorf("minTurnWords for selector %q = %d, want %d", tc.sel, got, tc.want)
+			}
+			if err := childConn.Close(); err != nil {
+				t.Fatalf("close: %v", err)
+			}
+			if err := <-runDone; err != nil {
+				t.Fatalf("Run error on close: %v", err)
+			}
+		})
+	}
+}

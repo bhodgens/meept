@@ -16,6 +16,28 @@ type Profile struct {
 	TtsVoice  string
 }
 
+// Acoustics is one call's resolved per-employee acoustic control set
+// (voice-peragent leaf 01). ResolveAcoustics merges the
+// voice.employee_leg row over the global [voice] values (row > global,
+// the FreshSession tri-state pattern extended to every noise knob); a
+// row pointer that is nil inherits the global. The daemon resolves this
+// once per call: the keys frame, the talk-loop construction, and the
+// open frame all read it, so no consumer ever re-implements precedence.
+type Acoustics struct {
+	TurnConfirmMs        int
+	MinTurnWords         int
+	ExemptPhrases        []string
+	EnergyGate           bool
+	MinRMS               int
+	FragmentDecayS       int
+	ReplyExemptS         int
+	FillerGraceMs        int
+	SilencePrompt        string
+	SilencePromptSeconds int
+	SilenceHangupAfterS  int
+	BackchannelSoften    bool
+}
+
 // employeeEntry finds the voice.employee_leg row for employeeID, or nil
 // when the employee carries no per-agent routing default.
 func employeeEntry(cfg config.VoiceConfig, employeeID string) *config.EmployeeLegConfig {
@@ -38,6 +60,25 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// pickInt resolves one tri-state int pointer over a global fallback
+// (voice-peragent leaf 01): a non-nil row pointer wins — an explicit 0
+// is a real value (the "gate off for this employee" escape hatch); nil
+// inherits the global.
+func pickInt(row *int, global int) int {
+	if row != nil {
+		return *row
+	}
+	return global
+}
+
+// pickBool resolves one tri-state bool pointer over a global fallback.
+func pickBool(row *bool, global bool) bool {
+	if row != nil {
+		return *row
+	}
+	return global
 }
 
 // ResolveProfile resolves one call's voice selection per the CL4
@@ -74,6 +115,68 @@ func ResolveProfile(cfg config.VoiceConfig, employeeID, ttsVoiceOverride, leg st
 	return p
 }
 
+// ResolveAcoustics resolves one call's per-employee acoustic controls
+// (voice-peragent leaf 01): every voice.employee_leg row pointer beats
+// its global [voice] counterpart; an absent (nil) pointer inherits.
+// There is NO per-leg sub-block for these knobs — voice.local.* never
+// carries acoustic values, so "global" is always the top-level block.
+// A hand-built config that never set a field lands on that field's zero
+// value, which is the documented disabled/legacy posture for every gate
+// knob, so a config built without DefaultConfig behaves byte-identically
+// to pre-leaf code (the pin, not the hope). Pure config read
+// (FreshSessionFor shape): the daemon resolves once per call at the
+// keys-frame / talk-loop construction sites.
+func ResolveAcoustics(cfg config.VoiceConfig, employeeID string) Acoustics {
+	entry := employeeEntry(cfg, employeeID)
+	a := Acoustics{
+		TurnConfirmMs:        cfg.TurnConfirmMs,
+		MinTurnWords:         cfg.MinTurnWords,
+		ExemptPhrases:        cfg.ExemptPhrases,
+		EnergyGate:           cfg.EnergyGate,
+		MinRMS:               cfg.MinRMS,
+		FragmentDecayS:       cfg.FragmentDecayS,
+		ReplyExemptS:         cfg.ReplyExemptS,
+		FillerGraceMs:        cfg.FillerGraceMs,
+		SilencePrompt:        cfg.SilencePrompt,
+		SilencePromptSeconds: cfg.SilencePromptSeconds,
+		SilenceHangupAfterS:  cfg.SilenceHangupAfterSeconds,
+		BackchannelSoften:    cfg.BackchannelSoften != nil && *cfg.BackchannelSoften,
+	}
+	if entry == nil {
+		return a
+	}
+	a.TurnConfirmMs = pickInt(entry.TurnConfirmMs, a.TurnConfirmMs)
+	a.MinTurnWords = pickInt(entry.MinTurnWords, a.MinTurnWords)
+	if entry.ExemptPhrases != nil {
+		a.ExemptPhrases = entry.ExemptPhrases
+	}
+	a.EnergyGate = pickBool(entry.EnergyGate, a.EnergyGate)
+	a.MinRMS = pickInt(entry.MinRMS, a.MinRMS)
+	a.FragmentDecayS = pickInt(entry.FragmentDecayS, a.FragmentDecayS)
+	a.ReplyExemptS = pickInt(entry.ReplyExemptS, a.ReplyExemptS)
+	a.FillerGraceMs = pickInt(entry.FillerGraceMs, a.FillerGraceMs)
+	if entry.SilencePrompt != "" {
+		a.SilencePrompt = entry.SilencePrompt
+	}
+	a.SilencePromptSeconds = pickInt(entry.SilencePromptSeconds, a.SilencePromptSeconds)
+	a.SilenceHangupAfterS = pickInt(entry.SilenceHangupAfterSeconds, a.SilenceHangupAfterS)
+	a.BackchannelSoften = pickBool(entry.BackchannelSoften, a.BackchannelSoften)
+	return a
+}
+
+// ResolveBargeInRms resolves one call's local-leg barge-in RMS threshold
+// (voice-peragent leaf 01): the employee_leg row's tri-state BargeInRms
+// (explicit 0 = VAD off for this employee) overrides the global
+// voice.local.barge_in_rms. Open-frame construction sites only: the
+// value rides the per-call C1 open frame and was always per-call — this
+// is a resolution-source change, not a plumbing change.
+func ResolveBargeInRms(cfg config.VoiceConfig, employeeID string) int {
+	if entry := employeeEntry(cfg, employeeID); entry != nil && entry.BargeInRms != nil {
+		return *entry.BargeInRms
+	}
+	return cfg.Local.BargeInRms
+}
+
 // FreshSessionFor resolves one call's fresh-session-per-call flag
 // (fresh-session plan leaf 02): the employee_leg row's tri-state
 // FreshSession overrides the global voice.fresh_session_per_call; an
@@ -100,4 +203,18 @@ func GuidedIntakeFor(cfg config.VoiceConfig, employeeID string) bool {
 		return *entry.GuidedIntake
 	}
 	return false
+}
+
+// BackchannelSoftenFor resolves one call's #130 backchannel-soften flag
+// (schema lands here via leaf 01; leaf 02 is the consumer): the
+// employee_leg row's tri-state BackchannelSoften overrides the global
+// voice.backchannel_soften; both default false = today's coordinator,
+// byte-identical. The link-RPC wiring (internal/daemon/voice_link_rpc.go,
+// leaf 02's fence) passes the resolved value into
+// LinkDeps.BackchannelSoften.
+func BackchannelSoftenFor(cfg config.VoiceConfig, employeeID string) bool {
+	if entry := employeeEntry(cfg, employeeID); entry != nil && entry.BackchannelSoften != nil {
+		return *entry.BackchannelSoften
+	}
+	return cfg.BackchannelSoften != nil && *cfg.BackchannelSoften
 }

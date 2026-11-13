@@ -98,6 +98,23 @@ type keysWire struct {
 	// defaultTurnConfirmMs) from an explicit 0 (operator chose legacy
 	// per-final dispatch). A negative value clamps to 0 at decode.
 	TurnConfirmMs *int `json:"turn_confirm_ms"`
+	// MinTurnWords is the voice-microfrag short-final gate selector.
+	// Unlike turn_confirm_ms its ABSENT state is the DISABLED default
+	// (0), the same as an explicit 0 — the gate only does something at
+	// N >= 1, so absent/explicit-0 collapse to legacy behavior and a
+	// pointer is the honest wire shape for "default = zero value". A
+	// negative value clamps to 0.
+	MinTurnWords *int `json:"min_turn_words"`
+	// ---- voice-peragent leaf 01: short-final gate improvements ----
+	// All ADDITIVE optional keys: an old daemon line omits them and
+	// the gate stays exactly its pre-leaf shape (no exemptions; energy
+	// off; decay off; reply window = defaultReplyExemptS). The current
+	// daemon always sends the effective resolved exemption set.
+	ExemptPhrases  []string `json:"exempt_phrases"`
+	EnergyGate     *bool    `json:"energy_gate,omitempty"`
+	MinRMS         *int     `json:"min_rms,omitempty"`
+	FragmentDecayS *int     `json:"fragment_decay_s,omitempty"`
+	ReplyExemptS   *int     `json:"reply_exempt_s,omitempty"`
 }
 
 // handleKeysFrame decodes one raw keys line into the redacting KeysFrame
@@ -118,18 +135,60 @@ func (c *Child) handleKeysFrame(line string) error {
 			turnConfirmMs = 0
 		}
 	}
+	// Absent min_turn_words (old daemon line) = 0 = gate disabled
+	// (legacy behavior); explicit 0 the same; negative clamps to 0 —
+	// the config load boundary clamps too (belt and braces on a wire
+	// value).
+	minTurnWords := 0
+	if w.MinTurnWords != nil {
+		minTurnWords = *w.MinTurnWords
+		if minTurnWords < 0 {
+			minTurnWords = 0
+		}
+	}
+	// Gate improvements (voice-peragent leaf 01). Absent-on-wire
+	// (old daemon) lands on the gate's today-shape defaults: nil
+	// exemptions (the gate then falls back to the shipped default
+	// set), energy off, decay off, reply window = defaultReplyExemptS.
+	// Negatives clamp to the disabled value on every numeric field.
+	exemptPhrases := w.ExemptPhrases
+	energyGate := false
+	if w.EnergyGate != nil {
+		energyGate = *w.EnergyGate
+	}
+	minRMS := 0
+	if w.MinRMS != nil && *w.MinRMS > 0 {
+		minRMS = *w.MinRMS
+	}
+	fragmentDecayS := 0
+	if w.FragmentDecayS != nil && *w.FragmentDecayS > 0 {
+		fragmentDecayS = *w.FragmentDecayS
+	}
+	replyExemptS := defaultReplyExemptS
+	if w.ReplyExemptS != nil {
+		replyExemptS = *w.ReplyExemptS
+		if replyExemptS < 0 {
+			replyExemptS = 0
+		}
+	}
 	return c.handleKeys(KeysFrame{
-		CallID:        w.CallID,
-		STTKey:        w.STTKey,
-		TTSKey:        w.TTSKey,
-		STTVendor:     w.STTVendor,
-		STTModel:      w.STTModel,
-		STTBaseURL:    w.STTBaseURL,
-		TTSVendor:     w.TTSVendor,
-		TTSModel:      w.TTSModel,
-		TTSBaseURL:    w.TTSBaseURL,
-		TTSVoice:      w.TTSVoice,
-		TurnConfirmMs: turnConfirmMs,
+		CallID:         w.CallID,
+		STTKey:         w.STTKey,
+		TTSKey:         w.TTSKey,
+		STTVendor:      w.STTVendor,
+		STTModel:       w.STTModel,
+		STTBaseURL:     w.STTBaseURL,
+		TTSVendor:      w.TTSVendor,
+		TTSModel:       w.TTSModel,
+		TTSBaseURL:     w.TTSBaseURL,
+		TTSVoice:       w.TTSVoice,
+		TurnConfirmMs:  turnConfirmMs,
+		MinTurnWords:   minTurnWords,
+		ExemptPhrases:  exemptPhrases,
+		EnergyGate:     energyGate,
+		MinRMS:         minRMS,
+		FragmentDecayS: fragmentDecayS,
+		ReplyExemptS:   replyExemptS,
 	})
 }
 

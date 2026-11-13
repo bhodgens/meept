@@ -29,7 +29,7 @@
     "agent.action": [
       {
         "file": "internal/agent/loop.go",
-        "line": 9334,
+        "line": 9390,
         "payload_keys": [
           "conversation_id",
           "iteration",
@@ -56,7 +56,7 @@
     "agent.iteration.completed": [
       {
         "file": "internal/agent/loop.go",
-        "line": 9571,
+        "line": 9627,
         "payload_keys": [
           "agent_id",
           "conversation_id",
@@ -68,7 +68,7 @@
     "agent.lifecycle.ended": [
       {
         "file": "internal/agent/loop.go",
-        "line": 3398,
+        "line": 3427,
         "payload_keys": [],
         "via_const": true
       }
@@ -76,7 +76,7 @@
     "agent.lifecycle.started": [
       {
         "file": "internal/agent/loop.go",
-        "line": 3308,
+        "line": 3337,
         "payload_keys": [],
         "via_const": true
       }
@@ -112,7 +112,7 @@
       },
       {
         "file": "internal/agent/loop.go",
-        "line": 9399,
+        "line": 9455,
         "payload_keys": [
           "detail",
           "iteration",
@@ -123,7 +123,7 @@
       },
       {
         "file": "internal/agent/loop.go",
-        "line": 9453,
+        "line": 9509,
         "payload_keys": [
           "conversation_id",
           "detail",
@@ -153,7 +153,7 @@
     "agent.queue.followup.injected": [
       {
         "file": "internal/agent/loop.go",
-        "line": 9553,
+        "line": 9609,
         "payload_keys": [
           "conversation_id",
           "count",
@@ -190,7 +190,7 @@
     "agent.queue.steer.injected": [
       {
         "file": "internal/agent/loop.go",
-        "line": 9529,
+        "line": 9585,
         "payload_keys": [
           "conversation_id",
           "count",
@@ -225,7 +225,7 @@
     "agent.result": [
       {
         "file": "internal/agent/loop.go",
-        "line": 9364,
+        "line": 9420,
         "payload_keys": [
           "conversation_id",
           "iteration",
@@ -688,7 +688,7 @@
     "llm.tokens.used": [
       {
         "file": "internal/agent/loop.go",
-        "line": 9502,
+        "line": 9558,
         "payload_keys": []
       }
     ],
@@ -1753,7 +1753,7 @@
     "session.title_updated": [
       {
         "file": "internal/agent/loop.go",
-        "line": 10950,
+        "line": 11006,
         "payload_keys": [
           "description",
           "name",
@@ -2448,7 +2448,7 @@
     "voice.call.ended": [
       {
         "file": "internal/daemon/voice_wiring.go",
-        "line": 1472,
+        "line": 1514,
         "payload_keys": [],
         "typed": true
       }
@@ -2456,7 +2456,7 @@
     "voice.call.progress": [
       {
         "file": "internal/daemon/voice_employee.go",
-        "line": 576,
+        "line": 588,
         "payload_keys": [],
         "typed": true
       }

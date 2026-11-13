@@ -27,6 +27,7 @@ Package config provides configuration loading and validation for meept.
 - [func DeepMerge\(dst, src map\[string\]any\) map\[string\]any](<#DeepMerge>)
 - [func DefaultAlwaysFullTools\(\) \[\]string](<#DefaultAlwaysFullTools>)
 - [func DefaultUnapprovedCallerAllowedTools\(\) \[\]string](<#DefaultUnapprovedCallerAllowedTools>)
+- [func DefaultVoiceExemptPhrases\(\) \[\]string](<#DefaultVoiceExemptPhrases>)
 - [func EnsureDataDir\(cfg \*Config\) error](<#EnsureDataDir>)
 - [func ExpandEnvVars\(s string\) \(string, error\)](<#ExpandEnvVars>)
 - [func ExpandMeeptPath\(path string\) string](<#ExpandMeeptPath>)
@@ -54,6 +55,7 @@ Package config provides configuration loading and validation for meept.
 - [func NormalizeSemanticCacheDefaults\(sc \*SemanticCacheConfig\)](<#NormalizeSemanticCacheDefaults>)
 - [func NormalizeTierPolicyDefaults\(tp \*TierPolicyConfig\)](<#NormalizeTierPolicyDefaults>)
 - [func NormalizeUnapprovedCallerAllowedTools\(v \*VoiceConfig\)](<#NormalizeUnapprovedCallerAllowedTools>)
+- [func NormalizeVoiceAcousticDefaults\(v \*VoiceConfig\)](<#NormalizeVoiceAcousticDefaults>)
 - [func ParseLogLevel\(level string\) slog.Level](<#ParseLogLevel>)
 - [func ParseLogLevelValue\(level string\) \(slog.Level, bool\)](<#ParseLogLevelValue>)
 - [func ReadMainConfig\(\) \(string, bool, error\)](<#ReadMainConfig>)
@@ -629,6 +631,13 @@ DefaultAlwaysFullTools returns the curated core\-tool list that keeps its full p
 
 DefaultUnapprovedCallerAllowedTools is the \[voice\] unapproved\_caller\_allowed\_tools default \(plan 20261110\-caller\-authz, decision O3\): the message\-leaving lane plus the ledger append — the only actions an unapproved inbound caller may take. The tool names are the REAL builtin registry names \(internal/tools/builtin/agent\_message.go Name\(\) == "send\_agent\_message", the daemon's message\-taking lane wired via builtin.NewSendAgentMessageTool; internal/tools/builtin/ledger.go Name\(\) == "ledger\_append"\). Returns a fresh slice on every call so consumers may mutate the loaded config freely \(DefaultAlwaysFullTools precedent\).
 
+<a name="DefaultVoiceExemptPhrases"></a>
+## func DefaultVoiceExemptPhrases
+
+	func DefaultVoiceExemptPhrases() []string
+
+DefaultVoiceExemptPhrases is the \[voice\] exempt\_phrases default set \(voice\-peragent leaf 01\): the short\-final gate never drops a stripped final whose whole residue matches one of these — the one\-word/two\-word voice commands and acknowledgements an operator actually says \("Stop." must survive an N=3 gate\). Returns a fresh slice on every call so consumers may mutate the loaded config freely \(DefaultUnapprovedCallerAllowedTools precedent\).
+
 <a name="EnsureDataDir"></a>
 ## func EnsureDataDir
 
@@ -823,6 +832,13 @@ NormalizeTierPolicyDefaults clamps the tier policy to defaults at the load bound
 	func NormalizeUnapprovedCallerAllowedTools(v *VoiceConfig)
 
 NormalizeUnapprovedCallerAllowedTools restores the default list when the loaded \[voice\] block carries an EMPTY unapproved\_caller\_allowed\_tools \(master: "normalize at load \(empty \-\> default\)"\). A nil or explicit \`\[\]\` must NOT ship zero message rights to unknown callers. Non\-empty user lists pass through untouched, in user order — no reordering, no default injection \(review checklist\). Idempotent on valid values.
+
+<a name="NormalizeVoiceAcousticDefaults"></a>
+## func NormalizeVoiceAcousticDefaults
+
+	func NormalizeVoiceAcousticDefaults(v *VoiceConfig)
+
+NormalizeVoiceAcousticDefaults clamps invalid \[voice\] acoustic\-gate values at the load boundary so every consumer sees final values \(voice\-peragent leaf 01\): negative min\_turn\_words / min\_rms / fragment\_decay\_s / reply\_exempt\_s clamp to 0 \(their disabled values\), globally and on every employee\_leg row pointer. Zero values are legitimate defaults — nothing here INJECTS defaults \(opt\-in rule\). exempt\_phrases keeps its DefaultConfig value when the file omits the key \(load starts from DefaultConfig\); an explicitly null list lands nil and the daemon\-side resolution falls back to DefaultVoiceExemptPhrases\(\). Idempotent on valid values.
 
 <a name="ParseLogLevel"></a>
 ## func ParseLogLevel
@@ -2492,6 +2508,58 @@ EmployeeLegConfig is one per\-agent voice routing default \(voice tree CL4, OQ4 
 	    // true/false = this employee's override. Pointer because JSON5 cannot
 	    // distinguish "absent" from false on a plain bool.
 	    FreshSession *bool `json:"fresh_session" toml:"fresh_session"`
+	    // GuidedIntake (leaf 05 uptractor-ports, opt-in per employee row,
+	    // default false): run this employee's calls as guided intake —
+	    // identify the caller, collect missing fields ONE question at a
+	    // time, read the record back verbatim, and save only after the
+	    // caller confirms (intake_save; confirm-flag gated at the tool
+	    // layer). Scoped per employee_leg row deliberately: guided intake is
+	    // the SECRETARY employee's call behavior (owner decision
+	    // 2026-11-11), not a generic employee knob — an employee opts in by
+	    // its own row, and the prompt extension + intake_save grant follow
+	    // that row only. Pointer (tri-state like FreshSession).
+	    GuidedIntake *bool `json:"guided_intake" toml:"guided_intake"`
+	    // ---- Per-employee acoustic controls (voice-peragent leaf 01) ----
+	    // Every pointer below is tri-state: nil = inherit the global
+	    // voice.* value; a set value (including an explicit 0/""/false)
+	    // overrides it for THIS employee's calls. Resolution rides
+	    // voice.ResolveProfile / the *_For helpers (row > global), the
+	    // FreshSession pattern extended to the acoustic knobs.
+	    //
+	    // TurnConfirmMs: child-side turn-aggregation confirm window (ms).
+	    // Explicit 0 = legacy per-final dispatch for this employee.
+	    TurnConfirmMs *int `json:"turn_confirm_ms" toml:"turn_confirm_ms"`
+	    // MinTurnWords: short-final gate threshold for this employee
+	    // (see voice.min_turn_words). Explicit 0 = gate off even if the
+	    // global gate is on — the per-row escape hatch from chatter tuning.
+	    MinTurnWords *int `json:"min_turn_words" toml:"min_turn_words"`
+	    // ExemptPhrases: replaces the global exemption SET for this
+	    // employee when non-nil (an explicit empty list = no exemptions);
+	    // nil inherits voice.exempt_phrases.
+	    ExemptPhrases []string `json:"exempt_phrases" toml:"exempt_phrases"`
+	    // EnergyGate / MinRMS / FragmentDecayS / ReplyExemptS: per-row
+	    // overrides of the matching voice.* gate improvements
+	    // (docs/workflows/voicechild.md gate section).
+	    EnergyGate     *bool `json:"energy_gate" toml:"energy_gate"`
+	    MinRMS         *int  `json:"min_rms" toml:"min_rms"`
+	    FragmentDecayS *int  `json:"fragment_decay_s" toml:"fragment_decay_s"`
+	    ReplyExemptS   *int  `json:"reply_exempt_s" toml:"reply_exempt_s"`
+	    // FillerGraceMs: how long a dispatched turn may run before the
+	    // talk loop speaks filler for THIS employee (ms; 0 = immediate).
+	    FillerGraceMs *int `json:"filler_grace_ms" toml:"filler_grace_ms"`
+	    // SilencePrompt: this employee's dedicated dead-air nudge line
+	    // (row non-empty wins; empty string = inherit the global line).
+	    SilencePrompt string `json:"silence_prompt" toml:"silence_prompt"`
+	    // SilencePromptSeconds / SilenceHangupAfterSeconds: the nudge (S)
+	    // and post-nudge hangup (H) windows for this employee.
+	    SilencePromptSeconds      *int `json:"silence_prompt_seconds" toml:"silence_prompt_seconds"`
+	    SilenceHangupAfterSeconds *int `json:"silence_hangup_after_seconds" toml:"silence_hangup_after_seconds"`
+	    // BargeInRms: the local-leg open-frame RMS threshold for this
+	    // employee's calls (row override of voice.local.barge_in_rms).
+	    BargeInRms *int `json:"barge_in_rms" toml:"barge_in_rms"`
+	    // BackchannelSoften: per-row override of voice.backchannel_soften
+	    // (#130 leaf 02 consumes the resolved value via voice.BackchannelSoftenFor).
+	    BackchannelSoften *bool `json:"backchannel_soften" toml:"backchannel_soften"`
 	}
 
 <a name="EmployeesAuditConfig"></a>
@@ -6111,7 +6179,73 @@ VerificationDefaults holds daemon\-level verification defaults.
 	    // talk loop speaks a filler line (dead-air defect 2026-11-10:
 	    // filler fired immediately on EVERY prompt, so "give me a second"
 	    // preceded fast answers). 0 = speak immediately (legacy).
-	    FillerGraceMs       int      `json:"filler_grace_ms"        toml:"filler_grace_ms"`
+	    FillerGraceMs int `json:"filler_grace_ms" toml:"filler_grace_ms"`
+	    // TurnConfirmMs is the child-side turn-aggregation confirm window
+	    // (startguard C1, live call local-496a3fd0d2ab3fc6): consecutive
+	    // FINAL transcripts arriving within this window of each other are
+	    // aggregated into ONE employee-turn prompt instead of dispatching
+	    // a turn per breath-pause fragment (the provider flushes segments
+	    // at 500 ms wall-idle; a normal mid-sentence breath is 300-600 ms,
+	    // so per-final dispatch answered fragments of one sentence).
+	    // Default 900; 0 = legacy per-final dispatch.
+	    TurnConfirmMs int `json:"turn_confirm_ms" toml:"turn_confirm_ms"`
+	    // MinTurnWords is the child-side short-final gate (voice-microfrag,
+	    // live call local-0627960006a7f3d9): in a loud room, background-TV
+	    // fragments ("The other", "This is...") finalize seconds apart —
+	    // too far for the aggregation window to merge, and a fixed word
+	    // filter is wrong by default because an operator command like
+	    // "Stop." is one word. So the threshold is operator-tunable: the
+	    // child drops a FINAL whose non-speech-stripped text has fewer
+	    // than N whitespace-separated words (dropped finals dispatch
+	    // nothing and never stamp barge-in speech evidence). Default 0 =
+	    // disabled (opt-in defaults rule, docs/agents/opt-in-defaults.md);
+	    // set 2 to tune out short background fragments; 1-word voice
+	    // commands still pass at N=1. A negative value clamps to 0.
+	    // Per-employee override: voice.employee_leg[].min_turn_words.
+	    MinTurnWords int `json:"min_turn_words" toml:"min_turn_words"`
+	    // ExemptPhrases is the short-final gate's exemption set (voice-peragent
+	    // leaf 01): a stripped final whose whole residue matches one entry
+	    // (case-insensitive, outer punctuation trimmed) is NEVER dropped by
+	    // the min_turn_words gate — one-word commands ("stop", "thanks")
+	    // survive at any N. Default: DefaultVoiceExemptPhrases(); an
+	    // explicit empty list disables exemptions. Inert while
+	    // min_turn_words is 0. Per-employee override replaces the set.
+	    ExemptPhrases []string `json:"exempt_phrases" toml:"exempt_phrases"`
+	    // EnergyGate turns the short-final gate into a loudness-aware gate
+	    // (voice-peragent leaf 01): with it ON, a short final drops ONLY when
+	    // the utterance window's average mic RMS is BELOW MinRMS — far-field
+	    // TV fragments are quiet, a near-field "Thank you." you actually
+	    // said is loud and passes. Default false = plain word-count gate
+	    // (opt-in rule). Inert while min_turn_words is 0. Per-employee
+	    // override: employee_leg[].energy_gate.
+	    EnergyGate bool `json:"energy_gate" toml:"energy_gate"`
+	    // MinRMS is the EnergyGate's loudness floor, in s16 RMS units on the
+	    // utterance-window average mic energy (same scale as
+	    // voice.local.barge_in_rms: 3000 ≈ conversational). 0 = unused when
+	    // the gate is off; with the gate ON and MinRMS 0 every short final
+	    // reads "loud" (the gate never drops — exemptions-only posture).
+	    // Per-employee override: employee_leg[].min_rms.
+	    MinRMS int `json:"min_rms" toml:"min_rms"`
+	    // FragmentDecayS escalates the short-final gate after consecutive
+	    // drops (voice-peragent leaf 01): while a drop happened within this
+	    // many seconds ago, the effective threshold is N + min(consecutive
+	    // drops, 3); any final that passes the gate resets the counter.
+	    // Detected chatter => stricter for a moment. 0 = off (the default).
+	    // Per-employee override: employee_leg[].fragment_decay_s.
+	    FragmentDecayS int `json:"fragment_decay_s" toml:"fragment_decay_s"`
+	    // ReplyExemptS is the short-final gate's reply window (voice-peragent
+	    // leaf 01): a short final arriving within this many seconds of the
+	    // child's OWN last spoken-audio activity is a reply to the agent,
+	    // not background — the gate skips it. Default 15. 0 disables the
+	    // exemption. Per-employee override: employee_leg[].reply_exempt_s.
+	    ReplyExemptS int `json:"reply_exempt_s" toml:"reply_exempt_s"`
+	    // BackchannelSoften is the #130 backchannel-soften toggle (default
+	    // FALSE = today's coordinator behavior, byte-identical): when true
+	    // the voice link softens the flush timing of short backchannel
+	    // replies ("mm-hm" reactions) against the peer's audio tail. The
+	    // link coordinator consumes the per-call resolved value.
+	    // Per-employee override: employee_leg[].backchannel_soften.
+	    BackchannelSoften   *bool    `json:"backchannel_soften" toml:"backchannel_soften"`
 	    SupervisorEmployee  string   `json:"supervisor_employee"    toml:"supervisor_employee"`
 	    SupervisorEnabled   bool     `json:"supervisor_enabled"     toml:"supervisor_enabled"`
 	    SupervisorModel     string   `json:"supervisor_model"       toml:"supervisor_model"`
@@ -6160,15 +6294,38 @@ VerificationDefaults holds daemon\-level verification defaults.
 	    STTModel                  string `json:"stt_model"             toml:"stt_model"`
 	    TTSBaseURL                string `json:"tts_base_url"          toml:"tts_base_url"`
 	    STTBaseURL                string `json:"stt_base_url"          toml:"stt_base_url"`
+	    // ReaperIntervalS (leaf 02, C3): the dead-air reaper's sweep cadence.
+	    // 0 => default 30s (frozen from the uptractor source); NEGATIVE
+	    // disables the reaper entirely (opt-out without removing the key).
+	    ReaperIntervalS int `json:"reaper_interval_s"      toml:"reaper_interval_s"`
+	    // ReaperDeadAirS: release a call only after this much caller silence.
+	    // 0 => default 60s; never reaped on age alone (owner-ratified
+	    // DEAD-AIR semantics, master C3).
+	    ReaperDeadAirS int `json:"reaper_dead_air_s"      toml:"reaper_dead_air_s"`
+	    // ReaperMaxCallMinutes: the absolute cap from call start. 0 => default
+	    // 30m (the talk-loop's max_call_minutes is a separate, older knob);
+	    // negative values disable the reaper (same posture as interval).
+	    ReaperMaxCallMinutes int `json:"reaper_max_call_minutes" toml:"reaper_max_call_minutes"`
 	    // FreshSessionPerCall (opt-in, default false): each voice call opens a
 	    // brand-new session instead of reusing the (employee, target) shared
 	    // conversation, so turn history never snowballs across calls. The day
 	    // brief stays the only cross-call context channel. Per-employee
 	    // override: employee_leg rows carry fresh_session (tri-state).
-	    FreshSessionPerCall bool                `json:"fresh_session_per_call" toml:"fresh_session_per_call"`
-	    Local               LocalConfig         `json:"local"                  toml:"local"`
-	    EmployeeLeg         []EmployeeLegConfig `json:"employee_leg"   toml:"employee_leg"`
-	    Messaging           MessagingConfig     `json:"messaging"              toml:"messaging"`
+	    FreshSessionPerCall bool `json:"fresh_session_per_call" toml:"fresh_session_per_call"`
+	    // RecordCalls (leaf 06, opt-in, default false): start a dual-channel
+	    // mp3 recording at call.answered. HARD-GATED by RecordConsentPin:
+	    // enabling without a non-empty pin is a startup REFUSAL (Error log,
+	    // recording forced off — fail-closed in the daemon wiring), never a
+	    // silent record-without-consent (all-party-consent states).
+	    RecordCalls bool `json:"record_calls" toml:"record_calls"`
+	    // RecordConsentPin is REQUIRED non-empty when RecordCalls is true:
+	    // the call must announce that it is being recorded (and driven by AI)
+	    // before any record_start. Empty + RecordCalls=true => recording
+	    // disabled with an Error log at wiring time.
+	    RecordConsentPin string              `json:"record_consent_pin" toml:"record_consent_pin"`
+	    Local            LocalConfig         `json:"local"                  toml:"local"`
+	    EmployeeLeg      []EmployeeLegConfig `json:"employee_leg"   toml:"employee_leg"`
+	    Messaging        MessagingConfig     `json:"messaging"              toml:"messaging"`
 	}
 
 <a name="WatchdogConfig"></a>

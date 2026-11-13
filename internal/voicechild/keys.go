@@ -45,6 +45,40 @@ type KeysFrame struct {
 	// decodes as defaultTurnConfirmMs (900) at handleKeysFrame, and an
 	// explicit 0 selects legacy per-final dispatch.
 	TurnConfirmMs int
+	// MinTurnWords is the voice-microfrag short-final gate (see
+	// pipeline.minTurnWords): the daemon sends config
+	// voice.min_turn_words; an ABSENT selector on an old daemon's line
+	// decodes as 0 (gate disabled, legacy behavior) and an explicit 0
+	// is the same. Positive N drops FINALs whose stripped text has
+	// fewer than N words. A negative value clamps to 0 at decode.
+	MinTurnWords int
+	// ---- voice-peragent leaf 01: the short-final gate improvements ----
+	// (pipeline.shortGate; ALL inert while MinTurnWords is 0, so an
+	// old-daemon/keys-less line reproduces the plain word-count gate
+	// exactly.)
+	//
+	// ExemptPhrases: a stripped final whose whole residue matches one
+	// entry (case-insensitive, outer punctuation trimmed) is never
+	// dropped. Absent/nil or [] on the wire = NO exemptions (the
+	// pre-leaf gate shape, byte-identical); the daemon always sends
+	// the effective resolved set (DefaultConfig's shipped phrases or
+	// the row's), so a real deployment's gate exempts the one-word
+	// command set.
+	ExemptPhrases []string
+	// EnergyGate + MinRMS: with the gate on, a short final drops ONLY
+	// when the utterance window's average mic RMS is below MinRMS.
+	// Absent = false/0 = plain word-count gate.
+	EnergyGate bool
+	MinRMS     int
+	// FragmentDecayS: after K consecutive drops, raise the effective N
+	// by min(K, 3) while a drop happened within this many seconds.
+	// Absent/0 = off.
+	FragmentDecayS int
+	// ReplyExemptS: a short final within this many seconds of the
+	// child's own last spoken-audio activity is exempt (a reply, not
+	// background). Absent on an old daemon line decodes to the child
+	// default (15 s, defaultReplyExemptS); an explicit 0 disables.
+	ReplyExemptS int
 }
 
 // Redacted is what String prints instead of key material.
@@ -148,6 +182,21 @@ func (p *pipeline) applyKeys(k KeysFrame) {
 	// pipeline constructor seeds the same default so a keys-less call
 	// still aggregates.
 	p.turnConfirm = time.Duration(k.TurnConfirmMs) * time.Millisecond
+	// Short-final gate (voice-microfrag): absent-on-wire already decoded
+	// to 0 (disabled) at handleKeysFrame. Same playMu guard as
+	// turnConfirm; applied before any transcript can arrive.
+	p.minTurnWords = k.MinTurnWords
+	// Gate improvements (voice-peragent leaf 01): stored as one
+	// struct so the gate reads a consistent snapshot under playMu.
+	// Absent-on-wire decoded to the today-shape defaults at
+	// handleKeysFrame (nil exemptions -> the shipped default set at
+	// the gate, energy off, decay off, reply window 15); every
+	// improvement stays inert while minTurnWords is 0.
+	p.exemptPhrases = k.ExemptPhrases
+	p.energyGate = k.EnergyGate
+	p.minRMS = k.MinRMS
+	p.fragmentDecayS = k.FragmentDecayS
+	p.replyExemptS = k.ReplyExemptS
 	p.sttCfg = ProviderConfig{
 		Vendor:  k.STTVendor,
 		Model:   k.STTModel,

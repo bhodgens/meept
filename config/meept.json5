@@ -1357,8 +1357,15 @@
     "tts_provider": "",                     // TTS provider for call audio
     "greeting": "",                          // fact-free line spoken once on connect; empty = first filler line; an empty filler list disables the greeting
     "filler": ["Hold on, let me check."],   // spoken filler lines while working
-    "filler_grace_ms": 2500,                // wait this long after a prompt before speaking filler (0 = immediate)
-    "turn_confirm_ms": 900,                 // child-side turn aggregation: consecutive final transcripts inside this window dispatch ONE employee turn (kills the breath-pause fragment fence); 0 = legacy per-final dispatch
+    "filler_grace_ms": 2500,                // wait this long after a prompt before speaking filler (0 = immediate); per-employee override: employee_leg[].filler_grace_ms
+    "turn_confirm_ms": 900,                 // child-side turn aggregation: consecutive final transcripts inside this window dispatch ONE employee turn (kills the breath-pause fragment fence); 0 = legacy per-final dispatch; per-employee override: employee_leg[].turn_confirm_ms
+    "min_turn_words": 0,                    // short-final gate: drop finals with fewer than N real words after non-speech stripping - tunes out background-fragment chatter (TV) in loud rooms; exempt_phrases below still passes; 0 = gate off (default); per-employee override: employee_leg[].min_turn_words (explicit 0 = gate off for that row)
+    "exempt_phrases": ["stop", "cancel", "yes", "no", "thanks", "thank you", "okay", "ok", "mm-hm", "mmhm", "uh-huh", "go ahead"], // short-final gate's exemption set: a whole-residue match (case-insensitive, outer punctuation trimmed) is never dropped - raise min_turn_words without losing voice commands; lower/empty only if short acknowledgements SHOULD count as chatter noise; per-employee override: employee_leg[].exempt_phrases (replaces the set)
+    "energy_gate": false,                   // short-final gate loudness awareness (opt-in): with it ON a short final drops ONLY when the utterance window's average mic RMS is below min_rms - far-field TV is quiet, a near-field "Thank you." passes; turn ON when the word gate drops things you actually said; per-employee override: employee_leg[].energy_gate
+    "min_rms": 0,                           // energy_gate's loudness floor (s16 RMS units, same scale as local.barge_in_rms: ~1000-3000 = room speech, 3000+ near-field); 0 = unused with the gate off; raise when TV audio at conversation loudness still passes, lower when your own quiet speech drops; per-employee override: employee_leg[].min_rms
+    "fragment_decay_s": 0,                  // short-final gate escalation: after K consecutive drops within this many seconds the effective N rises by min(K,3), resetting on any dispatch - sustained chatter gets stricter for a moment; 0 = off (default); set 30-60 for rooms with bursty TV speech; per-employee override: employee_leg[].fragment_decay_s
+    "reply_exempt_s": 15,                   // short-final gate reply window: a short final within this many seconds of the agent's OWN last spoken audio is a reply, not background - the gate skips it; 0 disables; lower (5-8) if the caller's immediate reactions still flood turns, raise if genuine replies arrive late after long answers; per-employee override: employee_leg[].reply_exempt_s
+    "backchannel_soften": false,            // opt-in (plan #130 A/B): the voice link softens short backchannel flush timing against the peer's audio tail; false = today's coordinator, byte-identical; per-employee override: employee_leg[].backchannel_soften
     "supervisor_employee": "",              // employee id supervising calls
     "supervisor_enabled": true,             // run the call supervisor
     "supervisor_model": "",                 // empty = use small_model
@@ -1370,9 +1377,9 @@
     "allowed_numbers": null,                // allowed caller numbers (E.164); null = all
     "timeout_secs": 30,                     // per-step call timeout
     "max_call_minutes": 15,                 // hard cap on call length
-    "silence_prompt_seconds": 45,           // silence before prompting the caller; the clock pauses while the employee turn is in flight
-    "silence_prompt": "Are you still there?", // dedicated dead-air nudge line on the first silence fire; empty = legacy filler round-robin
-    "silence_hangup_after_seconds": 45,     // quiet time AFTER the nudge before hangup: nudge@silence_prompt_seconds, hangup@S+H (45+45 = the legacy 45/90 endpoints; 0 = reuse S)
+    "silence_prompt_seconds": 45,           // silence before prompting the caller; the clock pauses while the employee turn is in flight; per-employee override: employee_leg[].silence_prompt_seconds
+    "silence_prompt": "Are you still there?", // dedicated dead-air nudge line on the first silence fire; empty = legacy filler round-robin; per-employee override: employee_leg[].silence_prompt (row non-empty wins)
+    "silence_hangup_after_seconds": 45,     // quiet time AFTER the nudge before hangup: nudge@silence_prompt_seconds, hangup@S+H (45+45 = the legacy 45/90 endpoints; 0 = reuse S); per-employee override: employee_leg[].silence_hangup_after_seconds
     "turn_timeout_seconds": 0,              // optional hard cap on one in-flight voice turn (hung LLM bound); 0 = disabled
     "fresh_session_per_call": false,        // opt-in: each voice call opens a NEW session (no cross-call turn-history snowball); the day brief stays the only cross-call context
     "max_concurrent_calls": 2,              // concurrent voice instances; 0 = unlimited
@@ -1392,7 +1399,7 @@
       "tts_provider": "",                   // default "piper"; empty = voice.tts_provider
       "tts_model": "",                      // local-leg TTS model; empty = voice.tts_model
       "tts_voice": "",                      // local-leg TTS voice; empty = voice.tts_voice
-      "barge_in_rms": 3000,                 // s16 RMS threshold for local-leg barge-in
+      "barge_in_rms": 3000,                 // s16 RMS threshold for local-leg barge-in; raise if the agent never interrupts (TV trips it), lower if you must shout; per-employee override: employee_leg[].barge_in_rms
       "name": ""                            // session label; empty = hostname
     },
     "employee_leg": [
@@ -1403,7 +1410,7 @@
         "leg": "phone",
         "guided_intake": true
       }
-    ],                     // per-agent routing defaults; entry {employee, leg: "phone"|"local", tts_voice, tts_model, fresh_session?, guided_intake?}; fresh_session overrides voice.fresh_session_per_call per employee (absent = inherit); guided_intake opts that employee's calls into guided intake (uptractor-ports leaf 05: intake_save tool + one-question-at-a-time prompt; the secretary's row opts in), default absent = off; beats per-leg config, beats provider default
+    ],                     // per-agent routing + acoustic defaults; entry {employee, leg: "phone"|"local", tts_voice, tts_model, fresh_session?, guided_intake?, backchannel_soften?, and the acoustic overrides turn_confirm_ms?, min_turn_words?, exempt_phrases?, energy_gate?, min_rms?, fragment_decay_s?, reply_exempt_s?, filler_grace_ms?, silence_prompt?, silence_prompt_seconds?, silence_hangup_after_seconds?, barge_in_rms?}; every acoustic key is tri-state (absent = inherit the voice.* global; an explicit 0/false/"" = a real override for this row), so per-row tuning never touches other employees; fresh_session overrides voice.fresh_session_per_call per employee; guided_intake opts that employee's calls into guided intake (uptractor-ports leaf 05); row > global > provider default everywhere (docs/workflows/voice.md "Per-employee voice controls")
     "child_binary_path": "",                // empty = daemon-adjacent lookup
     "loopback_plain_addr": "",              // empty = no second listener; when set (and enabled), serves plain HTTP on this loopback addr for a TLS-terminating tunnel
     "messaging": {                          // Telnyx SMS messaging (contact channels); disabled by default

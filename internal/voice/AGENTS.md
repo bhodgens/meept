@@ -54,10 +54,25 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   hardcoded deepgram/openai defaults; a non-empty `stt_base_url`/`tts_base_url`
   is dialed instead of the cloud default - `[voice].stt_base_url` /
   `[voice].tts_base_url` feed them daemon-side, global config by design)
-  plus the startguard C1 selector `turn_confirm_ms` (global
-  `[voice].turn_confirm_ms` like the base URLs; the child decodes an
-  ABSENT field as its own 900 ms default and an explicit 0 as legacy
-  per-final dispatch).
+  plus the startguard C1 selector `turn_confirm_ms` (the RESOLVED
+  per-employee `voice.turn_confirm_ms` since voice-peragent leaf 01:
+  `voice.employee_leg` row > global; the child decodes an ABSENT
+  field as its own 900 ms default and an explicit 0 as legacy
+  per-final dispatch) plus the voice-microfrag short-final gate and
+  its leaf-01 improvements: `min_turn_words` (N>0 drops a FINAL whose
+  bracket/asterisk-stripped residue has < N words, before evidence
+  stamping and aggregation; absent/0 = off), `exempt_phrases` (whole-
+  residue exemption set; absent = the child's shipped default set),
+  `energy_gate` + `min_rms` (drop only when the utterance window's
+  average mic RMS is below the floor), `fragment_decay_s` (effective
+  N += min(consecutive drops, 3) for S s after a drop), and
+  `reply_exempt_s` (short final within S s of the child's own last
+  spoken-audio write is a reply: exempt). All five are additive
+  optional keys; every improvement is strictly inert while
+  min_turn_words is 0, so an old daemon line keeps the exact
+  pre-leaf gate. Telemetry: INFO 'short final dropped' with
+  reason=wordcount|energy; INFO 'short final exempted' with
+  reason=phrase|reply|energy.
   The vendor/model/voice selectors resolve per call through
   `voice.ResolveProfile` (local-leg CL4: `voice.employee_leg` row >
   per-leg config > provider default) over the call's registry row
@@ -704,6 +719,30 @@ store. Invariants a future agent must NOT break:
   daemon adapts in internal/daemon/voice_local_rpc.go). No audio ever
   rides RPC - clients dial the C2 pair paths directly (internal/rpc/
   voice_local.go:23-24).
+
+## Per-employee acoustic controls (voice-peragent leaf 01)
+
+One immutable rule with two halves:
+
+- **Row > global.** Every acoustic/noise knob resolves through
+  `voice.ResolveAcoustics` (provider selection through
+  `voice.ResolveProfile`, barge-in RMS through `voice.ResolveBargeInRms`)
+  in `internal/voice/profile.go`, exactly like the FreshSession tri-state
+  pattern: a `voice.employee_leg` row pointer that is nil inherits the
+  global `[voice]` value; a set pointer (including an explicit 0/""/
+  false) wins for that employee's calls. The daemon resolves ONCE per
+  call at the keys-frame emit (gate knobs + turn_confirm to the child),
+  the talk-loop construction (silence trio + filler grace), and the
+  open-frame construction (barge_in_rms) — no consumer re-implements
+  precedence, and the TalkLoopConfig/LocalSpliceConfig SHAPES never
+  changed, only the VALUES fed them.
+- **Zero-config = byte-identical legacy — the pin, not the hope.** A
+  config with no employee_leg acoustic rows and no leaf-01 gate knobs
+  lands every value on today's global read, and the child-side gate
+  improvements are strictly inert while `min_turn_words` is 0, so an
+  old daemon line or a zero-config deployment reproduces the pre-leaf
+  behavior exactly. Any change that makes a defaulted call behave
+  differently from its pre-leaf self is a bug, not a feature.
 
 ## Operator telemetry (voice-events tree)
 

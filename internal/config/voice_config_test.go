@@ -185,3 +185,50 @@ func TestSilenceNudgeConfig_ExplicitValuesSurviveLoad(t *testing.T) {
 		t.Errorf("silence_hangup_after_seconds = %d, want 45", c.Voice.SilenceHangupAfterSeconds)
 	}
 }
+
+// TestMinTurnWordsConfig (voice-microfrag leaf 01): voice.min_turn_words
+// defaults to 0 — the short-final gate is OPT-IN (docs/agents/opt-in-
+// defaults.md): word filters are wrong by default because an operator
+// command like "Stop." is one word, so only a loud-room operator flips
+// it. Pins: DefaultConfig = 0, explicit load survives, template ships
+// the key at 0 and parses.
+func TestMinTurnWordsConfig(t *testing.T) {
+	if got := DefaultConfig().Voice.MinTurnWords; got != 0 {
+		t.Errorf("voice.min_turn_words default = %d, want 0 (gate disabled out of the box — operator-tunable loud-room filter)", got)
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "meept.json5")
+	body := `{
+  "voice": {
+    "min_turn_words": 2,
+  },
+}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := DefaultConfig()
+	if err := LoadJSON5(path, c); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if c.Voice.MinTurnWords != 2 {
+		t.Errorf("min_turn_words = %d, want 2 (explicit value must survive the load)", c.Voice.MinTurnWords)
+	}
+
+	// Template ships the key at the disabled default and still parses.
+	const templatePath = "../../config/meept.json5"
+	if _, err := os.Stat(templatePath); err != nil {
+		t.Skipf("template not found from test cwd: %v", err)
+	}
+	abs, err := filepath.Abs(templatePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tpl := DefaultConfig()
+	if err := LoadJSON5(abs, tpl); err != nil {
+		t.Fatalf("template meept.json5 failed to parse: %v", err)
+	}
+	if tpl.Voice.MinTurnWords != 0 {
+		t.Errorf("template voice.min_turn_words = %d, want 0 (template reproduces today's behavior: gate off)", tpl.Voice.MinTurnWords)
+	}
+}

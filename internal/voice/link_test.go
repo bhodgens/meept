@@ -2465,3 +2465,362 @@ func (g *speakGateTurns) Run(ctx context.Context, sess SessionHandle, prompt str
 }
 
 func (g *speakGateTurns) count() int { return g.inner.(*holdTurns).count() }
+
+// ---------------------------------------------------------------------------
+// voice.backchannel_soften (#130) — A/B toggle pinning.
+//
+// Toggle OFF (the default everywhere above): the existing coordinator
+// suite runs UNMODIFIED and green — byte-identical today. Toggle ON:
+// soft pad/margin values, short-parked-backchannel flush deferral at
+// non-drained releases, full-question releases unaffected, and the
+// never-drop force-flush backstop.
+// ---------------------------------------------------------------------------
+
+// bindSideBLoopText is bindSideBLoop with a parameterised parked text
+// (the soften classifier reads the word count of the ACTUAL parked
+// prompt, so the short-vs-full split must be drivable).
+func bindSideBLoopText(t *testing.T, c *LinkTurnCoordinator, buf *syncBuffer, turnsB *holdTurns, heldText string) *TalkLoop {
+	t.Helper()
+	logger := slog.New(slog.NewTextHandler(buf, nil))
+	loopB := NewTalkLoop(TalkDeps{
+		Supervisor: &cannedSupervisor{},
+		Turns:      turnsB,
+		SessionFor: constSession(SessionHandle{ID: "s", ConversationID: "c"}),
+		Send:       (&recordSink{}).Send,
+		OnEnd:      func(ccid, reason string) {},
+		Logger:     logger,
+		HoldPrompt: c.HoldPromptFor(LinkSideB),
+		TurnState:  c.TurnStateFor(LinkSideB),
+	}, TalkLoopConfig{})
+	c.Bind(LinkSideB, loopB)
+	cancelB, doneB := runLoop(t, loopB, "cc-b-drain")
+	t.Cleanup(func() { cancelB(); <-doneB })
+	stateA := c.TurnStateFor(LinkSideA)
+	stateA("cc-a-drain", 1, TurnKindStart)
+	loopB.frames <- finalPrompt("cc-b-drain", heldText)
+	waitFor(t, 2*time.Second, "park "+heldText, func() bool { return loopHeldPrompt(loopB) })
+	return loopB
+}
+
+// BS-1: toggle ON applies the soft pad + soft margin (defaults only —
+// an explicitly tuned TurnMargin stays untouched), toggle OFF (and a
+// never-softened coordinator) keeps today's exact constants. Also pins
+// the manager seam: LinkDeps.BackchannelSoften lands on every link's
+// coordinator at Open, before the legs exist.
+func TestBackchannelSoftenPadAndMarginValues(t *testing.T) {
+	// The soft constants themselves pin the plan's literal values.
+	if softFloorTailPad != 700*time.Millisecond {
+		t.Fatalf("softFloorTailPad = %v, want 700ms", softFloorTailPad)
+	}
+	if softFloorFallbackMargin != 15*time.Second {
+		t.Fatalf("softFloorFallbackMargin = %v, want 15s", softFloorFallbackMargin)
+	}
+	// ON with production defaults: 250ms -> 700ms pad, 12s -> 15s margin.
+	c := NewLinkTurnCoordinator("link-soften-vals", 0, linkDiscard())
+	c.SetBackchannelSoften(true)
+	c.mu.Lock()
+	pad, margin := c.pad, c.margin
+	c.mu.Unlock()
+	if pad != softFloorTailPad {
+		t.Fatalf("soft pad = %v, want softFloorTailPad (700ms)", pad)
+	}
+	if margin != softFloorFallbackMargin {
+		t.Fatalf("soft margin = %v, want softFloorFallbackMargin (15s)", margin)
+	}
+
+	// ON with an explicitly tuned margin: margin preserved, pad soft.
+	c2 := newTestCoordinator(80*time.Millisecond, linkDiscard())
+	c2.SetBackchannelSoften(true)
+	c2.mu.Lock()
+	pad2, margin2 := c2.pad, c2.margin
+	c2.mu.Unlock()
+	if pad2 != softFloorTailPad {
+		t.Fatalf("soft pad with tuned margin = %v, want 700ms", pad2)
+	}
+	if margin2 != 80*time.Millisecond {
+		t.Fatalf("tuned margin overwritten by soften: %v", margin2)
+	}
+
+	// OFF: byte-identical constants.
+	c3 := NewLinkTurnCoordinator("link-soften-off", 0, linkDiscard())
+	c3.mu.Lock()
+	if c3.pad != linkFloorTailPad || c3.margin != linkFloorFallbackDefault || c3.soften {
+		c3.mu.Unlock()
+		t.Fatal("toggle-off coordinator drifted from today's constants")
+	}
+	c3.mu.Unlock()
+
+	// Manager seam: LinkDeps.BackchannelSoften arms every link's
+	// coordinator at Open.
+	leg := newLinkFakeLeg(t)
+	reg := NewLinkTurnRegistry(linkDiscard())
+	m, err := NewLinkManager(LinkDeps{
+		Leg:               leg,
+		Store:             &linkFakeStore{calls: map[string][]TranscriptLine{}},
+		Turns:             reg,
+		DialTimeout:       3 * time.Second,
+		RetainEnded:       time.Hour,
+		TurnMargin:        25 * time.Millisecond,
+		BackchannelSoften: true,
+		Logger:            linkDiscard(),
+	})
+	if err != nil {
+		t.Fatalf("NewLinkManager: %v", err)
+	}
+	link, err := m.Open(context.Background(), "alice", "bob")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	coord, _ := reg.Lookup("local:link-a-" + link.ID[len("link-"):])
+	if coord == nil {
+		t.Fatal("coordinator unresolved")
+	}
+	coord.mu.Lock()
+	on, padOpen := coord.soften, coord.pad
+	coord.mu.Unlock()
+	if !on || padOpen != softFloorTailPad {
+		t.Fatalf("LinkDeps.BackchannelSoften did not reach the Open coordinator (soften=%v pad=%v)", on, padOpen)
+	}
+	if err := m.Close(link.ID, "test close"); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
+// BS-2: the core rule. With soften ON, the holder's FALLBACK MARGIN
+// release (not the played-drain edge) does NOT flush a SHORT parked
+// backchannel: the park survives (never dropped), and flushes at the
+// holder's NEXT drained release.
+func TestBackchannelSoftenMarginReleaseDefersShortPark(t *testing.T) {
+	var buf syncBuffer
+	turnsB := &holdTurns{reply: "ok."}
+	c := newTestCoordinator(80*time.Millisecond, slog.New(slog.NewTextHandler(&buf, nil)))
+	c.SetBackchannelSoften(true)
+	loopB := bindSideBLoopText(t, c, &buf, turnsB, "Sure.")
+
+	stateA := c.TurnStateFor(LinkSideA)
+	stateA("cc-a-drain", 1, TurnKindFinal) // no live splice -> margin fires in 80ms
+
+	waitFor(t, 3*time.Second, "margin release fired", func() bool {
+		return strings.Contains(buf.String(), "kind=floor_released") &&
+			strings.Contains(buf.String(), "reason=margin")
+	})
+	// Soften pin: the floor IS released, but the short park is NOT
+	// flushed — kind=backchannel_softened and B still parked.
+	logs := buf.String()
+	if !strings.Contains(logs, "kind=backchannel_softened") {
+		t.Fatalf("short park was not softened at the margin release:\\n%s", logs)
+	}
+	if turnsB.count() != 0 {
+		t.Fatal("short backchannel flushed at a non-drained margin release")
+	}
+	if !loopHeldPrompt(loopB) {
+		t.Fatal("softened park VANISHED (never-drop violation)")
+	}
+	c.mu.Lock()
+	softened := c.softenTimer != nil && c.softenSide == LinkSideB
+	c.mu.Unlock()
+	if !softened {
+		t.Fatal("force-flush backstop not armed on defer")
+	}
+
+	// A's next burst quiet-finals and DRAINS: the real release flushes B.
+	// (The 80 ms test margin would beat the 700 ms soft pad to the
+	// funnel — the margin's bounded-fire path is already pinned above —
+	// so stand it down here and drive the drained edge deterministically.)
+	stateA("cc-a-drain", 2, TurnKindStart)
+	stateA("cc-a-drain", 2, TurnKindFinal)
+	c.mu.Lock()
+	if c.a.marginTimer != nil {
+		c.a.marginTimer.Stop()
+		c.a.marginTimer = nil
+	}
+	c.a.marginGen++ // invalidate any in-flight fire: the drain edge is the release path here
+	c.mu.Unlock()
+	c.NoteAudioDrained("cc-a-drain")
+	waitFor(t, 3*time.Second, "drained release flushes the softened park", func() bool {
+		return turnsB.count() == 1
+	})
+	if !strings.Contains(buf.String(), "reason=drained") {
+		t.Fatalf("flush must land on the drained release:\\n%s", buf.String())
+	}
+	if strings.Contains(buf.String(), "kind=prompt_dropped") {
+		t.Fatalf("backchannel dropped: %s", buf.String())
+	}
+	c.mu.Lock()
+	timerDown := c.softenTimer == nil && c.softenSide == ""
+	c.mu.Unlock()
+	if !timerDown {
+		t.Fatal("drained release must stand the force-flush down")
+	}
+}
+
+// BS-3: a FULL (> backchannelMaxWords words) parked question flushes
+// on the margin release exactly as today, even with soften ON.
+func TestBackchannelSoftenFullQuestionUnaffected(t *testing.T) {
+	var buf syncBuffer
+	turnsB := &holdTurns{reply: "ok."}
+	c := newTestCoordinator(80*time.Millisecond, slog.New(slog.NewTextHandler(&buf, nil)))
+	c.SetBackchannelSoften(true)
+	bindSideBLoopText(t, c, &buf, turnsB, "Can you explain the third one?")
+
+	stateA := c.TurnStateFor(LinkSideA)
+	stateA("cc-a-drain", 1, TurnKindFinal)
+	waitFor(t, 3*time.Second, "full question flushes at margin release", func() bool {
+		return turnsB.count() == 1
+	})
+	if strings.Contains(buf.String(), "kind=backchannel_softened") {
+		t.Fatalf("full question was softened (must flush on any release):\\n%s", buf.String())
+	}
+}
+
+// BS-4 (toggle-off parity pin): the SAME margin-release shape with the
+// toggle OFF flushes the short park immediately — today's byte-
+// identical behavior.
+func TestBackchannelSoftenOffShortParkFlushesToday(t *testing.T) {
+	var buf syncBuffer
+	turnsB := &holdTurns{reply: "ok."}
+	c := newTestCoordinator(80*time.Millisecond, slog.New(slog.NewTextHandler(&buf, nil)))
+	// No SetBackchannelSoften call at all: the zero state.
+	bindSideBLoopText(t, c, &buf, turnsB, "Sure.")
+
+	stateA := c.TurnStateFor(LinkSideA)
+	stateA("cc-a-drain", 1, TurnKindFinal)
+	waitFor(t, 3*time.Second, "margin release flushes short park (today)", func() bool {
+		return turnsB.count() == 1
+	})
+	if strings.Contains(buf.String(), "kind=backchannel_softened") {
+		t.Fatalf("soften fired with the toggle OFF:\\n%s", buf.String())
+	}
+}
+
+// BS-5 (never-drop backstop): soften ON, short park deferred, and the
+// holder NEVER produces another drained release — the bounded
+// softenMaxDefer force-flush fires and the backchannel dispatches
+// anyway. (Production bound is 10 s; the seam var lets the pin drive
+// it on test time.)
+func TestBackchannelSoftenForceFlushNeverDies(t *testing.T) {
+	oldDefer := softenMaxDefer
+	softenMaxDefer = 150 * time.Millisecond
+	defer func() { softenMaxDefer = oldDefer }()
+
+	var buf syncBuffer
+	turnsB := &holdTurns{reply: "ok."}
+	c := newTestCoordinator(80*time.Millisecond, slog.New(slog.NewTextHandler(&buf, nil)))
+	c.SetBackchannelSoften(true)
+	bindSideBLoopText(t, c, &buf, turnsB, "mm-hm")
+
+	stateA := c.TurnStateFor(LinkSideA)
+	stateA("cc-a-drain", 1, TurnKindFinal) // margin -> softened defer, no further A edges
+	waitFor(t, 3*time.Second, "force-flush backstop fires", func() bool {
+		return turnsB.count() == 1
+	})
+	logs := buf.String()
+	if !strings.Contains(logs, "kind=backchannel_forced_flush") {
+		t.Fatalf("forced flush telemetry missing:\\n%s", logs)
+	}
+	if strings.Contains(logs, "kind=prompt_dropped") {
+		t.Fatalf("backchannel dropped instead of force-flushed:\\n%s", logs)
+	}
+}
+
+// BS-6: the exact live overlap shape (link-9ee64c5fe7d651e9): A long
+// reply -> chains a subturn -> the DEFERRED release's watchdog fires
+// mid-reply (holder hung, no live edges) and releases the floor. The
+// table pins the three-way behavior split: short park + soften ON
+// waits for A's drained edge; short park + OFF flushes at the
+// watchdog (today); full question + ON flushes at the watchdog.
+func TestBackchannelSoftenLiveChainWatchdogTable(t *testing.T) {
+	cases := []struct {
+		name     string
+		heldText string
+		soften   bool
+	}{
+		{"short-on-defers", "Sure.", true},
+		{"short-off-flushes", "Sure.", false},
+		{"full-on-flushes", "Can you say that again about the budget?", true},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			var buf syncBuffer
+			turnsB := &holdTurns{reply: "ok."}
+			c := newTestCoordinator(80*time.Millisecond, slog.New(slog.NewTextHandler(&buf, nil)))
+			c.SetBackchannelSoften(tc.soften)
+			bindSideBLoopText(t, c, &buf, turnsB, tc.heldText)
+
+			stateA := c.TurnStateFor(LinkSideA)
+			// A's burst 1 finalizes, drains... then chains burst 2
+			// (T-HR2b shape): the pad release DEFERS (holder chained)
+			// and arms the one-shot floor_watchdog at one margin.
+			stateA("cc-a-drain", 1, TurnKindFinal)
+			c.NoteAudioDrained("cc-a-drain")
+			stateA("cc-a-drain", 2, TurnKindStart)
+			c.mu.Lock()
+			c.a.busy = false // burst 2's text stream flushed: floor+chain stand, busy clears
+			gen := c.a.releaseGen
+			c.mu.Unlock()
+			c.releaseFloor(LinkSideA, "cc-a-drain", 1, gen, "drained") // hits the chain guard -> defer
+			waitFor(t, 2*time.Second, "chain defer telemetry", func() bool {
+				return strings.Contains(buf.String(), "kind=floor_release_deferred")
+			})
+
+			// The WATCHDOG fires while A's reply-chain is still mid-
+			// reply (the hung-LLM backstop) and releases the floor.
+			waitFor(t, 3*time.Second, "watchdog release", func() bool {
+				return strings.Contains(buf.String(), "reason=floor_watchdog") &&
+					strings.Contains(buf.String(), "kind=floor_released")
+			})
+
+			defers := tc.soften && len(strings.Fields(tc.heldText)) <= 2
+			if defers {
+				if turnsB.count() != 0 || !loopHeldPrompt(firstBoundLoop(c, LinkSideB)) {
+					t.Fatal("short park flushed at the watchdog release under soften (overlap regression)")
+				}
+				if !strings.Contains(buf.String(), "kind=backchannel_softened") {
+					t.Fatalf("soften defer telemetry missing:\\n%s", buf.String())
+				}
+			} else {
+				waitFor(t, 3*time.Second, "flush at watchdog release (today's path)", func() bool {
+					return turnsB.count() == 1
+				})
+				if strings.Contains(buf.String(), "kind=backchannel_softened") {
+					t.Fatalf("unexpected soften defer:\\n%s", buf.String())
+				}
+			}
+
+			if !defers {
+				return
+			}
+			// A's chain continues and finally DRAINS quiet: B flushes
+			// there, still never dropped. (Stand the 80 ms test
+			// margin down so the drained edge — the flush path under
+			// soften — wins the race against the soft 700 ms pad,
+			// exactly as it does in production where the margin is
+			// 15 s.)
+			stateA("cc-a-drain", 3, TurnKindStart)
+			stateA("cc-a-drain", 3, TurnKindFinal)
+			c.mu.Lock()
+			if c.a.marginTimer != nil {
+				c.a.marginTimer.Stop()
+				c.a.marginTimer = nil
+			}
+			c.a.marginGen++
+			c.mu.Unlock()
+			c.NoteAudioDrained("cc-a-drain")
+			waitFor(t, 3*time.Second, "drained edge flushes the shortened park", func() bool {
+				return turnsB.count() == 1
+			})
+			if strings.Contains(buf.String(), "kind=prompt_dropped") {
+				t.Fatalf("backchannel dropped across the whole chain:\\n%s", buf.String())
+			}
+		})
+	}
+}
+
+// firstBoundLoop returns the side's bound loop (test accessor mirroring
+// the coordinator's slot).
+func firstBoundLoop(c *LinkTurnCoordinator, side string) *TalkLoop {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.sideLocked(side).loop
+}

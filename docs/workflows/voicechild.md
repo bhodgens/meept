@@ -41,6 +41,40 @@ without touching the main process.
   — the interrupt path stays on arrival. Partials stay per-preview.
   Telemetry: one INFO 'voicechild: final prompt dispatched aggregated'
   per dispatch with call_id, parts, chars, reason.
+  Short-final gate (`voice.min_turn_words`, keys selector, default 0 =
+  off): at N>0 a FINAL whose bracket/asterisk-STRIPPED residue carries
+  fewer than N whitespace-separated words drops before evidence
+  stamping and aggregation (dispatches nothing, seeds no pending
+  buffer). The gate ships with four improvements (voice-peragent leaf
+  01), keyed by additive selectors on the same frame and ALL strictly
+  inert while min_turn_words is 0 — zero config stays the plain
+  word-count gate:
+  - exempt_phrases (the daemon always sends the effective set —
+    default stop, cancel, yes, no, thanks, thank you, okay, ok, mm-hm,
+    mmhm, uh-huh, go ahead; an old daemon's absent line = NO
+    exemptions, the legacy gate): a short final whose WHOLE stripped
+    residue matches one phrase (case-insensitive, outer punctuation
+    trimmed) is exempted, never dropped — one-word commands survive
+    any N;
+  - reply_exempt_s (default 15, 0 = off): a short final arriving
+    within S seconds of the CHILD's own last spoken-audio write is a
+    REPLY to the agent, not background — exempted (no extra wire
+    traffic: the pipeline's playback write loop already stamps it);
+  - energy_gate + min_rms (default off): with the gate ON, a short
+    final drops ONLY when the utterance window's average incoming mic
+    RMS sits BELOW min_rms (the pump's per-chunk energy tap already
+    feeds the barge-in VAD; the gate accumulates the same rmsEnergy
+    over the aggregation window) — quiet far-field TV fragments drop,
+    a loud near-field "Thank you." passes as exempted reason=energy;
+  - fragment_decay_s (default 0 = off): after K consecutive drops
+    within S seconds, the effective threshold rises to N + min(K, 3);
+    any dispatched final resets the streak. Chatter detected =>
+    stricter for a moment. State is per pipeline instance: bounded
+    and stateless-safe across calls.
+  Telemetry: INFO 'voicechild: short final dropped' with
+  reason=wordcount|energy per drop, and INFO 'voicechild: short final
+  exempted' with reason=phrase|reply|energy whenever an improvement
+  saved a would-be drop — the operator's tuning signal in the log.
   The playback worker emits the C1 `played` frame (last:true) once per
   turn-final (`last:true` say) stream, strictly after its final byte
   reaches the .out socket - the daemon's link-floor drain watch arms
