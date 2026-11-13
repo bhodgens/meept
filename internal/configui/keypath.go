@@ -33,10 +33,35 @@ func GetKeypath(cfg *config.Config, path string) (string, error) {
 	case reflect.Slice:
 		b, _ := json.Marshal(val.Interface())
 		return string(b), nil
+	case reflect.Pointer:
+		// Optional scalar pointer (voice-peragent leaf 01: the
+		// tri-state *bool/*int rows and voice.backchannel_soften):
+		// nil renders "" (absent = inherit), a set value renders its
+		// element. The editor's toggle/number fields feed the default
+		// for the nil case, same posture as auto_stop_on_exit.
+		if val.IsNil() {
+			return "", nil
+		}
+		return valueToString(val.Elem())
 	default:
 		b, _ := json.Marshal(val.Interface())
 		return string(b), nil
 	}
+}
+
+// valueToString renders one resolved reflect.Value (shared by
+// GetKeypath's tail cases).
+func valueToString(val reflect.Value) (string, error) {
+	switch val.Kind() {
+	case reflect.Bool:
+		return fmt.Sprintf("%v", val.Bool()), nil
+	case reflect.Int, reflect.Int64:
+		return fmt.Sprintf("%v", val.Int()), nil
+	case reflect.String:
+		return val.String(), nil
+	}
+	b, _ := json.Marshal(val.Interface())
+	return string(b), nil
 }
 
 // SetKeypath sets a dot-notation path on a config struct.
@@ -93,6 +118,33 @@ func SetKeypath(cfg *config.Config, path string, value any) error {
 						return fmt.Errorf("invalid float %q: %w", val, err)
 					}
 					fv.SetFloat(f)
+				case reflect.Pointer:
+					// Optional scalar pointer fields (voice-peragent
+					// leaf 01: voice.backchannel_soften is a tri-state
+					// *bool; EmployeeLeg rows carry *int/*bool too).
+					// Same posture as setStructField: allocate and set
+					// so an explicit true/false round-trips instead of
+					// being rejected as unsupported.
+					switch fv.Type().Elem().Kind() {
+					case reflect.Bool:
+						b, err := strconv.ParseBool(val)
+						if err != nil {
+							return fmt.Errorf("invalid bool %q: %w", val, err)
+						}
+						ptr := reflect.New(fv.Type().Elem())
+						ptr.Elem().SetBool(b)
+						fv.Set(ptr)
+					case reflect.Int, reflect.Int64:
+						n, err := strconv.Atoi(val)
+						if err != nil {
+							return fmt.Errorf("invalid int %q: %w", val, err)
+						}
+						ptr := reflect.New(fv.Type().Elem())
+						ptr.Elem().SetInt(int64(n))
+						fv.Set(ptr)
+					default:
+						return fmt.Errorf("unsupported type %s for field %s", fv.Type(), fieldName)
+					}
 				default:
 					return fmt.Errorf("unsupported type %s for field %s", fv.Kind(), fieldName)
 				}

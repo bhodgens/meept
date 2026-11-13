@@ -679,6 +679,14 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 			FreshSession: func(employeeID string) bool {
 				return voice.FreshSessionFor(cfg, employeeID)
 			},
+			// Barge-in RMS override (voice-peragent leaf 01): resolve
+			// employee_leg.barge_in_rms over voice.local.barge_in_rms
+			// once per call for the open frame (mirrors the Profile /
+			// FreshSession closures). No row = the global value,
+			// byte-identical to the leg-level cfg.BargeInRms.
+			BargeInRms: func(employeeID string) int {
+				return voice.ResolveBargeInRms(cfg, employeeID)
+			},
 			// Goal-hold seam (AcquireCallHold gap closure): every opened
 			// local call acquires the per-employee hold so the release
 			// fan-out's ReleaseHook sees it in heldCalls and runs
@@ -951,6 +959,10 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 		// (single-greeting contract). A nil lookup = phone/plain-local =
 		// the legacy uncoordinated construction, seams nil.
 		coord, turnSide := w.linkTurns.Lookup(inst.Target)
+		// Per-call acoustic profile (voice-peragent leaf 01): the
+		// employee_leg row over the global [voice] block, resolved ONCE
+		// here for the talk-loop knobs below.
+		loopAcoustics := voice.ResolveAcoustics(w.cfg, inst.EmployeeID)
 		var holdPrompt func(voice.Instance, func()) bool
 		var turnState func(ccid string, seq uint64, kind string)
 		suppressGreeting := false
@@ -987,15 +999,21 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 			// never gates the loop (the seam is nil-safe in voice).
 			OnEvent: w.appendCallEvent,
 		}, voice.TalkLoopConfig{
+			// Acoustic knobs resolve PER CALL through the call's
+			// employee_leg row (voice-peragent leaf 01: row > global,
+			// voice.ResolveAcoustics). The registry instance is the
+			// authority for the employee id (acquire pinned it); an
+			// employee with no row lands on the exact global values
+			// the pre-leaf code read - zero-config = byte-identical.
 			FillerLines:               w.cfg.Filler,
 			GreetingLine:              w.cfg.GreetingLine,
 			FallbackLine:              "I cannot confirm that yet.",
 			MaxCallMinutes:            w.cfg.MaxCallMinutes,
-			SilencePromptSeconds:      w.cfg.SilencePromptSeconds,
-			SilencePromptLine:         w.cfg.SilencePrompt,
-			SilenceHangupAfterSeconds: w.cfg.SilenceHangupAfterSeconds,
+			SilencePromptSeconds:      loopAcoustics.SilencePromptSeconds,
+			SilencePromptLine:         loopAcoustics.SilencePrompt,
+			SilenceHangupAfterSeconds: loopAcoustics.SilenceHangupAfterS,
 			TurnTimeoutSeconds:        w.cfg.TurnTimeoutSeconds,
-			FillerGrace:               time.Duration(w.cfg.FillerGraceMs) * time.Millisecond,
+			FillerGrace:               time.Duration(loopAcoustics.FillerGraceMs) * time.Millisecond,
 			SuppressGreeting:          suppressGreeting,
 		})
 		// H4 + A10: arm the per-call context and install the loop in ONE
@@ -1557,7 +1575,10 @@ func (w *VoiceWiring) sendOpenFrame(ccid string) error {
 		f.TtsVoice = p.TtsVoice
 		if inst.Leg == voice.LegLocal {
 			f.Local = true
-			f.BargeInRms = w.cfg.Local.BargeInRms
+			// Per-employee override (voice-peragent leaf 01): the
+			// employee_leg row's barge_in_rms beats the global
+			// voice.local.barge_in_rms; nil inherits byte-identically.
+			f.BargeInRms = voice.ResolveBargeInRms(w.cfg, inst.EmployeeID)
 		}
 		break
 	}

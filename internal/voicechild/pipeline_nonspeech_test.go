@@ -177,6 +177,11 @@ func TestIsRealSpeechClassTable(t *testing.T) {
 		// nested brackets: the run ends at the FIRST closer, so the whole
 		// artifact (including the inner opener) strips:
 		"[music (fade)]", "[music (fade)", "(())", "[ (in brackets) ]",
+		// asterisk markers (voice-microfrag, live call
+		// local-0627960006a7f3d9: whisper's *...* class — the bracket-
+		// only strip dispatched "*unintelligible*" as seq=1 user prompt):
+		"*unintelligible*", "*static*", "*music*", "*silence*",
+		"*laughter* *applause*", // multiple asterisk runs in one final
 		// punctuation/whitespace-only residue:
 		" .", "()", "  ", "... ---", "?! ,",
 	}
@@ -197,6 +202,14 @@ func TestIsRealSpeechClassTable(t *testing.T) {
 		// unbalanced opener with NO closer anywhere: matches nothing,
 		// stays as word residue (errs toward hearing the caller):
 		"hello [music (fade",
+		// asterisk shape keeps (voice-microfrag): mixed artifact + real
+		// words outside the run dispatch; an unclosed run and a lone "*"
+		// (no closer -> matches nothing) stay REAL — the caller might
+		// have said something the shape rule cannot prove is an artifact:
+		"hey *music* what's that",
+		"stop * that noise",
+		"*",
+		"hello *",
 		// parenthetical beyond the 60-char cap: shape says it carries
 		// real words, keep:
 		"(a very long parenthetical sentence that exceeds the sixty character token cap by a wide margin)",

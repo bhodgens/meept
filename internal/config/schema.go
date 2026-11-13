@@ -5097,6 +5097,18 @@ func DefaultConfig() *Config {
 			SilenceHangupAfterSeconds: 45,
 			FillerGraceMs:             2500,
 			TurnConfirmMs:             900,
+			// min_turn_words is opt-in: default 0 = short-final gate
+			// disabled (docs/agents/opt-in-defaults.md). Loud-room
+			// operators set N>=2 to drop background-fragment finals.
+			MinTurnWords: 0,
+			// The gate's exemption set ships populated (defaults only
+			// bind when the gate is on — inert at MinTurnWords 0).
+			ExemptPhrases: DefaultVoiceExemptPhrases(),
+			// energy_gate opt-in false; min_rms 0 = unused while off.
+			EnergyGate:     false,
+			MinRMS:         0,
+			FragmentDecayS: 0,
+			ReplyExemptS:   15,
 			// turn_timeout_seconds is opt-in: default 0 = disabled
 			// (docs/agents/opt-in-defaults.md). The silence timer is
 			// suspended while a voice turn is in flight, so an operator
@@ -5484,7 +5496,64 @@ type VoiceConfig struct {
 	// at 500 ms wall-idle; a normal mid-sentence breath is 300-600 ms,
 	// so per-final dispatch answered fragments of one sentence).
 	// Default 900; 0 = legacy per-final dispatch.
-	TurnConfirmMs       int      `json:"turn_confirm_ms"        toml:"turn_confirm_ms"`
+	TurnConfirmMs int `json:"turn_confirm_ms" toml:"turn_confirm_ms"`
+	// MinTurnWords is the child-side short-final gate (voice-microfrag,
+	// live call local-0627960006a7f3d9): in a loud room, background-TV
+	// fragments ("The other", "This is...") finalize seconds apart —
+	// too far for the aggregation window to merge, and a fixed word
+	// filter is wrong by default because an operator command like
+	// "Stop." is one word. So the threshold is operator-tunable: the
+	// child drops a FINAL whose non-speech-stripped text has fewer
+	// than N whitespace-separated words (dropped finals dispatch
+	// nothing and never stamp barge-in speech evidence). Default 0 =
+	// disabled (opt-in defaults rule, docs/agents/opt-in-defaults.md);
+	// set 2 to tune out short background fragments; 1-word voice
+	// commands still pass at N=1. A negative value clamps to 0.
+	// Per-employee override: voice.employee_leg[].min_turn_words.
+	MinTurnWords int `json:"min_turn_words" toml:"min_turn_words"`
+	// ExemptPhrases is the short-final gate's exemption set (voice-peragent
+	// leaf 01): a stripped final whose whole residue matches one entry
+	// (case-insensitive, outer punctuation trimmed) is NEVER dropped by
+	// the min_turn_words gate — one-word commands ("stop", "thanks")
+	// survive at any N. Default: DefaultVoiceExemptPhrases(); an
+	// explicit empty list disables exemptions. Inert while
+	// min_turn_words is 0. Per-employee override replaces the set.
+	ExemptPhrases []string `json:"exempt_phrases" toml:"exempt_phrases"`
+	// EnergyGate turns the short-final gate into a loudness-aware gate
+	// (voice-peragent leaf 01): with it ON, a short final drops ONLY when
+	// the utterance window's average mic RMS is BELOW MinRMS — far-field
+	// TV fragments are quiet, a near-field "Thank you." you actually
+	// said is loud and passes. Default false = plain word-count gate
+	// (opt-in rule). Inert while min_turn_words is 0. Per-employee
+	// override: employee_leg[].energy_gate.
+	EnergyGate bool `json:"energy_gate" toml:"energy_gate"`
+	// MinRMS is the EnergyGate's loudness floor, in s16 RMS units on the
+	// utterance-window average mic energy (same scale as
+	// voice.local.barge_in_rms: 3000 ≈ conversational). 0 = unused when
+	// the gate is off; with the gate ON and MinRMS 0 every short final
+	// reads "loud" (the gate never drops — exemptions-only posture).
+	// Per-employee override: employee_leg[].min_rms.
+	MinRMS int `json:"min_rms" toml:"min_rms"`
+	// FragmentDecayS escalates the short-final gate after consecutive
+	// drops (voice-peragent leaf 01): while a drop happened within this
+	// many seconds ago, the effective threshold is N + min(consecutive
+	// drops, 3); any final that passes the gate resets the counter.
+	// Detected chatter => stricter for a moment. 0 = off (the default).
+	// Per-employee override: employee_leg[].fragment_decay_s.
+	FragmentDecayS int `json:"fragment_decay_s" toml:"fragment_decay_s"`
+	// ReplyExemptS is the short-final gate's reply window (voice-peragent
+	// leaf 01): a short final arriving within this many seconds of the
+	// child's OWN last spoken-audio activity is a reply to the agent,
+	// not background — the gate skips it. Default 15. 0 disables the
+	// exemption. Per-employee override: employee_leg[].reply_exempt_s.
+	ReplyExemptS int `json:"reply_exempt_s" toml:"reply_exempt_s"`
+	// BackchannelSoften is the #130 backchannel-soften toggle (default
+	// FALSE = today's coordinator behavior, byte-identical): when true
+	// the voice link softens the flush timing of short backchannel
+	// replies ("mm-hm" reactions) against the peer's audio tail. The
+	// link coordinator consumes the per-call resolved value.
+	// Per-employee override: employee_leg[].backchannel_soften.
+	BackchannelSoften   *bool    `json:"backchannel_soften" toml:"backchannel_soften"`
 	SupervisorEmployee  string   `json:"supervisor_employee"    toml:"supervisor_employee"`
 	SupervisorEnabled   bool     `json:"supervisor_enabled"     toml:"supervisor_enabled"`
 	SupervisorModel     string   `json:"supervisor_model"       toml:"supervisor_model"`
@@ -5518,11 +5587,11 @@ type VoiceConfig struct {
 	// dead air => nudge at silence_prompt_seconds (S), hangup at S+H.
 	// Default 45 with S default 45 => nudge@45, hangup@90, exactly the
 	// legacy double-window endpoints. 0/negative reuses S (legacy shape).
-	SilenceHangupAfterSeconds int `json:"silence_hangup_after_seconds" toml:"silence_hangup_after_seconds"`
-	TurnTimeoutSeconds        int `json:"turn_timeout_seconds"   toml:"turn_timeout_seconds"`
-	MaxConcurrentCalls        int `json:"max_concurrent_calls"   toml:"max_concurrent_calls"`
-	ReorderWindowFrames       int `json:"reorder_window_frames"  toml:"reorder_window_frames"`
-	ReorderGapMs              int `json:"reorder_gap_ms"         toml:"reorder_gap_ms"`
+	SilenceHangupAfterSeconds int    `json:"silence_hangup_after_seconds" toml:"silence_hangup_after_seconds"`
+	TurnTimeoutSeconds        int    `json:"turn_timeout_seconds"   toml:"turn_timeout_seconds"`
+	MaxConcurrentCalls        int    `json:"max_concurrent_calls"   toml:"max_concurrent_calls"`
+	ReorderWindowFrames       int    `json:"reorder_window_frames"  toml:"reorder_window_frames"`
+	ReorderGapMs              int    `json:"reorder_gap_ms"         toml:"reorder_gap_ms"`
 	TelnyxPublicKey           string `json:"telnyx_public_key"      toml:"telnyx_public_key"`
 	ChildBinaryPath           string `json:"child_binary_path"      toml:"child_binary_path"`
 	LoopbackPlainAddr         string `json:"loopback_plain_addr"    toml:"loopback_plain_addr"`
@@ -5593,6 +5662,82 @@ func NormalizeUnapprovedCallerAllowedTools(v *VoiceConfig) {
 	}
 }
 
+// DefaultVoiceExemptPhrases is the [voice] exempt_phrases default set
+// (voice-peragent leaf 01): the short-final gate never drops a stripped
+// final whose whole residue matches one of these — the one-word/two-word
+// voice commands and acknowledgements an operator actually says
+// ("Stop." must survive an N=3 gate). Returns a fresh slice on every
+// call so consumers may mutate the loaded config freely
+// (DefaultUnapprovedCallerAllowedTools precedent).
+func DefaultVoiceExemptPhrases() []string {
+	return []string{"stop", "cancel", "yes", "no", "thanks", "thank you",
+		"okay", "ok", "mm-hm", "mmhm", "uh-huh", "go ahead"}
+}
+
+// NormalizeVoiceAcousticDefaults clamps invalid [voice] acoustic-gate
+// values at the load boundary so every consumer sees final values
+// (voice-peragent leaf 01): negative min_turn_words / min_rms /
+// fragment_decay_s / reply_exempt_s clamp to 0 (their disabled values),
+// globally and on every employee_leg row pointer. Zero values are
+// legitimate defaults — nothing here INJECTS defaults (opt-in rule).
+// exempt_phrases keeps its DefaultConfig value when the file omits the
+// key (load starts from DefaultConfig); an explicitly null list lands
+// nil and the daemon-side resolution falls back to
+// DefaultVoiceExemptPhrases(). Idempotent on valid values.
+func NormalizeVoiceAcousticDefaults(v *VoiceConfig) {
+	if v.MinTurnWords < 0 {
+		v.MinTurnWords = 0
+	}
+	if v.MinRMS < 0 {
+		v.MinRMS = 0
+	}
+	if v.FragmentDecayS < 0 {
+		v.FragmentDecayS = 0
+	}
+	if v.ReplyExemptS < 0 {
+		v.ReplyExemptS = 0
+	}
+	for i := range v.EmployeeLeg {
+		e := &v.EmployeeLeg[i]
+		if e.TurnConfirmMs != nil && *e.TurnConfirmMs < 0 {
+			zero := 0
+			e.TurnConfirmMs = &zero
+		}
+		if e.MinTurnWords != nil && *e.MinTurnWords < 0 {
+			zero := 0
+			e.MinTurnWords = &zero
+		}
+		if e.FillerGraceMs != nil && *e.FillerGraceMs < 0 {
+			zero := 0
+			e.FillerGraceMs = &zero
+		}
+		if e.BargeInRms != nil && *e.BargeInRms < 0 {
+			zero := 0
+			e.BargeInRms = &zero
+		}
+		if e.MinRMS != nil && *e.MinRMS < 0 {
+			zero := 0
+			e.MinRMS = &zero
+		}
+		if e.FragmentDecayS != nil && *e.FragmentDecayS < 0 {
+			zero := 0
+			e.FragmentDecayS = &zero
+		}
+		if e.ReplyExemptS != nil && *e.ReplyExemptS < 0 {
+			zero := 0
+			e.ReplyExemptS = &zero
+		}
+		if e.SilencePromptSeconds != nil && *e.SilencePromptSeconds < 0 {
+			zero := 0
+			e.SilencePromptSeconds = &zero
+		}
+		if e.SilenceHangupAfterSeconds != nil && *e.SilenceHangupAfterSeconds < 0 {
+			zero := 0
+			e.SilenceHangupAfterSeconds = &zero
+		}
+	}
+}
+
 // MessagingConfig holds the Telnyx SMS messaging settings
 // ([voice.messaging], contact-channels plan leaf 12 T5). Same Telnyx
 // account as Call Control (one API key via the secrets Broker); the
@@ -5645,6 +5790,47 @@ type EmployeeLegConfig struct {
 	// its own row, and the prompt extension + intake_save grant follow
 	// that row only. Pointer (tri-state like FreshSession).
 	GuidedIntake *bool `json:"guided_intake" toml:"guided_intake"`
+	// ---- Per-employee acoustic controls (voice-peragent leaf 01) ----
+	// Every pointer below is tri-state: nil = inherit the global
+	// voice.* value; a set value (including an explicit 0/""/false)
+	// overrides it for THIS employee's calls. Resolution rides
+	// voice.ResolveProfile / the *_For helpers (row > global), the
+	// FreshSession pattern extended to the acoustic knobs.
+	//
+	// TurnConfirmMs: child-side turn-aggregation confirm window (ms).
+	// Explicit 0 = legacy per-final dispatch for this employee.
+	TurnConfirmMs *int `json:"turn_confirm_ms" toml:"turn_confirm_ms"`
+	// MinTurnWords: short-final gate threshold for this employee
+	// (see voice.min_turn_words). Explicit 0 = gate off even if the
+	// global gate is on — the per-row escape hatch from chatter tuning.
+	MinTurnWords *int `json:"min_turn_words" toml:"min_turn_words"`
+	// ExemptPhrases: replaces the global exemption SET for this
+	// employee when non-nil (an explicit empty list = no exemptions);
+	// nil inherits voice.exempt_phrases.
+	ExemptPhrases []string `json:"exempt_phrases" toml:"exempt_phrases"`
+	// EnergyGate / MinRMS / FragmentDecayS / ReplyExemptS: per-row
+	// overrides of the matching voice.* gate improvements
+	// (docs/workflows/voicechild.md gate section).
+	EnergyGate     *bool `json:"energy_gate" toml:"energy_gate"`
+	MinRMS         *int  `json:"min_rms" toml:"min_rms"`
+	FragmentDecayS *int  `json:"fragment_decay_s" toml:"fragment_decay_s"`
+	ReplyExemptS   *int  `json:"reply_exempt_s" toml:"reply_exempt_s"`
+	// FillerGraceMs: how long a dispatched turn may run before the
+	// talk loop speaks filler for THIS employee (ms; 0 = immediate).
+	FillerGraceMs *int `json:"filler_grace_ms" toml:"filler_grace_ms"`
+	// SilencePrompt: this employee's dedicated dead-air nudge line
+	// (row non-empty wins; empty string = inherit the global line).
+	SilencePrompt string `json:"silence_prompt" toml:"silence_prompt"`
+	// SilencePromptSeconds / SilenceHangupAfterSeconds: the nudge (S)
+	// and post-nudge hangup (H) windows for this employee.
+	SilencePromptSeconds      *int `json:"silence_prompt_seconds" toml:"silence_prompt_seconds"`
+	SilenceHangupAfterSeconds *int `json:"silence_hangup_after_seconds" toml:"silence_hangup_after_seconds"`
+	// BargeInRms: the local-leg open-frame RMS threshold for this
+	// employee's calls (row override of voice.local.barge_in_rms).
+	BargeInRms *int `json:"barge_in_rms" toml:"barge_in_rms"`
+	// BackchannelSoften: per-row override of voice.backchannel_soften
+	// (#130 leaf 02 consumes the resolved value via voice.BackchannelSoftenFor).
+	BackchannelSoften *bool `json:"backchannel_soften" toml:"backchannel_soften"`
 }
 
 // ContactConfig configures the employee contact chain ([contact],

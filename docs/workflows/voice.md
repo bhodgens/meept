@@ -81,6 +81,50 @@ Local providers are subprocesses, not libraries: the daemon needs the
 `whisper-cli` (whisper.cpp) and `piper` binaries on PATH. Both are
 keyless - no secrets-broker entry is required for the local leg.
 
+## Per-employee voice controls
+
+Every voice.employee_leg row can override the provider selection AND
+every acoustic/noise knob for ONE employee's calls (voice-peragent
+leaf 01). Precedence is fixed: **row value > global `voice.*` > shipped
+default**, and every per-row key is tri-state - ABSENT means inherit,
+an explicit `0` / `false` / `""` means a real override. A row that
+carries no acoustic keys reproduces today's global behavior
+byte-for-byte: the pin, not the hope (see
+`internal/voice/AGENTS.md`). Resolution lives in
+`voice.ResolveProfile` / `voice.ResolveAcoustics`
+(`internal/voice/profile.go`); the values reach the child over the
+per-call C1 keys frame (gate knobs, `internal/daemon/voice_keys.go`)
+and the C1 open frame (`barge_in_rms`), and feed the daemon talk loop
+directly at construction (`internal/daemon/voice_wiring.go`).
+
+| key | type | global default | per-row? | meaning + tuning hint |
+|-----|------|----------------|----------|-----------------------|
+| `tts_voice` | string | `""` (vendor default) | yes | voice id; row beats per-leg config |
+| `tts_model` | string | `""` | yes | TTS model for this employee's calls |
+| `fresh_session` | bool | `voice.fresh_session_per_call` = false | yes | new session per call; raise isolation, loses cross-call memory |
+| `guided_intake` | bool | off (no global) | yes | one-question-at-a-time intake procedure |
+| `backchannel_soften` | bool | false (#130 A/B) | yes | soften short-backchannel flush vs the peer tail; ON only when mm-hm reactions interrupt the tail |
+| `turn_confirm_ms` | int | 900 | yes | child-side breath-pause aggregation window; lower = faster turns but more fragments; 0 = legacy per-final dispatch |
+| `min_turn_words` | int | 0 (gate off) | yes | short-final gate: drop finals with < N stripped words; set 2-3 in loud rooms; explicit 0 turns the gate off for this row even when the global gate runs |
+| `exempt_phrases` | []string | stop, cancel, yes, no, thanks, thank you, okay, ok, mm-hm, mmhm, uh-huh, go ahead | yes | phrases the gate never drops (whole-residue, case-insensitive); extend for a domain's voice commands; empty list = no exemptions |
+| `energy_gate` | bool | false | yes | loudness-aware gate: drop a short final ONLY when the utterance window's average mic RMS is below `min_rms`; turn ON when the word gate eats things you actually said |
+| `min_rms` | int | 0 (unused while off) | yes | energy floor, s16 RMS units (same scale as `barge_in_rms`); raise when TV audio passes as "loud", lower when your quiet speech drops |
+| `fragment_decay_s` | int | 0 (off) | yes | after K consecutive drops within S seconds the effective N rises by min(K,3), resetting on any dispatch; set 30-60 for bursty chatter rooms |
+| `reply_exempt_s` | int | 15 | yes | short final within S seconds of the agent's OWN last spoken audio is a reply, exempted; 0 disables; lower if immediate reactions flood turns |
+| `filler_grace_ms` | int | 2500 | yes | wait before speaking filler after a prompt; 0 = immediate (legacy); raise for a fast employee, lower for a slow one |
+| `silence_prompt` | string | "Are you still there?" | yes (non-empty wins) | dedicated dead-air nudge line for this employee |
+| `silence_prompt_seconds` | int | 45 | yes | S: nudge fires after this much caller silence; lower (10) for snappy re-engagement |
+| `silence_hangup_after_seconds` | int | 45 | yes | H: quiet time AFTER the nudge before hangup (nudge@S, hangup@S+H); 0 reuses S |
+| `barge_in_rms` | int | `voice.local.barge_in_rms` = 3000 | yes (local open frame) | RMS VAD threshold; raise if TV trips the barge-in, lower if you must shout to interrupt |
+
+Row keys are the same names on the row object (acoustic overrides ride
+as pointers child-side; see the template comment at
+`config/meept.json5` `voice.employee_leg`). Telemetry: the child logs
+`voicechild: short final dropped` with `reason=wordcount|energy` per
+drop and `voicechild: short final exempted` with `reason=phrase|reply|energy`
+whenever an improvement saved a would-be drop - the operator tunes
+`min_turn_words` up/down straight from the log.
+
 ## The default voice employee
 
 The repo ships a default voice employee:

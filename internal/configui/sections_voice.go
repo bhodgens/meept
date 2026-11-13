@@ -19,6 +19,20 @@ func buildVoiceFields() []Field {
 		NewTextField("voice.stt_provider", "stt provider", s.STTProvider),
 		NewTextField("voice.tts_provider", "tts provider", s.TTSProvider),
 		NewTextField("voice.filler", "filler lines (comma separated)", voiceJoinSlice(s.Filler)),
+		// Short-final gate + acoustic knobs (voice-peragent leaf 01
+		// parity): every global [voice] gate key rides here; the
+		// per-employee employee_leg rows are edited in the JSON5 file
+		// (the GUI surface for rows is tracked separately, same
+		// posture as the pre-leaf employee_leg block).
+		NewNumberField("voice.turn_confirm_ms", "turn confirm ms", s.TurnConfirmMs),
+		NewNumberField("voice.min_turn_words", "min turn words", s.MinTurnWords),
+		NewTextField("voice.exempt_phrases", "exempt phrases (comma separated)", voiceJoinSlice(s.ExemptPhrases)),
+		NewToggleField("voice.energy_gate", "energy gate", s.EnergyGate),
+		NewNumberField("voice.min_rms", "min rms", s.MinRMS),
+		NewNumberField("voice.fragment_decay_s", "fragment decay s", s.FragmentDecayS),
+		NewNumberField("voice.reply_exempt_s", "reply exempt s", s.ReplyExemptS),
+		NewToggleField("voice.backchannel_soften", "backchannel soften", s.BackchannelSoften != nil && *s.BackchannelSoften),
+		NewNumberField("voice.filler_grace_ms", "filler grace ms", s.FillerGraceMs),
 		NewTextField("voice.supervisor_employee", "supervisor employee", s.SupervisorEmployee),
 		NewToggleField("voice.supervisor_enabled", "supervisor enabled", s.SupervisorEnabled),
 		NewTextField("voice.supervisor_model", "supervisor model", s.SupervisorModel),

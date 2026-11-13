@@ -141,6 +141,12 @@ func finalizeLoadedConfig(cfg *Config) (*Config, error) {
 	// pass through in order.
 	NormalizeUnapprovedCallerAllowedTools(&cfg.Voice)
 
+	// Clamp negative acoustic-gate values to their disabled defaults
+	// (voice-peragent leaf 01). Load-boundary normalization so every
+	// consumer (profile resolver, keys frame, talk loop) sees final
+	// values, globally and per employee_leg row.
+	NormalizeVoiceAcousticDefaults(&cfg.Voice)
+
 	// Normalize the evolver plan sink (empty -> user-scoped default,
 	// ~ expansion, relative rejection) at the load boundary so every
 	// consumer sees an absolute path (evolver plan-sink leaf 01).
@@ -302,6 +308,10 @@ func LoadJSON5Config(path string) (*Config, error) {
 	// caller-authz O3). Same load-boundary rationale as
 	// finalizeLoadedConfig above.
 	NormalizeUnapprovedCallerAllowedTools(&cfg.Voice)
+
+	// Clamp negative acoustic-gate values (voice-peragent leaf 01).
+	// Same load-boundary rationale as finalizeLoadedConfig above.
+	NormalizeVoiceAcousticDefaults(&cfg.Voice)
 
 	// Normalize the evolver plan sink (empty -> user-scoped default,
 	// ~ expansion, relative rejection) at the load boundary so every

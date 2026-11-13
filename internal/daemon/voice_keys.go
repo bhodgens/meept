@@ -28,6 +28,7 @@ package daemon
 import (
 	"encoding/json"
 
+	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/voice"
 )
 
@@ -56,6 +57,39 @@ type keysWire struct {
 	// and an old DAEMON line (field absent child-side) leaves the child
 	// on its own default. 0 = legacy per-final dispatch.
 	TurnConfirmMs int `json:"turn_confirm_ms"`
+	// MinTurnWords is the voice-microfrag short-final gate selector:
+	// the RESOLVED per-employee voice.min_turn_words (voice-peragent
+	// leaf 01: employee_leg row > global; default 0 = disabled). Sent
+	// always (no omitempty, the keys-wire convention); an old child
+	// ignores the extra field, and an old daemon line (field absent
+	// child-side) decodes as 0 — the gate's disabled default, so
+	// absent and explicit-0 are the same legacy behavior.
+	MinTurnWords int `json:"min_turn_words"`
+	// ---- voice-peragent leaf 01: the short-final gate improvements ----
+	// All ADDITIVE optional keys (backward-compatible on the C1 wire):
+	// a keys-less or old-daemon line leaves the child on the gate's
+	// today-shape defaults (empty exemptions, no energy gate, no decay,
+	// reply window 15). Absent-vs-explicit distinction rides pointers
+	// where the defaults differ from the zero value.
+	//
+	// ExemptPhrases is the effective exemption set for this call
+	// (resolved row > global). nil is normalized to
+	// config.DefaultVoiceExemptPhrases() at the emit site, so the
+	// line ALWAYS carries the effective set and the child's absent-
+	// on-wire fallback (no exemptions = the legacy gate) never binds
+	// behind a current daemon.
+	ExemptPhrases []string `json:"exempt_phrases"`
+	// EnergyGate+MinRMS: loudness-aware short-final gate (see config
+	// voice.energy_gate / voice.min_rms). energy_gate rides a pointer:
+	// absent = false (the plain word-count gate).
+	EnergyGate *bool `json:"energy_gate,omitempty"`
+	MinRMS     int   `json:"min_rms,omitempty"`
+	// FragmentDecayS: consecutive-drop escalation window (0 = off).
+	FragmentDecayS int `json:"fragment_decay_s,omitempty"`
+	// ReplyExemptS rides a pointer because its DEFAULT is 15, not the
+	// wire-zero: absent (old daemon) = the child's own 15 s default;
+	// an explicit 0 disables the reply exemption.
+	ReplyExemptS *int `json:"reply_exempt_s,omitempty"`
 }
 
 // Default vendor adapters when the config fields are empty (C4: preserves
@@ -97,6 +131,20 @@ func (w *VoiceWiring) sendKeysFrame(ccid string) {
 		}
 	}
 	p := voice.ResolveProfile(w.cfg, employeeID, "", leg)
+	// Acoustic controls (voice-peragent leaf 01): resolve the whole
+	// per-employee set ONCE per call (employee_leg row > global,
+	// voice.ResolveAcoustics) and let every gate selector read it. The
+	// exemption list always lands on an effective set at the emit site
+	// (a hand-built config with nil ExemptPhrases sends the shipped
+	// default set; a loaded config carries DefaultConfig's or the
+	// user's list), so the child never has to guess between "absent"
+	// and "empty = no exemptions".
+	ac := voice.ResolveAcoustics(w.cfg, employeeID)
+	if ac.ExemptPhrases == nil {
+		ac.ExemptPhrases = config.DefaultVoiceExemptPhrases()
+	}
+	energyGate := ac.EnergyGate
+	replyExemptS := ac.ReplyExemptS
 	kw := keysWire{
 		CallID:     ccid,
 		Event:      keysEvent,
@@ -106,13 +154,25 @@ func (w *VoiceWiring) sendKeysFrame(ccid string) {
 		TTSModel:   p.TtsModel,
 		TTSBaseURL: w.cfg.TTSBaseURL,
 		TTSVoice:   p.TtsVoice,
-		// Turn-aggregation window (voice-startguard C1): global config
-		// like the base URLs — not per-agent routing. A loaded config
-		// carries voice.turn_confirm_ms (DefaultConfig: 900; explicit 0
-		// = legacy per-final dispatch). A hand-built VoiceConfig that
+		// Turn-aggregation window (voice-startguard C1) — per-agent
+		// since voice-peragent leaf 01 (employee_leg.turn_confirm_ms
+		// row override, nil inherits global). A loaded config carries
+		// voice.turn_confirm_ms (DefaultConfig: 900; explicit 0 =
+		// legacy per-final dispatch). A hand-built VoiceConfig that
 		// never set the field sends 0: the legacy shape, which is the
 		// exact pre-C1 behavior old call sites had.
-		TurnConfirmMs: w.cfg.TurnConfirmMs,
+		TurnConfirmMs: ac.TurnConfirmMs,
+		// Short-final gate (voice-microfrag; row-overridable since
+		// leaf 01): the resolved min_turn_words. Default 0 = disabled.
+		MinTurnWords: ac.MinTurnWords,
+		// Gate improvements (voice-peragent leaf 01) — all inert while
+		// MinTurnWords is 0, so zero-config lines stay byte-compatible
+		// with the plain word-count gate even when the keys ride.
+		ExemptPhrases:  ac.ExemptPhrases,
+		EnergyGate:     &energyGate,
+		MinRMS:         ac.MinRMS,
+		FragmentDecayS: ac.FragmentDecayS,
+		ReplyExemptS:   &replyExemptS,
 	}
 	if kw.STTVendor == "" {
 		kw.STTVendor = defaultSTTVendor
