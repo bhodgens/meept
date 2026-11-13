@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -217,4 +218,176 @@ func (r *sliceReaderT) Read(p []byte) (int, error) {
 	n := copy(p, r.b)
 	r.b = r.b[n:]
 	return n, nil
+}
+
+// chunkReaderT is a scripted slice reader: unlike sliceReaderT it hands out
+// the exact byte counts it was told to, one per Read, instead of always
+// filling the caller's buffer. That is what a real HTTP body / subprocess
+// pipe does - reads land on vendor-chunk and kernel-buffer boundaries, so
+// odd counts are routine and sliceReaderT could never reach the misalignment
+// defect. The final scripted size repeats once the script is exhausted, so a
+// script shorter than the payload still terminates on EOF.
+type chunkReaderT struct {
+	b     []byte
+	sizes []int
+	i     int
+}
+
+func (r *chunkReaderT) Read(p []byte) (int, error) {
+	if len(r.b) == 0 {
+		return 0, io.EOF
+	}
+	want := r.sizes[len(r.sizes)-1]
+	if r.i < len(r.sizes) {
+		want = r.sizes[r.i]
+	}
+	r.i++
+	if want > len(r.b) {
+		want = len(r.b)
+	}
+	if want > len(p) {
+		want = len(p)
+	}
+	if want <= 0 {
+		// A zero-length read is legal for io.Reader but meaningless here;
+		// never script one - fall back to one byte so the stream advances.
+		want = 1
+	}
+	n := copy(p, r.b[:want])
+	r.b = r.b[n:]
+	return n, nil
+}
+
+// readScript lays out the per-Read byte counts covering total bytes at
+// chunk-sized steps. Each index in oddAt is one byte short (the odd boundary
+// a real vendor read produces); allOdd shorts every read. The tail read is
+// clamped to what remains, so the script always covers the payload exactly.
+func readScript(total, chunk int, oddAt []int, allOdd bool) []int {
+	in := func(idx int) bool {
+		for _, o := range oddAt {
+			if o == idx {
+				return true
+			}
+		}
+		return false
+	}
+	var sizes []int
+	for rem := total; rem > 0; {
+		n := chunk
+		if allOdd || in(len(sizes)) {
+			n = chunk - 1
+		}
+		if n > rem {
+			n = rem
+		}
+		sizes = append(sizes, n)
+		rem -= n
+	}
+	return sizes
+}
+
+// sine24k builds n samples of a deterministic tone at the vendor's 24 kHz
+// rate, s16le mono. Unlike the pcm24k ramp, a sine has a KNOWN maximum
+// per-sample slew at the target rate, so a resampled stream can be graded for
+// sample-stream integrity rather than just size: a misaligned stream swaps
+// byte halves between samples and blows far past that slew.
+func sine24k(n int, freq, amp float64) []byte {
+	b := make([]byte, n*2)
+	for i := range n {
+		v := amp * math.Sin(2*math.Pi*freq*float64(i)/24000.0)
+		binary.LittleEndian.PutUint16(b[i*2:], uint16(int16(math.Round(v))))
+	}
+	return b
+}
+
+// s16Samples decodes an even-length s16le buffer into int samples.
+func s16Samples(t *testing.T, b []byte) []int {
+	t.Helper()
+	if len(b)%2 != 0 {
+		t.Fatalf("resampled output has an odd byte count %d: half a sample reached the caller", len(b))
+	}
+	out := make([]int, len(b)/2)
+	for i := range out {
+		out[i] = int(int16(binary.LittleEndian.Uint16(b[i*2:])))
+	}
+	return out
+}
+
+// Regression for the streaming resampler's sub-sample alignment: an odd
+// source read used to be silently truncated by jargo's Process (inFrames =
+// len(in)/bytesPerFrame), flipping the byte parity of every later boundary
+// and corrupting the rest of the utterance - the audible fuzz/crackle on
+// locally played TTS. Grading is on the SAMPLE STREAM (per-sample slew), not
+// the output size, because a misaligned stream is the right SIZE and still
+// garbage. Driven through chunkReaderT so the odd branch is actually reached;
+// the old sliceReaderT always returned full even reads, which is why
+// TestResamplingReaderShape shipped over this defect.
+func TestResamplingReaderOddReadsPreserveAlignment(t *testing.T) {
+	const (
+		inRate  = 24000
+		outRate = 16000
+		freq    = 440.0
+		amp     = 20000.0
+		secs    = 3
+	)
+	src := sine24k(inRate*secs, freq, amp)
+	// Natural per-sample delta of the tone at the OUTPUT rate: the steepest
+	// slope a clean resampled stream may show.
+	natural := amp * 2 * math.Pi * freq / float64(outRate)
+	limit := 2 * natural
+	// Ideal frame count for 3 s at the output rate; the streaming filter's
+	// ramp-in costs ~41 frames at this rate pair, so the band is loose on the
+	// low side and the test grades alignment, not the filter's exact delay.
+	idealFrames := outRate * secs
+
+	cases := []struct {
+		name   string
+		oddAt  []int
+		allOdd bool
+	}{
+		{name: "control all-even reads"},
+		{name: "one odd read early", oddAt: []int{1}},
+		{name: "one odd read mid-stream", oddAt: []int{100}},
+		{name: "one odd read late", oddAt: []int{220}},
+		{name: "every read odd", allOdd: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rc := newResamplingReader(
+				&chunkReaderT{b: src, sizes: readScript(len(src), resampleChunkBytes, tc.oddAt, tc.allOdd)},
+				inRate, outRate)
+			defer rc.Close() // test teardown: Close error is not actionable here
+			got, err := io.ReadAll(rc)
+			if err != nil {
+				t.Fatalf("read: %v", err)
+			}
+			frames := s16Samples(t, got)
+			if len(frames) < idealFrames-200 || len(frames) > idealFrames+50 {
+				t.Fatalf("resampled frame count %d, want ~%d (ideal minus filter-delay ramp)",
+					len(frames), idealFrames)
+			}
+			bad, worst := 0, 0
+			for i := 1; i < len(frames); i++ {
+				d := frames[i] - frames[i-1]
+				if d < 0 {
+					d = -d
+				}
+				if d > worst {
+					worst = d
+				}
+				if float64(d) > limit {
+					if bad == 0 {
+						t.Errorf("first bad jump at output frame %d: |delta|=%d (natural max %.0f, limit %.0f)",
+							i, d, natural, limit)
+					}
+					bad++
+				}
+			}
+			t.Logf("frames=%d worst_delta=%d natural=%.0f bad_jumps=%d", len(frames), worst, natural, bad)
+			if bad > 0 {
+				t.Fatalf("%d output frames jumped over 2x the natural %.0f delta: "+
+					"sub-sample misalignment reached the caller", bad, natural)
+			}
+		})
+	}
 }
