@@ -24,11 +24,13 @@
 #     'response body must be closed' (verified from the binary); findings
 #     are discriminated by file:line:col PLUS that message text, never by
 #     the location shape alone.
-#   - FINDINGS: at least one line matching
-#     grep -E '\.go:[0-9]+:[0-9]+:.*response body must be closed'. MUST stay
-#     strict — keep the discriminating regex in sync with bodyclose's output
-#     shape when editing this hook (string 'response body must be closed'
-#     lives in the binary; a tool version that renames it must update here).
+#   - FINDINGS: output contains BOTH bodyclose's exact message text
+#     ('response body must be closed') AND a .go:L:C position marker.
+#     MUST stay strict — keep the discriminating markers in sync with
+#     bodyclose's output shape when editing this hook (the message string
+#     lives in the binary; a tool version that renames it must update
+#     here). Classification runs on OUTPUT, never on exit code alone —
+#     the current tool reports findings while exiting 0.
 #   - CLEAN: rc=0.
 # Findings anywhere -> exit 1 as before. Crashes only -> loud yellow skip
 # banner with rebuild instructions, exit 0 (a broken tool must not block
@@ -108,36 +110,46 @@ FAILED=false
 OUTPUT=""
 CRASHED_PKGS=""
 for pkg in $PACKAGES; do
-  if result=$(go vet -vettool="$BODYCLOSE" "$pkg" 2>&1); then
-    :
-  else
-    # A FINDING requires BOTH markers anywhere in the output:
-    #   1. bodyclose's exact message text (covers the text form
-    #      'file.go:L:C: response body must be closed' AND the -json form
-    #      where the message rides its own '"message": "..."' line), and
-    #   2. a .go:L:C position marker (filters any output that merely
-    #      quotes the tool's docs/help text — the analyzer's own name/description
-    #      never appears without a position when it has nothing to report).
-    # Compile errors ('undefined: field') and export-data panics carry
-    # neither pair together, so they classify as CRASH.
-    diagnostics=""
-    if printf '%s\n' "$result" | grep -qE 'response body must be closed' \
-       && printf '%s\n' "$result" | grep -qE '\.go:[0-9]+:[0-9]+'; then
-      diagnostics=$(printf '%s\n' "$result" | grep -E '\.go:[0-9]+:[0-9]+:.*response body must be closed|response body must be closed' | sort -u)
-    fi
-    if [ -n "$diagnostics" ]; then
-      # FINDINGS: bodyclose-message lines are authoritative. Even if panic
-      # markers or compile noise are also present (tool crashed on some
-      # dependency packages but still analyzed the target), genuine
-      # findings must fail the commit — the findings gate never loosens.
-      FAILED=true
-      OUTPUT="${OUTPUT}${pkg}:\n${diagnostics}\n\n"
-    else
-      # CRASH: non-zero exit with no diagnostic lines (panic / export-data
-      # skew / bare '# pkg' header). The panic-marker grep below is the
-      # explicit signature check; empty-diagnostics alone is sufficient.
-      CRASHED_PKGS="${CRASHED_PKGS}  ${pkg}\n"
-    fi
+  # IMPORTANT (2026-11-12): TWO tool-behavior traps this gate must survive,
+  # both REPRODUCED on this host (probe file, cold cache 1/3 then cached
+  # 0/3, both -a runs flagged; later 0/3 plain repeats = cached-clean replay
+  # of a silent entry):
+  #  1. bodyclose@latest under 'go vet -vettool' prints diagnostics AND
+  #     EXITS 0 — classification MUST run on the OUTPUT regardless of the
+  #     exit code (exit code only distinguishes CRASH: non-zero with no
+  #     finding markers, from CLEAN).
+  #  2. 'go vet' action-caches analyzer results and REPLAYS A CACHE HIT
+  #     WITH NO OUTPUT — a cached clean run reports NOTHING even when the
+  #     package contains a real leak. -a forces fresh analysis every
+  #     commit — slower, but a gate that green-lights leaks on cache hits
+  #     is worse than no gate.
+  result=$(go vet -a -vettool="$BODYCLOSE" "$pkg" 2>&1) && rc=0 || rc=$?
+  # A FINDING requires BOTH markers anywhere in the OUTPUT (exit code
+  # irrelevant — the current tool exits 0 even when it reports):
+  #   1. bodyclose's exact message text (covers the text form
+  #      'file.go:L:C: response body must be closed' AND the -json form
+  #      where the message rides its own '"message": "..."' line), and
+  #   2. a .go:L:C position marker (filters any output that merely
+  #      quotes the tool's docs/help text — the analyzer's own name/description
+  #      never appears without a position when it has nothing to report).
+  # Compile errors ('undefined: field') and export-data panics carry
+  # neither pair together, so they classify as CRASH.
+  diagnostics=""
+  if printf '%s\n' "$result" | grep -qE 'response body must be closed' \
+     && printf '%s\n' "$result" | grep -qE '\.go:[0-9]+:[0-9]+'; then
+    diagnostics=$(printf '%s\n' "$result" | grep -E '\.go:[0-9]+:[0-9]+:.*response body must be closed|"(posn|message)"' | sort -u)
+  fi
+  if [ -n "$diagnostics" ]; then
+    # FINDINGS: bodyclose-message lines are authoritative. Even if panic
+    # markers or compile noise are also present (tool crashed on some
+    # dependency packages but still analyzed the target), genuine
+    # findings must fail the commit — the findings gate never loosens.
+    FAILED=true
+    OUTPUT="${OUTPUT}${pkg}:\n${diagnostics}\n\n"
+  elif [ "$rc" -ne 0 ]; then
+    # CRASH: non-zero exit with no diagnostic lines (panic / export-data
+    # skew / bare '# pkg' header / sibling dirty-tree compile errors).
+    CRASHED_PKGS="${CRASHED_PKGS}  ${pkg}\n"
   fi
 done
 
