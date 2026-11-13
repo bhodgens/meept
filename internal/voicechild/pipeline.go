@@ -23,6 +23,17 @@ type STTProvider interface {
 	Stream(ctx context.Context, pcm <-chan []byte) (<-chan Transcript, error)
 }
 
+// sttFlusher is the optional early-flush seam (BARGE-IN CONTRACT
+// (2026-11-11)): an STT adapter that segments utterances itself (the
+// whisper CLI adapter buffers a voiced window and finalizes on trailing
+// silence) can force-finalize the OPEN window on demand, so the C5
+// speaking-final barge-in lane lands a full segment-recognition earlier
+// when the energy lane is mid-trip. Implementations must never fire
+// recognition on an empty window and never inject silence.
+type sttFlusher interface {
+	FlushNow()
+}
+
 // TTSProvider synthesizes speech audio for one text unit. Stubbed in this
 // leaf; leaf 08 implements real adapters.
 type TTSProvider interface {
@@ -255,6 +266,25 @@ type pipeline struct {
 	// path in consumeTranscripts, so the RMS lane stays purely an
 	// early-warning lane that must never self-authorize.
 	lastDispatchAt time.Time
+	// echoWin (playMu) is the rolling window of normalized recent AGENT
+	// speech — one entry per say frame the child is asked to synthesize
+	// (see echo_window.go). It is the text-provenance lane of the local
+	// leg's fast barge-in: the second authorization source for energy
+	// trips AND the filter that keeps agent-echo whisper finals from
+	// dispatching self-answer turns.
+	//
+	// BARGE-IN CONTRACT (2026-11-11): the dispatch watermark (e0dbce12)
+	// closed the prompt-final auto-authorize hole by making the RMS lane
+	// wait for a post-dispatch final — which put the real barge-in floor
+	// at ~850-1000 ms (whisperSilenceMs 500 + ~350 ms cold subprocess per
+	// segment), because that final always carries its own C5 interrupt
+	// and the RMS lane can never beat it. The watermark ALSO unmasked the
+	// self-answer loop: a whisper final that IS the agent's own voice
+	// (TTS -> speaker -> mic) dispatched a full employee turn (exact-match
+	// dedupe only). This window is what makes restoring the fast lane safe
+	// to re-open — do not delete it to "fix" phantom barge-in again; see
+	// the file header of echo_window.go for the full contract.
+	echoWin echoWindow
 
 	// cancel cancels the pipeline's internal context (workers, streams).
 	cancel context.CancelFunc
@@ -756,6 +786,36 @@ func (p *pipeline) consumeTranscripts(trans <-chan Transcript) {
 					"call_id", p.ccid, "text", transcriptPreview(trimmed))
 				continue
 			}
+			// Echo-provenance drop — BARGE-IN CONTRACT (2026-11-11):
+			// defect 2 of the 2026-11-11 regression review — a whisper
+			// final that fuzzy-matches the agent's own recent speech (the
+			// echo window, fed by every say frame) is the TTS coming back
+			// through speaker -> mic — NOT a caller utterance. Before
+			// this drop existed, the self-answer loop dispatched a FULL
+			// employee turn on every re-heard sentence (the lastFinalText
+			// dedupe below is EXACT-match only: the next sentence, a
+			// paraphrase, or another call's voice always dispatched), and
+			// the dispatch watermark unmasked the loop by removing the
+			// accidental fast cancels that used to kill it. Drop it here
+			// at the single choke point, exactly like the non-speech path:
+			// NO prompt frame, NO evidence stamp (lastFinalAt/Text), NO
+			// watermark, NO C5 interrupt — an echo must neither start a
+			// turn nor authorize/cancel anything.
+			//
+			// Known, ACCEPTED trade-off: a human quoting the agent
+			// verbatim mid-reply can be dropped (short quotes under the
+			// echoMinContentTokens provenance floor pass through
+			// unaffected). The daemon roster leaf carries the rest of the
+			// short-tail policy; this layer only needs to stop the
+			// unbounded self-answer loop.
+			p.playMu.Lock()
+			echoDrop := p.echoWin.matches(trimmed)
+			p.playMu.Unlock()
+			if echoDrop {
+				p.logger.Info("voicechild: echo final dropped",
+					"call_id", p.ccid, "text", transcriptPreview(trimmed))
+				continue
+			}
 			// Speech evidence for the local leg's RMS barge-in gate
 			// (see rmsBargeInCheck): whisper heard actual words.
 			// Exact-duplicate dedupe (defect 2026-11-09): whisper
@@ -1004,6 +1064,13 @@ func (p *pipeline) enqueueSay(frame voiceframe.Frame) error {
 	// retirement stamp: a clear after this enqueue bumps playGen and the
 	// draft is dropped at dequeue time ("clear drops queued drafts").
 	p.dropQueued = false
+	// BARGE-IN CONTRACT (2026-11-11): record the agent's own speech into
+	// the rolling echo window as each say frame enqueues. Say frames
+	// arrive sentence-granular from the daemon talk loop, so the window
+	// tracks exactly what the speakers are (about to be) emitting — the
+	// text the mic's echo will fuzzy-match when whisper re-hears it. Pure
+	// string bookkeeping, no I/O (playMu-safe).
+	p.echoWin.add(frame.Text)
 	p.sayQueue = append(p.sayQueue, queuedSay{frame: frame, gen: p.playGen})
 	workerUp := p.playWorkerUp
 	if !workerUp {
@@ -1701,20 +1768,28 @@ func rmsChunkOver(b []byte, threshold int) bool {
 // NEW final; the final that authorized the first trip already dispatched
 // the very turn the trip cancelled.
 // DISPATCH-WATERMARK rule (defect 2026-11-11, live call
-// local-611f46b1c3fe5c5b): the evidence must also POST-DATE the current
-// turn's dispatch (lastDispatchAt, stamped by consumeTranscripts right
-// after a final prompt emit succeeds). Evidence older than the dispatch
-// is the user's OWN prompt that STARTED this turn, never new speech —
-// without the watermark any echo/noise RMS window inside the 10 s tail
-// after dispatch was auto-authorized by that prompt's own final and
-// killed the reply mid-sentence (observed 2.9 s and 1.2 s into answers).
-// Genuine new caller speech re-stamps lastFinalAt via consumeTranscripts
-// and re-earns the trip. A zero (or pre-first-dispatch) watermark
-// suppresses too: no turn has been dispatched, so there is no
-// evidence-backed proof a new utterance is talking over a live answer.
+// local-611f46b1c3fe5c5b): evidence older than the current turn's
+// dispatch (lastDispatchAt, stamped by consumeTranscripts right after a
+// final prompt emit succeeds) is the user's OWN prompt that STARTED this
+// turn — never NEW speech. Without the watermark any echo/noise RMS
+// window inside the 10 s tail after dispatch was auto-authorized by that
+// prompt's own final and killed the reply mid-sentence (observed 2.9 s
+// and 1.2 s into answers).
+//
+// BARGE-IN CONTRACT (2026-11-11): TWO authorization sources, no raw-
+// energy lane: a trip needs (1) a post-dispatch final (the e0dbce12
+// watermark, unchanged) OR (2) text provenance — the most recent final
+// (even pre-dispatch) whose text does NOT fuzzy-match the echo window
+// (echo_window.go), i.e. proof that the speech is not the agent's own
+// voice. (2) restores the ~200 ms fast lane the absolute watermark froze
+// at ~850-1000 ms; bare loudness without a recent non-echo final stays
+// suppressed on both lanes. Genuine new caller speech re-stamps
+// lastFinalAt via consumeTranscripts either way.
+//
 // The C5 speaking-final path (consumeTranscripts) carries a final's
 // interrupt directly and is untouched — RMS remains only the
-// early-warning lane, which must never self-cancel.
+// early-warning lane; a suppressed trip never consumes the one-shot
+// evidence.
 func (p *pipeline) rmsBargeInCheck(chunk []byte) {
 	if !p.local || p.bargeInRms <= 0 {
 		return // phone legs keep the STT-partial trigger; VAD never runs
@@ -1762,6 +1837,30 @@ func (p *pipeline) rmsBargeInCheck(chunk []byte) {
 		p.playMu.Unlock()
 		return // looks like self-echo: latch stays armed, keep listening
 	}
+	// Whisper early-flush kick (BARGE-IN CONTRACT (2026-11-11): trip
+	// attempt in progress — this window cleared energy + echo-guard, the
+	// text-evidence gates below decide). A STT adapter that can force-
+	// finalize its open voiced window (WhisperSTT.FlushNow) gets kicked
+	// here so the C5 speaking-final path — the primary barge-in lane —
+	// lands ~350 ms (one cold subprocess + up to 500 ms trailing
+	// silence) sooner, whether or not this RMS trip itself fires. The
+	// adapter's contract: FlushNow never fires recognition on an empty
+	// window, so a kick during pure echo/noise costs nothing. Provider
+	// field read under playMu (audit fix 2 regime), the seam call itself
+	// OFF the lock (mutexio posture, same as the interrupt emit below);
+	// a non-blocking, coalescing send either way. Re-check the latch
+	// state after re-locking: if playback died during the kick the trip
+	// is moot (evidence untouched, one-shot intact).
+	flusher, _ := p.stt.(sttFlusher)
+	if flusher != nil {
+		p.playMu.Unlock()
+		flusher.FlushNow()
+		p.playMu.Lock()
+		if !p.speaking || p.interrupted || p.dropQueued {
+			p.playMu.Unlock()
+			return
+		}
+	}
 	// STT evidence gate (defect 2026-11-08): the trip must be evidence of
 	// new SPEECH, not just loud sound. Only emit the interrupt when a
 	// non-empty final transcript arrived within rmsSttEvidenceWindow —
@@ -1785,21 +1884,77 @@ func (p *pipeline) rmsBargeInCheck(chunk []byte) {
 		p.playMu.Unlock()
 		return
 	}
+	// Echo-provenance gate (BARGE-IN CONTRACT (2026-11-11)): the recent
+	// final above is the trip's only speech proof. If its text
+	// fuzzy-matches the agent's own recent speech (the echo window, see
+	// echo_window.go), it is the AGENT'S VOICE coming back through the
+	// speakers — never caller speech — and must not authorize a trip on
+	// EITHER lane (post- or pre-dispatch). This is what makes the
+	// pre-dispatch fast lane below safe to re-open: without it, the
+	// self-answer echo finals would re-authorize the very cancellations
+	// the watermark exists to stop.
+	if p.echoWin.matches(p.lastFinalText) {
+		p.logger.Debug("voicechild: rms barge-in suppressed (evidence is agent echo)",
+			"call_id", p.ccid)
+		p.playMu.Unlock()
+		return
+	}
 	// Dispatch watermark (defect 2026-11-11, live call
-	// local-611f46b1c3fe5c5b): the recent final above must also POST-DATE
-	// the current turn's dispatch. Evidence older than lastDispatchAt is
-	// the user's OWN prompt that STARTED this turn — never new speech —
-	// so an echo/noise window in the first 10 s of a fast answer was
-	// auto-authorized by that prompt's own final and cancelled the reply
-	// mid-sentence. A zero watermark (no final has successfully dispatched
-	// yet this call) suppresses too: RMS is only the early-warning lane,
-	// and the C5 speaking-final path handles a real final's interrupt
-	// directly. Genuine new caller speech re-stamps lastFinalAt via
-	// consumeTranscripts, lands after the watermark, and re-earns the
-	// trip. Same suppression shape as the window gate above: latch and
-	// playback untouched, the window accumulators were already reset.
+	// local-611f46b1c3fe5c5b) and the RESTORED FAST LANE (BARGE-IN
+	// CONTRACT (2026-11-11)). e0dbce12 made the recent final above also
+	// POST-DATE the current turn's dispatch: evidence older than
+	// lastDispatchAt is the user's OWN prompt that STARTED this turn.
+	// That closed the hole where any echo/noise window in the 10 s tail
+	// after dispatch was auto-authorized and killed the reply mid-
+	// sentence (observed 2.9 s / 1.2 s into answers) — but it also froze
+	// the real barge-in detection floor at ~850-1000 ms, because a
+	// post-dispatch final ALWAYS carries its own C5 interrupt (the
+	// consumeTranscripts speaking-final path), so the energy lane could
+	// never again beat the whisper flush (500 ms trailing silence + a
+	// ~350 ms cold subprocess per segment).
+	//
+	// Two authorization sources now exist, per the contract: (1) the
+	// e0dbce12 watermark — evidence post-dating the dispatch is new
+	// speech (unchanged path: fall through to the latch below); (2) the
+	// echo-window rejection — a PRE-dispatch (or zero-watermark) final
+	// whose text is PROVEN not to be agent speech. Case (2) is the fast
+	// lane: the prompt was spoken by a HUMAN on this call; combined with
+	// sustained energy that independently cleared the 130% speaker-
+	// reference echo guard, it is legitimate barge-in evidence — the
+	// human is still talking / restarting over the answer (~200 ms trips
+	// restored, no raw-energy lane returns: bare loudness without a
+	// non-echo final is still suppressed above).
+	//
+	// RESIDUAL RISK, stated honestly: this re-opens part of the
+	// e0dbce12 hole. The hole was "ANY noise within 10 s of the prompt
+	// got authorized by the prompt final". Now the prompt final counts
+	// only when the energy ALSO independently passes the echo guard
+	// (130% ratio against the last outbound chunk) AND the prompt is
+	// recent (the existing 10 s window) AND a later echo final has not
+	// overwritten the evidence (the provenance gate above). Loud NON-
+	// speech that clears the energy guard inside that window can still
+	// cancel the reply — the remaining mitigation is the one-shot
+	// evidence consume.
 	if p.lastDispatchAt.IsZero() || !p.lastFinalAt.After(p.lastDispatchAt) {
-		p.logger.Debug("voicechild: rms barge-in suppressed (evidence predates turn dispatch)",
+		// The fast lane needs USABLE text evidence: a final with no
+		// recorded text (or a pre-first-dispatch call where the only
+		// stamp came without one) proves nothing about provenance, so
+		// the watermark stays absolute and the trip is suppressed with
+		// the original e0dbce12 reason (the pin in
+		// TestRMSTripZeroWatermarkSuppresses).
+		if strings.TrimSpace(p.lastFinalText) == "" {
+			p.logger.Debug("voicechild: rms barge-in suppressed (evidence predates turn dispatch)",
+				"call_id", p.ccid,
+				"since_dispatch_ms", func() int64 {
+					if p.lastDispatchAt.IsZero() {
+						return -1
+					}
+					return time.Since(p.lastDispatchAt).Milliseconds()
+				}())
+			p.playMu.Unlock()
+			return
+		}
+		p.logger.Debug("voicechild: rms barge-in fast lane (pre-dispatch final, provenance-verified non-echo)",
 			"call_id", p.ccid,
 			"since_dispatch_ms", func() int64 {
 				if p.lastDispatchAt.IsZero() {
@@ -1807,8 +1962,6 @@ func (p *pipeline) rmsBargeInCheck(chunk []byte) {
 				}
 				return time.Since(p.lastDispatchAt).Milliseconds()
 			}())
-		p.playMu.Unlock()
-		return
 	}
 	// Latch trip under playMu (noteBargeIn cannot be called re-entrantly:
 	// it would deadlock on playMu). Same field transitions as

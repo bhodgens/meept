@@ -78,29 +78,41 @@ func TestFinalDispatchStampsWatermark(t *testing.T) {
 	}
 }
 
-// TestRMSTripEvidencePredatesDispatch: the live hole, end-to-end. The
-// user's own prompt dispatched the turn (watermark stamped after that
-// final); the agent starts answering; a sustained loud mic window
-// arrives with NO new final. The only in-window evidence is the prompt
-// that STARTED this turn: the trip must be SUPPRESSED — no interrupt
-// frame, latch and playback untouched — and the suppression must NOT
-// consume the one-shot evidence (the trip never fired).
-func TestRMSTripEvidencePredatesDispatch(t *testing.T) {
+// TestRMSTripPreDispatchPromptFinalTripsFastLane: the RESTORED FAST LANE
+// (BARGE-IN CONTRACT (2026-11-11)). This test SUPERSEDES the e0dbce12
+// absolute-watermark pin (old name
+// TestRMSTripEvidencePredatesDispatch): under e0dbce12 a sustained loud
+// window with only the turn's own prompt final as evidence was always
+// suppressed — which froze the real barge-in floor at ~850-1000 ms,
+// because a post-dispatch final always carries its own C5 interrupt and
+// the energy lane could never beat the whisper flush. The contract now
+// has TWO authorization sources: the watermark (post-dispatch final) OR
+// text provenance (the most recent final is proven NOT to be the agent's
+// own voice). A human's prompt final is exactly that: prompt words spoken
+// by the caller, still loud over the reply = the human is talking over /
+// restarting — legitimate fast barge-in (~200 ms). The echo half of the
+// original hole (the agent's own re-heard speech authorizing a trip) is
+// closed by the provenance gate (see
+// TestRMSTripEchoEvidenceFinalSuppresses) AND by the echo-final dispatch
+// drop (pipeline_final_c5 / TestEchoFinalDropped); a faithful ENERGY
+// echo stays closed by the 130% speaker-reference guard.
+func TestRMSTripPreDispatchPromptFinalTripsFastLane(t *testing.T) {
 	const ccid = "rmsdisp1"
 	const chunks = 12
 	d, child, p, in, _, stt := newRMSChild(t, ccid, true, rmsThresh)
-	// Debug-level capture so the suppression reason is observable (the
-	// captureLogger default is INFO; the watermark gate logs Debug).
 	capLog := newCaptureLogger()
 	p.logger = slog.New(slog.NewTextHandler(&captureWriter{c: capLog}, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	// Turn 1 dispatches while playback is idle: no C5 interrupt, FIFO
-	// holds only the prompt (popped by sttFinal).
+	// holds only the prompt (popped by sttFinal). lastFinalText is now
+	// the human's prompt — provenance-verified non-echo (the agent has
+	// said nothing yet: the echo window is empty until a say arrives).
 	sttFinal(t, d, stt, "what time is it")
 
 	// The fast answer starts playing (quiet TTS: near-zero echo
-	// reference, so the loud mic window also clears the echo guard —
-	// only the watermark gate stands between it and a trip).
+	// reference, so the loud mic window also clears the energy echo
+	// guard — only the text-provenance lanes stand between it and a
+	// trip).
 	gate := newChunkedTTS(quietSample, chunks)
 	swapTTS(p, gate)
 	defer close(gate.park)
@@ -109,20 +121,66 @@ func TestRMSTripEvidencePredatesDispatch(t *testing.T) {
 	}
 	waitFor(t, func() bool { return p.isSpeaking() })
 
-	// Echo/noise inside the 10 s tail of the prompt's own final: the
-	// window gate passes (recent final); the watermark gate must
-	// suppress (evidence predates this turn's dispatch).
+	// Pre-dispatch evidence + loud window + non-echo provenance: the
+	// fast lane TRIPS — one sustained window (~200 ms of mic audio), no
+	// whisper final required.
+	writeMic(t, in, callerSample, chunks)
+	f := d.waitFrame(t)
+	if f.Event != voiceframe.EventInterrupt {
+		t.Fatalf("RMS trip with a provenance-verified non-echo prompt final emitted %q, want interrupt (fast lane must stay alive)", f.Event)
+	}
+	if !capLog.contains("fast lane") {
+		t.Fatalf("fast-lane trip did not log the contract reason; got:\n%s", capLog.everything())
+	}
+	// One-shot evidence consumption is unchanged on the fast lane.
+	if zero, _ := finalEvidence(p); !zero {
+		t.Fatal("fast-lane trip did not consume the STT evidence (one-shot contract)")
+	}
+}
+
+// TestRMSTripEchoEvidenceFinalSuppresses: the echo half of the restored
+// fast lane (BARGE-IN CONTRACT (2026-11-11)): energy trips are NEVER
+// allowed on bare loudness, and a final whose text IS the agent's own
+// recent speech is agent echo, not caller speech — it must not authorize
+// a trip even when the pre-dispatch fast lane would otherwise accept it.
+// Fixture drives the gate's evidence directly (in production an echo
+// final never even reaches lastFinalText — the consumeTranscripts
+// echo-drop intercepts it upstream; this pins the belt-and-braces gate).
+func TestRMSTripEchoEvidenceFinalSuppresses(t *testing.T) {
+	const ccid = "rmsdisp5"
+	const chunks = 12
+	d, child, p, in, _, _ := newRMSChild(t, ccid, true, rmsThresh)
+	capLog := newCaptureLogger()
+	p.logger = slog.New(slog.NewTextHandler(&captureWriter{c: capLog}, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	// The agent says a sentence; the echo window records it on enqueue.
+	gate := newChunkedTTS(quietSample, chunks)
+	swapTTS(p, gate)
+	defer close(gate.park)
+	if err := child.handleSay(voiceframe.Frame{CallID: ccid, Event: voiceframe.EventSay, Text: "the weather today is definitely sunny"}); err != nil {
+		t.Fatalf("handleSay: %v", err)
+	}
+	waitFor(t, func() bool { return p.isSpeaking() })
+
+	// Evidence: a pre-dispatch final that is the agent's own sentence
+	// (whisper re-hearing the speakers) + watermark laid so the fast
+	// lane would otherwise fire.
+	rmsGateEvidence(p, 500*time.Millisecond)
+	setFinalText(p, "the weather today is definitely sunny")
+
 	writeMic(t, in, callerSample, chunks)
 	assertNoInterruptWithin(t, d, 80*time.Millisecond,
-		"RMS trip authorized by the prompt final that dispatched the live turn cancelled the reply (dispatch watermark: evidence must post-date the dispatch)")
+		"RMS trip authorized by an AGENT-ECHO final fired (energy trips are never allowed on echo provenance — BARGE-IN CONTRACT 2026-11-11)")
 	if !p.isSpeaking() {
-		t.Fatal("suppressed stale-evidence trip stopped playback")
+		t.Fatal("suppressed echo-evidence trip stopped playback")
 	}
+	if !capLog.contains("evidence is agent echo") {
+		t.Fatalf("suppression Debug log missing the echo-provenance reason; got:\n%s", capLog.everything())
+	}
+	// Suppression does not consume evidence (same shape as every other
+	// gate: the one-shot is only spent when a trip actually fires).
 	if zero, _ := finalEvidence(p); zero {
-		t.Fatal("suppressed trip consumed STT evidence (lastFinalAt zeroed without firing)")
-	}
-	if !capLog.contains("evidence predates turn dispatch") {
-		t.Fatalf("suppression Debug log missing the watermark reason; got:\n%s", capLog.everything())
+		t.Fatal("suppressed echo trip consumed STT evidence (one-shot is for fired trips only)")
 	}
 }
 

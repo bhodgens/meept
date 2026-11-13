@@ -165,6 +165,50 @@ func FuzzyFind[T any](query string, candidates []T, getName func(T) string, thre
 	return out
 }
 
+// ContainsRatio scores how much of `query` is recognizably contained in
+// `text`: for every query token, the best per-token similarity against
+// any text token (the frozen FuzzyFind measure, 1 - editDistance/maxLen),
+// averaged over ALL query tokens (multiset — a repeated query token is
+// scored twice). 1.0 means every query token appears (near-)verbatim in
+// text; 0 means nothing overlaps.
+//
+// Unlike Similarity (which averages only the TOP TWO query tokens and so
+// confidently matches unrelated sentences that share two words), a
+// containment ratio over the WHOLE query is the echo-provenance shape:
+// agent-echo transcripts land near 1.0 (whisper re-hears the TTS almost
+// word-for-word, garbled tails still score high because EVERY token gets
+// its best fuzzy match), while a human sentence that merely shares a few
+// function words with the agent's speech stays low.
+//
+// BARGE-IN CONTRACT (2026-11-11): this scorer is the text-provenance half
+// of the echo gate in internal/voicechild — energy barge-in trips are
+// NEVER allowed on bare loudness; a recent final authorizes a trip only
+// when its text does NOT ContainsRatio-match the agent's own recent
+// speech (see voicechild textIsAgentEcho). Stdlib-only per contract C5.
+//
+// Empty query or empty text score 0 (no overlap evidence, never a match).
+func ContainsRatio(query, text string) float64 {
+	q := strings.Fields(normalize(query))
+	if len(q) == 0 {
+		return 0
+	}
+	t := strings.Fields(normalize(text))
+	if len(t) == 0 {
+		return 0
+	}
+	var sum float64
+	for _, qt := range q {
+		best := 0.0
+		for _, tt := range t {
+			if s := similarity(qt, tt); s > best {
+				best = s
+			}
+		}
+		sum += best
+	}
+	return sum / float64(len(q))
+}
+
 // EditDistance is the exported contract name (C5): Levenshtein distance.
 func EditDistance(a, b string) int { return editDistance(a, b) }
 

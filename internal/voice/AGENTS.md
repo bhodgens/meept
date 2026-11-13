@@ -611,7 +611,21 @@ store. Invariants a future agent must NOT break:
   the playback intact. A suppressed trip NEVER consumes the watermark
   evidence (pinned by pipeline_rmsdispatch_test.go). non-speech
   finals ([BLANK_AUDIO]/(sighs) class, nonSpeechTranscript) never dispatch
-  a turn and never stamp evidence. RMS must NEVER run on phone legs -
+  a turn and never stamp evidence. CROSS-CALL ECHO CONTRACT
+  (2026-11-11, leaf C): agent speech is also recorded in a PROCESS-WIDE
+  roster (`internal/voice/echo_roster.go`, fed by the talk loop's `say`
+  choke point on successful send, cleared at call end). A final prompt
+  whose text fuzzy-matches ANOTHER live call's recent speech (TTL 30 s,
+  `RecentOtherSpeech`) is room echo - call A's TTS out the speakers
+  into call B's mic - and the loop DROPS the dispatch (no turn, call
+  lives on; telemetry kind=dropped reason="cross-call echo"). LINK
+  calls are EXEMPT from the gate (a link is a deliberate two-agent
+  conversation; the HoldPrompt seam is the discriminator) but their
+  speech is still RECORDED, so a plain call overhearing a link drops
+  the echo. The gate lives ONLY in the voice talk loop's prompt path -
+  agent/chat dispatch paths are untouched by contract. The short-prompt
+  floor (echoMinPromptWords) is enforced inside the roster.
+  RMS must NEVER run on phone legs -
   they keep the Tier A STT-partial trigger. Never move the trigger to a
   leg-agnostic branch.
 - Barge-in must SILENCE the client speakers, not just stop new frames:

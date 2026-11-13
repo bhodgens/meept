@@ -59,6 +59,17 @@ func stampRecentFinal(p *pipeline) {
 	rmsGateEvidence(p, 500*time.Millisecond)
 }
 
+// setFinalText writes lastFinalText under playMu — the same regime
+// consumeTranscripts stamps it in — so tests can pin the echo-provenance
+// gate's TEXT without driving a transcript through the dispatch lane
+// (which the echo drop would intercept before the stamp; see
+// TestRMSTripEchoEvidenceFinalSuppresses).
+func setFinalText(p *pipeline, text string) {
+	p.playMu.Lock()
+	defer p.playMu.Unlock()
+	p.lastFinalText = text
+}
+
 // tripLocal speaks via a chunkedTTS, stamps the STT evidence window as if
 // whisper had finalized `evidenceAge` ago (negative = never), then drives
 // a full loud-mic window through the pump tap; returns the gate the

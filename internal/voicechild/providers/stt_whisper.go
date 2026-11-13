@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/caimlas/meept/internal/voicechild"
@@ -72,6 +73,54 @@ var ErrWhisperBinMissing = errors.New("voicechild/providers: whisper-cli binary 
 type WhisperSTT struct {
 	cfg ProviderConfig
 	bin string // resolved at construction (test seam: PATH)
+
+	// kickMu guards the per-session flush-kick channels registered by
+	// Stream and retired by run. BARGE-IN CONTRACT (2026-11-11): FlushNow
+	// force-recognizes every session's OPEN voiced window immediately so
+	// the whisper C5 final lands ~350 ms (one cold subprocess) sooner on
+	// the pure-whisper barge-in path. The signal is a non-blocking send
+	// on a buffered(1) channel: the run loop never takes kickMu while
+	// handling a kick, and a second pending kick coalesces into the
+	// first (one flush already covers everything buffered so far).
+	kickMu sync.Mutex
+	kicks  map[chan struct{}]struct{}
+}
+
+// FlushNow force-closes the open voiced window of every live Stream
+// session of this adapter (early-kick for barge-in latency).
+//
+// BARGE-IN CONTRACT (2026-11-11): FlushNow must NEVER fire recognition
+// on an empty (or un-voiced) window — the run loop's kick case checks
+// voicedSamples > 0 and no-ops otherwise. It never injects silence and
+// never splits an utterance that has no speech in it: with nothing
+// buffered the kick is a no-op, so behavior is byte-identical when the
+// pipeline calls it speculatively on every sustained-energy window.
+func (s *WhisperSTT) FlushNow() {
+	s.kickMu.Lock()
+	for ch := range s.kicks {
+		select {
+		case ch <- struct{}{}:
+		default: // a kick already pending: coalesce
+		}
+	}
+	s.kickMu.Unlock()
+}
+
+// registerKick adds one session's flush-kick channel and returns its
+// retire closure (deferred by run).
+func (s *WhisperSTT) registerKick() (chan struct{}, func()) {
+	ch := make(chan struct{}, 1)
+	s.kickMu.Lock()
+	if s.kicks == nil {
+		s.kicks = make(map[chan struct{}]struct{})
+	}
+	s.kicks[ch] = struct{}{}
+	s.kickMu.Unlock()
+	return ch, func() {
+		s.kickMu.Lock()
+		delete(s.kicks, ch)
+		s.kickMu.Unlock()
+	}
 }
 
 // newWhisperSTT builds the local STT adapter. No key is needed - this
@@ -103,7 +152,8 @@ func (s *WhisperSTT) Stream(ctx context.Context, pcm <-chan []byte) (<-chan voic
 		return nil, fmt.Errorf("whisper temp dir: %w", err)
 	}
 	out := make(chan voicechild.Transcript, 8)
-	go s.run(ctx, pcm, out, dir)
+	kick, retire := s.registerKick()
+	go s.run(ctx, pcm, out, dir, kick, retire)
 	return out, nil
 }
 
@@ -112,9 +162,12 @@ func (s *WhisperSTT) Stream(ctx context.Context, pcm <-chan []byte) (<-chan voic
 // boundary a slow one does; a producer that STOPS sending bytes at all
 // (the pump bridge's silence is an absence of chunks) is caught by the
 // whisperWallIdle wall-clock timer instead — an utterance flushes when
-// either kind of pause closes it.
-func (s *WhisperSTT) run(ctx context.Context, pcm <-chan []byte, out chan<- voicechild.Transcript, dir string) {
+// either kind of pause closes it. A third close trigger is the barge-in
+// flush kick (kick channel, see FlushNow): the pipeline asks for the
+// open voiced window NOW so the C5 final arrives ~350 ms sooner.
+func (s *WhisperSTT) run(ctx context.Context, pcm <-chan []byte, out chan<- voicechild.Transcript, dir string, kick <-chan struct{}, retire func()) {
 	defer close(out)
+	defer retire()
 	defer func() {
 		if rerr := os.RemoveAll(dir); rerr != nil {
 			slog.Error("whisper temp cleanup failed", "dir", dir, "error", rerr)
@@ -205,6 +258,21 @@ func (s *WhisperSTT) run(ctx context.Context, pcm <-chan []byte, out chan<- voic
 		select {
 		case <-ctx.Done():
 			return
+		case <-kick:
+			// BARGE-IN CONTRACT (2026-11-11): early flush kick from the
+			// pipeline (a sustained-energy window is attempting a trip).
+			// Flush ONLY the OPEN voiced window: with nothing voiced
+			// buffered this is a strict no-op — never inject silence,
+			// never launch a subprocess, no behavior change when the
+			// buffer is empty (recognize's voicedSamples==0 guard
+			// already handles the empty case, and we skip it entirely
+			// so even the reset is a no-op).
+			if voicedSamples > 0 {
+				disarmIdle()
+				if !recognize() {
+					return
+				}
+			}
 		case <-idleC:
 			// Audio stopped arriving with a voiced window open: the
 			// speaker finished (or paused); close the utterance on the

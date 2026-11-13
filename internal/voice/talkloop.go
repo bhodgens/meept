@@ -569,12 +569,23 @@ func (t *TalkLoop) fallbackLine() string {
 // say sends one say frame. last marks the final sentence of a turn.
 func (t *TalkLoop) say(ccid, text string, last bool) error {
 	lastFlag := last
-	return t.deps.Send(Frame{
+	err := t.deps.Send(Frame{
 		CallID: ccid,
 		Event:  EventSay,
 		Text:   text,
 		Last:   &lastFlag,
 	})
+	// CROSS-CALL ECHO CONTRACT (2026-11-11): say is the single choke for
+	// ALL agent speech (greeting, filler, replies, fallback, fragment
+	// clarify), so this is where the process-wide roster learns what each
+	// live call is speaking. Recorded only on a successful send (a frame
+	// that never left the daemon produced no room audio, so it must not
+	// gate anything). The empty turn-final flush marker is a no-op inside
+	// the roster. See echo_roster.go for the full contract.
+	if err == nil {
+		RecordSpoken(ccid, text)
+	}
+	return err
 }
 
 // sayProgress publishes one allowed-say progress event through the binding
@@ -590,6 +601,10 @@ func (t *TalkLoop) end(ccid, reason string) {
 	t.endOnce.Do(func() {
 		t.log.Info("voice talk loop: call ended", "ccid", ccid, "reason", reason)
 		t.emitEvent(ccid, EventInput{Kind: EventKindCallEnded, Reason: reason})
+		// CROSS-CALL ECHO CONTRACT (2026-11-11): drop this call's roster
+		// entries at teardown (hygiene only — TTL ages them out within
+		// 30 s regardless; a dead call's speech should stop gating early).
+		ClearSpoken(ccid)
 		t.deps.OnEnd(ccid, reason)
 	})
 }
@@ -916,6 +931,47 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 			case EventPrompt:
 				if f.Last == nil || !*f.Last {
 					// Partial transcript: preview only, never a turn.
+					continue
+				}
+				// CROSS-CALL ECHO CONTRACT (2026-11-11): a final prompt
+				// that fuzzy-matches agent speech spoken by ANOTHER live
+				// call inside the roster TTL is room echo (call A's TTS
+				// out the speakers -> call B's mic -> whisper final ->
+				// B would answer A: the "two agents answering each other"
+				// defect, audit symptom (b)). Drop the DISPATCH — the call
+				// lives on. This gate lives ONLY in the voice talk loop's
+				// prompt path; agent/chat dispatch paths are untouched
+				// by contract. LINK calls are exempt: a link is a
+				// DELIBERATE two-agent conversation (the half-duplex
+				// coordinator pins A's greeting crossing B's mic as the
+				// conversation seed — internal/voice/AGENTS.md turn-taking
+				// section), and the only loops that ever receive the
+				// HoldPrompt/TurnState seams are link loops, so the seam
+				// is the discriminator. Link speech is still RECORDED
+				// (say-choke): a plain local/phone call that overhears a
+				// link conversation must still drop the echo. The
+				// short-prompt floor (echoMinPromptWords)
+				// is enforced inside the roster.
+				//
+				// Telemetry posture: routeFrame already appended the
+				// `heard` ring event BEFORE enqueueing this frame (the
+				// mic really did hear it — keeping the ring honest means
+				// we do NOT retroactively hide that), so we only append
+				// the dispatch-drop marker here. The gate runs BEFORE
+				// any dispatch bookkeeping (no timers stop, no pipeline
+				// cancels, no park slot touched).
+				if t.deps.HoldPrompt == nil && RecentOtherSpeech(ccid, f.Text) {
+					// Pure no-op dispatch: no cancelPipeline, no timer
+					// churn, no floor effects — an echo must not interrupt
+					// a legitimate in-flight reply or touch the link park.
+					t.log.Info("voice talk loop: echo prompt dropped (cross-call)",
+						"ccid", ccid, "text_preview", previewPrompt(f.Text),
+						"words", wordCount(f.Text))
+					t.emitEvent(ccid, EventInput{
+						Kind:   EventKindDropped,
+						Text:   previewPrompt(f.Text),
+						Reason: "cross-call echo",
+					})
 					continue
 				}
 				// Link half-duplex seam: when a coordinator holds (the
