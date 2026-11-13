@@ -202,6 +202,27 @@ type pipeline struct {
 	local      bool
 	bargeInRms int
 
+	// vad is the input-side speech-vs-noise analyzer (jargo Silero VAD),
+	// built lazily in handleOpen for the LOCAL leg only when a VADFactory
+	// is wired and the ONNX runtime loads. nil = legacy RMS + STT-evidence
+	// gate (byte-identical). vadSpeaking is the smoothed speaking state
+	// the pump updates; both are guarded by playMu. (Restored 2026-11-12:
+	// a sibling revert had dropped the fields while open.go still wired them.)
+	vad         VADAnalyzer
+	vadSpeaking bool
+
+	// turn is the input-side COMPLETE-THOUGHT analyzer (jargo Smart Turn),
+	// built alongside the VAD for the local leg. All analyzer calls are
+	// guarded by turnMu (the pipeline's own lock — jargo's turn base has no
+	// internal lock): the audio pump calls AppendAudio, and the dispatch
+	// paths + teardown call Clear so the model's per-turn buffer never
+	// spans utterances. (The completion VERDICT lane - AnalyzeEndOfTurn +
+	// a stored turn state - was dropped with the peragent merge's
+	// confirm-window rework; re-add it here if endpointing ever consults
+	// the model again.)
+	turn   TurnAnalyzer
+	turnMu sync.Mutex
+
 	// Playback state, guarded by playMu.
 	//
 	// playMu is ALSO the single lock regime for p.stt/p.tts: constructProviders
@@ -1009,6 +1030,16 @@ func (p *pipeline) dispatchAggregated(ctx context.Context, text string, parts in
 	p.playMu.Lock()
 	p.lastDispatchAt = time.Now()
 	p.playMu.Unlock()
+	// Smart Turn hygiene (defect 2026-11-13): the aggregated dispatch ENDS
+	// the turn its parts described. Drop the analyzer's buffered audio +
+	// sticky speech state NOW (turnMu only, never nested under playMu —
+	// see the lock-order note in turn.go) so turn N+1's endpointing never
+	// rides leftover audio from the aggregated parts.
+	p.turnMu.Lock()
+	if t := p.turn; t != nil {
+		t.Clear()
+	}
+	p.turnMu.Unlock()
 	p.logger.Info("voicechild: final prompt dispatched aggregated",
 		"call_id", p.ccid, "parts", parts, "chars", len([]rune(text)), "reason", reason)
 }
@@ -1264,19 +1295,35 @@ func (p *pipeline) consumeTranscripts(trans <-chan Transcript) {
 				continue
 			}
 		}
-		if err := p.child.emitPrompt(p.ctx, p.ccid, promptText, tr.Final, rawText); err != nil {
-			p.logger.Error("voicechild: emit prompt", "err", err, "call_id", p.ccid)
-		} else if tr.Final {
-			// Dispatch watermark (defect 2026-11-11): a successfully
-			// dispatched FINAL prompt STARTS the in-flight turn, so
-			// the turn's dispatch epoch is stamped right after the
-			// emit. rmsBargeInCheck then refuses to let evidence that
-			// predates this watermark authorize a trip: it is the
-			// prompt that started this turn, never new speech (see
-			// lastDispatchAt).
+		// Dispatch watermark (defect 2026-11-12): stamped for a FINAL that was
+		// ATTEMPTED, not only one that emitted successfully. The watermark's
+		// meaning is "a turn started here": rmsBargeInCheck refuses to let
+		// evidence that predates the current turn's dispatch authorize a trip
+		// (see lastDispatchAt). An attempted final therefore has to move it —
+		// a transient text-socket write error (2 s deadline) used to leave the
+		// watermark zero, so EVERY later RMS trip hit
+		// `p.lastDispatchAt.IsZero()` and was suppressed with "evidence
+		// predates turn dispatch": one failed emit disabled the RMS barge-in
+		// lane for the rest of the call. Exactly-once semantics are unchanged
+		// (finals only, partials never stamp) and the error log below keeps its
+		// severity.
+		if tr.Final {
 			p.playMu.Lock()
 			p.lastDispatchAt = time.Now()
 			p.playMu.Unlock()
+			// Smart Turn hygiene (defect 2026-11-13): a dispatched final
+			// ENDS the turn the buffered audio described. Drop the
+			// analyzer's turn buffer + sticky SpeechTriggered state NOW,
+			// under turnMu (never nested under playMu), so turn N+1's
+			// endpointing verdict never rides turn N's leftover audio.
+			p.turnMu.Lock()
+			if t := p.turn; t != nil {
+				t.Clear()
+			}
+			p.turnMu.Unlock()
+		}
+		if err := p.child.emitPrompt(p.ctx, p.ccid, promptText, tr.Final, rawText); err != nil {
+			p.logger.Error("voicechild: emit prompt", "err", err, "call_id", p.ccid)
 		}
 	}
 	// Transcript-stream EOF (C1 point 5): the provider's session ended
@@ -1316,6 +1363,34 @@ func (p *pipeline) pumpAudioIn() {
 			// to STT. No-op unless local && bargeInRms > 0; takes playMu
 			// briefly, never blocks the socket drain beyond that.
 			p.rmsBargeInCheck(data)
+			// Input-side ML speech discriminator (jargo Silero VAD, local
+			// leg): advance the speaking state each chunk so
+			// rmsBargeInCheck can require real SPEECH, and feed the Smart
+			// Turn complete-thought analyzer the same chunk + speaking
+			// decision. No-op when p.vad is nil (legacy gate). The model
+			// call is sub-ms on the pump goroutine — never under playMu
+			// (mutexio); the turn analyzer is guarded by its own turnMu.
+			// (Restored 2026-11-12: a sibling merge removed the feed.)
+			// Race fix (2026-11-13): the analyzer fields are playMu-
+			// guarded; handleOpen/installVAD write them under playMu, so
+			// the pump SNAPSHOTs both references under playMu and then
+			// releases before the model I/O — the bare reads used to race
+			// the install. turnMu is taken alone (never nested under
+			// playMu), per the lock-order notes in turn.go.
+			p.playMu.Lock()
+			vad := p.vad
+			p.playMu.Unlock()
+			if vad != nil {
+				sp := vad.AnalyzeAudio(data)
+				p.playMu.Lock()
+				p.vadSpeaking = sp
+				p.playMu.Unlock()
+				p.turnMu.Lock()
+				if t := p.turn; t != nil {
+					t.AppendAudio(data, sp)
+				}
+				p.turnMu.Unlock()
+			}
 			// Turn aggregation C1 point 4: the LOOSER speaking-floor tap
 			// (bargeInRms/4) stamps lastMicLoudAt so a confirm-window
 			// expiry during a breath can tell "silence resumed" from "the
@@ -2018,7 +2093,13 @@ func (p *pipeline) noteBargeIn() bool {
 const rmsWindowChunks = 10
 
 // rmsEnergy reports an s16le mono PCM chunk's loudness as (sum of squared
-// |sample|, sample count); a trailing odd byte is ignored. This is the
+// |sample|, sample count); a trailing odd byte is ignored. The magnitude
+// is taken in int32 BEFORE squaring (|v| fits int32 even at full scale:
+// -32768 -> 32768), so a negative sample's energy is its TRUE magnitude
+// squared — never a two's-complement wrap artifact. (The pre-fix
+// arithmetic wrapped -u mod 2^64 and squared that, making every non-silent
+// chunk with a negative sample read astronomically loud: room tone at
+// rms~40 fabricated a 7.0e11 sum against a 2.88e9 threshold.) This is the
 // integer form of rms^2 * n used by the threshold compare in
 // rmsChunkOver and the echo compare in rmsBargeInCheck, so neither needs a
 // division or a float.
@@ -2027,10 +2108,11 @@ func rmsEnergy(b []byte) (uint64, uint64) {
 	var n uint64
 	for i := 0; i+1 < len(b); i += 2 {
 		v := int16(binary.LittleEndian.Uint16(b[i:])) //nolint:gosec // G115: PCM s16le decode — byte-pair truncation is the codec contract
-		u := uint64(uint16(v))                        //nolint:gosec // G115: |v| magnitude cast of a 16-bit sample (always in uint16 range)
-		if v < 0 {
-			u = -u // two's complement wrap: -32768 -> 32768
+		x := int32(v)                                 //nolint:gosec // G115: int16 widened to int32 is lossless
+		if x < 0 {
+			x = -x // |sample| magnitude; -32768 -> 32768 fits int32
 		}
+		u := uint64(x)
 		sum += u * u
 		n++
 	}
@@ -2295,6 +2377,22 @@ func (p *pipeline) rmsBargeInCheck(chunk []byte) {
 				return time.Since(p.lastDispatchAt).Milliseconds()
 			}())
 	}
+	// ML speech gate (jargo Silero VAD, local leg): when an analyzer is
+	// installed, the trip must ALSO be real SPEECH — not just loud sound
+	// that cleared RMS + echo-guard + evidence (background noise, a door
+	// slam, the agent's own TTS bleed that STT mis-heard). vadSpeaking is
+	// the smoothed speaking state the audio pump writes from the same
+	// chunk; a window that is loud but the model rates not-speech is
+	// suppressed (latch + playback untouched), so a false trip can never
+	// cancel the answer. When no analyzer is present (lib absent / phone
+	// leg) this is a no-op and the legacy gate is byte-identical.
+	// (Restored 2026-11-12: a sibling merge dropped the gate.)
+	if p.vad != nil && !p.vadSpeaking {
+		p.logger.Debug("voicechild: rms barge-in suppressed (silero vad not speech)",
+			"call_id", p.ccid)
+		p.playMu.Unlock()
+		return
+	}
 	// Latch trip under playMu (noteBargeIn cannot be called re-entrantly:
 	// it would deadlock on playMu). Same field transitions as
 	// noteBargeIn: interrupted latches one-interrupt-per-barge-in,
@@ -2340,6 +2438,14 @@ func (p *pipeline) rmsBargeInCheck(chunk []byte) {
 // interrupt strictly before the partial's prompt frame — even though the
 // VAD trip fires on the audio-pump goroutine, typically a moment before
 // the STT partial for the same caller utterance lands.
+//
+// Teardown escape (defect 2026-11-13): the done handshake is closed by
+// the emit goroutine, whose socket write carries only a 2 s deadline — a
+// consumer parked here during pipeline teardown must not ride that worst
+// case out. p.ctx is cancelled by close() BEFORE the sockets drop, so the
+// select releases as soon as the pipeline is dying; the pendingInterrupt
+// field itself is cleared under playMu inside close() so later callers
+// see the no-op path.
 func (p *pipeline) awaitPendingInterrupt() {
 	p.playMu.Lock()
 	done := p.pendingInterrupt
@@ -2347,7 +2453,10 @@ func (p *pipeline) awaitPendingInterrupt() {
 	if done == nil {
 		return
 	}
-	<-done
+	select {
+	case <-done:
+	case <-p.ctx.Done():
+	}
 }
 
 // rmsEchoMarginPct is the echo-guard headroom: the incoming window's
@@ -2404,9 +2513,47 @@ func (p *pipeline) close(ctx context.Context) {
 	// confirm-timer sees an empty buffer and returns).
 	p.flushPendingFinal(p.ctx, "hangup")
 	p.cancel()
+	// Teardown escape (defect 2026-11-13): retire any in-flight RMS-trip
+	// handshake NOW — a consumer already parked in awaitPendingInterrupt
+	// releases via the ctx cancel above (the select arms the escape), and
+	// a later caller sees the nil no-op path instead of waiting on a done
+	// whose emit goroutine died with the sockets.
+	p.playMu.Lock()
+	p.pendingInterrupt = nil
+	p.playMu.Unlock()
 	_ = ctx // kept for future graceful-drain variants
 	_ = p.audioIn.Close()
 	_ = p.audioOut.Close()
+	// Release the input-side analyzers' ONNX sessions (the VAD's Silero +
+	// the turn's Smart Turn). take/release their locks to own the
+	// read-clear; Close runs off-lock (restored 2026-11-12: a sibling
+	// merge had dropped the release, leaking the ONNX session per call).
+	p.playMu.Lock()
+	vad := p.vad
+	p.vad = nil
+	p.vadSpeaking = false
+	p.playMu.Unlock()
+	if vad != nil {
+		if err := vad.Close(); err != nil {
+			p.logger.Warn("voicechild: silero vad close", "err", err, "call_id", p.ccid)
+		}
+	}
+	p.turnMu.Lock()
+	turn := p.turn
+	p.turn = nil
+	if turn != nil {
+		// Smart Turn hygiene (defect 2026-11-13): discard the buffered
+		// turn audio + sticky speech state under turnMu BEFORE releasing
+		// the session, so teardown mirrors the dispatch-path Clear and a
+		// fake analyzer observes exactly-once-per-call reset semantics.
+		turn.Clear()
+	}
+	p.turnMu.Unlock()
+	if turn != nil {
+		if err := turn.Close(); err != nil {
+			p.logger.Warn("voicechild: smart turn close", "err", err, "call_id", p.ccid)
+		}
+	}
 	p.transMu.Lock()
 	started := p.transStarted
 	p.transMu.Unlock()

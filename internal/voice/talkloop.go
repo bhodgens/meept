@@ -61,6 +61,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 )
 
 // Turn-state kinds for the link half-duplex seam (TalkDeps.TurnState).
@@ -148,6 +149,31 @@ type TalkLoopConfig struct {
 	// greeting crosses its mic as a final prompt). False (the default,
 	// every non-link call) keeps the greeting byte-identical.
 	SuppressGreeting bool
+	// ConnectSentences speaks a reply as ONE connected utterance when
+	// no supervisor gate is active. The supervisor is per-SENTENCE:
+	// when the gate is off there is nothing to check per sentence, yet
+	// the legacy path still SplitSentences'd the draft and submitted
+	// each sentence as a separate TTS request — qwen3 then read each
+	// sentence as a flat standalone unit, producing a robotic
+	// list-cadence plus 400-760 ms artificial gaps between every
+	// sentence (live call local-4aaa6ea97de14a22 baseline; the gaps are
+	// the TTS SYNTHESIS deferral between independent requests, not the
+	// pacer). When true, the WHOLE draft is sent as one say frame and
+	// the TTS synthesizes natural cross-sentence prosody with real
+	// (short) intra-reply pauses. When a supervisor IS enabled the
+	// per-sentence path is mandatory (the gate must check each
+	// sentence), so this is only consulted when no check is needed.
+	ConnectSentences bool
+	// FragmentClarify is the line spoken when a dispatched prompt is an
+	// unfinished fragment (whisper cut it mid-thought; the endpointing
+	// layer already waited fragment_confirm_ms for the caller to resume
+	// and they trailed off anyway). A human agent then says "Was that
+	// all? I'm not sure I understand you" rather than coldly answering
+	// the half-broken sentence. Empty (the default) preserves legacy
+	// behavior (the turn runs on whatever text reached the loop);
+	// non-empty speaks the line and SKIPS the LLM turn for that
+	// fragment.
+	FragmentClarify string
 }
 
 // TalkDeps wires the loop. Send is the C1 seam: the talk loop never touches
@@ -310,6 +336,18 @@ type TalkLoop struct {
 	// fire speaks SilencePromptLine, the second hangs up.
 	silencePrompted bool
 
+	// drainSignal wakes Run's select after cancelPipeline drops a LIVE
+	// draft (barge-in/supersede). The silence clock is suspended from
+	// dispatch until the draft DRAINS, and the drain edge is normally the
+	// checker closing p.checks — but a cancelled draft's close is invisible
+	// to Run (t.cur is already nil, so current() is the disarmed nil
+	// channel forever): bughunt 2026-11-12 defect 7, the silence
+	// nudge/hangup never fired after a barge-in with no follow-up speech.
+	// Buffered(1): the signal is level-free (any pending wake-up triggers
+	// the re-arm check on the next select) and a non-blocking send from the
+	// splice's CancelDraftFn goroutine can never wedge the cancel path.
+	drainSignal chan struct{}
+
 	// Link half-duplex state (turn-taking leaf). held is the ONE parked
 	// prompt (a second held final replaces the pending one, latest
 	// question wins); heldMu guards ONLY the swap - the closure itself is
@@ -340,12 +378,13 @@ func NewTalkLoop(deps TalkDeps, cfg TalkLoopConfig) *TalkLoop {
 		now = time.Now
 	}
 	return &TalkLoop{
-		deps:   deps,
-		cfg:    cfg,
-		log:    logger,
-		now:    now,
-		frames: make(chan Frame, 16),
-		flush:  make(chan struct{}, 1),
+		deps:        deps,
+		cfg:         cfg,
+		log:         logger,
+		now:         now,
+		frames:      make(chan Frame, 16),
+		flush:       make(chan struct{}, 1),
+		drainSignal: make(chan struct{}, 1),
 	}
 }
 
@@ -746,7 +785,11 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 	defer stopTurn()
 
 	// current drains the live pipeline's verdict channel, or nil between
-	// prompts.
+	// prompts. A nil channel is the DISARMED verdict arm: select never
+	// picks it, so the drain branch stays parked while a turn is in
+	// flight (the silence clock is suspended). The cancel path re-arms
+	// the clock through the dedicated drain channel instead (see
+	// drainSignal) rather than by making this channel readable.
 	current := func() chan verdict {
 		t.interruptMu.Lock()
 		defer t.interruptMu.Unlock()
@@ -895,6 +938,17 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 			t.cancelPipeline(ccid, "teardown")
 			t.end(ccid, fmt.Sprintf("turn timeout (%ds without a spoken reply)", t.cfg.TurnTimeoutSeconds))
 			return nil
+		case <-t.drainSignal:
+			// A cancelled draft ends the silence suspension (defect 7).
+			// Only re-arm when NOTHING is in flight and the clock is
+			// still stopped: after a supersede the signal lands while
+			// the NEWER draft is already live, and re-arming there would
+			// unsuspend the clock mid-generation (the fresh draft's own
+			// drain branch re-arms instead). A live silenceC means some
+			// other path already re-armed — never stomp a fresher window.
+			if t.curPipeline() == nil && silenceC == nil {
+				rearmSilence()
+			}
 		case vr, ok := <-current():
 			if !ok {
 				// Draft finished (checker closed the channel): the
@@ -951,7 +1005,11 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 				// (say-choke): a plain local/phone call that overhears a
 				// link conversation must still drop the echo. The
 				// short-prompt floor (echoMinPromptWords)
-				// is enforced inside the roster.
+				// is enforced inside the roster; interaction with the
+				// sibling 9f860991 min_turn_words gate is documented in
+				// echo_roster.go (harmless overlap: that gate drops short
+				// finals by length for every call, this floor just
+				// declines to run the scorer on them).
 				//
 				// Telemetry posture: routeFrame already appended the
 				// `heard` ring event BEFORE enqueueing this frame (the
@@ -1107,6 +1165,41 @@ func (t *TalkLoop) spawnPipeline(ctx context.Context, call Instance, prompt, fil
 	}
 
 	go func() {
+		// Fragment-clarify (voice.fragment_clarify): if the caller
+		// trailed off into an unfinished fragment (whisper cut it
+		// mid-thought and the endpointing layer already waited
+		// fragment_confirm_ms with no continuation), speak the
+		// configured clarification line and SKIP the LLM turn — a human
+		// says "Was that all? I'm not sure I understand you" rather than
+		// coldly answering the half-broken sentence. Fact-free like
+		// filler, so it bypasses the supervisor gate. Empty config keeps
+		// the legacy ready path; only the trailing-ellipsis shape trips
+		// (a completed word/sentence never does), so a real one-word
+		// command like "Stop." is never clarified away.
+		if t.cfg.FragmentClarify != "" && isTrailingEllipsis(prompt) {
+			t.interruptMu.Lock()
+			stale := t.gen != p.gen
+			if !stale {
+				p.utteranceOut = true
+				p.fillerPending = false
+				if p.fillerTimer != nil {
+					p.fillerTimer.Stop()
+					p.fillerTimer = nil
+				}
+				p.turnEnded = true
+			}
+			t.interruptMu.Unlock()
+			if !stale {
+				if err := t.say(ccid, t.cfg.FragmentClarify, true); err == nil {
+					t.log.Info("voice talk loop: fragment clarify", "ccid", ccid, "seq", seq, "kind", "fragment_clarify", "line", t.cfg.FragmentClarify)
+					t.sayProgress(ccid)
+				} else {
+					t.log.Warn("voice talk loop: fragment clarify send failed", "ccid", ccid, "error", err)
+				}
+			}
+			close(p.checks)
+			return
+		}
 		// The turn itself: run AFTER the pipeline is registered so an
 		// interrupt racing the spawn still bumps past this gen.
 		reply, err := t.deps.Turns.Run(turnCtx, t.deps.SessionFor(call), prompt)
@@ -1121,6 +1214,89 @@ func (t *TalkLoop) spawnPipeline(ctx context.Context, call Instance, prompt, fil
 		}
 		if strings.TrimSpace(reply) == "" {
 			close(p.checks)
+			return
+		}
+		// Connected-utterance path (ConnectSentences, wired for a disabled
+		// supervisor gate): the per-sentence split exists ONLY so the
+		// supervisor can check each sentence. With no gate to satisfy, sort
+		// by the whole draft as ONE connected utterance — the TTS then
+		// produces natural cross-sentence prosody and real short pauses
+		// instead of a flat per-sentence list reading of independent
+		// requests (the 400-760 ms artificial gaps in the baseline live
+		// call). The utterance is still capped so a runaway draft cannot
+		// turn into one unbounded TTS request; beyond the cap it falls back
+		// to split sentences so no speech is ever lost.
+		unit := strings.TrimSpace(reply)
+		if t.cfg.ConnectSentences {
+			if n := utf8.RuneCountInString(unit); n > maxSentenceRunes*3 {
+				r := []rune(unit)
+				unit = string(r[:maxSentenceRunes*3])
+			}
+			// Fast-first-audio: split the FIRST sentence off as its own
+			// (short, fast-to-synthesize) say, then the REMAINDER as the
+			// final connected utterance. The child's depth-2 prefetch
+			// overlaps the remainder's synthesis under the first
+			// sentence's playback, so the caller hears the opening within
+			// ~1-2s instead of waiting for the WHOLE reply to synthesize
+			// (qwen3 does not stream; the full-utterance synthesis latency
+			// was the dominant post-dispatch delay — measured 2-5.6s in
+			// live call local-fbf9a76ef9357454). A single-sentence reply
+			// stays a single final utterance. Both utterances are checked
+			// once (gate-off = instant allow); delivery splits them.
+			v, err := t.deps.Supervisor.Check(turnCtx, ccid, unit)
+			defer close(p.checks)
+			if err != nil {
+				if turnCtx.Err() != nil {
+					return
+				}
+				t.interruptMu.Lock()
+				stale := t.gen != p.gen
+				t.interruptMu.Unlock()
+				if stale {
+					return
+				}
+				select {
+				case p.checks <- verdict{fallback: true, final: true}:
+				case <-turnCtx.Done():
+					return
+				}
+				return
+			}
+			first, rest := splitFirstSentence(unit)
+			if first != "" && rest != "" {
+				t.interruptMu.Lock()
+				stale := t.gen != p.gen
+				t.interruptMu.Unlock()
+				if stale {
+					return
+				}
+				// First sentence out first, non-final; the remainder
+				// follows as the final connected utterance.
+				select {
+				case p.checks <- verdict{sentence: first, allowed: v.Allowed, final: false}:
+				case <-turnCtx.Done():
+					return
+				}
+				select {
+				case p.checks <- verdict{sentence: rest, allowed: v.Allowed, final: true}:
+				case <-turnCtx.Done():
+					return
+				}
+				return
+			}
+			// Single-sentence (or empty rest) reply: one connected final
+			// utterance.
+			t.interruptMu.Lock()
+			stale := t.gen != p.gen
+			t.interruptMu.Unlock()
+			if stale {
+				return
+			}
+			select {
+			case p.checks <- verdict{sentence: unit, allowed: v.Allowed, final: true}:
+			case <-turnCtx.Done():
+				return
+			}
 			return
 		}
 		sentences := SplitSentences(reply)
@@ -1290,6 +1466,18 @@ func (t *TalkLoop) cancelPipeline(ccid, reason string) {
 	if p.cancel != nil {
 		p.cancel()
 	}
+	// Defect-7 re-arm wake-up: a cancelled draft is a DRAIN for the
+	// silence suspension, but its p.checks close is invisible to Run
+	// (t.cur was already dropped, so current() is the disarmed nil
+	// channel). Wake the select so the Run-goroutine handler can restart
+	// the clock. Non-blocking send on a buffered(1) channel: cancelPipeline
+	// may run on the splice's CancelDraftFn goroutine, and one pending
+	// wake-up is all the level-free re-arm check needs (teardown sends are
+	// harmless — Run returns right after and never reads the signal).
+	select {
+	case t.drainSignal <- struct{}{}:
+	default:
+	}
 }
 
 // logTurnFinal emits the per-turn completion telemetry (leaf 02): words
@@ -1319,6 +1507,59 @@ func (t *TalkLoop) logTurnFinal(ccid string, p *pipeline) {
 // (telemetry preview only - exactness does not matter).
 func wordCount(text string) int {
 	return len(strings.Fields(text))
+}
+
+// splitFirstSentence returns (first, rest): the leading sentence (ending at
+// the first terminal '.?!' or newline) and everything after it, both
+// trimmed. Used by the fast-first-audio connected-utterance path so the
+// opener can synthesize and play while the remainder generates.
+func splitFirstSentence(text string) (string, string) {
+	t := strings.TrimSpace(text)
+	if t == "" {
+		return "", ""
+	}
+	for i, r := range t {
+		if r == '.' || r == '!' || r == '?' || r == '\n' {
+			first := strings.TrimSpace(t[:i+1])
+			rest := strings.TrimSpace(t[i+1:])
+			if first != "" && rest != "" {
+				return first, rest
+			}
+		}
+	}
+	return t, ""
+}
+
+// isTrailingEllipsis reports whether text ends in an ellipsis (the U+2026
+// rune or an ASCII multi-dot run) — whisper's mark for a mid-thought
+// cutoff ("...got any t..."). Single terminal '.?!' is a completed
+// sentence. Mirrors voicechild.isUnfinishedReport at the dispatch layer so
+// the talk loop can decide fragment-clarify without importing the child.
+func isTrailingEllipsis(text string) bool {
+	t := strings.TrimSpace(text)
+	if t == "" {
+		return false
+	}
+	runes := []rune(t)
+	if len(runes) == 0 {
+		return false
+	}
+	last := runes[len(runes)-1]
+	if last == '…' {
+		return true
+	}
+	if last != '.' {
+		return false
+	}
+	dots := 0
+	for i := len(runes) - 1; i >= 0; i-- {
+		if runes[i] == '.' || runes[i] == '…' {
+			dots++
+		} else {
+			break
+		}
+	}
+	return dots >= 2
 }
 
 // handleInterrupt runs the barge-in contract for THIS call only: drop the

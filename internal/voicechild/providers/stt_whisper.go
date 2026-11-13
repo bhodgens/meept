@@ -52,6 +52,20 @@ const (
 	whisperStderrTailBytes = 200
 )
 
+// whisperRecognizeTimeout bounds ONE whisper-cli segment run.
+//
+// ctx at the call site is the Stream context = the pipeline context = the
+// whole CALL lifetime. Handing that to exec.CommandContext means a wedged
+// whisper-cli blocks the transcript consumer forever while forwardPCM
+// silently drops the caller's speech (defect 5). This per-segment bound
+// turns a wedge into a segment error: recognize() logs it and ends the
+// stream, so the child stays responsive.
+//
+// The segment WAV is at most whisperMaxWindowS (10 s) of audio; 15 s leaves
+// ~1.5x headroom over real time for a cold subprocess, and a slow model is
+// still bounded instead of unbounded.
+const whisperRecognizeTimeout = 15 * time.Second
+
 // whisperWallIdle is the duration form of whisperWallIdleMs. A package
 // var so unit tests can shrink the wall-idle wait; production uses the
 // constant.
@@ -362,11 +376,20 @@ func (s *WhisperSTT) recognizeOne(ctx context.Context, dir string, seq int, buf 
 	if err := writeWAV16(wavPath, buf, s.cfg.SampleRate); err != nil {
 		return "", fmt.Errorf("write wav: %w", err)
 	}
-	cmd := exec.CommandContext(ctx, s.bin, "-m", s.cfg.Model, "-f", wavPath, "-nt")
+	// Per-segment bound (whisperRecognizeTimeout): the caller's ctx is the
+	// whole call lifetime, so a wedged CLI would otherwise block this
+	// consumer forever and starve the transcript stream.
+	segCtx, cancel := context.WithTimeout(ctx, whisperRecognizeTimeout)
+	defer cancel()
+	// -m model, -f wav, -nt = no timestamps (plain text on stdout).
+	cmd := exec.CommandContext(segCtx, s.bin, "-m", s.cfg.Model, "-f", wavPath, "-nt")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	stdout, err := cmd.Output()
 	if err != nil {
+		if errors.Is(segCtx.Err(), context.DeadlineExceeded) {
+			return "", fmt.Errorf("whisper-cli on segment: timed out after %s: %w", whisperRecognizeTimeout, segCtx.Err())
+		}
 		return "", fmt.Errorf("whisper-cli on segment: %w (stderr tail: %s)", err, tailBytes(stderr.Bytes(), whisperStderrTailBytes))
 	}
 	return strings.TrimSpace(string(stdout)), nil

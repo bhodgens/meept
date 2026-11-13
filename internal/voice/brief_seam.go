@@ -10,7 +10,6 @@ package voice
 import (
 	"context"
 	"fmt"
-	"strconv"
 )
 
 // CommitmentRow mirrors the C7 ledger row the adapter must produce: one
@@ -82,11 +81,4 @@ func fileCommitmentOnce(ctx context.Context, filer CommitmentFiler, ccid string,
 		return fmt.Errorf("voice commitments: file %s idx %d: %w", ccid, index, err)
 	}
 	return nil
-}
-
-// commitmentIndexKey is the canonical (ccid, index) dedupe key form the
-// daemon adapter encodes in the ledger row payload (kept here so the
-// voice-side tests and the daemon adapter agree on the encoding).
-func commitmentIndexKey(ccid string, index int) string {
-	return ccid + "#" + strconv.Itoa(index)
 }

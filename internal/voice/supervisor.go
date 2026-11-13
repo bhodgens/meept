@@ -11,11 +11,13 @@ package voice
 // a failure").
 
 import (
+	"container/list"
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -75,7 +77,56 @@ type supervisor struct {
 	cfg     SupervisorConfig
 	chatter SupervisorChatter
 	logger  *slog.Logger
+
+	// sentenceCache memoizes ALLOW verdicts so a repeat sentence (the
+	// same fact restated across turns of one call, or across calls
+	// sharing the supervisor) costs no second model ask. DENIES are
+	// NEVER cached — fail-closed means a denial gets re-examined. A
+	// short TTL bounds staleness (policy context moves). cacheMu guards
+	// ONLY the map + LRU list swap: never held across Ask (no I/O under
+	// a mutex, repo rule).
+	cacheMu       sync.Mutex
+	sentenceCache map[string]*list.Element
+	cacheOrder    *list.List // front = most recently used/inserted
+	cacheNow      func() time.Time
+
+	// counters ride their own mutex (statsMu) so a stats read never
+	// contends with a cache hit path. Posture: aggregate counts only —
+	// the gate never logs per sentence (a voice call must not spam the
+	// log at sentence rate); this is the observability substitute that
+	// a per-call summary getter (Stats) exposes for wiring to poll.
+	statsMu   sync.Mutex
+	checks    int64 // Check calls that reached a verdict source (not ctx-cancel, not parent-err)
+	denied    int64 // deny verdicts (never-pattern, model deny, error, quota — every fail-closed path)
+	timeouts  int64 // timeout-class denies specifically
+	cacheHits int64 // checks answered from the allow cache (zero model spend)
 }
+
+// cacheEntry is one memoized ALLOW.
+type cacheEntry struct {
+	sentence string // normalized key (also stored for eviction re-lookup)
+	expires  time.Time
+}
+
+// SupervisorStats is the snapshot returned by (*supervisor).Stats.
+type SupervisorStats struct {
+	Checks    int64
+	Denied    int64
+	Timeouts  int64
+	CacheHits int64
+}
+
+// supervisorCacheTTL is the allow-cache entry lifetime. A var (not a
+// const) is the ms-tunable seam for tests, same posture as
+// silenceWindowUnit in the talk loop; only supervisor cache tests mutate
+// it, and package tests run sequentially.
+var supervisorCacheTTL = 5 * time.Second
+
+// supervisorCacheCap bounds the memo map; the least-recently-used entry
+// is evicted when a NEW key would exceed it. 256 comfortably covers one
+// call's distinct sentences (maxSplitSentences x a few turns) without
+// unbounded growth across long-lived shared supervisors.
+const supervisorCacheCap = 256
 
 // NewSupervisor builds the gate. Construction logs ONCE when the gate is
 // disabled; Check never logs per sentence (a voice call must not spam the
@@ -87,7 +138,14 @@ func NewSupervisor(cfg SupervisorConfig, chatter SupervisorChatter, logger *slog
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = defaultSupervisorTimeout
 	}
-	s := &supervisor{cfg: cfg, chatter: chatter, logger: logger}
+	s := &supervisor{
+		cfg:           cfg,
+		chatter:       chatter,
+		logger:        logger,
+		sentenceCache: make(map[string]*list.Element),
+		cacheOrder:    list.New(),
+		cacheNow:      time.Now,
+	}
 	if !cfg.Enabled {
 		logger.Info("voice supervisor disabled: every sentence is allowed without a check")
 	}
@@ -110,12 +168,24 @@ func (s *supervisor) Check(ctx context.Context, callID, sentence string) (Verdic
 	if !s.cfg.Enabled {
 		return Verdict{Sentence: sentence, Allowed: true, Reason: "disabled"}, nil
 	}
-	// NeverPatterns pre-check: a machine-checked denial spends no model call.
+	s.countCheck()
+	// NeverPatterns pre-check: a machine-checked denial spends no model call
+	// and bypasses the allow cache (policy beats memoization; and denies
+	// are never cached, so a hit here only shadows a stale allow).
 	lower := strings.ToLower(sentence)
 	for _, p := range s.cfg.NeverPatterns {
 		if p != "" && strings.Contains(lower, strings.ToLower(p)) {
+			s.countDeny()
 			return Verdict{Sentence: sentence, Allowed: false, Reason: neverPatternReason}, nil
 		}
+	}
+	// Allow cache: a repeat sentence the model already approved within the
+	// TTL costs zero model asks (repeated facts across turns are common —
+	// confirmations, restatements). Only successful ALLOW verdicts land in
+	// the cache (see countAllow), so a hit can never resurrect a denial.
+	if key := s.cacheLookupKey(sentence); s.cacheHit(key) {
+		s.countCacheHit()
+		return Verdict{Sentence: sentence, Allowed: true, Reason: "cached"}, nil
 	}
 
 	// Hard per-Check budget. Ask runs on a child of the caller's ctx with
@@ -149,18 +219,141 @@ func (s *supervisor) Check(ctx context.Context, callID, sentence string) (Verdic
 			// no retry (internal/llm/AGENTS.md). Classify via real sentinels.
 			var qe *llm.QuotaResetError
 			if errors.As(res.err, &qe) || errors.Is(res.err, llm.ErrAllModelsQuotaBlocked) {
+				s.countDeny()
 				return Verdict{Sentence: sentence, Allowed: false, Reason: quotaReason}, nil
 			}
+			s.countDeny()
 			return Verdict{Sentence: sentence, Allowed: false, Reason: errorReason}, nil
 		}
-		return Verdict{Sentence: sentence, Allowed: parseAllowed(res.reply), Reason: parseReason(res.reply)}, nil
+		allowed := parseAllowed(res.reply)
+		if allowed {
+			// Only a SUCCESSFUL model ALLOW is memoized (never an
+			// "disabled" fast path, a timeout, or a deny).
+			s.cacheStore(s.cacheLookupKey(sentence))
+		} else {
+			s.countDeny()
+		}
+		return Verdict{Sentence: sentence, Allowed: allowed, Reason: parseReason(res.reply)}, nil
 	case <-askCtx.Done():
 		// Our deadline (or the parent) expired first: fail closed as
 		// timeout. The abandoned Ask goroutine exits on its own via
 		// askCtx cancellation; the buffered channel means it never leaks
 		// blocked on the send.
+		s.countTimeout()
 		return Verdict{Sentence: sentence, Allowed: false, Reason: timeoutReason}, nil
 	}
+}
+
+// cacheLookupKey normalizes a sentence for cache identity: trimmed,
+// inner whitespace collapsed, lower-cased. Whitespace/case variants of the
+// same approved sentence hit the same entry (the ask prompt embeds the raw
+// sentence, but its verdict is not sensitive to those differences).
+func (s *supervisor) cacheLookupKey(sentence string) string {
+	return strings.ToLower(strings.Join(strings.Fields(sentence), " "))
+}
+
+// cacheHit reports whether key holds a live ALLOW entry, refreshing its
+// recency on a hit and dropping it when the TTL expired.
+func (s *supervisor) cacheHit(key string) bool {
+	if key == "" {
+		return false
+	}
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	el, ok := s.sentenceCache[key]
+	if !ok {
+		return false
+	}
+	entry := el.Value.(*cacheEntry)
+	if s.cacheNow().After(entry.expires) {
+		s.cacheRemoveLocked(el)
+		return false
+	}
+	s.cacheOrder.MoveToFront(el)
+	return true
+}
+
+// cacheStore memoizes an ALLOW under key, evicting the least-recently-used
+// (or already-expired) entries when the cache is at capacity. An expired
+// sweep runs only at the cap, keeping the hot path O(1).
+func (s *supervisor) cacheStore(key string) {
+	if key == "" {
+		return
+	}
+	now := s.cacheNow()
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	if el, ok := s.sentenceCache[key]; ok {
+		el.Value.(*cacheEntry).expires = now.Add(supervisorCacheTTL)
+		s.cacheOrder.MoveToFront(el)
+		return
+	}
+	for s.cacheOrder.Len() >= supervisorCacheCap {
+		// Evict LRU (back). The entry itself may be expired — same
+		// eviction shape either way.
+		back := s.cacheOrder.Back()
+		if back == nil {
+			break
+		}
+		s.cacheRemoveLocked(back)
+	}
+	el := s.cacheOrder.PushFront(&cacheEntry{sentence: key, expires: now.Add(supervisorCacheTTL)})
+	s.sentenceCache[key] = el
+}
+
+// cacheRemoveLocked drops one entry (caller holds cacheMu).
+func (s *supervisor) cacheRemoveLocked(el *list.Element) {
+	s.cacheOrder.Remove(el)
+	delete(s.sentenceCache, el.Value.(*cacheEntry).sentence)
+}
+
+// countCheck records one gate-reaching Check (excludes the disabled fast
+// path and a parent-cancel early return — those never cost or classify).
+func (s *supervisor) countCheck() {
+	s.statsMu.Lock()
+	s.checks++
+	s.statsMu.Unlock()
+}
+
+func (s *supervisor) countDeny() {
+	s.statsMu.Lock()
+	s.denied++
+	s.statsMu.Unlock()
+}
+
+func (s *supervisor) countTimeout() {
+	s.statsMu.Lock()
+	s.timeouts++
+	s.denied++
+	s.statsMu.Unlock()
+}
+
+func (s *supervisor) countCacheHit() {
+	s.statsMu.Lock()
+	s.cacheHits++
+	s.statsMu.Unlock()
+}
+
+// Stats returns a snapshot of the gate counters. Wiring/report surfaces
+// read this instead of per-sentence logs (the never-log-at-sentence-rate
+// posture stays intact). Intentionally NOT on the Supervisor interface —
+// the talk loop treats the gate as just a Supervisor.
+func (s *supervisor) Stats() SupervisorStats {
+	s.statsMu.Lock()
+	defer s.statsMu.Unlock()
+	return SupervisorStats{
+		Checks:    s.checks,
+		Denied:    s.denied,
+		Timeouts:  s.timeouts,
+		CacheHits: s.cacheHits,
+	}
+}
+
+// cacheLen reports the live entry count (tests only).
+func (s *supervisor) cacheLen() int {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	return len(s.sentenceCache)
 }
 
 // supervisorPrompt is the fixed, short ask: one verdict word plus a reason

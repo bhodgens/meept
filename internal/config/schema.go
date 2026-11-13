@@ -5097,6 +5097,7 @@ func DefaultConfig() *Config {
 			SilenceHangupAfterSeconds: 45,
 			FillerGraceMs:             2500,
 			TurnConfirmMs:             900,
+			FragmentConfirmMs:         3000,
 			// min_turn_words is opt-in: default 0 = short-final gate
 			// disabled (docs/agents/opt-in-defaults.md). Loud-room
 			// operators set N>=2 to drop background-fragment finals.
@@ -5497,6 +5498,21 @@ type VoiceConfig struct {
 	// so per-final dispatch answered fragments of one sentence).
 	// Default 900; 0 = legacy per-final dispatch.
 	TurnConfirmMs int `json:"turn_confirm_ms" toml:"turn_confirm_ms"`
+	// FragmentConfirmMs is the extra confirm budget for a FINAL that
+	// looks like an unfinished thought (whisper leaves no terminal
+	// punctuation / a trailing ellipsis on a mid-word cutoff): the
+	// dispatch waits this long for the caller to resume so a thinking
+	// pause is never answered mid-sentence (default 3000; 0 = no
+	// fragment extension — the turn_confirm_ms window applies to all
+	// finals). Restored 2026-11-12 (a sibling commit had dropped the
+	// field while the wiring still referenced it).
+	FragmentConfirmMs int `json:"fragment_confirm_ms" toml:"fragment_confirm_ms"`
+	// FragmentClarify is the line spoken when a dispatched prompt still
+	// ends in a trailing ellipsis after the fragment budget (the caller
+	// genuinely trailed off): the talk loop speaks it and skips the LLM
+	// turn. Empty (default) = legacy behavior. Restored 2026-11-12
+	// alongside FragmentConfirmMs.
+	FragmentClarify string `json:"fragment_clarify" toml:"fragment_clarify"`
 	// MinTurnWords is the child-side short-final gate (voice-microfrag,
 	// live call local-0627960006a7f3d9): in a loud room, background-TV
 	// fragments ("The other", "This is...") finalize seconds apart —

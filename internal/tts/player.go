@@ -90,14 +90,24 @@ func resolveSampleRate(cfg PlaybackConfig) int {
 // per-handoff pause chopped paced real-time audio at every burst
 // boundary - the 2026-11-09 chop regression). Cancellation lives in
 // Stop(), which pauses every live burst at once.
+//
+// Mutex scope: the lock covers ONLY the map bookkeeping (lazy ctx init +
+// prune + the live-set insert). The driver calls - newContext (which may
+// OPEN the audio device and wait for it) and NewPlayer/Play - run with NO
+// lock held. Holding the mutex across them violated the repo's
+// I/O-under-mutex rule and put a barge-in Stop() behind an in-flight
+// Play(), which is exactly the ~20 ms silence target the barge-in contract
+// promises. Two concurrent Play calls cannot double-init the context: the
+// first publishes it under the lock, the second finds it non-nil there.
 func (p *AudioPlayer) Play(audioData []byte) error {
+	// Phase 1 - lock: lazy context init (re-checked under the lock so a
+	// concurrent Play cannot re-open the device) and the finished-burst
+	// prune.
 	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	// Initialize context if not already done
 	if p.ctx == nil {
 		drv, err := newContext(p.config)
 		if err != nil {
+			p.mu.Unlock()
 			return err
 		}
 		p.ctx = drv
@@ -105,7 +115,6 @@ func (p *AudioPlayer) Play(audioData []byte) error {
 	if p.live == nil {
 		p.live = map[burstPlayer]struct{}{}
 	}
-
 	// Prune finished bursts lazily on each handoff so the live set stays
 	// bounded to the short overlap tail (a burst runs ~150 ms; at most a
 	// couple are ever mid-playback).
@@ -114,10 +123,22 @@ func (p *AudioPlayer) Play(audioData []byte) error {
 			delete(p.live, pl)
 		}
 	}
+	drv := p.ctx
+	p.mu.Unlock()
 
-	player := p.ctx.NewPlayer(io.Reader(bytes.NewReader(audioData)))
+	// Phase 2 - no lock: the driver I/O. newContext's failure mode and a
+	// NewPlayer panic are the only reasons this can fail; a panic here
+	// leaves the live set untouched (nothing was inserted yet).
+	player := drv.NewPlayer(io.Reader(bytes.NewReader(audioData)))
 	player.Play()
+
+	// Phase 3 - lock again, briefly: record the burst. Stop() that lands
+	// between phase 2 and here still pauses it (Stop clears the set, and
+	// this insert then re-adds a burst Stop already paused - harmless: the
+	// player is paused, and the next Play's prune drops it).
+	p.mu.Lock()
 	p.live[player] = struct{}{}
+	p.mu.Unlock()
 
 	return nil
 }

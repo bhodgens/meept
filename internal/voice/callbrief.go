@@ -196,26 +196,8 @@ func (s *CallStore) SetBriefExt(ctx context.Context, callID string, ext json.Raw
 	return nil
 }
 
-// abandonBriefIfStub marks the stored stub brief abandoned (O1: startup
-// sweep / live reaper = brief abandoned while the call row outcome says
-// failed). Only a non-terminal (stub) brief is touched; completed and
-// failed briefs survive the sweep untouched. Blank briefs are excluded
-// FIRST: json_extract on a non-JSON value errors in SQLite, and old rows
-// / rows without a stub legitimately carry ”.
-func (s *CallStore) abandonBriefIfStub(ctx context.Context, callID string) error {
-	if _, err := s.db.ExecContext(ctx,
-		`UPDATE voice_calls SET brief = json_set(brief, '$.status', json_quote('`+BriefStatusAbandoned+`'))
-		 WHERE call_id = ? AND brief != '' AND json_valid(brief)
-		   AND json_extract(brief, '$.status') = '`+BriefStatusInProgress+`'`,
-		callID,
-	); err != nil {
-		return fmt.Errorf("voice callbrief: abandon stub for %s: %w", callID, err)
-	}
-	return nil
-}
-
-// abandonStubs marks every stub brief abandoned (the sweep's bulk form of
-// abandonBriefIfStub; single statement, single connection, no cursor).
+// abandonStubs marks every stub brief abandoned (single statement,
+// single connection, no cursor).
 func (s *CallStore) abandonStubs(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx,
 		`UPDATE voice_calls SET brief = json_set(brief, '$.status', json_quote('`+BriefStatusAbandoned+`'))

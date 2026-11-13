@@ -81,8 +81,8 @@ func (w *echoWindow) add(text string) {
 // matches reports whether text fuzzy-MATCHES any entry of the window —
 // i.e. its provenance query (the final's content tokens, see
 // echoMinContentTokens) is recognizably contained in some sentence the
-// agent recently spoke. Caller holds playMu (the pipeline routes through
-// echoWindowMatchesLocked which also enforces the lock regime).
+// agent recently spoke. Caller holds playMu (the pipeline's read sites —
+// consumeTranscripts and rmsBargeInCheck — call it under that lock).
 func (w *echoWindow) matches(text string) bool {
 	query := provenanceQuery(text)
 	if query == "" {
@@ -129,12 +129,6 @@ func provenanceQuery(text string) string {
 		return ""
 	}
 	return strings.Join(kept, " ")
-}
-
-// echoWindowMatchesLocked reports whether trimmed final text is the
-// agent's own recent speech. Caller holds playMu.
-func (p *pipeline) echoWindowMatchesLocked(text string) bool {
-	return p.echoWin.matches(text)
 }
 
 // echoWindowTextLocked returns a normalized copy of the current window

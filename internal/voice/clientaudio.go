@@ -323,7 +323,7 @@ func (s *SpeakerSink) Flush() error {
 	if s.buf.Len() == 0 {
 		return nil
 	}
-	burst := s.buf.Bytes()
+	burst := append([]byte(nil), s.buf.Bytes()...)
 	s.buf.Reset()
 	if s.player == nil {
 		return nil

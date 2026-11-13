@@ -56,6 +56,17 @@ type Child struct {
 	// nil factories leave the leaf-07 stubs in place (tests).
 	sttFactory STTFactory
 	ttsFactory TTSFactory
+	// vadFactory, injected by cmd/meept-voice, builds an input-side
+	// speech-vs-noise analyzer (jargo Silero VAD) for the local leg. A
+	// nil factory keeps the legacy RMS + STT-evidence gate; a factory
+	// that errors (ONNX lib absent) degrades the same way, per call.
+	vadFactory VADFactory
+	// turnFactory, injected by cmd/meept-voice, builds an input-side
+	// COMPLETE-THOUGHT analyzer (jargo Smart Turn) for the local leg. A
+	// nil factory keeps the whisper-punctuation endpointing oracle; a
+	// factory that errors (ONNX lib absent) degrades the same way, per
+	// call.
+	turnFactory TurnFactory
 
 	// mu guards conn + the provider factories ONLY (audit fix 3: the
 	// pipelines map moved to pipelineMu). writeMu serializes text-socket
@@ -189,6 +200,42 @@ func (c *Child) SetProviderFactories(stt STTFactory, tts TTSFactory) {
 	if tts != nil {
 		c.ttsFactory = tts
 	}
+}
+
+// SetVADFactory injects the input-side speech analyzer constructor (jargo
+// Silero VAD, wired by cmd/meept-voice). A nil argument keeps the legacy
+// RMS + STT-evidence gate; a factory that errors at construct time
+// (ONNX runtime lib absent) degrades to the same gate per call.
+func (c *Child) SetVADFactory(f VADFactory) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.vadFactory = f
+}
+
+// SetTurnFactory injects the input-side complete-thought analyzer
+// constructor (jargo Smart Turn, wired by cmd/meept-voice). A nil argument
+// keeps the whisper-punctuation endpointing oracle; a factory that errors
+// at construct time (ONNX runtime lib absent) degrades the same way.
+func (c *Child) SetTurnFactory(f TurnFactory) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.turnFactory = f
+}
+
+// vadFactoryFor returns the child's VAD factory under the mu regime (nil
+// default).
+func (c *Child) vadFactoryFor() VADFactory {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.vadFactory
+}
+
+// turnFactoryFor returns the child's turn-analyzer factory under the mu
+// regime (nil default).
+func (c *Child) turnFactoryFor() TurnFactory {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.turnFactory
 }
 
 // Run connects the text socket, reads the start token from TokenReader

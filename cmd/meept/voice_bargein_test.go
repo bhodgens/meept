@@ -107,7 +107,10 @@ func newCtrlReader() *ctrlReader {
 func (r *ctrlReader) Read(p []byte) (int, error) {
 	r.mu.Lock()
 	for len(r.data) == 0 && !r.closed {
-		r.cond.Wait()
+		// sync.Cond.Wait REQUIRES the mutex held and atomically releases
+		// it while blocked - there is no I/O under the lock here (the
+		// mutexio analyzer has no Cond special-case; false positive).
+		r.cond.Wait() //nolint:mutexio // cond.Wait contract: must hold L, releases it internally
 	}
 	if len(r.data) > 0 {
 		d := r.data[0]

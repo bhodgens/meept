@@ -1810,6 +1810,48 @@ linkLoop:
 // warning, never aborts the link run; the loops die on socket EOF when
 // the link closes (tap conns close with the bridge's teardown).
 func startVoiceLinkMonitor(open voiceLinkOpenResult, aEmp, bEmp, recordDir string) {
+	monitorDeps{
+		open:      open,
+		aEmp:      aEmp,
+		bEmp:      bEmp,
+		recordDir: recordDir,
+		newPlayer: func() voice.Player { return voice.NewOtoPlayer() },
+		dial:      net.Dial,
+	}.start()
+}
+
+// monitorDeps carries the monitor's construction seams so the teardown
+// contract (WAIT-returns-and-Close-runs-exactly-once even when every side
+// fails to dial) is exercisable headlessly, without an oto context or a
+// live daemon. Production passes voice.NewOtoPlayer + net.Dial; the unit
+// test passes fakes. Same seam shape as setupLiveSpeaker above.
+type monitorDeps struct {
+	open      voiceLinkOpenResult
+	aEmp      string
+	bEmp      string
+	recordDir string
+	newPlayer func() voice.Player
+	dial      func(network, addr string) (net.Conn, error)
+}
+
+// start dials the daemon's monitor tap sockets and plays BOTH sides'
+// audio through the operator's speakers (listen-only: the tap sockets
+// carry tee PCM out of the bridge; nothing is ever written back - the
+// operator does not join the conversation). Each side gets its OWN
+// player seam + SpeakerSink + drainLiveSpeaker loop, reusing the
+// live-local machinery: two oto instances overlap safely in oto's mixer
+// (the player.go overlap contract - Play never pauses predecessors), so
+// A and B audible streams mix together.
+//
+// recordDir ("" = off) additionally tees EXACTLY the bytes handed to
+// playback into DIR/<linkID>-<a|b>.raw (raw s16le mono 16 kHz) via
+// recorderPlayer, plus one DIR/<linkID>-meta.json, so gap analysis
+// reflects what the operator HEARS. Default off = zero behaviour change.
+//
+// Best-effort by contract: a dial failure disables that side with a
+// warning, never aborts the link run; the loops die on socket EOF when
+// the link closes (tap conns close with the bridge's teardown).
+func (d monitorDeps) start() {
 	// ONE oto context per process is a hard driver limit (a second
 	// oto.NewContext errors "context is already created" - live
 	// link-d2d7e713a8d914f5 killed side b's player). Both sides share a
@@ -1817,7 +1859,8 @@ func startVoiceLinkMonitor(open voiceLinkOpenResult, aEmp, bEmp, recordDir strin
 	// mixer (the internal/tts playback contract), which is exactly what
 	// a two-voice monitor needs. The monitor never Clears, so sharing
 	// cannot silence one side via the other.
-	player := voice.NewOtoPlayer()
+	player := d.newPlayer()
+	open, recordDir := d.open, d.recordDir
 	// Warm the audio context BEFORE dialing the taps: the tee starts
 	// flowing the instant a dial lands, and lazy context init (~0.3 s
 	// device open + ready wait) stalled the first writes and dropped
@@ -1828,24 +1871,37 @@ func startVoiceLinkMonitor(open voiceLinkOpenResult, aEmp, bEmp, recordDir strin
 	// dialSide, so the silent 640-byte burst still opens the context
 	// but provably cannot enter a .raw file (the skip consumes it).
 	if recordDir == "" {
-		if werr := player.Play(make([]byte, 640)); werr != nil {
+		if werr := player.Play(make([]byte, liveWarmBurstBytes)); werr != nil {
 			fmt.Fprintf(os.Stderr, "monitor: speaker warm-up failed: %v (speakers off)\n", werr)
 			return
 		}
-	} else if merr := writeLinkRecordingMeta(recordDir, open, aEmp, bEmp); merr != nil {
+	} else if merr := writeLinkRecordingMeta(recordDir, open, d.aEmp, d.bEmp); merr != nil {
 		fmt.Fprintf(os.Stderr, "monitor: record meta: %v (recording off)\n", merr)
 		recordDir = ""
-		if werr := player.Play(make([]byte, 640)); werr != nil {
+		if werr := player.Play(make([]byte, liveWarmBurstBytes)); werr != nil {
 			fmt.Fprintf(os.Stderr, "monitor: speaker warm-up failed: %v (speakers off)\n", werr)
 			return
 		}
 	}
+	// Teardown WaitGroup is LOCAL to this invocation (defect
+	// 2026-11-12): the package-level `var monitorWG` it replaced
+	// accumulated a counter across repeated `voice link --monitor` runs
+	// in one process (the `Add(2)` before every dial), so a Wait() from
+	// a later run could observe a stale, never-zero counter. Each side
+	// registers Add(1) BEFORE its first early return, so a side that
+	// never dials (missing path, dial error) still decrements - the old
+	// shape leaked one count per failed dial and Wait() never returned,
+	// which kept the one-oto-context-per-process held for the whole
+	// process lifetime.
+	var monitorWG sync.WaitGroup
 	dialSide := func(label, emp, path string) {
+		monitorWG.Add(1)
+		defer monitorWG.Done()
 		if path == "" {
 			fmt.Fprintf(os.Stderr, "monitor %s: daemon returned no tap path (speakers off for that side)\n", label)
 			return
 		}
-		conn, err := net.Dial("unix", path)
+		conn, err := d.dial("unix", path)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "monitor %s: dial %s: %v (speakers off for that side)\n", label, path, err)
 			return
@@ -1896,12 +1952,10 @@ func startVoiceLinkMonitor(open voiceLinkOpenResult, aEmp, bEmp, recordDir strin
 					fmt.Fprintf(os.Stderr, "monitor %s: record close: %v\n", label, cerr)
 				}
 			}
-			monitorWG.Done()
 		}()
 	}
-	monitorWG.Add(2)
-	dialSide("a", aEmp, open.MonitorAPath)
-	dialSide("b", bEmp, open.MonitorBPath)
+	dialSide("a", d.aEmp, open.MonitorAPath)
+	dialSide("b", d.bEmp, open.MonitorBPath)
 	go func() {
 		monitorWG.Wait()
 		player.Close()
@@ -2049,9 +2103,11 @@ func (r *recorderPlayer) closeFile() error {
 	return err
 }
 
-// monitorWG coordinates the shared monitor player's teardown: both side
-// drains must flush before the one audio context is closed.
-var monitorWG sync.WaitGroup
+// The monitor's teardown WaitGroup is LOCAL to
+// startVoiceLinkMonitor/monitorDeps.start (defect 2026-11-12): a
+// package-level one accumulated a counter across repeated
+// `voice link --monitor` runs in one process, and a dial-failure early
+// return leaked its count so Wait() never returned. See monitorDeps.start.
 
 // monitorFirstByteReader announces a side's speech once when tee audio
 // first lands on the monitor socket ("[a companion] speaking"), then

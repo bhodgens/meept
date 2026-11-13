@@ -310,8 +310,6 @@ func (c *slowEventsClient) Call(_ string, _ any) (json.RawMessage, error) {
 	return b, nil
 }
 
-type contextTodo struct{}
-
 // C-9 (client side): the fake echoes the request cursor, so a poll with
 // nothing new keeps cursor stable - advance-by-assignment is safe.
 func TestVoiceEventCursorEchoAdvanceByAssignment(t *testing.T) {

@@ -695,14 +695,6 @@ func (p *pipeline) isTransStarted() bool {
 	return p.transStarted
 }
 
-// queuedSayCount reports how many say frames sit in the FIFO (test seam
-// for the single-worker serialization audit, fix 1).
-func (p *pipeline) queuedSayCount() int {
-	p.playMu.Lock()
-	defer p.playMu.Unlock()
-	return len(p.sayQueue)
-}
-
 // pendingSayCount reports every say frame the worker still owes audio
 // to: queued drafts PLUS the prefetch syntheses in flight (they left
 // sayQueue at prefetch launch but are still unplayed frames).

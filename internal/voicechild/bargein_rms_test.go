@@ -29,10 +29,6 @@ import (
 	"github.com/caimlas/meept/internal/voiceframe"
 )
 
-// rmsBargeInTestDeadline is this file's local alias for the shared
-// load-tolerant poll deadline (audit VLC-1/VS-3, see child_test.go).
-const rmsBargeInTestDeadline = testPollDeadline
-
 // loudSample/quietSample: little-endian int16 sample bytes for the chunked
 // TTS. 8000 is far above the 3000 test threshold; 100 is far below it.
 // callerSample is the loud INCOMING mic level: above the 8000 outgoing

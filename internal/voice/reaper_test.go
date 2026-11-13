@@ -74,14 +74,28 @@ func (c *captureFail) add(ccid string, o Outcome, reason string) {
 	c.reasons = append(c.reasons, reason)
 }
 
+// snapFields is the mutex-FREE snapshot of a captureFail's assertion
+// fields (dated addendum 2026-11-11: returning captureFail by value
+// copies the sync.Mutex — go vet 'return copies lock value'; returning
+// only the guarded data keeps the locked-read pattern assertions
+// unchanged).
+type snapFields struct {
+	outcome Outcome
+	calls   []string
+	reasons []string
+}
+
 // snapshot returns a locked copy for assertion reads (dated addendum
 // 2026-11-11: -race flagged unlocked reads of the slices the terminal
 // observer appends from the reaper goroutine; assertions unchanged).
-func (c *captureFail) snapshot() captureFail {
+func (c *captureFail) snapshot() snapFields {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	cp := captureFail{outcome: c.outcome, calls: append([]string(nil), c.calls...), reasons: append([]string(nil), c.reasons...)}
-	return cp
+	return snapFields{
+		outcome: c.outcome,
+		calls:   append([]string(nil), c.calls...),
+		reasons: append([]string(nil), c.reasons...),
+	}
 }
 
 // callStatusCheckerIsStandalone pins the contract: a STANDALONE interface
@@ -207,8 +221,9 @@ func TestReaperFreshCallerActivityNeverReapedRegardlessOfAge(t *testing.T) {
 
 	// Let several sweeps run while the reaper sees caller activity.
 	time.Sleep(400 * time.Millisecond)
-	if len(cap.calls) != 0 {
-		t.Fatalf("a call with fresh caller activity was reaped: %v (reasons %v)", cap.calls, cap.reasons)
+	snap := cap.snapshot()
+	if len(snap.calls) != 0 {
+		t.Fatalf("a call with fresh caller activity was reaped: %v (reasons %v)", snap.calls, snap.reasons)
 	}
 	if status.probeCount() == 0 {
 		t.Error("reaper never probed; DEAD-AIR gating untestable")
@@ -238,11 +253,12 @@ func TestReaperMaxDurationForceHangup(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if len(cap.calls) != 1 {
-		t.Fatalf("release fan-out fired %d times, want exactly 1 for the over-max call", len(cap.calls))
+	snap := cap.snapshot()
+	if len(snap.calls) != 1 {
+		t.Fatalf("release fan-out fired %d times, want exactly 1 for the over-max call", len(snap.calls))
 	}
-	if cap.reasons[0] != "reaped:max-duration" {
-		t.Errorf("release reason = %q, want frozen %q", cap.reasons[0], "reaped:max-duration")
+	if snap.reasons[0] != "reaped:max-duration" {
+		t.Errorf("release reason = %q, want frozen %q", snap.reasons[0], "reaped:max-duration")
 	}
 	if rig.tel.countHangups() == 0 {
 		t.Error("over-max call must be hung up carrier-side (best-effort)")
@@ -261,8 +277,9 @@ func TestReaperWithoutCheckerDoesNothing(t *testing.T) {
 	go rig.mgr.RunReaper(ctx, cfg)
 
 	time.Sleep(200 * time.Millisecond)
-	if len(cap.calls) != 0 {
-		t.Errorf("reaper released calls with a nil status checker: %v", cap.calls)
+	snap := cap.snapshot()
+	if len(snap.calls) != 0 {
+		t.Errorf("reaper released calls with a nil status checker: %v", snap.calls)
 	}
 }
 
@@ -295,8 +312,9 @@ func TestReaperRaceWithRealHangupReleasesExactlyOnce(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	time.Sleep(200 * time.Millisecond) // let any duplicate land
-	if len(cap.calls) != 1 {
-		t.Fatalf("terminal fan-out fired %d times under the reaper/hangup race, want exactly 1 (%v)", len(cap.calls), cap.reasons)
+	snap := cap.snapshot()
+	if len(snap.calls) != 1 {
+		t.Fatalf("terminal fan-out fired %d times under the reaper/hangup race, want exactly 1 (%v)", len(snap.calls), snap.reasons)
 	}
 }
 
@@ -321,10 +339,11 @@ func TestReaperCallEventErroredOnBus(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if len(cap.calls) == 0 {
+	snap := cap.snapshot()
+	if len(snap.calls) == 0 {
 		t.Fatal("reaper never released cc-bus")
 	}
-	if cap.outcome != OutcomeFailed {
-		t.Errorf("reaper outcome = %q, want OutcomeFailed (=> CallEventErrored on the leg bus)", cap.outcome)
+	if snap.outcome != OutcomeFailed {
+		t.Errorf("reaper outcome = %q, want OutcomeFailed (=> CallEventErrored on the leg bus)", snap.outcome)
 	}
 }

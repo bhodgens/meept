@@ -24,7 +24,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -57,8 +56,16 @@ func main() {
 
 // run wires the child and blocks until ctx or a signal ends it.
 func run(ctx context.Context, textSocket, audioDir string) error {
-	if err := checkONNX(); err != nil {
-		return err
+	// The daemon passes the ONNX Runtime library path as VOICE_ONNX_LIB
+	// (a path, not a secret); jargo's onnxrt loader looks for
+	// JARGO_ONNXRUNTIME_LIB (or the bare platform name). Translate here so
+	// the Silero VAD / Smart Turn analyzers can load the real lib
+	// regardless of the platform search path (this machine: homebrew's
+	// /opt/homebrew/lib is not on the child's dyld default search path).
+	if lib := os.Getenv("VOICE_ONNX_LIB"); lib != "" {
+		if os.Getenv("JARGO_ONNXRUNTIME_LIB") == "" {
+			_ = os.Setenv("JARGO_ONNXRUNTIME_LIB", lib) //nolint:errcheck // best-effort; a failure leaves the env hint
+		}
 	}
 
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
@@ -90,22 +97,26 @@ func run(ctx context.Context, textSocket, audioDir string) error {
 			return providers.NewTTS(cfg, key)
 		},
 	)
+	// Input-side ML speech discriminator (jargo Silero VAD, local leg):
+	// lets the pipeline gate the RMS barge-in on real SPEECH so loud noise
+	// / self-echo never trips it. The factory errors only when the ONNX
+	// runtime library is absent — the pipeline degrades to the legacy
+	// RMS + STT-evidence gate for that call, never fails the call.
+	child.SetVADFactory(func(sampleRate int) (voicechild.VADAnalyzer, error) {
+		return providers.NewSileroVAD(sampleRate)
+	})
+	// Input-side ML complete-thought analyzer (jargo Smart Turn, local
+	// leg): ML replacement for the whisper-punctuation endpointing oracle.
+	// Degrades to the punctuation oracle when the ONNX lib is absent.
+	child.SetTurnFactory(func(sampleRate int) (voicechild.TurnAnalyzer, error) {
+		a, err := providers.NewSmartTurnVAD(sampleRate)
+		if err == nil {
+			// Inform the analyzer of the Silero VAD's onset delay (0.2 s
+			// StartSecs) so its pre-speech buffer widens to cover what
+			// the VAD held back before confirming speech.
+			a.SetVADStartSecs(0.2)
+		}
+		return a, err
+	})
 	return child.Run(ctx)
-}
-
-// checkONNX fails fast with the missing path when the ONNX Runtime library
-// cannot be located. The concrete purego probe lands with leaf 08's provider
-// wiring (jargo loads the library lazily); the config key
-// voice.onnx_runtime_lib names the expected path either way.
-func checkONNX() error {
-	// The daemon passes the resolved library path through voice config;
-	// without the leaf-08 loader this skeleton only reports the env hint.
-	if lib := os.Getenv("JARGO_ONNXRUNTIME_LIB"); lib == "" {
-		// Not fatal in the skeleton: jargo degrades to STT endpointing
-		// (loses barge-in) when the runtime is absent at LOAD time, but a
-		// phone call without barge-in is refused per spec. Leaf 08 makes
-		// this a hard probe before Run; the daemon refuses the call then.
-		return nil
-	}
-	return errors.New("meept-voice: onnx runtime probe unimplemented in skeleton")
 }

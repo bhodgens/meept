@@ -11,6 +11,7 @@ package voicechild
 // PCM on the .in socket, countQueuedInterrupts observes the FIFO).
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -207,4 +208,69 @@ func TestRMSTripStaleSTTEvidence(t *testing.T) {
 		t.Fatalf("suppressed stale-evidence trip stopped playback")
 	}
 	close(gate.park)
+}
+
+// fakeVAD is a programmable voice-activity analyzer for the Silero seam
+// tests: it returns the configured speaking answer and records Close.
+type fakeVAD struct {
+	speaking bool
+	closed   bool
+}
+
+func (f *fakeVAD) AnalyzeAudio([]byte) bool { return f.speaking }
+func (f *fakeVAD) Close() error             { f.closed = true; return nil }
+
+// installVAD sets the pipeline's analyzer to the fake (the path
+// handleOpen wires for a local leg with a VADFactory).
+func installVAD(p *pipeline, speaking bool) *fakeVAD {
+	v := &fakeVAD{speaking: speaking}
+	p.playMu.Lock()
+	p.vad = v
+	p.vadSpeaking = speaking
+	p.playMu.Unlock()
+	return v
+}
+
+// TestRMSTripSileroNotSpeech: with a Silero VAD installed, a loud window
+// (RMS + fresh STT evidence) is SUPPRESSED when the model rates it not
+// speech — background noise / a door slam must never cancel the answer.
+func TestRMSTripSileroNotSpeech(t *testing.T) {
+	const ccid = "rmsvad1"
+	d, _, p, gate := tripLocal(t, ccid, 500*time.Millisecond) // this DOES leave evidence
+	installVAD(p, false)                                      // but VAD says: not speech
+
+	assertNoInterruptWithin(t, d, 50*time.Millisecond,
+		"RMS trip with VAD=false emitted an interrupt (loud non-speech must not cancel the answer)")
+	if !p.isSpeaking() {
+		t.Fatalf("suppressed VAD-rejected trip stopped playback (speaking=false); loud noise must not cancel the answer")
+	}
+	close(gate.park)
+}
+
+// TestRMSTripSileroSpeech: with a Silero VAD installed AND real speech
+// (VAD=true, fresh evidence), the trip still EMITS the interrupt — the ML
+// gate only filters non-speech, it never blocks a real barge-in.
+func TestRMSTripSileroSpeech(t *testing.T) {
+	const ccid = "rmsvad2"
+	d, _, p, gate := tripLocal(t, ccid, 500*time.Millisecond)
+	installVAD(p, true) // VAD confirms speech
+
+	f := d.waitFrame(t)
+	if f.Event != voiceframe.EventInterrupt {
+		t.Fatalf("RMS trip with VAD=true emitted %q, want interrupt (speech must still barge in)", f.Event)
+	}
+	close(gate.park)
+}
+
+// TestSileroVADCloseOnTeardown: the analyzer's ONNX session is released
+// when the pipeline closes (resource hygiene).
+func TestSileroVADCloseOnTeardown(t *testing.T) {
+	const ccid = "rmsvad3"
+	_, _, p, _ := tripLocal(t, ccid, 500*time.Millisecond)
+	v := installVAD(p, true)
+
+	p.close(context.Background())
+	if !v.closed {
+		t.Fatal("Silero VAD was not closed on pipeline teardown (ONNX session leaked)")
+	}
 }

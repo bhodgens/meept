@@ -50,7 +50,7 @@ func (d *fakeDriver) Suspend() error {
 
 // withFakeDriver swaps the package's newContext seam for the test and
 // restores it via t.Cleanup.
-func withFakeDriver(t *testing.T, d *fakeDriver) {
+func withFakeDriver(t *testing.T, d audioDriver) {
 	t.Helper()
 	orig := newContext
 	newContext = func(PlaybackConfig) (audioDriver, error) { return d, nil }

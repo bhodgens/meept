@@ -1299,3 +1299,233 @@ func TestTalkLoopSuppressGreeting(t *testing.T) {
 	cancel()
 	<-done
 }
+
+// TestSplitFirstSentence pins the fast-first split boundary: the first
+// sentence ends at the first terminal '.?!'/newline, everything after is
+// the remainder; a single-sentence / punctuationless string returns
+// (whole, "").
+func TestSplitFirstSentence(t *testing.T) {
+	cases := []struct {
+		in, first, rest string
+	}{
+		{"Thanks for waiting. I checked the schedule and tomorrow is free at ten. Does that work?", "Thanks for waiting.", "I checked the schedule and tomorrow is free at ten. Does that work?"},
+		{"Turn on the lights", "Turn on the lights", ""},
+		{"Hello!", "Hello!", ""},
+		{"One sentence. Two sentence.", "One sentence.", "Two sentence."},
+		{"", "", ""},
+	}
+	for _, c := range cases {
+		f, r := splitFirstSentence(c.in)
+		if f != c.first || r != c.rest {
+			t.Errorf("splitFirstSentence(%q) = (%q, %q), want (%q, %q)", c.in, f, r, c.first, c.rest)
+		}
+	}
+}
+
+// TestTalkLoopConnectSentencesSpeaksOneUtterance pins the natural-prosody
+// path (supervisor gate off): a multi-sentence draft is spoken as TWO
+// connected say frames — the FIRST sentence ships immediately (fast-first-
+// audio: it is short, so its TTS starts while the rest generates), then the
+// REMAINDER follows as the final connected utterance. This replaces the
+// old whole-reply-as-one-frame shape, which waited for the ENTIRE (non-
+// streaming) TTS synthesis before any audio — measured 2-5.6s in live call
+// local-fbf9a76ef9357454. The per-sentence split is ONLY for the gate; with
+// no gate to satisfy there is nothing to check per sentence.
+func TestTalkLoopConnectSentencesSpeaksOneUtterance(t *testing.T) {
+	sink := &recordSink{}
+	sup := &cannedSupervisor{allowed: map[string]bool{}}
+	turns := &cannedTurns{reply: "Thanks for waiting. I checked the schedule and tomorrow is free at ten. Does that work?"}
+	loop := newTestTalkLoop(t, sink.Send, sup, turns, TalkLoopConfig{
+		FillerLines:      []string{"One moment."},
+		GreetingLine:     "Hello.",
+		ConnectSentences: true,
+	})
+
+	cancel, done := runLoop(t, loop, "cc-connect")
+	defer cancel()
+
+	loop.frames <- finalPrompt("cc-connect", "question")
+	waitFor(t, 2*time.Second, "connected utterance never spoken", func() bool {
+		return len(sink.sayTexts()) >= 4 // greeting + filler + first sentence + remainder
+	})
+
+	var replyTexts []string
+	for _, tx := range sink.sayTexts() {
+		if strings.Contains(tx, "Thanks for waiting") || strings.Contains(tx, "I checked the schedule") {
+			replyTexts = append(replyTexts, tx)
+		}
+	}
+	// Fast-first: the opening sentence is its own short say, and the
+	// remainder is the second (final, connected) say.
+	if len(replyTexts) != 2 {
+		t.Fatalf("connected reply emitted %d reply frames, want 2 (first sentence fast, remainder connected): %v", len(replyTexts), sink.sayTexts())
+	}
+	if replyTexts[0] != "Thanks for waiting." {
+		t.Fatalf("first reply frame = %q, want the first sentence spoken immediately", replyTexts[0])
+	}
+	if replyTexts[1] != "I checked the schedule and tomorrow is free at ten. Does that work?" {
+		t.Fatalf("remainder reply frame = %q, want the connected remainder", replyTexts[1])
+	}
+	// The supervisor checked ONE unit (the whole draft once, not per
+	// sentence) — the fast-first split is delivery-only.
+	if starts := sup.startOrder(); len(starts) != 1 || starts[0] != "Thanks for waiting. I checked the schedule and tomorrow is free at ten. Does that work?" {
+		t.Fatalf("supervisor Check calls = %d/%q, want exactly one call for the whole draft", len(starts), starts)
+	}
+	cancel()
+	<-done
+}
+
+// TestTalkLoopPerSentenceSpeaksSplit pins the byte-identical old path when
+// ConnectSentences is false (supervisor gate on): the split still emits one
+// say frame per allowed sentence — the gate needs per-sentence granularity.
+func TestTalkLoopPerSentenceSpeaksSplit(t *testing.T) {
+	sink := &recordSink{}
+	sup := &cannedSupervisor{allowed: map[string]bool{
+		"First sentence.":  true,
+		"Second sentence.": true,
+	}}
+	turns := &cannedTurns{reply: "First sentence. Second sentence."}
+	loop := newTestTalkLoop(t, sink.Send, sup, turns, TalkLoopConfig{
+		FillerLines:  []string{"One moment."},
+		GreetingLine: "Hello.",
+	})
+
+	cancel, done := runLoop(t, loop, "cc-split")
+	defer cancel()
+
+	loop.frames <- finalPrompt("cc-split", "question")
+	waitFor(t, 2*time.Second, "sentences never spoken", func() bool {
+		return len(sink.sayTexts()) >= 4 // greeting + filler + 2 sentence reply
+	})
+
+	var replies []string
+	for _, tx := range sink.sayTexts() {
+		if strings.Contains(tx, "sentence.") {
+			replies = append(replies, tx)
+		}
+	}
+	if len(replies) != 2 {
+		t.Fatalf("per-sentence reply emitted %d say frames, want 2 (one per allowed sentence): %v", len(replies), sink.sayTexts())
+	}
+	// The supervisor checked each sentence separately (2 calls).
+	if starts := sup.startOrder(); len(starts) != 2 {
+		t.Fatalf("supervisor Check calls = %d, want 2 (per-sentence)", len(starts))
+	}
+	cancel()
+	<-done
+}
+
+// TestTalkLoopFragmentClarify is the conversational acknowledgment: a
+// dispatched prompt that ended in a trailing ellipsis (the caller trailed
+// off mid-thought) speaks the configured clarify line and SKIPS the LLM
+// turn — a human says "Was that all? I'm not sure I understand you" rather
+// than coldly answering the half-broken sentence. Pins voice.fragment_clarify.
+func TestTalkLoopFragmentClarify(t *testing.T) {
+	sink := &recordSink{}
+	turns := &countingTurns{reply: "Unexpected: the LLM must NOT run for a fragment"}
+	sup := &cannedSupervisor{allowed: map[string]bool{}}
+	loop := newTestTalkLoop(t, sink.Send, sup, turns, TalkLoopConfig{
+		FillerLines:      []string{"One moment."},
+		GreetingLine:     "Hello.",
+		ConnectSentences: true,
+		FragmentClarify:  "Was that all? I'm not sure I understand you.",
+	})
+
+	cancel, done := runLoop(t, loop, "cc-fragclarify")
+	defer cancel()
+
+	loop.frames <- finalPrompt("cc-fragclarify", "I was just wondering if you've got any t...")
+	waitFor(t, 2*time.Second, "clarify line never spoken", func() bool {
+		return slices.Contains(sink.sayTexts(), "Was that all? I'm not sure I understand you.")
+	})
+	// The LLM turn must NOT have run for an unresolved fragment.
+	if starts := turns.startCount(); starts != 0 {
+		t.Fatalf("LLM Runs started for a fragment prompt = %d, want 0 (clarify line replaces the turn)", starts)
+	}
+	// A single trailing '.' (a completed one-word command) must NOT clarify.
+	if isTrailingEllipsis("Stop.") {
+		t.Fatalf("isTrailingEllipsis('Stop.') = true, want false (single dot is a completed command)")
+	}
+	cancel()
+	<-done
+}
+
+// TestTalkLoopFragmentClarifySkipsComplete turns MUST run normally when
+// FragmentClarify is configured but the prompt is a complete sentence (no
+// trailing ellipsis) — a real question still reaches the LLM, and a real
+// one-word command like "Stop." is never clarified away.
+func TestTalkLoopFragmentClarifySkipsComplete(t *testing.T) {
+	sink := &recordSink{}
+	turns := &countingTurns{reply: "The schedule is free tomorrow at ten."}
+	sup := &cannedSupervisor{allowed: map[string]bool{}}
+	loop := newTestTalkLoop(t, sink.Send, sup, turns, TalkLoopConfig{
+		FillerLines:      []string{"One moment."},
+		GreetingLine:     "Hello.",
+		ConnectSentences: true,
+		FragmentClarify:  "Was that all? I'm not sure I understand you.",
+	})
+
+	cancel, done := runLoop(t, loop, "cc-fragcomplete")
+	defer cancel()
+
+	loop.frames <- finalPrompt("cc-fragcomplete", "Is the schedule free tomorrow at ten?")
+	waitFor(t, 2*time.Second, "complete sentence never answered", func() bool {
+		return len(sink.sayTexts()) >= 3 // greeting + filler + connected reply
+	})
+	if starts := turns.startCount(); starts != 1 {
+		t.Fatalf("LLM Runs for a complete prompt = %d, want 1 (complete sentences must answer)", starts)
+	}
+	joined := strings.Join(sink.sayTexts(), " | ")
+	if strings.Contains(joined, "Was that all?") {
+		t.Fatalf("clarify line spoken for a complete sentence: %v", sink.sayTexts())
+	}
+	cancel()
+	<-done
+}
+
+// TestTalkLoopFragmentClarifyOff preserves byte-equality when
+// FragmentClarify is empty (the default): even an ellipsis prompt runs the
+// LLM turn exactly as the legacy path did.
+func TestTalkLoopFragmentClarifyOff(t *testing.T) {
+	sink := &recordSink{}
+	turns := &countingTurns{reply: "Let me check that for you."}
+	sup := &cannedSupervisor{allowed: map[string]bool{}}
+	loop := newTestTalkLoop(t, sink.Send, sup, turns, TalkLoopConfig{
+		FillerLines:      []string{"One moment."},
+		GreetingLine:     "Hello.",
+		ConnectSentences: true, // clarify NOT set
+	})
+
+	cancel, done := runLoop(t, loop, "cc-fragoff")
+	defer cancel()
+
+	loop.frames <- finalPrompt("cc-fragoff", "I was just wondering if you've got any t...")
+	waitFor(t, 2*time.Second, "turn never answered", func() bool {
+		return len(sink.sayTexts()) >= 3
+	})
+	if starts := turns.startCount(); starts != 1 {
+		t.Fatalf("LLM Runs with clarify off = %d, want 1 (legacy: fragment still reaches the turn)", starts)
+	}
+	cancel()
+	<-done
+}
+
+// countingTurns records how many LLM turns ran (for the skip assertions).
+type countingTurns struct {
+	mu      sync.Mutex
+	reply   string
+	started int
+}
+
+func (t *countingTurns) Run(ctx context.Context, sess SessionHandle, prompt string) (string, error) {
+	t.mu.Lock()
+	t.started++
+	t.mu.Unlock()
+	return t.reply, nil
+}
+
+func (t *countingTurns) startCount() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.started
+}

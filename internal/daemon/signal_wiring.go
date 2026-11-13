@@ -58,10 +58,7 @@ type effectsEffectsSeam struct {
 	claim    func(ctx context.Context, key, employeeID string) (bool, error)
 	complete func(ctx context.Context, key, employeeID string) error
 	abandon  func(ctx context.Context, key, employeeID, reason string) error
-	hash     func(employeeID, target, requestID string) string
 }
-
-func (a effectsEffectsSeam) keyFor(rawKey string) string { return rawKey }
 
 func (a effectsEffectsSeam) Reserve(ctx context.Context, key, employeeID string) (bool, error) {
 	return a.claim(ctx, key, employeeID)

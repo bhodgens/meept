@@ -279,12 +279,14 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   (voice-tierA leaves 05/06, D1): pumpAudioIn feeds the bound STT
   session; a non-empty partial while playback is live emits interrupt
   BEFORE the partial's prompt frame (C5 order), once per barge-in
-  (noteBargeIn latch, re-armed by the next say). ONNX/jargo VAD is NOT
-  required for Tier A - the ONNX probe in cmd/meept-voice stays
-  non-fatal and the "a phone call without barge-in is refused" spec line
-  is superseded (see docs/workflows/voice-sidecar.md Tier A as-built).
-  The local leg keeps its RMS VAD trigger (Local==true only); STT
-  partials drive the phone leg.
+  (noteBargeIn latch, re-armed by the next say). The local leg's RMS
+  trigger is now ML-GATED (Tier B, landed): a Silero VAD analyzer, when
+  constructed, requires a loud window to also be VAD-confirmed SPEECH or
+  the RMS trip is suppressed (see the four-contracts block); STT partials
+  still drive the phone leg. When the ONNX runtime lib is absent the
+  local leg degrades to the legacy RMS + STT-evidence gate — never a
+  call failure (the "a phone call without barge-in is refused" spec line
+  is superseded; see docs/workflows/voice-sidecar.md Tier A as-built).
 
 ## Release fan-out
 
@@ -345,6 +347,48 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   `call.answered` triggers StartStreaming only.
 
 ## Per-call silence path (plan 20261111-voice-turn2 leaf 02): dedicated nudge, S+H windows
+
+- **Three conversational-audio contracts for the talk loop (natural-speech fixes, live call local-4aaa6ea97de14a22):**
+  1. **Connected-utterance speech** (`TalkLoopConfig.ConnectSentences`, wired from
+     `!voice.supervisor_enabled`): the reply-per-sentence split exists ONLY to let
+     the supervisor gate each sentence. When the gate is OFF, splitting into separate
+     per-sentence TTS requests made qwen3 read the reply as a flat list with 400-760 ms
+     artificial gaps between every sentence. ConnectSentences=false is MANDATORY when
+     a supervisor is enabled (it must check each sentence); the daemon wires it from
+     the config, so re-enabling the gate automatically returns to per-sentence.
+     Acceptance on recorded audio: the child cadence line shows ONE synth stream over
+     the whole reply (synth_ms≈write_ms) and the daemon pacer reports pace_stalls=0.
+  2. **Fragment endpointing** (`voice.fragment_confirm_ms` / `pipeline.fragmentConfirm`,
+     default 3000): whisper punctuates complete thoughts and leaves a mid-word cutoff as
+     a trailing ellipsis (or no terminal punctuation). Such an unfinished final is held
+     for the fragment budget (longer than `turn_confirm_ms`) so a caller who pauses to
+     think is never answered mid-sentence; a complete sentence still dispatches on the
+     fast window. The continuation joins the fragment into ONE prompt when it lands
+     inside the budget.
+  3. **Fragment clarification** (`TalkLoopConfig.FragmentClarify` / `voice.fragment_clarify`,
+     default empty = off): when a dispatched prompt STILL ends in a trailing ellipsis after
+     the fragment budget (the caller genuinely trailed off), the loop speaks the configured
+     line (e.g. "Was that all? I'm not sure I understand you.") and SKIPS the LLM turn —
+     a human asks for completion rather than coldly answering the half-broken sentence.
+     The intercept runs BEFORE `Turns.Run`; only the trailing-ellipsis shape trips (a
+     completed command like "Stop." never does). Fact-free like filler, so it bypasses the
+     supervisor gate. Empty keeps the legacy ready-path byte-for-byte.
+  4. **ML input speech gate (Silero VAD, Tier B)** — `VADAnalyzer` seam in the child
+     (`internal/voicechild/vad.go`), wired by `cmd/meept-voice` via `SetVADFactory` →
+     `providers.NewSileroVAD` (jargo `audio/vad.NewSilero`, embeds `silero_vad.onnx`).
+     Built in `handleOpen` for the LOCAL leg only; fed per-chunk in `pumpAudioIn` (before
+     `rmsBargeInCheck`); gates the RMS barge-in: when an analyzer is installed, a loud
+     window that ALSO passes STT-evidence must additionally be VAD-confirmed SPEECH or the
+     trip is suppressed (`speaking` state only) — background noise / a door slam / the
+     agent's own TTS bleed that STT mis-heard can never cancel the answer. The underlying
+     model runs once per ~32 ms frame, sub-ms, on the pump goroutine (never under playMu —
+     mutexio), one ONNX thread. The ONNX runtime lib reaches the child as the daemon's
+     `VOICE_ONNX_LIB` env (from `voice.onnx_runtime_lib`); the child translates it to
+     `JARGO_ONNXRUNTIME_LIB` at startup (`cmd/meept-voice/main.go` run). A nil factory, a
+     construct-time failure (runtime lib absent), or a phone leg all keep the legacy RMS +
+     STT-evidence gate byte-identical — silence-by-design, never a call failure.
+     Acceptance: the child logs `silero vad active` (constructed) vs `silero vad unavailable`
+     (degraded); unit tests pin suppress-when-not-speech / trip-when-speech / close-on-teardown.
 
 - The FIRST silence fire speaks the DEDICATED nudge line
   (`TalkLoopConfig.SilencePromptLine` / `voice.silence_prompt`, default
@@ -626,21 +670,7 @@ store. Invariants a future agent must NOT break:
   the playback intact. A suppressed trip NEVER consumes the watermark
   evidence (pinned by pipeline_rmsdispatch_test.go). non-speech
   finals ([BLANK_AUDIO]/(sighs) class, nonSpeechTranscript) never dispatch
-  a turn and never stamp evidence. CROSS-CALL ECHO CONTRACT
-  (2026-11-11, leaf C): agent speech is also recorded in a PROCESS-WIDE
-  roster (`internal/voice/echo_roster.go`, fed by the talk loop's `say`
-  choke point on successful send, cleared at call end). A final prompt
-  whose text fuzzy-matches ANOTHER live call's recent speech (TTL 30 s,
-  `RecentOtherSpeech`) is room echo - call A's TTS out the speakers
-  into call B's mic - and the loop DROPS the dispatch (no turn, call
-  lives on; telemetry kind=dropped reason="cross-call echo"). LINK
-  calls are EXEMPT from the gate (a link is a deliberate two-agent
-  conversation; the HoldPrompt seam is the discriminator) but their
-  speech is still RECORDED, so a plain call overhearing a link drops
-  the echo. The gate lives ONLY in the voice talk loop's prompt path -
-  agent/chat dispatch paths are untouched by contract. The short-prompt
-  floor (echoMinPromptWords) is enforced inside the roster.
-  RMS must NEVER run on phone legs -
+  a turn and never stamp evidence. RMS must NEVER run on phone legs -
   they keep the Tier A STT-partial trigger. Never move the trigger to a
   leg-agnostic branch.
 - Barge-in must SILENCE the client speakers, not just stop new frames:

@@ -352,13 +352,25 @@ func (p *ChildProc) spawn(ctx context.Context) error {
 		}
 	}()
 
-	// Child env: minimal by contract. Only the ONNX library path (a path is
-	// not a secret); no wholesale daemon environment, no credentials.
+	// Child env: NONE (empty SpawnEnv = the child inherits the daemon's
+	// inherited env, which already carries PATH for whisper-cli/piper/
+	// ffmpeg and is the only shape the supervisor can forward — a
+	// non-empty SpawnEnv is NUL-joined into one wrapper var and a value
+	// with embedded NUL is rejected by Go's exec). The ONNX library path
+	// rides the daemon's own environment as VOICE_ONNX_LIB (set once in
+	// WireVoiceChildProc), so it reaches the child through inheritance
+	// too. Do not reintroduce a non-empty SpawnEnv here.
 	var env []string
+
 	if p.cfg.OnnxLib != "" {
-		env = []string{"VOICE_ONNX_LIB=" + p.cfg.OnnxLib}
-	} else {
-		env = []string{}
+		// Belt-and-braces: the caller (WireVoiceChildProc) already set
+		// VOICE_ONNX_LIB in the daemon env; make sure it is present even
+		// if a caller forgets (this var only ever carries a path, never a
+		// credential). Setenv is additive on the daemon, not a spawn env,
+		// so it cannot NUL-join or drop PATH.
+		if os.Getenv("VOICE_ONNX_LIB") == "" {
+			_ = os.Setenv("VOICE_ONNX_LIB", p.cfg.OnnxLib) //nolint:errcheck // content is a path; failure leaves the child unfindable anyway
+		}
 	}
 
 	rc := &llm.RuntimeConfig{

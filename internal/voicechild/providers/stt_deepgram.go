@@ -283,13 +283,19 @@ func (s *DeepgramSTT) pumpAndRead(ctx context.Context, sess wsSession, pcm <-cha
 			select {
 			case chunk, ok := <-pcm:
 				if !ok {
-					// Caller finished the utterance stream; ask Deepgram
-					// to flush, then hold the session open so the final
-					// can arrive.
-					if ferr := sess.Write(readCtx, 1, []byte(`{"type":"Finalize"}`)); ferr != nil {
-						return
-					}
-					continue
+					// Caller finished the utterance stream: ask Deepgram ONCE
+					// to flush, then wait for the reader to end the session.
+					// A closed channel is always ready, so this MUST NOT loop
+					// back into the select - doing so re-sends Finalize as fast
+					// as the CPU allows, pinning a core and flooding the vendor
+					// (defect 4). The whisper sibling has the same posture: it
+					// returns on !ok. The reader below owns the lifetime: its
+					// final can, if any, arrives on the Results read, and the
+					// deferred cancelRead() releases this goroutine on every
+					// exit path (context end, session drop, pumpAndRead return).
+					sess.Write(readCtx, 1, []byte(`{"type":"Finalize"}`)) //nolint:errcheck // flush is best-effort: the reader owns session teardown
+					<-readCtx.Done()
+					return
 				}
 				if len(chunk) > 0 {
 					if werr := sess.Write(readCtx, 2, chunk); werr != nil {

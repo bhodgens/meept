@@ -41,6 +41,44 @@ func (c *Child) handleOpen(ctx context.Context, frame voiceframe.Frame) error {
 	// downstream behaves differently from before this frame existed.
 	p.local = frame.Local
 	p.bargeInRms = frame.BargeInRms
+	// Input-side speech analyzer (jargo Silero VAD, local leg only): gate
+	// the RMS barge-in on real SPEECH so loud noise / self-echo never trips
+	// it. Built lazily here; a nil factory or a construct-time failure
+	// (ONNX runtime lib absent) leaves p.vad nil, keeping the legacy
+	// RMS + STT-evidence gate byte-identical. Feed happens in pumpAudioIn.
+	if frame.Local {
+		if f := c.vadFactoryFor(); f != nil {
+			vad, err := f(frame.SampleRate)
+			if err != nil {
+				c.logger.Info("voicechild: silero vad unavailable; local leg on legacy RMS gate",
+					"call_id", frame.CallID, "err", err)
+			} else {
+				p.playMu.Lock()
+				p.vad = vad
+				p.playMu.Unlock()
+				c.logger.Info("voicechild: silero vad active; local leg gates barge-in on real speech",
+					"call_id", frame.CallID, "sample_rate", frame.SampleRate)
+			}
+		}
+		// Complete-thought analyzer (jargo Smart Turn, local leg only):
+		// ML replacement for the whisper-punctuation endpointing oracle.
+		// Built lazily here; nil factory / construct failure keeps the
+		// punctuation oracle byte-identical. Fed in pumpAudioIn with the
+		// VAD's speaking state; queried in noteTurnVerdict on each final.
+		if f := c.turnFactoryFor(); f != nil {
+			turn, err := f(frame.SampleRate)
+			if err != nil {
+				c.logger.Info("voicechild: smart turn unavailable; local leg on punctuation oracle",
+					"call_id", frame.CallID, "err", err)
+			} else {
+				p.turnMu.Lock()
+				p.turn = turn
+				p.turnMu.Unlock()
+				c.logger.Info("voicechild: smart turn active; local leg endpoints on complete-thought model",
+					"call_id", frame.CallID, "sample_rate", frame.SampleRate)
+			}
+		}
+	}
 	c.registerPipeline(p)
 	c.logger.Info("voicechild: pipeline registered from open",
 		"call_id", frame.CallID, "codec", frame.Codec, "sample_rate", frame.SampleRate,

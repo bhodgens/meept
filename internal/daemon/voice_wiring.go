@@ -1015,6 +1015,17 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 			TurnTimeoutSeconds:        w.cfg.TurnTimeoutSeconds,
 			FillerGrace:               time.Duration(loopAcoustics.FillerGraceMs) * time.Millisecond,
 			SuppressGreeting:          suppressGreeting,
+			// ConnectSentences: a reply is ONE connected utterance when
+			// the supervisor gate is OFF (nothing to check per sentence
+			// — splitting into separate TTS requests made qwen3 read each
+			// sentence flat with 400-760 ms artificial gaps). When the
+			// supervisor IS enabled the per-sentence path is mandatory.
+			ConnectSentences: !w.cfg.SupervisorEnabled,
+			// FragmentClarify: speak this line instead of coldly running
+			// the LLM turn when the caller trailed off into an unfinished
+			// fragment (dispatched after fragment_confirm_ms with no
+			// continuation). empty = legacy behavior.
+			FragmentClarify: w.cfg.FragmentClarify,
 		})
 		// H4 + A10: arm the per-call context and install the loop in ONE
 		// critical section. releaseCall cancels the ctx so a released

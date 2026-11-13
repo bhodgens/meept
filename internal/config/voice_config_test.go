@@ -59,6 +59,9 @@ func TestVoiceConfigDefaults(t *testing.T) {
 	if v.TurnConfirmMs != 900 {
 		t.Errorf("voice.turn_confirm_ms default = %d, want 900 (startguard C1: aggregation ON out of the box; 0 = legacy per-final dispatch)", v.TurnConfirmMs)
 	}
+	if v.FragmentConfirmMs != 3000 {
+		t.Errorf("voice.fragment_confirm_ms default = %d, want 3000 (an unfinished-thought final waits this long for the caller to resume)", v.FragmentConfirmMs)
+	}
 	if v.FillerGraceMs != 2500 {
 		t.Errorf("voice.filler_grace_ms default = %d, want 2500", v.FillerGraceMs)
 	}

@@ -566,6 +566,44 @@ func (p *AudioPair) WriteToChild(pcm []byte) error {
 // L16@16k chunks is 2.56 s of audio, far past any realistic dial window.
 const maxPendingInBytes = 128 * 640
 
+// clientWriteTimeout bounds a single daemon->client audio write, mirroring
+// textWriteTimeout on the C1 side (bughunt 2026-11-10 A4): the local
+// splice's pacer goroutine calls WriteToClient for every 20 ms chunk, so a
+// client that connects and then stops reading (kernel buffer full) would
+// block that goroutine FOREVER and take the whole leg's audio with it. The
+// deadline degrades the wedged conn to a write error instead.
+const clientWriteTimeout = 2 * time.Second
+
+// ErrClientWriteTimeout reports that a daemon->client audio write (or the
+// pre-connect accept wait) exceeded its bound. Named consistently with the
+// package's other transport sentinels so callers can errors.Is it instead
+// of string-matching a wrapped net error.
+var ErrClientWriteTimeout = errors.New("voice: client audio write timed out")
+
+// clientAcceptTimeoutDefault bounds how long a single WriteToClient /
+// ReadFromMic waits for the client's .out/.in accept. It is far past the
+// real dial window (the client dials as soon as the open RPC returns);
+// tests lower it via setClientAcceptTimeout to pin the bounded-failure
+// path fast. See clientAcceptTimeout.
+const clientAcceptTimeoutDefault = 5 * time.Second
+
+// clientAcceptTimeout is the accept-wait bound, a var so tests can shorten
+// it. Read/written under acceptTimeoutMu - it is a plain var rather than an
+// AudioPair field so no other constructor shape changes.
+var (
+	clientAcceptTimeout = clientAcceptTimeoutDefault
+	acceptTimeoutMu     sync.RWMutex
+)
+
+// clientAcceptTimeoutValue returns the current accept-wait bound under the
+// guard mutex. Tests lower the bound through setClientAcceptTimeout in
+// socket_deadline_test.go; production always reads the default.
+func clientAcceptTimeoutValue() time.Duration {
+	acceptTimeoutMu.RLock()
+	defer acceptTimeoutMu.RUnlock()
+	return clientAcceptTimeout
+}
+
 // pairInPath returns the .in socket file path for the pair (CL5: the
 // LocalCall exposes the pair PATHS; leaf 08's clients dial them).
 func pairInPath(p *AudioPair) string {
@@ -589,10 +627,18 @@ func (p *AudioPair) ReadFromClient(buf []byte) (int, error) {
 
 // WriteToClient writes raw bytes to the CLIENT over the accepted conn
 // (local-leg leaf 07). Mirrors ReadFromMic: the client dials only after
-// the open RPC returns, so this WAITS for the .out accept (bounded by a
-// Close - the End-teardown path) before writing. Dropping audio instead
-// would starve the client's speaker mid-call.
+// the open RPC returns, so this WAITS for the .out accept before writing.
+// Dropping audio instead would starve the client's speaker mid-call.
+//
+// Both waits are BOUNDED (the accept wait by clientAcceptTimeout, the
+// conn.Write by clientWriteTimeout), and the conn.Write deadline is CLEARED
+// afterwards so no later writer inherits a stale bound - the same posture
+// as TextServer.writeChild. An unbounded wait was the defect: a client that
+// never dialed spun this at 100 Hz forever, and a client that connected
+// then stopped reading blocked the local splice's pacer goroutine
+// permanently.
 func (p *AudioPair) WriteToClient(pcm []byte) (int, error) {
+	deadline := time.Now().Add(clientAcceptTimeoutValue())
 	var conn net.Conn
 	for {
 		p.mu.Lock()
@@ -602,15 +648,29 @@ func (p *AudioPair) WriteToClient(pcm []byte) (int, error) {
 		if conn != nil || closed {
 			break
 		}
+		if !time.Now().Before(deadline) {
+			return 0, fmt.Errorf("voice: client did not connect on %s.out within %s: %w",
+				p.ccid, clientAcceptTimeoutValue(), ErrClientWriteTimeout)
+		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	if conn == nil {
 		return 0, fmt.Errorf("voice: client not connected on %s.out", p.ccid)
 	}
+	if err := conn.SetWriteDeadline(time.Now().Add(clientWriteTimeout)); err != nil {
+		return 0, fmt.Errorf("voice: set client write deadline %s.out: %w", p.ccid, err)
+	}
 	n, err := conn.Write(pcm)
 	if err != nil {
+		var ne net.Error
+		if errors.As(err, &ne) && ne.Timeout() {
+			return n, fmt.Errorf("voice: write %s.out (client) exceeded %s: %w",
+				p.ccid, clientWriteTimeout, ErrClientWriteTimeout)
+		}
 		return n, fmt.Errorf("voice: write %s.out (client): %w", p.ccid, err)
 	}
+	// Clear the deadline so a later writer never inherits a stale bound.
+	_ = conn.SetWriteDeadline(time.Time{})
 	return n, nil
 }
 
@@ -634,11 +694,16 @@ func (p *AudioPair) ReadFromChild(buf []byte) (int, error) {
 // conn (local-leg client pair: the client dials <ccid>.c.in and writes
 // its mic there; the child pair's .in accept stays the child's). The
 // client dials only AFTER the open RPC returns - i.e. after the splice
-// started - so this call WAITS for the accept (bounded: a Close ends the
-// wait with the named error, which is the End-teardown path). A poll
+// started - so this call WAITS for the accept before reading. A poll
 // loop, not a condition variable: the accept is a one-shot and 10 ms
 // granularity is far below audio timescales.
+//
+// The wait is BOUNDED by clientAcceptTimeout (the same bound WriteToClient
+// uses): a client that never dials used to spin this at 100 Hz for the
+// life of the call. Close still ends the wait immediately - teardown is
+// never the path that has to wait out the deadline.
 func (p *AudioPair) ReadFromMic(buf []byte) (int, error) {
+	deadline := time.Now().Add(clientAcceptTimeoutValue())
 	for {
 		p.mu.Lock()
 		conn := p.in
@@ -653,6 +718,10 @@ func (p *AudioPair) ReadFromMic(buf []byte) (int, error) {
 		}
 		if closed {
 			return 0, fmt.Errorf("voice: client not connected on %s.in (pair closed)", p.ccid)
+		}
+		if !time.Now().Before(deadline) {
+			return 0, fmt.Errorf("voice: client mic did not connect on %s.in within %s: %w",
+				p.ccid, clientAcceptTimeoutValue(), ErrClientWriteTimeout)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
