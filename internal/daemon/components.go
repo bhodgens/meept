@@ -1669,6 +1669,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			c.LLMResolver,
 			logger.With("component", "classifier-llm"),
 			budgetTracker,
+			c.MetricsStore,
 		)
 		// Re-resolve the classifier model's ModelConfig so downstream token
 		// caps can be derived from its declared max_output. Best-effort: when
@@ -1695,6 +1696,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			c.LLMResolver,
 			logger.With("component", "summarizer-llm"),
 			budgetTracker,
+			c.MetricsStore,
 		)
 		if c.SummarizerClient != nil {
 			logger.Info("Summarizer LLM client initialized", "model", summarizerRef)
@@ -1712,6 +1714,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				c.LLMResolver,
 				logger.With("component", "transcript-summarizer-llm"),
 				budgetTracker,
+				c.MetricsStore,
 			)
 		}
 
@@ -1725,6 +1728,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				c.LLMResolver,
 				logger.With("component", "extract-llm"),
 				budgetTracker,
+				c.MetricsStore,
 			)
 			if c.ExtractClient != nil {
 				logger.Info("Extract LLM client initialized", "model", c.ModelsConfig.ExtractModel)
@@ -1744,6 +1748,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				c.LLMResolver,
 				logger.With("component", "memory-model-llm"),
 				budgetTracker,
+				c.MetricsStore,
 			)
 			if c.MemoryModelClient != nil {
 				logger.Info("Memory model LLM client initialized", "model", c.ModelsConfig.MemoryModel)
@@ -1763,6 +1768,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				c.LLMResolver,
 				logger.With("component", "planner-model-llm"),
 				budgetTracker,
+				c.MetricsStore,
 			)
 			if c.PlannerModelClient != nil {
 				logger.Info("Planner model LLM client initialized", "model", c.ModelsConfig.PlannerModel)
@@ -1785,6 +1791,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				c.LLMResolver,
 				logger.With("component", "critic-model-llm"),
 				budgetTracker,
+				c.MetricsStore,
 			)
 			if c.CriticModelClient != nil {
 				logger.Info("Critic model LLM client initialized", "model", c.ModelsConfig.CriticModel)
@@ -1799,6 +1806,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				c.LLMResolver,
 				logger.With("component", "hostile-critic-model-llm"),
 				budgetTracker,
+				c.MetricsStore,
 			)
 			if c.HostileCriticModelClient != nil {
 				logger.Info("Hostile critic model LLM client initialized", "model", c.ModelsConfig.HostileCriticModel)
@@ -4322,12 +4330,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// 03-agent-recall-wiring, Flag 3 fail-closed).
 		c.Dispatcher.SetMultiUserScopeEnabled(cfg.MultiUser.Enabled)
 
-		// Register platform tools now that agent registry is available
+		// Register platform tools now that agent registry is available.
+		// Inter-agent messaging (send_agent_message, inbox) is wired later,
+		// after EmployeeMessageStore exists. Calling it here no-ops and the
+		// tools never register.
 		registerPlatformTools(c.ToolRegistry, c.AgentRegistry, c.StatusHandler, c.MCPManager, msgBus, logger)
-
-		// Inter-agent messaging (loop-economics leaf 10): send_agent_message,
-		// inbox, and roster reachability on platform_agents.
-		WireEmployeeMessagingForComponents(c)
 
 		// Register template tools if template registry is available
 		registerTemplateTools(c.ToolRegistry, c.TemplateRegistry, logger)
@@ -5342,6 +5349,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			}
 			if ms != nil {
 				c.EmployeeMessageStore = ms
+				// Must run after the store exists. The earlier call site
+				// (before this block) saw a nil store and skipped
+				// send_agent_message and inbox, so a policy naming them
+				// failed the live-registry check.
+				WireEmployeeMessagingForComponents(c)
 			}
 
 			// Wire the bus publisher so Pause publishes employee.paused
@@ -5537,6 +5549,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				c.LLMResolver,
 				logger.With("component", "voice-supervisor-llm"),
 				budgetTracker,
+				c.MetricsStore,
 			)
 		}
 		vdeps.SupervisorChatter = voiceSupervisorChatter(c)
@@ -5957,9 +5970,11 @@ func (c *Components) Start(ctx context.Context) error {
 		startedHandlers = append(startedHandlers, "voice")
 	}
 
-	// C6 live-registry check. Scheduler, ledger, platform, and voice tools
-	// register above this point. A check before that rejected registered
-	// names (schedule_*, ledger_*, inbox, voice_call, delegate_task).
+	// C6 live-registry check. This is an order constraint, not a race.
+	// Every registration path must have returned before this line:
+	// builtin tools, scheduler provider, ledger tools, platform tools,
+	// employee messaging (after EmployeeMessageStore exists), and voice.
+	// A check before that set rejects names that are registered later.
 	if c.Config != nil && c.ToolRegistry != nil {
 		if err := revalidateGroupsPolicyTools(nil, groupsPoliciesFromConfig(c.Config.Security.Groups.Policies), c.ToolRegistry, agent.CanonicalToolName); err != nil {
 			c.Logger.Error("FATAL: groups config policy tool names invalid (live registry)", "error", err)
@@ -7941,6 +7956,7 @@ func createAuxiliaryLLMClientWithResolver(
 	resolver *llm.Resolver,
 	logger *slog.Logger,
 	budget *llm.Budget,
+	metricsStore *metrics.Store,
 ) *llm.Client {
 	if modelRef == "" {
 		return nil
@@ -7972,7 +7988,17 @@ func createAuxiliaryLLMClientWithResolver(
 	if budget != nil {
 		opts = append(opts, llm.WithBudget(budget))
 	}
-	return llm.NewClient(llmCfg, opts...)
+	cli := llm.NewClient(llmCfg, opts...)
+	// Attach the app-level metrics store so auxiliary clients (classifier,
+	// summarizer, extract, etc.) record their calls into llm_calls like the
+	// main client does (daemon.go daemon usageStore wiring). Without this,
+	// classifier/intent requests were invisible to llm_calls — the exact
+	// "how many requests and when" visibility gap for routing latency.
+	// nil-safe: no store = byte-identical prior behavior.
+	if metricsStore != nil {
+		cli.SetUsageStore(metricsStore)
+	}
+	return cli
 }
 
 // resolveModelRef resolves a "provider/model-id" reference into an LLM config.
