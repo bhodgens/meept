@@ -153,7 +153,10 @@ func (s *Store) CreateBoard(ctx context.Context, b Board) error {
 }
 
 func (s *Store) ListColumns(ctx context.Context, boardID string) ([]Column, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT id, board_id, name, position, wip FROM kanban_columns WHERE board_id = ?", boardID)
+	// ORDER BY is load-bearing: callers treat index order == column
+	// position; without it SQLite returns insertion order and a reorder
+	// silently "does nothing" from the caller's point of view.
+	rows, err := s.db.QueryContext(ctx, "SELECT id, board_id, name, position, wip FROM kanban_columns WHERE board_id = ? ORDER BY position ASC, id ASC", boardID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list columns: %w", err)
 	}
@@ -181,6 +184,62 @@ func (s *Store) CreateColumn(ctx context.Context, c Column) error {
 		c.ID, c.BoardID, c.Name, c.Position, c.WIP)
 	if err != nil {
 		return fmt.Errorf("failed to create column: %w", err)
+	}
+	return nil
+}
+
+// ErrUnknownColumn means no column with that id exists on that board.
+// Callers check it when a mutation matched zero rows — an UPDATE that
+// matches nothing is a miss, not a success.
+type ErrUnknownColumn struct{ ID string }
+
+func (e ErrUnknownColumn) Error() string { return fmt.Sprintf("unknown column: %s", e.ID) }
+
+// UpdateColumnWIP sets the WIP limit for colID on boardID (0 = no limit).
+// It refuses an unknown column instead of silently matching zero rows.
+func (s *Store) UpdateColumnWIP(ctx context.Context, boardID, colID string, wip int) error {
+	res, err := s.db.ExecContext(ctx, "UPDATE kanban_columns SET wip = ? WHERE id = ? AND board_id = ?", wip, colID, boardID)
+	if err != nil {
+		return fmt.Errorf("failed to set column wip: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to read rows affected: %w", err)
+	}
+	if affected == 0 {
+		return ErrUnknownColumn{ID: colID}
+	}
+	return nil
+}
+
+// SetColumnPositions writes each column's position in ONE transaction so a
+// half-applied reorder can never leave duplicate or gapped positions (a
+// per-statement loop would drift if a later write failed). Empty map is a
+// no-op. Any unknown (colID, boardID) pair aborts the whole transaction.
+func (s *Store) SetColumnPositions(ctx context.Context, boardID string, positions map[string]int) error {
+	if len(positions) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin position update: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op once Commit succeeds
+	for colID, pos := range positions {
+		res, err := tx.ExecContext(ctx, "UPDATE kanban_columns SET position = ? WHERE id = ? AND board_id = ?", pos, colID, boardID)
+		if err != nil {
+			return fmt.Errorf("failed to update column position: %w", err)
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("failed to read rows affected: %w", err)
+		}
+		if affected == 0 {
+			return ErrUnknownColumn{ID: colID}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit position update: %w", err)
 	}
 	return nil
 }
