@@ -709,11 +709,15 @@ completion reports (leaf ids cited):
   llm.RuntimeProcess rather than hand-rolling kill/pid logic; the
   supervisor mode (`--supervise-parent`) gained a stdin seam so the
   voice child's stdin-only start token survives the wrapper (leaf 14).
-- jargo pinned at v0.1.0 (leaf 07): v0.2.0+ needs go 1.27 and the tree
-  pins 1.26.x. Six API drifts vs this spec's assumptions recorded in
-  internal/voicechild/jargo.go comments (pipeline package alias, no
-  STT/TTS interfaces, TranscriptionFrame signature, Worker.Run
-  blocking, processor.Base embed, StartFrame worker-owned).
+- jargo pinned at v0.6.1 (leaf 07 pinned v0.1.0; upgraded 2026-11-13 now
+  that the tree declares go 1.27). Six API drifts vs this spec's assumptions
+  recorded in internal/voicechild/jargo.go comments (pipeline package alias,
+  no STT/TTS interfaces, TranscriptionFrame signature, Worker.Run
+  blocking, processor.Base embed, StartFrame worker-owned), plus the v0.1.0
+  -> v0.6.1 drifts in the same file (SmartTurnV3.AnalyzeEndOfTurn returns
+  *MetricsData, Cleanup replaces its Close, resample Quality deprecated,
+  ClearAfter zero inverted, Process keeps output in pace with input so no
+  end-of-stream Flush belongs here, jargo's own ONNX binding swapped).
 - Frame codec relocated (leaf 07): the C1 codec lives in
   internal/voiceframe (stdlib-only, shared by daemon and child) instead
   of internal/voice alone; internal/voice keeps an alias.

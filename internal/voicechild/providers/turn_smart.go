@@ -48,9 +48,15 @@ func (s *smartTurnVAD) SetVADStartSecs(secs float64) { s.a.UpdateVADStartSecs(se
 
 // AnalyzeEndOfTurn runs the model over the buffered turn audio.
 func (s *smartTurnVAD) AnalyzeEndOfTurn() (bool, float64, error) {
-	state, prob, err := s.a.AnalyzeEndOfTurn()
+	state, metrics, err := s.a.AnalyzeEndOfTurn()
 	if err != nil {
 		return false, 0, err
+	}
+	// jargo v0.6.x returns a *MetricsData rather than a bare probability;
+	// a nil metrics means the model ran on no audio.
+	prob := 0.0
+	if metrics != nil {
+		prob = metrics.Probability
 	}
 	return state == turn.Complete, prob, nil
 }
@@ -58,5 +64,6 @@ func (s *smartTurnVAD) AnalyzeEndOfTurn() (bool, float64, error) {
 // Clear resets the analyzer.
 func (s *smartTurnVAD) Clear() { s.a.Clear() }
 
-// Close releases the model session.
-func (s *smartTurnVAD) Close() error { return s.a.Close() }
+// Close releases the model session. jargo v0.6.x renamed this Cleanup on
+// SmartTurnV3 (it releases the session and leaves the analyzer reusable).
+func (s *smartTurnVAD) Close() error { return s.a.Cleanup() }

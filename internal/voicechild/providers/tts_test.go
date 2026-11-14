@@ -335,9 +335,15 @@ func TestResamplingReaderOddReadsPreserveAlignment(t *testing.T) {
 	// slope a clean resampled stream may show.
 	natural := amp * 2 * math.Pi * freq / float64(outRate)
 	limit := 2 * natural
-	// Ideal frame count for 3 s at the output rate; the streaming filter's
-	// ramp-in costs ~41 frames at this rate pair, so the band is loose on the
-	// low side and the test grades alignment, not the filter's exact delay.
+	// Ideal frame count for 3 s at the output rate. jargo v0.6.x keeps a
+	// streaming Resampler's output in pace with its input — the filter delays
+	// the audio by a few milliseconds instead of holding frames back — so the
+	// stream alone produces the full count with nothing clipped at the end.
+	// (On v0.1.0 the same stream yielded 47959 frames and the missing 41 could
+	// only be recovered by Flush, which v0.6.x's flush() instead pads with 58
+	// frames of zero-input ringing on top of a complete stream. Do not add a
+	// Flush here.) The band is exact on both sides on purpose: a shortfall
+	// means frames were clipped, an excess means audio was double-emitted.
 	idealFrames := outRate * secs
 
 	cases := []struct {
@@ -362,8 +368,10 @@ func TestResamplingReaderOddReadsPreserveAlignment(t *testing.T) {
 				t.Fatalf("read: %v", err)
 			}
 			frames := s16Samples(t, got)
-			if len(frames) < idealFrames-200 || len(frames) > idealFrames+50 {
-				t.Fatalf("resampled frame count %d, want ~%d (ideal minus filter-delay ramp)",
+			if len(frames) != idealFrames {
+				t.Fatalf("resampled frame count %d, want exactly %d (v0.6.x keeps output in pace "+
+					"with input: a shortfall means frames were clipped, an excess means audio was "+
+					"double-emitted)",
 					len(frames), idealFrames)
 			}
 			bad, worst := 0, 0

@@ -468,7 +468,8 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   must not import it - pinned by compile-time import checks
   (internal/voice/import_test.go, internal/voiceframe/pin_test.go).
   Keep those pins green; do not "temporarily" import jargo in daemon
-  code. jargo is pinned at v0.1.0 (v0.2.0+ needs go 1.27); API drifts
+  code. jargo is pinned at v0.6.1 (upgraded 2026-11-13; v0.2.0+ needs
+  go 1.27, which the tree now declares). API drifts
   are documented in internal/voicechild/jargo.go.
 - `internal/voiceframe` is dependency-free (stdlib only): both sides
   share the codec and neither may drag the other's world in through it.

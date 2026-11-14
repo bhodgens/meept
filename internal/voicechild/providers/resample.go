@@ -17,16 +17,17 @@ const resampleChunkBytes = 640
 // resampleClearAfter keeps the streaming filter's history across delivery
 // gaps.
 //
-// jargo's resample.Config.ClearAfter defaults (zero value) to
-// resample.DefaultClearAfter = 200 ms: a resampler idle longer than that
-// discards its filter history on the next chunk, treating it as a fresh
-// signal. That rule fits a continuous file stream, not telephony: TTS audio
-// arrives in vendor HTTP chunks whose delivery intervals are gaps in
-// DELIVERY, not gaps in the AUDIO. A stall over 200 ms mid-utterance
-// therefore reset the filter state and is audible as a click. A negative
-// ClearAfter means "never clear" - exactly what this leg wants (library
-// doc, config.go).
-const resampleClearAfter = -1
+// TTS audio arrives in vendor HTTP chunks whose delivery intervals are gaps
+// in DELIVERY, not gaps in the AUDIO, so an idle-window clear mid-utterance
+// discards the filter history and is audible as a click. This leg wants a
+// history that survives every delivery gap, which is what resample.NeverClear
+// is for (config.go).
+//
+// jargo v0.1.0 read a zero ClearAfter as the 200 ms DefaultClearAfter, so
+// "never clear" had to be spelled as a negative. v0.6.x inverted that: zero
+// now never clears too, and NeverClear names the intent. Either value
+// behaves identically here.
+const resampleClearAfter = resample.NeverClear
 
 // resampleBytesPerFrame is the frame size of the PCM this reader converts:
 // s16le mono is 1 channel x 2 bytes. The leg is mono-only (both callers pass
