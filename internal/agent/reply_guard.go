@@ -137,6 +137,16 @@ func toolResultJSONKey(reply string) (string, bool) {
 			return "", false
 		}
 	}
+	// Human-shaped exception: a tool result carrying a non-empty
+	// "message" field already IS the user-facing answer (memory_vote's
+	// {"success": true, "voted": 1, ..., "message": "Recorded vote +1 on
+	// memory <id> (net votes: 1)"} — the vote evidence is the designed
+	// terminating-tool reply). The generic tool-shape keys below match
+	// its "success": true, but replacing this would discard the only
+	// answer the turn produced. Bare dumps never carry a message line.
+	if hasNonEmptyMessageField(trimmed) {
+		return "", false
+	}
 	for _, key := range []string{`"memory_id"`, `"task_id"`, `"job_id"`, `"tool_result"`, `"tool_output"`, `"step_id"`, `"evidence"`} {
 		if strings.Contains(reply, key) {
 			return key, true
@@ -153,6 +163,29 @@ func toolResultJSONKey(reply string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// hasNonEmptyMessageField reports whether the reply is a JSON object whose
+// top-level "message" key carries a non-empty string value — the shape a
+// tool uses to hand the agent a ready user-facing answer alongside its
+// machine evidence. A bare ":" or an empty "" value does not count.
+func hasNonEmptyMessageField(trimmed string) bool {
+	needle := `"message"`
+	idx := strings.Index(trimmed, needle)
+	if idx < 0 {
+		return false
+	}
+	rest := trimmed[idx+len(needle):]
+	rest = strings.TrimLeft(rest, " \t\n\r")
+	if !strings.HasPrefix(rest, ":") {
+		return false
+	}
+	rest = strings.TrimLeft(rest[1:], " \t\n\r")
+	if !strings.HasPrefix(rest, `"`) {
+		return false
+	}
+	rest = rest[1:]
+	return !strings.HasPrefix(rest, `"`)
 }
 
 // matchedTotalsLine reports whether the reply carries a tools/agents catalog

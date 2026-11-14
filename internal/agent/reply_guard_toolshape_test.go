@@ -79,6 +79,39 @@ func TestReplaceCatalogReply_SchedulerJobsReplaced(t *testing.T) {
 	}
 }
 
+// The memory_vote terminating-tool reply is evidence + a human "message"
+// field: {"success": true, "voted": 1, "net_votes": 1, "message": "Recorded
+// vote +1 on memory <id> (net votes: 1)"}. The generic tool-shape keys would
+// trip on "success": true, but a tool result that carries its own
+// user-facing message is the DESIGNED answer (memory_vote is a
+// TerminatingTool whose result becomes the turn reply), not a bare dump.
+// Pin: the guard must pass it through byte-identical.
+func TestToolResultJSONKey_MessageBearingToolReplyPasses(t *testing.T) {
+	reply := "{\n  \"message\": \"Recorded vote +1 on memory 7a4b-uuid (net votes: 1)\",\n  \"net_votes\": 1,\n  \"success\": true,\n  \"voted\": 1\n}"
+	if _, _, replaced := replaceCatalogReply(reply); replaced {
+		t.Fatal("message-bearing terminating-tool reply was replaced by the guard")
+	}
+	if _, ok := toolResultJSONKey(reply); ok {
+		t.Fatal("toolResultJSONKey classified a message-bearing tool reply as a dump")
+	}
+}
+
+// A bare success dump with NO message field (or an empty one) is still a
+// machine dump: the message exception must not open a hole for the
+// schedule_list-style replies.
+func TestToolResultJSONKey_EmptyOrMissingMessageStillDump(t *testing.T) {
+	cases := []string{
+		`{"success": true}`,
+		`{"success": true, "message": ""}`,
+		`{"jobs": [{"id": "x"}]}`,
+	}
+	for _, reply := range cases {
+		if _, ok := toolResultJSONKey(reply); !ok {
+			t.Fatalf("%s not detected as machine-shaped", reply)
+		}
+	}
+}
+
 // Prose answers mentioning a schedule must NOT be replaced: the guard
 // replaces only pure-JSON replies.
 func TestReplaceCatalogReply_ProseMentioningJobsPasses(t *testing.T) {

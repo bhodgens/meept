@@ -68,10 +68,11 @@ type keyedParkBackend interface {
 // the SAME ParkPersistence the parker would use unwired and forwards every
 // call to the SAME store methods with the SAME semantics — no logic change,
 // this leaf is pure refactor insurance that makes leaf 02 additive.
+// Construction goes through the parker's SetBackend callers; the owner
+// lives on each record (stamped by the parker), not on the wrapper.
 type sqliteParkBackend struct {
 	store ParkPersistence
 	kind  ParkKind
-	owner string
 	// nowFn overrides time.Now for the plain-path clock (test seam, same
 	// regime as TurnParker.nowFunc; nil means time.Now).
 	nowFn func() time.Time
@@ -81,14 +82,6 @@ var (
 	_ parkBackend      = (*sqliteParkBackend)(nil)
 	_ keyedParkBackend = (*sqliteParkBackend)(nil)
 )
-
-// newSqliteParkBackend wraps an existing ParkPersistence (typically the
-// *SQLiteParkStore the daemon already builds) as the C-A1 default backend.
-// kind/owner mirror the parker's SetParkPersistence + SetPersistenceOwner
-// wiring for consumers that use the backend stand-alone.
-func newSqliteParkBackend(store ParkPersistence, kind ParkKind, owner string) *sqliteParkBackend {
-	return &sqliteParkBackend{store: store, kind: kind, owner: owner}
-}
 
 func (b *sqliteParkBackend) now() time.Time {
 	if b.nowFn != nil {
