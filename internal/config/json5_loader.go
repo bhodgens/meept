@@ -77,17 +77,19 @@ func LoadJSON5(path string, v any) error {
 // otherwise a quoted value like "5m" silently becomes an integer and config
 // load fails. Known members:
 //
-//	queue.interactive_window          — held as string, parsed at use site
+//	interactive_window          — held as string, parsed at use site
 //	oauth.refresh_interval            — time.ParseDuration at wiring (components.go)
 //	oauth.refresh_margin              — time.ParseDuration at wiring (components.go)
 //	agent.worker_pool.idle_timeout    — time.ParseDuration (agent_manager_wiring.go)
 //	intake.poll_interval              — time.ParseDuration at wiring (leaf 05)
+//	kanban.reconcile_interval         — time.ParseDuration at wiring (07/01-daemon-wiring)
 var stringDurationKeys = map[string]bool{
 	"interactive_window": true,
 	"refresh_interval":   true,
 	"refresh_margin":     true,
 	"idle_timeout":       true,
 	"poll_interval":      true,
+	"reconcile_interval": true,
 }
 
 // preprocessDurations applies the shared duration preprocessing used by both
