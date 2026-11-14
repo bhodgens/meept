@@ -462,6 +462,27 @@ func (a *planDisposerAdapter) RejectPlan(ctx context.Context, planID, sessionID,
 // employee.PlanDisposer.
 var _ employee.PlanDisposer = (*planDisposerAdapter)(nil)
 
+// planBriefLookup adapts PlanManager.GetPlan to employee.PlanBriefLookup so
+// a resumed execution (PlanRef carries only the id) can show the employee
+// the approved plan's title and description. A nil manager returns nil so
+// the caller does not install a lookup — a nil *PlanManager must not be
+// closed over by a non-nil func (typed-nil: the first GetPlan would panic).
+func planBriefLookup(pm *plan.PlanManager) employee.PlanBriefLookup {
+	if pm == nil {
+		return nil
+	}
+	return func(ctx context.Context, planID string) (employee.PlanBrief, bool, error) {
+		p, err := pm.GetPlan(ctx, planID)
+		if err != nil {
+			return employee.PlanBrief{}, false, err
+		}
+		if p == nil {
+			return employee.PlanBrief{}, false, nil
+		}
+		return employee.PlanBrief{Title: p.Title, Description: p.Description}, true, nil
+	}
+}
+
 // planLookupAdapter wraps *plan.PlanManager to satisfy employee.PlanLookup.
 // Used by the approval-timeout sweeper to determine when a plan was created.
 type planLookupAdapter struct {

@@ -182,6 +182,20 @@ type PlanRef struct {
 	GoalID string `json:"goal_id,omitempty"`
 }
 
+// PlanBrief is the title and description of a stored plan. Resume paths hand
+// Execute a PlanRef that carries only the id; the brief is what the employee
+// actually executes against. internal/employee must not import internal/plan,
+// so the daemon supplies this through PlanBriefLookup.
+type PlanBrief struct {
+	Title       string
+	Description string
+}
+
+// PlanBriefLookup resolves a plan's title and description by id.
+// ok=false means the plan is unknown. A non-nil error is a lookup failure.
+// Either case is non-fatal for Execute (generic-mandate fallback).
+type PlanBriefLookup func(ctx context.Context, planID string) (PlanBrief, bool, error)
+
 // ---------------------------------------------------------------------------
 // Dependency interfaces
 // ---------------------------------------------------------------------------
@@ -285,7 +299,12 @@ type GoalLoop struct {
 	// External callbacks.
 	pauseFn    PauseFunc
 	goalLookup GoalLookup
-	statusFn   func() string // returns "running"|"paused"|"error"|"" (empty=unknown)
+	// planBriefLookup fills an empty PlanRef.Prompt from the stored plan's
+	// title and description. Nil means Execute keeps the generic mandate,
+	// byte-identical to the pre-brief path. Set once via SetPlanBriefLookup;
+	// snapshotted under mu and called outside the lock (store I/O).
+	planBriefLookup PlanBriefLookup
+	statusFn        func() string // returns "running"|"paused"|"error"|"" (empty=unknown)
 
 	// emitMetricFn is the telemetry callback injected by the Manager
 	// (same pattern as pauseFn). When non-nil, Reflect emits the
@@ -651,6 +670,19 @@ func (l *GoalLoop) SetEmitMetricFunc(fn EmitMetricFunc) {
 	l.mu.Unlock()
 }
 
+// SetPlanBriefLookup wires the optional plan title/description lookup used
+// when Execute is handed a PlanRef with an empty Prompt (resume paths pass
+// only the plan id). Nil is ignored (setter nil-guard): an unwired loop keeps
+// today's "[plan %s] execute per your mandate" fallback, byte-identical.
+func (l *GoalLoop) SetPlanBriefLookup(fn PlanBriefLookup) {
+	if l == nil || fn == nil {
+		return
+	}
+	l.mu.Lock()
+	l.planBriefLookup = fn
+	l.mu.Unlock()
+}
+
 // SetConstitution atomically replaces the constitution. Safe to call
 // concurrently with Decide; the next Assess/Plan/Execute/Reflect invocation
 // will pick up the new constitution.
@@ -865,6 +897,32 @@ func (l *GoalLoop) Plan(ctx context.Context, candidate CandidatePlan) (PlanRef, 
 	return ref, nil
 }
 
+// approvedPlanMandate is the user message when a resumed plan has no Prompt
+// but the store still has its title and description. Stable so tests can
+// assert substrings (plan id, title, description, both labels).
+const approvedPlanMandate = "Approved plan %s\nTitle: %s\nDescription: %s\nExecute this approved plan. The title and description above are the mandate."
+
+// userMessageForEmptyPrompt is the fallback when PlanRef.Prompt is empty.
+// A nil lookup is today's generic mandate, byte-identical. A lookup hit
+// includes the plan id, title, and description (empty fields still keep
+// their labels). A miss or error is logged and falls back to the generic
+// mandate; Execute never fails because the brief could not be read.
+func userMessageForEmptyPrompt(ctx context.Context, planID string, lookup PlanBriefLookup, logger *slog.Logger) string {
+	generic := fmt.Sprintf("[plan %s] execute per your mandate", planID)
+	if lookup == nil {
+		return generic
+	}
+	brief, ok, err := lookup(ctx, planID)
+	if err != nil || !ok {
+		if logger != nil {
+			logger.Warn("execute: plan brief unavailable; using generic mandate",
+				"plan_id", planID, "found", ok, "error", err)
+		}
+		return generic
+	}
+	return fmt.Sprintf(approvedPlanMandate, planID, brief.Title, brief.Description)
+}
+
 // Execute runs the BotExecutor with the plan's prompt. For tier-1, the prompt
 // comes directly from the ASSESS candidate. For tier-2+, the prompt is the
 // approved plan's instruction.
@@ -880,6 +938,7 @@ func (l *GoalLoop) Execute(ctx context.Context, plan PlanRef) (*bot.BotExecution
 	runner := l.runner
 	constitution := l.constitution
 	logger := l.logger
+	briefLookup := l.planBriefLookup
 	l.mu.Unlock()
 
 	if runner == nil {
@@ -893,11 +952,13 @@ func (l *GoalLoop) Execute(ctx context.Context, plan PlanRef) (*bot.BotExecution
 	}
 
 	systemPrompt := SynthesizedPrompt(constitution, "")
-	// Use the plan's prompt as the user message if available; fall back to the
-	// generic mandate instruction.
+	// Use the plan's prompt as the user message if available. An empty prompt
+	// (resume paths pass only the plan id) is filled from the stored title
+	// and description when a lookup is wired; otherwise the generic mandate
+	// is byte-identical to the pre-brief fallback.
 	userMessage := plan.Prompt
 	if userMessage == "" {
-		userMessage = fmt.Sprintf("[plan %s] execute per your mandate", plan.ID)
+		userMessage = userMessageForEmptyPrompt(ctx, plan.ID, briefLookup, logger)
 	}
 
 	start := time.Now()

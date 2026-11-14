@@ -6817,6 +6817,15 @@ func (c *Components) Start(ctx context.Context) error {
 						emp.ID, &emp.Constitution, goalStore,
 						c.Logger.With("component", "goal-loop", "employee_id", emp.ID),
 					)
+					// Resume paths pass PlanRef{ID} with an empty Prompt. Fill the
+					// execution user message from the stored plan's title and
+					// description so the employee is not blind. Nil plan manager
+					// leaves the lookup unset (generic mandate, byte-identical).
+					// Concrete *plan.PlanManager — the != nil check is the typed-nil
+					// guard; do not box a nil manager into the lookup func.
+					if briefLookup := planBriefLookup(c.PlanManager); briefLookup != nil {
+						loop.SetPlanBriefLookup(briefLookup)
+					}
 					if c.Config != nil {
 						loop.SetGateEnabled(c.Config.Employees.Defaults.Gate.Enabled)
 						if c.Config.Employees.Defaults.Gate.Command != "" {
