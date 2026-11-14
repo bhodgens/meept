@@ -511,6 +511,20 @@ type PlanLookup interface {
 	PlanCreatedAt(ctx context.Context, planID string) (time.Time, error)
 }
 
+// PlanStateLookup provides read-only access to a plan's current signoff
+// state. Used by the approval-timeout sweeper to decide whether a plan
+// tracked in a goal's ActivePlanIDs is actually awaiting approval before
+// auto-rejecting it: an ActivePlanIDs entry can be an already-EXECUTING
+// plan (tier-2 appends pending plans after the executing one), and
+// rejecting that would fail harmlessly while the real pending plan's
+// timeout never fires. The state string mirrors internal/plan's PlanState
+// ("pending_approval", "approved", "executing", ...) — internal/employee
+// cannot import internal/plan (cycle risk), same as PlanApprovedLister.
+// An error (plan unknown/purged) means "not pending": the sweeper skips.
+type PlanStateLookup interface {
+	PlanState(ctx context.Context, planID string) (string, error)
+}
+
 // PlanApprovedLister provides read-only access to the IDs of plans that are
 // currently in the APPROVED signoff state. It drives
 // StartApprovedPlanResumeSweep: the sweep reconciles approved-but-unexecuted
@@ -585,6 +599,14 @@ type Manager struct {
 	// falls back to LastAssessed.
 	planLookup PlanLookup
 
+	// planStateLookup is an optional read-only accessor for a plan's
+	// current signoff state, injected by the daemon wiring. Used by the
+	// approval-timeout sweeper to filter ActivePlanIDs entries to plans
+	// actually in pending_approval before auto-rejecting (an entry can be
+	// an already-executing plan). Nil means the sweeper falls back to the
+	// legacy ActivePlanID-only behavior without a state filter.
+	planStateLookup PlanStateLookup
+
 	// planApprovedLister is an optional read-only accessor for the IDs of
 	// plans in the APPROVED signoff state, injected by the daemon wiring.
 	// It drives StartApprovedPlanResumeSweep — the reconciliation sweep
@@ -597,7 +619,8 @@ type Manager struct {
 	// pending_approval->approved one-way, and decideTier2/3 only create
 	// NEW plans). Nil lister = sweep disabled; the bus subscriber is the
 	// only resume driver. Write-once at daemon init via
-	// SetPlanApprovedLister; read under planApprovedSweepMu by the sweep.
+	// SetPlanApprovedLister (before StartApprovedPlanResumeSweep),
+	// read-only afterwards; the sweep goroutine snapshots it at start.
 	planApprovedLister PlanApprovedLister
 
 	// approvedResumeSweep controls the periodic approved-plan resume sweep
@@ -2005,10 +2028,31 @@ func (m *Manager) SetPlanLookup(l PlanLookup) {
 	m.planLookup = l
 }
 
+// SetPlanStateLookup wires the read-only plan-state accessor used by the
+// approval-timeout sweeper to filter ActivePlanIDs entries to plans
+// actually in pending_approval before auto-rejecting them. Nil is ignored
+// (the sweeper then falls back to the legacy ActivePlanID-only behavior
+// without a state filter).
+func (m *Manager) SetPlanStateLookup(l PlanStateLookup) {
+	if l == nil {
+		return
+	}
+	m.planStateLookup = l
+}
+
 // SetPlanApprovedLister wires the read-only accessor that enumerates plans
 // in the APPROVED signoff state. It enables StartApprovedPlanResumeSweep;
 // nil is ignored (the sweep stays disabled and the plan.approved bus
 // subscriber remains the only resume driver).
+//
+// Ordering contract (replaces the old "read under planApprovedSweepMu"
+// claim, which was false — the setter took no lock): write-once at daemon
+// init BEFORE StartApprovedPlanResumeSweep, read-only afterwards. The
+// sweep goroutine snapshots the field under approvedResumeSweepMu at
+// start and never re-reads it, so production's sequential wiring
+// (SetPlanApprovedLister then StartApprovedPlanResumeSweep, see
+// internal/daemon employee_resume_wiring.go) is race-free. Re-wiring after
+// Start is NOT supported — the running sweep keeps the original lister.
 func (m *Manager) SetPlanApprovedLister(l PlanApprovedLister) {
 	if l == nil {
 		return
@@ -2130,7 +2174,12 @@ func (m *Manager) sweepApprovedPlans(ctx context.Context, lister PlanApprovedLis
 			return
 		}
 		if err := m.ResumeApprovedPlan(ctx, planID, "approved-resume-sweep"); err != nil {
-			m.logger.Warn("approved plan resume sweep: resume failed (will retry next pass)",
+			// NOT retried by the next sweep pass: ResumeApprovedPlan
+			// recorded planID in the once-map before executing, so every
+			// later pass takes the already-resumed INFO skip within this
+			// process. A daemon restart retries, because the plan stays
+			// approved and the fresh process's once-map is empty.
+			m.logger.Warn("approved plan resume sweep: resume failed — marked resumed for this process; a daemon restart retries since the plan stays approved",
 				"plan_id", planID, "error", err)
 		}
 	}

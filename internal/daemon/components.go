@@ -6492,6 +6492,7 @@ func (c *Components) Start(ctx context.Context) error {
 		if c.PlanManager != nil {
 			c.EmployeeManager.SetPlanDisposer(&planDisposerAdapter{pm: c.PlanManager})
 			c.EmployeeManager.SetPlanLookup(&planLookupAdapter{pm: c.PlanManager})
+			c.EmployeeManager.SetPlanStateLookup(&planStateLookupAdapter{pm: c.PlanManager})
 		}
 
 		// Wire known agent IDs for hire-time validation (spec line 597,

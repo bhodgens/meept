@@ -246,9 +246,12 @@ type Goal struct {
 	// "never assessed".
 	LastAssessed time.Time `json:"last_assessed"`
 	// ActivePlanID is the currently-executing Plan pursuing this goal, if
-	// any. Empty when no plan is active. Kept for backward compatibility;
-	// ActivePlanIDs is the authoritative multi-plan field (G2). When
-	// ActivePlanIDs is non-empty, ActivePlanID mirrors its first element.
+	// any. Empty when no plan is executing. Kept for backward
+	// compatibility; ActivePlanIDs is the authoritative multi-plan field
+	// (G2). ActivePlanID is the executing-plan POINTER: SetActivePlan
+	// records it, AddActivePlan sets it only when empty (a pending plan
+	// appended later must not clobber it), and RemoveActivePlan re-points
+	// it only when the removed plan WAS the pointer.
 	ActivePlanID string `json:"active_plan_id,omitempty"`
 	// ActivePlanIDs holds the IDs of all concurrently-executing plans
 	// pursuing this goal (G2: multi-plan concurrency). The first element
@@ -522,6 +525,11 @@ func (g *Goal) SetActivePlan(planID string) {
 // AddActivePlan adds a plan ID to the active plans list (G2). Returns the
 // new count. Does NOT enforce MaxActivePlans; the caller (GoalLoop) is
 // responsible for checking CanAddActivePlan before calling this.
+//
+// ActivePlanID (the executing-plan pointer) is set only when currently
+// empty: tier-2 appends pending plans AFTER an already-executing plan, and
+// re-pointing here would clobber the pointer SetActivePlan recorded for the
+// executing plan (the approval-timeout sweep and resume path key off it).
 func (g *Goal) AddActivePlan(planID string) int {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -533,15 +541,16 @@ func (g *Goal) AddActivePlan(planID string) int {
 		return len(g.ActivePlanIDs)
 	}
 	g.ActivePlanIDs = append(g.ActivePlanIDs, planID)
-	if len(g.ActivePlanIDs) > 0 {
-		g.ActivePlanID = g.ActivePlanIDs[0]
+	if g.ActivePlanID == "" {
+		g.ActivePlanID = planID
 	}
 	return len(g.ActivePlanIDs)
 }
 
 // RemoveActivePlan removes a plan ID from the active plans list (G2).
-// Returns the new count. Updates ActivePlanID to mirror the first
-// remaining element (or empty when no plans remain).
+// Returns the new count. ActivePlanID is re-pointed (to the first remaining
+// entry, or emptied) only when the REMOVED id was the pointer — removing a
+// pending plan must never move the executing-plan pointer.
 func (g *Goal) RemoveActivePlan(planID string) int {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -552,10 +561,12 @@ func (g *Goal) RemoveActivePlan(planID string) int {
 		}
 	}
 	g.ActivePlanIDs = filtered
-	if len(g.ActivePlanIDs) > 0 {
-		g.ActivePlanID = g.ActivePlanIDs[0]
-	} else {
-		g.ActivePlanID = ""
+	if g.ActivePlanID == planID {
+		if len(g.ActivePlanIDs) > 0 {
+			g.ActivePlanID = g.ActivePlanIDs[0]
+		} else {
+			g.ActivePlanID = ""
+		}
 	}
 	return len(g.ActivePlanIDs)
 }

@@ -501,6 +501,30 @@ func (a *planLookupAdapter) PlanCreatedAt(ctx context.Context, planID string) (t
 // Compile-time guard: planLookupAdapter must satisfy employee.PlanLookup.
 var _ employee.PlanLookup = (*planLookupAdapter)(nil)
 
+// planStateLookupAdapter adapts *plan.PlanManager to
+// employee.PlanStateLookup (a plan's current signoff state as a string).
+// Same adapter shape as planLookupAdapter: the employee package cannot
+// import internal/plan (cycle risk). Used by the approval-timeout sweeper
+// to filter ActivePlanIDs entries to plans actually pending approval
+// before auto-rejecting (an entry can be an already-executing plan).
+type planStateLookupAdapter struct {
+	pm *plan.PlanManager
+}
+
+// PlanState returns the current signoff state of the plan with the given
+// ID (e.g. "pending_approval", "approved", "executing").
+func (a *planStateLookupAdapter) PlanState(ctx context.Context, planID string) (string, error) {
+	p, err := a.pm.GetPlan(ctx, planID)
+	if err != nil {
+		return "", err
+	}
+	return string(p.State), nil
+}
+
+// Compile-time guard: planStateLookupAdapter must satisfy
+// employee.PlanStateLookup.
+var _ employee.PlanStateLookup = (*planStateLookupAdapter)(nil)
+
 // pushNotifierAdapter bridges *EventEmitter to the services.notifier
 // interface. The services package defines notifier with interface{} params
 // to avoid importing comm/http or daemon. EventEmitter.Publish takes a

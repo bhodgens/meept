@@ -336,15 +336,26 @@ func (m *Manager) runPeriodicAudit(ctx context.Context) {
 }
 
 // runApprovalTimeoutSweep checks pending plans against the timeout and
-// auto-rejects expired ones per spec line 591. The goal store tracks
-// plans via ActivePlanID; the approval workflow is owned by the plan
-// system (internal/plan). This sweeper queries goals with active plans
-// in PendingApproval state and rejects those older than the timeout.
+// auto-rejects expired ones per spec line 591. The approval workflow is
+// owned by the plan system (internal/plan). This sweeper walks each
+// active goal's full ActivePlanIDs list, filters to plans actually in
+// pending_approval state (via the wired PlanStateLookup), and rejects
+// those older than the timeout.
+//
+// The state filter is essential: ActivePlanIDs[0] can be an
+// already-EXECUTING plan (tier-2 appends pending plans after the executing
+// one), so keying the sweep off ActivePlanID alone rejected the executing
+// plan (RejectPlan's pending_approval->cancelled CAS harmlessly failed)
+// while the real pending plan's timeout never fired — it could sit pending
+// forever. Without a wired PlanStateLookup the sweep keeps the legacy
+// ActivePlanID-only behavior (no state filter), preserving the pre-seam
+// contract for callers that never wired the accessor.
 func (m *Manager) runApprovalTimeoutSweep(ctx context.Context, timeout time.Duration) {
 	m.mu.RLock()
 	goalStore := m.goalStore
 	auditStore := m.auditStore
 	planLookup := m.planLookup
+	stateLookup := m.planStateLookup
 	m.mu.RUnlock()
 
 	if goalStore == nil {
@@ -358,54 +369,94 @@ func (m *Manager) runApprovalTimeoutSweep(ctx context.Context, timeout time.Dura
 	}
 	cutoff := time.Now().UTC().Add(-timeout)
 	for _, g := range goals {
-		// Goals without an active plan skip.
-		if g.ActivePlanID == "" {
-			continue
+		// Candidate plan IDs: the full active list when it is tracked,
+		// else the legacy pointer (backward compat for goals persisted
+		// before G2).
+		candidates := g.ActivePlanIDs
+		if len(candidates) == 0 && g.ActivePlanID != "" {
+			candidates = []string{g.ActivePlanID}
 		}
+		for _, planID := range candidates {
+			m.rejectIfApprovalTimedOut(ctx, g, planID, timeout, cutoff, planLookup, stateLookup, auditStore)
+		}
+	}
+}
 
-		// Determine the plan's age. Prefer the plan store's CreatedAt
-		// (accurate plan submission time); fall back to the goal's
-		// LastAssessed when no plan lookup is wired.
-		var planAge time.Time
-		if planLookup != nil {
-			t, err := planLookup.PlanCreatedAt(ctx, g.ActivePlanID)
-			if err == nil && !t.IsZero() {
-				planAge = t
+// rejectIfApprovalTimedOut rejects one candidate plan when it is actually
+// pending approval and older than the timeout. A plan whose state cannot
+// be resolved (nil lookup, unknown plan) is treated as not-pending and
+// skipped: rejecting an executing plan is at best a harmless CAS failure
+// and at worst a wrong audit row, while a false skip only delays the next
+// sweep pass.
+func (m *Manager) rejectIfApprovalTimedOut(
+	ctx context.Context,
+	g *Goal,
+	planID string,
+	timeout time.Duration,
+	cutoff time.Time,
+	planLookup PlanLookup,
+	stateLookup PlanStateLookup,
+	auditStore *AuditStore,
+) {
+	if planID == "" {
+		return
+	}
+	// Only plans actually awaiting approval are candidates. An
+	// already-executing/approved/cancelled entry in ActivePlanIDs is
+	// never rejected here.
+	if stateLookup != nil {
+		state, err := stateLookup.PlanState(ctx, planID)
+		if err != nil || state != "pending_approval" {
+			if err != nil {
+				m.logger.Debug("approval timeout: state lookup failed; skipping plan",
+					"goal_id", g.ID, "plan_id", planID, "error", err)
 			}
+			return
 		}
-		if planAge.IsZero() {
-			// Fallback: use LastAssessed (imperfect proxy for plan age).
-			planAge = g.LastAssessed
+	}
+
+	// Determine the plan's age. Prefer the plan store's CreatedAt
+	// (accurate plan submission time); fall back to the goal's
+	// LastAssessed when no plan lookup is wired.
+	var planAge time.Time
+	if planLookup != nil {
+		t, err := planLookup.PlanCreatedAt(ctx, planID)
+		if err == nil && !t.IsZero() {
+			planAge = t
 		}
-		if planAge.IsZero() || planAge.After(cutoff) {
-			continue
+	}
+	if planAge.IsZero() {
+		// Fallback: use LastAssessed (imperfect proxy for plan age).
+		planAge = g.LastAssessed
+	}
+	if planAge.IsZero() || planAge.After(cutoff) {
+		return
+	}
+	m.logger.Info("approval timeout: rejecting stale pending plan",
+		"goal_id", g.ID, "plan_id", planID,
+		"age", time.Since(planAge))
+	if err := m.RejectPlan(ctx, g.ID, planID, "system",
+		fmt.Sprintf("auto-rejected: approval timeout after %s (spec line 591)", timeout)); err != nil {
+		// RejectPlan may fail if the plan was already approved
+		// or rejected between sweeps — log and continue.
+		m.logger.Warn("approval timeout: reject failed",
+			"plan_id", planID, "error", err)
+		return
+	}
+	// Write audit finding.
+	if auditStore != nil {
+		finding := AuditFinding{
+			ID:           fmt.Sprintf("approval-timeout-%s-%d", planID, time.Now().Unix()),
+			EmployeeID:   g.EmployeeID,
+			GoalID:       g.ID,
+			PlanID:       planID,
+			Severity:     SeverityWarning,
+			Checkpoint:   "periodic",
+			ViolatedRule: "approval_timeout",
+			Evidence:     fmt.Sprintf(`{"plan_id":"%s","goal_id":"%s"}`, planID, g.ID),
+			DetectedAt:   time.Now().UTC(),
 		}
-		m.logger.Info("approval timeout: rejecting stale plan",
-			"goal_id", g.ID, "plan_id", g.ActivePlanID,
-			"age", time.Since(g.LastAssessed))
-		if err := m.RejectPlan(ctx, g.ID, g.ActivePlanID, "system",
-			"auto-rejected: approval timeout (spec line 591)"); err != nil {
-			// RejectPlan may fail if the plan was already approved
-			// or rejected between sweeps — log and continue.
-			m.logger.Warn("approval timeout: reject failed",
-				"plan_id", g.ActivePlanID, "error", err)
-			continue
-		}
-		// Write audit finding.
-		if auditStore != nil {
-			finding := AuditFinding{
-				ID:           fmt.Sprintf("approval-timeout-%s-%d", g.ActivePlanID, time.Now().Unix()),
-				EmployeeID:   g.EmployeeID,
-				GoalID:       g.ID,
-				PlanID:       g.ActivePlanID,
-				Severity:     SeverityWarning,
-				Checkpoint:   "periodic",
-				ViolatedRule: "approval_timeout",
-				Evidence:     fmt.Sprintf(`{"plan_id":"%s","goal_id":"%s"}`, g.ActivePlanID, g.ID),
-				DetectedAt:   time.Now().UTC(),
-			}
-			_ = auditStore.Create(ctx, finding)
-		}
+		_ = auditStore.Create(ctx, finding)
 	}
 }
 
