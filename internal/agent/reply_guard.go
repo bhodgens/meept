@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"log/slog"
 	"strings"
 )
@@ -166,26 +167,25 @@ func toolResultJSONKey(reply string) (string, bool) {
 }
 
 // hasNonEmptyMessageField reports whether the reply is a JSON object whose
-// top-level "message" key carries a non-empty string value — the shape a
+// TOP-LEVEL "message" key carries a non-empty string value — the shape a
 // tool uses to hand the agent a ready user-facing answer alongside its
 // machine evidence. A bare ":" or an empty "" value does not count.
+//
+// The check must be structural, not a substring scan (bughunt 2026-11-14):
+// the raw strings.Index version matched a "message" key at ANY nesting
+// depth, so a machine dump like {"memory_id": ..., "details":{"message":
+// "..."}} cleared the exemption and its payload leaked to the user (and
+// was spoken aloud via the voice lane). The reply is parsed with
+// encoding/json and ONLY the top-level key is consulted; any parse error
+// or non-object shape falls back to the conservative verdict (no
+// exemption → machine-shaped).
 func hasNonEmptyMessageField(trimmed string) bool {
-	needle := `"message"`
-	idx := strings.Index(trimmed, needle)
-	if idx < 0 {
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(trimmed), &obj); err != nil {
 		return false
 	}
-	rest := trimmed[idx+len(needle):]
-	rest = strings.TrimLeft(rest, " \t\n\r")
-	if !strings.HasPrefix(rest, ":") {
-		return false
-	}
-	rest = strings.TrimLeft(rest[1:], " \t\n\r")
-	if !strings.HasPrefix(rest, `"`) {
-		return false
-	}
-	rest = rest[1:]
-	return !strings.HasPrefix(rest, `"`)
+	msg, ok := obj["message"].(string)
+	return ok && strings.TrimSpace(msg) != ""
 }
 
 // matchedTotalsLine reports whether the reply carries a tools/agents catalog

@@ -158,9 +158,14 @@ func TestWrapVoiceStampedUserInputRejectsMalformedStamp(t *testing.T) {
 			t.Errorf("malformed stamp %q must not lead outside the boundary: %.160q", bad, out)
 		}
 		// The malformed stamp text must sit inside the boundary (between
-		// the markers), escaped when it is scaffolding-shaped.
+		// the markers). Since the 2026-11-14 unclosed-bracket fix, a
+		// scaffolding-shaped malformed stamp is ALSO bracket-escaped at
+		// its leading "[Context:" (bughunt pin: "[Context: no closing
+		// bracket" used to survive the neutralizer verbatim), so the
+		// inner prefix check follows the escape.
 		inner := strings.TrimSuffix(strings.TrimPrefix(out, "<<<USER_INPUT>>>\n"), "\n<<<END_USER_INPUT>>>")
-		if !strings.HasPrefix(inner, bad) {
+		wantInner := strings.Replace(bad, "[Context:", "\\[Context:", 1)
+		if !strings.HasPrefix(inner, wantInner) {
 			t.Errorf("malformed stamp %q not carried as data inside the boundary: %.160q", bad, out)
 		}
 	}
