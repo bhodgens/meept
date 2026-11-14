@@ -160,11 +160,12 @@ func hireResumeEmployee(t *testing.T, s *harness.Stack, employeeID, escMarker st
 			{"type": "cron", "schedule": "0 4 * * *", "enabled": false},
 		},
 		"constitution": map[string]any{
-			"purpose":       employeeID + " escalation-resume fixture",
-			"role":          "escalation resume probe",
-			"charter":       "Complete the assigned goal. Never delete data.",
-			"autonomy_tier": "tier_2_propose",
-			"escalates_to":  []string{"user"},
+			"purpose":          employeeID + " escalation-resume fixture",
+			"role":             "escalation resume probe",
+			"charter":          "Complete the assigned goal. Never delete data.",
+			"autonomy_tier":    "tier_2_propose",
+			"escalates_to":     []string{"user"},
+			"amendment_policy": map[string]any{"requires_approval": true},
 			"constraints": map[string]any{
 				"tools_allowed": []string{},
 				"risk_ceiling":  "medium",
@@ -232,6 +233,12 @@ func TestApprovedPlanResumesGoalRoundOnce(t *testing.T) {
 
 	s := harness.Start(t, harness.WithConfigOverlay(map[string]any{
 		"employees.defaults.gate.enabled": true,
+		// Leaf 06: the adapter submits every goal-loop plan right after
+		// creation, so the scratch daemon MUST require approval — with the
+		// default (require_approval=false) SubmitPlan auto-approves within
+		// milliseconds and the plan lands in executing before this wait
+		// ever samples pending_approval.
+		"plans.approval.require_approval": true,
 	}))
 
 	hireResumeEmployee(t, s, empID, escMarker)
@@ -314,7 +321,13 @@ func TestApprovedPlanResumesGoalRoundOnce(t *testing.T) {
 		return strings.Contains(row.History, pending.ID)
 	})
 
-	// The executor turn ran: the fake LLM saw the execution prompt.
+	// The executor turn ran: the fake LLM saw the execution prompt. The
+	// resume path carries ONLY the plan id (C1: ResumeApprovedPlan ->
+	// ApproveAndExecute(ctx, PlanRef{ID: planID})), and an empty ref
+	// prompt falls back to the loop's "[plan <id>] execute per your
+	// mandate" synthetic — the escalated candidate prompt does not
+	// survive the resume, so the observable is the synthetic carrying
+	// the plan id.
 	sawExecution := false
 	for _, body := range s.Fake.Requests() {
 		msgs, _ := body["messages"].([]any)
@@ -324,14 +337,14 @@ func TestApprovedPlanResumesGoalRoundOnce(t *testing.T) {
 				continue
 			}
 			if role, _ := msg["role"].(string); role == "user" {
-				if c, _ := msg["content"].(string); strings.Contains(c, escMarker) {
+				if c, _ := msg["content"].(string); strings.Contains(c, pending.ID) {
 					sawExecution = true
 				}
 			}
 		}
 	}
 	if !sawExecution {
-		t.Error("no executor turn carried the escalated prompt — the resume never executed the plan")
+		t.Error("no executor turn carried the plan id — the resume never executed the plan")
 	}
 
 	// Second approve event is a SKIP: publish the same approval again via

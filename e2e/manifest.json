@@ -157,7 +157,8 @@
       "llm-serving-tiers"
     ],
     "internal/daemon/": [
-      "daemon-lifecycle"
+      "daemon-lifecycle",
+      "escalation-resume"
     ],
     "internal/llm/": [
       "daemon-lifecycle",

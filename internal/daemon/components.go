@@ -6667,9 +6667,7 @@ func (c *Components) Start(ctx context.Context) error {
 			// employees will error at Decide time (documented behaviour).
 			var planner employee.PlanCreator
 			if c.PlanManager != nil {
-				planner = &planCreatorAdapter{
-					planMgr: c.PlanManager,
-				}
+				planner = newPlanCreatorAdapter(c.PlanManager, c.Logger)
 			}
 
 			// Tree 03 leaf 03 (D9): ONE shared TurnParker + EpisodeParker
