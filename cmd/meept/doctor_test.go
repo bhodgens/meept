@@ -309,9 +309,23 @@ func TestMcpDependencyCatalogWarn(t *testing.T) {
 // mcp: dependency block (from the real user catalog, or the single
 // mcp:catalog warn line if it cannot load).
 func TestRunDoctorMcpChecksWired(t *testing.T) {
-	oldState := stateDir
-	t.Cleanup(func() { stateDir = oldState })
-	stateDir = t.TempDir()
+	// Hermetic MEEPT_HOME (pattern from e0ab3974): runDoctor reads the real
+	// ~/.meept config through config.LoadDefault, so an ambient operator
+	// home with default_managed agents drowned the output in groups-config
+	// failures before the mcp: lines ever rendered. Point MEEPT_HOME at a
+	// scratch dir via the shared withMeeptHome helper and stage a minimal
+	// catalog with one enabled stdio entry so the mcp dependency block
+	// renders from a clean, deterministic fixture. The wiring under test is
+	// unchanged.
+	home := withMeeptHome(t)
+	if err := os.WriteFile(filepath.Join(home, "meept.json5"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "mcp_servers.json5"), []byte(
+		`{servers: [{name: "doctor-wired-fixture", command: ["doctor-wired-fixture-bin"], type: "stdio", enabled: true}]}`,
+	), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	// captureStdout swaps the global os.Stdout; keep this test serial.
 	out := captureStdout(t, func() {

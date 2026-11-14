@@ -373,9 +373,20 @@ func TestDoctorMemorySummaryPhrases(t *testing.T) {
 // memory-pipeline line (the seam the F7 e2e gate asserts through the real
 // binary; this pins the wiring in-process).
 func TestDoctorMemorySummaryWiredIntoRunDoctor(t *testing.T) {
-	oldState := stateDir
-	t.Cleanup(func() { stateDir = oldState })
-	stateDir = t.TempDir()
+	// Hermetic MEEPT_HOME (pattern from e0ab3974): runDoctor reads the real
+	// ~/.meept config through config.LoadDefault (groups check) and
+	// memoryDoctorConfigHook (memory checks), so an ambient operator home
+	// with default_managed agents drowned the output in groups-config
+	// failures and the memory-pipeline assertion lines never appeared. Point
+	// MEEPT_HOME at a scratch dir via the shared withMeeptHome helper and
+	// stage minimal config files so every doctor leg sees a clean, by-design
+	// fresh-install posture. The wiring under test is unchanged.
+	home := withMeeptHome(t)
+	for _, name := range []string{"meept.json5", "models.json5", "mcp_servers.json5"} {
+		if err := os.WriteFile(filepath.Join(home, name), []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	out := captureStdout(t, func() {
 		if err := runDoctor(false, false); err != nil {

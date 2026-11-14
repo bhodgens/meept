@@ -15,9 +15,11 @@
 # provision`) to print every remote command instead of executing it. Local
 # read-only steps still run; nothing is installed or written on any node.
 #
-# Go toolchain policy: the cluster pins the upstream toolchain named in the
-# repo's go.mod (GO_VERSION below, currently go1.26.5). Distro golang-go is
-# NEVER installed: it is unpinned, and a newer ambient go (1.27+) breaks the
+# Go toolchain policy: the cluster derives the pinned toolchain from the
+# repo's go.mod `toolchain` line at script runtime (GO_VERSION below; the
+# pre-1.27 value go1.26.5 is the documented fallback if go.mod carries no
+# toolchain line). Distro golang-go is
+# NEVER installed: it is unpinned, and a newer ambient go breaks the
 # repo's x/tools analyzers — the same reason the repo pins GOTOOLCHAIN
 # in-repo. The pinned toolchain installs to /usr/local/go-<ver> and is
 # exposed as /usr/local/go (symlink, only when absent or already ours);
@@ -42,11 +44,23 @@ REPO_DIR=/root/git/meept
 STATE=/root/.meept
 GOSSIP_PORT=9701
 
-# Pinned Go toolchain — MUST match the `toolchain` line in the repo's go.mod.
-GO_VERSION=go1.26.5
+# Pinned Go toolchain — derived from the `toolchain` line in the repo's
+# go.mod at script runtime (so a go.mod bump re-pins the cluster on the next
+# provision). Fallback matches the pre-1.27-era pin when go.mod names no
+# toolchain. NOTE: GO_SHA256 corresponds to the FALLBACK version only; the
+# sha is re-derived per-version below from go.dev/dl's published checksum
+# file, so a go.mod bump stays verifiable without editing this script.
+GO_VERSION="$(sed -n 's/^toolchain[[:space:]]//p' "$(dirname "$0")/../go.mod" 2>/dev/null | head -1)"
+GO_VERSION="${GO_VERSION:-go1.26.5}"
+GO_SHA256_FALLBACK="798232c0baa15b14e03a55899bdb5ea7deb154f5dffd4b4b83bcbe45dc7ada2d" # go1.26.5
 GO_TARBALL="${GO_VERSION}.linux-amd64.tar.gz"
 GO_URL="https://go.dev/dl/${GO_TARBALL}"
-GO_SHA256="798232c0baa15b14e03a55899bdb5ea7deb154f5dffd4b4b83bcbe45dc7ada2d"
+# Resolve the published checksum for the derived version; fall back to the
+# pinned legacy sha (only correct for go1.26.5) when the fetch fails, and
+# abort loudly if we cannot verify at all against anything.
+GO_SHA256="$(curl -fsSL "https://go.dev/dl/?mode=json&include=all" 2>/dev/null | \
+  sed -n "s/.*\"${GO_TARBALL}\",\"sha256\":\"\\([0-9a-f]\\{64\\}\\)\".*/\\1/p" | head -1)" || true
+GO_SHA256="${GO_SHA256:-$GO_SHA256_FALLBACK}"
 GO_INSTALL_ROOT=/usr/local
 GO_INSTALL_DIR="${GO_INSTALL_ROOT}/${GO_VERSION}"
 GO_SYMLINK="${GO_INSTALL_ROOT}/go"
@@ -173,7 +187,7 @@ cmd_provision() {
   # GOTOOLCHAIN is also derived from go.mod inline so the build stays pinned
   # even if the toolchain binary were wrong (go would then fetch the declared
   # toolchain itself rather than silently building with a mismatched one).
-  node totem1 "cd $REPO_DIR && . /etc/profile.d/pinned-go.sh 2>/dev/null; TC=\$(sed -n 's/^toolchain[[:space:]]//p' go.mod | head -1) && \
+  node totem1 "cd $REPO_DIR && . /etc/profile.d/pinned-go.sh 2>/dev/null; TC=\$(sed -n 's/^toolchain[[:space:]]//p' go.mod | head -1); TC=\${TC:-$GO_VERSION} && \
 GOTOOLCHAIN=\$TC go build -o bin/meept-daemon ./cmd/meept-daemon && \
 GOTOOLCHAIN=\$TC go build -o bin/meept ./cmd/meept && echo build-ok"
 
