@@ -39,10 +39,10 @@ them a documented exception.
 ## Completion Tracking Table
 | Leaf | Status | Notes |
 |---|---|---|
-| 02/01-task-transition-guard | PENDING | |
-| 02/02-queue-transition-guard | PENDING | |
-| 02/03-publishers-task-queue | PENDING | |
-| 02/04-publishers-plan-step-goal | PENDING | |
+| 02/01-task-transition-guard | DONE | 8c1de6b6 (option (a) SetStateChecked; run 1 claimed COMPLETE and landed nothing — re-dispatched, verified on disk) |
+| 02/02-queue-transition-guard | IN_PROGRESS | child running (transitions.go on disk; store.go wiring pending) |
+| 02/03-publishers-task-queue | PENDING | depends on 02/02 |
+| 02/04-publishers-plan-step-goal | PENDING | depends on 02/03 |
 
 ## Integration Test Plan
 - Verify that invalid transitions for tasks/jobs/plans are blocked.

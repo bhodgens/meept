@@ -31,10 +31,10 @@ Establish the network-exposed boundary for the Kanban subsystem. This branch imp
 ## Completion Tracking Table
 | Leaf | Status | Notes |
 |---|---|---|
-| 04/01 | PENDING | |
-| 04/02 | PENDING | |
-| 04/03 | PENDING | |
-| 04/04 | PENDING | |
+| 04/01 | DONE | 875fadf2 (parent fixes: C5 grant filter on GetGrantsForPrincipal; UserID principal fixture — child's test had never actually run) |
+| 04/02 | IN_PROGRESS | child running (dispatched 2026-11-14, RPCCaller seam + EventSource seam + loopback-bind gate) |
+| 04/03 | PENDING | depends on 04/02 |
+| 04/04 | PENDING | depends on 04/03 |
 
 ## Integration Test Plan
 - Verify sidecar process lifecycle (spawn/SIGTERM).

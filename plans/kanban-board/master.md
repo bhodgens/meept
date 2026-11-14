@@ -216,10 +216,10 @@ For each child in dependency order:
 
 | Child | Status | Notes |
 |---|---|---|
-| 01-foundation | PENDING | |
-| 02-workflow-authority | PENDING | |
+| 01-foundation | IN_PROGRESS | 01/01 COMMITTED 322b6682 (parent fixes: FK pragma, provenance INSERT, events API); 01/02 COMMITTED f93a017f (hand-recovered after subagent context blowout); 01/03 running |
+| 02-workflow-authority | IN_PROGRESS | 02/01 COMMITTED 8c1de6b6 (option (a); parent added missing negative test edges); 02/02 running (transitions.go on disk, store.go wiring pending) |
 | 03-board-projection | PENDING | |
-| 04-sidecar-gateway | PENDING | |
+| 04-sidecar-gateway | IN_PROGRESS | 04/01 COMMITTED 875fadf2 (parent fixes: C5 grant filter, UserID principal fixture) |
 | 05-surfaces | PENDING | |
 | 06-wiring-delivery | PENDING | |
 | 07-daemon-wiring | PENDING | |

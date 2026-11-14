@@ -33,9 +33,9 @@ Implement the core data structures and storage for the Kanban board, establishin
 ## Completion Tracking Table
 | Leaf | Status | Notes |
 |---|---|---|
-| 01/01-store-schema | PENDING | |
-| 01/02-config-surface | PENDING | |
-| 01/03-board-crud | PENDING | |
+| 01/01-store-schema | DONE | 322b6682 (parent fixes: FK pragma, provenance INSERT, card-events API, 13 tests) |
+| 01/02-config-surface | DONE | f93a017f (hand-recovered after subagent context blowout) |
+| 01/03-board-crud | DONE | 83ed8f56 (Manager; parent moved raw SQL into store, fixed ListColumns ORDER BY, +unknown-col/clamp/idempotence tests) |
 
 ## Integration Test Plan
 - Verify SQLite migration logic for `kanban_` tables.
