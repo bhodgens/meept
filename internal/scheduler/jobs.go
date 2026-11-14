@@ -243,11 +243,20 @@ func (j *AgentJob) Execute(ctx context.Context) error {
 	// the chat.request turn_id, so re-delivery (at-least-once recovery) is
 	// idempotent. The scheduler records the receipt around this call.
 	messageID := id.Generate("turn-")
+	// The dispatch boundary (executeJob) passes the atomically-claimed tick
+	// through the context. Stamping OccurrenceAt with it keeps hasReceiptForTick
+	// (ms-precision claim↔receipt match) exact: a drifting stamp reads as
+	// "claim without receipt" and the claimed-tick recovery sweep re-delivers
+	// an occurrence that already has receipts, with a fresh turn id.
+	occ := time.Now().UTC()
+	if claimed, ok := ctx.Value(claimedTickKey{}).(time.Time); ok && !claimed.IsZero() {
+		occ = claimed
+	}
 	if s := j.deliveryScheduler; s != nil {
 		receipt := ScheduleDeliveryReceipt{
 			ScheduleID:      j.id,
-			ScheduledAt:     time.Now().UTC(),
-			OccurrenceAt:    time.Now().UTC(),
+			ScheduledAt:     occ,
+			OccurrenceAt:    occ,
 			MessageID:       messageID,
 			TargetSessionID: j.config.AgentConfig.TargetSessionID,
 			Prompt:          j.prompt,
@@ -270,8 +279,8 @@ func (j *AgentJob) Execute(ctx context.Context) error {
 	if s := j.deliveryScheduler; s != nil {
 		receipt := ScheduleDeliveryReceipt{
 			ScheduleID:      j.id,
-			ScheduledAt:     time.Now().UTC(),
-			OccurrenceAt:    time.Now().UTC(),
+			ScheduledAt:     occ,
+			OccurrenceAt:    occ,
 			DeliveredAt:     time.Now().UTC(),
 			MessageID:       messageID,
 			TargetSessionID: j.config.AgentConfig.TargetSessionID,

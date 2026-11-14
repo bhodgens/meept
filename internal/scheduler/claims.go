@@ -303,6 +303,13 @@ func writeLastWake(dataDir string, wake time.Time) error {
 	return nil
 }
 
+// claimedTickKey carries the atomically-claimed tick from the dispatch
+// boundary (executeJob) into the job's Execute context. Receipt-writing
+// executions stamp the delivery OccurrenceAt with this tick instead of a
+// fresh time.Now(), keeping the claim row and the receipt's tick-match key
+// (hasReceiptForTick, ms precision) identical.
+type claimedTickKey struct{}
+
 // ExecutionOptions carries per-delivery context from the dispatch boundary
 // into executeJob.
 type ExecutionOptions struct {

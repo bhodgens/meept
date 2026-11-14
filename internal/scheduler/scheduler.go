@@ -675,6 +675,15 @@ func (s *Scheduler) executeJob(ctx context.Context, job Job, opts ExecutionOptio
 		return
 	}
 
+	// Pass the claimed tick to the job so receipt-writing executions
+	// (AgentJob.Execute) stamp OccurrenceAt with THIS tick instead of a
+	// fresh time.Now(). The claim INSERT and the stamp are milliseconds
+	// apart; hasReceiptForTick matches claims to receipts at ms precision,
+	// so a drifting stamp reads as "no receipt for this claim" and the
+	// claimed-tick recovery sweep re-delivers an occurrence that already
+	// has receipts, with a fresh (dedupe-proof) turn id.
+	ctx = context.WithValue(ctx, claimedTickKey{}, tick)
+
 	// Mark as running
 	s.mu.Lock()
 	s.runningJobs[jobID] = true

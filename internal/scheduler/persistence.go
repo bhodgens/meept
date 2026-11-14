@@ -61,6 +61,19 @@ func NewStore(dataDir string) (*Store, error) {
 		jobs:     make(map[string]JobConfig),
 	}
 
+	// Seed the in-memory map from any existing jobs.json. Store writes are
+	// full-snapshot saves: a caller that persists a job BEFORE
+	// Scheduler.Start()/Load() (e.g. the daemon's construction-time
+	// interval-job registrations like ledger-integrity, which run in
+	// NewComponents) would otherwise write only its own in-memory subset
+	// and silently delete every already-persisted job — including
+	// session-pinned jobs whose in-flight receipts restart recovery
+	// depends on. A parse error is left to Start's loadPersistedJobs,
+	// which logs it.
+	if _, err := os.Stat(filePath); err == nil {
+		_, _ = store.Load()
+	}
+
 	return store, nil
 }
 
