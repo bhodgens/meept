@@ -212,12 +212,12 @@ Output: APPROVED or a list of specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-gate-tests.md | PENDING | 0 | |
+| 00T-gate-tests.md | TESTS_VALIDATED | 1 | Validated in-session 2026-11-13. All RED for missing-impl reasons (T0-T4 name m.ResumeApprovedPlan; T5 names the Components seam; T6 names intersectToolsAllowed; T7 names buildAmendPayload). T8 pins compiled-green in the subagent run (package-wide run blocked only by leaf-01 RED — expected). T9 compiles under -tags e2e, manifest test ok. 4 documented deviations: T6 helper-targeted pin (conservative base has no seam to seed non-empty base), T7 builder seam (no RPC-client injection in cmd/meept), T5 func-field seam (parallel-leaf rule), T4 uses real ResumeGoalEpisode path. |
 | 01-employee-resume.md | PENDING | 0 | |
-| 02-daemon-resume-wiring.md | PENDING | 0 | |
-| 03-hint-intersection.md | PENDING | 0 | serialized after 01 |
-| 04-amend-cli.md | PENDING | 0 | |
-| 05-trigger-wildcard-pin.md | PENDING | 0 | |
+| 02-daemon-resume-wiring.md | PENDING | 0 | seam shape pinned by T5: Components.resumeApprovedPlan func field + start/stopEmployeeResumeSubscriber |
+| 03-hint-intersection.md | PENDING | 0 | helper must be named intersectToolsAllowed per T6 pin (or adapt the 2 call sites) |
+| 04-amend-cli.md | PENDING | 0 | must factor out buildAmendPayload(agentID, field, value, reason) per T7 pin |
+| 05-trigger-wildcard-pin.md | PENDING | 0 | T8 pins already green |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 
