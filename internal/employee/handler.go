@@ -728,8 +728,8 @@ func (h *RPCHandler) handleGoalsApprove(ctx context.Context, raw json.RawMessage
 		return nil, fmt.Errorf("goal_id and plan_id are required")
 	}
 
-	// Extract caller from context and validate authorization
-	caller := CallerFromContext(ctx)
+	// Injected caller, else owner-trusted unix peer. No identity fails closed.
+	caller := effectiveApprover(ctx)
 	if caller == nil {
 		return nil, fmt.Errorf("unauthenticated: API key required for plan approval")
 	}
@@ -781,7 +781,7 @@ func (h *RPCHandler) handleGoalsApproveGate(ctx context.Context, raw json.RawMes
 	if req.GoalID == "" {
 		return nil, fmt.Errorf("goal_id is required")
 	}
-	caller := CallerFromContext(ctx)
+	caller := effectiveApprover(ctx)
 	if caller == nil {
 		return nil, fmt.Errorf("unauthenticated: API key required for gate approval")
 	}
@@ -823,8 +823,8 @@ func (h *RPCHandler) handleGoalsReject(ctx context.Context, raw json.RawMessage)
 		return nil, fmt.Errorf("reason is required when rejecting a plan")
 	}
 
-	// Extract caller from context and validate authorization
-	caller := CallerFromContext(ctx)
+	// Injected caller, else owner-trusted unix peer. No identity fails closed.
+	caller := effectiveApprover(ctx)
 	if caller == nil {
 		return nil, fmt.Errorf("unauthenticated: API key required for plan rejection")
 	}
