@@ -317,3 +317,70 @@ func TestExtractJSON(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Gate tests: tools_allowed_hint intersection (Contract C3, tree
+// 20261113-escalation-resume-and-hardening leaf 03). The D4 rule
+// ("intersection never widens the spec") binds the migration LLM's
+// tools_allowed_hint to the base constitution's allowlist.
+//
+// Structure: synthesizeConstitutionWithLLM always starts from the
+// conservative base whose ToolsAllowed is NIL (inherit-everything), and it
+// exposes no seam to seed a non-empty base. The intersection therefore lives
+// in the ~10-line set helper Contract C3 freezes (sorted+deduped
+// intersection, mirroring internal/groups/resolve.go:163-171 inline — no
+// internal/groups import). These tests pin that helper directly
+// (intersectToolsAllowed, the name C3's spec block implies) plus the
+// nil-base behavioral branch through the REAL synthesize path.
+// RED today: intersectToolsAllowed is undefined (compile error naming it)
+// and the real-path assertions fail on the replace-block superset.
+// ---------------------------------------------------------------------------
+
+// TestSynthesizeConstitution_HintIntersectsBase: base=[file_read],
+// hint=[file_read, shell] -> result=[file_read], sorted+deduped. The hint
+// must never add "shell" to a base that did not grant it (D4). RED today:
+// intersectToolsAllowed is undefined.
+func TestSynthesizeConstitution_HintIntersectsBase(t *testing.T) {
+	got := intersectToolsAllowed([]string{"file_read", "shell"}, []string{"file_read"})
+	if len(got) != 1 || got[0] != "file_read" {
+		t.Errorf("intersectToolsAllowed([file_read shell], [file_read]) = %v, want [file_read] (hint must not widen a non-empty base allowlist — D4)", got)
+	}
+}
+
+// TestSynthesizeConstitution_EmptyHintKeepsBase: an empty (or blank-only)
+// hint keeps the base untouched — nil stays nil (inherit-everything
+// preserved; an empty hint must never replace nil with an empty slice).
+// Behavioral leg pinned through the REAL synthesizeConstitutionWithLLM path
+// with the conservative nil base. Blank-only hint RED today is possible only
+// if the current code already keeps nil — the assertion is the pin; the
+// compile failure above is this file's gate RED.
+func TestSynthesizeConstitution_EmptyHintKeepsBase(t *testing.T) {
+	mgr := newTestManager()
+
+	mc := &mockMigrator{response: `{
+  "purpose": "hint probe",
+  "role": "hint probe",
+  "never": [],
+  "tools_allowed_hint": ["  ", ""]
+}`}
+	c, _, err := mgr.synthesizeConstitutionWithLLM(context.Background(), mc, migrateTestBot())
+	if err != nil {
+		t.Fatalf("synthesizeConstitutionWithLLM error: %v", err)
+	}
+	if got := c.Constraints.ToolsAllowed; got != nil {
+		t.Errorf("blank-only hint: ToolsAllowed = %v, want nil (base inherit-everything preserved)", got)
+	}
+}
+
+// TestSynthesizeConstitution_AllUnknownHintDropsUnmatched: against a
+// non-empty base sharing nothing with the hint, only base members survive —
+// every unmatched hint token is dropped, never merged in. Also pins the
+// sorted+deduped output contract on the surviving set. RED today:
+// intersectToolsAllowed is undefined.
+func TestSynthesizeConstitution_AllUnknownHintDropsUnmatched(t *testing.T) {
+	got := intersectToolsAllowed([]string{"shell", "web_fetch", "shell"}, []string{"file_read", "web_fetch"})
+	want := []string{"web_fetch"}
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Errorf("intersectToolsAllowed = %v, want %v (unmatched hint tokens dropped, sorted+deduped)", got, want)
+	}
+}
