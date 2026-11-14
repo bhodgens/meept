@@ -2,7 +2,7 @@
 #
 # meept daemon + CLI container image.
 #
-# Builder: pinned golang:1.26 with cgo enabled — the daemon links the oto
+# Builder: pinned golang:1.27 with cgo enabled — the daemon links the oto
 # audio driver, which needs ALSA headers (libasound2-dev) on Linux.
 # Runtime: debian:bookworm-slim with libasound2 (the only runtime half of the
 # audio dependency) plus ca-certificates and curl (healthcheck).
@@ -15,7 +15,7 @@
 # ---------------------------------------------------------------------------
 # Build stage
 # ---------------------------------------------------------------------------
-FROM golang:1.26-bookworm AS build
+FROM golang:1.27-bookworm AS build
 
 # ALSA headers for the oto audio driver (cgo) and libsqlite3-dev for the
 # sqlite-vec cgo bindings (sqlite3.h); git for version stamping.

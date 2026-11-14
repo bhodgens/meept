@@ -61,6 +61,16 @@ func PeerIdentityFromContext(ctx context.Context) (PeerIdentity, bool) {
 	return p, ok
 }
 
+// ContextWithPeerIdentity attaches a kernel-verified Unix-socket peer to ctx.
+// handleConnection is the production writer. Tests use the same key
+// PeerIdentityFromContext reads; a nil ctx is treated as Background.
+func ContextWithPeerIdentity(ctx context.Context, peer PeerIdentity) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, peerIdentityKey{}, peer)
+}
+
 // Default timeouts.
 const (
 	DefaultShutdownTimeout = 30 * time.Second // Graceful shutdown deadline
@@ -415,9 +425,10 @@ func (s *Server) handleConnection(conn net.Conn, peer PeerIdentity) {
 	// Create connection-scoped context that cancels when we return
 	ctx, cancel := context.WithCancel(context.Background())
 	// Attach the kernel-verified peer identity so handlers can gate on
-	// caller identity (ACP approver check, audit M5). Value-only context
-	// key; handlers read it via PeerIdentityFromContext.
-	ctx = context.WithValue(ctx, peerIdentityKey{}, peer)
+	// caller identity (ACP approver check, audit M5; employee plan
+	// approval). Value-only context key; handlers read it via
+	// PeerIdentityFromContext.
+	ctx = ContextWithPeerIdentity(ctx, peer)
 	defer func() {
 		cancel() // Signal all handlers to stop
 		conn.Close()

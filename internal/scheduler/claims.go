@@ -9,9 +9,12 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/caimlas/meept/pkg/models"
 
 	_ "modernc.org/sqlite" // sqlite driver registration
 )
@@ -444,6 +447,12 @@ func (s *Scheduler) ProcessMissedTicks(now time.Time) ([]MissedTickRun, error) {
 
 // dispatchMissed runs a claimed catch-up tick with missed_count metadata
 // attached to the job's execution events.
+//
+// The goroutine carries its own panic recovery (bughunt 2026-11-12 F5):
+// the tick was already claimed, so a panic killing the daemon here would
+// leave a claim row with no receipt — invisible to the receipt-recovery
+// sweep and skipped by ProcessMissedTicks, permanently losing the
+// occurrence. cron.Recover (scheduler.go) covers only cron-fired jobs.
 func (s *Scheduler) dispatchMissed(job Job, tick time.Time, missedCount int) {
 	s.mu.RLock()
 	baseCtx := s.runNowCtx
@@ -454,6 +463,25 @@ func (s *Scheduler) dispatchMissed(job Job, tick time.Time, missedCount int) {
 	ctx, cancel := context.WithTimeout(baseCtx, 30*time.Minute)
 	go func() {
 		defer cancel()
+		defer func() {
+			if rec := recover(); rec != nil {
+				s.logger.Error("scheduler: panic in missed-tick job recovered",
+					"job_id", job.ID(),
+					"tick", tick,
+					"panic", rec,
+					"stack", string(debug.Stack()),
+				)
+				if s.bus != nil {
+					msg, _ := models.NewBusMessage(models.MessageTypeEvent, "scheduler."+job.ID(), map[string]any{
+						SchedulerKeyEvent: "job_panic_recovered",
+						SchedulerKeyJobID: job.ID(),
+						"tick":            tick.Format(time.RFC3339Nano),
+						"panic":           fmt.Sprintf("%v", rec),
+					})
+					s.bus.PublishExternalOnly("scheduler.job.completed", msg)
+				}
+			}
+		}()
 		s.executeJob(ctx, job, ExecutionOptions{Tick: tick, MissedCount: missedCount, PreClaimed: true})
 	}()
 }

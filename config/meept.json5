@@ -1596,4 +1596,29 @@
   //   "restart_backoff_ms": 1000,
   //   "restart_max_backoff_ms": 30000,
   // },
+
+  // Kanban board projection (opt-in, disabled by default). The daemon
+  // projects plan/task/step/goal/job state into board columns; the board
+  // store is rebuildable projection state, never the source of truth.
+  // sidecar_enabled spawns the meept-kanban browser gateway child; it
+  // binds loopback by default, and sidecar_bind is the ONLY way to name
+  // a non-loopback address (loud boot warning; TLS terminates at an
+  // operator proxy). wip_mode: "warn" moves a card past a column's WIP
+  // limit but notes it on the board feed, "block" refuses the move.
+  // reconcile_interval: Go duration string; "0s" disables the periodic
+  // full rebuild (event-driven projection stays on). github_sync is the
+  // deferred GitHub Projects inbound-sync knob (issue #133) — nothing
+  // reads it yet.
+  // drift: commented template block; absent from installed homes by
+  // design (default-off: an absent block is identical to disabled).
+  // "kanban": {
+  //   "enabled": false,
+  //   "sidecar_enabled": false,
+  //   "sidecar_bind": "127.0.0.1:8790",
+  //   "wip_mode": "warn",
+  //   "reconcile_interval": "0s",
+  //   "github_sync": {
+  //     "enabled": false,
+  //   },
+  // },
 }

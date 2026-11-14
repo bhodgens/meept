@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -448,9 +449,30 @@ func (s *Scheduler) RunNow(jobID string) error {
 	runNowCtx := s.runNowCtx
 	s.mu.Unlock()
 
-	// Run job in goroutine with shutdown-aware context
+	// Run job in goroutine with shutdown-aware context. A panic here would
+	// kill the whole daemon AFTER the tick was claimed — the recovery sweep
+	// would never see a receipt and the occurrence is lost or re-delivered
+	// into a fresh daemon boot. cron.Recover only covers cron-fired jobs;
+	// RunNow's goroutine is outside that wrapper (bughunt 2026-11-12 F5).
 	go func() {
 		defer s.runNowWg.Done()
+		defer func() {
+			if rec := recover(); rec != nil {
+				s.logger.Error("scheduler: panic in manually-triggered job recovered",
+					"job_id", jobID,
+					"panic", rec,
+					"stack", string(debug.Stack()),
+				)
+				if s.bus != nil {
+					msg, _ := models.NewBusMessage(models.MessageTypeEvent, "scheduler."+jobID, map[string]any{
+						SchedulerKeyEvent: "job_panic_recovered",
+						SchedulerKeyJobID: jobID,
+						"panic":           fmt.Sprintf("%v", rec),
+					})
+					s.bus.PublishExternalOnly("scheduler.job.completed", msg)
+				}
+			}
+		}()
 		ctx, cancel := context.WithTimeout(runNowCtx, 30*time.Minute)
 		defer cancel()
 

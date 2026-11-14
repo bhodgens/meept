@@ -323,11 +323,12 @@ func TestApprovedPlanResumesGoalRoundOnce(t *testing.T) {
 
 	// The executor turn ran: the fake LLM saw the execution prompt. The
 	// resume path carries ONLY the plan id (C1: ResumeApprovedPlan ->
-	// ApproveAndExecute(ctx, PlanRef{ID: planID})), and an empty ref
-	// prompt falls back to the loop's "[plan <id>] execute per your
-	// mandate" synthetic — the escalated candidate prompt does not
-	// survive the resume, so the observable is the synthetic carrying
-	// the plan id.
+	// ApproveAndExecute(ctx, PlanRef{ID: planID})). Execute fills the
+	// empty prompt from the stored plan brief, so the user message
+	// carries the plan id plus the candidate title and description
+	// (assessReply stamps both on the plan row). The escalated candidate
+	// prompt itself still does not survive the resume.
+	const planDesc = "the escalating candidate for " + escMarker
 	sawExecution := false
 	for _, body := range s.Fake.Requests() {
 		msgs, _ := body["messages"].([]any)
@@ -337,14 +338,17 @@ func TestApprovedPlanResumesGoalRoundOnce(t *testing.T) {
 				continue
 			}
 			if role, _ := msg["role"].(string); role == "user" {
-				if c, _ := msg["content"].(string); strings.Contains(c, pending.ID) {
+				c, _ := msg["content"].(string)
+				if strings.Contains(c, pending.ID) &&
+					strings.Contains(c, planTitle) &&
+					strings.Contains(c, planDesc) {
 					sawExecution = true
 				}
 			}
 		}
 	}
 	if !sawExecution {
-		t.Error("no executor turn carried the plan id — the resume never executed the plan")
+		t.Error("no executor turn carried the plan id, title, and description — the resume never executed the approved brief")
 	}
 
 	// Second approve event is a SKIP: publish the same approval again via

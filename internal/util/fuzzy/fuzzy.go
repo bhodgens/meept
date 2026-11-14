@@ -24,7 +24,10 @@ const implEpsilon = 1e-9
 
 // normalize lowercases and collapses non-alphanumeric runs to single
 // spaces (the TS .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
-// pipeline).
+// pipeline). Exported as NormalizeToken so scorers that pre-tokenize
+// (the cross-call echo roster) can drop dead tokens — tokens that
+// normalize to empty ("...", "--") — with the SAME rule this package
+// applies internally, instead of re-implementing it (fork-prevention).
 func normalize(s string) string {
 	var b strings.Builder
 	prevSpace := true // trims the head
@@ -211,6 +214,15 @@ func ContainsRatio(query, text string) float64 {
 
 // EditDistance is the exported contract name (C5): Levenshtein distance.
 func EditDistance(a, b string) int { return editDistance(a, b) }
+
+// NormalizeToken returns normalize(s): the canonical lower/alphanumeric
+// form every similarity comparison in this package runs on. A token
+// whose normalized form is EMPTY ("...", "--", "!!!") scores 1.0 against
+// any other empty-normalizing token (Similarity's maxLen==0 branch) —
+// pure noise. Pre-tokenizing scorers (the cross-call echo roster) use
+// this to DROP such dead tokens at store/query time so they never count
+// toward coverage.
+func NormalizeToken(s string) string { return normalize(s) }
 
 // Similarity is the exported contract name (C5): token-aware similarity
 // with the frozen top-two query-token vector.

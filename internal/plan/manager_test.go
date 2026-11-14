@@ -276,26 +276,70 @@ func TestManagerApproveFlow(t *testing.T) {
 		t.Errorf("state after submit: got %q, want %q", got.State, StatePendingApproval)
 	}
 
-	// Approve the plan. Synthesize will fail because taskCreator is nil,
-	// but the plan should already be in StateApproved in the store.
-	err = mgr.ApprovePlan(ctx, plan.ID, "sess-001", "reviewer")
-	if err == nil {
-		// If no error, synthesis somehow succeeded — verify state.
-		got, _ = mgr.store.GetPlan(ctx, plan.ID)
-		if got.State != StateExecuting {
-			t.Errorf("state after approve+synthesize: got %q, want %q", got.State, StateExecuting)
-		}
-	} else {
-		// Synthesis failed (expected with nil taskCreator). Check that state
-		// was at least set to approved before the synthesis attempt.
-		got, getErr := mgr.store.GetPlan(ctx, plan.ID)
-		if getErr != nil {
-			t.Fatalf("GetPlan after approve: %v", getErr)
-		}
-		if got.State != StateApproved {
-			t.Errorf("state after approve (synthesis failed): got %q, want %q", got.State, StateApproved)
+	// Approve the plan. taskCreator is nil, so Synthesize fails before the
+	// claim. That post-commit failure is non-fatal: ApprovePlan returns nil
+	// and the plan stays StateApproved. runSynthesisReclaimPass retries
+	// synthesis for approved plans that have no task.
+	if err := mgr.ApprovePlan(ctx, plan.ID, "sess-001", "reviewer"); err != nil {
+		t.Fatalf("ApprovePlan: %v", err)
+	}
+	got, err = mgr.store.GetPlan(ctx, plan.ID)
+	if err != nil {
+		t.Fatalf("GetPlan after approve: %v", err)
+	}
+	if got.State != StateApproved {
+		t.Errorf("state after approve (synthesis failed): got %q, want %q", got.State, StateApproved)
+	}
+	t.Logf("ApprovePlan err=<nil> state=%s", got.State)
+}
+
+// TestApprovePlanSynthesisErrorKeepsApproval pins a task creator that returns
+// an error: ApprovePlan still returns nil, the approval stands (signoff row
+// and ApprovedBy), and the plan is StateApproved. runSynthesisReclaimPass
+// retries synthesis for that approved-with-no-task residue.
+func TestApprovePlanSynthesisErrorKeepsApproval(t *testing.T) {
+	mgr, dir := setupTestManagerWithDir(t)
+	ctx := context.Background()
+	mgr.taskCreator = &countingCreator{alwaysFailPar: true}
+
+	plan, err := mgr.CreatePlan(ctx, "Failing Synthesis", "creator returns an error", "proj-1", dir, "sess-001")
+	if err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+	if err := mgr.SubmitPlan(ctx, plan.ID); err != nil {
+		t.Fatalf("SubmitPlan: %v", err)
+	}
+
+	if err := mgr.ApprovePlan(ctx, plan.ID, "sess-001", "reviewer"); err != nil {
+		t.Fatalf("ApprovePlan: %v; synthesis failure after a committed approval must not fail the call", err)
+	}
+
+	got, err := mgr.store.GetPlan(ctx, plan.ID)
+	if err != nil {
+		t.Fatalf("GetPlan after approve: %v", err)
+	}
+	if got.State != StateApproved {
+		t.Errorf("state after approve (synthesis failed): got %q, want %q", got.State, StateApproved)
+	}
+	if got.ApprovedBy != "reviewer" {
+		t.Errorf("ApprovedBy = %q, want %q", got.ApprovedBy, "reviewer")
+	}
+
+	signoffs, err := mgr.store.GetSignoffs(ctx, plan.ID)
+	if err != nil {
+		t.Fatalf("GetSignoffs: %v", err)
+	}
+	found := false
+	for _, so := range signoffs {
+		if so.Action == "approved" && so.By == "reviewer" {
+			found = true
+			break
 		}
 	}
+	if !found {
+		t.Error("expected an approved signoff from reviewer")
+	}
+	t.Logf("ApprovePlan err=<nil> state=%s approved_by=%s signoff=%t", got.State, got.ApprovedBy, found)
 }
 
 func TestManagerRejectPlan(t *testing.T) {
@@ -552,6 +596,24 @@ func TestResolvePlanDir(t *testing.T) {
 	// With empty external_path, should return projectPath + default_path.
 	got := mgr.resolvePlanDir("/home/user/project")
 	want := "/home/user/project/docs/plans"
+	if got != want {
+		t.Errorf("resolvePlanDir with empty external_path: got %q, want %q", got, want)
+	}
+
+	// Empty project path must not be relative to the process CWD.
+	home := t.TempDir()
+	t.Setenv("MEEPT_HOME", home)
+	got = mgr.resolvePlanDir("")
+	want = filepath.Join(home, "plans")
+	if got != want {
+		t.Errorf("resolvePlanDir with empty project path: got %q, want %q", got, want)
+	}
+	if !filepath.IsAbs(got) {
+		t.Errorf("resolvePlanDir(\"\") = %q, want an absolute path", got)
+	}
+
+	got = mgr.resolvePlanDir("/home/user/project")
+	want = "/home/user/project/docs/plans"
 	if got != want {
 		t.Errorf("resolvePlanDir with empty external_path: got %q, want %q", got, want)
 	}

@@ -477,14 +477,29 @@ func (s *SQLiteStore) ClaimPlanSynthesis(ctx context.Context, id string, lease t
 // expansion and increments its attempt counter, so the caller can bound retries.
 // A successful expansion does not call this — it moves the plan to
 // StateExecuting with its task_id via UpdatePlan.
+//
+// An already-approved claim must not land on draft: that undoes the approval
+// and hides the row from runSynthesisReclaimPass. Callers that know the
+// pre-claim state was approved use ReleasePlanSynthesisTo.
 func (s *SQLiteStore) ReleasePlanSynthesis(ctx context.Context, id string) error {
+	return s.ReleasePlanSynthesisTo(ctx, id, StateDraft)
+}
+
+// ReleasePlanSynthesisTo is ReleasePlanSynthesis with an explicit restore
+// state. restore must be StateDraft or StateApproved — the two non-terminal
+// synthesizing exits that are not "expansion succeeded" (executing) or
+// "attempts exhausted" (failed, via ParkPlanSynthesis).
+func (s *SQLiteStore) ReleasePlanSynthesisTo(ctx context.Context, id string, restore PlanState) error {
+	if restore != StateDraft && restore != StateApproved {
+		return fmt.Errorf("release plan synthesis: restore state %q is not draft or approved", restore)
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE plans
 		SET state = ?, synthesis_lease_until = NULL,
 		    synthesis_attempts = synthesis_attempts + 1, updated_at = ?
 		WHERE id = ? AND state = ?`,
-		string(StateDraft), now, id, string(StateSynthesizing))
+		string(restore), now, id, string(StateSynthesizing))
 	if err != nil {
 		return fmt.Errorf("failed to release plan synthesis claim: %w", err)
 	}

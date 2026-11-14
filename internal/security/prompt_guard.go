@@ -3,6 +3,7 @@ package security
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -25,16 +26,42 @@ const (
 	VoiceContextStampSuffix = "] "
 )
 
-// bracketedScaffoldRE matches a full line that OPENS with a
+// scaffoldTokenAlt is the scaffolding-token alternation shared by the
+// closed- and open-bracket neutralizer regexes. "assistant" and "relevant
+// context" were added alongside "context|system|note|instruction" after the
+// 2026-11-14 probe: forged '[Assistant: ...]' and '[Relevant context: ...]'
+// lines slipped past the original four-token alternation and rendered as
+// authoritative-looking scaffolding inside the untrusted boundary.
+const scaffoldTokenAlt = `context|system|note|instruction|assistant|relevant\s+context`
+
+// bracketedScaffoldRE matches a line that OPENS with a
 // scaffolding-looking bracket ("[Context", "[System", "[Note",
-// "[Instruction", case-insensitive) and closes on the same line. Any such
-// line inside user input is attacker-controllable text masquerading as
-// system scaffolding and gets its opening bracket escaped so no rendered
-// bracketed context line can be forged around the authoritative stamp
-// (C-6). Ordinary bracketed text that does not start a line with these
-// tokens — "see [1] reference", "the [draft] version" — is untouched, so
-// prompts with NO bracketed scaffolding lines wrap byte-identically.
-var bracketedScaffoldRE = regexp.MustCompile(`(?im)^[ 	]*(?:\[\s*(?:context|system|note|instruction)\b[^\]\n]*\])`)
+// "[Instruction", "[Assistant", "[Relevant context", case-insensitive) and
+// closes on the same line (or never closes — the alternative branch matches
+// up to end-of-line, so an unterminated "[Context: ..." prefix is neutralized
+// too rather than surviving verbatim; 2026-11-14 probe). Any such line inside
+// user input is attacker-controllable text masquerading as system
+// scaffolding and gets its opening bracket escaped so no rendered bracketed
+// context line can be forged around the authoritative stamp (C-6). Ordinary
+// bracketed text that does not start a line with these tokens — "see [1]
+// reference", "the [draft] version" — is untouched, so prompts with NO
+// bracketed scaffolding lines wrap byte-identically.
+//
+// Bare \r line separators are normalized to \n before matching: without the
+// normalization a forged line hidden behind "trusted text\rforged [Context:
+// ...]" never sits at a (?m) line start and survived the anchor entirely.
+var bracketedScaffoldRE = regexp.MustCompile(`(?im)^[ 	]*(?:\[\s*(?:` + scaffoldTokenAlt + `)\b[^\]\n]*(?:\]|$))`)
+
+// normalizeCRLF converts \r\n and bare \r line separators to \n so the
+// line-anchored neutralizer regex cannot be bypassed by carriage returns
+// (the (?m) ^ anchor matches after \n only, not after \r).
+func normalizeCRLF(text string) string {
+	if !strings.ContainsRune(text, '\r') {
+		return text
+	}
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	return strings.ReplaceAll(text, "\r", "\n")
+}
 
 // Pre-compiled regex for tool output boundary markers.
 var toolOutputStartRE = regexp.MustCompile(`<<<TOOL_OUTPUT:[^>]+>>>`)
@@ -107,16 +134,44 @@ func NewPromptGuardWithInterval(interval int) *PromptGuard {
 // voiceContextStampShape reports whether s OPENS with the daemon voice
 // lane's clock-stamp shape: an optional leading-whitespace-free start at
 // "[Context: current date/time is " whose bracket closes at the first "] "
-// (the suffix voiceTurnContextStamp renders). The stamp's inner time layout
-// is NOT validated here — the exemption only ever applies at the seam where
-// the loop itself re-renders the stamp, so a caller-supplied lookalike line
-// never earns the exemption.
+// (the suffix voiceTurnContextStamp renders), with exactly ONE "[Context:"
+// occurrence and a parseable clock value between the prefix and the suffix
+// (bughunt 2026-11-14: the original shape check accepted a second forged
+// "[Context:" inside the stamp param and any garbage where the timestamp
+// belongs). The daemon renders the clock with the fixed layout
+// "Mon 2006-01-02 15:04 (UTC-07:00)"; the validation here is deliberately
+// looser than that exact layout — it accepts any "<wordish date> <hh:mm>"
+// core so it cannot break if the daemon's layout gains precision — but it
+// must still contain a parseable HH:MM clock, which random scaffolding
+// text does not.
 func voiceContextStampShape(s string) bool {
 	if !strings.HasPrefix(s, VoiceContextStampPrefix) {
 		return false
 	}
-	_, _, ok := strings.Cut(s, VoiceContextStampSuffix)
-	return ok
+	inner, _, ok := strings.Cut(s, VoiceContextStampSuffix)
+	if !ok {
+		return false
+	}
+	// Exactly one "[Context:" occurrence: a second one means the stamp
+	// param smuggles its own forged scaffolding line.
+	if strings.Count(s, "[Context:") != 1 {
+		return false
+	}
+	// The clock core ("Wed 2026-11-11 12:20" or a localizable variant)
+	// must end in a parseable HH:MM; the "(UTC-07:00)" offset tail follows
+	// before the "] " suffix. A bare-word garbage inner ("anything at all")
+	// has no clock and is rejected.
+	fields := strings.Fields(strings.TrimSpace(inner))
+	if len(fields) < 3 {
+		return false
+	}
+	clock := fields[len(fields)-2]
+	if len(clock) != 5 || clock[2] != ':' {
+		return false
+	}
+	hh, err1 := strconv.Atoi(clock[:2])
+	mm, err2 := strconv.Atoi(clock[3:])
+	return err1 == nil && err2 == nil && hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59
 }
 
 // neutralizeBracketedScaffolding escapes the OPENING bracket of every
@@ -128,7 +183,7 @@ func voiceContextStampShape(s string) bool {
 // (WrapVoiceStampedUserInput) keeps it OUTSIDE the boundary entirely, so
 // trust follows the producer's declaration, never a content-shape sniff.
 func neutralizeBracketedScaffolding(text string) string {
-	return bracketedScaffoldRE.ReplaceAllStringFunc(text, func(match string) string {
+	return bracketedScaffoldRE.ReplaceAllStringFunc(normalizeCRLF(text), func(match string) string {
 		return strings.Replace(match, "[", "\\[", 1)
 	})
 }

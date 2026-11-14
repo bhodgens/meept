@@ -491,19 +491,32 @@ func (g *Goal) AppendHistory(planID string) int {
 	return len(g.PlanHistory)
 }
 
-// SetActivePlan records the currently-executing plan ID and mirrors it
-// into ActivePlanIDs[0] (G2 backward-compat).
+// SetActivePlan records the currently-executing plan ID and keeps
+// ActivePlanIDs consistent with it (G2 backward-compat).
+//
+// The list is maintained with AddActivePlan's dedup-append semantics, NOT a
+// wholesale replace: ApprovePlan's post-approval SetActivePlan once
+// overwrote ActivePlanIDs with [planID], dropping a concurrently-pending
+// plan tracked by AddActivePlan (goal_loop.go tier-2 creation) and breaking
+// both the MaxActivePlans cap and lookupGoalByPlanID's plan→goal linkage
+// (the approved-plan resume resolves through that containment scan, so a
+// dropped entry also broke resume). An empty planID clears the current
+// pointer; the pending entries in ActivePlanIDs are preserved (the list's
+// source of truth is AddActivePlan/RemoveActivePlan).
 func (g *Goal) SetActivePlan(planID string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.ActivePlanID = planID
 	if planID == "" {
-		g.ActivePlanIDs = nil
-	} else if len(g.ActivePlanIDs) == 0 {
-		g.ActivePlanIDs = []string{planID}
-	} else {
-		g.ActivePlanIDs[0] = planID
+		// Clear the current pointer only. Dropping the whole list here
+		// would un-track concurrently-pending plans the same way the
+		// non-empty path used to.
+		return
 	}
+	if slices.Contains(g.ActivePlanIDs, planID) {
+		return
+	}
+	g.ActivePlanIDs = append(g.ActivePlanIDs, planID)
 }
 
 // AddActivePlan adds a plan ID to the active plans list (G2). Returns the

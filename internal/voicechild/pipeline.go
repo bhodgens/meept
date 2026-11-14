@@ -725,12 +725,24 @@ func (p *pipeline) evaluateShortFinal(trimmed string) (gateVerdict, int, string)
 	// (the legacy gate shape on an absent-on-wire line).
 	if matchExemptPhrase(stripNonSpeechTokens(trimmed), p.exemptPhrases) {
 		p.gateDropStreak = 0
+		// Consume the window on the exempt path too (defect
+		// 2026-11-14): a phrase exemption is judged on THIS final's
+		// speech — leaving the accumulator intact let a loud
+		// dispatched utterance's energy bleed into the NEXT short
+		// final's energy verdict (stale mixed window). Same reset
+		// posture as the energyGate branch below and the pass
+		// branch above.
+		p.utterEnergySum, p.utterEnergySample = 0, 0
 		p.playMu.Unlock()
 		return gateExempt, words, "phrase"
 	}
 	if p.replyExemptS > 0 && !p.lastSayActivity.IsZero() &&
 		now.Sub(p.lastSayActivity) < time.Duration(p.replyExemptS)*time.Second {
 		p.gateDropStreak = 0
+		// Consume the window on the reply-exempt path too (same
+		// stale-window defect as the phrase branch: the exempted
+		// final's own speech must not pollute the next verdict).
+		p.utterEnergySum, p.utterEnergySample = 0, 0
 		p.playMu.Unlock()
 		return gateExempt, words, "reply"
 	}
@@ -2171,6 +2183,18 @@ func (p *pipeline) noteBargeIn() bool {
 // over-threshold chunks = 200 ms at the L16/16k 20 ms chunk size.
 const rmsWindowChunks = 10
 
+// rmsChunkSamples is the per-chunk sample count a FULL 20 ms chunk
+// normally carries (L16 s16le: 640 bytes = 320 samples), the codec-derived
+// count the pipeline was set up with. The sustained window is sized off
+// this FIXED constant, never off the last chunk's byte length: short
+// unix-socket reads (pumpAudioIn hands pumpAudioInCheck whatever a single
+// read returned) must not shrink the bar — a window of ten half-read
+// 1 ms slivers is not 200 ms of sustained loudness. Sizing off the
+// constant makes the window a true duration regardless of read
+// fragmentation; under-reading only means the window takes more reads
+// to fill, never a premature trip.
+const rmsChunkSamples = 320
+
 // rmsEnergy reports an s16le mono PCM chunk's loudness as (sum of squared
 // |sample|, sample count); a trailing odd byte is ignored. The magnitude
 // is taken in int32 BEFORE squaring (|v| fits int32 even at full scale:
@@ -2304,7 +2328,11 @@ func (p *pipeline) rmsBargeInCheck(chunk []byte) {
 	}
 	p.rmsRun += samples
 	p.rmsEnergyRun += sum
-	if p.rmsRun < rmsWindowChunks*samples {
+	// The bar is FIXED at the codec-derived full-chunk sample count
+	// (rmsWindowChunks * rmsChunkSamples), never the LAST chunk's
+	// length: short unix-socket reads must not shrink the sustained
+	// window (a 10-sliver window is not 200 ms of loudness).
+	if p.rmsRun < rmsWindowChunks*rmsChunkSamples {
 		p.playMu.Unlock()
 		return
 	}

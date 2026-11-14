@@ -122,6 +122,7 @@ type Config struct {
 	Metrics             MetricsConfig             `json:"metrics"              toml:"metrics"`
 	GitHub              GitHubConfig              `json:"github"               toml:"github"`
 	Intake              IntakeConfig              `json:"intake"               toml:"intake"`
+	Kanban              KanbanConfig              `json:"kanban"               toml:"kanban"`
 	Slack               SlackConfig               `json:"slack"                toml:"slack"`
 	Signal              SignalConfig              `json:"signal"               toml:"signal"`
 	Delegation          DelegationConfig          `json:"delegation,omitzero"  toml:"delegation"`
@@ -224,6 +225,54 @@ type IntakeConfig struct {
 	// ProjectNumber is a GitHub Projects V2 project number for
 	// ticket projection; 0 = projection disabled.
 	ProjectNumber int64 `json:"project_number" toml:"project_number"`
+}
+
+// KanbanConfig carries the [kanban] board-projection subsystem block
+// (plans/kanban-board master.md contract C9). Every surface is opt-in
+// (docs/agents/opt-in-defaults.md): with Enabled=false the daemon opens no
+// kanban store, starts no projector, and registers no kanban.* RPC — the
+// boot path stays byte-identical to a config without the block.
+type KanbanConfig struct {
+	// Enabled turns on the kanban subsystem: store, projector, RPC
+	// (default: false, opt-in).
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// SidecarEnabled turns on the daemon-spawned meept-kanban gateway
+	// (default: false; requires Enabled).
+	SidecarEnabled bool `json:"sidecar_enabled" toml:"sidecar_enabled"`
+	// SidecarBind is the sidecar's HTTP listen address (default
+	// "127.0.0.1:8790"). A NON-loopback value is the explicit operator
+	// knob required by C7: the sidecar refuses an accidental LAN bind
+	// and logs a loud boot warning when this names a non-loopback
+	// address (TLS terminates at an operator proxy; no TLS here).
+	SidecarBind string `json:"sidecar_bind" toml:"sidecar_bind"`
+	// WIPMode governs card.move against Column.WIP limits (C10):
+	// "warn" moves but emits a kanban.board.changed note, "block"
+	// refuses with ErrWIPFull. Any other value fails load validation.
+	WIPMode string `json:"wip_mode" toml:"wip_mode"`
+	// ReconcileInterval is the periodic full-rebuild cadence as a Go
+	// duration string (default "0s" = disabled). Held as a string,
+	// parsed at wiring time by 07/01-daemon-wiring — register the key
+	// in stringDurationKeys (json5_loader.go) so the loader's duration
+	// preprocessing keeps it a string.
+	ReconcileInterval string `json:"reconcile_interval" toml:"reconcile_interval"`
+	// GitHubSync is the deferred inbound GitHub Projects sync knob
+	// (issue bhodgens/meept#133). Code must NOT read beyond the knob.
+	GitHubSync struct {
+		Enabled bool `json:"enabled" toml:"enabled"`
+	} `json:"github_sync" toml:"github_sync"`
+}
+
+// Validate checks the enum-typed kanban fields. Cheap and total: wip_mode
+// accepts exactly "warn" and "block" per C9/C10. The empty string is valid
+// too — it means the block was absent (a hand-built Config literal), and the
+// wiring layer treats it as the "warn" default exactly like DefaultConfig.
+func (c KanbanConfig) Validate() error {
+	switch c.WIPMode {
+	case "", "warn", "block":
+		return nil
+	default:
+		return fmt.Errorf("kanban.wip_mode %q invalid, want \"warn\" or \"block\"", c.WIPMode)
+	}
 }
 
 // ValidateEnabled checks the REQUIRED-when-enabled fields: it names EVERY
@@ -5178,6 +5227,17 @@ func DefaultConfig() *Config {
 			GateCommand:     "",
 			ProjectNumber:   0,
 		},
+		// Kanban board projection (opt-in, disabled by default;
+		// plans/kanban-board C9). wip_mode/reconcile_interval are the
+		// enforced defaults of C10/C9; the GitHubSync knob exists for
+		// issue #133 only — no code reads it.
+		Kanban: KanbanConfig{
+			Enabled:           false,
+			SidecarEnabled:    false,
+			SidecarBind:       "127.0.0.1:8790",
+			WIPMode:           "warn",
+			ReconcileInterval: "0s",
+		},
 		// HITL Slack approval channel (opt-in, disabled by default; T4).
 		// APIBaseURL mirrors slack.DefaultAPIBaseURL (internal/comm/slack).
 		Slack: SlackConfig{
@@ -6149,6 +6209,14 @@ func (c *Config) ValidateAll() error {
 		if err := c.Employees.Validate(); err != nil {
 			return fmt.Errorf("employees config: %w", err)
 		}
+	}
+
+	// Validate kanban enum fields (wip_mode warn|block per C9/C10).
+	// Unconditional so a typo trips at load even while the subsystem is
+	// disabled; the default "warn" always passes, keeping valid configs
+	// byte-identical.
+	if err := c.Kanban.Validate(); err != nil {
+		return fmt.Errorf("kanban config: %w", err)
 	}
 
 	// Validate plans config

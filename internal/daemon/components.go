@@ -1066,10 +1066,15 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// the [security.groups] section BEFORE any component wiring — a
 	// cyclic group chain or dangling policy reference fails boot with a
 	// named defect (fail closed). Leaf 04 extends the same hook with the
-	// C6 live-registry tool-name leg: the registry is built just below
-	// (tools.NewRegistry), and groupsBootValidateTools runs AFTER builtin
-	// registration (registerBuiltinTools) where every policy tool name
-	// must resolve, or boot fails naming the offender.
+	// C6 live-registry tool-name leg. The registry is built just below
+	// (tools.NewRegistry), but the LIVE check does NOT run here: since
+	// commit 479666b7 it lives in Components.Start, AFTER every
+	// registration path has returned (builtin, scheduler, ledger,
+	// platform, employee messaging, voice). A construction-time check
+	// would reject policy tool names that are only registered later in
+	// Start (a real false positive), so Start is the single leg that can
+	// see the fully-populated registry — that order constraint is why
+	// NewComponents deliberately leaves the C6 leg inert.
 	if err := validateGroupsConfig(cfg); err != nil {
 		logger.Error("FATAL: groups config invalid", "error", err)
 		return nil, err
@@ -1669,6 +1674,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			c.LLMResolver,
 			logger.With("component", "classifier-llm"),
 			budgetTracker,
+			c.MetricsStore,
 		)
 		// Re-resolve the classifier model's ModelConfig so downstream token
 		// caps can be derived from its declared max_output. Best-effort: when
@@ -1695,6 +1701,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			c.LLMResolver,
 			logger.With("component", "summarizer-llm"),
 			budgetTracker,
+			c.MetricsStore,
 		)
 		if c.SummarizerClient != nil {
 			logger.Info("Summarizer LLM client initialized", "model", summarizerRef)
@@ -1712,6 +1719,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				c.LLMResolver,
 				logger.With("component", "transcript-summarizer-llm"),
 				budgetTracker,
+				c.MetricsStore,
 			)
 		}
 
@@ -1725,6 +1733,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				c.LLMResolver,
 				logger.With("component", "extract-llm"),
 				budgetTracker,
+				c.MetricsStore,
 			)
 			if c.ExtractClient != nil {
 				logger.Info("Extract LLM client initialized", "model", c.ModelsConfig.ExtractModel)
@@ -1744,6 +1753,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				c.LLMResolver,
 				logger.With("component", "memory-model-llm"),
 				budgetTracker,
+				c.MetricsStore,
 			)
 			if c.MemoryModelClient != nil {
 				logger.Info("Memory model LLM client initialized", "model", c.ModelsConfig.MemoryModel)
@@ -1763,6 +1773,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				c.LLMResolver,
 				logger.With("component", "planner-model-llm"),
 				budgetTracker,
+				c.MetricsStore,
 			)
 			if c.PlannerModelClient != nil {
 				logger.Info("Planner model LLM client initialized", "model", c.ModelsConfig.PlannerModel)
@@ -1785,6 +1796,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				c.LLMResolver,
 				logger.With("component", "critic-model-llm"),
 				budgetTracker,
+				c.MetricsStore,
 			)
 			if c.CriticModelClient != nil {
 				logger.Info("Critic model LLM client initialized", "model", c.ModelsConfig.CriticModel)
@@ -1799,6 +1811,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				c.LLMResolver,
 				logger.With("component", "hostile-critic-model-llm"),
 				budgetTracker,
+				c.MetricsStore,
 			)
 			if c.HostileCriticModelClient != nil {
 				logger.Info("Hostile critic model LLM client initialized", "model", c.ModelsConfig.HostileCriticModel)
@@ -3870,54 +3883,10 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// agent.RegistryConfig.CodemodeEnabled at the NewAgentRegistry site.
 	applyCodemodeToolsFromConfig(c.ToolRegistry, cfg.Agent.Tools)
 
-	// C6 live-registry validation (agent-groups leaf 04): every policy
-	// tool name must resolve in the NOW-FULL registry (builtin + extract
-	// + deterministic wrappers all registered above), or boot fails
-	// naming the offender. Runs here — not at the early structural hook —
-	// because the registry is empty before registerBuiltinTools.
-	//
-	// GRP-1 (wiring-gap remediation): the C6 leg was INERT at this site —
-	// the resolver was constructed without WithKnownTools, so
-	// ValidatePolicies saw an empty known set and returned nil unconditionally
-	// (resolution.go's len(known)==0 early-out), letting a policy naming an
-	// unregistered tool boot silently despite the comment above. Rebuild the
-	// resolver with the live registry's canonical-name set (the same seam the
-	// RPC leg wires via GroupsHandler.SetToolValidation); CanonicalNames() is
-	// normalized-lowercase, matching the normalizer's output space so lookup
-	// keys agree.
-	if c.ToolRegistry != nil && groupsResolver != nil {
-		knownOpts := groups.ResolverOptions{
-			NormalizeToolName: agent.CanonicalToolName,
-			ExtraAllowsFor: func(subject string) []string {
-				return groupsOverrides.AllowsFor(subject, EnvGroupsNow())
-			},
-		}.WithKnownTools(c.ToolRegistry.CanonicalNames())
-		groupsResolver = groups.NewResolver(
-			groupsPoliciesFromConfig(cfg.Security.Groups.Policies),
-			groupsBindingsFromConfig(cfg.Security.Groups.Bindings),
-			cfg.Security.Groups.DefaultManaged,
-			&knownOpts,
-		)
-	}
-	if err := groupsResolver.ValidatePolicies(); err != nil {
-		logger.Error("FATAL: groups config policy tool names invalid", "error", err)
-		return nil, err
-	}
-	if err := revalidateGroupsPolicyTools(groupsResolver, groupsPoliciesFromConfig(cfg.Security.Groups.Policies), c.ToolRegistry, agent.CanonicalToolName); err != nil {
-		// C6 live-registry leg (agent-groups leaf 04, wiring remediation
-		// GRP-1): the resolver was constructed BEFORE the registry filled,
-		// so its known-tools set was empty and the ValidatePolicies call
-		// above ran structural checks only. Now that registerBuiltinTools,
-		// wireGitHubTools, extract/deterministic/codemode registration and
-		// the deferred scheduler/goal/delegate provider registration have
-		// all run, re-run the tool-name leg against the LIVE registry and
-		// fail boot naming the offender — matching the boot-hook
-		// comment's promise instead of leaving a policy that names an
-		// unregistered tool silently half-enforced.
-		logger.Error("FATAL: groups config policy tool names invalid (live registry)", "error", err)
-		return nil, err
-	}
-
+	// C6 tool-name validation runs in Start, after scheduler, ledger,
+	// platform, and voice tools register. Those names are not in the
+	// registry yet at this point. An early check here rejected a valid
+	// secretary policy (schedule_*, ledger_*, inbox, voice_call).
 	// msgBus (the NewComponents parameter): c.msgBus is only stored later
 	// in this function, so the relay notifier takes the local directly.
 	acpMgr, acpErr := applyACPFromConfig(cfg.ACP, decisionClient, msgBus)
@@ -4366,12 +4335,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// 03-agent-recall-wiring, Flag 3 fail-closed).
 		c.Dispatcher.SetMultiUserScopeEnabled(cfg.MultiUser.Enabled)
 
-		// Register platform tools now that agent registry is available
+		// Register platform tools now that agent registry is available.
+		// Inter-agent messaging (send_agent_message, inbox) is wired later,
+		// after EmployeeMessageStore exists. Calling it here no-ops and the
+		// tools never register.
 		registerPlatformTools(c.ToolRegistry, c.AgentRegistry, c.StatusHandler, c.MCPManager, msgBus, logger)
-
-		// Inter-agent messaging (loop-economics leaf 10): send_agent_message,
-		// inbox, and roster reachability on platform_agents.
-		WireEmployeeMessagingForComponents(c)
 
 		// Register template tools if template registry is available
 		registerTemplateTools(c.ToolRegistry, c.TemplateRegistry, logger)
@@ -5386,6 +5354,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			}
 			if ms != nil {
 				c.EmployeeMessageStore = ms
+				// Must run after the store exists. The earlier call site
+				// (before this block) saw a nil store and skipped
+				// send_agent_message and inbox, so a policy naming them
+				// failed the live-registry check.
+				WireEmployeeMessagingForComponents(c)
 			}
 
 			// Wire the bus publisher so Pause publishes employee.paused
@@ -5581,6 +5554,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				c.LLMResolver,
 				logger.With("component", "voice-supervisor-llm"),
 				budgetTracker,
+				c.MetricsStore,
 			)
 		}
 		vdeps.SupervisorChatter = voiceSupervisorChatter(c)
@@ -5999,6 +5973,37 @@ func (c *Components) Start(ctx context.Context) error {
 			return err
 		}
 		startedHandlers = append(startedHandlers, "voice")
+	}
+
+	// C6 live-registry check. This is an order constraint, not a race.
+	// Every registration path must have returned before this line:
+	// builtin tools, scheduler provider, ledger tools, platform tools,
+	// employee messaging (after EmployeeMessageStore exists), and voice.
+	// A check before that set rejects names that are registered later.
+	//
+	// Hazard note (conditional registration vs fatal check): several of
+	// the registration paths above are CONDITIONAL or DEGRADABLE —
+	// employee messaging registers send_agent_message/inbox only when its
+	// store built (non-fatal on failure, components.go ~5330), voice
+	// swallows voice_call registration errors, intake_save registers only
+	// when [intake] is enabled, and mcp_* tools register per configured
+	// server. A policy naming one of those is INDISTINGUISHABLE from a
+	// typo at this check, so a failure here must not pretend certainty:
+	// the error wraps a hint listing the known conditional families so
+	// ops can distinguish a typo from a degraded/absent optional
+	// dependency. The check's semantics are unchanged — an unregistered
+	// name still fails boot.
+	if c.Config != nil && c.ToolRegistry != nil {
+		if err := revalidateGroupsPolicyTools(nil, groupsPoliciesFromConfig(c.Config.Security.Groups.Policies), c.ToolRegistry, agent.CanonicalToolName); err != nil {
+			err = fmt.Errorf("%w\nhint: a name may also be missing because its registration is CONDITIONAL: "+
+				"employee messaging (send_agent_message, inbox) registers only when its store builds (non-fatal on failure); "+
+				"voice_call registers only when the voice provider is enabled and its registration succeeded; "+
+				"intake_save registers only when [intake] is enabled; mcp_* tools register per configured MCP server. "+
+				"Check the boot log above for the corresponding degradation warning before treating this as a typo",
+				err)
+			c.Logger.Error("FATAL: groups config policy tool names invalid (live registry)", "error", err)
+			return err
+		}
 	}
 
 	// Start chat handler
@@ -6817,6 +6822,15 @@ func (c *Components) Start(ctx context.Context) error {
 						emp.ID, &emp.Constitution, goalStore,
 						c.Logger.With("component", "goal-loop", "employee_id", emp.ID),
 					)
+					// Resume paths pass PlanRef{ID} with an empty Prompt. Fill the
+					// execution user message from the stored plan's title and
+					// description so the employee is not blind. Nil plan manager
+					// leaves the lookup unset (generic mandate, byte-identical).
+					// Concrete *plan.PlanManager — the != nil check is the typed-nil
+					// guard; do not box a nil manager into the lookup func.
+					if briefLookup := planBriefLookup(c.PlanManager); briefLookup != nil {
+						loop.SetPlanBriefLookup(briefLookup)
+					}
 					if c.Config != nil {
 						loop.SetGateEnabled(c.Config.Employees.Defaults.Gate.Enabled)
 						if c.Config.Employees.Defaults.Gate.Command != "" {
@@ -6974,6 +6988,13 @@ func (c *Components) Start(ctx context.Context) error {
 	// unarmed (employee_resume_wiring.go).
 	c.wireEmployeeResume(ctx)
 	c.startEmployeeResumeSubscriber(ctx)
+	// Approved-plan resume sweep (stranded-approval fix): boot-time
+	// reconciliation of approved-but-unexecuted plans + periodic retry for
+	// resumes skipped while an employee's goal loop was busy mid-round.
+	// Armed with the subscriber because it consumes the same resume seam
+	// and covers the shapes the in-memory plan.approved event misses
+	// (employee_resume_wiring.go).
+	c.startApprovedPlanResumeSweep(ctx)
 
 	// Wire the chat-path goal anchor (goal-completion leaf 03 Task 2):
 	// the dispatcher resolves a session's goal at plan-creation time via
@@ -7255,6 +7276,11 @@ func (c *Components) stopComponents(ctx context.Context) error {
 	// unsubscribes so late approvals cannot queue mid-shutdown. No-op
 	// when the subscriber was never armed.
 	c.stopEmployeeResumeSubscriber()
+
+	// Stop the approved-plan resume sweep (stranded-approval fix): joins
+	// the sweep goroutine so an in-flight pass completes before shutdown
+	// proceeds. No-op when the sweep was never armed.
+	c.stopApprovedPlanResumeSweep()
 
 	// Stop the async-turn liveness reaper (async-turn-migration leaf 06)
 	// next to the other handler-side background loops. Nil when the
@@ -7966,6 +7992,7 @@ func createAuxiliaryLLMClientWithResolver(
 	resolver *llm.Resolver,
 	logger *slog.Logger,
 	budget *llm.Budget,
+	metricsStore *metrics.Store,
 ) *llm.Client {
 	if modelRef == "" {
 		return nil
@@ -7997,7 +8024,17 @@ func createAuxiliaryLLMClientWithResolver(
 	if budget != nil {
 		opts = append(opts, llm.WithBudget(budget))
 	}
-	return llm.NewClient(llmCfg, opts...)
+	cli := llm.NewClient(llmCfg, opts...)
+	// Attach the app-level metrics store so auxiliary clients (classifier,
+	// summarizer, extract, etc.) record their calls into llm_calls like the
+	// main client does (daemon.go daemon usageStore wiring). Without this,
+	// classifier/intent requests were invisible to llm_calls — the exact
+	// "how many requests and when" visibility gap for routing latency.
+	// nil-safe: no store = byte-identical prior behavior.
+	if metricsStore != nil {
+		cli.SetUsageStore(metricsStore)
+	}
+	return cli
 }
 
 // resolveModelRef resolves a "provider/model-id" reference into an LLM config.

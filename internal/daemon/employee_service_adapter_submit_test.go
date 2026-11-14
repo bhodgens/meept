@@ -156,3 +156,36 @@ func TestPlanCreatorAdapter_SubmitRefusalStillReturnsPlanRef(t *testing.T) {
 		t.Errorf("refusal error does not look like a state-rule refusal: %v", err)
 	}
 }
+
+// TestPlanCreator_BriefLookupMapsTitleAndDescription pins the resume-brief
+// adapter: a nil manager installs nothing, a stored plan's title and
+// description come back through PlanBriefLookup, and a miss is an error
+// (Execute logs Warn and keeps the generic mandate).
+func TestPlanCreator_BriefLookupMapsTitleAndDescription(t *testing.T) {
+	if planBriefLookup(nil) != nil {
+		t.Fatal("nil plan manager must not install a lookup")
+	}
+	// Typed-nil: a nil concrete pointer must not become a non-nil func.
+	if planBriefLookup((*plan.PlanManager)(nil)) != nil {
+		t.Fatal("typed-nil *PlanManager must not install a lookup")
+	}
+
+	pm := newAdapterPlanManager(t, true)
+	created, err := pm.CreatePlan(context.Background(),
+		"Roof repair", "Call the client and confirm the crew finished",
+		"proj", "", "sess")
+	if err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+	lookup := planBriefLookup(pm)
+	brief, ok, err := lookup(context.Background(), created.ID)
+	if err != nil || !ok {
+		t.Fatalf("lookup hit: ok=%v err=%v", ok, err)
+	}
+	if brief.Title != "Roof repair" || brief.Description != "Call the client and confirm the crew finished" {
+		t.Fatalf("brief = %+v", brief)
+	}
+	if _, ok, err = lookup(context.Background(), "plan-missing"); ok || err == nil {
+		t.Fatalf("miss: ok=%v err=%v, want ok=false and an error", ok, err)
+	}
+}

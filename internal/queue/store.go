@@ -798,12 +798,30 @@ func (s *Store) MarkProcessing(jobID, claimToken string) error {
 // callers left and is kept solely for the pre-M-1 state-transition pins in
 // store_complete_guard_test.go. Do not wire new production callers here —
 // use MarkProcessing(jobID, claimToken) (C-Q1).
+//
+// TRANSITION GUARD (leaf 02/02): the legal source-state set for the target
+// comes from jobTransitions and is FOLDED INTO the UPDATE's WHERE clause. A
+// read-then-check would reintroduce exactly the race this CAS was audited for
+// (audit M-1), so there is no read here — the database stays the arbiter. A
+// job that is missing, or that sits in a state this edge does not start from,
+// still lands as ErrJobStateLocked, preserving the pre-guard contract
+// byte-identically (including the L8 terminal-resurrection pin in
+// store_complete_guard_test.go).
 func (s *Store) UpdateState(jobID string, state JobState) error {
+	sources := legalSources(state)
+	if len(sources) == 0 {
+		// Nothing in the machine can ever reach this state. That is a caller
+		// bug, not a lost race, so it gets its own sentinel rather than the
+		// "someone else won" error.
+		return fmt.Errorf("update job %s to %q: %w", jobID, string(state), ErrInvalidTransition)
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339)
+	args := []any{string(state), now, jobID}
+	args = append(args, sourceArgs(sources)...)
 	res, err := s.db.Exec(`
 		UPDATE jobs SET state = ?, updated_at = ?
-		WHERE id = ? AND state NOT IN ('completed', 'dead')`,
-		string(state), now, jobID)
+		WHERE id = ?`+sourcePredicate(sources), args...)
 	if err != nil {
 		return fmt.Errorf("failed to update job state: %w", err)
 	}
@@ -813,7 +831,7 @@ func (s *Store) UpdateState(jobID string, state JobState) error {
 		return fmt.Errorf("failed to read state update rows affected: %w", err)
 	}
 	if affected == 0 {
-		s.logger.Warn("Refused state update for a terminal or missing job",
+		s.logger.Warn("Refused state update for a terminal, unreachable-source, or missing job",
 			"id", jobID, "requested_state", string(state))
 		return ErrJobStateLocked
 	}
@@ -876,6 +894,12 @@ func (s *Store) CompleteAttempt(jobID string, result any, claimToken string) (Co
 	// race. Token-less callers keep the pre-H4 state-only predicate.
 	// Args are appended in PLACEHOLDER ORDER: result, updated_at, id, then the
 	// optional claim token (which the predicate appends last).
+	//
+	// TRANSITION GUARD (leaf 02/02): jobTransitions is the authority, and its
+	// legal sources of StateCompleted are exactly {claimed, processing} — the
+	// predicate below already matches that set, so folding the edge table in
+	// would change no behavior. Pinned rather than merely asserted:
+	// TestCompleteAttemptSourcesMatchTransitions fails if either side drifts.
 	claimPredicate := `state IN ('claimed', 'processing')`
 	args := []any{string(resultJSON), now, jobID}
 	if claimToken != "" {

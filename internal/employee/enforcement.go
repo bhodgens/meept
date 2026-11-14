@@ -999,15 +999,17 @@ func (p *PreExecChecker) triggerAutoPause(reason string) {
 // matchesTrigger returns true if the escalation trigger fires for the given
 // action/tool/details combination.
 //
-// Trigger match values are EXACT compares for every On kind: tool name
-// (EscalateOnTool), action string (EscalateOnAction), risk_level token
-// (EscalateOnRiskLevel), cost threshold (EscalateOnCost). Unlike the
-// tools_forbidden '*' wildcard (:667), '*' has NO wildcard meaning here —
-// a trigger {on: action, match: "*"} fires only for a literal action "*".
-// Do not add wildcard expansion without revisiting the allowlist interplay:
-// with a tools_allowed list, wildcard triggers would escalate every
-// allowlisted call (RequiresPlan livelock: approve -> execute ->
-// re-escalate). Pinned by TestMatchesTrigger_ActionStarIsExactMatch.
+// Match semantics differ per On kind: tool name (EscalateOnTool) and action
+// string (EscalateOnAction) are EXACT compares; risk_level
+// (EscalateOnRiskLevel) is a CASE-INSENSITIVE compare (strings.EqualFold
+// against details["risk_level"]); cost (EscalateOnCost) is a THRESHOLD
+// compare — details["cost_cents"] fires when it is >= the parsed trigger
+// threshold. Unlike the tools_forbidden '*' wildcard (:667), '*' has NO
+// wildcard meaning here — a trigger {on: action, match: "*"} fires only for
+// a literal action "*". Do not add wildcard expansion without revisiting
+// the allowlist interplay: with a tools_allowed list, wildcard triggers
+// would escalate every allowlisted call (RequiresPlan livelock: approve ->
+// execute -> re-escalate). Pinned by TestMatchesTrigger_ActionStarIsExactMatch.
 func matchesTrigger(trig EscalationTrigger, action, toolName string, details map[string]string) bool {
 	switch trig.On {
 	case EscalateOnTool:

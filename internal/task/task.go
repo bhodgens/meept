@@ -184,7 +184,21 @@ func (t *Task) FailJob() {
 	t.UpdatedAt = time.Now().UTC()
 }
 
-// SetState updates the task state.
+// SetStateChecked moves the task to `to` only when the edge is legal per
+// taskTransitions; an illegal edge returns an ErrInvalidTransition-wrapped
+// error WITHOUT mutating t.State. New callers should prefer this over
+// SetState: plain SetState stays a legacy passthrough (leaf
+// 02/01-task-transition-guard option (a)) so existing ~20 call sites keep
+// their compile contract while migration proceeds incrementally.
+func (t *Task) SetStateChecked(to TaskState) error {
+	if !taskAllows(t.State, to) {
+		return fmt.Errorf("%w: current state %s cannot transition to %s", ErrInvalidTransition, t.State, to)
+	}
+	t.SetState(to)
+	return nil
+}
+
+// SetState updates the task state. Guarded callers use SetStateChecked.
 func (t *Task) SetState(state TaskState) {
 	// Set StartedAt when transitioning from pending to an active state
 	if t.State == StatePending && (state == StatePlanning || state == StateExecuting || state == StateAwaitingApproval) {

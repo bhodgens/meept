@@ -350,6 +350,15 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		groupsAudit := components.ToolGateAudit
 		groupsHandler := rpc.NewGroupsHandler(fullCfg, defaultConfigFilePath(), components.AgentRegistry, components.AuthUsersStore, groupsAudit)
 		if components.ToolRegistry != nil {
+			// STALE-SNAPSHOT FIX (daemon wiring audit, fix 2): the eager
+			// SetToolValidation snapshot here predates Components.Start —
+			// the scheduler/ledger/platform/employee-messaging/voice tools
+			// register during Start, so an eager set rejects valid
+			// assignments (e.g. voice_call) forever. Wire the LAZY provider
+			// instead: the C6 assignment-time check resolves CanonicalNames
+			// from the LIVE registry per request, the same ordering the
+			// Start-time boot check relies on.
+			groupsHandler.SetKnownToolsProvider(components.ToolRegistry.CanonicalNames)
 			groupsHandler.SetToolValidation(components.ToolRegistry.CanonicalNames(), agent.CanonicalToolName)
 		}
 		// Diagnosis surface (agent-groups leaf 06): the report-only

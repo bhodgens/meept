@@ -9,6 +9,7 @@ package employee
 import (
 	"context"
 	"errors"
+	"os"
 	"slices"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 
 	"github.com/caimlas/meept/internal/auth"
 	commhttp "github.com/caimlas/meept/internal/comm/http"
+	"github.com/caimlas/meept/internal/rpc"
 )
 
 // callerKey is the context key for storing the caller identity.
@@ -107,3 +109,31 @@ func isAuthorizedApprover(callerID string, escalatesTo []string) bool {
 	return slices.Contains(escalatesTo, callerID)
 }
 
+// effectiveApprover is the caller allowed to approve or reject employee
+// plans and gates.
+//
+// An explicit CallerFromContext identity always wins, including a non-nil
+// caller with an empty UserID — HTTP and already-injected identities are
+// unchanged. Otherwise an owner-trusted Unix-socket peer is accepted as
+// the "user" sentinel isAuthorizedApprover already allows: kernel UID
+// matches this process, and the peer was not spawned by the daemon
+// (shell-tool children are not the owner). No caller and no qualifying
+// peer returns nil so handlers fail closed. A nil ctx fails closed;
+// CallerFromContext panics on nil.
+func effectiveApprover(ctx context.Context) *CallerInfo {
+	if ctx == nil {
+		return nil
+	}
+	if caller := CallerFromContext(ctx); caller != nil {
+		return caller
+	}
+	peer, ok := rpc.PeerIdentityFromContext(ctx)
+	if !ok {
+		return nil
+	}
+	ownerUID := peer.HasUID && peer.UID == os.Getuid()
+	if !ownerUID || peer.SpawnedByDaemon {
+		return nil
+	}
+	return &CallerInfo{UserID: "user"}
+}

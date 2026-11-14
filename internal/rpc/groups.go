@@ -98,8 +98,21 @@ type GroupsHandler struct {
 	// registered names ("shell_execute" -> "shell"). Nil knownTools
 	// disables tool validation (policy persistence then trusts boot
 	// validation alone).
+	//
+	// STALE-SNAPSHOT FIX (daemon wiring audit, fix 2): knownTools set
+	// eagerly via SetToolValidation is a SNAPSHOT taken when the daemon
+	// wires RPC handlers — BEFORE Components.Start registers the
+	// scheduler/ledger/platform/employee-messaging/voice tools — so a
+	// valid voice_call assignment would be rejected forever against the
+	// stale set. When knownToolsProvider is wired it wins: the set is
+	// resolved from the LIVE registry per request (same ordering the
+	// Start-time boot check relies on). knownTools remains the fallback
+	// for callers that never wire the provider.
 	knownTools map[string]struct{}
 	normalize  func(string) string
+	// knownToolsProvider resolves the live tool set per request; wired
+	// by the daemon registration site. Nil = use the knownTools snapshot.
+	knownToolsProvider func() map[string]struct{}
 	// bundledAgentsDir is the bundled roster root used when a user-tier
 	// AGENT.md is absent (agent definition writes).
 	bundledAgentsDir string
@@ -147,9 +160,34 @@ func NewGroupsHandler(
 // SetToolValidation wires the C6 live-registry validation inputs.
 // knownTools is the canonical registered-name set; normalize maps a
 // declared name to its registered form (nil = identity). Typed-nil safe.
+// This is a SNAPSHOT: the daemon constructs the handler before
+// Components.Start registers the later tools, so prefer
+// SetKnownToolsProvider for the daemon wiring path.
 func (h *GroupsHandler) SetToolValidation(knownTools map[string]struct{}, normalize func(string) string) {
 	h.knownTools = knownTools
 	h.normalize = normalize
+}
+
+// SetKnownToolsProvider wires a LAZY resolver for the C6 live set: the
+// daemon registry fills throughout Components.Start (scheduler, ledger,
+// platform, employee messaging, voice all register after construction),
+// so an eager snapshot taken at handler registration is permanently
+// stale. The provider is consulted per request and wins over any
+// SetToolValidation snapshot. Typed-nil safe.
+func (h *GroupsHandler) SetKnownToolsProvider(provider func() map[string]struct{}) {
+	h.knownToolsProvider = provider
+}
+
+// liveKnownTools returns the validation set in effect: the provider's
+// live resolution when wired (nil resolution falls back to the snapshot
+// so a racing shutdown never widens the gate), else the snapshot.
+func (h *GroupsHandler) liveKnownTools() map[string]struct{} {
+	if h.knownToolsProvider != nil {
+		if known := h.knownToolsProvider(); known != nil {
+			return known
+		}
+	}
+	return h.knownTools
 }
 
 // RegisterGroupsMethods registers the groups.* methods on the server.
@@ -468,9 +506,11 @@ func (h *GroupsHandler) handleAssign(ctx context.Context, params json.RawMessage
 	// C6 assignment-time validation (T4): validate the policy's tool
 	// names against the LIVE registry BEFORE any persistence. A policy
 	// with an unregistered tool is rejected naming the offender and
-	// nothing is persisted.
-	if req.Policy != nil && h.knownTools != nil {
-		if err := groups.ValidatePolicyTools([]groups.Policy{*req.Policy}, h.knownTools, h.normalize); err != nil {
+	// nothing is persisted. The set resolves through the lazy provider
+	// when wired (the eager snapshot predates Start-time registration
+	// of scheduler/ledger/voice/employee-messaging tools).
+	if req.Policy != nil && h.liveKnownTools() != nil {
+		if err := groups.ValidatePolicyTools([]groups.Policy{*req.Policy}, h.liveKnownTools(), h.normalize); err != nil {
 			return nil, fmt.Errorf("groups.assign: %w", err)
 		}
 	}
