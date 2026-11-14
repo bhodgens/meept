@@ -5093,11 +5093,21 @@ func DefaultConfig() *Config {
 			// byte-identical endpoints to the legacy double-window
 			// (docs/agents/opt-in-defaults.md: the template reproduces
 			// today's behavior; the operator sets S=10 for the live ask).
-			SilencePrompt:             "Are you still there?",
+			SilencePrompt: "Are you still there?",
+			// C5 (plan 20261113-filler-clips leaf 05): the farewell pool
+			// ships non-empty (frozen list); the two lane-list overrides
+			// stay empty so the existing scalars keep binding —
+			// zero-config behavior is byte-identical to pre-leaf.
+			Farewell:                  DefaultVoiceFarewellLines(),
 			SilenceHangupAfterSeconds: 45,
 			FillerGraceMs:             2500,
 			TurnConfirmMs:             900,
-			FragmentConfirmMs:         3000,
+			// C6 (phase2-context-warm leaf 02): partial context warm
+			// is opt-in (default false = byte-identical); the floor
+			// ships at its frozen default so a flag flip alone works.
+			ContextWarm:          false,
+			ContextWarmMinTokens: 60,
+			FragmentConfirmMs:    3000,
 			// min_turn_words is opt-in: default 0 = short-final gate
 			// disabled (docs/agents/opt-in-defaults.md). Loud-room
 			// operators set N>=2 to drop background-fragment finals.
@@ -5498,6 +5508,17 @@ type VoiceConfig struct {
 	// so per-final dispatch answered fragments of one sentence).
 	// Default 900; 0 = legacy per-final dispatch.
 	TurnConfirmMs int `json:"turn_confirm_ms" toml:"turn_confirm_ms"`
+	// ContextWarm (phase2-context-warm C6, opt-in, default FALSE): route
+	// live-call STT PARTIALS (last:false) into llm.Client.Warm on a
+	// debounced timer so the provider-side prompt cache already holds the
+	// imminent turn's prefix when the final turn dispatches. Disabled is
+	// byte-identical (docs/agents/opt-in-defaults.md); global-only (no
+	// employee_leg override this wave).
+	ContextWarm bool `json:"context_warm" toml:"context_warm"`
+	// ContextWarmMinTokens is the token floor under which a partial is
+	// never worth warming (rough 3-chars/token estimate over the rendered
+	// prefix). Default 60; <=0 falls back to the default at the warmer.
+	ContextWarmMinTokens int `json:"context_warm_min_tokens" toml:"context_warm_min_tokens"`
 	// FragmentConfirmMs is the extra confirm budget for a FINAL that
 	// looks like an unfinished thought (whisper leaves no terminal
 	// punctuation / a trailing ellipsis on a mid-word cutoff): the
@@ -5599,6 +5620,27 @@ type VoiceConfig struct {
 	// that" is wrong semantics when nothing is pending). Empty falls back
 	// to the filler list for byte-compat with callers that never set it.
 	SilencePrompt string `json:"silence_prompt" toml:"silence_prompt"`
+	// SilencePromptLines is the C5 list shape for the dead-air nudge
+	// lane (plan 20261113-filler-clips leaf 05, contract C5 FROZEN): a
+	// non-empty list takes precedence over the SilencePrompt scalar
+	// (ladder: row list > row scalar > global list > global scalar >
+	// default). Empty/nil (the shipped default) keeps the scalar binding,
+	// so zero-config behavior is byte-identical to pre-leaf. Round-robin
+	// over the pool rides voice.PickLine (talk-loop wiring is leaf 04).
+	SilencePromptLines []string `json:"silence_prompt_lines" toml:"silence_prompt_lines"`
+	// FragmentClarifyLines is the C5 list shape for the fragment-clarify
+	// lane: a non-empty list takes precedence over the FragmentClarify
+	// scalar (same ladder; the employee_leg row never carried a
+	// fragment-clarify scalar). Empty/nil default keeps the scalar
+	// binding (byte-identical).
+	FragmentClarifyLines []string `json:"fragment_clarify_lines" toml:"fragment_clarify_lines"`
+	// Farewell is the C5 farewell pool (R5): the lines the talk loop may
+	// speak on call teardown / detected caller bye (leaf 04 wires the
+	// speech; this leaf owns only the pool). Ships a non-empty default
+	// (DefaultVoiceFarewellLines, the frozen C5 list); an empty list
+	// inherits the default. Per-employee override: employee_leg[].farewell
+	// (row list > global list > default).
+	Farewell []string `json:"farewell" toml:"farewell"`
 	// SilenceHangupAfterSeconds is the hangup window H after the nudge:
 	// dead air => nudge at silence_prompt_seconds (S), hangup at S+H.
 	// Default 45 with S default 45 => nudge@45, hangup@90, exactly the
@@ -5688,6 +5730,14 @@ func NormalizeUnapprovedCallerAllowedTools(v *VoiceConfig) {
 func DefaultVoiceExemptPhrases() []string {
 	return []string{"stop", "cancel", "yes", "no", "thanks", "thank you",
 		"okay", "ok", "mm-hm", "mmhm", "uh-huh", "go ahead"}
+}
+
+// DefaultVoiceFarewellLines is the [voice] farewell pool default (C5,
+// plan 20261113-filler-clips leaf 05, FROZEN): ["Goodbye!","Bye!","Talk
+// soon."]. Returns a fresh slice per call so consumers may mutate the
+// loaded config freely (DefaultVoiceExemptPhrases precedent).
+func DefaultVoiceFarewellLines() []string {
+	return []string{"Goodbye!", "Bye!", "Talk soon."}
 }
 
 // NormalizeVoiceAcousticDefaults clamps invalid [voice] acoustic-gate
@@ -5837,6 +5887,15 @@ type EmployeeLegConfig struct {
 	// SilencePrompt: this employee's dedicated dead-air nudge line
 	// (row non-empty wins; empty string = inherit the global line).
 	SilencePrompt string `json:"silence_prompt" toml:"silence_prompt"`
+	// SilencePromptLines / FragmentClarifyLines / Farewell: per-row lane
+	// pools (C5, plan 20261113-filler-clips leaf 05). A non-empty row
+	// list wins over the row scalar, the global list, and the global
+	// scalar (ladder: row list > row scalar > global list > global
+	// scalar > default); nil/empty inherits — the non-empty-takes-
+	// precedence posture C5 freezes, resolved in voice.VoiceLanes.
+	SilencePromptLines   []string `json:"silence_prompt_lines" toml:"silence_prompt_lines"`
+	FragmentClarifyLines []string `json:"fragment_clarify_lines" toml:"fragment_clarify_lines"`
+	Farewell             []string `json:"farewell" toml:"farewell"`
 	// SilencePromptSeconds / SilenceHangupAfterSeconds: the nudge (S)
 	// and post-nudge hangup (H) windows for this employee.
 	SilencePromptSeconds      *int `json:"silence_prompt_seconds" toml:"silence_prompt_seconds"`
