@@ -4158,7 +4158,7 @@
       "id": "boundary-hardening-03",
       "suite": "boundary-hardening",
       "diff": "M",
-      "title": "PII roundtrip: [PII:<uuid>] tokens minted by the real Swapper restore only for the originating session at the ScanOutput choke point; reply + provider-bound history carry restored originals, never tokens; a stolen cross-session token survives verbatim",
+      "title": "PII roundtrip: [PII:<uuid>] tokens minted by the real Swapper restore only for the originating session at the ScanOutput choke point; user-visible reply + stored history carry restored originals while provider-bound turns carry only tokens (BND-1 pre-LLM masking); a stolen cross-session token survives verbatim",
       "paths": [
         "internal/security/pii/",
         "internal/agent/pii_restore_hook.go",

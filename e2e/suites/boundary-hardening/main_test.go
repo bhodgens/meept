@@ -111,20 +111,6 @@ func bhRequestsText(s *harness.Stack) string {
 	return sb.String()
 }
 
-// bhUnboundSession creates a session with NO project and NO detection CWD
-// via the RPC surface (the CLI always stamps os.Getwd() into the detection
-// context). Returns the session id.
-func bhUnboundSession(t *testing.T, s *harness.Stack, name string) string {
-	t.Helper()
-	rpc := harness.DialRPC(t, s.SocketPath)
-	result := rpc.CallResult("session.create", map[string]any{"name": name})
-	id, _ := result["id"].(string)
-	if id == "" {
-		t.Fatalf("boundary-hardening: session.create returned no id: %v", result)
-	}
-	return id
-}
-
 // bhTokenRe matches the [PII:<uuid-v4>] swap-token vocabulary.
 var bhTokenRe = regexp.MustCompile(`\[PII:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\]`)
 
@@ -283,13 +269,25 @@ func TestBoundaryForgedControlMessage(t *testing.T) {
 // boundary-hardening-03 (M): PII roundtrip with cross-session refusal
 // ---------------------------------------------------------------------------
 
-// TestBoundaryPiiRoundtrip proves the PII restore lane end to end through
+// TestBoundaryPiiRoundtrip proves the PII proxy lane end to end through
 // its real seams: the daemon (fresh scratch daemon, security.pii.enabled)
 // registers the pii-restore hook at boot; the real pii.Swapper over a real
 // durable SwapStore mints tokens; the real PiiRestoreHook restores them at
-// the AgentLoop ScanOutput choke point ONLY for the originating session,
-// and conversation history re-sent toward the provider carries the restored
-// originals, never tokens.
+// the AgentLoop ScanOutput choke point ONLY for the originating session.
+//
+// Contract re-pin (BND-1, commit 0b5cc1cd; plan master.md C1-C scenario
+// 03(a)): with [security.pii].enabled the provider-bound surface and the
+// stored-history surface are DISTINCT. Provider-bound turns (including the
+// prior turns' history re-sent in later iterations) carry ONLY [PII:*]
+// tokens - the masking half runs pre-LLM on the per-iteration clone
+// (loop.go, MaskOutboundScoped), so the provider never sees raw PII in any
+// turn. Stored conversation history and the user-visible reply keep the
+// restored originals (restore fires at the ScanOutput choke point BEFORE
+// history append). The pre-0b5cc1cd assertion that provider-bound history
+// "carries the restored originals, never tokens" pinned the pre-masking
+// state (the mask lane had zero production callers when this suite was
+// written, per the package docblock) and inverted the plan's security
+// contract; this test now pins BOTH surfaces explicitly.
 func TestBoundaryPiiRoundtrip(t *testing.T) {
 	// Live-daemon half: the enabled config registers the restore hook at
 	// boot (the components.go wiring's observable trace).
@@ -355,8 +353,12 @@ func TestBoundaryPiiRoundtrip(t *testing.T) {
 		t.Fatalf("boundary-hardening-03: reply lost the restored originals: %q", reply)
 	}
 
-	// (provider-bound history) the next turn's context carries the previous
-	// assistant reply RESTORED: originals present, tokens absent.
+	// (provider-bound history, BND-1 re-pin) the next turn's context re-sent
+	// to the provider carries the previous assistant reply RE-MASKED to
+	// session tokens (TokenFor reuse: same session, same value -> same
+	// token), never the raw originals. Simultaneously the STORED
+	// conversation history keeps the restored originals — masking lands only
+	// on the per-iteration provider-bound clone.
 	echo.resp = &llm.Response{Content: "recapping the contact thread.", FinishReason: "stop"}
 	second, err := loopA.RunOnce(context.Background(), "recap the thread", "conv-bh03-a")
 	if err != nil {
@@ -369,11 +371,25 @@ func TestBoundaryPiiRoundtrip(t *testing.T) {
 		t.Fatalf("boundary-hardening-03: stub saw %d requests, want >= 2", len(echo.seen))
 	}
 	history := echo.seen[len(echo.seen)-1]
-	if strings.Contains(history, "[PII:") {
-		t.Fatalf("boundary-hardening-03: token re-entered provider-bound history: %q", history)
+	if !strings.Contains(history, tokensA[0]) || !strings.Contains(history, tokensA[1]) {
+		t.Fatalf("boundary-hardening-03: prior-turn PII re-entered the provider-bound history RAW (mask lane not on the re-sent turn): %q", history)
 	}
-	if !strings.Contains(history, "alice@example.com") {
-		t.Fatalf("boundary-hardening-03: provider-bound history lost the restored original: %q", history)
+	if strings.Contains(history, "alice@example.com") || strings.Contains(history, "555-010-1234") {
+		t.Fatalf("boundary-hardening-03: raw PII in provider-bound history (pre-LLM masking skipped a turn): %q", history)
+	}
+	// Stored history: the user-visible/original surface. The conversation's
+	// own messages (never the clone) must retain the restored originals.
+	conv := loopA.GetConversation("conv-bh03-a")
+	if conv == nil {
+		t.Fatal("boundary-hardening-03: conversation missing after turns")
+	}
+	var stored strings.Builder
+	for _, m := range conv.GetMessages() {
+		stored.WriteString(m.Content)
+		stored.WriteString("\n")
+	}
+	if !strings.Contains(stored.String(), "alice@example.com") || !strings.Contains(stored.String(), "555-010-1234") {
+		t.Fatalf("boundary-hardening-03: stored history lost the restored originals: %q", stored.String())
 	}
 
 	// (d) cross-session refusal: the stolen victim token replayed inside
