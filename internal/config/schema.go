@@ -5657,9 +5657,21 @@ type VoiceConfig struct {
 	DefaultLeg                string `json:"default_leg"            toml:"default_leg"`
 	TTSModel                  string `json:"tts_model"             toml:"tts_model"`
 	TTSVoice                  string `json:"tts_voice"             toml:"tts_voice"`
-	STTModel                  string `json:"stt_model"             toml:"stt_model"`
-	TTSBaseURL                string `json:"tts_base_url"          toml:"tts_base_url"`
-	STTBaseURL                string `json:"stt_base_url"          toml:"stt_base_url"`
+	// TTSRefAudio (json tts_ref_audio) is the path to the CLONE
+	// REFERENCE WAV the qwen3 custom voice is keyed on (plan
+	// 20261113-filler-clips leaf 02). The OpenAI-compatible shim never
+	// receives the reference in a request, so this knob feeds ONLY the
+	// clip-key identity: the daemon hashes the file's content (sha256)
+	// into the keys line's tts_ref_hash and into every Contract C1 clip
+	// key — two deployments sharing model+voice name but different
+	// reference audio get different clip keys. Empty (default) = a
+	// preset/non-clone voice: the hash-of-zero-bytes inner case. A
+	// missing/unreadable file degrades to the same posture with a
+	// one-shot WARN, never a failed call.
+	TTSRefAudio string `json:"tts_ref_audio" toml:"tts_ref_audio"`
+	STTModel    string `json:"stt_model"             toml:"stt_model"`
+	TTSBaseURL  string `json:"tts_base_url"          toml:"tts_base_url"`
+	STTBaseURL  string `json:"stt_base_url"          toml:"stt_base_url"`
 	// ReaperIntervalS (leaf 02, C3): the dead-air reaper's sweep cadence.
 	// 0 => default 30s (frozen from the uptractor source); NEGATIVE
 	// disables the reaper entirely (opt-out without removing the key).

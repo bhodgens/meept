@@ -69,6 +69,7 @@ func buildVoiceFields() []Field {
 		NewTextField("voice.default_leg", "default leg (phone|local)", s.DefaultLeg),
 		NewTextField("voice.tts_model", "tts model", s.TTSModel),
 		NewTextField("voice.tts_voice", "tts voice", s.TTSVoice),
+		NewTextField("voice.tts_ref_audio", "tts clone reference audio path", s.TTSRefAudio),
 		NewTextField("voice.stt_model", "stt model", s.STTModel),
 		NewToggleField("voice.local.enabled", "local enabled", s.Local.Enabled),
 		NewTextField("voice.local.stt_provider", "local stt provider", s.Local.STTProvider),

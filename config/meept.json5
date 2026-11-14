@@ -1395,6 +1395,7 @@
     "default_leg": "phone",                 // phone | local; default leg for outbound voice
     "tts_model": "",                        // global TTS model (openai voice id etc.)
     "tts_voice": "",                        // global TTS voice
+    "tts_ref_audio": "",                    // path to the qwen3 clone reference WAV; feeds ONLY the clip-key identity (sha256 into tts_ref_hash + voice_clips keys) — never a TTS request field; empty = preset voice
     "stt_model": "",                        // global STT model
     "tts_base_url": "",                     // TTS base URL override (local Qwen3-TTS server); empty = vendor default
     "stt_base_url": "",                     // STT base URL override (Deepgram-compatible endpoint); empty = api.deepgram.com
