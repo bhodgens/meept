@@ -1066,10 +1066,15 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// the [security.groups] section BEFORE any component wiring — a
 	// cyclic group chain or dangling policy reference fails boot with a
 	// named defect (fail closed). Leaf 04 extends the same hook with the
-	// C6 live-registry tool-name leg: the registry is built just below
-	// (tools.NewRegistry), and groupsBootValidateTools runs AFTER builtin
-	// registration (registerBuiltinTools) where every policy tool name
-	// must resolve, or boot fails naming the offender.
+	// C6 live-registry tool-name leg. The registry is built just below
+	// (tools.NewRegistry), but the LIVE check does NOT run here: since
+	// commit 479666b7 it lives in Components.Start, AFTER every
+	// registration path has returned (builtin, scheduler, ledger,
+	// platform, employee messaging, voice). A construction-time check
+	// would reject policy tool names that are only registered later in
+	// Start (a real false positive), so Start is the single leg that can
+	// see the fully-populated registry — that order constraint is why
+	// NewComponents deliberately leaves the C6 leg inert.
 	if err := validateGroupsConfig(cfg); err != nil {
 		logger.Error("FATAL: groups config invalid", "error", err)
 		return nil, err
@@ -5975,8 +5980,27 @@ func (c *Components) Start(ctx context.Context) error {
 	// builtin tools, scheduler provider, ledger tools, platform tools,
 	// employee messaging (after EmployeeMessageStore exists), and voice.
 	// A check before that set rejects names that are registered later.
+	//
+	// Hazard note (conditional registration vs fatal check): several of
+	// the registration paths above are CONDITIONAL or DEGRADABLE —
+	// employee messaging registers send_agent_message/inbox only when its
+	// store built (non-fatal on failure, components.go ~5330), voice
+	// swallows voice_call registration errors, intake_save registers only
+	// when [intake] is enabled, and mcp_* tools register per configured
+	// server. A policy naming one of those is INDISTINGUISHABLE from a
+	// typo at this check, so a failure here must not pretend certainty:
+	// the error wraps a hint listing the known conditional families so
+	// ops can distinguish a typo from a degraded/absent optional
+	// dependency. The check's semantics are unchanged — an unregistered
+	// name still fails boot.
 	if c.Config != nil && c.ToolRegistry != nil {
 		if err := revalidateGroupsPolicyTools(nil, groupsPoliciesFromConfig(c.Config.Security.Groups.Policies), c.ToolRegistry, agent.CanonicalToolName); err != nil {
+			err = fmt.Errorf("%w\nhint: a name may also be missing because its registration is CONDITIONAL: "+
+				"employee messaging (send_agent_message, inbox) registers only when its store builds (non-fatal on failure); "+
+				"voice_call registers only when the voice provider is enabled and its registration succeeded; "+
+				"intake_save registers only when [intake] is enabled; mcp_* tools register per configured MCP server. "+
+				"Check the boot log above for the corresponding degradation warning before treating this as a typo",
+				err)
 			c.Logger.Error("FATAL: groups config policy tool names invalid (live registry)", "error", err)
 			return err
 		}
@@ -6964,6 +6988,13 @@ func (c *Components) Start(ctx context.Context) error {
 	// unarmed (employee_resume_wiring.go).
 	c.wireEmployeeResume(ctx)
 	c.startEmployeeResumeSubscriber(ctx)
+	// Approved-plan resume sweep (stranded-approval fix): boot-time
+	// reconciliation of approved-but-unexecuted plans + periodic retry for
+	// resumes skipped while an employee's goal loop was busy mid-round.
+	// Armed with the subscriber because it consumes the same resume seam
+	// and covers the shapes the in-memory plan.approved event misses
+	// (employee_resume_wiring.go).
+	c.startApprovedPlanResumeSweep(ctx)
 
 	// Wire the chat-path goal anchor (goal-completion leaf 03 Task 2):
 	// the dispatcher resolves a session's goal at plan-creation time via
@@ -7245,6 +7276,11 @@ func (c *Components) stopComponents(ctx context.Context) error {
 	// unsubscribes so late approvals cannot queue mid-shutdown. No-op
 	// when the subscriber was never armed.
 	c.stopEmployeeResumeSubscriber()
+
+	// Stop the approved-plan resume sweep (stranded-approval fix): joins
+	// the sweep goroutine so an in-flight pass completes before shutdown
+	// proceeds. No-op when the sweep was never armed.
+	c.stopApprovedPlanResumeSweep()
 
 	// Stop the async-turn liveness reaper (async-turn-migration leaf 06)
 	// next to the other handler-side background loops. Nil when the
