@@ -236,29 +236,6 @@ func NewAnthropicClient(config *ModelConfig, opts ...AnthropicClientOption) *Ant
 	return c
 }
 
-// isAnthropicRoute reports whether a model config targets an Anthropic-
-// compatible endpoint (direct, OpenRouter-claude, or Bedrock-claude).
-// Used to decide whether the Anthropic wire format applies.
-func isAnthropicRoute(cfg *ModelConfig) bool {
-	if cfg == nil {
-		return false
-	}
-	if cfg.ProviderID == ProviderIDAnthropic {
-		return true
-	}
-	if strings.Contains(strings.ToLower(cfg.BaseURL), "anthropic") {
-		return true
-	}
-	// Bedrock and OpenRouter host Claude models; route by model-id prefix.
-	if cfg.ProviderID == ProviderIDBedrock || cfg.ProviderID == "openrouter" {
-		mid := strings.ToLower(cfg.ModelID)
-		if strings.Contains(mid, "claude") || strings.HasPrefix(mid, "anthropic/") || strings.HasPrefix(mid, "anthropic.") {
-			return true
-		}
-	}
-	return false
-}
-
 // anthropicRequestURL constructs the request URL honoring provider quirks.
 // cfg is the effective config for the call (withRequestModelOverride
 // output): the Bedrock model path uses the request-scoped ModelID, and the
