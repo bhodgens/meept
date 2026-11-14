@@ -44,6 +44,35 @@ type Frame struct {
 	TtsModel   string `json:"tts_model,omitempty"`
 	TtsVoice   string `json:"tts_voice,omitempty"`
 	BargeInRms int    `json:"barge_in_rms,omitempty"`
+
+	// Filler-clip cache (plan 20261113-filler-clips-and-context-warm,
+	// Contract C3, ALL fields additive + omitempty). An old child ignores
+	// clip_id/clip_render/clip_ready and falls back to live synth —
+	// today's byte-identical behavior; an old daemon never sends them.
+	//
+	// ClipID rides a say frame: the 64-hex clipstore key of the pre-rendered
+	// PCM for Text. Text stays the transcript source (R6): the clip is an
+	// audio-only optimization, never a second speech path.
+	ClipID string `json:"clip_id,omitempty"`
+	// Clips carries the render list on a clip_render frame (daemon ->
+	// child). Capped at 32 entries per frame per Contract C3; the daemon
+	// shards larger pools across frames and the cap is enforced there.
+	Clips []ClipSpec `json:"clips,omitempty"`
+	// Key + OK are the clip_ready result fields (child -> daemon):
+	// Key is the 64-hex clip key that was rendered (or found warm), OK
+	// reports success. OK is *bool so an explicit false ("ok":false) is
+	// distinguishable from an absent field, exactly like Last.
+	Key string `json:"key,omitempty"`
+	OK  *bool  `json:"ok,omitempty"`
+}
+
+// ClipSpec is one {key,text} entry of a clip_render frame (Contract C3).
+// The key is pre-computed by the daemon planner with the pinned C1
+// formula; the child renders Text through its installed TTS provider and
+// stores the result under Key — the child never recomputes the key.
+type ClipSpec struct {
+	Key  string `json:"key"`
+	Text string `json:"text"`
 }
 
 // Text-socket event values (C1).
@@ -69,11 +98,27 @@ const (
 	// turn_final TEXT edge, where the child still has queued sentences whose
 	// inter-sentence synth gaps (measured 1.4-3.8 s) exceed the quiescence
 	// window and fake a mid-reply drain (link-2fdc3f5fd8d81805: 10.94 s of
-	// both-audible overlap from 60 early drains). Older child binaries never
-	// send it; the coordinator's fallback margin keeps bounding those.
+	// both-audible overlap). Older child binaries never send it; the
+	// coordinator's fallback margin keeps bounding those.
 	// Unknown-event decode tolerance means a daemon that predates this
 	// constant drops the frame silently.
 	EventPlayed = "played"
+
+	// EventClipRender is the daemon -> child clip-warming request (Contract
+	// C3, plan 20261113-filler-clips-and-context-warm): one frame carries
+	// up to 32 Clips {key,text} specs the daemon's planner diffed against
+	// the clip store. The child renders misses in the background (never on
+	// the turn lane) and answers each spec with one EventClipReady frame.
+	// An old child decodes the frame as an unknown event and drops it
+	// silently (C3 back-compat).
+	EventClipRender = "clip_render"
+
+	// EventClipReady is the child -> daemon result of one clip_render
+	// entry: {"call_id":"<ccid>","event":"clip_ready","key":"<64 hex>",
+	// "ok":true|false}. ok:false means the render or store write failed;
+	// the line stays playable via live synth (the clip path never fails
+	// a turn). An old daemon drops the unknown event silently.
+	EventClipReady = "clip_ready"
 )
 
 // EncodeFrame serializes f as one JSON line: compact JSON plus '\n'.

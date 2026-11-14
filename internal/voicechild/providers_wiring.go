@@ -115,6 +115,14 @@ type keysWire struct {
 	MinRMS         *int     `json:"min_rms,omitempty"`
 	FragmentDecayS *int     `json:"fragment_decay_s,omitempty"`
 	ReplyExemptS   *int     `json:"reply_exempt_s,omitempty"`
+	// TTSRefHash (leaf 03, filler clips, ADDITIVE optional): the
+	// hex(sha256) of the clone reference audio for the configured TTS
+	// voice ("" = non-clone / old daemon). Together with the vendor/
+	// model/voice selectors it is the Contract C1 identity input the
+	// daemon planner hashed the clip keys with; the child stores it
+	// decoded on the pipeline (p.ttsRefHash) for the byte-equality
+	// contract test between the two key computations.
+	TTSRefHash string `json:"tts_ref_hash"`
 }
 
 // handleKeysFrame decodes one raw keys line into the redacting KeysFrame
@@ -189,6 +197,7 @@ func (c *Child) handleKeysFrame(line string) error {
 		MinRMS:         minRMS,
 		FragmentDecayS: fragmentDecayS,
 		ReplyExemptS:   replyExemptS,
+		TTSRefHash:     w.TTSRefHash,
 	})
 }
 

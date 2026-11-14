@@ -76,6 +76,11 @@ func run(ctx context.Context, textSocket, audioDir string) error {
 		AudioDir:       audioDir,
 		TokenReader:    os.Stdin, // start token via stdin ONLY (never argv/env)
 	})
+	// Clip-playback rate converter (filler-clips leaf 03, A1): stored PCM
+	// is canonical s16le@16k; a call negotiated at any other rate reads
+	// clips through jargo's streaming resampler. voicechild cannot import
+	// providers (cycle), so the seam is injected here.
+	child.SetResampler(providers.ResampleS16Mono)
 	// Real provider adapters behind the leaf-07 interfaces, dispatched on
 	// the per-call config the child passes from the C1 keys frame (C3):
 	// the vendor, model, base URL, and voice now come from the daemon per

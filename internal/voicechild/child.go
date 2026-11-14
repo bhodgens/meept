@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caimlas/meept/internal/voice/clipstore"
 	"github.com/caimlas/meept/internal/voiceframe"
 )
 
@@ -75,6 +76,17 @@ type Child struct {
 	writeMu sync.Mutex // serializes writeLine's conn.Write
 	conn    net.Conn   // live text socket; nil until Run dials
 
+	// clipStore is the shared filler-clip cache (Contract C2) handed to
+	// every pipeline at construction. New builds clipstore.NewStore()
+	// (cheap + inert: the store creates its directory only on the first
+	// successful Put — the R4 no-sidecar-no-writes gate lives in the
+	// store, not here). SetClipStore swaps it (tests, custom roots).
+	// mu-guarded like the factories; read per pipeline at construction.
+	clipStore *clipstore.Store
+	// resampler is the injected rate converter for clip playback (see
+	// Resampler in clips.go); mu-guarded.
+	resampler Resampler
+
 	pipelineMu sync.Mutex           // guards pipelines (routing map)
 	pipelines  map[string]*pipeline // keyed by call_control_id
 }
@@ -121,7 +133,25 @@ func New(cfg ChildConfig) *Child {
 		cfg:       cfg,
 		logger:    cfg.Logger,
 		pipelines: make(map[string]*pipeline),
+		clipStore: clipstore.NewStore(),
 	}
+}
+
+// SetClipStore overrides the filler-clip cache root (tests and callers
+// that resolve the store dir themselves; nil disables the clip path
+// entirely — every say falls through to live synth). Call before Run.
+func (c *Child) SetClipStore(s *clipstore.Store) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.clipStore = s
+}
+
+// clipStoreFor reads the shared store under the mu regime, for pipeline
+// construction.
+func (c *Child) clipStoreFor() *clipstore.Store {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.clipStore
 }
 
 // readToken reads the start token from the configured reader. The token is
@@ -374,6 +404,13 @@ func (c *Child) handleLine(ctx context.Context, line string) {
 		// Hangup flush: the pipeline's close() drains the transcript
 		// lane (pump EOF -> consumer EOF flush); nothing to emit here.
 		c.handleEnd(frame)
+	case voiceframe.EventClipRender:
+		// Clip warming (Contract C3): never an error path — a render
+		// failure answers clip_ready ok:false, and an unknown call drops
+		// the frame (the planner re-requests per call). failCall is
+		// deliberately NOT used: the clip path must never tear down a
+		// live call.
+		c.handleClipRender(frame)
 	case "keys": // voiceframe keys event (leaf-07 C1 shape; constant lives here: the shared codec carries no key fields)
 		c.failCall(frame.CallID, c.handleKeysFrame(line), "keys")
 	default:

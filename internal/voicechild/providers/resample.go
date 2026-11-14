@@ -47,6 +47,18 @@ type resamplingReader struct {
 	done    bool
 }
 
+// ResampleS16Mono is the exported seam for newResamplingReader: it wraps
+// src (s16le mono at inRate) in a reader that emits s16le mono at outRate.
+// voicechild cannot import this package (providers imports voicechild for
+// the factory interfaces — the reverse would cycle), so cmd/meept-voice
+// injects this function through Child.SetResampler for the clip-playback
+// path (plan 20261113-filler-clips leaf 03, adjudication A1: the clip
+// store is canonical 16000 Hz; a call negotiated at any other rate
+// resamples on read).
+func ResampleS16Mono(src io.Reader, inRate, outRate int) (io.ReadCloser, error) {
+	return newResamplingReader(src, inRate, outRate), nil
+}
+
 func newResamplingReader(src io.Reader, inRate, outRate int) *resamplingReader {
 	rs, err := resample.NewWithConfig(inRate, outRate, 1, resample.Config{ClearAfter: resampleClearAfter})
 	if err != nil {

@@ -79,6 +79,15 @@ type KeysFrame struct {
 	// background). Absent on an old daemon line decodes to the child
 	// default (15 s, defaultReplyExemptS); an explicit 0 disables.
 	ReplyExemptS int
+	// TTSRefHash is the leaf-03 (filler-clips) clip-identity input:
+	// hex(sha256(clone reference audio bytes)), or "" for a preset
+	// (non-clone) voice — the per-employee clone reference never crosses
+	// C2 (the keys lane is its only wire, same posture as the raw keys),
+	// so the hash rides instead. Absent on an old daemon's line = "" =
+	// the non-clone empty-bytes case of Contract C1. It is NOT secret
+	// material (a hash of public-ish audio); it still never logs (the
+	// redaction posture covers the whole frame).
+	TTSRefHash string
 }
 
 // Redacted is what String prints instead of key material.
@@ -174,6 +183,10 @@ func (p *pipeline) applyKeys(k KeysFrame) {
 	p.playMu.Lock()
 	p.sttKey = k.STTKey
 	p.ttsKey = k.TTSKey
+	// Clip-identity input (leaf 03, adjudication A4): the hex(sha256) of
+	// the clone reference audio from the keys frame, decoded for the
+	// Contract C1 ClipKey path. "" (old daemon) = non-clone = nil.
+	p.ttsRefHash = decodeTTSRefHash(k.TTSRefHash)
 	// Turn-aggregation window (C1): the keys frame carries the daemon's
 	// resolved voice.turn_confirm_ms; absent-on-wire already decoded to
 	// defaultTurnConfirmMs at handleKeysFrame. Applied before the
@@ -209,6 +222,15 @@ func (p *pipeline) applyKeys(k KeysFrame) {
 		Voice:   k.TTSVoice,
 	}
 	p.playMu.Unlock()
+	// Clip renders gate on provider identity, which only exists once the
+	// keys frame has landed (A3): release any queued render worker exactly
+	// once (a re-sent keys frame is idempotent through the Once). Guarded
+	// for nil: hand-built unit-test pipelines may skip newPipeline. Moved
+	// OUT of the playMu section: mutexio forbids Do-under-lock (the closure
+	// must be allowed to grow I/O later without re-tripping the analyzer).
+	if p.keysReady != nil {
+		p.keysReadyOnce.Do(func() { close(p.keysReady) })
+	}
 }
 
 // emitPrompt sends a C1 prompt frame to the daemon: final transcripts
