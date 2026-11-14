@@ -20,13 +20,25 @@
 //     a logged WARN + drop — never a panic, never a retry, never a
 //     re-publish. The approval flow that triggered the event must not
 //     fail because of this subscriber.
+//
+// RESTART COVERAGE (stranded-approval fix): this subscriber is an
+// in-memory trigger — a daemon restart between approval and delivery loses
+// the plan.approved event and would strand the approved plan (pending
+// approval can never re-enter approved). The approved-plan resume sweep
+// (Manager.StartApprovedPlanResumeSweep, armed by
+// startApprovedPlanResumeSweep below alongside the subscriber) reconciles
+// this at boot AND periodically: it scans approved plans not yet in the
+// manager's resumedPlans once-map and resumes them.
 package daemon
 
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/employee"
+	"github.com/caimlas/meept/internal/plan"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -84,9 +96,18 @@ func (c *Components) handleEmployeePlanApproved(msg *models.BusMessage) {
 		PlanID string `json:"plan_id"`
 		By     string `json:"by"`
 	}
-	if err := json.Unmarshal(msg.Payload, &payload); err != nil || payload.PlanID == "" {
+	// Decode failure and shape failure are distinct conditions: a decode
+	// error carries an error, a decoded-but-empty plan_id is a shape
+	// mismatch with nothing to log as "error" (logging the nil made the
+	// WARN line lie about the failure kind).
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 		log.Warn("employee resume: undecodable plan.approved payload -- dropped",
 			"error", err)
+		return
+	}
+	if payload.PlanID == "" {
+		log.Warn("employee resume: plan.approved payload missing plan_id -- dropped (shape mismatch)",
+			"subscriber", employeeResumeSubscriberID)
 		return
 	}
 	if err := c.resumeApprovedPlan(payload.PlanID, payload.By); err != nil {
@@ -131,3 +152,69 @@ func (c *Components) stopEmployeeResumeSubscriber() {
 		c.employeeResumeSubscriber = nil
 	}
 }
+
+// approvedPlanResumeSweepInterval is the reconciliation sweep's cadence in
+// production. Deliberately short relative to a plan approval: a resume
+// skipped because the employee's goal loop was busy mid-round (the
+// TryLock skip never queues) must land shortly after the round settles,
+// not minutes later.
+const approvedPlanResumeSweepInterval = 15 * time.Second
+
+// startApprovedPlanResumeSweep arms Manager.StartApprovedPlanResumeSweep
+// (boot + periodic reconciliation; see the RESTART COVERAGE note in this
+// file's header) once the plan lookup adapter exists. Called from
+// Components.Start next to startEmployeeResumeSubscriber; idempotent (the
+// Manager-level Start is a no-op on an already-running sweep). No-op when
+// the employee manager or the plan system is absent: without a plan
+// approved-lister there is nothing to reconcile, and the bus subscriber
+// remains the sole resume driver. Stopped with the sweep's lifecycle in
+// stopComponents via stopApprovedPlanResumeSweep.
+func (c *Components) startApprovedPlanResumeSweep(ctx context.Context) {
+	if c == nil || c.EmployeeManager == nil || c.PlanManager == nil {
+		return
+	}
+	c.EmployeeManager.SetPlanApprovedLister(&planApprovedListerAdapter{pm: c.PlanManager})
+	c.EmployeeManager.StartApprovedPlanResumeSweep(ctx, approvedPlanResumeSweepInterval)
+	c.Logger.Info("approved plan resume sweep wired",
+		"interval", approvedPlanResumeSweepInterval)
+}
+
+// stopApprovedPlanResumeSweep ends the periodic approved-plan resume sweep.
+// Safe when the sweep never started (nil manager; Manager-side Stop is
+// idempotent).
+func (c *Components) stopApprovedPlanResumeSweep() {
+	if c == nil || c.EmployeeManager == nil {
+		return
+	}
+	c.EmployeeManager.StopApprovedPlanResumeSweep()
+}
+
+// planApprovedListerAdapter adapts *plan.PlanManager to
+// employee.PlanApprovedLister (IDs of plans in the APPROVED signoff state).
+// Same shape as planLookupAdapter: the employee package cannot import
+// internal/plan, so the daemon supplies the concrete adapter. The bounded
+// scan mirrors CountPlansByState's listing shape (max 1000 rows — approvals
+// are human-paced and the sweep's once-map plus the plan system's own
+// Synthesize/execution guards make a re-listed plan a cheap skip).
+type planApprovedListerAdapter struct {
+	pm *plan.PlanManager
+}
+
+// ApprovedPlanIDs returns the plan IDs currently in StateApproved.
+func (a *planApprovedListerAdapter) ApprovedPlanIDs(ctx context.Context) ([]string, error) {
+	plans, err := a.pm.ListApprovedPlans(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(plans))
+	for _, p := range plans {
+		if p != nil {
+			ids = append(ids, p.ID)
+		}
+	}
+	return ids, nil
+}
+
+// Compile-time guard: planApprovedListerAdapter must satisfy
+// employee.PlanApprovedLister.
+var _ employee.PlanApprovedLister = (*planApprovedListerAdapter)(nil)

@@ -511,6 +511,19 @@ type PlanLookup interface {
 	PlanCreatedAt(ctx context.Context, planID string) (time.Time, error)
 }
 
+// PlanApprovedLister provides read-only access to the IDs of plans that are
+// currently in the APPROVED signoff state. It drives
+// StartApprovedPlanResumeSweep: the sweep reconciles approved-but-unexecuted
+// plans that the plan.approved bus event missed (subscriber down, daemon
+// restart between approval and resume, or the employee's goal loop busy
+// mid-round at approval time — the TryLock skip never retries on its own).
+// Nil lister (the default) disables the sweep and the bus subscriber remains
+// the only resume driver. The daemon wires the concrete adapter; the
+// interface exists here to avoid importing internal/plan (cycle risk).
+type PlanApprovedLister interface {
+	ApprovedPlanIDs(ctx context.Context) ([]string, error)
+}
+
 // Manager orchestrates the employee lifecycle: hiring, retiring, pause/resume,
 // triggering, constitution amendment (via Plan signoff), goal management,
 // audit findings, and legacy bot migration.
@@ -571,6 +584,28 @@ type Manager struct {
 	// when a plan was created (spec line 591). Nil means the sweeper
 	// falls back to LastAssessed.
 	planLookup PlanLookup
+
+	// planApprovedLister is an optional read-only accessor for the IDs of
+	// plans in the APPROVED signoff state, injected by the daemon wiring.
+	// It drives StartApprovedPlanResumeSweep — the reconciliation sweep
+	// that rescues approved-but-unexecuted plans the plan.approved bus
+	// event missed (bus subscriber down, daemon restart between approval
+	// and resume, or the goal loop busy mid-round at approval time: the
+	// ResumeApprovedPlan TryLock skip deliberately never queues, so
+	// without this sweep such a plan is stranded forever — pending
+	// approval can never re-enter approved, transitions.go pins
+	// pending_approval->approved one-way, and decideTier2/3 only create
+	// NEW plans). Nil lister = sweep disabled; the bus subscriber is the
+	// only resume driver. Write-once at daemon init via
+	// SetPlanApprovedLister; read under planApprovedSweepMu by the sweep.
+	planApprovedLister PlanApprovedLister
+
+	// approvedResumeSweep controls the periodic approved-plan resume sweep
+	// goroutine started by StartApprovedPlanResumeSweep. Guarded by
+	// approvedResumeSweepMu.
+	approvedResumeSweepMu     sync.Mutex
+	approvedResumeSweepCancel context.CancelFunc
+	approvedResumeSweepDone   chan struct{}
 
 	// resumedPlans is the once-per-process memory for ResumeApprovedPlan
 	// (Contract C1, tree docs/plans/20261113-escalation-resume-and-hardening
@@ -1970,6 +2005,137 @@ func (m *Manager) SetPlanLookup(l PlanLookup) {
 	m.planLookup = l
 }
 
+// SetPlanApprovedLister wires the read-only accessor that enumerates plans
+// in the APPROVED signoff state. It enables StartApprovedPlanResumeSweep;
+// nil is ignored (the sweep stays disabled and the plan.approved bus
+// subscriber remains the only resume driver).
+func (m *Manager) SetPlanApprovedLister(l PlanApprovedLister) {
+	if l == nil {
+		return
+	}
+	m.planApprovedLister = l
+}
+
+// DefaultApprovedPlanResumeSweepInterval is the reconciliation sweep's
+// cadence when StartApprovedPlanResumeSweep is called with a non-positive
+// interval.
+const DefaultApprovedPlanResumeSweepInterval = time.Minute
+
+// StartApprovedPlanResumeSweep launches the periodic reconciliation sweep
+// that resumes approved-but-unexecuted plans (HIGH stranded-approval fix,
+// tree 20261113-escalation-resume-and-hardening). Two stranding shapes are
+// covered:
+//
+//   - Busy-at-approval: ResumeApprovedPlan's TryLock skip runs while the
+//     employee's goal loop is mid-round. The skip never queues and the
+//     false "next scheduled trigger resumes normal rounds" assumption is
+//     wrong — nothing revisits an approved plan (decideTier2/3 only create
+//     NEW plans and pending_approval->approved is pinned one-way), so the
+//     sweep is the retry driver.
+//   - Restart-between-approval-and-resume: the bus event that arms
+//     ResumeApprovedPlan is in-memory (internal/daemon
+//     employee_resume_wiring.go); a daemon restart between approval and
+//     delivery loses it. Running the sweep at boot (immediate first pass,
+//     then every interval) reconciles whatever the previous process left
+//     behind.
+//
+// Safety: the once-per-process resumedPlans map (plus park.go's
+// planResumed map) makes the sweep idempotent — a plan already executed by
+// THIS process is an INFO skip, and a bus-delivered resume racing the sweep
+// serializes on the per-employee invoke mutex. Post-restart resumes are
+// safe because execution is a fresh ApproveAndExecute against the plan
+// system's own state guards.
+//
+// The first pass runs immediately (covers the boot-restart shape), then
+// every interval on ctx. interval <= 0 selects
+// DefaultApprovedPlanResumeSweepInterval. A second Start on a running sweep
+// is a no-op; StopApprovedPlanResumeSweep ends it (idempotent, joins the
+// goroutine). A nil Manager or an unwired lister is a no-op: no lister
+// means the bus subscriber is the only resume driver.
+func (m *Manager) StartApprovedPlanResumeSweep(ctx context.Context, interval time.Duration) {
+	if m == nil || m.planApprovedLister == nil {
+		return
+	}
+	if interval <= 0 {
+		interval = DefaultApprovedPlanResumeSweepInterval
+	}
+	m.approvedResumeSweepMu.Lock()
+	if m.approvedResumeSweepCancel != nil {
+		// Already running.
+		m.approvedResumeSweepMu.Unlock()
+		return
+	}
+	loopCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	m.approvedResumeSweepCancel = cancel
+	m.approvedResumeSweepDone = done
+	lister := m.planApprovedLister
+	m.approvedResumeSweepMu.Unlock()
+
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		m.sweepApprovedPlans(loopCtx, lister) // immediate first pass: boot coverage
+		for {
+			select {
+			case <-loopCtx.Done():
+				return
+			case <-ticker.C:
+				m.sweepApprovedPlans(loopCtx, lister)
+			}
+		}
+	}()
+	m.logger.Info("approved plan resume sweep started",
+		"interval", interval)
+}
+
+// StopApprovedPlanResumeSweep ends the periodic approved-plan resume sweep
+// and waits for the goroutine to exit. Idempotent; safe on a nil receiver
+// or a sweep that never started.
+func (m *Manager) StopApprovedPlanResumeSweep() {
+	if m == nil {
+		return
+	}
+	m.approvedResumeSweepMu.Lock()
+	cancel := m.approvedResumeSweepCancel
+	done := m.approvedResumeSweepDone
+	m.approvedResumeSweepCancel = nil
+	m.approvedResumeSweepDone = nil
+	m.approvedResumeSweepMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if done != nil {
+		<-done
+	}
+}
+
+// sweepApprovedPlans runs one reconciliation pass: enumerate APPROVED plan
+// IDs via the wired lister and attempt a resume for each. Errors are
+// per-plan: one failure never blocks the rest. Deliberate skips inside
+// ResumeApprovedPlan (already resumed, no owning goal, no live loop, busy
+// loop) return nil and log their reason at INFO — the sweep's next tick
+// retries the retryable ones (busy/no-live-loop) and the permanent ones
+// (unknown plan) cost one INFO line per pass at most.
+func (m *Manager) sweepApprovedPlans(ctx context.Context, lister PlanApprovedLister) {
+	ids, err := lister.ApprovedPlanIDs(ctx)
+	if err != nil {
+		m.logger.Warn("approved plan resume sweep: list failed",
+			"error", err)
+		return
+	}
+	for _, planID := range ids {
+		if ctx.Err() != nil {
+			return
+		}
+		if err := m.ResumeApprovedPlan(ctx, planID, "approved-resume-sweep"); err != nil {
+			m.logger.Warn("approved plan resume sweep: resume failed (will retry next pass)",
+				"plan_id", planID, "error", err)
+		}
+	}
+}
+
 // SetBotsDir overrides the directory Migrate scans for legacy
 // ~/.meept/bots/*.json files. Empty restores the default (~/.meept/bots/).
 // Nil-guarded via the empty-string check; passing "" explicitly clears
@@ -2454,10 +2620,12 @@ func (m *Manager) ResumeApprovedPlan(ctx context.Context, planID, callerID strin
 
 	// Resolve the live GoalLoop (same seam Trigger uses via
 	// triggerViaGoalLoop). No registered loop means there is nothing to
-	// resume on — an INFO skip, not an error.
+	// resume on — an INFO skip, not an error. Not permanent: the
+	// approved-plan resume sweep (StartApprovedPlanResumeSweep) retries on
+	// every pass, so a loop registered after this skip is picked up.
 	loop := m.GetGoalLoop(goal.EmployeeID)
 	if loop == nil {
-		m.logger.Info("resume plan: no live goal loop for employee — skipping",
+		m.logger.Info("resume plan: no live goal loop for employee — skipping (approved-resume sweep will retry)",
 			"plan_id", planID, "employee_id", goal.EmployeeID,
 			"caller_id", callerID)
 		return nil
@@ -2466,10 +2634,16 @@ func (m *Manager) ResumeApprovedPlan(ctx context.Context, planID, callerID strin
 	// Busy guard: the loop is mid-round when its per-employee serialization
 	// mutex (the one triggerViaGoalLoop holds across Decide) is already
 	// locked. TryLock NEVER blocks — C1 forbids queueing a resume behind a
-	// running round; the next scheduled Trigger picks up normal rounds.
+	// running round. This skip is NOT terminal: the approved-plan resume
+	// sweep retries on its next pass, so the resume lands after the round
+	// completes. (The pre-sweep text claimed "next scheduled trigger
+	// resumes normal rounds", which stranded the plan: a scheduled trigger
+	// drives the goal round, not this plan's pending resume, and nothing
+	// else revisits an approved plan — pending_approval->approved is
+	// pinned one-way and decideTier2/3 only create NEW plans.)
 	invokeMu := m.acquireInvokeMutex(goal.EmployeeID)
 	if !invokeMu.TryLock() {
-		m.logger.Info("resume plan: goal loop busy mid-round — skipping (next scheduled trigger resumes normal rounds)",
+		m.logger.Info("resume plan: goal loop busy mid-round — skipping (approved-resume sweep will retry after the round settles)",
 			"plan_id", planID, "employee_id", goal.EmployeeID,
 			"caller_id", callerID)
 		return nil
@@ -3011,18 +3185,9 @@ func (m *Manager) synthesizeConstitutionWithLLM(
 			}
 		}
 		if len(cleaned) > 0 {
-			if allowed := base.Constraints.ToolsAllowed; len(allowed) > 0 {
-				kept := intersectToolsAllowed(cleaned, allowed)
-				dropped := len(cleaned) - len(kept)
-				notes = append(notes,
-					fmt.Sprintf("tools_allowed: LLM hint intersected with base allowlist (%d kept, %d dropped)",
-						len(kept), dropped))
-				cleaned = kept
-			} else {
-				notes = append(notes,
-					fmt.Sprintf("tools_allowed: LLM suggested %d tool(s)", len(cleaned)))
+			if note := m.applyToolsAllowedHint(&base, cleaned); note != "" {
+				notes = append(notes, note)
 			}
-			base.Constraints.ToolsAllowed = cleaned
 		}
 	}
 
@@ -3035,6 +3200,41 @@ func (m *Manager) synthesizeConstitutionWithLLM(
 	}
 
 	return base, notes, nil
+}
+
+// applyToolsAllowedHint merges a cleaned (trimmed, non-empty) migration LLM
+// tools_allowed hint into base's constraints and returns the review note
+// (empty when there is nothing to note).
+//
+// D4 (internal/groups/groups.go:40, "intersection never widens the spec")
+// plus the empty-allowlist semantics (constitution.go Tool gating doc;
+// enforcement check 1b skips an empty allowlist = inherit-everything):
+//   - a restricted (non-empty) base intersects with the hint. An EMPTY
+//     INTERSECTION is NOT an assignment of empty — that would silently
+//     widen the constitution past the restricted base list — so the
+//     disjoint case keeps the RESTRICTED base list, drops the hint, and
+//     Warn-logs both lists;
+//   - an unrestricted (nil/empty) base inherits the hint in full (never
+//     an empty assignment).
+func (m *Manager) applyToolsAllowedHint(base *Constitution, cleaned []string) string {
+	if allowed := base.Constraints.ToolsAllowed; len(allowed) > 0 {
+		kept := intersectToolsAllowed(cleaned, allowed)
+		if len(kept) == 0 {
+			// Disjoint hint and base: keep the restricted base list;
+			// the hint is dropped entirely (D4 — an empty result must
+			// never replace a non-empty allowlist).
+			m.logger.Warn("tools_allowed: LLM hint and base allowlist are disjoint; keeping the restricted base allowlist (hint dropped)",
+				"hint_tools", cleaned, "base_tools", allowed)
+			return fmt.Sprintf("tools_allowed: LLM hint %v is disjoint from base allowlist %v; base kept, hint dropped",
+				cleaned, allowed)
+		}
+		dropped := len(cleaned) - len(kept)
+		base.Constraints.ToolsAllowed = kept
+		return fmt.Sprintf("tools_allowed: LLM hint intersected with base allowlist (%d kept, %d dropped)",
+			len(kept), dropped)
+	}
+	base.Constraints.ToolsAllowed = cleaned
+	return fmt.Sprintf("tools_allowed: LLM suggested %d tool(s)", len(cleaned))
 }
 
 // intersectToolsAllowed intersects a migration LLM's tools_allowed hint with

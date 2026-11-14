@@ -162,6 +162,19 @@ func (m *PlanManager) CountPlansByState(ctx context.Context, state PlanState, li
 	return len(plans), nil
 }
 
+// ListApprovedPlans returns the plans currently in StateApproved (capped at
+// 1000 rows, the same bound CountPlansByState's callers use). Read-only:
+// the employee approved-plan resume sweep consumes the IDs to reconcile
+// approved-but-unexecuted plans (stranded-approval fix); it never mutates
+// plan state.
+func (m *PlanManager) ListApprovedPlans(ctx context.Context) ([]*Plan, error) {
+	plans, err := m.store.ListPlansByState(ctx, StateApproved, 1000)
+	if err != nil {
+		return nil, fmt.Errorf("list approved plans: %w", err)
+	}
+	return plans, nil
+}
+
 // stampTaskGoal carries a plan's goal onto a synthesized task through the
 // optional TaskGoalSetter seam. Best-effort: a creator without the seam or a
 // failed stamp logs a Warn and leaves the task goal-less (legacy-legal).
