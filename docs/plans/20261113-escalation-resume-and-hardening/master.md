@@ -212,12 +212,15 @@ Output: APPROVED or a list of specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-gate-tests.md | TESTS_VALIDATED | 1 | Validated in-session 2026-11-13. All RED for missing-impl reasons (T0-T4 name m.ResumeApprovedPlan; T5 names the Components seam; T6 names intersectToolsAllowed; T7 names buildAmendPayload). T8 pins compiled-green in the subagent run (package-wide run blocked only by leaf-01 RED — expected). T9 compiles under -tags e2e, manifest test ok. 4 documented deviations: T6 helper-targeted pin (conservative base has no seam to seed non-empty base), T7 builder seam (no RPC-client injection in cmd/meept), T5 func-field seam (parallel-leaf rule), T4 uses real ResumeGoalEpisode path. |
-| 01-employee-resume.md | PENDING | 0 | |
-| 02-daemon-resume-wiring.md | PENDING | 0 | seam shape pinned by T5: Components.resumeApprovedPlan func field + start/stopEmployeeResumeSubscriber |
-| 03-hint-intersection.md | PENDING | 0 | helper must be named intersectToolsAllowed per T6 pin (or adapt the 2 call sites) |
-| 04-amend-cli.md | PENDING | 0 | must factor out buildAmendPayload(agentID, field, value, reason) per T7 pin |
-| 05-trigger-wildcard-pin.md | PENDING | 0 | T8 pins already green |
+| 00T-gate-tests.md | COMPLETE | 1 | Committed ce23efca. T8 pin corrected post-validation (delta protocol): literal action "*" MUST fire under exact equality — exactness pinned both ways. |
+| 01-employee-resume.md | COMPLETE | 1 | Committed d95572e6 (with leaf 03, shared manager.go). Once/busy/unknown guards; park interplay via shared resumeOnce. |
+| 02-daemon-resume-wiring.md | COMPLETE | 1 | Committed 576745c4. Seam is 2-arg (test-pinned); ctx bound via closure. Graphs regenerated. |
+| 03-hint-intersection.md | COMPLETE | 1 | Committed d95572e6. intersectToolsAllowed per T6 pin; note reports kept/dropped. |
+| 04-amend-cli.md | COMPLETE | 1 | Committed 5f9d8ae7. buildAmendPayload factored; --reason; JSON decode-first. Lite client: local task amend stub, no parity defect. |
+| 05-trigger-wildcard-pin.md | COMPLETE | 1 | Committed d900fbf6. Comments at both sites; zero behavior change. |
+| 06-submit-pending (scope extension) | COMPLETE | 1 | Committed d8dc0fa0. Integration e2e proved goal-loop plans stranded in draft (SubmitPlan had no employee-path caller) — approval was impossible; adapter now submits to pending_approval. E2E escalation-resume green end-to-end. |
+
+Final integration: merge ddf3dce8 to main. Full internal/employee + internal/daemon suites green; e2e-fast-area AREA=escalation-resume green; graphs-check green. Follow-ups surfaced: (1) resumed execution carries only PlanRef{ID} — the candidate prompt is lost to a generic synthetic (manager.go ApproveAndExecute call site); (2) ApprovePlan fails whole call on Synthesize error (internal/plan); (3) agents.goals.approve unauthenticated over unix socket RPC.
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 
