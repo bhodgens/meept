@@ -28,6 +28,7 @@ Package security provides the security engine with SQLite\-backed decision makin
 - [func CountRules\(\) int](<#CountRules>)
 - [func ExtractToolOutput\(text, toolName string\) \(string, bool\)](<#ExtractToolOutput>)
 - [func ExtractUserInput\(text string\) \(string, bool\)](<#ExtractUserInput>)
+- [func IsVoiceContextStampShape\(s string\) bool](<#IsVoiceContextStampShape>)
 - [func IsWithinBoundary\(fullText, target string\) bool](<#IsWithinBoundary>)
 - [func ServerTLSConfig\(cfg TLSConfig\) \(\*tls.Config, error\)](<#ServerTLSConfig>)
 - [func ToolOutputStartTag\(name string\) string](<#ToolOutputStartTag>)
@@ -115,6 +116,7 @@ Package security provides the security engine with SQLite\-backed decision makin
   - [func \(o \*Orchestrator\) WrapSkillOutput\(skillName, output string\) string](<#Orchestrator.WrapSkillOutput>)
   - [func \(o \*Orchestrator\) WrapToolOutput\(toolName, output string\) string](<#Orchestrator.WrapToolOutput>)
   - [func \(o \*Orchestrator\) WrapUserInput\(text string\) string](<#Orchestrator.WrapUserInput>)
+  - [func \(o \*Orchestrator\) WrapVoiceStampedUserInput\(prompt, stamp string\) string](<#Orchestrator.WrapVoiceStampedUserInput>)
 - [type OrchestratorConfig](<#OrchestratorConfig>)
   - [func DefaultOrchestratorConfig\(\) OrchestratorConfig](<#DefaultOrchestratorConfig>)
 - [type OutputMonitor](<#OutputMonitor>)
@@ -141,6 +143,7 @@ Package security provides the security engine with SQLite\-backed decision makin
   - [func \(pg \*PromptGuard\) WrapSkillOutput\(skillName, output string\) string](<#PromptGuard.WrapSkillOutput>)
   - [func \(pg \*PromptGuard\) WrapToolOutput\(toolName, output string\) string](<#PromptGuard.WrapToolOutput>)
   - [func \(pg \*PromptGuard\) WrapUserInput\(text string\) string](<#PromptGuard.WrapUserInput>)
+  - [func \(pg \*PromptGuard\) WrapVoiceStampedUserInput\(prompt, stamp string\) string](<#PromptGuard.WrapVoiceStampedUserInput>)
 - [type QueryFilters](<#QueryFilters>)
 - [type RiskLevel](<#RiskLevel>)
   - [func MaxBashInjectionRisk\(findings \[\]BashInjectionFinding\) RiskLevel](<#MaxBashInjectionRisk>)
@@ -262,6 +265,16 @@ Package security provides the security engine with SQLite\-backed decision makin
 	    ToolOutputEndTag = "<<<END_TOOL_OUTPUT>>>"
 	
 	    DefaultReminderInterval = 15
+	
+	    // VoiceContextStampPrefix / VoiceContextStampSuffix delimit the daemon
+	    // voice lane's clock stamp ("[Context: current date/time is <Mon
+	    // 2006-01-02 15:04 (UTC-07:00)>] ", rendered by daemon
+	    // voiceTurnContextStamp). The exact time layout is the daemon's business
+	    // (voiceTurnTimeLayout); the guard only needs the bracket shape to
+	    // recognize its ONE exempted leading occurrence inside user input
+	    // (C-6, 2026-11-11 bughunt).
+	    VoiceContextStampPrefix = "[Context: current date/time is "
+	    VoiceContextStampSuffix = "] "
 	)
 
 <a name="ShellActionAllow"></a>Shell rule actions.
@@ -322,6 +335,13 @@ ExtractToolOutput extracts the content from tool output boundaries.
 	func ExtractUserInput(text string) (string, bool)
 
 ExtractUserInput extracts the content from user input boundaries.
+
+<a name="IsVoiceContextStampShape"></a>
+## func IsVoiceContextStampShape
+
+	func IsVoiceContextStampShape(s string) bool
+
+IsVoiceContextStampShape reports whether s opens with the daemon voice clock stamp's exact bracket shape \("\[Context: current date/time is ...\] "\). Exported for the daemon package's lockstep pins \(the packages cannot share test helpers across the import boundary without one\).
 
 <a name="IsWithinBoundary"></a>
 ## func IsWithinBoundary
@@ -1039,6 +1059,13 @@ WrapToolOutput wraps output from a tool in tool\-output boundary markers.
 
 WrapUserInput wraps text in user\-input boundary markers for prompt injection defense.
 
+<a name="Orchestrator.WrapVoiceStampedUserInput"></a>
+### func \(\*Orchestrator\) WrapVoiceStampedUserInput
+
+	func (o *Orchestrator) WrapVoiceStampedUserInput(prompt, stamp string) string
+
+WrapVoiceStampedUserInput is the C\-6 voice\-lane seam: wraps ONLY the raw user prompt inside the untrusted boundary and prepends the daemon's clock stamp OUTSIDE it \(prompt\_guard.WrapVoiceStampedUserInput\). A nil prompt guard degrades to the legacy stamped\-then\-unwrapped shape \(no boundaries existed to be inside/outside of\).
+
 <a name="OrchestratorConfig"></a>
 ## type OrchestratorConfig
 
@@ -1295,7 +1322,14 @@ WrapToolOutput wraps output from a tool in tool\-output boundary markers. It neu
 
 	func (pg *PromptGuard) WrapUserInput(text string) string
 
-WrapUserInput wraps text in user\-input boundary markers. It neutralizes embedded boundary markers in the input to prevent prompt injection attacks that attempt to prematurely close the boundary.
+WrapUserInput wraps text in user\-input boundary markers. It neutralizes embedded boundary markers in the input to prevent prompt injection attacks that attempt to prematurely close the boundary, and escapes bracketed\-scaffolding lines \(C\-6\) so attacker text can never render as a system context line inside the untrusted boundary.
+
+<a name="PromptGuard.WrapVoiceStampedUserInput"></a>
+### func \(\*PromptGuard\) WrapVoiceStampedUserInput
+
+	func (pg *PromptGuard) WrapVoiceStampedUserInput(prompt, stamp string) string
+
+WrapVoiceStampedUserInput is the C\-6 loop seam for the daemon's VOICE turn lane: it wraps ONLY the raw user\-authored prompt in the untrusted boundary, then PREPENDS the daemon\-rendered clock stamp OUTSIDE it, so the authoritative clock is trusted scaffolding on its own line and any bracketed\-scaffolding line the caller smuggled inside stays escaped user data. prompt must be the RAW spoken prompt \(no stamp prepended\); render stamp is called exactly once to produce that outside\-boundary line. Chat\-lane callers keep WrapUserInput.
 
 <a name="QueryFilters"></a>
 ## type QueryFilters

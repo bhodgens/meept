@@ -218,7 +218,7 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 11406,
+        "line": 11404,
         "payload_keys": []
       }
     ],
@@ -326,7 +326,7 @@
       },
       {
         "file": "internal/scheduler/jobs.go",
-        "line": 330,
+        "line": 339,
         "payload_keys": []
       },
       {
@@ -598,7 +598,7 @@
     "employee.metric": [
       {
         "file": "internal/daemon/components.go",
-        "line": 6925,
+        "line": 6923,
         "payload_keys": [
           "name",
           "tags",
@@ -1349,12 +1349,12 @@
     "scheduler.job.completed": [
       {
         "file": "internal/scheduler/jobs.go",
-        "line": 451,
+        "line": 460,
         "payload_keys": []
       },
       {
         "file": "internal/scheduler/scheduler.go",
-        "line": 736,
+        "line": 745,
         "payload_keys": [
           "duration",
           "name",
@@ -1365,7 +1365,7 @@
     "scheduler.job.started": [
       {
         "file": "internal/scheduler/scheduler.go",
-        "line": 703,
+        "line": 712,
         "payload_keys": [
           "name",
           "type"
@@ -1375,14 +1375,14 @@
     "scheduler.reminder": [
       {
         "file": "internal/scheduler/jobs.go",
-        "line": 532,
+        "line": 541,
         "payload_keys": []
       }
     ],
     "scheduler.security.completed": [
       {
         "file": "internal/scheduler/jobs.go",
-        "line": 710,
+        "line": 719,
         "payload_keys": [
           "issue_count",
           "issues",
@@ -1829,7 +1829,7 @@
     "status.response": [
       {
         "file": "internal/daemon/components.go",
-        "line": 10540,
+        "line": 10538,
         "payload_keys": []
       }
     ],
@@ -2390,13 +2390,13 @@
     "team.start": [
       {
         "file": "internal/daemon/components.go",
-        "line": 9029,
+        "line": 9027,
         "payload_keys": [],
         "via_const": true
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 9066,
+        "line": 9064,
         "payload_keys": [],
         "via_const": true
       }
@@ -3694,7 +3694,7 @@
     "status.request": [
       {
         "file": "internal/daemon/components.go",
-        "line": 10466,
+        "line": 10464,
         "subscriber_id": "status-handler"
       }
     ],
@@ -4001,7 +4001,7 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 10633,
+        "line": 10631,
         "subscriber_id": "agent-job-processor-evidence"
       }
     ],

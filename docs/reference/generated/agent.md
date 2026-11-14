@@ -127,6 +127,7 @@ Package agent provides the agent loop and related components.
 - [func StripClaimsEvidenceOrProse\(raw string\) string](<#StripClaimsEvidenceOrProse>)
 - [func StripPromptScaffolding\(desc string\) string](<#StripPromptScaffolding>)
 - [func StripReport\(response string\) string](<#StripReport>)
+- [func StripVoiceContextStamp\(prompt string\) string](<#StripVoiceContextStamp>)
 - [func TeamMessageTopic\(sessionID string\) string](<#TeamMessageTopic>)
 - [func TeamResultTopic\(sessionID string\) string](<#TeamResultTopic>)
 - [func TeamStatusTopic\(sessionID string\) string](<#TeamStatusTopic>)
@@ -146,6 +147,7 @@ Package agent provides the agent loop and related components.
 - [func WithThrottleDispatch\(ctx context.Context, d \*throttleTurnContext\) context.Context](<#WithThrottleDispatch>)
 - [func WithThrottleParkAttempt\(ctx context.Context, attempt int\) context.Context](<#WithThrottleParkAttempt>)
 - [func WithTraceContext\(ctx context.Context, traceID string\) context.Context](<#WithTraceContext>)
+- [func WithVoiceClockStamp\(ctx context.Context, stamp string\) context.Context](<#WithVoiceClockStamp>)
 - [type ACPExecutor](<#ACPExecutor>)
   - [func NewACPExecutor\(m \*acp.Manager\) \*ACPExecutor](<#NewACPExecutor>)
   - [func \(e \*ACPExecutor\) Run\(ctx context.Context, spec \*AgentSpec, workdir string, promptText string, emit func\(updateText string\)\) \(string, error\)](<#ACPExecutor.Run>)
@@ -2675,6 +2677,8 @@ Consumers: prefilter vote\(\) cue guard, LLM\-chain post\-check \(leaf 02, optio
 	    "ledger_append": "ledger_write",
 	    "ledger_query":  "ledger_read",
 	
+	    "intake_save": "ledger_write",
+	
 	    "workflow":               "agent_delegate",
 	    "workflow_status":        "platform_read",
 	    "subagent_send_message":  "subagent_control",
@@ -3273,6 +3277,15 @@ so when the Your Task marker is present everything after it is the real text. Wh
 
 StripReport removes the report JSON block and claims/evidence blocks from the response. This returns the response without structured metadata for user display.
 
+<a name="StripVoiceContextStamp"></a>
+## func StripVoiceContextStamp
+
+	func StripVoiceContextStamp(prompt string) string
+
+stripVoiceContextStamp removes the daemon voice lane's clock\-stamp prefix \("\[Context: current date/time is ...\] ", injected at the loopTurnRunner seam in internal/daemon/voice\_employee.go\) from a turn's prompt text. The stamp is MODEL\-FACING scaffolding only — the LLM request message must carry it \(that is the feature\), but every DERIVED field built from the prompt \(turnUserPrompt, the learning capture's intent, the reflection trajectory's UserInput\) must receive the RAW spoken prompt: deliverableFileEffectRe is ^\-anchored, so a stamped prompt never matched the file\-deliverable shape and fabricated file claims on voice turns took the labelled branch instead of the honest failure \(C\-3, 2026\-11\-11 bughunt\). The exact prefix shape is duplicated here DELIBERATELY: the two packages cannot share a constant without an import cycle \(internal/daemon imports internal/agent\), and the pin test in each package keeps them in lockstep. A prompt that merely CONTAINS a bracketed line mid\-text is untouched — only the leading prefix strips.
+
+StripVoiceContextStamp is the exported pin seam for the daemon package's lockstep test \(the daemon cannot import agent's test files\); the unexported wrapper below is what the loop itself calls.
+
 <a name="TeamMessageTopic"></a>
 ## func TeamMessageTopic
 
@@ -3409,6 +3422,13 @@ WithThrottleParkAttempt returns a ctx carrying the previous park generation's at
 	func WithTraceContext(ctx context.Context, traceID string) context.Context
 
 WithTraceContext attaches the turn's trace ID to the turn's context \-\- the request\-scoped channel from the handler's mint seam into the agent loop and the tool\-executor hand\-off. An empty traceID returns ctx unchanged \(no scope = the pre\-leaf posture; never a sentinel value\). This mirrors the llm.WithTraceID ChatOption contract: per\-request state on the context, never a field on the shared loop.
+
+<a name="WithVoiceClockStamp"></a>
+## func WithVoiceClockStamp
+
+	func WithVoiceClockStamp(ctx context.Context, stamp string) context.Context
+
+WithVoiceClockStamp marks a turn whose prompt carries the daemon's voice clock stamp as a LEADING prefix. stamp must be the exact rendered stamp \("\[Context: current date/time is \<Mon 2006\-01\-02 15:04 \(UTC\-07:00\)\>\] "\). The loop validates the shape \(security.IsVoiceContextStampShape\) before trusting it outside the boundary.
 
 <a name="ACPExecutor"></a>
 ## type ACPExecutor
