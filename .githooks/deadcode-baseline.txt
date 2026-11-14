@@ -72,7 +72,6 @@ internal/agent/loop.go unreachable func: WithWorkerID
 internal/agent/loop.go unreachable func: WithWorkingDir
 internal/agent/loop_refusal.go unreachable func: AgentLoop.clearRefusalFallbackServed
 internal/agent/loop_refusal.go unreachable func: AgentLoop.refusalHopsExhausted
-internal/agent/park_backend.go unreachable func: newSqliteParkBackend
 internal/agent/park_backend.go unreachable func: sqliteParkBackend.Arm
 internal/agent/park_backend.go unreachable func: sqliteParkBackend.Delete
 internal/agent/park_backend.go unreachable func: sqliteParkBackend.LoadOwned
@@ -360,6 +359,7 @@ internal/migrate/migrate.go unreachable func: Applied
 internal/plan/treeemit.go unreachable func: sectionPresent
 internal/project/init_deep.go unreachable func: LoadAgentsForContext
 internal/queue/queue.go unreachable func: WaitForJob
+internal/queue/transitions.go unreachable func: queueAllows
 internal/repomap/cache.go unreachable func: DefaultCacheConfig
 internal/repomap/cache.go unreachable func: ValidateCacheConfig
 internal/repomap/extractor.go unreachable func: FilterTagsByKind

@@ -1,0 +1,502 @@
+// Package kanbansvc holds the sidecar gateway for the kanban board: a thin
+// REST/WS front that forwards every read and mutation to the daemon's
+// kanban.* RPC over the CLI's transport client. The gateway holds NO logic and
+// NO database handle (master.md C7) — it is the only process the browser ever
+// talks to, so the daemon stays loopback/socket-bound.
+//
+// Grant model (C5): reads need board.read, mutations board.mutate, takeover
+// additionally board.takeover. Browsers cannot set headers on a WebSocket, so
+// the WS handshake carries the bearer token in Sec-WebSocket-Protocol as
+// "bearer.<token>" — the same convention internal/comm/web/websocket.go uses.
+package kanbansvc
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/url"
+	"strings"
+	"sync"
+	"time"
+
+	"golang.org/x/net/websocket"
+)
+
+// C5 grants. The strings are the contract — keep them byte-identical to
+// internal/kanban/authz.go.
+const (
+	GrantRead     = "board.read"
+	GrantMutate   = "board.mutate"
+	GrantTakeover = "board.takeover"
+)
+
+// ErrNoStaticBundle distinguishes "the web bundle is not installed" from a
+// real serving failure so the placeholder path and logs stay honest.
+var ErrNoStaticBundle = errors.New("kanban web bundle not installed")
+
+// RPCCaller is the seam to the daemon RPC. transport.Client satisfies it; the
+// tests substitute a fake so the gateway can be exercised with no daemon.
+type RPCCaller interface {
+	Call(method string, params any) (json.RawMessage, error)
+	Connect() error
+	Close() error
+}
+
+// EventSource supplies board deltas for the /api/v1/events relay. The daemon
+// side (WSBoard class, C8) lands in 05-surfaces/06; until then main.go wires
+// a source that emits nothing.
+type EventSource interface {
+	Subscribe(ctx context.Context) (<-chan json.RawMessage, error)
+}
+
+// GrantChecker maps a bearer token to its grant set. Pairing (04/03) will
+// provide the production implementation; the gateway only ever asks this.
+type GrantChecker interface {
+	Grants(token string) ([]string, bool)
+}
+
+// route describes one REST endpoint and the RPC method it forwards to.
+type route struct {
+	verb  string
+	rpc   string
+	grant string
+	// body marks endpoints whose params come from the JSON request body
+	// (mutations) versus the query string (reads).
+	body bool
+}
+
+// restRoutes is the 1:1 REST-to-C4 map. Keys are paths; the verb is checked
+// separately so a wrong verb returns 405 rather than 404.
+var restRoutes = map[string]route{
+	"/api/v1/board/list":     {verb: http.MethodGet, rpc: "kanban.board.list", grant: GrantRead},
+	"/api/v1/board/create":   {verb: http.MethodPost, rpc: "kanban.board.create", grant: GrantMutate, body: true},
+	"/api/v1/column/list":    {verb: http.MethodGet, rpc: "kanban.column.list", grant: GrantRead},
+	"/api/v1/column/set_wip": {verb: http.MethodPost, rpc: "kanban.column.set_wip", grant: GrantMutate, body: true},
+	"/api/v1/card/list":      {verb: http.MethodGet, rpc: "kanban.card.list", grant: GrantRead},
+	"/api/v1/card/get":       {verb: http.MethodGet, rpc: "kanban.card.get", grant: GrantRead},
+	"/api/v1/card/create":    {verb: http.MethodPost, rpc: "kanban.card.create", grant: GrantMutate, body: true},
+	"/api/v1/card/move":      {verb: http.MethodPost, rpc: "kanban.card.move", grant: GrantMutate, body: true},
+	"/api/v1/card/takeover":  {verb: http.MethodPost, rpc: "kanban.card.takeover", grant: GrantTakeover, body: true},
+	"/api/v1/card/assign":    {verb: http.MethodPost, rpc: "kanban.card.assign", grant: GrantMutate, body: true},
+	"/api/v1/card/comment":   {verb: http.MethodPost, rpc: "kanban.card.comment", grant: GrantMutate, body: true},
+	"/api/v1/card/timeline":  {verb: http.MethodGet, rpc: "kanban.card.timeline", grant: GrantRead},
+	"/api/v1/reconcile/now":  {verb: http.MethodPost, rpc: "kanban.reconcile.now", grant: GrantMutate, body: true},
+}
+
+// Gateway serves the REST/WS surface. It is stateless apart from its
+// dependencies, so a single instance backs the whole listener.
+type Gateway struct {
+	rpc    RPCCaller
+	events EventSource
+	authz  GrantChecker
+
+	// static serves /web/ from the installed bundle, or is nil when no
+	// bundle exists. Built once in NewGateway so every request rides the
+	// canonical StripPrefix+FileServer pair rather than a hand-forged
+	// http.Request.
+	static http.Handler
+}
+
+// NewGateway wires the sidecar gateway. Every dependency is required: a nil
+// here is a boot-time misconfiguration, so it returns an error rather than
+// panicking or silently serving unauthenticated routes.
+func NewGateway(rpc RPCCaller, events EventSource, authz GrantChecker, staticDir string) (*Gateway, error) {
+	if rpc == nil {
+		return nil, errors.New("kanbansvc: rpc caller is required")
+	}
+	if events == nil {
+		return nil, errors.New("kanbansvc: event source is required")
+	}
+	if authz == nil {
+		return nil, errors.New("kanbansvc: grant checker is required")
+	}
+	g := &Gateway{rpc: rpc, events: events, authz: authz}
+	if staticDir != "" {
+		g.static = http.StripPrefix("/web", http.FileServer(http.Dir(staticDir)))
+	}
+	return g, nil
+}
+
+// ServeHTTP routes the three surfaces: REST (auth + RPC forward), the WS
+// event relay, and the static bundle.
+func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	switch {
+	case r.URL.Path == "/api/v1/events":
+		g.handleEvents(w, r)
+	case r.URL.Path == "/web":
+		http.Redirect(w, r, "/web/", http.StatusMovedPermanently)
+	case strings.HasPrefix(r.URL.Path, "/web/"):
+		g.serveStatic(w, r)
+	case r.URL.Path == "/":
+		g.serveIndex(w, r)
+	case strings.HasPrefix(r.URL.Path, "/api/v1/"):
+		g.serveAPI(w, r)
+	default:
+		writeJSONError(w, http.StatusNotFound, "not found")
+	}
+}
+
+// serveAPI enforces the grant, builds params, forwards one RPC call, and
+// passes the reply or the upstream error through.
+func (g *Gateway) serveAPI(w http.ResponseWriter, r *http.Request) {
+	spec, ok := restRoutes[r.URL.Path]
+	if !ok {
+		writeJSONError(w, http.StatusNotFound, "unknown api path")
+		return
+	}
+	if r.Method != spec.verb {
+		w.Header().Set("Allow", spec.verb)
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !g.authorize(w, r, spec.grant) {
+		return
+	}
+
+	params, err := g.buildParams(r, spec.body)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	resp, err := g.rpc.Call(spec.rpc, params)
+	if err != nil {
+		g.writeRPCError(w, spec.rpc, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if _, err := w.Write(resp); err != nil {
+		slog.Warn("kanban gateway: reply write failed", "rpc", spec.rpc, "error", err)
+	}
+}
+
+// buildParams turns the request into RPC params: query values for reads (a
+// single-valued map), the decoded JSON body for mutations.
+func (g *Gateway) buildParams(r *http.Request, fromBody bool) (any, error) {
+	if !fromBody {
+		q := r.URL.Query()
+		params := make(map[string]string, len(q))
+		for k, v := range q {
+			if len(v) > 0 {
+				params[k] = v[0]
+			}
+		}
+		return params, nil
+	}
+	var params any
+	if err := json.NewDecoder(r.Body).Decode(&params); err != nil && !errors.Is(err, io.EOF) {
+		// An empty body is a legal mutation call (e.g. reconcile/now) and
+		// forwards as nil params; anything else is a client error.
+		return nil, fmt.Errorf("decode request body: %w", err)
+	}
+	return params, nil
+}
+
+// authorize answers 401 for missing OR unknown tokens (bad credentials) and
+// 403 for a known token that lacks the grant. The distinction matters to
+// operators: 403 means "pair this sidecar and grant the lane", 401 means
+// "the token you presented was never issued". The grant requirement is never
+// relaxed for convenience.
+func (g *Gateway) authorize(w http.ResponseWriter, r *http.Request, grant string) bool {
+	token := bearerToken(r)
+	if token == "" {
+		writeJSONError(w, http.StatusUnauthorized, "missing bearer token")
+		return false
+	}
+	grants, known := g.authz.Grants(token)
+	if !known {
+		writeJSONError(w, http.StatusUnauthorized, "unknown bearer token")
+		return false
+	}
+	if !hasGrantName(grants, grant) {
+		writeJSONError(w, http.StatusForbidden, "missing grant "+grant)
+		return false
+	}
+	return true
+}
+
+func hasGrantName(grants []string, grant string) bool {
+	for _, candidate := range grants {
+		if candidate == grant {
+			return true
+		}
+	}
+	return false
+}
+
+// bearerToken reads the token from the Authorization header, then falls back
+// to the subprotocol lane browsers are forced to use.
+func bearerToken(r *http.Request) string {
+	header := r.Header.Get("Authorization")
+	if rest, ok := strings.CutPrefix(header, "Bearer "); ok {
+		return strings.TrimSpace(rest)
+	}
+	return wsBearer(r)
+}
+
+// wsBearer extracts "bearer.<token>" from Sec-WebSocket-Protocol (RFC 6455
+// §4.2.2 lane, same convention as the daemon's own hub).
+func wsBearer(r *http.Request) string {
+	for _, proto := range strings.Split(r.Header.Get("Sec-WebSocket-Protocol"), ",") {
+		if rest, ok := strings.CutPrefix(strings.TrimSpace(proto), "bearer."); ok {
+			return rest
+		}
+	}
+	return ""
+}
+
+// pickSubprotocol returns the offered protocol the server must echo back. A
+// browser that offered "bearer.<token>" and got NO Sec-WebSocket-Protocol
+// response header aborts the upgrade, so the gateway echoes the bearer lane
+// verbatim, exactly as the daemon hub does (websocket.go:243-261).
+func pickSubprotocol(r *http.Request) string {
+	offered := r.Header.Get("Sec-WebSocket-Protocol")
+	if offered == "" {
+		return ""
+	}
+	picked := ""
+	for _, proto := range strings.Split(offered, ",") {
+		proto = strings.TrimSpace(proto)
+		if strings.HasPrefix(proto, "bearer.") {
+			return proto
+		}
+		if picked == "" {
+			picked = proto
+		}
+	}
+	return picked
+}
+
+// writeJSONError is the single JSON error writer. Hand-assembled error bodies
+// break on any value that needs escaping (a grant name, upstream message) and
+// ship invalid JSON, so every error path goes through here instead.
+func writeJSONError(w http.ResponseWriter, status int, message string) {
+	body, err := json.Marshal(map[string]string{"error": message})
+	if err != nil {
+		// Only a non-UTF-8 message can do this, and Go strings are
+		// UTF-8-clean by contract, so fall back to a fixed body.
+		body = []byte(`{"error":"error encoding failed"}`)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if _, writeErr := w.Write(body); writeErr != nil {
+		slog.Warn("kanban gateway: error reply write failed", "status", status, "error", writeErr)
+	}
+}
+
+// writeRPCError maps an upstream RPC failure onto an HTTP status. A method or
+// record the daemon does not know is a client-visible 404; anything else means
+// the upstream is the thing that failed (502).
+func (g *Gateway) writeRPCError(w http.ResponseWriter, rpc string, err error) {
+	status := http.StatusBadGateway
+	msg := err.Error()
+	lower := strings.ToLower(msg)
+	if strings.Contains(lower, "unknown method") || strings.Contains(lower, "not found") || strings.Contains(lower, "no handler") {
+		status = http.StatusNotFound
+	}
+	body, marshalErr := json.Marshal(map[string]string{"rpc": rpc, "error": msg})
+	if marshalErr != nil {
+		body = []byte(`{"error":"error encoding upstream failure"}`)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if _, writeErr := w.Write(body); writeErr != nil {
+		slog.Warn("kanban gateway: error reply write failed", "rpc", rpc, "error", writeErr)
+	}
+}
+
+// handleEvents serves the WS relay. Auth happens in the Handshake so a bad
+// token never completes an upgrade.
+func (g *Gateway) handleEvents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	srv := &websocket.Server{
+		Handshake: func(cfg *websocket.Config, req *http.Request) error {
+			if err := checkWSOrigin(req); err != nil {
+				return err
+			}
+			token := bearerToken(req)
+			if token == "" {
+				return errors.New("missing bearer token")
+			}
+			grants, known := g.authz.Grants(token)
+			if !known {
+				return errors.New("unknown bearer token")
+			}
+			if !hasGrantName(grants, GrantRead) {
+				return fmt.Errorf("missing grant %s", GrantRead)
+			}
+			// Echo the offered subprotocol or the browser aborts the
+			// upgrade after the server accepts it.
+			if picked := pickSubprotocol(req); picked != "" {
+				cfg.Protocol = []string{picked}
+			}
+			return nil
+		},
+		Handler: g.relayEvents,
+	}
+	srv.ServeHTTP(w, r)
+}
+
+// checkWSOrigin mirrors the daemon hub's allow-list: same-origin only, with a
+// missing Origin (non-browser client) allowed because the bearer token still
+// gates the connection.
+func checkWSOrigin(req *http.Request) error {
+	origin := req.Header.Get("Origin")
+	if origin == "" {
+		return nil
+	}
+	host := strings.ToLower(origin)
+	if u, err := url.Parse(origin); err == nil && u.Hostname() != "" {
+		host = strings.ToLower(u.Hostname())
+	}
+	switch host {
+	case "localhost", "127.0.0.1", "::1":
+		return nil
+	default:
+		return fmt.Errorf("origin not allowed: %s", origin)
+	}
+}
+
+// relayEvents pumps EventSource messages to one WS client. A discarded reader
+// goroutine notices the client's close and ends the relay, so no subscription
+// outlives its connection.
+func (g *Gateway) relayEvents(conn *websocket.Conn) {
+	defer conn.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Drain inbound frames so the peer's close is observed (a WS server that
+	// only writes never sees it).
+	go func() {
+		for {
+			var discard json.RawMessage
+			if err := websocket.Message.Receive(conn, &discard); err != nil {
+				cancel()
+				return
+			}
+		}
+	}()
+
+	stream, err := g.events.Subscribe(ctx)
+	if err != nil {
+		slog.Warn("kanban gateway: event subscription failed", "error", err)
+		return
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg, ok := <-stream:
+			if !ok {
+				return
+			}
+			if err := websocket.Message.Send(conn, string(msg)); err != nil {
+				return
+			}
+		}
+	}
+}
+
+// serveStatic serves the Flutter bundle under /web/. The handler is built
+// once in NewGateway, so path cleanup and traversal rejection stay in
+// http.FileServer, which owns that contract.
+func (g *Gateway) serveStatic(w http.ResponseWriter, r *http.Request) {
+	if g.static == nil {
+		writeJSONError(w, http.StatusServiceUnavailable, ErrNoStaticBundle.Error())
+		return
+	}
+	g.static.ServeHTTP(w, r)
+}
+
+// serveIndex tells the truth about the bundle instead of a 404 stack.
+func (g *Gateway) serveIndex(w http.ResponseWriter, r *http.Request) {
+	if g.static == nil {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		fmt.Fprintln(w, "meept-kanban sidecar is running; the web bundle is not installed (build it with `make build-gui` and point WEBDIR at it).")
+		return
+	}
+	http.Redirect(w, r, "/web/", http.StatusFound)
+}
+
+// StaticGrantStore is the token→grant map the gateway consults. Pairing
+// (04/03) will populate it at runtime; NewStaticGrantStore starts empty so an
+// unpaired sidecar authorizes nothing. Safe for concurrent read/write.
+type StaticGrantStore struct {
+	mu     sync.RWMutex
+	grants map[string][]string
+}
+
+// NewStaticGrantStore returns an empty store: no token is known, so no request
+// is authorized.
+func NewStaticGrantStore() *StaticGrantStore {
+	return &StaticGrantStore{grants: make(map[string][]string)}
+}
+
+// Grant associates a token with a grant set, replacing any previous set.
+func (s *StaticGrantStore) Grant(token string, grants ...string) {
+	if s == nil || token == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.grants == nil {
+		s.grants = make(map[string][]string)
+	}
+	s.grants[token] = append([]string(nil), grants...)
+}
+
+// Revoke drops a token's grants entirely.
+func (s *StaticGrantStore) Revoke(token string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.grants, token)
+}
+
+// Grants implements GrantChecker. The bool reports whether the token is known
+// at all; an unknown token never carries grants.
+func (s *StaticGrantStore) Grants(token string) ([]string, bool) {
+	if s == nil || token == "" {
+		return nil, false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	grants, ok := s.grants[token]
+	if !ok {
+		return nil, false
+	}
+	return append([]string(nil), grants...), true
+}
+
+// IdleSource is the stand-in EventSource until the daemon board-event feed
+// lands. Subscribe returns a channel that closes when ctx ends and never
+// yields a board delta.
+type IdleSource struct{}
+
+// Subscribe implements EventSource.
+func (IdleSource) Subscribe(ctx context.Context) (<-chan json.RawMessage, error) {
+	out := make(chan json.RawMessage)
+	go func() {
+		<-ctx.Done()
+		close(out)
+	}()
+	return out, nil
+}
+
+// StaticDir reports whether a web bundle is wired (the root itself stays
+// private so no caller can repoint the handler). Used by boot logs and tests.
+func (g *Gateway) HasStaticBundle() bool { return g.static != nil }
+
+// ReadIdleTimeout is exported so the sidecar main can align listener tuning
+// with the relay's expectations; the gateway itself keeps no timers.
+const ReadIdleTimeout = 60 * time.Second

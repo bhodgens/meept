@@ -679,6 +679,15 @@
     ],
     "internal/daemon/voice_local_rpc.go": [
       "voice-local"
+    ],
+    "internal/kanban/": [
+      "kanban-board"
+    ],
+    "internal/kanbansvc/": [
+      "kanban-board"
+    ],
+    "cmd/meept-kanban/": [
+      "kanban-board"
     ]
   },
   "suites": [
@@ -1345,6 +1354,15 @@
         "employee-markdown-04 agents update companion <companion_updated.md> adopts the updated file's body as the new prompt, read back over agents.get"
       ],
       "note": "RED gate for the employee-markdown tree: an EMPLOYEE.md definition (frontmatter -> employee definition, body -> prompt) flowing through agents validate/create/update to a persisted employee, asserted over the live harness daemon (CLI + agents.get RPC). Fails RED today for the missing-implementation reason - the employeemd parser and the CLI .md dispatch do not exist (readDefinitionFile JSON5-parses the file, so a .md path is rejected); no rigging or assertion bug makes these fail. Goes GREEN when the .md parse + dispatch land."
+    },
+    {
+      "name": "kanban-board",
+      "dir": "e2e/suites/kanban-board",
+      "status": "implemented",
+      "scenarios": [
+        "kanban-board-01",
+        "kanban-board-02"
+      ]
     }
   ],
   "scenarios": [
@@ -4991,6 +5009,26 @@
       "paths": [
         "internal/employee/manager.go",
         "internal/daemon/gate_park_wiring.go"
+      ]
+    },
+    {
+      "id": "kanban-board-01",
+      "suite": "kanban-board",
+      "diff": "S",
+      "title": "real meept-kanban binary: index 200, API routes 401 without token, unknown api path 404, wrong verb 405, SIGTERM exits 0",
+      "paths": [
+        "cmd/meept-kanban/main.go",
+        "internal/kanbansvc/gateway.go"
+      ]
+    },
+    {
+      "id": "kanban-board-02",
+      "suite": "kanban-board",
+      "diff": "S",
+      "title": "C7 bind guard at process boundary: non-loopback -bind without -allow-lan refuses to start, nothing listens",
+      "paths": [
+        "cmd/meept-kanban/main.go",
+        "internal/kanbansvc/gateway.go"
       ]
     }
   ]
