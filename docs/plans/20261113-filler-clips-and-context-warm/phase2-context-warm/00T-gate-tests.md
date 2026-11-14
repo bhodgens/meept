@@ -25,22 +25,33 @@ verbatim into the headers.
 ## Tasks
 
 1. `internal/llm/warm_test.go` — against a fake OpenAI-compatible
-   upstream (httptest, the pattern codex_sse_test.go uses): payload has
-   `max_tokens:1`, non-streaming, session-affinity header equals the real
-   turn's scope value; returned text never surfaces (no callback, no
-   error propagation — assert quiet); quota-blocked fake upstream ⇒ Warm
-   logs DEBUG and returns without retry storms; `golangci` clean.
+   upstream (httptest, the pattern codex_sse_test.go uses):
+   - payload has `max_tokens:1`, `stream` absent/false, the affinity header
+     value equals the real turn's scope, and the SAME `tools` block the turn
+     sends (prefix identity);
+   - returned text never surfaces (no callback, no error propagation —
+     assert quiet);
+   - **cache isolation**: Warm then Chat with identical messages ⇒ the fake
+     upstream receives TWO requests (the turn must not be served from
+     `tokenCache`), and no exact-key or semantic entry exists for the warm's
+     messages afterwards;
+   - **no retry**: an upstream that returns empty text observes exactly ONE
+     request per Warm call;
+   - quota-blocked fake upstream ⇒ Warm logs DEBUG and returns; the real turn
+     that follows is not delayed, parked, or short-circuited;
+   - non-reuse endpoint predicate ⇒ Warm sends nothing.
 2. Config test: `voice.context_warm` default false; disabled ⇒ the routing
    seam calls Warm zero times (assert via injected counter seam).
 3. Debounce unit tests (routing file's package, white-box with the fake
    seam): (a) 4 partials inside one `turn_confirm_ms` window ⇒ at most 2
-   warms with the LATEST text; (b) `last:true` cancels pending; (c) prompt
-   under `context_warm_min_tokens` ⇒ no warm; (d) call `end` ⇒ pending
-   cancelled.
-4. `e2e/suites/context_warm/` + `e2e/manifest.json` entry (path_map for
-   `internal/llm`, `internal/voice`): hermetic fake-upstream scenario
-   proving request order warm(…,partial) → turn(final) shares a prefix and
-   the flag-off baseline sees ONE request only.
+   warms with the LATEST text; (b) `last:true` stops further warms and leaves
+   an in-flight warm running; (c) prompt under `context_warm_min_tokens` ⇒ no
+   warm; (d) call `end` ⇒ pending dropped, per-call state cleared.
+4. `e2e/suites/context-warm/` (HYPHEN, matching existing suite names) +
+   `e2e/manifest.json` entry (path_map for `internal/llm`, `internal/daemon`):
+   hermetic fake-upstream scenario proving request order warm(…,partial) →
+   turn(final) shares a prefix, that the turn is NOT served from cache, and
+   that the flag-off baseline sees ONE request only.
 
 ## Interface Contract (exposes to siblings)
 

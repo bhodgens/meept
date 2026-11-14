@@ -33,21 +33,30 @@ daemon planner and child renderer is pinned HERE, not in either impl leaf).
 2. `internal/voiceframe/clip_frames_test.go` — encode/decode of the three
    C3 frame shapes incl. omitempty back-compat (a frame without
    clip_id/clip fields round-trips to today's exact JSON).
-3. `e2e/suites/voice_clips/` (new suite dir, `e2e` build tag) +
-   `e2e/manifest.json` entry + path_map additions, per
-   `docs/workflows/e2e-testing.md` and the pre-commit [18/18] rule. Hermetic
-   scenarios via the standard harness (throwaway MEEPT_HOME, local leg or
-   fake child per harness capabilities):
-   - sidecar disabled ⇒ `$MEEPT_HOME/voice_clips` never created (R4).
+3. `e2e/suites/voice-clips/` (new suite dir - HYPHEN, matching the existing
+   `voice-lifecycle` / `voice-bargein` / `voice-local` names, `e2e` build
+   tag) + `e2e/manifest.json` entry + `path_map` additions, per
+   `docs/workflows/e2e-testing.md` and the pre-commit [18/18] rule. Author
+   the manifest entry HERE, in wave 0: leaf 01 adds the new
+   `internal/voice/clipstore` package and the check requires the mapping to
+   already exist. Hermetic scenarios via the standard harness (throwaway
+   MEEPT_HOME at a SHORT path, local leg or fake child per harness
+   capabilities):
+   - sidecar disabled ⇒ `<MEEPT_HOME>/voice_clips` never created (R4).
    - configured pools ⇒ after a call, clip files exist for every pool line
      and no others.
+   - render ordering ⇒ `clip_render` for a ccid is observed AFTER that ccid's
+     keys line.
+   - stored PCM is L16@16000 and byte-equal to the live-lane bytes for the
+     same text.
    - voice identity change (edit tts_voice in config, reload) ⇒ new keys
      appear, turn still works.
    - filler fires cached: fake/slow TTS server that WOULD take 2 s — assert
      filler lands under 300 ms after grace expiry (proves PCM came from
      store, not synth).
    - farewell: caller says "bye" ⇒ goodbye audio (played edge) precedes the
-     end frame; effects/slot release still exactly-once.
+     end frame; effects/slot release still exactly-once; a carrier-hangup
+     path speaks no farewell.
 4. Unit-test stubs in `internal/voice/lanes_test.go` for the C5 precedence
    table (row list > row scalar > global list > global scalar > default)
    and single-line-pool legacy equivalence.

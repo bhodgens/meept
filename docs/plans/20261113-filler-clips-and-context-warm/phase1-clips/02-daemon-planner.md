@@ -19,10 +19,17 @@ Daemon side (`internal/daemon`): compute the clip render set per employee.
 
 ## Scope
 
-Daemon side (`internal/daemon`): compute the clip render set per employee
-voice config, diff against the store, and ship `clip_render` C1 frames to
-the voice child — background, non-blocking, ONLY when the sidecar is
-actually running.
+Daemon side (`internal/daemon`): compute the clip render set for THIS call's
+resolved TTS identity (the same identity the keys frame just carried), diff
+against the store, and ship `clip_render` C1 frames to the voice child —
+background, non-blocking, ONLY when the sidecar is actually running for that
+call.
+
+The trigger is the per-call `setup` frame, immediately after `sendKeysFrame`
+(`internal/daemon/voice_keys.go`, the `routeFrame` EventSetup branch), NOT
+daemon start and NOT child spawn. Before the keys frame the child has no TTS
+config or key (its provider is constructed from that frame), so a render
+frame sent earlier can only fail.
 
 ## Tasks
 
@@ -31,39 +38,44 @@ actually running.
    // ClipPlanner diffs the resolved lane pool against the clip store and
    // emits C1 clip_render frames for misses. Construction is cheap and
    // inert: nothing reads or writes the store until Run.
-   type ClipPlanner struct { store *clipstore.Store; lanes func() []voice.LaneLine; ... }
+   type ClipPlanner struct { store *clipstore.Store; lanes func(employeeID string) []voice.LaneLine; ... }
    func NewClipPlanner(...) *ClipPlanner
    // Run renders the diff for the given resolved TTS identity (vendor/
-   // model/voice/refHash from the keys lane inputs — NOT the key VALUES,
-   // the identity strings; refHash comes from the configured clone
-   // reference file content, hashed once at load).
+   // model/voice from voice.ResolveProfile for this call's employee + leg;
+   // refHash is nil for every shipped vendor - see root C1).
    func (pl *ClipPlanner) Run(ctx context.Context, ccid string, id TTSIdentity, send func(voiceframe.Frame) error) error
    ```
-   Cap 32 clips per frame (Contract C3), shard the rest; per-call planner
-   run is fire-and-forget on the call's ctx.
-2. `internal/daemon/voice_wiring.go` — mount the planner at the child
-   spawn/setup site (near the existing keys-frame emit, ~voice_wiring.go:
-   1008 where FillerLines wires the talk loop):
-   - Gate (R4, pinned by test): planner runs ONLY when (a) the voice child
-     process is up for this call, AND (b) TTS vendor+model+voice all
-     resolved non-empty, AND (c) at least one voice employee is
-     configured. No sidecar ⇒ zero planner calls, zero store writes,
-     store dir never created.
-   - Config-reload hook: on voice config change, recompute lane pools for
-     live identities and schedule a planner pass (background goroutine,
-     ctx = daemon lifetime). Never block the reload path.
+   Cap 32 clips per frame (Contract C3), shard the rest; the run is
+   fire-and-forget on the call's ctx.
+2. `internal/daemon/voice_wiring.go` — mount the planner in the SAME
+   EventSetup branch that emits the keys frame, after `sendKeysFrame`
+   returns (that call site also has the employee id and the resolved
+   profile in hand; `voice_wiring.go:1008` is where `FillerLines` wires the
+   talk loop):
+   - Gate (R4, pinned by test): the planner runs ONLY when (a) the call has a
+     live voice child connection, AND (b) the resolved TTS vendor, model, and
+     voice are all non-empty. No sidecar / no keys frame ⇒ zero planner
+     calls, zero store writes, store dir never created.
+   - Config-reload hook: on a voice config change, recompute the lane pools
+     and schedule one planner pass per LIVE ccid (background goroutine,
+     ctx = daemon lifetime). Never block the reload path; a reload with no
+     live calls writes nothing.
 3. `internal/daemon/voice_keys.go` — extend the keys wire (additive, same
-   no-omitempty convention comments) so the planner and the child agree on
-   TTS identity strings without re-reading config: `tts_ref_hash` (hex
-   sha256 of the clone reference audio, empty hash for preset voices).
-   Old children ignore it (pin in test).
+   no-omitempty convention comments) so the child can compute the same clip
+   keys without reading config: `tts_ref_hash` (hex sha256 of the reference
+   audio). No vendor consumes a reference clip today, so the field carries
+   the empty digest `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+   Old children ignore the field (pin in test).
 
 ## Interface Contract (exposes to siblings)
 
 Consumes: `clipstore` (01), `voice.VoiceLanes` (05), `voiceframe` clip
-event shapes (03). Exposes: nothing used by other leaves except the
-behavioral guarantee "clip_render arrives at least once per call before
-the first filler can fire, for pool lines missing from the store".
+event shapes (03). Exposes: nothing used by other leaves. Behavioral
+guarantee: "a `clip_render` frame for this call's misses is sent after the
+keys frame for the same ccid, on a background goroutine". It is NOT a
+guarantee that the clips exist before the first filler: a filler that fires
+before a render completes simply takes the live-synth path (today's
+behavior), and the next one hits the store.
 
 ## Self-Verification Checklist
 
@@ -71,6 +83,8 @@ the first filler can fire, for pool lines missing from the store".
 - [ ] `go test -p 2 ./internal/daemon/... -count=1` green
 - [ ] R4 unit test: voice disabled / no child ⇒ planner never invoked,
       store dir untouched (assert os.Stat error).
+- [ ] Ordering test: the `clip_render` frame for a ccid is written AFTER
+      that ccid's keys line, never before and never with an empty call_id.
 - [ ] Reload test: change a lane line → exactly one clip_render frame
       containing only the new line's key.
 - [ ] Sharding test: 40-line pool ⇒ frames of 32+8.

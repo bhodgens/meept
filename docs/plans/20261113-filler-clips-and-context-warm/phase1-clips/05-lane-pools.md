@@ -20,22 +20,38 @@ Make filler-class text pools lane-aware and enumerable, per root Contract.
 ## Scope
 
 Make filler-class text pools lane-aware and enumerable, per root Contract
-C5. Today: `voice.filler` list, `voice.greeting` string,
-`voice.silence_prompt` string (schema.go:5601), `voice.fragment_clarify`
-string. Target: five lanes, each a finite list; every line the talk loop
-can speak belongs to exactly one enumerable lane set, so leaf 02 can
-pre-render all of them.
+C5. Today: `voice.filler` list (schema.go:5486), `voice.greeting` SINGLE
+STRING (schema.go:5485), `voice.silence_prompt` string (schema.go:5601),
+`voice.fragment_clarify` string. Target: five lanes, each an enumerable
+line set, so leaf 02 can pre-render all of them.
+
+Facts to respect (verified, do not re-derive):
+- Filler already round-robins over the whole list (`talkloop.go:549-553`
+  via `fillerIdx`); what is missing is enumeration and lane identity, not
+  multi-line support.
+- Filler and greeting are GLOBAL-only today: `voice_wiring.go:1008-1009`
+  passes `w.cfg.Filler` / `w.cfg.GreetingLine`, and `ResolveAcoustics`
+  (`internal/voice/profile.go:127-170`) carries no such fields. Per-employee
+  filler text pools are OUT of scope for this tree; state that in the report
+  rather than half-wiring it.
 
 ## Tasks
 
 1. `internal/config/schema.go` — add list fields per C5:
-   `SilencePromptLines []string`, `FragmentClarifyLines []string`,
-   `Farewell []string` (non-empty default: `["Goodbye!","Bye!","Talk soon."]`
-   in DefaultConfig next to the existing SilencePrompt default at
-   schema.go:5096). Keep existing scalars untouched for back-compat.
+   `GreetingLines []string`, `SilencePromptLines []string`,
+   `FragmentClarifyLines []string`, `FarewellLines []string`. Keep the
+   existing scalars untouched for back-compat.
+   - `FarewellLines` schema default MUST be EMPTY (nil). A non-empty default
+     would make every existing deployment start speaking a goodbye, which
+     violates the repository's pinned "zero-config = byte-identical legacy"
+     rule (internal/voice/AGENTS.md). Ship the three lines
+     (`["Goodbye!","Bye!","Talk soon."]`) in `config/meept.json5` instead,
+     so fresh installs get the feature and existing configs opt in.
+   - `GreetingLines` empty ⇒ fall back to today's rule (greeting scalar, then
+     the first filler line).
    Validation mirrors the existing per-employee tri-state rules (negative/
-   nil handling like schema.go:5746's pattern). Per-employee overrides:
-   add `farewell` + the two `_lines` keys to the `employee_leg` row struct
+   nil handling like schema.go:5746's pattern). Per-employee overrides: add
+   the `_lines` keys to the `employee_leg` row struct
    (schema.go ~5818-5839 region) with the same tri-state semantics.
 2. `config/meept.json5` — document + ship the new keys next to the
    existing filler block (config/meept.json5:1358-1381 area), same comment
@@ -72,6 +88,9 @@ talkloop wiring.
       scalar > default (write the table test; it is the C5 contract).
 - [ ] Empty-list default for the two `_lines` keys ⇒ scalar keeps binding
       (byte-identical existing behavior when new keys unset).
+- [ ] `FarewellLines` defaults EMPTY in `DefaultConfig`: a config built
+      without the template speaks no farewell (test asserts the lane is
+      empty), while `config/meept.json5` ships the three lines.
 - [ ] `gofmt -l` empty.
 
 ## Review Checklist (for the orchestrator)

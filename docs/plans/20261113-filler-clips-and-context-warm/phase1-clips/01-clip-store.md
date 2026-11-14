@@ -26,10 +26,18 @@ Contracts C1 + C2 (quote them verbatim into the code as doc comments).
 ## Tasks
 
 1. `internal/voice/clipstore/key.go` — `func ClipKey(text, vendor, model, voice string, refHash []byte) string`
-   implementing C1 EXACTLY: `hex(sha256("v1" + \x1f + text + \x1f + vendor +
-   \x1f + model + \x1f + voice + \x1f + hex(sha256(refHash))))`. Table test:
-   any component change flips the key; stable across calls; empty refHash
-   (non-clone voice) uses the hash of zero bytes.
+   implementing C1 EXACTLY:
+   `hex(sha256("v1" + \x1f + text + \x1f + vendor + \x1f + model + \x1f + voice + \x1f + hex(refHash)))`
+   where `refHash` is the ALREADY-COMPUTED `sha256.Sum256(refBytes)` digest
+   (32 raw bytes), NOT the reference bytes. When `len(refHash) == 0`, the
+   helper substitutes `sha256.Sum256(nil)`, whose hex is
+   `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
+   (the sha256 of the empty input). Do not hash `refHash` a second time.
+   No shipped TTS vendor consumes a reference clip today, so every
+   production call passes nil - keep the slot so a future clone vendor does
+   not change the key format. Table test: any component change flips the
+   key; stable across calls; nil and `sha256.Sum256(nil)` produce the SAME
+   key; a one-byte refHash change flips it.
 2. `internal/voice/clipstore/store.go` — `type Store struct{ dir string }`
    with `NewStore() *Store` (uses `config.MeeptPath("voice_clips")`,
    honored MEEPT_HOME per internal/config/home.go), and methods:
@@ -37,9 +45,11 @@ Contracts C1 + C2 (quote them verbatim into the code as doc comments).
    - `Get(key string) (io.ReadCloser, Meta, error)` — opens validated pcm;
      on length/parse mismatch deletes both files (treat as miss) and
      returns os.ErrNotExist.
-   - `Put(key string, meta Meta, pcm io.Reader) error` — write to
-     `<key>.pcm.tmp` via `os.CreateTemp(dir)`, sync, rename; then write
-     meta JSON. Create dir with 0700 ONLY on first Put (Has/Get never
+   - `Put(key string, meta Meta, pcm io.Reader) error` — REJECT
+     `meta.SampleRate != 16000` with an error (root C2: the store holds the
+     child lane's rate only; a non-16k clip is a bug, never a resample).
+     Write to `<key>.pcm.tmp` via `os.CreateTemp(dir)`, sync, rename; then
+     write meta JSON. Create dir with 0700 ONLY on first Put (Has/Get never
      create it — pins the R4 "no sidecar, no dir" test).
    - `ListKeys() ([]string, error)` — for the reload diff (leaf 02).
    - All file I/O outside any mutex; no global lock (mutexio analyzer).

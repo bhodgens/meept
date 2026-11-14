@@ -1,79 +1,116 @@
-# Leaf 02 — Partial → Warm Routing + Debounce
+# Leaf 02 - Partial → Warm Routing + Debounce
 
 > **DISPATCH INSTRUCTION:** Implement this leaf end-to-end with TDD in the
-> isolation worktree (path in your dispatch context). Do NOT commit. Do NOT commit. Do NOT run `git commit`
+> isolation worktree (path in your dispatch context). Do NOT run `git commit`
 > or `git add`. Make the 00T gate tests green without editing them.
 
 ## Meta
 
 - **Parent:** orchestrator.md (phase2-context-warm)
-- **Depends on:** 00T TESTS_VALIDATED (codes against C4 signature; runtime
-  needs 01 merged for the full suite GREEN — orchestrator sequences the
-  final test run after both leaves REVIEWED)
+- **Depends on:** 00T TESTS_VALIDATED (codes against the C4 signature; the
+  runtime path needs 01 merged for the suite to go green - the orchestrator
+  sequences the final run after both leaves are REVIEWED)
 - **Estimated context:** ~60K
 - **Parallel group:** Wave A (with 01; file-disjoint)
 - **Requirements:** R7, C6
 
 ## Goal
 
-Route live voice partials into `Client.Warm` with debounce, gated by.
+Route live voice partials into `Client.Warm` with debounce, gated by
+`voice.context_warm` (default false) and by the endpoint-support predicate
+from leaf 01.
 
 ## Scope
 
-Route live voice partials into `Client.Warm` with debounce, gated by
-`voice.context_warm` (default false).
+New file `internal/daemon/voice_warm.go` holding the whole router, plus ONE
+hook line in `VoiceWiring.routeFrame`. Config keys in `internal/config/schema.go`
+and `config/meept.json5`.
+
+## Collision warning (read first)
+
+`VoiceWiring.routeFrame` (`internal/daemon/voice_wiring.go`) is also edited by
+Phase 1 leaf 02. Confirm Phase 1 leaf 02 is committed before you touch that
+file. Keep everything else in your new file so the diff to `voice_wiring.go`
+is one call plus the cancel-on-end lookup.
+
+## Ingress facts (verified - do not re-derive)
+
+- Only `last:true` prompt frames are acted on today:
+  `voice_wiring.go:1154` (dispatch) and `:1192` (binding). A `last:false`
+  partial falls through to the preview path, so your hook goes BEFORE the
+  `last:true` branches and returns without touching them.
+- The partial's text is raw STT text. The real turn's messages are rendered
+  by the agent/employee turn builder, not by the voice path. You must obtain
+  them from that builder (the same seam the turn uses), not assemble them
+  yourself.
 
 ## Tasks
 
 1. Config: add `ContextWarm bool` + `ContextWarmMinTokens int` (default 60)
-   to the voice block in `internal/config/schema.go` next to
-   `TurnConfirmMs` (schema.go:5500) with tri-state per-employee override
-   only if the existing employee_leg pattern makes it cheap — otherwise
-   global-only and SAY SO in the report. Template keys + comments in
-   `config/meept.json5` (voice block ~1358).
-2. Ingress: the daemon's C1 prompt router handles `last:false` frames
-   today (internal/voice/AGENTS.md: partials aggregate; voice_wiring.go /
-   routeFrame path). Add a hook at the point where a partial's text is
-   known to belong to a LIVE voice session:
-   - resolve the employee's session + alias + rendered prefix EXACTLY as
-     the imminent real turn will render it (reuse the turn-builder's
-     message assembly; a divergence here silently kills the cache hit —
-     add a test asserting warm-prefix == turn-prefix for the same state).
-   - token floor: skip when est. tokens < ContextWarmMinTokens (rough
-     len/4 estimate is fine; the estimator already exists in
-     internal/llm token cache — use it if exported cheaply).
-3. Debounce state machine (per call session, map guarded): pending timer =
-   window `voice.turn_confirm_ms` (0/legacy mode: fixed 900 default); a
-   newer partial replaces pending text (latest wins, at most 1 in-flight
-   warm — 01's semaphore gives replace-discard for free); `last:true` or
-   call `end` cancels pending + abandons in-flight (ctx cancel).
-4. Session affinity identity: pass the SAME scope value the real turn uses
-   (session_id plumbing) so llama.cpp keys both requests to one cache
-   slot (sticky rotation rules in internal/llm/AGENTS.md still apply —
-   warm must not create a NEW affinity scope).
-5. Telemetry: `llm_calls` must show zero warm rows; add a counter
-   `voice_context_warm_total{result}` dimension-free or reuse metrics
-   pattern — keep it DEBUG-grade cheap.
+   to the voice block next to `TurnConfirmMs` (`schema.go:5500`), plus
+   template keys and comments in `config/meept.json5` (voice block near
+   line 1358). Global-only; per-employee tri-state is NOT in scope - say so
+   in the report.
+2. Hook: in `routeFrame`, for `f.Event == voice.EventPrompt` with
+   `f.Last == nil || !*f.Last`, look up the live call and hand `(ccid, text)`
+   to the router. Nil/unknown ccid, no live voice session, or flag off:
+   return immediately (byte-identical timing).
+3. Build the warm request from the SAME state the imminent turn will use:
+   - resolve the call's employee + session + alias exactly as the turn does,
+   - render the message list through the turn builder's assembly (the
+     system prompt, persona, history, and the partial as the user turn),
+   - pass the SAME `llm.ChatOption` set the turn will pass, including
+     `tools` and the accounting `sessionID` (the affinity header and
+     `prompt_cache_key` both derive from it).
+   A divergence here silently kills the cache hit, so add a test asserting
+   warm-prefix equals turn-prefix for the same state.
+4. Token floor: use `llm.EstimateChatTokens(messages)`
+   (`internal/llm/tokenizer.go:23`). Skip the warm when the estimate is below
+   `voice.context_warm_min_tokens`. Do not hand-roll a `len/4` estimator.
+5. Debounce state machine, per (session, employee), map guarded:
+   - pending window = the resolved `voice.turn_confirm_ms` (absent or 0: a
+     fixed 900 ms default, matching the child's own default),
+   - a newer partial replaces pending text (latest wins), and never more than
+     one warm is in flight,
+   - on `last:true` or call `end`: stop scheduling new warms and drop the
+     pending timer. Do NOT cancel a warm that is already in flight - let it
+     finish under its own 1200 ms deadline. Cancelling mid-flight aborts the
+     server's prefill and leaves a partial slot, and the real turn is already
+     waiting behind it.
+6. Endpoint gate: call leaf 01's support predicate once per call and cache
+   the answer on the router's per-call state. A non-reuse endpoint schedules
+   nothing.
+7. Teardown: grep every call-end site (hangup, employee unpark, reaper,
+   `releaseCall`) and make sure each one drops the router's per-call state.
+   A stale entry must never warm a later call on a recycled ccid.
+8. Telemetry: a cheap counter or DEBUG line per attempted/skipped warm with a
+   reason (`off`, `no-endpoint-support`, `too-short`, `debounced`). No new bus
+   topic, no `llm_calls` columns.
 
 ## Interface Contract (exposes to siblings)
 
-None downstream. Consumes `Client.Warm` (C4) through a package-level seam
-var (func value) so 00T's injected counter works without linking the real
-client.
+None downstream. Consumes `Client.Warm` (C4) plus the endpoint predicate
+through package-level seam vars (func values) so the 00T counter seam works
+without linking the real client.
 
 ## Self-Verification Checklist
 
-- [ ] `go build ./internal/voice/... ./internal/daemon/...`
-- [ ] `go test -p 2 ./internal/voice/... -count=1` green (with 01 merged)
-- [ ] Disabled-flag test: routing hook is a pure no-op (byte-identical
-      dispatch timing assertions from 00T)
-- [ ] prefix-equality test warm-vs-turn passes
-- [ ] `gofmt -l` empty
+- [ ] `go build ./internal/daemon/...`
+- [ ] `go test -p 2 ./internal/daemon/... -count=1` green (with 01 merged)
+- [ ] Disabled-flag test: the hook is a pure no-op (assert zero calls on the
+      injected seam and unchanged dispatch timing).
+- [ ] Prefix-equality test: warm messages equal the turn's messages for the
+      same state.
+- [ ] Debounce tests: 4 partials in one window imply at most 2 warms with the
+      latest text; `last:true` stops further warms; `end` drops pending.
+- [ ] Endpoint-gate test: a non-reuse endpoint schedules zero warms.
+- [ ] `gofmt -l` empty.
 
 ## Review Checklist (for the orchestrator)
 
-- [ ] Opt-in default false honored (docs/agents/opt-in-defaults.md rule).
-- [ ] No new bus topic invented for this (rule: use existing lanes; a
-      counter metric is enough).
-- [ ] Teardown paths (hangup, employee unpark, reaper) all cancel pending
-      warms — grep every call-end site, don't trust the happy path.
+- [ ] Opt-in default false honored (`docs/agents/opt-in-defaults.md`).
+- [ ] No new bus topic invented; no WS class added.
+- [ ] The hook cannot change dispatch ordering or timing for `last:true`.
+- [ ] No in-flight warm is ever cancelled mid-flight.
+- [ ] Every call-end site drops router state (grep, do not trust the happy
+      path).
