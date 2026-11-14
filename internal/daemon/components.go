@@ -3870,54 +3870,10 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// agent.RegistryConfig.CodemodeEnabled at the NewAgentRegistry site.
 	applyCodemodeToolsFromConfig(c.ToolRegistry, cfg.Agent.Tools)
 
-	// C6 live-registry validation (agent-groups leaf 04): every policy
-	// tool name must resolve in the NOW-FULL registry (builtin + extract
-	// + deterministic wrappers all registered above), or boot fails
-	// naming the offender. Runs here — not at the early structural hook —
-	// because the registry is empty before registerBuiltinTools.
-	//
-	// GRP-1 (wiring-gap remediation): the C6 leg was INERT at this site —
-	// the resolver was constructed without WithKnownTools, so
-	// ValidatePolicies saw an empty known set and returned nil unconditionally
-	// (resolution.go's len(known)==0 early-out), letting a policy naming an
-	// unregistered tool boot silently despite the comment above. Rebuild the
-	// resolver with the live registry's canonical-name set (the same seam the
-	// RPC leg wires via GroupsHandler.SetToolValidation); CanonicalNames() is
-	// normalized-lowercase, matching the normalizer's output space so lookup
-	// keys agree.
-	if c.ToolRegistry != nil && groupsResolver != nil {
-		knownOpts := groups.ResolverOptions{
-			NormalizeToolName: agent.CanonicalToolName,
-			ExtraAllowsFor: func(subject string) []string {
-				return groupsOverrides.AllowsFor(subject, EnvGroupsNow())
-			},
-		}.WithKnownTools(c.ToolRegistry.CanonicalNames())
-		groupsResolver = groups.NewResolver(
-			groupsPoliciesFromConfig(cfg.Security.Groups.Policies),
-			groupsBindingsFromConfig(cfg.Security.Groups.Bindings),
-			cfg.Security.Groups.DefaultManaged,
-			&knownOpts,
-		)
-	}
-	if err := groupsResolver.ValidatePolicies(); err != nil {
-		logger.Error("FATAL: groups config policy tool names invalid", "error", err)
-		return nil, err
-	}
-	if err := revalidateGroupsPolicyTools(groupsResolver, groupsPoliciesFromConfig(cfg.Security.Groups.Policies), c.ToolRegistry, agent.CanonicalToolName); err != nil {
-		// C6 live-registry leg (agent-groups leaf 04, wiring remediation
-		// GRP-1): the resolver was constructed BEFORE the registry filled,
-		// so its known-tools set was empty and the ValidatePolicies call
-		// above ran structural checks only. Now that registerBuiltinTools,
-		// wireGitHubTools, extract/deterministic/codemode registration and
-		// the deferred scheduler/goal/delegate provider registration have
-		// all run, re-run the tool-name leg against the LIVE registry and
-		// fail boot naming the offender — matching the boot-hook
-		// comment's promise instead of leaving a policy that names an
-		// unregistered tool silently half-enforced.
-		logger.Error("FATAL: groups config policy tool names invalid (live registry)", "error", err)
-		return nil, err
-	}
-
+	// C6 tool-name validation runs in Start, after scheduler, ledger,
+	// platform, and voice tools register. Those names are not in the
+	// registry yet at this point. An early check here rejected a valid
+	// secretary policy (schedule_*, ledger_*, inbox, voice_call).
 	// msgBus (the NewComponents parameter): c.msgBus is only stored later
 	// in this function, so the relay notifier takes the local directly.
 	acpMgr, acpErr := applyACPFromConfig(cfg.ACP, decisionClient, msgBus)
@@ -5999,6 +5955,16 @@ func (c *Components) Start(ctx context.Context) error {
 			return err
 		}
 		startedHandlers = append(startedHandlers, "voice")
+	}
+
+	// C6 live-registry check. Scheduler, ledger, platform, and voice tools
+	// register above this point. A check before that rejected registered
+	// names (schedule_*, ledger_*, inbox, voice_call, delegate_task).
+	if c.Config != nil && c.ToolRegistry != nil {
+		if err := revalidateGroupsPolicyTools(nil, groupsPoliciesFromConfig(c.Config.Security.Groups.Policies), c.ToolRegistry, agent.CanonicalToolName); err != nil {
+			c.Logger.Error("FATAL: groups config policy tool names invalid (live registry)", "error", err)
+			return err
+		}
 	}
 
 	// Start chat handler
