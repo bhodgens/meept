@@ -319,6 +319,16 @@ var _ bot.BotExecutor = (*agentLoopBotExecutorAdapter)(nil)
 // has fewer params — projectPath defaults to "").
 type planCreatorAdapter struct {
 	planMgr *plan.PlanManager
+	logger  *slog.Logger
+}
+
+// newPlanCreatorAdapter builds the adapter; nil logger falls back to
+// slog.Default() so the submit-refusal WARN path is never a nil deref.
+func newPlanCreatorAdapter(planMgr *plan.PlanManager, logger *slog.Logger) *planCreatorAdapter {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &planCreatorAdapter{planMgr: planMgr, logger: logger}
 }
 
 // CreatePlan delegates to PlanManager.CreatePlan, translating the
@@ -337,6 +347,24 @@ func (a *planCreatorAdapter) CreatePlan(ctx context.Context, title, description,
 
 // CreatePlanWithGoal is CreatePlan with the owning goal id, persisted in the
 // same INSERT as the plan row (employee.PlanCreatorWithGoal contract).
+//
+// Plan 20261113-escalation-resume leaf 06: the GoalLoop's contract says the
+// plan enters pending_approval for signoff (goal_loop.go Plan: "The plan
+// enters PendingApproval state"), but PlanManager.CreatePlanWithGoal stops
+// at StateDraft — SubmitPlan's only production caller was the plan-mode
+// tool. A draft plan can NEVER be approved (ApprovePlan CASes
+// pending_approval->approved), which stranded every goal-loop plan and made
+// the escalation-resume path dead in production. The adapter therefore
+// submits right after creation.
+//
+// SubmitPlan auto-approve (internal/plan/manager.go): when
+// plans.approval.require_approval is FALSE the submit immediately approves
+// (empty session, by="system") and fires plan.approved — creation still
+// succeeds and the resume pump handles the rest. When TRUE (production
+// default, config/meept.json5) the plan parks at pending_approval and the
+// plan.submitting event reaches the gate-park pump (gate_park_wiring.go):
+// a goal-loop session id (gloop_*) with no armed gate is harmlessly
+// checkpointed or skipped, and approve flows normally.
 func (a *planCreatorAdapter) CreatePlanWithGoal(ctx context.Context, title, description, projectID, sessionID, goalID string) (employee.PlanRef, error) {
 	if a.planMgr == nil {
 		return employee.PlanRef{}, fmt.Errorf("plan manager not configured")
@@ -344,6 +372,20 @@ func (a *planCreatorAdapter) CreatePlanWithGoal(ctx context.Context, title, desc
 	p, err := a.planMgr.CreatePlanWithGoal(ctx, title, description, projectID, "", sessionID, goalID)
 	if err != nil {
 		return employee.PlanRef{}, err
+	}
+	// Submit draft -> pending_approval so the signoff workflow can reach
+	// it. A refused submit (state rules, auto-approve failure) is a WARN:
+	// creation itself succeeded, and the caller must still get the plan
+	// ref — failing here would strand the goal round with no artifact.
+	if err := a.planMgr.SubmitPlan(ctx, p.ID); err != nil {
+		a.logger.Warn("goal-loop plan submit refused; plan stays in draft",
+			"plan_id", p.ID, "goal_id", p.GoalID, "error", err)
+	} else {
+		// Re-read so the returned ref carries the post-submit state
+		// (pending_approval, or approved under auto-approve).
+		if fresh, getErr := a.planMgr.GetPlan(ctx, p.ID); getErr == nil {
+			p = fresh
+		}
 	}
 	return employee.PlanRef{
 		ID:     p.ID,

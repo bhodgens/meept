@@ -818,6 +818,7 @@ Examples:
 
 func newAgentsAmendCmd() *cobra.Command {
 	var field string
+	var reason string
 
 	cmd := &cobra.Command{
 		Use:   "amend <id> --field=<key> <value>",
@@ -829,12 +830,17 @@ path supports dotted notation for nested keys (e.g.
 --field=constraints.risk_ceiling high). This is the ONLY way to modify
 constitution fields (purpose, charter, constraints, frozen fields, etc.).
 
+Values that parse as JSON are sent decoded (arrays, objects, numbers,
+bools); otherwise the raw string is sent. An optional --reason is
+attached to the amendment request.
+
 For non-constitution changes (triggers, model, prompt, tools), use
 ` + "`meept agents update`" + ` instead.
 
 Examples:
   meept agents amend researcher --field=constraints.risk_ceiling high
-  meept agents amend coder --field=escalates_to user`,
+  meept agents amend coder --field=escalates_to user
+  meept agents amend coder --field=max_active_plans 42 --reason "workload"`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			agentID := args[0]
@@ -850,11 +856,11 @@ Examples:
 			}
 			defer client.Close()
 
-			rawResult, err := client.Call("agents.amend", map[string]any{
-				"id":    agentID,
-				"field": field,
-				"value": value,
-			})
+			payload, err := buildAmendPayload(agentID, field, value, reason)
+			if err != nil {
+				return err
+			}
+			rawResult, err := client.Call("agents.amend", payload)
 			if err != nil {
 				return fmt.Errorf("failed to propose amendment: %w", err)
 			}
@@ -870,6 +876,9 @@ Examples:
 
 			planID := getStringOr(resultMap, "plan_id", "")
 			fmt.Printf("amendment proposed for %s: %s = %s\n", agentID, field, value)
+			if reason != "" {
+				fmt.Printf("reason: %s\n", reason)
+			}
 			if planID != "" {
 				fmt.Printf("plan id: %s (awaiting signoff)\n", planID)
 			}
@@ -878,8 +887,38 @@ Examples:
 	}
 
 	cmd.Flags().StringVar(&field, "field", "", "constitution field path (dotted, e.g. constraints.risk_ceiling)")
+	cmd.Flags().StringVar(&reason, "reason", "", "why the amendment is being proposed (optional)")
 	_ = cmd.MarkFlagRequired("field")
 	return cmd
+}
+
+// buildAmendPayload constructs the agents.amend RPC payload (Contract C4):
+// {"id": agentID, "fields": {field: value}} plus "reason" only when reason
+// is non-empty — the shape internal/employee/handler.go amendRequest
+// requires. Values that parse as JSON are sent decoded (arrays as []any,
+// numbers as float64, objects as map[string]any, bools as bool); anything
+// else is sent as the raw string.
+func buildAmendPayload(agentID, field, value, reason string) (map[string]any, error) {
+	if agentID == "" {
+		return nil, fmt.Errorf("agent id is required")
+	}
+	if field == "" {
+		return nil, fmt.Errorf("--field is required")
+	}
+
+	var parsed any = value
+	if err := json.Unmarshal([]byte(value), &parsed); err != nil {
+		// not JSON — send the raw string
+	}
+
+	payload := map[string]any{
+		"id":     agentID,
+		"fields": map[string]any{field: parsed},
+	}
+	if reason != "" {
+		payload["reason"] = reason
+	}
+	return payload, nil
 }
 
 // ---------------------------------------------------------------------------

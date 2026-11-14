@@ -157,7 +157,8 @@
       "llm-serving-tiers"
     ],
     "internal/daemon/": [
-      "daemon-lifecycle"
+      "daemon-lifecycle",
+      "escalation-resume"
     ],
     "internal/llm/": [
       "daemon-lifecycle",
@@ -203,6 +204,7 @@
     ],
     "internal/employee/": [
       "employee-markdown",
+      "escalation-resume",
       "goal-completion",
       "goal-loop",
       "goals-plans"
@@ -587,6 +589,7 @@
       "output-filters"
     ],
     "internal/daemon/gate_park_wiring.go": [
+      "escalation-resume",
       "hitl-notifications"
     ],
     "internal/daemon/github_wiring.go": [
@@ -1252,6 +1255,17 @@
         "goals-plans-04 round-driver autonomy knob: goal_auto_advance=false pins the goal at the manually-advanced round (the autonomous loop never starts)"
       ],
       "note": "02-goals-plans branch e2e gate (G2/G3/G4): goal tools + round driver + plan mode through live RPC/CLI. goals-plans-01/02 fully wired (incl. the deferred-turn autonomy loop); goals-plans-03 approve tail documented-infeasible."
+    },
+    {
+      "name": "escalation-resume",
+      "dir": "e2e/suites/escalation-resume",
+      "status": "implemented",
+      "diff": "M",
+      "scenarios": [
+        "esc-resume-01 tier-2 employee's escalating candidate lands a pending plan linked to its goal; the operator approves and the goal round executes EXACTLY once (ApproveAndExecute) without a parked episode",
+        "esc-resume-02 a duplicate plan.approved delivery is a skip: the once-per-process resume guard keeps execution count at 1 (no double-execute)"
+      ],
+      "note": "Gate T9 of the escalation-resume-and-hardening tree: approve -> plan.approved bus event -> daemon subscriber employee-plan-resume -> Manager.ResumeApprovedPlan -> GoalLoop.ApproveAndExecute exactly once. RED/incomplete until leaves 01 (C1 method) + 02 (subscriber wiring) land; the suite compiles today and asserts only public surfaces (RPC, stores, fake LLM)."
     },
     {
       "name": "office-skills",
@@ -4957,6 +4971,26 @@
       "title": "agents update companion <companion_updated.md> adopts the updated file's body as the new prompt via agents.get",
       "paths": [
         "cmd/meept/agents_cmd.go"
+      ]
+    },
+    {
+      "id": "esc-resume-01",
+      "suite": "escalation-resume",
+      "diff": "M",
+      "title": "tier-2 escalated candidate -> pending plan linked to its goal -> operator approves -> goal round executes exactly once (ApproveAndExecute) without a parked episode",
+      "paths": [
+        "internal/employee/manager.go",
+        "internal/daemon/gate_park_wiring.go"
+      ]
+    },
+    {
+      "id": "esc-resume-02",
+      "suite": "escalation-resume",
+      "diff": "M",
+      "title": "duplicate plan.approved delivery is a skip: the once-per-process resume guard keeps execution count at 1 (no double-execute)",
+      "paths": [
+        "internal/employee/manager.go",
+        "internal/daemon/gate_park_wiring.go"
       ]
     }
   ]

@@ -274,6 +274,8 @@ The checker evaluates, in order:
 1. **`tools_allowed` / `tools_forbidden`** — allowlist/denylist of tool names.
 2. **`risk_ceiling`** — hard upper bound on the risk returned by the engine.
 3. **`escalation_triggers`** — matches against action/tool/details. On match, the action is queued as a Plan in `PendingApproval` routed to `escalates_to`; the current invocation returns without executing.
+
+   > **Trigger match semantics:** trigger `match` values are **exact** compares (tool name, action string, `risk_level` token, `cost` threshold). `'*'` has **no wildcard meaning** here — a trigger `{on: "action", match: "*"}` fires only for a literal action `"*"` (the only `'*'` wildcard in enforcement is the `tools_forbidden` deny rule). Do not rely on `'*'` as "match everything": such a row is inert, and wildcard expansion is deliberately not implemented because wildcard triggers would escalate every allowlisted call (a `RequiresPlan` livelock: approve → execute → re-escalate). Pinned by `TestMatchesTrigger_ActionStarIsExactMatch`.
 4. **`never[]`** — shell command scan, path scan where possible. Hard deny + employee auto-pause.
 5. **Budget** — tokens today, dollars today, invocations today via `BotState`. Hard deny + auto-pause when exhausted.
 
@@ -339,6 +341,18 @@ Tier is a property of the constitution, not the agent. The same agent binary can
 
 Authority is **escalation-only**. An employee has an `escalates_to` list naming who signs off on its Plans. Entries are agent IDs or the literal string `"user"`.
 
+### Approval → resume flow (plan.approved fan-out)
+
+Signing off a tier-2 Plan is what resumes the employee's work. Every approval surface (`meept plans approve`, `agents.goals.approve` RPC, HTTP/GUI plan approve) funnels through `PlanManager.ApprovePlan`, which publishes the `plan.approved` bus event `{plan_id, by}`. Three subscribers consume that event, each scoped to its own business:
+
+| Subscriber | Owner | Business |
+|------------|-------|----------|
+| `employee-plan-resume` | `internal/daemon/employee_resume_wiring.go` | resolves the plan's goal owner and invokes `Manager.ResumeApprovedPlan`, so the employee's GoalLoop executes the approved plan without a parked episode |
+| `gate-resume-pump` | `internal/daemon/gate_park_wiring.go` | resumes the parked chat turn behind the approval gate |
+| `evolver-approval-bridge` | `internal/daemon/evolver_approval_bridge.go` | evolver-owned plans only |
+
+The resume fan-out is best-effort and never fails the approval that triggered it: a malformed payload is a WARN + drop (no panic), a resume error is a WARN + drop (no retry, no re-publish), and a plan with no employee goal owner (e.g. an evolver plan) is an INFO skip inside `ResumeApprovedPlan`. Resume is once-per-process per plan — a plan that already executed (directly or through the parked-episode resume path) is an INFO skip, so the two resume drivers can never double-execute.
+
 - There is no delegation field. Delegation uses the existing `delegate_task` and `request_handoff` tools.
 - Role evolution is propose-only: an employee may propose amendments to its own constitution via `meept agents amend`, but every amendment goes through Plan signoff. Frozen fields (e.g. `never`, `risk_ceiling`) cannot be amended even with approval.
 
@@ -397,6 +411,8 @@ meept agents pause <id>                        # operator pause
 meept agents resume <id>                       # operator resume (only un-pause path)
 meept agents trigger <id> [payload-json]       # invoke the goal loop now; a cap-blocked round prints "employee busy: active plan cap reached (skipped)"
 meept agents amend <id> --field=<key> <value>  # propose constitution amendment (routes to Plan signoff)
+                                               #   --reason "text" attaches an optional justification
+                                               #   values that parse as JSON are sent decoded (arrays, numbers, bools)
 ```
 
 ### Migration

@@ -311,6 +311,44 @@ func (l *GoalLoop) maybeParkProviderWait(err error, payload goalTurnPayload) (bo
 	return true, nil
 }
 
+// resumeOnceMu / resumeOnce carry the once-per-process "already resumed"
+// memory shared with Manager.ResumeApprovedPlan (Contract C1, tree
+// docs/plans/20261113-escalation-resume-and-hardening leaf 01). A planID is
+// recorded when ApproveAndExecute is entered through the parked-episode
+// resume path below; the Manager's once-guard reads the same map, so a
+// bus-side resume after a park resume is an INFO skip and the plan can
+// never double-execute (R5). Entries are retained for the process lifetime —
+// a plan only ever executes once. Guarded by resumeOnceMu; no I/O happens
+// under the lock (check-and-set is snapshot-under-lock).
+var (
+	resumeOnceMu sync.Mutex
+	resumeOnce   = make(map[string]struct{})
+)
+
+// markPlanResumed records planID in the shared once-per-process resume map.
+// Package-private by design: Manager.ResumeApprovedPlan and the parked
+// episode resume coordinate through it; no new exported surface.
+func (l *GoalLoop) markPlanResumed(planID string) {
+	if l == nil || planID == "" {
+		return
+	}
+	resumeOnceMu.Lock()
+	resumeOnce[planID] = struct{}{}
+	resumeOnceMu.Unlock()
+}
+
+// planResumed reports whether planID is already recorded in the shared
+// once-per-process resume map.
+func planResumed(planID string) bool {
+	if planID == "" {
+		return false
+	}
+	resumeOnceMu.Lock()
+	_, ok := resumeOnce[planID]
+	resumeOnceMu.Unlock()
+	return ok
+}
+
 // ResumeGoalEpisode re-enters a parked episode's phase. Daemon wiring
 // registers this — via the Manager's registered GoalLoop for the parked
 // employee — as the shared TurnParker's resume callback, so ONE callback
@@ -403,6 +441,13 @@ func (l *GoalLoop) ResumeGoalEpisode(ctx context.Context, rec agent.ParkedTurnRe
 			l.logger.Warn("resumed goal episode approve+execute failed",
 				"employee_id", l.employeeID, "error", err)
 		}
+		// Once-per-process resume guard (Contract C1,
+		// docs/plans/20261113-escalation-resume-and-hardening leaf 01):
+		// record the plan as resumed so a later Manager.ResumeApprovedPlan
+		// (e.g. the daemon plan.approved bus subscriber) is an INFO skip —
+		// the two resume paths must never double-execute a plan (R5).
+		// Entries are retained for the process lifetime.
+		l.markPlanResumed(p.Plan.ID)
 	case "reflect":
 		if p.Plan == nil || p.Result == nil {
 			l.logger.Warn("parked goal episode reflect missing plan/result — dropping",

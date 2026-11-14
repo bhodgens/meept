@@ -21,6 +21,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -571,6 +572,17 @@ type Manager struct {
 	// falls back to LastAssessed.
 	planLookup PlanLookup
 
+	// resumedPlans is the once-per-process memory for ResumeApprovedPlan
+	// (Contract C1, tree docs/plans/20261113-escalation-resume-and-hardening
+	// leaf 01): planIDs already resumed through ApproveAndExecute by THIS
+	// process, so a second resume (bus-side duplicate, or a bus resume
+	// racing the parked-episode resume) is a deliberate INFO skip instead
+	// of a double execution. Entries are retained for the process lifetime
+	// — a plan only ever executes once. Guarded by resumedPlansMu; the map
+	// is never touched while any I/O is in flight (snapshot-under-lock).
+	resumedPlans   map[string]struct{}
+	resumedPlansMu sync.Mutex
+
 	// pendingConstitutions maps plan_id to a constitution amendment request
 	// that is waiting for approval. When a constitution amendment plan is
 	// created, the patched constitution is stored here (not persisted).
@@ -699,6 +711,7 @@ func NewManagerWithStores(
 		auditStore:           as,
 		constitutions:        make(map[string]Constitution),
 		pendingConstitutions: make(map[string]*pendingConstitution),
+		resumedPlans:         make(map[string]struct{}),
 		driftScores:          make(map[string]float64),
 		goalLoops:            make(map[string]*GoalLoop),
 		invokeMuMap:          make(map[string]*sync.Mutex),
@@ -2307,8 +2320,20 @@ func (m *Manager) AssessGoal(ctx context.Context, goalID, health string) (*Goal,
 //
 // On a successful approval, the Manager updates the goal's ActivePlanID
 // (spec line 295: "Active plan ID recorded on the Goal") when the
-// goalStore is available and goalID is non-empty. Actual plan execution
-// is left to the GoalLoop driver, which has its own scheduler hook.
+// goalStore is available and goalID is non-empty.
+//
+// Approval does NOT execute the plan. Execution happens when one of the
+// two resume drivers fires (Contract C1, tree
+// docs/plans/20261113-escalation-resume-and-hardening):
+//   - Manager.ResumeApprovedPlan, called by the daemon plan.approved bus
+//     subscriber (leaf 02), resumes the approved plan on the owning
+//     employee's GoalLoop once per process; and
+//   - the parked-episode resume path (park.go "approve" phase via
+//     GoalLoop.ResumeGoalEpisode) re-enters ApproveAndExecute for episodes
+//     that were parked mid-approve on a provider wait.
+//
+// Both drivers share the once-per-process resume map, so a plan approved
+// here is executed exactly once no matter which driver arrives first.
 func (m *Manager) ApprovePlan(ctx context.Context, goalID, planID, callerID, reason string) error {
 	if m.planDisposer == nil {
 		return errors.New("employee: plan disposer not configured")
@@ -2329,8 +2354,10 @@ func (m *Manager) ApprovePlan(ctx context.Context, goalID, planID, callerID, rea
 		if err != nil {
 			// Don't fail the approval over a goal lookup miss; the
 			// plan is already approved in the signoff system. Log
-			// and move on — the GoalLoop will see the approved state
-			// on its next Assess regardless.
+			// and move on — whichever resume driver fires next
+			// (Manager.ResumeApprovedPlan via the daemon subscriber,
+			// or the parked-episode resume) resolves the plan→goal
+			// linkage from ActivePlanIDs at resume time.
 			m.logger.Warn("approve plan: goal lookup failed; plan is approved but ActivePlanID not set",
 				"goal_id", goalID, "plan_id", planID, "error", err)
 			return nil
@@ -2372,6 +2399,137 @@ func (m *Manager) ApprovePlan(ctx context.Context, goalID, planID, callerID, rea
 		"outcome":     "approved",
 	})
 	return nil
+}
+
+// ResumeApprovedPlan resumes execution of an APPROVED plan on the goal loop
+// of the employee that owns the plan's goal (Contract C1,
+// docs/plans/20261113-escalation-resume-and-hardening leaf 01). The daemon
+// bus subscriber (leaf 02) calls it when a plan.approved event arrives; the
+// parked-episode resume path records into the same once-map so the two
+// resume drivers can never double-execute a plan (R5).
+//
+// Deliberate skips — unknown plan (no goal's ActivePlanIDs contains it),
+// unknown goal owner, no live GoalLoop, loop busy mid-round, or the plan
+// already resumed by this process — return nil and log the reason at INFO:
+// the bus subscriber must not error-retry skips. Real failures (goal-store
+// errors, ApproveAndExecute errors) are returned wrapped with %w.
+//
+// Resume is once-per-process per planID: resumedPlans records every planID
+// that entered ApproveAndExecute, including via park.go's parked-episode
+// "approve" phase. Entries are retained for the process lifetime — a plan
+// only ever executes once.
+func (m *Manager) ResumeApprovedPlan(ctx context.Context, planID, callerID string) error {
+	// Once guard: a second resume for a plan this process already ran is
+	// an INFO skip. Two memories feed it: m.resumedPlans (direct resumes
+	// through this method) and the shared parked-episode resume map
+	// (planResumed — park.go records plans ApproveAndExecute'd through
+	// ResumeGoalEpisode). Together they make double execution impossible
+	// across both resume drivers (R5).
+	m.resumedPlansMu.Lock()
+	_, alreadyResumed := m.resumedPlans[planID]
+	m.resumedPlansMu.Unlock()
+	if alreadyResumed || planResumed(planID) {
+		m.logger.Info("resume plan: already resumed by this process — skipping",
+			"plan_id", planID, "caller_id", callerID)
+		return nil
+	}
+
+	// Resolve the owning goal via the authoritative plan→goal linkage (G2):
+	// scan goals for ActivePlanIDs containment. internal/employee cannot
+	// import internal/plan, so the goal store is the lookup source.
+	if m.goalStore == nil {
+		m.logger.Info("resume plan: no goal store configured — skipping",
+			"plan_id", planID, "caller_id", callerID)
+		return nil
+	}
+	goal, err := m.lookupGoalByPlanID(ctx, planID)
+	if err != nil {
+		return fmt.Errorf("resume plan %s: goal lookup: %w", planID, err)
+	}
+	if goal == nil {
+		m.logger.Info("resume plan: no goal owns this plan — skipping",
+			"plan_id", planID, "caller_id", callerID)
+		return nil
+	}
+
+	// Resolve the live GoalLoop (same seam Trigger uses via
+	// triggerViaGoalLoop). No registered loop means there is nothing to
+	// resume on — an INFO skip, not an error.
+	loop := m.GetGoalLoop(goal.EmployeeID)
+	if loop == nil {
+		m.logger.Info("resume plan: no live goal loop for employee — skipping",
+			"plan_id", planID, "employee_id", goal.EmployeeID,
+			"caller_id", callerID)
+		return nil
+	}
+
+	// Busy guard: the loop is mid-round when its per-employee serialization
+	// mutex (the one triggerViaGoalLoop holds across Decide) is already
+	// locked. TryLock NEVER blocks — C1 forbids queueing a resume behind a
+	// running round; the next scheduled Trigger picks up normal rounds.
+	invokeMu := m.acquireInvokeMutex(goal.EmployeeID)
+	if !invokeMu.TryLock() {
+		m.logger.Info("resume plan: goal loop busy mid-round — skipping (next scheduled trigger resumes normal rounds)",
+			"plan_id", planID, "employee_id", goal.EmployeeID,
+			"caller_id", callerID)
+		return nil
+	}
+	defer invokeMu.Unlock()
+
+	m.logger.Info("resuming approved plan",
+		"plan_id", planID, "employee_id", goal.EmployeeID,
+		"goal_id", goal.ID, "caller_id", callerID)
+
+	// Record the plan in the once-map BEFORE ApproveAndExecute so a
+	// concurrent second resume cannot double-execute; I/O (the execution
+	// itself) happens strictly outside both the resumedPlansMu and the
+	// map check-and-set being atomic under the lock.
+	m.resumedPlansMu.Lock()
+	m.resumedPlans[planID] = struct{}{}
+	m.resumedPlansMu.Unlock()
+
+	// Execute through the loop's existing approve+execute entry point (the
+	// same one the parked-episode resume uses). ApproverID is empty, which
+	// CanExecutePlan treats as backward-compat authorized: the plan was
+	// already approved through the signoff system before this resume fired.
+	if _, _, err := loop.ApproveAndExecute(ctx, PlanRef{ID: planID}); err != nil {
+		return fmt.Errorf("resume plan %s: approve and execute: %w", planID, err)
+	}
+	return nil
+}
+
+// lookupGoalByPlanID finds the active goal whose ActivePlanIDs contains
+// planID — the authoritative G2 plan→goal linkage (internal/employee cannot
+// import internal/plan, so the goal store is the lookup source). Returns
+// (nil, nil) when no goal owns the plan.
+func (m *Manager) lookupGoalByPlanID(ctx context.Context, planID string) (*Goal, error) {
+	active, err := m.goalStore.ListActive(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	for _, g := range active {
+		if slices.Contains(g.ActivePlanIDs, planID) {
+			return g, nil
+		}
+	}
+	// Retired/paused goals may still carry the plan linkage; scan the full
+	// roster before concluding the plan is unknown.
+	bots, err := m.botManager.ListBots(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, b := range bots {
+		goals, err := m.goalStore.ListByEmployee(ctx, b.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, g := range goals {
+			if slices.Contains(g.ActivePlanIDs, planID) {
+				return g, nil
+			}
+		}
+	}
+	return nil, nil
 }
 
 // RejectPlan rejects a pending plan. A reason is required (spec CLI line
@@ -2841,7 +2999,9 @@ func (m *Manager) synthesizeConstitutionWithLLM(
 		}
 	}
 
-	// Override ToolsAllowed if the LLM provided a non-empty hint list.
+	// Apply the tools_allowed hint under D4 (internal/groups/groups.go:40:
+	// "intersection never widens the spec") — a non-empty hint intersects
+	// with the base allowlist (Contract C3); an empty hint inherits base.
 	if len(llmResp.ToolsAllowedHint) > 0 {
 		cleaned := make([]string, 0, len(llmResp.ToolsAllowedHint))
 		for _, t := range llmResp.ToolsAllowedHint {
@@ -2851,9 +3011,18 @@ func (m *Manager) synthesizeConstitutionWithLLM(
 			}
 		}
 		if len(cleaned) > 0 {
+			if allowed := base.Constraints.ToolsAllowed; len(allowed) > 0 {
+				kept := intersectToolsAllowed(cleaned, allowed)
+				dropped := len(cleaned) - len(kept)
+				notes = append(notes,
+					fmt.Sprintf("tools_allowed: LLM hint intersected with base allowlist (%d kept, %d dropped)",
+						len(kept), dropped))
+				cleaned = kept
+			} else {
+				notes = append(notes,
+					fmt.Sprintf("tools_allowed: LLM suggested %d tool(s)", len(cleaned)))
+			}
 			base.Constraints.ToolsAllowed = cleaned
-			notes = append(notes,
-				fmt.Sprintf("tools_allowed: LLM suggested %d tool(s)", len(cleaned)))
 		}
 	}
 
@@ -2866,6 +3035,33 @@ func (m *Manager) synthesizeConstitutionWithLLM(
 	}
 
 	return base, notes, nil
+}
+
+// intersectToolsAllowed intersects a migration LLM's tools_allowed hint with
+// the base constitution's allowlist (Contract C3). It mirrors the inline set
+// logic of internal/groups/resolve.go resolveLayered (~10 lines, kept inline —
+// internal/employee must not import internal/groups) and upholds the D4 rule
+// (internal/groups/groups.go:40): intersection never widens the spec — the
+// result is sorted and deduplicated.
+func intersectToolsAllowed(hint, base []string) []string {
+	allowed := make(map[string]struct{}, len(base))
+	for _, t := range base {
+		allowed[t] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(hint))
+	out := make([]string, 0, len(hint))
+	for _, t := range hint {
+		if _, ok := allowed[t]; !ok {
+			continue
+		}
+		if _, dup := seen[t]; dup {
+			continue
+		}
+		seen[t] = struct{}{}
+		out = append(out, t)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // buildMigratorPrompt constructs the prompt sent to the small model to
@@ -3091,6 +3287,7 @@ func NewManager(bm *bot.Manager) *Manager {
 		botManager:           bm,
 		constitutions:        make(map[string]Constitution),
 		pendingConstitutions: make(map[string]*pendingConstitution),
+		resumedPlans:         make(map[string]struct{}),
 		driftScores:          make(map[string]float64),
 		goalLoops:            make(map[string]*GoalLoop),
 		invokeMuMap:          make(map[string]*sync.Mutex),

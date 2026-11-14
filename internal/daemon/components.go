@@ -701,6 +701,17 @@ type Components struct {
 	// currently the leaf-11 speak router for GoalLoops.
 	msgBus *bus.MessageBus
 
+	// employee-plan-resume subscriber seams (tree
+	// 20261113-escalation-resume-and-hardening, leaf 02, Contract C2).
+	// resumeApprovedPlan is the frozen C1 seam: func(planID,
+	// callerID string) error (the gate test's recorder pins this exact
+	// two-arg shape), assigned from EmployeeManager at boot
+	// (wireEmployeeResume); nil = the employee subsystem is absent and
+	// the subscriber is not armed. employeeResumeSubscriber holds the
+	// bus registration so Stop can detach it.
+	resumeApprovedPlan       func(planID, callerID string) error
+	employeeResumeSubscriber *bus.Subscriber
+
 	// OAuth token management (shared across calendar, LLM providers, etc.)
 	TokenStore     *authpkg.TokenStore
 	RefreshManager *authpkg.RefreshManager
@@ -6656,9 +6667,7 @@ func (c *Components) Start(ctx context.Context) error {
 			// employees will error at Decide time (documented behaviour).
 			var planner employee.PlanCreator
 			if c.PlanManager != nil {
-				planner = &planCreatorAdapter{
-					planMgr: c.PlanManager,
-				}
+				planner = newPlanCreatorAdapter(c.PlanManager, c.Logger)
 			}
 
 			// Tree 03 leaf 03 (D9): ONE shared TurnParker + EpisodeParker
@@ -6956,6 +6965,16 @@ func (c *Components) Start(ctx context.Context) error {
 	// the gate parker or bus is absent (gate_park_wiring.go).
 	c.StartGateParkPump(ctx)
 
+	// Employee plan-resume subscriber (tree 20261113-escalation-resume-
+	// and-hardening leaf 02): subscribe "employee-plan-resume" on
+	// plan.approved so an approved plan resumes its employee GoalLoop
+	// (Contract C1 via the resumeApprovedPlan seam). Wired alongside the
+	// gate park pump: both consume the same plan.approved fan-out, the
+	// seam needs EmployeeManager, and nil seams keep the subscriber
+	// unarmed (employee_resume_wiring.go).
+	c.wireEmployeeResume(ctx)
+	c.startEmployeeResumeSubscriber(ctx)
+
 	// Wire the chat-path goal anchor (goal-completion leaf 03 Task 2):
 	// the dispatcher resolves a session's goal at plan-creation time via
 	// agent.GoalAnchorStore. Wired here (after the employee subsystem)
@@ -7229,6 +7248,13 @@ func (c *Components) stopComponents(ctx context.Context) error {
 	// surviving gate rows stay in the park store and re-arm on the next
 	// Start (Stop only logs the count). Nil on checkpointing-off boots.
 	c.stopGateParker()
+
+	// Detach the employee plan-resume subscriber (tree
+	// 20261113-escalation-resume-and-hardening leaf 02) beside the gate
+	// parker: the pump goroutine exits on context cancel, this only
+	// unsubscribes so late approvals cannot queue mid-shutdown. No-op
+	// when the subscriber was never armed.
+	c.stopEmployeeResumeSubscriber()
 
 	// Stop the async-turn liveness reaper (async-turn-migration leaf 06)
 	// next to the other handler-side background loops. Nil when the

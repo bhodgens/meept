@@ -261,6 +261,8 @@ meept agents delete <id>                       # stops + deletes; confirms unles
 meept agents pause <id>                        # operator pause
 meept agents resume <id>                       # operator resume (only un-pause path)
 meept agents amend <id> --field=<key> <value>  # propose constitution amendment (routes to Plan signoff)
+                                               #   --reason "text" attaches an optional justification
+                                               #   values that parse as JSON are sent decoded (arrays, numbers, bools)
 meept agents trigger <id> [payload-json]       # invoke the goal loop now
 meept agents steer <id> <content...>           # deliver steering to a running episode
 ```

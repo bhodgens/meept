@@ -769,6 +769,17 @@ func (p *PreExecChecker) Check(action, toolName string, details map[string]strin
 	//    EscalatesTo. Severity is empty (no audit event), RequiresPlan
 	//    is true so the caller knows to route for signoff.
 	//    (Spec line 354.)
+	//
+	//    Trigger match values are EXACT compares (see matchesTrigger):
+	//    tool name, action string, risk_level token, cost threshold.
+	//    Unlike tools_forbidden below (:667), '*' has NO wildcard
+	//    meaning here — a trigger {on: action, match: "*"} fires only
+	//    for a literal action "*". Do not add wildcard expansion
+	//    without revisiting the allowlist interplay: with a
+	//    tools_allowed list, wildcard triggers would escalate every
+	//    allowlisted call (approve -> execute -> re-escalate), i.e. a
+	//    RequiresPlan livelock. Pinned by
+	//    TestMatchesTrigger_ActionStarIsExactMatch.
 	for _, trig := range constraints.EscalationTriggers {
 		if matchesTrigger(trig, action, toolName, details) {
 			return Decision{
@@ -987,6 +998,16 @@ func (p *PreExecChecker) triggerAutoPause(reason string) {
 
 // matchesTrigger returns true if the escalation trigger fires for the given
 // action/tool/details combination.
+//
+// Trigger match values are EXACT compares for every On kind: tool name
+// (EscalateOnTool), action string (EscalateOnAction), risk_level token
+// (EscalateOnRiskLevel), cost threshold (EscalateOnCost). Unlike the
+// tools_forbidden '*' wildcard (:667), '*' has NO wildcard meaning here —
+// a trigger {on: action, match: "*"} fires only for a literal action "*".
+// Do not add wildcard expansion without revisiting the allowlist interplay:
+// with a tools_allowed list, wildcard triggers would escalate every
+// allowlisted call (RequiresPlan livelock: approve -> execute ->
+// re-escalate). Pinned by TestMatchesTrigger_ActionStarIsExactMatch.
 func matchesTrigger(trig EscalationTrigger, action, toolName string, details map[string]string) bool {
 	switch trig.On {
 	case EscalateOnTool:
