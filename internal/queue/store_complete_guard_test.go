@@ -307,6 +307,43 @@ func TestStoreUpdateState_RefusesTerminalTransition(t *testing.T) {
 	}
 }
 
+// TestStoreUpdateState_RefusesIllegalEdge (leaf 02/02): the guard now derives
+// its source-state set from jobTransitions instead of the old blanket "NOT IN
+// (completed, dead)". The set is a strict subset, so edges the map does not
+// list — pending -> processing, dead -> anything — are refused, and they must
+// keep returning the SAME error the pre-guard code returned for a refused
+// write (ErrJobStateLocked, "my attempt lost the race"), not a new one.
+func TestStoreUpdateState_RefusesIllegalEdge(t *testing.T) {
+	store := newTestStore(t, "")
+
+	// pending -> processing is not a legal edge: processing requires a claim
+	// first (Claim sets claimed; MarkProcessing moves claimed -> processing).
+	job := mustNewJob(t, JobTypeOneOff, map[string]string{"prompt": "guard-edge"})
+	if err := store.Insert(job); err != nil {
+		t.Fatalf("Insert failed: %v", err)
+	}
+	if err := store.UpdateState(job.ID, StateProcessing); !errors.Is(err, ErrJobStateLocked) {
+		t.Fatalf("pending -> processing: err = %v, want ErrJobStateLocked", err)
+	}
+	got, err := store.GetByID(job.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	if got.State != StatePending {
+		t.Errorf("state = %q after refusal, want %q (the refused write must land nothing)", got.State, StatePending)
+	}
+
+	// A target the machine can never reach is a caller bug, and gets its own
+	// sentinel rather than masquerading as a lost race. JobState is a string
+	// type, so an unknown value reaches here from any caller that built one.
+	if err := store.UpdateState(job.ID, JobState("no-such-state")); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("unreachable target: err = %v, want ErrInvalidTransition", err)
+	}
+	if got, err := store.GetByID(job.ID); err != nil || got.State != StatePending {
+		t.Errorf("state = %q (err %v) after the invalid-target call, want %q", got.State, err, StatePending)
+	}
+}
+
 // mustClaimToken reads the current attempt token for a job.
 func mustClaimToken(t *testing.T, store *Store, jobID string) string {
 	t.Helper()
