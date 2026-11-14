@@ -116,6 +116,13 @@ daemon log.
   short `idle_release` still fires within about a minute of crossing the
   threshold.
 - Session IDs and endpoint keys never appear in Info-level logs.
+- The voice sidecar's opt-in partial context warm
+  (`voice.context_warm`, plan docs/plans/20261113-filler-clips-and-context-warm/)
+  rides this exact plumbing: a max_tokens=1 `llm.Client.Warm` request
+  over the imminent turn's prefix under the SAME session-affinity scope
+  (the turn's accounting/conversation id), so the provider cache hit
+  depends on the header + prompt_cache_key matching the real turn byte
+  for byte. See `internal/voice/AGENTS.md` "Partial context warm".
 
 ## Test coverage
 

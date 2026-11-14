@@ -6,7 +6,10 @@
 2026-11-07; as-built 2026-11-10 adds the C1 `played` end-of-turn audio
 edge (child emits after the final byte of a last:true say stream; the
 link floor's drain watch arms from it instead of the blind turn_final
-arm - kills the mid-synthesis early floor release)
+arm - kills the mid-synthesis early floor release); as-built 2026-11-14
+adds the filler clip cache + lane pools + farewell rule + partial
+context warm (plan docs/plans/20261113-filler-clips-and-context-warm/,
+section at the end)
 
 This spec covers both voice legs: the Telnyx phone channel and the local
 (client audio) channel. It is not the client text-to-speech path in
@@ -593,6 +596,24 @@ Proposed keys, all under `voice`:
 - `silence_prompt` - string, default "Are you still there?"; the dedicated
   dead-air nudge line spoken on the first silence fire. Empty falls back
   to the `filler` round-robin (legacy behavior)
+- `silence_prompt_lines` / `fragment_clarify_lines` - []string, default
+  empty (plan 20261113-filler-clips C5 lane pools); a NON-EMPTY list
+  takes precedence over the `silence_prompt` / `fragment_clarify` scalar
+  (ladder: employee_leg row list > row scalar > global list > global
+  scalar > default); round-robin per fire
+- `farewell` - []string, default ["Goodbye!", "Bye!", "Talk soon."]
+  (plan 20261113-filler-clips C5/R5); goodbye lines spoken when the
+  caller's final utterance is a bye phrase; an empty list inherits the
+  shipped default (the rule fires whenever the config resolves a
+  non-empty pool)
+- `context_warm` - bool, default false (plan 20261113-filler-clips
+  phase 2 C6); opt-in partial-triggered LLM context warm (see
+  docs/workflows/voice.md "Partial context warm")
+- `context_warm_min_tokens` - int, default 60; token floor under which a
+  partial is never warmed
+- `tts_ref_audio` - string, default ""; path to the qwen3 clone
+  reference WAV; feeds ONLY clip-key identity (its sha256 rides the keys
+  frame as `tts_ref_hash`), never a TTS request field
 - `silence_hangup_after_seconds` - int, default 45; the hangup window (H)
   after the nudge: hangup at S+H. 45+45 == the legacy double-window
   endpoints (nudge@45, hangup@90); 0 reuses S
@@ -1159,3 +1180,79 @@ half-answers. The fix lives entirely daemon-side (internal/voice/link.go
   and signal calls construct their talk loops exactly as before (the
   target-keyed registry lookup only matches link legs). Non-link tests
   (grace/filler pins) run through the untouched path.
+
+## As-built (2026-11-14, plan docs/plans/20261113-filler-clips-and-context-warm/): filler clip cache + lane pools + farewell + partial context warm
+
+Two latency layers shipped over the existing single `t.say()` audio
+path. The full binding contracts (C1 key formula, C2 store layout, C3
+frame shapes, C4 warm seam, C5 lane ladder, C6 warm knobs) are pinned
+in that tree's master.md and restated as invariants in
+`internal/voice/AGENTS.md`; this section records the deltas to this
+spec's frame/config/flow contracts.
+
+- **New C1 events (all additive; old child/daemon compat per the
+  keys-wire convention).** `clip_render` (daemon -> child): up to 32
+  `{key,text}` specs per frame, larger sets sharded; a `clip_render`
+  that arrives before the keys frame queues (cap 256, drop-oldest with
+  a WARN) and drains once providers exist. `clip_ready` (child ->
+  daemon): `{key, ok}` per render entry, `ok` a `*bool` like `Last`;
+  the daemon's routeFrame treats it as pure observability — DEBUG +
+  telemetry-ring `kind=clip_ready` append, no new bus topic, no new WS
+  class. A `say` frame may carry `clip_id` (64-hex store key for its
+  Text): on a store hit the child serves cached PCM through the exact
+  same pacing/barge-in/`played` lane (zero provider call); a miss or
+  an absent field is today's live `Speak(text)` byte-identically. No
+  PCM ever crosses C1; the say's Text stays the transcript source.
+- **Keys frame extension.** `tts_ref_hash` (always present, "" =
+  preset voice): hex sha256 of the `voice.tts_ref_audio` clone
+  reference file. It feeds ONLY clip-key identity — the qwen3 OpenAI-
+  compatible shim never receives reference audio in a request — so
+  deployments sharing model+voice name but differing reference audio
+  get distinct clip keys. An old child ignores the extra field.
+- **Clip store (child-owned writes).** `$MEEPT_HOME/voice_clips/`,
+  content-addressed, no index: `<key>.pcm` (canonical mono s16le at
+  16 kHz — renders NEVER use the call's negotiated rate, so a
+  PCMU@8k call cannot poison the store; playback resamples from the
+  meta `sample_rate`) + `<key>.json` manifest. Hit condition is pcm
+  length == meta `bytes`; corrupt = delete + regenerate. Renders run
+  in the background on the call's ctx (bounded concurrency, worker
+  dies with pipeline teardown); the daemon's planner path is
+  read-only + frame sends and fires ONLY behind the R4 gate (live
+  child connection, complete resolved TTS identity, voice employee
+  configured). `voice.enabled=false` writes nothing — the store dir is
+  created lazily by a child Put, never by the planner.
+- **Lane pools + reload.** `voice.VoiceLanes` resolves the five
+  filler-class pools per employee (row list > row scalar > global list
+  > global scalar > shipped default; a list is "set" only when
+  non-empty, so unset new keys are byte-identical; the `farewell` pool
+  ships non-empty). A config reload (`daemon.reloaded` bus topic, the
+  planner's `voice-clip-reload` subscription — that topic's first
+  production subscriber) re-reads the [voice] snapshot, republishes it
+  for keys-frame/identity/lane consumers (`currentVoiceCfg()`), and
+  re-plans every live call on its existing connection. A slow or
+  failed diff WARNs and degrades to live synth; never a teardown,
+  never a keys-frame delay.
+- **Farewell rule (R5).** A caller FINAL utterance that whole-matches
+  the builtin bye-phrase set speaks one farewell-lane line as a
+  last:true say with clip_id, cancels any in-flight draft (no LLM
+  turn), and ends the call with reason `caller farewell` — the say is
+  written before the end frame in program order so the played-drain
+  guarantee completes the audio. Exactly once per call; a repeat bye
+  logs and is ignored.
+- **Partial context warm (R7/R8).** `voice.context_warm` (opt-in,
+  default false; false = the warmer is never constructed and routeFrame
+  costs one atomic load per partial). Debounced per call on the global
+  `voice.turn_confirm_ms` window (0/legacy = fixed 900 ms)
+  + a 150 ms fire throttle; latest partial wins; at most one in-flight
+  warm per session (replace-discard); a final prompt or call end
+  cancels the timer AND the in-flight request. The warm request
+  (`llm.Client.Warm`) reuses the real turn's serialization path with
+  max_tokens=1 and the same session-affinity scope (the turn's
+  ACCOUNTING/conversation id, so prompt_cache_key + affinity header
+  match by construction), renders the same system+history prefix, and
+  participates in none of the retry/block/budget/metrics/ledger
+  machinery. Failures are DEBUG-swallowed by design; the Anthropic and
+  Codex clients ship explicit no-op Warm twins.
+- **E2E.** Hermetic suites `e2e/suites/voice_clips` (VC-1 pins the R4
+  gate: no clip writes with the sidecar disabled) and
+  `e2e/suites/context_warm`, both manifest-registered.
