@@ -138,7 +138,7 @@
     "agent.progress.synthesized": [
       {
         "file": "internal/daemon/components.go",
-        "line": 2782,
+        "line": 2793,
         "payload_keys": []
       }
     ],
@@ -218,7 +218,7 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 11378,
+        "line": 11406,
         "payload_keys": []
       }
     ],
@@ -577,7 +577,7 @@
     "dispatcher.stats.result": [
       {
         "file": "internal/daemon/components.go",
-        "line": 4532,
+        "line": 4543,
         "payload_keys": []
       }
     ],
@@ -598,7 +598,7 @@
     "employee.metric": [
       {
         "file": "internal/daemon/components.go",
-        "line": 6914,
+        "line": 6925,
         "payload_keys": [
           "name",
           "tags",
@@ -1829,7 +1829,7 @@
     "status.response": [
       {
         "file": "internal/daemon/components.go",
-        "line": 10512,
+        "line": 10540,
         "payload_keys": []
       }
     ],
@@ -2390,13 +2390,13 @@
     "team.start": [
       {
         "file": "internal/daemon/components.go",
-        "line": 9001,
+        "line": 9029,
         "payload_keys": [],
         "via_const": true
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 9038,
+        "line": 9066,
         "payload_keys": [],
         "via_const": true
       }
@@ -2448,7 +2448,7 @@
     "voice.call.ended": [
       {
         "file": "internal/daemon/voice_wiring.go",
-        "line": 1514,
+        "line": 1525,
         "payload_keys": [],
         "typed": true
       }
@@ -2621,7 +2621,7 @@
     "agent.event.*": [
       {
         "file": "internal/daemon/components.go",
-        "line": 2752,
+        "line": 2763,
         "subscriber_id": "progress-synthesizer"
       }
     ],
@@ -2807,7 +2807,7 @@
     "dispatcher.stats": [
       {
         "file": "internal/daemon/components.go",
-        "line": 4510,
+        "line": 4521,
         "subscriber_id": "dispatcher-stats-handler"
       }
     ],
@@ -2822,7 +2822,7 @@
     "employee.critical_finding": [
       {
         "file": "internal/daemon/components.go",
-        "line": 5400,
+        "line": 5411,
         "subscriber_id": "employee-critical-finding"
       }
     ],
@@ -3022,6 +3022,11 @@
       }
     ],
     "plan.approved": [
+      {
+        "file": "internal/daemon/employee_resume_wiring.go",
+        "line": 111,
+        "subscriber_id": "employee-plan-resume"
+      },
       {
         "file": "internal/daemon/evolver_approval_bridge.go",
         "line": 75,
@@ -3689,7 +3694,7 @@
     "status.request": [
       {
         "file": "internal/daemon/components.go",
-        "line": 10438,
+        "line": 10466,
         "subscriber_id": "status-handler"
       }
     ],
@@ -3996,7 +4001,7 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 10605,
+        "line": 10633,
         "subscriber_id": "agent-job-processor-evidence"
       }
     ],
