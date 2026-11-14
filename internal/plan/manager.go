@@ -567,9 +567,14 @@ func (m *PlanManager) ApprovePlan(ctx context.Context, planID, sessionID, by str
 
 	m.logger.Info("plan approved", "plan_id", planID, "by", by)
 
-	// Trigger synthesis.
+	// Synthesis is best-effort once approval is committed. A failure here must
+	// not fail the operator approve RPC or roll back the CAS, signoff, or
+	// approval columns — only those earlier errors stay fatal.
+	// runSynthesisReclaimPass re-drives approved plans that have no live task.
 	if err := m.Synthesize(ctx, planID); err != nil {
-		return fmt.Errorf("synthesize plan: %w", err)
+		m.logger.Error("synthesize plan after approval failed",
+			"plan_id", planID, "error", err)
+		return nil
 	}
 
 	return nil
@@ -942,6 +947,22 @@ func (m *PlanManager) PruneStalePlans(ctx context.Context, retentionDays int) (d
 	return deleted, cancelled, err
 }
 
+// synthesisReleaseTarget is the optional store seam that restores a failed
+// expansion to a caller-chosen state. ReleasePlanSynthesis always writes
+// draft; an approved plan must come back to approved so the approval stands
+// and runSynthesisReclaimPass can re-drive it. A store without the seam
+// keeps the draft release.
+type synthesisReleaseTarget interface {
+	ReleasePlanSynthesisTo(ctx context.Context, id string, restore PlanState) error
+}
+
+func releaseSynthesisTo(store PlanStore, ctx context.Context, id string, restore PlanState) error {
+	if rel, ok := store.(synthesisReleaseTarget); ok {
+		return rel.ReleasePlanSynthesisTo(ctx, id, restore)
+	}
+	return store.ReleasePlanSynthesis(ctx, id)
+}
+
 // ---------------------------------------------------------------------------
 // Synthesis
 // ---------------------------------------------------------------------------
@@ -997,10 +1018,15 @@ func (m *PlanManager) Synthesize(ctx context.Context, planID string) error {
 
 	// Past this point the plan is OURS and carries a lease. Every failure path
 	// must release or park it, or the plan would stay claimed forever.
+	// plan.State is the pre-claim snapshot: an approved row must come back to
+	// approved, not draft, or the approval is undone and runSynthesisReclaimPass
+	// never sees the no-task residue.
 	release := func(park bool) {
 		var relErr error
 		if park {
 			relErr = m.store.ParkPlanSynthesis(ctx, planID)
+		} else if plan.State == StateApproved {
+			relErr = releaseSynthesisTo(m.store, ctx, planID, StateApproved)
 		} else {
 			relErr = m.store.ReleasePlanSynthesis(ctx, planID)
 		}
@@ -1715,6 +1741,16 @@ func (m *PlanManager) resolvePlanDir(projectPath string) string {
 	defaultPath := m.config.Storage.DefaultPath
 	if defaultPath == "" {
 		defaultPath = "docs/plans"
+	}
+	if filepath.IsAbs(defaultPath) {
+		return defaultPath
+	}
+	// An empty project path must not resolve relative to the process CWD.
+	// Employee goal-loop plans and EnsureTaskPlan pass "". That used to
+	// write docs/plans/*.md into the git repo whenever a test or daemon
+	// was started there.
+	if projectPath == "" {
+		return filepath.Join(config.MeeptHome(), "plans")
 	}
 	return filepath.Join(projectPath, defaultPath)
 }

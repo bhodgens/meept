@@ -206,9 +206,13 @@ func TestPlanningRoundTrip(t *testing.T) {
 	if err := mgr.SubmitPlan(ctx, plan.ID); err != nil {
 		t.Fatalf("SubmitPlan (round-trip): %v", err)
 	}
-	// ApprovePlan synthesizes with a nil taskCreator — expected to error,
-	// but the plan must already sit in StateApproved.
-	_ = mgr.ApprovePlan(ctx, plan.ID, "sess-b3", "reviewer")
+	// ApprovePlan synthesizes with a nil taskCreator. Synthesis failure is
+	// non-fatal once approval is committed (ApprovePlan returns nil);
+	// runSynthesisReclaimPass retries approved plans with no task. The plan
+	// must sit in StateApproved (or executing if a creator ran).
+	if err := mgr.ApprovePlan(ctx, plan.ID, "sess-b3", "reviewer"); err != nil {
+		t.Fatalf("ApprovePlan: %v", err)
+	}
 	got, err = mgr.store.GetPlan(ctx, plan.ID)
 	if err != nil {
 		t.Fatalf("GetPlan: %v", err)
