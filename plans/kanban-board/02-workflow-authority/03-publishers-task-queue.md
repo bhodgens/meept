@@ -33,7 +33,7 @@ Exposes the following event payloads via `internal/bus.Topic[StateEvent]`:
 ## Self-Verification Checklist
 - [ ] Every state transition emits a `StateEvent` (C1) on the correct topic (C2).
 - [ ] Events are published to the correct `internal/bus` topics.
-- [s] One enum-coverage test is implemented.
+- [ ] One enum-coverage test is implemented.
 
 ## Review Checklist
 - [ ] No debug prints or TODOs.

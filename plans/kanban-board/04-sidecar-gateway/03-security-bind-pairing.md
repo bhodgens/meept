@@ -37,9 +37,9 @@ Implement secure pairing and binding policies for the sidecar (C7).
 
 ## Tasks
 - [ ] TDD: Write `internal/kanbansvc/pairing_test.go` verifying the single-use exchange and token storage (kanban pairing lives in the sidecar gateway package, NOT the daemon's `internal/comm/http/pairing.go` — that is precedent only: read, do not edit).
-- [ ] Implementation: Implement the daemon-side pairing handler and token management.
+- [ ] Implementation: Implement the daemon-side pairing handler and token management (in the kanban daemon wiring, per C7 — the daemon-side exchange endpoint is registered by 07/01-daemon-wiring; this leaf provides the handler code).
 - [ ] Implementation: Implement the sidecar's bearer token middleware.
-- [ ] Verify: `go test ./internal/comm/http/...` and `go build ./cmd/meept-kanban`
+- [ ] Verify: `go test ./internal/kanbansvc/...` and `go build ./cmd/meept-kanban`
 
 ## Self-Verification Checklist
 - [ ] Pairing code is printed to console only once.

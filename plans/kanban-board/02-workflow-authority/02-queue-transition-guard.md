@@ -10,7 +10,11 @@ Do NOT commit. Do NOT run `git add`.
 Implement state transition guards for queue jobs to ensure valid lifecycle movements.
 1. Create `internal/queue/transitions.go` containing a transition map for `JobState` (including dead-letter edges).
 2. Implement `queueAllows(from, to string) bool` logic.
-3. Integrate a guard in `internal/queue/store.go` (e.g., during `SetState` or `CompleteAttempt`) to ensure state changes respect the transition rules, while preserving existing SQL CAS (Compare-And-Swap) logic.
+3. Integrate a guard in `internal/queue/store.go` — the state mutator is
+   `Store.UpdateState` (`internal/queue/store.go:801`) and
+   `Store.CompleteAttempt` (`internal/queue/store.go:866`); there is no
+   `SetState` in this package. Ensure state changes respect the transition
+   rules while preserving existing SQL CAS (Compare-And-Swap) logic.
 
 ## Estimated Context
 60K tokens
@@ -33,7 +37,7 @@ Exposes the following logic for job lifecycle enforcement:
 ## Self-Verification Checklist
 - [ ] Implementation preserves existing SQL CAS (Compare-And-Swap) for atomic updates.
 - [ ] All valid state transitions are covered in the `jobTransitions` map.
-- [ ] `SetState` in `internal/queue/store.go` correctly blocks invalid transitions.
+- [ ] `UpdateState` and `CompleteAttempt` in `internal/queue/store.go` correctly block invalid transitions.
 
 ## Review Checklist
 - [ ] No debug prints or TODOs.

@@ -5,7 +5,12 @@ Do NOT commit. Do NOT run git add.
 
 ## Parent and Dependencies
 - Parent: 05-surfaces (Orchestrator)
-- Dependencies: 01-foundation (C1), 05/05-flutter-board-view
+- Dependencies: 01-foundation (C1). This leaf comes FIRST in the
+  04→05→07 chain: the service layer must exist before the board view
+  (05/05) consumes it, and the Dart `WSBoard` event-model support lands
+  in 05/07 AFTER the view — until 05/07 lands, `boardEvents()` returns a
+  progress-class stream placeholder (C8 interim rule) and 05/05 must not
+  depend on `WSBoard`-typed payloads.
 
 ## Scope
 Implement the Dart service layer in `ui/flutter_ui/lib/services/kanban_service.dart` and its associated models.

@@ -13,7 +13,7 @@ Establish the network-exposed boundary for the Kanban subsystem. This branch imp
 |---|---|---|---|---|
 | 04/01-grants-authz | leaf | 01 | 55K | `internal/kanban/authz.go` |
 | 04/02-sidecar-gateway | leaf | 01, 04/01 | 85K | `cmd/meept-kanban/main.go`, `internal/kanbansvc/gateway.go` |
-| 04/03-security-bind-pairing | leaf | 01, 04/01 | 80K | `internal/comm/http/pairing.go` |
+| 04/03-security-bind-pairing | leaf | 01, 04/01 | 80K | `internal/kanbansvc/pairing.go` (+ `internal/kanbansvc/pairing_test.go`; `internal/comm/http/pairing.go` is READ-ONLY precedent, not owned) |
 | 04/04-daemon-spawn-supervision | leaf | 01 | 70K | `internal/daemon/kanban_boot.go` |
 
 ## Dispatch Protocol

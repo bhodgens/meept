@@ -22,9 +22,10 @@ Exposes:
 
 ## Tasks
 - [ ] Implement `internal/kanban/human.go`: `MoveCard` logic enforcing C10 Lease rule (returns `ErrLeaseHeld` with holder + age).
-- [ ] Implement `internal/kanban/human.go`: `Takeover` logic (audit-before-effect; release claim token; cancel underlying episode via registry seam).
-- [ ] Implement `internal/kanban/human.go`: `Assign` and `Comment` handlers.
-- [ ] Write `internal/kanban/human_test.go`: Test lease refusal (C10) and takeover audit sequence.
+- [ ] Implement `internal/kanban/human.go`: WIP check per C10: target column count vs `Column.WIP` (0 = unlimited) BEFORE the move; `wip_mode: "block"` refuses with `ErrWIPFull{ColumnID, Limit}`, `"warn"` moves + notes.
+- [ ] Implement `internal/kanban/human.go`: `Takeover` logic (audit-before-effect; release claim token; cancel underlying episode). Inject a `LeaseAuthority` interface (claim lookup, token release, episode cancel) so this package does not import the task registry / plan store directly; the concrete implementation is wired by 07/01-daemon-wiring.
+- [ ] Implement `internal/kanban/human.go`: `Assign` and `Comment` handlers. `Comment` writes to the `kanban_card_events` table (C3, migration in 01-foundation/01); `kanban.card.timeline` reads the same table.
+- [ ] Write `internal/kanban/human_test.go`: Test lease refusal (C10), WIP block/warn, and takeover audit sequence.
 - [ ] Verify: `go test -v -run TestHumanCommands ./internal/kanban/...`
 
 ## Self-Verification Checklist

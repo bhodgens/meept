@@ -19,10 +19,10 @@ Implement a Kanban board view in the TUI via `internal/tui/kanban_view.go`.
   - All TUI text must be lowercase.
 
 ## Estimated Context (90K)
-- `internal/tui/app.go`
-- `internal/tui/tableutil.go`
+- `internal/tui/kanban_view.go`
+- `internal/tui/tableutil/` (package directory — Size + SetRows helpers)
 - `internal/tui/components/`
-- `internal/rpc/client.go`
+- daemon transport client (`connectDaemon()` pattern, `cmd/meept/main.go:302`)
 
 ## Interface Contract (exact signatures exposed to siblings)
 - None (TUI is a consumer)

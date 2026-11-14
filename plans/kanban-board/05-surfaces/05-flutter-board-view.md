@@ -5,7 +5,9 @@ Do NOT commit. Do NOT run git add.
 
 ## Parent and Dependencies
 - Parent: 05-surfaces (Orchestrator)
-- Dependencies: 03-board-projection, 05/04-flutter-bridge
+- Dependencies: 03-board-projection, 05/04-flutter-bridge. Do not consume
+  `WSBoard`-typed payloads — 05/07 lands after this leaf; consume the
+  service's `boardEvents()` stream and let 05/07 upgrade the payload type.
 
 ## Scope
 Implement the Flutter Kanban board widget in `ui/flutter_ui/lib/features/kanban/board_view.dart`.

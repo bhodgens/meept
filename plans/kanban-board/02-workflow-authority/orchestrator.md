@@ -13,10 +13,15 @@ Implement the authority logic for Kanban transitions, ensuring state changes are
 
 | Child | Type | Deps | Est context | Files |
 |---|---|---|---|---|
-| 02/01-task-transition-guard | Leaf | — | 60K | transitions.go, transitions_test.go |
-| 02/02-queue-transition-guard | Leaf | — | 60K | transitions.go, transitions_test.go |
-| 02/03-publishers-task-queue | Leaf | 02 | 90K | events.go, [edits to task/step/goal] |
-| 02/04-publishers-plan-step-goal | Leaf | 02 | 90K | [edits to plan/step/goal] |
+| 02/01-task-transition-guard | Leaf | — | 60K | internal/task/transitions.go, internal/task/task.go (+ documented SetState call-site migration per the leaf's blast-radius note) |
+| 02/02-queue-transition-guard | Leaf | — | 60K | internal/queue/transitions.go, internal/queue/store.go |
+| 02/03-publishers-task-queue | Leaf | 02 | 90K | internal/kanban/events.go, internal/task/registry.go + internal/queue/queue.go publisher wiring (task+job only) |
+| 02/04-publishers-plan-step-goal | Leaf | 02 | 90K | internal/plan/manager.go, internal/task/step.go, internal/employee/goal.go publisher wiring |
+
+NOTE: this branch violates the master "no leaf owns >3 changed files" rule
+by design — event publication must touch each machine's package. The two
+publisher leaves are sequential (04 depends on 03) and the master grants
+them a documented exception.
 
 ## Dispatch Protocol
 1. `delegate_task` per leaf.

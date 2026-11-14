@@ -22,7 +22,7 @@ Implement the parity validation for the Kanban board view to ensure TUI and Flut
 - None (Testing/Auditing task)
 
 ## Tasks
-- [ ] TDD: Write `internal/tui/parity_test.go` verifying the board view's presence in `gui_inventory.json`.
+- [ ] TDD: UPDATE `internal/tui/parity_test.go` (the file already exists) verifying the board view's presence in `gui_inventory.json`.
 - [ ] Implementation: Regenerate `internal/tui/testdata/gui_inventory.json` with Kanban features.
 - [ ] Implementation: Run lowercase audit on Kanban UI strings.
 - [ ] Verify: `go test ./internal/tui/...` and `make graphs-check`

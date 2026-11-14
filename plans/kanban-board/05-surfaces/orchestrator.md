@@ -12,13 +12,17 @@ Implement the user-facing interaction layer for the Kanban board across CLI, TUI
 ## Child Index
 | Child | Type | Deps | Est context | Files |
 |---|---|---|---|---|
-| 05/01-rpc-handlers | leaf | 03 | 75K | `internal/rpc/kanban.go` |
-| 05/02-cli | leaf | 06 | 55K | `cmd/meept/kanban.go` |
-| 05/03-tui-board | leaf | 03 | 90K | `internal/tui/kanban_view.go` |
-| 05/04-flutter-bridge | leaf | 01, 05/05 | 70K | `ui/flutter_ui/lib/services/kanban_service.dart` |
+| 05/01-rpc-handlers | leaf | 03 | 75K | `internal/rpc/kanban.go` (+ `kanban_test.go`; daemon-side registration is 07/01) |
+| 05/02-cli | leaf | 03 | 55K | `cmd/meept/kanban.go` (+ `kanban_test.go`; uses the existing `transport.Client` from `connectDaemon()`, `cmd/meept/main.go:302` — there is no `internal/rpc/client.go`) |
+| 05/03-tui-board | leaf | 03 | 90K | `internal/tui/kanban_view.go` (+ test; uses the `internal/tui/tableutil` package — a package dir, not `tableutil.go`) |
+| 05/04-flutter-bridge | leaf | 01 | 70K | `ui/flutter_ui/lib/services/kanban_service.dart`, `ui/flutter_ui/lib/models/kanban_models.dart` |
 | 05/05-flutter-board-view | leaf | 03, 05/04 | 95K | `ui/flutter_ui/lib/features/kanban/board_view.dart` |
-| 05/06-parity-inventory | leaf | 03, 05/03 | 45K | `internal/tui/testdata/gui_inventory.json` |
-| 05/07-ws-event-class | leaf | 03, 05/05 | 60K | `internal/comm/wsclass/wsclass.go` |
+| 05/06-parity-inventory | leaf | 03, 05/03 | 45K | `internal/tui/testdata/gui_inventory.json`, `internal/tui/parity_test.go` (UPDATE — file exists), `internal/tui/kanban_view.go` |
+| 05/07-ws-event-class | leaf | 03, 05/05 | 60K | `internal/comm/wsclass/wsclass.go` (+ tests), `ui/flutter_ui/lib/models/kanban_models.dart` |
+
+Leaf order: 05/01, 05/02, 05/03 parallel; then 05/04; then 05/05; then
+05/06 and 05/07 (parallel). The old cycle (05/04 depending on 05/05) is
+removed — the 04→05→07 chain is strict.
 
 ## Dispatch Protocol
 1. `delegate_task` per leaf.

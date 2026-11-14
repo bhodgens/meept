@@ -10,7 +10,22 @@ Do NOT commit. Do NOT run `git add`.
 Implement the authority to validate and execute task state transitions.
 1. Create `internal/task/transitions.go` containing a transition map and logic mirroring the pattern in `internal/plan/transitions.go` (specifically referencing `internal/plan/transitions.go:46`, `77`, `136`).
 2. Implement `taskAllows(from, to string) bool` logic.
-3. Integrate a guard into `internal/task/task.go` (e.g., in `SetState`) to check transitions before application.
+3. Integrate a guard into `internal/task/task.go` `SetState`.
+
+**BLAST-RADIUS NOTE (do not skip):** `Task.SetState` today is
+`func (t *Task) SetState(state TaskState)` with NO error return
+(`internal/task/task.go:188`). Guarding requires changing the signature to
+return `error`. That touches ~20 call sites: `internal/agent/strategic.go`
+(8 sites), `internal/task/registry.go` (5 sites),
+`internal/tools/builtin/task.go:360`. Options, in order of preference:
+(a) add `SetStateChecked(to TaskState) error` that wraps the guard + calls
+SetState, migrate call sites incrementally, and keep plain `SetState` as a
+deprecated passthrough that logs a guard violation; or (b) change the
+signature and fix all call sites in this leaf. Choose (a) unless the
+call-site count at execution time is small. Record the choice in the
+completion-notes for the orchestrator. Files beyond transitions.go/task.go
+may be touched ONLY for this call-site migration; list them explicitly in
+the report.
 
 ## Estimated Context
 60K tokens

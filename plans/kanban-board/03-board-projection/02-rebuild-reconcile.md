@@ -16,10 +16,14 @@ Implement a reconciliation mechanism to ensure the Kanban board can be fully reb
 ## Interface Contract
 `ReconcileNow(ctx context.Context) error` (updates `kanban_projections` via full scan)
 
+Periodic rebuild schedule comes from `[kanban].reconcile_interval`
+(C9; "0s" = disabled, default). The ticker is wired by 07/01-daemon-wiring
+on the daemon stop context — this leaf implements only the mechanism, not
+the daemon scheduling.
+
 ## Tasks
 - [ ] Implement `internal/kanban/reconcile.go`: Full rebuild from source tables (`kanban_boards`, `kanban_columns`, etc.).
-- [ ] Implement `internal/kanban/reconcile.go`: Periodic rebuild trigger.
-- [ ] Implement `internal/kanban/reconcile.go`: `ReconcileNow()` implementation for on-demand refresh.
+- [ ] Implement `internal/kanban/reconcile.go`: `ReconcileNow()` implementation for on-demand refresh, plus an exported `RunPeriodicReconcile(ctx, store, interval)` helper the daemon wiring calls.
 - [ ] Write `internal/kanban/reconcile_test.go`: Verify equality (board == source) after rebuild.
 - [ ] Test: Kill the projector mid-stream, restart, and assert equality in `reconcile_test.go`.
 

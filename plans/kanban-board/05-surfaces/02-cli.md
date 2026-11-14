@@ -22,8 +22,8 @@ Implement the `meept kanban` command-line interface in `cmd/meept/kanban.go`.
 
 ## Estimated Context (55K)
 - `cmd/meept/kanban.go`
-- `cmd/meept/main.go`
-- `internal/rpc/client.go`
+- `cmd/meept/main.go` (the `connectDaemon()` transport client, line 302)
+- `internal/transport` (client constructor; there is NO `internal/rpc/client.go`)
 
 ## Interface Contract (exact signatures exposed to siblings)
 - None (CLI is a consumer)

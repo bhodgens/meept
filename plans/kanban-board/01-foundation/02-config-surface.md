@@ -24,11 +24,18 @@ type KanbanConfig struct {
     SidecarEnabled  bool   `json:"sidecar_enabled"`
     SidecarBind     string `json:"sidecar_bind"`
     WIPMode         string `json:"wip_mode"` // "warn" | "block"
+    ReconcileInterval string `json:"reconcile_interval"` // Go duration string; "0s" = disabled
     GitHubSync      struct {
         Enabled bool `json:"enabled"`
     } `json:"github_sync"`
 }
 ```
+NOTE: meept's json5 loader rewrites quoted duration-looking values to ns
+integers (`quotedDurationToNanos`). If `ReconcileInterval` round-trips as
+an int and the schema validator rejects the reload, add a key-aware
+exemption in the loader (skip declared-string keys) + a regression test
+pinning BOTH sides (exempt key stays a string; real duration keys still
+convert). See the close-out integration bug precedent in plan-tree-review.
 
 ## Tasks
 1. **TDD: failing test for missing config field**

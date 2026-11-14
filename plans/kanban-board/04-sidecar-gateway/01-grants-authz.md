@@ -9,11 +9,15 @@ Do NOT commit. Do NOT run git add.
 
 ## Scope
 Implement `internal/kanban/authz.go` to enforce C5 grants.
-- Implement `CheckGrant(principal, grant string) bool`.
+- Implement grant checks bound to a config/user-store dependency, NOT
+  package-level globals: construct `NewAuthorizer(cfg *config.Config, users *auth.Store)` (nil users = owner-only mode) and expose
+  `func (a *Authorizer) CheckGrant(principal, grant string) bool` and
+  `func (a *Authorizer) GetGrantsForPrincipal(principal string) []string`.
+  Package-level functions would force global config state; the daemon
+  wiring (07/01) holds the instance.
 - Logic:
   - If `multiuser.enabled=false` (default), the Unix socket/dev_key owner holds all three grants: `board.read`, `board.mutate`, `board.takeover`.
   - If `multiuser.enabled=true`, verify principal has the required grant from the user store.
-- Implement `GetGrantsForPrincipal(principal string) []string`.
 
 ## Estimated Context (55K)
 - `internal/kanban/authz.go`
@@ -21,8 +25,9 @@ Implement `internal/kanban/authz.go` to enforce C5 grants.
 - `internal/config/config.go`
 
 ## Interface Contract (exact signatures exposed to siblings)
-- `func CheckGrant(principal string, grant string) bool`
-- `func GetGrantsForPrincipal(principal string) []string`
+- `func NewAuthorizer(cfg *config.Config, users *auth.Store) *Authorizer`
+- `func (a *Authorizer) CheckGrant(principal string, grant string) bool`
+- `func (a *Authorizer) GetGrantsForPrincipal(principal string) []string`
 
 ## Tasks
 - [ ] TDD: Write `internal/kanban/authz_test.go` testing both `multiuser=false` (owner-only) and `multiuser=true` (user-specific) modes.

@@ -23,7 +23,10 @@ Exposes:
 - `kanban_assign`
 - `kanban_comment`
 
-Note: `kanban_claim` is EXCLUDED per master.md decision (stays on internal queue path).
+Note: `kanban_claim` is EXCLUDED — claim acquisition/release stays on the
+internal queue/task machinery (master decision 1: agents hold claims via
+their work items; the board only REFUSES human moves on claimed cards and
+offers `takeover`).
 
 ## Tasks
 - [ ] Implement `internal/tools/builtin/kanban_register.go`: Register the list of `kanban_*` tools with the `toolprov`.

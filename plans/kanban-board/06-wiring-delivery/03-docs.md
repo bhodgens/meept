@@ -16,7 +16,8 @@ Generate and verify all required documentation for the Kanban board feature, ens
 ## Tasks
 - [ ] Author `docs/workflows/kanban.md`: Feature specification covering projector, rebuild, and human command workflows.
 - [ ] Author `internal/kanban/AGENTS.md`: Package invariant documentation (store-is-projection rule, lease rule, sidecar no-logic rule, opt-in defaults).
-- [ ] Update root `AGENTS.md`: Add `internal/kanban` to the package table and include an invariant summary.
+- [ ] Author `internal/kanbansvc/AGENTS.md`: Sidecar gateway invariants (no SQLite import, no TLS, no provider keys; transport-client-only daemon access).
+- [ ] Update root `AGENTS.md`: Add `internal/kanban` + `internal/kanbansvc` to the Key Components table with invariant summaries (and the `07-daemon-wiring` wiring note), updating this file in the same commit as the code per its maintenance rule.
 - [ ] Add a section to `docs/workflows/kanban.md` providing a Caddy/nginx proxy example for sidecar TLS termination.
 
 ## Self-Verification Checklist

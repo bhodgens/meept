@@ -24,7 +24,7 @@ Implement the `kanban` RPC handlers in `internal/rpc/kanban.go`.
   - `kanban.card.timeline` (C4)
   - `kanban.reconcile.now` (C4)
 - **Authorization (C5):** All mutation methods (anything modifying cards/columns/boards) must be guarded by `board.mutate` and `board.takeover` as appropriate. Read methods must be guarded by `board.read`.
-- **Implementation Detail:** All handlers must be registered in the RPC server (follow `internal/rpc/intake_status.go` pattern).
+- **Implementation Detail:** All handlers must be registered in the RPC server (follow `internal/rpc/intake_status.go` pattern). NOTE: this leaf ships the handler + registration code as a registerable unit; the LIVE daemon registration (calling it from components/daemon wiring) is owned by 07/01-daemon-wiring. Until 07 lands, the handlers exist but the live daemon does not serve them.
 
 ## Estimated Context (75K)
 - `internal/rpc/kanban.go`

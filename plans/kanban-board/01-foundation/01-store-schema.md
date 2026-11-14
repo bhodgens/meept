@@ -34,6 +34,7 @@ Exposes the following CRUD signatures:
 2. **Implementation: types.go and store.go**
    - Implement `internal/kanban/types.go` (C1 verbatim)
    - Implement `internal/kanban/store.go` with SQLite migrations and CAS for card movement
+   - Include the `kanban_card_events` migration (C3: append-only comments/timeline).
 3. **Verification: store_test.go**
    - Run `go test -p 2 -v ./internal/kanban/`
 

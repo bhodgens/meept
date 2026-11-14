@@ -18,7 +18,7 @@ Implement a real-time projector that subscribes to work-item state-change bus ev
 
 ## Tasks
 - [ ] Implement `internal/kanban/projector.go`: Subscribe to `kanban.event.step.state`, `.goal.state`, `.job.state`, `.task.state`, `.plan.state` topics.
-- [ ] Implement `internal/kanban/projector.go`: Map events via `kanban_projections` rules to `Card` objects.
+- [ ] Implement `internal/kanban/projector.go`: Map events via `kanban_projections` rules to `Card` objects. Fill `Card` provenance (`GoalID`, `EmployeeID`, `PlanID`, `SessionID`, `TriggerRef`) by reading the source work-item row keyed by `StateEvent.ID` (C1 provenance rule) — inject a read-only row-fetcher interface so the projector does not import each machine package directly.
 - [ ] Implement `internal/kanban/projector.go`: Handle bursts via coalescence; never block the publisher.
 - [ ] Write `internal/kanban/projector_test.go`: Verify projection logic against event streams.
 - [ ] Verify: `go test -v -run TestProjector/coalescence ./internal/kanban/...`

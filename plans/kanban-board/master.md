@@ -61,6 +61,12 @@ type StateEvent struct { Kind, ID, From, To, Reason string; TS time.Time } // JS
 type CardMoved struct { CardID, FromColumnID, ToColumnID, Actor string; LeaseBlocked bool }
 ```
 
+Provenance rule (C1): `StateEvent` carries identity only. The projector
+fills `Card` provenance (`GoalID`, `EmployeeID`, `PlanID`, `SessionID`,
+`TriggerRef`) by reading the source work-item row (plan / task / step /
+goal / job / ticket store) keyed by `StateEvent.ID` at projection time.
+No provenance rides the event. Owner of the fetch: 03-board-projection/01.
+
 Errors: `ErrLeaseHeld{Holder string, Since time.Time}`, `ErrUnknownCard`,
 `ErrWIPFull{ColumnID string, Limit int}`.
 
@@ -71,12 +77,18 @@ Errors: `ErrLeaseHeld{Holder string, Since time.Time}`, `ErrUnknownCard`,
 | `kanban.event.step.state`, `.goal.state`, `.job.state`, `.task.state`, `.plan.state` | StateEvent | per-machine event publishers (branch 02) |
 | `kanban.card.moved` | CardMoved | kanban RPC (branch 03) |
 | `kanban.board.changed` | `{board_id}` | projector + CRUD |
-| `kanban.human.command` | `{verb, card_id, column_id, actor, token}` | sidecar (branch 04) → consumed by daemon |
+
+No sidecar bus topic exists: the sidecar is a thin REST/WS → Unix-socket-RPC
+proxy (C7) and never publishes to the daemon bus. Human card commands arrive
+as `kanban.card.*` RPC calls forwarded by the sidecar.
 
 ### C3 Table names (migration-owned by 01-foundation/01)
 
 `kanban_boards`, `kanban_columns`, `kanban_cards`, `kanban_projections`
-(board↔column mapping rules: kind + from_state → column_id).
+(board↔column mapping rules: kind + from_state → column_id),
+`kanban_card_events` (append-only: card comments and timeline entries —
+card_id, kind, actor, body, created_at; backs `kanban.card.comment` and
+`kanban.card.timeline`).
 
 ### C4 RPC method names (exact strings)
 
@@ -108,10 +120,15 @@ Default bind `127.0.0.1:8790`. Non-loopback bind requires
 boot warning (mirrors the voice non-loopback invariant with flipped
 polarity: knob required, never accidental). No TLS in the binary. Static
 Flutter web bundle from `$MEEPT_HOME/webui` (`WEBDIR`, Makefile:127).
-Every read/mutation goes to the daemon Unix socket RPC; the binary opens
-NO SQLite handle. Browser auth: pairing-style single-use code printed to
-the daemon console, exchanged once at `POST /kanban/pair/exchange` for a
-stored bearer token carrying a grant set (pattern: internal/comm/http/pairing.go).
+Every read/mutation goes to the daemon Unix-socket RPC via the CLI's
+existing transport client (`connectDaemon()` pattern, `cmd/meept/main.go:302`
+— `internal/transport`, NOT `internal/rpc/client.go`, which does not exist);
+the binary opens NO SQLite handle. Browser auth: pairing-style single-use
+code printed to the daemon console, exchanged once at
+`POST /kanban/pair/exchange` for a stored bearer token carrying a grant
+set (pattern: internal/comm/http/pairing.go — read-only precedent; the
+kanban pairing handler lives in the daemon kanban wiring + sidecar
+middleware, see 04-sidecar/03).
 
 ### C8 WS event class
 
@@ -125,7 +142,8 @@ GUI Dart event model, and `make graphs` output (ws-event-map). Owner:
 
 ```json5
 enabled: false, sidecar_enabled: false, sidecar_bind: "127.0.0.1:8790",
-wip_mode: "warn", // warn | block
+wip_mode: "warn", // warn | block — enforced in 03-board-projection/03 MoveCard
+reconcile_interval: "0s", // 0 = disabled; >0 schedules the periodic rebuild (03-board-projection/02)
 github_sync: { enabled: false } // issue #133; code must NOT read this beyond the knob
 ```
 
@@ -135,6 +153,11 @@ github_sync: { enabled: false } // issue #133; code must NOT read this beyond th
 whose work ref holds a live claim → `ErrLeaseHeld`. The UI must display
 holder + age from the error. `card.takeover` is the only bypass; it emits
 an audit record before acting (audit-before-effect precedent, voice dial).
+WIP rule (same owner): `card.move` checks the target column count against
+`Column.WIP` (0 = unlimited) BEFORE the move; `wip_mode: "block"` refuses
+with `ErrWIPFull{ColumnID, Limit}`, `wip_mode: "warn"` moves but emits a
+`kanban.board.changed` note payload. Both checks live in
+03-board-projection/03 `MoveCard`.
 
 ## Child Index
 
@@ -145,12 +168,14 @@ an audit record before acting (audit-before-effect precedent, voice dial).
 | 03-board-projection | branch | 01, 02 | — | projector, rebuild, commands |
 | 04-sidecar-gateway | branch | 01 (C5 self-owned) | — | grants, sidecar, security, spawn |
 | 05-surfaces | branch | 03 | — | rpc, cli, tui, flutter, parity, ws |
-| 06-wiring-delivery | branch | all | — | mcp, e2e, docs, intake-bridge |
+| 06-wiring-delivery | branch | all | — | mcp, e2e, docs |
+| 07-daemon-wiring | branch | 01, 03, 05 | — | daemon boot wiring, RPC registration, store open |
 
 Concurrency plan: Wave A = 01 and 02 (fully parallel, disjoint packages).
 Wave B = 03 and 04 (04 depends on 01 only). Wave C = 05 (needs 03).
-Wave D = 06 (needs all). Serialize leaves that edit `internal/daemon/components.go`
-or `internal/tui/app.go` — one per wave.
+Wave D = 06 and 07 (06 needs 05's e2e surface; 07 needs 01+03+05 —
+07 and 06 are parallel, disjoint files). Serialize leaves that edit
+`internal/daemon/components.go` or `internal/tui/app.go` — one per wave.
 
 ## Dispatch Protocol
 
@@ -197,6 +222,7 @@ For each child in dependency order:
 | 04-sidecar-gateway | PENDING | |
 | 05-surfaces | PENDING | |
 | 06-wiring-delivery | PENDING | |
+| 07-daemon-wiring | PENDING | |
 
 ## Integration Test Plan
 
@@ -205,9 +231,14 @@ After all branches reach COMPLETE, in-session:
 1. `go test -p 2 -short ./...` full sweep, then `-race ./internal/kanban/...`.
 2. e2e suite `e2e/suites/kanban`: (a) rebuild equality — kill projector,
    restart, board == source; (b) lease refusal returns ErrLeaseHeld with
-   holder+age; (c) takeover moves + audits; (d) WIP counter accuracy;
-   (e) sidecar request without token → 401; LAN bind without knob → boot fail;
-   (f) parity snapshot (gui_inventory includes board view).
+   holder+age; (c) takeover moves + audits; (d) WIP counter accuracy
+   (block refuses with ErrWIPFull, warn moves + notes); (e) sidecar request
+   without token → 401; LAN bind without knob → boot fail;
+   (f) parity snapshot (gui_inventory includes board view); (g) live-daemon
+   wiring — boot the real daemon with `[kanban].enabled=true`, assert
+   `kanban.board.list` answers over the Unix socket (guards against a
+   hand-replicated test fixture passing while the real registration never
+   fires).
 3. `make graphs-check`, `make lint-ci`, TUI parity test.
 4. Manual smoke: `meept kanban board`, sidecar curl against loopback,
    Caddy example in docs.
