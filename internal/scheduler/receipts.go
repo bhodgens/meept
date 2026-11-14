@@ -330,6 +330,22 @@ func (s *Scheduler) recoverInFlightDeliveries() error {
 			return receiptAttemptTime(stuck[i]).Before(receiptAttemptTime(stuck[j]))
 		})
 
+		// M-7 (bughunt 2026-11-14 round 2): the no-target-session guard
+		// MUST precede the F2 reconciliation. A job whose TargetSessionID
+		// was removed after its rows went stuck was getting those rows
+		// flipped to delivered with the "already delivered" note even
+		// though nothing was ever deliverable to it — recovery is only
+		// meaningful for session-pinned jobs, so the guard owns the skip.
+		if cfg.AgentConfig == nil || cfg.AgentConfig.TargetSessionID == "" {
+			for _, r := range stuck {
+				s.logger.Warn("scheduler: skipping receipt recovery for job without a target session",
+					"job_id", cfg.ID,
+					"message_id", r.MessageID,
+				)
+			}
+			continue
+		}
+
 		// F2 guard: any stuck MessageID that already has a DELIVERED
 		// receipt in this job's history is a completed turn — re-publishing
 		// it would re-execute the turn (chat.request has no
@@ -356,16 +372,6 @@ func (s *Scheduler) recoverInFlightDeliveries() error {
 					"message_id", mid,
 				)
 			}
-		}
-
-		if cfg.AgentConfig == nil || cfg.AgentConfig.TargetSessionID == "" {
-			for _, r := range stuck {
-				s.logger.Warn("scheduler: skipping receipt recovery for job without a target session",
-					"job_id", cfg.ID,
-					"message_id", r.MessageID,
-				)
-			}
-			continue
 		}
 
 		s.mu.RLock()

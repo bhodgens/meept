@@ -158,6 +158,13 @@ type CancelTaskRequest struct {
 }
 
 // Cancel marks a task as cancelled.
+//
+// Routes through Registry.CancelTask (M-4, bughunt 2026-11-14 round 2) so
+// the service path shares the registry's terminal-refusal semantics: a task
+// already in a terminal state is a no-op success, not a resurrection flip
+// (the raw UpdateState path previously flipped a completed/failed/rejected
+// task into cancelled). CancelTask also triggers the interrupt token so
+// in-flight work observes the cancellation, matching the bus handler path.
 func (s *TaskService) Cancel(ctx context.Context, req CancelTaskRequest) error {
 	if req.ID == "" {
 		return wrapError("task", "Cancel", ErrInvalidInput)
@@ -165,8 +172,7 @@ func (s *TaskService) Cancel(ctx context.Context, req CancelTaskRequest) error {
 	if s.registry == nil {
 		return wrapError("task", "Cancel", ErrUnavailable)
 	}
-	// Use UpdateState to set task to cancelled state
-	return s.registry.UpdateState(ctx, req.ID, task.StateCancelled)
+	return s.registry.CancelTask(ctx, req.ID, "")
 }
 
 // LinkSessionRequest contains parameters for linking a session to a task.

@@ -357,7 +357,16 @@ func (t *TaskUpdateTool) Execute(ctx context.Context, args map[string]any) (any,
 	}
 
 	if stateStr, ok := args["state"].(string); ok && stateStr != "" {
-		taskObj.SetState(task.TaskState(stateStr))
+		// M-1 (bughunt 2026-11-14 round 2): this was a raw
+		// SetState(task.TaskState(stateStr)) — an agent-executed tool could
+		// write ANY string as state with no validity or transition check.
+		// Validate the enum value, then enforce the taskTransitions edge.
+		if !task.ValidTaskState(task.TaskState(stateStr)) {
+			return nil, fmt.Errorf("invalid task state %q: must be one of pending, planning, awaiting_approval, executing, testing, completed, failed, rejected, cancelled", stateStr)
+		}
+		if err := taskObj.SetStateChecked(task.TaskState(stateStr)); err != nil {
+			return nil, fmt.Errorf("invalid task state transition: %w (allowed transitions: pending -> planning/awaiting_approval/executing/cancelled; planning -> awaiting_approval/executing/testing/cancelled/failed; awaiting_approval -> executing/testing/cancelled/failed/rejected; executing -> testing/completed/failed/rejected/cancelled; testing -> completed/failed/rejected/cancelled/executing)", err)
+		}
 	}
 
 	if memRef, ok := args["add_memory_ref"].(string); ok && memRef != "" {

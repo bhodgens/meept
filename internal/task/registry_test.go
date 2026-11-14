@@ -215,13 +215,31 @@ func TestRegistry_AutoComplete(t *testing.T) {
 	reg := newTestRegistry(t)
 	ctx := context.Background()
 
+	// The auto-complete must only fire from a LEGAL source state (M-3,
+	// bughunt 2026-11-14 round 2): pending -> completed is an illegal edge
+	// per taskTransitions, so CompleteJob on a pending task increments the
+	// counters but leaves the state pending.
 	task, _ := reg.Create(ctx, "test", "desc")
 	_ = reg.IncrementJobCount(ctx, task.ID)
 	_ = reg.CompleteJob(ctx, task.ID)
 
 	got, _ := reg.Get(ctx, task.ID)
-	if got.State != StateCompleted {
-		t.Errorf("expected task to auto-complete, got state %q", got.State)
+	if got.State != StatePending {
+		t.Errorf("pending task must NOT auto-complete (illegal edge), got state %q", got.State)
+	}
+	if got.CompletedJobs != 1 || got.TotalJobs != 1 {
+		t.Errorf("job bookkeeping must still land, got %d/%d", got.CompletedJobs, got.TotalJobs)
+	}
+
+	// From a legal source state the auto-complete still fires.
+	t2, _ := reg.Create(ctx, "test legal", "desc")
+	_ = reg.UpdateState(ctx, t2.ID, StateExecuting)
+	_ = reg.IncrementJobCount(ctx, t2.ID)
+	_ = reg.CompleteJob(ctx, t2.ID)
+
+	got2, _ := reg.Get(ctx, t2.ID)
+	if got2.State != StateCompleted {
+		t.Errorf("expected task to auto-complete from executing, got state %q", got2.State)
 	}
 }
 

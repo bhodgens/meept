@@ -211,6 +211,20 @@ func (r *Registry) UpdateState(ctx context.Context, taskID string, state TaskSta
 	return nil
 }
 
+// ValidTaskState reports whether s is a known task.TaskState enum value.
+// Exported for callers that receive state strings from untrusted input
+// (agent-executed tools) and must reject arbitrary strings before any
+// state write. Pair it with Task.SetStateChecked, which enforces the
+// taskTransitions legality of the edge itself.
+func ValidTaskState(s TaskState) bool {
+	switch s {
+	case StatePending, StatePlanning, StateAwaitingApproval, StateExecuting,
+		StateTesting, StateCompleted, StateFailed, StateRejected, StateCancelled:
+		return true
+	}
+	return false
+}
+
 // CancelTask cancels a task through the SAME machinery the "task.cancel" bus
 // handler uses (leaf 06 T2, audit F8): trigger the interrupt token so
 // in-flight work observes the cancellation, drive the task to its terminal
@@ -396,6 +410,16 @@ func (r *Registry) IncrementJobCount(ctx context.Context, taskID string) error {
 // Read-modify-write under a single write lock so the auto-complete
 // transition (CompletedJobs == TotalJobs) observes a consistent pair of
 // counters.
+//
+// NOTE: this API currently has NO production callers (dead API, grep-verified
+// 2026-11-14); it is kept because the deadcode gate churns on removals. The
+// auto-complete transition is guarded by taskTransitions (M-3, bughunt
+// 2026-11-14 round 2): previously it set StateCompleted from ANY state,
+// including illegal edges from pending/planning/awaiting_approval — a
+// pending task with all its jobs externally marked done was "completed"
+// without ever executing. The auto-complete now only fires from a legal
+// source state; an illegal edge leaves the state untouched (the job counter
+// still increments — that is bookkeeping, not a state transition).
 func (r *Registry) CompleteJob(ctx context.Context, taskID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -414,9 +438,15 @@ func (r *Registry) CompleteJob(ctx context.Context, taskID string) error {
 
 	task.CompleteJob()
 
-	// Auto-complete task if all jobs done
+	// Auto-complete task if all jobs done — only via a LEGAL transition.
 	if task.CompletedJobs == task.TotalJobs && task.TotalJobs > 0 {
-		task.SetState(StateCompleted)
+		if err := task.SetStateChecked(StateCompleted); err != nil {
+			r.logger.Warn("skipping illegal auto-complete transition",
+				KeyTaskID, task.ID,
+				"state", task.State.String(),
+				"error", err,
+			)
+		}
 	}
 
 	if err := r.store.Update(task); err != nil {

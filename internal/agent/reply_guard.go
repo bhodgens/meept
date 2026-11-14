@@ -175,17 +175,53 @@ func toolResultJSONKey(reply string) (string, bool) {
 // the raw strings.Index version matched a "message" key at ANY nesting
 // depth, so a machine dump like {"memory_id": ..., "details":{"message":
 // "..."}} cleared the exemption and its payload leaked to the user (and
-// was spoken aloud via the voice lane). The reply is parsed with
-// encoding/json and ONLY the top-level key is consulted; any parse error
-// or non-object shape falls back to the conservative verdict (no
-// exemption → machine-shaped).
+// was spoken aloud via the voice lane).
+//
+// The top-level object is STREAMED with json.Decoder token-by-token instead
+// of json.Unmarshal into map[string]any (bughunt 2026-11-14 round 2):
+// unmarshal (a) allocates the whole dump tree, and (b) Go's duplicate-key
+// LAST-WINS semantics let {"message":"","x":1,"message":"prose"} smuggle a
+// non-empty message past an earlier empty one. Decoding stops as soon as
+// the first top-level "message" value is decided; DUPLICATE-KEY FIRST-WINS
+// is deliberate and conservative — the earliest key decides the exemption,
+// so a later "message" re-open cannot clear a machine-shaped verdict.
+// Malformed JSON or a non-object shape falls back to the conservative
+// verdict (no exemption → machine-shaped).
 func hasNonEmptyMessageField(trimmed string) bool {
-	var obj map[string]any
-	if err := json.Unmarshal([]byte(trimmed), &obj); err != nil {
+	dec := json.NewDecoder(strings.NewReader(trimmed))
+	tok, err := dec.Token()
+	if err != nil {
 		return false
 	}
-	msg, ok := obj["message"].(string)
-	return ok && strings.TrimSpace(msg) != ""
+	if delim, ok := tok.(json.Delim); !ok || delim != '{' {
+		return false // array or scalar: not a message-bearing object
+	}
+	for dec.More() {
+		keyTok, err := dec.Token()
+		if err != nil {
+			return false
+		}
+		key, ok := keyTok.(string)
+		if !ok {
+			return false
+		}
+		if key != "message" {
+			// Skip this key's value without materializing it.
+			var skip any
+			if err := dec.Decode(&skip); err != nil {
+				return false
+			}
+			continue
+		}
+		// FIRST top-level "message" key decides (see duplicate-key note).
+		var msg any
+		if err := dec.Decode(&msg); err != nil {
+			return false
+		}
+		s, ok := msg.(string)
+		return ok && strings.TrimSpace(s) != ""
+	}
+	return false
 }
 
 // matchedTotalsLine reports whether the reply carries a tools/agents catalog
