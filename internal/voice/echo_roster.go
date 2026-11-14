@@ -112,12 +112,33 @@ var (
 )
 
 // echoEntry is one recorded agent utterance: the speaking call's id and
-// its pre-tokenized words (fields of the raw say text; case/punctuation
-// are stripped lazily inside fuzzy.Similarity).
+// its pre-tokenized words (fields of the raw say text, normalized the
+// same way fuzzy.Similarity normalizes: tokens that collapse to nothing
+// under fuzzy's lower/alphanumeric-only rule are dropped at STORE time —
+// "..." and "--" never become matchable entries).
 type echoEntry struct {
 	ccid   string
 	tokens []string
 	at     time.Time
+}
+
+// echoLiveTokens splits text into the tokens the scorer actually sees:
+// fuzzy.Similarity lowercases and strips non-alphanumerics inside each
+// token, and two punctuation-only tokens both normalize to empty and
+// score 1.0 (fuzzy.go Similarity maxLen==0 branch) — a whisper "..."
+// free-matched agent say-text punctuation and deflated real coverage.
+// Dead tokens are dropped HERE, at both store and query time, so they
+// never count toward echoCoverageNeed or entry size; the same rule the
+// fuzzy primitive applies is applied once, up front.
+func echoLiveTokens(text string) []string {
+	var out []string
+	for _, tok := range strings.Fields(text) {
+		if fuzzy.NormalizeToken(tok) == "" {
+			continue
+		}
+		out = append(out, tok)
+	}
+	return out
 }
 
 // echoRoster is the process-wide registry of recently SPOKEN agent text
@@ -161,7 +182,7 @@ func (r *echoRoster) record(ccid, text string) {
 	if ccid == "" || strings.TrimSpace(text) == "" {
 		return
 	}
-	tokens := strings.Fields(text)
+	tokens := echoLiveTokens(text)
 	if len(tokens) == 0 {
 		return
 	}
@@ -182,7 +203,7 @@ func (r *echoRoster) record(ccid, text string) {
 // window); prompts under echoMinPromptWords skip the scorer entirely
 // (see the constant's two-part rationale).
 func (r *echoRoster) recentOther(ccid, text string) bool {
-	query := strings.Fields(text)
+	query := echoLiveTokens(text)
 	if ccid == "" || len(query) < echoMinPromptWords {
 		return false
 	}
