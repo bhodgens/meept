@@ -361,6 +361,10 @@ func (b *QueueParkBackend) LoadOwnedKeyed(ctx context.Context, kind ParkKind, ow
 		}
 		resumeAt := parseParkTime(p.ResumeAt)
 		if resumeAt.IsZero() || !resumeAt.After(now) {
+			// Expired bucket: a row whose wait already lapsed (including
+			// one that expired while the daemon was down) is DELETED, not
+			// resumed — catch-up resume is not implemented (see the
+			// TurnParker.reArm doc in parked_turn.go).
 			expired = append(expired, id)
 			continue
 		}

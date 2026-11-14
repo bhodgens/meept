@@ -365,6 +365,20 @@ func (pm *PairManager) finalizeTask(ctx context.Context, session *PairSession, s
 		return
 	}
 
+	// Never flip a terminal task's state: another path (a cancellation,
+	// a ralph replan cap, startup recovery) may have terminalized the
+	// task while this pair session was still running — a late finalize
+	// must not overwrite a user-cancelled task or resurrect it as
+	// completed.
+	if t.State.IsTerminal() {
+		pm.logger.Info("Task already terminal; skipping pair finalization",
+			"session_id", session.ID,
+			KeyTaskID, session.TaskID,
+			"state", string(t.State),
+		)
+		return
+	}
+
 	if success {
 		t.SetState(task.StateCompleted)
 		pm.logger.Info("Pair session task completed",

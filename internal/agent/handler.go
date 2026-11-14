@@ -835,17 +835,44 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 
 	// Async-turn tracking (leaf 03): register the submit-time turn under
 	// its explicit turn id. Only chat.submit turns carry TurnID — the
-	// legacy `chat` path has it empty and stays untracked. Registration is
-	// idempotent (a duplicate chat.request for the same turn_id is the
-	// submit handler's dedupe problem; here a re-registered turn simply
-	// keeps its original record). The registry row also carries the turn's
-	// trace id (leaf 01): the async task-end relay re-broadcasts the
-	// terminal event under the SUBMITTED turn id and needs the SAME trace
-	// correlation, and the turn watchdog's reap event names the trace too.
+	// legacy `chat` path has it empty and stays untracked. Register
+	// returning true means the id is ALREADY tracked (in flight) or
+	// tombstoned (completed): the F16 dedupe — do NOT re-execute the
+	// turn, answer the idempotent re-ack the submit handler's shape uses
+	// (internal/rpc/chat_submit.go) and leave. The registry row also
+	// carries the turn's trace id (leaf 01): the async task-end relay
+	// re-broadcasts the terminal event under the SUBMITTED turn id and
+	// needs the SAME trace correlation, and the turn watchdog's reap
+	// event names the trace too.
 	if req.TurnID != "" && h.turnRegistry != nil {
 		if h.turnRegistry.Register(req.TurnID, conversationID) {
-			h.turnRegistry.AttachTrace(req.TurnID, traceID, turnSpanID)
+			h.logger.Warn("duplicate chat.request suppressed; turn already tracked or completed",
+				"turn_id", req.TurnID,
+				"conversation_id", conversationID,
+			)
+			h.sendResponse(msg.ID, ChatResponse{
+				Reply:          "turn already submitted; result arrives via turn.terminal",
+				ConversationID: conversationID,
+				SessionID:      req.SessionID,
+			})
+			h.publishTurnTerminal(TurnTerminalEvent{
+				ConversationID: conversationID,
+				SessionID:      req.SessionID,
+				TurnID:         req.TurnID,
+				HandlerCase:    "duplicate_suppressed",
+				// "parked": accepted-but-not-finished — the original
+				// submission is either still in flight (its real terminal
+				// event arrives via turn.terminal) or already tombstoned
+				// (its terminal event already fired). This duplicate must
+				// never report "completed", which would let awaiting
+				// clients take the ack as the result.
+				Status:     "parked",
+				Reply:      "turn already submitted; result arrives via turn.terminal",
+				DurationMS: time.Since(start).Milliseconds(),
+			})
+			return
 		}
+		h.turnRegistry.AttachTrace(req.TurnID, traceID, turnSpanID)
 	}
 
 	// Broadcast chat.message.received for bilateral visibility.
@@ -1043,7 +1070,11 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 				if budgetResult := h.budget.CheckBudget(); budgetResult.Exceeded {
 					// Cancel the task that ClassifyAndRoute just created
 					if h.taskStore != nil && result.Task != nil {
-						result.Task.SetState(task.StateFailed)
+						// The task was fresh-created in StatePending:
+						// pending->failed is not a legal edge. Cancelling a
+						// never-started task (budget pre-check denial) is the
+						// honest semantics; pending->cancelled IS legal.
+						result.Task.SetState(task.StateCancelled)
 						if updateErr := h.taskStore.Update(result.Task); updateErr != nil {
 							h.logger.Warn("Failed to cancel budget-blocked task",
 								"task_id", result.Task.ID, "error", updateErr)

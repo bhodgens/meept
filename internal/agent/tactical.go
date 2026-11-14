@@ -2745,6 +2745,15 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID, jobErr stri
 			ts.logger.Error("Failed to reload task for finalization", "task_id", step.TaskID, "error", terr)
 			return nil
 		}
+		// F6 posture (mirror of the allDone finalize above): another
+		// path — a cancellation, startup recovery — may have terminalized
+		// the task while this step was still in flight. Never flip a
+		// terminal task's state or emit a second task.failed.
+		if t.State.IsTerminal() {
+			ts.logger.Info("Task already terminal; skipping failure finalization",
+				"task_id", step.TaskID, "state", string(t.State))
+			return nil
+		}
 		t.SetState(task.StateFailed)
 		if err := ts.taskStore.Update(t); err != nil {
 			ts.logger.Error("Failed to set task failed", "error", err)

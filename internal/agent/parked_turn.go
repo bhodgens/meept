@@ -833,6 +833,13 @@ func (p *TurnParker) SetParkKey(keyFn func(rec ParkedTurnRecord) string) {
 // immediate drainDue below — within one poll interval of boot instead of
 // one poll interval late.
 //
+// EXPIRED-WHILE-DOWN SEMANTICS (C-K1 backend contract): records whose
+// resume time expired while the daemon was down are NOT resumed — both
+// persistence backends DELETE such rows outright at Load (the sqlite
+// store's expired-bucket prune and the queue backend's
+// LoadOwnedKeyed expired bucket). Catch-up resume is NOT implemented:
+// an expired-during-downtime park is dropped silently, never re-armed.
+//
 // Persistence is load-best-effort: a store failure logs and leaves the
 // in-memory queue empty (the daemon still runs; the records are retried on
 // the next boot).
