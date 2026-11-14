@@ -62,6 +62,8 @@ import (
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
+
+	"github.com/caimlas/meept/internal/voice/clipstore"
 )
 
 // Turn-state kinds for the link half-duplex seam (TalkDeps.TurnState).
@@ -174,6 +176,44 @@ type TalkLoopConfig struct {
 	// non-empty speaks the line and SKIPS the LLM turn for that
 	// fragment.
 	FragmentClarify string
+	// Lanes is the C5 lane-pool set for this call (plan
+	// 20261113-filler-clips leaf 04): the resolved VoiceLanes output for
+	// the call's employee. When non-empty, greeting/filler/silence/
+	// fragment/farewell lines resolve through voice.PickLine per lane
+	// with the loop's own round-robin cursors; a lane that resolves to
+	// "" keeps the legacy scalar fallback chain below, so a partial
+	// lane set never loses a line the old resolvers would have spoken.
+	// Empty/nil (the default — every caller that has not wired the lane
+	// plan) leaves all four resolvers byte-identical to today.
+	Lanes []LaneLine
+	// FarewellLines is the legacy scalar farewell pool for callers that
+	// do not wire Lanes (additive field; empty default = the farewell
+	// rule NEVER fires, so zero-config is byte-identical). When Lanes
+	// carries a farewell lane it wins; otherwise this list round-robins.
+	FarewellLines []string
+	// Identity is the TTS voice identity the clip key is computed under
+	// (Contracts C1 + C3, leaf 04). Nil (the default) => say frames
+	// carry NO clip_id => byte-identical today. When set, every
+	// filler-class say (greeting, filler, silence nudge, fragment-
+	// clarify, fallback, farewell) gains
+	// clip_id = clipstore.ClipKey(text, Vendor, Model, Voice, RefHash)
+	// so the child can serve pre-rendered PCM. Reply sentences are
+	// live content and NEVER get a clip_id (R6).
+	Identity *ClipIdentity
+}
+
+// ClipIdentity is the TTS identity half of the C1 clip key: the exact
+// (vendor, model, voice, reference-audio-hash) inputs the clip planner
+// renders under and the talk loop keys its say frames with, so a clip the
+// planner never pre-rendered simply misses in the store and the child
+// speaks the frame text live (the text always rides the frame).
+// RefHash is nil/empty for preset (non-clone) voices — the C1 formula's
+// documented zero-bytes branch.
+type ClipIdentity struct {
+	Vendor  string
+	Model   string
+	Voice   string
+	RefHash []byte
 }
 
 // TalkDeps wires the loop. Send is the C1 seam: the talk loop never touches
@@ -314,8 +354,19 @@ type TalkLoop struct {
 
 	// frames is the inbound C1 frame channel; close ends the loop.
 	frames chan Frame
-	// fillerIdx round-robins over the filler list.
+	// fillerIdx round-robins over the filler list (legacy scalar pool —
+	// the same cursor drives the C5 filler lane when Lanes is wired).
 	fillerIdx int
+	// Per-lane round-robin cursors (plan 20261113-filler-clips leaf 04,
+	// C5: "Pool selection = round-robin per lane with its own cursor").
+	// Run-owned like fillerIdx (the delayed-filler timer only reads the
+	// picked text under interruptMu, never a cursor).
+	silenceIdx  int
+	fragmentIdx int
+	farewellIdx int
+	// farewellSpoken latches the R5 farewell: at most one goodbye per
+	// call (never double-speaks with a fallback or a repeat bye).
+	farewellSpoken bool
 
 	// interruptMu guards ONLY the generation counter and pipeline pointer
 	// swap (repo mutex-scope rule: no I/O, send, or Check under it). The
@@ -532,8 +583,13 @@ func previewPrompt(text string) string {
 
 // greetingLine returns the configured greeting, falling back to the first
 // filler line (the greeting is filler-class; an operator who configured no
-// filler gets no greeting rather than a hardcoded line).
+// filler gets no greeting rather than a hardcoded line). With the C5 lane
+// pool wired the greeting lane resolves first; an empty lane keeps this
+// exact legacy chain (GreetingLine -> FillerLines[0] -> "").
 func (t *TalkLoop) greetingLine() string {
+	if line := PickLine(t.cfg.Lanes, LaneGreeting, nil); line != "" {
+		return line
+	}
 	if t.cfg.GreetingLine != "" {
 		return t.cfg.GreetingLine
 	}
@@ -544,8 +600,15 @@ func (t *TalkLoop) greetingLine() string {
 }
 
 // fillerLine picks the next fact-free line round-robin over the config
-// list; an empty list disables the filler.
+// list; an empty list disables the filler. With the C5 lane pool wired,
+// the filler lane round-robins through the SAME cursor (fillerIdx), so a
+// single-line pool equals the legacy pick order exactly; an empty lane
+// falls back to the legacy scalar list byte-identically (callers that
+// never set Lanes keep today's behavior).
 func (t *TalkLoop) fillerLine() string {
+	if line := PickLine(t.cfg.Lanes, LaneFiller, &t.fillerIdx); line != "" {
+		return line
+	}
 	if len(t.cfg.FillerLines) == 0 {
 		return ""
 	}
@@ -556,16 +619,46 @@ func (t *TalkLoop) fillerLine() string {
 
 // silencePromptLine picks the line for the FIRST silence fire (the
 // dead-air nudge). Fallback chain (contract: no filler-class promise on
-// the silence path when a dedicated line is configured): configured
-// SilencePromptLine; empty line -> fillerLine() round-robin (legacy
-// callers that never set the new field keep byte-compatible behavior,
-// INCLUDING consuming a filler index); empty filler -> "" (no line —
-// the fire still latches and re-arms the hangup window).
+// the silence path when a dedicated line is configured): C5 silence lane
+// (round-robin, own cursor); configured SilencePromptLine; empty line ->
+// fillerLine() round-robin (legacy callers that never set the new field
+// keep byte-compatible behavior, INCLUDING consuming a filler index);
+// empty filler -> "" (no line — the fire still latches and re-arms the
+// hangup window).
 func (t *TalkLoop) silencePromptLine() string {
+	if line := PickLine(t.cfg.Lanes, LaneSilence, &t.silenceIdx); line != "" {
+		return line
+	}
 	if t.cfg.SilencePromptLine != "" {
 		return t.cfg.SilencePromptLine
 	}
 	return t.fillerLine()
+}
+
+// fragmentClarifyLine picks the clarification line for an unfinished
+// fragment. C5 fragment lane (round-robin, own cursor) first; the legacy
+// scalar FragmentClarify otherwise (empty = no clarify, turn runs).
+func (t *TalkLoop) fragmentClarifyLine() string {
+	if line := PickLine(t.cfg.Lanes, LaneFragment, &t.fragmentIdx); line != "" {
+		return line
+	}
+	return t.cfg.FragmentClarify
+}
+
+// farewellLine picks the R5 goodbye line: the C5 farewell lane first
+// (round-robin, own cursor), the legacy FarewellLines scalar pool
+// otherwise. Empty from both = the farewell rule never speaks (a caller's
+// bye rides the normal turn path, exactly today's behavior).
+func (t *TalkLoop) farewellLine() string {
+	if line := PickLine(t.cfg.Lanes, LaneFarewell, &t.farewellIdx); line != "" {
+		return line
+	}
+	if len(t.cfg.FarewellLines) == 0 {
+		return ""
+	}
+	line := t.cfg.FarewellLines[t.farewellIdx%len(t.cfg.FarewellLines)]
+	t.farewellIdx++
+	return line
 }
 
 // silenceAudioDeferralCap bounds CONSECUTIVE audio-aware deferrals of a
@@ -606,13 +699,33 @@ func (t *TalkLoop) fallbackLine() string {
 }
 
 // say sends one say frame. last marks the final sentence of a turn.
+// It delegates to sayClip with an empty clip key, so the single-audible
+// choke (RecordSpoken on every successful send — echo_roster.go) lives in
+// exactly one place.
 func (t *TalkLoop) say(ccid, text string, last bool) error {
+	return t.sayClip(ccid, text, "", last)
+}
+
+// sayClip sends one say frame that may carry a pre-rendered clip key
+// (Contracts C1 + C3, leaf 04). clipID is the 64-hex clipstore key of
+// text when the call's TTS identity resolved; an EMPTY clipID omits the
+// wire field entirely (omitempty), so the frame is byte-identical to a
+// plain say — the nil-identity / live-synth path is today's shape. The
+// text ALWAYS rides the frame: a child whose store misses the key
+// synthesizes frame.Text live (internal/voicechild/clips.go), so a
+// clip_id on a line the planner never rendered is a miss, never a mute.
+// This is the single-audible choke for ALL agent speech (CROSS-CALL ECHO
+// CONTRACT, 2026-11-11): say delegates here; every new say variant MUST
+// too. RecordSpoken runs only on a successful send (a frame that never
+// left the daemon produced no room audio, so it must not gate anything).
+func (t *TalkLoop) sayClip(ccid, text, clipID string, last bool) error {
 	lastFlag := last
 	err := t.deps.Send(Frame{
 		CallID: ccid,
 		Event:  EventSay,
 		Text:   text,
 		Last:   &lastFlag,
+		ClipID: clipID,
 	})
 	// CROSS-CALL ECHO CONTRACT (2026-11-11): say is the single choke for
 	// ALL agent speech (greeting, filler, replies, fallback, fragment
@@ -625,6 +738,135 @@ func (t *TalkLoop) say(ccid, text string, last bool) error {
 		RecordSpoken(ccid, text)
 	}
 	return err
+}
+
+// speakFarewell speaks one farewell-lane goodbye for the R5 rule: it
+// cancels any in-flight draft (a bye supersedes an answer the caller is
+// walking away from — the same skip shape as the fragment clarify, no LLM
+// turn), then sends the line as a FINAL (last:true) say with clip_id so
+// the child's turn-final flush + played-drain machinery completes the
+// audio before teardown. Exactly-once per call (farewellSpoken latch).
+// Runs on the Run goroutine (dispatchPrompt), so the cursor and latch are
+// lock-free like fillerIdx. Returns false when the latch already fired
+// (a repeat bye never double-speaks) or no line resolves.
+func (t *TalkLoop) speakFarewell(ccid string) bool {
+	if t.farewellSpoken {
+		t.log.Info("voice talk loop: farewell already spoken; bye ignored",
+			"ccid", ccid, "lane", string(LaneFarewell))
+		return false
+	}
+	line := t.farewellLine()
+	if line == "" {
+		return false
+	}
+	t.farewellSpoken = true
+	// Cancel any live draft so its verdicts cannot interleave a reply
+	// under the goodbye (and the grace filler cannot zombie behind it).
+	t.cancelPipeline(ccid, "farewell")
+	if err := t.sayClip(ccid, line, t.clipID(line), true); err != nil {
+		t.log.Warn("voice talk loop: farewell send failed", "ccid", ccid, "error", err)
+		return true // the latch fired: a failed send must not re-arm the rule
+	}
+	t.log.Info("voice talk loop: farewell",
+		"ccid", ccid, "kind", "farewell", "line", line,
+		"lane", string(LaneFarewell), "clip", t.cfg.Identity != nil)
+	t.sayProgress(ccid)
+	return true
+}
+
+// clipID returns the C1 clip key of a filler-class line under the call's
+// resolved TTS identity — the EXACT inputs the clip planner renders and
+// the store keys by, so a loop-said line hits the store iff the planner
+// pre-rendered it. "" (no clip_id on the frame) whenever the identity is
+// nil (a call whose daemon predates the clip plan — byte-identical
+// today) or the frame carries no speakable text (the turn-final flush
+// marker).
+func (t *TalkLoop) clipID(text string) string {
+	if t.cfg.Identity == nil || text == "" {
+		return ""
+	}
+	id := t.cfg.Identity
+	return clipstore.ClipKey(text, id.Vendor, id.Model, id.Voice, id.RefHash)
+}
+
+// farewellPhrases is the builtin R5 bye-phrase set (leaf
+// 20261113-filler-clips/04): matched against the WHOLE normalized caller
+// utterance, case- and punctuation-insensitive. A phrase embedded in a
+// longer sentence never matches ("bye for now to the router issue" is a
+// real question). Keep the list small and documented — a cheap rule,
+// deliberately no LLM.
+var farewellPhrases = []string{"bye", "goodbye", "see ya", "see you", "talk later", "later", "that's all"}
+
+// isFarewellUtterance reports whether the caller's final prompt is a
+// whole-utterance goodbye per the R5 builtin rule.
+func isFarewellUtterance(text string) bool {
+	norm := normalizeUtterance(text)
+	if norm == "" {
+		return false
+	}
+	for _, p := range farewellPhrases {
+		if norm == normalizeUtterance(p) {
+			return true
+		}
+	}
+	return false
+}
+
+// normalizeUtterance lowercases, strips punctuation, and collapses
+// whitespace for whole-utterance bye matching ("Goodbye!" -> "goodbye",
+// "See  ya!" -> "see ya", "that's all" -> "thats all").
+func normalizeUtterance(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	var b strings.Builder
+	b.Grow(len(s))
+	prevSpace := true // suppresses a leading space
+	for _, r := range s {
+		switch {
+		case r == ' ' || r == '	' || r == '\n' || r == '\r':
+			if !prevSpace {
+				b.WriteRune(' ')
+				prevSpace = true
+			}
+		case unicodeIsPunct(r):
+			// stripped; a comma never joins words into a phrase
+			if !prevSpace {
+				b.WriteRune(' ')
+				prevSpace = true
+			}
+		default:
+			b.WriteRune(r)
+			prevSpace = false
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// unicodeIsPunct reports whether r is a unicode punct/symbol (the
+// farewell-rule's strip set) without pulling unicode into the import
+// block used by the hot path.
+func unicodeIsPunct(r rune) bool {
+	switch r {
+	case '!', '"', '#', '$', '%', '&', '\'', '(', ')', '*', '+', ',', '-', '.', '/',
+		':', ';', '<', '=', '>', '?', '@', '[', ']', '^', '_', '`', '{', '|', '}', '~',
+		'…':
+		return true
+	}
+	return false
+}
+
+// farewellPoolConfigured reports whether ANY farewell line is resolvable
+// (C5 lane or the legacy scalar pool) without consuming a round-robin
+// cursor — the rule must not advance the pool on non-bye prompts.
+func (t *TalkLoop) farewellPoolConfigured() bool {
+	if len(t.cfg.FarewellLines) > 0 {
+		return true
+	}
+	for _, ll := range t.cfg.Lanes {
+		if ll.Lane == LaneFarewell {
+			return true
+		}
+	}
+	return false
 }
 
 // sayProgress publishes one allowed-say progress event through the binding
@@ -667,7 +909,7 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 	// prompt (the conversation seed), so B opening silent prevents the
 	// live-run defect of two employees saying hello at once.
 	if line := t.greetingLine(); line != "" && !t.cfg.SuppressGreeting {
-		if err := t.say(ccid, line, false); err != nil {
+		if err := t.sayClip(ccid, line, t.clipID(line), false); err != nil {
 			t.log.Warn("voice talk loop: greeting send failed", "ccid", ccid, "error", err)
 		}
 	}
@@ -824,6 +1066,29 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 	// (timer discipline + fillerIdx ownership untouched). stopSilence/
 	// armTurn close over Run's timer locals, so this MUST live here.
 	dispatchPrompt := func(text string) {
+		// Farewell rule (R5, plan 20261113-filler-clips leaf 04): a
+		// whole-utterance bye never starts an LLM turn — the loop
+		// speaks one farewell-lane line as a FINAL (last:true) say
+		// carrying the clip_id, then ends the call through the loop's
+		// own teardown (t.end -> OnEnd -> managerHangup -> releaseCall
+		// -> sendEndFrame), riding the SAME once-guarded fan-out a
+		// silence hangup uses — never a second release path. The
+		// farewell say is written to the shared text connection BEFORE
+		// the end frame (program order on this goroutine), and the
+		// last:true shape hands the child its turn-final flush +
+		// played-drain guarantee (C1), so the goodbye audio completes
+		// before teardown kills the leg. Zero-config (no farewell pool
+		// resolvable) = the rule NEVER fires: "bye" rides the normal
+		// turn path byte-identically. dispatchPrompt (and the
+		// link-park release that re-runs it) lives on the Run
+		// goroutine, so the farewell cursor/latch need no lock
+		// (same discipline as fillerIdx).
+		if t.farewellPoolConfigured() && isFarewellUtterance(text) {
+			if t.speakFarewell(ccid) {
+				t.end(ccid, "caller farewell")
+			}
+			return
+		}
 		// The clock stops while the turn runs: the silence window
 		// is turn-aware, and the draft-drain branch re-arms it
 		// fresh once the reply is fully spoken (a slow 30-90s LLM
@@ -839,8 +1104,18 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 		// Run-owned); whether it speaks now (legacy grace==0) or
 		// after the grace window is spawnPipeline's call (call
 		// flow step 6: fact-free, so it needs no supervisor
-		// verdict).
-		t.spawnPipeline(ctx, call, text, t.fillerLine())
+		// verdict). The fragment-clarify line is picked here too,
+		// but ONLY when the prompt's trailing-ellipsis shape trips
+		// (isTrailingEllipsis is pure over the immutable text), so
+		// the fragment cursor never advances on a non-fragment
+		// prompt — today's scalar path only reads
+		// cfg.FragmentClarify on the ellipsis shape, and the lane
+		// pick must not consume a round on every dispatch.
+		fragmentLine := ""
+		if isTrailingEllipsis(text) {
+			fragmentLine = t.fragmentClarifyLine()
+		}
+		t.spawnPipeline(ctx, call, text, t.fillerLine(), fragmentLine)
 	}
 
 	for {
@@ -905,9 +1180,10 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 				line := t.silencePromptLine()
 				afterS := t.now().Sub(silenceArmedAt).Seconds()
 				t.log.Info("voice talk loop: silence prompt",
-					"ccid", ccid, "line", line, "after_s", afterS)
+					"ccid", ccid, "line", line, "after_s", afterS,
+					"lane", string(LaneSilence), "clip", t.cfg.Identity != nil && line != "")
 				if line != "" {
-					if sayErr := t.say(ccid, line, false); sayErr != nil {
+					if sayErr := t.sayClip(ccid, line, t.clipID(line), false); sayErr != nil {
 						t.log.Debug("talkloop: partial say dropped", "ccid", ccid, "err", sayErr)
 					}
 				}
@@ -1080,7 +1356,12 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 // The closure re-checks under interruptMu that this pipeline is still the
 // live draft before saying anything — a cancelled or hung-up draft never
 // emits zombie filler.
-func (t *TalkLoop) spawnPipeline(ctx context.Context, call Instance, prompt, fillerLine string) {
+//
+// fragmentLine is the Run-picked clarification line ("" = no fragment
+// handling — either no lane configured or the prompt is not a fragment);
+// it is passed in, never re-picked here, so the fragment cursor stays
+// Run-owned (spawnPipeline's checker goroutine must not touch it).
+func (t *TalkLoop) spawnPipeline(ctx context.Context, call Instance, prompt, fillerLine, fragmentLine string) {
 	ccid := call.CallControlID
 
 	turnCtx, cancel := context.WithCancel(ctx)
@@ -1128,12 +1409,13 @@ func (t *TalkLoop) spawnPipeline(ctx context.Context, call Instance, prompt, fil
 			p.fillerFired = true
 			after := int64(0)
 			t.interruptMu.Unlock()
-			if err := t.say(ccid, fillerLine, false); err != nil {
+			if err := t.sayClip(ccid, fillerLine, t.clipID(fillerLine), false); err != nil {
 				t.log.Warn("voice talk loop: filler send failed", "ccid", ccid, "error", err)
 			}
 			t.log.Info("voice talk loop: turn filler",
 				"ccid", ccid, "seq", seq, "kind", "filler",
-				"line", fillerLine, "after_ms", after)
+				"line", fillerLine, "after_ms", after,
+				"lane", string(LaneFiller), "clip", t.cfg.Identity != nil)
 		} else {
 			grace := t.cfg.FillerGrace
 			t.interruptMu.Lock()
@@ -1152,13 +1434,14 @@ func (t *TalkLoop) spawnPipeline(ctx context.Context, call Instance, prompt, fil
 				p.fillerFired = true
 				after := t.now().Sub(p.dispatchedAt).Milliseconds()
 				t.interruptMu.Unlock()
-				if err := t.say(ccid, p.fillerText, false); err != nil {
+				if err := t.sayClip(ccid, p.fillerText, t.clipID(p.fillerText), false); err != nil {
 					t.log.Warn("voice talk loop: delayed filler send failed", "ccid", ccid, "error", err)
 					return
 				}
 				t.log.Info("voice talk loop: turn filler",
 					"ccid", ccid, "seq", seq, "kind", "filler",
-					"line", p.fillerText, "after_ms", after)
+					"line", p.fillerText, "after_ms", after,
+					"lane", string(LaneFiller), "clip", t.cfg.Identity != nil)
 			})
 			t.interruptMu.Unlock()
 		}
@@ -1175,8 +1458,11 @@ func (t *TalkLoop) spawnPipeline(ctx context.Context, call Instance, prompt, fil
 		// filler, so it bypasses the supervisor gate. Empty config keeps
 		// the legacy ready path; only the trailing-ellipsis shape trips
 		// (a completed word/sentence never does), so a real one-word
-		// command like "Stop." is never clarified away.
-		if t.cfg.FragmentClarify != "" && isTrailingEllipsis(prompt) {
+		// command like "Stop." is never clarified away. The line was
+		// picked on the Run goroutine (fragmentIdx, like fillerIdx); the
+		// empty string means either no lane configured or the prompt is
+		// not a fragment.
+		if fragmentLine != "" && isTrailingEllipsis(prompt) {
 			t.interruptMu.Lock()
 			stale := t.gen != p.gen
 			if !stale {
@@ -1190,8 +1476,8 @@ func (t *TalkLoop) spawnPipeline(ctx context.Context, call Instance, prompt, fil
 			}
 			t.interruptMu.Unlock()
 			if !stale {
-				if err := t.say(ccid, t.cfg.FragmentClarify, true); err == nil {
-					t.log.Info("voice talk loop: fragment clarify", "ccid", ccid, "seq", seq, "kind", "fragment_clarify", "line", t.cfg.FragmentClarify)
+				if err := t.sayClip(ccid, fragmentLine, t.clipID(fragmentLine), true); err == nil {
+					t.log.Info("voice talk loop: fragment clarify", "ccid", ccid, "seq", seq, "kind", "fragment_clarify", "line", fragmentLine, "lane", string(LaneFragment), "clip", t.cfg.Identity != nil)
 					t.sayProgress(ccid)
 				} else {
 					t.log.Warn("voice talk loop: fragment clarify send failed", "ccid", ccid, "error", err)
@@ -1368,7 +1654,11 @@ func (t *TalkLoop) playVerdict(ccid string, vr verdict) {
 			p.utteranceOut = true // fallback counts as the utterance
 			p.stopFillerLocked()
 			t.interruptMu.Unlock()
-			if err := t.say(ccid, t.fallbackLine(), true); err == nil {
+			line := t.fallbackLine()
+			if err := t.sayClip(ccid, line, t.clipID(line), true); err == nil {
+				t.log.Info("voice talk loop: fallback line",
+					"ccid", ccid, "line", line,
+					"lane", "fallback", "clip", t.cfg.Identity != nil)
 				t.sayProgress(ccid)
 			}
 		}
@@ -1409,7 +1699,11 @@ func (t *TalkLoop) playVerdict(ccid string, vr verdict) {
 		p.utteranceOut = true // fallback counts as the utterance
 		p.stopFillerLocked()
 		t.interruptMu.Unlock()
-		if err := t.say(ccid, t.fallbackLine(), true); err == nil {
+		line := t.fallbackLine()
+		if err := t.sayClip(ccid, line, t.clipID(line), true); err == nil {
+			t.log.Info("voice talk loop: fallback line (all sentences denied)",
+				"ccid", ccid, "line", line,
+				"lane", "fallback", "clip", t.cfg.Identity != nil)
 			t.sayProgress(ccid)
 		}
 	} else {
