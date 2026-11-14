@@ -20,11 +20,17 @@ import "testing"
 // EXACT action-string compare, not a wildcard — it fires for NO normal
 // action string.
 func TestMatchesTrigger_ActionStarIsExactMatch(t *testing.T) {
-	trig := EscalationTrigger{On: EscalateOnAction, Match: "*", Reason: "wildcard-shaped row must stay inert"}
-	for _, action := range []string{"shell_execute", "file_delete", "web_fetch", "", "*"} {
+	trig := EscalationTrigger{On: EscalateOnAction, Match: "*", Reason: "wildcard-shaped row must stay inert for real actions"}
+	for _, action := range []string{"shell_execute", "file_delete", "web_fetch", ""} {
 		if matchesTrigger(trig, action, "", nil) {
 			t.Errorf("trigger {on:action, match:\"*\"} FIRED for action %q — '*' gained wildcard meaning; exact-match semantics violated (livelock risk)", action)
 		}
+	}
+	// Exactness both ways: under exact-match semantics the literal action "*"
+	// MUST fire (string equality "* == *"). If this ever stops firing,
+	// someone added wildcard suppression — also a semantics change.
+	if !matchesTrigger(trig, "*", "", nil) {
+		t.Errorf("trigger {on:action, match:\"*\"} did NOT fire for literal action \"*\" — exact equality semantics changed")
 	}
 }
 
