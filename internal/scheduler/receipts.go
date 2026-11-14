@@ -42,6 +42,12 @@ type ScheduleDeliveryReceipt struct {
 	TargetSessionID string         `json:"target_session_id"`
 	Prompt          string         `json:"prompt,omitempty"`
 	Status          DeliveryStatus `json:"status"`
+
+	// RecoveryNote is the audit trail for in-place reconciliation: when
+	// recoverInFlightDeliveries flips a stuck row (or skips a re-delivery
+	// because the MessageID is already delivered), the reason is recorded
+	// here. Empty for normal dispatch-path deliveries.
+	RecoveryNote string `json:"recovery_note,omitempty"`
 }
 
 // MaxDeliveryHistoryRecords bounds the per-job delivery history length.
@@ -55,6 +61,13 @@ const DeliveryHistoryRetentionDays = 30
 type DeliveryHistory struct {
 	Records              []ScheduleDeliveryReceipt `json:"records"`
 	EarlierRecordsPruned bool                      `json:"earlier_records_pruned"`
+
+	// LastEvictedStuckIDs carries the MessageIDs of any pending/in_flight
+	// rows evicted by the most recent Append as a last-resort count-bound
+	// eviction (bughunt 2026-11-12 F4). The caller (recordDelivery) Warns
+	// naming each so the lost occurrence is at least observable. Empty
+	// when the last Append evicted only terminal rows (or nothing).
+	LastEvictedStuckIDs []string `json:"last_evicted_stuck_ids,omitempty"`
 }
 
 // NewDeliveryHistory returns an empty delivery history.
@@ -71,8 +84,13 @@ func NewDeliveryHistory() *DeliveryHistory {
 // (bughunt 2026-11-10 B8): recoverInFlightDeliveries re-delivers FROM
 // pending/in_flight rows, so pruning a stuck receipt older than retention
 // permanently lost the tick it represents. Age-retention is for delivered
-// history only; a stuck row survives until recovery resolves it. The
-// count bound still applies (bounded memory), keeping newest stuck rows.
+// history only; a stuck row survives until recovery resolves it.
+//
+// The count bound evicts TERMINAL rows (delivered/failed) first. A stuck
+// row is evicted only as a last resort — when the bound still overflows
+// with nothing terminal left — and that case is flagged so the caller can
+// Warn naming the MessageID (bughunt 2026-11-12 F4): silently evicting a
+// pending/in_flight row loses the occurrence it represents.
 func (h *DeliveryHistory) Append(r ScheduleDeliveryReceipt) {
 	h.Records = append(h.Records, r)
 
@@ -91,11 +109,49 @@ func (h *DeliveryHistory) Append(r ScheduleDeliveryReceipt) {
 		}
 		kept = append(kept, rec)
 	}
+
+	// Count-bound overflow: evict OLDEST TERMINAL rows first; stuck rows
+	// are last-resort evictions recorded for a Warn. Overflow beyond the
+	// terminal pool is impossible in practice (Append adds one row per
+	// call), but the defensive slice keeps the bound exact.
+	evictedStuck := []string{}
 	if len(kept) > MaxDeliveryHistoryRecords {
 		pruned = true
-		kept = kept[len(kept)-MaxDeliveryHistoryRecords:]
+		overflow := len(kept) - MaxDeliveryHistoryRecords
+
+		// Pass 1: evict oldest terminal rows.
+		evicted := 0
+		keptTerminalPass := make([]ScheduleDeliveryReceipt, 0, len(kept))
+		for _, rec := range kept {
+			stuck := rec.Status == DeliveryPending || rec.Status == DeliveryInFlight
+			if !stuck && evicted < overflow {
+				evicted++
+				continue
+			}
+			keptTerminalPass = append(keptTerminalPass, rec)
+		}
+
+		// Pass 2 (last resort): evict oldest stuck rows, naming each.
+		if len(keptTerminalPass) > MaxDeliveryHistoryRecords {
+			stillOver := len(keptTerminalPass) - MaxDeliveryHistoryRecords
+			evicted = 0
+			final := make([]ScheduleDeliveryReceipt, 0, len(keptTerminalPass))
+			for _, rec := range keptTerminalPass {
+				stuck := rec.Status == DeliveryPending || rec.Status == DeliveryInFlight
+				if stuck && evicted < stillOver {
+					evicted++
+					evictedStuck = append(evictedStuck, rec.MessageID)
+					continue
+				}
+				final = append(final, rec)
+			}
+			keptTerminalPass = final
+		}
+		kept = keptTerminalPass
 	}
+
 	h.Records = kept
+	h.LastEvictedStuckIDs = evictedStuck
 	if pruned {
 		h.EarlierRecordsPruned = true
 	}
@@ -104,6 +160,10 @@ func (h *DeliveryHistory) Append(r ScheduleDeliveryReceipt) {
 // recordDelivery persists a delivery receipt on the job's JobConfig: the
 // receipt is appended to the bounded DeliveryHistory and mirrored into
 // LastDelivery. The job must exist in the store.
+//
+// When the count bound forced a last-resort eviction of a pending/in_flight
+// row (bughunt 2026-11-12 F4), every evicted MessageID is Warn'd — the
+// occurrence it represented is no longer recoverable.
 func (s *Scheduler) recordDelivery(jobID string, r ScheduleDeliveryReceipt) error {
 	cfg, ok := s.store.Get(jobID)
 	if !ok {
@@ -116,8 +176,82 @@ func (s *Scheduler) recordDelivery(jobID string, r ScheduleDeliveryReceipt) erro
 		cfg.DeliveryHistory = NewDeliveryHistory()
 	}
 	cfg.DeliveryHistory.Append(r)
+	for _, mid := range cfg.DeliveryHistory.LastEvictedStuckIDs {
+		s.logger.Warn("scheduler: delivery history cap evicted a stuck receipt — its occurrence is no longer recoverable",
+			"job_id", jobID,
+			"message_id", mid,
+		)
+	}
 	last := r
 	cfg.LastDelivery = &last
+	return s.store.Update(cfg)
+}
+
+// hasDeliveredReceiptForMessageID reports whether any DELIVERED receipt in
+// the job's history (or the LastDelivery mirror) carries the given
+// MessageID. Recovery consults this BEFORE re-publishing (bughunt
+// 2026-11-12 F2): the chat.request handler registers the turn with no
+// prior-completion check, so a recovered MessageID whose turn already
+// completed would re-execute the turn — the dedupe-that-isn't. Only a
+// delivered status counts; a stuck row for the same MessageID does not.
+func hasDeliveredReceiptForMessageID(cfg JobConfig, messageID string) bool {
+	if messageID == "" {
+		return false
+	}
+	if cfg.DeliveryHistory != nil {
+		for _, r := range cfg.DeliveryHistory.Records {
+			if r.MessageID == messageID && r.Status == DeliveryDelivered {
+				return true
+			}
+		}
+	}
+	return cfg.LastDelivery != nil &&
+		cfg.LastDelivery.MessageID == messageID &&
+		cfg.LastDelivery.Status == DeliveryDelivered
+}
+
+// reconcileStuckReceipt flips a stuck receipt row to delivered IN PLACE in
+// the persisted history (bughunt 2026-11-12 F1): recordDelivery only
+// APPENDS, so a recovery re-delivery previously left the original
+// pending/in_flight row stuck forever and every daemon start re-delivered
+// the same MessageID. The new delivered row is appended alongside (audit
+// trail of the recovery delivery); the original row carries a
+// RecoveryNote and is terminal, so the next recovery pass no longer sees
+// it stuck.
+func (s *Scheduler) reconcileStuckReceipt(jobID string, stuck ScheduleDeliveryReceipt, note string) error {
+	cfg, ok := s.store.Get(jobID)
+	if !ok {
+		return fmt.Errorf("job not found: %s", jobID)
+	}
+	reconciled := false
+	if cfg.DeliveryHistory != nil {
+		for i := range cfg.DeliveryHistory.Records {
+			rec := cfg.DeliveryHistory.Records[i]
+			if rec.MessageID == stuck.MessageID &&
+				(rec.Status == DeliveryPending || rec.Status == DeliveryInFlight) {
+				rec.Status = DeliveryDelivered
+				rec.DeliveredAt = stuck.DeliveredAt
+				rec.RecoveryNote = note
+				cfg.DeliveryHistory.Records[i] = rec
+				reconciled = true
+			}
+		}
+	}
+	// The LastDelivery mirror can be the stuck row itself (absent from
+	// history only in the B2 edge). Reconcile it too.
+	if cfg.LastDelivery != nil &&
+		cfg.LastDelivery.MessageID == stuck.MessageID &&
+		(cfg.LastDelivery.Status == DeliveryPending || cfg.LastDelivery.Status == DeliveryInFlight) {
+		m := *cfg.LastDelivery
+		m.Status = DeliveryDelivered
+		m.DeliveredAt = stuck.DeliveredAt
+		m.RecoveryNote = note
+		cfg.LastDelivery = &m
+		reconciled = true
+	}
+	if !reconciled {
+		return nil // nothing stuck to reconcile; caller still appends its row
+	}
 	return s.store.Update(cfg)
 }
 
@@ -144,8 +278,15 @@ func receiptAttemptTime(r ScheduleDeliveryReceipt) time.Time {
 // recoverInFlightDeliveries re-delivers receipts left pending/in_flight by a
 // previous run (crash between claim and session ack). Recovery scans
 // RECEIPTS, not ticks: the claimed tick will not re-fire, so this is the
-// only at-least-once path. Re-delivery reuses the SAME MessageID, which the
-// chat.request handler treats idempotently via turn_id dedupe.
+// only at-least-once path. Re-delivery reuses the SAME MessageID.
+//
+// Bughunt 2026-11-12 F2 (dedupe-that-isn't): BEFORE re-publishing, the
+// MessageID is checked against DELIVERED history. The chat.request handler
+// (internal/agent) registers a turn with no prior-completion check, so a
+// recovered MessageID whose turn already completed would re-execute it.
+// A MessageID that already has a delivered receipt is skipped entirely —
+// the stuck rows are reconciled to delivered in place with an audit note
+// (also fixing F1's every-restart re-delivery) instead of re-sent.
 //
 // M-5 / C-S1 (audit scheduler F5): walks the FULL DeliveryHistory per job,
 // not cfg.LastDelivery only — a stuck earlier receipt hidden behind a newer
@@ -189,6 +330,34 @@ func (s *Scheduler) recoverInFlightDeliveries() error {
 			return receiptAttemptTime(stuck[i]).Before(receiptAttemptTime(stuck[j]))
 		})
 
+		// F2 guard: any stuck MessageID that already has a DELIVERED
+		// receipt in this job's history is a completed turn — re-publishing
+		// it would re-execute the turn (chat.request has no
+		// prior-completion dedupe). Reconcile the stuck rows in place and
+		// skip before any publish.
+		skipDelivered := make(map[string]bool, len(stuck))
+		for _, r := range stuck {
+			if hasDeliveredReceiptForMessageID(cfg, r.MessageID) {
+				skipDelivered[r.MessageID] = true
+			}
+		}
+		if len(skipDelivered) > 0 {
+			note := "recovery skipped: message already delivered (turn completed; chat.request re-publish would re-execute it)"
+			if err := s.reconcileStuckReceiptsByIDs(cfg.ID, skipDelivered, note, stuck); err != nil {
+				s.logger.Warn("scheduler: failed to persist already-delivered reconciliation",
+					"job_id", cfg.ID,
+					"error", err,
+				)
+				// Leave the rows stuck; the guard will re-skip next pass.
+			}
+			for mid := range skipDelivered {
+				s.logger.Info("scheduler: recovery skipped already-delivered message",
+					"job_id", cfg.ID,
+					"message_id", mid,
+				)
+			}
+		}
+
 		if cfg.AgentConfig == nil || cfg.AgentConfig.TargetSessionID == "" {
 			for _, r := range stuck {
 				s.logger.Warn("scheduler: skipping receipt recovery for job without a target session",
@@ -216,7 +385,7 @@ func (s *Scheduler) recoverInFlightDeliveries() error {
 		// MessageID (pending+in_flight pair for one occurrence) must not be
 		// sent twice in this run.
 		for _, r := range stuck {
-			if deliveredIDs[r.MessageID] {
+			if deliveredIDs[r.MessageID] || skipDelivered[r.MessageID] {
 				continue
 			}
 
@@ -237,8 +406,25 @@ func (s *Scheduler) recoverInFlightDeliveries() error {
 			}
 
 			deliveredIDs[r.MessageID] = true
+			now := time.Now().UTC()
+			// F1: reconcile the original stuck row(s) to delivered IN PLACE
+			// with an audit note so the next recovery pass no longer sees
+			// them stuck (recordDelivery below only APPENDS — without this
+			// every daemon start re-delivered the same MessageID).
+			reconcileNote := "recovery re-delivery succeeded; original stuck receipt reconciled in place"
+			if err := s.reconcileStuckReceipt(cfg.ID, ScheduleDeliveryReceipt{
+				MessageID:   r.MessageID,
+				DeliveredAt: now,
+			}, reconcileNote); err != nil {
+				s.logger.Warn("scheduler: failed to persist stuck-row reconciliation",
+					"job_id", cfg.ID,
+					"message_id", r.MessageID,
+					"error", err,
+				)
+			}
 			r.Status = DeliveryDelivered
-			r.DeliveredAt = time.Now().UTC()
+			r.DeliveredAt = now
+			r.RecoveryNote = reconcileNote
 			if err := s.recordDelivery(cfg.ID, r); err != nil {
 				s.logger.Warn("scheduler: failed to persist recovered-delivery receipt",
 					"job_id", cfg.ID,
@@ -248,6 +434,28 @@ func (s *Scheduler) recoverInFlightDeliveries() error {
 		}
 	}
 	return nil
+}
+
+// reconcileStuckReceiptsByIDs flips the stuck rows whose MessageID is in
+// ids to delivered, stamping note with the time each stuck row was
+// attempted (attempt-time is the honest "delivered" timestamp for a skipped
+// re-delivery). Used by the F2 skip path where NO publish happens but the
+// stuck rows must stop being seen as stuck by the next recovery pass.
+func (s *Scheduler) reconcileStuckReceiptsByIDs(jobID string, ids map[string]bool, note string, stuck []ScheduleDeliveryReceipt) error {
+	var lastErr error
+	for _, r := range stuck {
+		if !ids[r.MessageID] {
+			continue
+		}
+		deliveredAt := receiptAttemptTime(r)
+		if err := s.reconcileStuckReceipt(jobID, ScheduleDeliveryReceipt{
+			MessageID:   r.MessageID,
+			DeliveredAt: deliveredAt,
+		}, note); err != nil {
+			lastErr = err
+		}
+	}
+	return lastErr
 }
 
 // recoverClaimedTicksWithoutReceipt re-delivers claimed ticks that have NO

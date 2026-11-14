@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -70,11 +71,49 @@ func NewStore(dataDir string) (*Store, error) {
 	// session-pinned jobs whose in-flight receipts restart recovery
 	// depends on. A parse error is left to Start's loadPersistedJobs,
 	// which logs it.
+	//
+	// Bughunt 2026-11-12 F3 (corrupt-file wipe): the seed swallows Load's
+	// error, and the FIRST Add then persists only the new job — silently
+	// destroying the unparsed file. On a parse failure the corrupt file is
+	// quarantined to jobs.json.corrupt-<ts> (mirroring readLastWake's
+	// self-heal pattern) BEFORE the store can ever persist, so no Add/Save
+	// can overwrite unparsed jobs; the error is logged at Error level and
+	// the store starts empty.
 	if _, err := os.Stat(filePath); err == nil {
-		_, _ = store.Load()
+		if _, loadErr := store.Load(); loadErr != nil {
+			quarantineCorruptJobsFile(filePath, loadErr)
+		}
 	}
 
 	return store, nil
+}
+
+// quarantineCorruptJobsFile preserves an unparseable jobs.json for
+// forensics and removes it from the live path BEFORE any Add/Save can
+// full-snapshot over it (bughunt 2026-11-12 F3). Mirrors
+// quarantineLastWake (claims.go). Best-effort: a failed quarantine is
+// logged but does not fail construction — the corrupt file simply stays
+// and gets re-quarantined on the next NewStore.
+func quarantineCorruptJobsFile(path string, cause error) {
+	data, readErr := os.ReadFile(path)
+	if readErr != nil {
+		slog.Error("scheduler: jobs file unreadable during store construction; new jobs may overwrite it",
+			"path", path, "error", readErr)
+		return
+	}
+	qPath := path + fmt.Sprintf(".corrupt-%d", time.Now().UTC().Unix())
+	if err := os.WriteFile(qPath, data, 0o600); err != nil { //nolint:gosec // G703: qPath is <jobs path>.corrupt-<ts>, derived from config (forensics copy)
+		slog.Error("scheduler: failed to quarantine corrupt jobs file; new jobs may overwrite it",
+			"path", path, "quarantine_target", qPath, "error", err)
+		return
+	}
+	if err := os.Remove(path); err != nil {
+		slog.Error("scheduler: quarantined corrupt jobs file but failed to remove it from the live path",
+			"path", path, "quarantined_to", qPath, "error", err)
+		return
+	}
+	slog.Error("scheduler: jobs file corrupt; quarantined before any store write",
+		"path", path, "quarantined_to", qPath, "error", cause)
 }
 
 // Load reads job configurations from the persistent store.
