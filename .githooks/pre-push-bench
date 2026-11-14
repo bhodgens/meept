@@ -3,12 +3,25 @@
 #
 # Blocks the push when the benchmark regression suite regresses against
 # the committed baseline (results/baseline/regression.jsonl in
-# ~/git/meept-bench). One known-failure task (memory-recall-marker) is
-# pinned red by design; the diff gate treats fail->fail as unchanged.
+# ~/git/meept-bench). The known-failure task (memory-recall-marker) is
+# pinned red by design: the run excludes it via --ignore-tags (a run
+# that executed it would exit 1 on ANY failed row, green suite or not),
+# and the diff gate remains the second line for pass->fail moves of
+# whatever else the baseline carries.
+#
+# Runs on an ISOLATED SCRATCH RIG (bench repo's scripts/scratch-rig.sh):
+# its own MEEPT_HOME under mktemp, its own daemon built from THIS repo's
+# bin/meept-daemon, its own llama-server, OS-assigned ports that never
+# collide with the live runtimes. The bench binary's isolation guard
+# (meept-bench internal/isolation) REFUSES any ~/.meept socket, so a bare
+# `run` against the user daemon is no longer a valid gate shape - it dies
+# with "refusing to talk to the user's live meept daemon" and run exits 0
+# while refusing, which this hook would misread as a pass. The rig owns
+# the socket + JUDGE_URL wiring end to end.
 #
 # Requires:
-#   - meept-daemon running (local socket ~/.meept/meept.sock)
 #   - meept-bench repo at $MEEPT_BENCH_DIR (default ~/git/meept-bench)
+#   - the gate builds bin/meept-daemon from the pushing repo itself
 #
 # Skip with: git push --no-verify
 # Override for a single push: MEEPT_BENCH_SKIP=1 git push
@@ -30,7 +43,7 @@ fi
 BENCH_DIR="${MEEPT_BENCH_DIR:-$HOME/git/meept-bench}"
 BENCH_BIN="$BENCH_DIR/meept-bench-bin"
 BASELINE="$BENCH_DIR/results/baseline/regression.jsonl"
-OUT="$BENCH_DIR/results/gate-pre-push"
+REPO="$(git rev-parse --show-toplevel)"
 
 if [ ! -d "$BENCH_DIR" ]; then
   echo -e "${YELLOW}⏭  meept-bench not found at $BENCH_DIR — skipping bench gate${NC}"
@@ -39,55 +52,91 @@ fi
 
 echo ""
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${BLUE}  Pre-push Bench Regression Gate${NC}"
+echo -e "${BLUE}  Pre-push Bench Regression Gate (scratch rig)${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
-# Build the bench binary from the current bench tree.
+# Build the bench binary from the current bench tree (the rig reuses it via
+# MEEPT_BENCH_BIN instead of building its own into a temp dir).
 if ! (cd "$BENCH_DIR" && go build -o "$BENCH_BIN" ./cmd/meept-bench); then
   echo -e "${RED}❌ Failed to build meept-bench — fix or push with --no-verify${NC}"
   exit 1
 fi
 
-# Daemon must be reachable, else every task would error.
-if ! "$BENCH_BIN" doctor >/dev/null 2>&1; then
-  echo -e "${YELLOW}⚠  meept daemon unreachable — cannot run bench gate.${NC}"
-  echo -e "${YELLOW}   Start the daemon, or push with --no-verify / MEEPT_BENCH_SKIP=1.${NC}"
+# The rig's daemon comes from THIS repo's binary (MEEPT_DAEMON_BIN default
+# is $MEEPT_REPO/bin/meept-daemon); build it from the pushed state so the
+# gate measures what we are about to publish, not whatever was last built.
+if ! (cd "$REPO" && go build -o bin/meept-daemon ./cmd/meept-daemon); then
+  echo -e "${RED}❌ Failed to build meept-daemon — fix or push with --no-verify${NC}"
   exit 1
 fi
 
-# Run the gate. DEV_GATE default: force the LOCAL 8B (local/lfm-8b-q4) so
-# pushes never depend on (or burn) cloud quota. Override with
-# MEEPT_GATE_MODEL="" to use the daemon default chain, or any other model.
-GATE_MODEL="${MEEPT_GATE_MODEL-local/lfm-8b-q4}"
-MODEL_ARG=""
-if [ -n "$GATE_MODEL" ]; then
-  MODEL_ARG="--model $GATE_MODEL"
-  echo -e "${BLUE}   Gate model: $GATE_MODEL (set MEEPT_GATE_MODEL to override)${NC}"
+# The rig renders a hermetic collapsed models.json5 where every alias
+# resolves to one rig model, so the old MEEPT_GATE_MODEL="local/lfm-8b-q4"
+# override is meaningless here; MEEPT_GATE_MODEL is now repurposed to pass
+# raw extra bench-run arguments - e.g. MEEPT_GATE_MODEL="--task file-write"
+# to gate a single task.
+EXTRA_RUN=()
+if [ -n "${MEEPT_GATE_MODEL}" ]; then
+  # shellcheck disable=SC2206  # deliberate word-splitting: it is an args string
+  EXTRA_RUN=(${MEEPT_GATE_MODEL})
 fi
 
-mkdir -p "$OUT"
-if ! "$BENCH_BIN" run --suite "$BENCH_DIR/suites/regression.json" \
-     --out "$OUT" --auto-approved $MODEL_ARG \
-     --judge-cmd "python3 scripts/judge-local.py"; then
-  RUN_EXIT=$?
+# Keep the rig alive after the run so the results survive for the diff and
+# for postmortems; teardown happens below on the success path.
+RIG_LOG="$(mktemp)"
+rig_rc=0
+(cd "$BENCH_DIR" && MEEPT_BENCH_BIN="$BENCH_BIN" MEEPT_REPO="$REPO" \
+  scripts/scratch-rig.sh --suite suites/regression.json --keep-rig \
+  -- --ignore-tags known-failure ${EXTRA_RUN[@]+"${EXTRA_RUN[@]}"}) >"$RIG_LOG" 2>&1 || rig_rc=$?
+cat "$RIG_LOG"
+
+RIGDIR="$(sed -n 's/^scratch-rig: rig kept at \(\/[^ ]*\) .*/\1/p' "$RIG_LOG" | tail -1)"
+if [ -z "$RIGDIR" ] || [ ! -d "$RIGDIR" ]; then
   echo ""
-  echo -e "${RED}❌ Bench suite run failed (exit $RUN_EXIT) — push blocked.${NC}"
-  echo -e "   Details: $OUT/scorecard.md"
+  echo -e "${RED}❌ Scratch rig never came up (exit $rig_rc) — push blocked.${NC}"
+  echo -e "${RED}   Rig log tail above; boot failure is usually the daemon or the GGUF.${NC}"
+  rm -f "$RIG_LOG"
   exit 1
 fi
+
+RESULTS="$RIGDIR/results/results.jsonl"
+if [ ! -f "$RESULTS" ]; then
+  echo ""
+  if [ "$rig_rc" -eq 124 ]; then
+    echo -e "${RED}❌ Rig timed out (exit 124) — push blocked.${NC}"
+  else
+    echo -e "${RED}❌ Bench suite never produced results (exit $rig_rc) — push blocked.${NC}"
+  fi
+  echo -e "${RED}   Postmortem: $RIGDIR (daemon.log + results/); teardown:${NC}"
+  echo -e "${RED}     $BENCH_DIR/scripts/scratch-rig.sh --down $RIGDIR${NC}"
+  rm -f "$RIG_LOG"
+  exit 1
+fi
+# NOTE: run rc != 0 here just means some task failed - the DIFF against the
+# committed baseline is the actual gate (pass->fail = regression = block;
+# fail->fail stays unchanged). Do not exit on rig_rc when results exist.
 
 # Diff against the committed baseline. Exit 1 = regressed.
 if ! "$BENCH_BIN" diff \
-     --baseline "$BENCH_DIR/results/baseline/regression.jsonl" \
-     --current  "$OUT/results.jsonl"; then
+     --baseline "$BASELINE" \
+     --current  "$RESULTS"; then
   echo ""
   echo -e "${RED}❌ REGRESSION detected vs baseline — push blocked.${NC}"
-  echo -e "   Fix the regression, or re-baseline deliberately:"
-  echo -e "   cp $OUT/results.jsonl $BASELINE"
+  echo -e "${RED}   Rig kept for postmortem: $RIGDIR${NC}"
+  echo -e "${RED}   Teardown when done: $BENCH_DIR/scripts/scratch-rig.sh --down $RIGDIR${NC}"
+  echo -e "${YELLOW}   Re-baseline deliberately (only for intended behavior moves):${NC}"
+  echo -e "${YELLOW}     cp $RESULTS $BASELINE${NC}"
+  rm -f "$RIG_LOG"
   exit 1
 fi
 
+# Clean path: tear the rig down (kills its daemon + llama children, rm's
+# the temp home) and drop the scratch log.
+(cd "$BENCH_DIR" && scripts/scratch-rig.sh --down "$RIGDIR") >/dev/null 2>&1 || \
+  echo -e "${YELLOW}⚠  rig teardown reported an error; check for a stray llama-server from $RIGDIR${NC}"
+rm -f "$RIG_LOG"
+
 echo ""
-echo -e "${GREEN}✅ Bench gate clean — pushing.${NC}"
+echo -e "${GREEN}✅ Bench gate clean (scratch rig, isolated) — pushing.${NC}"
 exit 0
