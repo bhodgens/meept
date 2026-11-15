@@ -5673,6 +5673,15 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			lastPromotedReasoning = response.Content
 		}
 
+		// Reasoning retention (voice lane): when an OPT-IN reasoning sink
+		// rides this turn's context, capture the response's separate-
+		// channel reasoning. Runs on every successful /chat response so
+		// the LAST iteration (the final reply) wins. No sink present =
+		// no-op, byte-identical to the pre-retention behavior.
+		if sink := reasoningSinkFromContext(ctx); sink != nil {
+			sink.Capture(response.Reasoning)
+		}
+
 		// Case 1: LLM returned tool calls
 		if response.HasToolCalls() {
 			hadToolCalls = true

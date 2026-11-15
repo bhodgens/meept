@@ -256,6 +256,74 @@ type loopTurnRunner struct {
 	// guidedIntakePromptFor resolves the guided-intake procedure block
 	// for the bound employee (leaf 05). nil = never stamped.
 	guidedIntakePromptFor func(employeeID string) string
+
+	// Prior-reasoning retention (voice lane): the LAST captured
+	// llm.Response.Reasoning from a voice turn on each session, bounded
+	// and overwritten each turn (latest wins). It NEVER enters the
+	// conversation history (the "Reasoning never persists in history"
+	// invariant — AddAssistantMessage strips thinking before append), so
+	// it cannot create the stale-reasoning stagnation the invariant
+	// guards against. It is injected as OPTIONAL bounded scaffolding into
+	// the NEXT turn's system prompt (voice-reasoning scaffold below) and
+	// only ever reaches the model's context — never the reply text and
+	// therefore never qwen3-TTS.
+	reasonMu       sync.Mutex
+	retainedReason map[string]string // sessionID -> bounded prior reasoning
+	// reasonSeen tracks each slot's last-turn time (playMu-sibling:
+	// reasonMu guards both) so the bounded map can evict the
+	// oldest-turned session when maxRetainedReasoningSessions is hit.
+	reasonSeen map[string]time.Time
+}
+
+// maxPriorReasoningBytes bounds a single retained reasoning block before
+// it is stashed or injected. Kept deliberately small: the block is one
+// optional reminder, not a replay of the whole chain of thought.
+const maxPriorReasoningBytes = 4000
+
+// maxRetainedReasoningSessions bounds the retainedReason map (defect
+// 2026-11-14: the map grew one entry per session id, unbounded for a
+// long-lived daemon serving many calls). Small by the same posture as
+// maxPriorReasoningBytes: a handful of concurrent voice sessions is the
+// real working set; eviction drops the OLDEST-TURNED session's slot
+// (last-N by insert/update order — a "recently used" posture without a
+// separate list structure).
+const maxRetainedReasoningSessions = 8
+
+// boundReasoning truncates reasoning text to the retention cap. A whole
+// leading slice is kept; the tail is dropped with a marker so the model
+// is not handed a mid-thought fragment. The cut is RUNE-SAFE: a raw
+// byte slice at the cap could split a multi-byte UTF-8 rune and hand the
+// model a corrupted tail, so the boundary backs up to the last complete
+// rune inside the cap (ASCII reasoning is unaffected — every byte is a
+// rune boundary).
+func boundReasoning(r string) string {
+	if len(r) <= maxPriorReasoningBytes {
+		return r
+	}
+	cut := maxPriorReasoningBytes
+	// Back the cut up over any trailing partial rune: while the last
+	// byte at the boundary is a UTF-8 continuation byte (10xxxxxx), the
+	// rune it belongs to started earlier and would be split.
+	for cut > 0 && isUTF8Continuation(r[cut]) {
+		cut--
+	}
+	return r[:cut] + "\n[…retained reasoning truncated]"
+}
+
+// isUTF8Continuation reports whether b is a UTF-8 continuation byte
+// (0b10xxxxxx): a byte that can never START a rune.
+func isUTF8Continuation(b byte) bool { return b&0xC0 == 0x80 }
+
+// priorReasoningBlock renders the model-facing scaffolding header for an
+// injected prior-reasoning retention. The header explicitly marks the
+// block as internal context the model may use to understand the
+// conversation but must NOT read aloud or repeat — the block is a system
+// prompt, so it can never reach TTS (only the reply text is spoken).
+func priorReasoningBlock(reasoning string) string {
+	return "\n\n# Prior reasoning (internal context)\n" +
+		"The following is the model's prior chain-of-thought from the previous turn. " +
+		"Use it to understand the ongoing conversation, but do NOT read it aloud or repeat it to the user.\n\n" +
+		reasoning
 }
 
 // EmployeeDefinitionResolver resolves one employee's runtime definition:
@@ -548,6 +616,30 @@ func (r *loopTurnRunner) Run(ctx context.Context, sess voice.SessionHandle, prom
 				"session_id", sess.ID, "employee_id", employeeID)
 		}
 	}
+	// Prior-reasoning retention (voice lane): the last captured
+	// llm.Response.Reasoning for this session rides the NEXT turn's
+	// system prompt as OPTIONAL bounded scaffolding so the model can use
+	// the prior chain-of-thought to understand the conversation. Appended
+	// here — after the employee persona and the guided-intake extension —
+	// so the block composes with the same override lane the voice loop
+	// short-circuits through (buildSystemPromptWithOverride). It NEVER
+	// touches conversation history (the reply text appended by
+	// RunOnceWithParts is already thinking-stripped) and NEVER the reply
+	// text, so it can never reach qwen3-TTS: only `reply` is spoken. A
+	// session with no captured reasoning injects nothing (byte-identical
+	// to the pre-retention turn).
+	r.reasonMu.Lock()
+	prior := r.retainedReason[sess.ID]
+	r.reasonMu.Unlock()
+	if prior != "" {
+		cfg := loop.GetConfig()
+		if cfg.SystemPromptOveride != "" {
+			cfg.SystemPromptOveride += priorReasoningBlock(prior)
+		} else {
+			cfg.SystemPromptOveride = priorReasoningBlock(prior)
+		}
+		loop.SetConfig(cfg)
+	}
 
 	// Clock stamp (live defect 2026-11-11: asked "what time is it?" the
 	// companion answered "I can't check the current time" — the voice turn
@@ -578,7 +670,14 @@ func (r *loopTurnRunner) Run(ctx context.Context, sess voice.SessionHandle, prom
 	// (C-3) see the same raw prompt as before.
 	now := time.Now().In(r.resolveVoiceTurnLocation(ctx, employeeID))
 	stamp := voiceTurnContextStamp(now)
-	turnCtx := agent.WithVoiceClockStamp(ctx, stamp)
+	// Opt-in reasoning capture (voice lane): arm a call-scoped sink on the
+	// turn context so reasoningCycle captures llm.Response.Reasoning into
+	// it; read it back below and retain it for the NEXT turn. The sink
+	// travels the same turnCtx into the spoken-guard rewrite retry, so a
+	// rewrite's reasoning overwrites the pre-retry reasoning (the final
+	// spoken text's reasoning is what gets retained).
+	sink := &agent.ReasoningSink{}
+	turnCtx := agent.WithReasoningSink(agent.WithVoiceClockStamp(ctx, stamp), sink)
 	reply, err := loop.RunOnce(turnCtx, prompt, sess.ConversationID)
 	if err != nil {
 		return "", err
@@ -619,6 +718,42 @@ func (r *loopTurnRunner) Run(ctx context.Context, sess voice.SessionHandle, prom
 		} else {
 			reply = retry
 		}
+	}
+	// Retain the captured reasoning for this session (latest wins),
+	// bounded. Runs AFTER the spoken-guard rewrite so the sink holds the
+	// FINAL reply's reasoning (RunVoiceSpokenRewriteRetry re-enters the
+	// producer with the same turnCtx, overwriting the sink); stored so the
+	// next Run on this session injects it as prior-reasoning scaffolding.
+	if captured := sink.Get(); captured != "" {
+		r.reasonMu.Lock()
+		if r.retainedReason == nil {
+			r.retainedReason = make(map[string]string)
+		}
+		// Bounded last-N by update order (defect 2026-11-14): the map
+		// previously grew one entry per session id for the daemon's
+		// whole life. When at capacity, evict the OLDEST slot (insert/
+		// update order) before writing; the re-armed session simply
+		// re-fills its slot on its next turn.
+		if _, exists := r.retainedReason[sess.ID]; !exists &&
+			len(r.retainedReason) >= maxRetainedReasoningSessions {
+			oldest := ""
+			oldestAt := time.Time{}
+			for id := range r.retainedReason {
+				if at := r.reasonSeen[id]; oldest == "" || at.Before(oldestAt) {
+					oldest, oldestAt = id, at
+				}
+			}
+			if oldest != "" {
+				delete(r.retainedReason, oldest)
+				delete(r.reasonSeen, oldest)
+			}
+		}
+		r.retainedReason[sess.ID] = boundReasoning(captured)
+		if r.reasonSeen == nil {
+			r.reasonSeen = make(map[string]time.Time)
+		}
+		r.reasonSeen[sess.ID] = time.Now()
+		r.reasonMu.Unlock()
 	}
 	r.persistExchange(sess.ID, prompt, reply)
 	return reply, nil

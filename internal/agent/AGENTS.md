@@ -194,6 +194,18 @@ lane, not a filter rejection, and consumes no retry counter. Separate-channel
 reasoning (`reasoning_content`/`reasoning`) was already safe — the client
 parses it into `Response.Reasoning`, which never enters history.
 
+**Bounded voice exception (2026-11-12, reasoning-token retention):** the
+DAEMON voice lane (`internal/daemon/voice_employee.go`) retains the LAST
+captured `Response.Reasoning` per session in a bounded side slot
+(`maxPriorReasoningBytes=4000`, latest-wins, never appended to history)
+and injects it into the NEXT voice turn's SYSTEM prompt as optional
+scaffolding ("Prior reasoning (internal context)"), so the model can use
+prior reasoning to understand the conversation without stale chain-of-
+thought replaying in transcript. The slot is NOT history: `AddAssistantMessage`
+still strips, the reply/transcript stay byte-identical, reasoned text never
+reaches TTS, and chat lanes never arm the capture (opt-in via
+`agent.WithReasoningSink` — no sink = the pre-retention drop, unchanged).
+
 ## session_id vs conversation_id
 
 `session_id` (primary key, e.g. `session-abc123`) and `conversation_id`
