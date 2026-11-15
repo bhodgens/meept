@@ -4,10 +4,12 @@
 // NO database handle (master.md C7) — it is the only process the browser ever
 // talks to, so the daemon stays loopback/socket-bound.
 //
-// Grant model (C5): reads need board.read, mutations board.mutate, takeover
-// additionally board.takeover. Browsers cannot set headers on a WebSocket, so
-// the WS handshake carries the bearer token in Sec-WebSocket-Protocol as
-// "bearer.<token>" — the same convention internal/comm/web/websocket.go uses.
+// Grant model (C5): reads need board.read, mutations board.mutate, and
+// takeover is conjunctive — it needs board.mutate AND board.takeover, so a
+// takeover-only token cannot move cards in. Browsers cannot set headers on a
+// WebSocket, so the WS handshake carries the bearer token in
+// Sec-WebSocket-Protocol as "bearer.<token>" — the same convention
+// internal/comm/web/websocket.go uses.
 package kanbansvc
 
 import (
@@ -61,9 +63,11 @@ type GrantChecker interface {
 
 // route describes one REST endpoint and the RPC method it forwards to.
 type route struct {
-	verb  string
-	rpc   string
-	grant string
+	verb string
+	rpc  string
+	// grants lists every grant the route requires; a token must hold ALL
+	// of them (takeover needs board.mutate AND board.takeover, C5).
+	grants []string
 	// body marks endpoints whose params come from the JSON request body
 	// (mutations) versus the query string (reads).
 	body bool
@@ -72,19 +76,19 @@ type route struct {
 // restRoutes is the 1:1 REST-to-C4 map. Keys are paths; the verb is checked
 // separately so a wrong verb returns 405 rather than 404.
 var restRoutes = map[string]route{
-	"/api/v1/board/list":     {verb: http.MethodGet, rpc: "kanban.board.list", grant: GrantRead},
-	"/api/v1/board/create":   {verb: http.MethodPost, rpc: "kanban.board.create", grant: GrantMutate, body: true},
-	"/api/v1/column/list":    {verb: http.MethodGet, rpc: "kanban.column.list", grant: GrantRead},
-	"/api/v1/column/set_wip": {verb: http.MethodPost, rpc: "kanban.column.set_wip", grant: GrantMutate, body: true},
-	"/api/v1/card/list":      {verb: http.MethodGet, rpc: "kanban.card.list", grant: GrantRead},
-	"/api/v1/card/get":       {verb: http.MethodGet, rpc: "kanban.card.get", grant: GrantRead},
-	"/api/v1/card/create":    {verb: http.MethodPost, rpc: "kanban.card.create", grant: GrantMutate, body: true},
-	"/api/v1/card/move":      {verb: http.MethodPost, rpc: "kanban.card.move", grant: GrantMutate, body: true},
-	"/api/v1/card/takeover":  {verb: http.MethodPost, rpc: "kanban.card.takeover", grant: GrantTakeover, body: true},
-	"/api/v1/card/assign":    {verb: http.MethodPost, rpc: "kanban.card.assign", grant: GrantMutate, body: true},
-	"/api/v1/card/comment":   {verb: http.MethodPost, rpc: "kanban.card.comment", grant: GrantMutate, body: true},
-	"/api/v1/card/timeline":  {verb: http.MethodGet, rpc: "kanban.card.timeline", grant: GrantRead},
-	"/api/v1/reconcile/now":  {verb: http.MethodPost, rpc: "kanban.reconcile.now", grant: GrantMutate, body: true},
+	"/api/v1/board/list":     {verb: http.MethodGet, rpc: "kanban.board.list", grants: []string{GrantRead}},
+	"/api/v1/board/create":   {verb: http.MethodPost, rpc: "kanban.board.create", grants: []string{GrantMutate}, body: true},
+	"/api/v1/column/list":    {verb: http.MethodGet, rpc: "kanban.column.list", grants: []string{GrantRead}},
+	"/api/v1/column/set_wip": {verb: http.MethodPost, rpc: "kanban.column.set_wip", grants: []string{GrantMutate}, body: true},
+	"/api/v1/card/list":      {verb: http.MethodGet, rpc: "kanban.card.list", grants: []string{GrantRead}},
+	"/api/v1/card/get":       {verb: http.MethodGet, rpc: "kanban.card.get", grants: []string{GrantRead}},
+	"/api/v1/card/create":    {verb: http.MethodPost, rpc: "kanban.card.create", grants: []string{GrantMutate}, body: true},
+	"/api/v1/card/move":      {verb: http.MethodPost, rpc: "kanban.card.move", grants: []string{GrantMutate}, body: true},
+	"/api/v1/card/takeover":  {verb: http.MethodPost, rpc: "kanban.card.takeover", grants: []string{GrantMutate, GrantTakeover}, body: true},
+	"/api/v1/card/assign":    {verb: http.MethodPost, rpc: "kanban.card.assign", grants: []string{GrantMutate}, body: true},
+	"/api/v1/card/comment":   {verb: http.MethodPost, rpc: "kanban.card.comment", grants: []string{GrantMutate}, body: true},
+	"/api/v1/card/timeline":  {verb: http.MethodGet, rpc: "kanban.card.timeline", grants: []string{GrantRead}},
+	"/api/v1/reconcile/now":  {verb: http.MethodPost, rpc: "kanban.reconcile.now", grants: []string{GrantMutate}, body: true},
 }
 
 // Gateway serves the REST/WS surface. It is stateless apart from its
@@ -153,7 +157,7 @@ func (g *Gateway) serveAPI(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	if !g.authorize(w, r, spec.grant) {
+	if !g.authorize(w, r, spec.grants...) {
 		return
 	}
 
@@ -197,24 +201,28 @@ func (g *Gateway) buildParams(r *http.Request, fromBody bool) (any, error) {
 }
 
 // authorize answers 401 for missing OR unknown tokens (bad credentials) and
-// 403 for a known token that lacks the grant. The distinction matters to
-// operators: 403 means "pair this sidecar and grant the lane", 401 means
-// "the token you presented was never issued". The grant requirement is never
-// relaxed for convenience.
-func (g *Gateway) authorize(w http.ResponseWriter, r *http.Request, grant string) bool {
+// 403 for a known token that lacks any of the required grants. The
+// distinction matters to operators: 403 means "pair this sidecar and grant
+// the lane", 401 means "the token you presented was never issued". The grant
+// requirement is never relaxed for convenience; when a route requires
+// multiple grants (takeover: board.mutate AND board.takeover) the token must
+// hold all of them, and the 403 names the first missing one.
+func (g *Gateway) authorize(w http.ResponseWriter, r *http.Request, grants ...string) bool {
 	token := bearerToken(r)
 	if token == "" {
 		writeJSONError(w, http.StatusUnauthorized, "missing bearer token")
 		return false
 	}
-	grants, known := g.authz.Grants(token)
+	held, known := g.authz.Grants(token)
 	if !known {
 		writeJSONError(w, http.StatusUnauthorized, "unknown bearer token")
 		return false
 	}
-	if !hasGrantName(grants, grant) {
-		writeJSONError(w, http.StatusForbidden, "missing grant "+grant)
-		return false
+	for _, grant := range grants {
+		if !hasGrantName(held, grant) {
+			writeJSONError(w, http.StatusForbidden, "missing grant "+grant)
+			return false
+		}
 	}
 	return true
 }

@@ -40,15 +40,18 @@ func (f *fakeRPC) Connect() error { return nil }
 func (f *fakeRPC) Close() error   { return nil }
 
 // newTestGateway builds a gateway over one grant store. readToken holds only
-// board.read; mutateToken holds read+mutate; takeoverToken adds takeover. The
-// grant ladder is what the tests exercise, so a route must fail for a token
-// that lacks its specific grant.
+// board.read; mutateToken holds read+mutate; takeoverToken adds takeover;
+// takeoverOnlyToken holds ONLY board.takeover. The grant ladder is what the
+// tests exercise, so a route must fail for a token that lacks its specific
+// grant — and takeover must fail for a token that lacks either of its two
+// required grants.
 func newTestGateway(t *testing.T, rpc *fakeRPC, staticDir string) (*Gateway, *StaticGrantStore) {
 	t.Helper()
 	authz := NewStaticGrantStore()
 	authz.Grant("read-token", GrantRead)
 	authz.Grant("mutate-token", GrantRead, GrantMutate)
 	authz.Grant("takeover-token", GrantRead, GrantMutate, GrantTakeover)
+	authz.Grant("takeover-only-token", GrantTakeover)
 	gateway, err := NewGateway(rpc, IdleSource{}, authz, staticDir)
 	if err != nil {
 		t.Fatalf("NewGateway: %v", err)
@@ -105,9 +108,11 @@ func TestGateway_EveryRouteForwardsToItsRPC(t *testing.T) {
 }
 
 // TestGateway_GrantLadder is the C5 contract: reads need board.read,
-// mutations board.mutate, takeover board.takeover. The child's version of
-// this test asserted that reads with NO token return 200 — that is not a
-// board, it is an open edit surface, so the pin now runs the other way.
+// mutations board.mutate, and takeover needs BOTH board.mutate AND
+// board.takeover (a token holding only one of the two is refused). The
+// child's version of this test asserted that reads with NO token return
+// 200 — that is not a board, it is an open edit surface, so the pin now
+// runs the other way.
 func TestGateway_GrantLadder(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -122,7 +127,8 @@ func TestGateway_GrantLadder(t *testing.T) {
 		{"mutate with only board.read", http.MethodPost, "/api/v1/card/move", "read-token", http.StatusForbidden, false},
 		{"mutate with board.mutate", http.MethodPost, "/api/v1/card/move", "mutate-token", http.StatusOK, true},
 		{"takeover with board.mutate only", http.MethodPost, "/api/v1/card/takeover", "mutate-token", http.StatusForbidden, false},
-		{"takeover with board.takeover", http.MethodPost, "/api/v1/card/takeover", "takeover-token", http.StatusOK, true},
+		{"takeover with board.takeover only", http.MethodPost, "/api/v1/card/takeover", "takeover-only-token", http.StatusForbidden, false},
+		{"takeover with board.mutate and board.takeover", http.MethodPost, "/api/v1/card/takeover", "takeover-token", http.StatusOK, true},
 		{"unknown token is 401, not 403", http.MethodGet, "/api/v1/card/get?card_id=1", "never-issued", http.StatusUnauthorized, false},
 		{"empty bearer is refused", http.MethodGet, "/api/v1/board/list", " ", http.StatusUnauthorized, false},
 	}
@@ -223,10 +229,12 @@ func TestGateway_ErrorBodiesAreValidJSON(t *testing.T) {
 			if body["error"] == "" {
 				t.Errorf("error body has no error field: %q", rec.Body.String())
 			}
-			// The 403 must name the grant it refused, or an operator
-			// debugging a permission failure has nothing to act on.
-			if tt.name == "403 names a grant" && !strings.Contains(body["error"], GrantTakeover) {
-				t.Errorf("403 body %q does not name the refused grant %q", body["error"], GrantTakeover)
+			// The 403 must name a grant it refused, or an operator
+			// debugging a permission failure has nothing to act on. A
+			// read-only token on takeover is missing board.mutate first
+			// (route grants are checked in order: mutate, then takeover).
+			if tt.name == "403 names a grant" && !strings.Contains(body["error"], GrantMutate) {
+				t.Errorf("403 body %q does not name the refused grant %q", body["error"], GrantMutate)
 			}
 		})
 	}
