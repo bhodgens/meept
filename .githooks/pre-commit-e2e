@@ -9,11 +9,24 @@
 #      hermetic e2e suites are run (scripts/e2e-affected.sh). Any failing
 #      suite FAILS the commit.
 #
-#   2. New-feature coverage rule: a staged change that creates files under a
-#      NEW package directory (a directory with no path_map entry) FAILS with
-#      instructions to add e2e coverage + a manifest entry, unless e2e suite
-#      files are staged in the same commit or the files are exempt
-#      (_test.go, docs, generated).
+#   2. New-package census (hard gate, fail-closed): every NEW package
+#      directory in the staged diff — a directory with no path_map entry
+#      under the manifest's bidirectional-prefix normalization — FAILS the
+#      commit unless either (a) the commit also stages a path_map key that
+#      covers the dir, or (b) e2e/manifest.json carries an "exempt" entry
+#      mapping the dir to a non-empty reason string. Exemptions are printed
+#      in the report so the exception list stays visible as residual risk.
+#      Test-only additions (a dir whose staged Go files are all *_test.go)
+#      never open a new package dir; neither do exempt paths (_test.go,
+#      docs, generated, ui/, tools/, magefiles/, scripts/, config/, theme/).
+#      The population is staged ADDITIONS only, so no historical baseline
+#      is needed — existing unmapped dirs pass until someone re-adds files
+#      under them.
+#
+#      Non-vacuity floors (each exits 1 loudly): a manifest that fails to
+#      parse, zero path_map entries, or a census that parsed zero staged
+#      dirs on a commit that adds non-test internal/|pkg/|cmd/ Go files.
+#      A checker that matches nothing is a false green, not a pass.
 #
 # This is the repo's NO-NEW-UNIT-TESTS policy enforcement point: all new
 # feature tests go in the e2e tier (see docs/workflows/e2e-testing.md).
@@ -21,6 +34,18 @@
 # Escape hatch (emergencies only — prints a loud warning, stays in the
 # transcript):
 #   MEEPT_SKIP_E2E=1 git commit ...
+#
+# Test seams (mirrors MEEPT_DEADCODE_BASELINE in pre-commit-deadcode):
+#   MEEPT_E2E_CENSUS_STAGED_FILE=/path/to/file   census fixture mode: read
+#     the staged ADDITIONS list from FILE (one path per line, exactly what
+#     `git diff --cached --name-only --diff-filter=A` prints) instead of
+#     the git index, evaluate the census against MEEPT_E2E_MANIFEST_FILE
+#     (or REPO_ROOT/e2e/manifest.json), and exit before the affected-suite
+#     gate — a synthetic list must never drive `go test`. Lets e2e-census
+#     fixtures prove the gate without touching a shared worktree's index.
+#   MEEPT_E2E_MANIFEST_FILE=/path/to/file   fixture-only manifest override;
+#     requires MEEPT_E2E_CENSUS_STAGED_FILE (real commits always evaluate
+#     the STAGED manifest copy so same-commit keys count).
 #
 # Exempt paths (never trigger either mode): _test.go files, docs/,
 # e2e/ harness+manifest itself, generated dirs, ui/, tools/, magefiles/.
@@ -34,8 +59,19 @@ cd "$REPO_ROOT"
 AFFECTED_SCRIPT="scripts/e2e-affected.sh"
 
 # Staged paths (index, not worktree) — added/copied/modified/renamed.
-STAGED="$(git diff --cached --name-only --diff-filter=ACMR || true)"
-if [ -z "$STAGED" ]; then
+# In seam mode (MEEPT_E2E_CENSUS_STAGED_FILE, see header) the list comes
+# from FILE and the git index is never read.
+if [ -n "${MEEPT_E2E_CENSUS_STAGED_FILE:-}" ]; then
+    if [ ! -f "$MEEPT_E2E_CENSUS_STAGED_FILE" ]; then
+        echo "pre-commit-e2e: MEEPT_E2E_CENSUS_STAGED_FILE=$MEEPT_E2E_CENSUS_STAGED_FILE does not exist — fail-closed." >&2
+        exit 1
+    fi
+    STAGED="$(cat "$MEEPT_E2E_CENSUS_STAGED_FILE")"
+    echo "pre-commit-e2e: census using staged-file seam $MEEPT_E2E_CENSUS_STAGED_FILE (no git index reads)."
+else
+    STAGED="$(git diff --cached --name-only --diff-filter=ACMR || true)"
+fi
+if [ -z "$STAGED" ] && [ -z "${MEEPT_E2E_CENSUS_STAGED_FILE:-}" ]; then
     echo "pre-commit-e2e: no staged changes — nothing to check."
     exit 0
 fi
@@ -57,99 +93,197 @@ TMP="$(mktemp "${TMPDIR:-/tmp}/pre-commit-e2e.XXXXXX")"
 trap 'rm -f "$TMP"' EXIT
 printf '%s\n' "$STAGED" > "$TMP"
 
-is_exempt() {
-    case "$1" in
-        *_test.go)                   return 0 ;;
-        docs/*|*.md)                 return 0 ;;
-        e2e/manifest.json|e2e/harness/*|e2e/suites/*) return 0 ;;
-        */generated/*|docs/generated/*) return 0 ;;
-        ui/*|tools/*|magefiles/*|scripts/*|config/*|theme/*) return 0 ;;
-        *)                           return 1 ;;
-    esac
-}
+# --- Mode 2 first: new-package census (hard gate) -------------------------
+#
+# Population: staged ADDED (git diff --cached --diff-filter=A) non-test .go
+# files under internal/ | pkg/ | cmd/, minus is_exempt-style paths
+# (_test.go, */generated/*). Package dirs = dirname of each. A dir passes
+# iff the manifest's OWN normalization predicate (trailing-slash
+# normalization, bidirectional slash-boundary prefix match — identical
+# semantics to the old per-file check, now run once against all dirs) says
+# it is covered by a path_map key, OR an "exempt" key (dir -> non-empty
+# reason string) covers it under the same predicate. Everything else blocks.
+#
+# The census evaluates the INDEX copy of e2e/manifest.json (git show
+# :e2e/manifest.json), so a commit that adds both the package dir and the
+# path_map key covering it passes atomically; with the
+# MEEPT_E2E_CENSUS_STAGED_FILE seam it reads MEEPT_E2E_MANIFEST_FILE or the
+# worktree manifest instead.
+#
+# There is deliberately NO blanket "some suite file is staged" escape any
+# more: that let any commit pass by staging an unrelated file under
+# e2e/suites/ (the hole the prior audit flagged). Coverage is path_map or
+# annotated exemption, nothing else.
 
-# --- Mode 2 first: new-feature coverage rule ------------------------------
+MANIFEST_TMP=""
+CENSUS_TMP=""
+trap 'rm -f "$TMP" "${MANIFEST_TMP:-}" "${CENSUS_TMP:-}"' EXIT
 
-new_pkg_fail=""
-suite_files_staged=0
-
-while IFS= read -r f; do
-    [ -n "$f" ] || continue
-
-    case "$f" in
-        e2e/suites/*) suite_files_staged=1 ;;
-    esac
-
-    is_exempt "$f" && continue
-
-    # Only .go files under the feature trees can open a new package dir.
-    case "$f" in
-        *.go) ;;
-        *) continue ;;
-    esac
-    case "$f" in
-        internal/*|pkg/*|cmd/*) ;;
-        *) continue ;;
-    esac
-
-    # The staged path's package directory.
-    pkg_dir="$(dirname "$f")"
-
-    # NEW = the directory is not a prefix key in the manifest path_map and
-    # is not itself an existing e2e suite dir. Both sides are normalized
-    # (trailing slashes stripped) because behavioral path_map keys are
-    # trailing-slash prefixes ("internal/agent/"): without normalization a
-    # NEW subpackage of a covered package (internal/agent/prompts vs the
-    # "internal/agent/" key) was false-flagged, contradicting the prefix
-    # semantics scripts/e2e-affected.sh applies to the same map. Matching is
-    # directional after normalization: pkg equals a key, a key prefixes pkg
-    # ("internal/agent/" covers "internal/agent/prompts"), or pkg prefixes a
-    # key ("internal/agent" covers the "internal/agent/" key). The boundary
-    # stays safe: "internal/agentfoo" shares no slash boundary with
-    # "internal/agent" and remains NEW.
-    known="$(python3 - e2e/manifest.json "$pkg_dir" <<'PYEOF'
-import json, sys
-manifest = json.load(open(sys.argv[1]))
-pkg = sys.argv[2].rstrip("/")
-if any(pkg == (p := k.rstrip("/")) or p.startswith(pkg + "/") or pkg.startswith(p + "/") for k in manifest.get("path_map", {})):
-    print("known")
-else:
-    print("new")
-PYEOF
-)"
-    if [ "$known" = "new" ]; then
-        new_pkg_fail="$new_pkg_fail$f"
+if [ -n "${MEEPT_E2E_CENSUS_STAGED_FILE:-}" ]; then
+    # Fixture seam: the staged-file IS the additions list (one path per
+    # line, as `git diff --cached --name-only --diff-filter=A` would print).
+    CENSUS_SRC="$MEEPT_E2E_CENSUS_STAGED_FILE"
+    if [ -n "${MEEPT_E2E_MANIFEST_FILE:-}" ]; then
+        if [ ! -f "$MEEPT_E2E_MANIFEST_FILE" ]; then
+            echo "pre-commit-e2e: MEEPT_E2E_MANIFEST_FILE=$MEEPT_E2E_MANIFEST_FILE does not exist — fail-closed." >&2
+            exit 1
+        fi
+        MANIFEST_PATH="$MEEPT_E2E_MANIFEST_FILE"
+    else
+        MANIFEST_PATH="$REPO_ROOT/e2e/manifest.json"
     fi
-done < "$TMP"
-
-if [ "$suite_files_staged" = "1" ]; then
-    new_pkg_fail=""
+else
+    if [ -n "${MEEPT_E2E_MANIFEST_FILE:-}" ]; then
+        echo "pre-commit-e2e: MEEPT_E2E_MANIFEST_FILE is fixture-only — it requires MEEPT_E2E_CENSUS_STAGED_FILE (real commits must evaluate the staged manifest). Fail-closed." >&2
+        exit 1
+    fi
+    CENSUS_TMP="$(mktemp "${TMPDIR:-/tmp}/pre-commit-e2e-census.XXXXXX")"
+    if ! git diff --cached --name-only --diff-filter=A > "$CENSUS_TMP"; then
+        echo "pre-commit-e2e: cannot read staged additions from the index (git diff failed) — fail-closed." >&2
+        exit 1
+    fi
+    CENSUS_SRC="$CENSUS_TMP"
+    # Read the manifest from the INDEX so same-commit path_map keys count.
+    MANIFEST_TMP="$(mktemp "${TMPDIR:-/tmp}/pre-commit-e2e-manifest.XXXXXX")"
+    if ! git show :e2e/manifest.json > "$MANIFEST_TMP" 2>/dev/null; then
+        cp e2e/manifest.json "$MANIFEST_TMP" 2>/dev/null || true
+    fi
+    MANIFEST_PATH="$MANIFEST_TMP"
 fi
 
-if [ -n "$new_pkg_fail" ]; then
-    echo ""
-    echo "❌ pre-commit-e2e: NEW package directory staged without e2e coverage"
-    echo ""
-    echo "These files live under a package directory that has no entry in"
-    echo "e2e/manifest.json path_map, and no e2e suite files are staged:"
-    while IFS= read -r f; do
-        [ -n "$f" ] || continue
-        echo "  - $f"
-    done <<EOF
-$new_pkg_fail
-EOF
-    echo ""
-    echo "Repo policy (docs/workflows/e2e-testing.md): new feature tests go"
-    echo "in the hermetic e2e tier — NOT as new unit-test files."
-    echo ""
-    echo "To fix:"
-    echo "  1. Create an e2e suite dir e2e/suites/<your-suite>/ with tests"
-    echo "     (build tag 'e2e'; see e2e/suites/smoke/ for the pattern)."
-    echo "  2. Add a path_map entry and a suites[] row for it in"
-    echo "     e2e/manifest.json."
-    echo "  3. Stage both, then re-commit."
-    echo ""
+# Independent (awk) count of census-list non-test feature Go files. The
+# Python side re-derives its own filter; the two parsers must AGREE that a
+# "clearly adds Go files" census is not parsed into zero dirs — a
+# regression in either filter then trips the vacuity floor below instead
+# of silently green-lighting the census.
+shell_go_adds="$(awk '/\.go$/ && !/_test\.go$/ && !/\/generated\// && ($0 ~ /^(internal|pkg|cmd)\//)' "$CENSUS_SRC" | wc -l | tr -d ' "')"
+
+python3 - "$MANIFEST_PATH" "$CENSUS_SRC" "$shell_go_adds" <<'PYEOF'
+import json, os, sys
+
+manifest_path, additions_path = sys.argv[1], sys.argv[2]
+shell_go_adds = int(sys.argv[3]) if len(sys.argv) > 3 else 0
+
+def vacuous(msg):
+    print("")
+    print("❌ pre-commit-e2e: new-package census is VACUOUS — refusing to pass")
+    print("   A gate that can match nothing is a false green, not a pass.")
+    print("   reason: %s" % msg)
+    print("")
+    sys.exit(2)
+
+try:
+    with open(manifest_path) as fh:
+        manifest = json.load(fh)
+except Exception as exc:
+    vacuous("manifest %s did not parse: %s" % (manifest_path, exc))
+
+path_map = manifest.get("path_map")
+exempt = manifest.get("exempt", {})
+if not isinstance(path_map, dict) or not path_map:
+    vacuous("e2e/manifest.json has zero path_map entries")
+if not isinstance(exempt, dict):
+    vacuous("e2e/manifest.json 'exempt' is not an object (dir -> reason string)")
+
+# Same filter the old per-file loop applied: non-test .go under the
+# feature trees; generated paths are exempt (mirrors is_exempt).
+added_go = []
+with open(additions_path) as fh:
+    for line in fh:
+        f = line.strip()
+        if not f or not f.endswith(".go") or f.endswith("_test.go"):
+            continue
+        if "/generated/" in f:
+            continue
+        if f.startswith("internal/") or f.startswith("pkg/") or f.startswith("cmd/"):
+            added_go.append(f)
+
+dirs = sorted(set(os.path.dirname(f) or "." for f in added_go))
+# Non-vacuity floor (cross-parser): an independent awk pass counted
+# shell_go_adds non-test feature Go files on the same list; if the Python
+# census parsed any fewer to zero dirs, the checker matched nothing on a
+# commit that clearly adds Go code — that is a false green, not a pass.
+if shell_go_adds > 0 and not dirs:
+    vacuous("census parsed 0 package dirs but awk sees %d added feature Go file(s)" % shell_go_adds)
+if shell_go_adds > 0 and added_go and len(added_go) != shell_go_adds:
+    vacuous("parser disagreement: awk=%d python=%d non-test feature Go files" % (shell_go_adds, len(added_go)))
+
+# The repo's own normalization predicate (pre-commit-e2e, since 6b97665c /
+# a7290da9): both sides trailing-slash-stripped; match iff dir equals key,
+# key prefixes dir at a slash boundary, or dir prefixes key at a slash
+# boundary. Reproduces the old per-dir check EXACTLY — a naive prefix grep
+# would false-cover sibling dirs like internal/newpkg under key internal/new/.
+def match_key(d, keys):
+    d = d.rstrip("/")
+    for k in keys:
+        k0 = k.rstrip("/")
+        if not k0:
+            continue
+        if d == k0 or k0.startswith(d + "/") or d.startswith(k0 + "/"):
+            return k
+    return None
+
+blocked, mapped, exempted = [], [], []
+for d in dirs:
+    if match_key(d, path_map) is not None:
+        mapped.append(d)
+        continue
+    ek = match_key(d, exempt)
+    if ek is not None:
+        reason = exempt.get(ek)
+        if isinstance(reason, str) and reason.strip():
+            exempted.append((d, reason.strip()))
+            continue
+        # An exemption without a reason string is no exemption at all —
+        # the annotation is the whole point of the residual-risk list.
+    blocked.append(d)
+
+if blocked:
+    print("")
+    print("❌ pre-commit-e2e: NEW package directory staged without e2e coverage")
+    print("")
+    print("These package directories have no path_map entry in e2e/manifest.json")
+    print("(under its bidirectional prefix normalization) and no 'exempt'")
+    print("annotation:")
+    for d in blocked:
+        files = [f for f in added_go if (os.path.dirname(f) or ".") == d]
+        print("  - %s  (%d new file(s), e.g. %s)" % (d, len(files), files[0]))
+    print("")
+    print("Repo policy (docs/workflows/e2e-testing.md): new feature tests go")
+    print("in the hermetic e2e tier — NOT as new unit-test files.")
+    print("")
+    print("To fix (pick one):")
+    print("  1. Create an e2e suite dir e2e/suites/<your-suite>/ with tests")
+    print("     (build tag 'e2e'; see e2e/suites/smoke/ for the pattern),")
+    print("     add a path_map entry + a suites[] row in e2e/manifest.json,")
+    print("     and STAGE the manifest — the census reads the staged copy.")
+    print("  2. Emergency-only exemption: add")
+    print('       "exempt": {"<dir>": "<mandatory reason string>"}')
+    print("     to e2e/manifest.json. Every hook run then prints it as")
+    print("     residual risk; follow up with a real suite.")
+    print("")
+    sys.exit(1)
+
+if exempted:
+    print("")
+    print("⚠️  pre-commit-e2e: new-package census — ANNOTATED EXEMPTIONS in use")
+    print("   (residual risk; tracked in e2e/manifest.json 'exempt'):")
+    for d, reason in exempted:
+        print("  - %s — %s" % (d, reason))
+    print("")
+elif dirs:
+    print("pre-commit-e2e: census: %d new package dir(s), all mapped in e2e/manifest.json." % len(dirs))
+PYEOF
+census_rc=$?
+if [ "$census_rc" != "0" ]; then
     exit 1
+fi
+
+# Census-seam mode is fixture-only: never drive `go test` from a synthetic
+# staged list (that would run suites against unrelated worktree state).
+if [ -n "${MEEPT_E2E_CENSUS_STAGED_FILE:-}" ]; then
+    echo "pre-commit-e2e: OK (census-seam mode — affected-suite gate not run)."
+    exit 0
 fi
 
 # --- Mode 1: affected-suite gate ------------------------------------------
