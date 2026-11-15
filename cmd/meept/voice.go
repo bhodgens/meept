@@ -222,6 +222,7 @@ func runVoiceLocal(employee, label, inPath, outPath, recordDir string) error {
 	events := newVoiceEventTracker(client, map[string][2]string{
 		open.CallID: {"local", employee},
 	})
+	events.clock = newSpeakerClock("local", employee)
 	events.start(teleCtx)
 
 	// SIGINT -> voice.local.end (graceful: the daemon's release fan-out
@@ -244,7 +245,7 @@ func runVoiceLocal(employee, label, inPath, outPath, recordDir string) error {
 	if inPath != "" || outPath != "" {
 		err = runVoiceLocalFileMode(ctx, client, open, inPath, outPath)
 	} else {
-		err = runVoiceLocalLive(ctx, open, employee, recordDir)
+		err = runVoiceLocalLive(ctx, open, employee, recordDir, events.clock)
 	}
 
 	// The call ends here no matter how the loop exited (the daemon may
@@ -608,7 +609,34 @@ const liveSpeakerReadChunk = 640
 // the client (upstream stall); burst sizes pinned at the 4800 B bound
 // mean handoffs are bound-driven (expected), sizes < ~1000 B mean the
 // 350 ms sink-gap heuristic is splitting sentences (audible seams).
-func drainLiveSpeaker(r io.Reader, s *voice.SpeakerSink, done chan<- error, clears <-chan struct{}) {
+func drainLiveSpeaker(r io.Reader, s *voice.SpeakerSink, done chan<- error, clears <-chan struct{}, clocks ...*speakerClock) {
+	var clock *speakerClock
+	if len(clocks) > 0 {
+		clock = clocks[0]
+	}
+	gapTimer := time.NewTimer(time.Hour)
+	if !gapTimer.Stop() {
+		<-gapTimer.C
+	}
+	defer gapTimer.Stop()
+	armSpeakerGap := func() {
+		if clock == nil {
+			return
+		}
+		if !gapTimer.Stop() {
+			select {
+			case <-gapTimer.C:
+			default:
+			}
+		}
+		gapTimer.Reset(voice.SinkGap)
+	}
+	notePlayed := func() {
+		if clock == nil || s.Pending() == 0 {
+			return
+		}
+		clock.noteOn()
+	}
 	trace := os.Getenv("MEEPT_VOICE_TRACE") == "1"
 	var (
 		lastRead   time.Time
@@ -698,17 +726,18 @@ func drainLiveSpeaker(r io.Reader, s *voice.SpeakerSink, done chan<- error, clea
 	for {
 		select {
 		case <-clears:
-			// BARGE-IN CONTRACT (2026-11-11): sink.Clear() - the ONLY
-			// production caller chain for the whole client-speaker
-			// silence path (daemon routeFrame latch -> ev {"event":
-			// "clear"} -> token -> HERE). Runs on this goroutine, the
-			// sink's sole owner (SpeakerSink is not concurrency-safe
-			// beyond Close/Clear): drops the buffered backlog AND
-			// pauses every live oto burst within ~20 ms. Keep this
-			// call in any refactor - the ~750 ms ghost tail returns
-			// the moment it is gone.
+			// BARGE-IN CONTRACT: Clear is the production silence path.
+			// Keep this call. A missing Clear restores the ghost tail.
 			s.Clear()
+			if clock != nil {
+				clock.noteOff()
+			}
 			sawClear = true
+			continue
+		case <-gapTimer.C:
+			if clock != nil {
+				clock.noteOff()
+			}
 			continue
 		case res := <-reads:
 			if len(res.data) > 0 {
@@ -749,6 +778,7 @@ func drainLiveSpeaker(r io.Reader, s *voice.SpeakerSink, done chan<- error, clea
 						lastFlushAt = now
 						lastFlushBytes = s.Pending()
 					}
+					notePlayed()
 					if ferr := s.Flush(); ferr != nil {
 						done <- ferr
 						return
@@ -761,6 +791,7 @@ func drainLiveSpeaker(r io.Reader, s *voice.SpeakerSink, done chan<- error, clea
 					// belongs to that new stream and must play out
 					// normally - the no-barge hangup path.
 					sawClear = false
+					armSpeakerGap()
 				}
 			}
 			if res.err != nil {
@@ -780,12 +811,19 @@ func drainLiveSpeaker(r io.Reader, s *voice.SpeakerSink, done chan<- error, clea
 				// hand the aborted tail to the player either.
 				if sawClear {
 					s.Clear()
+					if clock != nil {
+						clock.noteOff()
+					}
 					end(nil)
 					return
 				}
+				notePlayed()
 				if ferr := s.Flush(); ferr != nil {
 					done <- ferr
 					return
+				}
+				if clock != nil {
+					clock.noteOff()
 				}
 				end(nil)
 				return
@@ -1012,7 +1050,7 @@ func writeLocalRecordingMeta(dir string, open voiceLocalOpenResult, employee str
 	return os.WriteFile(filepath.Join(dir, open.CallID+"-meta.json"), b, 0o644)
 }
 
-func runVoiceLocalLive(ctx context.Context, open voiceLocalOpenResult, employee, recordDir string) error {
+func runVoiceLocalLive(ctx context.Context, open voiceLocalOpenResult, employee, recordDir string, clock *speakerClock) error {
 	cap, err := voice.NewRawMicCapture("", "")
 	if err != nil {
 		return err
@@ -1059,7 +1097,7 @@ func runVoiceLocalLive(ctx context.Context, open voiceLocalOpenResult, employee,
 	// gap-only flush let seconds of audio queue behind a barge-in and
 	// talk over the new answer.
 	go func() {
-		drainLiveSpeaker(lspk.conn, lspk.sink, spkDone, lspk.clears)
+		drainLiveSpeaker(lspk.conn, lspk.sink, spkDone, lspk.clears, clock)
 		close(spkReturned)
 	}()
 	// Registered AFTER the drain starts (the only code between dialing
@@ -1137,11 +1175,16 @@ func voiceEventRender(ev voiceEventRow) string {
 		return at + " thinking (" + itoa(ev.Words) + " words): " + ev.Text
 	case "turn_final":
 		return at + " replied (" + itoa(ev.Words) + " words, " + itoa64(ev.Ms) + "ms)"
+	case "said":
+		return at + " said: " + ev.Text
 	case "barge_in":
 		return at + " >> barge-in"
 	case "call_ended":
 		return at + " call ended: " + ev.Reason
 	case "silence_deferred":
+		if ev.Reason == "caller" {
+			return at + " silence held (caller speaking)"
+		}
 		return at + " silence deferred (agent audio playing, x" + ev.Reason + ")"
 	case "prompt_held":
 		return at + " held (peer speaking): " + ev.Text
@@ -1186,6 +1229,9 @@ type voiceEventTracker struct {
 	// the poller prints one "feed ended" line and stops polling it.
 	ended map[string]bool
 	wg    sync.WaitGroup
+	// clock joins said lines to speaker on/off. Nil prints said as a
+	// plain event line.
+	clock *speakerClock
 }
 
 // voiceEventCallTimeout bounds one voice.local.events round-trip (C-11):
@@ -1202,6 +1248,73 @@ func newVoiceEventTracker(client interface {
 		cursors: make(map[string]uint64, len(calls)),
 		ended:   make(map[string]bool, len(calls)),
 	}
+}
+
+// speakerClock joins spoken sentences to the speaker window. The drain
+// calls noteOn on the first played byte of a burst and noteOff after a
+// 350 ms gap, a clear, or end of stream. said events that arrive before
+// the window wait in pending.
+type speakerClock struct {
+	label string
+	emp   string
+	mu    sync.Mutex
+	on    bool
+	start time.Time
+	wait  []string
+}
+
+func newSpeakerClock(label, emp string) *speakerClock {
+	return &speakerClock{label: label, emp: emp}
+}
+
+func (c *speakerClock) printf(format string, args ...any) {
+	fmt.Printf("[%s %s] "+format+"\n", append([]any{c.label, c.emp}, args...)...)
+}
+
+func (c *speakerClock) noteSaid(text string) {
+	if c == nil || strings.TrimSpace(text) == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.on {
+		c.printf("%s said: %s", time.Now().Format("15:04:05"), text)
+		return
+	}
+	c.wait = append(c.wait, text)
+}
+
+func (c *speakerClock) noteOn() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.on {
+		return
+	}
+	c.on = true
+	c.start = time.Now()
+	stamp := c.start.Format("15:04:05")
+	c.printf("%s speaker on", stamp)
+	for _, text := range c.wait {
+		c.printf("%s said: %s", stamp, text)
+	}
+	c.wait = nil
+}
+
+func (c *speakerClock) noteOff() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.on {
+		return
+	}
+	c.on = false
+	elapsed := time.Since(c.start).Round(100 * time.Millisecond)
+	c.printf("%s speaker off (%s)", time.Now().Format("15:04:05"), elapsed)
 }
 
 // start spawns one ticker poller goroutine per known call id. The
@@ -1299,6 +1412,10 @@ func (t *voiceEventTracker) pollOnce(ccid, label, emp string) bool {
 		return false // abandoned window: never print after stop began
 	}
 	for _, ev := range res.Events {
+		if ev.Kind == "said" && t.clock != nil {
+			t.clock.noteSaid(ev.Text)
+			continue
+		}
 		fmt.Printf("[%s %s] %s\n", label, emp, voiceEventRender(ev))
 	}
 	if res.Truncated {

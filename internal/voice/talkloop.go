@@ -238,6 +238,16 @@ type TalkDeps struct {
 	// LocalSpliceFor(ccid).TailActive(window) (nil-safe splice lookup).
 	// It reads audio-truth (pump/pace writes), never the text lane.
 	AudioActive func(ccid string, window time.Duration) bool
+	// CallerActive is the OPTIONAL caller-speech hold (call
+	// local-a7588dbe40dbe78c): when non-nil the silence fire checks
+	// whether the CALLER was speaking inside the lookback BEFORE the
+	// nudge or the hangup. A true verdict re-arms a fresh S window and
+	// does not speak. It is not charged against silenceAudioDeferralCap
+	// (that cap is a stuck agent tail). A separate caller cap still
+	// lets a stuck-hot mic reach the nudge. Nil (phone legs, legacy
+	// callers) = zero behavior change. The daemon wires it for LOCAL
+	// legs to LocalSpliceFor(ccid).CallerSpeaking(window).
+	CallerActive func(ccid string, window time.Duration) bool
 	// OnEvent is the operator-telemetry append hook (voice-events tree):
 	// when non-nil the loop records dispatch / final / barge-in / held /
 	// released / dropped / call-ended events at its existing log sites
@@ -576,6 +586,17 @@ func (t *TalkLoop) silencePromptLine() string {
 // (margin_rearmed re-arms ONCE, the second fire releases).
 const silenceAudioDeferralCap = 2
 
+// silenceCallerLookback is how recently inbound speech must have been
+// loud for a silence fire to hold. It is wall time, not the armed S
+// window: the user who has started talking must hold the nudge now,
+// not for the whole 10 s dead-air window.
+const silenceCallerLookback = time.Second
+
+// silenceCallerDeferralCap bounds consecutive caller-speech holds.
+// A stuck-hot mic must still reach the nudge. This cap is separate
+// from silenceAudioDeferralCap.
+const silenceCallerDeferralCap = 6
+
 // silenceAudioDefers reports whether a silence fire must DEFER because
 // the agent's own audio was active inside the expiring window. False
 // whenever: the seam is nil (phone/legacy callers stay byte-identical),
@@ -591,6 +612,16 @@ func (t *TalkLoop) silenceAudioDefers(ccid string, armedSeconds int) bool {
 	// they are ms. TailActive's own clock is wall time, so a test seam
 	// receives the same unit the timer was armed with.
 	return t.deps.AudioActive(ccid, time.Duration(armedSeconds)*silenceWindowUnit)
+}
+
+// silenceCallerDefers reports whether a silence fire must HOLD because
+// the caller was speaking inside the lookback. False when the seam is
+// nil (phone and legacy callers stay byte-identical).
+func (t *TalkLoop) silenceCallerDefers(ccid string) bool {
+	if t.deps.CallerActive == nil {
+		return false
+	}
+	return t.deps.CallerActive(ccid, silenceCallerLookback)
 }
 
 // itoaSilence renders a deferral count for the telemetry Reason field
@@ -623,6 +654,13 @@ func (t *TalkLoop) say(ccid, text string, last bool) error {
 	// the roster. See echo_roster.go for the full contract.
 	if err == nil {
 		RecordSpoken(ccid, text)
+		if strings.TrimSpace(text) != "" {
+			t.emitEvent(ccid, EventInput{
+				Kind:  EventKindSaid,
+				Text:  text,
+				Words: len(strings.Fields(text)),
+			})
+		}
 	}
 	return err
 }
@@ -727,6 +765,7 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 	// live window (capped at silenceAudioDeferralCap): a text-drain
 	// re-arm or a real fire starts a fresh silent stretch and resets it.
 	var silenceDeferrals int
+	var callerDeferrals int
 	rearmSilenceWindow := func(seconds int) {
 		if seconds <= 0 {
 			return
@@ -747,6 +786,7 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 		// with the new window (the fire-time check below still defers
 		// while this turn's reply audio paces - defect S1).
 		silenceDeferrals = 0
+		callerDeferrals = 0
 		rearmSilenceWindow(t.cfg.SilencePromptSeconds)
 	}
 	stopSilence := func() {
@@ -832,6 +872,7 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 		stopSilence()
 		armTurn()
 		t.silencePrompted = false
+		callerDeferrals = 0
 		// A newer prompt supersedes any in-flight draft (the
 		// barge-in drop rule applies to a fresh question too).
 		t.cancelPipeline(ccid, "supersede")
@@ -866,6 +907,25 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 			if t.curPipeline() != nil {
 				continue
 			}
+			// Caller speech holds the nudge and the hangup. The
+			// agent-audio cap does not apply: a person who has
+			// started talking is not dead air. A stuck-hot mic
+			// still reaches the nudge after silenceCallerDeferralCap
+			// consecutive holds.
+			if callerDeferrals < silenceCallerDeferralCap && t.silenceCallerDefers(ccid) {
+				callerDeferrals++
+				silenceDeferrals = 0
+				t.silencePrompted = false
+				t.log.Info("voice talk loop: silence window held (caller speaking)",
+					"ccid", ccid, "holds", callerDeferrals)
+				t.emitEvent(ccid, EventInput{
+					Kind:   EventKindSilenceDeferred,
+					Reason: "caller",
+				})
+				rearmSilenceWindow(t.cfg.SilencePromptSeconds)
+				continue
+			}
+			callerDeferrals = 0
 			// Audio-aware deferral (self-talk fix, defect S1/S2, call
 			// local-53b347f028f0a43f): the TEXT lane drains seconds
 			// before the reply's AUDIO finishes pacing (measured: the

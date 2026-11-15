@@ -127,3 +127,18 @@ func TestSilenceAudioActiveForLegs(t *testing.T) {
 	}
 	_ = rpc.ErrVoiceLocalDisabled // surface-shape import pin (seam rows are rpc-typed)
 }
+
+func TestSilenceCallerActiveForLegs(t *testing.T) {
+	for _, leg := range []string{"", voice.LegPhone, "signal"} {
+		if fn := silenceCallerActiveFor(leg); fn != nil {
+			t.Fatalf("leg %q must NOT arm the CallerActive seam", leg)
+		}
+	}
+	fn := silenceCallerActiveFor(voice.LegLocal)
+	if fn == nil {
+		t.Fatal("local leg must arm the CallerActive seam")
+	}
+	if fn("local-nosplice", time.Second) {
+		t.Fatal("a call with no live splice must read not-speaking")
+	}
+}

@@ -126,6 +126,11 @@ type LocalSpliceConfig struct {
 	// (post-C1-played-edge) watch window (0 -> default). Tests lower it;
 	// production never sets it.
 	DrainQuietFinal time.Duration
+	// CallerSpeechFloor is the s16 RMS floor for inbound speech. A chunk
+	// at or above this floor stamps caller activity. 0 = do not stamp
+	// (a continuous silent mic must not hold the nudge). Production sets
+	// this to barge_in_rms/4, the same loose floor the child uses.
+	CallerSpeechFloor int
 }
 
 // LocalSpliceDeps carries the injected edges. CancelDraft is ALWAYS
@@ -347,6 +352,11 @@ type runLocalSplice struct {
 	audioPending     atomic.Int64
 	audioCarry       atomic.Int64
 	audioLastAct     atomic.Int64
+	// micLastLoud is the unix-nano of the last inbound chunk whose
+	// s16 RMS met CallerSpeechFloor. The silence clock reads it
+	// through CallerSpeaking. 0 = no loud inbound chunk yet.
+	micLastLoud atomic.Int64
+	callerFloor int
 	// loopCtx bounds the watch goroutine (assigned BEFORE the splice
 	// registers itself in localSpliceByCcid: LocalSpliceFor readers get
 	// a happens-before edge through the registry mutex).
@@ -419,12 +429,13 @@ func RunLocalSplice(ctx context.Context, ccid string, cfg LocalSpliceConfig, dep
 	}
 
 	s := &runLocalSplice{
-		ccid:       ccid,
-		cfg:        cfg,
-		deps:       deps,
-		log:        deps.Logger.With("ccid", ccid),
-		chunkBytes: cfg.ChunkBytes,
-		wake:       make(chan struct{}, 1),
+		ccid:        ccid,
+		cfg:         cfg,
+		deps:        deps,
+		log:         deps.Logger.With("ccid", ccid),
+		chunkBytes:  cfg.ChunkBytes,
+		callerFloor: cfg.CallerSpeechFloor,
+		wake:        make(chan struct{}, 1),
 	}
 
 	// Drain-watch parent context: assigned BEFORE the registration
@@ -603,6 +614,9 @@ func (s *runLocalSplice) inboundLoop(ctx context.Context) error {
 				chunk := make([]byte, s.chunkBytes)
 				copy(chunk, pending[:s.chunkBytes])
 				pending = pending[s.chunkBytes:]
+				if s.callerFloor > 0 && s16leRMSOver(chunk, s.callerFloor) {
+					s.micLastLoud.Store(time.Now().UnixNano())
+				}
 				if err := s.deps.Audio.WriteToChild(chunk); err != nil {
 					if ctx.Err() != nil {
 						return ctx.Err()
@@ -1429,6 +1443,43 @@ func (s *runLocalSplice) TailActive(window time.Duration) bool {
 		return false
 	}
 	return time.Since(time.Unix(0, last)) < window
+}
+
+// CallerSpeaking reports whether inbound mic audio was above the
+// splice's speech floor inside window. A nil receiver (no live splice)
+// reports false. window <= 0 reports false. Takes no lock: micLastLoud
+// is an atomic the inbound loop stamps.
+func (s *runLocalSplice) CallerSpeaking(window time.Duration) bool {
+	if s == nil || window <= 0 {
+		return false
+	}
+	last := s.micLastLoud.Load()
+	if last == 0 {
+		return false
+	}
+	return time.Since(time.Unix(0, last)) < window
+}
+
+// s16leRMSOver reports whether an s16le mono chunk's RMS is at or above
+// threshold. threshold <= 0 is never loud. A trailing odd byte is ignored.
+func s16leRMSOver(b []byte, threshold int) bool {
+	if threshold <= 0 || len(b) < 2 {
+		return false
+	}
+	var sum uint64
+	var n uint64
+	for i := 0; i+1 < len(b); i += 2 {
+		u := uint16(b[i]) | uint16(b[i+1])<<8
+		sample := int16(u)
+		v := int64(sample)
+		sum += uint64(v * v)
+		n++
+	}
+	if n == 0 {
+		return false
+	}
+	thr := uint64(threshold)
+	return sum >= thr*thr*n
 }
 
 // TailAge is the time since the splice's last outbound touch (0 when
