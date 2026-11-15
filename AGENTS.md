@@ -140,9 +140,9 @@ make e2e-fast                 # CI: full hermetic e2e suite (ci.yml gate member;
 
 # Git hooks (bash >= 3.2; sub-hooks run under whatever `bash` is on PATH, so the
 # suite also executes on the Linux CI runner)
-make hooks                # core.hooksPath -> .githooks (19 pre-commit checks +
+make hooks                # core.hooksPath -> .githooks (20 pre-commit checks +
                           # pre-push chain: e2e-affected gate, then bench gate)
-# Pre-flight [0/19]: pre-commit-worktreecfg - auto-repairs core.bare=true flips
+# Pre-flight [0/20]: pre-commit-worktreecfg - auto-repairs core.bare=true flips
 # that break go build -buildvcs and git status; logs repairs to
 # .core-bare-repair.log in the repo root (gitignored by the *.log rule). It runs
 # before the numbered chain because the flip breaks gate 1 (pre-commit-build).

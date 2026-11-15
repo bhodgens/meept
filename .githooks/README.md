@@ -33,8 +33,8 @@ chmod +x .githooks/*
 
 ### pre-commit (Main Hook)
 
-Entry point that runs all checks sequentially (19 total). The numbers below are
-the `[n/19]` labels `.githooks/pre-commit` prints:
+Entry point that runs all checks sequentially (20 total). The numbers below are
+the `[n/20]` labels `.githooks/pre-commit` prints:
 
 | # | Hook | Purpose |
 |---|------|---------|
@@ -667,18 +667,40 @@ MEEPT_E2E_SKIP=1 git push   # loud skip of this gate only (emergencies)
 
 ### 2. pre-push-bench — bench regression gate
 
-Runs the meept-bench regression suite (9 tasks, ~2 min) against the local
-daemon and diffs the result against the committed baseline
-(`~/git/meept-bench/results/baseline/regression.jsonl`).
+Runs the meept-bench regression suite (9 tasks, ~2 min) on an isolated
+scratch rig against a daemon binary built from THE PUSHED STATE: the hook
+parses the new sha from the pre-push stdin lines, checks it out into a
+detached git worktree under `~/.git/worktrees/pre-push-bench-<12-char-sha>`,
+builds `bin/meept-daemon` from that tree, runs the rig against it, and
+removes the worktree on exit. If the worktree checkout fails, the gate
+falls back to the working-tree build with a loud warning that it measured
+the dirty tree.
 
-- **Regressed or errored** → push blocked, scorecard path printed.
-- **Daemon unreachable** → push blocked with instructions (the gate is
-  the point; silent skips would be decorative).
+The run must pass three checks before the diff gate:
+
+- **Rig exit status** — a non-zero rig exit blocks the push even when
+  `results.jsonl` exists (rc != 0 also covers mid-suite crash/timeout;
+  un-run tasks are absent from results and the diff scores them REMOVED,
+  which never fails).
+- **Missing-task gate** — every baseline task not excluded via
+  `--ignore-tags known-failure` must have a result row; missing tasks
+  block the push by name (hook-side, using the same baseline + results
+  files the bench diff consumes).
+- **Diff gate** — pass->fail vs the committed baseline blocks.
+
+- **Regressed, errored, or missing tasks** → push blocked, scorecard path
+  printed.
 - **Skip options**: `git push --no-verify` (all hooks) or
   `MEEPT_BENCH_SKIP=1 git push` (bench gate only).
+- **`MEEPT_GATE_MODEL` no longer selects a model** — it is raw extra
+  `meept-bench run` args passthrough (e.g.
+  `MEEPT_GATE_MODEL="--task file-write"`); a stale model-id value
+  (contains `/`) is passed through and corrupts the run, so the hook
+  prints a deprecation warning whenever it is set. Unset it to silence.
 - **Re-baseline deliberately** after an intended behavior change:
   `cp ~/git/meept-bench/results/gate-pre-push/results.jsonl \
       ~/git/meept-bench/results/baseline/regression.jsonl`
 
-Requires the meept daemon running locally. Config override:
-`MEEPT_BENCH_DIR=/path/to/meept-bench`.
+Requires the meept-bench repo (`MEEPT_BENCH_DIR`, default
+`~/git/meept-bench`); the rig builds its own daemon from the pushed
+worktree, so no live daemon is needed.
