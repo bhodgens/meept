@@ -103,17 +103,6 @@ func TestTelemetryRingNilSafe(t *testing.T) {
 	}
 }
 
-func TestPreviewEventText(t *testing.T) {
-	if got := PreviewEventText("  hi there  "); got != "hi there" {
-		t.Fatalf("trim = %q", got)
-	}
-	long := "this prompt text is definitely much longer than forty runes in total"
-	got := PreviewEventText(long)
-	if len([]rune(got)) != 41 || []rune(got)[40] != '…' {
-		t.Fatalf("preview = %q, want 40 runes + ellipsis", got)
-	}
-}
-
 // recorderHook captures every OnEvent emission in order.
 type recorderHook struct {
 	mu     sync.Mutex
@@ -169,17 +158,60 @@ func TestTalkLoopOnEventFiresAtLogSites(t *testing.T) {
 	})
 
 	var kinds []string
+	// EventKindSaid rides the same ring (the say() choke emits one per
+	// spoken sentence: filler, reply, final flush excluded) - it is a
+	// FEATURE marker, not an ordering event. Filter it out so the
+	// dispatch-first / final-last ordering assertion stays meaningful,
+	// then pin the said events themselves below.
+	var saidTexts []string
 	for _, ev := range hook.all() {
+		if ev.Kind == EventKindSaid {
+			saidTexts = append(saidTexts, ev.Text)
+			continue
+		}
 		kinds = append(kinds, ev.Kind)
 	}
 	// dispatch precedes final.
 	if len(kinds) < 2 || kinds[0] != EventKindDispatch || kinds[len(kinds)-1] != EventKindFinal {
 		t.Fatalf("event kinds = %v, want dispatch first, final last", kinds)
 	}
+	// Positive pin for the say() telemetry (ee465418): every spoken
+	// sentence reaches the ring with its full text and word count.
+	// The filler ("Hold on, let me check.") and the reply
+	// ("The report is ready.") are both fact-free/supervised speech
+	// through the same choke.
+	wantSaid := map[string]bool{
+		"Hold on, let me check.": false,
+		"The report is ready.":   false,
+	}
+	for _, tx := range saidTexts {
+		if _, ok := wantSaid[tx]; ok {
+			wantSaid[tx] = true
+		}
+	}
+	for tx, seen := range wantSaid {
+		if !seen {
+			t.Errorf("said events = %q, want one carrying %q", saidTexts, tx)
+		}
+	}
+	for _, ev := range hook.all() {
+		if ev.Kind == EventKindSaid && ev.Text == "The report is ready." {
+			if ev.Words != 4 {
+				t.Errorf("said reply words = %d, want 4", ev.Words)
+			}
+		}
+	}
 	// The dispatch carries the preview + words; the final the reply words.
 	events := hook.all()
-	if events[0].Words != 3 || events[0].Text == "" {
-		t.Errorf("dispatch payload = %+v, want words=3 + preview text", events[0])
+	var dispatch EventInput
+	for _, ev := range events {
+		if ev.Kind == EventKindDispatch {
+			dispatch = ev
+			break
+		}
+	}
+	if dispatch.Words != 3 || dispatch.Text == "" {
+		t.Errorf("dispatch payload = %+v, want words=3 + preview text", dispatch)
 	}
 	final := events[len(events)-1]
 	if final.Words == 0 || final.Ms < 0 {

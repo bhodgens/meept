@@ -75,7 +75,7 @@ const (
 )
 
 // TelemetryEvent is one ring entry. Text is a PREVIEW (truncated at the
-// emitter by PreviewEventText) for kinds other than heard and said.
+// emitter by a 40-rune rule) for kinds other than heard and said.
 // heard and said carry the full sentence: the live operator feed is the
 // transcript, not a 40-rune preview.
 type TelemetryEvent struct {
