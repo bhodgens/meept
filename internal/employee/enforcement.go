@@ -664,7 +664,9 @@ func (p *PreExecChecker) Check(action, toolName string, details map[string]strin
 		forbidden := slices.ContainsFunc(constraints.ToolsForbidden, func(entry string) bool {
 			return canonicalToolName(entry) == canonicalTool
 		})
-		if forbidden || slices.Contains(constraints.ToolsForbidden, "*") {
+		if forbidden || slices.ContainsFunc(constraints.ToolsForbidden, func(entry string) bool {
+			return canonicalToolName(entry) == "*"
+		}) {
 			p.recordDenial(context.Background(), p.employeeID, action, toolName,
 				"tools_forbidden", SeverityWarning)
 			return Decision{
