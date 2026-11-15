@@ -56,6 +56,50 @@ func (t *ReadFileTool) SetFenceChecker(fc FenceChecker) {
 	}
 }
 
+// jailedFenceChecker is the optional per-session jail capability a
+// FenceChecker may expose (internal/security.FenceChecker.CheckPathJailed,
+// issue #138). It is kept OUT of the builtin FenceChecker interface (declared
+// in shell.go) so the existing fence doubles stay valid; production fences
+// always satisfy it, and a fence that does not simply keeps the pre-jail
+// CheckPath behavior.
+type jailedFenceChecker interface {
+	CheckPathJailed(path string, op string, jailRoot string) error
+}
+
+// checkPathJailed is the shared session-jail fence call for the filesystem
+// tools (issue #138, second half).
+//
+// The jail root is the SESSION's working directory taken from ctx on EVERY
+// call — never a field on the tool, never a mutation of the process-wide
+// fence config. That is the whole point: one FenceChecker is shared by every
+// tool and every session, so a jail stored on the config would let session A
+// retarget session B's checks (the race internal/agent/fence_stage.go was
+// written to remove). Passing it per call means two concurrent sessions with
+// different worktrees are each fenced to their own root.
+//
+// A nil fence, a fence without the jail capability, or a session with no
+// bound working directory (empty jail) all behave exactly as before.
+func checkPathJailed(ctx context.Context, fence FenceChecker, path string, op string) error {
+	if fence == nil {
+		return nil
+	}
+	jailRoot := tools.WorkingDirFromContext(ctx)
+	if jailRoot == "" {
+		return fence.CheckPath(path, op)
+	}
+	if jailed, ok := fence.(jailedFenceChecker); ok {
+		return jailed.CheckPathJailed(path, op, jailRoot)
+	}
+	return fence.CheckPath(path, op)
+}
+
+// checkPathJailed consults the installed fence with the SESSION's jail root
+// (issue #138). A nil fence, or a session with no bound working directory
+// (empty jail), keeps the legacy CheckPath posture exactly.
+func (t *ReadFileTool) checkPathJailed(ctx context.Context, path string, op string) error {
+	return checkPathJailed(ctx, t.fenceChecker, path, op)
+}
+
 // SetSecurityOrchestrator sets the security orchestrator for output scanning.
 // Follows the typed-nil interface guard pattern mandated by CLAUDE.md.
 func (t *ReadFileTool) SetSecurityOrchestrator(orch *intsecurity.Orchestrator) {
@@ -149,22 +193,17 @@ func (t *ReadFileTool) executeRead(ctx context.Context, args map[string]any, pro
 		return nil, fmt.Errorf("access denied: %s", resolved)
 	}
 
-	// Fence check
+	// Fence check — session jail first (issue #138).
 	//
-	// TODO(#138): an ABSOLUTE path bypasses the session root here — the fence
-	// allowlist in this build is rig-wide (see internal/daemon components +
-	// internal/security fence config), so /etc/hosts or another user's tree is
-	// accepted for read. The per-session jail root (root the fence at the
-	// session working directory for absolute paths too) is DEFERRED: the config
-	// surface lives in internal/daemon + internal/security and changing it is
-	// out of scope for this fix. What this change does guarantee is that
-	// RELATIVE paths resolve under the session working directory
-	// (resolvePathSecure -> tools.WorkingDirFromContext), so the common
-	// agent-generated path can no longer escape via the daemon's process CWD.
-	if t.fenceChecker != nil {
-		if err := t.fenceChecker.CheckPath(resolved, "read"); err != nil {
-			return nil, err
-		}
+	// A RELATIVE path was already session-bound by resolvePathSecure, but an
+	// ABSOLUTE path used to be accepted anywhere the rig-wide allowlist
+	// admits, so a session bound to worktree A could write into the rig's
+	// repo clone and file_write still answered success. The per-session jail
+	// root (tools.WorkingDirFromContext, supplied per call by
+	// checkPathJailed) closes that half; an unbound session has no jail and
+	// keeps the rig-only posture.
+	if err := t.checkPathJailed(ctx, resolved, "read"); err != nil {
+		return nil, err
 	}
 
 	info, err := os.Stat(resolved)
@@ -391,6 +430,13 @@ func (t *WriteFileTool) SetFenceChecker(fc FenceChecker) {
 	}
 }
 
+// checkPathJailed consults the installed fence with the SESSION's jail root
+// (issue #138). A nil fence, or a session with no bound working directory
+// (empty jail), keeps the legacy CheckPath posture exactly.
+func (t *WriteFileTool) checkPathJailed(ctx context.Context, path string, op string) error {
+	return checkPathJailed(ctx, t.fenceChecker, path, op)
+}
+
 // SetPendingChangesRegistry sets the pending changes registry for the
 // preview/accept workflow. When set, writes are staged (no disk I/O) until a
 // pending change is accepted via the resolve tool. Follows the typed-nil
@@ -542,17 +588,15 @@ func (t *WriteFileTool) executeWrite(ctx context.Context, args map[string]any, p
 		return nil, fmt.Errorf("access denied: %s", resolved)
 	}
 
-	// Fence check
+	// Fence check — session jail first (issue #138).
 	//
-	// TODO(#138): same deferred per-session jail root as file_read above — an
-	// ABSOLUTE write path is accepted by the rig-wide fence allowlist. Relative
-	// paths are already session-bound: resolvePathSecure joins them onto
-	// tools.WorkingDirFromContext, so a relative write lands under the session
-	// worktree (pinned by TestFileWriteRelativePathUsesContextWorkingDir).
-	if t.fenceChecker != nil {
-		if err := t.fenceChecker.CheckPath(resolved, "write"); err != nil {
-			return nil, err
-		}
+	// Relative paths were already session-bound (resolvePathSecure joins them
+	// onto tools.WorkingDirFromContext, pinned by
+	// TestFileWriteRelativePathUsesContextWorkingDir); the jail now covers the
+	// ABSOLUTE half too, so a write into a foreign worktree is refused instead
+	// of silently returning success.
+	if err := t.checkPathJailed(ctx, resolved, "write"); err != nil {
+		return nil, err
 	}
 
 	if progress != nil {
@@ -713,6 +757,13 @@ func (t *DeleteFileTool) SetFenceChecker(fc FenceChecker) {
 	}
 }
 
+// checkPathJailed consults the installed fence with the SESSION's jail root
+// (issue #138). A nil fence, or a session with no bound working directory
+// (empty jail), keeps the legacy CheckPath posture exactly.
+func (t *DeleteFileTool) checkPathJailed(ctx context.Context, path string, op string) error {
+	return checkPathJailed(ctx, t.fenceChecker, path, op)
+}
+
 // SetSecurityOrchestrator sets the security orchestrator for audit logging.
 // Follows the typed-nil interface guard pattern mandated by CLAUDE.md.
 func (t *DeleteFileTool) SetSecurityOrchestrator(orch *intsecurity.Orchestrator) {
@@ -767,11 +818,10 @@ func (t *DeleteFileTool) Execute(ctx context.Context, args map[string]any) (any,
 		return nil, fmt.Errorf("access denied: %s", resolved)
 	}
 
-	// Fence check
-	if t.fenceChecker != nil {
-		if err := t.fenceChecker.CheckPath(resolved, "write"); err != nil {
-			return nil, err
-		}
+	// Fence check — session jail first (issue #138): a delete outside the
+	// bound worktree is refused even though the rig-wide allowlist admits it.
+	if err := t.checkPathJailed(ctx, resolved, "write"); err != nil {
+		return nil, err
 	}
 
 	info, err := os.Stat(resolved)
@@ -832,6 +882,13 @@ func (t *ListDirectoryTool) SetFenceChecker(fc FenceChecker) {
 	if fc != nil {
 		t.fenceChecker = fc
 	}
+}
+
+// checkPathJailed consults the installed fence with the SESSION's jail root
+// (issue #138). A nil fence, or a session with no bound working directory
+// (empty jail), keeps the legacy CheckPath posture exactly.
+func (t *ListDirectoryTool) checkPathJailed(ctx context.Context, path string, op string) error {
+	return checkPathJailed(ctx, t.fenceChecker, path, op)
 }
 
 // SetSecurityOrchestrator sets the security orchestrator for output scanning.
@@ -923,16 +980,12 @@ func (t *ListDirectoryTool) Execute(ctx context.Context, args map[string]any) (a
 		return nil, fmt.Errorf("access denied: %s", resolved)
 	}
 
-	// Fence check
-	//
-	// TODO(#138): the deferred per-session jail root applies here as well — an
-	// ABSOLUTE list path is accepted by the rig-wide fence allowlist. Relative
-	// paths (including an omitted path, which defaults to the session working
-	// directory above) resolve under tools.WorkingDirFromContext.
-	if t.fenceChecker != nil {
-		if err := t.fenceChecker.CheckPath(resolved, "read"); err != nil {
-			return nil, err
-		}
+	// Fence check — session jail first (issue #138). Relative paths (including
+	// an omitted path, which defaults to the session working directory above)
+	// were already session-bound; the jail now also refuses an ABSOLUTE
+	// listing outside the bound worktree.
+	if err := t.checkPathJailed(ctx, resolved, "read"); err != nil {
+		return nil, err
 	}
 
 	info, err := os.Stat(resolved)
