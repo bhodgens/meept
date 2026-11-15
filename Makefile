@@ -54,6 +54,7 @@ help:
 	@echo "  vet              Run go vet"
 	@echo "  graphs           Regenerate connectivity graphs (bus/RPC/HTTP/WS)"
 	@echo "  graphs-check     Verify connectivity graphs are fresh (CI: code-quality.yml generated-artifacts)"
+	@echo "  orphan-check     Ratchet: fail on NEW orphan bus topics vs scripts/orphan-baseline.txt"
 	@echo "  compare-prep     Clone competitor repos into TMPDIR/meept-compare"
 	@echo "  mod-tidy         Tidy go modules"
 	@echo "  clean            Remove build artifacts"
@@ -791,7 +792,7 @@ gosec:
 # (mutexio for I/O-under-mutex, predid for predictable IDs) plus the audit
 # scripts that catch UTF-8 corruption bugs and Dart enum-shadowing, and
 # fmt-check-gui for Dart formatting in the Flutter tree.
-lint-ci: lint analyzers audit-scripts fmt-check-gui
+lint-ci: lint analyzers audit-scripts fmt-check-gui orphan-check
 	@echo "All CI lint checks passed."
 
 # Doherty Threshold (IBM ~400ms UX latency budget) enforcement lane: p95
@@ -897,6 +898,16 @@ graphs:
 .PHONY: graphs-check
 graphs-check:
 	@python3 scripts/gen-connectivity-graph.py --check
+
+# orphan-check is the ratchet on top of graphs-check: freshness proves the
+# topology matches source; this proves no NEW orphan topic (published but
+# never subscribed, or subscribed but never published) slipped in without
+# its consuming side. Baseline: scripts/orphan-baseline.txt (same new-only
+# policy as .githooks/pre-commit-deadcode). Keys are name-only, so line
+# offsets in the generated JSON never churn the comparison.
+.PHONY: orphan-check
+orphan-check: graphs-check
+	@python3 scripts/orphan-check.py
 
 # audit-scripts runs the Python-based codebase audits:
 #   - dart-enum-name-shadow: flags Dart extensions that shadow Enum.name/index

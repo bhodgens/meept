@@ -75,6 +75,13 @@ jobs:
       - name: Connectivity graphs are fresh
         run: make graphs-check
 
+      # Orphan ratchet: a NEW bus topic/RPC-adjacent surface with no consumer
+      # side blocks CI (stock tolerated via scripts/orphan-baseline.txt; same
+      # new-only policy as the deadcode gate). Keys are name-only so line
+      # offsets embedded by the generator never churn this check.
+      - name: Orphan ratchet (no new unwired topics)
+        run: make orphan-check
+
       # docs/reference/generated/* (gomarkdoc pages): needs mage + gomarkdoc,
       # which nothing else in CI installed - which is why this check was
       # documented as a gate for months while nothing ran it.
