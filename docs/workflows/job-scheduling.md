@@ -149,6 +149,14 @@ max_concurrent_jobs = 5
 retry_attempts = 3
 retry_delay_seconds = 60
 
+# One-shot (TimingAt) catch-up window. "Run at T" means "run as soon as
+# possible after T": a one-shot overdue by less than this window fires on
+# boot or the next tick. Overdue by more than the window = marked failed
+# (re-runnable via RunNow), never fired. Scheduling a one-shot further
+# than the window in the FUTURE is rejected at schedule time (use cron
+# for later triggers). Default: 2h; zero/empty/unparseable = default.
+one_shot_window = "2h"
+
 [scheduler.jobs]
 history_retention_days = 30
 max_job_duration_minutes = 60

@@ -72,6 +72,17 @@ type JobConfig struct {
 	// Schedule for the engine.
 	Timing *TimingSpec `json:"timing,omitempty"`
 
+	// One-shot (TimingAt) lifecycle bookkeeping. Additive JSON fields:
+	// older rows without them load unchanged and behave as today.
+	// OneShotFailed marks a one-shot whose due time fell outside the
+	// [scheduler] one_shot_window catch-up horizon before the daemon could
+	// fire it — the job never ran, the row stops looking schedulable (no
+	// cron entry), and it stays re-runnable via RunNow. OneShotFiredAt
+	// records when a boot-recovered overdue one-shot fired, so the boot
+	// sweep neither re-fires nor re-marks it.
+	OneShotFailed  bool       `json:"one_shot_failed,omitempty"`
+	OneShotFiredAt *time.Time `json:"one_shot_fired_at,omitempty"`
+
 	// Delivery bookkeeping (leaf 05-schedule/02-delivery-inbox). Both are
 	// optional and only populated for jobs that deliver to a session inbox.
 	LastDelivery    *ScheduleDeliveryReceipt `json:"last_delivery,omitempty"`

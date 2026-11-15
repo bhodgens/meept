@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"slices"
 	"strconv"
 	"strings"
@@ -781,10 +782,220 @@ func (t *TimingSpec) NextOccurrence(from time.Time) (time.Time, bool) {
 	}
 }
 
+// One-shot recovery (owner-decided semantics, 2026-11-14):
+//
+// A TimingAt job persists its due time in the Timing spec itself (the
+// `at` field — an absolute RFC3339 instant carried in the JSON `timing`
+// column of jobs.json, so older rows without it behave as today), NOT in
+// the cron Schedule string (which stays empty for one-shots — the reason
+// ProcessMissedTicks could never catch them up).
+//
+// "Run at T" means "run as soon as possible AFTER T":
+//   - one-shot due T in (now-window, past] at boot  -> fires on boot;
+//   - one-shot due T at or before now-window        -> marked failed
+//     (never ran; re-runnable via RunNow; no cron entry);
+//   - scheduling a one-shot due more than window ahead -> rejected with
+//     ErrOneShotBeyondHorizon, naming the window (one-shots are
+//     near-term triggers; operators needing later should use cron).
+//
+// The window is [scheduler] one_shot_window (config.SchedulerConfig.
+// EffectiveOneShotWindow); DefaultOneShotCatchUpWindow mirrors the config
+// default (2h) for call sites that have no SchedulerConfig.
+
+// DefaultOneShotCatchUpWindow mirrors config.DefaultOneShotWindow (2h). It
+// is only a fallback: the live window always comes from the scheduler's
+// cfg.Scheduler.OneShotWindow via effectiveOneShotWindow.
+const DefaultOneShotCatchUpWindow = 2 * time.Hour
+
+// ErrOneShotBeyondHorizon is returned when a TimingAt spec's due time lies
+// further in the future than the configured one-shot window. The wrapped
+// message names the window (operators needing later triggers should use
+// cron).
+var ErrOneShotBeyondHorizon = fmt.Errorf("one_shot_beyond_horizon")
+
+// effectiveOneShotWindow returns the configured one-shot horizon, falling
+// back to the 2h default when unset/unparseable/non-positive (zero-value =
+// default).
+func (s *Scheduler) effectiveOneShotWindow() time.Duration {
+	if d, err := time.ParseDuration(s.cfg.OneShotWindow); err == nil && d > 0 {
+		return d
+	}
+	return DefaultOneShotCatchUpWindow
+}
+
+// validateOneShotHorizon rejects a TimingAt due time further in the future
+// than window. Called at schedule time (RegisterTiming); overdue due times
+// are NOT rejected here — boot recovery decides fire-vs-failed.
+func validateOneShotHorizon(spec *TimingSpec, at time.Time, window time.Duration) error {
+	if spec == nil || spec.Kind != TimingAt {
+		return nil
+	}
+	if horizon := time.Now().UTC().Add(window); at.After(horizon) {
+		return fmt.Errorf("%w: one-shot due %s is more than %s in the future (use a cron schedule for far-future triggers)",
+			ErrOneShotBeyondHorizon, at.Format(time.RFC3339), window)
+	}
+	return nil
+}
+
+// sweepOneShotsAtBoot reconciles persisted TimingAt jobs against the
+// configured window. "Run at T" = run as soon as possible after T:
+//
+//   - due within the past window (T > now-window) and not yet fired:
+//     fire now (claim + execute, the same at-least-once path missed ticks
+//     take), then prune the row — the one-shot has fired.
+//   - due at or before now-window: mark the job FAILED (never ran) via
+//     markOneShotFailed, remove the cron entry, and leave the row in the
+//     store re-runnable via RunNow (the failed row stops looking
+//     schedulable but is not silently deleted).
+//
+// Runs from Start alongside the other boot-recovery sweeps. Note the raw
+// cron registration is useless for overdue one-shots (robfigAtSchedule.Next
+// returns the zero time for a past instant), which is exactly why this
+// sweep exists: ProcessMissedTicks cannot parse the empty Schedule string.
+func (s *Scheduler) sweepOneShotsAtBoot() {
+	window := s.effectiveOneShotWindow()
+	now := time.Now().UTC()
+	cutoff := now.Add(-window)
+
+	for _, cfg := range s.store.List() {
+		if cfg.Timing == nil || cfg.Timing.Kind != TimingAt || cfg.Timing.At == nil {
+			continue
+		}
+		if !cfg.Enabled {
+			continue // paused/disabled rows are never fired or marked
+		}
+		if cfg.OneShotFailed || cfg.OneShotFiredAt != nil {
+			continue // already reconciled
+		}
+		due := cfg.Timing.At.UTC()
+		if due.After(cutoff) {
+			// Overdue-within-window: fire now, then prune the row.
+			s.mu.RLock()
+			job, ok := s.jobs[cfg.ID]
+			s.mu.RUnlock()
+			if !ok {
+				continue
+			}
+			s.logger.Info("scheduler: firing overdue one-shot on boot",
+				"job_id", cfg.ID,
+				"due", due.Format(time.RFC3339),
+				"window", window.String(),
+			)
+			s.fireOverdueOneShot(cfg, job, due, now)
+			continue
+		}
+		// Past the window: mark failed (never ran), remove the cron entry,
+		// keep the row re-runnable via RunNow.
+		if err := s.markOneShotFailed(cfg, due, now, window); err != nil {
+			s.logger.Warn("scheduler: failed to mark overdue one-shot as failed",
+				"job_id", cfg.ID, "error", err)
+		}
+	}
+}
+
+// fireOverdueOneShot delivers an overdue-within-window one-shot through the
+// same claim-before-deliver boundary missed ticks use (executeJob with the
+// due instant as the tick), then prunes the persisted row on success so
+// jobs.json does not accumulate fired one-shot entries. A failed delivery
+// leaves the row with OneShotFiredAt set — it never re-fires automatically,
+// but stays visible and re-runnable via RunNow.
+func (s *Scheduler) fireOverdueOneShot(cfg JobConfig, job Job, due, now time.Time) {
+	// Claim the due instant atomically: a previous instance that already
+	// fired it (crash after execution, before pruning) must not re-fire.
+	claimed, claimErr := s.ClaimTick(cfg.ID, due)
+	if claimErr != nil {
+		s.logger.Warn("scheduler: failed to claim overdue one-shot tick",
+			"job_id", cfg.ID, "due", due.Format(time.RFC3339), "error", claimErr)
+		return
+	}
+	if !claimed {
+		// Already delivered pre-crash: the persisted row is stale residue —
+		// prune it instead of accumulating it forever.
+		if err := s.store.Remove(cfg.ID); err != nil {
+			s.logger.Warn("scheduler: failed to prune already-fired one-shot row",
+				"job_id", cfg.ID, "error", err)
+		}
+		return
+	}
+
+	// Stamp OneShotFiredAt BEFORE dispatch: a crash mid-execution leaves a
+	// row the next sweep neither re-fires nor re-marks (delivery recovery
+	// for session-pinned jobs proceeds via the receipt rows).
+	firedCfg := cfg
+	firedAt := now
+	firedCfg.OneShotFiredAt = &firedAt
+	if err := s.store.Update(firedCfg); err != nil {
+		s.logger.Warn("scheduler: failed to record one-shot firing; row stays re-sweepable",
+			"job_id", cfg.ID, "error", err)
+	}
+
+	// Mirror dispatchMissed: shutdown-aware context, timeout, panic
+	// recovery (a panic here would otherwise kill the daemon with the tick
+	// already claimed — bughunt 2026-11-12 F5).
+	s.mu.RLock()
+	baseCtx := s.runNowCtx
+	s.mu.RUnlock()
+	if baseCtx == nil {
+		baseCtx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(baseCtx, 30*time.Minute)
+	go func() {
+		defer cancel()
+		defer func() {
+			if rec := recover(); rec != nil {
+				s.logger.Error("scheduler: panic in overdue one-shot recovered",
+					"job_id", cfg.ID,
+					"due", due.Format(time.RFC3339),
+					"panic", rec,
+					"stack", string(debug.Stack()),
+				)
+			}
+		}()
+		s.executeJob(ctx, job, ExecutionOptions{Tick: due, PreClaimed: true})
+		// Prune-or-mark: a successful run leaves no stale row behind; a
+		// failed run keeps it (with OneShotFiredAt set) for inspection and
+		// manual re-run.
+		if latest, ok := s.store.Get(cfg.ID); ok && latest.LastError == "" {
+			if err := s.store.Remove(cfg.ID); err != nil {
+				s.logger.Warn("scheduler: failed to prune fired one-shot row",
+					"job_id", cfg.ID, "error", err)
+			}
+		}
+	}()
+}
+
+// markOneShotFailed flips a past-window one-shot into the failed-never-ran
+// posture (JobConfig.OneShotFailed=true, LastError naming the miss), removes
+// its cron entry, and persists the row so it stops looking schedulable but
+// stays re-runnable via RunNow.
+func (s *Scheduler) markOneShotFailed(cfg JobConfig, due, now time.Time, window time.Duration) error {
+	s.mu.Lock()
+	if entryID, ok := s.entryIDs[cfg.ID]; ok {
+		s.cron.Remove(entryID)
+		delete(s.entryIDs, cfg.ID)
+	}
+	s.mu.Unlock()
+
+	cfg.OneShotFailed = true
+	cfg.LastError = fmt.Sprintf("one-shot never ran: due %s is more than %s before boot; re-run manually",
+		due.Format(time.RFC3339), window)
+	if err := s.store.Update(cfg); err != nil {
+		return err
+	}
+	s.logger.Warn("scheduler: overdue one-shot beyond window marked failed (re-runnable via run-now)",
+		"job_id", cfg.ID,
+		"due", due.Format(time.RFC3339),
+		"window", window.String(),
+	)
+	return nil
+}
+
 // RegisterTiming registers cfg's Timing spec on the given cron engine in the
 // engine's location so cron.WithLocation DST handling applies. `at` specs
 // register as a one-shot entry that removes itself after firing exactly once.
-func RegisterTiming(c *cron.Cron, cfg JobConfig, job Job) (cron.EntryID, error) {
+// oneShotWindow is the configured scheduling horizon for the at-kind
+// rejection; callers without a scheduler pass DefaultOneShotCatchUpWindow.
+func RegisterTiming(c *cron.Cron, cfg JobConfig, job Job, oneShotWindow time.Duration) (cron.EntryID, error) {
 	if cfg.Timing == nil {
 		return 0, fmt.Errorf("%w: job config has no timing spec", ErrInvalidRule)
 	}
@@ -793,6 +1004,13 @@ func RegisterTiming(c *cron.Cron, cfg JobConfig, job Job) (cron.EntryID, error) 
 	}
 
 	if cfg.Timing.Kind == TimingAt {
+		// Scheduling horizon (owner-decided): a one-shot is a near-term
+		// trigger, not a calendar event. Due times further ahead than the
+		// configured window are rejected at schedule time (overdue times
+		// are allowed here — boot recovery fires or fails them).
+		if err := validateOneShotHorizon(cfg.Timing, *cfg.Timing.At, oneShotWindow); err != nil {
+			return 0, err
+		}
 		at := *cfg.Timing.At
 		var entryID cron.EntryID
 		entryID = c.Schedule(robfigAtSchedule{at: at}, cron.FuncJob(func() {
@@ -835,5 +1053,5 @@ func (s *Scheduler) RegisterTimingVia(cfg JobConfig, job Job) (cron.EntryID, err
 	if cfg.Timing == nil {
 		return 0, fmt.Errorf("%w: job config has no timing spec", ErrInvalidRule)
 	}
-	return RegisterTiming(s.cron, cfg, job)
+	return RegisterTiming(s.cron, cfg, job, s.effectiveOneShotWindow())
 }

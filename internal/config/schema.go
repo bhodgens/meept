@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caimlas/meept/internal/langcode"
 	"github.com/caimlas/meept/internal/pathutil"
 	"github.com/caimlas/meept/internal/secrets"
-	"github.com/caimlas/meept/internal/validator"
 )
 
 // Agent ID constants used throughout the codebase as identifiers. These are
@@ -1082,26 +1082,26 @@ type OutputFiltersConfig struct {
 // config load, where the mistake is visible and costs nothing.
 //
 // A code is accepted when detection can name it without user data
-// (validator.KnownLanguageCode) or when the operator shipped the word
-// table that makes it detectable
-// ($MEEPT_HOME/validator/lang/<code>.txt). Both tests use the validator's
-// normalizer, so the accepted set is exactly the set of codes the filter
-// can match — never a second, drifting list.
+// (langcode.IsKnown) or when the operator shipped the word table that makes
+// it detectable ($MEEPT_HOME/validator/lang/<code>.txt). Both tests use the
+// shared langcode vocabulary — the same authority the validator's filter
+// reads — so the accepted set is exactly the set of codes the filter can
+// match, never a second, drifting list.
 //
 // Empty keeps the frozen default and is always valid.
 func (c *OutputFiltersConfig) Validate() error {
 	if c.ExpectedLanguage == "" {
 		return nil
 	}
-	if validator.KnownLanguageCode(c.ExpectedLanguage) {
+	if langcode.IsKnown(c.ExpectedLanguage) {
 		return nil
 	}
-	code, ok := validator.NormalizeLanguageCode(c.ExpectedLanguage)
+	code, ok := langcode.Normalize(c.ExpectedLanguage)
 	if !ok {
 		return fmt.Errorf("daemon.output_filters.expected_language: invalid value %q (want an ISO-639 code such as \"en\", \"de\", \"zh\", \"fr\")", c.ExpectedLanguage)
 	}
 	langDir := filepath.Join(MeeptHome(), "validator", "lang")
-	if validator.HasLanguageWordTable(c.ExpectedLanguage, langDir) {
+	if langcode.HasWordTable(c.ExpectedLanguage, langDir) {
 		return nil
 	}
 	return fmt.Errorf("daemon.output_filters.expected_language: unknown language %q — no built-in detection for it and no word table at %s (drop a <code>.txt word list there, or use one of the detected languages)",
@@ -3364,10 +3364,36 @@ type TaintDeclassificationConfig struct {
 	SafeOperations []string `json:"safe_operations" toml:"safe_operations"`
 }
 
+// DefaultOneShotWindow is the default one-shot (TimingAt) catch-up and
+// scheduling horizon: a one-shot whose due time is more than this far in the
+// past is marked failed (never fired, re-runnable via RunNow), and a one-shot
+// due more than this far in the future is rejected at schedule time.
+const DefaultOneShotWindow = 2 * time.Hour
+
 // SchedulerConfig holds scheduler settings.
 type SchedulerConfig struct {
 	Enabled  bool   `json:"enabled"  toml:"enabled"`
 	Timezone string `json:"timezone" toml:"timezone"`
+
+	// OneShotWindow bounds the one-shot (TimingAt) horizon, both directions:
+	// an overdue one-shot due within this window fires on boot ("run at T"
+	// means "run as soon as possible after T"); one due further back is
+	// marked failed (never ran, re-runnable via RunNow), and scheduling a
+	// one-shot due further ahead than this window is rejected at schedule
+	// time (use a cron schedule for far-future triggers). Duration string
+	// ("2h", "30m"); zero-value/empty/unparseable = DefaultOneShotWindow
+	// (2h) — see EffectiveOneShotWindow.
+	OneShotWindow string `json:"one_shot_window" toml:"one_shot_window"`
+}
+
+// EffectiveOneShotWindow resolves the one-shot horizon, falling back to
+// DefaultOneShotWindow (2h) when the knob is unset, unparseable, or
+// non-positive — the zero-value default per the [scheduler] knob contract.
+func (c SchedulerConfig) EffectiveOneShotWindow() time.Duration {
+	if d, err := time.ParseDuration(c.OneShotWindow); err == nil && d > 0 {
+		return d
+	}
+	return DefaultOneShotWindow
 }
 
 // QueueConfig holds job queue settings.

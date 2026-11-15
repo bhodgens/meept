@@ -244,6 +244,13 @@ func (s *Scheduler) Start(ctx context.Context) error {
 		s.logger.Warn("scheduler: in-flight delivery recovery failed", "error", err)
 	}
 
+	// One-shot (TimingAt) boot recovery: overdue-within-window one-shots
+	// fire now ("run at T" = run as soon as possible after T); past-window
+	// ones are marked failed (never ran) and stay re-runnable via RunNow.
+	// Runs BEFORE cron.Start so a due-again-in-the-future entry is not
+	// double-registered against the sweep's re-registration.
+	s.sweepOneShotsAtBoot()
+
 	// Start cron scheduler
 	s.cron.Start()
 	s.running.Store(true)
@@ -441,6 +448,16 @@ func (s *Scheduler) RunNow(jobID string) error {
 	if s.runningJobs[jobID] {
 		s.mu.Unlock()
 		return fmt.Errorf("job already running: %s", jobID)
+	}
+	// A failed (never-ran) one-shot is re-runnable here: clear the failed
+	// posture before dispatch so the row no longer reads as "never ran".
+	// LastRunAt/LastError are refreshed by executeJob's UpdateLastRun.
+	if cfg, ok := s.store.Get(jobID); ok && cfg.OneShotFailed {
+		cfg.OneShotFailed = false
+		if err := s.store.Update(cfg); err != nil {
+			s.logger.Warn("scheduler: failed to clear one-shot failed state",
+				"job_id", jobID, "error", err)
+		}
 	}
 	s.runningJobs[jobID] = true
 	// Add to the WaitGroup under the lock so that a concurrent Stop()
@@ -843,6 +860,23 @@ func (s *Scheduler) loadPersistedJobs() error {
 					"job_id", cfg.ID)
 			}
 			s.logger.Debug("scheduler: skipping transient interval job", "job_id", cfg.ID)
+			continue
+		}
+
+		// A failed (never-ran) one-shot stays in the store for manual
+		// re-run via RunNow but is NOT registered on cron: the row must
+		// stop looking schedulable. It is still added to the jobs map so
+		// RunNow can execute it and clear the failed state.
+		if cfg.Timing != nil && cfg.Timing.Kind == TimingAt && cfg.OneShotFailed {
+			job, err := s.createJob(cfg)
+			if err != nil {
+				s.logger.Warn("scheduler: failed to build failed one-shot job",
+					"job_id", cfg.ID, "error", err)
+				continue
+			}
+			s.jobs[cfg.ID] = job
+			s.logger.Debug("scheduler: loaded failed one-shot (re-runnable via run-now, not cron-registered)",
+				"job_id", cfg.ID)
 			continue
 		}
 
