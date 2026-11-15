@@ -16,6 +16,14 @@ type SubmittedTurnRecord struct {
 	TaskID         string
 	SubmittedAt    time.Time
 	LastProgressAt time.Time
+	// dispatchClaimed (task-state regression 2026-11-14): marks that the
+	// ChatHandler has taken charge of this turn's dispatch. The submit RPC
+	// registers the id for client-retry idempotency BEFORE publishing
+	// chat.request, so "already registered" alone does NOT mean
+	// "already dispatched" — without this bit the handler suppressed every
+	// legitimate submission (b9afb4e0 F16 dedupe vs. the submit-side
+	// pre-register: no task row was ever created). See ClaimDispatch.
+	dispatchClaimed bool
 	// TraceID/TurnSpanID (llm-hop-tracing leaf 01): the turn's trace
 	// correlation, captured at the handler mint seam so the async task-end
 	// relay and the turn watchdog can stamp the SAME trace onto their
@@ -84,6 +92,52 @@ func (r *TurnRegistry) Register(turnID, conversationID string) bool {
 		LastProgressAt: now,
 	}
 	return false
+}
+
+// ClaimDispatch is the handler-side dispatch gate (task-state regression
+// 2026-11-14). ChatHandler.handleRequest calls it exactly once per
+// chat.request message; claimed=true means THIS message may execute the
+// turn. It returns false only when the dispatch was already claimed by an
+// earlier chat.request (an in-flight duplicate — a scheduler-recovery
+// re-publish, a legacy retry) or the turn completed (tombstone, F16).
+//
+// Why not just Register's verdict: chat.submit registers the turn id for
+// CLIENT-retry idempotency BEFORE publishing chat.request, so at handler
+// entry every legitimate turn looks "already tracked". Treating that as a
+// duplicate suppressed 100% of submit dispatches (the handler answered
+// duplicate_suppressed and no task row was ever created — task-state e2e
+// suite, and by extension the live chat path, broke for the whole window
+// b9afb4e0..fix). An unclaimed row created by Register is precisely the
+// "submit pre-registration" state the handler is expected to consume.
+//
+// The first claim on an existing unclaimed record (the submit path) keeps
+// the ORIGINAL record — conversation binding and trace untouched; the
+// handler mints/attaches its trace after claiming.
+func (r *TurnRegistry) ClaimDispatch(turnID, conversationID string) bool {
+	if r == nil {
+		return true // nil registry = untracked legacy path: always dispatch
+	}
+	now := r.now().UTC()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, done := r.tombstones[turnID]; done {
+		return false // already completed — suppress the retry (F16)
+	}
+	if rec, ok := r.turns[turnID]; ok {
+		if rec.dispatchClaimed {
+			return false // dispatch in flight from an earlier chat.request
+		}
+		rec.dispatchClaimed = true
+		return true
+	}
+	r.turns[turnID] = &SubmittedTurnRecord{
+		TurnID:          turnID,
+		ConversationID:  conversationID,
+		SubmittedAt:     now,
+		LastProgressAt:  now,
+		dispatchClaimed: true,
+	}
+	return true
 }
 
 // AttachTask records the orchestrator task created for a turn. No-op when

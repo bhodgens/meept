@@ -341,6 +341,20 @@ jobs:
         # all five production mains yet absent from the matching baseline.
         run: bash .githooks/pre-commit-deadcode
 
+  # ─── Census-gate regression battery ───────────────────────────────────
+  # Pins .githooks/pre-commit-e2e Mode 2 (new-package census) contract via
+  # the fixture seams. Pure bash+python3+git: the seam path exits before
+  # the affected-suite gate, so no Go toolchain is needed here.
+  census-selftest:
+    name: E2E census gate self-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run census regression battery
+        run: bash scripts/e2e-census-selftest.sh
+
   # ─── Aggregate gate ───────────────────────────────────────────────────
   # Required-status-check name for branch protection. Succeeds only when
   # every job above succeeds.
@@ -356,6 +370,7 @@ jobs:
       - pkg-id-tests
       - e2e-fast
       - deadcode
+      - census-selftest
     steps:
       - name: Report success
         run: echo "All CI checks passed."
