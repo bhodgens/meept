@@ -120,6 +120,15 @@ type Daemon struct {
 	pidFile       string
 	shutdownOnce  atomic.Bool  // DAE-H1: per-instance guard (was package-level, broke test isolation)
 	drainOverride atomic.Int64 // requested drain timeout (ns); 0 = ShutdownTimeout default
+
+	// kanbanSidecar supervises the daemon-spawned meept-kanban gateway
+	// ([kanban].sidecar_enabled, default false = nil = no process). Owned
+	// by StartKanbanSidecar, torn down by stopKanbanSidecar in shutdown().
+	kanbanSidecar *kanbanSupervisor
+
+	// kanbanTuning is the test-only override for the supervisor timings,
+	// read by StartKanbanSidecar before the loop goroutine exists.
+	kanbanTuning *kanbanSidecarConfig
 }
 
 // Config holds daemon configuration.
@@ -2416,6 +2425,17 @@ func (d *Daemon) Run(ctx context.Context) error {
 			"gate", "classifier-boot-gate")
 	}
 
+	// Kanban sidecar boot (kanban-board 04/04): supervised spawn of
+	// meept-kanban, gated on [kanban].sidecar_enabled (default false =
+	// no-op, byte-identical). Runs AFTER the orphan sweep above (a leaked
+	// sidecar is reaped before we spawn) and after the RPC server started
+	// in registry.StartAll (the sidecar forwards kanban.* over that unix
+	// socket). Non-fatal by contract: a gateway that cannot spawn degrades
+	// the board surface only, never the daemon boot.
+	if err := d.StartKanbanSidecar(ctx); err != nil {
+		d.logger.Warn("kanban sidecar degraded: gateway not running", "error", err)
+	}
+
 	// Metrics collector is started automatically by NewCollector
 
 	// Spill retention sweep (plans/context-reduction/08-spill-retention.md):
@@ -2812,6 +2832,12 @@ func (d *Daemon) shutdown() error {
 			d.logger.Error("Failed to stop LLM runtimes", "error", err)
 		}
 	}
+
+	// Kanban sidecar stop (kanban-board 04/04): graceful SIGTERM group to
+	// the supervised meept-kanban child BEFORE the RPC socket closes below,
+	// so the gateway drains while its backend is still answering. No-op
+	// when the sidecar was never enabled (byte-identical shutdown).
+	d.stopKanbanSidecar(ctx)
 
 	// Stop agent components first
 	if d.components != nil {
