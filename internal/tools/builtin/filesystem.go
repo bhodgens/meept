@@ -150,6 +150,17 @@ func (t *ReadFileTool) executeRead(ctx context.Context, args map[string]any, pro
 	}
 
 	// Fence check
+	//
+	// TODO(#138): an ABSOLUTE path bypasses the session root here — the fence
+	// allowlist in this build is rig-wide (see internal/daemon components +
+	// internal/security fence config), so /etc/hosts or another user's tree is
+	// accepted for read. The per-session jail root (root the fence at the
+	// session working directory for absolute paths too) is DEFERRED: the config
+	// surface lives in internal/daemon + internal/security and changing it is
+	// out of scope for this fix. What this change does guarantee is that
+	// RELATIVE paths resolve under the session working directory
+	// (resolvePathSecure -> tools.WorkingDirFromContext), so the common
+	// agent-generated path can no longer escape via the daemon's process CWD.
 	if t.fenceChecker != nil {
 		if err := t.fenceChecker.CheckPath(resolved, "read"); err != nil {
 			return nil, err
@@ -532,6 +543,12 @@ func (t *WriteFileTool) executeWrite(ctx context.Context, args map[string]any, p
 	}
 
 	// Fence check
+	//
+	// TODO(#138): same deferred per-session jail root as file_read above — an
+	// ABSOLUTE write path is accepted by the rig-wide fence allowlist. Relative
+	// paths are already session-bound: resolvePathSecure joins them onto
+	// tools.WorkingDirFromContext, so a relative write lands under the session
+	// worktree (pinned by TestFileWriteRelativePathUsesContextWorkingDir).
 	if t.fenceChecker != nil {
 		if err := t.fenceChecker.CheckPath(resolved, "write"); err != nil {
 			return nil, err
@@ -907,6 +924,11 @@ func (t *ListDirectoryTool) Execute(ctx context.Context, args map[string]any) (a
 	}
 
 	// Fence check
+	//
+	// TODO(#138): the deferred per-session jail root applies here as well — an
+	// ABSOLUTE list path is accepted by the rig-wide fence allowlist. Relative
+	// paths (including an omitted path, which defaults to the session working
+	// directory above) resolve under tools.WorkingDirFromContext.
 	if t.fenceChecker != nil {
 		if err := t.fenceChecker.CheckPath(resolved, "read"); err != nil {
 			return nil, err
