@@ -122,10 +122,15 @@ func TestHandleRequest_DuplicateTurnIDInFlight(t *testing.T) {
 
 	turnID := "turn-dedupe-pin-3"
 	convID := "conv-dedupe-pin-3"
-	// Simulate the in-flight first submission: already registered with its
-	// original trace correlation (the mint seam's AttachTrace).
+	// Simulate the in-flight first submission: the ORIGINAL chat.request
+	// already CLAIMED the dispatch (the handler's own gate — task-state
+	// regression 2026-11-14: chat.submit's Register is a pre-registration
+	// for client-retry idempotency and is NOT a dispatch claim; a row
+	// with dispatchClaimed=true is what a true in-flight duplicate hits).
+	// Registered with its original trace correlation (the mint seam's
+	// AttachTrace).
 	origTrace, origSpan := id.TraceID(), id.SpanID()
-	h.turnRegistry.Register(turnID, convID)
+	h.turnRegistry.ClaimDispatch(turnID, convID)
 	h.turnRegistry.AttachTrace(turnID, origTrace, origSpan)
 
 	payload, _ := json.Marshal(ChatRequest{

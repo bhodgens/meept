@@ -835,17 +835,22 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 
 	// Async-turn tracking (leaf 03): register the submit-time turn under
 	// its explicit turn id. Only chat.submit turns carry TurnID — the
-	// legacy `chat` path has it empty and stays untracked. Register
-	// returning true means the id is ALREADY tracked (in flight) or
-	// tombstoned (completed): the F16 dedupe — do NOT re-execute the
-	// turn, answer the idempotent re-ack the submit handler's shape uses
-	// (internal/rpc/chat_submit.go) and leave. The registry row also
+	// legacy `chat` path has it empty and stays untracked.
+	// ClaimDispatch (task-state regression 2026-11-14) is the dispatch
+	// gate: false means the dispatch was ALREADY claimed by an earlier
+	// chat.request (in-flight duplicate — scheduler recovery re-publish,
+	// legacy retry) or the turn is tombstoned (completed, F16). It must
+	// NOT be Register's verdict: chat.submit pre-registers the turn id
+	// for client-retry idempotency before publishing chat.request, so
+	// Register reports every legitimate submit as existing — using it as
+	// the duplicate signal suppressed 100% of submit dispatches (no task
+	// row ever created; task-state e2e suite). The registry row also
 	// carries the turn's trace id (leaf 01): the async task-end relay
 	// re-broadcasts the terminal event under the SUBMITTED turn id and
 	// needs the SAME trace correlation, and the turn watchdog's reap
 	// event names the trace too.
 	if req.TurnID != "" && h.turnRegistry != nil {
-		if h.turnRegistry.Register(req.TurnID, conversationID) {
+		if !h.turnRegistry.ClaimDispatch(req.TurnID, conversationID) {
 			h.logger.Warn("duplicate chat.request suppressed; turn already tracked or completed",
 				"turn_id", req.TurnID,
 				"conversation_id", conversationID,
