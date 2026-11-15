@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/caimlas/meept/internal/kanban"
 )
 
 // ErrPlanNotModifiable is the typed guard error every table-refused or
@@ -96,6 +98,43 @@ func planFromStatesFor(to PlanState) []PlanState {
 	return from
 }
 
+// planEventReason derives the kanban StateEvent.Reason for a table edge
+// (plan leaf 02/04). Call sites that know the operator verb pass it
+// explicitly; the generic transition() entry (tests, future callers) falls
+// back to this edge derivation.
+func planEventReason(from, to PlanState) string {
+	switch to {
+	case StatePendingApproval:
+		return kanban.EventReasonSubmit
+	case StateApproved:
+		return kanban.EventReasonApprove
+	case StatePlanning:
+		return kanban.EventReasonRevise
+	case StateDraft:
+		if from == StatePlanning {
+			return kanban.EventReasonRevisionDone
+		}
+		return kanban.EventReasonRelease
+	case StateSynthesizing:
+		return kanban.EventReasonSynthesize
+	case StateExecuting:
+		return kanban.EventReasonExecuting
+	case StateCompleted:
+		return kanban.EventReasonComplete
+	case StateConfirmed:
+		return kanban.EventReasonConfirm
+	case StateCancelled:
+		if from == StatePendingApproval {
+			return kanban.EventReasonReject
+		}
+		return kanban.EventReasonCancel
+	case StateFailed:
+		return kanban.EventReasonFail
+	default:
+		return kanban.EventReasonUpdateState
+	}
+}
+
 // transition is the single guarded entry point for plan state changes
 // (contract C-P4): read the current state once, require table membership,
 // then commit through the C-P1 CAS (UpdatePlanStateWhere) with the OBSERVED
@@ -114,8 +153,8 @@ func planFromStatesFor(to PlanState) []PlanState {
 //
 // A non-member edge or a lost race returns an ErrPlanNotModifiable-wrapped
 // error and leaves the row untouched.
-func (m *PlanManager) transition(ctx context.Context, planID string, to PlanState) error {
-	return m.transitionFrom(ctx, planID, nil, to)
+func (m *PlanManager) transition(ctx context.Context, planID string, to PlanState, reason ...string) error {
+	return m.transitionFrom(ctx, planID, nil, to, reason...)
 }
 
 // transitionFrom is transition() with an optional caller-narrowed set of
@@ -127,7 +166,11 @@ func (m *PlanManager) transition(ctx context.Context, planID string, to PlanStat
 //   - Revise/Reject/Submit pin the from-sets their pre-migration guards
 //     accepted (re-derived at dispatch; the table's draft->planning row
 //     exists for the rework path, not the revise command).
-func (m *PlanManager) transitionFrom(ctx context.Context, planID string, restrict []PlanState, to PlanState) error {
+//
+// The optional `reason` names the operator verb for the kanban.event.plan.state
+// StateEvent (plan leaf 02/04); when omitted the reason is derived from the
+// won edge via planEventReason. It has no effect on the CAS itself.
+func (m *PlanManager) transitionFrom(ctx context.Context, planID string, restrict []PlanState, to PlanState, reason ...string) error {
 	plan, err := m.store.GetPlan(ctx, planID)
 	if err != nil {
 		return fmt.Errorf("transition plan %s: %w", planID, err)
@@ -154,6 +197,13 @@ func (m *PlanManager) transitionFrom(ctx context.Context, planID string, restric
 			"%w: plan %s left state %s before the transition to %s committed",
 			ErrPlanNotModifiable, planID, observed, to)
 	}
+	// CAS won: the row is committed in `to`. Publish the plan-machine
+	// StateEvent AFTER the write (plan leaf 02/04; gated no-op by default).
+	evReason := planEventReason(observed, to)
+	if len(reason) > 0 && reason[0] != "" {
+		evReason = reason[0]
+	}
+	m.publishPlanState(planID, observed, to, evReason)
 	return nil
 }
 

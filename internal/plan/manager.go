@@ -14,6 +14,7 @@ import (
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/kanban"
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/pkg/models"
 )
@@ -63,7 +64,20 @@ type PlanManager struct {
 	logger       *slog.Logger
 	phaseTaskMap map[string]string // taskID -> phaseID, populated during Synthesize
 	taskPlanMap  map[string]string // taskID -> planID, populated during Synthesize
-	mu           sync.RWMutex      // protects phaseTaskMap and taskPlanMap
+
+	// kanbanEvents is the opt-in gate (plan leaf 02/04) for the typed
+	// kanban.event.plan.state StateEvent publishers on the plan state
+	// machine's transition paths. Default false = no publish at all =
+	// byte-identical behavior. Set via SetKanbanEventPublishing (the
+	// queue's and registry's 02/03 setter pattern). It sits under its OWN
+	// kanbanMu, NOT m.mu: m.mu is held across Synthesize/EnsureTaskPlan
+	// map writes whose call chains reach publishPlanState, and Go's
+	// RWMutex is non-reentrant — sharing it would self-deadlock (the
+	// selflock analyzer's exact shape). kanbanMu guards only the bool.
+	kanbanMu     sync.RWMutex
+	kanbanEvents bool
+
+	mu sync.RWMutex // protects phaseTaskMap and taskPlanMap
 }
 
 // synthesisLeaseDuration is how long a synthesis claim stays live. A crash
@@ -227,6 +241,8 @@ func (m *PlanManager) RecoverStrandedSynthesis(ctx context.Context) (int, error)
 		}
 		if won {
 			recovered++
+			// CAS won: synthesizing -> approved is committed (plan leaf 02/04).
+			m.publishPlanState(p.ID, StateSynthesizing, StateApproved, kanban.EventReasonReclaim)
 		}
 	}
 	return recovered, nil
@@ -284,6 +300,8 @@ func (m *PlanManager) runSynthesisReclaimPass(ctx context.Context) (synthesisRec
 			counts.reclaimed++
 			seen[p.ID] = true
 			candidates = append(candidates, p.ID)
+			// CAS won: synthesizing -> approved is committed (plan leaf 02/04).
+			m.publishPlanState(p.ID, StateSynthesizing, StateApproved, kanban.EventReasonReclaim)
 		}
 	}
 
@@ -473,6 +491,10 @@ func (m *PlanManager) CreatePlanWithGoal(ctx context.Context, title, description
 		err = fmt.Errorf("set plan state to draft: %w", err)
 		return nil, err
 	}
+	// The create-path write is the plan machine's first edge (planning ->
+	// draft, the one SetPlanState the table comments allow alongside the
+	// lease primitives). Publish AFTER the write committed (plan leaf 02/04).
+	m.publishPlanState(plan.ID, StatePlanning, StateDraft, kanban.EventReasonCreate)
 
 	m.publishEvent("plan.created", map[string]any{
 		"plan_id":    plan.ID,
@@ -506,7 +528,7 @@ func (m *PlanManager) SubmitPlan(ctx context.Context, planID string) error {
 	}
 	// Table-driven CAS (C-P4): draft -> pending_approval, with the from-set
 	// pinned to draft — the pre-migration guard's exact accepted set.
-	if err := m.transitionFrom(ctx, planID, []PlanState{StateDraft}, StatePendingApproval); err != nil {
+	if err := m.transitionFrom(ctx, planID, []PlanState{StateDraft}, StatePendingApproval, kanban.EventReasonSubmit); err != nil {
 		return err
 	}
 	plan, err := m.store.GetPlan(ctx, planID)
@@ -552,7 +574,7 @@ func (m *PlanManager) SubmitPlan(ctx context.Context, planID string) error {
 // synthesizing->approved row exists for the reclaimer's stranded-lease path,
 // and a normal approve must never fire it (that would stomp a live expander).
 func (m *PlanManager) ApprovePlan(ctx context.Context, planID, sessionID, by string) error {
-	if err := m.transitionFrom(ctx, planID, []PlanState{StatePendingApproval}, StateApproved); err != nil {
+	if err := m.transitionFrom(ctx, planID, []PlanState{StatePendingApproval}, StateApproved, kanban.EventReasonApprove); err != nil {
 		return err
 	}
 
@@ -598,7 +620,7 @@ func (m *PlanManager) RejectPlan(ctx context.Context, planID, sessionID, by, rea
 	// Table-driven CAS first (C-P4): pending_approval -> cancelled. The
 	// signoff is written only when this caller WINS the transition, so a
 	// losing racer leaves no duplicate audit row behind.
-	if err := m.transitionFrom(ctx, planID, []PlanState{StatePendingApproval}, StateCancelled); err != nil {
+	if err := m.transitionFrom(ctx, planID, []PlanState{StatePendingApproval}, StateCancelled, kanban.EventReasonReject); err != nil {
 		return err
 	}
 	plan, err := m.store.GetPlan(ctx, planID)
@@ -653,7 +675,7 @@ func (m *PlanManager) RevisePlan(ctx context.Context, planID, sessionID, feedbac
 	// The CAS pins the observed state, so a racer that moved the row
 	// between the read above and this write loses.
 	if err := m.transitionFrom(ctx, planID,
-		[]PlanState{StatePendingApproval, StateCancelled, StateFailed}, StatePlanning); err != nil {
+		[]PlanState{StatePendingApproval, StateCancelled, StateFailed}, StatePlanning, kanban.EventReasonRevise); err != nil {
 		return err
 	}
 
@@ -691,7 +713,7 @@ func (m *PlanManager) RevisePlan(ctx context.Context, planID, sessionID, feedbac
 // lifecycle (SubmitPlan -> ApprovePlan -> ...). The table's planning->draft
 // row is the only legal writer; anything else is refused by the guarded CAS.
 func (m *PlanManager) CompletePlanningRevision(ctx context.Context, planID string) error {
-	if err := m.transitionFrom(ctx, planID, []PlanState{StatePlanning}, StateDraft); err != nil {
+	if err := m.transitionFrom(ctx, planID, []PlanState{StatePlanning}, StateDraft, kanban.EventReasonRevisionDone); err != nil {
 		return err
 	}
 	m.publishEvent("plan.revision_completed", map[string]any{
@@ -710,7 +732,7 @@ func (m *PlanManager) ConfirmPlan(ctx context.Context, planID, sessionID, by str
 	// guard, signoff, full-row UpdatePlan from the stale copy — lost both:
 	// last-writer-wins on the state AND stomped the live
 	// task_id/synthesis_lease_until columns of the pre-transition copy (T4).
-	if err := m.transition(ctx, planID, StateConfirmed); err != nil {
+	if err := m.transition(ctx, planID, StateConfirmed, kanban.EventReasonConfirm); err != nil {
 		return err
 	}
 	plan, err := m.store.GetPlan(ctx, planID)
@@ -793,7 +815,7 @@ func (m *PlanManager) CancelPlan(ctx context.Context, planID, reason string) err
 	// guard's accepted set minus completed/planning — the audited table has
 	// no edge into cancelled from those states (see planTransitions; delta
 	// noted in the leaf report).
-	if err := m.transition(ctx, planID, StateCancelled); err != nil {
+	if err := m.transition(ctx, planID, StateCancelled, kanban.EventReasonCancel); err != nil {
 		return err
 	}
 
@@ -1028,6 +1050,9 @@ func (m *PlanManager) Synthesize(ctx context.Context, planID string) error {
 			"plan_id", planID, "state", plan.State)
 		return nil
 	}
+	// Claim won: the row moved to synthesizing (or refreshed its lease on a
+	// stale synthesizing row, where from==to publishes nothing).
+	m.publishPlanState(planID, plan.State, StateSynthesizing, kanban.EventReasonSynthesize)
 
 	// Past this point the plan is OURS and carries a lease. Every failure path
 	// must release or park it, or the plan would stay claimed forever.
@@ -1036,16 +1061,25 @@ func (m *PlanManager) Synthesize(ctx context.Context, planID string) error {
 	// never sees the no-task residue.
 	release := func(park bool) {
 		var relErr error
+		to := StateDraft
+		reason := kanban.EventReasonRelease
 		if park {
 			relErr = m.store.ParkPlanSynthesis(ctx, planID)
+			to = StateFailed
+			reason = kanban.EventReasonPark
 		} else if plan.State == StateApproved {
 			relErr = releaseSynthesisTo(m.store, ctx, planID, StateApproved)
+			to = StateApproved
 		} else {
 			relErr = m.store.ReleasePlanSynthesis(ctx, planID)
 		}
 		if relErr != nil {
 			m.logger.Error("failed to release synthesis claim", "plan_id", planID, "error", relErr)
+			return
 		}
+		// Lease discharged: the row left synthesizing. Publish AFTER the
+		// store write succeeded (plan leaf 02/04).
+		m.publishPlanState(planID, StateSynthesizing, to, reason)
 	}
 
 	// Bound the retries: a plan that cannot be expanded is parked (terminal)
@@ -1140,6 +1174,10 @@ func (m *PlanManager) Synthesize(ctx context.Context, planID string) error {
 	}); err != nil {
 		return fmt.Errorf("update plan with task ID: %w", err)
 	}
+	// Expansion succeeded: synthesizing -> executing is committed. Publish
+	// AFTER the write (plan leaf 02/04); the legacy plan.executing event
+	// below stays untouched.
+	m.publishPlanState(planID, StateSynthesizing, newState, kanban.EventReasonExecuting)
 	// Keep the in-memory copy usable for the tail writes below without
 	// letting it back onto the persistence path.
 	plan.TaskID = taskID
@@ -1520,7 +1558,7 @@ func (m *PlanManager) completePlan(ctx context.Context, planID string) error {
 	// observed state, so a concurrent CancelPlan that moved the row first
 	// makes this a lost race: the completion must NOT clobber the cancel,
 	// and the event/markdown below must not fire for a plan nobody completed.
-	if err := m.transition(ctx, planID, StateCompleted); err != nil {
+	if err := m.transition(ctx, planID, StateCompleted, kanban.EventReasonComplete); err != nil {
 		return err
 	}
 
@@ -1563,7 +1601,7 @@ func (m *PlanManager) failPlan(ctx context.Context, planID string) error {
 		return nil
 	}
 
-	if err := m.transition(ctx, planID, StateFailed); err != nil {
+	if err := m.transition(ctx, planID, StateFailed, kanban.EventReasonFail); err != nil {
 		return err
 	}
 
@@ -1776,6 +1814,47 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// SetKanbanEventPublishing arms the opt-in gate (plan leaf 02/04) for the
+// typed kanban.event.plan.state StateEvent publishers on the plan state
+// machine's transition paths. Default false: the manager behaves
+// byte-identically to pre-kanban builds — no StateEvent is ever constructed
+// or published, and the legacy plan.* events are untouched. The daemon
+// wiring (leaf 07/01) turns it on; tests drive both sides through this
+// setter (same mutex-guarded setter pattern as PersistentQueue's).
+func (m *PlanManager) SetKanbanEventPublishing(enabled bool) {
+	m.kanbanMu.Lock()
+	defer m.kanbanMu.Unlock()
+	m.kanbanEvents = enabled
+}
+
+// publishPlanState emits a plan-machine StateEvent on
+// kanban.event.plan.state when (and only when) the opt-in gate is armed.
+// Called from the successful transition paths AFTER the guarded CAS or
+// store write confirmed the change; refused transitions and lost races
+// never reach it. The gate bit is read under kanbanMu (its OWN lock —
+// m.mu is held across some publish call chains, and Go's RWMutex is
+// non-reentrant), then the publish runs outside any lock (mutexio). It
+// never touches the legacy publishEvent surface: plan.executing /
+// plan.phase_state stay byte-identical (intake depends on them).
+func (m *PlanManager) publishPlanState(planID string, from, to PlanState, reason string) {
+	if m == nil || from == "" || to == "" || from == to {
+		return
+	}
+	m.kanbanMu.RLock()
+	enabled := m.kanbanEvents
+	m.kanbanMu.RUnlock()
+	if !enabled {
+		return
+	}
+	kanban.PublishPlanState(m.bus, kanban.StateEvent{
+		Kind:   kanban.EventKindPlan,
+		ID:     planID,
+		From:   string(from),
+		To:     string(to),
+		Reason: reason,
+	})
 }
 
 // publishEvent creates a BusMessage and publishes it to the message bus.

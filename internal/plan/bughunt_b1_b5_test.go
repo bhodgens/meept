@@ -309,12 +309,6 @@ func TestDeletePlanCascadesViaPooledConn(t *testing.T) {
 	}
 }
 
-// countingGoalCreator is a countingCreator variant that records goal stamps
-// so the B5 race can interleave SetPlanGoal mid-synthesis.
-type countingGoalCreator struct {
-	countingCreator
-}
-
 // goalStampingCreator stamps the plan's goal from INSIDE CreateTask — a
 // deterministic mid-synthesis stamp. The manager reads its plan snapshot
 // BEFORE task creation and persists after it, exactly the window the stale

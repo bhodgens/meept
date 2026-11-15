@@ -10,8 +10,11 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/kanban"
 	sid "github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 )
@@ -382,6 +385,71 @@ type StepStore struct {
 	db             *sql.DB
 	logger         *slog.Logger
 	logTransitions bool // Enable transition logging
+
+	// kanbanBus + kanbanEvents are the opt-in publisher seam (plan leaf
+	// 02/04) for the typed kanban.event.step.state StateEvent on the
+	// SetState / SetStateWithReason transition paths. Gate default false =
+	// no publish at all = byte-identical behavior. Both fields sit under
+	// kanbanMu (a dedicated lock: the store has no main mutex today and
+	// the existing DB paths stay untouched); the publish runs outside the
+	// lock after the DB write committed (mutexio). Wiring reaches these
+	// through Store.StepStore() — no constructor signature changed.
+	kanbanBus    *bus.MessageBus
+	kanbanEvents bool
+	kanbanMu     sync.RWMutex
+}
+
+// SetKanbanEventBus installs the optional bus the step machine publishes
+// StateEvents on (plan leaf 02/04). A nil bus makes every publisher a
+// silent no-op, matching the nil-bus tolerance of the kanban helpers.
+// Nil-receiver guard: callers may hold a nil *StepStore on lite paths.
+func (s *StepStore) SetKanbanEventBus(b *bus.MessageBus) {
+	if s == nil {
+		return
+	}
+	s.kanbanMu.Lock()
+	defer s.kanbanMu.Unlock()
+	s.kanbanBus = b
+}
+
+// SetKanbanEventPublishing arms the opt-in gate (plan leaf 02/04) for the
+// typed kanban.event.step.state StateEvent publishers. Default false: the
+// step store behaves byte-identically to pre-kanban builds — no StateEvent
+// is ever constructed or published. The daemon wiring (leaf 07/01) turns
+// it on (same gated-setter pattern as PersistentQueue's).
+func (s *StepStore) SetKanbanEventPublishing(enabled bool) {
+	if s == nil {
+		return
+	}
+	s.kanbanMu.Lock()
+	defer s.kanbanMu.Unlock()
+	s.kanbanEvents = enabled
+}
+
+// publishStepState emits a step-machine StateEvent on
+// kanban.event.step.state when (and only when) the opt-in gate is armed.
+// Callers invoke it AFTER the SetState/SetStateWithReason transaction
+// committed the write; lost races (affected==0) and same-state writes
+// publish nothing. The gate bit and bus are snapshotted under kanbanMu,
+// the publish runs outside it.
+func (s *StepStore) publishStepState(id string, from, to StepState, reason string) {
+	if from == "" || to == "" || from == to {
+		return
+	}
+	s.kanbanMu.RLock()
+	enabled := s.kanbanEvents
+	b := s.kanbanBus
+	s.kanbanMu.RUnlock()
+	if !enabled {
+		return
+	}
+	kanban.PublishStepState(b, kanban.StateEvent{
+		Kind:   kanban.EventKindStep,
+		ID:     id,
+		From:   string(from),
+		To:     string(to),
+		Reason: reason,
+	})
 }
 
 // StateTransition represents a state transition for a task step.
@@ -966,6 +1034,11 @@ func (s *StepStore) SetState(id string, state StepState) error {
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit SetState %s: %w", id, err)
+	}
+	// Committed write with a real state change: publish AFTER commit, never
+	// inside the tx (plan leaf 02/04; gated no-op by default).
+	if oldState != state {
+		s.publishStepState(id, oldState, state, kanban.EventReasonStateChange)
 	}
 	return nil
 }
@@ -1552,6 +1625,17 @@ func (s *StepStore) SetStateWithReason(id string, state StepState, reason string
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit SetStateWithReason %s: %w", id, err)
+	}
+	// Committed write with a real state change: publish AFTER commit, never
+	// inside the tx (plan leaf 02/04). The caller-supplied reason rides the
+	// StateEvent verbatim when non-empty; an empty reason falls back to the
+	// generic state_change label.
+	if currentStepState != state {
+		evReason := reason
+		if evReason == "" {
+			evReason = kanban.EventReasonStateChange
+		}
+		s.publishStepState(id, currentStepState, state, evReason)
 	}
 	return nil
 }
