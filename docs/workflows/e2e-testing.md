@@ -140,10 +140,12 @@ Runs on every commit with staged Go files:
 
 1. **Affected-suite gate** — staged `internal/|pkg/|cmd/` Go paths are fed to
    `scripts/e2e-affected.sh`; any failing suite FAILS the commit.
-2. **New-feature coverage rule** — if a staged change creates files under a
-   NEW package directory (no `path_map` entry) AND no e2e suite files are
-   staged, the commit FAILS with instructions to add e2e coverage and a
-   manifest entry. Exempt: `_test.go`, docs, generated files.
+2. **New-package census** — every package directory that gains a new
+   non-test Go file in the staged additions must have a `path_map` entry in
+   `e2e/manifest.json` or an `exempt` entry with a written reason (printed as
+   residual risk), or the commit FAILS. Exempt: `_test.go`, docs, generated
+   files. Staging e2e suite files no longer clears the check; an unparseable
+   or empty manifest fails the commit closed.
 
 Escape hatch for emergencies — prints a loud warning and proceeds:
 

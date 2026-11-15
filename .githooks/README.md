@@ -254,6 +254,12 @@ Checks for common error handling anti-patterns.
 - `panic(err)` in non-test code
 - `fmt.Errorf` without `%w` for wrapping
 - Error assigned but not returned
+- Unwired placeholder seam calls (nil-seam ratchet): added non-test lines
+  calling `Set*Provider/Sink/Source/Relay/Adapter/Handler/Emitter/Publisher`
+  with a bare `nil` whole argument — the "wired with a nil provider"
+  placeholder instead of real wiring. Suppress with `//nolint:nilseam` plus a
+  reason (or `// nilseam: allow`), only for documented fail-closed opt-in
+  seams. New-additions-only ratchet; existing legitimate sites unaffected.
 
 **Example:**
 ```go
@@ -438,10 +444,16 @@ new package directory under those trees)
   status `todo`) are reported and skipped; the smoke suite runs as fallback
   whenever feature Go files are staged with no hit or with only-pending hits.
   Any failing suite FAILS the commit.
-- **New-feature coverage rule**: a staged change creating files under a NEW
-  package directory (no `path_map` entry) FAILS with instructions to add an
-  e2e suite + manifest entry, unless e2e suite files are staged in the same
-  commit. Exempt: `_test.go`, docs, generated files, the e2e tree itself.
+- **New-package census** (hard gate since f18fea35): every package directory
+  that gains a new non-test `.go` file in the staged additions
+  (`git diff --cached --diff-filter=A` under `internal/`/`pkg/`/`cmd/`) must
+  have a `path_map` entry in `e2e/manifest.json` (bidirectional slash-boundary
+  prefix match) or an `exempt` entry with a mandatory non-empty reason —
+  exemptions print as residual risk every run. Test-only and generated
+  additions are excluded. The old escape (staging any `e2e/suites/` file
+  cleared the whole check) is GONE; an unparseable manifest or empty
+  `path_map` exits 1 (vacuity floor) instead of failing open. Fixture/test
+  seam: `MEEPT_E2E_CENSUS_STAGED_FILE` (plus `MEEPT_E2E_MANIFEST_FILE`).
 
 **Skip (emergencies only — prints a loud warning):**
 ```bash
@@ -460,34 +472,40 @@ using `golang.org/x/tools/cmd/deadcode`.
 **Triggers on:** Staged `.go` files (any path)
 
 **Checks:**
-- Runs `deadcode -test` on ALL FIVE production binaries (`./cmd/meept-daemon`,
+- Runs TWO passes on ALL FIVE production binaries (`./cmd/meept-daemon`,
   `./cmd/meept`, `./cmd/meept-lite`, `./cmd/meept-classifier-test`,
   `./tools/bridges-eval`) and INTERSECTS the per-binary unreachable sets
   (each normalized to `path: func Name`; line numbers stripped, so pure code
   motion never produces churn). A function counts as unwired only if it is
   unreachable from EVERY main — wired-in-one-binary code is never flagged.
-- Diffs the current intersection against the committed baseline
-  `.githooks/deadcode-baseline.txt`. Any function unreachable from all mains
-  in the working tree but ABSENT from the baseline FAILS the commit.
-- The baseline was rebaselined at 528 entries after the 2026-11-09 wiring
-  campaign (the old union baseline was 13.3k; 88%+ of it was single-binary
-  linkage artifacts). The gate is a ratchet: it only ever blocks NEW
-  additions. Failing output names the exact function and its file.
+- Pass 1 uses `-test` (tests count as roots) against
+  `.githooks/deadcode-baseline.txt`; pass 2 runs WITHOUT `-test` against
+  `.githooks/deadcode-baseline-notest.txt`, closing the blind spot where a
+  function's only caller is its own unit test ("implemented, tested, never
+  wired"). A commit fails if a function is new-vs-baseline in EITHER mode.
+- CI enforces the whole tree: the `deadcode` job in `.github/workflows/ci.yml`
+  (member of `ci-success.needs`) installs the tool pinned to the go.mod
+  x/tools version and runs with `MEEPT_DEADCODE_FULL_TREE=1`, which skips the
+  "no staged Go files -> exit 0" early-return (a fresh CI checkout has an
+  empty staged diff).
 - Override the analyzed mains for testing:
   `MEEPT_DEADCODE_MAINS="./cmd/meept-daemon" .githooks/pre-commit-deadcode`.
 
 **Re-baselining (deliberate, same policy as the bench regression baseline):**
 ```bash
 .githooks/pre-commit-deadcode --rebaseline
-git add .githooks/deadcode-baseline.txt
+git add .githooks/deadcode-baseline.txt .githooks/deadcode-baseline-notest.txt
 ```
 Re-baseline when you INTEND to remove dead code or when you wire previously
 unreachable code in (its count drops - keeping the old baseline is harmless,
-re-baselining just shrinks the ratchet).
+re-baselining just shrinks the ratchet). `--rebaseline` regenerates BOTH
+baselines (it needs a tree where every main, tests included, compiles).
 
 **Notes:**
-- Skips with a warning if `deadcode` is not on PATH or `$HOME/go/bin`
-  (install: `go install golang.org/x/tools/cmd/deadcode@latest`).
+- FAILS CLOSED when `deadcode` is not on PATH or `$HOME/go/bin` — install
+  with `go install golang.org/x/tools/cmd/deadcode@latest`. Local skip only
+  via `MEEPT_DEADCODE_ALLOW_SKIP=1`, and never on CI (`CI=true` ignores the
+  opt-out).
 - Uses the GOTOOLCHAIN pin from go.mod (set by the main pre-commit; also
   self-pins when run standalone).
 - Over-reporting caveat: deadcode is call-graph-based, so a function reachable
