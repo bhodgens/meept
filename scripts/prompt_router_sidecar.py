@@ -134,6 +134,19 @@ LANES, LANES_SOURCE = resolve_lanes()
 tok = None
 model = None
 
+# The single shared torch model is NOT thread-safe / slot-bounded. The
+# ThreadingHTTPServer spawns one thread per request, and concurrent
+# classifier forwards all hit the one device in one forward each — a burst
+# multiplies latency unbounded and starves the /health canary's tiny probe
+# (observed 2026-11-13: a legit 12-13k-token encoder forward took >15 s,
+# tripping a FALSE HUNG restart of the prompt-router runtime). Serialize
+# model.route so a burst becomes FIFO serialized forwards instead of N
+# concurrent forwards thrashing the device — bounded latency for every
+# real turn AND the canary, at the cost of throughput (routing is one
+# operator-facing turn, not a bulk lane). (import threading added for Lock.)
+import threading
+_model_lock = threading.Lock()
+
 
 def log_lanes_source(stream=None):
     """Emit the one-line lane-source diagnostic to stderr (stdout is API-only)."""
@@ -146,8 +159,14 @@ def log_lanes_source(stream=None):
 
 
 def route_prompt(prompt: str) -> dict:
-    """Score the prompt against every lane in one encoder pass."""
-    ranked = model.route(prompt, LANES, tokenizer=tok)
+    """Score the prompt against every lane in one encoder pass.
+
+    The forward runs under _model_lock: the single shared model can serve
+    exactly one forward at a time, and serializing stops a concurrent burst
+    from thrashing the device (the false-HUNG root cause).
+    """
+    with _model_lock:
+        ranked = model.route(prompt, LANES, tokenizer=tok)
     scores = {item["route"]: float(item["score"]) for item in ranked}
     # Keep only configured lanes, renormalize.
     filtered = {lane: float(scores.get(lane, 0.0)) for lane in LANES}
