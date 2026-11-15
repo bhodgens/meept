@@ -153,15 +153,15 @@ func voiceLocalSeams(w *VoiceWiring, mgr *employee.Manager, logger *slog.Logger)
 // the handler's empty envelope. Store read errors degrade the same way
 // (found=false) - the transcript print is best-effort and must never
 // surface as an RPC failure the CLI has to handle.
-func callTranscriptSeam(w *VoiceWiring) func(ctx context.Context, callID string) (string, string, []rpc.VoiceCallTranscriptLine, bool) {
+func callTranscriptSeam(w *VoiceWiring) func(ctx context.Context, callID string) (string, string, string, []rpc.VoiceCallTranscriptLine, bool) {
 	store := linkTranscriptSourceFor(w)
 	if store == nil {
 		return nil
 	}
-	return func(ctx context.Context, callID string) (string, string, []rpc.VoiceCallTranscriptLine, bool) {
+	return func(ctx context.Context, callID string) (string, string, string, []rpc.VoiceCallTranscriptLine, bool) {
 		rec, lines, ok, err := store.EndedCall(ctx, callID)
 		if err != nil || !ok {
-			return "", "", nil, false
+			return "", "", "", nil, false
 		}
 		out := make([]rpc.VoiceCallTranscriptLine, 0, len(lines))
 		for _, l := range lines {
@@ -171,7 +171,11 @@ func callTranscriptSeam(w *VoiceWiring) func(ctx context.Context, callID string)
 				At:   l.At.Format(time.RFC3339),
 			})
 		}
-		return rec.EmployeeID, rec.SessionID, out, true
+		endedAt := ""
+		if !rec.EndedAt.IsZero() {
+			endedAt = rec.EndedAt.Format(time.RFC3339)
+		}
+		return rec.EmployeeID, rec.SessionID, endedAt, out, true
 	}
 }
 

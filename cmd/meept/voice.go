@@ -2285,6 +2285,7 @@ type voiceLocalTranscriptResult struct {
 	CallID     string `json:"call_id"`
 	EmployeeID string `json:"employee_id"`
 	SessionID  string `json:"session_id"`
+	EndedAt    string `json:"ended_at,omitempty"`
 	Lines      []struct {
 		Role string `json:"role"`
 		Text string `json:"text"`
@@ -2293,29 +2294,88 @@ type voiceLocalTranscriptResult struct {
 	Found bool `json:"found"`
 }
 
+// transcriptReadRetries bounds the end-of-call transcript read: after
+// voice.local.end the daemon's release fan-out commits the final
+// transcript line and the ended-state asynchronously, so a read that lands
+// a few ms early can legitimately find the row but not (yet) the full
+// lines (or, worse, the row not yet marked ended). A short bounded retry
+// absorbs that flush race before surrendering to the honest "(no
+// transcript lines)" degrade - a genuinely absent/unwired read still gives
+// up fast, NEVER hanging the call's exit.
+const transcriptReadRetries = 3
+
+// transcriptReadTimeout bounds ONE transcript round-trip, mirroring the
+// events tracker's bounded-round-trip contract (callBounded /
+// voiceEventCallTimeout, C-11): the RPC client's own retry ladder spans
+// minutes, and a wedged socket must never hold the call's exit open for
+// it. An abandoned child goroutine's result is discarded. Var seam
+// (echoRosterTTL posture): production constant, tests shrink it.
+var transcriptReadTimeout = 5 * time.Second
+
+// callTranscriptBounded runs one voice.local.transcript round-trip on a
+// child goroutine bounded by transcriptReadTimeout (the callBounded
+// posture): a wedged socket degrades to a timeout, never a multi-minute
+// CLI hang at call end. Returns (res, true) on a decoded success and
+// (zero, false) on error/timeout.
+func callTranscriptBounded(client interface {
+	Call(method string, params any) (json.RawMessage, error)
+}, callID string) (voiceLocalTranscriptResult, bool) {
+	type result struct {
+		res voiceLocalTranscriptResult
+		ok  bool
+	}
+	ch := make(chan result, 1)
+	go func() {
+		raw, err := client.Call("voice.local.transcript", map[string]any{"call_id": callID})
+		if err != nil {
+			ch <- result{}
+			return
+		}
+		var r voiceLocalTranscriptResult
+		if json.Unmarshal(raw, &r) != nil {
+			ch <- result{}
+			return
+		}
+		ch <- result{res: r, ok: true}
+	}()
+	select {
+	case r := <-ch:
+		return r.res, r.ok
+	case <-time.After(transcriptReadTimeout):
+		return voiceLocalTranscriptResult{}, false
+	}
+}
+
 // printLocalCallTranscript prints the call's stored transcript at call
 // end (the user-facing "what was said" the live event feed also lost in
 // the local-53b347f028f0a43f regression). Reads voice.local.transcript -
 // the call store, call-scoped, so a shared session never leaks prior
 // calls' history. Best-effort by contract: an RPC error, an old daemon
-// without the method, or an unwired store prints the honest "no
-// transcript lines" degrade and NEVER changes the run's outcome.
+// without the method, an unwired store, or a WEDGED SOCKET (each attempt
+// bounded by transcriptReadTimeout, so the whole retry ladder stays
+// bounded too) prints the honest "no transcript lines" degrade and NEVER
+// changes the run's outcome.
 func printLocalCallTranscript(client interface {
 	Call(method string, params any) (json.RawMessage, error)
 }, callID, employee string) {
 	var res voiceLocalTranscriptResult
-	raw, err := client.Call("voice.local.transcript", map[string]any{"call_id": callID})
-	if err == nil {
-		err = json.Unmarshal(raw, &res)
-	}
-	if err != nil || !res.Found {
-		emp := employee
-		if res.EmployeeID != "" {
-			emp = res.EmployeeID
+	for attempt := 0; attempt <= transcriptReadRetries; attempt++ {
+		if attempt > 0 {
+			time.Sleep(200 * time.Millisecond)
 		}
-		fmt.Printf("\n--- transcript (%s / %s) ---\n", emp, callID)
-		fmt.Println("(no transcript lines)")
-		return
+		r, ok := callTranscriptBounded(client, callID)
+		if !ok {
+			// Hard RPC error or timeout: no row to retry a flush race
+			// on — break to the honest degrade below.
+			break
+		}
+		res = r
+		if !res.Found || len(res.Lines) > 0 {
+			// Real result.
+			break
+		}
+		// found but empty: retry the flush race; the last retry's empty
+		// lines flow into the honest degrade below.
 	}
 	var userN, asstN int
 	for _, l := range res.Lines {
@@ -2333,22 +2393,84 @@ func printLocalCallTranscript(client interface {
 	if emp == "" {
 		emp = "?"
 	}
-	fmt.Printf("\n--- transcript (%s / %s): %d user / %d assistant ---\n",
-		emp, res.CallID, userN, asstN)
-	if len(res.Lines) == 0 {
-		fmt.Println("(no transcript lines)")
+	if len(res.Lines) > 0 {
+		fmt.Printf("\n--- transcript (%s / %s): %d user / %d assistant ---\n",
+			emp, res.CallID, userN, asstN)
+		printTranscriptWindow(res.Lines, res.EndedAt)
 		return
 	}
-	for _, l := range res.Lines {
-		printTranscriptLine(l.Role, l.At, l.Text)
+	// Honest degrade: RPC error, unwired store, or a found row whose lines
+	// never flushed. Same shape as before, never a crash.
+	fmt.Printf("\n--- transcript (%s / %s) ---\n", emp, callID)
+	fmt.Println("(no transcript lines)")
+}
+
+// printTranscriptWindow renders the full transcript in chronological
+// order, each line tagged with a start→stop wall-clock window so the
+// operator can make precise observational references against the DAW /
+// recording. Stop is determinable two ways, in order of accuracy:
+//
+//   - next line's start (a line spans from its own start until the next
+//     speaker's line begins); this is the closest available storage-backed
+//     bound for every line but the last - the store records no per-line
+//     end timestamp.
+//   - the call's ended_at (RFC3339), which closes the FINAL line (there is
+//     no "next line" to bound it); an old daemon / live call that omits it
+//     leaves that line start-only.
+func printTranscriptWindow(lines []struct {
+	Role string `json:"role"`
+	Text string `json:"text"`
+	At   string `json:"at"`
+}, endedAt string) {
+	for i, l := range lines {
+		start := l.At
+		stop := ""
+		if i+1 < len(lines) {
+			stop = lines[i+1].At
+		} else if endedAt != "" {
+			stop = endedAt
+		}
+		printTranscriptLineWindow(l.Role, start, stop, l.Text)
 	}
 }
 
-// printTranscriptLine renders one role-tagged transcript line (shared
-// shape of the link/local end-of-call prints: HH:MM:SS <role>: <text>).
+// printTranscriptLine renders one role-tagged transcript line
+// (HH:MM:SS [→HH:MM:SS] <role>: <text>). A missing stop keeps the start
+// alone - the shared start-only shape of the link print.
 func printTranscriptLine(role, at, text string) {
-	if len(at) >= 19 {
-		at = at[11:19]
+	printTranscriptLineWindow(role, at, "", text)
+}
+
+// printTranscriptLineWindow renders one role-tagged transcript line with a
+// start→stop window. Times are RFC3339 on the wire; only the HH:MM:SS part
+// prints (chronological same-day call, seconds resolution is the precision
+// the operator needs).
+func printTranscriptLineWindow(role, start, stop, text string) {
+	s := timePartOfRFC3339(start)
+	if s == "" {
+		s = "??:??:??"
 	}
-	fmt.Printf("%s %s: %s\n", at, role, strings.TrimSpace(text))
+	prefix := s
+	if stop != "" {
+		if e := timePartOfRFC3339(stop); e != "" {
+			prefix = s + "→" + e
+		}
+	}
+	fmt.Printf("%s %s: %s\n", prefix, role, strings.TrimSpace(text))
+}
+
+// timePartOfRFC3339 extracts HH:MM:SS from an RFC3339 timestamp (time at
+// offsets 11-19). A string already shaped as HH:MM:SS passes through
+// untouched (the pre-window renderers emitted it verbatim); anything else
+// yields empty so the caller can fall back.
+func timePartOfRFC3339(at string) string {
+	if len(at) == 8 && at[2] == ':' && at[5] == ':' {
+		return at
+	}
+	if len(at) >= 19 {
+		if at[8] == 'T' || at[10] == 'T' {
+			return at[11:19]
+		}
+	}
+	return ""
 }

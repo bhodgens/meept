@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -71,6 +72,41 @@ func transcriptStubRunner(stdout string) func(ctx context.Context, name string, 
 }
 
 const transcriptStubSegment = `{"text":"hello wired world","start":0}`
+
+// TestAuxClientUsageStoreWired verifies the classifier (and other
+// auxiliary) LLM clients built through createAuxiliaryLLMClientWithResolver
+// actually carry the app-level metrics store — the fix that makes
+// intent/classifier requests appear in llm_calls (before it, they were
+// invisible: the constructor never attached the usage store the main
+// client gets via SetUsageStore in daemon.go). The store field is
+// unexported, so we assert via reflection. Regression guard: if someone
+// drops the metricsStore wiring, classifier latency stops being recorded
+// and the routing-delay report goes dark.
+func TestAuxClientUsageStoreWired(t *testing.T) {
+	cfg, _ := skillToolsTestConfig(t)
+	// Enable the cache metrics store so Components.MetricsStore is non-nil
+	// during auxiliary-client construction — otherwise the wiring path we're
+	// pinning never runs (and production always sets it before the classifier
+	// client is built).
+	cfg.LLM.Cache.Enabled = true
+	comps := newTranscriptWiringComponents(t, cfg)
+	if comps.ClassifierClient == nil {
+		t.Fatal("ClassifierClient nil: classifier model did not build an auxiliary client")
+	}
+	if comps.MetricsStore == nil {
+		t.Skip("MetricsStore nil (test config cache wiring not honored); cannot exercise the store-attach path")
+	}
+	// reflect over the unexported *appmetrics.Store (usageStore) field on
+	// *llm.Client to confirm SetUsageStore ran in the wiring path.
+	fv := reflect.ValueOf(comps.ClassifierClient).Elem().FieldByName("usageStore")
+	if !fv.IsValid() {
+		t.Fatalf("usageStore field not found on llm.Client (wiring shape changed?)")
+	}
+	if fv.IsNil() {
+		t.Fatalf("classifier client usageStore is nil: classifier calls will NOT be recorded in llm_calls")
+	}
+	t.Log("classifier client has usage store attached (classifier requests will be recorded in llm_calls)")
+}
 
 // TestTranscriptSummarizerClientConstruction verifies the dedicated
 // transcript summarizer client is built EXACTLY when configured:
