@@ -238,12 +238,68 @@ func (r *Registry) ListSummaries(ctx context.Context, limit int) ([]TaskSummary,
 	return summaries, nil
 }
 
-// UpdateState changes a task's state.
+// UpdateState changes a task's state through the transition guard (issue #135).
+//
+// Caller classification (grep `-rn 'UpdateState\|handleUpdate\|TaskService.*Update'
+// --include=*.go`, 2026-11-15):
+//
+//	REGISTRY.UpdateState (this method) — every in-tree caller is an INTERNAL
+//	component driving a task it owns through a legal edge, i.e. should-be-checked:
+//	  - internal/task/registry_test.go:145,236 (tests: pending->executing)
+//	  - internal/task/registry_completejob_pin_test.go:60 (test staging)
+//	  - internal/task/kanban_events_test.go:126,160,228,231 (publisher tests, walk
+//	    taskTransitions keys — every edge driven is legal by construction)
+//	  - internal/services/task_service_cancel_pin_test.go:34-83 (test staging for
+//	    the terminal-state pins; every chain is pending->...->terminal)
+//	  - internal/agent/recall_answer_test.go:51,143 (test staging)
+//	  - production callers: NONE. Grep across internal/, cmd/, pkg/ finds no
+//	    non-test caller. Kept (rather than deleted) because it is the registry's
+//	    generic state driver and the deadcode gate churns on removals.
+//	REGISTRY.Update (raw row write, NOT this method) — bypasses the guard by
+//	design and stays that way; it is a field-level row write used by
+//	amendment_handlers.go:54 (ContextQuery only), taskCreatorAdapter.SetTaskJobCount
+//	(internal/daemon/daemon.go:3450), handleCancel and the agent planners, which
+//	mutate fields they read back from the store. None of them set .State, so
+//	none of them is a state-write path. Wrapping Update would break all of them.
+//	HANDLER.handleUpdate (task.update bus contract) — should-be-checked; the
+//	RPC (internal/rpc/proxy.go:210) and HTTP (PUT /api/v1/tasks/{id}) surfaces
+//	both proxy onto it.
+//	TASKSERVICE.Update — should-be-checked; reached from
+//	internal/comm/http/api_handlers.go:761.
+//
+// LEGITIMATE FREE-FORM NEED: admin recovery. An operator repairing a stuck or
+// mis-seeded task must be able to force an edge the table forbids (e.g.
+// completed -> pending to re-run it). That need is real but it must be
+// EXPLICIT and AUDITED, so it lives in UpdateStateUnchecked — the default a
+// new caller reaches for is the checked form.
 //
 // Read-modify-write is performed under a single write lock to prevent lost
 // updates from concurrent callers (the previous Get+mutate+Update sequence
 // released the read lock between the read and the write).
 func (r *Registry) UpdateState(ctx context.Context, taskID string, state TaskState) error {
+	return r.updateState(ctx, taskID, state, false, "")
+}
+
+// UpdateStateUnchecked is the explicit operator escape hatch around
+// UpdateState's transition guard (issue #135): it forces `state` onto a task
+// regardless of the current edge, and LOGS the override at Warn with the
+// caller-supplied reason. Use it ONLY for admin recovery of a stuck or
+// mis-seeded task; the reason must name why the guard was bypassed, because
+// that log line is the audit record for the illegal edge.
+//
+// The state ENUM is still validated — this is a transition-table override, not
+// a license to persist arbitrary strings.
+func (r *Registry) UpdateStateUnchecked(ctx context.Context, taskID string, state TaskState, reason string) error {
+	return r.updateState(ctx, taskID, state, true, reason)
+}
+
+// updateState is the shared body behind UpdateState (checked) and
+// UpdateStateUnchecked (audited override).
+func (r *Registry) updateState(ctx context.Context, taskID string, state TaskState, force bool, reason string) error {
+	if err := validateTaskStateString(string(state)); err != nil {
+		return err
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -264,7 +320,26 @@ func (r *Registry) UpdateState(ctx context.Context, taskID string, state TaskSta
 	// which publishes nothing, is visible as such).
 	oldState := task.State
 
-	task.SetState(state)
+	switch {
+	case task.State == state:
+		// Not a transition at all: nothing to guard, nothing to publish.
+	case force:
+		if reason == "" {
+			reason = "unspecified"
+		}
+		r.logger.Warn("task state transition override",
+			KeyTaskID, taskID,
+			"from", oldState.String(),
+			"to", state.String(),
+			"reason", reason,
+		)
+		task.SetState(state)
+	default:
+		if err := task.SetStateChecked(state); err != nil {
+			return fmt.Errorf("%w (%s)", err, AllowedTransitionsText())
+		}
+	}
+
 	if err := r.store.Update(task); err != nil {
 		return err
 	}
@@ -844,7 +919,17 @@ func (h *Handler) handleUpdate(ctx context.Context, msg *models.BusMessage) (any
 		task.Description = params.Description
 	}
 	if params.State != "" {
-		task.SetState(TaskState(params.State))
+		// Issue #135: this was a raw SetState(TaskState(params.State)) — an
+		// unvalidated state string from the task.update bus contract (proxied
+		// by RPC task.update and HTTP PUT /api/v1/tasks/{id}) reached the
+		// store with no enum check and no transition check. Validate the enum,
+		// then enforce the edge, before any field is persisted.
+		if err := validateTaskStateString(params.State); err != nil {
+			return nil, err
+		}
+		if err := task.SetStateChecked(TaskState(params.State)); err != nil {
+			return nil, fmt.Errorf("%w (%s)", err, AllowedTransitionsText())
+		}
 	}
 	if params.ProjectDir != "" {
 		task.ProjectDir = params.ProjectDir
