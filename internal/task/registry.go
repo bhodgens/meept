@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/kanban"
 	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 )
@@ -29,6 +30,13 @@ type Registry struct {
 	interruptMgrBus *bus.MessageBus
 	amendmentMgr    *AmendmentManager
 	amendmentMgrBus *bus.MessageBus
+
+	// kanbanEvents is the opt-in gate (plan 02/03) for the typed
+	// kanban.event.task.state StateEvent publishers on the state-change
+	// paths. Default false = no publish at all = byte-identical behavior.
+	// Set via SetKanbanEventPublishing (guarded by mu, like the queue's
+	// SetTaskCancelledCallback pattern).
+	kanbanEvents bool
 
 	mu     sync.RWMutex
 	closed bool
@@ -72,6 +80,58 @@ const taskEventPrefix = "task.ev."
 // notification on the command topic itself is what created the runaway loop.
 func taskEventTopic(commandTopic string) string {
 	return taskEventPrefix + strings.TrimPrefix(commandTopic, "task.")
+}
+
+// SetKanbanEventPublishing arms the opt-in gate (plan 02/03) for the typed
+// kanban.event.task.state StateEvent publishers on the state-change paths.
+// Default false: the registry behaves byte-identically to pre-kanban builds —
+// no StateEvent is ever constructed or published. The daemon wiring (leaf
+// 07/01) turns it on; unit and wire tests drive both sides through this
+// setter (same mutex-guarded setter pattern as PersistentQueue's).
+func (r *Registry) SetKanbanEventPublishing(enabled bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.kanbanEvents = enabled
+}
+
+// publishTaskState emits a task-machine StateEvent on kanban.event.task.state
+// when (and only when) the opt-in gate is armed. Callers pass the pre-state
+// captured BEFORE task.SetState mutated the in-memory row, and only invoke it
+// after the store UPDATE confirmed the write. Follows the existing
+// publishEvent pattern: publishing under r.mu is what every legacy task
+// notification already does, so no locking is restructured here.
+func (r *Registry) publishTaskState(taskID string, from, to TaskState, reason string) {
+	if !r.kanbanEvents || from == to {
+		return
+	}
+	kanban.PublishTaskState(r.bus, kanban.StateEvent{
+		Kind:   kanban.EventKindTask,
+		ID:     taskID,
+		From:   from.String(),
+		To:     to.String(),
+		Reason: reason,
+	})
+}
+
+// publishTaskStateLocked is the variant for callers OUTSIDE the registry
+// mutex (the bus handler paths, which reach the store through Get/Update and
+// never hold r.mu themselves). It takes the read lock ONLY for the gate bit,
+// then publishes without it — the event itself rides the bus's own locking,
+// exactly like the legacy publishEvent calls on those paths.
+func (r *Registry) publishTaskStateLocked(taskID string, from, to TaskState, reason string) {
+	r.mu.RLock()
+	enabled := r.kanbanEvents
+	r.mu.RUnlock()
+	if !enabled || from == to {
+		return
+	}
+	kanban.PublishTaskState(r.bus, kanban.StateEvent{
+		Kind:   kanban.EventKindTask,
+		ID:     taskID,
+		From:   from.String(),
+		To:     to.String(),
+		Reason: reason,
+	})
 }
 
 // Create creates a new task.
@@ -199,10 +259,17 @@ func (r *Registry) UpdateState(ctx context.Context, taskID string, state TaskSta
 		return fmt.Errorf("task not found: %s", taskID)
 	}
 
+	// Capture the pre-state BEFORE SetState mutates the in-memory row so the
+	// kanban StateEvent carries the true From (and so a same-state write,
+	// which publishes nothing, is visible as such).
+	oldState := task.State
+
 	task.SetState(state)
 	if err := r.store.Update(task); err != nil {
 		return err
 	}
+
+	r.publishTaskState(task.ID, oldState, task.State, kanban.EventReasonUpdateState)
 
 	r.publishEvent(taskEventTopic("task.update"), map[string]any{
 		KeyTaskID: task.ID,
@@ -260,10 +327,13 @@ func (r *Registry) CancelTask(ctx context.Context, taskID, reason string) error 
 		r.logger.Warn("Failed to trigger interrupt", KeyTaskID, taskID, "error", err)
 	}
 
+	oldState := t.State
 	t.SetState(StateCancelled)
 	if err := r.store.Update(t); err != nil {
 		return err
 	}
+
+	r.publishTaskState(taskID, oldState, StateCancelled, kanban.EventReasonCancel)
 
 	// MUST go through taskEventTopic — same self-replication guard as the
 	// handler's publish (see handleCancel).
@@ -960,10 +1030,15 @@ func (h *Handler) handleCancel(ctx context.Context, msg *models.BusMessage) (any
 	}
 
 	// Update task state
+	oldState := task.State
 	task.SetState(StateCancelled)
 	if err := h.registry.Update(ctx, task); err != nil {
 		return nil, err
 	}
+
+	// Cancel notification path runs OUTSIDE the registry mutex (Get/Update
+	// each take it internally), so use the self-locking gate reader.
+	h.registry.publishTaskStateLocked(params.ID, oldState, StateCancelled, kanban.EventReasonCancel)
 
 	// Publish cancellation event. MUST go through taskEventTopic: a raw
 	// "task.cancelled" lacks the task.ev. notification prefix and publishEvent's

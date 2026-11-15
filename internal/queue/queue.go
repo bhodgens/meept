@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/kanban"
 	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 )
@@ -96,6 +97,13 @@ type PersistentQueue struct {
 	// atomic path via store.ClaimNextForAgent without listing pending jobs.
 	hasCancelFilter bool
 
+	// kanbanEvents is the opt-in gate (plan 02/03) for the typed
+	// kanban.event.job.state StateEvent publishers on the successful
+	// transition paths. Default false = no publish at all = byte-identical
+	// behavior. Set via SetKanbanEventPublishing (guarded by mu, like
+	// SetTaskCancelledCallback).
+	kanbanEvents bool
+
 	mu     sync.RWMutex
 	closed bool
 
@@ -166,6 +174,59 @@ func (q *PersistentQueue) SetTaskCancelledCallback(fn IsTaskCancelledFunc) {
 	}
 	q.isTaskCancelled = fn
 	q.hasCancelFilter = true
+}
+
+// SetKanbanEventPublishing arms the opt-in gate (plan 02/03) for the typed
+// kanban.event.job.state StateEvent publishers. Default false: the queue
+// behaves byte-identically to pre-kanban builds — no StateEvent is ever
+// constructed or published. The daemon wiring (leaf 07/01) turns it on; unit
+// and wire tests drive both sides through this setter.
+func (q *PersistentQueue) SetKanbanEventPublishing(enabled bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.kanbanEvents = enabled
+}
+
+// publishJobState emits a job-machine StateEvent on kanban.event.job.state
+// when (and only when) the opt-in gate is armed. Called from the successful
+// transition paths AFTER the store confirmed the write; terminal no-op and
+// idempotent/superseded dispositions never reach it. Follows the existing
+// publishEvent pattern: publishing under q.mu is what every legacy queue
+// event already does (bus.Publish is non-blocking drop-on-full), so no
+// locking is restructured here.
+func (q *PersistentQueue) publishJobState(jobID, from, to, reason string) {
+	if !q.kanbanEvents || from == "" || to == "" || from == to {
+		return
+	}
+	kanban.PublishJobState(q.bus, kanban.StateEvent{
+		Kind:   kanban.EventKindJob,
+		ID:     jobID,
+		From:   from,
+		To:     to,
+		Reason: reason,
+	})
+}
+
+// jobStateForEvent is the gate-on helper that reads a job's CURRENT state so
+// the StateEvent's From carries the true pre-transition state (claimed vs
+// processing on complete, failed vs claimed on retry, and the full set on
+// requeue). Callers invoke it BEFORE the store mutation while q.mu is held —
+// the same lock every other store call in these methods already runs under
+// (Claim pages the table under q.mu), so this follows the existing pattern
+// rather than adding new locking.
+//
+// A failed or missing read returns "": the publisher sites skip the event
+// rather than publish a lying From, and the periodic reconcile (branch 03/02)
+// re-derives the card from the row. This is a best-effort projection feed,
+// never an authoritative path — the gate-off caller pays zero queries.
+func (q *PersistentQueue) jobStateForEvent(jobID string) string {
+	job, err := q.store.GetByID(jobID)
+	if err != nil {
+		q.logger.Debug("kanban event publish skipped: pre-state unreadable",
+			KeyJobID, jobID, "error", err)
+		return ""
+	}
+	return string(job.State)
 }
 
 // Store returns the underlying store for cluster-aware operations.
@@ -340,6 +401,8 @@ func (q *PersistentQueue) Claim(ctx context.Context, workerID string, caps []str
 				KeyJobID:    claimedJob.ID,
 				"worker_id": workerID,
 			})
+			// pending->claimed is guaranteed by the store's SQL predicate.
+			q.publishJobState(claimedJob.ID, string(StatePending), string(StateClaimed), kanban.EventReasonClaim)
 		}
 		return claimedJob, nil
 	}
@@ -451,6 +514,8 @@ func (q *PersistentQueue) Claim(ctx context.Context, workerID string, caps []str
 			KeyJobID:    claimedJob.ID,
 			"worker_id": workerID,
 		})
+		// pending->claimed is guaranteed by ClaimNextByID's SQL predicate.
+		q.publishJobState(claimedJob.ID, string(StatePending), string(StateClaimed), kanban.EventReasonClaim)
 	}
 
 	return claimedJob, nil
@@ -468,7 +533,22 @@ func (q *PersistentQueue) MarkProcessing(ctx context.Context, jobID string, clai
 		return fmt.Errorf("queue is closed")
 	}
 
-	return q.store.MarkProcessing(jobID, claimToken)
+	// The store's predicate accepts claimed AND processing (a same-token
+	// re-mark is idempotent success). Read the pre-state only when the gate
+	// is armed so the event publishes the legal claimed->processing edge and
+	// the processing->processing idempotent re-mark publishes nothing.
+	pre := ""
+	if q.kanbanEvents {
+		pre = q.jobStateForEvent(jobID)
+	}
+
+	if err := q.store.MarkProcessing(jobID, claimToken); err != nil {
+		return err
+	}
+	if pre == string(StateClaimed) {
+		q.publishJobState(jobID, pre, string(StateProcessing), kanban.EventReasonProcessing)
+	}
+	return nil
 }
 
 // Complete marks a job as completed with a result.
@@ -502,6 +582,11 @@ func (q *PersistentQueue) CompleteAttempt(ctx context.Context, jobID string, res
 		return fmt.Errorf("queue is closed")
 	}
 
+	pre := ""
+	if q.kanbanEvents {
+		pre = q.jobStateForEvent(jobID)
+	}
+
 	disposition, err := q.store.CompleteAttempt(jobID, result, claimToken)
 	if err != nil {
 		// Stale/duplicate completion (job requeued or already completed):
@@ -512,6 +597,12 @@ func (q *PersistentQueue) CompleteAttempt(ctx context.Context, jobID string, res
 	}
 	if !disposition.CompletionIsFresh() {
 		return nil
+	}
+	// Applied disposition only: claimed|processing -> completed (the store's
+	// predicate guarantees the write landed from one of those states; an
+	// unreadable pre-state skips the event rather than lying about From).
+	if pre == string(StateClaimed) || pre == string(StateProcessing) {
+		q.publishJobState(jobID, pre, string(StateCompleted), kanban.EventReasonComplete)
 	}
 
 	q.publishEvent("queue.job.completed", map[string]any{
@@ -575,12 +666,37 @@ func (q *PersistentQueue) FailAttempt(ctx context.Context, jobID string, err err
 		return fmt.Errorf("queue is closed")
 	}
 
+	pre := ""
+	if q.kanbanEvents {
+		pre = q.jobStateForEvent(jobID)
+	}
+
 	disposition, storeErr := q.store.FailAttempt(jobID, err.Error(), claimToken)
 	if storeErr != nil {
 		return storeErr
 	}
 	if !disposition.CompletionIsFresh() {
 		return nil
+	}
+	// Applied disposition only: pending|claimed|processing|failed -> failed,
+	// or -> dead when the store consumed the last of the retry budget. The
+	// resolved target is read back from the row the write just landed on: the
+	// store owns the failed-vs-dead decision, and a row that vanished from
+	// jobs in the same call was moved to dead_letter (moveToDead deletes it).
+	// Any other read failure skips the event rather than guessing the target.
+	switch pre {
+	case string(StatePending), string(StateClaimed), string(StateProcessing), string(StateFailed):
+		to := ""
+		if job, lookupErr := q.store.GetByID(jobID); lookupErr == nil {
+			if job.State == StateFailed || job.State == StateDead {
+				to = string(job.State)
+			}
+		} else if errors.Is(lookupErr, sql.ErrNoRows) {
+			to = string(StateDead)
+		}
+		if to != "" {
+			q.publishJobState(jobID, pre, to, kanban.EventReasonFail)
+		}
 	}
 
 	q.publishEvent("queue.job.failed", map[string]any{
@@ -601,8 +717,18 @@ func (q *PersistentQueue) Retry(ctx context.Context, jobID string) error {
 		return fmt.Errorf("queue is closed")
 	}
 
+	pre := ""
+	if q.kanbanEvents {
+		pre = q.jobStateForEvent(jobID)
+	}
+
 	if err := q.store.Retry(jobID); err != nil {
 		return err
+	}
+	// failed|claimed -> pending (Store.Retry's SQL predicate; an exhausted
+	// budget or any other state errors above and publishes nothing).
+	if pre == string(StateFailed) || pre == string(StateClaimed) {
+		q.publishJobState(jobID, pre, string(StatePending), kanban.EventReasonRetry)
 	}
 
 	// The job is back to pending but parked at a future next_retry_at (the
@@ -636,8 +762,19 @@ func (q *PersistentQueue) Requeue(ctx context.Context, jobID string, notBefore t
 		return fmt.Errorf("queue is closed")
 	}
 
+	pre := ""
+	if q.kanbanEvents {
+		pre = q.jobStateForEvent(jobID)
+	}
+
 	if err := q.store.Requeue(jobID, notBefore); err != nil {
 		return err
+	}
+	// failed|claimed|processing -> pending (Store.Requeue's SQL predicate;
+	// anything else errors above and publishes nothing).
+	switch pre {
+	case string(StateFailed), string(StateClaimed), string(StateProcessing):
+		q.publishJobState(jobID, pre, string(StatePending), kanban.EventReasonRequeue)
 	}
 
 	// Claimable again once notBefore arrives (the next_retry_at gate) — wake
