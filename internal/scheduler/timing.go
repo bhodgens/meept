@@ -868,6 +868,12 @@ func (s *Scheduler) sweepOneShotsAtBoot() {
 			continue // already reconciled
 		}
 		due := cfg.Timing.At.UTC()
+		// Future dues belong to the live cron entry (registered by
+		// loadPersistedJobs); the sweep handles only past dues — firing a
+		// future-due one-shot here would run it before its scheduled time.
+		if due.After(now) {
+			continue
+		}
 		if due.After(cutoff) {
 			// Overdue-within-window: fire now, then prune the row.
 			s.mu.RLock()
@@ -893,34 +899,51 @@ func (s *Scheduler) sweepOneShotsAtBoot() {
 	}
 }
 
-// fireOverdueOneShot delivers an overdue-within-window one-shot through the
-// same claim-before-deliver boundary missed ticks use (executeJob with the
-// due instant as the tick), then prunes the persisted row on success so
-// jobs.json does not accumulate fired one-shot entries. A failed delivery
-// leaves the row with OneShotFiredAt set — it never re-fires automatically,
-// but stays visible and re-runnable via RunNow.
-func (s *Scheduler) fireOverdueOneShot(cfg JobConfig, job Job, due, now time.Time) {
+// fireOneShotOnce is the single claim-before-deliver path for TimingAt
+// one-shot firings, shared by the boot sweep (fireOverdueOneShot) and the
+// cron-fire closure (RegisterTimingVia). Both paths must go through it so a
+// cron-fired occurrence is claimed and stamped exactly like a
+// sweep-fired one — otherwise a daemon restart between the normal cron
+// fire and row pruning re-runs the job at boot.
+//
+// Sequence: ClaimTick(due) -> on claim error warn+skip; if !claimed the
+// occurrence was already delivered, so the stale store row is pruned (and
+// the cron entry removed when present); if claimed, OneShotFiredAt is
+// stamped best-effort BEFORE dispatch; then the job executes and the row is
+// pruned on success (LastError=="") or kept (with the stamp) on failure.
+func (s *Scheduler) fireOneShotOnce(cfg JobConfig, job Job, due, now time.Time) {
 	// Claim the due instant atomically: a previous instance that already
 	// fired it (crash after execution, before pruning) must not re-fire.
 	claimed, claimErr := s.ClaimTick(cfg.ID, due)
 	if claimErr != nil {
-		s.logger.Warn("scheduler: failed to claim overdue one-shot tick",
+		s.logger.Warn("scheduler: failed to claim one-shot tick",
 			"job_id", cfg.ID, "due", due.Format(time.RFC3339), "error", claimErr)
 		return
 	}
 	if !claimed {
-		// Already delivered pre-crash: the persisted row is stale residue —
-		// prune it instead of accumulating it forever.
+		// Already delivered: the persisted row is stale residue — prune it
+		// instead of accumulating it forever. With the cron closure routed
+		// through this helper, a false claim can only mean the cron path
+		// delivered this exact due instant, so pruning is correct.
 		if err := s.store.Remove(cfg.ID); err != nil {
 			s.logger.Warn("scheduler: failed to prune already-fired one-shot row",
 				"job_id", cfg.ID, "error", err)
 		}
+		// Drop any lingering cron entry: the one-shot has fired.
+		s.mu.Lock()
+		if entryID, ok := s.entryIDs[cfg.ID]; ok {
+			s.cron.Remove(entryID)
+			delete(s.entryIDs, cfg.ID)
+		}
+		s.mu.Unlock()
 		return
 	}
 
 	// Stamp OneShotFiredAt BEFORE dispatch: a crash mid-execution leaves a
 	// row the next sweep neither re-fires nor re-marks (delivery recovery
-	// for session-pinned jobs proceeds via the receipt rows).
+	// for session-pinned jobs proceeds via the receipt rows). Best-effort:
+	// a failed stamp leaves the row re-sweepable, but the due tick is
+	// already claimed, so the sweep's own fire attempt is skipped.
 	firedCfg := cfg
 	firedAt := now
 	firedCfg.OneShotFiredAt = &firedAt
@@ -943,7 +966,7 @@ func (s *Scheduler) fireOverdueOneShot(cfg JobConfig, job Job, due, now time.Tim
 		defer cancel()
 		defer func() {
 			if rec := recover(); rec != nil {
-				s.logger.Error("scheduler: panic in overdue one-shot recovered",
+				s.logger.Error("scheduler: panic in one-shot recovered",
 					"job_id", cfg.ID,
 					"due", due.Format(time.RFC3339),
 					"panic", rec,
@@ -962,6 +985,12 @@ func (s *Scheduler) fireOverdueOneShot(cfg JobConfig, job Job, due, now time.Tim
 			}
 		}
 	}()
+}
+
+// fireOverdueOneShot delivers an overdue-within-window one-shot discovered
+// by sweepOneShotsAtBoot through the shared claim-before-deliver path.
+func (s *Scheduler) fireOverdueOneShot(cfg JobConfig, job Job, due, now time.Time) {
+	s.fireOneShotOnce(cfg, job, due, now)
 }
 
 // markOneShotFailed flips a past-window one-shot into the failed-never-ran
@@ -990,11 +1019,78 @@ func (s *Scheduler) markOneShotFailed(cfg JobConfig, due, now time.Time, window 
 	return nil
 }
 
+// RegisterTimingVia registers a Timing-carrying JobConfig on the scheduler's
+// engine (DST-safe: the engine's location applies). Used from ScheduleConfig
+// and loadPersistedJobs so a persisted Timing re-registers on restart.
+func (s *Scheduler) RegisterTimingVia(cfg JobConfig, job Job) (cron.EntryID, error) {
+	if cfg.Timing == nil {
+		return 0, fmt.Errorf("%w: job config has no timing spec", ErrInvalidRule)
+	}
+	return s.registerTiming(cfg, job, s.effectiveOneShotWindow())
+}
+
+// registerTiming is the scheduler-backed variant of RegisterTiming: the
+// one-shot cron closure delivers through the shared fireOneShotOnce path so
+// a normal cron fire claims the due tick, stamps OneShotFiredAt, and prunes
+// the store row exactly like the boot sweep does.
+func (s *Scheduler) registerTiming(cfg JobConfig, job Job, oneShotWindow time.Duration) (cron.EntryID, error) {
+	if cfg.Timing == nil {
+		return 0, fmt.Errorf("%w: job config has no timing spec", ErrInvalidRule)
+	}
+	if err := cfg.Timing.Validate(); err != nil {
+		return 0, err
+	}
+
+	if cfg.Timing.Kind == TimingAt {
+		// Scheduling horizon (owner-decided): a one-shot is a near-term
+		// trigger, not a calendar event. Due times further ahead than the
+		// configured window are rejected at schedule time (overdue times
+		// are allowed here — boot recovery fires or fails them).
+		if err := validateOneShotHorizon(cfg.Timing, *cfg.Timing.At, oneShotWindow); err != nil {
+			return 0, err
+		}
+		at := *cfg.Timing.At
+		var entryID cron.EntryID
+		entryID = s.cron.Schedule(robfigAtSchedule{at: at}, cron.FuncJob(func() {
+			// Fire exactly once, then unregister. The delivery goes through
+			// the shared claim-before-deliver helper (same path as the boot
+			// sweep): claim the due tick, stamp OneShotFiredAt, execute,
+			// prune the store row — a daemon restart after this fire must
+			// not re-run the job from the stale row. fireOneShotOnce keeps
+			// the goroutine posture (shutdown-aware ctx, timeout, panic
+			// recovery) so both firing paths stay identical.
+			s.fireOneShotOnce(cfg, job, at.UTC(), time.Now().UTC())
+			s.mu.Lock()
+			if cur, ok := s.entryIDs[cfg.ID]; ok && cur == entryID {
+				s.cron.Remove(entryID)
+				delete(s.entryIDs, cfg.ID)
+			}
+			s.mu.Unlock()
+		}))
+		return entryID, nil
+	}
+
+	expr, err := cfg.Timing.CronExpr()
+	if err != nil {
+		return 0, err
+	}
+	return s.cron.AddFunc(expr, func() {
+		if err := job.Execute(context.Background()); err != nil {
+			slog.Warn("scheduler: recurring timing job failed", "error", err)
+		}
+	})
+}
+
 // RegisterTiming registers cfg's Timing spec on the given cron engine in the
 // engine's location so cron.WithLocation DST handling applies. `at` specs
 // register as a one-shot entry that removes itself after firing exactly once.
 // oneShotWindow is the configured scheduling horizon for the at-kind
 // rejection; callers without a scheduler pass DefaultOneShotCatchUpWindow.
+//
+// This standalone form has no claim store or jobs.json writer available, so
+// its one-shot closure executes directly; the scheduler-backed registerTiming
+// (RegisterTimingVia) is the production path and delivers through
+// fireOneShotOnce.
 func RegisterTiming(c *cron.Cron, cfg JobConfig, job Job, oneShotWindow time.Duration) (cron.EntryID, error) {
 	if cfg.Timing == nil {
 		return 0, fmt.Errorf("%w: job config has no timing spec", ErrInvalidRule)
@@ -1044,14 +1140,4 @@ func (r robfigAtSchedule) Next(t time.Time) time.Time {
 		return r.at
 	}
 	return time.Time{}
-}
-
-// RegisterTimingVia registers a Timing-carrying JobConfig on the scheduler's
-// engine (DST-safe: the engine's location applies). Used from ScheduleConfig
-// and loadPersistedJobs so a persisted Timing re-registers on restart.
-func (s *Scheduler) RegisterTimingVia(cfg JobConfig, job Job) (cron.EntryID, error) {
-	if cfg.Timing == nil {
-		return 0, fmt.Errorf("%w: job config has no timing spec", ErrInvalidRule)
-	}
-	return RegisterTiming(s.cron, cfg, job, s.effectiveOneShotWindow())
 }

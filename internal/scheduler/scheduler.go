@@ -449,15 +449,54 @@ func (s *Scheduler) RunNow(jobID string) error {
 		s.mu.Unlock()
 		return fmt.Errorf("job already running: %s", jobID)
 	}
-	// A failed (never-ran) one-shot is re-runnable here: clear the failed
-	// posture before dispatch so the row no longer reads as "never ran".
-	// LastRunAt/LastError are refreshed by executeJob's UpdateLastRun.
-	if cfg, ok := s.store.Get(jobID); ok && cfg.OneShotFailed {
+	jobCfg := job.Config()
+	isTimingAtOneShot := jobCfg.Timing != nil && jobCfg.Timing.Kind == TimingAt
+	s.mu.Unlock()
+
+	// Store I/O happens OUTSIDE s.mu (mutexio rule: never hold the lock
+	// across file I/O — mirrors the markOneShotFailed pattern).
+	cfg, ok := s.store.Get(jobID)
+	if ok && cfg.OneShotFailed {
+		// A failed (never-ran) one-shot is re-runnable here: clear the failed
+		// posture before dispatch so the row no longer reads as "never ran".
+		// LastRunAt/LastError are refreshed by executeJob's UpdateLastRun.
 		cfg.OneShotFailed = false
 		if err := s.store.Update(cfg); err != nil {
 			s.logger.Warn("scheduler: failed to clear one-shot failed state",
 				"job_id", jobID, "error", err)
 		}
+	}
+	if isTimingAtOneShot && ok {
+		// S5: a manual RunNow on a TimingAt one-shot delivers the occurrence
+		// the row describes, so stamp OneShotFiredAt=now BEFORE dispatch —
+		// otherwise the boot sweep would see a fresh unclaimed overdue row
+		// after a restart and re-fire it. The stamp uses the same
+		// best-effort posture as fireOneShotOnce. Repeated manual RunNow
+		// stays possible: RunNow does not consult the stamp.
+		cfg.OneShotFailed = false
+		now := time.Now().UTC()
+		cfg.OneShotFiredAt = &now
+		if err := s.store.Update(cfg); err != nil {
+			s.logger.Warn("scheduler: failed to stamp one-shot fired-at for run-now",
+				"job_id", jobID, "error", err)
+		}
+	}
+
+	// Re-acquire the lock only for the in-memory dispatch bookkeeping.
+	s.mu.Lock()
+	// Re-check running under the lock: Stop() may have run while we were
+	// doing unlocked store I/O above. Without this, runNowWg.Add could
+	// happen after Stop's runNowWg.Wait() returns, leaking a goroutine past
+	// shutdown. The re-fetch of the job also defends against an Unschedule
+	// in the same window.
+	job, ok = s.jobs[jobID]
+	if !ok || !s.running.Load() {
+		s.mu.Unlock()
+		return fmt.Errorf("scheduler not running or job gone: %s", jobID)
+	}
+	if s.runningJobs[jobID] {
+		s.mu.Unlock()
+		return fmt.Errorf("job already running: %s", jobID)
 	}
 	s.runningJobs[jobID] = true
 	// Add to the WaitGroup under the lock so that a concurrent Stop()
