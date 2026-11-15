@@ -39,7 +39,20 @@ type SubmittedTurnRecord struct {
 type TurnRegistry struct {
 	now func() time.Time
 
-	mu    sync.Mutex
+	mu sync.Mutex
+	// turns is the live-turn table, keyed by turn id. INVARIANT
+	// (turn-registry defect 2026-11-15): this map is deliberately
+	// UNBOUNDED — entries are released exactly by these paths:
+	//   - Complete (the handler funnel, the duplicate-suppression
+	//     suppression path never owns a row to complete, the task-end
+	//     relay after the task→turn edge is consumed, and the reaper);
+	//   - the turn watchdog reaper (Stale + Complete), wired only when
+	//     orchestrator.turn_watchdog.enabled is true (the default).
+	// With the watchdog enabled every abandoned turn is reaped, so the
+	// map stays bounded by in-flight turns. The map grows without bound
+	// ONLY when the watchdog is disabled AND turns park indefinitely
+	// (parked turns keep their rows so the resume path can find them);
+	// that is an operator opt-out, not a leak in the happy path.
 	turns map[string]*SubmittedTurnRecord
 	// tombstones records turn ids whose work already reached a terminal
 	// state (week bughunt 2026-09-17 F16): a same-turn-id retry arriving

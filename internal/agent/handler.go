@@ -849,8 +849,34 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 	// re-broadcasts the terminal event under the SUBMITTED turn id and
 	// needs the SAME trace correlation, and the turn watchdog's reap
 	// event names the trace too.
+	//
+	// Early-return safety net (turn-registry defect 2026-11-15): after a
+	// successful claim, every path is expected to reach the single funnel
+	// at the bottom of this function (publishTurnTerminal +, when no task
+	// is pending, completeTurn). That invariant is convention, not code:
+	// ClaimDispatch sets dispatchClaimed=true with no rollback, so any
+	// future early-return added between here and the funnel would leave
+	// the row claimed forever and wedge every retry of the turn under
+	// duplicate_suppressed until the watchdog reaps it. The defer below
+	// completes the turn if the normal path did not. TurnRegistry.Complete
+	// is idempotent (map delete + tombstone upsert), so a late net firing
+	// after the normal completeTurn is a no-op. turnCompleted stands the
+	// net down at the normal funnel — REQUIRED for the task path, where
+	// completeTurn is deliberately skipped (syncTaskID != "") so the
+	// task→turn registry edge survives for the task_completed_relay.
+	turnCompleted := false
 	if req.TurnID != "" && h.turnRegistry != nil {
-		if !h.turnRegistry.ClaimDispatch(req.TurnID, conversationID) {
+		claimed := h.turnRegistry.ClaimDispatch(req.TurnID, conversationID)
+		if claimed {
+			// Registered inside the if-block, but defers are
+			// function-scoped in Go: this fires on ANY exit of
+			// handleRequest after the claim, including early returns.
+			defer func() {
+				if !turnCompleted {
+					h.completeTurn(req.TurnID)
+				}
+			}()
+		} else {
 			h.logger.Warn("duplicate chat.request suppressed; turn already tracked or completed",
 				"turn_id", req.TurnID,
 				"conversation_id", conversationID,
@@ -1428,6 +1454,14 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 	// edge) must survive until the relay fires. The relay emits under the
 	// recovered id and the reaper bounds any orphan. No-op for untracked
 	// (legacy) turns.
+	// turnCompleted (turn-registry defect 2026-11-15): set BEFORE the
+	// skip/complete decision so the early-return safety net armed at the
+	// ClaimDispatch seam stands down here — in BOTH branches. On the
+	// task-pending branch the row must survive for the relay; completing
+	// it via the net would tombstone the id and break
+	// TurnIDForTask's re-broadcast. On the normal branch completeTurn is
+	// idempotent, but the flag keeps the net's contract explicit.
+	turnCompleted = true
 	if req.TurnID != "" && syncTaskID == "" {
 		h.completeTurn(req.TurnID)
 	}
