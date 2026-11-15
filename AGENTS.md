@@ -146,6 +146,28 @@ make hooks                # core.hooksPath -> .githooks (20 pre-commit checks +
 # that break go build -buildvcs and git status; logs repairs to
 # .core-bare-repair.log in the repo root (gitignored by the *.log rule). It runs
 # before the numbered chain because the flip breaks gate 1 (pre-commit-build).
+# Dispatch (gates-speedup, .githooks/README.md "pre-commit (Main Hook)"):
+# checks 1-15 and 17-20 run CONCURRENTLY via pre-commit-dispatch-lib (cap
+# MEEPT_HOOKS_PARALLEL=6; verdicts replay in [n/20] order after the join;
+# aggregate exit non-zero iff a blocking gate failed); check 16
+# (feature-docs, the only gate that can prompt) runs serially AFTER the
+# join; MEEPT_PARALLEL_HOOKS=0 restores serial fail-fast. The Go-toolchain
+# gates (1, 2, 4, 5, 6, 8, 20) run against the PREPARED-COMMIT TREE: the
+# staged index is materialized once (index copy + git checkout-index -a +
+# symlinked .git) and those hooks execute with GIT_WORK_TREE/GIT_INDEX_FILE
+# pinned inside it, so an untracked sibling package can no longer make a
+# build gate pass while HEAD stays broken, and sibling edits mid-hook can
+# no longer false-block a self-consistent commit. Snapshot-build failure
+# prints a loud WARN and falls back to working-tree mode — the mechanism
+# never blocks a commit. Check [19] keeps ONLY the cheap new-package census;
+# the affected-suite sweep runs at pre-push-e2e (FULL MEEPT_E2E_SCOPE,
+# forced) + CI e2e-fast, optable back in per-commit with
+# MEEPT_E2E_PRECOMMIT_SWEEP=1 (pair with MEEPT_E2E_SCOPE=direct for the
+# cheap package-dir-only selection). Check [20] result-caches its 5-main
+# x2-mode deadcode analysis under <git-dir>/meept-cache keyed by content
+# digests — HIT requires an identical tree, a FAIL is never stored.
+# Offline regressions: scripts/gates-speedup-selftest.sh +
+# scripts/e2e-census-selftest.sh.
 # Package-classification rule for those hooks: a staged package's state comes
 # from `go list -e` STDOUT only. {{.Error}} prints there, while stderr carries
 # progress noise ("go: downloading ..." on a cold GOMODCACHE) that must never be
@@ -453,12 +475,15 @@ for new features.** Existing unit tests may be updated for bug fixes only.
   not reintroduce an ownerless
   `os.MkdirTemp("", "meept-e2e-bin...")` — an earlier version of the
   harness leaked one ~136 MiB dir per test process (219 GiB observed).
-- Enforcement: pre-commit check [18/18] (`pre-commit-e2e`) runs the affected
-  suites on staged `internal/|pkg/|cmd/` Go changes and blocks commits that
-  add files under a NEW package directory without an e2e suite + manifest
-  entry. Emergency-only bypass: `MEEPT_SKIP_E2E=1 git commit` (prints a loud
-  warning). When you add a package, add its `path_map` entry + suite to the
-  manifest in the same commit.
+- Enforcement: pre-commit check [19/20] (`pre-commit-e2e`) runs the new-
+  package census — blocks commits that add files under a NEW package
+  directory without an e2e suite + manifest entry — while the affected-
+  suite sweep moved to the push boundary (`pre-push-e2e`, FULL scope) and
+  CI (`e2e-fast`) after the gates-speedup change; opt it back in per-commit
+  with `MEEPT_E2E_PRECOMMIT_SWEEP=1`. Emergency-only bypass:
+  `MEEPT_SKIP_E2E=1 git commit` (prints a loud warning). When you add a
+  package, add its `path_map` entry + suite to the manifest in the same
+  commit.
 
 ### Predictable ID Prevention
 

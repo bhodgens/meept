@@ -120,6 +120,15 @@ jobs:
       - name: E2E sweep offline regression tests
         run: make e2e-sweep-selftest
 
+      # Pins the gates-speedup contracts offline: census blocks an unmapped
+      # new pkg + sweep skipped by default at commit time, MEEPT_E2E_SCOPE
+      # =direct selection semantics, parallel/skip-retry flake handling,
+      # deadcode cache HIT/MISS/fail-closed rules, the parallel dispatcher
+      # (ordered verdicts + aggregate exit), and the staged-snapshot
+      # primitive. Pure bash+git+python3, no Go toolchain needed.
+      - name: Gate-speedup self-test
+        run: bash scripts/gates-speedup-selftest.sh
+
   analyzers:
     runs-on: ubuntu-latest
     name: Static Analyzers

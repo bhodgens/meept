@@ -18,6 +18,26 @@
 #   --from-diff  take changed paths from `git diff --name-only HEAD`
 #   path ...     changed paths as positional args (else stdin; none = no-op)
 #
+# Env:
+#   MEEPT_E2E_SCOPE=full|direct   suite-selection breadth (default: full).
+#     full   — the historical gate: every path_map key that PREFIXES a changed
+#              path contributes its suites (so internal/agent/sub/x.go selects
+#              the internal/agent/ suites too), with the smoke fallback when
+#              Go changed but nothing matched. This is the thorough sweep the
+#              pre-push gate runs.
+#     direct — no fan-out: a changed path selects suites ONLY from the path_map
+#              key equal to the file's own package dir (internal/kanban/x.go ->
+#              kanban-board; nothing else). Nothing matched selects NOTHING —
+#              the smoke fallback is disabled in this mode (it is exactly the
+#              fan-out direct mode exists to avoid), and that is printed
+#              loudly. Local dev escape valve for running the sweep cheaply
+#              where the full fan-out would sweep half the manifest.
+#   MEEPT_E2E_GO_TEST_CMD   test seam: replaces the `go test` command prefix
+#              (default "go test"). Lets offline selftests
+#              (scripts/gates-speedup-selftest.sh) drive the runner and the
+#              flake-retry logic without the Go toolchain.
+#   MEEPT_E2E_RETRY_PARALLEL  max concurrent suite retries (default 2).
+#
 # bash-3.2 compatible (macOS /bin/bash); python3 does the JSON parsing
 # (repo convention in scripts/).
 
@@ -36,6 +56,14 @@ MANIFEST="e2e/manifest.json"
 SMOKE_DIR="e2e/suites/smoke"
 LIST_ONLY=0
 FROM_DIFF=0
+
+# Suite-selection scope (see header). Anything other than "direct" is "full".
+E2E_SCOPE="${MEEPT_E2E_SCOPE:-full}"
+if [ "$E2E_SCOPE" != "direct" ]; then
+    E2E_SCOPE="full"
+fi
+GO_CMD="${MEEPT_E2E_GO_TEST_CMD:-go test}"
+RETRY_PARALLEL="${MEEPT_E2E_RETRY_PARALLEL:-2}"
 
 usage() {
     echo "usage: scripts/e2e-affected.sh [--list] [--from-diff] [path ...]" >&2
@@ -57,7 +85,8 @@ while [ $# -gt 0 ]; do
 done
 
 TMP="$(mktemp "${TMPDIR:-/tmp}/e2e-affected.XXXXXX")"
-trap 'rm -f "$TMP"' EXIT
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/e2e-affected-run.XXXXXX")"
+trap 'rm -f "$TMP"; rm -rf "$WORK"' EXIT
 
 if [ "$FROM_DIFF" = "1" ]; then
     git diff --name-only HEAD > "$TMP" || exit 1
@@ -72,11 +101,12 @@ if [ ! -s "$TMP" ]; then
     exit 0
 fi
 
-mode="dirs"
-[ "$LIST_ONLY" = "1" ] && mode="names"
+mode="$E2E_SCOPE"
+[ "$LIST_ONLY" = "1" ] && [ "$E2E_SCOPE" = "direct" ] && mode="direct-list"
+[ "$LIST_ONLY" = "1" ] && [ "$E2E_SCOPE" = "full" ] && mode="names"
 
 map_out="$(python3 - "$MANIFEST" "$mode" "$TMP" <<'PYEOF'
-import json, sys
+import json, os, sys
 
 manifest = json.load(open(sys.argv[1]))
 mode = sys.argv[2] if len(sys.argv) > 2 else "dirs"
@@ -87,14 +117,27 @@ paths = [ln.strip() for ln in open(sys.argv[3]) if ln.strip()]
 matched = set()
 go_changed = 0
 dart_changed = 0
+
+# Scope semantics (MEEPT_E2E_SCOPE): full matches any path_map KEY that
+# prefixes the changed path (a nested dir inherits its ancestor package's
+# suites — the fan-out); direct matches ONLY the key equal to the changed
+# file's own package dir, so one staged package selects exactly its own
+# suite(s) and nothing else.
 for p in paths:
     if p.endswith(".go"):
         go_changed = 1
     if p.endswith(".dart"):
         dart_changed = 1
-    for prefix, names in path_map.items():
-        if p == prefix or p.startswith(prefix):
-            matched.update(n for n in names if n in suites_by_name)
+    if mode in ("direct", "direct-list"):
+        pkg = os.path.dirname(p)
+        for key_fmt in ("{}/", "{}"):
+            names = path_map.get(key_fmt.format(pkg))
+            if names:
+                matched.update(n for n in names if n in suites_by_name)
+    else:
+        for prefix, names in path_map.items():
+            if p == prefix or p.startswith(prefix):
+                matched.update(n for n in names if n in suites_by_name)
 
 # Split by runner so a Dart-tier suite (e.g. gui-flows, whose dir is
 # ui/flutter_ui/test/e2e and is driven by `flutter test`, not `go test`)
@@ -108,7 +151,7 @@ for name in sorted(matched):
         go_names.append(name)
         go_dirs.append(suite["dir"])
 
-if mode == "names":
+if mode in ("names", "direct-list"):
     # --list contract: affected SUITE NAMES (both tiers).
     for name in go_names:
         print(name)
@@ -158,7 +201,13 @@ if [ -n "$pending" ]; then
 fi
 
 if [ -z "$run_dirs" ] && [ -z "$dart_suites" ]; then
-    if [ "$go_changed" = "1" ]; then
+    if [ "$go_changed" = "1" ] && [ "$E2E_SCOPE" = "direct" ]; then
+        # Direct scope selected nothing: no fan-out, and the smoke fallback
+        # IS fan-out, so it stays off by design. Say so instead of silently
+        # running (or silently skipping) suites the user did not select.
+        echo "e2e-affected: MEEPT_E2E_SCOPE=direct — no suite mapped to the changed package dirs; NOTHING selected (smoke fallback disabled by scope)."
+        exit 0
+    elif [ "$go_changed" = "1" ]; then
         if [ "$matched" = "1" ]; then
             echo "e2e-affected: all affected suites are pending — falling back to the smoke suite."
         else
@@ -178,26 +227,77 @@ if [ -z "$run_dirs" ] && [ -z "$dart_suites" ]; then
     fi
 fi
 
-# bash-3.2: no arrays — iterate $run_dirs directly (the per-suite retry loop
-# below needs one invocation per dir anyway).
-
 if [ -n "$run_dirs" ]; then
     echo "e2e-affected: running hermetic Go e2e suites:"
     for d in $run_dirs; do
         echo "  - $d"
     done
-    # One labeled retry per failed suite (e2e-boot-hardening, Contract 2):
-    # load-dependent boot flakes pass on isolated re-run, so the SECOND rc
-    # decides; a suite red twice stays red and the gate still blocks.
+    # PASS 1 (serial, as before): run each suite, keeping per-suite output in
+    # $WORK so the retry logic can classify the failure. Serial first pass
+    # bounds the socket/CPU load the same way the old loop did.
+    #
+    # PASS 2 (RETRY, gates-speedup item 3): a load-dependent boot flake passes
+    # on an isolated re-run (e2e-boot-hardening Contract 2), so the SECOND rc
+    # decides — but a full serial re-run cost 2x the suite timeout per flake.
+    # Retries now run IN PARALLEL (cap $RETRY_PARALLEL), and a suite whose log
+    # shows a BUILD/setup failure (rc=2 class — "build failed", "setup failed")
+    # is NOT retried at all: a compile error cannot flake, and re-running it
+    # only doubles the wall time of the failure.
     go_rc=0
+    retry_dirs=""
     for d in $run_dirs; do
-        go test -tags e2e -count=1 -p 2 "./$d/..."
-        rc=$?
+        tag="$(printf '%s' "$d" | tr '/.' '__')"
+        log="$WORK/first.$tag"
+        # shellcheck disable=SC2086  # GO_CMD is intentionally word-split.
+        $GO_CMD -tags e2e -count=1 -p 2 "./$d/..." 2>&1 | tee "$log"
+        rc="${PIPESTATUS[0]}"
         if [ "$rc" != "0" ]; then
-            echo "RETRY(flake-check): $d failed (rc=$rc), re-running once" >&2
-            go test -tags e2e -count=1 -p 2 "./$d/..." || go_rc=$?
+            if grep -qEi 'build failed|setup failed|cannot find package' "$log"; then
+                # Build failure — retrying re-compiles the same error.
+                go_rc="$rc"
+                echo "SKIPRETRY(build): $d failed to BUILD (rc=$rc) — flake retry skipped (a compile error does not flake)" >&2
+            else
+                retry_dirs="$retry_dirs $d"
+            fi
         fi
     done
+
+    if [ -n "$retry_dirs" ]; then
+        echo "RETRY(flake-check): parallel re-run of${retry_dirs} (max ${RETRY_PARALLEL} concurrent)" >&2
+        for d in $retry_dirs; do
+            tag="$(printf '%s' "$d" | tr '/.' '__')"
+            # bash 3.2: no `wait -n` — cap concurrency by polling `jobs -rp`.
+            while [ "$(jobs -rp | wc -l | tr -d ' ')" -ge "$RETRY_PARALLEL" ]; do
+                sleep 0.2
+            done
+            (
+                # shellcheck disable=SC2086  # GO_CMD is intentionally word-split.
+                $GO_CMD -tags e2e -count=1 -p 2 "./$d/..." > "$WORK/retry.$tag" 2>&1
+                rc2=$?
+                # One file per suite (not a shared append) — concurrent
+                # >> from two subshells can interleave partial lines.
+                printf '%s\n' "$rc2" > "$WORK/retry.$tag.rc"
+            ) &
+        done
+        wait
+        for d in $retry_dirs; do
+            tag="$(printf '%s' "$d" | tr '/.' '__')"
+            if [ ! -f "$WORK/retry.$tag.rc" ]; then
+                # The retry job died before recording its rc — fail closed.
+                echo "RETRY(flake-check): $d re-run produced no result (killed?) — gate blocks" >&2
+                go_rc=1
+                continue
+            fi
+            rc2="$(cat "$WORK/retry.$tag.rc")"
+            if [ "$rc2" = "0" ]; then
+                echo "RETRY(flake-check): $d passed on re-run (boot flake — isolation fixed it)" >&2
+            else
+                echo "RETRY(flake-check): $d failed TWICE (rc=$rc2) — a real regression, gate blocks" >&2
+                cat "$WORK/retry.$tag" >&2
+                go_rc="$rc2"
+            fi
+        done
+    fi
 else
     go_rc=0
 fi

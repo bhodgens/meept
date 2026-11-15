@@ -4,12 +4,7 @@
 #
 # Two failure modes (fail-closed):
 #
-#   1. Affected-suite gate: staged Go paths under internal/, pkg/, or cmd/
-#      are mapped through e2e/manifest.json path_map and the affected
-#      hermetic e2e suites are run (scripts/e2e-affected.sh). Any failing
-#      suite FAILS the commit.
-#
-#   2. New-package census (hard gate, fail-closed): every NEW package
+#   1. New-package census (hard gate, fail-closed): every NEW package
 #      directory in the staged diff — a directory with no path_map entry
 #      under the manifest's bidirectional-prefix normalization — FAILS the
 #      commit unless either (a) the commit also stages a path_map key that
@@ -27,6 +22,20 @@
 #      parse, zero path_map entries, or a census that parsed zero staged
 #      dirs on a commit that adds non-test internal/|pkg/|cmd/ Go files.
 #      A checker that matches nothing is a false green, not a pass.
+#
+#   2. Affected-suite sweep — MOVED OUT of pre-commit (gates-speedup item
+#      1). Running the transitively-mapped suites here cost 15-25 minutes on
+#      a green commit touching internal/queue|agent|task. The sweep still
+#      runs at TWO enforcement sites:
+#        - .githooks/pre-push-e2e (FULL fan-out scope, push boundary)
+#        - CI: ci.yml job e2e-fast (`make e2e-fast`, required member of
+#          the ci-success aggregate gate)
+#      Only the CHEAP census half (mode 1 above) stays in pre-commit: it
+#      blocks forgetting the manifest without paying for suite runtime.
+#      Developers who want the sweep pre-push:
+#        scripts/e2e-affected.sh --from-diff              (full fan-out)
+#        MEEPT_E2E_SCOPE=direct scripts/e2e-affected.sh   (package-dir-only,
+#                                                          cheap; see README)
 #
 # This is the repo's NO-NEW-UNIT-TESTS policy enforcement point: all new
 # feature tests go in the e2e tier (see docs/workflows/e2e-testing.md).
@@ -46,6 +55,11 @@
 #   MEEPT_E2E_MANIFEST_FILE=/path/to/file   fixture-only manifest override;
 #     requires MEEPT_E2E_CENSUS_STAGED_FILE (real commits always evaluate
 #     the STAGED manifest copy so same-commit keys count).
+#   MEEPT_E2E_PRECOMMIT_SWEEP=1   opt back IN to the affected-suite sweep
+#     at commit time (the pre-gates-speedup behavior) — for a developer who
+#     wants it locally. Combine with MEEPT_E2E_SCOPE=direct for the cheap
+#     package-dir-only version. The default is OFF; pre-push-e2e + CI remain
+#     the enforcement sites.
 #
 # Exempt paths (never trigger either mode): _test.go files, docs/,
 # e2e/ harness+manifest itself, generated dirs, ui/, tools/, magefiles/.
@@ -93,7 +107,7 @@ TMP="$(mktemp "${TMPDIR:-/tmp}/pre-commit-e2e.XXXXXX")"
 trap 'rm -f "$TMP"' EXIT
 printf '%s\n' "$STAGED" > "$TMP"
 
-# --- Mode 2 first: new-package census (hard gate) -------------------------
+# --- Mode 1: new-package census (hard gate) --------------------------------
 #
 # Population: staged ADDED (git diff --cached --diff-filter=A) non-test .go
 # files under internal/ | pkg/ | cmd/, minus is_exempt-style paths
@@ -286,9 +300,22 @@ if [ -n "${MEEPT_E2E_CENSUS_STAGED_FILE:-}" ]; then
     exit 0
 fi
 
-# --- Mode 1: affected-suite gate ------------------------------------------
+# --- Mode 2: affected-suite sweep — OPT-IN only (gates-speedup item 1) ----
+#
+# The sweep left pre-commit: on a green commit touching internal/queue|
+# agent|task it cost 15-25 minutes (serial transitively-mapped suites plus a
+# serial flake retry). Enforcement moved to pre-push-e2e (FULL scope) and CI
+# (ci.yml e2e-fast, a ci-success member). A developer who still wants the
+# commit-boundary sweep sets MEEPT_E2E_PRECOMMIT_SWEEP=1; MEEPT_E2E_SCOPE=
+# direct makes it package-dir-only and much cheaper.
 
-# Mode 1 only applies to Go files under internal/, pkg/, cmd/.
+if [ "${MEEPT_E2E_PRECOMMIT_SWEEP:-0}" != "1" ]; then
+    echo "pre-commit-e2e: census OK. Suite sweep not run at commit time (moved to pre-push-e2e + CI; opt in with MEEPT_E2E_PRECOMMIT_SWEEP=1)."
+    echo "pre-commit-e2e: OK"
+    exit 0
+fi
+
+# Mode 2 only applies to Go files under internal/, pkg/, cmd/.
 feature_go=0
 while IFS= read -r f; do
     [ -n "$f" ] || continue
@@ -302,7 +329,7 @@ while IFS= read -r f; do
 done < "$TMP"
 
 if [ "$feature_go" = "1" ]; then
-    echo "pre-commit-e2e: running affected hermetic e2e suites on staged paths..."
+    echo "pre-commit-e2e: MEEPT_E2E_PRECOMMIT_SWEEP=1 — running affected hermetic e2e suites on staged paths (scope: ${MEEPT_E2E_SCOPE:-full})..."
     # Hand the staged paths straight to the affected script (it reads stdin
     # when no args are given). Any failing suite fails the commit.
     if ! "$REPO_ROOT/$AFFECTED_SCRIPT" < "$TMP"; then
@@ -314,7 +341,7 @@ if [ "$feature_go" = "1" ]; then
         exit 1
     fi
 else
-    echo "pre-commit-e2e: no feature Go files staged — suite gate not applicable."
+    echo "pre-commit-e2e: no feature Go files staged — suite sweep not applicable."
 fi
 
 echo "pre-commit-e2e: OK"

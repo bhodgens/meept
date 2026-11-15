@@ -3,13 +3,14 @@
 # included), then pre-push-e2e (affected hermetic e2e suites over the
 # pushed diff), then pre-push-bench (bench regression gate).
 #
-# WHY these gates: pre-commit-e2e (check 19/20) can be bypassed at commit
-# time (--no-verify, MEEPT_SKIP_E2E=1, or a hook run killed mid-sweep).
-# The push boundary is the last local checkpoint before a commit reaches
-# the remote. pre-push-vet runs FIRST: it is the whole-tree compile gate
-# (production AND test files, seconds-long) and must fail before the
-# minutes-long e2e and bench gates start. The e2e gate follows because it
-# needs no running daemon. Other pre-push checks can be chained here.
+# WHY these gates: the affected-suite e2e SWEEP moved from pre-commit to
+# here (gates-speedup: it cost 15-25 min per commit). pre-push-e2e is now
+# the primary local sweep site (FULL scope forced), with CI's e2e-fast job
+# as the remote line. pre-push-vet runs FIRST: it is the whole-tree
+# compile gate (production AND test files, seconds-long) and must fail
+# before the minutes-long e2e and bench gates start. The e2e gate follows
+# because it needs no running daemon. Other pre-push checks can be chained
+# here.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 

@@ -1,13 +1,15 @@
 # e2e Testing
 
 This repo has two e2e tiers plus a policy that decides where new feature
-tests go. Enforcement lives in the pre-commit hook (check [18/18]).
+tests go. Enforcement: the new-package census lives in the pre-commit hook
+(check [19/20]); the affected-suite sweep runs at the push boundary
+(`pre-push-e2e`) and in CI — see "Where the sweep runs" below.
 
 ## Tiers
 
 | Tier | Command | What it is |
 |------|---------|------------|
-| **Fast (hermetic)** | `make e2e-fast` | Go tests under `e2e/suites/` with the `e2e` build tag. Fresh binaries, sandboxed `HOME`/`MEEPT_HOME`, fake LLM. Never touches `~/.meept` or a live daemon. Seconds per suite; the full tier is ~13 min wall (`-p 2`, 63 suites, measured 2026-10-25). Runs in CI (ci.yml, job `e2e-fast`, a member of the `ci-success` aggregate gate; code-quality.yml runs the same tier as `e2e-fast` too) and in the pre-commit hook via the affected-suite gate. |
+| **Fast (hermetic)** | `make e2e-fast` | Go tests under `e2e/suites/` with the `e2e` build tag. Fresh binaries, sandboxed `HOME`/`MEEPT_HOME`, fake LLM. Never touches `~/.meept` or a live daemon. Seconds per suite; the full tier is ~13 min wall (`-p 2`, 63 suites, measured 2026-10-25). Runs in CI (ci.yml, job `e2e-fast`, a member of the `ci-success` aggregate gate; code-quality.yml runs the same tier as `e2e-fast` too) and at the push boundary via `pre-push-e2e` (the affected-suite sweep). Since the gates-speedup change the sweep is NO LONGER part of pre-commit — see "Where the sweep runs" below. |
 | **Fast, Dart tier** | `make e2e-affected-area AREA=gui-flows` | The `gui-flows` suite: Flutter widget/provider tests under `ui/flutter_ui/test/e2e`, driven by `flutter test test/e2e` (NOT `go test`). Runs in CI (code-quality.yml, job `e2e-gui`) and via the affected-suite gate when a `ui/**` path changes. |
 | **Live-model** | `make e2e-chat` | `scripts/e2e-naive-user-chat.sh` drives a real daemon with a real model through a naive-user chat comparison. Slow, costs tokens, needs a configured local daemon. Local-only by design — never in CI. Its scenario also ships as the hermetic twin `e2e/suites/naive-user-chat/` (manifest-registered; CI + pre-commit coverage for the A0-A6 contract). |
 
@@ -134,38 +136,84 @@ Behavior:
 
 bash-3.2 compatible (macOS); python3 does the JSON parsing.
 
-## The hook (`pre-commit-e2e`, check [18/18])
+## Where the sweep runs (`pre-commit-e2e` census [19/20] → `pre-push-e2e` → CI)
 
-Runs on every commit with staged Go files:
+Gate locations after the gates-speedup change (the sweep cost 15-25 min
+per commit touching `internal/queue|agent|task`, so it moved off the
+commit boundary):
 
-1. **Affected-suite gate** — staged `internal/|pkg/|cmd/` Go paths are fed to
-   `scripts/e2e-affected.sh`; any failing suite FAILS the commit.
-2. **New-package census** — every package directory that gains a new
-   non-test Go file in the staged additions must have a `path_map` entry in
-   `e2e/manifest.json` or an `exempt` entry with a written reason (printed as
-   residual risk), or the commit FAILS. Exempt: `_test.go`, docs, generated
-   files. Staging e2e suite files no longer clears the check; an unparseable
-   or empty manifest fails the commit closed.
+**Pre-commit `[19/20]` (`pre-commit-e2e`) runs ONLY the census** on staged
+Go changes:
 
-Escape hatch for emergencies — prints a loud warning and proceeds:
+1. **New-package census** (stays — cheap, blocks forgetting) — every
+   package directory that gains a new non-test Go file in the staged
+   additions must have a `path_map` entry in `e2e/manifest.json` or an
+   `exempt` entry with a written reason (printed as residual risk), or
+   the commit FAILS. Exempt: `_test.go`, docs, generated files. Staging
+   e2e suite files no longer clears the check; an unparseable or empty
+   manifest fails the commit closed.
+
+The **affected-suite sweep** is no longer part of pre-commit. It runs at
+two enforcement sites:
+
+- `pre-push-e2e` (push boundary) with `MEEPT_E2E_SCOPE=full` FORCED, and
+- CI's `make e2e-fast` (ci.yml job `e2e-fast`, required `ci-success`
+  member).
+
+Want the sweep back at commit time anyway? Opt in per invocation:
+
+```bash
+MEEPT_E2E_PRECOMMIT_SWEEP=1 git commit -m "..."          # full sweep
+MEEPT_E2E_PRECOMMIT_SWEEP=1 MEEPT_E2E_SCOPE=direct git commit ...  # package-dir-only, cheap
+```
+
+Escape hatch for emergencies — prints a loud warning and proceeds
+(disables the census too):
 
 ```bash
 MEEPT_SKIP_E2E=1 git commit -m "..."
 ```
 
-`--no-verify` also bypasses (bypasses all 18 checks — emergencies only).
+`--no-verify` also bypasses (bypasses all 20 checks — emergencies only).
 
-## The push-boundary second line (`pre-push-e2e`)
+### Sweep scope (`MEEPT_E2E_SCOPE`)
 
-`pre-commit-e2e` gates at commit time, and a commit-time gate can be
-bypassed (`--no-verify`, `MEEPT_SKIP_E2E=1`, or a hook run killed
-mid-sweep). `pre-push-e2e` is the last local checkpoint before a commit
-reaches the remote: on every `git push` it diffs each pushed ref
-(`remote_sha..local_sha`), feeds the changed paths to
-`scripts/e2e-affected.sh`, and runs exactly the affected hermetic suites
-— same mapping, same suite runner, push boundary instead of commit
-boundary. A red suite blocks the push. A new branch with no tracking ref
-runs the smoke suite instead, so the gate never degrades to a no-op.
+`scripts/e2e-affected.sh` selects suites from the changed paths through
+the manifest `path_map`:
+
+- `full` (default; what the push gate forces): a path matching a
+  `path_map` PREFIX contributes that key's suites — so a change to
+  `internal/queue/queue.go` fans out to everything any key covering
+  `internal/queue/` (and ancestor keys covering the file path) maps.
+  Feature Go changed with no hit at all → the smoke suite runs as the
+  non-decorative fallback.
+- `direct`: a path selects suites ONLY from the key equal to its own
+  package dir (`internal/kanban/card.go` -> `kanban-board`; nothing
+  else). No fan-out, no smoke fallback — nothing mapped selects
+  nothing, loudly printed. This is the local-dev knob for running the
+  sweep where the transitive fan-out would sweep half the manifest;
+  `pre-push-e2e` pins `full` so it can never be thinned by accident.
+
+### Flake retry
+
+A failing suite gets ONE labeled re-run (boot flakes pass in isolation),
+but since the gates-speedup change the retry is parallel across suites
+(`MEEPT_E2E_RETRY_PARALLEL`, default 2) instead of a serial 2x-timeout
+per failure, and a suite whose output shows a BUILD/setup failure is NOT
+retried at all (`SKIPRETRY(build)`) — a compile error never flakes.
+
+## The push-boundary sweep gate (`pre-push-e2e`)
+
+`pre-commit-e2e` no longer runs the suite sweep at commit time (the census
+does), so `pre-push-e2e` is the first local sweep run: on every `git push`
+it diffs each pushed ref (`remote_sha..local_sha`), feeds the changed
+paths to `scripts/e2e-affected.sh` with `MEEPT_E2E_SCOPE=full` FORCED (an
+ambient `direct` can never thin the push gate), and runs exactly the
+affected hermetic suites — same mapping, same suite runner. A red suite
+blocks the push. It also still closes the old bypass hole (`--no-verify`,
+`MEEPT_SKIP_E2E=1`, or a killed hook run at commit time). A new branch
+with no tracking ref runs the smoke suite instead, so the gate never
+degrades to a no-op.
 
 ```bash
 MEEPT_E2E_SKIP=1 git push   # loud skip of this gate only (emergencies)
