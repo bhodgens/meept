@@ -9,10 +9,24 @@
 # and the diff gate remains the second line for pass->fail moves of
 # whatever else the baseline carries.
 #
+# The gate measures THE PUSHED STATE: the new sha is parsed from the
+# pre-push stdin lines and the daemon under test is built from a
+# detached worktree checked out at that sha (not from the possibly
+# dirty working tree). If the worktree checkout fails, the hook falls
+# back to the working-tree build with a loud warning.
+#
+# The run itself gates two ways:
+#   1. rig exit status: rc != 0 blocks the push even when results exist
+#      (rc != 0 also covers mid-suite crash/timeout, and un-run tasks
+#      are absent from results.jsonl - the diff classifies them REMOVED,
+#      which never fails the gate).
+#   2. task-count: every baseline task not excluded via IGNORE_TAGS must
+#      appear in results.jsonl; missing tasks block the push by name.
+#
 # Runs on an ISOLATED SCRATCH RIG (bench repo's scripts/scratch-rig.sh):
-# its own MEEPT_HOME under mktemp, its own daemon built from THIS repo's
-# bin/meept-daemon, its own llama-server, OS-assigned ports that never
-# collide with the live runtimes. The bench binary's isolation guard
+# its own MEEPT_HOME under mktemp, its own daemon (from the worktree
+# build), its own llama-server, OS-assigned ports that never collide
+# with the live runtimes. The bench binary's isolation guard
 # (meept-bench internal/isolation) REFUSES any ~/.meept socket, so a bare
 # `run` against the user daemon is no longer a valid gate shape - it dies
 # with "refusing to talk to the user's live meept daemon" and run exits 0
@@ -21,7 +35,7 @@
 #
 # Requires:
 #   - meept-bench repo at $MEEPT_BENCH_DIR (default ~/git/meept-bench)
-#   - the gate builds bin/meept-daemon from the pushing repo itself
+#   - the gate builds bin/meept-daemon from the pushed sha itself
 #
 # Skip with: git push --no-verify
 # Override for a single push: MEEPT_BENCH_SKIP=1 git push
@@ -43,7 +57,10 @@ fi
 BENCH_DIR="${MEEPT_BENCH_DIR:-$HOME/git/meept-bench}"
 BENCH_BIN="$BENCH_DIR/meept-bench-bin"
 BASELINE="$BENCH_DIR/results/baseline/regression.jsonl"
+SUITE="$BENCH_DIR/suites/regression.json"
 REPO="$(git rev-parse --show-toplevel)"
+# Tasks excluded from the run (and from the missing-task gate below).
+IGNORE_TAGS="known-failure"
 
 if [ ! -d "$BENCH_DIR" ]; then
   echo -e "${YELLOW}⏭  meept-bench not found at $BENCH_DIR — skipping bench gate${NC}"
@@ -56,6 +73,23 @@ echo -e "${BLUE}  Pre-push Bench Regression Gate (scratch rig)${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
+# ---- stdin parse -----------------------------------------------------------
+# git sends one "<local-ref> <local-sha> <remote-ref> <remote-sha>" line per
+# pushed ref on stdin. Gate on the first non-delete ref (all-zero local sha =
+# ref deletion, nothing is published). Multi-ref pushes gate once, on the
+# first published ref - same single-run shape the hook always had.
+PUSHED_SHA=""
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+  case "${local_sha:-}" in
+    "" | *[!0]*) PUSHED_SHA="${local_sha:-}"; break ;;  # non-all-zero sha
+  esac
+done
+if [ -z "$PUSHED_SHA" ]; then
+  echo -e "${YELLOW}⏭  no non-delete ref update on stdin — nothing to gate, skipping${NC}"
+  exit 0
+fi
+SHA12="${PUSHED_SHA:0:12}"
+
 # Build the bench binary from the current bench tree (the rig reuses it via
 # MEEPT_BENCH_BIN instead of building its own into a temp dir).
 if ! (cd "$BENCH_DIR" && go build -o "$BENCH_BIN" ./cmd/meept-bench); then
@@ -63,32 +97,84 @@ if ! (cd "$BENCH_DIR" && go build -o "$BENCH_BIN" ./cmd/meept-bench); then
   exit 1
 fi
 
-# The rig's daemon comes from THIS repo's binary (MEEPT_DAEMON_BIN default
-# is $MEEPT_REPO/bin/meept-daemon); build it from the pushed state so the
-# gate measures what we are about to publish, not whatever was last built.
-if ! (cd "$REPO" && go build -o bin/meept-daemon ./cmd/meept-daemon); then
+# ---- worktree build: the daemon comes from the PUSHED state ----------------
+# Check the pushed sha out into a detached worktree under ~/.git/worktrees/
+# and build bin/meept-daemon from THAT tree, so the gate measures what we
+# are about to publish instead of the (possibly dirty) working tree. The
+# worktree is removed on exit via the trap below. Fallback: if the checkout
+# fails, build from the working tree with a loud warning.
+WT_DIR="$HOME/.git/worktrees/pre-push-bench-$SHA12"
+DAEMON_SRC="$REPO"   # fallback source; replaced by the worktree on success
+WT_ADDED=0
+mkdir -p "$HOME/.git/worktrees"
+# Clear a leftover from a previous run killed before its EXIT trap.
+git -C "$REPO" worktree remove --force "$WT_DIR" >/dev/null 2>&1 || true
+rm -rf "$WT_DIR"
+git -C "$REPO" worktree prune >/dev/null 2>&1 || true
+if git -C "$REPO" worktree add --detach "$WT_DIR" "$PUSHED_SHA" >/dev/null 2>&1; then
+  WT_ADDED=1
+  DAEMON_SRC="$WT_DIR"
+  echo -e "${BLUE}building daemon from the pushed state ($SHA12): $WT_DIR${NC}"
+else
+  echo ""
+  echo -e "${YELLOW}⚠⚠  WORKTREE CHECKOUT FAILED — falling back to the DIRTY WORKING TREE.${NC}"
+  echo -e "${YELLOW}⚠⚠  The gate below measures the working tree, NOT the pushed sha${NC}"
+  echo -e "${YELLOW}    ($PUSHED_SHA). Commit or stash the WIP, or push with --no-verify${NC}"
+  echo -e "${YELLOW}    if the working tree is not what you intend to publish.${NC}"
+  echo ""
+fi
+
+cleanup() {
+  if [ "$WT_ADDED" = 1 ]; then
+    git -C "$REPO" worktree remove --force "$WT_DIR" >/dev/null 2>&1 \
+      || rm -rf "$WT_DIR" >/dev/null 2>&1 || true
+    git -C "$REPO" worktree prune >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT
+
+if ! (cd "$DAEMON_SRC" && go build -o bin/meept-daemon ./cmd/meept-daemon); then
   echo -e "${RED}❌ Failed to build meept-daemon — fix or push with --no-verify${NC}"
   exit 1
 fi
+DAEMON_BIN="$DAEMON_SRC/bin/meept-daemon"
 
-# The rig renders a hermetic collapsed models.json5 where every alias
-# resolves to one rig model, so the old MEEPT_GATE_MODEL="local/lfm-8b-q4"
-# override is meaningless here; MEEPT_GATE_MODEL is now repurposed to pass
-# raw extra bench-run arguments - e.g. MEEPT_GATE_MODEL="--task file-write"
-# to gate a single task.
+# DEPRECATION: MEEPT_GATE_MODEL used to select a model id (e.g.
+# "local/lfm-8b-q4"). The rig renders a hermetic collapsed models.json5
+# where every alias resolves to one rig model, so a model id is meaningless
+# here. The variable is repurposed as RAW EXTRA BENCH-RUN ARGS passthrough
+# (e.g. MEEPT_GATE_MODEL="--task file-write" gates a single task) and is
+# passed to the rig verbatim below — a stale model-id value therefore
+# becomes garbage args and corrupts the run. Keep the value (behavior
+# preservation); warn loudly instead of dropping it.
 EXTRA_RUN=()
-if [ -n "${MEEPT_GATE_MODEL}" ]; then
+if [ -n "${MEEPT_GATE_MODEL:-}" ]; then
+  echo ""
+  echo -e "${YELLOW}⚠  DEPRECATION: MEEPT_GATE_MODEL no longer selects a model.${NC}"
+  echo -e "${YELLOW}   It is now RAW EXTRA ARGS appended to 'meept-bench run'${NC}"
+  echo -e "${YELLOW}   (e.g. MEEPT_GATE_MODEL=\"--task file-write\").${NC}"
+  echo -e "${YELLOW}   The old value was a model id; unset MEEPT_GATE_MODEL to silence this.${NC}"
+  case "$MEEPT_GATE_MODEL" in
+    -* ) ;;
+    */*) echo -e "${YELLOW}⚠  \"$MEEPT_GATE_MODEL\" looks like a STALE model id (contains '/',${NC}"
+         echo -e "${YELLOW}   no leading '-'): it will be passed as raw run args and will${NC}"
+         echo -e "${YELLOW}   probably CORRUPT this run (unrelated alias error). Unset it.${NC}" ;;
+  esac
+  echo ""
   # shellcheck disable=SC2206  # deliberate word-splitting: it is an args string
   EXTRA_RUN=(${MEEPT_GATE_MODEL})
 fi
 
 # Keep the rig alive after the run so the results survive for the diff and
 # for postmortems; teardown happens below on the success path.
+# MEEPT_REPO points the rig (bench --repo, daemon config, config/agents) at
+# the tree under test: the pushed worktree, or the dirty tree on fallback.
 RIG_LOG="$(mktemp)"
 rig_rc=0
-(cd "$BENCH_DIR" && MEEPT_BENCH_BIN="$BENCH_BIN" MEEPT_REPO="$REPO" \
+(cd "$BENCH_DIR" && MEEPT_BENCH_BIN="$BENCH_BIN" MEEPT_REPO="$DAEMON_SRC" \
+  MEEPT_DAEMON_BIN="$DAEMON_BIN" \
   scripts/scratch-rig.sh --suite suites/regression.json --keep-rig \
-  -- --ignore-tags known-failure ${EXTRA_RUN[@]+"${EXTRA_RUN[@]}"}) >"$RIG_LOG" 2>&1 || rig_rc=$?
+  -- --ignore-tags "$IGNORE_TAGS" ${EXTRA_RUN[@]+"${EXTRA_RUN[@]}"}) >"$RIG_LOG" 2>&1 || rig_rc=$?
 cat "$RIG_LOG"
 
 RIGDIR="$(sed -n 's/^scratch-rig: rig kept at \(\/[^ ]*\) .*/\1/p' "$RIG_LOG" | tail -1)"
@@ -100,6 +186,11 @@ if [ -z "$RIGDIR" ] || [ ! -d "$RIGDIR" ]; then
   exit 1
 fi
 
+print_postmortem() {
+  echo -e "${RED}   Postmortem: $RIGDIR (daemon.log + results/); teardown:${NC}"
+  echo -e "${RED}     $BENCH_DIR/scripts/scratch-rig.sh --down $RIGDIR${NC}"
+}
+
 RESULTS="$RIGDIR/results/results.jsonl"
 if [ ! -f "$RESULTS" ]; then
   echo ""
@@ -108,14 +199,95 @@ if [ ! -f "$RESULTS" ]; then
   else
     echo -e "${RED}❌ Bench suite never produced results (exit $rig_rc) — push blocked.${NC}"
   fi
-  echo -e "${RED}   Postmortem: $RIGDIR (daemon.log + results/); teardown:${NC}"
-  echo -e "${RED}     $BENCH_DIR/scripts/scratch-rig.sh --down $RIGDIR${NC}"
+  print_postmortem
   rm -f "$RIG_LOG"
   exit 1
 fi
-# NOTE: run rc != 0 here just means some task failed - the DIFF against the
-# committed baseline is the actual gate (pass->fail = regression = block;
-# fail->fail stays unchanged). Do not exit on rig_rc when results exist.
+
+# ---- Missing-task comparison (computed once, used by both gates) ------------
+# Every baseline task NOT excluded via IGNORE_TAGS must appear in the run's
+# results.jsonl. Hook-side mirror of the diff's inputs ($BASELINE vs
+# $RESULTS) — the bench diff never fails on REMOVED, so this closes the
+# crash-hole it leaves open. NOTE: baseline/results rows carry no "tags"
+# field — tags live only in the SUITE file (the same one the rig runs), so
+# the exclusion decision is read from there, keyed by task id. If the suite
+# file is gone/unreadable, fall back to treating nothing as excluded (any
+# --ignore-tags task present in baseline then trips the gate loudly rather
+# than silently passing).
+missing_tasks=""
+missing_gate_err=0
+missing_tasks="$(python3 - "$BASELINE" "$RESULTS" "$SUITE" "$IGNORE_TAGS" <<'PY'
+import json, os, sys
+
+baseline_path, results_path, suite_path, ignore_tags = sys.argv[1:5]
+ignore = set(t for t in ignore_tags.split(",") if t)
+
+def load_tasks(path):
+    tasks = {}
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            row = json.loads(line)
+            tasks.setdefault(row["task_id"], row)
+    return tasks
+
+excluded = set()
+if os.path.exists(suite_path):
+    with open(suite_path) as f:
+        for t in json.load(f).get("tasks", []):
+            if set(t.get("tags", [])) & ignore:
+                excluded.add(t["id"])
+
+baseline = load_tasks(baseline_path)
+current = load_tasks(results_path)
+missing = sorted(
+    tid for tid in baseline
+    if tid not in excluded and tid not in current
+)
+if missing:
+    print("\n".join(missing))
+PY
+)" || missing_gate_err=1
+
+# ---- GATE 1: rig exit status ------------------------------------------------
+# rc != 0 is NOT just "some task failed": it also covers a mid-suite
+# crash/timeout. Tasks that never ran are ABSENT from results.jsonl, and the
+# diff below classifies them REMOVED — which never fails the gate. So a
+# crashed run must block here, even though results exist.
+if [ "$rig_rc" -ne 0 ]; then
+  echo ""
+  echo -e "${RED}❌ Bench run exited $rig_rc — push blocked.${NC}"
+  echo -e "${RED}   rc != 0 also covers mid-suite crash/timeout: un-run tasks are absent${NC}"
+  echo -e "${RED}   from results.jsonl and the diff scores them REMOVED (never a failure).${NC}"
+  if [ -n "$missing_tasks" ]; then
+    echo -e "${RED}   Tasks with no result row:${NC}"
+    printf '%s\n' "$missing_tasks" | sed 's/^/     - /'
+  fi
+  print_postmortem
+  rm -f "$RIG_LOG"
+  exit 1
+fi
+
+# ---- GATE 2: missing-task gate ----------------------------------------------
+if [ "$missing_gate_err" -ne 0 ]; then
+  echo ""
+  echo -e "${RED}❌ Missing-task gate could not run (python3 or baseline unreadable) — push blocked.${NC}"
+  print_postmortem
+  rm -f "$RIG_LOG"
+  exit 1
+fi
+if [ -n "$missing_tasks" ]; then
+  echo ""
+  echo -e "${RED}❌ Missing task results — push blocked.${NC}"
+  echo -e "${RED}   These baseline tasks (minus ignore-tags: $IGNORE_TAGS) have no result${NC}"
+  echo -e "${RED}   row in this run; the diff would score them REMOVED and stay green:${NC}"
+  printf '%s\n' "$missing_tasks" | sed 's/^/     - /'
+  print_postmortem
+  rm -f "$RIG_LOG"
+  exit 1
+fi
 
 # Diff against the committed baseline. Exit 1 = regressed.
 if ! "$BENCH_BIN" diff \
@@ -132,11 +304,12 @@ if ! "$BENCH_BIN" diff \
 fi
 
 # Clean path: tear the rig down (kills its daemon + llama children, rm's
-# the temp home) and drop the scratch log.
+# the temp home) and drop the scratch log. The worktree is removed by the
+# EXIT trap.
 (cd "$BENCH_DIR" && scripts/scratch-rig.sh --down "$RIGDIR") >/dev/null 2>&1 || \
   echo -e "${YELLOW}⚠  rig teardown reported an error; check for a stray llama-server from $RIGDIR${NC}"
 rm -f "$RIG_LOG"
 
 echo ""
-echo -e "${GREEN}✅ Bench gate clean (scratch rig, isolated) — pushing.${NC}"
+echo -e "${GREEN}✅ Bench gate clean (scratch rig, pushed state $SHA12) — pushing.${NC}"
 exit 0
