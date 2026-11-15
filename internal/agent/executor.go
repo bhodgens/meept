@@ -540,6 +540,69 @@ var ToolActionMap = map[string]string{
 	// dead-map exactly like the H7 entries above). RiskMedium like
 	// send_message/voice_call — outbound third-party communication.
 	"contact": "contact",
+
+	// RP-01..RP-11 (registry-parity gate internal/daemon/
+	// registry_parity_completeness_test.go): fifteen registered/produced
+	// tools with NO ToolActionMap row — the name-fallback action was
+	// unknown to BuiltinRules, so every model call died "Unknown action"
+	// (deny-by-default) despite registration + grant (bughunt H7 class).
+	// Every tool resolves to an EXISTING action class below: no new
+	// BuiltinRules rows were needed and no existing rule's risk was
+	// lowered or allowance broadened.
+	//
+	// RP-01/RP-02 code-intelligence AST lane. The read-only siblings
+	// (ast_parse / ast_query / ast_symbols) map to file_read above, but
+	// ast_edit applies rewrites to source files when preview_only=false
+	// and resolve_ast_edit writes on action="apply" — file mutation is the
+	// security-relevant surface, so they ride file_write (RiskMedium) like
+	// spreadsheet_write / the office_* writers. The tools' own fence
+	// checker still enforces the project boundary at Execute time.
+	"ast_edit":         ToolFileWrite,
+	"resolve_ast_edit": ToolFileWrite,
+	// RP-03/RP-04 scheduler family: schedule_create/schedule_delete are
+	// task_write and schedule_list/schedule_get are task_read above.
+	// cron_create creates a job; pause/resume mutate a job's state and
+	// run_now triggers an execution — all job writes, so task_write,
+	// following the schedule_create precedent exactly.
+	"cron_create":      "task_write",
+	"schedule_pause":   "task_write",
+	"schedule_resume":  "task_write",
+	"schedule_run_now": "task_write",
+	// RP-05 DAP debug: launches/attaches processes, sets breakpoints,
+	// evaluates expressions inside a live inferior — subprocess execution
+	// is the security-relevant surface, so shell_execute (RiskMedium, the
+	// git_split class), deliberately NOT the read-only file_read class of
+	// the LSP siblings (debug runs code, LSP only reads it).
+	"debug": "shell_execute",
+	// RP-06 git family: git_commit runs `git add`/`git commit` subprocess
+	// mutations, the exact surface of git_split -> shell_execute;
+	// git_overview is read-only porcelain (rev-parse / diff --stat) and
+	// follows the sibling git_validate -> file_read precedent.
+	"git_commit":   "shell_execute",
+	"git_overview": ToolFileRead,
+	// RP-07 hermes gateway meta-tool (chat/run/steer/stop/approve/jobs):
+	// it drives a REMOTE autonomous agent that executes its own tools
+	// under its own approval policy (the tool description's security
+	// note) — the same delegation posture as delegate_task ->
+	// agent_delegate (RiskLow), not the plain network_request class of
+	// the egress-only tools above.
+	"hermes": "agent_delegate",
+	// RP-08/RP-09 memory read lane: memory_fact_search queries stored
+	// facts; memory_get_version / memory_get_version_history read a
+	// memory entry's version records. All are read-only over the memory
+	// store -> memory_read (RiskSafe) like memory_search /
+	// knowledge_search above; nothing here reaches the memory_write rows.
+	"memory_fact_search":         "memory_read",
+	"memory_get_version":         "memory_read",
+	"memory_get_version_history": "memory_read",
+	// RP-10 task_summarize: loads a task and summarizes it via the
+	// agent's own configured model lane (the LLM call is internal
+	// plumbing, not arbitrary egress); read-only over task state ->
+	// task_read like task_get / task_list.
+	"task_summarize": "task_read",
+	// RP-11 tool_search: deferred-schema capability discovery registered
+	// next to tool_view -> platform_read (read-only introspection).
+	"tool_search": "platform_read",
 }
 
 // WorkingDirSetter is implemented by tools that accept a session-scoped

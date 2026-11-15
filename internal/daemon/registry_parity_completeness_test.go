@@ -228,31 +228,16 @@ func rp2ResolvedAction(toolName string) string {
 // inert bug class, each CONFIRMED by running this gate on 2026-11-14.
 // These are FINDINGS, not fixes: adding the missing ToolActionMap row
 // and/or BuiltinRules row is separate wiring work, tracked per entry.
-// This list must SHRINK as findings close; adding a name without a
+// This list must SHRINK, never rot silently: adding a name without a
 // finding id is a review reject, and a name that stops being inert must
 // be deleted here (the staleness assertion below enforces it).
-var rp2InertAllowlist = map[string]string{
-	// No ToolActionMap row AND no identically-named rule: the name-fallback
-	// action is unknown to BuiltinRules -> every call denied "Unknown
-	// action". Fix precedent: json_extract / transcript_fetch (bughunt H7):
-	// row in internal/agent/executor.go + rule in pkg/security/permissions.go
-	// where needed, then delete the entry here.
-	"ast_edit":                   "finding RP-01: registered behind code_intel enabled gate; no ToolActionMap row, no ast_edit rule -> inert",
-	"resolve_ast_edit":           "finding RP-02: resolve-side AST edit (codetools AST lane); same missing row/rule as RP-01 -> inert",
-	"cron_create":                "finding RP-03: scheduler provider Discover() contributes cron_create but executor.go has no row -> inert (schedule_* siblings landed; pause/resume/run_now are RP-04)",
-	"schedule_pause":             "finding RP-04: scheduler family rows landed for create/list/get/delete only; pause/resume/run_now unmapped -> inert",
-	"schedule_resume":            "finding RP-04: same scheduler-family gap as cron_create/schedule_pause",
-	"schedule_run_now":           "finding RP-04: same scheduler-family gap as cron_create/schedule_pause",
-	"debug":                      "finding RP-05: DAP debug tool registered unconditionally; no row -> identity action \"debug\" unknown -> inert",
-	"git_commit":                 "finding RP-06: registered in registerBuiltinTools; no row/rule -> inert",
-	"git_overview":               "finding RP-06: git_overview, same gap as git_commit",
-	"hermes":                     "finding RP-07: hermes gateway tool arrives via the hermes provider; no row/rule -> inert",
-	"memory_fact_search":         "finding RP-08: harness-eval leaf-12 fact-retrieval tool registered with the memory manager; no row/rule -> inert",
-	"memory_get_version":         "finding RP-09: memory versioning family registered with the memory manager; no row/rule -> inert",
-	"memory_get_version_history": "finding RP-09: memory versioning family, same gap as memory_get_version",
-	"task_summarize":             "finding RP-10: transcript summarize tool registered with the summarizer lane; no row/rule -> inert",
-	"tool_search":                "finding RP-11: deferred-schema discovery tool registered next to tool_view; no row/rule -> inert",
-}
+//
+// RP-01..RP-11 CLOSED 2026-11-14: all fifteen allowlisted tools received
+// their ToolActionMap rows in internal/agent/executor.go (mapped to
+// existing BuiltinRules action classes — no new rules needed), and this
+// list was emptied by that fix. Keep the map (and the staleness
+// assertion) for future registered-but-inert findings.
+var rp2InertAllowlist = map[string]string{}
 
 // rp2GatedRegistrationPins — ToolActionMap keys this hermetic boot does NOT
 // produce because their registration site sits behind a default-off daemon
@@ -264,41 +249,41 @@ var rp2InertAllowlist = map[string]string{
 // here. A pinned key whose tool no gate can EVER register must be removed
 // from this list (then the reverse assertion fails, which is the point).
 var rp2GatedRegistrationPins = map[string]string{
-	"ask":                    "gated: built-in ask tool needs the msgBus pending-question store wiring at the agent-loop site",
-	"intake_save":            "gated: intake tool registers only with [intake].enabled (default false)",
-	"send_agent_message":     "gated: inter-agent messaging wires after EmployeeMessageStore exists (multi-user/employee boot leg)",
-	"inbox":                  "gated: same employee-message-store leg as send_agent_message",
-	"request_handoff":        "gated: wires where the dispatcher + agent registry + message bus init (multi-agent boot leg)",
-	"request_review":         "gated: same platform-tools leg as request_handoff",
-	"delegate_task":          "gated: registerPlatformTools leg runs after Dispatcher init (the legacy direct-Register site predates the delegate provider)",
-	"team_assign":            "gated: registerTeamTools runs only with the strategic/tactical orchestrator (multi-agent orchestrator leg)",
-	"team_message":           "gated: same team leg as team_assign",
-	"team_result":            "gated: same team leg as team_assign",
-	"team_status":            "gated: same team leg as team_assign",
-	"team_preset_create":     "gated: same team leg as team_assign",
-	"platform_status":        "gated: registerPlatformTools runs after Dispatcher init (multi-agent boot leg)",
-	"platform_tools":         "gated: same platform leg as platform_status",
-	"platform_agents":        "gated: same platform leg as platform_status",
-	"platform_team_create":   "gated: same platform leg as platform_status",
-	"project_info":           "gated: platform-tools leg with the project manager wired",
-	"template_clear":         "gated: registerTemplateTools only when the template registry is built (orchestrator leg)",
-	"template_invoke":        "gated: same template leg as template_clear",
-	"workspace_yield":        "gated: registerCollaborationTools only with the collaboration engine (multi-agent leg)",
-	"mcp_servers":            "gated: registers only when the MCP manager is live ([mcp] block, default off)",
-	"memory_delete":          "gated: memory-delete tool leg beyond the manager-init gate this boot arms",
-	"entity_create":          "gated: knowledge-graph tools need a live memoryMgr.Graph() (memory-v2 leg)",
-	"entity_link":            "gated: same graph leg as entity_create",
-	"entity_query":           "gated: same graph leg as entity_create",
-	"graph_stats":            "gated: same graph leg as entity_create",
-	"compute_pagerank":       "gated: same graph leg as entity_create",
-	"detect_communities":     "gated: same graph leg as entity_create",
-	"community_siblings":     "gated: same graph leg as entity_create",
-	"lsp_goto_definition":    "gated: code-intelligence LSP family registers only with configured LSP servers (code_intel.lsp.servers)",
-	"lsp_find_references":    "gated: same LSP leg as lsp_goto_definition",
-	"lsp_hover":              "gated: same LSP leg as lsp_goto_definition",
-	"lsp_workspace_symbols":  "gated: same LSP leg as lsp_goto_definition",
-	"lsp_diagnostics":        "gated: same LSP leg as lsp_goto_definition",
-	"lsp_navigate":           "gated: same LSP leg as lsp_goto_definition",
+	"ask":                   "gated: built-in ask tool needs the msgBus pending-question store wiring at the agent-loop site",
+	"intake_save":           "gated: intake tool registers only with [intake].enabled (default false)",
+	"send_agent_message":    "gated: inter-agent messaging wires after EmployeeMessageStore exists (multi-user/employee boot leg)",
+	"inbox":                 "gated: same employee-message-store leg as send_agent_message",
+	"request_handoff":       "gated: wires where the dispatcher + agent registry + message bus init (multi-agent boot leg)",
+	"request_review":        "gated: same platform-tools leg as request_handoff",
+	"delegate_task":         "gated: registerPlatformTools leg runs after Dispatcher init (the legacy direct-Register site predates the delegate provider)",
+	"team_assign":           "gated: registerTeamTools runs only with the strategic/tactical orchestrator (multi-agent orchestrator leg)",
+	"team_message":          "gated: same team leg as team_assign",
+	"team_result":           "gated: same team leg as team_assign",
+	"team_status":           "gated: same team leg as team_assign",
+	"team_preset_create":    "gated: same team leg as team_assign",
+	"platform_status":       "gated: registerPlatformTools runs after Dispatcher init (multi-agent boot leg)",
+	"platform_tools":        "gated: same platform leg as platform_status",
+	"platform_agents":       "gated: same platform leg as platform_status",
+	"platform_team_create":  "gated: same platform leg as platform_status",
+	"project_info":          "gated: platform-tools leg with the project manager wired",
+	"template_clear":        "gated: registerTemplateTools only when the template registry is built (orchestrator leg)",
+	"template_invoke":       "gated: same template leg as template_clear",
+	"workspace_yield":       "gated: registerCollaborationTools only with the collaboration engine (multi-agent leg)",
+	"mcp_servers":           "gated: registers only when the MCP manager is live ([mcp] block, default off)",
+	"memory_delete":         "gated: memory-delete tool leg beyond the manager-init gate this boot arms",
+	"entity_create":         "gated: knowledge-graph tools need a live memoryMgr.Graph() (memory-v2 leg)",
+	"entity_link":           "gated: same graph leg as entity_create",
+	"entity_query":          "gated: same graph leg as entity_create",
+	"graph_stats":           "gated: same graph leg as entity_create",
+	"compute_pagerank":      "gated: same graph leg as entity_create",
+	"detect_communities":    "gated: same graph leg as entity_create",
+	"community_siblings":    "gated: same graph leg as entity_create",
+	"lsp_goto_definition":   "gated: code-intelligence LSP family registers only with configured LSP servers (code_intel.lsp.servers)",
+	"lsp_find_references":   "gated: same LSP leg as lsp_goto_definition",
+	"lsp_hover":             "gated: same LSP leg as lsp_goto_definition",
+	"lsp_workspace_symbols": "gated: same LSP leg as lsp_goto_definition",
+	"lsp_diagnostics":       "gated: same LSP leg as lsp_goto_definition",
+	"lsp_navigate":          "gated: same LSP leg as lsp_goto_definition",
 }
 
 // rp2AdminRuleAllowlist — BuiltinRules keys no registrable tool resolves
