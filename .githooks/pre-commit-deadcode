@@ -3,12 +3,18 @@
 #
 # Runs golang.org/x/tools/cmd/deadcode on ALL FIVE production binaries
 # (cmd/meept-daemon, cmd/meept, cmd/meept-lite, cmd/meept-classifier-test,
-# tools/bridges-eval) and intersects the per-binary unreachable sets, then
-# diffs the intersection against the committed baseline
-# (.githooks/deadcode-baseline.txt). Commit is blocked when a function is
-# unreachable from EVERY main in the working tree but absent from the
-# baseline — i.e. newly added code nothing calls ("implemented but never
-# wired").
+# tools/bridges-eval) in TWO modes:
+#
+#   1. WITH -test:   intersects the per-binary unreachable sets and diffs
+#      against .githooks/deadcode-baseline.txt (the historical baseline).
+#   2. WITHOUT -test: same intersection/diff against
+#      .githooks/deadcode-baseline-notest.txt (the no-test baseline).
+#
+# The commit is blocked if a function appears as NEW (absent from the
+# baseline) in EITHER mode. Mode 2 is the strict pass: -test makes a
+# function whose only caller is its own unit test look WIRED, which is
+# exactly the "implemented with tests but never wired" failure shape this
+# gate exists to catch. Without -test such functions surface as unwired.
 #
 # Why the intersection (not the union): a function wired in one binary but
 # merely LINKED (never called) in another is live code. Union baselining
@@ -28,16 +34,27 @@
 #
 # Usage:
 #   .githooks/pre-commit-deadcode               # gate (called from pre-commit)
-#   .githooks/pre-commit-deadcode --rebaseline  # regenerate the baseline
+#   .githooks/pre-commit-deadcode --rebaseline  # regenerate BOTH baselines
 #
 # Env overrides (testing/CI):
-#   MEEPT_DEADCODE_BASELINE=/path/to/file   baseline location
-#   MEEPT_DEADCODE_MAINS="a b c"            binary targets (space-separated
-#                                           go list patterns; default: all
-#                                           five production mains)
-#
-# Requires: deadcode in PATH (or $GOPATH/bin). Skips with a warning when
-# missing: go install golang.org/x/tools/cmd/deadcode@latest
+#   MEEPT_DEADCODE_BASELINE=/path/to/file       -test-mode baseline location
+#   MEEPT_DEADCODE_BASELINE_NOTEST=/path/to/f   no-test baseline location
+#   MEEPT_DEADCODE_MAINS="a b c"                binary targets (space-separated
+#                                               go list patterns; default: all
+#                                               five production mains)
+#   MEEPT_DEADCODE_FULL_TREE=1                  analyze the whole working tree
+#                                               against the baselines: skips
+#                                               the "no staged Go files ->
+#                                               exit 0" early-return so CI
+#                                               (fresh checkout, empty index)
+#                                               still enforces the ratchet.
+#   MEEPT_DEADCODE_ALLOW_SKIP=1                 only consulted when the
+#                                               deadcode binary is MISSING:
+#                                               permits a warning + exit 0.
+#                                               Without it a missing binary
+#                                               fails the hook (fail-closed);
+#                                               when CI=true the binary is
+#                                               ALWAYS required.
 #
 # Requires GOTOOLCHAIN pinned by the caller (pre-commit does this; standalone
 # runs pin from go.mod below).
@@ -67,9 +84,15 @@ if [ "${1:-}" = "--rebaseline" ]; then
     REBASELINE=1
 fi
 
-BASELINE="${MEEPT_DEADCODE_BASELINE:-$PWD/.githooks/deadcode-baseline.txt}"
+FULL_TREE="${MEEPT_DEADCODE_FULL_TREE:-0}"
 
-# Locate the deadcode binary.
+BASELINE="${MEEPT_DEADCODE_BASELINE:-$PWD/.githooks/deadcode-baseline.txt}"
+BASELINE_NOTEST="${MEEPT_DEADCODE_BASELINE_NOTEST:-$PWD/.githooks/deadcode-baseline-notest.txt}"
+
+# Locate the deadcode binary. A missing binary FAILS the gate: the whole
+# point is deterministic enforcement, and a silent skip on a machine
+# without the tool is how unwired code lands. The only escape hatch is an
+# explicit opt-out (MEEPT_DEADCODE_ALLOW_SKIP=1), and never on CI.
 DEADCODE_BIN=""
 if command -v deadcode &>/dev/null; then
     DEADCODE_BIN="$(command -v deadcode)"
@@ -77,15 +100,28 @@ elif [ -x "$HOME/go/bin/deadcode" ]; then
     DEADCODE_BIN="$HOME/go/bin/deadcode"
 fi
 if [ -z "$DEADCODE_BIN" ]; then
-    echo -e "${YELLOW}⚠️  deadcode not installed — skipping reachability (unwired code) check${NC}"
+    if [ "${CI:-}" = "true" ]; then
+        echo -e "${RED}✗ deadcode not installed — FAILING on CI (no skip allowed)${NC}"
+        echo "   Install with: go install golang.org/x/tools/cmd/deadcode@v0.52.0"
+        exit 1
+    fi
+    if [ "${MEEPT_DEADCODE_ALLOW_SKIP:-0}" = "1" ]; then
+        echo -e "${YELLOW}⚠️  deadcode not installed — skip explicitly allowed via MEEPT_DEADCODE_ALLOW_SKIP=1${NC}"
+        exit 0
+    fi
+    echo -e "${RED}✗ deadcode not installed — reachability gate is fail-closed${NC}"
     echo "   Install with: go install golang.org/x/tools/cmd/deadcode@latest"
-    exit 0
+    echo "   To skip deliberately (local only): MEEPT_DEADCODE_ALLOW_SKIP=1 git commit ..."
+    exit 1
 fi
 
-# No staged Go files → nothing to check.
-STAGED_GO_FILES=$(git -c color.ui=false -c core.quotepath=false diff --cached --name-only --diff-filter=ACMR 2>/dev/null | grep '\.go$' || true)
-if [ -z "$STAGED_GO_FILES" ] && [ "$REBASELINE" -eq 0 ]; then
-    exit 0
+# No staged Go files → nothing to check (unless CI/full-tree mode is
+# enforcing the whole tree against the baselines).
+if [ "$FULL_TREE" != "1" ]; then
+    STAGED_GO_FILES=$(git -c color.ui=false -c core.quotepath=false diff --cached --name-only --diff-filter=ACMR 2>/dev/null | grep '\.go$' || true)
+    if [ -z "$STAGED_GO_FILES" ] && [ "$REBASELINE" -eq 0 ]; then
+        exit 0
+    fi
 fi
 
 # Normalize deadcode output to "path: unreachable func: Name" (no line:col —
@@ -95,7 +131,6 @@ normalize() {
 }
 
 TMPDIR_CURRENT="$(mktemp -d -t meept-deadcode.XXXXXX)"
-CURRENT="$TMPDIR_CURRENT/current"
 trap 'rm -rf "$TMPDIR_CURRENT"' EXIT
 
 # Production mains to analyze. Override with MEEPT_DEADCODE_MAINS for
@@ -104,68 +139,102 @@ trap 'rm -rf "$TMPDIR_CURRENT"' EXIT
 MAINS_DEFAULT="./cmd/meept-daemon ./cmd/meept ./cmd/meept-lite ./cmd/meept-classifier-test ./tools/bridges-eval"
 MAINS="${MEEPT_DEADCODE_MAINS:-$MAINS_DEFAULT}"
 
-# Analyze every binary, then intersect: a function is only "currently
-# unwired" if it appears in ALL per-binary outputs (comm-style incremental
-# intersection). A deadcode failure here means the working tree does not
-# typecheck/build — fail closed (pre-commit-build runs earlier and should
-# have caught it, so reaching this failure is unexpected).
-FIRST=1
-for MAIN in $MAINS; do
-    TAG=$(echo "$MAIN" | tr '/.' '__')
-    OUT="$TMPDIR_CURRENT/run$TAG"
-    if ! "$DEADCODE_BIN" -test "$MAIN" > "$OUT"; then
-        echo -e "${RED}✗ deadcode failed on $MAIN (build/typecheck problem?)${NC}"
-        head -20 "$OUT"
-        exit 1
-    fi
-    normalize < "$OUT" > "$OUT.norm"
-    if [ "$FIRST" -eq 1 ]; then
-        sort -u "$OUT.norm" > "$TMPDIR_CURRENT/acc"
-        FIRST=0
-    else
-        # Intersection so far: entries present in BOTH the accumulator and
-        # this binary's set (comm -12 needs LC_ALL=C-sorted inputs).
-        LC_ALL=C sort -u -o "$TMPDIR_CURRENT/acc" "$TMPDIR_CURRENT/acc"
-        LC_ALL=C sort -u -o "$OUT.norm" "$OUT.norm"
-        comm -12 "$TMPDIR_CURRENT/acc" "$OUT.norm" > "$TMPDIR_CURRENT/acc.next"
-        mv "$TMPDIR_CURRENT/acc.next" "$TMPDIR_CURRENT/acc"
-    fi
-done
-sort -u -o "$TMPDIR_CURRENT/acc" "$TMPDIR_CURRENT/acc"
-cp "$TMPDIR_CURRENT/acc" "$CURRENT"
+# analyze_mode <suffix> <extra deadcode flags...>
+#
+# Runs every binary, intersects the per-binary unreachable sets
+# (comm-style incremental intersection — a function is only "currently
+# unwired" if unreachable from ALL entry points), and leaves the sorted
+# result in $TMPDIR_CURRENT/inter.<suffix>. A deadcode failure means the
+# working tree does not typecheck/build — fail closed (pre-commit-build
+# runs earlier and should have caught it, so reaching this failure is
+# unexpected).
+analyze_mode() {
+    SUFFIX="$1"
+    shift
+    FIRST=1
+    : > "$TMPDIR_CURRENT/inter.$SUFFIX"
+    for MAIN in $MAINS; do
+        TAG=$(echo "$MAIN" | tr '/.' '__')
+        OUT="$TMPDIR_CURRENT/run$TAG.$SUFFIX"
+        if ! "$DEADCODE_BIN" "$@" "$MAIN" > "$OUT" 2>&1; then
+            echo -e "${RED}✗ deadcode failed on $MAIN (mode: $SUFFIX — build/typecheck problem?)${NC}"
+            head -20 "$OUT"
+            exit 1
+        fi
+        normalize < "$OUT" > "$OUT.norm"
+        if [ "$FIRST" -eq 1 ]; then
+            LC_ALL=C sort -u "$OUT.norm" > "$TMPDIR_CURRENT/acc"
+            FIRST=0
+        else
+            # Intersection so far: entries present in BOTH the accumulator and
+            # this binary's set (comm -12 needs LC_ALL=C-sorted inputs).
+            LC_ALL=C sort -u -o "$TMPDIR_CURRENT/acc" "$TMPDIR_CURRENT/acc"
+            LC_ALL=C sort -u -o "$OUT.norm" "$OUT.norm"
+            comm -12 "$TMPDIR_CURRENT/acc" "$OUT.norm" > "$TMPDIR_CURRENT/acc.next"
+            mv "$TMPDIR_CURRENT/acc.next" "$TMPDIR_CURRENT/acc"
+        fi
+    done
+    LC_ALL=C sort -u -o "$TMPDIR_CURRENT/acc" "$TMPDIR_CURRENT/acc"
+    cp "$TMPDIR_CURRENT/acc" "$TMPDIR_CURRENT/inter.$SUFFIX"
+}
 
-CURRENT_COUNT=$(wc -l < "$CURRENT" | tr -d ' ')
+analyze_mode test -test
+analyze_mode notest
 
 if [ "$REBASELINE" -eq 1 ]; then
-    cp "$CURRENT" "$BASELINE"
-    echo -e "${GREEN}✓ deadcode baseline regenerated: $BASELINE ($CURRENT_COUNT unreachable funcs)${NC}"
-    echo "  Stage it: git add $BASELINE"
+    cp "$TMPDIR_CURRENT/inter.test" "$BASELINE"
+    cp "$TMPDIR_CURRENT/inter.notest" "$BASELINE_NOTEST"
+    echo -e "${GREEN}✓ deadcode baselines regenerated:${NC}"
+    echo "  $BASELINE ($(wc -l < "$BASELINE" | tr -d ' ') unreachable funcs, -test mode)"
+    echo "  $BASELINE_NOTEST ($(wc -l < "$BASELINE_NOTEST" | tr -d ' ') unreachable funcs, no-test mode)"
+    echo "  Stage them: git add $BASELINE $BASELINE_NOTEST"
     exit 0
 fi
 
-if [ ! -f "$BASELINE" ]; then
-    echo -e "${RED}✗ deadcode baseline missing: $BASELINE${NC}"
-    echo "  Generate it with: .githooks/pre-commit-deadcode --rebaseline"
-    exit 1
-fi
-
-# New = in the current set but not in the baseline (comm -13).
-NEW_FUNCS=$(comm -13 "$BASELINE" "$CURRENT" || true)
-if [ -n "$NEW_FUNCS" ]; then
-    NEW_COUNT=$(printf '%s\n' "$NEW_FUNCS" | grep -c . || true)
-    echo -e "${RED}✗ deadcode gate: $NEW_COUNT newly unwired function(s) — commit blocked${NC}"
-    echo ""
-    echo "$NEW_FUNCS" | head -30 | sed 's/^/  /'
-    TOTAL_SHOW=$(printf '%s\n' "$NEW_FUNCS" | grep -c .)
-    if [ "$TOTAL_SHOW" -gt 30 ]; then
-        echo "  ... and $((TOTAL_SHOW - 30)) more"
+for BASE in "$BASELINE" "$BASELINE_NOTEST"; do
+    if [ ! -f "$BASE" ]; then
+        echo -e "${RED}✗ deadcode baseline missing: $BASE${NC}"
+        echo "  Generate it with: .githooks/pre-commit-deadcode --rebaseline"
+        exit 1
     fi
-    echo ""
-    echo "  Fix: wire the code into a call path, remove it, or gate it behind"
-    echo "  an existing entry point. If removal/wiring is the intent, re-baseline:"
-    echo "    .githooks/pre-commit-deadcode --rebaseline && git add .githooks/deadcode-baseline.txt"
+done
+
+# report_new <label> <baseline> <current>
+# Exits non-zero (via the caller's set -e) when the current set contains
+# functions absent from the baseline.
+GATE_FAILED=0
+report_new() {
+    LABEL="$1"
+    BASE="$2"
+    CUR="$3"
+    # New = in the current set but not in the baseline (comm -13).
+    NEW_FUNCS=$(comm -13 "$BASE" "$CUR" || true)
+    if [ -n "$NEW_FUNCS" ]; then
+        NEW_COUNT=$(printf '%s\n' "$NEW_FUNCS" | grep -c . || true)
+        echo -e "${RED}✗ deadcode gate ($LABEL): $NEW_COUNT newly unwired function(s) — commit blocked${NC}"
+        echo ""
+        printf '%s\n' "$NEW_FUNCS" | head -30 | sed 's/^/  /'
+        TOTAL_SHOW=$(printf '%s\n' "$NEW_FUNCS" | grep -c .)
+        if [ "$TOTAL_SHOW" -gt 30 ]; then
+            echo "  ... and $((TOTAL_SHOW - 30)) more"
+        fi
+        echo ""
+        GATE_FAILED=1
+    else
+        echo -e "${GREEN}✓ deadcode gate ($LABEL): no newly unwired code ($(wc -l < "$CUR" | tr -d ' ') unreachable funcs, at baseline)${NC}"
+    fi
+}
+
+report_new "-test" "$BASELINE" "$TMPDIR_CURRENT/inter.test"
+report_new "no-test" "$BASELINE_NOTEST" "$TMPDIR_CURRENT/inter.notest"
+
+if [ "$GATE_FAILED" -eq 1 ]; then
+    echo "  Fix: wire the code into a production call path, remove it, or gate it"
+    echo "  behind an existing entry point. A function that only its OWN unit"
+    echo "  test calls is NOT wired (the no-test pass exists for exactly this)."
+    echo "  If removal/wiring is the intent, re-baseline:"
+    echo "    .githooks/pre-commit-deadcode --rebaseline && git add .githooks/deadcode-baseline.txt .githooks/deadcode-baseline-notest.txt"
     exit 1
 fi
 
-echo -e "${GREEN}✓ no newly unwired code ($CURRENT_COUNT unreachable funcs, at baseline)${NC}"
 exit 0
