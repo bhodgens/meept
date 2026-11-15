@@ -210,7 +210,7 @@ User Input → CommServer (RPC/HTTP) → MessageBus → AgentLoop → Dispatcher
 | **Scheduling** | `internal/scheduler`, `internal/queue`, `internal/worker` |
 | **Voice** | `internal/voice` (daemon side: call manager, splice, supervisor gate, dial, day brief, registry, child proc, local leg `local.go`/`localsplice.go`), `internal/voiceframe` (stdlib-only shared frame codec), `internal/voicechild` + `cmd/meept-voice` (jargo voice child), `cmd/meept/voice.go` (`voice local`/`voice status` CLI), `internal/rpc/voice_local.go` (`voice.local.*` RPC - full contract in `internal/voice/AGENTS.md`) |
 | **Skills** | `internal/skills`, `internal/selfimprove` |
-| **Infra** | `internal/config`, `internal/metrics`, `internal/transport`, `internal/pty`, `internal/process`, `internal/eval`, `internal/gate` |
+| **Infra** | `internal/config`, `internal/metrics`, `internal/transport`, `internal/pty`, `internal/process`, `internal/eval`, `internal/gate`, `internal/langcode` (shared ISO-639 vocabulary for config validation + validator output filter; docs/workflows/langcode.md) |
 
 See `docs/concepts/architecture.md` for full documentation.
 

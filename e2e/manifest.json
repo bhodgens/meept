@@ -59,6 +59,9 @@
       "output-filters",
       "naive-user-chat"
     ],
+    "internal/langcode/": [
+      "output-filters"
+    ],
     "internal/queue/": [
       "goal-loop",
       "task-queue",
