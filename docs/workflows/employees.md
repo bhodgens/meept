@@ -271,7 +271,7 @@ Runs **before every tool call**, inside the existing `SecurityEngine.Check()` fl
 
 The checker evaluates, in order:
 
-1. **`tools_allowed` / `tools_forbidden`** — allowlist/denylist of tool names.
+1. **`tools_allowed` / `tools_forbidden`** — allowlist/denylist of tool names. A voice turn also hides tools outside that list from the model (`employeeVisibleTools` in `internal/daemon/voice_employee.go`). An empty allowlist still inherits the full registry. The call-time gate remains the enforcement step.
 2. **`risk_ceiling`** — hard upper bound on the risk returned by the engine.
 3. **`escalation_triggers`** — matches against action/tool/details. On match, the action is queued as a Plan in `PendingApproval` routed to `escalates_to`; the current invocation returns without executing.
 

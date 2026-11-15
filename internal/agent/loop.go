@@ -1464,6 +1464,30 @@ func WithToolRegistry(registry ToolRegistry) LoopOption {
 	}
 }
 
+// SetToolRegistry replaces the loop's tool registry. Nil is ignored.
+// Voice employee turns use this on the per-session clone only, so the
+// shared template registry stays the full set.
+func (l *AgentLoop) SetToolRegistry(registry ToolRegistry) {
+	if l == nil || registry == nil {
+		return
+	}
+	l.mu.Lock()
+	l.registry = registry
+	l.applySchemaModeLocked()
+	l.mu.Unlock()
+}
+
+// ToolRegistry returns the registry this loop sends to the model.
+// Nil if the loop is nil or no registry is attached.
+func (l *AgentLoop) ToolRegistry() ToolRegistry {
+	if l == nil {
+		return nil
+	}
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.registry
+}
+
 // SetSchemaModeConfig supplies the [agent.tools] tool-schema settings
 // (loop-economics leaf 02) used to resolve the registry's schema mode.
 // Call it any time before or after the registry is attached; when a registry

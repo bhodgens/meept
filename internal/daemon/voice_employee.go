@@ -296,7 +296,7 @@ func employeeSystemPrompt(def *employee.Employee) string {
 // (GetOrCreateWired never returns the shared template), so concurrent
 // sessions are isolated by construction. Returns the override actually
 // applied ("" = template persona) for logging/tests.
-func applyEmployeeDefinition(ctx context.Context, loop *agent.AgentLoop, employeeID string, resolver EmployeeDefinitionResolver, logger *slog.Logger) string {
+func applyEmployeeDefinition(ctx context.Context, loop *agent.AgentLoop, employeeID string, resolver EmployeeDefinitionResolver, parent agent.ToolRegistry, logger *slog.Logger) string {
 	if resolver == nil || employeeID == "" {
 		return ""
 	}
@@ -331,6 +331,18 @@ func applyEmployeeDefinition(ctx context.Context, loop *agent.AgentLoop, employe
 		if len(c.Constraints.Never) > 0 {
 			cfg.Restrictions = strings.Join(c.Constraints.Never, "; ")
 		}
+		// A non-empty allowlist, or an explicit forbid list, is the tool
+		// list the model may see. Empty constraints keep the template
+		// registry (inherit-everything), byte-identical to before.
+		if parent != nil {
+			visible := employeeVisibleTools(parent, &c)
+			loop.SetToolRegistry(visible)
+			if visible != parent {
+				cfg.OmitEvidenceFormatTemplate = len(visible.GetDefinitions()) == 0
+			}
+		}
+	} else if parent != nil {
+		loop.SetToolRegistry(parent)
 	}
 	loop.SetConfig(cfg)
 
@@ -343,6 +355,72 @@ func applyEmployeeDefinition(ctx context.Context, loop *agent.AgentLoop, employe
 		loop.SetPersistentModelOverride(ref)
 	}
 	return override
+}
+
+// templateRegistry is the full tool list the shared voice template holds.
+// The per-session clone must filter from this list, not from its own
+// registry: a second turn would otherwise filter an already-filtered set.
+func templateRegistry(loop *agent.AgentLoop) agent.ToolRegistry {
+	if loop == nil {
+		return nil
+	}
+	return loop.ToolRegistry()
+}
+
+// employeeVisibleTools returns the tool registry a voice turn may show the
+// model. A constitution with no tool constraint returns parent unchanged
+// (inherit-everything). tools_forbidden "*" returns a deny-all registry.
+// A non-empty tools_allowed is intersected with the parent and then minus
+// tools_forbidden. Names match case-insensitively; the registry keeps the
+// parent's spelling so Get stays exact.
+func employeeVisibleTools(parent agent.ToolRegistry, c *employee.Constitution) agent.ToolRegistry {
+	if parent == nil || c == nil {
+		return parent
+	}
+	allowed := c.Constraints.ToolsAllowed
+	forbidden := c.Constraints.ToolsForbidden
+	if len(allowed) == 0 && len(forbidden) == 0 {
+		return parent
+	}
+	for _, name := range forbidden {
+		if strings.TrimSpace(name) == "*" {
+			return agent.NewFilteredToolRegistry(parent, nil, agent.WithDenyAll())
+		}
+	}
+	deny := make(map[string]struct{}, len(forbidden))
+	for _, name := range forbidden {
+		key := strings.ToLower(strings.TrimSpace(name))
+		if key != "" {
+			deny[key] = struct{}{}
+		}
+	}
+	want := make(map[string]struct{}, len(allowed))
+	for _, name := range allowed {
+		key := strings.ToLower(strings.TrimSpace(name))
+		if key != "" {
+			want[key] = struct{}{}
+		}
+	}
+	var names []string
+	for _, tool := range parent.List() {
+		if tool == nil {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(tool.Name()))
+		if _, no := deny[key]; no {
+			continue
+		}
+		if len(want) > 0 {
+			if _, yes := want[key]; !yes {
+				continue
+			}
+		}
+		names = append(names, tool.Name())
+	}
+	if len(names) == 0 {
+		return agent.NewFilteredToolRegistry(parent, nil, agent.WithDenyAll())
+	}
+	return agent.NewFilteredToolRegistry(parent, names)
 }
 
 // voiceTurnTimeLayout is the clock layout for the voice-turn stamp:
@@ -446,7 +524,7 @@ func (r *loopTurnRunner) Run(ctx context.Context, sess voice.SessionHandle, prom
 	} else {
 		loop.SetMomentRenderer(nil)
 	}
-	if override := applyEmployeeDefinition(ctx, loop, employeeID, r.employees, r.logger); override != "" {
+	if override := applyEmployeeDefinition(ctx, loop, employeeID, r.employees, templateRegistry(r.template), r.logger); override != "" {
 		r.logger.Debug("voice turn runner: employee persona applied",
 			"session_id", sess.ID, "employee_id", employeeID, "prompt_bytes", len(override))
 	}
@@ -470,6 +548,7 @@ func (r *loopTurnRunner) Run(ctx context.Context, sess voice.SessionHandle, prom
 				"session_id", sess.ID, "employee_id", employeeID)
 		}
 	}
+
 	// Clock stamp (live defect 2026-11-11: asked "what time is it?" the
 	// companion answered "I can't check the current time" — the voice turn
 	// carried no clock, and the model honestly reported what its prompt
@@ -499,7 +578,8 @@ func (r *loopTurnRunner) Run(ctx context.Context, sess voice.SessionHandle, prom
 	// (C-3) see the same raw prompt as before.
 	now := time.Now().In(r.resolveVoiceTurnLocation(ctx, employeeID))
 	stamp := voiceTurnContextStamp(now)
-	reply, err := loop.RunOnce(agent.WithVoiceClockStamp(ctx, stamp), prompt, sess.ConversationID)
+	turnCtx := agent.WithVoiceClockStamp(ctx, stamp)
+	reply, err := loop.RunOnce(turnCtx, prompt, sess.ConversationID)
 	if err != nil {
 		return "", err
 	}
@@ -531,7 +611,7 @@ func (r *loopTurnRunner) Run(ctx context.Context, sess voice.SessionHandle, prom
 			"conversation_id", sess.ConversationID,
 			"matched", violation,
 		)
-		retry, retryErr := loop.RunVoiceSpokenRewriteRetry(ctx, sess.ConversationID)
+		retry, retryErr := loop.RunVoiceSpokenRewriteRetry(turnCtx, sess.ConversationID)
 		if retryErr != nil {
 			r.logger.Warn("voice spoken-guard rewrite retry failed; shipping the canned spoken line",
 				"session_id", sess.ID, "error", retryErr)

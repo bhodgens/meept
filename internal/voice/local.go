@@ -483,7 +483,9 @@ func (l *LocalLeg) Open(ctx context.Context, employeeID, label string, voiceOver
 	// paced tail actually leaves the socket.
 	go func() {
 		drainFn := wiredAudioDrain(l.deps.LinkTurns, target)
-		err := RunLocalSplice(spliceCtx, ccid, LocalSpliceConfig{}, LocalSpliceDeps{
+		err := RunLocalSplice(spliceCtx, ccid, LocalSpliceConfig{
+			CallerSpeechFloor: callerSpeechFloor(l.bargeInRmsFor(employeeID)),
+		}, LocalSpliceDeps{
 			Audio:        pair,
 			Client:       localClientIO{cli: cliPair},
 			Text:         rawTextSender{srv: l.deps.TextServer},
@@ -541,6 +543,28 @@ func (l *LocalLeg) Open(ctx context.Context, employeeID, label string, voiceOver
 	}, nil
 }
 
+// bargeInRmsFor resolves the per-call local barge-in RMS. A nil seam
+// keeps the leg-level value, byte-identical to the pre-seam open frame.
+func (l *LocalLeg) bargeInRmsFor(employeeID string) int {
+	if l != nil && l.deps.BargeInRms != nil {
+		return l.deps.BargeInRms(employeeID)
+	}
+	if l == nil {
+		return 0
+	}
+	return l.cfg.BargeInRms
+}
+
+// callerSpeechFloor is the loose inbound-speech floor: one quarter of
+// the barge-in RMS, matching the child's noteMicEnergy floor. 0 stays 0
+// so a disabled VAD does not stamp every silent chunk.
+func callerSpeechFloor(bargeInRms int) int {
+	if bargeInRms <= 0 {
+		return 0
+	}
+	return bargeInRms / 4
+}
+
 // sendOpenFrame builds and sends the CL1 open frame for st. Identity
 // mirrors the phone producer's sendOpenFrame: child-native codec
 // (L16@16000 - the NEGOTIATED wire codec belongs to the splice), the
@@ -557,13 +581,7 @@ func (l *LocalLeg) sendOpenFrame(st *localCallState) error {
 		Codec:      "L16",
 		SampleRate: 16000,
 		Local:      true,
-		BargeInRms: l.cfg.BargeInRms,
-	}
-	// Per-call barge-in RMS override (voice-peragent leaf 01): the
-	// seam resolves the employee_leg row over the leg-level value;
-	// nil seam = the leg-level value, byte-identical.
-	if l.deps.BargeInRms != nil {
-		f.BargeInRms = l.deps.BargeInRms(st.employee)
+		BargeInRms: l.bargeInRmsFor(st.employee),
 	}
 	if l.deps.Profile != nil {
 		p := l.deps.Profile(st.employee)

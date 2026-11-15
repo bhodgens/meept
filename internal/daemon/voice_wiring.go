@@ -1070,7 +1070,8 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 			// stay nil = the loop's silence path is byte-identical
 			// (mirror rule of the link seams above: OPTIONAL seams only,
 			// never wire link-era postures onto the phone lane).
-			AudioActive: silenceAudioActiveFor(inst.Leg),
+			AudioActive:  silenceAudioActiveFor(inst.Leg),
+			CallerActive: silenceCallerActiveFor(inst.Leg),
 			// Operator telemetry (voice-events): append the loop's
 			// dispatch/final/barge-in/ended events to the shared per-call
 			// ring, polled via voice.local.events. Pure bookkeeping;
@@ -1251,13 +1252,10 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 			// never registered a warmer (voice.context_warm=false).
 			voice.RouteFinal(f.CallID)
 			// Heard TEXT source: the RAW transcript rides From in
-			// aggregation mode (leaf 03), and From is read BEFORE the
-			// swap below moves it into Text. A final with NO From —
-			// legacy per-final mode (turn_confirm_ms=0 never fills raw)
-			// or an older/fake child — falls back to Text: an empty
-			// heard event makes the operator's live feed lie
-			// ("heard: " with nothing), the exact user-visible class of
-			// the local-53b347f028f0a43f transcript regression.
+			// aggregation mode. From is read BEFORE the swap below moves
+			// it into Text. The live line carries the full sentence.
+			// A final with no From (legacy per-final mode, or an older
+			// child) falls back to Text. An empty heard line would lie.
 			heardText := f.From
 			if heardText == "" {
 				heardText = f.Text
@@ -1266,7 +1264,7 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 			case loop.Frames() <- f:
 				w.callEvents.Append(f.CallID, voice.EventInput{
 					Kind:  voice.EventKindHeard,
-					Text:  voice.PreviewEventText(heardText),
+					Text:  strings.TrimSpace(heardText),
 					Words: len(strings.Fields(heardText)),
 				})
 			default:
@@ -1517,6 +1515,19 @@ func silenceAudioActiveFor(leg string) func(ccid string, window time.Duration) b
 	}
 	return func(ccid string, window time.Duration) bool {
 		return voice.LocalSpliceFor(ccid).TailActive(window)
+	}
+}
+
+// silenceCallerActiveFor builds the talk loop's CallerActive seam for
+// one leg. LOCAL legs read the live splice's inbound speech stamp.
+// Every other leg returns nil so the phone silence path stays
+// byte-identical.
+func silenceCallerActiveFor(leg string) func(ccid string, window time.Duration) bool {
+	if leg != voice.LegLocal {
+		return nil
+	}
+	return func(ccid string, window time.Duration) bool {
+		return voice.LocalSpliceFor(ccid).CallerSpeaking(window)
 	}
 }
 

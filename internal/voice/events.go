@@ -58,6 +58,11 @@ const (
 	// fix, call local-53b347f028f0a43f). Reason carries the consecutive
 	// deferral count. Local legs with the AudioActive seam only.
 	EventKindSilenceDeferred = "silence_deferred"
+	// EventKindSaid: one sentence the talk loop handed to the child
+	// (greeting, filler, reply, fallback, clarify, silence nudge).
+	// Text is the FULL sentence, not a preview. At is say-send time,
+	// which is before the speakers play it.
+	EventKindSaid = "said"
 )
 
 // Ring sizing: DefaultCallEvents is the per-call ring capacity the daemon
@@ -69,8 +74,10 @@ const (
 	DefaultCallEventRings = 32
 )
 
-// TelemetryEvent is one ring entry. Text is always a PREVIEW (truncated
-// at the emitter by PreviewEventText), never full transcript material.
+// TelemetryEvent is one ring entry. Text is a PREVIEW (truncated at the
+// emitter by PreviewEventText) for kinds other than heard and said.
+// heard and said carry the full sentence: the live operator feed is the
+// transcript, not a 40-rune preview.
 type TelemetryEvent struct {
 	Seq    uint64    `json:"seq"`
 	Kind   string    `json:"kind"`

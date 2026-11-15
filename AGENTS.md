@@ -385,7 +385,9 @@ prints the call's stored transcript at call end over the read-only
 `voice.local.transcript` RPC (call-scoped, best-effort). The silence
 nudge's clock is AUDIO-AWARE on local legs via the optional
 `TalkDeps.AudioActive` seam (fire re-arms while the agent's own audio is
-active, bounded at 2 deferrals; nil = byte-identical - full contract in
+active, bounded at 2 deferrals) and CALLER-AWARE via optional
+`TalkDeps.CallerActive` (a loud inbound chunk inside 1 s re-arms a fresh
+window and does not speak; nil = byte-identical - full contract in
 `internal/voice/AGENTS.md`). The optional SECOND
 cleartext listener (`voice.loopback_plain_addr`, leaf 10 T6) is booted by
 `internal/daemon/voice_plain_boot.go` from `VoiceWiring.Start` when the

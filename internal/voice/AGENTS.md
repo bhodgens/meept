@@ -445,6 +445,25 @@ that tree's master.md; the invariants below are the as-built form).
   nil-safe splice lookup); phone/signal/legacy/test callers keep it nil =
   byte-identical silence path (mirror rule of the link seams). Pinned by
   talkloop_silence_audio_test.go + TestSilenceAudioActiveForLegs.
+- CALLER-SPEECH HOLD (live call local-a7588dbe40dbe78c): AudioActive
+  only sees outbound agent audio. A caller who has started speaking
+  does not stop the clock until a last:true final arrives, so the
+  nudge spoke over them. OPTIONAL `TalkDeps.CallerActive(ccid, window)`
+  holds the nudge and the hangup when inbound speech was loud inside
+  the 1 s lookback. It re-arms a fresh S window and is NOT charged
+  against silenceAudioDeferralCap. A separate cap
+  (silenceCallerDeferralCap, 6) still lets a stuck-hot mic reach the
+  nudge. Daemon wiring arms it for LOCAL legs only
+  (`silenceCallerActiveFor` -> `LocalSpliceFor(ccid).CallerSpeaking`).
+  The splice stamps micLastLoud when an inbound chunk's s16 RMS meets
+  CallerSpeechFloor (barge_in_rms/4; 0 stamps nothing). Phone legs keep
+  the seam nil. Pinned by TestTalkLoopSilenceHoldsWhileCallerSpeaking
+  and TestSilenceCallerActiveForLegs.
+- LIVE TRANSCRIPT: `say` emits event kind `said` with the full sentence
+  (not a preview). `heard` also carries the full sentence. `voice local`
+  prints speaker on at the first played burst and speaker off after a
+  350 ms gap, a clear, or end of stream, and attaches queued `said`
+  lines to that window.
 
 ## Supervisor gate (C6): fail-open per sentence, never parked
 

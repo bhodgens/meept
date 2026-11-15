@@ -265,3 +265,68 @@ func TestTalkLoopHangupWindowDefersAndStillHangsUp(t *testing.T) {
 		t.Error("nudge never spoken before the hangup")
 	}
 }
+
+// Caller speech holds the nudge. AudioActive is false. CallerActive is
+// true for the first fire only. The nudge must not speak on that fire,
+// and the hold must not count as an agent-audio deferral.
+func TestTalkLoopSilenceHoldsWhileCallerSpeaking(t *testing.T) {
+	withMsSilenceUnit(t)
+	sink := &recordSink{}
+	capH := &captureHandler{}
+	endReasons := make(chan string, 1)
+	caller := &countingAudioActive{remain: 1}
+	var eventsMu sync.Mutex
+	var events []EventInput
+
+	deps := TalkDeps{
+		Supervisor:   &cannedSupervisor{},
+		Turns:        &cannedTurns{reply: "Back with an answer."},
+		SessionFor:   constSession(SessionHandle{ID: "s", ConversationID: "c"}),
+		Send:         sink.Send,
+		OnEnd:        func(ccid, reason string) { endReasons <- reason },
+		Logger:       slog.New(capH),
+		CallerActive: caller.fn,
+		OnEvent: func(_ string, in EventInput) uint64 {
+			eventsMu.Lock()
+			events = append(events, in)
+			eventsMu.Unlock()
+			return 1
+		},
+	}
+	loop := NewTalkLoop(deps, TalkLoopConfig{
+		GreetingLine:              "Welcome.",
+		SilencePromptSeconds:      20,
+		SilencePromptLine:         "Are you still there?",
+		SilenceHangupAfterSeconds: 20,
+	})
+	cancel, done := runLoop(t, loop, "cc-caller")
+	defer func() { cancel(); <-done }()
+
+	waitFor(t, 2*time.Second, "nudge never spoken after caller went quiet", func() bool {
+		return strings.Contains(strings.Join(sink.sayTexts(), "|"), "Are you still there?")
+	})
+	if got := countDeferred(capH); got != 0 {
+		t.Errorf("agent-audio deferrals = %d, want 0", got)
+	}
+	capH.mu.Lock()
+	held := 0
+	for _, r := range capH.records {
+		if strings.Contains(r.Message, "caller speaking") {
+			held++
+		}
+	}
+	capH.mu.Unlock()
+	if held != 1 {
+		t.Errorf("caller holds = %d, want 1", held)
+	}
+	if caller.lastWindow() != silenceCallerLookback {
+		t.Errorf("caller lookback = %s, want %s", caller.lastWindow(), silenceCallerLookback)
+	}
+	eventsMu.Lock()
+	defer eventsMu.Unlock()
+	for _, in := range events {
+		if in.Kind == EventKindSilenceDeferred && in.Reason != "caller" {
+			t.Errorf("hold reason = %q, want caller", in.Reason)
+		}
+	}
+}

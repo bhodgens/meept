@@ -1537,3 +1537,17 @@ func TestLocalSpliceLatchBargeInAudioPlaneOnly(t *testing.T) {
 		t.Fatalf("latch line fired %d times, want 1 (per-barge-in guard)", got)
 	}
 }
+
+func TestS16leRMSOver(t *testing.T) {
+	quiet := make([]byte, 4)
+	if s16leRMSOver(quiet, 100) {
+		t.Fatal("silence must not clear the floor")
+	}
+	loud := []byte{0x00, 0x40, 0x00, 0x40} // two samples of 16384
+	if !s16leRMSOver(loud, 1000) {
+		t.Fatal("loud samples must clear a 1000 floor")
+	}
+	if s16leRMSOver(loud, 0) {
+		t.Fatal("a zero floor must never report loud")
+	}
+}
