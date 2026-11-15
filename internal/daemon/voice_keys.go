@@ -90,6 +90,18 @@ type keysWire struct {
 	// wire-zero: absent (old daemon) = the child's own 15 s default;
 	// an explicit 0 disables the reply exemption.
 	ReplyExemptS *int `json:"reply_exempt_s,omitempty"`
+	// TTSRefHash is the filler-clip identity input (plan
+	// 20261113-filler-clips leaf 02, Contract C1): hex(sha256(reference
+	// audio bytes)) for a qwen3 CLONE voice, "" for a preset voice.
+	// Sent always (no omitempty, the keys-wire convention); an old
+	// child ignores the extra field. The qwen3 endpoint is an
+	// OpenAI-compatible shim and the clone REFERENCE never rides a
+	// request — this hash feeds ONLY clip-key identity, so two
+	// deployments sharing model+voice name but different reference
+	// audio get different clip keys. The child hex-decodes it back to
+	// the bytes the daemon's planner fed clipstore.ClipKey
+	// (voicechild.decodeTTSRefHash — byte agreement pinned there).
+	TTSRefHash string `json:"tts_ref_hash"`
 }
 
 // Default vendor adapters when the config fields are empty (C4: preserves
@@ -130,7 +142,11 @@ func (w *VoiceWiring) sendKeysFrame(ccid string) {
 			break
 		}
 	}
-	p := voice.ResolveProfile(w.cfg, employeeID, "", leg)
+	// VoiceConfig snapshot: the LIVE one once a daemon.reloaded
+	// republished it (leaf 02), the construction value otherwise. Same
+	// profile/acoustics resolution as before — only the source moves.
+	vcfg := w.currentVoiceCfg()
+	p := voice.ResolveProfile(vcfg, employeeID, "", leg)
 	// Acoustic controls (voice-peragent leaf 01): resolve the whole
 	// per-employee set ONCE per call (employee_leg row > global,
 	// voice.ResolveAcoustics) and let every gate selector read it. The
@@ -139,7 +155,7 @@ func (w *VoiceWiring) sendKeysFrame(ccid string) {
 	// default set; a loaded config carries DefaultConfig's or the
 	// user's list), so the child never has to guess between "absent"
 	// and "empty = no exemptions".
-	ac := voice.ResolveAcoustics(w.cfg, employeeID)
+	ac := voice.ResolveAcoustics(vcfg, employeeID)
 	if ac.ExemptPhrases == nil {
 		ac.ExemptPhrases = config.DefaultVoiceExemptPhrases()
 	}
@@ -152,7 +168,7 @@ func (w *VoiceWiring) sendKeysFrame(ccid string) {
 		STTModel:   p.SttModel,
 		TTSVendor:  p.TtsVendor,
 		TTSModel:   p.TtsModel,
-		TTSBaseURL: w.cfg.TTSBaseURL,
+		TTSBaseURL: vcfg.TTSBaseURL,
 		TTSVoice:   p.TtsVoice,
 		// Turn-aggregation window (voice-startguard C1) — per-agent
 		// since voice-peragent leaf 01 (employee_leg.turn_confirm_ms
@@ -173,6 +189,10 @@ func (w *VoiceWiring) sendKeysFrame(ccid string) {
 		MinRMS:         ac.MinRMS,
 		FragmentDecayS: ac.FragmentDecayS,
 		ReplyExemptS:   &replyExemptS,
+		// Clip identity (leaf 02): the SAME ref-hash bytes the planner
+		// fed ClipKey for this call ("" = preset/non-clone). The hash
+		// is content-addressed, never the file path or its bytes.
+		TTSRefHash: refHashHex(w.ttsRefHash(vcfg)),
 	}
 	if kw.STTVendor == "" {
 		kw.STTVendor = defaultSTTVendor
@@ -183,7 +203,7 @@ func (w *VoiceWiring) sendKeysFrame(ccid string) {
 	// STT base URL: when set, the child dials Deepgram (or any
 	// wire-compatible STT) at this endpoint instead of the cloud default
 	// - the same contract TTS honors for tts_base_url.
-	kw.STTBaseURL = w.cfg.STTBaseURL
+	kw.STTBaseURL = vcfg.STTBaseURL
 	if w.broker == nil {
 		// Loud WARN in the ResolveVoiceSecrets style: a broker-less
 		// install must still run, but every cloud-provider call would

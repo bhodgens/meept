@@ -363,3 +363,40 @@ pinned by the tree's gate tests (`health_checker_verdict_internal_test.go`,
   `AvgTTFTMs` (store.go:911) averages ONLY measured rows. Non-streaming
   calls, exact/semantic cache hits (they short-circuit before any clock
   arm), and errors stay -1 — never write 0 for "not measured".
+
+## Context-warm seam (`Client.Warm`, plan 20261113-filler-clips-and-context-warm phase 2)
+
+`Warm` (internal/llm/warm.go) pre-issues a throwaway max_tokens=1,
+non-streaming chat request whose ONLY purpose is planting the imminent
+turn's prefix in the provider prompt cache / KV slot. Invariants:
+
+- **Prefix identity over the real serialization path.** The request is
+  built through the SAME buildChatRequest shape a real turn uses
+  (system-prompt cache boundary, ToOpenAIDictWithStore rendering, stable
+  tool order, prompt_cache_key, affinity header via
+  applyExtraHeaders + applyAffinityHeader), so the cached prefix matches
+  by construction. A divergence on ANY field silently kills the cache
+  hit — that is the whole feature.
+- **Zero side effects are the contract (R8).** Warm participates in NONE
+  of: the short-retry budget, recordAliasFailure / endpoint / alias /
+  quota blocks, the slot gate / pacer, the budget gate, semantic-cache
+  put, the `llm_calls` ledger, metrics.Store records, tier signaling, WS
+  relay, or session messages. It never returns a completion or an error;
+  ANY failure (transport, `*QuotaResetError`, 4xx, timeout, panic) is
+  DEBUG-logged and swallowed. Do not route it through doRequest — that
+  function owns the slot gate, pacer, Error-level logging, and metrics
+  rows.
+- **One lane per client, replace-discard.** A new Warm cancels the
+  in-flight one rather than queueing; a hung warm is bounded by an
+  internal ceiling deadline over the caller ctx so the lane always
+  releases. The completion text is discarded and NEVER logged.
+- **Provider coverage.** Only the OpenAI-compatible `Client` performs a
+  real warm (the llama.cpp-family serving tier). `AnthropicClient.Warm`
+  and `CodexClient.Warm` are explicit no-op twins by design — keep the
+  `warmDispatcher` shape every client class implements so callers never
+  type-switch.
+- **`alias` is a DEBUG-attribution label only.** A bare *Client serves
+  whatever (possibly Reconfigured) config it holds; request-scoped alias
+  resolution is the Resolver/ProviderManager lane and is not reachable
+  from Warm. Callers pass the alias of the real turn for log
+  correlation.

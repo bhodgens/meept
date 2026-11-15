@@ -9,7 +9,8 @@ summaries; the full contracts live next to the code:
 internal/llm/     -> internal/llm/AGENTS.md     (quota blocks, refusals, alias resolution,
                                                  session affinity headers, sticky rotation,
                                                  upstream teardown, serving-tier policy,
-                                                 semantic cache tier, TTFT)
+                                                 semantic cache tier, TTFT, context-warm
+                                                 seam (Client.Warm))
 internal/session/ -> internal/session/AGENTS.md (lifecycle hooks, idle reaper)
 internal/daemon/  -> internal/daemon/AGENTS.md  (runtime lifecycle, spawn guards)
 internal/agent/   -> internal/agent/AGENTS.md   (chat contracts, output filters, session IDs)
@@ -208,7 +209,7 @@ User Input → CommServer (RPC/HTTP) → MessageBus → AgentLoop → Dispatcher
 | **TUI** | `internal/tui` (app, commands, components, handlers, modals, models, tableutil) |
 | **GUI** | `ui/flutter_ui` (Flutter web + desktop) |
 | **Scheduling** | `internal/scheduler`, `internal/queue`, `internal/worker` |
-| **Voice** | `internal/voice` (daemon side: call manager, splice, supervisor gate, dial, day brief, registry, child proc, local leg `local.go`/`localsplice.go`), `internal/voiceframe` (stdlib-only shared frame codec), `internal/voicechild` + `cmd/meept-voice` (jargo voice child), `cmd/meept/voice.go` (`voice local`/`voice status` CLI), `internal/rpc/voice_local.go` (`voice.local.*` RPC - full contract in `internal/voice/AGENTS.md`) |
+| **Voice** | `internal/voice` (daemon side: call manager, splice, supervisor gate, dial, day brief, registry, child proc, local leg `local.go`/`localsplice.go`, filler lane pools `lanes.go`, partial context warm `contextwarm.go`, content-addressed clip cache `internal/voice/clipstore`), `internal/voiceframe` (stdlib-only shared frame codec), `internal/voicechild` + `cmd/meept-voice` (jargo voice child; clip render/playback `clips.go`), `cmd/meept/voice.go` (`voice local`/`voice status` CLI), `internal/rpc/voice_local.go` (`voice.local.*` RPC - full contract in `internal/voice/AGENTS.md`), `internal/llm/warm.go` (`Client.Warm` cache-warming seam) |
 | **Skills** | `internal/skills`, `internal/selfimprove` |
 | **Infra** | `internal/config`, `internal/metrics`, `internal/transport`, `internal/pty`, `internal/process`, `internal/eval`, `internal/gate` |
 
@@ -344,7 +345,8 @@ and errors never write 0.
 
 Full rules live in `internal/voice/AGENTS.md` (frames, sockets,
 reorder/pacing/barge-in, release fan-out, secrets lanes, child
-confinement, one-live-call-per-employee, local-leg invariants);
+confinement, one-live-call-per-employee, local-leg invariants, filler
+clip cache + lane pools + farewell, partial context warm);
 user-facing docs are
 `docs/workflows/voice-sidecar.md` (spec rev 3 + as-built) and
 `docs/workflows/voice.md`. Short form: C1 text frames are byte-exact
@@ -391,7 +393,27 @@ knob is non-empty, rides the voice subsystem's stop context, and MUST
 bind loopback: a non-loopback address (name-checked AND actual-bind
 re-checked) is `ErrNonLoopbackVoiceAddr` and fails the startup loudly,
 never degrades. Its mux carries the same per-IP rate limit + access
-logging as the main listener's voice chain.
+logging as the main listener's voice chain. FILLER CLIP CACHE + LANE
+POOLS (plan 20261113-filler-clips-and-context-warm phase 1): every
+filler-class line (greeting/filler/silence nudge/fragment clarify/
+farewell) belongs to one enumerable C5 lane pool (ladder row list > row
+scalar > global list > global scalar > default; list "set" = non-empty,
+so unset new keys are byte-identical; the farewell pool ships
+non-empty and speaks a goodbye on a detected caller bye, exactly once
+per call); the daemon's clip planner pre-renders misses to the child as
+C3 `clip_render` frames ONLY behind the R4 gate (live child + complete
+resolved TTS identity + voice employee — sidecar disabled writes
+nothing), the child caches PCM under `$MEEPT_HOME/voice_clips/` keyed by
+the frozen C1 sha256 formula, and filler-class `say` frames carry
+`clip_id`; a store hit replaces synth entirely, a miss or an old child
+falls through to live synth byte-identically. TEXT stays the transcript
+source — a clip never makes a second speech path. PARTIAL CONTEXT WARM
+(phase 2, `voice.context_warm` opt-in default false): debounced STT
+partials fire `llm.Client.Warm` (max_tokens=1, same rendered prefix +
+session-affinity scope as the imminent turn) so the real turn pays
+decode, not prefill; warm never starts a turn or tools, consumes no
+budget, never touches blocks/metrics, and its failures are silent
+(DEBUG). Full contracts (C1-C6) in `internal/voice/AGENTS.md`.
 
 ### The github_* tools register through the tool-provider seam; githubsvc never imports builtin
 

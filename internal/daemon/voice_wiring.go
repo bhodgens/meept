@@ -52,6 +52,7 @@ import (
 	"github.com/caimlas/meept/internal/tools/builtin"
 	"github.com/caimlas/meept/internal/voice"
 	"github.com/caimlas/meept/internal/voice/telnyx"
+	"github.com/caimlas/meept/internal/voiceframe"
 )
 
 // VoiceWiring is the constructed voice stack carried on Components. Every
@@ -200,6 +201,25 @@ type VoiceWiring struct {
 	// tests inject an immediately-returning Serve to pin the
 	// immediate-exit-is-fatal contract.
 	plainServe func(ctx context.Context, addr string) error
+
+	// Filler-clip planner (plan 20261113-filler-clips leaf 02). Nil on
+	// hand-built test wirings that skip initClipPlanner (the planner
+	// methods guard nil); production arms both via WireVoice.
+	clipPlanner *ClipPlanner
+	refCache    *refHashCache
+	// cfgMu guards cfgLive: the LIVE [voice] snapshot republished on
+	// daemon.reloaded (the keys frame, clip identity, and lane pools all
+	// read currentVoiceCfg; w.cfg itself stays the immutable
+	// construction value so pre-leaf readers never race the swap).
+	cfgMu   sync.RWMutex
+	cfgLive *config.VoiceConfig
+
+	// contextWarmer is this wiring's registered partial-warm state
+	// machine (phase2-context-warm leaf 02; nil when the feature is
+	// off). Kept for the Stop-path's identity-guarded unregister:
+	// the package seam is process-global, so Stop must only clear it
+	// when the live registration is OUR warmer.
+	contextWarmer *voice.ContextWarmer
 }
 
 // WireVoiceDeps carries the components WireVoice captures. All pointer
@@ -619,6 +639,31 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		w.tel = tel
 		w.telClient = tel
 	}
+	// Filler-clip planner (leaf 02): cheap + inert construction — the
+	// store dir is NEVER created here (R4); the first filesystem read
+	// happens on a gated, async planner pass.
+	w.initClipPlanner()
+
+	// -- 6c. Context warm (phase2-context-warm leaf 02, C6): construct
+	// and register the partial-triggered warmer ONCE per daemon, only
+	// when voice.context_warm is true (disabled = zero overhead: the
+	// warmer is never allocated, never registered, and the routeFrame
+	// hooks read one nil atomic pointer per partial frame). The
+	// request ctx parents on this wiring's lifecycle ctx so daemon
+	// shutdown cancels every in-flight warm. Stop unregisters.
+	if cw := w.newContextWarmer(ctx, contextWarmSources{
+		Loops:     deps.Loops,
+		Template:  deps.Template,
+		Employees: deps.Employees,
+		Sessions:  deps.Sessions,
+		Moment:    deps.MomentResolver,
+	}); cw != nil {
+		voice.SetContextWarmRouting(cw)
+		w.contextWarmer = cw
+		vlog.Info("voice wiring: context warm enabled",
+			"min_tokens", w.cfg.ContextWarmMinTokens,
+			"window_ms", w.cfg.TurnConfirmMs)
+	}
 
 	// -- 7a-b. Call recording (leaf 06, T3): consent gate evaluated at
 	// STARTUP, never lazily at first call. record_calls=true with an
@@ -903,6 +948,21 @@ func dialAuditMaskedTarget(target string) string {
 // loop registered for that call_control_id.
 func (w *VoiceWiring) routeFrame(f voice.Frame) {
 	switch f.Event {
+	case voiceframe.EventClipReady:
+		// Child -> daemon result of one clip_render entry (leaf 02,
+		// C3): {key, ok}. Pure observability — the store already has
+		// (or lacks) the clip regardless of this frame, and a missing
+		// clip falls through to live synth. DEBUG + the per-call
+		// telemetry ring (nil-safe append, no new bus topic).
+		ok := false
+		if f.OK != nil {
+			ok = *f.OK
+		}
+		w.logger.Debug("voice wiring: clip ready", "ccid", f.CallID, "key", f.Key, "ok", ok)
+		w.callEvents.Append(f.CallID, voice.EventInput{
+			Kind:   "clip_ready",
+			Reason: f.Key,
+		})
 	case voice.EventPlayed:
 		// Child -> daemon end-of-turn AUDIO marker (turn-final drain fix):
 		// the final byte of a last:true say stream left the child's .out
@@ -963,6 +1023,24 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 		// employee_leg row over the global [voice] block, resolved ONCE
 		// here for the talk-loop knobs below.
 		loopAcoustics := voice.ResolveAcoustics(w.cfg, inst.EmployeeID)
+		// Clip identity for the talk loop (plan 20261113-filler-clips
+		// leaf 04): the SAME inputs the clip planner keys with, so
+		// clip_id-bearing say frames hit exactly the store the planner
+		// renders into. Incomplete identity (R4 gate b) => nil => no
+		// clip_id => today's frames byte-identically.
+		var clipIdent *voice.ClipIdentity
+		{
+			vcfg := w.currentVoiceCfg()
+			p := voice.ResolveProfile(vcfg, inst.EmployeeID, "", inst.Leg)
+			vendor := p.TtsVendor
+			if vendor == "" {
+				vendor = defaultTTSVendor
+			}
+			tid := TTSIdentity{Vendor: vendor, Model: p.TtsModel, Voice: p.TtsVoice, RefHash: w.ttsRefHash(vcfg)}
+			if tid.Complete() {
+				clipIdent = &voice.ClipIdentity{Vendor: tid.Vendor, Model: tid.Model, Voice: tid.Voice, RefHash: tid.RefHash}
+			}
+		}
 		var holdPrompt func(voice.Instance, func()) bool
 		var turnState func(ccid string, seq uint64, kind string)
 		suppressGreeting := false
@@ -1026,6 +1104,8 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 			// fragment (dispatched after fragment_confirm_ms with no
 			// continuation). empty = legacy behavior.
 			FragmentClarify: w.cfg.FragmentClarify,
+			Lanes:           w.lanesFor(inst.EmployeeID),
+			Identity:        clipIdent,
 		})
 		// H4 + A10: arm the per-call context and install the loop in ONE
 		// critical section. releaseCall cancels the ctx so a released
@@ -1069,6 +1149,13 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 		// (refused setups send nothing). Send failure degrades inside
 		// sendKeysFrame (warn, no teardown).
 		w.sendKeysFrame(f.CallID)
+		// Leaf 02 (R4 gate (a) by construction): the setup frame just
+		// arrived THROUGH the child's text connection, so a child is
+		// live for this call. The clip planner pass rides the call's
+		// own loop context (teardown = cancel) and runs async — the
+		// keys frame and the talk loop above are never delayed by the
+		// store diff. Gates (b)/(c) are checked inside.
+		w.planClipsForCall(loopCtx, f.CallID, inst.EmployeeID, inst.Leg)
 		go func() {
 			// Talk loop lives for the call; Run returns at end (end
 			// frame, timers) or when releaseCall cancels loopCtx. Run's
@@ -1157,6 +1244,12 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 			// the additive activity observers (one nil-check when no
 			// reaper runs); the notify itself is pure bookkeeping.
 			w.Manager.NotifyCallActivity(f.CallID)
+			// Context warm (phase2 leaf 02): the imminent real turn
+			// supersedes every pending/in-flight warm for this call —
+			// abandon BEFORE the turn's request can race a zombie warm
+			// for the provider lane. Nil-safe no-op when the feature
+			// never registered a warmer (voice.context_warm=false).
+			voice.RouteFinal(f.CallID)
 			// Heard TEXT source: the RAW transcript rides From in
 			// aggregation mode (leaf 03), and From is read BEFORE the
 			// swap below moves it into Text. A final with NO From —
@@ -1191,6 +1284,30 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 		// traffic) and carry no From payload.
 		if f.Event == voice.EventPrompt && f.Last != nil && *f.Last && f.From != "" && f.From != f.Text {
 			f.Text, f.From = f.From, ""
+		}
+		// Context warm (phase2 leaf 02): a PARTIAL prompt (last !=
+		// true — the same shape the talk loop treats as preview
+		// traffic) feeds the debounced warm lane. The identity fields
+		// ride the registry instance (the acquire pinned the employee)
+		// + the call's resolved session — the SAME (employee, session)
+		// the imminent turn will run under. The faster path is a
+		// pointer load + map write inside the warmer (the render and
+		// the request run on its debounce goroutine, never here); with
+		// no warmer registered (the disabled default) this whole branch
+		// costs one atomic load.
+		if f.Event == voice.EventPrompt && (f.Last == nil || !*f.Last) {
+			if voice.ContextWarmRouting() != nil && w.Employee != nil {
+				var warmInst voice.Instance
+				for _, live := range w.Registry.Live() {
+					if live.CallControlID == f.CallID {
+						warmInst = live
+						break
+					}
+				}
+				if warmInst.CallControlID != "" {
+					voice.RoutePartial(f.CallID, warmInst.EmployeeID, w.sessionFor(warmInst).ID, f.Text)
+				}
+			}
 		}
 		select {
 		case loop.Frames() <- f:
@@ -1426,6 +1543,12 @@ func (w *VoiceWiring) releaseCall(ccid string, outcome voice.Outcome) {
 	// call — a replayed outcome or a new call on a recycled ccid can
 	// never inherit a confirmation.
 	clearIntakeSession(ccid)
+	// Context warm (phase2 leaf 02): tear the call's warm state down
+	// entirely — pending debounce timer stopped, in-flight warm's ctx
+	// cancelled, session entry deleted. Nil-safe no-op with no warmer
+	// registered; idempotent on unknown ccids (a release for a call
+	// that never received a partial costs one map miss).
+	voice.RouteEnd(ccid)
 	w.sendEndFrame(ccid, outcome)
 	w.ChildProc.NoteCallEnd(ccid)
 
@@ -1752,6 +1875,10 @@ func (w *VoiceWiring) Start(ctx context.Context, registerTool func(dial builtin.
 	if registerTool != nil {
 		registerTool(w.dialForTool(), w.agentIDForTool())
 	}
+	// Clip planner reload watch (leaf 02): subscribe daemon.reloaded so
+	// a config reload re-plans lane pools for live calls. Nil-safe (no
+	// bus / no planner on hand-built test wirings = no subscription).
+	w.startClipReloadWatch()
 	return nil
 }
 
@@ -1828,6 +1955,15 @@ func (w *VoiceWiring) Stop(ctx context.Context) {
 	}
 	stopCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	// Context warm (phase2 leaf 02): unregister this wiring's warmer
+	// from the process-global route seam — but ONLY if the live
+	// registration is ours (a reload hands the next VoiceWiring its own
+	// warmer before this Stop runs; clearing that would silently kill
+	// the new subsystem's warm lane). In-flight warms die with the
+	// subsystem ctx at stopCancel below.
+	if w.contextWarmer != nil && voice.ContextWarmRouting() == w.contextWarmer {
+		voice.SetContextWarmRouting(nil)
+	}
 	// Stop the reaper FIRST (leaf 02): its sweep must not release calls
 	// while the drain below is running the funnel itself.
 	if w.reaperCancel != nil {

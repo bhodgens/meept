@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/caimlas/meept/internal/voice/clipstore"
 	"github.com/caimlas/meept/internal/voiceframe"
 )
 
@@ -367,6 +368,33 @@ type pipeline struct {
 	// the file header of echo_window.go for the full contract.
 	echoWin echoWindow
 
+	// ---- filler-clip cache (plan 20261113-filler-clips leaf 03) ----
+	// clipStore is the content-addressed PCM cache (Contract C2), shared
+	// across pipelines (the Child constructs it once). Set at pipeline
+	// construction, read-only afterwards — like codec, no lock guards it.
+	clipStore *clipstore.Store
+	// ttsRefHash (playMu) is the decoded keys-frame tts_ref_hash: the
+	// sha256 of the clone reference audio (nil = non-clone, Contract C1).
+	// The child does not recompute incoming clip keys today (the daemon
+	// planner pins them), but the identity input stays stored so the
+	// child-side ClipKey computation is byte-testable against the daemon
+	// path, and the render meta carries the same identity (adjudication A4).
+	ttsRefHash []byte
+	// clipMu guards the background render queue ONLY (never held across
+	// file I/O or Speak — mutexio). clipQueue holds pending
+	// voiceframe.ClipSpec entries; clipWorkerUp is released under clipMu
+	// in the same critical section that observes the empty queue, so a
+	// concurrent enqueueClipRenders re-launches the worker (the sayQueue
+	// playWorkerUp discipline mirrored for renders).
+	clipMu       sync.Mutex
+	clipQueue    []voiceframe.ClipSpec
+	clipWorkerUp bool
+	// keysReady is closed when the keys frame has been applied (renders
+	// need the provider identity; adjudication A3). Sync.Once so
+	// applyKeys is idempotent on a keys re-send.
+	keysReady     chan struct{}
+	keysReadyOnce sync.Once
+
 	// cancel cancels the pipeline's internal context (workers, streams).
 	cancel context.CancelFunc
 	ctx    context.Context
@@ -402,6 +430,10 @@ func (c *Child) newPipeline(frame voiceframe.Frame) (*pipeline, error) {
 		logger:   c.logger,
 		stt:      stubSTT{},
 		tts:      stubTTS{},
+		// Clip cache: the store is shared across calls (constructed once
+		// per child); keysReady gates the background render worker.
+		clipStore: c.clipStoreFor(),
+		keysReady: make(chan struct{}),
 		// Aggregation on by default (C1): the keys frame may override
 		// this with the daemon's voice.turn_confirm_ms (0 = legacy)
 		// BEFORE any transcript can arrive (the STT session only binds
@@ -1518,6 +1550,11 @@ type synthResult struct {
 	pcm      io.ReadCloser
 	err      error
 	synthDur time.Duration
+	// clipKey is non-empty when the reader came from the filler-clip
+	// store instead of a live Speak (leaf 03, adjudication A2) — drives
+	// the "say played from clip" INFO line, nothing else. The playback
+	// lane treats a clip reader exactly like a provider reader.
+	clipKey string
 }
 
 // synthJob is one in-flight synthesis: Speak runs on a dedicated
@@ -1573,16 +1610,51 @@ func (p *pipeline) registerSynthLocked(item queuedSay) *synthJob {
 // (or resolves it synchronously when no provider is installed). Captures
 // the provider the caller read under playMu — the same regime as every
 // other p.tts read (audit fix 2). No lock is held across Speak (mutexio).
+//
+// Filler-clip branch (leaf 03, adjudication A2): when the frame carries
+// clip_id AND the store has a valid entry, the stored PCM REPLACES the
+// provider call entirely (zero Speak) and rides the unchanged playback
+// lane — pacing, barge-in clear, played edge all inherit from the reader
+// swap. A miss (or invalid key / open error / rate mismatch without a
+// resampler) falls through to today's tts.Speak(frame.Text) path
+// byte-identically (no opportunistic backfill — orchestrator decision).
+// The store I/O runs OFF every lock (mutexio posture: the file read
+// shares the synth goroutine's "no lock across I/O" rule).
 func (p *pipeline) runSynth(tts TTSProvider, job *synthJob) {
+	if job.frame.ClipID != "" {
+		// File I/O on a goroutine, never on the caller (the prefetch
+		// path reaches here from the frame-handler/serve goroutine):
+		// a slow disk must not stall frame routing.
+		go func() {
+			if rc, key, ok := p.openClip(job.frame.ClipID); ok {
+				job.done <- synthResult{pcm: rc, clipKey: key}
+				return
+			}
+			p.speakFallback(tts, job)
+		}()
+		return
+	}
 	if tts == nil {
 		job.done <- synthResult{err: errNoTTSProvider}
 		return
 	}
 	go func() {
-		start := time.Now()
-		r, err := tts.Speak(WithTTSContext(job.ctx, p.ccid), job.frame.Text)
-		job.done <- synthResult{pcm: r, err: err, synthDur: time.Since(start)}
+		p.speakFallback(tts, job)
 	}()
+}
+
+// speakFallback runs today's live Speak path for a job (frame text,
+// provider ctx stamped with the call id). Safe to call from any synth
+// goroutine; a nil provider surfaces the named no-provider error the
+// worker logs unchanged.
+func (p *pipeline) speakFallback(tts TTSProvider, job *synthJob) {
+	if tts == nil {
+		job.done <- synthResult{err: errNoTTSProvider}
+		return
+	}
+	start := time.Now()
+	r, err := tts.Speak(WithTTSContext(job.ctx, p.ccid), job.frame.Text)
+	job.done <- synthResult{pcm: r, err: err, synthDur: time.Since(start)}
 }
 
 // awaitSynth blocks for the job's Speak result and removes it from the
@@ -1819,6 +1891,13 @@ func (p *pipeline) playbackWorker() {
 		// top of the next iteration; the write-start prefetch hook lives
 		// inside playbackStream (OVERLAP POINT 1) so it fires in the
 		// same critical section that raises writingNow.
+		if res.clipKey != "" {
+			// Cached-playback telemetry (leaf 03 A5): the store served
+			// this utterance's PCM — zero Speak ran. Logged on the
+			// worker right before the stream enters pacing, so the line
+			// ordering in the log matches the audible order.
+			p.emitClipPlayed(res.clipKey)
+		}
 		drained := p.playbackStream(res.pcm, item.gen, res.synthDur)
 
 		// End-of-turn AUDIO marker (C1 played edge): a last:true say

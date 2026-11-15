@@ -85,6 +85,26 @@ without touching the main process.
   resampling to the negotiated rate.
 - cmd/meept-voice: --text-socket and --audio-dir flags; the start token
   arrives on stdin, never argv or environment.
+- Filler clip cache (plan 20261113-filler-clips-and-context-warm,
+  internal/voicechild/clips.go): the child renders and serves the
+  pre-synthesized filler/greeting/silence/farewell PCM.
+  `clip_render` frames (daemon -> child, <=32 {key,text} specs) diff
+  against the content-addressed store under $MEEPT_HOME/voice_clips/:
+  warm entries answer `clip_ready ok:true` with zero synth, misses
+  render in the BACKGROUND at canonical mono s16le 16 kHz (never the
+  call's negotiated rate) and store Put + `clip_ready`; entries that
+  arrive before the keys frame queue (cap 256, drop-oldest + WARN) and
+  drain once providers exist; the render worker dies with pipeline
+  teardown. A `say` frame carrying `clip_id` whose store entry is
+  valid streams the cached PCM into the SAME playback lane as
+  synthesized audio (pacing, barge-in clear, and the `played` edge
+  untouched - the swap happens at the reader); any miss, invalid key,
+  or open error falls through to live Speak(text) byte-identically,
+  with no opportunistic backfill. The keys frame's `tts_ref_hash`
+  (hex sha256 of the clone reference audio, "" = preset voice)
+  participates in the C1 clip-key formula ONLY - the reference never
+  rides a TTS request. No PCM ever crosses the text socket: clip
+  frames carry hex keys + text.
 
 ## Configuration options
 

@@ -154,11 +154,13 @@
       "github-intake",
       "agent-groups",
       "dynamic-tools",
-      "llm-serving-tiers"
+      "llm-serving-tiers",
+      "context_warm"
     ],
     "internal/daemon/": [
       "daemon-lifecycle",
-      "escalation-resume"
+      "escalation-resume",
+      "context_warm"
     ],
     "internal/llm/": [
       "daemon-lifecycle",
@@ -168,7 +170,8 @@
       "session-teardown",
       "dynamic-tools",
       "llm-hop-tracing",
-      "llm-serving-tiers"
+      "llm-serving-tiers",
+      "context_warm"
     ],
     "internal/logrotate/": [
       "logrotate"
@@ -498,7 +501,9 @@
     "internal/voice/": [
       "voice-lifecycle",
       "voice-bargein",
-      "voice-concurrency"
+      "voice-concurrency",
+      "voice_clips",
+      "context_warm"
     ],
     "internal/voice/telnyx/": [
       "voice-lifecycle",
@@ -508,17 +513,20 @@
     "internal/voiceframe/": [
       "voice-lifecycle",
       "voice-bargein",
-      "voice-concurrency"
+      "voice-concurrency",
+      "voice_clips"
     ],
     "internal/voicechild/": [
       "voice-lifecycle",
       "voice-bargein",
-      "voice-concurrency"
+      "voice-concurrency",
+      "voice_clips"
     ],
     "cmd/meept-voice/": [
       "voice-lifecycle",
       "voice-bargein",
-      "voice-concurrency"
+      "voice-concurrency",
+      "voice_clips"
     ],
     "internal/voice/local.go": [
       "voice-local"
@@ -640,12 +648,14 @@
       "tool-provider-seam"
     ],
     "internal/daemon/voice_keys.go": [
-      "voice-lifecycle"
+      "voice-lifecycle",
+      "voice_clips"
     ],
     "internal/daemon/voice_wiring.go": [
       "voice-bargein",
       "voice-lifecycle",
-      "voice-local"
+      "voice-local",
+      "voice_clips"
     ],
     "internal/contact/": [
       "contact-chain"
@@ -688,6 +698,15 @@
     ],
     "cmd/meept-kanban/": [
       "kanban-board"
+    ],
+    "internal/voice/clipstore/": [
+      "voice_clips"
+    ],
+    "e2e/suites/voice_clips": [
+      "voice_clips"
+    ],
+    "internal/daemon/voice_clip_planner.go": [
+      "voice_clips"
     ]
   },
   "exempt": {},
@@ -923,7 +942,7 @@
         "memory-scoping-02 chief-of-staff: memory_max_scope=global agent recalls the project-A fact in project B; the default (project) agent does not (F3, C3)",
         "memory-scoping-03 fail-closed cell: multiuser enabled + resolved-empty userID hides user-scope rows while global rows stay visible (Flag 3)"
       ],
-      "note": "RED gate for the memory second-brain tree leaf 00T (memory-scoping half; gates branch 01): drives plant/recall through live chat turns and asserts the C1/C2/C3 scoping behavior. Fails RED today \u2014 the Scope vocabulary, WithScopeFilter predicate, and the memory_max_scope agent declaration do not exist."
+      "note": "RED gate for the memory second-brain tree leaf 00T (memory-scoping half; gates branch 01): drives plant/recall through live chat turns and asserts the C1/C2/C3 scoping behavior. Fails RED today — the Scope vocabulary, WithScopeFilter predicate, and the memory_max_scope agent declaration do not exist."
     },
     {
       "name": "memory-layered-distill",
@@ -1240,6 +1259,11 @@
       "status": "implemented"
     },
     {
+      "name": "voice_clips",
+      "dir": "e2e/suites/voice_clips",
+      "status": "implemented"
+    },
+    {
       "name": "delegate-seam",
       "dir": "e2e/suites/delegate-seam",
       "status": "implemented",
@@ -1364,6 +1388,11 @@
         "kanban-board-01",
         "kanban-board-02"
       ]
+    },
+    {
+"status": "implemented",
+      "name": "context_warm",
+      "dir": "e2e/suites/context_warm"
     }
   ],
   "scenarios": [
@@ -3064,7 +3093,7 @@
       "id": "naive-user-chat-05",
       "suite": "naive-user-chat",
       "diff": "M",
-      "title": "reply-guard rewrite retry: a chat lane whose first completion is a raw tool-result JSON dump is recovered by one bounded rewrite nudge \u2014 the reply is the rewritten prose, never the canned apology, and the nudge reaches the model exactly once",
+      "title": "reply-guard rewrite retry: a chat lane whose first completion is a raw tool-result JSON dump is recovered by one bounded rewrite nudge — the reply is the rewritten prose, never the canned apology, and the nudge reaches the model exactly once",
       "paths": [
         "internal/agent/loop.go",
         "internal/agent/reply_guard.go"
@@ -3187,7 +3216,7 @@
       "id": "plan-lifecycle-02",
       "suite": "plan-lifecycle",
       "diff": "M",
-      "title": "approval path: dispatch-path plan parks at pending_approval; plan.approve synthesizes a task and flips the file status to executing through the atomic read-parse-write \u2014 file parses at every observation",
+      "title": "approval path: dispatch-path plan parks at pending_approval; plan.approve synthesizes a task and flips the file status to executing through the atomic read-parse-write — file parses at every observation",
       "paths": [
         "internal/plan/manager.go",
         "internal/plan/filelock.go",
@@ -3431,7 +3460,7 @@
       "id": "goal-completion-01",
       "suite": "goal-completion",
       "diff": "L",
-      "title": "declare-fulfil: tier-3 employee with a gated goal fulfils via agents.trigger \u2014 plan row goal_id stamped, gate command executes, goal health assessed (no longer unknown)",
+      "title": "declare-fulfil: tier-3 employee with a gated goal fulfils via agents.trigger — plan row goal_id stamped, gate command executes, goal health assessed (no longer unknown)",
       "paths": [
         "internal/employee/manager.go",
         "internal/employee/goal_loop.go",
@@ -3516,7 +3545,7 @@
       "id": "memory-turn-capture-02",
       "suite": "memory-turn-capture",
       "diff": "M",
-      "title": "DISPATCHED turn (multiagent task lane) regression proof: relay terminal carries the conversation id (store keys by session id) and the subscriber resolves it via GetByConversationID \u2014 task reply reaches L0 + status=auto claim",
+      "title": "DISPATCHED turn (multiagent task lane) regression proof: relay terminal carries the conversation id (store keys by session id) and the subscriber resolves it via GetByConversationID — task reply reaches L0 + status=auto claim",
       "paths": [
         "internal/daemon/memory_capture.go",
         "internal/agent/handler.go"
@@ -3714,7 +3743,7 @@
       "id": "github-pr-ci-04",
       "suite": "github-pr-ci",
       "diff": "M",
-      "title": "CI-wait park + re-arm: with check-runs always in_progress a 1s github_ci_wait parks at its deadline \u2014 the tool result carries parked=true and a non-empty wait_id, and the re-arm instruction row github_ci_wait-<waitID>.yaml is persisted under the scratch daemon's instruction tier",
+      "title": "CI-wait park + re-arm: with check-runs always in_progress a 1s github_ci_wait parks at its deadline — the tool result carries parked=true and a non-empty wait_id, and the re-arm instruction row github_ci_wait-<waitID>.yaml is persisted under the scratch daemon's instruction tier",
       "paths": [
         "internal/tools/builtin/github_ci.go",
         "internal/githubsvc/rearm.go",
@@ -5030,6 +5059,112 @@
       "paths": [
         "cmd/meept-kanban/main.go",
         "internal/kanbansvc/gateway.go"
+      ]
+    },
+    {
+"id": "voice-clips-sidecar-gate-01",
+      "suite": "voice_clips",
+      "diff": "S",
+      "title": "[voice-clips R4] voice sidecar disabled: boot + idle leave $MEEPT_HOME/voice_clips never created (dir absent assertion)",
+      "paths": [
+        "internal/voice/clipstore/key.go",
+        "internal/voice/clipstore/store.go",
+        "internal/daemon/voice_clip_planner.go",
+        "internal/voicechild/clips.go",
+        "internal/voice/talkloop.go"
+      ]
+    },
+    {
+      "id": "voice-clips-pools-rendered-01",
+      "suite": "voice_clips",
+      "diff": "M",
+      "title": "[voice-clips R2/R3/C3] configured pools: daemon emits clip_render frames on the real text socket; after a call the store carries exactly one .pcm+.json pair per pool line, C1-mirror keys, no extras",
+      "paths": [
+        "internal/voice/clipstore/key.go",
+        "internal/voice/clipstore/store.go",
+        "internal/daemon/voice_clip_planner.go",
+        "internal/voicechild/clips.go",
+        "internal/voice/talkloop.go"
+      ]
+    },
+    {
+      "id": "voice-clips-identity-reload-02",
+      "suite": "voice_clips",
+      "diff": "M",
+      "title": "[voice-clips R3] tts_voice edit + SIGHUP reload: keys line carries the new voice, new-identity C1 keys appear, old files survive, turn path still works",
+      "paths": [
+        "internal/voice/clipstore/key.go",
+        "internal/voice/clipstore/store.go",
+        "internal/daemon/voice_clip_planner.go",
+        "internal/voicechild/clips.go",
+        "internal/voice/talkloop.go"
+      ]
+    },
+    {
+      "id": "voice-clips-cached-filler-latency-03",
+      "suite": "voice_clips",
+      "diff": "M",
+      "title": "[voice-clips R1] warmed store + 2s fake TTS lane: greeting say frame carries clip_id, child plays from store in <300 ms with zero TTS endpoint requests",
+      "paths": [
+        "internal/voice/clipstore/key.go",
+        "internal/voice/clipstore/store.go",
+        "internal/daemon/voice_clip_planner.go",
+        "internal/voicechild/clips.go",
+        "internal/voice/talkloop.go"
+      ]
+    },
+    {
+      "id": "voice-clips-farewell-ordering-04",
+      "suite": "voice_clips",
+      "diff": "L",
+      "title": "[voice-clips R5] caller says bye: farewell-pool clip-bearing say frame precedes the C1 end frame (mirror order), release fan-out still exactly-once",
+      "paths": [
+        "internal/voice/clipstore/key.go",
+        "internal/voice/clipstore/store.go",
+        "internal/daemon/voice_clip_planner.go",
+        "internal/voicechild/clips.go",
+        "internal/voice/talkloop.go"
+      ]
+    },
+    {
+      "id": "context-warm-01",
+      "suite": "context_warm",
+      "diff": "M",
+      "title": "partials debounce into <=2 max_tokens=1 warm requests preceding the final turn, sharing its prefix + prompt_cache_key",
+      "paths": [
+        "e2e/suites/context_warm/context_warm_test.go",
+        "internal/daemon/voice_wiring.go",
+        "internal/voice/contextwarm.go",
+        "internal/llm/warm.go"
+      ]
+    },
+    {
+      "id": "context-warm-02",
+      "suite": "context_warm",
+      "diff": "S",
+      "title": "voice.context_warm off (default) => zero warm requests, final turn unaffected (byte-identical)",
+      "paths": [
+        "internal/config/schema.go",
+        "internal/voice/contextwarm.go"
+      ]
+    },
+    {
+      "id": "context-warm-03",
+      "suite": "context_warm",
+      "diff": "S",
+      "title": "sub-floor prefix (context_warm_min_tokens) skips warm traffic; final turn unaffected",
+      "paths": [
+        "internal/voice/contextwarm.go"
+      ]
+    },
+    {
+      "id": "context-warm-04",
+      "suite": "context_warm",
+      "diff": "M",
+      "title": "quota-blocked (429) warm upstream never delays or poisons the real turn (R8 end-to-end)",
+      "paths": [
+        "internal/llm/warm.go",
+        "internal/daemon/voice_wiring.go"
       ]
     }
   ]

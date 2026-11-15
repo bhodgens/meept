@@ -6,9 +6,13 @@ title: Voice
 
 Status: Implemented (plans docs/plans/20261102-voice-sidecar/ and
 docs/plans/20261106-voice-local-leg/ complete; see the as-built sections
-of the spec). Authoritative design: docs/workflows/voice-sidecar.md.
-Implementation plans: docs/plans/20261102-voice-sidecar/ and
-docs/plans/20261106-voice-local-leg/.
+of the spec; plan docs/plans/20261113-filler-clips-and-context-warm/
+adds the filler clip cache + lane pools + farewell rule and the
+opt-in partial context warm). Authoritative design:
+docs/workflows/voice-sidecar.md. Implementation plans:
+docs/plans/20261102-voice-sidecar/,
+docs/plans/20261106-voice-local-leg/, and
+docs/plans/20261113-filler-clips-and-context-warm/.
 
 ## Overview
 
@@ -112,7 +116,10 @@ directly at construction (`internal/daemon/voice_wiring.go`).
 | `fragment_decay_s` | int | 0 (off) | yes | after K consecutive drops within S seconds the effective N rises by min(K,3), resetting on any dispatch; set 30-60 for bursty chatter rooms |
 | `reply_exempt_s` | int | 15 | yes | short final within S seconds of the agent's OWN last spoken audio is a reply, exempted; 0 disables; lower if immediate reactions flood turns |
 | `filler_grace_ms` | int | 2500 | yes | wait before speaking filler after a prompt; 0 = immediate (legacy); raise for a fast employee, lower for a slow one |
-| `silence_prompt` | string | "Are you still there?" | yes (non-empty wins) | dedicated dead-air nudge line for this employee |
+| `silence_prompt` | string | "Are you still there?" | yes (non-empty wins) | dedicated dead-air nudge line for this employee; superseded for this row by a non-empty `silence_prompt_lines` |
+| `silence_prompt_lines` | []string | `voice.silence_prompt_lines` (empty) | yes (non-empty wins) | C5 lane pool: dead-air nudge lines, round-robin per fire; empty inherits the scalar layers (ladder: row list > row scalar > global list > global scalar) |
+| `fragment_clarify_lines` | []string | `voice.fragment_clarify_lines` (empty) | yes | C5 lane pool: "you trailed off?" lines, round-robin per fire; a non-empty list beats `voice.fragment_clarify` |
+| `farewell` | []string | `voice.farewell` (default "Goodbye!", "Bye!", "Talk soon.") | yes | C5 farewell pool: goodbye lines spoken when the caller says bye (see "Filler audio: pre-rendered clips, lane pools, and the farewell rule") |
 | `silence_prompt_seconds` | int | 45 | yes | S: nudge fires after this much caller silence; lower (10) for snappy re-engagement |
 | `silence_hangup_after_seconds` | int | 45 | yes | H: quiet time AFTER the nudge before hangup (nudge@S, hangup@S+H); 0 reuses S |
 | `barge_in_rms` | int | `voice.local.barge_in_rms` = 3000 | yes (local open frame) | RMS VAD threshold; raise if TV trips the barge-in, lower if you must shout to interrupt |
@@ -124,6 +131,81 @@ as pointers child-side; see the template comment at
 drop and `voicechild: short final exempted` with `reason=phrase|reply|energy`
 whenever an improvement saved a would-be drop - the operator tunes
 `min_turn_words` up/down straight from the log.
+
+## Filler audio: pre-rendered clips, lane pools, and the farewell rule
+
+Every short "holding" line the call speaks - the greeting on connect,
+the working-turn filler ("Hold on, let me check."), the dead-air nudge,
+the fragment-clarify, and the NEW farewell - is FACT-FREE and comes
+from a finite configured pool. That makes them cacheable, and phase 1
+of plan docs/plans/20261113-filler-clips-and-context-warm/ uses it:
+
+- **Lane pools.** Each filler-class line belongs to exactly one lane
+  (`greeting` / `filler` / `silence` / `fragment` / `farewell`). Pools
+  round-robin per lane with their own cursor, so multi-line pools are
+  fully honored. `voice.filler` and `voice.greeting` keep their shapes;
+  the scalar `voice.silence_prompt` / `voice.fragment_clarify` gain
+  list overrides `voice.silence_prompt_lines` /
+  `voice.fragment_clarify_lines` (a non-empty list wins; the ladder is
+  employee_leg row list > row scalar > global list > global scalar >
+  default, and a list counts as "set" only when non-empty, so unset
+  new keys behave exactly as before). The farewell pool
+  `voice.farewell` is new and ships non-empty ("Goodbye!", "Bye!",
+  "Talk soon."); per-employee override `employee_leg[].farewell`.
+- **The farewell rule.** When the caller's finished utterance IS a bye
+  phrase (whole-utterance match against a small builtin set - bye,
+  goodbye, see ya, see you, talk later, later, that's all - never a
+  phrase buried in a longer sentence), the employee speaks one
+  farewell-lane line, cancels any in-flight draft (no LLM turn), and
+  ends the call with reason `caller farewell`. The goodbye rides the
+  normal final-say drain, so its audio completes before teardown.
+  Exactly one goodbye per call; a repeat "bye" is ignored. The pool
+  ships non-empty and an empty list INHERITS the shipped default, so
+  there is no config-level off switch by emptying (override the pool
+  with the lines you want instead); a talk loop built without any
+  resolvable farewell line (programmatic callers with empty Lanes and
+  FarewellLines) never fires the rule and "bye" rides the normal turn
+  path byte-identically.
+- **Clip cache.** At call setup (and again after a config reload) the
+  daemon diffs the resolved pools against a content-addressed clip
+  store and asks the voice child to render only the MISSING lines, in
+  the background, never blocking the conversation. Rendered clips land
+  in `$MEEPT_HOME/voice_clips/` keyed by sha256 over
+  (text, tts_vendor, tts_model, tts_voice, clone-reference-audio hash):
+  change the voice, model, a pool line, or the `voice.tts_ref_audio`
+  reference file, and the affected clips simply regenerate. When the
+  talk loop speaks a pool line its say frame names the clip; the child
+  plays the cached PCM through the exact same pacing/barge-in lane as
+  synthesized audio (zero vendor call), and any miss falls back to
+  live synthesis. Net effect: filler lines that used to cost 0.7-4.8 s
+  of synthesis now start instantly, and they always play in ONE
+  timbre - the drifting bug was short live-synth utterances. Nothing is
+  generated or written when the voice sidecar is not configured and
+  running (`voice.enabled=false` = the store dir is never even
+  created), and clip audio never carries secrets: the store holds PCM
+  + a small JSON manifest per line.
+
+## Partial context warm (opt-in)
+
+`voice.context_warm = true` (default FALSE) spends the STT PARTIALS a
+live call already streams: while you are still talking, a debounced
+max_tokens=1 throwaway request plants the imminent turn's exact prompt
+prefix (system + history + the partial text) into the local model's
+prompt cache under the same session-affinity scope the turn will use.
+When the final transcript dispatches the real turn, it pays decode
+time, not full prefill - measurably lower first-token latency on long
+conversations. The warm is strictly invisible: it never starts an
+employee turn or tools, consumes no turn budget, logs nothing above
+debug, and its failures are silently ignored (a failed warm is simply
+the old latency). `voice.context_warm_min_tokens` (default 60) skips
+warming trivial prefixes. The debounce window rides the global
+`voice.turn_confirm_ms` (no per-employee override; 0/legacy mode =
+fixed 900 ms). A final
+transcript or hangup cancels any pending or in-flight warm. The payoff
+is the llama.cpp-family local endpoints (prompt_cache_key + affinity
+header are the existing session-affinity plumbing); the Anthropic and
+Codex clients implement Warm as an explicit no-op. Disabled =
+byte-identical.
 
 ## The default voice employee
 
