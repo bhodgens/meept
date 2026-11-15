@@ -46,8 +46,8 @@
 #
 # Test seams (mirrors MEEPT_DEADCODE_BASELINE in pre-commit-deadcode):
 #   MEEPT_E2E_CENSUS_STAGED_FILE=/path/to/file   census fixture mode: read
-#     the staged ADDITIONS list from FILE (one path per line, exactly what
-#     `git diff --cached --name-only --diff-filter=A` prints) instead of
+#     the staged ACMR list from FILE (one path per line, exactly what
+#     `git diff --cached --name-only --diff-filter=ACMR` prints) instead of
 #     the git index, evaluate the census against MEEPT_E2E_MANIFEST_FILE
 #     (or REPO_ROOT/e2e/manifest.json), and exit before the affected-suite
 #     gate — a synthetic list must never drive `go test`. Lets e2e-census
@@ -109,8 +109,11 @@ printf '%s\n' "$STAGED" > "$TMP"
 
 # --- Mode 1: new-package census (hard gate) --------------------------------
 #
-# Population: staged ADDED (git diff --cached --diff-filter=A) non-test .go
-# files under internal/ | pkg/ | cmd/, minus is_exempt-style paths
+# Population: staged rows that can OPEN a new package dir — ADDITIONS (A),
+# COPIES (C), and RENAMES (R; the NEW path) — as
+# `git diff --cached --name-status --diff-filter=ACMR` rows minus plain
+# modifies (M already-existed-at-baseline dirs are not new), for non-test
+# .go files under internal/ | pkg/ | cmd/, minus is_exempt-style paths
 # (_test.go, */generated/*). Package dirs = dirname of each. A dir passes
 # iff the manifest's OWN normalization predicate (trailing-slash
 # normalization, bidirectional slash-boundary prefix match — identical
@@ -135,7 +138,7 @@ trap 'rm -f "$TMP" "${MANIFEST_TMP:-}" "${CENSUS_TMP:-}"' EXIT
 
 if [ -n "${MEEPT_E2E_CENSUS_STAGED_FILE:-}" ]; then
     # Fixture seam: the staged-file IS the additions list (one path per
-    # line, as `git diff --cached --name-only --diff-filter=A` would print).
+    # line, as `git diff --cached --name-only --diff-filter=ACMR` prints).
     CENSUS_SRC="$MEEPT_E2E_CENSUS_STAGED_FILE"
     if [ -n "${MEEPT_E2E_MANIFEST_FILE:-}" ]; then
         if [ ! -f "$MEEPT_E2E_MANIFEST_FILE" ]; then
@@ -152,7 +155,17 @@ else
         exit 1
     fi
     CENSUS_TMP="$(mktemp "${TMPDIR:-/tmp}/pre-commit-e2e-census.XXXXXX")"
-    if ! git diff --cached --name-only --diff-filter=A > "$CENSUS_TMP"; then
+    # A/C/R, not just A: git rename detection (diff.renames=true, on by
+    # default) emits R rows and ZERO A rows for renames, so a file renamed
+    # into a brand-new unmapped dir would otherwise produce an empty
+    # census and a false green. --name-status lets us keep exactly the
+    # rows that OPEN a directory — A (add), C (copy), R (rename; $NF is
+    # the NEW path) — while plain M (modify) rows stay excluded: a
+    # modified file already existed at baseline, so its dir is not new
+    # (case modified_only_not_censused in e2e-census-selftest.sh pins
+    # that). pipefail makes a git failure fail the pipeline.
+    if ! git diff --cached --name-status --diff-filter=ACMR \
+            | awk -F'\t' '$1 != "M" { print $NF }' > "$CENSUS_TMP"; then
         echo "pre-commit-e2e: cannot read staged additions from the index (git diff failed) — fail-closed." >&2
         exit 1
     fi

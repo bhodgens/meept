@@ -209,7 +209,7 @@ if [ -z "$DEADCODE_BIN" ]; then
         exit 0
     fi
     echo -e "${RED}✗ deadcode not installed — reachability gate is fail-closed${NC}"
-    echo "   Install with: go install golang.org/x/tools/cmd/deadcode@latest"
+    echo "   Install with: go install golang.org/x/tools/cmd/deadcode@v0.52.0"
     echo "   To skip deliberately (local only): MEEPT_DEADCODE_ALLOW_SKIP=1 git commit ..."
     exit 1
 fi
@@ -372,15 +372,19 @@ if [ "$REBASELINE" -eq 1 ]; then
 fi
 
 # report_new <label> <baseline> <current>
-# Exits non-zero (via the caller's set -e) when the current set contains
-# functions absent from the baseline.
+# Records the failure in GATE_FAILED (the CALLER exits 1 after both
+# passes report); it does not exit non-zero itself.
 GATE_FAILED=0
 report_new() {
     LABEL="$1"
     BASE="$2"
     CUR="$3"
-    # New = in the current set but not in the baseline (comm -13).
-    NEW_FUNCS=$(comm -13 "$BASE" "$CUR" || true)
+    # New = in the current set but not in the baseline (comm -13). No
+    # `|| true`: comm fails (exit 1) on unsorted input, and swallowing
+    # that would truncate the output into a false clean pass. Both
+    # baselines are written LC_ALL=C-sorted; a mis-sorted baseline now
+    # fails the gate via set -e instead of silently passing.
+    NEW_FUNCS=$(comm -13 "$BASE" "$CUR")
     if [ -n "$NEW_FUNCS" ]; then
         NEW_COUNT=$(printf '%s\n' "$NEW_FUNCS" | grep -c . || true)
         echo -e "${RED}✗ deadcode gate ($LABEL): $NEW_COUNT newly unwired function(s) — commit blocked${NC}"

@@ -136,7 +136,11 @@ for p in paths:
                 matched.update(n for n in names if n in suites_by_name)
     else:
         for prefix, names in path_map.items():
-            if p == prefix or p.startswith(prefix):
+            # Slash-boundary prefix match (same semantics as the census
+            # hook): a bare prefix would false-cover siblings — key
+            # "internal/agent" must not match "internal/agentfoo".
+            if p == prefix or (p.startswith(prefix)
+                               and (prefix.endswith("/") or p[len(prefix)] == "/")):
                 matched.update(n for n in names if n in suites_by_name)
 
 # Split by runner so a Dart-tier suite (e.g. gui-flows, whose dir is

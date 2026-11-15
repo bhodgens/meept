@@ -121,6 +121,8 @@ else
   echo -e "${YELLOW}⚠⚠  The gate below measures the working tree, NOT the pushed sha${NC}"
   echo -e "${YELLOW}    ($PUSHED_SHA). Commit or stash the WIP, or push with --no-verify${NC}"
   echo -e "${YELLOW}    if the working tree is not what you intend to publish.${NC}"
+  echo -e "${YELLOW}⚠⚠  BUILD SOURCE IS YOUR LIVE REPO ($REPO): the build below${NC}"
+  echo -e "${YELLOW}    OVERWRITES your local bin/meept-daemon artifact.${NC}"
   echo ""
 fi
 
