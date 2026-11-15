@@ -792,7 +792,7 @@ gosec:
 # (mutexio for I/O-under-mutex, predid for predictable IDs) plus the audit
 # scripts that catch UTF-8 corruption bugs and Dart enum-shadowing, and
 # fmt-check-gui for Dart formatting in the Flutter tree.
-lint-ci: lint analyzers audit-scripts fmt-check-gui orphan-check
+lint-ci: lint analyzers audit-scripts fmt-check-gui orphan-check e2e-census-selftest
 	@echo "All CI lint checks passed."
 
 # Doherty Threshold (IBM ~400ms UX latency budget) enforcement lane: p95
@@ -1105,6 +1105,15 @@ e2e-sweep-selftest:
 	python3 -m unittest discover -s tools/e2e-sweep -p 'test_*.py' -v
 	python3 scripts/test_e2e_chat_harness.py -v
 	bash -n scripts/e2e-naive-user-chat.sh
+
+# census-selftest pins the pre-commit-e2e Mode 2 (new-package census) gate:
+# fixture battery over the MEEPT_E2E_CENSUS_STAGED_FILE / MEEPT_E2E_MANIFEST_FILE
+# seams plus a scratch-repo real-index case. Pure bash+python3+git — the seam
+# path exits before the affected-suite gate, so no Go toolchain is needed.
+# CI member: ci.yml job "census-selftest" runs the script directly.
+.PHONY: e2e-census-selftest
+e2e-census-selftest:
+	bash scripts/e2e-census-selftest.sh
 
 .PHONY: adversarial
 adversarial:
