@@ -10,6 +10,11 @@
 # - Ignored errors (_ = someFunc())
 # - panic(err) in non-test code
 # - fmt.Errorf without %w for wrapping (informational, not blocking)
+# - Unwired placeholder seam calls: Set*Provider/Sink/Source/Relay/Adapter/
+#   Handler/Emitter/Publisher(...) passing a bare nil literal in non-test additions
+#   (the "wired with a nil provider" placeholder agents emit instead of
+#   real wiring; suppress an intentional call with //nolint:nilseam and a
+#   reason, the repo-wide annotation convention)
 #
 # Installation: Included in .githooks/pre-commit
 
@@ -126,6 +131,37 @@ for file in $STAGED_GO_FILES; do
     done
   done <<< "$(echo "$ADDED_LINES" | grep -F 'fmt.Errorf(' | grep -vE '^\s*//' || true)"
 
+  # Check 4: Unwired placeholder seam calls — Set*Provider/Sink/Source/
+  # Relay/Adapter/Handler/Emitter/Publisher(...) with a bare nil literal
+  # argument.
+  # Agents emit these instead of constructing the real adapter: the seam
+  # compiles, stays inert, the feature is silently unimplemented. Scope:
+  # newly-added lines in NON-TEST Go only (test files are already excluded
+  # via STAGED_GO_FILES; tests legitimately exercise nil guards).
+  # Exempt with //nolint:nilseam + reason (repo-wide annotation convention,
+  # see pre-commit-channel-nilafterclose / pre-commit-predictable-ids) or
+  # the equivalent '// nilseam: allow' marker.
+  while IFS= read -r pattern; do
+    [ -z "$pattern" ] && continue
+    # Skip comment lines
+    echo "$pattern" | grep -qE '^\s*//' && continue
+    # Skip suppressed lines
+    echo "$pattern" | grep -qE 'nolint:nilseam|nilseam: allow' && continue
+    # Strip string literals so "nil" inside text doesn't count
+    code=$(echo "$pattern" | sed 's/"[^"]*"//g')
+    # Extract the argument list of the seam-setter call (flat, no nested
+    # parens — the placeholder shape is always SetX(nil) / SetX(a, nil)).
+    args=$(echo "$code" | sed -nE 's/.*Set[A-Za-z0-9_]*(Provider|Sink|Source|Relay|Adapter|Handler|Emitter|Publisher)\(([^()]*)\).*/\2/p')
+    [ -z "$args" ] && continue
+    # Require nil as a WHOLE argument (not a substring of an identifier)
+    echo "$args" | grep -qE '(^|,)[[:space:]]*nil[[:space:]]*($|,)' || continue
+    LINE_NUMS=$(grep -nF "$pattern" "$file" 2>/dev/null | cut -d: -f1)
+    for ln in $LINE_NUMS; do
+      BLOCKING_ISSUES="${BLOCKING_ISSUES}  ❌ Unwired placeholder seam call (nil passed to $(echo "$pattern" | sed -nE 's/.*(Set[A-Za-z0-9_]*(Provider|Sink|Source|Relay|Adapter|Handler|Emitter|Publisher))\(.*/\1/p')):\n    $file:$ln: $pattern\n"
+      BLOCK_COUNT=$((BLOCK_COUNT + 1))
+    done
+  done <<< "$(echo "$ADDED_LINES" | grep -E 'Set[A-Za-z0-9_]*(Provider|Sink|Source|Relay|Adapter|Handler|Emitter|Publisher)\(' | grep -F 'nil' || true)"
+
   if [ -n "$FILE_ISSUES" ]; then
     echo -e "${YELLOW}⚠️  $file:${NC}"
     echo -e "$FILE_ISSUES"
@@ -157,7 +193,7 @@ if [ "$ISSUE_COUNT" -gt 0 ]; then
   echo ""
 
   if [ "$BLOCK_COUNT" -gt 0 ]; then
-    echo -e "${RED}❌ Commit blocked: $BLOCK_COUNT newly-added ignored-error / panic(err) site(s)${NC}"
+    echo -e "${RED}❌ Commit blocked: $BLOCK_COUNT newly-added ignored-error / panic(err) / nil-seam site(s)${NC}"
     echo ""
     exit 1
   fi
