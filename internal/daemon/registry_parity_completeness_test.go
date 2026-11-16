@@ -286,8 +286,6 @@ var rp2InertAllowlist = map[string]string{}
 var rp2GatedRegistrationPins = map[string]string{
 	"ask":                   "gated: built-in ask tool needs the msgBus pending-question store wiring at the agent-loop site",
 	"intake_save":           "gated: intake tool registers only with [intake].enabled (default false)",
-	"send_agent_message":    "gated: inter-agent messaging wires after EmployeeMessageStore exists (multi-user/employee boot leg)",
-	"inbox":                 "gated: same employee-message-store leg as send_agent_message",
 	"request_handoff":       "gated: wires where the dispatcher + agent registry + message bus init (multi-agent boot leg)",
 	"request_review":        "gated: same platform-tools leg as request_handoff",
 	"delegate_task":         "gated: registerPlatformTools leg runs after Dispatcher init (the legacy direct-Register site predates the delegate provider)",
