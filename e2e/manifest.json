@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-15",
+  "generated": "2026-11-16",
   "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage \u2014 behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet. Flutter surface (ui/flutter_ui/**) is covered Dart-side by the gui-flows suite (gui-terminal-01, gui-session-01, gui-quota-01, gui-stream-01, gui-stream-02) against a wire-shape stub: `cd ui/flutter_ui && flutter test test/e2e`. The ui/** path_map keys below make a Flutter change select that suite; scripts/e2e-affected.sh dispatches on suites[].runner to run the Dart command instead of go test (the pre-commit-e2e Go hook does not scan Dart files, so `make e2e-affected-area AREA=gui-flows` / CI's e2e-gui job is the gate). New-package census (pre-commit-e2e): every NEW internal/|pkg/|cmd/ package dir in a commit's staged ADDITIONS must match a path_map key (bidirectional slash-boundary prefix, trailing slashes stripped) or an 'exempt' entry mapping dir -> non-empty reason string; exempt entries are printed as residual risk on every hook run.",
   "path_map": {
     "e2e/suites/smoke": [
@@ -683,13 +683,33 @@
       "voice-local"
     ],
     "internal/kanban/": [
-      "kanban-board"
+      "kanban-board",
+      "kanban",
+      "kanban-dart"
     ],
     "internal/kanbansvc/": [
-      "kanban-board"
+      "kanban-board",
+      "kanban",
+      "kanban-dart"
     ],
     "cmd/meept-kanban/": [
-      "kanban-board"
+      "kanban-board",
+      "kanban",
+      "kanban-dart"
+    ],
+    "internal/daemon/kanban_wiring.go": [
+      "kanban",
+      "kanban-dart"
+    ],
+    "internal/rpc/kanban.go": [
+      "kanban",
+      "kanban-dart"
+    ],
+    "e2e/suites/kanban": [
+      "kanban"
+    ],
+    "ui/flutter_ui/test/kanban": [
+      "kanban-dart"
     ]
   },
   "exempt": {},
@@ -1366,6 +1386,35 @@
         "kanban-board-01",
         "kanban-board-02"
       ]
+    },
+    {
+      "name": "kanban",
+      "dir": "e2e/suites/kanban",
+      "status": "implemented",
+      "scenarios": [
+        "kanban-01",
+        "kanban-02",
+        "kanban-03",
+        "kanban-04",
+        "kanban-05",
+        "kanban-06",
+        "kanban-07",
+        "kanban-08"
+      ],
+      "note": "Live-daemon wiring suite (plan leaf 06/02, master.md Integration Test Plan (a)-(g)): rebuild equality + fail-safe, real queue-claim lease refusal + takeover audit ordering, wip_mode block/warn, pairing lane through the real sidecar binary, wiring pins. Boots the harness daemon with [kanban].enabled."
+    },
+    {
+      "name": "kanban-dart",
+      "dir": "ui/flutter_ui/test/kanban",
+      "status": "implemented",
+      "runner": "dart",
+      "command": [
+        "flutter",
+        "test",
+        "test/kanban"
+      ],
+      "workdir": "ui/flutter_ui",
+      "note": "Dart tier for the kanban parity snapshot (case f): board view / service / nav widget tests under ui/flutter_ui/test/kanban. Same runner:dart dispatch as gui-flows \u2014 scripts/e2e-affected.sh and make e2e-affected-area run `flutter test test/kanban`, never go test."
     }
   ],
   "scenarios": [
@@ -5032,6 +5081,100 @@
       "paths": [
         "cmd/meept-kanban/main.go",
         "internal/kanbansvc/gateway.go"
+      ]
+    },
+    {
+      "id": "kanban-01",
+      "suite": "kanban",
+      "diff": "M",
+      "title": "(a) rebuild equality + fail-safe: real claimed-job event projects; ghost task event via bus.publish projects with the kind:id fallback title; reconcile deletes ONLY the ghost orphan (manual NULL-ref card immune, live job card stays), second pass changes zero rows",
+      "paths": [
+        "internal/kanban/",
+        "internal/rpc/kanban.go",
+        "internal/daemon/kanban_wiring.go",
+        "e2e/suites/kanban/"
+      ]
+    },
+    {
+      "id": "kanban-02",
+      "suite": "kanban",
+      "diff": "M",
+      "title": "(b) lease refusal: human kanban.card.move of a card whose job holds a LIVE queue claim refuses with the frozen C1 'lease held by <holder> since <RFC3339>' text over the error path; card unmoved, zero timeline rows",
+      "paths": [
+        "internal/kanban/",
+        "internal/rpc/kanban.go",
+        "internal/daemon/kanban_wiring.go",
+        "e2e/suites/kanban/"
+      ]
+    },
+    {
+      "id": "kanban-03",
+      "suite": "kanban",
+      "diff": "M",
+      "title": "(c) takeover audit sequence: kanban.card.takeover appends the kind=takeover row first and releases the lease (queue.db job back to pending); the previously refused human move then lands and the timeline orders takeover strictly before move",
+      "paths": [
+        "internal/kanban/",
+        "internal/rpc/kanban.go",
+        "internal/daemon/kanban_wiring.go",
+        "e2e/suites/kanban/"
+      ]
+    },
+    {
+      "id": "kanban-04",
+      "suite": "kanban",
+      "diff": "S",
+      "title": "(d) wip_mode=block: move onto a column at its WIP limit refuses with the exact 'WIP limit reached for column <id>: 1' C1 text; card stays, no timeline rows",
+      "paths": [
+        "internal/kanban/",
+        "internal/rpc/kanban.go",
+        "internal/daemon/kanban_wiring.go",
+        "e2e/suites/kanban/"
+      ]
+    },
+    {
+      "id": "kanban-05",
+      "suite": "kanban",
+      "diff": "S",
+      "title": "(d) wip_mode=warn (default): the over-WIP human move LANDS and the timeline carries the move row plus a wip_warning note row",
+      "paths": [
+        "internal/kanban/",
+        "internal/rpc/kanban.go",
+        "internal/daemon/kanban_wiring.go",
+        "e2e/suites/kanban/"
+      ]
+    },
+    {
+      "id": "kanban-06",
+      "suite": "kanban",
+      "diff": "M",
+      "title": "(e) pairing lane end-to-end: kanban.pair.mint/exchange over the daemon socket persist $MEEPT_HOME/kanban/tokens.json; the REAL meept-kanban binary loads the same file \u2014 paired token 200 (seeded board forwarded live), no token 401, read-only token on a mutate route 403, code single-use",
+      "paths": [
+        "internal/kanbansvc/",
+        "cmd/meept-kanban/main.go",
+        "internal/daemon/kanban_wiring.go",
+        "e2e/suites/kanban/",
+        "internal/rpc/kanban.go"
+      ]
+    },
+    {
+      "id": "kanban-07",
+      "suite": "kanban-dart",
+      "diff": "S",
+      "title": "(f) GUI parity snapshot: flutter test test/kanban \u2014 board view widget, kanban service wire shapes, and board navigation stay green with the Go board surface",
+      "paths": [
+        "ui/flutter_ui/test/kanban/",
+        "internal/kanban/"
+      ]
+    },
+    {
+      "id": "kanban-08",
+      "suite": "kanban",
+      "diff": "S",
+      "title": "(g) live wiring pins: enabled boot answers kanban.board.list with the seeded 'meept board' over the Unix socket; disabled boot answers -32601 method-not-found for kanban.board.list and kanban.pair.mint while queue.stats still serves (byte-identical posture)",
+      "paths": [
+        "internal/daemon/kanban_wiring.go",
+        "internal/rpc/kanban.go",
+        "e2e/suites/kanban/"
       ]
     }
   ]
