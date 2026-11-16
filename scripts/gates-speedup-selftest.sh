@@ -25,7 +25,10 @@
 #       non-zero on a blocking failure, verdicts replay in numbered order
 #       regardless of completion order, wall time proves concurrency,
 #       non-blocking failures never flip the aggregate, serial mode
-#       fail-stops at the first blocking failure.
+#       fail-stops at the first blocking failure, and the aggregate exit
+#       survives an output pipe (PIPESTATUS[0]) — plus a static scan: no
+#       side-effecting command piped into tail/head without pipefail in
+#       the dispatch chain files (pipeline-mask guard).
 #   [6] snapshot primitive: checkout-index of an index COPY yields the
 #       STAGED bytes and excludes the sibling's unstaged edit (the
 #       langcode failure class this gates against).
@@ -340,6 +343,47 @@ grep -qF "blocked at [1/20]" "$WORK/dispatch-c.out" || ok=0
 # fail-stop: the second hook must NOT have run.
 if grep -qF "MARK_ONE" "$WORK/dispatch-c.out"; then ok=0; fi
 check dispatch_serial_failstop "$ok" "rc=$rc_c"
+
+# (4d) PIPELINE-MASK GUARD (2026-11-16 incident: `git commit ... | tail`
+# returns TAIL's status — a failed commit nearly read as success).
+# Two halves:
+#  - behavioral: a blocking-failure dispatch, with its stdout drained
+#    through a pipe, must still expose rc=1 via PIPESTATUS[0] (the
+#    aggregate exit rides `return`/`exit`, never a pipe stage).
+#  - static: no side-effecting command (git/go/make) may be piped into a
+#    status-swallowing filter (tail/head) in the dispatch chain files
+#    unless the file sets pipefail. Text-book grep loop, no eval.
+env MEEPT_HOOKS_SELFTEST=1 \
+    MEEPT_HOOKS_SELFTEST_HOOKS="$H2 $H1" \
+    bash "$PRE_COMMIT" 2>/dev/null | tail -3 >/dev/null
+piped_rc="${PIPESTATUS[0]}"
+ok=1
+[ "$piped_rc" = "1" ] || ok=0
+check dispatch_blocking_rc_survives_output_pipe "$ok" "PIPESTATUS[0]=$piped_rc want=1"
+
+mask_scan_fail=0
+mask_probe() { # $1 = file; echoes nothing, returns 0 if a masking line found
+    grep -q "pipefail" "$1" && return 1
+    grep -vE '^[[:space:]]*#' "$1" \
+        | grep -qE '(^|[;&|(]|[[:space:]])(git|go|make)[[:space:]][^|]*\|[[:space:]]*(tail|head)([[:space:]]|$|\))'
+}
+# Non-vacuity: the probe must catch a planted violation and must not fire
+# on the hardened safe forms (PIPESTATUS capture, pipefail-set file).
+printf '#!/bin/bash\nset -e\ngit commit -m x | tail -1\n' > "$WORK/mask-probe-bad.sh"
+printf '#!/bin/bash\nsome_command | tail -1; rc=${PIPESTATUS[0]}\nset -o pipefail\ngit push | tail -1\n' > "$WORK/mask-probe-ok.sh"
+mask_probe "$WORK/mask-probe-bad.sh" || mask_scan_fail=1
+! mask_probe "$WORK/mask-probe-ok.sh" || mask_scan_fail=1
+for f in "$PRE_COMMIT" "$HOOK_DISPATCH_LIB" "$REPO_ROOT/.githooks/pre-commit-build" \
+         "$REPO_ROOT/.githooks/pre-commit-feature-docs" "$REPO_ROOT/.githooks/pre-push" \
+         "$REPO_ROOT/.githooks/pre-push-vet" "$REPO_ROOT/.githooks/pre-push-bench"; do
+    if mask_probe "$f"; then
+        echo "  pipe-masking pattern found in $(basename "$f"):"
+        grep -nE '(^|[;&|(]|[[:space:]])(git|go|make)[[:space:]][^|]*\|[[:space:]]*(tail|head)([[:space:]]|$|\))' "$f" | grep -vE ':[[:space:]]*#' | sed 's/^/    /'
+        mask_scan_fail=1
+    fi
+done
+[ "$mask_scan_fail" = "0" ] && ok=1 || ok=0
+check dispatch_chain_no_sideeffect_pipe_to_filter "$ok" "see lines above"
 
 # ==========================================================================
 # [6] Snapshot primitive (speedup item 6): staged bytes, not worktree.

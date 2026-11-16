@@ -65,14 +65,27 @@ echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 
 # Get list of staged files (excluding deleted files)
-STAGED_FILES=$(git diff --cached --name-only --diff-filter=d 2>/dev/null || true)
+# PIPELINE-MASKING HARDENING (2026-11-16): these reads used to end in
+# `|| true`, so a failing `git diff` (broken index, lock contention) left
+# STAGED_FILES empty and the gate printed "No staged changes" + exit 0 —
+# a false green from a blocking gate. Fail-closed instead, same policy as
+# pre-commit-e2e. pipefail so no later pipe in this file masks stage-1
+# failures either.
+set -o pipefail
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=d) || {
+  echo -e "${RED}❌ pre-commit-feature-docs: cannot read staged files from the index (git diff failed) — fail-closed.${NC}" >&2
+  exit 1
+}
 
 # Get list of newly-added files only (for the doc trigger).
 # The feature-doc check should fire for NEW feature code, not for minor
 # tweaks to existing files (log line additions, bug fixes, refactors).
 # For "significant" packages (agent, llm, etc.) we still check modified
 # files since those packages are core to the product.
-STAGED_ADDED_FILES=$(git diff --cached --name-only --diff-filter=A 2>/dev/null || true)
+STAGED_ADDED_FILES=$(git diff --cached --name-only --diff-filter=A) || {
+  echo -e "${RED}❌ pre-commit-feature-docs: cannot read staged additions from the index (git diff failed) — fail-closed.${NC}" >&2
+  exit 1
+}
 
 if [ -z "$STAGED_FILES" ]; then
   echo -e "${GREEN}✅ No staged changes to check${NC}"
@@ -232,10 +245,33 @@ generate_doc_suggestion() {
   local feature="$1"
   local changed_files="$2"
 
+  # NON-TTY GUARD (two 10+ min commit hangs, 2026-11-16): the read below
+  # waits forever when stdin is not a terminal (agent/non-interactive
+  # `git commit` — this gate is the one serial check that inherits the
+  # caller's stdin; the parallel batch sub-hooks all run </dev/null).
+  # Fail fast instead of hanging: print the actionable remedy and exit
+  # with this gate's normal failure code (1). TTY behavior is unchanged —
+  # an interactive user still gets the aider prompt.
+  if [ ! -t 0 ]; then
+    echo -e "${RED}❌ Non-interactive session (stdin is not a TTY) — the aider prompt cannot run.${NC}"
+    echo "   This gate would have blocked the commit anyway; it blocks now instead of hanging."
+    echo ""
+    echo "   Missing documentation: ${FEATURE_DOCS_DIR}/${feature}.md"
+    echo "   Remedy: create or update that doc, stage it"
+    echo "     git add ${FEATURE_DOCS_DIR}/${feature}.md"
+    echo "   and re-run the commit — or run the commit from an interactive"
+    echo "   terminal to use the aider offer (or --no-verify in an emergency)."
+    echo ""
+    exit 1
+  fi
+
   echo -e "${YELLOW}📝 Would you like to generate documentation using aider?${NC}"
   echo -e "   This will create ${FEATURE_DOCS_DIR}/${feature}.md"
   echo ""
-  read -p "   Generate documentation? (y/n): " -n 1 -r
+  # Defense-in-depth on the TTY path: a bounded wait, answering "no" on
+  # timeout (empty REPLY falls through to return 1, the normal block).
+  REPLY=""
+  read -t 120 -p "   Generate documentation? (y/n): " -n 1 -r || true
   echo ""
 
   if [[ $REPLY =~ ^[Yy]$ ]]; then

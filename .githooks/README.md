@@ -407,6 +407,14 @@ When documentation is missing, the hook offers to:
 2. Run aider with glm-5.2 to analyze code changes
 3. Generate draft documentation based on the code
 
+**Non-interactive sessions:** the aider prompt requires a TTY. When stdin
+is not a terminal (agent-driven or scripted `git commit`), the hook does
+NOT prompt — it prints the missing doc + the exact remedy and fails
+immediately (exit 1), because the gate blocks that commit anyway and an
+unbounded `read` there hung two commits for 10+ minutes each (2026-11-16).
+On a TTY the prompt is unchanged, now with a 120s timeout that answers
+"no" if you walk away.
+
 **Manual aider usage:**
 ```bash
 aider --model glm-5.2 \

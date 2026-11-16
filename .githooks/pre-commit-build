@@ -28,7 +28,17 @@ echo -e "${BLUE}  Running go build on staged packages${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
-STAGED_GO_FILES=$(git diff --cached --name-only --diff-filter=d 2>/dev/null | grep '\.go$' | grep -v '_test\.go$' || true)
+# PIPELINE-MASKING HARDENING (2026-11-16): the old
+# `git diff ... | grep ... || true` form let a failing index read exit 0
+# with an empty list (the trailing `|| true` plus pipefail-off masked
+# stage 1), which printed "No Go source files staged" + exit 0 — a false
+# green from a blocking gate. Read the index in its own step and fail
+# closed if git itself fails.
+STAGED_GO_LIST=$(git diff --cached --name-only --diff-filter=d 2>/dev/null) || {
+  echo -e "${RED}❌ pre-commit-build: cannot read staged files from the index (git diff failed) — fail-closed.${NC}" >&2
+  exit 1
+}
+STAGED_GO_FILES=$(printf '%s\n' "$STAGED_GO_LIST" | grep '\.go$' | grep -v '_test\.go$' || true)
 
 if [ -z "$STAGED_GO_FILES" ]; then
   echo -e "${GREEN}✅ No Go source files staged${NC}"
@@ -160,7 +170,23 @@ echo ""
 # Packages whose working-tree files differ from HEAD outside what is staged:
 # these contain other sessions' WIP and are flagged when building from the
 # working tree.
-DIRTY_PKGS=$(git diff --name-only HEAD | sort -u | xargs -I{} dirname {} | sort -u | sed 's|^|./|')
+# PIPELINE-MASKING HARDENING (2026-11-16): the git stage used to sit
+# behind sort/xargs/sed with pipefail off, so a `git diff HEAD` failure
+# (orphan HEAD, lock contention) exited 0 with an empty list and silently
+# disarmed the sibling-WIP warning. Split the git read out; its failure
+# prints a note instead of passing silently (the list only feeds a
+# warning, so it stays non-blocking).
+DIRTY_FILES=$(git diff --name-only HEAD 2>/dev/null) || DIRTY_FILES=""
+if [ -n "$DIRTY_FILES" ]; then
+  DIRTY_PKGS=$(printf '%s\n' "$DIRTY_FILES" | xargs -I{} dirname {} 2>/dev/null | sort -u | sed 's|^|./|')
+else
+  if ! git diff --quiet HEAD 2>/dev/null; then
+    # git diff HEAD errored (rc>1: lock contention, bad HEAD) — the
+    # sibling-WIP warning below is disarmed this run; say so, don't hide.
+    echo -e "${YELLOW}note: could not read working-tree dirt (git diff HEAD failed); sibling-WIP warning skipped this run${NC}"
+  fi
+  DIRTY_PKGS=""
+fi
 
 for pkg in $STAGED_PKGS; do
   if printf '%s\n' "$DIRTY_PKGS" | grep -Fxq "$pkg"; then

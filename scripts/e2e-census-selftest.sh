@@ -266,9 +266,44 @@ run_case skip_env_escape_hatch 0 "E2E ENFORCEMENT SKIPPED" \
 
 # ── (l) seam guard: MEEPT_E2E_MANIFEST_FILE without the staged seam is
 #       fixture-only misuse -> fail-closed exit 1 ─────────────────────────
-run_case manifest_seam_requires_staged_seam 1 "fixture-only" \
-    env MEEPT_E2E_MANIFEST_FILE="$WORK/base.json" \
-        bash "$HOOK"
+# Must run in REAL-index mode in its OWN scratch repo with a STAGED row.
+# Invoking the shared hook directly let the outer checkout's index decide
+# the outcome: on a clean clone the hook's "no staged changes" short
+# circuit (pre-commit-e2e, the STAGED-empty early exit) fired BEFORE the
+# seam guard, so the case passed rc=0 past "fixture-only" — a
+# checkout-dependent false red/green (failed on every fresh clone).
+# The scratch repo stages its own fixture (baseline commit + one staged
+# modification) so the guard is always reached, with no dependence on
+# the outer worktree's index at all.
+SCRATCH3="$WORK/scratch-seamguard-repo"
+mkdir -p "$SCRATCH3/.githooks" "$SCRATCH3/scripts" "$SCRATCH3/e2e" "$SCRATCH3/internal/otherpkg"
+cp "$HOOK" "$SCRATCH3/.githooks/pre-commit-e2e"
+printf '#!/usr/bin/env bash\necho "STUB e2e-affected: ok"\nexit 0\n' > "$SCRATCH3/scripts/e2e-affected.sh"
+chmod +x "$SCRATCH3/scripts/e2e-affected.sh"
+write_manifest "$SCRATCH3/e2e/manifest.json" '{"path_map": {"internal/agent/": ["smoke"]}, "exempt": {}}'
+printf 'package otherpkg\n\nvar X = 1\n' > "$SCRATCH3/internal/otherpkg/x.go"
+(
+    cd "$SCRATCH3" || exit 1
+    export GIT_AUTHOR_NAME=selftest GIT_AUTHOR_EMAIL=selftest@example.invalid
+    export GIT_COMMITTER_NAME=selftest GIT_COMMITTER_EMAIL=selftest@example.invalid
+    git init -q . >/dev/null 2>&1
+    git add . >/dev/null 2>&1
+    git commit -q -m "baseline" >/dev/null 2>&1
+    printf 'package otherpkg\n\nvar X = 2\n' > internal/otherpkg/x.go
+    git add internal/otherpkg/x.go >/dev/null 2>&1
+    # The case is only meaningful with a non-empty staged diff: without a
+    # staged row the hook legitimately takes the "no staged changes" early
+    # exit and the seam guard is never exercised.
+    if [ -z "$(git diff --cached --name-only --diff-filter=ACMR)" ]; then
+        echo "e2e-census-selftest: seam-guard fixture has no staged row — setup failed" >&2
+        exit 1
+    fi
+) || { echo "CASE manifest_seam_requires_staged_seam: rc=? expected=1 FAIL (scratch repo setup failed)"; CASES_RAN=$((CASES_RAN+1)); CASES_FAIL=$((CASES_FAIL+1)); }
+if [ -d "$SCRATCH3/.git" ]; then
+    run_case manifest_seam_requires_staged_seam 1 "fixture-only" \
+        env MEEPT_E2E_MANIFEST_FILE="$WORK/base.json" \
+            bash "$SCRATCH3/.githooks/pre-commit-e2e"
+fi
 
 # ── (m) seam guard: staged seam pointing at a missing file -> exit 1 ────
 run_case staged_seam_missing_file 1 "does not exist" \
