@@ -563,7 +563,7 @@ func TestManagerFromFiles_EndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetOrCreate: %v", err)
 	}
-	if _, err := sess.Send(ctx, "hello"); err != nil {
+	if _, _, err := sess.Send(ctx, "hello"); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
 	m.StopAll()

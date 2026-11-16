@@ -36,9 +36,13 @@ type Manager struct {
 	decision Decisioner
 	relay    *Relay
 	notifier PermissionNotifier
-	mu       sync.Mutex
-	sessions map[string]*Session
-	pending  map[string]*startWait
+	// onSessionCreated is the post-creation hook fired once per freshly
+	// started session (inter-agent-coordination leaf 04-01, C8). The
+	// daemon installs it to arm the per-session turn-state publisher.
+	onSessionCreated func(*Session)
+	mu               sync.Mutex
+	sessions         map[string]*Session
+	pending          map[string]*startWait
 }
 
 // SetDecisionClient injects the permission lane's decision seam. Nil-safe
@@ -52,6 +56,23 @@ func (m *Manager) SetDecisionClient(d Decisioner) {
 	}
 	m.mu.Lock()
 	m.decision = d
+	m.mu.Unlock()
+}
+
+// SetOnSessionCreated installs the post-creation hook (inter-agent
+// coordination leaf 04-01, C8): fired once per freshly STARTED session,
+// outside the manager mutex, with the live session — never for sessions
+// served from the sessions/pending caches. Nil-safe per the repo setter
+// rule; nil clears the hook. The daemon uses it to arm
+// sess.SetTurnStatePublisher at the single construction seam
+// (GetOrCreatePersona), so lazily created ACP sessions publish
+// agent.turn.state edges without every caller re-wiring the seam.
+func (m *Manager) SetOnSessionCreated(fn func(*Session)) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.onSessionCreated = fn
 	m.mu.Unlock()
 }
 
@@ -382,7 +403,17 @@ func (m *Manager) GetOrCreatePersona(ctx context.Context, agentID, persona, work
 		m.sessions[key] = sess
 	}
 	close(w.done)
+	hook := m.onSessionCreated
 	m.mu.Unlock()
+
+	// Post-creation hook (inter-agent-coordination leaf 04-01, C8): fired
+	// OUTSIDE the mutex, only for a freshly started session (cache hits
+	// and concurrent waiters return above without reaching this point).
+	// A nil hook or failed start is a no-op — the session then runs with
+	// an unarmed turn-state seam, exactly like the pre-leaf-04 build.
+	if err == nil && hook != nil {
+		hook(sess)
+	}
 	return sess, err
 }
 

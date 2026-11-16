@@ -14,6 +14,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -133,6 +134,11 @@ type ChildRecord struct {
 	// refused beyond maxDelegateDepth. Recorded for observability; the
 	// cap itself is enforced at Spawn (delegateDepthKey).
 	Depth int
+	// StopReason is classified at SETTLE time, where the typed child error
+	// (e.g. *llm.RefusalError) is still in scope — never by string-matching
+	// the stored Err text. Empty for unsettled/terminal-free states; see
+	// classifyStopReason.
+	StopReason StopReason
 	// Context and OutputSchema ride the spawn request so the resume brief
 	// can be re-rendered through the same childPrompt pipeline as a fresh
 	// spawn (no drift between fork and resume briefs).
@@ -180,12 +186,13 @@ func childWantsForkSeed(spec *AgentSpec) bool {
 // DelegateResult is the C1 result shape; it expands the legacy platform.go
 // shape with ChildID + Status so a spawn returns the child handle immediately.
 type DelegateResult struct {
-	AgentID  string `json:"agent_id"`
-	Success  bool   `json:"success"`
-	Response string `json:"response,omitempty"`
-	Error    string `json:"error,omitempty"`
-	ChildID  string `json:"child_id,omitempty"` // steer/interrupt key
-	Status   string `json:"status,omitempty"`   // running|completed|interrupted
+	AgentID    string     `json:"agent_id"`
+	Success    bool       `json:"success"`
+	Response   string     `json:"response,omitempty"`
+	Error      string     `json:"error,omitempty"`
+	ChildID    string     `json:"child_id,omitempty"` // steer/interrupt key
+	Status     string     `json:"status,omitempty"`   // running|completed|interrupted
+	StopReason StopReason `json:"stop_reason,omitempty"`
 }
 
 // ErrChildNotFound is returned by Lookup/Join/Cancel for an unknown child.
@@ -541,7 +548,19 @@ func (m *DelegateManager) Spawn(ctx context.Context, req DelegateRequest, parent
 	if m.children == nil {
 		m.children = make(map[string]*childEntry)
 	}
-	childCtx, cancel := context.WithCancel(ctx)
+	// The child ctx DETACHES from the parent turn's cancellation
+	// (WithoutCancel keeps the value chain - session ids, taint context -
+	// but drops the cancel edge): a delegate child is an async job by
+	// contract (spawn returns "running"; settlement arrives later on
+	// agent.delegate.result). Inheriting the parent turn's ctx made every
+	// settlement impossible by construction - the child died
+	// "context cancelled" the moment the parent task completed (observed
+	// e2e, inter-agent-coord T1/T2; delegate-seam masked it because its
+	// turn-2 assertion reads scripted post-tool text, not the wire).
+	// Explicit cancellation still works through e.cancel (Cancel /
+	// subagent_interrupt); daemon shutdown terminates children with the
+	// process.
+	childCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	e := &childEntry{rec: rec, settle: make(chan struct{}), cancel: cancel}
 	m.children[childID] = e
 	m.mu.Unlock()
@@ -549,6 +568,13 @@ func (m *DelegateManager) Spawn(ctx context.Context, req DelegateRequest, parent
 	// Launch the child ONLY when a registry is wired; unwired/test children
 	// remain pending settlement through the test seam / external hooks.
 	if m.reg != nil {
+		emitTurnStatePublisher(m.publisher, TurnStateEvent{
+			AgentID:   req.AgentID,
+			ChildID:   childID,
+			SessionID: parentSessionID,
+			State:     TurnStateRunning,
+			Phase:     "spawn",
+		})
 		go m.runChild(contextWithDelegateDepth(childCtx, depth), req, childID, rec)
 	} else {
 		go func() {
@@ -603,7 +629,9 @@ func (m *DelegateManager) runChild(ctx context.Context, req DelegateRequest, chi
 
 	resp, err := m.runChildTurn(ctx, rec, fullMessage)
 	if err != nil {
-		m.settle(childID, ChildStateFailed, "", err.Error())
+		// Typed error in scope: classify the stop reason HERE (a refusal
+		// must survive as StopReasonRefusal, not be string-matched later).
+		m.settleWithError(childID, ChildStateFailed, "", err.Error(), err)
 		return
 	}
 	m.settle(childID, ChildStateCompleted, resp, "")
@@ -635,7 +663,7 @@ func (m *DelegateManager) runACPChild(ctx context.Context, req DelegateRequest, 
 		return
 	}
 
-	resp, err := sess.Send(ctx, fullMessage)
+	resp, _, err := sess.Send(ctx, fullMessage)
 	if err != nil {
 		m.settle(childID, ChildStateFailed, "", fmt.Sprintf("acp session send failed: %v", err))
 		return
@@ -819,7 +847,18 @@ func (m *DelegateManager) SettleForTest(childID string, state ChildState, result
 // settle finalizes a child's record exactly once: it updates state/result/err
 // under the write lock, closes the settle channel, then publishes the bus
 // event and runs the persistence hook OUTSIDE the lock (no I/O under mutex).
+//
+// The typed error is classified HERE (settle time), where it is still in
+// scope, and the resulting StopReason is stored on the record — the stored
+// Err string is never string-matched (a *llm.RefusalError must survive as
+// StopReasonRefusal even after errStr flattens it to text).
 func (m *DelegateManager) settle(childID string, state ChildState, result, errStr string) {
+	m.settleWithError(childID, state, result, errStr, nil)
+}
+
+// settleWithError is settle with the typed child error in scope, so the
+// stop-reason classification sees the concrete error type (not its string).
+func (m *DelegateManager) settleWithError(childID string, state ChildState, result, errStr string, typedErr error) {
 	m.mu.Lock()
 	e, ok := m.children[childID]
 	if !ok || e.settled {
@@ -830,10 +869,27 @@ func (m *DelegateManager) settle(childID string, state ChildState, result, errSt
 	e.rec.State = state
 	e.rec.Result = result
 	e.rec.Err = errStr
+	e.rec.StopReason = classifyStopReason(state, typedErr)
 	rec := e.rec
 	m.mu.Unlock()
 
 	m.publishResult(rec)
+	// Turn-state edge for coordination observers (F1): idle (or
+	// requires_action when the child needs input, i.e. a refusal) with the
+	// classified stop reason. Outside the mutex (mutexio invariant),
+	// publisher nil-guarded — unwired managers stay byte-identical.
+	turnState := TurnStateIdle
+	if rec.StopReason == StopReasonRefusal {
+		turnState = TurnStateRequiresAction
+	}
+	emitTurnStatePublisher(m.publisher, TurnStateEvent{
+		AgentID:    rec.AgentID,
+		ChildID:    rec.ChildID,
+		SessionID:  rec.ParentSessionID,
+		State:      turnState,
+		StopReason: rec.StopReason,
+		Phase:      "settled",
+	})
 	// Persist BEFORE closing the settle channel: Join returns the moment the
 	// channel closes, so a resume path (or a test) observing a settled child
 	// must be able to rely on the durable descriptor already being saved.
@@ -841,6 +897,33 @@ func (m *DelegateManager) settle(childID string, state ChildState, result, errSt
 	// cost lands on the child's own goroutine, and persist stays best-effort.
 	m.persistRecord(rec)
 	close(e.settle)
+}
+
+// classifyStopReason maps a settled child state (plus the typed error when
+// one is in scope) to the C2 stop-reason table:
+//
+//	completed, err==""   -> StopReasonEndTurn
+//	interrupted          -> StopReasonCancelled
+//	failed + *llm.RefusalError -> StopReasonRefusal
+//	failed, otherwise    -> StopReasonError
+//	pending/running      -> "" (unsettled, omitted)
+func classifyStopReason(state ChildState, typedErr error) StopReason {
+	switch state {
+	case ChildStateCompleted:
+		// completion with a typed error cannot happen (runChild settles
+		// Completed only on the success path); treat it as end_turn.
+		return StopReasonEndTurn
+	case ChildStateInterrupted:
+		return StopReasonCancelled
+	case ChildStateFailed:
+		var refusal *llm.RefusalError
+		if errors.As(typedErr, &refusal) {
+			return StopReasonRefusal
+		}
+		return StopReasonError
+	default:
+		return ""
+	}
 }
 
 // resultFromRecord maps a settled record to the C1 DelegateResult shape.
@@ -852,6 +935,12 @@ func (m *DelegateManager) resultFromRecord(rec ChildRecord) DelegateResult {
 		Status:   status,
 		Response: rec.Result,
 		Error:    rec.Err,
+		// Classify from the state; the settle-time classification (typed
+		// error, e.g. refusal) wins when the record carries one.
+		StopReason: rec.StopReason,
+	}
+	if res.StopReason == "" {
+		res.StopReason = classifyStopReason(rec.State, nil)
 	}
 	res.Success = status == string(ChildStateCompleted) && rec.Err == ""
 	return res
@@ -869,6 +958,11 @@ func (m *DelegateManager) publishResult(rec ChildRecord) {
 		"response":          rec.Result,
 		"error":             rec.Err,
 		"parent_session_id": rec.ParentSessionID,
+	}
+	// C2 (inter-agent-coord): the classified stop reason rides the wire
+	// alongside status - empty for pending/running, mapped for terminals.
+	if rec.StopReason != "" {
+		payload["stop_reason"] = string(rec.StopReason)
 	}
 	m.publisher("agent.delegate.result", payload)
 }

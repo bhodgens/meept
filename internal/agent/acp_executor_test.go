@@ -21,12 +21,12 @@ type fakeACPSession struct {
 	sent   []string // prompt texts Send received
 }
 
-func (s *fakeACPSession) Send(ctx context.Context, text string) (string, error) {
+func (s *fakeACPSession) Send(ctx context.Context, text string) (string, acp.StopReason, error) {
 	s.sent = append(s.sent, text)
 	if s.err != nil {
-		return "", s.err
+		return "", "", s.err
 	}
-	return s.reply, nil
+	return s.reply, "end_turn", nil
 }
 
 func (s *fakeACPSession) Events() <-chan acp.SessionEvent {

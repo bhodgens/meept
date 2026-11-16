@@ -20,6 +20,18 @@ func decodeTurnTerminalWSClass(raw json.RawMessage) (wsclass.WSClassified, error
 	return ev, nil
 }
 
+// decodeTurnStateWSClass unmarshals an agent.turn.state payload into the
+// frozen agent.TurnStateEvent struct (inter-agent-coordination leaf 04-01,
+// C6). The marker classifies the frame as agent_progress — never
+// chat_message.
+func decodeTurnStateWSClass(raw json.RawMessage) (wsclass.WSClassified, error) {
+	var ev agent.TurnStateEvent
+	if err := json.Unmarshal(raw, &ev); err != nil {
+		return nil, err
+	}
+	return ev, nil
+}
+
 // decodeACPPermissionWSClass unmarshals an acp.permission.* payload into
 // the frozen bus.ACPPermissionEvent struct (acp-human-permission-relay
 // leaf 03). The marker classifies the frame as agent_progress — never
@@ -74,6 +86,7 @@ func decodeKanbanStateEventWSClass(raw json.RawMessage) (wsclass.WSClassified, e
 // fallback still classifies any topic missing here.
 var typedPayloadDecoders = map[string]func(json.RawMessage) (wsclass.WSClassified, error){
 	agent.TopicTurnTerminal.Name:         decodeTurnTerminalWSClass,
+	agent.TopicTurnState.Name:            decodeTurnStateWSClass,
 	bus.TopicACPPermissionRequested.Name: decodeACPPermissionWSClass,
 	bus.TopicACPPermissionResolved.Name:  decodeACPPermissionWSClass,
 	kanban.TopicCardMoved.Name:           decodeKanbanCardMovedWSClass,

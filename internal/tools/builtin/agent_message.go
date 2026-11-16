@@ -17,6 +17,7 @@ package builtin
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -102,6 +103,24 @@ func (t *SendAgentMessageTool) Parameters() llm.FunctionParameters {
 				Type:        schemaTypeString,
 				Description: fmt.Sprintf("The message body (max %d bytes).", MaxAgentMessageBody),
 			},
+			"structured": {
+				Type:        schemaTypeObject,
+				Description: "Optional machine-readable context alongside the message: tool_targets (tools the recipient should use), file_paths (files in play), plan_entries (related plan entry IDs).",
+				Properties: map[string]llm.ParameterProperty{
+					"tool_targets": {
+						Type:  schemaTypeArray,
+						Items: &llm.ParameterProperty{Type: schemaTypeString},
+					},
+					"file_paths": {
+						Type:  schemaTypeArray,
+						Items: &llm.ParameterProperty{Type: schemaTypeString},
+					},
+					"plan_entries": {
+						Type:  schemaTypeArray,
+						Items: &llm.ParameterProperty{Type: schemaTypeString},
+					},
+				},
+			},
 		},
 		Required: []string{"to", "message"},
 	}
@@ -112,6 +131,43 @@ type SendMessageResult struct {
 	ID    string `json:"id"`
 	To    string `json:"to"`
 	State string `json:"state"`
+}
+
+// inboxStructured is a local mirror of employee.InboxStructured. It is
+// duplicated (same JSON tags) because builtin cannot import
+// internal/employee — that import path closes the builtin → employee →
+// bot → … → tools/builtin cycle.
+type inboxStructured struct {
+	ToolTargets []string `json:"tool_targets,omitempty"`
+	FilePaths   []string `json:"file_paths,omitempty"`
+	PlanEntries []string `json:"plan_entries,omitempty"`
+}
+
+// inboxBody is the local mirror of employee.AgentInboxBody: the JSON
+// envelope stored as the message body when a send carries structured
+// context. Legacy sends store the raw text unchanged.
+type inboxBody struct {
+	Body       string           `json:"body"`
+	Structured *inboxStructured `json:"structured,omitempty"`
+}
+
+// parseStructuredArg decodes the optional "structured" tool argument
+// (map[string]any from the LLM) into the local mirror via a JSON
+// round-trip. Returns nil when the arg is absent or not an object.
+func parseStructuredArg(raw any) *inboxStructured {
+	obj, ok := raw.(map[string]any)
+	if !ok {
+		return nil
+	}
+	roundTrip, err := json.Marshal(obj)
+	if err != nil {
+		return nil
+	}
+	var st inboxStructured
+	if err := json.Unmarshal(roundTrip, &st); err != nil {
+		return nil
+	}
+	return &st
 }
 
 func (t *SendAgentMessageTool) Execute(ctx context.Context, args map[string]any) (any, error) {
@@ -147,7 +203,19 @@ func (t *SendAgentMessageTool) Execute(ctx context.Context, args map[string]any)
 		}
 	}
 
-	msg := &AgentMessage{From: from, To: to, Body: body}
+	// Envelope composition (inbox leaf 03): when the caller supplied the
+	// optional structured object, the stored body becomes an
+	// AgentInboxBody JSON envelope wrapping the human text; without it,
+	// Body stays the raw message (legacy byte-identical). The 32KB cap
+	// is enforced by the store's Enqueue against this final body.
+	storedBody := body
+	if st := parseStructuredArg(args["structured"]); st != nil {
+		if envelope, err := json.Marshal(inboxBody{Body: body, Structured: st}); err == nil {
+			storedBody = string(envelope)
+		}
+	}
+
+	msg := &AgentMessage{From: from, To: to, Body: storedBody}
 	if err := t.store.Enqueue(msg); err != nil {
 		return nil, fmt.Errorf("send_agent_message: %w", err)
 	}

@@ -195,6 +195,18 @@ type SessionUpdate struct {
 	Status        string          `json:"status,omitempty"`
 }
 
+// AgentProgressUpdate is the C5 wire shape for a generic session/update
+// variant: a sessionUpdate discriminator plus optional messageId/planId,
+// raw content, and a title. It sits beside SessionUpdate for senders that
+// need the loose, forward-compatible envelope.
+type AgentProgressUpdate struct {
+	SessionUpdate string          `json:"sessionUpdate"`
+	MessageID     string          `json:"messageId,omitempty"`
+	PlanID        string          `json:"planId,omitempty"`
+	Content       json.RawMessage `json:"content,omitempty"`
+	Title         string          `json:"title,omitempty"`
+}
+
 // SessionUpdateParams is params for the session/update notification.
 type SessionUpdateParams struct {
 	SessionID string        `json:"sessionId"`

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/employee"
+	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/internal/tools/builtin"
 )
 
@@ -84,7 +85,15 @@ func WireEmployeeMessagingForComponents(c *Components) {
 		return
 	}
 	msgStore := c.EmployeeMessageStore
-	senderOf := func(ctx context.Context) string { return "orchestrator" }
+	senderOf := func(ctx context.Context) string {
+		// The calling loop's agent id when the executor stamps it into
+		// ctx (tools.AgentIDFromContext); "orchestrator" for contexts
+		// without an agent identity (RPC-driven callers).
+		if id := tools.AgentIDFromContext(ctx); id != "" {
+			return id
+		}
+		return "orchestrator"
+	}
 	adapter := WireEmployeeMessaging(msgStore, c.EmployeeManager, senderOf)
 
 	// Roster reachability for platform_agents.

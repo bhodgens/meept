@@ -31,7 +31,7 @@ const (
 // implements it; tests inject a fake.
 type acpSession interface {
 	State() acp.SessionState
-	Send(context.Context, string) (string, error)
+	Send(context.Context, string) (string, acp.StopReason, error)
 	Events() <-chan acp.SessionEvent
 }
 
@@ -231,7 +231,7 @@ func (t *ACPAgentTool) send(
 	if err != nil {
 		return nil, err
 	}
-	reply, err := sess.Send(ctx, message)
+	reply, _, err := sess.Send(ctx, message)
 	if err != nil {
 		return nil, err
 	}

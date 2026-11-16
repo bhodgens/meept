@@ -224,6 +224,7 @@ func (po *PairOrchestrator) runPairConversation(ctx context.Context, state *BusP
 			state.mu.Lock()
 			state.Phase = "failed"
 			state.mu.Unlock()
+			po.emitTurnState(sessionID, agentID, "failed", TurnStateIdle, StopReasonError)
 			po.publishError(sessionID, "context cancelled")
 			return
 		default:
@@ -233,11 +234,13 @@ func (po *PairOrchestrator) runPairConversation(ctx context.Context, state *BusP
 		state.mu.Lock()
 		state.Phase = "actor_turn"
 		state.mu.Unlock()
+		po.emitTurnState(sessionID, agentID, "actor_turn", TurnStateRunning, "")
 		actorOutput, err := po.runAgent(ctx, agentID, actorPrompt, sessionID)
 		if err != nil {
 			state.mu.Lock()
 			state.Phase = "failed"
 			state.mu.Unlock()
+			po.emitTurnState(sessionID, agentID, "failed", TurnStateIdle, StopReasonError)
 			po.publishError(sessionID, fmt.Sprintf("actor %s failed: %v", agentID, err))
 			return
 		}
@@ -263,12 +266,14 @@ func (po *PairOrchestrator) runPairConversation(ctx context.Context, state *BusP
 		state.mu.Lock()
 		state.Phase = "reviewer_turn"
 		state.mu.Unlock()
+		po.emitTurnState(sessionID, reviewerID, "reviewer_turn", TurnStateRunning, "")
 		reviewerPrompt := po.buildReviewerPrompt(state, actorOutput)
 		reviewerOutput, err := po.runAgent(ctx, reviewerID, reviewerPrompt, sessionID)
 		if err != nil {
 			state.mu.Lock()
 			state.Phase = "failed"
 			state.mu.Unlock()
+			po.emitTurnState(sessionID, reviewerID, "failed", TurnStateIdle, StopReasonError)
 			po.publishError(sessionID, fmt.Sprintf("reviewer %s failed: %v", reviewerID, err))
 			return
 		}
@@ -312,6 +317,7 @@ func (po *PairOrchestrator) runPairConversation(ctx context.Context, state *BusP
 			state.mu.Lock()
 			state.Phase = "completed"
 			state.mu.Unlock()
+			po.emitTurnState(sessionID, agentID, "completed", TurnStateIdle, StopReasonEndTurn)
 			return
 		}
 
@@ -343,6 +349,7 @@ func (po *PairOrchestrator) runPairConversation(ctx context.Context, state *BusP
 		TotalTurns:   ct,
 		FinalVerdict: lastVerdict,
 	})
+	po.emitTurnState(sessionID, agentID, "completed", TurnStateIdle, StopReasonEndTurn)
 }
 
 // runAgent invokes an agent via the registry.
@@ -508,4 +515,23 @@ func (po *PairOrchestrator) removeSession(sessionID string) {
 	po.mu.Lock()
 	defer po.mu.Unlock()
 	delete(po.sessions, sessionID)
+}
+
+// emitTurnState publishes one TurnStateEvent edge on TopicTurnState for a
+// pair phase transition (branch 02-acp-emit F2). reason carries the terminal
+// stop reason on idle/failure edges and stays empty on running edges. The
+// bus is nil-guarded: an unwired orchestrator stays byte-identical. Never
+// called while state.mu is held (mutexio invariant) — call sites emit after
+// the phase assignment lock is released.
+func (po *PairOrchestrator) emitTurnState(sessionID, agentID, phase string, state AgentTurnState, reason StopReason) {
+	if po.bus == nil {
+		return
+	}
+	bus.PublishT(po.bus, TopicTurnState, "pair-orchestrator", TurnStateEvent{
+		AgentID:    agentID,
+		SessionID:  sessionID,
+		State:      state,
+		StopReason: reason,
+		Phase:      phase,
+	})
 }

@@ -52,6 +52,13 @@ func applyACPFromConfig(cfg config.ACPConfig, dec acp.Decisioner, msgBus ...*bus
 	if len(msgBus) > 0 {
 		busRef = msgBus[0]
 	}
+	// Turn-state publisher (inter-agent-coordination leaf 04-01, C8):
+	// every ACP session the manager lazily creates publishes its
+	// running/idle edges on agent.turn.state through the bus. With a nil
+	// bus the hook still installs and emissions are silent no-ops
+	// (agent.publishTurnState nil-guard) — the pre-leaf-04 build's
+	// observable behavior.
+	mgr.SetOnSessionCreated(installTurnStatePublisher(busRef))
 	if busRef != nil &&
 		(cfg.PermissionMode == "human" ||
 			(cfg.PermissionMode == "decision" && cfg.DecisionEscalateToHuman)) {

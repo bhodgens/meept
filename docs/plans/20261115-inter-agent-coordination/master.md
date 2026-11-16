@@ -268,20 +268,20 @@ Output: APPROVED or a list of specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-e2e-tests | PENDING | 0 | |
-| 01-contract (branch) | PENDING | 0 | |
-| 01-00T-unit-tests | PENDING | 0 | |
-| 01-01-coordination-contract | PENDING | 0 | |
-| 02-acp-emit (branch) | PENDING | 0 | |
-| 02-00T-unit-tests | PENDING | 0 | |
-| 02-01-delegate-pair-emit | PENDING | 0 | |
-| 02-02-acp-updates | PENDING | 0 | |
-| 03-inbox (branch) | PENDING | 0 | |
-| 03-00T-unit-tests | PENDING | 0 | |
-| 03-01-typed-body | PENDING | 0 | |
-| 03-02-structured-scan | PENDING | 0 | |
-| 04-wire (branch) | PENDING | 0 | |
-| 04-01-ws-docs-graphs | PENDING | 0 | |
+| 00T-e2e-tests | COMPLETE | 1 | b9a56ca7 + rig repairs in 6681d508; 5/5 scenarios GREEN |
+| 01-contract (branch) | COMPLETE | 1 | contract committed 034eeef7 |
+| 01-00T-unit-tests | COMPLETE | 1 | c11910fa + AgentTurnState delta 1502d82b |
+| 01-01-coordination-contract | COMPLETE | 2 | first attempt BLOCKED (hooks.go TurnState collision) - renamed AgentTurnState; landed 034eeef7 |
+| 02-acp-emit (branch) | COMPLETE | 1 | |
+| 02-00T-unit-tests | COMPLETE | 1 | d8acd42b |
+| 02-01-delegate-pair-emit | COMPLETE | 2 | 9b3f7838 (orchestrator repaired the missing turn_end emission in-session) |
+| 02-02-acp-updates | COMPLETE | 1 | 0d926119 |
+| 03-inbox (branch) | COMPLETE | 1 | |
+| 03-00T-unit-tests | COMPLETE | 1 | bf82994a |
+| 03-01-typed-body | COMPLETE | 1 | 69b0f3ed |
+| 03-02-structured-scan | COMPLETE | 1 | 5847675a |
+| 04-wire (branch) | COMPLETE | 1 | |
+| 04-01-ws-docs-graphs | COMPLETE | 1 | d9e3f08b |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 

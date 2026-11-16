@@ -50,6 +50,7 @@ func TestEveryWSClassifiedHasDecoderEntry(t *testing.T) {
 	// have a decoder entry.
 	expectations := map[string][]string{
 		reflectTypeKey(agent.TurnTerminalEvent{}): {agent.TopicTurnTerminal.Name},
+		reflectTypeKey(agent.TurnStateEvent{}):    {agent.TopicTurnState.Name},
 		reflectTypeKey(bus.ACPPermissionEvent{}): {
 			bus.TopicACPPermissionRequested.Name,
 			bus.TopicACPPermissionResolved.Name,

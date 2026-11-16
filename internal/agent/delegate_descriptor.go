@@ -602,7 +602,7 @@ func (m *DelegateManager) resumeACPChild(ctx context.Context, childID string, re
 		e.sess = sess
 	}
 	m.mu.Unlock()
-	resp, err := sess.Send(ctx, seedPayload)
+	resp, _, err := sess.Send(ctx, seedPayload)
 	if err != nil {
 		m.settle(childID, ChildStateFailed, "", fmt.Sprintf("acp session send failed: %v", err))
 		return

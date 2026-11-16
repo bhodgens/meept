@@ -699,6 +699,15 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
 		GlobalRules:           r.globalRules,
 		Guards:                GuardConfig{}.Normalized(),
 	}
+	// Zero MaxIterations floors at the discovery default (the same rule the
+	// definition→spec path applies): a bare RegisterSpec (tests, programmatic
+	// registration) carries zero constraints, and WithAgentConfig would
+	// otherwise REPLACE the loop's DefaultMaxIterations=25 with 0 — the
+	// reasoning cycle then exhausts before its first LLM call
+	// ("maximum iterations reached" with zero model calls).
+	if agentCfg.MaxIterations == 0 {
+		agentCfg.MaxIterations = DefaultMaxIterations
+	}
 	if r.guardsCfg != (config.AgentGuardsConfig{}) {
 		g := r.guardsCfg
 		config.NormalizeAgentGuardsDefaults(&g)
@@ -718,6 +727,12 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
 		WithAgentConfig(agentCfg),
 		WithAgentID(spec.ID),
 		WithLoopLogger(r.logger.With("agent", spec.ID)),
+		// Progress is default-on platform-wide (AgentConfig
+		// ProgressEnabled, schema.go) - the ACP bridge (publishACPUpdate)
+		// and the coordination surfaces publish through this lane.
+		// Registry-built specialist loops previously ran with it off,
+		// silently dropping every ACP session/update from the bus.
+		WithProgressEnabled(true),
 	}
 
 	// Hook registry inheritance (security-before-tool HardError deny,

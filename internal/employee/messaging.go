@@ -2,6 +2,7 @@ package employee
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -40,6 +41,38 @@ type AgentMessage struct {
 	State       string // "queued" | "delivered" | "read"
 	CreatedAt   time.Time
 	DeliveredAt *time.Time
+}
+
+// AgentInboxBody is the optional typed envelope carried in an
+// AgentMessage's Body field (inbox leaf 03, C4). Legacy messages keep
+// raw free-text bodies; when a sender supplies structured context, the
+// tool layer marshals this envelope into Body before enqueueing, and
+// consumers decode it with ParseAgentInboxBody. The JSON tags are the
+// wire contract.
+type AgentInboxBody struct {
+	Body       string           `json:"body"`
+	Structured *InboxStructured `json:"structured,omitempty"`
+}
+
+// InboxStructured is the machine-readable payload alongside the human
+// text: the tools the recipient should reach for, the files in play,
+// and the plan entries the message relates to. All fields optional.
+type InboxStructured struct {
+	ToolTargets []string `json:"tool_targets,omitempty"`
+	FilePaths   []string `json:"file_paths,omitempty"`
+	PlanEntries []string `json:"plan_entries,omitempty"`
+}
+
+// ParseAgentInboxBody decodes a stored message body into an
+// AgentInboxBody. Body strings that are not a valid typed envelope
+// (legacy raw text, truncated JSON) fall back verbatim:
+// {Body: raw, Structured: nil}.
+func ParseAgentInboxBody(raw string) AgentInboxBody {
+	var parsed AgentInboxBody
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		return AgentInboxBody{Body: raw}
+	}
+	return parsed
 }
 
 const messageSchema = `

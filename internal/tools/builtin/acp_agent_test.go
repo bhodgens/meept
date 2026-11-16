@@ -22,12 +22,12 @@ type fakeACPSession struct {
 
 func (s *fakeACPSession) State() acp.SessionState { return s.state }
 
-func (s *fakeACPSession) Send(_ context.Context, msg string) (string, error) {
+func (s *fakeACPSession) Send(_ context.Context, msg string) (string, acp.StopReason, error) {
 	s.lastMsg = msg
 	if s.sendErr != nil {
-		return "", s.sendErr
+		return "", "", s.sendErr
 	}
-	return s.reply, nil
+	return s.reply, "end_turn", nil
 }
 
 func (s *fakeACPSession) Events() <-chan acp.SessionEvent { return s.events }
