@@ -34,7 +34,7 @@ var ErrNoACPSession = errors.New("acp executor: manager started no session")
 // ACPSession is the session surface ACPExecutor drives. *acp.Session
 // satisfies it; tests inject a fake.
 type ACPSession interface {
-	Send(ctx context.Context, text string) (string, error)
+	Send(ctx context.Context, text string) (string, acp.StopReason, error)
 	Events() <-chan acp.SessionEvent
 }
 
@@ -292,7 +292,7 @@ func (e *ACPExecutor) Run(
 			}
 		}
 	})
-	finalText, err := sess.Send(ctx, promptText)
+	finalText, _, err := sess.Send(ctx, promptText)
 	close(done)
 	wg.Wait()
 	// Single terminal path per acp turn: everything after session

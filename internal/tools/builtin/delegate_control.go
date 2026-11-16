@@ -147,7 +147,7 @@ func (c *DelegateController) SendMessage(ctx context.Context, childID, message s
 			if !ok || sess == nil {
 				return tools.NewErrorResult("subagent_send_message: acp child has no live session: " + childID), nil
 			}
-			if _, err := sess.Send(ctx, message); err != nil {
+			if _, _, err := sess.Send(ctx, message); err != nil {
 				return tools.NewErrorResult(fmt.Sprintf("subagent_send_message: acp send failed: %v", err)), nil
 			}
 		} else {

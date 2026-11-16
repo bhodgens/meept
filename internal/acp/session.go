@@ -66,6 +66,12 @@ const (
 	StateClosed
 )
 
+// StopReason is the ACP-local stop-reason vocabulary (wire `stopReason`
+// values: end_turn/cancelled/max_tokens/refusal). acp must NOT import
+// internal/agent (agent imports acp — cycle); the daemon wiring (leaf 04-01)
+// maps this to agent.StopReason.
+type StopReason string
+
 // SessionEvent is a projected ACP notification for higher layers.
 type SessionEvent struct {
 	Kind string
@@ -78,6 +84,14 @@ type Session struct {
 	cmd       *exec.Cmd
 	tr        *Transport
 	sessionID string
+
+	// turnStatePublisher is the nil-safe turn-state seam (branch
+	// 02-acp-emit F5): wired by the daemon (leaf 04-01) to the agent
+	// layer's publishTurnState. Arguments are plain strings because acp
+	// must NOT import internal/agent (agent imports acp — cycle); the
+	// daemon adapts them to agent.TurnStateEvent. Nil = no-op
+	// (byte-identical unwired posture).
+	turnStatePublisher func(agentID, state, stopReason, phase string)
 
 	mu     sync.Mutex
 	state  SessionState
@@ -263,6 +277,39 @@ func (s *Session) Events() <-chan SessionEvent {
 	return s.events
 }
 
+// AgentID returns the session's configured agent id.
+func (s *Session) AgentID() string {
+	if s == nil {
+		return ""
+	}
+	return s.cfg.AgentID
+}
+
+// SetTurnStatePublisher installs the turn-state emission seam (nil-safe, per
+// the setters contract). Passing nil clears the seam. The callback receives
+// (agentID, state, stopReason, phase) as plain strings — acp does not import
+// internal/agent — and is invoked OUTSIDE the session mutex.
+func (s *Session) SetTurnStatePublisher(fn func(agentID, state, stopReason, phase string)) {
+	s.mu.Lock()
+	s.turnStatePublisher = fn
+	s.mu.Unlock()
+}
+
+// emitTurnState invokes the turn-state publisher outside the mutex with the
+// session's agent id; a nil seam (or nil session) is a no-op.
+func (s *Session) emitTurnState(state, stopReason, phase string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	fn := s.turnStatePublisher
+	s.mu.Unlock()
+	if fn == nil {
+		return
+	}
+	fn(s.cfg.AgentID, state, stopReason, phase)
+}
+
 func (s *Session) emit(ev SessionEvent) {
 	select {
 	case s.events <- ev:
@@ -278,13 +325,18 @@ func (s *Session) emit(ev SessionEvent) {
 	}
 }
 
-// Send submits a user turn and returns the agent's final chat text.
-func (s *Session) Send(ctx context.Context, text string) (string, error) {
+// Send submits a user turn and returns the agent's final chat text, the
+// wire stopReason (empty wire value defaults to end_turn), and any error.
+func (s *Session) Send(ctx context.Context, text string) (string, StopReason, error) {
 	if s.State() == StateClosed {
-		return "", fmt.Errorf("acp: send %s: closed", s.cfg.AgentID)
+		return "", "", fmt.Errorf("acp: send %s: closed", s.cfg.AgentID)
 	}
 	s.setState(StateBusy)
 	defer s.setState(StateReady)
+
+	// Turn-state edge (F5): running at prompt entry, idle+stopReason at
+	// exit. Emissions stay outside the mutex; an unwired seam is a no-op.
+	s.emitTurnState("running", "", "prompt")
 
 	s.mu.Lock()
 	s.chunks = nil
@@ -306,7 +358,8 @@ func (s *Session) Send(ctx context.Context, text string) (string, error) {
 	}, &res)
 	if err != nil {
 		s.emit(SessionEvent{Kind: "error", Text: err.Error()})
-		return "", fmt.Errorf("acp: send %s: %w", s.cfg.AgentID, err)
+		s.emitTurnState("idle", "error", "prompt")
+		return "", "", fmt.Errorf("acp: send %s: %w", s.cfg.AgentID, err)
 	}
 
 	s.mu.Lock()
@@ -316,7 +369,16 @@ func (s *Session) Send(ctx context.Context, text string) (string, error) {
 	}
 	s.mu.Unlock()
 	s.emit(SessionEvent{Kind: "done", Text: out.String()})
-	return out.String(), nil
+	stopReason := StopReason(res.StopReason)
+	if stopReason == "" {
+		stopReason = "end_turn"
+	}
+	// Turn-end projection (branch 02-acp-emit F3): the raw wire stopReason
+	// rides a dedicated SessionEvent so higher layers see the terminal
+	// edge without re-deriving it from the return value.
+	s.emit(SessionEvent{Kind: "turn_end", Text: string(stopReason)})
+	s.emitTurnState("idle", string(stopReason), "prompt")
+	return out.String(), stopReason, nil
 }
 
 // Cancel interrupts the in-flight turn.

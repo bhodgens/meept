@@ -699,6 +699,15 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
 		GlobalRules:           r.globalRules,
 		Guards:                GuardConfig{}.Normalized(),
 	}
+	// Zero MaxIterations floors at the discovery default (the same rule the
+	// definition→spec path applies): a bare RegisterSpec (tests, programmatic
+	// registration) carries zero constraints, and WithAgentConfig would
+	// otherwise REPLACE the loop's DefaultMaxIterations=25 with 0 — the
+	// reasoning cycle then exhausts before its first LLM call
+	// ("maximum iterations reached" with zero model calls).
+	if agentCfg.MaxIterations == 0 {
+		agentCfg.MaxIterations = DefaultMaxIterations
+	}
 	if r.guardsCfg != (config.AgentGuardsConfig{}) {
 		g := r.guardsCfg
 		config.NormalizeAgentGuardsDefaults(&g)

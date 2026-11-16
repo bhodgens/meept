@@ -106,7 +106,7 @@ func TestSession_EchoSend(t *testing.T) {
 	s := startEcho(t, "echo")
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
-	got, err := s.Send(ctx, "hello")
+	got, _, err := s.Send(ctx, "hello")
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestSession_PermissionPermissive(t *testing.T) {
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
-	got, err := s.Send(ctx, "hi")
+	got, _, err := s.Send(ctx, "hi")
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestSession_PermissionDeny(t *testing.T) {
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
-	if _, err := s.Send(ctx, "hi"); err != nil {
+	if _, _, err := s.Send(ctx, "hi"); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
 }
@@ -580,7 +580,7 @@ func TestSession_DecisionSubprocessAllowEndToEnd(t *testing.T) {
 	})
 	sendCtx, sendCancel := context.WithTimeout(ctx, 20*time.Second)
 	defer sendCancel()
-	got, err := s.Send(sendCtx, "hi")
+	got, _, err := s.Send(sendCtx, "hi")
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
@@ -620,7 +620,7 @@ func TestSession_DecisionSubprocessDenyEndToEnd(t *testing.T) {
 	})
 	sendCtx, sendCancel := context.WithTimeout(ctx, 20*time.Second)
 	defer sendCancel()
-	if _, err := s.Send(sendCtx, "hi"); err != nil {
+	if _, _, err := s.Send(sendCtx, "hi"); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
 	if text := findEvent(drainEvents(s), "permission_decision"); text != "deny" {
@@ -1796,7 +1796,7 @@ func TestSession_CommandArgsAppendedToSpawnArgv(t *testing.T) {
 			t.Logf("close: %v", err)
 		}
 	})
-	got, err := s.Send(ctx, "argv?")
+	got, _, err := s.Send(ctx, "argv?")
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
