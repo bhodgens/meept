@@ -474,8 +474,10 @@ new package directory under those trees)
 **Checks:**
 - **New-package census** (hard gate; STAYS in pre-commit since the
   gates-speedup change): every package directory that gains a new non-test
-  `.go` file in the staged additions (`git diff --cached --diff-filter=A`
-  under `internal/`/`pkg/`/`cmd/`) must have a `path_map` entry in
+  `.go` file in the staged additions (`git diff --cached --name-status
+  --diff-filter=ACMR` under `internal/`/`pkg/`/`cmd/`, with plain `M` rows
+  excluded — A/C/R rows carry the NEW path, so renames into an unmapped
+  dir census too) must have a `path_map` entry in
   `e2e/manifest.json` (bidirectional slash-boundary prefix match) or an
   `exempt` entry with a mandatory non-empty reason — exemptions print as
   residual risk every run. Test-only and generated additions are excluded.
