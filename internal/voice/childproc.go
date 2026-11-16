@@ -36,6 +36,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"debug/buildinfo"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -45,6 +46,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -59,6 +61,18 @@ import (
 // refused and the caller (leaf 14 manager) hangs the Telnyx leg up; the
 // error is always wrapped, so callers test with errors.Is.
 var ErrChildUnavailable = errors.New("voice child unavailable")
+
+// ChildRevisionMismatchError is returned when the voice child's
+// vcs.revision and the running daemon's are both set and differ. Spawn
+// is refused: a stale meept-voice resamples with the old alignment.
+type ChildRevisionMismatchError struct {
+	Daemon string
+	Child  string
+}
+
+func (e *ChildRevisionMismatchError) Error() string {
+	return fmt.Sprintf("voice child revision %s does not match daemon revision %s", e.Child, e.Daemon)
+}
 
 // childProc states. stopped -> starting (spawn + handshake, bounded by
 // StartTimeout) -> running (>= 1 live call) -> draining (0 calls, idle timer
@@ -197,6 +211,51 @@ func ResolveChildBinary(configPath string) string {
 	return ""
 }
 
+// compareChildRevisions refuses a spawn when both vcs revisions are
+// non-empty and differ. An empty revision on either side is allowed:
+// test stubs and builds with no vcs info have nothing to compare.
+func compareChildRevisions(daemonRev, childRev string) error {
+	if daemonRev == "" || childRev == "" || daemonRev == childRev {
+		return nil
+	}
+	return &ChildRevisionMismatchError{Daemon: daemonRev, Child: childRev}
+}
+
+// checkChildRevision compares the running process's vcs.revision to the
+// child binary's. spawn calls it before the process is started, for both
+// the lookup path and an explicit voice.child_binary_path.
+func checkChildRevision(bin string) error {
+	return compareChildRevisions(runningRevision(), childBinaryRevision(bin))
+}
+
+func runningRevision() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok || info == nil {
+		return ""
+	}
+	return vcsRevision(info.Settings)
+}
+
+// childBinaryRevision reads vcs.revision from bin without exec.
+// debug/buildinfo.Open was renamed to Read; ReadFile is that reader for
+// a path. A non-Go stub or a binary with no vcs info yields "".
+func childBinaryRevision(bin string) string {
+	info, err := buildinfo.ReadFile(bin) //nolint:gosec // G304: resolved child binary, not a request path
+	if err != nil || info == nil {
+		return ""
+	}
+	return vcsRevision(info.Settings)
+}
+
+func vcsRevision(settings []debug.BuildSetting) string {
+	for _, s := range settings {
+		if s.Key == "vcs.revision" {
+			return s.Value
+		}
+	}
+	return ""
+}
+
 // regularFile reports whether path exists as a regular file.
 func regularFile(path string) bool {
 	fi, err := os.Stat(path) //nolint:gosec // G703: candidate child binary path is daemon-derived (exe dir / MEEPT_HOME), not user taint
@@ -303,6 +362,11 @@ func (p *ChildProc) spawn(ctx context.Context) error {
 	bin := ResolveChildBinary(p.cfg.BinaryPath)
 	if bin == "" {
 		return fmt.Errorf("voice child: no meept-voice binary found (config child_binary_path, daemon dir, or $MEEPT_HOME/bin)")
+	}
+	// Refuse a stale adjacent (or explicit) meept-voice before any spawn
+	// side effect. Empty vcs.revision on either side is allowed.
+	if err := checkChildRevision(bin); err != nil {
+		return err
 	}
 
 	// Stale socket files from a previous child must not survive a spawn.
