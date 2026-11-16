@@ -372,6 +372,14 @@ func applyEmployeeDefinition(ctx context.Context, loop *agent.AgentLoop, employe
 	if err != nil || def == nil {
 		logger.Warn("voice turn runner: employee definition unavailable (turn runs the template persona)",
 			"employee_id", employeeID, "error", err)
+		// A turn with an unresolvable employee runs deny-all, never the
+		// full template list: without the definition there is no
+		// constitution to bind, so no tool is provably permitted. The
+		// clone's persona stays the template's (the warning above); only
+		// the registry is constrained.
+		if parent != nil {
+			loop.SetToolRegistry(agent.NewFilteredToolRegistry(parent, nil, agent.WithDenyAll()))
+		}
 		return ""
 	}
 
@@ -399,9 +407,12 @@ func applyEmployeeDefinition(ctx context.Context, loop *agent.AgentLoop, employe
 		if len(c.Constraints.Never) > 0 {
 			cfg.Restrictions = strings.Join(c.Constraints.Never, "; ")
 		}
-		// A non-empty allowlist, or an explicit forbid list, is the tool
-		// list the model may see. Empty constraints keep the template
-		// registry (inherit-everything), byte-identical to before.
+		// The constitution's tool policy decides what the model may
+		// see: a declared tools_allowed (including an explicit "*" or a
+		// declared-empty list) or a non-empty tools_forbidden filters
+		// the clone's registry via employeeVisibleTools. A constitution
+		// that declares no tool lists at all keeps the template
+		// registry (inherit-everything).
 		if parent != nil {
 			visible := employeeVisibleTools(parent, &c)
 			loop.SetToolRegistry(visible)
@@ -435,19 +446,73 @@ func templateRegistry(loop *agent.AgentLoop) agent.ToolRegistry {
 	return loop.ToolRegistry()
 }
 
-// employeeVisibleTools returns the tool registry a voice turn may show the
-// model. A constitution with no tool constraint returns parent unchanged
-// (inherit-everything). tools_forbidden "*" returns a deny-all registry.
-// A non-empty tools_allowed is intersected with the parent and then minus
-// tools_forbidden. Names match case-insensitively; the registry keeps the
-// parent's spelling so Get stays exact.
+// employeeTurnClone builds a throwaway per-turn clone of a SHARED
+// template loop with the employee's constitution tool policy applied to
+// its registry — the same rule applyEmployeeDefinition stamps on the
+// voice clone (employeeVisibleTools over the TEMPLATE's full registry,
+// never the clone's own). The shared template loop is never mutated:
+// SetToolRegistry/SetAgentID run on the clone only (mirrors the voice
+// lane's GetOrCreateWired pattern; the goal-loop lane has no session
+// cache, so the clone lives for exactly one turn). Returns nil when the
+// template is nil so callers fail loudly instead of panicking.
+func employeeTurnClone(template *agent.AgentLoop, conversationID, employeeID string, c *employee.Constitution) *agent.AgentLoop {
+	if template == nil {
+		return nil
+	}
+	clone := agent.NewAgentLoop(conversationID, template.GetWorkingDir(), template.ConfigSnapshot()...)
+	if clone == nil {
+		return nil
+	}
+	if employeeID != "" {
+		// Same authz stamp as the voice lane: the executor injects
+		// details["agent_id"] from the loop id, and the PreExecChecker
+		// (employee constitution gate) routes on it.
+		clone.SetAgentID(employeeID)
+	}
+	if c != nil {
+		if parent := templateRegistry(template); parent != nil {
+			clone.SetToolRegistry(employeeVisibleTools(parent, c))
+		}
+	}
+	return clone
+}
+
+// employeeVisibleTools returns the tool registry an employee turn may
+// show the model. The rule:
+//   - No tool policy at all (tools_allowed nil AND tools_forbidden
+//     empty) returns parent unchanged (inherit-everything; this is also
+//     the no-Constraints shape).
+//   - tools_allowed with an explicit "*" inherits the parent list, then
+//     tools_forbidden is subtracted.
+//   - A DECLARED-empty tools_allowed (the constitution names zero
+//     tools) shows NO tools - fail closed, never inherit.
+//   - A non-empty tools_allowed is intersected with the parent, minus
+//     tools_forbidden.
+//
+// tools_forbidden "*" returns a deny-all registry. Names match
+// case-insensitively; the registry keeps the parent's spelling so Get
+// stays exact.
 func employeeVisibleTools(parent agent.ToolRegistry, c *employee.Constitution) agent.ToolRegistry {
 	if parent == nil || c == nil {
 		return parent
 	}
 	allowed := c.Constraints.ToolsAllowed
 	forbidden := c.Constraints.ToolsForbidden
-	if len(allowed) == 0 && len(forbidden) == 0 {
+	// inherit = no allowlist declared (nil), or an explicit "*" entry.
+	// A declared-empty (non-nil, len 0) allowlist is a deny-all policy,
+	// NOT the undeclared case.
+	star := false
+	for _, name := range allowed {
+		if strings.ToLower(strings.TrimSpace(name)) == "*" {
+			star = true
+			break
+		}
+	}
+	if allowed != nil && len(allowed) == 0 && !star {
+		return agent.NewFilteredToolRegistry(parent, nil, agent.WithDenyAll())
+	}
+	inherit := allowed == nil || star
+	if inherit && len(forbidden) == 0 {
 		return parent
 	}
 	for _, name := range forbidden {
@@ -463,10 +528,12 @@ func employeeVisibleTools(parent agent.ToolRegistry, c *employee.Constitution) a
 		}
 	}
 	want := make(map[string]struct{}, len(allowed))
-	for _, name := range allowed {
-		key := strings.ToLower(strings.TrimSpace(name))
-		if key != "" {
-			want[key] = struct{}{}
+	if !star {
+		for _, name := range allowed {
+			key := strings.ToLower(strings.TrimSpace(name))
+			if key != "" {
+				want[key] = struct{}{}
+			}
 		}
 	}
 	var names []string
@@ -478,7 +545,7 @@ func employeeVisibleTools(parent agent.ToolRegistry, c *employee.Constitution) a
 		if _, no := deny[key]; no {
 			continue
 		}
-		if len(want) > 0 {
+		if !star && len(want) > 0 {
 			if _, yes := want[key]; !yes {
 				continue
 			}

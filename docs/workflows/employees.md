@@ -271,7 +271,7 @@ Runs **before every tool call**, inside the existing `SecurityEngine.Check()` fl
 
 The checker evaluates, in order:
 
-1. **`tools_allowed` / `tools_forbidden`** — allowlist/denylist of tool names. A voice turn also hides tools outside that list from the model (`employeeVisibleTools` in `internal/daemon/voice_employee.go`). An empty allowlist still inherits the full registry. The call-time gate remains the enforcement step.
+1. **`tools_allowed` / `tools_forbidden`** — allowlist/denylist of tool names. The same visibility rule binds voice turns and employee chat/ACP (goal-loop) turns. The voice lane stamps it on the per-session clone (`employeeVisibleTools` in `internal/daemon/voice_employee.go`); the non-voice lane runs each employee turn on a per-turn clone with the filtered registry, so the shared daemon loop never changes. A constitution that declares no tool lists at all inherits the full registry. An explicit `tools_allowed: ["*"]` also inherits the full list, then `tools_forbidden` is subtracted. A declared-empty `tools_allowed` shows the model no tools; it is a deny-all policy, not an omission. A named allowlist is intersected with the registry, minus the deny list. An unresolvable employee definition also runs deny-all. The call-time gate remains the enforcement step.
 2. **`risk_ceiling`** — hard upper bound on the risk returned by the engine.
 3. **`escalation_triggers`** — matches against action/tool/details. On match, the action is queued as a Plan in `PendingApproval` routed to `escalates_to`; the current invocation returns without executing.
 

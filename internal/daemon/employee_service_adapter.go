@@ -312,6 +312,70 @@ func (a *agentLoopBotExecutorAdapter) ExecuteBot(ctx context.Context, systemProm
 // bot.BotExecutor.
 var _ bot.BotExecutor = (*agentLoopBotExecutorAdapter)(nil)
 
+// employeeBoundAgentLoopExecutor wraps the shared agentLoopBotExecutorAdapter
+// for ONE employee (goal-loop / non-voice lane, bug 1). The plain adapter
+// runs every employee's ExecuteBot directly on the shared daemon loop, so
+// the model saw the full template tool list regardless of the employee's
+// constitution. This wrapper runs each turn on a throwaway per-turn clone
+// (employeeTurnClone) whose registry carries the SAME visibility rule the
+// voice lane applies (employeeVisibleTools), with the employee id stamped
+// so the call-time PreExecChecker gate routes. The shared template loop is
+// never mutated.
+//
+// The acp lane is deliberately NOT wrapped here: its loop is a registry
+// agent's loop whose tool registry is already spec-scoped by
+// AgentRegistry.filterTools at loop creation (constitution intersection
+// rides the groups resolution), and the executor: acp branch never sends
+// meept tool definitions to a model (the harness owns its own tools).
+type employeeBoundAgentLoopExecutor struct {
+	inner        *agentLoopBotExecutorAdapter
+	employeeID   string
+	constitution employee.Constitution
+	// cloneHook is a TEST-ONLY seam: when non-nil, ExecuteBot calls it
+	// with the per-turn clone before running the turn, so a pin can
+	// inspect the registry view the turn actually ran with. Production
+	// wiring never sets it, so the production path writes no shared
+	// state (a bare lastClone field was unguarded on a path that can
+	// in principle run concurrent rounds).
+	cloneHook func(*agent.AgentLoop)
+}
+
+// ExecuteBot runs one employee turn on a filtered per-turn clone. Returns
+// (output, 0, err) with the same token-count posture as the inner
+// adapter (RunOnce exposes no token count; cost rides the LLM token
+// cache). A clone that cannot be built (nil shared loop) fails loudly.
+func (a *employeeBoundAgentLoopExecutor) ExecuteBot(ctx context.Context, systemPrompt, userMessage string) (string, int, error) {
+	if a.inner == nil || a.inner.agentLoop == nil {
+		if a.inner != nil {
+			return a.inner.ExecuteBot(ctx, systemPrompt, userMessage) // fails with "agent loop not configured"
+		}
+		return "", 0, fmt.Errorf("employee-bound executor %q: inner adapter not configured", a.employeeID)
+	}
+	c := a.constitution
+	conversationID := id.Generate("bot-exec")
+	clone := employeeTurnClone(a.inner.agentLoop, conversationID, a.employeeID, &c)
+	if clone == nil {
+		return "", 0, fmt.Errorf("employee-bound executor %q: per-turn clone failed", a.employeeID)
+	}
+	if a.cloneHook != nil {
+		a.cloneHook(clone)
+	}
+	response, err := clone.RunOnce(ctx, userMessage, conversationID)
+	clone.Close()
+	if err != nil {
+		a.inner.logger.Warn("employee-bound agent loop execute failed",
+			"employee_id", a.employeeID,
+			"error", err,
+			"conversation_id", conversationID)
+		return "", 0, err
+	}
+	return response, 0, nil
+}
+
+// Compile-time guard: employeeBoundAgentLoopExecutor must satisfy
+// bot.BotExecutor.
+var _ bot.BotExecutor = (*employeeBoundAgentLoopExecutor)(nil)
+
 // planCreatorAdapter wraps *plan.PlanManager to satisfy
 // employee.PlanCreator. The GoalLoop calls CreatePlan to route tier-2
 // candidates through the existing Plan signoff workflow. The adapter

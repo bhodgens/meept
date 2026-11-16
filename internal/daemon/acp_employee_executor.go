@@ -212,7 +212,7 @@ func employeeBotExecutor(emp employee.Employee, defaultExecutor bot.BotExecutor,
 	logger *slog.Logger) (bot.BotExecutor, bool) {
 
 	if emp.ExecutorAgent == "" {
-		return defaultExecutor, false
+		return employeeBoundLocalExecutor(emp, defaultExecutor), false
 	}
 	if registry == nil {
 		logger.Error("employee executor_agent refused: agent registry unavailable",
@@ -286,4 +286,29 @@ func employeeBotExecutor(emp employee.Employee, defaultExecutor bot.BotExecutor,
 		audit:        audit,
 		logger:       logger.With("component", "acp-employee-executor", "employee_id", emp.ID),
 	}, false
+}
+
+// employeeBoundLocalExecutor applies the bug-1 fix to the NON-voice
+// local lane: an employee with a constitution whose default executor is
+// the shared agent-loop adapter gets the per-turn-clone wrapper, so the
+// constitution's tool policy binds the model-visible list instead of
+// the full template list. Everything else passes through unchanged:
+// no constitution (the goal-loop roster skips those anyway), a foreign
+// executor type (test doubles / future executors), or a nil executor.
+// The acp branch above never reaches here: its loop is a registry
+// agent's loop already spec-scoped by AgentRegistry.filterTools, and
+// the harness branch sends no meept tool definitions to a model.
+func employeeBoundLocalExecutor(emp employee.Employee, defaultExecutor bot.BotExecutor) bot.BotExecutor {
+	if defaultExecutor == nil || !emp.HasConstitution() {
+		return defaultExecutor
+	}
+	inner, ok := defaultExecutor.(*agentLoopBotExecutorAdapter)
+	if !ok {
+		return defaultExecutor
+	}
+	return &employeeBoundAgentLoopExecutor{
+		inner:        inner,
+		employeeID:   emp.ID,
+		constitution: emp.Constitution,
+	}
 }
