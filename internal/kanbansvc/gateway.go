@@ -55,11 +55,17 @@ type EventSource interface {
 	Subscribe(ctx context.Context) (<-chan json.RawMessage, error)
 }
 
-// GrantChecker maps a bearer token to its grant set. Pairing (04/03) will
-// provide the production implementation; the gateway only ever asks this.
+// GrantChecker maps a bearer token to its grant set. TokenStore (pairing,
+// 04/03) is the production implementation; StaticGrantStore remains the
+// in-process/test helper. The gateway only ever asks this seam.
 type GrantChecker interface {
 	Grants(token string) ([]string, bool)
 }
+
+// pairExchangePath is the single intentionally UNGRANTED route: the
+// single-use pairing code in the body IS the credential, so authorize
+// never runs on it. Everything else under /api/v1/ stays grant-gated.
+const pairExchangePath = "/api/v1/pair/exchange"
 
 // route describes one REST endpoint and the RPC method it forwards to.
 type route struct {
@@ -98,6 +104,12 @@ type Gateway struct {
 	events EventSource
 	authz  GrantChecker
 
+	// pairing, when set, arms POST /api/v1/pair/exchange. It is optional:
+	// a gateway built without it answers 503 on the pair route but keeps
+	// serving every grant-gated route through authz. main.go sets it right
+	// after NewGateway (leaf 07/01 may fold it into the constructor).
+	pairing *TokenStore
+
 	// static serves /web/ from the installed bundle, or is nil when no
 	// bundle exists. Built once in NewGateway so every request rides the
 	// canonical StripPrefix+FileServer pair rather than a hand-forged
@@ -125,10 +137,24 @@ func NewGateway(rpc RPCCaller, events EventSource, authz GrantChecker, staticDir
 	return g, nil
 }
 
-// ServeHTTP routes the three surfaces: REST (auth + RPC forward), the WS
-// event relay, and the static bundle.
+// SetPairing arms the pairing-exchange route. Store is never nil here: a
+// nil store means the route was never meant to be armed, and SetPairing
+// returns an error instead of silently serving a route that cannot work.
+// Additive seam — leaf 07/01 may fold this into NewGateway.
+func (g *Gateway) SetPairing(store *TokenStore) error {
+	if store == nil {
+		return errors.New("kanbansvc: token store is required")
+	}
+	g.pairing = store
+	return nil
+}
+
+// ServeHTTP routes the surfaces: REST (auth + RPC forward), the ungranted
+// pairing exchange, the WS event relay, and the static bundle.
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
+	case r.URL.Path == pairExchangePath:
+		g.handlePairExchange(w, r)
 	case r.URL.Path == "/api/v1/events":
 		g.handleEvents(w, r)
 	case r.URL.Path == "/web":
@@ -175,6 +201,50 @@ func (g *Gateway) serveAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if _, err := w.Write(resp); err != nil {
 		slog.Warn("kanban gateway: reply write failed", "rpc", spec.rpc, "error", err)
+	}
+}
+
+// handlePairExchange serves POST /api/v1/pair/exchange — the one
+// deliberately UNGRANTED route. The single-use pairing code in the body IS
+// the credential (the code was minted in-process and printed once to the
+// daemon console), so authorize never runs here; everything else under
+// /api/v1/ stays grant-gated. A wrong, consumed, or missing code is 401
+// with ErrInvalidPairCode's message — one error for all three shapes, so a
+// caller cannot oracle the store. The code and the minted token are never
+// logged. No rate limiter exists in the pairing layer, and none is invented
+// here: single-use consumption + constant-time compare are the pairing
+// contract's defenses (mirrors the daemon's own pair/exchange handler).
+func (g *Gateway) handlePairExchange(w http.ResponseWriter, r *http.Request) {
+	if g.pairing == nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "pairing is not armed on this sidecar")
+		return
+	}
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "decode request body: expected {\"code\": string}")
+		return
+	}
+	token, grants, err := g.pairing.ExchangePairCode(body.Code)
+	if err != nil {
+		if !errors.Is(err, ErrInvalidPairCode) {
+			// Mint/persist failure: the code is already consumed, so a
+			// plain 500 with no detail is the honest answer.
+			writeJSONError(w, http.StatusInternalServerError, "exchange failed")
+			return
+		}
+		writeJSONError(w, http.StatusUnauthorized, ErrInvalidPairCode.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{"token": token, "grants": grants}); err != nil {
+		slog.Warn("kanban gateway: exchange reply write failed", "error", err)
 	}
 }
 
@@ -434,9 +504,11 @@ func (g *Gateway) serveIndex(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/web/", http.StatusFound)
 }
 
-// StaticGrantStore is the token→grant map the gateway consults. Pairing
-// (04/03) will populate it at runtime; NewStaticGrantStore starts empty so an
-// unpaired sidecar authorizes nothing. Safe for concurrent read/write.
+// StaticGrantStore is an in-process token→grant map (tests, embedding
+// hosts). The production GrantChecker is TokenStore (pairing.go): it is
+// file-backed, survives restarts, and mints tokens through pairing codes.
+// NewStaticGrantStore starts empty so a store with no granted tokens
+// authorizes nothing. Safe for concurrent read/write.
 type StaticGrantStore struct {
 	mu     sync.RWMutex
 	grants map[string][]string

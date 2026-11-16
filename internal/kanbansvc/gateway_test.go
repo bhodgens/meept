@@ -558,6 +558,223 @@ func dialWSWithOrigin(server *httptest.Server, origin string, subprotocols ...st
 	return conn, resp, err
 }
 
+// newPairGateway builds a gateway armed with a real TokenStore backed by a
+// temp-dir token file, plus two minted pairing codes: readCode (board.read)
+// and readMutateCode (board.read + board.mutate).
+func newPairGateway(t *testing.T) (*Gateway, *TokenStore, string, string) {
+	t.Helper()
+	store, err := NewTokenStore(filepath.Join(t.TempDir(), "tokens.json"))
+	if err != nil {
+		t.Fatalf("NewTokenStore: %v", err)
+	}
+	gateway, err := NewGateway(&fakeRPC{}, IdleSource{}, store, "")
+	if err != nil {
+		t.Fatalf("NewGateway: %v", err)
+	}
+	if err := gateway.SetPairing(store); err != nil {
+		t.Fatalf("SetPairing: %v", err)
+	}
+	readCode, err := store.GeneratePairCode(GrantRead)
+	if err != nil {
+		t.Fatalf("GeneratePairCode(read): %v", err)
+	}
+	readMutateCode, err := store.GeneratePairCode(GrantRead, GrantMutate)
+	if err != nil {
+		t.Fatalf("GeneratePairCode(read+mutate): %v", err)
+	}
+	return gateway, store, readCode, readMutateCode
+}
+
+// exchange sends one pair/exchange POST and returns the status + body. An
+// empty code sends NO body (the decode-failure shape), not {"code":""}.
+func exchange(t *testing.T, gateway *Gateway, code string) (int, map[string]any) {
+	t.Helper()
+	var req *http.Request
+	if code == "" {
+		req = httptest.NewRequest(http.MethodPost, "/api/v1/pair/exchange", nil)
+	} else {
+		req = httptest.NewRequest(http.MethodPost, "/api/v1/pair/exchange",
+			strings.NewReader(`{"code":"`+code+`"}`))
+	}
+	rec := httptest.NewRecorder()
+	gateway.ServeHTTP(rec, req)
+	var parsed map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &parsed); err != nil {
+		t.Fatalf("pair/exchange body is not valid JSON: %v (body %q)", err, rec.Body.String())
+	}
+	return rec.Code, parsed
+}
+
+// TestGateway_PairExchange pins the pairing wiring: the route is reachable
+// WITHOUT a bearer token (the code is the credential), a good code mints a
+// token + grants, a wrong code is 401, the minted token authorizes a granted
+// REST route, and the code is single-use.
+func TestGateway_PairExchange(t *testing.T) {
+	t.Run("good code returns 200 with token and grants", func(t *testing.T) {
+		gateway, _, readCode, _ := newPairGateway(t)
+		status, body := exchange(t, gateway, readCode)
+		if status != http.StatusOK {
+			t.Fatalf("status = %d, want 200 (body %v)", status, body)
+		}
+		token, _ := body["token"].(string)
+		if len(token) < 32 {
+			t.Fatalf("minted token too short: %q", token)
+		}
+		grants, _ := body["grants"].([]any)
+		if len(grants) != 1 || grants[0] != GrantRead {
+			t.Fatalf("grants = %v, want [%s]", grants, GrantRead)
+		}
+	})
+
+	t.Run("wrong code is 401 and names no store state", func(t *testing.T) {
+		gateway, _, readCode, _ := newPairGateway(t)
+		// Burn the real code first so this probes the consumed shape,
+		// then a never-minted code; both must be indistinguishable 401s.
+		if status, _ := exchange(t, gateway, readCode); status != http.StatusOK {
+			t.Fatalf("pre-burn exchange: status = %d, want 200", status)
+		}
+		for _, code := range []string{readCode, "ZZZZZZZZ"} {
+			status, body := exchange(t, gateway, code)
+			if status != http.StatusUnauthorized {
+				t.Fatalf("code %q: status = %d, want 401 (body %v)", code, status, body)
+			}
+			if msg, _ := body["error"].(string); msg == "" {
+				t.Fatalf("401 body has no error field: %v", body)
+			}
+		}
+	})
+
+	t.Run("empty body is 400", func(t *testing.T) {
+		gateway, _, _, _ := newPairGateway(t)
+		status, _ := exchange(t, gateway, "")
+		if status != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400", status)
+		}
+	})
+
+	t.Run("route needs no bearer token", func(t *testing.T) {
+		// exchange() never sets an Authorization header; the good-code
+		// case above already proves this, but pin the 405 verb error
+		// path too: a GET (with no token anywhere) must surface the
+		// method error, not an auth error.
+		gateway, _, _, _ := newPairGateway(t)
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/pair/exchange", nil)
+		rec := httptest.NewRecorder()
+		gateway.ServeHTTP(rec, req)
+		if rec.Code != http.StatusMethodNotAllowed {
+			t.Fatalf("GET pair/exchange: status = %d, want 405", rec.Code)
+		}
+		if allow := rec.Header().Get("Allow"); allow != http.MethodPost {
+			t.Errorf("Allow = %q, want %q", allow, http.MethodPost)
+		}
+	})
+
+	t.Run("minted token authorizes a granted route", func(t *testing.T) {
+		rpc := &fakeRPC{}
+		// The wired shape: the SAME TokenStore backs authz and pairing,
+		// so a mint is instantly visible to authorize.
+		store, err := NewTokenStore(filepath.Join(t.TempDir(), "tokens.json"))
+		if err != nil {
+			t.Fatalf("NewTokenStore: %v", err)
+		}
+		gateway, err := NewGateway(rpc, IdleSource{}, store, "")
+		if err != nil {
+			t.Fatalf("NewGateway: %v", err)
+		}
+		if err := gateway.SetPairing(store); err != nil {
+			t.Fatalf("SetPairing: %v", err)
+		}
+		code, err := store.GeneratePairCode(GrantRead, GrantMutate)
+		if err != nil {
+			t.Fatalf("GeneratePairCode: %v", err)
+		}
+		_, body := exchange(t, gateway, code)
+		token, _ := body["token"].(string)
+		if token == "" {
+			t.Fatalf("no token minted: %v", body)
+		}
+
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/card/move",
+			strings.NewReader(`{"card_id":"c1","column_id":"c2"}`))
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		gateway.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("exchange-minted token on card/move: status = %d, want 200 (body %q)", rec.Code, rec.Body.String())
+		}
+		if len(rpc.calls) != 1 {
+			t.Errorf("rpc forwards = %d, want 1", len(rpc.calls))
+		}
+	})
+
+	t.Run("read-only mint cannot mutate", func(t *testing.T) {
+		gateway, _, readCode, _ := newPairGateway(t)
+		_, body := exchange(t, gateway, readCode)
+		token, _ := body["token"].(string)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/card/move", strings.NewReader(`{}`))
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		gateway.ServeHTTP(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("read-only mint on card/move: status = %d, want 403", rec.Code)
+		}
+	})
+
+	t.Run("code reuse is 401 and the token survives", func(t *testing.T) {
+		gateway, _, readCode, _ := newPairGateway(t)
+		_, first := exchange(t, gateway, readCode)
+		token, _ := first["token"].(string)
+
+		status, _ := exchange(t, gateway, readCode)
+		if status != http.StatusUnauthorized {
+			t.Fatalf("code reuse: status = %d, want 401", status)
+		}
+
+		// Single-use means the CODE dies, not the token it minted: the
+		// first exchange's token keeps working.
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/board/list", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		gateway.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("minted token after code reuse: status = %d, want 200", rec.Code)
+		}
+	})
+
+	t.Run("exchange-minted token reaches the WS handshake", func(t *testing.T) {
+		gateway, _, readCode, _ := newPairGateway(t)
+		_, body := exchange(t, gateway, readCode)
+		token, _ := body["token"].(string)
+		server := httptest.NewServer(gateway)
+		defer server.Close()
+		conn, _, err := dialWS(server, "bearer."+token)
+		if err != nil {
+			t.Fatalf("WS handshake with exchange-minted token: %v", err)
+		}
+		conn.Close()
+	})
+
+	t.Run("disarmed gateway answers 503 on the pair route", func(t *testing.T) {
+		gateway, _ := newTestGateway(t, &fakeRPC{}, "")
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/pair/exchange",
+			strings.NewReader(`{"code":"ABCDEFGHIJ"}`))
+		rec := httptest.NewRecorder()
+		gateway.ServeHTTP(rec, req)
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("disarmed pair route: status = %d, want 503", rec.Code)
+		}
+	})
+}
+
+// TestGateway_SetPairing_NilStoreRejected: arming the route with no store
+// is a wiring bug, not a legitimate disarmed state.
+func TestGateway_SetPairing_NilStoreRejected(t *testing.T) {
+	gateway, _ := newTestGateway(t, &fakeRPC{}, "")
+	if err := gateway.SetPairing(nil); err == nil {
+		t.Fatal("SetPairing(nil) returned no error")
+	}
+}
+
 // TestIdleSource closes its channel when the caller's context ends, which is
 // what stops a relay from outliving its connection.
 func TestIdleSource(t *testing.T) {

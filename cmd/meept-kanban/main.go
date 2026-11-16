@@ -47,6 +47,7 @@ func run() error {
 	socket := flag.String("daemon-socket", "", "daemon RPC socket (default $MEEPT_HOME/meept.sock)")
 	baseURL := flag.String("daemon-http", "", "daemon HTTP base URL (overrides -daemon-socket when set)")
 	webdir := flag.String("webdir", "", "web bundle root (default $WEBDIR, else $MEEPT_HOME/webui)")
+	pairStorePath := flag.String("pair-store", "", "pairing token store file (default $MEEPT_HOME/kanban/tokens.json)")
 	flag.Parse()
 
 	if err := guardBind(*bind, *allowLAN); err != nil {
@@ -65,15 +66,27 @@ func run() error {
 			"hint", "run `make build-gui` and set WEBDIR")
 	}
 
-	// Pairing (04/03) supplies the production token store. Until it lands,
-	// no token maps to any grant: the sidecar serves its placeholder page and
-	// answers 401 on every API route. Refusing is correct — a board reachable
-	// without auth is not a board, it is an outage waiting to happen.
-	authz := kanbansvc.NewStaticGrantStore()
+	// Pairing (04/03) is wired: the TokenStore is the production GrantChecker
+	// (its token file lives at $MEEPT_HOME/kanban/tokens.json, 0600) and
+	// POST /api/v1/pair/exchange arms the loopback handshake — an operator
+	// (or the daemon, leaf 07/01) mints a code with GeneratePairCode and
+	// prints it once; the browser exchanges it for a grant-carrying bearer
+	// token. Until a code is minted and exchanged, the store knows no tokens
+	// and every API route answers 401 — refusing is correct: a board
+	// reachable without auth is not a board, it is an outage waiting to
+	// happen.
+	pairStore, err := kanbansvc.NewTokenStore(*pairStorePath)
+	if err != nil {
+		return fmt.Errorf("load token store: %w", err)
+	}
+	authz := pairStore
 
 	gateway, err := kanbansvc.NewGateway(daemon, kanbansvc.IdleSource{}, authz, bundle)
 	if err != nil {
 		return fmt.Errorf("build gateway: %w", err)
+	}
+	if err := gateway.SetPairing(pairStore); err != nil {
+		return fmt.Errorf("arm pairing: %w", err)
 	}
 
 	srv := &http.Server{

@@ -41,11 +41,39 @@ gets 403. No anonymous board access.
 | daemon says "unknown method" | 404 |
 | any other RPC error | 502 (body names the rpc) |
 
-Tokens resolve through `GrantChecker`. This leaf ships
-`StaticGrantStore` (an in-memory map, `Grant`/`Revoke`, safe for
-concurrent use). Runtime pairing (leaf `04/03`) populates it from the
-daemon's pairing handshake; until then the sidecar authorizes nothing an
-operator has not granted explicitly.
+Tokens resolve through `GrantChecker`. The production implementation is
+`TokenStore` (pairing, leaf `04/03`): a file-backed store at
+`$MEEPT_HOME/kanban/tokens.json` (0600 in a 0700 dir, refused at load if
+any group/other bit is set) that survives restarts and mints bearer
+tokens through single-use pairing codes. `StaticGrantStore` remains the
+in-process helper (tests, embedding hosts). With no token exchanged yet
+the sidecar authorizes nothing an operator has not granted explicitly.
+
+## Pairing (`POST /api/v1/pair/exchange`)
+
+The sidecar boots with pairing wired: `meept-kanban` loads the
+`TokenStore` (flag `-pair-store`, default
+`$MEEPT_HOME/kanban/tokens.json`) and both consults it for every
+bearer-authenticated route and arms the exchange route.
+
+`POST /api/v1/pair/exchange` with body `{"code": "..."}` is the one
+deliberately **ungranted** route — the single-use pairing code in the
+body IS the credential. Flow:
+
+1. `TokenStore.GeneratePairCode(board.read, ...)` mints a single-use
+   `crypto/rand` code; the caller (operator, or the daemon — leaf
+   `07/01`) prints it once to the console. Never logged.
+2. The client exchanges it at `/api/v1/pair/exchange` and receives
+   `{"token": "...", "grants": [...]}` — a fresh 256-bit bearer token
+   carrying the grants the code was minted with.
+3. The code is consumed on first use: reuse, wrong, and missing codes
+   all answer 401 with the same message (no store-state oracle).
+
+The route is exempt from the authorize check (like health-style
+endpoints), requires no bearer token, and returns 503 when the sidecar
+was built without a pairing store. There is no rate limiter — the
+pairing layer's defenses are single-use consumption and constant-time
+code comparison; none is invented at the gateway layer.
 
 ## Token transport
 
