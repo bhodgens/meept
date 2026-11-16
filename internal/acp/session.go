@@ -446,6 +446,20 @@ func (s *Session) onNotice(n Notification) {
 				Text string `json:"text"`
 			} `json:"content"`
 			Title string `json:"title"`
+			// Plan rendering inputs (sessionUpdate == "plan"): entries is
+			// the loose shape agents send — any string-ish list. Decoded
+			// defensively; a non-array plan payload still renders its title.
+			Entries []struct {
+				Content     string `json:"content"`
+				Status      string `json:"status"`
+				Description string `json:"description"`
+			} `json:"entries"`
+			// Commands rendering inputs (sessionUpdate ==
+			// "available_commands_update").
+			Commands []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+			} `json:"commands"`
 		} `json:"update"`
 	}
 	if err := json.Unmarshal(n.Params, &p); err != nil {
@@ -459,7 +473,63 @@ func (s *Session) onNotice(n Notification) {
 		s.emit(SessionEvent{Kind: "message_chunk", Text: p.Update.Content.Text})
 	case "tool_call", "tool_call_update":
 		s.emit(SessionEvent{Kind: "tool_call", Text: p.Update.Title})
+	case "plan":
+		s.emit(SessionEvent{Kind: "plan", Text: renderPlanUpdate(p.Update.Title, p.Update.Entries)})
+	case "agent_thought_chunk":
+		s.emit(SessionEvent{Kind: "thought", Text: p.Update.Content.Text})
+	case "available_commands_update":
+		s.emit(SessionEvent{Kind: "commands", Text: renderCommandsUpdate(p.Update.Commands)})
 	}
+}
+
+// renderPlanUpdate renders a plan notification into one text line for the
+// "plan" SessionEvent. Loose rendering: title plus a status-tagged line per
+// entry when any are present.
+func renderPlanUpdate(title string, entries []struct {
+	Content     string `json:"content"`
+	Status      string `json:"status"`
+	Description string `json:"description"`
+}) string {
+	if len(entries) == 0 {
+		return title
+	}
+	var b strings.Builder
+	if title != "" {
+		b.WriteString(title)
+		b.WriteString("\n")
+	}
+	for _, e := range entries {
+		text := e.Content
+		if text == "" {
+			text = e.Description
+		}
+		if e.Status != "" {
+			b.WriteString("[" + e.Status + "] ")
+		}
+		b.WriteString(text)
+		b.WriteString("\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// renderCommandsUpdate renders an available_commands_update notification into
+// one text line for the "commands" SessionEvent: one "name — description"
+// line per command.
+func renderCommandsUpdate(commands []struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}) string {
+	var b strings.Builder
+	for i, c := range commands {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(c.Name)
+		if c.Description != "" {
+			b.WriteString(" — " + c.Description)
+		}
+	}
+	return b.String()
 }
 
 // defaultAllowOptionID is the fallback optionId for allow replies when the
