@@ -13,11 +13,27 @@
 package agent
 
 import (
+	"encoding/json"
 	"log/slog"
 
 	"github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/internal/security/taint"
 )
+
+// inboxBodyMirror is a LOCAL mirror of the AgentInboxBody JSON contract
+// (leaf 03-01, tags pinned by the C4 schema) — internal/agent must NOT
+// import internal/employee (import cycle), so the shape is duplicated
+// here per C7. Only the fields the taint scan needs are mirrored; any
+// extra envelope fields unmarshal into the anonymous Structured struct's
+// discard and are ignored.
+type inboxBodyMirror struct {
+	Body       string `json:"body"`
+	Structured *struct {
+		ToolTargets []string `json:"tool_targets"`
+		FilePaths   []string `json:"file_paths"`
+		PlanEntries []string `json:"plan_entries"`
+	} `json:"structured"`
+}
 
 // collaborationHandoffMode mirrors [security.agent_handoff_mode]
 // (R0 decision D3): off = labeling only, warn = scan + log, block =
@@ -105,6 +121,52 @@ func (h *HandoffBoundary) prepareHandoff(driver, role, rawOutput string) (blocke
 	}
 
 	if h.mode == collabHandoffOff || h.boundary == nil {
+		return false, ""
+	}
+
+	// Structured branch (leaf 03-02 / F8): when the raw peer output
+	// parses as an AgentInboxBody-style envelope with a structured
+	// section, scan each structured field plus the human body
+	// field-by-field so a deny hit can name the offending field.
+	// Legacy free text keeps the whole-blob scan below byte-identically.
+	var mirror inboxBodyMirror
+	if err := json.Unmarshal([]byte(rawOutput), &mirror); err == nil && mirror.Structured != nil {
+		fields := []struct {
+			name   string
+			values []string
+		}{
+			{"tool_targets", mirror.Structured.ToolTargets},
+			{"file_paths", mirror.Structured.FilePaths},
+			{"plan_entries", mirror.Structured.PlanEntries},
+			{"body", []string{mirror.Body}},
+		}
+		for _, f := range fields {
+			for _, v := range f.values {
+				matches := h.boundary.InspectHandoffContent(v)
+				if len(matches) == 0 {
+					continue
+				}
+				reason := matches[0].Class + " pattern in " + f.name + " of peer output from " + driver + " (" + role + ")"
+				if h.mode == collabHandoffWarn {
+					h.logger.Warn("inter-agent handoff deny-pattern hit (monitor: not blocked)",
+						"driver", driver,
+						"role", role,
+						"field", f.name,
+						"class", matches[0].Class,
+						"pattern", matches[0].Pattern,
+					)
+					continue
+				}
+				h.logger.Warn("inter-agent handoff blocked by deny pattern",
+					"driver", driver,
+					"role", role,
+					"field", f.name,
+					"class", matches[0].Class,
+					"pattern", matches[0].Pattern,
+				)
+				return true, reason
+			}
+		}
 		return false, ""
 	}
 
