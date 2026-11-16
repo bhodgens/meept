@@ -15,7 +15,7 @@ import (
 
 func TestTurnState_Marshal(t *testing.T) {
 	tests := []struct {
-		state  TurnState
+		state  AgentTurnState
 		expect string
 	}{
 		{TurnStateRunning, "running"},
@@ -27,10 +27,10 @@ func TestTurnState_Marshal(t *testing.T) {
 		t.Run(tc.expect, func(t *testing.T) {
 			b, err := json.Marshal(tc.state)
 			if err != nil {
-				t.Fatalf("json.Marshal(TurnState) error: %v", err)
+				t.Fatalf("json.Marshal(AgentTurnState) error: %v", err)
 			}
 			if got := string(b); got != `"`+tc.expect+`"` {
-				t.Fatalf("TurnState marshal = %s, want %q", got, tc.expect)
+				t.Fatalf("AgentTurnState marshal = %s, want %q", got, tc.expect)
 			}
 		})
 	}
