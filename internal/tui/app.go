@@ -52,6 +52,10 @@ const (
 	ViewSearch
 	ViewAgents
 	ViewActivity
+	// ViewKanban is the kanban board surface (plans/kanban-board
+	// 05-surfaces/03-tui-board); palette-only entry (key "b"), no number
+	// tab, mirroring how ViewActivity was introduced.
+	ViewKanban
 )
 
 // VerbosityLevel controls how much progress detail to show in the TUI.
@@ -124,6 +128,7 @@ type App struct {
 	search   *models.SearchModel
 	agents   *AgentsPanel
 	activity *models.ActivityModel
+	kanban   *KanbanPanel
 
 	// Sidebar
 	sidebar *SidebarModel
@@ -345,6 +350,7 @@ func NewApp(socketPath string, cwd string) *App {
 		search:           models.NewSearchModel(rpc, slog.Default()),
 		agents:           NewAgentsPanel(rpc),
 		activity:         models.NewActivityModel(rpc),
+		kanban:           NewKanbanPanel(rpc),
 		sidebar:          NewSidebarModel(rpc, eventRPC, styles, clientConfig.Rendering.SidebarAnimation),
 		keys:             DefaultKeyMap(),
 		clientConfig:     clientConfig,
@@ -858,6 +864,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if a.activity != nil {
 			a.activity.SetSize(mainWidth, msg.Height-chromeHeight)
+		}
+		if a.kanban != nil {
+			a.kanban.SetSize(mainWidth, msg.Height-chromeHeight)
 		}
 
 		if layoutCmd != nil {
@@ -2491,6 +2500,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.activity != nil {
 			cmd = a.activity.Update(msg)
 		}
+	case ViewKanban:
+		if a.kanban != nil {
+			cmd = a.kanban.Update(msg)
+		}
 	}
 	if cmd != nil {
 		cmds = append(cmds, cmd)
@@ -2544,6 +2557,12 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case keys.ViewActivity:
 			if keys.ViewActivity != "" {
 				a.currentView = ViewActivity
+				cmd := a.initCurrentView()
+				return a, cmd
+			}
+		case keys.ViewKanban:
+			if keys.ViewKanban != "" {
+				a.currentView = ViewKanban
 				cmd := a.initCurrentView()
 				return a, cmd
 			}
@@ -2885,6 +2904,10 @@ func (a *App) initCurrentView() tea.Cmd {
 		if a.activity != nil {
 			return a.activity.Init()
 		}
+	case ViewKanban:
+		if a.kanban != nil {
+			return a.kanban.Init()
+		}
 	}
 	return nil
 }
@@ -2947,6 +2970,12 @@ func (a *App) View() tea.View {
 				mainView = a.activity.View()
 			} else {
 				mainView = "activity unavailable"
+			}
+		case ViewKanban:
+			if a.kanban != nil {
+				mainView = a.kanban.View()
+			} else {
+				mainView = "kanban unavailable"
 			}
 		}
 	}
@@ -3360,6 +3389,18 @@ func (a *App) getQuickActions() []string {
 			a.styles.HelpKey.Render("tab")+" "+a.styles.HelpValue.Render("sort mode"),
 			a.styles.HelpKey.Render("t")+" "+a.styles.HelpValue.Render("live tail"),
 			a.styles.HelpKey.Render("p")+" "+a.styles.HelpValue.Render("findings + drift"),
+		)
+
+	case ViewKanban:
+		actions = append(actions,
+			a.styles.HelpKey.Render("j/k")+" "+a.styles.HelpValue.Render("select card"),
+			a.styles.HelpKey.Render(KeyEnter)+" "+a.styles.HelpValue.Render("details + timeline"),
+			a.styles.HelpKey.Render("h/l")+" "+a.styles.HelpValue.Render("move card ←/→"),
+			a.styles.HelpKey.Render("t")+" "+a.styles.HelpValue.Render("takeover (lease bypass)"),
+			a.styles.HelpKey.Render("a/c")+" "+a.styles.HelpValue.Render("assign / comment"),
+			a.styles.HelpKey.Render("r")+" "+a.styles.HelpValue.Render("refresh"),
+			a.styles.HelpKey.Render("R")+" "+a.styles.HelpValue.Render("reconcile now"),
+			a.styles.HelpKey.Render("[/]")+" "+a.styles.HelpValue.Render("cycle board"),
 		)
 
 	case ViewSearch:

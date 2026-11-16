@@ -209,6 +209,7 @@ func CommandPaletteModal(styles *Styles, config *ClientConfig) *Modal {
 		{Key: keys.ViewPlans, Label: "plans", Description: "switch to plans view"},
 		{Key: keys.ViewAgents, Label: "agents", Description: "switch to employees view"},
 		{Key: keys.ViewActivity, Label: "activity view", Description: "agent activity, findings + drift"},
+		{Key: keys.ViewKanban, Label: "kanban board", Description: "work-item board: move/takeover/assign cards"},
 		{Key: keys.Sidebar, Label: "toggle sidebar", Description: "show/hide sidebar"},
 		{Key: keys.Projects, Label: "projects", Description: "manage projects"},
 		{Key: keys.MemoryReview, Label: "memory review", Description: "review pending auto-claims (promote/reject)"},

@@ -118,6 +118,9 @@ type CommandPaletteKeys struct {
 	// ViewActivity switches to the activity view (leaf 03, activity-views
 	// tree). "" disables the binding.
 	ViewActivity string `json:"view_activity"`
+	// ViewKanban switches to the kanban board view (kanban-board leaf
+	// 05/03). "" disables the binding.
+	ViewKanban string `json:"view_kanban"`
 }
 
 // SessionConfig defines session behavior settings.
@@ -180,6 +183,7 @@ func DefaultClientConfig() *ClientConfig {
 				Projects:      "o",
 				MemoryReview:  "v",
 				ViewActivity:  "a",
+				ViewKanban:    "b",
 			},
 		},
 		Session: SessionConfig{

@@ -13,6 +13,8 @@
                │    [e]  agents - switch to employees view      │
                │    [a]  activity view - agent activity,        │
                │  findings + drift                              │
+               │    [b]  kanban board - work-item board:        │
+               │  move/takeover/assign cards                    │
                │    [y]  toggle sidebar - show/hide sidebar     │
                │    [o]  projects - manage projects             │
                │    [v]  memory review - review pending auto-   │
