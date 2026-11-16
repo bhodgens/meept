@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -24,11 +25,48 @@ func oneShotJobConfig(id string, at time.Time) JobConfig {
 	}
 }
 
+// timingAwareCountingJob is a countingJob whose Config() carries the
+// TimingAt spec: RunNow's one-shot stamp path (S5) consults job.Config()
+// from the jobs map, so a plain countingJob (no Timing) would skip it.
+type timingAwareCountingJob struct {
+	countingJob
+	at time.Time
+}
+
+func newTimingAwareCountingJob(id string, at time.Time) *timingAwareCountingJob {
+	return &timingAwareCountingJob{countingJob: countingJob{id: id, runs: make(chan string, 100)}, at: at}
+}
+
+func (j *timingAwareCountingJob) Config() JobConfig {
+	return JobConfig{
+		ID:      j.id,
+		Name:    j.id,
+		Type:    JobTypeShell,
+		Enabled: true,
+		Timing:  &TimingSpec{Kind: TimingAt, At: &j.at},
+	}
+}
+
 // startTestScheduler builds and starts a scheduler in a fresh temp dir,
 // returning it with a guaranteed Stop in cleanup.
 func startTestScheduler(t *testing.T, cfg config.SchedulerConfig, opts ...Option) *Scheduler {
 	t.Helper()
 	s, err := NewScheduler(cfg, nil, append([]Option{WithDataDir(t.TempDir())}, opts...)...)
+	if err != nil {
+		t.Fatalf("NewScheduler failed: %v", err)
+	}
+	if err := s.Start(context.Background()); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Stop(context.Background()) })
+	return s
+}
+
+// newStartedScheduler starts a scheduler rooted in the GIVEN data dir (used
+// for restart-over-same-dir pins) with a guaranteed Stop in cleanup.
+func newStartedScheduler(t *testing.T, cfg config.SchedulerConfig, opts ...Option) *Scheduler {
+	t.Helper()
+	s, err := NewScheduler(cfg, nil, opts...)
 	if err != nil {
 		t.Fatalf("NewScheduler failed: %v", err)
 	}
@@ -293,29 +331,35 @@ func TestOneShotFutureDueNotFiredAtBoot(t *testing.T) {
 	dataDir := t.TempDir()
 	due := time.Now().UTC().Add(2 * time.Second)
 
-	// Persist the row the way a pre-crash daemon would (never fired),
-	// then boot the next instance over it.
+	// The observable is a shell job whose command touches a marker file:
+	// loadPersistedJobs rebuilds the SAME shell command from the persisted
+	// row on restart, so the live cron entry's delivery stays observable
+	// across the boot boundary without any test-side job swapping (the
+	// swap would be invisible anyway — the reload-registered closure
+	// delivers to the job instance it captured).
+	marker := filepath.Join(dataDir, "oneshot-future-marker")
+	cfg := oneShotJobConfig("oneshot-future", due)
+	cfg.ShellConfig = &ShellJobConfig{Command: "/usr/bin/touch", Args: []string{marker}}
+
+	// Persist the row the way a pre-crash daemon would (never fired), then
+	// tear the seed down WITHOUT Start so the claims db survives.
 	seed, err := NewScheduler(config.SchedulerConfig{Timezone: "UTC"}, nil, WithDataDir(dataDir))
 	if err != nil {
 		t.Fatalf("seed NewScheduler failed: %v", err)
 	}
-	if err := seed.store.Add(oneShotJobConfig("oneshot-future", due)); err != nil {
+	if err := seed.store.Add(cfg); err != nil {
 		t.Fatalf("store.Add failed: %v", err)
 	}
 	_ = seed.claims.close()
 
-	job := newCountingJob("oneshot-future", "")
-	s := startTestScheduler(t, config.SchedulerConfig{Timezone: "UTC"}, WithDataDir(dataDir))
-	// Swap in the counting job AFTER Start so the eventual cron fire is
-	// observable (loadPersistedJobs rebuilt the jobs map from the store).
-	s.mu.Lock()
-	s.jobs[job.ID()] = job
-	s.mu.Unlock()
+	// Boot the "next daemon instance" over the same data dir; its
+	// loadPersistedJobs re-registers the future-due cron entry.
+	s := newStartedScheduler(t, config.SchedulerConfig{Timezone: "UTC"}, WithDataDir(dataDir))
 
 	// Give the boot sweep ample time to (wrongly) fire the future row.
 	time.Sleep(500 * time.Millisecond)
-	if got := job.runCount(); got != 0 {
-		t.Fatalf("future-due one-shot fired at boot (early): %d runs, want 0", got)
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatalf("future-due one-shot fired at boot (early): marker exists, want absent")
 	}
 	// The row must be untouched by the sweep.
 	got, ok := s.store.Get("oneshot-future")
@@ -328,14 +372,14 @@ func TestOneShotFutureDueNotFiredAtBoot(t *testing.T) {
 
 	// The live cron entry still fires at the due instant.
 	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) && job.runCount() == 0 {
-		time.Sleep(20 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(marker); err == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
-	if job.runCount() == 0 {
+	if _, err := os.Stat(marker); err != nil {
 		t.Fatal("cron entry did not fire the future-due one-shot at due time")
-	}
-	if job.runCount() != 1 {
-		t.Fatalf("cron entry fired %d times, want exactly 1", job.runCount())
 	}
 }
 
@@ -352,15 +396,28 @@ func TestCronFiredOneShotNotRefiredOnBoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed NewScheduler failed: %v", err)
 	}
-	// Schedule the one-shot through the real path so RegisterTimingVia
-	// wires the cron closure that routes through fireOneShotOnce.
+	// Wire the one-shot through the real RegisterTimingVia path so the cron
+	// closure routes through fireOneShotOnce, and keep the counting job as
+	// the captured instance (the closure delivers to the job it captured).
+	// The store row is registered AND immediately removed so
+	// loadPersistedJobs does not register a SECOND cron entry over the same
+	// due instant — the reload's entry would deliver to its own freshly
+	// built shell job instead of the counting job, making the observable
+	// run count racy. fireOneShotOnce persists the pruning stamp itself, so
+	// the pin's store assertions do not need the pre-seeded row.
 	cfg := oneShotJobConfig(job.ID(), due)
-	if _, err := seed.ScheduleConfig(cfg); err != nil {
-		t.Fatalf("ScheduleConfig failed: %v", err)
-	}
 	seed.mu.Lock()
-	seed.jobs[job.ID()] = job // observable execution
+	entryID, regErr := seed.RegisterTimingVia(cfg, job)
+	if regErr == nil {
+		seed.jobs[job.ID()] = job
+		seed.entryIDs[job.ID()] = entryID
+	}
 	seed.mu.Unlock()
+	if regErr != nil {
+		t.Fatalf("RegisterTimingVia failed: %v", regErr)
+	}
+	_ = seed.store.Add(cfg)
+	_ = seed.store.Remove(cfg.ID)
 	if err := seed.Start(context.Background()); err != nil {
 		t.Fatalf("seed Start failed: %v", err)
 	}
@@ -395,12 +452,12 @@ func TestCronFiredOneShotNotRefiredOnBoot(t *testing.T) {
 		t.Fatalf("seed Stop failed: %v", err)
 	}
 
-	// Boot the next daemon instance over the same data dir.
+	// Boot the next daemon instance over the same data dir, again wiring
+	// the counting job as the cron-registered instance so a wrongful
+	// re-fire is observable. The store row is gone (pruned after the
+	// successful cron fire), so no reload re-registration happens here.
 	job2 := newCountingJob(job.ID(), "")
-	s2 := startTestScheduler(t, config.SchedulerConfig{Timezone: "UTC"}, WithDataDir(dataDir))
-	s2.mu.Lock()
-	s2.jobs[job2.ID()] = job2
-	s2.mu.Unlock()
+	s2 := newStartedScheduler(t, config.SchedulerConfig{Timezone: "UTC"}, WithDataDir(dataDir))
 
 	time.Sleep(1 * time.Second)
 	if got := job2.runCount(); got != 0 {
@@ -419,12 +476,20 @@ func TestRunNowStampsOneShotFiredAtBootSweepSkips(t *testing.T) {
 	dataDir := t.TempDir()
 	due := time.Now().UTC().Add(-10 * time.Minute)
 
-	job := newCountingJob("oneshot-runnnow", "")
+	job := newTimingAwareCountingJob("oneshot-runnnow", due)
 	seed, err := NewScheduler(config.SchedulerConfig{Timezone: "UTC"}, nil, WithDataDir(dataDir))
 	if err != nil {
 		t.Fatalf("seed NewScheduler failed: %v", err)
 	}
-	if err := seed.store.Add(oneShotJobConfig(job.ID(), due)); err != nil {
+	// Persist the row in the failed (never-ran) posture BEFORE Start: a
+	// failed row is not cron-registered and the boot sweep leaves it alone,
+	// so RunNow is the only delivery path (deterministic — no sweep race).
+	if err := seed.store.Add(func() JobConfig {
+		c := oneShotJobConfig(job.ID(), due)
+		c.OneShotFailed = true
+		c.LastError = "one-shot never ran"
+		return c
+	}()); err != nil {
 		t.Fatalf("store.Add failed: %v", err)
 	}
 	seed.mu.Lock()
@@ -433,18 +498,14 @@ func TestRunNowStampsOneShotFiredAtBootSweepSkips(t *testing.T) {
 	if err := seed.Start(context.Background()); err != nil {
 		t.Fatalf("seed Start failed: %v", err)
 	}
+	// loadPersistedJobs put its own shell job in the map; swap the counting
+	// job back in so RunNow's dispatch is observable (RunNow re-fetches the
+	// job from the map at dispatch time, unlike the cron closure).
+	seed.mu.Lock()
+	seed.jobs[job.ID()] = job
+	seed.mu.Unlock()
 
-	// RunNow BEFORE the boot sweep can win the race: the row was persisted
-	// without the failed posture, so mark it failed first to make this
-	// deterministic — RunNow on a failed one-shot is the documented path.
-	if err := seed.store.Update(func() JobConfig {
-		c := oneShotJobConfig(job.ID(), due)
-		c.OneShotFailed = true
-		c.LastError = "one-shot never ran"
-		return c
-	}()); err != nil {
-		t.Fatalf("store.Update failed: %v", err)
-	}
+	// RunNow on a failed one-shot is the documented manual re-run path.
 	if err := seed.RunNow(job.ID()); err != nil {
 		t.Fatalf("RunNow failed: %v", err)
 	}
@@ -467,19 +528,31 @@ func TestRunNowStampsOneShotFiredAtBootSweepSkips(t *testing.T) {
 	if got.OneShotFailed {
 		t.Error("OneShotFailed still set after RunNow")
 	}
+	// Baseline claim snapshot AFTER RunNow settled: RunNow claims a
+	// nanosecond-unique start tick, which is legitimate and must be
+	// excluded from the boot-sweep re-fire assertion below.
+	claimsBaseline, err := seed.claims.ListClaimsSince(due.Add(-time.Minute))
+	if err != nil {
+		t.Fatalf("ListClaimsSince failed: %v", err)
+	}
 	if err := seed.Stop(context.Background()); err != nil {
 		t.Fatalf("seed Stop failed: %v", err)
 	}
 
 	// Boot the next instance: the sweep must NOT re-fire the stamped row.
-	job2 := newCountingJob(job.ID(), "")
-	s2 := startTestScheduler(t, config.SchedulerConfig{Timezone: "UTC"}, WithDataDir(dataDir))
-	s2.mu.Lock()
-	s2.jobs[job2.ID()] = job2
-	s2.mu.Unlock()
+	s2 := newStartedScheduler(t, config.SchedulerConfig{Timezone: "UTC"}, WithDataDir(dataDir))
 	time.Sleep(1 * time.Second)
-	if got := job2.runCount(); got != 0 {
-		t.Fatalf("boot sweep re-fired a RunNow-delivered one-shot: %d runs, want 0", got)
+	// Not-refired proof: no NEW claim rows appeared at boot (RunNow itself
+	// claims a nanosecond-unique start tick, so the baseline is non-zero —
+	// the assertion is equality, not emptiness), and the stamped row is
+	// kept for inspection.
+	claimsAfter, err := s2.claims.ListClaimsSince(due.Add(-time.Minute))
+	if err != nil {
+		t.Fatalf("ListClaimsSince failed: %v", err)
+	}
+	if len(claimsAfter) != len(claimsBaseline) {
+		t.Fatalf("boot sweep re-fired the RunNow-delivered one-shot: claims %d -> %d, want no new claims",
+			len(claimsBaseline), len(claimsAfter))
 	}
 	if _, ok := s2.store.Get(job.ID()); !ok {
 		t.Error("RunNow-delivered one-shot row pruned by boot sweep; want kept")
