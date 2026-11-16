@@ -376,10 +376,13 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		// normalizer injects the registry-backed grant vocabulary (same
 		// seam the resolver construction in components uses) so the C6
 		// tool-name leg validates against the live vocabulary.
-		groupsHandler.SetDiagnosisService(services.NewGroupsService(
-			fullCfg,
-			"config/agents",
-		))
+		//
+		// Employee ids (secretary) are not in the discovered AGENT.md
+		// roster. The resolver is injected here so services never imports
+		// internal/employee (that edge cycles through bot and comm/http).
+		diag := services.NewGroupsService(fullCfg, "config/agents")
+		diag.SetEmployeeExplainResolver(newGroupsEmployeeResolver(components.EmployeeManager))
+		groupsHandler.SetDiagnosisService(diag)
 		// Overrides reader seam (agent-groups leaf 07): groups.check
 		// loads $MEEPT_HOME/group_overrides.json5 per request through the
 		// same injected clock the resolver seam uses (MEEPT_GROUPS_NOW

@@ -84,6 +84,92 @@ func TestGroupsServiceExplainUnknownAgent(t *testing.T) {
 	}
 }
 
+// fakeEmployeeExplainResolver is the secretary-shaped seam: it answers one
+// employee id and reports every other id as not an employee.
+type fakeEmployeeExplainResolver struct {
+	view EmployeeExplain
+}
+
+func (f fakeEmployeeExplainResolver) ExplainEmployee(_ context.Context, id string) (EmployeeExplain, bool, error) {
+	if id != f.view.ID {
+		return EmployeeExplain{}, false, nil
+	}
+	return f.view, true, nil
+}
+
+// TestGroupsServiceExplainEmployeeNotRoster pins that an employee id such
+// as secretary is explained from the employee row, not rejected as a
+// missing roster agent and not rendered as a discovered AGENT.md subject.
+func TestGroupsServiceExplainEmployeeNotRoster(t *testing.T) {
+	svc := serviceWithRoster(t, fixtureConfig(), fixtureRoster())
+	svc.SetEmployeeExplainResolver(fakeEmployeeExplainResolver{
+		view: EmployeeExplain{
+			ID:                  "secretary",
+			ConstitutionPresent: true,
+			ToolsAllowed:        []string{"web_fetch", "file_read"},
+			ToolsForbidden:      []string{"shell_execute", "git_push"},
+		},
+	})
+
+	res, err := svc.Explain(context.Background(), "secretary")
+	if err != nil {
+		t.Fatalf("explain secretary: %v", err)
+	}
+	if res == nil {
+		t.Fatal("explain secretary: nil result")
+	}
+	if res.Managed || len(res.Groups) != 0 {
+		t.Fatalf("explain secretary pretended to be a roster agent: managed=%v groups=%v", res.Managed, res.Groups)
+	}
+	subject, constitution := "", ""
+	for _, b := range res.Bindings {
+		if strings.HasPrefix(b.Subject, "employee:") {
+			subject = b.Subject
+			constitution = b.Note
+			break
+		}
+	}
+	if subject != "employee:secretary" {
+		t.Fatalf("explain secretary: subject %q; want employee:secretary (not a roster agent: subject)", subject)
+	}
+	if constitution != "constitution present" {
+		t.Fatalf("explain secretary: constitution note %q; want constitution present", constitution)
+	}
+	allowed, forbidden := map[string]bool{}, map[string]bool{}
+	for _, g := range res.Grants {
+		if g.BindingSubject != "employee:secretary" {
+			t.Fatalf("explain secretary: grant %+v is not an employee-row grant", g)
+		}
+		switch g.Reason {
+		case "tools_allowed":
+			allowed[g.Tool] = true
+		case "tools_forbidden":
+			forbidden[g.Tool] = true
+		default:
+			t.Fatalf("explain secretary: grant reason %q; want tools_allowed or tools_forbidden", g.Reason)
+		}
+	}
+	for _, tool := range []string{"web_fetch", "file_read"} {
+		if !allowed[tool] {
+			t.Fatalf("explain secretary: tools_allowed missing %q (got %v)", tool, allowed)
+		}
+	}
+	for _, tool := range []string{"shell_execute", "git_push"} {
+		if !forbidden[tool] {
+			t.Fatalf("explain secretary: tools_forbidden missing %q (got %v)", tool, forbidden)
+		}
+	}
+	if len(res.AllowedTools) != 0 || len(res.DeniedTools) != 0 {
+		t.Fatalf("explain secretary: roster allow/deny sets populated (%v / %v); employee tools must not ride the roster resolution", res.AllowedTools, res.DeniedTools)
+	}
+
+	// A wired resolver that does not know the id must still fail, same as
+	// a roster miss. The existing roster explain stays on the other test.
+	if _, err := svc.Explain(context.Background(), "nobody"); err == nil || !strings.Contains(err.Error(), "not in the discovered roster") {
+		t.Fatalf("explain missing employee and roster agent: err=%v; want roster-miss error", err)
+	}
+}
+
 func TestGroupsServiceCheckDefects(t *testing.T) {
 	cfg := fixtureConfig()
 	// Inject: unknown group in the roster + a dangling policy binding.

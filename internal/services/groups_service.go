@@ -17,6 +17,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/caimlas/meept/internal/agents"
@@ -36,6 +37,11 @@ type GroupsService struct {
 	// extraDiscoverDirs are extra discovery tier roots (test injection);
 	// entries shadow the default tiers at project priority.
 	extraDiscoverDirs []string
+	// employeeExplain resolves an employee id when the discovered roster
+	// misses. Nil keeps roster-only explain (tests and unwired daemons).
+	// The daemon injects this; services must not import internal/employee
+	// (services -> employee -> bot -> comm/http -> services).
+	employeeExplain EmployeeExplainResolver
 }
 
 // Compile-time: the RPC diagnosis interface is satisfied structurally
@@ -49,6 +55,30 @@ func explainShape() (*groups.ExplainResult, error) { return nil, nil } //nolint:
 
 // checkShape pins the Check signature the RPC interface mirrors.
 func checkShape() (*groups.CheckResult, error) { return nil, nil } //nolint:nilnil // signature-pin stub (rpc mirrors this method set; never invoked for a value)
+
+// EmployeeExplain is the employee row groups explain may print. It is not
+// a roster agent: tools come from the constitution, not group policy.
+type EmployeeExplain struct {
+	ID                  string
+	ConstitutionPresent bool
+	ToolsAllowed        []string
+	ToolsForbidden      []string
+}
+
+// EmployeeExplainResolver looks up an employee id. found=false means the
+// id is not an employee (not an error). A store failure is err.
+type EmployeeExplainResolver interface {
+	ExplainEmployee(ctx context.Context, id string) (EmployeeExplain, bool, error)
+}
+
+// SetEmployeeExplainResolver injects the employee lookup. Nil is ignored
+// (setter convention) so a missing manager cannot wipe a wired resolver.
+func (s *GroupsService) SetEmployeeExplainResolver(r EmployeeExplainResolver) {
+	if s == nil || r == nil {
+		return
+	}
+	s.employeeExplain = r
+}
 
 // NewGroupsService constructs the diagnosis service over a loaded config.
 // extraDiscoverDirs are extra discovery tier roots (test injection); an
@@ -175,9 +205,25 @@ func (s *GroupsService) findAgent(agentID string) *agents.AgentDefinition {
 	return nil
 }
 
+// Employee explain markers. The CLI human renderer (cmd/meept/groups.go)
+// keys off these exact strings. They are not roster subjects: an employee
+// id must not be explained as a discovered AGENT.md agent.
+const (
+	employeeExplainSubjectPrefix       = "employee:"
+	employeeExplainConstitutionPresent = "constitution present"
+	employeeExplainConstitutionAbsent  = "constitution absent"
+	employeeExplainToolsAllowed        = "tools_allowed"
+	employeeExplainToolsForbidden      = "tools_forbidden"
+)
+
 // Explain resolves one agent with per-entry source attribution (which
 // binding + policy produced each grant/deny). Delegates to the shared
 // groups.Explain engine — the SAME resolution the gates enforce.
+//
+// A roster hit stays on that path and is byte-identical. A roster miss
+// tries the injected employee resolver. An employee row is NOT passed
+// through groups.Explain: that would pretend the employee is a roster
+// agent. A miss on both still fails.
 func (s *GroupsService) Explain(ctx context.Context, agentID string) (*groups.ExplainResult, error) {
 	agentID = strings.TrimSpace(agentID)
 	if agentID == "" {
@@ -185,7 +231,7 @@ func (s *GroupsService) Explain(ctx context.Context, agentID string) (*groups.Ex
 	}
 	def := s.findAgent(agentID)
 	if def == nil {
-		return nil, fmt.Errorf("groups explain: agent %q is not in the discovered roster", agentID)
+		return s.explainEmployee(ctx, agentID)
 	}
 	return groups.Explain(
 		def.AdditionalTools, agentID, def.Groups,
@@ -193,6 +239,76 @@ func (s *GroupsService) Explain(ctx context.Context, agentID string) (*groups.Ex
 		&groups.ResolveOptions{}, // default normalizer; daemon wiring injects the registry-backed one
 		s.groupsSection().DefaultManaged,
 	), nil
+}
+
+// explainEmployee answers a roster miss from the employee row. A nil
+// resolver, or a resolver that does not know the id, keeps the roster-miss
+// error so a missing employee and a missing roster agent both fail.
+func (s *GroupsService) explainEmployee(ctx context.Context, agentID string) (*groups.ExplainResult, error) {
+	if s == nil || s.employeeExplain == nil {
+		return nil, fmt.Errorf("groups explain: agent %q is not in the discovered roster", agentID)
+	}
+	view, found, err := s.employeeExplain.ExplainEmployee(ctx, agentID)
+	if err != nil {
+		return nil, fmt.Errorf("groups explain: employee %q: %w", agentID, err)
+	}
+	if !found {
+		return nil, fmt.Errorf("groups explain: agent %q is not in the discovered roster", agentID)
+	}
+	return employeeExplainResult(agentID, view), nil
+}
+
+// employeeExplainResult builds the explain answer from the employee row.
+// AllowedTools and DeniedTools stay empty: those are roster resolution
+// sets. Constitution tools ride grants whose reason is tools_allowed or
+// tools_forbidden, attributed to subject employee:<id>.
+func employeeExplainResult(requestedID string, view EmployeeExplain) *groups.ExplainResult {
+	id := strings.TrimSpace(view.ID)
+	if id == "" {
+		id = requestedID
+	}
+	subject := employeeExplainSubjectPrefix + id
+	note := employeeExplainConstitutionAbsent
+	if view.ConstitutionPresent {
+		note = employeeExplainConstitutionPresent
+	}
+	grants := make([]groups.GrantEntry, 0, len(view.ToolsAllowed)+len(view.ToolsForbidden))
+	for _, tool := range view.ToolsAllowed {
+		if tool == "" {
+			continue
+		}
+		grants = append(grants, groups.GrantEntry{
+			Tool:           tool,
+			Effect:         "allow",
+			BindingSubject: subject,
+			Reason:         employeeExplainToolsAllowed,
+		})
+	}
+	for _, tool := range view.ToolsForbidden {
+		if tool == "" {
+			continue
+		}
+		grants = append(grants, groups.GrantEntry{
+			Tool:           tool,
+			Effect:         "deny",
+			BindingSubject: subject,
+			Reason:         employeeExplainToolsForbidden,
+		})
+	}
+	sort.Slice(grants, func(i, j int) bool {
+		if grants[i].Effect != grants[j].Effect {
+			return grants[i].Effect < grants[j].Effect
+		}
+		return grants[i].Tool < grants[j].Tool
+	})
+	return &groups.ExplainResult{
+		AgentID: id,
+		Bindings: []groups.ExplainSource{{
+			Subject: subject,
+			Note:    note,
+		}},
+		Grants: grants,
+	}
 }
 
 // Check enumerates every R5 defect class with names. knownTools is the

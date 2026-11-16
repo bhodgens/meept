@@ -6,7 +6,8 @@ package main
 // Report-only diagnosis over the daemon's groups.* RPC surface:
 //
 //	meept groups list                — policy + binding tables
-//	meept groups explain <agent>     — per grant/deny: binding + policy source
+//	meept groups explain <id>        — roster agent: binding + policy source;
+//	                                   employee: constitution + tool lists
 //	meept groups check [--json]      — defect enumeration (R5); exit 0 clean,
 //	                                   exit 1 defects (scriptable)
 //
@@ -30,7 +31,7 @@ const groupsLong = `Inspect agent group policies, bindings, and effective permis
 Report-only: every subcommand reads state and never mutates it.
 
   meept groups list                 # policy + binding tables
-  meept groups explain <agent>      # per grant/deny: the binding + policy behind it
+  meept groups explain <id>        # roster agent: binding + policy; employee: constitution tool lists
   meept groups check                # config defect enumeration (exit 1 on defects)
   meept groups check --json         # machine-readable defects (stable keys)
 
@@ -149,8 +150,8 @@ func newGroupsExplainCmd() *cobra.Command {
 	var outputJSON bool
 
 	cmd := &cobra.Command{
-		Use:   "explain <agent>",
-		Short: "explain an agent's effective permissions, naming the binding and policy behind each grant and deny",
+		Use:   "explain <id>",
+		Short: "explain a roster agent or an employee id; an employee prints constitution presence and tool lists, not a roster resolution",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, err := connectDaemon()
@@ -186,9 +187,27 @@ func newGroupsExplainCmd() *cobra.Command {
 	return cmd
 }
 
+// employee-explain markers. Must match internal/services/groups_service.go
+// (employeeExplainSubjectPrefix, constitution notes, grant reasons). The
+// groups.explain RPC copies bindings and grants; these strings are how
+// this renderer tells an employee row from a roster resolution. The CLI
+// does not import services.
+const (
+	cliEmployeeSubjectPrefix = "employee:"
+	cliConstitutionPresent   = "constitution present"
+	cliToolsAllowedReason    = "tools_allowed"
+	cliToolsForbiddenReason  = "tools_forbidden"
+)
+
 // renderExplainHuman prints the explain table: resolution summary, the
 // bindings that selected the subject, and every attributed grant/deny.
+// An employee row (subject employee:<id>) is not a roster agent and is
+// printed as the employee id, constitution presence, and constitution
+// tool lists instead.
 func renderExplainHuman(resultMap map[string]any) {
+	if renderEmployeeExplain(resultMap) {
+		return
+	}
 	agentID := getStringOr(resultMap, "agent_id", "")
 	managed, _ := resultMap["managed"].(bool)
 
@@ -249,6 +268,60 @@ func renderExplainHuman(resultMap map[string]any) {
 			fmt.Println(line)
 		}
 	}
+}
+
+// renderEmployeeExplain prints an employee row when the explain result
+// carries a subject employee:<id>. Returns false for a roster resolution
+// so that path stays byte-identical. It does not print "agent:".
+func renderEmployeeExplain(resultMap map[string]any) bool {
+	bindings, _ := resultMap["bindings"].([]any)
+	subject, note := "", ""
+	for _, b := range bindings {
+		bm, ok := b.(map[string]any)
+		if !ok {
+			continue
+		}
+		sub := getStringOr(bm, "subject", "")
+		if strings.HasPrefix(sub, cliEmployeeSubjectPrefix) {
+			subject = sub
+			note = getStringOr(bm, "note", "")
+			break
+		}
+	}
+	if subject == "" {
+		return false
+	}
+	id := strings.TrimPrefix(subject, cliEmployeeSubjectPrefix)
+	if id == "" {
+		id = getStringOr(resultMap, "agent_id", "")
+	}
+	constitution := "absent"
+	if note == cliConstitutionPresent {
+		constitution = "present"
+	}
+	var allowed, forbidden []any
+	grants, _ := resultMap["grants"].([]any)
+	for _, g := range grants {
+		gm, ok := g.(map[string]any)
+		if !ok {
+			continue
+		}
+		tool := getStringOr(gm, "tool", "")
+		if tool == "" {
+			continue
+		}
+		switch getStringOr(gm, "reason", "") {
+		case cliToolsAllowedReason:
+			allowed = append(allowed, tool)
+		case cliToolsForbiddenReason:
+			forbidden = append(forbidden, tool)
+		}
+	}
+	fmt.Printf("employee: %s\n", id)
+	fmt.Printf("constitution: %s\n", constitution)
+	fmt.Printf("tools_allowed: %s\n", joinAny(allowed))
+	fmt.Printf("tools_forbidden: %s\n", joinAny(forbidden))
+	return true
 }
 
 // ---------------------------------------------------------------------------
