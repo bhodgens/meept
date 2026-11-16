@@ -1,6 +1,7 @@
 # Kanban Sidecar Gateway (`internal/kanbansvc` + `cmd/meept-kanban`)
 
 Spec: `plans/kanban-board/master.md` (leaf `04-sidecar-gateway/02`).
+Package invariants for agents: `internal/kanbansvc/AGENTS.md`.
 
 ## What it is
 
@@ -86,11 +87,17 @@ without the echo the browser aborts the connection after accept
 
 ## Event relay
 
-`/api/v1/events` upgrades to WebSocket (origin-checked against the
-daemon hub's allow-list: same-origin or no-Origin clients). The gateway
+`/api/v1/events` upgrades to WebSocket. The origin gate mirrors the
+daemon hub's allow-list shape but is a LOOPBACK allow-list:
+`localhost`/`127.0.0.1`/`::1` origins pass, a missing Origin (non-browser
+client) passes because the bearer token still gates the connection, and
+any other origin is refused (`checkWSOrigin`, `gateway.go:425-443`) —
+relevant when fronting the sidecar with a TLS proxy, see
+[docs/workflows/kanban.md](kanban.md) "Exposing the sidecar". The gateway
 subscribes to the daemon through `EventSource` and pumps frames to the
-client. `IdleSource` is the no-event placeholder used until the bus
-bridge leaf lands; it closes its channel on context cancel so a relay
+client. `IdleSource` is the no-event placeholder the binary currently
+boots with (`cmd/meept-kanban/main.go:84`), used until the daemon bus
+bridge lands; it closes its channel on context cancel so a relay
 never outlives its connection.
 
 ## Static web bundle

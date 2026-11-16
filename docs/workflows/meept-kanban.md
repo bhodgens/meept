@@ -25,20 +25,27 @@ bin/meept-kanban -bind 127.0.0.1:8790
 | `-daemon-socket` | `$MEEPT_HOME/meept.sock` | Daemon RPC socket for forwarding. |
 | `-daemon-http` | (empty) | Daemon HTTP base URL. Overrides `-daemon-socket` when set. |
 | `-webdir` | `$WEBDIR`, else `$MEEPT_HOME/webui` | Flutter bundle root, served at `/web/`. |
+| `-pair-store` | `$MEEPT_HOME/kanban/tokens.json` | Bearer-token + pairing-code store file. |
 
 A non-loopback `-bind` without `-allow-lan` refuses to start.
 
-## Tokens (current state)
+## Tokens (as-built, pairing leaf 04/03)
 
-The sidecar ships with an empty grant store. Until the pairing leaf
-(04/03) lands, no token maps to any grant, so every API route answers
-401. That refusal is deliberate: a board reachable without auth is an
-outage waiting to happen. The placeholder page at `/` still serves.
+The gateway authorizes through `TokenStore` (`internal/kanbansvc/pairing.go`):
+a bearer token must have been minted by a single-use pairing code
+(`TokenStore.GeneratePairCode`, printed once by the operator — or the
+daemon, leaf 07/01 — never logged) and exchanged at
+`POST /api/v1/pair/exchange`. Until a code is minted and exchanged the
+store knows no tokens and every API route answers 401. That refusal is
+deliberate: a board reachable without auth is an outage waiting to
+happen. The placeholder page at `/` still serves. See
+[docs/workflows/kanbansvc.md](kanbansvc.md) for the grant lanes and the
+conjunctive takeover rule (310701d5).
 
 ## Signals
 
-`SIGINT`/`SIGTERM` shut the listener down with a 10-second drain and
-close the daemon connection.
+`SIGINT`/`SIGTERM` shut the listener down with a 5-second HTTP drain
+(`cmd/meept-kanban/main.go:116`) and close the daemon connection.
 
 ## Verifying it is up
 
