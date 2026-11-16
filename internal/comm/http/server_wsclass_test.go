@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/caimlas/meept/internal/agent"
+	"github.com/caimlas/meept/internal/comm/wsclass"
+	"github.com/caimlas/meept/internal/kanban"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -48,6 +50,9 @@ func TestWSClassParity(t *testing.T) {
 		{"agent.model_escalated", "agent_progress"},
 		{"agent.progress", "agent_progress"},
 		{"turn.terminal", "agent_progress"},
+		{"kanban.card.moved", "board_event"},
+		{"kanban.board.changed", "board_event"},
+		{"kanban.event.task.state", "board_event"},
 		{"metrics.cpu", "metrics_update"},
 		{"task.completed", "job_update"},
 		{"step.started", "job_update"},
@@ -196,5 +201,73 @@ func TestWSClassAgentProgressRawFrame(t *testing.T) {
 	}
 	if out := transformBusEventToWS(busMsg("agent.progress", loopPayload)); out == nil || out["type"] != "agent_progress" {
 		t.Errorf("loop-stage agent.progress: got %v, want type agent_progress", out)
+	}
+}
+
+// TestWSClassBoardTypedMarkers is the kanban-board C8 pin (leaf 05/07):
+// every WS-visible kanban topic classifies board_event VIA the typed
+// decode -> WSBoard marker path (not the prefix table), carries the
+// source_topic metadata through, and rides the `progress` subscription
+// channel. board_event must NEVER classify chat_message (blank-bubble
+// invariant).
+func TestWSClassBoardTypedMarkers(t *testing.T) {
+	cases := []struct {
+		topic   string
+		payload any
+	}{
+		{kanban.TopicCardMoved.Name, kanban.CardMoved{CardID: "c1", FromColumnID: "todo", ToColumnID: "doing", Actor: "user"}},
+		{kanban.TopicBoardChanged.Name, kanban.BoardChanged{BoardID: "b1"}},
+		{kanban.TopicBoardChanged.Name, kanban.BoardChanged{BoardID: "b1", Note: "wip warning"}},
+		{kanban.TopicTaskState.Name, kanban.StateEvent{Kind: "task", ID: "t1", From: "queued", To: "running"}},
+		{kanban.TopicJobState.Name, kanban.StateEvent{Kind: "job", ID: "j1", From: "pending", To: "active"}},
+		{kanban.TopicPlanState.Name, kanban.StateEvent{Kind: "plan", ID: "p1", From: "draft", To: "approved"}},
+		{kanban.TopicStepState.Name, kanban.StateEvent{Kind: "step", ID: "s1", From: "pending", To: "done"}},
+		{kanban.TopicGoalState.Name, kanban.StateEvent{Kind: "goal", ID: "g1", From: "active", To: "achieved"}},
+	}
+	for _, tc := range cases {
+		out := transformBusEventToWS(busMsg(tc.topic, tc.payload))
+		if out == nil {
+			t.Errorf("topic %q: transformBusEventToWS returned nil", tc.topic)
+			continue
+		}
+		if got := out["type"]; got != "board_event" {
+			t.Errorf("topic %q: type = %v, want board_event", tc.topic, got)
+		}
+		if got := out["source_topic"]; got != tc.topic {
+			t.Errorf("topic %q: source_topic = %v", tc.topic, got)
+		}
+	}
+
+	// Marker proof: the typed decode (not a prefix) decides classification.
+	typed, err := decodeKanbanCardMovedWSClass(json.RawMessage(`{"CardID":"c9"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if typed.WSClass() != wsclass.WSBoard {
+		t.Errorf("CardMoved marker = %v, want WSBoard", typed.WSClass())
+	}
+
+	// Corrupt payload still classifies board_event via the kanban. prefix
+	// fallback (the turn.terminal posture), with no panic.
+	if out := transformBusEventToWS(busMsg(kanban.TopicCardMoved.Name, "{not valid json")); out == nil || out["type"] != "board_event" {
+		t.Errorf("corrupt kanban payload: got %v, want type board_event (fallback)", out)
+	}
+
+	// Channel routing: board_event rides the progress channel (C8
+	// "relayed like progress").
+	if ch := wsEventChannel("board_event"); ch != wsChannelProgress {
+		t.Errorf("wsEventChannel(board_event) = %q, want %q", ch, wsChannelProgress)
+	}
+	hub := NewWebSocketHub(nil)
+	wc := &wsConn{}
+	hub.SubscribeSession(wc, "s1", wsChannelProgress)
+	if !hub.ShouldSend(wc, "board_event", "s1") {
+		t.Error("progress-channel grant must deliver board_event")
+	}
+	// A chat-channel unsubscribe must not mute the board feed (the
+	// (channel, session) opt-out rule applied to board frames).
+	hub.UnsubscribeSession(wc, "s1", wsChannelChat)
+	if !hub.ShouldSend(wc, "board_event", "s1") {
+		t.Error("chat-channel unsubscribe must not suppress board_event")
 	}
 }

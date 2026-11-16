@@ -427,11 +427,21 @@ const (
 // that scopes it. Types outside the chat/progress split (job_update,
 // metrics_update, plan_update, the generic "event") are scoped by the session
 // set alone, so they resolve to wsChannelAll.
+//
+// board_event rides wsChannelProgress per master.md C8 ("relayed like
+// progress"): a connection that armed `progress` for a session also gets
+// that session's board frames, and an unsubscribeFromChat cannot mute the
+// board feed. Kanban payloads carry no session_id, so the relay's
+// empty-session broadcast bypass dominates in practice — the channel choice
+// only pins the (channel, session) opt-out semantics should board payloads
+// ever grow a session scope. No new "board" subscription channel is added:
+// the Flutter client's subscribe frames name only chat/progress, and C8
+// mandates progress-style relay, not a new lane.
 func wsEventChannel(eventType string) string {
 	switch eventType {
 	case "chat_message":
 		return wsChannelChat
-	case "agent_progress":
+	case "agent_progress", "board_event":
 		return wsChannelProgress
 	default:
 		return wsChannelAll
@@ -756,7 +766,21 @@ func WithWebSocket(msgBus *bus.MessageBus, wsPath string) ServerOption {
 			// never chat_message (AGENTS.md invariant). Without this
 			// pattern the WS relay drops every record change and diffing
 			// WS consumers never see session-message writes/deletes.
-			"storage.*"}
+			//
+			// kanban.* + kanban.*.* (kanban-board C8, leaf 05/07
+			// 'ws-event-class'): the board-event feed. kanban.card.moved
+			// and kanban.board.changed are 2-segment typed topics (matched
+			// by kanban.*); the five kanban.event.*.state work-item
+			// transitions are 4-segment typed topics (matched by
+			// kanban.*.* — matchWildcard compares segment counts, so one
+			// pattern cannot cover both shapes). Frames classify via the
+			// wsclass marker path (typedPayloadDecoders -> kanban.WSBoard)
+			// as board_event — relayed like progress, NEVER chat_message
+			// (blank-bubble invariant). The payloads carry no session_id,
+			// so the relay's empty-session bypass delivers them to every
+			// connection, exactly like the progress path does for
+			// session-less frames.
+			"kanban.*", "kanban.*.*", "storage.*"}
 		for _, topic := range topics {
 			sub := msgBus.Subscribe("http-ws-"+topic, topic)
 			s.wsSubMu.Lock()
@@ -1018,6 +1042,14 @@ func transformBusEventToWS(msg *models.BusMessage) map[string]any {
 			// agent_progress — never chat_message (AGENTS.md WS
 			// classification invariant: blank bubbles otherwise).
 			eventType = "agent_progress"
+		case strings.HasPrefix(topic, "kanban."):
+			// Kanban board deltas (kanban.card.moved, kanban.board.changed,
+			// kanban.event.*.state — kanban-board C8, leaf 05/07). The typed
+			// marker path normally decides this (board_event); this prefix
+			// match is the corrupt-payload fallback, mirroring the turn.*
+			// posture. Board events are NEVER chat_message (blank-bubble
+			// invariant).
+			eventType = "board_event"
 		case strings.HasPrefix(topic, "metrics."):
 			eventType = "metrics_update"
 		case strings.HasPrefix(topic, "task.") || strings.HasPrefix(topic, "step.") || strings.HasPrefix(topic, "job.") ||

@@ -399,13 +399,16 @@ class KanbanReconcileStats {
 
 /// One frame from the board-events stream.
 ///
-/// INTERIM (master.md C8): the WSBoard wire class (`board_event`) does not
-/// exist yet — it lands in leaf 05/07. Until then board deltas ride the
-/// PROGRESS class, exactly like the daemon's own agent_progress frames, so
-/// this placeholder carries the raw decoded frame and reports [isProgress].
-/// Consumers (leaf 05/05) MUST NOT depend on WSBoard-typed payload keys;
-/// read [payload] defensively. When 05/07 ships, this class gains the
-/// typed board_event variants and [isProgress] narrows accordingly.
+/// WSBoard (master.md C8) landed in leaf 05/07: the daemon relay
+/// classifies every kanban.* bus topic (kanban.card.moved,
+/// kanban.board.changed, kanban.event.*.state) as wire type
+/// `board_event`, framed as `{"type": "board_event", "data": {...}}`.
+/// Frames on this stream are typed by [wireType]; [isBoard] is true for
+/// WSBoard frames. Pre-05/07 C8-interim producers may still emit
+/// `agent_progress` frames, so both classes are tolerated — and a
+/// `chat_message` frame is dropped by [KanbanService._handleEventFrame]
+/// and must never reach this class. A frame with NO type defaults to
+/// the board class: the sidecar relay is board-scoped.
 class KanbanBoardEvent {
   const KanbanBoardEvent(this.payload, {this.linkError});
 
@@ -416,21 +419,49 @@ class KanbanBoardEvent {
   /// connection dropping) so listeners can react without error channels.
   final String? linkError;
 
-  /// The relay wire type. Absent or non-'chat_message' frames are progress
-  /// class by contract (only chat_message topics classify chat; C8).
+  /// The relay wire type. Absent-type frames are board class by contract
+  /// (the relay is board-scoped; only chat_message topics classify chat —
+  /// and those are dropped upstream; C8).
   String get wireType =>
-      payload['type'] is String ? payload['type'] as String : _progressWireType;
+      payload['type'] is String ? payload['type'] as String : _boardWireType;
 
+  static const String _boardWireType = 'board_event';
   static const String _progressWireType = 'agent_progress';
 
-  /// True while the C8 interim rule holds: everything on this stream is
-  /// progress-class, never chat.
+  /// True for WSBoard-typed frames (the C8 board_event class).
+  bool get isBoard => wireType == _boardWireType;
+
+  /// True for C8-interim progress-class frames. Kept so pre-05/07 feeds
+  /// (and the sidecar's transitional relay) stay consumable.
   bool get isProgress => wireType == _progressWireType;
+
+  /// The inner data map of a daemon-framed event
+  /// (`{"type": ..., "data": {...}}`), or the frame itself when the
+  /// producer already flattened it.
+  Map<String, dynamic> get data {
+    final inner = payload['data'];
+    return inner is Map ? Map<String, dynamic>.from(inner) : payload;
+  }
+
+  /// Bus topic the frame was relayed from, when present
+  /// (transformBusEventToWS stamps source_topic).
+  String? get sourceTopic {
+    final v = data['source_topic'];
+    return v is String && v.isNotEmpty ? v : null;
+  }
 
   /// Board the delta concerns, when the frame names one (kanban.board.changed
   /// and card payloads carry board_id).
   String? get boardId {
-    final v = payload['board_id'] ?? payload['BoardID'];
+    final d = data;
+    final v = d['board_id'] ?? d['BoardID'];
+    return v is String && v.isNotEmpty ? v : null;
+  }
+
+  /// Card the delta concerns, when the frame names one (kanban.card.moved).
+  String? get cardId {
+    final d = data;
+    final v = d['card_id'] ?? d['CardID'];
     return v is String && v.isNotEmpty ? v : null;
   }
 

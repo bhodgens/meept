@@ -5,7 +5,7 @@ import "testing"
 // FuzzWSClassString exercises the WSClass wire-string mapping with arbitrary
 // int values, including out-of-range ones. Invariants:
 //   - never panics (an unknown value falls through to "event");
-//   - always returns one of the six valid wire strings — never empty.
+//   - always returns one of the seven valid wire strings — never empty.
 func FuzzWSClassString(f *testing.F) {
 	seeds := []int{
 		int(WSChatMessage),
@@ -14,8 +14,9 @@ func FuzzWSClassString(f *testing.F) {
 		int(WSJobUpdate),
 		int(WSPlanUpdate),
 		int(WSEvent),
+		int(WSBoard),
 		-1,
-		6,
+		7,
 		42,
 		1 << 30,
 	}
@@ -30,11 +31,12 @@ func FuzzWSClassString(f *testing.F) {
 		"job_update":     true,
 		"plan_update":    true,
 		"event":          true,
+		"board_event":    true,
 	}
 	f.Fuzz(func(t *testing.T, v int) {
 		got := WSClass(v).String()
 		if !valid[got] {
-			t.Fatalf("WSClass(%d).String() = %q, want one of the six wire strings", v, got)
+			t.Fatalf("WSClass(%d).String() = %q, want one of the seven wire strings", v, got)
 		}
 	})
 }

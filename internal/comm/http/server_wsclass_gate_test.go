@@ -13,6 +13,7 @@ import (
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/comm/wsclass"
+	"github.com/caimlas/meept/internal/kanban"
 )
 
 // reflectTypeKey derives the "pkgpath.TypeName" identity of a payload
@@ -52,6 +53,16 @@ func TestEveryWSClassifiedHasDecoderEntry(t *testing.T) {
 		reflectTypeKey(bus.ACPPermissionEvent{}): {
 			bus.TopicACPPermissionRequested.Name,
 			bus.TopicACPPermissionResolved.Name,
+		},
+		// kanban-board C8 leaf 05/07: the board-event surface.
+		reflectTypeKey(kanban.CardMoved{}):    {kanban.TopicCardMoved.Name},
+		reflectTypeKey(kanban.BoardChanged{}): {kanban.TopicBoardChanged.Name},
+		reflectTypeKey(kanban.StateEvent{}): {
+			kanban.TopicTaskState.Name,
+			kanban.TopicJobState.Name,
+			kanban.TopicPlanState.Name,
+			kanban.TopicStepState.Name,
+			kanban.TopicGoalState.Name,
 		},
 	}
 

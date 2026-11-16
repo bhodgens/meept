@@ -33,7 +33,16 @@ handleWSProgress path (no double-delivery; ws-filter-06 pin). Classification der
 `acp.permission.requested`/`.resolved` typed topics carrying
 `bus.ACPPermissionEvent`, which marker-classify as `agent_progress`; they
 only reach WS because the proxy subscription list includes the 3-segment
-`acp.*.*` wildcard — the bare `*` matches single-segment topics only); all
+`acp.*.*` wildcard — the bare `*` matches single-segment topics only;
+plus the kanban board surface — `kanban.card.moved`/`CardMoved`,
+`kanban.board.changed`/`BoardChanged` and the five
+`kanban.event.*.state`/`StateEvent` typed topics, which marker-classify
+as the `WSBoard` wire type `board_event` (master.md C8, kanban-board leaf
+05/07 — relayed like progress, riding the `progress` subscription
+channel, NEVER chat_message; a corrupt-payload `kanban.*` frame falls
+back to the prefix table's board bucket). They relay via the `kanban.*`
++ `kanban.*.*` subscription patterns — board payloads carry no
+session_id, so the relay's empty-session bypass broadcasts them); all
 other topics classify through the
 legacy topic-prefix table in `transformBusEventToWS` (kept as a labeled
 fallback until every WS-visible topic is typed). Switch coverage is enforced by

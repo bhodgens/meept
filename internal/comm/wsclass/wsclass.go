@@ -8,7 +8,7 @@
 // agent -> wsclass only.
 package wsclass
 
-// WSClass enumerates the six frontend event types produced by the WS
+// WSClass enumerates the seven frontend event types produced by the WS
 // relay's classification (formerly the topic-prefix switch in
 // transformBusEventToWS).
 type WSClass int
@@ -20,6 +20,12 @@ const (
 	WSJobUpdate                    // job_update
 	WSPlanUpdate                   // plan_update
 	WSEvent                        // generic "event" (the old default)
+	WSBoard                        // board_event (kanban-board C8; appended
+	// AFTER WSEvent so the pinned iota order 0..5 is preserved. Wire type
+	// "board_event", relayed like progress — never chat_message — and it
+	// rides the `progress` subscription channel, so clients that only
+	// name chat/progress channels (websocket_service.dart) keep working
+	// unchanged.)
 )
 
 // WSClassified is implemented by bus event payloads that reach the
@@ -47,6 +53,8 @@ func (c WSClass) String() string {
 		return "plan_update"
 	case WSEvent:
 		return "event"
+	case WSBoard:
+		return "board_event"
 	default:
 		return "event"
 	}

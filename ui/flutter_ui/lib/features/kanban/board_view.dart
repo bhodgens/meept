@@ -10,11 +10,13 @@
 // with a takeover action; wip-full names the column and limit; forbidden
 // names the grant.
 //
-// Reactivity follows the C8 interim rule: the view consumes only
-// KanbanService.boardEvents() (progress-class raw frames today) and never
-// inspects WSBoard-typed payload keys. Frames are coalesced through a
-// ~250 ms debounce into ONE board reload, and the subscription is
-// cancelled on dispose.
+// Reactivity consumes only KanbanService.boardEvents(): WSBoard
+// board_event frames (C8, landed in leaf 05/07) plus tolerated pre-05/07
+// progress-class frames. The view stays class-agnostic — every live frame
+// triggers a reload, filtered only by the typed boardId when both sides
+// name one — so it is unaffected by payload-shape drift. Frames are
+// coalesced through a ~250 ms debounce into ONE board reload, and the
+// subscription is cancelled on dispose.
 //
 // All UI text lowercase per the repo convention (data like card titles is
 // shown verbatim; column NAMES are lowercased at render like the TUI's
@@ -90,7 +92,8 @@ class _KanbanBoardViewState extends ConsumerState<KanbanBoardView> {
     }
     // A live frame means the link recovered since the last error note.
     if (_linkNote != null) setState(() => _linkNote = null);
-    // relevance filter is defensive-only: today frames carry no typed keys.
+    // WSBoard (C8) relevance filter: a typed frame that names a different
+    // board is not ours; interim frames without board keys pass through.
     final boardId = event.boardId;
     if (boardId != null && _boardId != null && boardId != _boardId) return;
     // coalesce: each frame re-arms the debounce; one reload per burst.

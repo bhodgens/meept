@@ -2,7 +2,9 @@ package wsclass
 
 import "testing"
 
-// TestWSClassConstants pins iota ordering: WSChatMessage==0 .. WSEvent==5.
+// TestWSClassConstants pins iota ordering: WSChatMessage==0 .. WSEvent==5,
+// WSBoard==6 (appended after WSEvent by kanban-board C8 leaf 05/07 so the
+// 0..5 prefix stays byte-stable for any persisted/serialized class ints).
 func TestWSClassConstants(t *testing.T) {
 	if WSChatMessage != 0 {
 		t.Errorf("WSChatMessage = %d, want 0", WSChatMessage)
@@ -22,6 +24,9 @@ func TestWSClassConstants(t *testing.T) {
 	if WSEvent != 5 {
 		t.Errorf("WSEvent = %d, want 5", WSEvent)
 	}
+	if WSBoard != 6 {
+		t.Errorf("WSBoard = %d, want 6", WSBoard)
+	}
 }
 
 // TestWSClassStringMapping pins the exact wire strings for every constant
@@ -37,6 +42,7 @@ func TestWSClassStringMapping(t *testing.T) {
 		{WSJobUpdate, "job_update"},
 		{WSPlanUpdate, "plan_update"},
 		{WSEvent, "event"},
+		{WSBoard, "board_event"},
 	}
 	for _, tc := range cases {
 		if got := tc.c.String(); got != tc.want {

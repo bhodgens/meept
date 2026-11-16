@@ -292,7 +292,10 @@ remains dev-workflow-only.
 Full rules live in `internal/comm/AGENTS.md`. Short form: only `chat_message` topics
 produce `type: "chat_message"` (everything else is `agent_progress`); `chat.response`
 is never WS-relayed; typed `bus.Topic[T]` for stable payloads, raw `Publish` for
-multi-shape; a bus proxy registration needs a live responder on both sides. The
+multi-shape; the kanban board surface (`kanban.card.moved` / `kanban.board.changed`
+/ the five `kanban.event.*.state` topics) classifies as the `WSBoard` wire type
+`board_event`, relayed like progress and never `chat_message` (kanban-board C8). A
+bus proxy registration needs a live responder on both sides. The
 per-connection session filter is `(channel, session)`-scoped — a chat
 unsubscribe must not silence progress/turn-terminal for the same session, an
 unsubscribe records a suppression rather than deleting the grant, and a

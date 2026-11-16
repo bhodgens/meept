@@ -14,10 +14,11 @@
 //     404 = unknown path/method-not-found/upstream "not found", 502 =
 //     upstream RPC failure — where kanban domain errors (lease held, WIP
 //     full, unknown card) surface as messages.
-//   * WS event class: C8 interim — WSBoard does not exist until leaf 05/07,
-//     so board deltas ride the progress class. [boardEvents] therefore
-//     yields progress-class [KanbanBoardEvent]s only and never decodes
-//     WSBoard-typed payloads.
+//   * WS event class: C8 WSBoard landed in leaf 05/07 — the daemon relay
+//     classifies every kanban.* bus topic as wire type `board_event`
+//     (never chat_message). [boardEvents] decodes WSBoard-typed frames
+//     into [KanbanBoardEvent] and additionally tolerates pre-05/07
+//     progress-class frames; chat frames are dropped.
 //
 // No dart:io anywhere (web + desktop shared code). WebSocket transport is
 // injected via [KanbanEventConnector] so tests never touch a real socket.
@@ -281,15 +282,17 @@ class KanbanService {
   }
 
   // ------------------------------------------------------------------
-  // Events (C8 interim)
+  // Events (C8 WSBoard)
   // ------------------------------------------------------------------
 
-  /// Board delta stream. INTERIM RULE (master.md C8, leaf 05/04): the
-  /// WSBoard wire class lands in 05/07; until then every frame on the
-  /// sidecar relay is progress-class (never chat_message), so this yields
-  /// [KanbanBoardEvent]s whose [KanbanBoardEvent.isProgress] is true and
-  /// whose payload is the RAW frame — consumers must not depend on
-  /// WSBoard-typed keys. The sidecar's live feed is additionally IdleSource
+  /// Board delta stream (C8, WSBoard landed in leaf 05/07). Frames on the
+  /// sidecar relay classify as the board_event wire type — the daemon's
+  /// WSBoard class (never chat_message; chat frames are dropped here even
+  /// if a future producer leaked one). Pre-05/07 progress-class frames
+  /// are additionally tolerated so mixed-version feeds keep working:
+  /// consumers read [KanbanBoardEvent.wireType] / [KanbanBoardEvent.isBoard]
+  /// and the typed accessors on [KanbanBoardEvent] rather than raw keys.
+  /// The sidecar's live feed is additionally IdleSource
   /// today (no daemon board-event feed wired), so an empty stream that only
   /// closes on dispose is the expected steady state.
   ///
@@ -347,8 +350,8 @@ class KanbanService {
     if (data is! String) {
       // The relay sends JSON text frames only (relayEvents → websocket
       // Message.Send(string)). A binary frame is unexpected: pass it along
-      // as an opaque progress frame rather than dropping it silently.
-      out.add(const KanbanBoardEvent({'type': 'agent_progress'}));
+      // as an opaque board frame rather than dropping it silently.
+      out.add(const KanbanBoardEvent({'type': 'board_event'}));
       return;
     }
     Object? decoded;
@@ -366,9 +369,11 @@ class KanbanService {
     final map = decoded is Map
         ? Map<String, dynamic>.from(decoded)
         : <String, dynamic>{};
-    // C8 interim classification: progress-class placeholder. chat_message
-    // NEVER arrives on this relay (the gateway is board-scoped), but if a
-    // future frame claims it, drop it — the bridge must not leak chat.
+    // C8 classification: WSBoard frames (type == 'board_event') decode via
+    // the typed KanbanBoardEvent accessors; pre-05/07 progress-class
+    // frames stay consumable. chat_message NEVER arrives on this relay
+    // (the gateway is board-scoped), but if a future frame claims it,
+    // drop it — the bridge must not leak chat.
     if (map['type'] == 'chat_message') return;
     out.add(KanbanBoardEvent(map));
   }

@@ -539,13 +539,29 @@ void main() {
     );
   });
 
-  group('interim-rule documentation pins', () {
-    test('KanbanBoardEvent progress classification is default', () {
-      const ev = KanbanBoardEvent({'type': 'agent_progress'});
-      expect(ev.isProgress, isTrue);
-      const noType = KanbanBoardEvent({});
-      expect(noType.isProgress, isTrue); // absent type => progress class
-    });
+  group('WSBoard classification pins (C8, leaf 05/07)', () {
+    test(
+      'KanbanBoardEvent classification: board default, progress tolerated',
+      () {
+        const ev = KanbanBoardEvent({'type': 'agent_progress'});
+        expect(ev.isProgress, isTrue); // pre-05/07 interim frames stay in
+        const noType = KanbanBoardEvent({});
+        expect(noType.isBoard, isTrue); // absent type => board class (C8)
+        const board = KanbanBoardEvent({
+          'type': 'board_event',
+          'data': {
+            'board_id': 'b2',
+            'CardID': 'c7',
+            'source_topic': 'kanban.card.moved',
+          },
+        });
+        expect(board.isBoard, isTrue);
+        expect(board.wireType, 'board_event');
+        expect(board.boardId, 'b2');
+        expect(board.cardId, 'c7');
+        expect(board.sourceTopic, 'kanban.card.moved');
+      },
+    );
   });
 }
 
