@@ -245,7 +245,10 @@ func rpcOpenLocalCall(t *testing.T, s *harness.Stack, employee, label string) ma
 			"autonomy_tier": "tier_1_reactive",
 			"escalates_to":  []string{"user"},
 			"constraints": map[string]any{
-				"tools_allowed": []string{},
+				// "*" = inherit the template tool list (a declared-EMPTY
+				// list is a deny-all constitution policy, which starves
+				// the harness's IsExecutorRequest script predicate).
+				"tools_allowed": []string{"*"},
 				"risk_ceiling":  "medium",
 			},
 			"amendment_policy": map[string]any{

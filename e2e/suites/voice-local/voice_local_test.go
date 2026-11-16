@@ -458,7 +458,12 @@ func rpcCreateEmployee(t *testing.T, s *harness.Stack, employee string) {
 			"autonomy_tier": "tier_1_reactive",
 			"escalates_to":  []string{"user"},
 			"constraints": map[string]any{
-				"tools_allowed": []string{},
+				// "*" = inherit the template tool list (pre-dff75a6e
+				// intent): a declared-EMPTY list is now a deny-all
+				// constitution policy, which starves the harness's
+				// IsExecutorRequest script predicate (tool-bearing
+				// turns) and the reply never scripts.
+				"tools_allowed": []string{"*"},
 				"risk_ceiling":  "medium",
 			},
 			"amendment_policy": map[string]any{
