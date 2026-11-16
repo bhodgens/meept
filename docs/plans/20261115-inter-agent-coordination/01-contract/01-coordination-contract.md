@@ -33,21 +33,11 @@ One new file that every other branch imports for the shared vocabulary. The file
 
 ### What This Leaf Exposes
 
-```go
-package agent
-
-import (
-    "time"
-
-    "github.com/caimlas/meept/internal/bus"
-    "github.com/caimlas/meept/internal/comm/wsclass"
-)
-
-type TurnState string
+type AgentTurnState string
 const (
-    TurnStateRunning        TurnState = "running"
-    TurnStateIdle           TurnState = "idle"
-    TurnStateRequiresAction TurnState = "requires_action"
+    TurnStateRunning        AgentTurnState = "running"
+    TurnStateIdle           AgentTurnState = "idle"
+    TurnStateRequiresAction AgentTurnState = "requires_action"
 )
 
 type StopReason string
@@ -61,18 +51,18 @@ const (
 )
 
 type TurnStateEvent struct {
-    AgentID    string     `json:"agent_id"`
-    SessionID  string     `json:"session_id,omitempty"`
-    ChildID    string     `json:"child_id,omitempty"`
-    State      TurnState  `json:"state"`
-    StopReason StopReason `json:"stop_reason,omitempty"`
-    Phase      string     `json:"phase,omitempty"`
-    Timestamp  time.Time  `json:"timestamp"`
+    AgentID    string         `json:"agent_id"`
+    SessionID  string         `json:"session_id,omitempty"`
+    ChildID    string         `json:"child_id,omitempty"`
+    State      AgentTurnState `json:"state"`
+    StopReason StopReason     `json:"stop_reason,omitempty"`
+    Phase      string         `json:"phase,omitempty"`
+    Timestamp  time.Time      `json:"timestamp"`
 }
-
 func (TurnStateEvent) WSClass() wsclass.WSClass { return wsclass.WSProgress }
 
 var TopicTurnState = bus.NewTopic[TurnStateEvent]("agent.turn.state")
+// Consumers: 02-01, 02-02, 03-01, 04-01
 ```
 
 ### What This Leaf Consumes

@@ -50,15 +50,35 @@ const (
     StopReasonError         StopReason = "error"
 )
 
+type AgentTurnState string
+const (
+    TurnStateRunning        AgentTurnState = "running"
+    TurnStateIdle           AgentTurnState = "idle"
+    TurnStateRequiresAction AgentTurnState = "requires_action"
+)
+
+type StopReason string
+const (
+    StopReasonEndTurn       StopReason = "end_turn"
+    StopReasonCancelled     StopReason = "cancelled"
+    StopReasonMaxTokens     StopReason = "max_tokens"
+    StopReasonRefusal       StopReason = "refusal"
+    StopReasonMaxIterations StopReason = "max_iterations"
+    StopReasonError         StopReason = "error"
+)
+
 // TurnStateEvent is the payload of the agent.turn.state topic.
+// (Name note: hooks.go already declares TurnState - the hook-callback
+// struct - so the coordination vocabulary uses AgentTurnState for the
+// enum. TurnStateEvent is unambiguous and keeps the event name.)
 type TurnStateEvent struct {
-    AgentID    string    `json:"agent_id"`
-    SessionID  string    `json:"session_id,omitempty"`   // pair/team session, when scoped
-    ChildID    string    `json:"child_id,omitempty"`     // delegate child handle
-    State      TurnState `json:"state"`
-    StopReason StopReason `json:"stop_reason,omitempty"`
-    Phase      string    `json:"phase,omitempty"`
-    Timestamp  time.Time `json:"timestamp"`
+    AgentID    string         `json:"agent_id"`
+    SessionID  string         `json:"session_id,omitempty"`
+    ChildID    string         `json:"child_id,omitempty"`
+    State      AgentTurnState `json:"state"`
+    StopReason StopReason     `json:"stop_reason,omitempty"`
+    Phase      string         `json:"phase,omitempty"`
+    Timestamp  time.Time      `json:"timestamp"`
 }
 func (TurnStateEvent) WSClass() wsclass.WSClass { return wsclass.WSProgress }
 // Consumers: 02-01, 02-02, 03-01, 04-01
