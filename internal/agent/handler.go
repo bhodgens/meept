@@ -858,12 +858,15 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 	// future early-return added between here and the funnel would leave
 	// the row claimed forever and wedge every retry of the turn under
 	// duplicate_suppressed until the watchdog reaps it. The defer below
-	// completes the turn if the normal path did not. TurnRegistry.Complete
-	// is idempotent (map delete + tombstone upsert), so a late net firing
-	// after the normal completeTurn is a no-op. turnCompleted stands the
-	// net down at the normal funnel — REQUIRED for the task path, where
-	// completeTurn is deliberately skipped (syncTaskID != "") so the
-	// task→turn registry edge survives for the task_completed_relay.
+	// completes the turn if the normal path did not, and FIRST emits a
+	// failed turn.terminal so an awaiting client learns the turn died
+	// immediately (the watchdog cannot — Complete's tombstone removes the
+	// row the reaper keys on). TurnRegistry.Complete is idempotent (map
+	// delete + tombstone upsert), so a late net firing after the normal
+	// completeTurn is a no-op. turnCompleted stands the net down at the
+	// normal funnel — REQUIRED for the task path, where completeTurn is
+	// deliberately skipped (syncTaskID != "") so the task→turn registry
+	// edge survives for the task_completed_relay.
 	turnCompleted := false
 	if req.TurnID != "" && h.turnRegistry != nil {
 		claimed := h.turnRegistry.ClaimDispatch(req.TurnID, conversationID)
@@ -873,6 +876,18 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 			// handleRequest after the claim, including early returns.
 			defer func() {
 				if !turnCompleted {
+					// Failed terminal BEFORE Complete: the tombstone this
+					// call creates removes the row the turn watchdog's
+					// reaper keys on, so without this event an awaiting
+					// turn-scoped client would never receive a terminal.
+					h.publishTurnTerminal(TurnTerminalEvent{
+						ConversationID: conversationID,
+						SessionID:      req.SessionID,
+						TurnID:         req.TurnID,
+						HandlerCase:    "early_return_safety_net",
+						Status:         "failed",
+						Error:          "turn handler exited before the dispatch funnel completed it",
+					})
 					h.completeTurn(req.TurnID)
 				}
 			}()
