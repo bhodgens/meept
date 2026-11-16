@@ -79,9 +79,30 @@ table (310701d5, 079c29b1 message scope).
 7. eb18719f retry/comment mismatch — voice lane owner call.
 8. V1 commit-message overclaim (ee465418 "only ... allowlist") — history note.
 
+## ADDENDUM (2026-11-15 evening): the 3 pre-existing e2e failures triaged
+
+All three red-at-anchor failures diagnosed read-only, fixed test-side, verified
+green, committed d69a1ad8:
+
+1. TestRestartRedeliversInFlightReceipt — the crash SIMULATION was wrong:
+   rewindReceiptToInFlight rewound only the last_delivery mirror while
+   recordDelivery persists history+mirror atomically; the F2 already-delivered
+   guard (40819154) correctly refused to re-deliver against the still-delivered
+   history row. Rewind now covers the matching history record.
+2. TestSIGHUPReloadKeepsDaemonHealthy — flaky (2/4): a boot-window HUP is
+   buffered by the pre-listener signal.Notify (da35b006, documented contract)
+   and drains after the wait loop starts; the one-shot 4KB log-tail read raced
+   that drain. Now polls via harness.WaitFor.
+3. plan-lifecycle (both tests) — resolvePlanDir sends dispatch-path plans to
+   $MEEPT_HOME/plans since 84de5c6a (empty project path ≠ process CWD, by
+   design and unit-pinned); waitForPlanFile watched only the old CWD-relative
+   roots. Added the $MEEPT_HOME/plans root.
+
+No production code changed in this addendum: all three were stale fixtures.
+
 ## Duration (wall clock, MST)
 
-- Scope + baseline gates: 00:25→00:32 (~10 min; two baseline attempts blocked by a permission gate, proceeded with targeted baselines)
+- Scope + baseline gates: 00:25→00:32 (~10 min)
 - Wave-1 audit (6 auditors, parallel): 00:32→~03:10 (~2h40m)
 - Parent HIGH verification + fix dispatch: ~03:10→03:24 (~15 min)
 - Fix wave (6 fixers, parallel; scheduler fixer dominated at 2006 api_calls): 03:24→16:29 batch landing (~13h wall; other fixers finished within minutes)
