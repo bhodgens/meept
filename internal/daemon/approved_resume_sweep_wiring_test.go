@@ -11,7 +11,6 @@ import (
 	"context"
 	"log/slog"
 	"path/filepath"
-	"sync"
 	"testing"
 
 	"github.com/caimlas/meept/internal/bot"
@@ -19,27 +18,6 @@ import (
 	"github.com/caimlas/meept/internal/employee"
 	"github.com/caimlas/meept/internal/plan"
 )
-
-// stubEmployeeResumeSeam captures resume seam invocations for the sweep
-// wiring test (mirrors resumeSeamRecorder's shape against the Manager-level
-// seam so the sweep's calls through ResumeApprovedPlan are observable).
-type stubEmployeeResumeSeam struct {
-	mu    sync.Mutex
-	calls []string
-}
-
-func (s *stubEmployeeResumeSeam) record(planID, _ string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.calls = append(s.calls, planID)
-	return nil
-}
-
-func (s *stubEmployeeResumeSeam) count() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return len(s.calls)
-}
 
 // TestPlanApprovedListerAdapter_ListsApprovedIDs: the adapter surfaces the
 // plan manager's approved-state rows as IDs.

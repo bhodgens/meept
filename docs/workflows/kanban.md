@@ -19,21 +19,44 @@ Store: SQLite WAL + FK cascades, schema in `internal/kanban/store.go`
 
 ## Status (as-built)
 
-Everything below is committed and tested. What is NOT yet live in a
-running daemon is the 07-daemon-wiring/01 pass: `RegisterKanbanMethods`
-has no production caller yet (`internal/rpc/kanban.go:6-8` — "the
-methods exist but the running daemon does not serve them"), the fetcher
-and `LeaseAuthority` implementations live there, the publisher gates are
-flipped there, and `newKanbanCmd()` is not yet added to the CLI root
-command. The deadcode gate census
-(`.githooks/deadcode-baseline.txt`, `internal/kanban` entries starting
-at :250 — including `Store.SetProjectionRule` :285 and
-`RegisterDefaultReconciler` :327)
-is the honest stock list. Until 07/01 lands the only production reader
-of `[kanban].enabled` is the sidecar spawn gate (`internal/daemon/kanban_boot.go:231`);
-the block otherwise configures surfaces that the wiring pass will light
-up (the schema doc states the intended posture: enabled opens store +
-projector + RPC registration).
+Everything below is committed and tested. The 07-daemon-wiring/01 pass
+LIVES the wiring: `internal/daemon/kanban_wiring.go` constructs the full
+stack when `[kanban].enabled` (default false = byte-identical boot —
+no store file, no goroutine, no subscriber, no RPC registration). On
+enable it opens the store at `$MEEPT_HOME/kanban/board.db` (migrates on
+open, `MaxOpenConns(1)`), builds Manager + HumanCommands with the real
+C10 `LeaseAuthority` over the queue/task machinery (job claim state +
+task interrupt + plan synthesis lease + goal activity; takeover cancels
+the episode then requeues the claim), ensures the default board
+(`"meept board"` with todo/doing/done), seeds the default projection
+ruleset once (idempotent upsert; 30 (kind, from_state) -> column rules
+documented at the top of kanban_wiring.go), starts the Projector on the
+five `kanban.event.*.state` topics with the real daemon `RowFetcher` +
+`ListFetcher` (the enumeration lane reports the from_state of the last
+MAPPED transition — `kanbanFromState` — so reconcile and the projector
+resolve one column per item), arms the five machine publishers
+(`SetKanbanEventPublishing(true)` + bus installs), registers the
+thirteen C4 methods plus the C7 pairing `kanban.pair.mint`/
+`kanban.pair.exchange` owner-socket helpers, binds the kanban_* tool
+provider via `builtin.SetKanbanProvider` before `toolprov.RegisterAll`,
+and schedules the C9 `reconcile_interval` ticker on the run context.
+Shutdown stops the projector (unsubscribe + drain + join, counters
+logged) after the sidecar child goes down. `meept kanban` is mounted on
+the CLI root (`cmd/meept/main.go`). Boot tests:
+`internal/daemon/kanban_wiring_test.go` (disabled-constructs-nothing,
+enabled store/rules/projection round-trip, rule bootstrap idempotence,
+from_state closure property); the hermetic e2e case (g) in
+`e2e/suites/kanban-board` covers the real daemon boot.
+
+Two wiring debts stay open, deliberately not faked: (1) `internal/kanban`
+exposes no `Store.Close`, so the single SQLite handle lives until
+process teardown (owned by a foundation follow-up); (2) the C7
+`POST /kanban/pair/exchange` literal HTTP path needs a mux hook in
+`internal/comm/http` — the exchange is live over the owner socket RPC
+(and the existing `POST /api/v1/bus/call` bridge the GUI already uses);
+codes are in-memory per process (kanbansvc pairing.go), so a code
+minted by the daemon exchanges on the daemon, one minted by the
+sidecar on the sidecar.
 
 ## Event contract (master.md C1/C2)
 

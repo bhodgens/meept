@@ -126,6 +126,13 @@ type Daemon struct {
 	// by StartKanbanSidecar, torn down by stopKanbanSidecar in shutdown().
 	kanbanSidecar *kanbanSupervisor
 
+	// kanban holds the live [kanban].enabled wiring bundle (store,
+	// projector, reconciler, human lane, pairing) built once in New.
+	// nil = subsystem disabled: byte-identical boot (no goroutine, no
+	// store file, no RPC registration). Torn down by stopKanban in
+	// shutdown().
+	kanban *kanbanServices
+
 	// kanbanTuning is the test-only override for the supervisor timings,
 	// read by StartKanbanSidecar before the loop goroutine exists.
 	kanbanTuning *kanbanSidecarConfig
@@ -1559,6 +1566,23 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	// a daemon without [intake] answers the disabled envelope.
 	registerIntakeStatusRPC(components, rpcServer, logger)
 
+	// Kanban live wiring (plans/kanban-board 07/01-daemon-wiring): the
+	// full stack — store, manager, human lane with the real C10
+	// LeaseAuthority, rule bootstrap, projector over the five
+	// kanban.event.*.state topics, reconciler with the real fetchers,
+	// C4 RPC, tool provider, pairing — constructed ONLY when
+	// [kanban].enabled (default false: wireKanbanServices touches
+	// nothing and the boot stays byte-identical). Registration pattern
+	// mirrors the intake lane; failures degrade (Warn), never fail boot.
+	kanbanSvc, kanbanWireErr := wireKanbanServices(components, planStoreIF, msgBus, logger)
+	if kanbanWireErr != nil {
+		logger.Warn("kanban subsystem degraded: board surfaces offline this run", "error", kanbanWireErr)
+	}
+	if kanbanSvc != nil {
+		registerKanbanRPC(kanbanSvc, rpcServer, logger)
+		registerKanbanTools(fullCfg, components.ToolRegistry, kanbanSvc, logger)
+	}
+
 	// delegate.status RPC (DSH-9d, audit item 5 operator half): a
 	// read-only report of a session's/agent's delegated children over
 	// the live C1 DelegateManager. Always registers (unwired registry =
@@ -2025,6 +2049,7 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		planHandler:         planHandlerInst,
 		logger:              logger,
 		pidFile:             cfg.PIDFile,
+		kanban:              kanbanSvc,
 	}
 	d.status.Store(models.StatusStopped)
 
@@ -2439,6 +2464,12 @@ func (d *Daemon) Run(ctx context.Context) error {
 		d.logger.Warn("kanban sidecar degraded: gateway not running", "error", err)
 	}
 
+	// Kanban periodic reconcile ticker (07/01, C9): only exists when
+	// [kanban].enabled AND reconcile_interval > 0 — the disabled/zero
+	// default starts no goroutine (byte-identical). Rides the Run
+	// context, so shutdown cancels it and RunPeriodicReconcile returns.
+	d.startKanbanReconcile(ctx)
+
 	// Metrics collector is started automatically by NewCollector
 
 	// Spill retention sweep (plans/context-reduction/08-spill-retention.md):
@@ -2841,6 +2872,12 @@ func (d *Daemon) shutdown() error {
 	// so the gateway drains while its backend is still answering. No-op
 	// when the sidecar was never enabled (byte-identical shutdown).
 	d.stopKanbanSidecar(ctx)
+
+	// Kanban live-stack stop (07/01): projector unsubscribe + drain +
+	// join, reconcile unbind, AFTER the sidecar is down so no gateway
+	// request races the teardown, BEFORE the components' stores close.
+	// No-op when the subsystem was never enabled.
+	d.stopKanban()
 
 	// Stop agent components first
 	if d.components != nil {

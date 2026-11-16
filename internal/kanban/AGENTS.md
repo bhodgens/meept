@@ -66,7 +66,9 @@ default — projection never dies on an unwired source
 machine-side question is asked through an injected interface
 (`RowFetcher`, `ListFetcher`, `LeaseAuthority`), never through an import.
 The real implementations of the fetchers and the authority close over the
-machine stores and live in daemon wiring (leaf 07/01, not yet committed).
+machine stores and live in daemon wiring (`internal/daemon/
+kanban_wiring.go`, leaf 07/01 — committed and wired behind
+`[kanban].enabled`).
 
 ## The rule key is FROM-state
 
@@ -163,16 +165,20 @@ grants ALL THREE to any principal — owner-only mode (`authz.go:22-37`,
 AND takeover) — enforced in the gateway (`internal/kanbansvc`) and the
 RPC table (`internal/rpc/kanban.go:161-173`), never assumed here.
 
-## Deadcode-stock status (leaf 07/01 pending)
+## Deadcode-stock status (leaf 07/01 wired)
 
-The package is fully committed (leaves 01–03, 04/01) but NOT yet
-daemon-wired: `internal/kanban` entries in `.githooks/deadcode-baseline.txt`
-(e.g. `Store.SetProjectionRule`, `RegisterDefaultReconciler`, the
-`Manager`/`HumanCommands` methods) are the honest census of functions
-waiting for the 07/01 wiring (fetchers, LeaseAuthority binding,
+The package is fully committed (leaves 01–03, 04/01) and daemon-wired
+behind `[kanban].enabled` (`internal/daemon/kanban_wiring.go`): the
+former census entries (fetchers, LeaseAuthority binding,
 `RegisterDefaultReconciler` call site, `RunPeriodicReconcile` ticker,
-gate flips). Do not delete them as dead; do not widen the ratchet
-baseline for anything else.
+gate flips, `Store.SetProjectionRule`, the `Manager`/`HumanCommands`
+methods) are consumed by the live wiring and left the rebaselined
+`.githooks/deadcode-baseline.txt`. Remaining kanban stock is the
+honest residual: `LeaseAge` (error-text helper, CLI-parsed instead),
+`Projector.Close` (Stop alias), `WithQueueSize` (no config knob),
+`NewReconciler` (the provenance variant is what wiring uses). Do not
+delete them as dead; do not widen the ratchet baseline for anything
+else.
 
 ## Verification
 

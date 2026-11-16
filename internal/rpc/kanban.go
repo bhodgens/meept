@@ -3,9 +3,11 @@ package rpc
 // kanban.go — the C4 kanban.* RPC surface (plan tree 05/01). Thirteen frozen
 // method strings from master.md C4, served as a registerable unit over narrow
 // interfaces into the committed internal/kanban service layer
-// (Manager/HumanCommands/Reconciler/Store). LIVE daemon registration (calling
-// RegisterKanbanMethods from the wiring) is owned by leaf 07/01 — until it
-// lands the methods exist but the running daemon does not serve them.
+// (Manager/HumanCommands/Reconciler/Store). LIVE daemon registration
+// (calling RegisterKanbanMethods from the wiring) is leaf 07/01 —
+// internal/daemon/kanban_wiring.go registers the methods on the running
+// daemon when [kanban].enabled (default false: the methods are not
+// served, byte-identical to a pre-kanban daemon).
 //
 // Layering (master.md "no logic duplication" review check): this layer ONLY
 // decodes params, enforces the C5 grant lane, delegates, and serialises. All

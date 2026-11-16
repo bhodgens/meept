@@ -55,6 +55,7 @@ import (
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/githubsvc"
+	"github.com/caimlas/meept/internal/kanban"
 	"github.com/caimlas/meept/internal/toolprov"
 	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/internal/tools/builtin"
@@ -91,6 +92,38 @@ func (rp2StubGoal) UpdateGoal(ctx context.Context, g *builtin.GoalRecord) error 
 type rp2StaticToken struct{}
 
 func (rp2StaticToken) Token(ctx context.Context) (string, error) { return "rp2-parity-token", nil }
+
+// rp2StubKanban satisfies builtin.KanbanBoard + builtin.KanbanHumanLane the
+// way the daemon's 07/01 wiring passes the live *kanban.Store /
+// *kanban.HumanCommands. The gate only needs Discover()'s names to resolve,
+// so zero-returning methods are sufficient (the tools fail closed at
+// Execute against the empty seams).
+type rp2StubKanban struct{}
+
+func (rp2StubKanban) ListBoards(context.Context) ([]kanban.Board, error) { return nil, nil }
+func (rp2StubKanban) ListColumns(context.Context, string) ([]kanban.Column, error) {
+	return nil, nil
+}
+func (rp2StubKanban) ListCards(context.Context, string) ([]kanban.Card, error) { return nil, nil }
+func (rp2StubKanban) GetCard(context.Context, string) (kanban.Card, error) {
+	return kanban.Card{}, kanban.ErrUnknownCard{ID: "rp2"}
+}
+func (rp2StubKanban) CreateCard(context.Context, kanban.Card) error { return nil }
+func (rp2StubKanban) UpdateCard(context.Context, kanban.Card) error { return nil }
+func (rp2StubKanban) MoveCard(context.Context, string, string, string, string) error {
+	return nil
+}
+func (rp2StubKanban) Takeover(context.Context, string, string) error { return nil }
+func (rp2StubKanban) Assign(context.Context, string, string) error   { return nil }
+func (rp2StubKanban) TakeoverMove(context.Context, string, string, string, string) error {
+	return nil
+}
+func (rp2StubKanban) Comment(context.Context, string, string, string) (kanban.CardEvent, error) {
+	return kanban.CardEvent{}, nil
+}
+func (rp2StubKanban) Timeline(context.Context, string) ([]kanban.CardEvent, error) {
+	return nil, nil
+}
 
 // rp2BootParityUniverse boots the daemon's REAL registration path
 // (NewComponents + Start) with the tool gates flipped on that only ADD
@@ -158,6 +191,8 @@ func rp2BootParityUniverse(t *testing.T) map[string]struct{} {
 	builtin.SetGitHubProvider(githubsvc.RegistrationOptions{Pool: pool}, nil, nil, nil)
 	builtin.SetGoalProvider(rp2StubGoal{}, func(ctx context.Context) string { return "rp2-parity" })
 	builtin.SetACPProvider(acp.NewManager(config.ACPConfig{Enabled: true}, nil), nil)
+	builtin.SetKanbanProvider(rp2StubKanban{}, rp2StubKanban{}, true)
+	t.Cleanup(builtin.ResetKanbanProviderForTest)
 
 	for _, pname := range toolprov.Names() {
 		factory, ok := toolprov.Factory(pname)

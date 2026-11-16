@@ -127,6 +127,18 @@ var BuiltinRules = map[string]ActionRule{
 	// action" despite registration + grant.
 	"ledger_read":  {Action: "ledger_read", RiskLevel: RiskSafe, RequiresConfirmation: false},
 	"ledger_write": {Action: "ledger_write", RiskLevel: RiskLow, RequiresConfirmation: false},
+
+	// Kanban board tools (plans/kanban-board 06/01 provider, live tool
+	// registration behind [kanban].enabled at 07/01): kanban_read is
+	// board/column/card/timeline introspection (RiskSafe, like
+	// goal_read); kanban_write moves/creates/comments on board cards
+	// (RiskLow, like goal_write — the board store is local state, no
+	// filesystem/network/exec surface; lease rule A + takeover stay
+	// machine-enforced in internal/kanban, never by this gate).
+	// Without rows unknown actions DENY by default ("Unknown action",
+	// the bughunt H7 class).
+	"kanban_read":  {Action: "kanban_read", RiskLevel: RiskSafe, RequiresConfirmation: false},
+	"kanban_write": {Action: "kanban_write", RiskLevel: RiskLow, RequiresConfirmation: false},
 }
 
 // Dangerous command patterns that elevate shell_execute to HIGH risk.

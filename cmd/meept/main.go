@@ -202,6 +202,7 @@ Analytics:
 	rootCmd.AddCommand(newSoulCmd())
 	rootCmd.AddCommand(newKnowledgeCmd())
 	rootCmd.AddCommand(newVoiceCmd())
+	rootCmd.AddCommand(newKanbanCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "\nError: %v\n\n", err)

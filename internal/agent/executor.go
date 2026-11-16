@@ -500,6 +500,22 @@ var ToolActionMap = map[string]string{
 	"goal_create": "goal_write",
 	"goal_update": "goal_write",
 
+	// Kanban board tools (plans/kanban-board 06/01 provider + the 07/01
+	// daemon registration behind [kanban].enabled): the kanban_read /
+	// kanban_write rows mirror the goal split (reads are RiskSafe
+	// board introspection; create/move/takeover/assign/comment persist
+	// local board state, RiskLow). Without these entries the tool names
+	// become fallback actions with no BuiltinRules row and every call
+	// denies "Unknown action" despite registration + grant (bughunt H7
+	// class, same as the goal family above).
+	"kanban_list":     "kanban_read",
+	"kanban_show":     "kanban_read",
+	"kanban_create":   "kanban_write",
+	"kanban_move":     "kanban_write",
+	"kanban_takeover": "kanban_write",
+	"kanban_assign":   "kanban_write",
+	"kanban_comment":  "kanban_write",
+
 	// Employee ledger (plan 20261109-employee-ledger, H7-class gap pinned
 	// by the caller-authz matrix): ledger_append writes immutable rows +
 	// guarded subject state (ledger_write, RiskLow); ledger_query is a
