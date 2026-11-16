@@ -34,7 +34,10 @@ func (p *KanbanPanel) View() string {
 
 	switch {
 	case p.err != nil:
-		b.WriteString(st.Error.Render("board error: "+p.err.Error()) + "\n")
+		// Lowercase at display (repo UI rule): forwarded daemon errors can
+		// carry the frozen C1 phrasing ("WIP limit reached for column …"),
+		// same as the GUI's `e.message.toLowerCase()` in board_view.dart.
+		b.WriteString(st.Error.Render("board error: "+strings.ToLower(p.err.Error())) + "\n")
 	case p.pendingRef != "":
 		// C10 surface: the decoded refusal line persists until cleared
 		// by the next action.
