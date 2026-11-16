@@ -37,11 +37,9 @@
 // Board DB: $MEEPT_HOME/kanban/board.db (config.MeeptPath is THE
 // resolution point; one directory with the C7 token-store file so the
 // subsystem has one home). kanban.NewStore migrates on open and pins
-// MaxOpenConns(1). internal/kanban exposes NO Store.Close (01-foundation
-// shipped without one), so shutdown stops the projector (unsubscribe +
-// drain + join) and the single SQLite handle lives until process
-// teardown — the close accessor is flagged as owned by a follow-up leaf,
-// never worked around from the daemon side (the handle is unexported).
+// MaxOpenConns(1). stopKanban follows the drain-then-close invariant:
+// projector Stop (unsubscribe + drain + join), reconcile unbind, then
+// Store.Close on the single SQLite handle.
 //
 // # Seeded default ruleset (one-shot bootstrap)
 //
@@ -405,9 +403,13 @@ func (d *Daemon) startKanbanReconcile(ctx context.Context) {
 
 // stopKanban tears the live stack down on daemon shutdown: projector
 // first (unsubscribe, drain the handoff queue into the store, join the
-// worker), then the reconcile binding. The Store handle has no exported
-// Close (see the header note) and is left to process teardown. No-op
-// when the subsystem was never enabled (byte-identical shutdown).
+// worker), then the reconcile unbind (the ticker itself is driven by the
+// Run context, which shutdown cancels before reaching here), and ONLY
+// then Store.Close — the drain-then-close order the MaxOpenConns(1)
+// invariant requires: no writer may still hold the single connection
+// when the pool drains. A Close failure is logged, never fatal: the
+// process is leaving. No-op when the subsystem was never enabled
+// (byte-identical shutdown).
 func (d *Daemon) stopKanban() {
 	if d == nil || d.kanban == nil {
 		return
@@ -417,6 +419,9 @@ func (d *Daemon) stopKanban() {
 	svc.projector.Stop()
 	kanban.UnregisterDefaultReconciler(svc.store)
 	d.kanban = nil
+	if err := svc.store.Close(); err != nil {
+		d.logger.Warn("kanban subsystem: store close failed", "error", err)
+	}
 	d.logger.Info("kanban subsystem stopped",
 		"projected", stats.Processed, "dropped", stats.Dropped,
 		"wip_overflow", stats.WIPOverflow, "failed", stats.Failed)
@@ -1356,13 +1361,13 @@ func (a *daemonLeaseAuthority) leaseLogger() *slog.Logger {
 // IN-MEMORY in whichever process mints them (kanbansvc pairing.go — the
 // tokens persist, the codes do not), so a daemon-minted code is
 // exchangeable only against the daemon process; the sidecar redeems
-// codes IT minted. The browser-facing exchange route therefore lives
-// where the mint happens: the daemon mints here (RPC, owner socket),
-// and the GUI pairs with the daemon through the loopback handshake
-// pattern; the sidecar's own exchange route stays armed for codes it
-// minted itself. Wiring the sidecar to redeem daemon codes needs a
-// shared code store — owned by a follow-up on 04-sidecar/03, NOT faked
-// here.
+// codes IT minted. The browser-facing exchange therefore runs on the
+// daemon, where the mint happens: this pairing bundle is mounted on
+// the daemon HTTP mux as POST /kanban/pair/exchange
+// (internal/comm/http/kanban_pairing.go, loopback-only + rate-limited
+// per the dev-key precedent), alongside the owner-socket RPC pair. A
+// shared code store for sidecar-side redemption of daemon codes remains
+// owned by a follow-up on 04-sidecar/03, NOT faked here.
 type kanbanPairing struct {
 	store  *kanbansvc.TokenStore
 	logger *slog.Logger

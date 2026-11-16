@@ -211,6 +211,7 @@ internal/agent/turn_compaction.go unreachable func: NewAtomicTurnLogger
 internal/agent/turn_compaction.go unreachable func: atomicWriteFile
 internal/agent/turn_compaction.go unreachable func: readSnapshotFromFile
 internal/agent/turn_compaction.go unreachable func: sanitizeFilename
+internal/agent/turnstate.go unreachable func: publishTurnState
 internal/agent/verdict.go unreachable func: Verdict.String
 internal/auth/permissions.go unreachable func: OwnerOnlyPermissions.CanAccess
 internal/auth/quota.go unreachable func: NoopQuota.Allow
@@ -268,7 +269,6 @@ internal/lint/testrunner.go unreachable func: Summary
 internal/llm/anthropic.go unreachable func: WithAnthropicMetricsStore
 internal/llm/anthropic.go unreachable func: WithAnthropicTokenCache
 internal/llm/anthropic.go unreachable func: WithAnthropicUploadStore
-internal/llm/anthropic.go unreachable func: isAnthropicRoute
 internal/llm/client.go unreachable func: Client.parseResponse
 internal/llm/client.go unreachable func: EffectiveTraceID
 internal/llm/client.go unreachable func: PriorityOf

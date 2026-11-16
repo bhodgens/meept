@@ -579,7 +579,7 @@
     "daemon.reloaded": [
       {
         "file": "internal/daemon/daemon.go",
-        "line": 3197,
+        "line": 3212,
         "payload_keys": [
           "event"
         ]
@@ -588,7 +588,7 @@
     "daemon.stopping": [
       {
         "file": "internal/daemon/daemon.go",
-        "line": 2821,
+        "line": 2836,
         "payload_keys": [
           "event"
         ]
@@ -2696,14 +2696,14 @@
     "*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 3271,
+        "line": 3310,
         "subscriber_id": "session.sessionID"
       }
     ],
     "acp.*.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 793,
+        "line": 801,
         "subscriber_id": "slice:topics:acp.*.*",
         "via_topic_slice": true
       }
@@ -2754,7 +2754,7 @@
       },
       {
         "file": "internal/comm/http/server.go",
-        "line": 805,
+        "line": 813,
         "subscriber_id": "http-ws-agent.progress.synthesized"
       }
     ],
@@ -2768,7 +2768,7 @@
     "agent.turn.state": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 793,
+        "line": 801,
         "subscriber_id": "slice:topics:agent.turn.state",
         "via_topic_slice": true
       }
@@ -2791,7 +2791,7 @@
     "chat.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 793,
+        "line": 801,
         "subscriber_id": "slice:topics:chat.*",
         "via_topic_slice": true
       }
@@ -2799,7 +2799,7 @@
     "chat.*.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 793,
+        "line": 801,
         "subscriber_id": "slice:topics:chat.*.*",
         "via_topic_slice": true
       }
@@ -2836,7 +2836,7 @@
     "collaboration.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 793,
+        "line": 801,
         "subscriber_id": "slice:topics:collaboration.*",
         "via_topic_slice": true
       }
@@ -2904,7 +2904,7 @@
     "daemon.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 793,
+        "line": 801,
         "subscriber_id": "slice:topics:daemon.*",
         "via_topic_slice": true
       }
@@ -2926,7 +2926,7 @@
     "employee.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 793,
+        "line": 801,
         "subscriber_id": "slice:topics:employee.*",
         "via_topic_slice": true
       }
@@ -2983,7 +2983,7 @@
     "kanban.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 793,
+        "line": 801,
         "subscriber_id": "slice:topics:kanban.*",
         "via_topic_slice": true
       }
@@ -2991,7 +2991,7 @@
     "kanban.*.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 793,
+        "line": 801,
         "subscriber_id": "slice:topics:kanban.*.*",
         "via_topic_slice": true
       }
@@ -2999,7 +2999,7 @@
     "llm.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 793,
+        "line": 801,
         "subscriber_id": "slice:topics:llm.*",
         "via_topic_slice": true
       }
@@ -3082,7 +3082,7 @@
     "pair.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 793,
+        "line": 801,
         "subscriber_id": "slice:topics:pair.*",
         "via_topic_slice": true
       }
@@ -3136,7 +3136,7 @@
     "plan.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 793,
+        "line": 801,
         "subscriber_id": "slice:topics:plan.*",
         "via_topic_slice": true
       }
@@ -3144,7 +3144,7 @@
     "plan.*.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 793,
+        "line": 801,
         "subscriber_id": "slice:topics:plan.*.*",
         "via_topic_slice": true
       }
@@ -3211,7 +3211,7 @@
     "queue.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 793,
+        "line": 801,
         "subscriber_id": "slice:topics:queue.*",
         "via_topic_slice": true
       }
@@ -3219,7 +3219,7 @@
     "queue.*.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 793,
+        "line": 801,
         "subscriber_id": "slice:topics:queue.*.*",
         "via_topic_slice": true
       }
@@ -3472,7 +3472,7 @@
     "review.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 793,
+        "line": 801,
         "subscriber_id": "slice:topics:review.*",
         "via_topic_slice": true
       }
@@ -3844,7 +3844,7 @@
     "storage.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 793,
+        "line": 801,
         "subscriber_id": "slice:topics:storage.*",
         "via_topic_slice": true
       }
@@ -4102,7 +4102,7 @@
     "terminal.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 793,
+        "line": 801,
         "subscriber_id": "slice:topics:terminal.*",
         "via_topic_slice": true
       }
@@ -4110,7 +4110,7 @@
     "tool.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 793,
+        "line": 801,
         "subscriber_id": "slice:topics:tool.*",
         "via_topic_slice": true
       }
@@ -4175,7 +4175,7 @@
     "turn.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 793,
+        "line": 801,
         "subscriber_id": "slice:topics:turn.*",
         "via_topic_slice": true
       }

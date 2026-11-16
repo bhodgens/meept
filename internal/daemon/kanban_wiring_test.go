@@ -342,3 +342,37 @@ func TestKanbanWiring_StorePathUnderMeeptHome(t *testing.T) {
 		t.Fatal("board.db must live in the same directory as the C7 token store")
 	}
 }
+
+// TestKanbanWiring_StopDrainsAndClosesStore pins the shutdown order:
+// stopKanban stops the projector, unbinds the reconciler, and THEN
+// closes the store handle (the MaxOpenConns(1) drain-then-close
+// invariant). After it returns, the board.db file must be readable by a
+// fresh handle (clean WAL shutdown) and a second stopKanban must be a
+// no-op (byte-identical disabled-subsystem posture).
+func TestKanbanWiring_StopDrainsAndClosesStore(t *testing.T) {
+	c, b := newKanbanWiringHarness(t, true)
+	svc, err := wireKanbanServices(c, nil, b, nil)
+	if err != nil {
+		t.Fatalf("enabled wiring: %v", err)
+	}
+	kanban.RegisterDefaultReconciler(svc.store, svc.reconciler)
+
+	d := &Daemon{kanban: svc, logger: slog.Default()}
+	d.stopKanban()
+
+	if d.kanban != nil {
+		t.Fatal("stopKanban must release the bundle")
+	}
+	// The handle closed: reopen works (WAL checkpointed) and the store
+	// itself refuses further queries.
+	reopened, err := kanban.NewStore(kanbanStorePath(), slog.Default())
+	if err != nil {
+		t.Fatalf("reopen board.db after stopKanban: %v (handle was not closed cleanly)", err)
+	}
+	defer func() { _ = reopened.Close() }()
+	if _, err := svc.store.ListBoards(context.Background()); err == nil {
+		t.Fatal("store survived stopKanban: the handle was never closed")
+	}
+	// Idempotent: a second stop (nil bundle) is a no-op, not a panic.
+	d.stopKanban()
+}

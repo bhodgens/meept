@@ -260,6 +260,14 @@ type Server struct {
 	// When nil the /api/v1/pair/* routes do not exist and the middleware
 	// chain is byte-identical to the pre-pairing behavior.
 	pairing *PairingService
+
+	// kanbanPairing is the optional browser-facing kanban pairing
+	// exchange (WithKanbanPairing), armed only when the kanban
+	// subsystem's pairing store exists. When nil the
+	// POST /kanban/pair/exchange route does not exist and the chain is
+	// byte-identical (root AGENTS.md: "Two wiring debts stay open" —
+	// now closed).
+	kanbanPairing *kanbanPairingHandler
 }
 
 // AgentInfo describes an agent for listing.
@@ -1551,6 +1559,17 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("GET /api/v1/pair/status", s.pairing.handleStatus)
 		mux.HandleFunc("POST /api/v1/pair/exchange", s.pairing.handleExchange)
 	}
+	// Kanban browser pairing (follow-up gap: literal mux hook). Armed
+	// only when the daemon's kanban pairing store exists
+	// ([kanban].enabled); the middleware intercepts this path after the
+	// rate limiter and before bearer auth — the single-use code IS the
+	// credential (precedent posture, kanban_pairing.go header).
+	if s.kanbanPairing != nil {
+		// Literal path (mirrors the pairing precedent) so the
+		// connectivity-graph generator sees the route; the const is
+		// pinned-equal in kanban_pairing_test.go.
+		mux.HandleFunc("POST /kanban/pair/exchange", s.kanbanPairing.ServeHTTP)
+	}
 
 	if s.config.RESTEnabled {
 		s.setupRESTRoutes(mux)
@@ -1983,6 +2002,17 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		pairingHandler = s.pairing
 	}
 
+	// Kanban browser pairing: EXEMPT from bearer auth (the one-time code
+	// is the credential, same lane shape as the dev-key precedent) but
+	// NOT from the rate limiter — kanban codes are ~40 bits vs the dev
+	// key code's 48, and this route hands out board grants, so brute-
+	// force throttling stays on. Built once outside the closure; nil
+	// when the subsystem is disabled (byte-identical chain).
+	var kanbanPairHandler http.Handler
+	if s.kanbanPairing != nil {
+		kanbanPairHandler = rateLimitMiddleware(s.kanbanPairing)
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 
@@ -2016,6 +2046,18 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 			// limit (the one-time code + single-use consumption bound the
 			// risk; remote callers are rejected inside the handlers).
 			pairingHandler.ServeHTTPForPath(lrw, r)
+			return
+		}
+
+		if kanbanPairHandler != nil && r.URL.Path == KanbanPairExchangePath {
+			// Kanban browser pairing: rate-limited through its OWN
+			// per-IP bucket (a second limiter instance at the same
+			// limit/burst — pairing traffic cannot spend the general
+			// bucket and normal traffic cannot starve pairing), bearer-
+			// auth exempt (the one-time code is the credential), loop-
+			// back enforced INSIDE the handler. POST-only is the
+			// handler's own check.
+			kanbanPairHandler.ServeHTTP(lrw, r)
 			return
 		}
 

@@ -1786,6 +1786,21 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 				logger.Info("Eval HTTP endpoints enabled", "path", "/api/v1/eval/runs*")
 			}
 
+			// Kanban browser pairing (follow-up gap: literal mux hook
+			// for POST /kanban/pair/exchange). Armed ONLY when the
+			// kanban subsystem's pairing store exists: disabled or
+			// degraded ([kanban].enabled=false — the default) leaves
+			// the option unwired and the chain byte-identical. The
+			// exchanger hands out board tokens in exchange for a
+			// daemon-minted single-use code; loopback + rate-limit +
+			// no-oracle posture mirrors the dev-key precedent (see
+			// internal/comm/http/kanban_pairing.go). Typed-nil guard:
+			// svc.pairing is a concrete *kanbanPairing, so the nil
+			// check happens HERE, never inside the option.
+			if kanbanSvc != nil && kanbanSvc.pairing != nil {
+				httpOpts = append(httpOpts, http.WithKanbanPairing(kanbanSvc.pairing, logger))
+			}
+
 			// First-run pairing handshake (issue #59): when auth is
 			// required but no key came from config, the effective key is
 			// the per-installation dev key — a fresh GUI cannot know it.

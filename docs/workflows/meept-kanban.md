@@ -25,6 +25,7 @@ bin/meept-kanban -bind 127.0.0.1:8790
 | `-daemon-socket` | `$MEEPT_HOME/meept.sock` | Daemon RPC socket for forwarding. |
 | `-daemon-http` | (empty) | Daemon HTTP base URL. Overrides `-daemon-socket` when set. |
 | `-webdir` | `$WEBDIR`, else `$MEEPT_HOME/webui` | Flutter bundle root, served at `/web/`. |
+| `-allow-origin` | (none) | Extra EXACT browser Origin accepted on the WS relay (repeatable or comma-list). The daemon passes `[kanban].allowed_origins` through; the sidecar itself never reads config (C7). Empty = loopback-only posture. |
 | `-pair-store` | `$MEEPT_HOME/kanban/tokens.json` | Bearer-token + pairing-code store file. |
 
 A non-loopback `-bind` without `-allow-lan` refuses to start.

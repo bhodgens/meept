@@ -109,9 +109,17 @@ echo the offered subprotocol back (`pickSubprotocol` `gateway.go:330-346`,
 connection after accept (`TestGateway_WS` pins it with a real gorilla
 dialer). Origin check mirrors the daemon hub's allow-list: same-origin
 or no-Origin (non-browser) clients allowed, bearer still required
-(`gateway.go:425-429`). The event feed comes through the `EventSource`
-seam (`gateway.go:54-56`); `IdleSource` is the placeholder until the
-daemon board-event bridge lands (`gateway.go:561-567`).
+(`gateway.go`). `[kanban].allowed_origins` (repeated `-allow-origin`
+flags from the daemon boot; `SetAllowedOrigins`) adds EXACT
+scheme://host[:port] entries for the TLS-proxy deployment — no wildcard,
+no suffix matching; the empty list keeps the loopback-only posture byte-
+identical. The event feed comes through the `EventSource`
+seam (`gateway.go:54-56`); the production source is `BusPump`
+(`pump.go`): it bridges the daemon's `bus.subscribe`/`bus.poll` RPC pair
+(the seven concrete kanban topics, over the SAME `RPCCaller` client the
+REST forwards ride) and delivers daemon-shaped `board_event` envelopes.
+`IdleSource` remains only as an inert embedder/test placeholder
+(`gateway.go`).
 
 Any operator proxy in front of the sidecar MUST pass
 `Sec-WebSocket-Protocol` through unchanged — the bearer lane rides it —

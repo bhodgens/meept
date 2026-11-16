@@ -91,14 +91,25 @@ without the echo the browser aborts the connection after accept
 daemon hub's allow-list shape but is a LOOPBACK allow-list:
 `localhost`/`127.0.0.1`/`::1` origins pass, a missing Origin (non-browser
 client) passes because the bearer token still gates the connection, and
-any other origin is refused (`checkWSOrigin`, `gateway.go:425-443`) —
+any other origin is refused by default (`checkWSOrigin`) —
 relevant when fronting the sidecar with a TLS proxy, see
-[docs/workflows/kanban.md](kanban.md) "Exposing the sidecar". The gateway
+[docs/workflows/kanban.md](kanban.md) "Exposing the sidecar".
+`[kanban].allowed_origins` (delivered as repeated `-allow-origin` flags
+by the daemon boot; `SetAllowedOrigins`) extends the gate with EXACT
+`scheme://host[:port]` entries — no wildcard, no suffix matching; an
+empty list keeps the loopback-only posture byte-identical. The gateway
 subscribes to the daemon through `EventSource` and pumps frames to the
-client. `IdleSource` is the no-event placeholder the binary currently
-boots with (`cmd/meept-kanban/main.go:84`), used until the daemon bus
-bridge lands; it closes its channel on context cancel so a relay
-never outlives its connection.
+client. The production source is `BusPump` (`pump.go`), which the
+binary boots with (`cmd/meept-kanban/main.go`): it subscribes the seven
+concrete kanban topics over the daemon's `bus.subscribe`/`bus.poll` RPC
+pair — riding the SAME transport client the REST forwards use — polls on
+a short interval, tolerates daemon disconnects with bounded retry, and
+delivers daemon-shaped `board_event` envelopes. `Close` stops the pump
+goroutine and closes every subscriber channel; per-relay context cancel
+closes only that relay's channel, so a relay never outlives its
+connection. `IdleSource` remains only as an inert embedder/test
+placeholder. Any change to the relay's frame shape must stay compatible
+with the Flutter `KanbanBoardEvent` decoder (`ui/flutter_ui/lib/features/kanban/`).
 
 ## Static web bundle
 

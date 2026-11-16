@@ -41,22 +41,27 @@ thirteen C4 methods plus the C7 pairing `kanban.pair.mint`/
 provider via `builtin.SetKanbanProvider` before `toolprov.RegisterAll`,
 and schedules the C9 `reconcile_interval` ticker on the run context.
 Shutdown stops the projector (unsubscribe + drain + join, counters
-logged) after the sidecar child goes down. `meept kanban` is mounted on
+logged) after the sidecar child goes down, unbinds the reconciler, and
+closes the store handle (`Store.Close`, drain-then-close per the
+MaxOpenConns(1) invariant). `meept kanban` is mounted on
 the CLI root (`cmd/meept/main.go`). Boot tests:
 `internal/daemon/kanban_wiring_test.go` (disabled-constructs-nothing,
 enabled store/rules/projection round-trip, rule bootstrap idempotence,
 from_state closure property); the hermetic e2e case (g) in
 `e2e/suites/kanban-board` covers the real daemon boot.
 
-Two wiring debts stay open, deliberately not faked: (1) `internal/kanban`
-exposes no `Store.Close`, so the single SQLite handle lives until
-process teardown (owned by a foundation follow-up); (2) the C7
-`POST /kanban/pair/exchange` literal HTTP path needs a mux hook in
-`internal/comm/http` — the exchange is live over the owner socket RPC
-(and the existing `POST /api/v1/bus/call` bridge the GUI already uses);
-codes are in-memory per process (kanbansvc pairing.go), so a code
-minted by the daemon exchanges on the daemon, one minted by the
-sidecar on the sidecar.
+Pairing follow-ups, now closed (as-built): (1) `internal/kanban`
+exports `Store.Close` — idempotent, nil-safe; `stopKanban` calls it
+after the projector drain. (2) `POST /kanban/pair/exchange` is a real
+mux route (`internal/comm/http/kanban_pairing.go`), armed only when the
+kanban pairing store exists: loopback-only, per-IP rate-limited,
+bearer-auth-exempt (the single-use console-printed code IS the
+credential), one uniform 401 for wrong/consumed/expired/missing codes,
+4KB body cap, code and token never logged — the dev-key pairing
+precedent's posture exactly. Codes remain in-memory per process: a
+daemon-minted code exchanges at the daemon (this route or the owner RPC),
+a sidecar-minted code at the sidecar's own exchange route; the minted
+bearer token lands in the shared tokens.json and authenticates at both.
 
 ## Event contract (master.md C1/C2)
 
@@ -346,15 +351,19 @@ server {
 }
 ```
 
-**Known as-built limitation:** the gateway's WS origin allow-list
-accepts only `localhost` / `127.0.0.1` / `::1` (or a missing Origin,
-non-browser clients) — `gateway.go:425-443`. A browser whose page origin
-is the proxied public hostname will have its `/api/v1/events` upgrade
-rejected ("origin not allowed"); REST routes still work. Until the
-origin policy is revisited, the supported remote setups are (a) an SSH
-or Tailscale loopback tunnel to the sidecar (origin stays loopback), or
-(b) REST polling. Document any change to that allow-list in
-`internal/kanbansvc/AGENTS.md`.
+**Origin policy:** the gateway's WS origin allow-list accepts
+`localhost` / `127.0.0.1` / `::1` (or a missing Origin, non-browser
+clients) BY DEFAULT. For the TLS-proxy deployment above — where the
+proxy presents the PUBLIC browser Origin — set
+`[kanban].allowed_origins: ["https://board.example.com"]`: exact
+`scheme://host[:port]` entries (no wildcard, no path, no suffix
+matching — origin trust is exact; validation in
+`internal/config/schema.go`, normalization + match in
+`internal/kanbansvc/gateway.go` `SetAllowedOrigins`/`originAllowed`).
+The daemon passes each entry to the sidecar as a repeated `-allow-origin`
+flag (`internal/daemon/kanban_boot.go` `buildKanbanArgs`); the sidecar
+stays config-blind (C7). An empty/absent list keeps the loopback-only
+posture byte-identical.
 
 ## Verification
 

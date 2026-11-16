@@ -108,7 +108,11 @@ func newProjectorFixture(t *testing.T, rules []ProjectionRule) *projectorFixture
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	t.Cleanup(func() { store.db.Close() })
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("close store: %v", err)
+		}
+	})
 
 	f := &projectorFixture{
 		bus:     bus.New(nil, nil),
@@ -605,7 +609,11 @@ func TestProjector_QueuedDropsAreCounted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	t.Cleanup(func() { store.db.Close() })
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("close store: %v", err)
+		}
+	})
 	b := bus.New(&bus.Config{BufferSize: 1024}, nil)
 	t.Cleanup(func() { b.Close() })
 

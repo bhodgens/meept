@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/url"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -255,6 +256,16 @@ type KanbanConfig struct {
 	// in stringDurationKeys (json5_loader.go) so the loader's duration
 	// preprocessing keeps it a string.
 	ReconcileInterval string `json:"reconcile_interval" toml:"reconcile_interval"`
+	// AllowedOrigins extends the sidecar's WS Origin allow-list with
+	// EXACT scheme://host[:port] entries — the documented Caddy/nginx
+	// TLS-proxy deployment, where the proxy presents the public Origin
+	// that the loopback-only default rejects. No wildcards, no paths,
+	// no suffix matching (origin trust is exact). Empty (the default)
+	// keeps the current same-origin/loopback posture byte-identical.
+	// The daemon passes each entry to the sidecar as -allow-origin
+	// (internal/daemon/kanban_boot.go); the sidecar never reads this
+	// config itself (C7 sidecar-minimal).
+	AllowedOrigins []string `json:"allowed_origins" toml:"allowed_origins"`
 	// GitHubSync is the deferred inbound GitHub Projects sync knob
 	// (issue bhodgens/meept#133). Code must NOT read beyond the knob.
 	GitHubSync struct {
@@ -266,13 +277,51 @@ type KanbanConfig struct {
 // accepts exactly "warn" and "block" per C9/C10. The empty string is valid
 // too — it means the block was absent (a hand-built Config literal), and the
 // wiring layer treats it as the "warn" default exactly like DefaultConfig.
+// allowed_origins entries are validated unconditionally (an empty list —
+// the default — stays byte-identical): each must be an exact
+// scheme://host[:port] origin — http/https only, no wildcard, no path or
+// trailing slash, no credentials or query. Origin trust is exact-match;
+// a fuzzy-looking entry is a misconfiguration, not a feature.
 func (c KanbanConfig) Validate() error {
 	switch c.WIPMode {
 	case "", "warn", "block":
-		return nil
 	default:
 		return fmt.Errorf("kanban.wip_mode %q invalid, want \"warn\" or \"block\"", c.WIPMode)
 	}
+	for _, origin := range c.AllowedOrigins {
+		if !kanbanAllowedOriginValid(origin) {
+			return fmt.Errorf("kanban.allowed_origins entry %q invalid, want exact scheme://host[:port] (http or https, no path, wildcard, or trailing slash)", origin)
+		}
+	}
+	return nil
+}
+
+// kanbanAllowedOriginValid is the config-side twin of the gateway's
+// normalizeOrigin: http/https, host present, no path/query/userinfo,
+// no wildcard character. Kept stdlib-parse based so load-time validation
+// and serve-time normalization agree.
+func kanbanAllowedOriginValid(origin string) bool {
+	trimmed := strings.TrimSpace(origin)
+	if trimmed == "" || strings.ContainsAny(trimmed, "*?") {
+		return false
+	}
+	u, err := url.Parse(trimmed)
+	if err != nil {
+		return false
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return false
+	}
+	if u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return false
+	}
+	// Browsers send bare origins; a path (even "/") or a trailing slash
+	// is an operator pasting a URL, not an Origin.
+	if u.Path != "" {
+		return false
+	}
+	return true
 }
 
 // ValidateEnabled checks the REQUIRED-when-enabled fields: it names EVERY

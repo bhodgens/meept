@@ -120,24 +120,70 @@ void main() {
       expect(board.scrollDirection, Axis.horizontal);
     });
 
-    testWidgets('load failure surfaces a lowercase error + retry', (
-      tester,
-    ) async {
-      service.boardLoads = 0;
-      final broken = _ThrowingService();
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [kanbanServiceProvider.overrideWithValue(broken)],
-          child: const MaterialApp(home: Scaffold(body: KanbanBoardView())),
-        ),
-      );
-      await _pumpBoard(tester);
-      expect(
-        find.textContaining('kanban error: sidecar offline'),
-        findsOneWidget,
-      );
-      expect(find.text('retry'), findsOneWidget);
-    });
+    testWidgets(
+      'non-connection load failure surfaces a lowercase error + retry',
+      (tester) async {
+        service.boardLoads = 0;
+        final broken = _ThrowingService(
+          const KanbanUpstreamException(
+            'rpc failed: board.list',
+            rpc: 'kanban.board.list',
+          ),
+        );
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [kanbanServiceProvider.overrideWithValue(broken)],
+            child: const MaterialApp(home: Scaffold(body: KanbanBoardView())),
+          ),
+        );
+        await _pumpBoard(tester);
+        expect(
+          find.textContaining('kanban error: rpc failed: board.list'),
+          findsOneWidget,
+        );
+        // not the connection empty state
+        expect(find.text('sidecar not running'), findsNothing);
+        expect(find.text('retry'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'connection failure shows the actionable sidecar empty state (gap #9)',
+      (tester) async {
+        final broken = _ThrowingService(
+          const KanbanConnectionException('sidecar offline (127.0.0.1:8790)'),
+        );
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [kanbanServiceProvider.overrideWithValue(broken)],
+            child: const MaterialApp(home: Scaffold(body: KanbanBoardView())),
+          ),
+        );
+        await _pumpBoard(tester);
+        // actionable lowercase empty state, not the generic error
+        expect(find.text('sidecar not running'), findsOneWidget);
+        expect(
+          find.text('set [kanban].sidecar_enabled=true and restart the daemon'),
+          findsOneWidget,
+        );
+        expect(find.textContaining('kanban error:'), findsNothing);
+        expect(find.text('sidecar offline (127.0.0.1:8790)'), findsOneWidget);
+        // retry re-runs the initial load: the button is wired to _refresh, so
+        // once the fake recovers, tapping it renders the board.
+        expect(
+          find.byKey(const ValueKey('kanban-connection-retry')),
+          findsOneWidget,
+        );
+        broken.error = null;
+        broken.boards = const [KanbanBoard(id: 'b1', name: 'default')];
+        broken.columns = const [_todo];
+        broken.cards = [_card('k1', 'c-todo')];
+        await tester.tap(find.byKey(const ValueKey('kanban-connection-retry')));
+        await _pumpBoard(tester);
+        expect(find.text('sidecar not running'), findsNothing);
+        expect(find.text('todo (1)'), findsOneWidget);
+      },
+    );
   });
 
   group('tap-to-move', () {
@@ -368,10 +414,17 @@ void main() {
   });
 }
 
-/// Fails every read so the error path renders.
+/// Fails every read so the error path renders. The thrown exception is
+/// configurable so the connection / non-connection branches can be pinned
+/// separately; set [error] to null to make the service recover.
 class _ThrowingService extends FakeKanbanService {
+  _ThrowingService([this.error]);
+
+  Object? error;
+
   @override
   Future<List<KanbanBoard>> listBoards() async {
-    throw const KanbanConnectionException('sidecar offline (127.0.0.1:8790)');
+    if (error != null) throw error!;
+    return super.listBoards();
   }
 }

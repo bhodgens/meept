@@ -362,3 +362,48 @@ func TestKanbanBindAllowLANTurn(t *testing.T) {
 		}
 	}
 }
+
+// TestBuildKanbanArgs pins the argv assembly, including the origin-flag
+// plumbing ([kanban].allowed_origins → repeated -allow-origin) and the
+// byte-identical posture with an empty list (the sidecar stays
+// config-blind; flags are its only config channel).
+func TestBuildKanbanArgs(t *testing.T) {
+	base := []string{"/bin/meept-kanban", "-daemon-socket", "/home/.meept/meept.sock", "-bind", "127.0.0.1:8790"}
+
+	got := buildKanbanArgs("/bin/meept-kanban", kanbanSidecarConfig{
+		SocketPath: "/home/.meept/meept.sock",
+		Bind:       "127.0.0.1:8790",
+	})
+	if len(got) != len(base) {
+		t.Fatalf("empty AllowedOrigins must add NO flags: %v", got)
+	}
+	for i := range base {
+		if got[i] != base[i] {
+			t.Fatalf("args[%d] = %q, want %q (byte-identical spawn pre-knob)", i, got[i], base[i])
+		}
+	}
+
+	got = buildKanbanArgs("/bin/meept-kanban", kanbanSidecarConfig{
+		SocketPath:     "/s",
+		Bind:           "127.0.0.1:8790",
+		AllowedOrigins: []string{"https://board.example.com", " ", "https://second.example.com:8443"},
+	})
+	want := append(append([]string{}, base[0], "-daemon-socket", "/s", "-bind", "127.0.0.1:8790"),
+		"-allow-origin", "https://board.example.com",
+		"-allow-origin", "https://second.example.com:8443")
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("args = %v, want %v", got, want)
+	}
+
+	// LAN bind + origins + webdir together (order-stable).
+	got = buildKanbanArgs("/b", kanbanSidecarConfig{
+		SocketPath:     "/s",
+		Bind:           "0.0.0.0:8790",
+		Webdir:         "/w",
+		AllowedOrigins: []string{"https://x.example"},
+	})
+	wantStr := "/b -daemon-socket /s -bind 0.0.0.0:8790 -webdir /w -allow-lan -allow-origin https://x.example"
+	if strings.Join(got, " ") != wantStr {
+		t.Fatalf("args = %q, want %q", strings.Join(got, " "), wantStr)
+	}
+}

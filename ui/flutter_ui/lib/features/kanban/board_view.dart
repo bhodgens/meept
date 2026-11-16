@@ -29,6 +29,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'card_detail_sheet.dart';
 import 'card_tile.dart';
+import 'kanban_errors.dart';
 import 'kanban_models.dart';
 import 'kanban_provider.dart';
 import 'kanban_service.dart';
@@ -50,6 +51,12 @@ class _KanbanBoardViewState extends ConsumerState<KanbanBoardView> {
   List<KanbanCard> _cards = const [];
   bool _loading = false;
   String? _error;
+
+  /// Lowercased message of the last transport-level load failure
+  /// (KanbanConnectionException — sidecar unreachable). Non-null renders an
+  /// actionable empty state instead of the generic 'kanban error' text
+  /// (kanban follow-up gap #9).
+  String? _connectionMessage;
   String? _linkNote;
 
   StreamSubscription<KanbanBoardEvent>? _eventsSub;
@@ -113,6 +120,7 @@ class _KanbanBoardViewState extends ConsumerState<KanbanBoardView> {
           setState(() {
             _loading = false;
             _error = 'no boards found';
+            _connectionMessage = null;
             _boards = const [];
           });
         }
@@ -134,12 +142,22 @@ class _KanbanBoardViewState extends ConsumerState<KanbanBoardView> {
         _cards = cards;
         _loading = false;
         _error = null;
+        _connectionMessage = null;
       });
     } on KanbanApiException catch (e) {
       if (mounted) {
         setState(() {
           _loading = false;
-          _error = e.message.toLowerCase();
+          if (e is KanbanConnectionException) {
+            // Transport failure: the sidecar gateway is unreachable. Show
+            // the actionable empty state instead of the generic error
+            // (kanban follow-up gap #9); keep the raw message for detail.
+            _error = null;
+            _connectionMessage = e.message.toLowerCase();
+          } else {
+            _error = e.message.toLowerCase();
+            _connectionMessage = null;
+          }
         });
       }
     }
@@ -295,6 +313,41 @@ class _KanbanBoardViewState extends ConsumerState<KanbanBoardView> {
   Widget _buildBody() {
     if (_loading && _columns.isEmpty) {
       return const Center(child: CircularProgressIndicator());
+    }
+    if (_connectionMessage != null && _columns.isEmpty) {
+      // Gap #9: connection refused / sidecar unreachable is actionable —
+      // name the fix (opt-in sidecar) instead of a generic 'board error'.
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Text(
+              'sidecar not running',
+              style: TextStyle(color: Colors.orange, fontSize: 13),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'set [kanban].sidecar_enabled=true and restart the daemon',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            const SizedBox(height: 4),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Text(
+                _connectionMessage!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white38, fontSize: 11),
+              ),
+            ),
+            const SizedBox(height: 8),
+            FilledButton.tonal(
+              key: const ValueKey('kanban-connection-retry'),
+              onPressed: _refresh,
+              child: const Text('retry', style: TextStyle(fontSize: 12)),
+            ),
+          ],
+        ),
+      );
     }
     if (_error != null && _columns.isEmpty) {
       return Center(

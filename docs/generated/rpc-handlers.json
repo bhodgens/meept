@@ -519,13 +519,13 @@
     "topic": "kanban.pair.exchange",
     "handler": "func(_ context.Context, params json.RawMessage",
     "file": "internal/daemon/kanban_wiring.go",
-    "line": 299
+    "line": 297
   },
   {
     "topic": "kanban.pair.mint",
     "handler": "func(_ context.Context, params json.RawMessage",
     "file": "internal/daemon/kanban_wiring.go",
-    "line": 281
+    "line": 279
   },
   {
     "topic": "kanban.reconcile.now",

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/caimlas/meept/pkg/id"
@@ -17,6 +18,12 @@ import (
 type Store struct {
 	db     *sql.DB
 	logger *slog.Logger
+
+	// closed is set by Close after the handle is released. mu guards the
+	// flag transition only (never across DB I/O) so double-Close is
+	// idempotent and callers see one definitive drain.
+	mu     sync.Mutex
+	closed bool
 }
 
 // NewStore creates a new SQLite-backed Kanban store.
@@ -441,4 +448,36 @@ func (s *Store) ListCardEvents(ctx context.Context, cardID string) ([]CardEvent,
 		return nil, fmt.Errorf("failed to iterate card events: %w", err)
 	}
 	return events, nil
+}
+
+// Close releases the SQLite handle. The repo's MaxOpenConns(1) invariant
+// means the handle must be drained and closed BEFORE the owner tears the
+// rest of the stack down (daemon shutdown stops the projector and the
+// reconcile ticker first, then calls Close) — an open single-connection
+// pool holding WAL state across teardown is the deadlock class the daemon
+// tests pin. Close is idempotent and nil-receiver-safe: a second call is
+// a no-op, and (*Store)(nil).Close() returns nil, so shutdown paths can
+// call it unconditionally. Any in-flight query finishes first (sql.DB.Close
+// drains); later calls on this handle fail with sql.ErrConnDone/"closed"
+// as usual for a closed pool.
+func (s *Store) Close() error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return nil
+	}
+	s.closed = true
+	db := s.db
+	s.mu.Unlock()
+	// No I/O under the mutex above: sql.DB.Close does the drain.
+	if db == nil {
+		return nil
+	}
+	if err := db.Close(); err != nil {
+		return fmt.Errorf("failed to close kanban store: %w", err)
+	}
+	return nil
 }

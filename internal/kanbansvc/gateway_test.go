@@ -798,3 +798,116 @@ func TestIdleSource(t *testing.T) {
 		t.Fatal("IdleSource did not close its channel on context cancel")
 	}
 }
+
+// --- WS Origin allow-list ([kanban].allowed_origins, gap #10) ---------
+
+// TestGateway_OriginTable pins the exact-match allow-list semantics:
+// the empty list keeps the pre-knob loopback-only posture byte-identical;
+// a configured list accepts EXACTLY the operator's scheme://host[:port]
+// and nothing fuzzy — wrong scheme, wrong port, subdomain, superstring.
+func TestGateway_OriginTable(t *testing.T) {
+	cases := []struct {
+		name   string
+		allow  []string
+		origin string
+		wantOK bool
+	}{
+		// Default (empty list) — byte-identical pre-knob behavior.
+		{"default/empty-origin", nil, "", true},
+		{"default/loopback", nil, "http://127.0.0.1:8790", true},
+		{"default/localhost", nil, "http://localhost:8790", true},
+		{"default/proxy-origin-rejected", nil, "https://board.example.com", false},
+		// Configured list — exact-match acceptance.
+		{"configured/exact", []string{"https://board.example.com"}, "https://board.example.com", true},
+		{"configured/exact-with-port", []string{"https://board.example.com:8443"}, "https://board.example.com:8443", true},
+		{"configured/other-port-rejected", []string{"https://board.example.com:8443"}, "https://board.example.com", false},
+		{"configured/wrong-scheme-rejected", []string{"https://board.example.com"}, "http://board.example.com", false},
+		{"configured/subdomain-rejected", []string{"https://board.example.com"}, "https://evil.board.example.com", false},
+		{"configured/superstring-rejected", []string{"https://board.example.com"}, "https://board.example.com.evil.net", false},
+		{"configured/prefix-rejected", []string{"https://board.example.com"}, "https://board.example", false},
+		{"configured/case-insensitive-match", []string{"https://Board.Example.com"}, "https://board.example.com", true},
+		{"configured/loopback-still-accepted", []string{"https://board.example.com"}, "http://127.0.0.1:8790", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			g := &Gateway{}
+			g.SetAllowedOrigins(tc.allow)
+			if got := g.originAllowed(tc.origin); got != tc.wantOK {
+				t.Fatalf("originAllowed(%q) with allow=%v = %v, want %v", tc.origin, tc.allow, got, tc.wantOK)
+			}
+		})
+	}
+}
+
+// TestGateway_DefaultOriginListIsByteIdentical pins the empty-list
+// posture against the REAL request path (no allow entries at all).
+func TestGateway_DefaultOriginListIsByteIdentical(t *testing.T) {
+	g := &Gateway{}
+	req := httptest.NewRequest("GET", "/api/v1/events", nil)
+	if err := g.checkWSOrigin(req); err != nil {
+		t.Fatalf("missing Origin must be allowed: %v", err)
+	}
+	req.Header.Set("Origin", "https://board.example.com")
+	if err := g.checkWSOrigin(req); err == nil {
+		t.Fatal("unconfigured proxy origin must stay rejected (byte-identical default)")
+	}
+	req.Header.Set("Origin", "http://localhost:8790")
+	if err := g.checkWSOrigin(req); err != nil {
+		t.Fatalf("loopback origin must pass: %v", err)
+	}
+}
+
+// TestGateway_SetAllowedOrigins_NilSafeAndNormalized pins the Set*
+// receiver guard and the entry normalization/drop rules.
+func TestGateway_SetAllowedOrigins_NilSafeAndNormalized(t *testing.T) {
+	var g *Gateway
+	g.SetAllowedOrigins([]string{"https://board.example.com"}) // no panic
+
+	g = &Gateway{}
+	g.SetAllowedOrigins([]string{"https://board.example.com/", "https://bad/path", "board.example.com", ""})
+	if len(g.allowedOrigins) != 0 {
+		t.Fatalf("trailing-slash/path/no-scheme/empty entries must all drop: %v", g.allowedOrigins)
+	}
+	g.SetAllowedOrigins([]string{"HTTPS://Board.Example.com"})
+	if len(g.allowedOrigins) != 1 || g.allowedOrigins[0] != "https://board.example.com" {
+		t.Fatalf("normalization = %v, want [https://board.example.com]", g.allowedOrigins)
+	}
+	// Re-setting with an empty list restores the default posture.
+	g.SetAllowedOrigins(nil)
+	if err := g.checkWSOrigin(mustOriginRequest(t, "https://board.example.com")); err == nil {
+		t.Fatal("cleared list must stop accepting the proxy origin")
+	}
+}
+
+func mustOriginRequest(t *testing.T, origin string) *http.Request {
+	t.Helper()
+	req := httptest.NewRequest("GET", "/api/v1/events", nil)
+	req.Header.Set("Origin", origin)
+	return req
+}
+
+// TestGateway_WS_ProxyOrigin_WithAllowList is the end-to-end pin: the
+// documented TLS-proxy deployment (proxy presents the public Origin)
+// upgrades when the list is armed and stays refused when it is not.
+func TestGateway_WS_ProxyOrigin_WithAllowList(t *testing.T) {
+	t.Run("default posture refused", func(t *testing.T) {
+		server := httptest.NewServer(mustGateway(t, &fakeRPC{}, ""))
+		defer server.Close()
+		conn, _, err := dialWSWithOrigin(server, "https://board.example.com", "bearer.read-token")
+		if err == nil {
+			conn.Close()
+			t.Fatal("unconfigured gateway accepted a proxy-origin handshake")
+		}
+	})
+	t.Run("configured list accepted", func(t *testing.T) {
+		gateway, _ := newTestGateway(t, &fakeRPC{}, "")
+		gateway.SetAllowedOrigins([]string{"https://board.example.com"})
+		server := httptest.NewServer(gateway)
+		defer server.Close()
+		conn, _, err := dialWSWithOrigin(server, "https://board.example.com", "bearer.read-token")
+		if err != nil {
+			t.Fatalf("configured gateway refused the exact proxy origin: %v", err)
+		}
+		conn.Close()
+	})
+}

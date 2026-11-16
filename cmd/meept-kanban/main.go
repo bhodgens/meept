@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -48,6 +49,8 @@ func run() error {
 	baseURL := flag.String("daemon-http", "", "daemon HTTP base URL (overrides -daemon-socket when set)")
 	webdir := flag.String("webdir", "", "web bundle root (default $WEBDIR, else $MEEPT_HOME/webui)")
 	pairStorePath := flag.String("pair-store", "", "pairing token store file (default $MEEPT_HOME/kanban/tokens.json)")
+	var allowOrigins stringSlice
+	flag.Var(&allowOrigins, "allow-origin", "exact browser Origin to accept on the WS relay IN ADDITION to loopback (repeatable or comma-list; set by the daemon from [kanban].allowed_origins for the TLS-proxy deployment)")
 	flag.Parse()
 
 	if err := guardBind(*bind, *allowLAN); err != nil {
@@ -81,12 +84,26 @@ func run() error {
 	}
 	authz := pairStore
 
-	gateway, err := kanbansvc.NewGateway(daemon, kanbansvc.IdleSource{}, authz, bundle)
+	// Board-event pump (follow-up gap: the GUI live feed): the daemon's
+	// bus.subscribe/bus.poll RPC pair, riding the SAME transport client
+	// the gateway's REST→RPC forwards use. Replaces the IdleSource
+	// placeholder: without it the /api/v1/events relay carried no deltas.
+	events, err := kanbansvc.NewBusPump(daemon, kanbansvc.PumpOptions{})
+	if err != nil {
+		return fmt.Errorf("build event pump: %w", err)
+	}
+	defer events.Close()
+
+	gateway, err := kanbansvc.NewGateway(daemon, events, authz, bundle)
 	if err != nil {
 		return fmt.Errorf("build gateway: %w", err)
 	}
 	if err := gateway.SetPairing(pairStore); err != nil {
 		return fmt.Errorf("arm pairing: %w", err)
+	}
+	if len(allowOrigins) > 0 {
+		gateway.SetAllowedOrigins(allowOrigins)
+		slog.Info("kanban sidecar: WS origin allow-list armed", "origins", strings.Join(allowOrigins, ","))
 	}
 
 	srv := &http.Server{
@@ -171,6 +188,22 @@ func resolveWebdir(flagged string) string {
 		}
 	}
 	return ""
+}
+
+// stringSlice is a flag.Value collecting a repeatable AND comma-listable
+// flag (stdlib strings has no split-on-reuse helper; the daemon boot emits
+// one -allow-origin per entry, a human operator may pass a comma list).
+type stringSlice []string
+
+func (s *stringSlice) String() string { return strings.Join(*s, ",") }
+
+func (s *stringSlice) Set(raw string) error {
+	for _, part := range strings.Split(raw, ",") {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			*s = append(*s, trimmed)
+		}
+	}
+	return nil
 }
 
 // dialDaemon connects to the daemon over the Unix socket (default) or HTTP.

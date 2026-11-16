@@ -48,9 +48,10 @@ type RPCCaller interface {
 	Close() error
 }
 
-// EventSource supplies board deltas for the /api/v1/events relay. The daemon
-// side (WSBoard class, C8) lands in 05-surfaces/06; until then main.go wires
-// a source that emits nothing.
+// EventSource supplies board deltas for the /api/v1/events relay. The
+// production implementation is BusPump (pump.go): it bridges the daemon's
+// bus.subscribe/bus.poll RPC pair. IdleSource remains as an inert
+// placeholder for embedders/tests that want a relay with no feed.
 type EventSource interface {
 	Subscribe(ctx context.Context) (<-chan json.RawMessage, error)
 }
@@ -115,6 +116,19 @@ type Gateway struct {
 	// canonical StripPrefix+FileServer pair rather than a hand-forged
 	// http.Request.
 	static http.Handler
+
+	// allowedOrigins is the EXACT-MATCH WS Origin allow-list ([kanban].
+	// allowed_origins, plumbed as repeated -allow-origin flags by the
+	// daemon boot — the sidecar stays config-blind). Empty = the current
+	// same-origin/loopback-only posture, byte-identical. Entries are
+	// normalized scheme://host[:port] lowercase; a browser Origin is
+	// accepted only on full-string equality — no wildcard, no suffix or
+	// prefix fuzzy matching (origin trust is exact; a subdomain-suffix
+	// match is how an XSS'd sibling hands your board tokens to an
+	// attacker). This exists for the documented Caddy/nginx TLS-proxy
+	// deployment: the proxy presents the PUBLIC Origin, which the
+	// loopback-only check otherwise rejects.
+	allowedOrigins []string
 }
 
 // NewGateway wires the sidecar gateway. Every dependency is required: a nil
@@ -396,7 +410,7 @@ func (g *Gateway) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	srv := &websocket.Server{
 		Handshake: func(cfg *websocket.Config, req *http.Request) error {
-			if err := checkWSOrigin(req); err != nil {
+			if err := g.checkWSOrigin(req); err != nil {
 				return err
 			}
 			token := bearerToken(req)
@@ -422,24 +436,92 @@ func (g *Gateway) handleEvents(w http.ResponseWriter, r *http.Request) {
 	srv.ServeHTTP(w, r)
 }
 
-// checkWSOrigin mirrors the daemon hub's allow-list: same-origin only, with a
-// missing Origin (non-browser client) allowed because the bearer token still
-// gates the connection.
-func checkWSOrigin(req *http.Request) error {
-	origin := req.Header.Get("Origin")
-	if origin == "" {
-		return nil
+// SetAllowedOrigins arms the exact-match WS Origin allow-list (the
+// TLS-proxy knob, [kanban].allowed_origins via -allow-origin). Entries
+// are normalized (lowercase scheme://host[:port]); invalid URLs and the
+// empty string are dropped with a warning rather than failing boot — a
+// malformed entry must never silently widen or break origin trust, so
+// only exact parseable origins are kept. A nil/empty list restores the
+// default loopback-only posture. Nil-gate on the receiver (house Set*
+// rule).
+func (g *Gateway) SetAllowedOrigins(origins []string) {
+	if g == nil {
+		return
 	}
-	host := strings.ToLower(origin)
+	normalized := make([]string, 0, len(origins))
+	for _, raw := range origins {
+		if entry, ok := normalizeOrigin(raw); ok {
+			normalized = append(normalized, entry)
+		} else if raw != "" {
+			slog.Warn("kanban gateway: dropping malformed allowed origin", "origin", raw)
+		}
+	}
+	g.allowedOrigins = normalized
+}
+
+// normalizeOrigin canonicalizes an Origin to lowercase scheme://host with
+// any default port trimmed comparison-stable. Accepts only an absolute
+// http/https URL with a host and NO path (browsers never send one, and a
+// path in an allow-list entry signals a misconfigured operator input).
+func normalizeOrigin(raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", false
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "", false
+	}
+	if strings.ToLower(u.Scheme) != "http" && strings.ToLower(u.Scheme) != "https" {
+		return "", false
+	}
+	// A bare origin only: any path — even "/" (a trailing slash) — is an
+	// operator pasting a URL, not an Origin. Browsers never send one, so
+	// matching against a slashed entry could never fire anyway.
+	if u.Path != "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return "", false
+	}
+	return strings.ToLower(u.Scheme + "://" + u.Host), true
+}
+
+// originAllowed reports whether an Origin header value passes the
+// allow-list: the exact-match operator entries first, then the
+// same-origin/loopback default (mirrors the daemon hub's allow-list).
+// ok=false for a non-empty Origin on the default posture with no list.
+func (g *Gateway) originAllowed(origin string) bool {
+	if origin == "" {
+		return true
+	}
+	lower := strings.ToLower(strings.TrimSpace(origin))
+	for _, allowed := range g.allowedOrigins {
+		if lower == allowed {
+			return true
+		}
+	}
+	host := lower
 	if u, err := url.Parse(origin); err == nil && u.Hostname() != "" {
 		host = strings.ToLower(u.Hostname())
 	}
 	switch host {
 	case "localhost", "127.0.0.1", "::1":
-		return nil
+		return true
 	default:
-		return fmt.Errorf("origin not allowed: %s", origin)
+		return false
 	}
+}
+
+// checkWSOrigin mirrors the daemon hub's allow-list: same-origin only, with a
+// missing Origin (non-browser client) allowed because the bearer token still
+// gates the connection. Operator-configured exact origins
+// ([kanban].allowed_origins → SetAllowedOrigins) are accepted IN ADDITION
+// — required for the documented Caddy/nginx TLS-proxy deployment, where
+// the proxy presents the public Origin.
+func (g *Gateway) checkWSOrigin(req *http.Request) error {
+	origin := req.Header.Get("Origin")
+	if g.originAllowed(origin) {
+		return nil
+	}
+	return fmt.Errorf("origin not allowed: %s", origin)
 }
 
 // relayEvents pumps EventSource messages to one WS client. A discarded reader

@@ -1617,6 +1617,10 @@
   //   "sidecar_bind": "127.0.0.1:8790",
   //   "wip_mode": "warn",
   //   "reconcile_interval": "0s",
+  //   "allowed_origins": [],          // exact scheme://host[:port] WS
+  //                                   // origins for the TLS-proxy
+  //                                   // deployment (no wildcard/path;
+  //                                   // empty = loopback-only default)
   //   "github_sync": {
   //     "enabled": false,
   //   },

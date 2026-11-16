@@ -103,3 +103,69 @@ func TestKanbanReconcileIntervalDurationExemption(t *testing.T) {
 		t.Errorf("convert side: shutdown_timeout left as quoted string; got %s", convert)
 	}
 }
+
+// TestKanbanAllowedOriginsValidate pins the [kanban].allowed_origins
+// entry grammar: exact scheme://host[:port] origins only. Empty/absent =
+// valid (the byte-identical default); wildcards, paths/trailing slashes,
+// non-http schemes, bare hosts, and credentials all fail load.
+func TestKanbanAllowedOriginsValidate(t *testing.T) {
+	ok := []string{
+		"https://board.example.com",
+		"http://localhost:8790",
+		"https://board.example.com:8443",
+	}
+	for _, entry := range ok {
+		if err := (KanbanConfig{AllowedOrigins: []string{entry}}).Validate(); err != nil {
+			t.Errorf("valid entry %q rejected: %v", entry, err)
+		}
+	}
+
+	bad := []string{
+		"*",
+		"https://*.example.com",
+		"https://board.example.com/",
+		"https://board.example.com/app",
+		"board.example.com",
+		"ftp://board.example.com",
+		"https://user:pass@board.example.com",
+		"https://board.example.com?x=1",
+		"",
+	}
+	for _, entry := range bad {
+		if err := (KanbanConfig{AllowedOrigins: []string{entry}}).Validate(); err == nil {
+			t.Errorf("malformed entry %q accepted at load", entry)
+		}
+	}
+
+	// The empty list — the default — validates (byte-identical).
+	if err := (KanbanConfig{}).Validate(); err != nil {
+		t.Fatalf("empty kanban block must validate: %v", err)
+	}
+	// wip_mode check survives the refactor.
+	if err := (KanbanConfig{WIPMode: "yolo"}).Validate(); err == nil {
+		t.Fatal("wip_mode validation regressed")
+	}
+}
+
+// TestKanbanAllowedOriginsJSON5RoundTrip proves the key loads through
+// the JSON5 path and lands on the struct.
+func TestKanbanAllowedOriginsJSON5RoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "meept.json5")
+	content := `{
+  "kanban": {
+    "enabled": true,
+    "allowed_origins": ["https://board.example.com"]
+  }
+}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.Kanban.AllowedOrigins) != 1 || cfg.Kanban.AllowedOrigins[0] != "https://board.example.com" {
+		t.Fatalf("allowed_origins = %v, want the one entry", cfg.Kanban.AllowedOrigins)
+	}
+}

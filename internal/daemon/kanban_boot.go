@@ -99,6 +99,12 @@ type kanbanSidecarConfig struct {
 	// Webdir is the optional web-bundle root; empty lets the sidecar
 	// resolve $WEBDIR / $MEEPT_HOME/webui itself.
 	Webdir string
+	// AllowedOrigins mirrors [kanban].allowed_origins: each entry is
+	// passed as a repeated -allow-origin flag so the sidecar's WS relay
+	// accepts the TLS-proxy's public Origin. The sidecar stays
+	// config-blind (C7) — flags are its only config channel. Empty =
+	// no flags, byte-identical default posture.
+	AllowedOrigins []string
 	// PIDFile anchors the pid file + durable spawn record. Empty selects
 	// the run dir (where StartupOrphanSweep scans).
 	PIDFile string
@@ -256,9 +262,10 @@ func (d *Daemon) StartKanbanSidecar(ctx context.Context) error {
 	}
 
 	sup := newKanbanSupervisor(kanbanSidecarConfig{
-		SocketPath: socketPath,
-		Bind:       bind,
-		Webdir:     webdir,
+		SocketPath:     socketPath,
+		Bind:           bind,
+		Webdir:         webdir,
+		AllowedOrigins: d.fullConfig.Kanban.AllowedOrigins,
 	}, d.logger)
 	// Test seam: tightened timings applied BEFORE the loop goroutine
 	// starts, so the loop never reads cfg while it is being mutated.
@@ -357,21 +364,35 @@ func (s *kanbanSupervisor) run(ctx context.Context, ready chan<- error) {
 // foreign-token live pid file is adopted observed-not-OWNED and NOT killed,
 // ever — the daemon-AGENTS ownership rule the voice child relies on.
 // Called with no lock held (I/O).
-func (s *kanbanSupervisor) spawnOnce(ctx context.Context) error {
-	bin := s.cfg.resolveBinary()
-	if bin == "" {
-		return errors.New("no meept-kanban binary found (daemon-adjacent dir or $MEEPT_HOME/bin)")
+
+// buildKanbanArgs assembles the child's argv. The sidecar is config-blind
+// (C7): every knob arrives as a flag. Empty AllowedOrigins appends nothing
+// (byte-identical spawn args pre-knob).
+func buildKanbanArgs(bin string, cfg kanbanSidecarConfig) []string {
+	args := []string{bin, "-daemon-socket", cfg.SocketPath, "-bind", cfg.Bind}
+	if cfg.Webdir != "" {
+		args = append(args, "-webdir", cfg.Webdir)
 	}
-	args := []string{bin, "-daemon-socket", s.cfg.SocketPath, "-bind", s.cfg.Bind}
-	if s.cfg.Webdir != "" {
-		args = append(args, "-webdir", s.cfg.Webdir)
-	}
-	if kanbanBindNeedsAllowLAN(s.cfg.Bind) {
+	if kanbanBindNeedsAllowLAN(cfg.Bind) {
 		// The bind is an explicit operator knob ([kanban].sidecar_bind);
 		// pass the flag the sidecar's C7 guard demands, so a deliberate
 		// LAN bind works instead of crash-looping on the refusal.
 		args = append(args, "-allow-lan")
 	}
+	for _, origin := range cfg.AllowedOrigins {
+		if trimmed := strings.TrimSpace(origin); trimmed != "" {
+			args = append(args, "-allow-origin", trimmed)
+		}
+	}
+	return args
+}
+
+func (s *kanbanSupervisor) spawnOnce(ctx context.Context) error {
+	bin := s.cfg.resolveBinary()
+	if bin == "" {
+		return errors.New("no meept-kanban binary found (daemon-adjacent dir or $MEEPT_HOME/bin)")
+	}
+	args := buildKanbanArgs(bin, s.cfg)
 
 	rc := &llm.RuntimeConfig{
 		EndpointKey:  kanbanSidecarEndpointKey,

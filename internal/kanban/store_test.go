@@ -23,7 +23,7 @@ func newTestStore(t *testing.T) *Store {
 		t.Fatalf("NewStore: %v", err)
 	}
 	t.Cleanup(func() {
-		if err := s.db.Close(); err != nil {
+		if err := s.Close(); err != nil {
 			t.Errorf("close store: %v", err)
 		}
 	})
@@ -419,3 +419,52 @@ func TestStore_DSNPragmasApplied(t *testing.T) {
 
 // ensure the sql import is used even when helpers above are trimmed
 var _ = sql.ErrNoRows
+
+// TestStore_Close pins the exported drain-then-close accessor: a Close
+// releases the handle (later queries fail), a second Close is a no-op
+// returning nil, (*Store)(nil).Close() is nil-safe, and the DB file can be
+// reopened after Close (WAL is checkpointed, data intact).
+func TestStore_Close(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "close-test.db")
+
+	s, err := NewStore(dbPath, slog.Default())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	if err := s.CreateBoard(ctx, Board{ID: "b1", Name: "close"}); err != nil {
+		t.Fatalf("CreateBoard: %v", err)
+	}
+
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	// Double-Close: idempotent, no error.
+	if err := s.Close(); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
+	// Nil receiver: shutdown paths call it unconditionally.
+	var nilStore *Store
+	if err := nilStore.Close(); err != nil {
+		t.Fatalf("nil store Close: %v", err)
+	}
+	// Use-after-close fails instead of panicking.
+	if _, err := s.ListBoards(ctx); err == nil {
+		t.Fatal("ListBoards after Close: want error, got nil")
+	}
+
+	// Reopen the same file: the board survived (clean WAL shutdown).
+	reopened, err := NewStore(dbPath, slog.Default())
+	if err != nil {
+		t.Fatalf("reopen after Close: %v", err)
+	}
+	t.Cleanup(func() { _ = reopened.Close() })
+	boards, err := reopened.ListBoards(ctx)
+	if err != nil {
+		t.Fatalf("ListBoards after reopen: %v", err)
+	}
+	if len(boards) != 1 || boards[0].ID != "b1" {
+		t.Fatalf("reopened boards = %+v, want the one card written pre-Close", boards)
+	}
+}
