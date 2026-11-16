@@ -10,15 +10,15 @@
 
 - **Role:** Root
 - **Parent:** none
-- **Children:** 1 gate leaf + 8 implementation leaves under this node
-- **Scope:** Add eight additive routing capabilities to meept's model configuration and LLM resolver, ported from the Sovereign Router design (github.com/jmason84/SovereignRouter, reviewed 2026-11-15 at `/tmp/SovereignRouter`, spec v0.9.0). No capability is removed; meept's existing alias rotation, cooldown, quota-block, and sticky semantics are preserved byte-identically when the new features are off.
-- **Source of requirements:** the comparison report delivered 2026-11-15 (P1-P8 proposals), restated as R1-R8 below.
+- **Children:** 1 gate leaf + 9 implementation leaves under this node
+- **Scope:** Add nine additive routing capabilities to meept's model configuration and LLM resolver, ported from the Sovereign Router design (github.com/jmason84/SovereignRouter, reviewed 2026-11-15 at `/tmp/SovereignRouter`, spec v0.9.0). No capability is removed; meept's existing alias rotation, cooldown, quota-block, and sticky semantics are preserved byte-identically when the new features are off.
+- **Source of requirements:** the comparison report delivered 2026-11-15 (P1-P8 proposals) plus the follow-up analysis (price groups R9, sticky-difficulty source Q7), restated as R1-R9 below.
 
 ## Goal
 
 Sovereign Router routes on **cost, quality, data posture, and pool capacity**. meept routes on **health, declared alias order, and cooldowns**. This tree adds the four missing dimensions without disturbing the existing ones.
 
-Eight capabilities, each traceable to a requirement:
+Nine capabilities, each traceable to a requirement:
 
 | Req | Capability | Sovereign Router source | Leaf |
 |-----|-----------|------------------------|------|
@@ -30,6 +30,7 @@ Eight capabilities, each traceable to a requirement:
 | R6 | Advisory budget mode (steer + alert, never refuse) | `src/governor.py:87-207`; owner ruling 2026-10-31 "no spending caps, ever" | 08 |
 | R7 | Sticky-pin invalidation on classified difficulty increase | `src/sticky.py:1-60` | 07 |
 | R8 | Streamed tool-call validation before execution | `src/validation.py:78-126` `validate_response`, `validate_streamed_text_outcome` | 03 |
+| R9 | Alias-level price group + paid spillway (free first, paid on exhaustion) | `src/gateway.py:765-800` `build_spillway_candidates`; registry `lane` `paid`/`premium` | 09 |
 
 ### Non-goals (explicit)
 
@@ -38,6 +39,11 @@ Eight capabilities, each traceable to a requirement:
 - **No new bus topics and no new WS event types.** New signals ride response metadata, following the `llm_tier*` precedent (`internal/llm/tier_policy.go:42-47`).
 - **No `internal/llm` -> `internal/config` import.** New config is mirrored 1:1 as a plain struct inside `internal/llm`, the `TierPolicy` / `FailurePolicyConfig` pattern.
 - **No cloud-provider calls in tests.** The repo e2e tier is hermetic (AGENTS.md e2e policy).
+- **R9 (price groups) is explicitly NOT the Sovereign Router multi-tenant surface.** R9 adds a *price-tier label on aliases* (`free`/`paid`/`premium`) and a spillway that selects across tiers. It does NOT add per-identity clients, per-client key auth, per-client lanes, per-client daily targets, or a premium gate. meept's identity unit is the *session*, not the *consumer* (`internal/auth/quota.go:10-23` is an undecided no-op); inventing a tenant concept to host those features is a product decision this tree does not make. The portable mechanism (tier ordering + steering) is what R6 and R9 cover.
+
+### Difficulty sourcing (Q7 lock-in)
+
+R7's sticky-difficulty invalidation needs a per-turn difficulty signal *inside the agent loop*, where `ResolveForAlias` is called (`internal/agent/loop.go:5309`, `:6943`). The dispatcher's `Intent` is computed at dispatch, once — a different clock from the per-turn model resolution. **The difficulty derives from existing signals, never a second classifier call:** `Intent.SuggestedMode` (`direct`/`spec_plan`/`quick_plan`/`spec_pair`, `dispatcher.go:2013-2044`) + `Intent.RequiresPlanning` + input length, projected to a 1-5 level by the frozen table in leaf 07 (Contract C11). This costs zero extra inference and reuses the routing decision meept already computes but discards. If no difficulty is derivable, the value is 0 and R7 is inert.
 
 ## Architecture
 
@@ -66,6 +72,9 @@ Eight capabilities, each traceable to a requirement:
                     [R6] advisory budget (steer, not block)
                     budget.go AdvisoryVerdict()
                               |
+                    [R9] paid spillway (free first, paid on exhaustion)
+                    pricegroup.go ResolveSpillway()
+                              |
                     ProviderManager.chatWithFailoverRaw
                               |
                     [R8] stream tool-call validation
@@ -73,6 +82,8 @@ Eight capabilities, each traceable to a requirement:
                               |
                         LLM client -> upstream
 ```
+
+`[R9]` is a caller-selected tier step (free → paid → premium), not part of single-alias rotation; `ResolveSpillway` is opt-in at the call site and never reorders `ResolveForAlias`.
 
 `[R4]` shadow routing is a **read-only parallel entry point**: it calls the same `ResolveForAlias` + a new cost estimator and returns the decision. It never enters `chatWithFailoverRaw`.
 
@@ -323,6 +334,50 @@ func ValidateToolCalls(resp *Response, offered []string) error
 
 This does NOT replace `ErrEmptyResponse`: empty-completion classification stays exactly where it is (every client, before the empty-retry). Tool-call validation runs after a successful parse and before the executor sees the calls.
 
+### C10: Alias price group + paid spillway (`internal/llm/pricegroup.go`)
+
+Owner: 09-price-groups.md. The `ModelAliasEntry.PriceGroup` field is declared in leaf 01 (same `providers.go` edit as `Quality`); leaf 09 implements the resolution.
+
+```
+// internal/llm/providers.go (leaf 01 declares the field, leaves it inert)
+type ModelAliasEntry struct {
+    ...
+    // PriceGroup tags this alias as a routing tier. "" | "free" | "paid" |
+    // "premium". "" = untagged = legacy behavior (this alias resolves only
+    // when explicitly selected). Free/paid/premium become selectable as a
+    // TIER by the spillway.
+    PriceGroup string `json:"price_group,omitempty"`
+}
+
+// internal/llm/pricegroup.go (leaf 09)
+type PriceGroup string
+const ( PriceGroupFree PriceGroup = "free"; PriceGroupPaid PriceGroup = "paid"; PriceGroupPremium PriceGroup = "premium" )
+
+// ResolveSpillway selects the cheapest capable alias across the given
+// groups in cost order, mirroring gateway.py build_spillway_candidates:
+//   - candidates = aliases whose PriceGroup is in groups, whose members all
+//     pass the posture + quality + admission filters for this request
+//   - sorted by (TotalCost, -quality)
+//   - a call with groups=["free"] then, on exhaustion/failure,
+//     ["paid","premium"] implements "free first, paid on exhaustion"
+func (r *Resolver) ResolveSpillway(ctx context.Context, groups []string, fc *FilterCtx) (*ModelConfig, error)
+func (r *Resolver) AliasesByPriceGroup(g PriceGroup) []string
+```
+
+Freeze: spillway selection NEVER reorders alias rotation, never touches a sticky pin, and does not change what an explicitly-selected alias resolves to. A `free`-tagged and `paid`-tagged alias both operating for the same caller, with `free` healthy, always yields `free` first — that is the whole point, and it is opt-in (only a caller that names it as a `groups` step gets it; default callers are unchanged).
+
+### C11: Difficulty derivation (`internal/llm/difficulty.go`)
+
+Owner: 07-sticky-difficulty.md. The per-turn difficulty source, locked in by Q7.
+
+```
+// DeriveDifficulty projects an Intent into a difficulty level, 0-5.
+// It is pure/side-effect-free: no classifier call, no I/O, reads only the
+// values the dispatcher already computed. A caller with no Intent or no
+// derivable signal returns 0 (R7 inert). This table is the frozen contract.
+func DeriveDifficulty(mode string, requiresPlanning bool, inputLen int) int
+```
+
 ## Test Gate
 
 Repo policy (AGENTS.md e2e policy): **new feature tests go in the hermetic e2e tier, not new unit test files.** The gate leaf writes `e2e/suites/sovereign-parity/` with the `e2e` build tag plus an `e2e/manifest.json` entry, per `docs/workflows/e2e-testing.md`.
@@ -342,9 +397,12 @@ Repo policy (AGENTS.md e2e policy): **new feature tests go in the hermetic e2e t
 | R6 | `mode: steer` with the daily cost cap exceeded completes the turn and emits `budget_advisory` | sovereign-parity | PENDING |
 | R6 | `mode: enforce` (default) is byte-identical to today: `BudgetExceededError`, turn refused | sovereign-parity | PENDING |
 | R7 | a new user message classified above the pinned level releases the pin and re-pins at the rotation head | sovereign-parity | PENDING |
+| R7 | difficulty derives from existing Intent signals (no second classifier call) and difficulty 0 keeps R7 inert | sovereign-parity | PENDING |
 | R8 | a tool call naming an unoffered function is rejected with `ErrToolCallInvalid` and never reaches the executor | sovereign-parity | PENDING |
 | R8 | streamed tool-call arguments split across chunks are validated only after the stream completes | sovereign-parity | PENDING |
-| ALL | flag-off control: with all eight features unconfigured, the routing decision stream is byte-identical to `main` | sovereign-parity | PENDING |
+| R9 | a free-tagged and paid-tagged alias both eligible: the free one serves while healthy, the paid spillway serves only on free exhaustion/failure | sovereign-parity | PENDING |
+| R9 | untagged aliases (no `price_group`) keep legacy resolution exactly; spillway is opt-in per-caller | sovereign-parity | PENDING |
+| ALL | flag-off control: with all nine features unconfigured, the routing decision stream is byte-identical to `main` | sovereign-parity | PENDING |
 
 Gate leaf: `00T-gate-tests.md`. Implementation leaves dispatch only after the gate reaches TESTS_VALIDATED.
 
@@ -359,12 +417,13 @@ Gate leaf: `00T-gate-tests.md`. Implementation leaves dispatch only after the ga
 | 04 | 04-shadow-routing-rpc.md | R4 | D | 00T | 60K | `internal/llm/shadow.go`, `internal/rpc/shadow_route.go`, `internal/daemon/shadow_rpc_wiring.go` |
 | 05 | 05-data-posture.md | R3 | A2 | 01 | 60K | `internal/llm/posture.go`, `providers.go`, `resolver.go` |
 | 06 | 06-pool-scoped-failure.md | R5 | A3 | 05 | 65K | `internal/llm/pool_failure.go`, `resolver.go` |
-| 07 | 07-sticky-difficulty.md | R7 | A4 | 06 | 45K | `resolver.go` |
+| 07 | 07-sticky-difficulty.md | R7 | A4 | 06 | 55K | `resolver.go`, `internal/llm/difficulty.go` |
 | 08 | 08-advisory-budget.md | R6 | B2 | 02 | 50K | `internal/llm/budget.go`, `provider_manager.go` |
+| 09 | 09-price-groups.md | R9 | A5 | 07, 01 | 45K | `internal/llm/pricegroup.go` (reads `resolver.go`, `providers.go`) |
 
 ### File-write serialization (verified by intersecting declared write-targets)
 
-`internal/llm/resolver.go` is written by 01, 05, 06, 07 - therefore those four leaves are **serialized in that order**, not parallel. `internal/llm/providers.go` is written by 01 and 05 - same chain. `internal/llm/provider_manager.go` is written by 02 and 08 - 08 follows 02.
+`internal/llm/resolver.go` is written by 01, 05, 06, 07 - therefore those four leaves are **serialized in that order**, not parallel. `internal/llm/providers.go` is written by 01 and 05 - same chain. `internal/llm/provider_manager.go` is written by 02 and 08 - 08 follows 02. `internal/llm/pricegroup.go` (new file) is written ONLY by 09; 09 also reads `resolver.go` but does not edit it, so it depends on the A-chain being complete (09 needs 01's `PriceGroup` field and the filters) without adding a writer.
 
 Parallel lanes after the gate:
 
@@ -375,6 +434,7 @@ Wave 2 (2 concurrent):
   A2: 05 (needs 01)      B2: 08 (needs 02)
 Wave 3:  A3: 06 (needs 05)
 Wave 4:  A4: 07 (needs 06)
+Wave 5:  A5: 09 (needs 07, 01)   -- reads resolver.go, writes pricegroup.go only
 ```
 
 ## Dispatch Protocol
@@ -387,7 +447,7 @@ Wave 4:  A4: 07 (needs 06)
 
 ### Wave 1
 
-Dispatch 01, 02, 03, 04 together (4 concurrent, file-disjoint - verified above). Each brief pins: the leaf path, Contracts C1-C9 that apply, "Do NOT commit", the corruption rule (never `read_file` a file then `write_file` it back; explore with `search_files`/`cat`), and the exact verify command.
+Dispatch 01, 02, 03, 04 together (4 concurrent, file-disjoint - verified above). Each brief pins: the leaf path, Contracts C1-C11 that apply, "Do NOT commit", the corruption rule (never `read_file` a file then `write_file` it back; explore with `search_files`/`cat`), and the exact verify command.
 
 ### Wave 2-4
 
@@ -434,12 +494,13 @@ After every leaf is REVIEWED: run `make build`, `make test`, `make lint-ci`, `ma
 | 06 | R5 | PENDING | | |
 | 07 | R7 | PENDING | | |
 | 08 | R6 | PENDING | | |
+| 09 | R9 | PENDING | | |
 
 Status values: PENDING, TESTS_IN_PROGRESS, TESTS_VALIDATED, IN_PROGRESS, IMPLEMENTED, REVIEWED, COMPLETE, BLOCKED.
 
 ## Integration Test Plan
 
-1. **Flag-off control (blocking).** With no `quality`, no `data_posture`, no `budget.mode`, and no `pool` config anywhere, run the existing routing suite and diff the `routing_decisions` rows against `main`. Must be identical. This is the single most important gate: it proves the eight features are additive.
+1. **Flag-off control (blocking).** With no `quality`, no `data_posture`, no `budget.mode`, no `pool`, and no `price_group` config anywhere, run the existing routing suite and diff the `routing_decisions` rows against `main`. Must be identical. This is the single most important gate: it proves the nine features are additive.
 2. **Contract compile check.** Each leaf's declared signature must exist verbatim. Run `go build ./...` after each wave.
 3. **Precedence invariance.** Add a test that arms a quota block, an endpoint cooldown, and a sticky pin simultaneously and asserts the winner is unchanged from `main` (quota > endpoint > alias > sticky).
 4. **Sentinel identity.** Assert `errors.Is(err, ErrContextTooSmall)` and direct pointer equality for `ErrToolCallInvalid` on the exhaustion path.
@@ -471,3 +532,5 @@ Status values: PENDING, TESTS_IN_PROGRESS, TESTS_VALIDATED, IN_PROGRESS, IMPLEME
 | Q3 | Should `public_only` be the *default* posture for a provider with no explicit declaration (conservative) or `private` (backward-compatible)? | `private` - backward compatibility wins; the flag-off control gate requires it. | Choosing conservative breaks the flag-off gate and every existing install. |
 | Q4 | Does the pool concept need a config surface (two providers naming one pool), or is one-pool-per-provider enough for v1? | One pool per provider in v1, with the `pool` field reserved. OpenRouter `:free` and Cloudflare are the only real multi-route pools and both are single-provider. | Leaf 06 grows a config surface and a migration. |
 | Q5 | Should R2 admission control consult `llm.context_discovery` (opt-in, default off) or only the static `models.json5` `context_limit`? | Static only in v1. Discovery is off by default and async; an admission gate that depends on a background syncer is a gate that flaps. | Leaf 02 stays small; discovery integration is a follow-up. |
+| Q6 | Should price groups (R9) be a ninth leaf, folded into leaf 01, or skipped? | Ninth leaf (`09-price-groups.md`). It is a distinct, independently-verifiable capability; folding it into 01 makes leaf 01 too large and couples schema to resolution. | A separate leaf lets 01 (schema) and 09 (resolution) advance on their own review cycles. |
+| Q7 | What is the per-turn difficulty source for R7? | Derive from existing `Intent` signals (`SuggestedMode`/`RequiresPlanning`/input length) via the frozen `DeriveDifficulty` table (Contract C11) - zero extra inference, reuses what meept already computes. Never a second classifier call. | Locked in the master (Difficulty sourcing); leaf 07 implements the table. A caller may still override difficulty explicitly. |

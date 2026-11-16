@@ -13,7 +13,7 @@
 ## Meta
 
 - **Parent:** master.md
-- **Scope:** Write the full hermetic e2e suite for requirements R1-R8 of the Sovereign Router parity tree, plus the `e2e/manifest.json` path_map entry. RED today, GREEN after leaves 01-08 land.
+- **Scope:** Write the full hermetic e2e suite for requirements R1-R9 of the Sovereign Router parity tree, plus the `e2e/manifest.json` path_map entry. RED today, GREEN after leaves 01-09 land.
 - **Dependencies:** none. Tests reference symbols that do not exist yet; that IS the RED state.
 - **Estimated Context:** 75K
 - **Concurrency Group:** Phase 0 (gate) - runs alone
@@ -21,7 +21,7 @@
 
 ## Goal
 
-Produce the failing-test suite that pins all eight contracts before any implementation dispatches: the selection chain (C1), quality shape and floor (C2), admission verdict (C3), data posture (C4), pool-scoped failure (C5), shadow route (C6), advisory budget (C7), sticky difficulty (C8), streamed tool-call validation (C9).
+Produce the failing-test suite that pins all eleven contracts before any implementation dispatches: the selection chain (C1), quality shape and floor (C2), admission verdict (C3), data posture (C4), pool-scoped failure (C5), shadow route (C6), advisory budget (C7), sticky difficulty (C8), streamed tool-call validation (C9), price groups (C10), and the difficulty-derivation source (C11).
 
 ## Context
 
@@ -38,8 +38,10 @@ e2e/suites/sovereign-parity/
   shadow_test.go       // R4
   poolfailure_test.go  // R5
   budget_test.go       // R6
-  sticky_test.go       // R7
+  sticky_test.go      // R7
   toolcheck_test.go    // R8
+  pricegroup_test.go   // R9
+  derivedifficulty_test.go // R7 source (C11)
   flagoff_test.go      // ALL - byte-identical control
 ```
 
@@ -135,6 +137,14 @@ llm.AdvisoryVerdict{OverTarget, Limit, Used, Cap}
 
 llm.ErrToolCallInvalid
 llm.ValidateToolCalls(resp *llm.Response, offered []string) error
+
+llm.PriceGroupFree / PriceGroupPaid / PriceGroupPremium
+llm.ParsePriceGroup(s string) llm.PriceGroup
+(*llm.Resolver).ResolveSpillway(ctx, []string, *llm.FilterCtx) (*llm.ModelConfig, string, error)
+(*llm.Resolver).AliasesByPriceGroup(g llm.PriceGroup) []string
+ModelAliasEntry.PriceGroup      // string, json:"price_group,omitempty"
+
+llm.DeriveDifficulty(mode string, requiresPlanning bool, inputLen int) int
 ```
 
 ## Tasks
@@ -162,8 +172,11 @@ llm.ValidateToolCalls(resp *llm.Response, offered []string) error
 | T19 | R8 unknown function: a tool call naming a function absent from the offered list returns `ErrToolCallInvalid` and the executor is never invoked | Create: `toolcheck_test.go` | `-run 'TestToolCheck_'` | RED (undefined `llm.ValidateToolCalls`, `ErrToolCallInvalid`) | GREEN after leaf 03 | Given tools `[a,b]` offered and a response calling `c`; When validate; Then `err == llm.ErrToolCallInvalid` by pointer identity, executor counter 0 |
 | T20 | R8 bad arguments: arguments that are not a JSON object fail validation | same | `-run TestToolCheck_BadArgs'` | RED | GREEN | Given a call with `arguments: "{not json"`; When validate; Then `ErrToolCallInvalid` |
 | T21 | R8 stream completion: arguments split across SSE chunks validate only after the stream ends; a mid-stream abort does not produce a false pass | same | `-run TestToolCheck_Streamed'` | RED | GREEN | Given a streamed call split at an argument boundary; When the stream completes; Then validation runs once on the assembled call |
-| T22 | ALL flag-off control: with none of the eight features configured, every routing decision is byte-identical to `main` (golden rows) | Create: `flagoff_test.go` | `-run TestFlagOff'` | RED (partially - golden rows must be captured from `main`) | GREEN | Given a config with no new keys; When N turns resolve; Then the `routing_decisions` rows match the checked-in golden file |
-| T23 | Manifest registration: `sovereign-parity` suite + `internal/llm/` path_map entry; `make e2e-fast-area AREA=sovereign-parity` discovers the suite | Modify: `e2e/manifest.json` | `make e2e-fast-area AREA=sovereign-parity` | n/a (discovery) | suite listed and run | Given the manifest; When the area target runs; Then the suite executes |
+| T22 | R7 difficulty source: `DeriveDifficulty` maps `Intent` signals to 1-5 with no classifier call; and difficulty 0 keeps R7 inert | Create: `derivedifficulty_test.go` | `-run 'TestDeriveDifficulty'` | RED (undefined `llm.DeriveDifficulty`) | GREEN after leaf 07 | Given `(requiresPlanning, "quick_plan", ...)`; When derived; Then the frozen table level; Given no Intent (0); Then non-release |
+| T23 | R9 price group: a free-tagged alias and a paid-tagged alias both eligible; the free serves while healthy, the paid spillway serves only on free exhaustion/failure | Create: `pricegroup_test.go` | `-run 'TestPriceGroup_'` | RED (undefined `llm.ResolveSpillway`, `llm.PriceGroup`) | GREEN after leaf 09 | Given free A healthy and paid B; When spillway(["free"]) then spillway(["paid"]); Then A then B |
+| T24 | R9 untagged legacy: aliases with no `price_group` keep legacy resolution; spillway is opt-in per-caller and never reorders rotation | same | `-run TestPriceGroup_NoMutation'` | RED | GREEN | Given untagged aliases; When a normal turn; Then the decision equals `main` |
+| T25 | ALL flag-off control: with none of the nine features configured, every routing decision is byte-identical to `main` (golden rows) | Create: `flagoff_test.go` | `-run TestFlagOff'` | GREEN (partially - golden rows must be captured from `main`) | GREEN | Given a config with no new keys; When N turns resolve; Then the `routing_decisions` rows match the checked-in golden file |
+| T26 | Manifest registration: `sovereign-parity` suite + `internal/llm/` path_map entry; `make e2e-fast-area AREA=sovereign-parity` discovers the suite | Modify: `e2e/manifest.json` | `make e2e-fast-area AREA=sovereign-parity` | n/a (discovery) | suite listed and run | Given the manifest; When the area target runs; Then the suite executes |
 
 ## Self-Verification Checklist
 

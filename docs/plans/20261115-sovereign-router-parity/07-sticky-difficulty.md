@@ -12,11 +12,11 @@
 ## Meta
 
 - **Parent:** master.md
-- **Scope:** Extend sticky pins with a `Difficulty` field (Contract C8). A pin created for an easy turn is released when a later user message classifies HARDER than the level the pin was created for, and the caller re-pins at the rotation head. Same-or-lower difficulty keeps the pin.
+- **Scope:** Extend sticky pins with a `Difficulty` field (Contract C8) and add the difficulty **source** (Contract C11): `DeriveDifficulty`, a pure projection of the dispatcher's existing `Intent` signals into a 1-5 level, threaded into the loop where `ResolveForAlias` runs. A pin created for an easy turn is released when the derived difficulty rises past the level the pin was created for, and the caller re-pins at the rotation head. Same-or-lower difficulty keeps the pin.
 - **Dependencies:** 00T gate tests committed (RED); 06-pool-scoped-failure.md COMPLETE (serializes behind 06; both edit `resolver.go`)
-- **Estimated Context:** 45K
+- **Estimated Context:** 55K
 - **Concurrency Group:** A4 (wave 4 - serialized behind 06)
-- **Source reference:** Sovereign Router `src/sticky.py:1-60` - "a new *user* message arrives whose classified level is higher than the level the sticky model was chosen for."
+- **Source reference:** Sovereign Router `src/sticky.py:1-60` - "a new *user* message arrives whose classified level is higher than the level the sticky model was chosen for." Plus the difficulty-source analysis (Q7): meept has no per-turn difficulty today, and `Intent` is computed at dispatch, which is a different clock from per-turn model resolution (`loop.go:5309`) - so this leaf adds the derivation seam.
 
 ## Goal
 
@@ -46,7 +46,9 @@ Without it, a conversation that starts with "rename this variable" pins the chea
 - `internal/llm/resolver.go:1128-1142` - `recordStickyDecision` and the reason strings
 - `internal/llm/routing_log.go:98` - `Reason` column (free text, no migration)
 - `internal/llm/selection.go` - `FilterCtx.Difficulty` from leaf 01
-- `internal/agent/dispatcher.go:101` - `Intent`
+- `internal/agent/dispatcher.go:101-140` - `Intent`: `SuggestedMode` (:123), `RequiresPlanning` (:112). The difficulty source inputs.
+- `internal/agent/dispatcher.go:2013-2044` - `suggestMode`: the short-input downgrade (<50 chars -> "direct") and quickplan/compound/spec_pair mode synthesis this leaf mirrors in `DeriveDifficulty`.
+- `internal/agent/loop.go:5309`, `:6943` - `ResolveForAlias(l.modelRef, l.sessionID)`: the per-turn resolution site that must receive the derived difficulty.
 - `e2e/suites/sovereign-parity/sticky_test.go` - gate tests T17, T18
 
 ## Interface Contracts (From Parent)
@@ -69,6 +71,22 @@ type StickyPin struct {
 func WithDifficulty(d int) ChatOption
 // Read inside resolveStickyCaller as fc.Difficulty. Zero = unclassified =
 // the feature is inert (a pin created at 0 is never released for difficulty).
+
+// internal/llm/difficulty.go (Contract C11) - the difficulty SOURCE.
+// DeriveDifficulty projects an Intent's routing signals into a 1-5 level.
+// Pure function: no classifier call, no I/O. Values come from the values the
+// dispatcher already computed, so there is zero extra inference cost.
+// A caller with no Intent or no derivable signal passes 0 -> R7 inert.
+//
+// The frozen table (locked by Q7):
+//   requiresPlanning==true              -> level 4
+//   mode=="quick_plan"                  -> level 5   (explicit execution phrasing)
+//   mode=="spec_plan" && requiresPlan   -> level 4
+//   mode=="spec_pair" || mode=="compound"-> level 3
+//   otherwise, inputLen<50              -> level 1   (short-input downgrade,
+//                                                     mirrors suggestMode)
+//   otherwise                           -> level 2
+func DeriveDifficulty(mode string, requiresPlanning bool, inputLen int) int
 ```
 
 ### Frozen semantics
@@ -93,8 +111,9 @@ The release must reuse the EXISTING re-pin block (the one with the quota-block a
 
 | Task ID | Objective | Files | Verify command | RED reason | PASS state | Given/When/Then |
 |---------|-----------|-------|----------------|------------|------------|-----------------|
+| T0 | Implement `DeriveDifficulty(mode, requiresPlanning, inputLen) int` as the frozen table (Contract C11). Pure, no I/O, no classifier call. Create `internal/llm/difficulty.go`. | Create: `internal/llm/difficulty.go` | `go test -p 2 ./internal/llm/ -run TestDeriveDifficulty` | RED (undefined) | GREEN | Given each row of the frozen table; When derived; Then the level matches |
 | T1 | Add `StickyPin` struct; change `AliasHealth.StickyPins` to `map[string]StickyPin`; update every reader/writer (`resolveStickyCaller`, `releasePinsForModel`, `ForgetSessionEndpoint*`) | Modify: `internal/llm/resolver.go` (pin map + all uses) | `go build ./internal/llm/` | RED (compile) | GREEN | Given the new type; When built; Then every pin site compiles with Index/Date/Difficulty |
-| T2 | Add `WithDifficulty(d int) ChatOption` and thread it to the sticky call site | Modify: `internal/llm/resolver.go:543-545`, the `ChatOption` plumbing | `go test -p 2 ./internal/llm/ -run TestWithDifficulty` | RED (undefined) | GREEN | Given an option; When applied; Then the resolver's `FilterCtx.Difficulty` carries the value |
+| T2 | Add `WithDifficulty(d int) ChatOption` and, when no explicit difficulty is given, derive it from the loop's pending intent via `DeriveDifficulty` before the sticky call site | Modify: `internal/llm/resolver.go:543-545`, the `ChatOption` plumbing, `internal/agent/loop.go` | `go test -p 2 ./internal/llm/ -run TestWithDifficulty` | RED (undefined) | GREEN | Given an option; When applied; Then the resolver's `FilterCtx.Difficulty` carries the value |
 | T3 | Implement the difficulty release: `fc.Difficulty > pin.Difficulty` deletes the pin and falls through to the existing re-pin block with reason `sticky_difficulty_increase` | Modify: `internal/llm/resolver.go:1025-1047` | `go test -tags e2e -p 2 ./e2e/suites/sovereign-parity/ -run 'TestSticky_'` | RED | GREEN | Given a pin at difficulty 2; When a difficulty-4 turn resolves; Then the pin moves and the routing-log reason is `sticky_difficulty_increase` |
 | T4 | Same-or-lower difficulty keeps the pin (both `==` and `<` cases) | Modify: `internal/llm/resolver.go` | `-run TestSticky_SameDifficultyKeepsPin` | RED | GREEN | Given a pin at 3; When difficulty 2 or 3; Then the same model serves |
 | T5 | Inertness: difficulty 0 (unclassified) never releases a pin | same | `-run TestSticky_ZeroDifficultyInert'` | RED | GREEN | Given a pin at 2; When difficulty 0; Then the pin holds |
@@ -104,7 +123,8 @@ The release must reuse the EXISTING re-pin block (the one with the quota-block a
 
 ## Self-Verification Checklist
 
-- [ ] T1-T8 complete; gate tests T17, T18 GREEN.
+- [ ] T0-T8 complete; gate tests T17, T18 GREEN.
+- [ ] `DeriveDifficulty` is pure (no classifier call, no I/O) and matches the frozen table in this leaf verbatim.
 - [ ] `StickyPins` has exactly ONE writer path (the existing re-pin block); grep confirms no second assignment.
 - [ ] `WithDifficulty` is request-scoped (a `ChatOption`), never a field on the shared `ProviderManager` or `Resolver`.
 - [ ] Difficulty 0 is inert.
