@@ -2,11 +2,14 @@ package builtin
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tools"
 )
 
@@ -150,6 +153,112 @@ func TestInboxTool_DrainsAndMarksRead(t *testing.T) {
 	if n := len(bus.events); n == 0 {
 		t.Fatal("expected agent.message.delivered bus events")
 	}
+}
+
+// TestSendAgentMessage_Structured pins F7 (inbox leaf 03): the optional
+// "structured" object param composes an AgentInboxBody JSON envelope as
+// the stored body, while the receipt stays byte-identical to the legacy
+// send path. RED until the structured param lands.
+func TestSendAgentMessage_Structured(t *testing.T) {
+	store := &mockMessageStore{}
+	tool := NewSendAgentMessageTool(store,
+		func(id string) bool { return id == "bob" },
+		func() []string { return []string{"bob"} },
+		func(ctx context.Context) string { return "orchestrator" },
+	)
+
+	t.Run("parameters declare optional structured object", func(t *testing.T) {
+		params := tool.Parameters()
+		prop, ok := params.Properties["structured"]
+		if !ok {
+			t.Fatalf("Parameters() missing optional %q property; have keys %v", "structured", propKeys(params.Properties))
+		}
+		if prop.Type != schemaTypeObject {
+			t.Fatalf("structured property type = %q; want object", prop.Type)
+		}
+		for _, r := range params.Required {
+			if r == "structured" {
+				t.Fatal("structured must be optional, not required")
+			}
+		}
+	})
+
+	t.Run("send with structured stores inbox-body envelope", func(t *testing.T) {
+		structured := map[string]any{
+			"tool_targets": []any{"shell"},
+			"file_paths":   []any{},
+			"plan_entries": []any{"03-01"},
+		}
+		res, err := tool.Execute(context.Background(), map[string]any{
+			"to":         "bob",
+			"message":    "run the shell check",
+			"structured": structured,
+		})
+		if err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+		receipt, ok := res.(SendMessageResult)
+		if !ok {
+			t.Fatalf("result type %T; want SendMessageResult", res)
+		}
+		if receipt.ID == "" || receipt.State != "queued" || receipt.To != "bob" {
+			t.Fatalf("receipt must be unchanged by structured; got %+v", receipt)
+		}
+		if len(store.queued) != 1 {
+			t.Fatalf("queued %d messages; want 1", len(store.queued))
+		}
+
+		// The stored body must decode as the AgentInboxBody envelope
+		// (local mirror: builtin cannot import internal/employee).
+		var envelope struct {
+			Body       string `json:"body"`
+			Structured *struct {
+				ToolTargets []string `json:"tool_targets"`
+				FilePaths   []string `json:"file_paths"`
+				PlanEntries []string `json:"plan_entries"`
+			} `json:"structured"`
+		}
+		if err := json.Unmarshal([]byte(store.queued[0].Body), &envelope); err != nil {
+			t.Fatalf("stored body is not an AgentInboxBody envelope: %v (body %q)", err, store.queued[0].Body)
+		}
+		if envelope.Body != "run the shell check" {
+			t.Fatalf("envelope body = %q; want %q", envelope.Body, "run the shell check")
+		}
+		if envelope.Structured == nil {
+			t.Fatalf("stored envelope lost structured; body %q", store.queued[0].Body)
+		}
+		if len(envelope.Structured.ToolTargets) != 1 || envelope.Structured.ToolTargets[0] != "shell" {
+			t.Fatalf("ToolTargets = %v; want [shell]", envelope.Structured.ToolTargets)
+		}
+		if len(envelope.Structured.PlanEntries) != 1 || envelope.Structured.PlanEntries[0] != "03-01" {
+			t.Fatalf("PlanEntries = %v; want [03-01]", envelope.Structured.PlanEntries)
+		}
+	})
+
+	t.Run("send without structured keeps legacy raw body", func(t *testing.T) {
+		if _, err := tool.Execute(context.Background(), map[string]any{
+			"to": "bob", "message": "plain hello",
+		}); err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+		if len(store.queued) != 2 {
+			t.Fatalf("queued %d messages; want 2", len(store.queued))
+		}
+		body := store.queued[1].Body
+		if body != "plain hello" {
+			t.Fatalf("legacy send body = %q; want verbatim %q", body, "plain hello")
+		}
+	})
+}
+
+// propKeys keeps the missing-property failure readable.
+func propKeys(m map[string]llm.ParameterProperty) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func TestEmployeeMessageStoreSatisfiesToolInterface(t *testing.T) {
