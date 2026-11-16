@@ -30,11 +30,12 @@ type fakeSeams struct {
 	eventsHasMore   bool
 	eventsFound     bool
 	// voice.local.transcript fakes (end-of-call transcript read).
-	transcriptCalls int
-	transcriptEmp   string
-	transcriptSess  string
-	transcriptLines []VoiceCallTranscriptLine
-	transcriptFound bool
+	transcriptCalls   int
+	transcriptEmp     string
+	transcriptSess    string
+	transcriptEndedAt string
+	transcriptLines   []VoiceCallTranscriptLine
+	transcriptFound   bool
 }
 
 func (f *fakeSeams) seams() VoiceLocalSeams {
@@ -57,9 +58,9 @@ func (f *fakeSeams) seams() VoiceLocalSeams {
 			f.eventsCalls++
 			return f.eventsRows, f.eventsTruncated, f.eventsHasMore, f.eventsFound
 		},
-		Transcript: func(_ context.Context, _ string) (string, string, []VoiceCallTranscriptLine, bool) {
+		Transcript: func(_ context.Context, _ string) (string, string, string, []VoiceCallTranscriptLine, bool) {
 			f.transcriptCalls++
-			return f.transcriptEmp, f.transcriptSess, f.transcriptLines, f.transcriptFound
+			return f.transcriptEmp, f.transcriptSess, f.transcriptEndedAt, f.transcriptLines, f.transcriptFound
 		},
 	}
 }

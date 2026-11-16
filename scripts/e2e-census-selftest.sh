@@ -211,6 +211,52 @@ if [ -d "$SCRATCH/.git" ]; then
         bash "$SCRATCH/.githooks/pre-commit-e2e"
 fi
 
+# ── (j2) rename into a BRAND-NEW unmapped dir must BLOCK ─────────────────
+# H1 regression pin: git rename detection (diff.renames=true, the default)
+# emits R rows and ZERO A rows, so the old --diff-filter=A census saw an
+# empty list and the gate exited 0 on a file renamed (even with edits,
+# R073+) into an unmapped dir. The hook now censuses A/C/R rows (name-status,
+# new path for R). Real-index mode in the same scratch repo style as (j):
+# a high-similarity file + git mv + a small edit => an R row, not A+D.
+SCRATCH2="$WORK/scratch-rename-repo"
+mkdir -p "$SCRATCH2/.githooks" "$SCRATCH2/scripts" "$SCRATCH2/e2e" "$SCRATCH2/internal/oldpkg"
+cp "$HOOK" "$SCRATCH2/.githooks/pre-commit-e2e"
+printf '#!/usr/bin/env bash\necho "STUB e2e-affected: ok"\nexit 0\n' > "$SCRATCH2/scripts/e2e-affected.sh"
+chmod +x "$SCRATCH2/scripts/e2e-affected.sh"
+write_manifest "$SCRATCH2/e2e/manifest.json" '{"path_map": {"internal/agent/": ["smoke"]}, "exempt": {}}'
+{
+    echo "package oldpkg"
+    echo ""
+    i=0
+    while [ "$i" -lt 60 ]; do echo "func helper$i() int { return $i }"; i=$((i + 1)); done
+    echo ""
+    echo "var X = 1"
+} > "$SCRATCH2/internal/oldpkg/x.go"
+(
+    cd "$SCRATCH2" || exit 1
+    export GIT_AUTHOR_NAME=selftest GIT_AUTHOR_EMAIL=selftest@example.invalid
+    export GIT_COMMITTER_NAME=selftest GIT_COMMITTER_EMAIL=selftest@example.invalid
+    git init -q . >/dev/null 2>&1
+    git add . >/dev/null 2>&1
+    git commit -q -m "baseline" >/dev/null 2>&1
+    mkdir internal/brandnew
+    git mv internal/oldpkg/x.go internal/brandnew/x.go
+    echo "" >> internal/brandnew/x.go
+    echo "var Y = 2" >> internal/brandnew/x.go
+    git add internal/brandnew/x.go >/dev/null 2>&1
+    # Belt-and-braces: the case is only meaningful if git actually detected
+    # a RENAME (R row). If the shape regressed to A+D the census would catch
+    # it via the A row anyway — but then this case would not pin H1.
+    if ! git diff --cached --name-status | grep -q '^R'; then
+        echo "e2e-census-selftest: rename fixture produced no R row — setup failed" >&2
+        exit 1
+    fi
+) || { echo "CASE rename_into_new_unmapped_dir_blocks: rc=? expected=1 FAIL (scratch repo setup failed)"; CASES_RAN=$((CASES_RAN+1)); CASES_FAIL=$((CASES_FAIL+1)); }
+if [ -d "$SCRATCH2/.git" ]; then
+    run_case rename_into_new_unmapped_dir_blocks 1 "internal/brandnew" \
+        bash "$SCRATCH2/.githooks/pre-commit-e2e"
+fi
+
 # ── (k) documented escape hatch MEEPT_SKIP_E2E=1 exits 0 early ──────────
 run_case skip_env_escape_hatch 0 "E2E ENFORCEMENT SKIPPED" \
     env MEEPT_SKIP_E2E=1 \

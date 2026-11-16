@@ -1098,7 +1098,7 @@ func (c *OutputFiltersConfig) Validate() error {
 	}
 	code, ok := langcode.Normalize(c.ExpectedLanguage)
 	if !ok {
-		return fmt.Errorf("daemon.output_filters.expected_language: invalid value %q (want an ISO-639 code such as \"en\", \"de\", \"zh\", \"fr\")", c.ExpectedLanguage)
+		return fmt.Errorf("daemon.output_filters.expected_language: invalid value %q (want an ISO-639 code such as \"en\", \"de\", \"zh\")", c.ExpectedLanguage)
 	}
 	langDir := filepath.Join(MeeptHome(), "validator", "lang")
 	if langcode.HasWordTable(c.ExpectedLanguage, langDir) {

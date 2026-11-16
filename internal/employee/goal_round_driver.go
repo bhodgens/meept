@@ -96,10 +96,9 @@ type GoalRoundDriver struct {
 	// pollInterval is the Start loop's settlement-check cadence.
 	pollInterval time.Duration
 
-	// cancel stops the Start loop. Guarded by mu alongside start state.
+	// mu guards the start/stop state below (pollCancel/pollDone/pollStopping).
 	mu           sync.Mutex
 	armed        map[string]*bool
-	cancel       context.CancelFunc
 	inflight     map[string]bool   // employeeID -> deferred turn not yet settled
 	deferredGoal map[string]string // employeeID -> goal id of its last deferred turn (C27 disarm key)
 	pollCancel   context.CancelFunc

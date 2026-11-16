@@ -67,6 +67,8 @@ CREATE INDEX IF NOT EXISTS idx_call_errors_call
 `
 
 // CallRecord is one new call row. StartedAt zero means "now" (store clock).
+// EndedAt is populated on read paths (EndedCall) for ended rows; a live or
+// never-started row carries the zero value.
 type CallRecord struct {
 	CallID     string
 	Number     string
@@ -74,6 +76,7 @@ type CallRecord struct {
 	Direction  string // "incoming" | "outgoing"
 	SessionID  string
 	StartedAt  time.Time
+	EndedAt    time.Time
 }
 
 // TranscriptLine is one entry of the call transcript JSON array.
@@ -146,12 +149,13 @@ func NewCallStore(dbPath string, logger *slog.Logger) (*CallStore, error) {
 }
 
 // migrationAddColumn runs one ALTER TABLE, tolerating only the
-// duplicate-column error that steady-state reruns produce.
+// duplicate-column error that steady-state reruns produce. Log-and-
+// continue by design (upgrade-compatibility): the migration never fails
+// the store open, so ANY failure — duplicate-column or otherwise — is
+// only logged. A genuinely missing column surfaces later as per-query
+// errors from the statements that reference it, not as a boot failure.
 func (s *CallStore) migrationAddColumn(stmt, columnName string) {
 	if _, err := s.db.Exec(stmt); err != nil {
-		// Duplicate-column is the expected steady state on migrated
-		// databases; any other ALTER failure means the column is missing
-		// and later queries will fail on it, so surface it loudly.
 		if !strings.Contains(err.Error(), "duplicate column name") {
 			s.logger.Error("voice callstore: column migration failed", "column", columnName, "error", err)
 		}
@@ -412,12 +416,13 @@ func (s *CallStore) EndedCall(ctx context.Context, callID string) (CallRecord, [
 	var (
 		number, employeeID, direction, sessionID string
 		startedAt                                string
+		endedAt                                  sql.NullString
 		raw                                      string
 	)
 	err := s.db.QueryRowContext(ctx,
-		`SELECT number, employee_id, direction, session_id, started_at, transcript
+		`SELECT number, employee_id, direction, session_id, started_at, ended_at, transcript
 		 FROM voice_calls WHERE call_id = ?`, callID,
-	).Scan(&number, &employeeID, &direction, &sessionID, &startedAt, &raw)
+	).Scan(&number, &employeeID, &direction, &sessionID, &startedAt, &endedAt, &raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return CallRecord{}, nil, false, nil
 	}
@@ -436,7 +441,23 @@ func (s *CallStore) EndedCall(ctx context.Context, callID string) (CallRecord, [
 		EmployeeID: employeeID,
 		Direction:  direction,
 		SessionID:  sessionID,
+		EndedAt:    parseCallTime(endedAt.String),
 	}, lines, true, nil
+}
+
+// parseCallTime decodes a store RFC3339 TEXT timestamp; an empty or
+// unparseable value yields the zero time (callers treat that as "no such
+// timestamp"). Times are stored in UTC RFC3339Nano by Start/End, but reads
+// tolerate the second-resolution variant too.
+func parseCallTime(s string) time.Time {
+	if s == "" {
+		return time.Time{}
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
 }
 
 // SessionIDFor returns the meept session id bound to the most recent call

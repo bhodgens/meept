@@ -22,7 +22,6 @@ package voice
 //     thousands of calls.
 
 import (
-	"strings"
 	"sync"
 	"time"
 )
@@ -75,7 +74,7 @@ const (
 )
 
 // TelemetryEvent is one ring entry. Text is a PREVIEW (truncated at the
-// emitter by PreviewEventText) for kinds other than heard and said.
+// emitter by a 40-rune rule) for kinds other than heard and said.
 // heard and said carry the full sentence: the live operator feed is the
 // transcript, not a 40-rune preview.
 type TelemetryEvent struct {
@@ -243,15 +242,4 @@ func (r *TelemetryRing) HasRing(ccid string) bool {
 	defer r.mu.Unlock()
 	_, seen := r.everSeen[ccid]
 	return seen
-}
-
-// PreviewEventText truncates free text for a telemetry line (the same
-// 40-rune rule the talk loop applies to prompt dispatches; exported so
-// the daemon frame router records "heard" previews identically).
-func PreviewEventText(text string) string {
-	trimmed := strings.TrimSpace(text)
-	if runes := []rune(trimmed); len(runes) > 40 {
-		return string(runes[:40]) + "…"
-	}
-	return trimmed
 }

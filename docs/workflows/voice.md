@@ -278,9 +278,16 @@ fresh call and keeps ticking (it once silenced the whole live feed —
 call local-53b347f028f0a43f). `meept voice local` additionally reads the
 call's stored transcript over `voice.local.transcript`
 (params {call_id}; the call store, call-scoped) at call end and prints
-role-tagged `HH:MM:SS user|assistant: <text>` lines, reusing the link
-transcript shape — best-effort too: an old daemon or unwired store
-prints "(no transcript lines)" and never changes the run's exit.
+every role-tagged line with a `HH:MM:SS→HH:MM:SS user|assistant: <text>`
+start→stop window so the operator can make precise observational
+references against the recording: each line's stop is the NEXT line's
+start (the closest storage-backed bound — no per-line end timestamp is
+stored), and the FINAL line is bounded by the call's `ended_at` when the
+daemon provides it (an old daemon / live call renders that line
+start-only rather than fabricating a stop). The read retries briefly to
+absorb the end/flush race, then degrades honestly: an old daemon or
+unwired store prints "(no transcript lines)" and never changes the run's
+exit.
 
 ## Edge Cases
 

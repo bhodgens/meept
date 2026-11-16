@@ -157,11 +157,16 @@ type VoiceCallTranscriptLine struct {
 // end-of-call transcript read the CLI prints). Lines is never nil (empty
 // list, not absent). Found reports whether the call id exists in the
 // store at all; an unknown/never-stored call is the empty envelope, never
-// an error - the CLI print is best-effort by contract.
+// an error - the CLI print is best-effort by contract. EndedAt is the
+// call's terminal timestamp (RFC3339, store clock); empty for a live or
+// never-stored call. The CLI uses it to bound the FINAL transcript line's
+// stop time (there is no "next line" to close it); an old daemon that
+// omits it just renders that line start-only.
 type VoiceLocalTranscriptResult struct {
 	CallID     string                    `json:"call_id"`
 	EmployeeID string                    `json:"employee_id"`
 	SessionID  string                    `json:"session_id"`
+	EndedAt    string                    `json:"ended_at,omitempty"`
 	Lines      []VoiceCallTranscriptLine `json:"lines"`
 	Found      bool                      `json:"found"`
 }
@@ -199,10 +204,12 @@ type VoiceLocalSeams struct {
 	Events func(callID string, cursor uint64, limit int) (events []VoiceCallEvent, truncated bool, hasMore bool, found bool)
 	// Transcript reads ONE call's stored transcript from the call store
 	// (voice.local.transcript - the end-of-call print). Returns the
-	// call's employee/session ids and its role-tagged lines; found=false
-	// for an unknown call id (empty envelope, never an error). Nil seam
-	// (no store wired) answers the same empty envelope.
-	Transcript func(ctx context.Context, callID string) (employeeID, sessionID string, lines []VoiceCallTranscriptLine, found bool)
+	// call's employee/session ids, its role-tagged lines, and its
+	// terminal timestamp endedAt (RFC3339; empty for a live or unknown
+	// call - the CLI uses it to bound the final line's stop time);
+	// found=false for an unknown call id (empty envelope, never an
+	// error). Nil seam (no store wired) answers the same empty envelope.
+	Transcript func(ctx context.Context, callID string) (employeeID, sessionID, endedAt string, lines []VoiceCallTranscriptLine, found bool)
 }
 
 // VoiceLocalHandler serves voice.local.open / .end / .status.
@@ -360,12 +367,13 @@ func (h *VoiceLocalHandler) handleTranscript(ctx context.Context, params json.Ra
 	if h.seams.Transcript == nil {
 		return res, nil
 	}
-	emp, sess, lines, found := h.seams.Transcript(ctx, req.CallID)
+	emp, sess, endedAt, lines, found := h.seams.Transcript(ctx, req.CallID)
 	if lines == nil {
 		lines = []VoiceCallTranscriptLine{}
 	}
 	res.EmployeeID = emp
 	res.SessionID = sess
+	res.EndedAt = endedAt
 	res.Lines = lines
 	res.Found = found
 	return res, nil

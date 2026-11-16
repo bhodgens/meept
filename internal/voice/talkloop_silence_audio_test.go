@@ -12,8 +12,10 @@ package voice
 // reports the call's own audio active inside the expiring window, the
 // window RE-ARMS instead of speaking, bounded at
 // silenceAudioDeferralCap consecutive deferrals. These pins run at ms
-// scale via silenceWindowUnit (same discipline as the silence pins file:
-// no t.Parallel anywhere in the silence path).
+// emitted telemetry kinds and payloads (EventKindSilenceDeferred) are
+// preserved. These pins run at ms scale via silenceWindowUnit (same
+// discipline as the silence pins file: no t.Parallel anywhere in the
+// silence path).
 
 import (
 	"log/slog"
@@ -328,5 +330,167 @@ func TestTalkLoopSilenceHoldsWhileCallerSpeaking(t *testing.T) {
 		if in.Kind == EventKindSilenceDeferred && in.Reason != "caller" {
 			t.Errorf("hold reason = %q, want caller", in.Reason)
 		}
+	}
+}
+
+// callerHoldAudio is a fake CallerActive seam: true for the first N
+// consultations (or forever when always). Fire-time-only, like
+// countingAudioActive.
+type callerHoldAudio struct {
+	mu     sync.Mutex
+	remain int
+	always bool
+	calls  int
+}
+
+func (c *callerHoldAudio) fn(ccid string, window time.Duration) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.calls++
+	if c.always {
+		return true
+	}
+	if c.remain > 0 {
+		c.remain--
+		return true
+	}
+	return false
+}
+
+// callerHolds counts the "caller speaking" hold logs.
+func callerHolds(h *captureHandler) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	n := 0
+	for _, r := range h.records {
+		if strings.Contains(r.Message, "caller speaking") {
+			n++
+		}
+	}
+	return n
+}
+
+// V2 pin (a): the caller-hold branch must NOT rewind the escalation
+// ladder. The caller is loud on EVERY fire; the nudge speaks once, the
+// remaining fires burn callerDeferrals to silenceCallerDeferralCap, and
+// the NEXT fire takes the hangup leg (bounded). Pre-fix this loop
+// spun forever: each hold reset silencePrompted (so the nudge leg
+// repeated) and zeroed silenceDeferrals, and the hangup was
+// unreachable.
+func TestTalkLoopCallerHoldEscalatesToHangup(t *testing.T) {
+	withMsSilenceUnit(t)
+	sink := &recordSink{}
+	capH := &captureHandler{}
+	endReasons := make(chan string, 16)
+	caller := &callerHoldAudio{always: true}
+
+	deps := TalkDeps{
+		Supervisor:   &cannedSupervisor{},
+		Turns:        &cannedTurns{reply: "Back with an answer."},
+		SessionFor:   constSession(SessionHandle{ID: "s", ConversationID: "c"}),
+		Send:         sink.Send,
+		OnEnd:        func(ccid, reason string) { endReasons <- reason },
+		Logger:       slog.New(capH),
+		CallerActive: caller.fn,
+	}
+	loop := NewTalkLoop(deps, TalkLoopConfig{
+		GreetingLine:              "Welcome.",
+		SilencePromptSeconds:      20,
+		SilencePromptLine:         "Are you still there?",
+		SilenceHangupAfterSeconds: 20,
+	})
+	cancel, done := runLoop(t, loop, "cc-hold-esc")
+	defer func() { cancel(); <-done }()
+
+	select {
+	case r := <-endReasons:
+		if !strings.Contains(r, "silence") {
+			t.Fatalf("end reason = %q, want the silence hangup", r)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("caller-hold escalation never reached the hangup leg (unbounded loop?)")
+	}
+	// The nudge spoke exactly once before the hangup (silencePrompted
+	// was never rewound by a hold).
+	nudges := 0
+	for _, tx := range sink.sayTexts() {
+		if tx == "Are you still there?" {
+			nudges++
+		}
+	}
+	if nudges != 1 {
+		t.Errorf("nudge spoken %d times, want exactly 1 before hangup", nudges)
+	}
+	// Every fire under the sustained loud caller held. The ladder has
+	// TWO hold runs: pre-nudge holds burn callerDeferrals to the cap
+	// and the next fire takes the nudge leg; the nudge fall-through
+	// resets callerDeferrals, so the post-nudge H-window holds burn to
+	// the cap again and the next fire takes the hangup leg.
+	// 2 x silenceCallerDeferralCap holds total, then hangup - bounded.
+	if got := callerHolds(capH); got != 2*silenceCallerDeferralCap {
+		t.Errorf("caller holds = %d, want exactly 2 x cap (%d)", got, 2*silenceCallerDeferralCap)
+	}
+}
+
+// V2 pin (b): an ALTERNATING loud-mic / agent-audio-tail pattern must
+// terminate. Pre-fix, each caller hold reset silencePrompted AND zeroed
+// silenceDeferrals while the audio-deferral lane ran its own bounded
+// streak, so the two lanes kept each other's progress markers rewound
+// and BOTH counters stayed permanently under cap. Post-fix each lane
+// keeps its accumulated escalation state, so the ladder reaches the
+// hangup regardless of the alternation order. The seams share one
+// parity counter: odd consult -> caller-loud, even consult ->
+// agent-audio-tail (consults happen fire-time, caller lane first -
+// the branch order in the loop).
+func TestTalkLoopAlternatingCallerAudioTerminates(t *testing.T) {
+	withMsSilenceUnit(t)
+	sink := &recordSink{}
+	capH := &captureHandler{}
+	endReasons := make(chan string, 16)
+	consult := 0
+	var consultMu sync.Mutex
+	callerSeam := func(ccid string, window time.Duration) bool {
+		consultMu.Lock()
+		defer consultMu.Unlock()
+		consult++
+		return consult%2 == 1
+	}
+	audioSeam := func(ccid string, window time.Duration) bool {
+		consultMu.Lock()
+		defer consultMu.Unlock()
+		consult++
+		return consult%2 == 0
+	}
+
+	deps := TalkDeps{
+		Supervisor:   &cannedSupervisor{},
+		Turns:        &cannedTurns{reply: "Back with an answer."},
+		SessionFor:   constSession(SessionHandle{ID: "s", ConversationID: "c"}),
+		Send:         sink.Send,
+		OnEnd:        func(ccid, reason string) { endReasons <- reason },
+		Logger:       slog.New(capH),
+		CallerActive: callerSeam,
+		AudioActive:  audioSeam,
+	}
+	loop := NewTalkLoop(deps, TalkLoopConfig{
+		GreetingLine:              "Welcome.",
+		SilencePromptSeconds:      20,
+		SilencePromptLine:         "Are you still there?",
+		SilenceHangupAfterSeconds: 20,
+	})
+	cancel, done := runLoop(t, loop, "cc-alt")
+	defer func() { cancel(); <-done }()
+
+	select {
+	case r := <-endReasons:
+		if !strings.Contains(r, "silence") {
+			t.Fatalf("end reason = %q, want the silence hangup", r)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("alternating loud-mic/audio-tail escalation never terminated")
+	}
+	// The call DID escalate: the nudge was spoken along the way.
+	if !strings.Contains(strings.Join(sink.sayTexts(), "|"), "Are you still there?") {
+		t.Error("nudge never spoken during the alternating escalation")
 	}
 }

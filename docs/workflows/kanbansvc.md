@@ -26,7 +26,10 @@ walks it and fails if any path forwards to the wrong method.
 ## Authorization (contract C5)
 
 Three grants: `board.read`, `board.mutate`, `board.takeover`. Every
-route — reads included — requires its grant. No anonymous board access.
+route — reads included — requires its grant. Takeover
+(`/api/v1/card/takeover`) is conjunctive: it requires BOTH
+`board.mutate` AND `board.takeover`, and a token missing either one
+gets 403. No anonymous board access.
 
 | Condition | Status |
 |---|---|

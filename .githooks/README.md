@@ -33,37 +33,71 @@ chmod +x .githooks/*
 
 ### pre-commit (Main Hook)
 
-Entry point that runs all checks sequentially (20 total). The numbers below are
-the `[n/20]` labels `.githooks/pre-commit` prints:
+Entry point that runs 20 checks. Since the gates-speedup change the chain
+dispatches INDEPENDENTLY: checks 1-15, 17-20 run CONCURRENTLY (bash
+background jobs, capped at `MEEPT_HOOKS_PARALLEL` slots, default 6), each
+writing its own output file, and every gate's full output is replayed in
+`[n/20]` numbered order after the join, so the transcript still reads like
+the old serial chain. Check 16 (`pre-commit-feature-docs`) is the only
+gate that can PROMPT the user (aider y/n) — it runs serially AFTER the
+parallel join with the real TTY. Check [0/20] (`pre-commit-worktreecfg`)
+stays the serial pre-flight. Any blocking gate failing => exit 1 (gates
+14/15 are report-only and never block). Escape hatches unchanged:
+`--no-verify`, and `MEEPT_PARALLEL_HOOKS=0` restores the old strictly
+serial fail-fast order. `MEEPT_GATE_SNAPSHOT=0` opts the Go gates back to
+the dirty working tree (deliberate escape hatch for a commit that intends
+to bundle a sibling session's unstaged WIP).
 
-| # | Hook | Purpose |
-|---|------|---------|
-| 1 | pre-commit-build | Staged packages + clean downstream importers compile (no stray binaries) |
-| 2 | pre-commit-consumer-tests | Clean downstream packages' `_test.go` files compile against staged contracts |
-| 3 | pre-commit-deferred | Findings docs have resolution plans |
-| 4 | pre-commit-mutexio | No I/O under mutex (CLAUDE.md rule) |
-| 5 | pre-commit-u1000 | Unused code detection (staticcheck) |
-| 6 | pre-commit-vet | Common Go bugs (built-in) |
-| 7 | pre-commit-setters | Nil-safe setter methods |
-| 8 | pre-commit-selflock | Self-deadlocking locks (AST analyzer) |
-| 9 | pre-commit-gosec | Security vulnerabilities |
-| 10 | pre-commit-errors | Error handling anti-patterns |
-| 11 | pre-commit-predictable-ids | Use pkg/id.Generate (not time.Now().UnixNano()) |
-| 12 | pre-commit-sqlite-pragmas | SQLite WAL + busy_timeout required |
-| 13 | pre-commit-channel-nilafterclose | Use sync.Once (not close+nil) |
-| 14 | pre-commit-concurrency | Concurrency annotations (informational — never blocks) |
-| 15 | pre-commit-mutation | Mutation-test coverage (report only — never blocks) |
-| 16 | pre-commit-feature-docs | Documentation updates |
-| 17 | pre-commit-ascii | No CJK/Hangul/fullwidth characters in staged text files |
-| 18 | pre-commit-dart-format | Staged Dart blob (index content) is dart-format clean |
-| 19 | pre-commit-e2e | Affected hermetic e2e suites run + new feature packages have e2e coverage |
-| 20 | pre-commit-deadcode | Blocks NEW unwired functions (deadcode vs committed baseline) |
+**Snapshot-gated Go gates (prepared-commit tree).** The worktree is shared
+with sibling agent sessions, so the Go-toolchain gates 1 (build), 2
+(consumer-tests), 4 (mutexio), 5 (u1000), 6 (vet), 8 (selflock) and 20
+(deadcode) no longer analyze the dirty working tree: the dispatcher
+materializes the STAGED index once (`cp` of the index + `git checkout-index
+-a` into a temp dir with `.git` symlinked, ~1.5s wall) and runs those
+hooks with `cwd` + `GIT_WORK_TREE` + `GIT_INDEX_FILE` pinned inside it.
+A gate now sees exactly the bytes the commit will contain — an untracked
+sibling package can no longer make a build gate pass (the langcode
+incident: HEAD broke for everyone post-merge while the hook was green),
+and a sibling editing files mid-hook can no longer false-block a
+self-consistent commit. Text/blob gates (3, 7, 9-13, 17-19) read staged
+blobs via `git show :path` / the index and need no tree. If the snapshot
+cannot be built the dispatcher prints a loud WARN and falls back to
+working-tree mode — the mechanism itself never blocks a commit.
+
+The numbers below are the `[n/20]` labels `.githooks/pre-commit` prints:
+
+| # | Hook | Purpose | Mode |
+|---|------|---------|------|
+| 1 | pre-commit-build | Staged packages + clean downstream importers compile (no stray binaries) | snapshot |
+| 2 | pre-commit-consumer-tests | Clean downstream packages' `_test.go` files compile against staged contracts | snapshot |
+| 3 | pre-commit-deferred | Findings docs have resolution plans | parallel |
+| 4 | pre-commit-mutexio | No I/O under mutex (CLAUDE.md rule) | snapshot |
+| 5 | pre-commit-u1000 | Unused code detection (staticcheck) | snapshot |
+| 6 | pre-commit-vet | Common Go bugs (built-in) | snapshot |
+| 7 | pre-commit-setters | Nil-safe setter methods | parallel |
+| 8 | pre-commit-selflock | Self-deadlocking locks (AST analyzer) | snapshot |
+| 9 | pre-commit-gosec | Security vulnerabilities | parallel |
+| 10 | pre-commit-errors | Error handling anti-patterns | parallel |
+| 11 | pre-commit-predictable-ids | Use pkg/id.Generate (not time.Now().UnixNano()) | parallel |
+| 12 | pre-commit-sqlite-pragmas | SQLite WAL + busy_timeout required | parallel |
+| 13 | pre-commit-channel-nilafterclose | Use sync.Once (not close+nil) | parallel |
+| 14 | pre-commit-concurrency | Concurrency annotations (informational — never blocks) | parallel |
+| 15 | pre-commit-mutation | Mutation-test coverage (report only — never blocks) | parallel |
+| 16 | pre-commit-feature-docs | Documentation updates — **serial after the join; interactive (aider prompt)** | serial |
+| 17 | pre-commit-ascii | No CJK/Hangul/fullwidth characters in staged text files | parallel |
+| 18 | pre-commit-dart-format | Staged Dart blob (index content) is dart-format clean | parallel |
+| 19 | pre-commit-e2e | New-package census ONLY (affected-suite sweep moved to pre-push + CI; opt back in with `MEEPT_E2E_PRECOMMIT_SWEEP=1`) | parallel |
+| 20 | pre-commit-deadcode | Blocks NEW unwired functions (deadcode vs committed baseline; result-cached) | snapshot |
 
 Steps 14 and 15 are reported but never block the commit. Steps 1-13,
 16-18, and 19-20 do.
 `pre-commit-staticcheck` is not in this list: it is standalone (run it directly,
 or via your editor) and additionally analyzes the tag-gated `magefiles` package
 with `-tags mage`.
+`pre-commit-dispatch-lib` is the sourced dispatch engine (parallel/serial
+join, snapshot env pinning, ordered replay) — not a standalone gate.
+Offline regressions for all of this live in `scripts/gates-speedup-selftest.sh`
+(and `scripts/e2e-census-selftest.sh` for the census contract).
 
 ---
 
@@ -438,22 +472,41 @@ NO-NEW-UNIT-TESTS policy — see docs/workflows/e2e-testing.md).
 new package directory under those trees)
 
 **Checks:**
-- **Affected-suite gate**: maps staged paths through `e2e/manifest.json`
-  `path_map` and runs the affected hermetic e2e suites
-  (`scripts/e2e-affected.sh`). Suites whose dirs don't exist yet (manifest
-  status `todo`) are reported and skipped; the smoke suite runs as fallback
-  whenever feature Go files are staged with no hit or with only-pending hits.
-  Any failing suite FAILS the commit.
-- **New-package census** (hard gate since f18fea35): every package directory
-  that gains a new non-test `.go` file in the staged additions
-  (`git diff --cached --diff-filter=A` under `internal/`/`pkg/`/`cmd/`) must
-  have a `path_map` entry in `e2e/manifest.json` (bidirectional slash-boundary
-  prefix match) or an `exempt` entry with a mandatory non-empty reason —
-  exemptions print as residual risk every run. Test-only and generated
-  additions are excluded. The old escape (staging any `e2e/suites/` file
-  cleared the whole check) is GONE; an unparseable manifest or empty
-  `path_map` exits 1 (vacuity floor) instead of failing open. Fixture/test
-  seam: `MEEPT_E2E_CENSUS_STAGED_FILE` (plus `MEEPT_E2E_MANIFEST_FILE`).
+- **New-package census** (hard gate; STAYS in pre-commit since the
+  gates-speedup change): every package directory that gains a new non-test
+  `.go` file in the staged additions (`git diff --cached --name-status
+  --diff-filter=ACMR` under `internal/`/`pkg/`/`cmd/`, with plain `M` rows
+  excluded — A/C/R rows carry the NEW path, so renames into an unmapped
+  dir census too) must have a `path_map` entry in
+  `e2e/manifest.json` (bidirectional slash-boundary prefix match) or an
+  `exempt` entry with a mandatory non-empty reason — exemptions print as
+  residual risk every run. Test-only and generated additions are excluded.
+  The old escape (staging any `e2e/suites/` file cleared the whole check) is
+  GONE; an unparseable manifest or empty `path_map` exits 1 (vacuity floor)
+  instead of failing open. Fixture/test seam:
+  `MEEPT_E2E_CENSUS_STAGED_FILE` (plus `MEEPT_E2E_MANIFEST_FILE`).
+- **Affected-suite sweep** — MOVED OUT of pre-commit (it cost 15-25 min per
+  commit touching `internal/queue|agent|task`). The sweep now enforces at
+  exactly two sites, unchanged in every other way:
+  1. **pre-push-e2e** — FULL fan-out scope, forced here so an ambient
+     `MEEPT_E2E_SCOPE=direct` can never thin the push gate;
+  2. **CI** — ci.yml job `e2e-fast` (`make e2e-fast`), a required member of
+     the `ci-success` aggregate gate.
+  Opt back in locally when you want it at commit time:
+  `MEEPT_E2E_PRECOMMIT_SWEEP=1 git commit ...` (combine with
+  `MEEPT_E2E_SCOPE=direct` for the cheap package-dir-only version).
+
+**Scope env (`scripts/e2e-affected.sh`):** `MEEPT_E2E_SCOPE=full` (default;
+transitive fan-out — a nested path inherits ancestor package keys' suites)
+or `direct` (only the changed file's own package dir key selects suites; no
+smoke fallback — nothing mapped selects nothing). Local dev convenience:
+`e2e-direct() { MEEPT_E2E_SCOPE=direct scripts/e2e-affected.sh "$@"; }`.
+
+**Flake retry inside the sweep:** failing suites re-run in PARALLEL (cap
+`MEEPT_E2E_RETRY_PARALLEL`, default 2), and a suite that failed with a
+BUILD error is not retried at all (`SKIPRETRY(build)`) — a compile error
+cannot flake, and the old serial retry cost 2x the suite timeout per
+failure.
 
 **Skip (emergencies only — prints a loud warning):**
 ```bash
@@ -490,6 +543,27 @@ using `golang.org/x/tools/cmd/deadcode`.
   empty staged diff).
 - Override the analyzed mains for testing:
   `MEEPT_DEADCODE_MAINS="./cmd/meept-daemon" .githooks/pre-commit-deadcode`.
+- **Result cache** (gates-speedup item 5): the 5-main x2-mode analysis
+  takes 2-4 minutes and its input is the Go source TREE, so a PASSING
+  result is cached under `<git-dir>/meept-cache/deadcode/<digest>/` keyed
+  by sha256 of (every `.go` file's content hash in the analyzed tree +
+  go.mod/go.sum + both baseline hashes + the mains list + the deadcode
+  binary checksum). Identical next run prints `deadcode cache: HIT` and
+  reuses the stored intersections (sub-second); ANY Go content change
+  prints `MISS` and re-analyzes. Fail-closed by construction: a gate
+  FAILURE is never stored (and purges its digest entry, so a failure can
+  never replay as a success), a mid-analysis tree change voids the store,
+  and `--rebaseline` always does the full analysis then refreshes the
+  cache against the new baselines. Disable with `MEEPT_DEADCODE_CACHE=0`,
+  relocate with `MEEPT_DEADCODE_CACHE_DIR`, and see the digest decision
+  always with `MEEPT_DEADCODE_VERBOSE=1`. When the dispatcher snapshot-
+  gates this hook (check 20 runs in the prepared-commit tree), the digest
+  covers the STAGED bytes — a sibling's unstaged edit neither false-HITs
+  the cache nor needlessly invalidates it, because the analyzed content
+  is the staged tree either way.
+- Fixture seam for offline tests: `MEEPT_DEADCODE_BIN=/path/to/stub`
+  pins the analyzed binary directly (the stub's output format is
+  `<path>:<line>:<col>: unreachable func: <Name>`).
 
 **Re-baselining (deliberate, same policy as the bench regression baseline):**
 ```bash
@@ -666,12 +740,15 @@ extract_feature_name() {
 
 ### 1. pre-push-e2e — affected hermetic e2e gate (push boundary)
 
-The pre-commit e2e check (18/18) can be bypassed at commit time
-(`--no-verify`, `MEEPT_SKIP_E2E=1`, or a hook run killed mid-sweep). This
-gate is the last local checkpoint before a commit reaches the remote: for
-each pushed ref it diffs `remote_sha..local_sha`, feeds the changed paths
-to `scripts/e2e-affected.sh` (mapped through `e2e/manifest.json`), and runs
-exactly the affected hermetic suites. A red suite blocks the push.
+The pre-commit e2e census can be bypassed at commit time
+(`--no-verify`, `MEEPT_SKIP_E2E=1`), and since the gates-speedup change
+the affected-SUITE SWEEP is no longer a commit-time check at all: this
+gate is its primary local enforcement site (CI `e2e-fast` is the remote
+one). For each pushed ref it diffs `remote_sha..local_sha`, feeds the
+changed paths to `scripts/e2e-affected.sh` with `MEEPT_E2E_SCOPE=full`
+FORCED (an ambient `direct` can never thin the push gate; mapped through
+`e2e/manifest.json`), and runs exactly the affected hermetic suites. A
+red suite blocks the push.
 
 - **New branch, no tracking ref** → the smoke suite runs instead, so the
   gate stays non-decorative.

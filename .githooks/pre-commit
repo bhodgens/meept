@@ -1,38 +1,78 @@
 #!/bin/bash
 # Main pre-commit hook - runs all quality and security checks
 #
-# Runs the following checks in order:
-# 1. go build on staged packages (+ clean downstream importers)
-# 2. consumer test-compile (clean downstream packages' _test.go vs staged changes)
+# Runs the following checks (numbered as [n/20] labels below):
+# 1. go build on staged packages (+ clean downstream importers)   [SNAPSHOT]
+# 2. consumer test-compile (clean downstream packages' _test.go vs staged changes) [SNAPSHOT]
 # 3. Deferred item validation (findings docs)
-# 4. Mutex I/O analyzer (Go concurrency)
-# 5. Staticcheck U1000 (unused code)
-# 6. go vet (common Go bugs)
+# 4. Mutex I/O analyzer (Go concurrency)                          [SNAPSHOT]
+# 5. Staticcheck U1000 (unused code)                              [SNAPSHOT]
+# 6. go vet (common Go bugs)                                      [SNAPSHOT]
 # 7. Setter nil-safety (typed-nil panics)
-# 8. Selflock analyzer (self-deadlocking locks)
+# 8. Selflock analyzer (self-deadlocking locks)                   [SNAPSHOT]
 # 9. gosec (security vulnerabilities) - if installed
 # 10. Error handling patterns (anti-patterns)
 # 11. Predictable ID detection (use pkg/id.Generate)
 # 12. SQLite pragma check (WAL + busy_timeout)
 # 13. Channel close-then-nil detection (sync.Once pattern)
-# 14. Concurrency annotations (informational)
-# 15. Mutation testing (report only)
-# 16. Feature documentation (code changes)
+# 14. Concurrency annotations (informational, does not block)
+# 15. Mutation testing (report only, does not block)
+# 16. Feature documentation (code changes)          [SERIAL — interactive]
 # 17. Non-English character check (CJK/Hangul/fullwidth in staged text files)
 # 18. Dart formatting (staged ui/flutter_ui Dart files)
-# 19. e2e enforcement (affected suites + new-feature coverage rule)
-# 20. deadcode reachability (blocks NEW unwired functions vs baseline)
+# 19. e2e new-package census ONLY (suite sweep moved to pre-push + CI)
+# 20. deadcode reachability (blocks NEW unwired functions vs baseline) [SNAPSHOT]
+#
+# Execution model (gates-speedup items 4 + 6):
+#   * Checks 1-15, 17-18, 19-20 are INDEPENDENT and run CONCURRENTLY
+#     (background jobs, capped at MEEPT_HOOKS_PARALLEL slots, default 6;
+#     bash >= 3.2: no `wait -n`, concurrency is bounded by polling
+#     `jobs -rp`). Each hook writes its own output file; verdicts are
+#     re-printed in numbered order after the join, exactly like the old
+#     serial chain. Any blocking hook failing => overall exit 1. Gates 14
+#     and 15 never block. Set MEEPT_PARALLEL_HOOKS=0 for the old serial
+#     order.
+#   * Hooks marked [SNAPSHOT] (item 6) run against the PREPARED-COMMIT
+#     TREE, not the dirty working tree: the staged index is materialized
+#     once (index copy + `git checkout-index -a` into a temp dir with .git
+#     symlinked, ~1.5s) and the Go-toolchain gates execute there with
+#     GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE pinned to the snapshot. This
+#     closes the root reliability flaw: a gate that passes because a
+#     SIBLING's unstaged file (untracked package, half-written test) makes
+#     the shared worktree compile — HEAD after the commit then fails for
+#     everyone else (langcode incident) — and the inverse false-block when
+#     a running child edits files mid-hook. [19]'s census and the
+#     text/blob gates (3, 7, 9-13, 17, 18) keep reading the index/staged
+#     blobs directly. If the snapshot cannot be built (any step fails),
+#     the dispatcher prints a loud WARN and falls back to working-tree
+#     mode — the MECHANISM never blocks a commit; the checks still run.
+#   * Check 16 (pre-commit-feature-docs) can PROMPT the user (aider y/n).
+#     It runs AFTER the parallel join, serially, with the real TTY on
+#     stdin — never concurrently with stdin shared.
 #
 # Pre-flight [0/20]: pre-commit-worktreecfg repairs a core.bare=true flip. It
-# runs BEFORE the numbered chain because that flip breaks `go build`
-# ("error obtaining VCS status: exit status 128"), which would abort gate 1.
+# runs BEFORE everything because that flip breaks `go build -buildvcs`
+# ("error obtaining VCS status: exit status 128"), which would abort gate 1
+# (and the snapshot build).
 #
 # Requires bash >= 4 (macOS /bin/bash is 3.2): sub-hooks carry
 # /opt/homebrew/bin/bash shebangs.
 #
+# Test seam: MEEPT_HOOKS_SELFTEST=1 runs the SAME parallel dispatch +
+# ordered-report machinery against the fake hook list in
+# MEEPT_HOOKS_SELFTEST_HOOKS (space-separated executable paths) instead of
+# the real chain — no git index reads, no snapshot, no Go. Used by
+# scripts/gates-speedup-selftest.sh to pin the aggregate-exit and
+# order-in-report contracts offline.
+#
 # Skip with --no-verify for emergencies only.
 
-set -e
+# NOTE: deliberately NO `set -e` here. The old serial chain used set -e to
+# abort at the first failing hook; the parallel batch must instead run every
+# independent gate (they no longer depend on each other) and aggregate
+# verdicts at the end. The FAIL contract is unchanged: any blocking gate
+# failing => exit 1.
+set +e
 
 # Pin the toolchain every sub-hook's go invocation uses (go run/list/vet/build
 # and the x/tools-linked analyzers) to go.mod's `toolchain` line. WHY:
@@ -52,99 +92,175 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# 0. worktree config guard (core.bare=true self-heal) — PRE-FLIGHT, before the
-# numbered chain. WHY first: a bare-config flip makes `go build` fail with
-# "error obtaining VCS status: exit status 128", so gate [1/20] pre-commit-build
-# would abort the chain (set -e) before a later guard could repair it.
+# --------------------------------------------------------------------------
+# Selftest mode: exercise the dispatcher itself with a fake hook set.
+# --------------------------------------------------------------------------
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+[ -n "$REPO_ROOT" ] || REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+if [ "${MEEPT_HOOKS_SELFTEST:-0}" = "1" ]; then
+    WORK="$(mktemp -d "${TMPDIR:-/tmp}/meept-dispatch-selftest.XXXXXX")"
+    STEST_ENTRIES=""
+    _i=0
+    for h in ${MEEPT_HOOKS_SELFTEST_HOOKS:-}; do
+        _i=$((_i + 1))
+        # format: idx|name|blocking|snapshot|label (name = ABSOLUTE path
+        # to a fake hook; run_one_hook accepts absolute names verbatim)
+        STEST_ENTRIES="$STEST_ENTRIES$_i|$h|1|0|selftest $_i
+"
+    done
+    if [ -n "${MEEPT_HOOKS_SELFTEST_NONBLOCKING:-}" ]; then
+        _i=$((_i + 1))
+        STEST_ENTRIES="$STEST_ENTRIES$_i|$MEEPT_HOOKS_SELFTEST_NONBLOCKING|0|0|selftest non-blocking $_i
+"
+    fi
+    # shellcheck disable=SC2064
+    trap "rm -rf '$WORK'" EXIT
+    . "$SCRIPT_DIR/pre-commit-dispatch-lib"
+    if [ "${MEEPT_HOOKS_SELFTEST_SERIAL:-0}" = "1" ]; then
+        dispatch_serial "$WORK" "$STEST_ENTRIES" "$SCRIPT_DIR" "$REPO_ROOT" ""
+    else
+        dispatch_batch "$WORK" "$STEST_ENTRIES" "$SCRIPT_DIR" "$REPO_ROOT" ""
+    fi
+    exit $?
+fi
+
+
+# 0. worktree config guard (core.bare=true self-heal) — PRE-FLIGHT, before
+# everything. WHY first: a bare-config flip makes `go build` fail with
+# "error obtaining VCS status: exit status 128", so gate [1/20]
+# pre-commit-build would abort the chain (and the snapshot build).
 echo -e "\e[34m[0/20]\e[0m Checking worktree configuration (core.bare guard)..."
-"$SCRIPT_DIR/pre-commit-worktreecfg"
+if ! "$SCRIPT_DIR/pre-commit-worktreecfg"; then
+    # Old chain had `set -e`: a failing pre-flight aborted everything.
+    echo -e "\e[31m❌ pre-commit blocked at [0/20] worktree configuration guard\e[0m"
+    exit 1
+fi
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  Pre-commit Quality Checks"
+echo "  Pre-commit Quality Checks (parallel dispatch)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-# 1. go build (catches compile errors before anything else runs)
-echo -e "\e[34m[1/20]\e[0m Building staged packages..."
-"$SCRIPT_DIR/pre-commit-build"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/meept-pre-commit.XXXXXX")"
+cleanup() {
+    [ -n "$WORK" ] && rm -rf "$WORK"
+}
+trap cleanup EXIT
 
-# 2. consumer test-compile (downstream _test.go against staged contracts —
-#    the gate that would have caught 65ad62b1's fakeStore/SaveMessagesWithToolCalls)
-echo -e "\e[34m[2/20]\e[0m Test-compiling clean consumer packages..."
-"$SCRIPT_DIR/pre-commit-consumer-tests" || exit 1
+# --------------------------------------------------------------------------
+# Snapshot stage (gates-speedup item 6): materialize the prepared-commit
+# tree once, UNDER $WORK so the trap cleans it with everything else.
+# --------------------------------------------------------------------------
+GITDIR_ABS="$(git rev-parse --absolute-git-dir 2>/dev/null || true)"
+IDX_RAW="${GIT_INDEX_FILE:-$(git rev-parse --git-path index 2>/dev/null || true)}"
+IDX_ABS=""
+if [ -n "$IDX_RAW" ]; then
+    case "$IDX_RAW" in
+        /*) IDX_ABS="$IDX_RAW" ;;
+        *)  IDX_ABS="$REPO_ROOT/$IDX_RAW" ;;
+    esac
+fi
 
-# 3. Deferred item check (findings docs have resolution plans)
-echo -e "\e[34m[3/20]\e[0m Running deferred item validation..."
-"$SCRIPT_DIR/pre-commit-deferred" || exit 1
+SNAP=""
+SNAPIDX=""
+make_snapshot() {
+    [ -n "$GITDIR_ABS" ] || return 1
+    [ -n "$IDX_ABS" ] && [ -f "$IDX_ABS" ] || return 1
+    command -v git >/dev/null 2>&1 || return 1
+    SNAP_BASE="$WORK/gate-snap"
+    SNAP="$SNAP_BASE/tree"
+    SNAPIDX="$SNAP_BASE/index"
+    mkdir -p "$SNAP" || return 1
+    # Operate on a COPY of the index: checkout-index never touches the
+    # real index, and a child session staging more files mid-hook cannot
+    # change what this gate analyzed.
+    cp "$IDX_ABS" "$SNAPIDX" || return 1
+    if ! GIT_INDEX_FILE="$SNAPIDX" git checkout-index -a --prefix="$SNAP/" 2>"$SNAP_BASE/err"; then
+        echo "  checkout-index said: $(head -2 "$SNAP_BASE/err" 2>/dev/null)" >&2
+        return 1
+    fi
+    # .git symlink so -buildvcs / git status inside the snapshot resolve
+    # the real object store; GIT_* env below pins the work tree + index.
+    ln -sfn "$GITDIR_ABS" "$SNAP/.git" || return 1
+    [ -f "$SNAP/go.mod" ] && [ -f "$SNAP/go.sum" ] || return 1
+    return 0
+}
 
-# 4. Mutex I/O analyzer (CLAUDE.md rule: no I/O under lock)
-echo -e "\e[34m[4/20]\e[0m Running mutex I/O analyzer..."
-"$SCRIPT_DIR/pre-commit-mutexio" || exit 1
+PARALLEL="${MEEPT_PARALLEL_HOOKS:-1}"
+# The snapshot is built whenever the dispatcher can (both parallel and
+# serial modes use it — item 6 is orthogonal to item 4). Fallback to
+# working-tree mode is loud but never blocks: the mechanism must not
+# break commits. MEEPT_GATE_SNAPSHOT=0 opts the Go gates back to the
+# dirty shared worktree (deliberate escape hatch: a commit that INTENDS
+# to bundle a sibling session's unstaged WIP compiles in the worktree
+# but not in its own staged tree — old behavior when you need it).
+if [ "${MEEPT_GATE_SNAPSHOT:-1}" = "0" ]; then
+    echo "gate-snapshot: DISABLED via MEEPT_GATE_SNAPSHOT=0 — Go gates analyze the working tree (pre-speedup behavior)"
+elif make_snapshot; then
+    echo "gate-snapshot: prepared-commit tree materialized — Go gates (1,2,4,5,6,8,20) run against the staged bytes, not the shared worktree"
+else
+    SNAP=""
+    SNAPIDX=""
+    echo -e "\e[1;33m⚠ gate-snapshot: FAILED to materialize the staged tree — falling back to working-tree mode for the Go gates (checks still run; commit unaffected).\e[0m"
+fi
+if [ "$PARALLEL" != "1" ]; then
+    echo "hooks: serial dispatch (MEEPT_PARALLEL_HOOKS=0)"
+fi
 
-# 5. Staticcheck U1000 (unused code detection)
-echo -e "\e[34m[5/20]\e[0m Running unused code check..."
-"$SCRIPT_DIR/pre-commit-u1000" || exit 1
+# --------------------------------------------------------------------------
+# Hook entries: idx|name|blocking|snapshot|label
+# blocking: 1 = a failing exit blocks the commit; 0 = report only.
+# snapshot: 1 = run inside the prepared-commit tree when available.
+# --------------------------------------------------------------------------
+ENTRIES="1|pre-commit-build|1|1|Building staged packages...
+2|pre-commit-consumer-tests|1|1|Test-compiling clean consumer packages...
+3|pre-commit-deferred|1|0|Running deferred item validation...
+4|pre-commit-mutexio|1|1|Running mutex I/O analyzer...
+5|pre-commit-u1000|1|1|Running unused code check...
+6|pre-commit-vet|1|1|Running go vet...
+7|pre-commit-setters|1|0|Verifying setter nil-safety...
+8|pre-commit-selflock|1|1|Checking for self-deadlocking locks...
+9|pre-commit-gosec|1|0|Running security scan...
+10|pre-commit-errors|1|0|Checking error handling patterns...
+11|pre-commit-predictable-ids|1|0|Checking for predictable ID generation...
+12|pre-commit-sqlite-pragmas|1|0|Checking SQLite pragma compliance...
+13|pre-commit-channel-nilafterclose|1|0|Checking for close-then-nil channel pattern...
+14|pre-commit-concurrency|0|0|Checking concurrency annotations...
+15|pre-commit-mutation|0|0|Checking mutation test coverage...
+17|pre-commit-ascii|1|0|Checking for non-English characters...
+18|pre-commit-dart-format|1|0|Checking Dart formatting (ui/flutter_ui)...
+19|pre-commit-e2e|1|0|Checking e2e new-package census (suite sweep: pre-push + CI)...
+20|pre-commit-deadcode|1|1|Checking code reachability (deadcode gate)..."
 
-# 6. go vet (common Go bugs)
-echo -e "\e[34m[6/20]\e[0m Running go vet..."
-"$SCRIPT_DIR/pre-commit-vet" || exit 1
+. "$SCRIPT_DIR/pre-commit-dispatch-lib"
 
-# 7. Setter nil-safety (typed-nil interface guard)
-echo -e "\e[34m[7/20]\e[0m Verifying setter nil-safety..."
-"$SCRIPT_DIR/pre-commit-setters"
+if [ "$PARALLEL" = "1" ]; then
+    dispatch_batch "$WORK" "$ENTRIES" "$SCRIPT_DIR" "$REPO_ROOT" "$SNAP"
+    rc=$?
+else
+    dispatch_serial "$WORK" "$ENTRIES" "$SCRIPT_DIR" "$REPO_ROOT" "$SNAP"
+    rc=$?
+fi
+if [ "$rc" != "0" ]; then
+    exit "$rc"
+fi
 
-# 8. Selflock analyzer (self-deadlocking locks)
-echo -e "\e[34m[8/20]\e[0m Checking for self-deadlocking locks..."
-"$SCRIPT_DIR/pre-commit-selflock" || exit 1
-
-# 9. gosec security scan (if installed)
-echo -e "\e[34m[9/20]\e[0m Running security scan..."
-"$SCRIPT_DIR/pre-commit-gosec" || exit 1
-
-# 10. Error handling patterns
-echo -e "\e[34m[10/20]\e[0m Checking error handling patterns..."
-"$SCRIPT_DIR/pre-commit-errors" || exit 1
-
-# 11. Predictable ID detection (use pkg/id.Generate, not time.Now().UnixNano())
-echo -e "\e[34m[11/20]\e[0m Checking for predictable ID generation..."
-"$SCRIPT_DIR/pre-commit-predictable-ids" || exit 1
-
-# 12. SQLite pragma check (WAL + busy_timeout required)
-echo -e "\e[34m[12/20]\e[0m Checking SQLite pragma compliance..."
-"$SCRIPT_DIR/pre-commit-sqlite-pragmas" || exit 1
-
-# 13. Channel close-then-nil detection (use sync.Once instead)
-echo -e "\e[34m[13/20]\e[0m Checking for close-then-nil channel pattern..."
-"$SCRIPT_DIR/pre-commit-channel-nilafterclose" || exit 1
-
-# 14. Concurrency annotations (informational, does not block)
-echo -e "\e[34m[14/20]\e[0m Checking concurrency annotations..."
-"$SCRIPT_DIR/pre-commit-concurrency" || true
-
-# 15. Mutation testing (report only, does not block)
-echo -e "\e[34m[15/20]\e[0m Checking mutation test coverage..."
-"$SCRIPT_DIR/pre-commit-mutation" || true
-
-# 16. Feature documentation check
+# --------------------------------------------------------------------------
+# 16. Feature documentation — SERIAL, AFTER the join, with the real TTY.
+# pre-commit-feature-docs may prompt "Generate documentation? (y/n)" and
+# drive aider interactively; it must never share stdin concurrently with
+# the parallel batch (gates-speedup item 4: promptable gate stays serial).
+# --------------------------------------------------------------------------
 echo -e "\e[34m[16/20]\e[0m Verifying feature documentation..."
-"$SCRIPT_DIR/pre-commit-feature-docs" || exit 1
-
-# 17. Non-English character check (CJK/Hangul/fullwidth in staged text files)
-echo -e "\e[34m[17/20]\e[0m Checking for non-English characters..."
-"$SCRIPT_DIR/pre-commit-ascii" || exit 1
-
-# 18. Dart formatting check (staged ui/flutter_ui Dart files)
-echo -e "\e[34m[18/20]\e[0m Checking Dart formatting (ui/flutter_ui)..."
-"$SCRIPT_DIR/pre-commit-dart-format" || exit 1
-
-# 19. e2e enforcement (affected suites + new-feature coverage rule)
-echo -e "\e[34m[19/20]\e[0m Checking e2e coverage (affected suites)..."
-"$SCRIPT_DIR/pre-commit-e2e" || exit 1
-
-# 20. deadcode reachability (blocks NEW unwired functions vs baseline)
-echo -e "\e[34m[20/20]\e[0m Checking code reachability (deadcode gate)..."
-"$SCRIPT_DIR/pre-commit-deadcode" || exit 1
+if ! (cd "$REPO_ROOT" && "$SCRIPT_DIR/pre-commit-feature-docs"); then
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo -e "\e[31m❌ pre-commit blocked: feature documentation gate failed\e[0m"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    exit 1
+fi
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

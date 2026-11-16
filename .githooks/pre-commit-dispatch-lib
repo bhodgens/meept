@@ -1,0 +1,177 @@
+#!/usr/bin/env bash
+# pre-commit-dispatch-lib - parallel/serial dispatch engine for the
+# pre-commit chain (gates-speedup item 4). SOURCED by .githooks/pre-commit,
+# not executed directly (no shebang contract beyond that).
+#
+# bash >= 3.2: no associative arrays, no `wait -n`, no mapfile. Jobs are
+# launched as background subshells writing per-hook output files; the
+# concurrency cap is enforced by polling `jobs -rp`.
+#
+# Entry format (one per line):  idx|name|blocking|snapshot|label
+#   blocking=1  a failing exit blocks the commit
+#   blocking=0  report-only (informational; exit code printed, never fails)
+#   snapshot=1  run inside the prepared-commit tree when the dispatcher
+#               exports GATE_SNAP_DIR + GATE_SNAP_INDEX (cwd + absolute
+#               GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE pinned to it), else in
+#               the repo root.
+#
+# dispatch_batch WORK ENTRIES SCRIPTDIR REPOROOT SNAP
+#   -> runs every hook concurrently (cap: MEEPT_HOOKS_PARALLEL, default 6),
+#      replays per-hook output in NUMERICAL order after the join, and
+#      returns 1 if any blocking hook failed, 0 otherwise.
+# dispatch_serial WORK ENTRIES SCRIPTDIR REPOROOT SNAP
+#   -> same contract, one hook at a time, stops at the first blocking
+#      failure (the pre-speedup behavior; MEEPT_PARALLEL_HOOKS=0).
+
+# Number of concurrently-running hooks. 6 keeps wall time near the longest
+# single gate while bounding go-build/analyzer load (and the macOS
+# ephemeral socket pressure the repo's -p 2 rule exists for — these hooks
+# are compile-only analyzers, not test sweeps).
+HOOKS_PARALLEL="${MEEPT_HOOKS_PARALLEL:-6}"
+
+# ANSI helpers built via echo -e (universally supported on bash 3.2+;
+# printf's \e is a bash-4+ extension).
+_esc() { echo -e "$1"; }
+C_RED="$(_esc '\033[31m')"
+C_GRN="$(_esc '\033[32m')"
+C_YLW="$(_esc '\033[33m')"
+C_BLU="$(_esc '\033[34m')"
+C_RST="$(_esc '\033[0m')"
+
+_pidx() { # zero-pad entry index to width 2 for stable file names
+    case "${#1}" in
+        1) printf '0%s' "$1" ;;
+        *) printf '%s' "$1" ;;
+    esac
+}
+
+run_one_hook() {
+    # $1=outfile(body) $2=SCRIPTDIR $3=REPOROOT $4=SNAP $5=name $6=snapshot-flag
+    OUT="$1"; SDIR="$2"; ROOT="$3"; SNAPH="$4"; NAME="$5"; WANTSNAP="$6"
+    # Absolute names (selftest fixtures) bypass the SCRIPT_DIR prefix.
+    case "$NAME" in
+        /*) HOOK="$NAME" ;;
+        *)  HOOK="$SDIR/$NAME" ;;
+    esac
+    if [ "$WANTSNAP" = "1" ] && [ -n "$SNAPH" ] \
+        && [ -d "$SNAPH" ] && [ -f "$SNAPH/go.mod" ]; then
+        # Snapshot-gated run. GIT_WORK_TREE pins the staged tree; the
+        # index COPY keeps `git diff --cached` answering "what is this
+        # commit" even if a sibling stages more files mid-hook, and
+        # `go build -buildvcs` resolves VCS status against the real
+        # object store via the .git symlink (GIT_DIR below).
+        (
+            cd "$SNAPH" || exit 99
+            GIT_DIR="${GATE_SNAP_GITDIR:-$SNAPH/.git}" \
+            GIT_WORK_TREE="$SNAPH" \
+            GIT_INDEX_FILE="${GATE_SNAP_INDEX:-}" \
+                "$HOOK" </dev/null
+        ) > "$OUT" 2>&1
+    else
+        ( cd "$ROOT" && "$HOOK" </dev/null ) > "$OUT" 2>&1
+    fi
+    printf '%s\n' "$?" > "$OUT.rc"
+    return 0
+}
+
+dispatch_batch() {
+    WORK="$1"; ENTRIES="$2"; SDIR="$3"; ROOT="$4"; SNAP="$5"
+    # Only export snapshot pinning when a snapshot actually exists: a
+    # stale GIT_INDEX_FILE export with no tree would poison every plain
+    # `git diff --cached` in working-tree fallback mode.
+    if [ -n "$SNAP" ]; then
+        GATE_SNAP_INDEX="${SNAPIDX:-}"; export GATE_SNAP_INDEX
+        GATE_SNAP_GITDIR="${GITDIR_ABS:-}"; export GATE_SNAP_GITDIR
+    else
+        unset GATE_SNAP_INDEX GATE_SNAP_GITDIR
+    fi
+
+    # Launch (bounded by live-job count; bash 3.2 has no `wait -n`).
+    while IFS='|' read -r idx name blocking snapshot label; do
+        [ -n "$idx" ] || continue
+        OUT="$WORK/out.$(_pidx "$idx")"
+        : > "$OUT"
+        while [ "$(jobs -rp | wc -l | tr -d ' ')" -ge "$HOOKS_PARALLEL" ]; do
+            sleep 0.2
+        done
+        run_one_hook "$OUT" "$SDIR" "$ROOT" "$SNAP" "$name" "$snapshot" &
+    done <<EOF
+$ENTRIES
+EOF
+
+    wait
+
+    # Replay in numbered order; aggregate the blocking verdicts. Each
+    # gate's full output is printed under its own verdict banner so the
+    # transcript reads like the old serial chain.
+    rc_total=0
+    while IFS='|' read -r idx name blocking snapshot label; do
+        [ -n "$idx" ] || continue
+        OUT="$WORK/out.$(_pidx "$idx")"
+        rc="?"
+        [ -f "$OUT.rc" ] && rc="$(cat "$OUT.rc" 2>/dev/null || echo '?')"
+        if [ "$rc" = "0" ]; then
+            verdict="PASS"
+        elif [ "$blocking" = "0" ]; then
+            verdict="INFO (non-blocking, rc=$rc)"
+        else
+            verdict="FAIL (rc=$rc)"
+        fi
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        if [ "$rc" = "0" ]; then
+            echo -e "${C_BLU}[$idx/20]${C_RST} $label — ${C_GRN}PASS${C_RST}"
+        elif [ "$blocking" = "0" ]; then
+            echo -e "${C_BLU}[$idx/20]${C_RST} $label — ${C_YLW}$verdict${C_RST}"
+        else
+            echo -e "${C_BLU}[$idx/20]${C_RST} $label — ${C_RED}$verdict${C_RST}"
+        fi
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        cat "$OUT" 2>/dev/null || true
+        if [ "$rc" != "0" ] && [ "$blocking" = "1" ]; then
+            rc_total=1
+        fi
+    done <<EOF
+$ENTRIES
+EOF
+
+    if [ "$rc_total" != "0" ]; then
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo -e "\e[31m❌ pre-commit blocked: one or more checks failed (see the [n/20] FAIL verdicts above)\e[0m"
+        echo "   Hooks ran in parallel; each gate's full output is printed in numbered order."
+        echo "   Re-run a single gate directly: .githooks/<name>"
+        echo "   Serial mode (pre-speedup behavior): MEEPT_PARALLEL_HOOKS=0 git commit ..."
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    fi
+    return "$rc_total"
+}
+
+dispatch_serial() {
+    WORK="$1"; ENTRIES="$2"; SDIR="$3"; ROOT="$4"; SNAP="$5"
+    export GATE_SNAP_INDEX="${SNAPIDX:-}"
+    export GATE_SNAP_GITDIR="${GITDIR_ABS:-}"
+    while IFS='|' read -r idx name blocking snapshot label; do
+        [ -n "$idx" ] || continue
+        echo ""
+        echo -e "\e[34m[$idx/20]\e[0m $label"
+        OUT="$WORK/out.$(_pidx "$idx")"
+        run_one_hook "$OUT" "$SDIR" "$ROOT" "$SNAP" "$name" "$snapshot"
+        rc="$(cat "$OUT.rc" 2>/dev/null || echo '?')"
+        cat "$OUT" 2>/dev/null || true
+        if [ "$rc" != "0" ]; then
+            if [ "$blocking" = "0" ]; then
+                echo "[$idx/20] (report-only gate failed rc=$rc — not blocking)"
+                continue
+            fi
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo -e "\e[31m❌ pre-commit blocked at [$idx/20] $label (exit $rc)\e[0m"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            return 1
+        fi
+    done <<EOF
+$ENTRIES
+EOF
+    return 0
+}

@@ -23,6 +23,8 @@ import (
 
 	_ "modernc.org/sqlite" // sqlite driver registration
 
+	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/kanban"
 	"github.com/caimlas/meept/pkg/id"
 )
 
@@ -448,16 +450,6 @@ func (g *Goal) autonomySnapshot() (maxRounds, roundsStarted int, blockedReason *
 	return g.MaxRounds, g.RoundsStarted, g.BlockedReason
 }
 
-// bumpRevision increments the CAS revision counter under the write lock and
-// returns the new value. Each Update calls this exactly once so revision
-// advances monotonically per persisted write.
-func (g *Goal) bumpRevision() int64 {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.Revision++
-	return g.Revision
-}
-
 // ActivePlan returns the currently executing plan ID (empty if none) in a
 // concurrency-safe manner.
 func (g *Goal) ActivePlan() string {
@@ -691,6 +683,95 @@ type GoalStore struct {
 	log   *slog.Logger
 	mu    sync.Mutex // serializes migrate-on-open and Close
 	ready bool
+
+	// kanbanBus + kanbanEvents are the opt-in publisher seam (plan leaf
+	// 02/04) for the typed kanban.event.goal.state StateEvent on the
+	// transition-fenced write paths (UpdateWithTransition / Retire). Gate
+	// default false = no publish at all = byte-identical behavior. These
+	// fields sit under kanbanMu (separate from mu, which only serializes
+	// migrate/Close); the publish runs outside every lock after the DB
+	// write confirmed. Wiring reaches this through the setter seam (the
+	// daemon's employee wiring, leaf 07/01) — no constructor signature
+	// change. internal/bus/kanban imports are safe here: the package
+	// comment's cycle warning covers internal/agent, and neither bus
+	// (wsclass+models only) nor kanban imports employee (build-pinned).
+	kanbanBus    *bus.MessageBus
+	kanbanEvents bool
+	kanbanMu     sync.RWMutex
+}
+
+// SetKanbanEventBus installs the optional bus the goal machine publishes
+// StateEvents on (plan leaf 02/04). A nil bus makes every publisher a
+// silent no-op, matching the nil-bus tolerance of the kanban helpers.
+func (s *GoalStore) SetKanbanEventBus(b *bus.MessageBus) {
+	if s == nil {
+		return
+	}
+	s.kanbanMu.Lock()
+	defer s.kanbanMu.Unlock()
+	s.kanbanBus = b
+}
+
+// SetKanbanEventPublishing arms the opt-in gate (plan leaf 02/04) for the
+// typed kanban.event.goal.state StateEvent publishers. Default false: the
+// goal store behaves byte-identically to pre-kanban builds — no StateEvent
+// is ever constructed or published. The daemon wiring (leaf 07/01) turns
+// it on (same gated-setter pattern as PersistentQueue's).
+func (s *GoalStore) SetKanbanEventPublishing(enabled bool) {
+	if s == nil {
+		return
+	}
+	s.kanbanMu.Lock()
+	defer s.kanbanMu.Unlock()
+	s.kanbanEvents = enabled
+}
+
+// goalKanbanPublishEnabled snapshots the gate + bus outside s.mu
+// (mutexio: the publish itself must never run under a store lock).
+func (s *GoalStore) goalKanbanPublishEnabled() (bool, *bus.MessageBus) {
+	s.kanbanMu.RLock()
+	defer s.kanbanMu.RUnlock()
+	return s.kanbanEvents, s.kanbanBus
+}
+
+// publishGoalState emits a goal-machine StateEvent on
+// kanban.event.goal.state when (and only when) the opt-in gate is armed.
+// from == to (same-state field updates, not lifecycle transitions)
+// publishes nothing, matching the task/queue publishers' disposition.
+func (s *GoalStore) publishGoalState(id string, from, to GoalState, reason string) {
+	if from == to {
+		return
+	}
+	enabled, b := s.goalKanbanPublishEnabled()
+	if !enabled {
+		return
+	}
+	kanban.PublishGoalState(b, kanban.StateEvent{
+		Kind:   kanban.EventKindGoal,
+		ID:     id,
+		From:   from.String(),
+		To:     to.String(),
+		Reason: reason,
+	})
+}
+
+// goalEventReason maps a won goal edge to its StateEvent.Reason label.
+// The resume label covers both non-bypassed (paused -> active) and the
+// human-gated (blocked -> active) edge — the fence caller semantics are
+// the same operator-visible verb.
+func goalEventReason(to GoalState) string {
+	switch to {
+	case GoalPaused:
+		return kanban.EventReasonPark
+	case GoalBlocked:
+		return kanban.EventReasonBlock
+	case GoalRetired:
+		return kanban.EventReasonRetire
+	case GoalActive:
+		return kanban.EventReasonResume
+	default:
+		return kanban.EventReasonUpdateState
+	}
 }
 
 // NewGoalStore opens (or creates) the SQLite database at path and runs
@@ -1071,6 +1152,12 @@ WHERE id = ? AND revision = ?`,
 		}
 		return fmt.Errorf("%w: goal %s caller snapshot at revision %d, persisted revision changed under this write", ErrGoalRevisionConflict, g.ID, callerRevision)
 	}
+	// CAS won: the row is committed in g.State. Publish the goal-machine
+	// StateEvent AFTER the write (plan leaf 02/04). Same-state field
+	// updates publish nothing; the reason is derived from the won edge.
+	if g.State != cur.State {
+		s.publishGoalState(g.ID, cur.State, g.State, goalEventReason(g.State))
+	}
 	return nil
 }
 
@@ -1081,6 +1168,21 @@ func (s *GoalStore) Retire(ctx context.Context, id string, now time.Time) error 
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
+	// Gate-armed only: read the pre-state so the StateEvent carries the
+	// true From (plan leaf 02/04; mirrors PersistentQueue's
+	// jobStateForEvent gate check). Gate-off path stays byte-identical.
+	var pre GoalState
+	enabled, _ := s.goalKanbanPublishEnabled()
+	if enabled {
+		var raw string
+		if err := s.db.QueryRowContext(ctx, "SELECT state FROM employee_goals WHERE id = ?", id).Scan(&raw); err != nil {
+			enabled = false // no pre-state, no event — the UPDATE below still decides the row
+		} else if parsed, perr := ParseGoalState(raw); perr == nil {
+			pre = parsed
+		} else {
+			enabled = false
+		}
+	}
 	res, err := s.db.ExecContext(ctx, retireStmt, GoalRetired.String(), now.Format(time.RFC3339), id)
 	if err != nil {
 		return fmt.Errorf("retire: %w", err)
@@ -1088,6 +1190,9 @@ func (s *GoalStore) Retire(ctx context.Context, id string, now time.Time) error 
 	n, _ := res.RowsAffected()
 	if n == 0 {
 		return ErrGoalNotFound
+	}
+	if enabled && pre != GoalRetired {
+		s.publishGoalState(id, pre, GoalRetired, kanban.EventReasonRetire)
 	}
 	s.log.InfoContext(ctx, "employee goal retired", "goal_id", id, "retired_at", now)
 	return nil

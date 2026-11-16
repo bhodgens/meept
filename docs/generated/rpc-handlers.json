@@ -75,13 +75,13 @@
     "topic": "bus.publish",
     "handler": "func(ctx context.Context, params json.RawMessage",
     "file": "internal/rpc/server.go",
-    "line": 688
+    "line": 699
   },
   {
     "topic": "bus.stats",
     "handler": "func(ctx context.Context, params json.RawMessage",
     "file": "internal/rpc/server.go",
-    "line": 709
+    "line": 720
   },
   {
     "topic": "bus.subscribe",
@@ -183,7 +183,7 @@
     "topic": "chat.submit",
     "handler": "chatSubmitHandler.Submit",
     "file": "internal/daemon/daemon.go",
-    "line": 336
+    "line": 345
   },
   {
     "topic": "chat.submit",
@@ -297,7 +297,7 @@
     "topic": "daemon.status",
     "handler": "statusHandler",
     "file": "internal/rpc/server.go",
-    "line": 677
+    "line": 688
   },
   {
     "topic": "daemon.stop",
@@ -381,37 +381,37 @@
     "topic": "firewall.stats",
     "handler": "func(ctx context.Context, params json.RawMessage",
     "file": "internal/rpc/server.go",
-    "line": 680
+    "line": 691
   },
   {
     "topic": "groups.assign",
     "handler": "h.handleAssign",
     "file": "internal/rpc/groups.go",
-    "line": 161
+    "line": 199
   },
   {
     "topic": "groups.check",
     "handler": "h.handleCheck",
     "file": "internal/rpc/groups.go",
-    "line": 163
+    "line": 201
   },
   {
     "topic": "groups.explain",
     "handler": "h.handleExplain",
     "file": "internal/rpc/groups.go",
-    "line": 160
+    "line": 198
   },
   {
     "topic": "groups.list",
     "handler": "h.handleList",
     "file": "internal/rpc/groups.go",
-    "line": 159
+    "line": 197
   },
   {
     "topic": "groups.remove",
     "handler": "h.handleRemove",
     "file": "internal/rpc/groups.go",
-    "line": 162
+    "line": 200
   },
   {
     "topic": "instruction.add",
@@ -663,7 +663,7 @@
     "topic": "ping",
     "handler": "func(ctx context.Context, params json.RawMessage",
     "file": "internal/rpc/server.go",
-    "line": 557
+    "line": 568
   },
   {
     "topic": "plan.approve",
@@ -1389,7 +1389,7 @@
     "topic": "status",
     "handler": "statusHandler",
     "file": "internal/rpc/server.go",
-    "line": 676
+    "line": 687
   },
   {
     "topic": "sync.pull",
@@ -1407,7 +1407,7 @@
     "topic": "task.amend.submit",
     "handler": "func(ctx context.Context, params json.RawMessage",
     "file": "internal/rpc/server.go",
-    "line": 714
+    "line": 725
   },
   {
     "topic": "task.approve",
@@ -1539,31 +1539,31 @@
     "topic": "voice.local.end",
     "handler": "h.handleEnd",
     "file": "internal/rpc/voice_local.go",
-    "line": 228
+    "line": 235
   },
   {
     "topic": "voice.local.events",
     "handler": "h.handleEvents",
     "file": "internal/rpc/voice_local.go",
-    "line": 230
+    "line": 237
   },
   {
     "topic": "voice.local.open",
     "handler": "h.handleOpen",
     "file": "internal/rpc/voice_local.go",
-    "line": 227
+    "line": 234
   },
   {
     "topic": "voice.local.status",
     "handler": "h.handleStatus",
     "file": "internal/rpc/voice_local.go",
-    "line": 229
+    "line": 236
   },
   {
     "topic": "voice.local.transcript",
     "handler": "h.handleTranscript",
     "file": "internal/rpc/voice_local.go",
-    "line": 231
+    "line": 238
   },
   {
     "topic": "worker.add",

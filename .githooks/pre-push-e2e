@@ -2,19 +2,27 @@
 #
 # pre-push-e2e — push-boundary e2e gate for the NO-NEW-UNIT-TESTS policy.
 #
-# pre-commit-e2e (check 19/20) gates the affected hermetic e2e suites at
-# COMMIT time. This hook closes the bypass hole: a commit that skipped or
-# broke that gate (--no-verify, MEEPT_SKIP_E2E=1, or a hook run that was
-# killed mid-sweep) still cannot LAND on the remote while any affected
-# hermetic e2e suite is red. CI's `make e2e-fast` (code-quality.yml, job
-# e2e-fast) is the second line; this gate runs locally at the push
-# boundary, before anything reaches the remote at all.
+# Since the gates-speedup change this is the PRIMARY local site for the
+# affected hermetic e2e sweep: pre-commit's check 19/20 keeps only the
+# cheap new-package census (the sweep cost 15-25 min per commit). This
+# gate also closes the bypass hole around the census (--no-verify,
+# MEEPT_SKIP_E2E=1, or a hook run killed mid-census). CI's `make e2e-fast`
+# (ci.yml job e2e-fast, member of the ci-success aggregate gate) is the
+# remote line; this gate runs locally at the push boundary, before anything
+# reaches the remote at all. Scope is FORCED to full here — see header.
 #
 # For each ref being pushed, the changed paths (remote_sha..local_sha) are
 # fed to scripts/e2e-affected.sh, which maps them through
 # e2e/manifest.json and runs exactly the affected suites. A failing suite
-# blocks the push. A pushed diff with no mapped feature paths is a no-op
-# (same as pre-commit-e2e).
+# blocks the push. A pushed diff with no mapped feature paths is a no-op.
+#
+# SCOPE: this is the thorough sweep — it runs with MEEPT_E2E_SCOPE=full
+# (the transitive fan-out: a staged internal/agent/sub/x.go also selects
+# the internal/agent/ suites), forced here so a leaked or ambient
+# MEEPT_E2E_SCOPE=direct in a developer shell can NEVER thin the push
+# gate. Since the gates-speedup change this is ALSO the primary local
+# e2e gate: pre-commit check [19] keeps only the cheap new-package census
+# and the suite sweep moved here (CI's e2e-fast job is the second site).
 #
 # New branch with no usable base (remote_sha all-zeros and no tracking
 # ref): the smoke suite runs instead — the gate stays non-decorative,
@@ -140,7 +148,9 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         fi
         echo "pre-push-e2e: checking $(wc -l < "$TMP" | tr -d ' ') changed file(s) on $local_ref..."
         ran=1
-        if ! scripts/e2e-affected.sh < "$TMP"; then
+        # FULL scope forced: the push gate is the thorough sweep; ambient
+        # MEEPT_E2E_SCOPE must never thin it (see header).
+        if ! MEEPT_E2E_SCOPE=full scripts/e2e-affected.sh < "$TMP"; then
             echo "pre-push-e2e: FAIL — affected hermetic e2e suite(s) are red for $local_ref."
             failed=1
         fi

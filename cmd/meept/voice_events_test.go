@@ -68,9 +68,11 @@ func (c transcriptFakeClient) Call(_ string, _ any) (json.RawMessage, error) {
 func TestPrintLocalCallTranscriptEmitsRoleLines(t *testing.T) {
 	payload, err := json.Marshal(map[string]any{
 		"call_id": "local-x", "employee_id": "companion", "session_id": "s-1",
+		"ended_at": "2026-11-11T21:39:20Z",
 		"lines": []map[string]any{
 			{"role": "user", "text": " how are you ", "at": "2026-11-11T21:39:08Z"},
 			{"role": "assistant", "text": "Doing well.", "at": "2026-11-11T21:39:13Z"},
+			{"role": "assistant", "text": "Anything else?", "at": "2026-11-11T21:39:15Z"},
 		},
 		"found": true,
 	})
@@ -81,9 +83,12 @@ func TestPrintLocalCallTranscriptEmitsRoleLines(t *testing.T) {
 		printLocalCallTranscript(transcriptFakeClient{payload: payload}, "local-x", "companion")
 	})
 	for _, want := range []string{
-		"--- transcript (companion / local-x): 1 user / 1 assistant ---",
-		"21:39:08 user: how are you",
-		"21:39:13 assistant: Doing well.",
+		"--- transcript (companion / local-x): 1 user / 2 assistant ---",
+		// Each line renders a start→stop window: next line's start for all
+		// but the last, the call's ended_at for the final line.
+		"21:39:08→21:39:13 user: how are you",
+		"21:39:13→21:39:15 assistant: Doing well.",
+		"21:39:15→21:39:20 assistant: Anything else?",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("transcript print missing %q in:\n%s", want, out)
@@ -91,9 +96,87 @@ func TestPrintLocalCallTranscriptEmitsRoleLines(t *testing.T) {
 	}
 }
 
+// The final line without an ended_at (old daemon / live call) renders
+// start-only - the window never fabricates a stop it does not have.
+func TestPrintLocalCallTranscriptFinalLineStartOnlyWithoutEndedAt(t *testing.T) {
+	payload, err := json.Marshal(map[string]any{
+		"call_id": "local-x", "employee_id": "companion", "session_id": "s-1",
+		"lines": []map[string]any{
+			{"role": "user", "text": "hi", "at": "2026-11-11T21:39:08Z"},
+			{"role": "assistant", "text": "hello", "at": "2026-11-11T21:39:09Z"},
+		},
+		"found": true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := captureStdout(t, func() {
+		printLocalCallTranscript(transcriptFakeClient{payload: payload}, "local-x", "companion")
+	})
+	for _, want := range []string{
+		"21:39:08→21:39:09 user: hi",
+		"21:39:09 assistant: hello", // no stop: start-only, no arrow after
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("transcript print missing %q in:\n%s", want, out)
+		}
+	}
+	// The brief flush-race window degrades to start-only rather than
+	// fabricating a bad stop.
+	if strings.Contains(out, "→") && strings.Count(out, "→") != 1 {
+		t.Fatalf("expected exactly one arrow (one bounded line), got:\n%s", out)
+	}
+}
+
+// callSeqClient answers voice.local.transcript with scripted payloads in
+// order, serving the last one forever (the bounded retry's convergence).
+type callSeqClient struct {
+	responses []json.RawMessage
+	served    int
+}
+
+func (c *callSeqClient) Call(_ string, _ any) (json.RawMessage, error) {
+	idx := c.served
+	if idx >= len(c.responses) {
+		idx = len(c.responses) - 1
+	}
+	c.served++
+	return c.responses[idx], nil
+}
+
+// The transcript read absorbs the end/flush race with a short retry: a
+// found row that first returns empty lines resolves on a later attempt.
+func TestPrintLocalCallTranscriptRetriesFlushRace(t *testing.T) {
+	payload, err := json.Marshal(map[string]any{
+		"call_id": "local-race", "employee_id": "companion", "session_id": "s-1",
+		"lines": []map[string]any{
+			{"role": "user", "text": "hello", "at": "2026-11-11T21:39:08Z"},
+			{"role": "assistant", "text": "hi", "at": "2026-11-11T21:39:09Z"},
+		},
+		"found": true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	empty, err := json.Marshal(map[string]any{
+		"call_id": "local-race", "employee_id": "companion", "session_id": "s-1",
+		"lines": []any{}, "found": true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &callSeqClient{responses: []json.RawMessage{empty, empty, payload}}
+	out := captureStdout(t, func() {
+		printLocalCallTranscript(client, "local-race", "companion")
+	})
+	if !strings.Contains(out, "21:39:08→21:39:09 user: hello") {
+		t.Fatalf("flush-race retry must converge to the full transcript, got:\n%s", out)
+	}
+}
+
 // Best-effort degrade pins: an RPC failure (e.g. an old daemon without
 // the method) and a found=false empty envelope print the honest "no
-// transcript lines" header and NOTHING else — never a crash, never a
+// transcript lines" header and NOTHING else - never a crash, never a
 // change to the run's outcome.
 func TestPrintLocalCallTranscriptDegradesQuietly(t *testing.T) {
 	out := captureStdout(t, func() {

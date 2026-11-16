@@ -14,7 +14,9 @@
 #   Handler/Emitter/Publisher(...) passing a bare nil literal in non-test additions
 #   (the "wired with a nil provider" placeholder agents emit instead of
 #   real wiring; suppress an intentional call with //nolint:nilseam and a
-#   reason, the repo-wide annotation convention)
+#   reason, the repo-wide annotation convention; the marker is honored on
+#   the same line or the immediately preceding line, and multi-line
+#   calls are joined into logical lines before matching)
 #
 # Installation: Included in .githooks/pre-commit
 
@@ -140,27 +142,75 @@ for file in $STAGED_GO_FILES; do
   # via STAGED_GO_FILES; tests legitimately exercise nil guards).
   # Exempt with //nolint:nilseam + reason (repo-wide annotation convention,
   # see pre-commit-channel-nilafterclose / pre-commit-predictable-ids) or
-  # the equivalent '// nilseam: allow' marker.
-  while IFS= read -r pattern; do
-    [ -z "$pattern" ] && continue
-    # Skip comment lines
+  # the equivalent '// nilseam: allow' marker — honored on the call line
+  # OR the immediately preceding line.
+  # Multi-line calls are handled first: ADDED lines are joined into
+  # LOGICAL lines — a line is appended to the previous one while paren
+  # depth is positive (counted naively over ( and ); string/comment
+  # contents are NOT excluded — kept simple on purpose, matching this
+  # file's grep-grade heuristics). Without the join, the common diff
+  # shape `mgr.SetHandler(\n\t nil,\n)` has no single line holding both
+  # the setter and nil, and the gate exits 0 on exactly what it blocks.
+  # awk emits "<SUPPRESS><TAB><logical>" per logical line, where SUPPRESS
+  # is 1 when the call line or the line immediately BEFORE it (the same
+  # logical line or the previous emitted one) carries
+  # //nolint:nilseam / 'nilseam: allow'. Simplified single-file shape:
+  # one awk pass, no per-pattern re-scanning of ADDED_LINES.
+  LOGICAL_LINES=$(awk '
+    {
+      line = $0
+      suppressed = (line ~ /nolint:nilseam|nilseam: allow/) ? 1 : 0
+      if (pending != "" && depth > 0) {
+        pending = pending " " line
+        if (suppressed) pend_sup = 1
+      } else {
+        if (pending != "") printf "%d\t%s\n", pend_sup, pending
+        pending = line
+        # A call is suppressed when its own line(s) OR the ADDED line
+        # immediately before it carries the marker (preceding-line nolint).
+        pend_sup = (suppressed || last_sup) ? 1 : 0
+      }
+      last_sup = suppressed
+      n = gsub(/\(/, "(", line); m = gsub(/\)/, ")", line)
+      depth += n - m
+      if (depth < 0) depth = 0
+      if (depth <= 0) {
+        # Logical line complete: flush immediately so the next line can
+        # act as a fresh preceding-line nolint candidate.
+        if (pending != "") { printf "%d\t%s\n", pend_sup, pending; pending = ""; pend_sup = 0 }
+      }
+    }
+    END { if (pending != "") printf "%d\t%s\n", pend_sup, pending }
+  ' <<< "$ADDED_LINES")
+  while IFS= read -r row; do
+    [ -z "$row" ] && continue
+    suppressed="${row%%$'\t'*}"
+    pattern="${row#*$'\t'}"
+    [ "$suppressed" = "1" ] && continue
+    # Skip comment-only logical lines
     echo "$pattern" | grep -qE '^\s*//' && continue
-    # Skip suppressed lines
-    echo "$pattern" | grep -qE 'nolint:nilseam|nilseam: allow' && continue
     # Strip string literals so "nil" inside text doesn't count
     code=$(echo "$pattern" | sed 's/"[^"]*"//g')
     # Extract the argument list of the seam-setter call (flat, no nested
-    # parens — the placeholder shape is always SetX(nil) / SetX(a, nil)).
+    # parens — the placeholder shape is always SetX(nil) / SetX(a, nil);
+    # the logical-line join above flattens multi-line calls into one).
     args=$(echo "$code" | sed -nE 's/.*Set[A-Za-z0-9_]*(Provider|Sink|Source|Relay|Adapter|Handler|Emitter|Publisher)\(([^()]*)\).*/\2/p')
     [ -z "$args" ] && continue
     # Require nil as a WHOLE argument (not a substring of an identifier)
     echo "$args" | grep -qE '(^|,)[[:space:]]*nil[[:space:]]*($|,)' || continue
-    LINE_NUMS=$(grep -nF "$pattern" "$file" 2>/dev/null | cut -d: -f1)
-    for ln in $LINE_NUMS; do
-      BLOCKING_ISSUES="${BLOCKING_ISSUES}  ❌ Unwired placeholder seam call (nil passed to $(echo "$pattern" | sed -nE 's/.*(Set[A-Za-z0-9_]*(Provider|Sink|Source|Relay|Adapter|Handler|Emitter|Publisher))\(.*/\1/p')):\n    $file:$ln: $pattern\n"
-      BLOCK_COUNT=$((BLOCK_COUNT + 1))
-    done
-  done <<< "$(echo "$ADDED_LINES" | grep -E 'Set[A-Za-z0-9_]*(Provider|Sink|Source|Relay|Adapter|Handler|Emitter|Publisher)\(' | grep -F 'nil' || true)"
+    LINE_NUMS=$(grep -nF "$(echo "$pattern" | awk '{print $1}')" "$file" 2>/dev/null | cut -d: -f1)
+    LN_HINT=""
+    # Best-effort line number: locate the call's first token span in the
+    # file; fall back to a bare file reference when the joined shape does
+    # not exist verbatim in the file.
+    FIRST_TOKEN=$(echo "$pattern" | grep -oE 'Set[A-Za-z0-9_]*(Provider|Sink|Source|Relay|Adapter|Handler|Emitter|Publisher)\(' | head -1)
+    if [ -n "$FIRST_TOKEN" ]; then
+      LN_HINT=$(grep -nF "$FIRST_TOKEN" "$file" 2>/dev/null | cut -d: -f1 | head -1)
+    fi
+    SETTER_NAME=$(echo "$pattern" | sed -nE 's/.*(Set[A-Za-z0-9_]*(Provider|Sink|Source|Relay|Adapter|Handler|Emitter|Publisher))\(.*/\1/p')
+    BLOCKING_ISSUES="${BLOCKING_ISSUES}  ❌ Unwired placeholder seam call (nil passed to ${SETTER_NAME:-unknown setter}):\n    $file:${LN_HINT:-?}: $pattern\n"
+    BLOCK_COUNT=$((BLOCK_COUNT + 1))
+  done <<< "$LOGICAL_LINES"
 
   if [ -n "$FILE_ISSUES" ]; then
     echo -e "${YELLOW}⚠️  $file:${NC}"
@@ -175,7 +225,12 @@ if [ -n "$BLOCKING_ISSUES" ]; then
   echo -e "$BLOCKING_ISSUES"
 fi
 
-if [ "$ISSUE_COUNT" -gt 0 ]; then
+# Blocking findings must fail the gate on their OWN — not only when an
+# unrelated informational (fmt.Errorf) finding happened to co-occur. The
+# old structure nested the exit inside `ISSUE_COUNT > 0`, so a commit whose
+# only sin was a nil-seam/ignored-error/panic site exited 0 on exactly the
+# errors this hook exists to block.
+if [ "$BLOCK_COUNT" -gt 0 ]; then
   echo ""
   echo -e "${YELLOW}Summary: $ISSUE_COUNT file(s) with potential issues; $BLOCK_COUNT blocking.${NC}"
   echo ""
@@ -191,13 +246,15 @@ if [ "$ISSUE_COUNT" -gt 0 ]; then
   echo "      return err"
   echo "  }"
   echo ""
+  echo -e "${RED}❌ Commit blocked: $BLOCK_COUNT newly-added ignored-error / panic(err) / nil-seam site(s)${NC}"
+  echo ""
+  exit 1
+fi
 
-  if [ "$BLOCK_COUNT" -gt 0 ]; then
-    echo -e "${RED}❌ Commit blocked: $BLOCK_COUNT newly-added ignored-error / panic(err) / nil-seam site(s)${NC}"
-    echo ""
-    exit 1
-  fi
-
+if [ "$ISSUE_COUNT" -gt 0 ]; then
+  echo ""
+  echo -e "${YELLOW}Summary: $ISSUE_COUNT file(s) with potential issues; $BLOCK_COUNT blocking.${NC}"
+  echo ""
   echo -e "${YELLOW}⚠️  Remaining items are informational (fmt.Errorf style). Review encouraged but not required.${NC}"
   echo ""
 else

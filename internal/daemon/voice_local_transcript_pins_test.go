@@ -52,9 +52,17 @@ func TestCallTranscriptSeamProjection(t *testing.T) {
 	if seam == nil {
 		t.Fatal("callTranscriptSeam nil with a store")
 	}
-	emp, sess, lines, found := seam(ctx, "local-tp-1")
+	// End the call so the store carries an ended_at (the seam's final-line
+	// stop source).
+	if err := store.End(context.Background(), "local-tp-1", "ended"); err != nil {
+		t.Fatalf("End: %v", err)
+	}
+	emp, sess, endedAt, lines, found := seam(ctx, "local-tp-1")
 	if !found || emp != "companion" || sess != "session-tp" {
 		t.Fatalf("found=%v emp=%q sess=%q", found, emp, sess)
+	}
+	if endedAt == "" {
+		t.Fatal("ended_at must render RFC3339 for an ended call")
 	}
 	if len(lines) != 2 || lines[0].Role != "user" || lines[0].Text != "hello" || lines[1].Role != "assistant" {
 		t.Fatalf("lines = %+v", lines)
@@ -63,7 +71,7 @@ func TestCallTranscriptSeamProjection(t *testing.T) {
 		t.Fatal("line At must render RFC3339, not empty")
 	}
 	// Unknown call: found=false, nil lines (the handler normalises).
-	if _, _, lines, found := seam(ctx, "local-nope"); found || len(lines) != 0 {
+	if _, _, _, lines, found := seam(ctx, "local-nope"); found || len(lines) != 0 {
 		t.Fatalf("unknown ccid: found=%v lines=%+v", found, lines)
 	}
 }

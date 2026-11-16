@@ -55,6 +55,31 @@
 #                                               fails the hook (fail-closed);
 #                                               when CI=true the binary is
 #                                               ALWAYS required.
+#   MEEPT_DEADCODE_CACHE=0                      disable the result cache.
+#   MEEPT_DEADCODE_CACHE_DIR=/path              cache dir override (default
+#                                               <git-dir>/meept-cache).
+#   MEEPT_DEADCODE_VERBOSE=1                    print the cache digest on a
+#                                               hit too (the full HIT/MISS
+#                                               line always prints — the
+#                                               selftest seam).
+#   MEEPT_DEADCODE_BIN=/path/to/fake            deadcode binary override
+#                                               (fixture seam for offline
+#                                               selftests; mirrors the PATH
+#                                               lookup contract otherwise).
+#
+# RESULT CACHE (gates-speedup item 5): the 5-main x2-mode analysis costs
+# 2-4 minutes and its inputs are the Go source TREE, not the commit. The
+# per-mode intersection outputs are cached under <git-dir>/meept-cache
+# keyed by a digest of (sha256 of every .go file in the analyzed tree +
+# go.mod + go.sum, the baseline file hashes, the mains list, the deadcode
+# binary fingerprint). A matching digest reuses the prior intersection
+# verbatim; ANY Go content change (staged, unstaged, added, removed)
+# changes at least one file hash and misses. Fail-closed rules: only a
+# PASSING gate result (both intersections computed, zero NEW-vs-baseline
+# functions) is ever written; a gate failure deletes the entry, so a
+# failure can never replay as a success and a stale entry can never be
+# consulted twice. --rebaseline always does the full analysis and refreshes
+# the cache against the new baselines.
 #
 # Requires GOTOOLCHAIN pinned by the caller (pre-commit does this; standalone
 # runs pin from go.mod below).
@@ -89,12 +114,86 @@ FULL_TREE="${MEEPT_DEADCODE_FULL_TREE:-0}"
 BASELINE="${MEEPT_DEADCODE_BASELINE:-$PWD/.githooks/deadcode-baseline.txt}"
 BASELINE_NOTEST="${MEEPT_DEADCODE_BASELINE_NOTEST:-$PWD/.githooks/deadcode-baseline-notest.txt}"
 
+# Production mains to analyze. Override with MEEPT_DEADCODE_MAINS for
+# testing/CI. A function counts as unwired only if unreachable from EVERY
+# one of these entry points.
+MAINS_DEFAULT="./cmd/meept-daemon ./cmd/meept ./cmd/meept-lite ./cmd/meept-classifier-test ./tools/bridges-eval"
+MAINS="${MEEPT_DEADCODE_MAINS:-$MAINS_DEFAULT}"
+
+# --- Result cache plumbing (gates-speedup item 5) --------------------------
+#
+# CACHE_ROOT: <git-dir>/meept-cache/deadcode (outside the worktree: no
+# .gitignore needed, never checked, safe to rm). Entries are keyed by a
+# content digest of everything the analysis reads: the .go file contents of
+# the analyzed tree (+ go.mod/go.sum), both baselines, the mains list, and
+# the deadcode binary fingerprint.
+GITDIR_ABS="$(git rev-parse --absolute-git-dir 2>/dev/null || true)"
+CACHE_ENABLED=1
+if [ "${MEEPT_DEADCODE_CACHE:-1}" = "0" ]; then
+    CACHE_ENABLED=0
+fi
+if [ -z "$GITDIR_ABS" ] && [ -z "${MEEPT_DEADCODE_CACHE_DIR:-}" ]; then
+    CACHE_ENABLED=0   # cannot resolve a cache root — full run, no cache
+fi
+CACHE_ROOT="${MEEPT_DEADCODE_CACHE_DIR:-${GITDIR_ABS:+$GITDIR_ABS/meept-cache/deadcode}}"
+
+# Hash helper: shasum (macOS) else sha256sum (Linux CI).
+if command -v shasum >/dev/null 2>&1; then
+    hash_stream() { shasum -a 256 | cut -d' ' -f1; }
+elif command -v sha256sum >/dev/null 2>&1; then
+    hash_stream() { sha256sum | cut -d' ' -f1; }
+else
+    CACHE_ENABLED=0
+    hash_stream() { cat >/dev/null; }
+fi
+
+# digest_inputs — the cache key. Contents-based by design ("invalidate on
+# ANY .go content change" includes UNSTAGED edits, which an index-blob-id
+# digest would miss). $PWD is the analyzed tree: the working tree by
+# default, the prepared-commit snapshot when the dispatcher runs this gate
+# gated (the chain cds there before exec'ing hooks; find then digests the
+# exact bytes deadcode will read). bash-3.2/BSD-safe: no `sort -z` (BSD
+# sort has no NUL mode) — hash first, sort the "hash  name" lines after.
+digest_inputs() {
+    {
+        printf 'v3|MAINS=%s\n' "$MAINS"
+        # Binary fingerprint: CONTENT hash via stdin (never the path — the
+        # path embeds this run's temp dir when snapshot-gating, which made
+        # every digest unique and the cache dead on arrival).
+        cksum < "$DEADCODE_BIN" 2>/dev/null || true
+        if command -v shasum >/dev/null 2>&1; then
+            shasum -a 256 < "$BASELINE" 2>/dev/null || true
+            shasum -a 256 < "$BASELINE_NOTEST" 2>/dev/null || true
+            find . \( -path './.git' -o -path './.worktrees' -o -path './node_modules' -o -path './vendor' \) -prune \
+                -o -type f -name '*.go' -print0 \
+                | xargs -0 shasum -a 256 2>/dev/null \
+                | LC_ALL=C sort || true
+            shasum -a 256 go.mod 2>/dev/null || true
+            shasum -a 256 go.sum 2>/dev/null || true
+        else
+            sha256sum < "$BASELINE" 2>/dev/null || true
+            sha256sum < "$BASELINE_NOTEST" 2>/dev/null || true
+            find . \( -path './.git' -o -path './.worktrees' -o -path './node_modules' -o -path './vendor' \) -prune \
+                -o -type f -name '*.go' -print0 \
+                | xargs -0 sha256sum 2>/dev/null \
+                | LC_ALL=C sort || true
+            sha256sum go.mod 2>/dev/null || true
+            sha256sum go.sum 2>/dev/null || true
+        fi
+    } | hash_stream
+}
+
 # Locate the deadcode binary. A missing binary FAILS the gate: the whole
 # point is deterministic enforcement, and a silent skip on a machine
 # without the tool is how unwired code lands. The only escape hatch is an
 # explicit opt-out (MEEPT_DEADCODE_ALLOW_SKIP=1), and never on CI.
+# MEEPT_DEADCODE_BIN pins the binary directly (fixture seam; skips the PATH
+# search — used by scripts/gates-speedup-selftest.sh with a stub that
+# emulates deadcode's output format offline).
 DEADCODE_BIN=""
-if command -v deadcode &>/dev/null; then
+if [ -n "${MEEPT_DEADCODE_BIN:-}" ]; then
+    DEADCODE_BIN="$MEEPT_DEADCODE_BIN"
+elif command -v deadcode &>/dev/null; then
     DEADCODE_BIN="$(command -v deadcode)"
 elif [ -x "$HOME/go/bin/deadcode" ]; then
     DEADCODE_BIN="$HOME/go/bin/deadcode"
@@ -110,7 +209,7 @@ if [ -z "$DEADCODE_BIN" ]; then
         exit 0
     fi
     echo -e "${RED}✗ deadcode not installed — reachability gate is fail-closed${NC}"
-    echo "   Install with: go install golang.org/x/tools/cmd/deadcode@latest"
+    echo "   Install with: go install golang.org/x/tools/cmd/deadcode@v0.52.0"
     echo "   To skip deliberately (local only): MEEPT_DEADCODE_ALLOW_SKIP=1 git commit ..."
     exit 1
 fi
@@ -132,12 +231,6 @@ normalize() {
 
 TMPDIR_CURRENT="$(mktemp -d -t meept-deadcode.XXXXXX)"
 trap 'rm -rf "$TMPDIR_CURRENT"' EXIT
-
-# Production mains to analyze. Override with MEEPT_DEADCODE_MAINS for
-# testing/CI. A function counts as unwired only if unreachable from EVERY
-# one of these entry points.
-MAINS_DEFAULT="./cmd/meept-daemon ./cmd/meept ./cmd/meept-lite ./cmd/meept-classifier-test ./tools/bridges-eval"
-MAINS="${MEEPT_DEADCODE_MAINS:-$MAINS_DEFAULT}"
 
 # analyze_mode <suffix> <extra deadcode flags...>
 #
@@ -178,12 +271,99 @@ analyze_mode() {
     cp "$TMPDIR_CURRENT/acc" "$TMPDIR_CURRENT/inter.$SUFFIX"
 }
 
-analyze_mode test -test
-analyze_mode notest
+# Baselines must exist before hashing them — EXCEPT in rebaseline mode,
+# which is exactly the flow that creates missing baselines (the analysis
+# runs first and writes them).
+if [ "$REBASELINE" -eq 0 ]; then
+    for BASE in "$BASELINE" "$BASELINE_NOTEST"; do
+        if [ ! -f "$BASE" ]; then
+            echo -e "${RED}✗ deadcode baseline missing: $BASE${NC}"
+            echo "  Generate it with: .githooks/pre-commit-deadcode --rebaseline"
+            exit 1
+        fi
+    done
+fi
+
+# --- Cache lookup ----------------------------------------------------------
+# A HIT needs the two per-mode intersection outputs, which are the ONLY
+# data the diff-vs-baseline step reads afterwards. Fail-closed: only a
+# PASSING gate result is ever stored (cache_store at the end); a gate
+# failure purges the entry, and cache-disabled/miss always does the full
+# analysis.
+CACHE_KEY=""
+CACHE_HIT=0
+if [ "$CACHE_ENABLED" = "1" ]; then
+    mkdir -p "$CACHE_ROOT" 2>/dev/null || CACHE_ENABLED=0
+fi
+if [ "$CACHE_ENABLED" = "1" ]; then
+    # A digest failure (missing hash tool, unreadable file mid-walk) must
+    # NEVER fail the gate — degrade to an uncached full run.
+    CACHE_KEY="$(digest_inputs 2>/dev/null || true)"
+    if [ -z "$CACHE_KEY" ]; then
+        CACHE_ENABLED=0
+        echo "deadcode cache: digest unavailable — running full analysis (uncached)"
+    fi
+fi
+if [ "$CACHE_ENABLED" = "1" ]; then
+    if [ "$REBASELINE" -eq 0 ] \
+        && [ -s "$CACHE_ROOT/$CACHE_KEY/digest" ] \
+        && [ -f "$CACHE_ROOT/$CACHE_KEY/inter.test" ] \
+        && [ -f "$CACHE_ROOT/$CACHE_KEY/inter.notest" ]; then
+        cp "$CACHE_ROOT/$CACHE_KEY/inter.test" "$TMPDIR_CURRENT/inter.test"
+        cp "$CACHE_ROOT/$CACHE_KEY/inter.notest" "$TMPDIR_CURRENT/inter.notest"
+        CACHE_HIT=1
+        echo "deadcode cache: HIT (digest ${CACHE_KEY:0:12}, 5-main analysis reused — nothing re-analyzed)"
+    elif [ "$REBASELINE" -eq 0 ]; then
+        echo "deadcode cache: MISS (digest ${CACHE_KEY:0:12}) — running full analysis"
+    fi
+fi
+if [ "${MEEPT_DEADCODE_VERBOSE:-0}" = "1" ] && [ -n "$CACHE_KEY" ]; then
+    echo "deadcode cache: verbose digest=$CACHE_KEY hit=$CACHE_HIT"
+fi
+
+if [ "$CACHE_HIT" -eq 0 ]; then
+    analyze_mode test -test
+    analyze_mode notest
+fi
+
+cache_store() {
+    # Only called on the PASS path (and after --rebaseline). Writes the
+    # digest as a sentinel file so a half-written entry never validates.
+    # TOCTOU guard: re-digest after the analysis; if the tree moved while
+    # deadcode ran, the result belongs to a DIFFERENT key than the one we
+    # computed — drop it rather than risk a wrong future HIT.
+    [ "$CACHE_ENABLED" = "1" ] && [ -n "$CACHE_KEY" ] || return 0
+    if [ "${REBASELINE:-0}" != "1" ]; then
+        post_key="$(digest_inputs)"
+        if [ "$post_key" != "$CACHE_KEY" ]; then
+            echo "deadcode cache: tree changed mid-analysis — result not cached (correctness over speed)"
+            return 0
+        fi
+    fi
+    mkdir -p "$CACHE_ROOT/$CACHE_KEY" 2>/dev/null || return 0
+    cp "$TMPDIR_CURRENT/inter.test" "$CACHE_ROOT/$CACHE_KEY/inter.test.tmp" 2>/dev/null || return 0
+    cp "$TMPDIR_CURRENT/inter.notest" "$CACHE_ROOT/$CACHE_KEY/inter.notest.tmp" 2>/dev/null || return 0
+    mv "$CACHE_ROOT/$CACHE_KEY/inter.test.tmp" "$CACHE_ROOT/$CACHE_KEY/inter.test" 2>/dev/null || return 0
+    mv "$CACHE_ROOT/$CACHE_KEY/inter.notest.tmp" "$CACHE_ROOT/$CACHE_KEY/inter.notest" 2>/dev/null || return 0
+    printf '%s\n' "$CACHE_KEY" > "$CACHE_ROOT/$CACHE_KEY/digest" 2>/dev/null || return 0
+    return 0
+}
+
+cache_purge() {
+    [ "$CACHE_ENABLED" = "1" ] && [ -n "$CACHE_KEY" ] || return 0
+    rm -rf "$CACHE_ROOT/$CACHE_KEY" 2>/dev/null || true
+    return 0
+}
 
 if [ "$REBASELINE" -eq 1 ]; then
     cp "$TMPDIR_CURRENT/inter.test" "$BASELINE"
     cp "$TMPDIR_CURRENT/inter.notest" "$BASELINE_NOTEST"
+    # Refresh the cache against the NEW baselines (the digest embeds their
+    # hashes, so the old entry is stale the moment they change).
+    if [ "$CACHE_ENABLED" = "1" ]; then
+        CACHE_KEY="$(digest_inputs)"
+        cache_store
+    fi
     echo -e "${GREEN}✓ deadcode baselines regenerated:${NC}"
     echo "  $BASELINE ($(wc -l < "$BASELINE" | tr -d ' ') unreachable funcs, -test mode)"
     echo "  $BASELINE_NOTEST ($(wc -l < "$BASELINE_NOTEST" | tr -d ' ') unreachable funcs, no-test mode)"
@@ -191,24 +371,20 @@ if [ "$REBASELINE" -eq 1 ]; then
     exit 0
 fi
 
-for BASE in "$BASELINE" "$BASELINE_NOTEST"; do
-    if [ ! -f "$BASE" ]; then
-        echo -e "${RED}✗ deadcode baseline missing: $BASE${NC}"
-        echo "  Generate it with: .githooks/pre-commit-deadcode --rebaseline"
-        exit 1
-    fi
-done
-
 # report_new <label> <baseline> <current>
-# Exits non-zero (via the caller's set -e) when the current set contains
-# functions absent from the baseline.
+# Records the failure in GATE_FAILED (the CALLER exits 1 after both
+# passes report); it does not exit non-zero itself.
 GATE_FAILED=0
 report_new() {
     LABEL="$1"
     BASE="$2"
     CUR="$3"
-    # New = in the current set but not in the baseline (comm -13).
-    NEW_FUNCS=$(comm -13 "$BASE" "$CUR" || true)
+    # New = in the current set but not in the baseline (comm -13). No
+    # `|| true`: comm fails (exit 1) on unsorted input, and swallowing
+    # that would truncate the output into a false clean pass. Both
+    # baselines are written LC_ALL=C-sorted; a mis-sorted baseline now
+    # fails the gate via set -e instead of silently passing.
+    NEW_FUNCS=$(comm -13 "$BASE" "$CUR")
     if [ -n "$NEW_FUNCS" ]; then
         NEW_COUNT=$(printf '%s\n' "$NEW_FUNCS" | grep -c . || true)
         echo -e "${RED}✗ deadcode gate ($LABEL): $NEW_COUNT newly unwired function(s) — commit blocked${NC}"
@@ -229,6 +405,10 @@ report_new "-test" "$BASELINE" "$TMPDIR_CURRENT/inter.test"
 report_new "no-test" "$BASELINE_NOTEST" "$TMPDIR_CURRENT/inter.notest"
 
 if [ "$GATE_FAILED" -eq 1 ]; then
+    # Fail-closed cache rule: never leave an entry that could replay this
+    # tree as a prior pass, even if it was stored for an identical earlier
+    # digest (it cannot be — same inputs, same verdict — belt-and-braces).
+    cache_purge
     echo "  Fix: wire the code into a production call path, remove it, or gate it"
     echo "  behind an existing entry point. A function that only its OWN unit"
     echo "  test calls is NOT wired (the no-test pass exists for exactly this)."
@@ -236,5 +416,8 @@ if [ "$GATE_FAILED" -eq 1 ]; then
     echo "    .githooks/pre-commit-deadcode --rebaseline && git add .githooks/deadcode-baseline.txt .githooks/deadcode-baseline-notest.txt"
     exit 1
 fi
+
+# Gate passed: store the analysis result for the identical next digest.
+cache_store
 
 exit 0

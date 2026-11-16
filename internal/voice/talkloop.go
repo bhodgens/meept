@@ -914,8 +914,13 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 			// consecutive holds.
 			if callerDeferrals < silenceCallerDeferralCap && t.silenceCallerDefers(ccid) {
 				callerDeferrals++
-				silenceDeferrals = 0
-				t.silencePrompted = false
+				// Escalation counters are deliberately NOT reset here:
+				// a stuck-hot mic must not rewind the nudge/hangup ladder.
+				// silencePrompted stays set after the nudge and
+				// silenceDeferrals keeps its streak, so sustained holds
+				// burn callerDeferrals to the cap and the next fire takes
+				// the hangup leg (bounded escalation). Only a fresh
+				// dispatch (dispatchPrompt) legitimately resets both.
 				t.log.Info("voice talk loop: silence window held (caller speaking)",
 					"ccid", ccid, "holds", callerDeferrals)
 				t.emitEvent(ccid, EventInput{
