@@ -637,6 +637,22 @@ func drainLiveSpeaker(r io.Reader, s *voice.SpeakerSink, done chan<- error, clea
 		}
 		clock.noteOn()
 	}
+	// flushComplete marks the end-of-audio boundary (V4): the pending
+	// tail has been handed to the player (or there was no tail). A very
+	// short reply can end with Pending()==0 and the speaker window never
+	// opened (below the flush bound, or already closed by the gap
+	// timer) - the said lines queued in the clock would otherwise be
+	// stranded: the stored transcript has them, the live feed silently
+	// dropped them. endStream prints them without fabricating a speaker
+	// window; on the normal path the wait queue is already empty (noteOn
+	// joined it), so this is a no-op and the join semantics are
+	// unchanged.
+	flushComplete := func() {
+		if clock == nil {
+			return
+		}
+		clock.endStream()
+	}
 	trace := os.Getenv("MEEPT_VOICE_TRACE") == "1"
 	var (
 		lastRead   time.Time
@@ -822,6 +838,7 @@ func drainLiveSpeaker(r io.Reader, s *voice.SpeakerSink, done chan<- error, clea
 					done <- ferr
 					return
 				}
+				flushComplete()
 				if clock != nil {
 					clock.noteOff()
 				}
@@ -1230,8 +1247,11 @@ type voiceEventTracker struct {
 	ended map[string]bool
 	wg    sync.WaitGroup
 	// clock joins said lines to speaker on/off. Nil prints said as a
-	// plain event line.
-	clock *speakerClock
+	// plain event line. For multi-call trackers (voice link) the map is
+	// per-ccid; clock falls back to the single clock when the map is
+	// unset (single-call trackers).
+	clock  *speakerClock
+	clocks map[string]*speakerClock
 }
 
 // voiceEventCallTimeout bounds one voice.local.events round-trip (C-11):
@@ -1250,10 +1270,23 @@ func newVoiceEventTracker(client interface {
 	}
 }
 
+// clockFor resolves the speaker clock for one call id: the per-ccid map
+// (voice link) first, then the single clock (voice local), else nil
+// (said renders raw).
+func (t *voiceEventTracker) clockFor(ccid string) *speakerClock {
+	if c, ok := t.clocks[ccid]; ok {
+		return c
+	}
+	return t.clock
+}
+
 // speakerClock joins spoken sentences to the speaker window. The drain
 // calls noteOn on the first played byte of a burst and noteOff after a
 // 350 ms gap, a clear, or end of stream. said events that arrive before
-// the window wait in pending.
+// the window wait in pending. A drained clock (SetDrained, V5) has no
+// audio window: every said prints immediately with the join styling the
+// live feed uses, so the post-call drain tail reads like the live feed
+// it continues.
 type speakerClock struct {
 	label string
 	emp   string
@@ -1261,60 +1294,145 @@ type speakerClock struct {
 	on    bool
 	start time.Time
 	wait  []string
+	// drained = no audio is ever played again (post-call drain tail):
+	// noteSaid flushes through immediately instead of waiting for a
+	// noteOn that will never come.
+	drained bool
 }
 
 func newSpeakerClock(label, emp string) *speakerClock {
 	return &speakerClock{label: label, emp: emp}
 }
 
+// SetDrained puts the clock in drained mode: said lines print at once
+// (still styled "said:", just without a speaker on/off window - at drain
+// time the audio is gone). V5: the drain previously printed said events
+// raw via voiceEventRender, diverging from the live feed's clock join.
+func (c *speakerClock) SetDrained() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	c.drained = true
+	wait := c.wait
+	c.wait = nil
+	c.mu.Unlock()
+	// Flush anything the live window never opened for (the V4 shape) so
+	// nothing already queued is stranded when the drain takes over.
+	stamp := time.Now().Format("15:04:05")
+	for _, text := range wait {
+		c.printSaid(stamp, text)
+	}
+}
+
 func (c *speakerClock) printf(format string, args ...any) {
 	fmt.Printf("[%s %s] "+format+"\n", append([]any{c.label, c.emp}, args...)...)
+}
+
+// printSaid renders one said line. Callers snapshot the arguments under
+// c.mu and call this AFTER unlocking (V6: no I/O while holding the
+// mutex - mutexio). The single feeder goroutine means call-order
+// printing preserves the join ordering.
+func (c *speakerClock) printSaid(stamp, text string) {
+	c.printf("%s said: %s", stamp, text)
 }
 
 func (c *speakerClock) noteSaid(text string) {
 	if c == nil || strings.TrimSpace(text) == "" {
 		return
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.on {
-		c.printf("%s said: %s", time.Now().Format("15:04:05"), text)
-		return
+	type saidLine struct {
+		stamp, text string
 	}
-	c.wait = append(c.wait, text)
+	var prints []saidLine
+	c.mu.Lock()
+	if c.on || c.drained {
+		prints = append(prints, saidLine{time.Now().Format("15:04:05"), text})
+	} else {
+		c.wait = append(c.wait, text)
+	}
+	c.mu.Unlock()
+	for _, l := range prints {
+		c.printSaid(l.stamp, l.text)
+	}
 }
 
 func (c *speakerClock) noteOn() {
 	if c == nil {
 		return
 	}
+	// Snapshot everything to print under the lock; print after unlock
+	// (V6, mutexio). A single feeder goroutine keeps call-order printing
+	// equivalent to the old under-lock order.
+	type onPrint struct {
+		on          bool
+		stamp, text string // text set only when on==false (a queued said)
+	}
+	var prints []onPrint
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.on {
+	if !c.on {
+		c.on = true
+		c.start = time.Now()
+		stamp := c.start.Format("15:04:05")
+		prints = append(prints, onPrint{on: true, stamp: stamp})
+		for _, text := range c.wait {
+			prints = append(prints, onPrint{stamp: stamp, text: text})
+		}
+		c.wait = nil
+	}
+	c.mu.Unlock()
+	for _, p := range prints {
+		if p.on {
+			c.printf("%s speaker on", p.stamp)
+			continue
+		}
+		c.printSaid(p.stamp, p.text)
+	}
+}
+
+// endStream is the flush-complete edge of the speaker window (V4): any
+// said lines still waiting (the window never opened for a very short
+// reply that fully flushed before EOF) print now - the stored transcript
+// has them, so the live feed must not silently drop them. Called after
+// the EOF tail flush, before noteOff. On the normal multi-burst path the
+// wait queue is already drained by noteOn's join, so this prints
+// nothing and ordering is unchanged.
+func (c *speakerClock) endStream() {
+	if c == nil {
 		return
 	}
-	c.on = true
-	c.start = time.Now()
-	stamp := c.start.Format("15:04:05")
-	c.printf("%s speaker on", stamp)
-	for _, text := range c.wait {
-		c.printf("%s said: %s", stamp, text)
-	}
+	c.mu.Lock()
+	wait := c.wait
 	c.wait = nil
+	c.mu.Unlock()
+	stamp := time.Now().Format("15:04:05")
+	for _, text := range wait {
+		c.printSaid(stamp, text)
+	}
 }
 
 func (c *speakerClock) noteOff() {
 	if c == nil {
 		return
 	}
+	// V6: the off line is composed under the lock and printed after
+	// unlock - ordering is preserved (single feeder goroutine).
+	var (
+		doPrint bool
+		stamp   string
+		elapsed time.Duration
+	)
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if !c.on {
-		return
+	if c.on {
+		c.on = false
+		doPrint = true
+		stamp = time.Now().Format("15:04:05")
+		elapsed = time.Since(c.start).Round(100 * time.Millisecond)
 	}
-	c.on = false
-	elapsed := time.Since(c.start).Round(100 * time.Millisecond)
-	c.printf("%s speaker off (%s)", time.Now().Format("15:04:05"), elapsed)
+	c.mu.Unlock()
+	if doPrint {
+		c.printf("%s speaker off (%s)", stamp, elapsed)
+	}
 }
 
 // start spawns one ticker poller goroutine per known call id. The
@@ -1337,6 +1455,16 @@ func (t *voiceEventTracker) start(ctx context.Context) {
 // Every in-flight round-trip is bounded by voiceEventCallTimeout, so this
 // join waits at most ~one timeout per poller, never minutes (C-11).
 func (t *voiceEventTracker) stop() {
+	// The live speaker window is over (V5): said events reaching the
+	// drain print immediately through the clock's join styling instead
+	// of waiting for a noteOn that can never come - and the drain prints
+	// them through the SAME clock the live feed used, so the tail reads
+	// like the feed it continues. The per-ccid clocks (voice link) were
+	// already constructed drained; their SetDrained here is a no-op.
+	t.clock.SetDrained()
+	for _, c := range t.clocks {
+		c.SetDrained()
+	}
 	t.mu.Lock()
 	t.stopped = true
 	t.mu.Unlock()
@@ -1412,8 +1540,8 @@ func (t *voiceEventTracker) pollOnce(ccid, label, emp string) bool {
 		return false // abandoned window: never print after stop began
 	}
 	for _, ev := range res.Events {
-		if ev.Kind == "said" && t.clock != nil {
-			t.clock.noteSaid(ev.Text)
+		if ev.Kind == "said" && t.clockFor(ccid) != nil {
+			t.clockFor(ccid).noteSaid(ev.Text)
 			continue
 		}
 		fmt.Printf("[%s %s] %s\n", label, emp, voiceEventRender(ev))
@@ -1527,6 +1655,16 @@ func (t *voiceEventTracker) drainPollOnce(ccid, label, emp string) bool {
 	defer t.mu.Unlock()
 	if res.Found {
 		for _, ev := range res.Events {
+			// V5: said rides the same speakerClock join the live feed
+			// used (stop() drained the clock, so this prints at once
+			// with the live feed's styling) - the drain tail is no
+			// longer a raw-render divergence from the feed it
+			// continues. A nil clock (tracker without a speaker
+			// window) keeps the raw render.
+			if ev.Kind == "said" && t.clockFor(ccid) != nil {
+				t.clockFor(ccid).noteSaid(ev.Text)
+				continue
+			}
 			fmt.Printf("[%s %s] %s\n", label, emp, voiceEventRender(ev))
 		}
 		if res.Truncated {
@@ -1810,6 +1948,18 @@ func runVoiceLink(f linkFlags) error {
 		open.ACCID: {"a", f.a},
 		open.BCCID: {"b", f.b},
 	})
+	// V5: the link harness never plays audio through the operator feed's
+	// speaker clock, so its said lines must not wait for a window that
+	// never opens - drained clocks print them immediately (same styling
+	// the local leg's feed uses).
+	aClock := newSpeakerClock("a", f.a)
+	aClock.SetDrained()
+	bClock := newSpeakerClock("b", f.b)
+	bClock.SetDrained()
+	events.clocks = map[string]*speakerClock{
+		open.ACCID: aClock,
+		open.BCCID: bClock,
+	}
 	events.start(teleCtx)
 
 	// Audible monitor: dial the daemon's tap sockets and play BOTH

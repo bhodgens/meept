@@ -10,10 +10,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/caimlas/meept/internal/voice"
 )
 
 func TestVoiceEventRenderKinds(t *testing.T) {
@@ -412,5 +415,243 @@ func TestVoiceEventCursorEchoAdvanceByAssignment(t *testing.T) {
 	// the truncation note; only truncated=true (genuine eviction) does.
 	if printed := captureStdout(t, func() { _ = tr.pollOnce("cc-1", "a", "emp") }); strings.Contains(printed, "truncated") {
 		t.Fatalf("healthy empty poll printed a truncation note: %q", printed)
+	}
+}
+
+// V4 pin (bughunt 2026-11-15 item 6): a very short reply whose said
+// event arrives while no speaker window is open (the audio fully flushes
+// below the bound before EOF, so Pending()==0 and noteOn never fires)
+// must still print the said line at the EOF flush-complete edge - the
+// stored transcript has it, the live feed used to silently drop it.
+func TestSpeakerClockShortReplySaidPrintsAtEOF(t *testing.T) {
+	clock := newSpeakerClock("local", "companion")
+	// The said arrives BEFORE any audio is played: the clock parks it.
+	clock.noteSaid("Sure.")
+	if !clockHasWait(clock) {
+		t.Fatal("said before the window must wait in the clock")
+	}
+	// Short-reply EOF shape: flushComplete runs with Pending()==0 and no
+	// noteOn ever fired - the queued said must print, unstyled by any
+	// speaker on/off window (none ever existed).
+	out := captureStdout(t, func() {
+		clock.endStream()
+		clock.noteOff()
+	})
+	if !strings.Contains(out, "said: Sure.") {
+		t.Fatalf("flush-complete edge dropped the queued said line:\n%s", out)
+	}
+	if strings.Contains(out, "speaker on") || strings.Contains(out, "speaker off") {
+		t.Fatalf("no window ever opened; the edge must not fabricate one:\n%s", out)
+	}
+	if clockHasWait(clock) {
+		t.Fatal("endStream must drain the wait queue")
+	}
+	// A second endStream (no wait left) prints nothing more.
+	out2 := captureStdout(t, func() {
+		clock.endStream()
+	})
+	if strings.TrimSpace(out2) != "" {
+		t.Fatalf("second endStream re-printed: %q", out2)
+	}
+}
+
+// V4 pin, normal path: the multi-chunk path still joins said with the
+// speaker on/off markers in order - said arrives, noteOn joins it under
+// "speaker on", noteOff closes the window. The queued said line carries
+// the window's start stamp.
+func TestSpeakerClockNormalPathJoinsSaidWithWindow(t *testing.T) {
+	clock := newSpeakerClock("local", "companion")
+	clock.noteSaid("First sentence.")
+	clock.noteSaid("Second sentence.")
+	onOut := captureStdout(t, func() {
+		clock.noteOn()
+	})
+	if !strings.Contains(onOut, "speaker on") {
+		t.Fatalf("noteOn printed no speaker-on marker:\n%s", onOut)
+	}
+	onLines := strings.Split(strings.TrimSpace(onOut), "\n")
+	if len(onLines) != 3 {
+		t.Fatalf("noteOn must print speaker on + 2 joined said lines, got %d lines:\n%s", len(onLines), onOut)
+	}
+	if !strings.Contains(onOut, "said: First sentence.") || !strings.Contains(onOut, "said: Second sentence.") {
+		t.Fatalf("noteOn must join BOTH queued said lines:\n%s", onOut)
+	}
+	// The window is open now: a fresh said prints immediately.
+	liveOut := captureStdout(t, func() {
+		clock.noteSaid("Third sentence.")
+	})
+	if !strings.Contains(liveOut, "said: Third sentence.") || strings.Contains(liveOut, "speaker on") {
+		t.Fatalf("open-window said must print at once without a new window:\n%s", liveOut)
+	}
+	offOut := captureStdout(t, func() {
+		clock.endStream() // wait queue already drained: no-op
+		clock.noteOff()
+	})
+	if !strings.Contains(offOut, "speaker off (") {
+		t.Fatalf("noteOff printed no speaker-off marker:\n%s", offOut)
+	}
+	if strings.Contains(offOut, "said:") {
+		t.Fatalf("normal path must not re-print joined saids at endStream:\n%s", offOut)
+	}
+}
+
+// V5 pin (bughunt 2026-11-15 item 7): the drain routes said through the
+// SAME speakerClock the live feed used - after stop() drains the clock,
+// a drain-side said prints immediately with the join styling ("said:"),
+// not the raw voiceEventRender line. Covers both clock wirings: the
+// single clock (voice local) and the per-ccid clocks (voice link).
+func TestDrainPollOnceSaidUsesClockJoin(t *testing.T) {
+	build := func() (*voiceEventTracker, *fakeEventsClient) {
+		f := &fakeEventsClient{rows: []voiceEventRow{
+			{Seq: 1, Kind: "said", At: "2026-11-15T10:00:04Z", Text: "Drained reply."},
+		}}
+		tr := newVoiceEventTracker(f, map[string][2]string{"cc-1": {"a", "emp"}})
+		return tr, f
+	}
+	// Single-clock wiring (voice local shape): the live clock holds the
+	// said (window never opened), stop() drains it out, then the drain's
+	// own said events print immediately through the clock.
+	tr, f := build()
+	tr.clock = newSpeakerClock("local", "emp")
+	tr.clock.noteSaid("Live-window said.")
+	out := captureStdout(t, func() {
+		tr.stop()
+	})
+	if !strings.Contains(out, "said: Live-window said.") {
+		t.Fatalf("stop() must flush the stranded live said:\n%s", out)
+	}
+	out = captureStdout(t, func() {
+		if !tr.drainPollOnce("cc-1", "a", "emp") {
+			t.Fatal("drain must keep polling a live feed")
+		}
+	})
+	if !strings.Contains(out, "said: Drained reply.") {
+		t.Fatalf("drain said must print through the clock join:\n%s", out)
+	}
+	if strings.Contains(out, "10:00:04 said: Drained reply.") && strings.Count(out, "said:") != 1 {
+		t.Fatalf("drain said must be the clock-joined shape only:\n%s", out)
+	}
+	if f.served != 1 {
+		t.Fatalf("drain served = %d, want 1", f.served)
+	}
+	// Per-ccid wiring (voice link shape): a drained clock prints the
+	// said at once; a tracker WITHOUT a clock still renders said raw
+	// (backwards-compatible nil-clock degrade).
+	tr2, _ := build()
+	c := newSpeakerClock("a", "emp")
+	c.SetDrained()
+	tr2.clocks = map[string]*speakerClock{"cc-1": c}
+	out2 := captureStdout(t, func() {
+		if !tr2.drainPollOnce("cc-1", "a", "emp") {
+			t.Fatal("drain must keep polling")
+		}
+	})
+	if !strings.Contains(out2, "said: Drained reply.") {
+		t.Fatalf("per-ccid drained clock must print the said:\n%s", out2)
+	}
+	tr3, _ := build()
+	out3 := captureStdout(t, func() {
+		_ = tr3.drainPollOnce("cc-1", "a", "emp")
+	})
+	if !strings.Contains(out3, "10:00:04 said: Drained reply.") {
+		t.Fatalf("nil clock must keep the raw render:\n%s", out3)
+	}
+}
+
+// clockHasWait reports whether the clock is holding queued said lines
+// (test-only peek under the clock's own mutex).
+func clockHasWait(c *speakerClock) bool {
+	if c == nil {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.wait) > 0
+}
+
+// scriptedGapReader feeds nChunks 640 B chunks (one Read each, the
+// adapter's chunk size), then on the FOLLOW-UP read (the one that will
+// return EOF - after the final chunk has crossed the sink and the bound
+// flush) sleeps well past the sink gap so the gap timer closes the
+// speaker window (noteOff), fires the late-said hook (the telemetry poll
+// delivering a said event AFTER the window closed), and only then
+// returns EOF with the sink fully flushed (pending==0).
+type scriptedGapReader struct {
+	left     int
+	payload  byte
+	lateSaid func()
+	fired    bool
+}
+
+func (r *scriptedGapReader) Read(p []byte) (int, error) {
+	if r.left <= 0 {
+		if !r.fired {
+			r.fired = true
+			// All audio is handed off (pending==0). Well past the
+			// 350 ms gap the window closes and the late said
+			// queues - then EOF with nothing pending: the exact
+			// V4 drop shape. 1200 ms gives the gap timer (350 ms)
+			// a wide, scheduling-tolerant margin to close the
+			// window BEFORE the said queues.
+			time.Sleep(1200 * time.Millisecond)
+			if r.lateSaid != nil {
+				r.lateSaid()
+			}
+		}
+		return 0, io.EOF
+	}
+	n := len(p)
+	if n > r.left {
+		n = r.left
+	}
+	r.left -= n
+	for i := 0; i < n; i++ {
+		p[i] = r.payload
+	}
+	return n, nil
+}
+
+// V4 end-to-end pin: the drop shape through drainLiveSpeaker. A reply
+// whose audio fully crosses the bound flush (pending==0 afterwards), the
+// gap timer closes the speaker window, the said event lands AFTER the
+// close (late 500 ms telemetry tick), and EOF arrives with pending==0 -
+// notePlayed returns early, noteOn never re-fires, and the OLD code
+// silently dropped the said line from the live feed. The flush-complete
+// edge must print it.
+func TestDrainLiveSpeakerShortReplySaidPrintsAtEOF(t *testing.T) {
+	t.Parallel()
+	fp := &playoutFakePlayer{}
+	sink := voice.NewSpeakerSink(fp, time.Hour) // gap default irrelevant; the drain arms voice.SinkGap itself
+	clock := newSpeakerClock("local", "companion")
+	done := make(chan error, 1)
+	late := func() {
+		clock.noteSaid("Sure.")
+	}
+	// 19 chunks = 12160 B: the 19th write crosses liveMaxPendingAudioBytes
+	// (12000 B), the bound flush hands off everything (pending==0), and
+	// no further audio follows.
+	r := &scriptedGapReader{left: 19 * liveSpeakerReadChunk, payload: 0x01, lateSaid: late}
+	out := captureStdout(t, func() {
+		drainLiveSpeaker(r, sink, done, nil, clock)
+	})
+	if err := <-done; err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if len(fp.bursts) != 1 {
+		t.Fatalf("want 1 bound-flushed burst, got %d", len(fp.bursts))
+	}
+	if sink.Pending() != 0 {
+		t.Fatalf("EOF tail must leave pending==0: %d B", sink.Pending())
+	}
+	if !strings.Contains(out, "said: Sure.") {
+		t.Fatalf("late said line was dropped from the live feed:\n%s", out)
+	}
+	// The window opened on the bound flush and closed on the gap; the
+	// said line must NOT be joined under a fabricated second window.
+	onIdx := strings.Index(out, "speaker on")
+	offIdx := strings.Index(out, "speaker off")
+	saidIdx := strings.Index(out, "said: Sure.")
+	if onIdx < 0 || offIdx < 0 || saidIdx < offIdx {
+		t.Fatalf("unexpected ordering; want speaker on -> speaker off -> late said:\n%s", out)
 	}
 }
