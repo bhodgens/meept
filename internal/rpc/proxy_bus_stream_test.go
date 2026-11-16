@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"sync"
 	"testing"
 	"time"
 
@@ -24,7 +23,6 @@ type busStreamFixture struct {
 	t    *testing.T
 	bus  *bus.MessageBus
 	px   *ProxyHandler
-	subs sync.Map // subscription_id -> subID string
 }
 
 func newBusStreamFixture(t *testing.T) *busStreamFixture {
