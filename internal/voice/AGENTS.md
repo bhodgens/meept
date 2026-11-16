@@ -425,10 +425,14 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   active inside the expiring window, the window RE-ARMS (same duration)
   instead of speaking — telemetry `kind=silence_deferred`, reason = the
   consecutive-deferral count, INFO "silence window deferred". Bounded at
-  `silenceAudioDeferralCap` (2) CONSECUTIVE deferrals: after the cap the
-  fire proceeds regardless, so a permanently-audible stream cannot
-  suppress the nudge (and through it the hangup) forever — the link
-  margin's bounded-re-arm posture mirrored onto the silence clock. The
+  `silenceAudioDeferralCap` (2) CONSECUTIVE deferrals: at the cap a
+  still-active tail does NOT speak the nudge over the agent (call
+  local-a7588dbe40dbe78c) — `silenceCapSkipsNudge` latches the nudge,
+  re-arms the hangup window H, and leaves the streak AT the cap, so the
+  following fire takes the existing hangup leg. A permanently-audible
+  stream therefore cannot suppress the hangup forever, and never hears
+  the nudge as a second voice — the link margin's bounded-re-arm posture
+  mirrored onto the silence clock. The
   streak resets at every `rearmSilence` (fresh turn drained) and at every
   real fire. Daemon wiring arms it for LOCAL legs ONLY
   (`silenceAudioActiveFor(inst.Leg)` -> `LocalSpliceFor(ccid).TailActive`,
@@ -492,6 +496,14 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   are documented in internal/voicechild/jargo.go.
 - `internal/voiceframe` is dependency-free (stdlib only): both sides
   share the codec and neither may drag the other's world in through it.
+- Spawn refuses a STALE child binary: `checkChildRevision` in
+  `ChildProc.spawn` compares the daemon's `vcs.revision`
+  (debug.ReadBuildInfo) against the child's (buildinfo.ReadFile, no
+  exec) and returns `ChildRevisionMismatchError` when both are set and
+  differ. An empty revision on either side (test stubs, no-vcs builds)
+  is allowed. This kills the 2026-11-14 defect where a rebuilt daemon
+  kept spawning the Nov 12 `meept-voice` whose resampler lacked the
+  odd-read alignment fix and crackled every utterance.
 - The child never imports telnyx code and never sees the Telnyx token.
 - The one-time start token is an ENFORCED authentication seam:
   ChildProc.spawn() generates the per-spawn crypto/rand token, pipes it

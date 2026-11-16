@@ -226,9 +226,10 @@ type TalkDeps struct {
 	// window (window = the armed S/H duration) BEFORE speaking the nudge
 	// or hanging up. A true verdict defers the fire: the window re-arms
 	// (same duration) instead, bounded by silenceAudioDeferralCap
-	// consecutive deferrals - after the cap the fire proceeds so a
-	// permanently-audible stream cannot suppress the nudge forever
-	// (mirrors the link margin's bounded re-arm posture). This kills the
+	// consecutive deferrals. At the cap a still-active tail does not
+	// speak the nudge (call local-a7588dbe40dbe78c); silenceCapSkipsNudge
+	// advances the hangup ladder so a stuck-audible stream cannot
+	// suppress hangup forever. This kills the
 	// two live defects: (S1) rearmSilence at TEXT drain counted down
 	// while the reply audio still paced, so the nudge fired over the
 	// agent's own voice; (S2) the loop-start window fired while the
@@ -579,11 +580,12 @@ func (t *TalkLoop) silencePromptLine() string {
 }
 
 // silenceAudioDeferralCap bounds CONSECUTIVE audio-aware deferrals of a
-// silence window (self-talk fix, call local-53b347f028f0a43f): after this
-// many deferrals the fire proceeds regardless, so a permanently-audible
-// stream (or a stuck seam) cannot suppress the nudge - and through it the
-// hangup - forever. Mirrors the link margin's bounded re-arm posture
-// (margin_rearmed re-arms ONCE, the second fire releases).
+// silence window (self-talk fix, call local-53b347f028f0a43f). After this
+// many deferrals the same window is not re-armed again. A still-active
+// agent tail does not then speak the nudge (that talked over the agent
+// on call local-a7588dbe40dbe78c); silenceCapSkipsNudge advances the
+// hangup ladder instead, so a stuck-audible stream cannot suppress
+// hangup forever. Do not raise this cap to paper over a stuck tail.
 const silenceAudioDeferralCap = 2
 
 // silenceCallerLookback is how recently inbound speech must have been
@@ -597,13 +599,13 @@ const silenceCallerLookback = time.Second
 // from silenceAudioDeferralCap.
 const silenceCallerDeferralCap = 6
 
-// silenceAudioDefers reports whether a silence fire must DEFER because
-// the agent's own audio was active inside the expiring window. False
-// whenever: the seam is nil (phone/legacy callers stay byte-identical),
-// the consecutive-deferral cap is reached (the nudge must still
-// eventually fire on a permanently-audible stream), or the window length
-// is unrecordable (<= 0 - nothing to consult the seam about).
-func (t *TalkLoop) silenceAudioDefers(ccid string, armedSeconds int) bool {
+// silenceAudioActive reports whether the agent's own audio was active
+// inside the expiring window. False whenever the seam is nil (phone and
+// legacy callers stay byte-identical) or the window length is
+// unrecordable (<= 0 - nothing to consult the seam about). The deferral
+// cap is not applied here: the caller still needs the verdict at the
+// cap, so a still-audible tail is not treated as silence.
+func (t *TalkLoop) silenceAudioActive(ccid string, armedSeconds int) bool {
 	if t.deps.AudioActive == nil || armedSeconds <= 0 {
 		return false
 	}
@@ -612,6 +614,27 @@ func (t *TalkLoop) silenceAudioDefers(ccid string, armedSeconds int) bool {
 	// they are ms. TailActive's own clock is wall time, so a test seam
 	// receives the same unit the timer was armed with.
 	return t.deps.AudioActive(ccid, time.Duration(armedSeconds)*silenceWindowUnit)
+}
+
+// silenceCapSkipsNudge reports whether this silence fire must skip the
+// nudge and advance the hangup ladder. True only when the agent's own
+// audio is still active, the consecutive-deferral cap is already spent,
+// and the nudge has not been latched. The caller sets silencePrompted,
+// re-arms the hangup window, and leaves the deferral streak at the cap
+// so the following fire takes the existing hangup leg instead of
+// speaking over the agent or opening a fresh deferral budget. A nil
+// seam never returns true (active is false). The cap is not raised.
+func silenceCapSkipsNudge(active bool, deferrals int, prompted bool) bool {
+	return active && deferrals >= silenceAudioDeferralCap && !prompted
+}
+
+// silenceHangupSeconds is the post-nudge window H, or S when H is unset
+// (legacy double-window).
+func (t *TalkLoop) silenceHangupSeconds() int {
+	if t.cfg.SilenceHangupAfterSeconds > 0 {
+		return t.cfg.SilenceHangupAfterSeconds
+	}
+	return t.cfg.SilencePromptSeconds
 }
 
 // silenceCallerDefers reports whether a silence fire must HOLD because
@@ -763,7 +786,9 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 	var silenceArmedSeconds int
 	// silenceDeferrals counts CONSECUTIVE audio-aware deferrals of the
 	// live window (capped at silenceAudioDeferralCap): a text-drain
-	// re-arm or a real fire starts a fresh silent stretch and resets it.
+	// re-arm or a real nudge starts a fresh silent stretch and resets
+	// it. silenceCapSkipsNudge leaves the streak at the cap so the
+	// following fire cannot defer again.
 	var silenceDeferrals int
 	var callerDeferrals int
 	rearmSilenceWindow := func(seconds int) {
@@ -940,14 +965,15 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 			// heard "two agents talking"). When the seam reports the
 			// call's own audio active inside the expiring window,
 			// DEFER: re-arm the same window instead of speaking.
-			// Bounded at silenceAudioDeferralCap consecutive deferrals
-			// so a permanently-audible stream cannot suppress the
-			// nudge (and through it the hangup) forever. The same
-			// check covers the loop-start window over the greeting's
-			// audio tail (S2): the greeting rides the same pump and
-			// stamps the splice's audio activity.
-			if silenceDeferrals < silenceAudioDeferralCap &&
-				t.silenceAudioDefers(ccid, silenceArmedSeconds) {
+			// Bounded at silenceAudioDeferralCap consecutive deferrals.
+			// At the cap a still-active tail must not speak the nudge
+			// over the agent (call local-a7588dbe40dbe78c):
+			// silenceCapSkipsNudge advances the hangup ladder and the
+			// following fire takes the existing hangup leg. A nil seam
+			// is byte-identical. The same check covers the loop-start
+			// window over the greeting's audio tail (S2).
+			audioActive := t.silenceAudioActive(ccid, silenceArmedSeconds)
+			if audioActive && silenceDeferrals < silenceAudioDeferralCap {
 				silenceDeferrals++
 				t.log.Info("voice talk loop: silence window deferred (agent audio active)",
 					"ccid", ccid, "window_s", float64(silenceArmedSeconds),
@@ -959,13 +985,25 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 				rearmSilenceWindow(silenceArmedSeconds)
 				continue
 			}
+			if silenceCapSkipsNudge(audioActive, silenceDeferrals, t.silencePrompted) {
+				// Cap spent, agent still audible. Do not say the nudge.
+				// Latch the ladder and re-arm H; leave the deferral
+				// streak at the cap so the following fire cannot defer
+				// again and takes the hangup leg below.
+				t.silencePrompted = true
+				t.log.Info("voice talk loop: silence nudge skipped (agent audio still active)",
+					"ccid", ccid, "deferrals", silenceDeferrals)
+				rearmSilenceWindow(t.silenceHangupSeconds())
+				continue
+			}
 			silenceDeferrals = 0
 			if !t.silencePrompted {
 				// First fire: the dedicated dead-air nudge, then re-arm
 				// with the hangup window H (S when H unset - legacy
 				// double-window). Fallback chain inside
 				// silencePromptLine: configured line -> fillerLine() ->
-				// nothing.
+				// nothing. Reached only when agent audio is not active
+				// (nil seam included).
 				t.silencePrompted = true
 				line := t.silencePromptLine()
 				afterS := t.now().Sub(silenceArmedAt).Seconds()
@@ -976,20 +1014,15 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 						t.log.Debug("talkloop: partial say dropped", "ccid", ccid, "err", sayErr)
 					}
 				}
-				hangupWindow := t.cfg.SilenceHangupAfterSeconds
-				if hangupWindow <= 0 {
-					hangupWindow = t.cfg.SilencePromptSeconds
-				}
-				rearmSilenceWindow(hangupWindow)
+				rearmSilenceWindow(t.silenceHangupSeconds())
 				continue
 			}
-			// Second consecutive fire: hang up with the named reason.
+			// Hangup leg: the nudge already latched (spoken, or skipped
+			// because agent audio was still active at the cap) and this
+			// fire is not a fresh audio deferral. A stuck-audible stream
+			// lands here on the fire after silenceCapSkipsNudge.
 			t.cancelPipeline(ccid, "teardown")
-			hangupWindow := t.cfg.SilenceHangupAfterSeconds
-			if hangupWindow <= 0 {
-				hangupWindow = t.cfg.SilencePromptSeconds
-			}
-			t.end(ccid, fmt.Sprintf("silence (%ds without caller speech after prompt)", hangupWindow))
+			t.end(ccid, fmt.Sprintf("silence (%ds without caller speech after prompt)", t.silenceHangupSeconds()))
 			return nil
 		case <-turnTimerC:
 			// Hard cap on ONE in-flight turn (opt-in). The fire is

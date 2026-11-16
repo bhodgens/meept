@@ -11,11 +11,12 @@ package voice
 // The fix: at fire time, when the optional TalkDeps.AudioActive seam
 // reports the call's own audio active inside the expiring window, the
 // window RE-ARMS instead of speaking, bounded at
-// silenceAudioDeferralCap consecutive deferrals. These pins run at ms
-// emitted telemetry kinds and payloads (EventKindSilenceDeferred) are
-// preserved. These pins run at ms scale via silenceWindowUnit (same
-// discipline as the silence pins file: no t.Parallel anywhere in the
-// silence path).
+// silenceAudioDeferralCap consecutive deferrals. At the cap a still-active
+// tail does not speak the nudge; the hangup ladder advances instead
+// (TestTalkLoopSilenceCapSkipsNudgeAndHangsUp). These pins run at ms
+// scale via silenceWindowUnit (same discipline as the silence pins file:
+// no t.Parallel anywhere in the silence path). Emitted telemetry kinds
+// and payloads (EventKindSilenceDeferred) are preserved.
 
 import (
 	"log/slog"
@@ -166,11 +167,10 @@ func TestTalkLoopSilenceDefersWhileAudioActive(t *testing.T) {
 	}
 }
 
-// Cap pin: a PERMANENTLY audible stream cannot suppress the nudge
-// forever. The seam always reports active; the nudge must still fire
-// after silenceAudioDeferralCap consecutive deferrals (exactly
-// cap deferral logs, then the line is spoken). Same shape bounds the
-// H-window hangup fire.
+// Cap pin: a PERMANENTLY audible stream cannot suppress hangup forever,
+// and it must not be answered with the nudge. The seam always reports
+// active; after exactly silenceAudioDeferralCap deferrals the ladder
+// advances and the call hangs up with the nudge line never said.
 func TestTalkLoopSilenceDeferralIsBounded(t *testing.T) {
 	withMsSilenceUnit(t)
 	sink := &recordSink{}
@@ -183,20 +183,77 @@ func TestTalkLoopSilenceDeferralIsBounded(t *testing.T) {
 	cancel, done := runLoop(t, loop, "cc-defer-cap")
 	defer func() { cancel(); <-done }()
 
-	waitFor(t, 2*time.Second, "nudge never fired despite the deferral cap", func() bool {
-		return strings.Contains(strings.Join(sink.sayTexts(), "|"), "Are you still there?")
-	})
+	select {
+	case r := <-endReasons:
+		if !strings.Contains(r, "silence") {
+			t.Fatalf("end reason = %q, want the silence hangup", r)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("audible stream never reached hangup despite the deferral cap")
+	}
 	if got := countDeferred(capH); got != silenceAudioDeferralCap {
 		t.Errorf("deferred log count = %d, want exactly the cap (%d)", got, silenceAudioDeferralCap)
 	}
-	nudges := 0
 	for _, tx := range sink.sayTexts() {
 		if tx == "Are you still there?" {
-			nudges++
+			t.Errorf("nudge spoken over a permanently audible stream: %q", sink.sayTexts())
 		}
 	}
-	if nudges != 1 {
-		t.Errorf("nudge spoken %d times after the cap, want exactly 1", nudges)
+}
+
+// Cap-while-audible pin (live call local-a7588dbe40dbe78c): the deferral
+// cap must not speak the nudge over the agent's own audio. AudioActive
+// stays true. After exactly silenceAudioDeferralCap deferrals the next
+// fire advances the hangup ladder (no say of the nudge line) and the
+// FOLLOWING fire hangs up. S and H differ so that following fire is
+// observable: the seam's last window is H, consulted only after the
+// ladder re-arms. A same-fire hangup would leave the seam on S.
+func TestTalkLoopSilenceCapSkipsNudgeAndHangsUp(t *testing.T) {
+	withMsSilenceUnit(t)
+	sink := &recordSink{}
+	capH := &captureHandler{}
+	endReasons := make(chan string, 1)
+	active := &countingAudioActive{always: true}
+
+	const promptS = 20
+	const hangupS = 35
+	deps := TalkDeps{
+		Supervisor:  &cannedSupervisor{},
+		Turns:       &cannedTurns{reply: "Back with an answer."},
+		SessionFor:  constSession(SessionHandle{ID: "s", ConversationID: "c"}),
+		Send:        sink.Send,
+		OnEnd:       func(ccid, reason string) { endReasons <- reason },
+		Logger:      slog.New(capH),
+		AudioActive: active.fn,
+	}
+	loop := NewTalkLoop(deps, TalkLoopConfig{
+		GreetingLine:              "Welcome.",
+		SilencePromptSeconds:      promptS,
+		SilencePromptLine:         "Are you still there?",
+		SilenceHangupAfterSeconds: hangupS,
+	})
+	cancel, done := runLoop(t, loop, "cc-cap-skip")
+	defer func() { cancel(); <-done }()
+
+	select {
+	case r := <-endReasons:
+		if !strings.Contains(r, "silence") {
+			t.Fatalf("end reason = %q, want the silence hangup", r)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("audible-at-cap stream never reached hangup")
+	}
+	for _, tx := range sink.sayTexts() {
+		if tx == "Are you still there?" {
+			t.Errorf("say called with the nudge over active agent audio: %q", sink.sayTexts())
+		}
+	}
+	if got := countDeferred(capH); got != silenceAudioDeferralCap {
+		t.Errorf("deferred log count = %d, want exactly the cap (%d); the following fire must hang up, not defer again", got, silenceAudioDeferralCap)
+	}
+	wantH := time.Duration(hangupS) * silenceWindowUnit
+	if w := active.lastWindow(); w != wantH {
+		t.Errorf("seam window at hangup = %v, want hangup window %v (following fire after the ladder re-arm)", w, wantH)
 	}
 }
 
@@ -226,27 +283,28 @@ func TestTalkLoopSilenceNilSeamFiresImmediately(t *testing.T) {
 	}
 }
 
-// Deferral-streak reset pin: after a REAL fire (nudge) the streak is
-// spent; the post-nudge hangup window re-arms with deferrals reset to 0,
-// so an audio-active hangup fire defers up to the cap again and THEN
-// hangs up. Drives: seam active for the first window (defer), active
-// again... simpler deterministic shape: active for the first 3
-// consults -> nudge on the 3rd fire (after cap); then active for 2 more
-// consults -> the H window defers twice... that is 5 windows of timing.
-// Instead assert the reset the cheap way: after the nudge fires, a
-// still-active seam defers (fresh streak), and the hangup still lands
-// within a bounded number of extra windows.
+// Deferral-streak reset pin: a REAL nudge (seam quiet, under the cap)
+// resets the streak. The post-nudge hangup window then defers under a
+// fresh streak while audio is active again, and still hangs up once
+// that streak is spent (already prompted → existing hangup leg).
+// Consult 2 must be quiet: a seam that is still active at the cap
+// skips the nudge (see TestTalkLoopSilenceCapSkipsNudgeAndHangsUp)
+// and would not exercise the reset.
 func TestTalkLoopHangupWindowDefersAndStillHangsUp(t *testing.T) {
 	withMsSilenceUnit(t)
 	sink := &recordSink{}
 	capH := &captureHandler{}
 	endReasons := make(chan string, 1)
-	// Active for the first 3 consults: window1 defer, window2 defer,
-	// (cap reached) fire=nudge on window 3's fire... consult 3 returns
-	// true, consults 4+ false. Streak resets at the real fire.
-	active := &countingAudioActive{remain: 3}
+	consults := 0
+	var mu sync.Mutex
+	active := func(string, time.Duration) bool {
+		mu.Lock()
+		defer mu.Unlock()
+		consults++
+		return consults != 2
+	}
 
-	loop := audioTestLoop(t, active.fn, nil, sink, capH, endReasons)
+	loop := audioTestLoop(t, active, nil, sink, capH, endReasons)
 
 	cancel, done := runLoop(t, loop, "cc-hangup-defer")
 	defer func() { cancel(); <-done }()
@@ -257,11 +315,12 @@ func TestTalkLoopHangupWindowDefersAndStillHangsUp(t *testing.T) {
 			t.Fatalf("end reason = %q, want the silence hangup", r)
 		}
 	case <-time.After(3 * time.Second):
-		t.Fatal("silence hangup never fired despite the seam going quiet")
+		t.Fatal("silence hangup never fired")
 	}
-	// The hangup path also saw deferrals (>=2 from the nudge phase).
+	// One pre-nudge deferral plus a fresh H-window streak (at least one
+	// more). The cap on that fresh streak is what reaches the hangup leg.
 	if got := countDeferred(capH); got < 2 {
-		t.Errorf("deferred logs = %d, want >= 2 (nudge phase deferrals)", got)
+		t.Errorf("deferred logs = %d, want >= 2 (nudge-phase deferral plus a fresh H-window streak)", got)
 	}
 	if !strings.Contains(strings.Join(sink.sayTexts(), "|"), "Are you still there?") {
 		t.Error("nudge never spoken before the hangup")
