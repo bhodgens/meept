@@ -22,7 +22,7 @@ void main() {
       ),
     );
     await tester.pump();
-    expect(CommandPalette.defaultItems.length, 15);
+    expect(CommandPalette.defaultItems.length, 16);
     expect(find.text('chat'), findsOneWidget);
     expect(find.text('sessions'), findsOneWidget);
     expect(find.text('agents'), findsOneWidget);
@@ -33,6 +33,7 @@ void main() {
     expect(find.text('users'), findsOneWidget);
     expect(find.text('activity view'), findsOneWidget);
     expect(find.text('intake status'), findsOneWidget);
+    expect(find.text('kanban board'), findsOneWidget);
     expect(find.text('voice'), findsOneWidget);
   });
 

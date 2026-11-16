@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../features/activity/activity_tab.dart';
 import '../features/intake/intake_tab.dart';
+import '../features/kanban/kanban_tab.dart';
 import '../features/home/home_screen.dart';
 import '../features/home/sidebar_home_screen.dart';
 import '../features/voice/voice_page.dart';
@@ -103,6 +104,15 @@ final GoRouter router = GoRouter(
       name: 'intake',
       pageBuilder: (context, state) {
         return const NoTransitionPage(child: IntakeTab());
+      },
+    ),
+    // Kanban board (plan tree kanban-board 05/05; TUI parity: ViewKanban
+    // key 'b', internal/tui/kanban_view.go). Same shape as /intake.
+    GoRoute(
+      path: '/kanban',
+      name: 'kanban',
+      pageBuilder: (context, state) {
+        return const NoTransitionPage(child: KanbanTab());
       },
     ),
     GoRoute(

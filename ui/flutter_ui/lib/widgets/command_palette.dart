@@ -93,6 +93,15 @@ class CommandPalette extends StatefulWidget {
       description: 'github ticket intake: config + poller state',
       route: '/intake',
     ),
+    // Kanban board view — parity with the TUI's ViewKanban (default key
+    // 'b', internal/tui/config.go). Routed at core/router.dart (/kanban),
+    // same shape as intake/activity (plan tree kanban-board 05/05).
+    const CommandPaletteItem(
+      keybinding: 'b',
+      label: 'kanban board',
+      description: 'work-item board: columns, cards, moves, takeover',
+      route: '/kanban',
+    ),
     // Local voice page - parity with the TUI's /voice slash command
     // (local-leg leaf 13a: internal/sharedclient/slash.go "voice") and
     // the CLI's `meept voice local`. Same voice.local.* RPC plane; the
