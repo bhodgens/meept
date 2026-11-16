@@ -914,6 +914,18 @@ func (s *Scheduler) sweepOneShotsAtBoot() {
 func (s *Scheduler) fireOneShotOnce(cfg JobConfig, job Job, due, now time.Time) {
 	// Claim the due instant atomically: a previous instance that already
 	// fired it (crash after execution, before pruning) must not re-fire.
+	//
+	// DELIBERATE POSTURE (exactly-once, bughunt 2026-11-15): claim+stamp
+	// happen BEFORE dispatch, so a daemon crash in the pre-execute window
+	// leaves the row stamped (OneShotFiredAt) and the sweep skips it —
+	// the run is LOST for kinds with no receipt lane. Receipt-writing
+	// session-pinned agent jobs still re-deliver via
+	// recoverClaimedTicksWithoutReceipt (receipts.go); shell/reminder and
+	// other fire-and-forget kinds do not. The pre-2026-11-15 shape
+	// (bare job.Execute, no claim) was at-least-once for those kinds but
+	// re-ran fired jobs on every restart — the double-fire was the worse
+	// defect. If at-least-once recovery for fire-and-forget kinds is ever
+	// needed, it belongs in the claim-recovery sweep, not here.
 	claimed, claimErr := s.ClaimTick(cfg.ID, due)
 	if claimErr != nil {
 		s.logger.Warn("scheduler: failed to claim one-shot tick",
