@@ -22,12 +22,10 @@
 package scheduler
 
 import (
-	"bufio"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -151,70 +149,6 @@ func restartDaemon(t *testing.T, s *harness.Stack) func() {
 			stopDaemonByPid(t, pid)
 		}
 	}
-}
-
-// persistentRPC is a persistent framed-protocol JSON-RPC connection, used
-// only for short request/response calls (session.create, scheduler.*).
-type persistentRPC struct {
-	conn   net.Conn
-	reader *bufio.Reader
-}
-
-func newPersistentRPC(t *testing.T, s *harness.Stack) *persistentRPC {
-	t.Helper()
-	conn, err := net.DialTimeout("unix", s.SocketPath, 5*time.Second)
-	if err != nil {
-		t.Fatalf("dial unix %s: %v", s.SocketPath, err)
-	}
-	return &persistentRPC{conn: conn, reader: bufio.NewReader(conn)}
-}
-
-func (c *persistentRPC) Close() { _ = c.conn.Close() }
-
-func (c *persistentRPC) call(method string, params any) (json.RawMessage, error) {
-	req := map[string]any{"jsonrpc": "2.0", "id": 1, "method": method}
-	if params != nil {
-		req["params"] = params
-	}
-	payload, err := json.Marshal(req)
-	if err != nil {
-		return nil, err
-	}
-	if err := c.conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
-		return nil, err
-	}
-	if _, err := fmt.Fprintf(c.conn, "%d\n", len(payload)); err != nil {
-		return nil, err
-	}
-	if _, err := c.conn.Write(payload); err != nil {
-		return nil, err
-	}
-	lengthLine, err := c.reader.ReadString('\n')
-	if err != nil {
-		return nil, err
-	}
-	var length int
-	if _, err := fmt.Sscanf(strings.TrimSpace(lengthLine), "%d", &length); err != nil || length <= 0 {
-		return nil, fmt.Errorf("bad length line %q", lengthLine)
-	}
-	buf := make([]byte, length)
-	if _, err := io.ReadFull(c.reader, buf); err != nil {
-		return nil, err
-	}
-	var resp struct {
-		Result json.RawMessage `json:"result"`
-		Error  *struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(buf, &resp); err != nil {
-		return nil, err
-	}
-	if resp.Error != nil {
-		return nil, fmt.Errorf("%s: [%d] %s", method, resp.Error.Code, resp.Error.Message)
-	}
-	return resp.Result, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -448,9 +382,12 @@ func TestSessionDeliveryReceiptRecorded(t *testing.T) {
 	sessionID := s.CreateSession(t, "receipt-inbox", s.ProjectDir)
 
 	// A far-future one-shot: no scheduled fire during the test; the
-	// delivery comes from RunNow.
+	// delivery comes from RunNow. The instant must sit INSIDE the
+	// one-shot scheduling horizon (validateOneShotHorizon, 2h default)
+	// while remaining beyond any realistic test window — +90m.
+	fireInstant := time.Now().UTC().Add(90 * time.Minute).Truncate(time.Second)
 	jobID := addSessionPinnedAgentJob(t, s, "e2e-receipt-f13b",
-		"at 2099-01-01T00:00:00Z", "receipt probe", sessionID)
+		"at "+fireInstant.Format(time.RFC3339), "receipt probe", sessionID)
 
 	// No receipt before the fire.
 	if job, ok := readPersistedJobsFull(t, s)[jobID]; ok && job.LastDelivery != nil {
@@ -529,8 +466,13 @@ func TestRestartRedeliversInFlightReceipt(t *testing.T) {
 
 	sessionID := s.CreateSession(t, "recovery-inbox", s.ProjectDir)
 
+	// The instant must sit INSIDE the one-shot scheduling horizon
+	// (validateOneShotHorizon, 2h default) while remaining beyond any
+	// realistic test window — +90m; the deliveries come from RunNow and
+	// the crash-recovery redelivery, never from the scheduled instant.
+	fireInstant := time.Now().UTC().Add(90 * time.Minute).Truncate(time.Second)
 	jobID := addSessionPinnedAgentJob(t, s, "e2e-redelivery-f13b",
-		"at 2099-01-01T00:00:00Z", "redelivery probe", sessionID)
+		"at "+fireInstant.Format(time.RFC3339), "redelivery probe", sessionID)
 
 	// Fire once: the receipt is recorded delivered and the turn lands.
 	rpc(t, s, "scheduler.run_job", map[string]any{"job_id": jobID})

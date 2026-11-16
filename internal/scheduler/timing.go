@@ -987,10 +987,21 @@ func (s *Scheduler) fireOneShotOnce(cfg JobConfig, job Job, due, now time.Time) 
 			}
 		}()
 		s.executeJob(ctx, job, ExecutionOptions{Tick: due, PreClaimed: true})
-		// Prune-or-mark: a successful run leaves no stale row behind; a
-		// failed run keeps it (with OneShotFiredAt set) for inspection and
-		// manual re-run.
-		if latest, ok := s.store.Get(cfg.ID); ok && latest.LastError == "" {
+		// Prune-or-mark. Receipt-writing kinds (session-pinned agent jobs)
+		// KEEP the row unconditionally: the delivery receipt and its
+		// bounded history live in this row and are read by operators and
+		// the crash-recovery sweeps AFTER executeJob returns (the async
+		// delivery may still be in flight) — the 2026-11-15 bughunt
+		// regression: pruning here erased delivered receipts (e2e
+		// scheduler suite F13a/F13b). A stamp on such a row makes the
+		// boot sweep skip it, which is the no-refire guarantee; the row
+		// is the audit trail, not stale residue. Only fire-and-forget
+		// kinds are pruned on success.
+		latest, ok := s.store.Get(cfg.ID)
+		if !ok {
+			return
+		}
+		if !jobKindWritesReceipts(latest) && latest.LastError == "" {
 			if err := s.store.Remove(cfg.ID); err != nil {
 				s.logger.Warn("scheduler: failed to prune fired one-shot row",
 					"job_id", cfg.ID, "error", err)
