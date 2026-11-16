@@ -21,6 +21,122 @@ const (
 	KeyStatus = "status"
 )
 
+// taskEventSource is the bus message Source on every task notification.
+const taskEventSource = "task-registry"
+
+// TaskUpdateEvent is the payload of the task.ev.update notification: a task
+// row changed and this is its new state. Frozen wire shape (task_id, state) —
+// five of the six task.update publish sites carried exactly this map before the
+// typed migration.
+//
+// State is the TaskState string (TaskState.String()), never the enum's numeric
+// value, matching what every pre-migration publisher sent.
+type TaskUpdateEvent struct {
+	TaskID string `json:"task_id"`
+	State  string `json:"state"`
+}
+
+// TaskGoalLinkedEvent is the payload of the OTHER task.ev.update shape: a task
+// was stamped with its owning goal. SetGoalID published {task_id, goal_id} —
+// no state key — so it is a distinct type rather than a union struct with an
+// omitempty field. A union would emit "state":"" on the goal path, which is a
+// different wire shape from what shipped.
+type TaskGoalLinkedEvent struct {
+	TaskID string `json:"task_id"`
+	GoalID string `json:"goal_id"`
+}
+
+// Typed topics for the task.ev.* notification namespace. Names are the wire
+// contract (taskEventTopic), so a typed publisher and a raw subscriber on the
+// same name interoperate — that is what keeps the TUI/plan/WS consumers
+// working while the producer side becomes compiler-checked.
+//
+// Declared as package vars beside the payload structs, per the
+// internal/kanban/events.go and internal/storage/events.go precedent.
+var (
+	// TopicTaskUpdate carries TaskUpdateEvent — state changes and row updates.
+	TopicTaskUpdate = bus.NewTopic[TaskUpdateEvent](taskEventTopic("task.update"))
+	// TopicTaskUpdateGoal carries TaskGoalLinkedEvent — SetGoalID's distinct
+	// {task_id, goal_id} payload on the same wire topic.
+	TopicTaskUpdateGoal = bus.NewTopic[TaskGoalLinkedEvent](taskEventTopic("task.update"))
+)
+
+// publishTaskUpdate emits a task.ev.update notification carrying the task's
+// current state. It replaces the five hand-rolled map[string]any publishes
+// that used to build {task_id, state} inline; the typed payload is what makes
+// a key typo or a missing key a compile error instead of a silent consumer
+// failure.
+//
+// Uses PublishExternalOnly (not PublishT) because bus.PublishT always publishes
+// and would therefore lose the registry's two hard rules:
+//
+//   - a nil bus must be a no-op (a registry built without a bus publishes
+//     nothing, and that path is exercised by tests and embedded callers);
+//   - a notification must NEVER land on a command topic. The registry's own
+//     request handler subscribes to "task.update", "task.create", etc., and
+//     executes every message it receives — a notification there is what caused
+//     the 2026-10-08 self-replication incident (513M task rows). publishEvent
+//     is the choke point that enforces it and it is unchanged.
+//
+// Note: this path leaves BusMessage.ID empty, where models.NewBusMessage set a
+// generated ID. No task.ev.* consumer reads ID (the WS relay copies it only for
+// chat_message frames), and it matches every other typed publish in the repo.
+func (r *Registry) publishTaskUpdate(taskID string, state TaskState) {
+	r.publishEventTyped(TopicTaskUpdate.Name, TaskUpdateEvent{
+		TaskID: taskID,
+		State:  state.String(),
+	})
+}
+
+// publishTaskGoalLinked emits the goal-linkage variant of task.ev.update.
+// Same nil-bus and command-topic rules as publishTaskUpdate.
+func (r *Registry) publishTaskGoalLinked(taskID, goalID string) {
+	r.publishEventTyped(TopicTaskUpdateGoal.Name, TaskGoalLinkedEvent{
+		TaskID: taskID,
+		GoalID: goalID,
+	})
+}
+
+// publishEventTyped is the typed sibling of publishEvent: it marshals payload
+// and publishes it on topicName, keeping publishEvent's command-topic guard and
+// nil-bus no-op. Payload types are checked at the call site by Topic[T], so a
+// caller cannot pass a map with a misspelled key.
+//
+// The envelope mirrors what models.NewBusMessage produced (Type=event, Source,
+// Timestamp) so the typed path is wire-identical to the map path it replaced.
+// ID stays EMPTY, matching every other typed publish in the repo
+// (bus.PublishT sets no ID) — no task.ev.* consumer reads it; the WS relay
+// copies ID into the frame only for chat_message topics.
+//
+// json.Marshal failure is payload-dependent, not type-dependent: TaskUpdateEvent
+// and TaskGoalLinkedEvent contain only strings, so it cannot fail for them; an
+// error here is a programming error in a new payload type and is logged and
+// dropped rather than panicking mid-state-change.
+func (r *Registry) publishEventTyped(topicName string, payload any) {
+	if r.bus == nil {
+		return
+	}
+	if strings.HasPrefix(topicName, "task.") && !strings.HasPrefix(topicName, taskEventPrefix) {
+		r.logger.Error("refusing to publish a task event on a command topic",
+			"topic", topicName, "required_prefix", taskEventPrefix)
+		return
+	}
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		r.logger.Error("Failed to marshal task event payload",
+			"topic", topicName, "error", err)
+		return
+	}
+
+	r.bus.PublishExternalOnly(topicName, &models.BusMessage{
+		Type:      models.MessageTypeEvent,
+		Source:    taskEventSource,
+		Timestamp: time.Now().UTC(),
+		Payload:   data,
+	})
+}
+
 // Registry manages tasks and provides a unified API.
 type Registry struct {
 	store           *Store
@@ -177,10 +293,7 @@ func (r *Registry) Update(ctx context.Context, task *Task) error {
 		return err
 	}
 
-	r.publishEvent(taskEventTopic("task.update"), map[string]any{
-		KeyTaskID: task.ID,
-		"state":   task.State.String(),
-	})
+	r.publishTaskUpdate(task.ID, task.State)
 
 	return nil
 }
@@ -346,10 +459,7 @@ func (r *Registry) updateState(ctx context.Context, taskID string, state TaskSta
 
 	r.publishTaskState(task.ID, oldState, task.State, kanban.EventReasonUpdateState)
 
-	r.publishEvent(taskEventTopic("task.update"), map[string]any{
-		KeyTaskID: task.ID,
-		"state":   task.State.String(),
-	})
+	r.publishTaskUpdate(task.ID, task.State)
 	return nil
 }
 
@@ -443,10 +553,7 @@ func (r *Registry) SetGoalID(ctx context.Context, taskID, goalID string) error {
 	if err := r.store.Update(t); err != nil {
 		return err
 	}
-	r.publishEvent(taskEventTopic("task.update"), map[string]any{
-		KeyTaskID: t.ID,
-		"goal_id": goalID,
-	})
+	r.publishTaskGoalLinked(t.ID, goalID)
 	return nil
 }
 
@@ -543,10 +650,7 @@ func (r *Registry) IncrementJobCount(ctx context.Context, taskID string) error {
 		return err
 	}
 
-	r.publishEvent(taskEventTopic("task.update"), map[string]any{
-		KeyTaskID: task.ID,
-		"state":   task.State.String(),
-	})
+	r.publishTaskUpdate(task.ID, task.State)
 	return nil
 }
 
@@ -598,10 +702,7 @@ func (r *Registry) CompleteJob(ctx context.Context, taskID string) error {
 		return err
 	}
 
-	r.publishEvent(taskEventTopic("task.update"), map[string]any{
-		KeyTaskID: task.ID,
-		"state":   task.State.String(),
-	})
+	r.publishTaskUpdate(task.ID, task.State)
 	return nil
 }
 
@@ -630,10 +731,7 @@ func (r *Registry) FailJob(ctx context.Context, taskID string) error {
 		return err
 	}
 
-	r.publishEvent(taskEventTopic("task.update"), map[string]any{
-		KeyTaskID: task.ID,
-		"state":   task.State.String(),
-	})
+	r.publishTaskUpdate(task.ID, task.State)
 	return nil
 }
 
