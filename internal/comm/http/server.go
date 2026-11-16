@@ -734,6 +734,14 @@ func WithWebSocket(msgBus *bus.MessageBus, wsPath string) ServerOption {
 			// wsclass marker path (typedPayloadDecoders) as
 			// agent_progress — never chat_message.
 			"acp.*.*",
+			// agent.turn.state (inter-agent-coordination leaf 04-01, C6):
+			// the inter-agent turn-state edges (delegate spawn/settle,
+			// pair phase transitions, ACP prompt boundaries) ride the
+			// typed Topic[agent.TurnStateEvent] — 3 segments, so neither
+			// the single-segment "*" nor "agent.*" matches. Classified
+			// as agent_progress via the wsclass marker path
+			// (typedPayloadDecoders) — never chat_message.
+			"agent.turn.state",
 			// Employee notify (leaf 11, harness-routed speak):
 			// employee.notify carries detached goal-round notifications.
 			// Forwarded as the generic "event" type — NEVER classified as
