@@ -77,6 +77,7 @@ func llmBudgetConfigFromConfig(bc config.BudgetConfig) llm.BudgetConfig {
 		PerSessionBudget:    bc.PerSessionTokenLimit,
 		PerTaskCostLimit:    bc.PerTaskCostLimit,
 		PerSessionCostLimit: bc.PerSessionCostLimit,
+		Mode:                llm.ParseBudgetMode(bc.Mode),
 	}
 }
 

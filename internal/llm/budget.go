@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 )
@@ -63,7 +64,86 @@ type Budget struct {
 	// Daily cost tracking — reset at midnight UTC
 	dailyCostUsed float64
 
+	// Advisory-mode state (Contract C7): mode gates enforcement; the
+	// advisory dedup set tracks which (limit|task|session) breaches have
+	// already emitted a signal so one breach episode yields exactly one
+	// BudgetAdvisorySignal, not one per budget check. advisorySeen is
+	// cleared when a check observes no breach, re-arming the edge.
+	mode              BudgetMode
+	advisorySeen      map[string]struct{}
+	advisoryPublisher AdvisoryPublisher
+
 	logger *slog.Logger
+}
+
+// BudgetMode selects how a breached budget is enforced (Contract C7).
+type BudgetMode string
+
+const (
+	// BudgetModeEnforce is the DEFAULT: a breached budget returns
+	// *BudgetExceededError exactly as before this leaf.
+	BudgetModeEnforce BudgetMode = "enforce"
+	// BudgetModeSteer never refuses a turn: the budget check reports
+	// "allowed", Advisory() reports the breach, and one
+	// BudgetAdvisorySignal rides the existing agent.quota_wait topic with
+	// class "budget_advisory".
+	BudgetModeSteer BudgetMode = "steer"
+)
+
+// ParseBudgetMode maps a config string to a BudgetMode. "" and any
+// unrecognized value map to BudgetModeEnforce (backward compatible; the
+// default posture is byte-identical to today).
+func ParseBudgetMode(s string) BudgetMode {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case string(BudgetModeSteer):
+		return BudgetModeSteer
+	default:
+		return BudgetModeEnforce
+	}
+}
+
+// AdvisoryVerdict reports the breach state WITHOUT blocking (Contract C7).
+// It reads the same counters CheckBudgetWithScope maintains; it never
+// mutates them.
+type AdvisoryVerdict struct {
+	OverTarget bool
+	Limit      BudgetLimit // the existing BudgetLimit enum
+	Used       float64     // tokens or USD, matching Limit's unit
+	Cap        float64     // the configured limit after aggressiveness
+}
+
+// BudgetAdvisorySignal is the advisory payload (Contract C7). It rides the
+// EXISTING agent.quota_wait topic with Class "budget_advisory" — never a
+// new topic, never a new WS type.
+type BudgetAdvisorySignal struct {
+	Class string // "budget_advisory"
+	Limit string // the BudgetLimit reason string
+	Used  float64
+	Cap   float64
+	Scope string // "hourly" | "daily" | "per_task" | "per_session"
+}
+
+// BudgetAdvisoryClass is the wire class carried by the advisory signal on
+// the agent.quota_wait topic.
+const BudgetAdvisoryClass = "budget_advisory"
+
+// AdvisoryPublisher is the emission seam for BudgetAdvisorySignal. The
+// daemon wiring installs a publisher that marshals the signal onto the
+// EXISTING agent.quota_wait topic (class "budget_advisory", same shape as
+// the quota park events). A nil publisher drops the signal silently —
+// Advisory() remains the in-process source of truth. Never called under
+// b.mu: publishers do I/O.
+type AdvisoryPublisher func(BudgetAdvisorySignal)
+
+// SetAdvisoryPublisher installs the advisory emission seam. Nil-guarded at
+// the call site per repo setter convention: a nil publisher is refused.
+func (b *Budget) SetAdvisoryPublisher(p AdvisoryPublisher) {
+	if p == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.advisoryPublisher = p
 }
 
 // BudgetConfig holds configuration for token budget tracking.
@@ -78,6 +158,8 @@ type BudgetConfig struct {
 	PerSessionBudget    int     // max tokens per single session (0 = no cap)
 	PerTaskCostLimit    float64 // max USD per single task (0 = no cap)
 	PerSessionCostLimit float64 // max USD per single session (0 = no cap)
+	// Mode selects enforce (default; "" or unknown -> enforce) or steer.
+	Mode BudgetMode
 }
 
 // NewBudget creates a new token budget tracker.
@@ -100,6 +182,8 @@ func NewBudget(cfg BudgetConfig, logger *slog.Logger) *Budget {
 	now := time.Now().UTC()
 
 	return &Budget{
+		mode:                ParseBudgetMode(string(cfg.Mode)),
+		advisorySeen:        make(map[string]struct{}),
 		hourlyLimit:         cfg.HourlyLimit,
 		dailyLimit:          cfg.DailyLimit,
 		rateLimitRPM:        cfg.RateLimitRPM,
@@ -359,141 +443,26 @@ func (b *Budget) RecordUsageWithScope(usage TokenUsage, taskID, sessionID string
 // CheckBudget returns a BudgetCheckResult indicating whether the current usage
 // is within all budget limits. When both hourlyLimit and dailyLimit are 0
 // (unconfigured), all requests are allowed.
+//
+// Contract C7: in steer mode a breach NEVER returns Exceeded=true; the turn
+// is allowed and exactly one BudgetAdvisorySignal per breach episode is
+// emitted on the wired publisher (agent.quota_wait, class budget_advisory).
 func (b *Budget) CheckBudget() BudgetCheckResult {
 	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	// Allow all requests when both token and cost budget limits are unconfigured (zero)
-	if b.hourlyLimit == 0 && b.dailyLimit == 0 && b.dailyCostLimit == 0 && b.hourlyCostLimit == 0 {
-		return BudgetCheckResult{Exceeded: false}
-	}
-
-	b.maybeResetDaily()
-	b.pruneHourlyWindow()
-
-	// Check hourly token limit
-	if b.hourlyLimit > 0 {
-		effLimit := b.effectiveLimit(b.hourlyLimit)
-		used := b.hourlyUsed()
-		if used >= effLimit {
-			return BudgetCheckResult{Exceeded: true, Reason: BudgetLimitHourlyTokens, Used: float64(used), Limit: float64(effLimit)}
-		}
-	}
-
-	// Check daily token limit
-	if b.dailyLimit > 0 {
-		effLimit := b.effectiveLimit(b.dailyLimit)
-		if b.dailyUsed >= effLimit {
-			return BudgetCheckResult{Exceeded: true, Reason: BudgetLimitDailyTokens, Used: float64(b.dailyUsed), Limit: float64(effLimit)}
-		}
-	}
-
-	// Check daily cost limit
-	if b.dailyCostLimit > 0 {
-		effLimit := b.effectiveCostLimit(b.dailyCostLimit)
-		if b.dailyCostUsed >= effLimit {
-			return BudgetCheckResult{Exceeded: true, Reason: BudgetLimitDailyCost, Used: b.dailyCostUsed, Limit: effLimit}
-		}
-	}
-
-	// Check hourly cost limit
-	if b.hourlyCostLimit > 0 {
-		effLimit := b.effectiveCostLimit(b.hourlyCostLimit)
-		used := b.hourlyCostUsed()
-		if used >= effLimit {
-			return BudgetCheckResult{Exceeded: true, Reason: BudgetLimitHourlyCost, Used: used, Limit: effLimit}
-		}
-	}
-
-	return BudgetCheckResult{Exceeded: false}
+	res, sigs := b.applyModeGateLocked(b.checkBudgetLocked("", ""), "", "")
+	b.mu.Unlock()
+	b.emitPending(sigs)
+	return res
 }
 
 // CheckBudgetWithScope validates budgets including per-task and per-session caps.
 // taskID and sessionID can be empty strings if per-task/per-session caps are not configured.
 func (b *Budget) CheckBudgetWithScope(taskID, sessionID string) BudgetCheckResult {
 	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	// Allow all requests when budget is unconfigured (limits = 0)
-	if b.hourlyLimit == 0 && b.dailyLimit == 0 && b.dailyCostLimit == 0 && b.hourlyCostLimit == 0 &&
-		b.perTaskBudget == 0 && b.perSessionBudget == 0 && b.perTaskCostLimit == 0 && b.perSessionCostLimit == 0 {
-		return BudgetCheckResult{Exceeded: false}
-	}
-
-	b.maybeResetDaily()
-	b.pruneHourlyWindow()
-
-	// Per-task token cap check
-	if b.perTaskBudget > 0 && len(taskID) > 0 {
-		if taskUsed, exists := b.tasks[taskID]; exists {
-			if taskUsed >= b.perTaskBudget {
-				return BudgetCheckResult{Exceeded: true, Reason: BudgetLimitPerTask, Used: float64(taskUsed), Limit: float64(b.perTaskBudget)}
-			}
-		}
-	}
-
-	// Per-session token cap check
-	if b.perSessionBudget > 0 && len(sessionID) > 0 {
-		if sessionUsed, exists := b.sessions[sessionID]; exists {
-			if sessionUsed >= b.perSessionBudget {
-				return BudgetCheckResult{Exceeded: true, Reason: BudgetLimitPerSession, Used: float64(sessionUsed), Limit: float64(b.perSessionBudget)}
-			}
-		}
-	}
-
-	// Per-task cost cap check
-	if b.perTaskCostLimit > 0 && len(taskID) > 0 {
-		if taskCost, exists := b.taskCosts[taskID]; exists {
-			if taskCost >= b.perTaskCostLimit {
-				return BudgetCheckResult{Exceeded: true, Reason: BudgetLimitPerTaskCost, Used: taskCost, Limit: b.perTaskCostLimit}
-			}
-		}
-	}
-
-	// Per-session cost cap check
-	if b.perSessionCostLimit > 0 && len(sessionID) > 0 {
-		if sessionCost, exists := b.sessionCosts[sessionID]; exists {
-			if sessionCost >= b.perSessionCostLimit {
-				return BudgetCheckResult{Exceeded: true, Reason: BudgetLimitPerSessionCost, Used: sessionCost, Limit: b.perSessionCostLimit}
-			}
-		}
-	}
-
-	// Check hourly token limit
-	if b.hourlyLimit > 0 {
-		effLimit := b.effectiveLimit(b.hourlyLimit)
-		used := b.hourlyUsed()
-		if used >= effLimit {
-			return BudgetCheckResult{Exceeded: true, Reason: BudgetLimitHourlyTokens, Used: float64(used), Limit: float64(effLimit)}
-		}
-	}
-
-	// Check daily token limit
-	if b.dailyLimit > 0 {
-		effLimit := b.effectiveLimit(b.dailyLimit)
-		if b.dailyUsed >= effLimit {
-			return BudgetCheckResult{Exceeded: true, Reason: BudgetLimitDailyTokens, Used: float64(b.dailyUsed), Limit: float64(effLimit)}
-		}
-	}
-
-	// Check daily cost limit
-	if b.dailyCostLimit > 0 {
-		effLimit := b.effectiveCostLimit(b.dailyCostLimit)
-		if b.dailyCostUsed >= effLimit {
-			return BudgetCheckResult{Exceeded: true, Reason: BudgetLimitDailyCost, Used: b.dailyCostUsed, Limit: effLimit}
-		}
-	}
-
-	// Check hourly cost limit
-	if b.hourlyCostLimit > 0 {
-		effLimit := b.effectiveCostLimit(b.hourlyCostLimit)
-		used := b.hourlyCostUsed()
-		if used >= effLimit {
-			return BudgetCheckResult{Exceeded: true, Reason: BudgetLimitHourlyCost, Used: used, Limit: effLimit}
-		}
-	}
-
-	return BudgetCheckResult{Exceeded: false}
+	res, sigs := b.applyModeGateLocked(b.checkBudgetLocked(taskID, sessionID), taskID, sessionID)
+	b.mu.Unlock()
+	b.emitPending(sigs)
+	return res
 }
 
 // RecordTaskUsage tracks tokens consumed by a specific task.
@@ -856,6 +825,200 @@ func (r BudgetLimit) Message(used, limit float64) string {
 }
 
 // BudgetCheckResult describes the outcome of a budget check.
+// Mode returns the budget's enforcement mode (Contract C7).
+func (b *Budget) Mode() BudgetMode {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.mode == "" {
+		return BudgetModeEnforce
+	}
+	return b.mode
+}
+
+// budgetLimitScope maps a BudgetLimit reason to its wire scope.
+func budgetLimitScope(l BudgetLimit) string {
+	switch l {
+	case BudgetLimitHourlyTokens, BudgetLimitHourlyCost:
+		return "hourly"
+	case BudgetLimitDailyTokens, BudgetLimitDailyCost:
+		return "daily"
+	case BudgetLimitPerTask, BudgetLimitPerTaskCost:
+		return "per_task"
+	case BudgetLimitPerSession, BudgetLimitPerSessionCost:
+		return "per_session"
+	default:
+		return ""
+	}
+}
+
+// advisorySignalFor builds the wire signal for a breach result.
+func advisorySignalFor(res BudgetCheckResult) BudgetAdvisorySignal {
+	return BudgetAdvisorySignal{
+		Class: BudgetAdvisoryClass,
+		Limit: string(res.Reason),
+		Used:  res.Used,
+		Cap:   res.Limit,
+		Scope: budgetLimitScope(res.Reason),
+	}
+}
+
+// Advisory reports the breach state WITHOUT blocking (Contract C7). It
+// reads the same counters RecordCost maintains; it never mutates them.
+// The first global (hourly/daily) breach is reported, in the same
+// precedence CheckBudget uses.
+func (b *Budget) Advisory() AdvisoryVerdict {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	res := b.checkBudgetLocked("", "")
+	return AdvisoryVerdict{
+		OverTarget: res.Exceeded,
+		Limit:      res.Reason,
+		Used:       res.Used,
+		Cap:        res.Limit,
+	}
+}
+
+// noteAdvisoryLocked records a breach for dedup and returns the signal to
+// publish, or false when this exact breach episode already signalled.
+func (b *Budget) noteAdvisoryLocked(res BudgetCheckResult, taskID, sessionID string) (BudgetAdvisorySignal, bool) {
+	key := string(res.Reason) + "|" + taskID + "|" + sessionID
+	if _, seen := b.advisorySeen[key]; seen {
+		return BudgetAdvisorySignal{}, false
+	}
+	b.advisorySeen[key] = struct{}{}
+	return advisorySignalFor(res), true
+}
+
+// clearAdvisoryLocked re-arms the edge when a check observes no breach.
+func (b *Budget) clearAdvisoryLocked() {
+	if len(b.advisorySeen) > 0 {
+		b.advisorySeen = make(map[string]struct{})
+	}
+}
+
+// emitPending publishes collected signals OUTSIDE b.mu (publishers do I/O).
+func (b *Budget) emitPending(sigs []BudgetAdvisorySignal) {
+	b.mu.Lock()
+	p := b.advisoryPublisher
+	b.mu.Unlock()
+	for _, sig := range sigs {
+		if p == nil {
+			b.logger.Debug("budget advisory signal (no publisher wired; dropping)",
+				"limit", sig.Limit, "used", sig.Used, "cap", sig.Cap, "scope", sig.Scope)
+			continue
+		}
+		p(sig)
+	}
+}
+
+// checkBudgetLocked is the shared decision table for CheckBudget /
+// CheckBudgetWithScope / Advisory. Callers hold b.mu. taskID/sessionID may
+// be empty (CheckBudget / Advisory semantics: global limits only).
+func (b *Budget) checkBudgetLocked(taskID, sessionID string) BudgetCheckResult {
+	// Allow all requests when budget is unconfigured (limits = 0)
+	if b.hourlyLimit == 0 && b.dailyLimit == 0 && b.dailyCostLimit == 0 && b.hourlyCostLimit == 0 &&
+		b.perTaskBudget == 0 && b.perSessionBudget == 0 && b.perTaskCostLimit == 0 && b.perSessionCostLimit == 0 {
+		return BudgetCheckResult{Exceeded: false}
+	}
+
+	b.maybeResetDaily()
+	b.pruneHourlyWindow()
+
+	// Per-task token cap check
+	if b.perTaskBudget > 0 && len(taskID) > 0 {
+		if taskUsed, exists := b.tasks[taskID]; exists {
+			if taskUsed >= b.perTaskBudget {
+				return BudgetCheckResult{Exceeded: true, Reason: BudgetLimitPerTask, Used: float64(taskUsed), Limit: float64(b.perTaskBudget)}
+			}
+		}
+	}
+
+	// Per-session token cap check
+	if b.perSessionBudget > 0 && len(sessionID) > 0 {
+		if sessionUsed, exists := b.sessions[sessionID]; exists {
+			if sessionUsed >= b.perSessionBudget {
+				return BudgetCheckResult{Exceeded: true, Reason: BudgetLimitPerSession, Used: float64(sessionUsed), Limit: float64(b.perSessionBudget)}
+			}
+		}
+	}
+
+	// Per-task cost cap check
+	if b.perTaskCostLimit > 0 && len(taskID) > 0 {
+		if taskCost, exists := b.taskCosts[taskID]; exists {
+			if taskCost >= b.perTaskCostLimit {
+				return BudgetCheckResult{Exceeded: true, Reason: BudgetLimitPerTaskCost, Used: taskCost, Limit: b.perTaskCostLimit}
+			}
+		}
+	}
+
+	// Per-session cost cap check
+	if b.perSessionCostLimit > 0 && len(sessionID) > 0 {
+		if sessionCost, exists := b.sessionCosts[sessionID]; exists {
+			if sessionCost >= b.perSessionCostLimit {
+				return BudgetCheckResult{Exceeded: true, Reason: BudgetLimitPerSessionCost, Used: sessionCost, Limit: b.perSessionCostLimit}
+			}
+		}
+	}
+
+	// Check hourly token limit
+	if b.hourlyLimit > 0 {
+		effLimit := b.effectiveLimit(b.hourlyLimit)
+		used := b.hourlyUsed()
+		if used >= effLimit {
+			return BudgetCheckResult{Exceeded: true, Reason: BudgetLimitHourlyTokens, Used: float64(used), Limit: float64(effLimit)}
+		}
+	}
+
+	// Check daily token limit
+	if b.dailyLimit > 0 {
+		effLimit := b.effectiveLimit(b.dailyLimit)
+		if b.dailyUsed >= effLimit {
+			return BudgetCheckResult{Exceeded: true, Reason: BudgetLimitDailyTokens, Used: float64(b.dailyUsed), Limit: float64(effLimit)}
+		}
+	}
+
+	// Check daily cost limit
+	if b.dailyCostLimit > 0 {
+		effLimit := b.effectiveCostLimit(b.dailyCostLimit)
+		if b.dailyCostUsed >= effLimit {
+			return BudgetCheckResult{Exceeded: true, Reason: BudgetLimitDailyCost, Used: b.dailyCostUsed, Limit: effLimit}
+		}
+	}
+
+	// Check hourly cost limit
+	if b.hourlyCostLimit > 0 {
+		effLimit := b.effectiveCostLimit(b.hourlyCostLimit)
+		used := b.hourlyCostUsed()
+		if used >= effLimit {
+			return BudgetCheckResult{Exceeded: true, Reason: BudgetLimitHourlyCost, Used: used, Limit: effLimit}
+		}
+	}
+
+	return BudgetCheckResult{Exceeded: false}
+}
+
+// applyModeGate applies Contract C7 to a locked breach result: in enforce
+// mode the result is returned unchanged (byte-identical to today); in steer
+// mode the breach becomes "allowed" and at most one advisory signal per
+// breach episode is collected for the caller to publish after unlock.
+func (b *Budget) applyModeGateLocked(res BudgetCheckResult, taskID, sessionID string) (BudgetCheckResult, []BudgetAdvisorySignal) {
+	if b.mode != BudgetModeSteer {
+		if !res.Exceeded {
+			b.clearAdvisoryLocked()
+		}
+		return res, nil
+	}
+	if !res.Exceeded {
+		b.clearAdvisoryLocked()
+		return res, nil
+	}
+	sig, ok := b.noteAdvisoryLocked(res, taskID, sessionID)
+	if !ok {
+		return BudgetCheckResult{Exceeded: false}, nil
+	}
+	return BudgetCheckResult{Exceeded: false}, []BudgetAdvisorySignal{sig}
+}
+
 // If Exceeded is true, Reason and the Used/Limit fields are populated.
 type BudgetCheckResult struct {
 	Exceeded bool

@@ -1855,8 +1855,17 @@ func NormalizeOTLPMetricsDefaults(c *OTLPMetricsConfig) {
 // cost limits, not the RPM rate limit, and not the hierarchical
 // task/phase/turn budget (which additionally requires a positive
 // agent.budget.total). When true, the configured limits apply.
+//
+// Mode selects how a breach is handled when Enabled is true (Contract C7,
+// sovereign-router-parity tree leaf 08):
+//   - "enforce" (the DEFAULT; an absent, empty, or unknown value maps to
+//     enforce): a breached budget returns BudgetExceededError, unchanged.
+//   - "steer": a breach never refuses a turn. The budget check reports
+//     "allowed", an Advisory reports the breach, and ONE advisory signal
+//     (class "budget_advisory") rides the existing agent.quota_wait topic.
 type BudgetConfig struct {
 	Enabled              bool    `json:"enabled"              toml:"enabled"`
+	Mode                 string  `json:"mode"                 toml:"mode"`
 	HourlyTokenLimit     int     `json:"hourly_token_limit"   toml:"hourly_token_limit"`
 	DailyTokenLimit      int     `json:"daily_token_limit"    toml:"daily_token_limit"`
 	DailyCostLimit       float64 `json:"daily_cost_limit"     toml:"daily_cost_limit"`

@@ -1263,6 +1263,31 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// values cross from meept.json5 into enforcement: switch off -> zero
 		// config -> the tracker is unlimited.
 		budgetTracker = llm.NewBudget(llmBudgetConfigFromConfig(cfg.LLM.Budget), logger.With("component", "budget"))
+		// Advisory budget wiring (s-r parity tree, leaf 08, Contract C7): a
+		// "steer"-configured budget never refuses a turn; instead it emits one
+		// BudgetAdvisorySignal per breach episode. Bridge the llm-side seam onto
+		// the EXISTING agent.quota_wait topic with class "budget_advisory" (same
+		// posture as the budget park events above) - never a new topic, never a
+		// new WS type, and nil-safe when the bus is absent.
+		if msgBus != nil {
+			budgetTracker.SetAdvisoryPublisher(func(sig llm.BudgetAdvisorySignal) {
+				payload := map[string]any{
+					"class":    sig.Class,
+					"limit":    sig.Limit,
+					"used":     sig.Used,
+					"cap":      sig.Cap,
+					"scope":    sig.Scope,
+					"agent_id": "budget",
+				}
+				msg, err := models.NewBusMessage(models.MessageTypeEvent, "budget", payload)
+				if err != nil {
+					logger.Warn("budget advisory signal marshal failed — signal dropped", "limit", sig.Limit, "error", err)
+					return
+				}
+				msg.Topic = "agent.quota_wait"
+				msgBus.Publish("agent.quota_wait", msg)
+			})
+		}
 
 		// Start periodic cleanup of stale task/session entries (TTL=24h, run hourly)
 		c.BudgetCleanupStop = budgetTracker.StartPeriodicCleanup(24*time.Hour, 1*time.Hour)
