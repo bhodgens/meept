@@ -5412,6 +5412,27 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		}
 	}
 
+	// Inter-agent messaging fallback (inter-agent-coord T4 root fix):
+	// when the employee gate above did not build the store (employees AND
+	// bots both disabled), build it from the daemon data dir so
+	// send_agent_message/inbox register for plain agent sessions too -
+	// they are agent-platform capabilities, not employee-only. The
+	// in-gate wiring above keeps precedence (shared DB, roster
+	// reachability).
+	if c.EmployeeMessageStore == nil && c.ToolRegistry != nil {
+		fbDir := filepath.Join(cfg.Daemon.DataDir, "employees")
+		if mkErr := os.MkdirAll(fbDir, 0o755); mkErr == nil {
+			if fbStore, fbErr := employee.NewMessageStore(
+				filepath.Join(fbDir, "messages.db"),
+				logger.With("component", "employee-messages")); fbErr == nil {
+				c.EmployeeMessageStore = fbStore
+				WireEmployeeMessagingForComponents(c)
+			} else {
+				logger.Warn("employee messaging: fallback store init failed; messaging unavailable", "error", fbErr)
+			}
+		}
+	}
+
 	// Situational awareness ([awareness] block, plan 20261110-situational
 	// leaf 01-moment/02): build the moment.Provider + per-employee def
 	// resolver (internal/daemon/awareness_wiring.go) and install the

@@ -1,11 +1,16 @@
 // Fake ACP agent for internal/acp tests. Speaks newline JSON-RPC on stdio.
 //
-//	-mode echo|slow|die|badhandshake|permission|permission-always|selfapprove|argv|prompt
+//	-mode echo|slow|die|badhandshake|permission|permission-always|selfapprove|argv|prompt|plan
 //
 // prompt: session/prompt first emits a tool_call-ish session/update, then
 // replies with the deterministic text "acp-fake reply to: <prompt>" so an
 // e2e harness reply is distinguishable from both the bare echo and any
 // canned local-LLM text (acp-persona-route suite).
+//
+// plan: session/prompt first emits a session/update with sessionUpdate
+// "plan" (one entry titled from -plan-marker), then an agent_message_chunk
+// "planstub reply", then end_turn (inter-agent-coord suite: the plan
+// variant exercises onNotice's plan branch end-to-end).
 //
 // argv: session/prompt replies with the fakeagent's own os.Args tail
 // ("argv=<a1>,<a2>,...") so tests can assert the spawn argv (persona-lane
@@ -71,9 +76,10 @@ func main() {
 	// after the catalog command; ContinueOnError keeps the process alive
 	// so the argv echo can read os.Args directly.
 	fs := flag.NewFlagSet("fakeagent", flag.ContinueOnError)
-	mode := fs.String("mode", "echo", "echo|slow|die|badhandshake|permission|permission-always|selfapprove|argv|prompt")
+	mode := fs.String("mode", "echo", "echo|slow|die|badhandshake|permission|permission-always|selfapprove|argv|prompt|plan")
 	socket := fs.String("socket", "", "daemon unix RPC socket (selfapprove mode)")
 	resultFile := fs.String("result-file", "", "write the selfapprove probe result here (selfapprove mode)")
+	planMarker := fs.String("plan-marker", "PLAN-STEP-1", "plan entry title (plan mode)")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "fakeagent flag parse: %v\n", err)
 	}
@@ -192,10 +198,36 @@ func main() {
 					replyEcho = replyOutcome(replyMsg.Result)
 				}
 			}
+			if *mode == "plan" {
+				// inter-agent-coord T3: exercise onNotice's plan branch -
+				// a session/update with sessionUpdate "plan" whose entry
+				// title carries the caller's -plan-marker, then the
+				// deterministic chunk + end_turn.
+				planChunk, pErr := json.Marshal(map[string]any{
+					"sessionId": sessionID,
+					"update": map[string]any{
+						"sessionUpdate": "plan",
+						"planId":        "plan-coord-1",
+						"entries": []map[string]string{
+							{"content": *planMarker, "status": "in_progress"},
+						},
+					},
+				})
+				if pErr == nil {
+					write(msg{
+						JSONRPC: "2.0",
+						Method:  "session/update",
+						Params:  planChunk,
+					})
+				}
+			}
 			text := promptText(m.Params)
 			if *mode == "argv" {
 				// echo the spawn argv tail for CommandArgs assertions
 				text = "argv=" + strings.Join(os.Args[1:], ",")
+			}
+			if *mode == "plan" {
+				text = "planstub reply"
 			}
 			if *mode == "prompt" {
 				// acp-persona-route e2e: deterministic prefixed reply

@@ -79,10 +79,8 @@ func main() {
 				"update": map[string]any{
 					"sessionUpdate": "plan",
 					"planId":        "plan-coord-1",
-					"content": map[string]any{
-						"entries": []map[string]string{
-							{"title": planMarker, "status": "in_progress"},
-						},
+					"entries": []map[string]string{
+						{"content": planMarker, "status": "in_progress"},
 					},
 				},
 			})
@@ -119,6 +117,12 @@ func planStubBin(t *testing.T) string {
 	src := filepath.Join(dir, "main.go")
 	if err := os.WriteFile(src, []byte(planStubMain), 0o644); err != nil {
 		t.Fatalf("planstub write: %v", err)
+	}
+	// The stub is stdlib-only; `go build .` still needs module context
+	// (go.mod required since Go 1.16) - write a minimal one.
+	gomod := filepath.Join(dir, "go.mod")
+	if err := os.WriteFile(gomod, []byte("module planstub\n\ngo 1.22\n"), 0o644); err != nil {
+		t.Fatalf("planstub go.mod write: %v", err)
 	}
 	bin := filepath.Join(dir, "planstub")
 	cmd := exec.Command("go", "build", "-o", bin, ".")

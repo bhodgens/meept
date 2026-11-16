@@ -548,7 +548,19 @@ func (m *DelegateManager) Spawn(ctx context.Context, req DelegateRequest, parent
 	if m.children == nil {
 		m.children = make(map[string]*childEntry)
 	}
-	childCtx, cancel := context.WithCancel(ctx)
+	// The child ctx DETACHES from the parent turn's cancellation
+	// (WithoutCancel keeps the value chain - session ids, taint context -
+	// but drops the cancel edge): a delegate child is an async job by
+	// contract (spawn returns "running"; settlement arrives later on
+	// agent.delegate.result). Inheriting the parent turn's ctx made every
+	// settlement impossible by construction - the child died
+	// "context cancelled" the moment the parent task completed (observed
+	// e2e, inter-agent-coord T1/T2; delegate-seam masked it because its
+	// turn-2 assertion reads scripted post-tool text, not the wire).
+	// Explicit cancellation still works through e.cancel (Cancel /
+	// subagent_interrupt); daemon shutdown terminates children with the
+	// process.
+	childCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	e := &childEntry{rec: rec, settle: make(chan struct{}), cancel: cancel}
 	m.children[childID] = e
 	m.mu.Unlock()
@@ -946,6 +958,11 @@ func (m *DelegateManager) publishResult(rec ChildRecord) {
 		"response":          rec.Result,
 		"error":             rec.Err,
 		"parent_session_id": rec.ParentSessionID,
+	}
+	// C2 (inter-agent-coord): the classified stop reason rides the wire
+	// alongside status - empty for pending/running, mapped for terminals.
+	if rec.StopReason != "" {
+		payload["stop_reason"] = string(rec.StopReason)
 	}
 	m.publisher("agent.delegate.result", payload)
 }

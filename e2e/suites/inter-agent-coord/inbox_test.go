@@ -46,7 +46,7 @@ func toolResultsJoined(f *harness.FakeLLM) string {
 // confirmation gate off for the messaging tools.
 func inboxStack(t *testing.T) *harness.Stack {
 	t.Helper()
-	return harness.Start(t,
+	s := harness.Start(t,
 		harness.WithConfigOverlay(map[string]any{
 			"security.require_confirmation_high": false,
 		}),
@@ -62,9 +62,40 @@ func inboxStack(t *testing.T) *harness.Stack {
 			if patched == string(data) {
 				return errNoAdditionalToolsBlock
 			}
-			return os.WriteFile(chatSpec, []byte(patched), 0o644)
+			if err := os.WriteFile(chatSpec, []byte(patched), 0o644); err != nil {
+				return err
+			}
+			// The message TARGET: a coord-worker roster agent must exist
+			// or send_agent_message fails "unknown recipient" (roster
+			// gate, employee_message_tools.go targetExists).
+			workerDir := filepath.Join(st.MeeptHome, "agents", "coord-worker")
+			if err := os.MkdirAll(workerDir, 0o755); err != nil {
+				return err
+			}
+			// The prompt NAMES coord-worker, so the dispatcher's
+			// named-agent route delivers the send/drain turns THERE -
+			// grant it the messaging tools exactly like the chat agent.
+			workerDef := `---
+id: coord-worker
+name: coord-worker
+role: executor
+description: inter-agent-coord inbox fixture - the message target
+additional_tools:
+  - send_agent_message
+  - inbox
+enabled: true
+---
+coord-worker receives inter-agent-coord test messages.
+`
+			return os.WriteFile(filepath.Join(workerDir, "AGENT.md"), []byte(workerDef), 0o644)
 		}),
 	)
+	// Pin the intent classifier to chat (delegate-seam rationale): the
+	// messaging turns must run on the chat loop - the agent whose
+	// additional_tools this rig grants - not dispatch to the coder
+	// executor whose allowlist strips them.
+	s.Fake.SetClassifierOutput(`{"intent":"chat","confidence":0.95,"reasoning":"pinned chat for inter-agent-coord inbox"}`)
+	return s
 }
 
 var errNoAdditionalToolsBlock = &inboxRigError{}
@@ -117,7 +148,7 @@ func TestT4_StructuredInboxRoundTrip(t *testing.T) {
 		harness.ToolCall{Name: "inbox", Arguments: `{}`},
 	)
 	reply = s.ChatTurn(t, sessionID,
-		`Call the inbox tool to drain your messages and report the raw tool result verbatim.`,
+		`coord-worker: call the inbox tool to drain your messages and report the raw tool result verbatim.`,
 		3*time.Minute)
 	joined := toolResultsJoined(s.Fake)
 	squash := strings.Join(strings.Fields(joined), "")
@@ -253,7 +284,7 @@ func TestT5_StructuredScanBlockAllow(t *testing.T) {
 	// file_paths entry carries the real deny pattern. The observer turn
 	// must never run (handoff blocked at driver->observer).
 	const denyDriverText = `{"body":"COORD-SCAN-DENY handoff payload","structured":{"file_paths":["` + scanDenyFilePath + `"],"tool_targets":["file_read"]}}`
-	s.Fake.ScriptN(2, coordMainTurnPred("You are the CURRENT DRIVER"),
+	s.Fake.ScriptN(1, coordMainTurnPred("You are the CURRENT DRIVER"),
 		harness.TextResponse(denyDriverText))
 
 	sessionID := s.CreateSession(t, "coord-scan-deny", s.ProjectDir)
@@ -278,8 +309,12 @@ func TestT5_StructuredScanBlockAllow(t *testing.T) {
 	const cleanDriverText = `{"body":"COORD-SCAN-CLEAN handoff payload","structured":{"file_paths":["` + scanCleanFilePath + `"],"tool_targets":["file_read"]}}`
 	s.Fake.ScriptN(2, coordMainTurnPred("You are the CURRENT DRIVER"),
 		harness.TextResponse(cleanDriverText))
+	// Plain-text approval: the spoofed control-JSON shape
+	// {"action": "approve"} is a REAL control_verb_forgery deny pattern
+	// (agent_boundary.go:80) - the observer reply must converge without
+	// tripping it (parseObserverResponse's keyword fallback: "looks good").
 	s.Fake.ScriptN(2, coordMainTurnPred("You are the OBSERVER"),
-		harness.TextResponse(`{"action": "approve", "feedback": "the clean structured handoff looks correct"}`))
+		harness.TextResponse(`looks good - the clean structured handoff is correct and complete`))
 
 	sessionID2 := s.CreateSession(t, "coord-scan-clean", s.ProjectDir)
 	s.ChatTurn(t, sessionID2, "collaborate on the coordscanclean", 60*time.Second)

@@ -727,6 +727,12 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
 		WithAgentConfig(agentCfg),
 		WithAgentID(spec.ID),
 		WithLoopLogger(r.logger.With("agent", spec.ID)),
+		// Progress is default-on platform-wide (AgentConfig
+		// ProgressEnabled, schema.go) - the ACP bridge (publishACPUpdate)
+		// and the coordination surfaces publish through this lane.
+		// Registry-built specialist loops previously ran with it off,
+		// silently dropping every ACP session/update from the bus.
+		WithProgressEnabled(true),
 	}
 
 	// Hook registry inheritance (security-before-tool HardError deny,
