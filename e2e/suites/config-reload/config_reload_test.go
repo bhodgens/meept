@@ -58,11 +58,14 @@ func TestSIGHUPReloadKeepsDaemonHealthy(t *testing.T) {
 		t.Fatalf("health after reload = %v, want ok", health["status"])
 	}
 
-	// The daemon log must show the reload path ran.
-	tail := s.Daemon.LogTail()
-	if !strings.Contains(tail, "reloading configuration") {
-		t.Fatalf("daemon log does not show the SIGHUP reload; tail:\n%s", tail)
-	}
+	// The daemon log must show the reload path ran. A one-shot read races
+	// twice: a HUP sent during boot is buffered by the daemon's pre-listener
+	// signal.Notify (da35b006) and only drained when the wait loop starts,
+	// and boot keeps writing past the 4KB tail window. Poll the log the
+	// same way hup() polls /health.
+	harness.WaitFor(t, 30*time.Second, "SIGHUP reload log line", func() bool {
+		return strings.Contains(s.Daemon.LogTail(), "reloading configuration")
+	})
 }
 
 // config-reload-01 (part 2): a BAD config on disk keeps the old config —

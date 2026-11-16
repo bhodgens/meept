@@ -229,6 +229,31 @@ func rewindReceiptToInFlight(t *testing.T, s *harness.Stack, jobID, messageID st
 		}
 		ld["status"] = "in_flight"
 		delete(ld, "delivered_at")
+		// A real crash rewinds the HISTORY row too: recordDelivery persists
+		// the history append and the LastDelivery mirror in one store.Update
+		// per transition, so killing the daemon before the delivered-write
+		// leaves BOTH in_flight. Without this rewind the F2 already-delivered
+		// guard (receipts.go hasDeliveredReceiptForMessageID) sees the still-
+		// delivered history row and correctly refuses to re-deliver.
+		if hist, ok := job["delivery_history"].(map[string]any); ok {
+			recs, ok := hist["records"].([]any)
+			if !ok {
+				t.Fatalf("job %s delivery_history.records has wrong shape", jobID)
+			}
+			histHit := false
+			for _, rr := range recs {
+				rec, ok := rr.(map[string]any)
+				if !ok || rec["message_id"] != messageID {
+					continue
+				}
+				rec["status"] = "in_flight"
+				delete(rec, "delivered_at")
+				histHit = true
+			}
+			if !histHit {
+				t.Fatalf("job %s history has no record for %s", jobID, messageID)
+			}
+		}
 		found = true
 	}
 	if !found {

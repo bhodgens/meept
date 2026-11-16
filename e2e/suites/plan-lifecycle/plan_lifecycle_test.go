@@ -71,13 +71,15 @@ func requireParses(t *testing.T, path, wantPlanID string) *plan.ParsedPlan {
 }
 
 // waitForPlanFile waits until a plan markdown file appears in the watched
-// roots, returning its path. The dispatch path stores files relative to the
-// daemon working directory (no project path is passed); plan.create with an
-// explicit project_path stores them under that project. Every observation
-// re-parses the file — the file must be intact on every poll.
+// roots, returning its path. The dispatch path passes no project path, so
+// resolvePlanDir sends its files under $MEEPT_HOME/plans (84de5c6a: an empty
+// project path must not resolve relative to the process CWD); plan.create
+// with an explicit project_path stores them under that project. Every
+// observation re-parses the file — the file must be intact on every poll.
 func waitForPlanFile(t *testing.T, s *harness.Stack, timeout time.Duration) string {
 	t.Helper()
 	roots := []string{
+		filepath.Join(s.MeeptHome, "plans"),
 		filepath.Join(s.ProjectDir, "docs", "plans"),
 		filepath.Join(s.Work, "docs", "plans"),
 	}
