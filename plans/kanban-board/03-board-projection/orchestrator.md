@@ -41,9 +41,9 @@ Implement the data projection and command handling logic for the Kanban board, e
 
 | Task | Status | Notes |
 |---|---|---|
-| 01-projector | PENDING | |
-| 02-rebuild-reconcile | PENDING | |
-| 03-human-commands | PENDING | |
+| 01-projector | DONE | e183937e (commit chain: projector.go, projection_rules.go, projector_test.go; deadcode stock baselined) |
+| 02-rebuild-reconcile | DONE | this commit (reconcile.go, reconcile_test.go; kill-projector-restart pin green) |
+| 03-human-commands | DONE | 8d613272 (human.go, human_test.go; C2 topics + graphs regen) |
 
 ## Integration Test Plan
 (See master.md Integration Test Plan for 03-board-projection specifics)
