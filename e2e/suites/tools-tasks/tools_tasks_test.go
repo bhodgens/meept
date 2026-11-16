@@ -104,7 +104,7 @@ func TestTaskLifecycleCreateUpdateGetList(t *testing.T) {
 	// lifecycle walks pending -> executing -> completed.
 	s.Fake.EnqueueToolCalls(
 		harness.ToolCall{
-			Name: "task_update",
+			Name:      "task_update",
 			Arguments: `{"id":"` + createdID + `","state":"executing"}`,
 		},
 		harness.ToolCall{
