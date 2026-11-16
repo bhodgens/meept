@@ -59,7 +59,7 @@ The new vocabulary becomes observable end-to-end: WS clients see `agent.turn.sta
 
 **T2 expansion:** run `make graphs`; if orphan-check flags `agent.turn.state` (publisher without subscriber — expected until T1's relay lands, or subscriber without publisher until 02-01), add a baseline entry with a one-line reason (same policy as existing entries). If T1 landed first, the topic has both sides and no baseline entry is needed.
 
-**T4 expansion:** copy the shape of an existing manifest entry (e.g. `delegate-seam`): `{"suite": "inter-agent-coord", "paths": ["internal/agent/...", "internal/acp/...", "internal/employee/..."], "build_tags": ["e2e"]}` — match the exact schema the manifest uses (read one entry via search_files, do not guess).
+**T4 expansion:** copy the delegate-seam manifest entry's schema exactly (verified 2026-11-15): `{"name", "dir", "status", "diff", "scenarios": [...], "note": ...}` — scenarios are numbered strings ("inter-agent-coord-01 ..."); path_map is a SEPARATE top-level key mapping `e2e/suites/inter-agent-coord` → `["inter-agent-coord"]` plus package dirs (`internal/agent`, `internal/acp`, `internal/employee`) as needed. Read one full entry via search_files before editing; do not guess field names.
 
 **T5 expansion:** the daemon-side adapter (new small file `internal/daemon/turnstate_wiring.go` or inline in acp_register.go):
 ```go

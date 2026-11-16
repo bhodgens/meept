@@ -67,9 +67,9 @@ type InboxStructured struct {
 | T2 | send_agent_message structured param | Modify: `internal/tools/builtin/agent_message.go` | `go test ./internal/tools/builtin/ -run 'TestSendAgentMessage_Structured' -v` | FAIL: unknown param | PASS: structured stored as AgentInboxBody JSON | Given store+roster; When send with structured; Then stored body parses with Structured set |
 | T3 | Legacy path byte-identical | Modify: `internal/tools/builtin/agent_message.go` | `go test ./internal/tools/builtin/ -run 'TestSendAgentMessage' -v` | (existing tests must stay green) | PASS: legacy send stores raw text | Given send without structured; When executed; Then stored body == message (no JSON envelope) |
 
-**T1 expansion:** define both structs with the exact JSON tags from C4. Add a `ParseAgentInboxBody(raw string) AgentInboxBody` helper (unmarshal; on failure return {Body: raw}).
+**T1 expansion:** define both structs with the exact JSON tags from C4. Add a `ParseAgentInboxBody(raw string) AgentInboxBody` helper (unmarshal; on failure return {Body: raw}). NOTE: `employee.AgentMessage` itself has NO json tags (messaging.go:35-43) - that is fine; the tags live on AgentInboxBody only. Enqueue stores Body verbatim (messaging.go:249-278), so the tool layer marshals the envelope into Body before calling Enqueue; no store change needed.
 
-**T2 expansion:** in Parameters(), add the optional object property. In Execute(), after building `msg`, parse args["structured"] (map[string]any → InboxStructured via manual extraction or json round-trip); if non-nil, `body, _ := json.Marshal(AgentInboxBody{Body: body, Structured: &st})` and use that as the message body. The 32KB cap (MaxAgentMessageBody) applies to the marshaled body.
+**T2 expansion:** in Parameters(), add the optional object property. `llm.ParameterProperty` supports nested objects (Properties + Required fields, models.go:492-501) - use them for the structured schema. In Execute(), after building `msg`, parse args["structured"] (map[string]any → InboxStructured via json round-trip); if non-nil, `body, _ := json.Marshal(AgentInboxBody{Body: body, Structured: &st})` and use that as the message body. The 32KB cap (MaxAgentMessageBody) is enforced at Enqueue on the marshaled body.
 
 ## Self-Verification Checklist
 

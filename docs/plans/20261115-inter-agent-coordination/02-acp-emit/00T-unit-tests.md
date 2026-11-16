@@ -56,7 +56,9 @@ Write the RED gate tests for F1-F6 in the parent Test Gate matrix.
 | T5 | onNotice handles plan/thought/commands | Modify: `internal/acp/session_updates_test.go` | `go test ./internal/acp/ -run 'TestACPSession_UpdateKinds' -v` | FAIL: only 2 kinds handled | PASS: session/update with sessionUpdate=plan emits SessionEvent{Kind:"plan"}; agent_thought_chunk→"thought"; available_commands_update→"commands" | Given a session with a scripted notification; When onNotice; Then event kind matches |
 | T6 | ACP turn emits TurnStateEvent at boundaries | Modify: `internal/acp/session_updates_test.go` | `go test ./internal/acp/ -run 'TestACPTurn_EmitsState' -v` | FAIL: no emission | PASS: prompt start→running, end→idle+stopReason | Given a session with a bus; When Send completes; Then TurnStateEvent running then idle |
 
-**T1 expansion:** table of {record ChildRecord, want StopReason}. Include: completed+no err→end_turn; completed+refusal marker in result→refusal; interrupted→cancelled; failed→error; failed+max iterations marker→max_iterations.
+**T2 expansion:** table of {record ChildRecord, want StopReason}. Include: completed+no err→end_turn; interrupted→cancelled; failed→error. The refusal row requires the settle-time classification (typed *llm.RefusalError in settle, not string matching) — test via a classified record, not by crafting error text.
+
+**T1 expansion:** table of {record ChildRecord, want StopReason} — completed+no err→end_turn; interrupted→cancelled; failed→error.
 
 **T2 expansion:** use a fake bus (capture published messages); spawn a child with a stub run func that returns immediately; assert two TurnStateEvents (running at spawn, idle at settle).
 

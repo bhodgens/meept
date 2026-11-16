@@ -68,19 +68,25 @@ type DelegateResult struct {
 
 **T2 mapping table (implement in resultFromRecord, delegate.go:847):**
 ```
-completed, err==""                       -> StopReasonEndTurn
-completed, result contains refusal marker -> StopReasonRefusal   (marker: "I can't help with that" / "I'm unable to")
-interrupted                              -> StopReasonCancelled
-failed, err contains "max iterations"    -> StopReasonMaxIterations
-failed, otherwise                        -> StopReasonError
-pending/running                          -> "" (omit)
+completed, err==""   -> StopReasonEndTurn
+interrupted          -> StopReasonCancelled
+failed + typed *llm.RefusalError -> StopReasonRefusal
+failed, otherwise    -> StopReasonError
+pending/running      -> "" (omit)
 ```
+NOTE: ChildRecord stores err as a STRING (delegate.go:116-131), so a typed
+RefusalError only survives settle if the settle call is widened to carry the
+typed error OR settle itself classifies before stringifying. Classify in
+`settle(childID, state, result, err)` — where the typed error is in scope —
+and store the classified StopReason on the record; do NOT string-match the
+stored text.
 
 **T3 emit points (outside mutexes):**
-- Spawn: after `State: ChildStateRunning` (:507) and after the child entry is added, call `publishTurnState(d.bus, TurnStateEvent{AgentID: req.AgentID, ChildID: childID, State: TurnStateRunning, Phase: "spawn"})`. Guard `if d.bus != nil`.
-- settle: after `m.publishResult(rec)` (:838), call with State=TurnStateIdle (or TurnStateRequiresAction when the child failed in a way that needs input — for now: idle for completed/interrupted, requires_action for failed), StopReason=result.StopReason, Phase="settled". Guard bus nil.
+- DelegateManager has NO bus field - it holds a generic `publisher func(topic string, payload any)` (delegate.go, "publisher" seam, wired in dsh_wiring.go:307). Do NOT add a bus field. The turn-state emitter goes through the SAME seam: add `publishTurnState(d, ev)` that wraps `d.publisher("agent.turn.state", ev)`; the helper still sets Timestamp when zero. Guard `if d.publisher != nil`. (The bus.PublishT typed path stays available for pair/ACP surfaces which DO hold a *bus.MessageBus.)
+- Spawn: after `State: ChildStateRunning` (:507) and after the child entry is added, emit `TurnStateEvent{AgentID: req.AgentID, ChildID: childID, State: TurnStateRunning, Phase: "spawn"}` via the publisher seam.
+- settle: after `m.publishResult(rec)` (:838), emit with State=TurnStateIdle (or TurnStateRequiresAction when the failure is a refusal/validation needing input), StopReason=record's classified stop reason, Phase="settled". Guard publisher nil.
 
-**T4 emit points (pair_orchestrator.go):** at each `state.Phase = "X"` transition, also `publishTurnState(po.bus, TurnStateEvent{AgentID: <current agent>, SessionID: sessionID, State: <running|idle>, Phase: "X"})`. Map: actor_turn→running, reviewer_turn→running, completed→idle, failed→idle+StopReasonError. po.bus is `PairOrchestratorDeps.Bus`.
+**T4 emit points (pair_orchestrator.go):** at each `state.Phase = "X"` transition (verified lines: actor_turn :234, reviewer_turn :264, completed :313/:327, failed :225/:239/:270), also `bus.PublishT(po.bus, TopicTurnState, "pair-orchestrator", TurnStateEvent{AgentID: <current agent>, SessionID: sessionID, State: <running|idle>, Phase: "X"})`. Map: actor_turn→running, reviewer_turn→running, completed→idle, failed→idle+StopReasonError. `po.bus` exists: `PairOrchestratorDeps.Bus` (pair_orchestrator.go:39-43) is already a field on the orchestrator. Guard `if po.bus != nil`.
 
 **T5 emit points (session.go Prompt):** needs the session's bus. If `Session` has no bus field, add one via a nil-safe setter `SetTurnStatePublisher(func(TurnStateEvent))` (constructor `NewTurnStatePublisher`); the daemon wiring (04-01) injects it. Emit running at Prompt entry, idle+stopReason at exit. If no publisher wired, no-op.
 

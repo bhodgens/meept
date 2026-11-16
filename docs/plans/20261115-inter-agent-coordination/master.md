@@ -78,22 +78,30 @@ type DelegateResult struct {
     Status     string     `json:"status,omitempty"`
     StopReason StopReason `json:"stop_reason,omitempty"` // NEW
 }
-// Mapping (resultFromRecord delegate.go:847):
-//   completed   -> end_turn (refine: refusal if output carries a refusal marker)
+// Mapping (resultFromRecord delegate.go:847) - TYPED errors only, no text matching:
+//   completed   -> end_turn
 //   interrupted -> cancelled
-//   failed      -> error (refine: max_iterations if the loop budget tripped)
+//   failed + errors.As(err, *llm.RefusalError) -> refusal
+//   failed, otherwise -> error
+//   (max_iterations: NO typed signal exists in the child result path today - the
+//    enum value is reserved, not emitted. Do NOT string-match error text.)
 // Consumers: 02-01, 04-01
 ```
 
 ### C3: ACP turn result carries stopReason
 
 ```go
-// Owner: 02-01 (session.go), contract from 01-01
+// Owner: 02-02 (session.go), contract from 01-01
 // internal/acp/session.go Prompt() already decodes:
 //   var res struct{ StopReason string `json:"stopReason"` }
 // Change: SessionEvent gains Kind "turn_end" with Text = res.StopReason
 // (wire values end_turn/cancelled/max_tokens/refusal map 1:1 to StopReason).
-// Session.Send returns (output string, stopReason StopReason, err error).
+// acp defines its OWN string type (acp.StopReason) - acp must NOT import
+// internal/agent (agent imports acp; cycle). Session.Send returns
+// (output string, stopReason acp.StopReason, err error); agent-side callers
+// cast to agent.StopReason (identical values).
+// Callers to update (grep .Send(ctx, verified 2026-11-15): acp_executor.go:295,
+// delegate.go:638, delegate_descriptor.go:605.
 // Consumers: 02-01, 04-01
 ```
 
