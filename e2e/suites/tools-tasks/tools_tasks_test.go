@@ -99,8 +99,14 @@ func TestTaskLifecycleCreateUpdateGetList(t *testing.T) {
 		t.Fatalf("task_create returned id %q but tasks.db has %q", toolID, createdID)
 	}
 
-	// Turn 2: update -> get -> list, using the persisted id.
+	// Turn 2: update -> get -> list, using the persisted id. The task
+	// transition guard (leaf 02/01) forbids pending -> completed, so the
+	// lifecycle walks pending -> executing -> completed.
 	s.Fake.EnqueueToolCalls(
+		harness.ToolCall{
+			Name: "task_update",
+			Arguments: `{"id":"` + createdID + `","state":"executing"}`,
+		},
 		harness.ToolCall{
 			Name: "task_update",
 			Arguments: `{"id":"` + createdID + `","state":"completed",` +
