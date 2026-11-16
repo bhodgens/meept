@@ -408,13 +408,16 @@ type fakeWorkflowBus struct {
 }
 
 func (f *fakeWorkflowBus) Publish(topic string, msg *models.BusMessage) int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.topics = append(f.topics, topic)
+	// Decode OUTSIDE the mutex (mutexio gate): the payload is produced by
+	// the code under test; an undecodable frame simply records Kind ""
+	// and the assertions that care fail visibly.
 	var payload struct {
 		Kind string `json:"kind"`
 	}
 	_ = json.Unmarshal(msg.Payload, &payload)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.topics = append(f.topics, topic)
 	f.kinds = append(f.kinds, payload.Kind)
 	return 1
 }

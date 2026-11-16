@@ -23,7 +23,6 @@ package builtin
 import (
 	"context"
 	"sort"
-	"strings"
 	"sync"
 
 	"github.com/caimlas/meept/internal/llm"
@@ -61,15 +60,6 @@ func (t *IntakeSaveTool) SetFilerFunc(fn func(ctx context.Context) voiceintake.I
 		return
 	}
 	t.filerFor = fn
-}
-
-// filerForCtx resolves the filer for this call: the per-call seam when
-// armed, else the static saver.
-func (t *IntakeSaveTool) filer(ctx context.Context) voiceintake.IntakeSaver {
-	if t.filerFor != nil {
-		return t.filerFor(ctx)
-	}
-	return t.saver
 }
 
 // SetCallIDFunc arms the ccid seam (AgentIDFunc pattern, voice_call
@@ -236,9 +226,6 @@ func NormalizeIntakeFields(fields map[string]string) []string {
 	sort.Strings(names)
 	return names
 }
-
-// blankIntakeField reports whether a collected field value is blank.
-func blankIntakeField(v string) bool { return strings.TrimSpace(v) == "" }
 
 // ---- package-level seams the daemon arms before provider construction ----
 //

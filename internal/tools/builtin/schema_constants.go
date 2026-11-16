@@ -60,7 +60,6 @@ const (
 	errJobIDRequired         = "job_id is required"
 
 	// Knowledge graph relationship type.
-	schemaPropReference = "reference"
 
 	// Memory type constants.
 	schemaMemoryEpisodic = "episodic"
