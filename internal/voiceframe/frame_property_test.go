@@ -179,7 +179,11 @@ func TestFrame_GarbageNeverDecodes(t *testing.T) {
 			// would fake a REAL frame: a null decode yields the zero Frame,
 			// whose empty event/call_id no handler treats as a frame.
 			var want Frame
-			if g == "null" && f == want {
+			// DeepEqual, not ==: the filler-clip additions (leaf 03,
+			// Contract C3) put a slice (Clips) on Frame, which makes the
+			// struct non-comparable. Semantics unchanged — "null decodes
+			// to the zero frame" is exactly what DeepEqual reports.
+			if g == "null" && reflect.DeepEqual(f, want) {
 				continue
 			}
 			t.Fatalf("garbage %q decoded without error to %+v", g, f)

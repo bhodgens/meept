@@ -19,12 +19,27 @@ func buildVoiceFields() []Field {
 		NewTextField("voice.stt_provider", "stt provider", s.STTProvider),
 		NewTextField("voice.tts_provider", "tts provider", s.TTSProvider),
 		NewTextField("voice.filler", "filler lines (comma separated)", voiceJoinSlice(s.Filler)),
+		// C5 lane pools (plan 20261113-filler-clips leaf 05): the two
+		// list-shape overrides + the new farewell pool ride the same
+		// comma-separated text-field pattern as voice.filler (a
+		// non-empty list beats the scalar on resolution). voice.greeting
+		// is surfaced alongside them so all five lanes are editable from
+		// one block.
+		NewTextField("voice.greeting", "greeting line", s.GreetingLine),
+		NewTextField("voice.silence_prompt_lines", "silence prompt lines (comma separated)", voiceJoinSlice(s.SilencePromptLines)),
+		NewTextField("voice.fragment_clarify_lines", "fragment clarify lines (comma separated)", voiceJoinSlice(s.FragmentClarifyLines)),
+		NewTextField("voice.farewell", "farewell lines (comma separated)", voiceJoinSlice(s.Farewell)),
 		// Short-final gate + acoustic knobs (voice-peragent leaf 01
 		// parity): every global [voice] gate key rides here; the
 		// per-employee employee_leg rows are edited in the JSON5 file
 		// (the GUI surface for rows is tracked separately, same
 		// posture as the pre-leaf employee_leg block).
 		NewNumberField("voice.turn_confirm_ms", "turn confirm ms", s.TurnConfirmMs),
+		// Partial context warm (phase2-context-warm leaf 02, C6): the
+		// warm debounce window IS turn_confirm_ms above, so only the
+		// flag + token floor are separate knobs.
+		NewToggleField("voice.context_warm", "context warm (partials pre-warm the LLM cache)", s.ContextWarm),
+		NewNumberField("voice.context_warm_min_tokens", "context warm min tokens", s.ContextWarmMinTokens),
 		NewNumberField("voice.min_turn_words", "min turn words", s.MinTurnWords),
 		NewTextField("voice.exempt_phrases", "exempt phrases (comma separated)", voiceJoinSlice(s.ExemptPhrases)),
 		NewToggleField("voice.energy_gate", "energy gate", s.EnergyGate),
@@ -54,6 +69,7 @@ func buildVoiceFields() []Field {
 		NewTextField("voice.default_leg", "default leg (phone|local)", s.DefaultLeg),
 		NewTextField("voice.tts_model", "tts model", s.TTSModel),
 		NewTextField("voice.tts_voice", "tts voice", s.TTSVoice),
+		NewTextField("voice.tts_ref_audio", "tts clone reference audio path", s.TTSRefAudio),
 		NewTextField("voice.stt_model", "stt model", s.STTModel),
 		NewToggleField("voice.local.enabled", "local enabled", s.Local.Enabled),
 		NewTextField("voice.local.stt_provider", "local stt provider", s.Local.STTProvider),

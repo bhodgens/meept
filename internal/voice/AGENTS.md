@@ -7,8 +7,11 @@ sidecar contract lives here. Update both in the same commit per the
 root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
 (spec rev 3 + as-built), `docs/workflows/voice.md`,
 `docs/workflows/voicechild.md`. Plan trees:
-`docs/plans/20261102-voice-sidecar/` and
-`docs/plans/20261106-voice-local-leg/`.
+`docs/plans/20261102-voice-sidecar/`,
+`docs/plans/20261106-voice-local-leg/`, and
+`docs/plans/20261113-filler-clips-and-context-warm/` (filler clip cache +
+lane pools + farewell + partial context warm — Contracts C1-C6 live in
+that tree's master.md; the invariants below are the as-built form).
 
 ## Frames (C1): one JSON object per line, every frame carries call_id
 
@@ -33,8 +36,9 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   dispatch.
 - DTMF frames decode as a counted no-op - a voicemail-tree "press 1"
   must never error the call.
-- The child sends setup/prompt/interrupt/end/played; the daemon sends
-  say/clear/end. `played` (EventPlayed) is the child's end-of-turn AUDIO
+- The child sends setup/prompt/interrupt/end/played/clip_ready; the
+  daemon sends say/clear/end/clip_render. `played` (EventPlayed) is the
+  child's end-of-turn AUDIO
   marker: exactly one frame `{"call_id":...,"event":"played","last":true}`
   after the FINAL byte of a `last:true` say stream is written to the
   .out socket, never for a non-final stream, a barge-in-aborted stream,
@@ -45,7 +49,9 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   the sentence; filler/greeting lines (fact-free, config list) are the
   sole exception, emitted by the daemon talk loop (greeting on connect,
   filler immediately on each final prompt - order pinned by
-  TestTalkLoopGreetingAndFiller).
+  TestTalkLoopGreetingAndFiller). Every filler-class say may carry a
+  `clip_id` naming pre-rendered PCM (lane pools + clip cache: see
+  "Filler clip cache"); Text stays the transcript source either way.
 - The daemon sends ONE extended C1 `keys` line per call (voice-tierA
   leaf 03, internal/daemon/voice_keys.go) through `TextServer.SendRaw`
   right after the talk loop registers on setup: `stt_key`, `tts_key`,
@@ -82,7 +88,11 @@ root maintenance rule. User-facing docs: `docs/workflows/voice-sidecar.md`
   child decodes the raw line (KeysFrame String/LogValue redacts). The
   child constructs its real providers from this frame (C3 factories in
   cmd/meept-voice); a pre-Tier-A child that ignores unknown keys fields
-  keeps working (D4). A daemon-side `open` frame (local-leg CL1) now
+  keeps working (D4). The frame also carries `tts_ref_hash` (filler-clip
+  identity, plan 20261113-filler-clips C1): hex sha256 of the clone
+  reference audio, "" for a preset voice — sent always (no omitempty),
+  read ONLY for clip-key identity, never by a TTS request; see "Filler
+  clip cache". A daemon-side `open` frame (local-leg CL1) now
   precedes setup: the child answers open with setup, which arms the talk
   loop and triggers the keys emission.
 
@@ -797,7 +807,13 @@ One immutable rule with two halves:
   the talk-loop construction (silence trio + filler grace), and the
   open-frame construction (barge_in_rms) — no consumer re-implements
   precedence, and the TalkLoopConfig/LocalSpliceConfig SHAPES never
-  changed, only the VALUES fed them.
+  changed, only the VALUES fed them. The C5 lane pools extend the same
+  ladder to LIST keys (row list > row scalar > global list > global
+  scalar > default, a list counting as set only when NON-EMPTY) —
+  resolved in `voice.VoiceLanes` (`internal/voice/lanes.go`), consumed
+  by the talk loop via `voice.PickLine` and by the clip planner at
+  reload time against the LIVE config snapshot (see "Filler clip
+  cache, lane pools, farewell").
 - **Zero-config = byte-identical legacy — the pin, not the hope.** A
   config with no employee_leg acoustic rows and no leaf-01 gate knobs
   lands every value on today's global read, and the child-side gate
@@ -805,6 +821,203 @@ One immutable rule with two halves:
   old daemon line or a zero-config deployment reproduces the pre-leaf
   behavior exactly. Any change that makes a defaulted call behave
   differently from its pre-leaf self is a bug, not a feature.
+
+## Filler clip cache, lane pools, farewell (plan 20261113-filler-clips-and-context-warm phase 1; Contracts C1/C2/C3/C5)
+
+Context: every filler-class line (greeting, working-turn filler, silence
+nudge, fragment clarify, farewell) used to ride the LIVE TTS lane,
+blocking 0.7-4.8 s per synthesis and drifting the 3-second-clone voice's
+timbre on the shortest utterances. Phase 1 pre-renders every lane line
+once per (voice, model, text, reference-audio) and serves cached PCM.
+
+- **Clip key (C1, FROZEN):**
+  `hex(sha256("v1" \x1f text \x1f tts_vendor \x1f tts_model \x1f tts_voice \x1f hex(sha256(refHash))))`,
+  implemented once in `clipstore.ClipKey` (`internal/voice/clipstore/key.go`)
+  — consumers copy the formula through the function, never re-derive it.
+  `refHash` is the sha256 of the clone reference audio bytes (callers hash
+  once, ClipKey re-hashes to hex per the formula); nil/empty = the
+  preset/non-clone case (hash-of-zero-bytes inner hex). Any component
+  change flips the key = automatic invalidation + regeneration. The keys
+  frame carries `tts_ref_hash` (hex of the reference sha256; sent ALWAYS,
+  no omitempty, per the keys-wire convention) and the child
+  hex-decodes it back to the exact bytes the daemon planner fed ClipKey
+  (`voicechild.decodeTTSRefHash` pins byte agreement). `voice.tts_ref_audio`
+  feeds ONLY this identity — the qwen3 shim never carries reference audio
+  in a request — so two deployments sharing model+voice NAME but
+  different reference audio get different clip keys. Missing/unreadable
+  file: WARN once, "" identity (non-clone), never a failed call.
+- **Store (C2):** `$MEEPT_HOME/voice_clips/<clipKey>.pcm` (raw s16le at
+  the CANONICAL 16000 Hz rate — child adjudication A1: renders build
+  their ProviderConfig at 16k, never the call's negotiated rate, so a
+  PCMU@8k call can never poison the shared store; playback resamples
+  from `Meta.SampleRate`) + `<clipKey>.json`
+  `{key, text, vendor, model, voice, sample_rate, bytes, created_at}`.
+  Content-addressed, NO index file. The ONLY cache-hit condition is a
+  valid `<key>.pcm` whose length matches meta `bytes`; a corrupt/short
+  file = miss (delete, regenerate). Clip files carry audio only — no
+  secrets, no key material (the keys frame stays the only place TTS
+  material lives, in child memory).
+- **Frames (C3, all additive + omitempty):** a `say` may carry
+  `clip_id` (the 64-hex key for its Text); daemon -> child
+  `{"event":"clip_render","call_id":...,"clips":[{"key","text"}]}` capped
+  at 32 entries per frame (the planner shards larger sets); child ->
+  daemon `{"event":"clip_ready","key":...,"ok":true|false}` with `ok`
+  a `*bool` (explicit false distinguishable from absent, exactly like
+  `last`). Back-compat is the contract: an old child ignores
+  clip_id/clip_render/clip_ready and falls back to live synth (today's
+  byte-identical behavior); an old daemon never sends them. NO PCM ever
+  crosses C1 — clip frames carry hex keys + text only. The say frame's
+  TEXT stays the transcript source (R6): a clip is an audio-only
+  attribute of the existing `t.say()` lane, NEVER a second speech path
+  (echo_roster's single-origin invariant preserved).
+- **Talk loop:** `TalkLoopConfig.Identity` (`*ClipIdentity`) gates it.
+  When set, every filler-class say (greeting, filler, silence nudge,
+  fragment clarify, fallback, farewell) goes through `sayClip` with
+  `clip_id = ClipKey(text, Vendor, Model, Voice, RefHash)`; live-content
+  turns NEVER carry clip_id; empty text / nil identity = no clip_id
+  (byte-identical frame). The INFO filler/nudge/clarify/farewell lines
+  carry `lane` + `clip` (true iff Identity != nil). A child store HIT
+  replaces the provider call ENTIRELY (zero Speak, adjudication A2) and
+  rides the exact same playback lane — pacing, barge-in clear, and the
+  `played` edge are untouched because the swap happens at the reader,
+  upstream of playbackStream. A miss / invalid key / open error falls
+  through to live `Speak(text)` byte-identically (no opportunistic
+  backfill — deliberately out of scope). `clip_render` entries the store
+  already has answer `clip_ready ok:true` with ZERO synth (idempotent
+  warm); misses render in the BACKGROUND at bounded concurrency on a
+  call-scoped ctx (the worker dies with pipeline teardown, never after).
+  A `clip_render` arriving BEFORE the keys frame queues (cap 256,
+  drop-oldest with a WARN) and drains once providers exist.
+- **Daemon planner (R3/R4, `internal/daemon/voice_clip_planner.go`):**
+  the diff-and-ship pass runs ONLY when the sidecar is actually live.
+  Gate: (a) a child connection is live (the pass mounts on routeFrame's
+  EventSetup branch, or reload re-plan iterates `Registry.Live()`);
+  (b) the resolved TTS identity is COMPLETE (vendor+model+voice all
+  non-empty after `voice.ResolveProfile`, byte-matching the C1 inputs);
+  (c) a voice employee owns the call (empty `voice.default_employee`
+  never gets a live registry row). With `voice.enabled=false` WireVoice
+  never constructs the wiring and NOTHING is generated or written —
+  `clipstore.NewStore` alone creates no dir; the store materializes only
+  inside a child `Put`. The daemon path is read-only (`store.Has`) plus
+  frame sends. The pass is fire-and-forget on the call's loop ctx: a
+  slow store diff never delays the keys frame or the talk loop, and a
+  failed pass WARNs and degrades the call to live synth — never a
+  teardown.
+- **Config reload:** `startClipReloadWatch` subscribes the planner to
+  the `daemon.reloaded` bus topic (subscription name
+  `voice-clip-reload`) — this is that topic's first production
+  subscriber. The handler re-reads config, republishes the LIVE [voice]
+  snapshot (`w.currentVoiceCfg()` — keys frame, clip identity, and lane
+  pools all read it after reload), and re-plans every live call on
+  existing connections. A failed re-read keeps the previous snapshot
+  (the daemon's keep-existing posture). Never blocks the reload path.
+- **Lane pools (C5, `internal/voice/lanes.go`):** every filler-class
+  line belongs to exactly one enumerable lane — greeting / filler /
+  silence / fragment / farewell — so the planner can pre-render ALL of
+  them. `VoiceLanes(cfg, employeeID)` resolves the five pools per
+  employee with the precedence ladder **row list > row scalar > global
+  list > global scalar > shipped default**, where a list counts as SET
+  only when non-empty (an empty list never masks a lower layer — that
+  is what keeps zero-config byte-identical: `voice.silence_prompt_lines`
+  / `voice.fragment_clarify_lines` ship empty so the existing scalars
+  keep binding; only the NEW `voice.farewell` pool ships non-empty:
+  `config.DefaultVoiceFarewellLines()` = ["Goodbye!", "Bye!", "Talk
+  soon."]). `PickLine(lanes, lane, cursor)` round-robins within a lane
+  with a per-lane cursor (the existing fillerIdx discipline); a nil
+  cursor takes the first line; the greeting special case is preserved
+  (empty greeting resolves to the first filler line; both empty = the
+  lane stays empty, the greeting is filler-class and NEVER hardcoded).
+  Finite configured pools only — every pool line is cacheable, there is
+  no free-form generated filler.
+- **Farewell rule (R5):** when the caller's FINAL utterance, whole-
+  normalized (case/punctuation-insensitive), matches the builtin bye
+  phrase set (`farewellPhrases`: bye, goodbye, see ya, see you, talk
+  later, later, that's all — a phrase embedded in a longer sentence
+  never matches; deliberately a cheap rule, no LLM), the loop speaks one
+  farewell-lane line as a FINAL (last:true) say with clip_id, cancels
+  any in-flight draft first (no LLM turn — the fragment-clarify skip
+  shape), then ends the call with reason `caller farewell`. The
+  last:true shape hands the child the turn-final flush + played-drain
+  guarantee so the goodbye audio completes before teardown; the farewell
+  say is written BEFORE the end frame in program order on the Run
+  goroutine. Exactly-once per call (`farewellSpoken` latch — a repeat
+  bye logs and never double-speaks; a failed send still latches). When
+  NO farewell line resolves (`farewellPoolConfigured` false — hand-built
+  callers with empty Lanes + FarewellLines), the rule NEVER fires and
+  "bye" rides the normal turn path byte-identically.
+
+## Partial context warm (plan 20261113-filler-clips-and-context-warm phase 2; Contracts C4/C6)
+
+STT partials (`last:false` prompt frames) already reach the daemon; phase
+2 spends them on planting the imminent turn's prefix in the provider
+prompt cache (and the llama.cpp KV slot under the session-affinity
+scope) so the final turn pays decode, not prefill.
+
+- **Opt-in, default OFF:** `voice.context_warm` false = the warmer is
+  never constructed and every entry point is a pure no-op (the partial
+  hook costs one atomic load of `ContextWarmRouting()` before doing ANY
+  per-frame work) — byte-identical dispatch. `voice.context_warm_min_tokens`
+  (default 60; <=0 falls back to 60) is the rough-token floor (3
+  chars/token heuristic over the rendered prefix) under which a partial
+  is never warmed — warming a trivial prefix is pointless traffic.
+  Global-only; no employee_leg override this wave.
+- **Debounce (`internal/voice/contextwarm.go`, self-contained in
+  package voice — NEVER imports internal/daemon):** per-call timer whose
+  window is the global `voice.turn_confirm_ms` snapshot (no per-employee
+  override this wave; 0/legacy mode = fixed 900 ms, the child's shipped
+  default) plus a 150 ms per-session fire
+  throttle (re-arms for the remainder instead of dropping the text).
+  Latest partial wins (gen bump replaces the pending timer); at most one
+  IN-FLIGHT warm per session — a new fire cancels the previous request
+  ctx (replace-discard, the cheap client-side backstop; the llm lane is
+  cap-1 replace-discard anyway). A final (last:true) prompt
+  (`RouteFinal`) or call end (`RouteEnd`, from releaseCall) cancels the
+  pending timer AND the in-flight request ctx — no zombie request ever
+  outlives the superseding turn or the call. No I/O under the mutex
+  (mutexio): BuildPrefix and Warm run after unlock, on the debounce
+  goroutine's clock, never on the frame path. Partial text is NEVER
+  logged above DEBUG (length-only emissions).
+- **Routing seam:** the daemon registers its warmer via
+  `voice.SetContextWarmRouting` and `VoiceWiring.routeFrame` calls the
+  nil-safe package entry points `RoutePartial` / `RouteFinal` /
+  `RouteEnd`. Stop unwinds by re-registering nil (only if it still owns
+  the slot).
+- **Prefix identity is the whole feature** (daemon closures in
+  `internal/daemon/voice_wiring_contextwarm.go`): BuildPrefix renders
+  the EXACT system+history the imminent turn sends (voice persona
+  override + guided-intake extension + global rules + moment block,
+  live conversation history, the partial as the trailing user row) with
+  the SAME alias and the SAME session-affinity scope. The scope is the
+  turn's ACCOUNTING id — the voice lane's conversation id (`w.sessionFor(inst).ID`,
+  matching RunOnce's conversationID -> WithTaskScope -> prompt_cache_key
+  + affinity header); a divergence on ANY field silently kills the cache
+  hit, which is the entire feature, and costs only the hit — never the
+  turn. Warm forwards to the concrete client the real turn rides
+  (session agent-loop chatter unwrapped ContextFirewall ->
+  ProviderManager primary -> `*llm.Client`), so the warm lands on the
+  same endpoint + affinity lane. `warmDispatcher` is the lane every
+  client class implements (Anthropic/Codex have explicit no-op twins)
+  so the closure never type-switches providers.
+- **`llm.Client.Warm` (C4, `internal/llm/warm.go`):** non-streaming,
+  max_tokens=1, built through the SAME buildChatRequest serialization
+  path a real turn uses (system-prompt cache boundary, message
+  rendering, stable tool order, prompt_cache_key, affinity header).
+  The completion is discarded and NEVER logged. R8 error posture: any
+  failure — transport, `*QuotaResetError`, 4xx, timeout, panic — is
+  DEBUG-logged and swallowed. Warm participates in NONE of the loop
+  machinery: no short-retry budget, no recordAliasFailure, no endpoint/
+  alias block arming, no budget-gate consumption, no quota parking, no
+  semantic-cache put, no `llm_calls` row, no metrics.Store record, no
+  tier signal, no WS relay, no session message. It NEVER starts tools
+  or an employee turn and never returns an error by design. One
+  dedicated in-flight lane per client (cap 1, replace-discard); it
+  never queues behind the real turn's slot gate; a hung warm is bounded
+  by an internal deadline so the lane always releases. The HTTP dispatch
+  bypasses doRequest ON PURPOSE (doRequest owns the slot gate, pacer,
+  Error-level logs, and metrics rows).
+- **E2E:** hermetic suites `e2e/suites/voice_clips` and
+  `e2e/suites/context_warm` (manifest-registered; gates
+  `make e2e-fast-area AREA=voice_clips` / `AREA=context_warm`).
 
 ## Operator telemetry (voice-events tree)
 
