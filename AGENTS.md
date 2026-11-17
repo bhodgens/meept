@@ -374,6 +374,25 @@ byte-identical. TTFT (`llm_calls.ttft_ms`, migration v9 via
 captureFirstDelta) is -1 when unmeasured — non-streaming, cache hits,
 and errors never write 0.
 
+### Routing selection chain: quality, posture, admission, spillway
+
+Full rules live in `internal/llm/AGENTS.md` (sovereign-router-parity
+tree); user-facing map: `docs/workflows/llm-routing-quality.md`. Short
+form: the pre-dispatch chain is THREE filters in fixed order (posture ->
+quality -> admission), first non-Allow verdict binds, and it never
+reorders the frozen precedence (quota > endpoint > alias > sticky).
+Every dimension is opt-in: absent `quality`/`data_posture`/`budget.mode`/
+`price_group` config is byte-identical legacy behavior (flag-off golden
+gates it). Admission fires pre-dispatch in all three ProviderManager
+rotation loops (`*ContextTooSmallError`, NonRetryable, never parked);
+shadow routing (`ResolveShadow`, RPC `llm.route.shadow`) is read-only by
+construction — zero ledger/budget/health/pin mutation. Sticky pins carry
+difficulty (`StickyPins` is `map[string]StickyPin`; releases only on a
+strictly-rising difficulty from the pure `DeriveDifficulty` table);
+`ErrToolCallInvalid` keeps the empty/refusal ordering and the bare-
+sentinel pointer rule. Advisory budget is NOT a chain filter; it binds
+at the client budget gate and the tier steer.
+
 ### Voice sidecar (phone channel + local leg)
 
 Full rules live in `internal/voice/AGENTS.md` (frames, sockets,
