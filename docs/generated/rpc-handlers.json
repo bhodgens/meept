@@ -447,73 +447,73 @@
     "topic": "kanban.board.create",
     "handler": "h.handleBoardCreate",
     "file": "internal/rpc/kanban.go",
-    "line": 138
+    "line": 141
   },
   {
     "topic": "kanban.board.list",
     "handler": "h.handleBoardList",
     "file": "internal/rpc/kanban.go",
-    "line": 137
+    "line": 140
   },
   {
     "topic": "kanban.card.assign",
     "handler": "h.handleCardAssign",
     "file": "internal/rpc/kanban.go",
-    "line": 146
+    "line": 149
   },
   {
     "topic": "kanban.card.comment",
     "handler": "h.handleCardComment",
     "file": "internal/rpc/kanban.go",
-    "line": 147
+    "line": 150
   },
   {
     "topic": "kanban.card.create",
     "handler": "h.handleCardCreate",
     "file": "internal/rpc/kanban.go",
-    "line": 143
+    "line": 146
   },
   {
     "topic": "kanban.card.get",
     "handler": "h.handleCardGet",
     "file": "internal/rpc/kanban.go",
-    "line": 142
+    "line": 145
   },
   {
     "topic": "kanban.card.list",
     "handler": "h.handleCardList",
     "file": "internal/rpc/kanban.go",
-    "line": 141
+    "line": 144
   },
   {
     "topic": "kanban.card.move",
     "handler": "h.handleCardMove",
     "file": "internal/rpc/kanban.go",
-    "line": 144
+    "line": 147
   },
   {
     "topic": "kanban.card.takeover",
     "handler": "h.handleCardTakeover",
     "file": "internal/rpc/kanban.go",
-    "line": 145
+    "line": 148
   },
   {
     "topic": "kanban.card.timeline",
     "handler": "h.handleCardTimeline",
     "file": "internal/rpc/kanban.go",
-    "line": 148
+    "line": 151
   },
   {
     "topic": "kanban.column.list",
     "handler": "h.handleColumnList",
     "file": "internal/rpc/kanban.go",
-    "line": 139
+    "line": 142
   },
   {
     "topic": "kanban.column.set_wip",
     "handler": "h.handleColumnSetWIP",
     "file": "internal/rpc/kanban.go",
-    "line": 140
+    "line": 143
   },
   {
     "topic": "kanban.pair.exchange",
@@ -531,7 +531,7 @@
     "topic": "kanban.reconcile.now",
     "handler": "h.handleReconcileNow",
     "file": "internal/rpc/kanban.go",
-    "line": 149
+    "line": 152
   },
   {
     "topic": "ledger.query",
@@ -544,6 +544,12 @@
     "handler": "h.handleState",
     "file": "internal/rpc/ledger.go",
     "line": 136
+  },
+  {
+    "topic": "llm.route.shadow",
+    "handler": "h.handleShadowRoute",
+    "file": "internal/rpc/shadow_route.go",
+    "line": 89
   },
   {
     "topic": "mcp.list",
