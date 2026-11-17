@@ -404,16 +404,16 @@ Repo policy (AGENTS.md e2e policy): **new feature tests go in the hermetic e2e t
 |-----|-------------|-------|--------|
 | R1 | cheap model with low `quality.code` loses to a pricier high-quality model on a code turn; quality-absent models keep legacy cost order | sovereign-parity | PENDING |
 | R1 | quality floor: difficulty 5 with only score-2 candidates surfaces `ErrQualityFloor`, not a completed turn | sovereign-parity | PENDING |
-| R2 | request whose estimated input exceeds the model context is rejected pre-dispatch with `ErrContextTooSmall`; no upstream request is made | sovereign-parity | PENDING |
-| R2 | `ContextLimit == 0` (unknown) allows the request through | sovereign-parity | PENDING |
+| R2 | request whose estimated input exceeds the model context is rejected pre-dispatch with `ErrContextTooSmall`; no upstream request is made | sovereign-parity | VALIDATED 2026-11-17 |
+| R2 | `ContextLimit == 0` (unknown) allows the request through | sovereign-parity | VALIDATED 2026-11-17 |
 | R3 | a prompt containing an AWS-shaped key never routes to a `public_only` or `non_sensitive` model | sovereign-parity | PENDING |
 | R3 | posture absent = `private`; sensitive routing is byte-identical to pre-change | sovereign-parity | PENDING |
 | R4 | shadow decision returns the same model the live path would pick, and writes no `llm_calls` row | sovereign-parity | PENDING |
 | R4 | shadow does not consume budget, does not mutate alias health, does not create a sticky pin | sovereign-parity | PENDING |
 | R5 | a 401 on one model blocks the ACCOUNT (sibling model on the same provider is skipped) | sovereign-parity | PENDING |
 | R5 | a 400 (request fault) blocks nothing | sovereign-parity | PENDING |
-| R6 | `mode: steer` with the daily cost cap exceeded completes the turn and emits `budget_advisory` | sovereign-parity | PENDING |
-| R6 | `mode: enforce` (default) is byte-identical to today: `BudgetExceededError`, turn refused | sovereign-parity | PENDING |
+| R6 | `mode: steer` with the daily cost cap exceeded completes the turn and emits `budget_advisory` | sovereign-parity | VALIDATED 2026-11-17 |
+| R6 | `mode: enforce` (default) is byte-identical to today: `BudgetExceededError`, turn refused | sovereign-parity | VALIDATED 2026-11-17 |
 | R7 | a new user message classified above the pinned level releases the pin and re-pins at the rotation head | sovereign-parity | PENDING |
 | R7 | difficulty derives from existing Intent signals (no second classifier call) and difficulty 0 keeps R7 inert | sovereign-parity | PENDING |
 | R8 | a tool call naming an unoffered function is rejected with `ErrToolCallInvalid` and never reaches the executor | sovereign-parity | PENDING |
@@ -423,6 +423,10 @@ Repo policy (AGENTS.md e2e policy): **new feature tests go in the hermetic e2e t
 | ALL | flag-off control: with all nine features unconfigured, the routing decision stream is byte-identical to `main` | sovereign-parity | PENDING |
 
 Gate leaf: `00T-gate-tests.md`. Implementation leaves dispatch only after the gate reaches TESTS_VALIDATED.
+
+### Gate delta log
+
+- 2026-11-17 (issue #155 close-out): R2 (both rows) + R6 (both rows) flipped PENDING -> VALIDATED after a fresh `-count=1` confirmation on the merged tree: `TestAdmission_ContextTooSmallRejectsPreDispatch`, `TestAdmission_UnknownContextAllows`, `TestBudgetSteer_CompletesOverCapWithAdvisory`, `TestBudgetSteer_EnforceIsDefault`, `TestFlagOffByteIdenticalControl` all PASS (`-tags e2e -p 2 -run 'TestAdmission_ContextTooSmallRejectsPreDispatch|TestAdmission_UnknownContextAllows|TestBudgetSteer_CompletesOverCapWithAdvisory|TestBudgetSteer_EnforceIsDefault|TestFlagOff' ./e2e/suites/sovereign-parity/`), `go test -p 2 ./internal/llm/ -count=1` clean, `go build ./internal/... ./cmd/...` clean. Fix commits already landed (waiting for parent review of this docs flip only): `755bfecc` (admission gate bound on the bare-client paths — `internal/llm/client.go` `Client.Chat` + `ChatWithProgress`, plus the loop-end verdict in `ProviderManager.ChatWithProgress`, `internal/llm/provider_manager.go`; R2 root cause: single-provider daemons and aux lanes never pass the PM rotation loops where the gate was wired), `bfa66daf` (gate fixtures/rulings 26-27 — `e2e/suites/sovereign-parity/admission_test.go`, `budget_test.go`, `suite_test.go`; R6 root causes: the async-ack "parked" terminal was mistaken for the turn outcome — `waitTerminal` now skips it per `cmd/meept/chat_async.go`, and T16's enforce-world park IS the terminal via `waitTerminalAny`), `17fc00f8` + `2f34d16d` (R6 product lanes — `internal/llm/budget.go` mode gate `applyModeGateLocked` so steer never sets Exceeded and emits one `budget_advisory` per breach episode, `internal/daemon/components.go` publisher bridging onto `agent.quota_wait`, enforce default byte-identical). Flag-off control (`TestFlagOffByteIdenticalControl`) green throughout; no production file was modified by this close-out — docs flip only.
 
 ## Child Index
 
