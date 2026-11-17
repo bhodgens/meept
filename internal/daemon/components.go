@@ -4603,6 +4603,14 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				SessionStore: c.SessionStore,
 			})
 			c.ReviewManager = reviewManager
+			// #137: the reviewer lane resolves the step's session workdir
+			// through this store (resolveStepWorkingDir). Without it the
+			// resolver returns ("", none) on every real review and the
+			// workdir inheritance shipped only in tests
+			// (review_workdir_test.go injects the store). Late-armed via
+			// the setter, the same pattern the TacticalScheduler uses
+			// just below — the store handle is fully built by this point.
+			reviewManager.SetSessionStore(c.SessionStore)
 
 			// Create escalation manager for automatic re-planning on failures
 			c.EscalationManager = agent.NewEscalationManager(agent.EscalationManagerConfig{
