@@ -813,6 +813,20 @@ type AgentLoop struct {
 	// gate fail-opens. Writes go through setTurnPosturePrompt.
 	turnPosturePrompt atomic.Pointer[string]
 
+	// armedTurnDifficulty carries THIS turn's classified routing difficulty
+	// (sovereign-router-parity leaf 07 / Contract C11, R7). The dispatcher
+	// projects the turn's Intent signals (Intent.RequiresPlanning +
+	// Intent.SuggestedMode + input length) through llm.DeriveDifficulty and
+	// arms it via ArmTurnDifficulty at RouteToAgent / direct-mode entry —
+	// the same one-shot seam shape as ApplyRequestModel. reasoningCycle's
+	// FIRST alias resolve consumes it via ResolveForAliasDifficulty; zero
+	// (unset) keeps R7 fully inert — byte-identical to the pre-leaf
+	// resolve. It is a plain field under l.mu (the resolver-facing read is
+	// on the turn goroutine only, never from a resolver-held-lock closure,
+	// so no atomic is needed — unlike turnPosturePrompt which the resolver
+	// reads deep inside its own critical section).
+	armedTurnDifficulty int
+
 	// Conversation management
 	conversations *ConversationStore
 
@@ -2211,6 +2225,63 @@ func (l *AgentLoop) ApplyRequestModel(modelRef string) {
 		"agent_id", l.agentID,
 		"model_ref", modelRef,
 	)
+}
+
+// ArmTurnDifficulty arms THIS turn's classified routing difficulty
+// (sovereign-router-parity leaf 07 / Contract C11, R7) on the loop via the
+// same one-shot seam shape as ApplyRequestModel: set before the turn's
+// reasoning cycle runs, consumed by the FIRST alias resolve, never persisted.
+// Zero (or a negative level) is a no-op — an unclassified turn keeps R7
+// fully inert (no arm, byte-identical resolve). Thread-safe (l.mu).
+func (l *AgentLoop) ArmTurnDifficulty(difficulty int) {
+	if difficulty <= 0 {
+		return
+	}
+	l.mu.Lock()
+	l.armedTurnDifficulty = difficulty
+	l.mu.Unlock()
+}
+
+// consumeTurnDifficulty reads and clears the armed per-turn difficulty for
+// this resolve. The one-shot contract mirrors the override pin: the value
+// arms for the turn's FIRST alias resolution (the sticky pin's creation or
+// release decision), then clears so later tool-loop iterations and the next
+// turn stay unclassified (difficulty 0 = inert). Callers on the turn
+// goroutine only.
+func (l *AgentLoop) consumeTurnDifficulty() int {
+	l.mu.Lock()
+	d := l.armedTurnDifficulty
+	l.armedTurnDifficulty = 0
+	l.mu.Unlock()
+	return d
+}
+
+// ResolveTurnModel runs the session loop's alias resolution at the DISPATCH
+// clock (sovereign-router-parity leaf 07, R7): async task dispatch never
+// routes through this loop's reasoning cycle (the step job runs on a
+// task-scoped loop that may hold no alias), so without this the escalation
+// turn's difficulty never reaches the sticky predicate keyed by THIS
+// session. The resolve consumes the one-shot armed difficulty and applies
+// the frozen C8 semantics — a pin created for an easier turn releases and
+// re-pins at the rotation head with reason sticky_difficulty_increase, and
+// the updated pin serves the session's NEXT turn. No alias on the loop (or
+// no resolver) is a no-op. Resolve errors are DEBUG-logged, never fatal:
+// routing observability and pin state must not break the dispatch.
+func (l *AgentLoop) ResolveTurnModel() {
+	l.mu.RLock()
+	ref := l.modelRef
+	sid := l.sessionID
+	l.mu.RUnlock()
+	if ref == "" || l.resolver == nil || !l.resolver.HasAlias(ref) {
+		return
+	}
+	if _, err := l.resolver.ResolveForAliasDifficulty(ref, sid, l.consumeTurnDifficulty()); err != nil {
+		l.logger.Debug("Dispatch-time turn model resolve failed",
+			"alias", ref,
+			"session_id", sid,
+			"error", err,
+		)
+	}
 }
 
 // applyExposureGate is the warn-once capability-gate downgrade for the
@@ -5374,7 +5445,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		l.modelMu.Unlock()
 
 		if l.modelRef != "" && l.resolver != nil && l.resolver.HasAlias(l.modelRef) {
-			modelConfig, err := l.resolver.ResolveForAlias(l.modelRef, l.sessionID)
+			modelConfig, err := l.resolver.ResolveForAliasDifficulty(l.modelRef, l.sessionID, l.consumeTurnDifficulty())
 			if err != nil {
 				l.logger.Warn("Alias resolution failed, using default",
 					"alias", l.modelRef,
@@ -7008,7 +7079,7 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 
 		// Resolve model for this attempt
 		if l.modelRef != "" && l.resolver != nil && l.resolver.HasAlias(l.modelRef) {
-			modelConfig, err := l.resolver.ResolveForAlias(l.modelRef, l.sessionID)
+			modelConfig, err := l.resolver.ResolveForAliasDifficulty(l.modelRef, l.sessionID, l.consumeTurnDifficulty())
 			if err != nil {
 				// Endpoint-blocked parking (tree 02 leaf 04 D10 + tree
 				// 03 leaf 02 D9 composition): every alias candidate sits

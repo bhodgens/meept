@@ -449,6 +449,35 @@ type AliasEntry struct {
 	timeoutArmed bool
 }
 
+const (
+	// ReasonStickyRequest is the reason written when a healthy existing pin
+	// serves the caller.
+	ReasonStickyRequest = "sticky_request"
+	// ReasonStickyRequestNew is the reason written when the caller is
+	// (re-)pinned at the rotation position.
+	ReasonStickyRequestNew = "sticky_request_new"
+	// ReasonStickyDifficultyIncrease is the reason written when the
+	// caller's per-turn difficulty rose ABOVE the level the pin was
+	// created for (Contract C8, R7): the pin releases and re-pins at the
+	// rotation head through the SAME re-pin block as the failure paths.
+	ReasonStickyDifficultyIncrease = "sticky_difficulty_increase"
+)
+
+// StickyPin is one sticky-pinned caller's rotation position plus the
+// routing context the pin was created under (Contract C8, sovereign-
+// router-parity leaf 07). Index keeps the pre-existing semantics (an
+// alias.Models rotation index; resolve identity at release time via the
+// alias). Difficulty records the classified difficulty (Contract C11,
+// 0 = unclassified) the pin was created FOR: a later resolve whose
+// difficulty rises strictly above it releases the pin (R7). CreatedAt is
+// the write instant (diagnostics only — the pin has NO TTL by contract;
+// sticky state is a cache-affinity optimisation, not correctness state).
+type StickyPin struct {
+	Index      int
+	Difficulty int
+	CreatedAt  time.Time
+}
+
 // AliasHealth tracks the health and rotation state of an alias.
 //
 // Locking convention (issue #29): Resolver.mu is the SINGLE lock guarding
@@ -461,7 +490,7 @@ type AliasHealth struct {
 	ConsecutiveFails int
 	LastFailure      time.Time
 	CooldownUntil    time.Time
-	StickyPins       map[string]int
+	StickyPins       map[string]StickyPin
 	// RevertAt arms default-model reversion: when non-zero, rotation reverts
 	// to AliasEntry.DefaultModel after this deadline (armed by
 	// RecordAliasFailure when default_model is configured).

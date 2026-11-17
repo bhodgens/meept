@@ -1090,6 +1090,17 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 			reply, err = h.startCollaborationSession(ctx, result, conversationID)
 		case h.dispatcher.ShouldDispatchAsync(result) && result.Task != nil:
 			handlerCase = "async_dispatch"
+			// Per-turn routing difficulty (sovereign-router-parity leaf 07,
+			// R7): an async turn never re-enters the session loop's
+			// reasoning cycle, so the session's sticky predicate would
+			// never see this turn's classified difficulty. The dispatcher
+			// arms + resolves on the SAME session loop the interactive
+			// path uses (resolveAgent) at the DISPATCH clock — the pin
+			// releases (sticky_difficulty_increase) when the escalation
+			// rose above the pinned level, and the updated pin serves the
+			// session's next turn. No-op without a loop, alias, or intent
+			// (R7 inert).
+			h.dispatcher.ArmSessionTurnDifficulty(result, conversationID)
 			// LEGACY (async-turn-migration leaf 07): headless benchmark
 			// clients (source_client prefix "meept-bench") used to be
 			// force-switched into synchronous dispatch so the chat RPC
@@ -1729,6 +1740,12 @@ func (h *ChatHandler) publishPlanRequest(result *DispatchResult, sessionID strin
 		// carried must reach specialist execution even on async task
 		// dispatch, not just the interactive RouteToAgent path.
 		RequestModel: result.RequestModel,
+		// Per-turn routing difficulty (leaf 07, R7): project the
+		// dispatch's Intent onto the frozen C11 table. Lands on the
+		// task's turn_difficulty metadata (StrategicPlanner.Plan) so the
+		// step-job processor arms the executing loop one-shot — the
+		// async twin of RouteToAgent's interactive arm.
+		Difficulty: llm.DeriveDifficulty(result.Intent.SuggestedMode, result.Intent.RequiresPlanning, len(result.OriginalInput)),
 	}
 
 	// Session execution context (quickplan-mode leaf 02 / master Contract

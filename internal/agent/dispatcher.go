@@ -3284,6 +3284,12 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 	// runs the alias/default chain).
 	agent.ApplyRequestModel(result.RequestModel)
 
+	// Per-turn routing difficulty (sovereign-router-parity leaf 07, R7):
+	// project the classified Intent onto the frozen C11 table and arm the
+	// loop's one-shot seam. reasoningCycle's FIRST alias resolve consumes
+	// it (sticky pin create/release); no intent = no arm = R7 inert.
+	d.armTurnDifficultyForLoop(agent, result.Intent, len(result.OriginalInput))
+
 	// Digest-aware guard fallback (2026-09-25 A5): arm the executing
 	// agent's reply guard with the session digest answer, so a catalog-dump
 	// reply on a context-bearing question is replaced with the digest
@@ -3389,6 +3395,51 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 	}
 
 	return finalResponse, nil
+}
+
+// armTurnDifficultyForLoop projects the dispatch's classified Intent onto
+// the loop's per-turn difficulty seam (sovereign-router-parity leaf 07 /
+// Contract C11, R7) and arms it via the loop's ONE-SHOT ArmTurnDifficulty
+// seam — the same slot as ApplyRequestModel. The projection is the frozen
+// C11 table (llm.DeriveDifficulty) over the values the dispatcher already
+// computed: no classifier call, no I/O. An intent-less result arms nothing
+// (the turn runs R7-inert, byte-identical).
+//
+// Scope: the INTERACTIVE dispatch paths arm here — RouteToAgent (before
+// RunOnceWithParts runs). The async task path (queue/employee runners in
+// internal/daemon) never arms: those loops resolve with difficulty 0 =
+// R7 inert, the leaf's opt-in posture (no Intent signal at their resolve
+// clock). Arming them later is additive and needs no resolver change.
+func (d *Dispatcher) armTurnDifficultyForLoop(loop *AgentLoop, intent *Intent, inputLen int) {
+	if loop == nil || intent == nil {
+		return
+	}
+	difficulty := llm.DeriveDifficulty(intent.SuggestedMode, intent.RequiresPlanning, inputLen)
+	loop.ArmTurnDifficulty(difficulty)
+}
+
+// ArmSessionTurnDifficulty runs the per-turn difficulty pipeline for an
+// ASYNC dispatched turn (sovereign-router-parity leaf 07, R7). The async
+// lane never re-enters the session loop's reasoning cycle (the step job
+// runs on a task-scoped loop that may hold no chat alias), so without this
+// the session's sticky predicate never sees the escalation's classified
+// level. The CHAT session loop is the pin owner: its alias (the chat
+// agent's model pin) is what the session's interactive turns resolve
+// through, so the dispatch-clock resolve runs the frozen C8 predicate on
+// the SAME key — a pin created for an easier turn releases and re-pins at
+// the rotation head with reason sticky_difficulty_increase, and the
+// updated pin serves the session's next turn. No chat loop, alias, or
+// intent is a no-op (R7 inert).
+func (d *Dispatcher) ArmSessionTurnDifficulty(result *DispatchResult, conversationID string) {
+	if d == nil || result == nil || result.Intent == nil || conversationID == "" {
+		return
+	}
+	loop := d.resolveAgent(config.AgentIDChat, conversationID)
+	if loop == nil {
+		return
+	}
+	d.armTurnDifficultyForLoop(loop, result.Intent, len(result.OriginalInput))
+	loop.ResolveTurnModel()
 }
 
 // handlePlatformIntrospection returns platform capabilities directly.

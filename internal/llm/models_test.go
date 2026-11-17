@@ -102,10 +102,10 @@ func TestAliasHealth_ReleasePinsForModel(t *testing.T) {
 		},
 	}
 	health := &AliasHealth{
-		StickyPins: map[string]int{
-			"session-on-glm":   0,
-			"session-on-llama": 1,
-			"session-stale":    7, // beyond the list
+		StickyPins: map[string]StickyPin{
+			"session-on-glm":   {Index: 0},
+			"session-on-llama": {Index: 1},
+			"session-stale":    {Index: 7}, // beyond the list
 		},
 	}
 

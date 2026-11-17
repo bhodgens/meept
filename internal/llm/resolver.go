@@ -685,6 +685,18 @@ func (r *Resolver) FindByProvider(providerID string) []*ModelConfig {
 // When callerKey is non-empty and BalancedStickyRequests is true, the caller
 // is pinned to a single model within the alias.
 func (r *Resolver) ResolveForAlias(aliasName string, sessionID string) (*ModelConfig, error) {
+	return r.ResolveForAliasDifficulty(aliasName, sessionID, 0)
+}
+
+// ResolveForAliasDifficulty is ResolveForAlias with the per-turn routing
+// difficulty (Contract C11, sovereign-router-parity leaf 07). The parameter
+// is the narrowest request-scoped channel: model resolution happens BEFORE
+// any chat call exists, so a ChatOption physically cannot reach the
+// resolver here — leaf 05's resolve-time seam precedent (SetResolvePostureContext)
+// would add shared resolver state for a value the caller already holds.
+// difficulty 0 (= DeriveDifficulty inert value: unclassified turn, no
+// Intent signal) keeps R7 fully inert — byte-identical to ResolveForAlias.
+func (r *Resolver) ResolveForAliasDifficulty(aliasName string, sessionID string, difficulty int) (*ModelConfig, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -700,7 +712,7 @@ func (r *Resolver) ResolveForAlias(aliasName string, sessionID string) (*ModelCo
 	// to a failed model releases its pin and re-pins to a healthy model,
 	// while callers pinned to unaffected models keep their pins.
 	if alias.BalancedStickyRequests && sessionID != "" {
-		return r.resolveStickyCaller(alias, aliasName, health, sessionID, now), nil
+		return r.resolveStickyCaller(alias, aliasName, health, sessionID, now, difficulty), nil
 	}
 
 	reverted := false
@@ -1211,11 +1223,11 @@ func (h *AliasHealth) releasePinsForModel(alias *AliasEntry, providerID, modelID
 	if providerID == "" && modelID == "" {
 		return
 	}
-	for caller, pinned := range h.StickyPins {
+	for caller, pin := range h.StickyPins {
 		// Pins store rotation indexes; resolve identity via the alias at
 		// release time. Entries pointing past the list are stale and dropped.
-		if pinned >= 0 && pinned < len(alias.Models) {
-			m := alias.Models[pinned]
+		if pin.Index >= 0 && pin.Index < len(alias.Models) {
+			m := alias.Models[pin.Index]
 			if m.ProviderID == providerID && m.ModelID == modelID {
 				delete(h.StickyPins, caller)
 			}
@@ -1227,11 +1239,21 @@ func (h *AliasHealth) releasePinsForModel(alias *AliasEntry, providerID, modelID
 
 // resolveStickyCaller serves one ResolveForAlias call for a sticky alias.
 // It must be called with r.mu held. The caller either keeps an existing pin
-// (when the pinned model is healthy), or is (re-)pinned to the next healthy
-// rotation position. Always returns a model.
-func (r *Resolver) resolveStickyCaller(alias *AliasEntry, aliasName string, health *AliasHealth, callerKey string, now time.Time) *ModelConfig {
+// (when the pinned model is healthy AND the turn's difficulty has not risen
+// past the level the pin was created for), or is (re-)pinned to the next
+// healthy rotation position. Always returns a model.
+//
+// difficulty is the per-turn classified level (Contract C11; 0 =
+// unclassified = R7 inert). The release check runs INSIDE the sticky stage
+// — below quota/endpoint/alias blocks, never above the frozen precedence.
+func (r *Resolver) resolveStickyCaller(alias *AliasEntry, aliasName string, health *AliasHealth, callerKey string, now time.Time, difficulty int) *ModelConfig {
+	// difficultyReleased marks that THIS resolve released the caller's
+	// existing pin because the classified level rose above the pin's
+	// (R7) — the re-pin below then carries the sticky_difficulty_increase
+	// reason instead of sticky_request_new. One flag, one consumer.
+	difficultyReleased := false
 	if health.StickyPins == nil {
-		health.StickyPins = make(map[string]int)
+		health.StickyPins = make(map[string]StickyPin)
 	}
 
 	// Quota-aware pin selection: a pinned model whose credential is
@@ -1242,7 +1264,8 @@ func (r *Resolver) resolveStickyCaller(alias *AliasEntry, aliasName string, heal
 	// instead of deadlocking the resolve.
 	r.releaseQuotaBlockedPin(alias, health)
 
-	if pinnedIdx, ok := health.StickyPins[callerKey]; ok {
+	if pin, ok := health.StickyPins[callerKey]; ok {
+		pinnedIdx := pin.Index
 		switch {
 		case pinnedIdx >= len(alias.Models):
 			// Stale pin beyond the configured model list (config changed).
@@ -1254,10 +1277,21 @@ func (r *Resolver) resolveStickyCaller(alias *AliasEntry, aliasName string, heal
 			// auditor 2 finding 4; sticky aliases previously bypassed
 			// endpoint blocks entirely).
 			delete(health.StickyPins, callerKey)
+		case difficulty > pin.Difficulty:
+			// R7 (Contract C8, leaf 07): the caller's classified
+			// difficulty rose STRICTLY above the level the pin was
+			// created for. Release so the re-pin block below lands the
+			// caller on the rotation head — the cheap model pinned for
+			// an easy turn must not serve a hard one. Same-or-lower
+			// difficulty (and 0, unclassified) keeps the pin: only an
+			// increase releases. reason "sticky_difficulty_increase"
+			// rides the re-pin block's return.
+			delete(health.StickyPins, callerKey)
+			difficultyReleased = true
 		case !health.inCooldown(now) || !health.failedModelMatches(alias, pinnedIdx):
 			// The pinned model is still usable: either the alias is healthy
 			// or the active cooldown belongs to a different model.
-			return r.recordStickyDecision(alias, aliasName, pinnedIdx, "sticky_request")
+			return r.recordStickyDecision(alias, aliasName, pinnedIdx, ReasonStickyRequest)
 		default:
 			// Pinned model failed; release the pin so the caller re-pins to
 			// a healthy model below.
@@ -1265,7 +1299,10 @@ func (r *Resolver) resolveStickyCaller(alias *AliasEntry, aliasName string, heal
 		}
 	}
 
-	// (Re-)assign a pin. Start at the rotation position; if that position is
+	// (Re-)assign a pin — the ONE pin writer (T6: the quota/stale/endpoint/
+	// failed AND the R7 difficulty release all land here, so the
+	// one-full-lap caps apply to every release path identically).
+	// Start at the rotation position; if that position is
 	// the model currently failing, advance once so the new pin lands on a
 	// healthy candidate.
 	nextIdx := health.CurrentIndex % len(alias.Models)
@@ -1308,9 +1345,23 @@ func (r *Resolver) resolveStickyCaller(alias *AliasEntry, aliasName string, heal
 			)
 		}
 	}
-	health.StickyPins[callerKey] = nextIdx
+	// The new pin records the difficulty it was created FOR (Contract C8):
+	// a later resolve releases it only when the caller's difficulty rises
+	// strictly above THIS value. 0 (unclassified) can never be released by
+	// the difficulty predicate — inert by construction.
+	health.StickyPins[callerKey] = StickyPin{
+		Index:      nextIdx,
+		Difficulty: difficulty,
+		CreatedAt:  now,
+	}
 	health.CurrentIndex = (nextIdx + 1) % len(alias.Models)
-	return r.recordStickyDecision(alias, aliasName, nextIdx, "sticky_request_new")
+	// A released-by-difficulty caller re-pins with the R7 reason; every
+	// other fresh pin keeps the legacy vocabulary.
+	reason := ReasonStickyRequestNew
+	if difficultyReleased {
+		reason = ReasonStickyDifficultyIncrease
+	}
+	return r.recordStickyDecision(alias, aliasName, nextIdx, reason)
 }
 
 // hasEndpointBlocks reports whether the resolver currently holds any live
@@ -1334,8 +1385,8 @@ func (r *Resolver) releaseQuotaBlockedPin(alias *AliasEntry, health *AliasHealth
 	if !r.quotaEnabled() || len(alias.Models) == 0 {
 		return
 	}
-	for caller, pinned := range health.StickyPins {
-		if pinned >= 0 && pinned < len(alias.Models) && r.isQuotaBlocked(health, alias.Models[pinned]) {
+	for caller, pin := range health.StickyPins {
+		if pin.Index >= 0 && pin.Index < len(alias.Models) && r.isQuotaBlocked(health, alias.Models[pin.Index]) {
 			delete(health.StickyPins, caller)
 		}
 	}

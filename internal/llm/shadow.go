@@ -182,7 +182,7 @@ func (r *Resolver) shadowAliasDecision(req ShadowRequest, alias *AliasEntry, hea
 	// sentinels — shadow reports that as no selection, not an error).
 	winIdx := -1
 	if alias.BalancedStickyRequests && req.SessionID != "" {
-		winIdx = r.shadowStickyWinner(alias, health, req.SessionID, now)
+		winIdx = r.shadowStickyWinner(alias, health, req.SessionID, now, req.Difficulty)
 	} else if idx, ok := r.shadowRotationWinner(alias, health, req.SessionID, now); ok {
 		winIdx = idx
 	}
@@ -241,25 +241,33 @@ func (r *Resolver) shadowAliasDecision(req ShadowRequest, alias *AliasEntry, hea
 // shadowStickyWinner simulates resolveStickyCaller WITHOUT any of its
 // writes: an existing pin is inspected (never released, never rewritten) and
 // the new-pin ladder is computed from the current cursor without storing the
-// pin or advancing CurrentIndex. Unlike the rotation path, the live sticky
+// pin or advancing CurrentIndex. difficulty is the preview's classified
+// level (Contract C11): a level above the pin's mirrors the live R7
+// release (the pin falls through to the new-pin ladder) — read-only, like
+// every gate here. Unlike the rotation path, the live sticky
 // path always returns a model (it pins the rotation position even when every
 // candidate is blocked), so ok is always true for a non-empty alias.
 // Callers hold r.mu (read).
-func (r *Resolver) shadowStickyWinner(alias *AliasEntry, health *AliasHealth, sessionID string, now time.Time) int {
+func (r *Resolver) shadowStickyWinner(alias *AliasEntry, health *AliasHealth, sessionID string, now time.Time, difficulty int) int {
 	n := len(alias.Models)
 	cur := 0
 	if health != nil {
 		cur = health.CurrentIndex % n
 	}
 
-	// Existing pin: the live path serves it while it is healthy — same
-	// health gates, evaluated read-only.
+	// Existing pin: the live path serves it while it is healthy AND the
+	// preview's difficulty has not risen above the pin's level — same
+	// health gates, evaluated read-only (R7's release runs INSIDE the
+	// sticky stage in the live path; the mirror reads it as a keep/release
+	// question only, never a write).
 	if health != nil && health.StickyPins != nil {
-		if pinnedIdx, ok := health.StickyPins[sessionID]; ok && pinnedIdx >= 0 && pinnedIdx < n {
+		if pin, ok := health.StickyPins[sessionID]; ok && pin.Index >= 0 && pin.Index < n {
+			pinnedIdx := pin.Index
 			pm := alias.Models[pinnedIdx]
 			pinnedBlocked := r.isEndpointBlocked(health, pm) ||
 				(r.quotaEnabled() && r.isQuotaBlocked(health, pm))
-			if !pinnedBlocked && (!shadowInCooldown(health, now) || !health.failedModelMatches(alias, pinnedIdx)) {
+			if !pinnedBlocked && difficulty <= pin.Difficulty &&
+				(!shadowInCooldown(health, now) || !health.failedModelMatches(alias, pinnedIdx)) {
 				return pinnedIdx // live reason: sticky_request
 			}
 		}

@@ -11224,6 +11224,36 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 		p.turnJournal.OnStepStart(ctx, stepPayload.TaskID, conversationID, stepPayload.StepID, 0)
 	}
 
+	// Per-turn routing difficulty (sovereign-router-parity leaf 07,
+	// R7): the dispatch's classified level rides the task's
+	// turn_difficulty metadata (written by StrategicPlanner.Plan from
+	// the plan request). Arm the executing loop one-shot — the async
+	// twin of the dispatcher's RouteToAgent arm — so the step's FIRST
+	// alias resolve runs the sticky difficulty predicate. Unset
+	// metadata or a level <= 0 arms nothing (R7 inert). The arm is
+	// one-shot (consumeTurnDifficulty clears it on first use), so a
+	// shared loop never carries a stale level into later jobs. Read
+	// failure is warn-and-continue: routing difficulty must never
+	// block a step job.
+	if isStepJob && p.taskStore != nil {
+		if tk, tkErr := p.taskStore.GetByID(job.TaskID); tkErr == nil && tk != nil && len(tk.Metadata) > 0 {
+			var meta map[string]any
+			if mErr := json.Unmarshal(tk.Metadata, &meta); mErr == nil {
+				if dAny, ok := meta["turn_difficulty"]; ok {
+					switch dVal := dAny.(type) {
+					case float64:
+						agentLoop.ArmTurnDifficulty(int(dVal))
+					case int:
+						agentLoop.ArmTurnDifficulty(dVal)
+					}
+				}
+			} else {
+				p.logger.Warn("Failed to parse task metadata for turn difficulty",
+					"task_id", job.TaskID, "error", mErr)
+			}
+		}
+	}
+
 	response, err := agentLoop.RunOnce(ctx, prompt, conversationID)
 	if err != nil {
 		// Job-level quota surfacing (leaf 06): the primary loop parks quota
