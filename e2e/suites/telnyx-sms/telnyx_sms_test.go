@@ -60,8 +60,8 @@ func TestTelnyxSMSWebhookInboundAndDLR(t *testing.T) {
 		t.Fatalf("generate key: %v", err)
 	}
 
-	var finalized []telnyx.Message
-	var inbound []telnyx.Message
+	var finalized []vtelnyx.Message
+	var inbound []vtelnyx.Message
 
 	stubAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"data":{"id":"out-msg-1","to":[{"status":"queued"}]}}`))
@@ -84,8 +84,16 @@ func TestTelnyxSMSWebhookInboundAndDLR(t *testing.T) {
 			// The REAL verifier under test (internal/voice/telnyx).
 			return vtelnyx.VerifyWebhookSignature(body, headers, pub)
 		},
-		OnInbound:   func(m telnyx.Message) error { inbound = append(inbound, m); return nil },
-		OnFinalized: func(m telnyx.Message) error { finalized = append(finalized, m); attempt.OnFinalized(m); return nil },
+		OnInbound: func(m vtelnyx.Message) error { inbound = append(inbound, m); return nil },
+		// The webhook seams now carry the NORMALIZED voice/telnyx Message.
+		// The DLR feed routes through ResolvePending(providerMessageID,
+		// status) — the exact seam messaging_arming arms in production
+		// (ProviderMessageID is payload.id, the resolution key).
+		OnFinalized: func(m vtelnyx.Message) error {
+			finalized = append(finalized, m)
+			attempt.ResolvePending(m.ProviderMessageID, m.Status)
+			return nil
+		},
 	}
 	routes, err := httpx.NewMessagingRoutes(deps, nil)
 	if err != nil {
@@ -100,7 +108,9 @@ func TestTelnyxSMSWebhookInboundAndDLR(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	// 1. Inbound: signed message.received -> 200 + OnInbound fired.
+	// 1. Inbound: signed message.received -> 202 (the handler's processed
+	// code; 200 is reserved for the ack-noop/duplicate path per the
+	// messaging.go contract) + OnInbound fired.
 	inboundBody := []byte(`{"data":{"event_type":"message.received","payload":{"id":"inb-1","from":"+15550000255","to":"+15559999955","text":"reply yes","direction":"inbound","received_at":"2026-11-08T12:00:00Z"}}}`)
 	req, _ := http.NewRequest(http.MethodPost, srv.URL+routes.WebhookPath(), bytes.NewReader(inboundBody))
 	req.Header = signHeaders(t, priv, inboundBody)
@@ -108,8 +118,8 @@ func TestTelnyxSMSWebhookInboundAndDLR(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST inbound: %v", err)
 	}
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("inbound status = %d, want 200", resp.StatusCode)
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("inbound status = %d, want 202 (processed)", resp.StatusCode)
 	}
 	_ = resp.Body.Close()
 	if len(inbound) != 1 || inbound[0].Text != "reply yes" {
