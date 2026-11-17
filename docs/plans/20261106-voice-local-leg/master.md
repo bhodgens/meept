@@ -312,6 +312,8 @@ Simpler sibling of splice.RunSplice for the local leg:
 | 12 | Docs + AGENTS.md + spec amendment + graphs | docs/workflows/voice-sidecar.md, docs/workflows/voice.md, internal/voice/AGENTS.md, root AGENTS.md | 11 | E |
 | 13 | (Part 2, optional) TUI voice session command | internal/tui (command + audio shim) | 08 | F |
 
+> Note (2026-11-16): leaf 13-tui-voice.md is SUPERSEDED by 13a-tui-voice.md and 13b-tui-gui-parity.md (split per OQ1; see Completion Tracking Table and Open Questions). Do not dispatch 13-tui-voice.md.
+
 Concurrency: waves A and B parallelize within the wave. Serial rules:
 - leaf 04 then leaf 07 (both edit internal/daemon/voice_wiring.go)
 - leaf 07 then leaves 08/09 (wiring + tool depend on the leg API)

@@ -137,3 +137,13 @@ EmployeeLegConfig + VoiceConfig (tri-state pointers where noted):
 - Leaf 02 unit pins: toggle OFF = existing coordinator tests unmodified
   and green; toggle ON: pad/margin values apply, short parked flushes
   deferred during holder chain, full question still flushes on release.
+
+## Completion Tracking Table (added 2026-11-16; from git log)
+
+| Leaf / Item | Status | Commit | Notes |
+|---|---|---|---|
+| tree authored | DONE | bc18641d | docs(plans): voice-peragent tree |
+| 01 - per-employee acoustic controls + contextual short-final gate | COMPLETE | dd9d6520 | feat(voice) leaf 01 |
+| 02 - backchannel_soften A/B toggle (#130) | COMPLETE | 9206104d | feat(voice) leaf 02 |
+| tree merge to main | MERGED | 292db8e1 | merge: voice-peragent; gate restore noted |
+| #130 A/B verdict recorded | DONE | 022f3ce6 | docs(voice): record the #130 A/B verdict + measured cost |

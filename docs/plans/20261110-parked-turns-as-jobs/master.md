@@ -109,9 +109,9 @@ BRANCH MERGED TO MAIN: de39440e (includes main-side fakeEmployeeResolver test fi
 
 | # | Feature | Source | Unit tests | E2E | Status |
 |---|---------|--------|-----------|-----|--------|
-| F1 | backend seam | 01 | TestParkBackendSeamWrapped (existing parker tests green through seam) | n/a | PENDING |
-| F2 | queue backend | 02 | TestQueueBackendSaveLoadDelete / GiveUp | restart re-arm parity | PENDING |
-| F3 | flag parity | 03 | TestParkingQueueBackendDefaultFalse | byte-identical suite | PENDING |
+| F1 | backend seam | 01 | TestParkBackendSeamWrapped (existing parker tests green through seam) | n/a | COMPLETE (merged de39440e; leaf fb47ab4c) |
+| F2 | queue backend | 02 | TestQueueBackendSaveLoadDelete / GiveUp | restart re-arm parity | COMPLETE (merged de39440e; leaf 3a4964a3) |
+| F3 | flag parity | 03 | TestParkingQueueBackendDefaultFalse | byte-identical suite | COMPLETE (merged de39440e; merge/docs evidence fd17e145 / 3a4964a3) |
 
 ## Open Questions
 

@@ -82,9 +82,9 @@ go test -p 2 ./internal/voice/... ./internal/signalleg/... ./internal/daemon/ -r
 
 | # | Feature | Source | Unit tests | Status |
 |---|---------|--------|-----------|--------|
-| F1 | CallLeg contract + adapters | 01 | TestCallLegAdaptersCompileShape + per-leg Place/Accept/Hangup pins on existing fakes | PENDING |
-| F2 | event unification | 02 | TestCallLegEventsParityAcrossLegs | PENDING |
-| F3 | caller migration | 03 | existing voice suites green via interface | PENDING |
+| F1 | CallLeg contract + adapters | 01 | TestCallLegAdaptersCompileShape + per-leg Place/Accept/Hangup pins on existing fakes | COMPLETE (merged dcb6a19a; leaf f3f312c3, gate tests b8cd81f6) |
+| F2 | event unification | 02 | TestCallLegEventsParityAcrossLegs | COMPLETE (merged dcb6a19a; leaf 94e60f5a) |
+| F3 | caller migration | 03 | existing voice suites green via interface | COMPLETE (merged dcb6a19a; leaf 5f7bfdef) |
 
 ## Open Questions
 

@@ -376,7 +376,7 @@ rebase re-check each).
 | 01-store/00T | COMPLETE | 5cc91064 | |
 | 01-store/01 | COMPLETE | f3d5262f | |
 | 01-store/02 | COMPLETE | a978bafd | |
-| 01-store/03 | IN_PROGRESS | | |
+| 01-store/03 | COMPLETE | 3782b780 | QueryOpen/SearchLog/VerifyState/RepairState/Tail verified in internal/ledger/ops.go |
 | 02/00T | COMPLETE | a6e458a0 | |
 | 02/01 | COMPLETE | 3ba45197 | |
 | 02/02 | COMPLETE | efb4a9b9 | |
