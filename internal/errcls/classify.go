@@ -84,8 +84,6 @@ func IsRetryable(err error) bool {
 	return false
 }
 
-
-
 // IsParameterError reports whether err is a parameter-validation error
 // suitable for JSON-RPC -32602 InvalidParams. This replaces the substring
 // heuristic in rpc/server.go's isParameterError which false-positive'd on
@@ -146,7 +144,6 @@ func isConnError(err error) bool {
 	}
 	return false
 }
-
 
 // IsDuplicateColumn reports whether err is a SQLite "duplicate column" error
 // returned by ALTER TABLE ADD COLUMN when the column already exists. SQLite

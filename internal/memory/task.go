@@ -79,7 +79,6 @@ type TaskMemoryConfig struct {
 	Logger *slog.Logger
 }
 
-
 // NewTaskMemory creates a new task memory instance.
 func NewTaskMemory(cfg TaskMemoryConfig) (*TaskMemory, error) {
 	if cfg.Logger == nil {

@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/caimlas/meept/internal/task"
 )
@@ -100,6 +101,15 @@ type UpdateTaskRequest struct {
 }
 
 // Update updates a task.
+//
+// The state field is a WRITE surface with untrusted input (RPC task.update ->
+// bus task.update; HTTP PUT /api/v1/tasks/{id}), so it is gated in two steps
+// (issue #135): the enum value is validated FIRST (an unknown string like "done"
+// is a parameter error, never a state), then the edge is enforced by
+// SetStateChecked. Errors mirror the agent task-update tool's shape and name the
+// allowed transitions; both wrap task sentinels that the transport layer already
+// classifies, and both are wrapped as ErrInvalidInput so a bad state renders as
+// 400 rather than 500.
 func (s *TaskService) Update(ctx context.Context, req UpdateTaskRequest) (*task.Task, error) {
 	if req.ID == "" {
 		return nil, wrapError("task", "Update", ErrInvalidInput)
@@ -120,7 +130,17 @@ func (s *TaskService) Update(ctx context.Context, req UpdateTaskRequest) (*task.
 	}
 	// Update state if provided
 	if req.State != "" {
-		t.SetState(task.TaskState(req.State))
+		if !task.ValidTaskState(task.TaskState(req.State)) {
+			return nil, wrapError("task", "Update", fmt.Errorf(
+				"%w: %w: invalid task state %q: must be one of pending, planning, awaiting_approval, executing, testing, completed, failed, rejected, cancelled",
+				ErrInvalidInput, task.ErrInvalidTaskState, req.State))
+		}
+		if err := t.SetStateChecked(task.TaskState(req.State)); err != nil {
+			// Classified as a parameter error (400) while keeping the
+			// transition sentinel reachable for errors.Is.
+			return nil, wrapError("task", "Update", fmt.Errorf("%w: %w (%s)",
+				ErrInvalidInput, err, task.AllowedTransitionsText()))
+		}
 	}
 	// Persist changes if either field was modified
 	if req.Name != "" || req.State != "" {

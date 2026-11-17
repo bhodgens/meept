@@ -195,5 +195,3 @@ func (v *InstructionVerifier) assessToolRisk(tool string) string {
 		return "low"
 	}
 }
-
-

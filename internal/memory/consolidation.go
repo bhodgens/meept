@@ -998,7 +998,6 @@ type SummarizeResponse struct {
 	Summaries []Summary `json:"summaries"`
 }
 
-
 // extractJSONFromFences finds JSON inside markdown code fences anywhere in the text.
 // It tries ```json fences first, then generic ``` fences.
 func extractJSONFromFences(content string) string {

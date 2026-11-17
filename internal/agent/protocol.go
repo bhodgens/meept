@@ -71,8 +71,6 @@ type TaskMessage struct {
 	Payload json.RawMessage `json:"payload"`
 }
 
-
-
 // TaskPayload is the payload for "execute" and "delegate" actions.
 type TaskPayload struct {
 	// Description is what needs to be done.
@@ -148,11 +146,6 @@ type StatusPayload struct {
 	Message string `json:"message"`
 }
 
-
-
-
-
-
 // ChatDelegation is a simple delegation from the chat agent.
 // This is NOT in JSONL format - it's a simpler struct for chat-to-dispatcher handoff.
 type ChatDelegation struct {
@@ -168,5 +161,3 @@ type ChatDelegation struct {
 	// OriginalMessage is the user's original request.
 	OriginalMessage string `json:"original_message"`
 }
-
-

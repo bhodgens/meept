@@ -33,7 +33,6 @@ type QueuePersisterConfig struct {
 	MaxPending int
 }
 
-
 const queuedFollowupsSchema = `
 CREATE TABLE IF NOT EXISTS queued_followups (
     conversation_id TEXT NOT NULL,
@@ -50,17 +49,6 @@ const createQueuedFollowupsIndex = `
 CREATE INDEX IF NOT EXISTS idx_queued_followups_conversation
     ON queued_followups(conversation_id);
 `
-
-
-
-
-
-
-
-
-
-
-
 
 // NewQueuePersister creates a new write-behind persister.
 // It initializes the database schema immediately.

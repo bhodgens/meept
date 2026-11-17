@@ -138,14 +138,14 @@
     "agent.progress.synthesized": [
       {
         "file": "internal/daemon/components.go",
-        "line": 2806,
+        "line": 2831,
         "payload_keys": []
       }
     ],
     "agent.queue.followup.added": [
       {
         "file": "internal/agent/queue.go",
-        "line": 317,
+        "line": 316,
         "payload_keys": [],
         "via_helper": true
       }
@@ -174,7 +174,7 @@
     "agent.queue.persisted": [
       {
         "file": "internal/agent/queue_persister.go",
-        "line": 222,
+        "line": 210,
         "payload_keys": [],
         "via_const": true
       }
@@ -182,7 +182,7 @@
     "agent.queue.steer.added": [
       {
         "file": "internal/agent/queue.go",
-        "line": 252,
+        "line": 251,
         "payload_keys": [],
         "via_helper": true
       }
@@ -218,7 +218,19 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 11463,
+        "line": 1288,
+        "payload_keys": [
+          "agent_id",
+          "cap",
+          "class",
+          "limit",
+          "scope",
+          "used"
+        ]
+      },
+      {
+        "file": "internal/daemon/components.go",
+        "line": 11502,
         "payload_keys": []
       }
     ],
@@ -579,7 +591,7 @@
     "daemon.reloaded": [
       {
         "file": "internal/daemon/daemon.go",
-        "line": 3212,
+        "line": 3213,
         "payload_keys": [
           "event"
         ]
@@ -588,7 +600,7 @@
     "daemon.stopping": [
       {
         "file": "internal/daemon/daemon.go",
-        "line": 2836,
+        "line": 2837,
         "payload_keys": [
           "event"
         ]
@@ -597,7 +609,7 @@
     "dispatcher.stats.result": [
       {
         "file": "internal/daemon/components.go",
-        "line": 4511,
+        "line": 4536,
         "payload_keys": []
       }
     ],
@@ -618,7 +630,7 @@
     "employee.metric": [
       {
         "file": "internal/daemon/components.go",
-        "line": 6959,
+        "line": 6998,
         "payload_keys": [
           "name",
           "tags",
@@ -807,12 +819,12 @@
     "memory.result": [
       {
         "file": "internal/memory/handler.go",
-        "line": 269,
+        "line": 268,
         "payload_keys": []
       },
       {
         "file": "internal/memory/handler.go",
-        "line": 293,
+        "line": 292,
         "payload_keys": []
       }
     ],
@@ -1926,14 +1938,14 @@
     "status.response": [
       {
         "file": "internal/daemon/components.go",
-        "line": 10597,
+        "line": 10636,
         "payload_keys": []
       }
     ],
     "step.review_completed": [
       {
         "file": "internal/agent/review_manager.go",
-        "line": 701,
+        "line": 851,
         "payload_keys": [
           "confidence",
           "feedback",
@@ -2049,13 +2061,13 @@
     "task.cancelled": [
       {
         "file": "internal/task/registry.go",
-        "line": 340,
+        "line": 525,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/task/registry.go",
-        "line": 1047,
+        "line": 1230,
         "payload_keys": [],
         "via_helper": true
       }
@@ -2077,7 +2089,7 @@
       },
       {
         "file": "internal/task/registry.go",
-        "line": 151,
+        "line": 267,
         "payload_keys": [],
         "via_helper": true
       },
@@ -2098,7 +2110,7 @@
       },
       {
         "file": "internal/task/registry.go",
-        "line": 201,
+        "line": 314,
         "payload_keys": [],
         "via_helper": true
       },
@@ -2209,7 +2221,7 @@
       },
       {
         "file": "internal/task/registry.go",
-        "line": 400,
+        "line": 582,
         "payload_keys": [],
         "via_helper": true
       },
@@ -2316,7 +2328,7 @@
     "task.result": [
       {
         "file": "internal/task/registry.go",
-        "line": 805,
+        "line": 978,
         "payload_keys": [],
         "via_helper": true
       }
@@ -2324,7 +2336,7 @@
     "task.review_completed": [
       {
         "file": "internal/agent/review_manager.go",
-        "line": 718,
+        "line": 868,
         "payload_keys": [
           "confidence",
           "feedback",
@@ -2394,7 +2406,7 @@
       },
       {
         "file": "internal/task/registry.go",
-        "line": 421,
+        "line": 603,
         "payload_keys": [],
         "via_helper": true
       },
@@ -2410,42 +2422,6 @@
       {
         "file": "internal/rpc/proxy.go",
         "line": 210,
-        "payload_keys": [],
-        "via_helper": true
-      },
-      {
-        "file": "internal/task/registry.go",
-        "line": 180,
-        "payload_keys": [],
-        "via_helper": true
-      },
-      {
-        "file": "internal/task/registry.go",
-        "line": 274,
-        "payload_keys": [],
-        "via_helper": true
-      },
-      {
-        "file": "internal/task/registry.go",
-        "line": 371,
-        "payload_keys": [],
-        "via_helper": true
-      },
-      {
-        "file": "internal/task/registry.go",
-        "line": 471,
-        "payload_keys": [],
-        "via_helper": true
-      },
-      {
-        "file": "internal/task/registry.go",
-        "line": 526,
-        "payload_keys": [],
-        "via_helper": true
-      },
-      {
-        "file": "internal/task/registry.go",
-        "line": 558,
         "payload_keys": [],
         "via_helper": true
       },
@@ -2487,13 +2463,13 @@
     "team.start": [
       {
         "file": "internal/daemon/components.go",
-        "line": 9086,
+        "line": 9125,
         "payload_keys": [],
         "via_const": true
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 9123,
+        "line": 9162,
         "payload_keys": [],
         "via_const": true
       }
@@ -2520,14 +2496,14 @@
     "tool.execution.complete": [
       {
         "file": "internal/agent/executor.go",
-        "line": 2389,
+        "line": 2425,
         "payload_keys": []
       }
     ],
     "tool.execution.progress": [
       {
         "file": "internal/agent/executor.go",
-        "line": 2334,
+        "line": 2370,
         "payload_keys": [
           "message",
           "percent"
@@ -2696,7 +2672,7 @@
     "*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 3310,
+        "line": 3313,
         "subscriber_id": "session.sessionID"
       }
     ],
@@ -2718,7 +2694,7 @@
     "agent.event.*": [
       {
         "file": "internal/daemon/components.go",
-        "line": 2776,
+        "line": 2801,
         "subscriber_id": "progress-synthesizer"
       }
     ],
@@ -2919,7 +2895,7 @@
     "dispatcher.stats": [
       {
         "file": "internal/daemon/components.go",
-        "line": 4489,
+        "line": 4514,
         "subscriber_id": "dispatcher-stats-handler"
       }
     ],
@@ -2934,7 +2910,7 @@
     "employee.critical_finding": [
       {
         "file": "internal/daemon/components.go",
-        "line": 5384,
+        "line": 5423,
         "subscriber_id": "employee-critical-finding"
       }
     ],
@@ -3022,14 +2998,14 @@
     "memory.query": [
       {
         "file": "internal/memory/handler.go",
-        "line": 108,
+        "line": 107,
         "subscriber_id": "memory-handler"
       }
     ],
     "memory.recent": [
       {
         "file": "internal/memory/handler.go",
-        "line": 109,
+        "line": 108,
         "subscriber_id": "memory-handler"
       }
     ],
@@ -3822,7 +3798,7 @@
     "status.request": [
       {
         "file": "internal/daemon/components.go",
-        "line": 10523,
+        "line": 10562,
         "subscriber_id": "status-handler"
       }
     ],
@@ -3882,7 +3858,7 @@
     "task.cancel": [
       {
         "file": "internal/task/registry.go",
-        "line": 699,
+        "line": 872,
         "subscriber_id": "topics:task.cancel",
         "via_handler_table": true
       }
@@ -3903,7 +3879,7 @@
     "task.create": [
       {
         "file": "internal/task/registry.go",
-        "line": 699,
+        "line": 872,
         "subscriber_id": "topics:task.create",
         "via_handler_table": true
       }
@@ -3911,7 +3887,7 @@
     "task.delete": [
       {
         "file": "internal/task/registry.go",
-        "line": 699,
+        "line": 872,
         "subscriber_id": "topics:task.delete",
         "via_handler_table": true
       }
@@ -3926,7 +3902,7 @@
     "task.get": [
       {
         "file": "internal/task/registry.go",
-        "line": 699,
+        "line": 872,
         "subscriber_id": "topics:task.get",
         "via_handler_table": true
       }
@@ -3934,7 +3910,7 @@
     "task.link": [
       {
         "file": "internal/task/registry.go",
-        "line": 699,
+        "line": 872,
         "subscriber_id": "topics:task.link",
         "via_handler_table": true
       }
@@ -3942,7 +3918,7 @@
     "task.list": [
       {
         "file": "internal/task/registry.go",
-        "line": 699,
+        "line": 872,
         "subscriber_id": "topics:task.list",
         "via_handler_table": true
       }
@@ -3950,7 +3926,7 @@
     "task.list_extended": [
       {
         "file": "internal/task/registry.go",
-        "line": 699,
+        "line": 872,
         "subscriber_id": "topics:task.list_extended",
         "via_handler_table": true
       }
@@ -4055,7 +4031,7 @@
     "task.steps": [
       {
         "file": "internal/task/registry.go",
-        "line": 699,
+        "line": 872,
         "subscriber_id": "topics:task.steps",
         "via_handler_table": true
       }
@@ -4063,7 +4039,7 @@
     "task.unlink": [
       {
         "file": "internal/task/registry.go",
-        "line": 699,
+        "line": 872,
         "subscriber_id": "topics:task.unlink",
         "via_handler_table": true
       }
@@ -4071,7 +4047,7 @@
     "task.update": [
       {
         "file": "internal/task/registry.go",
-        "line": 699,
+        "line": 872,
         "subscriber_id": "topics:task.update",
         "via_handler_table": true
       }
@@ -4129,7 +4105,7 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 10690,
+        "line": 10729,
         "subscriber_id": "agent-job-processor-evidence"
       }
     ],

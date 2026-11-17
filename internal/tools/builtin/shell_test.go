@@ -25,8 +25,29 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// newShellToolWithWorkDir builds a shell tool with an EXPLICIT working
+// directory. Issue #136 removed the constructor's implicit "~" fallback: a tool
+// constructed with "" has no working directory until a call supplies one (an
+// explicit working_dir argument or tools.ContextWithWorkingDir). Tests that just
+// want to run a command therefore need a real dir — an unset dir now fails
+// actionably instead of running in the process home.
+func newShellToolWithWorkDir(t *testing.T) *ShellExecuteTool {
+	t.Helper()
+	return NewShellExecuteTool(t.TempDir(), time.Second*10, nil)
+}
+
+// mustExecShell runs a shell command on a tool built with an explicit working
+// directory (issue #136 removed the implicit "~" fallback, so a bare tool no
+// longer has anywhere to run).
+func mustExecShell(t *testing.T, tool *ShellExecuteTool, ctx context.Context, args map[string]any) any {
+	t.Helper()
+	res, err := tool.Execute(ctx, args)
+	require.NoError(t, err)
+	return res
+}
+
 func TestShellExecuteTool_Execute(t *testing.T) {
-	tool := NewShellExecuteTool("", time.Second*10, nil)
+	tool := newShellToolWithWorkDir(t)
 	ctx := context.Background()
 
 	// Test simple echo
@@ -433,7 +454,7 @@ func TestShellExecuteTool_Execute_WithSanitization(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	orch := security.NewOrchestrator(security.DefaultOrchestratorConfig(), logger)
 
-	tool := NewShellExecuteTool("", time.Second*10, nil)
+	tool := newShellToolWithWorkDir(t)
 	tool.SetSecurityOrchestrator(orch)
 
 	// Echo a string containing a special token pattern.
@@ -488,7 +509,7 @@ func TestInterpretExitCode(t *testing.T) {
 }
 
 func TestGrepExit1NotError(t *testing.T) {
-	tool := NewShellExecuteTool("", time.Second*10, nil)
+	tool := newShellToolWithWorkDir(t)
 	ctx := context.Background()
 
 	// grep returns exit 1 when no matches found — should be Success=true.
@@ -505,7 +526,7 @@ func TestGrepExit1NotError(t *testing.T) {
 }
 
 func TestGrepExit2IsError(t *testing.T) {
-	tool := NewShellExecuteTool("", time.Second*10, nil)
+	tool := newShellToolWithWorkDir(t)
 	ctx := context.Background()
 
 	// grep returns exit 2 on error (e.g., file not found).
@@ -527,7 +548,7 @@ func TestDiffExit1NotError(t *testing.T) {
 	require.NoError(t, os.WriteFile(fileA, []byte("aaa\n"), 0o644))
 	require.NoError(t, os.WriteFile(fileB, []byte("bbb\n"), 0o644))
 
-	tool := NewShellExecuteTool("", time.Second*10, nil)
+	tool := NewShellExecuteTool(dir, time.Second*10, nil)
 	ctx := context.Background()
 
 	result, err := tool.Execute(ctx, map[string]any{
@@ -543,7 +564,7 @@ func TestDiffExit1NotError(t *testing.T) {
 }
 
 func TestUnknownCommandExit1IsError(t *testing.T) {
-	tool := NewShellExecuteTool("", time.Second*10, nil)
+	tool := newShellToolWithWorkDir(t)
 	ctx := context.Background()
 
 	// Unknown command with exit 1 should be failure.
@@ -561,7 +582,7 @@ func TestCompoundCommandSemantics(t *testing.T) {
 	filePath := filepath.Join(dir, "data.txt")
 	require.NoError(t, os.WriteFile(filePath, []byte("hello\nworld\n"), 0o644))
 
-	tool := NewShellExecuteTool("", time.Second*10, nil)
+	tool := newShellToolWithWorkDir(t)
 	ctx := context.Background()
 
 	// Pipe: cat | grep with no match — last command is grep, exit 1 = success.
@@ -644,7 +665,7 @@ func writeOversizedStdoutFile(t *testing.T) (path, headMarker, tailMarker string
 func TestShellTruncationKeepsTail(t *testing.T) {
 	path, headMarker, tailMarker := writeOversizedStdoutFile(t)
 
-	tool := NewShellExecuteTool("", time.Second*10, nil)
+	tool := newShellToolWithWorkDir(t)
 	result, err := tool.Execute(context.Background(), map[string]any{
 		"command": "cat " + path,
 	})
@@ -670,7 +691,7 @@ func TestShellTruncationNoteStatesOmittedBytes(t *testing.T) {
 	_ = headMarker
 	_ = tailMarker
 
-	tool := NewShellExecuteTool("", time.Second*10, nil)
+	tool := newShellToolWithWorkDir(t)
 	result, err := tool.Execute(context.Background(), map[string]any{
 		"command": "cat " + path,
 	})
@@ -695,7 +716,7 @@ func TestShellTruncationUnderCapByteIdentical(t *testing.T) {
 	path := filepath.Join(dir, "small.txt")
 	require.NoError(t, os.WriteFile(path, []byte(raw), 0o644))
 
-	tool := NewShellExecuteTool("", time.Second*10, nil)
+	tool := NewShellExecuteTool(dir, time.Second*10, nil)
 	result, err := tool.Execute(context.Background(), map[string]any{
 		"command": "cat " + path,
 	})
@@ -722,7 +743,7 @@ func TestShellSpill(t *testing.T) {
 
 	path, headMarker, tailMarker := writeOversizedStdoutFile(t)
 
-	tool := NewShellExecuteTool("", time.Second*10, nil)
+	tool := newShellToolWithWorkDir(t)
 	tool.SetSpillWriter(llm.NewSpillService(""))
 
 	// Scoped context so the spill lands under the named session dir.
@@ -786,7 +807,7 @@ func (failingSpillWriter) WriteToolSpill(string, []byte) (string, error) {
 func TestShellSpillFailure(t *testing.T) {
 	path, headMarker, tailMarker := writeOversizedStdoutFile(t)
 
-	tool := NewShellExecuteTool("", time.Second*10, nil)
+	tool := newShellToolWithWorkDir(t)
 	tool.SetSpillWriter(failingSpillWriter{})
 	tool.logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 

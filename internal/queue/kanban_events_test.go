@@ -135,6 +135,11 @@ var jobEdgePaths = []jobEdge{
 		claimTo(t, q, ctx, id, StateClaimed)
 		return q.Requeue(ctx, id, time.Now().UTC())
 	}},
+	{StateClaimed, StateDead, kanban.EventReasonFail, func(t *testing.T, q *PersistentQueue, ctx context.Context, id string) error {
+		claimTo(t, q, ctx, id, StateClaimed)
+		preStageJobState(t, q, id, StateClaimed, true) // budget exhausted -> Fail resolves dead
+		return q.Fail(ctx, id, fmt.Errorf("boom"))
+	}},
 	{StateProcessing, StateCompleted, kanban.EventReasonComplete, func(t *testing.T, q *PersistentQueue, ctx context.Context, id string) error {
 		tok := claimTo(t, q, ctx, id, StateProcessing)
 		return q.CompleteAttempt(ctx, id, "ok", tok)
@@ -163,11 +168,23 @@ var jobEdgePaths = []jobEdge{
 }
 
 // TestJobTransitions_AllEdgesHavePublisherPath walks jobTransitions — the
-// machine authority (plan 02/02) — and asserts every legal from->to edge has a
-// wired publisher path in jobEdgePaths.
+// machine authority (plan 02/02) — and asserts every DISTINGUISHABLE legal
+// edge has a wired publisher path in jobEdgePaths.
+//
+// Self-edges (from == to) are deliberately exempt: publishJobState no-ops on
+// from == to (issue #134), so an idempotent re-mark (processing->processing)
+// or re-fail (failed->failed) is a legal SQL write but emits NO StateEvent —
+// the card does not change, so there is nothing to publish. The SQL
+// legality of those edges is pinned in transitions_drift_test.go; here we
+// only assert that every edge that changes the visible state has a publisher.
 func TestJobTransitions_AllEdgesHavePublisherPath(t *testing.T) {
 	for from, targets := range jobTransitions {
 		for _, to := range targets {
+			if from == to {
+				// Self-edge: no distinct event by contract. The drive
+				// paths below still exercise it at the store level.
+				continue
+			}
 			found := false
 			for _, e := range jobEdgePaths {
 				if e.from == from && e.to == to {

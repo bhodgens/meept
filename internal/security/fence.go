@@ -1,6 +1,7 @@
 package security
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -8,6 +9,19 @@ import (
 	"strings"
 	"sync"
 )
+
+// ErrOutsideSessionRoot is returned by CheckPathJailed when a path lies
+// outside the CALLER'S session jail root. It is a distinct sentinel from the
+// generic "outside project root" refusal because the two mean different
+// things to a caller: the ordinary refusal says "the rig's static allowlist
+// does not admit this path", while this one says "the path is fine for the
+// rig but this SESSION is bound to a different worktree" — the #138 defect,
+// where a session bound to worktree A wrote into another tree and the tool
+// still reported success.
+//
+// The message names both the jail root and the offending path so the model
+// can correct the call instead of retrying it verbatim.
+var ErrOutsideSessionRoot = errors.New("outside the session worktree")
 
 // FenceConfig controls path fencing for a session.
 type FenceConfig struct {
@@ -169,6 +183,58 @@ func splitPath(path string) []string {
 // op is "read", "write", or "exec".
 // Returns nil if allowed, error if blocked or misconfigured.
 func (fc *FenceChecker) CheckPath(path string, op string) error {
+	return fc.checkPath(path, op, "")
+}
+
+// CheckPathJailed validates a path against the fence AND against the
+// caller's per-session jail root (issue #138).
+//
+// A FenceChecker is one process-wide object whose RootPath is the rig's
+// static allowlist: any tree it admits is reachable by ABSOLUTE path, so a
+// session bound to worktree A could write into worktree B and the tool still
+// reported success (observed in the bench: file_write returned success:true
+// into the rig's repo clone, then the task failed its checker with no error
+// anywhere). Relative paths were already session-bound by resolvePathSecure;
+// this closes the absolute-path half.
+//
+// jailRoot is the SESSION's working directory, supplied per call by the
+// caller (tools.WorkingDirFromContext) — deliberately NOT a field on
+// FenceConfig, because FenceChecker is shared by every tool and session:
+// storing the jail on the config would reintroduce the cross-session
+// mutation race that per-session fence instances were introduced to remove
+// (internal/agent/fence_stage.go). The jail is a per-CALL argument, so the
+// same checker can serve two sessions with different roots concurrently.
+//
+// Contract:
+//   - jailRoot empty (or all whitespace) -> identical to CheckPath. This is
+//     mandatory: unbound sessions and every non-session caller must keep the
+//     pre-jail behavior byte for byte.
+//   - NoFence / !Enabled -> allowed, jail included (the per-session
+//     --nofence override outranks the jail, same as the fence itself).
+//   - A path inside jailRoot -> allowed, even when the ordinary fence would
+//     refuse it: the jail is the caller's own worktree, and it is the
+//     narrower, more specific contract.
+//   - A path outside jailRoot -> ErrOutsideSessionRoot, even when the static
+//     fence (or AllowRead) would admit it. The jail only NARROWS.
+//
+// Symlinks are resolved before the comparison (the shared path resolution
+// below), so a link inside the session root pointing outside it is refused.
+func (fc *FenceChecker) CheckPathJailed(path string, op string, jailRoot string) error {
+	jail := strings.TrimSpace(jailRoot)
+	if jail == "" {
+		return fc.CheckPath(path, op)
+	}
+	return fc.checkPath(path, op, jail)
+}
+
+// checkPath is the shared body of CheckPath / CheckPathJailed.
+//
+// jailRoot is either "" (unjailed, the legacy posture) or the caller's
+// session worktree. When set, it is evaluated AFTER the path has been fully
+// resolved (absolute + symlinks) and BEFORE the ordinary root/AllowRead
+// checks, so an in-jail path short-circuits to allowed and an out-of-jail
+// path is refused regardless of what the rig-wide allowlist says.
+func (fc *FenceChecker) checkPath(path string, op string, jailRoot string) error {
 	cfg := fc.snapshot()
 	if cfg.NoFence || !cfg.Enabled {
 		return nil
@@ -190,6 +256,24 @@ func (fc *FenceChecker) CheckPath(path string, op string) error {
 		return fmt.Errorf("fence: cannot resolve symlinks for %q", path)
 	}
 
+	// Per-session jail (issue #138). The jail is the caller's own worktree,
+	// so it wins over the rig-wide allowlist in both directions: inside is
+	// allowed unconditionally, outside is refused unconditionally.
+	if jailRoot != "" {
+		jailAbs, err := filepath.Abs(jailRoot)
+		if err != nil {
+			return fmt.Errorf("fence: cannot resolve session root %q: %w", jailRoot, err)
+		}
+		jail, ok := resolveSymlinks(jailAbs)
+		if !ok {
+			return fmt.Errorf("fence: cannot resolve symlinks for session root %q", jailRoot)
+		}
+		if pathWithin(abs, jail) {
+			return nil
+		}
+		return fmt.Errorf("fence: %w: %q is %s access outside the session root %q", ErrOutsideSessionRoot, path, op, jailRoot)
+	}
+
 	// Check if path is within root
 	rootAbs, err := filepath.Abs(cfg.RootPath)
 	if err != nil {
@@ -199,7 +283,7 @@ func (fc *FenceChecker) CheckPath(path string, op string) error {
 	if !ok {
 		return fmt.Errorf("fence: cannot resolve symlinks for root %q", cfg.RootPath)
 	}
-	if strings.HasPrefix(abs, root+string(os.PathSeparator)) || abs == root {
+	if pathWithin(abs, root) {
 		return nil
 	}
 
@@ -214,13 +298,21 @@ func (fc *FenceChecker) CheckPath(path string, op string) error {
 			if !ok {
 				continue
 			}
-			if strings.HasPrefix(abs, resolved+string(os.PathSeparator)) || abs == resolved {
+			if pathWithin(abs, resolved) {
 				return nil
 			}
 		}
 	}
 
 	return fmt.Errorf("fence: %s access denied for %q (outside project root %q)", op, path, cfg.RootPath)
+}
+
+// pathWithin reports whether the already-absolute, already-symlink-resolved
+// candidate sits at or under root. Both arguments must be pre-resolved;
+// this is a pure lexical containment test (the resolution is the caller's
+// job, done once in checkPath).
+func pathWithin(abs, root string) bool {
+	return strings.HasPrefix(abs, root+string(os.PathSeparator)) || abs == root
 }
 
 // CheckCommand validates a shell command and its working directory.

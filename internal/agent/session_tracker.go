@@ -62,7 +62,6 @@ func NewSessionTracker(maxAge time.Duration) *SessionTracker {
 	}
 }
 
-
 // RecordIntent logs an intent for a session.
 func (t *SessionTracker) RecordIntent(sessionID string, intent *Intent, agentID string) {
 	t.mu.Lock()

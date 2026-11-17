@@ -167,10 +167,10 @@ func TestGoalGateNilWiringNoop(t *testing.T) {
 	// Manager set but no park store: the resume seam reports an error
 	// rather than a silent false.
 	c2 := &Components{
-		Logger:           logger,
-		msgBus:           mb,
-		ParkStore:        nil,
-		EmployeeManager:  employee.NewManagerWithStores(nil, nil, nil, nil, nil, logger),
+		Logger:            logger,
+		msgBus:            mb,
+		ParkStore:         nil,
+		EmployeeManager:   employee.NewManagerWithStores(nil, nil, nil, nil, nil, logger),
 		EmployeeGoalStore: nil,
 	}
 	c2.StartGateParkPump(ctx)

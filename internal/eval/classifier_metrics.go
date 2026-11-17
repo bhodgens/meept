@@ -245,7 +245,6 @@ func ScoreModel(m ModelMetrics) float64 {
 	return scoreModel(m)
 }
 
-
 // scoreModel computes a weighted composite score for a model.
 // Weights: accuracy 60%, precision 20%, recall 20%.
 func scoreModel(m ModelMetrics) float64 {

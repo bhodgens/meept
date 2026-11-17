@@ -20,7 +20,6 @@ func NewJSLinter() *JSLinter {
 	return &JSLinter{}
 }
 
-
 // CompileCheck runs TypeScript compilation check.
 // For JavaScript, this returns nil as JS is interpreted.
 func (jl *JSLinter) CompileCheck(ctx context.Context, filePath, relPath, content string) ([]LinterResult, error) {

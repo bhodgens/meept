@@ -283,7 +283,6 @@ func (s *PlanService) Confirm(ctx context.Context, req ConfirmPlanRequest) (*pla
 	return p, nil
 }
 
-
 // Phases returns the phases (with produces/consumes artifacts) for a plan.
 func (s *PlanService) Phases(ctx context.Context, planID string) ([]*plan.PlanPhase, error) {
 	if planID == "" {

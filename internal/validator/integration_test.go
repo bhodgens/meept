@@ -81,4 +81,3 @@ func TestValidatorManager_EvidenceEnforcement(t *testing.T) {
 		})
 	}
 }
-

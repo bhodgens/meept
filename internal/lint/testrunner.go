@@ -516,11 +516,6 @@ func (tr *TestRunner) truncateOutput(output string) string {
 	return strings.Join(lines[:tr.config.MaxOutputLines], "\n") + "\n... (truncated)"
 }
 
-
-
-
-
-
 // FilterSkipped returns only skipped test results
 func FilterSkipped(results []TestResult) []TestResult {
 	var filtered []TestResult
