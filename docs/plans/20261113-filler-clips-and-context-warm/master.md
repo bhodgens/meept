@@ -192,6 +192,18 @@ Hard rules (each is a pinned test, not a hope):
    (`mlx_lm server`, `config/models.json5:185`) and cloud providers get no
    warm call at all. Encode this as one predicate; do not scatter checks.
 
+> **SUPERSEDE 2026-11-17 (issue #142 Option A applied): the AMENDMENT below is
+> WITHDRAWN. Code moved to the frozen C4 signature, not the reverse. As-built
+> now: `func (c *Client) Warm(ctx context.Context, messages []ChatMessage,
+> opts ...ChatOption) error` (internal/llm/warm.go:146), alias resolution at
+> the warmer layer via `Resolver.PeekAliasForWarm` + `WithResolvedModel` opts,
+> `chatOptions.noCache` bypassing all cache Get/Put + semantic tier sites,
+> dedicated warm transport (no retry loop, no slot gate, no identity side
+> effects). Landing commit: 25d5a524. Pins: internal/llm/warm_c4_pins_test.go
+> + internal/daemon/voice_wiring_contextwarm_c4_test.go. The amendment text
+> below is kept as the historical record of the (vetoed-by-default-execution)
+> ratification proposal.**
+
 > **AMENDMENT 2026-11-16 (C4 signature ratification, doc-only; audit BUG #1,
 > owner default applied, veto pending):**
 > The frozen sketch above pins
