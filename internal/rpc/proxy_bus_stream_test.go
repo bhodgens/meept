@@ -20,9 +20,9 @@ import (
 // daemon does, and drives bus.subscribe / bus.poll through their handlers
 // directly (same handler functions the RPC server registers).
 type busStreamFixture struct {
-	t    *testing.T
-	bus  *bus.MessageBus
-	px   *ProxyHandler
+	t   *testing.T
+	bus *bus.MessageBus
+	px  *ProxyHandler
 }
 
 func newBusStreamFixture(t *testing.T) *busStreamFixture {
