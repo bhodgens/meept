@@ -271,3 +271,37 @@ func TestWSClassBoardTypedMarkers(t *testing.T) {
 		t.Error("chat-channel unsubscribe must not suppress board_event")
 	}
 }
+
+// TestDecodeExecutionResultWSClass pins the wire-contract decoder for the
+// shared bot/employee execution result payload (plan
+// docs/plans/20261117-bot-employee-execution-observability, leaf
+// 01-wire-contract/00T, task T3). ONE decoder handles BOTH topics: the
+// payload carries no discriminator, so decode + WSProgress marker is the
+// whole contract. RED until C5 registers decodeExecutionResultWSClass.
+func TestDecodeExecutionResultWSClass(t *testing.T) {
+	raw := json.RawMessage(`{"agent_id":"worker-1","status":"completed","output":"done","tokens_used":7,"error":"","duration_ms":12,"stop_reason":"end_turn","trigger_ref":"intake:repo#7","session_id":"sess-abc","timestamp":"2026-11-17T12:34:56Z"}`)
+
+	classified, err := decodeExecutionResultWSClass(raw)
+	if err != nil {
+		t.Fatalf("decodeExecutionResultWSClass error: %v", err)
+	}
+	if classified == nil {
+		t.Fatal("decodeExecutionResultWSClass returned nil classified event")
+	}
+	if got := classified.WSClass(); got != wsclass.WSProgress {
+		t.Errorf("decoded ExecutionResultEvent.WSClass() = %v, want wsclass.WSProgress", got)
+	}
+
+	// The SAME decoder serves both frozen topic names; the wire payload is
+	// identical for bot.result and employee.result (no kind field).
+	for _, topic := range []string{"bot.result", "employee.result"} {
+		out := transformBusEventToWS(busMsg(topic, json.RawMessage(raw)))
+		if out == nil {
+			t.Errorf("topic %q: transformBusEventToWS returned nil", topic)
+			continue
+		}
+		if got := out["type"]; got != "agent_progress" {
+			t.Errorf("topic %q: type = %v, want agent_progress", topic, got)
+		}
+	}
+}
