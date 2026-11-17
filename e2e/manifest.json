@@ -721,6 +721,9 @@
     "e2e/suites/voice_clips": [
       "voice_clips"
     ],
+    "e2e/suites/context_warm": [
+      "context_warm"
+    ],
     "internal/daemon/voice_clip_planner.go": [
       "voice_clips"
     ]
