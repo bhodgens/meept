@@ -97,6 +97,11 @@ func jsonMarshalIndent(v any) ([]byte, error) {
 	return json.MarshalIndent(v, "", "  ")
 }
 
+// jsonMarshal wraps json.Marshal (single seam, keeps helper bodies small).
+func jsonMarshal(v any) ([]byte, error) {
+	return json.Marshal(v)
+}
+
 // filepathJoinTemp returns a temp-file path for gate config writes.
 func filepathJoinTemp(t *testing.T, name string) string {
 	t.Helper()

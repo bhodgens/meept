@@ -385,16 +385,16 @@ func (m *RuntimeManager) logToEndpoint(endpointKey, event string, kv ...any) {
 // hang it publishes verdict=healthy. The restart path is NOT here — the bool
 // callback (makeHealthCallback) keeps driving attemptAutoRestart unchanged.
 func (m *RuntimeManager) makeHealthVerdictCallback(endpointKey string) HealthVerdictCallback {
-	return func(v Verdict, detail string) {
+	return func(v HealthVerdict, detail string) {
 		switch v {
-		case VerdictHung:
+		case VerdictHealthHung:
 			m.mu.Lock()
 			m.hangCounts[endpointKey]++
 			m.hungEndpoints[endpointKey] = struct{}{}
 			m.mu.Unlock()
 			m.logToEndpoint(endpointKey, "runtime_hung", slog.String("detail", detail))
 			m.publishHealthEvent(endpointKey, "hung", detail)
-		case VerdictHealthy:
+		case VerdictHealthOK:
 			m.mu.Lock()
 			_, wasHung := m.hungEndpoints[endpointKey]
 			if wasHung {
@@ -405,7 +405,7 @@ func (m *RuntimeManager) makeHealthVerdictCallback(endpointKey string) HealthVer
 				m.logToEndpoint(endpointKey, "runtime_hung_recovered", slog.String("detail", detail))
 				m.publishHealthEvent(endpointKey, "healthy", detail)
 			}
-		case VerdictUnhealthy:
+		case VerdictHealthBad:
 			// The bool callback already logs/fans out the unhealthy
 			// transition; no extra bus event here keeps the crash path
 			// byte-identical (the watchdog re-arm publishes its own).

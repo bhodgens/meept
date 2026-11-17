@@ -289,7 +289,7 @@ pinned by the tree's gate tests (`health_checker_verdict_internal_test.go`,
   verdict callback (`OnHealthVerdict`) is additive: bus event + hang
   counter only, never a second restart path.
 - **HUNG is its own verdict state.** An answering `/health` must NOT
-  clear `VerdictHung` (only a canary success can), or the verdict would
+  clear `VerdictHealthHung` (only a canary success can), or the verdict would
   oscillate on every health tick while inference stays dead. Canary
   failures count in `canaryFails`, separate from `unhealthyCount`.
 - **The self-watchdog re-arms via `Start()` and never spawns a second
