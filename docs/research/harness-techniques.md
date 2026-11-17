@@ -4,7 +4,7 @@
 
 Generated from `docs/research/harness-techniques.json` (version 1, updated 2026-09-01). Do not edit by hand; run `python3 scripts/research-harness-lit.py` to regenerate.
 
-Status counts: shipped 23, partial 10, candidate 9, skip 0
+Status counts: shipped 22, partial 10, candidate 9, skip 1
 
 ## context
 
@@ -48,7 +48,7 @@ Status counts: shipped 23, partial 10, candidate 9, skip 0
 
 | Technique | Status | Sources | Evidence | Notes |
 | --- | --- | --- | --- | --- |
-| Adaptive timeout (mean + N*stddev) | shipped | — | `internal/llm/metrics/adaptive.go` | Wired via broker. |
+| Adaptive timeout (mean + N*stddev) | skip | — | — | RETIRED (a7366653, 2026-11-09 deadcode wave1): the mean+N*stddev Calculator (internal/llm/metrics/adaptive.go) shipped but had zero construction sites and was deleted as confirmed-dead. Adaptive behavior in production today is the 429 pacer (tree 02 leaf 05, D15, internal/llm/pacing.go) and server Retry-After precedence. Re-ship only with a real call site. |
 | HALO trace analysis (RLM analyzer, trace index, depth gating, turn compaction, failure recovery) | shipped | [HALO augmentation implementation status](../plans/2026-07-17-halo-implementation-status.md), [context-labs/halo](https://github.com/context-labs/halo) | `internal/agent/rlm_analyzer.go`, `internal/memory/trace_store.go`, `internal/agent/per_depth_semaphore.go`, `internal/agent/turn_compaction.go`, `internal/agent/rlm_telemetry.go`, `internal/memory/report_artifact.go` | Tier1-3 HALO phases landed 2026-07-17..23 (status doc marks Tier1 done; Phases 6/8/9/10/11 files exist). Mid-stream RetryRecovery (112f7b32) shipped despite 'deferred' note. |
 | Per-model latency / error stats | shipped | — | `internal/metrics/store.go` | Client Mission Control panel is still candidate. |
 

@@ -392,15 +392,10 @@
       "id": "adaptive-timeout",
       "name": "Adaptive timeout (mean + N*stddev)",
       "category": "observability",
-      "status": "shipped",
+      "status": "skip",
       "sources": [],
-      "evidence": [
-        {
-          "path": "internal/llm/metrics/adaptive.go",
-          "must_contain": "stddev"
-        }
-      ],
-      "notes": "Wired via broker."
+      "evidence": [],
+      "notes": "RETIRED (a7366653, 2026-11-09 deadcode wave1): the mean+N*stddev Calculator (internal/llm/metrics/adaptive.go) shipped but had zero construction sites and was deleted as confirmed-dead. Adaptive behavior in production today is the 429 pacer (tree 02 leaf 05, D15, internal/llm/pacing.go) and server Retry-After precedence. Re-ship only with a real call site."
     },
     {
       "id": "model-perf-stats",

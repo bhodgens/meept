@@ -95,6 +95,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -156,11 +157,10 @@ func newRplCapture(t *testing.T) *rplCapture {
 	return c
 }
 
-func (c *rplCapture) setFails(v bool) {
-	c.mu.Lock()
-	c.fails = v
-	c.mu.Unlock()
-}
+// (The former setFails(bool) accessor was dropped as dead code — the
+// pre-commit unused-code gate (staticcheck U1000) does not honor
+// nolint. c.fails stays live on the serve path at :143; a future 500-
+// path case arms it directly on the fixture struct.)
 
 // openRplContacts opens the real contact store (the a8186602 messaging_
 // opt_out guard column is created by contact.NewStore's migrate).
@@ -553,29 +553,10 @@ func TestReplyGlueHookErrorNeverDropsStoreOrPublish(t *testing.T) {
 	}
 }
 
-// containsFold is a tiny case-insensitive substring check (stdlib-only,
-// no strings.EqualFold semantics confusion with the shared package).
+// containsFold is the case-insensitive substring check the SMS reply
+// fixtures need. The hand-rolled ASCII case map this used to carry was
+// flagged by scripts/audit-utf8-byte-arithmetic.py — strings.ToUpper is
+// Unicode-correct and one call.
 func containsFold(hay, needle string) bool {
-	return len(needle) == 0 || indexOfFold(hay, needle) >= 0
-}
-
-func indexOfFold(hay, needle string) int {
-	h := toUpperASCII(hay)
-	n := toUpperASCII(needle)
-	for i := 0; i+len(n) <= len(h); i++ {
-		if h[i:i+len(n)] == n {
-			return i
-		}
-	}
-	return -1
-}
-
-func toUpperASCII(s string) string {
-	out := []byte(s)
-	for i, c := range out {
-		if c >= 'a' && c <= 'z' {
-			out[i] = c - 32
-		}
-	}
-	return string(out)
+	return strings.Contains(strings.ToUpper(hay), strings.ToUpper(needle))
 }

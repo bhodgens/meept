@@ -804,7 +804,7 @@ lint: gosec mutexio
 gosec:
 	@echo "Running gosec security scan (G201, G202)..."
 	@which gosec > /dev/null 2>&1 || (echo "Install: go install github.com/securego/gosec/v2/cmd/gosec@latest" && exit 1)
-	gosec -include=G201,G202 ./...
+	gosec -include=G201,G202 -exclude-dir=.hermes ./...
 
 # lint-ci runs all checks expected to pass in CI. Use this as the canonical
 # "is this branch shippable?" target. Includes project-specific analyzers

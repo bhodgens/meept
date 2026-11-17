@@ -872,6 +872,8 @@ func (s *Store) RecoverStaleTasks(journal turnjournal.JournalStore, jobs queue.Q
 	updateArgs := make([]any, 0, 1+len(spareArgs))
 	updateArgs = append(updateArgs, now)
 	updateArgs = append(updateArgs, spareArgs...)
+	// #nosec G202 -- `clause` is sqlNotIn's own " AND id NOT IN (?,?,?)"
+	// placeholder string (internal-built, zero user input; ids ride args).
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE tasks
 		SET state = 'failed', updated_at = ?

@@ -82,6 +82,10 @@ SKIP_DIRS = {
     '.git', 'node_modules', 'vendor', '.dart_tool', 'build',
     '.gradle', '__pycache__', '.idea', '.vscode', 'dist',
     'bin', '.syft', '.next', 'coverage', 'site',
+    # Agent worktrees under .hermes/ hold OTHER branches' trees; a
+    # finding there is not this checkout's state (mirrors fmt-check's
+    # .worktrees/ exclusion, now that worktrees live in .hermes/).
+    '.hermes',
 }
 
 SKIP_FILE_PREFIXES = ('.min.',)

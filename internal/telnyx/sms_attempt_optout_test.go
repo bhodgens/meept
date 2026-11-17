@@ -34,12 +34,15 @@ type captureSMS struct {
 func (st *captureSMS) handler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		st.mu.Lock()
-		st.hits++
-		st.header = r.Header.Clone()
-		st.bodyRaw = string(body)
+		// Parse OUTSIDE the mutex (mutexio rule): json.Unmarshal is I/O-
+		// adjacent work, and the header/body captures below stay cheap.
 		var m map[string]any
 		_ = json.Unmarshal(body, &m)
+		header := r.Header.Clone()
+		st.mu.Lock()
+		st.hits++
+		st.header = header
+		st.bodyRaw = string(body)
 		st.body = m
 		code, resp := st.respCode, st.respBody
 		st.mu.Unlock()

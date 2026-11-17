@@ -79,12 +79,16 @@ const send2DefaultBody = `{"data":{"id":"msg-send2-1","to":"+15555510099","from"
 func (s *send2Stub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var body map[string]any
 	_ = json.NewDecoder(r.Body).Decode(&body)
+	// Snapshot the header reads OUTSIDE the mutex (mutexio / CLAUDE.md
+	// mutex-scope rule): r.Header.Get is an HTTP request read.
+	auth := r.Header.Get("Authorization")
+	idemKey := r.Header.Get("Idempotency-Key")
 	s.mu.Lock()
 	s.calls++
 	s.method = r.Method
 	s.path = r.URL.Path
-	s.auth = r.Header.Get("Authorization")
-	s.idemKeys = append(s.idemKeys, r.Header.Get("Idempotency-Key"))
+	s.auth = auth
+	s.idemKeys = append(s.idemKeys, idemKey)
 	s.bodies = append(s.bodies, body)
 	code, respBody, hdr := s.respCode, s.respBody, s.respHdr
 	s.mu.Unlock()

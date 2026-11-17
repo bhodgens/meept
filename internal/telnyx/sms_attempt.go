@@ -106,9 +106,9 @@ func (p *pendingDLR) ResolveFinalized(id, status string) error {
 	return nil
 }
 
-// done reports whether the slot was resolved (used to count only
-// unresolved entries and to reject duplicate DLRs).
-func (o *DLROutcome) isDone() bool { return o.done }
+// (The former isDone() accessor was dead — staticcheck U1000: every
+// resolution guard reads the unexported done field directly inside the
+// pendingDLR critical section, sms_attempt.go:91/:130.)
 
 // OutcomeLocked snapshots an outcome slot under the lock (no I/O).
 func (p *pendingDLR) Outcome(id string) (DLROutcome, bool) {

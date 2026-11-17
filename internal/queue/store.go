@@ -772,6 +772,9 @@ func (s *Store) MarkProcessing(jobID, claimToken string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	args := []any{now, jobID, claimToken}
 	args = append(args, predicateArgs(StateProcessing)...)
+	// #nosec G202 -- the concatenated fragment is sourcePredicate/predicateFor
+	// (transitions.go): " AND state IN (?,?,...)" built from legalSources — a
+	// fixed-count ?-placeholder list, never inlined values, zero user input.
 	res, err := s.db.Exec(`
 		UPDATE jobs SET state = 'processing', updated_at = ?
 		WHERE id = ? AND claim_token = ?`+predicateFor(StateProcessing), args...)
@@ -827,6 +830,9 @@ func (s *Store) UpdateState(jobID string, state JobState) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	args := []any{string(state), now, jobID}
 	args = append(args, sourceArgs(sources)...)
+	// #nosec G202 -- the concatenated fragment is sourcePredicate/predicateFor
+	// (transitions.go): " AND state IN (?,?,...)" built from legalSources — a
+	// fixed-count ?-placeholder list, never inlined values, zero user input.
 	res, err := s.db.Exec(`
 		UPDATE jobs SET state = ?, updated_at = ?
 		WHERE id = ?`+sourcePredicate(sources), args...)
@@ -1283,6 +1289,9 @@ func (s *Store) Requeue(jobID string, notBefore time.Time) error {
 		notBefore.UTC().Format(time.RFC3339), now.Format(time.RFC3339), jobID,
 	}
 	args = append(args, predicateArgs(StatePending)...)
+	// #nosec G202 -- the concatenated fragment is sourcePredicate/predicateFor
+	// (transitions.go): " AND state IN (?,?,...)" built from legalSources — a
+	// fixed-count ?-placeholder list, never inlined values, zero user input.
 	result, err := tx.Exec(`
 		UPDATE jobs
 		SET state = 'pending',
@@ -1377,6 +1386,9 @@ func (s *Store) Retry(jobID string) error {
 	// exhausted row.
 	pendingArgs := []any{nextRetryAt.Format(time.RFC3339), now.Format(time.RFC3339), jobID}
 	pendingArgs = append(pendingArgs, predicateArgs(StatePending)...)
+	// #nosec G202 -- the concatenated fragment is sourcePredicate/predicateFor
+	// (transitions.go): " AND state IN (?,?,...)" built from legalSources — a
+	// fixed-count ?-placeholder list, never inlined values, zero user input.
 	result, err := tx.Exec(`
 		UPDATE jobs
 		SET state = 'pending',
@@ -1436,6 +1448,9 @@ func (s *Store) ResetToPending(ctx context.Context, jobID string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	args := []any{now, jobID}
 	args = append(args, predicateArgs(StatePending)...)
+	// #nosec G202 -- the concatenated fragment is sourcePredicate/predicateFor
+	// (transitions.go): " AND state IN (?,?,...)" built from legalSources — a
+	// fixed-count ?-placeholder list, never inlined values, zero user input.
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE jobs
 		SET state = 'pending',
