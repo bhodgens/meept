@@ -15,25 +15,29 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/caimlas/meept/internal/telnyx"
+	vt "github.com/caimlas/meept/internal/voice/telnyx"
 )
 
-// fakeVoiceManager lives in voice_test.go; messageDeps is the messaging
-// seam fake counting dep invocations.
+// Gate amendment (leaf 01-webhook-hardening/02 posture, owner-ratified
+// supersession 2026-11-10): seams now carry voice/telnyx.Message
+// (tolerant normalizer), seam-success is 202 Accepted, and good-signature
+// non-messaging events are 200 ack-noops (Telnyx redelivery policy), not
+// 400. fakeVoiceManager lives in voice_test.go; messageDeps is the
+// messaging seam fake counting dep invocations.
 type messageDeps struct {
 	mu        sync.Mutex
-	inbound   []telnyx.Message
-	finalized []telnyx.Message
+	inbound   []vt.Message
+	finalized []vt.Message
 }
 
-func (d *messageDeps) onInbound(msg telnyx.Message) error {
+func (d *messageDeps) onInbound(msg vt.Message) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.inbound = append(d.inbound, msg)
 	return nil
 }
 
-func (d *messageDeps) onFinalized(msg telnyx.Message) error {
+func (d *messageDeps) onFinalized(msg vt.Message) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.finalized = append(d.finalized, msg)
@@ -130,8 +134,8 @@ func TestMessagingWebhookInbound(t *testing.T) {
 		"text": "reply yes to confirm",
 	})
 	rec := doMessaging(t, routes, body, sign(body))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", rec.Code)
 	}
 	inbound, _ := deps.counts()
 	if inbound != 1 {
@@ -150,8 +154,8 @@ func TestMessagingWebhookFinalized(t *testing.T) {
 		"status": "delivered",
 	})
 	rec := doMessaging(t, routes, body, sign(body))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", rec.Code)
 	}
 	_, finalized := deps.counts()
 	if finalized != 1 {
@@ -159,15 +163,18 @@ func TestMessagingWebhookFinalized(t *testing.T) {
 	}
 }
 
-// TestMessagingWebhookUnknownEvent pins the parse gate: a
-// good-signature non-messaging event is a 400 (misrouted webhook), not
-// a silent 200.
+// TestMessagingWebhookUnknownEvent pins the ratified redelivery posture
+// (gate amendment 2026-11-10, leaf 01/02): a good-signature
+// non-messaging event is a 200 ack-noop so Telnyx stops redelivering
+// what it sends to a shared webhook URL — deps never fire. (Malformed
+// JSON, which cannot be classified, stays a 400 AFTER signature
+// verification.)
 func TestMessagingWebhookUnknownEvent(t *testing.T) {
 	routes, deps, sign := enabledMessagingRoutes(t)
 	body := messagingBody(t, "call.answered", map[string]any{"call_control_id": "cc-1"})
 	rec := doMessaging(t, routes, body, sign(body))
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (ack-noop posture)", rec.Code)
 	}
 	inbound, finalized := deps.counts()
 	if inbound != 0 || finalized != 0 {

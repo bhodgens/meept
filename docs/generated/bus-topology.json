@@ -138,7 +138,7 @@
     "agent.progress.synthesized": [
       {
         "file": "internal/daemon/components.go",
-        "line": 2831,
+        "line": 2841,
         "payload_keys": []
       }
     ],
@@ -218,7 +218,7 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 1288,
+        "line": 1298,
         "payload_keys": [
           "agent_id",
           "cap",
@@ -230,7 +230,7 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 11502,
+        "line": 11555,
         "payload_keys": []
       }
     ],
@@ -609,7 +609,7 @@
     "dispatcher.stats.result": [
       {
         "file": "internal/daemon/components.go",
-        "line": 4536,
+        "line": 4546,
         "payload_keys": []
       }
     ],
@@ -630,7 +630,7 @@
     "employee.metric": [
       {
         "file": "internal/daemon/components.go",
-        "line": 6998,
+        "line": 7039,
         "payload_keys": [
           "name",
           "tags",
@@ -1920,6 +1920,28 @@
         "method": "sessions.designated"
       }
     ],
+    "sms.inbound.received": [
+      {
+        "file": "internal/daemon/messaging_arming.go",
+        "line": 223,
+        "payload_keys": [],
+        "typed": true
+      }
+    ],
+    "sms.state.changed": [
+      {
+        "file": "internal/daemon/messaging_arming.go",
+        "line": 301,
+        "payload_keys": [],
+        "typed": true
+      },
+      {
+        "file": "internal/daemon/sms_reply_glue.go",
+        "line": 234,
+        "payload_keys": [],
+        "typed": true
+      }
+    ],
     "status.request": [
       {
         "file": "internal/rpc/proxy.go",
@@ -1938,7 +1960,7 @@
     "status.response": [
       {
         "file": "internal/daemon/components.go",
-        "line": 10636,
+        "line": 10689,
         "payload_keys": []
       }
     ],
@@ -2463,13 +2485,13 @@
     "team.start": [
       {
         "file": "internal/daemon/components.go",
-        "line": 9125,
+        "line": 9178,
         "payload_keys": [],
         "via_const": true
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 9162,
+        "line": 9215,
         "payload_keys": [],
         "via_const": true
       }
@@ -2521,7 +2543,7 @@
     "voice.call.ended": [
       {
         "file": "internal/daemon/voice_wiring.go",
-        "line": 1659,
+        "line": 1719,
         "payload_keys": [],
         "typed": true
       }
@@ -2694,7 +2716,7 @@
     "agent.event.*": [
       {
         "file": "internal/daemon/components.go",
-        "line": 2801,
+        "line": 2811,
         "subscriber_id": "progress-synthesizer"
       }
     ],
@@ -2895,7 +2917,7 @@
     "dispatcher.stats": [
       {
         "file": "internal/daemon/components.go",
-        "line": 4514,
+        "line": 4524,
         "subscriber_id": "dispatcher-stats-handler"
       }
     ],
@@ -2910,7 +2932,7 @@
     "employee.critical_finding": [
       {
         "file": "internal/daemon/components.go",
-        "line": 5423,
+        "line": 5433,
         "subscriber_id": "employee-critical-finding"
       }
     ],
@@ -3798,7 +3820,7 @@
     "status.request": [
       {
         "file": "internal/daemon/components.go",
-        "line": 10562,
+        "line": 10615,
         "subscriber_id": "status-handler"
       }
     ],
@@ -4105,7 +4127,7 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 10729,
+        "line": 10782,
         "subscriber_id": "agent-job-processor-evidence"
       }
     ],
@@ -4306,6 +4328,8 @@
       "session.store",
       "session.title_updated",
       "sessions.designated",
+      "sms.inbound.received",
+      "sms.state.changed",
       "task.approved",
       "task.cancelled",
       "task.error",

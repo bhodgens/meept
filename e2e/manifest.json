@@ -666,6 +666,9 @@
     "internal/signal/": [
       "signal-sidecar"
     ],
+    "internal/sms/": [
+      "telnyx-sms"
+    ],
     "internal/telnyx/": [
       "telnyx-sms"
     ],
