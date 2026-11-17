@@ -334,7 +334,7 @@ Test leaf: 00T-plan-critic-gate.md. Dispatched in Phase 0. Files land as `.stage
 
 | # | Feature | Source | Unit tests | E2E tests | Status |
 |---|---------|--------|------------|-----------|--------|
-| F1 | Flag off keeps planner-loop critic | 02 T1 | n/a - pins live in e2e suite (no new unit file; meept e2e policy) | TestFreshCriticFlagOffDoesNotSpawnChild | VALIDATED (as-built: default-on posture per 2026-11-03 FC-1 delta; commit 977d4044; test renamed coverage in wiring_test.go; e2e green at 24036114 sweep) |
+| F1 | Flag off keeps planner-loop critic | 02 T1 | n/a - pins live in e2e suite (no new unit file; meept e2e policy) | TestFreshCriticFlagOffDoesNotSpawnChild | VALIDATED (as-built: default-on posture per 2026-11-03 FC-1 delta; commit 977d4044; the F9 wiring test was renamed TestCriticFlagsDefaultOn -> coverage in wiring_test.go (F1's own test, TestFreshCriticFlagOffDoesNotSpawnChild, is unchanged); e2e green at 24036114 sweep) |
 | F2 | Flag on child has empty history and no tools | 02 T2 | n/a - same reason | TestFreshCriticChildHasNoTranscript | VALIDATED (dc8f051a; gate 347ba137; e2e present e2e/suites/plan-critic/fresh_critic_test.go) |
 | F3 | Empty paraphrase is blocking | 02 T3 | n/a | TestEmptyParaphraseIsBlocking | VALIDATED (dc8f051a; gate 347ba137; e2e present e2e/suites/plan-critic/fresh_critic_test.go) |
 | F4 | Hostile pass skipped when model matches planner | 03 T1 | n/a | TestHostilePassSkipsSameModel | VALIDATED (77734589; gate 347ba137; e2e present e2e/suites/plan-critic/hostile_pass_test.go) |

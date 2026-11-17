@@ -214,14 +214,18 @@ RATIFIED as of 2026-11-16, veto pending. As-built verification at HEAD:
   add a warn log on the legacy token-less Complete call site.
 - Q2 (PhaseFailed/PhaseConfirmed): RATIFIED default = add writers.
   Verified writers exist: `internal/plan/manager.go` sets PhaseConfirmed
-  on plan confirm cascade (~L777, pending/in_progress -> PhaseConfirmed)
-  and PhaseFailed via OnStepFailed failure-threshold accounting (~L1337,
-  ~L1436); phases_test/transitions_gate_test.go pins both. No longer
-  dormant enum values.
+  on plan confirm cascade (~L777, completed/failed -> PhaseConfirmed;
+  the guard at :773-775 converts only terminal phases and explicitly
+  leaves pending/in_progress alone) and PhaseFailed via OnStepFailed
+  failure-threshold accounting (~L1337, ~L1436);
+  internal/plan/transitions_gate_test.go pins both (:377, :458). No
+  longer dormant enum values.
 - Q3 (goal retirement): RATIFIED default = soft-delete only. Verified:
   `internal/employee/manager.go` Retire() sets state='retired' + retired_at
   (soft-delete, audit trail preserved); goal.go documents RetiredAt as
-  soft-delete; hard-delete path does not exist.
+  soft-delete; no operator-facing hard-delete exists (hire-rollback
+  excepted: rollbackHiredBot passes hardDeleteGoals=true, which DELETEs
+  employee_goals rows, manager.go:1383-1477).
 - Q4 (scheduler crash-window shape): RATIFIED default = move
   advanceLastWake after delivery. Verified: `internal/scheduler/scheduler.go`
   advances the last-wake watermark ONLY on err==nil after Execute (and only
