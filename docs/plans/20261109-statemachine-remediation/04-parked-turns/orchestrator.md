@@ -117,10 +117,10 @@ parkers, re-wire, assert each row resumed exactly once by its owner
 
 | # | Feature | Source | Unit tests | E2E | Status |
 |---|---------|--------|-----------|-----|--------|
-| F1 | Parker identity | 01 | TestLoadReturnsOnlyOwnedRows | restart re-arm (integration) | PENDING |
-| F2 | Throttle delivery | 02 | TestThrottleResumeDeliversResult | n/a | PENDING |
-| F3 | Gate release | 03 | TestRejectReleasesGatePark | n/a | PENDING |
-| F4 | Bounds + budget | 04 | TestQuotaReparkAttemptCap / TestBudgetParkPersists | n/a | PENDING |
+| F1 | Parker identity | 01 | TestLoadReturnsOnlyOwnedRows | restart re-arm (integration) | VALIDATED (bb24843f; merged e729937d) |
+| F2 | Throttle delivery | 02 | TestThrottleResumeDeliversResult | n/a | VALIDATED (fa5720fa; merged e729937d) |
+| F3 | Gate release | 03 | TestRejectReleasesGatePark | n/a | VALIDATED (407932d6; merged e729937d) |
+| F4 | Bounds + budget | 04 | TestQuotaReparkAttemptCap / TestBudgetParkPersists | n/a | VALIDATED (80659bb5; merged e729937d) |
 
 ## Open Questions
 

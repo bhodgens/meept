@@ -158,11 +158,11 @@ each branch's Open Questions with the named decision owner.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-queue | PENDING | 0 | |
-| 02-scheduler | PENDING | 0 | |
-| 03-plans-goals | PENDING | 0 | |
-| 04-parked-turns | PENDING | 0 | |
-| 05-voice | PENDING (BLOCKED: sibling voice wave) | 0 | |
+| 01-queue | COMPLETE | 1+ | merged e729937d (2026-11-10); leaves 6e73912b/328945fb/cf83d64e/12e93ef6(+wiring 43958b96)/6ef73902 |
+| 02-scheduler | COMPLETE | 1 | merged e729937d; leaves 6e73912b/893109a8 |
+| 03-plans-goals | COMPLETE | 1 | merged e729937d; leaves a59fbc4f/7c626b69/a94995c8/d191cb34/3b04d3ef/091cc90b/5950547d |
+| 04-parked-turns | COMPLETE | 1 | merged e729937d; leaves 222578ac/bb24843f/fa5720fa/407932d6/80659bb5 |
+| 05-voice | COMPLETE | 1+ | merged e729937d; sibling voice wave landed; leaves f9304084/47d03b60/97c67a59/117cd338/d0802617 |
 
 ## Integration Test Plan
 
@@ -181,11 +181,11 @@ Test leaves per branch (00T-), dispatched in Phase 0, validated in-session.
 
 | # | Feature (from plan) | Source | Unit tests | E2E tests | Status |
 |---|---------------------|--------|-----------|-----------|--------|
-| F1 | Queue CAS/sweeper/CHECK | 01-queue/* | per-leaf gate tests | n/a - store-level | PENDING |
-| F2 | Scheduler crash window | 02-scheduler/01 | gate test | n/a | PENDING |
-| F3 | Plan/goal lifecycle | 03-plans-goals/* | per-leaf gate tests | n/a | PENDING |
-| F4 | Parker identity + resume parity | 04-parked-turns/* | per-leaf gate tests | restart re-arm (integration) | PENDING |
-| F5 | Voice terminal parity | 05-voice/* | per-leaf gate tests | n/a | PENDING |
+| F1 | Queue CAS/sweeper/CHECK | 01-queue/* | per-leaf gate tests | n/a - store-level | VALIDATED (merged e729937d; branch gate rows VALIDATED) |
+| F2 | Scheduler crash window | 02-scheduler/01 | gate test | n/a | VALIDATED (merged e729937d; TestAdvanceLastWakeAfterDelivery/TestRecoverInFlightWalksHistory) |
+| F3 | Plan/goal lifecycle | 03-plans-goals/* | per-leaf gate tests | n/a | VALIDATED (merged e729937d) |
+| F4 | Parker identity + resume parity | 04-parked-turns/* | per-leaf gate tests | restart re-arm (integration) | VALIDATED (merged e729937d; integration re-arm not separately re-run 2026-11-16) |
+| F5 | Voice terminal parity | 05-voice/* | per-leaf gate tests | n/a | VALIDATED (merged e729937d) |
 
 ## Open Questions (decision-gated leaves)
 
@@ -198,6 +198,42 @@ Test leaves per branch (00T-), dispatched in Phase 0, validated in-session.
   employee delete) vs hard-delete documented? Default: soft-delete.
 - Q4 (owner: user): scheduler crash-window fix shape - move advanceLastWake
   after delivery (recommended) vs pre-execute receipt. Default: recommendation.
+
+## Addendum (2026-11-16): Owner-timeout defaults RATIFIED (veto pending)
+
+The owner (user) timed out on the Open Questions; the stated defaults are
+RATIFIED as of 2026-11-16, veto pending. As-built verification at HEAD:
+
+- Q1 (token-less Complete, queue F8): RATIFIED default = keep token-less
+  Complete + warn log + doc. Verified: the legacy token-less path still
+  exists (`internal/queue/store.go` Complete/CompleteAttempt with empty
+  token degrades to the state-only predicate; `internal/queue/queue.go`
+  PersistentQueue.Complete). WARN LOG NOT FOUND: no warn is emitted on the
+  token-less completion path (existing warns cover refused/superseded/
+  unknown-job cases only). NOTED AS FOLLOW-UP (not fixed, docs-only tree):
+  add a warn log on the legacy token-less Complete call site.
+- Q2 (PhaseFailed/PhaseConfirmed): RATIFIED default = add writers.
+  Verified writers exist: `internal/plan/manager.go` sets PhaseConfirmed
+  on plan confirm cascade (~L777, pending/in_progress -> PhaseConfirmed)
+  and PhaseFailed via OnStepFailed failure-threshold accounting (~L1337,
+  ~L1436); phases_test/transitions_gate_test.go pins both. No longer
+  dormant enum values.
+- Q3 (goal retirement): RATIFIED default = soft-delete only. Verified:
+  `internal/employee/manager.go` Retire() sets state='retired' + retired_at
+  (soft-delete, audit trail preserved); goal.go documents RetiredAt as
+  soft-delete; hard-delete path does not exist.
+- Q4 (scheduler crash-window shape): RATIFIED default = move
+  advanceLastWake after delivery. Verified: `internal/scheduler/scheduler.go`
+  advances the last-wake watermark ONLY on err==nil after Execute (and only
+  for explicit ticks); M-5 fix comment in place.
+
+Per-leaf landing proof: all branch leaf commits are ancestors of merge
+e729937d (verified 2026-11-16 via git merge-base --is-ancestor): queue
+6e73912b/328945fb/cf83d64e/12e93ef6/43958b96/6ef73902; scheduler 6e73912b/
+893109a8; plans-goals a59fbc4f/7c626b69/a94995c8/d191cb34/3b04d3ef/091cc90b/
+5950547d; parked-turns 222578ac/bb24843f/fa5720fa/407932d6/80659bb5; voice
+f9304084/47d03b60/97c67a59/117cd338/d0802617. Merge e729937d (2026-11-10)
+is in HEAD. Drift-resolution merge 724b9dba (2026-11-09) also in HEAD.
 
 ## Design Amendments (2026-11-09, user-approved direction)
 
