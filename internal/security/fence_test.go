@@ -1,6 +1,7 @@
 package security
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -305,5 +306,181 @@ func TestCheckPath_PathTraversalAttempt(t *testing.T) {
 	err := fc.CheckPath(escapePath, "read")
 	if err == nil {
 		t.Errorf("CheckPath(%q, \"read\") = nil, want error (path traversal attempt)", escapePath)
+	}
+}
+
+// --- Per-session jail root (#138, second half) ---------------------------
+//
+// FenceConfig is process-wide and its RootPath is a static rig-wide
+// allowlist, so a session bound to worktree A can still touch worktree B
+// (or any other tree the allowlist admits) with an ABSOLUTE path. The jail
+// closes that: CheckPathJailed refuses any path outside the caller's
+// session root before the ordinary fence check runs. An empty jail root is
+// the legacy posture and must stay byte-identical to CheckPath.
+
+// jailFixture builds a fence whose rig-wide root admits BOTH the session
+// worktree and a neighbouring tree — the shape that let the bench write
+// into a foreign repo clone while file_write reported success.
+func jailFixture(t *testing.T) (fc *FenceChecker, sessionRoot, otherTree, allowReadTree string) {
+	t.Helper()
+	rig := t.TempDir()
+	sessionRoot = filepath.Join(rig, "worktrees", "a")
+	otherTree = filepath.Join(rig, "clones", "rig")
+	allowReadTree = filepath.Join(rig, "shared")
+	for _, d := range []string{sessionRoot, otherTree, allowReadTree} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", d, err)
+		}
+	}
+	return NewFenceChecker(FenceConfig{
+		Enabled:   true,
+		RootPath:  rig,
+		AllowRead: []string{allowReadTree},
+	}, nil), sessionRoot, otherTree, allowReadTree
+}
+
+func TestCheckPathJailed_InsideSessionRootAllowed(t *testing.T) {
+	fc, sessionRoot, _, _ := jailFixture(t)
+
+	inside := filepath.Join(sessionRoot, "src", "main.go")
+	for _, op := range []string{"read", "write", "exec"} {
+		if err := fc.CheckPathJailed(inside, op, sessionRoot); err != nil {
+			t.Errorf("CheckPathJailed(%q, %q) = %v, want nil", inside, op, err)
+		}
+	}
+	// The session root itself is inside the session root.
+	if err := fc.CheckPathJailed(sessionRoot, "write", sessionRoot); err != nil {
+		t.Errorf("CheckPathJailed(%q, \"write\") = %v, want nil", sessionRoot, err)
+	}
+	// A not-yet-existing file directly under the root (the write case).
+	if err := fc.CheckPathJailed(filepath.Join(sessionRoot, "new.txt"), "write", sessionRoot); err != nil {
+		t.Errorf("CheckPathJailed(new file, \"write\") = %v, want nil", err)
+	}
+}
+
+func TestCheckPathJailed_OutsideSessionRootRefused(t *testing.T) {
+	fc, sessionRoot, otherTree, _ := jailFixture(t)
+
+	outside := filepath.Join(otherTree, "README.md")
+	if err := os.WriteFile(outside, []byte("rig\n"), 0o644); err != nil {
+		t.Fatalf("seed outside file: %v", err)
+	}
+	for _, op := range []string{"read", "write"} {
+		err := fc.CheckPathJailed(outside, op, sessionRoot)
+		if err == nil {
+			t.Fatalf("CheckPathJailed(%q, %q) = nil, want refusal (fence allowlist admits it, session root does not)", outside, op)
+		}
+		if !errors.Is(err, ErrOutsideSessionRoot) {
+			t.Errorf("CheckPathJailed(%q, %q) error = %v, want errors.Is(ErrOutsideSessionRoot)", outside, op, err)
+		}
+		// The refusal must name BOTH the jail root and the offending path so
+		// the model can correct itself instead of retrying blindly.
+		if !strings.Contains(err.Error(), sessionRoot) {
+			t.Errorf("refusal %q does not name the session root %q", err, sessionRoot)
+		}
+		if !strings.Contains(err.Error(), outside) {
+			t.Errorf("refusal %q does not name the offending path %q", err, outside)
+		}
+	}
+	// Sanity: the ordinary, un-jailed check still admits it (that is the
+	// bug the jail exists to close).
+	if err := fc.CheckPath(outside, "write"); err != nil {
+		t.Fatalf("fixture precondition failed: plain CheckPath refused %q: %v", outside, err)
+	}
+}
+
+func TestCheckPathJailed_SymlinkEscapeRefused(t *testing.T) {
+	fc, sessionRoot, otherTree, _ := jailFixture(t)
+
+	outsideFile := filepath.Join(otherTree, "secret.txt")
+	if err := os.WriteFile(outsideFile, []byte("s\n"), 0o600); err != nil {
+		t.Fatalf("seed outside file: %v", err)
+	}
+	link := filepath.Join(sessionRoot, "portal")
+	if err := os.Symlink(otherTree, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	err := fc.CheckPathJailed(filepath.Join(link, "secret.txt"), "read", sessionRoot)
+	if err == nil {
+		t.Fatal("symlink escape out of the session root allowed")
+	}
+	if !errors.Is(err, ErrOutsideSessionRoot) {
+		t.Errorf("symlink escape error = %v, want errors.Is(ErrOutsideSessionRoot)", err)
+	}
+	// A link that stays inside the session root is fine.
+	insideFile := filepath.Join(sessionRoot, "real.txt")
+	if err := os.WriteFile(insideFile, []byte("x\n"), 0o600); err != nil {
+		t.Fatalf("seed inside file: %v", err)
+	}
+	benign := filepath.Join(sessionRoot, "alias.txt")
+	if err := os.Symlink(insideFile, benign); err != nil {
+		t.Fatalf("benign symlink: %v", err)
+	}
+	if err := fc.CheckPathJailed(benign, "read", sessionRoot); err != nil {
+		t.Errorf("benign in-root symlink refused: %v", err)
+	}
+}
+
+func TestCheckPathJailed_JailNarrowsAllowRead(t *testing.T) {
+	fc, sessionRoot, _, allowReadTree := jailFixture(t)
+
+	// AllowRead admits this tree; the session jail does not. The jail is
+	// the narrower, per-session contract and must win.
+	inAllowRead := filepath.Join(allowReadTree, "ref.md")
+	if err := os.WriteFile(inAllowRead, []byte("doc\n"), 0o600); err != nil {
+		t.Fatalf("seed allow-read file: %v", err)
+	}
+	if err := fc.CheckPath(inAllowRead, "read"); err != nil {
+		t.Fatalf("fixture precondition failed: plain CheckPath refused the AllowRead path: %v", err)
+	}
+	err := fc.CheckPathJailed(inAllowRead, "read", sessionRoot)
+	if err == nil {
+		t.Fatal("jailed read of an AllowRead path outside the session root allowed")
+	}
+	if !errors.Is(err, ErrOutsideSessionRoot) {
+		t.Errorf("error = %v, want errors.Is(ErrOutsideSessionRoot)", err)
+	}
+}
+
+func TestCheckPathJailed_EmptyRootIsLegacyCheckPath(t *testing.T) {
+	fc, sessionRoot, otherTree, allowReadTree := jailFixture(t)
+
+	probes := []struct {
+		path string
+		op   string
+	}{
+		{filepath.Join(sessionRoot, "src", "main.go"), "read"},
+		{filepath.Join(sessionRoot, "src", "main.go"), "write"},
+		{sessionRoot, "exec"},
+		{filepath.Join(otherTree, "README.md"), "read"},
+		{filepath.Join(otherTree, "README.md"), "write"},
+		{filepath.Join(allowReadTree, "ref.md"), "read"},
+		{filepath.Join(allowReadTree, "ref.md"), "write"},
+	}
+	for _, p := range probes {
+		want := fc.CheckPath(p.path, p.op)
+		got := fc.CheckPathJailed(p.path, p.op, "")
+		if (want == nil) != (got == nil) {
+			t.Errorf("CheckPathJailed(%q, %q, \"\") = %v, CheckPath = %v; empty jail root must be identical", p.path, p.op, got, want)
+		}
+	}
+}
+
+func TestCheckPathJailed_NoFenceBypasses(t *testing.T) {
+	fc, sessionRoot, otherTree, _ := jailFixture(t)
+	fc.SetNoFence(true)
+
+	if err := fc.CheckPathJailed(filepath.Join(otherTree, "README.md"), "write", sessionRoot); err != nil {
+		t.Errorf("NoFence override must bypass the jail too, got %v", err)
+	}
+}
+
+func TestCheckPathJailed_EmptyJailRootValueIsUnjailed(t *testing.T) {
+	fc, _, otherTree, _ := jailFixture(t)
+
+	// A whitespace-only jail root is "unset", never a jail at "/".
+	if err := fc.CheckPathJailed(filepath.Join(otherTree, "x"), "write", "   "); err != nil {
+		t.Errorf("blank jail root must be treated as unset, got %v", err)
 	}
 }

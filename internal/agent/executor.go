@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
@@ -1493,7 +1494,7 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 			actionName = toolName
 		}
 		if denied := e.groupDenyVerdict(toolName); denied != nil {
-			e.logPermissionDecision(*denied, actionName, toolName, e.agentID)
+			e.logPermissionDecision(ctx, *denied, actionName, toolName, e.agentID, args)
 			return &ExecutionResult{
 				ToolCallID: toolCall.ID,
 				Success:    false,
@@ -2132,8 +2133,28 @@ func (e *Executor) checkPermission(ctx context.Context, toolName string, args ma
 
 	result := e.security.CheckPermission(action, details)
 	result = e.applyGroupGate(result, action, toolName)
-	e.logPermissionDecision(result, action, toolName, agentID)
+	e.logPermissionDecision(ctx, result, action, toolName, agentID, args)
 	return result
+}
+
+// deniedPath resolves the path a permission decision was made about, for the
+// decision log (issue #137, audit half). A relative path resolves against the
+// turn's working dir (tools.WorkingDirFromContext, injected by
+// AgentLoop.executeToolCalls); an absolute path resolves to itself. Returns ""
+// when the call carries no path argument — a non-path decision logs no
+// path/workdir pair (the frozen C2 key set stays exact).
+func (e *Executor) deniedPath(args map[string]any, workdir string) string {
+	raw, ok := args["path"].(string)
+	if !ok || raw == "" {
+		return ""
+	}
+	if filepath.IsAbs(raw) {
+		return filepath.Clean(raw)
+	}
+	if workdir == "" {
+		return ""
+	}
+	return filepath.Join(workdir, raw)
 }
 
 // groupDenyVerdict returns the group_deny verdict for a tool call a
@@ -2237,13 +2258,20 @@ func (e *Executor) applyGroupGate(result security.CheckResult, action, toolName 
 //	msg="tool permission decision"
 //	keys: decision, action, tool, agent, groups, rule_source, risk, reason
 //
+// Issue #137 adds the attribution pair when the decision is about a
+// filesystem path: `path` (the resolved path the checker judged) and
+// `workdir` (the turn's working dir it resolved against) — the rig's
+// unattributable WARN said only "Path does not match any allowed path
+// pattern" and never which path or which dir. Non-path decisions keep the
+// frozen key set byte-identical (no path/workdir keys).
+//
 // Denies log at WARN, allows at DEBUG under the default "deny-warn"
 // level; "all" logs every decision at INFO; "off" suppresses entirely.
 // Kept at the EXECUTOR seam — pkg/security stays pure (no logging). The
 // groups key carries the loop's group memberships (agent-groups leaf 04:
 // the loop's resolution record supplies the subject's groups; "-" when
 // ungrouped/unmanaged). No lock is held here.
-func (e *Executor) logPermissionDecision(result security.CheckResult, action, toolName, agentID string) {
+func (e *Executor) logPermissionDecision(ctx context.Context, result security.CheckResult, action, toolName, agentID string, args map[string]any) {
 	e.mu.RLock()
 	level := e.decisionLogLevel
 	e.mu.RUnlock()
@@ -2271,6 +2299,14 @@ func (e *Executor) logPermissionDecision(result security.CheckResult, action, to
 		"rule_source", result.RuleSource,
 		"risk", result.EffectiveRisk.String(),
 		"reason", result.Reason,
+	}
+
+	// Attribution pair (issue #137): the resolved path and the working dir
+	// it resolved against. Absent for non-path decisions.
+	if wd := tools.WorkingDirFromContext(ctx); wd != "" {
+		if p := e.deniedPath(args, wd); p != "" {
+			attrs = append(attrs, "path", p, "workdir", wd)
+		}
 	}
 
 	switch {

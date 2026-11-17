@@ -1,4 +1,4 @@
-.PHONY: sdk-generate sdk-generate-go sdk-generate-dart sdk-clean localcert localcert-check localcert-install help build build-all uninstall-all uninstall-gui build-daemon build-cli build-voice build-gui build-gui-dist test test-verbose test-cover test-race test-record test-efficacy bench bench-all daemon daemon-debug devbuild status clean lint fmt fmt-gui fmt-check-gui vet mod-tidy deps deps-go deps-llama deps-llama-check update-deps install install-cli install-desktop setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate docs-check menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server webui graphs graphs-check compare-prep config-bootstrap dev-key gui-connect-setup gui-connect-check sync-config
+.PHONY: sdk-generate sdk-generate-go sdk-generate-dart sdk-clean localcert localcert-check localcert-install help build build-all uninstall-all uninstall-gui build-daemon build-cli build-voice build-gui build-gui-dist test test-verbose test-cover test-race test-record test-efficacy bench bench-all daemon daemon-debug devbuild status clean lint fmt fmt-check fmt-gui fmt-check-gui vet mod-tidy deps deps-go deps-llama deps-llama-check update-deps install install-cli install-desktop setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate docs-check menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server webui graphs graphs-check compare-prep config-bootstrap dev-key gui-connect-setup gui-connect-check sync-config
 	@echo "  localcert        Generate trusted SSL cert for localhost (requires mkcert)"
 	@echo "  localcert-install Install mkcert and local CA (one-time setup)"
 
@@ -50,7 +50,8 @@ help:
 	@echo ""
 	@echo "Development:"
 	@echo "  lint             Run golangci-lint + gosec + the mutexio analyzer"
-	@echo "  fmt              Format code"
+	@echo "  fmt              Format the Go tree (gofmt -w)"
+	@echo "  fmt-check        Verify the Go tree is gofmt-formatted (CI + lint-ci)"
 	@echo "  vet              Run go vet"
 	@echo "  graphs           Regenerate connectivity graphs (bus/RPC/HTTP/WS)"
 	@echo "  graphs-check     Verify connectivity graphs are fresh (CI: code-quality.yml generated-artifacts)"
@@ -791,8 +792,10 @@ gosec:
 # "is this branch shippable?" target. Includes project-specific analyzers
 # (mutexio for I/O-under-mutex, predid for predictable IDs) plus the audit
 # scripts that catch UTF-8 corruption bugs and Dart enum-shadowing, and
-# fmt-check-gui for Dart formatting in the Flutter tree.
-lint-ci: lint analyzers audit-scripts fmt-check-gui orphan-check e2e-census-selftest
+# fmt-check-gui for Dart formatting in the Flutter tree, and fmt-check for
+# gofmt formatting across the Go tree (both are check-only, both fail the
+# target when a tree they can see is unformatted).
+lint-ci: lint analyzers audit-scripts fmt-check fmt-check-gui orphan-check e2e-census-selftest
 	@echo "All CI lint checks passed."
 
 # Doherty Threshold (IBM ~400ms UX latency budget) enforcement lane: p95
@@ -815,10 +818,30 @@ test-voice-eval:
 	@go test -p 2 ./internal/voice/eval/ -run 'TestLaneEndToEnd' -v
 
 
+# fmt formats the Go tree in place with gofmt (apply-mode companion to the
+# fmt-check gate). Walks the same scope as scripts/fmt-check.sh --write, so
+# `make fmt` fixes exactly what `make fmt-check` would flag. The Flutter tree
+# has its own apply target, fmt-gui.
 fmt:
-	@echo "Formatting code..."
-	go fmt ./...
-	@echo "Done"
+	@echo "Formatting Go tree (gofmt -w, same scope as fmt-check)..."
+	@GOFMT="$(GOFMT)" scripts/fmt-check.sh --write
+	@echo "Done. Go tree formatted; stage the result and re-commit."
+
+# gofmt resolution for the Go format gate. Overridable:
+#   make fmt-check GOFMT=/path/to/gofmt
+# scripts/fmt-check.sh hard-fails when it cannot resolve gofmt, so a tree that
+# cannot be checked is never reported clean.
+GOFMT ?= $(shell command -v gofmt 2>/dev/null)
+
+# fmt-check is the check-only Go formatting gate used by `make lint-ci` and
+# CI. Exits non-zero when any Go file outside the excluded paths (archive/,
+# third_party/, testdata/, vendor/, .worktrees/ - the same list .golangci.yml
+# excludes) is not gofmt-formatted, printing every offending file first so the
+# failure is actionable. Never a silent pass: a missing gofmt is a hard error.
+fmt-check:
+	@echo "Checking Go formatting (gofmt) across the tree..."
+	@GOFMT="$(GOFMT)" scripts/fmt-check.sh
+	@echo "Go formatting clean."
 
 # Dart binary for the Flutter formatting targets. Overridable:
 #   make fmt-check-gui DART=/path/to/dart

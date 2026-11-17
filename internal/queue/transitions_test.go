@@ -16,17 +16,20 @@ func TestQueueAllows(t *testing.T) {
 		{"pending to claimed", StatePending, StateClaimed, true},
 		{"pending to failed", StatePending, StateFailed, true},
 		{"pending to processing", StatePending, StateProcessing, false},
-		{"pending to dead", StatePending, StateDead, false},
+		{"pending to dead", StatePending, StateDead, true}, // issue #134: exhaustion dead-letters from pending
 		{"claimed to processing", StateClaimed, StateProcessing, true},
 		{"claimed to completed", StateClaimed, StateCompleted, true},
 		{"claimed to failed", StateClaimed, StateFailed, true},
 		{"claimed to pending", StateClaimed, StatePending, true},
+		{"claimed to dead", StateClaimed, StateDead, true}, // issue #134: exhaustion dead-letters from claimed
 		{"processing to completed", StateProcessing, StateCompleted, true},
 		{"processing to failed", StateProcessing, StateFailed, true},
 		{"processing to pending", StateProcessing, StatePending, true},
 		{"processing to dead", StateProcessing, StateDead, true},
+		{"processing to processing", StateProcessing, StateProcessing, true}, // issue #134: idempotent re-mark
 		{"failed to pending", StateFailed, StatePending, true},
 		{"failed to dead", StateFailed, StateDead, true},
+		{"failed to failed", StateFailed, StateFailed, true}, // issue #134: idempotent re-fail
 		{"completed to pending", StateCompleted, StatePending, false},
 		{"dead to pending", StateDead, StatePending, false},
 		{"dead to dead", StateDead, StateDead, false},
@@ -51,10 +54,10 @@ func TestLegalSources(t *testing.T) {
 	}{
 		{StatePending, []JobState{StateClaimed, StateFailed, StateProcessing}},
 		{StateClaimed, []JobState{StatePending}},
-		{StateProcessing, []JobState{StateClaimed}},
+		{StateProcessing, []JobState{StateClaimed, StateProcessing}},
 		{StateCompleted, []JobState{StateClaimed, StateProcessing}},
-		{StateFailed, []JobState{StateClaimed, StatePending, StateProcessing}},
-		{StateDead, []JobState{StateFailed, StateProcessing}},
+		{StateFailed, []JobState{StateClaimed, StateFailed, StatePending, StateProcessing}},
+		{StateDead, []JobState{StateClaimed, StateFailed, StatePending, StateProcessing}},
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.to), func(t *testing.T) {

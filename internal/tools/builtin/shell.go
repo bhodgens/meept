@@ -9,7 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -108,6 +110,16 @@ type FenceChecker interface {
 // ShellExecuteTool executes shell commands in a sandboxed subprocess.
 type ShellExecuteTool struct {
 	tools.ToolDefaults
+	// workingDir is the tool's EXPLICIT working-directory fallback for callers that
+	// are not bound to a session working directory (the terminal service's
+	// configured dir). It is EMPTY when the caller passed nothing — the daemon
+	// constructs the agent-path tool with "" and every per-session call then
+	// resolves the directory from the tool context.
+	//
+	// Issue #136: an empty workingDir used to be replaced by
+	// resolvePath(ctx, "~") at construction, which made "unset" and "explicitly
+	// HOME" indistinguishable and ran `shell pwd` in the daemon operator's home
+	// directory instead of the session worktree.
 	workingDir        string
 	defaultTimeout    time.Duration
 	securityOrch      *intsecurity.Orchestrator
@@ -139,11 +151,98 @@ func (t *ShellExecuteTool) SetSpillWriter(w SpillWriter) {
 	}
 }
 
-// NewShellExecuteTool creates a new shell execution tool.
-func NewShellExecuteTool(workingDir string, defaultTimeout time.Duration, ptyMgr *pty.Manager) *ShellExecuteTool {
-	if workingDir == "" {
-		workingDir, _ = resolvePath(context.Background(), "~")
+// shellExplicitWorkingDir reports whether the shell tool was constructed with
+// an EXPLICIT working directory.
+//
+// Issue #136: NewShellExecuteTool used to replace an empty workingDir with
+// resolvePath(ctx, "~") — the process HOME. That made "explicitly configured"
+// indistinguishable from the daemon-wide home fallback, and it is exactly the
+// daemon-wide fallback the AGENTS.md invariant forbids ("never fall back to the
+// daemon's CWD"; $HOME is the same class of guess). The field is now left EMPTY
+// when the caller passes nothing, so "no explicit dir" and "explicit dir" are
+// representable again and the resolution helper below can tell them apart.
+func (t *ShellExecuteTool) shellExplicitWorkingDir() bool {
+	if t == nil {
+		return false
 	}
+	// The pre-#136 constructor stored resolvePath(ctx, "~") for an empty
+	// argument, so a long-lived tool built by an older wiring path (or a test
+	// that pinned the old semantics) carries a HOME-shaped path in the field.
+	// That value is a daemon-wide guess, not an explicit configuration: never
+	// treat it as one. Matching is done on the FIELD SHAPE (a `~`-expansion),
+	// not on equality with os.UserHomeDir(), because the session working
+	// directory is itself often a home subdirectory (macOS test temp dirs live
+	// under /var/folders, but real worktrees routinely live under $HOME).
+	if t.workingDir == "" || isHomeExpansion(t.workingDir) {
+		return false
+	}
+	return true
+}
+
+// isHomeExpansion reports whether path is (a symlink-resolved spelling of) the
+// process home directory itself — the value NewShellExecuteTool used to store
+// for an empty workingDir. It is a heuristic on the OLD sentinel value only:
+// any other configured directory (including one under $HOME) stays explicit.
+func isHomeExpansion(path string) bool {
+	home, err := os.UserHomeDir()
+	if err != nil || path == "" || home == "" {
+		return false
+	}
+	if path == home {
+		return true
+	}
+	realPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return false
+	}
+	realHome, err := filepath.EvalSymlinks(home)
+	if err != nil {
+		return false
+	}
+	return realPath == realHome
+}
+
+// resolveShellWorkingDir resolves the directory a shell invocation must run in,
+// in this precedence order:
+//
+//  1. args["working_dir"] when the caller supplied one (resolved via resolvePath
+//     so ~ and relative-to-session forms keep working);
+//  2. the session working directory injected by the agent loop
+//     (tools.ContextWithWorkingDir) — the live, per-session binding;
+//  3. t.workingDir ONLY when it was explicitly configured at construction;
+//  4. otherwise an actionable tools.NoWorkingDirError("shell").
+//
+// Step 4 is the point of the fix: a shell call with nothing bound must REFUSE
+// with the detectable sentinel, never silently run in the process home.
+//
+// rule is the caller's label for error messages ("shell" / "shell pty") and
+// exists only so the sentinel text can name the failing surface.
+func (t *ShellExecuteTool) resolveShellWorkingDir(ctx context.Context, args map[string]any, rule string) (string, error) {
+	if wd, ok := args["working_dir"].(string); ok && strings.TrimSpace(wd) != "" {
+		resolved, err := resolvePath(ctx, wd)
+		if err != nil {
+			return "", fmt.Errorf("invalid working directory: %w", err)
+		}
+		return resolved, nil
+	}
+	if wd := tools.WorkingDirFromContext(ctx); wd != "" {
+		return wd, nil
+	}
+	if t.shellExplicitWorkingDir() {
+		return t.workingDir, nil
+	}
+	return "", tools.NoWorkingDirError(rule)
+}
+
+// NewShellExecuteTool creates a new shell execution tool.
+//
+// workingDir is the tool's EXPLICIT fallback for callers that are not bound to
+// a session working directory (the terminal service's configured dir). An empty
+// value stays empty: the daemon constructs the agent-path tool with "" and
+// every per-session call then resolves the directory from the tool context
+// (issue #136 — the former "~" fallback ran `shell pwd` in the daemon
+// operator's home directory instead of the session worktree).
+func NewShellExecuteTool(workingDir string, defaultTimeout time.Duration, ptyMgr *pty.Manager) *ShellExecuteTool {
 	if defaultTimeout == 0 {
 		defaultTimeout = DefaultShellTimeout
 	}
@@ -471,14 +570,12 @@ func (t *ShellExecuteTool) Execute(ctx context.Context, args map[string]any) (an
 		timeout = time.Duration(timeoutSec) * time.Second
 	}
 
-	// Parse working directory
-	workDir := t.workingDir
-	if wd, ok := args["working_dir"].(string); ok && wd != "" {
-		resolved, err := resolvePath(ctx, wd)
-		if err != nil {
-			return nil, fmt.Errorf("invalid working directory: %w", err)
-		}
-		workDir = resolved
+	// Parse working directory (issue #136): explicit arg > session context binding
+	// > explicitly configured tool dir > actionable refusal. Never the process
+	// home, never the daemon's CWD.
+	workDir, err := t.resolveShellWorkingDir(ctx, args, "shell")
+	if err != nil {
+		return nil, err
 	}
 
 	// Check fence boundaries
@@ -732,14 +829,12 @@ func (t *ShellExecuteTool) ExecuteStreaming(ctx context.Context, args map[string
 		timeout = time.Duration(timeoutSec) * time.Second
 	}
 
-	// Parse working directory
-	workDir := t.workingDir
-	if wd, ok := args["working_dir"].(string); ok && wd != "" {
-		resolved, err := resolvePath(ctx, wd)
-		if err != nil {
-			return nil, fmt.Errorf("invalid working directory: %w", err)
-		}
-		workDir = resolved
+	// Parse working directory (issue #136): same resolution as Execute — explicit
+	// arg > session context binding > explicitly configured tool dir >
+	// actionable refusal.
+	workDir, err := t.resolveShellWorkingDir(ctx, args, "shell")
+	if err != nil {
+		return nil, err
 	}
 
 	// Check fence boundaries
@@ -1151,14 +1246,25 @@ func (t *ShellExecuteTool) GetRiskLevel(command string) security.RiskLevel {
 // PTYTool methods -------------------------------------------------------------
 
 // CreateSession creates a new PTY session.
+//
+// The interface carries no context, so this lane resolves the directory from
+// config.Dir first and then the tool's EXPLICITLY configured dir — never the
+// process home. Issue #136: the former code fell back to t.workingDir, which
+// used to hold resolvePath(ctx, "~"), so an unbound PTY ran in $HOME while the
+// fence was asked about $HOME too (fencing the wrong root). When nothing is
+// configured the session REFUSES with the actionable sentinel rather than
+// inheriting the daemon's (or the operator's home) directory.
 func (t *ShellExecuteTool) CreateSession(sessionID string, config tools.PTYSessionConfig) (*tools.PTYSessionInfo, error) {
 	// SECURITY FIX (2026-07-14): Always check fence boundaries before creating
 	// PTY sessions. Previously, the fence check was skipped when config.Dir
 	// was empty, allowing commands to execute outside the workspace.
-	// When Dir is empty, the command runs in the tool's default workingDir.
+	// When Dir is empty, the command runs in the tool's configured working dir.
 	checkDir := config.Dir
-	if checkDir == "" {
+	if checkDir == "" && t.shellExplicitWorkingDir() {
 		checkDir = t.workingDir
+	}
+	if checkDir == "" {
+		return nil, tools.NoWorkingDirError("shell pty")
 	}
 	if t.fenceChecker != nil {
 		if err := t.fenceChecker.CheckCommand(config.Cmd, checkDir); err != nil {
@@ -1173,7 +1279,7 @@ func (t *ShellExecuteTool) CreateSession(sessionID string, config tools.PTYSessi
 	ptyCfg := pty.SessionConfig{
 		Cmd:  config.Cmd,
 		Args: config.Args,
-		Dir:  config.Dir,
+		Dir:  checkDir,
 		Rows: config.Rows,
 		Cols: config.Cols,
 	}
@@ -1193,7 +1299,7 @@ func (t *ShellExecuteTool) CreateSession(sessionID string, config tools.PTYSessi
 		ID:        sessionID,
 		Cmd:       config.Cmd,
 		Args:      config.Args,
-		Dir:       config.Dir,
+		Dir:       ptyCfg.Dir,
 		CreatedAt: time.Now(),
 		Rows:      ptyCfg.Rows,
 		Cols:      ptyCfg.Cols,

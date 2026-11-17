@@ -21,6 +21,122 @@ const (
 	KeyStatus = "status"
 )
 
+// taskEventSource is the bus message Source on every task notification.
+const taskEventSource = "task-registry"
+
+// TaskUpdateEvent is the payload of the task.ev.update notification: a task
+// row changed and this is its new state. Frozen wire shape (task_id, state) —
+// five of the six task.update publish sites carried exactly this map before the
+// typed migration.
+//
+// State is the TaskState string (TaskState.String()), never the enum's numeric
+// value, matching what every pre-migration publisher sent.
+type TaskUpdateEvent struct {
+	TaskID string `json:"task_id"`
+	State  string `json:"state"`
+}
+
+// TaskGoalLinkedEvent is the payload of the OTHER task.ev.update shape: a task
+// was stamped with its owning goal. SetGoalID published {task_id, goal_id} —
+// no state key — so it is a distinct type rather than a union struct with an
+// omitempty field. A union would emit "state":"" on the goal path, which is a
+// different wire shape from what shipped.
+type TaskGoalLinkedEvent struct {
+	TaskID string `json:"task_id"`
+	GoalID string `json:"goal_id"`
+}
+
+// Typed topics for the task.ev.* notification namespace. Names are the wire
+// contract (taskEventTopic), so a typed publisher and a raw subscriber on the
+// same name interoperate — that is what keeps the TUI/plan/WS consumers
+// working while the producer side becomes compiler-checked.
+//
+// Declared as package vars beside the payload structs, per the
+// internal/kanban/events.go and internal/storage/events.go precedent.
+var (
+	// TopicTaskUpdate carries TaskUpdateEvent — state changes and row updates.
+	TopicTaskUpdate = bus.NewTopic[TaskUpdateEvent](taskEventTopic("task.update"))
+	// TopicTaskUpdateGoal carries TaskGoalLinkedEvent — SetGoalID's distinct
+	// {task_id, goal_id} payload on the same wire topic.
+	TopicTaskUpdateGoal = bus.NewTopic[TaskGoalLinkedEvent](taskEventTopic("task.update"))
+)
+
+// publishTaskUpdate emits a task.ev.update notification carrying the task's
+// current state. It replaces the five hand-rolled map[string]any publishes
+// that used to build {task_id, state} inline; the typed payload is what makes
+// a key typo or a missing key a compile error instead of a silent consumer
+// failure.
+//
+// Uses PublishExternalOnly (not PublishT) because bus.PublishT always publishes
+// and would therefore lose the registry's two hard rules:
+//
+//   - a nil bus must be a no-op (a registry built without a bus publishes
+//     nothing, and that path is exercised by tests and embedded callers);
+//   - a notification must NEVER land on a command topic. The registry's own
+//     request handler subscribes to "task.update", "task.create", etc., and
+//     executes every message it receives — a notification there is what caused
+//     the 2026-10-08 self-replication incident (513M task rows). publishEvent
+//     is the choke point that enforces it and it is unchanged.
+//
+// Note: this path leaves BusMessage.ID empty, where models.NewBusMessage set a
+// generated ID. No task.ev.* consumer reads ID (the WS relay copies it only for
+// chat_message frames), and it matches every other typed publish in the repo.
+func (r *Registry) publishTaskUpdate(taskID string, state TaskState) {
+	r.publishEventTyped(TopicTaskUpdate.Name, TaskUpdateEvent{
+		TaskID: taskID,
+		State:  state.String(),
+	})
+}
+
+// publishTaskGoalLinked emits the goal-linkage variant of task.ev.update.
+// Same nil-bus and command-topic rules as publishTaskUpdate.
+func (r *Registry) publishTaskGoalLinked(taskID, goalID string) {
+	r.publishEventTyped(TopicTaskUpdateGoal.Name, TaskGoalLinkedEvent{
+		TaskID: taskID,
+		GoalID: goalID,
+	})
+}
+
+// publishEventTyped is the typed sibling of publishEvent: it marshals payload
+// and publishes it on topicName, keeping publishEvent's command-topic guard and
+// nil-bus no-op. Payload types are checked at the call site by Topic[T], so a
+// caller cannot pass a map with a misspelled key.
+//
+// The envelope mirrors what models.NewBusMessage produced (Type=event, Source,
+// Timestamp) so the typed path is wire-identical to the map path it replaced.
+// ID stays EMPTY, matching every other typed publish in the repo
+// (bus.PublishT sets no ID) — no task.ev.* consumer reads it; the WS relay
+// copies ID into the frame only for chat_message topics.
+//
+// json.Marshal failure is payload-dependent, not type-dependent: TaskUpdateEvent
+// and TaskGoalLinkedEvent contain only strings, so it cannot fail for them; an
+// error here is a programming error in a new payload type and is logged and
+// dropped rather than panicking mid-state-change.
+func (r *Registry) publishEventTyped(topicName string, payload any) {
+	if r.bus == nil {
+		return
+	}
+	if strings.HasPrefix(topicName, "task.") && !strings.HasPrefix(topicName, taskEventPrefix) {
+		r.logger.Error("refusing to publish a task event on a command topic",
+			"topic", topicName, "required_prefix", taskEventPrefix)
+		return
+	}
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		r.logger.Error("Failed to marshal task event payload",
+			"topic", topicName, "error", err)
+		return
+	}
+
+	r.bus.PublishExternalOnly(topicName, &models.BusMessage{
+		Type:      models.MessageTypeEvent,
+		Source:    taskEventSource,
+		Timestamp: time.Now().UTC(),
+		Payload:   data,
+	})
+}
+
 // Registry manages tasks and provides a unified API.
 type Registry struct {
 	store           *Store
@@ -177,10 +293,7 @@ func (r *Registry) Update(ctx context.Context, task *Task) error {
 		return err
 	}
 
-	r.publishEvent(taskEventTopic("task.update"), map[string]any{
-		KeyTaskID: task.ID,
-		"state":   task.State.String(),
-	})
+	r.publishTaskUpdate(task.ID, task.State)
 
 	return nil
 }
@@ -238,12 +351,68 @@ func (r *Registry) ListSummaries(ctx context.Context, limit int) ([]TaskSummary,
 	return summaries, nil
 }
 
-// UpdateState changes a task's state.
+// UpdateState changes a task's state through the transition guard (issue #135).
+//
+// Caller classification (grep `-rn 'UpdateState\|handleUpdate\|TaskService.*Update'
+// --include=*.go`, 2026-11-15):
+//
+//	REGISTRY.UpdateState (this method) — every in-tree caller is an INTERNAL
+//	component driving a task it owns through a legal edge, i.e. should-be-checked:
+//	  - internal/task/registry_test.go:145,236 (tests: pending->executing)
+//	  - internal/task/registry_completejob_pin_test.go:60 (test staging)
+//	  - internal/task/kanban_events_test.go:126,160,228,231 (publisher tests, walk
+//	    taskTransitions keys — every edge driven is legal by construction)
+//	  - internal/services/task_service_cancel_pin_test.go:34-83 (test staging for
+//	    the terminal-state pins; every chain is pending->...->terminal)
+//	  - internal/agent/recall_answer_test.go:51,143 (test staging)
+//	  - production callers: NONE. Grep across internal/, cmd/, pkg/ finds no
+//	    non-test caller. Kept (rather than deleted) because it is the registry's
+//	    generic state driver and the deadcode gate churns on removals.
+//	REGISTRY.Update (raw row write, NOT this method) — bypasses the guard by
+//	design and stays that way; it is a field-level row write used by
+//	amendment_handlers.go:54 (ContextQuery only), taskCreatorAdapter.SetTaskJobCount
+//	(internal/daemon/daemon.go:3450), handleCancel and the agent planners, which
+//	mutate fields they read back from the store. None of them set .State, so
+//	none of them is a state-write path. Wrapping Update would break all of them.
+//	HANDLER.handleUpdate (task.update bus contract) — should-be-checked; the
+//	RPC (internal/rpc/proxy.go:210) and HTTP (PUT /api/v1/tasks/{id}) surfaces
+//	both proxy onto it.
+//	TASKSERVICE.Update — should-be-checked; reached from
+//	internal/comm/http/api_handlers.go:761.
+//
+// LEGITIMATE FREE-FORM NEED: admin recovery. An operator repairing a stuck or
+// mis-seeded task must be able to force an edge the table forbids (e.g.
+// completed -> pending to re-run it). That need is real but it must be
+// EXPLICIT and AUDITED, so it lives in UpdateStateUnchecked — the default a
+// new caller reaches for is the checked form.
 //
 // Read-modify-write is performed under a single write lock to prevent lost
 // updates from concurrent callers (the previous Get+mutate+Update sequence
 // released the read lock between the read and the write).
 func (r *Registry) UpdateState(ctx context.Context, taskID string, state TaskState) error {
+	return r.updateState(ctx, taskID, state, false, "")
+}
+
+// UpdateStateUnchecked is the explicit operator escape hatch around
+// UpdateState's transition guard (issue #135): it forces `state` onto a task
+// regardless of the current edge, and LOGS the override at Warn with the
+// caller-supplied reason. Use it ONLY for admin recovery of a stuck or
+// mis-seeded task; the reason must name why the guard was bypassed, because
+// that log line is the audit record for the illegal edge.
+//
+// The state ENUM is still validated — this is a transition-table override, not
+// a license to persist arbitrary strings.
+func (r *Registry) UpdateStateUnchecked(ctx context.Context, taskID string, state TaskState, reason string) error {
+	return r.updateState(ctx, taskID, state, true, reason)
+}
+
+// updateState is the shared body behind UpdateState (checked) and
+// UpdateStateUnchecked (audited override).
+func (r *Registry) updateState(ctx context.Context, taskID string, state TaskState, force bool, reason string) error {
+	if err := validateTaskStateString(string(state)); err != nil {
+		return err
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -264,17 +433,33 @@ func (r *Registry) UpdateState(ctx context.Context, taskID string, state TaskSta
 	// which publishes nothing, is visible as such).
 	oldState := task.State
 
-	task.SetState(state)
+	switch {
+	case task.State == state:
+		// Not a transition at all: nothing to guard, nothing to publish.
+	case force:
+		if reason == "" {
+			reason = "unspecified"
+		}
+		r.logger.Warn("task state transition override",
+			KeyTaskID, taskID,
+			"from", oldState.String(),
+			"to", state.String(),
+			"reason", reason,
+		)
+		task.SetState(state)
+	default:
+		if err := task.SetStateChecked(state); err != nil {
+			return fmt.Errorf("%w (%s)", err, AllowedTransitionsText())
+		}
+	}
+
 	if err := r.store.Update(task); err != nil {
 		return err
 	}
 
 	r.publishTaskState(task.ID, oldState, task.State, kanban.EventReasonUpdateState)
 
-	r.publishEvent(taskEventTopic("task.update"), map[string]any{
-		KeyTaskID: task.ID,
-		"state":   task.State.String(),
-	})
+	r.publishTaskUpdate(task.ID, task.State)
 	return nil
 }
 
@@ -368,10 +553,7 @@ func (r *Registry) SetGoalID(ctx context.Context, taskID, goalID string) error {
 	if err := r.store.Update(t); err != nil {
 		return err
 	}
-	r.publishEvent(taskEventTopic("task.update"), map[string]any{
-		KeyTaskID: t.ID,
-		"goal_id": goalID,
-	})
+	r.publishTaskGoalLinked(t.ID, goalID)
 	return nil
 }
 
@@ -468,10 +650,7 @@ func (r *Registry) IncrementJobCount(ctx context.Context, taskID string) error {
 		return err
 	}
 
-	r.publishEvent(taskEventTopic("task.update"), map[string]any{
-		KeyTaskID: task.ID,
-		"state":   task.State.String(),
-	})
+	r.publishTaskUpdate(task.ID, task.State)
 	return nil
 }
 
@@ -523,10 +702,7 @@ func (r *Registry) CompleteJob(ctx context.Context, taskID string) error {
 		return err
 	}
 
-	r.publishEvent(taskEventTopic("task.update"), map[string]any{
-		KeyTaskID: task.ID,
-		"state":   task.State.String(),
-	})
+	r.publishTaskUpdate(task.ID, task.State)
 	return nil
 }
 
@@ -555,10 +731,7 @@ func (r *Registry) FailJob(ctx context.Context, taskID string) error {
 		return err
 	}
 
-	r.publishEvent(taskEventTopic("task.update"), map[string]any{
-		KeyTaskID: task.ID,
-		"state":   task.State.String(),
-	})
+	r.publishTaskUpdate(task.ID, task.State)
 	return nil
 }
 
@@ -844,7 +1017,17 @@ func (h *Handler) handleUpdate(ctx context.Context, msg *models.BusMessage) (any
 		task.Description = params.Description
 	}
 	if params.State != "" {
-		task.SetState(TaskState(params.State))
+		// Issue #135: this was a raw SetState(TaskState(params.State)) — an
+		// unvalidated state string from the task.update bus contract (proxied
+		// by RPC task.update and HTTP PUT /api/v1/tasks/{id}) reached the
+		// store with no enum check and no transition check. Validate the enum,
+		// then enforce the edge, before any field is persisted.
+		if err := validateTaskStateString(params.State); err != nil {
+			return nil, err
+		}
+		if err := task.SetStateChecked(TaskState(params.State)); err != nil {
+			return nil, fmt.Errorf("%w (%s)", err, AllowedTransitionsText())
+		}
 	}
 	if params.ProjectDir != "" {
 		task.ProjectDir = params.ProjectDir
