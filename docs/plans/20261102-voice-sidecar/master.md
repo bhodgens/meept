@@ -270,25 +270,25 @@ files, then releases the wave.
 
 ## Completion Tracking Table
 
-| Leaf | Status | Notes |
-|------|--------|-------|
-| 00T | COMPLETE | gate tests landed + validated (see Test Gate matrix above) |
-| 01 | COMPLETE | config schema + templates |
-| 02 | COMPLETE | telnyx webhook + media |
-| 03 | COMPLETE | manager + call events |
-| 04 | COMPLETE | splice + pacing |
-| 05 | COMPLETE | dial + effects |
-| 06 | COMPLETE | registry + one-live-call |
-| 07 | COMPLETE | supervisor gate |
-| 08 | COMPLETE | day brief |
-| 09 | COMPLETE | child proc + lifecycle |
-| 10 | COMPLETE | plain loopback listener |
-| 11 | COMPLETE | talk loop + greeting/filler |
-| 12 | COMPLETE | routes fail-closed |
-| 13 | COMPLETE | keys redaction + secrets lanes |
-| 14 | COMPLETE | daemon wiring |
-| 15 | COMPLETE | manifest is shared-write: merged, never overwritten |
-| 16 | PARTIAL | docs + internal/voice/AGENTS.md + root AGENTS.md row landed; Makefile `make install` meept-voice target and docs/features.md row still PENDING |
+| Leaf | Status | Landing SHA | Notes |
+|------|--------|-------------|-------|
+| 00T | COMPLETE | 537c92fd | gate tests landed + validated (see Test Gate matrix above) |
+| 01 | COMPLETE | 52f72040 | config schema + templates |
+| 02 | COMPLETE | 52f72040 | telnyx webhook + media |
+| 03 | COMPLETE | a25997c7 | manager + call events (socket protocol C1/C2) |
+| 04 | COMPLETE | 1cde70fc | splice + pacing (day brief C7 in same wave) |
+| 05 | COMPLETE | 1dfb8d22 | dial + effects |
+| 06 | COMPLETE | 32f71d74 | registry + one-live-call |
+| 07 | COMPLETE | 523f23af | supervisor gate |
+| 08 | COMPLETE | ba6fd76c | day brief |
+| 09 | COMPLETE | f65a60bd | child proc + lifecycle |
+| 10 | COMPLETE | 9827555a | plain loopback listener |
+| 11 | COMPLETE | af3d41be | talk loop + greeting/filler |
+| 12 | COMPLETE | 359e3f64 | routes fail-closed |
+| 13 | COMPLETE | 94d7f782 | keys redaction + secrets lanes |
+| 14 | COMPLETE | 0e36ed76 | daemon wiring (restored tree-wide at c265636d) |
+| 15 | COMPLETE | 18a1cdbec | manifest is shared-write: merged, never overwritten |
+| 16 | COMPLETE | bbe86771, c265636d, d18ac93f | docs + graphs + AGENTS.md + Makefile install surface + meept-voice-install target (issue #150); see reconciliation note below |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS |
 IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED | PARTIAL
@@ -302,6 +302,34 @@ full contract), leaf 16 PARTIAL (its docs half landed: spec status flip,
 invariant docs, root package-table row; its build half — the Makefile
 install target for cmd/meept-voice and the docs/features.md row — is
 still pending).
+
+Reconciliation note (2026-11-16): leaf 16 flipped PARTIAL -> COMPLETE. The
+remaining build-half work (Makefile `build-voice` target wired into
+`build`/`install-install-order`/`install-bin`, and the docs/features.md
+Voice Sidecar row) had already landed at HEAD in bbe86771 (leaf 16 docs +
+AGENTS.md + Makefile voice install), c265636d (post-sweep tree restore
+carrying internal/voice/AGENTS.md + wiring), and d18ac93f (meept-voice in
+make targets + delegation docs, audit VS-2 remainder). Verified at HEAD:
+`make build` includes build-voice; `make install` copies meept-voice via
+install-bin (Makefile:514); `make -n build-voice` and `make -n install-bin`
+dry-runs clean; `make build-voice` produces a 35M bin/meept-voice;
+docs/features.md carries the Voice Sidecar row; spec is Implemented (rev 3
++ as-built) with the `meept voice` CLI deferral recorded
+(docs/workflows/voice-sidecar.md:759). Leaf SHAs above verified present
+via `git cat-file -e <sha>^{commit}`. Not re-verified here (per handoff
+scope): per-leaf wiring re-audit, live `make install` end-to-end (needs
+Flutter), make docs-generate/graphs-check regeneration (leaf 14/16 commits
+already carry the regenerated trees).
+
+Issue #150 follow-up (2026-11-16): the tracking-table flip landed in the
+prior edit but the dedicated target was still missing - `install-bin`
+copies all four binaries and `make install` must stay unchanged, so a
+standalone `meept-voice-install` target was added (installs only
+bin/meept-voice to $(DESTDIR)$(BINDIR), DESTDIR-honored, no build; run
+`make build-voice` first), with a matching help-text line and zero overlap
+with `make install`. Leaf-16 evidence: Makefile `meept-voice-install`
+(`make -n meept-voice-install` dry-runs clean) + docs/features.md Voice
+Sidecar row (present, links docs/workflows/voice-sidecar.md).
 
 ## Integration Test Plan
 
