@@ -130,6 +130,16 @@ func (st *parityStub) hitCount() int {
 	return st.hits
 }
 
+// chatModelHits returns the request count for ONE model id — the
+// chat-lane-only subset of hitCount (classifier/ambient/summarizer
+// traffic hits other model names and must not pollute zero-dispatch
+// assertions).
+func (st *parityStub) chatModelHits(model string) int {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	return st.byModel[model]
+}
+
 func (st *parityStub) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	var body map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -980,6 +990,16 @@ func waitTerminal(t *testing.T, sess *busSession, subID, turnID string, timeout 
 					}
 					var payload terminalEvent
 					if json.Unmarshal(ev.Payload, &payload) != nil || payload.TurnID != turnID {
+						continue
+					}
+					// RULING (orchestrator, 2026-11-17): "parked" is the
+					// async-ack's accepted-not-finished state — the CLI's
+					// own submitAndAwait (cmd/meept/chat_async.go) skips it
+					// and keeps waiting for the task_completed_relay, which
+					// re-broadcasts under the SAME turn id. The first
+					// parked event is not terminal; returning it here made
+					// T15 read the ack as the verdict. Mirror the CLI.
+					if payload.Status == "parked" {
 						continue
 					}
 					return payload
