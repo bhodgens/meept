@@ -46,13 +46,16 @@ package rpc
 // missing grant) and parameter errors are returned as Go errors carrying the
 // FROZEN C1 error text ("lease held by <holder> since <RFC3339>", "WIP limit
 // reached for column <id>: <limit>", "unknown card: <id>", "missing grant
-// <g>"). All three surfaces parse refusals from the transport-error path with
-// regexes over exactly those strings (CLI kanbanError, TUI
-// kanbanRefusalMessage, Dart mapStatusError/_parseLeaseHeld/_parseWipFull
-// behind the gateway's 502) — a success-body envelope would make the TUI and
-// the Flutter bridge treat a refusal as success. Parameter errors wrap
-// ErrKanbanInvalidParams (registered with errcls) so server.dispatch maps
-// them to JSON-RPC -32602 InvalidParams.
+// <g>"). Parsing converges only on 'lease held' and 'WIP limit reached':
+// all three surfaces regex those (CLI kanbanError, TUI
+// kanbanRefusalMessage, Dart _parseLeaseHeld/_parseWipFull behind the
+// gateway's 502). 'unknown card' is strict-parsed only by Dart
+// (kanban_service.dart _parseUnknownCard); 'missing grant' is matched by
+// Dart prefix and CLI substring (kanbanGrants), and the TUI surfaces both
+// as opaque lowercased text. A success-body envelope would make the TUI
+// and the Flutter bridge treat a refusal as success. Parameter
+// errors wrap ErrKanbanInvalidParams (registered with errcls) so
+// server.dispatch maps them to JSON-RPC -32602 InvalidParams.
 
 import (
 	"context"

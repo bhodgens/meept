@@ -91,7 +91,11 @@ the frozen refusal text riding the body (`gateway.go:370-376`).
   (`subtle.ConstantTimeCompare` `pairing.go:248`); reuse, wrong, and
   missing codes all answer the SAME 401 `ErrInvalidPairCode` message
   ("invalid or already-used") — no store-state oracle (`pairing.go:84-88`,
-  `gateway.go:213`). Codes live in memory only: a restart re-mints.
+  `gateway.go:213`). Codes have a 10-minute TTL (pairCodeTTL,
+  `pairing.go:78`): expired codes are refused with the same uniform 401
+  as an unknown code, and deleted so a replay attacker cannot keep retrying.
+  The rate limit (M3) lives at the gateway HTTP layer. Codes live in
+  memory only: a restart re-mints.
 - **Empty-store boot state is 401-everything**: until a code is minted
   and exchanged the store knows no tokens and every API route refuses —
   deliberate; "a board reachable without auth is an outage waiting to
@@ -142,3 +146,7 @@ go list -deps ./internal/kanbansvc | grep sqlite          # must be empty
 ```
 e2e: suite `kanban-board` (manifest maps `internal/kanbansvc/` and
 `cmd/meept-kanban/` to it; drives the real sidecar binary).
+
+## L7 (code TTL)
+
+Pairing codes have a 10-minute TTL (`pairCodeTTL`, `internal/kanbansvc/pairing.go:78`). Expired codes are refused with the same uniform 401 `ErrInvalidPairCode` response as an unknown code — never distinguished — and deleted so a replay attacker cannot keep retrying (L7). The rate limiter (M3) lives at the gateway HTTP layer, not here.

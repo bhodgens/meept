@@ -13,10 +13,12 @@
 //     CALLER prints it once to the daemon console (the designed delivery
 //     channel, same as internal/comm/http/pairing.go); it must never be
 //     passed to the structured logger at info level and never returned over
-//     any authenticated surface.
+//     any authenticated surface. The code expires after pairCodeTTL (10m)
+//     and cannot be replayed.
 //   - ExchangePairCode(code) consumes the code on first use — reuse always
 //     fails — and returns a fresh 256-bit crypto/rand bearer token carrying
-//     the grant set the code was minted with.
+//     the grant set the code was minted with. Expired codes are refused with
+//     the same ErrInvalidPairCode response shape as an unknown code.
 //
 // Threat model / scope (mirrors the daemon pairing precedent, C7 binary
 // invariants):
@@ -30,6 +32,10 @@
 //     duplicate it.
 //   - The POST /kanban/pair/exchange + RPC registration is leaf 07/01; the
 //     Middleware here is the sidecar-middleware piece that wiring mounts.
+//   - Codes have a 10-minute TTL (pairCodeTTL): expired codes are refused
+//     with the same uniform 401 as an unknown code, and deleted so a
+//     replay attacker cannot keep retrying (L7). The rate limiter (M3)
+//     lives at the gateway HTTP layer, not here.
 package kanbansvc
 
 import (
@@ -45,6 +51,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/caimlas/meept/internal/config"
 )
@@ -75,6 +82,11 @@ const (
 
 	// tokenBytes is 256 bits of entropy per bearer token (hex-encoded).
 	tokenBytes = 32
+
+	// pairCodeTTL is how long a pairing code remains valid after minting.
+	// Codes older than this are rejected as invalid (same uniform 401 as an
+	// unknown code, per the no-oracle uniform-401 contract).
+	pairCodeTTL = 10 * time.Minute
 )
 
 // tokenFileSchemaVersion is the on-disk format tag; unknown versions refuse
@@ -93,6 +105,15 @@ type tokenFileRecord struct {
 	Tokens  map[string][]string `json:"tokens"`
 }
 
+// pairCodeRecord is the in-memory shape of an outstanding pairing code:
+// the grant set it arms plus the time it was minted (codes older than
+// pairCodeTTL are refused as invalid, not consumed, to keep the no-oracle
+// contract intact).
+type pairCodeRecord struct {
+	grants   []string
+	mintedAt time.Time
+}
+
 // TokenStore is the file-backed bearer-token store: token -> C5 grant set.
 // It satisfies GrantChecker (in-memory lookup, no I/O under the lock) and
 // mints tokens through single-use pairing codes. Safe for concurrent use.
@@ -102,7 +123,7 @@ type TokenStore struct {
 	// mu guards codes (outstanding pairing codes, in-memory only: a
 	// restart re-mints, exactly like the daemon pairing service).
 	mu    sync.Mutex
-	codes map[string][]string
+	codes map[string]pairCodeRecord
 
 	// grantsMu guards tokens. Grants() takes only a read lock and touches
 	// no I/O, so the hot auth path never blocks on disk.
@@ -121,7 +142,7 @@ func NewTokenStore(path string) (*TokenStore, error) {
 	}
 	s := &TokenStore{
 		path:   path,
-		codes:  make(map[string][]string),
+		codes:  make(map[string]pairCodeRecord),
 		tokens: make(map[string][]string),
 	}
 	if err := s.load(); err != nil {
@@ -200,8 +221,9 @@ func (s *TokenStore) Revoke(token string) error {
 // GeneratePairCode mints a single-use pairing code carrying the given C5
 // grants and returns it. The caller prints it ONCE to the daemon console —
 // never to the structured logger at info level — and the code is consumed by
-// the first successful ExchangePairCode. Codes live only in memory: a
-// restart simply re-mints, matching the daemon's GUI pairing precedent.
+// the first successful ExchangePairCode (provided it has not expired). Codes
+// older than pairCodeTTL are refused as invalid, not consumed, so a replay
+// attacker never learns whether a code was seen.
 func (s *TokenStore) GeneratePairCode(grants ...string) (string, error) {
 	if s == nil {
 		return "", errors.New("kanbansvc: token store is nil")
@@ -219,7 +241,7 @@ func (s *TokenStore) GeneratePairCode(grants ...string) (string, error) {
 	// overwriting replaces the grant set of the (unused) earlier code,
 	// which is the least surprising outcome for the operator who has not
 	// typed either yet.
-	s.codes[code] = clean
+	s.codes[code] = pairCodeRecord{grants: clean, mintedAt: time.Now()}
 	s.mu.Unlock()
 	return code, nil
 }
@@ -229,7 +251,9 @@ func (s *TokenStore) GeneratePairCode(grants ...string) (string, error) {
 // minted with. Single-use — the code is deleted before the token is minted,
 // so a second exchange of the same code returns ErrInvalidPairCode even if
 // minting or persisting then fails (fail-closed: a half-used code never
-// grants a second chance).
+// grants a second chance). Codes older than pairCodeTTL are refused as
+// invalid (same uniform 401 as an unknown code, per the no-oracle contract);
+// the code is deleted so an attacker cannot keep retrying with it.
 func (s *TokenStore) ExchangePairCode(presented string) (string, []string, error) {
 	if s == nil {
 		return "", nil, errors.New("kanbansvc: token store is nil")
@@ -241,12 +265,19 @@ func (s *TokenStore) ExchangePairCode(presented string) (string, []string, error
 	var grants []string
 	found := false
 	s.mu.Lock()
-	for code, set := range s.codes {
+	for code, rec := range s.codes {
+		// Drop expired codes silently so an attacker cannot distinguish
+		// expired from unknown via timing — they all answer the same
+		// uniform 401.
+		if time.Since(rec.mintedAt) > pairCodeTTL {
+			delete(s.codes, code)
+			continue
+		}
 		// Constant-time compare so a local attacker timing the loop
 		// learns nothing about the outstanding code (mirrors the
 		// daemon pairing exchange).
 		if subtle.ConstantTimeCompare([]byte(code), []byte(normalized)) == 1 {
-			grants = append([]string(nil), set...)
+			grants = append([]string(nil), rec.grants...)
 			found = true
 			delete(s.codes, code)
 			break

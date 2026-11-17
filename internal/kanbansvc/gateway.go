@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -67,6 +68,50 @@ type GrantChecker interface {
 // single-use pairing code in the body IS the credential, so authorize
 // never runs on it. Everything else under /api/v1/ stays grant-gated.
 const pairExchangePath = "/api/v1/pair/exchange"
+
+// pairRateLimiterWindow is the sliding window for the per-IP pair/exchange
+// rate limit (M3). Requests outside the window are allowed.
+const pairRateLimiterWindow = 30 * time.Second
+
+// pairRateLimiterMax is the maximum number of exchange attempts per window.
+const pairRateLimiterMax = 5
+
+// ipRateLimitEntry tracks one IP's window state for the pair/exchange
+// rate limit.
+type ipRateLimitEntry struct {
+	windowStart time.Time
+	count       int
+}
+
+// pairRateLimiter is a small in-process per-IP fixed-window rate limiter.
+// No external dependency — a fixed 30s window keyed by client IP, used here
+// for the pair/exchange route that is reachable in TLS-proxy deployments.
+type pairRateLimiter struct {
+	mu sync.Mutex
+	m  map[string]ipRateLimitEntry
+}
+
+// allowed reports whether the client at key has budget left in the current
+// window. If the window has expired, the counter resets and the request is
+// allowed. A nil receiver is a no-op pass.
+func (r *pairRateLimiter) allowed(key string) bool {
+	if r == nil {
+		return true
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	now := time.Now()
+	entry, ok := r.m[key]
+	if !ok || now.Sub(entry.windowStart) >= pairRateLimiterWindow {
+		// New window — allow the first request.
+		r.m[key] = ipRateLimitEntry{windowStart: now, count: 1}
+		return true
+	}
+	// Same window.
+	entry.count++
+	r.m[key] = entry
+	return entry.count <= pairRateLimiterMax
+}
 
 // route describes one REST endpoint and the RPC method it forwards to.
 type route struct {
@@ -129,6 +174,11 @@ type Gateway struct {
 	// deployment: the proxy presents the PUBLIC Origin, which the
 	// loopback-only check otherwise rejects.
 	allowedOrigins []string
+
+	// pairRateLimiter is the per-IP rate limiter for the pair/exchange
+	// route (M3). Set via SetPairRateLimiter. A nil limiter is a no-op —
+	// every request is allowed.
+	pairRateLimiter *pairRateLimiter
 }
 
 // NewGateway wires the sidecar gateway. Every dependency is required: a nil
@@ -144,7 +194,8 @@ func NewGateway(rpc RPCCaller, events EventSource, authz GrantChecker, staticDir
 	if authz == nil {
 		return nil, errors.New("kanbansvc: grant checker is required")
 	}
-	g := &Gateway{rpc: rpc, events: events, authz: authz}
+	g := &Gateway{rpc: rpc, events: events, authz: authz,
+		pairRateLimiter: &pairRateLimiter{m: make(map[string]ipRateLimitEntry)}}
 	if staticDir != "" {
 		g.static = http.StripPrefix("/web", http.FileServer(http.Dir(staticDir)))
 	}
@@ -225,9 +276,7 @@ func (g *Gateway) serveAPI(w http.ResponseWriter, r *http.Request) {
 // /api/v1/ stays grant-gated. A wrong, consumed, or missing code is 401
 // with ErrInvalidPairCode's message — one error for all three shapes, so a
 // caller cannot oracle the store. The code and the minted token are never
-// logged. No rate limiter exists in the pairing layer, and none is invented
-// here: single-use consumption + constant-time compare are the pairing
-// contract's defenses (mirrors the daemon's own pair/exchange handler).
+// logged. Per-IP rate limit (M3) is enforced before the store is touched.
 func (g *Gateway) handlePairExchange(w http.ResponseWriter, r *http.Request) {
 	if g.pairing == nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "pairing is not armed on this sidecar")
@@ -236,6 +285,15 @@ func (g *Gateway) handlePairExchange(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	// Per-IP rate limit (M3): reject rapid exchange attempts before the
+	// code is consumed, so a remote attacker cannot brute-force codes in
+	// volume. The limiter is keyed by the request's client IP, which is
+	// either the direct RemoteAddr (loopback-only bind) or X-Forwarded-For
+	// (TLS-proxy deployment).
+	if !g.pairRateLimiter.allowed(requestIP(r)) {
+		writeJSONError(w, http.StatusTooManyRequests, "too many pair exchange attempts")
 		return
 	}
 	var body struct {
@@ -260,6 +318,25 @@ func (g *Gateway) handlePairExchange(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(map[string]any{"token": token, "grants": grants}); err != nil {
 		slog.Warn("kanban gateway: exchange reply write failed", "error", err)
 	}
+}
+
+// requestIP extracts the client IP from the request. In TLS-proxy
+// deployments the proxy sets X-Forwarded-For; otherwise it returns the
+// direct RemoteAddr. The pair/exchange rate limiter (M3) is keyed by this
+// value, so the limiter distinguishes independent attackers in a proxy.
+func requestIP(r *http.Request) string {
+	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+		// The leftmost entry is the original client; strip it for the
+		// limiter key.
+		if i := strings.IndexByte(fwd, ','); i >= 0 {
+			return strings.TrimSpace(fwd[:i])
+		}
+		return strings.TrimSpace(fwd)
+	}
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
 }
 
 // buildParams turns the request into RPC params: query values for reads (a
@@ -457,6 +534,16 @@ func (g *Gateway) SetAllowedOrigins(origins []string) {
 		}
 	}
 	g.allowedOrigins = normalized
+}
+
+// SetPairRateLimiter arms the per-IP rate limiter for the pair/exchange
+// route (M3). A nil limiter leaves every request allowed; pass one when the
+// sidecar is reachable over a TLS proxy.
+func (g *Gateway) SetPairRateLimiter(limit *pairRateLimiter) {
+	if g == nil {
+		return
+	}
+	g.pairRateLimiter = limit
 }
 
 // normalizeOrigin canonicalizes an Origin to lowercase scheme://host with

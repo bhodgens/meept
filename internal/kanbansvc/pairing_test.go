@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/caimlas/meept/internal/config"
 )
@@ -296,5 +297,109 @@ func TestTokenStore_PairCodesAreDistinct(t *testing.T) {
 			t.Fatalf("duplicate pair code %q", code)
 		}
 		seen[code] = true
+	}
+}
+
+// TestTokenStore_PairCodeTTL_ExpiresRejects pins the L7 contract:
+// an expired code is refused with ErrInvalidPairCode, exactly like an
+// unknown code — no store-state oracle.
+func TestTokenStore_PairCodeTTL_ExpiresRejects(t *testing.T) {
+	store := newTempStore(t)
+	code, err := store.GeneratePairCode(GrantRead)
+	if err != nil {
+		t.Fatalf("GeneratePairCode: %v", err)
+	}
+
+	// Advance time past the TTL to mark the code expired.
+	store.mu.Lock()
+	rec := store.codes[code]
+	rec.mintedAt = rec.mintedAt.Add(-pairCodeTTL - time.Second)
+	store.codes[code] = rec
+	store.mu.Unlock()
+
+	// Expired code: must be refused, not consumed.
+	if _, _, err := store.ExchangePairCode(code); !errors.Is(err, ErrInvalidPairCode) {
+		t.Fatalf("expired code exchange err = %v, want ErrInvalidPairCode", err)
+	}
+	// Second attempt on the same expired code: still refused (no oracle).
+	if _, _, err := store.ExchangePairCode(code); !errors.Is(err, ErrInvalidPairCode) {
+		t.Fatalf("second expired exchange err = %v, want ErrInvalidPairCode", err)
+	}
+
+	// Unknown code: same error, for the no-oracle contract.
+	if _, _, err := store.ExchangePairCode("UNKNOWNCODE"); !errors.Is(err, ErrInvalidPairCode) {
+		t.Fatalf("unknown code err = %v, want ErrInvalidPairCode", err)
+	}
+
+	// A fresh code still works.
+	code2, err := store.GeneratePairCode(GrantRead)
+	if err != nil {
+		t.Fatalf("GeneratePairCode(fresh): %v", err)
+	}
+	token, grants, err := store.ExchangePairCode(code2)
+	if err != nil {
+		t.Fatalf("fresh code exchange: %v", err)
+	}
+	if len(token) < 32 {
+		t.Fatalf("minted token too short: %q", token)
+	}
+	if !hasGrantName(grants, GrantRead) {
+		t.Fatalf("grants %v lack GrantRead", grants)
+	}
+}
+
+// TestTokenStore_PairCodeTTL_ValidWithinWindow proves a code minted less
+// than pairCodeTTL ago is still accepted.
+func TestTokenStore_PairCodeTTL_ValidWithinWindow(t *testing.T) {
+	store := newTempStore(t)
+	code, err := store.GeneratePairCode(GrantRead)
+	if err != nil {
+		t.Fatalf("GeneratePairCode: %v", err)
+	}
+
+	// Advance to just before expiry.
+	store.mu.Lock()
+	rec := store.codes[code]
+	rec.mintedAt = rec.mintedAt.Add(-pairCodeTTL + time.Millisecond)
+	store.codes[code] = rec
+	store.mu.Unlock()
+
+	token, _, err := store.ExchangePairCode(code)
+	if err != nil {
+		t.Fatalf("code minted < TTL ago was rejected: %v", err)
+	}
+	if len(token) < 32 {
+		t.Fatalf("minted token too short: %q", token)
+	}
+}
+
+// TestTokenStore_PairCodeTTL_DeletedAfterExpiry proves expired codes are
+// removed so a replay attacker cannot keep retrying.
+func TestTokenStore_PairCodeTTL_DeletedAfterExpiry(t *testing.T) {
+	store := newTempStore(t)
+	code, err := store.GeneratePairCode(GrantRead)
+	if err != nil {
+		t.Fatalf("GeneratePairCode: %v", err)
+	}
+
+	// Mark expired.
+	store.mu.Lock()
+	rec := store.codes[code]
+	rec.mintedAt = rec.mintedAt.Add(-pairCodeTTL - time.Second)
+	store.codes[code] = rec
+	store.mu.Unlock()
+
+	// First exchange deletes it.
+	_, _, err = store.ExchangePairCode(code)
+	if !errors.Is(err, ErrInvalidPairCode) {
+		t.Fatalf("first expired exchange err = %v, want ErrInvalidPairCode", err)
+	}
+
+	// The code must no longer be in the map (replay attacker cannot retry).
+	store.mu.Lock()
+	_, known := store.codes[code]
+	store.mu.Unlock()
+	if known {
+		t.Fatal("expired code still present after exchange")
 	}
 }

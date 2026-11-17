@@ -911,3 +911,105 @@ func TestGateway_WS_ProxyOrigin_WithAllowList(t *testing.T) {
 		conn.Close()
 	})
 }
+
+// TestGateway_PairExchangeRateLimit pins the M3 contract: the per-IP
+// rate limit on /api/v1/pair/exchange trips after pairRateLimiterMax
+// requests in pairRateLimiterWindow, and resets on a fresh window. A nil
+// limiter leaves every request allowed.
+func TestGateway_PairExchangeRateLimit(t *testing.T) {
+	t.Run("nil limiter allows everything", func(t *testing.T) {
+		gateway, _, readCode, _ := newPairGateway(t)
+		// Explicitly ensure the limiter is nil.
+		gateway.SetPairRateLimiter(nil)
+		for i := range pairRateLimiterMax + 1 {
+			rec := httptest.NewRecorder()
+			gateway.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/pair/exchange",
+				strings.NewReader(`{"code":"`+readCode+`"}`)))
+			if rec.Code == http.StatusTooManyRequests {
+				t.Fatalf("request %d with nil limiter got 429", i+1)
+			}
+		}
+	})
+
+	t.Run("rate limit trips after N requests from the same IP", func(t *testing.T) {
+		gateway, _, readCode, _ := newPairGateway(t)
+		limit := &pairRateLimiter{m: make(map[string]ipRateLimitEntry)}
+		gateway.SetPairRateLimiter(limit)
+		// Use the same X-Forwarded-For for every request to hit the same key.
+		for i := range pairRateLimiterMax {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/pair/exchange",
+				strings.NewReader(`{"code":"`+readCode+`"}`))
+			req.Header.Set("X-Forwarded-For", "1.2.3.4")
+			gateway.ServeHTTP(rec, req)
+			if rec.Code == http.StatusTooManyRequests {
+				t.Fatalf("request %d should have been allowed, got 429", i+1)
+			}
+		}
+		// The next one must trip.
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/pair/exchange",
+			strings.NewReader(`{"code":"`+readCode+`"}`))
+		req.Header.Set("X-Forwarded-For", "1.2.3.4")
+		gateway.ServeHTTP(rec, req)
+		if rec.Code != http.StatusTooManyRequests {
+			t.Fatalf("request %d: status = %d, want 429", pairRateLimiterMax+1, rec.Code)
+		}
+		// Different IP gets its own window.
+		rec2 := httptest.NewRecorder()
+		req2 := httptest.NewRequest(http.MethodPost, "/api/v1/pair/exchange",
+			strings.NewReader(`{"code":"`+readCode+`"}`))
+		req2.Header.Set("X-Forwarded-For", "5.6.7.8")
+		gateway.ServeHTTP(rec2, req2)
+		if rec2.Code == http.StatusTooManyRequests {
+			t.Fatal("different IP hit the same window")
+		}
+	})
+
+	t.Run("rate limit window resets on expiry", func(t *testing.T) {
+		gateway, _, readCode, _ := newPairGateway(t)
+		limit := &pairRateLimiter{m: make(map[string]ipRateLimitEntry)}
+		gateway.SetPairRateLimiter(limit)
+		// Exhaust the window.
+		for i := 0; i < pairRateLimiterMax; i++ {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/pair/exchange",
+				strings.NewReader(`{"code":"`+readCode+`"}`))
+			req.Header.Set("X-Forwarded-For", "1.2.3.4")
+			gateway.ServeHTTP(rec, req)
+		}
+		// The next request from the same IP should be denied.
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/pair/exchange",
+			strings.NewReader(`{"code":"`+readCode+`"}`))
+		req.Header.Set("X-Forwarded-For", "1.2.3.4")
+		gateway.ServeHTTP(rec, req)
+		if rec.Code != http.StatusTooManyRequests {
+			t.Fatalf("expected 429 after exhausting window, got %d", rec.Code)
+		}
+	})
+
+	t.Run("X-Forwarded-For leftmost entry is the key", func(t *testing.T) {
+		gateway, _, readCode, _ := newPairGateway(t)
+		limit := &pairRateLimiter{m: make(map[string]ipRateLimitEntry)}
+		gateway.SetPairRateLimiter(limit)
+		// First request from a chain.
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/pair/exchange",
+			strings.NewReader(`{"code":"`+readCode+`"}`))
+		req.Header.Set("X-Forwarded-For", "1.2.3.4, 5.6.7.8")
+		gateway.ServeHTTP(rec, req)
+		if rec.Code == http.StatusTooManyRequests {
+			t.Fatal("first request should be allowed")
+		}
+		// Second request with the SAME leftmost entry: same key, counts toward it.
+		rec2 := httptest.NewRecorder()
+		req2 := httptest.NewRequest(http.MethodPost, "/api/v1/pair/exchange",
+			strings.NewReader(`{"code":"`+readCode+`"}`))
+		req2.Header.Set("X-Forwarded-For", "1.2.3.4, 9.9.9.9")
+		gateway.ServeHTTP(rec2, req2)
+		if rec2.Code == http.StatusTooManyRequests {
+			t.Fatal("same leftmost entry should hit the same window")
+		}
+	})
+}

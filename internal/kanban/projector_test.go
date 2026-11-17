@@ -569,6 +569,38 @@ func TestProjector_ProvenanceDriftRefresh(t *testing.T) {
 	}, "provenance to refresh")
 }
 
+// TestProjector_ProvenanceRefreshNoColumnTouch: provenance-only refresh
+// must not overwrite a column_id a human moved between the read and the
+// write (the original bug). The fixture publishes a mapped transition
+// twice: the first creates the card in "todo"; the second publish
+// refreshes provenance (card is already in mapped column) and must
+// leave the card in "todo".
+func TestProjector_ProvenanceRefreshNoColumnTouch(t *testing.T) {
+	f := newProjectorFixture(t, standardRules(EventKindTask))
+
+	f.fetcher.set(EventKindTask, "task-x", ProvRow{Title: "X"})
+	f.publish(t, TopicTaskState, StateEvent{Kind: EventKindTask, ID: "task-x", From: "pending", To: "claimed"})
+	f.waitProcessed(t, 1)
+
+	card := mustGetCardByRef(t, f.store, EventKindTask, "task-x")
+	if got := card.ColumnID; got != f.cols["todo"] {
+		t.Fatalf("initial card column %q, want %q", got, f.cols["todo"])
+	}
+
+	// Second publish with unchanged provenance hits the refresh path.
+	f.fetcher.set(EventKindTask, "task-x", ProvRow{Title: "X"})
+	f.publish(t, TopicTaskState, StateEvent{Kind: EventKindTask, ID: "task-x", From: "pending", To: "claimed"})
+	f.waitProcessed(t, 2)
+
+	got, err := f.store.GetCardByRef(context.Background(), EventKindTask, "task-x")
+	if err != nil {
+		t.Fatalf("GetCardByRef: %v", err)
+	}
+	if got.ColumnID != f.cols["todo"] {
+		t.Errorf("after provenance refresh, column %q, want %q (refresh did not overwrite column)", got.ColumnID, f.cols["todo"])
+	}
+}
+
 // TestProjector_EventsAcrossAllFiveTopics: one mapped transition per
 // machine topic projects per-kind cards — the C2 five-topic surface is
 // really subscribed.

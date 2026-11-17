@@ -492,7 +492,9 @@ func (p *Projector) moveCard(ctx context.Context, card Card, rule ProjectionRule
 
 // refreshProvenance re-reads the source row and writes only the
 // provenance fields when they drifted; a fetch error is a no-op (the
-// card stands with its last-known provenance).
+// card stands with its last-known provenance). Uses a provenance-only
+// UPDATE so a concurrent human column move survives (the card's
+// column_id is not touched).
 func (p *Projector) refreshProvenance(ctx context.Context, card Card, ev StateEvent) error {
 	prov := p.fetchProv(ev.Kind, ev.ID)
 	if prov.GoalID == card.GoalID && prov.EmployeeID == card.EmployeeID &&
@@ -500,12 +502,8 @@ func (p *Projector) refreshProvenance(ctx context.Context, card Card, ev StateEv
 		prov.TriggerRef == card.TriggerRef {
 		return nil
 	}
-	card.GoalID = prov.GoalID
-	card.EmployeeID = prov.EmployeeID
-	card.PlanID = prov.PlanID
-	card.SessionID = prov.SessionID
-	card.TriggerRef = prov.TriggerRef
-	if err := p.store.UpdateCard(ctx, card); err != nil {
+	if err := p.store.UpdateCardProvenance(ctx, card.ID,
+		prov.GoalID, prov.EmployeeID, prov.PlanID, prov.SessionID, prov.TriggerRef); err != nil {
 		return fmt.Errorf("failed to write provenance: %w", err)
 	}
 	return nil
