@@ -64,6 +64,28 @@ contradicts a ruling here, this file wins.
     docs/workflows/llm-advisory-budget.md "Wiring" item 3 is now stale
     (says deliberately-not-wired) - flip to as-built at integration.
 
+## Wave-3 rulings (2026-11-17, post-review)
+
+18. **Model-scope arming is deduped into the existing alias cooldown**
+    (d7a6e166): a separate model-scope key would convert the
+    throttle-only D10 endpoint key into a blocks-everything key and broke
+    TestCooldownCursorStaysOnHealthyMember. ClassifyFailure still
+    classifies model scope verbatim; only the arming dedupes.
+19. **Leaf 06 named the vocabulary type `FailureCategory`**: package
+    `llm` already owns `FailureClass` (int enum, failure_policy.go).
+    Constant VALUES stay the frozen lowercase strings; gate tests
+    pin values, not the type name.
+20. **Leaf 06 gap-filled leaves 07/09's compile blockers** (2dcf3045):
+    difficulty.go (C11 table + WithDifficulty option) and pricegroup.go
+    (full C10 resolution surface + the ModelAliasEntry.PriceGroup field
+    leaf 01 declared-in-doc but never wrote). Leaf 07's remaining work is
+    the resolve-side release predicate; leaf 09 closes by review against
+    the back lane's staged file (their spillwayCostEpsilon rename applies).
+21. **402 quota short-circuit (observed, not acted on)**: resolver.go
+    VerdictForFailure classifies 402 as quota (D5, frozen contract of the
+    quota tree), so account-scope arming fires for 401/403; a 402 reaches
+    the scoped path only via non-quota routes. Left as-is deliberately.
+
 ## Line-anchor corrections (fold into dispatch contexts)
 
 - 00T: validation.py streamed-outcome fn is at :104-112 (not 113-126);

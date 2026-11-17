@@ -509,10 +509,10 @@ After every leaf is REVIEWED: run `make build`, `make test`, `make lint-ci`, `ma
 | 03 | R8 | REVIEWED | d46fee26 | child interrupted post-implementation; wiring verified on disk (validateOfferedToolCalls, openai+anthropic+codex) |
 | 04 | R4 | REVIEWED | 298c8ff5 | RLock-only proof; Posture type declared in shadow.go (leaf 05 consumes); CLI+RPC+doc landed |
 | 05 | R3 | REVIEWED | 9a37d512 | import-cycle fallback (narrow interface); resolver-hook prompt seam; atomic prompt snapshot |
-| 06 | R5 | PENDING | | needs 05 (landed) - dispatching |
-| 07 | R7 | PENDING | | needs 06 |
+| 06 | R5 | REVIEWED | d7a6e166 | model-scope arming deduped into alias cooldown (ruling 18); T12/T13/T14 pass live |
+| 07 | R7 | IMPLEMENTED (partial) | 2dcf3045 | C11 table + WithDifficulty landed as gap fill; resolve-side release predicate dispatching |
 | 08 | R6 | REVIEWED | 17fc00f8 + 2f34d16d | back-lane body + forward steer backfill; T7 WIRED (handoff ask 3 closed) |
-| 09 | R9 | IMPLEMENTED | | back lane authored pricegroup.go, uncommitted - needs leaf 01 symbols (landed) |
+| 09 | R9 | IMPLEMENTED | 2dcf3045 | resolution surface landed as gap fill; review against back lane's staged work closes it |
 
 Status values: PENDING, TESTS_IN_PROGRESS, TESTS_VALIDATED, IN_PROGRESS, IMPLEMENTED, REVIEWED, COMPLETE, BLOCKED.
 
