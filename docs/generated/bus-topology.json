@@ -2740,14 +2740,14 @@
       },
       {
         "file": "internal/comm/http/api_handlers.go",
-        "line": 286,
+        "line": 294,
         "subscriber_id": "subID+\"-agent\""
       }
     ],
     "agent.progress.synthesized": [
       {
         "file": "internal/comm/http/api_handlers.go",
-        "line": 292,
+        "line": 300,
         "subscriber_id": "subID+\"-synth\""
       },
       {
@@ -2805,14 +2805,14 @@
     "chat.processing": [
       {
         "file": "internal/comm/http/api_handlers.go",
-        "line": 310,
+        "line": 318,
         "subscriber_id": "subID+\"-chatprocessing\""
       }
     ],
     "chat.progress": [
       {
         "file": "internal/comm/http/api_handlers.go",
-        "line": 304,
+        "line": 312,
         "subscriber_id": "subID+\"-chatprogress\""
       }
     ],
@@ -4122,7 +4122,7 @@
       },
       {
         "file": "internal/comm/http/api_handlers.go",
-        "line": 298,
+        "line": 306,
         "subscriber_id": "subID+\"-complete\""
       },
       {
@@ -4134,7 +4134,7 @@
     "tool.execution.progress": [
       {
         "file": "internal/comm/http/api_handlers.go",
-        "line": 276,
+        "line": 284,
         "subscriber_id": "subID"
       }
     ],
