@@ -1597,6 +1597,13 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	registerVoiceLocalRPC(components, rpcServer, logger)
 	registerVoiceLinkRPC(components, rpcServer, logger)
 
+	// llm.route.shadow RPC (sovereign-router-parity leaf 04, Contract C6):
+	// the read-only "which model would you pick, and what would it cost"
+	// preview over the live resolver. Always registers (unwired resolver =
+	// the disabled envelope, never "method not found"); ResolveShadow takes
+	// r.mu.RLock and writes nothing.
+	registerShadowRouteRPC(components, rpcServer, logger)
+
 	// ledger.query / ledger.state (plan 20261109-employee-ledger, leaf
 	// 02-surfaces/02; bughunt D6): the handler existed in internal/rpc
 	// with the surface documented and present in the generated
