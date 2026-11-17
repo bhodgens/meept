@@ -154,7 +154,7 @@ func jsonAny(v any) string {
 
 // warmFnSig is the C4 contract shape (pin type: if Client.Warm's signature
 // drifts, the assignment below stops compiling).
-type warmFnSig = func(ctx context.Context, alias string, messages []ChatMessage, sessionScope string)
+type warmFnSig = func(ctx context.Context, messages []ChatMessage, opts ...ChatOption) error
 
 // TestWarmSignature_C4 pins the frozen contract shape (minus the codebase's
 // real message type name, ChatMessage) by assigning the method value to a
@@ -171,6 +171,12 @@ func TestWarmSignature_C4(t *testing.T) {
 	// Non-OpenAI-compat classes expose the same seam shape (no-op).
 	var _ = (*AnthropicClient)(nil).Warm
 	var _ = (*CodexClient)(nil).Warm
+	// The ProviderManager and ContextFirewall also implement WarmChatter;
+	// the wiring layer unwraps directly to the warm lane without a
+	// concrete-class type switch.
+	var _ WarmChatter = (*ProviderManager)(nil)
+	var _ WarmChatter = (*ContextFirewall)(nil)
+	var _ WarmChatter = (*Client)(nil)
 }
 
 // --- payload shape + prefix identity ---
@@ -182,7 +188,7 @@ func TestWarm_PayloadShape(t *testing.T) {
 	c := warmTestClient(t, srv.URL)
 	c.SetSessionAffinityConfig(warmAffinity())
 
-	c.Warm(context.Background(), "voice-fast", warmMessages(), "sess-42")
+	c.Warm(context.Background(), warmMessages(), WithTaskScope("", "sess-42"))
 
 	if !waitFor(func() bool { return len(recs()) == 1 }, 3*time.Second) {
 		t.Fatalf("warm request never reached upstream; got %d requests", len(recs()))
@@ -215,7 +221,7 @@ func TestWarm_EmptyScopeSendsNoAffinity(t *testing.T) {
 	c := warmTestClient(t, srv.URL)
 	c.SetSessionAffinityConfig(warmAffinity())
 
-	c.Warm(context.Background(), "voice-fast", warmMessages(), "")
+	c.Warm(context.Background(), warmMessages(), WithTaskScope("", ""))
 
 	if !waitFor(func() bool { return len(recs()) == 1 }, 3*time.Second) {
 		t.Fatal("warm request never reached upstream")
@@ -244,7 +250,7 @@ func TestWarm_PrefixIdentity(t *testing.T) {
 		t.Fatalf("Chat: %v", err)
 	}
 	// Warm of the same prefix (request #2).
-	c.Warm(context.Background(), "voice-fast", msgs, "sess-42")
+	c.Warm(context.Background(), msgs, WithTaskScope("", "sess-42"))
 	if !waitFor(func() bool { return len(recs()) == 2 }, 3*time.Second) {
 		t.Fatalf("expected 2 requests, got %d", len(recs()))
 	}
@@ -288,7 +294,7 @@ func TestWarm_SystemCacheBoundaryStripped(t *testing.T) {
 		{Role: RoleSystem, Content: "static half" + PromptCacheBoundary + " dynamic half"},
 		{Role: RoleUser, Content: "hi"},
 	}
-	c.Warm(context.Background(), "a", msgs, "s")
+	c.Warm(context.Background(), msgs, WithTaskScope("", "s"))
 	if !waitFor(func() bool { return len(recs()) == 1 }, 3*time.Second) {
 		t.Fatal("no warm request")
 	}
@@ -320,7 +326,7 @@ func TestWarm_QuotaUpstream_QuietNoRetry(t *testing.T) {
 	logs, h := debugLogger()
 	c := warmTestClient(t, srv.URL, WithLogger(h))
 
-	c.Warm(context.Background(), "voice-fast", warmMessages(), "sess-42")
+	c.Warm(context.Background(), warmMessages(), WithTaskScope("", "sess-42"))
 	if !waitFor(func() bool { return len(recs()) >= 1 }, 3*time.Second) {
 		t.Fatal("quota warm never reached upstream")
 	}
@@ -330,12 +336,10 @@ func TestWarm_QuotaUpstream_QuietNoRetry(t *testing.T) {
 	if n := len(recs()); n != 1 {
 		t.Errorf("quota upstream saw %d requests, want 1 (Warm must never retry)", n)
 	}
+	// DEBUG failure must be on the warm path; nothing surfaced (Warm returns nil).
 	l := logs.String()
 	if !strings.Contains(l, "level=DEBUG") || !strings.Contains(l, "Warm request failed") {
 		t.Errorf("expected DEBUG failure line, got:\n%s", l)
-	}
-	if !strings.Contains(l, "voice-fast") {
-		t.Errorf("DEBUG failure must name the alias, got:\n%s", l)
 	}
 }
 
@@ -349,14 +353,14 @@ func TestWarm_TransportErrorQuiet(t *testing.T) {
 	logs, h := debugLogger()
 	cfg := &ModelConfig{BaseURL: url + "/v1", ModelID: "m", ProviderID: "p", MaxTokens: 100}
 	c := NewClient(cfg, WithLogger(h))
-	c.Warm(context.Background(), "dead-alias", warmMessages(), "s")
+	c.Warm(context.Background(), warmMessages(), WithTaskScope("", "s"))
 
 	if !waitFor(func() bool { return laneIdle(c) }, 3*time.Second) {
 		t.Fatal("lane pinned after transport failure")
 	}
 	l := logs.String()
-	if !strings.Contains(l, "Warm request failed") || !strings.Contains(l, "dead-alias") {
-		t.Errorf("expected DEBUG transport-failure line naming alias, got:\n%s", l)
+	if !strings.Contains(l, "Warm request failed") {
+		t.Errorf("expected DEBUG transport-failure line, got:\n%s", l)
 	}
 }
 
@@ -381,7 +385,7 @@ func TestWarm_ReturnedTextNeverSurfaces(t *testing.T) {
 	logs, h := debugLogger()
 	c := warmTestClient(t, srv.URL, WithLogger(h))
 
-	c.Warm(context.Background(), "a", warmMessages(), "s")
+	c.Warm(context.Background(), warmMessages(), WithTaskScope("", "s"))
 	time.Sleep(300 * time.Millisecond)
 
 	l := logs.String()
@@ -404,7 +408,7 @@ func TestWarm_NoLLMCallsRow(t *testing.T) {
 	c := warmTestClient(t, srv.URL)
 	c.SetUsageStore(store)
 
-	c.Warm(context.Background(), "voice-fast", warmMessages(), "sess-42")
+	c.Warm(context.Background(), warmMessages(), WithTaskScope("", "sess-42"))
 	if !waitFor(func() bool { return len(recs()) == 1 && laneIdle(c) }, 3*time.Second) {
 		t.Fatal("warm did not complete")
 	}
@@ -430,7 +434,7 @@ func TestWarm_BudgetExhaustedStillWarms(t *testing.T) {
 	b.RecordUsage(TokenUsage{PromptTokens: 5, CompletionTokens: 5})
 	c := warmTestClient(t, srv.URL, WithBudget(b))
 
-	c.Warm(context.Background(), "voice-fast", warmMessages(), "s")
+	c.Warm(context.Background(), warmMessages(), WithTaskScope("", "s"))
 	if !waitFor(func() bool { return len(recs()) == 1 }, 3*time.Second) {
 		t.Fatal("warm blocked by budget gate")
 	}
@@ -487,7 +491,7 @@ func TestWarm_NeverQueuesBehindRealTurn(t *testing.T) {
 	go func() { _, _ = c.Chat(chatCtx, warmMessages()) }()
 	time.Sleep(150 * time.Millisecond) // let Chat take the single slot + connect
 
-	c.Warm(context.Background(), "voice-fast", warmMessages(), "s")
+	c.Warm(context.Background(), warmMessages(), WithTaskScope("", "s"))
 
 	if !waitFor(func() bool {
 		mu.Lock()
@@ -534,14 +538,14 @@ func TestWarm_ReplaceDiscardPrevious(t *testing.T) {
 	msgs := func(content string) []ChatMessage {
 		return []ChatMessage{{Role: RoleUser, Content: content}}
 	}
-	c.Warm(context.Background(), "stale", msgs("stale"), "s")
+	c.Warm(context.Background(), msgs("stale"), WithTaskScope("", "s"))
 	select {
 	case <-arrived:
 	case <-time.After(3 * time.Second):
 		t.Fatal("first warm never arrived")
 	}
 
-	c.Warm(context.Background(), "latest", msgs("latest"), "s")
+	c.Warm(context.Background(), msgs("latest"), WithTaskScope("", "s"))
 	select {
 	case got := <-cancelled:
 		if got != "stale" {
@@ -563,11 +567,11 @@ func TestWarm_LaneReleasedAfterCompletion(t *testing.T) {
 	srv, recs := warmUpstream(t, nil)
 	c := warmTestClient(t, srv.URL)
 
-	c.Warm(context.Background(), "a", warmMessages(), "s")
+	c.Warm(context.Background(), warmMessages(), WithTaskScope("", "s"))
 	if !waitFor(func() bool { return len(recs()) == 1 && laneIdle(c) }, 3*time.Second) {
 		t.Fatal("lane not released after warm completion")
 	}
-	c.Warm(context.Background(), "b", warmMessages(), "s")
+	c.Warm(context.Background(), warmMessages(), WithTaskScope("", "s"))
 	if !waitFor(func() bool { return len(recs()) == 2 }, 3*time.Second) {
 		t.Error("second warm after release never fired")
 	}
@@ -593,14 +597,14 @@ func TestWarm_PanicReleasesLane(t *testing.T) {
 		WithLogger(slog.New(slog.DiscardHandler)),
 		WithTokenResolver(panicResolver{}, "evil"))
 
-	c.Warm(context.Background(), "a", warmMessages(), "s")
+	c.Warm(context.Background(), warmMessages(), WithTaskScope("", "s"))
 	if !waitFor(laneIdleFunc(c), 3*time.Second) {
 		t.Fatal("lane pinned after a panicking warm")
 	}
 	// A follow-up warm must still run after the panic released the lane.
 	c2srv, recs := warmUpstream(t, nil)
 	c2 := warmTestClient(t, c2srv.URL)
-	c2.Warm(context.Background(), "b", warmMessages(), "s")
+	c2.Warm(context.Background(), warmMessages(), WithTaskScope("", "s"))
 	if !waitFor(func() bool { return len(recs()) == 1 }, 3*time.Second) {
 		t.Error("unrelated client unaffected")
 	}
@@ -627,7 +631,7 @@ func TestWarm_CallerCancelDiscards(t *testing.T) {
 	c := warmTestClient(t, srv.URL)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	c.Warm(ctx, "a", warmMessages(), "s")
+	c.Warm(ctx, warmMessages(), WithTaskScope("", "s"))
 	<-arrived
 	cancel()
 	select {
@@ -655,7 +659,7 @@ func TestWarm_CeilingBoundsHungRequest(t *testing.T) {
 	})
 	c := warmTestClient(t, srv.URL)
 
-	c.Warm(context.Background(), "a", warmMessages(), "s")
+	c.Warm(context.Background(), warmMessages(), WithTaskScope("", "s"))
 	<-arrived
 	if !waitFor(laneIdleFunc(c), 3*time.Second) {
 		t.Fatal("hung warm pinned the lane past the internal ceiling")
@@ -667,8 +671,8 @@ func TestWarm_CeilingBoundsHungRequest(t *testing.T) {
 func TestWarm_EmptyMessagesNoRequest(t *testing.T) {
 	srv, recs := warmUpstream(t, nil)
 	c := warmTestClient(t, srv.URL)
-	c.Warm(context.Background(), "a", nil, "s")
-	c.Warm(context.Background(), "a", []ChatMessage{}, "s")
+	c.Warm(context.Background(), nil, WithTaskScope("", "s"))
+	c.Warm(context.Background(), []ChatMessage{}, WithTaskScope("", "s"))
 	time.Sleep(200 * time.Millisecond)
 	if n := len(recs()); n != 0 {
 		t.Errorf("empty-messages warm sent %d requests, want 0", n)
@@ -678,11 +682,11 @@ func TestWarm_EmptyMessagesNoRequest(t *testing.T) {
 // TestWarm_NilClientNoPanic pins nil-receiver safety on all three classes.
 func TestWarm_NilClientNoPanic(t *testing.T) {
 	var c *Client
-	c.Warm(context.Background(), "a", warmMessages(), "s")
+	_ = c.Warm(context.Background(), warmMessages(), WithTaskScope("", "s"))
 	var ac *AnthropicClient
-	ac.Warm(context.Background(), "a", warmMessages(), "s")
+	_ = ac.Warm(context.Background(), warmMessages(), WithTaskScope("", "s"))
 	var cc *CodexClient
-	cc.Warm(context.Background(), "a", warmMessages(), "s")
+	_ = cc.Warm(context.Background(), warmMessages(), WithTaskScope("", "s"))
 }
 
 // --- non-OpenAI-compat classes: no-op with DEBUG ---
@@ -704,10 +708,10 @@ func TestWarm_AnthropicCodexNoop(t *testing.T) {
 	logs, h := debugLogger()
 
 	ac := NewAnthropicClient(&ModelConfig{BaseURL: srv.URL, ModelID: "claude-test", ProviderID: "anthropic"}, WithAnthropicLogger(h))
-	ac.Warm(context.Background(), "anthropic-alias", warmMessages(), "s")
+	_ = ac.Warm(context.Background(), warmMessages(), WithTaskScope("", "s"))
 
 	cc := NewCodexClient(&ModelConfig{BaseURL: srv.URL, ModelID: "gpt-5.1-codex", ProviderID: "openai-codex"}, WithCodexLogger(h))
-	cc.Warm(context.Background(), "codex-alias", warmMessages(), "s")
+	_ = cc.Warm(context.Background(), warmMessages(), WithTaskScope("", "s"))
 
 	time.Sleep(200 * time.Millisecond)
 	mu.Lock()
@@ -719,8 +723,5 @@ func TestWarm_AnthropicCodexNoop(t *testing.T) {
 	l := logs.String()
 	if !strings.Contains(l, "Warm unsupported for Anthropic") || !strings.Contains(l, "Warm unsupported for Codex") {
 		t.Errorf("expected DEBUG no-op lines, got:\n%s", l)
-	}
-	if !strings.Contains(l, "anthropic-alias") || !strings.Contains(l, "codex-alias") {
-		t.Errorf("no-op DEBUG must name the alias, got:\n%s", l)
 	}
 }

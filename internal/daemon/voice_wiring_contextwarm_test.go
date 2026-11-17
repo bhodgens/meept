@@ -377,8 +377,9 @@ func (c *cwFakeWarmChatter) Config() *llm.ModelConfig {
 	return &llm.ModelConfig{ModelID: "cw-fake-model", ContextLimit: 32768}
 }
 
-func (c *cwFakeWarmChatter) Warm(_ context.Context, _ string, _ []llm.ChatMessage, _ string) {
+func (c *cwFakeWarmChatter) Warm(_ context.Context, _ []llm.ChatMessage, _ ...llm.ChatOption) error {
 	c.mu.Lock()
 	c.warms++
 	c.mu.Unlock()
+	return nil
 }

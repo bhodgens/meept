@@ -395,8 +395,13 @@ turn's prefix in the provider prompt cache / KV slot. Invariants:
   and `CodexClient.Warm` are explicit no-op twins by design — keep the
   `warmDispatcher` shape every client class implements so callers never
   type-switch.
-- **`alias` is a DEBUG-attribution label only.** A bare *Client serves
-  whatever (possibly Reconfigured) config it holds; request-scoped alias
-  resolution is the Resolver/ProviderManager lane and is not reachable
-  from Warm. Callers pass the alias of the real turn for log
-  correlation.
+- **No alias parameter; resolution lives at the caller layer.** The frozen
+  C4 signature is `Warm(ctx, messages []ChatMessage, opts ...ChatOption) error`
+  (issue #142 reverted the 2026-11-16 alias-param ratification). Request-
+  scoped alias resolution is the Resolver/ProviderManager lane: the daemon's
+  context-warm closure resolves the alias read-only via
+  `Resolver.PeekAliasForWarm` (never perturbing rotation/blocks/sticky
+  state) and carries the result on the opts as `WithResolvedModel`; a bare
+  `*Client` serves whatever (possibly Reconfigured) config it holds, and
+  `ProviderManager.Warm` re-derives routing from the same opts. The warm
+  performs NO resolution and takes no attribution label.

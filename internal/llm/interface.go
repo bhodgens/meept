@@ -41,6 +41,25 @@ type Chatter interface {
 	Config() *ModelConfig
 }
 
+// WarmChatter is the warm-seam contract (plan
+// 20261113-filler-clips-and-context-warm C4, hard rules 1 and 5): every
+// client class the voice turn rides implements it so the daemon's
+// context-warm closure can dispatch a cache-warming probe WITHOUT
+// knowing the concrete provider. Warm is fire-and-forget: it NEVER
+// returns a completion, NEVER re-dispatches (no retry loop), NEVER
+// reads/writes a response cache, and NEVER records alias/endpoint/quota
+// state. Failures are logged at DEBUG and swallowed by design.
+//
+// The signature is EXACTLY ChatOption-opts shaped; the alias / target
+// resolution lives at the Resolver/ProviderManager layer (WithResolvedModel
+// steers the ProviderManager's routing; a bare *Client serves whatever
+// its own config holds). Callers may stamp WithMaxTokens(1) themselves
+// or let the implementation force it.
+type WarmChatter interface {
+	Chatter
+	Warm(ctx context.Context, messages []ChatMessage, opts ...ChatOption) error
+}
+
 // StreamingChatter is the interface for LLMs that support per-delta streaming.
 // Time-traveling stream rules (TTSR) use this to abort mid-generation and
 // retry with injected rule enforcement content.
@@ -61,6 +80,11 @@ var (
 	_ Chatter = (*Client)(nil)
 	_ Chatter = (*ProviderManager)(nil)
 	_ Chatter = (*ContextFirewall)(nil)
+
+	_ WarmChatter = (*Client)(nil)
+	_ WarmChatter = (*ProviderManager)(nil)
+	_ WarmChatter = (*AnthropicClient)(nil)
+	_ WarmChatter = (*CodexClient)(nil)
 )
 
 // TokenResolver is implemented by token stores that can provide a valid access

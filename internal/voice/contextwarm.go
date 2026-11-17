@@ -65,9 +65,12 @@ const (
 	defaultContextWarmThrottleMs = 150
 )
 
-// WarmFn is the warm-dispatch seam (mirrors llm.Client.Warm's signature so
-// the daemon wires it as a direct method value). Fire-and-forget: it never
-// returns a result; errors are the callee's (DEBUG, swallowed) per C4.
+// WarmFn is the warm-dispatch seam (the daemon closure that renders +
+// resolves the warm's opts and forwards them to the concrete client
+// class). Fire-and-forget: it never returns a completion; errors are the
+// callee's to DEBUG-log and swallow. The opts lane carries the
+// per-request alias resolution (WithResolvedModel) and the scope
+// (WithTaskScope) EXACTLY as the real turn stamps them.
 type WarmFn func(ctx context.Context, alias string, messages []llm.ChatMessage, scope string)
 
 // WarmPrefix is one rendered warm candidate: the EXACT message list the

@@ -259,6 +259,11 @@ type WireVoiceDeps struct {
 	// turn runner (persona prompt + constitution stamping). Nil degrades
 	// to the daemon template persona (the legacy behavior).
 	Employees EmployeeDefinitionResolver
+	// LLMResolver is the daemon's alias resolver: the context-warm lane
+	// resolves the real turn's alias via PeekAliasForWarm (read-only) and
+	// carries the candidate on the per-request opts. Nil = the warm serves
+	// whatever the resolved client holds (alias stays a DEBUG label).
+	LLMResolver *llm.Resolver
 	// SupervisorChatter is the resolved fast-model client for the C6
 	// gate (voice.supervisor_model alias). nil degrades the gate to
 	// disabled (every sentence allowed) with a logged warning.
@@ -689,6 +694,7 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		Loops:     deps.Loops,
 		Template:  deps.Template,
 		Employees: deps.Employees,
+		Resolver:  deps.LLMResolver,
 		Sessions:  deps.Sessions,
 		Moment:    deps.MomentResolver,
 	}); cw != nil {

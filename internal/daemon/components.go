@@ -5577,8 +5577,9 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// runner stamps the bound employee's prompt + constitution
 			// onto the session loop before every turn. Nil (employees and
 			// bots both disabled) degrades to the template persona.
-			Employees: c.EmployeeManager,
-			Logger:    logger,
+			Employees:   c.EmployeeManager,
+			LLMResolver: c.LLMResolver,
+			Logger:      logger,
 			// Moment renderer seam (awareness leaf 01/02): set only when
 			// [awareness] is enabled (nil otherwise -> the turn runner
 			// stamps nothing, voice prompts byte-identical, D1).

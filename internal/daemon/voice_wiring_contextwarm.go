@@ -17,8 +17,12 @@ package daemon
 //     byte-identical between the warm and the turn.
 //   - Warm forwards to the concrete client the voice turn actually rides:
 //     the session's agent loop chatter unwrapped per call (ContextFirewall
-//     -> ProviderManager primary entry -> *llm.Client), so the warm lands
-//     on the same endpoint + affinity lane as the turn. The scope is the
+//     -> terminal chatter; a ProviderManager IS the dispatcher and re-
+//     derives the alias routing from the opts), so the warm lands on the
+//     same endpoint + affinity lane as the turn. The alias is resolved
+//     READ-ONLY at this warmer layer via Resolver.PeekAliasForWarm and
+//     carried as WithResolvedModel (C4 rule 1: resolution lives at the
+//     Resolver layer, never on *Client.Warm). The scope is the
 //     session/conversation id — the voice lane sets SessionHandle.ID ==
 //     ConversationID (sessionFor), and RunOnce stamps that conversation id
 //     as the turn's accounting scope (loop.go turnAccountingSessionID ->
@@ -51,11 +55,14 @@ import (
 // resolveVoiceTurnLocation lookup carries (voice_employee.go).
 const contextWarmEmployeeLookupBudget = 2 * time.Second
 
-// warmDispatcher is the warm lane every llm client class implements
-// (llm.Client real; Anthropic/Codex explicit no-op twins) so the closure
-// never type-switches provider classes out of scope.
+// warmDispatcher is the warm lane every llm client class implements — the
+// llm.WarmChatter contract (llm.Client real; ProviderManager re-derives the
+// alias routing; Anthropic/Codex explicit no-op twins) so the closure never
+// type-switches provider classes out of scope. The opts lane carries the
+// per-request alias resolution (WithResolvedModel) and the accounting scope
+// (WithTaskScope) EXACTLY as the real turn stamps them.
 type warmDispatcher interface {
-	Warm(ctx context.Context, alias string, messages []llm.ChatMessage, sessionScope string)
+	Warm(ctx context.Context, messages []llm.ChatMessage, opts ...llm.ChatOption) error
 }
 
 // contextWarmSources are the daemon components the warmer's closures read.
@@ -66,6 +73,13 @@ type contextWarmSources struct {
 	Loops     *agent.Manager
 	Template  *agent.AgentLoop
 	Employees EmployeeDefinitionResolver
+	// Resolver is the daemon's llm.Resolver: the warm resolves the real
+	// turn's alias to its serving candidate via PeekAliasForWarm (read-only,
+	// never perturbs rotation/blocks/sticky state) and carries the result on
+	// the per-request opts (WithResolvedModel). nil (hand-built wiring) =
+	// the warm serves whatever the resolved client holds (alias stays a
+	// DEBUG-attribution label only).
+	Resolver *llm.Resolver
 	// Sessions resolves the session -> conversation id duality: the
 	// real turn's accounting scope (RunOnce conversationID ->
 	// WithTaskScope -> prompt_cache_key + affinity header) is the
@@ -99,12 +113,25 @@ func (w *VoiceWiring) newContextWarmer(baseCtx context.Context, src contextWarmS
 		baseCtx = context.Background()
 	}
 	warmFn := func(ctx context.Context, alias string, messages []llm.ChatMessage, scope string) {
+		// The opts lane mirrors the real turn's stamps: the accounting
+		// scope (WithTaskScope -> prompt_cache_key + affinity header) and
+		// the resolved serving candidate for the alias (WithResolvedModel
+		// via PeekAliasForWarm — read-only, never perturbs the rotation).
+		// max_tokens=1 + the cache bypass are forced by Warm itself (C4
+		// hard rules 2/3). A ProviderManager dispatcher re-derives the
+		// routing from the same opts.
+		warmOpts := []llm.ChatOption{llm.WithTaskScope("", scope)}
+		if src.Resolver != nil {
+			if mc, ok := src.Resolver.PeekAliasForWarm(alias, scope); ok && mc != nil {
+				warmOpts = append(warmOpts, llm.WithResolvedModel(mc))
+			}
+		}
 		if src.Dispatch != nil {
 			src.Dispatch(ctx, alias, messages, scope)
 			return
 		}
 		if d := w.resolveContextWarmDispatcher(src, scope); d != nil {
-			d.Warm(ctx, alias, messages, scope)
+			_ = d.Warm(ctx, messages, warmOpts...)
 		}
 	}
 	return voice.NewContextWarmer(
@@ -292,11 +319,17 @@ func contextWarmEmployeeDef(src contextWarmSources, employeeID string) (*employe
 
 // resolveContextWarmDispatcher unwraps the session's serving chatter to the
 // concrete warm-capable client, following the SAME chain the turn
-// dispatches through: ContextFirewall.Inner -> ProviderManager primary
-// entry -> the provider's Chatter. A direct *llm.Client chatter resolves
-// immediately. Returns nil (skip) when the chain holds no warm-aware
-// client — an Anthropic/Codex-terminal deployment no-ops there by C4
-// contract, and an unresolvable chain never guesses an endpoint.
+// dispatches through: ContextFirewall.Inner, then the terminal chatter.
+// A *llm.ProviderManager is itself the dispatcher — it is NEVER unwrapped
+// to its primary entry, because the alias the real turn rides (carried on
+// the opts as WithResolvedModel, resolved read-only via
+// Resolver.PeekAliasForWarm) only reorders routing INSIDE the manager
+// (ProviderManager.Warm -> orderedProvidersForRequest). Unwrapping to the
+// primary entry would warm the wrong endpoint whenever the alias serves a
+// non-primary provider. A direct *llm.Client chatter resolves immediately.
+// Returns nil (skip) when the chain holds no warm-aware client — an
+// Anthropic/Codex-terminal deployment no-ops there by C4 contract, and an
+// unresolvable chain never guesses an endpoint.
 func (w *VoiceWiring) resolveContextWarmDispatcher(src contextWarmSources, sessionID string) warmDispatcher {
 	var chatter llm.Chatter
 	if loop := contextWarmLoopFor(src.Loops, sessionID); loop != nil {
@@ -305,19 +338,11 @@ func (w *VoiceWiring) resolveContextWarmDispatcher(src contextWarmSources, sessi
 	if chatter == nil && src.Template != nil {
 		chatter = src.Template.Chatter()
 	}
-	// Bounded unwrap: firewall -> manager -> entry; a self-referential
-	// chain is a wiring bug we refuse to follow forever.
+	// Bounded unwrap: firewall hops only; a self-referential chain is a
+	// wiring bug we refuse to follow forever.
 	for hop := 0; chatter != nil && hop < 4; hop++ {
-		switch t := chatter.(type) {
-		case *llm.ContextFirewall:
-			chatter = t.Inner()
-			continue
-		case *llm.ProviderManager:
-			entry := t.GetPrimaryProvider()
-			if entry == nil {
-				return nil
-			}
-			chatter = entry.Chatter
+		if fw, ok := chatter.(*llm.ContextFirewall); ok {
+			chatter = fw.Inner()
 			continue
 		}
 		if d, ok := chatter.(warmDispatcher); ok {
