@@ -29,6 +29,12 @@ Location: `<data_dir>/routing.db`
 | `ResolveForAlias` | `round_robin` | every alias resolution (the production hot path) |
 | `ResolveForSkill` | `capability_escalation` | when skill requires capabilities the current model lacks |
 | `ResolveRef` | `explicit` | when a specific model ref is requested |
+| `ResolveStickyCaller` | `sticky_request` / `sticky_request_new` / `sticky_difficulty_increase` | sticky alias keeps, pins, or releases+re-pins (difficulty release = a turn classified above the pinned level, sovereign-router-parity R7) |
+
+Chain skip/floor reasons ride the same `reason` column where a filter is the
+binding constraint: `sensitive_data_posture` (R3), `quality_below_required`
+(R1), `context_too_small` (R2). See
+`docs/workflows/llm-routing-quality.md` for the full selection chain.
 
 ## CLI
 

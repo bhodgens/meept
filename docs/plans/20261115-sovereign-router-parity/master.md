@@ -507,16 +507,16 @@ After every leaf is REVIEWED: run `make build`, `make test`, `make lint-ci`, `ma
 
 | Leaf | Requirement | Status | Commit | Notes |
 |------|-------------|--------|--------|-------|
-| 00T | gate | TESTS_VALIDATED | a130ce81 | 13 files/36 tests, compile-RED on C1-C11 symbols; golden captured on main subset; orchestrator-reviewed vs Test Gate matrix |
-| 01 | R1 | REVIEWED | 01a16d2b | comparator = per-turn cost estimate (gateway.py estimate_cost shape); floor difficulty default 5 until leaf 07 threads per-turn value |
-| 02 | R2 | REVIEWED | 01a16d2b + 755bfecc | gate wired in all 3 ProviderManager rotation loops AND both bare-client paths; typed verdict on all-refused, never pool-exhaustion shape |
-| 03 | R8 | REVIEWED | d46fee26 | child interrupted post-implementation; wiring verified on disk (validateOfferedToolCalls, openai+anthropic+codex) |
-| 04 | R4 | REVIEWED | 298c8ff5 | RLock-only proof; Posture type declared in shadow.go (leaf 05 consumes); CLI+RPC+doc landed |
-| 05 | R3 | REVIEWED | 9a37d512 | import-cycle fallback (narrow interface); resolver-hook prompt seam; atomic prompt snapshot |
-| 06 | R5 | REVIEWED | d7a6e166 | model-scope arming deduped into alias cooldown (ruling 18); T12/T13/T14 pass live |
-| 07 | R7 | REVIEWED | 5a9a2659 | parameter-threaded difficulty (option unreachable at resolve-time); async lane via turn_difficulty metadata; single pin writer preserved |
-| 08 | R6 | REVIEWED | 17fc00f8 + 2f34d16d | back-lane body + forward steer backfill; T7 WIRED (handoff ask 3 closed) |
-| 09 | R9 | REVIEWED | 2dcf3045 | leaf-06 gap fill landed the full C10 surface; matches back lane's staged work (spillwayCostEpsilon rename applies); pricegroup gate tests in full-suite run |
+| 00T | gate | COMPLETE | a130ce81 | 13 files/36 tests, compile-RED on C1-C11 symbols; golden captured on main subset; orchestrator-reviewed vs Test Gate matrix |
+| 01 | R1 | COMPLETE | 01a16d2b | comparator = per-turn cost estimate (gateway.py estimate_cost shape); floor difficulty default 5 until leaf 07 threads per-turn value |
+| 02 | R2 | COMPLETE | 01a16d2b + 755bfecc | gate wired in all 3 ProviderManager rotation loops AND both bare-client paths; typed verdict on all-refused, never pool-exhaustion shape |
+| 03 | R8 | COMPLETE | d46fee26 | child interrupted post-implementation; wiring verified on disk (validateOfferedToolCalls, openai+anthropic+codex) |
+| 04 | R4 | COMPLETE | 298c8ff5 | RLock-only proof; Posture type declared in shadow.go (leaf 05 consumes); CLI+RPC+doc landed |
+| 05 | R3 | COMPLETE | 9a37d512 | import-cycle fallback (narrow interface); resolver-hook prompt seam; atomic prompt snapshot |
+| 06 | R5 | COMPLETE | d7a6e166 | model-scope arming deduped into alias cooldown (ruling 18); T12/T13/T14 pass live |
+| 07 | R7 | COMPLETE | 5a9a2659 | parameter-threaded difficulty (option unreachable at resolve-time); async lane via turn_difficulty metadata; single pin writer preserved |
+| 08 | R6 | COMPLETE | 17fc00f8 + 2f34d16d | back-lane body + forward steer backfill; T7 WIRED (handoff ask 3 closed) |
+| 09 | R9 | COMPLETE | 2dcf3045 | leaf-06 gap fill landed the full C10 surface; matches back lane's staged work (spillwayCostEpsilon rename applies); pricegroup gate tests in full-suite run |
 
 Status values: PENDING, TESTS_IN_PROGRESS, TESTS_VALIDATED, IN_PROGRESS, IMPLEMENTED, REVIEWED, COMPLETE, BLOCKED.
 

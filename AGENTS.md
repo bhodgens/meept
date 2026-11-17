@@ -221,7 +221,7 @@ User Input → CommServer (RPC/HTTP) → MessageBus → AgentLoop → Dispatcher
 |-------|----------|
 | **Server** | `cmd/meept-daemon`, `internal/daemon`, `internal/rpc`, `internal/bus` (typed topics: `bus.Topic[T]`/`PublishT`/`SubscribeT`, `internal/bus/topic.go`), `internal/comm` (WS classification: `internal/comm/wsclass`; HITL Slack approval channel: `internal/comm/slack`, docs/workflows/hitl-notifications.md) |
 | **Agent** | `internal/agent` (loop, orchestrator, planner, collaborative, workspace, executor, dispatcher) |
-| **LLM** | `internal/llm` (client, resolver, budget, providers, token cache, context firewall) |
+| **LLM** | `internal/llm` (client, resolver, budget, providers, token cache, context firewall; selection chain: quality/posture/admission filters, shadow route, pool-scoped failure, price groups, difficulty derivation, tool-call validation — docs/workflows/llm-routing-quality.md) |
 | **Memory** | `internal/memory` (manager, episodic, task, ftstore, facts) |
 | **Tools** | `internal/tools` (registry, builtin/*, mcp), `internal/acp` (ACP client wire + human permission relay `relay.go` + decision lane + persona lane `GetOrCreatePersona`), `internal/hermes` (Hermes gateway API-server client) |
 | **Codemode** | `internal/codemode` (C3 sandbox: goja eventloop VM, ToolBridge async bridge, hard timeout kill, allocation-counting memory cap, no fs/net — full contract in `docs/workflows/codemode.md`) |
@@ -357,6 +357,35 @@ alias blocks > stickiness; teardown (KV-cache erase on session archive/delete/
 idle/shutdown) is best-effort with the verified route `POST /slots/0?action=erase`
 and NEVER fails a turn, an archive, or a shutdown; cloud providers are an
 explicit no-op.
+
+### Sovereign-router parity: selection chain, posture, admission, difficulty (tree 20261115-sovereign-router-parity)
+
+Full contract: `docs/workflows/llm-routing-quality.md` + the tree's
+`master.md` (C1-C11) + `DRIFT-AUDIT.md` rulings 1-29. Short form: nine
+routing capabilities (quality floor R1, admission R2, data posture R3,
+shadow route R4, pool-scoped failure R5, advisory budget R6, sticky
+difficulty R7, tool-call validation R8, price groups R9) are additive and
+OPT-IN — with none configured every routing decision is byte-identical to
+pre-change (pinned by the flag-off golden in `e2e/suites/sovereign-parity/`).
+The selection chain (`internal/llm/selection.go`) has a FIXED registration
+order posture -> quality -> admission; posture is a hard compliance
+boundary (a sensitive prompt never reaches a non-cleared model and
+all-non-cleared refuses the turn, never a leak). The frozen precedence
+(quota > endpoint > alias > sticky) is untouched: filters slot around it,
+the difficulty release check sits INSIDE the sticky stage, and the spillway
+(R9) never reorders rotation or touches pins. Admission
+(`*ContextTooSmallError`, NonRetryable) gates pre-dispatch on the
+ProviderManager rotation loops AND the bare-client paths — a size verdict
+is never a `RecordAliasFailure` and never parked. `ClassifyFailure`'s
+5-arg shape (poolID third) and the (scope,target) block keys coexist with
+the legacy `host|credential` endpoint keys; model-scope arming is deduped
+into the alias cooldown; a request-fault (400/413/422) arms nothing.
+`ResolveShadow` is RLock-only with zero side effects (no ledger, no
+budget, no cursor, no pin). `ErrToolCallInvalid` is a bare pointer-identity
+sentinel wired post-parse/pre-executor on all three clients; it never
+replaces the empty-completion lane. Advisory-budget `steer` never returns
+`BudgetExceededError` — one `budget_advisory`-class event rides
+`agent.quota_wait` and only the failover TAIL reorders by cost.
 
 ### Serving tiers, semantic cache, and TTFT
 

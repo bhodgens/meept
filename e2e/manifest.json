@@ -1428,7 +1428,7 @@
       "dir": "e2e/suites/context_warm"
     },
     {
-      "status": "todo",
+      "status": "implemented",
       "name": "sovereign-parity",
       "dir": "e2e/suites/sovereign-parity",
       "diff": "L",
