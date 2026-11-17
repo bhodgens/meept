@@ -216,13 +216,13 @@ For each child in dependency order:
 
 | Child | Status | Notes |
 |---|---|---|
-| 01-foundation | IN_PROGRESS | 01/01 COMMITTED 322b6682 (parent fixes: FK pragma, provenance INSERT, events API); 01/02 COMMITTED f93a017f (hand-recovered after subagent context blowout); 01/03 running |
-| 02-workflow-authority | IN_PROGRESS | 02/01 COMMITTED 8c1de6b6 (option (a); parent added missing negative test edges); 02/02 running (transitions.go on disk, store.go wiring pending) |
-| 03-board-projection | PENDING | |
-| 04-sidecar-gateway | IN_PROGRESS | 04/01 COMMITTED 875fadf2 (parent fixes: C5 grant filter, UserID principal fixture) |
-| 05-surfaces | PENDING | |
-| 06-wiring-delivery | PENDING | |
-| 07-daemon-wiring | PENDING | |
+| 01-foundation | COMPLETE | 01/01 322b6682; 01/02 f93a017f; 01/03 83ed8f56 — all on main |
+| 02-workflow-authority | COMPLETE | 02/01 8c1de6b6; 02/02 b6b33fc9; 02/03+02/04 6affd763 + c0788bb0 — all on main |
+| 03-board-projection | COMPLETE | 03/01 e183937e; 03/02 b2570e62; 03/03 8d613272 — all on main |
+| 04-sidecar-gateway | COMPLETE | 04/01 875fadf2; 04/02 1598c095; 04/03 7481f498 (+310701d5, 2da662e9); 04/04 0c48c45f — all on main |
+| 05-surfaces | COMPLETE | 05/01 b43b9ea6; 05/02 126c1eb5; 05/03 5f649948; 05/04 45b19b90; 05/05 fe03c6e5; 05/06 1a2ade63; 05/07 f715909d — all on main |
+| 06-wiring-delivery | COMPLETE | 06/01 dbe8cb00; 06/02 365c21ea; 06/03 f9c0bc95 — all on main |
+| 07-daemon-wiring | COMPLETE | 07/01 8a58fadc — on main |
 
 ## Integration Test Plan
 
