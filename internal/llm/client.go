@@ -2160,7 +2160,11 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any, cfg *Mod
 	// skips validation entirely (the offered-empty rule keeps no-tool turns
 	// byte-identical).
 	if parsedResp != nil && len(parsedResp.ToolCalls) > 0 && len(c.toolcheckNames) > 0 {
-		if verr := validateOfferedToolCalls(parsedResp.ToolCalls, c.toolcheckNames); verr != nil {
+		// ValidateToolCalls is the exported Contract C9 seam (the
+		// unexported wrapper serves the pre-assembly streaming sites);
+		// identical semantics here — the len guard above is the
+		// offered-empty skip.
+		if verr := ValidateToolCalls(parsedResp, c.toolcheckNames); verr != nil {
 			c.logger.Warn("tool call failed validation",
 				"provider", providerID,
 				"model", modelID,

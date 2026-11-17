@@ -7435,6 +7435,29 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 			return nil, err
 		}
 
+		// Admission verdict (sovereign-router-parity leaf 02, Contract
+		// C3): a ContextTooSmallError is a REQUEST-size verdict, not
+		// alias ill-health — the same body would overflow any
+		// smaller-context candidate, so RecordAliasFailure here would
+		// cooldown-damage healthy members and rotation could never fix
+		// it (every candidate fails the same frozen rule; the
+		// ProviderManager gate already refused each one pre-dispatch).
+		// NonRetryable: surface verbatim so the caller decides (shrink
+		// the request or pick a bigger-context model), mirroring the
+		// tier-floor branch below.
+		if llm.IsContextTooSmall(err) {
+			if admissionErr, ok := llm.AsContextTooSmall(err); ok {
+				l.logger.Warn("request does not fit the model context — surfacing without rotation",
+					"provider", admissionErr.ProviderID,
+					"model", admissionErr.ModelID,
+					"est_input", admissionErr.EstInput,
+					"reserve", admissionErr.Reserve,
+					"context_limit", admissionErr.ContextLimit,
+				)
+			}
+			return nil, err
+		}
+
 		// Tier-floor verdict (llm-serving-tiers, errors_tier.go): a
 		// *TierFloorError is a CLASSIFIED terminal error (NonRetryable,
 		// ErrAllModelsQuotaBlocked family) — the tier policy refused the
