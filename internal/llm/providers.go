@@ -113,6 +113,22 @@ type ModelDef struct {
 	// no provider-level option: the value maps straight through from
 	// ModelDef.
 	ToolExposure string `json:"tool_exposure,omitempty"`
+	// Quality is the MEASURED per-class quality scores (0-5) from probe
+	// batteries (Contract C2, sovereign-router-parity leaf 01). The
+	// Sovereign Router selection rule governs seeding: "leaderboards
+	// nominate, our own probes score" — a score invented from vendor
+	// documentation must never land here. ABSENT BLOCK = zero Quality =
+	// the dimension is inert (floor never binds, comparator quality term
+	// vanishes), which is the shipped config posture (plan Q1: ship
+	// EMPTY). The shape is documented in config/models.json5; no shipped
+	// model sets it until an operator measures.
+	Quality Quality `json:"quality,omitempty"`
+	// QualitySource is free-text provenance for the quality scores (e.g.
+	// "tooling-battery:2026-11-15"). Advisory only — never parsed.
+	QualitySource string `json:"quality_source,omitempty"`
+	// QualityVerifiedAt is the RFC3339 date the scores were last
+	// re-measured. Advisory only — never parsed, never enforced.
+	QualityVerifiedAt string `json:"quality_verified_at,omitempty"`
 	// ToolChoice overrides the provider-level tool_choice policy for this
 	// model. Empty inherits the provider setting. See
 	// ProviderOptionsConfig.ToolChoice.
@@ -172,6 +188,13 @@ type ModelAliasEntry struct {
 	MaxFails               int      `json:"max_fails"` // Max consecutive failures before rotation
 	DefaultModel           string   `json:"default_model,omitempty"`
 	BalancedStickyRequests bool     `json:"balanced_sticky_requests,omitempty"`
+	// PriceGroup tags this alias as a routing tier (Contract C10).
+	// "" | "free" | "paid" | "premium". "" = untagged = legacy behavior
+	// (this alias resolves only when explicitly selected). Free/paid/
+	// premium become selectable as a TIER by leaf 09's spillway;
+	// declaring the field here (leaf 01) is schema-only and INERT —
+	// nothing reads it until leaf 09 lands.
+	PriceGroup string `json:"price_group,omitempty"`
 }
 
 // ToolChoiceRequired is the only tool_choice value the request builder acts
@@ -737,6 +760,7 @@ func modelConfigFrom(providerID, mapKey string, provider ProviderConfig, modelDe
 		APIKey:               opts.APIKey,
 		CostPerMillionInput:  modelDef.InputCost,
 		CostPerMillionOutput: modelDef.OutputCost,
+		Quality:              modelDef.Quality,
 		MaxTokens:            modelDef.MaxOutput,
 		Temperature:          modelDef.Temperature,
 		TopP:                 modelDef.TopP,

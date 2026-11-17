@@ -153,6 +153,32 @@
   // Default timeout for all providers (in seconds, 50 minutes)
   "default_timeout": 3000,
 
+  // QUALITY DIMENSION (sovereign-router-parity leaf 01, Contract C2) —
+  // documented but deliberately UNSET on every model (plan Q1 ruling:
+  // ship EMPTY). Quality scores come from MEASUREMENT only — Sovereign
+  // Router's selection rule is "leaderboards nominate, our own probes
+  // score" — never from vendor documentation, and seeding invented
+  // scores would silently reorder existing aliases on upgrade. The
+  // feature is structurally present and behaviorally inert until an
+  // operator measures. Optional per-model keys (inside
+  // providers.<id>.models.<name>):
+  //
+  //   "quality": {              // measured scores, 0-5 per class
+  //     "chat": 3,
+  //     "code": 4,
+  //     "reasoning": 3,
+  //     "tooling": 5,
+  //     "long-context": 2
+  //   },
+  //   "quality_source": "tooling-battery:2026-11-15",  // provenance, free text
+  //   "quality_verified_at": "2026-11-15",             // RFC3339 date, advisory
+  //
+  // An ABSENT "quality" block is the default and must stay the shipped
+  // posture: zero Quality means the selection floor never binds and the
+  // (cost, quality, latency) comparator reduces to the legacy pure-cost
+  // order byte-identically. Only add a block to a model you have actually
+  // probed.
+
   // Providers to skip entirely
   // NOTE: MLX re-enabled 2026-09-06 — the July SIGKILL root cause was the
   // daemon's StartAll context cancellation, fixed for ALL runtimes in

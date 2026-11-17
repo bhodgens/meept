@@ -311,6 +311,12 @@ type ModelConfig struct {
 	Workflow string
 	// GenerationURL is a full URL for kind=http models.
 	GenerationURL string
+	// Quality carries the measured per-class quality scores mapped from
+	// the models.json5 "quality" block (Contract C2, leaf 01). Zero value
+	// (no block) = dimension inert: floor never binds, the selection
+	// comparator's quality term vanishes. Scores come from measurement
+	// only — never seed from vendor documentation.
+	Quality Quality
 	// BodyTemplate is the JSON body template for kind=http models.
 	BodyTemplate map[string]any
 	// ResponseURLPath / ResponseB64Path extract the asset from an http response.

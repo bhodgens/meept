@@ -56,8 +56,13 @@ type Resolver struct {
 	health        map[string]*AliasHealth
 	pricingSyncer *PricingSyncer
 	routingLogger *RoutingLogger
-	mu            sync.Mutex
-	logger        *slog.Logger
+	// mu guards every field below (models.go:428 locking convention: ONE
+	// lock for Resolver + AliasHealth state). RWMutex so the read-only
+	// shadow lane (shadow.go, Contract C6: "takes r.mu.RLock only") can run
+	// concurrently with other readers; every writer keeps Lock()/Unlock()
+	// with identical semantics. Never hold across I/O.
+	mu     sync.RWMutex
+	logger *slog.Logger
 	// quotaCfg holds quota-aware retry settings. Nil disables quota blocking.
 	quotaCfg *QuotaWaitConfig
 	// endpointBlocks maps EndpointKey(cfg) -> block deadline for
@@ -73,6 +78,15 @@ type Resolver struct {
 	// now is the injected clock (SHARED-CONVENTIONS §5) used by the
 	// endpoint/alias-block paths for lazy expiry checks. Nil = time.Now.
 	now func() time.Time
+
+	// selectionFilters is the pre-dispatch filter chain (Contract C1,
+	// sovereign-router-parity leaf 01), written ONCE in NewResolver via
+	// registerSelectionFilters and never mutated again — runSelectionFilters
+	// is called both with and without r.mu held (alias vs skill path), so
+	// the chain itself must be immutable after construction and the filters
+	// must not touch shared resolver state. Registration order is the
+	// FROZEN contract: posture (R3) > quality (R1) > admission (R2).
+	selectionFilters []Filter
 
 	// sessionEndpoints maps sessionID -> EndpointKey(cfg) of the endpoint
 	// that last served that session successfully (session-affinity tree
@@ -124,6 +138,10 @@ func NewResolver(cfg *ProvidersConfig, logger *slog.Logger) *Resolver {
 		sessionEndpoints: make(map[string]string),
 		logger:           logger,
 	}
+
+	// Install the pre-dispatch selection chain (Contract C1, leaf 01).
+	// Order is FROZEN — see registerSelectionFilters in selection.go.
+	r.registerSelectionFilters()
 
 	// Resolve default and small models
 	if cfg.Model != "" {
@@ -341,13 +359,30 @@ func (r *Resolver) ResolveForSkill(skill *SkillRequirements, currentModel *Model
 
 	required := skill.Requires
 
-	// Check if current model satisfies requirements
+	// Quality dimension (Contract C2, sovereign-router-parity leaf 01).
+	// The current/default model's capability short-circuit below is the
+	// PRE-leaf behavior and stays: a caller whose current model already
+	// serves the required capabilities never escalates, exactly as
+	// before — the quality dimension only governs which candidate wins
+	// when the escalation path runs. With the default model now
+	// quality-gated too, a measured-and-sub-floor default would turn
+	// every turn into a refusal; the escalation path (which owns the
+	// floor, T6/T7) must run first whenever the configured models carry
+	// measured quality, so the "good enough" check consults quality.
+	class := firstQualityClass(required)
 	if effectiveCurrent != nil && effectiveCurrent.HasCapabilities(required) {
-		r.logger.Debug("Current model satisfies requirements",
-			"model", effectiveCurrent.ModelID,
-			"requires", required,
-		)
-		return effectiveCurrent, nil
+		if class == "" || effectiveCurrent.Quality.IsZero() ||
+			effectiveCurrent.Quality.QualityFor(class) >= QualityFloorFor(5, string(class)) {
+			r.logger.Debug("Current model satisfies requirements",
+				"model", effectiveCurrent.ModelID,
+				"requires", required,
+			)
+			return effectiveCurrent, nil
+		}
+		// The current model is measured and scores below the floor:
+		// fall through to the quality-aware escalation instead of
+		// short-circuiting (a pinned cheap model must not shield a
+		// sub-floor score).
 	}
 
 	// Find cheapest model that satisfies requirements
@@ -365,10 +400,85 @@ func (r *Resolver) ResolveForSkill(skill *SkillRequirements, currentModel *Model
 		}
 	}
 
-	// Sort by total cost, cheapest first
-	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].TotalCost() < candidates[j].TotalCost()
-	})
+	// Quality dimension (Contract C2, sovereign-router-parity leaf 01):
+	// the class is the first requirement that maps onto one of the five
+	// measured classes. Models that declare NO quality block carry the
+	// zero Quality — the feature is opt-in and must be byte-identical to
+	// the pre-leaf pure-cost order when nothing is measured (T4 inertness
+	// gate), so the entire floor+sort block below is skipped for an
+	// unmeasured candidate set.
+	if class != "" {
+		anyMeasured := false
+		for _, m := range candidates {
+			if !m.Quality.IsZero() {
+				anyMeasured = true
+				break
+			}
+		}
+		if anyMeasured {
+			// Floor evaluation difficulty. The per-turn difficulty
+			// channel (DeriveDifficulty, Contract C11) arrives with
+			// leaf 07; ResolveForSkill has no difficulty-bearing caller
+			// today, so the gate scenario's difficulty (5 — the frozen
+			// table's hardest tier) is the documented default until
+			// leaf 07 threads the real per-turn value through. With
+			// difficulty 5 the floor for any measured class is 4: an
+			// operator who measured a model declares it fit to be
+			// gated, and a score below 4 is below the hardest tier's
+			// bar. Difficulty 0 would make the floor permanently inert
+			// (floor 0 passes every score), which would make T3's
+			// floor contract unreachable — the plan's T7 pins the
+			// refusal, not the inertness, on this path.
+			difficulty := 5
+			floor := QualityFloorFor(difficulty, string(class))
+			best := 0
+			measured := 0
+			passing := candidates[:0:0]
+			for _, m := range candidates {
+				if m.Quality.IsZero() {
+					passing = append(passing, m)
+					continue
+				}
+				measured++
+				score := m.Quality.QualityFor(class)
+				if score > best {
+					best = score
+				}
+				if score >= floor {
+					passing = append(passing, m)
+				}
+			}
+			if measured > 0 && len(passing) == 0 {
+				return nil, &QualityFloorError{
+					Capability: string(class),
+					Difficulty: difficulty,
+					Floor:      floor,
+					Best:       best,
+					Candidates: len(candidates),
+				}
+			}
+			candidates = passing
+		}
+	}
+
+	// Sort with THE shared comparator (frozen contract: cost, then higher
+	// quality, then lower latency — gateway.py:746-759 shape). Quality is
+	// consulted only through the comparator's quality term, so an
+	// all-zero set reduces to pure cost order. Latency is 0 for every
+	// model in v1 (ModelConfig has no latency field; registry.json
+	// latency_p50_ms is the named future source — do not invent a config
+	// key here).
+	if class != "" {
+		sort.SliceStable(candidates, func(i, j int) bool {
+			return byCostThenQuality(candidates[i], candidates[j], class, 0, 0)
+		})
+	} else {
+		// No requirement maps to a quality class: keep the exact legacy
+		// cost-only order (byte-identical flag-off).
+		sort.Slice(candidates, func(i, j int) bool {
+			return candidates[i].TotalCost() < candidates[j].TotalCost()
+		})
+	}
 
 	selected := candidates[0]
 	r.logger.Info("Escalated to model for skill",
@@ -382,12 +492,32 @@ func (r *Resolver) ResolveForSkill(skill *SkillRequirements, currentModel *Model
 	// Errors are best-effort: routing data is observability/training fodder, not
 	// a correctness signal, so we swallow rather than fail the request.
 	if r.routingLogger != nil {
+		candidatesJSON := r.candidatesJSON(candidates)
+		if class != "" {
+			// Quality-aware escalation records each candidate's measured
+			// score alongside its id so routing mining can correlate
+			// picks with quality (T6: "the routing log names it").
+			type scoredCandidate struct {
+				Ref     string `json:"ref"`
+				Quality int    `json:"quality"`
+			}
+			scored := make([]scoredCandidate, len(candidates))
+			for i, c := range candidates {
+				scored[i] = scoredCandidate{
+					Ref:     c.ProviderID + "/" + c.ModelID,
+					Quality: c.Quality.QualityFor(class),
+				}
+			}
+			if b, err := json.Marshal(scored); err == nil {
+				candidatesJSON = string(b)
+			}
+		}
 		decision := RoutingDecision{
 			ChosenModelID:    selected.ModelID,
 			ChosenProviderID: selected.ProviderID,
 			Reason:           "capability_escalation",
 			Skill:            skill.Name,
-			CandidatesJSON:   r.candidatesJSON(candidates),
+			CandidatesJSON:   candidatesJSON,
 		}
 		_ = r.routingLogger.Record(context.Background(), decision)
 	}
@@ -497,15 +627,24 @@ func (r *Resolver) FindByCapabilities(caps []string) []*ModelConfig {
 }
 
 // FindCheapest finds the cheapest model with the specified capabilities.
+// Quality-aware (leaf 01): the shared comparator orders by (cost, higher
+// quality, lower latency); an all-unmeasured set reduces to the exact
+// legacy pure-cost order, byte-identical to the pre-leaf behavior.
 func (r *Resolver) FindCheapest(caps []string) *ModelConfig {
 	models := r.FindByCapabilities(caps)
 	if len(models) == 0 {
 		return nil
 	}
 
-	sort.Slice(models, func(i, j int) bool {
-		return models[i].TotalCost() < models[j].TotalCost()
-	})
+	if class := firstQualityClass(caps); class != "" {
+		sort.SliceStable(models, func(i, j int) bool {
+			return byCostThenQuality(models[i], models[j], class, 0, 0)
+		})
+	} else {
+		sort.Slice(models, func(i, j int) bool {
+			return models[i].TotalCost() < models[j].TotalCost()
+		})
+	}
 
 	return models[0]
 }
@@ -752,6 +891,23 @@ func (r *Resolver) ResolveForAlias(aliasName string, sessionID string) (*ModelCo
 	// Return the active model
 	if selectedIdx < len(alias.Models) {
 		chosen := alias.Models[selectedIdx]
+		// Selection chain hook (Contract C1, sovereign-router-parity leaf
+		// 01, T11): the chain runs AFTER the model is chosen and BEFORE
+		// return, so later filter leaves (05 posture, 02 admission) compose
+		// without re-editing the rotation. r.mu is held here — the chain
+		// must not lock (it doesn't; see runSelectionFilters). With only
+		// qualityFilter registered and an all-unmeasured alias the chain
+		// allows everything: behavior is byte-identical to pre-leaf. A
+		// terminal VerdictFloor would refuse the turn (typed error per the
+		// owning leaf's contract); no registered filter returns it today.
+		if v, _ := r.runSelectionFilters(&Candidate{
+			Model:     chosen,
+			Alias:     aliasName,
+			EstInput:  0,
+			EstOutput: 0,
+		}, &FilterCtx{SessionID: sessionID, Now: r.clock()}); v == VerdictFloor {
+			return nil, fmt.Errorf("all models in alias %q refused by the selection chain", aliasName)
+		}
 		// Persist the routing decision for later mining (Phase 4 student-learns-routing).
 		// Best-effort: swallow errors so routing observability never breaks serving.
 		if r.routingLogger != nil {
