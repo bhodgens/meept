@@ -196,8 +196,10 @@ make hooks                # core.hooksPath -> .githooks (20 pre-commit checks +
 
 # Static analyzers
 make analyzers            # mutexio + predid
-make lint-ci              # golangci-lint + analyzers + audit scripts + fmt-check-gui
-                          # (fmt-check-gui hard-requires the Dart SDK / Flutter)
+make lint-ci              # golangci-lint + analyzers + audit scripts + fmt-check
+                          # + fmt-check-gui (fmt-check runs scripts/fmt-check.sh,
+                          # the gofmt gate scoped to the .golangci.yml `formatters`
+                          # block; fmt-check-gui hard-requires the Dart SDK / Flutter)
 ```
 
 See `cmd/meept/`, `cmd/meept-daemon/`, and `Makefile` for full command reference.
@@ -733,6 +735,7 @@ Audit scripts in `scripts/`:
 | `audit-sqlite-dsn-pragmas.py` | Flags modernc-style `sql.Open("sqlite")` DSNs using mattn keys (`_journal_mode`/`_busy_timeout`/`_fk`/`_foreign_keys`) — modernc.org/sqlite silently drops them (only `_pragma=name(value)` reaches SQLite). bughunt 2026-11-07 infra-fixes |
 | `orphan-check.py` | Ratchets unwired bus topics (publisher-without-subscriber and vice versa) from `docs/generated/bus-topology.json` against `scripts/orphan-baseline.txt` — new-only blocks, `--rebaseline` is deliberate (same policy as the deadcode gate). `make orphan-check`; CI step in code-quality.yml generated-artifacts |
 | `gen-connectivity-graph.py` | Generates bus/RPC/HTTP/WS topology (`make graphs`) |
+| `fmt-check.sh` | gofmt gate for the Go tree (`make fmt-check` check-only / `make fmt` apply); scope mirrors the `.golangci.yml` `formatters` block (archive/, third_party/, testdata/, vendor/, .worktrees/ + nested modules excluded); a missing gofmt is a HARD ERROR, never a silent pass (issue #138 CI gate) |
 | `ensure-dev-key.sh` | Provision the per-installation dev API key (`$MEEPT_HOME/dev_key`, 0600) |
 | `gui-daemon-connect.py` | Reconcile the installed daemon config with the GUI connect path (`ensure-config` / `endpoint` / `check` / `probe`) |
 | `verify-gui-connect.sh` | Prove a fresh install's GUI reaches the daemon (config, key, TLS pin, WS upgrade) |
