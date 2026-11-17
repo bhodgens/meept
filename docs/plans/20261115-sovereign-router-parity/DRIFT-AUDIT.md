@@ -26,9 +26,27 @@ contradicts a ruling here, this file wins.
    posture, quality, admission - in that order.
 5. **ErrProviderLimit is dropped.** No leaf owns it; rate-window handling
    stays with the existing cooldown machinery. Removed from master C3.
-6. **C8 wording**: today `StickyPins` is `map[string]int` (models.go:440).
-   Leaf 07's per-pin difficulty storage (map conversion) is the accurate
-   description; "StickyPin struct gains Difficulty" was wrong.
+- **C8 wording**: today `StickyPins` is `map[string]int` (models.go:440).
+  Leaf 07's per-pin difficulty storage (map conversion) is the accurate
+  description; "StickyPin struct gains Difficulty" was wrong.
+
+## Wave-1 rulings (2026-11-16, post-review)
+
+10. **Health checker `Verdict` renamed `HealthVerdict`** (commit c04596c8):
+    Contract C1's chain `Verdict` and the health checker's verdict type
+    collided in-package. Wire strings unchanged ("healthy"/"unhealthy"/
+    "hung"); AGENTS.md refs updated.
+11. **Leaf 04 declares the `Posture` type** (+3 constants) in shadow.go -
+    C6's union needs it before leaf 05 dispatches. posture.go MUST NOT
+    redeclare; it adds parsing/filtering only.
+12. **Leaf 01 floor difficulty defaults to 5 in ResolveForSkill** until
+    leaf 07 threads the per-turn `DeriveDifficulty` value (gate T3
+    requires the floor to bind without the difficulty channel).
+13. **Comparator cost term = per-turn estimate** (`estIn*in + estOut*out`),
+    falling back to the legacy `TotalCost()` order at zero estimate -
+    flag-off byte-identical; quality breaks equal-cost ties only.
+14. **Gate helper bug fixed in-session** (commit c04596c8): toolcheck
+    streamed-args test called an undefined `jsonMarshal`; helper added.
 
 ## Line-anchor corrections (fold into dispatch contexts)
 

@@ -503,16 +503,16 @@ After every leaf is REVIEWED: run `make build`, `make test`, `make lint-ci`, `ma
 
 | Leaf | Requirement | Status | Commit | Notes |
 |------|-------------|--------|--------|-------|
-| 00T | gate | TESTS_VALIDATED | this commit | 13 files/36 tests, compile-RED on C1-C11 symbols; golden captured on main subset; orchestrator-reviewed vs Test Gate matrix |
-| 01 | R1 | PENDING | | |
-| 02 | R2 | PENDING | | |
-| 03 | R8 | PENDING | | |
-| 04 | R4 | PENDING | | |
+| 00T | gate | TESTS_VALIDATED | a130ce81 | 13 files/36 tests, compile-RED on C1-C11 symbols; golden captured on main subset; orchestrator-reviewed vs Test Gate matrix |
+| 01 | R1 | REVIEWED | 01a16d2b | comparator = per-turn cost estimate (gateway.py estimate_cost shape); floor difficulty default 5 until leaf 07 threads per-turn value |
+| 02 | R2 | REVIEWED | 01a16d2b | gate wired in all 3 ProviderManager rotation loops; typed verdict on all-refused, never pool-exhaustion shape |
+| 03 | R8 | REVIEWED | d46fee26 | child interrupted post-implementation; wiring verified on disk (validateOfferedToolCalls, openai+anthropic+codex) |
+| 04 | R4 | REVIEWED | 298c8ff5 | RLock-only proof; Posture type declared in shadow.go (leaf 05 consumes); CLI+RPC+doc landed |
 | 05 | R3 | PENDING | | |
 | 06 | R5 | PENDING | | |
 | 07 | R7 | PENDING | | |
-| 08 | R6 | PENDING | | |
-| 09 | R9 | PENDING | | |
+| 08 | R6 | REVIEWED | 17fc00f8 (main, back lane) | committed by back agent; merged into forward lane; flag-off pending GREEN |
+| 09 | R9 | IMPLEMENTED | | back lane authored pricegroup.go, uncommitted - needs leaf 01 symbols |
 
 Status values: PENDING, TESTS_IN_PROGRESS, TESTS_VALIDATED, IN_PROGRESS, IMPLEMENTED, REVIEWED, COMPLETE, BLOCKED.
 
