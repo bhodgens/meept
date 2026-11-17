@@ -731,7 +731,6 @@ func (s *SessionService) GetMessageCount(ctx context.Context, sessionID string) 
 	return count, nil
 }
 
-
 // UpdateDescription sets a session's description text.
 type UpdateDescriptionRequest struct {
 	ID          string `json:"id"`

@@ -35,9 +35,9 @@ func newAgentsChildrenCmd() *cobra.Command {
 				return fmt.Errorf("delegate.status: %w", err)
 			}
 			var res struct {
-				Query    string                 `json:"query"`
-				Children []agentChildStatusRow  `json:"children"`
-				Note     string                 `json:"note"`
+				Query    string                `json:"query"`
+				Children []agentChildStatusRow `json:"children"`
+				Note     string                `json:"note"`
 			}
 			if err := json.Unmarshal(raw, &res); err != nil {
 				return fmt.Errorf("failed to parse response: %w", err)

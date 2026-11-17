@@ -46,7 +46,6 @@ type RendererConfig struct {
 	MaxTagsPerFile int
 }
 
-
 // NewContextRenderer creates a new ContextRenderer with the given configuration.
 func NewContextRenderer(config RendererConfig, logger *slog.Logger) *ContextRenderer {
 	// Apply defaults

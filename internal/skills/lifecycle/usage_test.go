@@ -183,7 +183,6 @@ func TestOutcomeString(t *testing.T) {
 	}
 }
 
-
 // TestUsageTrackerImpl_RecordsAndReturnsLowMatchQueries verifies the Pass D
 // data source: RecordLowMatchQuery upserts accumulate count, and
 // GetLowMatchQueries returns them ranked by descending count, filtered by

@@ -70,7 +70,6 @@ type ConfigSyncConfig struct {
 	ConflictMode string `json:"conflict_mode" toml:"conflict_mode"`
 }
 
-
 var ErrConfigSyncInvalid = fmt.Errorf("config sync config is invalid")
 
 // Validate checks that ConfigSyncConfig is valid when enabled.

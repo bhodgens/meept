@@ -63,4 +63,3 @@ func LoadExpectedFingerprint(path string) (certFP, spkiFP string, err error) {
 	}
 	return strings.TrimSpace(certFP), strings.TrimSpace(spkiFP), nil
 }
-

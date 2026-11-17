@@ -473,7 +473,6 @@ func quotaCredentialProxy(modelID string) string {
 	return fmt.Sprintf("%s:default", modelID)
 }
 
-
 // FormatDuration returns a human-readable duration string.
 func FormatDuration(d time.Duration) string {
 	if d < time.Hour {

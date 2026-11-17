@@ -1,10 +1,8 @@
 package tui
 
 import (
-
 	"time"
 )
-
 
 // ProgressState holds current progress for display in chat
 type ProgressState struct {
@@ -20,7 +18,3 @@ type ProgressState struct {
 	ToolMessage string
 	ToolPercent int
 }
-
-
-
-

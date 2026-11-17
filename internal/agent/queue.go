@@ -200,7 +200,6 @@ func WithQueueLogger(l Logger) MessageQueueOption {
 	}
 }
 
-
 // NewMessageQueue creates a new MessageQueue.
 func NewMessageQueue(opts ...MessageQueueOption) *MessageQueue {
 	q := &MessageQueue{

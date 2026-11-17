@@ -9,18 +9,18 @@
 //     registered later). The loop parks the turn inside Reflect when its
 //     effective gate config has Type "approval".
 //   - RESUME (two coordinated halves, both at-most-once):
-//       1. DRAIN+DISPATCH: agents.goals.approve_gate →
-//          Manager.ResumeGoalGateParked → GateParker.ResumeByKey("goal",
-//          goal id) — delete-before-callback — whose resume callback
-//          (wireGateParker) sees GateKind "goal" and calls
-//          resumeGoalGateFromDrain: the decoded row's TurnReentry (plan
-//          id, prompt, recorded result, employee_id) re-enters the owning
-//          loop via GoalLoop.ResumeGoalGateApproval, which re-runs Reflect
-//          with the approval short-circuit.
-//       2. COORDINATION: the manager seam reports whether a row was
-//          drained so the RPC answers resumed=true/false honestly; the
-//          re-entry itself rides the drain callback (the decode happened
-//          there, so the payload never needs a second read).
+//     1. DRAIN+DISPATCH: agents.goals.approve_gate →
+//     Manager.ResumeGoalGateParked → GateParker.ResumeByKey("goal",
+//     goal id) — delete-before-callback — whose resume callback
+//     (wireGateParker) sees GateKind "goal" and calls
+//     resumeGoalGateFromDrain: the decoded row's TurnReentry (plan
+//     id, prompt, recorded result, employee_id) re-enters the owning
+//     loop via GoalLoop.ResumeGoalGateApproval, which re-runs Reflect
+//     with the approval short-circuit.
+//     2. COORDINATION: the manager seam reports whether a row was
+//     drained so the RPC answers resumed=true/false honestly; the
+//     re-entry itself rides the drain callback (the decode happened
+//     there, so the payload never needs a second read).
 //   - Restart re-arm is the parker's existing Start (a goal gate parked
 //     before a boot is resumable by a late approval).
 //

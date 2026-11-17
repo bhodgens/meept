@@ -144,7 +144,6 @@ func (p *Proxy) Start(ctx context.Context) (string, error) {
 	return ln.Addr().String(), nil
 }
 
-
 // loopbackListen validates that listen targets a loopback IP literal and
 // binds it. Non-loopback targets are refused outright: the proxy holds the
 // power to mint authenticated requests, so binding it broadly would turn one

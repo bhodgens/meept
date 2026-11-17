@@ -30,7 +30,6 @@ type PageRankConfig struct {
 	Personalization map[string]float64
 }
 
-
 // ComputeRank applies Personalized PageRank to the given graph and returns
 // ranked tags sorted by their PageRank score in descending order.
 func ComputeRank(g *RepoGraph, config PageRankConfig) RankedTags {
@@ -248,8 +247,6 @@ func buildPersonalizationMap(g *RepoGraph, personalization map[string]float64) m
 
 	return pers
 }
-
-
 
 // matchesPathComponents checks if any path component matches the identifier.
 // This helps identify files related to a mentioned identifier.

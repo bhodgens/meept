@@ -18,10 +18,8 @@ const (
 	ColorSuccess = 35  // green
 )
 
-
 // Style represents a text style with foreground and background colors.
 type Style struct {
 	Fg termbox.Attribute
 	Bg termbox.Attribute
 }
-
