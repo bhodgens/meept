@@ -49,6 +49,7 @@ import (
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/secrets"
 	"github.com/caimlas/meept/internal/session"
+	"github.com/caimlas/meept/internal/sms"
 	"github.com/caimlas/meept/internal/tools/builtin"
 	"github.com/caimlas/meept/internal/voice"
 	"github.com/caimlas/meept/internal/voice/telnyx"
@@ -220,6 +221,24 @@ type VoiceWiring struct {
 	// the package seam is process-global, so Stop must only clear it
 	// when the live registration is OUR warmer.
 	contextWarmer *voice.ContextWarmer
+	// dlrSlot hands the contact chain's live *telnyx.SMSAttempt to the
+	// armed messaging OnFinalized seam (leaf 03/02, the D6 fix). The
+	// attempt is constructed in BuildContactChain — AFTER WireVoice
+	// returns — so the closure reads this slot per event; components.go
+	// arms it via setSMSAttempt. nil-safe both ways. The sms store and
+	// nonce handles stay Components-owned (stopComponents closes the
+	// store after the voice stack, matching the callstore ordering
+	// precedent).
+	dlrSlot *dlrAttemptSlot
+
+	// replySlot hands the production consent reply hook (leaf 04/02) to
+	// the armed OnInbound seam. Same late-arming rationale as dlrSlot:
+	// the hook closes over the contacts.db handle + messaging
+	// telnyx.Client that only BuildContactChain has, so it registers
+	// through this slot after WireVoice returns. nil-safe: an unarmed
+	// slot reads nil and OnInbound does no reply handling (the inert
+	// posture every pre-04/02 test pins).
+	replySlot *consentReplySlot
 }
 
 // WireVoiceDeps carries the components WireVoice captures. All pointer
@@ -287,6 +306,19 @@ type WireVoiceDeps struct {
 	// session clone gets the bound employee's renderer before its turn.
 	// Nil (awareness disabled — the default) = the inert D1 posture.
 	MomentResolver func(employeeID string) func() string
+	// MessagingStore (plan 20261110-telnyx-texting leaf 03/02, §6): the
+	// durable SMS store handle built by components.go when
+	// [voice.messaging].Enabled || InboundEnabled. Nil => the messaging
+	// webhook arms parse-and-ack only (the D3 disabled posture —
+	// buildMessagingDeps yields nil consumer callbacks).
+	MessagingStore *sms.Store
+	// MessagingNonces (leaf 03/02, §6): the replay-dedupe NonceStore
+	// shared by the messaging webhook handler. The `telnyx` import here
+	// IS internal/voice/telnyx (§1's home), matching the gate's
+	// voicetelnyx.NonceStore pin. Nil with a non-nil store still arms
+	// the consumer seams; only the handler-level dedupe degrades (the
+	// store's insert-ignore stays the redelivery guard).
+	MessagingNonces *telnyx.NonceStore
 }
 
 // WireVoice constructs the voice stack from cfg. It returns (nil, nil)
@@ -614,6 +646,8 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		loopCancels:    make(map[string]context.CancelFunc),
 		linkTurns:      voice.NewLinkTurnRegistry(vlog.With("sub", "link-turns")),
 		callEvents:     voice.NewTelemetryRing(voice.DefaultCallEvents, voice.DefaultCallEventRings),
+		dlrSlot:        &dlrAttemptSlot{},
+		replySlot:      &consentReplySlot{},
 		bus:            deps.Bus,
 		textSocketPath: textSocketPath,
 		broker:         deps.Broker,
@@ -835,19 +869,45 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		w.Routes = routes
 	}
 
-	// -- 10b. Messaging webhook routes (leaf 12): the SAME Ed25519
-	// verifier as the voice routes (injected; no second crypto impl).
-	// OnFinalized feeds the contact chain's SMS attempt DLR wait; the
-	// wiring arms it after the chain exists (BuildContactChain sets
-	// Messaging.OnFinalized through the exported seam). Disabled block
+	// -- 10b. Messaging webhook routes (leaf 12, armed by leaf 03/02):
+	// the SAME Ed25519 verifier as the voice routes (injected; no second
+	// crypto impl). Consumer seams come from buildMessagingDeps: when
+	// inbound_enabled AND a store handle was injected, OnInbound/On-
+	// Finalized arm (store rows + sms.* bus fan-out + DLR resolve — the
+	// D6 fix); the disabled posture (D3 golden) keeps the historical
+	// Verify-only shape so the route stays byte-identical parse-and-ack.
+	// The SMSAttempt reaches the OnFinalized closure through w.dlrSlot
+	// (BuildContactChain arms it after WireVoice returns; gate tests can
+	// inject Attempts directly into messagingArmingDeps). Disabled block
 	// leaves the route unserved.
 	if deps.Config.Voice.Messaging.Enabled {
+		armed := deps.Config.Voice.Messaging.InboundEnabled && deps.MessagingStore != nil
 		msgDeps := commhttp.MessagingWebhookDeps{
 			Verify: verify.Webhook,
+		}
+		if armed {
+			consumer := buildMessagingDeps(messagingArmingDeps{
+				Store:     deps.MessagingStore,
+				Nonce:     deps.MessagingNonces,
+				Bus:       deps.Bus,
+				Attempts:  nil, // late-armed through w.dlrSlot (see above)
+				Logger:    vlog.With("sub", "messaging-arming"),
+				slot:      w.dlrSlot,
+				replySlot: w.replySlot, // late-armed by BuildContactChain (leaf 04/02)
+			})
+			msgDeps.OnInbound = consumer.OnInbound
+			msgDeps.OnFinalized = consumer.OnFinalized
+			if consumer.Nonce != nil {
+				msgDeps.Nonce = consumer.Nonce
+			}
 		}
 		mr, err := commhttp.NewMessagingRoutes(msgDeps, vlog.With("sub", "messaging"))
 		if err == nil {
 			w.Messaging = mr
+			if armed {
+				vlog.Info("voice wiring: messaging webhook armed (inbound store + DLR resolve)",
+					"nonce_dedupe", deps.MessagingNonces != nil)
+			}
 		} else {
 			vlog.Warn("voice wiring: messaging routes degraded (route unserved)", "error", err)
 		}

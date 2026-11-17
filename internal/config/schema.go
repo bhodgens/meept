@@ -5984,6 +5984,23 @@ type MessagingConfig struct {
 	// DLRWaitSeconds bounds the wait for message.finalized; 0 inherits
 	// the telnyx.DefaultDLRWaitSeconds (30) at adapter construction.
 	DLRWaitSeconds int `json:"dlr_wait_seconds" toml:"dlr_wait_seconds"`
+	// WebhookBaseURL is the scheme+host Telnyx webhooks are addressed
+	// under (telnyx-texting plan master.md §8). Empty = no webhook_url
+	// is sent on sends; the contact channel derives
+	// {base}/api/v1/voice/messaging/webhook when set. Zero default.
+	WebhookBaseURL string `json:"webhook_base_url" toml:"webhook_base_url"`
+	// StopReply is the confirmation text sent after a STOP/START consent
+	// keyword (zero default: the reply WORDING defaults live in the sms
+	// pkg per the master serialization note, not in schema.go).
+	StopReply string `json:"stop_reply" toml:"stop_reply"`
+	// HelpReply is the reply text for HELP (zero default, same rationale
+	// as StopReply).
+	HelpReply string `json:"help_reply" toml:"help_reply"`
+	// InboundEnabled is the D3 kill switch for the inbound SMS leg;
+	// DEFAULT FALSE — the SMS leg ships opt-in and disabled daemon
+	// behavior stays byte-identical. An explicit false in the doc is
+	// honored (never force-defaulted true at the load boundary).
+	InboundEnabled bool `json:"inbound_enabled" toml:"inbound_enabled"`
 }
 
 // EmployeeLegConfig is one per-agent voice routing default (voice tree
