@@ -1350,6 +1350,12 @@ type chatOptions struct {
 	// channel.
 	overrideProviderID string
 	overrideModelID    string
+	// difficulty is the caller's per-turn routing difficulty (1-5,
+	// leaf 07 / Contract C11), set with WithDifficulty and consumed by
+	// leaf 07's sticky difficulty predicate. Zero (the default) =
+	// unclassified = difficulty-derived behavior inert; a ChatOption is
+	// the request-scoped carrier — never shared client state.
+	difficulty int
 	// traceID/spanID carry the request-scoped trace identifiers (llm-hop-
 	// tracing leaf 01), set with WithTraceID. Empty means no per-request
 	// trace scope: records carry "" and no trace correlation happens,
@@ -1477,6 +1483,18 @@ func WithModelOverride(mc *ModelConfig) ChatOption {
 		}
 		o.overrideProviderID = mc.ProviderID
 		o.overrideModelID = mc.ModelID
+	}
+}
+
+// WithDifficulty carries a caller-derived routing difficulty (1-5, leaf 07
+// / Contract C11; produced by DeriveDifficulty in internal/agent). It is
+// request-scoped (never shared state): leaf 07's sticky release predicate
+// reads it inside resolveStickyCaller as fc.Difficulty. Zero =
+// unclassified = the feature is inert (a pin created at 0 is never
+// released for difficulty).
+func WithDifficulty(d int) ChatOption {
+	return func(o *chatOptions) {
+		o.difficulty = d
 	}
 }
 
