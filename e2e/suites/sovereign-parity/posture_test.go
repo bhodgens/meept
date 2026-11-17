@@ -68,7 +68,7 @@ func postureConfig(t *testing.T, first extra, second extra) parityConfig {
 		// never lands on provpub; isolating the classifier makes the
 		// stronger zero-hit assertion meaningful.
 		secondaryRef: "provpriv/model-private",
-		chatAlias: "general",
+		chatAlias:    "general",
 	}
 }
 
