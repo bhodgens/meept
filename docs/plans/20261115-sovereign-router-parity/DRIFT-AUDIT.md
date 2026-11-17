@@ -48,6 +48,22 @@ contradicts a ruling here, this file wins.
 14. **Gate helper bug fixed in-session** (commit c04596c8): toolcheck
     streamed-args test called an undefined `jsonMarshal`; helper added.
 
+## Wave-2 rulings (2026-11-16, post-review)
+
+15. **Leaf 05 uses the narrow-interface fallback** for the secret
+    scanner: `internal/security -> internal/preferences -> internal/tools
+    -> internal/llm` makes the leaf doc's direct import impossible
+    (verified via go list -deps). posture.go declares `SecretScanner`;
+    the daemon wires `*security.SecretScanner` into it.
+16. **The posture prompt seam lives at the resolver resolve-time hook**,
+    not the chain hook: a plain chain Skip cannot re-rotate past a
+    non-cleared rotation head. Resolver-level scan + re-rotation is the
+    mechanism; `FilterCtx.PromptText` carries the request-scoped text.
+17. **Leaf 08 T7 WIRED** (2f34d16d): steerReorderedTail at the three
+    rotation loops; primary candidate never moves; enforce byte-identical.
+    docs/workflows/llm-advisory-budget.md "Wiring" item 3 is now stale
+    (says deliberately-not-wired) - flip to as-built at integration.
+
 ## Line-anchor corrections (fold into dispatch contexts)
 
 - 00T: validation.py streamed-outcome fn is at :104-112 (not 113-126);
