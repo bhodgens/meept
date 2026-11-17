@@ -45,6 +45,18 @@ func (l *AgentLoop) SetMessageDrainer(d MessageDrainer) {
 	l.mu.Unlock()
 }
 
+// MessageDrainer returns the currently wired inbox drain source under l.mu,
+// mirroring SetMessageDrainer. Returns nil when injection is disabled. The
+// snapshot is taken under the lock so per-turn clones can forward the source
+// (voice/goal/bot lanes) without reading the field unlocked; no drain I/O
+// happens here.
+func (l *AgentLoop) MessageDrainer() MessageDrainer {
+	l.mu.Lock()
+	d := l.messageDrainer
+	l.mu.Unlock()
+	return d
+}
+
 // buildAgentMessagesSection drains the loop agent's unread messages and
 // renders them as a system-anchored section. Returns "" when no drainer
 // is wired or the inbox is empty. Draining marks messages delivered, so
