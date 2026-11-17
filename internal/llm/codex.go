@@ -177,6 +177,14 @@ type CodexClient struct {
 	// goroutine; nil = off (SetLLMCallObserver nil-guard). Atomic for the
 	// same reason as Client's (bughunt 2026-11-07 infra-fixes F-3).
 	llmCallObserver atomic.Pointer[func(appmetrics.LLMCallRecord)]
+	// toolcheckNames carries the request's offered tool function names
+	// (Contract C9, sovereign-router-parity leaf 03) for post-parse
+	// tool-call validation in parseResponse/parseResponsesSSE.
+	// Request-scoped state stamped by buildPayload from chatOpts.tools and
+	// read within the same call chain — it never mutates shared client
+	// configuration. Empty/nil on a tool-less request: validation skips
+	// byte-identically (the offered-empty rule).
+	toolcheckNames []string
 }
 
 // llmCallObserverFn loads the attached observer (nil when unset).
@@ -525,6 +533,13 @@ func (c *CodexClient) buildPayload(messages []ChatMessage, cfg *ModelConfig, cha
 		}
 		payload.Tools = tools
 		payload.ToolChoice = "auto"
+		// Contract C9 (sovereign-router-parity leaf 03): capture the
+		// offered names for post-parse tool-call validation in
+		// parseResponse / parseResponsesSSE. The wire sort is a payload
+		// concern; the offered set is the request's declaration
+		// (OfferedToolNames dedups). A tool-less request leaves
+		// toolcheckNames nil so validation skips byte-identically.
+		c.toolcheckNames = OfferedToolNames(chatOpts.tools)
 	}
 
 	if chatOpts.maxTokens > 0 {
@@ -778,6 +793,21 @@ func (c *CodexClient) parseResponse(parsed *codexResponsesResponse, cfg *ModelCo
 		strings.TrimSpace(resp.Content) == "" &&
 		strings.TrimSpace(resp.Reasoning) == "" {
 		return nil, ErrEmptyResponse
+	}
+
+	// Contract C9 (sovereign-router-parity leaf 03): function_call items are
+	// validated AFTER the empty-completion gate (which keeps its precedence)
+	// and BEFORE the Response returns to doRequestWithEmptyRetry / the
+	// executor. The bare ErrToolCallInvalid sentinel is NOT the empty
+	// sentinel, so the empty-retry wrapper returns it single-shot (existing
+	// behavior for every non-empty error). toolcheckNames is nil on a
+	// tool-less request: validation skips byte-identically.
+	if verr := validateOfferedToolCalls(resp.ToolCalls, c.toolcheckNames); verr != nil {
+		c.logger.Warn("tool call failed validation (codex)",
+			"model", cfg.ModelID,
+			"detail", firstInvalidToolCall(resp.ToolCalls, c.toolcheckNames),
+		)
+		return nil, verr
 	}
 
 	return resp, nil

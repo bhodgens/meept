@@ -124,6 +124,14 @@ type Client struct {
 	// failurePolicy is the injected tree-02 policy config (leaf 03 Task 5):
 	// ShortRetries bounds every loop's retry budget; nil-safe default 3.
 	failurePolicy *FailurePolicyConfig
+	// toolcheckNames carries the request's offered tool function names
+	// (Contract C9, sovereign-router-parity leaf 03) for post-parse
+	// tool-call validation in doRequest/doStreamRequest. Request-scoped
+	// state stamped by buildChatRequest from chatOpts.tools and read by the
+	// transport layer within the same call — it never mutates shared client
+	// configuration. Empty/nil on a tool-less request: validation skips
+	// (the offered-empty rule keeps no-tool turns byte-identical).
+	toolcheckNames []string
 	// concurrencyGate limits concurrent requests for this model/provider.
 	// When nil, no limit is enforced. Two-lane slot gate (tree 04 leaf
 	// 03): replaces the raw buffered channel so interactive acquires
@@ -715,6 +723,13 @@ func (c *Client) buildChatRequest(messages []ChatMessage, cfg *ModelConfig, opts
 			return sorted[i].Function.Name < sorted[j].Function.Name
 		})
 		payload["tools"] = sorted
+		// Contract C9 (sovereign-router-parity leaf 03): capture the
+		// offered names for post-parse tool-call validation. Declaration
+		// order over the REQUEST's tools (OfferedToolNames dedups); the
+		// wire sort is a payload concern and does not change the offered
+		// set. A tool-less request leaves toolcheckNames nil so
+		// doRequest/doStreamRequest skip validation byte-identically.
+		c.toolcheckNames = OfferedToolNames(chatOpts.tools)
 	}
 
 	// Session-scoped prompt-cache routing hint (OpenAI spec): requests
@@ -2134,6 +2149,27 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any, cfg *Mod
 
 	parsedResp, err := c.parseResponseWithTools(&chatResp, hasTools, providerID, modelID, assistantPrefill)
 
+	// Tool-call validation (Contract C9, sovereign-router-parity leaf 03):
+	// AFTER a successful parse, BEFORE the response returns to the retry
+	// loop / the executor. A call naming an unoffered function or carrying
+	// unparseable/non-object arguments is rejected here — the bare
+	// ErrToolCallInvalid sentinel classifies as a fatal, non-retried error
+	// in the caller's loop (Classify(0) -> FailureNone -> immediate return),
+	// never re-entering the empty-completion or throttle lanes. The offered
+	// names ride on the request payload; a tool-less request passes nil and
+	// skips validation entirely (the offered-empty rule keeps no-tool turns
+	// byte-identical).
+	if parsedResp != nil && len(parsedResp.ToolCalls) > 0 && len(c.toolcheckNames) > 0 {
+		if verr := validateOfferedToolCalls(parsedResp.ToolCalls, c.toolcheckNames); verr != nil {
+			c.logger.Warn("tool call failed validation",
+				"provider", providerID,
+				"model", modelID,
+				"detail", firstInvalidToolCall(parsedResp.ToolCalls, c.toolcheckNames),
+			)
+			return nil, verr
+		}
+	}
+
 	// Update metrics with actual token counts if available
 	if c.metricsStore != nil && parsedResp != nil {
 		costUSD := float64(chatResp.Usage.PromptTokens)*cfg.CostPerMillionInput/1_000_000 + float64(chatResp.Usage.CompletionTokens)*cfg.CostPerMillionOutput/1_000_000
@@ -3212,6 +3248,28 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 		!strings.Contains(content[idx:], "</function_calls>") {
 		c.logger.Warn("LFM <function_calls> block truncated at stream cutoff; raw text kept in content",
 			"model", modelID, "remainder", content[idx:])
+	}
+
+	// Contract C9 (sovereign-router-parity leaf 03): streamed tool-call
+	// chunks are buffered to completion (the toolCallAccums above) and the
+	// ASSEMBLED calls are validated ONCE, at stream end, before the
+	// response is returned — validation.py:113-126's "buffered to
+	// completion and validated before anything is sent to the client",
+	// never per chunk. chatOpts.tools names the request's offered set; a
+	// tool-less request passes nil and skips byte-identically (the
+	// offered-empty rule). The bare sentinel classifies as a fatal error in
+	// the ChatWithDeltaCallback retry loop (Classify(0) -> FailureNone ->
+	// immediate return), never the empty-completion lane.
+	if len(toolCalls) > 0 && len(chatOpts.tools) > 0 {
+		offered := OfferedToolNames(chatOpts.tools)
+		if verr := validateOfferedToolCalls(toolCalls, offered); verr != nil {
+			c.logger.Warn("tool call failed validation (stream)",
+				"provider", providerID,
+				"model", modelID,
+				"detail", firstInvalidToolCall(toolCalls, offered),
+			)
+			return nil, resp.StatusCode, verr
+		}
 	}
 
 	// Refusal surfacing (refusal-fallback leaf 01): a stream that ends with
