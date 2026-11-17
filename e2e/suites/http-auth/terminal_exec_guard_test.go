@@ -62,8 +62,12 @@ func TestTerminalExecGuardBlockedIsForbiddenNotInternal(t *testing.T) {
 	}
 
 	// Benign control: the same endpoint runs an allowed command normally,
-	// proving the 403 above is the guard, not a broken route.
-	code, fields = postExec(t, s, `{"command":"echo e2e-guard-ok"}`)
+	// proving the 403 above is the guard, not a broken route. Issue #136
+	// made the shell lane refuse to guess a working directory, so the
+	// benign call passes one explicitly (the scratch project dir) — the
+	// guard-blocked arm above deliberately OMITS it, pinning that the
+	// guard verdict binds even on an unbound caller.
+	code, fields = postExec(t, s, `{"command":"echo e2e-guard-ok","working_dir":"`+s.ProjectDir+`"}`)
 	if code != http.StatusOK {
 		t.Fatalf("http-auth-04: benign status = %d, want 200 (body: %v)", code, fields)
 	}

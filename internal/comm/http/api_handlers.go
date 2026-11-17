@@ -15,6 +15,7 @@ import (
 	"github.com/caimlas/meept/internal/queue"
 	"github.com/caimlas/meept/internal/services"
 	"github.com/caimlas/meept/internal/session"
+	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/security"
@@ -198,6 +199,13 @@ func (s *Server) handleServiceError(w http.ResponseWriter, err error) {
 		// authorization outcome, not a server fault: 403, matching the
 		// PTY endpoint's fence rejection (pty_handler.go).
 		s.writeError(w, http.StatusForbidden, err.Error())
+	case errors.Is(err, tools.ErrNoWorkingDir):
+		// The tool refused because this caller has no bound working
+		// directory (issue #136 posture: actionable refusal, never a
+		// daemon-wide $HOME guess). That is a request the client can fix
+		// (pass working_dir / bind the session): 400 with the sentinel's
+		// own guidance, not a 500.
+		s.writeError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, queue.ErrJobNotClaimable):
 		// Completing a job that is not claimed/processing (pending, failed,
 		// already completed — e.g. requeued for another attempt) is a state

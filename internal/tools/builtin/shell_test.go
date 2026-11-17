@@ -36,16 +36,9 @@ func newShellToolWithWorkDir(t *testing.T) *ShellExecuteTool {
 	return NewShellExecuteTool(t.TempDir(), time.Second*10, nil)
 }
 
-// mustExecShell runs a shell command on a tool built with an explicit working
-// directory (issue #136 removed the implicit "~" fallback, so a bare tool no
-// longer has anywhere to run).
-func mustExecShell(t *testing.T, tool *ShellExecuteTool, ctx context.Context, args map[string]any) any {
-	t.Helper()
-	res, err := tool.Execute(ctx, args)
-	require.NoError(t, err)
-	return res
-}
-
+// mustExecShell was removed: every caller now invokes tool.Execute
+// directly (issue #136 made the working directory explicit in the args, so
+// the wrapper no longer carried a distinct behavior worth a helper).
 func TestShellExecuteTool_Execute(t *testing.T) {
 	tool := newShellToolWithWorkDir(t)
 	ctx := context.Background()

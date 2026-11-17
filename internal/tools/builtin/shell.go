@@ -557,17 +557,35 @@ func (t *ShellExecuteTool) Execute(ctx context.Context, args map[string]any) (an
 		return nil, fmt.Errorf("empty command")
 	}
 
-	// Declarative permission table ([security.shell_permissions]) consult:
-	// deny blocks outright; ask requires user confirmation; allow falls
-	// through to tirith below. Unset table or unmatched prefix -> legacy path.
-	if err := t.checkPermissionTable(command); err != nil {
-		return nil, err
-	}
-
 	// Parse timeout
 	timeout := t.defaultTimeout
 	if timeoutSec, ok := args["timeout"].(float64); ok && timeoutSec > 0 {
 		timeout = time.Duration(timeoutSec) * time.Second
+	}
+
+	// Command-only security guards run BEFORE working-directory resolution
+	// (order contract of 86e4fc05, restored after the #136 reorder): a
+	// refusal by the risk classifier or the permission table is an
+	// authorization outcome and must surface as ErrCommandBlocked (-> 403
+	// at the HTTP layer) even when the caller has no bound working
+	// directory — otherwise the unbound-directory refusal (-> 400) shadows
+	// the guard verdict and the always-denied list stops binding on
+	// unbound lanes.
+	//
+	// Check command risk level (built-in check)
+	risk := t.classifyRisk(command)
+	if risk == RiskCritical {
+		baseCmd := extractBaseCommand(command)
+		return nil, fmt.Errorf("%w: command blocked for safety: %s", security.ErrCommandBlocked, baseCmd)
+	}
+
+	// Declarative permission table ([security.shell_permissions]) consult:
+	// deny blocks outright; ask requires user confirmation; allow falls
+	// through to tirith below. Unset table or unmatched prefix -> legacy
+	// path. Deny/ask short-circuit before tirith; allow (or no match)
+	// falls through; tirith still runs after directory resolution below.
+	if err := t.checkPermissionTable(command); err != nil {
+		return nil, err
 	}
 
 	// Parse working directory (issue #136): explicit arg > session context binding
@@ -578,24 +596,12 @@ func (t *ShellExecuteTool) Execute(ctx context.Context, args map[string]any) (an
 		return nil, err
 	}
 
-	// Check fence boundaries
+	// Check fence boundaries (needs the resolved workDir, so it stays after
+	// resolution; a fence refusal is still ErrCommandBlocked -> 403).
 	if t.fenceChecker != nil {
 		if err := t.fenceChecker.CheckCommand(command, workDir); err != nil {
 			return nil, fmt.Errorf("%w: fence: %w", security.ErrCommandBlocked, err)
 		}
-	}
-
-	// Check command risk level (built-in check)
-	risk := t.classifyRisk(command)
-	if risk == RiskCritical {
-		baseCmd := extractBaseCommand(command)
-		return nil, fmt.Errorf("%w: command blocked for safety: %s", security.ErrCommandBlocked, baseCmd)
-	}
-
-	// Declarative permission table: deny/ask short-circuit before tirith.
-	// Allow (or no match) falls through; tirith still runs below.
-	if err := t.checkPermissionTable(command); err != nil {
-		return nil, err
 	}
 
 	// Scan command with Tirith via security orchestrator
@@ -829,21 +835,13 @@ func (t *ShellExecuteTool) ExecuteStreaming(ctx context.Context, args map[string
 		timeout = time.Duration(timeoutSec) * time.Second
 	}
 
-	// Parse working directory (issue #136): same resolution as Execute — explicit
-	// arg > session context binding > explicitly configured tool dir >
-	// actionable refusal.
-	workDir, err := t.resolveShellWorkingDir(ctx, args, "shell")
-	if err != nil {
-		return nil, err
-	}
-
-	// Check fence boundaries
-	if t.fenceChecker != nil {
-		if err := t.fenceChecker.CheckCommand(command, workDir); err != nil {
-			return nil, fmt.Errorf("%w: fence: %w", security.ErrCommandBlocked, err)
-		}
-	}
-
+	// Command-only security guards run BEFORE working-directory resolution
+	// (order contract of 86e4fc05, restored after the #136 reorder; same
+	// shape as Execute above): a refusal by the risk classifier or the
+	// permission table is an authorization outcome and must surface as
+	// ErrCommandBlocked (-> 403 at the HTTP layer) even when the caller
+	// has no bound working directory.
+	//
 	// Check command risk level
 	risk := t.classifyRisk(command)
 	if risk == RiskCritical {
@@ -854,6 +852,22 @@ func (t *ShellExecuteTool) ExecuteStreaming(ctx context.Context, args map[string
 	// Declarative permission table: deny/ask short-circuit before tirith.
 	if err := t.checkPermissionTable(command); err != nil {
 		return nil, err
+	}
+
+	// Parse working directory (issue #136): same resolution as Execute — explicit
+	// arg > session context binding > explicitly configured tool dir >
+	// actionable refusal.
+	workDir, err := t.resolveShellWorkingDir(ctx, args, "shell")
+	if err != nil {
+		return nil, err
+	}
+
+	// Check fence boundaries (needs the resolved workDir, so it stays after
+	// resolution; a fence refusal is still ErrCommandBlocked -> 403).
+	if t.fenceChecker != nil {
+		if err := t.fenceChecker.CheckCommand(command, workDir); err != nil {
+			return nil, fmt.Errorf("%w: fence: %w", security.ErrCommandBlocked, err)
+		}
 	}
 
 	// Scan command with Tirith via security orchestrator

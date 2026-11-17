@@ -277,6 +277,7 @@ internal/llm/client.go unreachable func: RawGrammarOf
 internal/llm/client.go unreachable func: ResolvedModelOf
 internal/llm/client.go unreachable func: ToolChoiceOf
 internal/llm/client.go unreachable func: WithConcurrencyLimit
+internal/llm/client.go unreachable func: WithDifficulty
 internal/llm/client.go unreachable func: WithGrammar
 internal/llm/client.go unreachable func: WithMetricsStore
 internal/llm/client.go unreachable func: WithSystemBlocks
@@ -296,6 +297,9 @@ internal/llm/models_catalog.go unreachable func: GetAllCatalogModels
 internal/llm/models_catalog.go unreachable func: GetModelsForProvider
 internal/llm/modelstore.go unreachable func: OpenModelStoreForTesting
 internal/llm/pacing.go unreachable func: AdaptivePacer.interval
+internal/llm/pool_failure.go unreachable func: PoolIDFor
+internal/llm/posture.go unreachable func: PosturePromptText
+internal/llm/posture.go unreachable func: Resolver.postureBlocks
 internal/llm/provider_registry.go unreachable func: GetProviderByEnvVar
 internal/llm/provider_registry.go unreachable func: ListProviders
 internal/llm/provider_registry.go unreachable func: ProvidersFromConfig
