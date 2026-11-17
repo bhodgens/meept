@@ -90,6 +90,22 @@ jitter = gap table).
 
 | Leaf | Status | Notes |
 |------|--------|-------|
-| 01 | PENDING | |
-| 02 | PENDING | |
-| 03 | PENDING | |
+| 01 | VALIDATED | Merged in 42d727d5 (merge parent 4cb51951). Mechanically verified at HEAD (2026-11-16): `internal/voicechild/pipeline.go:178-183` aggregation fields (turnConfirm, pendingFinal*, pendingFinalSeq, micHoldRearms), `confirmWindow()` :902, `accumulateFinal` :911 with 8 s age cap + timer-seq stale-closure guard; config surface `internal/config/schema.go:5237` (TurnConfirmMs default 900) + `:5646/:5654` doc field + `:5924` negative-clamps-to-0 validation + `:6041` employee_leg tri-state selector; daemon emission `internal/daemon/voice_keys.go:52-59/:174-180`; child decode `internal/voicechild/keys.go:42-47/:191-197`; config template `config/meept.json5:1361`; doc `docs/workflows/voicechild.md` (+12 lines in the merge). Gates green (2026-11-16, `-count=1`): `go test ./internal/voicechild/ -run 'Aggregation|ShortFinal'` — 22/22 PASS incl. TestAggregationTwoFinalsOnePrompt, TestAggregationBreathPatternSingleDispatch, TestAggregationLegacyZeroDispatchesPerFinal, TestAggregationEOFTranscriptStreamFlushes, TestAggregationHangupFlushes, TestAggregationMicHoldBounded/LivePump, TestAggregationCapForceDispatch; `./internal/daemon/ -run VoiceKeys` — 7/7 PASS incl. TestVoiceKeysEmissionTurnConfirmSelector + TestVoiceKeysEmissionDefaultConfigSends900; `./internal/config/ -run 'TurnConfirm|Voice'` PASS; segmentation unchanged: `./internal/voicechild/providers/ -run WhisperPaced` PASS (TestWhisperPacedStreamFlushesWithoutClose stays green). |
+| 02 | VALIDATED | Merged in 7bc515ed (merge parent 4cb51951). Mechanically verified at HEAD (2026-11-16): `cmd/meept/voice.go:93` `--record` flag; `:114-126` live-mode-only validation (--record refused in file mode) + MkdirAll; `:856-938` setupLiveSpeaker — warm via silent `liveWarmBurstBytes` burst BEFORE dial (:906), warm-through-recorder so the burst never lands in the capture (:925-927); `:1070-1077` runVoiceLocalLive constructs + warms the chain before dialing; recorderPlayer tee writes `<ccid>-<side>.raw` + meta JSON. Gates green (2026-11-16): `go test ./cmd/meept/ -run 'SetupLiveSpeaker|TeardownLiveSpeaker|VoiceLocalRecord'` — 7/7 PASS incl. TestSetupLiveSpeakerWarmsBeforeDial, TestSetupLiveSpeakerWarmFailureNeverDials, TestSetupLiveSpeakerRecordsWithoutWarmBytes, TestVoiceLocalRecordFlagValidation. |
+| 03 | UNVERIFIED (live drill pending) — hermetic gates green | 2026-11-16 hermetic reconciliation pass: leaf-01/02 unit gates above ALL green at HEAD (post-4cb51951); hermetic e2e `make e2e-fast-area AREA=voice-local` PASS (49.8 s) — the full local leg end-to-end through the REAL STT/TTS adapters + real pipeline (single-final dispatch shape; the two-finals aggregation window itself is pinned at unit level by TestAggregationTwoFinalsOnePrompt/TestAggregationBreathPatternSingleDispatch). The three LIVE steps below were NOT run (no live daemon, no live LLM — out of scope for this reconciliation pass). Owner steps when running the drill: (1) rebuild `make build` and restart the daemon; (2) paced-replay: synthesize a 24 kHz/16-bit mono WAV of two sentences separated by a ~500 ms pause, stream it at real time into a scratch-daemon `voice local` call, assert ONE `prompt_dispatch` + ONE reply in the telemetry ring (`voice.local.events`); (3) human-leg: `./bin/meept voice local --employee secretary --record /tmp/vsg-rec` (interactive), then `scripts/voice-gap-analyze.py /tmp/vsg-rec` — first-window RMS must be non-zero (no open truncation) and the gap/overlap table is the jitter evidence; (4) `meept voice link` re-run 60 s — dispatches must still fire both sides (confirm window must not stall link floor telemetry), report analyzer numbers. Record the outcomes here to close leaf 03. |
+
+## Delta log
+
+- **2026-11-16 (reconciliation wave)**: Tree arrived all-PENDING although the work
+  merged in 4cb51951 (parents 42d727d5 leaf 01, 7bc515ed leaf 02; confirmed via
+  `git log --oneline 4cb51951` + `git show --stat 4cb51951`, 16 files, +1778/-64).
+  Every deliverable was re-verified mechanically at HEAD: symbols grepped with
+  file:line citations (see table), and every verification-gate test command from
+  this master was actually run green with `-count=1` (22 aggregation/short-final
+  unit tests, 7 voice-keys emission tests, config schema/voice tests, whisper
+  paced-flush segmentation pin, 7 CLI warm/record tests, plus the hermetic
+  voice-local e2e suite). Leaf 03's live drill remains OPEN by design — this pass
+  ran hermetic proof only (no live daemon, no live LLM calls, per the
+  reconciliation constraints); the exact owner steps are recorded in the leaf 03
+  row. Table updated PENDING -> VALIDATED (01, 02) and PENDING ->
+  TESTS-VALIDATED/live-open (03).
