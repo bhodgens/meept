@@ -1,4 +1,4 @@
-.PHONY: sdk-generate sdk-generate-go sdk-generate-dart sdk-clean localcert localcert-check localcert-install help build build-all uninstall-all uninstall-gui build-daemon build-cli build-voice build-gui build-gui-dist test test-verbose test-cover test-race test-record test-efficacy bench bench-all daemon daemon-debug devbuild status clean lint fmt fmt-check fmt-gui fmt-check-gui vet mod-tidy deps deps-go deps-llama deps-llama-check update-deps install install-cli install-desktop setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate docs-check menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server webui graphs graphs-check compare-prep config-bootstrap dev-key gui-connect-setup gui-connect-check sync-config
+.PHONY: sdk-generate sdk-generate-go sdk-generate-dart sdk-clean localcert localcert-check localcert-install help build build-all uninstall-all uninstall-gui build-daemon build-cli build-voice build-gui build-gui-dist test test-verbose test-cover test-race test-record test-efficacy bench bench-all daemon daemon-debug devbuild status clean lint fmt fmt-check fmt-gui fmt-check-gui vet mod-tidy deps deps-go deps-llama deps-llama-check update-deps install install-cli install-desktop meept-voice-install setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate docs-check menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server webui graphs graphs-check compare-prep config-bootstrap dev-key gui-connect-setup gui-connect-check sync-config
 	@echo "  localcert        Generate trusted SSL cert for localhost (requires mkcert)"
 	@echo "  localcert-install Install mkcert and local CA (one-time setup)"
 
@@ -30,6 +30,7 @@ help:
 	@echo "  install-cli      Headless install: binaries + config (no Flutter needed)"
 	@echo "  install-desktop  Install GUI + menubar apps (built first)"
 	@echo "  install-package  Stage bin + web payload under DESTDIR= for packaging"
+	@echo "  meept-voice-install  Install only the meept-voice child binary (no build)"
 	@echo ""
 	@echo "Install destinations (override on the command line):"
 	@echo "  PREFIX=...       Derive BINDIR=$(PREFIX)/bin, WEBDIR=$(PREFIX)/share/meept/web"
@@ -497,6 +498,7 @@ install-install-order:
 # destination (honoring DESTDIR staging); none of them build.
 #
 #   install-bin      meept, meept-daemon, meept-lite, meept-voice -> $(DESTDIR)$(BINDIR)
+#   meept-voice-install  install-bin scoped to the voice child only (no build)
 #   install-config   config templates + sync          -> $(MEEPT_HOME) (never staged)
 #   install-gui      Meept Client GUI.app             -> $(DESTDIR)$(APPSDIR)
 #   install-menubar  MeeptMenuBar.app                 -> $(DESTDIR)$(APPSDIR)
@@ -520,6 +522,22 @@ install-bin:
 			exit 1; \
 		fi; \
 	done
+
+# meept-voice-install: copy only the voice child to BINDIR (DESTDIR-honored).
+# The full install paths (install-cli / install / install-package) already
+# carry meept-voice via install-bin; this target exists for hosts that need
+# the sidecar alone (e.g. a dedicated voice node) without the daemon/CLI.
+# Does NOT build - run `make build-voice` first.
+.PHONY: meept-voice-install
+meept-voice-install:
+	@mkdir -p $(DESTDIR)$(BINDIR)
+	@if [ -f $(BIN_DIR)/meept-voice ]; then \
+		install -m 755 $(BIN_DIR)/meept-voice $(DESTDIR)$(BINDIR)/meept-voice; \
+		echo "  installed $(DESTDIR)$(BINDIR)/meept-voice"; \
+	else \
+		echo "  ERROR: $(BIN_DIR)/meept-voice not built (run 'make build-voice' first)"; \
+		exit 1; \
+	fi
 
 .PHONY: install-config
 install-config: config-bootstrap
