@@ -48,6 +48,29 @@ func admissionConfig(t *testing.T) parityConfig {
 func TestAdmission_ContextTooSmallRejectsPreDispatch(t *testing.T) {
 	cfg := admissionConfig(t)
 	stub := cfg.providers[0].stub
+	// RULING (orchestrator, 2026-11-17): the aux aliases (classifier,
+	// ambient extract, planner) ride a SECOND provider so their traffic
+	// never counts as a chat-lane dispatch against model-tiny. That
+	// provider MUST also declare a too-small context_limit: the
+	// ProviderManager rotation tail covers EVERY registered provider,
+	// and an unknown (0) limit is contractually ALLOWED (C3 never
+	// fabricates a bound) — an unknown-limit aux provider was the
+	// failover escape that let the oversized chat turn complete via
+	// "stub ok". Declared-small on both providers = the strict
+	// zero-dispatch world the scenario describes.
+	cfg.secondaryRef = "provadm2/model-aux"
+	cfg.providers = append(cfg.providers, parityProvider{
+		id:     "provadm2",
+		stub:   newParityStub(t),
+		apiKey: "test-key-adm2",
+		models: []parityModel{
+			{name: "model-aux", caps: []string{"completion", "code", "reasoning", "tool_use"}, inCost: 1.0, outCost: 1.0, ctxLimit: 512, maxOutput: 64},
+		},
+	})
+	// Pin the classifier to intent chat so the turn stays on the chat
+	// agent pinned to the alias under test.
+	cfg.providers[0].stub.setClassifierOut(`{"intent":"chat","confidence":0.9,"reasoning":"gate admission drive"}`)
+	cfg.providers[1].stub.setClassifierOut(`{"intent":"chat","confidence":0.9,"reasoning":"gate admission drive"}`)
 	s := newParitySandbox(t, cfg)
 
 	// ~4000-char prompt = ~1000 tokens by the rune/4 heuristic — far over
@@ -68,10 +91,10 @@ func TestAdmission_ContextTooSmallRejectsPreDispatch(t *testing.T) {
 	term := waitTerminal(t, sess, subID, turnID, 120*time.Second)
 
 	if term.Status == "completed" {
-		t.Fatalf("R2 admission RED (expected): oversized prompt COMPLETED against the upstream — no pre-dispatch context gate exists. want ErrContextTooSmall rejection, got completed turn (reply %.80q)", term.Reply)
+		t.Fatalf("R2 admission RED (expected): oversized prompt COMPLETED against the upstream — no pre-dispatch context gate exists. want ErrContextTooSmall rejection, got completed turn (reply %.80q). daemon tail:\n%s", term.Reply, tailRunes(s.daemonLog(t), 3000))
 	}
-	if stub.hitCount() != 0 {
-		t.Fatalf("R2 admission: the fake upstream saw %d requests; a context-gate rejection must dispatch ZERO upstream requests", stub.hitCount())
+	if got := stub.chatModelHits("model-tiny"); got != 0 {
+		t.Fatalf("R2 admission: the chat model saw %d requests; a context-gate rejection must dispatch ZERO upstream requests (total stub hits incl. classifier lanes: %d). daemon tail:\n%s", got, stub.hitCount(), tailRunes(s.daemonLog(t), 3000))
 	}
 }
 

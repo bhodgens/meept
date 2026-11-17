@@ -505,7 +505,7 @@ After every leaf is REVIEWED: run `make build`, `make test`, `make lint-ci`, `ma
 |------|-------------|--------|--------|-------|
 | 00T | gate | TESTS_VALIDATED | a130ce81 | 13 files/36 tests, compile-RED on C1-C11 symbols; golden captured on main subset; orchestrator-reviewed vs Test Gate matrix |
 | 01 | R1 | REVIEWED | 01a16d2b | comparator = per-turn cost estimate (gateway.py estimate_cost shape); floor difficulty default 5 until leaf 07 threads per-turn value |
-| 02 | R2 | REVIEWED | 01a16d2b | gate wired in all 3 ProviderManager rotation loops; typed verdict on all-refused, never pool-exhaustion shape |
+| 02 | R2 | REVIEWED | 01a16d2b + 755bfecc | gate wired in all 3 ProviderManager rotation loops AND both bare-client paths; typed verdict on all-refused, never pool-exhaustion shape |
 | 03 | R8 | REVIEWED | d46fee26 | child interrupted post-implementation; wiring verified on disk (validateOfferedToolCalls, openai+anthropic+codex) |
 | 04 | R4 | REVIEWED | 298c8ff5 | RLock-only proof; Posture type declared in shadow.go (leaf 05 consumes); CLI+RPC+doc landed |
 | 05 | R3 | REVIEWED | 9a37d512 | import-cycle fallback (narrow interface); resolver-hook prompt seam; atomic prompt snapshot |

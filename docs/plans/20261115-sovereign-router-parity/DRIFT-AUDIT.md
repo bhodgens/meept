@@ -112,6 +112,30 @@ contradicts a ruling here, this file wins.
     returns the same model the live path would pick") is satisfied by
     predict-then-verify; the original live-first ordering could never
     pass against a correct read-only implementation.
+26. **Admission T5 fixture world**: aux aliases (classifier/ambient/
+    planner) ride a SECOND provider that also declares the small
+    context_limit. The ProviderManager rotation tail covers every
+    registered provider and an unknown (0) limit is contractually
+    ALLOWED (C3 never fabricates a bound) — an unknown-limit aux
+    provider was the failover escape that completed the oversized
+    turn. The master scenario ("no upstream request is made") holds in
+    the strict world where every declared provider bounds the request.
+27. **waitTerminal skips the async-ack 'parked' terminal** (mirrors
+    cmd/meept/chat_async.go submitAndAwait): the real result arrives
+    as a later turn.terminal under the same turn id. Budget T16 uses
+    waitTerminalAny because in the enforce world the budget park IS
+    the final terminal (no relay ever fires).
+
+## Wave-4 rulings (2026-11-17, post-review)
+
+28. **Admission gate is client-layer complete** (755bfecc): the frozen
+    C3 check now runs in ProviderManager's three rotation loops, the
+    bare Client.Chat, and Client.ChatWithProgress (surfacing verbatim,
+    never re-entering the short-retry budget). A single-provider daemon
+    without this had no pre-dispatch gate at all.
+29. **Full sovereign-parity suite: 35/35 PASS** at bfa66daf, including
+    the flag-off byte-identical control. Every Test Gate matrix row now
+    has a passing live test.
 
 ## Line-anchor corrections (fold into dispatch contexts)
 

@@ -83,7 +83,7 @@ func TestBudgetSteer_CompletesOverCapWithAdvisory(t *testing.T) {
 		sess2, sub2 := subscribeTopic(t, s, "turn.terminal")
 		term := waitTerminal(t, sess2, sub2, turnID, 90*time.Second)
 		if term.Status != "completed" || term.Reply == "" {
-			t.Fatalf("T15 R6 RED (expected): steer-mode turn over a BREACHED cap did not complete (status %q, err %q) — no advisory budget mode exists on main", term.Status, term.Error)
+			t.Fatalf("T15 R6 RED (expected): steer-mode turn over a BREACHED cap did not complete (status %q, err %q) — no advisory budget mode exists on main. daemon tail:\n%s", term.Status, term.Error, tailRunes(s.daemonLog(t), 3000))
 		}
 	} else if note, _ := ack["note"].(string); note != "" && !strings.Contains(note, "budget") {
 		t.Fatalf("T15: steer submit refused for a non-budget reason: %+v", ack)
@@ -118,7 +118,18 @@ func TestBudgetSteer_EnforceIsDefault(t *testing.T) {
 		t.Logf("T16: enforce refusal surfaced at submit: %v", ack["note"])
 		return
 	}
-	term := waitTerminal(t, sess, subID, turnID, 120*time.Second)
+	// RULING (orchestrator, 2026-11-17): wait on a turn.terminal
+	// subscription — the pre-existing subID above polls agent.quota_wait,
+	// a topic that never carries turn.terminal, so the original wait
+	// could only time out. T16 uses its OWN waiter: the shared
+	// waitTerminal skips "parked" (correct for T15, where parked is the
+	// async-ack before the relay), but in the ENFORCE world the budget
+	// park IS the terminal — the turn parks for the window and no relay
+	// ever fires. Here "parked" with the queue notice is the expected
+	// enforce refusal; "completed" is the only forbidden state.
+	termSess, termSub := subscribeTopic(t, s, "turn.terminal")
+	defer termSess.Close()
+	term := waitTerminalAny(t, termSess, termSub, turnID, 120*time.Second)
 	// Enforce posture: the turn is refused — a failed/parked terminal (the
 	// budget park holds the turn for the window) or an errored turn. What
 	// it must NEVER be: completed with a normal reply.
@@ -135,6 +146,42 @@ func TestBudgetSteer_EnforceIsDefault(t *testing.T) {
 			t.Fatal("T16: a budget_advisory signal fired in enforce mode; advisory signaling is steer-only")
 		}
 	}
+}
+
+// waitTerminalAny is waitTerminal WITHOUT the parked skip: some turns'
+// FINAL terminal state IS "parked" (the enforce-world budget park holds
+// the turn for the whole window; no relay ever fires). T15 needs the skip
+// (parked is the async-ack, the relay follows); T16 needs the parked
+// event itself.
+func waitTerminalAny(t *testing.T, sess *busSession, subID, turnID string, timeout time.Duration) terminalEvent {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		raw, err := sess.call("bus.poll", map[string]string{"subscription_id": subID})
+		if err == nil {
+			var resp struct {
+				Events []struct {
+					Topic   string          `json:"topic"`
+					Payload json.RawMessage `json:"payload"`
+				} `json:"events"`
+			}
+			if json.Unmarshal(raw, &resp) == nil {
+				for _, ev := range resp.Events {
+					if ev.Topic != "turn.terminal" {
+						continue
+					}
+					var payload terminalEvent
+					if json.Unmarshal(ev.Payload, &payload) != nil || payload.TurnID != turnID {
+						continue
+					}
+					return payload
+				}
+			}
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	t.Fatalf("no turn.terminal for %s within %s", turnID, timeout)
+	return terminalEvent{}
 }
 
 // containsClass reports whether a bus.poll raw response carries an event

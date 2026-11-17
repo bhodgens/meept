@@ -1001,6 +1001,12 @@ func (pm *ProviderManager) ChatWithProgress(ctx context.Context, messages []Chat
 		return resp, nil
 	}
 
+	// Contract C3 (leaf 02), same as the Chat() twin: every candidate
+	// refused pre-dispatch surfaces the typed verdict, never the
+	// pool-exhaustion shape (zero upstream requests were made).
+	if admissionVerdict != nil {
+		return nil, admissionVerdict
+	}
 	if lastErr != nil {
 		return nil, fmt.Errorf("all %d provider(s) failed (last: %w)", len(orderedProviders), lastErr)
 	}
