@@ -174,7 +174,8 @@
       "dynamic-tools",
       "llm-hop-tracing",
       "llm-serving-tiers",
-      "context_warm"
+      "context_warm",
+      "sovereign-parity"
     ],
     "internal/logrotate/": [
       "logrotate"
@@ -1419,9 +1420,41 @@
       "note": "ROOT e2e RED gate of the inter-agent-coordination tree (leaf 00T): hermetic scratch daemons, WS frame collector, live ACP subprocess via the suite's own scripted planstub, send_agent_message/inbox driven through rigged chat turns — never mocks. Compile-RED today on acp.AgentProgressUpdate (leaf 02-02); runtime-RED on the turn-state publisher (02-01), the WS relay entry (04-01), and the structured scan branch (03-02) until those leaves land. Status flips to implemented by leaf 04-01 when the suite goes GREEN."
     },
     {
-"status": "implemented",
+      "status": "implemented",
       "name": "context_warm",
       "dir": "e2e/suites/context_warm"
+    },
+    {
+      "status": "todo",
+      "name": "sovereign-parity",
+      "dir": "e2e/suites/sovereign-parity",
+      "diff": "L",
+      "scenarios": [
+        "quality-order-01 R1: cheap model with low quality.code loses to a pricier high-quality model on a code turn; quality-absent models keep legacy cost order",
+        "quality-floor-02 R1: quality floor - difficulty 5 with only score-2 candidates surfaces ErrQualityFloor, not a completed turn",
+        "admission-context-03 R2: request whose estimated input exceeds the model context is rejected pre-dispatch with ErrContextTooSmall; no upstream request is made",
+        "admission-unknown-04 R2: ContextLimit == 0 (unknown) allows the request through",
+        "posture-sensitive-05 R3: a prompt containing an AWS-shaped key never routes to a public_only or non_sensitive model",
+        "posture-absent-06 R3: posture absent = private; sensitive routing is byte-identical to pre-change",
+        "posture-log-hygiene-07 R3: no secret leakage - the scanner's matched string never appears in any log line or routing_decisions row",
+        "shadow-parity-08 R4: shadow decision returns the same model the live path would pick, with populated Candidates, and writes no llm_calls row",
+        "shadow-no-side-effects-09 R4: shadow does not consume budget, does not mutate alias health or rotation, does not create a sticky pin",
+        "pool-account-10 R5: a 401 on one model blocks the ACCOUNT (sibling model on the same provider is skipped)",
+        "pool-request-fault-11 R5: a 400 (request fault) blocks nothing",
+        "pool-classify-table-12 R5: the frozen pools.py:176-206 (status, body) -> (class, scope, target) table verbatim, incl. 402, 404, 429-with-pool-phrase, 5xx",
+        "budget-steer-13 R6: mode steer with the daily cost cap exceeded completes the turn and emits budget_advisory on the existing agent.quota_wait topic",
+        "budget-enforce-14 R6: mode enforce (default, no mode key) is byte-identical to today: BudgetExceededError, turn refused, no advisory",
+        "sticky-difficulty-15 R7: a new user message classified above the pinned level releases the pin and re-pins at the rotation head, reason sticky_difficulty_increase",
+        "sticky-same-level-16 R7: a same-or-lower difficulty turn keeps the existing pin",
+        "difficulty-source-17 R7: difficulty derives from existing Intent signals via the frozen DeriveDifficulty table (no second classifier call); difficulty 0 keeps R7 inert",
+        "toolcheck-unknown-18 R8: a tool call naming an unoffered function is rejected with the bare ErrToolCallInvalid and never reaches the executor",
+        "toolcheck-bad-args-19 R8: tool-call arguments that are not a JSON object fail validation",
+        "toolcheck-streamed-20 R8: streamed tool-call arguments split across chunks are validated only after the stream completes; a mid-stream abort never produces a false pass",
+        "pricegroup-spillway-21 R9: a free-tagged and paid-tagged alias both eligible: the free one serves while healthy, the paid spillway serves only on free exhaustion/failure",
+        "pricegroup-legacy-22 R9: untagged aliases (no price_group) keep legacy resolution exactly; spillway is opt-in per-caller and never reorders rotation",
+        "flagoff-control-23 ALL: with all nine features unconfigured, every routing_decisions row is byte-identical to the main-captured golden fixture"
+      ],
+      "note": "gate leaf 00T of the sovereign-router-parity tree: tests only, RED today (the contract-level files do not compile until leaves 01-09 declare the C1-C11 symbols - that compile failure is the documented gate); golden fixture e2e/fixtures/golden/sovereign-parity-flagoff.golden.json captured from main @ 4ec87974 and checked in, never regenerated at runtime. Status flips to implemented when the suite goes GREEN."
     }
   ],
   "scenarios": [
