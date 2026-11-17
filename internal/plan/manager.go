@@ -135,6 +135,24 @@ func (m *PlanManager) SetPlanGoal(ctx context.Context, planID, goalID string) er
 	return nil
 }
 
+// SetPlanPrompt persists the candidate goal prompt onto a stored plan row
+// (issue #148 resume-prompt-loss). The GoalLoop creates the plan through
+// the daemon's PlanCreator adapter, which cannot carry the prompt in its
+// fixed signature; this targeted column write is the persistence seam. A
+// resumed ApproveAndExecute (PlanRef{ID} only) rehydrates the EXACT prompt
+// through the plan-brief lookup, so the execution user message matches a
+// same-process approve. Failures are returned for the caller to log; the
+// plan row keeps whatever prompt it had.
+func (m *PlanManager) SetPlanPrompt(ctx context.Context, planID, prompt string) error {
+	if err := m.updatePlanColumns(ctx, planID, func(p *Plan) {
+		p.Prompt = prompt
+		p.UpdatedAt = time.Now().UTC()
+	}); err != nil {
+		return fmt.Errorf("set plan prompt: %w", err)
+	}
+	return nil
+}
+
 // GetPlansForSession returns the plans linked to a session (read-through
 // to the store). Used by the dispatcher's quickplan Session execution
 // context block (quickplan-mode leaf 02).
@@ -606,9 +624,23 @@ func (m *PlanManager) ApprovePlan(ctx context.Context, planID, sessionID, by str
 	// not fail the operator approve RPC or roll back the CAS, signoff, or
 	// approval columns — only those earlier errors stay fatal.
 	// runSynthesisReclaimPass re-drives approved plans that have no live task.
+	//
+	// Per-goal outcome (issue #148): a sibling create — several goals' plans
+	// approved one after another — must never be aborted by this plan's
+	// expansion failure, so the call still returns nil. The failure rides on
+	// the plan row itself (synthesis_error column) instead of the return
+	// value: operators and the resume sweep see WHICH plan failed and why,
+	// and a successful re-drive clears it.
 	if err := m.Synthesize(ctx, planID); err != nil {
 		m.logger.Error("synthesize plan after approval failed",
 			"plan_id", planID, "error", err)
+		if markErr := m.updatePlanColumns(ctx, planID, func(p *Plan) {
+			p.SynthesisError = err.Error()
+			p.UpdatedAt = time.Now().UTC()
+		}); markErr != nil {
+			m.logger.Warn("failed to record synthesis error on plan row",
+				"plan_id", planID, "error", markErr)
+		}
 		return nil
 	}
 
@@ -1170,6 +1202,9 @@ func (m *PlanManager) Synthesize(ctx context.Context, planID string) error {
 		p.TaskID = taskID
 		p.State = newState
 		p.SynthesisLeaseUntil = nil
+		// Expansion succeeded: clear any recorded synthesis failure
+		// (issue #148 per-goal outcome) — the row is no longer failed.
+		p.SynthesisError = ""
 		p.UpdatedAt = time.Now().UTC()
 	}); err != nil {
 		return fmt.Errorf("update plan with task ID: %w", err)

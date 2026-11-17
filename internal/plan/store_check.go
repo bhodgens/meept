@@ -46,6 +46,8 @@ const rebuiltPlansDDL = `CREATE TABLE plans_new (
 	synthesis_attempts INTEGER DEFAULT 0,
 	synthesis_lease_until TEXT,
 	goal_id TEXT,
+	prompt TEXT,
+	synthesis_error TEXT,
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL
 )`

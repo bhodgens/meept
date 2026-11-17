@@ -323,12 +323,12 @@ func TestApprovedPlanResumesGoalRoundOnce(t *testing.T) {
 
 	// The executor turn ran: the fake LLM saw the execution prompt. The
 	// resume path carries ONLY the plan id (C1: ResumeApprovedPlan ->
-	// ApproveAndExecute(ctx, PlanRef{ID: planID})). Execute fills the
-	// empty prompt from the stored plan brief, so the user message
-	// carries the plan id plus the candidate title and description
-	// (assessReply stamps both on the plan row). The escalated candidate
-	// prompt itself still does not survive the resume.
-	const planDesc = "the escalating candidate for " + escMarker
+	// ApproveAndExecute(ctx, PlanRef{ID: planID})). Issue #148 fix: the
+	// candidate prompt is persisted on the plan row at creation
+	// (PlanPromptSetter) and rehydrated through the plan-brief lookup, so
+	// the resumed execution carries the EXACT candidate prompt — not the
+	// generic title/description mandate the pre-fix resume produced.
+	const candidatePrompt = "perform the risky " + escMarker + " action now"
 	sawExecution := false
 	for _, body := range s.Fake.Requests() {
 		msgs, _ := body["messages"].([]any)
@@ -339,16 +339,14 @@ func TestApprovedPlanResumesGoalRoundOnce(t *testing.T) {
 			}
 			if role, _ := msg["role"].(string); role == "user" {
 				c, _ := msg["content"].(string)
-				if strings.Contains(c, pending.ID) &&
-					strings.Contains(c, planTitle) &&
-					strings.Contains(c, planDesc) {
+				if strings.Contains(c, candidatePrompt) {
 					sawExecution = true
 				}
 			}
 		}
 	}
 	if !sawExecution {
-		t.Error("no executor turn carried the plan id, title, and description — the resume never executed the approved brief")
+		t.Errorf("no executor turn carried the persisted candidate prompt %q — the resume lost the prompt (#148)", candidatePrompt)
 	}
 
 	// Second approve event is a SKIP: publish the same approval again via

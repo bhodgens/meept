@@ -182,13 +182,19 @@ type PlanRef struct {
 	GoalID string `json:"goal_id,omitempty"`
 }
 
-// PlanBrief is the title and description of a stored plan. Resume paths hand
-// Execute a PlanRef that carries only the id; the brief is what the employee
-// actually executes against. internal/employee must not import internal/plan,
-// so the daemon supplies this through PlanBriefLookup.
+// PlanBrief is the title, description, and persisted candidate prompt of a
+// stored plan. Resume paths hand Execute a PlanRef that carries only the id;
+// the brief is what the employee actually executes against. internal/employee
+// must not import internal/plan, so the daemon supplies this through
+// PlanBriefLookup.
 type PlanBrief struct {
 	Title       string
 	Description string
+	// Prompt is the candidate goal prompt persisted at plan-creation time
+	// (issue #148 resume-prompt-loss). When non-empty a resumed execution
+	// carries the EXACT same user message as a same-process approve; empty
+	// on legacy rows falls back to the title/description mandate.
+	Prompt string
 }
 
 // PlanBriefLookup resolves a plan's title and description by id.
@@ -232,6 +238,18 @@ type PlanCreatorWithGoal interface {
 // persist the linkage.
 type PlanGoalSetter interface {
 	SetPlanGoal(ctx context.Context, planID, goalID string) error
+}
+
+// PlanPromptSetter is the optional prompt-persistence seam (issue #148
+// resume-prompt-loss): implementations that can store the candidate goal
+// prompt on the created plan row (the daemon's PlanManager adapter writes
+// Plan.Prompt through internal/plan) let a RESUMED ApproveAndExecute —
+// which receives only PlanRef{ID} — rehydrate the exact prompt the live
+// approve would have executed. The GoalLoop type-asserts the planner to
+// this interface and skips the call when the planner cannot persist the
+// prompt (the title/description mandate fallback then applies).
+type PlanPromptSetter interface {
+	SetPlanPrompt(ctx context.Context, planID, prompt string) error
 }
 
 // Reflector is the LLM chatter used for ASSESS and REFLECT prompts. It is
@@ -890,6 +908,20 @@ func (l *GoalLoop) Plan(ctx context.Context, candidate CandidatePlan) (PlanRef, 
 		ref.Prompt = candidate.Title
 	}
 
+	// Persist the prompt onto the plan row when the planner supports it
+	// (issue #148): a resume that reaches ApproveAndExecute with only
+	// PlanRef{ID} rehydrates this exact prompt through the brief lookup,
+	// so the candidate's instruction survives approval routing that leaves
+	// the process (or parks across a provider wait). Failure is a logged
+	// non-fatal — the live approve still carries ref.Prompt in memory, and
+	// the resume falls back to the title/description mandate.
+	if setter, ok := planner.(PlanPromptSetter); ok && ref.Prompt != "" {
+		if setErr := setter.SetPlanPrompt(ctx, ref.ID, ref.Prompt); setErr != nil {
+			logger.Warn("plan: failed to persist candidate prompt on plan row",
+				"plan_id", ref.ID, "error", setErr)
+		}
+	}
+
 	logger.Info("plan created",
 		"plan_id", ref.ID,
 		"plan_state", ref.State,
@@ -904,9 +936,12 @@ const approvedPlanMandate = "Approved plan %s\nTitle: %s\nDescription: %s\nExecu
 
 // userMessageForEmptyPrompt is the fallback when PlanRef.Prompt is empty.
 // A nil lookup is today's generic mandate, byte-identical. A lookup hit
-// includes the plan id, title, and description (empty fields still keep
-// their labels). A miss or error is logged and falls back to the generic
-// mandate; Execute never fails because the brief could not be read.
+// carrying a persisted prompt (issue #148: the candidate prompt stored at
+// plan-creation time) rehydrates the EXACT user message a same-process
+// approve would have executed with. A hit without a prompt includes the
+// plan id, title, and description (empty fields still keep their labels).
+// A miss or error is logged and falls back to the generic mandate; Execute
+// never fails because the brief could not be read.
 func userMessageForEmptyPrompt(ctx context.Context, planID string, lookup PlanBriefLookup, logger *slog.Logger) string {
 	generic := fmt.Sprintf("[plan %s] execute per your mandate", planID)
 	if lookup == nil {
@@ -919,6 +954,11 @@ func userMessageForEmptyPrompt(ctx context.Context, planID string, lookup PlanBr
 				"plan_id", planID, "found", ok, "error", err)
 		}
 		return generic
+	}
+	// Persisted candidate prompt wins: the resumed execution carries the
+	// same prompt the live approve would have run (#148).
+	if brief.Prompt != "" {
+		return brief.Prompt
 	}
 	return fmt.Sprintf(approvedPlanMandate, planID, brief.Title, brief.Description)
 }
