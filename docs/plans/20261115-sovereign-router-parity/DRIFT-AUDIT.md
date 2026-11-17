@@ -86,6 +86,33 @@ contradicts a ruling here, this file wins.
     quota tree), so account-scope arming fires for 401/403; a 402 reaches
     the scoped path only via non-quota routes. Left as-is deliberately.
 
+## Wave-4 rulings (2026-11-17, post-review)
+
+22. **Difficulty rides a resolver PARAMETER, not the WithDifficulty
+    ChatOption** (5a9a2659): resolution happens before any chat call
+    exists, so the option is physically unreachable at resolve-time
+    (leaf-05 posture-seam precedent). The option remains for
+    chat-call-scoped consumers. Async/task lanes arm via the
+    `turn_difficulty` task-metadata key; no metadata = R7 inert.
+23. **Gate-fixture defects fixed by the first full-suite run**
+    (7cb2e86d): posture prompt never matched the scanner regex (literal
+    dots); classifier requests rode the asserted provider (aux aliases
+    now pinned per-test); shadow parity ordered live-before-shadow
+    (impossible for a read-only predict); T11's reason-based pin
+    assertion contradicted balanced-alias semantics (target is the
+    evidence); T20 empty-args was a gate extrapolation (C9 fails only
+    non-object args; "" is the wire convention for no-arg calls).
+
+## Convergence rulings (Test Gate matrix, orchestrator adjudication)
+
+24. **R8 empty-args**: master scenario "{not json" unchanged; the gate's
+    extra row flips to assert the ALLOWED behavior (upward convergence,
+    rationale in toolcheck_test.go).
+25. **R4 parity order**: the master's scenario text ("shadow decision
+    returns the same model the live path would pick") is satisfied by
+    predict-then-verify; the original live-first ordering could never
+    pass against a correct read-only implementation.
+
 ## Line-anchor corrections (fold into dispatch contexts)
 
 - 00T: validation.py streamed-outcome fn is at :104-112 (not 113-126);
