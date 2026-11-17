@@ -141,6 +141,7 @@ Package agent provides the agent loop and related components.
 - [func WithACPTurnSource\(ctx context.Context, kind, employeeID string\) context.Context](<#WithACPTurnSource>)
 - [func WithChatTurnID\(ctx context.Context, turnID string\) context.Context](<#WithChatTurnID>)
 - [func WithExposurePlan\(ctx context.Context, plan \*ExposurePlan\) context.Context](<#WithExposurePlan>)
+- [func WithReasoningSink\(ctx context.Context, sink \*ReasoningSink\) context.Context](<#WithReasoningSink>)
 - [func WithResumedTurn\(ctx context.Context\) context.Context](<#WithResumedTurn>)
 - [func WithRetryBudget\(ctx context.Context, budget \*RetryBudget\) context.Context](<#WithRetryBudget>)
 - [func WithScopeOptions\(ctx context.Context, opts \[\]llm.ChatOption\) context.Context](<#WithScopeOptions>)
@@ -291,6 +292,7 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) SetTaskStore\(store \*task.Store\)](<#AgentLoop.SetTaskStore>)
   - [func \(l \*AgentLoop\) SetThrottleParker\(h \*ChatHandler, parker \*TurnParker\)](<#AgentLoop.SetThrottleParker>)
   - [func \(l \*AgentLoop\) SetTierBudgetProvider\(prov contextalloc.TierBudgetProvider\)](<#AgentLoop.SetTierBudgetProvider>)
+  - [func \(l \*AgentLoop\) SetToolRegistry\(registry ToolRegistry\)](<#AgentLoop.SetToolRegistry>)
   - [func \(l \*AgentLoop\) SetTurnParker\(parker \*TurnParker\)](<#AgentLoop.SetTurnParker>)
   - [func \(l \*AgentLoop\) SetUploadStore\(store llm.UploadStore\)](<#AgentLoop.SetUploadStore>)
   - [func \(l \*AgentLoop\) SetWorkerID\(wid int\)](<#AgentLoop.SetWorkerID>)
@@ -299,6 +301,7 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) SpawnVerifier\(ctx context.Context, prompt string, modelRef string\) \(string, error\)](<#AgentLoop.SpawnVerifier>)
   - [func \(l \*AgentLoop\) Stop\(\)](<#AgentLoop.Stop>)
   - [func \(l \*AgentLoop\) ThrottleMaxWait\(\) time.Duration](<#AgentLoop.ThrottleMaxWait>)
+  - [func \(l \*AgentLoop\) ToolRegistry\(\) ToolRegistry](<#AgentLoop.ToolRegistry>)
   - [func \(l \*AgentLoop\) TurnParker\(\) \*TurnParker](<#AgentLoop.TurnParker>)
 - [type AgentMemoryConfig](<#AgentMemoryConfig>)
 - [type AgentMessage](<#AgentMessage>)
@@ -378,6 +381,7 @@ Package agent provides the agent loop and related components.
   - [func \(m \*AgentStateMachine\) Transition\(to AgentState, reason string, metadata map\[string\]any\) error](<#AgentStateMachine.Transition>)
 - [type AgentStatePersister](<#AgentStatePersister>)
 - [type AgentStateSnapshot](<#AgentStateSnapshot>)
+- [type AgentTurnState](<#AgentTurnState>)
 - [type AllotmentConfig](<#AllotmentConfig>)
   - [func DefaultAllotmentConfig\(\) AllotmentConfig](<#DefaultAllotmentConfig>)
 - [type AmendmentSubmitter](<#AmendmentSubmitter>)
@@ -1414,6 +1418,10 @@ Package agent provides the agent loop and related components.
   - [func \(rl \*RalphLoop\) TriggerReplan\(ctx context.Context, taskID string, previousEvidence \[\]string\) error](<#RalphLoop.TriggerReplan>)
 - [type RalphLoopConfig](<#RalphLoopConfig>)
   - [func DefaultRalphLoopConfig\(\) RalphLoopConfig](<#DefaultRalphLoopConfig>)
+- [type ReasoningSink](<#ReasoningSink>)
+  - [func \(s \*ReasoningSink\) Capture\(reasoning string\)](<#ReasoningSink.Capture>)
+  - [func \(s \*ReasoningSink\) Get\(\) string](<#ReasoningSink.Get>)
+  - [func \(s \*ReasoningSink\) Has\(\) bool](<#ReasoningSink.Has>)
 - [type ReasoningWatchdog](<#ReasoningWatchdog>)
   - [func NewReasoningWatchdog\(\) \*ReasoningWatchdog](<#NewReasoningWatchdog>)
   - [func \(w \*ReasoningWatchdog\) Breach\(tokenCap, streakTurns int\) bool](<#ReasoningWatchdog.Breach>)
@@ -1481,6 +1489,7 @@ Package agent provides the agent loop and related components.
   - [func \(rm \*ReviewManager\) HandleReviewResult\(ctx context.Context, stepID string, result \*ReviewResult, spec \*TaskSpec\) \(\[\]\*task.TaskStep, error\)](<#ReviewManager.HandleReviewResult>)
   - [func \(rm \*ReviewManager\) ReviewStep\(ctx context.Context, step \*task.TaskStep, spec \*TaskSpec\) \(\*ReviewResult, error\)](<#ReviewManager.ReviewStep>)
   - [func \(rm \*ReviewManager\) SetPolicy\(policy \*ReviewPolicy\)](<#ReviewManager.SetPolicy>)
+  - [func \(rm \*ReviewManager\) SetSessionStore\(store SessionStoreReader\)](<#ReviewManager.SetSessionStore>)
   - [func \(rm \*ReviewManager\) SetValidationPolicy\(policy \*ValidationPolicy\)](<#ReviewManager.SetValidationPolicy>)
   - [func \(rm \*ReviewManager\) ValidateCompletion\(ctx context.Context, step \*task.TaskStep, taskDesc string\) \(\*ValidationResult, error\)](<#ReviewManager.ValidateCompletion>)
 - [type ReviewManagerConfig](<#ReviewManagerConfig>)
@@ -1641,6 +1650,7 @@ Package agent provides the agent loop and related components.
   - [func \(h \*StepHandoff\) Truncate\(\)](<#StepHandoff.Truncate>)
 - [type StepJobPayload](<#StepJobPayload>)
 - [type StopDecision](<#StopDecision>)
+- [type StopReason](<#StopReason>)
 - [type StrategicPlanner](<#StrategicPlanner>)
   - [func NewStrategicPlanner\(cfg StrategicPlannerConfig\) \*StrategicPlanner](<#NewStrategicPlanner>)
   - [func \(sp \*StrategicPlanner\) ApprovePlan\(ctx context.Context, taskID string\) error](<#StrategicPlanner.ApprovePlan>)
@@ -1881,6 +1891,7 @@ Package agent provides the agent loop and related components.
   - [func NewTurnRegistry\(\) \*TurnRegistry](<#NewTurnRegistry>)
   - [func \(r \*TurnRegistry\) AttachTask\(turnID, taskID string\)](<#TurnRegistry.AttachTask>)
   - [func \(r \*TurnRegistry\) AttachTrace\(turnID, traceID, turnSpanID string\)](<#TurnRegistry.AttachTrace>)
+  - [func \(r \*TurnRegistry\) ClaimDispatch\(turnID, conversationID string\) bool](<#TurnRegistry.ClaimDispatch>)
   - [func \(r \*TurnRegistry\) Complete\(turnID string\)](<#TurnRegistry.Complete>)
   - [func \(r \*TurnRegistry\) Register\(turnID, conversationID string\) bool](<#TurnRegistry.Register>)
   - [func \(r \*TurnRegistry\) Stale\(olderThan time.Duration\) \[\]SubmittedTurnRecord](<#TurnRegistry.Stale>)
@@ -1892,6 +1903,8 @@ Package agent provides the agent loop and related components.
 - [type TurnSnapshotFile](<#TurnSnapshotFile>)
 - [type TurnStartData](<#TurnStartData>)
 - [type TurnState](<#TurnState>)
+- [type TurnStateEvent](<#TurnStateEvent>)
+  - [func \(TurnStateEvent\) WSClass\(\) wsclass.WSClass](<#TurnStateEvent.WSClass>)
 - [type TurnStatus](<#TurnStatus>)
 - [type TurnTerminalEvent](<#TurnTerminalEvent>)
   - [func \(TurnTerminalEvent\) WSClass\(\) wsclass.WSClass](<#TurnTerminalEvent.WSClass>)
@@ -2674,6 +2687,14 @@ Consumers: prefilter vote\(\) cue guard, LLM\-chain post\-check \(leaf 02, optio
 	    "goal_create": "goal_write",
 	    "goal_update": "goal_write",
 	
+	    "kanban_list":     "kanban_read",
+	    "kanban_show":     "kanban_read",
+	    "kanban_create":   "kanban_write",
+	    "kanban_move":     "kanban_write",
+	    "kanban_takeover": "kanban_write",
+	    "kanban_assign":   "kanban_write",
+	    "kanban_comment":  "kanban_write",
+	
 	    "ledger_append": "ledger_write",
 	    "ledger_query":  "ledger_read",
 	
@@ -2686,7 +2707,34 @@ Consumers: prefilter vote\(\) cue guard, LLM\-chain post\-check \(leaf 02, optio
 	    "subagent_list_children": "platform_read",
 	
 	    "contact": "contact",
+	
+	    "ast_edit":         ToolFileWrite,
+	    "resolve_ast_edit": ToolFileWrite,
+	
+	    "cron_create":      "task_write",
+	    "schedule_pause":   "task_write",
+	    "schedule_resume":  "task_write",
+	    "schedule_run_now": "task_write",
+	
+	    "debug": "shell_execute",
+	
+	    "git_commit":   "shell_execute",
+	    "git_overview": ToolFileRead,
+	
+	    "hermes": "agent_delegate",
+	
+	    "memory_fact_search":         "memory_read",
+	    "memory_get_version":         "memory_read",
+	    "memory_get_version_history": "memory_read",
+	
+	    "task_summarize": "task_read",
+	
+	    "tool_search": "platform_read",
 	}
+
+<a name="TopicTurnState"></a>TopicTurnState carries TurnStateEvent publishes on the "agent.turn.state" bus topic.
+
+	var TopicTurnState = bus.NewTopic[TurnStateEvent]("agent.turn.state")
 
 <a name="TopicTurnTerminal"></a>TopicTurnTerminal is the typed declaration for the turn.terminal bus topic \(typed\-bus\-topics leaf 02\). Publishers MUST use bus.PublishT with this declaration; future subscribers MUST use bus.SubscribeT with it. Payload is the frozen TurnTerminalEvent \- see its doc comment \(CLOSED field set\).
 
@@ -3381,6 +3429,13 @@ WithChatTurnID returns ctx carrying the turn's chat.submit identity. Empty turnI
 
 WithExposurePlan attaches the episode's plan to ctx for the duration of the turn. A nil plan leaves ctx untouched \(legacy posture: the row\-4 execution gate stays off\).
 
+<a name="WithReasoningSink"></a>
+## func WithReasoningSink
+
+	func WithReasoningSink(ctx context.Context, sink *ReasoningSink) context.Context
+
+WithReasoningSink attaches an opt\-in reasoning sink to a turn context so the producer can capture llm.Response.Reasoning into it. A nil sink is a no\-op \(same as no sink\). The context value is read by reasoningCycle on every successful /chat response.
+
 <a name="WithResumedTurn"></a>
 ## func WithResumedTurn
 
@@ -3466,7 +3521,7 @@ SetTurnMetricRecorder wires the acp.persona.turns sink after construction \(daem
 ACPSession is the session surface ACPExecutor drives. \*acp.Session satisfies it; tests inject a fake.
 
 	type ACPSession interface {
-	    Send(ctx context.Context, text string) (string, error)
+	    Send(ctx context.Context, text string) (string, acp.StopReason, error)
 	    Events() <-chan acp.SessionEvent
 	}
 
@@ -4696,6 +4751,13 @@ SetThrottleParker wires a throttle\-resume parker onto the loop, sharing the SAM
 
 SetTierBudgetProvider wires the C1 provider adapter \(branch B stores\). Typed\-nil guard \(internal/daemon/AGENTS.md wiring rule\): a nil or typed\-nil provider stores as an absent seam \-\- the query helpers then report today's path, never a half\-armed seam. The provider may be wired before OR after SetContextAssemblerConfig.
 
+<a name="AgentLoop.SetToolRegistry"></a>
+### func \(\*AgentLoop\) SetToolRegistry
+
+	func (l *AgentLoop) SetToolRegistry(registry ToolRegistry)
+
+SetToolRegistry replaces the loop's tool registry. Nil is ignored. Voice employee turns use this on the per\-session clone only, so the shared template registry stays the full set.
+
 <a name="AgentLoop.SetTurnParker"></a>
 ### func \(\*AgentLoop\) SetTurnParker
 
@@ -4751,6 +4813,13 @@ Stop waits for all asynchronous goroutines spawned by RunOnce \(reflection, lear
 	func (l *AgentLoop) ThrottleMaxWait() time.Duration
 
 ThrottleMaxWait reports the MaxWait the loop's parker applies for a throttled turn \(handler\-side pre\-checks and tests\). Zero when no parker is wired.
+
+<a name="AgentLoop.ToolRegistry"></a>
+### func \(\*AgentLoop\) ToolRegistry
+
+	func (l *AgentLoop) ToolRegistry() ToolRegistry
+
+ToolRegistry returns the registry this loop sends to the model. Nil if the loop is nil or no registry is attached.
 
 <a name="AgentLoop.TurnParker"></a>
 ### func \(\*AgentLoop\) TurnParker
@@ -5578,6 +5647,21 @@ AgentStateSnapshot is a serializable snapshot of agent state.
 	    History        []StateTransition `json:"history,omitempty"`
 	    Timestamp      time.Time         `json:"timestamp"`
 	}
+
+<a name="AgentTurnState"></a>
+## type AgentTurnState
+
+AgentTurnState is the lifecycle state of an agent's turn, published on TopicTurnState so sibling/child agents can observe each other's activity.
+
+	type AgentTurnState string
+
+<a name="TurnStateRunning"></a>
+
+	const (
+	    TurnStateRunning        AgentTurnState = "running"
+	    TurnStateIdle           AgentTurnState = "idle"
+	    TurnStateRequiresAction AgentTurnState = "requires_action"
+	)
 
 <a name="AllotmentConfig"></a>
 ## type AllotmentConfig
@@ -7152,6 +7236,11 @@ ChildRecord is the per\-session registry entry for a delegated child.
 	    // refused beyond maxDelegateDepth. Recorded for observability; the
 	    // cap itself is enforced at Spawn (delegateDepthKey).
 	    Depth int
+	    // StopReason is classified at SETTLE time, where the typed child error
+	    // (e.g. *llm.RefusalError) is still in scope — never by string-matching
+	    // the stored Err text. Empty for unsettled/terminal-free states; see
+	    // classifyStopReason.
+	    StopReason StopReason
 	    // Context and OutputSchema ride the spawn request so the resume brief
 	    // can be re-rendered through the same childPrompt pipeline as a fresh
 	    // spawn (no drift between fork and resume briefs).
@@ -8464,12 +8553,13 @@ DelegateRequest is the C1 request shape for spawning a delegated child.
 DelegateResult is the C1 result shape; it expands the legacy platform.go shape with ChildID \+ Status so a spawn returns the child handle immediately.
 
 	type DelegateResult struct {
-	    AgentID  string `json:"agent_id"`
-	    Success  bool   `json:"success"`
-	    Response string `json:"response,omitempty"`
-	    Error    string `json:"error,omitempty"`
-	    ChildID  string `json:"child_id,omitempty"` // steer/interrupt key
-	    Status   string `json:"status,omitempty"`   // running|completed|interrupted
+	    AgentID    string     `json:"agent_id"`
+	    Success    bool       `json:"success"`
+	    Response   string     `json:"response,omitempty"`
+	    Error      string     `json:"error,omitempty"`
+	    ChildID    string     `json:"child_id,omitempty"` // steer/interrupt key
+	    Status     string     `json:"status,omitempty"`   // running|completed|interrupted
+	    StopReason StopReason `json:"stop_reason,omitempty"`
 	}
 
 <a name="DependencyInferrer"></a>
@@ -15112,6 +15202,38 @@ RalphLoopConfig holds configuration for the Ralph loop.
 
 DefaultRalphLoopConfig returns default Ralph loop configuration.
 
+<a name="ReasoningSink"></a>
+## type ReasoningSink
+
+ReasoningSink is an OPTIONAL call\-scoped collector for the model's separate\-channel reasoning \(llm.Response.Reasoning\) produced during a turn. The default chat path never arms one \(no sink in the context = zero behavior change: reasoning stays exactly as dropped as before\); only callers that explicitly opt in — the daemon voice lane's loopTurnRunner — attach one and read it back after the turn.
+
+Why a context\-carried sink rather than a return value on RunOnce/RunOnceWithParts: changing those signatures would touch every chat/lambda call site and the return\-shape contract; a sink is per\-CALL by construction, survives the spoken\-guard rewrite retry \(RunVoiceSpokenRewriteRetry re\-enters the producer with the SAME context, so it overwrites the sink with the final reply's reasoning\), and is invisible to any caller that does not set it.
+
+	type ReasoningSink struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="ReasoningSink.Capture"></a>
+### func \(\*ReasoningSink\) Capture
+
+	func (s *ReasoningSink) Capture(reasoning string)
+
+Capture records the latest reasoning text. Last write wins — a multi\- iteration turn's final response overwrites the earlier tool\-call iterations' reasoning, and a bounded rewrite retry overwrites the pre\-retry one, so the sink ends up holding the reasoning that produced the shipped reply text.
+
+<a name="ReasoningSink.Get"></a>
+### func \(\*ReasoningSink\) Get
+
+	func (s *ReasoningSink) Get() string
+
+Get returns the captured reasoning \("" when nothing was captured or the sink is nil\).
+
+<a name="ReasoningSink.Has"></a>
+### func \(\*ReasoningSink\) Has
+
+	func (s *ReasoningSink) Has() bool
+
+Has reports whether a non\-empty reasoning was captured.
+
 <a name="ReasoningWatchdog"></a>
 ## type ReasoningWatchdog
 
@@ -15847,6 +15969,13 @@ ReviewStep initiates review of a completed step.
 
 SetPolicy updates the review policy.
 
+<a name="ReviewManager.SetSessionStore"></a>
+### func \(\*ReviewManager\) SetSessionStore
+
+	func (rm *ReviewManager) SetSessionStore(store SessionStoreReader)
+
+SetSessionStore wires \(or replaces\) the session origin resolver used to resolve a review step's working directory. Nil\-safe per the repo setter convention: nil keeps the current resolver.
+
 <a name="ReviewManager.SetValidationPolicy"></a>
 ### func \(\*ReviewManager\) SetValidationPolicy
 
@@ -15874,6 +16003,12 @@ ReviewManagerConfig holds configuration for creating a ReviewManager.
 	    ValidationPolicy *ValidationPolicy
 	    Bus              *bus.MessageBus
 	    Logger           *slog.Logger
+	
+	    // SessionStore is the session origin resolver for review steps
+	    // (SessionStoreReader: lookup by primary id OR conversation id). It is
+	    // what lets the reviewer lane resolve the SAME working dir the step job
+	    // ran in. Nil = the lane keeps its legacy "no dir bound" behavior.
+	    SessionStore SessionStoreReader
 	}
 
 <a name="ReviewPolicy"></a>
@@ -17413,6 +17548,24 @@ StopDecision is returned by ShouldStopAfterTurnHook.
 	    Reason string // used in the "wrap up" message
 	}
 
+<a name="StopReason"></a>
+## type StopReason
+
+StopReason explains why a turn left the running state.
+
+	type StopReason string
+
+<a name="StopReasonEndTurn"></a>
+
+	const (
+	    StopReasonEndTurn       StopReason = "end_turn"
+	    StopReasonCancelled     StopReason = "cancelled"
+	    StopReasonMaxTokens     StopReason = "max_tokens"
+	    StopReasonRefusal       StopReason = "refusal"
+	    StopReasonMaxIterations StopReason = "max_iterations"
+	    StopReasonError         StopReason = "error"
+	)
+
 <a name="StrategicPlanner"></a>
 ## type StrategicPlanner
 
@@ -17714,12 +17867,14 @@ SubmittedTurnRecord is one tracked async\-submitted chat turn. Shape is stable f
 	    TaskID         string
 	    SubmittedAt    time.Time
 	    LastProgressAt time.Time
+	
 	    // TraceID/TurnSpanID (llm-hop-tracing leaf 01): the turn's trace
 	    // correlation, captured at the handler mint seam so the async task-end
 	    // relay and the turn watchdog can stamp the SAME trace onto their
 	    // terminal events (one trace per minted turn). "" on untracked turns.
 	    TraceID    string
 	    TurnSpanID string
+	    // contains filtered or unexported fields
 	}
 
 <a name="SubtaskAssignment"></a>
@@ -19672,6 +19827,17 @@ AttachTask records the orchestrator task created for a turn. No\-op when the tur
 
 AttachTrace records the turn's trace correlation \(llm\-hop\-tracing leaf 01\), captured at the handler's mint seam. Call only on a FRESH Register \(the handler's Register\-then\-AttachTrace pair\) so a re\-registered turn keeps its original trace. No\-op when the turn is unknown or traceID "".
 
+<a name="TurnRegistry.ClaimDispatch"></a>
+### func \(\*TurnRegistry\) ClaimDispatch
+
+	func (r *TurnRegistry) ClaimDispatch(turnID, conversationID string) bool
+
+ClaimDispatch is the handler\-side dispatch gate \(task\-state regression 2026\-11\-14\). ChatHandler.handleRequest calls it exactly once per chat.request message; claimed=true means THIS message may execute the turn. It returns false only when the dispatch was already claimed by an earlier chat.request \(an in\-flight duplicate — a scheduler\-recovery re\-publish, a legacy retry\) or the turn completed \(tombstone, F16\).
+
+Why not just Register's verdict: chat.submit registers the turn id for CLIENT\-retry idempotency BEFORE publishing chat.request, so at handler entry every legitimate turn looks "already tracked". Treating that as a duplicate suppressed 100% of submit dispatches \(the handler answered duplicate\_suppressed and no task row was ever created — task\-state e2e suite, and by extension the live chat path, broke for the whole window b9afb4e0..fix\). An unclaimed row created by Register is precisely the "submit pre\-registration" state the handler is expected to consume.
+
+The first claim on an existing unclaimed record \(the submit path\) keeps the ORIGINAL record — conversation binding and trace untouched; the handler mints/attaches its trace after claiming.
+
 <a name="TurnRegistry.Complete"></a>
 ### func \(\*TurnRegistry\) Complete
 
@@ -19775,6 +19941,30 @@ TurnState provides read\-only access to the current turn state.
 	    TotalTokens    int
 	    LastResponse   string
 	}
+
+<a name="TurnStateEvent"></a>
+## type TurnStateEvent
+
+TurnStateEvent is the payload published on TopicTurnState whenever an agent's turn state changes. It models TurnTerminalEvent's wire shape \(internal/agent/handler.go\) and classifies as WSProgress.
+
+Schema note \(Q2 ratified 2026\-11\-16, see docs/plans/20261115\-inter\-agent\-coordination/master.md\): the SAME struct carries both the plain delegate/ACP shape \(phase absent\) and the pair\-phase shape \(phase = actor\_turn|reviewer\_turn|completed|failed\). \`phase\` is OPTIONAL — consumers must not require it and must tolerate its absence; pair consumers discriminate on it, never on struct identity. Both shapes decode without error \(pinned by TestTurnStateEvent\_BothShapesDecode\).
+
+	type TurnStateEvent struct {
+	    AgentID    string         `json:"agent_id"`
+	    SessionID  string         `json:"session_id,omitempty"`
+	    ChildID    string         `json:"child_id,omitempty"`
+	    State      AgentTurnState `json:"state"`
+	    StopReason StopReason     `json:"stop_reason,omitempty"`
+	    Phase      string         `json:"phase,omitempty"`
+	    Timestamp  time.Time      `json:"timestamp"`
+	}
+
+<a name="TurnStateEvent.WSClass"></a>
+### func \(TurnStateEvent\) WSClass
+
+	func (TurnStateEvent) WSClass() wsclass.WSClass
+
+WSClass marks this event for the WS relay's progress lane.
 
 <a name="TurnStatus"></a>
 ## type TurnStatus

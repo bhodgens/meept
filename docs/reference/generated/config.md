@@ -28,6 +28,7 @@ Package config provides configuration loading and validation for meept.
 - [func DefaultAlwaysFullTools\(\) \[\]string](<#DefaultAlwaysFullTools>)
 - [func DefaultUnapprovedCallerAllowedTools\(\) \[\]string](<#DefaultUnapprovedCallerAllowedTools>)
 - [func DefaultVoiceExemptPhrases\(\) \[\]string](<#DefaultVoiceExemptPhrases>)
+- [func DefaultVoiceFarewellLines\(\) \[\]string](<#DefaultVoiceFarewellLines>)
 - [func EnsureDataDir\(cfg \*Config\) error](<#EnsureDataDir>)
 - [func ExpandEnvVars\(s string\) \(string, error\)](<#ExpandEnvVars>)
 - [func ExpandMeeptPath\(path string\) string](<#ExpandMeeptPath>)
@@ -211,6 +212,8 @@ Package config provides configuration loading and validation for meept.
   - [func \(c IntakeConfig\) ValidateEnabled\(\) error](<#IntakeConfig.ValidateEnabled>)
 - [type IsolationConfig](<#IsolationConfig>)
 - [type JevGateConfig](<#JevGateConfig>)
+- [type KanbanConfig](<#KanbanConfig>)
+  - [func \(c KanbanConfig\) Validate\(\) error](<#KanbanConfig.Validate>)
 - [type KnowledgeConfig](<#KnowledgeConfig>)
 - [type LLMAdaptiveTimeoutConfig](<#LLMAdaptiveTimeoutConfig>)
 - [type LLMBrokerConfig](<#LLMBrokerConfig>)
@@ -327,6 +330,7 @@ Package config provides configuration loading and validation for meept.
 - [type SafetyConfig](<#SafetyConfig>)
 - [type SandboxConfig](<#SandboxConfig>)
 - [type SchedulerConfig](<#SchedulerConfig>)
+  - [func \(c SchedulerConfig\) EffectiveOneShotWindow\(\) time.Duration](<#SchedulerConfig.EffectiveOneShotWindow>)
 - [type SecretSources](<#SecretSources>)
 - [type SecretsConfig](<#SecretsConfig>)
 - [type SecretsProxyConfig](<#SecretsProxyConfig>)
@@ -547,6 +551,10 @@ Package config provides configuration loading and validation for meept.
 
 	const DefaultOTLPTracesEndpoint = "http://localhost:4318"
 
+<a name="DefaultOneShotWindow"></a>DefaultOneShotWindow is the default one\-shot \(TimingAt\) catch\-up and scheduling horizon: a one\-shot whose due time is more than this far in the past is marked failed \(never fired, re\-runnable via RunNow\), and a one\-shot due more than this far in the future is rejected at schedule time.
+
+	const DefaultOneShotWindow = 2 * time.Hour
+
 <a name="DefaultTierPolicyMaxDepth"></a>DefaultTierPolicyMaxDepth is the per\-request degradation\-depth limit llm.tiers.max\_depth takes when the policy is enabled and max\_depth is unset/zero \(llm\-serving\-tiers tree leaf 01, Contract C1: "default 2 when Enabled"\). Inactive while disabled: a zero\-value config keeps MaxDepth 0 so no tier logic can fire.
 
 	const DefaultTierPolicyMaxDepth = 2
@@ -637,6 +645,13 @@ DefaultUnapprovedCallerAllowedTools is the \[voice\] unapproved\_caller\_allowed
 	func DefaultVoiceExemptPhrases() []string
 
 DefaultVoiceExemptPhrases is the \[voice\] exempt\_phrases default set \(voice\-peragent leaf 01\): the short\-final gate never drops a stripped final whose whole residue matches one of these — the one\-word/two\-word voice commands and acknowledgements an operator actually says \("Stop." must survive an N=3 gate\). Returns a fresh slice on every call so consumers may mutate the loaded config freely \(DefaultUnapprovedCallerAllowedTools precedent\).
+
+<a name="DefaultVoiceFarewellLines"></a>
+## func DefaultVoiceFarewellLines
+
+	func DefaultVoiceFarewellLines() []string
+
+DefaultVoiceFarewellLines is the \[voice\] farewell pool default \(C5, plan 20261113\-filler\-clips leaf 05, FROZEN\): \["Goodbye\!","Bye\!","Talk soon."\]. Returns a fresh slice per call so consumers may mutate the loaded config freely \(DefaultVoiceExemptPhrases precedent\).
 
 <a name="EnsureDataDir"></a>
 ## func EnsureDataDir
@@ -1626,8 +1641,14 @@ meept.json5 is the SINGLE source of truth for budget values. No Go code invents 
 
 Enabled is the ONE global budget switch. When false \(the default\) NO budget is enforced anywhere: not the hourly/daily/per\-task/per\-session token and cost limits, not the RPM rate limit, and not the hierarchical task/phase/turn budget \(which additionally requires a positive agent.budget.total\). When true, the configured limits apply.
 
+Mode selects how a breach is handled when Enabled is true \(Contract C7, sovereign\-router\-parity tree leaf 08\):
+
+- "enforce" \(the DEFAULT; an absent, empty, or unknown value maps to enforce\): a breached budget returns BudgetExceededError, unchanged.
+- "steer": a breach never refuses a turn. The budget check reports "allowed", an Advisory reports the breach, and ONE advisory signal \(class "budget\_advisory"\) rides the existing agent.quota\_wait topic.
+
 	type BudgetConfig struct {
 	    Enabled              bool    `json:"enabled"              toml:"enabled"`
+	    Mode                 string  `json:"mode"                 toml:"mode"`
 	    HourlyTokenLimit     int     `json:"hourly_token_limit"   toml:"hourly_token_limit"`
 	    DailyTokenLimit      int     `json:"daily_token_limit"    toml:"daily_token_limit"`
 	    DailyCostLimit       float64 `json:"daily_cost_limit"     toml:"daily_cost_limit"`
@@ -2018,6 +2039,7 @@ Config is the root configuration structure loaded from meept.toml.
 	    Metrics             MetricsConfig             `json:"metrics"              toml:"metrics"`
 	    GitHub              GitHubConfig              `json:"github"               toml:"github"`
 	    Intake              IntakeConfig              `json:"intake"               toml:"intake"`
+	    Kanban              KanbanConfig              `json:"kanban"               toml:"kanban"`
 	    Slack               SlackConfig               `json:"slack"                toml:"slack"`
 	    Signal              SignalConfig              `json:"signal"               toml:"signal"`
 	    Delegation          DelegationConfig          `json:"delegation,omitzero"  toml:"delegation"`
@@ -2550,6 +2572,15 @@ EmployeeLegConfig is one per\-agent voice routing default \(voice tree CL4, OQ4 
 	    // SilencePrompt: this employee's dedicated dead-air nudge line
 	    // (row non-empty wins; empty string = inherit the global line).
 	    SilencePrompt string `json:"silence_prompt" toml:"silence_prompt"`
+	    // SilencePromptLines / FragmentClarifyLines / Farewell: per-row lane
+	    // pools (C5, plan 20261113-filler-clips leaf 05). A non-empty row
+	    // list wins over the row scalar, the global list, and the global
+	    // scalar (ladder: row list > row scalar > global list > global
+	    // scalar > default); nil/empty inherits — the non-empty-takes-
+	    // precedence posture C5 freezes, resolved in voice.VoiceLanes.
+	    SilencePromptLines   []string `json:"silence_prompt_lines" toml:"silence_prompt_lines"`
+	    FragmentClarifyLines []string `json:"fragment_clarify_lines" toml:"fragment_clarify_lines"`
+	    Farewell             []string `json:"farewell" toml:"farewell"`
 	    // SilencePromptSeconds / SilenceHangupAfterSeconds: the nudge (S)
 	    // and post-nudge hangup (H) windows for this employee.
 	    SilencePromptSeconds      *int `json:"silence_prompt_seconds" toml:"silence_prompt_seconds"`
@@ -3217,6 +3248,58 @@ JevGateConfig configures the \[security.jev\_command\_gate\] section \(graded co
 	    // this forces ASK regardless of score. Default 0.10.
 	    ConfidenceThreshold float64 `json:"confidence_threshold" toml:"confidence_threshold"`
 	}
+
+<a name="KanbanConfig"></a>
+## type KanbanConfig
+
+KanbanConfig carries the \[kanban\] board\-projection subsystem block \(plans/kanban\-board master.md contract C9\). Every surface is opt\-in \(docs/agents/opt\-in\-defaults.md\): with Enabled=false the daemon opens no kanban store, starts no projector, and registers no kanban.\* RPC — the boot path stays byte\-identical to a config without the block.
+
+	type KanbanConfig struct {
+	    // Enabled turns on the kanban subsystem: store, projector, RPC
+	    // (default: false, opt-in).
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // SidecarEnabled turns on the daemon-spawned meept-kanban gateway
+	    // (default: false; requires Enabled).
+	    SidecarEnabled bool `json:"sidecar_enabled" toml:"sidecar_enabled"`
+	    // SidecarBind is the sidecar's HTTP listen address (default
+	    // "127.0.0.1:8790"). A NON-loopback value is the explicit operator
+	    // knob required by C7: the sidecar refuses an accidental LAN bind
+	    // and logs a loud boot warning when this names a non-loopback
+	    // address (TLS terminates at an operator proxy; no TLS here).
+	    SidecarBind string `json:"sidecar_bind" toml:"sidecar_bind"`
+	    // WIPMode governs card.move against Column.WIP limits (C10):
+	    // "warn" moves but emits a kanban.board.changed note, "block"
+	    // refuses with ErrWIPFull. Any other value fails load validation.
+	    WIPMode string `json:"wip_mode" toml:"wip_mode"`
+	    // ReconcileInterval is the periodic full-rebuild cadence as a Go
+	    // duration string (default "0s" = disabled). Held as a string,
+	    // parsed at wiring time by 07/01-daemon-wiring — register the key
+	    // in stringDurationKeys (json5_loader.go) so the loader's duration
+	    // preprocessing keeps it a string.
+	    ReconcileInterval string `json:"reconcile_interval" toml:"reconcile_interval"`
+	    // AllowedOrigins extends the sidecar's WS Origin allow-list with
+	    // EXACT scheme://host[:port] entries — the documented Caddy/nginx
+	    // TLS-proxy deployment, where the proxy presents the public Origin
+	    // that the loopback-only default rejects. No wildcards, no paths,
+	    // no suffix matching (origin trust is exact). Empty (the default)
+	    // keeps the current same-origin/loopback posture byte-identical.
+	    // The daemon passes each entry to the sidecar as -allow-origin
+	    // (internal/daemon/kanban_boot.go); the sidecar never reads this
+	    // config itself (C7 sidecar-minimal).
+	    AllowedOrigins []string `json:"allowed_origins" toml:"allowed_origins"`
+	    // GitHubSync is the deferred inbound GitHub Projects sync knob
+	    // (issue bhodgens/meept#133). Code must NOT read beyond the knob.
+	    GitHubSync struct {
+	        Enabled bool `json:"enabled" toml:"enabled"`
+	    }   `json:"github_sync" toml:"github_sync"`
+	}
+
+<a name="KanbanConfig.Validate"></a>
+### func \(KanbanConfig\) Validate
+
+	func (c KanbanConfig) Validate() error
+
+Validate checks the enum\-typed kanban fields. Cheap and total: wip\_mode accepts exactly "warn" and "block" per C9/C10. The empty string is valid too — it means the block was absent \(a hand\-built Config literal\), and the wiring layer treats it as the "warn" default exactly like DefaultConfig. allowed\_origins entries are validated unconditionally \(an empty list — the default — stays byte\-identical\): each must be an exact scheme://host\[:port\] origin — http/https only, no wildcard, no path or trailing slash, no credentials or query. Origin trust is exact\-match; a fuzzy\-looking entry is a misconfiguration, not a feature.
 
 <a name="KnowledgeConfig"></a>
 ## type KnowledgeConfig
@@ -3937,6 +4020,23 @@ Ops note \(documented, not coded\): application\-to\-person traffic from local n
 	    // DLRWaitSeconds bounds the wait for message.finalized; 0 inherits
 	    // the telnyx.DefaultDLRWaitSeconds (30) at adapter construction.
 	    DLRWaitSeconds int `json:"dlr_wait_seconds" toml:"dlr_wait_seconds"`
+	    // WebhookBaseURL is the scheme+host Telnyx webhooks are addressed
+	    // under (telnyx-texting plan master.md §8). Empty = no webhook_url
+	    // is sent on sends; the contact channel derives
+	    // {base}/api/v1/voice/messaging/webhook when set. Zero default.
+	    WebhookBaseURL string `json:"webhook_base_url" toml:"webhook_base_url"`
+	    // StopReply is the confirmation text sent after a STOP/START consent
+	    // keyword (zero default: the reply WORDING defaults live in the sms
+	    // pkg per the master serialization note, not in schema.go).
+	    StopReply string `json:"stop_reply" toml:"stop_reply"`
+	    // HelpReply is the reply text for HELP (zero default, same rationale
+	    // as StopReply).
+	    HelpReply string `json:"help_reply" toml:"help_reply"`
+	    // InboundEnabled is the D3 kill switch for the inbound SMS leg;
+	    // DEFAULT FALSE — the SMS leg ships opt-in and disabled daemon
+	    // behavior stays byte-identical. An explicit false in the doc is
+	    // honored (never force-defaulted true at the load boundary).
+	    InboundEnabled bool `json:"inbound_enabled" toml:"inbound_enabled"`
 	}
 
 <a name="MetricsConfig"></a>
@@ -4348,7 +4448,7 @@ The zero VALUE of this field is still false, which is what a config that omits t
 
 Validate checks \[daemon.output\_filters\]. expected\_language is fail\-fast \(bughunt wave M5\): an unknown code used to pass through verbatim, match no word table, and reject EVERY prose output — including correct output — burning filter retries to rejected\_exhausted on the chat path, signalled only by a lang= reason string. An unknown code now fails at config load, where the mistake is visible and costs nothing.
 
-A code is accepted when detection can name it without user data \(validator.KnownLanguageCode\) or when the operator shipped the word table that makes it detectable \($MEEPT\_HOME/validator/lang/\<code\>.txt\). Both tests use the validator's normalizer, so the accepted set is exactly the set of codes the filter can match — never a second, drifting list.
+A code is accepted when detection can name it without user data \(langcode.IsKnown\) or when the operator shipped the word table that makes it detectable \($MEEPT\_HOME/validator/lang/\<code\>.txt\). Both tests use the shared langcode vocabulary — the same authority the validator's filter reads — so the accepted set is exactly the set of codes the filter can match, never a second, drifting list.
 
 Empty keeps the frozen default and is always valid.
 
@@ -5077,7 +5177,24 @@ SchedulerConfig holds scheduler settings.
 	type SchedulerConfig struct {
 	    Enabled  bool   `json:"enabled"  toml:"enabled"`
 	    Timezone string `json:"timezone" toml:"timezone"`
+	
+	    // OneShotWindow bounds the one-shot (TimingAt) horizon, both directions:
+	    // an overdue one-shot due within this window fires on boot ("run at T"
+	    // means "run as soon as possible after T"); one due further back is
+	    // marked failed (never ran, re-runnable via RunNow), and scheduling a
+	    // one-shot due further ahead than this window is rejected at schedule
+	    // time (use a cron schedule for far-future triggers). Duration string
+	    // ("2h", "30m"); zero-value/empty/unparseable = DefaultOneShotWindow
+	    // (2h) — see EffectiveOneShotWindow.
+	    OneShotWindow string `json:"one_shot_window" toml:"one_shot_window"`
 	}
+
+<a name="SchedulerConfig.EffectiveOneShotWindow"></a>
+### func \(SchedulerConfig\) EffectiveOneShotWindow
+
+	func (c SchedulerConfig) EffectiveOneShotWindow() time.Duration
+
+EffectiveOneShotWindow resolves the one\-shot horizon, falling back to DefaultOneShotWindow \(2h\) when the knob is unset, unparseable, or non\-positive — the zero\-value default per the \[scheduler\] knob contract.
 
 <a name="SecretSources"></a>
 ## type SecretSources
@@ -6189,6 +6306,17 @@ VerificationDefaults holds daemon\-level verification defaults.
 	    // so per-final dispatch answered fragments of one sentence).
 	    // Default 900; 0 = legacy per-final dispatch.
 	    TurnConfirmMs int `json:"turn_confirm_ms" toml:"turn_confirm_ms"`
+	    // ContextWarm (phase2-context-warm C6, opt-in, default FALSE): route
+	    // live-call STT PARTIALS (last:false) into llm.Client.Warm on a
+	    // debounced timer so the provider-side prompt cache already holds the
+	    // imminent turn's prefix when the final turn dispatches. Disabled is
+	    // byte-identical (docs/agents/opt-in-defaults.md); global-only (no
+	    // employee_leg override this wave).
+	    ContextWarm bool `json:"context_warm" toml:"context_warm"`
+	    // ContextWarmMinTokens is the token floor under which a partial is
+	    // never worth warming (rough 3-chars/token estimate over the rendered
+	    // prefix). Default 60; <=0 falls back to the default at the warmer.
+	    ContextWarmMinTokens int `json:"context_warm_min_tokens" toml:"context_warm_min_tokens"`
 	    // FragmentConfirmMs is the extra confirm budget for a FINAL that
 	    // looks like an unfinished thought (whisper leaves no terminal
 	    // punctuation / a trailing ellipsis on a mid-word cutoff): the
@@ -6290,6 +6418,27 @@ VerificationDefaults holds daemon\-level verification defaults.
 	    // that" is wrong semantics when nothing is pending). Empty falls back
 	    // to the filler list for byte-compat with callers that never set it.
 	    SilencePrompt string `json:"silence_prompt" toml:"silence_prompt"`
+	    // SilencePromptLines is the C5 list shape for the dead-air nudge
+	    // lane (plan 20261113-filler-clips leaf 05, contract C5 FROZEN): a
+	    // non-empty list takes precedence over the SilencePrompt scalar
+	    // (ladder: row list > row scalar > global list > global scalar >
+	    // default). Empty/nil (the shipped default) keeps the scalar binding,
+	    // so zero-config behavior is byte-identical to pre-leaf. Round-robin
+	    // over the pool rides voice.PickLine (talk-loop wiring is leaf 04).
+	    SilencePromptLines []string `json:"silence_prompt_lines" toml:"silence_prompt_lines"`
+	    // FragmentClarifyLines is the C5 list shape for the fragment-clarify
+	    // lane: a non-empty list takes precedence over the FragmentClarify
+	    // scalar (same ladder; the employee_leg row never carried a
+	    // fragment-clarify scalar). Empty/nil default keeps the scalar
+	    // binding (byte-identical).
+	    FragmentClarifyLines []string `json:"fragment_clarify_lines" toml:"fragment_clarify_lines"`
+	    // Farewell is the C5 farewell pool (R5): the lines the talk loop may
+	    // speak on call teardown / detected caller bye (leaf 04 wires the
+	    // speech; this leaf owns only the pool). Ships a non-empty default
+	    // (DefaultVoiceFarewellLines, the frozen C5 list); an empty list
+	    // inherits the default. Per-employee override: employee_leg[].farewell
+	    // (row list > global list > default).
+	    Farewell []string `json:"farewell" toml:"farewell"`
 	    // SilenceHangupAfterSeconds is the hangup window H after the nudge:
 	    // dead air => nudge at silence_prompt_seconds (S), hangup at S+H.
 	    // Default 45 with S default 45 => nudge@45, hangup@90, exactly the
@@ -6306,9 +6455,21 @@ VerificationDefaults holds daemon\-level verification defaults.
 	    DefaultLeg                string `json:"default_leg"            toml:"default_leg"`
 	    TTSModel                  string `json:"tts_model"             toml:"tts_model"`
 	    TTSVoice                  string `json:"tts_voice"             toml:"tts_voice"`
-	    STTModel                  string `json:"stt_model"             toml:"stt_model"`
-	    TTSBaseURL                string `json:"tts_base_url"          toml:"tts_base_url"`
-	    STTBaseURL                string `json:"stt_base_url"          toml:"stt_base_url"`
+	    // TTSRefAudio (json tts_ref_audio) is the path to the CLONE
+	    // REFERENCE WAV the qwen3 custom voice is keyed on (plan
+	    // 20261113-filler-clips leaf 02). The OpenAI-compatible shim never
+	    // receives the reference in a request, so this knob feeds ONLY the
+	    // clip-key identity: the daemon hashes the file's content (sha256)
+	    // into the keys line's tts_ref_hash and into every Contract C1 clip
+	    // key — two deployments sharing model+voice name but different
+	    // reference audio get different clip keys. Empty (default) = a
+	    // preset/non-clone voice: the hash-of-zero-bytes inner case. A
+	    // missing/unreadable file degrades to the same posture with a
+	    // one-shot WARN, never a failed call.
+	    TTSRefAudio string `json:"tts_ref_audio" toml:"tts_ref_audio"`
+	    STTModel    string `json:"stt_model"             toml:"stt_model"`
+	    TTSBaseURL  string `json:"tts_base_url"          toml:"tts_base_url"`
+	    STTBaseURL  string `json:"stt_base_url"          toml:"stt_base_url"`
 	    // ReaperIntervalS (leaf 02, C3): the dead-air reaper's sweep cadence.
 	    // 0 => default 30s (frozen from the uptractor source); NEGATIVE
 	    // disables the reaper entirely (opt-out without removing the key).
