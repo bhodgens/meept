@@ -30,7 +30,11 @@ func TestTerminalService_FenceRejection(t *testing.T) {
 	// After the fix, we can call SetFenceChecker on the TerminalService
 	// to wire a fence checker.
 
-	termSvc := NewTerminalService("", nil, nil)
+	// An explicit working directory is required: the shell tool no longer
+	// silently falls back to $HOME when constructed with "" (issue #136).
+	// Passing t.TempDir() keeps this test about the FENCE, not about
+	// working-directory resolution.
+	termSvc := NewTerminalService(t.TempDir(), nil, nil)
 	fence := &stubFenceChecker{rejectCmd: "MARKER_REJECT_ME"}
 	termSvc.SetFenceChecker(fence)
 

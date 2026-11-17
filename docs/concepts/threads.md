@@ -94,7 +94,7 @@ meept thread current
     threads_enabled: true,
     min_messages_for_summary: 5,  // Cross-thread summary injection threshold
 
-    // Branch feature: disabled by default (dead feature)
+    // Branch feature: legacy, disabled by default; superseded by threads
     // Enable only if you need git-like conversation forking
     branching: false,
     branch_summary_threshold: 5,

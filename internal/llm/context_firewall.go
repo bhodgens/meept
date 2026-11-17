@@ -1260,5 +1260,21 @@ func (f *ContextFirewall) Inner() Chatter {
 // Ensure ContextFirewall implements Chatter
 var _ Chatter = (*ContextFirewall)(nil)
 
+// Warm dispatch — C4. The firewall is a transparent passthrough on the
+// warm lane: it forwards the rendered message list + opts to the inner
+// chatter UNCHANGED (the warm already serializes through the SAME
+// buildChatRequest a turn uses; re-rendering here would diverge the
+// prefix). A non-warm-capable inner is a fail-soft skip.
+func (f *ContextFirewall) Warm(ctx context.Context, messages []ChatMessage, opts ...ChatOption) error {
+	if f == nil || f.inner == nil {
+		return nil
+	}
+	if warm, ok := f.inner.(WarmChatter); ok {
+		return warm.Warm(ctx, messages, opts...)
+	}
+	return nil
+}
+
 // Ensure ContextFirewall supports streaming when its inner does
 var _ StreamingChatter = (*ContextFirewall)(nil)
+var _ WarmChatter = (*ContextFirewall)(nil)

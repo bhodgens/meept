@@ -41,7 +41,9 @@ user-reachable (the repo's wiring-requirement red flag).
 
 | Task | Status | Notes |
 |---|---|---|
-| 07/01-daemon-wiring | PENDING | |
+| 07/01-daemon-wiring | DONE | 8a58fadc (live kanban wiring behind [kanban].enabled) |
+
+> Reconciliation note (2026-11-16, issue #156): rows above were under-reporting merged work; statuses updated from git (each SHA verified an ancestor of main). Tables were last refreshed d492867c (2026-11-14).
 
 ## Integration Test Plan
 - e2e master case (g): boot the real daemon with `[kanban].enabled=true`;

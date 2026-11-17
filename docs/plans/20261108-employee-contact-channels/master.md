@@ -301,18 +301,35 @@ Phase 0, validated by the control agent (orchestrator, in-session).
 
 | # | Feature (from plan) | Source (leaf/spec section) | Unit tests | E2E tests | Status |
 |---|---------------------|----------------------------|-----------|-----------|--------|
-| F1 | contact store CRUD + E.164 normalize | C1 | contact/store_test.go | contact-chain scenario | PENDING |
-| F2 | chain runner ordered fallback + dedupe | C2 | contact/chain_test.go | contact-chain scenario | PENDING |
-| F3 | signal json-rpc client + demux | C3 | signal/rpc_test.go | signal-sidecar scenario | PENDING |
-| F4 | signal voice leg registry + splice adapter | C4 | voice/signal_leg_test.go | signal-sidecar scenario | PENDING |
-| F5 | signal msg send/receive | #120 | signal/msg_test.go | signal-sidecar scenario | PENDING |
-| F6 | telnyx SMS send + webhook + DLR | C5 | telnyx/messaging_test.go | telnyx-sms scenario | PENDING |
-| F7 | phone-leg ended-state fix (#123) | leaf 01 T0 | daemon voice wiring test | NEW phone-leg ended assertion (leaf 01 T0); local-leg assertion already landed upstream (commit 2a5c0ccf) | PENDING |
-| F8 | contact tool surface | C6 | builtin/contact_test.go | contact-chain scenario | PENDING |
+| F1 | contact store CRUD + E.164 normalize | C1 | contact/store_test.go | contact-chain scenario | VALIDATED 2026-11-16: store tests green at HEAD (`go test ./internal/contact/` ok; 5 store tests in store_test.go incl. GetByPhone-unknown + upsert); e2e contact-chain-01 green (`go test -tags e2e ./e2e/suites/contact-chain/` ok 18.35s). Merged via 668b92fb (leaf ff2c8eb9). |
+| F2 | chain runner ordered fallback + dedupe | C2 | contact/chain_test.go | contact-chain scenario | VALIDATED 2026-11-16: chain_test.go 7 tests green (TestChainStopsOnDelivered, TestChainOverridePinsOrder, TestChainDelayRespected, ...); e2e contact-chain-01/02 (one chain id, no double notification) green. Merged via 668b92fb (leaf ff2c8eb9). |
+| F3 | signal json-rpc client + demux | C3 | signal/rpc_test.go | signal-sidecar scenario | VALIDATED 2026-11-16: rpc_test.go green (TestClientDialAndStartCall, TestClientConcurrentRequestsSerialize, TestClientCallEventDemux; also clean under -race and -count=4); e2e signal-sidecar-01 green (ok 3.34s). Note: TestSupervisorRestartOnCrash is count-flaky on macOS (failed once at -count=4, passed in isolation x4 and under -race) - timing-sensitive restart backoff, not a gate row. Merged via 668b92fb (leaf ff2c8eb9). |
+| F4 | signal voice leg registry + splice adapter | C4 | voice/signal_leg_test.go | signal-sidecar scenario | VALIDATED 2026-11-16: TestRegistrySignalLegTargetVerbatim/NoMangling/SharesCapacity/ReleaseFrees all PASS at HEAD; e2e signal-sidecar-01 (PCM 640B/20ms + release fan-out) green. Merged via 668b92fb (leaf a0e2217e). |
+| F5 | signal msg send/receive | #120 | signal/msg_test.go | signal-sidecar scenario | VALIDATED 2026-11-16: msg_test.go green (TestClientSendReturnsTimestamp, TestClientTyping, TestEnvelopeDemuxAndDedupe) + 11 MsgChannel tests green in signalleg/msgchannel_test.go; e2e signal-sidecar-02 (inbound routing + dedupe) green. Merged via 668b92fb (leaf a0e2217e). |
+| F6 | telnyx SMS send + webhook + DLR | C5 | telnyx/messaging_test.go | telnyx-sms scenario | VALIDATED 2026-11-16: messaging_test.go green (TestSendSMSParsesDataID, TestSendSMSRejectsNonE164, TestParseMessageReceived, TestParseMessageFinalized); e2e telnyx-sms-01 (Ed25519-signed webhook + DLR correlation) green (ok 2.00s). Merged via 668b92fb (leaf a0e2217e). Live-carrier send path (real Telnyx messaging profile) remains pending-owner — hermetically verified only. |
+| F7 | phone-leg ended-state fix (#123) | leaf 01 T0 | daemon voice wiring test | NEW phone-leg ended assertion (leaf 01 T0); local-leg assertion already landed upstream (commit 2a5c0ccf) | VALIDATED 2026-11-16: internal/daemon/voice_phone_bind_test.go TestPhoneLegCallRowReachesEnded (outbound) + TestPhoneLegInboundRefusedSpawnLeavesNoRow (inbound) PASS at HEAD (`go test -run TestPhoneLeg ./internal/daemon/` ok); holdPhoneCall registered on both phone paths (internal/daemon/voice_wiring.go:491 inbound, :630 outbound); local-leg hard ended assertion at e2e/suites/voice-local/voice_local_test.go:870-874 green (suite ok 36.70s). Merged via 668b92fb (leaf ff2c8eb9). |
+| F8 | contact tool surface | C6 | builtin/contact_test.go | contact-chain scenario | VALIDATED 2026-11-16: internal/tools/builtin/contact_test.go 5 tests PASS (TestContactToolName/ArgsAndReport/EmptyChannelsOmitted/AnsweredTerminal/MissingPersonFails); e2e contact-chain-01 green. Merged via 668b92fb (leaf 256b2be9). |
 
 Statuses: PENDING | DELTA (mismatch, resolution in progress) | VALIDATED
 
 Delta log: [date, feature ID, direction, one-line reason]
+
+- 2026-11-16, reconciliation pass (all rows F1-F8, docs-only): plan-vs-disk
+  reconciliation at HEAD d6a7e3db. F1-F6+F8 gate rows re-verified mechanically
+  at HEAD (named unit tests grepped + re-run green; contact-chain /
+  signal-sidecar / telnyx-sms / voice-local e2e suites re-run green; commands
+  and results embedded in each row). F7 (leaf 01 T0, GH #123) verified
+  IMPLEMENTED at HEAD: holdPhoneCall fires on both phone paths
+  (voice_wiring.go inbound :491 / outbound :630), daemon pin tests
+  TestPhoneLegCallRowReachesEnded + TestPhoneLegInboundRefusedSpawnLeavesNoRow
+  green, voice-local hard ended assertion green — no open work remains in F7.
+  F6 live-carrier caveat recorded (hermetic verification only). Flaky-test
+  observation: internal/signal TestSupervisorRestartOnCrash failed once at
+  -count=4 on macOS (timing-sensitive restart backoff), passed in isolation
+  and under -race; not a gate row, no code touched. Branch-orchestrator
+  tracking table (11-signal-legs) synced: 11a/11b PENDING -> REVIEWED with
+  evidence (work landed in a0e2217e, review 93fb9f3f). No source files
+  modified in this pass.
 
 ## Frozen Documents
 

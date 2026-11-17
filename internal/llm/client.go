@@ -381,7 +381,10 @@ func (c *Client) semanticPartitionFor(cfg *ModelConfig, o *chatOptions) string {
 // to the budget gate exactly as before (never parked, never errored,
 // ErrEmptyResponse accounting untouched).
 func (c *Client) semanticLookupBehindMiss(ctx context.Context, cfg *ModelConfig, o *chatOptions, messages []ChatMessage) (*Response, bool) {
-	if c.semanticCache == nil || !c.semanticCache.Enabled() {
+	if o != nil && o.noCache {
+		return nil, false
+	}
+	if c.semanticCache == nil || !c.semanticCache.Enabled() || o == nil {
 		return nil, false
 	}
 	part := c.semanticPartitionFor(cfg, o)
@@ -408,6 +411,9 @@ func (c *Client) semanticLookupBehindMiss(ctx context.Context, cfg *ModelConfig,
 // silent; tool-call-bearing responses are skipped entirely so they can
 // never be served semantically later (leaf 02 hard constraint).
 func (c *Client) semanticStoreAfterSuccess(ctx context.Context, cfg *ModelConfig, o *chatOptions, messages []ChatMessage, resp *Response) {
+	if o != nil && o.noCache {
+		return
+	}
 	if c.semanticCache == nil || !c.semanticCache.Enabled() || resp == nil || resp.HasToolCalls() {
 		return
 	}
@@ -795,7 +801,7 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 	cfg = withRequestModelOverride(cfg, chatOpts)
 
 	// Check cache
-	if c.tokenCache != nil && c.keyBuilder != nil {
+	if !chatOpts.noCache && c.tokenCache != nil && c.keyBuilder != nil {
 		cacheKey := c.keyBuilder.BuildPrefixAwareKeyWithFiles(cfg.ModelID, SystemPromptSections(SystemPromptOf(messages)), messages)
 		if cached, found := c.tokenCache.Get(ctx, cacheKey); found {
 			return cached.Response, nil
@@ -1012,7 +1018,7 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 		}
 
 		// Store in cache
-		if c.tokenCache != nil && c.keyBuilder != nil {
+		if !chatOpts.noCache && c.tokenCache != nil && c.keyBuilder != nil {
 			cacheKey := c.keyBuilder.BuildPrefixAwareKeyWithFiles(cfg.ModelID, SystemPromptSections(SystemPromptOf(messages)), messages)
 			c.tokenCache.Put(ctx, cacheKey, resp)
 			// Semantic tier store (leaf 02): best-effort vector
@@ -1079,7 +1085,7 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 	cfg = withRequestModelOverride(cfg, chatOpts)
 
 	// Check cache
-	if c.tokenCache != nil && c.keyBuilder != nil {
+	if !chatOpts.noCache && c.tokenCache != nil && c.keyBuilder != nil {
 		cacheKey := c.keyBuilder.BuildPrefixAwareKeyWithFiles(cfg.ModelID, SystemPromptSections(SystemPromptOf(messages)), messages)
 		if cached, found := c.tokenCache.Get(ctx, cacheKey); found {
 			reportProgress(ProgressStageDone, "Cache hit")
@@ -1281,7 +1287,7 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 		}
 
 		// Store in cache
-		if c.tokenCache != nil && c.keyBuilder != nil {
+		if !chatOpts.noCache && c.tokenCache != nil && c.keyBuilder != nil {
 			cacheKey := c.keyBuilder.BuildPrefixAwareKeyWithFiles(cfg.ModelID, SystemPromptSections(SystemPromptOf(messages)), messages)
 			c.tokenCache.Put(ctx, cacheKey, resp)
 			// Semantic tier store (leaf 02): best-effort vector
@@ -1346,6 +1352,15 @@ type chatOptions struct {
 	// different layer (stamped at enqueue from the originating session)
 	// and does not flow here; see docs/workflows/llm-management.md.
 	priority bool
+	// noCache (plan 20261113-filler-clips-and-context-warm C4, hard
+	// rule 3) marks this call as a cache-warming probe: it NEVER reads
+	// the exact-key token cache, NEVER queries the semantic tier, and
+	// NEVER writes either back. A max_tokens=1 warm response stored
+	// under the exact key would otherwise be SERVED to the real turn as
+	// the completed answer whenever the final transcript matches the
+	// partial. It is a bypass on the cache path ONLY — it never touches
+	// the budget gate, the short-retry loop, or the wire payload.
+	noCache bool
 	// toolChoice is the caller's per-turn tool_choice request, set with
 	// WithToolChoice. Non-empty means the caller marked THIS turn an
 	// action turn. The wire value is still gated on the resolved model
@@ -1837,6 +1852,21 @@ func WithPriority(interactive bool) ChatOption {
 	}
 }
 
+// WithNoCache bypasses every response-cache tier for this call: no
+// exact-key tokenCache Get/Put, no semantic-tier lookup/store. It is
+// the context-warm seam's hard bypass (plan
+// 20261113-filler-clips-and-context-warm, C4 hard rule 3): a
+// max_tokens=1 warm must never be stored under the exact key, or the
+// real turn would be served the warm's one-token completion as its
+// "answer" whenever the transcript matched the partial. It does NOT
+// affect the wire payload, the budget gate, the short-retry loop, or
+// any rate limiter.
+func WithNoCache() ChatOption {
+	return func(o *chatOptions) {
+		o.noCache = true
+	}
+}
+
 // PriorityOf reports whether the given options mark the turn INTERACTIVE
 // for model-slot acquisition (tree 04 leaf 03, D11). It is the inspection
 // counterpart of WithPriority: a priority-less (nil / empty) option slice
@@ -1851,6 +1881,32 @@ func PriorityOf(opts []ChatOption) bool {
 		}
 	}
 	return o.priority
+}
+
+// NoCacheOf reports whether the given options mark the call as a
+// cache-bypass probe (C4 hard rule 3). Inspection counterpart of
+// WithNoCache, mirroring PriorityOf: tests and stubs that need the
+// verdict without running the client can read it off the option
+// slice instead of re-deriving chatOptions.
+func NoCacheOf(opts []ChatOption) bool {
+	var o chatOptions
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&o)
+		}
+	}
+	return o.noCache
+}
+
+// ResolvedModelOf reports the per-request model selection (user directive
+// > alias resolution, per requestModelOverride precedence) carried on the
+// given options, or nil when the call carries none. Inspection
+// counterpart of WithResolvedModel / WithModelOverride — the public face
+// of requestResolvedProviderID — so wiring tests can pin that the warmer
+// layer performed its alias resolution BEFORE dispatching Warm (C4 rule 1)
+// without re-deriving chatOptions.
+func ResolvedModelOf(opts []ChatOption) *ModelConfig {
+	return requestResolvedProviderID(opts)
 }
 
 // WithToolChoice marks THIS request as an action turn and sets the requested
@@ -2624,7 +2680,7 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 	// BEFORE the first delta (the TTFT sentinel stays -1: no clock was
 	// ever armed -- chatOpts.ttftStart arms per live attempt below). A
 	// hit never carries tool calls (guard inside the seam).
-	if c.tokenCache != nil && c.keyBuilder != nil {
+	if !chatOpts.noCache && c.tokenCache != nil && c.keyBuilder != nil {
 		cacheKey := c.keyBuilder.BuildPrefixAwareKeyWithFiles(cfg.ModelID, SystemPromptSections(SystemPromptOf(messages)), messages)
 		if cached, found := c.tokenCache.Get(ctx, cacheKey); found {
 			return cached.Response, nil
@@ -2742,7 +2798,7 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 				// to the ChatWithProgress() success site. Tool-call
 				// responses are skipped inside the seam (the streaming
 				// hard exemption mirrors the non-streaming sites).
-				if c.tokenCache != nil && c.keyBuilder != nil {
+				if !chatOpts.noCache && c.tokenCache != nil && c.keyBuilder != nil {
 					cacheKey := c.keyBuilder.BuildPrefixAwareKeyWithFiles(cfg.ModelID, SystemPromptSections(SystemPromptOf(messages)), messages)
 					c.tokenCache.Put(ctx, cacheKey, resp)
 					c.semanticStoreAfterSuccess(ctx, cfg, chatOpts, messages, resp)

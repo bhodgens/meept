@@ -58,7 +58,7 @@ TestActivityWiring_AllNilHandlesNeverPanics (ACT-1) fails at committed HEAD and 
 ## WAVE 2 FINDINGS (2026-11-08; parent re-verified the HIGH items in-session — all CONFIRMED)
 
 - TRJ-1 [LOW][drift] trajectory-golden-ci + turn-journal: both fully landed/wired/green. Master "70 suites" stale (actual 95); turn-journal has 2 disclosed known-gaps (RecoverStaleTasks force-fail row state; multi-round OpenRuns) missing from master delta log.
-- FC-1 [HIGH][drift] fresh-context-critic: commit 977d4044 (2026-11-03) inverted C1's frozen "default false, ships dark" contract to disable-form keys defaulting ON, one day after COMPLETE; master/leaves never got the dated addendum. Consequence: TierComplex plans cannot self-seal by default (hostile slot empty -> hostile_skipped -> human seal). Code is deliberate + tested; the TREE is the stale artifact.
+- FC-1 [HIGH][drift] fresh-context-critic: DISPOSITIONED 2026-11-16 - Option A ratification-as-documented (dated C1 amendment added to master.md; as-built disable-form default-ON keys ratified; TierComplex empty hostile slot -> human seal is the designed gate, hostile_skipped is expected telemetry, not coverage). Owner default applied; veto pending. No code behavior change. (Original finding: commit 977d4044 (2026-11-03) inverted C1's frozen "default false, ships dark" contract to disable-form keys defaulting ON, one day after COMPLETE; master/leaves never got the dated addendum. Code is deliberate + tested; the TREE was the stale artifact - now amended.)
 - FC-2 [MED][contract] C5 flag_off skip-reason never fires (flag-off is structural); C1 test renamed TestCriticFlagsDefaultOn. Doc deltas.
 - SGF-1: security-gate-followups 4/4 DONE, verified. Only cross-tree ACT-1 affects its daemon package run.
 - DSH-1 [HIGH][unwired-stub] CONFIRMED: fork mode never seeds from a real parent transcript - childPrompt (delegate.go:430) calls m.forkSeed(nil); completedTurnPrefix(nil) returns nil -> fresh brief. SetForkSeed has zero production callers; Spawn call at internal/tools/builtin/platform.go:487 passes "". Slicer logic itself is real and tested.
@@ -103,7 +103,7 @@ TestActivityWiring_AllNilHandlesNeverPanics (ACT-1) fails at committed HEAD and 
 | GRP-2 template-loop record | ResolveForAgent + SetGroupResolution at construction | bacff2e7 |
 | DSH-2 projections/events inert | registry + ChangeEmitter wired at store construction | bacff2e7 |
 | DSH-4 skill catalog test-only | prompt path sources index; per-session catalog record | bacff2e7 |
-| DSH-3 round driver manual-only | scheduler deferred-turn auto-advance; [employees] goal_auto_advance default true | f6ecd5ca |
+| DSH-3 round driver manual-only | scheduler turn auto-advance; [employees] goal_auto_advance default true | f6ecd5ca |
 | DSH-5 PreflightRoute unwired | [delegation] allowed_routes + fail-closed preflight on every spawn | f6ecd5ca |
 | DSH-9a timing JSON drift | snake_case MarshalJSON, legacy-compatible Unmarshal | f6ecd5ca |
 | INT-1 sub-issue 422 | two-step create+link form; fake validates sequence | 7483dd3d |

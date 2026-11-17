@@ -363,7 +363,8 @@ matching — origin trust is exact; validation in
 The daemon passes each entry to the sidecar as a repeated `-allow-origin`
 flag (`internal/daemon/kanban_boot.go` `buildKanbanArgs`); the sidecar
 stays config-blind (C7). An empty/absent list keeps the loopback-only
-posture byte-identical.
+posture byte-identical; a request carrying no Origin at all passes the
+exact-match gate (non-browser clients never send one).
 
 ## Verification
 

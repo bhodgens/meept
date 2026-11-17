@@ -750,11 +750,18 @@ func (s *Store) ClaimNextForAgent(workerID string, caps []string, agentID string
 
 // MarkProcessing promotes a claimed attempt to 'processing' — but only for
 // the writer that HOLDS the current claim token (contract C-Q1, audit M-1).
-// The CAS predicate (id + claim_token + state IN claimed/processing) closes
-// the requeue-vs-MarkProcessing race: a superseded or foreign attempt can
-// never flip the row forward, and neither can a token-less writer (an empty
-// token matches no row — claim_token is NULL or a minted token, never the
-// empty string).
+// The CAS predicate (id + claim_token + the legal sources of 'processing')
+// closes the requeue-vs-MarkProcessing race: a superseded or foreign attempt
+// can never flip the row forward, and neither can a token-less writer (an
+// empty token matches no row — claim_token is NULL or a minted token, never
+// the empty string).
+//
+// The allowed source set is FOLDED from jobTransitions (issue #134):
+// legalSources(StateProcessing) = {claimed, processing}. The processing
+// self-edge is deliberate — a worker whose processing-ack was lost re-marks
+// its own live attempt without being told it lost the race (see jobTransitions
+// TRUTH note). No check-then-write split: the guard lives in the UPDATE's
+// WHERE clause.
 //
 // 0 rows affected means one of: the token is not the live attempt's, the row
 // left the claimed/processing window (requeued, completed, dead-lettered), or
@@ -763,10 +770,11 @@ func (s *Store) ClaimNextForAgent(workerID string, caps []string, agentID string
 // terminal guard.
 func (s *Store) MarkProcessing(jobID, claimToken string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
+	args := []any{now, jobID, claimToken}
+	args = append(args, predicateArgs(StateProcessing)...)
 	res, err := s.db.Exec(`
 		UPDATE jobs SET state = 'processing', updated_at = ?
-		WHERE id = ? AND claim_token = ? AND state IN ('claimed', 'processing')`,
-		now, jobID, claimToken)
+		WHERE id = ? AND claim_token = ?`+predicateFor(StateProcessing), args...)
 	if err != nil {
 		return fmt.Errorf("failed to mark job processing: %w", err)
 	}
@@ -1100,26 +1108,24 @@ func (s *Store) FailAttempt(jobID, errMsg, claimToken string) (CompletionDisposi
 	//
 	// A token-LESS caller (the bus queue.fail handler, the RPC/HTTP
 	// FailRequest path, an operator force-failing a stuck job) is held to the
-	// state ALLOW-LIST below: it may fail a job that is still in play —
-	// 'pending', 'claimed', 'processing', 'failed' — but NOT a job that cannot
-	// be failed: 'completed' (the work succeeded and the result stands) and
-	// 'dead' (already retired to the dead-letter table). This is a DELIBERATE
-	// contract change from the pre-H4 bare `WHERE id = ?`, which accepted ANY
-	// state and let POST /queue/jobs/{id}/fail mark a finished job failed and
-	// publish queue.job.failed for it. The refusal is ErrJobNotClaimable, the
-	// same sentinel Complete uses, so the HTTP surface maps it to 409 — and
+	// folded source set for the target state (issue #134): legalSources of
+	// 'failed' (pending, claimed, processing, failed) or of 'dead' (pending,
+	// failed, processing) once the retry budget decides the target. It may NOT
+	// fail a job that cannot be failed: 'completed' (the work succeeded and the
+	// result stands) and 'dead' when the target is 'failed' (already retired
+	// to the dead-letter table). This is a DELIBERATE contract change from the
+	// pre-H4 bare `WHERE id = ?`, which accepted ANY state and let
+	// POST /queue/jobs/{id}/fail mark a finished job failed and publish
+	// queue.job.failed for it. The refusal is ErrJobNotClaimable, the same
+	// sentinel Complete uses, so the HTTP surface maps it to 409 — and
 	// PersistentQueue.FailAttempt publishes NOTHING for it, exactly as the
 	// completion surface does.
 	//
-	// Args are appended in PLACEHOLDER ORDER: state, error, updated_at, id,
-	// then the optional claim token.
-	predicate := `id = ? AND state IN ('pending', 'claimed', 'processing', 'failed')`
-	args := []any{string(StateFailed), errMsg, now, jobID}
-	if claimToken != "" {
-		predicate = `id = ? AND state IN ('claimed', 'processing') AND claim_token = ?`
-		args = append(args, claimToken)
-	}
-
+	// The source-state set is FOLDED from jobTransitions (issue #134) once the
+	// target is known below — legalSources(StateFailed) vs
+	// legalSources(StateDead) — so the fail path cannot admit a state the map
+	// omits. See the jobTransitions TRUTH note for why the failed->failed
+	// self-edge and the pending->dead exhaustion edge are deliberate.
 	var retryCount, maxRetries int
 	row := tx.QueryRow(`SELECT retry_count, max_retries FROM jobs WHERE id = ?`, jobID)
 	if err := row.Scan(&retryCount, &maxRetries); err != nil {
@@ -1130,9 +1136,32 @@ func (s *Store) FailAttempt(jobID, errMsg, claimToken string) (CompletionDisposi
 	if retryCount >= maxRetries {
 		newState = StateDead
 	}
-	// failed/dead are computed AFTER the predicate is built, so the first two
-	// args must carry the resolved state rather than a pre-computed StateFailed.
-	args[0] = string(newState)
+
+	// The source-state set is FOLDED from jobTransitions (issue #134), minus
+	// the target's own self-edge. The map carries processing->processing and
+	// failed->failed because the TOKEN-LESS operator surfaces admit them
+	// (idempotent re-mark / re-fail); the token-PRESENT attempt path must NOT
+	// re-write a row already in the target state, so its predicate is the map's
+	// source set with `to` removed. That is what lets the step-2 idempotent
+	// branch (below) report CompletionIdempotent instead of a second
+	// CompletionApplied.
+	sources := legalSources(newState)
+	filtered := sources[:0]
+	for _, s := range sources {
+		if s != newState {
+			filtered = append(filtered, s)
+		}
+	}
+
+	// Args are appended in PLACEHOLDER ORDER: state, error, updated_at, id,
+	// then the optional claim token, then the folded source list.
+	predicate := `id = ?` + sourcePredicate(filtered)
+	args := []any{string(newState), errMsg, now, jobID}
+	if claimToken != "" {
+		predicate = `id = ? AND claim_token = ?` + sourcePredicate(filtered)
+		args = append(args, claimToken)
+	}
+	args = append(args, sourceArgs(filtered)...)
 
 	res, err := tx.Exec(fmt.Sprintf(`
 		UPDATE jobs SET state = ?, error = ?, updated_at = ?
@@ -1247,6 +1276,13 @@ func (s *Store) Requeue(jobID string, notBefore time.Time) error {
 		}
 	}()
 
+	// Source set folded from jobTransitions (issue #134): legalSources of
+	// 'pending' = {failed, claimed, processing}. A provider-wait requeue is a
+	// retry path, not a fresh claim, so it may reset a job from any of those.
+	args := []any{
+		notBefore.UTC().Format(time.RFC3339), now.Format(time.RFC3339), jobID,
+	}
+	args = append(args, predicateArgs(StatePending)...)
 	result, err := tx.Exec(`
 		UPDATE jobs
 		SET state = 'pending',
@@ -1260,8 +1296,7 @@ func (s *Store) Requeue(jobID string, notBefore time.Time) error {
 		    timeout_at = NULL,
 		    last_heartbeat_at = NULL,
 		    updated_at = ?
-		WHERE id = ? AND state IN ('failed', 'claimed', 'processing')`,
-		notBefore.UTC().Format(time.RFC3339), now.Format(time.RFC3339), jobID)
+		WHERE id = ?`+predicateFor(StatePending), args...)
 
 	if err != nil {
 		return fmt.Errorf("failed to requeue job: %w", err)
@@ -1336,6 +1371,12 @@ func (s *Store) Retry(jobID string) error {
 
 	nextRetryAt := now.Add(backoff)
 
+	// Source set folded from jobTransitions (issue #134): legalSources of
+	// 'pending' = {failed, claimed, processing}. Retry resets a failed/claimed
+	// job for another attempt; the budget bound above already refused an
+	// exhausted row.
+	pendingArgs := []any{nextRetryAt.Format(time.RFC3339), now.Format(time.RFC3339), jobID}
+	pendingArgs = append(pendingArgs, predicateArgs(StatePending)...)
 	result, err := tx.Exec(`
 		UPDATE jobs
 		SET state = 'pending',
@@ -1348,8 +1389,7 @@ func (s *Store) Retry(jobID string) error {
 		    timeout_at = NULL,
 		    last_heartbeat_at = NULL,
 		    updated_at = ?
-		WHERE id = ? AND state IN ('failed', 'claimed')`,
-		nextRetryAt.Format(time.RFC3339), now.Format(time.RFC3339), jobID)
+		WHERE id = ?`+predicateFor(StatePending), pendingArgs...)
 
 	if err != nil {
 		return fmt.Errorf("failed to retry job: %w", err)
@@ -1394,6 +1434,8 @@ func (s *Store) Retry(jobID string) error {
 // backward-compatible fallback, not a hole.
 func (s *Store) ResetToPending(ctx context.Context, jobID string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
+	args := []any{now, jobID}
+	args = append(args, predicateArgs(StatePending)...)
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE jobs
 		SET state = 'pending',
@@ -1405,8 +1447,7 @@ func (s *Store) ResetToPending(ctx context.Context, jobID string) error {
 		    last_heartbeat_at = NULL,
 		    claim_token = NULL,
 		    updated_at = ?
-		WHERE id = ? AND state IN ('claimed', 'processing')`,
-		now, jobID)
+		WHERE id = ?`+predicateFor(StatePending), args...)
 	if err != nil {
 		return fmt.Errorf("failed to reset job to pending: %w", err)
 	}

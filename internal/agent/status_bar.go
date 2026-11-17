@@ -161,7 +161,6 @@ func (l *AgentLoop) turnStatus() TurnStatus {
 	}
 }
 
-
 // compactToolIndex renders the COMPACT tool index for indexed schema mode:
 // one line per tool definition, "- name: description", sorted by name
 // (registry.ToLLMDefinitions already sorts). Stubbed definitions carry the

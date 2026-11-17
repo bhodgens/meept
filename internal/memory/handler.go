@@ -65,7 +65,6 @@ func NewHandlerWithSecurity(manager *Manager, msgBus *bus.MessageBus, secOrch *i
 	return h
 }
 
-
 // protectContent applies retrieval-time defense to memory content:
 //  1. Re-sanitize through InputSanitizer (if wired) to catch injection patterns
 //     that may have been stored before the pattern DB was updated.

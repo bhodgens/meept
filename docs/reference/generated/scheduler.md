@@ -16,7 +16,7 @@ Session mapping: scheduler jobs carry no conversation/session identity \(a timer
 - Variables
 - [func NotifyJobComplete\(publish func\(topic string, msg \*models.BusMessage\) int, msg \*models.BusMessage\) int](<#NotifyJobComplete>)
 - [func RegisterRPCHandlers\(server \*rpc.Server, scheduler \*Scheduler\)](<#RegisterRPCHandlers>)
-- [func RegisterTiming\(c \*cron.Cron, cfg JobConfig, job Job\) \(cron.EntryID, error\)](<#RegisterTiming>)
+- [func RegisterTiming\(c \*cron.Cron, cfg JobConfig, job Job, oneShotWindow time.Duration\) \(cron.EntryID, error\)](<#RegisterTiming>)
 - [func ValidateJobConfig\(cfg JobConfig\) error](<#ValidateJobConfig>)
 - [type AddJobParams](<#AddJobParams>)
 - [type AddJobResult](<#AddJobResult>)
@@ -173,6 +173,10 @@ Session mapping: scheduler jobs carry no conversation/session identity \(a timer
 
 	const DefaultClaimRetentionDays = 7
 
+<a name="DefaultOneShotCatchUpWindow"></a>DefaultOneShotCatchUpWindow mirrors config.DefaultOneShotWindow \(2h\). It is only a fallback: the live window always comes from the scheduler's cfg.Scheduler.OneShotWindow via effectiveOneShotWindow.
+
+	const DefaultOneShotCatchUpWindow = 2 * time.Hour
+
 <a name="DeliveryHistoryRetentionDays"></a>DeliveryHistoryRetentionDays bounds the per\-job delivery history age.
 
 	const DeliveryHistoryRetentionDays = 30
@@ -200,6 +204,10 @@ Session mapping: scheduler jobs carry no conversation/session identity \(a timer
 	    ErrTimingUnsupported = fmt.Errorf("invalid_kind")
 	)
 
+<a name="ErrOneShotBeyondHorizon"></a>ErrOneShotBeyondHorizon is returned when a TimingAt spec's due time lies further in the future than the configured one\-shot window. The wrapped message names the window \(operators needing later triggers should use cron\).
+
+	var ErrOneShotBeyondHorizon = fmt.Errorf("one_shot_beyond_horizon")
+
 <a name="NotifyJobComplete"></a>
 ## func NotifyJobComplete
 
@@ -219,9 +227,11 @@ RegisterRPCHandlers registers all scheduler RPC handlers with the server.
 <a name="RegisterTiming"></a>
 ## func RegisterTiming
 
-	func RegisterTiming(c *cron.Cron, cfg JobConfig, job Job) (cron.EntryID, error)
+	func RegisterTiming(c *cron.Cron, cfg JobConfig, job Job, oneShotWindow time.Duration) (cron.EntryID, error)
 
-RegisterTiming registers cfg's Timing spec on the given cron engine in the engine's location so cron.WithLocation DST handling applies. \`at\` specs register as a one\-shot entry that removes itself after firing exactly once.
+RegisterTiming registers cfg's Timing spec on the given cron engine in the engine's location so cron.WithLocation DST handling applies. \`at\` specs register as a one\-shot entry that removes itself after firing exactly once. oneShotWindow is the configured scheduling horizon for the at\-kind rejection; callers without a scheduler pass DefaultOneShotCatchUpWindow.
+
+This standalone form has no claim store or jobs.json writer available, so its one\-shot closure executes directly; the scheduler\-backed registerTiming \(RegisterTimingVia\) is the production path and delivers through fireOneShotOnce.
 
 <a name="ValidateJobConfig"></a>
 ## func ValidateJobConfig
@@ -321,6 +331,13 @@ DeliveryHistory is a bounded, most\-recent\-first\-kept history of delivery rece
 	type DeliveryHistory struct {
 	    Records              []ScheduleDeliveryReceipt `json:"records"`
 	    EarlierRecordsPruned bool                      `json:"earlier_records_pruned"`
+	
+	    // LastEvictedStuckIDs carries the MessageIDs of any pending/in_flight
+	    // rows evicted by the most recent Append as a last-resort count-bound
+	    // eviction (bughunt 2026-11-12 F4). The caller (recordDelivery) Warns
+	    // naming each so the lost occurrence is at least observable. Empty
+	    // when the last Append evicted only terminal rows (or nothing).
+	    LastEvictedStuckIDs []string `json:"last_evicted_stuck_ids,omitempty"`
 	}
 
 <a name="NewDeliveryHistory"></a>
@@ -337,7 +354,9 @@ NewDeliveryHistory returns an empty delivery history.
 
 Append adds a receipt and enforces the retention bounds: records older than DeliveryHistoryRetentionDays \(measured on DeliveredAt, falling back to ScheduledAt\) and records beyond the MaxDeliveryHistoryRecords most recent are dropped. Any drop sets EarlierRecordsPruned.
 
-Non\-terminal statuses \(pending/in\_flight\) are EXEMPT from the age prune \(bughunt 2026\-11\-10 B8\): recoverInFlightDeliveries re\-delivers FROM pending/in\_flight rows, so pruning a stuck receipt older than retention permanently lost the tick it represents. Age\-retention is for delivered history only; a stuck row survives until recovery resolves it. The count bound still applies \(bounded memory\), keeping newest stuck rows.
+Non\-terminal statuses \(pending/in\_flight\) are EXEMPT from the age prune \(bughunt 2026\-11\-10 B8\): recoverInFlightDeliveries re\-delivers FROM pending/in\_flight rows, so pruning a stuck receipt older than retention permanently lost the tick it represents. Age\-retention is for delivered history only; a stuck row survives until recovery resolves it.
+
+The count bound evicts TERMINAL rows \(delivered/failed\) first. A stuck row is evicted only as a last resort — when the bound still overflows with nothing terminal left — and that case is flagged so the caller can Warn naming the MessageID \(bughunt 2026\-11\-12 F4\): silently evicting a pending/in\_flight row loses the occurrence it represents.
 
 <a name="DeliveryStatus"></a>
 ## type DeliveryStatus
@@ -504,6 +523,17 @@ JobConfig is the serializable configuration for a job.
 	    // (Schedule OR Timing validation); the normalized cron string stays in
 	    // Schedule for the engine.
 	    Timing *TimingSpec `json:"timing,omitempty"`
+	
+	    // One-shot (TimingAt) lifecycle bookkeeping. Additive JSON fields:
+	    // older rows without them load unchanged and behave as today.
+	    // OneShotFailed marks a one-shot whose due time fell outside the
+	    // [scheduler] one_shot_window catch-up horizon before the daemon could
+	    // fire it — the job never ran, the row stops looking schedulable (no
+	    // cron entry), and it stays re-runnable via RunNow. OneShotFiredAt
+	    // records when a boot-recovered overdue one-shot fired, so the boot
+	    // sweep neither re-fires nor re-marks it.
+	    OneShotFailed  bool       `json:"one_shot_failed,omitempty"`
+	    OneShotFiredAt *time.Time `json:"one_shot_fired_at,omitempty"`
 	
 	    // Delivery bookkeeping (leaf 05-schedule/02-delivery-inbox). Both are
 	    // optional and only populated for jobs that deliver to a session inbox.
@@ -962,6 +992,12 @@ ScheduleDeliveryReceipt records one delivery attempt of a scheduled message to a
 	    TargetSessionID string         `json:"target_session_id"`
 	    Prompt          string         `json:"prompt,omitempty"`
 	    Status          DeliveryStatus `json:"status"`
+	
+	    // RecoveryNote is the audit trail for in-place reconciliation: when
+	    // recoverInFlightDeliveries flips a stuck row (or skips a re-delivery
+	    // because the MessageID is already delivered), the reason is recorded
+	    // here. Empty for normal dispatch-path deliveries.
+	    RecoveryNote string `json:"recovery_note,omitempty"`
 	}
 
 <a name="Scheduler"></a>

@@ -82,7 +82,6 @@ func ParseAgentText(text string) (*AgentDefinition, error) {
 	return def, nil
 }
 
-
 // splitFrontmatter splits YAML frontmatter from the markdown body.
 // The frontmatter must be delimited by --- markers.
 func splitFrontmatter(text string) (frontmatter, body string, err error) {

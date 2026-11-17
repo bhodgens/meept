@@ -57,7 +57,6 @@ func GetLocalDBPaths(dataDir string) ([]string, error) {
 	return paths, nil
 }
 
-
 // GetLocalDBPath returns a single database path for backup, preferring local.db
 // over sessions.db (legacy), with no memory.db (the primary store).
 func GetLocalDBPath(dataDir string) (string, []string, error) {

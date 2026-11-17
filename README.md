@@ -88,6 +88,19 @@ Meept ships a default catalog of 20 preconfigured MCP client servers in `config/
 #### Aggressive Memory Retention and Recall 
 
 Multi-tiered memory based on context - task, project, tool, topic, and so on. Memories can be stored and retrieved by any agent, and associated with tasks for cross-agent reference-passed communication. 
+
+#### The Session Mental Model
+
+A meept session is a durable, branchable conversation handle, not a flat transcript. Clients attach to it; the daemon owns it. Inside a session, messages form a tree with one live leaf (`LeafMessageID`); abandoned branches survive as `[Branch Summary]` entries, and compacted spans survive as `[Compacted Context]` entries. Work state - plans, plan steps, delegated child agents, parked turns, budgets, evidence - lives in backend stores keyed by session id, not in the chat context window. The model sees only an assembled path from root to leaf plus a digest of recent work.
+
+Why this beats the common alternatives:
+
+- Flat transcript in one window: work state falls out of the context window on exhaustion. Compaction entries keep the live path bounded.
+- Plan files injected into every prompt: token cost grows with plan size. Meept loads context dynamically and injects a digest.
+- Subagent output pasted into chat: parent and child contexts bleed together. Children get their own conversation id, a depth cap, and async settlement on the message bus.
+- Resume amnesia: the session row carries project id, worktree path, goal id, and employee id, so a reconnecting client knows what it was working on.
+
+Learn more: [Sessions](docs/concepts/sessions.md)
  
 ### 1. Evidence-Based Deterministic Execution
 

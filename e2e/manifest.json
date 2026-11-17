@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-15",
+  "generated": "2026-11-17",
   "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage \u2014 behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet. Flutter surface (ui/flutter_ui/**) is covered Dart-side by the gui-flows suite (gui-terminal-01, gui-session-01, gui-quota-01, gui-stream-01, gui-stream-02) against a wire-shape stub: `cd ui/flutter_ui && flutter test test/e2e`. The ui/** path_map keys below make a Flutter change select that suite; scripts/e2e-affected.sh dispatches on suites[].runner to run the Dart command instead of go test (the pre-commit-e2e Go hook does not scan Dart files, so `make e2e-affected-area AREA=gui-flows` / CI's e2e-gui job is the gate). New-package census (pre-commit-e2e): every NEW internal/|pkg/|cmd/ package dir in a commit's staged ADDITIONS must match a path_map key (bidirectional slash-boundary prefix, trailing slashes stripped) or an 'exempt' entry mapping dir -> non-empty reason string; exempt entries are printed as residual risk on every hook run.",
   "path_map": {
     "e2e/suites/smoke": [
@@ -161,9 +161,7 @@
       "context_warm"
     ],
     "internal/daemon/": [
-      "daemon-lifecycle",
-      "escalation-resume",
-      "context_warm"
+      "daemon-lifecycle"
     ],
     "internal/llm/": [
       "daemon-lifecycle",
@@ -652,20 +650,22 @@
       "tool-provider-seam"
     ],
     "internal/daemon/voice_keys.go": [
-      "voice-lifecycle",
-      "voice_clips"
+      "voice-lifecycle"
     ],
     "internal/daemon/voice_wiring.go": [
+      "context_warm",
       "voice-bargein",
       "voice-lifecycle",
-      "voice-local",
-      "voice_clips"
+      "voice-local"
     ],
     "internal/contact/": [
       "contact-chain"
     ],
     "internal/signal/": [
       "signal-sidecar"
+    ],
+    "internal/sms/": [
+      "telnyx-sms"
     ],
     "internal/telnyx/": [
       "telnyx-sms"
@@ -715,11 +715,14 @@
     "internal/employee": [
       "inter-agent-coord"
     ],
-"internal/voice/clipstore/": [
+    "internal/voice/clipstore/": [
       "voice_clips"
     ],
     "e2e/suites/voice_clips": [
       "voice_clips"
+    ],
+    "e2e/suites/context_warm": [
+      "context_warm"
     ],
     "internal/daemon/voice_clip_planner.go": [
       "voice_clips"
@@ -958,7 +961,7 @@
         "memory-scoping-02 chief-of-staff: memory_max_scope=global agent recalls the project-A fact in project B; the default (project) agent does not (F3, C3)",
         "memory-scoping-03 fail-closed cell: multiuser enabled + resolved-empty userID hides user-scope rows while global rows stay visible (Flag 3)"
       ],
-      "note": "RED gate for the memory second-brain tree leaf 00T (memory-scoping half; gates branch 01): drives plant/recall through live chat turns and asserts the C1/C2/C3 scoping behavior. Fails RED today — the Scope vocabulary, WithScopeFilter predicate, and the memory_max_scope agent declaration do not exist."
+      "note": "RED gate for the memory second-brain tree leaf 00T (memory-scoping half; gates branch 01): drives plant/recall through live chat turns and asserts the C1/C2/C3 scoping behavior. Fails RED today \u2014 the Scope vocabulary, WithScopeFilter predicate, and the memory_max_scope agent declaration do not exist."
     },
     {
       "name": "memory-layered-distill",
@@ -1417,7 +1420,7 @@
         "inter-agent-coord-04 typed inbox round-trip: send_agent_message{to, structured} -> inbox returns AgentInboxBody with Structured set; legacy raw-text body stays byte-identical (T4, F6/F7, C4)",
         "inter-agent-coord-05 structured taint scan block/allow: block-mode handoff with a structured file_path carrying a real exfiltration_directive pattern blocks with the FIELD named in the reason; clean structured handoff converges (T5, F8, C7; waits on leaf 03-02)"
       ],
-      "note": "ROOT e2e RED gate of the inter-agent-coordination tree (leaf 00T): hermetic scratch daemons, WS frame collector, live ACP subprocess via the suite's own scripted planstub, send_agent_message/inbox driven through rigged chat turns — never mocks. Compile-RED today on acp.AgentProgressUpdate (leaf 02-02); runtime-RED on the turn-state publisher (02-01), the WS relay entry (04-01), and the structured scan branch (03-02) until those leaves land. Status flips to implemented by leaf 04-01 when the suite goes GREEN."
+      "note": "ROOT e2e RED gate of the inter-agent-coordination tree (leaf 00T): hermetic scratch daemons, WS frame collector, live ACP subprocess via the suite's own scripted planstub, send_agent_message/inbox driven through rigged chat turns \u2014 never mocks. Compile-RED today on acp.AgentProgressUpdate (leaf 02-02); runtime-RED on the turn-state publisher (02-01), the WS relay entry (04-01), and the structured scan branch (03-02) until those leaves land. Status flips to implemented by leaf 04-01 when the suite goes GREEN."
     },
     {
       "status": "implemented",
@@ -3155,7 +3158,7 @@
       "id": "naive-user-chat-05",
       "suite": "naive-user-chat",
       "diff": "M",
-      "title": "reply-guard rewrite retry: a chat lane whose first completion is a raw tool-result JSON dump is recovered by one bounded rewrite nudge — the reply is the rewritten prose, never the canned apology, and the nudge reaches the model exactly once",
+      "title": "reply-guard rewrite retry: a chat lane whose first completion is a raw tool-result JSON dump is recovered by one bounded rewrite nudge \u2014 the reply is the rewritten prose, never the canned apology, and the nudge reaches the model exactly once",
       "paths": [
         "internal/agent/loop.go",
         "internal/agent/reply_guard.go"
@@ -3278,7 +3281,7 @@
       "id": "plan-lifecycle-02",
       "suite": "plan-lifecycle",
       "diff": "M",
-      "title": "approval path: dispatch-path plan parks at pending_approval; plan.approve synthesizes a task and flips the file status to executing through the atomic read-parse-write — file parses at every observation",
+      "title": "approval path: dispatch-path plan parks at pending_approval; plan.approve synthesizes a task and flips the file status to executing through the atomic read-parse-write \u2014 file parses at every observation",
       "paths": [
         "internal/plan/manager.go",
         "internal/plan/filelock.go",
@@ -3522,7 +3525,7 @@
       "id": "goal-completion-01",
       "suite": "goal-completion",
       "diff": "L",
-      "title": "declare-fulfil: tier-3 employee with a gated goal fulfils via agents.trigger — plan row goal_id stamped, gate command executes, goal health assessed (no longer unknown)",
+      "title": "declare-fulfil: tier-3 employee with a gated goal fulfils via agents.trigger \u2014 plan row goal_id stamped, gate command executes, goal health assessed (no longer unknown)",
       "paths": [
         "internal/employee/manager.go",
         "internal/employee/goal_loop.go",
@@ -3607,7 +3610,7 @@
       "id": "memory-turn-capture-02",
       "suite": "memory-turn-capture",
       "diff": "M",
-      "title": "DISPATCHED turn (multiagent task lane) regression proof: relay terminal carries the conversation id (store keys by session id) and the subscriber resolves it via GetByConversationID — task reply reaches L0 + status=auto claim",
+      "title": "DISPATCHED turn (multiagent task lane) regression proof: relay terminal carries the conversation id (store keys by session id) and the subscriber resolves it via GetByConversationID \u2014 task reply reaches L0 + status=auto claim",
       "paths": [
         "internal/daemon/memory_capture.go",
         "internal/agent/handler.go"
@@ -3805,7 +3808,7 @@
       "id": "github-pr-ci-04",
       "suite": "github-pr-ci",
       "diff": "M",
-      "title": "CI-wait park + re-arm: with check-runs always in_progress a 1s github_ci_wait parks at its deadline — the tool result carries parked=true and a non-empty wait_id, and the re-arm instruction row github_ci_wait-<waitID>.yaml is persisted under the scratch daemon's instruction tier",
+      "title": "CI-wait park + re-arm: with check-runs always in_progress a 1s github_ci_wait parks at its deadline \u2014 the tool result carries parked=true and a non-empty wait_id, and the re-arm instruction row github_ci_wait-<waitID>.yaml is persisted under the scratch daemon's instruction tier",
       "paths": [
         "internal/tools/builtin/github_ci.go",
         "internal/githubsvc/rearm.go",
@@ -5124,7 +5127,7 @@
       ]
     },
     {
-"id": "voice-clips-sidecar-gate-01",
+      "id": "voice-clips-sidecar-gate-01",
       "suite": "voice_clips",
       "diff": "S",
       "title": "[voice-clips R4] voice sidecar disabled: boot + idle leave $MEEPT_HOME/voice_clips never created (dir absent assertion)",

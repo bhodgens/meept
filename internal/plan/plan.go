@@ -74,11 +74,25 @@ type Plan struct {
 	// SynthesisLeaseUntil is when a StateSynthesizing claim expires. A claim
 	// older than this is treated as abandoned (the daemon died mid-expansion)
 	// and may be re-claimed, so one dead claim cannot strand a plan forever.
-	SynthesisLeaseUntil *time.Time       `json:"synthesis_lease_until,omitempty"`
-	SourceSession       string           `json:"source_session,omitempty"`
-	RevisionCount       int              `json:"revision_count,omitempty"`
-	Phases              []PlanPhase      `json:"phases,omitempty"`
-	PlanningContext     *PlanningContext `json:"planning_context,omitempty"`
+	SynthesisLeaseUntil *time.Time `json:"synthesis_lease_until,omitempty"`
+	// Prompt is the candidate goal prompt captured at plan-creation time
+	// (issue #148 resume-prompt-loss). The GoalLoop's Assess produces a
+	// CandidatePlan whose Prompt is the EXACT execution user message; the
+	// resume path hands ApproveAndExecute a PlanRef{ID} only, so the
+	// prompt must live on the plan record — Execute's brief lookup reads
+	// it back and a resumed execution carries the SAME prompt as a
+	// same-process approve would. Empty on legacy rows (the title/
+	// description mandate fallback stays byte-identical).
+	Prompt string `json:"prompt,omitempty"`
+	// SynthesisError records the most recent Synthesize failure for this
+	// plan (issue #148 per-goal outcome marking): an approved plan whose
+	// expansion failed carries WHY here until a re-drive succeeds (which
+	// clears it). Empty means no outstanding synthesis failure.
+	SynthesisError  string           `json:"synthesis_error,omitempty"`
+	SourceSession   string           `json:"source_session,omitempty"`
+	RevisionCount   int              `json:"revision_count,omitempty"`
+	Phases          []PlanPhase      `json:"phases,omitempty"`
+	PlanningContext *PlanningContext `json:"planning_context,omitempty"`
 }
 
 // PlanPhase represents a named phase within a plan.

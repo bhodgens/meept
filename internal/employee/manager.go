@@ -2557,13 +2557,14 @@ func (m *Manager) ApprovePlan(ctx context.Context, goalID, planID, callerID, rea
 	// The Manager does not have a session context here; pass empty
 	// sessionID and "user" as the approver (the only valid caller of
 	// this signoff path per the spec's "require_operator_resume"
-	// invariant). The reason is forwarded as the sessionID-free context.
-	_ = reason // reason is recorded by the disposer's own signoff row
+	// invariant). The reason rides the audit line below (and the
+	// disposer's own signoff row); it is no longer silently dropped.
 	if err := m.planDisposer.ApprovePlan(ctx, planID, "", callerID); err != nil {
 		return fmt.Errorf("approve plan %s: %w", planID, err)
 	}
 	// Record the active plan on the goal so the GoalLoop driver can
 	// pick it up during its next tick.
+	var employeeID string
 	if m.goalStore != nil && goalID != "" {
 		goal, err := m.goalStore.Get(ctx, goalID)
 		if err != nil {
@@ -2577,6 +2578,7 @@ func (m *Manager) ApprovePlan(ctx context.Context, goalID, planID, callerID, rea
 				"goal_id", goalID, "plan_id", planID, "error", err)
 			return nil
 		}
+		employeeID = goal.EmployeeID
 		goal.SetActivePlan(planID)
 		if err := m.goalStore.Update(ctx, goal); err != nil {
 			m.logger.Warn("approve plan: goal update failed; plan is approved but ActivePlanID not persisted",
@@ -2606,6 +2608,47 @@ func (m *Manager) ApprovePlan(ctx context.Context, goalID, planID, callerID, rea
 			"plan_id", planID)
 	}
 	m.mu.Unlock()
+
+	// Structured audit line for the approve mutation (issue #148): the
+	// unix RPC socket is owner-trusted by convention (no token auth —
+	// see docs note in the escalation-resume tree master), so this handler
+	// carries no auth middleware. What it DOES carry is a durable record
+	// of WHO approved WHAT: the daemon log line plus an AuditFinding row
+	// surfaced by `meept agents audit`, mirroring the tier-3 escalation
+	// finding pattern (goal_loop.go). Both are best-effort — the plan is
+	// already approved and must not be failed by audit-write trouble.
+	m.logger.Info("plan approval recorded",
+		"event", "agents.goals.approve",
+		"goal_id", goalID,
+		"plan_id", planID,
+		"employee_id", employeeID,
+		"approver", callerID,
+		"reason", reason,
+	)
+	m.mu.RLock()
+	auditStore := m.auditStore
+	m.mu.RUnlock()
+	// employee_id is NOT NULL (FK to bot_definitions): without a resolved
+	// owning employee there is no finding to write — the log line above
+	// already carries the approve.
+	if auditStore != nil && employeeID != "" {
+		finding := AuditFinding{
+			ID:           idpkg.Generate("audit_"),
+			EmployeeID:   employeeID,
+			GoalID:       goalID,
+			PlanID:       planID,
+			Severity:     SeverityInfo,
+			Checkpoint:   CheckpointPreExec,
+			ViolatedRule: "plan_approved",
+			Evidence: fmt.Sprintf("plan %s approved by %q for goal %s: %s",
+				planID, callerID, goalID, reason),
+			DetectedAt: time.Now().UTC(),
+		}
+		if err := auditStore.Create(ctx, finding); err != nil {
+			m.logger.Warn("approve plan: audit finding write failed (non-fatal)",
+				"plan_id", planID, "error", err)
+		}
+	}
 
 	m.logger.Info("plan approved",
 		"goal_id", goalID, "plan_id", planID)

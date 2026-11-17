@@ -56,6 +56,35 @@ These are operator decisions. A leaf that violates one is NEEDS_FIXES.
 
 ### C1: PlansConfig knobs
 
+> **AMENDMENT 2026-11-16 (C1-delta ratification, doc-only; issue #145 / audit FC-1):**
+> The as-built posture is ratified. The shipping keys are the
+> disable-form keys recorded in the 2026-11-03 delta log below:
+> `fresh_critic_disabled` / `hostile_critic_disabled` /
+> `interview_options_disabled`, all defaulting ON (absent config =
+> ENABLED; explicit disable honored). The original `*_enabled` frozen
+> keys have no effect. The inversion landed in commit 977d4044
+> (2026-11-03) and is deliberate and tested (go-live posture per operator
+> decision 2026-11-02; doc-only delta recorded 24036114).
+>
+> Explicitly ratified: for TierComplex plans with an empty
+> `hostile_critic_model` slot, the human seal IS the designed gate. The
+> hostile pass is skipped (never falls back onto the planner model),
+> `critique_outcome` stamps `hostile_skipped`, seal provenance records
+> `by=user, stage=hostile_skipped`, and the draft waits at the human seal.
+> `hostile_skipped` is expected telemetry for the default configuration,
+> NOT coverage of a review that happened. A clean self-seal still
+> requires a hostile reader distinct from the planner.
+>
+> No cheap explicit self-seal override exists for this case and none is
+> added: `plans.self_seal_enabled` (default false, ships dark) gates
+> planner-self sealing only when the hostile pass was NOT skipped
+> (plan_critique_loop.go: `sp.selfSealFlag() && !hostileSkipped`); a
+> skipped-hostile draft never self-seals regardless of that flag. The
+> human seal is the bypass-free designed gate, not a missing flag.
+> Behavior is unchanged by this amendment; this records the decision.
+> Owner default (Option A, ratification-as-documented) applied
+> 2026-11-16; veto pending.
+
 ```go
 // Owner: 01-config-knobs.md
 // Consumers: 07-daemon-wiring.md
@@ -65,6 +94,8 @@ InterviewOptionGates  bool `json:"interview_option_gates"  toml:"interview_optio
 ```
 
 All three default false. NormalizePlansDefaults does not flip them on. Absent JSON keys stay false.
+
+(Superseded by the 2026-11-03 delta log and the 2026-11-16 amendment above: the shipped keys are disable-form, default ON.)
 
 ### C2: Planner setters
 
@@ -303,19 +334,29 @@ Test leaf: 00T-plan-critic-gate.md. Dispatched in Phase 0. Files land as `.stage
 
 | # | Feature | Source | Unit tests | E2E tests | Status |
 |---|---------|--------|------------|-----------|--------|
-| F1 | Flag off keeps planner-loop critic | 02 T1 | n/a - pins live in e2e suite (no new unit file; meept e2e policy) | TestFreshCriticFlagOffDoesNotSpawnChild | PENDING |
-| F2 | Flag on child has empty history and no tools | 02 T2 | n/a - same reason | TestFreshCriticChildHasNoTranscript | PENDING |
-| F3 | Empty paraphrase is blocking | 02 T3 | n/a | TestEmptyParaphraseIsBlocking | PENDING |
-| F4 | Hostile pass skipped when model matches planner | 03 T1 | n/a | TestHostilePassSkipsSameModel | PENDING |
-| F5 | Hostile pass uses its own prompt, not verifier.go | 03 T2 | n/a | TestHostilePassDoesNotCallSpawnVerifier | PENDING |
-| F6 | Contest without evidence is not applied | 04 T1 | n/a | TestContestWithoutEvidenceNotApplied | PENDING |
-| F7 | Mutating phase without decision fails compile | 05 T1 | n/a | TestMutatingPhaseWithoutDecisionFailsCompile | PENDING |
-| F8 | Interview flag off keeps string questions | 06 T1 | n/a | TestInterviewFlagOffKeepsStringQuestions | PENDING |
-| F9 | Daemon wires flags default false | 07 T1 | n/a | TestCriticFlagsDefaultOff | PENDING |
+| F1 | Flag off keeps planner-loop critic | 02 T1 | n/a - pins live in e2e suite (no new unit file; meept e2e policy) | TestFreshCriticFlagOffDoesNotSpawnChild | VALIDATED (as-built: default-on posture per 2026-11-03 FC-1 delta; commit 977d4044; the F9 wiring test was renamed TestCriticFlagsDefaultOn -> coverage in wiring_test.go (F1's own test, TestFreshCriticFlagOffDoesNotSpawnChild, is unchanged); e2e green at 24036114 sweep) |
+| F2 | Flag on child has empty history and no tools | 02 T2 | n/a - same reason | TestFreshCriticChildHasNoTranscript | VALIDATED (dc8f051a; gate 347ba137; e2e present e2e/suites/plan-critic/fresh_critic_test.go) |
+| F3 | Empty paraphrase is blocking | 02 T3 | n/a | TestEmptyParaphraseIsBlocking | VALIDATED (dc8f051a; gate 347ba137; e2e present e2e/suites/plan-critic/fresh_critic_test.go) |
+| F4 | Hostile pass skipped when model matches planner | 03 T1 | n/a | TestHostilePassSkipsSameModel | VALIDATED (77734589; gate 347ba137; e2e present e2e/suites/plan-critic/hostile_pass_test.go) |
+| F5 | Hostile pass uses its own prompt, not verifier.go | 03 T2 | n/a | TestHostilePassDoesNotCallSpawnVerifier | VALIDATED (77734589; gate 347ba137; e2e present e2e/suites/plan-critic/hostile_pass_test.go) |
+| F6 | Contest without evidence is not applied | 04 T1 | n/a | TestContestWithoutEvidenceNotApplied | VALIDATED (53e07d22; gate 347ba137; e2e present e2e/suites/plan-critic/contest_test.go) |
+| F7 | Mutating phase without decision fails compile | 05 T1 | n/a | TestMutatingPhaseWithoutDecisionFailsCompile | VALIDATED (2a2df9d8; gate 347ba137; e2e present e2e/suites/plan-critic/zero_decision_test.go) |
+| F8 | Interview flag off keeps string questions | 06 T1 | n/a | TestInterviewFlagOffKeepsStringQuestions | VALIDATED (238b53c4; gate 347ba137; e2e present e2e/suites/plan-critic/interview_gates_test.go) |
+| F9 | Daemon wires flags default off | 07 T1 | n/a | TestCriticFlagsDefaultOff (renamed TestCriticFlagsDefaultOn at 977d4044) | VALIDATED as-built, INVERTED posture: flags default ON (disable-form keys) per 2026-11-03 FC-1 delta + 2026-11-16 C1 amendment; wiring 2d2a8dcb; inverted 977d4044; e2e wiring_test.go (TestCriticFlagsDefaultOn, TestCriticFlagsExplicitDisable) |
 
 Statuses: PENDING | DELTA | VALIDATED
 
 Delta log:
+
+- 2026-11-16 (C1 amendment, doc-only; issue #145 / audit FC-1):
+  C1 annotated with a dated ratification amendment. The as-built
+  default-ON disable-form critic posture (977d4044) is ratified; for
+  TierComplex plans with empty hostile_critic_model the human seal is
+  the designed gate and hostile_skipped is expected telemetry, not
+  coverage. F1-F9 rows reconciled PENDING -> VALIDATED with evidence
+  SHAs. No code or behavior change. FC-1 DISPOSITIONED in findings.md:
+  Option A ratification-as-documented, owner default applied, veto
+  pending.
 
 - 2026-11-03 (FC-1 addendum): commit 977d4044 records the C1 delta — the
   critic feature flags shipped INVERTED to disable-form, per operator

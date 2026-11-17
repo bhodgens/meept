@@ -40,10 +40,6 @@ type ComponentRegistry struct {
 // ComponentRegistryOption configures a ComponentRegistry.
 type ComponentRegistryOption func(*ComponentRegistry)
 
-
-
-
-
 // NewDefaultComponentRegistry scans the standard 3-tier prompts hierarchy
 // plus an optional bundled path. This is the constructor most callers want.
 func NewDefaultComponentRegistry(bundledPath string, logger *slog.Logger) *ComponentRegistry {

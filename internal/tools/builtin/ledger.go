@@ -246,7 +246,9 @@ func (t *LedgerAppendTool) Execute(ctx context.Context, args map[string]any) (an
 	// non-empty set_status refuses the WHOLE call — nothing is written,
 	// the model is told to re-append without set_status so the note still
 	// records. Provenance of the refused attempt is this WARN only.
-	if caller, hasCaller := callerid.From(ctx); hasCaller && !caller.Approved && setStatus != "" {
+	caller, hasCaller := callerid.From(ctx)
+	unapproved := hasCaller && !caller.Approved
+	if unapproved && setStatus != "" {
 		t.logger.Warn("ledger_append refused set_status from unapproved voice caller",
 			"employee_id", employeeID,
 			"caller_known", caller.Known,
@@ -254,6 +256,37 @@ func (t *LedgerAppendTool) Execute(ctx context.Context, args map[string]any) (an
 			"set_status", setStatus,
 		)
 		return tools.NewErrorResult("ledger_append: caller is not approved to change subject state; drop set_status/summary and re-append — message recorded instead, subject state not changed"), nil
+	}
+	// Issue #149 (O4 residual, master Q1): an UNAPPROVED caller may not
+	// file on the work-opening kinds (commitment / resolution) either —
+	// a commitment opens obligations and a resolution closes someone's
+	// commitment; both are work assignment, not message-taking. The
+	// stranger lane is narrowed to the message/observation kinds
+	// (committal, observation, action — a note of what happened on the
+	// interaction). This mirrors the set_status refusal shape: the WHOLE
+	// call refuses, nothing is written, the model is told to re-append as
+	// an observation. Provenance of the refused attempt is this WARN.
+	if unapproved && (kindStr == string(ledger.KindCommitment) || kindStr == string(ledger.KindResolution)) {
+		t.logger.Warn("ledger_append refused work-kind from unapproved voice caller",
+			"employee_id", employeeID,
+			"caller_known", caller.Known,
+			"subject", subject,
+			"kind", kindStr,
+		)
+		return tools.NewErrorResult("ledger_append: caller is not approved to file commitments or resolutions; re-append as an observation — the note records, no obligation is opened or closed"), nil
+	}
+	// Issue #149 (O4 residual): an UNAPPROVED caller may not carry
+	// resolves_id — closing a record by reference is the resolution lane
+	// in another guise. Refused with the same shape (whole call, zero
+	// rows, WARN provenance).
+	if unapproved && hasResolves {
+		t.logger.Warn("ledger_append refused resolves_id from unapproved voice caller",
+			"employee_id", employeeID,
+			"caller_known", caller.Known,
+			"subject", subject,
+			"resolves_id", resolves,
+		)
+		return tools.NewErrorResult("ledger_append: caller is not approved to close ledger records; drop resolves_id and re-append as an observation — the note records, no record is closed"), nil
 	}
 
 	// Frozen pairing rule: the two travel together or not at all.

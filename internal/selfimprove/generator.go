@@ -126,7 +126,6 @@ func (g *PatchGenerator) Generate(ctx context.Context, analysis *RootCauseAnalys
 	return g.parseGenerationResponse(analysis.IssueID, resp.Content)
 }
 
-
 // readAffectedFiles reads content from affected files.
 func (g *PatchGenerator) readAffectedFiles(files []string) string {
 	var sb strings.Builder

@@ -465,6 +465,16 @@ class KanbanBoardEvent {
     return v is String && v.isNotEmpty ? v : null;
   }
 
+  /// The from-state of the transition (StateEvent.json:"from"), when
+  /// present. Tolerate absence: the relay is forward-only so a frame
+  /// missing the key is tolerated, not an error.
+  String? get fromState {
+    final d = data;
+    final v = d['from'] ?? d['from_state'];
+    return v is String && v.isNotEmpty ? v : null;
+  }
+
   @override
-  String toString() => 'KanbanBoardEvent($wireType, board=$boardId)';
+  String toString() =>
+      'KanbanBoardEvent($wireType, board=$boardId, from=$fromState)';
 }

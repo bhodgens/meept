@@ -182,6 +182,20 @@ Do NOT commit (leaves).
 
 - Q1: Should ledger_append for unapproved callers be narrowed to committal-
       only via a payload-kind check in step 1c? Deferred (O4).
+      RESOLVED 2026-11-16 (issue #149, commit 44f0e14c): unapproved callers are
+      now refused on the work-opening kinds (commitment, resolution) and on
+      resolves_id, with WARN provenance and zero rows written; the stranger lane
+      keeps the message/observation kinds. set_status refusal unchanged.
 - Q2: Signal-leg callers — same stamp path? (Instance.Caller is leg-neutral;
       wire signal leg resolution as a fast-follow in the same file if the
       stamp site is shared.)
+      OUT OF SCOPE 2026-11-16 (issue #149): the signal path carries no
+      caller-resolution seam — internal/daemon/signal_wiring.go has zero
+      callerid references, and RegisterMessages/RouteInbound are never wired
+      to any stamping site. Mirroring 00a0071b would require building contact
+      resolution into the signal leg (new plumbing, not a fast-follow).
+      Signal-leg inbound callers therefore run unauthenticated-by-design
+      (no caller in ctx -> step 1c inert, byte-identical non-voice posture).
+      Follow-up if the signal leg ever fronts human-facing state changes:
+      resolve the sender against contacts.db and stamp callerid.Info, then
+      file a new issue referencing this note.

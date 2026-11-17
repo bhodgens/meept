@@ -147,15 +147,19 @@ const linkWatchdogReason = "floor_watchdog"
 const linkReasonDrained = "drained"
 
 // ---------------------------------------------------------------------------
-// Backchannel soften (#130) — A/B toggle, default OFF.
+// Backchannel soften (#130) — A/B toggle, default OFF; per-employee
+// rows (#143) — each link side resolves its own voice.employee_leg row.
 //
 // The toggle resolves config-side (voice.backchannel_soften global +
 // voice.employee_leg row, internal/voice/profile.go
-// BackchannelSoftenFor — sibling leaf 01's schema) and the daemon link
-// adapter (internal/daemon/voice_link_rpc.go) passes the GLOBAL value
-// into LinkDeps.BackchannelSoften at manager construction.
-// When ON the coordinator's release TIMING softens so a short parked
-// backchannel ("Sure.", "mm-hm") never flushes into a peer tail:
+// BackchannelSoftenFor — sibling leaf 01's schema). The daemon link
+// adapter (internal/daemon/voice_link_rpc.go) passes a PER-EMPLOYEE
+// resolver closure into LinkDeps.BackchannelSoftenFor (#143); LinkManager
+// .Open resolves each side against its employee id. A nil resolver (or
+// agreeing / absent rows) falls back to the single GLOBAL
+// LinkDeps.BackchannelSoften bool — byte-identical to the pre-#143
+// shape. When ON the coordinator's release TIMING softens so a short
+// parked backchannel ("Sure.", "mm-hm") never flushes into a peer tail:
 //   - tail pad linkFloorTailPad (250 ms) -> softFloorTailPad (700 ms);
 //   - fallback margin linkFloorFallbackDefault (12 s) ->
 //     softFloorFallbackMargin (15 s) — ONLY when the margin still
@@ -333,6 +337,29 @@ type LinkTurnCoordinator struct {
 	soften      bool
 	softenSide  string
 	softenTimer *time.Timer
+
+	// Per-side soften (#143): softenA/softenB carry each side's OWN
+	// employee-row value (voice.employee_leg backchannel_soften >
+	// global), resolved at LinkManager.Open through
+	// LinkDeps.BackchannelSoftenFor. Uniform flags (a == b — every
+	// global-only shape, including a nil resolver) delegate to
+	// SetBackchannelSoften so the global path stays byte-identical.
+	// DIVERGENT flags (softenPerSide) keep the coordinator-level
+	// pad/margin at the configured (hard) values and apply the soft
+	// values PER RELEASE at arm time (padForLocked /
+	// marginForLocked). PEER-SIDE SEMANTICS: the softened park always
+	// belongs to the PEER of the current floor holder (a released
+	// holder flushes the peer's park), so every soften consult — the
+	// short-park defer gate AND the holder's release-timing softening
+	// (a longer pad/margin delays exactly the peer's flush) — keys on
+	// the PEER side's row value: each side's backchannel behaves per
+	// its OWN employee row at the release points (the opposite
+	// employee holding the floor), which is the issue's "each side's
+	// coordinator behavior keyed on the opposite employee's row
+	// value" seam read from the parked side.
+	softenPerSide bool
+	softenA       bool
+	softenB       bool
 }
 
 func NewLinkTurnCoordinator(linkID string, fallbackMargin time.Duration, logger *slog.Logger) *LinkTurnCoordinator {
@@ -373,6 +400,75 @@ func (c *LinkTurnCoordinator) SetBackchannelSoften(on bool) {
 	if c.margin == linkFloorFallbackDefault {
 		c.margin = softFloorFallbackMargin
 	}
+}
+
+// SetBackchannelSoftenSides arms the #143 per-employee soften (one
+// resolved row value per link side). UNIFORM flags (a == b — the global
+// value, no rows, or both rows agreeing) delegate to SetBackchannelSoften
+// unchanged, so the global path stays byte-identical (the pad/margin
+// swap happens once at arm time exactly as today). DIVERGENT flags keep
+// the coordinator-level pad/margin at their configured values and apply
+// the soft values PER ARM through padForLocked / marginForLocked, keyed
+// on the PEER side's row (the parked backchannel belongs to the peer;
+// see the softenA/softenB field comment).
+func (c *LinkTurnCoordinator) SetBackchannelSoftenSides(a, b bool) {
+	if a == b {
+		c.SetBackchannelSoften(a)
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.softenPerSide = true
+	c.softenA = a
+	c.softenB = b
+}
+
+// softenForSideLocked reports whether the parked side's backchannel
+// flush softens at release points. Uniform/global mode reads c.soften
+// exactly as today; divergent per-side mode reads the parked side's own
+// resolved row value. Callers hold c.mu.
+func (c *LinkTurnCoordinator) softenForSideLocked(side string) bool {
+	if c.softenPerSide {
+		return c.sideSoftenLocked(side)
+	}
+	return c.soften
+}
+
+// sideSoftenLocked reads one side's per-side row value (zero in the
+// uniform/global shape — every divergent-mode consult goes through
+// softenForSideLocked's softenPerSide gate). Callers hold c.mu.
+func (c *LinkTurnCoordinator) sideSoftenLocked(side string) bool {
+	if side == LinkSideA {
+		return c.softenA
+	}
+	return c.softenB
+}
+
+// padForLocked is the tail pad for a release of the HOLDER side: in the
+// divergent per-side shape the pad's job is to delay the PEER's flush
+// (the parked backchannel), so the soft pad applies when the peer's row
+// softens AND the pad still carries the production default (an
+// explicitly tuned pad — a test seam — wins, mirroring SetBackchannel-
+// Soften's TurnMargin rule). Uniform/global mode returns c.pad
+// byte-identically (the swap already happened at arm time). Callers
+// hold c.mu.
+func (c *LinkTurnCoordinator) padForLocked(side string) time.Duration {
+	if c.softenPerSide && c.pad == linkFloorTailPad &&
+		c.softenForSideLocked(c.peerID(side)) {
+		return softFloorTailPad
+	}
+	return c.pad
+}
+
+// marginForLocked is the fallback margin for a release of the HOLDER
+// side — the same peer-keyed, default-only rule as padForLocked.
+// Callers hold c.mu.
+func (c *LinkTurnCoordinator) marginForLocked(side string) time.Duration {
+	if c.softenPerSide && c.margin == linkFloorFallbackDefault &&
+		c.softenForSideLocked(c.peerID(side)) {
+		return softFloorFallbackMargin
+	}
+	return c.margin
 }
 
 // parkedPromptIsShort reports whether the side's loop currently holds a
@@ -797,8 +893,12 @@ func (c *LinkTurnCoordinator) TurnStateFor(side string) func(ccid string, seq ui
 				// drain signal never firing. The fire is audio-aware
 				// (marginFire): it rearms once while the outbound
 				// stream is still active, so a long audio tail can no
-				// longer be cut by a text-side timer.
-				st.marginTimer = time.AfterFunc(c.margin, func() {
+				// longer be cut by a text-side timer. #143: in the
+				// divergent per-side shape the margin is the PEER-
+				// keyed soft value (the margin fire releases the peer's
+				// park); uniform/global mode returns c.pad/c.margin
+				// exactly as set at arm time.
+				st.marginTimer = time.AfterFunc(c.marginForLocked(side), func() {
 					c.marginFire(side, gen)
 				})
 			}
@@ -893,12 +993,13 @@ func (c *LinkTurnCoordinator) NoteAudioDrained(ccid string) {
 	}
 	gen := match.releaseGen + 1
 	match.releaseGen = gen
-	match.releaseTimer = time.AfterFunc(c.pad, func() {
+	pad := c.padForLocked(side)
+	match.releaseTimer = time.AfterFunc(pad, func() {
 		c.releaseFloor(side, ccid, seq, gen, linkReasonDrained)
 	})
 	c.mu.Unlock()
 	c.log.Info("voice: link turn: drain noted", "side", side,
-		"kind", "floor_drain_noted", "ccid", ccid, "seq", seq, "pad_ms", c.pad.Milliseconds())
+		"kind", "floor_drain_noted", "ccid", ccid, "seq", seq, "pad_ms", pad.Milliseconds())
 }
 
 // marginFire is the holder's fallback-margin fire (armed at the
@@ -927,14 +1028,15 @@ func (c *LinkTurnCoordinator) marginFire(side string, gen uint64) {
 	}
 	ccid, seq := st.marginCcid, st.marginSeq
 	releaseGen := st.releaseGen // drained-arm identity for the funnel check
+	margin := c.marginForLocked(side)
 	c.mu.Unlock()
 
-	if sp := LocalSpliceFor(ccid); sp.TailActive(c.margin) {
+	if sp := LocalSpliceFor(ccid); sp.TailActive(margin) {
 		c.mu.Lock()
 		st := c.sideLocked(side)
 		armed := false
 		if st.marginGen == gen && c.holder == side && !st.busy && st.floorHeld && !c.closed {
-			st.marginTimer = time.AfterFunc(c.margin, func() {
+			st.marginTimer = time.AfterFunc(margin, func() {
 				c.marginFireRearmed(side, gen)
 			})
 			armed = true
@@ -1037,19 +1139,22 @@ func (c *LinkTurnCoordinator) releaseFloor(side, ccid string, seq, gen uint64, r
 		st.releaseGen++ // this arm is consumed; the watchdog owns the floor until a live edge supersedes it
 		watchGen := st.releaseGen
 		watchCcid := st.ccid
-		st.releaseTimer = time.AfterFunc(c.margin, func() {
+		watchdogMargin := c.marginForLocked(side)
+		st.releaseTimer = time.AfterFunc(watchdogMargin, func() {
 			c.releaseFloor(side, watchCcid, seq, watchGen, linkWatchdogReason)
 		})
 		chainCcid, chainSeq := st.ccid, st.seq
-		// Backchannel soften (#130): a chain-defer is a deferral of the
-		// peer flush too — with soften ON and a SHORT parked prompt,
-		// start the bounded softenMaxDefer force-flush HERE so the
-		// never-die bound counts from the FIRST deferral, not only from
-		// this branch's own watchdog fire. A pending deferral for the
+		peerSideForChain := c.peerID(side)
+		// Backchannel soften (#130/#143): a chain-defer is a deferral of the
+		// peer flush too — with the parked PEER side's soften active (global
+		// toggle, or that side's own row in per-side mode) and a SHORT
+		// parked prompt, start the bounded softenMaxDefer force-flush HERE
+		// so the never-die bound counts from the FIRST deferral, not only
+		// from this branch's own watchdog fire. A pending deferral for the
 		// same side keeps its original deadline (no starvation-by-
 		// extension across a long chain).
-		if c.soften && parkedPromptIsShort(c.peerLocked(side).loop) {
-			c.armSoftenedFlushLocked(c.peerID(side), reason)
+		if c.softenForSideLocked(peerSideForChain) && parkedPromptIsShort(c.peerLocked(side).loop) {
+			c.armSoftenedFlushLocked(peerSideForChain, reason)
 		}
 		// Telemetry ring (bughunt 2026-11-11 C-14): same kind string
 		// as the log line below.
@@ -1057,7 +1162,7 @@ func (c *LinkTurnCoordinator) releaseFloor(side, ccid string, seq, gen uint64, r
 		c.mu.Unlock()
 		c.log.Info("voice: link turn: release deferred (holder chained, watchdog armed)", "side", side,
 			"kind", "floor_release_deferred", "reason", reason, "ccid", chainCcid, "seq", chainSeq,
-			"watchdog_ms", c.margin.Milliseconds())
+			"watchdog_ms", watchdogMargin.Milliseconds())
 		return
 	}
 	watchdog := reason == linkWatchdogReason && st.releaseGen == gen
@@ -1096,18 +1201,20 @@ func (c *LinkTurnCoordinator) releaseFloor(side, ccid string, seq, gen uint64, r
 	if reason == linkWatchdogReason {
 		releaseKind = linkWatchdogReason
 	}
-	// BACKCHANNEL SOFTEN (#130): a release whose reason is NOT the
+	// BACKCHANNEL SOFTEN (#130/#143): a release whose reason is NOT the
 	// played-drain edge (fallback margin, deferred-chain watchdog — the
 	// only two non-drained reasons that can reach this point; a
 	// reDispatched drained edge defers earlier in the funnel) leaves
 	// the holder's reply-chain audio TRUTH unproven: its tail may still
-	// be pacing or a subturn may follow. With soften ON and a SHORT
-	// (<= backchannelMaxWords words) parked prompt on the peer, the
-	// flush is deferred: the park rides the holder's next drained
-	// release, or the bounded softenMaxDefer force-flush (never a
-	// drop). A full question flushes on ANY release exactly as today;
-	// soften OFF is byte-identical (the branch is skipped entirely).
-	softenDefer := c.soften && stillCurrent && reason != linkReasonDrained && parkedPromptIsShort(peerLoop)
+	// be pacing or a subturn may follow. With the parked PEER side's
+	// soften active (the global toggle, or that side's own row under
+	// #143 per-side flags) and a SHORT (<= backchannelMaxWords words)
+	// parked prompt on the peer, the flush is deferred: the park rides
+	// the holder's next drained release, or the bounded softenMaxDefer
+	// force-flush (never a drop). A full question flushes on ANY
+	// release exactly as today; soften inactive for the peer is byte-
+	// identical (the branch is skipped entirely).
+	softenDefer := c.softenForSideLocked(peerSide) && stillCurrent && reason != linkReasonDrained && parkedPromptIsShort(peerLoop)
 	if softenDefer {
 		c.armSoftenedFlushLocked(peerSide, reason)
 	} else if stillCurrent {
@@ -1338,9 +1445,21 @@ type LinkDeps struct {
 	// fallback margin 12 s -> 15 s when still the defaults, short-park
 	// defer) — NEVER a drop; see SetBackchannelSoften. The daemon
 	// adapter passes voice.BackchannelSoftenFor(cfg, "") — the
-	// resolved global toggle (row > global, leaf 01's schema).
+	// resolved global toggle — only when BackchannelSoftenFor (below)
+	// is nil; with a resolver set the per-side rows win and this bool
+	// is unused (a link spans two employees, so the row tri-state
+	// resolves per side at Open — #143).
 	BackchannelSoften bool
-	Logger            *slog.Logger
+	// BackchannelSoftenFor is the #143 per-employee resolver: called
+	// once per side at Open with that side's employee id (the same
+	// voice.employee_leg row > global resolution the non-link legs use,
+	// voice.BackchannelSoftenFor). Nil = the global BackchannelSoften
+	// bool for both sides (byte-identical pre-#143 shape). When set,
+	// uniform resolutions (both sides equal — no rows, or agreeing
+	// rows) take the exact global path; only DIVERGENT rows engage the
+	// per-side coordinator flags (SetBackchannelSoftenSides).
+	BackchannelSoftenFor func(employeeID string) bool
+	Logger               *slog.Logger
 }
 
 // LinkSide is one side's live status: routing ids plus turn counts read
@@ -1662,10 +1781,21 @@ func (m *LinkManager) Open(ctx context.Context, employeeA, employeeB string, opt
 	aTarget := "local:link-a-" + suffix
 	bTarget := "local:link-b-" + suffix
 	coord := NewLinkTurnCoordinator(linkID, m.turnMargin, m.log)
-	// Backchannel soften (#130): apply the toggle before registering so
-	// the very first edges ride the soft pad/margin/flush rule.
-	// Default false = today's coordinator, byte-identical.
-	coord.SetBackchannelSoften(m.deps.BackchannelSoften)
+	// Backchannel soften (#130/#143): apply the toggle before
+	// registering so the very first edges ride the soft pad/margin/flush
+	// rule. With the per-employee resolver (#143) each side's row
+	// (voice.employee_leg backchannel_soften > global) resolves against
+	// that side's employee id; uniform resolutions (including a nil
+	// resolver or no rows) take the exact global SetBackchannelSoften
+	// path — byte-identical. Only divergent rows engage the per-side
+	// coordinator flags. Default false = today's coordinator.
+	if m.deps.BackchannelSoftenFor != nil {
+		softenA := m.deps.BackchannelSoftenFor(employeeA)
+		softenB := m.deps.BackchannelSoftenFor(employeeB)
+		coord.SetBackchannelSoftenSides(softenA, softenB)
+	} else {
+		coord.SetBackchannelSoften(m.deps.BackchannelSoften)
+	}
 	m.turns.Register(aTarget, linkID, LinkSideA, coord)
 	m.turns.Register(bTarget, linkID, LinkSideB, coord)
 

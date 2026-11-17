@@ -82,6 +82,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
 - [func ListScratchRigRunDirs\(\) \[\]string](<#ListScratchRigRunDirs>)
 - [func LogAliasAudit\(logger \*slog.Logger, findings \[\]AliasFinding\)](<#LogAliasAudit>)
 - [func NewMetricsStoreForPacing\(dbPath string\) \(\*metrics.Store, error\)](<#NewMetricsStoreForPacing>)
+- [func NoCacheOf\(opts \[\]ChatOption\) bool](<#NoCacheOf>)
 - [func ParseCommandScore\(answer string\) \(float64, error\)](<#ParseCommandScore>)
 - [func ParsePIDFile\(path string\) \(int, error\)](<#ParsePIDFile>)
 - [func ParseRetryAfter\(header http.Header\) \(date time.Time, delta time.Duration, present bool\)](<#ParseRetryAfter>)
@@ -133,6 +134,8 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func NewAdaptivePacer\(store \*metrics.Store, cfg PacingConfig\) \*AdaptivePacer](<#NewAdaptivePacer>)
   - [func \(p \*AdaptivePacer\) Observe\(v PolicyVerdict, providerID string\)](<#AdaptivePacer.Observe>)
   - [func \(p \*AdaptivePacer\) Wait\(ctx context.Context, providerID string\) error](<#AdaptivePacer.Wait>)
+- [type AdvisoryPublisher](<#AdvisoryPublisher>)
+- [type AdvisoryVerdict](<#AdvisoryVerdict>)
 - [type AffinityConfig](<#AffinityConfig>)
 - [type AgentModelRef](<#AgentModelRef>)
 - [type AgentReasoningConfig](<#AgentReasoningConfig>)
@@ -153,6 +156,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func \(c \*AnthropicClient\) SetQuotaMaxWait\(d time.Duration\)](<#AnthropicClient.SetQuotaMaxWait>)
   - [func \(c \*AnthropicClient\) SetSessionAffinityConfig\(cfg \*AffinityConfig\)](<#AnthropicClient.SetSessionAffinityConfig>)
   - [func \(c \*AnthropicClient\) SetUsageStore\(store \*appmetrics.Store\)](<#AnthropicClient.SetUsageStore>)
+  - [func \(c \*AnthropicClient\) Warm\(\_ context.Context, \_ \[\]ChatMessage, \_ ...ChatOption\) error](<#AnthropicClient.Warm>)
 - [type AnthropicClientOption](<#AnthropicClientOption>)
   - [func WithAnthropicBudget\(budget \*Budget\) AnthropicClientOption](<#WithAnthropicBudget>)
   - [func WithAnthropicLogger\(logger \*slog.Logger\) AnthropicClientOption](<#WithAnthropicLogger>)
@@ -169,10 +173,12 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func \(p BackoffPlan\) ShouldGiveUp\(now time.Time\) bool](<#BackoffPlan.ShouldGiveUp>)
 - [type Budget](<#Budget>)
   - [func NewBudget\(cfg BudgetConfig, logger \*slog.Logger\) \*Budget](<#NewBudget>)
+  - [func \(b \*Budget\) Advisory\(\) AdvisoryVerdict](<#Budget.Advisory>)
   - [func \(b \*Budget\) CheckBudget\(\) BudgetCheckResult](<#Budget.CheckBudget>)
   - [func \(b \*Budget\) CheckBudgetWithScope\(taskID, sessionID string\) BudgetCheckResult](<#Budget.CheckBudgetWithScope>)
   - [func \(b \*Budget\) CleanupStaleEntries\(ttl time.Duration\)](<#Budget.CleanupStaleEntries>)
   - [func \(b \*Budget\) GetStatus\(\) Status](<#Budget.GetStatus>)
+  - [func \(b \*Budget\) Mode\(\) BudgetMode](<#Budget.Mode>)
   - [func \(b \*Budget\) RecordCost\(r CostRecord\)](<#Budget.RecordCost>)
   - [func \(b \*Budget\) RecordCostWithScope\(r CostRecord, taskID, sessionID string\)](<#Budget.RecordCostWithScope>)
   - [func \(b \*Budget\) RecordSessionUsage\(sessionID string, tokens int\)](<#Budget.RecordSessionUsage>)
@@ -184,8 +190,10 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func \(b \*Budget\) RemoveSessionCost\(\_ context.Context, sessionID string\)](<#Budget.RemoveSessionCost>)
   - [func \(b \*Budget\) RemoveTask\(\_ context.Context, taskID string\)](<#Budget.RemoveTask>)
   - [func \(b \*Budget\) RemoveTaskCost\(\_ context.Context, taskID string\)](<#Budget.RemoveTaskCost>)
+  - [func \(b \*Budget\) SetAdvisoryPublisher\(p AdvisoryPublisher\)](<#Budget.SetAdvisoryPublisher>)
   - [func \(b \*Budget\) StartPeriodicCleanup\(ttl time.Duration, freq time.Duration\) chan struct\{\}](<#Budget.StartPeriodicCleanup>)
   - [func \(b \*Budget\) WaitForRateLimit\(ctx context.Context\) error](<#Budget.WaitForRateLimit>)
+- [type BudgetAdvisorySignal](<#BudgetAdvisorySignal>)
 - [type BudgetCheckResult](<#BudgetCheckResult>)
 - [type BudgetConfig](<#BudgetConfig>)
 - [type BudgetExceededError](<#BudgetExceededError>)
@@ -194,6 +202,8 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func \(e \*BudgetExceededError\) UserMessage\(\) string](<#BudgetExceededError.UserMessage>)
 - [type BudgetLimit](<#BudgetLimit>)
   - [func \(r BudgetLimit\) Message\(used, limit float64\) string](<#BudgetLimit.Message>)
+- [type BudgetMode](<#BudgetMode>)
+  - [func ParseBudgetMode\(s string\) BudgetMode](<#ParseBudgetMode>)
 - [type BudgetStatusSnapshot](<#BudgetStatusSnapshot>)
   - [func LegacyTupleBudgetSnapshot\(hourlyUsed, hourlyRemaining, dailyUsed, dailyRemaining, rpmCurrent, rpmLimit int, dailyCostUsed, dailyCostLimit, hourlyCostUsed, hourlyCostLimit, perTaskCost, perSessionCost float64, perTaskBudget, perSessionBudget int, hourlyTokenLimit, dailyTokenLimit int\) BudgetStatusSnapshot](<#LegacyTupleBudgetSnapshot>)
   - [func SnapshotFromStatus\(s Status\) BudgetStatusSnapshot](<#SnapshotFromStatus>)
@@ -228,6 +238,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func WithGrammar\(mode string\) ChatOption](<#WithGrammar>)
   - [func WithMaxTokens\(tokens int\) ChatOption](<#WithMaxTokens>)
   - [func WithModelOverride\(mc \*ModelConfig\) ChatOption](<#WithModelOverride>)
+  - [func WithNoCache\(\) ChatOption](<#WithNoCache>)
   - [func WithPresencePenalty\(p float64\) ChatOption](<#WithPresencePenalty>)
   - [func WithPriority\(interactive bool\) ChatOption](<#WithPriority>)
   - [func WithRawGrammar\(grammar string\) ChatOption](<#WithRawGrammar>)
@@ -264,6 +275,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func \(c \*Client\) SetSessionAffinityConfig\(cfg \*AffinityConfig\)](<#Client.SetSessionAffinityConfig>)
   - [func \(c \*Client\) SetUsageStore\(store \*appmetrics.Store\)](<#Client.SetUsageStore>)
   - [func \(c \*Client\) SwitchModel\(config \*ModelConfig\) error](<#Client.SwitchModel>)
+  - [func \(c \*Client\) Warm\(ctx context.Context, messages \[\]ChatMessage, opts ...ChatOption\) error](<#Client.Warm>)
 - [type ClientError](<#ClientError>)
   - [func \(e \*ClientError\) Error\(\) string](<#ClientError.Error>)
   - [func \(e \*ClientError\) Unwrap\(\) error](<#ClientError.Unwrap>)
@@ -292,6 +304,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func \(c \*CodexClient\) Config\(\) \*ModelConfig](<#CodexClient.Config>)
   - [func \(c \*CodexClient\) SetLLMCallObserver\(fn func\(appmetrics.LLMCallRecord\)\)](<#CodexClient.SetLLMCallObserver>)
   - [func \(c \*CodexClient\) SetUsageStore\(store \*appmetrics.Store\)](<#CodexClient.SetUsageStore>)
+  - [func \(c \*CodexClient\) Warm\(\_ context.Context, \_ \[\]ChatMessage, \_ ...ChatOption\) error](<#CodexClient.Warm>)
 - [type CodexClientOption](<#CodexClientOption>)
   - [func WithCodexBudget\(b \*Budget\) CodexClientOption](<#WithCodexBudget>)
   - [func WithCodexLogger\(l \*slog.Logger\) CodexClientOption](<#WithCodexLogger>)
@@ -346,6 +359,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func \(f \*ContextFirewall\) SetCompactor\(compactor \*ContextCompactor, triggerRatio ...float64\)](<#ContextFirewall.SetCompactor>)
   - [func \(f \*ContextFirewall\) Stats\(\) FirewallStats](<#ContextFirewall.Stats>)
   - [func \(f \*ContextFirewall\) ValidateContextSize\(messages \[\]ChatMessage\) error](<#ContextFirewall.ValidateContextSize>)
+  - [func \(f \*ContextFirewall\) Warm\(ctx context.Context, messages \[\]ChatMessage, opts ...ChatOption\) error](<#ContextFirewall.Warm>)
 - [type ContextFirewallConfig](<#ContextFirewallConfig>)
 - [type ContextOverflowError](<#ContextOverflowError>)
   - [func AsContextOverflowError\(err error\) \(\*ContextOverflowError, bool\)](<#AsContextOverflowError>)
@@ -465,6 +479,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
 - [type ModelConfig](<#ModelConfig>)
   - [func GetAllModels\(cfg \*ProvidersConfig\) \[\]\*ModelConfig](<#GetAllModels>)
   - [func ResolveModelRef\(ref string, cfg \*ProvidersConfig\) \*ModelConfig](<#ResolveModelRef>)
+  - [func ResolvedModelOf\(opts \[\]ChatOption\) \*ModelConfig](<#ResolvedModelOf>)
   - [func \(m \*ModelConfig\) GenerationTransport\(\) string](<#ModelConfig.GenerationTransport>)
   - [func \(m \*ModelConfig\) HasCapabilities\(caps \[\]string\) bool](<#ModelConfig.HasCapabilities>)
   - [func \(m \*ModelConfig\) HasCapability\(capability string\) bool](<#ModelConfig.HasCapability>)
@@ -569,6 +584,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func \(pm \*ProviderManager\) SetUsageStore\(store \*appmetrics.Store\)](<#ProviderManager.SetUsageStore>)
   - [func \(pm \*ProviderManager\) StartHealthChecks\(ctx context.Context\)](<#ProviderManager.StartHealthChecks>)
   - [func \(pm \*ProviderManager\) Stop\(\)](<#ProviderManager.Stop>)
+  - [func \(pm \*ProviderManager\) Warm\(ctx context.Context, messages \[\]ChatMessage, opts ...ChatOption\) error](<#ProviderManager.Warm>)
 - [type ProviderManagerConfig](<#ProviderManagerConfig>)
 - [type ProviderOptionsConfig](<#ProviderOptionsConfig>)
 - [type ProviderStatus](<#ProviderStatus>)
@@ -635,6 +651,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func \(r \*Resolver\) HasAlias\(aliasName string\) bool](<#Resolver.HasAlias>)
   - [func \(r \*Resolver\) HasHealthyModels\(aliasName string\) bool](<#Resolver.HasHealthyModels>)
   - [func \(r \*Resolver\) ImageModel\(\) \*ModelConfig](<#Resolver.ImageModel>)
+  - [func \(r \*Resolver\) PeekAliasForWarm\(aliasName, sessionID string\) \(\*ModelConfig, bool\)](<#Resolver.PeekAliasForWarm>)
   - [func \(r \*Resolver\) PreferredEndpoint\(sessionID string\) \(string, bool\)](<#Resolver.PreferredEndpoint>)
   - [func \(r \*Resolver\) QuotaBlockedUntil\(credentialKey string\) time.Time](<#Resolver.QuotaBlockedUntil>)
   - [func \(r \*Resolver\) RecordAliasFailure\(aliasName string, err error, failedModel \*ModelConfig\)](<#Resolver.RecordAliasFailure>)
@@ -800,6 +817,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
 - [type UsageStoreAttacher](<#UsageStoreAttacher>)
 - [type Verdict](<#Verdict>)
   - [func \(v Verdict\) String\(\) string](<#Verdict.String>)
+- [type WarmChatter](<#WarmChatter>)
 
 
 ## Constants
@@ -943,6 +961,10 @@ Empty means the endpoint accepts no grammar constraint; nothing is attached.
 	    // MetaKeyLLMTierDepth: int - degradations from the primary.
 	    MetaKeyLLMTierDepth = "llm_tier_depth"
 	)
+
+<a name="BudgetAdvisoryClass"></a>BudgetAdvisoryClass is the wire class carried by the advisory signal on the agent.quota\_wait topic.
+
+	const BudgetAdvisoryClass = "budget_advisory"
 
 <a name="CommandScorePrompt"></a>CommandScorePrompt is the FROZEN rubric question \(Contract C6\): its bytes must stay identical with config/jev\-command\-gate.contract.json5's score\_question \(the training manifest hashes that file; the eval harness reads the contract as the authority\).
 
@@ -1822,6 +1844,13 @@ LogAliasAudit reports audit findings: ONE Info line per alias summarizing \(alia
 
 NewMetricsStoreForPacing opens a small metrics store dedicated to the pacer's rate\-hold query \(tree 02 leaf 05 daemon wiring\). Uses conservative defaults: 30\-day retention, 1h stats window.
 
+<a name="NoCacheOf"></a>
+## func NoCacheOf
+
+	func NoCacheOf(opts []ChatOption) bool
+
+NoCacheOf reports whether the given options mark the call as a cache\-bypass probe \(C4 hard rule 3\). Inspection counterpart of WithNoCache, mirroring PriorityOf: tests and stubs that need the verdict without running the client can read it off the option slice instead of re\-deriving chatOptions.
+
 <a name="ParseCommandScore"></a>
 ## func ParseCommandScore
 
@@ -2268,6 +2297,25 @@ Wait sleeps until the next outbound request to providerID is allowed and claims 
 
 Ticket\-style reservation \(concurrent\-Wait gap fix\): the slot is RESERVED under the pacer mutex BEFORE the sleep, computed against the provider's reservation timeline rather than the wall clock. Each concurrent Wait therefore owns a distinct start instant spaced one enforced gap apart and wakes into its own slot; previously every concurrent Wait read the same lastClaim, computed the same wait against now, and all woke together \(zero enforced gap\). Ctx cancellation abandons the caller's slot — the reservation already consumed the timeline position, mirroring a request that was canceled after pacing admitted it.
 
+<a name="AdvisoryPublisher"></a>
+## type AdvisoryPublisher
+
+AdvisoryPublisher is the emission seam for BudgetAdvisorySignal. The daemon wiring installs a publisher that marshals the signal onto the EXISTING agent.quota\_wait topic \(class "budget\_advisory", same shape as the quota park events\). A nil publisher drops the signal silently — Advisory\(\) remains the in\-process source of truth. Never called under b.mu: publishers do I/O.
+
+	type AdvisoryPublisher func(BudgetAdvisorySignal)
+
+<a name="AdvisoryVerdict"></a>
+## type AdvisoryVerdict
+
+AdvisoryVerdict reports the breach state WITHOUT blocking \(Contract C7\). It reads the same counters CheckBudgetWithScope maintains; it never mutates them.
+
+	type AdvisoryVerdict struct {
+	    OverTarget bool
+	    Limit      BudgetLimit // the existing BudgetLimit enum
+	    Used       float64     // tokens or USD, matching Limit's unit
+	    Cap        float64     // the configured limit after aggressiveness
+	}
+
 <a name="AffinityConfig"></a>
 ## type AffinityConfig
 
@@ -2493,6 +2541,13 @@ SetSessionAffinityConfig injects the resolved llm.session\_affinity config onto 
 
 SetUsageStore attaches the app\-level metrics store \(metrics.db\) for per\-provider/per\-agent token accounting. Nil\-safe.
 
+<a name="AnthropicClient.Warm"></a>
+### func \(\*AnthropicClient\) Warm
+
+	func (c *AnthropicClient) Warm(_ context.Context, _ []ChatMessage, _ ...ChatOption) error
+
+Warm on the Anthropic client class: explicit no\-op with a DEBUG line. Voice turns ride the OpenAI\-compatible local endpoint, so warming Anthropic is out of scope for this tree \(phase2 leaf 01, task 4\); the method exists so the warmDispatcher seam covers any Chatter\-shaped client without knowing which class resolved.
+
 <a name="AnthropicClientOption"></a>
 ## type AnthropicClientOption
 
@@ -2630,12 +2685,21 @@ NewBudget creates a new token budget tracker.
 
 This is the enforcement side of the budget contract: budget VALUES come from meept.json5 and nowhere else. A zero field means "unlimited" for that limit, so an all\-zero config \(the disabled posture\) enforces nothing.
 
+<a name="Budget.Advisory"></a>
+### func \(\*Budget\) Advisory
+
+	func (b *Budget) Advisory() AdvisoryVerdict
+
+Advisory reports the breach state WITHOUT blocking \(Contract C7\). It reads the same counters RecordCost maintains; it never mutates them. The first global \(hourly/daily\) breach is reported, in the same precedence CheckBudget uses.
+
 <a name="Budget.CheckBudget"></a>
 ### func \(\*Budget\) CheckBudget
 
 	func (b *Budget) CheckBudget() BudgetCheckResult
 
 CheckBudget returns a BudgetCheckResult indicating whether the current usage is within all budget limits. When both hourlyLimit and dailyLimit are 0 \(unconfigured\), all requests are allowed.
+
+Contract C7: in steer mode a breach NEVER returns Exceeded=true; the turn is allowed and exactly one BudgetAdvisorySignal per breach episode is emitted on the wired publisher \(agent.quota\_wait, class budget\_advisory\).
 
 <a name="Budget.CheckBudgetWithScope"></a>
 ### func \(\*Budget\) CheckBudgetWithScope
@@ -2657,6 +2721,13 @@ CleanupStaleEntries removes task and session entries that haven't been updated w
 	func (b *Budget) GetStatus() Status
 
 GetStatus returns a snapshot of current budget status.
+
+<a name="Budget.Mode"></a>
+### func \(\*Budget\) Mode
+
+	func (b *Budget) Mode() BudgetMode
+
+BudgetCheckResult describes the outcome of a budget check. Mode returns the budget's enforcement mode \(Contract C7\).
 
 <a name="Budget.RecordCost"></a>
 ### func \(\*Budget\) RecordCost
@@ -2735,6 +2806,13 @@ RemoveTask removes a completed task's tracking entry.
 
 RemoveTaskCost removes a completed task's cost tracking entry.
 
+<a name="Budget.SetAdvisoryPublisher"></a>
+### func \(\*Budget\) SetAdvisoryPublisher
+
+	func (b *Budget) SetAdvisoryPublisher(p AdvisoryPublisher)
+
+SetAdvisoryPublisher installs the advisory emission seam. Nil\-guarded at the call site per repo setter convention: a nil publisher is refused.
+
 <a name="Budget.StartPeriodicCleanup"></a>
 ### func \(\*Budget\) StartPeriodicCleanup
 
@@ -2751,10 +2829,23 @@ WaitForRateLimit blocks until the RPM rate limit window allows another request. 
 
 This method is the sole appender to requestTimestamps. It reserves a rate\-limit slot by appending time.Now\(\) when capacity is available. Without the reservation, N concurrent callers would all observe the same spare capacity and all proceed, exceeding RPM. RecordUsage does NOT append to requestTimestamps — the reservation here is the single source of truth for RPM accounting, giving exactly one timestamp per request.
 
+<a name="BudgetAdvisorySignal"></a>
+## type BudgetAdvisorySignal
+
+BudgetAdvisorySignal is the advisory payload \(Contract C7\). It rides the EXISTING agent.quota\_wait topic with Class "budget\_advisory" — never a new topic, never a new WS type.
+
+	type BudgetAdvisorySignal struct {
+	    Class string // "budget_advisory"
+	    Limit string // the BudgetLimit reason string
+	    Used  float64
+	    Cap   float64
+	    Scope string // "hourly" | "daily" | "per_task" | "per_session"
+	}
+
 <a name="BudgetCheckResult"></a>
 ## type BudgetCheckResult
 
-BudgetCheckResult describes the outcome of a budget check. If Exceeded is true, Reason and the Used/Limit fields are populated.
+If Exceeded is true, Reason and the Used/Limit fields are populated.
 
 	type BudgetCheckResult struct {
 	    Exceeded bool
@@ -2779,6 +2870,8 @@ BudgetConfig holds configuration for token budget tracking.
 	    PerSessionBudget    int     // max tokens per single session (0 = no cap)
 	    PerTaskCostLimit    float64 // max USD per single task (0 = no cap)
 	    PerSessionCostLimit float64 // max USD per single session (0 = no cap)
+	    // Mode selects enforce (default; "" or unknown -> enforce) or steer.
+	    Mode BudgetMode
 	}
 
 <a name="BudgetExceededError"></a>
@@ -2840,6 +2933,33 @@ BudgetLimit identifies which budget limit was exceeded.
 	func (r BudgetLimit) Message(used, limit float64) string
 
 Message returns an internal log message for this budget limit reason.
+
+<a name="BudgetMode"></a>
+## type BudgetMode
+
+BudgetMode selects how a breached budget is enforced \(Contract C7\).
+
+	type BudgetMode string
+
+<a name="BudgetModeEnforce"></a>
+
+	const (
+	    // BudgetModeEnforce is the DEFAULT: a breached budget returns
+	    // *BudgetExceededError exactly as before this leaf.
+	    BudgetModeEnforce BudgetMode = "enforce"
+	    // BudgetModeSteer never refuses a turn: the budget check reports
+	    // "allowed", Advisory() reports the breach, and one
+	    // BudgetAdvisorySignal rides the existing agent.quota_wait topic with
+	    // class "budget_advisory".
+	    BudgetModeSteer BudgetMode = "steer"
+	)
+
+<a name="ParseBudgetMode"></a>
+### func ParseBudgetMode
+
+	func ParseBudgetMode(s string) BudgetMode
+
+ParseBudgetMode maps a config string to a BudgetMode. "" and any unrecognized value map to BudgetModeEnforce \(backward compatible; the default posture is byte\-identical to today\).
 
 <a name="BudgetStatusSnapshot"></a>
 ## type BudgetStatusSnapshot
@@ -3194,6 +3314,13 @@ WithMaxTokens sets the max tokens for the chat request.
 
 WithModelOverride carries a USER model directive \(model reassignment / PrepareNextTurn ModelOverride\) naming the model that must serve THIS one request. It is the user\-directive twin of WithResolvedModel: precedence is explicit and enforced in requestModelOverride — a user directive beats an alias resolution regardless of option\-append order, because the two travel in separate chatOptions fields and requestModelOverride \(not slice order\) picks the winner. Nil is a no\-op.
 
+<a name="WithNoCache"></a>
+### func WithNoCache
+
+	func WithNoCache() ChatOption
+
+WithNoCache bypasses every response\-cache tier for this call: no exact\-key tokenCache Get/Put, no semantic\-tier lookup/store. It is the context\-warm seam's hard bypass \(plan 20261113\-filler\-clips\-and\-context\-warm, C4 hard rule 3\): a max\_tokens=1 warm must never be stored under the exact key, or the real turn would be served the warm's one\-token completion as its "answer" whenever the transcript matched the partial. It does NOT affect the wire payload, the budget gate, the short\-retry loop, or any rate limiter.
+
 <a name="WithPresencePenalty"></a>
 ### func WithPresencePenalty
 
@@ -3507,6 +3634,19 @@ SetUsageStore attaches the app\-level metrics store \(metrics.db\) for per\-prov
 
 SwitchModel switches to a different model/endpoint at runtime.
 
+<a name="Client.Warm"></a>
+### func \(\*Client\) Warm
+
+	func (c *Client) Warm(ctx context.Context, messages []ChatMessage, opts ...ChatOption) error
+
+Warm pre\-issues a cache\-warming request for the given rendered messages and caller opts: non\-streaming, max\_tokens=1, the SAME payload builder and session scope the real turn uses. It NEVER returns a completion, NEVER consumes turn budget semantics, NEVER starts tools or an agent turn, and NEVER reads or writes any response cache.
+
+Fire\-and\-forget by contract: the request runs on an internal goroutine bound to a ceiling\-wrapped copy of ctx; Warm itself returns nil as soon as the request is dispatched internally. Cancelling ctx \(or calling Warm again\) discards the in\-flight warm.
+
+Failures \(any kind\) are logged at DEBUG and swallowed; Warm returns a non\-nil error only when the call is a no\-op \(nil client or empty messages\), so callers may rely on nil == "warm accepted".
+
+session\-affinity scope: the scope the real turn stamps via WithTaskScope travels through opts \(WithTaskScope is a ChatOption\) and lands in prompt\_cache\_key \+ the llm.session\_affinity header — never a separate parameter.
+
 <a name="ClientError"></a>
 ## type ClientError
 
@@ -3709,6 +3849,13 @@ SetLLMCallObserver attaches the llm\-hop\-tracing observer seam \(leaf 01\) on t
 	func (c *CodexClient) SetUsageStore(store *appmetrics.Store)
 
 SetUsageStore attaches the app\-level metrics store \(metrics.db\) for per\-provider/per\-agent token accounting. Nil\-safe.
+
+<a name="CodexClient.Warm"></a>
+### func \(\*CodexClient\) Warm
+
+	func (c *CodexClient) Warm(_ context.Context, _ []ChatMessage, _ ...ChatOption) error
+
+Warm on the Codex client class: explicit no\-op with a DEBUG line \(same rationale as the Anthropic twin above\).
 
 <a name="CodexClientOption"></a>
 ## type CodexClientOption
@@ -4191,6 +4338,13 @@ Stats returns a snapshot of firewall counters. When proactive compression is ena
 	func (f *ContextFirewall) ValidateContextSize(messages []ChatMessage) error
 
 ValidateContextSize checks if the context size exceeds the model limit. Returns a ContextSizeExceededError error if the limit is exceeded.
+
+<a name="ContextFirewall.Warm"></a>
+### func \(\*ContextFirewall\) Warm
+
+	func (f *ContextFirewall) Warm(ctx context.Context, messages []ChatMessage, opts ...ChatOption) error
+
+Warm dispatch — C4. The firewall is a transparent passthrough on the warm lane: it forwards the rendered message list \+ opts to the inner chatter UNCHANGED \(the warm already serializes through the SAME buildChatRequest a turn uses; re\-rendering here would diverge the prefix\). A non\-warm\-capable inner is a fail\-soft skip.
 
 <a name="ContextFirewallConfig"></a>
 ## type ContextFirewallConfig
@@ -5412,6 +5566,13 @@ GetAllModels returns all available models from the configuration.
 
 ResolveModelRef resolves a "provider/model\-id" reference to a ModelConfig.
 
+<a name="ResolvedModelOf"></a>
+### func ResolvedModelOf
+
+	func ResolvedModelOf(opts []ChatOption) *ModelConfig
+
+ResolvedModelOf reports the per\-request model selection \(user directive \> alias resolution, per requestModelOverride precedence\) carried on the given options, or nil when the call carries none. Inspection counterpart of WithResolvedModel / WithModelOverride — the public face of requestResolvedProviderID — so wiring tests can pin that the warmer layer performed its alias resolution BEFORE dispatching Warm \(C4 rule 1\) without re\-deriving chatOptions.
+
 <a name="ModelConfig.GenerationTransport"></a>
 ### func \(\*ModelConfig\) GenerationTransport
 
@@ -6351,6 +6512,13 @@ StartHealthChecks starts periodic health checks \(optional\).
 
 Stop stops the provider manager and closes all clients.
 
+<a name="ProviderManager.Warm"></a>
+### func \(\*ProviderManager\) Warm
+
+	func (pm *ProviderManager) Warm(ctx context.Context, messages []ChatMessage, opts ...ChatOption) error
+
+Warm implements the warmDispatcher seam for the ProviderManager: the alias resolution the real turn would ride \(WithResolvedModel\) gets re\-derived for THIS call, the request lands on the provider that would serve the alias, and Warm on that provider's client fire\-and\- forgets. No providers available for the selection \-\> a DEBUG\-typed error \(never surfaced; the caller logs at DEBUG\).
+
 <a name="ProviderManagerConfig"></a>
 ## type ProviderManagerConfig
 
@@ -7011,6 +7179,15 @@ Because non\-current models are always considered available, this function HasHe
 	func (r *Resolver) ImageModel() *ModelConfig
 
 ImageModel returns the configured image\-generation model, if any.
+
+<a name="Resolver.PeekAliasForWarm"></a>
+### func \(\*Resolver\) PeekAliasForWarm
+
+	func (r *Resolver) PeekAliasForWarm(aliasName, sessionID string) (*ModelConfig, bool)
+
+PeekAliasForWarm reports aliasName's serving candidate WITHOUT any of the side effects ResolveForAlias carries \(no rotation, no sticky pin writes, no routing\-decision log, no cooldown/block re\-evaluation writes\): the context\-warm seam \(C4, plan 20261113\-filler\-clips\-and\-context\-warm\) needs to know which provider/model would serve the imminent turn — to stamp WithResolvedModel for the warm — but a warm must never perturb the alias state the real turn will read.
+
+It applies the SAME read\-side filters ResolveForAlias applies \(alias\-level cooldown order, quota blocks, endpoint blocks, the re\-validation pass, and the session's sticky\-endpoint preference, in that precedence\) in a fully request\-local form. ok=false when the alias is unknown, empty, or every candidate is blocked — the warm is then a skip, never a guess. sessionID may be "" \(no stickiness preference applied\). Read\-only: safe under r.mu.
 
 <a name="Resolver.PreferredEndpoint"></a>
 ### func \(\*Resolver\) PreferredEndpoint
@@ -8660,5 +8837,17 @@ Verdict is the health checker's tri\-state result \(Contract 2 of the llama\-han
 	func (v Verdict) String() string
 
 String returns the Contract\-2 wire spelling used in runtime.health bus payloads and log fields.
+
+<a name="WarmChatter"></a>
+## type WarmChatter
+
+WarmChatter is the warm\-seam contract \(plan 20261113\-filler\-clips\-and\-context\-warm C4, hard rules 1 and 5\): every client class the voice turn rides implements it so the daemon's context\-warm closure can dispatch a cache\-warming probe WITHOUT knowing the concrete provider. Warm is fire\-and\-forget: it NEVER returns a completion, NEVER re\-dispatches \(no retry loop\), NEVER reads/writes a response cache, and NEVER records alias/endpoint/quota state. Failures are logged at DEBUG and swallowed by design.
+
+The signature is EXACTLY ChatOption\-opts shaped; the alias / target resolution lives at the Resolver/ProviderManager layer \(WithResolvedModel steers the ProviderManager's routing; a bare \*Client serves whatever its own config holds\). Callers may stamp WithMaxTokens\(1\) themselves or let the implementation force it.
+
+	type WarmChatter interface {
+	    Chatter
+	    Warm(ctx context.Context, messages []ChatMessage, opts ...ChatOption) error
+	}
 
 Generated by [gomarkdoc](<https://github.com/princjef/gomarkdoc>)

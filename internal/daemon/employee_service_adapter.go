@@ -470,8 +470,25 @@ func (a *planCreatorAdapter) SetPlanGoal(ctx context.Context, planID, goalID str
 	return a.planMgr.SetPlanGoal(ctx, planID, goalID)
 }
 
+// SetPlanPrompt persists the candidate goal prompt on the stored plan row
+// (issue #148 resume-prompt-loss, employee.PlanPromptSetter contract): the
+// GoalLoop stamps Plan.Prompt right after CreatePlan returns so a resumed
+// ApproveAndExecute — which carries only PlanRef{ID} — rehydrates the exact
+// execution prompt through planBriefLookup instead of falling back to a
+// generic mandate.
+func (a *planCreatorAdapter) SetPlanPrompt(ctx context.Context, planID, prompt string) error {
+	if a.planMgr == nil {
+		return fmt.Errorf("plan manager not configured")
+	}
+	return a.planMgr.SetPlanPrompt(ctx, planID, prompt)
+}
+
 // Compile-time guard: planCreatorAdapter must satisfy employee.PlanGoalSetter.
 var _ employee.PlanGoalSetter = (*planCreatorAdapter)(nil)
+
+// Compile-time guard: planCreatorAdapter must satisfy
+// employee.PlanPromptSetter (issue #148).
+var _ employee.PlanPromptSetter = (*planCreatorAdapter)(nil)
 
 // Compile-time guard: planCreatorAdapter must satisfy employee.PlanCreator.
 var _ employee.PlanCreator = (*planCreatorAdapter)(nil)
@@ -543,7 +560,7 @@ func planBriefLookup(pm *plan.PlanManager) employee.PlanBriefLookup {
 		if p == nil {
 			return employee.PlanBrief{}, false, nil
 		}
-		return employee.PlanBrief{Title: p.Title, Description: p.Description}, true, nil
+		return employee.PlanBrief{Title: p.Title, Description: p.Description, Prompt: p.Prompt}, true, nil
 	}
 }
 

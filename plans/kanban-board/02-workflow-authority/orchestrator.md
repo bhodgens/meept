@@ -40,9 +40,11 @@ them a documented exception.
 | Leaf | Status | Notes |
 |---|---|---|
 | 02/01-task-transition-guard | DONE | 8c1de6b6 (option (a) SetStateChecked; run 1 claimed COMPLETE and landed nothing — re-dispatched, verified on disk) |
-| 02/02-queue-transition-guard | IN_PROGRESS | child running (transitions.go on disk; store.go wiring pending) |
-| 02/03-publishers-task-queue | PENDING | depends on 02/02 |
-| 02/04-publishers-plan-step-goal | PENDING | depends on 02/03 |
+| 02/02-queue-transition-guard | DONE | b6b33fc9 (fold the transition guard into the state-mutator CAS) |
+| 02/03-publishers-task-queue | DONE | 6affd763 (StateEvent publishers, opt-in gate) |
+| 02/04-publishers-plan-step-goal | DONE | 6affd763 + c0788bb0 (plan/step/goal publisher wiring) |
+
+> Reconciliation note (2026-11-16, issue #156): rows above were under-reporting merged work; statuses updated from git (each SHA verified an ancestor of main). Tables were last refreshed d492867c (2026-11-14).
 
 ## Integration Test Plan
 - Verify that invalid transitions for tasks/jobs/plans are blocked.

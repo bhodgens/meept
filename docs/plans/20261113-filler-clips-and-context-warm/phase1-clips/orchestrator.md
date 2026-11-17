@@ -58,12 +58,23 @@ Inherited from root master.md Coding Conventions verbatim (dispatch context must
 
 | Leaf | Status |
 |------|--------|
-| 00T-gate-tests | COMPLETE (commit gate-tests, worktree branch) |
-| 01-clip-store | REVIEWED (tests+race+mutexio green) |
-| 05-lane-pools | REVIEWED (ladder tests green; d662c738 + lanes commit pending final) |
-| 03-child-render-playback | IMPLEMENTED (leaf-03 returned green; closeClipReader fix in flight, commit pending) |
-| 02-daemon-planner | IMPLEMENTED (leaf returned: VC-1/2/3 GREEN; sweep-B commit pending) |
-| 04-farewell-lane | REVIEWED (00f9e86c; wiring hunk applied by orchestrator, e2e VC-4/VC-5 GREEN) |
+| 00T-gate-tests | VALIDATED (44e3d9a9; suites live on main, green 2026-11-16) |
+| 01-clip-store | VALIDATED (3769b30d; tests+race+mutexio green; unit ok 2026-11-16: TestClipKeyPinnedVectors, TestClipKeyGateMatchesFrozenC1Formula, TestClipGateMetaJSONShapeIsC2, TestClipGateShortPcmIsMissAndDeleted, TestConcurrentPutSameKeyNoMutexIO et al.) |
+| 05-lane-pools | VALIDATED (ladder tests green; d662c738 config + 48cfae06 lanes resolver, both ancestors of HEAD; unit ok 2026-11-16: TestVoiceLanesSilencePrecedenceLadder, TestVoiceLanesFragmentPrecedence, TestVoiceLanesFarewellPrecedence, TestPickLineRoundRobin) |
+| 03-child-render-playback | VALIDATED (fe8fea32 incl. closeClipReader fix, ancestor of HEAD; unit ok 2026-11-16: TestClipSayHitZeroSpeak, TestClipSayMissFallsToSpeak, TestClipRenderMissRendersAndStores, TestClipBargeInClearsLikeSynth) |
+| 02-daemon-planner | VALIDATED (d03f3b0a, ancestor of HEAD; sweep-B landed via 648eb6eb; unit ok 2026-11-16: TestClipPlannerGateMatrix, TestClipPlannerNoDirWhenCold, TestClipPlannerReloadReplan; e2e VC-1/2/3 green as suite tests TestVoiceClipsSidecarDisabledNoDir/PoolsRendered/IdentityChangeRegenerates) |
+| 04-farewell-lane | VALIDATED (00f9e86c; wiring hunk applied by orchestrator; e2e VC-4/VC-5 green 2026-11-16 as TestVoiceClipsFarewellAudioPrecedesEndFrame + unit TestTalkLoopFarewellSpokenOnceLastTrue) |
+
+Delta log (branch):
+
+- 2026-11-16 (reconciliation wave, doc-only): all six leaf rows reconciled
+  against disk + git — every leaf SHA verified a direct ancestor of HEAD
+  (`git merge-base --is-ancestor`), hermetic evidence recorded per row
+  (e2e/suites/voice_clips 5/5 PASS; unit packages internal/voice/clipstore,
+  internal/voice, internal/voicechild, internal/daemon,
+  internal/voiceframe all `ok` at HEAD 5f64419a). Test Gate matrix below
+  reconciled PENDING -> VALIDATED against the suites run 2026-11-16. Live
+  smoke a-e NOT executed (root Integration Test Plan disposition).
 
 ## Test Gate
 
@@ -71,13 +82,13 @@ Suite target: `e2e/suites/voice-clips` (new dir + `e2e/manifest.json` `path_map`
 
 | Feature | Unit test | E2E test | Status |
 |---------|-----------|----------|--------|
-| Key formula stability + invalidation | clipstore_test | voice-clips suite: clip absent -> rendered -> replayed | PENDING |
-| Sidecar-only gate (R4) | daemon planner_test | suite: sidecar disabled -> store dir never created | PENDING |
-| Render trigger is per call, after keys | daemon planner_test | suite: clip_render observed after the keys line, never before | PENDING |
-| Clip playback vs live-synth fallback | voicechild pipeline_test | suite: local leg, filler fires, log `clip=true` | PENDING |
-| Back-compat (old child / old daemon) | voiceframe_test | suite: frame without clip_id == today shape | PENDING |
-| Lane pools + farewell | talkloop_test | suite: farewell clip plays before end frame | PENDING |
-| Stored PCM rate is the lane rate | clipstore_test | suite: stored bytes equal live-lane bytes for the same text | PENDING |
+| Key formula stability + invalidation | clipstore_test: TestClipKeyPinnedVectors, TestClipKeyGateMatchesFrozenC1Formula, TestClipKeyGateInvalidationMatrix | voice-clips suite: TestVoiceClipsPoolsRendered, TestVoiceClipsIdentityChangeRegenerates | VALIDATED (unit + e2e green 2026-11-16) |
+| Sidecar-only gate (R4) | daemon planner_test: TestClipPlannerGateMatrix, TestClipPlannerNoDirWhenCold | suite: TestVoiceClipsSidecarDisabledNoDir | VALIDATED (unit + e2e green 2026-11-16) |
+| Render trigger is per call, after keys | daemon planner_test: TestClipPlannerSetupMountGateMatrix, TestClipPlannerKeysFrameRefHash | suite: TestVoiceClipsPoolsRendered (render-on-call exercised; exact ordering assert rides unit pins) | VALIDATED (unit + e2e green 2026-11-16) |
+| Clip playback vs live-synth fallback | voicechild pipeline_test: TestClipSayHitZeroSpeak, TestClipSayMissFallsToSpeak, TestClipGateSayMissFallsBackToLiveSpeak | suite: TestVoiceClipsCachedFillerUnder300msVsSlowTTS | VALIDATED (unit + e2e green 2026-11-16; the live `clip=true` log-line form is smoke-only, step (b) NOT executed — root disposition) |
+| Back-compat (old child / old daemon) | voiceframe_test: TestOldDaemonLineDecodesWithoutClipFields, TestClipFieldsOmittedOnPlainFrames, TestClipGateFrameWithoutClipIDIsTodaysExactJSON | suite: covered by unit wire-shape pins (no dedicated suite scenario) | VALIDATED (unit green 2026-11-16) |
+| Lane pools + farewell | talkloop_test: TestTalkLoopLaneRoundRobin, TestTalkLoopFarewellSpokenOnceLastTrue, TestTalkLoopFarewellZeroConfigDisabled | suite: TestVoiceClipsFarewellAudioPrecedesEndFrame | VALIDATED (unit + e2e green 2026-11-16) |
+| Stored PCM rate is the lane rate | clipstore_test: TestClipGateMetaJSONShapeIsC2 (rate assertion); TestClipRateResampleTo8k (child side) | suite: stored-bytes equality exercised inside TestVoiceClipsCachedFillerUnder300msVsSlowTTS | VALIDATED (unit + e2e green 2026-11-16; dedicated stored-vs-live byte-equality e2e scenario not present as a separate test — covered within the cached-filler scenario; noted honestly) |
 
 Dispatch 00T first (tests only, RED), validate in-session against this matrix, commit gate tests, mark TESTS_VALIDATED, then wave A (01 || 05), wave B (03 then 02), wave C (04).
 

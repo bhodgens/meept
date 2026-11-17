@@ -70,9 +70,6 @@ func VerboseMarkerFormat(itemCount, tokenCount int, hash string) string {
 	return fmt.Sprintf("[%d items compressed to %d tokens, hash=%s]", itemCount, tokenCount, hash)
 }
 
-
-
-
 // findSubstring finds the index of substr in s, or -1 if not found.
 func findSubstring(s, substr string) int {
 	for i := 0; i <= len(s)-len(substr); i++ {

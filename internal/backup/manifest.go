@@ -33,7 +33,6 @@ type SyncMetadata struct {
 	GossipEventsRecv24h int      `json:"gossip_events_recv_24h"`
 }
 
-
 // Save writes the manifest to the given path as JSON.
 func (m *BackupManifest) Save(path string) error {
 	data, err := json.MarshalIndent(m, "", "  ")

@@ -1,50 +1,82 @@
-package llm
-
 // Context-warm seam (phase2-context-warm leaf 01, root Contract C4).
 //
-// Warm pre-issues a throwaway chat-completion request whose ONLY purpose is
-// to plant the turn's prompt prefix in the provider-side prompt cache (and,
-// for llama.cpp-family servers, the KV slot reached under the session
-// affinity scope), so the real turn that follows pays decode, not prefill.
+// Warm pre-issues a throwaway chat-completion request whose ONLY purpose
+// is to plant the turn's prompt prefix in the provider-side prompt cache
+// (and, for llama.cpp-family servers, the KV slot reached under the
+// session affinity scope), so the real turn that follows pays decode,
+// not prefill.
 //
-// Prefix identity is the whole point: the request is built through the SAME
-// buildChatRequest serialization path a real turn uses (system-prompt cache
-// boundary stripping, ToOpenAIDictWithStore message rendering, stable tool
-// order, prompt_cache_key), with max_tokens forced to 1 and streaming off.
-// The completion text is discarded and NEVER logged.
+// Prefix identity is the whole point: the request is built through the
+// SAME buildChatRequest serialization path a real turn uses (system-prompt
+// cache boundary stripping, ToOpenAIDictWithStore message rendering,
+// stable tool order, prompt_cache_key), with max_tokens forced to 1 and
+// streaming off. The completion text is discarded and NEVER logged.
 //
-// Error posture (R8): any failure — transport, quota *QuotaResetError, 4xx,
-// timeout, panic — is logged at DEBUG with the alias + reason and swallowed.
-// Warm participates in NONE of the loop machinery: no short-retry budget, no
+// Error posture (R8): any failure — transport, quota *QuotaResetError,
+// 4xx, timeout, panic — is logged at DEBUG and swallowed. Warm
+// participates in NONE of the loop machinery: no short-retry budget, no
 // recordAliasFailure, no endpoint/alias block arming, no budget-gate
-// consumption, no quota parking, no cache put, no llm_calls turn row, no
-// metrics.Store request record, no tier/degradation signal, no WS relay, no
-// session message. It never returns an error by design.
+// consumption, no quota parking, no cache read or write (the
+// chatOptions.noCache bypass, C4 hard rule 3), no llm_calls turn row,
+// no metrics.Store request record, no tier/degradation signal, no WS
+// relay, no session message.
 //
-// Concurrency: one dedicated in-flight lane per Client (cap 1). A new Warm
-// REPLACES the in-flight one (cancels the previous request — replace-discard)
-// rather than queueing behind it, and a warm never queues behind the real
-// turn's slot gate either (it rides its own transport path). A hung warm is
-// bounded by an internal ceiling deadline wrapping the caller ctx, so the
-// lane is always released.
+// Contract C4 (frozen, master.md C4):
+//
+//	func (c *Client) Warm(ctx context.Context, messages []ChatMessage, opts ...ChatOption) error
+//
+// Alias resolution lives at the Resolver / ProviderManager layer, not on
+// *Client: the daemon's context-warm closure resolves which endpoint the
+// real turn would ride (via WithResolvedModel on the per-request opts, or
+// for a ProviderManager the manager's own ordered-Provider list) and the
+// warm lands on THAT serving client. Hard rules:
+//
+//  1. No alias parameter. The opts carry the per-request selection
+//     (WithResolvedModel / WithModelOverride) exactly as the real turn
+//     does; a bare *Client serves whatever (possibly Reconfigured) config
+//     it holds.
+//  2. Same payload builder. The warm serializes through the SAME
+//     non-streaming buildChatRequest path as the real turn, INCLUDING
+//     tools, grammar, and cache boundary (buildChatRequest applies all of
+//     them); the only intentional deltas are max_tokens=1 and
+//     stream=false.
+//  3. No cache traffic. dispatchWarm forces WithNoCache() (chatOptions
+//     .noCache) so tokenCache Get/Put and the semantic tier are bypassed
+//     even if a future path in buildChatRequest starts consulting them.
+//  4. No retry loop. Warm never enters doRequest: no short-retry budget,
+//     no backoff plan. A max_tokens=1 warm that comes back empty must
+//     not be re-dispatched.
+//  5. No identity side effects. Warm performs no Resolver alias failure
+//     recording and never writes the sticky per-session endpoint map
+//     (keeps on the client lane only; alias resolution is the Resolver's
+//     job, done by the CALLER before dispatch).
+//  6. Background slot posture. priority=false ALWAYS (opts zero value);
+//     a warm never blocks in budget.WaitForRateLimit. It carries its own
+//     short internal ceiling (warmCeilingDefault, default 10 s) wrapping
+//     the caller ctx.
+//  7. Endpoint support gate. Encoded by the caller (daemon), one
+//     predicate at the wiring layer — Warm itself dispatches only.
+//
+// Concurrency: one dedicated in-flight lane per Client (cap 1). A new
+// Warm REPLACES the in-flight one (cancels the previous request —
+// replace-discard) rather than queueing behind it, and a warm never
+// queues behind the real turn's slot gate either (it rides its own
+// transport path). A hung warm is bounded by an internal ceiling
+// deadline wrapping the caller ctx, so the lane is always released.
 //
 // Design notes for the orchestrator:
-//   - The C4 sketch says []Message; the codebase's real message type is
-//     ChatMessage, so the arg type is []ChatMessage (semantics unchanged).
-//   - `alias` is a caller-supplied label used for DEBUG attribution only: a
-//     bare *Client serves whatever model its (possibly Reconfigured) config
-//     holds; request-scoped alias resolution is the Resolver/ProviderManager
-//     lane and is NOT reachable from here. Leaf 02 should pass the alias it
-//     will use for the real turn so logs correlate.
-//   - The lane state lives in a package-level side table keyed by *Client
-//     rather than new Client struct fields because this leaf may only touch
-//     warm.go (concurrency notice). If the integration commit owns
-//     client.go, move the two fields onto Client and drop the sync.Map.
+//   - C4 sketch says []Message; codebase's real type is ChatMessage.
+//   - The lane state lives in a package-level side table keyed by
+//     *Client (a warm may only touch warm.go per the concurrency
+//     notice); integration commits owning client.go may move the two
+//     fields onto Client and drop the sync.Map.
 //   - The HTTP dispatch bypasses doRequest on purpose: doRequest owns the
 //     slot gate, the pacer, the Error-level 400 log, and the metricsStore
 //     error/success records. Warm reuses only the header plumbing
 //     (applyExtraHeaders + applyAffinityHeader) and the auth resolution
 //     shape, so it cannot write a metrics row or surface a non-DEBUG log.
+
+package llm
 
 import (
 	"bytes"
@@ -58,12 +90,12 @@ import (
 	"time"
 )
 
-// warmMaxTokens is the forced completion cap of a warm request: one token is
-// enough for the server to prefill (and cache) the whole prompt.
+// warmMaxTokens is the forced completion cap of a warm request: one token
+// is enough for the server to prefill (and cache) the whole prompt.
 const warmMaxTokens = 1
 
-// warmCeilingDefault is the hard internal deadline a warm request carries on
-// top of the caller ctx, so a hung upstream can never pin the warm lane.
+// warmCeilingDefault is the hard internal deadline a warm request carries
+// on top of the caller ctx, so a hung upstream can never pin the warm lane.
 const warmCeilingDefault = 10 * time.Second
 
 // warmRequestCeiling is the effective ceiling (test seam: warm_test.go
@@ -92,23 +124,28 @@ func (c *Client) lane() *warmLane {
 	return v.(*warmLane)
 }
 
-// Warm pre-issues a cache-warming request for the given alias and rendered
-// messages: non-streaming, max_tokens=1, same session-affinity scope as the
-// real turn. It NEVER returns a completion, NEVER consumes turn budget,
-// NEVER starts tools or an agent turn. Failures (any kind) are logged at
-// DEBUG and swallowed by design.
+// Warm pre-issues a cache-warming request for the given rendered messages
+// and caller opts: non-streaming, max_tokens=1, the SAME payload builder
+// and session scope the real turn uses. It NEVER returns a completion,
+// NEVER consumes turn budget semantics, NEVER starts tools or an agent
+// turn, and NEVER reads or writes any response cache.
 //
-// Fire-and-forget: Warm returns immediately; the request runs on an internal
-// goroutine bound to a ceiling-wrapped copy of ctx. Cancelling ctx (or
-// calling Warm again) discards the in-flight warm.
+// Fire-and-forget by contract: the request runs on an internal goroutine
+// bound to a ceiling-wrapped copy of ctx; Warm itself returns nil as soon
+// as the request is dispatched internally. Cancelling ctx (or calling
+// Warm again) discards the in-flight warm.
 //
-// sessionScope is the turn's ACCOUNTING session id — the SAME value the real
-// turn stamps via WithTaskScope — so prompt_cache_key and the
-// llm.session_affinity header land on the same provider-side lane. An empty
-// scope sends neither (client rule: never an empty header/key value).
-func (c *Client) Warm(ctx context.Context, alias string, messages []ChatMessage, sessionScope string) {
+// Failures (any kind) are logged at DEBUG and swallowed; Warm returns a
+// non-nil error only when the call is a no-op (nil client or empty
+// messages), so callers may rely on nil == "warm accepted".
+//
+// session-affinity scope: the scope the real turn stamps via
+// WithTaskScope travels through opts (WithTaskScope is a ChatOption) and
+// lands in prompt_cache_key + the llm.session_affinity header — never a
+// separate parameter.
+func (c *Client) Warm(ctx context.Context, messages []ChatMessage, opts ...ChatOption) error {
 	if c == nil || len(messages) == 0 {
-		return
+		return nil
 	}
 
 	ceiling := warmRequestCeiling
@@ -135,7 +172,7 @@ func (c *Client) Warm(ctx context.Context, alias string, messages []ChatMessage,
 		// do), the lane must not stay pinned.
 		defer func() {
 			if r := recover(); r != nil {
-				c.logger.Debug("Warm request panicked", "alias", alias, "panic", r)
+				c.logger.Debug("Warm request panicked", "panic", r)
 			}
 			lane.mu.Lock()
 			if lane.active == h {
@@ -144,43 +181,74 @@ func (c *Client) Warm(ctx context.Context, alias string, messages []ChatMessage,
 			lane.mu.Unlock()
 			cancel()
 		}()
-		c.dispatchWarm(reqCtx, alias, messages, sessionScope)
+		c.dispatchWarm(reqCtx, messages, opts)
 	}()
+	return nil
 }
 
 // dispatchWarm builds the payload through the shared turn serializer and
-// issues it on the warm-only transport path. All failures end in one DEBUG
-// line naming alias + reason.
-func (c *Client) dispatchWarm(ctx context.Context, alias string, messages []ChatMessage, sessionScope string) {
+// issues it on the warm-only transport path. All failures end in one
+// DEBUG line.
+func (c *Client) dispatchWarm(ctx context.Context, messages []ChatMessage, opts []ChatOption) {
 	c.configMu.RLock()
 	cfg := c.config
 	c.configMu.RUnlock()
 	if cfg == nil || cfg.BaseURL == "" {
-		c.logger.Debug("Warm skipped: no serving config", "alias", alias)
+		c.logger.Debug("Warm skipped: no serving config")
 		return
 	}
 
 	// SAME serialization path as a real turn (prefix identity): message
-	// rendering, cache-boundary strip, model stamping, prompt_cache_key via
-	// the chatOptions.sessionID lane (client.go buildChatRequest). No tools,
-	// no grammar, no reasoning, no prefill — a warm is a bare prefix echo.
-	opts := []ChatOption{
+	// rendering, cache-boundary strip, model stamping, tools, prompt
+	// cache key via the chatOptions.sessionID lane (client.go
+	// buildChatRequest). The only intentional payload deltas from a real
+	// Chat turn: max_tokens=1 and an explicit non-streaming flag.
+	//
+	// Hard rule 1: alias / model selection travels per-request via opts
+	// (WithResolvedModel or WithModelOverride) and buildChatRequest
+	// applies it via withRequestModelOverride — the warm lands on the
+	// same provider/model the real turn's opts select.
+	callerOpts := append([]ChatOption{}, opts...)
+	callerOpts = append(callerOpts,
 		WithMaxTokens(warmMaxTokens),
-		WithTaskScope("", sessionScope),
-	}
-	_, payload, err := c.buildChatRequest(messages, cfg, opts, false)
+		WithNoCache(),
+	)
+
+	_, payload, err := c.buildChatRequest(messages, cfg, callerOpts, false)
 	if err == nil {
-		// The only intentional payload deltas from a real Chat turn:
-		// max_tokens=1 (forced above) and an explicit non-streaming flag.
 		payload["stream"] = false
+		// Pull the resolved/scope values back off the options for the
+		// header plumbing (byte-identical to what Chat() stamps).
+		var o chatOptions
+		for _, opt := range callerOpts {
+			if opt != nil {
+				opt(&o)
+			}
+		}
+		sessionScope := o.sessionID
 		err = c.sendWarmRequest(ctx, cfg, payload, sessionScope)
 	}
 	if err != nil {
+		// Attribution: surface the resolved-model the per-request opts
+		// carried (alias's serving model), when any; otherwise the client's
+		// own configured provider/model.
+		attribution := cfg.ProviderID + "/" + cfg.ModelID
+		{
+			var o chatOptions
+			for _, opt := range callerOpts {
+				if opt != nil {
+					opt(&o)
+				}
+			}
+			if _, modelID, _, ok := o.requestModelOverride(cfg); ok && modelID != "" {
+				attribution = modelID
+			}
+		}
 		c.logger.Debug("Warm request failed (swallowed by design)",
-			"alias", alias, "reason", err.Error())
+			"model", attribution, "reason", err.Error())
 		return
 	}
-	c.logger.Debug("Warm request completed", "alias", alias)
+	c.logger.Debug("Warm request completed", "model", cfg.ProviderID+"/"+cfg.ModelID)
 }
 
 // sendWarmRequest is the warm-only transport: the same URL construction,
@@ -227,9 +295,10 @@ func (c *Client) sendWarmRequest(ctx context.Context, cfg *ModelConfig, payload 
 		return fmt.Errorf("egress: %w", err)
 	}
 	defer func() {
-		// Drain a bounded slice so the connection can be reused, then close.
-		// A drain or close failure here is benign on a bounded read, and Warm
-		// is silent-failure by contract C4: DEBUG only, never alters behavior.
+		// Drain a bounded slice so the connection can be reused, then
+		// close. A drain or close failure here is benign on a bounded
+		// read, and Warm is silent-failure by contract C4: DEBUG only,
+		// never alters behavior.
 		if _, cerr := io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20)); cerr != nil {
 			c.logger.Debug("Warm body drain failed (benign)", "err", cerr.Error())
 		}
@@ -249,20 +318,22 @@ func (c *Client) sendWarmRequest(ctx context.Context, cfg *ModelConfig, payload 
 // Warm on the Anthropic client class: explicit no-op with a DEBUG line.
 // Voice turns ride the OpenAI-compatible local endpoint, so warming
 // Anthropic is out of scope for this tree (phase2 leaf 01, task 4); the
-// method exists so leaf 02 can call the seam on any Chatter-shaped client
-// without knowing which class resolved.
-func (c *AnthropicClient) Warm(_ context.Context, alias string, _ []ChatMessage, _ string) {
+// method exists so the warmDispatcher seam covers any Chatter-shaped
+// client without knowing which class resolved.
+func (c *AnthropicClient) Warm(_ context.Context, _ []ChatMessage, _ ...ChatOption) error {
 	if c == nil {
-		return
+		return nil
 	}
-	c.logger.Debug("Warm unsupported for Anthropic client class (no-op)", "alias", alias)
+	c.logger.Debug("Warm unsupported for Anthropic client class (no-op)")
+	return nil
 }
 
 // Warm on the Codex client class: explicit no-op with a DEBUG line (same
 // rationale as the Anthropic twin above).
-func (c *CodexClient) Warm(_ context.Context, alias string, _ []ChatMessage, _ string) {
+func (c *CodexClient) Warm(_ context.Context, _ []ChatMessage, _ ...ChatOption) error {
 	if c == nil {
-		return
+		return nil
 	}
-	c.logger.Debug("Warm unsupported for Codex client class (no-op)", "alias", alias)
+	c.logger.Debug("Warm unsupported for Codex client class (no-op)")
+	return nil
 }

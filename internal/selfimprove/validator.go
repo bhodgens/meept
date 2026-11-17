@@ -105,7 +105,6 @@ func (v *FixValidator) Validate(ctx context.Context, fix *ProposedFix) (*Validat
 	return result, nil
 }
 
-
 // createSandbox creates a sandbox directory.
 func (v *FixValidator) createSandbox(fixID string) (string, error) {
 	sandboxPath := filepath.Join(v.config.WorkDirTemplate, fixID)

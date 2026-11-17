@@ -128,11 +128,11 @@ once, assert plan reaches executing or failed within attempt bound.
 
 | # | Feature | Source | Unit tests | E2E | Status |
 |---|---------|--------|-----------|-----|--------|
-| F1 | Reclaimer re-drive | 01 | TestSynthesisReclaimer* | n/a | PENDING |
-| F2 | Phase failure writers | 02 | TestPhaseFailedWriter | n/a | PENDING |
-| F3 | Plan CAS | 03/04 | TestUpdatePlanStateWhere + migration tests | n/a | PENDING |
-| F4 | Goal fence | 05 | TestGoalTransitionFence | n/a | PENDING |
-| F5 | Hygiene set | 06 | per-task | n/a | PENDING |
+| F1 | Reclaimer re-drive | 01 | TestSynthesisReclaimer* | n/a | VALIDATED (7c626b69; merged e729937d) |
+| F2 | Phase failure writers | 02 | TestPhaseFailedWriter | n/a | VALIDATED (a94995c8; merged e729937d) |
+| F3 | Plan CAS | 03/04 | TestUpdatePlanStateWhere + migration tests | n/a | VALIDATED (d191cb34/3b04d3ef; merged e729937d) |
+| F4 | Goal fence | 05 | TestGoalTransitionFence | n/a | VALIDATED (091cc90b; merged e729937d) |
+| F5 | Hygiene set | 06 | per-task | n/a | VALIDATED (5950547d; merged e729937d) |
 
 ## Open Questions
 

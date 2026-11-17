@@ -57,8 +57,14 @@ CREATE INDEX IF NOT EXISTS idx_contacts_phone
 // default for every pre-existing row).
 const contactsVoiceApprovedAlter = `ALTER TABLE contacts ADD COLUMN voice_approved INTEGER NOT NULL DEFAULT 0`
 
+// contactsMessagingOptOutAlter adds the messaging consent guard column
+// (telnyx-texting plan D5: STOP reply sets it, all outbound sends
+// consult it before dialing; default 0 = consented for pre-existing
+// rows, the same fail-open-to-history posture as voice_approved).
+const contactsMessagingOptOutAlter = `ALTER TABLE contacts ADD COLUMN messaging_opt_out INTEGER NOT NULL DEFAULT 0`
+
 // migrateContacts runs the additive contacts migration: base schema (with
-// phone index) + guarded ALTER. Duplicate-column is the expected steady
+// phone index) + guarded ALTERs. Duplicate-column is the expected steady
 // state on already-migrated databases and is tolerated (callstore.go
 // migrationAddColumn idiom); anything else fails the open — silently
 // missing the column would only surface later as query errors.
@@ -69,6 +75,11 @@ func migrateContacts(db *sql.DB) error {
 	if _, err := db.Exec(contactsVoiceApprovedAlter); err != nil {
 		if !strings.Contains(err.Error(), "duplicate column name") {
 			return fmt.Errorf("contact store: migrate voice_approved column: %w", err)
+		}
+	}
+	if _, err := db.Exec(contactsMessagingOptOutAlter); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("contact store: migrate messaging_opt_out column: %w", err)
 		}
 	}
 	return nil
@@ -218,20 +229,23 @@ func (s *SQLiteStore) Put(ctx context.Context, rec Record) error {
 	}
 	// Upsert on phone: the phone UNIQUE constraint is the identity rule;
 	// ON CONFLICT updates every mutable column and keeps created_at.
-	// VoiceApproved is second-wins like the other mutable columns (the
-	// owner revokes approval by Puts the record with the flag false).
+	// VoiceApproved and MessagingOptOut are second-wins like the other
+	// mutable columns (the owner revokes approval / the consent glue
+	// toggles opt-out by Puts the record with the flag set either way).
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO contacts (id, display_name, phone, signal_uuid, policy, voice_approved, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO contacts (id, display_name, phone, signal_uuid, policy, voice_approved, messaging_opt_out, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(phone) DO UPDATE SET
 		   id = excluded.id,
 		   display_name = excluded.display_name,
 		   signal_uuid = excluded.signal_uuid,
 		   policy = excluded.policy,
 		   voice_approved = excluded.voice_approved,
+		   messaging_opt_out = excluded.messaging_opt_out,
 		   updated_at = excluded.updated_at`,
 		stored.ID, stored.DisplayName, stored.Phone, stored.SignalUUID, policy,
 		boolToInt(stored.VoiceApproved),
+		boolToInt(stored.MessagingOptOut),
 		stored.CreatedAt.UTC().Format(time.RFC3339Nano),
 		stored.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	)
@@ -267,7 +281,7 @@ func boolToInt(b bool) int {
 // below is the matching scan order). One SSOT keeps Get / GetByPhone /
 // GetBySignalUUID / List / LookupByPhone from drifting apart when the
 // column set grows.
-const contactColumns = `id, display_name, phone, signal_uuid, policy, voice_approved, created_at, updated_at`
+const contactColumns = `id, display_name, phone, signal_uuid, policy, voice_approved, messaging_opt_out, created_at, updated_at`
 
 // scanRecord decodes one contacts row (column order = contactColumns).
 func scanRecord(row interface{ Scan(...any) error }) (Record, error) {
@@ -275,13 +289,15 @@ func scanRecord(row interface{ Scan(...any) error }) (Record, error) {
 		rec         Record
 		policyRaw   string
 		voiceApprov int
+		optOut      int
 		createdAt   string
 		updatedAt   string
 	)
-	if err := row.Scan(&rec.ID, &rec.DisplayName, &rec.Phone, &rec.SignalUUID, &policyRaw, &voiceApprov, &createdAt, &updatedAt); err != nil {
+	if err := row.Scan(&rec.ID, &rec.DisplayName, &rec.Phone, &rec.SignalUUID, &policyRaw, &voiceApprov, &optOut, &createdAt, &updatedAt); err != nil {
 		return Record{}, err
 	}
 	rec.VoiceApproved = voiceApprov != 0
+	rec.MessagingOptOut = optOut != 0
 	if policyRaw != "" && policyRaw != "[]" {
 		if err := json.Unmarshal([]byte(policyRaw), &rec.Policy); err != nil {
 			return Record{}, fmt.Errorf("contact store: decode policy for %s: %w", rec.ID, err)

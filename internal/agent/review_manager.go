@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/pkg/models"
 )
@@ -43,6 +44,12 @@ type ReviewManager struct {
 	validationPolicy *ValidationPolicy
 	bus              *bus.MessageBus
 	logger           *slog.Logger
+
+	// sessionStore resolves the ORIGIN of a review step — the session whose
+	// working directory the reviewer lane must run in (issue #137, the
+	// code-shaped half). Nil = no session context: the reviewer loop keeps
+	// whatever dir it has and the denial log still names the path.
+	sessionStore SessionStoreReader
 }
 
 // ReviewManagerConfig holds configuration for creating a ReviewManager.
@@ -54,6 +61,12 @@ type ReviewManagerConfig struct {
 	ValidationPolicy *ValidationPolicy
 	Bus              *bus.MessageBus
 	Logger           *slog.Logger
+
+	// SessionStore is the session origin resolver for review steps
+	// (SessionStoreReader: lookup by primary id OR conversation id). It is
+	// what lets the reviewer lane resolve the SAME working dir the step job
+	// ran in. Nil = the lane keeps its legacy "no dir bound" behavior.
+	SessionStore SessionStoreReader
 }
 
 // NewReviewManager creates a new review manager.
@@ -80,7 +93,118 @@ func NewReviewManager(cfg ReviewManagerConfig) *ReviewManager {
 		validationPolicy: cfg.ValidationPolicy,
 		bus:              cfg.Bus,
 		logger:           cfg.Logger,
+		sessionStore:     cfg.SessionStore,
 	}
+}
+
+// SetSessionStore wires (or replaces) the session origin resolver used to
+// resolve a review step's working directory. Nil-safe per the repo setter
+// convention: nil keeps the current resolver.
+func (rm *ReviewManager) SetSessionStore(store SessionStoreReader) {
+	if rm == nil || store == nil {
+		return
+	}
+	rm.mu.Lock()
+	rm.sessionStore = store
+	rm.mu.Unlock()
+}
+
+// reviewerLoop returns the reviewer agent loop for a review step, scoped to
+// the step's task and carrying the resolved working dir. Step-scoping (rather
+// than the registry.Get() "_default" bucket) is what keeps two concurrent
+// tasks on one daemon from sharing — and clobbering — one reviewer dir; and
+// the explicit SetWorkingDir is what gives a freshly created task-scoped loop
+// its dir at all (createLoop leaves it "" for the old two-phase init, which
+// this lane never did).
+func (rm *ReviewManager) reviewerLoop(reviewerID string, step *task.TaskStep, workingDir string) (*AgentLoop, error) {
+	if rm.registry == nil {
+		return nil, fmt.Errorf("review manager has no agent registry")
+	}
+	loop, err := rm.registry.GetForTask(reviewerID, step.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	if workingDir != "" {
+		loop.SetWorkingDir(workingDir)
+	}
+	return loop, nil
+}
+
+// resolveStepWorkingDir returns the working directory a review step must run
+// in, together with the session field that supplied it:
+//
+//	WorktreePath > ProjectPath > DetectionContext.CWD
+//
+// (session.ResolveWorkingDir — the repo-wide precedence). The step's own
+// SessionID hint is tried by primary id and by conversation id (the two
+// session keys, cf. handler.go's resolveStepWorkingDir link chain), and an
+// unset hint falls back to the FIRST linked session of the step's task, so a
+// legacy step with no stamp still resolves the task's session.
+//
+// Returns ("", WorkingDirFromNone) when nothing resolves. The daemon's own
+// process CWD is never consulted (AGENTS.md: os.Getwd is not a sanctioned
+// fallback) and no global active-project lookup happens here — an unbound
+// step gets an unbound reviewer, loudly logged by the caller.
+func (rm *ReviewManager) resolveStepWorkingDir(step *task.TaskStep) (string, session.WorkingDirSource) {
+	if rm == nil || step == nil || rm.sessionStore == nil {
+		return "", session.WorkingDirFromNone
+	}
+
+	// Snapshot the store under the lock (the setter may swap it); every
+	// lookup below runs lock-free, per the mutex-scope rule.
+	rm.mu.RLock()
+	store := rm.sessionStore
+	rm.mu.RUnlock()
+	if store == nil {
+		return "", session.WorkingDirFromNone
+	}
+
+	if step.SessionID != "" {
+		sess := store.Get(step.SessionID)
+		if sess == nil {
+			// Session ids and conversation ids are distinct identifiers
+			// (AGENTS.md); a conversation-scoped stamp resolves on the
+			// second lookup.
+			sess = store.GetByConversationID(step.SessionID)
+		}
+		if dir, src := session.ResolveWorkingDir(sess); dir != "" {
+			return dir, src
+		}
+	}
+
+	// The step record may carry a stamp the in-memory copy lacks (the
+	// tactical scheduler passes its own copy, persisted via SetSessionID):
+	// reload the row and retry the stamp when there is one.
+	if rm.stepStore != nil && step.ID != "" {
+		if fresh, err := rm.stepStore.GetByID(step.ID); err == nil && fresh != nil &&
+			fresh.SessionID != "" && fresh.SessionID != step.SessionID {
+			sess := store.Get(fresh.SessionID)
+			if sess == nil {
+				sess = store.GetByConversationID(fresh.SessionID)
+			}
+			if dir, src := session.ResolveWorkingDir(sess); dir != "" {
+				return dir, src
+			}
+		}
+	}
+
+	// No (or unresolvable) step stamp: fall back to the task's linked
+	// sessions, in order, first resolvable wins.
+	if rm.taskStore != nil && step.TaskID != "" {
+		if t, err := rm.taskStore.GetByID(step.TaskID); err == nil && t != nil {
+			for _, sessID := range t.LinkedSessions {
+				sess := store.Get(sessID)
+				if sess == nil {
+					sess = store.GetByConversationID(sessID)
+				}
+				if dir, src := session.ResolveWorkingDir(sess); dir != "" {
+					return dir, src
+				}
+			}
+		}
+	}
+
+	return "", session.WorkingDirFromNone
 }
 
 // ReviewStep initiates review of a completed step.
@@ -282,8 +406,27 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, sp
 	// Build review prompt
 	prompt := rm.buildReviewPrompt(step, spec)
 
-	// Get reviewer agent loop
-	reviewerLoop, err := rm.registry.Get(reviewerID)
+	// Resolve the working dir the reviewer lane runs in (issue #137): the
+	// step's session origin, WorktreePath > ProjectPath > DetectionContext.CWD.
+	// Before this, registry.Get() handed back the "_default" loop whose dir is
+	// "" — the reviewer's file_read fell through to whatever the daemon CWD
+	// was and a fence denial named no path, which is exactly the
+	// unattributable WARN captured on the scratch rig.
+	workingDir, wdSource := rm.resolveStepWorkingDir(step)
+	if workingDir == "" {
+		rm.logger.Warn("review lane has no working directory; the reviewer will require explicit paths",
+			"step_id", step.ID,
+			"task_id", step.TaskID,
+			"session_id", step.SessionID,
+			"source", string(wdSource),
+		)
+	}
+
+	// Get reviewer agent loop, SCOPED TO THE STEP: the reviewer must not share
+	// the registry's "_default" loop with every other task on this daemon (a
+	// full suite runs many tasks through one process, and whichever dir was
+	// stamped last won).
+	reviewerLoop, err := rm.reviewerLoop(reviewerID, step, workingDir)
 	if err != nil {
 		// Fail CLOSED: an unresolvable reviewer must never auto-approve.
 		// The old auto-approve fallback defeated the F9 guard whenever
@@ -293,6 +436,13 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, sp
 		rm.logger.Error("Failed to get reviewer agent", "reviewer", reviewerID, "error", err)
 		return nil, fmt.Errorf("reviewer %s not available: %w", reviewerID, err)
 	}
+	rm.logger.Info("Review lane working dir",
+		"step_id", step.ID,
+		"task_id", step.TaskID,
+		"reviewer", reviewerID,
+		"working_dir", workingDir,
+		"source", string(wdSource),
+	)
 
 	// Run reviewer agent
 	output, err := reviewerLoop.RunOnce(ctx, prompt, step.ID)

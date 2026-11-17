@@ -1069,7 +1069,6 @@ func (lp *LearningPipeline) similarity(a, b string) float64 {
 	return float64(intersection) / float64(union)
 }
 
-
 func (lp *LearningPipeline) loadPatterns() error {
 	path := filepath.Join(lp.dataDir, "patterns.json")
 

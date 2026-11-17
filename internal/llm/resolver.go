@@ -1434,6 +1434,166 @@ func (r *Resolver) candidatesJSON(candidates []*ModelConfig) string {
 	return string(b)
 }
 
+// PeekAliasForWarm reports aliasName's serving candidate WITHOUT any of
+// the side effects ResolveForAlias carries (no rotation, no sticky pin
+// writes, no routing-decision log, no cooldown/block re-evaluation
+// writes): the context-warm seam (C4, plan
+// 20261113-filler-clips-and-context-warm) needs to know which
+// provider/model would serve the imminent turn — to stamp
+// WithResolvedModel for the warm — but a warm must never perturb the
+// alias state the real turn will read.
+//
+// It applies the SAME read-side filters ResolveForAlias applies
+// (alias-level cooldown order, quota blocks, endpoint blocks, the
+// re-validation pass, and the session's sticky-endpoint preference, in
+// that precedence) in a fully request-local form. ok=false when the
+// alias is unknown, empty, or every candidate is blocked — the warm is
+// then a skip, never a guess. sessionID may be "" (no stickiness
+// preference applied). Read-only: safe under r.mu.
+func (r *Resolver) PeekAliasForWarm(aliasName, sessionID string) (*ModelConfig, bool) {
+	if r == nil || aliasName == "" {
+		return nil, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	alias, ok := r.aliases[aliasName]
+	if !ok || len(alias.Models) == 0 {
+		return nil, false
+	}
+	health := r.getOrCreateHealth(aliasName)
+	now := time.Now()
+
+	// Balanced-sticky aliases pin the caller to one candidate for the
+	// session's lifetime; the warm must target the pinned model, not the
+	// rotation head. Read-only mirror of resolveStickyCaller's verdict
+	// (never writes pins, never records a sticky decision).
+	if alias.BalancedStickyRequests && sessionID != "" {
+		if pin, ok := health.StickyPins[sessionID]; ok {
+			pinnedIdx := pin.Index
+			n := len(alias.Models)
+			if pinnedIdx >= 0 && pinnedIdx < n {
+				pinned := alias.Models[pinnedIdx]
+				blocked := (r.quotaEnabled() && r.isQuotaBlocked(health, pinned)) ||
+					r.isEndpointBlocked(health, pinned) ||
+					(health.inCooldown(now) && health.failedModelMatches(alias, pinnedIdx))
+				if !blocked {
+					cp := *pinned
+					return &cp, true
+				}
+			}
+		}
+		// No usable pin: mirror the rotation-head path below; the real
+		// turn would RE-PIN there, but a warm that targets the head is
+		// still the turn's target before the re-pin write.
+		selectedIdx2 := health.CurrentIndex % len(alias.Models)
+		if health.inCooldown(now) && health.failedModelMatches(alias, selectedIdx2) {
+			selectedIdx2 = (selectedIdx2 + 1) % len(alias.Models)
+		}
+		// Pick the first unblocked candidate starting there.
+		chosen := -1
+		for i := range len(alias.Models) {
+			idx := (selectedIdx2 + i) % len(alias.Models)
+			candidate := alias.Models[idx]
+			blocked := (r.quotaEnabled() && r.isQuotaBlocked(health, candidate)) ||
+				r.isEndpointBlocked(health, candidate)
+			if !blocked {
+				chosen = idx
+				break
+			}
+		}
+		if chosen < 0 {
+			return nil, false
+		}
+		cp := *alias.Models[chosen]
+		return &cp, true
+	}
+
+	selectedIdx := health.CurrentIndex
+	if health.inCooldown(now) {
+		nextIdx := (selectedIdx + 1) % len(alias.Models)
+		if nextIdx != selectedIdx {
+			selectedIdx = nextIdx
+		}
+	}
+	if r.quotaEnabled() {
+		if r.isQuotaBlocked(health, alias.Models[selectedIdx]) {
+			nextIdx := (selectedIdx + 1) % len(alias.Models)
+			rotated := false
+			for range len(alias.Models) {
+				candidate := alias.Models[nextIdx]
+				if !r.isQuotaBlocked(health, candidate) {
+					selectedIdx = nextIdx
+					rotated = true
+					break
+				}
+				nextIdx = (nextIdx + 1) % len(alias.Models)
+			}
+			if !rotated {
+				return nil, false
+			}
+		}
+	}
+	if r.isEndpointBlocked(health, alias.Models[selectedIdx]) {
+		nextIdx := (selectedIdx + 1) % len(alias.Models)
+		rotated := false
+		for range len(alias.Models) {
+			candidate := alias.Models[nextIdx]
+			if !r.isEndpointBlocked(health, candidate) {
+				selectedIdx = nextIdx
+				rotated = true
+				break
+			}
+			nextIdx = (nextIdx + 1) % len(alias.Models)
+		}
+		if !rotated {
+			return nil, false
+		}
+	}
+	if sessionID != "" {
+		if preferredKey, ok := preferredEndpointLocked(r, sessionID); ok {
+			for idx, candidate := range alias.Models {
+				if EndpointKey(candidate) != preferredKey {
+					continue
+				}
+				blocked := (r.quotaEnabled() && r.isQuotaBlocked(health, candidate)) ||
+					r.isEndpointBlocked(health, candidate)
+				if !blocked {
+					selectedIdx = idx
+				}
+				break
+			}
+		}
+	}
+	// Re-validation (same semantics as ResolveForAlias): when the
+	// selection carries a block, rotate to the first jointly-unblocked
+	// candidate.
+	if (r.quotaEnabled() && r.isQuotaBlocked(health, alias.Models[selectedIdx])) ||
+		r.isEndpointBlocked(health, alias.Models[selectedIdx]) {
+		n := len(alias.Models)
+		found := -1
+		for i := range n {
+			idx := (selectedIdx + i) % n
+			blocked := r.isEndpointBlocked(health, alias.Models[idx]) ||
+				(r.quotaEnabled() && r.isQuotaBlocked(health, alias.Models[idx]))
+			if !blocked {
+				found = idx
+				break
+			}
+		}
+		if found < 0 {
+			return nil, false
+		}
+		selectedIdx = found
+	}
+	chosen := alias.Models[selectedIdx]
+	if chosen == nil {
+		return nil, false
+	}
+	cp := *chosen
+	return &cp, true
+}
+
 // VerdictForFailure maps a failure into the leaf-01 policy vocabulary,
 // adding the transport seam audit M4 requires: status-bearing errors go
 // through Classify; transport timeouts (context deadline, net.Error

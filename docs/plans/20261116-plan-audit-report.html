@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Plan-tree audit 2026-11-16</title>
+<style>
+body{background:#14171c;color:#e6e8eb;font:14px/1.5 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;margin:24px;max-width:1100px}
+h1{font-size:22px;margin-bottom:2px} .sub{color:#8b93a1;margin-bottom:24px}
+.bar{display:flex;height:34px;border-radius:6px;overflow:hidden;margin:14px 0 4px}
+.seg{display:flex;align-items:center;justify-content:center;color:#0d0f12;font-weight:700;font-size:13px}
+.legend{display:flex;gap:16px;flex-wrap:wrap;margin:10px 0 26px;color:#c6ccd6;font-size:13px}
+.sw{display:inline-block;width:12px;height:12px;border-radius:2px;vertical-align:-1px;margin-right:6px}
+table{border-collapse:collapse;width:100%;margin-top:18px;font-size:13px}
+th,td{border-bottom:1px solid #262b33;padding:6px 10px;text-align:left;vertical-align:top}
+th{background:#1c2027;color:#aeb6c2;position:sticky;top:0}
+tr:nth-child(even){background:#171b21}
+.C{color:#6ee7a0}.INR{color:#ffd166}.INC{color:#ff8fa3}.NS{color:#8ecae6}
+code{background:#1c2027;padding:1px 5px;border-radius:4px}
+</style></head><body>
+<h1>Implementation plan audit — last 10 days (2026-11-06 → 2026-11-16)</h1>
+<div class="sub">37 plan trees / forests touched or created. 4 parallel audit subagents + in-session spot-checks. meept @ main (130 ahead of upstream/main), meept-uptractor (no upstream), antipythony @ main (4 ahead).</div>
+
+<h2>Verdict mix</h2>
+<div class="bar">
+<div class="seg" style="width:75.7%;background:#6ee7a0">28 FULLY COMPLETE</div>
+<div class="seg" style="width:18.9%;background:#ffd166">7 IMPL-NOT-RECONCILED</div>
+<div class="seg" style="width:2.7%;background:#ff8fa3">1 INCOMPLETE</div>
+<div class="seg" style="width:2.7%;background:#8ecae6">1 NEVER STARTED</div>
+</div>
+<div class="legend"><span><i class="sw" style="background:#6ee7a0"></i>FULLY COMPLETE — code+wiring verified</span><span><i class="sw" style="background:#ffd166"></i>IMPLEMENTED-NOT-RECONCILED — landed &amp; wired, tracking stale</span><span><i class="sw" style="background:#ff8fa3"></i>INCOMPLETE</span><span><i class="sw" style="background:#8ecae6"></i>NEVER STARTED</span></div>
+
+<svg viewBox="0 0 760 210" width="760" height="210" role="img" aria-label="per-area verdict counts">
+<g font-family="Helvetica" font-size="12" fill="#c6ccd6">
+<text x="0" y="18">Voice (10)</text>
+<rect x="150" y="6" width="420" height="14" fill="#6ee7a0"/><text x="578" y="17" fill="#6ee7a0">7 C</text>
+<rect x="150" y="22" width="180" height="10" fill="#ffd166"/><text x="338" y="31" fill="#ffd166">3 INR</text>
+<text x="0" y="66">Core/Orch (10)</text>
+<rect x="150" y="54" width="540" height="14" fill="#6ee7a0"/><text x="698" y="65" fill="#6ee7a0">9 C</text>
+<rect x="150" y="70" width="60" height="10" fill="#ffd166"/><text x="218" y="79" fill="#ffd166">1 INR</text>
+<text x="0" y="114">Employee/Routing (13)</text>
+<rect x="150" y="102" width="600" height="14" fill="#6ee7a0"/><text x="758" y="113" fill="#6ee7a0" text-anchor="end">10 C</text>
+<rect x="150" y="118" width="120" height="10" fill="#ffd166"/><text x="278" y="127" fill="#ffd166">2 INR</text>
+<rect x="150" y="130" width="0" height="0" fill="#8ecae6"/><text x="150" y="141" fill="#8ecae6">1 NS</text>
+<text x="0" y="168">Other (4)</text>
+<rect x="150" y="156" width="120" height="14" fill="#6ee7a0"/><text x="278" y="167" fill="#6ee7a0">2 C</text>
+<rect x="150" y="172" width="60" height="10" fill="#ffd166"/><text x="218" y="181" fill="#ffd166">1 INR</text>
+<rect x="150" y="184" width="0" height="0" fill="#ff8fa3"/><text x="150" y="195" fill="#ff8fa3">1 INC</text>
+</g></svg>
+
+<h2>Fully implemented (28)</h2>
+<table><thead><tr><th>Tree</th><th>Wiring</th></tr></thead><tbody>
+<tr><td>20261106-voice-local-leg</td><td>voice_wiring.go + cmd/meept-voice + TUI /voice + Flutter GUI + RPC voice.local.*</td></tr>
+<tr><td>20261106-voice-tierA-qwen3-tts</td><td>voice_keys.go:134 sendKeysFrame; cmd/meept-voice/main.go:100 vendor dispatch</td></tr>
+<tr><td>20261109-voice-comms-fixes</td><td>tts/player.go pause semantics; components.go:2438</td></tr>
+<tr><td>20261109-voice-fresh-session</td><td>voice_wiring.go:454/:599/:725 FreshSessionFor per call</td></tr>
+<tr><td>20261110-voice-callleg</td><td>contact_wiring.go:120 voice.CallLeg; merge dcb6a19a</td></tr>
+<tr><td>20261110-voice-deadair-link</td><td>voice_link_rpc.go:64 NewLinkManager; schema.go:5236</td></tr>
+<tr><td>20261112-voice-peragent</td><td>voice_link_rpc.go:77 BackchannelSoften (global only — see bugs)</td></tr>
+<tr><td>20261030-agent-groups</td><td>components.go:1108 groups.NewResolver; 7bffceb9 dispatch gate</td></tr>
+<tr><td>20261030-memory-second-brain</td><td>memory_capture.go:52 WireMemoryCapture; components.go:3653/3665</td></tr>
+<tr><td>20261030-agent-activity-audit-views</td><td>activity_wiring.go:70/:92; components.go:1136 OTLP</td></tr>
+<tr><td>20261031-hitl-notifications</td><td>components.go:2757 wireSlackChannel</td></tr>
+<tr><td>20261031-llm-serving-tiers</td><td>tierpolicy_wiring.go; semantic_cache_wiring.go:124; components.go:1358/1957</td></tr>
+<tr><td>20261031-trajectory-golden-ci</td><td>e2e/suites/trajectory-golden in manifest (CI gate)</td></tr>
+<tr><td>20261031-turn-journal</td><td>components.go:3319 (flag-gated, default off by design)</td></tr>
+<tr><td>20261102-dsh-convergence</td><td>components.go ~5504 wireDSHConvergence; tools registered ~8648</td></tr>
+<tr><td>20260829-harness-eval</td><td>daemon.go:1379 registerEvalRPCHandlers; cmd/meept/main.go:201</td></tr>
+<tr><td>20261109-employee-ledger</td><td>awareness_wiring.go:289-474; tools/builtin/ledger.go</td></tr>
+<tr><td>20261110-caller-authz</td><td>voice_wiring + guided_intake_wiring; merge cd0bd454/0f1572a0</td></tr>
+<tr><td>20261110-contact-display</td><td>caller_display.go; components.go:5990; merge e3739e84</td></tr>
+<tr><td>20261110-parked-turns-as-jobs</td><td>components.go:4445/7997; ships dark (queue_backend=false)</td></tr>
+<tr><td>20261110-situational</td><td>awareness_wiring.go moment/daystate/weather; impl record 8ddaafaf</td></tr>
+<tr><td>20261110-uptractor-ports</td><td>merge 5840a51e; guided_intake_wiring.go; 81fc45da integration pass</td></tr>
+<tr><td>20261113-escalation-resume-and-hardening</td><td>goal_gate_wiring.go; manager.go resumeOnce; merge ddf3dce8</td></tr>
+<tr><td>20261115-inter-agent-coordination</td><td>turnstate_wiring.go; merge 0f8831dd (closes #139)</td></tr>
+<tr><td>20261108-plan-audit</td><td>ledger doc complete; disposition recorded</td></tr>
+<tr><td>employee-markdown-surface</td><td>cmd/meept/agents_cmd.go markdown branch; c4bba906</td></tr>
+<tr><td>meept-uptractor/20261110-dashboard</td><td>cmd/dashboard/main.go:62/:92/:99/:115/:125</td></tr>
+<tr><td>antipythony/LEAF-gate-watchdog</td><td>wired in 6 byte-identical interpreter_gate copies; e9196b8</td></tr>
+</tbody></table>
+
+<h2>Implemented but not reconciled (7) — code landed + wired, tracking docs stale</h2>
+<table><thead><tr><th>Tree</th><th>State / evidence</th></tr></thead><tbody>
+<tr><td>20261102-voice-sidecar</td><td>Leaves 00T-15 COMPLETE; leaf 16 (Makefile install target + docs/features.md row) open. components.go:5532 wiring present.</td></tr>
+<tr><td>20261110-voice-startguard</td><td>Merged 4cb51951; tracking table ALL PENDING. Leaf 03 live drill unrecorded.</td></tr>
+<tr><td>20261113-filler-clips-and-context-warm</td><td>Merged 648eb6eb (18538f29); root table PENDING. C4 contract violated: Warm(ctx, alias, messages, sessionScope) vs pinned Warm(ctx, messages, opts...). call spot-checked warm.go:109.</td></tr>
+<tr><td>20261101-fresh-context-critic</td><td>Code+wiring live (components.go:1810); master F1-F6 matrix still PENDING.</td></tr>
+<tr><td>20261108-employee-contact-channels</td><td>Merge 668b92fb; F1-F8 test-gate table PENDING; F7 open.</td></tr>
+<tr><td>20261109-statemachine-remediation</td><td>Merge e729937d; all rows PENDING; Q1-Q4 shipped on recommended defaults without recorded owner answer.</td></tr>
+<tr><td>kanban-board (01-07)</td><td>All leaves committed/merged on main (322b6682..4ec87974); master + orchestrators under-report by ~7 leaves (stale at d492867c). Dark: [kanban].enabled=false default. parity_test.go has no 'kanban' symbol.</td></tr>
+</tbody></table>
+
+<h2>Not complete (2)</h2>
+<table><thead><tr><th>Tree</th><th>State</th></tr></thead><tbody>
+<tr><td>antipythony/03-wasm-backend</td><td>IN PROGRESS, honestly tracked. 03.02/03.03 landed; 03.04 generators/match lowering NOT started; WASM not on any user path (ap-cli main.rs:344 cmd_run --wasm hard error). Exit gate unmet.</td></tr>
+<tr><td>20261115-sovereign-router-parity</td><td>NEVER STARTED. Zero implementation (grep confirmed: no DataPosture/QualityDimension/ShadowRouting/DeriveDifficulty at HEAD). Only R6 BudgetModeSteer landed standalone in 17fc00f8 without the parity gate. Blocked on owner decisions Q1-Q3.</td></tr>
+</tbody></table>
+
+<h2>Bugs found (ranked)</h2>
+<ol>
+<li><b>C4 contract violation — 20261113-filler-clips-and-context-warm.</b> Plan pinned <code>Warm(ctx, messages, opts ...ChatOption)</code> with NO alias param; shipped <code>Warm(ctx, alias string, messages []ChatMessage, sessionScope string)</code> (internal/llm/warm.go:109). Alias resolution lives on the client, not the Resolver layer. Either the contract or the code must move.</li>
+<li><b>Per-employee backchannel override silently dropped — 20261112-voice-peragent.</b> internal/daemon/voice_link_rpc.go:77 calls <code>BackchannelSoftenFor(s.cfg, "")</code> with empty employeeID; per-row override never applies on the link path (global only). Spot-checked at HEAD.</li>
+<li><b>kanban-board "parity verified" claim unsupported.</b> parity_test.go contains no kanban assertions; claim rests on gui_inventory.json + a separate test file, not the leaf-named gate.</li>
+<li><b>sovereign-router-parity R6 shipped outside review discipline</b> — merged without parity gate protocol or e2e evidence; 8/9 requirements unimplemented.</li>
+<li><b>tracking-table drift class across 7 trees</b> — master tables read PENDING/IN_PROGRESS for merged work (kanban, startguard, filler-clips, fresh-context-critic, contact-channels, statemachine-remediation, voice-sidecar leaf 16). Repo rule "tracking docs must match disk" violated.</li>
+<li><b>statemachine-remediation Q1-Q4 decision-gated defaults shipped</b> without a recorded owner answer — behavior chose defaults the owner never ratified.</li>
+<li><b>escalation-resume-and-hardening:</b> resumed execution loses candidate prompt (PlanRef{ID} only); <code>agents.goals.approve</code> unauthenticated over unix-socket RPC; ApprovePlan fails whole call on Synthesize error.</li>
+<li><b>20261113-filler-clips:</b> C4 hard rule 3 (noCache bypass) unverified; smoke plan a-e not recorded executed.</li>
+<li><b>FC-1 (plan-audit ledger):</b> fresh-context-critic contract inverted default-on fixed as DOC delta, not code — TierComplex plans still cannot self-seal; frozen C1 violated.</li>
+<li><b>caller-authz O4 residual:</b> ledger_append not payload-narrowed for unapproved callers (deferred, unfixed); signal-leg callers unstamped.</li>
+<li><b>kanban dark launch:</b> all wiring behind default-false [kanban].enabled; smoke/live behavior unverified.</li>
+<li><b>antipythony 03.02 leaf doc</b> still heads "b/c pending" though merged; lower-wip-0303.diff kept in-tree despite "do NOT re-apply" note — footgun for future agents.</li>
+<li><b>inter-agent-coordination:</b> Pair phase reuses TurnStateEvent dual-shape payload (Q2 risk); available_commands_update has no consumer.</li>
+<li><b>voice-tierA-qwen3-tts:</b> C2 contract path drift (providers/providers.go → providers_wiring.go) accepted but unreconciled.</li>
+<li><b>1089 empty gitignored sealed-plan-*.md stubs</b> in meept/docs/plans/ — debris; 532 touched in window; drowns tree signal; recommend retention sweep + writing under $MEEPT_HOME.</li>
+<li><b>meept main is 130 commits ahead of upstream/main</b> — all of the above lives only locally + on the fork's remote? (verify remote). antipythony 4 ahead.</li>
+</ol>
+
+<h2>Fully implemented — but not reconciled / not closeable without fixes
+</h2>
+<p>Code-COMPLETE ≠ issue-closeable. Trees whose work landed but whose ledger/e2e-manifest/gate rows are stale: kanban-board, voice-startguard, filler-clips, fresh-context-critic, contact-channels, statemachine-remediation, voice-sidecar (leaf 16).</p>
+
+<h2>Method &amp; caveats</h2>
+<ul>
+<li>Inventory by mtime+birthtime of master.md/orchestrator.md across ~/git/*/plans and ~/git/*/docs/plans; 37 trees in window. meept sealed-plan-*.md stubs excluded from tree count (not plan trees).</li>
+<li>4 parallel audit subagents; findings spot-checked in-session at HEAD (sovereign-parity grep=0; kanban tables; voice_link_rpc.go:77; warm.go:109 signature).</li>
+<li>Wiring check = construction/registration on daemon boot / RPC / CLI / e2e manifest paths; not test-only callers.</li>
+<li>Tests NOT re-run in this pass; "green" is per-tree tracking + commit messages, not re-verified. Mechanically confirmed: file existence, git ancestry, grep wiring, contract symbol presence.</li>
+<li>subagent reports are self-reports; in-session spot-checks confirmed the load-bearing claims but did not exhaustively re-verify all 37.</li>
+</ul>
+</body></html>

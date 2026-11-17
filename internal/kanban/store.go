@@ -335,6 +335,26 @@ func (s *Store) UpdateCard(ctx context.Context, c Card) error {
 	return nil
 }
 
+// UpdateCardProvenance updates only the provenance fields of a card. It does
+// not touch column_id, so a concurrent human move survives a provenance
+// refresh — the projector re-reads the source row and writes back only what
+// came from it.
+func (s *Store) UpdateCardProvenance(ctx context.Context, cardID, goalID, employeeID, planID, sessionID, triggerRef string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE kanban_cards SET goal_id=?, employee_id=?, plan_id=?, session_id=?, trigger_ref=? WHERE id=?`,
+		goalID, employeeID, planID, sessionID, triggerRef, cardID)
+	if err != nil {
+		return fmt.Errorf("failed to update card provenance: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to read rows affected: %w", err)
+	}
+	if affected == 0 {
+		return ErrUnknownCard{ID: cardID}
+	}
+	return nil
+}
+
 func (s *Store) DeleteCard(ctx context.Context, cardID string) error {
 	res, err := s.db.ExecContext(ctx, "DELETE FROM kanban_cards WHERE id = ?", cardID)
 	if err != nil {

@@ -54,25 +54,6 @@ func NewEmployeeService(m EmployeeManager) *EmployeeService {
 	}
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 // SetLogger replaces the default logger. Nil is ignored (typed-nil guard per
 // CLAUDE.md setter rules).
 func (s *EmployeeService) SetLogger(l *slog.Logger) {

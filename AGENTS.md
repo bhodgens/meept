@@ -196,8 +196,10 @@ make hooks                # core.hooksPath -> .githooks (20 pre-commit checks +
 
 # Static analyzers
 make analyzers            # mutexio + predid
-make lint-ci              # golangci-lint + analyzers + audit scripts + fmt-check-gui
-                          # (fmt-check-gui hard-requires the Dart SDK / Flutter)
+make lint-ci              # golangci-lint + analyzers + audit scripts + fmt-check
+                          # + fmt-check-gui (fmt-check runs scripts/fmt-check.sh,
+                          # the gofmt gate scoped to the .golangci.yml `formatters`
+                          # block; fmt-check-gui hard-requires the Dart SDK / Flutter)
 ```
 
 See `cmd/meept/`, `cmd/meept-daemon/`, and `Makefile` for full command reference.
@@ -230,8 +232,9 @@ User Input → CommServer (RPC/HTTP) → MessageBus → AgentLoop → Dispatcher
 | **Effects** | `internal/effects` (external-effect idempotency ledger) |
 | **GitHub** | `internal/githubsvc` (token sources, per-token client pool, PR status + `ReArmSink` seam; tools themselves are `internal/tools/builtin` github_* registered through the `toolprov` "github" provider (`builtin.SetGitHubProvider` + `toolprov.RegisterAll`), with `githubsvc.ToolFactories` as the mirrored construction seam — `builtin` imports `githubsvc`, so `githubsvc` may NEVER import `builtin`) |
 | **Intake** | `internal/intake` (github-intake-factory: label-gated GitHub Issues poller, ticket→goal identity layer (`Linker.EnsureGoal`, TriggerRef `intake:<repo>#<ticket>`), outcome write-back with the effects storm guard, plan→GitHub-Projects projection (`Projector`, effects receipts as the phase↔issue correlation store, driven by the `plan.executing` + `plan.phase_state` bus topics); daemon wiring `internal/daemon/intake_wiring.go` schedules `intake_poller` only when `[intake].enabled` — disabled by default; rides the `[github]` token sources, no separate token; the read-only `intake.status` RPC (`internal/rpc/intake_status.go`, registered by `internal/daemon/intake_status_rpc.go`) backs the TUI `/intake`, the CLI `meept intake status`, and the GUI's `GET /api/v1/intake/status` bridge + `ui/flutter_ui/lib/features/intake` view (issue #109 parity); docs/workflows/intake.md) |
-| **Kanban** | `internal/kanban` (board/column/card store: rebuildable projection over the work-item machines — one canonical card per work item, provenance fields `goal_id`/`employee_id`/`plan_id`/`trigger_ref`, lease rule A on human moves only, frozen C1 refusal texts parsed by three surfaces; SQLite WAL + FK cascades, `[kanban]` config surface, plan tree `plans/kanban-board/` — full contract in `internal/kanban/AGENTS.md`) ; `internal/kanbansvc` + `cmd/meept-kanban` (sidecar gateway, spawned by the daemon only when `[kanban].sidecar_enabled` is true, default false: loopback HTTP, NO TLS (operator proxy terminates it — TLS-proxy examples in docs/workflows/kanban.md), REST→`kanban.*` RPC forwarding via `internal/transport` ONLY, ZERO board logic/store handle, bearer lane with single-use pairing codes, conjunctive takeover grants, WS event relay with `bearer.<token>` subprotocol lane + echo fed by `BusPump` (kanbansvc pump.go: bridges the daemon's `bus.subscribe`/`bus.poll` RPC pair over the same transport client; the seven concrete kanban topics; `[kanban].allowed_origins` extends the exact-match WS Origin gate for TLS-proxy deployments, plumbed as repeated `-allow-origin` boot flags — the sidecar stays config-blind), Flutter bundle under `/web/`; the daemon-side browser pairing route is `POST /kanban/pair/exchange` (`internal/comm/http/kanban_pairing.go`, loopback-only + rate-limited, code-as-credential per the dev-key precedent); known debt: the binary links sqlite transitively via `transport/rpc_adapter`→`internal/tui` — never import `internal/tui` from `internal/kanban`/`kanbansvc`; full contract in `internal/kanbansvc/AGENTS.md`) ; user surfaces committed: CLI `meept kanban` tree, TUI board view (key `b`), GUI `/kanban` route, `kanban_*` tools; daemon wiring live behind `[kanban].enabled` (default false = byte-identical): `internal/daemon/kanban_wiring.go` constructs store + manager + human lane with the real C10 LeaseAuthority, seeds the default projection rules, runs the projector + reconcile ticker, registers the C4 RPC, and flips the five publisher gates; docs/workflows/kanban.md + kanbansvc.md + meept-kanban.md |
+| **Kanban** | `internal/kanban` (board/column/card store: rebuildable projection over the work-item machines — one canonical card per work item, provenance fields `goal_id`/`employee_id`/`plan_id`/`trigger_ref`, lease rule A on human moves only, frozen C1 refusal texts parsed by three surfaces; SQLite WAL + FK cascades, `[kanban]` config surface, plan tree `plans/kanban-board/` — full contract in `internal/kanban/AGENTS.md`) ; `internal/kanbansvc` + `cmd/meept-kanban` (sidecar gateway, spawned by the daemon only when `[kanban].sidecar_enabled` is true, default false: loopback HTTP, NO TLS (operator proxy terminates it — TLS-proxy examples in docs/workflows/kanban.md), REST→`kanban.*` RPC forwarding via `internal/transport` ONLY, ZERO board logic/store handle, bearer lane with single-use pairing codes, conjunctive takeover grants, WS event relay with `bearer.<token>` subprotocol lane + echo fed by `BusPump` (kanbansvc pump.go: bridges the daemon's `bus.subscribe`/`bus.poll` RPC pair over the same transport client; the seven concrete kanban topics; `[kanban].allowed_origins` extends the exact-match WS Origin gate for TLS-proxy deployments, plumbed as repeated `-allow-origin` boot flags — the sidecar stays config-blind), pairing codes have a 10-minute TTL (pairCodeTTL, `internal/kanbansvc/pairing.go:78`): expired codes are refused with the same uniform 401 as an unknown code, Flutter bundle under `/web/`; the daemon-side browser pairing route is `POST /kanban/pair/exchange` (`internal/comm/http/kanban_pairing.go`, loopback-only + rate-limited, code-as-credential per the dev-key precedent); per-IP rate limit on the sidecar pair/exchange route (M3, `internal/kanbansvc/gateway.go:82-113`) prevents remote brute-force in TLS-proxy deployments; known debt: the binary links sqlite transitively via `transport/rpc_adapter`→`internal/tui` — never import `internal/tui` from `internal/kanban`/`kanbansvc`; full contract in `internal/kanbansvc/AGENTS.md`) ; user surfaces committed: CLI `meept kanban` tree, TUI board view (key `b`), GUI `/kanban` route, `kanban_*` tools; daemon wiring live behind `[kanban].enabled` (default false = byte-identical): `internal/daemon/kanban_wiring.go` constructs store + manager + human lane with the real C10 LeaseAuthority, seeds the default projection rules, runs the projector + reconcile ticker, registers the C4 RPC, and flips the five publisher gates; docs/workflows/kanban.md + kanbansvc.md + meept-kanban.md |
 | **Services** | `internal/services` (chat, session, terminal, push, reflection) |
+| **SMS leg** | `internal/sms` (durable inbound/outbound SMS store + typed topics `sms.inbound.received`/`sms.state.changed`, reply classifier + PendingConfirms), `internal/telnyx` SendSMS2/SMSAttempt (DLR wait + consent guard), `internal/voice/telnyx` signature v2 + replay NonceStore + tolerant normalizer, `internal/comm/http/messaging.go` webhook (401-first, 202 processed, 200 ack-noop); daemon arming `internal/daemon/messaging_arming.go` + `sms_reply_glue.go` closes the D6 dead-seam gap; ships fully opt-in (`[voice.messaging].enabled` / `.inbound_enabled`, default false = byte-identical boot); full contract in `docs/workflows/sms.md` (plan tree `docs/plans/20261110-telnyx-texting/`, dependency of #132) |
 | **Project** | `internal/project` (manager, init_deep, detection) |
 | **TUI** | `internal/tui` (app, commands, components, handlers, modals, models, tableutil) |
 | **GUI** | `ui/flutter_ui` (Flutter web + desktop) |
@@ -399,6 +402,25 @@ degrades silently to exact-only on embedder failure; disabled =
 byte-identical. TTFT (`llm_calls.ttft_ms`, migration v9 via
 captureFirstDelta) is -1 when unmeasured — non-streaming, cache hits,
 and errors never write 0.
+
+### Routing selection chain: quality, posture, admission, spillway
+
+Full rules live in `internal/llm/AGENTS.md` (sovereign-router-parity
+tree); user-facing map: `docs/workflows/llm-routing-quality.md`. Short
+form: the pre-dispatch chain is THREE filters in fixed order (posture ->
+quality -> admission), first non-Allow verdict binds, and it never
+reorders the frozen precedence (quota > endpoint > alias > sticky).
+Every dimension is opt-in: absent `quality`/`data_posture`/`budget.mode`/
+`price_group` config is byte-identical legacy behavior (flag-off golden
+gates it). Admission fires pre-dispatch in all three ProviderManager
+rotation loops (`*ContextTooSmallError`, NonRetryable, never parked);
+shadow routing (`ResolveShadow`, RPC `llm.route.shadow`) is read-only by
+construction — zero ledger/budget/health/pin mutation. Sticky pins carry
+difficulty (`StickyPins` is `map[string]StickyPin`; releases only on a
+strictly-rising difficulty from the pure `DeriveDifficulty` table);
+`ErrToolCallInvalid` keeps the empty/refusal ordering and the bare-
+sentinel pointer rule. Advisory budget is NOT a chain filter; it binds
+at the client budget gate and the tier steer.
 
 ### Voice sidecar (phone channel + local leg)
 
@@ -762,6 +784,7 @@ Audit scripts in `scripts/`:
 | `audit-sqlite-dsn-pragmas.py` | Flags modernc-style `sql.Open("sqlite")` DSNs using mattn keys (`_journal_mode`/`_busy_timeout`/`_fk`/`_foreign_keys`) — modernc.org/sqlite silently drops them (only `_pragma=name(value)` reaches SQLite). bughunt 2026-11-07 infra-fixes |
 | `orphan-check.py` | Ratchets unwired bus topics (publisher-without-subscriber and vice versa) from `docs/generated/bus-topology.json` against `scripts/orphan-baseline.txt` — new-only blocks, `--rebaseline` is deliberate (same policy as the deadcode gate). `make orphan-check`; CI step in code-quality.yml generated-artifacts |
 | `gen-connectivity-graph.py` | Generates bus/RPC/HTTP/WS topology (`make graphs`) |
+| `fmt-check.sh` | gofmt gate for the Go tree (`make fmt-check` check-only / `make fmt` apply); scope mirrors the `.golangci.yml` `formatters` block (archive/, third_party/, testdata/, vendor/, .worktrees/ + nested modules excluded); a missing gofmt is a HARD ERROR, never a silent pass (issue #138 CI gate) |
 | `ensure-dev-key.sh` | Provision the per-installation dev API key (`$MEEPT_HOME/dev_key`, 0600) |
 | `gui-daemon-connect.py` | Reconcile the installed daemon config with the GUI connect path (`ensure-config` / `endpoint` / `check` / `probe`) |
 | `verify-gui-connect.sh` | Prove a fresh install's GUI reaches the daemon (config, key, TLS pin, WS upgrade) |

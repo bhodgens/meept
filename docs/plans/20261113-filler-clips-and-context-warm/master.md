@@ -192,6 +192,68 @@ Hard rules (each is a pinned test, not a hope):
    (`mlx_lm server`, `config/models.json5:185`) and cloud providers get no
    warm call at all. Encode this as one predicate; do not scatter checks.
 
+> **SUPERSEDE 2026-11-17 (issue #142 Option A applied): the AMENDMENT below is
+> WITHDRAWN. Code moved to the frozen C4 signature, not the reverse. As-built
+> now: `func (c *Client) Warm(ctx context.Context, messages []ChatMessage,
+> opts ...ChatOption) error` (internal/llm/warm.go:146), alias resolution at
+> the warmer layer via `Resolver.PeekAliasForWarm` + `WithResolvedModel` opts,
+> `chatOptions.noCache` bypassing all cache Get/Put + semantic tier sites,
+> dedicated warm transport (no retry loop, no slot gate, no identity side
+> effects). Landing commit: 25d5a524. Pins: internal/llm/warm_c4_pins_test.go
+> + internal/daemon/voice_wiring_contextwarm_c4_test.go. The amendment text
+> below is kept as the historical record of the (vetoed-by-default-execution)
+> ratification proposal.**
+
+> **AMENDMENT 2026-11-16 (C4 signature ratification, doc-only; audit BUG #1,
+> owner default applied, veto pending):**
+> The frozen sketch above pins
+> `Warm(ctx, messages, opts ...ChatOption) error`; the as-built, shipped
+> signature (merged 648eb6eb, ancestor of HEAD) is
+>
+> ```go
+> func (c *Client) Warm(ctx context.Context, alias string, messages []ChatMessage, sessionScope string)
+> ```
+>
+> at `internal/llm/warm.go:109`, and it is RATIFIED as the contract. The
+> as-built 4-arg shape is the better design, and the deviation is deliberate:
+>
+> - `alias` is a DEBUG-attribution label only (`internal/llm/AGENTS.md`,
+>   Context-warm seam section): request-scoped alias resolution lives in the
+>   Resolver/ProviderManager lane and is NOT reachable from a bare `*Client`,
+>   so a no-alias signature could not correlate warm logs with the turn they
+>   precede. Callers pass the alias the real turn will use.
+> - `sessionScope` carries exactly what the contract wanted `opts` for: the
+>   session-affinity scope (`WithTaskScope` lane -> `prompt_cache_key` +
+>   `llm.session_affinity` header; empty scope sends neither).
+> - Warm is fire-and-forget (`void`, no error return) by design - failures
+>   are DEBUG-logged and swallowed per this contract's own failure clause
+>   (`warm.go:95-103`). The rule-1 intent ("alias resolution lives at the
+>   Resolver layer") is PRESERVED: Warm performs no resolution, it only
+>   labels.
+> - The signature is mirrored EXACTLY by the daemon seam
+>   (`internal/daemon/voice_wiring_contextwarm.go:58`, `warmDispatcher`
+>   interface) and the voice-side seam (`internal/voice/contextwarm.go:68`,
+>   `WarmFn`); a signature change would touch three packages for zero
+>   behavior gain.
+>
+> Behavior is unchanged by this amendment; it is a doc-only delta. Two
+> further as-built deviations on the hard-rule list are recorded here so the
+> contract matches the code it froze (all owner-default, veto pending, no
+> behavior change to the feature's purpose):
+> - Rule 2 "including tools": the as-built warm payload is a bare prefix
+>   echo WITHOUT tools (`warm.go:163-166` "No tools, no grammar, no
+>   reasoning, no prefill"), documented as-built in
+>   `internal/llm/AGENTS.md` (Context-warm seam). Voice-turn prompts carry
+>   no tool block; a tools-bearing turn would need the prefix identity
+>   revisited before enabling warm on that lane.
+> - Rule 6 deadline: the as-built internal ceiling is 10 s
+>   (`warmCeilingDefault`, `warm.go:67`), not 1200 ms - the replace-discard
+>   lane (cap 1, newest warm cancels the in-flight one, `warm.go:123-131`)
+>   bounds the exposure the 1200 ms figure was protecting.
+>
+> Rule 3 (no cache traffic) is verified at HEAD as SATISFIED - see the
+> 2026-11-16 Delta Log entry for the verdict and file:line evidence.
+
 ### C5: Lane pools (config keys; leaf p1-05 owner resolves, p1-04 consumes)
 
 ```
@@ -270,9 +332,9 @@ Phase 1 leaf 02's commit.
 
 | Node | Status |
 |------|--------|
-| phase1-clips branch | PENDING |
-| phase2-context-warm branch | PENDING |
-| Root integration (docs + full gate set) | PENDING |
+| phase1-clips branch | VALIDATED | 2026-11-16 reconciled from git: leaves merged via 648eb6eb (merge of plan/filler-clips-context-warm; inner merge 18538f29 "merge(main): bring clip/warm tree onto doctor-hermetic + voice-fix main"). Leaf SHAs: 44e3d9a9 (00T gate suites), d662c738 (p1-05/p2-02 config schema), 3769b30d (p1-01 clipstore), 48cfae06 (p1-05/p2-02 lane pools + ContextWarmer), fe8fea32 (p1-03 child render/playback), 00f9e86c (p1-04 talk-loop pools/farewell), d03f3b0a (p1-02/p1-05 daemon planner). Hermetic evidence 2026-11-16: e2e/suites/voice_clips 5/5 PASS (TestVoiceClipsSidecarDisabledNoDir, TestVoiceClipsPoolsRendered, TestVoiceClipsIdentityChangeRegenerates, TestVoiceClipsCachedFillerUnder300msVsSlowTTS, TestVoiceClipsFarewellAudioPrecedesEndFrame); unit ok: internal/voice/clipstore (incl. TestClipKeyGateMatchesFrozenC1Formula), internal/voice (lanes/talkloop), internal/voicechild (clips), internal/daemon (clip planner), internal/voiceframe (C3 wire shapes). Live smoke a-e NOT executed — root Integration Test Plan disposition. |
+| phase2-context-warm branch | VALIDATED | 2026-11-16 reconciled from git: 30e2f6ed (p2-01 Warm seam + p2 daemon wiring), 48cfae06 (p2-02 debounce), d662c738 (p2-02 config knobs), plus root 55569915 (docs integration) — all ancestors of 648eb6eb. Hermetic evidence 2026-11-16: e2e/suites/context_warm 4/4 PASS (TestContextWarmPartialThenFinal, TestContextWarmDisabledZeroWarms, TestContextWarmTokenFloorSkips, TestContextWarmQuotaUpstreamTurnUnaffected); unit ok: internal/llm (incl. TestWarmSignature_C4 compile-time signature pin), internal/voice (contextwarm), internal/daemon (contextwarm wiring). C4 amended 2026-11-16 to ratify the as-built Warm signature (internal/llm/warm.go:109); hard rule 3 verified SATISFIED at HEAD (root Delta Log). |
+| Root integration (docs + full gate set) | COMPLETE | 2026-11-16 reconciled from git: 648eb6eb merged onto main (ancestor of main); 55569915 tree-integration docs; d4fabbb1 plans-status tables commit (in 648eb6eb, on main). Full `make test` + `make lint-ci` + `make graphs-check` NOT re-run in the 2026-11-16 reconciliation pass (scoped hermetic runs only — honest NOT-VERIFIED on the full gate set; re-run owner-side before any release claim). |
 
 Per-leaf tables live in each branch orchestrator. This table mirrors branch verdicts only; the parent determines completion (canon C1-State).
 
@@ -301,6 +363,19 @@ surface (it should not).
    (d) with the voice sidecar disabled the dir is never created;
    (e) with the child stopped mid-call, filler falls back to live synth and the
        call continues.
+
+   **Disposition 2026-11-16 (reconciliation wave):** steps a-e NOT EXECUTED.
+   Every step needs a live daemon + live voice child + live TTS, which this
+   reconciliation pass was scoped to exclude. Owner steps to close: run the
+   local-leg smoke per skill `meept-voice-loop-test` with
+   `MEEPT_HOME=/tmp/mp1` (short path per the sun_path limit), verify each of
+   (a)-(e) in order, and record results in a Delta Log entry. Hermetic
+   equivalents that WERE run green 2026-11-16 (partial coverage of the same
+   properties, recorded in the Delta Log): (a)/(c) e2e `TestVoiceClipsPoolsRendered`
+   + `TestVoiceClipsIdentityChangeRegenerates`; (d) e2e
+   `TestVoiceClipsSidecarDisabledNoDir`; (e) unit `TestClipSayMissFallsToSpeak`
+   + `TestClipGateSayMissFallsBackToLiveSpeak`; (b) has no hermetic
+   equivalent of the live `clip=true` log line.
 4. Merge branch worktree to main per the isolation-worktree protocol; delete branch.
 
 ## Review Checklist
@@ -349,3 +424,62 @@ collision):
    naming the leaf doc (staged==declared-scope rule for sibling safety).
 5. Branch reports COMPLETE in the root Completion Tracking Table; then run
    the root Integration Test Plan.
+
+## Delta Log
+
+- 2026-11-16 (reconciliation wave; audit BUG #1 + BUG #8; doc-only):
+  - **C4 amendment (BUG #1).** The frozen C4 sketch pinned
+    `Warm(ctx, messages, opts ...ChatOption) error`; the shipped signature is
+    `Warm(ctx context.Context, alias string, messages []ChatMessage,
+    sessionScope string)` (`internal/llm/warm.go:109`), mirrored by
+    `internal/daemon/voice_wiring_contextwarm.go:58` (`warmDispatcher`) and
+    `internal/voice/contextwarm.go:68` (`WarmFn`). Ratified as-built via the
+    dated AMENDMENT 2026-11-16 above the C5 contract (owner default, veto
+    pending); rationale recorded there (alias = DEBUG-attribution label per
+    `internal/llm/AGENTS.md` Context-warm seam; sessionScope carries the
+    session-affinity scope the contract wanted opts for; three-package
+    signature surface). As-built deviations on rules 2 (no tools in warm
+    payload) and 6 (10 s ceiling, not 1200 ms) recorded in the same
+    amendment. No Go code changed.
+  - **C4 hard rule 3 (no cache traffic) VERIFIED at HEAD - SATISFIED.**
+    Mechanical evidence: `internal/llm/warm.go` contains ZERO references to
+    `tokenCache`, `semanticCache`, or `semanticLookupBehindMiss`
+    (`grep -c` = 0); the warm path is `Warm` (warm.go:109) ->
+    `dispatchWarm` (:154, builds ONLY via `buildChatRequest` :171 with
+    `WithMaxTokens(1)` + `WithTaskScope` :167-170) ->
+    `sendWarmRequest` (:190), a dedicated transport that never enters
+    `doRequest` (whose cache block sits at `internal/llm/client.go:783-796`:
+    `tokenCache.Get` :785, semantic tier :792, `tokenCache.Put` :977) and
+    never carries a cache key at all. The response body is drained to
+    `io.Discard` (warm.go:233) and discarded. Structural cover:
+    `TestWarm_NoLLMCallsRow`, `TestWarm_ReturnedTextNeverSurfaces`,
+    `TestWarm_BudgetExhaustedStillWarms`, `TestWarm_NeverQueuesBehindRealTurn`
+    (`internal/llm/warm_test.go`). Note: the review-checklist item "warm then
+    real turn with identical messages asserts no tokenCache hit" has no
+    direct test because the warm transport is structurally incapable of
+    touching `tokenCache` (no key builder, no Get/Put call sites in warm.go);
+    the rule is satisfied by construction, pinned by the compile-time
+    signature test `TestWarmSignature_C4` (warm_test.go:162).
+  - **Smoke steps a-e NOT EXECUTED** (live daemon + child + TTS required;
+    out of scope for this pass). Owner steps recorded in the Integration
+    Test Plan disposition block above. Hermetic equivalents run green
+    (partial property coverage): e2e `voice_clips`
+    (`TestVoiceClipsSidecarDisabledNoDir`, `TestVoiceClipsPoolsRendered`,
+    `TestVoiceClipsIdentityChangeRegenerates`,
+    `TestVoiceClipsCachedFillerUnder300msVsSlowTTS`,
+    `TestVoiceClipsFarewellAudioPrecedesEndFrame` — 5/5 PASS, 2026-11-16) and
+    e2e `context_warm` (`TestContextWarmPartialThenFinal`,
+    `TestContextWarmDisabledZeroWarms`, `TestContextWarmTokenFloorSkips`,
+    `TestContextWarmQuotaUpstreamTurnUnaffected` — 4/4 PASS, 2026-11-16);
+    unit suites `internal/voice/clipstore`, `internal/voice`,
+    `internal/voicechild`, `internal/daemon`, `internal/llm`,
+    `internal/config`, `internal/voiceframe` — all `ok` at HEAD 5f64419a
+    (2026-11-16, `go test -count=1` scoped run).
+  - **Tracking tables reconciled.** Root Completion Tracking Table:
+    PENDING -> VALIDATED (both branches; evidence above). Branch
+    orchestrator tables (phase1-clips, phase2-context-warm): leaf rows
+    reconciled to VALIDATED with test names + merge SHAs; branch Test Gate
+    matrices' PENDING e2e columns resolved against the suites on disk
+    (e2e/suites/voice_clips, e2e/suites/context_warm — both manifest
+    -registered, both green 2026-11-16). Merge lineage: 648eb6eb + 18538f29,
+    both verified ancestors of HEAD.

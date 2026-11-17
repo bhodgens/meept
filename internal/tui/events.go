@@ -33,10 +33,10 @@ type EventStream struct {
 	// cursor (strict Timestamp.After comparison), a server-seq cursor can
 	// never skip an event that was buffered before the previous poll
 	// returned — the load-shaped silent-drop bug this replaces.
-	lastSeq     int64
-	buffer      []BusEvent // Circular buffer for recent events
-	bufferSize  int
-	bufferIdx   int
+	lastSeq    int64
+	buffer     []BusEvent // Circular buffer for recent events
+	bufferSize int
+	bufferIdx  int
 }
 
 // EventStreamConfig configures the event stream.

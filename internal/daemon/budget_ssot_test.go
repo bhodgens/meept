@@ -47,7 +47,7 @@ func TestLLMBudgetConfigFromConfigGatedBySwitch(t *testing.T) {
 		PerSessionCostLimit: 10.0,
 		// Contract C7 (s-r parity tree): an absent mode maps to enforce, which is
 		// the byte-identical pre-change default.
-		Mode:                llm.BudgetModeEnforce,
+		Mode: llm.BudgetModeEnforce,
 	}
 	if got := llmBudgetConfigFromConfig(configured); got != want {
 		t.Errorf("enabled mapping = %+v, want %+v", got, want)

@@ -41,11 +41,6 @@ type retryableError struct {
 	reason     string
 }
 
-
-
-
-
-
 // IsRetryable returns true if the error is retryable.
 // It first checks the RetryableError interface, then delegates to
 // errcls.IsRetryable for network/HTTP/rate-limit classification, and

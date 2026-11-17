@@ -32,6 +32,13 @@ const (
 // TurnStateEvent is the payload published on TopicTurnState whenever an
 // agent's turn state changes. It models TurnTerminalEvent's wire shape
 // (internal/agent/handler.go) and classifies as WSProgress.
+//
+// Schema note (Q2 ratified 2026-11-16, see docs/plans/20261115-inter-agent-coordination/master.md):
+// the SAME struct carries both the plain delegate/ACP shape (phase absent) and
+// the pair-phase shape (phase = actor_turn|reviewer_turn|completed|failed).
+// `phase` is OPTIONAL — consumers must not require it and must tolerate its
+// absence; pair consumers discriminate on it, never on struct identity.
+// Both shapes decode without error (pinned by TestTurnStateEvent_BothShapesDecode).
 type TurnStateEvent struct {
 	AgentID    string         `json:"agent_id"`
 	SessionID  string         `json:"session_id,omitempty"`

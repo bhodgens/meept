@@ -48,6 +48,9 @@ func TestRecallAnswer_TerminalTaskNamesResult(t *testing.T) {
 	if err := reg.LinkSession(ctx, tsk.ID, "session-recall"); err != nil {
 		t.Fatalf("link session: %v", err)
 	}
+	if err := reg.UpdateState(ctx, tsk.ID, task.StateExecuting); err != nil {
+		t.Fatalf("start task: %v", err)
+	}
 	if err := reg.UpdateState(ctx, tsk.ID, task.StateCompleted); err != nil {
 		t.Fatalf("complete task: %v", err)
 	}
@@ -139,6 +142,9 @@ func TestRecallAnswer_AnyLabelWithPriorTaskAnswers(t *testing.T) {
 			}
 			if err := reg.LinkSession(ctx, tsk.ID, "session-labels"); err != nil {
 				t.Fatalf("link session: %v", err)
+			}
+			if err := reg.UpdateState(ctx, tsk.ID, task.StateExecuting); err != nil {
+				t.Fatalf("start task: %v", err)
 			}
 			if err := reg.UpdateState(ctx, tsk.ID, task.StateCompleted); err != nil {
 				t.Fatalf("complete task: %v", err)

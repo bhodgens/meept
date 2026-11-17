@@ -162,8 +162,34 @@ issues:
   max-same-issues: 5
   fix: false
 
+# Formatters (golangci-lint v2 moved gofmt/goimports/gofumpt out of `linters`
+# into this `formatters` block; `run`/`linters` above are the linter side).
+#
+# Scope is DELIBERATELY identical to `make fmt-check` / `make fmt`
+# (scripts/fmt-check.sh), so both gates agree:
+#   - gofmt: the tree is NOT gofmt-clean today (69 files). The gate exists and
+#     FAILS; the sweep is a separate, deliberate change. Do not enable a
+#     formatter the tree cannot pass without sweeping, or `make lint-ci` goes
+#     red for everyone.
+#   - gofumpt is deliberately NOT enabled: a probe over internal/ cmd/ pkg/
+#     reports 357 files (289 beyond gofmt). Enabling it would make the gate
+#     unpassable without a 357-file sweep. Revisit only after that sweep.
+#   - goimports: not enabled either; the tree's import grouping is hand-curated
+#     and goimports would rewrite unrelated files. Out of scope here.
 formatters:
+  enable:
+    - gofmt
+  settings:
+    gofmt:
+      # Simplify code: `x = x` -> `x`, `[]T{T{...}}` -> `[]T{{...}}`.
+      # Matches plain `gofmt -s`? NO - plain gofmt is NOT -s, so this is
+      # intentionally left at the gofmt default (false) to keep the gate
+      # byte-identical to `gofmt -l` in scripts/fmt-check.sh. Flip only
+      # together with that script, or the two gates disagree.
+      simplify: false
   exclusions:
+    # Same path exclusions as the linter block above and as
+    # scripts/fmt-check.sh - keep the three lists in lockstep.
     paths:
       - "archive/.*"
       - "third_party/.*"

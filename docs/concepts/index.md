@@ -10,4 +10,5 @@ Understand how Meept works under the hood.
 - [Tools](tools.md) — Tool registry, execution, and MCP integration
 - [Memory](memory.md) — Episodic, task, personality, knowledge graph, and vector memory
 - [Context Management](context-management.md) — Compaction, compression, and the context firewall pipeline
+- [Sessions](sessions.md) — The session as a durable, branchable conversation handle vs. backend work state
 - [Skills](skills.md) — Skill discovery, loading, and execution

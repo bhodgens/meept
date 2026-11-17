@@ -125,8 +125,8 @@ Output: APPROVED or a list of specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 11a-signal-voice-leg | PENDING | 0 | |
-| 11b-signal-msg | PENDING | 0 | |
+| 11a-signal-voice-leg | REVIEWED | 1 | gate GREEN (root matrix F4); LegSignal registry leg + Place gates + audio adapter; commit a0e2217e, wave-B review 93fb9f3f |
+| 11b-signal-msg | REVIEWED | 1 | gate GREEN (root matrix F5); msgchannel MessageAttempt (allowlist/throttle/outcome map) + envelope inbound dedupe; commit a0e2217e, wave-B review 93fb9f3f |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS |
 IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED

@@ -53,7 +53,6 @@ type JSONRPCError struct {
 	Data    any    `json:"data,omitempty"`
 }
 
-
 // ReadMessageBuffered reads a single JSON-RPC message from a BufferedReader.
 // This is the preferred method for MCP server use since it preserves the
 // bufio.Reader across multiple calls, preventing data loss.

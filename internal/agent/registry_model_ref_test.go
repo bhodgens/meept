@@ -118,7 +118,7 @@ func TestModelRefForAgent_ModelAliasReturnedEvenWhenResolverLacksIt(t *testing.T
 }
 
 // TestModelRefForAgent_EmptyEverythingKeepsGlobalDefault pins the bottom of
-// the chain: no model:, no model_alias:, no same-id alias -> '' (the loop
+// the chain: no model:, no model_alias:, no same-id alias -> ” (the loop
 // keeps the global default client).
 func TestModelRefForAgent_EmptyEverythingKeepsGlobalDefault(t *testing.T) {
 	resolver := testResolver(t, "coder")

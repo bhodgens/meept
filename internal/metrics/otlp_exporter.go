@@ -134,7 +134,6 @@ func (o *OTLPExporter) Stop() {
 	})
 }
 
-
 // RecordTurn records a completed agent turn for the given employee and session.
 func (o *OTLPExporter) RecordTurn(employeeID, sessionID string) {
 	o.mu.Lock()

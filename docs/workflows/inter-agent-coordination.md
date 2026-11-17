@@ -143,6 +143,41 @@ that tripped it (`file_paths[i]`), not just a blob position. A clean
 structured payload passes like plain text; a structured payload carrying
 a real directive pattern blocks with the field named.
 
+## Payload-shape ratifications (2026-11-16, issue #152)
+
+### `TurnStateEvent.phase` is optional — one struct, two shapes (Q2 ratified)
+
+Pair phase transitions and delegate/ACP turn boundaries publish on the
+ONE `agent.turn.state` topic through the ONE `TurnStateEvent` struct.
+Pair events set `phase` (`actor_turn` / `reviewer_turn` / `completed` /
+`failed`); plain delegate/ACP events omit it. The WS relay decodes every
+payload into the frozen `TurnStateEvent`
+(`internal/comm/http/server_wsclass.go` `decodeTurnStateWSClass`), and
+no Dart/GUI/TUI consumer of `agent.turn.state` requires the `phase`
+field — it is additive and `omitempty`. Splitting a `PairStateEvent`
+would fork the topic, the WS decoder, and the wsclass marker for zero
+consumer benefit, so the single-type-with-phase shape is RATIFIED.
+`phase` is pinned OPTIONAL: consumers must tolerate its absence; pair
+consumers discriminate on it, never on struct identity. Both shapes are
+pinned to decode cleanly by `TestTurnStateEvent_BothShapesDecode`
+(internal/agent/coordination_test.go).
+
+### `available_commands_update` is progress-only — no consumer (Q3 ratified)
+
+ACP `session/update` notifications with
+`sessionUpdate == "available_commands_update"` are rendered by
+`internal/acp/session.go` into a `SessionEvent{Kind: "commands"}` and
+drained verbatim (kind + text) into the `acp_agent` tool's `events`
+array (`internal/tools/builtin/acp_agent.go` `drainSessionEvents`).
+No TUI/GUI/menubar surface renders slash-command availability from
+this event today — the Flutter GUI's command palette rides its own
+`_loadCustomCommands` path and never reads ACP `commands` events, and
+the TUI slash autocomplete is file/config-driven. The event is
+therefore RATIFIED as informational progress: it is carried for
+logging/drain visibility only, with NO consumer and NO new bus topic.
+If a command-palette surface for ACP sessions is ever built, it should
+consume this event rather than re-derive the list.
+
 ## Observability summary
 
 | Layer | Surface |

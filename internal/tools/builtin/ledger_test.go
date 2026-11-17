@@ -648,6 +648,85 @@ func TestLedgerAppendExecute_NonVoiceSetStatusGoldenUnchanged(t *testing.T) {
 	}
 }
 
+// #149 (O4): an unapproved caller may not file the work-opening kinds
+// (commitment/resolution) nor carry resolves_id — each refuses the WHOLE
+// call with zero rows, mirroring the set_status refusal shape.
+func TestLedgerAppendExecute_UnapprovedVoiceCallerWorkKindsRefused(t *testing.T) {
+	st := ledgerTestStore(t)
+	tool := NewLedgerAppendTool(st, slog.New(slog.DiscardHandler))
+	ctx := voiceCallerCtx("eve", callerid.Info{Number: "+155****7777"}) // unknown => Approved=false
+
+	// Seed a row as an approved caller so resolves_id has a target.
+	approvedCtx := voiceCallerCtx("eve", callerid.Info{Number: "+155****2222", Name: "boss", Approved: true, Known: true})
+	if _, err := tool.Execute(approvedCtx, map[string]any{
+		"kind":    "commitment",
+		"subject": "acme-roof",
+		"payload": map[string]any{"owe": "call back"},
+	}); err != nil {
+		t.Fatalf("seed Execute: %v", err)
+	}
+	rows, err := st.QueryLog(context.Background(), ledger.LogQuery{EmployeeID: "eve"})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("want 1 seed row, got %d (err %v)", len(rows), err)
+	}
+	targetID := rows[0].ID
+
+	for _, tc := range []struct {
+		name  string
+		input map[string]any
+	}{
+		{"commitment kind", map[string]any{
+			"kind": "commitment", "subject": "acme-roof",
+			"payload": map[string]any{"owe": "refund"},
+		}},
+		{"resolution kind", map[string]any{
+			"kind": "resolution", "subject": "acme-roof",
+			"payload": map[string]any{"sent": "callback"},
+		}},
+		{"resolves_id on message kind", map[string]any{
+			"kind": "observation", "subject": "acme-roof",
+			"payload": map[string]any{"note": "stranger references close"}, "resolves_id": float64(targetID),
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := tool.Execute(ctx, tc.input)
+			if err != nil {
+				t.Fatalf("Execute returned Go error (want ToolResult refusal): %v", err)
+			}
+			tr, ok := res.(*tools.ToolResult)
+			if !ok {
+				t.Fatalf("result type = %T, want *tools.ToolResult", res)
+			}
+			if tr.Success {
+				t.Fatalf("%s must refuse for unapproved caller: %+v", tc.name, tr)
+			}
+			if !strings.Contains(tr.Error, "ledger_append") {
+				t.Errorf("refusal must name the tool: %q", tr.Error)
+			}
+		})
+	}
+
+	rows, _ = st.QueryLog(context.Background(), ledger.LogQuery{EmployeeID: "eve"})
+	if len(rows) != 1 {
+		t.Fatalf("refusals must write zero rows; got %d", len(rows))
+	}
+	if _, found, err := st.GetState(context.Background(), "eve", "acme-roof"); err != nil || found {
+		t.Errorf("no subject state row expected from refused work-kinds (found=%v err=%v)", found, err)
+	}
+
+	// Approved caller still files both kinds freely (positive control).
+	res, err := tool.Execute(approvedCtx, map[string]any{
+		"kind": "resolution", "subject": "acme-roof",
+		"payload": map[string]any{"sent": "callback"}, "resolves_id": float64(targetID),
+	})
+	if err != nil {
+		t.Fatalf("approved Execute: %v", err)
+	}
+	if tr, ok := res.(*tools.ToolResult); !ok || !tr.Success {
+		t.Fatalf("approved caller resolution+resolves_id must succeed: %+v", res)
+	}
+}
+
 // (5) the gate must not regress arg handling on allowed paths: after a
 //
 //	REFUSED set_status attempt (zero rows), the same caller's plain
@@ -657,8 +736,9 @@ func TestLedgerAppendExecute_RefusalDoesNotCorruptArgHandling(t *testing.T) {
 	tool := NewLedgerAppendTool(st, slog.New(slog.DiscardHandler))
 	ctx := voiceCallerCtx("eve", callerid.Info{Number: "+15550003333"})
 
-	// Seed a commitment (plain append — message lane allows it).
-	if _, err := tool.Execute(ctx, map[string]any{
+	// Seed a commitment as an APPROVED caller (unapproved callers cannot file commitments since #149).
+	approvedCtx := voiceCallerCtx("eve", callerid.Info{Number: "+155****2222", Name: "boss", Approved: true, Known: true})
+	if _, err := tool.Execute(approvedCtx, map[string]any{
 		"kind":    "commitment",
 		"subject": "acme-roof",
 		"payload": map[string]any{"owe": "call back"},
@@ -691,8 +771,11 @@ func TestLedgerAppendExecute_RefusalDoesNotCorruptArgHandling(t *testing.T) {
 		t.Fatalf("refusal must leave exactly the seed row, got %d", len(rows))
 	}
 
-	// Re-append WITHOUT set_status -> succeeds, resolves_id passthrough intact.
-	res, err = tool.Execute(ctx, map[string]any{
+	// Re-append WITHOUT set_status by the APPROVED caller -> succeeds,
+	// resolves_id passthrough intact. (An unapproved stranger may no longer file
+	// a resolution or carry resolves_id at all — that refusal is pinned by the
+	// #149 tests above.)
+	res, err = tool.Execute(approvedCtx, map[string]any{
 		"kind":        "resolution",
 		"subject":     "acme-roof",
 		"payload":     map[string]any{"sent": "callback"},

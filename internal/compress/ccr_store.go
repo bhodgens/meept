@@ -66,4 +66,3 @@ type CCRStoreConfig struct {
 type Duration struct {
 	time.Duration
 }
-

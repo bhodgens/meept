@@ -61,7 +61,6 @@ var (
 	}
 )
 
-
 // IsRetryable checks if a sync error can be retried.
 func IsSyncRetryable(err error) bool {
 	if err == nil {

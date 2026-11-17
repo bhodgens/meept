@@ -83,6 +83,7 @@ import (
 	"github.com/caimlas/meept/internal/shadow/adapters"
 	"github.com/caimlas/meept/internal/skills"
 	"github.com/caimlas/meept/internal/skills/lifecycle"
+	"github.com/caimlas/meept/internal/sms"
 	"github.com/caimlas/meept/internal/storage"
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/internal/templates"
@@ -91,6 +92,7 @@ import (
 	"github.com/caimlas/meept/internal/tools/builtin"
 	"github.com/caimlas/meept/internal/tools/mcp"
 	"github.com/caimlas/meept/internal/validator"
+	voicetelnyx "github.com/caimlas/meept/internal/voice/telnyx"
 	"github.com/caimlas/meept/internal/weather"
 	"github.com/caimlas/meept/internal/worker"
 	"github.com/caimlas/meept/internal/workspace"
@@ -630,6 +632,14 @@ type Components struct {
 	SlackChannel      *slack.SlackChannel
 	Voice             *VoiceWiring
 	SlackInteractions *slack.InteractionsHandler
+
+	// SMSStore is the durable SMS store (plan 20261110-telnyx-texting
+	// leaf 03/02, $MEEPT_HOME/sms/sms.db). Built when the messaging
+	// block is enabled (or inbound_enabled is set); nil otherwise — the
+	// messaging webhook then stays in the D3 parse-and-ack posture.
+	// Owned here so stopComponents closes it AFTER the voice stack stops
+	// (the callstore ordering precedent: consumers before stores).
+	SMSStore *sms.Store
 
 	// Code intelligence
 	ASTParser  *ast.ParserManager
@@ -4614,8 +4624,22 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				TaskStore: orchTaskStore,
 				Bus:       msgBus,
 				Logger:    logger.With("component", "review"),
+				// #137: the reviewer lane resolves the step's session workdir
+				// through this store (resolveStepWorkingDir). Without it the
+				// resolver returns ("", none) on every real review and the
+				// workdir inheritance ships only in tests. Same store the
+				// TacticalScheduler takes just below.
+				SessionStore: c.SessionStore,
 			})
 			c.ReviewManager = reviewManager
+			// #137: the reviewer lane resolves the step's session workdir
+			// through this store (resolveStepWorkingDir). Without it the
+			// resolver returns ("", none) on every real review and the
+			// workdir inheritance shipped only in tests
+			// (review_workdir_test.go injects the store). Late-armed via
+			// the setter, the same pattern the TacticalScheduler uses
+			// just below — the store handle is fully built by this point.
+			reviewManager.SetSessionStore(c.SessionStore)
 
 			// Create escalation manager for automatic re-planning on failures
 			c.EscalationManager = agent.NewEscalationManager(agent.EscalationManagerConfig{
@@ -5572,8 +5596,9 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// runner stamps the bound employee's prompt + constitution
 			// onto the session loop before every turn. Nil (employees and
 			// bots both disabled) degrades to the template persona.
-			Employees: c.EmployeeManager,
-			Logger:    logger,
+			Employees:   c.EmployeeManager,
+			LLMResolver: c.LLMResolver,
+			Logger:      logger,
 			// Moment renderer seam (awareness leaf 01/02): set only when
 			// [awareness] is enabled (nil otherwise -> the turn runner
 			// stamps nothing, voice prompts byte-identical, D1).
@@ -5623,10 +5648,37 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			)
 		}
 		vdeps.SupervisorChatter = voiceSupervisorChatter(c)
+		// SMS store + replay nonce (plan 20261110-telnyx-texting leaf
+		// 03/02, §6): built when the messaging block is enabled OR the
+		// inbound leg is explicitly on ($MEEPT_HOME/sms/sms.db, the §4
+		// path). Fail-soft: an open failure logs + leaves the store nil
+		// — the webhook stays in the D3 parse-and-ack posture, never a
+		// boot failure. Owned on Components so stopComponents closes it
+		// after the voice stack (callstore ordering precedent).
+		if cfg.Voice.Messaging.Enabled || cfg.Voice.Messaging.InboundEnabled {
+			smsDir := config.MeeptPath("sms")
+			if err := os.MkdirAll(smsDir, 0o755); err != nil {
+				logger.Warn("sms store: mkdir failed; messaging webhook stays parse-and-ack", "error", err)
+			} else if st, err := sms.Open(filepath.Join(smsDir, "sms.db"), logger.With("component", "sms-store")); err != nil {
+				logger.Warn("sms store: open failed; messaging webhook stays parse-and-ack", "error", err)
+			} else {
+				c.SMSStore = st
+				vdeps.MessagingStore = st
+				vdeps.MessagingNonces = voicetelnyx.NewNonceStore(6*time.Minute, 10000)
+				logger.Info("sms store armed",
+					"path", filepath.Join(smsDir, "sms.db"),
+					"inbound_enabled", cfg.Voice.Messaging.InboundEnabled,
+				)
+			}
+		}
 		wiring, err := WireVoice(c.ctx, vdeps)
 		if err != nil {
 			if vdeps.ContactDisplayStore != nil {
 				_ = vdeps.ContactDisplayStore.Close()
+			}
+			if c.SMSStore != nil {
+				_ = c.SMSStore.Close()
+				c.SMSStore = nil
 			}
 			logger.Error("FATAL: voice wiring failed", "error", err)
 			return nil, err
@@ -5638,6 +5690,10 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// close it here (the wiring's Stop would have).
 			if vdeps.ContactDisplayStore != nil {
 				_ = vdeps.ContactDisplayStore.Close()
+			}
+			if c.SMSStore != nil {
+				_ = c.SMSStore.Close()
+				c.SMSStore = nil
 			}
 			c.Voice = nil
 			logger.Warn("voice sidecar disabled: wiring degraded (see voice wiring WARN above)")
@@ -7654,6 +7710,18 @@ func (c *Components) stopComponents(ctx context.Context) error {
 			c.Logger.Info("Employee ledger closed")
 		}
 		c.EmployeeLedger = nil
+	}
+	// SMS store close (plan 20261110-telnyx-texting leaf 03/02): AFTER
+	// the voice stack (the callstore ordering precedent — the webhook
+	// consumers stop before their store), so a late in-flight webhook
+	// write still finds an open handle. Nil on every disabled boot.
+	if c.SMSStore != nil {
+		if err := c.SMSStore.Close(); err != nil {
+			c.Logger.Warn("sms store close failed", "error", err)
+		} else {
+			c.Logger.Info("sms store closed")
+		}
+		c.SMSStore = nil
 	}
 
 	// Close stores

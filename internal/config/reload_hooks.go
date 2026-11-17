@@ -56,8 +56,6 @@ func (r *ReloadRegistry) Trigger(path string, commitHash string) {
 	}
 }
 
-
-
 // Len returns the number of hooks registered for a path.
 func (r *ReloadRegistry) Len(path string) int {
 	r.mu.RLock()

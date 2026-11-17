@@ -72,7 +72,7 @@ unset = wall-clock UTC; a malformed value fails loudly.
 | Command | Notes |
 |---------|-------|
 | `meept groups list [--json]` | Policy + binding tables + `default_managed` (over daemon RPC). |
-| `meept groups explain <agent> [--json]` | Per grant/deny: binding + policy attribution. |
+| `meept groups explain <agent> [--json]` | Per grant/deny: binding + policy attribution. On a roster miss an employee id is explained instead: `subject employee:<id>`, reason `tools_allowed`/`tools_forbidden`, from the constitution (not group policy). |
 | `meept groups check [--json]` | Defect enumeration; exit 0 clean / 1 defects. |
 | `meept groups override add <subject> --allow T1,T2 --reason R --expires RFC3339 [--file P]` | Add a time-boxed allow override. |
 | `meept groups override list [--all] [--file P]` | Active overrides (`--all` includes expired). |

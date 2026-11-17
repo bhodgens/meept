@@ -114,10 +114,10 @@ matrix with the new paths).
 
 | # | Feature | Source | Unit tests | E2E | Status |
 |---|---------|--------|-----------|-----|--------|
-| F1 | Terminal completeness | 01 | TestAcquireFailureFiresFailOutcome | fan-out matrix | PENDING |
-| F2 | Signal parity | 02 | per-task | n/a | PENDING |
-| F3 | Watchdog + sweep | 03 | per-task | n/a | PENDING |
-| F4 | Webhook decouple | 04 | TestHoldDoesNotBlockWebhook | n/a | PENDING |
+| F1 | Terminal completeness | 01 | TestAcquireFailureFiresFailOutcome | fan-out matrix | VALIDATED (f9304084/47d03b60; merged e729937d) |
+| F2 | Signal parity | 02 | per-task | n/a | VALIDATED (97c67a59; merged e729937d) |
+| F3 | Watchdog + sweep | 03 | per-task | n/a | VALIDATED (117cd338; merged e729937d) |
+| F4 | Webhook decouple | 04 | TestHoldDoesNotBlockWebhook | n/a | VALIDATED (d0802617; merged e729937d) |
 
 ## Open Questions
 

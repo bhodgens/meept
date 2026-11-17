@@ -378,7 +378,6 @@ func (o BudgetHierarchyOptions) effectiveTurnWarningRatio() float64 {
 	return o.TurnWarningRatio
 }
 
-
 // NewBudgetHierarchyWithConfig is like NewBudgetHierarchy but accepts
 // configuration overrides for reserve ratio, warning thresholds, and
 // carryover/borrowing behavior. Zero-valued fields fall back to defaults.

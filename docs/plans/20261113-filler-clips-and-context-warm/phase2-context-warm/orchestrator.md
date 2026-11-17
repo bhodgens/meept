@@ -41,10 +41,33 @@ C4 (frozen in root master.md, reproduced here for dispatch contexts):
 func (c *Client) Warm(ctx context.Context, messages []ChatMessage, opts ...ChatOption) error
 ```
 
+> **AMENDMENT 2026-11-16 (mirrors root master.md C4 amendment; doc-only;
+> audit BUG #1, owner default applied, veto pending):** The as-built,
+> shipped signature (merged 648eb6eb) is RATIFIED:
+>
+> ```go
+> func (c *Client) Warm(ctx context.Context, alias string, messages []ChatMessage, sessionScope string)
+> ```
+>
+> (`internal/llm/warm.go:109`; mirrored by this branch's seams
+> `internal/daemon/voice_wiring_contextwarm.go:58` `warmDispatcher` and
+> `internal/voice/contextwarm.go:68` `WarmFn`). Rationale and the two
+> further as-built hard-rule notes (no-tools payload; 10 s ceiling) live in
+> the root master.md amendment — this block reproduces the verdict for
+> dispatch contexts. Behavior unchanged; doc-only delta. Hard rule 3 (no
+> cache traffic) verified SATISFIED at HEAD 2026-11-16 (root Delta Log).
+
 Notes the leaves must not "improve" away:
 - The message type is `llm.ChatMessage` (`internal/llm/models.go:23`), not `Message`.
-- There is no `alias` parameter: alias resolution lives at the Resolver/ProviderManager layer. The caller resolves, then passes opts.
-- A cache bypass does not exist today and must be ADDED (`client.go:785`/`:977` exact-key, `:383`/`:410` semantic).
+- ~~There is no `alias` parameter~~ (SUPERSEDED by the 2026-11-16 amendment:
+  `alias` IS a parameter, as a DEBUG-attribution label only — Warm performs
+  no alias resolution; resolution stays at the Resolver/ProviderManager
+  layer, which is the intent the original note protected).
+- The response-cache bypass was added as a dedicated transport, not an
+  option flag: `sendWarmRequest` (`internal/llm/warm.go:190`) never enters
+  `doRequest`, whose cache block is `client.go:785`/`:977` exact-key and
+  `:383`/`:410` semantic (HEAD line numbers). Verified no-cache at HEAD
+  2026-11-16.
 
 C6 (new, this branch):
 ```
@@ -72,9 +95,20 @@ Root master.md conventions verbatim, plus: opt-in defaults MUST default false (b
 
 | Leaf | Status |
 |------|--------|
-| 00T-gate-tests | COMPLETE (4 scenarios authored; 2 RED awaiting integration) |
-| 01-llm-warm-seam | REVIEWED (19/20 tests green incl. -race) |
-| 02-partial-warm-debounce | IMPLEMENTED (all 4 e2e scenarios GREEN with daemon wiring; commit sweep B pending) |
+| 00T-gate-tests | VALIDATED (4 scenarios authored; all GREEN in e2e/suites/context_warm at HEAD 5f64419a, run 2026-11-16: TestContextWarmPartialThenFinal, TestContextWarmDisabledZeroWarms, TestContextWarmTokenFloorSkips, TestContextWarmQuotaUpstreamTurnUnaffected — 4/4 PASS) |
+| 01-llm-warm-seam | VALIDATED (merged 30e2f6ed, ancestor of 648eb6eb on main; unit suite internal/llm ok 2026-11-16 incl. -race earlier at leaf time: 19/20 green then, full package green now; compile-time signature pin TestWarmSignature_C4 live at warm_test.go:162) |
+| 02-partial-warm-debounce | VALIDATED (merged 48cfae06 + 30e2f6ed wiring, ancestors of 648eb6eb on main; commit sweep B landed via the merge; unit ok internal/voice + internal/daemon contextwarm tests 2026-11-16) |
+
+Delta log (branch):
+
+- 2026-11-16 (reconciliation wave, doc-only): leaf statuses reconciled
+  against disk + git (all three merged on main via 648eb6eb/18538f29, both
+  verified ancestors of HEAD). Test Gate matrix below reconciled PENDING ->
+  VALIDATED against the suites run green 2026-11-16. C4 amended to ratify
+  the as-built signature (root master.md amendment applies here verbatim).
+  Hard rule 3 verified SATISFIED at HEAD (root Delta Log: warm.go zero
+  tokenCache/semantic references; dedicated sendWarmRequest transport never
+  enters doRequest's cache block client.go:783-796).
 
 ## Test Gate
 
@@ -82,13 +116,13 @@ Suite target: `e2e/suites/context-warm` (hyphen, matching existing suite names) 
 
 | Feature | Unit test | E2E test | Status |
 |---------|-----------|----------|--------|
-| Warm payload shape (max_tokens=1, non-streaming, same tools/prefix) | llm warm_test | suite: fake upstream records 2 requests (warm then turn), prefix shared | PENDING |
-| Warm cannot pollute a cache | llm warm_test | suite: warm then turn with identical messages reaches upstream (no cache hit) | PENDING |
-| Warm never retries | llm warm_test | suite: empty-text fake upstream sees exactly 1 request per warm | PENDING |
-| Disabled = byte-identical (opt-in) | config test | suite: flag off implies zero warm requests | PENDING |
-| Debounce + latest-wins | routing_test | suite: 4 rapid partials imply at most 2 warms, final turn unaffected | PENDING |
-| R8 no-tools/no-effect/no-quota-park | warm_test | suite: warm against 429/quota-blocked fake upstream never delays the real turn | PENDING |
-| Non-reuse endpoint no-op | warm_test | suite: endpoint without prefix-reuse support sees zero warms | PENDING |
+| Warm payload shape (max_tokens=1, non-streaming, same tools/prefix) | llm warm_test: TestWarm_PayloadShape, TestWarm_PrefixIdentity | suite TestContextWarmPartialThenFinal | VALIDATED (unit + e2e green 2026-11-16; as-built note: warm payload carries NO tools — root C4 amendment) |
+| Warm cannot pollute a cache | llm warm_test: structural (warm.go has zero tokenCache/semantic references; dedicated sendWarmRequest transport, warm.go:190) | suite TestContextWarmPartialThenFinal (warm then turn both reach upstream) | VALIDATED (verified mechanically + e2e green 2026-11-16; see root Delta Log) |
+| Warm never retries | llm warm_test: TestWarm_QuotaUpstream_QuietNoRetry, TestWarm_TransportErrorQuiet | suite TestContextWarmQuotaUpstreamTurnUnaffected | VALIDATED (unit + e2e green 2026-11-16) |
+| Disabled = byte-identical (opt-in) | config test: TestContextWarmDisabledIsNoOp; TestContextWarmDisabledNoWarms | suite TestContextWarmDisabledZeroWarms | VALIDATED (unit + e2e green 2026-11-16) |
+| Debounce + latest-wins | routing_test: TestContextWarmDebounceLatestWins, TestContextWarmThrottleSpacing, TestContextWarmSubFloorSkips | suite TestContextWarmTokenFloorSkips (sub-floor skip covered; the 4-partials-≤2-warms scenario has no direct e2e — unit pins only) | VALIDATED (unit + e2e green 2026-11-16; e2e debounce-count gap noted honestly) |
+| R8 no-tools/no-effect/no-quota-park | warm_test: TestWarm_NoLLMCallsRow, TestWarm_BudgetExhaustedStillWarms, TestWarm_NeverQueuesBehindRealTurn, TestWarm_ReturnedTextNeverSurfaces | suite TestContextWarmQuotaUpstreamTurnUnaffected | VALIDATED (unit + e2e green 2026-11-16) |
+| Non-reuse endpoint no-op | warm_test: TestWarm_AnthropicCodexNoop (client-class no-op twins); MLX/no-predicate case is covered by the disabled-flag pin, not a dedicated endpoint predicate | suite: none (no dedicated suite scenario) | PARTIALLY VERIFIED (unit twins green 2026-11-16; the single-predicate endpoint gate was NOT shipped — the as-built seam is silent on Anthropic/Codex client classes and gated by the opt-in flag; flagged in root Delta Log) |
 
 Dispatch 00T -> validate in-session -> commit -> wave A: 01 || 02 -> then the branch suite-green run.
 

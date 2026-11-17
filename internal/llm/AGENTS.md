@@ -398,8 +398,59 @@ turn's prefix in the provider prompt cache / KV slot. Invariants:
   and `CodexClient.Warm` are explicit no-op twins by design — keep the
   `warmDispatcher` shape every client class implements so callers never
   type-switch.
-- **`alias` is a DEBUG-attribution label only.** A bare *Client serves
-  whatever (possibly Reconfigured) config it holds; request-scoped alias
-  resolution is the Resolver/ProviderManager lane and is not reachable
-  from Warm. Callers pass the alias of the real turn for log
-  correlation.
+- **No alias parameter; resolution lives at the caller layer.** The frozen
+  C4 signature is `Warm(ctx, messages []ChatMessage, opts ...ChatOption) error`
+  (issue #142 reverted the 2026-11-16 alias-param ratification). Request-
+  scoped alias resolution is the Resolver/ProviderManager lane: the daemon's
+  context-warm closure resolves the alias read-only via
+  `Resolver.PeekAliasForWarm` (never perturbing rotation/blocks/sticky
+  state) and carries the result on the opts as `WithResolvedModel`; a bare
+  `*Client` serves whatever (possibly Reconfigured) config it holds, and
+  `ProviderManager.Warm` re-derives routing from the same opts. The warm
+  performs NO resolution and takes no attribution label.
+
+## Routing selection chain, posture, pool scope, spillway (sovereign-router-parity tree, 20261115)
+
+Full user-facing map: `docs/workflows/llm-routing-quality.md`. Invariants:
+
+- **The chain is three filters, fixed order, never a fourth** (Contract
+  C1): posture -> quality -> admission, registered in `NewResolver`;
+  `runSelectionFilters` returns the FIRST non-Allow verdict. Advisory
+  budget is NOT a chain filter (drift-audit ruling 4) - it binds at the
+  client budget gate + the PM tier steer. The chain never reorders the
+  frozen precedence (quota > endpoint > alias > sticky).
+- **Absent config = inert, byte-identical** for every dimension: no
+  `quality` block -> floor 0; no `data_posture` -> private; no
+  `budget.mode` -> enforce; no `price_group` -> untagged/invisible.
+  A feature that binds when unconfigured is a defect (the flag-off
+  golden test is the gate).
+- **Admission fires PRE-dispatch, all three PM rotation loops**
+  (provider_manager.go); `*ContextTooSmallError` is NonRetryable -
+  never retried, never parked. `ContextLimit <= 0` = unknown = allow;
+  never fabricate a bound. The post-hoc `DetectContextOverflowFromBody`
+  classifier STAYS as the fallback lane.
+- **Sensitive never reaches a non-cleared model** (C4). The
+  secret_scanner match TEXT is never logged anywhere, only the count.
+  `data_posture` absent = private.
+- **Failure scope is the block key** (C5): `ClassifyFailure` is the
+  frozen 4-arg form; 401/402/403 arm ACCOUNT blocks (sibling models
+  skip), 429-with-pool-phrase arms POOL, 400/413/422 block nothing.
+  Legacy `host|credential` endpoint keys keep working.
+- **Shadow is read-only by construction** (C6): `ResolveShadow` takes
+  `r.mu` read-side only, writes no ledger/metrics/budget/health/pin
+  state. Any mutation on the shadow path is a test failure.
+- **Sticky pins carry difficulty** (C8/C11): `StickyPins` is
+  `map[string]StickyPin{Index,Difficulty,CreatedAt}` (leaf 07 converted
+  the bare-int map - read sites use `pin.Index`, resolver.go:1472).
+  A pin releases ONLY on a strictly-rising difficulty; `DeriveDifficulty`
+  is pure, never a second classifier call; difficulty 0 = inert.
+- **Tool-call validation keeps the empty/refusal ordering** (C9):
+  `ErrToolCallInvalid` is the BARE sentinel by pointer identity,
+  validated AFTER parse / BEFORE the executor, once at stream end, on
+  all three clients. An empty completion is still `ErrEmptyResponse`.
+  Offered-list nil = no contract = pass.
+- **Spillway is caller-selected and mutation-free** (C10):
+  `ResolveSpillway` never touches rotation cursor, pins, or block maps;
+  untagged aliases are invisible; the sort key is (cost asc epsilon-
+  compare, quality desc). Price groups are tier ordering, NOT a
+  multi-tenant gate.
