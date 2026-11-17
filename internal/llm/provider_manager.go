@@ -523,7 +523,11 @@ func (pm *ProviderManager) Chat(ctx context.Context, messages []ChatMessage, opt
 	}
 
 	// Get providers in order of preference and snapshot health status while locked
-	orderedProviders := pm.orderedProvidersForRequest(opts)
+	// Advisory-budget cheaper-alias steer (Contract C7, leaf 08): in steer
+	// mode with a live breach the failover tail is reordered by ascending
+	// cost so the cheaper candidate dispatches next. Enforce (the default)
+	// returns the slice unchanged — byte-identical rotation.
+	orderedProviders := pm.steerReorderedTail(pm.orderedProvidersForRequest(opts))
 	healthSnapshot := make([]ProviderStatus, len(orderedProviders))
 	for i, e := range orderedProviders {
 		healthSnapshot[i] = e.Health.Status
@@ -803,7 +807,7 @@ func (pm *ProviderManager) ChatWithProgress(ctx context.Context, messages []Chat
 		return nil, errors.New("provider manager not initialized or no providers configured")
 	}
 
-	orderedProviders := pm.orderedProvidersForRequest(opts)
+	orderedProviders := pm.steerReorderedTail(pm.orderedProvidersForRequest(opts))
 	healthSnapshot := make([]ProviderStatus, len(orderedProviders))
 	for i, e := range orderedProviders {
 		healthSnapshot[i] = e.Health.Status
@@ -1082,7 +1086,7 @@ func (pm *ProviderManager) chatWithAttemptTaggedDeltas(ctx context.Context, mess
 		pm.mu.RUnlock()
 		return nil, errors.New("provider manager not initialized or no providers configured")
 	}
-	orderedProviders := pm.orderedProvidersForRequest(opts)
+	orderedProviders := pm.steerReorderedTail(pm.orderedProvidersForRequest(opts))
 	healthSnapshot := make([]ProviderStatus, len(orderedProviders))
 	for i, e := range orderedProviders {
 		healthSnapshot[i] = e.Health.Status
@@ -1344,6 +1348,51 @@ func (pm *ProviderManager) preferRequestedProvider(providers []*ProviderEntry, p
 		return providers
 	}
 	return append(preferred, rest...)
+}
+
+// steerReorderedTail applies the advisory-budget cheaper-alias steer
+// (Contract C7, sovereign-router-parity leaf 08) to one call's candidate
+// list. When the shared budget is configured in steer mode AND currently
+// reports a breach (Advisory().OverTarget), the FAILOVER TAIL (index 1+)
+// is stably reordered by ascending TotalCost() so the next rotation hop
+// dispatches the cheaper member; the primary candidate is never moved, so
+// tier-gate depth semantics and the primary's own precedence are untouched.
+//
+// Steering, never refusing: the reorder can only change WHICH healthy
+// candidate serves next, never whether the turn dispatches. In enforce
+// mode (the default), with no budget wired, or with no live breach the
+// input slice is returned unchanged — byte-identical rotation.
+// Advisory() takes b.mu only to READ counters (no mutation, no I/O), and
+// this runs before the loop starts, so no lock is held across dispatch.
+//
+// Health filtering stays downstream exactly as before: candidates skipped
+// pre-dispatch (disabled, unhealthy-at-start) consume no depth whether or
+// not this reorder moved them (mirrors the admission-gate wiring, leaf 02).
+func (pm *ProviderManager) steerReorderedTail(providers []*ProviderEntry) []*ProviderEntry {
+	if len(providers) < 2 {
+		return providers
+	}
+	budget := pm.config.Budget
+	if budget == nil || budget.Mode() != BudgetModeSteer {
+		return providers
+	}
+	if !budget.Advisory().OverTarget {
+		return providers
+	}
+	tail := make([]*ProviderEntry, len(providers)-1)
+	copy(tail, providers[1:])
+	stableSortByTotalCost(tail)
+	return append(providers[:1:1], tail...)
+}
+
+// stableSortByTotalCost sorts entries by ascending TotalCost() with
+// sort.SliceStable, so candidates with equal cost keep their
+// health/priority failover order exactly as the pre-steer rotation
+// produced it (a tie never reorders anything).
+func stableSortByTotalCost(entries []*ProviderEntry) {
+	sort.SliceStable(entries, func(i, j int) bool {
+		return entries[i].Config.TotalCost() < entries[j].Config.TotalCost()
+	})
 }
 
 // orderedProvidersForRequest returns the health/cost/priority-ordered provider
