@@ -68,13 +68,17 @@ func (s *voiceLinkState) manager() *voice.LinkManager {
 			DialTimeout: 5 * time.Second,
 			RetainEnded: 30 * time.Minute,
 			Logger:      s.logger.With("sub", "voice-link"),
-			// Backchannel soften (#130): the resolved GLOBAL toggle
-			// (voice.backchannel_soften; "" employee => no row
-			// override — a link spans two employees, so the row
-			// tri-state only meaningfully resolves per-call on the
-			// non-link legs). Default false = today's coordinator,
-			// byte-identical.
-			BackchannelSoften: voice.BackchannelSoftenFor(s.cfg, ""),
+			// Backchannel soften (#130/#143): the PER-EMPLOYEE
+			// resolver — a link spans two employees, so each
+			// side's voice.employee_leg row (row > global)
+			// resolves against that side's employee id at
+			// LinkManager.Open. No row on either side falls
+			// through to the global voice.backchannel_soften
+			// (default false = today's coordinator, byte-
+			// identical).
+			BackchannelSoftenFor: func(empID string) bool {
+				return voice.BackchannelSoftenFor(s.cfg, empID)
+			},
 		})
 		if err != nil {
 			s.logger.Error("voice link manager construction failed", "err", err)

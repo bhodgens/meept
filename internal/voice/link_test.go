@@ -2824,3 +2824,291 @@ func firstBoundLoop(c *LinkTurnCoordinator, side string) *TalkLoop {
 	defer c.mu.Unlock()
 	return c.sideLocked(side).loop
 }
+
+// ---------------------------------------------------------------------------
+// Per-employee backchannel soften (#143) — divergent voice.employee_leg
+// rows across a link's two sides.
+//
+// PEER-SIDE SEMANTICS (as implemented in link.go): the soften consult at
+// every release point keys on the PARKED (peer) side's own row value —
+// side X's short backchannel defers (and its flush's pad/margin soften)
+// iff X's employee row softens, observed by the coordinator when the
+// OPPOSITE employee (the holder) releases. Uniform rows / nil resolver /
+// no rows stay on the exact global SetBackchannelSoften path.
+// ---------------------------------------------------------------------------
+
+// bindSideLoopText is bindSideBLoopText parameterised by the PARKED side:
+// the holder is the other side. The holder takes the floor with a fake
+// turn_start edge; a short final prompt then parks on the bound loop.
+func bindSideLoopText(t *testing.T, c *LinkTurnCoordinator, buf *syncBuffer, turns *holdTurns, parkedSide, parkCCID, heldText string) *TalkLoop {
+	t.Helper()
+	holderSide := LinkSideA
+	if parkedSide == LinkSideA {
+		holderSide = LinkSideB
+	}
+	logger := slog.New(slog.NewTextHandler(buf, nil))
+	loop := NewTalkLoop(TalkDeps{
+		Supervisor: &cannedSupervisor{},
+		Turns:      turns,
+		SessionFor: constSession(SessionHandle{ID: "s", ConversationID: "c"}),
+		Send:       (&recordSink{}).Send,
+		OnEnd:      func(ccid, reason string) {},
+		Logger:     logger,
+		HoldPrompt: c.HoldPromptFor(parkedSide),
+		TurnState:  c.TurnStateFor(parkedSide),
+	}, TalkLoopConfig{})
+	c.Bind(parkedSide, loop)
+	cancelLoop, done := runLoop(t, loop, parkCCID)
+	t.Cleanup(func() { cancelLoop(); <-done })
+	holderState := c.TurnStateFor(holderSide)
+	holderState(holderStateCCID(holderSide), 1, TurnKindStart)
+	loop.frames <- finalPrompt(parkCCID, heldText)
+	waitFor(t, 2*time.Second, "park "+heldText, func() bool { return loopHeldPrompt(loop) })
+	return loop
+}
+
+func holderStateCCID(side string) string {
+	if side == LinkSideA {
+		return "cc-a-drain"
+	}
+	return "cc-b-drain"
+}
+
+// #143-1 (uniform parity): SetBackchannelSoftenSides with EQUAL flags is
+// exactly the global SetBackchannelSoften path — (true,true) lands the
+// soft pad/margin + global soften latch with NO per-side mode;
+// (false,false) keeps the untouched zero state.
+func TestBackchannelSoftenSidesUniformEqualsGlobal(t *testing.T) {
+	gOn := NewLinkTurnCoordinator("link-143-uniform-on", 0, linkDiscard())
+	gOn.SetBackchannelSoften(true)
+	sOn := NewLinkTurnCoordinator("link-143-sides-on", 0, linkDiscard())
+	sOn.SetBackchannelSoftenSides(true, true)
+
+	gOff := NewLinkTurnCoordinator("link-143-uniform-off", 0, linkDiscard())
+	sOff := NewLinkTurnCoordinator("link-143-sides-off", 0, linkDiscard())
+	sOff.SetBackchannelSoftenSides(false, false)
+
+	type snap struct {
+		soften, perSide, a, b bool
+		pad, margin           time.Duration
+	}
+	take := func(c *LinkTurnCoordinator) snap {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return snap{c.soften, c.softenPerSide, c.softenA, c.softenB, c.pad, c.margin}
+	}
+	if gs, ss := take(gOn), take(sOn); gs != ss {
+		t.Fatalf("uniform (true,true) drifted from the global ON path: global=%+v sides=%+v", gs, ss)
+	}
+	if ss := take(sOn); !ss.soften || ss.perSide || ss.pad != softFloorTailPad || ss.margin != softFloorFallbackMargin {
+		t.Fatalf("uniform (true,true) must take the global ON shape, got %+v", ss)
+	}
+	if gs, ss := take(gOff), take(sOff); gs != ss {
+		t.Fatalf("uniform (false,false) drifted from the OFF zero state: global=%+v sides=%+v", gs, ss)
+	}
+	if ss := take(sOff); ss.soften || ss.perSide || ss.pad != linkFloorTailPad || ss.margin != linkFloorFallbackDefault {
+		t.Fatalf("uniform (false,false) must stay byte-identical OFF, got %+v", ss)
+	}
+}
+
+// #143-2 (divergent flags + timing consults): A-row=true / B-row=false
+// arms per-side mode with the coordinator-level pad/margin UNTOUCHED,
+// and the arm-time consults split by holder: a B-held release (parked
+// peer = A, A's row softens) takes the soft pad/margin; an A-held
+// release (parked peer = B) stays hard. An explicitly tuned margin
+// still wins (mirrors the TurnMargin rule of the global path).
+func TestBackchannelSoftenSidesDivergentTimingConsults(t *testing.T) {
+	c := NewLinkTurnCoordinator("link-143-divergent", 0, linkDiscard())
+	c.SetBackchannelSoftenSides(true, false)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.softenPerSide || c.soften || c.softenA != true || c.softenB != false {
+		t.Fatalf("divergent flags wrong: perSide=%v global=%v a=%v b=%v", c.softenPerSide, c.soften, c.softenA, c.softenB)
+	}
+	if c.pad != linkFloorTailPad || c.margin != linkFloorFallbackDefault {
+		t.Fatalf("divergent mode must NOT swap the coordinator-level pad/margin: pad=%v margin=%v", c.pad, c.margin)
+	}
+	// Holder B releases A's parked backchannel: peer (A) row softens ->
+	// soft pad + soft margin (both still carry the production defaults).
+	if p := c.padForLocked(LinkSideB); p != softFloorTailPad {
+		t.Fatalf("padForLocked(B) = %v, want softFloorTailPad (parked A's row softens)", p)
+	}
+	if m := c.marginForLocked(LinkSideB); m != softFloorFallbackMargin {
+		t.Fatalf("marginForLocked(B) = %v, want softFloorFallbackMargin", m)
+	}
+	// Holder A releases B's parked backchannel: B's row is false -> hard.
+	if p := c.padForLocked(LinkSideA); p != linkFloorTailPad {
+		t.Fatalf("padForLocked(A) = %v, want hard linkFloorTailPad (parked B's row is off)", p)
+	}
+	if m := c.marginForLocked(LinkSideA); m != linkFloorFallbackDefault {
+		t.Fatalf("marginForLocked(A) = %v, want hard default", m)
+	}
+	// Explicitly tuned margin is respected untouched (same rule the
+	// global path pins in BS-1).
+	c2 := newTestCoordinator(80*time.Millisecond, linkDiscard())
+	c2.SetBackchannelSoftenSides(true, false)
+	c2.mu.Lock()
+	defer c2.mu.Unlock()
+	if m := c2.marginForLocked(LinkSideB); m != 80*time.Millisecond {
+		t.Fatalf("tuned margin overridden by per-side soften: %v", m)
+	}
+}
+
+// #143-3 (behavior, the named A-row=true / B-row=false case): side A's
+// short backchannel IS softened at side B's margin release — A's park
+// survives the non-drained release (kind=backchannel_softened, force-
+// flush armed for side A) and flushes at B's next drained release.
+func TestBackchannelSoftenSidesParkedRowDefersAtPeerRelease(t *testing.T) {
+	var buf syncBuffer
+	turnsA := &holdTurns{reply: "ok."}
+	c := newTestCoordinator(80*time.Millisecond, slog.New(slog.NewTextHandler(&buf, nil)))
+	c.SetBackchannelSoftenSides(true, false) // A row ON, B row OFF
+	loopA := bindSideLoopText(t, c, &buf, turnsA, LinkSideA, "cc-a-park", "Sure.")
+
+	stateB := c.TurnStateFor(LinkSideB)
+	stateB("cc-b-drain", 1, TurnKindFinal) // holder B final -> margin fires in 80ms (no live splice)
+
+	waitFor(t, 3*time.Second, "margin release fired", func() bool {
+		return strings.Contains(buf.String(), "kind=floor_released") &&
+			strings.Contains(buf.String(), "reason=margin")
+	})
+	logs := buf.String()
+	if !strings.Contains(logs, "kind=backchannel_softened") {
+		t.Fatalf("A's short park was not softened at B's margin release (A-row=true):\n%s", logs)
+	}
+	if turnsA.count() != 0 {
+		t.Fatal("A's backchannel flushed at a non-drained release despite A's row softening")
+	}
+	if !loopHeldPrompt(loopA) {
+		t.Fatal("softened park VANISHED (never-drop violation)")
+	}
+	c.mu.Lock()
+	armedForA := c.softenTimer != nil && c.softenSide == LinkSideA
+	c.mu.Unlock()
+	if !armedForA {
+		t.Fatal("force-flush backstop not armed for side A")
+	}
+
+	// B's next burst quiet-finals and DRAINS: the real release flushes
+	// A's park (margin stood down so the drained edge wins, BS-2 shape).
+	stateB("cc-b-drain", 2, TurnKindStart)
+	stateB("cc-b-drain", 2, TurnKindFinal)
+	c.mu.Lock()
+	if c.b.marginTimer != nil {
+		c.b.marginTimer.Stop()
+		c.b.marginTimer = nil
+	}
+	c.b.marginGen++
+	c.mu.Unlock()
+	c.NoteAudioDrained("cc-b-drain")
+	waitFor(t, 3*time.Second, "B's drained release flushes A's softened park", func() bool {
+		return turnsA.count() == 1
+	})
+	if strings.Contains(buf.String(), "kind=prompt_dropped") {
+		t.Fatalf("backchannel dropped: %s", buf.String())
+	}
+}
+
+// #143-4 (behavior, the complement): the SAME divergent coordinator
+// (A-row=true / B-row=false) must flush side B's short park on ANY
+// release — B's row is the gate for B's own backchannel, so B rides
+// today's hard timing at A's margin release.
+func TestBackchannelSoftenSidesNonSofteningPeerFlushesToday(t *testing.T) {
+	var buf syncBuffer
+	turnsB := &holdTurns{reply: "ok."}
+	c := newTestCoordinator(80*time.Millisecond, slog.New(slog.NewTextHandler(&buf, nil)))
+	c.SetBackchannelSoftenSides(true, false)
+	bindSideLoopText(t, c, &buf, turnsB, LinkSideB, "cc-b-park", "Sure.")
+
+	stateA := c.TurnStateFor(LinkSideA)
+	stateA("cc-a-drain", 1, TurnKindFinal) // holder A final -> margin release
+	waitFor(t, 3*time.Second, "margin release flushes B's short park (B row off)", func() bool {
+		return turnsB.count() == 1
+	})
+	if strings.Contains(buf.String(), "kind=backchannel_softened") {
+		t.Fatalf("soften fired for a side whose row is OFF:\n%s", buf.String())
+	}
+}
+
+// #143-5 (manager seam): LinkDeps.BackchannelSoftenFor resolves per side
+// from the side's employee id at Open (divergent rows land divergent
+// flags on the coordinator); a nil resolver keeps the global
+// LinkDeps.BackchannelSoften bool (pre-#143 shape, byte-identical).
+func TestLinkManagerOpenResolvesBackchannelSoftenPerSide(t *testing.T) {
+	leg := newLinkFakeLeg(t)
+	var seen []string
+	reg := NewLinkTurnRegistry(linkDiscard())
+	m, err := NewLinkManager(LinkDeps{
+		Leg:         leg,
+		Store:       &linkFakeStore{calls: map[string][]TranscriptLine{}},
+		Turns:       reg,
+		DialTimeout: 3 * time.Second,
+		RetainEnded: time.Hour,
+		TurnMargin:  25 * time.Millisecond,
+		// A-row (alice) softens, B-row (bob) does not; the global
+		// bool is deliberately opposite to prove the resolver wins.
+		BackchannelSoften: true,
+		BackchannelSoftenFor: func(empID string) bool {
+			seen = append(seen, empID)
+			return empID == "alice"
+		},
+		Logger: linkDiscard(),
+	})
+	if err != nil {
+		t.Fatalf("NewLinkManager: %v", err)
+	}
+	link, err := m.Open(context.Background(), "alice", "bob")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if len(seen) != 2 || seen[0] != "alice" || seen[1] != "bob" {
+		t.Fatalf("resolver did not get the per-side employee ids: %v", seen)
+	}
+	coord, _ := reg.Lookup("local:link-a-" + link.ID[len("link-"):])
+	if coord == nil {
+		t.Fatal("coordinator unresolved")
+	}
+	coord.mu.Lock()
+	perSide, softA, softB, globalOn := coord.softenPerSide, coord.softenA, coord.softenB, coord.soften
+	coord.mu.Unlock()
+	if !perSide || !softA || softB || globalOn {
+		t.Fatalf("divergent rows did not land per-side (perSide=%v a=%v b=%v global=%v)", perSide, softA, softB, globalOn)
+	}
+	if err := m.Close(link.ID, "test close"); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Uniform resolutions take the global path shape: a resolver that
+	// answers false for both sides (no rows) lands the exact OFF state.
+	reg2 := NewLinkTurnRegistry(linkDiscard())
+	m2, err := NewLinkManager(LinkDeps{
+		Leg:                  leg,
+		Store:                &linkFakeStore{calls: map[string][]TranscriptLine{}},
+		Turns:                reg2,
+		DialTimeout:          3 * time.Second,
+		RetainEnded:          time.Hour,
+		TurnMargin:           25 * time.Millisecond,
+		BackchannelSoftenFor: func(string) bool { return false },
+		Logger:               linkDiscard(),
+	})
+	if err != nil {
+		t.Fatalf("NewLinkManager (no-rows): %v", err)
+	}
+	link2, err := m2.Open(context.Background(), "carol", "dave")
+	if err != nil {
+		t.Fatalf("Open (no-rows): %v", err)
+	}
+	coord2, _ := reg2.Lookup("local:link-a-" + link2.ID[len("link-"):])
+	coord2.mu.Lock()
+	off := !coord2.soften && !coord2.softenPerSide && coord2.pad == linkFloorTailPad && coord2.margin == 25*time.Millisecond
+	coord2.mu.Unlock()
+	if !off {
+		t.Fatal("no-row resolver drifted from the global OFF path")
+	}
+	if err := m2.Close(link2.ID, "test close"); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	// The nil-resolver global-true path stays byte-identical: covered
+	// by the manager-seam pin inside TestBackchannelSoftenPadAndMargin
+	// Values (BS-1) — left unmodified on purpose.
+}
