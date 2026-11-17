@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/caimlas/meept/internal/bus"
 )
 
 // runningBot tracks an active bot's goroutines and state.
@@ -23,6 +25,14 @@ type Manager struct {
 	mu      sync.RWMutex
 	running map[string]*runningBot
 	logger  *slog.Logger
+	bus     *bus.MessageBus
+}
+
+// SetBus sets the message bus forwarded to every runner created by this
+// manager. A nil bus is a no-op: runners simply do not publish. Call before
+// StartAll so runners created during startBot receive it.
+func (m *Manager) SetBus(b *bus.MessageBus) {
+	m.bus = b
 }
 
 // NewManager creates a new bot lifecycle manager.
@@ -142,6 +152,7 @@ func (m *Manager) GetBotStatus(ctx context.Context, id string) (*BotState, error
 
 func (m *Manager) startBot(ctx context.Context, def BotDefinition) error {
 	runner := NewBotRunner(def)
+	runner.SetBus(m.bus)
 	botCtx, cancel := context.WithCancel(ctx)
 
 	state, err := m.store.GetState(botCtx, def.ID)

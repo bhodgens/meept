@@ -51,6 +51,11 @@ func TestEveryWSClassifiedHasDecoderEntry(t *testing.T) {
 	expectations := map[string][]string{
 		reflectTypeKey(agent.TurnTerminalEvent{}): {agent.TopicTurnTerminal.Name},
 		reflectTypeKey(agent.TurnStateEvent{}):    {agent.TopicTurnState.Name},
+		// issue #140: one shared payload on two sibling result topics.
+		reflectTypeKey(agent.ExecutionResultEvent{}): {
+			agent.TopicBotResult.Name,
+			agent.TopicEmployeeResult.Name,
+		},
 		reflectTypeKey(bus.ACPPermissionEvent{}): {
 			bus.TopicACPPermissionRequested.Name,
 			bus.TopicACPPermissionResolved.Name,

@@ -39,6 +39,7 @@ import (
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/auditlog"
 	"github.com/caimlas/meept/internal/bot"
+	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/gate"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/runtime"
@@ -311,6 +312,13 @@ type GoalLoop struct {
 	reflector    Reflector
 	logger       *slog.Logger
 
+	// bus is the optional MessageBus for execution observability events
+	// (employee.result via agent.TopicEmployeeResult and running/idle edges
+	// via agent.TopicTurnState). Nil = unwired/no-op. Guarded by mu; set
+	// once via SetBus and snapshotted under lock so publishes happen outside
+	// the lock (mutexio invariant).
+	bus *bus.MessageBus
+
 	// Configurable thresholds.
 	maxConsecutiveFailures int
 
@@ -429,6 +437,17 @@ type GoalLoop struct {
 	steerMu          sync.Mutex
 	pendingSteer     []TriggerEvent
 	lastDrainedSteer *TriggerEvent
+}
+
+// SetBus wires the MessageBus used for execution observability events
+// (employee.result plus running/idle turn-state edges). It is nil-safe:
+// a nil bus is a legal value meaning "publish nowhere" and downgrades all
+// emissions to no-ops. Guarded by mu; the bus pointer is snapshotted under
+// lock at publish time so no I/O happens while the lock is held.
+func (l *GoalLoop) SetBus(b *bus.MessageBus) {
+	l.mu.Lock()
+	l.bus = b
+	l.mu.Unlock()
 }
 
 // EmitMetricFunc is the callback signature for emitting telemetry from the
@@ -979,7 +998,20 @@ func (l *GoalLoop) Execute(ctx context.Context, plan PlanRef) (*bot.BotExecution
 	constitution := l.constitution
 	logger := l.logger
 	briefLookup := l.planBriefLookup
+	busRef := l.bus
 	l.mu.Unlock()
+
+	// Execution observability (branch 02): publish a running edge at entry
+	// and a matching result + idle edge on completion. All publishes use a
+	// snapshotted bus OUTSIDE the lock; a nil bus makes every emission a
+	// no-op, so unwired loops stay byte-identical.
+	if busRef != nil {
+		bus.PublishT(busRef, agent.TopicTurnState, "employee", agent.TurnStateEvent{
+			AgentID:   l.employeeID,
+			State:     agent.TurnStateRunning,
+			Timestamp: time.Now().UTC(),
+		})
+	}
 
 	if runner == nil {
 		return nil, errors.New("execute: no BotExecutor configured")
@@ -1025,6 +1057,37 @@ func (l *GoalLoop) Execute(ctx context.Context, plan PlanRef) (*bot.BotExecution
 			"tokens", tokens,
 			"duration", duration)
 	}
+
+	// Execution observability (branch 02): emit one result event on
+	// employee.result (source "employee") plus the matching idle edge. Use
+	// the bus snapshotted at entry; a nil bus makes both emissions no-ops.
+	// The topic is the sole tier discriminator — the payload carries no
+	// kind field, and nothing is ever published on bot.result here.
+	if busRef != nil {
+		status := "completed"
+		stopReason := agent.StopReasonEndTurn
+		if !result.Success {
+			status = "failed"
+			stopReason = agent.StopReasonError
+		}
+		bus.PublishT(busRef, agent.TopicEmployeeResult, "employee", agent.ExecutionResultEvent{
+			AgentID:    l.employeeID,
+			Status:     status,
+			Output:     result.Output,
+			TokensUsed: result.TokensUsed,
+			Error:      result.Error,
+			DurationMS: int64(result.Duration / time.Millisecond),
+			StopReason: stopReason,
+			Timestamp:  time.Now().UTC(),
+		})
+		bus.PublishT(busRef, agent.TopicTurnState, "employee", agent.TurnStateEvent{
+			AgentID:    l.employeeID,
+			State:      agent.TurnStateIdle,
+			StopReason: stopReason,
+			Timestamp:  time.Now().UTC(),
+		})
+	}
+
 	return result, nil
 }
 

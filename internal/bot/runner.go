@@ -3,10 +3,12 @@ package bot
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
-	"log/slog"
+	"github.com/caimlas/meept/internal/agent"
+	"github.com/caimlas/meept/internal/bus"
 )
 
 const maxConsecutiveFailures = 10
@@ -58,6 +60,16 @@ type BotRunner struct {
 	executor    BotExecutor
 	logger      *slog.Logger
 	retryPolicy RetryPolicy
+
+	// bus is the optional message bus used to publish execution-result and
+	// turn-state events. It is set before execution begins (nil-safe).
+	bus *bus.MessageBus
+}
+
+// SetBus sets the message bus used for execution-result and turn-state
+// emission. A nil bus is a no-op: execution proceeds without publishing.
+func (r *BotRunner) SetBus(b *bus.MessageBus) {
+	r.bus = b
 }
 
 func NewBotRunner(def BotDefinition) *BotRunner {
@@ -155,22 +167,66 @@ func (r *BotRunner) WithRetryPolicy(policy RetryPolicy) *BotRunner {
 	return &cp
 }
 
+// emitTurnState publishes one TurnStateEvent edge on agent.TopicTurnState.
+// A nil bus is a no-op; phase is deliberately left empty (bots have no
+// pair-phase). Publish happens outside any lock.
+func (r *BotRunner) emitTurnState(state agent.AgentTurnState, stop agent.StopReason) {
+	if r.bus == nil {
+		return
+	}
+	bus.PublishT(r.bus, agent.TopicTurnState, "bot", agent.TurnStateEvent{
+		AgentID:    r.definition.ID,
+		State:      state,
+		StopReason: stop,
+		Timestamp:  time.Now().UTC(),
+	})
+}
+
+// emitResult publishes the shared ExecutionResultEvent on the bot result
+// topic. The topic name is the sole tier discriminator — there is no kind
+// field. A nil bus is a no-op; publish happens outside any lock.
+func (r *BotRunner) emitResult(res *BotExecutionResult, status string, stop agent.StopReason) {
+	if r.bus == nil {
+		return
+	}
+	bus.PublishT(r.bus, agent.TopicBotResult, "bot", agent.ExecutionResultEvent{
+		AgentID:    res.BotID,
+		Status:     status,
+		Output:     res.Output,
+		TokensUsed: res.TokensUsed,
+		Error:      res.Error,
+		DurationMS: int64(res.Duration / time.Millisecond),
+		StopReason: stop,
+		Timestamp:  time.Now().UTC(),
+	})
+}
+
 // Execute runs the bot through the executor, checking ShouldRun first.
 // H2: LLM calls are wrapped in a retry loop with exponential backoff
 // when a RetryPolicy with MaxRetries > 0 is configured. Context
 // cancellation (including timeout) propagates immediately without
 // further retries.
+//
+// Every execution return path emits a bot.result event plus a running -> idle
+// turn-state pair (agent.TurnStateRunning at entry, agent.TurnStateIdle at
+// exit). Skipped runs carry status=skipped / stop_reason=cancelled, successes
+// completed / end_turn, failures failed / error. All emission is nil-bus-safe.
 func (r *BotRunner) Execute(ctx context.Context, state *BotState, triggerCtx string) (*BotExecutionResult, error) {
 	if r.executor == nil {
 		return nil, fmt.Errorf("bot %q: no executor configured", r.definition.ID)
 	}
 
+	r.emitTurnState(agent.TurnStateRunning, "")
+
 	if !r.ShouldRun(state) {
-		return &BotExecutionResult{
+		result := &BotExecutionResult{
 			BotID:   r.definition.ID,
 			Success: false,
 			Error:   "skipped: budget exhausted or consecutive failure limit reached",
-		}, nil
+		}
+		r.emitResult(result, "skipped", agent.StopReasonCancelled)
+		r.emitTurnState(agent.TurnStateIdle, agent.StopReasonCancelled)
+		return result, nil
 	}
 
 	systemPrompt := r.BuildSystemPrompt(triggerCtx)
@@ -242,6 +298,8 @@ retryLoop:
 				"duration", duration,
 				"retries", maxRetries)
 		}
+		r.emitResult(result, "failed", agent.StopReasonError)
+		r.emitTurnState(agent.TurnStateIdle, agent.StopReasonError)
 	} else {
 		result.Success = true
 		if r.logger != nil {
@@ -250,6 +308,8 @@ retryLoop:
 				"tokens", tokensUsed,
 				"duration", duration)
 		}
+		r.emitResult(result, "completed", agent.StopReasonEndTurn)
+		r.emitTurnState(agent.TurnStateIdle, agent.StopReasonEndTurn)
 	}
 
 	return result, nil
