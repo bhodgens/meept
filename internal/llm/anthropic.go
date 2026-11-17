@@ -70,6 +70,13 @@ type AnthropicClient struct {
 	// Guarded by configMu (set via SetSessionAffinityConfig, read on the
 	// request path alongside the config copy).
 	sessionAffinity *AffinityConfig
+	// toolcheckNames carries the request's offered tool function names
+	// (Contract C9, sovereign-router-parity leaf 03) for post-parse
+	// tool-call validation. Request-scoped state stamped by buildRequest
+	// from opts.tools and read within the same call chain — it never
+	// mutates shared client configuration. Empty/nil on a tool-less
+	// request: validation skips byte-identically (the offered-empty rule).
+	toolcheckNames []string
 
 	// llmCallObserver is the leaf-01 (llm-hop-tracing) seam -- see
 	// Client.llmCallObserver. Fired from recordUsageStore's async
@@ -1248,6 +1255,13 @@ func (c *AnthropicClient) buildRequest(cfg *ModelConfig, messages []ChatMessage,
 				InputSchema: json.RawMessage(schema),
 			}
 		}
+		// Contract C9 (sovereign-router-parity leaf 03): capture the
+		// offered names for post-parse tool-call validation in
+		// parseResponse / buildResponseFromBlocks. The wire sort is a
+		// payload concern; the offered set is the request's declaration
+		// (OfferedToolNames dedups). A tool-less request leaves
+		// toolcheckNames nil so validation skips byte-identically.
+		c.toolcheckNames = OfferedToolNames(opts.tools)
 	}
 
 	// Apply reasoning effort from chatOptions (spec §2, line 737).
@@ -2064,6 +2078,20 @@ func (c *AnthropicClient) buildResponseFromBlocks(blocks []contentBlockAccum, st
 		return nil, err
 	}
 
+	// Contract C9 (sovereign-router-parity leaf 03): assembled tool_use
+	// blocks are validated AFTER the empty-completion gate (which keeps its
+	// precedence) and BEFORE the Response returns — streamed input_Json
+	// partial_json deltas are already buffered to completion above, so the
+	// check runs once on the assembled calls, never per chunk. toolcheckNames
+	// is nil on a tool-less request: validation skips byte-identically.
+	if verr := validateOfferedToolCalls(toolCalls, c.toolcheckNames); verr != nil {
+		c.logger.Warn("tool call failed validation (anthropic stream)",
+			"model", c.config.ModelID,
+			"detail", firstInvalidToolCall(toolCalls, c.toolcheckNames),
+		)
+		return nil, verr
+	}
+
 	return &Response{
 		Content:   finalContent,
 		ToolCalls: toolCalls,
@@ -2155,6 +2183,19 @@ func (c *AnthropicClient) parseResponse(apiResp *anthropicResponse) (*Response, 
 	// the raw answer text.
 	if err := classifyAnthropicEmpty(toolCalls, content.String()); err != nil {
 		return nil, err
+	}
+
+	// Contract C9 (sovereign-router-parity leaf 03): assembled tool_use
+	// blocks are validated AFTER the empty-completion gate (which keeps its
+	// precedence) and BEFORE the Response returns to the retry loop /
+	// executor. toolcheckNames is nil on a tool-less request: validation
+	// skips byte-identically.
+	if verr := validateOfferedToolCalls(toolCalls, c.toolcheckNames); verr != nil {
+		c.logger.Warn("tool call failed validation (anthropic)",
+			"model", apiResp.Model,
+			"detail", firstInvalidToolCall(toolCalls, c.toolcheckNames),
+		)
+		return nil, verr
 	}
 
 	return &Response{

@@ -297,6 +297,21 @@ func (c *CodexClient) parseResponsesSSE(body io.Reader, cfg *ModelConfig, onDelt
 		return nil, ErrEmptyResponse
 	}
 
+	// Contract C9 (sovereign-router-parity leaf 03): streamed function_call
+	// arguments are buffered to completion in the accumulator and validated
+	// ONCE, at stream end, on the ASSEMBLED calls — never per event — before
+	// the Response is returned to the caller/executor. The bare
+	// ErrToolCallInvalid sentinel is NOT the empty sentinel, so the
+	// empty-retry wrapper keeps it single-shot. toolcheckNames is nil on a
+	// tool-less request: validation skips byte-identically.
+	if verr := validateOfferedToolCalls(acc.toolCalls, c.toolcheckNames); verr != nil {
+		c.logger.Warn("tool call failed validation (codex stream)",
+			"model", cfg.ModelID,
+			"detail", firstInvalidToolCall(acc.toolCalls, c.toolcheckNames),
+		)
+		return nil, verr
+	}
+
 	return &Response{
 		Content:      content,
 		Reasoning:    reasoning,

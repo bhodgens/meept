@@ -113,6 +113,37 @@ type ModelDef struct {
 	// no provider-level option: the value maps straight through from
 	// ModelDef.
 	ToolExposure string `json:"tool_exposure,omitempty"`
+	// DataPosture is the per-model data-posture label (Contract C4,
+	// sovereign-router-parity leaf 05): "private" (no-training, cleared
+	// for sensitive turns), "public_only" (provider may train — sensitive
+	// barred), or "non_sensitive" (aggregator, posture unclear — barred).
+	// ABSENT/unknown parses to private at the construction site below
+	// (ParsePosture), so a config with no data_posture key anywhere is
+	// byte-identical to pre-leaf (flag-off control gate, master Q3).
+	DataPosture Posture `json:"data_posture,omitempty"`
+	// Pool is the shared upstream quota pool this model draws from
+	// (Contract C5, sovereign-router-parity leaf 06; master Q4: ONE pool
+	// per provider in v1 — the field is RESERVED, empty default). When
+	// set, a pool-exhaustion-phrase 429 blocks the whole POOL instead of
+	// the single model. ABSENT = pool-less: classification still runs
+	// but ScopePool never fires (opt-in gate, flag-off byte-identical).
+	Pool string `json:"pool,omitempty"`
+	// Quality is the MEASURED per-class quality scores (0-5) from probe
+	// batteries (Contract C2, sovereign-router-parity leaf 01). The
+	// Sovereign Router selection rule governs seeding: "leaderboards
+	// nominate, our own probes score" — a score invented from vendor
+	// documentation must never land here. ABSENT BLOCK = zero Quality =
+	// the dimension is inert (floor never binds, comparator quality term
+	// vanishes), which is the shipped config posture (plan Q1: ship
+	// EMPTY). The shape is documented in config/models.json5; no shipped
+	// model sets it until an operator measures.
+	Quality Quality `json:"quality,omitempty"`
+	// QualitySource is free-text provenance for the quality scores (e.g.
+	// "tooling-battery:2026-11-15"). Advisory only — never parsed.
+	QualitySource string `json:"quality_source,omitempty"`
+	// QualityVerifiedAt is the RFC3339 date the scores were last
+	// re-measured. Advisory only — never parsed, never enforced.
+	QualityVerifiedAt string `json:"quality_verified_at,omitempty"`
 	// ToolChoice overrides the provider-level tool_choice policy for this
 	// model. Empty inherits the provider setting. See
 	// ProviderOptionsConfig.ToolChoice.
@@ -172,6 +203,13 @@ type ModelAliasEntry struct {
 	MaxFails               int      `json:"max_fails"` // Max consecutive failures before rotation
 	DefaultModel           string   `json:"default_model,omitempty"`
 	BalancedStickyRequests bool     `json:"balanced_sticky_requests,omitempty"`
+	// PriceGroup tags this alias as a routing tier (Contract C10).
+	// "" | "free" | "paid" | "premium". "" = untagged = legacy behavior
+	// (this alias resolves only when explicitly selected). Free/paid/
+	// premium become selectable as a TIER by leaf 09's spillway;
+	// declaring the field here (leaf 01) is schema-only and INERT —
+	// nothing reads it until leaf 09 lands.
+	PriceGroup string `json:"price_group,omitempty"`
 }
 
 // ToolChoiceRequired is the only tool_choice value the request builder acts
@@ -737,29 +775,37 @@ func modelConfigFrom(providerID, mapKey string, provider ProviderConfig, modelDe
 		APIKey:               opts.APIKey,
 		CostPerMillionInput:  modelDef.InputCost,
 		CostPerMillionOutput: modelDef.OutputCost,
-		MaxTokens:            modelDef.MaxOutput,
-		Temperature:          modelDef.Temperature,
-		TopP:                 modelDef.TopP,
-		ContextLimit:         modelDef.ContextLimit,
-		Capabilities:         caps,
-		ProviderID:           providerID,
-		CatalogRef:           providerID + "/" + mapKey,
-		ToolConstraint:       mode,
-		SchemaMode:           schemaMode,
-		ToolExposure:         toolExposure,
-		ToolChoice:           toolChoice,
-		ExtraHeaders:         extraHeaders,
-		Timeout:              time.Duration(opts.Timeout) * time.Second,
-		MaxConcurrency:       modelDef.MaxConcurrency,
-		ProviderAPI:          provider.API,
-		GenerationAPI:        modelDef.API,
-		Workflow:             workflow,
-		GenerationURL:        modelDef.GenerationURL,
-		BodyTemplate:         modelDef.BodyTemplate,
-		ResponseURLPath:      modelDef.ResponseURLPath,
-		ResponseB64Path:      modelDef.ResponseB64Path,
-		ImageApp:             modelDef.ImageApp,
-		VideoApp:             modelDef.VideoApp,
-		OAuthProvider:        modelDef.OAuthProvider,
+		Quality:              modelDef.Quality,
+		// Data posture (leaf 05, Contract C4): resolved HERE via
+		// ParsePosture so every consumer sees the effective posture —
+		// absent/unknown keys become PosturePrivate (the backward-
+		// compatible default, master Q3) instead of leaking the zero
+		// value into the gate.
+		DataPosture:     ParsePosture(string(modelDef.DataPosture)),
+		Pool:            modelDef.Pool,
+		MaxTokens:       modelDef.MaxOutput,
+		Temperature:     modelDef.Temperature,
+		TopP:            modelDef.TopP,
+		ContextLimit:    modelDef.ContextLimit,
+		Capabilities:    caps,
+		ProviderID:      providerID,
+		CatalogRef:      providerID + "/" + mapKey,
+		ToolConstraint:  mode,
+		SchemaMode:      schemaMode,
+		ToolExposure:    toolExposure,
+		ToolChoice:      toolChoice,
+		ExtraHeaders:    extraHeaders,
+		Timeout:         time.Duration(opts.Timeout) * time.Second,
+		MaxConcurrency:  modelDef.MaxConcurrency,
+		ProviderAPI:     provider.API,
+		GenerationAPI:   modelDef.API,
+		Workflow:        workflow,
+		GenerationURL:   modelDef.GenerationURL,
+		BodyTemplate:    modelDef.BodyTemplate,
+		ResponseURLPath: modelDef.ResponseURLPath,
+		ResponseB64Path: modelDef.ResponseB64Path,
+		ImageApp:        modelDef.ImageApp,
+		VideoApp:        modelDef.VideoApp,
+		OAuthProvider:   modelDef.OAuthProvider,
 	}
 }

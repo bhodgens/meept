@@ -340,7 +340,7 @@ classifier that never becomes healthy fails startup (F-D8), and client transport
 and enqueue during slow model loads (boot-window submits park on
 `ClassifierBootReadiness`). The SIGINT/SIGTERM/SIGHUP handler is installed before
 those listeners: a reload during boot is queued, not fatal. Hang detection
-(inference canary + checker self-watchdog, `VerdictHung`, `runtime.health` bus
+(inference canary + checker self-watchdog, `VerdictHealthHung`, `runtime.health` bus
 events) adds one rule: HUNG drives restart ONLY through the existing bool
 callback/auto-restart path and the bus seam is `SetHealthEventPublisher` — full
 invariants in `internal/llm/AGENTS.md` (`docs/workflows/runtime-hang-watchdog.md`).

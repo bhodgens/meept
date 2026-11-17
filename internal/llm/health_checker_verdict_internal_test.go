@@ -1,7 +1,7 @@
 // Gate tests for the llama-hang-watchdog tree (docs/plans/llama-hang-watchdog),
 // leaf 00T — written BEFORE the implementation exists. This file must fail to
-// compile naming ONLY the new contract symbols (Verdict / VerdictHealthy /
-// VerdictUnhealthy / VerdictHung / VerdictNow / OnHealthVerdict /
+// compile naming ONLY the new contract symbols (Verdict / VerdictHealthOK /
+// VerdictHealthBad / VerdictHealthHung / HealthVerdictNow / OnHealthVerdict /
 // HealthVerdictCallback / RuntimeConfig.Canary* fields). Leaf 02 (HUNG
 // verdict) makes these rows GREEN; leaf 01 supplies the canary lane they
 // drive.
@@ -21,9 +21,9 @@ import (
 
 // TestVerdictHungAfterThreshold — gate matrix F5: /health keeps answering
 // 200 while completions HANG (blocked handler). After CanaryThreshold
-// consecutive canary failures, VerdictNow() reports VerdictHung — the new
+// consecutive canary failures, HealthVerdictNow() reports VerdictHealthHung — the new
 // tri-state that distinguishes "HTTP alive but inference dead" from the
-// existing VerdictUnhealthy.
+// existing VerdictHealthBad.
 func TestVerdictHungAfterThreshold(t *testing.T) {
 	fx := newCanaryFixture(t)
 	release := make(chan struct{})
@@ -46,21 +46,21 @@ func TestVerdictHungAfterThreshold(t *testing.T) {
 	// The canary client times out (CanaryTimeout=100ms) on the hanging
 	// handler, so failures accumulate; 2 threshold ticks => HUNG. The bound
 	// covers arming + 2x(100ms timeout) + margin.
-	if !gateWaitFor(2*time.Second, func() bool { return hc.VerdictNow() == VerdictHung }) {
-		t.Fatalf("verdict = %v with healthy /health and hanging completions, want VerdictHung", hc.VerdictNow())
+	if !gateWaitFor(2*time.Second, func() bool { return hc.HealthVerdictNow() == VerdictHealthHung }) {
+		t.Fatalf("verdict = %v with healthy /health and hanging completions, want VerdictHealthHung", hc.HealthVerdictNow())
 	}
 	if !hc.IsHealthy() {
 		// /health still answers 200: HUNG is its own state, not unhealthy.
 		// (The bool callback fires false on the HUNG edge per F6, but the
 		// verdict the manager samples here must be Hung, not Unhealthy.)
-		if hc.VerdictNow() == VerdictUnhealthy {
-			t.Fatal("a hanging canary with an answering /health reported VerdictUnhealthy, want VerdictHung")
+		if hc.HealthVerdictNow() == VerdictHealthBad {
+			t.Fatal("a hanging canary with an answering /health reported VerdictHealthBad, want VerdictHealthHung")
 		}
 	}
 }
 
 // TestVerdictUnhealthyWhenHealthFails — gate matrix F5: unchanged /health
-// semantics. A failing /health drives VerdictUnhealthy at the existing
+// semantics. A failing /health drives VerdictHealthBad at the existing
 // HealthThreshold (the canary lane must not alter the crash-restart path).
 func TestVerdictUnhealthyWhenHealthFails(t *testing.T) {
 	fx := newCanaryFixture(t)
@@ -70,16 +70,16 @@ func TestVerdictUnhealthyWhenHealthFails(t *testing.T) {
 	hc.Start(context.Background())
 	defer hc.Stop()
 
-	if !gateWaitFor(2*time.Second, func() bool { return hc.VerdictNow() == VerdictUnhealthy }) {
-		t.Fatalf("verdict = %v with /health 500, want VerdictUnhealthy", hc.VerdictNow())
+	if !gateWaitFor(2*time.Second, func() bool { return hc.HealthVerdictNow() == VerdictHealthBad }) {
+		t.Fatalf("verdict = %v with /health 500, want VerdictHealthBad", hc.HealthVerdictNow())
 	}
-	if hc.VerdictNow() == VerdictHung {
-		t.Fatal("a failing /health reported VerdictHung; hung requires /health to ANSWER")
+	if hc.HealthVerdictNow() == VerdictHealthHung {
+		t.Fatal("a failing /health reported VerdictHealthHung; hung requires /health to ANSWER")
 	}
 }
 
 // TestVerdictHealthyRecovery — gate matrix F5: from HUNG, when completions
-// start answering 200+choices the next canary tick returns VerdictHealthy and
+// start answering 200+choices the next canary tick returns VerdictHealthOK and
 // resets the consecutive-failure counter (a later single failure must not
 // instantly re-hang — recovery clears the streak).
 func TestVerdictHealthyRecovery(t *testing.T) {
@@ -104,15 +104,15 @@ func TestVerdictHealthyRecovery(t *testing.T) {
 	defer hc.Stop()
 
 	// Drive into HUNG with hanging completions.
-	if !gateWaitFor(2*time.Second, func() bool { return hc.VerdictNow() == VerdictHung }) {
-		t.Fatalf("setup failed: verdict = %v, want VerdictHung before recovery", hc.VerdictNow())
+	if !gateWaitFor(2*time.Second, func() bool { return hc.HealthVerdictNow() == VerdictHealthHung }) {
+		t.Fatalf("setup failed: verdict = %v, want VerdictHealthHung before recovery", hc.HealthVerdictNow())
 	}
 
 	// Recover: completions answer the success shape again.
 	fx.setCompletions(canaryRespondOK)
 	closeHang()
-	if !gateWaitFor(2*time.Second, func() bool { return hc.VerdictNow() == VerdictHealthy }) {
-		t.Fatalf("verdict = %v after completions recovered, want VerdictHealthy", hc.VerdictNow())
+	if !gateWaitFor(2*time.Second, func() bool { return hc.HealthVerdictNow() == VerdictHealthOK }) {
+		t.Fatalf("verdict = %v after completions recovered, want VerdictHealthOK", hc.HealthVerdictNow())
 	}
 	closeClosed()
 
@@ -126,7 +126,7 @@ func TestVerdictHealthyRecovery(t *testing.T) {
 	})
 	oneTick := time.After(150 * time.Millisecond)
 	for {
-		if hc.VerdictNow() == VerdictHung {
+		if hc.HealthVerdictNow() == VerdictHealthHung {
 			t.Fatal("a single canary failure after recovery re-entered HUNG: the streak was not reset")
 		}
 		select {
@@ -140,7 +140,7 @@ func TestVerdictHealthyRecovery(t *testing.T) {
 // verdictEvent records one callback firing.
 type verdictEvent struct {
 	healthy bool // bool-callback value
-	verdict Verdict
+	verdict HealthVerdict
 	detail  string
 	order   int
 }
@@ -163,7 +163,7 @@ func (r *dualRecorder) onBool(healthy bool) {
 	r.events = append(r.events, verdictEvent{healthy: healthy, order: r.seq})
 }
 
-func (r *dualRecorder) onVerdict(v Verdict, detail string) {
+func (r *dualRecorder) onVerdict(v HealthVerdict, detail string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.seq++
@@ -213,8 +213,8 @@ func TestBoolCallbackUnchangedOnHung(t *testing.T) {
 	hc.Start(context.Background())
 	defer hc.Stop()
 
-	if !gateWaitFor(2*time.Second, func() bool { return hc.VerdictNow() == VerdictHung }) {
-		t.Fatalf("setup failed: verdict = %v, want VerdictHung", hc.VerdictNow())
+	if !gateWaitFor(2*time.Second, func() bool { return hc.HealthVerdictNow() == VerdictHealthHung }) {
+		t.Fatalf("setup failed: verdict = %v, want VerdictHealthHung", hc.HealthVerdictNow())
 	}
 	if !gateWaitFor(500*time.Millisecond, func() bool {
 		bools := rec.boolCalls()
@@ -232,8 +232,8 @@ func TestBoolCallbackUnchangedOnHung(t *testing.T) {
 	// Recovery: true exactly once.
 	fx.setCompletions(canaryRespondOK)
 	closeHang()
-	if !gateWaitFor(2*time.Second, func() bool { return hc.VerdictNow() == VerdictHealthy }) {
-		t.Fatalf("verdict = %v after recovery, want VerdictHealthy", hc.VerdictNow())
+	if !gateWaitFor(2*time.Second, func() bool { return hc.HealthVerdictNow() == VerdictHealthOK }) {
+		t.Fatalf("verdict = %v after recovery, want VerdictHealthOK", hc.HealthVerdictNow())
 	}
 	if !gateWaitFor(500*time.Millisecond, func() bool {
 		bools := rec.boolCalls()
@@ -251,7 +251,7 @@ func TestBoolCallbackUnchangedOnHung(t *testing.T) {
 }
 
 // TestVerdictCallbackPayload — gate matrix F7: OnHealthVerdict (Contract 3)
-// delivers (VerdictHung, non-empty detail) on the hang transition, and the
+// delivers (VerdictHealthHung, non-empty detail) on the hang transition, and the
 // verdict callback fires for the SAME transitions as the bool callback — no
 // dropped edges (ordering is asserted via the shared recorder log).
 func TestVerdictCallbackPayload(t *testing.T) {
@@ -280,7 +280,7 @@ func TestVerdictCallbackPayload(t *testing.T) {
 
 	if !gateWaitFor(2*time.Second, func() bool {
 		for _, ev := range rec.verdictEvents() {
-			if ev.detail != "" && ev.verdict == VerdictHung {
+			if ev.detail != "" && ev.verdict == VerdictHealthHung {
 				return true
 			}
 		}
@@ -298,11 +298,11 @@ func TestVerdictCallbackPayload(t *testing.T) {
 		sawHungVerdict, sawFalseBool, sawHealthyVerdict := false, false, false
 		for _, ev := range rec.verdictEvents() {
 			switch {
-			case ev.detail != "" && ev.verdict == VerdictHung:
+			case ev.detail != "" && ev.verdict == VerdictHealthHung:
 				sawHungVerdict = true
 			case ev.detail == "" && !ev.healthy && ev.order > 0:
 				sawFalseBool = true
-			case ev.detail != "" && ev.verdict == VerdictHealthy:
+			case ev.detail != "" && ev.verdict == VerdictHealthOK:
 				sawHealthyVerdict = true
 			}
 		}
@@ -316,8 +316,8 @@ func TestVerdictCallbackPayload(t *testing.T) {
 	// canary failure evidence).
 	events := rec.verdictEvents()
 	for _, ev := range events {
-		if ev.verdict == VerdictHung && ev.detail == "" {
-			t.Error("VerdictHung callback carried an empty detail")
+		if ev.verdict == VerdictHealthHung && ev.detail == "" {
+			t.Error("VerdictHealthHung callback carried an empty detail")
 		}
 	}
 }

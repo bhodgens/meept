@@ -1697,6 +1697,25 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			logger.Debug("Routing decision logger initialized")
 		}
 
+		// Data posture (sovereign-router-parity leaf 05, Contract C4):
+		// wire the secret scanner into the resolver's position-1 posture
+		// filter. A SEPARATE scanner instance from the tools-side one
+		// below (that one guards file/shell tool I/O at the tool
+		// boundary; this one guards the OUTBOUND prompt at the routing
+		// boundary — the leaf review checklist requires the existing
+		// tools-side wiring untouched). The narrow structural seam is
+		// required: internal/llm cannot import internal/security
+		// (security -> preferences -> tools -> llm cycle; documented in
+		// posture.go). Nil would mean the gate fail-opens; the scanner is
+		// always constructible, so the gate is live on every install —
+		// the OPT-IN dimension is the per-model data_posture key, not the
+		// scanner: with no key anywhere every model is Private and the
+		// filter allows everything (byte-identical flag-off).
+		if c.LLMResolver != nil {
+			c.LLMResolver.SetPostureScanner(intsecurity.NewSecretScanner())
+			logger.Debug("Posture scanner wired into resolver")
+		}
+
 		// Create auxiliary LLM clients for classifier and summarizer
 		// Use resolver for alias-based model selection (enables fallback rotation)
 		classifierRef := c.ModelsConfig.ClassifierModel
@@ -11271,6 +11290,36 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 			return restored, nil
 		}
 		p.turnJournal.OnStepStart(ctx, stepPayload.TaskID, conversationID, stepPayload.StepID, 0)
+	}
+
+	// Per-turn routing difficulty (sovereign-router-parity leaf 07,
+	// R7): the dispatch's classified level rides the task's
+	// turn_difficulty metadata (written by StrategicPlanner.Plan from
+	// the plan request). Arm the executing loop one-shot — the async
+	// twin of the dispatcher's RouteToAgent arm — so the step's FIRST
+	// alias resolve runs the sticky difficulty predicate. Unset
+	// metadata or a level <= 0 arms nothing (R7 inert). The arm is
+	// one-shot (consumeTurnDifficulty clears it on first use), so a
+	// shared loop never carries a stale level into later jobs. Read
+	// failure is warn-and-continue: routing difficulty must never
+	// block a step job.
+	if isStepJob && p.taskStore != nil {
+		if tk, tkErr := p.taskStore.GetByID(job.TaskID); tkErr == nil && tk != nil && len(tk.Metadata) > 0 {
+			var meta map[string]any
+			if mErr := json.Unmarshal(tk.Metadata, &meta); mErr == nil {
+				if dAny, ok := meta["turn_difficulty"]; ok {
+					switch dVal := dAny.(type) {
+					case float64:
+						agentLoop.ArmTurnDifficulty(int(dVal))
+					case int:
+						agentLoop.ArmTurnDifficulty(dVal)
+					}
+				}
+			} else {
+				p.logger.Warn("Failed to parse task metadata for turn difficulty",
+					"task_id", job.TaskID, "error", mErr)
+			}
+		}
 	}
 
 	response, err := agentLoop.RunOnce(ctx, prompt, conversationID)

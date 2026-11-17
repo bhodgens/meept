@@ -130,7 +130,12 @@ Registration order in `NewResolver` is FIXED and is part of the contract:
 1. `postureFilter` (R3) - a sensitive turn never reaches a non-cleared model
 2. `qualityFilter` (R1) - quality floor for the classified difficulty
 3. `admissionFilter` (R2) - context fit
-4. `budgetFilter` (R6) - advisory only; never returns `VerdictFloor` when mode is advisory
+
+There is no position 4. Advisory budget (R6) is NOT a selection-chain
+filter: leaf 08 binds it at the provider-manager tier gate (budget.go +
+provider_manager.go). Drift-audit ruling #4, 2026-11-16 - adding a
+budgetFilter would add a resolver.go writer and break the file-write
+serialization.
 
 Order matters: posture is a hard compliance boundary and must be evaluated even when the quality filter would skip, so the skip reason in the routing log names the *binding* constraint. A leaf that adds a filter appends it to this list and updates this contract in the same commit.
 
@@ -209,7 +214,9 @@ Owner: 02-admission-context.md.
 
 ```
 var ErrContextTooSmall = errors.New("llm: request does not fit the model context")
-var ErrProviderLimit = errors.New("llm: provider rate window exhausted")
+// ErrProviderLimit was dropped (drift-audit ruling #5, 2026-11-16):
+// rate-window handling stays with the existing cooldown machinery; no
+// leaf owns this sentinel and none may declare it.
 
 type ContextTooSmallError struct {
     ModelID, ProviderID string
@@ -259,7 +266,11 @@ const (
     ClassEntryMissing  FailureClass = "entry_missing" // 404
 )
 
-func ClassifyFailure(providerID, modelID string, status int, bodyExcerpt string) (FailureClass, FailureScope, string)
+func ClassifyFailure(providerID, modelID, poolID string, status int, bodyExcerpt string) (FailureClass, FailureScope, string)
+// FROZEN 5-arg shape WITH poolID in the THIRD position (user +
+// back-lane ruling 2026-11-16, superseding DRIFT-AUDIT.md ruling #2;
+// order matches the 00T gate seam and leaf 06: providerID, modelID,
+// poolID, status, body). Gate tests T12/T14 pin this arity.
 ```
 
 Scope resolution: `ScopeRequest` for 400/413/422 (never blocks anything); `ScopeModel` for 404; `ScopeAccount` for 401/402/403; `ScopePool` for a 429 whose body matches a pool-exhaustion phrase and whose provider declares a pool; else `ScopeModel` for 429; `ScopeModel` for 5xx and unmapped.
@@ -285,6 +296,8 @@ type ShadowCandidate struct {
     ModelID, ProviderID string
     Selected            bool
     SkipReason          string
+    Quality             int        // union ruling (drift audit #3): leaf 04's richer candidate shape
+    EstCostUSD          float64
 }
 func (r *Resolver) ResolveShadow(ctx context.Context, req ShadowRequest) (*ShadowDecision, error)
 ```
@@ -316,7 +329,9 @@ In `steer` mode `BudgetExceededError` is NEVER returned. Instead `Advisory()` re
 
 Owner: 07-sticky-difficulty.md.
 
-`StickyPin` gains `Difficulty int`. `resolveStickyCaller` releases the pin when `fc.Difficulty > pin.Difficulty` and re-pins from the rotation head. A released pin logs `sticky_difficulty_increase` as the routing-log reason (existing `RoutingDecision.Reason` field, `internal/llm/routing_log.go:98` - no schema change).
+`StickyPins` is `map[string]int` today (models.go:440). Leaf 07 converts
+pin storage to a struct with a `Difficulty` field (the per-pin difficulty
+storage described in leaf 07 is the accurate mechanism). `resolveStickyCaller` releases the pin when `fc.Difficulty > pin.Difficulty` and re-pins from the rotation head. A released pin logs `sticky_difficulty_increase` as the routing-log reason (existing `RoutingDecision.Reason` field, `internal/llm/routing_log.go:98` - no schema change).
 
 ### C9: Streamed tool-call validation (`internal/llm/stream_toolcheck.go`)
 
@@ -360,7 +375,10 @@ const ( PriceGroupFree PriceGroup = "free"; PriceGroupPaid PriceGroup = "paid"; 
 //   - sorted by (TotalCost, -quality)
 //   - a call with groups=["free"] then, on exhaustion/failure,
 //     ["paid","premium"] implements "free first, paid on exhaustion"
-func (r *Resolver) ResolveSpillway(ctx context.Context, groups []string, fc *FilterCtx) (*ModelConfig, error)
+func (r *Resolver) ResolveSpillway(ctx context.Context, groups []string, fc *FilterCtx) (*ModelConfig, string, error)
+// Returns the chosen config, the alias name that produced it, and an
+// error. 3-return shape is frozen (drift-audit ruling #1; leaf 09 and
+// the 00T contract list already held it).
 func (r *Resolver) AliasesByPriceGroup(g PriceGroup) []string
 ```
 
@@ -485,16 +503,16 @@ After every leaf is REVIEWED: run `make build`, `make test`, `make lint-ci`, `ma
 
 | Leaf | Requirement | Status | Commit | Notes |
 |------|-------------|--------|--------|-------|
-| 00T | gate | PENDING | | |
-| 01 | R1 | PENDING | | |
-| 02 | R2 | PENDING | | |
-| 03 | R8 | PENDING | | |
-| 04 | R4 | PENDING | | |
-| 05 | R3 | PENDING | | |
-| 06 | R5 | PENDING | | |
-| 07 | R7 | PENDING | | |
-| 08 | R6 | PENDING | | |
-| 09 | R9 | PENDING | | |
+| 00T | gate | TESTS_VALIDATED | a130ce81 | 13 files/36 tests, compile-RED on C1-C11 symbols; golden captured on main subset; orchestrator-reviewed vs Test Gate matrix |
+| 01 | R1 | REVIEWED | 01a16d2b | comparator = per-turn cost estimate (gateway.py estimate_cost shape); floor difficulty default 5 until leaf 07 threads per-turn value |
+| 02 | R2 | REVIEWED | 01a16d2b | gate wired in all 3 ProviderManager rotation loops; typed verdict on all-refused, never pool-exhaustion shape |
+| 03 | R8 | REVIEWED | d46fee26 | child interrupted post-implementation; wiring verified on disk (validateOfferedToolCalls, openai+anthropic+codex) |
+| 04 | R4 | REVIEWED | 298c8ff5 | RLock-only proof; Posture type declared in shadow.go (leaf 05 consumes); CLI+RPC+doc landed |
+| 05 | R3 | REVIEWED | 9a37d512 | import-cycle fallback (narrow interface); resolver-hook prompt seam; atomic prompt snapshot |
+| 06 | R5 | REVIEWED | d7a6e166 | model-scope arming deduped into alias cooldown (ruling 18); T12/T13/T14 pass live |
+| 07 | R7 | REVIEWED | 5a9a2659 | parameter-threaded difficulty (option unreachable at resolve-time); async lane via turn_difficulty metadata; single pin writer preserved |
+| 08 | R6 | REVIEWED | 17fc00f8 + 2f34d16d | back-lane body + forward steer backfill; T7 WIRED (handoff ask 3 closed) |
+| 09 | R9 | REVIEWED | 2dcf3045 | leaf-06 gap fill landed the full C10 surface; matches back lane's staged work (spillwayCostEpsilon rename applies); pricegroup gate tests in full-suite run |
 
 Status values: PENDING, TESTS_IN_PROGRESS, TESTS_VALIDATED, IN_PROGRESS, IMPLEMENTED, REVIEWED, COMPLETE, BLOCKED.
 

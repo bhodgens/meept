@@ -18,11 +18,13 @@ func newRoutingCmd() *cobra.Command {
 Subcommands:
   meept routing recent [N]             Last N decisions (default 20)
   meept routing by-model <model-id>    Decisions for a specific model
+  meept routing shadow                 Decision-only routing preview (no tokens spent)
 `,
 	}
 
 	cmd.AddCommand(newRoutingRecentCmd())
 	cmd.AddCommand(newRoutingByModelCmd())
+	cmd.AddCommand(newRoutingShadowCmd())
 
 	return cmd
 }

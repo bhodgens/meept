@@ -1,0 +1,47 @@
+{
+  "scenario": "sovereign-parity-flagoff",
+  "turns": [
+    {
+      "turn": 1,
+      "alias": "general",
+      "provider": "prova",
+      "model": "model-a",
+      "reason": "round_robin"
+    },
+    {
+      "turn": 2,
+      "alias": "general",
+      "provider": "prova",
+      "model": "model-a",
+      "reason": "round_robin"
+    },
+    {
+      "turn": 3,
+      "alias": "general",
+      "provider": "prova",
+      "model": "model-a",
+      "reason": "round_robin"
+    },
+    {
+      "turn": 4,
+      "alias": "general",
+      "provider": "prova",
+      "model": "model-a",
+      "reason": "round_robin"
+    },
+    {
+      "turn": 5,
+      "alias": "general",
+      "provider": "prova",
+      "model": "model-a",
+      "reason": "round_robin"
+    },
+    {
+      "turn": 6,
+      "alias": "general",
+      "provider": "prova",
+      "model": "model-a",
+      "reason": "round_robin"
+    }
+  ]
+}

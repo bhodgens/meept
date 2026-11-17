@@ -124,6 +124,16 @@ type PlanRequest struct {
 	// user directives use, which AgentLoop consumes one-shot per task run.
 	// Empty = no request-level model; unchanged behavior.
 	RequestModel string `json:"request_model,omitempty"`
+
+	// Difficulty carries the classified per-turn routing difficulty
+	// (sovereign-router-parity leaf 07 / Contract C11, R7): the
+	// dispatch's Intent projected through llm.DeriveDifficulty. It rides
+	// the plan request the same lane as RequestModel and lands on the
+	// task's turn_difficulty metadata, which the step-job processor arms
+	// on the executing loop one-shot (ArmTurnDifficulty). 0 = the intent
+	// produced no level (DeriveDifficulty never returns 0 for real
+	// signals; 0 here means unclassified) = R7 inert on the async lane.
+	Difficulty int `json:"difficulty,omitempty"`
 }
 
 // plannerStep is the JSON structure expected from the planner LLM output.
@@ -751,6 +761,32 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 					sp.logger.Warn("Failed to persist request model on task",
 						"task_id", req.TaskID, "error", err)
 				}
+			}
+		}
+	}
+
+	// Per-turn routing difficulty (sovereign-router-parity leaf 07, R7):
+	// merge the dispatch's classified level into the task's
+	// turn_difficulty metadata — the SAME channel RequestModel uses. The
+	// step-job processor reads it and arms the executing loop one-shot
+	// (ArmTurnDifficulty); a level <= 0 never writes (unclassified = R7
+	// inert). Written even when a model directive exists: the two keys
+	// are independent.
+	if req.Difficulty > 0 {
+		meta := map[string]any{}
+		if len(t.Metadata) > 0 {
+			if err := json.Unmarshal(t.Metadata, &meta); err != nil {
+				sp.logger.Warn("Failed to parse task metadata for difficulty merge",
+					"task_id", req.TaskID, "error", err)
+				meta = map[string]any{}
+			}
+		}
+		meta["turn_difficulty"] = req.Difficulty
+		if metaJSON, mErr := json.Marshal(meta); mErr == nil {
+			t.Metadata = json.RawMessage(metaJSON)
+			if err := sp.taskStore.Update(t); err != nil {
+				sp.logger.Warn("Failed to persist turn difficulty on task",
+					"task_id", req.TaskID, "error", err)
 			}
 		}
 	}

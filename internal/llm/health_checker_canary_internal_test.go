@@ -1,7 +1,7 @@
 // Gate tests for the llama-hang-watchdog tree (docs/plans/llama-hang-watchdog),
 // leaf 00T — written BEFORE the implementation exists. This file must fail to
 // compile naming ONLY the new contract symbols (RuntimeConfig.Canary* fields,
-// VerdictNow/VerdictHung). Leaf 01 (canary probe) makes the request-shape /
+// HealthVerdictNow/VerdictHealthHung). Leaf 01 (canary probe) makes the request-shape /
 // arming / ledger rows pass; the two failure-counting rows assert through the
 // Contract-2 verdict surface ("assert ... the verdict after threshold ticks" —
 // 00T brief Task 2), so they go GREEN with leaf 02. Referencing the
@@ -197,7 +197,7 @@ func TestCanaryRequestShape(t *testing.T) {
 // TestCanaryEmptyChoicesIsFailure — gate matrix F3: a 200 response with an
 // EMPTY choices array is a canary failure (Contract 5), not a success. After
 // CanaryThreshold such ticks with /health still answering 200, the checker
-// reports VerdictHung.
+// reports VerdictHealthHung.
 func TestCanaryEmptyChoicesIsFailure(t *testing.T) {
 	fx := newCanaryFixture(t)
 	fx.setCompletions(func(w http.ResponseWriter) {
@@ -210,9 +210,9 @@ func TestCanaryEmptyChoicesIsFailure(t *testing.T) {
 	hc.Start(context.Background())
 	defer hc.Stop()
 
-	if !gateWaitFor(2*time.Second, func() bool { return hc.VerdictNow() == VerdictHung }) {
-		t.Fatalf("verdict = %v after %d empty-choices canary ticks, want VerdictHung",
-			hc.VerdictNow(), fx.completionHits())
+	if !gateWaitFor(2*time.Second, func() bool { return hc.HealthVerdictNow() == VerdictHealthHung }) {
+		t.Fatalf("verdict = %v after %d empty-choices canary ticks, want VerdictHealthHung",
+			hc.HealthVerdictNow(), fx.completionHits())
 	}
 	if fx.completionHits() < 2 {
 		t.Errorf("expected at least CanaryThreshold=2 canary requests, got %d", fx.completionHits())
@@ -221,7 +221,7 @@ func TestCanaryEmptyChoicesIsFailure(t *testing.T) {
 
 // TestCanaryNon200IsFailure — gate matrix F3: any non-200 status is a canary
 // failure, and so is a 200 whose body is unparseable (Contract 5). Each case
-// drives VerdictHung after threshold consecutive failures.
+// drives VerdictHealthHung after threshold consecutive failures.
 func TestCanaryNon200IsFailure(t *testing.T) {
 	cases := []struct {
 		name string
@@ -245,9 +245,9 @@ func TestCanaryNon200IsFailure(t *testing.T) {
 			hc.Start(context.Background())
 			defer hc.Stop()
 
-			if !gateWaitFor(2*time.Second, func() bool { return hc.VerdictNow() == VerdictHung }) {
-				t.Fatalf("verdict = %v after %d failing canary ticks, want VerdictHung",
-					hc.VerdictNow(), fx.completionHits())
+			if !gateWaitFor(2*time.Second, func() bool { return hc.HealthVerdictNow() == VerdictHealthHung }) {
+				t.Fatalf("verdict = %v after %d failing canary ticks, want VerdictHealthHung",
+					hc.HealthVerdictNow(), fx.completionHits())
 			}
 		})
 	}

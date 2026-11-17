@@ -311,6 +311,25 @@ type ModelConfig struct {
 	Workflow string
 	// GenerationURL is a full URL for kind=http models.
 	GenerationURL string
+	// Quality carries the measured per-class quality scores mapped from
+	// the models.json5 "quality" block (Contract C2, leaf 01). Zero value
+	// (no block) = dimension inert: floor never binds, the selection
+	// comparator's quality term vanishes. Scores come from measurement
+	// only — never seed from vendor documentation.
+	Quality Quality
+	// DataPosture is the EFFECTIVE per-model data posture (Contract C4,
+	// leaf 05), resolved through ParsePosture at the ModelConfig
+	// construction site: PosturePrivate unless the config explicitly
+	// declares "public_only" or "non_sensitive". A config with no
+	// data_posture key anywhere carries all-Private — the position-1
+	// posture filter allows everything and routing is byte-identical to
+	// pre-leaf (flag-off control gate).
+	DataPosture Posture
+	// Pool is the declared shared upstream quota pool (Contract C5,
+	// sovereign-router-parity leaf 06), mirrored from ModelDef.Pool at
+	// construction. Empty (the default) = pool-less: ScopePool never
+	// fires for this model (opt-in gate, master Q4).
+	Pool string
 	// BodyTemplate is the JSON body template for kind=http models.
 	BodyTemplate map[string]any
 	// ResponseURLPath / ResponseB64Path extract the asset from an http response.
@@ -418,11 +437,45 @@ type AliasEntry struct {
 	MaxFails               int            // Max consecutive failures before rotation
 	DefaultModel           string         // Optional: revert to this model after cooldown
 	BalancedStickyRequests bool           // Optional: pin callers to single model
+	// PriceGroup is the alias routing-tier tag (Contract C10, leaf 01
+	// declares the config field; leaf 09's spillway reads it here).
+	// "" = untagged = legacy: resolves only when explicitly selected,
+	// never participates in a spillway step.
+	PriceGroup string
 	// timeoutArmed records that the originating CONFIG declared a nonzero
 	// timeout: (tree 02 leaf 04, DECISIONS.md D10). Alias-level blocks arm
 	// only when true — a Timeout value substituted as the 30s default must
 	// never look like an explicit opt-in.
 	timeoutArmed bool
+}
+
+const (
+	// ReasonStickyRequest is the reason written when a healthy existing pin
+	// serves the caller.
+	ReasonStickyRequest = "sticky_request"
+	// ReasonStickyRequestNew is the reason written when the caller is
+	// (re-)pinned at the rotation position.
+	ReasonStickyRequestNew = "sticky_request_new"
+	// ReasonStickyDifficultyIncrease is the reason written when the
+	// caller's per-turn difficulty rose ABOVE the level the pin was
+	// created for (Contract C8, R7): the pin releases and re-pins at the
+	// rotation head through the SAME re-pin block as the failure paths.
+	ReasonStickyDifficultyIncrease = "sticky_difficulty_increase"
+)
+
+// StickyPin is one sticky-pinned caller's rotation position plus the
+// routing context the pin was created under (Contract C8, sovereign-
+// router-parity leaf 07). Index keeps the pre-existing semantics (an
+// alias.Models rotation index; resolve identity at release time via the
+// alias). Difficulty records the classified difficulty (Contract C11,
+// 0 = unclassified) the pin was created FOR: a later resolve whose
+// difficulty rises strictly above it releases the pin (R7). CreatedAt is
+// the write instant (diagnostics only — the pin has NO TTL by contract;
+// sticky state is a cache-affinity optimisation, not correctness state).
+type StickyPin struct {
+	Index      int
+	Difficulty int
+	CreatedAt  time.Time
 }
 
 // AliasHealth tracks the health and rotation state of an alias.
@@ -437,7 +490,7 @@ type AliasHealth struct {
 	ConsecutiveFails int
 	LastFailure      time.Time
 	CooldownUntil    time.Time
-	StickyPins       map[string]int
+	StickyPins       map[string]StickyPin
 	// RevertAt arms default-model reversion: when non-zero, rotation reverts
 	// to AliasEntry.DefaultModel after this deadline (armed by
 	// RecordAliasFailure when default_model is configured).

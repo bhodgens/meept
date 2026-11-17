@@ -523,7 +523,11 @@ func (pm *ProviderManager) Chat(ctx context.Context, messages []ChatMessage, opt
 	}
 
 	// Get providers in order of preference and snapshot health status while locked
-	orderedProviders := pm.orderedProvidersForRequest(opts)
+	// Advisory-budget cheaper-alias steer (Contract C7, leaf 08): in steer
+	// mode with a live breach the failover tail is reordered by ascending
+	// cost so the cheaper candidate dispatches next. Enforce (the default)
+	// returns the slice unchanged — byte-identical rotation.
+	orderedProviders := pm.steerReorderedTail(pm.orderedProvidersForRequest(opts))
 	healthSnapshot := make([]ProviderStatus, len(orderedProviders))
 	for i, e := range orderedProviders {
 		healthSnapshot[i] = e.Health.Status
@@ -540,6 +544,16 @@ func (pm *ProviderManager) Chat(ctx context.Context, messages []ChatMessage, opt
 	if len(orderedProviders) > 0 {
 		tier = pm.newTierGate(orderedProviders[0].Config.Capabilities)
 	}
+
+	// R2 admission estimate (Contract C3, sovereign-router-parity leaf
+	// 02): computed ONCE per call over the request's messages + tools.
+	// Zero when nothing is estimable — the gate allows (never guesses).
+	admissionEst := admissionEstimateFor(messages, opts)
+	// admissionVerdict holds the typed verdict from the FIRST candidate
+	// the gate refused; if every candidate is refused the loop ends with
+	// it (never a pool-exhaustion error shape — the caller must see the
+	// binding limit, and NonRetryable bars retry/park).
+	var admissionVerdict *ContextTooSmallError
 
 	var lastErr error
 	var attempts int
@@ -568,6 +582,38 @@ func (pm *ProviderManager) Chat(ctx context.Context, messages []ChatMessage, opt
 		// (attempts == 0) can never trip the floor (0 <= any limit).
 		if floorErr := tier.nextHopBlocked(entry.Config.ProviderID, entry.Config.ModelID, attempts, lastErr); floorErr != nil {
 			return nil, floorErr
+		}
+
+		// R2 admission gate (Contract C3, sovereign-router-parity leaf
+		// 02): the request cannot fit this candidate's DECLARED context.
+		// SKIP — never dispatch, never recordFailure (a size verdict is
+		// not provider ill-health; the same body would overflow any
+		// smaller-context candidate exactly as F-A1 argues for the
+		// post-hoc classifier), never retried, never parked
+		// (ContextTooSmallError.NonRetryable). The estimate is computed
+		// once per call (admissionEst); skipped candidates cost one
+		// integer compare. When the gate rejects EVERY candidate the
+		// loop exits with the typed verdict from the PRIMARY (index 0 —
+		// the member that would have served), not a pool-exhaustion
+		// shape: the caller sees which limit was the binding one.
+		if blocked, reserve, limit := admissionGateBlocked(entry.Config, admissionEst); blocked {
+			pm.logger.Info("Context too small: skipping candidate pre-dispatch",
+				"provider", entry.Config.ProviderID,
+				"model", entry.Config.ModelID,
+				"est_input", admissionEst,
+				"reserve", reserve,
+				"context_limit", limit,
+			)
+			if admissionVerdict == nil {
+				admissionVerdict = &ContextTooSmallError{
+					ProviderID:   entry.Config.ProviderID,
+					ModelID:      entry.Config.ModelID,
+					EstInput:     admissionEst,
+					Reserve:      reserve,
+					ContextLimit: limit,
+				}
+			}
+			continue
 		}
 
 		attempts++
@@ -738,6 +784,13 @@ func (pm *ProviderManager) Chat(ctx context.Context, messages []ChatMessage, opt
 		return resp, nil
 	}
 
+	if admissionVerdict != nil {
+		// Every candidate the gate evaluated was refused pre-dispatch:
+		// surface the typed verdict (NonRetryable — never retried, never
+		// parked) instead of the pool-exhaustion shape. Zero upstream
+		// requests were made for this call.
+		return nil, admissionVerdict
+	}
 	if lastErr != nil {
 		return nil, fmt.Errorf("all providers failed: %w", lastErr)
 	}
@@ -754,7 +807,7 @@ func (pm *ProviderManager) ChatWithProgress(ctx context.Context, messages []Chat
 		return nil, errors.New("provider manager not initialized or no providers configured")
 	}
 
-	orderedProviders := pm.orderedProvidersForRequest(opts)
+	orderedProviders := pm.steerReorderedTail(pm.orderedProvidersForRequest(opts))
 	healthSnapshot := make([]ProviderStatus, len(orderedProviders))
 	for i, e := range orderedProviders {
 		healthSnapshot[i] = e.Health.Status
@@ -767,6 +820,11 @@ func (pm *ProviderManager) ChatWithProgress(ctx context.Context, messages []Chat
 	if len(orderedProviders) > 0 {
 		tier = pm.newTierGate(orderedProviders[0].Config.Capabilities)
 	}
+
+	// R2 admission estimate + verdict (Contract C3, leaf 02) — see the
+	// Chat() twin for the full contract.
+	admissionEst := admissionEstimateFor(messages, opts)
+	var admissionVerdict *ContextTooSmallError
 
 	var lastErr error
 	var attempts int
@@ -787,6 +845,28 @@ func (pm *ProviderManager) ChatWithProgress(ctx context.Context, messages []Chat
 		// Tier floor check BEFORE dispatch (T2/T4) - see the Chat() twin.
 		if floorErr := tier.nextHopBlocked(entry.Config.ProviderID, entry.Config.ModelID, attempts, lastErr); floorErr != nil {
 			return nil, floorErr
+		}
+
+		// R2 admission gate (Contract C3, leaf 02) - see the Chat()
+		// twin: skip pre-dispatch, no recordFailure, no depth consumed.
+		if blocked, reserve, limit := admissionGateBlocked(entry.Config, admissionEst); blocked {
+			pm.logger.Info("Context too small: skipping candidate pre-dispatch",
+				"provider", entry.Config.ProviderID,
+				"model", entry.Config.ModelID,
+				"est_input", admissionEst,
+				"reserve", reserve,
+				"context_limit", limit,
+			)
+			if admissionVerdict == nil {
+				admissionVerdict = &ContextTooSmallError{
+					ProviderID:   entry.Config.ProviderID,
+					ModelID:      entry.Config.ModelID,
+					EstInput:     admissionEst,
+					Reserve:      reserve,
+					ContextLimit: limit,
+				}
+			}
+			continue
 		}
 
 		attempts++
@@ -1006,7 +1086,7 @@ func (pm *ProviderManager) chatWithAttemptTaggedDeltas(ctx context.Context, mess
 		pm.mu.RUnlock()
 		return nil, errors.New("provider manager not initialized or no providers configured")
 	}
-	orderedProviders := pm.orderedProvidersForRequest(opts)
+	orderedProviders := pm.steerReorderedTail(pm.orderedProvidersForRequest(opts))
 	healthSnapshot := make([]ProviderStatus, len(orderedProviders))
 	for i, e := range orderedProviders {
 		healthSnapshot[i] = e.Health.Status
@@ -1019,6 +1099,11 @@ func (pm *ProviderManager) chatWithAttemptTaggedDeltas(ctx context.Context, mess
 	if len(orderedProviders) > 0 {
 		tier = pm.newTierGate(orderedProviders[0].Config.Capabilities)
 	}
+
+	// R2 admission estimate + verdict (Contract C3, leaf 02) — see the
+	// Chat() twin for the full contract.
+	admissionEst := admissionEstimateFor(messages, opts)
+	var admissionVerdict *ContextTooSmallError
 
 	var lastErr error
 	var attempts int
@@ -1043,6 +1128,29 @@ func (pm *ProviderManager) chatWithAttemptTaggedDeltas(ctx context.Context, mess
 		// Tier floor check BEFORE dispatch (T2/T4) - see the Chat() twin.
 		if floorErr := tier.nextHopBlocked(entry.Config.ProviderID, entry.Config.ModelID, attempts, lastErr); floorErr != nil {
 			return nil, floorErr
+		}
+
+		// R2 admission gate (Contract C3, leaf 02) - see the Chat()
+		// twin: skip pre-dispatch, no recordFailure, no attempt index
+		// consumed (consumers only reset on deltas they received).
+		if blocked, reserve, limit := admissionGateBlocked(entry.Config, admissionEst); blocked {
+			pm.logger.Info("Context too small: skipping candidate pre-dispatch",
+				"provider", entry.Config.ProviderID,
+				"model", entry.Config.ModelID,
+				"est_input", admissionEst,
+				"reserve", reserve,
+				"context_limit", limit,
+			)
+			if admissionVerdict == nil {
+				admissionVerdict = &ContextTooSmallError{
+					ProviderID:   entry.Config.ProviderID,
+					ModelID:      entry.Config.ModelID,
+					EstInput:     admissionEst,
+					Reserve:      reserve,
+					ContextLimit: limit,
+				}
+			}
+			continue
 		}
 
 		attempts++
@@ -1159,6 +1267,11 @@ func (pm *ProviderManager) chatWithAttemptTaggedDeltas(ctx context.Context, mess
 		return resp, nil
 	}
 
+	if admissionVerdict != nil {
+		// Every candidate refused pre-dispatch (Contract C3, leaf 02) —
+		// typed verdict, zero upstream requests (see the Chat() twin).
+		return nil, admissionVerdict
+	}
 	if lastErr != nil {
 		return nil, fmt.Errorf("all %d provider(s) failed (last: %w)", len(orderedProviders), lastErr)
 	}
@@ -1237,6 +1350,51 @@ func (pm *ProviderManager) preferRequestedProvider(providers []*ProviderEntry, p
 	return append(preferred, rest...)
 }
 
+// steerReorderedTail applies the advisory-budget cheaper-alias steer
+// (Contract C7, sovereign-router-parity leaf 08) to one call's candidate
+// list. When the shared budget is configured in steer mode AND currently
+// reports a breach (Advisory().OverTarget), the FAILOVER TAIL (index 1+)
+// is stably reordered by ascending TotalCost() so the next rotation hop
+// dispatches the cheaper member; the primary candidate is never moved, so
+// tier-gate depth semantics and the primary's own precedence are untouched.
+//
+// Steering, never refusing: the reorder can only change WHICH healthy
+// candidate serves next, never whether the turn dispatches. In enforce
+// mode (the default), with no budget wired, or with no live breach the
+// input slice is returned unchanged — byte-identical rotation.
+// Advisory() takes b.mu only to READ counters (no mutation, no I/O), and
+// this runs before the loop starts, so no lock is held across dispatch.
+//
+// Health filtering stays downstream exactly as before: candidates skipped
+// pre-dispatch (disabled, unhealthy-at-start) consume no depth whether or
+// not this reorder moved them (mirrors the admission-gate wiring, leaf 02).
+func (pm *ProviderManager) steerReorderedTail(providers []*ProviderEntry) []*ProviderEntry {
+	if len(providers) < 2 {
+		return providers
+	}
+	budget := pm.config.Budget
+	if budget == nil || budget.Mode() != BudgetModeSteer {
+		return providers
+	}
+	if !budget.Advisory().OverTarget {
+		return providers
+	}
+	tail := make([]*ProviderEntry, len(providers)-1)
+	copy(tail, providers[1:])
+	stableSortByTotalCost(tail)
+	return append(providers[:1:1], tail...)
+}
+
+// stableSortByTotalCost sorts entries by ascending TotalCost() with
+// sort.SliceStable, so candidates with equal cost keep their
+// health/priority failover order exactly as the pre-steer rotation
+// produced it (a tie never reorders anything).
+func stableSortByTotalCost(entries []*ProviderEntry) {
+	sort.SliceStable(entries, func(i, j int) bool {
+		return entries[i].Config.TotalCost() < entries[j].Config.TotalCost()
+	})
+}
+
 // orderedProvidersForRequest returns the health/cost/priority-ordered provider
 // list with any request-scoped model selection (WithResolvedModel) moved to
 // the front for THIS call only. Callers must hold at least pm.mu.RLock (it
@@ -1248,6 +1406,40 @@ func (pm *ProviderManager) orderedProvidersForRequest(opts []ChatOption) []*Prov
 		providerID = selection.ProviderID
 	}
 	return pm.preferRequestedProvider(pm.getOrderedProviders(), providerID)
+}
+
+// admissionEstimateFor computes the R2 pre-dispatch input estimate for one
+// call (Contract C3, sovereign-router-parity leaf 02): EstimateInputTokens
+// over the request's messages plus the tools the call carries. The tools
+// are read through a scratch chatOptions probe — the same side-effect-free
+// pattern as requestResolvedProviderID (every ChatOption writes only to its
+// receiver). Computed ONCE per call, before the rotation loop.
+func admissionEstimateFor(messages []ChatMessage, opts []ChatOption) int {
+	probe := &chatOptions{}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(probe)
+		}
+	}
+	return EstimateInputTokens(messages, probe.tools)
+}
+
+// admissionGateBlocked applies the frozen R2 context-fit gate rule
+// (master Contract C3, gateway.py:706) to one candidate:
+//
+//	estInput + reserve(cfg.MaxTokens) > cfg.ContextLimit
+//
+// Returns (blocked, reserve, limit). cfg.ContextLimit <= 0 (the config
+// declares no context_limit — unknown limit) and estInput <= 0 (nothing
+// to estimate) both ALLOW: the gate never fabricates a bound or an input
+// size, so a config with no context_limit anywhere is byte-identical to
+// pre-leaf (the opt-in default).
+func admissionGateBlocked(cfg *ModelConfig, estInput int) (blocked bool, reserve, limit int) {
+	if cfg == nil || cfg.ContextLimit <= 0 || estInput <= 0 {
+		return false, 0, 0
+	}
+	reserve = outputReserve(cfg.MaxTokens)
+	return estInput+reserve > cfg.ContextLimit, reserve, cfg.ContextLimit
 }
 
 // getOrderedProviders returns providers sorted by preference, with

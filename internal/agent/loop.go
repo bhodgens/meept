@@ -793,6 +793,39 @@ type AgentLoop struct {
 	// (labelled delivery, chain-stability phase-2 replay-01/47). Set at
 	// turn entry, cleared in resetTurnGuards. Guarded by l.mu.
 	turnUserPrompt string
+	// turnPosturePrompt is the resolve-time prompt snapshot for the C4
+	// data-posture gate (sovereign-router-parity leaf 05): the loop
+	// captures the RAW user prompt at turn entry (before sanitization —
+	// SanitizeInput normalizes shapes, but a scanner check belongs on the
+	// exact outbound text; the voice clock stamp is stripped, matching
+	// every other derived field) and hands it to the Resolver through the
+	// posture-context closure so the position-1 postureFilter can scan it
+	// before any model is chosen.
+	//
+	// LOCKING (do not regress): this is an ATOMIC pointer, read lock-free
+	// by the resolver's posture closure. The resolver calls the closure
+	// while holding its OWN r.mu on deep re-entry paths (e.g. refusal
+	// handling inside chatWithFailoverRaw); a plain l.mu-guarded field
+	// there self-deadlocks against whatever code on the turn goroutine
+	// holds l.mu across the resolve (observed live: RWMutex self-deadlock
+	// in TestAgentLoop_RefusalPinClearsOnFreshTurn before the atomic
+	// swap). Empty (between turns, task lanes that never set it) = the
+	// gate fail-opens. Writes go through setTurnPosturePrompt.
+	turnPosturePrompt atomic.Pointer[string]
+
+	// armedTurnDifficulty carries THIS turn's classified routing difficulty
+	// (sovereign-router-parity leaf 07 / Contract C11, R7). The dispatcher
+	// projects the turn's Intent signals (Intent.RequiresPlanning +
+	// Intent.SuggestedMode + input length) through llm.DeriveDifficulty and
+	// arms it via ArmTurnDifficulty at RouteToAgent / direct-mode entry —
+	// the same one-shot seam shape as ApplyRequestModel. reasoningCycle's
+	// FIRST alias resolve consumes it via ResolveForAliasDifficulty; zero
+	// (unset) keeps R7 fully inert — byte-identical to the pre-leaf
+	// resolve. It is a plain field under l.mu (the resolver-facing read is
+	// on the turn goroutine only, never from a resolver-held-lock closure,
+	// so no atomic is needed — unlike turnPosturePrompt which the resolver
+	// reads deep inside its own critical section).
+	armedTurnDifficulty int
 
 	// Conversation management
 	conversations *ConversationStore
@@ -1347,6 +1380,30 @@ func WithLLMChatter(chatter llm.Chatter) LoopOption {
 func WithResolver(resolver *llm.Resolver) LoopOption {
 	return func(l *AgentLoop) {
 		l.resolver = resolver
+
+		// Data posture (sovereign-router-parity leaf 05, Contract C4):
+		// the resolve-time prompt seam. The resolver reads the loop's
+		// per-turn prompt snapshot at alias resolution so the position-1
+		// postureFilter can scan the OUTBOUND user text before any model
+		// is chosen (sensitive turn -> rotation bypasses non-cleared
+		// models wholesale). Nil resolver: no seam — a resolver without
+		// this closure fail-opens (no text = non-sensitive), so eval/test
+		// resolvers keep the byte-identical posture. The read is LOCK-FREE
+		// (atomic snapshot): the resolver may call this while holding its
+		// own r.mu on deep re-entry paths, where an l.mu take would
+		// self-deadlock (see turnPosturePrompt's field contract).
+		if resolver != nil {
+			resolver.SetResolvePostureContext(func(sessionID string) string {
+				// LOCK-FREE read (see turnPosturePrompt's contract): the
+				// resolver calls this while holding its own r.mu on deep
+				// re-entry paths; taking l.mu here self-deadlocked
+				// (observed live). The atomic snapshot needs no lock.
+				if p := l.turnPosturePrompt.Load(); p != nil {
+					return *p
+				}
+				return ""
+			})
+		}
 
 		// Loop refusal fallback (refusal-fallback tree 03). The resolver
 		// backs the ModelResolver seam; the serving ref reads alias
@@ -2168,6 +2225,63 @@ func (l *AgentLoop) ApplyRequestModel(modelRef string) {
 		"agent_id", l.agentID,
 		"model_ref", modelRef,
 	)
+}
+
+// ArmTurnDifficulty arms THIS turn's classified routing difficulty
+// (sovereign-router-parity leaf 07 / Contract C11, R7) on the loop via the
+// same one-shot seam shape as ApplyRequestModel: set before the turn's
+// reasoning cycle runs, consumed by the FIRST alias resolve, never persisted.
+// Zero (or a negative level) is a no-op — an unclassified turn keeps R7
+// fully inert (no arm, byte-identical resolve). Thread-safe (l.mu).
+func (l *AgentLoop) ArmTurnDifficulty(difficulty int) {
+	if difficulty <= 0 {
+		return
+	}
+	l.mu.Lock()
+	l.armedTurnDifficulty = difficulty
+	l.mu.Unlock()
+}
+
+// consumeTurnDifficulty reads and clears the armed per-turn difficulty for
+// this resolve. The one-shot contract mirrors the override pin: the value
+// arms for the turn's FIRST alias resolution (the sticky pin's creation or
+// release decision), then clears so later tool-loop iterations and the next
+// turn stay unclassified (difficulty 0 = inert). Callers on the turn
+// goroutine only.
+func (l *AgentLoop) consumeTurnDifficulty() int {
+	l.mu.Lock()
+	d := l.armedTurnDifficulty
+	l.armedTurnDifficulty = 0
+	l.mu.Unlock()
+	return d
+}
+
+// ResolveTurnModel runs the session loop's alias resolution at the DISPATCH
+// clock (sovereign-router-parity leaf 07, R7): async task dispatch never
+// routes through this loop's reasoning cycle (the step job runs on a
+// task-scoped loop that may hold no alias), so without this the escalation
+// turn's difficulty never reaches the sticky predicate keyed by THIS
+// session. The resolve consumes the one-shot armed difficulty and applies
+// the frozen C8 semantics — a pin created for an easier turn releases and
+// re-pins at the rotation head with reason sticky_difficulty_increase, and
+// the updated pin serves the session's NEXT turn. No alias on the loop (or
+// no resolver) is a no-op. Resolve errors are DEBUG-logged, never fatal:
+// routing observability and pin state must not break the dispatch.
+func (l *AgentLoop) ResolveTurnModel() {
+	l.mu.RLock()
+	ref := l.modelRef
+	sid := l.sessionID
+	l.mu.RUnlock()
+	if ref == "" || l.resolver == nil || !l.resolver.HasAlias(ref) {
+		return
+	}
+	if _, err := l.resolver.ResolveForAliasDifficulty(ref, sid, l.consumeTurnDifficulty()); err != nil {
+		l.logger.Debug("Dispatch-time turn model resolve failed",
+			"alias", ref,
+			"session_id", sid,
+			"error", err,
+		)
+	}
 }
 
 // applyExposureGate is the warn-once capability-gate downgrade for the
@@ -3235,6 +3349,7 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	// guard reset; cleared with the rest of the per-turn state.
 	l.mu.Lock()
 	l.turnUserPrompt = stripVoiceContextStamp(userMessage)
+	l.setTurnPosturePrompt(userMessage)
 	l.mu.Unlock()
 
 	// AUDIT FIX H3 (bughunt 2026-09-03): a RESUMED parked turn re-enters
@@ -4903,9 +5018,33 @@ func (l *AgentLoop) resetTurnGuards() {
 	// semantics as guardRetried (one rewrite per turn).
 	l.terminateGuardRetried = false
 	// Chain-stability phase-2: the per-turn prompt snapshot clears with
-	// the rest of the guard state.
+	// the rest of the guard state (turnPosturePrompt with it — leaf 05:
+	// a stale prompt must never gate a later turn's model choice).
 	l.turnUserPrompt = ""
+	l.clearTurnPosturePrompt()
 	l.mu.Unlock()
+}
+
+// setTurnPosturePrompt / clearTurnPosturePrompt publish the per-turn
+// posture snapshot (leaf 05). The atomic pointer keeps the resolver's
+// posture closure lock-free — the resolver reads it while holding its own
+// mutex on re-entry paths, so an l.mu-guarded plain field would
+// self-deadlock (see the field contract).
+func (l *AgentLoop) setTurnPosturePrompt(prompt string) {
+	l.turnPosturePrompt.Store(&prompt)
+}
+
+func (l *AgentLoop) clearTurnPosturePrompt() {
+	l.turnPosturePrompt.Store(nil)
+}
+
+// TurnPosturePrompt returns the current turn's raw prompt snapshot (the
+// seam the posture closure reads; exported for tests and diagnostics).
+func (l *AgentLoop) TurnPosturePrompt() string {
+	if p := l.turnPosturePrompt.Load(); p != nil {
+		return *p
+	}
+	return ""
 }
 
 // reasoningCycle runs the main reasoning loop with tool execution.
@@ -5306,7 +5445,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		l.modelMu.Unlock()
 
 		if l.modelRef != "" && l.resolver != nil && l.resolver.HasAlias(l.modelRef) {
-			modelConfig, err := l.resolver.ResolveForAlias(l.modelRef, l.sessionID)
+			modelConfig, err := l.resolver.ResolveForAliasDifficulty(l.modelRef, l.sessionID, l.consumeTurnDifficulty())
 			if err != nil {
 				l.logger.Warn("Alias resolution failed, using default",
 					"alias", l.modelRef,
@@ -6940,7 +7079,7 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 
 		// Resolve model for this attempt
 		if l.modelRef != "" && l.resolver != nil && l.resolver.HasAlias(l.modelRef) {
-			modelConfig, err := l.resolver.ResolveForAlias(l.modelRef, l.sessionID)
+			modelConfig, err := l.resolver.ResolveForAliasDifficulty(l.modelRef, l.sessionID, l.consumeTurnDifficulty())
 			if err != nil {
 				// Endpoint-blocked parking (tree 02 leaf 04 D10 + tree
 				// 03 leaf 02 D9 composition): every alias candidate sits
@@ -7431,6 +7570,29 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 				// Feature off / one-hop give-up: surface the ORIGINAL
 				// refusal unchanged.
 				return nil, rerr
+			}
+			return nil, err
+		}
+
+		// Admission verdict (sovereign-router-parity leaf 02, Contract
+		// C3): a ContextTooSmallError is a REQUEST-size verdict, not
+		// alias ill-health — the same body would overflow any
+		// smaller-context candidate, so RecordAliasFailure here would
+		// cooldown-damage healthy members and rotation could never fix
+		// it (every candidate fails the same frozen rule; the
+		// ProviderManager gate already refused each one pre-dispatch).
+		// NonRetryable: surface verbatim so the caller decides (shrink
+		// the request or pick a bigger-context model), mirroring the
+		// tier-floor branch below.
+		if llm.IsContextTooSmall(err) {
+			if admissionErr, ok := llm.AsContextTooSmall(err); ok {
+				l.logger.Warn("request does not fit the model context — surfacing without rotation",
+					"provider", admissionErr.ProviderID,
+					"model", admissionErr.ModelID,
+					"est_input", admissionErr.EstInput,
+					"reserve", admissionErr.Reserve,
+					"context_limit", admissionErr.ContextLimit,
+				)
 			}
 			return nil, err
 		}
