@@ -27,6 +27,16 @@ Signature, verbatim:
 func (c *Client) Warm(ctx context.Context, messages []ChatMessage, opts ...ChatOption) error
 ```
 
+> **AMENDMENT 2026-11-16 (reconciliation wave; doc-only; mirrors root
+> master.md C4 amendment):** the as-built signature shipped in this leaf is
+> `Warm(ctx context.Context, alias string, messages []ChatMessage,
+> sessionScope string)` (`internal/llm/warm.go:109`) — ratified; the sketch
+> above is the original frozen draft. `alias` is a DEBUG-attribution label
+> (no resolution happens in Warm); `sessionScope` carries the
+> session-affinity scope; the return is void (failures DEBUG-swallowed).
+> Read the root amendment for the full rationale before dispatching against
+> this leaf.
+
 Facts already verified in the code - do not re-derive, and do not "correct"
 them back:
 - The message type is `llm.ChatMessage` (`internal/llm/models.go:23`).
