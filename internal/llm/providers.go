@@ -121,6 +121,13 @@ type ModelDef struct {
 	// (ParsePosture), so a config with no data_posture key anywhere is
 	// byte-identical to pre-leaf (flag-off control gate, master Q3).
 	DataPosture Posture `json:"data_posture,omitempty"`
+	// Pool is the shared upstream quota pool this model draws from
+	// (Contract C5, sovereign-router-parity leaf 06; master Q4: ONE pool
+	// per provider in v1 — the field is RESERVED, empty default). When
+	// set, a pool-exhaustion-phrase 429 blocks the whole POOL instead of
+	// the single model. ABSENT = pool-less: classification still runs
+	// but ScopePool never fires (opt-in gate, flag-off byte-identical).
+	Pool string `json:"pool,omitempty"`
 	// Quality is the MEASURED per-class quality scores (0-5) from probe
 	// batteries (Contract C2, sovereign-router-parity leaf 01). The
 	// Sovereign Router selection rule governs seeding: "leaderboards
@@ -775,6 +782,7 @@ func modelConfigFrom(providerID, mapKey string, provider ProviderConfig, modelDe
 		// compatible default, master Q3) instead of leaking the zero
 		// value into the gate.
 		DataPosture:     ParsePosture(string(modelDef.DataPosture)),
+		Pool:            modelDef.Pool,
 		MaxTokens:       modelDef.MaxOutput,
 		Temperature:     modelDef.Temperature,
 		TopP:            modelDef.TopP,

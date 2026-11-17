@@ -65,15 +65,18 @@ type Resolver struct {
 	logger *slog.Logger
 	// quotaCfg holds quota-aware retry settings. Nil disables quota blocking.
 	quotaCfg *QuotaWaitConfig
-	// endpointBlocks maps EndpointKey(cfg) -> block deadline for
-	// endpoint-level timeout cooldowns (tree 02 leaf 04, DECISIONS.md
-	// D10). It deliberately lives on the RESOLVER, not on AliasHealth
-	// (audit B3): AliasHealth is per-alias, but D10 shared fate is
-	// cross-alias — openai/model-1 on the medium alias and openai/model-2
-	// on the thinkhard alias are different aliases over one endpoint, and
-	// a timeout on either must skip both. Guarded by the single Resolver
-	// .mu regime like every other field; zero deadline or one in the past
-	// means unblocked.
+	// endpointBlocks is the resolver's scoped failure block memory
+	// (Contract C5, sovereign-router-parity leaf 06). Values are block
+	// deadlines; the key is EITHER a legacy D10 endpoint key
+	// (`EndpointKey(cfg)` = host|credential, still armed by the
+	// throttle/5xx path below — D10 behavior preserved, never migrated)
+	// OR a scoped block key "scope\x00target" produced by
+	// poolScopeBlockKey (ScopeAccount→providerID, ScopePool→poolID,
+	// ScopeModel→modelID; the NUL separator cannot collide with the
+	// legacy "|"). It deliberately lives on the RESOLVER, not on
+	// AliasHealth (audit B3): shared fate is cross-alias. Guarded by the
+	// single Resolver .mu regime like every other field; zero deadline or
+	// one in the past means unblocked.
 	endpointBlocks map[string]time.Time
 	// now is the injected clock (SHARED-CONVENTIONS §5) used by the
 	// endpoint/alias-block paths for lazy expiry checks. Nil = time.Now.
@@ -205,6 +208,7 @@ func NewResolver(cfg *ProvidersConfig, logger *slog.Logger) *Resolver {
 				MaxFails:               maxFails,
 				DefaultModel:           aliasEntry.DefaultModel,
 				BalancedStickyRequests: aliasEntry.BalancedStickyRequests,
+				PriceGroup:             aliasEntry.PriceGroup,
 			}
 			// Stamp explicit-config-ness onto every member model so the
 			// failure path can consult the identity-bearing config itself.
@@ -772,12 +776,13 @@ func (r *Resolver) ResolveForAlias(aliasName string, sessionID string) (*ModelCo
 	// DISTINCT ErrAllEndpointsBlocked is returned. NOTE precedence: quota
 	// blocks outrank endpoint blocks, so a candidate that is BOTH is
 	// reported as quota-blocked above.
-	if r.isEndpointBlocked(health, alias.Models[health.CurrentIndex]) {
+	if r.isEndpointBlocked(health, alias.Models[health.CurrentIndex]) ||
+		r.hasScopeBlocks() {
 		nextIdx := (health.CurrentIndex + 1) % len(alias.Models)
 		rotated := false
 		for range len(alias.Models) {
 			candidate := alias.Models[nextIdx]
-			if !r.isEndpointBlocked(health, candidate) {
+			if !r.isEndpointBlocked(health, candidate) && !r.isScopedBlock(health, candidate) {
 				health.CurrentIndex = nextIdx
 				rotated = true
 				break
@@ -785,8 +790,12 @@ func (r *Resolver) ResolveForAlias(aliasName string, sessionID string) (*ModelCo
 			nextIdx = (nextIdx + 1) % len(alias.Models)
 		}
 		if !rotated {
-			return nil, fmt.Errorf("%w: alias %q (all %d model(s) endpoint-blocked)",
-				ErrAllEndpointsBlocked, aliasName, len(alias.Models))
+			// Report by scope: a candidate blocked at POOL scope answers
+			// with the DISTINCT pool sentinel; otherwise the D10 endpoint
+			// family stands. Precedence (quota > endpoint > pool) is
+			// preserved — quota errors above already returned.
+			return nil, fmt.Errorf("%w: alias %q (all %d model(s) blocked)",
+				r.allBlockedSentinel(alias, health), aliasName, len(alias.Models))
 		}
 		r.logger.Info("Rotated away from endpoint-blocked current model",
 			"alias", aliasName,
@@ -871,12 +880,14 @@ func (r *Resolver) ResolveForAlias(aliasName string, sessionID string) (*ModelCo
 	// the quota-blocked A (bughunt round-2 auditor 3, finding 1). Re-
 	// validate the selection and keep rotating past doubly-blocked models.
 	if (r.quotaEnabled() && r.isQuotaBlocked(health, alias.Models[selectedIdx])) ||
-		r.isEndpointBlocked(health, alias.Models[selectedIdx]) {
+		r.isEndpointBlocked(health, alias.Models[selectedIdx]) ||
+		r.isScopedBlock(health, alias.Models[selectedIdx]) {
 		n := len(alias.Models)
 		finalIdx := -1
 		for i := range n {
 			idx := (selectedIdx + i) % n
 			blocked := r.isEndpointBlocked(health, alias.Models[idx]) ||
+				r.isScopedBlock(health, alias.Models[idx]) ||
 				(r.quotaEnabled() && r.isQuotaBlocked(health, alias.Models[idx]))
 			if !blocked {
 				finalIdx = idx
@@ -1520,6 +1531,20 @@ func (r *Resolver) RecordAliasFailure(aliasName string, err error, failedModel *
 	// endpoint to the front and the turn ping-ponged on it (GAP A).
 	// FailureServerError is Classify's verdict for any 5xx — the same
 	// bounded-retry-then-move-on semantics the throttle class gets.
+	//
+	// Scope-aware arming (Contract C5, leaf 06): the record path
+	// consults the frozen ClassifyFailure table so the block SHAPE
+	// matches the failure shape. A 400/413/422 (request fault) arms
+	// NOTHING — not even the alias cooldown would be deserved, but the
+	// alias cooldown advance stays for legacy call sites; the scoped
+	// maps stay untouched. A 401/402/403 (account dead) arms the
+	// ACCOUNT — sibling models on the same provider are skipped too. A
+	// pool-phrase 429 arms the POOL. Everything else (model-scope
+	// congestion, 404, transient) arms the MODEL key. The legacy
+	// host|credential endpoint key above stays armed by the
+	// throttle/5xx verdict exactly as before (D10 preserved). The body
+	// excerpt fed to ClassifyFailure is pattern-matched inside the
+	// classifier and discarded — never stored, never logged.
 	if v := VerdictForFailure(err); failedModel != nil &&
 		(v.Class == FailureThrottle || v.Class == FailureServerError) {
 		if r.endpointBlocks == nil {
@@ -1534,6 +1559,9 @@ func (r *Resolver) RecordAliasFailure(aliasName string, err error, failedModel *
 			"endpoint_key", key,
 			"until", r.endpointBlocks[key].Format(time.RFC3339),
 		)
+	}
+	if failedModel != nil {
+		r.armScopedFailureBlock(aliasName, failedModel, err)
 	}
 
 	// Arm default-model reversion: after the cooldown window ends, the next
@@ -1550,6 +1578,66 @@ func (r *Resolver) RecordAliasFailure(aliasName string, err error, failedModel *
 		"cooldown_until", health.CooldownUntil.Format(time.RFC3339),
 		"error", err,
 	)
+}
+
+// armScopedFailureBlock consults the frozen ClassifyFailure table
+// (Contract C5, leaf 06) and arms the scoped block the failure shape
+// deserves: a 401/402/403 blocks the ACCOUNT (providerID), a pool-phrase
+// 429 blocks the POOL (declared poolID — empty = opt-in gate, stays
+// model-scoped), a 404/429/5xx/transport blocks the MODEL (modelID), and
+// a 400/413/422 request fault arms NOTHING. Cooldown bases are the frozen
+// FailureCooldown table (pools.py:222), capped at 4h. Callers must hold
+// Resolver.mu. The body excerpt is pattern-matched inside the classifier
+// and discarded — it never reaches a struct field, a log, or a DB row.
+func (r *Resolver) armScopedFailureBlock(aliasName string, failedModel *ModelConfig, err error) {
+	status, body := failureStatusExcerpt(err)
+	cls, scope, target := ClassifyFailure(failedModel.ProviderID, failedModel.ModelID, poolIDForConfig(failedModel), status, body)
+	if scope == ScopeRequest {
+		// The caller's fault: no block at any scope, no cooldown.
+		return
+	}
+	if scope == ScopeModel {
+		// meept's alias cooldown (RecordAliasFailure's unconditional
+		// CooldownUntil advance, above) IS the model-scope block — it
+		// has carried model-shaped failures since before scopes
+		// existed, and its 30s default is the frozen transient base.
+		// Arming a second model-scope key here would make the D10
+		// key (armed only for throttle/5xx) de-facto cover every
+		// class, breaking existing pins (the shadow FAIL on
+		// TestCooldownCursorStaysOnHealthyMember). Model-scope
+		// classification stays expressed through the alias cooldown;
+		// the scoped key arms only for NEW scopes (pool, account).
+		return
+	}
+	until := r.clock().Add(FailureCooldown(cls))
+	if r.endpointBlocks == nil {
+		r.endpointBlocks = make(map[string]time.Time)
+	}
+	r.endpointBlocks[poolScopeBlockKey(scope, target)] = until
+	r.logger.Warn("Scoped failure block armed",
+		"alias", aliasName,
+		"provider", failedModel.ProviderID,
+		"model", failedModel.ModelID,
+		"class", string(cls),
+		"scope", string(scope),
+		"target", target,
+		"until", until.Format(time.RFC3339),
+	)
+}
+
+// failureStatusExcerpt extracts the HTTP status and a bounded body excerpt
+// from an error's wrap chain for ClassifyFailure. The excerpt is capped at
+// 512 bytes — a signal phrase lives in the head of an error body — and is
+// discarded by the classifier after matching.
+func failureStatusExcerpt(err error) (int, string) {
+	if apiErr, ok := errors.AsType[*APIError](err); ok {
+		body := apiErr.Detail
+		if len(body) > 512 {
+			body = body[:512]
+		}
+		return apiErr.StatusCode, body
+	}
+	return 0, ""
 }
 
 // RecordAliasSuccess records an alias-wide success, resetting the failure
@@ -2029,8 +2117,129 @@ func (r *Resolver) isEndpointBlocked(health *AliasHealth, m *ModelConfig) bool {
 		// The alias-level explicit-timeout block covers every member.
 		return true
 	}
-	blockedUntil, ok := r.endpointBlocks[EndpointKey(m)]
-	return ok && now.Before(blockedUntil)
+	if until, ok := r.endpointBlocks[EndpointKey(m)]; ok && now.Before(until) {
+		// Legacy D10 endpoint key (host|credential): the throttle/5xx
+		// cooldowns keep arming this shape unchanged (leaf 06 coexistence
+		// rule — existing keys keep working, never migrated).
+		return true
+	}
+	return r.isScopeBlocked(now,
+		poolScopeBlockKey(ScopeAccount, m.ProviderID),
+		poolScopeBlockKey(ScopePool, poolIDForConfig(m)),
+		poolScopeBlockKey(ScopeModel, m.ModelID),
+	)
+}
+
+// isScopeBlocked reports whether any of the given scoped keys is under a
+// live block. Callers must hold Resolver.mu.
+func (r *Resolver) isScopeBlocked(now time.Time, keys ...string) bool {
+	for _, key := range keys {
+		if key == "" {
+			continue
+		}
+		if until, ok := r.endpointBlocks[key]; ok && now.Before(until) {
+			return true
+		}
+	}
+	return false
+}
+
+// isScopedBlock is the per-candidate resolve-path gate: a model is
+// skipped when its account (providerID), its declared pool, or its own
+// modelID carries a live scoped block. The legacy host|credential check
+// stays in isEndpointBlocked. Callers must hold Resolver.mu.
+func (r *Resolver) isScopedBlock(health *AliasHealth, m *ModelConfig) bool {
+	if m == nil {
+		return false
+	}
+	return r.isScopeBlocked(r.clock(),
+		poolScopeBlockKey(ScopeAccount, m.ProviderID),
+		poolScopeBlockKey(ScopePool, poolIDForConfig(m)),
+		poolScopeBlockKey(ScopeModel, m.ModelID),
+	)
+}
+
+// hasScopeBlocks cheap-gates the rotation scan: true when ANY scoped
+// (non-legacy) key holds a live block. Legacy host|credential keys are
+// not consulted here — isEndpointBlocked owns them. Callers must hold
+// Resolver.mu.
+func (r *Resolver) hasScopeBlocks() bool {
+	now := r.clock()
+	for key, until := range r.endpointBlocks {
+		if !now.Before(until) {
+			continue
+		}
+		if _, _, ok := splitScopeBlockKey(key); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// splitScopeBlockKey is the inverse of poolScopeBlockKey: it reports
+// whether a block-map key is a scoped key (not a legacy host|credential
+// key) and returns its scope/target.
+func splitScopeBlockKey(key string) (FailureScope, string, bool) {
+	i := strings.IndexByte(key, 0)
+	if i < 0 {
+		return "", "", false
+	}
+	return FailureScope(key[:i]), key[i+1:], true
+}
+
+// allBlockedSentinel picks the all-blocked error by scope: when every
+// candidate's ONLY live block is its POOL key, the DISTINCT
+// ErrAllPoolsBlocked is returned (leaf 06 T6); the D10 endpoint family
+// stands otherwise. Quota has already returned above, so the quota
+// sentinel cannot be owed here. Callers must hold Resolver.mu.
+func (r *Resolver) allBlockedSentinel(alias *AliasEntry, health *AliasHealth) error {
+	now := r.clock()
+	for _, candidate := range alias.Models {
+		if !r.isEndpointBlocked(health, candidate) {
+			return ErrAllEndpointsBlocked
+		}
+		legacy := r.endpointBlocks[EndpointKey(candidate)]
+		if legacy.IsZero() || now.Before(legacy) {
+			return ErrAllEndpointsBlocked
+		}
+		// Legacy key expired; only scoped keys can be blocking this
+		// candidate. Account- or model-scope blocks report through the
+		// endpoint family (same horizon family); a pool block owns the
+		// distinct pool sentinel.
+		for _, key := range []string{
+			poolScopeBlockKey(ScopeAccount, candidate.ProviderID),
+			poolScopeBlockKey(ScopePool, poolIDForConfig(candidate)),
+			poolScopeBlockKey(ScopeModel, candidate.ModelID),
+		} {
+			if until, ok := r.endpointBlocks[key]; ok && now.Before(until) {
+				if scope, _, _ := splitScopeBlockKey(key); scope == ScopePool {
+					return ErrAllPoolsBlocked
+				}
+				return ErrAllEndpointsBlocked
+			}
+		}
+	}
+	return ErrAllEndpointsBlocked
+}
+
+// poolScopeBlockKey builds the (scope, target) block-memory key. The NUL
+// separator cannot collide with the legacy `host|credential` key shape
+// (URL hosts cannot carry NUL).
+func poolScopeBlockKey(scope FailureScope, target string) string {
+	if target == "" {
+		return ""
+	}
+	return string(scope) + "\x00" + target
+}
+
+// poolIDForConfig resolves a model's declared pool at read time. v1 keeps
+// ONE pool per provider (master Q4); the ModelDef.Pool field is reserved
+// for a future two-providers-one-pool config, so the declared value, when
+// present, must already be mirrored onto the serving ModelConfig (same
+// construction seam as every other mapped field). Empty = pool-less: the
+// opt-in gate — a pool-phrase 429 stays model-scoped for this model.
+func poolIDForConfig(m *ModelConfig) string {
+	return m.Pool
 }
 
 // sweepExpiredEndpointBlocks lazily deletes EXPIRED endpoint-block entries

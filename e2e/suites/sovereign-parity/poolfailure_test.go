@@ -19,6 +19,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/caimlas/meept/internal/llm"
 )
 
 // poolFailureConfig: ONE provider (provacct) carrying two sibling models,
@@ -212,13 +214,13 @@ func tailRunes(s string, n int) string {
 	return s[len(s)-n:]
 }
 
-// llmClassifyFailureForGate is the single symbol seam to Contract C5. It
-// keeps the raw strings here so the frozen table stays verbatim in this
-// file; contracts_test.go carries the typed go-identifiers.
+// llmClassifyFailureForGate is the single symbol seam to Contract C5.
+// Leaf 06 landed: this delegates to the real llm.ClassifyFailure, keeping
+// the raw strings here so the frozen table stays verbatim in this file
+// (contracts_test.go carries the typed go-identifiers).
 var llmClassifyFailureForGate = func(providerID, modelID, poolID string, status int, bodyExcerpt string) (cls, scope, target string) {
-	// RED today: nothing to call. The contract file swaps this var for
-	// the real llm.ClassifyFailure once leaf 06 lands.
-	return "", "", ""
+	c, s, t := llm.ClassifyFailure(providerID, modelID, poolID, status, bodyExcerpt)
+	return string(c), string(s), t
 }
 
 // ensure the table rows all exercise string forms (compile-time pin that

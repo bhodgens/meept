@@ -325,6 +325,11 @@ type ModelConfig struct {
 	// posture filter allows everything and routing is byte-identical to
 	// pre-leaf (flag-off control gate).
 	DataPosture Posture
+	// Pool is the declared shared upstream quota pool (Contract C5,
+	// sovereign-router-parity leaf 06), mirrored from ModelDef.Pool at
+	// construction. Empty (the default) = pool-less: ScopePool never
+	// fires for this model (opt-in gate, master Q4).
+	Pool string
 	// BodyTemplate is the JSON body template for kind=http models.
 	BodyTemplate map[string]any
 	// ResponseURLPath / ResponseB64Path extract the asset from an http response.
@@ -432,6 +437,11 @@ type AliasEntry struct {
 	MaxFails               int            // Max consecutive failures before rotation
 	DefaultModel           string         // Optional: revert to this model after cooldown
 	BalancedStickyRequests bool           // Optional: pin callers to single model
+	// PriceGroup is the alias routing-tier tag (Contract C10, leaf 01
+	// declares the config field; leaf 09's spillway reads it here).
+	// "" = untagged = legacy: resolves only when explicitly selected,
+	// never participates in a spillway step.
+	PriceGroup string
 	// timeoutArmed records that the originating CONFIG declared a nonzero
 	// timeout: (tree 02 leaf 04, DECISIONS.md D10). Alias-level blocks arm
 	// only when true — a Timeout value substituted as the 30s default must
