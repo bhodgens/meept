@@ -657,8 +657,9 @@ func TestLedgerAppendExecute_RefusalDoesNotCorruptArgHandling(t *testing.T) {
 	tool := NewLedgerAppendTool(st, slog.New(slog.DiscardHandler))
 	ctx := voiceCallerCtx("eve", callerid.Info{Number: "+15550003333"})
 
-	// Seed a commitment (plain append — message lane allows it).
-	if _, err := tool.Execute(ctx, map[string]any{
+	// Seed a commitment as an APPROVED caller (unapproved callers cannot file commitments since #149).
+	approvedCtx := voiceCallerCtx("eve", callerid.Info{Number: "+155****2222", Name: "boss", Approved: true, Known: true})
+	if _, err := tool.Execute(approvedCtx, map[string]any{
 		"kind":    "commitment",
 		"subject": "acme-roof",
 		"payload": map[string]any{"owe": "call back"},
@@ -691,8 +692,11 @@ func TestLedgerAppendExecute_RefusalDoesNotCorruptArgHandling(t *testing.T) {
 		t.Fatalf("refusal must leave exactly the seed row, got %d", len(rows))
 	}
 
-	// Re-append WITHOUT set_status -> succeeds, resolves_id passthrough intact.
-	res, err = tool.Execute(ctx, map[string]any{
+	// Re-append WITHOUT set_status by the APPROVED caller -> succeeds,
+	// resolves_id passthrough intact. (An unapproved stranger may no longer file
+	// a resolution or carry resolves_id at all — that refusal is pinned by the
+	// #149 tests above.)
+	res, err = tool.Execute(approvedCtx, map[string]any{
 		"kind":        "resolution",
 		"subject":     "acme-roof",
 		"payload":     map[string]any{"sent": "callback"},
