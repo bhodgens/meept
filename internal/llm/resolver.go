@@ -1469,7 +1469,8 @@ func (r *Resolver) PeekAliasForWarm(aliasName, sessionID string) (*ModelConfig, 
 	// rotation head. Read-only mirror of resolveStickyCaller's verdict
 	// (never writes pins, never records a sticky decision).
 	if alias.BalancedStickyRequests && sessionID != "" {
-		if pinnedIdx, ok := health.StickyPins[sessionID]; ok {
+		if pin, ok := health.StickyPins[sessionID]; ok {
+			pinnedIdx := pin.Index
 			n := len(alias.Models)
 			if pinnedIdx >= 0 && pinnedIdx < n {
 				pinned := alias.Models[pinnedIdx]
