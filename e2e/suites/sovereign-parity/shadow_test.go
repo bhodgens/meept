@@ -67,10 +67,34 @@ func callShadowRoute(t *testing.T, s *paritySandbox, alias, prompt string) (int,
 // list carrying skip reasons.
 func TestShadow_ParityWithLivePath(t *testing.T) {
 	cfg := shadowConfig(t)
+	// Pin the classifier to intent chat so the live turn routes to the
+	// chat agent (whose loop is pinned to the alias under test) instead
+	// of escalating to a planner task (same idiom as posture_test.go).
+	cfg.providers[0].stub.setClassifierOut(`{"intent":"chat","confidence":0.9,"reasoning":"gate shadow drive"}`)
+	cfg.providers[1].stub.setClassifierOut(`{"intent":"chat","confidence":0.9,"reasoning":"gate shadow drive"}`)
 	s := newParitySandbox(t, cfg)
 
-	// One live turn first: the routing log names the model the live path
-	// picked.
+	// Shadow FIRST: the decision predicts the model the NEXT live resolve
+	// picks from the current rotation state. A live turn first would
+	// advance the shared cursor, and a read-only shadow can never match a
+	// cursor it is forbidden to consume — that ordering made this test
+	// fail against a CORRECT read-only implementation.
+	status, result := callShadowRoute(t, s, "general", "live shadow parity")
+	if status != 200 {
+		t.Fatalf("T10 R4 RED (expected): llm.route.shadow status %d (%v) — the RPC does not exist on main; leaf 04 lands it", status, result)
+	}
+	res, _ := result["result"].(map[string]any)
+	if res == nil {
+		t.Fatalf("T10: shadow reply carries no result envelope: %+v", result)
+	}
+	shadowModel, _ := res["model_id"].(string)
+	shadowProvider, _ := res["provider_id"].(string)
+	if shadowModel == "" || shadowProvider == "" {
+		t.Fatalf("T10: shadow decision missing model/provider identity: %+v", res)
+	}
+
+	// One live turn now: the routing log names the model the live path
+	// picked from that same state.
 	sessID := s.createSession(t, "shadow-live")
 	if reply := s.chatTurn(t, sessID, "live shadow parity", 120*time.Second); reply == "" {
 		t.Fatal("live turn returned empty reply")
@@ -81,22 +105,8 @@ func TestShadow_ParityWithLivePath(t *testing.T) {
 	}
 	live := liveRows[len(liveRows)-1]
 
-	// Shadow-resolve the same alias.
-	status, result := callShadowRoute(t, s, "general", "live shadow parity")
-	if status != 200 {
-		t.Fatalf("T10 R4 RED (expected): llm.route.shadow status %d (%v) — the RPC does not exist on main; leaf 04 lands it", status, result)
-	}
-	res, _ := result["result"].(map[string]any)
-	if res == nil {
-		t.Fatalf("T10: shadow reply carries no result envelope: %+v", result)
-	}
-	modelID, _ := res["model_id"].(string)
-	providerID, _ := res["provider_id"].(string)
-	if modelID == "" || providerID == "" {
-		t.Fatalf("T10: shadow decision missing model/provider identity: %+v", res)
-	}
-	if providerID != live.Provider || modelID != live.Model {
-		t.Fatalf("T10: shadow decision %s/%s diverges from the live pick %s/%s", providerID, modelID, live.Provider, live.Model)
+	if shadowProvider != live.Provider || shadowModel != live.Model {
+		t.Fatalf("T10: shadow decision %s/%s diverges from the live pick %s/%s", shadowProvider, shadowModel, live.Provider, live.Model)
 	}
 	cands, _ := res["candidates"].([]any)
 	if len(cands) == 0 {
@@ -124,6 +134,11 @@ func TestShadow_ParityWithLivePath(t *testing.T) {
 // picks the rotation head — proving no sticky pin was created.
 func TestShadow_NoSideEffects(t *testing.T) {
 	cfg := shadowConfig(t)
+	// Pin the classifier to intent chat: without it the live turns'
+	// heuristic intent escalates to a planner task and no `general`
+	// routing rows are written at all (same idiom as posture_test.go).
+	cfg.providers[0].stub.setClassifierOut(`{"intent":"chat","confidence":0.9,"reasoning":"gate shadow drive"}`)
+	cfg.providers[1].stub.setClassifierOut(`{"intent":"chat","confidence":0.9,"reasoning":"gate shadow drive"}`)
 	s := newParitySandbox(t, cfg)
 
 	sessID := s.createSession(t, "shadow-sidefx")
@@ -159,10 +174,14 @@ func TestShadow_NoSideEffects(t *testing.T) {
 		t.Fatal("post-shadow live turn wrote no routing rows")
 	}
 	last := rows[len(rows)-1]
-	if last.Reason == "sticky_request" || last.Reason == "sticky_request_new" {
-		t.Fatalf("T11: post-shadow live resolve served a sticky reason %q — the shadow path created a pin; C6 forbids sticky mutation", last.Reason)
-	}
+	// RULING (orchestrator, 2026-11-17): the reason is NOT the evidence —
+	// on a balanced alias every resolve legitimately reads
+	// sticky_request_new (first pin) or sticky_request (kept pin); the
+	// reason-based assertion contradicted the alias semantics the fixture
+	// itself chose. The C6 evidence is WHERE the pin landed: the rotation
+	// head provsh1/model-s1 (plus the zero-ledger/zero-routing-row checks
+	// above for the shadow phase itself).
 	if last.Provider != "provsh1" || last.Model != "model-s1" {
-		t.Fatalf("T11: post-shadow live resolve served %s/%s (reason %q); want the untouched rotation head provsh1/model-s1 — evidence the shadow consumed rotation state", last.Provider, last.Model, last.Reason)
+		t.Fatalf("T11: post-shadow live resolve served %s/%s (reason %q); want the untouched rotation head provsh1/model-s1 — evidence the shadow consumed rotation state or created a pin", last.Provider, last.Model, last.Reason)
 	}
 }

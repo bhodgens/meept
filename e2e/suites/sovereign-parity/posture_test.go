@@ -22,8 +22,9 @@ import (
 )
 
 // sensitivePrompt is a REAL scanner match: AKIA + 16 [0-9A-Z] hits the
-// aws_access_key rule in internal/security/secret_scanner.go. It is a
-// synthetic, well-known-shape value — never a real credential.
+// aws_access_key rule in internal/security/secret_scanner.go. It is the
+// canonical AWS documentation EXAMPLE key (AKIAIOSFODNN7EXAMPLE) — a
+// well-known synthetic shape, never a real credential.
 const sensitivePrompt = "here is my key AKIAIOSFODNN7EXAMPLE please remember it"
 
 // extra is a per-model raw config-key map (data_posture etc.) that
@@ -58,6 +59,15 @@ func postureConfig(t *testing.T, first extra, second extra) parityConfig {
 		aliases: []parityAlias{
 			{name: "general", members: []string{"provpub/model-public", "provpriv/model-private"}, timeout: 5, maxFails: 3},
 		},
+		// RULING (orchestrator, 2026-11-17): the aux aliases (classifier,
+		// summarizer, planner, ...) MUST ride the PRIVATE provider here.
+		// The default (first provider's first model) would send the
+		// classifier request itself to the public_only stub, and T7's
+		// zero-hit assertion counts ALL requests, not just chat-lane
+		// dispatches. The routing-row scan already proves the CHAT lane
+		// never lands on provpub; isolating the classifier makes the
+		// stronger zero-hit assertion meaningful.
+		secondaryRef: "provpriv/model-private",
 		chatAlias: "general",
 	}
 }
