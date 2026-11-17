@@ -32,9 +32,11 @@ Establish the network-exposed boundary for the Kanban subsystem. This branch imp
 | Leaf | Status | Notes |
 |---|---|---|
 | 04/01 | DONE | 875fadf2 (parent fixes: C5 grant filter on GetGrantsForPrincipal; UserID principal fixture — child's test had never actually run) |
-| 04/02 | IN_PROGRESS | child running (dispatched 2026-11-14, RPCCaller seam + EventSource seam + loopback-bind gate) |
-| 04/03 | PENDING | depends on 04/02 |
-| 04/04 | PENDING | depends on 04/03 |
+| 04/02 | DONE | 1598c095 (sidecar gateway + meept-kanban binary; fixes 310701d5, 2da662e9) |
+| 04/03 | DONE | 7481f498 (bearer-token store + single-use pairing codes) |
+| 04/04 | DONE | 0c48c45f (spawn sidecar only when the flag is on) |
+
+> Reconciliation note (2026-11-16, issue #156): rows above were under-reporting merged work; statuses updated from git (each SHA verified an ancestor of main). Tables were last refreshed d492867c (2026-11-14).
 
 ## Integration Test Plan
 - Verify sidecar process lifecycle (spawn/SIGTERM).

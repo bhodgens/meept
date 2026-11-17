@@ -40,9 +40,11 @@ Complete the delivery of Kanban features via MCP tools, e2e testing, and user do
 
 | Task | Status | Notes |
 |---|---|---|
-| 01-mcp-tool-provider | PENDING | |
-| 02-e2e-suite | PENDING | |
-| 03-docs | PENDING | |
+| 01-mcp-tool-provider | DONE | dbe8cb00 (kanban_* tool provider) |
+| 02-e2e-suite | DONE | 365c21ea (kanban live-wiring suite, cases (a)-(g)) |
+| 03-docs | DONE | f9c0bc95 (package invariant docs + as-built workflows) |
+
+> Reconciliation note (2026-11-16, issue #156): rows above were under-reporting merged work; statuses updated from git (each SHA verified an ancestor of main). Tables were last refreshed d492867c (2026-11-14).
 
 ## Integration Test Plan
 (See master.md Integration Test Plan for 06-wiring-delivery specifics)

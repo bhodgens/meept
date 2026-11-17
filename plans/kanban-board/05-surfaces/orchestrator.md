@@ -39,13 +39,15 @@ removed — the 04→05→07 chain is strict.
 ## Completion Tracking Table
 | Leaf | Status | Notes |
 |---|---|---|
-| 05/01 | PENDING | |
-| 05/02 | PENDING | |
-| 05/03 | PENDING | |
-| 05/04 | PENDING | |
-| 05/05 | PENDING | |
-| 05/06 | PENDING | |
-| 05/07 | PENDING | |
+| 05/01 | DONE | b43b9ea6 (kanban.* RPC handlers — all 13 C4 methods) |
+| 05/02 | DONE | 126c1eb5 (meept kanban command tree) |
+| 05/03 | DONE | 5f649948 (TUI board view) |
+| 05/04 | DONE | 45b19b90 (GUI service bridge) |
+| 05/05 | DONE | fe03c6e5 (GUI board view) |
+| 05/06 | DONE | 1a2ade63 (parity verified + lowercase fix; Go pin added 2026-11-16 in internal/tui/parity_kanban_test.go, issue #144) |
+| 05/07 | DONE | f715909d (WSBoard event class for the kanban feed) |
+
+> Reconciliation note (2026-11-16, issue #156): rows above were under-reporting merged work; statuses updated from git (each SHA verified an ancestor of main). Tables were last refreshed d492867c (2026-11-14).
 
 ## Integration Test Plan
 - CLI `meept kanban` command suite.
