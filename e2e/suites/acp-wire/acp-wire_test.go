@@ -153,7 +153,7 @@ func TestACPWire_CatalogStubAgentHandshakeSendErrors(t *testing.T) {
 	}
 	sendCtx, sendCancel := context.WithTimeout(ctx, 20*time.Second)
 	defer sendCancel()
-	reply, err := sess.Send(sendCtx, "hello over the acp wire")
+	reply, _, err := sess.Send(sendCtx, "hello over the acp wire")
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
@@ -278,7 +278,7 @@ func TestACPWire_DecisionModeAllowDeny(t *testing.T) {
 		}
 		ch := make(chan sendRes, 1)
 		go func() {
-			text, err := sess.Send(sendCtx, "decide")
+			text, _, err := sess.Send(sendCtx, "decide")
 			ch <- sendRes{text, err}
 		}()
 		seen := collectEvents(t, sess, wantEvent, 15*time.Second)
@@ -394,7 +394,7 @@ func TestACPWire_HumanModeAllowDenyTimeout(t *testing.T) {
 		defer sendCancel()
 		ch := make(chan error, 1)
 		go func() {
-			_, err := sess.Send(sendCtx, text)
+			_, _, err := sess.Send(sendCtx, text)
 			ch <- err
 		}()
 		// The lane surfaces the pending id BEFORE the reply frame lands,
@@ -481,7 +481,7 @@ func TestACPWire_HumanModeAlwaysEcho(t *testing.T) {
 	}
 	ch := make(chan sendRes, 1)
 	go func() {
-		text, err := sess.Send(sendCtx, "always-please")
+		text, _, err := sess.Send(sendCtx, "always-please")
 		ch <- sendRes{text, err}
 	}()
 
@@ -573,7 +573,7 @@ func TestACPWire_DecisionModeFailClosed(t *testing.T) {
 	defer sendCancel()
 	ch := make(chan error, 1)
 	go func() {
-		_, err := sess.Send(sendCtx, "decide")
+		_, _, err := sess.Send(sendCtx, "decide")
 		ch <- err
 	}()
 	collectEvents(t, sess, "no_decisioner", 15*time.Second)
@@ -1156,7 +1156,7 @@ func TestACPWire_ResolveRankTightenOnly(t *testing.T) {
 		go func() {
 			sendCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			defer cancel()
-			_, _ = sess.Send(sendCtx, "do the thing")
+			_, _, _ = sess.Send(sendCtx, "do the thing")
 		}()
 		id := waitForPermissionEvent(t, sess, "permission_requested", 15*time.Second)
 		if id == "" {

@@ -269,8 +269,10 @@ internal/llm/anthropic.go unreachable func: WithAnthropicTokenCache
 internal/llm/anthropic.go unreachable func: WithAnthropicUploadStore
 internal/llm/client.go unreachable func: Client.parseResponse
 internal/llm/client.go unreachable func: EffectiveTraceID
+internal/llm/client.go unreachable func: NoCacheOf
 internal/llm/client.go unreachable func: PriorityOf
 internal/llm/client.go unreachable func: RawGrammarOf
+internal/llm/client.go unreachable func: ResolvedModelOf
 internal/llm/client.go unreachable func: ToolChoiceOf
 internal/llm/client.go unreachable func: WithConcurrencyLimit
 internal/llm/client.go unreachable func: WithGrammar
