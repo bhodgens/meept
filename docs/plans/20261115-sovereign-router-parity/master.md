@@ -508,11 +508,11 @@ After every leaf is REVIEWED: run `make build`, `make test`, `make lint-ci`, `ma
 | 02 | R2 | REVIEWED | 01a16d2b | gate wired in all 3 ProviderManager rotation loops; typed verdict on all-refused, never pool-exhaustion shape |
 | 03 | R8 | REVIEWED | d46fee26 | child interrupted post-implementation; wiring verified on disk (validateOfferedToolCalls, openai+anthropic+codex) |
 | 04 | R4 | REVIEWED | 298c8ff5 | RLock-only proof; Posture type declared in shadow.go (leaf 05 consumes); CLI+RPC+doc landed |
-| 05 | R3 | PENDING | | |
-| 06 | R5 | PENDING | | |
-| 07 | R7 | PENDING | | |
-| 08 | R6 | REVIEWED | 17fc00f8 (main, back lane) | committed by back agent; merged into forward lane; flag-off pending GREEN |
-| 09 | R9 | IMPLEMENTED | | back lane authored pricegroup.go, uncommitted - needs leaf 01 symbols |
+| 05 | R3 | IN_PROGRESS | | wave 2 dispatched |
+| 06 | R5 | PENDING | | needs 05 |
+| 07 | R7 | PENDING | | needs 06 |
+| 08 | R6 | IN_PROGRESS | | steer-tier-gate backfill dispatched (17fc00f8 body already on main) |
+| 09 | R9 | IMPLEMENTED | | back lane authored pricegroup.go, uncommitted - needs leaf 01 symbols (landed) |
 
 Status values: PENDING, TESTS_IN_PROGRESS, TESTS_VALIDATED, IN_PROGRESS, IMPLEMENTED, REVIEWED, COMPLETE, BLOCKED.
 
