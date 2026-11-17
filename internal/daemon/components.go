@@ -4595,6 +4595,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				TaskStore: orchTaskStore,
 				Bus:       msgBus,
 				Logger:    logger.With("component", "review"),
+				// #137: the reviewer lane resolves the step's session workdir
+				// through this store (resolveStepWorkingDir). Without it the
+				// resolver returns ("", none) on every real review and the
+				// workdir inheritance ships only in tests. Same store the
+				// TacticalScheduler takes just below.
+				SessionStore: c.SessionStore,
 			})
 			c.ReviewManager = reviewManager
 
