@@ -179,4 +179,3 @@ func (e *TraceExporter) flushLoop() {
 func defaultExporterLogger() *exporterLogger {
 	return &exporterLogger{prefix: "otlp-trace-exporter"}
 }
-

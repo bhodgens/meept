@@ -21,7 +21,6 @@ type EvolverScheduler struct {
 	running  bool
 }
 
-
 // NewEvolverSchedulerWithRunOnStart creates a scheduler with explicit control
 // over whether a cycle runs immediately on Start. When runOnStart is false the
 // scheduler enters the tick loop directly, avoiding LLM traffic on daemon

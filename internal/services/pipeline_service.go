@@ -1,11 +1,8 @@
 package services
 
 import (
-
 	"time"
-
 )
-
 
 // Pipeline represents a processing pipeline.
 type Pipeline struct {
@@ -66,7 +63,6 @@ type PipelineStepStatus struct {
 	EndedAt   *time.Time `json:"ended_at,omitempty"`
 }
 
-
 // PipelineListRequest contains list parameters.
 type PipelineListRequest struct {
 	Limit int `json:"limit,omitempty"`
@@ -80,7 +76,6 @@ type PipelineInfo struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-
 // CreateRequest contains create parameters.
 type CreatePipelineRequest struct {
 	ID          string            `json:"id,omitempty"`
@@ -90,17 +85,13 @@ type CreatePipelineRequest struct {
 	Metadata    map[string]string `json:"metadata,omitempty"`
 }
 
-
 // DeleteRequest contains delete parameters.
 type DeletePipelineRequest struct {
 	PipelineID string `json:"pipeline_id"`
 }
-
 
 // UpdateStatusRequest contains update status parameters.
 type UpdateStatusRequest struct {
 	PipelineID string `json:"pipeline_id"`
 	Status     string `json:"status"`
 }
-
-

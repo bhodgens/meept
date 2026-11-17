@@ -64,5 +64,3 @@ type DaemonClient interface {
 
 // Ensure RPCClient implements DaemonClient at compile time.
 var _ DaemonClient = (*RPCClient)(nil)
-
-

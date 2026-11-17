@@ -56,7 +56,7 @@ type busSubscription struct {
 	// trimmed counts records discarded from the tail of Events by the
 	// MaxEvents drop-oldest trim. Drop accounting: surfaced in the
 	// bus.poll response so buffer overflow is never silent.
-	trimmed int64
+	trimmed    int64
 	mu         sync.Mutex
 	cancelFunc context.CancelFunc // cancels goroutines when client disconnects
 }

@@ -163,8 +163,6 @@ func (s *ConfigSyncer) pullOnce(ctx context.Context) error {
 	return nil
 }
 
-
-
 // LastCommitHash returns the latest known commit hash.
 func (s *ConfigSyncer) LastCommitHash() string {
 	s.mu.Lock()
@@ -241,7 +239,6 @@ type SyncStatus struct {
 	Checkout          string `json:"checkout"`
 	Dirty             bool   `json:"dirty"`
 }
-
 
 // sanitizeRepoName strips URL scheme and path delimiters, converting to a
 // filesystem-safe directory name. E.g. "git@github.com:user/repo.git" → "github.com_user_repo.git".

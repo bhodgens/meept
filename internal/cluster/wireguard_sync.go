@@ -188,10 +188,6 @@ func (m *WireGuardManager) ApplyConfig(cfg *WireGuardConfig) error {
 	return nil
 }
 
-
-
-
-
 // generateSyncConf creates the minimal WireGuard config suitable for
 // wg syncconf. syncconf requires only the interface private key plus peer
 // definitions.
@@ -212,7 +208,6 @@ func (m *WireGuardManager) generateSyncConf(cfg *WireGuardConfig) ([]byte, error
 func parseTemplate(name, text string) (*texttemplate.Template, error) {
 	return texttemplate.New(name).Parse(text)
 }
-
 
 // Stop releases resources held by the WireGuardManager.
 // Currently a no-op since no background goroutines are started,

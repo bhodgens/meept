@@ -14,7 +14,7 @@ import (
 // fakeCeilingRegistry is a minimal ToolRegistry over a fixed tool set.
 type fakeCeilingRegistry struct{ tools map[string]tools.Tool }
 
-func (f *fakeCeilingRegistry) Get(name string) tools.Tool        { return f.tools[name] }
+func (f *fakeCeilingRegistry) Get(name string) tools.Tool { return f.tools[name] }
 func (f *fakeCeilingRegistry) List() []tools.Tool {
 	out := make([]tools.Tool, 0, len(f.tools))
 	for _, t := range f.tools {

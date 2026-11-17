@@ -72,22 +72,9 @@ type Compactor struct {
 	mu  sync.RWMutex
 }
 
-
-
-
-
-
-
-
 // -----------------------------------------------------------------------
 // Private helpers
 // -----------------------------------------------------------------------
-
-
-
-
-
-
 
 // NewCompactor creates a compactor with the given configuration. Zero
 // values in the config are replaced by the documented defaults.

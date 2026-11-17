@@ -14,9 +14,9 @@ import (
 
 type nameTool struct{ name string }
 
-func (t nameTool) Name() string                                 { return t.name }
-func (t nameTool) Description() string                          { return t.name }
-func (t nameTool) Parameters() llm.FunctionParameters           { return llm.FunctionParameters{} }
+func (t nameTool) Name() string                       { return t.name }
+func (t nameTool) Description() string                { return t.name }
+func (t nameTool) Parameters() llm.FunctionParameters { return llm.FunctionParameters{} }
 func (t nameTool) Execute(context.Context, map[string]any) (any, error) {
 	return nil, nil
 }

@@ -50,8 +50,8 @@ func TestCriticFlagsDefaultOn(t *testing.T) {
 	// C1: all three disable-form keys default false through the live
 	// config surface (false = the feature is enabled).
 	for key, want := range map[string]string{
-		"plans.fresh_critic_disabled":     "false",
-		"plans.hostile_critic_disabled":   "false",
+		"plans.fresh_critic_disabled":      "false",
+		"plans.hostile_critic_disabled":    "false",
 		"plans.interview_options_disabled": "false",
 	} {
 		if got := wiringConfigGet(t, s, key); !strings.Contains(got, want) {

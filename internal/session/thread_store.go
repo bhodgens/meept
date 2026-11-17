@@ -76,7 +76,6 @@ func (s *SQLiteThreadStore) CreateThread(ctx context.Context, thread *Thread) er
 	return err
 }
 
-
 // ListThreadsBySession returns all threads for a session.
 func (s *SQLiteThreadStore) ListThreadsBySession(ctx context.Context, sessionID string) ([]*Thread, error) {
 	rows, err := s.db.QueryContext(ctx, `
@@ -122,7 +121,6 @@ func (s *SQLiteThreadStore) UpdateThread(ctx context.Context, thread *Thread) er
 	)
 	return err
 }
-
 
 // GetThreadByID retrieves a thread by ID alone, without scoping to a session.
 // Use this when the caller knows the thread ID but not the session ID (e.g.

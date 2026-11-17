@@ -4,4 +4,3 @@ package bot
 // Embed this in concrete bot types to avoid boilerplate.
 type BaseBot struct {
 }
-

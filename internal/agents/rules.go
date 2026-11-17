@@ -12,7 +12,6 @@ import (
 //go:embed embedded_rules.md
 var embeddedRules string
 
-
 // RulesDiscovery searches for RULES.md files in a priority hierarchy.
 type RulesDiscovery struct {
 	logger *slog.Logger
@@ -56,5 +55,3 @@ func (r *RulesDiscovery) DiscoverWithPath() (content, path string) {
 	path, content = r.findRulesFile()
 	return content, path
 }
-
-

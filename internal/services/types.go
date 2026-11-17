@@ -7,7 +7,6 @@ type ListOptions struct {
 	Filter string `json:"filter,omitempty"`
 }
 
-
 // PaginatedResponse wraps a paginated list response.
 type PaginatedResponse[T any] struct {
 	Items      []T  `json:"items"`
@@ -15,4 +14,3 @@ type PaginatedResponse[T any] struct {
 	HasMore    bool `json:"has_more"`
 	NextOffset int  `json:"next_offset,omitempty"`
 }
-

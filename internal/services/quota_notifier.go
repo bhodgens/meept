@@ -108,7 +108,6 @@ func (qn *QuotaNotifier) pump(stopCh <-chan struct{}, doneCh chan<- struct{}) {
 	}
 }
 
-
 // Stop unsubscribes from the bus and terminates the pump goroutine, waiting
 // for it to exit. Safe to call multiple times (subsequent calls are no-ops),
 // and a following Start() may relaunch the pump.
@@ -289,7 +288,6 @@ func (qn *QuotaNotifier) processEvent(msg *models.BusMessage) {
 		"escalation", escalation,
 	)
 }
-
 
 // Cleanup removes old dedup entries (for memory safety on long runs).
 func (qn *QuotaNotifier) Cleanup() {

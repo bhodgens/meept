@@ -97,7 +97,6 @@ func (a *RootCauseAnalyzer) Analyze(ctx context.Context, issue Issue) (*RootCaus
 	return a.parseAnalysisResponse(issue.ID, resp.Content), nil
 }
 
-
 // extractRelevantCode extracts code around the issue.
 func (a *RootCauseAnalyzer) extractRelevantCode(content string, issue Issue) string {
 	lines := strings.Split(content, "\n")
