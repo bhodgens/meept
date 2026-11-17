@@ -183,7 +183,7 @@
     "topic": "chat.submit",
     "handler": "chatSubmitHandler.Submit",
     "file": "internal/daemon/daemon.go",
-    "line": 352
+    "line": 353
   },
   {
     "topic": "chat.submit",
@@ -544,6 +544,12 @@
     "handler": "h.handleState",
     "file": "internal/rpc/ledger.go",
     "line": 136
+  },
+  {
+    "topic": "llm.route.shadow",
+    "handler": "h.handleShadowRoute",
+    "file": "internal/rpc/shadow_route.go",
+    "line": 89
   },
   {
     "topic": "mcp.list",

@@ -151,7 +151,10 @@ boundaries:
   Park/resume/give-up events ride the existing `agent.quota_wait` topic
   (`agent.ParkTurnEvent` payloads with a `class` key) — never a new
   topic prefix — so the WS `agent.quota` classification above keeps
-  every park event on `agent_progress`.
+  every park event on `agent_progress`. Advisory-budget breaches
+  (sovereign-router-parity leaf 08, `llm.budget.mode: "steer"`) reuse the
+  SAME topic with `class: "budget_advisory"` — one signal per breach
+  episode, and steer never returns a `BudgetExceededError`.
 - **Slot priority is a ChatOption, two tiers only (tree 04 leaf 03,
   D11).** Model-concurrency slots are gated by `slotGate`
   (`internal/llm/slot_gate.go`), not a raw channel: interactive chat

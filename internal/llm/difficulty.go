@@ -1,7 +1,5 @@
 package llm
 
-import "strings"
-
 // DeriveDifficulty projects an Intent's routing signals into a 1-5 level
 // (Contract C11, sovereign-router-parity leaf 07). Pure function: no
 // classifier call, no I/O. Values come from the values the dispatcher
@@ -41,8 +39,3 @@ func DeriveDifficulty(mode string, requiresPlanning bool, inputLen int) int {
 	}
 	return 2
 }
-
-// deriveDifficultyUnused guards the strings import contract if future
-// table rows ever need mode normalization. (Kept minimal: the frozen
-// table is exact-string matching — never normalize an input mode.)
-var _ = strings.ToLower

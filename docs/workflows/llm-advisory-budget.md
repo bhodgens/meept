@@ -64,16 +64,18 @@ is live end-to-end:
    publish on "agent.quota_wait" with models.NewBusMessage ... })` (mirror
    the existing budget/throttle `SetParkEventBus` pattern; class
    `budget_advisory`).
-3. Cheaper-alias steer: the nearest tier-gate consult sites are
-   `provider_manager.go:569` (Chat), `:788` (ChatWithProgress),
-   `:1044` (streaming) — `tier.nextHopBlocked(...)` before each dispatch.
-   No "prefer cheaper" consult exists today (the rotation order comes from
-   `orderedProvidersForRequest` around `provider_manager.go:525`/`:761`/`:1015`
-   and the cost sort at `:1277`). The steer should reorder the candidate slice
-   ahead of `newTierGate(...)` when `budget.Advisory().OverTarget` (mode
-   steer) and a cheaper member exists — WITHOUT changing tier depth
-   semantics. This edit is deliberately not made here: `provider_manager.go`
-   is outside leaf 08's write scope and is the leaf 02 serialization surface.
+3. Cheaper-alias steer: WIRED (forward lane, commit 2f34d16d).
+   `steerReorderedTail(providers)` reorders the FAILOVER TAIL (index 1+)
+   by ascending `TotalCost()` with `sort.SliceStable` when
+   `pm.config.Budget.Mode() == BudgetModeSteer` AND
+   `budget.Advisory().OverTarget`; the primary candidate is never moved,
+   so tier depth semantics are untouched. Applied at all three rotation
+   loops as `pm.steerReorderedTail(pm.orderedProvidersForRequest(opts))`
+   (Chat, ChatWithProgress, chatWithAttemptTaggedDeltas). Enforce mode,
+   nil budget, and no-breach states return the input slice unchanged —
+   byte-identical rotation. Steering never refuses: the reorder can only
+   change WHICH healthy candidate serves next, never whether the turn
+   dispatches.
 
 ## Enforce-mode invariance
 
