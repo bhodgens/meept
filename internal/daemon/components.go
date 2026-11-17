@@ -1687,6 +1687,25 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			logger.Debug("Routing decision logger initialized")
 		}
 
+		// Data posture (sovereign-router-parity leaf 05, Contract C4):
+		// wire the secret scanner into the resolver's position-1 posture
+		// filter. A SEPARATE scanner instance from the tools-side one
+		// below (that one guards file/shell tool I/O at the tool
+		// boundary; this one guards the OUTBOUND prompt at the routing
+		// boundary — the leaf review checklist requires the existing
+		// tools-side wiring untouched). The narrow structural seam is
+		// required: internal/llm cannot import internal/security
+		// (security -> preferences -> tools -> llm cycle; documented in
+		// posture.go). Nil would mean the gate fail-opens; the scanner is
+		// always constructible, so the gate is live on every install —
+		// the OPT-IN dimension is the per-model data_posture key, not the
+		// scanner: with no key anywhere every model is Private and the
+		// filter allows everything (byte-identical flag-off).
+		if c.LLMResolver != nil {
+			c.LLMResolver.SetPostureScanner(intsecurity.NewSecretScanner())
+			logger.Debug("Posture scanner wired into resolver")
+		}
+
 		// Create auxiliary LLM clients for classifier and summarizer
 		// Use resolver for alias-based model selection (enables fallback rotation)
 		classifierRef := c.ModelsConfig.ClassifierModel

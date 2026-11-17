@@ -317,6 +317,14 @@ type ModelConfig struct {
 	// comparator's quality term vanishes. Scores come from measurement
 	// only — never seed from vendor documentation.
 	Quality Quality
+	// DataPosture is the EFFECTIVE per-model data posture (Contract C4,
+	// leaf 05), resolved through ParsePosture at the ModelConfig
+	// construction site: PosturePrivate unless the config explicitly
+	// declares "public_only" or "non_sensitive". A config with no
+	// data_posture key anywhere carries all-Private — the position-1
+	// posture filter allows everything and routing is byte-identical to
+	// pre-leaf (flag-off control gate).
+	DataPosture Posture
 	// BodyTemplate is the JSON body template for kind=http models.
 	BodyTemplate map[string]any
 	// ResponseURLPath / ResponseB64Path extract the asset from an http response.

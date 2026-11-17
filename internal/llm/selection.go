@@ -18,8 +18,10 @@ package llm
 // chain filter). Order matters: posture is a hard compliance boundary and
 // must be evaluated even when the quality filter would skip, so the skip
 // reason recorded in the routing log names the BINDING constraint. This
-// leaf reserves the order — positions 1 and 3 arrive with leaves 05 and
-// 02 — and registers only qualityFilter for now.
+// order is now fully populated: leaf 05 registered postureFilter at
+// position 1, leaf 02 registered admissionFilter at position 3. A leaf
+// that adds a filter appends it to this list and updates this contract in
+// the same commit.
 
 import "time"
 
@@ -42,6 +44,15 @@ type FilterCtx struct {
 	EstInput   int
 	EstOutput  int
 	Sensitive  bool
+	// PromptText carries the outbound user+system prompt text for the
+	// position-1 posture filter (leaf 05, R3). It rides FilterCtx — the
+	// chain's existing request-scoped carrier — rather than a resolver
+	// field, because sensitivity is a PER-REQUEST fact, not resolver
+	// state. Empty means the caller supplied no text: the posture gate
+	// fail-opens (treats the turn as non-sensitive, never errors).
+	// Callers build it with PosturePromptText; tool/assistant text is
+	// deliberately excluded (already scanned at the tool boundary).
+	PromptText string
 	Difficulty int // 0 = unclassified = difficulty-derived behavior inert
 	Now        time.Time
 }
@@ -97,13 +108,12 @@ func (qualityFilter) Reason() string { return "quality_below_required" }
 
 // registerSelectionFilters installs the chain in the FROZEN order.
 // Called once from NewResolver; never mutates after construction, so
-// runSelectionFilters needs no lock. Leaves 05 (postureFilter) and 02
-// (admissionFilter) append their registration lines at positions 1 and 3
-// and update the master contract in the same commit.
+// runSelectionFilters needs no lock. Leaves append their registration
+// lines at their contract positions and update the master contract in the
+// same commit.
 func (r *Resolver) registerSelectionFilters() {
-	// Position 1 (R3, leaf 05 postureFilter) is reserved above — the
-	// order contract in this file's header is binding.
 	r.selectionFilters = []Filter{
+		postureFilter{},   // Position 1 (R3, leaf 05) — hard compliance boundary; MUST stay first: it is evaluated even when a later filter would skip the same candidate, so the routing log names the binding constraint (master C1).
 		qualityFilter{},   // Position 2 (R1)
 		admissionFilter{}, // Position 3 (R2, leaf 02) — context fit
 	}

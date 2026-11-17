@@ -167,7 +167,7 @@ func (r *Resolver) shadowAliasDecision(req ShadowRequest, alias *AliasEntry, hea
 	dec := &ShadowDecision{
 		Alias:      req.Alias,
 		Reason:     reason,
-		Posture:    PosturePrivate, // default when the key is absent (Q3); leaf 05 wires the real value
+		Posture:    shadowPostureOf(alias.Models), // winner's effective posture (leaf 05); all-Private when no model declares a key (Q3)
 		Candidates: []ShadowCandidate{},
 	}
 	n := len(alias.Models)
@@ -451,7 +451,7 @@ func (r *Resolver) shadowSingleDecision(req ShadowRequest, mc *ModelConfig, estI
 	dec := &ShadowDecision{
 		Alias:      aliasLabel,
 		Reason:     reason,
-		Posture:    PosturePrivate, // default when the key is absent (Q3); leaf 05 wires the real value
+		Posture:    mc.DataPosture, // effective posture (leaf 05; ParsePosture-resolved at construction — absent key = Private)
 		Candidates: []ShadowCandidate{},
 	}
 	if mc == nil {
@@ -536,15 +536,25 @@ func shadowEstimateInputTokens(messages []ChatMessage, tools []ToolDefinition) i
 }
 
 // --------------------------------------------------------------------------
-// Posture vocabulary (minimal declaration — SEE THE HEADER NOTE).
-//
-// Owned by leaf 05 (Contract C4, posture.go): the full surface
-// (ParsePosture, AllowsSensitive, postureFilter, the ModelDef.DataPosture
-// mapping) lands there. Leaf 04 declares ONLY the type and the three frozen
-// constants because the C6 union ShadowDecision (drift-audit ruling #3)
-// carries a Posture value and wave 1 dispatches leaf 04 first. posture.go
-// must NOT redeclare these — move, don't duplicate.
+// Posture vocabulary (declared by leaf 04, consumed by leaf 05 — SEE THE
+// HEADER NOTE). Leaf 05's posture.go now owns ParsePosture, AllowsSensitive,
+// postureFilter, and the ModelDef.DataPosture mapping; shadow decisions
+// report the winner's effective posture via shadowPostureOf below.
 // --------------------------------------------------------------------------
+
+// shadowPostureOf reports the effective data posture of the model a shadow
+// decision previews: the WINNER's (rotation-head) posture. An alias whose
+// members disagree is judged by the model that would serve — an operator
+// reading the preview wants the compliance facts of the model that would
+// actually carry the prompt. Empty model list falls back to Private (the
+// Q3 default; ParsePosture guarantees every ModelConfig carries a resolved
+// posture, never the zero value).
+func shadowPostureOf(models []*ModelConfig) Posture {
+	if len(models) == 0 {
+		return PosturePrivate
+	}
+	return models[0].DataPosture
+}
 
 // Posture is the per-model data-posture label. The zero value "" is NOT a
 // valid posture: consumers treat absent/unknown as PosturePrivate

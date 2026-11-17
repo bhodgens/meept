@@ -113,6 +113,14 @@ type ModelDef struct {
 	// no provider-level option: the value maps straight through from
 	// ModelDef.
 	ToolExposure string `json:"tool_exposure,omitempty"`
+	// DataPosture is the per-model data-posture label (Contract C4,
+	// sovereign-router-parity leaf 05): "private" (no-training, cleared
+	// for sensitive turns), "public_only" (provider may train — sensitive
+	// barred), or "non_sensitive" (aggregator, posture unclear — barred).
+	// ABSENT/unknown parses to private at the construction site below
+	// (ParsePosture), so a config with no data_posture key anywhere is
+	// byte-identical to pre-leaf (flag-off control gate, master Q3).
+	DataPosture Posture `json:"data_posture,omitempty"`
 	// Quality is the MEASURED per-class quality scores (0-5) from probe
 	// batteries (Contract C2, sovereign-router-parity leaf 01). The
 	// Sovereign Router selection rule governs seeding: "leaderboards
@@ -761,29 +769,35 @@ func modelConfigFrom(providerID, mapKey string, provider ProviderConfig, modelDe
 		CostPerMillionInput:  modelDef.InputCost,
 		CostPerMillionOutput: modelDef.OutputCost,
 		Quality:              modelDef.Quality,
-		MaxTokens:            modelDef.MaxOutput,
-		Temperature:          modelDef.Temperature,
-		TopP:                 modelDef.TopP,
-		ContextLimit:         modelDef.ContextLimit,
-		Capabilities:         caps,
-		ProviderID:           providerID,
-		CatalogRef:           providerID + "/" + mapKey,
-		ToolConstraint:       mode,
-		SchemaMode:           schemaMode,
-		ToolExposure:         toolExposure,
-		ToolChoice:           toolChoice,
-		ExtraHeaders:         extraHeaders,
-		Timeout:              time.Duration(opts.Timeout) * time.Second,
-		MaxConcurrency:       modelDef.MaxConcurrency,
-		ProviderAPI:          provider.API,
-		GenerationAPI:        modelDef.API,
-		Workflow:             workflow,
-		GenerationURL:        modelDef.GenerationURL,
-		BodyTemplate:         modelDef.BodyTemplate,
-		ResponseURLPath:      modelDef.ResponseURLPath,
-		ResponseB64Path:      modelDef.ResponseB64Path,
-		ImageApp:             modelDef.ImageApp,
-		VideoApp:             modelDef.VideoApp,
-		OAuthProvider:        modelDef.OAuthProvider,
+		// Data posture (leaf 05, Contract C4): resolved HERE via
+		// ParsePosture so every consumer sees the effective posture —
+		// absent/unknown keys become PosturePrivate (the backward-
+		// compatible default, master Q3) instead of leaking the zero
+		// value into the gate.
+		DataPosture:     ParsePosture(string(modelDef.DataPosture)),
+		MaxTokens:       modelDef.MaxOutput,
+		Temperature:     modelDef.Temperature,
+		TopP:            modelDef.TopP,
+		ContextLimit:    modelDef.ContextLimit,
+		Capabilities:    caps,
+		ProviderID:      providerID,
+		CatalogRef:      providerID + "/" + mapKey,
+		ToolConstraint:  mode,
+		SchemaMode:      schemaMode,
+		ToolExposure:    toolExposure,
+		ToolChoice:      toolChoice,
+		ExtraHeaders:    extraHeaders,
+		Timeout:         time.Duration(opts.Timeout) * time.Second,
+		MaxConcurrency:  modelDef.MaxConcurrency,
+		ProviderAPI:     provider.API,
+		GenerationAPI:   modelDef.API,
+		Workflow:        workflow,
+		GenerationURL:   modelDef.GenerationURL,
+		BodyTemplate:    modelDef.BodyTemplate,
+		ResponseURLPath: modelDef.ResponseURLPath,
+		ResponseB64Path: modelDef.ResponseB64Path,
+		ImageApp:        modelDef.ImageApp,
+		VideoApp:        modelDef.VideoApp,
+		OAuthProvider:   modelDef.OAuthProvider,
 	}
 }

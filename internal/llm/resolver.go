@@ -88,6 +88,22 @@ type Resolver struct {
 	// FROZEN contract: posture (R3) > quality (R1) > admission (R2).
 	selectionFilters []Filter
 
+	// postureScanner is the C4 data-posture secret scanner (leaf 05,
+	// narrow structural seam over *security.SecretScanner — the direct
+	// import is a cycle: internal/security -> internal/preferences ->
+	// internal/tools -> internal/llm). Nil (default) = the posture gate
+	// fail-opens: every turn is treated as non-sensitive, routing is
+	// byte-identical to pre-leaf. Wired once at daemon construction via
+	// SetPostureScanner; guarded by mu (read on the hot resolve path).
+	postureScanner SecretScanner
+
+	// resolvePostureCtx is the resolve-time prompt seam (leaf 05): the
+	// daemon-installed closure supplying the outbound prompt text for the
+	// position-1 posture gate on the alias path. Nil (default) = no text =
+	// gate fail-open. Wired once via SetResolvePostureContext; guarded by
+	// mu. The closure itself must be lock-free.
+	resolvePostureCtx ResolvePostureContext
+
 	// sessionEndpoints maps sessionID -> EndpointKey(cfg) of the endpoint
 	// that last served that session successfully (session-affinity tree
 	// leaf 04, master Contract 4). It deliberately lives ON THE RESOLVER
@@ -895,17 +911,52 @@ func (r *Resolver) ResolveForAlias(aliasName string, sessionID string) (*ModelCo
 		// 01, T11): the chain runs AFTER the model is chosen and BEFORE
 		// return, so later filter leaves (05 posture, 02 admission) compose
 		// without re-editing the rotation. r.mu is held here — the chain
-		// must not lock (it doesn't; see runSelectionFilters). With only
-		// qualityFilter registered and an all-unmeasured alias the chain
-		// allows everything: behavior is byte-identical to pre-leaf. A
-		// terminal VerdictFloor would refuse the turn (typed error per the
+		// must not lock (it doesn't; see runSelectionFilters). A
+		// terminal VerdictFloor refuses the turn (typed error per the
 		// owning leaf's contract); no registered filter returns it today.
+		//
+		// POSTURE PROMPT SCANNING (leaf 05, Contract C4 — resolve-time
+		// seam, documented deviation from the leaf's chatWithFailoverRaw
+		// proposal): the prompt text rides FilterCtx.PromptText so the
+		// position-1 postureFilter can scan it (only user+system text;
+		// tool text is already scanned at the tool boundary). BUT the
+		// chain runs on the already-chosen winner and returns Skip without
+		// re-rotation — a SKIP here would serve a public_only model with a
+		// sensitive turn. The compliance rule is a hard boundary (master
+		// C1), so the posture-only pass below RE-ROTATES the cursor past
+		// non-cleared candidates BEFORE the winner is finalized; the hook
+		// then double-checks the final pick through the full chain. With
+		// no prompt text, no scanner wired, or a non-sensitive turn this
+		// is exactly one bool check — byte-identical to pre-leaf.
+		promptText := r.posturePromptForResolve(sessionID)
+		pfc := &FilterCtx{
+			SessionID:  sessionID,
+			PromptText: promptText,
+			Now:        r.clock(),
+		}
+		if sensitive, _ := r.postureSensitive(promptText); sensitive {
+			pfc.Sensitive = true
+			if idx := r.posturePass(alias, aliasName, pfc, selectedIdx); idx < 0 {
+				// Every candidate is non-cleared: refuse the turn — a
+				// sensitive prompt has no legal destination (never a
+				// best-effort leak). Mirror the all-blocked error shape.
+				return nil, fmt.Errorf("alias %q: every model is non-cleared for sensitive data (posture)", aliasName)
+			} else if idx != selectedIdx {
+				r.logger.Info("Rotated past non-cleared model for sensitive turn",
+					"alias", aliasName,
+					"from_index", selectedIdx,
+					"to_index", idx,
+				)
+				selectedIdx = idx
+			}
+		}
+		chosen = alias.Models[selectedIdx]
 		if v, _ := r.runSelectionFilters(&Candidate{
 			Model:     chosen,
 			Alias:     aliasName,
 			EstInput:  0,
 			EstOutput: 0,
-		}, &FilterCtx{SessionID: sessionID, Now: r.clock()}); v == VerdictFloor {
+		}, pfc); v == VerdictFloor {
 			return nil, fmt.Errorf("all models in alias %q refused by the selection chain", aliasName)
 		}
 		// Persist the routing decision for later mining (Phase 4 student-learns-routing).

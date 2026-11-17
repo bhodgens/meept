@@ -179,6 +179,27 @@
   // order byte-identically. Only add a block to a model you have actually
   // probed.
 
+  // DATA POSTURE (sovereign-router-parity leaf 05, Contract C4) —
+  // documented but deliberately UNSET on every model (plan Q3 ruling:
+  // absent = "private" = backward compatible). Optional per-model key
+  // (inside providers.<id>.models.<name>):
+  //
+  //   "data_posture": "private" | "public_only" | "non_sensitive"
+  //
+  //   private       no-training provider; cleared for sensitive turns
+  //   public_only   provider may train on submitted data; sensitive turns
+  //                 NEVER route here (skip reason "sensitive_data_posture")
+  //   non_sensitive aggregator with no auditable data policy; treated as
+  //                 barred for sensitive turns (conservative posture)
+  //
+  // When a turn's outbound user/system text carries secret-shaped content
+  // (detected by the same scanner the file/shell tools use — the matched
+  // string itself is NEVER logged, only rule names/counts), rotation
+  // bypasses every model whose data_posture is not "private" and serves
+  // the first cleared candidate; an alias with NO cleared candidate
+  // refuses the turn rather than leak. ABSENT KEY = "private": routing is
+  // byte-identical to pre-leaf until an operator opts a model in.
+
   // Providers to skip entirely
   // NOTE: MLX re-enabled 2026-09-06 — the July SIGKILL root cause was the
   // daemon's StartAll context cancellation, fixed for ALL runtimes in
