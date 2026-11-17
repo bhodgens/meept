@@ -27,6 +27,12 @@ import (
 // transport.Client without a live daemon.
 var kanbanConnectDaemon = connectDaemon
 
+// kanbanJSON is the tree-wide --json switch (persistent flag on the
+// kanban root): every subcommand prints the raw RPC result as JSON when
+// set, so `meept kanban --json timeline k1` works the same as
+// `meept kanban timeline k1 --json` and no leaf command re-declares it.
+var kanbanJSON bool
+
 // newKanbanCmd builds the `meept kanban` command tree (C6).
 func newKanbanCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -52,6 +58,7 @@ Verbs (C6):
   meept kanban timeline <card_id>                read the card event log
   meept kanban reconcile                         run a projection rebuild pass now`,
 	}
+	cmd.PersistentFlags().BoolVar(&kanbanJSON, "json", false, "print the raw RPC result as JSON")
 	cmd.AddCommand(
 		newKanbanListCmd(),
 		newKanbanShowCmd(),
@@ -71,42 +78,38 @@ Verbs (C6):
 // --- board reads -------------------------------------------------------
 
 func newKanbanListCmd() *cobra.Command {
-	var outputJSON bool
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "list boards",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return kanbanInvoke(cmd, "kanban.board.list", map[string]any{}, outputJSON, renderBoards)
+			return kanbanInvoke(cmd, "kanban.board.list", map[string]any{}, kanbanJSON, renderBoards)
 		},
 	}
-	cmd.Flags().BoolVar(&outputJSON, "json", false, "print the raw RPC result as JSON")
 	return cmd
 }
 
 func newKanbanShowCmd() *cobra.Command {
 	var cardID string
-	var outputJSON bool
 	cmd := &cobra.Command{
 		Use:   "show <board_id>",
 		Short: "show a board's columns and cards (or one card with --card)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if cardID != "" {
-				return kanbanInvoke(cmd, "kanban.card.get", map[string]any{"card_id": cardID}, outputJSON, renderCardResult)
+				return kanbanInvoke(cmd, "kanban.card.get", map[string]any{"card_id": cardID}, kanbanJSON, renderCardResult)
 			}
-			return runKanbanShowBoard(cmd, args[0], outputJSON)
+			return runKanbanShowBoard(cmd, args[0], kanbanJSON)
 		},
 	}
 	cmd.Flags().StringVar(&cardID, "card", "", "show a single card by id instead of the board view")
-	cmd.Flags().BoolVar(&outputJSON, "json", false, "print the raw RPC result as JSON")
 	return cmd
 }
 
 // runKanbanShowBoard composes the read path: column.list, then card.list
 // per column. A card.list failure on one column degrades to an annotation
 // rather than killing the whole view.
-func runKanbanShowBoard(cmd *cobra.Command, boardID string, outputJSON bool) error {
+func runKanbanShowBoard(cmd *cobra.Command, boardID string, kanbanJSON bool) error {
 	client, err := kanbanConnectDaemon()
 	if err != nil {
 		return fmt.Errorf("failed to connect to daemon: %w", err)
@@ -117,7 +120,7 @@ func runKanbanShowBoard(cmd *cobra.Command, boardID string, outputJSON bool) err
 	if err != nil {
 		return kanbanError(err)
 	}
-	if outputJSON {
+	if kanbanJSON {
 		return printRawJSON(cmd.OutOrStdout(), colRaw)
 	}
 	cols, err := decodeRows(colRaw, "columns")
@@ -162,7 +165,6 @@ func newKanbanBoardCmd() *cobra.Command {
 
 func newKanbanBoardCreateCmd() *cobra.Command {
 	var boardID string
-	var outputJSON bool
 	cmd := &cobra.Command{
 		Use:   "create <name>",
 		Short: "create a board",
@@ -172,44 +174,38 @@ func newKanbanBoardCreateCmd() *cobra.Command {
 			if boardID != "" {
 				params["id"] = boardID
 			}
-			return kanbanInvoke(cmd, "kanban.board.create", params, outputJSON, renderCreated(fmt.Sprintf("board %q", args[0])))
+			return kanbanInvoke(cmd, "kanban.board.create", params, kanbanJSON, renderCreated(fmt.Sprintf("board %q", args[0])))
 		},
 	}
 	cmd.Flags().StringVar(&boardID, "id", "", "explicit board id (daemon generates one when unset)")
-	cmd.Flags().BoolVar(&outputJSON, "json", false, "print the raw RPC result as JSON")
 	return cmd
 }
 
 func newKanbanBoardListCmd() *cobra.Command {
-	var outputJSON bool
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "list boards",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return kanbanInvoke(cmd, "kanban.board.list", map[string]any{}, outputJSON, renderBoards)
+			return kanbanInvoke(cmd, "kanban.board.list", map[string]any{}, kanbanJSON, renderBoards)
 		},
 	}
-	cmd.Flags().BoolVar(&outputJSON, "json", false, "print the raw RPC result as JSON")
 	return cmd
 }
 
 func newKanbanBoardColumnsCmd() *cobra.Command {
-	var outputJSON bool
 	cmd := &cobra.Command{
 		Use:   "columns <board_id>",
 		Short: "list a board's columns",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return kanbanInvoke(cmd, "kanban.column.list", map[string]any{"board_id": args[0]}, outputJSON, renderColumns)
+			return kanbanInvoke(cmd, "kanban.column.list", map[string]any{"board_id": args[0]}, kanbanJSON, renderColumns)
 		},
 	}
-	cmd.Flags().BoolVar(&outputJSON, "json", false, "print the raw RPC result as JSON")
 	return cmd
 }
 
 func newKanbanBoardCardsCmd() *cobra.Command {
-	var outputJSON bool
 	var limit int
 	cmd := &cobra.Command{
 		Use:   "cards <column_id>",
@@ -220,11 +216,10 @@ func newKanbanBoardCardsCmd() *cobra.Command {
 			if limit > 0 {
 				params["limit"] = limit
 			}
-			return kanbanInvoke(cmd, "kanban.card.list", params, outputJSON, renderCards)
+			return kanbanInvoke(cmd, "kanban.card.list", params, kanbanJSON, renderCards)
 		},
 	}
 	cmd.Flags().IntVar(&limit, "limit", 0, "cap the number of cards returned")
-	cmd.Flags().BoolVar(&outputJSON, "json", false, "print the raw RPC result as JSON")
 	return cmd
 }
 
@@ -232,7 +227,6 @@ func newKanbanBoardCardsCmd() *cobra.Command {
 
 func newKanbanCreateCmd() *cobra.Command {
 	var labels []string
-	var outputJSON bool
 	cmd := &cobra.Command{
 		Use:   "create <board_id> <column_id> <title>",
 		Short: "create a card in a column",
@@ -246,17 +240,15 @@ func newKanbanCreateCmd() *cobra.Command {
 			if len(labels) > 0 {
 				params["labels"] = labels
 			}
-			return kanbanInvoke(cmd, "kanban.card.create", params, outputJSON, renderCreated(fmt.Sprintf("card %q", args[2])))
+			return kanbanInvoke(cmd, "kanban.card.create", params, kanbanJSON, renderCreated(fmt.Sprintf("card %q", args[2])))
 		},
 	}
 	cmd.Flags().StringSliceVar(&labels, "label", nil, "label(s) for the card (repeatable)")
-	cmd.Flags().BoolVar(&outputJSON, "json", false, "print the raw RPC result as JSON")
 	return cmd
 }
 
 func newKanbanMoveCmd() *cobra.Command {
 	var order int
-	var outputJSON bool
 	cmd := &cobra.Command{
 		Use:   "move <card_id> <column_id>",
 		Short: "move a card to another column (lease rule enforced)",
@@ -269,17 +261,15 @@ error names the holder and its age. Use 'kanban takeover' to bypass.`,
 			if cmd.Flags().Changed("order") {
 				params["order"] = order
 			}
-			return kanbanInvoke(cmd, "kanban.card.move", params, outputJSON, renderMutation("card moved"))
+			return kanbanInvoke(cmd, "kanban.card.move", params, kanbanJSON, renderMutation("card moved"))
 		},
 	}
 	cmd.Flags().IntVar(&order, "order", 0, "manual ordering within the target column")
-	cmd.Flags().BoolVar(&outputJSON, "json", false, "print the raw RPC result as JSON")
 	return cmd
 }
 
 func newKanbanTakeoverCmd() *cobra.Command {
 	var columnID string
-	var outputJSON bool
 	cmd := &cobra.Command{
 		Use:   "takeover <card_id>",
 		Short: "cancel the episode, release the lease, and move the card",
@@ -292,17 +282,15 @@ daemon requires the board.takeover grant in addition to board.mutate.`,
 			if columnID != "" {
 				params["column_id"] = columnID
 			}
-			return kanbanInvoke(cmd, "kanban.card.takeover", params, outputJSON, renderMutation("takeover complete"))
+			return kanbanInvoke(cmd, "kanban.card.takeover", params, kanbanJSON, renderMutation("takeover complete"))
 		},
 	}
 	cmd.Flags().StringVar(&columnID, "column", "", "target column id (daemon default when unset)")
-	cmd.Flags().BoolVar(&outputJSON, "json", false, "print the raw RPC result as JSON")
 	return cmd
 }
 
 func newKanbanWIPCmd() *cobra.Command {
 	var boardID string
-	var outputJSON bool
 	cmd := &cobra.Command{
 		Use:   "wip <column_id> <limit>",
 		Short: "set a column's wip limit (0 = no limit)",
@@ -319,69 +307,60 @@ func newKanbanWIPCmd() *cobra.Command {
 			if boardID != "" {
 				params["board_id"] = boardID
 			}
-			return kanbanInvoke(cmd, "kanban.column.set_wip", params, outputJSON, renderMutation(fmt.Sprintf("column %s wip limit set to %d", args[0], limit)))
+			return kanbanInvoke(cmd, "kanban.column.set_wip", params, kanbanJSON, renderMutation(fmt.Sprintf("column %s wip limit set to %d", args[0], limit)))
 		},
 	}
 	cmd.Flags().StringVar(&boardID, "board", "", "board id (include in the request when the daemon needs the scope)")
-	cmd.Flags().BoolVar(&outputJSON, "json", false, "print the raw RPC result as JSON")
 	return cmd
 }
 
 func newKanbanAssignCmd() *cobra.Command {
-	var outputJSON bool
 	cmd := &cobra.Command{
 		Use:   "assign <card_id> <employee_id>",
 		Short: "assign an employee to a card",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			params := map[string]any{"card_id": args[0], "employee_id": args[1]}
-			return kanbanInvoke(cmd, "kanban.card.assign", params, outputJSON, renderMutation("card assigned"))
+			return kanbanInvoke(cmd, "kanban.card.assign", params, kanbanJSON, renderMutation("card assigned"))
 		},
 	}
-	cmd.Flags().BoolVar(&outputJSON, "json", false, "print the raw RPC result as JSON")
 	return cmd
 }
 
 func newKanbanCommentCmd() *cobra.Command {
-	var outputJSON bool
 	cmd := &cobra.Command{
 		Use:   "comment <card_id> <text...>",
 		Short: "append a comment event to a card",
 		Args:  cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			params := map[string]any{"card_id": args[0], "body": strings.Join(args[1:], " ")}
-			return kanbanInvoke(cmd, "kanban.card.comment", params, outputJSON, renderMutation("comment added"))
+			return kanbanInvoke(cmd, "kanban.card.comment", params, kanbanJSON, renderMutation("comment added"))
 		},
 	}
-	cmd.Flags().BoolVar(&outputJSON, "json", false, "print the raw RPC result as JSON")
 	return cmd
 }
 
 func newKanbanTimelineCmd() *cobra.Command {
-	var outputJSON bool
 	cmd := &cobra.Command{
 		Use:   "timeline <card_id>",
 		Short: "show a card's event timeline",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return kanbanInvoke(cmd, "kanban.card.timeline", map[string]any{"card_id": args[0]}, outputJSON, renderTimeline)
+			return kanbanInvoke(cmd, "kanban.card.timeline", map[string]any{"card_id": args[0]}, kanbanJSON, renderTimeline)
 		},
 	}
-	cmd.Flags().BoolVar(&outputJSON, "json", false, "print the raw RPC result as JSON")
 	return cmd
 }
 
 func newKanbanReconcileCmd() *cobra.Command {
-	var outputJSON bool
 	cmd := &cobra.Command{
 		Use:   "reconcile",
 		Short: "run a projection rebuild pass now",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return kanbanInvoke(cmd, "kanban.reconcile.now", map[string]any{}, outputJSON, renderReconcile)
+			return kanbanInvoke(cmd, "kanban.reconcile.now", map[string]any{}, kanbanJSON, renderReconcile)
 		},
 	}
-	cmd.Flags().BoolVar(&outputJSON, "json", false, "print the raw RPC result as JSON")
 	return cmd
 }
 
@@ -390,7 +369,7 @@ func newKanbanReconcileCmd() *cobra.Command {
 // kanbanInvoke is the one round-trip every single-call command uses: dial,
 // Call the C4 method, surface handler-level {error: msg} replies as real
 // errors, then either passthrough --json or render the table.
-func kanbanInvoke(cmd *cobra.Command, method string, params any, outputJSON bool, render func(io.Writer, map[string]any) error) error {
+func kanbanInvoke(cmd *cobra.Command, method string, params any, kanbanJSON bool, render func(io.Writer, map[string]any) error) error {
 	client, err := kanbanConnectDaemon()
 	if err != nil {
 		return fmt.Errorf("failed to connect to daemon: %w", err)
@@ -408,7 +387,7 @@ func kanbanInvoke(cmd *cobra.Command, method string, params any, outputJSON bool
 	if errMsg := getStringOr(resultMap, "error", ""); errMsg != "" {
 		return kanbanError(errors.New(errMsg))
 	}
-	if outputJSON {
+	if kanbanJSON {
 		return printRawJSON(cmd.OutOrStdout(), rawResult)
 	}
 	if render != nil {

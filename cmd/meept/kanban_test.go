@@ -138,7 +138,11 @@ func TestKanbanCommandStructure(t *testing.T) {
 		}
 	}
 
-	// --json flag on every leaf that renders a table or a mutation.
+	// --json is ONE persistent flag on the kanban root (tree-wide): declared
+	// once, inherited by every leaf that renders a table or a mutation.
+	if cmd.PersistentFlags().Lookup("json") == nil {
+		t.Error("kanban root missing persistent --json flag")
+	}
 	for _, path := range [][]string{
 		{"list"}, {"show"}, {"board", "list"}, {"board", "columns"}, {"board", "cards"},
 		{"board", "create"}, {"create"}, {"move"}, {"takeover"}, {"wip"},
@@ -148,8 +152,11 @@ func TestKanbanCommandStructure(t *testing.T) {
 		for _, name := range path {
 			c = findSubcommand(t, c, name)
 		}
-		if c.Flags().Lookup("json") == nil {
-			t.Errorf("kanban %s missing --json flag", strings.Join(path, " "))
+		// Lookup on Flags() after inheritance would include the parent's
+		// persistent set; before any parse it does not, so assert via
+		// InheritedFlags (what execution merges).
+		if c.Flags().Lookup("json") == nil && c.InheritedFlags().Lookup("json") == nil {
+			t.Errorf("kanban %s does not inherit --json", strings.Join(path, " "))
 		}
 	}
 }
