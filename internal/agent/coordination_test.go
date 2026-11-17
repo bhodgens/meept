@@ -115,3 +115,43 @@ func TestTopicTurnState_Name(t *testing.T) {
 		t.Fatalf("TopicTurnState.Name = %q, want %q", TopicTurnState.Name, "agent.turn.state")
 	}
 }
+
+// TestTurnStateEvent_BothShapesDecode pins the Q2 ratification (2026-11-16):
+// the pair-phase shape (phase set) and the plain delegate/ACP shape (phase
+// absent) both decode into TurnStateEvent without error. Phase is optional;
+// no consumer may require it.
+func TestTurnStateEvent_BothShapesDecode(t *testing.T) {
+	shapes := map[string]string{
+		"pair phase shape (phase present)": `{"agent_id":"pair-1","session_id":"s","state":"running","phase":"reviewer_turn","timestamp":"2026-11-16T00:00:00Z"}`,
+		"plain shape (phase absent)":       `{"agent_id":"a","session_id":"s","state":"idle","stop_reason":"end_turn","timestamp":"2026-11-16T00:00:00Z"}`,
+		"pair completed shape":             `{"agent_id":"pair-1","state":"idle","stop_reason":"end_turn","phase":"completed","timestamp":"2026-11-16T00:00:00Z"}`,
+		"pair failed shape":                `{"agent_id":"pair-1","state":"idle","stop_reason":"error","phase":"failed","timestamp":"2026-11-16T00:00:00Z"}`,
+	}
+	for name, raw := range shapes {
+		t.Run(name, func(t *testing.T) {
+			var ev TurnStateEvent
+			if err := json.Unmarshal([]byte(raw), &ev); err != nil {
+				t.Fatalf("unmarshal error: %v", err)
+			}
+			if ev.AgentID == "" || ev.State == "" {
+				t.Fatalf("decoded event missing required fields: %+v", ev)
+			}
+		})
+	}
+	// The phase-absent shape must re-marshal without a phase key.
+	var plain TurnStateEvent
+	if err := json.Unmarshal([]byte(shapes["plain shape (phase absent)"]), &plain); err != nil {
+		t.Fatal(err)
+	}
+	b, err := json.Marshal(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m["phase"]; ok {
+		t.Fatalf("phase key present in re-marshalled plain shape: %s", b)
+	}
+}
