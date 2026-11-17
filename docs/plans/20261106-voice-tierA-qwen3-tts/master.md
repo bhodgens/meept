@@ -97,7 +97,7 @@ Three seams change:
 // voiceframe.Frame - decoded raw child-side, exactly as today).
 ```
 
-### C2: ProviderConfig (internal/voicechild/providers/providers.go)
+### C2: ProviderConfig (internal/voicechild/providers/providers.go) [path cite SUPERSEDED 2026-11-16 — see amendment below]
 
 ```
 type ProviderConfig struct {
@@ -120,6 +120,22 @@ type ProviderConfig struct {
 > (providers imports voicechild for the interfaces). Field-for-field identical
 > to the contract above; leaf 03's C1 deviation note (Completion Tracking
 > Table) records the related SendRaw seam decision.
+
+> AMENDMENT (2026-11-16, issue #151, docs-only — supersedes the C2 heading's
+> path cite; no code changed): as-built, the canonical `ProviderConfig`
+> struct lives at `internal/voicechild/providers_wiring.go:17`
+> (`type ProviderConfig struct {`), verified 2026-11-16. The
+> `internal/voicechild/providers/providers.go:45` cite refers to the
+> re-export alias `type ProviderConfig = voicechild.ProviderConfig`,
+> which exists to avoid an import cycle (providers imports voicechild for
+> the interfaces; the reverse would cycle). The heading path
+> `internal/voicechild/providers/providers.go` is therefore SUPERSEDED for
+> the struct definition; use `internal/voicechild/providers_wiring.go:17`
+> (canonical) and `internal/voicechild/providers/providers.go:45` (alias).
+> The 2026-11-08 DEVIATION note above already records the same as-built
+> layout; this amendment formalizes it as the contract's reference and
+> marks the old heading cite superseded. Field shape, keyless rule, and
+> ownership notes are unchanged.
 
 ### C3: Factory signatures (internal/voicechild/providers_wiring.go)
 
