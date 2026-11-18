@@ -200,18 +200,6 @@ func (r *Resolver) postureSensitive(promptText string) (bool, []string) {
 	return true, rules
 }
 
-// postureBlocks reports whether the position-1 posture filter skips this
-// candidate for the request's FilterCtx. Callers hold r.mu (both call
-// sites are inside ResolveForAliasPosture's critical section). A nil or
-// non-sensitive fc never blocks.
-func (r *Resolver) postureBlocks(fc *FilterCtx, mc *ModelConfig) bool {
-	if fc == nil || !fc.Sensitive || mc == nil {
-		return false
-	}
-	pf := postureFilter{scanner: r.postureScanner}
-	return pf.Filter(&Candidate{Model: mc}, fc) == VerdictSkip
-}
-
 // posturePass returns the index of the FIRST candidate at/after startIdx
 // (wrapping) that the posture filter allows, or -1 when every candidate is
 // skipped. It runs ONLY the position-1 filter — not the whole chain — so

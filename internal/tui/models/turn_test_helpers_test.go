@@ -14,10 +14,6 @@ import (
 	"time"
 )
 
-// testTurnTerminalMsg is an alias kept for readability in router-level
-// tests (was the exported TestTurnTerminalMsg).
-type testTurnTerminalMsg = turnTerminalMsg
-
 // fireTimers exposes the manual timer source's FireTimers through the
 // router for tests that hold only the router.
 func (r *turnRouter) fireTimers() {
