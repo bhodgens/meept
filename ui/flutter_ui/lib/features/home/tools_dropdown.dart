@@ -23,6 +23,7 @@ const Map<String, String> toolRoutePaths = {
   'calendar': '/tools/calendar',
   'metrics': '/tools/metrics',
   'voice': '/tools/voice',
+  'kanban': '/kanban',
 };
 
 /// Route path for [toolName], or null when the tool has no route and
@@ -86,6 +87,7 @@ class HamburgerMenu extends StatefulWidget {
     'metrics': Icons.insights,
     'prompts': Icons.edit_note,
     'voice': Icons.graphic_eq,
+    'kanban': Icons.view_kanban,
     'settings': Icons.settings,
   };
 
