@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../models/api_models.dart' show Project;
+import '../models/api_models.dart' show Project, Session;
 import '../services/sdk_client.dart';
 import 'providers.dart';
 
@@ -112,6 +112,75 @@ final currentProjectProvider =
     StateNotifierProvider<CurrentProjectNotifier, CurrentProject>((ref) {
       return CurrentProjectNotifier(ref.watch(sdkClientProvider));
     });
+
+/// Resolves the project bound to a specific [Session] — never the
+/// globally-active project.
+///
+/// Session naming must describe the session's OWN codebase. Reading the
+/// globally-active project (the first `status == "active"` entry from
+/// [CurrentProjectNotifier.refresh]) names every session after whichever
+/// benchmark project happens to sort first (e.g. `bob-work-1`) regardless
+/// of the directory the session is actually bound to.
+///
+/// Resolution order, all scoped to the passed session:
+///   1. `session.projectId` → exact `id` match in the project list.
+///   2. `session.projectPath` → exact `local_path` match (normalized by
+///      stripping a trailing separator), for sessions bound by path before
+///      the daemon recorded a project id.
+///
+/// Returns an empty [CurrentProject] when the session is unbound or the
+/// bound project cannot be found, so callers can fall back to no project
+/// context rather than a wrong one.
+///
+/// A pure top-level helper (no widget tree required) so both the naming
+/// flow in `chat_input.dart` and unit tests exercise identical logic.
+Future<CurrentProject> resolveSessionProject(
+  SdkApiClient client,
+  Session session,
+) async {
+  final projects = await client.listProjects();
+
+  Map<String, dynamic>? match;
+  final pid = session.projectId;
+  if (pid != null && pid.isNotEmpty) {
+    for (final p in projects) {
+      if (p['id'] == pid) {
+        match = p;
+        break;
+      }
+    }
+  }
+
+  // Fall back to the session's bound path when there is no id match.
+  if (match == null) {
+    final ppath = session.projectPath;
+    if (ppath != null && ppath.isNotEmpty) {
+      final normalized = ppath.endsWith('/')
+          ? ppath.substring(0, ppath.length - 1)
+          : ppath;
+      for (final p in projects) {
+        final localPath = p['local_path'] as String? ?? '';
+        final candidate = localPath.endsWith('/')
+            ? localPath.substring(0, localPath.length - 1)
+            : localPath;
+        if (candidate.isNotEmpty && candidate == normalized) {
+          match = p;
+          break;
+        }
+      }
+    }
+  }
+
+  if (match == null) return CurrentProject.empty;
+  return CurrentProject(
+    id: (match['id'] as String?) ?? '',
+    name: (match['name'] as String?) ?? (match['id'] as String?) ?? '',
+    mode: (match['mode'] as String?) ?? 'git',
+    branch: '',
+    dirty: false,
+    localPath: (match['local_path'] as String?) ?? '',
+  );
+}
 
 /// Session-scoped project status provider.
 ///

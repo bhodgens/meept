@@ -8,7 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/path_utils.dart' show expandTilde;
 import '../../core/router.dart' show router;
 import '../../core/slash_commands.dart';
-import '../../models/api_models.dart' show Attachment;
+import '../../models/api_models.dart' show Attachment, Session;
 import '../../services/sdk_client.dart' show SdkApiClient;
 import '../../services/session_history.dart';
 import '../../services/skills_service.dart' show SkillsService;
@@ -1788,7 +1788,30 @@ class _ChatInputState extends ConsumerState<ChatInput>
     if (sessionId.isEmpty || sessionId == 'default') return;
     try {
       final client = ref.read(sdkClientProvider);
-      final projectName = ref.read(currentProjectProvider).name;
+
+      // Name the session from ITS OWN bound project, never the globally
+      // active project. The old code used currentProjectProvider (the first
+      // status=="active" entry), which named every new session after
+      // whichever benchmark project sorted first (e.g. bob-work-1) even
+      // when the session was bound to a different working directory.
+      // Look the session up by id in the loaded list, falling back to the
+      // active session, and resolve its project id/path against the
+      // project list. If unbound/unresolvable, send no project context.
+      Session? boundSession;
+      String projectName = '';
+      final loadedState = ref.read(sessionProvider);
+      for (final s in loadedState.sessions) {
+        if (s.id == sessionId) {
+          boundSession = s;
+          break;
+        }
+      }
+      boundSession ??= ref.read(activeSessionProvider);
+      if (boundSession != null && boundSession.id == sessionId) {
+        final boundProject = await resolveSessionProject(client, boundSession);
+        projectName = boundProject.name;
+      }
+
       final result = await client.generateSessionDescription(
         sessionId: sessionId,
         firstMessage: firstMessage,
