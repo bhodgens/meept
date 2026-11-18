@@ -1567,6 +1567,12 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	// a daemon without [intake] answers the disabled envelope.
 	registerIntakeStatusRPC(components, rpcServer, logger)
 
+	// agents.roster RPC (tui-gui-consistency-fixes 01-backend/01+02):
+	// register the unified agent/bot/employee roster over live daemon
+	// sources. The closure-based seam keeps the domain types out of
+	// internal/rpc (no import cycle); nil handles degrade to empty rows.
+	registerRosterRPC(components, rpcServer, logger)
+
 	// Kanban live wiring (plans/kanban-board 07/01-daemon-wiring): the
 	// full stack — store, manager, human lane with the real C10
 	// LeaseAuthority, rule bootstrap, projector over the five
