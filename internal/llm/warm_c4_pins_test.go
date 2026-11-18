@@ -355,3 +355,20 @@ func TestPeekAliasForWarm_ReadOnly(t *testing.T) {
 		t.Error("nil resolver resolved")
 	}
 }
+
+// A peek on a cold alias (no health entry yet) must NOT create one: the
+// warm path is read-only by contract. The existing read-only pin pre-arms
+// the health row, so it cannot observe this cold-alias insertion.
+func TestPeekAliasForWarm_ColdAliasNoHealthWrite(t *testing.T) {
+	r := NewResolver(createTestConfig(), slog.New(slog.DiscardHandler))
+	// Confirm the alias is known but has no health entry yet.
+	if _, ok := r.health["coder"]; ok {
+		t.Fatal("test setup: coder already has a health entry")
+	}
+	if _, ok := r.PeekAliasForWarm("coder", "sess-cold"); !ok {
+		t.Fatal("PeekAliasForWarm must resolve a known cold alias")
+	}
+	if _, ok := r.health["coder"]; ok {
+		t.Fatal("PeekAliasForWarm inserted an AliasHealth row for a cold alias")
+	}
+}

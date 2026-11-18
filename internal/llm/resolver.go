@@ -1461,7 +1461,15 @@ func (r *Resolver) PeekAliasForWarm(aliasName, sessionID string) (*ModelConfig, 
 	if !ok || len(alias.Models) == 0 {
 		return nil, false
 	}
-	health := r.getOrCreateHealth(aliasName)
+	// Peek MUST be read-only: getOrCreateHealth inserts an AliasHealth row
+	// for a cold alias, which is a side effect the warm path is forbidden
+	// from making. A read miss uses a zero-value health (no blocks, no
+	// pins, no cooldown), matching a never-observed alias exactly.
+	var zeroHealth AliasHealth
+	health := &zeroHealth
+	if existing, ok := r.health[aliasName]; ok {
+		health = existing
+	}
 	now := time.Now()
 
 	// Balanced-sticky aliases pin the caller to one candidate for the
