@@ -1,18 +1,17 @@
 package providers
 
-// Gate tests T3 (feature F3, master.md C2 + leaf 04): the qwen3 vendor
-// speaks the OpenAI-compatible streaming speech contract - keyless
-// construction (D2), streaming request body, incremental first chunk,
-// 24 kHz -> negotiated-rate resample.
-//
-// RED style: this file COMPILES (existing symbols only) and fails on the
-// NEW behavior. Missing symbols named in failure messages (leaf 04):
-//   NewTTS vendor case "qwen3" (today: ErrUnknownVendor)
-//   ErrMissingTTSBaseURL sentinel (qwen3 with empty BaseURL)
-//   stream:true request field (openAICompatibleTTSRequest.Stream)
+// Gate tests T3 (feature F3, master.md C2 + leaf 04) plus the qwen3
+// token-level pcm-stream route change:
+//   - keyless construction (D2)
+//   - request goes to /v1/audio/speech/pcm-stream with the route's own
+//     body shape (text, voice, chunk_size — NO stream/response_format)
+//   - length-prefixed response frames are deframed, then resampled
+//     24 kHz -> negotiated-rate s16le mono
+//   - incremental first chunk arrives before the body ends
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"io"
@@ -38,10 +37,26 @@ func (s *qwen3Seen) snapshot() (string, string, string) {
 	return s.auth, s.path, s.body
 }
 
-// qwen3Fake serves an OpenAI-compatible /v1/audio/speech that streams
-// s16le 24 kHz PCM slowly (many small flushes) so the first-chunk
-// contract is observable before the body ends.
-func qwen3Fake(t *testing.T, pcm []byte, seen *qwen3Seen) *httptest.Server {
+// framePCM wraps raw 24 kHz PCM in the pcm-stream route's envelope:
+// [4-byte BE uint32 length][length bytes PCM] ... [0-length frame].
+func framePCM(pcm []byte, frameBytes int) []byte {
+	var out []byte
+	for len(pcm) > 0 {
+		n := min(frameBytes, len(pcm))
+		var hdr [4]byte
+		binary.BigEndian.PutUint32(hdr[:], uint32(n))
+		out = append(out, hdr[:]...)
+		out = append(out, pcm[:n]...)
+		pcm = pcm[n:]
+	}
+	var zero [4]byte
+	return append(out, zero[:]...)
+}
+
+// qwen3Fake serves the pcm-stream route: length-prefixed PCM frames
+// flushed one at a time so the first-chunk contract is observable before
+// the body ends.
+func qwen3Fake(t *testing.T, framed []byte, seen *qwen3Seen) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -56,41 +71,30 @@ func qwen3Fake(t *testing.T, pcm []byte, seen *qwen3Seen) *httptest.Server {
 		seen.mu.Unlock()
 		w.Header().Set("Content-Type", "application/octet-stream")
 		flusher := w.(http.Flusher)
-		const chunk = 480 // 240 samples per write: many writes for 24k samples
-		for len(pcm) > 0 {
-			n := min(chunk, len(pcm))
-			if _, err := w.Write(pcm[:n]); err != nil {
+		// Write in small pieces, flushing after each, so a whole-body
+		// buffering adapter cannot produce a first chunk early.
+		const chunk = 480
+		for len(framed) > 0 {
+			n := min(chunk, len(framed))
+			if _, err := w.Write(framed[:n]); err != nil {
 				return
 			}
 			flusher.Flush()
-			// Slow stream: a full-body-buffer adapter cannot produce a
-			// first chunk before the handler returns.
 			time.Sleep(2 * time.Millisecond)
-			pcm = pcm[n:]
+			framed = framed[n:]
 		}
 	}))
 	t.Cleanup(srv.Close)
 	return srv
 }
 
-// newQwen3TTS (leaf 02 + leaf 04) builds the adapter the way leaf 04's
-// contract shape requires: ProviderConfig carries
-// Vendor/BaseURL/Model/Voice/SampleRate. The fields exist since leaf 02,
-// so the helper assigns them directly (the pre-leaf-02 reflection
-// indirection wrote to a throwaway copy and stopped landing values once
-// the fields existed).
-func setQwen3Fields(t *testing.T, cfg *ProviderConfig, baseURL, model, voice string) {
-	t.Helper()
-	cfg.BaseURL = baseURL
-	cfg.Model = model
-	cfg.Voice = voice
-}
-
 // TestQwen3TTSConstruction pins the constructor matrix (D2 keyless rule).
 func TestQwen3TTSConstruction(t *testing.T) {
 	var cfg ProviderConfig
 	cfg.Vendor = "qwen3"
-	setQwen3Fields(t, &cfg, "http://127.0.0.1:8880", "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice", "vivian")
+	cfg.BaseURL = "http://127.0.0.1:8880"
+	cfg.Model = "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
+	cfg.Voice = "vivian"
 
 	// Keyless construction MUST succeed (contract C2: qwen3 speaks with
 	// key ""; ErrMissingTTSKey only for cloud vendors).
@@ -112,7 +116,8 @@ func TestQwen3TTSConstruction(t *testing.T) {
 	// (ErrMissingTTSBaseURL; a local server has no meaningful default).
 	var noURL ProviderConfig
 	noURL.Vendor = "qwen3"
-	setQwen3Fields(t, &noURL, "", "m", "v")
+	noURL.Model = "m"
+	noURL.Voice = "v"
 	_, err = NewTTS(noURL, "")
 	if err == nil {
 		t.Fatal("missing behavior: NewTTS(qwen3, BaseURL=\"\") must error (leaf 04 ErrMissingTTSBaseURL)")
@@ -122,31 +127,30 @@ func TestQwen3TTSConstruction(t *testing.T) {
 	}
 }
 
-// TestQwen3TTSSpeakStreaming pins the wire shape and the streaming
-// first-chunk + resample contract end to end.
+// TestQwen3TTSSpeakStreaming pins the token-level route, wire body shape,
+// deframe + resample behavior, and the streaming first-chunk contract.
 func TestQwen3TTSSpeakStreaming(t *testing.T) {
 	seen := &qwen3Seen{}
-	// 24000 samples = 1 s of audio at 24 kHz => ~16000 samples (32 KB)
-	// after the 24000->16000 resample (ratio ~1.5 on byte count).
+	// 24000 samples = 1 s at 24 kHz => ~16000 samples after the 24k->16k
+	// resample. Frame it at 4800 B (100 ms/frame) like the real route.
 	src := pcm24k(24000)
-	srv := qwen3Fake(t, src, seen)
+	framed := framePCM(src, 4800)
+	srv := qwen3Fake(t, framed, seen)
 
 	var cfg ProviderConfig
 	cfg.Vendor = "qwen3"
 	cfg.SampleRate = 16000
-	setQwen3Fields(t, &cfg, srv.URL, "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice", "vivian")
+	cfg.BaseURL = srv.URL
+	cfg.Model = "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
+	cfg.Voice = "vivian"
 	tts, err := NewTTS(cfg, "")
 	if err != nil {
-		t.Fatalf("NewTTS(qwen3): %v (leaf 04: vendor case missing)", err)
+		t.Fatalf("NewTTS(qwen3): %v", err)
 	}
 
-	// The adapter's base URL comes from cfg.BaseURL; the constructor
-	// stores it per-instance. Rewrite the transport only if the adapter
-	// still targets the compile-time const (leaf 02/04 make it a field);
-	// if BaseURL is honored, the fake sees the request directly.
 	rc, err := tts.Speak(context.Background(), "hi")
 	if err != nil {
-		t.Fatalf("Speak: %v (leaf 04: qwen3 dispatch missing)", err)
+		t.Fatalf("Speak: %v", err)
 	}
 	defer func() { _ = rc.Close() }() //nolint:mutexio // deferred close, no lock held
 
@@ -161,33 +165,57 @@ func TestQwen3TTSSpeakStreaming(t *testing.T) {
 		t.Fatalf("drain: %v", derr)
 	}
 	total := len(buf) + len(rest)
-	want := 24000 * 2 * 16000 / 24000 // resampled output: source bytes scaled by 16000/24000
+	want := 24000 * 2 * 16000 / 24000 // source bytes scaled by 16000/24000
 	if total < want*9/10 || total > want*11/10 {
-		t.Fatalf("resampled output %d bytes, want ~%d (24k -> 16k, ratio ~1.5)", total, want)
+		t.Fatalf("deframed+resampled output %d bytes, want ~%d (24k -> 16k, ratio ~1.5)", total, want)
 	}
 
-	// Request shape: keyless vendor sends no Authorization header.
+	// Request shape: keyless vendor, token-level route, pcm-stream body.
 	auth, path, body := seen.snapshot()
 	if auth != "" {
-		t.Errorf("qwen3 sent Authorization header %q; keyless vendors send none (leaf 04)", auth)
+		t.Errorf("qwen3 sent Authorization header %q; keyless vendors send none", auth)
 	}
-	if !strings.HasSuffix(path, "/v1/audio/speech") {
-		t.Errorf("request path %q, want /v1/audio/speech suffix", path)
+	if !strings.HasSuffix(path, "/v1/audio/speech/pcm-stream") {
+		t.Errorf("request path %q, want /v1/audio/speech/pcm-stream suffix", path)
 	}
 	var req map[string]any
 	if err := json.Unmarshal([]byte(body), &req); err != nil {
 		t.Fatalf("request body not JSON: %v: %s", err, body)
 	}
-	if req["response_format"] != "pcm" {
-		t.Errorf("response_format = %v, want pcm (contract D3)", req["response_format"])
+	if req["text"] != "hi" {
+		t.Errorf("text = %v, want \"hi\" (pcm-stream field name): %s", req["text"], body)
 	}
-	if stream, ok := req["stream"].(bool); !ok || !stream {
-		t.Errorf("missing behavior: request body lacks \"stream\":true (leaf 04 T1): %s", body)
+	if req["voice"] != "vivian" {
+		t.Errorf("voice = %v, want \"vivian\": %s", req["voice"], body)
 	}
-	if m, _ := req["model"].(string); m != "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice" {
-		t.Errorf("model passthrough = %v, want cfg.Model", req["model"])
+	if cs, ok := req["chunk_size"].(float64); !ok || cs != 4 {
+		t.Errorf("chunk_size = %v, want 4: %s", req["chunk_size"], body)
 	}
-	if v, _ := req["voice"].(string); v != "vivian" {
-		t.Errorf("voice passthrough = %v, want cfg.Voice", req["voice"])
+	// The pcm-stream route must NOT carry the OpenAI speech fields.
+	for _, forbidden := range []string{"stream", "response_format", "input", "model"} {
+		if _, present := req[forbidden]; present {
+			t.Errorf("pcm-stream body must not carry %q: %s", forbidden, body)
+		}
+	}
+}
+
+// TestQwen3SpeechURLSeparatesVendors pins that only qwen3 is routed to
+// pcm-stream; cloud openai stays byte-identical on /v1/audio/speech.
+func TestQwen3SpeechURLSeparatesVendors(t *testing.T) {
+	q := &OpenAITTS{cfg: ProviderConfig{Vendor: TTSVendorQwen3, BaseURL: "http://h:8001/"}}
+	if got := q.speechURL(); got != "http://h:8001/v1/audio/speech/pcm-stream" {
+		t.Errorf("qwen3 speechURL = %q", got)
+	}
+	if !q.usesPCMStream() {
+		t.Error("qwen3 must use the pcm-stream route")
+	}
+	for _, v := range []string{"", TTSVendorOpenAI} {
+		o := &OpenAITTS{cfg: ProviderConfig{Vendor: v, BaseURL: "http://h:8001/"}}
+		if got := o.speechURL(); got != "http://h:8001/v1/audio/speech" {
+			t.Errorf("vendor %q speechURL = %q, want cloud route", v, got)
+		}
+		if o.usesPCMStream() {
+			t.Errorf("vendor %q must not use pcm-stream", v)
+		}
 	}
 }
