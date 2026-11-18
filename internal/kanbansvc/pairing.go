@@ -46,6 +46,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -125,10 +126,25 @@ type TokenStore struct {
 	mu    sync.Mutex
 	codes map[string]pairCodeRecord
 
-	// grantsMu guards tokens. Grants() takes only a read lock and touches
-	// no I/O, so the hot auth path never blocks on disk.
+	// grantsMu guards tokens. Grants() takes only a read lock on the hot
+	// path; when the backing file's signature changes it upgrades to the
+	// write lock and reloads (disk I/O still happens OUTSIDE the lock).
 	grantsMu sync.RWMutex
 	tokens   map[string][]string
+	// tokenSig is the (mtime, size) of the last loaded/persisted file. It
+	// lets a long-running sidecar pick up tokens minted by the daemon's
+	// /kanban/pair/exchange without a restart. Guarded by grantsMu.
+	tokenSig fileSignature
+}
+
+// fileSignature is the cheap change detector for the shared token file.
+type fileSignature struct {
+	modTime int64
+	size    int64
+}
+
+func statSignature(info fs.FileInfo) fileSignature {
+	return fileSignature{modTime: info.ModTime().UnixNano(), size: info.Size()}
 }
 
 // NewTokenStore loads (or lazily creates) the token store at path. An empty
@@ -167,11 +183,15 @@ func (s *TokenStore) Path() string {
 }
 
 // Grants implements GrantChecker: the grant set for a token and whether the
-// token is known at all. Purely in-memory; the disk is read only at load.
+// token is known at all. If the shared token file changed since the last
+// load (the daemon mints new tokens via /kanban/pair/exchange at runtime),
+// reload it first so a freshly paired browser works without a sidecar
+// restart. Disk I/O never happens under grantsMu.
 func (s *TokenStore) Grants(token string) ([]string, bool) {
 	if s == nil || token == "" {
 		return nil, false
 	}
+	s.maybeReload()
 	s.grantsMu.RLock()
 	defer s.grantsMu.RUnlock()
 	grants, ok := s.tokens[token]
@@ -179,6 +199,60 @@ func (s *TokenStore) Grants(token string) ([]string, bool) {
 		return nil, false
 	}
 	return append([]string(nil), grants...), true
+}
+
+// maybeReload refreshes the in-memory token map when the backing file's
+// (mtime, size) signature changes. A corrupt or unsafe file is ignored — the
+// last known-good grants stay authoritative (fail closed on new tokens,
+// never drop existing authorization on a bad write).
+func (s *TokenStore) maybeReload() {
+	if s == nil || s.path == "" {
+		return
+	}
+	info, err := os.Stat(s.path)
+	if err != nil {
+		return // missing/unstatable file: keep last known-good grants
+	}
+	sig := statSignature(info)
+
+	s.grantsMu.RLock()
+	unchanged := sig == s.tokenSig
+	s.grantsMu.RUnlock()
+	if unchanged {
+		return
+	}
+
+	// Read and parse OUTSIDE the lock. loadLocked-style parsing is done via
+	// a fresh map so a bad file cannot partially clobber the live grants.
+	data, err := os.ReadFile(s.path)
+	if err != nil {
+		return
+	}
+	var rec tokenFileRecord
+	if err := json.Unmarshal(data, &rec); err != nil || rec.Version != tokenFileSchemaVersion {
+		return
+	}
+	fresh := make(map[string][]string, len(rec.Tokens))
+	bad := false
+	for tok, grants := range rec.Tokens {
+		if tok == "" || len(grants) == 0 {
+			bad = true
+			break
+		}
+		clean, err := normalizeGrants(grants)
+		if err != nil {
+			bad = true
+			break
+		}
+		fresh[tok] = clean
+	}
+	if bad {
+		return
+	}
+	s.grantsMu.Lock()
+	s.tokens = fresh
+	s.tokenSig = sig
+	s.grantsMu.Unlock()
 }
 
 // Grant associates a token with a grant set and persists the store. It
@@ -308,6 +382,7 @@ func (s *TokenStore) load() error {
 	if err != nil {
 		return fmt.Errorf("kanbansvc: stat token store: %w", err)
 	}
+	s.tokenSig = statSignature(info)
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("kanbansvc: token store %s is not a regular file", s.path)
 	}
@@ -377,6 +452,11 @@ func (s *TokenStore) persist() error {
 	if err := os.Rename(tmpName, s.path); err != nil {
 		os.Remove(tmpName)
 		return fmt.Errorf("kanbansvc: rename token store into place: %w", err)
+	}
+	if info, err := os.Stat(s.path); err == nil {
+		s.grantsMu.Lock()
+		s.tokenSig = statSignature(info)
+		s.grantsMu.Unlock()
 	}
 	return nil
 }
