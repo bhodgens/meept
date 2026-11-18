@@ -168,8 +168,8 @@ func TestWindowResolutionDiscoveredLimit(t *testing.T) {
 }
 
 // TestWindowResolutionNoModelFallsBack pins T4's fallback: no discovered
-// window anywhere = 0 = statics (IterationTokenBudget /
-// DefaultConversationTokenBudget) unchanged.
+// window anywhere = 0 = statics (IterationTokenBudget; conversation budget
+// falls back to unlimited).
 func TestWindowResolutionNoModelFallsBack(t *testing.T) {
 	loop := newSeamTestLoop(t, true, &seamLoopProvider{})
 
@@ -188,8 +188,10 @@ func TestWindowResolutionNoModelFallsBack(t *testing.T) {
 	assert.Equal(t, allocIter, loop.iterationBudgetViaSeam(context.Background()))
 	assert.Equal(t, allocConv, loop.conversationBudgetViaSeam(context.Background()))
 	// The disabled fallback contract: reasoningCycle's floor is the
-	// static conversationTokenBudget path, unchanged.
-	assert.Equal(t, DefaultConversationTokenBudget, loop.conversationTokenBudget())
+	// static conversationTokenBudget path. With no explicit cap configured,
+	// that path is now UNLIMITED (0) — budgets are opt-in and an unconfigured
+	// turn must never be aborted at an invented 50k ceiling.
+	assert.Equal(t, 0, loop.conversationTokenBudget())
 }
 
 // seamWindowBudgets computes the expected iteration/conversation budgets

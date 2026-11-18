@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -232,5 +233,96 @@ func TestEffectiveResultBudget(t *testing.T) {
 				t.Errorf("effectiveResultBudget(%d, %v) = %d, want %d", tc.dynamic, tc.tool, got, tc.want)
 			}
 		})
+	}
+}
+
+// bigTokenChatter emits one tool call on its first invocation with a large
+// token usage (above the legacy 50k ceiling), then a normal final response.
+// The tool call forces a second iteration, where the budget check at the top
+// of the loop sees the accumulated total.
+type bigTokenChatter struct {
+	calls int
+	usage int
+}
+
+func (c *bigTokenChatter) Chat(ctx context.Context, messages []llm.ChatMessage, opts ...llm.ChatOption) (*llm.Response, error) {
+	c.calls++
+	if c.calls == 1 {
+		return &llm.Response{
+			Content:      "working",
+			FinishReason: "tool_calls",
+			Usage:        llm.TokenUsage{TotalTokens: c.usage},
+			ToolCalls: []llm.ToolCall{{
+				ID:   "call-big-1",
+				Type: "function",
+				Function: llm.ToolCallFunction{
+					Name:      "file_read",
+					Arguments: `{"path":"/tmp/x.txt"}`,
+				},
+			}},
+		}, nil
+	}
+	return &llm.Response{Content: "done", FinishReason: "stop",
+		Usage: llm.TokenUsage{TotalTokens: 1}}, nil
+}
+
+func (c *bigTokenChatter) ChatWithProgress(ctx context.Context, messages []llm.ChatMessage, progress llm.ProgressCallback, opts ...llm.ChatOption) (*llm.Response, error) {
+	return c.Chat(ctx, messages, opts...)
+}
+
+func (c *bigTokenChatter) Config() *llm.ModelConfig {
+	return &llm.ModelConfig{ModelID: "big-token-chatter"}
+}
+
+// newNoBudgetLoop builds a loop wired like newBudgetFloorLoop with a working
+// file_read tool so the first response's tool call executes and the loop
+// continues to a second iteration where the token total exceeds 50k. No
+// MaxConversationTokens is configured.
+func newNoBudgetLoop(t *testing.T, chatter llm.Chatter) (*AgentLoop, *Conversation) {
+	t.Helper()
+	registry := NewPlaceholderToolRegistry()
+	registry.Register(NewMockTool("file_read", "fetch", func(ctx context.Context, args map[string]any) (any, error) {
+		return "ok", nil
+	}))
+	secChecker := security.NewPermissionChecker(security.Config{})
+	loop := NewAgentLoop("sess-no-budget", "/tmp",
+		WithLLMChatter(chatter),
+		WithToolRegistry(registry),
+		WithSecurityChecker(secChecker),
+		WithMessageBus(bus.New(nil, slog.New(slog.DiscardHandler))),
+		WithAgentConfig(AgentConfig{MaxIterations: 5}),
+	)
+	loop.executor = NewExecutor(registry, secChecker)
+	conv := loop.conversations.Get("conv-no-budget")
+	conv.AddUserMessage("go")
+	return loop, conv
+}
+
+// TestConversationBudgetUnlimitedWhenUnconfigured pins the fix: with no
+// explicit MaxConversationTokens and the llm.budget global switch off (the
+// default), a turn whose accumulated tokens exceed the legacy 50k ceiling must
+// CONTINUE — the invented 50k hard stop may never abort an unconfigured turn.
+func TestConversationBudgetUnlimitedWhenUnconfigured(t *testing.T) {
+	loop, conv := newNoBudgetLoop(t, &bigTokenChatter{usage: 60000})
+	if got := loop.conversationTokenBudget(); got != 0 {
+		t.Fatalf("conversationTokenBudget() = %d, want 0 (unlimited) when unconfigured", got)
+	}
+	_, err := loop.reasoningCycle(context.Background(), conv, "conv-no-budget")
+	if errors.Is(err, ErrConversationBudgetExhausted) {
+		t.Fatalf("unconfigured turn aborted by the implicit 50k hard stop: %v", err)
+	}
+}
+
+// TestConversationBudgetEnforcedWhenConfigured pins the preserved behavior:
+// a POSITIVE explicit budget is still enforced as a hard stop.
+func TestConversationBudgetEnforcedWhenConfigured(t *testing.T) {
+	loop, conv := newNoBudgetLoop(t, &bigTokenChatter{usage: 60000})
+	loop.config.MaxConversationTokens = 1000 // explicit, positive cap
+	if got := loop.conversationTokenBudget(); got != 1000 {
+		t.Fatalf("conversationTokenBudget() = %d, want 1000", got)
+	}
+	_, err := loop.reasoningCycle(context.Background(), conv, "conv-no-budget")
+	if !errors.Is(err, ErrConversationBudgetExhausted) {
+		t.Fatalf("configured 1000-token budget not enforced, got err=%v", err)
 	}
 }

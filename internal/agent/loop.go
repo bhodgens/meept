@@ -497,7 +497,7 @@ type AgentConfig struct {
 	Personality             string
 	SystemPromptOveride     string
 	GlobalRules             string  // Global rules injected into all agent prompts
-	MaxConversationTokens   int     // 0 means use DefaultConversationTokenBudget
+	MaxConversationTokens   int     // >0 = enforced cap; 0 = unlimited (no implicit default)
 	SkillDiscoveryThreshold float64 // Minimum confidence for skill discovery (default 0.5)
 	Memory                  AgentMemoryConfig
 	// ProactiveCompression enables multi-stage context compression inside the
@@ -4867,9 +4867,11 @@ const (
 	// Large tool outputs are compressed to fit this limit
 	ToolResultMaxTokens = 3000
 
-	// DefaultConversationTokenBudget is the total token budget for a single
-	// conversation turn across all iterations. When exceeded, the agent
-	// stops gracefully and returns what it has so far.
+	// DefaultConversationTokenBudget is a legacy reference constant retained
+	// for the context-allocator documentation that names it. It is NOT used
+	// as an implicit default: conversationTokenBudget() returns 0 (unlimited)
+	// when no explicit cap is configured, so an unconfigured turn is never
+	// aborted at an invented ceiling. Kept exported for compatibility only.
 	DefaultConversationTokenBudget = 50000
 
 	// ConversationBudgetWarningRatio is the fraction of the conversation
@@ -4877,12 +4879,18 @@ const (
 	ConversationBudgetWarningRatio = 0.80
 )
 
-// conversationTokenBudget returns the effective conversation token budget.
+// conversationTokenBudget returns the effective conversation token budget, or
+// 0 when no cap is configured (unlimited). Budgets are opt-in: a zero/absent
+// limit means "unlimited", never an implicit default cap. Callers MUST treat a
+// non-positive return as "enforcement disabled" and skip the hard stop and
+// warning zone — otherwise an unconfigured turn would be aborted at an
+// invented ceiling. A positive MaxConversationTokens (set explicitly by an
+// agent/employee constraint) is the only source of an enforced cap.
 func (l *AgentLoop) conversationTokenBudget() int {
 	if l.config.MaxConversationTokens > 0 {
 		return l.config.MaxConversationTokens
 	}
-	return DefaultConversationTokenBudget
+	return 0
 }
 
 // maxDuplicateSearchRollbacks caps duplicate-search rollbacks per turn
@@ -5130,8 +5138,10 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			}
 		}
 
-		// Check conversation token budget
-		if totalTokens >= convBudget {
+		// Check conversation token budget. A non-positive budget means no cap
+		// is configured (budgets are opt-in) — never abort an unconfigured
+		// turn at an invented ceiling. Only an explicit positive budget stops.
+		if convBudget > 0 && totalTokens >= convBudget {
 			l.logger.Warn("Conversation token budget exhausted",
 				"total_tokens", totalTokens,
 				"budget", convBudget,
@@ -5165,8 +5175,9 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				"Here's a summary of what was accomplished -- please start a new session if you need further assistance.", nil
 		}
 
-		// Warning zone: at 80% of budget, prepare to wrap up
-		if !inWarningZone && float64(totalTokens) >= float64(convBudget)*ConversationBudgetWarningRatio {
+		// Warning zone: at 80% of budget, prepare to wrap up. Only meaningful
+		// when a positive budget is configured; a zero budget is unlimited.
+		if convBudget > 0 && !inWarningZone && float64(totalTokens) >= float64(convBudget)*ConversationBudgetWarningRatio {
 			inWarningZone = true
 			l.logger.Info("Approaching conversation token budget",
 				"total_tokens", totalTokens,
