@@ -32,6 +32,28 @@ product decision. Not flipped (still opt-in, deliberate):
 SKIP-Warn (one Warn per distill-worker cycle, jobs stay queued, L0 lines
 preserved) — documented in docs/workflows/memory.md.
 
+## Kanban board and sidecar are default-on (opt-out knobs)
+
+`[kanban].enabled` and `[kanban].sidecar_enabled` both default TRUE per the
+tui-gui-consistency-fixes option-B decision (plan
+`plans/tui-gui-consistency-fixes/master.md`, Q2 resolved). A default daemon
+boots the board projection (store `$MEEPT_HOME/kanban/board.db`), the `kanban.*`
+RPC, the `kanban_*` tools, and a loopback `meept-kanban` sidecar on
+`127.0.0.1:8790` with no opt-in: the GUI reaches the board through that sidecar,
+so flipping only `enabled` would leave the GUI board unreachable. Before spawn
+the daemon seeds the existing per-installation `$MEEPT_HOME/dev_key` into the
+sidecar token store at `$MEEPT_HOME/kanban/tokens.json` with all three grants
+(`board.read`, `board.mutate`, `board.takeover`), so a default GUI install needs
+no pairing code. No anonymous/default token is introduced and the key is never
+logged.
+
+These are OPT-OUT knobs: an explicit `enabled=false` (no store, projector, RPC,
+or publishers) and/or `sidecar_enabled=false` (no child process) restores the
+byte-identical pre-kanban boot. `sidecar_bind` is the ONLY way to name a
+non-loopback bind (loud boot warning; TLS terminates at an operator proxy).
+Flipping either default back OFF is again a product decision. Full operator
+contract: docs/workflows/kanban.md.
+
 ## State mode is per-skill opt-in
 
 `SKILL.state` execution (`internal/agent/skill_state.go`) activates only when
