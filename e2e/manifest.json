@@ -740,6 +740,15 @@
     ],
     "internal/daemon/voice_employee.go": [
       "execution-observability"
+    ],
+    "internal/daemon/kanban_wiring.go": [
+      "kanban"
+    ],
+    "internal/rpc/kanban.go": [
+      "kanban"
+    ],
+    "e2e/suites/kanban": [
+      "kanban"
     ]
   },
   "exempt": {},
@@ -1485,6 +1494,22 @@
         "execution-observability-04 bot inbox round-trip: send_agent_message accepts a bot id and the queued message is drained/injected at that bot's next round turn start (T4, F5/F6, C4)"
       ],
       "note": "ROOT cross-branch e2e RED gate of the issue-#140 execution-observability tree (leaf 00T): hermetic scratch-MEEPT_HOME daemons, live WS collector, real bus.publish RPC / agents.create / agents.trigger - never mocks. Compile-RED until branch 01 lands agent.ExecutionResultEvent + TopicBotResult/TopicEmployeeResult; runtime-RED until the result subscriptions/decoders, emitter bus seams + daemon wiring, bot trigger handler, and roster/drainer land. Status flips to implemented when the suite goes GREEN."
+    },
+    {
+      "name": "kanban",
+      "dir": "e2e/suites/kanban",
+      "status": "implemented",
+      "scenarios": [
+        "kanban-01",
+        "kanban-02",
+        "kanban-03",
+        "kanban-04",
+        "kanban-05",
+        "kanban-06",
+        "kanban-07",
+        "kanban-08"
+      ],
+      "note": "Live-daemon wiring suite (plan leaf 06/02, master.md Integration Test Plan (a)-(g)): rebuild equality + fail-safe, real queue-claim lease refusal + takeover audit ordering, wip_mode block/warn, pairing lane through the real sidecar binary, wiring pins. Boots the harness daemon with [kanban].enabled."
     }
   ],
   "scenarios": [
@@ -5300,6 +5325,297 @@
         "internal/daemon/employee_message_tools.go",
         "internal/agent/loop_messages.go",
         "internal/daemon/voice_employee.go"
+      ]
+    },
+    {
+      "id": "kanban-01",
+      "suite": "kanban",
+      "diff": "M",
+      "title": "(a) rebuild equality + fail-safe: real claimed-job event projects; ghost task event via bus.publish projects with the kind:id fallback title; reconcile deletes ONLY the ghost orphan (manual NULL-ref card immune, live job card stays), second pass changes zero rows",
+      "paths": [
+        "internal/kanban/",
+        "internal/rpc/kanban.go",
+        "internal/daemon/kanban_wiring.go",
+        "e2e/suites/kanban/"
+      ]
+    },
+    {
+      "id": "kanban-02",
+      "suite": "kanban",
+      "diff": "M",
+      "title": "(b) lease refusal: human kanban.card.move of a card whose job holds a LIVE queue claim refuses with the frozen C1 'lease held by <holder> since <RFC3339>' text over the error path; card unmoved, zero timeline rows",
+      "paths": [
+        "internal/kanban/",
+        "internal/rpc/kanban.go",
+        "internal/daemon/kanban_wiring.go",
+        "e2e/suites/kanban/"
+      ]
+    },
+    {
+      "id": "kanban-03",
+      "suite": "kanban",
+      "diff": "M",
+      "title": "(c) takeover audit sequence: kanban.card.takeover appends the kind=takeover row first and releases the lease (queue.db job back to pending); the previously refused human move then lands and the timeline orders takeover strictly before move",
+      "paths": [
+        "internal/kanban/",
+        "internal/rpc/kanban.go",
+        "internal/daemon/kanban_wiring.go",
+        "e2e/suites/kanban/"
+      ]
+    },
+    {
+      "id": "kanban-04",
+      "suite": "kanban",
+      "diff": "S",
+      "title": "(d) wip_mode=block: move onto a column at its WIP limit refuses with the exact 'WIP limit reached for column <id>: 1' C1 text; card stays, no timeline rows",
+      "paths": [
+        "internal/kanban/",
+        "internal/rpc/kanban.go",
+        "internal/daemon/kanban_wiring.go",
+        "e2e/suites/kanban/"
+      ]
+    },
+    {
+      "id": "kanban-05",
+      "suite": "kanban",
+      "diff": "S",
+      "title": "(d) wip_mode=warn (default): the over-WIP human move LANDS and the timeline carries the move row plus a wip_warning note row",
+      "paths": [
+        "internal/kanban/",
+        "internal/rpc/kanban.go",
+        "internal/daemon/kanban_wiring.go",
+        "e2e/suites/kanban/"
+      ]
+    },
+    {
+      "id": "kanban-06",
+      "suite": "kanban",
+      "diff": "M",
+      "title": "(e) pairing lane end-to-end: kanban.pair.mint/exchange over the daemon socket persist $MEEPT_HOME/kanban/tokens.json; the REAL meept-kanban binary loads the same file \u2014 paired token 200 (seeded board forwarded live), no token 401, read-only token on a mutate route 403, code single-use",
+      "paths": [
+        "internal/kanbansvc/",
+        "cmd/meept-kanban/main.go",
+        "internal/daemon/kanban_wiring.go",
+        "e2e/suites/kanban/",
+        "internal/rpc/kanban.go"
+      ]
+    },
+    {
+      "id": "kanban-08",
+      "suite": "kanban",
+      "diff": "S",
+      "title": "(g) live wiring pins: enabled boot answers kanban.board.list with the seeded 'meept board' over the Unix socket; disabled boot answers -32601 method-not-found for kanban.board.list and kanban.pair.mint while queue.stats still serves (byte-identical posture)",
+      "paths": [
+        "internal/daemon/kanban_wiring.go",
+        "internal/rpc/kanban.go",
+        "e2e/suites/kanban/"
+      ]
+    },
+    {
+      "id": "quality-order-01",
+      "suite": "sovereign-parity",
+      "diff": "L",
+      "title": "quality-order-01 R1: cheap model with low quality.code loses to a pricier high-quality model on a code turn; quality-absent models keep legacy cost order",
+      "paths": [
+        "internal/llm/"
+      ]
+    },
+    {
+      "id": "quality-floor-02",
+      "suite": "sovereign-parity",
+      "diff": "L",
+      "title": "quality-floor-02 R1: quality floor - difficulty 5 with only score-2 candidates surfaces ErrQualityFloor, not a completed turn",
+      "paths": [
+        "internal/llm/"
+      ]
+    },
+    {
+      "id": "admission-context-03",
+      "suite": "sovereign-parity",
+      "diff": "L",
+      "title": "admission-context-03 R2: request whose estimated input exceeds the model context is rejected pre-dispatch with ErrContextTooSmall; no upstream request is made",
+      "paths": [
+        "internal/llm/"
+      ]
+    },
+    {
+      "id": "admission-unknown-04",
+      "suite": "sovereign-parity",
+      "diff": "L",
+      "title": "admission-unknown-04 R2: ContextLimit == 0 (unknown) allows the request through",
+      "paths": [
+        "internal/llm/"
+      ]
+    },
+    {
+      "id": "posture-sensitive-05",
+      "suite": "sovereign-parity",
+      "diff": "L",
+      "title": "posture-sensitive-05 R3: a prompt containing an AWS-shaped key never routes to a public_only or non_sensitive model",
+      "paths": [
+        "internal/llm/"
+      ]
+    },
+    {
+      "id": "posture-absent-06",
+      "suite": "sovereign-parity",
+      "diff": "L",
+      "title": "posture-absent-06 R3: posture absent = private; sensitive routing is byte-identical to pre-change",
+      "paths": [
+        "internal/llm/"
+      ]
+    },
+    {
+      "id": "posture-log-hygiene-07",
+      "suite": "sovereign-parity",
+      "diff": "L",
+      "title": "posture-log-hygiene-07 R3: no secret leakage - the scanner's matched string never appears in any log line or routing_decisions row",
+      "paths": [
+        "internal/llm/"
+      ]
+    },
+    {
+      "id": "shadow-parity-08",
+      "suite": "sovereign-parity",
+      "diff": "L",
+      "title": "shadow-parity-08 R4: shadow decision returns the same model the live path would pick, with populated Candidates, and writes no llm_calls row",
+      "paths": [
+        "internal/llm/"
+      ]
+    },
+    {
+      "id": "shadow-no-side-effects-09",
+      "suite": "sovereign-parity",
+      "diff": "L",
+      "title": "shadow-no-side-effects-09 R4: shadow does not consume budget, does not mutate alias health or rotation, does not create a sticky pin",
+      "paths": [
+        "internal/llm/"
+      ]
+    },
+    {
+      "id": "pool-account-10",
+      "suite": "sovereign-parity",
+      "diff": "L",
+      "title": "pool-account-10 R5: a 401 on one model blocks the ACCOUNT (sibling model on the same provider is skipped)",
+      "paths": [
+        "internal/llm/"
+      ]
+    },
+    {
+      "id": "pool-request-fault-11",
+      "suite": "sovereign-parity",
+      "diff": "L",
+      "title": "pool-request-fault-11 R5: a 400 (request fault) blocks nothing",
+      "paths": [
+        "internal/llm/"
+      ]
+    },
+    {
+      "id": "pool-classify-table-12",
+      "suite": "sovereign-parity",
+      "diff": "L",
+      "title": "pool-classify-table-12 R5: the frozen pools.py:176-206 (status, body) -> (class, scope, target) table verbatim, incl. 402, 404, 429-with-pool-phrase, 5xx",
+      "paths": [
+        "internal/llm/"
+      ]
+    },
+    {
+      "id": "budget-steer-13",
+      "suite": "sovereign-parity",
+      "diff": "L",
+      "title": "budget-steer-13 R6: mode steer with the daily cost cap exceeded completes the turn and emits budget_advisory on the existing agent.quota_wait topic",
+      "paths": [
+        "internal/llm/"
+      ]
+    },
+    {
+      "id": "budget-enforce-14",
+      "suite": "sovereign-parity",
+      "diff": "L",
+      "title": "budget-enforce-14 R6: mode enforce (default, no mode key) is byte-identical to today: BudgetExceededError, turn refused, no advisory",
+      "paths": [
+        "internal/llm/"
+      ]
+    },
+    {
+      "id": "sticky-difficulty-15",
+      "suite": "sovereign-parity",
+      "diff": "L",
+      "title": "sticky-difficulty-15 R7: a new user message classified above the pinned level releases the pin and re-pins at the rotation head, reason sticky_difficulty_increase",
+      "paths": [
+        "internal/llm/"
+      ]
+    },
+    {
+      "id": "sticky-same-level-16",
+      "suite": "sovereign-parity",
+      "diff": "L",
+      "title": "sticky-same-level-16 R7: a same-or-lower difficulty turn keeps the existing pin",
+      "paths": [
+        "internal/llm/"
+      ]
+    },
+    {
+      "id": "difficulty-source-17",
+      "suite": "sovereign-parity",
+      "diff": "L",
+      "title": "difficulty-source-17 R7: difficulty derives from existing Intent signals via the frozen DeriveDifficulty table (no second classifier call); difficulty 0 keeps R7 inert",
+      "paths": [
+        "internal/llm/"
+      ]
+    },
+    {
+      "id": "toolcheck-unknown-18",
+      "suite": "sovereign-parity",
+      "diff": "L",
+      "title": "toolcheck-unknown-18 R8: a tool call naming an unoffered function is rejected with the bare ErrToolCallInvalid and never reaches the executor",
+      "paths": [
+        "internal/llm/"
+      ]
+    },
+    {
+      "id": "toolcheck-bad-args-19",
+      "suite": "sovereign-parity",
+      "diff": "L",
+      "title": "toolcheck-bad-args-19 R8: tool-call arguments that are not a JSON object fail validation",
+      "paths": [
+        "internal/llm/"
+      ]
+    },
+    {
+      "id": "toolcheck-streamed-20",
+      "suite": "sovereign-parity",
+      "diff": "L",
+      "title": "toolcheck-streamed-20 R8: streamed tool-call arguments split across chunks are validated only after the stream completes; a mid-stream abort never produces a false pass",
+      "paths": [
+        "internal/llm/"
+      ]
+    },
+    {
+      "id": "pricegroup-spillway-21",
+      "suite": "sovereign-parity",
+      "diff": "L",
+      "title": "pricegroup-spillway-21 R9: a free-tagged and paid-tagged alias both eligible: the free one serves while healthy, the paid spillway serves only on free exhaustion/failure",
+      "paths": [
+        "internal/llm/"
+      ]
+    },
+    {
+      "id": "pricegroup-legacy-22",
+      "suite": "sovereign-parity",
+      "diff": "L",
+      "title": "pricegroup-legacy-22 R9: untagged aliases (no price_group) keep legacy resolution exactly; spillway is opt-in per-caller and never reorders rotation",
+      "paths": [
+        "internal/llm/"
+      ]
+    },
+    {
+      "id": "flagoff-control-23",
+      "suite": "sovereign-parity",
+      "diff": "L",
+      "title": "flagoff-control-23 ALL: with all nine features unconfigured, every routing_decisions row is byte-identical to the main-captured golden fixture",
+      "paths": [
+        "internal/llm/"
       ]
     }
   ]
