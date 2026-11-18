@@ -394,6 +394,94 @@ func TestBindingTurnRunnerStampsZeroCaller(t *testing.T) {
 	}
 }
 
+// TestBindingTurnRunnerLocalCallerApproved pins the local-caller-approved
+// rule: a local-leg call is trusted by construction, so its turn ctx must
+// carry Approved=true/Known=true (step-1c caller gate inert, full tool use).
+// Detection is by the explicit Instance.Leg field, never a target-prefix
+// heuristic. The zero Info case is covered too: even a completely empty
+// caller becomes approved when the leg is local.
+func TestBindingTurnRunnerLocalCallerApproved(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		caller     callerid.Info
+		wantNumber string
+	}{
+		{
+			name:       "zero-caller local leg",
+			caller:     callerid.Info{},
+			wantNumber: "",
+		},
+		{
+			name:       "resolved-but-unapproved local leg",
+			caller:     callerid.Info{Number: callerGateE164(42), Name: "ignored", Approved: false, Known: false},
+			wantNumber: callerGateE164(42),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			turns := &callerGateCaptureTurns{}
+			b := newCallerGateBinding(t, turns)
+			const ccid = "cc-local-caller-approved"
+			if _, err := b.OnCallStart(context.Background(), ccid, callerGateE164(99), "emp-voice-1", "incoming", voice.DayBrief{}); err != nil {
+				t.Fatalf("OnCallStart: %v", err)
+			}
+			inst := voice.Instance{
+				CallControlID: ccid,
+				EmployeeID:    "emp-voice-1",
+				Target:        "local:desk",
+				Leg:           voice.LegLocal,
+				Caller:        tc.caller,
+			}
+			if _, err := turnRunnerFor(b, readyGatesFor(ccid), inst).Run(context.Background(), voice.SessionHandle{}, "hi"); err != nil {
+				t.Fatalf("run: %v", err)
+			}
+			captured := turns.captured()
+			got, ok := callerid.From(captured[0])
+			if !ok {
+				t.Fatal("local-leg turn ctx carries no callerid stamp")
+			}
+			if !got.Approved || !got.Known {
+				t.Errorf("local-leg caller = %+v, want Approved=true Known=true (step 1c must be inert)", got)
+			}
+			// Number is preserved — only the trust bits change.
+			if got.Number != tc.wantNumber {
+				t.Errorf("local-leg caller Number = %q, want %q (number must be untouched)", got.Number, tc.wantNumber)
+			}
+		})
+	}
+}
+
+// TestBindingTurnRunnerPhoneCallerUnchanged pins that the phone leg keeps
+// its resolved identity verbatim — the local-approval rule must not bleed
+// onto carrier callers, whose unknown numbers stay gated by
+// voice.unapproved_caller_allowed_tools.
+func TestBindingTurnRunnerPhoneCallerUnchanged(t *testing.T) {
+	turns := &callerGateCaptureTurns{}
+	b := newCallerGateBinding(t, turns)
+	const ccid = "cc-phone-caller-unchanged"
+	number := callerGateE164(7)
+	if _, err := b.OnCallStart(context.Background(), ccid, number, "emp-voice-1", "incoming", voice.DayBrief{}); err != nil {
+		t.Fatalf("OnCallStart: %v", err)
+	}
+	caller := callerid.Info{Number: number, Name: "Stranger", Approved: false, Known: false}
+	inst := voice.Instance{
+		CallControlID: ccid,
+		EmployeeID:    "emp-voice-1",
+		Target:        number,
+		Leg:           voice.LegPhone,
+		Caller:        caller,
+	}
+	if _, err := turnRunnerFor(b, readyGatesFor(ccid), inst).Run(context.Background(), voice.SessionHandle{}, "hi"); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	got, ok := callerid.From(turns.captured()[0])
+	if !ok {
+		t.Fatal("phone-leg turn ctx carries no callerid stamp")
+	}
+	if got != caller {
+		t.Errorf("phone-leg caller = %+v, want %+v unchanged (local-approval must not bleed onto carrier callers)", got, caller)
+	}
+}
+
 // --- §4 agentID fix (O5) ---
 
 // TestVoiceTurnRunnerStampsEmployeeAgentID proves the constitution-gate

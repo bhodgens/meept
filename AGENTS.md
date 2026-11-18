@@ -456,7 +456,12 @@ gated by allowlist + effects reservation + audit-before-dial. The
 LOCAL leg (phone + local run concurrently on one child/registry/store)
 never imports telnyx and skips effects + audit by contract; its
 barge-in is RMS VAD gated to `Local==true`; `LocalSplice` has no
-reorder window and negotiates L16@16k only. BARGE-IN CONTRACT
+reorder window and negotiates L16@16k only. A LOCAL CALLER IS ALWAYS
+APPROVED: the local leg's turn ctx is stamped Approved/Known so the
+step-1c caller gate is inert and full tool use works; `voice.unapproved_caller_allowed_tools`
+is the allow-list for UNAPPROVED phone/signal callers only, never a
+ceiling on the trusted local operator (detected via the explicit
+`Instance.Leg` field, never a target-prefix heuristic). BARGE-IN CONTRACT
 (2026-11-11): the client-speaker silence lane is a per-call daemon
 LISTENER `<ccid>.c.ev` beside the client pair (JSON-lines, NEVER PCM -
 the pair stays raw-audio-only) carrying `{"event":"clear"}`, emitted

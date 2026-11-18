@@ -644,6 +644,23 @@ is the carrier-free sibling of the phone leg. Two legs exist
 CONCURRENTLY - one child, one text server, one registry, one call
 store. Invariants a future agent must NOT break:
 
+- **The local caller is ALWAYS approved (step-1c caller gate inert).** The
+  local leg's caller is the operator at this machine: there is no carrier,
+  no E.164 address, and no unapproved-stranger threat model. At the single
+  production turn-stamp site (`bindingTurnRunner.Run`,
+  internal/daemon/voice_wiring.go:2181) a local-leg instance is stamped
+  `callerid.Info{Approved:true, Known:true}` (the `Number` is preserved),
+  so enforcement's step 1c sees `caller_approved=true` and is inert — full
+  tool use works for local calls. Detect the leg via the explicit
+  `Instance.Leg == voice.LegLocal` field; NEVER a `local:` target-prefix
+  heuristic. The phone/signal legs keep their resolved contact identity
+  verbatim: unknown numbers stay gated by `voice.unapproved_caller_allowed_tools`
+  (the message lane + ledger). That config is the allow-list for *unapproved*
+  callers, NOT a ceiling on the trusted local operator — do not route the
+  local leg through it. Pinned by TestBindingTurnRunnerLocalCallerApproved,
+  TestBindingTurnRunnerPhoneCallerUnchanged (daemon/caller_resolve_test.go)
+  and TestCallerMatrix_LocalCallerFullTools (daemon/caller_matrix_test.go,
+  drives a local turn through the real executor: shell_execute runs).
 - Local leg NEVER imports telnyx or touches the broker key: local.go
   imports no telnyx package and carries no carrier seam at all
   (internal/voice/local.go:14-15 - build-pinned, not convention), and

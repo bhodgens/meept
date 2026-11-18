@@ -209,7 +209,9 @@ var matrixVoiceTools = []string{"shell_execute", "send_agent_message", "ledger_a
 // contactApproved pins the contact row for `number` with the given
 // voice_approved bit; empty number means "store stays empty" (the unknown
 // caller case). constitution may be nil for the fully-permissive default.
-func newMatrixHarness(t *testing.T, employeeID, number string, contactApproved bool, constitution *employee.Constitution) *matrixHarness {
+// leg is optional and defaults to the phone leg; pass voice.LegLocal to
+// exercise the local-caller-approved rule through the full executor chain.
+func newMatrixHarness(t *testing.T, employeeID, number string, contactApproved bool, constitution *employee.Constitution, leg ...string) *matrixHarness {
 	t.Helper()
 	logger := slog.New(slog.DiscardHandler)
 
@@ -249,6 +251,14 @@ func newMatrixHarness(t *testing.T, employeeID, number string, contactApproved b
 		t.Fatalf("Binding.OnCallStart: %v", err)
 	}
 	inst := voice.Instance{CallControlID: ccid, EmployeeID: employeeID, Target: number, Caller: caller}
+	// Default to the phone leg; callers that exercise the local rule pass
+	// voice.LegLocal explicitly.
+	if len(leg) > 0 {
+		inst.Leg = leg[0]
+		if inst.Leg == voice.LegLocal {
+			inst.Target = "local:desk"
+		}
+	}
 	// 2026-11-10 merge fixup: turnRunnerFor gained the holdTracker gate
 	// param (sibling webhook-hold audit); arm the gate ready before the
 	// turn runs, matching the shipped spawn site.
@@ -662,5 +672,43 @@ func TestCallerMatrix_NonVoiceTurnGateInert(t *testing.T) {
 	res2 := h.executor.Execute(stamped, matrixToolCall("shell_execute", `{"command":"ls"}`))
 	if res2.Error != matrixCallerDenyModel {
 		t.Errorf("stamped non-binding ctx Error = %q, want %q", res2.Error, matrixCallerDenyModel)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// (e) LOCAL leg: the caller is trusted by construction. Even with an empty
+//     contact store (the exact unknown-caller shape that denied shell on the
+//     phone leg in (a)), a local call must carry Approved=true/Known=true so
+//     step 1c is inert and a tool OUTSIDE unapproved_caller_allowed_tools
+//     (shell_execute) executes. The frozen config list stays the phone/signal
+//     stranger lane, not a ceiling on the trusted local operator.
+// ---------------------------------------------------------------------------
+
+func TestCallerMatrix_LocalCallerFullTools(t *testing.T) {
+	// Empty store -> callerid.Info zero (unknown). The leg alone makes it
+	// approved at the real stamp site.
+	h := newMatrixHarness(t, "emp-m-local", "", false, nil, voice.LegLocal)
+
+	// The stamp on the turn ctx carries the trust bits.
+	info, ok := callerid.From(h.turnCtx)
+	if !ok || !info.Approved || !info.Known {
+		t.Fatalf("local-leg turn ctx caller = %+v (ok=%t), want Approved=true Known=true", info, ok)
+	}
+
+	// shell_execute is NOT in voice.unapproved_caller_allowed_tools. A full
+	// Execute must pass and the tool must actually run — step 1c is inert
+	// for the trusted local caller.
+	res := h.executor.Execute(h.turnCtx, matrixToolCall("shell_execute", `{"command":"ls","conversation_id":"cc-matrix-1"}`))
+	if res == nil || !res.Success {
+		t.Fatalf("local caller denied shell_execute (step 1c must be inert): %+v", res)
+	}
+	if n := h.runCount("shell_execute"); n != 1 {
+		t.Errorf("shell_execute mock ran %d times, want 1", n)
+	}
+	if rows := matrixCallerAuditRows(t, h); len(rows) != 0 {
+		t.Errorf("local caller wrote %d voice.unapproved_action rows, want 0", len(rows))
+	}
+	if n := h.pause.count(); n != 0 {
+		t.Errorf("local caller fired pause %d times, want 0", n)
 	}
 }
