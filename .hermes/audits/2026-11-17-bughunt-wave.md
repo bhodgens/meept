@@ -33,6 +33,22 @@ them, commit them").
 | K1 | kanbansvc sidecar loads tokens.json once at boot; Grants() read only memory. Daemon mints tokens at runtime via /kanban/pair/exchange, so freshly paired browsers got 401 until sidecar restart (e2e masked it by booting sidecar after exchange) | HIGH | CONFIRMED | c6ba8bfb — (mtime,size) signature reload in Grants(), disk I/O outside lock, fail-closed on bad file; pin + -race clean (non-vacuous) |
 | C1 | WithWebSocket subscribed to exact + wildcard patterns matching the same topics (employee.result + employee.*, agent.turn.state + agent.*.*); bus delivers to all, so clients got two WS frames per event | MED | CONFIRMED | b1cd55d8 — skip the redundant exact duplicates; pin (non-vacuous), full comm/http suite green |
 
+## Round 2 (late consolidated auditor reports)
+
+The full 6-auditor batch arrived after the first report was written. The
+complete reports exposed five more verified findings (the truncated early
+copies had hidden them). All were source-verified at HEAD and fixed:
+
+| # | Finding | Sev | Disposition |
+|---|---------|-----|-------------|
+| R2-1 | manifest: sovereign-parity implemented + path-mapped with ZERO scenarios (blocking CI: TestEveryMappedSuiteHasScenarios FAIL) and merge dropped the whole kanban suite surface | HIGH | 1d0cbdb8 — restored kanban suite + 7 scenarios + path_map keys; added 23 sovereign-parity scenarios. Manifest test + census 17/17 green |
+| R2-2 | shadowSingleDecision dereferenced mc.DataPosture before its nil check; llm.route.shadow with no default model panicked | HIGH | bfb74698 — nil guard at top + pin proving no panic |
+| R2-3 | R9 spillway tiebreak used the sum of all quality classes instead of capability-specific QualityFor | MED | cefeba4f — restore QualityFor(Capability); pin with code turn (non-vacuous) |
+| R2-4 | GoalLoop.Execute published "running" turn-state before executor/authorization checks; early returns left agents stuck "running" | MED | 5a774c19 — validate first; pin with real bus |
+| R2-5 | config template omitted llm.budget.mode and four voice.messaging schema keys | LOW | 9d47c147 — add five keys with opt-in defaults + drift annotations |
+| R2-6 | SMS DLR monotonic guard compared RFC3339Nano strings; newer fractional DLR discarded as older | MED | 31e8f758 — parse instants; pin (non-vacuous) |
+| R2-7 | GUI hint named only one of two required kanban gates; SetPairing lacked nil receiver guard; XFF trusted from remote peers | LOW/MED | be0b40e0 + 47a4d071 — both gates in hint, nil guard, loopback-only XFF trust |
+
 ## Confirmed but deliberately NOT changed (disclosure ledger)
 
 1. `internal/llm/client.go`: Client.ChatWithProgress / ChatWithDeltaCallback
@@ -71,10 +87,15 @@ them, commit them").
 - Targeted suites: internal/llm, internal/employee, internal/daemon,
   internal/project, internal/plan, internal/kanbansvc (+ -race),
   internal/comm/http — all green at commit time.
-- Final full `go build ./...` + `go test -p 2 ./... -count=1`: build clean
-  (0 output lines), 160 packages ok, 0 FAIL (baseline was 133 ok / 2 FAIL).
-  Both baseline flakes are gone. An earlier 135-ok snapshot was taken while
-  the suite was still running; the finished log has 160 ok lines.
+- Final full `go build ./...` + `go test -p 2 ./... -count=1` after all
+  fixes: build clean (0 output lines). First final run: 160 ok / 0 fail.
+  Second final run (after round-2 fixes): 159 ok / 1 FAIL, the failure
+  being `TestOneShotFutureDueNotFiredAtBoot` with a `t.TempDir` cleanup
+  error ("directory not empty") — a macOS background-writer flake, not a
+  logic failure. The scheduler package passed 5/5 targeted and a full
+  package re-run clean. Baseline was 133 ok / 2 failing packages.
+  Mid-run snapshots (135 ok, 92 ok) were taken while the suite was still
+  writing and are not final counts.
 
 ## Git hygiene incidents
 
