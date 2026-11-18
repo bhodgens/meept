@@ -112,9 +112,14 @@ type VoiceLocalStatusResult struct {
 // VoiceCallEvent is one operator-telemetry ring entry (voice.local.events).
 // The daemon's internal/voice telemetry ring is the producer; the RPC
 // mirror stays seam-typed (internal/rpc never imports internal/voice).
-// Kind is one of: heard, prompt_dispatch, prompt_held, prompt_released,
-// prompt_dropped, turn_final, barge_in, call_ended. Text is always a
-// truncated preview; Words/Ms/Reason are kind-dependent (0/"" omitted).
+// Kind is one of: heard, said, stt_final, model_final, voice_play,
+// prompt_dispatch, prompt_held, prompt_released, prompt_dropped,
+// turn_final, barge_in, call_ended, silence_deferred. Text is FULL for
+// heard/said/stt_final/model_final/voice_play; a 40-rune truncated
+// preview for prompt_dispatch and the prompt park lifecycle
+// (prompt_held/prompt_released/prompt_dropped); absent for
+// turn_final/barge_in/call_ended/silence_deferred. Words/Ms/Reason are
+// kind-dependent (0/"" omitted).
 type VoiceCallEvent struct {
 	Seq  uint64 `json:"seq"`
 	Kind string `json:"kind"`
