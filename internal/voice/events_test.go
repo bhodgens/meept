@@ -159,15 +159,26 @@ func TestTalkLoopOnEventFiresAtLogSites(t *testing.T) {
 	})
 
 	var kinds []string
-	// EventKindSaid rides the same ring (the say() choke emits one per
-	// spoken sentence: filler, reply, final flush excluded) - it is a
-	// FEATURE marker, not an ordering event. Filter it out so the
-	// dispatch-first / final-last ordering assertion stays meaningful,
-	// then pin the said events themselves below.
+	// The per-phase kinds (stt_final / voice_play / model_final) and
+	// EventKindSaid ride the same ring as additive markers. Filter them
+	// out so the dispatch-first / turn_final-last ordering assertion
+	// stays meaningful for the ORIGINAL lifecycle kinds, then pin the
+	// phase events themselves below.
 	var saidTexts []string
+	var sttFinal, modelFinal, voicePlay []EventInput
 	for _, ev := range hook.all() {
-		if ev.Kind == EventKindSaid {
+		switch ev.Kind {
+		case EventKindSaid:
 			saidTexts = append(saidTexts, ev.Text)
+			continue
+		case EventKindSttFinal:
+			sttFinal = append(sttFinal, ev)
+			continue
+		case EventKindModelFinal:
+			modelFinal = append(modelFinal, ev)
+			continue
+		case EventKindVoicePlay:
+			voicePlay = append(voicePlay, ev)
 			continue
 		}
 		kinds = append(kinds, ev.Kind)
@@ -175,6 +186,18 @@ func TestTalkLoopOnEventFiresAtLogSites(t *testing.T) {
 	// dispatch precedes final.
 	if len(kinds) < 2 || kinds[0] != EventKindDispatch || kinds[len(kinds)-1] != EventKindFinal {
 		t.Fatalf("event kinds = %v, want dispatch first, final last", kinds)
+	}
+	// Positive pins for the new per-phase events: each carries the FULL
+	// text (not a preview) and a non-negative duration, and each fires
+	// exactly once alongside its original-kind sibling.
+	if len(sttFinal) != 1 || sttFinal[0].Text != "is it done?" || sttFinal[0].Ms < 0 {
+		t.Errorf("stt_final events = %+v, want one with full prompt text + ms", sttFinal)
+	}
+	if len(modelFinal) != 1 || modelFinal[0].Text != "The report is ready." || modelFinal[0].Ms < 0 {
+		t.Errorf("model_final events = %+v, want one with full reply text + ms", modelFinal)
+	}
+	if len(voicePlay) != 1 || voicePlay[0].Text != "The report is ready." || voicePlay[0].Ms < 0 {
+		t.Errorf("voice_play events = %+v, want one with full spoken text + ms", voicePlay)
 	}
 	// Positive pin for the say() telemetry (ee465418): every spoken
 	// sentence reaches the ring with its full text and word count.
@@ -204,17 +227,18 @@ func TestTalkLoopOnEventFiresAtLogSites(t *testing.T) {
 	}
 	// The dispatch carries the preview + words; the final the reply words.
 	events := hook.all()
-	var dispatch EventInput
+	var dispatch, final EventInput
 	for _, ev := range events {
-		if ev.Kind == EventKindDispatch {
+		if ev.Kind == EventKindDispatch && dispatch.Kind == "" {
 			dispatch = ev
-			break
+		}
+		if ev.Kind == EventKindFinal {
+			final = ev
 		}
 	}
 	if dispatch.Words != 3 || dispatch.Text == "" {
 		t.Errorf("dispatch payload = %+v, want words=3 + preview text", dispatch)
 	}
-	final := events[len(events)-1]
 	if final.Words == 0 || final.Ms < 0 {
 		t.Errorf("final payload = %+v, want reply words + ms", final)
 	}
@@ -256,6 +280,64 @@ func TestTalkLoopOnEventFiresAtLogSites(t *testing.T) {
 		}
 		return false
 	})
+}
+
+func TestPerPhaseEventsCarryFullText(t *testing.T) {
+	// The per-phase kinds must carry FULL text, never the 40-rune preview
+	// the original prompt_dispatch/turn_final rows use. A >40-rune prompt
+	// proves stt_final is not truncated; the model/play rows carry the
+	// full reply. Driven through the real loop so the emit sites are
+	// exercised, not a hand-built EventInput.
+	const longPrompt = "please summarize the entire quarterly report for me right now"
+	const reply = "The quarterly report shows steady growth across all regions."
+	sink := &recordSink{}
+	hook := &recorderHook{}
+	deps := TalkDeps{
+		Supervisor: &cannedSupervisor{},
+		Turns:      &cannedTurns{reply: reply},
+		SessionFor: constSession(SessionHandle{ID: "s-p", ConversationID: "c-p"}),
+		Send:       sink.Send,
+		OnEnd:      func(ccid, reason string) {},
+		Logger:     testLogger(),
+		OnEvent:    hook.append,
+	}
+	loop := NewTalkLoop(deps, TalkLoopConfig{})
+	cancel, done := runLoop(t, loop, "cc-phase")
+	defer func() { cancel(); <-done }()
+
+	last := true
+	loop.frames <- Frame{CallID: "cc-phase", Event: EventPrompt, Text: longPrompt, Last: &last}
+	waitFor(t, 2*time.Second, "no final phase event", func() bool {
+		for _, ev := range hook.all() {
+			if ev.Kind == EventKindModelFinal {
+				return true
+			}
+		}
+		return false
+	})
+
+	want := map[string]string{
+		EventKindSttFinal:   longPrompt,
+		EventKindModelFinal: reply,
+		EventKindVoicePlay:  reply,
+	}
+	counts := map[string]int{}
+	for _, ev := range hook.all() {
+		if w, ok := want[ev.Kind]; ok {
+			counts[ev.Kind]++
+			if ev.Text != w {
+				t.Errorf("%s text = %q, want full %q", ev.Kind, ev.Text, w)
+			}
+			if ev.Ms < 0 {
+				t.Errorf("%s ms = %d, want >= 0", ev.Kind, ev.Ms)
+			}
+		}
+	}
+	for k := range want {
+		if counts[k] != 1 {
+			t.Errorf("%s fired %d times, want 1", k, counts[k])
+		}
+	}
 }
 
 func TestTalkLoopNilOnEventIsNoop(t *testing.T) {
