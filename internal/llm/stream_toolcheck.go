@@ -33,6 +33,24 @@ package llm
 // empty-retry; see internal/llm/AGENTS.md), and the refusal/quota/overflow
 // early-exit ordering above it is untouched.
 //
+// WIRING SPLIT (regression fix, 2026-11-17 — sovereign-parity leaf 03 over-
+// reach): the exported ValidateToolCalls keeps the FULL frozen table above
+// (strict verdict — a tool call naming an unoffered function is invalid by
+// contract; the sovereign-parity gate T19 pins it). The CLIENT TRANSPORT
+// wiring (openai + anthropic + codex, streaming and non-streaming) enforces
+// ONLY the arguments-shape half: malformed/non-object args are fatal there
+// because no downstream can execute them. Name-membership decisions stay
+// with the executor's audited, RECOVERABLE gates, which predate C9 and are
+// pinned by their own suites: the group-deny verdict (agent-groups F1/F7 —
+// a group-denied tool is BY DESIGN absent from the offered list, and its
+// call must reach the executor to land the rule_source=group_deny decision
+// line), the unknown-tool error result (fed back to the model), and the
+// dynamic-exposure row-4 recovery directive ("call tool_view{x} first" —
+// meaningless if the transport refuses the call fatally before the executor
+// can answer it). A transport-layer fatal on an unoffered name killed all
+// three flows (agent-groups F1/F7 + the golden-capture scripted unknown-tool
+// regression this fix closes).
+//
 // Streaming rule (validation.py:113-126, verbatim intent): streamed
 // tool-call chunks are buffered to completion and validated BEFORE anything
 // is sent to the client. In meept terms: the delta path assembles tool calls
@@ -182,37 +200,47 @@ func trimJSONSpaceEnd(s string) string {
 	return ""
 }
 
-// validateOfferedToolCalls is the shared client wiring helper (Contract C9
-// leaf 03): it applies the validation when the request CARRIED an offered
-// list (non-nil) and the assembled response carries calls. offered == nil —
-// the request offered no tools, or the transport never records one (a bare
-// client reconfigured onto a codex backend, an executor calling without
-// WithTools) — disables name checking entirely, byte-identical legacy.
-// Returns the BARE ErrToolCallInvalid sentinel on the first invalid call.
+// validateOfferedToolCalls is the client-wiring helper (Contract C9 leaf 03,
+// narrowed by the 2026-11-17 wiring-split fix above): it enforces ONLY the
+// arguments-shape half of the frozen table — malformed/non-object args are
+// fatal because nothing downstream can execute them. NAME membership is
+// deliberately NOT checked here: the executor owns the audited, recoverable
+// verdicts for a call to a tool absent from the offered list (group_deny
+// decision line, unknown-tool error result, dynamic-exposure recovery
+// directive) — a transport-layer fatal there killed agent-groups F1/F7 and
+// the golden-capture scripted flow (see the package comment).
+//
+// offered == nil — the request offered no tools, or the transport never
+// records one (a bare client reconfigured onto a codex backend, an executor
+// calling without WithTools) — still disables the check entirely, keeping
+// no-tool turns byte-identical to pre-C9 legacy.
+//
+// Returns the BARE ErrToolCallInvalid sentinel on the first malformed call.
 func validateOfferedToolCalls(toolCalls []ToolCall, offered []string) error {
 	if len(toolCalls) == 0 || offered == nil {
 		return nil
 	}
-	return validateToolCalls(toolCalls, offered)
+	for i := range toolCalls {
+		if !toolCallArgsAreObject(toolCalls[i].Function.Arguments) {
+			return ErrToolCallInvalid
+		}
+	}
+	return nil
 }
 
 // firstInvalidToolCall renders the first offending call for the client Warn
-// log (the incident shape: a hallucinated function name or truncated
-// arguments reaching the executor). Best-effort diagnostics only — the
-// verdict is always the bare sentinel.
+// log (the incident shape: truncated/non-object arguments reaching the
+// executor). Best-effort diagnostics only — the verdict is always the bare
+// sentinel. Matches the client wiring's args-only scope: an unoffered NAME
+// is not reported here because the transport no longer rejects on names
+// (validateOfferedToolCalls); the exported ValidateToolCalls verdict is
+// used by contract-level callers directly.
 func firstInvalidToolCall(toolCalls []ToolCall, offered []string) string {
 	if offered == nil {
 		return ""
 	}
-	valid := make(map[string]struct{}, len(offered))
-	for _, name := range offered {
-		valid[name] = struct{}{}
-	}
 	for i := range toolCalls {
 		call := &toolCalls[i]
-		if _, ok := valid[call.Function.Name]; !ok {
-			return fmt.Sprintf("unknown_function:%s", call.Function.Name)
-		}
 		if !toolCallArgsAreObject(call.Function.Arguments) {
 			return fmt.Sprintf("tool_args_invalid_json:%s", call.Function.Name)
 		}

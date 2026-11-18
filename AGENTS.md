@@ -388,8 +388,11 @@ the legacy `host|credential` endpoint keys; model-scope arming is deduped
 into the alias cooldown; a request-fault (400/413/422) arms nothing.
 `ResolveShadow` is RLock-only with zero side effects (no ledger, no
 budget, no cursor, no pin). `ErrToolCallInvalid` is a bare pointer-identity
-sentinel wired post-parse/pre-executor on all three clients; it never
-replaces the empty-completion lane. Advisory-budget `steer` never returns
+sentinel wired post-parse/pre-executor on all three clients, where the
+transport enforces the ARGUMENTS-SHAPE half only — name membership stays
+with the executor's audited gates (group_deny / unknown-tool / exposure
+recovery); the exported `ValidateToolCalls` keeps the full frozen table; it
+never replaces the empty-completion lane. Advisory-budget `steer` never returns
 `BudgetExceededError` — one `budget_advisory`-class event rides
 `agent.quota_wait` and only the failover TAIL reorders by cost.
 

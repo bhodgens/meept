@@ -135,6 +135,18 @@ calls validate once on the ASSEMBLED calls, never per chunk; a tool-less
 request (nil offered) skips byte-identically. It does NOT replace the
 empty-completion classification, which keeps its precedence.
 
+**Wiring split (2026-11-17):** the client-transport sites enforce only the
+arguments-shape half (`validateOfferedToolCalls`) — malformed/non-object
+args are fatal because nothing downstream can execute them. Name
+membership is the EXECUTOR's decision: a call to a function absent from
+the offered list must reach the executor's audited, recoverable gates —
+the group-deny verdict with its `rule_source=group_deny` decision line
+(agent-groups F1/F7), the `unknown tool` error result fed back to the
+model, and the dynamic-exposure recovery directive (`call tool_view{x}
+first`). A transport-layer fatal refusal on names broke all three flows
+when leaf 03 first shipped. The exported `ValidateToolCalls` keeps the
+full frozen table for contract-level callers (the T19 gate pins it).
+
 ## R9 price groups (C10) — `pricegroup.go`
 
 Aliases carry `price_group: "free" | "paid" | "premium"` (untagged =

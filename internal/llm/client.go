@@ -2259,22 +2259,22 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any, cfg *Mod
 
 	parsedResp, err := c.parseResponseWithTools(&chatResp, hasTools, providerID, modelID, assistantPrefill)
 
-	// Tool-call validation (Contract C9, sovereign-router-parity leaf 03):
-	// AFTER a successful parse, BEFORE the response returns to the retry
-	// loop / the executor. A call naming an unoffered function or carrying
-	// unparseable/non-object arguments is rejected here — the bare
-	// ErrToolCallInvalid sentinel classifies as a fatal, non-retried error
-	// in the caller's loop (Classify(0) -> FailureNone -> immediate return),
-	// never re-entering the empty-completion or throttle lanes. The offered
-	// names ride on the request payload; a tool-less request passes nil and
-	// skips validation entirely (the offered-empty rule keeps no-tool turns
-	// byte-identical).
-	if parsedResp != nil && len(parsedResp.ToolCalls) > 0 && len(c.toolcheckNames) > 0 {
-		// ValidateToolCalls is the exported Contract C9 seam (the
-		// unexported wrapper serves the pre-assembly streaming sites);
-		// identical semantics here — the len guard above is the
-		// offered-empty skip.
-		if verr := ValidateToolCalls(parsedResp, c.toolcheckNames); verr != nil {
+	// Tool-call validation (Contract C9, sovereign-router-parity leaf 03,
+	// narrowed by the 2026-11-17 wiring-split fix): AFTER a successful
+	// parse, BEFORE the response returns to the retry loop / the executor.
+	// The transport enforces ONLY the arguments-shape half — malformed /
+	// non-object args are fatal because nothing downstream can execute
+	// them. A call naming an unoffered function is NOT rejected here: the
+	// executor's audited gates (group_deny decision line, unknown-tool
+	// error result, exposure recovery directive) own name membership and
+	// are pinned by the agent-groups suite. The bare ErrToolCallInvalid
+	// sentinel classifies as a fatal, non-retried error in the caller's
+	// loop (Classify(0) -> FailureNone -> immediate return), never
+	// re-entering the empty-completion or throttle lanes. A tool-less
+	// request leaves toolcheckNames nil and skips validation entirely
+	// (the offered-empty rule keeps no-tool turns byte-identical).
+	if parsedResp != nil && len(parsedResp.ToolCalls) > 0 {
+		if verr := validateOfferedToolCalls(parsedResp.ToolCalls, c.toolcheckNames); verr != nil {
 			c.logger.Warn("tool call failed validation",
 				"provider", providerID,
 				"model", modelID,

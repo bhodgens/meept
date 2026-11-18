@@ -210,7 +210,6 @@ internal/agent/turn_compaction.go unreachable func: NewAtomicTurnLogger
 internal/agent/turn_compaction.go unreachable func: atomicWriteFile
 internal/agent/turn_compaction.go unreachable func: readSnapshotFromFile
 internal/agent/turn_compaction.go unreachable func: sanitizeFilename
-internal/agent/turnstate.go unreachable func: publishTurnState
 internal/agent/verdict.go unreachable func: Verdict.String
 internal/auth/permissions.go unreachable func: OwnerOnlyPermissions.CanAccess
 internal/auth/quota.go unreachable func: NoopQuota.Allow
@@ -297,7 +296,6 @@ internal/llm/modelstore.go unreachable func: OpenModelStoreForTesting
 internal/llm/pacing.go unreachable func: AdaptivePacer.interval
 internal/llm/pool_failure.go unreachable func: PoolIDFor
 internal/llm/posture.go unreachable func: PosturePromptText
-internal/llm/posture.go unreachable func: Resolver.postureBlocks
 internal/llm/provider_registry.go unreachable func: GetProviderByEnvVar
 internal/llm/provider_registry.go unreachable func: ListProviders
 internal/llm/provider_registry.go unreachable func: ProvidersFromConfig
@@ -315,6 +313,8 @@ internal/llm/runtime_config.go unreachable func: SupportedRuntimes
 internal/llm/runtime_sweep.go unreachable func: SweepStaleSpawnRecords
 internal/llm/slot_gate.go unreachable func: slotGate.heldCount
 internal/llm/slot_gate.go unreachable func: slotGate.waiterCount
+internal/llm/stream_toolcheck.go unreachable func: ValidateToolCalls
+internal/llm/stream_toolcheck.go unreachable func: validateToolCalls
 internal/llm/teardown.go unreachable func: CoordinatorHook.OnSessionEvent
 internal/llm/teardown.go unreachable func: TeardownHookFunc.OnSessionEvent
 internal/llm/token_cache.go unreachable func: NewTokenCacheCoordinator

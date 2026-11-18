@@ -448,7 +448,14 @@ Full user-facing map: `docs/workflows/llm-routing-quality.md`. Invariants:
   `ErrToolCallInvalid` is the BARE sentinel by pointer identity,
   validated AFTER parse / BEFORE the executor, once at stream end, on
   all three clients. An empty completion is still `ErrEmptyResponse`.
-  Offered-list nil = no contract = pass.
+  Offered-list nil = no contract = pass. WIRING SPLIT (2026-11-17,
+  agent-groups F1/F7 + golden-capture regression): the exported
+  `ValidateToolCalls` keeps the FULL frozen table (unknown name OR bad
+  args), but the CLIENT TRANSPORT sites enforce only the arguments-shape
+  half (`validateOfferedToolCalls`) — a call naming an unoffered function
+  must reach the executor's audited, recoverable gates (group_deny
+  decision line, unknown-tool error result, exposure recovery directive),
+  never a fatal transport refusal.
 - **Spillway is caller-selected and mutation-free** (C10):
   `ResolveSpillway` never touches rotation cursor, pins, or block maps;
   untagged aliases are invisible; the sort key is (cost asc epsilon-
