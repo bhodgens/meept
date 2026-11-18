@@ -72,8 +72,9 @@ them, commit them").
   internal/project, internal/plan, internal/kanbansvc (+ -race),
   internal/comm/http — all green at commit time.
 - Final full `go build ./...` + `go test -p 2 ./... -count=1`: build clean
-  (0 output lines), 135 packages ok, 0 FAIL (baseline was 133 ok / 2 FAIL).
-  Both baseline flakes are gone.
+  (0 output lines), 160 packages ok, 0 FAIL (baseline was 133 ok / 2 FAIL).
+  Both baseline flakes are gone. An earlier 135-ok snapshot was taken while
+  the suite was still running; the finished log has 160 ok lines.
 
 ## Git hygiene incidents
 
