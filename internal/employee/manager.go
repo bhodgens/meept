@@ -27,6 +27,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/bot"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/metrics"
@@ -1736,6 +1737,16 @@ func (m *Manager) triggerViaGoalLoop(ctx context.Context, id string, payload map
 	// session identity and resets the per-round dedup flag. Called here —
 	// the single round-entry site — so every round can notify exactly once.
 	loop.SetSpeakContext(id, "goal-"+id)
+	// Execution-result tier is PER ROUND, not a sticky loop property: a
+	// bus_event trigger (issue-140 bot router) publishes on bot.result;
+	// every other trigger — including goal rounds on the same bot —
+	// publishes on employee.result. Setting this on every round entry
+	// prevents one bot trigger from reclassifying all later rounds.
+	if source == "bus_event" {
+		loop.SetResultTopic(agent.TopicBotResult.Name)
+	} else {
+		loop.SetResultTopic(agent.TopicEmployeeResult.Name)
+	}
 	decideErr := loop.Decide(ctx, trigger)
 	skip := loop.LastDecideSkip()
 	invokeMu.Unlock()

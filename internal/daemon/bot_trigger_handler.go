@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/bot"
 )
 
@@ -55,13 +54,10 @@ func (h *botTriggerHandler) HandleBotTrigger(ctx context.Context, botID, prompt 
 	}
 
 	// A bus event calls a bot to run one task; it is not an employee looking
-	// for work. Mark the target loop so its execution result is published on
-	// bot.result (the topic name is the sole tier discriminator). GetGoalLoop
-	// is nil-safe; the Manager's Trigger path handles an absent loop.
-	if loop := h.components.EmployeeManager.GetGoalLoop(botID); loop != nil {
-		loop.SetResultTopic(agent.TopicBotResult.Name)
-	}
-
+	// for work. The result tier is set PER ROUND by Manager.triggerViaGoalLoop
+	// from the source="bus_event" payload below (issue-140), so this handler
+	// does not stamp sticky state on the shared GoalLoop: a later goal round
+	// on the same entity must publish employee.result, not bot.result.
 	if _, err := h.components.EmployeeManager.Trigger(ctx, botID, payload); err != nil {
 		if h.logger != nil {
 			h.logger.Error("bot trigger handler: GoalLoop trigger failed",
