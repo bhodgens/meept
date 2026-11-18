@@ -55,6 +55,14 @@ type SessionsModel struct {
 	// UI state
 	showingDetail bool
 	showingHelp   bool
+
+	// Project-grouped tree state. collapsed holds C2 buckets whose children
+	// are hidden; the remaining fields are derived from the last row build
+	// and map table rows (which include group headers) back to sessions.
+	collapsed   map[string]bool
+	rowSessions []*types.Session // nil for group header rows
+	rowBuckets  []string         // C2 bucket of each rendered row
+	headerRows  map[string]int   // bucket -> row index of its group header
 }
 
 // SessionsRPCClient interface for the sessions model.
@@ -300,16 +308,22 @@ func (m *SessionsModel) Update(msg tea.Msg) tea.Cmd {
 			return nil
 
 		case KeyEnter:
-			if len(m.sessions) > 0 {
-				idx := m.table.Cursor()
-				if idx >= 0 && idx < len(m.sessions) {
-					sess := &m.sessions[idx]
-					// Return command that signals session switch with chat view
-					return func() tea.Msg {
-						return SessionSwitchToChatMsg{Session: sess}
-					}
+			if s := m.selectedSession(); s != nil {
+				// Return command that signals session switch with chat view
+				return func() tea.Msg {
+					return SessionSwitchToChatMsg{Session: s}
 				}
 			}
+			return nil
+
+		case KeyLeft:
+			// Collapse the project group under the cursor (hide its children).
+			m.setBucketCollapsed(m.bucketAtCursor(), true)
+			return nil
+
+		case KeyRight:
+			// Expand the project group under the cursor (show its children).
+			m.setBucketCollapsed(m.bucketAtCursor(), false)
 			return nil
 
 		case KeyEsc:
@@ -320,10 +334,12 @@ func (m *SessionsModel) Update(msg tea.Msg) tea.Cmd {
 		case "up", "down", "j", "k":
 			var cmd tea.Cmd
 			m.table, cmd = m.table.Update(msg)
-			idx := m.table.Cursor()
-			if idx >= 0 && idx < len(m.sessions) {
+			// The cursor indexes grouped rows (headers included), not the
+			// flat sessions slice. Map through rowSessions; a header row has
+			// no session and leaves m.selected unchanged.
+			if s := m.selectedSession(); s != nil {
 				wasSelected := m.selected
-				m.selected = &m.sessions[idx]
+				m.selected = s
 				// Fetch plans for the new selection if it changed
 				if wasSelected == nil || wasSelected.ID != m.selected.ID {
 					m.plansLoading = true
@@ -350,65 +366,27 @@ var archivedRowStyle = sync.OnceValue(func() lipgloss.Style {
 })
 
 func (m *SessionsModel) updateSessionsTable() {
-	rows := make([]table.Row, len(m.sessions))
+	tree := m.buildSessionTreeRows()
+	m.rowSessions = tree.sessions
+	m.rowBuckets = tree.buckets
+	m.headerRows = tree.headers
 
-	// Derive title truncation from the dynamic column width so wider
-	// terminals can show more of the session name/description.
-	titleW := max(m.width*38/100-2, 15)
-
-	for i, sess := range m.sessions {
-		// Add designation indicator prefix
-		desigPrefix := ""
-		if sess.Designation != nil && sess.Designation.Status != "none" {
-			switch sess.Designation.Status {
-			case "requires_approval":
-				desigPrefix = "! "
-			case "waiting_human":
-				desigPrefix = "? "
-			case "human_responded":
-				desigPrefix = "R "
-			case "bot_thinking":
-				desigPrefix = "... "
-			}
-		}
-		// Archived sessions get a visual marker so the dim styling is
-		// discoverable even on terminals that ignore foreground color
-		// (e.g. when color is disabled or the theme overrides it).
-		archPrefix := ""
-		if sess.Archived {
-			archPrefix = "(archived) "
-		}
-		title := sess.Description
-		if title == "" {
-			title = sess.Name
-		}
-
-		created := m.formatTime(sess.CreatedAt)
-		activity := m.formatTimeRelative(sess.LastActivity)
-
-		titleCell := desigPrefix + archPrefix + types.TruncateString(title, titleW)
-		createdCell := created
-		activityCell := activity
-
-		// Apply dim styling to archived rows. Each cell is rendered with
-		// the archived style so the entire row reads as muted.
-		if sess.Archived {
-			titleCell = archivedRowStyle().Render(titleCell)
-			createdCell = archivedRowStyle().Render(createdCell)
-			activityCell = archivedRowStyle().Render(activityCell)
-		}
-
-		rows[i] = table.Row{titleCell, createdCell, activityCell}
-	}
-
-	tableutil.SetRows(&m.table, rows)
-	if len(rows) > 0 {
+	tableutil.SetRows(&m.table, tree.rows)
+	if len(tree.rows) > 0 {
 		m.table.GotoTop()
 	}
 
-	// Auto-select first session (plans fetch triggered by caller)
-	if len(m.sessions) > 0 {
-		m.selected = &m.sessions[0]
+	// Auto-select the first session row (plans fetch triggered by caller).
+	// Header rows are non-selectable, so park the cursor on the first child
+	// session: existing key handlers (d/D/enter) act on the cursor target,
+	// and leaving it on a header would make a freshly loaded list inert.
+	m.selected = nil
+	for i, s := range m.rowSessions {
+		if s != nil {
+			m.selected = s
+			m.table.SetCursor(i)
+			break
+		}
 	}
 }
 
@@ -505,7 +483,7 @@ func (m *SessionsModel) View() string {
 		MaxWidth(m.width)
 
 	b.WriteString("\n")
-	b.WriteString(hintStyle.Render("n: new | d: archive | D: delete | r: refresh | enter: details | up/down: navigate | f: search | ?: help"))
+	b.WriteString(hintStyle.Render("n: new | d: archive | D: delete | r: refresh | enter: details | up/down: navigate | left/right: collapse/expand | f: search | ?: help"))
 
 	return b.String()
 }
@@ -881,19 +859,16 @@ func (m *SessionsModel) getPlanStateColor(state string) string {
 	}
 }
 
-// selectedSession returns the session under the table cursor, or nil if the
-// list is empty or the cursor is out of range. This is preferred over reading
-// m.selected directly because sorting can leave m.selected pointing at the
-// wrong session (the pointer is not re-derived after a re-sort).
+// selectedSession returns the session under the table cursor, or nil when the
+// cursor is on a group header (or out of range). With the grouped tree the
+// table row index no longer maps 1:1 to m.sessions, so the derived
+// rowSessions slice is the source of truth.
 func (m *SessionsModel) selectedSession() *types.Session {
-	if len(m.sessions) == 0 {
-		return nil
-	}
 	idx := m.table.Cursor()
-	if idx < 0 || idx >= len(m.sessions) {
+	if idx < 0 || idx >= len(m.rowSessions) {
 		return nil
 	}
-	return &m.sessions[idx]
+	return m.rowSessions[idx]
 }
 
 // sortSessions sorts sessions by designation priority, then by last activity.
