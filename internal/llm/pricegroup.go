@@ -123,10 +123,15 @@ func (r *Resolver) ResolveSpillway(ctx context.Context, groups []string, fc *Fil
 				continue
 			}
 			cands = append(cands, spillwayCandidate{
-				name:    name,
-				model:   member,
-				cost:    member.TotalCost(),
-				quality: spillwayQuality(member),
+				name:  name,
+				model: member,
+				cost:  member.TotalCost(),
+				// Frozen R9 key: quality is the CAPABILITY-SPECIFIC
+				// score, not the sum across classes. A chat-heavy model
+				// must not outrank a code-specialized model on a code
+				// turn just because its total is higher (merge 2dcf3045
+				// had replaced the original QualityFor with a sum).
+				quality: member.Quality.QualityFor(QualityClass(fc.Capability)),
 			})
 		}
 		if len(cands) == 0 {
@@ -166,12 +171,4 @@ func spillwayEligible(r *Resolver, entry *AliasEntry, fc *FilterCtx) (*ModelConf
 		return nil, false
 	}
 	return cheapest, true
-}
-
-// spillwayQuality reads the member's measured quality total for the
-// frozen sort key's tiebreak (0 when unmeasured — leaderboards nominate,
-// probes score; an invented score must never land in a routing decision).
-func spillwayQuality(m *ModelConfig) int {
-	q := m.Quality
-	return q.Chat + q.Code + q.Reasoning + q.Tooling + q.LongContext
 }
