@@ -760,6 +760,14 @@ func WithWebSocket(msgBus *bus.MessageBus, wsPath string) ServerOption {
 			// as agent_progress via the wsclass marker path
 			// (typedPayloadDecoders) — never chat_message.
 			"agent.turn.state",
+			// bot.result + employee.result (issue #140, bot-employee
+			// execution observability): execution-result frames are
+			// 2-segment typed topics (Topic[agent.ExecutionResultEvent]);
+			// the single-segment "*" above never matches them
+			// (matchWildcard compares segment counts). Both classify as
+			// agent_progress via the wsclass marker path
+			// (typedPayloadDecoders) — never chat_message.
+			"bot.result", "employee.result",
 			// Employee notify (leaf 11, harness-routed speak):
 			// employee.notify carries detached goal-round notifications.
 			// Forwarded as the generic "event" type — NEVER classified as

@@ -303,7 +303,13 @@ produce `type: "chat_message"` (everything else is `agent_progress`); `chat.resp
 is never WS-relayed; typed `bus.Topic[T]` for stable payloads, raw `Publish` for
 multi-shape; the kanban board surface (`kanban.card.moved` / `kanban.board.changed`
 / the five `kanban.event.*.state` topics) classifies as the `WSBoard` wire type
-`board_event`, relayed like progress and never `chat_message` (kanban-board C8). A
+`board_event`, relayed like progress and never `chat_message` (kanban-board C8).
+Execution results use two typed `Topic[agent.ExecutionResultEvent]` topics —
+`bot.result` (bots) and `employee.result` (employees), issue #140 — with ONE
+shared payload that has NO `kind` field: the topic name is the sole tier
+discriminator. Both marker-classify as `agent_progress`, never `chat_message`.
+Bots are `send_agent_message` targets and drain inbox messages at turn start.
+A
 bus proxy registration needs a live responder on both sides. The
 per-connection session filter is `(channel, session)`-scoped — a chat
 unsubscribe must not silence progress/turn-terminal for the same session, an

@@ -469,6 +469,12 @@ func employeeTurnClone(template *agent.AgentLoop, conversationID, employeeID str
 		// (employee constitution gate) routes on it.
 		clone.SetAgentID(employeeID)
 	}
+	// Forward the template's turn-start drainer to the per-turn clone so
+	// employee AND bot goal rounds drain their queued inbox (C4). Nil-safe:
+	// a template without a drainer leaves the clone's injection disabled.
+	if d := template.MessageDrainer(); d != nil {
+		clone.SetMessageDrainer(d)
+	}
 	if c != nil {
 		if parent := templateRegistry(template); parent != nil {
 			clone.SetToolRegistry(employeeVisibleTools(parent, c))

@@ -655,6 +655,10 @@ type Components struct {
 	// Bot framework
 	BotManager *bot.Manager
 	BotStore   *bot.Store
+	// BotRouter routes bus events to bot triggers. Started once in Start
+	// after the bot framework is up; nil when bots/employees are disabled.
+	BotRouter          *bot.EventActionRouter
+	botRouterStartOnce sync.Once // guards BotRouter.Start against double-start
 
 	// Proactive notification bot stack (automation plan 2026-06-21
 	// Plans 1.x/3.x; deadcode wave-2 WIRE). All nil when
@@ -5346,11 +5350,15 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			if err != nil {
 				logger.Error("failed to create bot store", "error", err)
 			} else {
-				botRouter := bot.NewEventActionRouter(msgBus, nil)
+				botRouter := bot.NewEventActionRouter(msgBus, newBotTriggerHandler(c, logger))
 				botManager := bot.NewManager(botStore, botRouter)
+				if msgBus != nil {
+					botManager.SetBus(msgBus)
+				}
 
 				c.BotManager = botManager
 				c.BotStore = botStore
+				c.BotRouter = botRouter
 				logger.Info("Bot framework initialized",
 					"data_dir", botDataDir,
 					"max_concurrent", cfg.Bots.MaxConcurrentBots,
@@ -6452,6 +6460,14 @@ func (c *Components) Start(ctx context.Context) error {
 		} else {
 			c.Logger.Info("Bot framework started")
 			startedHandlers = append(startedHandlers, "bot")
+			// Start the event-action router once the bots are up so bus-event
+			// triggers actually reach the handler. Nil-guarded (bots+employees
+			// disabled) and startOnce-guarded (no double-start on reload).
+			c.botRouterStartOnce.Do(func() {
+				if router := c.BotRouter; router != nil {
+					router.Start(ctx)
+				}
+			})
 		}
 	}
 
@@ -6944,6 +6960,9 @@ func (c *Components) Start(ctx context.Context) error {
 						emp.ID, &emp.Constitution, goalStore,
 						c.Logger.With("component", "goal-loop", "employee_id", emp.ID),
 					)
+					if c.msgBus != nil {
+						loop.SetBus(c.msgBus)
+					}
 					// Resume paths pass PlanRef{ID} with an empty Prompt. Fill the
 					// execution user message from the stored plan's title and
 					// description so the employee is not blind. Nil plan manager

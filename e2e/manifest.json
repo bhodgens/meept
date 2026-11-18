@@ -244,7 +244,8 @@
       "smoke"
     ],
     "internal/bot/": [
-      "smoke"
+      "smoke",
+      "execution-observability"
     ],
     "internal/browser/": [
       "smoke"
@@ -489,7 +490,8 @@
     ],
     "internal/comm/http/": [
       "hitl-notifications",
-      "intake-status"
+      "intake-status",
+      "execution-observability"
     ],
     "internal/comm/web/": [
       "hitl-notifications"
@@ -564,6 +566,7 @@
       "auth-multiuser",
       "boundary-hardening",
       "config-models",
+      "execution-observability",
       "github-intake",
       "memory-knowledge-assets",
       "plan-critic",
@@ -707,13 +710,15 @@
       "inter-agent-coord"
     ],
     "internal/agent": [
-      "inter-agent-coord"
+      "inter-agent-coord",
+      "execution-observability"
     ],
     "internal/acp": [
       "inter-agent-coord"
     ],
     "internal/employee": [
-      "inter-agent-coord"
+      "inter-agent-coord",
+      "execution-observability"
     ],
     "internal/voice/clipstore/": [
       "voice_clips"
@@ -726,6 +731,15 @@
     ],
     "internal/daemon/voice_clip_planner.go": [
       "voice_clips"
+    ],
+    "e2e/suites/execution-observability": [
+      "execution-observability"
+    ],
+    "internal/daemon/employee_message_tools.go": [
+      "execution-observability"
+    ],
+    "internal/daemon/voice_employee.go": [
+      "execution-observability"
     ]
   },
   "exempt": {},
@@ -1458,6 +1472,19 @@
         "flagoff-control-23 ALL: with all nine features unconfigured, every routing_decisions row is byte-identical to the main-captured golden fixture"
       ],
       "note": "gate leaf 00T of the sovereign-router-parity tree: tests only, RED today (the contract-level files do not compile until leaves 01-09 declare the C1-C11 symbols - that compile failure is the documented gate); golden fixture e2e/fixtures/golden/sovereign-parity-flagoff.golden.json captured from main @ 4ec87974 and checked in, never regenerated at runtime. Status flips to implemented when the suite goes GREEN."
+    },
+    {
+      "name": "execution-observability",
+      "dir": "e2e/suites/execution-observability",
+      "status": "todo",
+      "diff": "L",
+      "scenarios": [
+        "execution-observability-01 frozen shared ExecutionResultEvent payload + two WS result topics: bot.result and employee.result reach a live WS subscriber as agent_progress with no kind key (T1, F1/F2/F7, C1/C5)",
+        "execution-observability-02 result events from real rounds: a bot bus-trigger round emits bot.result and an agents.trigger round emits employee.result, each with status + stop_reason and no kind key (T2, F3/F4/F9)",
+        "execution-observability-03 turn-state edges: a real round shows running then idle on agent.turn.state with stop_reason end_turn and no phase, classified agent_progress (T3, F3/F4, C2)",
+        "execution-observability-04 bot inbox round-trip: send_agent_message accepts a bot id and the queued message is drained/injected at that bot's next round turn start (T4, F5/F6, C4)"
+      ],
+      "note": "ROOT cross-branch e2e RED gate of the issue-#140 execution-observability tree (leaf 00T): hermetic scratch-MEEPT_HOME daemons, live WS collector, real bus.publish RPC / agents.create / agents.trigger - never mocks. Compile-RED until branch 01 lands agent.ExecutionResultEvent + TopicBotResult/TopicEmployeeResult; runtime-RED until the result subscriptions/decoders, emitter bus seams + daemon wiring, bot trigger handler, and roster/drainer land. Status flips to implemented when the suite goes GREEN."
     }
   ],
   "scenarios": [
@@ -5230,6 +5257,49 @@
       "paths": [
         "internal/llm/warm.go",
         "internal/daemon/voice_wiring.go"
+      ]
+    },
+    {
+      "id": "execution-observability-01",
+      "suite": "execution-observability",
+      "diff": "L",
+      "title": "frozen shared ExecutionResultEvent payload reaches WS on both bot.result and employee.result as agent_progress with no kind key",
+      "paths": [
+        "internal/agent/coordination.go",
+        "internal/comm/http/server_wsclass.go",
+        "internal/comm/http/server.go"
+      ]
+    },
+    {
+      "id": "execution-observability-02",
+      "suite": "execution-observability",
+      "diff": "L",
+      "title": "a real bot bus-trigger round emits bot.result and a real agents.trigger round emits employee.result, each with status + stop_reason and no kind key",
+      "paths": [
+        "internal/bot/runner.go",
+        "internal/employee/goal_loop.go",
+        "internal/daemon/components.go"
+      ]
+    },
+    {
+      "id": "execution-observability-03",
+      "suite": "execution-observability",
+      "diff": "M",
+      "title": "a real round shows running then idle edges on agent.turn.state with stop_reason end_turn and no phase",
+      "paths": [
+        "internal/agent/coordination.go",
+        "internal/employee/goal_loop.go"
+      ]
+    },
+    {
+      "id": "execution-observability-04",
+      "suite": "execution-observability",
+      "diff": "L",
+      "title": "send_agent_message accepts a bot id and the queued message is drained/injected into that bot's next round turn-start prompt",
+      "paths": [
+        "internal/daemon/employee_message_tools.go",
+        "internal/agent/loop_messages.go",
+        "internal/daemon/voice_employee.go"
       ]
     }
   ]

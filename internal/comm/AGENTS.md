@@ -34,6 +34,10 @@ handleWSProgress path (no double-delivery; ws-filter-06 pin). Classification der
 `bus.ACPPermissionEvent`, which marker-classify as `agent_progress`; they
 only reach WS because the proxy subscription list includes the 3-segment
 `acp.*.*` wildcard — the bare `*` matches single-segment topics only;
+execution results — `bot.result` and `employee.result` (issue #140) — use
+one shared `agent.ExecutionResultEvent` payload with NO `kind` field: the
+topic name is the sole tier discriminator, and ONE decoder serves both
+topics. Both marker-classify as `agent_progress`, never `chat_message`;
 plus the kanban board surface — `kanban.card.moved`/`CardMoved`,
 `kanban.board.changed`/`BoardChanged` and the five
 `kanban.event.*.state`/`StateEvent` typed topics, which marker-classify

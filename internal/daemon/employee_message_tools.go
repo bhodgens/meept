@@ -10,6 +10,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/employee"
 	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/internal/tools/builtin"
@@ -54,6 +55,40 @@ func (a *employeeMessageStoreAdapter) MarkRead(ids []string) error {
 
 var _ builtin.AgentMessager = (*employeeMessageStoreAdapter)(nil)
 
+// adapterMessageDrainer adapts the builtin-facing adapter to
+// agent.MessageDrainer. The two interfaces both declare DrainInbox but with
+// different return types, so one concrete type cannot satisfy both; the tiny
+// wrapper bridges the store to the loop's turn-start injection seam.
+type adapterMessageDrainer struct {
+	adapter *employeeMessageStoreAdapter
+}
+
+func (d *adapterMessageDrainer) DrainInbox(to string, limit int) ([]agent.IncomingAgentMessage, error) {
+	msgs, err := d.adapter.DrainInbox(to, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]agent.IncomingAgentMessage, len(msgs))
+	for i := range msgs {
+		out[i] = agent.IncomingAgentMessage{
+			ID: msgs[i].ID, From: msgs[i].From, To: msgs[i].To,
+			Body: msgs[i].Body, CreatedAt: msgs[i].CreatedAt,
+		}
+	}
+	return out, nil
+}
+
+var _ agent.MessageDrainer = (*adapterMessageDrainer)(nil)
+
+// newMessageDrainer returns an agent.MessageDrainer backed by the adapter.
+// Returns nil for a nil adapter (no typed-nil boxing).
+func newMessageDrainer(a *employeeMessageStoreAdapter) agent.MessageDrainer {
+	if a == nil {
+		return nil
+	}
+	return &adapterMessageDrainer{adapter: a}
+}
+
 // WireEmployeeMessaging registers send_agent_message and inbox on the
 // given tool registry using the employee message store and manager. A
 // nil store or registry skips registration (messaging unavailable).
@@ -96,6 +131,14 @@ func WireEmployeeMessagingForComponents(c *Components) {
 	}
 	adapter := WireEmployeeMessaging(msgStore, c.EmployeeManager, senderOf)
 
+	// Bot ids are message targets too. Wire the production drainer on the
+	// shared template loop so every turn-start prompt build (employee, bot,
+	// and plain agent sessions) drains its queued inbox. Uses a concrete
+	// wrapper behind an explicit nil check to avoid typed-nil boxing.
+	if d := newMessageDrainer(adapter); d != nil && c.AgentLoop != nil {
+		c.AgentLoop.SetMessageDrainer(d)
+	}
+
 	// Roster reachability for platform_agents.
 	for _, t := range c.ToolRegistry.List() {
 		if pa, ok := t.(*builtin.PlatformAgentsTool); ok && c.EmployeeManager != nil {
@@ -116,16 +159,42 @@ func WireEmployeeMessagingForComponents(c *Components) {
 		}
 		if c.EmployeeManager != nil {
 			emp, err := c.EmployeeManager.GetEmployee(context.Background(), id)
-			return err == nil && emp != nil
+			if err == nil && emp != nil {
+				return true
+			}
+		}
+		if c.BotManager != nil {
+			bot, err := c.BotManager.GetBot(context.Background(), id)
+			if err == nil && bot != nil {
+				return true
+			}
 		}
 		return false
 	}
 	listTargets := func() []string {
+		seen := make(map[string]struct{})
 		var ids []string
+		add := func(id string) {
+			if id == "" {
+				return
+			}
+			if _, ok := seen[id]; ok {
+				return
+			}
+			seen[id] = struct{}{}
+			ids = append(ids, id)
+		}
 		if c.EmployeeManager != nil {
 			if emps, err := c.EmployeeManager.ListEmployees(context.Background(), ""); err == nil {
 				for _, e := range emps {
-					ids = append(ids, e.ID)
+					add(e.ID)
+				}
+			}
+		}
+		if c.BotManager != nil {
+			if bots, err := c.BotManager.ListBots(context.Background()); err == nil {
+				for _, b := range bots {
+					add(b.ID)
 				}
 			}
 		}

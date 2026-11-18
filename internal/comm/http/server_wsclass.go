@@ -32,6 +32,20 @@ func decodeTurnStateWSClass(raw json.RawMessage) (wsclass.WSClassified, error) {
 	return ev, nil
 }
 
+// decodeExecutionResultWSClass unmarshals a bot.result / employee.result
+// payload into the shared agent.ExecutionResultEvent struct (bot-employee
+// execution observability, issue #140). The ONE decoder serves BOTH topics:
+// the wire shape is untagged, so the topic name is the sole tier
+// discriminator. The marker classifies the frame as agent_progress — never
+// chat_message.
+func decodeExecutionResultWSClass(raw json.RawMessage) (wsclass.WSClassified, error) {
+	var ev agent.ExecutionResultEvent
+	if err := json.Unmarshal(raw, &ev); err != nil {
+		return nil, err
+	}
+	return ev, nil
+}
+
 // decodeACPPermissionWSClass unmarshals an acp.permission.* payload into
 // the frozen bus.ACPPermissionEvent struct (acp-human-permission-relay
 // leaf 03). The marker classifies the frame as agent_progress — never
@@ -82,11 +96,14 @@ func decodeKanbanStateEventWSClass(raw json.RawMessage) (wsclass.WSClassified, e
 // WSClass markers. Entries exist only for topics migrated to Topic[T]
 // (turn.terminal; acp.permission.requested/.resolved; the kanban board
 // surface kanban.card.moved, kanban.board.changed and the five
-// kanban.event.*.state topics, kanban-board C8 leaf 05/07). Legacy
+// kanban.event.*.state topics, kanban-board C8 leaf 05/07; and the shared
+// bot.result / employee.result execution-result topics, issue #140). Legacy
 // fallback still classifies any topic missing here.
 var typedPayloadDecoders = map[string]func(json.RawMessage) (wsclass.WSClassified, error){
 	agent.TopicTurnTerminal.Name:         decodeTurnTerminalWSClass,
 	agent.TopicTurnState.Name:            decodeTurnStateWSClass,
+	agent.TopicBotResult.Name:            decodeExecutionResultWSClass,
+	agent.TopicEmployeeResult.Name:       decodeExecutionResultWSClass,
 	bus.TopicACPPermissionRequested.Name: decodeACPPermissionWSClass,
 	bus.TopicACPPermissionResolved.Name:  decodeACPPermissionWSClass,
 	kanban.TopicCardMoved.Name:           decodeKanbanCardMovedWSClass,
