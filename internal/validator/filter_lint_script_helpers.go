@@ -81,8 +81,8 @@ func extractFencedMulti(output string, fenceBegins []string) []fencedBlock {
 		// on EOF-newline requirements and rewriting here would desync the
 		// offsets we report in failure reasons.
 		blocks = append(blocks, fencedBlock{
-			codeBlock: codeBlock{start: codeStart, end: codeEnd, code: output[codeStart:codeEnd]},
-			fence:     bestFence,
+			start: codeStart, end: codeEnd, code: output[codeStart:codeEnd],
+			fence: bestFence,
 		})
 		offset = codeEnd + len(goFenceEnd)
 	}

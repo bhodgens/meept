@@ -6,7 +6,6 @@ package daemon
 import (
 	"context"
 	"errors"
-	"io"
 	"log/slog"
 	"path/filepath"
 	"testing"
@@ -31,7 +30,7 @@ import (
 // stopComponents returns.
 func TestStopComponentsClosesEmployeeLedgerAfterVoiceStop(t *testing.T) {
 	home := t.TempDir()
-	store, err := ledger.Open(filepath.Join(home, "ledger.db"), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	store, err := ledger.Open(filepath.Join(home, "ledger.db"), slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("open ledger: %v", err)
 	}
@@ -39,10 +38,10 @@ func TestStopComponentsClosesEmployeeLedgerAfterVoiceStop(t *testing.T) {
 
 	c := &Components{
 		Config:         &config.Config{},
-		Logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Logger:         slog.New(slog.DiscardHandler),
 		EmployeeLedger: store,
 		Voice: &VoiceWiring{
-			logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+			logger: slog.New(slog.DiscardHandler),
 		},
 	}
 
@@ -118,7 +117,7 @@ func TestVoiceStopDrainsLiveCallToEndedRow(t *testing.T) {
 	if len(live) != 0 {
 		t.Fatalf("registry still holds %d live rows after Stop", len(live))
 	}
-	roStore, err := voice.NewCallStore(callStorePath, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	roStore, err := voice.NewCallStore(callStorePath, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("reopen calls.db read-only: %v", err)
 	}
@@ -158,9 +157,9 @@ func TestStopComponentsClosesContactChain(t *testing.T) {
 	chain := &ContactChainWiring{Store: store}
 	c := &Components{
 		Config: &config.Config{},
-		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Logger: slog.New(slog.DiscardHandler),
 		Voice: &VoiceWiring{
-			logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+			logger:  slog.New(slog.DiscardHandler),
 			Contact: chain,
 		},
 	}
@@ -181,9 +180,9 @@ func TestStopComponentsClosesContactChain(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestLedgerRPCRegisteredOnDaemonSurface(t *testing.T) {
-	server := rpc.New(&rpc.Config{SocketPath: filepath.Join(t.TempDir(), "l.sock")}, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	server := rpc.New(&rpc.Config{SocketPath: filepath.Join(t.TempDir(), "l.sock")}, nil, slog.New(slog.DiscardHandler))
 	c := &Components{}
-	registerLedgerRPC(c, server, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	registerLedgerRPC(c, server, slog.New(slog.DiscardHandler))
 
 	// ledger.query must RESOLVE (not "method not found"): a nil store
 	// answers the named disabled refusal, never -32601.
@@ -198,7 +197,7 @@ func TestLedgerRPCRegisteredOnDaemonSurface(t *testing.T) {
 
 func TestLedgerRPCWithLiveStoreServesQueries(t *testing.T) {
 	home := t.TempDir()
-	store, err := ledger.Open(filepath.Join(home, "ledger.db"), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	store, err := ledger.Open(filepath.Join(home, "ledger.db"), slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("open ledger: %v", err)
 	}
@@ -212,8 +211,8 @@ func TestLedgerRPCWithLiveStoreServesQueries(t *testing.T) {
 		t.Fatalf("append: %v", err)
 	}
 
-	server := rpc.New(&rpc.Config{SocketPath: filepath.Join(t.TempDir(), "l2.sock")}, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	registerLedgerRPC(&Components{EmployeeLedger: store}, server, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	server := rpc.New(&rpc.Config{SocketPath: filepath.Join(t.TempDir(), "l2.sock")}, nil, slog.New(slog.DiscardHandler))
+	registerLedgerRPC(&Components{EmployeeLedger: store}, server, slog.New(slog.DiscardHandler))
 
 	result, err := server.CallMethod(context.Background(), "ledger.query", []byte(`{"employee":"emp-d6","mode":"log"}`))
 	if err != nil {
@@ -263,7 +262,7 @@ func TestPlainBootImmediateErrorExitStillFails(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestDialAuditPayloadMaskedToLast4(t *testing.T) {
-	auditStore, err := auditlog.OpenStore(filepath.Join(t.TempDir(), "audit.db"), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	auditStore, err := auditlog.OpenStore(filepath.Join(t.TempDir(), "audit.db"), slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("open audit store: %v", err)
 	}

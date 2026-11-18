@@ -63,20 +63,11 @@ func WER(ref, hyp string) float64 {
 			if r[i-1] == h[j-1] {
 				cost = 0
 			}
-			m := d[i-1][j] + 1
-			if d[i][j-1]+1 < m {
-				m = d[i][j-1] + 1
-			}
-			if d[i-1][j-1]+cost < m {
-				m = d[i-1][j-1] + cost
-			}
+			m := min(d[i][j-1]+1, d[i-1][j]+1, d[i-1][j-1]+cost)
 			d[i][j] = m
 		}
 	}
-	den := len(r)
-	if den < 1 {
-		den = 1
-	}
+	den := max(len(r), 1)
 	return float64(d[len(r)][len(h)]) / float64(den)
 }
 

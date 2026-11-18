@@ -23,7 +23,7 @@ import (
 func TestBoundReasoningRuneSafe(t *testing.T) {
 	// ASCII prefix, then a run of 3-byte runes straddling the cap.
 	ascii := strings.Repeat("a", 100)
-	multibyte := strings.Repeat("漢", 2000) // 6000 bytes of 3-byte runes
+	multibyte := strings.Repeat("\u6F22", 2000) // 6000 bytes of 3-byte runes (CJK ideograph, escaped to keep the source ASCII-only)
 	r := ascii + multibyte
 
 	got := boundReasoning(r)
@@ -47,13 +47,13 @@ func TestBoundReasoningRuneSafe(t *testing.T) {
 	if !utf8.ValidString(got2) {
 		t.Fatalf("pure-multibyte truncation produced invalid UTF-8")
 	}
-	if !strings.Contains(got2, "漢") {
+	if !strings.Contains(got2, "\u6F22") {
 		t.Error("expected whole runes to survive the truncation")
 	}
 
 	// At/under the cap returns the input untouched (including
 	// multibyte).
-	if got := boundReasoning("短い"); got != "短い" {
+	if got := boundReasoning("\u77ed\u3044"); got != "\u77ed\u3044" { // "short" in Japanese, escaped (ASCII-only source)
 		t.Errorf("under-cap text must pass through untouched, got %q", got)
 	}
 }
@@ -66,7 +66,7 @@ func TestVoiceReasoningRetentionMapBounded(t *testing.T) {
 	r, chatter, sessions := reasonRunner(t, "ok", "")
 	total := maxRetainedReasoningSessions + 4
 	ids := make([]string, 0, total)
-	for i := 0; i < total; i++ {
+	for i := range total {
 		chatter.set("ok", "reasoning for session slot")
 		sess, err := sessions.Create("bounded slot session")
 		if err != nil {
@@ -118,7 +118,7 @@ func TestVoiceReasoningRetentionRecentUseSurvives(t *testing.T) {
 		t.Fatalf("Run live 1: %v", err)
 	}
 	// Burst: fill the map to the cap with one-turn sessions.
-	for i := 0; i < maxRetainedReasoningSessions; i++ {
+	for i := range maxRetainedReasoningSessions {
 		chatter.set("ok", "burst reasoning")
 		sess, err := sessions.Create("burst session")
 		if err != nil {

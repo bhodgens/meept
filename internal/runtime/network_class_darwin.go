@@ -27,7 +27,7 @@ func ApplyNetworkClass(cmd *exec.Cmd, class string) error {
 		return fmt.Errorf("%w: nil command", ErrNetworkClassUnenforceable)
 	}
 	if _, err := os.Stat(darwinSandboxExec); err != nil {
-		return fmt.Errorf("%w: %s unavailable: %v", ErrNetworkClassUnenforceable, darwinSandboxExec, err)
+		return fmt.Errorf("%w: %s unavailable: %w", ErrNetworkClassUnenforceable, darwinSandboxExec, err)
 	}
 	cmd.Args = append([]string{darwinSandboxExec, "-p", noNetworkProfile}, cmd.Args...)
 	cmd.Path = darwinSandboxExec

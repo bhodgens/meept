@@ -47,7 +47,7 @@ func TestFitToBudget_SingleTag(t *testing.T) {
 	config := DefaultFittingConfig()
 
 	ranked := RankedTags{
-		{Tag: Tag{RelFname: "test.go", Name: "TestFunc", Kind: "function", Line: 10, IsDef: true}, Score: 1.0},
+		{RelFname: "test.go", Name: "TestFunc", Kind: "function", Line: 10, IsDef: true, Score: 1.0},
 	}
 
 	result := FitToBudget(ranked, config, renderer)
@@ -70,14 +70,12 @@ func TestFitToBudget_BinarySearch(t *testing.T) {
 	var ranked RankedTags
 	for i := range 100 {
 		ranked = append(ranked, RankedTag{
-			Tag: Tag{
-				RelFname: "test.go",
-				Name:     "Function" + string(rune('A'+i%26)),
-				Kind:     "function",
-				Line:     i * 5,
-				IsDef:    true,
-			},
-			Score: 1.0 - float64(i)*0.01,
+			RelFname: "test.go",
+			Name:     "Function" + string(rune('A'+i%26)),
+			Kind:     "function",
+			Line:     i * 5,
+			IsDef:    true,
+			Score:    1.0 - float64(i)*0.01,
 		})
 	}
 
@@ -100,14 +98,12 @@ func TestFitToBudget_ToleranceBand(t *testing.T) {
 	var ranked RankedTags
 	for i := range 50 {
 		ranked = append(ranked, RankedTag{
-			Tag: Tag{
-				RelFname: "file.go",
-				Name:     "Symbol" + string(rune('A'+i%26)),
-				Kind:     "function",
-				Line:     i * 10,
-				IsDef:    true,
-			},
-			Score: 1.0 / float64(i+1),
+			RelFname: "file.go",
+			Name:     "Symbol" + string(rune('A'+i%26)),
+			Kind:     "function",
+			Line:     i * 10,
+			IsDef:    true,
+			Score:    1.0 / float64(i+1),
 		})
 	}
 
@@ -155,7 +151,7 @@ func TestFitToBudgetSimple(t *testing.T) {
 	ranked := RankedTags{}
 	for i := range 10 {
 		ranked = append(ranked, RankedTag{
-			Tag:   Tag{Name: "Func" + string(rune('0'+i)), IsDef: true},
+			Name: "Func" + string(rune('0'+i)), IsDef: true,
 			Score: 1.0,
 		})
 	}
@@ -292,10 +288,10 @@ func TestFitStrategy(t *testing.T) {
 	config.MaxMapTokens = 200
 
 	ranked := RankedTags{
-		{Tag: Tag{FName: "test.go", RelFname: "test.go", Name: "Func1", Kind: "function", Line: 1, IsDef: true}, Score: 1.0},
-		{Tag: Tag{FName: "test.go", RelFname: "test.go", Name: "Func2", Kind: "function", Line: 2, IsDef: true}, Score: 0.8},
-		{Tag: Tag{FName: "test.go", RelFname: "test.go", Name: "Func3", Kind: "function", Line: 3, IsDef: true}, Score: 0.6},
-		{Tag: Tag{FName: "test.go", RelFname: "test.go", Name: "Func4", Kind: "function", Line: 4, IsDef: true}, Score: 0.4},
+		{FName: "test.go", RelFname: "test.go", Name: "Func1", Kind: "function", Line: 1, IsDef: true, Score: 1.0},
+		{FName: "test.go", RelFname: "test.go", Name: "Func2", Kind: "function", Line: 2, IsDef: true, Score: 0.8},
+		{FName: "test.go", RelFname: "test.go", Name: "Func3", Kind: "function", Line: 3, IsDef: true, Score: 0.6},
+		{FName: "test.go", RelFname: "test.go", Name: "Func4", Kind: "function", Line: 4, IsDef: true, Score: 0.4},
 	}
 
 	// Test binary search strategy
@@ -333,8 +329,8 @@ func TestDefaultRenderer(t *testing.T) {
 
 	// Test with ranked tags
 	ranked := RankedTags{
-		{Tag: Tag{RelFname: "a.go", Name: "FuncA", Kind: "function", Line: 1, IsDef: true}, Score: 1.0},
-		{Tag: Tag{RelFname: "b.go", Name: "TypeB", Kind: "class", Line: 5, IsDef: true}, Score: 0.5},
+		{RelFname: "a.go", Name: "FuncA", Kind: "function", Line: 1, IsDef: true, Score: 1.0},
+		{RelFname: "b.go", Name: "TypeB", Kind: "class", Line: 5, IsDef: true, Score: 0.5},
 	}
 
 	result = renderer.Render(ranked)

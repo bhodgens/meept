@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -264,12 +265,7 @@ func (r *chunkReaderT) Read(p []byte) (int, error) {
 // clamped to what remains, so the script always covers the payload exactly.
 func readScript(total, chunk int, oddAt []int, allOdd bool) []int {
 	in := func(idx int) bool {
-		for _, o := range oddAt {
-			if o == idx {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(oddAt, idx)
 	}
 	var sizes []int
 	for rem := total; rem > 0; {
@@ -295,7 +291,7 @@ func sine24k(n int, freq, amp float64) []byte {
 	b := make([]byte, n*2)
 	for i := range n {
 		v := amp * math.Sin(2*math.Pi*freq*float64(i)/24000.0)
-		binary.LittleEndian.PutUint16(b[i*2:], uint16(int16(math.Round(v))))
+		binary.LittleEndian.PutUint16(b[i*2:], uint16(int16(math.Round(v)))) //nolint:gosec // G115: s16le encode — the int16->uint16 reinterpret is the codec contract
 	}
 	return b
 }
@@ -308,7 +304,7 @@ func s16Samples(t *testing.T, b []byte) []int {
 	}
 	out := make([]int, len(b)/2)
 	for i := range out {
-		out[i] = int(int16(binary.LittleEndian.Uint16(b[i*2:])))
+		out[i] = int(int16(binary.LittleEndian.Uint16(b[i*2:]))) //nolint:gosec // G115: s16le decode — the uint16->int16 reinterpret is the codec contract
 	}
 	return out
 }

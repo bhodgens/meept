@@ -43,10 +43,7 @@ func (r *pacedReader) Read(p []byte) (int, error) {
 	if len(r.data) == 0 {
 		return 0, io.EOF
 	}
-	n := copy(p, r.data)
-	if n > liveSpeakerReadChunk {
-		n = liveSpeakerReadChunk
-	}
+	n := min(copy(p, r.data), liveSpeakerReadChunk)
 	r.data = r.data[n:]
 	return n, nil
 }

@@ -607,7 +607,7 @@ func kanbanBindNeedsAllowLAN(bind string) bool {
 		return false
 	}
 	ip := net.ParseIP(host)
-	return !(ip != nil && ip.IsLoopback())
+	return ip == nil || !ip.IsLoopback()
 }
 
 // Compile-time guard: kanbanLogWriter is an io.Writer for cmd.Stderr.

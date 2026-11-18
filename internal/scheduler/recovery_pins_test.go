@@ -277,7 +277,7 @@ func TestAppendEvictsTerminalBeforeStuck(t *testing.T) {
 	h := NewDeliveryHistory()
 	now := time.Now().UTC()
 	// Fill the cap with delivered rows.
-	for i := 0; i < MaxDeliveryHistoryRecords; i++ {
+	for i := range MaxDeliveryHistoryRecords {
 		h.Append(ScheduleDeliveryReceipt{
 			ScheduleID:  "job-f4",
 			ScheduledAt: now.Add(time.Duration(i) * time.Minute),
@@ -322,7 +322,7 @@ func TestAppendLastResortStuckEvictionWarns(t *testing.T) {
 	h := NewDeliveryHistory()
 	now := time.Now().UTC()
 	ids := make([]string, 0, MaxDeliveryHistoryRecords+1)
-	for i := 0; i < MaxDeliveryHistoryRecords+1; i++ {
+	for i := range MaxDeliveryHistoryRecords + 1 {
 		mid := fmt.Sprintf("turn-f4-allstuck-%03d", i)
 		ids = append(ids, mid)
 		h.Append(ScheduleDeliveryReceipt{

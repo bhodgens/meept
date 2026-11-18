@@ -29,7 +29,7 @@ func TestResolveGoalID_SessionEmployeeBinding(t *testing.T) {
 
 	t.Run("session binding wins over sole employee", func(t *testing.T) {
 		anchor := &stubSessionEmployeeGoalAnchor{
-			stubGoalAnchor:  stubGoalAnchor{soleEmployee: "emp_sole", implicitID: "goal_implicit"},
+			soleEmployee: "emp_sole", implicitID: "goal_implicit",
 			sessionEmployee: "emp_bound",
 		}
 		d := NewDispatcher(DispatcherConfig{Logger: testLogger()})
@@ -48,7 +48,7 @@ func TestResolveGoalID_SessionEmployeeBinding(t *testing.T) {
 
 	t.Run("unbound session falls back to sole employee", func(t *testing.T) {
 		anchor := &stubSessionEmployeeGoalAnchor{
-			stubGoalAnchor: stubGoalAnchor{soleEmployee: "emp_sole", implicitID: "goal_implicit"},
+			soleEmployee: "emp_sole", implicitID: "goal_implicit",
 		}
 		d := NewDispatcher(DispatcherConfig{Logger: testLogger()})
 		d.SetGoalAnchor(anchor)
@@ -63,7 +63,7 @@ func TestResolveGoalID_SessionEmployeeBinding(t *testing.T) {
 
 	t.Run("binding and sole both empty keeps the plan goal-less", func(t *testing.T) {
 		anchor := &stubSessionEmployeeGoalAnchor{
-			stubGoalAnchor: stubGoalAnchor{implicitID: "goal_should_not_exist"},
+			implicitID: "goal_should_not_exist",
 		}
 		d := NewDispatcher(DispatcherConfig{Logger: testLogger()})
 		d.SetGoalAnchor(anchor)
@@ -80,7 +80,7 @@ func TestResolveGoalID_SessionEmployeeBinding(t *testing.T) {
 		// The multi-employee install case: sole is "" but the session is
 		// bound — branches 2/3 must run against the bound employee.
 		anchor := &stubSessionEmployeeGoalAnchor{
-			stubGoalAnchor:  stubGoalAnchor{soleActiveID: "goal_active"},
+			soleActiveID:    "goal_active",
 			sessionEmployee: "emp_bound",
 		}
 		d := NewDispatcher(DispatcherConfig{Logger: testLogger()})

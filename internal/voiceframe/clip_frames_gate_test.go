@@ -33,7 +33,7 @@ func TestClipGateFrameSayClipIDRoundTrip(t *testing.T) {
 		CallID: "cc-1",
 		Event:  EventSay,
 		Text:   "Just a sec.",
-		Last:   gateBoolPtr(false),
+		Last:   new(false),
 		ClipID: hexKey,
 	}
 	line, err := EncodeFrame(f)
@@ -59,7 +59,7 @@ func TestClipGateFrameSayClipIDRoundTrip(t *testing.T) {
 // CF-2: back-compat — an empty ClipID is OMITTED (omitempty): a frame
 // without clip fields serializes to today's exact bytes.
 func TestClipGateFrameWithoutClipIDIsTodaysExactJSON(t *testing.T) {
-	f := Frame{CallID: "cc-2", Event: EventSay, Text: "One moment.", Last: gateBoolPtr(false)}
+	f := Frame{CallID: "cc-2", Event: EventSay, Text: "One moment.", Last: new(false)}
 	line, err := EncodeFrame(f)
 	if err != nil {
 		t.Fatalf("encode: %v", err)
@@ -156,5 +156,3 @@ func TestClipGateClipFramesNeverCarryLast(t *testing.T) {
 		t.Fatalf("clip_render decoded Last = %v, want nil (absent)", *f.Last)
 	}
 }
-
-func gateBoolPtr(v bool) *bool { return &v }

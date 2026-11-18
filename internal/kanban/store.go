@@ -140,6 +140,9 @@ func (s *Store) ListBoards(ctx context.Context) ([]Board, error) {
 		}
 		boards = append(boards, b)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to list boards: %w", err)
+	}
 	return boards, nil
 }
 
@@ -177,6 +180,9 @@ func (s *Store) ListColumns(ctx context.Context, boardID string) ([]Column, erro
 		}
 		columns = append(columns, c)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to list columns: %w", err)
+	}
 	return columns, nil
 }
 
@@ -198,7 +204,7 @@ func (s *Store) CreateColumn(ctx context.Context, c Column) error {
 // ErrUnknownColumn means no column with that id exists on that board.
 // Callers check it when a mutation matched zero rows — an UPDATE that
 // matches nothing is a miss, not a success.
-type ErrUnknownColumn struct{ ID string }
+type ErrUnknownColumn struct{ ID string } //nolint:errname // C1-adjacent contract name cited in package docs; renaming churns 17 refs for style only
 
 func (e ErrUnknownColumn) Error() string { return fmt.Sprintf("unknown column: %s", e.ID) }
 

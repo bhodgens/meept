@@ -36,7 +36,7 @@ func equalTexts(got, want []string) bool {
 		return false
 	}
 	for i := range got {
-		if got[i] != want[i] {
+		if got[i] != want[i] { //nolint:gosec // G602: equal lengths checked above
 			return false
 		}
 	}
@@ -279,7 +279,7 @@ func TestPickLineRoundRobin(t *testing.T) {
 
 	var cursor int
 	var seq []string
-	for i := 0; i < 7; i++ {
+	for range 7 {
 		seq = append(seq, PickLine(lanes, LaneFiller, &cursor))
 	}
 	want := []string{"a", "b", "c", "a", "b", "c", "a"}

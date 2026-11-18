@@ -162,10 +162,8 @@ func (p *BusPump) Subscribe(ctx context.Context) (<-chan json.RawMessage, error)
 
 	// Per-subscriber detach: ctx cancellation closes ONLY this channel.
 	go func() {
-		select {
-		case <-ctx.Done():
-			p.detach(out)
-		}
+		<-ctx.Done()
+		p.detach(out)
 	}()
 	return out, nil
 }
@@ -390,7 +388,7 @@ func boardFrame(ev pumpRecord) json.RawMessage {
 		// json.Marshal of a map decoded from valid JSON cannot fail in
 		// practice; if it does, deliver the bare payload rather than
 		// dropping the delta silently.
-		return json.RawMessage(ev.Payload)
+		return ev.Payload
 	}
 	return frame
 }
@@ -408,10 +406,7 @@ func isSubGone(err error) bool {
 // ended first.
 func sleepCtx(ctx context.Context, d time.Duration) bool {
 	for remaining := d; remaining > 0; {
-		step := remaining
-		if step > pumpDefaultPollInterval {
-			step = pumpDefaultPollInterval
-		}
+		step := min(remaining, pumpDefaultPollInterval)
 		timer := time.NewTimer(step)
 		select {
 		case <-ctx.Done():

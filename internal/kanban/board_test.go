@@ -126,8 +126,7 @@ func TestManager_SetWIPLimit_UnknownColumn(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected ErrUnknownColumn for missing column, got nil")
 	}
-	var unk ErrUnknownColumn
-	if !errors.As(err, &unk) {
+	if _, ok := errors.AsType[ErrUnknownColumn](err); !ok {
 		t.Errorf("expected wrapped ErrUnknownColumn, got %v", err)
 	}
 

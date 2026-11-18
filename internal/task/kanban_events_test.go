@@ -106,7 +106,6 @@ func TestTaskTransitions_EveryStateHasPublisherPath(t *testing.T) {
 func TestUpdateState_PublishesStateEvent(t *testing.T) {
 	for from, targets := range taskTransitions {
 		for _, to := range targets {
-			from, to := from, to
 			t.Run(fmt.Sprintf("%s->%s", from, to), func(t *testing.T) {
 				reg, sub, ctx := newGatedRegistry(t)
 				task, err := reg.Create(ctx, "edge-task", "")
@@ -169,7 +168,6 @@ func TestUpdateState_NoChangePublishesNothing(t *testing.T) {
 func TestCancelTask_PublishesCancelledEdge(t *testing.T) {
 	nonTerminal := []TaskState{StatePending, StatePlanning, StateAwaitingApproval, StateExecuting, StateTesting}
 	for _, from := range nonTerminal {
-		from := from
 		t.Run(string(from)+"->cancelled", func(t *testing.T) {
 			reg, sub, ctx := newGatedRegistry(t)
 			task, err := reg.Create(ctx, "cancel-task", "")

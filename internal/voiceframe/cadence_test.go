@@ -40,7 +40,7 @@ func TestCadenceReport(t *testing.T) {
 func TestCadenceSampleCap(t *testing.T) {
 	c := NewCadence(time.Millisecond, 4)
 	base := time.Now()
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		c.Mark(base.Add(time.Duration(i) * time.Millisecond))
 	}
 	if len(c.gaps) != 4 {

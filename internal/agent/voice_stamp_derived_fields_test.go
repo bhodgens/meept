@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -41,12 +42,12 @@ type stampedClaimChatter struct {
 
 func (m *stampedClaimChatter) Chat(_ context.Context, messages []llm.ChatMessage, _ ...llm.ChatOption) (*llm.Response, error) {
 	m.callCount++
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == llm.RoleUser {
+	for _, message := range slices.Backward(messages) {
+		if message.Role == llm.RoleUser {
 			if m.firstPrompt == "" {
-				m.firstPrompt = messages[i].Content
+				m.firstPrompt = message.Content
 			}
-			m.prompts = append(m.prompts, messages[i].Content)
+			m.prompts = append(m.prompts, message.Content)
 			break
 		}
 	}
@@ -381,7 +382,7 @@ func readRawCapturesTrajectories(t *testing.T, path string) []learning.ResearchT
 		t.Fatalf("read raw_captures.jsonl: %v", err)
 	}
 	var entries []learning.ResearchTrajectory
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue

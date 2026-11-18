@@ -215,6 +215,7 @@ func (r *resampler) Write(pcm []byte) []byte {
 			// next Write continues from prev so the stream is smooth.
 			s = s0
 		}
+		//nolint:gosec // G115: byte(s)/byte(s>>8) IS the s16le encode — truncation is the codec contract
 		out = append(out, byte(s), byte(s>>8))
 		r.pos += step
 	}
@@ -234,19 +235,19 @@ func (r *resampler) Write(pcm []byte) []byte {
 func sampleAt(pcm []byte, i int) int16 {
 	if 2*i+1 >= len(pcm) {
 		if len(pcm) >= 2 {
-			return int16(binary.LittleEndian.Uint16(pcm[len(pcm)-2:]))
+			return int16(binary.LittleEndian.Uint16(pcm[len(pcm)-2:])) //nolint:gosec // G115: s16le decode — bit-reinterpret is the codec contract
 		}
 		return 0
 	}
-	return int16(binary.LittleEndian.Uint16(pcm[2*i:]))
+	return int16(binary.LittleEndian.Uint16(pcm[2*i:])) //nolint:gosec // G115: s16le decode — bit-reinterpret is the codec contract
 }
 
 // lerp interpolates between two s16le samples at fixed-point frac
 // (0..2^32-1).
 func lerp(s0, s1 int16, frac int32) int16 {
 	d := int(s1) - int(s0)
-	v := int(s0)<<32 + int(d)*int(frac)
-	return int16(v >> 32)
+	v := int(s0)<<32 + d*int(frac)
+	return int16(v >> 32) //nolint:gosec // G115: v>>32 is the s16 range by construction (lerp between two int16 at frac<1)
 }
 
 // runOutboundAudio pumps child PCM (.out, L16 s16le@16k) to the signal
@@ -285,7 +286,7 @@ func runOutboundAudio(ctx context.Context, pair *voice.AudioPair, socket audioSo
 					if ctx.Err() != nil {
 						return ctx.Err()
 					}
-					return fmt.Errorf("%w: outbound child->socket: %v", ErrAudioBackpressure, werr)
+					return fmt.Errorf("%w: outbound child->socket: %w", ErrAudioBackpressure, werr)
 				}
 			}
 		}
@@ -308,7 +309,7 @@ func runOutboundAudio(ctx context.Context, pair *voice.AudioPair, socket audioSo
 				time.Sleep(audioReadDeadline)
 				continue
 			}
-			return fmt.Errorf("%w: child read: %v", ErrAudioBackpressure, err)
+			return fmt.Errorf("%w: child read: %w", ErrAudioBackpressure, err)
 		}
 		if n == 0 {
 			// A2: no data this iteration - bounded poll only. When data
@@ -387,7 +388,7 @@ func runInboundAudio(ctx context.Context, pair *voice.AudioPair, socket audioSoc
 					if ctx.Err() != nil {
 						return ctx.Err()
 					}
-					return fmt.Errorf("%w: inbound socket->child: %v", ErrAudioBackpressure, werr)
+					return fmt.Errorf("%w: inbound socket->child: %w", ErrAudioBackpressure, werr)
 				}
 			}
 		}
@@ -404,7 +405,7 @@ func runInboundAudio(ctx context.Context, pair *voice.AudioPair, socket audioSoc
 			if isDeadlineExpired(err) {
 				continue // bounded-iteration deadline: re-check ctx
 			}
-			return fmt.Errorf("%w: socket read: %v", ErrAudioBackpressure, err)
+			return fmt.Errorf("%w: socket read: %w", ErrAudioBackpressure, err)
 		}
 	}
 }

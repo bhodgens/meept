@@ -154,7 +154,7 @@ func TestAudioPlayerConcurrentPlayOpensOneContext(t *testing.T) {
 
 	done := make(chan error, 8)
 	for i := range 8 {
-		go func(i int) { done <- p.Play([]byte{byte(i)}) }(i)
+		go func(i int) { done <- p.Play([]byte{byte(i)}) }(i) //nolint:gosec // G115: i ranges 0..7, the byte conversion never truncates
 	}
 	for range 8 {
 		if err := <-done; err != nil {

@@ -26,6 +26,7 @@ package sms
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -192,7 +193,7 @@ func (s *Store) UpsertState(ctx context.Context, st State) (bool, error) {
 		"SELECT updated_at FROM sms_message_state WHERE provider_message_id = ?",
 		st.ProviderMessageID).Scan(&existing)
 	switch {
-	case err == sql.ErrNoRows:
+	case errors.Is(err, sql.ErrNoRows):
 		// Fresh row: always applies.
 	case err != nil:
 		return false, fmt.Errorf("sms: upsert state %q read guard: %w", st.ProviderMessageID, err)

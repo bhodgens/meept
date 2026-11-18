@@ -27,6 +27,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"maps"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -310,9 +311,7 @@ func TestLedgerAppendExecute_SetStatusSummaryPaired(t *testing.T) {
 	}
 	// set_status WITHOUT summary -> validation error.
 	withStatus := map[string]any{"set_status": "done"}
-	for k, v := range base {
-		withStatus[k] = v
-	}
+	maps.Copy(withStatus, base)
 	res, err := tool.Execute(ctx, withStatus)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -323,9 +322,7 @@ func TestLedgerAppendExecute_SetStatusSummaryPaired(t *testing.T) {
 
 	// summary WITHOUT set_status -> validation error.
 	withSummary := map[string]any{"summary": "roof replaced"}
-	for k, v := range base {
-		withSummary[k] = v
-	}
+	maps.Copy(withSummary, base)
 	res, err = tool.Execute(ctx, withSummary)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -344,9 +341,7 @@ func TestLedgerAppendExecute_SetStatusSummaryPaired(t *testing.T) {
 
 	// Both together -> success AND the state row lands.
 	both := map[string]any{"set_status": "open", "summary": "quote requested"}
-	for k, v := range base {
-		both[k] = v
-	}
+	maps.Copy(both, base)
 	res, err = tool.Execute(ctx, both)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)

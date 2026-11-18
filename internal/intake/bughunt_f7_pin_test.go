@@ -5,6 +5,7 @@ package intake
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,9 +13,10 @@ import (
 	"testing"
 	"time"
 
+	"log/slog"
+
 	"github.com/caimlas/meept/internal/effects"
 	"github.com/caimlas/meept/internal/githubsvc"
-	"log/slog"
 )
 
 // ---------------------------------------------------------------------------
@@ -42,7 +44,7 @@ func newD7FlakyLabelFake(initialFailures int) *d7FlakyLabelFake {
 	// constructor built its own mux; we just need the label endpoint to
 	// override. Serve a mux that (a) proxies comments to the embedded
 	// server and (b) serves flaky labels locally.
-	inner := f.writebackFake.URL
+	inner := f.URL
 	mux := http.NewServeMux()
 	mux.HandleFunc("/repos/o/r/issues/42/comments", func(w http.ResponseWriter, r *http.Request) {
 		// Delegate to the embedded fake (it records the count).
@@ -158,7 +160,7 @@ func TestPollConcurrentSingleFlight(t *testing.T) {
 	var wg sync.WaitGroup
 	errs := make([]error, n)
 	start := make(chan struct{})
-	for i := 0; i < n; i++ {
+	for i := range n {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
@@ -183,8 +185,8 @@ func TestPollConcurrentSingleFlight(t *testing.T) {
 		realPolls int
 		skips     int
 	)
-	for i := 0; i < n; i++ {
-		if errs[i] == ErrPollInProgress {
+	for i := range n {
+		if errors.Is(errs[i], ErrPollInProgress) {
 			skips++
 			continue
 		}
@@ -199,10 +201,6 @@ func TestPollConcurrentSingleFlight(t *testing.T) {
 	if skips == 0 {
 		t.Fatal("no single-flight skips observed; overlapping polls paged concurrently (the D8 race)")
 	}
-}
-
-func sleepPollPin() { /* tiny delay without importing time at top level twice */
-	<-make(chan struct{})
 }
 
 // TestPollWatermarkAdvancesMonotonic pins the mutex-guarded watermark

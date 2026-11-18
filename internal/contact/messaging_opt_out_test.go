@@ -95,6 +95,7 @@ func TestNewStoreMigrationsMessagingOptOutColumn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pragma_table_info: %v", err)
 	}
+	defer rows.Close()
 	found := false
 	for rows.Next() {
 		var name, typ string
@@ -119,9 +120,6 @@ func TestNewStoreMigrationsMessagingOptOutColumn(t *testing.T) {
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("iterate pragma rows: %v", err)
-	}
-	if err := rows.Close(); err != nil {
-		t.Fatalf("close pragma rows: %v", err)
 	}
 	if !found {
 		t.Fatal("fresh store has no messaging_opt_out column (guarded ALTER migration missing)")

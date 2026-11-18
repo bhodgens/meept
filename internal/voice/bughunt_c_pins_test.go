@@ -21,6 +21,7 @@ import (
 	"errors"
 	"log/slog"
 	"net"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -503,11 +504,6 @@ func TestLinkCoordinatorEventSinkNilDefaultAndCcidKey(t *testing.T) {
 	waitFor(t, time.Second, "ring keyed by loop ccid", func() bool {
 		mu.Lock()
 		defer mu.Unlock()
-		for _, s := range got {
-			if s == "cc-loop-a|floor_released" {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(got, "cc-loop-a|floor_released")
 	})
 }

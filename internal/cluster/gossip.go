@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -389,12 +390,7 @@ func verifyEventWithPeerKeys(g *GossipEngine, event *models.ClusterEvent) bool {
 	if g == nil || event == nil || len(event.Signature) == 0 {
 		return false
 	}
-	for _, pub := range g.PeerSigningKeys(event.NodeID) {
-		if event.Verify(pub) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(g.PeerSigningKeys(event.NodeID), event.Verify)
 }
 
 // SyncPeerSigningKeys publishes this node's signing pubkey into the

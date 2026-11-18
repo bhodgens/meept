@@ -598,8 +598,8 @@ func matchesTrustedPrefix(cleaned, prefix string) bool {
 // file, including extension variants such as Dockerfile.dev.
 func isDeniedBuildFile(cleaned string) bool {
 	base := cleaned
-	if i := strings.LastIndex(cleaned, "/"); i >= 0 {
-		base = cleaned[i+1:]
+	if _, after, ok := strings.CutLast(cleaned, "/"); ok {
+		base = after
 	}
 	for _, name := range deniedBuildFiles {
 		if base == name || strings.HasPrefix(base, name+".") {
@@ -708,9 +708,9 @@ func verifyTouchedPackage(ctx context.Context, worktreeRoot, relPath string) err
 	if !strings.HasSuffix(cleaned, ".go") {
 		return nil
 	}
-	dir := cleaned
-	if i := strings.LastIndex(cleaned, "/"); i >= 0 {
-		dir = cleaned[:i]
+	var dir string
+	if before, _, ok := strings.CutLast(cleaned, "/"); ok {
+		dir = before
 	} else {
 		dir = "."
 	}

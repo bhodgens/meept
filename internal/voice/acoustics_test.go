@@ -31,26 +31,23 @@ func acouCfg() config.VoiceConfig {
 	cfg.Local.BargeInRms = 3000
 	cfg.EmployeeLeg = []config.EmployeeLegConfig{
 		{Employee: "tweaker", Leg: LegLocal,
-			TurnConfirmMs: ptr(1200), MinTurnWords: ptr(4),
+			TurnConfirmMs: new(1200), MinTurnWords: new(4),
 			ExemptPhrases:        []string{"pause"},
-			EnergyGate:           bptr(false),
-			MinRMS:               ptr(900),
-			FragmentDecayS:       ptr(60),
-			ReplyExemptS:         ptr(8),
-			FillerGraceMs:        ptr(0),
+			EnergyGate:           new(false),
+			MinRMS:               new(900),
+			FragmentDecayS:       new(60),
+			ReplyExemptS:         new(8),
+			FillerGraceMs:        new(0),
 			SilencePrompt:        "Hello?",
-			SilencePromptSeconds: ptr(10), SilenceHangupAfterSeconds: ptr(20),
-			BargeInRms:        ptr(5000),
-			BackchannelSoften: bptr(true)},
+			SilencePromptSeconds: new(10), SilenceHangupAfterSeconds: new(20),
+			BargeInRms:        new(5000),
+			BackchannelSoften: new(true)},
 		{Employee: "plain", Leg: LegLocal},
 		// gate-off escape hatch: explicit 0 row over a running global.
-		{Employee: "silent", Leg: LegPhone, MinTurnWords: ptr(0), ReplyExemptS: ptr(0)},
+		{Employee: "silent", Leg: LegPhone, MinTurnWords: new(0), ReplyExemptS: new(0)},
 	}
 	return cfg
 }
-
-func ptr(n int) *int    { return &n }
-func bptr(b bool) *bool { return &b }
 
 // Row-set values beat the global for EVERY key.
 func TestResolveAcousticsRowWinsEveryKey(t *testing.T) {

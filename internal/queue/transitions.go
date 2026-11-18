@@ -2,6 +2,7 @@ package queue
 
 import (
 	"errors"
+	"slices"
 	"strings"
 )
 
@@ -60,12 +61,7 @@ func queueAllows(from, to JobState) bool {
 	if !ok {
 		return false
 	}
-	for _, s := range allowed {
-		if s == to {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(allowed, to)
 }
 
 // legalSources returns the states that may transition to 'to', as parameter
@@ -78,11 +74,8 @@ func queueAllows(from, to JobState) bool {
 func legalSources(to JobState) []JobState {
 	var sources []JobState
 	for from, allowed := range jobTransitions {
-		for _, s := range allowed {
-			if s == to {
-				sources = append(sources, from)
-				break
-			}
+		if slices.Contains(allowed, to) {
+			sources = append(sources, from)
 		}
 	}
 	return sources

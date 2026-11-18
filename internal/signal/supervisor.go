@@ -153,7 +153,7 @@ func (s *Supervisor) Start(ctx context.Context) error {
 	s.stateMu.Unlock()
 	s.startWatch(proc)
 	if s.cfg.IdleStopSeconds > 0 {
-		go s.idleStopLoop()
+		go s.idleStopLoop() //nolint:gosec // G118: the loop carries no ctx — it stops on s.stopWatch, the supervisor's own lifecycle channel
 	}
 	return nil
 }

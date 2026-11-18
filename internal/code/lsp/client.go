@@ -307,11 +307,9 @@ func (c *Client) GotoDefinition(ctx context.Context, uri string, line, char int)
 // FindReferences finds all references to a symbol.
 func (c *Client) FindReferences(ctx context.Context, uri string, line, char int, includeDecl bool) ([]Location, error) {
 	params := ReferenceParams{
-		TextDocumentPositionParams: TextDocumentPositionParams{
-			TextDocument: TextDocumentIdentifier{URI: uri},
-			Position:     Position{Line: line, Character: char},
-		},
-		Context: ReferenceContext{IncludeDeclaration: includeDecl},
+		TextDocument: TextDocumentIdentifier{URI: uri},
+		Position:     Position{Line: line, Character: char},
+		Context:      ReferenceContext{IncludeDeclaration: includeDecl},
 	}
 
 	result, err := c.Call(ctx, "textDocument/references", params)

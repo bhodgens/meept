@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -104,12 +105,7 @@ var allPlanStates = []PlanState{
 }
 
 func gateTableAllows(from, to PlanState) bool {
-	for _, t := range planTransitions[from] {
-		if t == to {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(planTransitions[from], to)
 }
 
 // TestPlanTransitionTable pins contract C-P4 (leaf 04, table-driven design
@@ -397,7 +393,7 @@ func TestPhaseFailedWriter(t *testing.T) {
 
 	// The step-failure signal (the executor seam leaf 02 wires): three failed
 	// steps on a total-of-3 phase.
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if err := mgr.OnStepFailed(ctx, "task-fail-phase", "step-1"); err != nil {
 			t.Fatalf("OnStepFailed %d: %v", i, err)
 		}
@@ -464,14 +460,12 @@ func TestPhaseConfirmedWriter(t *testing.T) {
 	if err := mgr.store.CreatePlan(ctx, p); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
-	ids := make([]string, 0, 2)
-	for seq := 1; seq <= 2; seq++ {
-		ph := NewPlanPhase(p.ID, "Phase done", seq, 1)
+	for seq := range 2 {
+		ph := NewPlanPhase(p.ID, "Phase done", seq+1, 1)
 		ph.State = PhaseCompleted
 		if err := mgr.store.CreatePhase(ctx, ph); err != nil {
 			t.Fatalf("CreatePhase: %v", err)
 		}
-		ids = append(ids, ph.ID)
 	}
 
 	if err := mgr.ConfirmPlan(ctx, p.ID, "", "reviewer"); err != nil {

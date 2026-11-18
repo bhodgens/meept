@@ -915,7 +915,7 @@ func (s *Store) RecoverStaleTasks(journal turnjournal.JournalStore, jobs queue.Q
 // direction) and the sweep continues.
 func (s *Store) journalReclaimableTasks(ctx context.Context, journal turnjournal.JournalStore, jobs queue.Queue) (map[string]struct{}, error) {
 	if journal == nil || jobs == nil {
-		return nil, nil
+		return nil, nil //nolint:nilnil // documented no-rehydrate posture: nil set = the sweep keeps every abandoned row
 	}
 	runs, err := journal.OpenRuns(ctx)
 	if err != nil {

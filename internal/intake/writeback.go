@@ -176,7 +176,6 @@ func (w *WriteBack) Report(ctx context.Context, t Ticket, o Outcome) (int64, str
 			prior.State == effects.StateReceipted && who.Matches(effects.Claimant{
 			AgentID: prior.ClaimantAgentID, SessionID: prior.ClaimantSessionID,
 		}) {
-			receipt = prior.Receipt
 			var adoptErr error
 			receipt, reused, adoptErr = w.retryLabelOnly(ctx, client, num, o, key, who, prior.Receipt)
 			if adoptErr != nil {

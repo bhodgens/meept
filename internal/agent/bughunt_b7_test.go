@@ -34,7 +34,7 @@ func TestParkStoreConcurrentLoadsNoBusy(t *testing.T) {
 	// half expired (prune half of the transaction), half live.
 	resumePast := time.Now().Add(-time.Minute)
 	resumeFuture := time.Now().Add(time.Hour)
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		key := fmt.Sprintf("k-expired-%d", i)
 		rec := ParkedTurnRecord{
 			ConversationID: "conv-" + key,
@@ -48,7 +48,7 @@ func TestParkStoreConcurrentLoadsNoBusy(t *testing.T) {
 			t.Fatalf("Save expired %s: %v", key, err)
 		}
 	}
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		key := fmt.Sprintf("k-live-%d", i)
 		rec := ParkedTurnRecord{
 			ConversationID: "conv-" + key,
@@ -67,11 +67,11 @@ func TestParkStoreConcurrentLoadsNoBusy(t *testing.T) {
 	const iterations = 25
 	var wg sync.WaitGroup
 	errCh := make(chan error, loaders)
-	for i := 0; i < loaders; i++ {
+	for i := range loaders {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			for j := 0; j < iterations; j++ {
+			for j := range iterations {
 				recs, _, err := store.Load(ctx, ParkKindChat, time.Now())
 				if err != nil {
 					errCh <- fmt.Errorf("loader %d iter %d: %w", id, j, err)
@@ -83,10 +83,8 @@ func TestParkStoreConcurrentLoadsNoBusy(t *testing.T) {
 	}
 	// A concurrent writer (Save) rides along to make the read-prune-commit
 	// transaction contend for real.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for j := 0; j < iterations; j++ {
+	wg.Go(func() {
+		for j := range iterations {
 			key := fmt.Sprintf("k-writer-%d", j)
 			rec := ParkedTurnRecord{
 				ConversationID: "conv-" + key,
@@ -101,7 +99,7 @@ func TestParkStoreConcurrentLoadsNoBusy(t *testing.T) {
 				return
 			}
 		}
-	}()
+	})
 	wg.Wait()
 	close(errCh)
 

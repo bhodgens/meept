@@ -183,7 +183,7 @@ func resolveWebdir(flagged string) string {
 		if candidate == "" {
 			continue
 		}
-		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() { //nolint:gosec // G703: operator-supplied webdir candidate (-webdir flag / WEBDIR env), the same trust class as every flag path
 			return candidate
 		}
 	}
@@ -198,7 +198,7 @@ type stringSlice []string
 func (s *stringSlice) String() string { return strings.Join(*s, ",") }
 
 func (s *stringSlice) Set(raw string) error {
-	for _, part := range strings.Split(raw, ",") {
+	for part := range strings.SplitSeq(raw, ",") {
 		if trimmed := strings.TrimSpace(part); trimmed != "" {
 			*s = append(*s, trimmed)
 		}

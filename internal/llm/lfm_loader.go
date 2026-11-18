@@ -277,7 +277,7 @@ func parseSafetensorsTensors(path string) ([]string, error) {
 	if n == 0 || n > maxHeader {
 		return nil, fmt.Errorf("header length %d out of range", n)
 	}
-	if uint64(info.Size()) < 8+n {
+	if info.Size() < int64(n)+8 { //nolint:gosec // G115: n is clamped to maxHeader (32 MiB) above, so int64(n)+8 cannot overflow
 		return nil, fmt.Errorf("truncated header")
 	}
 	hdr := make([]byte, n)

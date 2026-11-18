@@ -44,7 +44,7 @@ func TestTalkLoopFillerSuppressedInsideGrace(t *testing.T) {
 func TestTalkLoopFillerFiresAfterGrace(t *testing.T) {
 	sink := &recordSink{}
 	sup := &cannedSupervisor{}
-	turns := &slowTurns{cannedTurns: cannedTurns{reply: "Checked. All clear."}, delay: 400 * time.Millisecond}
+	turns := &slowTurns{reply: "Checked. All clear.", delay: 400 * time.Millisecond}
 	loop := newTestTalkLoop(t, sink.Send, sup, turns, TalkLoopConfig{
 		FillerLines:  []string{"One moment."},
 		GreetingLine: "Hello.",
@@ -74,7 +74,7 @@ func TestTalkLoopFillerFiresAfterGrace(t *testing.T) {
 func TestTalkLoopCancelledDraftNeverEmitsZombieFiller(t *testing.T) {
 	sink := &recordSink{}
 	sup := &cannedSupervisor{}
-	turns := &slowTurns{cannedTurns: cannedTurns{reply: "late"}, delay: 2 * time.Second}
+	turns := &slowTurns{reply: "late", delay: 2 * time.Second}
 	loop := newTestTalkLoop(t, sink.Send, sup, turns, TalkLoopConfig{
 		FillerLines:  []string{"One moment."},
 		GreetingLine: "Hello.",

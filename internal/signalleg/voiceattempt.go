@@ -2,6 +2,7 @@ package signalleg
 
 import (
 	"context"
+	"errors"
 
 	"github.com/caimlas/meept/internal/contact"
 	"github.com/caimlas/meept/internal/voice"
@@ -91,15 +92,10 @@ func (a *signalVoiceAttempt) Attempt(ctx context.Context, rec contact.Record, me
 // Named errors (repo rule): non-nil err on every non-terminal outcome
 // is the C2 contract (err == nil means CONNECTED/DELIVERED).
 var (
-	errSignalAttemptUnwired  = errorStr("signalleg: voice attempt not wired")
-	errSignalOutcomeUnknown  = errorStr("signalleg: call outcome unavailable")
-	errSignalOutcomeAdvanced = errorStr("signalleg: outcome advanced the chain")
+	errSignalAttemptUnwired  = errors.New("signalleg: voice attempt not wired")
+	errSignalOutcomeUnknown  = errors.New("signalleg: call outcome unavailable")
+	errSignalOutcomeAdvanced = errors.New("signalleg: outcome advanced the chain")
 )
-
-// errorStr is the package-local sentinel helper.
-type errorStr string
-
-func (e errorStr) Error() string { return string(e) }
 
 // OutcomeRegistry re-exports the shared collector shape for the signal
 // wiring (the daemon feeds BOTH attempts from ONE release-hook

@@ -981,7 +981,6 @@ func (r *Resolver) ResolveForAliasDifficulty(aliasName string, sessionID string,
 
 	// Return the active model
 	if selectedIdx < len(alias.Models) {
-		chosen := alias.Models[selectedIdx]
 		// Selection chain hook (Contract C1, sovereign-router-parity leaf
 		// 01, T11): the chain runs AFTER the model is chosen and BEFORE
 		// return, so later filter leaves (05 posture, 02 admission) compose
@@ -1025,7 +1024,7 @@ func (r *Resolver) ResolveForAliasDifficulty(aliasName string, sessionID string,
 				selectedIdx = idx
 			}
 		}
-		chosen = alias.Models[selectedIdx]
+		chosen := alias.Models[selectedIdx]
 		if v, _ := r.runSelectionFilters(&Candidate{
 			Model:     chosen,
 			Alias:     aliasName,
@@ -2451,11 +2450,11 @@ func (r *Resolver) hasScopeBlocks() bool {
 // whether a block-map key is a scoped key (not a legacy host|credential
 // key) and returns its scope/target.
 func splitScopeBlockKey(key string) (FailureScope, string, bool) {
-	i := strings.IndexByte(key, 0)
-	if i < 0 {
+	before, after, ok := strings.Cut(key, "\x00")
+	if !ok {
 		return "", "", false
 	}
-	return FailureScope(key[:i]), key[i+1:], true
+	return FailureScope(before), after, true
 }
 
 // allBlockedSentinel picks the all-blocked error by scope: when every

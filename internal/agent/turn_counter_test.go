@@ -38,7 +38,7 @@ func TestTurnCounter_ZeroLimit(t *testing.T) {
 
 func TestTurnCounter_MultiIncrement(t *testing.T) {
 	tc := newTurnCounter(3)
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		_, exhausted := tc.Increment()
 		if exhausted {
 			t.Fatalf("increment %d must not exhaust (limit 3)", i+1)
@@ -53,12 +53,10 @@ func TestTurnCounter_MultiIncrement(t *testing.T) {
 func TestTurnCounter_Concurrent(t *testing.T) {
 	tc := newTurnCounter(1000)
 	var wg sync.WaitGroup
-	for i := 0; i < 50; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 50 {
+		wg.Go(func() {
 			tc.Increment()
-		}()
+		})
 	}
 	wg.Wait()
 	if got := tc.GetCount(); got != 50 {

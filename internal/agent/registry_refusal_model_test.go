@@ -16,12 +16,10 @@ import (
 func TestRefusalModel_DefinitionToSpec(t *testing.T) {
 	r := &AgentRegistry{logger: silentLogger()}
 	def := &agents.AgentDefinition{
-		AgentMetadata: agents.AgentMetadata{
-			ID:           "ref-agent",
-			Name:         "Refusal Agent",
-			Role:         "executor",
-			RefusalModel: "mlx-local/uncensored-8b",
-		},
+		ID:           "ref-agent",
+		Name:         "Refusal Agent",
+		Role:         "executor",
+		RefusalModel: "mlx-local/uncensored-8b",
 	}
 
 	spec := r.definitionToSpec(def)
@@ -49,7 +47,7 @@ func TestRefusalModel_MergeSpec_Reload(t *testing.T) {
 		RefusalModel: "mlx-local/uncensored-8b",
 	}
 	def := &agents.AgentDefinition{
-		AgentMetadata: agents.AgentMetadata{ID: "ref-agent", Name: "Refusal Agent", Role: "executor"},
+		ID: "ref-agent", Name: "Refusal Agent", Role: "executor",
 	}
 
 	merged := r.mergeSpec(base, def)

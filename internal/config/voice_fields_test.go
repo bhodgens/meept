@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -203,13 +204,7 @@ func TestVoiceAcousticDefaults(t *testing.T) {
 	}
 	for _, ph := range []string{"stop", "cancel", "yes", "no", "thanks", "thank you",
 		"okay", "ok", "mm-hm", "mmhm", "uh-huh", "go ahead"} {
-		found := false
-		for _, got := range v.ExemptPhrases {
-			if got == ph {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(v.ExemptPhrases, ph)
 		if !found {
 			t.Errorf("default exemption %q missing from %v", ph, v.ExemptPhrases)
 		}

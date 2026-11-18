@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"sort"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -52,11 +52,8 @@ func dohertyBudget(t *testing.T) time.Duration {
 
 func p95Dur(durs []time.Duration) time.Duration {
 	sorted := append([]time.Duration(nil), durs...)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
-	idx := int(float64(len(sorted))*0.95) - 1
-	if idx < 0 {
-		idx = 0
-	}
+	slices.Sort(sorted)
+	idx := max(int(float64(len(sorted))*0.95)-1, 0)
 	return sorted[idx]
 }
 
@@ -108,14 +105,14 @@ func TestDohertyRPCDispatchLatency(t *testing.T) {
 			params := json.RawMessage(fx.params)
 
 			// Warmup: cold caches inflate early samples.
-			for i := 0; i < 10; i++ {
+			for range 10 {
 				if _, err := srv.CallMethod(context.Background(), fx.method, params); err != nil {
 					t.Fatalf("warmup %s: %v", fx.method, err)
 				}
 			}
 
 			var durs []time.Duration
-			for i := 0; i < 100; i++ {
+			for range 100 {
 				start := time.Now()
 				if _, err := srv.CallMethod(context.Background(), fx.method, params); err != nil {
 					t.Fatalf("%s: %v", fx.method, err)
@@ -152,14 +149,14 @@ func TestDohertyT0AckLatency(t *testing.T) {
 	ackBudget := time.Duration(100 * scale * float64(time.Millisecond))
 	params := json.RawMessage(`{"enabled":false}`)
 
-	for i := 0; i < 10; i++ { // warmup
+	for range 10 { // warmup
 		if _, err := srv.CallMethod(context.Background(), "notifications.set_dnd", params); err != nil {
 			t.Fatalf("warmup: %v", err)
 		}
 	}
 
 	var durs []time.Duration
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		start := time.Now()
 		if _, err := srv.CallMethod(context.Background(), "notifications.set_dnd", params); err != nil {
 			t.Fatalf("set_dnd: %v", err)

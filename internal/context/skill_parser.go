@@ -66,8 +66,8 @@ func extractSkillSlug(path string) string {
 	}
 
 	// Fallback: extract from path
-	if idx := strings.LastIndex(path, "/"); idx != -1 {
-		slug := path[idx+1:]
+	if _, after, ok := strings.CutLast(path, "/"); ok {
+		slug := after
 		// Remove "/SKILL.md" suffix if present
 		if strings.HasSuffix(slug, "/SKILL.md") {
 			return slug[:len(slug)-9]
@@ -303,10 +303,10 @@ func parseAgentsFromBody(_, path string) []*AgentDefinition {
 
 // extractFileName extracts the base filename without extension
 func extractFileName(path string) string {
-	if idx := strings.LastIndex(path, "/"); idx != -1 {
-		filename := path[idx+1:]
-		if extIdx := strings.LastIndex(filename, "."); extIdx != -1 {
-			return filename[:extIdx]
+	if _, after, ok := strings.CutLast(path, "/"); ok {
+		filename := after
+		if before, _, ok := strings.CutLast(filename, "."); ok {
+			return before
 		}
 		return filename
 	}

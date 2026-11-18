@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"sort"
 	"strings"
 	"sync"
@@ -119,9 +120,7 @@ func (b *ToolRetryBreaker) snapshotCounts() map[string]int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	out := make(map[string]int, len(b.counts))
-	for k, v := range b.counts {
-		out[k] = v
-	}
+	maps.Copy(out, b.counts)
 	return out
 }
 

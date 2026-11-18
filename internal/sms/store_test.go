@@ -351,13 +351,13 @@ func TestStoreWALPosture(t *testing.T) {
 	// 20 concurrent appends: with the 1-conn WAL convention all succeed
 	// (busy_timeout set); any error here is posture drift.
 	errCh := make(chan error, 20)
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		go func(i int) {
 			_, err := s.AppendEvent(ctx, eventAt("wal-"+strconv.Itoa(i), src, ts.Add(time.Duration(i)*time.Millisecond)))
 			errCh <- err
 		}(i)
 	}
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		if err := <-errCh; err != nil {
 			t.Fatalf("concurrent AppendEvent: %v (WAL/busy_timeout posture broken)", err)
 		}

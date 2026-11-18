@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -567,12 +568,7 @@ func (c *Constitution) CheckToolReferences(knownToolNames map[string]struct{}, r
 	}
 	isReserved := func(name string) bool {
 		canonical := canonicalToolName(name)
-		for _, r := range reserved {
-			if canonical == r {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(reserved, canonical)
 	}
 	for _, name := range c.Constraints.ToolsAllowed {
 		if isReserved(name) {

@@ -53,8 +53,8 @@ var voiceBriefFillers = map[string]bool{
 func usableCheck(lines []voice.TranscriptLine) bool {
 	count := 0
 	for _, l := range lines {
-		for _, word := range strings.Fields(strings.ToLower(l.Text)) {
-			trimmed := strings.Trim(word, ".,!?;:'\"()[]{}-—…\"\"''")
+		for word := range strings.FieldsSeq(strings.ToLower(l.Text)) {
+			trimmed := strings.Trim(word, ".,!?;:'\"()[]{}-—…")
 			if trimmed == "" {
 				continue
 			}
@@ -127,7 +127,7 @@ func briefForCall(ctx context.Context, llm func(prompt string) (string, error), 
 	}
 	prompt := buildVoiceBriefPrompt(lines)
 
-	for attempt := 0; attempt < 2; attempt++ {
+	for range 2 {
 		resp, err := callBriefLLM(ctx, llm, prompt)
 		if err != nil {
 			// Transport/timeout error on the first attempt gets the same

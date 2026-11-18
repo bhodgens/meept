@@ -98,8 +98,8 @@ func fetchPRStatus(ctx context.Context, client *github.Client, owner, repo strin
 	var workflows []*github.WorkflowRun
 	if headSHA != "" {
 		res, _, err := client.Actions.ListRepositoryWorkflowRuns(ctx, owner, repo, &github.ListWorkflowRunsOptions{
-			HeadSHA:     headSHA,
-			ListOptions: github.ListOptions{PerPage: 100},
+			HeadSHA: headSHA,
+			PerPage: 100,
 		})
 		if err != nil {
 			return githubsvc.PRStatus{}, fmt.Errorf("list workflow runs for ref %s: %w", headSHA, err)

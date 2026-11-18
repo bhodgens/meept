@@ -704,10 +704,7 @@ func (p *pipeline) evaluateShortFinal(trimmed string) (gateVerdict, int, string)
 	effN := base
 	if p.fragmentDecayS > 0 && p.gateDropStreak > 0 &&
 		!p.gateDropAt.IsZero() && now.Sub(p.gateDropAt) < time.Duration(p.fragmentDecayS)*time.Second {
-		bump := p.gateDropStreak
-		if bump > 3 {
-			bump = 3
-		}
+		bump := min(p.gateDropStreak, 3)
 		effN = base + bump
 	}
 	words := wordCount(stripNonSpeechTokens(trimmed))
@@ -2215,7 +2212,7 @@ func rmsEnergy(b []byte) (uint64, uint64) {
 		if x < 0 {
 			x = -x // |sample| magnitude; -32768 -> 32768 fits int32
 		}
-		u := uint64(x)
+		u := uint64(x) //nolint:gosec // G115: x >= 0 by the abs above, so the widening is lossless
 		sum += u * u
 		n++
 	}

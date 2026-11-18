@@ -127,26 +127,32 @@ func (s *MessageStore) migrateMessageStateCheck() error {
 		return fmt.Errorf("message CHECK migration table_info: %w", err)
 	}
 	var cols []string
-	for colRows.Next() {
-		var (
-			cid     int
-			name    string
-			ctype   string
-			notnull int
-			dflt    sql.NullString
-			pk      int
-		)
-		if err := colRows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
-			colRows.Close()
-			return fmt.Errorf("message CHECK migration table_info scan: %w", err)
+	// The cursor must be CLOSED inside this closure, not deferred to
+	// function exit: the pool is single-connection and the rebuild tx
+	// below (Begin) would deadlock waiting for it.
+	if err := func() error {
+		defer colRows.Close()
+		for colRows.Next() {
+			var (
+				cid     int
+				name    string
+				ctype   string
+				notnull int
+				dflt    sql.NullString
+				pk      int
+			)
+			if err := colRows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+				return fmt.Errorf("message CHECK migration table_info scan: %w", err)
+			}
+			cols = append(cols, name)
 		}
-		cols = append(cols, name)
+		if err := colRows.Err(); err != nil {
+			return fmt.Errorf("message CHECK migration table_info iteration: %w", err)
+		}
+		return nil
+	}(); err != nil {
+		return err
 	}
-	if err := colRows.Err(); err != nil {
-		colRows.Close()
-		return fmt.Errorf("message CHECK migration table_info iteration: %w", err)
-	}
-	colRows.Close()
 	if len(cols) == 0 {
 		return fmt.Errorf("message CHECK migration: PRAGMA table_info(agent_messages) returned no columns")
 	}
@@ -156,19 +162,23 @@ func (s *MessageStore) migrateMessageStateCheck() error {
 		return fmt.Errorf("message CHECK migration index capture: %w", err)
 	}
 	var indexSQL []string
-	for idxRows.Next() {
-		var sqlText string
-		if err := idxRows.Scan(&sqlText); err != nil {
-			idxRows.Close()
-			return fmt.Errorf("message CHECK migration index scan: %w", err)
+	// Same single-connection rule as the table_info cursor above.
+	if err := func() error {
+		defer idxRows.Close()
+		for idxRows.Next() {
+			var sqlText string
+			if err := idxRows.Scan(&sqlText); err != nil {
+				return fmt.Errorf("message CHECK migration index scan: %w", err)
+			}
+			indexSQL = append(indexSQL, sqlText)
 		}
-		indexSQL = append(indexSQL, sqlText)
+		if err := idxRows.Err(); err != nil {
+			return fmt.Errorf("message CHECK migration index iteration: %w", err)
+		}
+		return nil
+	}(); err != nil {
+		return err
 	}
-	if err := idxRows.Err(); err != nil {
-		idxRows.Close()
-		return fmt.Errorf("message CHECK migration index iteration: %w", err)
-	}
-	idxRows.Close()
 
 	tx, err := s.db.Begin()
 	if err != nil {

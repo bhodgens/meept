@@ -145,8 +145,8 @@ func TestClipGateHitRoundTripsRawPCM(t *testing.T) {
 	key := ClipKey("Talk soon.", "qwen3", "m", "v", nil)
 	pcm := make([]byte, 2*4800) // 200 ms at 24 kHz s16le
 	for i := 0; i < len(pcm); i += 2 {
-		pcm[i] = byte(i)
-		pcm[i+1] = byte(i >> 8)
+		pcm[i] = byte(i)        //nolint:gosec // G602: i < len(pcm) by the loop bound
+		pcm[i+1] = byte(i >> 8) //nolint:gosec // G602: len(pcm) is even, so i+1 stays in bounds
 	}
 	if err := s.Put(key, Meta{Key: key, Text: "Talk soon.", Vendor: "qwen3", Model: "m", Voice: "v", SampleRate: 24000, Bytes: int64(len(pcm))}, bytes.NewReader(pcm)); err != nil {
 		t.Fatalf("Put: %v", err)

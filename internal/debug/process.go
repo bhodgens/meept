@@ -187,8 +187,8 @@ func unknownExt(path string) string {
 
 // baseName returns the last component of a path, without directory prefix.
 func baseName(path string) string {
-	if slash := strings.LastIndex(path, "/"); slash >= 0 {
-		return path[slash+1:]
+	if _, after, ok := strings.CutLast(path, "/"); ok {
+		return after
 	}
 	return path
 }

@@ -296,13 +296,11 @@ func (s *PromptService) Get(name string) (PromptDetail, error) {
 			mod = info.ModTime()
 		}
 		return PromptDetail{
-			PromptEntry: PromptEntry{
-				Name:       name,
-				Tier:       tier.label,
-				SourcePath: full,
-				Modified:   mod,
-			},
-			Content: string(body),
+			Name:       name,
+			Tier:       tier.label,
+			SourcePath: full,
+			Modified:   mod,
+			Content:    string(body),
 		}, nil
 	}
 	return PromptDetail{}, fmt.Errorf("prompt %q not found in any tier", name)

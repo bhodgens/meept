@@ -138,10 +138,7 @@ func (c *Child) handleKeysFrame(line string) error {
 	// on a wire value).
 	turnConfirmMs := defaultTurnConfirmMs
 	if w.TurnConfirmMs != nil {
-		turnConfirmMs = *w.TurnConfirmMs
-		if turnConfirmMs < 0 {
-			turnConfirmMs = 0
-		}
+		turnConfirmMs = max(*w.TurnConfirmMs, 0)
 	}
 	// Absent min_turn_words (old daemon line) = 0 = gate disabled
 	// (legacy behavior); explicit 0 the same; negative clamps to 0 —
@@ -149,10 +146,7 @@ func (c *Child) handleKeysFrame(line string) error {
 	// value).
 	minTurnWords := 0
 	if w.MinTurnWords != nil {
-		minTurnWords = *w.MinTurnWords
-		if minTurnWords < 0 {
-			minTurnWords = 0
-		}
+		minTurnWords = max(*w.MinTurnWords, 0)
 	}
 	// Gate improvements (voice-peragent leaf 01). Absent-on-wire
 	// (old daemon) lands on the gate's today-shape defaults: nil
@@ -174,10 +168,7 @@ func (c *Child) handleKeysFrame(line string) error {
 	}
 	replyExemptS := defaultReplyExemptS
 	if w.ReplyExemptS != nil {
-		replyExemptS = *w.ReplyExemptS
-		if replyExemptS < 0 {
-			replyExemptS = 0
-		}
+		replyExemptS = max(*w.ReplyExemptS, 0)
 	}
 	return c.handleKeys(KeysFrame{
 		CallID:         w.CallID,

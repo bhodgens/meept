@@ -17,16 +17,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 
+	"log/slog"
+
 	"github.com/caimlas/meept/internal/effects"
 	"github.com/caimlas/meept/internal/githubsvc"
 	"github.com/caimlas/meept/internal/plan"
-	"log/slog"
 )
 
 // ---------------------------------------------------------------------------
@@ -256,9 +258,7 @@ func TestProjector_EnsureProjection_Creates(t *testing.T) {
 	badLinks := len(fake.badLinks)
 	linked := len(fake.parentOf)
 	parentOf := make(map[int]int, len(fake.parentOf))
-	for k, v := range fake.parentOf {
-		parentOf[k] = v
-	}
+	maps.Copy(parentOf, fake.parentOf)
 	fake.mu.Unlock()
 	if badLinks != 0 {
 		t.Errorf("sub_issues posts naming uncreated issue numbers: %v (create-and-parent shape leaked)", fake.badLinks)

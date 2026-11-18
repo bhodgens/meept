@@ -3,7 +3,6 @@ package daemon
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"testing"
 
@@ -35,9 +34,9 @@ func TestVectorHybrid_DisabledByDefault(t *testing.T) {
 // produce a wiring (the daemon logs and continues with the legacy path).
 func TestVectorHybrid_NewWiringWithoutVectorStoreFailsClosed(t *testing.T) {
 	mgr := memory.NewManager(memory.ManagerConfig{
-		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Logger: slog.New(slog.DiscardHandler),
 	})
-	wiring, err := newVectorHybridWiring(mgr, 0.5, false, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	wiring, err := newVectorHybridWiring(mgr, 0.5, false, slog.New(slog.DiscardHandler))
 	if err == nil {
 		t.Fatal("expected error when the manager has no ShardManager vector searcher")
 	}
@@ -49,11 +48,11 @@ func TestVectorHybrid_NewWiringWithoutVectorStoreFailsClosed(t *testing.T) {
 // newWiringTestServer builds an RPC server the same way daemon.go does.
 func newWiringTestServer(t *testing.T) *rpc.Server {
 	t.Helper()
-	return rpc.New(&rpc.Config{SocketPath: filepath_join(t.TempDir(), "test.sock")}, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	return rpc.New(&rpc.Config{SocketPath: filepathJoin(t.TempDir(), "test.sock")}, nil, slog.New(slog.DiscardHandler))
 }
 
-// filepath_join avoids importing path/filepath for one call.
-func filepath_join(parts ...string) string {
+// filepathJoin avoids importing path/filepath for one call.
+func filepathJoin(parts ...string) string {
 	out := ""
 	for i, p := range parts {
 		if i > 0 {
@@ -145,7 +144,7 @@ func TestAtomicCompaction_DisabledKeepsRawWindow(t *testing.T) {
 	memCfg.DataDir = mgr.DataDir()
 	agentCfg := config.DefaultConfig().Agent // AtomicCompaction.Enabled == false
 	l0c := &l0Components{dataDir: mgr.DataDir()}
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := slog.New(slog.DiscardHandler)
 
 	worker := wireL0Distill(l0c, mgr, nil, memCfg, agentCfg, logger)
 	if worker == nil {
@@ -166,7 +165,7 @@ func newWiringTestManager(t *testing.T) *memory.Manager {
 			DataDir:  t.TempDir(),
 			Episodic: config.EpisodicConfig{Enabled: true},
 		},
-		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Logger: slog.New(slog.DiscardHandler),
 	})
 	if err := mgr.Initialize(context.Background()); err != nil {
 		t.Fatalf("init manager: %v", err)

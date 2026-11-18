@@ -52,8 +52,7 @@ func TestFromAbsence(t *testing.T) {
 		t.Error("From(context.Background()) = ok true, want false (absence must be distinguishable)")
 	}
 	// A derived non-caller ctx reads the same absence.
-	cancelled, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	cancelled := t.Context()
 	if _, ok := From(cancelled); ok {
 		t.Error("From(cancelled non-caller ctx) = ok true, want false")
 	}

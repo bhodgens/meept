@@ -173,8 +173,6 @@ func (r *cwRecordingRunner) Run(_ context.Context, _ voice.SessionHandle, _ stri
 	return "cw test reply", nil
 }
 
-func boolPtr(b bool) *bool { return &b }
-
 // TestContextWarmDisabledNoWarms pins the zero-overhead posture: with
 // voice.context_warm false the warmer is not even constructed, the route
 // seam stays unregistered, and partial + final frames produce no WarmFn
@@ -196,7 +194,7 @@ func TestContextWarmDisabledNoWarms(t *testing.T) {
 	// The frames still flow unchanged: a final prompt with the seam
 	// unregistered must not error the router (the loop's turn lane is
 	// covered by TestRouteFrameHeardOnlyOnSuccessfulEnqueue).
-	w.routeFrame(voice.Frame{CallID: ccid, Event: voice.EventPrompt, Text: "ctxwarm disabled final", Last: boolPtr(true)})
+	w.routeFrame(voice.Frame{CallID: ccid, Event: voice.EventPrompt, Text: "ctxwarm disabled final", Last: new(true)})
 	time.Sleep(100 * time.Millisecond)
 	w.releaseCall(ccid, voice.OutcomeHangup)
 }
@@ -251,7 +249,7 @@ func TestContextWarmFinalCancelsPending(t *testing.T) {
 
 	w.routeFrame(voice.Frame{CallID: ccid, Event: voice.EventPrompt, Text: "ctxwarmnonce partial that the final supersedes now"})
 	time.Sleep(30 * time.Millisecond) // inside the 120 ms window
-	w.routeFrame(voice.Frame{CallID: ccid, Event: voice.EventPrompt, Text: "ctxwarmnonce final turn please answer", Last: boolPtr(true)})
+	w.routeFrame(voice.Frame{CallID: ccid, Event: voice.EventPrompt, Text: "ctxwarmnonce final turn please answer", Last: new(true)})
 
 	// Wait well past the window: the abandoned warm must never fire.
 	time.Sleep(500 * time.Millisecond)

@@ -74,7 +74,7 @@ func TestResume_SuccessReleasesClaim_LiveCycleRepeats(t *testing.T) {
 	// Cycle twice: cancel the running child, resume it, verify the claim is
 	// released after every success and a back-to-back resume is never
 	// refused by a STALE claim.
-	for cycle := 0; cycle < 2; cycle++ {
+	for cycle := range 2 {
 		require.NoError(t, mgr.Cancel(res.ChildID), "cycle %d: cancel", cycle)
 
 		got, err := mgr.Resume(ctx, "sess-parent", res.ChildID)
@@ -131,7 +131,7 @@ func TestResume_SuccessReleasesClaim_ColdCycleRepeats(t *testing.T) {
 	fresh.SetStore(store)
 	fresh.SetRunFunc(blockingRunFunc(release, &runs))
 
-	for cycle := 0; cycle < 2; cycle++ {
+	for cycle := range 2 {
 		if cycle > 0 {
 			// The prior cycle's resume left the child running; cancel so
 			// the next cold resume is admissible.

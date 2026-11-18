@@ -428,7 +428,7 @@ func (s *Store) runTail(ctx context.Context, t *tailer, sinceID int64, out chan<
 		close(t.quit)
 	}()
 
-	var lastSeen int64 = sinceID
+	var lastSeen = sinceID
 	deliver := func(rec Record) bool {
 		if rec.ID <= lastSeen {
 			return true // duplicate at the snapshot/live handoff
@@ -457,20 +457,24 @@ func (s *Store) runTail(ctx context.Context, t *tailer, sinceID int64, out chan<
 		// subscription simply ends (out is closed by the defer).
 		return
 	}
+	// The cursor MUST be fully drained and closed inside this closure:
+	// the single-connection pool means the delivery loop below (and the
+	// tail goroutine it hands off to) cannot hold the only DB connection.
 	var catchup []Record
-	for rows.Next() {
-		rec, err := scanRecord(rows)
-		if err != nil {
-			rows.Close()
-			return
+	drainErr := func() error {
+		defer rows.Close()
+		for rows.Next() {
+			rec, err := scanRecord(rows)
+			if err != nil {
+				return err
+			}
+			catchup = append(catchup, rec)
 		}
-		catchup = append(catchup, rec)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
+		return rows.Err()
+	}()
+	if drainErr != nil {
 		return
 	}
-	rows.Close()
 
 	for _, rec := range catchup {
 		if !deliver(rec) {

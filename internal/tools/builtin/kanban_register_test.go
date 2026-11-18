@@ -337,10 +337,6 @@ func TestKanbanToolsNilDepsErrorShape(t *testing.T) {
 			if !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("error %q, want to contain %q", err.Error(), tc.want)
 			}
-			var perr any
-			if errors.As(err, &perr) {
-				// sanity: the error is non-nil only path assertion above
-			}
 		})
 	}
 }

@@ -2806,7 +2806,7 @@ func (m *Manager) lookupGoalByPlanID(ctx context.Context, planID string) (*Goal,
 			}
 		}
 	}
-	return nil, nil
+	return nil, nil //nolint:nilnil // "plan not referenced by any goal" is the documented empty result the caller renders as unknown-plan
 }
 
 // RejectPlan rejects a pending plan. A reason is required (spec CLI line

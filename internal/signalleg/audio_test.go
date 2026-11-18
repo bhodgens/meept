@@ -27,7 +27,7 @@ import (
 )
 
 // discardLog keeps leaf logs out of test output.
-func discardLog() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
+func discardLog() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 // shortAudioDir dodges the macOS sun_path limit for AudioPair sockets.
 // The base ("/tmp/mpt-sl") keeps <base>/<ccid>.in|.out far below the
@@ -51,7 +51,6 @@ func shortAudioDir(t *testing.T) string {
 type fakePaceClock struct {
 	mu      sync.Mutex
 	waits   []time.Duration
-	ctxErr  error
 	fireNow chan struct{}
 	perWait func()
 }
@@ -128,7 +127,7 @@ func TestResamplerRateAndDrift(t *testing.T) {
 	}
 	total := 0
 	const chunks = 50
-	for i := 0; i < chunks; i++ {
+	for range chunks {
 		// One 20 ms wire chunk at 48k = 960 samples = 1920 bytes.
 		src := make([]byte, 1920)
 		for s := range 960 {

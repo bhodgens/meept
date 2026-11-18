@@ -784,12 +784,10 @@ func TestAgentRegistry_ReleaseTaskLoops_EmptyTaskID_Noop(t *testing.T) {
 func TestEscalationModel_DefinitionToSpec(t *testing.T) {
 	r := &AgentRegistry{logger: silentLogger()}
 	def := &agents.AgentDefinition{
-		AgentMetadata: agents.AgentMetadata{
-			ID:              "esc-agent",
-			Name:            "Escalation Agent",
-			Role:            "executor",
-			EscalationModel: "smarter-alias",
-		},
+		ID:              "esc-agent",
+		Name:            "Escalation Agent",
+		Role:            "executor",
+		EscalationModel: "smarter-alias",
 	}
 
 	spec := r.definitionToSpec(def)
@@ -816,7 +814,7 @@ func TestEscalationModel_MergeSpec_Reload(t *testing.T) {
 		EscalationModel: "smarter-alias",
 	}
 	def := &agents.AgentDefinition{
-		AgentMetadata: agents.AgentMetadata{ID: "esc-agent", Name: "Escalation Agent", Role: "executor"},
+		ID: "esc-agent", Name: "Escalation Agent", Role: "executor",
 	}
 
 	merged := r.mergeSpec(base, def)
@@ -864,7 +862,7 @@ func TestVerification_MergeSpec_Reload(t *testing.T) {
 		},
 	}
 	def := &agents.AgentDefinition{
-		AgentMetadata: agents.AgentMetadata{ID: "ver-agent", Name: "Verification Agent", Role: "executor"},
+		ID: "ver-agent", Name: "Verification Agent", Role: "executor",
 	}
 
 	merged := r.mergeSpec(base, def)
@@ -915,7 +913,7 @@ func TestGate_MergeSpec_Reload(t *testing.T) {
 		},
 	}
 	def := &agents.AgentDefinition{
-		AgentMetadata: agents.AgentMetadata{ID: "gate-agent", Name: "Gate Agent", Role: "executor"},
+		ID: "gate-agent", Name: "Gate Agent", Role: "executor",
 	}
 
 	merged := r.mergeSpec(base, def)
@@ -963,18 +961,16 @@ func TestGate_MergeSpec_Reload(t *testing.T) {
 func TestExecutorACP_DefinitionToSpec(t *testing.T) {
 	r := &AgentRegistry{logger: silentLogger()}
 	def := &agents.AgentDefinition{
-		AgentMetadata: agents.AgentMetadata{
-			ID:       "bob",
-			Name:     "Bob",
-			Role:     "executor",
-			Executor: "acp",
-			ACP: &agents.ACPAgentMetadata{
-				Agent:             "hermes",
-				Persona:           "bob",
-				CommandArgs:       []string{"-p", "borg"},
-				PermissionMode:    "human",
-				DecisionThreshold: 0.7,
-			},
+		ID:       "bob",
+		Name:     "Bob",
+		Role:     "executor",
+		Executor: "acp",
+		ACP: &agents.ACPAgentMetadata{
+			Agent:             "hermes",
+			Persona:           "bob",
+			CommandArgs:       []string{"-p", "borg"},
+			PermissionMode:    "human",
+			DecisionThreshold: 0.7,
 		},
 	}
 
@@ -1029,7 +1025,7 @@ func TestExecutorACP_MergeSpec_Override(t *testing.T) {
 		},
 	}
 	def := &agents.AgentDefinition{
-		AgentMetadata: agents.AgentMetadata{ID: "bob", Name: "Bob", Role: "executor"},
+		ID: "bob", Name: "Bob", Role: "executor",
 	}
 
 	// Omission preserves the base executor and acp block.

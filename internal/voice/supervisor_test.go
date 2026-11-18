@@ -242,7 +242,7 @@ func TestSupervisorCacheNeverCachesDenies(t *testing.T) {
 	ch := &scriptedChatter{reply: "DENY: speculates"}
 	sup := NewSupervisor(supervisorCfg(), ch, testLogger())
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		v, err := sup.Check(context.Background(), "cc-cache-2", "He earns six figures.")
 		if err != nil || v.Allowed {
 			t.Fatalf("check %d = %+v err %v, want denied", i, v, err)
@@ -289,7 +289,7 @@ func TestSupervisorCacheCapEvictsLRU(t *testing.T) {
 
 	// Fill the cache with cap distinct sentences, then re-touch key 0
 	// (making it most-recent) before adding one more to force an eviction.
-	for i := 0; i < supervisorCacheCap; i++ {
+	for i := range supervisorCacheCap {
 		if _, err := sup.Check(context.Background(), "cc-cache-4", fmt.Sprintf("Sentence number %d.", i)); err != nil {
 			t.Fatal(err)
 		}
@@ -329,7 +329,7 @@ func TestSupervisorCacheSkipsDisabledGate(t *testing.T) {
 	cfg.Enabled = false
 	sup := NewSupervisor(cfg, ch, testLogger())
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		v, err := sup.Check(context.Background(), "cc-cache-5", "Any sentence.")
 		if err != nil || !v.Allowed || v.Reason != "disabled" {
 			t.Fatalf("disabled check %d = %+v err %v", i, v, err)

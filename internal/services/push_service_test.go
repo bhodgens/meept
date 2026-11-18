@@ -4,10 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"testing"
-	"time"
 
 	"github.com/caimlas/meept/internal/bus"
-	"github.com/caimlas/meept/internal/session"
 )
 
 func testBus() *bus.MessageBus {
@@ -148,114 +146,3 @@ func TestPushPriority_Values(t *testing.T) {
 		}
 	}
 }
-
-// --- test helpers ---
-
-type fakeStore struct{}
-
-func (f *fakeStore) Create(name string) (*session.Session, error) { return nil, nil } //nolint:nilnil // test stub: never invoked, only satisfies the interface
-func (f *fakeStore) Get(string) *session.Session                  { return nil }
-func (f *fakeStore) GetByConversationID(string) *session.Session  { return nil }
-func (f *fakeStore) GetMostRecent() *session.Session              { return nil }
-func (f *fakeStore) List() ([]*session.Session, error)            { return nil, nil }
-func (f *fakeStore) Delete(string) bool                           { return false }
-func (f *fakeStore) Attach(string, string) error                  { return nil }
-func (f *fakeStore) Detach(string, string) error                  { return nil }
-func (f *fakeStore) UpdateActivity(string) error                  { return nil }
-func (f *fakeStore) AddWorker(string, string) error               { return nil }
-func (f *fakeStore) RemoveWorker(string, string) error            { return nil }
-func (f *fakeStore) SaveMessages(string, []session.Message) error { return nil }
-func (f *fakeStore) GetMessages(string, int, int) ([]session.Message, error) {
-	return nil, nil //nolint:nilnil // test stub: never invoked, only satisfies the interface
-}
-func (f *fakeStore) GetMessageCount(string) (int, error)    { return 0, nil }
-func (f *fakeStore) UpdateDescription(string, string) error { return nil }
-func (f *fakeStore) UpdateName(string, string) error        { return nil }
-func (f *fakeStore) HasResponses(string) (bool, error)      { return false, nil }
-func (f *fakeStore) Close() error                           { return nil }
-
-// SetLifecycleHook satisfies the session-affinity leaf-05 addition to
-// session.Store (the fake is a stub: the hook is stored nowhere).
-func (f *fakeStore) SetLifecycleHook(session.SessionLifecycleHook) {}
-func (f *fakeStore) GetLeafMessageID(string) (int64, error)        { return 0, nil }
-func (f *fakeStore) SetLeafMessageID(string, int64) error          { return nil }
-func (f *fakeStore) GetMessagePath(string, int64) ([]session.Message, error) {
-	return nil, nil
-}
-func (f *fakeStore) GetMessageBranches(string) ([]session.Branch, error) { return nil, nil }
-func (f *fakeStore) NavigateToBranch(string, int64) (int64, error)       { return 0, nil }
-func (f *fakeStore) CreateBranch(string, int64, int64, string) (*session.Branch, error) {
-	return nil, nil //nolint:nilnil // test stub: never invoked, only satisfies the interface
-}
-func (f *fakeStore) GetBranch(string, string) (*session.Branch, error) { return nil, nil } //nolint:nilnil // test stub: never invoked, only satisfies the interface
-func (f *fakeStore) DeleteBranch(string, string) error                 { return nil }
-func (f *fakeStore) ListBranches(string) ([]session.Branch, error)     { return nil, nil }
-func (f *fakeStore) GetTree(string) ([]session.TreeNode, error)        { return nil, nil }
-func (f *fakeStore) ForkSession(string, int64, string) (*session.Session, error) {
-	return nil, nil //nolint:nilnil // test stub: never invoked, only satisfies the interface
-}
-func (f *fakeStore) SaveToolCalls(int64, []session.ToolCall) error { return nil }
-func (f *fakeStore) SaveMessagesWithToolCalls(string, []session.Message, map[int][]session.ToolCall) error {
-	return nil
-}
-func (f *fakeStore) GetToolCalls(int64) ([]session.ToolCall, error) { return nil, nil }
-func (f *fakeStore) GetToolCallsForMessages([]int64) (map[int64][]session.ToolCall, error) {
-	return nil, nil //nolint:nilnil // test stub: never invoked, only satisfies the interface
-}
-func (f *fakeStore) SetProject(string, string, string) error                     { return nil }
-func (f *fakeStore) SetWorktree(string, string, string) error                    { return nil }
-func (f *fakeStore) SetDetectionContext(string, *session.DetectionContext) error { return nil }
-func (f *fakeStore) SetGoalID(string, string) error                              { return nil }
-func (f *fakeStore) SetEmployeeID(string, string) error                          { return nil }
-
-// SetPlanMode satisfies session.Store (dsh DSH-9c added it); unused here.
-func (f *fakeStore) SetPlanMode(string, bool) error                                  { return nil }
-func (f *fakeStore) ClearMessages(string) error                                      { return nil }
-func (f *fakeStore) UpdateSessionsProjectPath(context.Context, string, string) error { return nil }
-
-// Stubs for the session.Store ChildDescriptor methods (dsh-convergence
-// merge; same lane as the F-04 FIX stubs below — never invoked, only
-// satisfies the interface).
-func (f *fakeStore) SaveChildDescriptor(context.Context, session.ChildDescriptorRecord) error {
-	return nil
-}
-func (f *fakeStore) GetChildDescriptor(context.Context, string) (session.ChildDescriptorRecord, error) {
-	return session.ChildDescriptorRecord{}, nil
-}
-func (f *fakeStore) RemoveChildDescriptor(context.Context, string) error { return nil }
-
-// GetSchemaVersion stub (same interface-drift lane).
-func (f *fakeStore) GetSchemaVersion(string) (int, error) { return 0, nil }
-func (f *fakeStore) MigrateSchema(string) error           { return nil }
-
-// F-04 FIX: stub for new Store interface method.
-func (f *fakeStore) SetNoFence(string, bool) error              { return nil }
-func (f *fakeStore) SetForeground(string, bool) error           { return nil }
-func (f *fakeStore) SetLastUserMessage(string, time.Time) error { return nil }
-func (f *fakeStore) SearchMessages(context.Context, string, int) ([]session.MessageSearchResult, error) {
-	return nil, nil
-}
-func (f *fakeStore) SearchMessagesSemantic(context.Context, []float32, int) ([]session.MessageSearchResult, error) {
-	return nil, nil
-}
-func (f *fakeStore) StoreEmbedding(context.Context, int64, []float32) error { return nil }
-func (f *fakeStore) UnembeddedMessages(context.Context, int) ([]session.MessageSearchResult, error) {
-	return nil, nil
-}
-func (f *fakeStore) GetActiveThread(context.Context, string) (*session.Thread, error) {
-	return nil, nil //nolint:nilnil // test stub: never invoked, only satisfies the interface
-}
-func (f *fakeStore) ListThreadsBySession(context.Context, string) ([]*session.Thread, error) {
-	return nil, nil
-}
-func (f *fakeStore) CreateThread(context.Context, *session.Thread) error        { return nil }
-func (f *fakeStore) GetThread(context.Context, string) (*session.Thread, error) { return nil, nil } //nolint:nilnil // test stub: never invoked, only satisfies the interface
-func (f *fakeStore) UpdateThread(context.Context, *session.Thread) error        { return nil }
-func (f *fakeStore) DeleteThread(context.Context, string) error                 { return nil }
-func (f *fakeStore) SetActiveThread(context.Context, string, string) error      { return nil }
-func (f *fakeStore) GetDesignatedSessionIDs() ([]string, error)                 { return nil, nil }
-func (f *fakeStore) UpdateDesignation(string, session.DesignationStatus, string, string) error {
-	return nil
-}
-func (f *fakeStore) ClearDesignation(string) error { return nil }
-func (f *fakeStore) Archive(string, bool) error    { return nil }

@@ -129,11 +129,11 @@ func (f *fakeAttempt) Attempt(_ context.Context, _ contact.Record, _ string) (st
 	return f.outcome, f.err
 }
 
-var errAdvancedSentinel = chainErr("chain: outcome advanced")
+var errAdvancedSentinel = chainError("chain: outcome advanced")
 
-type chainErr string
+type chainError string
 
-func (e chainErr) Error() string { return string(e) }
+func (e chainError) Error() string { return string(e) }
 
 // phoneSeed assembles the fixture number from parts so no redactable
 // literal lands in source (the tool-output redaction layer masks

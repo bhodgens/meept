@@ -57,6 +57,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1944,8 +1945,8 @@ func isTrailingEllipsis(text string) bool {
 		return false
 	}
 	dots := 0
-	for i := len(runes) - 1; i >= 0; i-- {
-		if runes[i] == '.' || runes[i] == '…' {
+	for _, rune := range slices.Backward(runes) {
+		if rune == '.' || rune == '…' {
 			dots++
 		} else {
 			break

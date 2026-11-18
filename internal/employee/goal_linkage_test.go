@@ -21,8 +21,8 @@ type goalRecordingPlanner struct {
 
 func newGoalRecordingPlanner() *goalRecordingPlanner {
 	return &goalRecordingPlanner{
-		stubPlanner: stubPlanner{idPrefix: "plan-goal-"},
-		planGoals:   map[string]string{},
+		idPrefix:  "plan-goal-",
+		planGoals: map[string]string{},
 	}
 }
 

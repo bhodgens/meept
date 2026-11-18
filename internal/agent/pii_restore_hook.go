@@ -183,8 +183,10 @@ func (h *PiiRestoreHook) MaskOutboundScoped(messages []llm.ChatMessage, sessionI
 	}
 
 	total := 0
+	// i indexes `messages` straight from `range messages` — always in
+	// bounds; gosec's taint analysis cannot follow the range form.
 	for i := range messages {
-		if messages[i].Content != "" {
+		if messages[i].Content != "" { //nolint:gosec // G602: range-derived index
 			masked, n := h.swapper.Mask(messages[i].Content, sessionID)
 			if n > 0 {
 				messages[i].Content = masked
@@ -193,7 +195,7 @@ func (h *PiiRestoreHook) MaskOutboundScoped(messages []llm.ChatMessage, sessionI
 		}
 		// C18: text-bearing parts through the same swapper/session scope.
 		for j := range messages[i].Parts {
-			p := &messages[i].Parts[j]
+			p := &messages[i].Parts[j] //nolint:gosec // G602: j and i both come from range over the live slices - always in bounds
 			if p.Type != "text" || p.Text == "" {
 				continue
 			}
@@ -206,9 +208,9 @@ func (h *PiiRestoreHook) MaskOutboundScoped(messages []llm.ChatMessage, sessionI
 				// Parts, so the wire is correct), but Content must not keep
 				// raw text the parts lane just masked — mask it with the
 				// same scope too.
-				if messages[i].Content != "" && !strings.Contains(messages[i].Content, "[PII:") {
-					if cMasked, cn := h.swapper.Mask(messages[i].Content, sessionID); cn > 0 {
-						messages[i].Content = cMasked
+				if messages[i].Content != "" && !strings.Contains(messages[i].Content, "[PII:") { //nolint:gosec // G602: range-derived index
+					if cMasked, cn := h.swapper.Mask(messages[i].Content, sessionID); cn > 0 { //nolint:gosec // G602: i comes from range over messages - always in bounds
+						messages[i].Content = cMasked //nolint:gosec // G602: i comes from range over messages - always in bounds
 						total += cn
 					}
 				}

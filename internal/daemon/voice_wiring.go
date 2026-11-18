@@ -29,6 +29,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -967,9 +968,7 @@ type auditWriterAdapter struct {
 // the stored row by construction.
 func (a auditWriterAdapter) WriteAudit(ctx context.Context, row map[string]any) error {
 	sanitized := make(map[string]any, len(row)+1)
-	for k, v := range row {
-		sanitized[k] = v
-	}
+	maps.Copy(sanitized, row)
 	if target, ok := row["target"].(string); ok && target != "" {
 		digits := dialAuditDigits(target)
 		sanitized["target"] = dialAuditMaskedTarget(target)

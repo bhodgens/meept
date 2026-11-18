@@ -63,7 +63,7 @@ func linkParams(t *testing.T, m map[string]any) json.RawMessage {
 func TestVoiceLinkOpenOK(t *testing.T) {
 	f := &fakeLinkSeams{
 		openResult: VoiceLinkOpen{LinkID: "link-abc", ACCID: "local-1", BCCID: "local-2"},
-		employeeOK: boolPtr(true),
+		employeeOK: new(true),
 	}
 	h := NewVoiceLinkHandler(f.seams())
 	res, err := h.handleOpen(context.Background(), linkParams(t, map[string]any{
@@ -110,7 +110,7 @@ func TestVoiceLinkOpenMonitor(t *testing.T) {
 			LinkID: "link-mon", ACCID: "local-1", BCCID: "local-2",
 			MonitorAPath: "/s/link-mon.mon-a", MonitorBPath: "/s/link-mon.mon-b",
 		},
-		employeeOK: boolPtr(true),
+		employeeOK: new(true),
 	}
 	h := NewVoiceLinkHandler(f.seams())
 	res, err := h.handleOpen(context.Background(), linkParams(t, map[string]any{
@@ -137,7 +137,7 @@ func TestVoiceLinkOpenMonitor(t *testing.T) {
 	}
 
 	// monitor:false behaves exactly like an absent monitor.
-	f2 := &fakeLinkSeams{openResult: VoiceLinkOpen{LinkID: "l"}, employeeOK: boolPtr(true)}
+	f2 := &fakeLinkSeams{openResult: VoiceLinkOpen{LinkID: "l"}, employeeOK: new(true)}
 	h2 := NewVoiceLinkHandler(f2.seams())
 	res2, err := h2.handleOpen(context.Background(), linkParams(t, map[string]any{
 		"employee_a": "a", "employee_b": "b", "monitor": false,
@@ -212,7 +212,7 @@ func TestVoiceLinkCloseAndStatus(t *testing.T) {
 func TestVoiceLinkRegister(t *testing.T) {
 	f := &fakeLinkSeams{
 		openResult: VoiceLinkOpen{LinkID: "link-r"},
-		employeeOK: boolPtr(true),
+		employeeOK: new(true),
 	}
 	h := NewVoiceLinkHandler(f.seams())
 	s := New(&Config{}, nil, nil)
@@ -227,5 +227,3 @@ func TestVoiceLinkRegister(t *testing.T) {
 		t.Fatalf("voice.link.status not registered: %v", err)
 	}
 }
-
-func boolPtr(b bool) *bool { return &b }

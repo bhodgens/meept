@@ -34,7 +34,7 @@ type timingAwareCountingJob struct {
 }
 
 func newTimingAwareCountingJob(id string, at time.Time) *timingAwareCountingJob {
-	return &timingAwareCountingJob{countingJob: countingJob{id: id, runs: make(chan string, 100)}, at: at}
+	return &timingAwareCountingJob{id: id, runs: make(chan string, 100), at: at}
 }
 
 func (j *timingAwareCountingJob) Config() JobConfig {

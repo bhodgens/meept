@@ -151,7 +151,7 @@ func TestClipSayHitZeroSpeak(t *testing.T) {
 
 	d.sendLine(childConn, voiceframe.Frame{
 		CallID: ccid, Event: voiceframe.EventSay, Text: "Just a sec.",
-		Last: lastPtr(true), ClipID: clipKeyHex,
+		Last: new(true), ClipID: clipKeyHex,
 	})
 
 	// Exactly the stored bytes leave the .out socket (two 640-byte chunks).
@@ -188,7 +188,7 @@ func TestClipSayMissFallsToSpeak(t *testing.T) {
 	// clip_id set, store empty (dir never created) -> live path.
 	d.sendLine(childConn, voiceframe.Frame{
 		CallID: ccid, Event: voiceframe.EventSay, Text: "Hello there.",
-		Last: lastPtr(false), ClipID: clipKeyHex,
+		Last: new(false), ClipID: clipKeyHex,
 	})
 	buf := make([]byte, 1280)
 	_ = out.SetReadDeadline(time.Now().Add(10 * time.Second))
@@ -212,7 +212,7 @@ func TestClipSayNoClipIDUnchanged(t *testing.T) {
 	putClip(t, store, clipKeyHex, 0x41, 2)
 	d.sendLine(childConn, voiceframe.Frame{
 		CallID: ccid, Event: voiceframe.EventSay, Text: "Just a sec.",
-		Last: lastPtr(false),
+		Last: new(false),
 	})
 	buf := make([]byte, 1280)
 	_ = out.SetReadDeadline(time.Now().Add(10 * time.Second))
@@ -294,7 +294,7 @@ func TestClipRenderMissRendersAndStores(t *testing.T) {
 	buf := make([]byte, 1280)
 	d.sendLine(childConn, voiceframe.Frame{
 		CallID: ccid, Event: voiceframe.EventSay, Text: "Bye!",
-		Last: lastPtr(false), ClipID: key,
+		Last: new(false), ClipID: key,
 	})
 	_ = out.SetReadDeadline(time.Now().Add(10 * time.Second))
 	if _, err := io.ReadFull(out, buf); err != nil {
@@ -504,7 +504,7 @@ func TestClipBargeInClearsLikeSynth(t *testing.T) {
 
 	d.sendLine(childConn, voiceframe.Frame{
 		CallID: ccid, Event: voiceframe.EventSay, Text: "A long line.",
-		Last: lastPtr(true), ClipID: clipKeyHex,
+		Last: new(true), ClipID: clipKeyHex,
 	})
 	// Drain a few chunks so the stream is mid-flight, then clear.
 	paceDrain(t, out, 4, 2*time.Millisecond)
@@ -577,7 +577,7 @@ func TestClipRateResampleTo8k(t *testing.T) {
 
 	d.sendLine(childConn, voiceframe.Frame{
 		CallID: ccid, Event: voiceframe.EventSay, Text: "Still there?",
-		Last: lastPtr(true), ClipID: clipKeyHex,
+		Last: new(true), ClipID: clipKeyHex,
 	})
 	// 1280 -> 640 bytes after the 16k->8k stub halving, paced 160 B/chunk.
 	got := make([]byte, 640)

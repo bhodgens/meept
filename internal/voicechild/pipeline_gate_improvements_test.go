@@ -232,8 +232,8 @@ func TestEnergyGateLoudPassesQuietDrops(t *testing.T) {
 func constantChunk(sample int) []byte {
 	b := make([]byte, 640)
 	for i := 0; i+1 < len(b); i += 2 {
-		b[i] = byte(sample)
-		b[i+1] = byte(sample >> 8)
+		b[i] = byte(sample)        //nolint:gosec // G115: s16le encode — byte truncation IS the codec contract
+		b[i+1] = byte(sample >> 8) //nolint:gosec // G115: s16le encode — byte truncation IS the codec contract
 	}
 	return b
 }

@@ -17,13 +17,7 @@ var _ CommitmentFiler = (*fakeCommitmentFiler)(nil)
 
 // FileCommitment adapts a seam row onto the gate fake's recorder.
 func (f *fakeCommitmentFiler) FileCommitment(_ context.Context, row CommitmentRow) error {
-	return f.file(commitmentRow{
-		Kind:      row.Kind,
-		Source:    row.Source,
-		SourceRef: row.SourceRef,
-		Subject:   row.Subject,
-		Index:     row.Index,
-	})
+	return f.file(commitmentRow(row))
 }
 
 // HasCommitment is the dedupe query: a row for (ccid, index) already

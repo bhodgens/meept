@@ -837,7 +837,7 @@ func TestShellExecuteTool_NetworkClassDeniesLocalEgress(t *testing.T) {
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
-	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		if _, werr := w.Write([]byte("ok")); werr != nil {
 			return
 		}

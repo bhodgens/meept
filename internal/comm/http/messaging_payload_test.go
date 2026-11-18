@@ -388,7 +388,7 @@ func TestPayloadWebhookNilNonceMeansNoDedupe(t *testing.T) {
 	d := &payloadDeps{}
 	routes, sign, _ := payloadRoutes(t, d, nil)
 	body := realShapeMessagingBody(t, "message.received", "evt-h-nilnonce", inboundPayload())
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		rec := postPayload(t, routes, body, sign(body))
 		if rec.Code != http.StatusAccepted {
 			t.Fatalf("delivery %d status = %d, want 202 (nil nonce = no dedupe)", i, rec.Code)

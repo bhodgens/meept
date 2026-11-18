@@ -33,6 +33,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -183,12 +184,12 @@ func (p *TurnParker) dropQueuedByKey(key string) (ParkedTurnRecord, int) {
 	defer p.mu.Unlock()
 	var first ParkedTurnRecord
 	dropped := 0
-	for i := len(p.parked) - 1; i >= 0; i-- {
+	for i, v := range slices.Backward(p.parked) {
 		if p.parkKeys[i] != key {
 			continue
 		}
 		if dropped == 0 {
-			first = p.parked[i]
+			first = v
 		}
 		p.parked = append(p.parked[:i], p.parked[i+1:]...)
 		p.parkKeys = append(p.parkKeys[:i], p.parkKeys[i+1:]...)

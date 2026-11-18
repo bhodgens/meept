@@ -107,9 +107,9 @@ func (w *echoWindow) matches(text string) bool {
 // Returns "" when fewer than echoMinContentTokens content tokens remain.
 func provenanceQuery(text string) string {
 	var kept []string
-	for _, tok := range strings.Fields(strings.ToLower(text)) {
+	for tok := range strings.FieldsSeq(strings.ToLower(text)) {
 		tok = strings.TrimFunc(tok, func(r rune) bool {
-			return !(r >= 'a' && r <= 'z')
+			return r < 'a' || r > 'z'
 		})
 		if len(tok) < 4 {
 			continue

@@ -45,7 +45,7 @@ func Parse(data []byte) (map[string]any, error) {
 	// emits numeric values rather than strings.
 	var fm map[string]any
 	if err := yaml.Unmarshal([]byte(frontmatter), &fm); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidYAML, err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidYAML, err)
 	}
 
 	id, ok := fm["id"].(string)
@@ -190,8 +190,14 @@ func secondsToDuration(v any) (any, error) {
 	case int64:
 		secs = n
 	case uint:
+		if n > uint(^uint64(0)>>1) {
+			return nil, fmt.Errorf("timeout_seconds %d out of range", n)
+		}
 		secs = int64(n)
 	case uint64:
+		if n > ^uint64(0)>>1 {
+			return nil, fmt.Errorf("timeout_seconds %d out of range", n)
+		}
 		secs = int64(n)
 	default:
 		return nil, fmt.Errorf("timeout_seconds must be an integer, got %T", v)

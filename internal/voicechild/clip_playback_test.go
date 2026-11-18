@@ -192,7 +192,7 @@ func gateSendRaw(t *testing.T, w interface{ Write([]byte) (int, error) }, line s
 func (g *gateHarness) sendSay(ccid, text, clipID string, last bool) {
 	g.d.sendLine(g.conn, voiceframe.Frame{
 		CallID: ccid, Event: voiceframe.EventSay, Text: text,
-		Last: lastPtr(last), ClipID: clipID,
+		Last: new(last), ClipID: clipID,
 	})
 }
 
@@ -491,7 +491,7 @@ func gateDrain(t *testing.T, out interface {
 	t.Helper()
 	got := make([]byte, 0, chunks*size)
 	buf := make([]byte, size)
-	for i := 0; i < chunks; i++ {
+	for i := range chunks {
 		_ = out.SetReadDeadline(time.Now().Add(30 * time.Second))
 		n, err := io.ReadFull(out, buf)
 		if err != nil {

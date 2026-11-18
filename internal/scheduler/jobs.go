@@ -179,13 +179,11 @@ func NewIntervalJob(cfg JobConfig) (*IntervalJob, error) {
 		cfg.Schedule = "@every 1h"
 	}
 	return &IntervalJob{
-		baseJob: baseJob{
-			id:       cfg.ID,
-			name:     cfg.Name,
-			schedule: cfg.Schedule,
-			jobType:  cfg.Type,
-			config:   cfg,
-		},
+		id:       cfg.ID,
+		name:     cfg.Name,
+		schedule: cfg.Schedule,
+		jobType:  cfg.Type,
+		config:   cfg,
 	}, nil
 }
 
@@ -228,17 +226,15 @@ func NewAgentJob(cfg JobConfig, msgBus *bus.MessageBus) (*AgentJob, error) {
 	}
 
 	return &AgentJob{
-		baseJob: baseJob{
-			id:       cfg.ID,
-			name:     cfg.Name,
-			schedule: cfg.Schedule,
-			jobType:  JobTypeAgent,
-			config:   cfg,
-		},
-		prompt:  cfg.AgentConfig.Prompt,
-		context: cfg.AgentConfig.Context,
-		model:   cfg.AgentConfig.Model,
-		bus:     msgBus,
+		id:       cfg.ID,
+		name:     cfg.Name,
+		schedule: cfg.Schedule,
+		jobType:  JobTypeAgent,
+		config:   cfg,
+		prompt:   cfg.AgentConfig.Prompt,
+		context:  cfg.AgentConfig.Context,
+		model:    cfg.AgentConfig.Model,
+		bus:      msgBus,
 	}, nil
 }
 
@@ -382,20 +378,18 @@ func NewShellJob(cfg JobConfig, msgBus *bus.MessageBus) (*ShellJob, error) {
 	}
 
 	return &ShellJob{
-		baseJob: baseJob{
-			id:       cfg.ID,
-			name:     cfg.Name,
-			schedule: cfg.Schedule,
-			jobType:  JobTypeShell,
-			config:   cfg,
-		},
-		command: cfg.ShellConfig.Command,
-		args:    cfg.ShellConfig.Args,
-		workDir: cfg.ShellConfig.WorkDir,
-		env:     cfg.ShellConfig.Env,
-		timeout: timeout,
-		capture: cfg.ShellConfig.CaptureOut,
-		bus:     msgBus,
+		id:       cfg.ID,
+		name:     cfg.Name,
+		schedule: cfg.Schedule,
+		jobType:  JobTypeShell,
+		config:   cfg,
+		command:  cfg.ShellConfig.Command,
+		args:     cfg.ShellConfig.Args,
+		workDir:  cfg.ShellConfig.WorkDir,
+		env:      cfg.ShellConfig.Env,
+		timeout:  timeout,
+		capture:  cfg.ShellConfig.CaptureOut,
+		bus:      msgBus,
 	}, nil
 }
 
@@ -503,13 +497,11 @@ func NewReminderJob(cfg JobConfig, msgBus *bus.MessageBus) (*ReminderJob, error)
 	}
 
 	return &ReminderJob{
-		baseJob: baseJob{
-			id:       cfg.ID,
-			name:     cfg.Name,
-			schedule: cfg.Schedule,
-			jobType:  JobTypeReminder,
-			config:   cfg,
-		},
+		id:       cfg.ID,
+		name:     cfg.Name,
+		schedule: cfg.Schedule,
+		jobType:  JobTypeReminder,
+		config:   cfg,
 		message:  cfg.ReminderConfig.Message,
 		channels: channels,
 		priority: priority,
@@ -644,15 +636,13 @@ func NewOptimizationJob(cfg JobConfig, deps *JobDependencies) (*OptimizationJob,
 	}
 
 	return &OptimizationJob{
-		baseJob: baseJob{
-			id:       cfg.ID,
-			name:     cfg.Name,
-			schedule: cfg.Schedule,
-			jobType:  JobTypeOptimization,
-			config:   cfg,
-		},
-		target: target,
-		deps:   deps,
+		id:       cfg.ID,
+		name:     cfg.Name,
+		schedule: cfg.Schedule,
+		jobType:  JobTypeOptimization,
+		config:   cfg,
+		target:   target,
+		deps:     deps,
 	}, nil
 }
 
@@ -695,13 +685,11 @@ func NewSecurityJob(cfg JobConfig, deps *JobDependencies) (*SecurityJob, error) 
 	}
 
 	return &SecurityJob{
-		baseJob: baseJob{
-			id:       cfg.ID,
-			name:     cfg.Name,
-			schedule: cfg.Schedule,
-			jobType:  JobTypeSecurity,
-			config:   cfg,
-		},
+		id:        cfg.ID,
+		name:      cfg.Name,
+		schedule:  cfg.Schedule,
+		jobType:   JobTypeSecurity,
+		config:    cfg,
 		scanTypes: scanTypes,
 		deps:      deps,
 	}, nil
@@ -751,15 +739,13 @@ func NewLearningJob(cfg JobConfig, deps *JobDependencies) (*LearningJob, error) 
 	}
 
 	return &LearningJob{
-		baseJob: baseJob{
-			id:       cfg.ID,
-			name:     cfg.Name,
-			schedule: cfg.Schedule,
-			jobType:  JobTypeLearning,
-			config:   cfg,
-		},
-		action: action,
-		deps:   deps,
+		id:       cfg.ID,
+		name:     cfg.Name,
+		schedule: cfg.Schedule,
+		jobType:  JobTypeLearning,
+		config:   cfg,
+		action:   action,
+		deps:     deps,
 	}, nil
 }
 

@@ -112,8 +112,8 @@ type SelectField struct {
 
 func NewSelectField(key, label, value string, options []string) *SelectField {
 	return &SelectField{
-		baseField: baseField{key: key, label: label, orig: value, current: value},
-		Options:   options,
+		key: key, label: label, orig: value, current: value,
+		Options: options,
 	}
 }
 
@@ -143,8 +143,8 @@ type MultiSelectField struct {
 func NewMultiSelectField(key, label string, selected []string, options []string) *MultiSelectField {
 	orig := strings.Join(selected, ",")
 	return &MultiSelectField{
-		baseField: baseField{key: key, label: label, orig: orig, current: orig},
-		Options:   options,
+		key: key, label: label, orig: orig, current: orig,
+		Options: options,
 	}
 }
 
@@ -245,7 +245,7 @@ type FloatField struct {
 func NewFloatField(key, label string, value float64) *FloatField {
 	s := strconv.FormatFloat(value, 'f', -1, 64)
 	return &FloatField{
-		baseField: baseField{key: key, label: label, orig: s, current: s},
+		key: key, label: label, orig: s, current: s,
 	}
 }
 
@@ -253,9 +253,9 @@ func NewFloatField(key, label string, value float64) *FloatField {
 func NewFloatFieldWithRange(key, label string, value, min, max float64) *FloatField {
 	s := strconv.FormatFloat(value, 'f', -1, 64)
 	return &FloatField{
-		baseField: baseField{key: key, label: label, orig: s, current: s},
-		min:       &min,
-		max:       &max,
+		key: key, label: label, orig: s, current: s,
+		min: &min,
+		max: &max,
 	}
 }
 
@@ -335,7 +335,7 @@ func NewDrilldownField(key, label string, items []DrilldownItem) *DrilldownField
 		}
 	}
 	return &DrilldownField{
-		baseField:     baseField{key: key, label: label},
+		key: key, label: label,
 		Items:         items,
 		originalItems: originalItems,
 	}
@@ -356,7 +356,7 @@ func NewStringSliceDrilldownField(key, label, sliceKeypath string, items []Drill
 		}
 	}
 	return &DrilldownField{
-		baseField:      baseField{key: key, label: label},
+		key: key, label: label,
 		Items:          items,
 		originalItems:  originalItems,
 		StringSliceKey: sliceKeypath,
@@ -378,7 +378,7 @@ func NewMapStringStringDrilldownField(key, label, mapKeypath string, items []Dri
 		}
 	}
 	return &DrilldownField{
-		baseField:          baseField{key: key, label: label},
+		key: key, label: label,
 		Items:              items,
 		originalItems:      originalItems,
 		MapStringStringKey: mapKeypath,
@@ -389,8 +389,8 @@ func NewMapStringStringDrilldownField(key, label, mapKeypath string, items []Dri
 // items. Prefer NewDrilldownField when item data is available.
 func NewDrilldownFieldCount(key, label string, itemCount int) *DrilldownField {
 	return &DrilldownField{
-		baseField: baseField{key: key, label: label},
-		Items:     make([]DrilldownItem, itemCount),
+		key: key, label: label,
+		Items: make([]DrilldownItem, itemCount),
 	}
 }
 
@@ -466,8 +466,8 @@ type ActionField struct {
 // callback function. The display value is the label text itself.
 func NewActionField(key, label string, callback func() error) *ActionField {
 	return &ActionField{
-		baseField: baseField{key: key, label: label, current: label, orig: label},
-		callback:  callback,
+		key: key, label: label, current: label, orig: label,
+		callback: callback,
 	}
 }
 

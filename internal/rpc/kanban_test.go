@@ -859,7 +859,7 @@ func TestKanban_TypedErrorTextPins(t *testing.T) {
 			if !strings.Contains(err.Error(), tc.wantSub) {
 				t.Errorf("err %q missing frozen text %q", err.Error(), tc.wantSub)
 			}
-			if tc.err != nil && tc.err != kanban.ErrStaleCard && !errors.Is(err, tc.err) {
+			if tc.err != nil && !errors.Is(tc.err, kanban.ErrStaleCard) && !errors.Is(err, tc.err) {
 				t.Errorf("typed error must survive the handler unchanged, got %T %v", err, err)
 			}
 		})
@@ -871,7 +871,7 @@ func TestKanban_WrappedTypedErrorsStillIdentifiable(t *testing.T) {
 	// the handler passes them through untouched, so errors.Is and the
 	// substring both still resolve on the client side.
 	h, _, hu, _, _ := newTestHandler(KanbanDeps{})
-	wrapped := &wrapErr{err: kanban.ErrLeaseHeld{Holder: "b", Since: time.Now()}}
+	wrapped := &wrapError{err: kanban.ErrLeaseHeld{Holder: "b", Since: time.Now()}}
 	hu.err = wrapped
 	err := callErr(t, h, "kanban.card.move", `{"card_id":"card-1","column_id":"col-2"}`)
 	if !errors.Is(err, wrapped.err) {
@@ -882,10 +882,10 @@ func TestKanban_WrappedTypedErrorsStillIdentifiable(t *testing.T) {
 	}
 }
 
-type wrapErr struct{ err error }
+type wrapError struct{ err error }
 
-func (w *wrapErr) Error() string { return "kanban: move: " + w.err.Error() }
-func (w *wrapErr) Unwrap() error { return w.err }
+func (w *wrapError) Error() string { return "kanban: move: " + w.err.Error() }
+func (w *wrapError) Unwrap() error { return w.err }
 
 // ---- param validation & decode tolerance ---------------------------------------
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"strings"
 
@@ -14,7 +13,7 @@ import (
 // Test helpers for the atomic-compaction wiring pins. All test-only.
 
 func testDiscardLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+	return slog.New(slog.DiscardHandler)
 }
 
 func jsonMarshalForTest(v any) ([]byte, error) {
@@ -23,16 +22,6 @@ func jsonMarshalForTest(v any) ([]byte, error) {
 
 func newL1JobForTest(payload []byte) *queue.Job {
 	return &queue.Job{Type: MemoryJobL1Extract, Payload: payload}
-}
-
-func countNonEmptyLines(s string) int {
-	n := 0
-	for _, line := range strings.Split(s, "\n") {
-		if strings.TrimSpace(line) != "" {
-			n++
-		}
-	}
-	return n
 }
 
 func joinL0Conversation(recs []l0Record) string {

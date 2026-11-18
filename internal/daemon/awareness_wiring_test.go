@@ -121,7 +121,7 @@ func TestAw2UnknownAndEmptyIDInert(t *testing.T) {
 		t.Fatal("empty id must resolve to a nil renderer")
 	}
 	before := res.calls
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		if r := resolve("ghost"); r != nil {
 			t.Fatal("cached-negative must stay nil")
 		}

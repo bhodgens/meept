@@ -10,7 +10,6 @@ package voice
 // its seeding ccid.
 
 import (
-	"context"
 	"slices"
 	"testing"
 	"time"
@@ -175,8 +174,7 @@ func TestTalkLoopCallEndClearsRoster(t *testing.T) {
 		GreetingLine: "Quorf, the zibble plow invoice stap ready.",
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)

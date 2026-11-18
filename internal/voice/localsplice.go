@@ -1470,9 +1470,9 @@ func s16leRMSOver(b []byte, threshold int) bool {
 	var n uint64
 	for i := 0; i+1 < len(b); i += 2 {
 		u := uint16(b[i]) | uint16(b[i+1])<<8
-		sample := int16(u)
+		sample := int16(u) //nolint:gosec // G115: s16le decode — the two's-complement reinterpret IS the codec contract
 		v := int64(sample)
-		sum += uint64(v * v)
+		sum += uint64(v * v) //nolint:gosec // G115: v*v is a square (>= 0), so the uint64 conversion never wraps
 		n++
 	}
 	if n == 0 {

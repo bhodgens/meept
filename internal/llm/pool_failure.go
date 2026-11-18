@@ -59,7 +59,7 @@ const (
 // FailureCooldown returns the frozen base cooldown for a class, clamped to
 // the 4h cap (pools.py:222 + _MAX_COOLDOWN_S).
 func FailureCooldown(cls FailureCategory) time.Duration {
-	base := poolCooldownTransient
+	var base time.Duration
 	switch cls {
 	case ClassAccountDead:
 		base = poolCooldownAccount
@@ -143,23 +143,23 @@ func ClassifyFailure(providerID string, modelID string, poolID string, status in
 	if status == 0 {
 		return ClassTransient, ScopeModel, modelID
 	}
-	switch {
-	case status == 400 || status == 413 || status == 422:
+	switch status {
+	case 400, 413, 422:
 		// The request's fault (shape/size/params): never counts against
 		// the provider at any scope.
 		return ClassRequestFault, ScopeRequest, "-"
-	case status == 404:
+	case 404:
 		return ClassEntryMissing, ScopeModel, modelID
-	case status == 401 || status == 403:
+	case 401, 403:
 		return ClassAccountDead, ScopeAccount, providerID
-	case status == 402:
+	case 402:
 		// OpenRouter in-flight budget 402: transient concurrency
 		// accounting, subclassified BEFORE any account-scope reaction.
 		if providerID == "openrouter" && openrouterInFlightBody(bodyExcerpt) {
 			return ClassTransient, ScopeModel, modelID
 		}
 		return ClassAccountDead, ScopeAccount, providerID
-	case status == 429:
+	case 429:
 		if poolID != "" && PoolExhaustionSignal(providerID, bodyExcerpt) {
 			return ClassCongested, ScopePool, poolID
 		}

@@ -3,7 +3,6 @@ package rpc
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"testing"
 	"time"
@@ -27,7 +26,7 @@ type busStreamFixture struct {
 
 func newBusStreamFixture(t *testing.T) *busStreamFixture {
 	t.Helper()
-	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	quiet := slog.New(slog.DiscardHandler)
 	mb := bus.New(nil, quiet)
 	return &busStreamFixture{t: t, bus: mb, px: NewProxyHandler(mb)}
 }
@@ -214,7 +213,7 @@ func TestBusPollDropAccounting(t *testing.T) {
 	// MaxEvents is 100: burst 300 with the collector draining — the
 	// buffer keeps the newest records, the rest are trimmed.
 	const burst = 300
-	for i := 0; i < burst; i++ {
+	for i := range burst {
 		f.publish("t3", fmt.Sprintf("b%d", i))
 	}
 
@@ -262,7 +261,7 @@ func TestBusPollStressFastProducerSlowPoller(t *testing.T) {
 	produced := make(chan struct{})
 	go func() {
 		defer close(produced)
-		for i := 0; i < total; i++ {
+		for i := range total {
 			f.publish("stress", fmt.Sprintf("s%d", i))
 		}
 	}()
@@ -343,7 +342,7 @@ func TestBusPollStressPacedProducerZeroDrops(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		for i := 0; i < total; i++ {
+		for i := range total {
 			f.publish("paced", fmt.Sprintf("p%d", i))
 			time.Sleep(2 * time.Millisecond) // 2ms spacing: 100-cap buffer never overflows
 		}

@@ -22,6 +22,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -267,7 +268,7 @@ func (g *Gateway) serveAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if _, err := w.Write(resp); err != nil {
+	if _, err := w.Write(resp); err != nil { //nolint:gosec // G705: resp is a JSON-RPC reply written with Content-Type application/json — no HTML rendering surface, no XSS
 		slog.Warn("kanban gateway: reply write failed", "rpc", spec.rpc, "error", err)
 	}
 }
@@ -338,11 +339,11 @@ func requestIP(r *http.Request) string {
 	if peer != nil && peer.IsLoopback() {
 		if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
 			// The leftmost entry is the original client; strip it for
-			// the limiter key.
-			if i := strings.IndexByte(fwd, ','); i >= 0 {
-				return strings.TrimSpace(fwd[:i])
-			}
-			return strings.TrimSpace(fwd)
+			// the limiter key. Cut yields the whole value when there
+			// is no comma (single-entry XFF), matching the pre-merge
+			// behavior exactly.
+			before, _, _ := strings.Cut(fwd, ",")
+			return strings.TrimSpace(before)
 		}
 	}
 	return host
@@ -398,12 +399,7 @@ func (g *Gateway) authorize(w http.ResponseWriter, r *http.Request, grants ...st
 }
 
 func hasGrantName(grants []string, grant string) bool {
-	for _, candidate := range grants {
-		if candidate == grant {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(grants, grant)
 }
 
 // bearerToken reads the token from the Authorization header, then falls back
@@ -419,7 +415,7 @@ func bearerToken(r *http.Request) string {
 // wsBearer extracts "bearer.<token>" from Sec-WebSocket-Protocol (RFC 6455
 // §4.2.2 lane, same convention as the daemon's own hub).
 func wsBearer(r *http.Request) string {
-	for _, proto := range strings.Split(r.Header.Get("Sec-WebSocket-Protocol"), ",") {
+	for proto := range strings.SplitSeq(r.Header.Get("Sec-WebSocket-Protocol"), ",") {
 		if rest, ok := strings.CutPrefix(strings.TrimSpace(proto), "bearer."); ok {
 			return rest
 		}
@@ -437,7 +433,7 @@ func pickSubprotocol(r *http.Request) string {
 		return ""
 	}
 	picked := ""
-	for _, proto := range strings.Split(offered, ",") {
+	for proto := range strings.SplitSeq(offered, ",") {
 		proto = strings.TrimSpace(proto)
 		if strings.HasPrefix(proto, "bearer.") {
 			return proto
@@ -589,10 +585,8 @@ func (g *Gateway) originAllowed(origin string) bool {
 		return true
 	}
 	lower := strings.ToLower(strings.TrimSpace(origin))
-	for _, allowed := range g.allowedOrigins {
-		if lower == allowed {
-			return true
-		}
+	if slices.Contains(g.allowedOrigins, lower) {
+		return true
 	}
 	host := lower
 	if u, err := url.Parse(origin); err == nil && u.Hostname() != "" {

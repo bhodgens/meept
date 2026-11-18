@@ -223,7 +223,7 @@ func parseSpawnCtxSize(cmd []string) (int, bool, error) {
 	}
 	for i, arg := range cmd {
 		flag, value, hasEq := strings.Cut(arg, "=")
-		if flag != "--ctx-size" && !(llama && flag == "-c") {
+		if flag != "--ctx-size" && (!llama || flag != "-c") {
 			continue
 		}
 		if !hasEq {

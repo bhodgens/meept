@@ -453,7 +453,7 @@ func TestClearDuringPrefetchDiscardsLookahead(t *testing.T) {
 		if n == 0 {
 			break
 		}
-		for i := 0; i < n; i++ {
+		for i := range n {
 			if buf[i] >= 2 {
 				leaked = true
 			}

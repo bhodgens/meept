@@ -1,7 +1,7 @@
 package queue
 
 import (
-	"sort"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -111,5 +111,5 @@ func TestCompleteAttemptSourcesMatchTransitions(t *testing.T) {
 }
 
 func sortStates(states []JobState) {
-	sort.Slice(states, func(i, j int) bool { return states[i] < states[j] })
+	slices.Sort(states)
 }

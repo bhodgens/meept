@@ -329,6 +329,10 @@ func (b *QueueParkBackend) LoadOwnedKeyed(ctx context.Context, kind ParkKind, ow
 	if err != nil {
 		return nil, nil, fmt.Errorf("queue park backend: load query: %w", err)
 	}
+	// The loop below runs Next() to exhaustion, so the cursor releases
+	// the connection at its end; the deferred Close is the belt for the
+	// Fatalf/return paths.
+	defer rows.Close()
 
 	var (
 		records []ParkedTurnRecord
@@ -338,7 +342,6 @@ func (b *QueueParkBackend) LoadOwnedKeyed(ctx context.Context, kind ParkKind, ow
 	for rows.Next() {
 		var id, payloadRaw string
 		if err := rows.Scan(&id, &payloadRaw); err != nil {
-			rows.Close()
 			return nil, nil, fmt.Errorf("queue park backend: load scan: %w", err)
 		}
 		var p parkedTurnJobPayload
@@ -393,10 +396,8 @@ func (b *QueueParkBackend) LoadOwnedKeyed(ctx context.Context, kind ParkKind, ow
 		keys = append(keys, strings.TrimPrefix(id, string(kind)+"|"))
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
 		return nil, nil, fmt.Errorf("queue park backend: load iterate: %w", err)
 	}
-	rows.Close()
 
 	// Prune inside the same transaction (owner-scoped predicate when an
 	// owner filter is active, exactly the sqlite store's posture: one

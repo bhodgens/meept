@@ -33,6 +33,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -334,7 +335,7 @@ func TestQueueBackendNoWorkerClaim(t *testing.T) {
 	// most permissive claim filter) must NOT return the parked row.
 	if job, err := q.ClaimNextForAgent("worker-1", nil, ""); err == nil {
 		t.Fatalf("ClaimNextForAgent returned job %+v, want ErrNoJobAvailable (parked_turn rows are unclaimable)", job)
-	} else if err != queue.ErrNoJobAvailable {
+	} else if !errors.Is(err, queue.ErrNoJobAvailable) {
 		t.Errorf("ClaimNextForAgent err = %v, want %v", err, queue.ErrNoJobAvailable)
 	}
 

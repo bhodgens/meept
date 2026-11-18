@@ -431,14 +431,14 @@ func (s *TokenStore) persist() error {
 	s.grantsMu.RUnlock()
 
 	dir := filepath.Dir(s.path)
-	if err := os.MkdirAll(dir, tokenDirPerm); err != nil {
+	if err := os.MkdirAll(dir, tokenDirPerm); err != nil { //nolint:gosec // G703: s.path is $MEEPT_HOME-derived (operator-controlled), same posture as every config root
 		return fmt.Errorf("kanbansvc: create token dir: %w", err)
 	}
 	data, err := json.MarshalIndent(tokenFileRecord{Version: tokenFileSchemaVersion, Tokens: snapshot}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("kanbansvc: encode token store: %w", err)
 	}
-	tmp, err := os.CreateTemp(dir, ".tokens-*.tmp")
+	tmp, err := os.CreateTemp(dir, ".tokens-*.tmp") //nolint:gosec // G703: dir is the $MEEPT_HOME token dir (operator path), leaf name fixed by CreateTemp
 	if err != nil {
 		return fmt.Errorf("kanbansvc: create temp token file: %w", err)
 	}
@@ -446,11 +446,11 @@ func (s *TokenStore) persist() error {
 	// Any failure after this point removes the partial temp file so the
 	// directory never accumulates 0600 litter.
 	if err := writeAndCloseTemp(tmp, data); err != nil {
-		os.Remove(tmpName)
+		os.Remove(tmpName) //nolint:gosec // G703: tmpName came from CreateTemp in the operator dir
 		return err
 	}
-	if err := os.Rename(tmpName, s.path); err != nil {
-		os.Remove(tmpName)
+	if err := os.Rename(tmpName, s.path); err != nil { //nolint:gosec // G703: both endpoints are the operator-controlled token-store path
+		os.Remove(tmpName) //nolint:gosec // G703: tmpName came from CreateTemp in the operator dir
 		return fmt.Errorf("kanbansvc: rename token store into place: %w", err)
 	}
 	if info, err := os.Stat(s.path); err == nil {

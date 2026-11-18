@@ -1,6 +1,9 @@
 package agent
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+)
 
 // The WIRED half of the turn counter (HALO Phase 4/7): the turnCounter type
 // lives in subagent_pool.go (Increment/Remaining/GetCount/Reset) and feeds
@@ -49,9 +52,9 @@ func thresholdFor(turn, tot int) float64 {
 		return 0.0
 	}
 	frac := float64(turn) / float64(tot)
-	for i := len(nudgeTable) - 1; i >= 0; i-- {
-		if frac >= nudgeTable[i].Threshold {
-			return nudgeTable[i].Threshold
+	for _, n := range slices.Backward(nudgeTable) {
+		if frac >= n.Threshold {
+			return n.Threshold
 		}
 	}
 	return 0.0
@@ -63,9 +66,9 @@ func thresholdTagFor(turn, tot int) string {
 		return ""
 	}
 	frac := float64(turn) / float64(tot)
-	for i := len(nudgeTable) - 1; i >= 0; i-- {
-		if frac >= nudgeTable[i].Threshold {
-			return nudgeTable[i].Tag
+	for _, n := range slices.Backward(nudgeTable) {
+		if frac >= n.Threshold {
+			return n.Tag
 		}
 	}
 	return ""
@@ -87,8 +90,8 @@ func nudgeMessageFor(turn, tot int) string {
 	frac := float64(turn) / float64(tot)
 
 	// Scan thresholds from highest to lowest for progressive urgency.
-	for i := len(nudgeTable) - 1; i >= 0; i-- {
-		tbl := nudgeTable[i]
+	for _, tbl := range slices.Backward(nudgeTable) {
+
 		if frac >= tbl.Threshold {
 			if tbl.Tag != "" {
 				return fmt.Sprintf(tbl.Message, remaining)

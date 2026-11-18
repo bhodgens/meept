@@ -22,7 +22,6 @@ import (
 type fakeBinder struct {
 	mu       sync.Mutex
 	binds    []bindCall
-	turnFn   func(sess signalSession, prompt string) (string, error)
 	sessions map[string]signalSession // name -> handle
 }
 

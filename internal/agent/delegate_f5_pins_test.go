@@ -153,7 +153,7 @@ func TestCaptureSeed_CutInsideToolExchangeStartsNonTool(t *testing.T) {
 	// result as the head.
 	var seed []llm.ChatMessage
 	// 38 plain alternating messages (they will be front-dropped).
-	for i := 0; i < 38; i++ {
+	for i := range 38 {
 		role := llm.RoleUser
 		if i%2 == 1 {
 			role = llm.RoleAssistant

@@ -102,7 +102,7 @@ func renderChainReport(person string, rep contact.ChainReport) string {
 		b.WriteString("\n")
 	}
 	if len(rep.Attempts) == 0 {
-		b.WriteString(fmt.Sprintf("contact: no channels attempted for %s\n", person))
+		fmt.Fprintf(&b, "contact: no channels attempted for %s\n", person)
 	}
 	return strings.TrimSuffix(b.String(), "\n")
 }

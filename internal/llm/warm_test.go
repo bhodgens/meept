@@ -188,7 +188,9 @@ func TestWarm_PayloadShape(t *testing.T) {
 	c := warmTestClient(t, srv.URL)
 	c.SetSessionAffinityConfig(warmAffinity())
 
-	c.Warm(context.Background(), warmMessages(), WithTaskScope("", "sess-42"))
+	if err := c.Warm(context.Background(), warmMessages(), WithTaskScope("", "sess-42")); err != nil {
+		t.Fatalf("Warm: %v", err)
+	}
 
 	if !waitFor(func() bool { return len(recs()) == 1 }, 3*time.Second) {
 		t.Fatalf("warm request never reached upstream; got %d requests", len(recs()))
@@ -221,7 +223,9 @@ func TestWarm_EmptyScopeSendsNoAffinity(t *testing.T) {
 	c := warmTestClient(t, srv.URL)
 	c.SetSessionAffinityConfig(warmAffinity())
 
-	c.Warm(context.Background(), warmMessages(), WithTaskScope("", ""))
+	if err := c.Warm(context.Background(), warmMessages(), WithTaskScope("", "")); err != nil {
+		t.Fatalf("Warm: %v", err)
+	}
 
 	if !waitFor(func() bool { return len(recs()) == 1 }, 3*time.Second) {
 		t.Fatal("warm request never reached upstream")
@@ -250,7 +254,9 @@ func TestWarm_PrefixIdentity(t *testing.T) {
 		t.Fatalf("Chat: %v", err)
 	}
 	// Warm of the same prefix (request #2).
-	c.Warm(context.Background(), msgs, WithTaskScope("", "sess-42"))
+	if err := c.Warm(context.Background(), msgs, WithTaskScope("", "sess-42")); err != nil {
+		t.Fatalf("Warm: %v", err)
+	}
 	if !waitFor(func() bool { return len(recs()) == 2 }, 3*time.Second) {
 		t.Fatalf("expected 2 requests, got %d", len(recs()))
 	}
@@ -294,7 +300,9 @@ func TestWarm_SystemCacheBoundaryStripped(t *testing.T) {
 		{Role: RoleSystem, Content: "static half" + PromptCacheBoundary + " dynamic half"},
 		{Role: RoleUser, Content: "hi"},
 	}
-	c.Warm(context.Background(), msgs, WithTaskScope("", "s"))
+	if err := c.Warm(context.Background(), msgs, WithTaskScope("", "s")); err != nil {
+		t.Fatalf("Warm: %v", err)
+	}
 	if !waitFor(func() bool { return len(recs()) == 1 }, 3*time.Second) {
 		t.Fatal("no warm request")
 	}
@@ -326,7 +334,9 @@ func TestWarm_QuotaUpstream_QuietNoRetry(t *testing.T) {
 	logs, h := debugLogger()
 	c := warmTestClient(t, srv.URL, WithLogger(h))
 
-	c.Warm(context.Background(), warmMessages(), WithTaskScope("", "sess-42"))
+	if err := c.Warm(context.Background(), warmMessages(), WithTaskScope("", "sess-42")); err != nil {
+		t.Fatalf("Warm: %v", err)
+	}
 	if !waitFor(func() bool { return len(recs()) >= 1 }, 3*time.Second) {
 		t.Fatal("quota warm never reached upstream")
 	}
@@ -353,7 +363,9 @@ func TestWarm_TransportErrorQuiet(t *testing.T) {
 	logs, h := debugLogger()
 	cfg := &ModelConfig{BaseURL: url + "/v1", ModelID: "m", ProviderID: "p", MaxTokens: 100}
 	c := NewClient(cfg, WithLogger(h))
-	c.Warm(context.Background(), warmMessages(), WithTaskScope("", "s"))
+	if err := c.Warm(context.Background(), warmMessages(), WithTaskScope("", "s")); err != nil {
+		t.Fatalf("Warm: %v", err)
+	}
 
 	if !waitFor(func() bool { return laneIdle(c) }, 3*time.Second) {
 		t.Fatal("lane pinned after transport failure")
@@ -385,7 +397,9 @@ func TestWarm_ReturnedTextNeverSurfaces(t *testing.T) {
 	logs, h := debugLogger()
 	c := warmTestClient(t, srv.URL, WithLogger(h))
 
-	c.Warm(context.Background(), warmMessages(), WithTaskScope("", "s"))
+	if err := c.Warm(context.Background(), warmMessages(), WithTaskScope("", "s")); err != nil {
+		t.Fatalf("Warm: %v", err)
+	}
 	time.Sleep(300 * time.Millisecond)
 
 	l := logs.String()
@@ -408,7 +422,9 @@ func TestWarm_NoLLMCallsRow(t *testing.T) {
 	c := warmTestClient(t, srv.URL)
 	c.SetUsageStore(store)
 
-	c.Warm(context.Background(), warmMessages(), WithTaskScope("", "sess-42"))
+	if err := c.Warm(context.Background(), warmMessages(), WithTaskScope("", "sess-42")); err != nil {
+		t.Fatalf("Warm: %v", err)
+	}
 	if !waitFor(func() bool { return len(recs()) == 1 && laneIdle(c) }, 3*time.Second) {
 		t.Fatal("warm did not complete")
 	}
@@ -434,7 +450,9 @@ func TestWarm_BudgetExhaustedStillWarms(t *testing.T) {
 	b.RecordUsage(TokenUsage{PromptTokens: 5, CompletionTokens: 5})
 	c := warmTestClient(t, srv.URL, WithBudget(b))
 
-	c.Warm(context.Background(), warmMessages(), WithTaskScope("", "s"))
+	if err := c.Warm(context.Background(), warmMessages(), WithTaskScope("", "s")); err != nil {
+		t.Fatalf("Warm: %v", err)
+	}
 	if !waitFor(func() bool { return len(recs()) == 1 }, 3*time.Second) {
 		t.Fatal("warm blocked by budget gate")
 	}
@@ -491,7 +509,9 @@ func TestWarm_NeverQueuesBehindRealTurn(t *testing.T) {
 	go func() { _, _ = c.Chat(chatCtx, warmMessages()) }()
 	time.Sleep(150 * time.Millisecond) // let Chat take the single slot + connect
 
-	c.Warm(context.Background(), warmMessages(), WithTaskScope("", "s"))
+	if err := c.Warm(context.Background(), warmMessages(), WithTaskScope("", "s")); err != nil {
+		t.Fatalf("Warm: %v", err)
+	}
 
 	if !waitFor(func() bool {
 		mu.Lock()
@@ -538,14 +558,18 @@ func TestWarm_ReplaceDiscardPrevious(t *testing.T) {
 	msgs := func(content string) []ChatMessage {
 		return []ChatMessage{{Role: RoleUser, Content: content}}
 	}
-	c.Warm(context.Background(), msgs("stale"), WithTaskScope("", "s"))
+	if err := c.Warm(context.Background(), msgs("stale"), WithTaskScope("", "s")); err != nil {
+		t.Fatalf("Warm: %v", err)
+	}
 	select {
 	case <-arrived:
 	case <-time.After(3 * time.Second):
 		t.Fatal("first warm never arrived")
 	}
 
-	c.Warm(context.Background(), msgs("latest"), WithTaskScope("", "s"))
+	if err := c.Warm(context.Background(), msgs("latest"), WithTaskScope("", "s")); err != nil {
+		t.Fatalf("Warm: %v", err)
+	}
 	select {
 	case got := <-cancelled:
 		if got != "stale" {
@@ -567,11 +591,15 @@ func TestWarm_LaneReleasedAfterCompletion(t *testing.T) {
 	srv, recs := warmUpstream(t, nil)
 	c := warmTestClient(t, srv.URL)
 
-	c.Warm(context.Background(), warmMessages(), WithTaskScope("", "s"))
+	if err := c.Warm(context.Background(), warmMessages(), WithTaskScope("", "s")); err != nil {
+		t.Fatalf("Warm: %v", err)
+	}
 	if !waitFor(func() bool { return len(recs()) == 1 && laneIdle(c) }, 3*time.Second) {
 		t.Fatal("lane not released after warm completion")
 	}
-	c.Warm(context.Background(), warmMessages(), WithTaskScope("", "s"))
+	if err := c.Warm(context.Background(), warmMessages(), WithTaskScope("", "s")); err != nil {
+		t.Fatalf("Warm: %v", err)
+	}
 	if !waitFor(func() bool { return len(recs()) == 2 }, 3*time.Second) {
 		t.Error("second warm after release never fired")
 	}
@@ -597,14 +625,18 @@ func TestWarm_PanicReleasesLane(t *testing.T) {
 		WithLogger(slog.New(slog.DiscardHandler)),
 		WithTokenResolver(panicResolver{}, "evil"))
 
-	c.Warm(context.Background(), warmMessages(), WithTaskScope("", "s"))
+	if err := c.Warm(context.Background(), warmMessages(), WithTaskScope("", "s")); err != nil {
+		t.Fatalf("Warm: %v", err)
+	}
 	if !waitFor(laneIdleFunc(c), 3*time.Second) {
 		t.Fatal("lane pinned after a panicking warm")
 	}
 	// A follow-up warm must still run after the panic released the lane.
 	c2srv, recs := warmUpstream(t, nil)
 	c2 := warmTestClient(t, c2srv.URL)
-	c2.Warm(context.Background(), warmMessages(), WithTaskScope("", "s"))
+	if err := c2.Warm(context.Background(), warmMessages(), WithTaskScope("", "s")); err != nil {
+		t.Fatalf("Warm: %v", err)
+	}
 	if !waitFor(func() bool { return len(recs()) == 1 }, 3*time.Second) {
 		t.Error("unrelated client unaffected")
 	}
@@ -631,7 +663,9 @@ func TestWarm_CallerCancelDiscards(t *testing.T) {
 	c := warmTestClient(t, srv.URL)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	c.Warm(ctx, warmMessages(), WithTaskScope("", "s"))
+	if err := c.Warm(ctx, warmMessages(), WithTaskScope("", "s")); err != nil {
+		t.Fatalf("Warm: %v", err)
+	}
 	<-arrived
 	cancel()
 	select {
@@ -659,7 +693,9 @@ func TestWarm_CeilingBoundsHungRequest(t *testing.T) {
 	})
 	c := warmTestClient(t, srv.URL)
 
-	c.Warm(context.Background(), warmMessages(), WithTaskScope("", "s"))
+	if err := c.Warm(context.Background(), warmMessages(), WithTaskScope("", "s")); err != nil {
+		t.Fatalf("Warm: %v", err)
+	}
 	<-arrived
 	if !waitFor(laneIdleFunc(c), 3*time.Second) {
 		t.Fatal("hung warm pinned the lane past the internal ceiling")
@@ -671,8 +707,12 @@ func TestWarm_CeilingBoundsHungRequest(t *testing.T) {
 func TestWarm_EmptyMessagesNoRequest(t *testing.T) {
 	srv, recs := warmUpstream(t, nil)
 	c := warmTestClient(t, srv.URL)
-	c.Warm(context.Background(), nil, WithTaskScope("", "s"))
-	c.Warm(context.Background(), []ChatMessage{}, WithTaskScope("", "s"))
+	if err := c.Warm(context.Background(), nil, WithTaskScope("", "s")); err != nil {
+		t.Fatalf("Warm: %v", err)
+	}
+	if err := c.Warm(context.Background(), []ChatMessage{}, WithTaskScope("", "s")); err != nil {
+		t.Fatalf("Warm: %v", err)
+	}
 	time.Sleep(200 * time.Millisecond)
 	if n := len(recs()); n != 0 {
 		t.Errorf("empty-messages warm sent %d requests, want 0", n)

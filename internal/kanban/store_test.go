@@ -268,10 +268,8 @@ func TestStore_MoveCardCAS(t *testing.T) {
 	var mu sync.Mutex
 	var okCount, staleCount int
 	var wg sync.WaitGroup
-	for i := 0; i < 2; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 2 {
+		wg.Go(func() {
 			err := s.MoveCard(ctx, "card-1", colA, colB)
 			mu.Lock()
 			defer mu.Unlock()
@@ -283,7 +281,7 @@ func TestStore_MoveCardCAS(t *testing.T) {
 			default:
 				t.Errorf("MoveCard concurrent: unexpected err %v", err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if okCount != 1 || staleCount != 1 {

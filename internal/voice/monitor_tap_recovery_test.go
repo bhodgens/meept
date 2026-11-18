@@ -59,7 +59,7 @@ func TestMonitorTapRecoversAfterTransientWriteFailure(t *testing.T) {
 	// Phase 3: permanently dead conn -> threshold consecutive failures
 	// disarm (logged-once posture at the pump).
 	_ = client.Close()
-	for i := 0; i < monitorFailThreshold; i++ {
+	for range monitorFailThreshold {
 		_, _ = tap.Write([]byte("x"))
 	}
 	if !tap.dead.Load() {

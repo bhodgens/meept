@@ -198,7 +198,7 @@ func TestChildDescriptor_CaptureSeedBounds(t *testing.T) {
 	// Message-count cap: 50 tiny messages -> exactly the last 40 kept, in
 	// order, oldest-first.
 	var seed []llm.ChatMessage
-	for i := 0; i < seedDescriptorMaxMessages+10; i++ {
+	for i := range seedDescriptorMaxMessages + 10 {
 		seed = append(seed, llm.ChatMessage{Role: llm.RoleUser, Content: fmt.Sprintf("m%02d", i)})
 	}
 	d = ChildDescriptor{Version: 1}

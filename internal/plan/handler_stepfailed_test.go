@@ -77,7 +77,7 @@ func TestPlanHandlerStepFailedBusSeam(t *testing.T) {
 
 	// Publish the exact tactical payload shape (task.step_failed carries
 	// task_id/step_id/state/result; the handler decodes task_id/step_id).
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		msg, err := models.NewBusMessage(models.MessageTypeEvent, "tactical-scheduler", map[string]any{
 			"task_id": "task-seam",
 			"step_id": "step-seam",

@@ -181,7 +181,7 @@ func TestExecGateAfterFiresOnError(t *testing.T) {
 		// error ToolResult directly. gateTool returns success payloads, so
 		// use a dedicated inline tool here.
 		reg2 := NewRegistry(nil)
-		reg2.Register(&errResTool{gateTool: gateTool{name: "errres_tool", category: "custom"}})
+		reg2.Register(&errResTool{name: "errres_tool", category: "custom"})
 
 		gate := &recordingGate{}
 		reg2.SetGate(gate)

@@ -495,7 +495,7 @@ func TestPeerSigningKeyDistribution_SignedRemoteDispatch(t *testing.T) {
 func waitForInvoker(t *testing.T, invoker *fakeAgentInvoker, want int) {
 	t.Helper()
 	deadline := time.After(2 * time.Second)
-	for int(invoker.calls()) < want {
+	for invoker.calls() < want {
 		select {
 		case <-time.After(20 * time.Millisecond):
 		case <-deadline:

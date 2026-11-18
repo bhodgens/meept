@@ -52,7 +52,7 @@ func TestResume_ConcurrentColdResumeSingleExecution(t *testing.T) {
 	fresh.SetRunFunc(count)
 	var wg sync.WaitGroup
 	errs := make([]error, 2)
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()

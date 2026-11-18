@@ -78,6 +78,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -1308,13 +1309,7 @@ func (r *LinkTurnRegistry) Unregister(targets ...string) {
 	for _, t := range targets {
 		if entry, ok := r.byTarget[t]; ok {
 			delete(r.byTarget, t)
-			seen := false
-			for _, c := range coords {
-				if c == entry.coord {
-					seen = true
-					break
-				}
-			}
+			seen := slices.Contains(coords, entry.coord)
 			if !seen {
 				coords = append(coords, entry.coord)
 			}
@@ -1948,18 +1943,19 @@ func (m *LinkManager) unwindBoth(aCall, bCall LocalCall, reason string) {
 // whatever already dialed and surfaces the named dial error.
 func (m *LinkManager) dialAll(ctx context.Context, aCall, bCall LocalCall) ([4]net.Conn, error) {
 	paths := [4]string{aCall.InPath, aCall.OutPath, bCall.InPath, bCall.OutPath}
+	sideNames := [4]string{"a.mic", "a.speaker", "b.mic", "b.speaker"}
 	var conns [4]net.Conn
 	for i, p := range paths {
 		conn, err := m.deps.Dial(ctx, p)
 		if err != nil {
-			for j := 0; j < i; j++ {
+			for j := range i {
 				if conns[j] != nil {
 					_ = conns[j].Close()
 				}
 			}
-			return conns, fmt.Errorf("dial side %s (%s): %w", []string{"a.mic", "a.speaker", "b.mic", "b.speaker"}[i], p, err)
+			return conns, fmt.Errorf("dial side %s (%s): %w", sideNames[i], p, err) //nolint:gosec // G602: i indexes the fixed [4] paths array via range — always in bounds
 		}
-		conns[i] = conn
+		conns[i] = conn //nolint:gosec // G602: i indexes the fixed [4] paths array via range — always in bounds
 	}
 	return conns, nil
 }

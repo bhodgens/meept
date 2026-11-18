@@ -84,10 +84,10 @@ func resolveCaller(ctx context.Context, rawKey string, store *auth.Store) (*Call
 		return &CallerInfo{APIKey: rawKey, UserID: idn.UserID}, nil
 	}
 	if rawKey == "" {
-		return nil, nil
+		return nil, nil //nolint:nilnil // documented flat-key path: no key = anonymous caller, privileged checks fail closed on nil
 	}
 	if store == nil {
-		return nil, nil
+		return nil, nil //nolint:nilnil // documented multiuser-off posture: no auth store = anonymous caller (byte-identical legacy path)
 	}
 	idn, err := store.Validate(rawKey, time.Now())
 	if err != nil || idn == nil || idn.UserID == "" {

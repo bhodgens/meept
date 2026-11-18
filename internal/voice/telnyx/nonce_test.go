@@ -123,11 +123,11 @@ func TestNonceStore_ConcurrentCheckFresh(t *testing.T) {
 	n := NewNonceStore(time.Minute, 1000)
 	const goroutines = 8
 	results := make(chan bool, goroutines)
-	for i := 0; i < goroutines; i++ {
+	for range goroutines {
 		go func() { results <- n.CheckFresh("evt-race") }()
 	}
 	fresh := 0
-	for i := 0; i < goroutines; i++ {
+	for range goroutines {
 		if <-results {
 			fresh++
 		}
@@ -138,12 +138,12 @@ func TestNonceStore_ConcurrentCheckFresh(t *testing.T) {
 	// Release concurrent with checks must not panic either.
 	done := make(chan struct{})
 	go func() {
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			n.Release("evt-race-" + strconv.Itoa(i))
 		}
 		close(done)
 	}()
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		n.CheckFresh("evt-race-" + strconv.Itoa(i))
 	}
 	<-done

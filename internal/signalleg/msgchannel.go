@@ -17,7 +17,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"strings"
 	"sync"
@@ -102,7 +101,7 @@ func (t *msgThrottle) refill(now time.Time) {
 	if t.tokens > t.limit {
 		t.tokens = t.limit
 	}
-	t.lastFill = t.lastFill.Add(elapsed / per * per)
+	t.lastFill = t.lastFill.Add(time.Duration(int64(elapsed/per) * int64(per)))
 }
 
 // acquire consumes one token or returns the wait until one refills.
@@ -135,7 +134,7 @@ type msgChannel struct {
 // newMsgChannel assembles the channel (deps resolved by the Leg).
 func newMsgChannel(client sendSeam, allowlist func(string) bool, perMinute int, clock clockSeam, log *slog.Logger) *msgChannel {
 	if log == nil {
-		log = slog.New(slog.NewTextHandler(io.Discard, nil))
+		log = slog.New(slog.DiscardHandler)
 	}
 	return &msgChannel{
 		client:    client,

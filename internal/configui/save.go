@@ -110,12 +110,12 @@ func saveMainConfigSection(sm *SectionModel) error {
 // Returns an error if the prefix doesn't map to a map entry.
 func applyMapDrilldownFields(cfg *config.Config, prefix string, fields []Field) error {
 	// Split prefix into "parentPath" and "key" — the last segment is the map key
-	lastDot := strings.LastIndex(prefix, ".")
-	if lastDot < 0 {
+	before, after, ok := strings.CutLast(prefix, ".")
+	if !ok {
 		return fmt.Errorf("prefix %q has no dot separator", prefix)
 	}
-	mapPath := prefix[:lastDot]
-	mapKey := prefix[lastDot+1:]
+	mapPath := before
+	mapKey := after
 
 	// Resolve the map parent
 	v, err := resolvePath(reflect.ValueOf(cfg), strings.Split(mapPath, "."))

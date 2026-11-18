@@ -204,7 +204,7 @@ func (t *IntakeSaveTool) Execute(ctx context.Context, args map[string]any) (any,
 	// confirm=true here is the defense-in-depth leg: the flag was
 	// already checked above; SaveIntake's own gate is the pinned core.
 	if err := voiceintake.SaveIntake(t.filerFor(ctx), rec, true); err != nil {
-		return tools.NewErrorResult("intake_save refused: " + err.Error()), nil
+		return tools.NewErrorResult("intake_save refused: " + err.Error()), nil //nolint:nilerr // tool contract: failures surface via the result envelope, not the Go error
 	}
 	// One save per confirmation cycle: the next record demands a fresh
 	// read-back + caller turn (attempted/confirmed cleared).

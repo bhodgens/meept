@@ -59,6 +59,7 @@ package voice
 
 import (
 	"math"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -132,7 +133,7 @@ type echoEntry struct {
 // fuzzy primitive applies is applied once, up front.
 func echoLiveTokens(text string) []string {
 	var out []string
-	for _, tok := range strings.Fields(text) {
+	for tok := range strings.FieldsSeq(text) {
 		if fuzzy.NormalizeToken(tok) == "" {
 			continue
 		}
@@ -211,8 +212,8 @@ func (r *echoRoster) recentOther(ccid, text string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.pruneLocked(now)
-	for i := len(r.entries) - 1; i >= 0; i-- {
-		e := r.entries[i]
+	for _, e := range slices.Backward(r.entries) {
+
 		if e.ccid == ccid {
 			continue // own call never gates own prompts (rule 2)
 		}
@@ -230,10 +231,7 @@ func (r *echoRoster) recentOther(ccid, text string) bool {
 // echoCoverageNeed is the ceil of coverageFloor * n query tokens — the
 // minimum number of matched tokens for an echo verdict.
 func echoCoverageNeed(n int) int {
-	need := int(math.Ceil(float64(n) * echoTokenCoverageFloor))
-	if need < 1 {
-		need = 1
-	}
+	need := max(int(math.Ceil(float64(n)*echoTokenCoverageFloor)), 1)
 	return need
 }
 

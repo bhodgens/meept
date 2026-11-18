@@ -23,14 +23,13 @@ func (c *countingFakeTool) Execute(ctx context.Context, args map[string]any) (an
 
 func TestExecute_RejectsMissingRequiredBeforeToolRun(t *testing.T) {
 	reg := NewRegistry(nil)
-	fake := &countingFakeTool{mockTool: mockTool{
+	fake := &countingFakeTool{
 		name: "fake",
 		params: llm.FunctionParameters{
 			Type:       "object",
 			Properties: map[string]llm.ParameterProperty{"name": {Type: "string"}},
 			Required:   []string{"name"},
-		},
-	}}
+		}}
 	reg.Register(fake)
 
 	res, err := reg.Execute(context.Background(), "fake", map[string]any{})
@@ -44,14 +43,13 @@ func TestExecute_RejectsMissingRequiredBeforeToolRun(t *testing.T) {
 
 func TestExecute_RejectsEmptyRequiredBeforeToolRun(t *testing.T) {
 	reg := NewRegistry(nil)
-	fake := &countingFakeTool{mockTool: mockTool{
+	fake := &countingFakeTool{
 		name: "fake",
 		params: llm.FunctionParameters{
 			Type:       "object",
 			Properties: map[string]llm.ParameterProperty{"name": {Type: "string"}},
 			Required:   []string{"name"},
-		},
-	}}
+		}}
 	reg.Register(fake)
 
 	res, err := reg.Execute(context.Background(), "fake", map[string]any{"name": "   "})
@@ -64,14 +62,13 @@ func TestExecute_RejectsEmptyRequiredBeforeToolRun(t *testing.T) {
 
 func TestExecute_ValidArgsRunNormally(t *testing.T) {
 	reg := NewRegistry(nil)
-	fake := &countingFakeTool{mockTool: mockTool{
+	fake := &countingFakeTool{
 		name: "fake",
 		params: llm.FunctionParameters{
 			Type:       "object",
 			Properties: map[string]llm.ParameterProperty{"name": {Type: "string"}},
 			Required:   []string{"name"},
-		},
-	}}
+		}}
 	reg.Register(fake)
 
 	res, err := reg.Execute(context.Background(), "fake", map[string]any{"name": "fine"})
@@ -86,13 +83,12 @@ func TestExecute_NoRequiredSchemaUnaffected(t *testing.T) {
 	// Tools whose schema declares nothing required must be fully
 	// backwards-compatible: empty args still run.
 	reg := NewRegistry(nil)
-	fake := &countingFakeTool{mockTool: mockTool{
+	fake := &countingFakeTool{
 		name: "fake",
 		params: llm.FunctionParameters{
 			Type:       "object",
 			Properties: map[string]llm.ParameterProperty{},
-		},
-	}}
+		}}
 	reg.Register(fake)
 
 	res, err := reg.Execute(context.Background(), "fake", map[string]any{})
@@ -104,14 +100,13 @@ func TestExecute_NoRequiredSchemaUnaffected(t *testing.T) {
 
 func TestExecute_ValidationErrIsTyped(t *testing.T) {
 	reg := NewRegistry(nil)
-	fake := &countingFakeTool{mockTool: mockTool{
+	fake := &countingFakeTool{
 		name: "fake",
 		params: llm.FunctionParameters{
 			Type:       "object",
 			Properties: map[string]llm.ParameterProperty{"name": {Type: "string"}},
 			Required:   []string{"name"},
-		},
-	}}
+		}}
 	reg.Register(fake)
 
 	res, err := reg.Execute(context.Background(), "fake", map[string]any{})
