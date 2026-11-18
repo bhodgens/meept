@@ -28,11 +28,25 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	_ "modernc.org/sqlite" // sqlite driver registration (house convention)
 )
+
+// smsTimeBefore reports whether a is strictly earlier than b, parsing both
+// as RFC3339Nano instants so variable-width fractional seconds compare
+// correctly. Legacy whole-second rows parse with the same layout.
+func smsTimeBefore(a, b string) (bool, error) {
+	at, err := time.Parse(time.RFC3339Nano, a)
+	if err != nil {
+		return false, fmt.Errorf("parse %q: %w", a, err)
+	}
+	bt, err := time.Parse(time.RFC3339Nano, b)
+	if err != nil {
+		return false, fmt.Errorf("parse %q: %w", b, err)
+	}
+	return at.Before(bt), nil
+}
 
 // smsStoreSchema creates the two tables plus the reader index. Every
 // column the contract pins is in the base CREATE, so a fresh database is
@@ -183,9 +197,15 @@ func (s *Store) UpsertState(ctx context.Context, st State) (bool, error) {
 	case err != nil:
 		return false, fmt.Errorf("sms: upsert state %q read guard: %w", st.ProviderMessageID, err)
 	default:
-		// RFC3339 string compare (contract-pinned): older-than existing is
-		// ignored, equal-or-newer applies.
-		if strings.Compare(st.UpdatedAt, existing) < 0 {
+		// Compare parsed instants, not raw strings. Stamps use
+		// RFC3339Nano, whose fractional part is variable-width:
+		// "...05.5Z" sorts BEFORE "...05Z" as text, so a newer
+		// fractional DLR was wrongly discarded as "older".
+		newer, err := smsTimeBefore(st.UpdatedAt, existing)
+		if err != nil {
+			return false, fmt.Errorf("sms: upsert state %q time guard: %w", st.ProviderMessageID, err)
+		}
+		if newer {
 			return false, nil
 		}
 	}
