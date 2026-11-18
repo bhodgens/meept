@@ -512,10 +512,33 @@ func (r *AgentRegistry) UnregisterSpec(id string) {
 	r.logger.Debug("Unregistered agent spec", "id", id)
 }
 
+// agentIDAlias maps a routing-only synthetic agent id to a real agent spec.
+// The dispatcher/strategist stamp "orchestrator" on compound/quickplan step
+// jobs, but no config/agents/orchestrator/AGENT.md spec exists — so
+// GetForTask used to fail ("agent spec not found: orchestrator") and the
+// step job fell back to the daemon's tool-less template loop. Route it to
+// the canonical executor instead (mirrors config.ToolHintAgent's
+// "orchestrator" -> coder mapping). Keep this table tiny and directional:
+// it is a compatibility shim for ids that are roles/routing targets, not
+// real personas.
+var agentIDAlias = map[string]string{
+	"orchestrator": config.AgentIDCoder,
+}
+
+// canonicalAgentID resolves an alias to a real spec id (identity when no
+// alias applies).
+func canonicalAgentID(id string) string {
+	if real, ok := agentIDAlias[id]; ok {
+		return real
+	}
+	return id
+}
+
 // GetSpec returns an agent specification by ID. On a miss, a one-shot
 // discovery rescan runs first (ensureAgentDiscovered) so definitions seeded
 // after daemon boot (e2e harness per-test agents) are routable.
 func (r *AgentRegistry) GetSpec(id string) (*AgentSpec, bool) {
+	id = canonicalAgentID(id)
 	r.mu.RLock()
 	spec, ok := r.specs[id]
 	r.mu.RUnlock()
@@ -559,6 +582,11 @@ func (r *AgentRegistry) Get(id string) (*AgentLoop, error) {
 // calls), so holding the write lock through lazy-create is safe per CLAUDE.md
 // mutex-scope rule.
 func (r *AgentRegistry) GetForTask(agentID, taskID string) (*AgentLoop, error) {
+	// Routing-only ids (e.g. "orchestrator") have no AGENT.md spec; resolve
+	// them to a real executor persona so step jobs don't fall back to the
+	// tool-less template loop. Loop keys use the canonical id so aliased and
+	// direct lookups of the same persona share one task-scoped loop.
+	agentID = canonicalAgentID(agentID)
 	if taskID == "" {
 		taskID = "_default"
 	}

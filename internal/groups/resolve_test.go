@@ -291,6 +291,29 @@ func TestResolve_DefaultManaged(t *testing.T) {
 			t.Fatalf("want Managed=true with empty allowlist, got %s", got)
 		}
 	})
+	t.Run("no spec tools uses policy allowlist as ceiling (fallback loop)", func(t *testing.T) {
+		// The daemon template/fallback loop resolves with nil spec tools.
+		// It must inherit the default policy's minimal built-in toolset
+		// (and NOT get denied everything), while still being constrained
+		// to exactly what the policy lists.
+		policies := []Policy{{Name: "default", ToolsAllowed: []string{
+			"file_read", "shell", "project_info",
+		}}}
+		got := ResolveDefaultManaged(nil, policies, nil)
+		if !got.Managed {
+			t.Fatal("Managed = false, want true")
+		}
+		want := "file_read,project_info,shell"
+		if strings.Join(got.AllowedTools, ",") != want {
+			t.Errorf("AllowedTools = %v, want [%s]", got.AllowedTools, want)
+		}
+	})
+	t.Run("no spec tools with empty policy allowlist still denies everything", func(t *testing.T) {
+		got := ResolveDefaultManaged(nil, []Policy{{Name: "default"}}, nil)
+		if !got.Managed || len(got.AllowedTools) != 0 {
+			t.Fatalf("empty allowlist must stay fail-closed, got %s", got)
+		}
+	})
 }
 
 // TestResolve_NoIOShape pins the purity contract: Resolve is deterministic

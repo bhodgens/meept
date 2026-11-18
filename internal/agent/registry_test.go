@@ -745,6 +745,33 @@ func TestAgentRegistry_GetForTask_EmptyTaskIDDefaults(t *testing.T) {
 	}
 }
 
+// TestAgentRegistry_GetForTask_OrchestratorAlias pins the step-job fallback
+// fix: the dispatcher stamps "orchestrator" on task steps but no such AGENT.md
+// spec exists. GetForTask must resolve the routing alias to a real executor
+// persona so the step job does not fall back to the tool-less main loop.
+func TestAgentRegistry_GetForTask_OrchestratorAlias(t *testing.T) {
+	reg := newTestRegistryForTask(t)
+	loop, err := reg.GetForTask("orchestrator", "task-alias")
+	if err != nil {
+		t.Fatalf("GetForTask(orchestrator): %v", err)
+	}
+	if loop == nil {
+		t.Fatal("GetForTask(orchestrator) returned nil loop")
+	}
+	// Aliased lookup must share the canonical persona's task-scoped loop.
+	direct, err := reg.GetForTask(config.AgentIDCoder, "task-alias")
+	if err != nil {
+		t.Fatalf("GetForTask(coder): %v", err)
+	}
+	if loop != direct {
+		t.Error("orchestrator alias and coder must share the same task loop")
+	}
+	// An unknown id still fails (no blanket fallback to a real spec).
+	if _, err := reg.GetForTask("does-not-exist", "task-x"); err == nil {
+		t.Error("unknown agent id must still error")
+	}
+}
+
 func TestAgentRegistry_ReleaseTaskLoops(t *testing.T) {
 	reg := newTestRegistryForTask(t)
 	_, _ = reg.GetForTask("coder", "task-1")

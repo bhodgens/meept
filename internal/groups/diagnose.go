@@ -528,33 +528,38 @@ func Check(policies []Policy, bindings []Binding, agentsIn []DiagnosisAgent, kno
 			continue
 		}
 		agentsChecked++
-		res := Resolve(a.Tools, a.ID, a.Groups, policies, bindings, resolveOpts)
-		if !res.Managed && defaultManaged {
-			res = ResolveDefaultManaged(a.Tools, policies, resolveOpts)
-		}
-		if res.Managed && len(res.AllowedTools) == 0 {
-			directOrGroup := false
-			subject := "agent:" + a.ID
-			for _, b := range bindings {
-				if b.Subject == subject {
-					directOrGroup = true
-					break
-				}
-				if g, ok := strings.CutPrefix(b.Subject, "group:"); ok {
-					for _, gm := range a.Groups {
-						if g == gm {
-							directOrGroup = true
-						}
+		// Derive direct/group binding FIRST: the two report classes below
+		// are distinguished by STRUCTURE (is the agent bound?), not by the
+		// allowlist's emptiness. The default policy now ships a minimal
+		// built-in toolset, so a managed unbound agent is no longer
+		// necessarily denied-everything — but it is still an unbound agent
+		// running under default_managed, which R5-7 reports (not fatal).
+		directOrGroup := false
+		subject := "agent:" + a.ID
+		for _, b := range bindings {
+			if b.Subject == subject {
+				directOrGroup = true
+				break
+			}
+			if g, ok := strings.CutPrefix(b.Subject, "group:"); ok {
+				for _, gm := range a.Groups {
+					if g == gm {
+						directOrGroup = true
 					}
 				}
 			}
-			if directOrGroup {
-				add(DefectAgentDeniedEverything, a.ID,
-					"agent resolves MANAGED with an empty effective allowlist: it will be denied EVERYTHING (check its bound policies' allow lists)")
-			} else {
+		}
+		res := Resolve(a.Tools, a.ID, a.Groups, policies, bindings, resolveOpts)
+		if !res.Managed && defaultManaged {
+			res = ResolveDefaultManaged(a.Tools, policies, resolveOpts)
+			if !directOrGroup {
 				add(DefectAgentDefaultManaged, a.ID,
-					`agent has no group membership and no direct binding under default_managed=true: it will run under the fail-closed "default" policy`)
+					`agent has no group membership and no direct binding under default_managed=true: it runs under the fail-closed "default" policy`)
 			}
+		}
+		if res.Managed && len(res.AllowedTools) == 0 && directOrGroup {
+			add(DefectAgentDeniedEverything, a.ID,
+				"agent resolves MANAGED with an empty effective allowlist: it will be denied EVERYTHING (check its bound policies' allow lists)")
 		}
 	}
 

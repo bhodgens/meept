@@ -669,9 +669,24 @@
     //       "allowed_models": [],          // model aliases; empty = unrestricted
     //     },
     //     // The special "default" policy applies to unbound agents when
-    //     // default_managed=true (fail-closed: an empty allowlist denies
-    //     // everything for a managed agent).
-    //     // { "name": "default", "tools_allowed": ["file_read"] },
+    //     // default_managed=true. Fail-closed is preserved by an EMPTY
+    //     // allowlist; a managed agent with no spec (e.g. the daemon
+    //     // template/fallback loop that executes step jobs) needs a
+    //     // minimal built-in toolset or EVERY tool call is denied and the
+    //     // planner fails with "no plan". Keep this a small, known-good
+    //     // set: ungrouped step agents get these, truly sensitive tools
+    //     // (delegate_task, git_commit, voice_call, ...) stay denied
+    //     // unless a dedicated policy/binding grants them.
+    //     {
+    //       "name": "default",
+    //       "tools_allowed": [
+    //         "file_read", "file_write", "file_edit", "list_directory",
+    //         "shell", "project_info", "json_extract",
+    //         "task_list", "task_get", "task_create", "task_update",
+    //         "memory_search", "memory_get_context"
+    //       ],
+    //       "tools_denied": [],
+    //     },
     //   ],
     //   "bindings": [
     //     { "subject": "group:coders", "policy": "coders", "scope": "daemon" },

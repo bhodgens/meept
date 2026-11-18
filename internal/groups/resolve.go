@@ -274,6 +274,19 @@ func ResolveDefaultManaged(specTools []string, policies []Policy, opts *ResolveO
 			NetworkClass: "none",
 		}
 	}
+	// A subject with NO spec tools is the fallback/template loop (the
+	// daemon wires ResolveForAgent("daemon", nil, nil)); it has no
+	// AgentSpec to intersect a policy against. Under default_managed it
+	// still runs through this policy, so use the policy's own allowlist as
+	// the "spec" ceiling instead of intersecting against an empty set —
+	// otherwise every tool call is denied and step jobs that fall back to
+	// the template loop can never work (planner: "no plan"). Fail-closed
+	// is preserved: only the EXPLICITLY listed tools pass, and an empty
+	// allowlist still denies everything. Spec-bound agents keep the D4
+	// spec ∩ policy intersection below.
+	if len(specTools) == 0 {
+		return resolveLayered(p.ToolsAllowed, []Policy{p}, opts, true)
+	}
 	return resolveLayered(specTools, []Policy{p}, opts, true)
 }
 
