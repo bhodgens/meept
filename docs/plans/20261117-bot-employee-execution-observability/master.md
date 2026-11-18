@@ -172,16 +172,16 @@ e2e suite. Set COMPLETE and report to the operator.
 
 ## Review Checklist
 
-- [ ] Every leaf task implemented; gate tests pass GREEN and are unmodified
-- [ ] C1-C5 satisfied exactly (signatures, JSON tags, topic names, sources)
-- [ ] Bot result uses `bot.result`; employee result uses `employee.result`
-- [ ] No `kind` field or `ExecutionKind` type exists anywhere
-- [ ] Both tiers emit turn-state edges on `agent.turn.state`
-- [ ] `bot.result` and `employee.result` reach WS as `agent_progress`
-- [ ] Bots appear in `send_agent_message` roster and drain at turn start
-- [ ] No previous #139 behavior changed (delegate/pair/ACP suites still green)
-- [ ] `make graphs` regenerated; no new package dir added
-- [ ] No debug artifacts, TODOs, placeholders, or line-number corruption
+- [x] Every leaf task implemented; gate tests pass GREEN and are unmodified
+- [x] C1-C5 satisfied exactly (signatures, JSON tags, topic names, sources)
+- [x] Bot result uses `bot.result`; employee result uses `employee.result`
+- [x] No `kind` field or `ExecutionKind` type exists anywhere
+- [x] Both tiers emit turn-state edges on `agent.turn.state`
+- [x] `bot.result` and `employee.result` reach WS as `agent_progress`
+- [x] Bots appear in `send_agent_message` roster and drain at turn start
+- [x] No previous #139 behavior changed (delegate/pair/ACP suites still green)
+- [x] `make graphs` regenerated; no new package dir added
+- [x] No debug artifacts, TODOs, placeholders, or line-number corruption
 
 ## Coding Conventions
 
@@ -211,11 +211,11 @@ e2e suite. Set COMPLETE and report to the operator.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-e2e-gate | PENDING | 0 | |
-| 01-wire-contract | PENDING | 0 | |
-| 02-execution-emitters | PENDING | 0 | |
-| 03-inbox | PENDING | 0 | |
-| 04-integration | PENDING | 0 | |
+| 00T-e2e-gate | COMPLETE | - | e2e execution-observability green 2026-11-18 |
+| 01-wire-contract | COMPLETE | - | C1/C5 landed; WS relay + decodeExecutionResultWSClass |
+| 02-execution-emitters | COMPLETE | - | bot.result + employee.result emitters live; trigger handler activated |
+| 03-inbox | COMPLETE | - | bots in send_agent_message roster; turn-start drainer on shared loop |
+| 04-integration | COMPLETE | - | daemon wiring live; graphs regenerated; docs/workflows updated |
 
 ## Integration Test Plan
 
@@ -236,16 +236,16 @@ Test leaves: `00T-e2e-gate.md` (root), `01-wire-contract/00T-wire-tests.md`,
 
 | # | Feature | Source | Unit tests | E2E tests | Status |
 |---|---------|--------|-----------|-----------|--------|
-| F1 | Frozen shared result payload + two topics | 01-wire-contract/01 | TestExecutionResultEvent_JSONShape, TestResultTopics_Names | execution-observability-01 | PENDING |
-| F2 | WS decoders + both subscriptions | 01-wire-contract/02 | TestDecodeExecutionResultWSClass | execution-observability-01 | PENDING |
-| F3 | Bot executes and emits on bot.result | 02-execution-emitters/01 | TestBotRunner_EmitsResultAndTurnState | execution-observability-02 | PENDING |
-| F4 | Employee executes and emits on employee.result | 02-execution-emitters/02 | TestGoalLoop_EmitsResultAndTurnState | execution-observability-03 | PENDING |
-| F5 | Bots in send_agent_message roster | 03-inbox/01 | TestRoster_IncludesBotID | execution-observability-04 | PENDING |
-| F6 | Turn-start drain on bot/employee clone | 03-inbox/01 | TestClone_InheritsDrainer | execution-observability-04 | PENDING |
-| F7 | Daemon wires bus onto both emitters | 04-integration/01 | TestComponents_WiresExecutionBus | execution-observability-01..04 | PENDING |
-| F8 | Topology/doc freshness | 04-integration/02 | n/a (generated) | `make graphs-check` | PENDING |
+| F1 | Frozen shared result payload + two topics | 01-wire-contract/01 | TestExecutionResultEvent_JSONShape, TestResultTopics_Names | execution-observability-01 | COMPLETE |
+| F2 | WS decoders + both subscriptions | 01-wire-contract/02 | TestDecodeExecutionResultWSClass | execution-observability-01 | COMPLETE |
+| F3 | Bot executes and emits on bot.result | 02-execution-emitters/01 | TestBotRunner_EmitsResultAndTurnState | execution-observability-02 | COMPLETE |
+| F4 | Employee executes and emits on employee.result | 02-execution-emitters/02 | TestGoalLoop_EmitsResultAndTurnState | execution-observability-03 | COMPLETE |
+| F5 | Bots in send_agent_message roster | 03-inbox/01 | TestRoster_IncludesBotID | execution-observability-04 | COMPLETE |
+| F6 | Turn-start drain on bot/employee clone | 03-inbox/01 | TestClone_InheritsDrainer | execution-observability-04 | COMPLETE |
+| F7 | Daemon wires bus onto both emitters | 04-integration/01 | TestComponents_WiresExecutionBus | execution-observability-01..04 | COMPLETE |
+| F8 | Topology/doc freshness | 04-integration/02 | n/a (generated) | `make graphs-check` | COMPLETE |
 
-Delta log: none yet.
+Delta log: 2026-11-18 — tree verified complete against HEAD (9aeadb0c): `make e2e-fast-area AREA=execution-observability` ok (18.8s), `make e2e-fast-area AREA=inter-agent-coord` ok (20.6s), `go test -p 2 ./internal/bot ./internal/agent ./internal/comm/http ./internal/daemon` ok, `make graphs-check` ok after regeneration (line-offset drift + one stale turnstate.go entry). Review checklist items all verified; no kind/ExecutionKind present.
 
 ## Open Questions
 
