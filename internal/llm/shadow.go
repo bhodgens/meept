@@ -456,14 +456,21 @@ func shadowInCooldown(health *AliasHealth, now time.Time) bool {
 // veto the alias path enforces) surfaces as an unselected candidate with the
 // filter's reason rather than a bogus selection.
 func (r *Resolver) shadowSingleDecision(req ShadowRequest, mc *ModelConfig, estInput int, reason, aliasLabel string, now time.Time) *ShadowDecision {
+	// A daemon with no resolvable default model (cfg.Model unset or
+	// malformed) yields an empty preview — never a nil deref. The caller's
+	// contract explicitly promises "empty decision, not an error".
+	if mc == nil {
+		return &ShadowDecision{
+			Alias:      aliasLabel,
+			Reason:     reason,
+			Candidates: []ShadowCandidate{},
+		}
+	}
 	dec := &ShadowDecision{
 		Alias:      aliasLabel,
 		Reason:     reason,
 		Posture:    mc.DataPosture, // effective posture (leaf 05; ParsePosture-resolved at construction — absent key = Private)
 		Candidates: []ShadowCandidate{},
-	}
-	if mc == nil {
-		return dec
 	}
 	estOut := shadowEstOutputTokens(mc)
 	cand := ShadowCandidate{
