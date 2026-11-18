@@ -1872,7 +1872,14 @@ mixin _$Agent {
   String get description => throw _privateConstructorUsedError;
   bool get enabled => throw _privateConstructorUsedError;
   String? get prompt => throw _privateConstructorUsedError;
-  Map<String, dynamic>? get frontmatter => throw _privateConstructorUsedError;
+  Map<String, dynamic>? get frontmatter =>
+      throw _privateConstructorUsedError; // C1 roster fields (from agents.list / RosterEntry) used for GUI parity
+  // with the TUI agents panel: kind, active count and daily spend.
+  String get type => throw _privateConstructorUsedError;
+  @JsonKey(name: 'active_count')
+  int get activeCount => throw _privateConstructorUsedError;
+  @JsonKey(name: 'daily_cost_cents')
+  int get dailyCostCents => throw _privateConstructorUsedError;
 
   Map<String, dynamic> toJson() => throw _privateConstructorUsedError;
   @JsonKey(ignore: true)
@@ -1891,6 +1898,9 @@ abstract class $AgentCopyWith<$Res> {
     bool enabled,
     String? prompt,
     Map<String, dynamic>? frontmatter,
+    String type,
+    @JsonKey(name: 'active_count') int activeCount,
+    @JsonKey(name: 'daily_cost_cents') int dailyCostCents,
   });
 }
 
@@ -1913,6 +1923,9 @@ class _$AgentCopyWithImpl<$Res, $Val extends Agent>
     Object? enabled = null,
     Object? prompt = freezed,
     Object? frontmatter = freezed,
+    Object? type = null,
+    Object? activeCount = null,
+    Object? dailyCostCents = null,
   }) {
     return _then(
       _value.copyWith(
@@ -1940,6 +1953,18 @@ class _$AgentCopyWithImpl<$Res, $Val extends Agent>
                 ? _value.frontmatter
                 : frontmatter // ignore: cast_nullable_to_non_nullable
                       as Map<String, dynamic>?,
+            type: null == type
+                ? _value.type
+                : type // ignore: cast_nullable_to_non_nullable
+                      as String,
+            activeCount: null == activeCount
+                ? _value.activeCount
+                : activeCount // ignore: cast_nullable_to_non_nullable
+                      as int,
+            dailyCostCents: null == dailyCostCents
+                ? _value.dailyCostCents
+                : dailyCostCents // ignore: cast_nullable_to_non_nullable
+                      as int,
           )
           as $Val,
     );
@@ -1961,6 +1986,9 @@ abstract class _$$AgentImplCopyWith<$Res> implements $AgentCopyWith<$Res> {
     bool enabled,
     String? prompt,
     Map<String, dynamic>? frontmatter,
+    String type,
+    @JsonKey(name: 'active_count') int activeCount,
+    @JsonKey(name: 'daily_cost_cents') int dailyCostCents,
   });
 }
 
@@ -1982,6 +2010,9 @@ class __$$AgentImplCopyWithImpl<$Res>
     Object? enabled = null,
     Object? prompt = freezed,
     Object? frontmatter = freezed,
+    Object? type = null,
+    Object? activeCount = null,
+    Object? dailyCostCents = null,
   }) {
     return _then(
       _$AgentImpl(
@@ -2009,6 +2040,18 @@ class __$$AgentImplCopyWithImpl<$Res>
             ? _value._frontmatter
             : frontmatter // ignore: cast_nullable_to_non_nullable
                   as Map<String, dynamic>?,
+        type: null == type
+            ? _value.type
+            : type // ignore: cast_nullable_to_non_nullable
+                  as String,
+        activeCount: null == activeCount
+            ? _value.activeCount
+            : activeCount // ignore: cast_nullable_to_non_nullable
+                  as int,
+        dailyCostCents: null == dailyCostCents
+            ? _value.dailyCostCents
+            : dailyCostCents // ignore: cast_nullable_to_non_nullable
+                  as int,
       ),
     );
   }
@@ -2024,6 +2067,9 @@ class _$AgentImpl implements _Agent {
     this.enabled = true,
     this.prompt,
     final Map<String, dynamic>? frontmatter,
+    this.type = '',
+    @JsonKey(name: 'active_count') this.activeCount = 0,
+    @JsonKey(name: 'daily_cost_cents') this.dailyCostCents = 0,
   }) : _frontmatter = frontmatter;
 
   factory _$AgentImpl.fromJson(Map<String, dynamic> json) =>
@@ -2051,9 +2097,21 @@ class _$AgentImpl implements _Agent {
     return EqualUnmodifiableMapView(value);
   }
 
+  // C1 roster fields (from agents.list / RosterEntry) used for GUI parity
+  // with the TUI agents panel: kind, active count and daily spend.
+  @override
+  @JsonKey()
+  final String type;
+  @override
+  @JsonKey(name: 'active_count')
+  final int activeCount;
+  @override
+  @JsonKey(name: 'daily_cost_cents')
+  final int dailyCostCents;
+
   @override
   String toString() {
-    return 'Agent(id: $id, name: $name, description: $description, enabled: $enabled, prompt: $prompt, frontmatter: $frontmatter)';
+    return 'Agent(id: $id, name: $name, description: $description, enabled: $enabled, prompt: $prompt, frontmatter: $frontmatter, type: $type, activeCount: $activeCount, dailyCostCents: $dailyCostCents)';
   }
 
   @override
@@ -2070,7 +2128,12 @@ class _$AgentImpl implements _Agent {
             const DeepCollectionEquality().equals(
               other._frontmatter,
               _frontmatter,
-            ));
+            ) &&
+            (identical(other.type, type) || other.type == type) &&
+            (identical(other.activeCount, activeCount) ||
+                other.activeCount == activeCount) &&
+            (identical(other.dailyCostCents, dailyCostCents) ||
+                other.dailyCostCents == dailyCostCents));
   }
 
   @JsonKey(ignore: true)
@@ -2083,6 +2146,9 @@ class _$AgentImpl implements _Agent {
     enabled,
     prompt,
     const DeepCollectionEquality().hash(_frontmatter),
+    type,
+    activeCount,
+    dailyCostCents,
   );
 
   @JsonKey(ignore: true)
@@ -2105,6 +2171,9 @@ abstract class _Agent implements Agent {
     final bool enabled,
     final String? prompt,
     final Map<String, dynamic>? frontmatter,
+    final String type,
+    @JsonKey(name: 'active_count') final int activeCount,
+    @JsonKey(name: 'daily_cost_cents') final int dailyCostCents,
   }) = _$AgentImpl;
 
   factory _Agent.fromJson(Map<String, dynamic> json) = _$AgentImpl.fromJson;
@@ -2121,6 +2190,15 @@ abstract class _Agent implements Agent {
   String? get prompt;
   @override
   Map<String, dynamic>? get frontmatter;
+  @override // C1 roster fields (from agents.list / RosterEntry) used for GUI parity
+  // with the TUI agents panel: kind, active count and daily spend.
+  String get type;
+  @override
+  @JsonKey(name: 'active_count')
+  int get activeCount;
+  @override
+  @JsonKey(name: 'daily_cost_cents')
+  int get dailyCostCents;
   @override
   @JsonKey(ignore: true)
   _$$AgentImplCopyWith<_$AgentImpl> get copyWith =>

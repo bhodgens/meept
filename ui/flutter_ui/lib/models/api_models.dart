@@ -711,6 +711,11 @@ class Agent with _$Agent {
     @Default(true) bool enabled,
     String? prompt,
     Map<String, dynamic>? frontmatter,
+    // C1 roster fields (from agents.list / RosterEntry) used for GUI parity
+    // with the TUI agents panel: kind, active count and daily spend.
+    @Default('') String type,
+    @JsonKey(name: 'active_count') @Default(0) int activeCount,
+    @JsonKey(name: 'daily_cost_cents') @Default(0) int dailyCostCents,
   }) = _Agent;
 
   factory Agent.fromJson(Map<String, dynamic> json) =>
