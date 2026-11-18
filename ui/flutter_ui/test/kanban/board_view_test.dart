@@ -163,7 +163,9 @@ void main() {
         // actionable lowercase empty state, not the generic error
         expect(find.text('sidecar not running'), findsOneWidget);
         expect(
-          find.text('set [kanban].sidecar_enabled=true and restart the daemon'),
+          find.text(
+            'set [kanban].enabled=true and [kanban].sidecar_enabled=true, then restart the daemon',
+          ),
           findsOneWidget,
         );
         expect(find.textContaining('kanban error:'), findsNothing);

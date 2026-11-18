@@ -207,6 +207,9 @@ func NewGateway(rpc RPCCaller, events EventSource, authz GrantChecker, staticDir
 // returns an error instead of silently serving a route that cannot work.
 // Additive seam — leaf 07/01 may fold this into NewGateway.
 func (g *Gateway) SetPairing(store *TokenStore) error {
+	if g == nil {
+		return errors.New("kanbansvc: gateway is nil")
+	}
 	if store == nil {
 		return errors.New("kanbansvc: token store is required")
 	}

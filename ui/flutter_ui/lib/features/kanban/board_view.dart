@@ -327,7 +327,7 @@ class _KanbanBoardViewState extends ConsumerState<KanbanBoardView> {
             ),
             const SizedBox(height: 4),
             const Text(
-              'set [kanban].sidecar_enabled=true and restart the daemon',
+              'set [kanban].enabled=true and [kanban].sidecar_enabled=true, then restart the daemon',
               style: TextStyle(color: Colors.white70, fontSize: 12),
             ),
             const SizedBox(height: 4),
