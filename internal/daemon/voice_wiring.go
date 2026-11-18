@@ -2178,7 +2178,21 @@ func (r bindingTurnRunner) Run(ctx context.Context, _ voice.SessionHandle, promp
 	// Info is a legal "voice turn, caller unresolved" mark (enforcement
 	// distinguishes stamped-zero from absent; never-stamped is only
 	// possible off the voice path).
-	turnCtx = callerid.With(turnCtx, r.inst.Caller)
+	//
+	// Local-leg callers are trusted by construction: the caller is the
+	// operator at this machine, there is no carrier/E.164 identity and
+	// no unapproved-stranger threat model. Force the approved + known bits
+	// so the step-1c caller gate is inert and full tool use works for a
+	// local call. Phone/signal callers keep their resolved contact identity
+	// — unknown numbers stay gated by voice.unapproved_caller_allowed_tools.
+	// Detect the leg via the explicit Instance.Leg field (the zero value is
+	// "phone"); NEVER a "local:" target-prefix heuristic.
+	caller := r.inst.Caller
+	if r.inst.Leg == voice.LegLocal {
+		caller.Approved = true
+		caller.Known = true
+	}
+	turnCtx = callerid.With(turnCtx, caller)
 	// Guided intake (leaf 05): the ccid rides the turn ctx (the
 	// intake_save tool's callID seam keys the confirm state by it), and
 	// the caller-turn boundary advances the confirm state machine — a

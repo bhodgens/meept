@@ -241,6 +241,15 @@ ships DISABLED; hire with `meept agents create` after flipping `enabled`.
 
 ## The local leg: how to run it
 
+The local caller is trusted by construction: you are the operator at
+this machine, there is no carrier and no phone number to resolve. Local
+turns are stamped as an approved, known caller, so the voice-action gate
+(`voice.unapproved_caller_allowed_tools`) does NOT restrict them — a local
+call has full tool use. That config list governs only unapproved *phone*
+(and signal) callers, whose numbers are looked up in contacts.db. There
+is no config to grant local callers more tools because they already have
+all of them.
+
 Prereqs: daemon running with `voice.enabled = true` and
 `voice.local.enabled = true`; for live mode, `ffmpeg` on PATH (mic
 capture) plus the oto-backed speaker (built in); for file mode, only
