@@ -60,44 +60,44 @@ class _SessionInfoOverlayState extends State<SessionInfoOverlay>
   Widget build(BuildContext context) {
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.all(24),
-      child: Container(
-        width: 800,
-        height: 560,
-        decoration: BoxDecoration(
-          color: CyberpunkColors.darkGray,
-          border: Border.all(
-            color: CyberpunkColors.orangePrimary.withValues(alpha: 0.3),
-            width: 1,
+      insetPadding: EdgeInsets.zero,
+      child: SizedBox.expand(
+        child: Container(
+          decoration: BoxDecoration(
+            color: CyberpunkColors.darkGray,
+            border: Border.all(
+              color: CyberpunkColors.orangePrimary.withValues(alpha: 0.3),
+              width: 1,
+            ),
+            borderRadius: BorderRadius.circular(4),
           ),
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: Column(
-          children: [
-            // Header with session name and close button
-            _Header(
-              session: widget.session,
-              onClose: () => Navigator.pop(context),
-            ),
-            // Tab bar
-            _TabBar(
-              tabs: const ['sessions', 'plans', 'tasks', 'agents'],
-              selectedIndex: _selectedTabIndex,
-              onTap: (index) => _tabController.animateTo(index),
-            ),
-            // Tab content
-            Expanded(
-              child: IndexedStack(
-                index: _selectedTabIndex,
-                children: [
-                  _SessionsTabContent(selectedSession: widget.session),
-                  _PlansTabContent(sessionId: widget.session.id),
-                  _TasksTabContent(sessionId: widget.session.id),
-                  _AgentsTabContent(sessionId: widget.session.id),
-                ],
+          child: Column(
+            children: [
+              // Header with session name and close button
+              _Header(
+                session: widget.session,
+                onClose: () => Navigator.pop(context),
               ),
-            ),
-          ],
+              // Tab bar
+              _TabBar(
+                tabs: const ['sessions', 'plans', 'tasks', 'agents'],
+                selectedIndex: _selectedTabIndex,
+                onTap: (index) => _tabController.animateTo(index),
+              ),
+              // Tab content
+              Expanded(
+                child: IndexedStack(
+                  index: _selectedTabIndex,
+                  children: [
+                    _SessionsTabContent(selectedSession: widget.session),
+                    _PlansTabContent(sessionId: widget.session.id),
+                    _TasksTabContent(sessionId: widget.session.id),
+                    _AgentsTabContent(sessionId: widget.session.id),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
