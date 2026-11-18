@@ -261,9 +261,9 @@ func (m *SessionsModel) Update(msg tea.Msg) tea.Cmd {
 			}
 
 		case "f":
-			// Open the global search view
+			// Open the search view scoped to sessions (C4 reuse).
 			return func() tea.Msg {
-				return OpenSearchViewMsg{}
+				return OpenSearchViewMsg{Scope: "sessions"}
 			}
 
 		case "r":

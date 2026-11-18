@@ -1421,10 +1421,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case models.OpenSearchViewMsg:
-		// Switch to the global search view
+		// Switch to the search view. An empty Scope keeps the global
+		// "all" search; the sessions tree opens with Scope "sessions".
 		a.currentView = ViewSearch
 		if a.search != nil {
-			return a, a.search.Init()
+			return a, a.search.Open(msg.Scope)
 		}
 		return a, nil
 
