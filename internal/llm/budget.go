@@ -881,6 +881,15 @@ func (b *Budget) Advisory() AdvisoryVerdict {
 // noteAdvisoryLocked records a breach for dedup and returns the signal to
 // publish, or false when this exact breach episode already signalled.
 func (b *Budget) noteAdvisoryLocked(res BudgetCheckResult, taskID, sessionID string) (BudgetAdvisorySignal, bool) {
+	// Global (hourly/daily) breaches are the SAME episode regardless of
+	// which caller checks them: the async handler pre-check uses an empty
+	// scope while the client budget gate uses the real task/session scope.
+	// Keying those on scope emitted two budget_advisory signals for one
+	// breach. Per-task/per-session breaches stay scope-specific.
+	scope := budgetLimitScope(res.Reason)
+	if scope != "per_task" && scope != "per_session" {
+		taskID, sessionID = "", ""
+	}
 	key := string(res.Reason) + "|" + taskID + "|" + sessionID
 	if _, seen := b.advisorySeen[key]; seen {
 		return BudgetAdvisorySignal{}, false
