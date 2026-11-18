@@ -805,7 +805,18 @@ func WithWebSocket(msgBus *bus.MessageBus, wsPath string) ServerOption {
 			// connection, exactly like the progress path does for
 			// session-less frames.
 			"kanban.*", "kanban.*.*", "storage.*"}
+		// The bus delivers a message to ALL matching subscriptions. An
+		// exact pattern AND a wildcard that both match one topic (e.g.
+		// "employee.result" + "employee.*", or "agent.turn.state" +
+		// "agent.*.*") produce TWO WS frames for a single bus event.
+		// The wildcard patterns are already in the list and cover those
+		// topics, so the redundant exact entries are intentionally NOT
+		// subscribed here. Dropping only the exact duplicates keeps every
+		// wildcard's other topics (employee.notify, agent.status, ...).
 		for _, topic := range topics {
+			if topic == "employee.result" || topic == "agent.turn.state" {
+				continue
+			}
 			sub := msgBus.Subscribe("http-ws-"+topic, topic)
 			s.wsSubMu.Lock()
 			s.wsSubscribers = append(s.wsSubscribers, sub)
