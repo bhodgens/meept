@@ -257,6 +257,24 @@ that tree's master.md; the invariants below are the as-built form).
   (L16 = byte-identical passthrough, PCMU = mu-law 8 kHz up/downsample),
   and the wiring REFUSES a codec/rate mismatch (L16@!=16000, PCMU@!=8000)
   rather than silently mis-resampling (bughunt 2026-11-07 voice F-3).
+- PACER FEED / SYNTH PREFETCH (starvation fix, call local-611897f3c43b2c98):
+  the local pacer holds only a 64-chunk (~1.28 s) pump buffer, so it
+  CANNOT cover a multi-second synthesis gap — once the buffer drains,
+  the next client write waits on fresh child PCM and the gap is permanent
+  dead air (`localsplice pacer stall gap_ms=...`). The feed contract is
+  therefore CHILD-SIDE, not pacer-side: the child's depth-2 synth
+  prefetch (`internal/voicechild/pipeline.go` `tryLaunchPrefetch`) MUST
+  start the next utterance's `Speak` the instant its `say` frame is
+  enqueued — even while the head is still synthesizing (head-of-burst,
+  `writingNow=false`) or the worker is parked between frames. Gating
+  prefetch on `writingNow` left the talk loop's fast-first-audio remainder
+  unsynthesized until the short opening finished playing, so qwen3
+  voice-clone generation (0.7-18 s) surfaced verbatim as dead air. Depth
+  stays bounded at two lookahead synths, playback stays strict FIFO
+  (single worker, one reader at a time), and a barge-in still cancels
+  every registered synth through the playGen gate (`clear()`), so the
+  375 ms client recall bound is unchanged. Pinned by
+  TestPrefetchStartsWhileHeadStillSynthesizing.
 - Barge-in is PER CALL and per BARGE-IN: `clear` stops playback and drops
   queued drafts for THAT call_id only; other calls' pipelines are untouched
   (pinned by TestBargeInPerCall and the voice-bargein e2e suite). The

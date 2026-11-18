@@ -261,12 +261,14 @@ type pipeline struct {
 	speaking    bool // playback active (say in flight)
 	// writingNow (playMu) is true while the worker is INSIDE a frame's
 	// chunk write loop (set with speaking==true in playbackStream,
-	// cleared on its exit). It gates the enqueueSay prefetch hook: a say
-	// that arrives while sentence N's audio is actively pacing may start
-	// N+1's synthesis immediately; one that arrives while the worker is
-	// between frames (synthesizing N, or parked) stays queued and gets
-	// its prefetch from the worker's own write-start hook instead —
-	// keeping synth depth at ONE frame past the current write.
+	// cleared on its exit). It is telemetry/state only: the enqueueSay
+	// prefetch hook starts N+1's synthesis unconditionally (see
+	// tryLaunchPrefetch) — a say that arrives while the worker is
+	// between frames (synthesizing N head-of-burst, or parked) must
+	// overlap IMMEDIATELY too, otherwise the daemon pacer drains its
+	// ~1.28 s buffer and starves for the full non-streaming qwen3
+	// generation (the multi-second dead-air gaps in local-611897f3).
+	// Depth stays bounded at TWO frames past the current write.
 	writingNow   bool
 	sayQueue     []queuedSay // pending say frames (gen-stamped), drained FIFO by the worker (audit fix 8: replaces the never-consumed outCh placeholder)
 	playWorkerUp bool        // a playback worker goroutine is draining sayQueue
@@ -1525,16 +1527,17 @@ func (p *pipeline) enqueueSay(frame voiceframe.Frame) error {
 	if !workerUp {
 		go p.playbackWorker()
 	} else {
-		// OVERLAP POINT 2: this draft arrived while the worker is
-		// actively pacing an earlier frame's audio (writingNow) — the
-		// NORMAL supervisor path (sentence N+1 is checked while N
-		// plays). Start its synthesis now instead of waiting for N to
-		// fully drain; the bounded synth queue keeps depth at TWO. The
-		// hook is playMu-guarded and lock-free inside Speak; safe to
-		// call from the frame handler. No-op (draft stays queued) when
-		// the worker is between frames — its write-start hook (OVERLAP
-		// POINT 1) will pick it up.
-		p.tryLaunchPrefetch(true)
+		// OVERLAP POINT 2 (starve fix): this draft arrived while an
+		// earlier utterance is still generating or parked between
+		// frames. Start its synthesis NOW rather than waiting for N
+		// to finish playing — otherwise a short opening sentence
+		// drains the daemon pacer before the remainder's slow
+		// voice-clone synthesis even starts (multi-second dead air).
+		// Depth stays bounded and clear cancels every registered job,
+		// so barge-in recallability is unchanged. Safe to call from
+		// the frame handler: the hook is playMu-guarded and Speak
+		// runs lock-free on its own goroutine.
+		p.tryLaunchPrefetch()
 	}
 	return nil
 }
@@ -1757,24 +1760,27 @@ var errNoTTSProvider = errors.New("voicechild: tts provider not installed; dropp
 // head stays the next frame to play and a slow Speak for N+1 never lets
 // N+2 jump ahead on the write path. Memory stays ~two utterances.
 //
-// fromEnqueue=true is the enqueueSay path: the new draft may only
-// prefetch while the worker is actively writing (writingNow) — the same
-// depth contract. fromEnqueue=false is the worker's own hook fired
-// right before it enters the write loop for frame N (N+1 may start
-// generating even though N's first chunk has not left yet — there is no
-// second reader to collide with, and Speak calls that overlap a live
-// READER would need a real pacing stall to occur, which is exactly the
-// gap this prefetch removes).
-func (p *pipeline) tryLaunchPrefetch(fromEnqueue bool) {
+// enqueueSay calls it for every new draft: synthesis of the next
+// utterance starts the moment the frame arrives, even while the worker is
+// between frames (synthesizing N head-of-burst, or parked after a prior
+// turn). That is the starve fix — waiting for writingNow meant a short
+// opening sentence finished playing (and the daemon pacer drained its
+// ~1.28 s buffer) before the remainder's slow voice-clone synthesis even
+// started, leaving multi-second dead air (local-611897f3). The worker's
+// own write-start hook remains as a backstop for drafts that arrived
+// before the worker existed. Depth is still bounded
+// at prefetchDepth (TWO beyond the frame playing); a clear cancels every
+// registered job (playGen gate) so recallability is unchanged.
+func (p *pipeline) tryLaunchPrefetch() {
 	p.playMu.Lock()
 	if !p.playWorkerUp || p.ctx.Err() != nil {
 		p.playMu.Unlock()
 		return
 	}
-	if fromEnqueue && !p.writingNow {
-		p.playMu.Unlock()
-		return
-	}
+	// Depth is bounded strictly by prefetchDepth and the gen gate below.
+	// (The old `fromEnqueue && !p.writingNow` early-return was the dead-air
+	// source: it suppressed prefetch when the worker was synthesizing the
+	// head or parked between frames — exactly when overlap is needed most.)
 	// Fill the bounded synth queue from the FIFO head, current-gen
 	// drafts only (a retired stamp means a clear raced the queue — the
 	// draft drops at dequeue, same as the unpopped path).
@@ -1995,7 +2001,7 @@ func (p *pipeline) playbackStream(pcm io.ReadCloser, gen uint64, synthDur time.D
 	// awaitSynth, so this tops the bounded synth queue up to two
 	// lookahead synths (N+1, N+2); nothing beyond prefetchDepth starts
 	// until a slot frees.
-	p.tryLaunchPrefetch(false)
+	p.tryLaunchPrefetch()
 
 	chunk, err := voiceframe.ChunkBytes(p.codec, p.sampleRt)
 	if err != nil {
