@@ -348,6 +348,28 @@ seam-based like every other voice.local method — no new bus topic) and
 `meept voice link` / `meept voice local` poll it every 500 ms printing
 per-side lines: `heard:` / `thinking (N words)` / `replied (N words,
 Xms)` / `>> barge-in` / `call ended: <reason>` / `silence deferred (...)`.
+
+Per-phase events (voice/telemetry-phases): three ADDITIVE event kinds give
+the operator precise timing and text for each voice phase, on the same
+per-call ring and `voice.local.events` RPC as the lifecycle events (no new
+bus topic, no wire change to the RPC envelope):
+
+| kind | phase | text | `ms` |
+| --- | --- | --- | --- |
+| `stt_final` | caller speech → turn dispatch | FULL final transcript (not the `prompt_dispatch` preview) | speech-end (FINAL prompt frame arrival) → dispatch |
+| `model_final` | employee model → turn final | FULL reply text | dispatch → turn-final (same value as `turn_final`) |
+| `voice_play` | first spoken model output | FULL spoken sentence (the fallback line when the check failed) | dispatch → first playback |
+
+All three are emitted only when the talk loop's optional `OnEvent` seam is
+armed (nil = zero work, byte-identical loop), ride the same 64-per-call ring,
+and are **in addition to** — never replacements for — `prompt_dispatch`,
+`turn_final`, and `said`. `voice_play` fires once per turn (the first allowed
+sentence, or the fallback), never for fact-free greeting/filler/fragment/
+farewell lines, which have no employee turn. Full text means the operator
+feed no longer has to reconstruct a reply from 40-rune previews. A new client
+sees unknown kinds via its existing default renderer; old clients continue to
+render the lifecycle kinds unchanged.
+
 The Flutter GUI reads the same ring for parity (bughunt C-12):
 `VoiceService.events()` over the same RPC, one bounded 500 ms poller
 per live call, rendering the same operator lines under each call's row

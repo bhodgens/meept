@@ -308,10 +308,13 @@ type TalkDeps struct {
 // sequence it was spawned under, its cancel func (interrupt/teardown), and
 // the verdict channel the checker feeds. said/fallback are owned by the
 // playback goroutine (Run), never the checker. The filler*/utteranceOut/
-// dispatchedAt/replyWords fields are guarded by TalkLoop.interruptMu (the
-// delayed-filler timer closure runs on the runtime timer goroutine, so the
+// dispatchedAt/replyWords/replyText fields are guarded by TalkLoop.interruptMu
+// (the delayed-filler timer closure runs on the runtime timer goroutine, so the
 // latch lives under that lock; the mutex-scope rule still binds — no I/O,
-// send, or Check happens while it is held).
+// send, or Check happens while it is held). Per-phase telemetry (voice-events)
+// uses dispatchedAt for STT->dispatch and dispatch->final/play ms values and
+// replyText for the model_final full reply. voicePlaySeen is Run-owned like
+// turnEnded (only playVerdict, on the Run goroutine, touches it).
 type pipeline struct {
 	gen      uint64
 	seq      uint64
@@ -339,7 +342,9 @@ type pipeline struct {
 	utteranceOut  bool // first allowed/fallback sentence went out
 	fillerSkipped bool // grace timer was stopped by a real utterance (telemetry)
 	dispatchedAt  time.Time
-	replyWords    int // words across allowed spoken sentences (turn_final)
+	replyWords    int    // words across allowed spoken sentences (turn_final)
+	replyText     string // full model reply (model_final telemetry, not a preview)
+	voicePlaySeen bool   // voice_play fired once for this turn; Run-owned like turnEnded
 }
 
 // stopFillerLocked cancels a pending delayed-filler timer. Callers hold
@@ -487,6 +492,25 @@ func (t *TalkLoop) emitEvent(ccid string, in EventInput) {
 	}
 }
 
+// emitVoicePlay records the FIRST spoken model output of a turn as
+// kind=voice_play: full text + dispatch->play ms. Called from the say
+// choke in playVerdict (never from the fact-free greeting/filler/clarify
+// lanes), once per draft via p.voicePlaySeen. text is the FULL sentence
+// the child was asked to speak (a fallback line when the check failed).
+// p and its voicePlaySeen latch are Run-owned — all call sites are on the
+// Run goroutine — so no lock is taken here (mirrors turnEnded).
+func (t *TalkLoop) emitVoicePlay(ccid string, p *pipeline, text string) {
+	if p == nil || p.voicePlaySeen || text == "" {
+		return
+	}
+	p.voicePlaySeen = true
+	ms := t.now().Sub(p.dispatchedAt).Milliseconds()
+	if ms < 0 {
+		ms = 0
+	}
+	t.emitEvent(ccid, EventInput{Kind: EventKindVoicePlay, Text: text, Ms: ms})
+}
+
 // ccidForTelemetry returns the call id the link coordinator rings this
 // side's floor-lifecycle events under (bughunt 2026-11-11 C-14): the
 // Run call's ccid (the wiring arms Run with the live Instance; before
@@ -505,6 +529,7 @@ type heldPrompt struct {
 	dispatch func()
 	text     string
 	call     Instance
+	at       time.Time // speech-end (FINAL prompt frame arrival) for stt_final ms
 }
 
 // nextSeq reads the seq the NEXT spawnPipeline will claim (telemetry
@@ -519,10 +544,10 @@ func (t *TalkLoop) nextSeq() uint64 {
 // held final REPLACES the pending one - latest question wins) and logs
 // the prompt_held telemetry line. Called on the Run goroutine after
 // deps.HoldPrompt returned false.
-func (t *TalkLoop) parkPrompt(call Instance, dispatch func(), text string) {
+func (t *TalkLoop) parkPrompt(call Instance, dispatch func(), text string, at time.Time) {
 	t.heldMu.Lock()
 	replaced := t.held != nil
-	t.held = &heldPrompt{dispatch: dispatch, text: text, call: call}
+	t.held = &heldPrompt{dispatch: dispatch, text: text, call: call, at: at}
 	t.heldMu.Unlock()
 
 	ccid := call.CallControlID
@@ -1131,7 +1156,10 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 	// it verbatim: held dispatch runs LATER on this same goroutine
 	// (timer discipline + fillerIdx ownership untouched). stopSilence/
 	// armTurn close over Run's timer locals, so this MUST live here.
-	dispatchPrompt := func(text string) {
+	// speechEnd is the FINAL-prompt frame's arrival time — the STT
+	// phase end — carried through a link park so stt_final measures the
+	// true speech-end -> dispatch gap even for a delayed turn.
+	dispatchPrompt := func(text string, speechEnd time.Time) {
 		// Farewell rule (R5, plan 20261113-filler-clips leaf 04): a
 		// whole-utterance bye never starts an LLM turn — the loop
 		// speaks one farewell-lane line as a FINAL (last:true) say
@@ -1182,7 +1210,7 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 		if isTrailingEllipsis(text) {
 			fragmentLine = t.fragmentClarifyLine()
 		}
-		t.spawnPipeline(ctx, call, text, t.fillerLine(), fragmentLine)
+		t.spawnPipeline(ctx, call, text, t.fillerLine(), fragmentLine, speechEnd)
 	}
 
 	for {
@@ -1415,9 +1443,10 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 				// (every non-link call) dispatches inline, byte-identical.
 				if t.deps.HoldPrompt != nil {
 					text := f.Text
-					dispatch := func() { dispatchPrompt(text) }
+					at := t.now() // speech-end: FINAL prompt frame arrival
+					dispatch := func() { dispatchPrompt(text, at) }
 					if !t.deps.HoldPrompt(call, dispatch) {
-						t.parkPrompt(call, dispatch, text)
+						t.parkPrompt(call, dispatch, text, at)
 						continue
 					}
 					// Coordinator allows dispatch NOW: a prompt parked
@@ -1427,7 +1456,7 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 					dispatch()
 					continue
 				}
-				dispatchPrompt(f.Text)
+				dispatchPrompt(f.Text, t.now())
 			case EventInterrupt:
 				t.handleInterrupt(ccid)
 			case EventEnd:
@@ -1460,7 +1489,7 @@ func (t *TalkLoop) Run(ctx context.Context, call Instance) error {
 // handling — either no lane configured or the prompt is not a fragment);
 // it is passed in, never re-picked here, so the fragment cursor stays
 // Run-owned (spawnPipeline's checker goroutine must not touch it).
-func (t *TalkLoop) spawnPipeline(ctx context.Context, call Instance, prompt, fillerLine, fragmentLine string) {
+func (t *TalkLoop) spawnPipeline(ctx context.Context, call Instance, prompt, fillerLine, fragmentLine string, speechEnd time.Time) {
 	ccid := call.CallControlID
 
 	turnCtx, cancel := context.WithCancel(ctx)
@@ -1469,20 +1498,21 @@ func (t *TalkLoop) spawnPipeline(ctx context.Context, call Instance, prompt, fil
 	t.gen++
 	t.seq++
 	seq := t.seq
+	dispatchedAt := t.now()
 	p := &pipeline{
 		gen:          t.gen,
 		seq:          seq,
 		cancel:       cancel,
 		checks:       make(chan verdict, 1),
 		fillerText:   fillerLine,
-		dispatchedAt: t.now(),
+		dispatchedAt: dispatchedAt,
 	}
 	t.cur = p
 	t.interruptMu.Unlock()
 
 	// Telemetry: the prompt actually dispatched a turn (non-speech finals
 	// never reach this point — the child-side guard drops them before the
-	// frame is sent). kind=prompt_dispatch.
+	// frame is sent). kind=prompt_dispatch (preview + words, unchanged).
 	preview := prompt
 	if runes := []rune(preview); len(runes) > 40 {
 		preview = string(runes[:40]) + "…"
@@ -1491,6 +1521,21 @@ func (t *TalkLoop) spawnPipeline(ctx context.Context, call Instance, prompt, fil
 		"ccid", ccid, "seq", seq, "kind", "prompt_dispatch",
 		"text_preview", preview, "words", wordCount(prompt))
 	t.emitEvent(ccid, EventInput{Kind: EventKindDispatch, Text: preview, Words: wordCount(prompt)})
+
+	// Per-phase STT telemetry: stt_final carries the FULL final transcript
+	// and the speech-end -> dispatch latency. speechEnd is stamped when the
+	// FINAL prompt frame reached the loop (the end of the caller's speech);
+	// a hand-built caller with no frame timestamp falls back to the dispatch
+	// instant so the phase reads 0 rather than a bogus multi-year gap.
+	sttEnd := speechEnd
+	if sttEnd.IsZero() {
+		sttEnd = dispatchedAt
+	}
+	sttMs := dispatchedAt.Sub(sttEnd).Milliseconds()
+	if sttMs < 0 {
+		sttMs = 0
+	}
+	t.emitEvent(ccid, EventInput{Kind: EventKindSttFinal, Text: prompt, Ms: sttMs})
 
 	// Link half-duplex: this side is now the speaker (the turn will
 	// emit say frames) - the coordinator marks it busy so the OTHER
@@ -1601,6 +1646,13 @@ func (t *TalkLoop) spawnPipeline(ctx context.Context, call Instance, prompt, fil
 			close(p.checks)
 			return
 		}
+		// Per-phase model telemetry: keep the FULL raw reply on the draft
+		// so logTurnFinal can emit model_final with the exact text the
+		// employee produced (turn_final still carries words + ms only).
+		// replyText is read under interruptMu (same lock as replyWords).
+		t.interruptMu.Lock()
+		p.replyText = reply
+		t.interruptMu.Unlock()
 		// Connected-utterance path (ConnectSentences, wired for a disabled
 		// supervisor gate): the per-sentence split exists ONLY so the
 		// supervisor can check each sentence. With no gate to satisfy, sort
@@ -1755,6 +1807,7 @@ func (t *TalkLoop) playVerdict(ccid string, vr verdict) {
 			t.interruptMu.Unlock()
 			line := t.fallbackLine()
 			if err := t.sayClip(ccid, line, t.clipID(line), true); err == nil {
+				t.emitVoicePlay(ccid, p, line) // check-failure fallback is this turn's spoken output
 				t.log.Info("voice talk loop: fallback line",
 					"ccid", ccid, "line", line,
 					"lane", "fallback", "clip", t.cfg.Identity != nil)
@@ -1768,6 +1821,7 @@ func (t *TalkLoop) playVerdict(ccid string, vr verdict) {
 		if err := t.say(ccid, vr.sentence, vr.final); err != nil {
 			t.log.Warn("voice talk loop: say send failed", "ccid", ccid, "error", err)
 		} else {
+			t.emitVoicePlay(ccid, p, vr.sentence) // first allowed sentence of the turn
 			t.sayProgress(ccid)
 		}
 		t.interruptMu.Lock()
@@ -1800,6 +1854,7 @@ func (t *TalkLoop) playVerdict(ccid string, vr verdict) {
 		t.interruptMu.Unlock()
 		line := t.fallbackLine()
 		if err := t.sayClip(ccid, line, t.clipID(line), true); err == nil {
+			t.emitVoicePlay(ccid, p, line) // all-sentences-denied fallback is this turn's spoken output
 			t.log.Info("voice talk loop: fallback line (all sentences denied)",
 				"ccid", ccid, "line", line,
 				"lane", "fallback", "clip", t.cfg.Identity != nil)
@@ -1881,6 +1936,7 @@ func (t *TalkLoop) logTurnFinal(ccid string, p *pipeline) {
 	}
 	t.interruptMu.Lock()
 	words := p.replyWords
+	replyText := p.replyText
 	ms := t.now().Sub(p.dispatchedAt).Milliseconds()
 	p.stopFillerLocked()
 	skipped := p.fillerSkipped
@@ -1894,6 +1950,11 @@ func (t *TalkLoop) logTurnFinal(ccid string, p *pipeline) {
 		"ccid", ccid, "seq", p.seq, "kind", "turn_final",
 		"reply_words", words, "ms", ms)
 	t.emitEvent(ccid, EventInput{Kind: EventKindFinal, Words: words, Ms: ms})
+	// Per-phase model telemetry: model_final rides the SAME turn-final
+	// edge with the SAME ms, adding the full reply text the operator
+	// needs for a precise model-phase readout. Still additive: existing
+	// turn_final consumers keep their words+ms row unchanged.
+	t.emitEvent(ccid, EventInput{Kind: EventKindModelFinal, Text: replyText, Words: words, Ms: ms})
 }
 
 // wordCount counts whitespace-separated words in spoken text

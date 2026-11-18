@@ -62,6 +62,24 @@ const (
 	// Text is the FULL sentence, not a preview. At is say-send time,
 	// which is before the speakers play it.
 	EventKindSaid = "said"
+	// EventKindSttFinal: the STT phase completed and the talk loop
+	// dispatched its final prompt (the "voice talk loop: turn dispatch"
+	// site). Text is the FULL final transcript (not a preview); Ms is
+	// speech-end (the final prompt frame reaching the loop) -> dispatch.
+	// Emitted in addition to - never instead of - EventKindDispatch.
+	EventKindSttFinal = "stt_final"
+	// EventKindModelFinal: the employee model finished its reply (the
+	// "voice talk loop: turn final" site). Text is the FULL reply (not a
+	// preview); Ms is the same dispatch -> turn-final wall time already
+	// carried by EventKindFinal. Emitted in addition to - never instead
+	// of - EventKindFinal.
+	EventKindModelFinal = "model_final"
+	// EventKindVoicePlay: the first spoken model output of a turn hit the
+	// say choke (allowed reply sentence, or the fallback line on a check
+	// failure). Text is the FULL spoken sentence; Ms is dispatch -> first
+	// playback. Emitted once per turn (a second sentence never re-arms it)
+	// and never for fact-free filler/greeting lines, which have no turn.
+	EventKindVoicePlay = "voice_play"
 )
 
 // Ring sizing: DefaultCallEvents is the per-call ring capacity the daemon
