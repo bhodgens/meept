@@ -21,7 +21,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
+import '../../dialogs/rename_session_dialog.dart' show showRenameSessionDialog;
 import '../../providers/providers.dart';
+import '../../providers/status_message_provider.dart';
 import '../../models/api_models.dart';
 import '../sessions/sessions_list.dart';
 import '../sessions/sessions_detail.dart';
@@ -128,15 +130,35 @@ class _SessionsTabContent extends ConsumerWidget {
   }
 }
 
-/// Header with session name and close button
-class _Header extends StatelessWidget {
+/// Header with session name, rename affordance, and close button.
+///
+/// The name can be renamed by double-clicking it or with the edit icon; both
+/// paths use the shared dialog and SessionNotifier.renameSession.
+class _Header extends ConsumerWidget {
   final Session session;
   final VoidCallback onClose;
 
   const _Header({required this.session, required this.onClose});
 
+  Future<void> _rename(BuildContext context, WidgetRef ref) async {
+    final value = await showRenameSessionDialog(
+      context,
+      currentTitle: session.title,
+    );
+    if (value == null || value.isEmpty) return;
+    if (!context.mounted) return;
+    await ref.read(sessionProvider.notifier).renameSession(session.id, value);
+    final error = ref.read(sessionProvider).error;
+    if (!context.mounted) return;
+    if (error == null) {
+      showStatusMessage(ref, 'renamed: ${value.toLowerCase()}');
+    } else {
+      showStatusMessage(ref, 'rename failed: $error');
+    }
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
@@ -148,14 +170,32 @@ class _Header extends StatelessWidget {
       child: Row(
         children: [
           Expanded(
-            child: Text(
-              'session: ${session.title.isEmpty ? 'unnamed' : session.title}',
-              style: CyberpunkTypography.bodyMedium.copyWith(
-                color: CyberpunkColors.orangePrimary,
-                fontFamily: 'SourceCodePro',
+            child: GestureDetector(
+              onDoubleTap: () => _rename(context, ref),
+              behavior: HitTestBehavior.opaque,
+              child: Text(
+                'session: ${session.title.isEmpty ? 'unnamed' : session.title}',
+                style: CyberpunkTypography.bodyMedium.copyWith(
+                  color: CyberpunkColors.orangePrimary,
+                  fontFamily: 'SourceCodePro',
+                ),
               ),
             ),
           ),
+          // Rename icon — double-click alternative in the popup header
+          GestureDetector(
+            onTap: () => _rename(context, ref),
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              padding: const EdgeInsets.all(4),
+              child: Icon(
+                Icons.edit_outlined,
+                size: 16,
+                color: CyberpunkColors.orangePrimary,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
           GestureDetector(
             onTap: onClose,
             child: Container(

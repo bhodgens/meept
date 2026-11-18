@@ -67,6 +67,7 @@ import '../../widgets/background_image.dart';
 import '../../widgets/command_palette.dart';
 import '../../widgets/status_bar.dart';
 import '../../dialogs/directory_browser_dialog.dart';
+import '../../dialogs/rename_session_dialog.dart' show showRenameSessionDialog;
 import '../../providers/providers.dart';
 import '../../models/api_models.dart';
 import '../../providers/status_message_provider.dart';
@@ -1155,6 +1156,26 @@ class _SidebarSessionRow extends ConsumerWidget {
     required this.onSelect,
   });
 
+  /// Rename this session through the shared dialog and the same
+  /// SessionNotifier.renameSession path the sessions list uses. Reports the
+  /// outcome as a transient status message.
+  Future<void> _rename(BuildContext context, WidgetRef ref) async {
+    final value = await showRenameSessionDialog(
+      context,
+      currentTitle: session.title,
+    );
+    if (value == null || value.isEmpty) return;
+    if (!context.mounted) return;
+    await ref.read(sessionProvider.notifier).renameSession(session.id, value);
+    final error = ref.read(sessionProvider).error;
+    if (!context.mounted) return;
+    if (error == null) {
+      showStatusMessage(ref, 'renamed: ${value.toLowerCase()}');
+    } else {
+      showStatusMessage(ref, 'rename failed: $error');
+    }
+  }
+
   /// Confirm and archive this session. Mirrors the sessions-list flow:
   /// a dialog guards the destructive action, and a status message reports
   /// the outcome only after the RPC resolves (parity with TUI).
@@ -1231,20 +1252,41 @@ class _SidebarSessionRow extends ConsumerWidget {
         child: Row(
           children: [
             Expanded(
-              child: Text(
-                session.worktreePath != null && session.worktreePath!.isNotEmpty
-                    ? 'wt: ${session.title.isEmpty ? 'unnamed' : session.title}'
-                    : session.title.isEmpty
-                    ? 'unnamed'
-                    : session.title,
-                style: CyberpunkTypography.bodySmall.copyWith(
-                  color: isSelected
-                      ? CyberpunkColors.orangePrimary
-                      : CyberpunkColors.orangeDark,
-                  fontFamily: 'SourceCodePro',
-                  fontSize: 11,
+              // Double-click the name to rename (single tap still selects via
+              // the outer GestureDetector). A true double-tap wins the gesture
+              // arena, so onTap is suppressed while renaming.
+              child: GestureDetector(
+                onDoubleTap: () => _rename(context, ref),
+                behavior: HitTestBehavior.opaque,
+                child: Text(
+                  session.worktreePath != null &&
+                          session.worktreePath!.isNotEmpty
+                      ? 'wt: ${session.title.isEmpty ? 'unnamed' : session.title}'
+                      : session.title.isEmpty
+                      ? 'unnamed'
+                      : session.title,
+                  style: CyberpunkTypography.bodySmall.copyWith(
+                    color: isSelected
+                        ? CyberpunkColors.orangePrimary
+                        : CyberpunkColors.orangeDark,
+                    fontFamily: 'SourceCodePro',
+                    fontSize: 11,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
-                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            // Rename icon — same dialog/flow as double-clicking the name
+            GestureDetector(
+              onTap: () => _rename(context, ref),
+              behavior: HitTestBehavior.opaque,
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: Icon(
+                  Icons.edit_outlined,
+                  size: 13,
+                  color: CyberpunkColors.orangePrimary.withValues(alpha: 0.7),
+                ),
               ),
             ),
             // Archive icon — confirm + archive this session

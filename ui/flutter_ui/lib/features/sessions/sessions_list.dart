@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
+import '../../dialogs/rename_session_dialog.dart' show showRenameSessionDialog;
 import '../../features/home/home_screen.dart' show HomeTab;
 import '../../models/api_models.dart';
 import '../../providers/providers.dart';
@@ -215,9 +216,9 @@ class _SessionsListState extends ConsumerState<SessionsList> {
   /// PATCH /api/v1/sessions/{id} description endpoint the TUI's
   /// renameSession RPC path uses.
   Future<void> _showRenameDialog(String sessionId, String currentTitle) async {
-    final value = await showDialog<String>(
-      context: context,
-      builder: (_) => const _RenameDialog(),
+    final value = await showRenameSessionDialog(
+      context,
+      currentTitle: currentTitle,
     );
     if (value == null || value.isEmpty) return;
     if (!mounted) return;
@@ -496,65 +497,6 @@ class _SessionsListState extends ConsumerState<SessionsList> {
           ),
         ),
       ),
-    );
-  }
-}
-
-/// Rename dialog: owns its TextEditingController so the controller's
-/// lifetime matches the dialog widget's (a caller-owned controller is
-/// disposed before the dialog's exit animation finishes rebuilding the
-/// TextField, tripping use-after-dispose assertions).
-class _RenameDialog extends StatefulWidget {
-  const _RenameDialog();
-
-  @override
-  State<_RenameDialog> createState() => _RenameDialogState();
-}
-
-class _RenameDialogState extends State<_RenameDialog> {
-  final _controller = TextEditingController();
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: CyberpunkColors.darkGray,
-      title: Text(
-        'rename session',
-        style: CyberpunkTypography.bodyMedium.copyWith(
-          color: CyberpunkColors.orangePrimary,
-        ),
-      ),
-      content: TextField(
-        controller: _controller,
-        autofocus: true,
-        style: CyberpunkTypography.bodyMedium,
-        decoration: const InputDecoration(
-          isDense: true,
-          border: OutlineInputBorder(),
-        ),
-        onSubmitted: (value) => Navigator.pop(context, value.trim()),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: Text(
-            'cancel',
-            style: CyberpunkTypography.bodyMedium.copyWith(
-              color: CyberpunkColors.midGray,
-            ),
-          ),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.pop(context, _controller.text.trim()),
-          child: const Text('rename', style: CyberpunkTypography.bodyMedium),
-        ),
-      ],
     );
   }
 }
