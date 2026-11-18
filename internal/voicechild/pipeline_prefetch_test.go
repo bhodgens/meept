@@ -114,8 +114,22 @@ type pacedSnap struct {
 	firstRead []time.Time
 	lastRead  []time.Time
 	closed    []time.Time
+	ordinals  []byte // frame identity per index (see byOrdinal)
 	speaks    int
 	maxFlight int
+}
+
+// byOrdinal returns the snapshot index for a frame-stamped ordinal
+// (pacedTTS.Speak stamps it from "sentence N" text). With immediate
+// prefetch two Speak goroutines may enter in either order, so call-order
+// indices are not frame-order indices — assertions must key by identity.
+func (s pacedSnap) byOrdinal(ord byte) int {
+	for i, o := range s.ordinals {
+		if o == ord {
+			return i
+		}
+	}
+	return -1
 }
 
 // snapshot returns a race-safe copy of the per-call timeline.
@@ -124,6 +138,7 @@ func (t *pacedTTS) snapshot() pacedSnap {
 	defer t.mu.Unlock()
 	s := pacedSnap{speaks: len(t.calls), maxFlight: t.maxFlight}
 	for _, c := range t.calls {
+		s.ordinals = append(s.ordinals, c.ordinal)
 		s.starts = append(s.starts, c.start)
 		s.cancelled = append(s.cancelled, c.cancelled)
 		s.closed = append(s.closed, c.closed)
@@ -267,8 +282,12 @@ func TestPrefetchOverlapsPacing(t *testing.T) {
 	tts := newPacedTTS(delay, chunks)
 	swapTTS(p, tts)
 
-	sayLine(t, d, childConn, ccid, "first sentence")
-	sayLine(t, d, childConn, ccid, "second sentence")
+	// Frame-stamped texts: with immediate prefetch both Speak calls may
+	// start in either order (separate goroutines), so a call-time ordinal
+	// would mislabel legal FIFO playback. "sentence 0"/"sentence 1" pin
+	// frame identity (ordinal = n+1), exactly like the depth-2 tests.
+	sayLine(t, d, childConn, ccid, "sentence 0")
+	sayLine(t, d, childConn, ccid, "sentence 1")
 
 	ordinals := paceDrain(t, out, 2*chunks, interval)
 
@@ -288,27 +307,99 @@ func TestPrefetchOverlapsPacing(t *testing.T) {
 			t.Fatalf("Speak %d cancelled without a clear", i)
 		}
 	}
-	if snap.maxFlight > 1 {
+	// Depth TWO is the pinned bound (prefetchDepth=2): lookahead synths
+	// MAY overlap, so two Speak calls in flight is legal — the FIFO byte
+	// order assertion above is the real single-writer invariant.
+	if snap.maxFlight > 2 {
 		t.Fatalf("depth bound violated mid-overlap: max %d Speak in flight", snap.maxFlight)
 	}
 
 	// THE OVERLAP: Speak(N+1) started while N's chunks were still being
-	// paced out. Under the old serial chain starts[1] could not precede
-	// stream N's last provider read.
-	if snap.lastRead[0].IsZero() || !snap.starts[1].Before(snap.lastRead[0]) {
+	// paced out. Under the old serial chain the second frame's Speak
+	// could not start until N had fully drained. Key by FRAME identity
+	// (ordinal 1/2) — immediate prefetch means Speak call order may be
+	// either way.
+	i0, i1 := snap.byOrdinal(1), snap.byOrdinal(2)
+	if i0 < 0 || i1 < 0 {
+		t.Fatalf("missing frame-stamped Speak calls: ordinals=%v", snap.ordinals)
+	}
+	if snap.lastRead[i0].IsZero() || !snap.starts[i1].Before(snap.lastRead[i0]) {
 		t.Fatalf("NO OVERLAP: Speak#2 started at %v, stream#1's last chunk left the provider at %v",
-			snap.starts[1].Format(time.StampMilli), snap.lastRead[0].Format(time.StampMilli))
+			snap.starts[i1].Format(time.StampMilli), snap.lastRead[i0].Format(time.StampMilli))
 	}
 	// The audible-gap metric: time from stream N's reader close to
 	// stream N+1's first chunk. Serialized = the full synthesis delay;
 	// overlapped = near zero (generation hid inside N's pacing).
-	gap := snap.firstRead[1].Sub(snap.closed[0])
+	gap := snap.firstRead[i1].Sub(snap.closed[i0])
 	if gap >= delay/2 {
 		t.Fatalf("pipeline still serialized: inter-stream provider gap %s vs synth delay %s (overlap must hide generation inside N's pacing)",
 			gap, delay)
 	}
 	t.Logf("overlap proven: Speak#2 began %v before stream#1 paced its last byte; inter-stream gap %v vs synth delay %v",
-		snap.lastRead[0].Sub(snap.starts[1]), gap, delay)
+		snap.lastRead[i0].Sub(snap.starts[i1]), gap, delay)
+}
+
+// TestPrefetchStartsWhileHeadStillSynthesizing pins the dead-air fix:
+// local-611897f3 logged six "localsplice pacer stall" gaps of 2-19 s at
+// turn boundaries. The talk loop's fast-first-audio split sends a short
+// opening sentence (non-final) then a long remainder. With the old
+// `fromEnqueue && !writingNow` gate, the remainder's Speak only started
+// after the opening finished PLAYING — but a voice-clone qwen3 synth
+// takes seconds, so the daemon pacer drained its ~1.28 s buffer and
+// starved for the remainder's whole generation. The fix starts the next
+// utterance's synth the instant its say arrives, even while the head is
+// still generating (writingNow==false) or the worker is parked. This
+// test holds the head in synthesis and asserts the follower's Speak
+// starts BEFORE the head finishes, with no PCM drained at all yet.
+func TestPrefetchStartsWhileHeadStillSynthesizing(t *testing.T) {
+	const (
+		ccid     = "pf-starve"
+		chunks   = 20
+		interval = 8 * time.Millisecond
+		delay    = 600 * time.Millisecond // head's synth: long enough to catch a follower starting inside it
+	)
+	d, _, childConn, p, out := newPaceChild(t, ccid)
+	tts := newPacedTTS(delay, chunks)
+	swapTTS(p, tts)
+
+	// Head of burst: worker registers Speak#1 and blocks awaiting it.
+	// Nothing has been written to .out — writingNow is FALSE here.
+	sayLine(t, d, childConn, ccid, "sentence 0")
+	waitFor(t, func() bool { return p.synthQueueDepth() == 1 })
+
+	// The remainder arrives while the head is STILL generating. With
+	// the old gate this stays queued until playback starts — the exact
+	// dead-air window. It must prefetch into its synth slot now.
+	sayLine(t, d, childConn, ccid, "sentence 1")
+	waitFor(t, func() bool { return tts.snapshot().speaks == 2 })
+
+	snap := tts.snapshot()
+	i0, i1 := snap.byOrdinal(1), snap.byOrdinal(2)
+	if i0 < 0 || i1 < 0 {
+		t.Fatalf("missing frame-stamped Speak calls: ordinals=%v", snap.ordinals)
+	}
+	// THE ASSERTION: the follower's synth started while the head had
+	// NOT yet returned. Under the old writingNow gate, speaks==2 could
+	// only happen after the head finished (and the pacer starved).
+	if !snap.starts[i1].Before(snap.starts[i0].Add(delay)) {
+		t.Fatalf("follower synth did not overlap head generation: head started %v, follower started %v (delay %v)",
+			snap.starts[i0].Format(time.StampMilli), snap.starts[i1].Format(time.StampMilli), delay)
+	}
+	if snap.maxFlight < 2 {
+		t.Fatalf("no synth overlap: max %d Speak in flight, want 2", snap.maxFlight)
+	}
+	if snap.maxFlight > 2 {
+		t.Fatalf("prefetch depth bound broken: %d Speak in flight", snap.maxFlight)
+	}
+
+	// Byte order on the socket stays strict FIFO (the single-writer
+	// invariant the depth bound protects).
+	ordinals := paceDrain(t, out, 2*chunks, interval)
+	for i, ord := range ordinals {
+		if want := byte(i/chunks + 1); ord != want {
+			t.Fatalf("FIFO VIOLATION: chunk %d carries ordinal %d, want %d", i, ord, want)
+		}
+	}
 }
 
 // TestPrefetchDepthBound: five rapid says. The bounded synth queue means
