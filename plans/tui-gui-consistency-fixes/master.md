@@ -103,6 +103,7 @@ Go:   OpenSearchViewMsg with sessions scope in
 | 01/00T | 01-backend/00T-roster-tests.md | leaf | none | 26K | A0 |
 | 01/01 | 01-backend/01-roster-rpc.md | leaf | 01/00T | 55K | A1 |
 | 01/02 | 01-backend/02-roster-active-cost.md | leaf | 01/00T, 01/01 | 45K | A2 |
+| 01/03 | 01-backend/03-sidecar-devkey.md | leaf | 04/00T; C5, C7 | 45K | D1b |
 | 02 | 02-tui/orchestrator.md | branch | 01/00T (contract) | 18K | B |
 | 02/00T | 02-tui/00T-tui-tests.md | leaf | none | 32K | B0 |
 | 02/01 | 02-tui/01-agents-data.md | leaf | 02/00T, C1 | 40K | B1 |
@@ -235,6 +236,7 @@ Output: APPROVED or a list of specific gaps.
 | 04/00T-e2e-pin | PENDING | 0 | |
 | 04/01-kanban-default | PENDING | 0 | |
 | 04/02-docs-ag | PENDING | 0 | |
+| 01/03-sidecar-devkey | PENDING | 0 | |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS |
 IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
@@ -249,7 +251,7 @@ leaves reach TESTS_VALIDATED.
 3. `flutter analyze lib/ test/` - zero errors under `ui/flutter_ui/lib/`.
 4. `flutter test` - full widget suite green.
 5. Live: build `./bin/meept`, start `./bin/meept-daemon -f`, drive `agent-tui run ./bin/meept chat`; press agents key, sessions key, kanban key, search key. Capture screenshots and verify type/active/cost columns, project tree, clean kanban message, search entry.
-6. Live GUI: open the session popup full window; check plans/tasks populated, agents columns, project tree, search button, hamburger tools menu kanban entry.
+3. Live GUI: open the session popup full window; check plans/tasks populated, agents columns, project tree, search button, hamburger tools menu kanban entry. The board must load with no pairing step on a default install.
 
 ## Test Gate
 
@@ -271,6 +273,7 @@ the control agent (orchestrator, in-session).
 | F10 | GUI project tree + search | 03-gui/03,04 | widget test | gui-flows | PENDING |
 | F11 | kanban default on + clean pin | 04-config-docs/01 | config default test | e2e kanban | PENDING |
 | F12 | kanban in GUI tools menu | 04-config-docs/01 T3 | widget test | gui-flows | PENDING |
+| F13 | dev key seeded as sidecar board token | 01-backend/03 T1 | TestKanbanDevKeySeed | e2e kanban | PENDING |
 
 Statuses: PENDING | DELTA (mismatch, resolution in progress) | VALIDATED
 
@@ -287,10 +290,13 @@ addenda. Never edit a dispatched leaf document mid-execution.
    of `agents.list`? Recommendation: new RPC, so the employees-only contract
    used by existing callers stays byte-identical. Impact: one new method to
    register and document.
-2. Q2: Does `sidecar_enabled` stay false after `enabled` flips true?
-   Recommendation: yes. The user asked for the board to be enabled, not for
-   the browser gateway child to spawn. Impact: avoids a new child process on
-   every boot.
+2. Q2 (RESOLVED - user chose B): `sidecar_enabled` becomes true alongside
+   `enabled`, and `$MEEPT_HOME/dev_key` is seeded into the sidecar token store
+   with read/mutate/takeover grants before spawn (01-backend/03-sidecar-devkey.md).
+   Rationale: the GUI reaches the board at 127.0.0.1:8790 with the dev key as
+   bearer, so flipping `enabled` alone leaves the GUI board unreachable.
+   Impact: one extra daemon child; no Dart change; remote access still needs
+   the documented TLS proxy and `allowed_origins`.
 ## Notes
 
 - Two generated files are already modified in the working tree

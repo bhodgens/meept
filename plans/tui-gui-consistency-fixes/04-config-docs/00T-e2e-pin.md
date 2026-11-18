@@ -21,7 +21,7 @@
 
 ## Goal
 
-Write (or rewrite) the e2e scenario that will fail RED until `[kanban].enabled` defaults true: default boot answers `kanban.board.list`; explicit disabled boot answers method-not-found. Tests only, no implementation.
+Write (or rewrite) the e2e scenario that will fail RED until `[kanban].enabled` and `[kanban].sidecar_enabled` both default true: default boot answers `kanban.board.list`; explicit disabled boot answers method-not-found; and a default boot's sidecar token store grants the dev key all three board grants. Tests only, no implementation.
 
 ## Context
 

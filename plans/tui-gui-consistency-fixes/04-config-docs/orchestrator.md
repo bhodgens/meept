@@ -10,7 +10,7 @@
 
 - **Role:** Branch
 - **Parent:** ../master.md
-- **Children:** 1 test leaf, 2 implementation leaves
+- **Children:** 1 test leaf, 2 implementation leaves (plus one backend leaf in 01-backend that this branch depends on)
 - **Scope:** Config, docs, and kanban menu
 
 ## Goal
@@ -19,13 +19,13 @@ Flip `[kanban].enabled` to true in DefaultConfig and the config template; rewrit
 
 ## Architecture
 
-Kanban is deliberately opt-in under `docs/agents/opt-in-defaults.md`. The user explicitly requested default-on. `sidecar_enabled` stays false so boot stays light. The e2e pin must verify disabled behavior with an explicit config, not a default boot.
+Kanban is deliberately opt-in under `docs/agents/opt-in-defaults.md`. The user chose option B: default-on board AND default-on sidecar, with the existing per-installation dev key seeded as a full-grant sidecar token by `01-backend/03-sidecar-devkey.md`. This is required because the GUI reaches the board through the sidecar on 127.0.0.1:8790, not the daemon RPC socket. The e2e pin must verify disabled behavior with an explicit config, not a default boot.
 
 ## Interface Contracts
 
 ### C5: kanban default
 
-`DefaultConfig().Kanban.Enabled == true`; `SidecarEnabled == false`; config template uncommented with `"enabled": true`.
+`DefaultConfig().Kanban.Enabled == true`; `SidecarEnabled == true`; config template uncommented with `"enabled": true, "sidecar_enabled": true`. The dev-key token seed lives in 01-backend/03-sidecar-devkey.md; the sidecar child binary is a prerequisite and must exist at boot.
 
 ### C6: tools menu
 
@@ -106,6 +106,7 @@ as listed in each leaf's Goal.
 | 00T | PENDING | 0 | |
 | 01 | PENDING | 0 | |
 | 02 | PENDING | 0 | |
+| 01/03-sidecar-devkey | PENDING | 0 | |
 
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS |
@@ -127,6 +128,7 @@ Test leaves dispatched in Phase 0, validated by the control agent
 |---|---------|--------|-----------|-----------|--------|
 | F11 | kanban default on + pin | 01-kanban-default.md | config default test | e2e kanban | PENDING |
 | F12 | kanban in tools menu | 01-kanban-default.md T3 | widget test | gui-flows | PENDING |
+| F13 | dev key seeded as board token | 01-backend/03-sidecar-devkey.md T1 | TestKanbanDevKeySeed | e2e kanban sidecar | PENDING |
 
 Statuses: PENDING | DELTA (mismatch, resolution in progress) | VALIDATED
 

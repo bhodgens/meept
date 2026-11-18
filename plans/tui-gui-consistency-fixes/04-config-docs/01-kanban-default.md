@@ -21,7 +21,7 @@
 
 ## Goal
 
-Flip DefaultConfig().Kanban.Enabled to true, uncomment and update the config template block, add kanban to `toolRoutePaths` and `HamburgerMenu._knownTools`, and add any missing `_hasRoute` set entries in the home screens. Keep SidecarEnabled false.
+Flip DefaultConfig().Kanban.Enabled and SidecarEnabled to true (option B), uncomment and update the config template block, add kanban to `toolRoutePaths` and `HamburgerMenu._knownTools`, and add any missing `_hasRoute` set entries in the home screens. The sidecar token seed is a separate backend leaf (01-backend/03-sidecar-devkey.md); do not implement it here.
 
 ## Context
 
