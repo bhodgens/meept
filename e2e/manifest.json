@@ -749,6 +749,12 @@
     ],
     "e2e/suites/kanban": [
       "kanban"
+    ],
+    "internal/rpc/roster.go": [
+      "tui-gui-consistency"
+    ],
+    "e2e/suites/tui-gui-consistency": [
+      "tui-gui-consistency"
     ]
   },
   "exempt": {},
@@ -1510,6 +1516,18 @@
         "kanban-08"
       ],
       "note": "Live-daemon wiring suite (plan leaf 06/02, master.md Integration Test Plan (a)-(g)): rebuild equality + fail-safe, real queue-claim lease refusal + takeover audit ordering, wip_mode block/warn, pairing lane through the real sidecar binary, wiring pins. Boots the harness daemon with [kanban].enabled."
+    },
+    {
+      "name": "tui-gui-consistency",
+      "dir": "e2e/suites/tui-gui-consistency",
+      "status": "implemented",
+      "diff": "L",
+      "scenarios": [
+        "tui-gui-01 agents.roster answers C1 rows (id/name/type/status/active_count/daily_cost_cents/enabled) merging agent+bot+employee",
+        "tui-gui-02 roster numeric fields present; daily_cost_cents surfaced from live bot TodayCostCents",
+        "tui-gui-03 default boot (no kanban overlay) answers kanban.board.list with a boards array"
+      ],
+      "note": "Cross-branch test gate of the tui-gui-consistency tree (leaf 00T): RED on the unimplemented tree for method-not-found. agents.roster C1 rows + three types (01-backend tree), active/cost fields (01-backend/02), and default-on kanban.board.list (04-config-docs/01). Hermetic: harness scratch daemon, no LLM turn."
     }
   ],
   "scenarios": [
@@ -5625,6 +5643,36 @@
       "title": "flagoff-control-23 ALL: with all nine features unconfigured, every routing_decisions row is byte-identical to the main-captured golden fixture",
       "paths": [
         "internal/llm/"
+      ]
+    },
+    {
+      "id": "tui-gui-01",
+      "suite": "tui-gui-consistency",
+      "diff": "L",
+      "title": "tui-gui-01 agents.roster returns C1 rows with id/name/type/status/active_count/daily_cost_cents/enabled and all three types agent/bot/employee",
+      "paths": [
+        "internal/rpc/roster.go",
+        "internal/rpc/registry.go"
+      ]
+    },
+    {
+      "id": "tui-gui-02",
+      "suite": "tui-gui-consistency",
+      "diff": "L",
+      "title": "tui-gui-02 roster numeric fields present; a seeded bot's TodayCostCents is surfaced as a nonzero daily_cost_cents",
+      "paths": [
+        "internal/rpc/roster.go"
+      ]
+    },
+    {
+      "id": "tui-gui-03",
+      "suite": "tui-gui-consistency",
+      "diff": "L",
+      "title": "tui-gui-03 default boot (no [kanban] overlay) answers kanban.board.list with a boards array",
+      "paths": [
+        "internal/config/schema.go",
+        "config/meept.json5",
+        "internal/daemon/kanban_wiring.go"
       ]
     }
   ]

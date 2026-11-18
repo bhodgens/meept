@@ -214,26 +214,26 @@ Output: APPROVED or a list of specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-e2e-tests | PENDING | 0 | |
+| 00T-e2e-tests | TESTS_VALIDATED | 1 | RED: -32601 for both RPCs, verified in-session |
 | 01-backend | PENDING | 0 | |
-| 01/00T-roster-tests | PENDING | 0 | |
+| 01/00T-roster-tests | TESTS_VALIDATED | 1 | RED: undefined C1 symbols |
 | 01/01-roster-rpc | PENDING | 0 | |
 | 01/02-roster-active-cost | PENDING | 0 | |
 | 02-tui | PENDING | 0 | |
-| 02/00T-tui-tests | PENDING | 0 | |
+| 02/00T-tui-tests | TESTS_VALIDATED | 1 | RED: 6 assertion failures, no compile errors |
 | 02/01-agents-data | PENDING | 0 | |
 | 02/02-agents-columns | PENDING | 0 | |
 | 02/03-sessions-tree | PENDING | 0 | |
 | 02/04-kanban-error | PENDING | 0 | |
 | 02/05-search-entry | PENDING | 0 | |
 | 03-gui | PENDING | 0 | |
-| 03/00T-gui-tests | PENDING | 0 | |
+| 03/00T-gui-tests | TESTS_VALIDATED | 1 | RED: 4 assertion failures |
 | 03/01-popup-shell | PENDING | 0 | |
 | 03/02-popup-tabs | PENDING | 0 | |
 | 03/03-sessions-tree | PENDING | 0 | |
 | 03/04-search-entry | PENDING | 0 | |
 | 04-config-docs | PENDING | 0 | |
-| 04/00T-e2e-pin | PENDING | 0 | |
+| 04/00T-e2e-pin | TESTS_VALIDATED | 1 | RED: default-off; opt-out control still passes |
 | 04/01-kanban-default | PENDING | 0 | |
 | 04/02-docs-ag | PENDING | 0 | |
 | 01/03-sidecar-devkey | PENDING | 0 | |

@@ -41,7 +41,15 @@ Go RPC package. The daemon wires dependencies into internal/rpc. Follow the exis
 
 ```
 ```
-func (h *Handler) handleRoster(ctx context.Context, raw json.RawMessage) (any, error)
+// Pinned by the committed gate test internal/rpc/roster_test.go.
+// There is no generic Handler type in internal/rpc; use RosterHandler.
+type RosterDeps struct {
+    ListAgents    func() []RosterEntry
+    ListBots      func() []RosterEntry
+    ListEmployees func() []RosterEntry
+}
+func NewRosterHandler(deps RosterDeps) *RosterHandler
+func (h *RosterHandler) handleRoster(ctx context.Context, raw json.RawMessage) (any, error)
 // returns map[string]any{"agents": []RosterEntry}
 ```
 ```
@@ -54,7 +62,7 @@ func (h *Handler) handleRoster(ctx context.Context, raw json.RawMessage) (any, e
 
 | Task ID | Objective | Files | Verify command | RED reason | PASS state | Given/When/Then |
 |---------|-----------|-------|----------------|------------|------------|-----------------|
-| T1 | Add RosterEntry type | Modify: internal/rpc/roster.go (create) | `go test -p 2 ./internal/rpc/... -run TestRoster` | undefined type | type compiles | Given C1 keys; When marshaled; Then exact JSON | Given a row; When encoded; Then keys match C1 |
+| T1 | Add RosterEntry type | Modify: internal/rpc/roster.go (create; gate: internal/rpc/roster_test.go) | `go test -p 2 ./internal/rpc/... -run TestRoster` | undefined type | type compiles | Given C1 keys; When marshaled; Then exact JSON | Given a row; When encoded; Then keys match C1 |
 | T2 | Add handler + registration | Modify: internal/rpc/roster.go, internal/rpc/registry.go | same | method not found | RPC answers rows | Given seeded sources; When call; Then 3 rows | Given a client; When agents.roster; Then agents array |
 
 ## Self-Verification Checklist
