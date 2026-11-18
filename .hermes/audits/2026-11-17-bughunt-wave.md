@@ -71,8 +71,9 @@ them, commit them").
 - Targeted suites: internal/llm, internal/employee, internal/daemon,
   internal/project, internal/plan, internal/kanbansvc (+ -race),
   internal/comm/http — all green at commit time.
-- Final full `go build ./...` + `go test -p 2 ./... -count=1`: see final log
-  result below.
+- Final full `go build ./...` + `go test -p 2 ./... -count=1`: build clean
+  (0 output lines), 135 packages ok, 0 FAIL (baseline was 133 ok / 2 FAIL).
+  Both baseline flakes are gone.
 
 ## Git hygiene incidents
 
