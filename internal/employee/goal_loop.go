@@ -319,6 +319,13 @@ type GoalLoop struct {
 	// the lock (mutexio invariant).
 	bus *bus.MessageBus
 
+	// resultTopic is the typed topic used for execution-result publication.
+	// Default (zero value) is empty = agent.TopicEmployeeResult. The bot
+	// trigger handler marks a loop with TopicBotResult for bus-triggered
+	// rounds so a bot's execution is observable on bot.result. Guarded by mu;
+	// snapshotted under lock at publish time.
+	resultTopic string
+
 	// Configurable thresholds.
 	maxConsecutiveFailures int
 
@@ -447,6 +454,20 @@ type GoalLoop struct {
 func (l *GoalLoop) SetBus(b *bus.MessageBus) {
 	l.mu.Lock()
 	l.bus = b
+	l.mu.Unlock()
+}
+
+// SetResultTopic selects the typed topic used for execution-result events.
+// Empty (the default) means employee.result; a bot trigger handler sets
+// agent.TopicBotResult.Name so a bus-triggered round is observable on
+// bot.result. The topic name is the sole tier discriminator — no payload
+// discriminator exists. Nil-safe on a nil loop.
+func (l *GoalLoop) SetResultTopic(topic string) {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	l.resultTopic = topic
 	l.mu.Unlock()
 }
 
@@ -999,14 +1020,26 @@ func (l *GoalLoop) Execute(ctx context.Context, plan PlanRef) (*bot.BotExecution
 	logger := l.logger
 	briefLookup := l.planBriefLookup
 	busRef := l.bus
+	resultTopic := l.resultTopic
 	l.mu.Unlock()
+
+	// A bus-triggered round is marked with TopicBotResult.Name by the bot
+	// trigger handler; every other round keeps the employee default. The
+	// topic name is the sole tier discriminator — no kind field exists.
+	isBot := resultTopic == agent.TopicBotResult.Name
+	resultSource := "employee"
+	turnSource := "employee"
+	if isBot {
+		resultSource = "bot"
+		turnSource = "bot"
+	}
 
 	// Execution observability (branch 02): publish a running edge at entry
 	// and a matching result + idle edge on completion. All publishes use a
 	// snapshotted bus OUTSIDE the lock; a nil bus makes every emission a
 	// no-op, so unwired loops stay byte-identical.
 	if busRef != nil {
-		bus.PublishT(busRef, agent.TopicTurnState, "employee", agent.TurnStateEvent{
+		bus.PublishT(busRef, agent.TopicTurnState, turnSource, agent.TurnStateEvent{
 			AgentID:   l.employeeID,
 			State:     agent.TurnStateRunning,
 			Timestamp: time.Now().UTC(),
@@ -1058,11 +1091,11 @@ func (l *GoalLoop) Execute(ctx context.Context, plan PlanRef) (*bot.BotExecution
 			"duration", duration)
 	}
 
-	// Execution observability (branch 02): emit one result event on
-	// employee.result (source "employee") plus the matching idle edge. Use
-	// the bus snapshotted at entry; a nil bus makes both emissions no-ops.
-	// The topic is the sole tier discriminator — the payload carries no
-	// kind field, and nothing is ever published on bot.result here.
+	// Execution observability: emit one result event on the loop's result
+	// topic (employee.result by default, bot.result for a bus-triggered bot
+	// round) plus the matching idle edge. Use the bus snapshotted at entry;
+	// a nil bus makes both emissions no-ops. The topic is the sole tier
+	// discriminator — the payload carries no kind field.
 	if busRef != nil {
 		status := "completed"
 		stopReason := agent.StopReasonEndTurn
@@ -1070,7 +1103,7 @@ func (l *GoalLoop) Execute(ctx context.Context, plan PlanRef) (*bot.BotExecution
 			status = "failed"
 			stopReason = agent.StopReasonError
 		}
-		bus.PublishT(busRef, agent.TopicEmployeeResult, "employee", agent.ExecutionResultEvent{
+		resultPayload := agent.ExecutionResultEvent{
 			AgentID:    l.employeeID,
 			Status:     status,
 			Output:     result.Output,
@@ -1079,8 +1112,13 @@ func (l *GoalLoop) Execute(ctx context.Context, plan PlanRef) (*bot.BotExecution
 			DurationMS: int64(result.Duration / time.Millisecond),
 			StopReason: stopReason,
 			Timestamp:  time.Now().UTC(),
-		})
-		bus.PublishT(busRef, agent.TopicTurnState, "employee", agent.TurnStateEvent{
+		}
+		if isBot {
+			bus.PublishT(busRef, agent.TopicBotResult, resultSource, resultPayload)
+		} else {
+			bus.PublishT(busRef, agent.TopicEmployeeResult, resultSource, resultPayload)
+		}
+		bus.PublishT(busRef, agent.TopicTurnState, turnSource, agent.TurnStateEvent{
 			AgentID:    l.employeeID,
 			State:      agent.TurnStateIdle,
 			StopReason: stopReason,

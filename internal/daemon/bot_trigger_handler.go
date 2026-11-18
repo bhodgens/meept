@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/bot"
 )
 
@@ -51,6 +52,14 @@ func (h *botTriggerHandler) HandleBotTrigger(ctx context.Context, botID, prompt 
 	payload := map[string]any{
 		"source": "bus_event",
 		"prompt": prompt,
+	}
+
+	// A bus event calls a bot to run one task; it is not an employee looking
+	// for work. Mark the target loop so its execution result is published on
+	// bot.result (the topic name is the sole tier discriminator). GetGoalLoop
+	// is nil-safe; the Manager's Trigger path handles an absent loop.
+	if loop := h.components.EmployeeManager.GetGoalLoop(botID); loop != nil {
+		loop.SetResultTopic(agent.TopicBotResult.Name)
 	}
 
 	if _, err := h.components.EmployeeManager.Trigger(ctx, botID, payload); err != nil {
