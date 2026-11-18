@@ -93,7 +93,10 @@ func TestPlanHandlerStepFailedBusSeam(t *testing.T) {
 	}
 
 	// The handler runs on its subscription goroutine; poll the persisted
-	// row until the accounting lands (bounded).
+	// row until BOTH the accounting lands AND the PhaseFailed flip lands.
+	// OnStepFailed increments failed_steps first, then flips the phase in a
+	// second store write; observing the counter alone is an intermediate
+	// state (the pin flaked under full-suite load).
 	deadline := time.Now().Add(5 * time.Second)
 	var phases []*PlanPhase
 	for {
@@ -102,11 +105,12 @@ func TestPlanHandlerStepFailedBusSeam(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetPhases: %v", err)
 		}
-		if len(phases) == 1 && phases[0].FailedSteps == 3 {
+		if len(phases) == 1 && phases[0].FailedSteps == 3 &&
+			phases[0].State == PhaseFailed {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("failed_steps never reached 3 via the bus seam (last: %+v)", phases)
+			t.Fatalf("phase never reached failed with 3 failed steps via the bus seam (last: %+v)", phases)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"sort"
 	"testing"
 	"time"
 
@@ -456,5 +457,31 @@ func TestTimeRoundTrip(t *testing.T) {
 	got := parseTime(s)
 	if !got.Equal(now) {
 		t.Errorf("round-trip: got %v, want %v", got, now)
+	}
+}
+
+// formatTime strings must sort chronologically as text: ListProjects uses
+// ORDER BY created_at DESC on these strings. RFC3339Nano trims trailing zero
+// fractional digits, breaking that invariant (pin for the fixed-width layout).
+func TestFormatTimeLexicalOrder(t *testing.T) {
+	base := time.Date(2026, 11, 17, 17, 54, 20, 0, time.UTC)
+	// Deliberately chosen so RFC3339Nano would sort these WRONG:
+	// "20Z" > "20.4Z" and "20.1Z" > "20.12Z" lexicographically.
+	times := []time.Time{
+		base,
+		base.Add(100 * time.Millisecond),
+		base.Add(120 * time.Millisecond),
+		base.Add(400 * time.Millisecond),
+	}
+	formatted := make([]string, len(times))
+	for i, ts := range times {
+		formatted[i] = formatTime(ts)
+	}
+	sorted := append([]string(nil), formatted...)
+	sort.Strings(sorted)
+	for i := range formatted {
+		if sorted[i] != formatted[i] {
+			t.Fatalf("formatTime lexical order mismatch at %d: sorted=%v want=%v", i, sorted, formatted)
+		}
 	}
 }

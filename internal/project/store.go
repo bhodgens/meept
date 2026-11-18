@@ -386,11 +386,17 @@ func (s *Store) CleanupOrphanedWorktrees(ctx context.Context) (int, error) {
 
 // ---------- helpers ----------
 
+// formatTime emits a fixed-width UTC timestamp. The lexical order of these
+// strings is the same as chronological order, which ORDER BY created_at DESC
+// in ListProjects relies on. RFC3339Nano must NOT be used here: it trims
+// trailing zero fractional digits, so "20Z" sorts as newer than "20.4Z".
+const dbTimeLayout = "2006-01-02T15:04:05.000000000Z07:00"
+
 func formatTime(t time.Time) string {
 	if t.IsZero() {
 		return ""
 	}
-	return t.UTC().Format(time.RFC3339Nano)
+	return t.UTC().Format(dbTimeLayout)
 }
 
 func parseTime(s string) time.Time {
