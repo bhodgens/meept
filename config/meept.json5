@@ -72,6 +72,7 @@
     // All limits use the aggressiveness factor:
     //   effective_limit = base * (0.5 + 0.5 * aggressiveness)
     // At aggressiveness=0.5 (default), you can use 75% of configured limits.
+    // drift: local-drift: llm.budget.mode -> advisory-budget opt-in added after older installs; absent = enforce (byte-identical default)
     "budget": {
       "enabled": false,                  // Global switch: false = no budget enforced anywhere
       "hourly_token_limit": 0,           // Tokens per sliding hour (0 = unlimited)
@@ -84,6 +85,7 @@
       "per_session_token_limit": 0,      // Max tokens per session (0 = no cap)
       "per_task_cost_limit": 0.0,        // Max USD per single task (0 = no cap)
       "per_session_cost_limit": 0.0,     // Max USD per single session (0 = no cap)
+      "mode": "enforce",                 // "enforce" (default: refuse on breach) or "steer" (advisory only, one budget_advisory event per breach; never BudgetExceededError)
     },
     // Model broker - circuit breaker and fallback
     "broker": {
@@ -1420,10 +1422,15 @@
     "child_binary_path": "",                // empty = daemon-adjacent lookup
     "loopback_plain_addr": "",              // empty = no second listener; when set (and enabled), serves plain HTTP on this loopback addr for a TLS-terminating tunnel
     "messaging": {                          // Telnyx SMS messaging (contact channels); disabled by default
+      // drift: local-drift: voice.messaging.* -> telnyx-texting keys added after older installs; absent = package defaults (all opt-in)
       "enabled": false,                     // master switch; disabled = every SMS attempt refused before any HTTP
       "from_number": "",                    // sender number (E.164), bound to the messaging profile
       "profile_id": "",                     // Telnyx Messaging Profile id
-      "dlr_wait_seconds": 30                // bounded wait for message.finalized before an attempt reports unavailable
+      "dlr_wait_seconds": 30,               // bounded wait for message.finalized before an attempt reports unavailable
+      "webhook_base_url": "",               // scheme+host Telnyx webhooks target; empty = no webhook_url on sends
+      "stop_reply": "",                     // reply text for STOP/START consent keywords (empty = package default wording)
+      "help_reply": "",                     // reply text for HELP (empty = package default wording)
+      "inbound_enabled": false,             // D3 kill switch for inbound SMS leg; default false = byte-identical boot
     },
   },
 
