@@ -15,6 +15,23 @@ that tree's master.md; the invariants below are the as-built form).
 
 ## Frames (C1): one JSON object per line, every frame carries call_id
 
+- QWEN3 TTS WIRE CONTRACT (child-side, `internal/voicechild/providers`):
+  vendor `qwen3` posts to `<tts_base_url>/v1/audio/speech/pcm-stream`
+  (NOT the OpenAI `/v1/audio/speech` route, which buffers the whole
+  utterance — measured ~1.2 s first byte). The request body is the
+  route's own shape `{"text","voice","chunk_size":4}` with NO
+  `stream`/`response_format`/`input`/`model` fields; cloud `openai`
+  keeps the legacy shape byte-identically. The response is a
+  length-prefixed frame stream (`[4-byte BE uint32 length][s16le PCM]`,
+  zero-length = EOF) — `pcmstream.go` strips the envelope incrementally
+  before the shared 24 kHz -> 16 kHz resampler, so first audio is not
+  gated on a whole-frame/whole-utterance buffer. The clone reference
+  still resolves server-side by voice id (`vc_ce7d47c6`); no reference
+  audio is ever sent in the request. Barge-in `clear()` cancels the
+  request ctx (route aborts cleanly on disconnect); keyless
+  construction, resampling, and the fresh-dial/one-retry transport are
+  unchanged. Pinned by `tts_qwen3_test.go` (URL + body shape) and
+  `pcmstream_test.go` (split headers, terminator, truncated header).
 - The shared text socket hosts ONE child connection; every pipeline is
   keyed by call_id. Frame JSON keys are BYTE-EXACT (`call_id`, `event`,
   `text`, `last`, `from`, `to`, `direction`, `codec`, `sample_rate`) -

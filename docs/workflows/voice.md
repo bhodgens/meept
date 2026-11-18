@@ -85,6 +85,33 @@ Local providers are subprocesses, not libraries: the daemon needs the
 `whisper-cli` (whisper.cpp) and `piper` binaries on PATH. Both are
 keyless - no secrets-broker entry is required for the local leg.
 
+## TTS wire contract (qwen3 token-level streaming)
+
+The qwen3 TTS vendor (`tts_vendor: "qwen3"`) speaks the local server's
+**token-level** route, `POST <tts_base_url>/v1/audio/speech/pcm-stream`,
+not the OpenAI-shaped `/v1/audio/speech` route. The latter ignores
+`stream=true` and buffers the whole utterance before its response body
+begins (~1.2 s first byte); the pcm-stream route emits progressive
+codec-frame PCM (measured header TTFB ~7 ms, first audio ~0.37 s on a
+tier-1 faster-qwen3-tts server). Same server, same model, same cloned
+voice id (`vc_ce7d47c6`), so voice-clone identity is unchanged.
+
+- Request body (route's own schema): `{"text": "...", "voice": "...",
+  "chunk_size": 4}`. There is NO `stream`, `response_format`, `input`,
+  or `model` field; an empty `tts_model` means "use the server's loaded
+  default". Cloud `openai` is untouched and still posts
+  `stream=true, response_format=pcm` to `/v1/audio/speech`.
+- Response body is a length-prefixed frame stream:
+  `[4-byte big-endian uint32 length][length bytes s16le PCM] ...`, with a
+  zero-length frame marking the end. The child strips the envelope
+  incrementally (`internal/voicechild/providers/pcmstream.go`) before
+  the shared 24 kHz -> 16 kHz resampler, so first audio is not gated on
+  buffering a whole frame or the whole utterance.
+- A barge-in `clear()` cancels the request ctx; the route aborts cleanly
+  on client disconnect, so the existing per-barge-in cancel semantics
+  are preserved. Connection hygiene (one fresh POST per utterance, no
+  keep-alives, one narrow retry) is unchanged.
+
 ## Per-employee voice controls
 
 Every voice.employee_leg row can override the provider selection AND
