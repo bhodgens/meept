@@ -1034,18 +1034,9 @@ func (l *GoalLoop) Execute(ctx context.Context, plan PlanRef) (*bot.BotExecution
 		turnSource = "bot"
 	}
 
-	// Execution observability (branch 02): publish a running edge at entry
-	// and a matching result + idle edge on completion. All publishes use a
-	// snapshotted bus OUTSIDE the lock; a nil bus makes every emission a
-	// no-op, so unwired loops stay byte-identical.
-	if busRef != nil {
-		bus.PublishT(busRef, agent.TopicTurnState, turnSource, agent.TurnStateEvent{
-			AgentID:   l.employeeID,
-			State:     agent.TurnStateRunning,
-			Timestamp: time.Now().UTC(),
-		})
-	}
-
+	// Validate before emitting "running": a round that cannot execute
+	// must not leave observers stuck in the running state (issue-140
+	// observability contract: every running edge needs a matching idle).
 	if runner == nil {
 		return nil, errors.New("execute: no BotExecutor configured")
 	}
@@ -1054,6 +1045,19 @@ func (l *GoalLoop) Execute(ctx context.Context, plan PlanRef) (*bot.BotExecution
 	if !l.CanExecutePlan(plan) {
 		return nil, fmt.Errorf("execute: plan %s has approver %q; employee %q is not authorized to execute",
 			plan.ID, plan.ApproverID, l.employeeID)
+	}
+
+	// Execution observability (branch 02): publish a running edge once the
+	// round is actually executable; the success/failure block below always
+	// publishes the matching result + idle edge. All publishes use a
+	// snapshotted bus OUTSIDE the lock; a nil bus makes every emission a
+	// no-op, so unwired loops stay byte-identical.
+	if busRef != nil {
+		bus.PublishT(busRef, agent.TopicTurnState, turnSource, agent.TurnStateEvent{
+			AgentID:   l.employeeID,
+			State:     agent.TurnStateRunning,
+			Timestamp: time.Now().UTC(),
+		})
 	}
 
 	systemPrompt := SynthesizedPrompt(constitution, "")
