@@ -113,10 +113,11 @@ func TestClipPlannerGateMatrix(t *testing.T) {
 		t.Fatalf("shipped key %s != C1 ClipKey %s", specs[1].Key, wantKey)
 	}
 
-	// (b) incomplete identity: every field-empty variant ships nothing.
+	// (b) incomplete identity: vendor/voice empty variants ship nothing.
+	// NOTE: an empty MODEL is *complete* (qwen3 "server default") — pinned
+	// separately by TestClipPlannerEmptyModelIsComplete below.
 	for name, id := range map[string]TTSIdentity{
 		"no-vendor": {Model: "m", Voice: "v"},
-		"no-model":  {Vendor: "qwen3", Voice: "v"},
 		"no-voice":  {Vendor: "qwen3", Model: "m"},
 		"empty":     {},
 	} {
@@ -342,9 +343,12 @@ poolDone:
 	}
 	f.w.releaseCall(ccid, voice.OutcomeHangup)
 
-	// Gate (b) off: the default fixture identity (no model/voice) arms
+	// Gate (b) off: the default fixture identity (no vendor/voice) arms
 	// no pass — and with the planner store pointed elsewhere, nothing on
-	// the wire either.
+	// the wire either. An empty MODEL alone is still complete (qwen3
+	// "server default"), which is pinned by
+	// TestClipPlannerEmptyModelIsComplete / the e2e voice_clips suite.
+	f.w.cfg.TTSProvider = ""
 	f.w.cfg.TTSModel = ""
 	f.w.cfg.TTSVoice = ""
 	const ccid2 = "cc-planner-2"
@@ -634,4 +638,148 @@ func writeClipTestConfig(t *testing.T, home string, marker int) {
 
 func newReloadBusMessage() (*models.BusMessage, error) {
 	return models.NewBusMessage(models.MessageTypeEvent, "test", map[string]any{"event": "reloaded"})
+}
+
+// TestClipPlannerEmptyModelIsComplete is the R4 model-default pin. The
+// normal qwen3 config leaves tts_model="" ("use the server's loaded
+// default"). That must NOT disable prewarm: the identity is complete and
+// the planner ships the pool, with the clip key built from the SAME empty
+// model string the keys frame sends and the child synthesizes with.
+func TestClipPlannerEmptyModelIsComplete(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "voice_clips")
+	pl := newClipTestPlanner(dir, clipTestLanes("One moment.", "Just a sec."))
+
+	// Empty model => complete identity (vendor + voice present).
+	id := TTSIdentity{Vendor: "qwen3", Model: "", Voice: "vivian"}
+	if !id.Complete() {
+		t.Fatal("empty model identity must be complete (qwen3 server default)")
+	}
+	sender := &clipCaptureSender{}
+	if err := pl.Run(context.Background(), "cc-empty-model", "emp-1", id, sender.send); err != nil {
+		t.Fatalf("planner Run: %v", err)
+	}
+	specs := sender.specs()
+	if len(specs) != 2 {
+		t.Fatalf("empty-model pass shipped %d specs, want 2 (prewarm must not be disabled)", len(specs))
+	}
+	// The key MUST carry the empty model verbatim — not a fabricated
+	// constant — so it matches the keys frame and the child's synthesis.
+	wantKey := clipstore.ClipKey("Just a sec.", "qwen3", "", "vivian", nil)
+	if specs[1].Key != wantKey {
+		t.Fatalf("empty-model key %s != C1 ClipKey(model=\"\") %s", specs[1].Key, wantKey)
+	}
+	// A non-empty model stays a DIFFERENT key (no behavior change there).
+	otherKey := clipstore.ClipKey("Just a sec.", "qwen3", "Qwen/Qwen3-TTS-test", "vivian", nil)
+	if specs[1].Key == otherKey {
+		t.Fatal("empty-model key must differ from an explicit-model key")
+	}
+}
+
+// TestResolveTTSIdentityKeyMatchesKeysFrame proves the two gate sites
+// cannot drift: ResolveTTSIdentity (used by both the planner and the
+// talk-loop clip_id stamping) yields a Model identical to the keys
+// frame's tts_model, including the empty-model default. The C1 key built
+// from that identity is therefore the one the child will synthesize.
+func TestResolveTTSIdentityKeyMatchesKeysFrame(t *testing.T) {
+	for name, cfg := range map[string]config.VoiceConfig{
+		"empty model (server default)": {
+			TTSProvider: "qwen3", TTSModel: "", TTSVoice: "vivian",
+		},
+		"explicit model unchanged": {
+			TTSProvider: "qwen3", TTSModel: "Qwen/Qwen3-TTS-test", TTSVoice: "vivian",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			id := ResolveTTSIdentity(cfg, "", voice.LegPhone, nil)
+			if !id.Complete() {
+				t.Fatalf("resolved identity not complete: %+v", id)
+			}
+			// The keys frame emits p.TtsModel verbatim (voice_keys.go).
+			// Assert our identity holds that same value.
+			p := voice.ResolveProfile(cfg, "", "", voice.LegPhone)
+			if id.Model != p.TtsModel {
+				t.Fatalf("identity model %q != keys-frame tts_model %q", id.Model, p.TtsModel)
+			}
+			// The clip key uses exactly that model.
+			wantKey := clipstore.ClipKey("Hello there!", id.Vendor, p.TtsModel, id.Voice, id.RefHash)
+			gotKey := clipstore.ClipKey("Hello there!", id.Vendor, id.Model, id.Voice, id.RefHash)
+			if gotKey != wantKey {
+				t.Fatalf("clip key %s != keys-frame-model key %s", gotKey, wantKey)
+			}
+		})
+	}
+}
+
+// TestClipPlannerEmptyModelAtSetupMount drives the REAL wiring: with a
+// qwen3 config whose tts_model="" (the normal default), a setup frame
+// must ship clip_render, and its keys must be keyed on the empty model —
+// byte-matching the tts_model the keys frame emitted on the same socket.
+func TestClipPlannerEmptyModelAtSetupMount(t *testing.T) {
+	f := newKeysEmitFixture(t)
+	f.w.cfg = config.VoiceConfig{
+		DefaultEmployee: "phone-employee",
+		TTSProvider:     "qwen3",
+		TTSModel:        "", // the normal qwen3 "server default" config
+		TTSVoice:        "vivian",
+		GreetingLine:    "Hello there!",
+		Filler:          []string{"One moment."},
+		Farewell:        []string{"See ya!"},
+	}
+	f.w.initClipPlanner()
+	storeDir := filepath.Join(t.TempDir(), "vc")
+	f.w.clipPlanner = NewClipPlanner(clipstore.NewStoreAt(storeDir), f.w.lanesFor, testLogger(t))
+
+	const ccid = "cc-empty-model-setup"
+	acquireFor(f.w, ccid)
+	f.w.routeFrame(voice.Frame{CallID: ccid, Event: voice.EventSetup})
+
+	// Collect both the keys line (tts_model wire value) and the
+	// clip_render line from the same fake-child socket.
+	var keysLine, renderLine string
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && (keysLine == "" || renderLine == "") {
+		select {
+		case l := <-f.lines:
+			if strings.Contains(l, `"event":"keys"`) && keysLine == "" {
+				keysLine = l
+			}
+			if strings.Contains(l, `"clip_render"`) && renderLine == "" {
+				renderLine = l
+			}
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+	if renderLine == "" {
+		t.Fatal("empty-model setup shipped no clip_render (prewarm silently disabled)")
+	}
+	if keysLine == "" {
+		t.Fatal("no keys line emitted for the empty-model call")
+	}
+	// The keys frame must carry tts_model="" verbatim.
+	var kw struct {
+		TTSModel string `json:"tts_model"`
+	}
+	if err := json.Unmarshal([]byte(keysLine), &kw); err != nil {
+		t.Fatalf("decode keys line: %v (%s)", err, keysLine)
+	}
+	if kw.TTSModel != "" {
+		t.Fatalf("keys frame tts_model = %q, want empty (server default)", kw.TTSModel)
+	}
+	// The clip_render greeting key must be built with that SAME empty
+	// model, i.e. the key the child will synthesize with.
+	frame, err := voiceframe.DecodeFrame([]byte(renderLine))
+	if err != nil {
+		t.Fatalf("decode clip_render: %v (%s)", err, renderLine)
+	}
+	var greetingKey string
+	for _, spec := range frame.Clips {
+		if spec.Text == "Hello there!" {
+			greetingKey = spec.Key
+		}
+	}
+	wantKey := clipstore.ClipKey("Hello there!", "qwen3", kw.TTSModel, "vivian", nil)
+	if greetingKey != wantKey {
+		t.Fatalf("empty-model greeting key %s != keys-frame-model key %s", greetingKey, wantKey)
+	}
+	f.w.releaseCall(ccid, voice.OutcomeHangup)
 }

@@ -910,8 +910,14 @@ once per (voice, model, text, reference-audio) and serves cached PCM.
   the diff-and-ship pass runs ONLY when the sidecar is actually live.
   Gate: (a) a child connection is live (the pass mounts on routeFrame's
   EventSetup branch, or reload re-plan iterates `Registry.Live()`);
-  (b) the resolved TTS identity is COMPLETE (vendor+model+voice all
-  non-empty after `voice.ResolveProfile`, byte-matching the C1 inputs);
+  (b) the resolved TTS identity is COMPLETE (vendor+voice non-empty after
+  `voice.ResolveProfile`; MODEL MAY BE EMPTY — `tts_model=""` is the qwen3
+  "use the server's loaded default" sentinel, and the empty string stays
+  the C1 key component so the pre-rendered key matches both the keys frame
+  and the child's synthesis model byte-for-byte). Both gate sites (the
+  planner pass and the talk-loop `clip_id` stamping) resolve the identity
+  through the single shared `daemon.ResolveTTSIdentity` helper so the
+  clip_render keys and the say clip_ids cannot drift;
   (c) a voice employee owns the call (empty `voice.default_employee`
   never gets a live registry row). With `voice.enabled=false` WireVoice
   never constructs the wiring and NOTHING is generated or written —
