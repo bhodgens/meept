@@ -935,34 +935,49 @@ func TestGateway_PairExchangeRateLimit(t *testing.T) {
 		gateway, _, readCode, _ := newPairGateway(t)
 		limit := &pairRateLimiter{m: make(map[string]ipRateLimitEntry)}
 		gateway.SetPairRateLimiter(limit)
+		// XFF is trusted only from a loopback peer (the local TLS proxy).
+		exchangeReq := func(xff string) *http.Request {
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/pair/exchange",
+				strings.NewReader(`{"code":"`+readCode+`"}`))
+			req.RemoteAddr = "127.0.0.1:12345"
+			req.Header.Set("X-Forwarded-For", xff)
+			return req
+		}
 		// Use the same X-Forwarded-For for every request to hit the same key.
 		for i := range pairRateLimiterMax {
 			rec := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodPost, "/api/v1/pair/exchange",
-				strings.NewReader(`{"code":"`+readCode+`"}`))
-			req.Header.Set("X-Forwarded-For", "1.2.3.4")
-			gateway.ServeHTTP(rec, req)
+			gateway.ServeHTTP(rec, exchangeReq("1.2.3.4"))
 			if rec.Code == http.StatusTooManyRequests {
 				t.Fatalf("request %d should have been allowed, got 429", i+1)
 			}
 		}
 		// The next one must trip.
 		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/pair/exchange",
-			strings.NewReader(`{"code":"`+readCode+`"}`))
-		req.Header.Set("X-Forwarded-For", "1.2.3.4")
-		gateway.ServeHTTP(rec, req)
+		gateway.ServeHTTP(rec, exchangeReq("1.2.3.4"))
 		if rec.Code != http.StatusTooManyRequests {
 			t.Fatalf("request %d: status = %d, want 429", pairRateLimiterMax+1, rec.Code)
 		}
 		// Different IP gets its own window.
 		rec2 := httptest.NewRecorder()
-		req2 := httptest.NewRequest(http.MethodPost, "/api/v1/pair/exchange",
-			strings.NewReader(`{"code":"`+readCode+`"}`))
-		req2.Header.Set("X-Forwarded-For", "5.6.7.8")
-		gateway.ServeHTTP(rec2, req2)
+		gateway.ServeHTTP(rec2, exchangeReq("5.6.7.8"))
 		if rec2.Code == http.StatusTooManyRequests {
 			t.Fatal("different IP hit the same window")
+		}
+	})
+
+	t.Run("remote peer XFF is ignored for rate limiting", func(t *testing.T) {
+		// A remote caller can set XFF itself; it must NOT get fresh buckets.
+		var direct, spoofed string
+		req := func(xff string) *http.Request {
+			r := httptest.NewRequest(http.MethodGet, "/api/v1/pair/exchange", nil)
+			r.RemoteAddr = "203.0.113.9:54321"
+			r.Header.Set("X-Forwarded-For", xff)
+			return r
+		}
+		direct = requestIP(req(""))
+		spoofed = requestIP(req("9.9.9.9"))
+		if direct != spoofed || direct != "203.0.113.9" {
+			t.Fatalf("remote XFF not ignored: direct=%q spoofed=%q, want both 203.0.113.9", direct, spoofed)
 		}
 	})
 

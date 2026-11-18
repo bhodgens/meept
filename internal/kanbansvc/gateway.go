@@ -323,23 +323,29 @@ func (g *Gateway) handlePairExchange(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// requestIP extracts the client IP from the request. In TLS-proxy
-// deployments the proxy sets X-Forwarded-For; otherwise it returns the
-// direct RemoteAddr. The pair/exchange rate limiter (M3) is keyed by this
-// value, so the limiter distinguishes independent attackers in a proxy.
+// requestIP extracts the client IP from the request. X-Forwarded-For is
+// trusted ONLY when the direct peer is loopback (the operator's local TLS
+// proxy). A remote caller can set XFF itself, so trusting it there lets
+// one attacker get a fresh rate-limit bucket per request; the loopback
+// bind keeps the direct path safe. The pair/exchange rate limiter (M3)
+// is keyed by this value.
 func requestIP(r *http.Request) string {
-	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
-		// The leftmost entry is the original client; strip it for the
-		// limiter key.
-		if i := strings.IndexByte(fwd, ','); i >= 0 {
-			return strings.TrimSpace(fwd[:i])
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	peer := net.ParseIP(host)
+	if peer != nil && peer.IsLoopback() {
+		if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+			// The leftmost entry is the original client; strip it for
+			// the limiter key.
+			if i := strings.IndexByte(fwd, ','); i >= 0 {
+				return strings.TrimSpace(fwd[:i])
+			}
+			return strings.TrimSpace(fwd)
 		}
-		return strings.TrimSpace(fwd)
 	}
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		return host
-	}
-	return r.RemoteAddr
+	return host
 }
 
 // buildParams turns the request into RPC params: query values for reads (a
