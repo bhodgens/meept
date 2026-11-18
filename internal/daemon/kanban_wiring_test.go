@@ -79,11 +79,20 @@ func TestKanbanWiring_DisabledConstructsNothing(t *testing.T) {
 	}
 }
 
-func TestKanbanWiring_DefaultConfigIsDisabled(t *testing.T) {
-	// The opt-in-defaults rule pinned at the schema level: a config
-	// without the [kanban] block must construct nothing.
-	if config.DefaultConfig().Kanban.Enabled {
-		t.Fatal("[kanban].enabled default must be false")
+func TestKanbanWiring_DefaultConfigIsEnabled(t *testing.T) {
+	// Option B (plans/tui-gui-consistency-fixes): a config without the
+	// [kanban] block ships with the board AND sidecar enabled — the
+	// opt-in-defaults rule was deliberately overridden for this subsystem.
+	// The opt-out posture (Enabled=false constructs nothing) stays pinned
+	// by TestKanbanWiring_DisabledConstructsNothing.
+	if !config.DefaultConfig().Kanban.Enabled {
+		t.Fatal("[kanban].enabled default must be true (option B)")
+	}
+	if !config.DefaultConfig().Kanban.SidecarEnabled {
+		t.Fatal("[kanban].sidecar_enabled default must be true (option B)")
+	}
+	if config.DefaultConfig().Kanban.WIPMode != "warn" {
+		t.Fatal("[kanban].wip_mode default must be \"warn\"")
 	}
 	if config.DefaultConfig().Kanban.ReconcileInterval != "0s" {
 		t.Fatal("[kanban].reconcile_interval default must be \"0s\"")
