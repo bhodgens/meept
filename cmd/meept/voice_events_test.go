@@ -652,3 +652,132 @@ func TestDrainLiveSpeakerShortReplySaidPrintsAtEOF(t *testing.T) {
 		t.Fatalf("unexpected ordering; want speaker on -> speaker off -> late said:\n%s", out)
 	}
 }
+
+// REGRESSION (said-text-gaps): a "said" event with no text must NEVER
+// render as a bare "<time> said" line - the operator regression was a
+// contentless said with no colon and no visible text. Whether the text is
+// genuinely empty (old daemon / truncated row) or populated, a said line
+// always ends in "said: <something>".
+func TestVoiceEventRenderSaidNeverBare(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ev   voiceEventRow
+		want string
+	}{
+		{"empty-text", voiceEventRow{Kind: "said", At: "2026-11-18T22:05:06Z", Text: ""},
+			"22:05:06 said: (no text)"},
+		{"whitespace-text", voiceEventRow{Kind: "said", At: "2026-11-18T22:05:42Z", Text: "   "},
+			"22:05:42 said: (no text)"},
+		{"full-text", voiceEventRow{Kind: "said", At: "2026-11-18T22:05:42Z", Text: "the answer is forty-two"},
+			"22:05:42 said: the answer is forty-two"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := voiceEventRender(tc.ev)
+			if got != tc.want {
+				t.Fatalf("render = %q, want %q", got, tc.want)
+			}
+			if !strings.Contains(got, "said: ") {
+				t.Fatalf("said line has no colon+content (bare said regression): %q", got)
+			}
+		})
+	}
+}
+
+// saidTextOrMissing is the single content guard both the raw renderer and
+// the speaker-clock join use: a blank said must be visibly marked, never
+// dropped or printed as a contentless line.
+func TestSaidTextOrMissing(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"", "(no text)"}, {"  	 ", "(no text)"}, {"hello", "hello"},
+	} {
+		if got := saidTextOrMissing(tc.in); got != tc.want {
+			t.Errorf("saidTextOrMissing(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// REGRESSION (said-text-gaps): the SEND time from the event must survive
+// the speaker-clock join. A said that queues before audio plays prints at
+// its own send stamp when noteOn joins it - NOT at the played stamp - and
+// the speaker markers are explicitly labelled "played". This is the
+// operator's precise timeline: text + send time vs actual playback.
+func TestSpeakerClockSaidKeepsSendStampThroughJoin(t *testing.T) {
+	clock := newSpeakerClock("local", "companion")
+	// The event's At is the say-send time (events.go), distinct from the
+	// wall-clock moment noteOn fires (playback).
+	clock.noteSaidAt("2026-11-18T22:05:06Z", "queued before playback")
+	out := captureStdout(t, func() {
+		clock.noteOn()
+		clock.noteOff()
+	})
+	if !strings.Contains(out, "22:05:06 said: queued before playback") {
+		t.Fatalf("joined said lost its SEND stamp (re-stamped to play time?):\n%s", out)
+	}
+	if !strings.Contains(out, "speaker on (played)") {
+		t.Fatalf("speaker-on must be labelled as the PLAYED edge:\n%s", out)
+	}
+	if !strings.Contains(out, "speaker off (played,") {
+		t.Fatalf("speaker-off must be labelled as the PLAYED edge:\n%s", out)
+	}
+}
+
+// End-to-end (tracker level): said lines always carry their full text at
+// the SEND stamp, and the per-turn timeline fires after the played edge —
+// the operator sees STT, the model reply, and real audio playback joined.
+func TestTrackerTimelineSaidTextAndTurnSummary(t *testing.T) {
+	rows := []voiceEventRow{
+		{Seq: 1, Kind: "heard", At: "2026-11-18T22:05:00Z", Text: "what time is it"},
+		{Seq: 2, Kind: "prompt_dispatch", At: "2026-11-18T22:05:01Z", Text: "what time is it", Words: 4},
+		{Seq: 3, Kind: "turn_final", At: "2026-11-18T22:05:03Z", Words: 5, Ms: 2000},
+		{Seq: 4, Kind: "said", At: "2026-11-18T22:05:03Z", Text: "It is ten past five."},
+		{Seq: 5, Kind: "said", At: "2026-11-18T22:05:04Z", Text: ""}, // empty row -> honest marker
+	}
+	clock := newSpeakerClock("local", "companion")
+	tr := newVoiceEventTracker(&fakeEventsClient{rows: rows}, map[string][2]string{"cc-1": {"a", "companion"}})
+	tr.clock = clock
+	// Poll the events into the clock, fire the played edge, then drain —
+	// all inside the capture so every line is observable.
+	out := captureStdout(t, func() {
+		tr.pollOnce("cc-1", "a", "companion")
+		clock.noteOn()
+		tr.stop() // marks stopped + drains the clock
+		tr.drainOnce()
+	})
+	for _, want := range []string{
+		"22:05:03 said: It is ten past five.",
+		"22:05:04 said: (no text)",
+		"turn: heard 22:05:00 -> thinking 22:05:01 -> replied 22:05:03 -> played ",
+		"(model 2000ms, 5 words)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("timeline missing %q in:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "22:05:03 said\n") || strings.Contains(out, " said\n") {
+		t.Fatalf("bare said line still printed:\n%s", out)
+	}
+}
+
+// The per-turn phase summary joins STT (heard), model reply (thinking ->
+// replied) and the real playback (played) on one compact line.
+func TestSpeakerClockTurnPhaseSummary(t *testing.T) {
+	clock := newSpeakerClock("local", "companion")
+	clock.notePhase("heard", "2026-11-18T22:05:01Z", 0, 0)
+	clock.notePhase("prompt_dispatch", "2026-11-18T22:05:01.5Z", 5, 0)
+	clock.notePhase("turn_final", "2026-11-18T22:05:04Z", 5, 2500)
+	clock.noteOn() // played edge
+	out := captureStdout(t, func() {
+		clock.printTurnSummary()
+		clock.printTurnSummary() // once-guard: must not double-print
+	})
+	want := "turn: heard 22:05:01 -> thinking 22:05:01 -> replied 22:05:04 -> played "
+	if !strings.Contains(out, want) {
+		t.Fatalf("turn summary missing phase chain %q:\n%s", want, out)
+	}
+	if !strings.Contains(out, "(model 2500ms, 5 words)") {
+		t.Fatalf("turn summary missing model timing:\n%s", out)
+	}
+	if strings.Count(out, "turn: ") != 1 {
+		t.Fatalf("turn summary must print exactly once:\n%s", out)
+	}
+}
