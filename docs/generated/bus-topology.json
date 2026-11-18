@@ -2577,7 +2577,7 @@
     "voice.call.ended": [
       {
         "file": "internal/daemon/voice_wiring.go",
-        "line": 1724,
+        "line": 1721,
         "payload_keys": [],
         "typed": true
       }
@@ -2952,7 +2952,7 @@
     "daemon.reloaded": [
       {
         "file": "internal/daemon/voice_clip_planner.go",
-        "line": 266,
+        "line": 291,
         "subscriber_id": "voice-clip-reload"
       }
     ],
