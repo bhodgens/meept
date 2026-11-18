@@ -23,6 +23,8 @@ const Map<String, String> toolRoutePaths = {
   'calendar': '/tools/calendar',
   'metrics': '/tools/metrics',
   'voice': '/tools/voice',
+  // Kanban is a distinct /kanban route, not a /tools/* panel. It is offered
+  // by the menu through _routeOnlyTools and routed by openToolFromMenu.
   'kanban': '/kanban',
 };
 
@@ -87,12 +89,26 @@ class HamburgerMenu extends StatefulWidget {
     'metrics': Icons.insights,
     'prompts': Icons.edit_note,
     'voice': Icons.graphic_eq,
-    'kanban': Icons.view_kanban,
     'settings': Icons.settings,
   };
 
   /// Tool names offered by the menu, in display order.
+  ///
+  /// Pins exactly the tool panels that render the shared back control. Entries
+  /// that are full-screen routes (rather than tool panels) belong in
+  /// [_routeOnlyTools] so this contract stays unchanged.
   static List<String> get knownToolNames => _knownTools.keys.toList();
+
+  /// Menu entries that are distinct routes, not /tools/* panels.
+  ///
+  /// Kanban is a standalone /kanban board (TUI parity: key `b`) and does not
+  /// render the shared tool-panel chrome, so it must not be counted as a
+  /// known tool. It still opens through the same [onToolSelected] callback
+  /// and [openToolFromMenu] resolver as every other entry.
+  static const _routeOnlyTools = {'kanban': Icons.view_kanban};
+
+  /// Route-only menu entry names, in display order (for tests and callers).
+  static List<String> get routeOnlyToolNames => _routeOnlyTools.keys.toList();
 
   @override
   State<HamburgerMenu> createState() => _HamburgerMenuState();
@@ -155,29 +171,38 @@ class _HamburgerMenuState extends State<HamburgerMenu> {
       Divider(height: 1, color: CyberpunkColors.midGray),
     ];
 
-    for (final entry in HamburgerMenu._knownTools.entries) {
-      entries.add(
-        InkWell(
-          onTap: () {
-            _closeMenu();
-            widget.onToolSelected?.call(entry.key);
-          },
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            child: Row(
-              children: [
-                Icon(
-                  entry.value,
-                  size: 16,
-                  color: CyberpunkColors.orangeBright,
-                ),
-                const SizedBox(width: 8),
-                Text(entry.key, style: CyberpunkTypography.bodySmall),
-              ],
-            ),
-          ),
+    // Shared row builder for both sections: every pick closes the menu and
+    // reports its name through the same callback, so route-only entries (e.g.
+    // kanban) behave identically to the tool panels in openToolFromMenu.
+    Widget menuItem(String name, IconData icon) => InkWell(
+      onTap: () {
+        _closeMenu();
+        widget.onToolSelected?.call(name);
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          children: [
+            Icon(icon, size: 16, color: CyberpunkColors.orangeBright),
+            const SizedBox(width: 8),
+            Text(name, style: CyberpunkTypography.bodySmall),
+          ],
         ),
-      );
+      ),
+    );
+
+    for (final entry in HamburgerMenu._knownTools.entries) {
+      entries.add(menuItem(entry.key, entry.value));
+    }
+
+    // Route-only entries are distinct full-screen destinations, not /tools/*
+    // panels: keep them out of knownToolNames but still reachable from the
+    // same menu, separated by a divider.
+    if (HamburgerMenu._routeOnlyTools.isNotEmpty) {
+      entries.add(Divider(height: 1, color: CyberpunkColors.midGray));
+      for (final entry in HamburgerMenu._routeOnlyTools.entries) {
+        entries.add(menuItem(entry.key, entry.value));
+      }
     }
 
     // Calculate menu position (below the button, aligned to left edge of button)

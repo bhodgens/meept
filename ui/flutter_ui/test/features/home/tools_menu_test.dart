@@ -189,9 +189,14 @@ void main() {
       for (final tool in HamburgerMenu.knownToolNames) {
         expect(find.text(tool), findsOneWidget, reason: 'menu entry $tool');
       }
+      for (final tool in HamburgerMenu.routeOnlyToolNames) {
+        expect(find.text(tool), findsOneWidget, reason: 'menu entry $tool');
+      }
       // Exact menu contents: this pins the whole GUI tool surface, so a
       // removed tool (the terminal panel, the files panel) cannot creep
-      // back in without failing here.
+      // back in without failing here. Route-only destinations (kanban) are
+      // pinned separately below so they stay reachable without being
+      // mistaken for /tools/* panels.
       expect(
         HamburgerMenu.knownToolNames,
         orderedEquals([
@@ -204,6 +209,11 @@ void main() {
           'settings',
         ]),
       );
+      expect(HamburgerMenu.routeOnlyToolNames, orderedEquals(['kanban']));
+      // Kanban is a distinct /kanban route, offered through the same menu
+      // row and resolver as the tool panels.
+      expect(find.text('kanban'), findsOneWidget);
+      expect(toolRouteFor('kanban'), '/kanban');
 
       await tester.tap(find.text('memory'));
       await tester.pump();
@@ -320,6 +330,17 @@ void main() {
           .toSet();
 
       for (final tool in HamburgerMenu.knownToolNames) {
+        final path = toolRouteFor(tool);
+        expect(path, isNotNull, reason: '$tool has no route');
+        expect(
+          paths,
+          contains(path),
+          reason: '$tool maps to $path which is not in core/router.dart',
+        );
+      }
+      // Route-only entries are menu picks too: they must resolve to a real
+      // router destination even though they are not /tools/* panels.
+      for (final tool in HamburgerMenu.routeOnlyToolNames) {
         final path = toolRouteFor(tool);
         expect(path, isNotNull, reason: '$tool has no route');
         expect(
