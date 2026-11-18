@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
+import '../../core/router.dart';
 import '../../features/home/home_screen.dart' show HomeTab;
 import '../../models/api_models.dart';
 import '../../providers/providers.dart';
@@ -14,6 +15,7 @@ import '../../providers/session_project_provider.dart';
 import '../../providers/status_message_provider.dart';
 import '../../providers/tab_activation_provider.dart';
 import '../../providers/tool_exit_guard.dart';
+import 'session_tree.dart';
 
 /// Sessions list widget - displays all sessions with selection
 class SessionsList extends ConsumerStatefulWidget {
@@ -326,6 +328,12 @@ class _SessionsListState extends ConsumerState<SessionsList> {
     final sessionState = ref.watch(sessionProvider);
     final activeSession = ref.watch(activeSessionProvider);
 
+    // C2: group sessions into project buckets for the expandable tree.
+    // Insertion order is preserved so keyboard selection still indexes the
+    // original flat session list.
+    final groupedSessions = groupSessionsByBucket(sessionState.sessions);
+    final bucketOrder = groupedSessions.keys.toList();
+
     // Listen for command-palette "new session" requests. Mirrors the
     // focusInputRequestProvider pattern used by the chat input.
     ref.listen<bool>(createSessionRequestProvider, (previous, next) {
@@ -351,13 +359,23 @@ class _SessionsListState extends ConsumerState<SessionsList> {
             padding: const EdgeInsets.all(16),
             child: Row(
               children: [
-                Text(
-                  'sessions',
-                  style: CyberpunkTypography.headlineMedium.copyWith(
-                    color: CyberpunkColors.orangePrimary,
+                Flexible(
+                  child: Text(
+                    'sessions',
+                    overflow: TextOverflow.ellipsis,
+                    style: CyberpunkTypography.headlineMedium.copyWith(
+                      color: CyberpunkColors.orangePrimary,
+                    ),
                   ),
                 ),
                 const Spacer(),
+                IconButton(
+                  tooltip: 'search sessions',
+                  icon: const Icon(Icons.search, size: 18),
+                  color: CyberpunkColors.orangePrimary,
+                  onPressed: () =>
+                      context.goToolSearchScoped(SearchScope.sessions),
+                ),
                 IconButton(
                   tooltip: 'new session',
                   icon: const Icon(Icons.add, size: 18),
@@ -403,15 +421,14 @@ class _SessionsListState extends ConsumerState<SessionsList> {
                 },
                 onKeyEvent: _handleKey,
                 child: ListView.builder(
-                  itemCount: sessionState.sessions.length,
-                  itemBuilder: (context, index) {
-                    final session = sessionState.sessions[index];
-                    final isSelected = activeSession?.id == session.id;
-                    final isKeyboardSelected = _selectedIndex == index;
-                    return _buildSessionTile(
-                      session,
-                      isSelected || isKeyboardSelected,
-                      isKeyboardSelected,
+                  itemCount: bucketOrder.length,
+                  itemBuilder: (context, groupIndex) {
+                    final bucket = bucketOrder[groupIndex];
+                    return _buildBucketGroup(
+                      bucket,
+                      groupedSessions[bucket]!,
+                      sessionState.sessions,
+                      activeSession,
                     );
                   },
                 ),
@@ -419,6 +436,54 @@ class _SessionsListState extends ConsumerState<SessionsList> {
             ),
         ],
       ),
+    );
+  }
+
+  /// Build one C2 project bucket as an expandable group. Headers render the
+  /// bucket name (project id, project path, or 'unbound') in lowercase;
+  /// children are the existing session tiles indented under it. Groups start
+  /// expanded; `ExpansionTile` owns its own expand/collapse state, keyed by the
+  /// stable bucket key so it survives rebuilds.
+  Widget _buildBucketGroup(
+    String bucket,
+    List<Session> bucketSessions,
+    List<Session> allSessions,
+    Session? activeSession,
+  ) {
+    return ExpansionTile(
+      key: ValueKey('session-bucket-$bucket'),
+      initiallyExpanded: true,
+      tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+      iconColor: CyberpunkColors.orangePrimary,
+      collapsedIconColor: CyberpunkColors.orangeDark,
+      title: Text(
+        bucket.toLowerCase(),
+        key: ValueKey('session-bucket-label-$bucket'),
+        style: CyberpunkTypography.bodyMedium.copyWith(
+          color: CyberpunkColors.orangePrimary,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+      subtitle: Text(
+        '${bucketSessions.length}',
+        style: CyberpunkTypography.bodySmall.copyWith(
+          color: CyberpunkColors.midGray,
+        ),
+      ),
+      children: bucketSessions.map((session) {
+        final index = allSessions.indexOf(session);
+        final isSelected = activeSession?.id == session.id;
+        final isKeyboardSelected = _selectedIndex == index;
+        // Indent children under the project header (the tree affordance).
+        return Padding(
+          padding: const EdgeInsets.only(left: 16),
+          child: _buildSessionTile(
+            session,
+            isSelected || isKeyboardSelected,
+            isKeyboardSelected,
+          ),
+        );
+      }).toList(),
     );
   }
 
