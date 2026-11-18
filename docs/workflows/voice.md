@@ -370,7 +370,22 @@ feed no longer has to reconstruct a reply from 40-rune previews. A new client
 sees unknown kinds via its existing default renderer; old clients continue to
 render the lifecycle kinds unchanged.
 
-The Flutter GUI reads the same ring for parity (bughunt C-12):
+The CLI renders these per-phase kinds with their full text and `ms` values.
+
+Spoken sentences print as `<send-time> said: <full text>` — the stamp is
+the event's **say-send** time (when the talk loop handed the sentence to
+the child, per `internal/voice/events.go`), NOT when the speaker played it.
+The live speaker window prints `<time> speaker on (played)` at the first
+played burst and `<time> speaker off (played, <elapsed>)` after a 350 ms
+gap / clear / EOF, so the operator can tell send from actual playback (the
+fix for the bare-`said` regression: a `said` line is never contentless —
+an old daemon's empty row renders `said: (no text)` rather than a bare
+`said`). Each completed reply also gets one compact per-turn timeline:
+`turn: heard <t> -> thinking <t> -> replied <t> -> played <t> (model
+<ms>ms, <N> words)`, joining STT, the model reply, and real audio playback
+on one line. Queued `said` sentences keep their own send stamp when the
+speaker window joins them (they are not re-stamped to playback time). The
+Flutter GUI reads the same ring for parity (bughunt C-12):
 `VoiceService.events()` over the same RPC, one bounded 500 ms poller
 per live call, rendering the same operator lines under each call's row
 in `/tools/voice`. Best-effort by

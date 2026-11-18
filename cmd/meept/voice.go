@@ -1174,15 +1174,33 @@ type voiceEventRow struct {
 	Reason string `json:"reason"`
 }
 
+// clockStamp extracts HH:MM:SS from an RFC3339(Nano) telemetry stamp. A
+// short/unparseable stamp passes through unchanged (future-proof).
+func clockStamp(at string) string {
+	if len(at) >= 19 {
+		return at[11:19]
+	}
+	return at
+}
+
+// saidTextOrMissing guarantees a said line always carries visible content.
+// The daemon populates said.Text (internal/voice/talkloop.go), but an old
+// daemon or a truncated row must never render as a bare "said" with no text.
+func saidTextOrMissing(text string) string {
+	if strings.TrimSpace(text) == "" {
+		return "(no text)"
+	}
+	return text
+}
+
 // voiceEventRender turns one telemetry event into the operator line body
 // (pure, unit-tested): what the CLI prints after the "[side employee] "
-// prefix. Unknown kinds render the raw kind so a future daemon-side kind
-// never disappears silently.
+// prefix. A said row is SEND time (events.go: At is when the talk loop
+// handed the sentence to the child, before it played); the speaker clock
+// supplies the separate PLAYED edge. Unknown kinds render the raw kind so
+// a future daemon-side kind never disappears silently.
 func voiceEventRender(ev voiceEventRow) string {
-	at := ev.At
-	if len(at) >= 19 {
-		at = at[11:19]
-	}
+	at := clockStamp(ev.At)
 	switch ev.Kind {
 	case "heard":
 		return at + " heard: " + ev.Text
@@ -1191,7 +1209,9 @@ func voiceEventRender(ev voiceEventRow) string {
 	case "turn_final":
 		return at + " replied (" + itoa(ev.Words) + " words, " + itoa64(ev.Ms) + "ms)"
 	case "said":
-		return at + " said: " + ev.Text
+		// The daemon populates said.Text; never let an empty/truncated row
+		// render as a bare "said" with no content (the operator regression).
+		return at + " said: " + saidTextOrMissing(ev.Text)
 	case "barge_in":
 		return at + " >> barge-in"
 	case "call_ended":
@@ -1285,27 +1305,62 @@ func (t *voiceEventTracker) clockFor(ccid string) *speakerClock {
 // audio window: every said prints immediately with the join styling the
 // live feed uses, so the post-call drain tail reads like the live feed
 // it continues.
+//
+// TIMELINE (said-text-gaps): each said line is stamped with the EVENT's
+// time - the say-SEND time per events.go (when the talk loop handed the
+// sentence to the child) - which is distinct from the "speaker on/off"
+// PLAYED edges the drain emits from actual audio. A queued said keeps its
+// send stamp when noteOn joins it, so the operator never mistakes send
+// time for play time. The speaker on/off markers label the played edge,
+// and an optional per-turn phase summary records the heard -> thinking ->
+// replied -> played span for each reply.
 type speakerClock struct {
 	label string
 	emp   string
 	mu    sync.Mutex
 	on    bool
 	start time.Time
-	wait  []string
+	wait  []saidEntry
 	// drained = no audio is ever played again (post-call drain tail):
 	// noteSaid flushes through immediately instead of waiting for a
 	// noteOn that will never come.
 	drained bool
+	// turn tracks the heard -> thinking -> replied -> played phases of
+	// the current/latest reply for the compact per-turn summary.
+	turn         turnPhases
+	lastPlayedAt string // HH:MM:SS of the most recent speaker-on edge
+}
+
+// saidEntry is a queued said sentence with its SEND stamp (the event At).
+type saidEntry struct {
+	stamp string
+	text  string
+}
+
+// turnPhases collects the wall-clock stamps of one reply's phases so the
+// CLI can print a compact per-turn summary instead of leaving the operator
+// to correlate separate lines by hand.
+type turnPhases struct {
+	heardStamp    string
+	thinkingStamp string
+	repliedStamp  string
+	words         int
+	ms            int64
+	printed       bool // summary already emitted for this turn
 }
 
 func newSpeakerClock(label, emp string) *speakerClock {
 	return &speakerClock{label: label, emp: emp}
 }
 
+// defaultSaidStamp is used when a caller supplies no event time (legacy
+// noteSaid and unit fixtures that call noteSaid directly).
+func defaultSaidStamp() string { return time.Now().Format("15:04:05") }
+
 // SetDrained puts the clock in drained mode: said lines print at once
-// (still styled "said:", just without a speaker on/off window - at drain
-// time the audio is gone). V5: the drain previously printed said events
-// raw via voiceEventRender, diverging from the live feed's clock join.
+// (with the event's send stamp, styled "said:"). V5: the drain previously
+// printed said events raw via voiceEventRender, diverging from the live
+// feed's clock join.
 func (c *speakerClock) SetDrained() {
 	if c == nil {
 		return
@@ -1316,10 +1371,10 @@ func (c *speakerClock) SetDrained() {
 	c.wait = nil
 	c.mu.Unlock()
 	// Flush anything the live window never opened for (the V4 shape) so
-	// nothing already queued is stranded when the drain takes over.
-	stamp := time.Now().Format("15:04:05")
-	for _, text := range wait {
-		c.printSaid(stamp, text)
+	// nothing already queued is stranded when the drain takes over. Each
+	// queued said keeps its OWN send stamp instead of being re-stamped.
+	for _, e := range wait {
+		c.printSaid(e.stamp, e.text)
 	}
 }
 
@@ -1327,31 +1382,49 @@ func (c *speakerClock) printf(format string, args ...any) {
 	fmt.Printf("[%s %s] "+format+"\n", append([]any{c.label, c.emp}, args...)...)
 }
 
-// printSaid renders one said line. Callers snapshot the arguments under
-// c.mu and call this AFTER unlocking (V6: no I/O while holding the
-// mutex - mutexio). The single feeder goroutine means call-order
-// printing preserves the join ordering.
+// printSaid renders one said line. The stamp is the SEND time (the event
+// At), so it reads like "<send-time> said: <text>"; the separate
+// "speaker on (played)" edges the drain emits from real audio carry the
+// PLAYED time. The per-turn summary joins both into one timeline. Callers
+// snapshot the arguments under c.mu and call this AFTER unlocking (V6: no
+// I/O while holding the mutex - mutexio). The single feeder goroutine
+// means call-order printing preserves the join ordering.
 func (c *speakerClock) printSaid(stamp, text string) {
-	c.printf("%s said: %s", stamp, text)
+	c.printf("%s said: %s", stamp, saidTextOrMissing(text))
 }
 
+// noteSaid is the legacy stamp-less entry point (unit fixtures). It uses
+// the wall clock as the send stamp; production feeds noteSaidAt with the
+// event's real At so send time is preserved exactly.
 func (c *speakerClock) noteSaid(text string) {
-	if c == nil || strings.TrimSpace(text) == "" {
+	c.noteSaidAt("", text)
+}
+
+// noteSaidAt queues a said sentence with its event send stamp (At,
+// RFC3339Nano or HH:MM:SS). An empty at falls back to the wall clock.
+// Empty text is NOT dropped: saidTextOrMissing renders it as "(no text)"
+// so a truncated row never disappears into a silent gap.
+func (c *speakerClock) noteSaidAt(at, text string) {
+	if c == nil {
 		return
 	}
-	type saidLine struct {
-		stamp, text string
+	stamp := at
+	if stamp == "" {
+		stamp = defaultSaidStamp()
+	} else {
+		stamp = clockStamp(stamp)
 	}
-	var prints []saidLine
+	entry := saidEntry{stamp: stamp, text: text}
+	var prints []saidEntry
 	c.mu.Lock()
 	if c.on || c.drained {
-		prints = append(prints, saidLine{time.Now().Format("15:04:05"), text})
+		prints = append(prints, entry) // window open: print at once
 	} else {
-		c.wait = append(c.wait, text)
+		c.wait = append(c.wait, entry) // no window yet: queue with send stamp
 	}
 	c.mu.Unlock()
-	for _, l := range prints {
-		c.printSaid(l.stamp, l.text)
+	for _, e := range prints {
+		c.printSaid(e.stamp, e.text)
 	}
 }
 
@@ -1372,16 +1445,18 @@ func (c *speakerClock) noteOn() {
 		c.on = true
 		c.start = time.Now()
 		stamp := c.start.Format("15:04:05")
+		c.lastPlayedAt = stamp
 		prints = append(prints, onPrint{on: true, stamp: stamp})
-		for _, text := range c.wait {
-			prints = append(prints, onPrint{stamp: stamp, text: text})
+		for _, e := range c.wait {
+			// Print the joined said at its SEND stamp, not the play time.
+			prints = append(prints, onPrint{stamp: e.stamp, text: e.text})
 		}
 		c.wait = nil
 	}
 	c.mu.Unlock()
 	for _, p := range prints {
 		if p.on {
-			c.printf("%s speaker on", p.stamp)
+			c.printf("%s speaker on (played)", p.stamp)
 			continue
 		}
 		c.printSaid(p.stamp, p.text)
@@ -1404,8 +1479,13 @@ func (c *speakerClock) endStream() {
 	c.wait = nil
 	c.mu.Unlock()
 	stamp := time.Now().Format("15:04:05")
-	for _, text := range wait {
-		c.printSaid(stamp, text)
+	for _, e := range wait {
+		// A said that never got a window still prints at its SEND stamp.
+		s := e.stamp
+		if s == "" {
+			s = stamp
+		}
+		c.printSaid(s, e.text)
 	}
 }
 
@@ -1429,8 +1509,93 @@ func (c *speakerClock) noteOff() {
 	}
 	c.mu.Unlock()
 	if doPrint {
-		c.printf("%s speaker off (%s)", stamp, elapsed)
+		c.printf("%s speaker off (played, %s)", stamp, elapsed)
 	}
+}
+
+// formatTurnSummary formats one per-turn phase timeline. Returns "" when
+// the turn has no completed reply or no played edge yet.
+func formatTurnSummary(t turnPhases, played string) string {
+	if t.printed || (t.repliedStamp == "" && t.thinkingStamp == "") || played == "" {
+		return ""
+	}
+	chain := ""
+	if t.heardStamp != "" {
+		chain += "heard " + t.heardStamp + " -> "
+	}
+	if t.thinkingStamp != "" {
+		chain += "thinking " + t.thinkingStamp + " -> "
+	}
+	if t.repliedStamp != "" {
+		chain += "replied " + t.repliedStamp + " -> "
+	}
+	chain += "played " + played
+	line := "turn: " + chain
+	if t.ms > 0 {
+		line += " (model " + itoa64(t.ms) + "ms"
+		if t.words > 0 {
+			line += ", " + itoa(t.words) + " words"
+		}
+		line += ")"
+	}
+	return line
+}
+
+// notePhase records one per-turn phase stamp from an event. Kept pure and
+// nil-safe; the tracker calls it for heard / thinking / replied events.
+// On a new "heard" (a fresh turn) it first emits the PRIOR turn's compact
+// summary, so a multi-turn call gets one timeline line per turn.
+func (c *speakerClock) notePhase(kind, at string, words int, ms int64) {
+	if c == nil {
+		return
+	}
+	stamp := clockStamp(at)
+	c.mu.Lock()
+	var prior turnPhases
+	var priorPlayed string
+	switch kind {
+	case "heard":
+		prior, priorPlayed = c.turn, c.lastPlayedAt
+		c.turn = turnPhases{heardStamp: stamp} // new turn starts at the mic
+		c.lastPlayedAt = ""
+	case "prompt_dispatch":
+		c.turn.thinkingStamp = stamp
+		c.turn.words = words
+	case "turn_final":
+		c.turn.repliedStamp = stamp
+		c.turn.ms = ms
+		// The reply's own word count (turn_final) is the authoritative
+		// one for the summary; the prompt's word count may differ.
+		if words > 0 {
+			c.turn.words = words
+		}
+	}
+	c.mu.Unlock()
+	if line := formatTurnSummary(prior, priorPlayed); line != "" {
+		c.printf("%s", line)
+	}
+}
+
+// printTurnSummary emits the latest turn's compact phase line (called at
+// end-of-drain, once all phases are known). Idempotent via turn.printed.
+func (c *speakerClock) printTurnSummary() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	if c.turn.printed {
+		c.mu.Unlock()
+		return
+	}
+	t := c.turn
+	played := c.lastPlayedAt
+	if line := formatTurnSummary(t, played); line == "" {
+		c.mu.Unlock()
+		return
+	}
+	c.turn.printed = true
+	c.mu.Unlock()
+	c.printf("%s", formatTurnSummary(t, played))
 }
 
 // start spawns one ticker poller goroutine per known call id. The
@@ -1538,9 +1703,18 @@ func (t *voiceEventTracker) pollOnce(ccid, label, emp string) bool {
 		return false // abandoned window: never print after stop began
 	}
 	for _, ev := range res.Events {
-		if ev.Kind == "said" && t.clockFor(ccid) != nil {
-			t.clockFor(ccid).noteSaid(ev.Text)
-			continue
+		// The speaker clock turns said lines into a precise timeline:
+		// the said stamp is the SEND time (ev.At), while speaker on/off
+		// are the PLAYED edges from real audio. Phase events feed the
+		// compact per-turn summary printed when the window closes.
+		if c := t.clockFor(ccid); c != nil {
+			switch ev.Kind {
+			case "said":
+				c.noteSaidAt(ev.At, ev.Text)
+				continue
+			case "heard", "prompt_dispatch", "turn_final":
+				c.notePhase(ev.Kind, ev.At, ev.Words, ev.Ms)
+			}
 		}
 		fmt.Printf("[%s %s] %s\n", label, emp, voiceEventRender(ev))
 	}
@@ -1620,6 +1794,9 @@ func (t *voiceEventTracker) drainOnce() {
 				break
 			}
 		}
+		// Emit the final turn's compact phase timeline once all events
+		// (heard -> thinking -> replied) and the played edge are known.
+		t.clockFor(ccid).printTurnSummary()
 	}
 }
 
@@ -1658,10 +1835,16 @@ func (t *voiceEventTracker) drainPollOnce(ccid, label, emp string) bool {
 			// with the live feed's styling) - the drain tail is no
 			// longer a raw-render divergence from the feed it
 			// continues. A nil clock (tracker without a speaker
-			// window) keeps the raw render.
-			if ev.Kind == "said" && t.clockFor(ccid) != nil {
-				t.clockFor(ccid).noteSaid(ev.Text)
-				continue
+			// window) keeps the raw render. The event's At is the
+			// SEND stamp; phase events feed the per-turn summary.
+			if c := t.clockFor(ccid); c != nil {
+				switch ev.Kind {
+				case "said":
+					c.noteSaidAt(ev.At, ev.Text)
+					continue
+				case "heard", "prompt_dispatch", "turn_final":
+					c.notePhase(ev.Kind, ev.At, ev.Words, ev.Ms)
+				}
 			}
 			fmt.Printf("[%s %s] %s\n", label, emp, voiceEventRender(ev))
 		}
