@@ -493,7 +493,8 @@ func (t *TalkLoop) emitEvent(ccid string, in EventInput) {
 }
 
 // emitVoicePlay records the FIRST spoken model output of a turn as
-// kind=voice_play: full text + dispatch->play ms. Called from the say
+// kind=voice_play: full text + dispatch->say-send ms (the say choke, not
+// audible playback). Called from the say
 // choke in playVerdict (never from the fact-free greeting/filler/clarify
 // lanes), once per draft via p.voicePlaySeen. text is the FULL sentence
 // the child was asked to speak (a fallback line when the check failed).

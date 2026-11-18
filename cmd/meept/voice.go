@@ -1208,6 +1208,15 @@ func voiceEventRender(ev voiceEventRow) string {
 		return at + " thinking (" + itoa(ev.Words) + " words): " + ev.Text
 	case "turn_final":
 		return at + " replied (" + itoa(ev.Words) + " words, " + itoa64(ev.Ms) + "ms)"
+	case "stt_final":
+		return at + " stt: " + saidTextOrMissing(ev.Text) + " (" + itoa64(ev.Ms) + "ms)"
+	case "model_final":
+		return at + " model: " + saidTextOrMissing(ev.Text) + " (" + itoa64(ev.Ms) + "ms)"
+	case "voice_play":
+		// Say-send edge. The real played edge is printed separately by
+		// speakerClock.noteOn as "speaker on (played)"; the gap between
+		// these two stamps is the user-visible say-to-speaker delay.
+		return at + " voice: " + saidTextOrMissing(ev.Text) + " (sent, " + itoa64(ev.Ms) + "ms)"
 	case "said":
 		// The daemon populates said.Text; never let an empty/truncated row
 		// render as a bare "said" with no content (the operator regression).

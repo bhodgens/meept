@@ -76,9 +76,12 @@ const (
 	EventKindModelFinal = "model_final"
 	// EventKindVoicePlay: the first spoken model output of a turn hit the
 	// say choke (allowed reply sentence, or the fallback line on a check
-	// failure). Text is the FULL spoken sentence; Ms is dispatch -> first
-	// playback. Emitted once per turn (a second sentence never re-arms it)
-	// and never for fact-free filler/greeting lines, which have no turn.
+	// failure). Text is the FULL spoken sentence; Ms is dispatch -> SAY-SEND
+	// (the say choke handing the sentence to the child), NOT audible playback.
+	// The CLI's separate "speaker on (played)" marker carries the real play
+	// edge; the gap between the two stamps is the say-to-speaker delay.
+	// Emitted once per turn (a second sentence never re-arms it) and never
+	// for fact-free filler/greeting lines, which have no turn.
 	EventKindVoicePlay = "voice_play"
 )
 

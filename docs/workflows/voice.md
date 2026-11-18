@@ -358,7 +358,7 @@ bus topic, no wire change to the RPC envelope):
 | --- | --- | --- | --- |
 | `stt_final` | caller speech → turn dispatch | FULL final transcript (not the `prompt_dispatch` preview) | speech-end (FINAL prompt frame arrival) → dispatch |
 | `model_final` | employee model → turn final | FULL reply text | dispatch → turn-final (same value as `turn_final`) |
-| `voice_play` | first spoken model output | FULL spoken sentence (the fallback line when the check failed) | dispatch → first playback |
+| `voice_play` | first spoken model output handed to the child | FULL spoken sentence (the fallback line when the check failed) | dispatch → say-send (NOT audible playback) |
 
 All three are emitted only when the talk loop's optional `OnEvent` seam is
 armed (nil = zero work, byte-identical loop), ride the same 64-per-call ring,
