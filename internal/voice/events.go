@@ -94,10 +94,10 @@ const (
 	DefaultCallEventRings = 32
 )
 
-// TelemetryEvent is one ring entry. Text is a PREVIEW (truncated at the
-// emitter by a 40-rune rule) for kinds other than heard and said.
-// heard and said carry the full sentence: the live operator feed is the
-// transcript, not a 40-rune preview.
+// TelemetryEvent is one ring entry. Text is FULL for heard, said,
+// stt_final, model_final and voice_play: the live operator feed is the
+// transcript, not a 40-rune preview. Other kinds carry a PREVIEW
+// (truncated at the emitter by a 40-rune rule) or no Text at all.
 type TelemetryEvent struct {
 	Seq    uint64    `json:"seq"`
 	Kind   string    `json:"kind"`
