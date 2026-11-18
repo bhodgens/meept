@@ -101,16 +101,40 @@ func TestStartDelegateResumeSweep_ResumesPreseededInterrupted(t *testing.T) {
 	c.DelegateManager = fresh
 	c.StartDelegateResumeSweep(ctx)
 
+	// Pin the C13 claim: the sweep cold-resumed the preseeded interrupted
+	// child into the live registry under its original id. The claim is
+	// synchronous (resumeRegister inserts the running entry and writes the
+	// durable running row before returning), so the child must be visible
+	// here regardless of how far the async run has progressed.
 	rec, ok := fresh.Lookup(res.ChildID)
 	if !ok {
 		t.Fatal("sweep did not cold-resume the preseeded interrupted child")
 	}
-	// The resume lifecycle: claimed running, then executed against this
-	// rig's registry (which has no real "probe" agent, so the run settles
-	// failed — the pin is the CLAIM + execution attempt, and the durable row
-	// following it, not the agent's outcome).
 	if rec.State != agent.ChildStateRunning && rec.State != agent.ChildStateFailed {
 		t.Fatalf("resumed child state = %s, want running (or failed post-run on this rig)", rec.State)
+	}
+
+	// The run settles asynchronously against this rig's registry (no real
+	// "probe" agent, so it settles failed). settleWithError updates the LIVE
+	// record under the lock, then persists the DURABLE row AFTER releasing
+	// it, then closes the settle channel. A bare Lookup + Store read races
+	// that window: it can observe live=failed while the row is still
+	// running (the flake), or vice versa. Join is the production seam that
+	// guarantees consistency — it waits on the settle channel, which closes
+	// only after the durable row is saved. Await it with a bounded timeout
+	// instead of racing the settle goroutine.
+	if _, err := fresh.Join(ctx, "sess-parent", res.ChildID, 2*time.Second); err != nil {
+		t.Fatalf("join resumed child: %v", err)
+	}
+
+	// Post-Join observations are stable: the child has settled and the
+	// durable row is guaranteed to track the live record.
+	rec, ok = fresh.Lookup(res.ChildID)
+	if !ok {
+		t.Fatal("resumed child disappeared after join")
+	}
+	if rec.State != agent.ChildStateFailed && rec.State != agent.ChildStateCompleted {
+		t.Fatalf("resumed child state after join = %s, want a settled state", rec.State)
 	}
 	row, err := store.GetChildDescriptor(ctx, res.ChildID)
 	if err != nil {
@@ -118,6 +142,55 @@ func TestStartDelegateResumeSweep_ResumesPreseededInterrupted(t *testing.T) {
 	}
 	if row.State != string(rec.State) {
 		t.Fatalf("durable row after sweep = %s, want %s (row tracks the resumed run)", row.State, rec.State)
+	}
+}
+
+// Deterministic repeat pin for the C13 resume-settle consistency race: run
+// the cold-resume + async-settle cycle N times in ONE test invocation so the
+// row/live consistency guarantee is exercised even under a plain `-count=1`
+// CI run. Each iteration is an isolated restart (fresh manager over a store
+// holding one preseeded interrupted row). The invariant: after the bounded
+// Join, the live record and the durable row always agree — this is the exact
+// observation that raced before the flake fix (bare Lookup + Store read could
+// see live=failed while the row was still running).
+func TestStartDelegateResumeSweep_ResumeSettleConsistencyRepeat(t *testing.T) {
+	const iterations = 20
+	ctx := context.Background()
+	for i := range iterations {
+		c, store := sweepTestComponents(t)
+
+		unwired := agent.NewDelegateManager(nil, func(string, any) {}, func(string) error { return nil })
+		res, err := unwired.Spawn(ctx, agent.DelegateRequest{
+			AgentID: "probe", Mode: "spawn", Message: "in-flight task",
+		}, "sess-parent")
+		if err != nil {
+			t.Fatalf("iter %d spawn: %v", i, err)
+		}
+		unwired.SetStore(store)
+		unwired.SettleForTest(res.ChildID, agent.ChildStateInterrupted, "", "cancelled")
+
+		fresh := agent.NewDelegateManager(c.AgentRegistry, func(string, any) {}, func(string) error { return nil })
+		fresh.SetStore(store)
+		c.DelegateManager = fresh
+		c.StartDelegateResumeSweep(ctx)
+
+		if _, err := fresh.Join(ctx, "sess-parent", res.ChildID, 2*time.Second); err != nil {
+			t.Fatalf("iter %d join resumed child: %v", i, err)
+		}
+		rec, ok := fresh.Lookup(res.ChildID)
+		if !ok {
+			t.Fatalf("iter %d resumed child disappeared after join", i)
+		}
+		row, err := store.GetChildDescriptor(ctx, res.ChildID)
+		if err != nil {
+			t.Fatalf("iter %d row after join: %v", i, err)
+		}
+		if row.State != string(rec.State) {
+			t.Fatalf("iter %d durable row = %s, live = %s: row/live divergence after settle", i, row.State, rec.State)
+		}
+		if rec.State != agent.ChildStateFailed && rec.State != agent.ChildStateCompleted {
+			t.Fatalf("iter %d child state after join = %s, want settled", i, rec.State)
+		}
 	}
 }
 
