@@ -475,6 +475,9 @@ func TestGateway_WS(t *testing.T) {
 
 	t.Run("no token never upgrades", func(t *testing.T) {
 		conn, resp, err := dialWS(server)
+		if resp != nil {
+			resp.Body.Close()
+		}
 		if err == nil {
 			conn.Close()
 			t.Fatal("handshake succeeded with no bearer token")
@@ -486,6 +489,9 @@ func TestGateway_WS(t *testing.T) {
 
 	t.Run("read grant upgrades and echoes the subprotocol", func(t *testing.T) {
 		conn, resp, err := dialWS(server, "bearer.read-token")
+		if resp != nil {
+			defer resp.Body.Close()
+		}
 		if err != nil {
 			status := 0
 			if resp != nil {
@@ -500,7 +506,10 @@ func TestGateway_WS(t *testing.T) {
 	})
 
 	t.Run("a token the checker does not know never upgrades", func(t *testing.T) {
-		conn, _, err := dialWS(server, "bearer.never-issued")
+		conn, resp, err := dialWS(server, "bearer.never-issued")
+		if resp != nil {
+			resp.Body.Close()
+		}
 		if err == nil {
 			conn.Close()
 			t.Fatal("handshake succeeded with a bearer lane the checker does not know")
@@ -513,7 +522,10 @@ func TestGateway_WS_RejectsForeignOrigin(t *testing.T) {
 	server := httptest.NewServer(mustGateway(t, &fakeRPC{}, ""))
 	defer server.Close()
 
-	conn, _, err := dialWSWithOrigin(server, "http://evil.example", "bearer.read-token")
+	conn, resp, err := dialWSWithOrigin(server, "http://evil.example", "bearer.read-token")
+	if resp != nil {
+		resp.Body.Close()
+	}
 	if err == nil {
 		conn.Close()
 		t.Fatal("handshake succeeded from a foreign origin")
@@ -747,7 +759,10 @@ func TestGateway_PairExchange(t *testing.T) {
 		token, _ := body["token"].(string)
 		server := httptest.NewServer(gateway)
 		defer server.Close()
-		conn, _, err := dialWS(server, "bearer."+token)
+		conn, resp, err := dialWS(server, "bearer."+token)
+		if resp != nil {
+			resp.Body.Close()
+		}
 		if err != nil {
 			t.Fatalf("WS handshake with exchange-minted token: %v", err)
 		}
@@ -893,7 +908,10 @@ func TestGateway_WS_ProxyOrigin_WithAllowList(t *testing.T) {
 	t.Run("default posture refused", func(t *testing.T) {
 		server := httptest.NewServer(mustGateway(t, &fakeRPC{}, ""))
 		defer server.Close()
-		conn, _, err := dialWSWithOrigin(server, "https://board.example.com", "bearer.read-token")
+		conn, resp, err := dialWSWithOrigin(server, "https://board.example.com", "bearer.read-token")
+		if resp != nil {
+			resp.Body.Close()
+		}
 		if err == nil {
 			conn.Close()
 			t.Fatal("unconfigured gateway accepted a proxy-origin handshake")
@@ -904,7 +922,10 @@ func TestGateway_WS_ProxyOrigin_WithAllowList(t *testing.T) {
 		gateway.SetAllowedOrigins([]string{"https://board.example.com"})
 		server := httptest.NewServer(gateway)
 		defer server.Close()
-		conn, _, err := dialWSWithOrigin(server, "https://board.example.com", "bearer.read-token")
+		conn, resp, err := dialWSWithOrigin(server, "https://board.example.com", "bearer.read-token")
+		if resp != nil {
+			resp.Body.Close()
+		}
 		if err != nil {
 			t.Fatalf("configured gateway refused the exact proxy origin: %v", err)
 		}

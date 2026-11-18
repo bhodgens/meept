@@ -137,7 +137,7 @@ type ModelDef struct {
 	// vanishes), which is the shipped config posture (plan Q1: ship
 	// EMPTY). The shape is documented in config/models.json5; no shipped
 	// model sets it until an operator measures.
-	Quality Quality `json:"quality,omitempty"`
+	Quality Quality `json:"quality,omitzero"`
 	// QualitySource is free-text provenance for the quality scores (e.g.
 	// "tooling-battery:2026-11-15"). Advisory only — never parsed.
 	QualitySource string `json:"quality_source,omitempty"`

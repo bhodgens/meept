@@ -54,7 +54,7 @@ func usableCheck(lines []voice.TranscriptLine) bool {
 	count := 0
 	for _, l := range lines {
 		for word := range strings.FieldsSeq(strings.ToLower(l.Text)) {
-			trimmed := strings.Trim(word, ".,!?;:'\"()[]{}-—…\"\"''")
+			trimmed := strings.Trim(word, ".,!?;:'\"()[]{}-—…")
 			if trimmed == "" {
 				continue
 			}

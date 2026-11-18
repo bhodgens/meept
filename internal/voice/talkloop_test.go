@@ -96,11 +96,11 @@ type cannedTurns struct {
 	starts int
 }
 
-func (t *cannedTurns) Run(ctx context.Context, sess SessionHandle, prompt string) (string, error) {
-	t.mu.Lock()
-	t.starts++
-	reply := t.reply
-	t.mu.Unlock()
+func (ct *cannedTurns) Run(ctx context.Context, sess SessionHandle, prompt string) (string, error) {
+	ct.mu.Lock()
+	ct.starts++
+	reply := ct.reply
+	ct.mu.Unlock()
 	return reply, nil
 }
 
@@ -111,12 +111,12 @@ type slowTurns struct {
 	delay time.Duration
 }
 
-func (t *slowTurns) Run(ctx context.Context, sess SessionHandle, prompt string) (string, error) {
-	t.mu.Lock()
-	t.starts++
-	t.mu.Unlock()
-	time.Sleep(t.delay)
-	return t.reply, nil
+func (ct *slowTurns) Run(ctx context.Context, sess SessionHandle, prompt string) (string, error) {
+	ct.mu.Lock()
+	ct.starts++
+	ct.mu.Unlock()
+	time.Sleep(ct.delay)
+	return ct.reply, nil
 }
 
 // constSession returns the SessionFor seam for tests.

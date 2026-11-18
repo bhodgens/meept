@@ -72,11 +72,11 @@ func (s *ledgerIntakeSaver) save(kind, subject string) error {
 // errIntakeLedgerUnwired is the fail-closed refusal when the adapter runs
 // without a store (never reachable through the arming rule; kept for
 // hand-built test wirings).
-var errIntakeLedgerUnwired = errIntakeNoStore{}
+var errIntakeLedgerUnwired = intakeNoStoreError{}
 
-type errIntakeNoStore struct{}
+type intakeNoStoreError struct{}
 
-func (errIntakeNoStore) Error() string { return "intake_save: no ledger store wired" }
+func (intakeNoStoreError) Error() string { return "intake_save: no ledger store wired" }
 
 // anyGuidedIntakeRow reports whether any [voice.employee_leg] row opts
 // in (the tool-EXISTENCE gate — per-employee behavior rides

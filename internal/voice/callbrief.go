@@ -84,7 +84,7 @@ func encodeBrief(b *CallBrief) (string, error) {
 func decodeBrief(raw string) (*CallBrief, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return nil, nil
+		return nil, nil //nolint:nilnil // documented "no row content yet": an empty column is absence, not a decode failure
 	}
 	var b CallBrief
 	if err := json.Unmarshal([]byte(raw), &b); err != nil {

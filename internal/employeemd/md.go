@@ -190,8 +190,14 @@ func secondsToDuration(v any) (any, error) {
 	case int64:
 		secs = n
 	case uint:
+		if n > uint(^uint64(0)>>1) {
+			return nil, fmt.Errorf("timeout_seconds %d out of range", n)
+		}
 		secs = int64(n)
 	case uint64:
+		if n > ^uint64(0)>>1 {
+			return nil, fmt.Errorf("timeout_seconds %d out of range", n)
+		}
 		secs = int64(n)
 	default:
 		return nil, fmt.Errorf("timeout_seconds must be an integer, got %T", v)

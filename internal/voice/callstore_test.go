@@ -268,7 +268,7 @@ func TestCallStoreConcurrentAppendsAreAtomic(t *testing.T) {
 				if _, lines, _, err := s.EndedCall(ctx, "cc-race"); err != nil {
 					t.Errorf("concurrent EndedCall: %v", err)
 					return
-				} else if lines != nil {
+				} else {
 					for _, l := range lines {
 						if l.Role != "user" && l.Role != "assistant" {
 							t.Errorf("torn transcript line: %+v", l)

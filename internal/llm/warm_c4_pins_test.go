@@ -92,7 +92,9 @@ func TestWarm_CacheBypass_ExactKey(t *testing.T) {
 	c := warmTestClient(t, srv.URL, WithTokenCache(rc))
 
 	msgs := warmMessages()
-	c.Warm(context.Background(), msgs, WithTaskScope("", "sess-42"))
+	if err := c.Warm(context.Background(), msgs, WithTaskScope("", "sess-42")); err != nil {
+		t.Fatalf("Warm: %v", err)
+	}
 	if !waitFor(func() bool { return len(recs()) == 1 && laneIdle(c) }, 3*time.Second) {
 		t.Fatal("warm did not complete")
 	}
@@ -134,7 +136,9 @@ func TestWarm_CacheBypass_SemanticTier(t *testing.T) {
 	sem.Store(context.Background(), "test-model", seedText, &Response{Content: "Sunny."})
 
 	callsBefore := emb.calls.Load()
-	c.Warm(context.Background(), msgs, WithTaskScope("", "s"))
+	if err := c.Warm(context.Background(), msgs, WithTaskScope("", "s")); err != nil {
+		t.Fatalf("Warm: %v", err)
+	}
 	if !waitFor(func() bool { return len(recs()) == 1 && laneIdle(c) }, 3*time.Second) {
 		t.Fatal("warm did not reach upstream")
 	}
@@ -163,7 +167,9 @@ func TestWarm_EmptyCompletionNoRetry(t *testing.T) {
 	})
 	c := warmTestClient(t, srv.URL)
 
-	c.Warm(context.Background(), warmMessages(), WithTaskScope("", "s"))
+	if err := c.Warm(context.Background(), warmMessages(), WithTaskScope("", "s")); err != nil {
+		t.Fatalf("Warm: %v", err)
+	}
 	if !waitFor(func() bool { return len(recs()) >= 1 && laneIdle(c) }, 3*time.Second) {
 		t.Fatal("warm never completed")
 	}

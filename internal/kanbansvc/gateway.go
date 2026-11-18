@@ -265,7 +265,7 @@ func (g *Gateway) serveAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if _, err := w.Write(resp); err != nil {
+	if _, err := w.Write(resp); err != nil { //nolint:gosec // G705: resp is a JSON-RPC reply written with Content-Type application/json — no HTML rendering surface, no XSS
 		slog.Warn("kanban gateway: reply write failed", "rpc", spec.rpc, "error", err)
 	}
 }

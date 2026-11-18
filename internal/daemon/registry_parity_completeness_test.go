@@ -76,10 +76,10 @@ func (rp2StubChain) Run(person, message string, channels []string) string { retu
 type rp2StubGoal struct{}
 
 func (rp2StubGoal) CreateGoal(ctx context.Context, spec builtin.GoalCreateSpec) (*builtin.GoalRecord, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // test stub: empty store = "no goal", the gate's documented fail-closed shape
 }
 func (rp2StubGoal) GetGoal(ctx context.Context, id string) (*builtin.GoalRecord, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // test stub: empty store = "no goal", the gate's documented fail-closed shape
 }
 func (rp2StubGoal) ListActive(ctx context.Context, owner string) ([]*builtin.GoalRecord, error) {
 	return nil, nil

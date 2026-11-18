@@ -20,10 +20,9 @@ func TestClient_GotoImplementation_MethodExists(t *testing.T) {
 	// (ctx, uri, line, char) ([]Location, error). A nil client will panic at
 	// runtime, so assert only the method value's existence via the type.
 	var c *Client
-	fn := c.GotoImplementation // undefined until the leaf lands: RED here
-	if fn == nil {
-		t.Fatal("GotoImplementation method value is nil")
-	}
+	// A method value can never be nil (SA4031): resolving
+	// c.GotoImplementation at compile time IS the existence proof.
+	_ = c.GotoImplementation
 }
 
 func TestClient_GotoImplementation_NoServerErrorsCleanly(t *testing.T) {

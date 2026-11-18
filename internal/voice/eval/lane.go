@@ -46,8 +46,8 @@ var errWeightsMissing = errors.New("whisper weights absent")
 // the error message always NAMES the missing path.
 func weightsStatus() (string, error) {
 	if dir := os.Getenv(WeightsDirOverrideEnv); dir != "" {
-		p := filepath.Join(dir, "ggml-base.en.bin")
-		if _, err := os.Stat(p); err != nil {
+		p := filepath.Join(dir, "ggml-base.en.bin") //nolint:gosec // G703: operator env override with a fixed leaf name, same posture as config.MeeptPath roots
+		if _, err := os.Stat(p); err != nil {       //nolint:gosec // G703: operator env override dir with a fixed leaf name, same posture as every config root
 			return "", fmt.Errorf("%w: %s", errWeightsMissing, p)
 		}
 		return p, nil

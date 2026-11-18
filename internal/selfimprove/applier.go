@@ -708,7 +708,7 @@ func verifyTouchedPackage(ctx context.Context, worktreeRoot, relPath string) err
 	if !strings.HasSuffix(cleaned, ".go") {
 		return nil
 	}
-	dir := cleaned
+	var dir string
 	if before, _, ok := strings.CutLast(cleaned, "/"); ok {
 		dir = before
 	} else {

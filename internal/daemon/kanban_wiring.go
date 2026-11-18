@@ -148,11 +148,11 @@ type kanbanServices struct {
 // reads through the PlanStore seam.
 func wireKanbanServices(c *Components, planStore plan.PlanStore, msgBus *bus.MessageBus, logger *slog.Logger) (*kanbanServices, error) {
 	if c == nil || c.Config == nil {
-		return nil, nil
+		return nil, nil //nolint:nilnil // documented opt-in posture: no components = board subsystem absent, not an error
 	}
 	cfg := c.Config.Kanban
 	if !cfg.Enabled {
-		return nil, nil
+		return nil, nil //nolint:nilnil // [kanban].enabled=false = byte-identical boot; the caller treats (nil, nil) as "not opted in"
 	}
 	if logger == nil {
 		logger = slog.Default()
@@ -1110,7 +1110,7 @@ func (a *daemonLeaseAuthority) LookupLease(ctx context.Context, ref kanban.WorkR
 		}
 		job, err := pq.Get(ctx, ref.ID)
 		if err != nil || job == nil {
-			return "", time.Time{}, false, nil
+			return "", time.Time{}, false, nil //nolint:nilerr // fail-open read (documented above): a machine that cannot answer reports NOT held
 		}
 		if job.State == queue.StateClaimed || job.State == queue.StateProcessing {
 			holder := job.ClaimedBy
@@ -1127,7 +1127,7 @@ func (a *daemonLeaseAuthority) LookupLease(ctx context.Context, ref kanban.WorkR
 		}
 		t, err := a.c.TaskRegistry.Get(ctx, ref.ID)
 		if err != nil || t == nil {
-			return "", time.Time{}, false, nil
+			return "", time.Time{}, false, nil //nolint:nilerr // fail-open read (documented above): unreadable task row reports NOT held
 		}
 		if t.State == task.StateExecuting || t.State == task.StateTesting {
 			holder := t.AssignedAgent
@@ -1144,7 +1144,7 @@ func (a *daemonLeaseAuthority) LookupLease(ctx context.Context, ref kanban.WorkR
 		}
 		st, err := a.c.StepStore.GetByID(ref.ID)
 		if err != nil || st == nil {
-			return "", time.Time{}, false, nil
+			return "", time.Time{}, false, nil //nolint:nilerr // fail-open read (documented above): unreadable step row reports NOT held
 		}
 		if st.State == task.StepRunning || st.State == task.StepReviewing {
 			holder := st.AgentID
@@ -1161,7 +1161,7 @@ func (a *daemonLeaseAuthority) LookupLease(ctx context.Context, ref kanban.WorkR
 		}
 		p, err := a.c.PlanManager.GetPlan(ctx, ref.ID)
 		if err != nil || p == nil {
-			return "", time.Time{}, false, nil
+			return "", time.Time{}, false, nil //nolint:nilerr // fail-open read (documented above): unreadable plan row reports NOT held
 		}
 		if p.State == plan.StateSynthesizing && p.SynthesisLeaseUntil != nil &&
 			time.Now().Before(*p.SynthesisLeaseUntil) {
@@ -1175,7 +1175,7 @@ func (a *daemonLeaseAuthority) LookupLease(ctx context.Context, ref kanban.WorkR
 		}
 		g, err := a.c.EmployeeGoalStore.Get(ctx, ref.ID)
 		if err != nil || g == nil {
-			return "", time.Time{}, false, nil
+			return "", time.Time{}, false, nil //nolint:nilerr // fail-open read (documented above): unreadable goal row reports NOT held
 		}
 		if g.State == employee.GoalActive {
 			holder := g.EmployeeID
@@ -1213,7 +1213,7 @@ func (a *daemonLeaseAuthority) CancelEpisode(ctx context.Context, ref kanban.Wor
 		}
 		job, err := a.c.Queue.Get(ctx, ref.ID)
 		if err != nil || job == nil || job.TaskID == "" {
-			return nil
+			return nil //nolint:nilerr // takeover best-effort: an unreadable job has no episode to cancel
 		}
 		a.triggerInterrupt(job.TaskID, "kanban takeover (job)")
 		return nil
@@ -1228,7 +1228,7 @@ func (a *daemonLeaseAuthority) CancelEpisode(ctx context.Context, ref kanban.Wor
 		}
 		st, err := a.c.StepStore.GetByID(ref.ID)
 		if err != nil || st == nil {
-			return nil
+			return nil //nolint:nilerr // takeover best-effort: an unreadable step has no episode to cancel
 		}
 		if st.TaskID != "" && a.c.TaskRegistry != nil {
 			a.triggerInterrupt(st.TaskID, "kanban takeover (step)")
@@ -1245,7 +1245,7 @@ func (a *daemonLeaseAuthority) CancelEpisode(ctx context.Context, ref kanban.Wor
 		}
 		g, err := a.c.EmployeeGoalStore.Get(ctx, ref.ID)
 		if err != nil || g == nil {
-			return nil
+			return nil //nolint:nilerr // takeover best-effort: an unreadable goal is nothing to pause
 		}
 		if g.State == employee.GoalRetired {
 			return nil
@@ -1278,7 +1278,7 @@ func (a *daemonLeaseAuthority) ReleaseToken(ctx context.Context, ref kanban.Work
 	case kanban.EventKindJob:
 		job, err := pq.Get(ctx, ref.ID)
 		if err != nil || job == nil {
-			return nil
+			return nil //nolint:nilerr // release best-effort: an unreadable job has no claim to release
 		}
 		if job.State == queue.StateClaimed || job.State == queue.StateProcessing || job.State == queue.StateFailed {
 			return pq.Requeue(ctx, ref.ID, now)
@@ -1287,7 +1287,7 @@ func (a *daemonLeaseAuthority) ReleaseToken(ctx context.Context, ref kanban.Work
 	case kanban.EventKindTask:
 		jobs, err := pq.ListByTaskID(ctx, ref.ID)
 		if err != nil {
-			return nil // best-effort: unenumerable jobs cannot be force-released
+			return nil //nolint:nilerr // release best-effort: unenumerable jobs cannot be force-released
 		}
 		for _, j := range jobs {
 			if j == nil {
@@ -1307,11 +1307,11 @@ func (a *daemonLeaseAuthority) ReleaseToken(ctx context.Context, ref kanban.Work
 		}
 		st, err := a.c.StepStore.GetByID(ref.ID)
 		if err != nil || st == nil || st.JobID == "" {
-			return nil
+			return nil //nolint:nilerr // release best-effort: an unreadable step job has no claim to release
 		}
 		job, gerr := pq.Get(ctx, st.JobID)
 		if gerr != nil || job == nil {
-			return nil
+			return nil //nolint:nilerr // release best-effort: an unreadable queue job has no claim to release
 		}
 		if job.State == queue.StateClaimed || job.State == queue.StateProcessing {
 			return pq.Requeue(ctx, job.ID, now)

@@ -64,13 +64,13 @@ type ledgerReaderAdapter struct {
 	store *ledger.Store
 }
 
-// ledgerDisabledErr mirrors the disabled posture at the adapter layer.
-var ledgerDisabledErr = fmt.Errorf("ledger: store is not wired")
+// errLedgerDisabled mirrors the disabled posture at the adapter layer.
+var errLedgerDisabled = fmt.Errorf("ledger: store is not wired")
 
 // QueryLog implements rpc.LedgerReader.
 func (a ledgerReaderAdapter) QueryLog(ctx context.Context, employeeID, subject string, sinceID int64, limit int) ([]rpc.LedgerLogEntry, error) {
 	if a.store == nil {
-		return nil, ledgerDisabledErr
+		return nil, errLedgerDisabled
 	}
 	rows, err := a.store.QueryLog(ctx, ledger.LogQuery{
 		EmployeeID: employeeID,
@@ -101,7 +101,7 @@ func (a ledgerReaderAdapter) QueryLog(ctx context.Context, employeeID, subject s
 // QueryOpen implements rpc.LedgerReader.
 func (a ledgerReaderAdapter) QueryOpen(ctx context.Context, employeeID string) ([]rpc.LedgerOpenState, error) {
 	if a.store == nil {
-		return nil, ledgerDisabledErr
+		return nil, errLedgerDisabled
 	}
 	rows, err := a.store.QueryOpen(ctx, employeeID)
 	if err != nil {
@@ -124,7 +124,7 @@ func (a ledgerReaderAdapter) QueryOpen(ctx context.Context, employeeID string) (
 // Head implements rpc.LedgerReader: the store-wide max ledger id.
 func (a ledgerReaderAdapter) Head(ctx context.Context) (int64, error) {
 	if a.store == nil {
-		return 0, ledgerDisabledErr
+		return 0, errLedgerDisabled
 	}
 	return a.store.QueryHead(ctx)
 }

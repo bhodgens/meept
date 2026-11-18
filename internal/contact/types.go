@@ -7,7 +7,10 @@ package contact
 // packages; channel adapters (leaves 11/12) implement ChannelAttempt
 // against these types.
 
-import "time"
+import (
+	"errors"
+	"time"
+)
 
 // Channel is one contactable channel. The vocabulary is pinned by the
 // gate tests byte-exactly: the chain policy and the telnyx/signal
@@ -50,7 +53,7 @@ type Record struct {
 // ErrUnknownContact is the named sentinel for absent records (Get /
 // GetByPhone / GetBySignalUUID / Delete on an unknown id). errors.Is-
 // checkable by every consumer.
-var ErrUnknownContact = errorString("contact: unknown contact")
+var ErrUnknownContact = errors.New("contact: unknown contact")
 
 // ErrOptedOut is the named consent refusal (telnyx-texting D5): the
 // record has MessagingOptOut set, so outbound sends on the affected
@@ -59,11 +62,4 @@ var ErrUnknownContact = errorString("contact: unknown contact")
 // consent state that every channel consults, not a provider error.
 // errors.Is-checkable by every consumer, same posture as
 // ErrUnknownContact.
-var ErrOptedOut = errorString("contact: messaging opt-out")
-
-// errorString is the minimal error implementation for the package-level
-// sentinel; wrapping happens at call sites with %w so errors.Is still
-// resolves to this value.
-type errorString string
-
-func (e errorString) Error() string { return string(e) }
+var ErrOptedOut = errors.New("contact: messaging opt-out")

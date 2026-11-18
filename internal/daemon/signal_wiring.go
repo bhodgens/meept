@@ -129,7 +129,7 @@ func WireSignalLeg(ctx context.Context, cfg config.SignalConfig, deps WireVoiceD
 	}
 	if !cfg.Enabled {
 		logger.Info("signal leg disabled ([signal].enabled=false)")
-		return nil, nil
+		return nil, nil //nolint:nilnil // documented disabled-boot posture: (nil, nil) means "leg not armed"
 	}
 	socketPath := cfg.SocketPath
 	if socketPath == "" {

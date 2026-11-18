@@ -610,7 +610,7 @@ func awaitClipRender(t *testing.T, lines <-chan string, within time.Duration) vo
 // voice block; marker varies the filler pool per reload round.
 func writeClipTestConfig(t *testing.T, home string, marker int) {
 	t.Helper()
-	if err := os.MkdirAll(home, 0o755); err != nil {
+	if err := os.MkdirAll(home, 0o755); err != nil { //nolint:gosec // G703: home is t.TempDir()-derived, a fixed test path
 		t.Fatalf("home: %v", err)
 	}
 	extra := ""
@@ -627,7 +627,7 @@ func writeClipTestConfig(t *testing.T, home string, marker int) {
     "greeting": "Hello there!"%s
   }
 }`, extra)
-	if err := os.WriteFile(filepath.Join(home, "meept.json5"), []byte(body), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(home, "meept.json5"), []byte(body), 0o600); err != nil { //nolint:gosec // G703: fixed leaf name under t.TempDir(), no traversal input
 		t.Fatalf("write config: %v", err)
 	}
 }

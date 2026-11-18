@@ -59,7 +59,7 @@ const (
 // FailureCooldown returns the frozen base cooldown for a class, clamped to
 // the 4h cap (pools.py:222 + _MAX_COOLDOWN_S).
 func FailureCooldown(cls FailureCategory) time.Duration {
-	base := poolCooldownTransient
+	var base time.Duration
 	switch cls {
 	case ClassAccountDead:
 		base = poolCooldownAccount

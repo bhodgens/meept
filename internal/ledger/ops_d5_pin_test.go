@@ -104,12 +104,15 @@ func TestAppendRacingVerifyNoRewindWithAutoRepair(t *testing.T) {
 	if err != nil {
 		t.Fatalf("max id query: %v", err)
 	}
+	defer rows.Close()
 	for rows.Next() {
 		if err := rows.Scan(&maxID); err != nil {
 			t.Fatalf("scan max id: %v", err)
 		}
 	}
-	rows.Close()
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate max id rows: %v", err)
+	}
 	st, ok, err := store.GetState(ctx, "emp-d5", "repair-race")
 	if err != nil || !ok {
 		t.Fatalf("get state: ok=%v err=%v", ok, err)

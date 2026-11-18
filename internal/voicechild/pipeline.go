@@ -2212,7 +2212,7 @@ func rmsEnergy(b []byte) (uint64, uint64) {
 		if x < 0 {
 			x = -x // |sample| magnitude; -32768 -> 32768 fits int32
 		}
-		u := uint64(x)
+		u := uint64(x) //nolint:gosec // G115: x >= 0 by the abs above, so the widening is lossless
 		sum += u * u
 		n++
 	}

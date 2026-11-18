@@ -140,11 +140,9 @@ func newProjectorFixture(t *testing.T, rules []ProjectionRule) *projectorFixture
 		f.cols[r.ColumnID] = colID
 		pos++
 	}
-	loadedIn := make([]ProjectionRule, 0, len(rules))
 	for _, r := range rules {
 		r.BoardID = f.boardID
 		r.ColumnID = f.cols[r.ColumnID]
-		loadedIn = append(loadedIn, r)
 		if err := store.SetProjectionRule(ctx, r); err != nil {
 			t.Fatalf("SetProjectionRule: %v", err)
 		}

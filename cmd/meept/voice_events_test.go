@@ -183,7 +183,7 @@ func TestPrintLocalCallTranscriptRetriesFlushRace(t *testing.T) {
 // change to the run's outcome.
 func TestPrintLocalCallTranscriptDegradesQuietly(t *testing.T) {
 	out := captureStdout(t, func() {
-		printLocalCallTranscript(transcriptFakeClient{err: rpcErrStub{}}, "local-y", "emp")
+		printLocalCallTranscript(transcriptFakeClient{err: rpcStubError{}}, "local-y", "emp")
 	})
 	if !strings.Contains(out, "(no transcript lines)") {
 		t.Fatalf("RPC-error path must print the honest degrade:\n%s", out)
@@ -273,10 +273,10 @@ func TestVoiceEventTrackerDrain(t *testing.T) {
 	}
 }
 
-// rpcErrStub is a transient RPC failure (the best-effort retry posture).
-type rpcErrStub struct{}
+// rpcStubError is a transient RPC failure (the best-effort retry posture).
+type rpcStubError struct{}
 
-func (rpcErrStub) Error() string { return "rpc: connection closed" }
+func (rpcStubError) Error() string { return "rpc: connection closed" }
 
 func TestVoiceEventTrackerBestEffortOnErrors(t *testing.T) {
 	f := &fakeEventsClient{
@@ -284,7 +284,7 @@ func TestVoiceEventTrackerBestEffortOnErrors(t *testing.T) {
 	}
 	f.errFunc = func(n int) error {
 		if n == 1 {
-			return rpcErrStub{}
+			return rpcStubError{}
 		}
 		return nil
 	}

@@ -48,11 +48,11 @@ func TestVectorHybrid_NewWiringWithoutVectorStoreFailsClosed(t *testing.T) {
 // newWiringTestServer builds an RPC server the same way daemon.go does.
 func newWiringTestServer(t *testing.T) *rpc.Server {
 	t.Helper()
-	return rpc.New(&rpc.Config{SocketPath: filepath_join(t.TempDir(), "test.sock")}, nil, slog.New(slog.DiscardHandler))
+	return rpc.New(&rpc.Config{SocketPath: filepathJoin(t.TempDir(), "test.sock")}, nil, slog.New(slog.DiscardHandler))
 }
 
-// filepath_join avoids importing path/filepath for one call.
-func filepath_join(parts ...string) string {
+// filepathJoin avoids importing path/filepath for one call.
+func filepathJoin(parts ...string) string {
 	out := ""
 	for i, p := range parts {
 		if i > 0 {

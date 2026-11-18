@@ -1396,7 +1396,9 @@ func TestLocalSpliceBargeInDrainPreservesTerminalError(t *testing.T) {
 		t.Fatalf("mic write: %v", err)
 	}
 	for range 40 {
-		feedChild(ccid)
+		if err := feedChild(ccid); err != nil {
+			t.Fatalf("feedChild: %v", err)
+		}
 	}
 	time.Sleep(100 * time.Millisecond) // backlog builds in the pump queue
 
@@ -1501,7 +1503,9 @@ func TestLocalSpliceLatchBargeInAudioPlaneOnly(t *testing.T) {
 		t.Fatalf("mic write: %v", err)
 	}
 	for range 30 {
-		feedChild(ccid)
+		if err := feedChild(ccid); err != nil {
+			t.Fatalf("feedChild: %v", err)
+		}
 	}
 	time.Sleep(80 * time.Millisecond)
 

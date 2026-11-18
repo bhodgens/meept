@@ -208,7 +208,7 @@ func (r *TelemetryRing) Since(ccid string, cursor uint64, limit int) (events []T
 	// window's start means un-consumed events were already overwritten -
 	// the ONLY truncated condition (the ring is append-ordered, so any
 	// cursor above droppedEnd sees every retained match in full).
-	droppedEnd := cr.total - uint64(cr.count)
+	droppedEnd := cr.total - uint64(cr.count) //nolint:gosec // G115: cr.count is a bounded ring occupancy (0..perCall), never negative
 	if cursor < droppedEnd {
 		truncated = true
 	}

@@ -180,26 +180,32 @@ func rebuildTableWithCheck(ctx context.Context, conn *sql.Conn, logger *slog.Log
 		return fmt.Errorf("state CHECK migration table_info %s: %w", table, err)
 	}
 	var cols []string
-	for colRows.Next() {
-		var (
-			cid     int
-			name    string
-			ctype   string
-			notnull int
-			dflt    sql.NullString
-			pk      int
-		)
-		if err := colRows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
-			colRows.Close()
-			return fmt.Errorf("state CHECK migration table_info scan %s: %w", table, err)
+	// Drained inside a closure: the cursor must release the statement
+	// before the rebuild Execs below (defer to function exit would hold
+	// it across them).
+	if err := func() error {
+		defer colRows.Close()
+		for colRows.Next() {
+			var (
+				cid     int
+				name    string
+				ctype   string
+				notnull int
+				dflt    sql.NullString
+				pk      int
+			)
+			if err := colRows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+				return fmt.Errorf("state CHECK migration table_info scan %s: %w", table, err)
+			}
+			cols = append(cols, name)
 		}
-		cols = append(cols, name)
+		if err := colRows.Err(); err != nil {
+			return fmt.Errorf("state CHECK migration table_info iteration %s: %w", table, err)
+		}
+		return nil
+	}(); err != nil {
+		return err
 	}
-	if err := colRows.Err(); err != nil {
-		colRows.Close()
-		return fmt.Errorf("state CHECK migration table_info iteration %s: %w", table, err)
-	}
-	colRows.Close()
 	if len(cols) == 0 {
 		return fmt.Errorf("state CHECK migration: PRAGMA table_info(%s) returned no columns", table)
 	}
@@ -212,19 +218,22 @@ func rebuildTableWithCheck(ctx context.Context, conn *sql.Conn, logger *slog.Log
 		return fmt.Errorf("state CHECK migration index capture %s: %w", table, err)
 	}
 	var indexSQL []string
-	for idxRows.Next() {
-		var sqlText string
-		if err := idxRows.Scan(&sqlText); err != nil {
-			idxRows.Close()
-			return fmt.Errorf("state CHECK migration index scan %s: %w", table, err)
+	if err := func() error {
+		defer idxRows.Close()
+		for idxRows.Next() {
+			var sqlText string
+			if err := idxRows.Scan(&sqlText); err != nil {
+				return fmt.Errorf("state CHECK migration index scan %s: %w", table, err)
+			}
+			indexSQL = append(indexSQL, sqlText)
 		}
-		indexSQL = append(indexSQL, sqlText)
+		if err := idxRows.Err(); err != nil {
+			return fmt.Errorf("state CHECK migration index iteration %s: %w", table, err)
+		}
+		return nil
+	}(); err != nil {
+		return err
 	}
-	if err := idxRows.Err(); err != nil {
-		idxRows.Close()
-		return fmt.Errorf("state CHECK migration index iteration %s: %w", table, err)
-	}
-	idxRows.Close()
 
 	if _, err := tx.ExecContext(ctx, newDDL); err != nil {
 		return fmt.Errorf("state CHECK migration create %s: %w", newName, err)
@@ -259,14 +268,18 @@ func rebuildTableWithCheck(ctx context.Context, conn *sql.Conn, logger *slog.Log
 		return fmt.Errorf("state CHECK migration foreign_key_check after %s: %w", table, err)
 	}
 	violations := 0
-	for fkRows.Next() {
-		violations++
+	if err := func() error {
+		defer fkRows.Close()
+		for fkRows.Next() {
+			violations++
+		}
+		if err := fkRows.Err(); err != nil {
+			return fmt.Errorf("state CHECK migration foreign_key_check scan %s: %w", table, err)
+		}
+		return nil
+	}(); err != nil {
+		return err
 	}
-	if err := fkRows.Err(); err != nil {
-		fkRows.Close()
-		return fmt.Errorf("state CHECK migration foreign_key_check scan %s: %w", table, err)
-	}
-	fkRows.Close()
 	if violations > 0 {
 		return fmt.Errorf("state CHECK migration found %d foreign-key violation(s) after rebuilding %s", violations, table)
 	}

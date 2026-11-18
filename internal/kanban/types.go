@@ -55,7 +55,7 @@ type CardMoved struct {
 	LeaseBlocked bool
 }
 
-type ErrLeaseHeld struct {
+type ErrLeaseHeld struct { //nolint:errname // C1 contract name (internal/kanban/AGENTS.md + docs/workflows/kanban.md cite it verbatim); the error TEXT is the frozen wire contract
 	Holder string
 	Since  time.Time
 }
@@ -64,7 +64,7 @@ func (e ErrLeaseHeld) Error() string {
 	return fmt.Sprintf("lease held by %s since %s", e.Holder, e.Since.Format(time.RFC3339))
 }
 
-type ErrUnknownCard struct {
+type ErrUnknownCard struct { //nolint:errname // C1 contract name (cited verbatim in package docs); the error TEXT is the frozen wire contract
 	ID string
 }
 
@@ -72,7 +72,7 @@ func (e ErrUnknownCard) Error() string {
 	return fmt.Sprintf("unknown card: %s", e.ID)
 }
 
-type ErrWIPFull struct {
+type ErrWIPFull struct { //nolint:errname // C1 contract name (cited verbatim in package docs); the error TEXT is the frozen wire contract
 	ColumnID string
 	Limit    int
 }

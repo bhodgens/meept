@@ -349,28 +349,34 @@ func (s *Store) migrateJobsStateCheck() error {
 		pk      int
 	}
 	var cols []colDef
-	for colRows.Next() {
-		var (
-			cid       int
-			c         colDef
-			notnull   int
-			dfltValue sql.NullString
-			pk        int
-		)
-		if err := colRows.Scan(&cid, &c.name, &c.ctype, &notnull, &dfltValue, &pk); err != nil {
-			colRows.Close()
-			return fmt.Errorf("jobs CHECK migration table_info scan: %w", err)
+	// The cursor must be closed inside this closure, not deferred to
+	// function exit: the pool is single-connection and the rebuild tx
+	// below (Begin) would deadlock waiting for it.
+	if err := func() error {
+		defer colRows.Close()
+		for colRows.Next() {
+			var (
+				cid       int
+				c         colDef
+				notnull   int
+				dfltValue sql.NullString
+				pk        int
+			)
+			if err := colRows.Scan(&cid, &c.name, &c.ctype, &notnull, &dfltValue, &pk); err != nil {
+				return fmt.Errorf("jobs CHECK migration table_info scan: %w", err)
+			}
+			c.notnull = notnull
+			c.dflt = dfltValue
+			c.pk = pk
+			cols = append(cols, c)
 		}
-		c.notnull = notnull
-		c.dflt = dfltValue
-		c.pk = pk
-		cols = append(cols, c)
+		if err := colRows.Err(); err != nil {
+			return fmt.Errorf("jobs CHECK migration table_info iteration: %w", err)
+		}
+		return nil
+	}(); err != nil {
+		return err
 	}
-	if err := colRows.Err(); err != nil {
-		colRows.Close()
-		return fmt.Errorf("jobs CHECK migration table_info iteration: %w", err)
-	}
-	colRows.Close()
 	if len(cols) == 0 {
 		return fmt.Errorf("jobs CHECK migration: PRAGMA table_info(jobs) returned no columns")
 	}
@@ -382,19 +388,22 @@ func (s *Store) migrateJobsStateCheck() error {
 		return fmt.Errorf("jobs CHECK migration index capture: %w", err)
 	}
 	var indexSQL []string
-	for idxRows.Next() {
-		var sqlText string
-		if err := idxRows.Scan(&sqlText); err != nil {
-			idxRows.Close()
-			return fmt.Errorf("jobs CHECK migration index scan: %w", err)
+	if err := func() error {
+		defer idxRows.Close()
+		for idxRows.Next() {
+			var sqlText string
+			if err := idxRows.Scan(&sqlText); err != nil {
+				return fmt.Errorf("jobs CHECK migration index scan: %w", err)
+			}
+			indexSQL = append(indexSQL, sqlText)
 		}
-		indexSQL = append(indexSQL, sqlText)
+		if err := idxRows.Err(); err != nil {
+			return fmt.Errorf("jobs CHECK migration index iteration: %w", err)
+		}
+		return nil
+	}(); err != nil {
+		return err
 	}
-	if err := idxRows.Err(); err != nil {
-		idxRows.Close()
-		return fmt.Errorf("jobs CHECK migration index iteration: %w", err)
-	}
-	idxRows.Close()
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -1917,19 +1926,25 @@ func (s *Store) SweepAbandonedTerminalStates(ctx context.Context, olderThan time
 	}
 
 	var stranded []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return 0, fmt.Errorf("sweep: scan abandoned row: %w", err)
+	// The cursor must be closed inside this closure, not deferred to
+	// function exit: the pool is single-connection and the moveToDead
+	// loop below needs it.
+	if err := func() error {
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return fmt.Errorf("sweep: scan abandoned row: %w", err)
+			}
+			stranded = append(stranded, id)
 		}
-		stranded = append(stranded, id)
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("sweep: iterate abandoned rows: %w", err)
+		}
+		return nil
+	}(); err != nil {
+		return 0, err
 	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return 0, fmt.Errorf("sweep: iterate abandoned rows: %w", err)
-	}
-	rows.Close()
 
 	moved := 0
 	var sweepErr error

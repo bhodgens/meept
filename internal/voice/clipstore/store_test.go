@@ -284,7 +284,7 @@ func TestConcurrentPutSameKeyNoMutexIO(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			pcm := bytes.Repeat([]byte{byte(i)}, 64)
+			pcm := bytes.Repeat([]byte{byte(i)}, 64) //nolint:gosec // G115: i ranges 0..7, the byte conversion never truncates
 			if err := s.Put(key, testMeta(key, 64), bytes.NewReader(pcm)); err != nil {
 				t.Errorf("concurrent Put %d: %v", i, err)
 			}

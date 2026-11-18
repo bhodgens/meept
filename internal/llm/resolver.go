@@ -929,7 +929,6 @@ func (r *Resolver) ResolveForAliasDifficulty(aliasName string, sessionID string,
 
 	// Return the active model
 	if selectedIdx < len(alias.Models) {
-		chosen := alias.Models[selectedIdx]
 		// Selection chain hook (Contract C1, sovereign-router-parity leaf
 		// 01, T11): the chain runs AFTER the model is chosen and BEFORE
 		// return, so later filter leaves (05 posture, 02 admission) compose
@@ -973,7 +972,7 @@ func (r *Resolver) ResolveForAliasDifficulty(aliasName string, sessionID string,
 				selectedIdx = idx
 			}
 		}
-		chosen = alias.Models[selectedIdx]
+		chosen := alias.Models[selectedIdx]
 		if v, _ := r.runSelectionFilters(&Candidate{
 			Model:     chosen,
 			Alias:     aliasName,

@@ -908,7 +908,9 @@ func buildAmendPayload(agentID, field, value, reason string) (map[string]any, er
 
 	var parsed any = value
 	if err := json.Unmarshal([]byte(value), &parsed); err != nil {
-		// not JSON — send the raw string
+		// not JSON — send the raw string (Unmarshal may have written a
+		// partial value on the error path; restore the literal).
+		parsed = value
 	}
 
 	payload := map[string]any{

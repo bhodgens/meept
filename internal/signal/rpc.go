@@ -734,18 +734,14 @@ func readFrame(r *bufio.Reader) ([]byte, error) {
 // readFrameLine reads one \\n-terminated line (terminator stripped),
 // tolerating \\r\\n.
 func readFrameLine(r *bufio.Reader) ([]byte, error) {
-	var line []byte
-	for {
-		chunk, err := r.ReadString('\n')
-		line = append(line, chunk...)
-		if err != nil {
-			if len(line) > 0 && (err == io.EOF) {
-				return trimEOL(line), nil
-			}
-			return nil, err
+	chunk, err := r.ReadString('\n')
+	if err != nil {
+		if len(chunk) > 0 && (err == io.EOF) {
+			return trimEOL([]byte(chunk)), nil
 		}
-		return trimEOL(line), nil
+		return nil, err
 	}
+	return trimEOL([]byte(chunk)), nil
 }
 
 // trimEOL strips trailing \\n and \\r.

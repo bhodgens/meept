@@ -44,7 +44,7 @@ func TestAgentChildrenTable(t *testing.T) {
 			t.Errorf("table missing %q:\n%s", want, table)
 		}
 	}
-	if strings.ContainsAny(table, "ABC") && strings.Contains(table, "CHILD") {
-		// header is intentionally uppercase — just make sure rows render
-	}
+	// The header is intentionally uppercase; the row-content assertions
+	// above are what pin rendering (no branch needed for the uppercase
+	// header itself).
 }

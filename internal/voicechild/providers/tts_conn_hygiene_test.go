@@ -76,7 +76,7 @@ func staleKeepaliveFake(t *testing.T, pcm []byte) (net.Listener, *atomic.Int64) 
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	srv := &http.Server{Handler: mux}
+	srv := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: mux}
 	go func() {
 		if serr := srv.Serve(ln); serr != nil && !errors.Is(serr, http.ErrServerClosed) {
 			t.Errorf("fake server: %v", serr)
@@ -167,7 +167,7 @@ func TestTTSSpeakDoesNotRetryMoreThanOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	srv := &http.Server{Handler: mux}
+	srv := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: mux}
 	go func() {
 		if serr := srv.Serve(ln); serr != nil && !errors.Is(serr, http.ErrServerClosed) {
 			t.Errorf("kill-everything server: %v", serr)
@@ -209,7 +209,7 @@ func TestTTSSpeakDoesNotRetryOnHTTPStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	srv := &http.Server{Handler: mux}
+	srv := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: mux}
 	go func() {
 		if serr := srv.Serve(ln); serr != nil && !errors.Is(serr, http.ErrServerClosed) {
 			t.Errorf("500 server: %v", serr)
@@ -291,7 +291,7 @@ func TestIsTTSTransportErrorClassification(t *testing.T) {
 		errors.New("Post \"http://x/y\": EOF"),
 		io.ErrUnexpectedEOF,
 		errors.New("read tcp 127.0.0.1:1: connection reset by peer"),
-		&urlWrapErr{},
+		&urlWrapError{},
 	}
 	for _, err := range retry {
 		if !isTTSTransportError(ctx, err) {
@@ -315,13 +315,13 @@ func TestIsTTSTransportErrorClassification(t *testing.T) {
 	}
 }
 
-// urlWrapErr mimics url.Error's shape (wraps an *net.OpError) — the exact
+// urlWrapError mimics url.Error's shape (wraps an *net.OpError) — the exact
 // wrapper http.Client.Do returns for dial-class failures.
-type urlWrapErr struct{}
+type urlWrapError struct{}
 
-func (e *urlWrapErr) Error() string {
+func (e *urlWrapError) Error() string {
 	return "Post \"http://socrates:8001/v1/audio/speech\": http: server closed idle connection"
 }
-func (e *urlWrapErr) Unwrap() error {
+func (e *urlWrapError) Unwrap() error {
 	return &net.OpError{Op: "read", Net: "tcp", Err: errors.New("http: server closed idle connection")}
 }

@@ -174,7 +174,7 @@ func TestParkBackendSeamWrapped(t *testing.T) {
 	p.Start(ctx)
 	defer p.Stop()
 
-	saves, deletes, loads, arms := be.counts()
+	_, _, loads, arms := be.counts()
 	if loads < 1 {
 		t.Errorf("Start did not re-arm through the backend: LoadOwned hits = %d, want >= 1", loads)
 	}
@@ -190,7 +190,7 @@ func TestParkBackendSeamWrapped(t *testing.T) {
 		return s >= 1 && d >= 1 && resumed.count() >= 1
 	})
 	clock.advance(50 * time.Millisecond)
-	saves, deletes, _, _ = be.counts()
+	saves, deletes, _, _ := be.counts()
 	if saves != 1 {
 		t.Errorf("backend Save calls = %d, want 1 (park routed through the seam)", saves)
 	}

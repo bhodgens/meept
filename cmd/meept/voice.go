@@ -908,17 +908,15 @@ func setupLiveSpeaker(open voiceLocalOpenResult, employee, recordDir string,
 	if recordDir != "" {
 		// Belt-and-braces: validate() already MkdirAlls; this keeps the
 		// seam safe for any caller. Then meta, then the recorder file.
+		// A failure at any step degrades to recording-off (rec stays nil).
 		if rerr := os.MkdirAll(recordDir, 0o755); rerr != nil {
 			fmt.Fprintf(os.Stderr, "record: dir: %v (recording off)\n", rerr)
-			recordDir = ""
 		} else if merr := writeLocalRecordingMeta(recordDir, open, employee); merr != nil { //nolint:nestif // degrade recording, never the call
 			fmt.Fprintf(os.Stderr, "record: meta: %v (recording off)\n", merr)
-			recordDir = ""
 		} else {
 			rc, cerr := newSideRecorder(player, recordDir, open.CallID, "")
 			if cerr != nil {
 				fmt.Fprintf(os.Stderr, "record: %v (recording off)\n", cerr)
-				recordDir = ""
 			} else {
 				rec = rc
 				p = rc

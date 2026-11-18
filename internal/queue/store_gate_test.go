@@ -287,7 +287,7 @@ func TestSweepAbandonedTerminalStates(t *testing.T) {
 		{retryable.ID, StateFailed},
 		{fresh.ID, StateFailed},
 	} {
-		if got := gateRowState(t, store, tc.id); string(got) != string(tc.want) {
+		if got := gateRowState(t, store, tc.id); got != string(tc.want) {
 			t.Errorf("job %s: state=%s, want %s (must not be swept)", tc.id, got, tc.want)
 		}
 	}

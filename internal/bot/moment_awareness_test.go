@@ -196,6 +196,9 @@ func TestStore_AwarenessFieldsZeroSchemaAlter(t *testing.T) {
 		}
 		cols = append(cols, n)
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate pragma rows: %v", err)
+	}
 	want := "created_at,data,id,updated_at"
 	if got := strings.Join(cols, ","); got != want {
 		t.Fatalf("bot_definitions columns drifted (awareness fields must live in the JSON blob, zero ALTER): got %q want %q", got, want)

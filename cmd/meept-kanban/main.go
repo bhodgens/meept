@@ -183,7 +183,7 @@ func resolveWebdir(flagged string) string {
 		if candidate == "" {
 			continue
 		}
-		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() { //nolint:gosec // G703: operator-supplied webdir candidate (-webdir flag / WEBDIR env), the same trust class as every flag path
 			return candidate
 		}
 	}

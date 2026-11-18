@@ -18,7 +18,7 @@ func (t nameTool) Name() string                       { return t.name }
 func (t nameTool) Description() string                { return t.name }
 func (t nameTool) Parameters() llm.FunctionParameters { return llm.FunctionParameters{} }
 func (t nameTool) Execute(context.Context, map[string]any) (any, error) {
-	return nil, nil
+	return nil, nil //nolint:nilnil // test stub: never invoked, only satisfies the interface
 }
 func (t nameTool) IsReadOnly(map[string]any) bool        { return true }
 func (t nameTool) IsConcurrencySafe(map[string]any) bool { return true }

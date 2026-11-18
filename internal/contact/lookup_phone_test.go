@@ -142,6 +142,7 @@ func TestNewStoreMigratesVoiceApprovedColumnAndIndex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PRAGMA table_info: %v", err)
 	}
+	defer rows.Close()
 	var (
 		sawVoiceApproved bool
 		vaType           string
@@ -158,7 +159,6 @@ func TestNewStoreMigratesVoiceApprovedColumnAndIndex(t *testing.T) {
 			pk      sql.NullInt64
 		)
 		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
-			rows.Close() //nolint:errcheck // scan failure path still must release the cursor
 			t.Fatalf("scan table_info: %v", err)
 		}
 		if name == "voice_approved" {
@@ -167,11 +167,7 @@ func TestNewStoreMigratesVoiceApprovedColumnAndIndex(t *testing.T) {
 		}
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close() //nolint:errcheck // iterate failure path still must release the cursor
 		t.Fatalf("iterate table_info: %v", err)
-	}
-	if err := rows.Close(); err != nil {
-		t.Fatalf("close table_info cursor: %v", err)
 	}
 	if !sawVoiceApproved {
 		t.Fatal("fresh store has no voice_approved column (guarded ALTER migration missing)")

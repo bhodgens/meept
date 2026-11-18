@@ -2,6 +2,7 @@ package voice
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -79,15 +80,10 @@ func (a *telnyxVoiceAttempt) Attempt(ctx context.Context, rec contact.Record, me
 // Named errors (repo rule): the non-nil err on every non-terminal
 // outcome is the C2 contract (err == nil means CONNECTED/DELIVERED).
 var (
-	errVoiceAttemptUnwired = errorString("voiceattempt: dial seam not wired")
-	errOutcomeUnknown      = errorString("voiceattempt: call outcome unavailable")
-	errOutcomeAdvanced     = errorString("voiceattempt: outcome advanced the chain")
+	errVoiceAttemptUnwired = errors.New("voiceattempt: dial seam not wired")
+	errOutcomeUnknown      = errors.New("voiceattempt: call outcome unavailable")
+	errOutcomeAdvanced     = errors.New("voiceattempt: outcome advanced the chain")
 )
-
-// errorString is the package-local sentinel helper (mirrors types.go).
-type errorString string
-
-func (e errorString) Error() string { return string(e) }
 
 // OutcomeRegistry is the wiring-side terminal-outcome collector: the
 // daemon adapts Manager.SetReleaseHook onto it so a voice Attempt can
