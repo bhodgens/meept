@@ -389,7 +389,8 @@ func (c *ContextCompressor) summarizeOldHistory(ctx context.Context, messages []
 	if compactor != nil {
 		result := compactor.Compact(ctx, messages)
 		if result.Compacted {
-			return result.Messages
+			clipped, _ := boundOversizedSystemMessages(result.Messages)
+			return clipped
 		}
 		c.logger.Warn("compactor returned without compacting, falling back")
 	}
@@ -398,10 +399,12 @@ func (c *ContextCompressor) summarizeOldHistory(ctx context.Context, messages []
 		if err != nil {
 			c.logger.Warn("LLM summarization failed, falling back to tail-keep", "error", err)
 		} else {
-			return summarized
+			clipped, _ := boundOversizedSystemMessages(summarized)
+			return clipped
 		}
 	}
-	return keepTail(messages, 4)
+	clipped, _ := boundOversizedSystemMessages(keepTail(messages, 4))
+	return clipped
 }
 
 // SetCompactor sets the ContextCompactor for smart summarization.

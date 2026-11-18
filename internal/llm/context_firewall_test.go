@@ -221,6 +221,96 @@ func TestContextFirewall_RestartNoOpFewMessages(t *testing.T) {
 	}
 }
 
+// capturingChatter records the messages it receives and returns a stub response.
+type capturingChatter struct {
+	got []ChatMessage
+}
+
+func (c *capturingChatter) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatOption) (*Response, error) {
+	c.got = append([]ChatMessage(nil), messages...)
+	return &Response{Content: "ok"}, nil
+}
+
+func (c *capturingChatter) ChatWithProgress(ctx context.Context, messages []ChatMessage, progress ProgressCallback, opts ...ChatOption) (*Response, error) {
+	return c.Chat(ctx, messages, opts...)
+}
+
+func (c *capturingChatter) Config() *ModelConfig {
+	return &ModelConfig{}
+}
+
+// TestContextFirewall_OversizedSystemMessageIsBounded reproduces the incident:
+// a 219 KB system message (a full skill catalog) against a 32k-token model.
+// Every compaction strategy preserves system messages verbatim, so without
+// the final bound ValidateContextSize rejects the request and the LLM call
+// dies. With the fix, the system message is bounded to a small size and the
+// model call succeeds.
+func TestContextFirewall_OversizedSystemMessageIsBounded(t *testing.T) {
+	inner := &capturingChatter{}
+	model := &ModelConfig{ContextLimit: 32768}
+	cfg := ContextFirewallConfig{
+		Enabled:          true,
+		OverflowStrategy: "restart",
+		HardLimit:        0.8,
+		WrapUpThreshold:  0.5,
+	}
+	f := NewContextFirewall(inner, model, cfg, nil, nil, &HeuristicTokenizer{})
+
+	hugeCatalog := "# Skill Catalog\n\n" + strings.Repeat("- skill: description [load: file_read /skills/x/SKILL.md]\n", 4000)
+	msgs := []ChatMessage{
+		{Role: RoleSystem, Content: hugeCatalog},
+		{Role: RoleUser, Content: "list the skills"},
+	}
+
+	resp, err := f.Chat(context.Background(), msgs)
+	if err != nil {
+		t.Fatalf("Chat with oversized system message failed: %v", err)
+	}
+	if resp == nil || resp.Content != "ok" {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+	if len(inner.got) == 0 {
+		t.Fatal("inner chatter received no messages")
+	}
+	var systemLen int
+	for _, m := range inner.got {
+		if m.Role == RoleSystem {
+			systemLen = len(m.Content)
+		}
+	}
+	if systemLen > maxSystemMessageBytes+256 {
+		t.Fatalf("system message not bounded: %d bytes (bound %d)", systemLen, maxSystemMessageBytes)
+	}
+	if systemLen >= len(hugeCatalog) {
+		t.Fatalf("system message unchanged: %d bytes", systemLen)
+	}
+	// Input must not be mutated.
+	if len(msgs[0].Content) != len(hugeCatalog) {
+		t.Error("processMessages mutated the input system message")
+	}
+}
+
+// TestContextFirewall_SmallSystemMessageUntouched pins that normal system
+// prompts pass through the bound byte-identically.
+func TestContextFirewall_SmallSystemMessageUntouched(t *testing.T) {
+	inner := &capturingChatter{}
+	model := &ModelConfig{ContextLimit: 32768}
+	cfg := ContextFirewallConfig{Enabled: true, HardLimit: 0.8, WrapUpThreshold: 0.5}
+	f := NewContextFirewall(inner, model, cfg, nil, nil, &HeuristicTokenizer{})
+
+	const sys = "You are a helpful assistant."
+	msgs := []ChatMessage{
+		{Role: RoleSystem, Content: sys},
+		{Role: RoleUser, Content: "hello"},
+	}
+	if _, err := f.Chat(context.Background(), msgs); err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if len(inner.got) == 0 || inner.got[0].Content != sys {
+		t.Errorf("small system message changed: %+v", inner.got)
+	}
+}
+
 func TestContextFirewall_DropStrategyUnchanged(t *testing.T) {
 	model := &ModelConfig{ContextLimit: 1000}
 	cfg := ContextFirewallConfig{

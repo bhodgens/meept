@@ -157,11 +157,16 @@ func (c *ContextInjector) BuildSystemPrompt(ctx context.Context, base string) st
 			}
 		}
 
-		// Active skills section: one line per visible cached skill, no cap.
+		// Active skills section: one line per visible cached skill, bounded to
+		// maxSkillCatalogBytes. The full catalog stays reachable through the skill
+		// loader (each line names the SKILL.md to load); the in-prompt listing is
+		// only an index. An unbounded listing can exceed a small-model context
+		// window by itself and make the model call impossible — the root cause of
+		// the context-overflow incident.
 		if len(skillLines) > 0 {
 			sb.WriteString("\n## Active Skills\n")
 			sb.WriteString("The following skills provide specialized instructions. Load a skill's file when the task matches its description.\n\n")
-			for _, line := range skillLines {
+			for _, line := range boundSkillLines(skillLines, maxSkillCatalogBytes) {
 				sb.WriteString(line)
 				sb.WriteByte('\n')
 			}
@@ -458,18 +463,64 @@ func catalogDescription(desc string) string {
 	return desc
 }
 
-// renderCatalog emits the C4 listing lines for the (name-sorted) visible
-// entries.
-func renderCatalog(entries []skills.SkillIndexEntry) string {
-	var sb strings.Builder
-	for i, e := range entries {
-		if i > 0 {
-			sb.WriteByte('\n')
-		}
-		fmt.Fprintf(&sb, "- %s: %s [load: file_read %s]",
-			e.Name, catalogDescription(e.Description), e.Path)
+// maxSkillCatalogBytes bounds the in-context skill catalog. A full listing of
+// every discovered skill reaches hundreds of KB on large installs — larger
+// than a 32k-token model window by itself — which makes the model call
+// impossible (context-overflow incident). The catalog is an INDEX: its full
+// contents stay discoverable through the skill loader (each line carries the
+// SKILL.md path to load via file_read); only the rendered listing is bounded.
+// 12 KB is ~3k tokens at the heuristic 4-bytes/token ratio, leaving ample
+// room in a 32k window. Small catalogs are byte-identical (no truncation).
+const maxSkillCatalogBytes = 12_000
+
+// boundSkillLines truncates a C4 listing to at most maxBytes (newlines
+// included), appending a notice when entries were dropped. The notice does
+// NOT start with "- " so ParseSkillCatalogMessage ignores it. Callers pass a
+// name-sorted (renderCatalog) or episode-frozen (prompt) list, so truncation
+// is deterministic and the digest/dedup stays stable.
+func boundSkillLines(lines []string, maxBytes int) []string {
+	if maxBytes <= 0 || len(lines) == 0 {
+		return lines
 	}
-	return sb.String()
+	// Reserve room for the elision notice so the bounded output — including
+	// the notice — never exceeds the byte budget.
+	const noticeReserve = 128
+	budget := maxBytes - noticeReserve
+	if budget < 0 {
+		budget = 0
+	}
+	total, kept := 0, 0
+	for _, line := range lines {
+		n := len(line)
+		if kept > 0 { // the joined output carries a newline between lines
+			n++
+		}
+		if total+n > budget {
+			break
+		}
+		total += n
+		kept++
+	}
+	if kept >= len(lines) {
+		return lines
+	}
+	notice := fmt.Sprintf("[%d more skills available via the skill loader; load a SKILL.md by the path on its line]", len(lines)-kept)
+	out := make([]string, kept+1)
+	copy(out, lines[:kept])
+	out[kept] = notice
+	return out
+}
+
+// renderCatalog emits the C4 listing lines for the (name-sorted) visible
+// entries, bounded to maxSkillCatalogBytes so the rendered/persisted catalog
+// can never exceed a small-model context window.
+func renderCatalog(entries []skills.SkillIndexEntry) string {
+	lines := make([]string, 0, len(entries))
+	for _, e := range entries {
+		lines = append(lines, fmt.Sprintf("- %s: %s [load: file_read %s]",
+			e.Name, catalogDescription(e.Description), e.Path))
+	}
+	return strings.Join(boundSkillLines(lines, maxSkillCatalogBytes), "\n")
 }
 
 // ParseSkillCatalogMessage reconstructs a catalog from its rendered form (the

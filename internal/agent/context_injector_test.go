@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -18,6 +19,33 @@ func TestContextInjector_SetSkillLoader_Nil(t *testing.T) {
 	ci.SetSkillLoader(nil) // must be a no-op, no panic
 	if ci.skillLoader != nil {
 		t.Error("SetSkillLoader(nil) should not set the field")
+	}
+}
+
+// TestContextInjector_SkillsSectionIsBounded pins the context-overflow fix on
+// the production prompt path: a discovery index with a very large skill set
+// must render an "## Active Skills" section bounded to maxSkillCatalogBytes,
+// so the system prompt cannot exceed a small-model context window by itself.
+func TestContextInjector_SkillsSectionIsBounded(t *testing.T) {
+	idx := skills.NewSkillIndex()
+	for i := range 2000 {
+		idx.Index(&skills.SkillIndexEntry{
+			Name:        fmt.Sprintf("skill-%04d", i),
+			Description: strings.Repeat("long description ", 20),
+			Path:        fmt.Sprintf("/skills/skill-%04d/SKILL.md", i),
+		})
+	}
+	loader := skills.NewLazySkillLoader(idx)
+	ci := NewContextInjector(nil, nil)
+	ci.SetSkillLoader(loader)
+
+	prompt := ci.BuildSystemPrompt(context.Background(), "base")
+	section := c4SkillsSection(prompt)
+	if len(section) > maxSkillCatalogBytes {
+		t.Fatalf("Active Skills section %d bytes exceeds bound %d", len(section), maxSkillCatalogBytes)
+	}
+	if !strings.Contains(section, "more skills available via the skill loader") {
+		t.Error("bounded skills section must include an elision notice")
 	}
 }
 

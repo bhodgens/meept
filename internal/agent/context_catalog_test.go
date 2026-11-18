@@ -10,6 +10,7 @@ package agent
 // RED until leaf 03-skill-catalog lands (SkillCatalog/Digest undefined).
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -99,5 +100,52 @@ func TestSkillCatalog_ExcludesNonModelInvocable(t *testing.T) {
 	}
 	if !strings.Contains(rendered, "visible") {
 		t.Error("catalog dropped a visible skill")
+	}
+}
+
+// TestSkillCatalog_RenderIsBounded pins the context-overflow fix: a catalog
+// built from a very large skill set must render to a small, bounded listing,
+// and must still be parseable (the elision notice is not a "- " line).
+func TestSkillCatalog_RenderIsBounded(t *testing.T) {
+	entries := make([]skills.SkillIndexEntry, 0, 2000)
+	for i := range 2000 {
+		entries = append(entries, skills.SkillIndexEntry{
+			Name:        fmt.Sprintf("skill-%04d", i),
+			Description: strings.Repeat("very long description ", 20),
+			Path:        fmt.Sprintf("/skills/skill-%04d/SKILL.md", i),
+		})
+	}
+	c := NewSkillCatalog(entries)
+	rendered := c.Render()
+	if len(rendered) > maxSkillCatalogBytes {
+		t.Fatalf("rendered catalog %d bytes exceeds bound %d", len(rendered), maxSkillCatalogBytes)
+	}
+	if !strings.Contains(rendered, "more skills available via the skill loader") {
+		t.Error("bounded catalog must include an elision notice")
+	}
+	// The bounded render must still parse into a catalog with a stable digest.
+	rebuilt, err := ParseSkillCatalogMessage(rendered)
+	if err != nil {
+		t.Fatalf("ParseSkillCatalogMessage on bounded render: %v", err)
+	}
+	if rebuilt.Digest() == "" {
+		t.Error("bounded catalog rebuilt with empty digest")
+	}
+}
+
+// TestSkillCatalog_RenderSmallIsByteIdentical pins that small catalogs are
+// unaffected by the bound (no elision notice, exact round-trip).
+func TestSkillCatalog_RenderSmallIsByteIdentical(t *testing.T) {
+	c := NewSkillCatalog(skillEntries())
+	rendered := c.Render()
+	if strings.Contains(rendered, "more skills available") {
+		t.Errorf("small catalog was truncated:\n%s", rendered)
+	}
+	rebuilt, err := ParseSkillCatalogMessage(rendered)
+	if err != nil {
+		t.Fatalf("ParseSkillCatalogMessage: %v", err)
+	}
+	if rebuilt.Digest() != c.Digest() {
+		t.Errorf("small catalog digest changed: %q != %q", rebuilt.Digest(), c.Digest())
 	}
 }

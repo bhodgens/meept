@@ -748,6 +748,21 @@ func (f *ContextFirewall) processMessages(ctx context.Context, messages []ChatMe
 		}
 	}
 
+	// Final safety net: structure-only reductions (compactor/keepTail/
+	// dropOldContext/restart) preserve system messages verbatim. A single
+	// oversized system message (e.g. a 219 KB skill catalog) can therefore
+	// survive every strategy and still exceed the model window. Bound any
+	// such message as the last step before validation so the model call is
+	// never impossible. Small system messages are byte-identical.
+	if clipped, changed := boundOversizedSystemMessages(result); changed {
+		f.logger.Warn("context firewall: truncated oversized system message to fit model window",
+			"messages", len(result),
+		)
+		result = clipped
+		currentTokens = f.countTokens(result)
+		utilization = float64(currentTokens) / float64(f.model.ContextLimit)
+	}
+
 	return result
 }
 
@@ -1001,6 +1016,44 @@ func (f *ContextFirewall) greedyChunk(parts []string, maxChars int, sep string) 
 	}
 
 	return chunks
+}
+
+// maxSystemMessageBytes bounds any single system message after structural
+// reduction. Compaction strategies (compactor, keepTail, dropOldContext,
+// summarizeAndRestart) preserve system messages verbatim, so one oversized
+// system message — e.g. a full skill catalog — survives every strategy and
+// still exceeds the model window. Keeping its head preserves the useful
+// scaffolding/prompt prefix; the rest remains reachable via tools.
+const maxSystemMessageBytes = 12_000
+
+// boundOversizedSystemMessages truncates any system message longer than
+// maxSystemMessageBytes to its head plus an elision marker. Callers should
+// pass the final reduced slice just before the model call, so no strategy can
+// ship an over-limit oversized-system message. Returns whether anything was
+// truncated. Originals are never mutated (messages are copied on write).
+func boundOversizedSystemMessages(messages []ChatMessage) ([]ChatMessage, bool) {
+	var out []ChatMessage
+	truncated := false
+	for i, msg := range messages {
+		if msg.Role != RoleSystem || len(msg.Content) <= maxSystemMessageBytes {
+			if out != nil {
+				out = append(out, msg)
+			}
+			continue
+		}
+		if out == nil {
+			out = append(out, messages[:i]...)
+		}
+		clipped := msg
+		clipped.Content = msg.Content[:maxSystemMessageBytes] +
+			"\n[... truncated: system message exceeded context bounds; full content available via tools ...]"
+		out = append(out, clipped)
+		truncated = true
+	}
+	if !truncated {
+		return messages, false
+	}
+	return out, true
 }
 
 // countTokens counts tokens in a message slice using the configured tokenizer.
