@@ -712,7 +712,59 @@ func (r *Resolver) ResolveForAliasDifficulty(aliasName string, sessionID string,
 	// to a failed model releases its pin and re-pins to a healthy model,
 	// while callers pinned to unaffected models keep their pins.
 	if alias.BalancedStickyRequests && sessionID != "" {
-		return r.resolveStickyCaller(alias, aliasName, health, sessionID, now, difficulty), nil
+		chosen := r.resolveStickyCaller(alias, aliasName, health, sessionID, now, difficulty)
+		if chosen == nil {
+			return nil, fmt.Errorf("all models in alias %q exhausted", aliasName)
+		}
+		// The sticky early return must NOT bypass the C1 selection chain
+		// or the C4 posture hard boundary. The non-sticky path below
+		// applies both; a pinned model selected without them would let a
+		// sensitive prompt reach a non-cleared model. Mirror that gate:
+		// find the pinned winner's index, re-pin past non-cleared
+		// candidates, then run the full chain on the final pick.
+		promptText := r.posturePromptForResolve(sessionID)
+		pfc := &FilterCtx{
+			SessionID:  sessionID,
+			PromptText: promptText,
+			Now:        r.clock(),
+		}
+		sensitive, _ := r.postureSensitive(promptText)
+		chosenIdx := -1
+		for i, m := range alias.Models {
+			if m == chosen {
+				chosenIdx = i
+				break
+			}
+		}
+		if sensitive {
+			pfc.Sensitive = true
+			if chosenIdx < 0 {
+				return nil, fmt.Errorf("alias %q: sticky model not in alias (posture)", aliasName)
+			}
+			if idx := r.posturePass(alias, aliasName, pfc, chosenIdx); idx < 0 {
+				return nil, fmt.Errorf("alias %q: every model is non-cleared for sensitive data (posture)", aliasName)
+			} else if idx != chosenIdx {
+				// Re-pin to the cleared model so the next sticky round
+				// keeps the same compliant destination.
+				if pin, ok := health.StickyPins[sessionID]; ok {
+					pin.Index = idx
+					health.StickyPins[sessionID] = pin
+				}
+				chosenIdx = idx
+			}
+		}
+		if chosenIdx >= 0 {
+			chosen = alias.Models[chosenIdx]
+		}
+		if v, _ := r.runSelectionFilters(&Candidate{
+			Model:     chosen,
+			Alias:     aliasName,
+			EstInput:  0,
+			EstOutput: 0,
+		}, pfc); v == VerdictFloor {
+			return nil, fmt.Errorf("all models in alias %q refused by the selection chain", aliasName)
+		}
+		return chosen, nil
 	}
 
 	reverted := false
