@@ -5244,6 +5244,15 @@
       ]
     },
     {
+      "id": "voice-clips-empty-model-prewarm-05",
+      "suite": "voice_clips",
+      "diff": "S",
+      "title": "[voice-clips R4] empty tts_model (qwen3 server default): keys line carries tts_model=\"\", clip_render still ships keyed on the same empty model, clip renders into the store",
+      "paths": [
+        "internal/daemon/voice_clip_planner.go"
+      ]
+    },
+    {
       "id": "context-warm-01",
       "suite": "context_warm",
       "diff": "M",

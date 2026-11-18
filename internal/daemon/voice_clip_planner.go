@@ -15,9 +15,11 @@ package daemon
 //	    site (routeFrame's EventSetup branch runs only after the child's
 //	    setup frame arrives; the reload re-plan iterates Registry.Live(),
 //	    and a dead transport fails the Send, never the store);
-//	(b) the resolved TTS identity is complete — vendor+model+voice all
-//	    non-empty after voice.ResolveProfile (TTSIdentity.Complete),
-//	    matching the C1 key inputs byte-for-byte;
+//	(b) the resolved TTS identity is complete — vendor+voice non-empty
+//	    after voice.ResolveProfile (TTSIdentity.Complete); the model is
+//	    optional because an empty tts_model is the qwen3 "use server
+//	    default" sentinel, kept verbatim as the C1 key input so the key
+//	    matches the keys frame and synthesis byte-for-byte;
 //	(c) at least one voice employee is configured — the same
 //	    voice.default_employee rule WireVoice enforces before an inbound
 //	    call can arm a registry row (voice_wiring.go's spawn gate), so a
@@ -67,12 +69,45 @@ type TTSIdentity struct {
 	RefHash []byte // sha256(reference audio bytes), NOT the hex string
 }
 
-// Complete reports the R4 gate half (b): vendor+model+voice all
-// non-empty. An empty RefHash is legal (non-clone voice); an incomplete
-// identity NEVER renders (the clip would key onto a voice that cannot
-// actually synthesize it).
+// Complete reports the R4 gate half (b): vendor and voice non-empty.
+// An empty RefHash is legal (non-clone voice); an incomplete identity
+// NEVER renders (the clip would key onto a voice that cannot actually
+// synthesize it).
+//
+// An EMPTY Model is legal and complete. The normal qwen3 configuration
+// leaves tts_model="" to mean "use the server's loaded default"
+// (internal/voicechild/providers/tts_openai.go newQwen3TTS: cfg.Model
+// stays as sent, "" = server default; no cloud fallback applies). The
+// keys frame sends that "" verbatim and the child synthesizes with it;
+// the C1 clip key must therefore carry the SAME "" — never a fabricated
+// constant — or the pre-rendered key would not match the model the child
+// actually uses. A non-empty model is unchanged and still keyed verbatim.
 func (id TTSIdentity) Complete() bool {
-	return id.Vendor != "" && id.Model != "" && id.Voice != ""
+	return id.Vendor != "" && id.Voice != ""
+}
+
+// ResolveTTSIdentity is the single resolution point for a call's C1
+// clip identity. Both gate sites — the planner pass (planClipsForCall)
+// and the talk-loop clip_id stamping (routeFrame's EventSetup branch) —
+// MUST use it so the clip_render keys and the say clip_ids cannot drift.
+// The model is taken verbatim from the resolved profile: an empty value
+// stays "" (the qwen3 "server default" sentinel), matching the keys
+// frame and the child's synthesis model byte-for-byte. The vendor's
+// keys-frame default (defaultTTSVendor) is applied here, mirroring the
+// keys emit site, so an empty vendor resolves identically across all
+// three consumers.
+func ResolveTTSIdentity(cfg config.VoiceConfig, employeeID, leg string, refHash []byte) TTSIdentity {
+	p := voice.ResolveProfile(cfg, employeeID, "", leg)
+	vendor := p.TtsVendor
+	if vendor == "" {
+		vendor = defaultTTSVendor // mirrors the keys line's C4 default
+	}
+	return TTSIdentity{
+		Vendor:  vendor,
+		Model:   p.TtsModel, // verbatim: "" = qwen3 server-default model
+		Voice:   p.TtsVoice,
+		RefHash: refHash,
+	}
 }
 
 // ClipPlanner diffs the resolved lane pool against the clip store and
@@ -226,17 +261,7 @@ func (w *VoiceWiring) planClipsForCall(ctx context.Context, ccid, employeeID, le
 		return
 	}
 	vcfg := w.currentVoiceCfg()
-	p := voice.ResolveProfile(vcfg, employeeID, "", leg)
-	vendor := p.TtsVendor
-	if vendor == "" {
-		vendor = defaultTTSVendor // mirrors the keys line's C4 default
-	}
-	id := TTSIdentity{
-		Vendor:  vendor,
-		Model:   p.TtsModel,
-		Voice:   p.TtsVoice,
-		RefHash: w.ttsRefHash(vcfg),
-	}
+	id := ResolveTTSIdentity(vcfg, employeeID, leg, w.ttsRefHash(vcfg))
 	if !id.Complete() {
 		return // R4 (b)
 	}

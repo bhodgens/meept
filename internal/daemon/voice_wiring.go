@@ -1088,20 +1088,17 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 		// employee_leg row over the global [voice] block, resolved ONCE
 		// here for the talk-loop knobs below.
 		loopAcoustics := voice.ResolveAcoustics(w.cfg, inst.EmployeeID)
-		// Clip identity for the talk loop (plan 20261113-filler-clips
-		// leaf 04): the SAME inputs the clip planner keys with, so
-		// clip_id-bearing say frames hit exactly the store the planner
-		// renders into. Incomplete identity (R4 gate b) => nil => no
-		// clip_id => today's frames byte-identically.
+		// clip identity (plan 20261113-filler-clips leaf 04): the SAME
+		// inputs the clip planner keys with (the shared
+		// ResolveTTSIdentity helper), so clip_id-bearing say frames hit
+		// exactly the store the planner renders into. An empty model is
+		// a complete identity (qwen3 "server default"); an incomplete
+		// identity (R4 gate b) => nil => no clip_id => today's frames
+		// byte-identically.
 		var clipIdent *voice.ClipIdentity
 		{
 			vcfg := w.currentVoiceCfg()
-			p := voice.ResolveProfile(vcfg, inst.EmployeeID, "", inst.Leg)
-			vendor := p.TtsVendor
-			if vendor == "" {
-				vendor = defaultTTSVendor
-			}
-			tid := TTSIdentity{Vendor: vendor, Model: p.TtsModel, Voice: p.TtsVoice, RefHash: w.ttsRefHash(vcfg)}
+			tid := ResolveTTSIdentity(vcfg, inst.EmployeeID, inst.Leg, w.ttsRefHash(vcfg))
 			if tid.Complete() {
 				clipIdent = &voice.ClipIdentity{Vendor: tid.Vendor, Model: tid.Model, Voice: tid.Voice, RefHash: tid.RefHash}
 			}

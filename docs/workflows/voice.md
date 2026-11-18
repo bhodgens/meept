@@ -173,9 +173,13 @@ of plan docs/plans/20261113-filler-clips-and-context-warm/ uses it:
   in `$MEEPT_HOME/voice_clips/` keyed by sha256 over
   (text, tts_vendor, tts_model, tts_voice, clone-reference-audio hash):
   change the voice, model, a pool line, or the `voice.tts_ref_audio`
-  reference file, and the affected clips simply regenerate. When the
-  talk loop speaks a pool line its say frame names the clip; the child
-  plays the cached PCM through the exact same pacing/barge-in lane as
+  reference file, and the affected clips simply regenerate. An empty
+  `tts_model` is a valid identity: it is the qwen3 "use the server's
+  loaded default" sentinel, so prewarm works with the normal qwen3
+  config (the key carries that same empty model string the keys frame
+  sends and the child synthesizes with — never a fabricated default).
+  When the talk loop speaks a pool line its say frame names the clip; the
+  child plays the cached PCM through the exact same pacing/barge-in lane as
   synthesized audio (zero vendor call), and any miss falls back to
   live synthesis. Net effect: filler lines that used to cost 0.7-4.8 s
   of synthesis now start instantly, and they always play in ONE

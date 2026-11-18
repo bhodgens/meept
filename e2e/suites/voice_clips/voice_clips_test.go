@@ -365,6 +365,52 @@ func TestVoiceClipsFarewellAudioPrecedesEndFrame(t *testing.T) {
 	}
 }
 
+// VC-6 (R4 model-default): an empty tts_model — the normal qwen3 "use
+// the server's loaded default" config — must NOT silently disable clip
+// prewarm. The keys line carries tts_model="", a clip_render frame still
+// ships, and its C1 keys are computed with that SAME empty model (the
+// model the child synthesizes with), byte-for-byte.
+func TestVoiceClipsEmptyModelStillPrewarms(t *testing.T) {
+	fake := newFakeTelnyx(t)
+	tts := newFakeTTS(t)
+	// bootClipStack overlays the pool map last; forcing tts_model="" here
+	// overrides the suite's default explicit model.
+	pool := make(map[string]any, len(clipGatePool))
+	for k, v := range clipGatePool {
+		pool[k] = v
+	}
+	pool["tts_model"] = ""
+	s, ctrlPath := bootClipStack(t, fake, tts, pool)
+	const ccid = "cc-empty-model"
+	prewarmCall(t, s, fake, ctrlPath, "cc-empty-model-warm", ccid)
+
+	// The keys line must carry tts_model="" verbatim (server default).
+	keysIdx := fake.awaitMirrored(ccid, `"tts_model":""`, 30*time.Second)
+	if keysIdx < 0 {
+		t.Fatal("mirrored keys line never carried an empty tts_model")
+	}
+
+	// A clip_render MUST still ship — this is the regression: the old R4
+	// gate treated the empty model as incomplete and rendered nothing.
+	renderIdx := fake.awaitMirrored(ccid, `"clip_render"`, 30*time.Second)
+	line := fake.mirroredRawAt(renderIdx)
+
+	// The greeting clip key must be built with the SAME empty model the
+	// keys line sent (and the child synthesizes with).
+	vendor, _, voice := clipGateIdentity() // vendor=qwen3, voice=vivian
+	wantKey := c1Key(t, "Hello there!", vendor, "", voice)
+	if !strings.Contains(line, wantKey) {
+		t.Fatalf("empty-model clip_render line missing C1 key %s (model=\"\"): %s", wantKey, line)
+	}
+
+	// And it actually renders into the store with that key.
+	harness.WaitFor(t, 60*time.Second, "empty-model greeting clip rendered", func() bool {
+		have, _ := storedClipKeys(s)
+		return have[wantKey]
+	})
+	fake.deliverHangup(s, ccid)
+}
+
 // ---- suite-local assertion helpers ----
 
 func allPresent(have map[string]bool, want map[string]string) bool {
