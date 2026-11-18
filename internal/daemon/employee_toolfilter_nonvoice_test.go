@@ -81,14 +81,14 @@ func TestEmployeeToolfilter_LocalEmployeeGetsBoundExecutor(t *testing.T) {
 	template := agent.NewAgentLoop("shared-etf", t.TempDir(), agent.WithToolRegistry(parent))
 	inner := &agentLoopBotExecutorAdapter{agentLoop: template, logger: logger}
 
-	emp := employee.Employee{}
-	emp.ID = "secretary"
-	emp.Constitution = employee.Constitution{
-		Purpose: "answer calls",
-		Constraints: employee.ConstitutionalConstraints{
-			ToolsAllowed: []string{"inbox"},
-		},
-	}
+	emp := employee.Employee{
+		ID: "secretary",
+		Constitution: employee.Constitution{
+			Purpose: "answer calls",
+			Constraints: employee.ConstitutionalConstraints{
+				ToolsAllowed: []string{"inbox"},
+			},
+		}}
 
 	got, refuse := employeeBotExecutor(emp, inner, stubSpecSource{specs: map[string]*agent.AgentSpec{}}, "", dummyResolver(), nil, logger)
 	if refuse {
@@ -115,8 +115,8 @@ func TestEmployeeToolfilter_ConstitutionlessEmployeeKeepsDefaultExecutor(t *test
 	template := agent.NewAgentLoop("shared-etf2", t.TempDir())
 	inner := &agentLoopBotExecutorAdapter{agentLoop: template, logger: logger}
 
-	emp := employee.Employee{}
-	emp.ID = "plain"
+	emp := employee.Employee{
+		ID: "plain"}
 	// No constitution: the visibility rule would deny everything the
 	// employee should inherit; the default executor passes through
 	// byte-identical.
@@ -136,12 +136,12 @@ func TestEmployeeToolfilter_NonAgentLoopExecutorUntouched(t *testing.T) {
 	// shared-loop lane, never blindly wraps everything.
 	logger := slog.New(slog.DiscardHandler)
 	sentinel := &sentinelExecutor{}
-	emp := employee.Employee{}
-	emp.ID = "e"
-	emp.Constitution = employee.Constitution{
-		Purpose:     "p",
-		Constraints: employee.ConstitutionalConstraints{ToolsAllowed: []string{"inbox"}},
-	}
+	emp := employee.Employee{
+		ID: "e",
+		Constitution: employee.Constitution{
+			Purpose:     "p",
+			Constraints: employee.ConstitutionalConstraints{ToolsAllowed: []string{"inbox"}},
+		}}
 	got, refuse := employeeBotExecutor(emp, sentinel, stubSpecSource{specs: map[string]*agent.AgentSpec{}}, "", dummyResolver(), nil, logger)
 	if refuse || got != bot.BotExecutor(sentinel) {
 		t.Fatalf("got=%v refuse=%v, want the sentinel unchanged", got, refuse)

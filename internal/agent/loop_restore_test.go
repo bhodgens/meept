@@ -11,16 +11,17 @@ package agent
 import (
 	"context"
 	"errors"
-	"github.com/caimlas/meept/internal/config"
-	"github.com/caimlas/meept/internal/llm"
-	"github.com/caimlas/meept/internal/session"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"log/slog"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/session"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // fakeRestoreStore is a minimal in-memory sessionMessageReader for
@@ -72,7 +73,7 @@ type captureChatter struct {
 }
 
 func newCaptureChatter(responses ...*llm.Response) *captureChatter {
-	return &captureChatter{mockChatter: mockChatter{responses: responses}}
+	return &captureChatter{responses: responses}
 }
 
 func (m *captureChatter) Chat(ctx context.Context, messages []llm.ChatMessage, opts ...llm.ChatOption) (*llm.Response, error) {

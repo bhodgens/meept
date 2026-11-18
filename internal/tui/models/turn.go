@@ -72,12 +72,6 @@ type turnTerminalMsg struct {
 	DurationMS     int64
 }
 
-// defaultTurnLivenessTimeout is the stalled-turn window used when the chat
-// config does not override it. Mirrors the daemon's chat timeout so the
-// honest stalled indicator appears at roughly the moment the old blocking
-// path would have errored out.
-const defaultTurnLivenessTimeout = 120 * time.Second
-
 // stalledTurnText is the honest, lowercase stalled-turn wording (UI text
 // convention: all lowercase).
 const stalledTurnText = "no progress for %ds — task may still be running"
@@ -277,12 +271,6 @@ func (r *turnRouter) register(turnID, conversationID, sessionID string) (*pendin
 	}
 	r.turns[turnID] = pt
 	return pt, true
-}
-
-// registerConversation is the conversation-only form of register used by
-// tests and non-session callers.
-func (r *turnRouter) registerConversation(turnID, conversationID string) (*pendingTurn, bool) {
-	return r.register(turnID, conversationID, "")
 }
 
 // get returns the tracked turn by id, if any.

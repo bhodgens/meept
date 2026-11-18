@@ -22,8 +22,8 @@ func TestContextRenderer_Render(t *testing.T) {
 
 	// Test with ranked tags
 	ranked := RankedTags{
-		{Tag: Tag{RelFname: "a.go", FName: "testdata/a.go", Name: "FuncA", Kind: "function", Line: 1, IsDef: true}, Score: 1.0},
-		{Tag: Tag{RelFname: "b.go", FName: "testdata/b.go", Name: "TypeB", Kind: "class", Line: 5, IsDef: true}, Score: 0.5},
+		{RelFname: "a.go", FName: "testdata/a.go", Name: "FuncA", Kind: "function", Line: 1, IsDef: true, Score: 1.0},
+		{RelFname: "b.go", FName: "testdata/b.go", Name: "TypeB", Kind: "class", Line: 5, IsDef: true, Score: 0.5},
 	}
 
 	result = renderer.Render(ranked)
@@ -49,7 +49,7 @@ func TestContextRenderer_RenderCompact(t *testing.T) {
 	renderer := NewContextRenderer(config, nil)
 
 	ranked := RankedTags{
-		{Tag: Tag{RelFname: "test.go", FName: "testdata/test.go", Name: "TestFunc", Kind: "function", Line: 10, IsDef: true}, Score: 1.0},
+		{RelFname: "test.go", FName: "testdata/test.go", Name: "TestFunc", Kind: "function", Line: 10, IsDef: true, Score: 1.0},
 	}
 
 	result := renderer.RenderCompact(ranked)
@@ -63,9 +63,9 @@ func TestContextRenderer_RenderHierarchical(t *testing.T) {
 	renderer := NewContextRenderer(config, nil)
 
 	ranked := RankedTags{
-		{Tag: Tag{RelFname: "pkg1/file1.go", FName: "pkg1/file1.go", Name: "Func1", Kind: "function", Line: 1, IsDef: true}, Score: 1.0},
-		{Tag: Tag{RelFname: "pkg1/file2.go", FName: "pkg1/file2.go", Name: "Func2", Kind: "function", Line: 2, IsDef: true}, Score: 0.8},
-		{Tag: Tag{RelFname: "pkg2/file3.go", FName: "pkg2/file3.go", Name: "Type1", Kind: "class", Line: 5, IsDef: true}, Score: 0.5},
+		{RelFname: "pkg1/file1.go", FName: "pkg1/file1.go", Name: "Func1", Kind: "function", Line: 1, IsDef: true, Score: 1.0},
+		{RelFname: "pkg1/file2.go", FName: "pkg1/file2.go", Name: "Func2", Kind: "function", Line: 2, IsDef: true, Score: 0.8},
+		{RelFname: "pkg2/file3.go", FName: "pkg2/file3.go", Name: "Type1", Kind: "class", Line: 5, IsDef: true, Score: 0.5},
 	}
 
 	result := renderer.RenderHierarchical(ranked)
@@ -89,7 +89,7 @@ func TestContextRenderer_RenderSummarized(t *testing.T) {
 	var ranked RankedTags
 	for i := range 20 {
 		ranked = append(ranked, RankedTag{
-			Tag:   Tag{RelFname: "file" + string(rune('0'+i%10)) + ".go", Name: "Symbol" + string(rune('A'+i)), Kind: "function", Line: i * 5, IsDef: true},
+			RelFname: "file" + string(rune('0'+i%10)) + ".go", Name: "Symbol" + string(rune('A'+i)), Kind: "function", Line: i * 5, IsDef: true,
 			Score: 1.0 - float64(i)*0.05,
 		})
 	}
@@ -110,8 +110,8 @@ func TestContextRenderer_RenderJSON(t *testing.T) {
 	renderer := NewContextRenderer(config, nil)
 
 	ranked := RankedTags{
-		{Tag: Tag{RelFname: "test.go", Name: "TestFunc", Kind: "function", Line: 10, IsDef: true}, Score: 0.95},
-		{Tag: Tag{RelFname: "test.go", Name: "TestType", Kind: "class", Line: 20, IsDef: true}, Score: 0.85},
+		{RelFname: "test.go", Name: "TestFunc", Kind: "function", Line: 10, IsDef: true, Score: 0.95},
+		{RelFname: "test.go", Name: "TestType", Kind: "class", Line: 20, IsDef: true, Score: 0.85},
 	}
 
 	content, tokens, err := renderer.RenderJSON(ranked)
@@ -141,7 +141,7 @@ func TestContextRenderer_Cache(t *testing.T) {
 
 	// Render some tags (this may populate cache)
 	ranked := RankedTags{
-		{Tag: Tag{RelFname: "test.go", FName: "testdata/test.go", Name: "TestFunc", Kind: "function", Line: 1, IsDef: true}, Score: 1.0},
+		{RelFname: "test.go", FName: "testdata/test.go", Name: "TestFunc", Kind: "function", Line: 1, IsDef: true, Score: 1.0},
 	}
 	renderer.Render(ranked)
 
@@ -156,7 +156,7 @@ func TestContextRenderer_ClearCache(t *testing.T) {
 
 	// Render some tags
 	ranked := RankedTags{
-		{Tag: Tag{RelFname: "test.go", Name: "TestFunc", Kind: "function", Line: 1, IsDef: true}, Score: 1.0},
+		{RelFname: "test.go", Name: "TestFunc", Kind: "function", Line: 1, IsDef: true, Score: 1.0},
 	}
 	renderer.Render(ranked)
 
@@ -219,9 +219,9 @@ func TestContextRenderer_ImplementsRenderingProvider(t *testing.T) {
 
 func TestGroupByFileRankedTags(t *testing.T) {
 	ranked := RankedTags{
-		{Tag: Tag{RelFname: "a.go", Name: "Func1"}, Score: 1.0},
-		{Tag: Tag{RelFname: "b.go", Name: "Func2"}, Score: 0.8},
-		{Tag: Tag{RelFname: "a.go", Name: "Func3"}, Score: 0.6},
+		{RelFname: "a.go", Name: "Func1", Score: 1.0},
+		{RelFname: "b.go", Name: "Func2", Score: 0.8},
+		{RelFname: "a.go", Name: "Func3", Score: 0.6},
 	}
 
 	result := groupByFileRankedTags(ranked)

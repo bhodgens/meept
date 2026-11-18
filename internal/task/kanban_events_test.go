@@ -169,7 +169,6 @@ func TestUpdateState_NoChangePublishesNothing(t *testing.T) {
 func TestCancelTask_PublishesCancelledEdge(t *testing.T) {
 	nonTerminal := []TaskState{StatePending, StatePlanning, StateAwaitingApproval, StateExecuting, StateTesting}
 	for _, from := range nonTerminal {
-		from := from
 		t.Run(string(from)+"->cancelled", func(t *testing.T) {
 			reg, sub, ctx := newGatedRegistry(t)
 			task, err := reg.Create(ctx, "cancel-task", "")

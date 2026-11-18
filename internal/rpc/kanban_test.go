@@ -859,7 +859,7 @@ func TestKanban_TypedErrorTextPins(t *testing.T) {
 			if !strings.Contains(err.Error(), tc.wantSub) {
 				t.Errorf("err %q missing frozen text %q", err.Error(), tc.wantSub)
 			}
-			if tc.err != nil && tc.err != kanban.ErrStaleCard && !errors.Is(err, tc.err) {
+			if tc.err != nil && !errors.Is(tc.err, kanban.ErrStaleCard) && !errors.Is(err, tc.err) {
 				t.Errorf("typed error must survive the handler unchanged, got %T %v", err, err)
 			}
 		})

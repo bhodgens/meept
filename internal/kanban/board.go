@@ -3,6 +3,7 @@ package kanban
 import (
 	"context"
 	"fmt"
+	"slices"
 )
 
 // Manager provides Kanban board management operations.
@@ -105,10 +106,8 @@ func (m *Manager) AddLabel(ctx context.Context, cardID string, label string) err
 		return fmt.Errorf("failed to get card: %w", err)
 	}
 
-	for _, l := range card.Labels {
-		if l == label {
-			return nil // Idempotent
-		}
+	if slices.Contains(card.Labels, label) {
+		return nil // Idempotent
 	}
 
 	card.Labels = append(card.Labels, label)

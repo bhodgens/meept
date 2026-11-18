@@ -379,7 +379,7 @@ func linkAssertSilencePrefix(t *testing.T, got []byte, what string) {
 func linkSpeakerChunks(t *testing.T, w io.Writer) []byte {
 	t.Helper()
 	var payload []byte
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		chunk := make([]byte, 640)
 		for j := range chunk {
 			chunk[j] = byte((i*640 + j) % 251) // deterministic pattern
@@ -750,7 +750,7 @@ func linkDialChildPairCapturing(t *testing.T, ccid string) net.Conn {
 func linkWriteChunks(t *testing.T, w io.Writer, n int) []byte {
 	t.Helper()
 	var payload []byte
-	for i := 0; i < n; i++ {
+	for i := range n {
 		chunk := make([]byte, 640)
 		for j := range chunk {
 			chunk[j] = byte((i*640 + j) % 251)
@@ -2035,7 +2035,7 @@ func TestLinkCoordinatorNonHolderFinalCannotReleaseFloor(t *testing.T) {
 	// the holder's after its flushed dispatch), so only the first
 	// release is pinned.
 	first := ""
-	for _, line := range strings.Split(logs, "\n") {
+	for line := range strings.SplitSeq(logs, "\n") {
 		if strings.Contains(line, "kind=floor_released") {
 			first = line
 			break
@@ -2110,7 +2110,7 @@ func TestLinkCoordinatorHolderChainKeepsFloorAndDefersPeer(t *testing.T) {
 	if !strings.Contains(logs, "side=a") || !strings.Contains(logs, "kind=floor_released") {
 		t.Fatalf("release telemetry must name the holder side a:\n%s", logs)
 	}
-	for _, line := range strings.Split(logs, "\n") {
+	for line := range strings.SplitSeq(logs, "\n") {
 		if strings.Contains(line, "kind=floor_released") && strings.Contains(line, "side=b") {
 			t.Fatalf("a side=b release fired during an a-held chain: %s", line)
 		}
@@ -2397,7 +2397,7 @@ func TestLinkCoordinatorConversationNoBothSpeakWindows(t *testing.T) {
 		}
 	}
 	waitFor(t, 2*time.Second, "margin re-armed over A's live backlog", func() bool {
-		for _, line := range strings.Split(buf.String(), "\n") {
+		for line := range strings.SplitSeq(buf.String(), "\n") {
 			if strings.Contains(line, "kind=margin_rearmed") && strings.Contains(line, "side=a") {
 				return true
 			}
@@ -2426,7 +2426,7 @@ func TestLinkCoordinatorConversationNoBothSpeakWindows(t *testing.T) {
 	// through a gated claim) is legal. Pin: the first floor_released
 	// line must name side=a.
 	waitFor(t, 4*time.Second, "first floor_released names the holder side a", func() bool {
-		for _, line := range strings.Split(buf.String(), "\n") {
+		for line := range strings.SplitSeq(buf.String(), "\n") {
 			if strings.Contains(line, "kind=floor_released") {
 				return strings.Contains(line, "side=a")
 			}
@@ -2740,7 +2740,6 @@ func TestBackchannelSoftenLiveChainWatchdogTable(t *testing.T) {
 		{"full-on-flushes", "Can you say that again about the budget?", true},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			var buf syncBuffer
 			turnsB := &holdTurns{reply: "ok."}

@@ -3,6 +3,7 @@ package task
 import (
 	"errors"
 	"fmt"
+	"slices"
 )
 
 // ErrInvalidTransition is returned when a task transition is not allowed.
@@ -58,10 +59,5 @@ var taskTransitions = map[TaskState][]TaskState{
 
 // taskAllows reports whether from -> to is a member of the taskTransitions map.
 func taskAllows(from, to TaskState) bool {
-	for _, t := range taskTransitions[from] {
-		if t == to {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(taskTransitions[from], to)
 }

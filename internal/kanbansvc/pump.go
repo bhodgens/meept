@@ -408,10 +408,7 @@ func isSubGone(err error) bool {
 // ended first.
 func sleepCtx(ctx context.Context, d time.Duration) bool {
 	for remaining := d; remaining > 0; {
-		step := remaining
-		if step > pumpDefaultPollInterval {
-			step = pumpDefaultPollInterval
-		}
+		step := min(remaining, pumpDefaultPollInterval)
 		timer := time.NewTimer(step)
 		select {
 		case <-ctx.Done():

@@ -15,7 +15,6 @@ package signalleg
 import (
 	"context"
 	"errors"
-	"io"
 	"log/slog"
 	"sync"
 	"testing"
@@ -123,7 +122,7 @@ func newTestChannel(resp func(recipient, body string) (int64, error), clock cloc
 	return newMsgChannel(sender, nil, defaultMsgPerMinute, clock, discardLogger())
 }
 
-func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
+func discardLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 // TestMsgChannelDelivered pins the happy path: a successful Send with
 // ts>0 maps to ("delivered", nil) and the recipient is the Signal UUID.
@@ -264,7 +263,7 @@ func TestMsgChannelThrottleFourthWaits(t *testing.T) {
 	rec := testRecord()
 	ctx := context.Background()
 
-	for i := 0; i < defaultMsgPerMinute; i++ {
+	for i := range defaultMsgPerMinute {
 		outcome, err := mc.Attempt(ctx, rec, "burst")
 		if err != nil || outcome != contact.OutcomeDelivered {
 			t.Fatalf("send %d: outcome %q err %v, want delivered/nil", i+1, outcome, err)
@@ -310,7 +309,7 @@ func TestMsgChannelThrottleContextCancel(t *testing.T) {
 	mc := newTestChannel(nil, clock)
 	rec := testRecord()
 
-	for i := 0; i < defaultMsgPerMinute; i++ {
+	for range defaultMsgPerMinute {
 		_, _ = mc.Attempt(context.Background(), rec, "burst") //nolint:errcheck // seeded bursts
 	}
 
@@ -354,7 +353,7 @@ func TestMsgChannelZeroConfigClamps(t *testing.T) {
 	mc := newMsgChannel(sender, nil, 0, clock, discardLogger())
 	rec := testRecord()
 
-	for i := 0; i < defaultMsgPerMinute; i++ {
+	for i := range defaultMsgPerMinute {
 		if _, err := mc.Attempt(context.Background(), rec, "burst"); err != nil {
 			t.Fatalf("send %d: %v", i+1, err)
 		}

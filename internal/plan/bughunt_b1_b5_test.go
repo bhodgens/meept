@@ -275,7 +275,7 @@ func TestDeletePlanCascadesViaPooledConn(t *testing.T) {
 	if err := writer.CreatePlan(ctx, p); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		ph := NewPlanPhase(p.ID, "Phase", i+1, 0)
 		if err := writer.CreatePhase(ctx, ph); err != nil {
 			t.Fatalf("CreatePhase: %v", err)

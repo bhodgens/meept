@@ -11,7 +11,7 @@ import "testing"
 // the window's edge and the cap (not eviction) stops it after two rows.
 func TestTelemetryRingLimitCapIsNotTruncated(t *testing.T) {
 	r := NewTelemetryRing(4, 8)
-	for i := 0; i < 6; i++ {
+	for range 6 {
 		r.Append("cc-cap", EventInput{Kind: EventKindHeard, Text: "t"})
 	}
 	events, truncated, hasMore, found := r.Since("cc-cap", 2, 2)
@@ -37,7 +37,7 @@ func TestTelemetryRingLimitCapIsNotTruncated(t *testing.T) {
 // Genuine eviction: cursor below the retained window start.
 func TestTelemetryRingEvictionTruncates(t *testing.T) {
 	r := NewTelemetryRing(4, 8)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		r.Append("cc-ev", EventInput{Kind: EventKindHeard})
 	}
 	_, truncated, _, found := r.Since("cc-ev", 0, 0)
@@ -50,7 +50,7 @@ func TestTelemetryRingEvictionTruncates(t *testing.T) {
 	}
 	// cursor==0 on a NON-wrapped ring (count < cap): healthy first poll.
 	r2 := NewTelemetryRing(64, 8)
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		r2.Append("cc-fresh", EventInput{Kind: EventKindDispatch})
 	}
 	events, truncated, _, found := r2.Since("cc-fresh", 0, 0)

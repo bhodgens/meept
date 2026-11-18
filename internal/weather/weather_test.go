@@ -349,7 +349,7 @@ func TestCache_ConcurrentBurstSingleflight(t *testing.T) {
 
 	var wg sync.WaitGroup
 	results := make([]Outlook, 5)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()

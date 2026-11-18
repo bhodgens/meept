@@ -18,6 +18,7 @@ package agent
 import (
 	"context"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 
@@ -55,9 +56,9 @@ func lastAssistantContent(t *testing.T, loop *AgentLoop, convID string) string {
 		t.Fatalf("conversation %q not found", convID)
 	}
 	msgs := conv.GetMessages()
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == llm.RoleAssistant {
-			return msgs[i].Content
+	for _, msg := range slices.Backward(msgs) {
+		if msg.Role == llm.RoleAssistant {
+			return msg.Content
 		}
 	}
 	t.Fatalf("no assistant message in conversation %q", convID)

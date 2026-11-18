@@ -386,8 +386,7 @@ func (p *Projector) handleEvent(ctx context.Context, ev StateEvent) {
 	rule := matches[0]
 
 	card, err := p.store.GetCardByRef(ctx, ev.Kind, ev.ID)
-	var unknown ErrUnknownCard
-	if errors.As(err, &unknown) {
+	if _, ok := errors.AsType[ErrUnknownCard](err); ok {
 		if err := p.createCard(ctx, ev, rule); err != nil {
 			p.countFailed()
 			p.logger.Warn("kanban projector: create card failed",

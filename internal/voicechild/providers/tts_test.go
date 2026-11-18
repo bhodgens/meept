@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -264,12 +265,7 @@ func (r *chunkReaderT) Read(p []byte) (int, error) {
 // clamped to what remains, so the script always covers the payload exactly.
 func readScript(total, chunk int, oddAt []int, allOdd bool) []int {
 	in := func(idx int) bool {
-		for _, o := range oddAt {
-			if o == idx {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(oddAt, idx)
 	}
 	var sizes []int
 	for rem := total; rem > 0; {

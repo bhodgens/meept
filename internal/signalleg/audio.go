@@ -285,7 +285,7 @@ func runOutboundAudio(ctx context.Context, pair *voice.AudioPair, socket audioSo
 					if ctx.Err() != nil {
 						return ctx.Err()
 					}
-					return fmt.Errorf("%w: outbound child->socket: %v", ErrAudioBackpressure, werr)
+					return fmt.Errorf("%w: outbound child->socket: %w", ErrAudioBackpressure, werr)
 				}
 			}
 		}
@@ -308,7 +308,7 @@ func runOutboundAudio(ctx context.Context, pair *voice.AudioPair, socket audioSo
 				time.Sleep(audioReadDeadline)
 				continue
 			}
-			return fmt.Errorf("%w: child read: %v", ErrAudioBackpressure, err)
+			return fmt.Errorf("%w: child read: %w", ErrAudioBackpressure, err)
 		}
 		if n == 0 {
 			// A2: no data this iteration - bounded poll only. When data
@@ -387,7 +387,7 @@ func runInboundAudio(ctx context.Context, pair *voice.AudioPair, socket audioSoc
 					if ctx.Err() != nil {
 						return ctx.Err()
 					}
-					return fmt.Errorf("%w: inbound socket->child: %v", ErrAudioBackpressure, werr)
+					return fmt.Errorf("%w: inbound socket->child: %w", ErrAudioBackpressure, werr)
 				}
 			}
 		}
@@ -404,7 +404,7 @@ func runInboundAudio(ctx context.Context, pair *voice.AudioPair, socket audioSoc
 			if isDeadlineExpired(err) {
 				continue // bounded-iteration deadline: re-check ctx
 			}
-			return fmt.Errorf("%w: socket read: %v", ErrAudioBackpressure, err)
+			return fmt.Errorf("%w: socket read: %w", ErrAudioBackpressure, err)
 		}
 	}
 }

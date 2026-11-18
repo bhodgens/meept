@@ -916,8 +916,7 @@ func classifyStopReason(state ChildState, typedErr error) StopReason {
 	case ChildStateInterrupted:
 		return StopReasonCancelled
 	case ChildStateFailed:
-		var refusal *llm.RefusalError
-		if errors.As(typedErr, &refusal) {
+		if _, ok := errors.AsType[*llm.RefusalError](typedErr); ok {
 			return StopReasonRefusal
 		}
 		return StopReasonError

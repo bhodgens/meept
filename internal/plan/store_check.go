@@ -88,7 +88,7 @@ const rebuiltPhasesDDL = `CREATE TABLE plan_phases_new (
 func (s *SQLiteStore) migrateStateChecks() error {
 	// One dedicated connection: the pragma and the transaction must share it,
 	// and the pool must not hand another session's pragma state to the swap.
-	conn, err := s.db.DB.Conn(context.Background())
+	conn, err := s.db.Conn(context.Background())
 	if err != nil {
 		return fmt.Errorf("state CHECK migration: acquire conn: %w", err)
 	}

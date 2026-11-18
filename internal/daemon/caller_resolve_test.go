@@ -261,8 +261,7 @@ func TestCallerResolverStoreErrorFailSoft(t *testing.T) {
 	}
 
 	// Cancelled ctx (2s answer-time budget expiring): same fail-soft.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	number2 := callerGateE164(4)
 	info2, err2 := daemonCallerResolver(store, logger).ResolveCaller(ctx, number2)
 	if err2 != nil {

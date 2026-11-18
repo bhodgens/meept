@@ -151,10 +151,7 @@ func (p *ClipPlanner) Run(ctx context.Context, ccid, employeeID string, id TTSId
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		end := start + clipRenderFrameCap
-		if end > len(specs) {
-			end = len(specs)
-		}
+		end := min(start+clipRenderFrameCap, len(specs))
 		if err := send(voiceframe.Frame{
 			CallID: ccid,
 			Event:  voiceframe.EventClipRender,

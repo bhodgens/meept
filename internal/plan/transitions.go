@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/caimlas/meept/internal/kanban"
 )
@@ -77,12 +78,7 @@ var transitionStateOrder = []PlanState{
 
 // planAllows reports whether from -> to is a table member.
 func planAllows(from, to PlanState) bool {
-	for _, t := range planTransitions[from] {
-		if t == to {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(planTransitions[from], to)
 }
 
 // planFromStatesFor derives the table states that may reach `to` (reverse
@@ -208,12 +204,7 @@ func (m *PlanManager) transitionFrom(ctx context.Context, planID string, restric
 }
 
 func containsState(set []PlanState, s PlanState) bool {
-	for _, v := range set {
-		if v == s {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(set, s)
 }
 
 // updatePlanColumns is the T4 targeted-update seam: apply metadata columns

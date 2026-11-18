@@ -241,7 +241,7 @@ func TestCallStoreConcurrentAppendsAreAtomic(t *testing.T) {
 
 	const pairs = 12
 	var wg sync.WaitGroup
-	for i := 0; i < pairs; i++ {
+	for i := range pairs {
 		wg.Add(1)
 		go func(k int) {
 			defer wg.Done()
@@ -257,10 +257,8 @@ func TestCallStoreConcurrentAppendsAreAtomic(t *testing.T) {
 	// torn/invalid transcript either.
 	stop := make(chan struct{})
 	var readers sync.WaitGroup
-	for r := 0; r < 2; r++ {
-		readers.Add(1)
-		go func() {
-			defer readers.Done()
+	for range 2 {
+		readers.Go(func() {
 			for {
 				select {
 				case <-stop:
@@ -278,7 +276,7 @@ func TestCallStoreConcurrentAppendsAreAtomic(t *testing.T) {
 					}
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	close(stop)
@@ -295,7 +293,7 @@ func TestCallStoreConcurrentAppendsAreAtomic(t *testing.T) {
 	for _, l := range lines {
 		seen[l.Text] = true
 	}
-	for i := 0; i < pairs; i++ {
+	for i := range pairs {
 		if q := fmt.Sprintf("q-%d", i); !seen[q] {
 			t.Errorf("missing user line %q", q)
 		}

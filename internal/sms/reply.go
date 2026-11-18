@@ -66,7 +66,7 @@ var (
 
 	// stopMisspellingRegex — strategist consent_service.go:104
 	// (common misspellings of STOP).
-	stopMisspellingRegex = regexp.MustCompile(`(?i)^\s*(STIP|STOPP|STO|STPO|SOTP|DTOP|ATOP)\s*[.!?]*\s*$`)
+	stopMisspellingRegex = regexp.MustCompile(`(?i)^\s*(STIP|STOPP|STO|STOP|SOTP|DTOP|ATOP)\s*[.!?]*\s*$`)
 
 	// stopObjectNoun — strategist consent_service.go:112; shared
 	// object-noun sub-expression for the sentence-shaped STOP regexes.

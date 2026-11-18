@@ -153,7 +153,7 @@ func TestWorkflowStatusConcurrentQueries(t *testing.T) {
 	c, _ := newLiveStatusController(t)
 	eng := newTestEngine(t, &fakeSpawner{})
 	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()

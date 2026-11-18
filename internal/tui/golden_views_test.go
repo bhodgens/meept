@@ -186,15 +186,14 @@ func newHeadlessAppTasks(t *testing.T, w, h int) *headlessProgram {
 	hp := newHeadlessApp(t, w, h)
 	const fixedStamp = "golden-fixed"
 	tasks := []types.TaskExtended{
-		{Task: types.Task{
+		{
 			ID:            "task-1",
 			Name:          "write the golden fixture",
 			State:         "completed",
 			TotalJobs:     2,
 			CompletedJobs: 2,
 			CreatedAt:     fixedStamp,
-			UpdatedAt:     fixedStamp,
-		}},
+			UpdatedAt:     fixedStamp},
 	}
 	raw, err := json.Marshal(map[string]any{"tasks": tasks})
 	if err != nil {

@@ -7,7 +7,6 @@ package ledger
 
 import (
 	"context"
-	"io"
 	"log/slog"
 	"path/filepath"
 	"sync"
@@ -19,7 +18,7 @@ import (
 // fresh append's derived state intact — the repair never overwrites a
 // state row newer than its fold snapshot.
 func TestAppendRacingVerifyNoRewindWithAutoRepair(t *testing.T) {
-	store, err := Open(filepath.Join(t.TempDir(), "ledger.db"), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	store, err := Open(filepath.Join(t.TempDir(), "ledger.db"), slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -42,9 +41,7 @@ func TestAppendRacingVerifyNoRewindWithAutoRepair(t *testing.T) {
 	// while the verify/repair pass runs.
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		i := 0
 		for {
 			select {
@@ -67,9 +64,9 @@ func TestAppendRacingVerifyNoRewindWithAutoRepair(t *testing.T) {
 				return
 			}
 		}
-	}()
+	})
 
-	for pass := 0; pass < 20; pass++ {
+	for range 20 {
 		report, verr := store.VerifyState(ctx)
 		if verr != nil {
 			t.Fatalf("verify: %v", verr)
@@ -126,7 +123,7 @@ func TestAppendRacingVerifyNoRewindWithAutoRepair(t *testing.T) {
 // as_of EXCEEDS the fold's Want (a fresh append the fold never saw) is
 // skipped — never flagged divergent, never repaired.
 func TestVerifySkipsNewerThanFold(t *testing.T) {
-	store, err := Open(filepath.Join(t.TempDir(), "ledger2.db"), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	store, err := Open(filepath.Join(t.TempDir(), "ledger2.db"), slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

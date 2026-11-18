@@ -1611,7 +1611,7 @@ func TestHandleRequest_WorkerTerminalStateHoldsWorkersMu(t *testing.T) {
 		}
 	}()
 
-	for i := 0; i < 200; i++ {
+	for i := range 200 {
 		// Re-open the non-terminal window so handleAgentProgress keeps
 		// writing the same fields the terminal update writes.
 		h.workersMu.Lock()

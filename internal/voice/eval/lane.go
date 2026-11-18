@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/caimlas/meept/internal/voicechild/providers"
@@ -53,7 +54,7 @@ func weightsStatus() (string, error) {
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("%w: resolve home: %v", errWeightsMissing, err)
+		return "", fmt.Errorf("%w: resolve home: %w", errWeightsMissing, err)
 	}
 	p := filepath.Join(home, defaultModelRelPath)
 	if _, err := os.Stat(p); err != nil {
@@ -71,7 +72,7 @@ func repoRootFrom(start string) (string, error) {
 		return "", fmt.Errorf("voice eval: resolve %s: %w", start, err)
 	}
 	dir := abs
-	for i := 0; i < 12; i++ {
+	for range 12 {
 		if fi, err := os.Stat(filepath.Join(dir, "testdata", "voice-eval")); err == nil && fi.IsDir() {
 			return dir, nil
 		}
@@ -123,10 +124,7 @@ func transcribeFixture(ctx context.Context, modelPath, wavPath string) (string, 
 		// fixture has no trailing silence for the energy gate to ride.
 		const chunk = 4800
 		for i := 0; i < len(pcmBytes); i += chunk {
-			end := i + chunk
-			if end > len(pcmBytes) {
-				end = len(pcmBytes)
-			}
+			end := min(i+chunk, len(pcmBytes))
 			pcm <- pcmBytes[i:end]
 		}
 	}()
@@ -150,14 +148,14 @@ func transcribeFixture(ctx context.Context, modelPath, wavPath string) (string, 
 }
 
 func joinTranscripts(parts []string) string {
-	out := ""
+	var out strings.Builder
 	for i, p := range parts {
 		if i > 0 {
-			out += " "
+			out.WriteString(" ")
 		}
-		out += p
+		out.WriteString(p)
 	}
-	return out
+	return out.String()
 }
 
 // LaneReport is the lane outcome: Skipped=true means loud-skip (exit 0
@@ -198,7 +196,7 @@ func RunLane(repoRoot string) (*LaneReport, error) {
 		c := &cs.Cases[i]
 		actual, terr := transcribeFixture(context.Background(), modelPath, filepath.Join(fixtureDir, c.WAV))
 		if terr != nil {
-			return rep, fmt.Errorf("case %s: %v", c.WAV, terr)
+			return rep, fmt.Errorf("case %s: %w", c.WAV, terr)
 		}
 		res := ScoreCase(c, actual)
 		verdict := "PASS"
@@ -218,7 +216,7 @@ func RunLane(repoRoot string) (*LaneReport, error) {
 		c := &cs.LeakCases[i]
 		actual, terr := transcribeFixture(context.Background(), modelPath, filepath.Join(fixtureDir, c.WAV))
 		if terr != nil {
-			return rep, fmt.Errorf("leak case %s: %v", c.WAV, terr)
+			return rep, fmt.Errorf("leak case %s: %w", c.WAV, terr)
 		}
 		res := ScoreLeakTranscript(c, actual)
 		verdict := "PASS"

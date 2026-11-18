@@ -235,7 +235,7 @@ func (f *fakeEventsClient) Call(_ string, params any) (json.RawMessage, error) {
 		}
 	}
 	f.mu.Unlock()
-	var cur uint64 = cursor
+	var cur = cursor
 	for _, ev := range out {
 		if ev.Seq > cur {
 			cur = ev.Seq
@@ -600,12 +600,9 @@ func (r *scriptedGapReader) Read(p []byte) (int, error) {
 		}
 		return 0, io.EOF
 	}
-	n := len(p)
-	if n > r.left {
-		n = r.left
-	}
+	n := min(len(p), r.left)
 	r.left -= n
-	for i := 0; i < n; i++ {
+	for i := range n {
 		p[i] = r.payload
 	}
 	return n, nil
@@ -648,10 +645,10 @@ func TestDrainLiveSpeakerShortReplySaidPrintsAtEOF(t *testing.T) {
 	}
 	// The window opened on the bound flush and closed on the gap; the
 	// said line must NOT be joined under a fabricated second window.
-	onIdx := strings.Index(out, "speaker on")
+	found := strings.Contains(out, "speaker on")
 	offIdx := strings.Index(out, "speaker off")
 	saidIdx := strings.Index(out, "said: Sure.")
-	if onIdx < 0 || offIdx < 0 || saidIdx < offIdx {
+	if !found || offIdx < 0 || saidIdx < offIdx {
 		t.Fatalf("unexpected ordering; want speaker on -> speaker off -> late said:\n%s", out)
 	}
 }

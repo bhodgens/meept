@@ -42,6 +42,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -1104,7 +1105,7 @@ func TestParkedDetectionWithoutStateMachine(t *testing.T) {
 	if reply != "" {
 		t.Errorf("parked turn reply = %q, want empty", reply)
 	}
-	if err != nil && err != ErrTurnParked {
+	if err != nil && !errors.Is(err, ErrTurnParked) {
 		t.Errorf("parked turn surfaced %v, want ErrTurnParked (or nil on the old contract)", err)
 	}
 	if got := parker.Pending(); got != 1 {

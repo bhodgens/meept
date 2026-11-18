@@ -44,7 +44,7 @@ func TestRouteFrameHeardOnlyOnSuccessfulEnqueue(t *testing.T) {
 	w.loopsMu.Lock()
 	w.loops["cc-full"] = full
 	w.loopsMu.Unlock()
-	for i := 0; i < 16; i++ {
+	for range 16 {
 		full.Frames() <- voice.Frame{CallID: "cc-full", Event: voice.EventPlayed}
 	}
 	w.routeFrame(voice.Frame{CallID: "cc-full", Event: voice.EventPrompt, Text: "dropped prompt", Last: &last})

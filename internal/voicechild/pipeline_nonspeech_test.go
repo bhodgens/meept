@@ -333,7 +333,7 @@ func TestPartialNeverStampsEvidence(t *testing.T) {
 	// Partials stay preview prompts — the drop guard is finals-only by
 	// contract (the daemon never starts a turn on one). emitPrompt sets
 	// Last ONLY for finals (keys.go), so a partial carries no last flag.
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		f := d.waitFrame(t)
 		if f.Event != voiceframe.EventPrompt || f.Last != nil {
 			t.Fatalf("partial %d = %q %q last=%v, want preview prompt (no last flag)", i, f.Event, f.Text, f.Last)

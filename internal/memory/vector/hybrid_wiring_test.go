@@ -2,7 +2,6 @@ package vector
 
 import (
 	"context"
-	"io"
 	"log/slog"
 	"path/filepath"
 	"testing"
@@ -27,7 +26,7 @@ func newTwoShardFixture(t *testing.T) *twoShardFixture {
 		BasePath:     filepath.Join(dir, "shards"),
 		MaxRAMShards: 4,
 		Embedder:     newMockProvider(dim), //nolint:gosec // G404: deterministic fixture embeddings
-		Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Logger:       slog.New(slog.DiscardHandler),
 	})
 	if err != nil {
 		t.Fatalf("create shard manager: %v", err)

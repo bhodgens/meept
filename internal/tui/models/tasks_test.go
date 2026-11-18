@@ -59,11 +59,9 @@ func NewMockTasksRPCClient() *MockTasksRPCClient {
 		TasksExtendedResponse: &types.TaskExtendedListResponse{
 			Tasks: []types.TaskExtended{
 				{
-					Task: types.Task{
-						ID:    "task-1",
-						Name:  "Test Task",
-						State: "pending",
-					},
+					ID:    "task-1",
+					Name:  "Test Task",
+					State: "pending",
 				},
 			},
 		},
@@ -602,31 +600,25 @@ func TestTasksModel_LineageViewRendering(t *testing.T) {
 	mock.TasksExtendedResponse = &types.TaskExtendedListResponse{
 		Tasks: []types.TaskExtended{
 			{
-				Task: types.Task{
-					ID:    "parent-1",
-					Name:  "Build auth system",
-					State: "executing",
-				},
+				ID:            "parent-1",
+				Name:          "Build auth system",
+				State:         "executing",
 				InheritedFrom: "",
 				MemoryRefs:    []string{"mem-1", "mem-2"},
 			},
 			{
-				Task: types.Task{
-					ID:            "child-1",
-					Name:          "Plan architecture",
-					State:         "completed",
-					CompletedJobs: 1,
-					TotalJobs:     1,
-				},
+				ID:              "child-1",
+				Name:            "Plan architecture",
+				State:           "completed",
+				CompletedJobs:   1,
+				TotalJobs:       1,
 				InheritedFrom:   "parent-1",
 				CreatedMemories: []string{"mem-3"},
 			},
 			{
-				Task: types.Task{
-					ID:    "child-2",
-					Name:  "Implement handlers",
-					State: "pending",
-				},
+				ID:            "child-2",
+				Name:          "Implement handlers",
+				State:         "pending",
 				InheritedFrom: "parent-1",
 			},
 		},

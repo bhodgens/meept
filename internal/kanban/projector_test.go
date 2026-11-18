@@ -471,7 +471,7 @@ func TestProjector_StopDrainsInFlight(t *testing.T) {
 	f := newProjectorFixture(t, standardRules(EventKindTask))
 
 	f.fetcher.set(EventKindTask, "task-drain", ProvRow{Title: "Drain"})
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		ev := StateEvent{Kind: EventKindTask, ID: "task-drain", From: "pending", To: "claimed"}
 		if i%2 == 1 {
 			ev.From = "claimed"
@@ -672,7 +672,7 @@ func TestProjector_QueuedDropsAreCounted(t *testing.T) {
 	}
 	t.Cleanup(func() { proj.Stop() })
 
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		bus.PublishT(b, TopicTaskState, "flood", StateEvent{
 			Kind: EventKindTask, ID: "task-flood", From: "pending", To: "claimed",
 			TS: time.Now().UTC(),

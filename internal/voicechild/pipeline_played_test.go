@@ -29,7 +29,7 @@ func TestPlayedFrameEmittedAfterFinalStreamOnly(t *testing.T) {
 	swapTTS(p, tts)
 
 	// Sentence 1: NOT the turn-final flush (last:false).
-	d.sendLine(childConn, voiceframe.Frame{CallID: ccid, Event: voiceframe.EventSay, Text: "sentence 0", Last: lastPtr(false)})
+	d.sendLine(childConn, voiceframe.Frame{CallID: ccid, Event: voiceframe.EventSay, Text: "sentence 0", Last: new(false)})
 	if ordinals := paceDrain(t, out, 3, 2*time.Millisecond); len(ordinals) != 3 {
 		t.Fatalf("non-final stream did not pace out: %v", ordinals)
 	}
@@ -43,7 +43,7 @@ func TestPlayedFrameEmittedAfterFinalStreamOnly(t *testing.T) {
 	}
 
 	// Sentence 2: the turn-final flush.
-	d.sendLine(childConn, voiceframe.Frame{CallID: ccid, Event: voiceframe.EventSay, Text: "sentence 1", Last: lastPtr(true)})
+	d.sendLine(childConn, voiceframe.Frame{CallID: ccid, Event: voiceframe.EventSay, Text: "sentence 1", Last: new(true)})
 	if ordinals := paceDrain(t, out, 3, 2*time.Millisecond); len(ordinals) != 3 {
 		t.Fatalf("final stream did not pace out: %v", ordinals)
 	}
@@ -83,7 +83,7 @@ func TestNoPlayedOnBargeInAbort(t *testing.T) {
 	tts := newPacedTTS(10*time.Millisecond, 40) // long stream: clear lands mid-audio
 	swapTTS(p, tts)
 
-	d.sendLine(childConn, voiceframe.Frame{CallID: ccid, Event: voiceframe.EventSay, Text: "sentence 0", Last: lastPtr(true)})
+	d.sendLine(childConn, voiceframe.Frame{CallID: ccid, Event: voiceframe.EventSay, Text: "sentence 0", Last: new(true)})
 	paceDrain(t, out, 4, 2*time.Millisecond)
 	clearLine(t, d, childConn, ccid)
 
@@ -112,7 +112,7 @@ func TestNoPlayedOnSpeakError(t *testing.T) {
 	d, _, childConn, p, _ := newPaceChild(t, ccid)
 	swapTTS(p, errTTS{})
 
-	d.sendLine(childConn, voiceframe.Frame{CallID: ccid, Event: voiceframe.EventSay, Text: "boom", Last: lastPtr(true)})
+	d.sendLine(childConn, voiceframe.Frame{CallID: ccid, Event: voiceframe.EventSay, Text: "boom", Last: new(true)})
 	time.Sleep(400 * time.Millisecond)
 	for _, f := range drainFrames(d) {
 		if f.Event == voiceframe.EventPlayed {

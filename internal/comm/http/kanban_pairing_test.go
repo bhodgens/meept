@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -41,7 +40,7 @@ func newKanbanPairHandler(t *testing.T, exchanger KanbanPairExchanger) http.Hand
 	return &kanbanPairingHandler{exchanger: exchanger, logger: discardLogger()}
 }
 
-func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
+func discardLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 type exchangeResp struct {
 	Token   string   `json:"token"`

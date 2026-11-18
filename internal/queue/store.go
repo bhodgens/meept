@@ -441,7 +441,7 @@ func (s *Store) migrateJobsStateCheck() error {
 		}
 		create.WriteString(",\n")
 	}
-	create.WriteString(fmt.Sprintf("  CHECK (state IN %s)\n)", jobsStateEnumSQL))
+	fmt.Fprintf(&create, "  CHECK (state IN %s)\n)", jobsStateEnumSQL)
 
 	colList := make([]string, len(cols))
 	for i, c := range cols {

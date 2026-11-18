@@ -426,13 +426,13 @@ func TestVoiceKeysEmissionGateImprovementSelectors(t *testing.T) {
 	emp := f.w.cfg.DefaultEmployee
 	f.w.cfg.EmployeeLeg = []config.EmployeeLegConfig{{
 		Employee:       emp,
-		MinTurnWords:   ptrIntTest(5),
+		MinTurnWords:   new(5),
 		ExemptPhrases:  []string{"pause playback"},
-		EnergyGate:     ptrBoolTest(false),
-		MinRMS:         ptrIntTest(99),
-		FragmentDecayS: ptrIntTest(11),
-		ReplyExemptS:   ptrIntTest(22),
-		TurnConfirmMs:  ptrIntTest(333),
+		EnergyGate:     new(false),
+		MinRMS:         new(99),
+		FragmentDecayS: new(11),
+		ReplyExemptS:   new(22),
+		TurnConfirmMs:  new(333),
 	}}
 	acquireFor(f.w, ccid2)
 	f.w.routeFrame(voice.Frame{CallID: ccid2, Event: voice.EventSetup})
@@ -459,6 +459,3 @@ func TestVoiceKeysEmissionGateImprovementSelectors(t *testing.T) {
 	}
 	t.Cleanup(func() { f.w.releaseCall(ccid2, voice.OutcomeHangup) })
 }
-
-func ptrIntTest(n int) *int    { return &n }
-func ptrBoolTest(b bool) *bool { return &b }

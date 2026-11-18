@@ -428,7 +428,7 @@ func (s *Store) runTail(ctx context.Context, t *tailer, sinceID int64, out chan<
 		close(t.quit)
 	}()
 
-	var lastSeen int64 = sinceID
+	var lastSeen = sinceID
 	deliver := func(rec Record) bool {
 		if rec.ID <= lastSeen {
 			return true // duplicate at the snapshot/live handoff

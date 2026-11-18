@@ -152,7 +152,7 @@ func NewClient(baseURL string, opts ...Option) (*Client, error) {
 	// to the known-good default, never error.
 	if err := validateBaseURL(c.baseURL); err != nil {
 		c.log.Error("telnyx messaging: invalid api base url, falling back to default",
-			"baseURL", c.baseURL, "default", DefaultMessagingBaseURL, "error", err)
+			"base_url", c.baseURL, "default", DefaultMessagingBaseURL, "error", err)
 		c.baseURL = DefaultMessagingBaseURL
 	}
 	return c, nil
@@ -451,7 +451,7 @@ func (c *Client) postJSON(ctx context.Context, op, path string, body any, extraH
 			return newRateLimitError(resp.Header, c.clock)
 		}
 		c.log.Warn("telnyx messaging: error response",
-			"op", op, "statusCode", resp.StatusCode, "bodySnippet", errorSnippet(respBody))
+			"op", op, "status_code", resp.StatusCode, "body_snippet", errorSnippet(respBody))
 		return fmt.Errorf("telnyx %s: status %d: %s", op, resp.StatusCode, errorSnippet(respBody))
 	}
 	if out != nil && len(respBody) > 0 {

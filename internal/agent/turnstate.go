@@ -19,23 +19,7 @@ package agent
 
 import (
 	"time"
-
-	"github.com/caimlas/meept/internal/bus"
 )
-
-// publishTurnState publishes ev on TopicTurnState via bus.PublishT. The
-// timestamp defaults to now (UTC) when zero so every event carries a
-// usable clock stamp even when the producer did not set one. A nil bus is
-// a no-op (unwired surfaces stay byte-identical).
-func publishTurnState(b *bus.MessageBus, ev TurnStateEvent) {
-	if b == nil {
-		return
-	}
-	if ev.Timestamp.IsZero() {
-		ev.Timestamp = time.Now().UTC()
-	}
-	bus.PublishT(b, TopicTurnState, "agent", ev)
-}
 
 // emitTurnStatePublisher publishes ev through the delegate publisher seam
 // (the same func(topic, payload) that carries agent.delegate.result). The

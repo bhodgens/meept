@@ -18,7 +18,6 @@ package daemon
 import (
 	"context"
 	"errors"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -42,7 +41,7 @@ func newKanbanWiringHarness(t *testing.T, enabled bool) (*Components, *bus.Messa
 	t.Setenv(config.EnvMeeptHome, home)
 	cfg := config.DefaultConfig()
 	cfg.Kanban.Enabled = enabled
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := slog.New(slog.DiscardHandler)
 	c := &Components{Config: cfg, Logger: logger}
 	b := bus.New(nil, logger)
 	t.Cleanup(b.Close)

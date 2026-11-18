@@ -153,7 +153,7 @@ func TestVoiceCallLiveFunc_ConcurrentSetRead(t *testing.T) {
 	stop := make(chan struct{})
 	go func() {
 		defer close(stop)
-		for i := 0; i < 200; i++ {
+		for i := range 200 {
 			on := i%2 == 0
 			m.SetVoiceCallLiveFunc(func(string) bool { return on })
 		}

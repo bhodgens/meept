@@ -164,8 +164,7 @@ func TestPump_SubscribesTheSevenBoardTopics(t *testing.T) {
 	bus := newFakeBus()
 	p := fastPump(t, bus)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	if _, err := p.Subscribe(ctx); err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
@@ -205,8 +204,7 @@ func TestPump_DeliversFramesAndAdvancesCursor(t *testing.T) {
 	bus := newFakeBus()
 	p := fastPump(t, bus)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	stream, err := p.Subscribe(ctx)
 	if err != nil {
 		t.Fatalf("Subscribe: %v", err)
@@ -255,8 +253,7 @@ func TestPump_ReconnectsWhenTheDaemonForgetsTheSubscription(t *testing.T) {
 	bus.forgetSubAt = 2 // polls 3+ answer "subscription not found"
 	p := fastPump(t, bus)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	if _, err := p.Subscribe(ctx); err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
@@ -278,8 +275,7 @@ func TestPump_ToleratesTransientSubscribeFailure(t *testing.T) {
 	bus.failNextSub = errors.New("connection refused")
 	p := fastPump(t, bus)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	if _, err := p.Subscribe(ctx); err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
@@ -296,8 +292,7 @@ func TestPump_CloseIsIdempotentAndStopsTheGoroutine(t *testing.T) {
 	bus := newFakeBus()
 	p := fastPump(t, bus)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	stream, err := p.Subscribe(ctx)
 	if err != nil {
 		t.Fatalf("Subscribe: %v", err)

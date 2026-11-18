@@ -317,10 +317,10 @@ func TestRenderCallRelayHeaderFreeOfRawNumber(t *testing.T) {
 	// be failed by spoken digits in the BODY), so cut at the first
 	// transcript marker.
 	header := got
-	if i := strings.Index(got, "caller: "); i >= 0 {
-		header = got[:i]
-	} else if i := strings.Index(got, "reply: "); i >= 0 {
-		header = got[:i]
+	if before, _, ok := strings.Cut(got, "caller: "); ok {
+		header = before
+	} else if before, _, ok := strings.Cut(got, "reply: "); ok {
+		header = before
 	}
 	if headerNoLongDigitRun.MatchString(header) {
 		t.Errorf("relay header leaks a raw digit run (\\d{7,}): %q — header must use the Egress/last-4 form (leaf 02 RED)", header)

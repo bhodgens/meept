@@ -354,7 +354,7 @@ func TestHumanMove_SameColumnAndBadTargets(t *testing.T) {
 func fillColumn(t *testing.T, s *Store, boardID, colID, prefix string, n int) {
 	t.Helper()
 	ctx := context.Background()
-	for i := 0; i < n; i++ {
+	for range n {
 		if err := s.CreateCard(ctx, Card{BoardID: boardID, ColumnID: colID, Title: prefix}); err != nil {
 			t.Fatalf("fill card: %v", err)
 		}

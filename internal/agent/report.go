@@ -120,13 +120,13 @@ func ExtractReport(response string) *AgentReport {
 // extractReportFallback tries to find a JSON report without code fences.
 func extractReportFallback(response string) *AgentReport {
 	// Look for JSON object with status field
-	statusIdx := strings.LastIndex(response, `"status"`)
-	if statusIdx == -1 {
+	before, _, ok := strings.CutLast(response, `"status"`)
+	if !ok {
 		return nil
 	}
 
 	// Find the opening brace before status
-	braceIdx := strings.LastIndex(response[:statusIdx], "{")
+	braceIdx := strings.LastIndex(before, "{")
 	if braceIdx == -1 {
 		return nil
 	}

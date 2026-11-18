@@ -85,8 +85,7 @@ func isTTSTransportError(ctx context.Context, err error) bool {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
-	var opErr *net.OpError
-	if errors.As(err, &opErr) {
+	if _, ok := errors.AsType[*net.OpError](err); ok {
 		return true
 	}
 	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {

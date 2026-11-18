@@ -459,18 +459,18 @@ func (w *WorkspaceManager) ListCheckpoints(ctx context.Context, taskID string) (
 		// Actually, the tag format is: checkpoint-{taskID}-{label}-{timestamp}
 		// where timestamp is the last numeric part
 		// Let's find the last hyphen before a pure numeric segment
-		lastDash := strings.LastIndex(tag, "-")
-		if lastDash == -1 {
+		before, after, ok := strings.CutLast(tag, "-")
+		if !ok {
 			continue
 		}
-		timestampStr := tag[lastDash+1:]
+		timestampStr := after
 		timestamp, err := strconv.ParseInt(timestampStr, 10, 64)
 		if err != nil {
 			continue
 		}
 
 		// Extract prefix (everything before the timestamp)
-		prefix := tag[:lastDash]
+		prefix := before
 		// prefix is: checkpoint-{taskID}-{label}
 		// We need to extract label by removing "checkpoint-{taskID}-"
 		expectedPrefix := fmt.Sprintf("checkpoint-%s-", taskID)

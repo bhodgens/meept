@@ -148,7 +148,7 @@ func TestWorkflowStatusIdempotentAfterSettlement(t *testing.T) {
 	}
 
 	// First status read consumes the seam; the cache must retain it.
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		view, ok := c.workflowJobStatus(jobID)
 		if !ok {
 			t.Fatalf("query %d: job unknown", i+1)

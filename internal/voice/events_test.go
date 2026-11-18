@@ -5,6 +5,7 @@ package voice
 // each log site (and the nil-hook byte-identical posture).
 
 import (
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -12,7 +13,7 @@ import (
 
 func TestTelemetryRingAppendAndCursor(t *testing.T) {
 	r := NewTelemetryRing(4, 8)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		seq := r.Append("cc-1", EventInput{Kind: EventKindDispatch, Text: "hello"})
 		if seq != uint64(i+1) {
 			t.Fatalf("seq = %d, want %d", seq, i+1)
@@ -49,7 +50,7 @@ func TestTelemetryRingAppendAndCursor(t *testing.T) {
 
 func TestTelemetryRingOverflowDropsOldest(t *testing.T) {
 	r := NewTelemetryRing(4, 8)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		r.Append("cc-1", EventInput{Kind: EventKindHeard, Text: "t"})
 	}
 	// Full window: last 4 events retained (seqs 7..10).
@@ -219,7 +220,7 @@ func TestTalkLoopOnEventFiresAtLogSites(t *testing.T) {
 	}
 
 	// Barge-in: an interrupt frame while a turn is in flight emits it.
-	slow := &slowTurns{cannedTurns: cannedTurns{reply: "long"}, delay: 300 * time.Millisecond}
+	slow := &slowTurns{reply: "long", delay: 300 * time.Millisecond}
 	loop2Hook := &recorderHook{}
 	deps.Turns = slow
 	deps.OnEvent = loop2Hook.append
@@ -272,12 +273,7 @@ func TestTalkLoopNilOnEventIsNoop(t *testing.T) {
 	loop.frames <- Frame{CallID: "cc-nil", Event: EventPrompt, Text: "ready?", Last: &last}
 	waitFor(t, 2*time.Second, "no reply say", func() bool {
 		texts := sink.sayTexts()
-		for _, tx := range texts {
-			if tx == "Done." {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(texts, "Done.")
 	})
 	cancel()
 	<-done

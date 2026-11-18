@@ -29,6 +29,7 @@ package agent
 
 import (
 	"context"
+	"maps"
 	"strings"
 	"sync"
 	"testing"
@@ -59,9 +60,7 @@ func (c *capturePreExec) Check(action, toolName string, details map[string]strin
 	defer c.mu.Unlock()
 	// Copy — the checker runs before later stages may mutate.
 	cp := make(map[string]string, len(details))
-	for k, v := range details {
-		cp[k] = v
-	}
+	maps.Copy(cp, details)
 	c.calls = append(c.calls, cp)
 	return security.PreExecDecision{Allowed: c.allowed, Reason: c.reason}
 }

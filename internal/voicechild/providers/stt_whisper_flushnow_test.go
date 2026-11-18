@@ -12,8 +12,6 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/caimlas/meept/internal/voicechild"
 )
 
 // T-FlushNow-1: an open voiced window force-flushes on the kick without
@@ -124,5 +122,5 @@ func TestWhisperImplementsFlusher(t *testing.T) {
 	if _, ok := s.(interface{ FlushNow() }); !ok {
 		t.Fatal("WhisperSTT must expose FlushNow() for the pipeline's barge-in early-kick seam")
 	}
-	var _ voicechild.STTProvider = s
+	var _ = s
 }

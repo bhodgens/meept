@@ -15,6 +15,7 @@ package tts
 // suspending the driver.
 
 import (
+	"errors"
 	"io"
 	"testing"
 )
@@ -195,7 +196,7 @@ func TestAudioPlayerPlayContextErrorPropagates(t *testing.T) {
 	t.Cleanup(func() { newContext = orig })
 	newContext = func(PlaybackConfig) (audioDriver, error) { return nil, io.ErrClosedPipe }
 	p := NewAudioPlayer(PlaybackConfig{})
-	if err := p.Play([]byte("x")); err != io.ErrClosedPipe {
+	if err := p.Play([]byte("x")); !errors.Is(err, io.ErrClosedPipe) {
 		t.Fatalf("context failure must propagate, got %v", err)
 	}
 	// No burst retained on a failed Play.

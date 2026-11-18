@@ -58,7 +58,7 @@ func TestClipKeyPreImageStructure(t *testing.T) {
 
 func TestClipKeyStableAcrossCalls(t *testing.T) {
 	a := ClipKey("x", "y", "z", "w", []byte("r"))
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		if ClipKey("x", "y", "z", "w", []byte("r")) != a {
 			t.Fatal("ClipKey is not deterministic")
 		}

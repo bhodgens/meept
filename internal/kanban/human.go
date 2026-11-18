@@ -373,8 +373,7 @@ func (h *HumanCommands) Timeline(ctx context.Context, cardID string) ([]CardEven
 // rendering ("The UI must display holder + age from the error", C10).
 // ok=false for any other error.
 func LeaseAge(err error) (time.Duration, bool) {
-	var lh ErrLeaseHeld
-	if errors.As(err, &lh) {
+	if lh, ok := errors.AsType[ErrLeaseHeld](err); ok {
 		return time.Since(lh.Since), true
 	}
 	return 0, false

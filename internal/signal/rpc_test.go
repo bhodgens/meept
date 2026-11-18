@@ -159,22 +159,6 @@ func (s *stubRPCServer) count(method string) int {
 	return n
 }
 
-// notify writes one scripted notification to the (single) client conn.
-func (s *stubRPCServer) notify(conn net.Conn, method string, params any) {
-	s.t.Helper()
-	body, err := json.Marshal(params)
-	if err != nil {
-		s.t.Fatalf("marshal notification: %v", err)
-	}
-	n, err := json.Marshal(stubNotification{JSONRPC: "2.0", Method: method, Params: body})
-	if err != nil {
-		s.t.Fatalf("marshal notification envelope: %v", err)
-	}
-	if _, err := conn.Write(append(n, '\n')); err != nil {
-		s.t.Fatalf("write notification: %v", err)
-	}
-}
-
 // TestClientDialAndStartCall pins the leaf's Given/When/Then: Dial over a
 // unix socket to a stub signal-cli; StartCall issues the json-rpc
 // `startCall` method with the recipient + audio mode and surfaces the
@@ -231,14 +215,12 @@ func TestClientConcurrentRequestsSerialize(t *testing.T) {
 	const n = 20
 	var wg sync.WaitGroup
 	errs := make(chan error, n)
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range n {
+		wg.Go(func() {
 			if _, err := c.ListCalls(); err != nil {
 				errs <- err
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	close(errs)

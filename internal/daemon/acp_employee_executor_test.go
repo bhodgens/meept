@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/caimlas/meept/internal/agent"
-	"github.com/caimlas/meept/internal/bot"
 	"github.com/caimlas/meept/internal/employee"
 )
 
@@ -121,12 +120,10 @@ func acpSpec(mode string) *agent.AgentSpec {
 
 func acpEmployee(tier employee.AutonomyTier) employee.Employee {
 	emp := employee.Employee{
-		BotDefinition: bot.BotDefinition{
-			ID:            "alice",
-			Prompt:        "work",
-			Enabled:       true,
-			ExecutorAgent: "bob",
-		},
+		ID:            "alice",
+		Prompt:        "work",
+		Enabled:       true,
+		ExecutorAgent: "bob",
 	}
 	emp.Constitution = employee.Constitution{
 		Purpose:      "test",
@@ -238,7 +235,7 @@ func TestEmployeeBotExecutor_NonACPEmployeeUntouched(t *testing.T) {
 	resolveCalled := false
 	resolve := func(string) (acpTurnRunner, error) { resolveCalled = true; return nil, nil } //nolint:nilnil // test stub: never invoked on the non-acp path being pinned
 
-	emp := employee.Employee{BotDefinition: bot.BotDefinition{ID: "plain", Prompt: "p"}}
+	emp := employee.Employee{ID: "plain", Prompt: "p"}
 	emp.Constitution = employee.Constitution{Purpose: "x", AutonomyTier: employee.Tier1Reactive}
 
 	// A BROKEN registry would be irrelevant: the empty-ExecutorAgent path

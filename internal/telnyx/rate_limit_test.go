@@ -223,8 +223,7 @@ func TestSendSMS2ErrorBodySnippetTruncated(t *testing.T) {
 	}
 	// Non-429 is a plain error, not the typed rate-limit one — a worker
 	// must not back off on a payment-required.
-	var rle *RateLimitError
-	if errors.As(err, &rle) {
+	if _, ok := errors.AsType[*RateLimitError](err); ok {
 		t.Errorf("402 surfaced as *RateLimitError; only 429 is rate limiting")
 	}
 }

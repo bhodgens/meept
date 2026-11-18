@@ -214,7 +214,7 @@ func (r *TelemetryRing) Since(ccid string, cursor uint64, limit int) (events []T
 	}
 	start := (cr.head - cr.count + r.perCall) % r.perCall
 	out := make([]TelemetryEvent, 0, cr.count)
-	for i := 0; i < cr.count; i++ {
+	for i := range cr.count {
 		ev := cr.events[(start+i)%r.perCall]
 		if ev.Seq <= cursor {
 			continue

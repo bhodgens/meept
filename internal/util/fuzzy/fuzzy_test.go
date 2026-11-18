@@ -208,15 +208,6 @@ func TestFuzzyFindCanonicalWorkOrders(t *testing.T) {
 	}
 }
 
-// fuzzyMatch is the frozen C5 result element: item + score + name. The
-// generic FuzzyFind returns a slice of this shape; the sort test reads
-// the scores off it.
-type fuzzyMatch struct {
-	item  job
-	score float64
-	name  string
-}
-
 // TestFuzzyFindSortedDescending pins the contract: results are sorted by
 // score DESCENDING, and only candidates >= threshold are returned.
 func TestFuzzyFindSortedDescending(t *testing.T) {

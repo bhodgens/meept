@@ -275,9 +275,6 @@ func TestAppendRejectsInvalidSource(t *testing.T) {
 // §3 Transition matrix (AllowedTransitions)
 // =========================================================================
 
-// allStatuses is the closed set in contract order; "" means new subject.
-var allStatuses = []Status{StatusOpen, StatusDone, StatusCancelled, StatusWaitingMe, StatusWaitingThem}
-
 // legalTransition mirrors the frozen map, but the SUBJECT of the test is
 // the exported AllowedTransitions — the table is built FROM it so an
 // implementation that widens/narrows the map is caught by the
@@ -727,7 +724,7 @@ func TestQueryLogLimitsDefault200Max1000(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	const n = 250
-	for i := 0; i < n; i++ {
+	for i := range n {
 		mustAppend(t, s, DraftRecord{
 			EmployeeID: "emp-many", Kind: KindObservation,
 			Subject: fmt.Sprintf("s%03d", i), Source: SourceTool,

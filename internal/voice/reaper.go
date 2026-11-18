@@ -31,6 +31,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"sync"
 	"time"
 
@@ -190,9 +191,7 @@ func (r *reaper) forget(ccid string) {
 func (r *reaper) sweep(ctx context.Context) {
 	r.mu.Lock()
 	snapshot := make(map[string]time.Time, len(r.lastActivity))
-	for ccid, at := range r.lastActivity {
-		snapshot[ccid] = at
-	}
+	maps.Copy(snapshot, r.lastActivity)
 	r.mu.Unlock()
 	if len(snapshot) == 0 {
 		return

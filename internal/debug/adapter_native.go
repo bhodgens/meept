@@ -598,9 +598,9 @@ func parseGDBFrame(line string) *CoreFrame {
 	if _, loc, ok := strings.Cut(rest, " at "); ok {
 		location := strings.TrimSpace(loc)
 		// file:line format.
-		if colon := strings.LastIndex(location, ":"); colon >= 0 {
-			frame.File = location[:colon]
-			lineStr := location[colon+1:]
+		if before, after, ok := strings.CutLast(location, ":"); ok {
+			frame.File = before
+			lineStr := after
 			lineNum := 0
 			for _, ch := range lineStr {
 				if ch >= '0' && ch <= '9' {
@@ -902,9 +902,9 @@ func parseDelveCoreOutput(raw, coreFile, program string) *CoreDumpResult {
 				// Parse "at file:line" suffix.
 				if fn, location, ok := strings.Cut(funcName, " at "); ok {
 					frame.Function = fn
-					if colon := strings.LastIndex(location, ":"); colon >= 0 {
-						frame.File = location[:colon]
-						lineStr := location[colon+1:]
+					if before, after, ok := strings.CutLast(location, ":"); ok {
+						frame.File = before
+						lineStr := after
 						lineNum := 0
 						for _, ch := range lineStr {
 							if ch >= '0' && ch <= '9' {

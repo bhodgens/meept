@@ -704,10 +704,7 @@ func (p *pipeline) evaluateShortFinal(trimmed string) (gateVerdict, int, string)
 	effN := base
 	if p.fragmentDecayS > 0 && p.gateDropStreak > 0 &&
 		!p.gateDropAt.IsZero() && now.Sub(p.gateDropAt) < time.Duration(p.fragmentDecayS)*time.Second {
-		bump := p.gateDropStreak
-		if bump > 3 {
-			bump = 3
-		}
+		bump := min(p.gateDropStreak, 3)
 		effN = base + bump
 	}
 	words := wordCount(stripNonSpeechTokens(trimmed))

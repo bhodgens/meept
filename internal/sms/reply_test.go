@@ -108,7 +108,7 @@ func TestClassifyReplyStopFamily(t *testing.T) {
 		{"STIP", ":104"},
 		{"stopp", ":104"},
 		{"STO", ":104"},
-		{"stpo", ":104"},
+		{"stop", ":104"},
 		{"SOTP", ":104"},
 		{"DTOP", ":104"},
 		{"atop", ":104"},

@@ -45,7 +45,7 @@ func Parse(data []byte) (map[string]any, error) {
 	// emits numeric values rather than strings.
 	var fm map[string]any
 	if err := yaml.Unmarshal([]byte(frontmatter), &fm); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidYAML, err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidYAML, err)
 	}
 
 	id, ok := fm["id"].(string)

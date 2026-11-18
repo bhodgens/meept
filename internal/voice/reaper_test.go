@@ -178,8 +178,7 @@ func TestReaperReleasesSilentCallWithFrozenReason(t *testing.T) {
 	// would never reap it — this is the DEAD-AIR discriminator.
 	status := &fakeStatus{byID: map[string]telnyx.CallStatus{"cc-lost": {Known: true, Alive: false}}}
 	cfg := ReaperConfig{Status: status, Interval: 100 * time.Millisecond, DeadAir: 200 * time.Millisecond, MaxDuration: time.Hour}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	go rig.mgr.RunReaper(ctx, cfg)
 
 	// Within Interval + DeadAir the reaper must release the silent call
@@ -215,8 +214,7 @@ func TestReaperFreshCallerActivityNeverReapedRegardlessOfAge(t *testing.T) {
 	// Carrier would call it dead, but the caller keeps talking.
 	status := &fakeStatus{byID: map[string]telnyx.CallStatus{"cc-talkative": {Known: true, Alive: false}}}
 	cfg := ReaperConfig{Status: status, Interval: 100 * time.Millisecond, DeadAir: time.Hour, MaxDuration: time.Hour}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	go rig.mgr.RunReaper(ctx, cfg)
 
 	// Let several sweeps run while the reaper sees caller activity.
@@ -242,8 +240,7 @@ func TestReaperMaxDurationForceHangup(t *testing.T) {
 	// only seconds old.
 	status := &fakeStatus{byID: map[string]telnyx.CallStatus{"cc-long": {Known: true, Alive: true}}}
 	cfg := ReaperConfig{Status: status, Interval: 100 * time.Millisecond, DeadAir: time.Hour, MaxDuration: 200 * time.Millisecond}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	go rig.mgr.RunReaper(ctx, cfg)
 
 	deadline := time.Now().Add(5 * time.Second)
@@ -272,8 +269,7 @@ func TestReaperWithoutCheckerDoesNothing(t *testing.T) {
 	rig.answeredCall(t, "cc-x")
 
 	cfg := ReaperConfig{Status: nil, Interval: 50 * time.Millisecond}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	go rig.mgr.RunReaper(ctx, cfg)
 
 	time.Sleep(200 * time.Millisecond)
@@ -295,8 +291,7 @@ func TestReaperRaceWithRealHangupReleasesExactlyOnce(t *testing.T) {
 	// and a real hangup webhook through HandleCallEvent.
 	status := &fakeStatus{byID: map[string]telnyx.CallStatus{"cc-race": {Known: false}}}
 	cfg := ReaperConfig{Status: status, Interval: 50 * time.Millisecond, DeadAir: 100 * time.Millisecond, MaxDuration: time.Hour}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	go rig.mgr.RunReaper(ctx, cfg)
 	if err := rig.mgr.HandleCallEvent(ctx, telnyx.CallEvent{
 		EventType: "call.hangup", CallControlID: "cc-race",
@@ -328,8 +323,7 @@ func TestReaperCallEventErroredOnBus(t *testing.T) {
 
 	status := &fakeStatus{byID: map[string]telnyx.CallStatus{"cc-bus": {Known: false}}}
 	cfg := ReaperConfig{Status: status, Interval: 50 * time.Millisecond, DeadAir: 100 * time.Millisecond, MaxDuration: time.Hour}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	go rig.mgr.RunReaper(ctx, cfg)
 
 	deadline := time.Now().Add(5 * time.Second)

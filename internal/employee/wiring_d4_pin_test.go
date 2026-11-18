@@ -7,7 +7,6 @@ package employee
 
 import (
 	"context"
-	"io"
 	"log/slog"
 	"path/filepath"
 	"testing"
@@ -33,7 +32,7 @@ func TestNewManagerFromConfigReturnsStopAnchor(t *testing.T) {
 
 	result, err := NewManagerFromConfig(
 		context.Background(), cfg, botMgr, botStore,
-		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		slog.New(slog.DiscardHandler),
 	)
 	if err != nil {
 		t.Fatalf("NewManagerFromConfig: %v", err)

@@ -5,7 +5,6 @@ package daemon
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"path/filepath"
 	"sync"
@@ -28,7 +27,7 @@ import (
 // goroutines (simulating gate G2 + groups membership-change emissions)
 // leaves a contiguous, verifiable chain with no dropped seq.
 func TestSharedToolAuditStoreConcurrentAppendsVerify(t *testing.T) {
-	store, err := auditlog.OpenStore(filepath.Join(t.TempDir(), "tool_audit_chain.db"), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	store, err := auditlog.OpenStore(filepath.Join(t.TempDir(), "tool_audit_chain.db"), slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("open shared audit store: %v", err)
 	}
@@ -38,7 +37,7 @@ func TestSharedToolAuditStoreConcurrentAppendsVerify(t *testing.T) {
 	var wg sync.WaitGroup
 	appendLane := func(prefix string) {
 		defer wg.Done()
-		for i := 0; i < perLane; i++ {
+		for i := range perLane {
 			if _, aerr := store.Append(context.Background(), auditlog.Record{
 				Type:    prefix,
 				Payload: map[string]any{"i": i},
@@ -72,7 +71,7 @@ func TestSharedToolAuditStoreConcurrentAppendsVerify(t *testing.T) {
 // appending through the handler's lane and verifying via the gate lane's
 // handle.
 func TestGroupsLaneUsesSharedToolGateAudit(t *testing.T) {
-	store, err := auditlog.OpenStore(filepath.Join(t.TempDir(), "tool_audit_chain.db"), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	store, err := auditlog.OpenStore(filepath.Join(t.TempDir(), "tool_audit_chain.db"), slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("open shared audit store: %v", err)
 	}
@@ -109,7 +108,7 @@ func TestStopAnchorCancelsAnchorJob(t *testing.T) {
 	// Build the anchor seam the wiring produces: a NewAnchorJob over a
 	// real store, Run on a child of the given ctx, StopAnchor cancels.
 	dir := t.TempDir()
-	store, err := auditlog.OpenStore(filepath.Join(dir, "audit_chain.db"), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	store, err := auditlog.OpenStore(filepath.Join(dir, "audit_chain.db"), slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("open chain store: %v", err)
 	}
@@ -279,7 +278,7 @@ func TestVectorHybridRPCRespectsScopeFilter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create hybrid: %v", err)
 	}
-	server := rpc.New(&rpc.Config{SocketPath: filepath.Join(t.TempDir(), "vh.sock")}, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	server := rpc.New(&rpc.Config{SocketPath: filepath.Join(t.TempDir(), "vh.sock")}, nil, slog.New(slog.DiscardHandler))
 	registerVectorHybridRPCHandler(server, &vectorHybridWiring{searcher: hybrid}, 10)
 
 	params, _ := json.Marshal(services.VectorSearchRequest{Query: "scoped", Limit: 3})

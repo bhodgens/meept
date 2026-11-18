@@ -971,7 +971,7 @@ func TestGateway_PairExchangeRateLimit(t *testing.T) {
 		limit := &pairRateLimiter{m: make(map[string]ipRateLimitEntry)}
 		gateway.SetPairRateLimiter(limit)
 		// Exhaust the window.
-		for i := 0; i < pairRateLimiterMax; i++ {
+		for range pairRateLimiterMax {
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/pair/exchange",
 				strings.NewReader(`{"code":"`+readCode+`"}`))

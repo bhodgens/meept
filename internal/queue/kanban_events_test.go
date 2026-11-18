@@ -209,7 +209,6 @@ func TestJobTransitions_AllEdgesHavePublisherPath(t *testing.T) {
 // asserts the exact StateEvent payload on the C2 topic.
 func TestJobEdgePaths_EmitStateEvent(t *testing.T) {
 	for i, e := range jobEdgePaths {
-		e := e
 		t.Run(fmt.Sprintf("%d:%s->%s:%s", i, e.from, e.to, e.reason), func(t *testing.T) {
 			q, sub, ctx := newGatedQueue(t)
 			job := enqueueJob(t, q, ctx)

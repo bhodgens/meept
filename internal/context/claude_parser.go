@@ -553,8 +553,8 @@ func extractConfiguration(content string) []ConfigReference {
 
 // getFileExtension returns the file extension without the dot
 func getFileExtension(path string) string {
-	if idx := strings.LastIndex(path, "."); idx != -1 {
-		return path[idx+1:]
+	if _, after, ok := strings.CutLast(path, "."); ok {
+		return after
 	}
 	return ""
 }

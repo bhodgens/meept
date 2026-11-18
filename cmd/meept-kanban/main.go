@@ -198,7 +198,7 @@ type stringSlice []string
 func (s *stringSlice) String() string { return strings.Join(*s, ",") }
 
 func (s *stringSlice) Set(raw string) error {
-	for _, part := range strings.Split(raw, ",") {
+	for part := range strings.SplitSeq(raw, ",") {
 		if trimmed := strings.TrimSpace(part); trimmed != "" {
 			*s = append(*s, trimmed)
 		}

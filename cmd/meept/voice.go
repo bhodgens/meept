@@ -532,7 +532,7 @@ func classifyMicDeath(micErr error, micBytes int64) error {
 	if micErr == nil {
 		return fmt.Errorf("%w: capture ended cleanly with zero bytes", ErrMicNoAudio)
 	}
-	return fmt.Errorf("%w: %v", ErrMicNoAudio, micErr)
+	return fmt.Errorf("%w: %w", ErrMicNoAudio, micErr)
 }
 
 // liveMaxPendingAudioBytes bounds the not-yet-played backlog the CLI
@@ -902,8 +902,8 @@ func setupLiveSpeaker(open voiceLocalOpenResult, employee, recordDir string,
 	player := newPlayer()
 	var (
 		rec  *recorderPlayer
-		p    voice.Player = player
-		warm              = func() error { return player.Play(make([]byte, liveWarmBurstBytes)) }
+		p    = player
+		warm = func() error { return player.Play(make([]byte, liveWarmBurstBytes)) }
 	)
 	if recordDir != "" {
 		// Belt-and-braces: validate() already MkdirAlls; this keeps the
@@ -1103,10 +1103,10 @@ func runVoiceLocalLive(ctx context.Context, open voiceLocalOpenResult, employee,
 	// call end closes the sockets and the mic dies at zero bytes as a
 	// SYMPTOM, not the cause - reporting that as a mic failure was the
 	// user-visible false alarm).
-	var micBytes int64
+	var micBytes atomic.Int64
 	go func() {
 		n, err := io.Copy(inConn, cap)
-		atomic.StoreInt64(&micBytes, n)
+		micBytes.Store(n)
 		micDone <- err
 	}()
 	// speaker: out socket -> sink (raw PCM bursts -> oto), bounded
@@ -1136,7 +1136,7 @@ func runVoiceLocalLive(ctx context.Context, open voiceLocalOpenResult, employee,
 		if ctx.Err() != nil {
 			return nil
 		}
-		if cErr := classifyMicDeath(err, atomic.LoadInt64(&micBytes)); cErr != nil {
+		if cErr := classifyMicDeath(err, micBytes.Load()); cErr != nil {
 			if tail := cap.StderrTail(); tail != "" {
 				return fmt.Errorf("%w (ffmpeg: %s)", cErr, tail)
 			}
@@ -1617,7 +1617,7 @@ func (t *voiceEventTracker) drainOnce() {
 		if ccid == "" || t.ended[ccid] {
 			continue
 		}
-		for round := 0; round < 8; round++ {
+		for range 8 {
 			if !t.drainPollOnce(ccid, side[0], side[1]) {
 				break
 			}
@@ -2174,7 +2174,7 @@ func (d monitorDeps) start() {
 			return
 		}
 		fmt.Printf("monitor %s: tapping %s via speakers\n", label, emp)
-		var p voice.Player = player
+		var p = player
 		var rec *recorderPlayer
 		if recordDir != "" {
 			rec, err = newSideRecorder(player, recordDir, open.LinkID, label)

@@ -151,10 +151,7 @@ func feedChunks(n int) []byte {
 // exact chunk that crosses liveMaxPendingAudioBytes).
 func splitChunks(r *ctrlReader, data []byte) {
 	for len(data) > 0 {
-		n := liveSpeakerReadChunk
-		if n > len(data) {
-			n = len(data)
-		}
+		n := min(liveSpeakerReadChunk, len(data))
 		r.feed(data[:n])
 		data = data[n:]
 	}

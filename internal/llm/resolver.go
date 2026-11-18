@@ -2391,11 +2391,11 @@ func (r *Resolver) hasScopeBlocks() bool {
 // whether a block-map key is a scoped key (not a legacy host|credential
 // key) and returns its scope/target.
 func splitScopeBlockKey(key string) (FailureScope, string, bool) {
-	i := strings.IndexByte(key, 0)
-	if i < 0 {
+	before, after, ok := strings.Cut(key, "\x00")
+	if !ok {
 		return "", "", false
 	}
-	return FailureScope(key[:i]), key[i+1:], true
+	return FailureScope(before), after, true
 }
 
 // allBlockedSentinel picks the all-blocked error by scope: when every

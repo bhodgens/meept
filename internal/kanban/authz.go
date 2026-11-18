@@ -1,6 +1,8 @@
 package kanban
 
 import (
+	"slices"
+
 	"github.com/caimlas/meept/internal/auth"
 	"github.com/caimlas/meept/internal/config"
 )
@@ -43,13 +45,7 @@ func (a *Authorizer) CheckGrant(principal string, grant string) bool {
 	// Multiuser ON mode: check the user's assigned groups/grants.
 	// We treat the principal string as a UserID.
 	idn := &auth.Identity{UserID: principal}
-	for _, g := range a.users.UserGroups(idn) {
-		if g == grant {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(a.users.UserGroups(idn), grant)
 }
 
 // GetGrantsForPrincipal returns the C5 grants applicable to the principal.

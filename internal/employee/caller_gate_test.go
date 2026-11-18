@@ -48,6 +48,7 @@ package employee
 
 import (
 	"context"
+	"maps"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -80,9 +81,7 @@ func callerInfoDetails(approved, known bool, extra map[string]string) map[string
 		"caller_approved": strconv.FormatBool(approved),
 		"caller_known":    strconv.FormatBool(known),
 	}
-	for k, v := range extra {
-		d[k] = v
-	}
+	maps.Copy(d, extra)
 	return d
 }
 

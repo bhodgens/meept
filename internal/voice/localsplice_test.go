@@ -1282,7 +1282,7 @@ func TestLocalSpliceBargeInDrainsStalePump(t *testing.T) {
 	drainLine := ""
 	deadline = time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		for _, line := range strings.Split(logBuf.String(), "\n") {
+		for line := range strings.SplitSeq(logBuf.String(), "\n") {
 			if strings.Contains(line, "barge-in drained stale chunks") {
 				drainLine = line
 			}

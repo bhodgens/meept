@@ -22,6 +22,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -328,8 +329,8 @@ func requestIP(r *http.Request) string {
 	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
 		// The leftmost entry is the original client; strip it for the
 		// limiter key.
-		if i := strings.IndexByte(fwd, ','); i >= 0 {
-			return strings.TrimSpace(fwd[:i])
+		if before, _, ok := strings.Cut(fwd, ","); ok {
+			return strings.TrimSpace(before)
 		}
 		return strings.TrimSpace(fwd)
 	}
@@ -389,12 +390,7 @@ func (g *Gateway) authorize(w http.ResponseWriter, r *http.Request, grants ...st
 }
 
 func hasGrantName(grants []string, grant string) bool {
-	for _, candidate := range grants {
-		if candidate == grant {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(grants, grant)
 }
 
 // bearerToken reads the token from the Authorization header, then falls back
@@ -410,7 +406,7 @@ func bearerToken(r *http.Request) string {
 // wsBearer extracts "bearer.<token>" from Sec-WebSocket-Protocol (RFC 6455
 // §4.2.2 lane, same convention as the daemon's own hub).
 func wsBearer(r *http.Request) string {
-	for _, proto := range strings.Split(r.Header.Get("Sec-WebSocket-Protocol"), ",") {
+	for proto := range strings.SplitSeq(r.Header.Get("Sec-WebSocket-Protocol"), ",") {
 		if rest, ok := strings.CutPrefix(strings.TrimSpace(proto), "bearer."); ok {
 			return rest
 		}
@@ -428,7 +424,7 @@ func pickSubprotocol(r *http.Request) string {
 		return ""
 	}
 	picked := ""
-	for _, proto := range strings.Split(offered, ",") {
+	for proto := range strings.SplitSeq(offered, ",") {
 		proto = strings.TrimSpace(proto)
 		if strings.HasPrefix(proto, "bearer.") {
 			return proto
@@ -580,10 +576,8 @@ func (g *Gateway) originAllowed(origin string) bool {
 		return true
 	}
 	lower := strings.ToLower(strings.TrimSpace(origin))
-	for _, allowed := range g.allowedOrigins {
-		if lower == allowed {
-			return true
-		}
+	if slices.Contains(g.allowedOrigins, lower) {
+		return true
 	}
 	host := lower
 	if u, err := url.Parse(origin); err == nil && u.Hostname() != "" {

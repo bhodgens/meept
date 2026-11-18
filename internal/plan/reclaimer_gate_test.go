@@ -80,8 +80,7 @@ func backdateSynthesisLease(t *testing.T, mgr *PlanManager, planID string) {
 // RED: PlanManager.StartSynthesisReclaimer is undefined (compile failure —
 // the C-P2 symbol lands in leaf 01).
 func TestSynthesisReclaimerRedrivesApproved(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// --- sub-case A: within-bound plan is re-driven to executing.
 	mgr, creator := setupClaimManager(t)
@@ -152,8 +151,7 @@ func TestSynthesisReclaimerRedrivesApproved(t *testing.T) {
 //
 // RED: StartSynthesisReclaimer undefined (compile).
 func TestSynthesisReclaimerPeriodic(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	mgr, _ := setupClaimManager(t)
 	mgr.StartSynthesisReclaimer(ctx, 25*time.Millisecond)

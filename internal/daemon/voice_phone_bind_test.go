@@ -24,6 +24,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -115,7 +116,7 @@ func phoneBindRowState(t *testing.T, dbPath, ccid string) (string, bool) {
 	defer db.Close() //nolint:errcheck // read-only test handle
 	var state string
 	err = db.QueryRow(`SELECT state FROM voice_calls WHERE call_id = ?`, ccid).Scan(&state)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return "", false
 	}
 	if err != nil {

@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -58,9 +59,9 @@ func (f *fakeKanbanRPC) recordedCalls() []fakeKanbanCall {
 func (f *fakeKanbanRPC) lastCall(method string) (fakeKanbanCall, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	for i := len(f.calls) - 1; i >= 0; i-- {
-		if f.calls[i].method == method {
-			return f.calls[i], true
+	for _, v := range slices.Backward(f.calls) {
+		if v.method == method {
+			return v, true
 		}
 	}
 	return fakeKanbanCall{}, false

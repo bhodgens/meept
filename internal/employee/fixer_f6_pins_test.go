@@ -423,7 +423,7 @@ func TestBudgetChecker_LimitsExcessInvocationsRefused(t *testing.T) {
 	}
 
 	// Record 3 goal rounds against the persisted counters.
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		checker.RecordGoalRound("emp_budget")
 	}
 	_, _, invocations := checker.SpentToday("emp_budget")
