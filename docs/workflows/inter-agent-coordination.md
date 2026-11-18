@@ -4,10 +4,12 @@ Shared vocabulary for cross-agent observation and messaging: turn-state
 edges, stop reasons, the typed ACP progress bridge, the structured inbox
 envelope, and the field-keyed structured handoff scan. Everything here is
 defined once in `internal/agent` (`coordination.go`, `turnstate.go`) and
-adopted by the delegate, pair/team, ACP-bridge, and employee-messaging
+adopted by the delegate, pair/team, ACP-bridge, bot, and employee-messaging
 surfaces. Scope of issue #139 (plan tree
-`docs/plans/20261115-inter-agent-coordination/`); #140 (bot result/inbox)
-consumes the same shapes in a follow-up.
+`docs/plans/20261115-inter-agent-coordination/`); #140 (bot result/inbox,
+plan tree `docs/plans/20261117-bot-employee-execution-observability/`)
+consumes the same shapes — its two result topics and both turn-state edges are
+documented below.
 
 ## Bus topic: `agent.turn.state`
 
@@ -103,6 +105,42 @@ stop reasons map onto the `StopReason` table; anything unrecognized still
 publishes verbatim so consumers can see novel agent dialects instead of
 losing them to a silent remap.
 
+## Execution results: `bot.result` and `employee.result` (issue #140)
+
+Both execution tiers publish their outcome as a `result event` over the bus.
+Issue #140 (plan tree
+`docs/plans/20261117-bot-employee-execution-observability/`) gives each tier its
+**own** typed topic; the two share ONE frozen payload (`C1`,
+`agent.ExecutionResultEvent`, `internal/agent/execution_events.go`):
+
+```go
+var TopicBotResult      = bus.NewTopic[ExecutionResultEvent]("bot.result")
+var TopicEmployeeResult = bus.NewTopic[ExecutionResultEvent]("employee.result")
+```
+
+| Topic | Emitter | Source |
+|-------|---------|--------|
+| `bot.result` | `BotRunner` (`internal/bot/runner.go`), via `bot.Manager` | `"bot"` |
+| `employee.result` | `GoalLoop` (`internal/employee/goal_loop.go`) | `"employee"` |
+
+- The payload has **no `kind` field and no `ExecutionKind` type** — the topic
+  name is the sole tier discriminator. `status` carries
+  `completed` / `failed` / `skipped`; `stop_reason` reuses the `StopReason`
+  vocabulary above (`end_turn` / `error` / `cancelled` respectively). The shared
+  C1 payload also carries `agent_id`, `output`, `tokens_used`, `trigger_ref`,
+  `session_id`, `duration_ms`, and `timestamp`.
+- Both emitters also publish the entry/exit turn-state pair on the shared
+  `agent.turn.state` topic above (C2: `running` at entry, `idle` with the mapped
+  stop reason at exit), so result and turn-state surfaces stay on the same #139
+  vocabulary. No new turn-state type was introduced.
+- The topics are 2-segment and classified as `agent_progress` on the WS relay
+  via the `WSClass() == WSProgress` marker and the shared
+  `decodeExecutionResultWSClass` (`internal/comm/http/server_wsclass.go`);
+  both are in the relay's explicit subscription list. Publishers are nil-safe.
+- The publish seams are set at daemon construction (`internal/daemon/components.go`).
+
+See [bots](bots.md) for the two-tier user-facing view.
+
 ## Employee messaging: `AgentInboxBody` (C4)
 
 `send_agent_message` accepts an optional `structured` object argument
@@ -182,7 +220,7 @@ consume this event rather than re-derive the list.
 
 | Layer | Surface |
 |-------|---------|
-| Bus | `agent.turn.state` (typed `Topic[TurnStateEvent]`) |
+| Bus | `agent.turn.state` (typed `Topic[TurnStateEvent]`); `bot.result` + `employee.result` (typed `Topic[ExecutionResultEvent]`, #140) |
 | WS | relayed as `agent_progress` via the wsclass marker (`typedPayloadDecoders` entry + explicit relay literal) |
 | Connectivity graph | `docs/generated/bus-topology.md` (regenerate with `make graphs`) |
 | e2e | `e2e/suites/inter-agent-coord/` (manifest: `e2e/manifest.json`, suite `inter-agent-coord`) |
