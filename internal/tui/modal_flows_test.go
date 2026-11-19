@@ -598,3 +598,90 @@ func TestACPModal_FooterGatedByOptionsKey(t *testing.T) {
 		t.Errorf("case-insensitive allow+always kind should gate the footer on, got:\n%s", view3)
 	}
 }
+
+// M12 pin (GUI parity): both rename submit paths trim the name and refuse
+// an empty/whitespace result — the modal stays open with an inline error
+// instead of emitting SessionRenameMsg with an empty name (which the app
+// routes to session CREATE when SessionID is "").
+func TestSessionRenameModal_EmptyNameRejected(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		buffer   string
+		selected int // 0 = enter on input, 1 = enter on ok button
+	}{
+		{"input enter empty", "", 0},
+		{"input enter whitespace", "   ", 0},
+		{"ok button empty", "", 1},
+		{"ok button whitespace", " \t ", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewSessionRenameModal(DefaultStyles())
+			m.Show("sess-1", "old-name")
+			m.inputBuffer = tc.buffer
+			m.selected = tc.selected
+
+			cmd := m.HandleKey("enter")
+			if cmd != nil {
+				t.Fatalf("empty submit produced a command (%T msg)", cmd())
+			}
+			if !m.IsVisible() {
+				t.Fatal("empty submit closed the modal; it must stay open for correction")
+			}
+			if m.inputErr == "" {
+				t.Error("empty submit left no inline error affordance")
+			}
+			if out := m.View(80, 24); !strings.Contains(out, "name cannot be empty") {
+				t.Errorf("inline error not rendered\n%s", out)
+			}
+		})
+	}
+}
+
+// M12 pin: a padded name submits TRIMMED and closes the modal; typing
+// after a rejection clears the inline error.
+func TestSessionRenameModal_TrimsNameAndClearsError(t *testing.T) {
+	m := NewSessionRenameModal(DefaultStyles())
+	m.Show("sess-1", "old-name")
+	m.inputBuffer = "   "
+	if cmd := m.HandleKey("enter"); cmd != nil {
+		t.Fatal("whitespace submit emitted a command")
+	}
+
+	// Typing clears the rejection affordance.
+	m.HandleKey("x")
+	if m.inputErr != "" {
+		t.Errorf("typing did not clear the inline error: %q", m.inputErr)
+	}
+
+	m.inputBuffer = "  renamed-desc  "
+	cmd := m.HandleKey("enter")
+	if cmd == nil {
+		t.Fatal("valid submit produced no command")
+	}
+	msg, ok := cmd().(SessionRenameMsg)
+	if !ok {
+		t.Fatalf("submit produced %T, want SessionRenameMsg", msg)
+	}
+	if msg.NewName != "renamed-desc" {
+		t.Errorf("NewName = %q, want trimmed %q", msg.NewName, "renamed-desc")
+	}
+	if msg.SessionID != "sess-1" {
+		t.Errorf("SessionID = %q, want sess-1", msg.SessionID)
+	}
+	if m.IsVisible() {
+		t.Error("valid submit did not close the modal")
+	}
+}
+
+// M12 pin: the create path through the rename modal (SessionID "") also
+// refuses an empty name — no session named "" may be created.
+func TestSessionRenameModal_CreatePathEmptyRejected(t *testing.T) {
+	m := NewSessionRenameModal(DefaultStyles())
+	m.Show("", "")
+	if cmd := m.HandleKey("enter"); cmd != nil {
+		t.Fatal("empty create submit emitted a command")
+	}
+	if !m.IsVisible() {
+		t.Fatal("empty create submit closed the modal")
+	}
+}

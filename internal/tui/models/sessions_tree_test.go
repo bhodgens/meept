@@ -99,3 +99,34 @@ func TestSessionTree_LeftRightToggleChildren(t *testing.T) {
 		t.Errorf("left arrow did not collapse the group; child row still visible:\n%s", got)
 	}
 }
+
+// L15 pin (UI lowercase rule, GUI parity): bucket headers render the
+// bucket label lowercased while the grouping key keeps its raw case.
+func TestSessionTree_BucketHeaderLowercased(t *testing.T) {
+	rpc := &mockSessionsRPC{connected: true}
+	sessions := []types.Session{
+		{ID: "s1", Name: "chat one", ProjectID: "Proj-Alpha"},
+		{ID: "s2", Name: "chat two", ProjectPath: "/Work/MixedCase"},
+	}
+	m := newSessionsModelWithSessions(rpc, sessions)
+	out := treeRowText(m)
+
+	for _, want := range []string{"proj-alpha", "/work/mixedcase"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("bucket header not lowercased: missing %q\n%s", want, out)
+		}
+	}
+	for _, banned := range []string{"Proj-Alpha", "/Work/MixedCase"} {
+		if strings.Contains(out, banned) {
+			t.Errorf("bucket header renders raw-case label %q\n%s", banned, out)
+		}
+	}
+
+	// The raw bucket key still drives collapse state: left arrow on the
+	// header collapses the group even though its label is lowercased.
+	m.table.SetCursor(m.headerRows["Proj-Alpha"])
+	m.Update(leftArrow())
+	if !m.collapsed["Proj-Alpha"] {
+		t.Error("collapse state lost the raw-case bucket key")
+	}
+}

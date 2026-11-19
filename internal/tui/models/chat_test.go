@@ -57,6 +57,12 @@ type MockChatRPCClient struct {
 	GetMessagesResp     *types.SessionMessagesResponse
 	GetMessagesErr      error
 	UpdatedDescriptions map[string]string
+
+	// Session-naming project resolution tracking (M13)
+	GeneratedProjectNames []string        // projectName per GenerateSessionDescription call
+	SessionGetResp        json.RawMessage // session.get payload (nil = empty object)
+	ProjectListResp       json.RawMessage // project.list payload (nil = empty object)
+	CallErr               error           // generic Call failure injection
 }
 
 func NewMockChatRPCClient() *MockChatRPCClient {
@@ -133,7 +139,9 @@ func (m *MockChatRPCClient) UpdateSessionDescription(sessionID, description stri
 	return nil
 }
 
-func (m *MockChatRPCClient) GenerateSessionDescription(sessionID, firstMessage, _ string) (*types.GenerateDescriptionResult, error) {
+func (m *MockChatRPCClient) GenerateSessionDescription(sessionID, firstMessage, projectName string) (*types.GenerateDescriptionResult, error) {
+	// Record the resolved project name (M13 pin).
+	m.GeneratedProjectNames = append(m.GeneratedProjectNames, projectName)
 	// Simulate LLM-generated description
 	desc := "mock: " + firstMessage
 	if len(desc) > 30 {
@@ -195,6 +203,9 @@ func (m *MockChatRPCClient) SubmitChat(_ context.Context, message, sessionID str
 
 // Call implements the RPCClient interface for generic RPC calls.
 func (m *MockChatRPCClient) Call(method string, params any) (json.RawMessage, error) {
+	if m.CallErr != nil {
+		return nil, m.CallErr
+	}
 	switch method {
 	case "session.thread.list":
 		return json.RawMessage(`{"threads":[],"count":0}`), nil
@@ -202,6 +213,16 @@ func (m *MockChatRPCClient) Call(method string, params any) (json.RawMessage, er
 		return json.RawMessage(`{"success":true}`), nil
 	case "session.thread.new":
 		return json.RawMessage(`{"thread":{"id":"test-thread","topic_label":"test"}}`), nil
+	case "session.get":
+		if m.SessionGetResp != nil {
+			return m.SessionGetResp, nil
+		}
+		return json.RawMessage(`{}`), nil
+	case "project.list":
+		if m.ProjectListResp != nil {
+			return m.ProjectListResp, nil
+		}
+		return json.RawMessage(`{}`), nil
 	default:
 		return json.RawMessage(`{}`), nil
 	}
@@ -1899,5 +1920,102 @@ func TestChatModel_ProgressUpdateMsg_CarriesACPSession(t *testing.T) {
 	_ = model.Update(ProgressUpdateMsg{Stage: "acp"})
 	if model.progressState.ACPAgent != "" || model.progressState.Persona != "" {
 		t.Errorf("bindingless acp frame should clear stale attribution, got %+v", model.progressState)
+	}
+}
+
+// M13 pin (GUI parity, project_provider.dart resolveSessionProject):
+// session naming resolves the session's OWN bound project —
+// project_id exact match first, then project_path vs local_path with one
+// trailing separator stripped. Unbound/unresolvable = "" — never the
+// globally active project.
+func TestResolveSessionProjectName(t *testing.T) {
+	projects := json.RawMessage(`{"projects":[
+		{"id":"p-other","name":"other-project","local_path":"/work/other"},
+		{"id":"p-bound","name":"bound-project","local_path":"/work/bound/"},
+		{"id":"p-path","name":"path-project","local_path":"/work/pathproj"},
+		{"id":"p-unnamed","name":"","local_path":"/work/unnamed"}
+	],"count":4}`)
+
+	tests := []struct {
+		name    string
+		session string
+		want    string
+	}{
+		{"id match wins over path", `{"id":"s1","project_id":"p-bound","project_path":"/work/pathproj"}`, "bound-project"},
+		{"path fallback with trailing slash on session", `{"id":"s1","project_path":"/work/pathproj/"}`, "path-project"},
+		{"path fallback with trailing slash on project", `{"id":"s1","project_path":"/work/bound"}`, "bound-project"},
+		{"unknown id and unknown path", `{"id":"s1","project_id":"p-gone","project_path":"/work/gone"}`, ""},
+		{"unbound session", `{"id":"s1"}`, ""},
+		{"unnamed project falls back to id", `{"id":"s1","project_id":"p-unnamed"}`, "p-unnamed"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := NewMockChatRPCClient()
+			mock.SessionGetResp = json.RawMessage(tc.session)
+			mock.ProjectListResp = projects
+			if got := resolveSessionProjectName(mock, "s1"); got != tc.want {
+				t.Errorf("resolveSessionProjectName = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// M13 pin: RPC failures degrade to "" (naming still runs without project
+// context) instead of failing the description flow.
+func TestResolveSessionProjectName_RPCFailureDegrades(t *testing.T) {
+	mock := NewMockChatRPCClient()
+	mock.CallErr = errors.New("daemon unreachable")
+	if got := resolveSessionProjectName(mock, "s1"); got != "" {
+		t.Errorf("resolveSessionProjectName on RPC failure = %q, want empty", got)
+	}
+}
+
+// M13 pin: the first-exchange naming flow passes the resolved project
+// name through to GenerateSessionDescription (was hardcoded "").
+func TestChatModel_DescriptionUsesSessionBoundProject(t *testing.T) {
+	mock := NewMockChatRPCClient()
+	mock.SessionGetResp = json.RawMessage(`{"id":"sess-1","project_id":"p-bound"}`)
+	mock.ProjectListResp = json.RawMessage(`{"projects":[{"id":"p-bound","name":"bound-project","local_path":"/work/bound"}],"count":1}`)
+
+	style := lipgloss.NewStyle()
+	model := NewChatModelWithConfig(mock, style, style, style, "once", InputBehaviorConfig{EnterBehavior: "shift_sends"}, ChatConfig{LivenessTimeout: 120 * time.Second})
+	model.SetSize(80, 24)
+	model.sessionID = "sess-1"
+	model.addMessage(RoleUser, "fix the build pipeline")
+	model.addMessage(RoleAssistant, "on it")
+
+	cmd := model.maybeGenerateDescription()
+	if cmd == nil {
+		t.Fatal("first exchange produced no description command")
+	}
+	cmd()
+	if len(mock.GeneratedProjectNames) != 1 {
+		t.Fatalf("GenerateSessionDescription calls = %d, want 1", len(mock.GeneratedProjectNames))
+	}
+	if got := mock.GeneratedProjectNames[0]; got != "bound-project" {
+		t.Errorf("projectName passed = %q, want the session's bound project %q", got, "bound-project")
+	}
+}
+
+// M13 pin: an unbound session passes "" — never a globally active project.
+func TestChatModel_DescriptionUnboundSessionPassesEmpty(t *testing.T) {
+	mock := NewMockChatRPCClient()
+	mock.SessionGetResp = json.RawMessage(`{"id":"sess-1"}`)
+	mock.ProjectListResp = json.RawMessage(`{"projects":[{"id":"p-active","name":"active-project","local_path":"/work/active","status":"active"}],"count":1}`)
+
+	style := lipgloss.NewStyle()
+	model := NewChatModelWithConfig(mock, style, style, style, "once", InputBehaviorConfig{EnterBehavior: "shift_sends"}, ChatConfig{LivenessTimeout: 120 * time.Second})
+	model.SetSize(80, 24)
+	model.sessionID = "sess-1"
+	model.addMessage(RoleUser, "hello there")
+	model.addMessage(RoleAssistant, "hi")
+
+	cmd := model.maybeGenerateDescription()
+	if cmd == nil {
+		t.Fatal("first exchange produced no description command")
+	}
+	cmd()
+	if len(mock.GeneratedProjectNames) != 1 || mock.GeneratedProjectNames[0] != "" {
+		t.Errorf("projectName passed = %v, want [\"\"] for an unbound session", mock.GeneratedProjectNames)
 	}
 }

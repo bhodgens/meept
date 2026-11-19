@@ -641,9 +641,17 @@ func (s *SessionPickerModal) HandleKey(key string) tea.Cmd {
 func (s *SessionPickerModal) handleInputKey(key string) tea.Cmd {
 	switch key {
 	case KeyEnter:
-		name := s.inputBuffer
+		// M12 (GUI parity): trim the entered name; a whitespace-only
+		// buffer falls back to the configured default rather than
+		// creating a session named "   ".
+		name := strings.TrimSpace(s.inputBuffer)
 		if name == "" {
-			name = s.clientConfig.Session.DefaultName
+			name = strings.TrimSpace(s.clientConfig.Session.DefaultName)
+		}
+		if name == "" {
+			// No usable default configured: refuse the empty submit
+			// instead of creating an unnamed session.
+			return nil
 		}
 		s.inputMode = false
 		s.inputBuffer = ""
@@ -686,8 +694,11 @@ type SessionRenameModal struct {
 	sessionName string
 	inputBuffer string
 	selected    int // 0 = input, 1 = ok, 2 = cancel
-	styles      *Styles
-	width       int
+	// inputErr is the inline validation error shown when submit is
+	// rejected (empty/whitespace name — GUI parity, M12).
+	inputErr string
+	styles   *Styles
+	width    int
 }
 
 // NewSessionRenameModal creates a new session rename modal.
@@ -707,6 +718,7 @@ func (m *SessionRenameModal) Show(sessionID, currentName string) {
 	m.sessionName = currentName
 	m.inputBuffer = currentName
 	m.selected = 0
+	m.inputErr = ""
 }
 
 // Hide hides the modal.
@@ -752,7 +764,15 @@ func (m *SessionRenameModal) View(screenW, screenH int) string {
 	}
 	input := m.inputBuffer + "█"
 	b.WriteString(inputStyle.Render(input))
-	b.WriteString("\n\n")
+	b.WriteString("\n")
+	// Inline validation error (M12): shown when an empty/whitespace name
+	// was refused; the modal stays open so the user can correct it.
+	if m.inputErr != "" {
+		errStyle := lipgloss.NewStyle().Foreground(ColorError).Width(m.width - 4)
+		b.WriteString(errStyle.Render(m.inputErr))
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
 
 	// Buttons
 	okStyle := m.styles.ModalItem
@@ -780,6 +800,26 @@ func (m *SessionRenameModal) View(screenW, screenH int) string {
 	return lipgloss.Place(screenW, screenH, lipgloss.Center, lipgloss.Center, content)
 }
 
+// submitName validates the input and emits the rename/create request
+// (M12, GUI parity): the name is trimmed and an empty result is refused —
+// the modal stays open with an inline error instead of renaming to "" or
+// creating an unnamed session. Mirrors the Flutter RenameSessionDialog's
+// trim + empty rejection. Returns nil when the submit is rejected.
+func (m *SessionRenameModal) submitName() tea.Cmd {
+	name := strings.TrimSpace(m.inputBuffer)
+	if name == "" {
+		m.inputErr = "name cannot be empty"
+		m.selected = 0
+		return nil
+	}
+	m.inputErr = ""
+	sessionID := m.sessionID
+	m.Hide()
+	return func() tea.Msg {
+		return SessionRenameMsg{SessionID: sessionID, NewName: name}
+	}
+}
+
 // HandleKey processes key input for the rename modal.
 func (m *SessionRenameModal) HandleKey(key string) tea.Cmd {
 	// When input field is focused (selected == 0), handle text input keys first
@@ -801,13 +841,8 @@ func (m *SessionRenameModal) HandleKey(key string) tea.Cmd {
 			m.selected = 2
 			return nil
 		case KeyEnter:
-			// Submit the current input
-			name := m.inputBuffer
-			sessionID := m.sessionID
-			m.Hide()
-			return func() tea.Msg {
-				return SessionRenameMsg{SessionID: sessionID, NewName: name}
-			}
+			// Submit the current input (trimmed; empty refused — M12).
+			return m.submitName()
 		case KeyEsc:
 			m.Hide()
 			return nil
@@ -818,6 +853,7 @@ func (m *SessionRenameModal) HandleKey(key string) tea.Cmd {
 			// Append printable characters
 			if len(key) == 1 && key[0] >= ' ' && key[0] <= '~' {
 				m.inputBuffer += key
+				m.inputErr = ""
 			}
 			return nil
 		}
@@ -844,13 +880,8 @@ func (m *SessionRenameModal) HandleKey(key string) tea.Cmd {
 	case KeyEnter:
 		switch m.selected {
 		case 1:
-			// Ok button - submit
-			name := m.inputBuffer
-			sessionID := m.sessionID
-			m.Hide()
-			return func() tea.Msg {
-				return SessionRenameMsg{SessionID: sessionID, NewName: name}
-			}
+			// Ok button - submit (trimmed; empty refused — M12).
+			return m.submitName()
 		case 2:
 			// Cancel button
 			m.Hide()
@@ -862,6 +893,7 @@ func (m *SessionRenameModal) HandleKey(key string) tea.Cmd {
 		if len(key) == 1 && key[0] >= ' ' && key[0] <= '~' {
 			m.selected = 0
 			m.inputBuffer += key
+			m.inputErr = ""
 		}
 	}
 	return nil

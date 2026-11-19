@@ -2073,8 +2073,12 @@ func (m *ChatModel) maybeGenerateDescription() tea.Cmd {
 	m.sessionDescription = "summarizing..."
 
 	return func() tea.Msg {
+		// M13 (GUI parity, 025ba662): name the session from ITS OWN
+		// bound project, never the globally active one. Unresolvable
+		// bindings pass "" (no project context).
+		projectName := resolveSessionProjectName(rpc, sessionID)
 		// Try LLM-based generation first
-		result, err := rpc.GenerateSessionDescription(sessionID, firstUserContent, "")
+		result, err := rpc.GenerateSessionDescription(sessionID, firstUserContent, projectName)
 		if err != nil {
 			// Fallback to simple extraction
 			desc := extractDescription(firstUserContent)
@@ -2090,6 +2094,71 @@ func (m *ChatModel) maybeGenerateDescription() tea.Cmd {
 			Description: result.Description,
 		}
 	}
+}
+
+// resolveSessionProjectName resolves the project bound to sessionID for
+// session naming (M13, GUI parity with project_provider.dart's
+// resolveSessionProject): session.get supplies the session's own
+// project_id/project_path, project.list supplies the candidates.
+// Precedence: exact project_id match, then exact local_path match with a
+// single trailing separator stripped from both sides. An unbound or
+// unresolvable session yields "" — never the globally active project.
+// Best-effort: RPC failures degrade to "" (naming still runs, without
+// project context), logged so the failure is not silent.
+func resolveSessionProjectName(rpc RPCClient, sessionID string) string {
+	rawSession, err := rpc.Call("session.get", map[string]string{"id": sessionID})
+	if err != nil {
+		slog.Warn("session naming: session lookup failed", "session_id", sessionID, "error", err)
+		return ""
+	}
+	var sess types.Session
+	if err := json.Unmarshal(rawSession, &sess); err != nil {
+		slog.Warn("session naming: session decode failed", "session_id", sessionID, "error", err)
+		return ""
+	}
+	if sess.ProjectID == "" && sess.ProjectPath == "" {
+		return "" // unbound session: no project context
+	}
+
+	rawProjects, err := rpc.Call("project.list", nil)
+	if err != nil {
+		slog.Warn("session naming: project list failed", "session_id", sessionID, "error", err)
+		return ""
+	}
+	var resp types.ProjectListResponse
+	if err := json.Unmarshal(rawProjects, &resp); err != nil {
+		slog.Warn("session naming: project list decode failed", "session_id", sessionID, "error", err)
+		return ""
+	}
+
+	// 1. Exact id match.
+	for _, p := range resp.Projects {
+		if sess.ProjectID != "" && p.ID == sess.ProjectID {
+			return projectDisplayName(p)
+		}
+	}
+	// 2. Path fallback for sessions bound by path before the daemon
+	// recorded a project id: compare with one trailing separator
+	// stripped from both sides (GUI normalization).
+	if sess.ProjectPath != "" {
+		want := strings.TrimSuffix(sess.ProjectPath, "/")
+		for _, p := range resp.Projects {
+			candidate := strings.TrimSuffix(p.LocalPath, "/")
+			if candidate != "" && candidate == want {
+				return projectDisplayName(p)
+			}
+		}
+	}
+	return ""
+}
+
+// projectDisplayName mirrors the GUI's name resolution: the project's
+// name, falling back to its id when unnamed.
+func projectDisplayName(p types.ProjectInfo) string {
+	if p.Name != "" {
+		return p.Name
+	}
+	return p.ID
 }
 
 // extractDescription extracts the first 4-7 words from text for a session description.

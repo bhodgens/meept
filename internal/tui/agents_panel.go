@@ -460,6 +460,17 @@ func (p *AgentsPanel) resizeColumns() {
 	p.table.SetRows([]table.Row{})
 
 	if p.width < 30 {
+		// L17: the default 9-column set sums to 98 and overflowed any
+		// narrow viewport. Install a minimal id/status set fitted to the
+		// budget instead; tableutil.SetRows truncates the cached 9-cell
+		// rows to these columns when they are repopulated.
+		cols := []table.Column{{Title: "id"}, {Title: "status"}}
+		budget := max(tableutil.ContentBudget(p.table.Width(), len(cols)), 1)
+		widths := clampColumnWidths(tableutil.FitWidthsMin(budget, []int{1, 1}, []int{3, 2}), budget)
+		for i := range cols {
+			cols[i].Width = widths[i]
+		}
+		p.table.SetColumns(cols)
 		return
 	}
 	// Fitted to the viewport budget (tableutil.FitWidthsMin) rather than
@@ -501,8 +512,21 @@ func (p *AgentsPanel) resizeColumns() {
 	// pushes the sum to 14. Re-enforce the invariant at the single write
 	// boundary: sum <= budget, every column >= 1.
 	budget := max(tableutil.ContentBudget(p.table.Width(), len(mins)), 1)
-	for sum := 0; ; {
-		sum = 0
+	widths = clampColumnWidths(widths, budget)
+	for i := range cols {
+		cols[i].Width = widths[i]
+	}
+	p.table.SetColumns(cols)
+}
+
+// clampColumnWidths enforces the column-fit invariant at the write
+// boundary: the widths sum to at most budget and every column keeps at
+// least MinColumnWidth. FitWidthsMin's over-subscription fallback clamps
+// zero-width columns up to 1, which can push the sum past the budget
+// (M12 pin); shrink the widest shrinkable column until it fits.
+func clampColumnWidths(widths []int, budget int) []int {
+	for {
+		sum := 0
 		for _, w := range widths {
 			sum += w
 		}
@@ -520,10 +544,7 @@ func (p *AgentsPanel) resizeColumns() {
 		}
 		widths[widest]--
 	}
-	for i := range cols {
-		cols[i].Width = widths[i]
-	}
-	p.table.SetColumns(cols)
+	return widths
 }
 
 // showExec reports whether the agents list should carry the exec column:
@@ -880,6 +901,11 @@ func (p *AgentsPanel) Update(msg tea.Msg) tea.Cmd {
 	case agentsDetailMsg:
 		if msg.err != nil {
 			p.err = msg.err
+			// M10: agents.get is employee-only — bots and registry agents
+			// fail with ErrEmployeeNotFound. Drop any stale snapshot so the
+			// detail view renders the error instead of "loading agents..."
+			// forever; esc still returns to the list.
+			p.detail = nil
 			return nil
 		}
 		p.err = nil
@@ -1469,8 +1495,36 @@ func (p *AgentsPanel) renderError() string {
 	)
 }
 
+// renderDetailError renders a failed drill-in inside the detail view
+// (M10): agents.get only serves employees, so Enter on a bot or registry
+// row fails. The error replaces the endless loading state; esc (or q)
+// returns to the list, matching handleDetailKey.
+func (p *AgentsPanel) renderDetailError() string {
+	style := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(Current().ErrorC).
+		Padding(1, 2).
+		Width(max(p.width-4, 20))
+
+	errMsg := "unknown error"
+	if p.err != nil {
+		errMsg = fmt.Sprintf("%v", p.err)
+	}
+	return style.Render(
+		lipgloss.NewStyle().Foreground(Current().ErrorC).Bold(true).Render("error") +
+			"\n\n" + errMsg + "\n\n" +
+			lipgloss.NewStyle().Foreground(Current().TextMuted).Render("esc: back to list"),
+	)
+}
+
 func (p *AgentsPanel) renderDetail() string {
 	if p.detail == nil {
+		// M10: a failed drill-in (agents.get is employee-only; bots and
+		// registry agents error) must surface the failure here, not an
+		// endless "loading agents..." — esc returns to the list.
+		if p.err != nil {
+			return p.renderDetailError()
+		}
 		return p.renderLoading()
 	}
 

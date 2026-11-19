@@ -2,11 +2,13 @@ package tui
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"charm.land/bubbles/v2/table"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/caimlas/meept/internal/tui/tableutil"
 )
@@ -249,5 +251,118 @@ func TestAgentsPanel_DetailRendersExecutorLine(t *testing.T) {
 	out = p.View()
 	if strings.Contains(out, "executor:") {
 		t.Errorf("detail view renders an executor line for a local-executor employee\n%s", out)
+	}
+}
+
+// detailErrRPC answers the roster fetch but fails agents.get the way the
+// daemon does for bots/registry agents (employee-only RPC).
+type detailErrRPC struct{}
+
+func (detailErrRPC) Call(method string, _ any) (json.RawMessage, error) {
+	if method == "agents.get" {
+		return nil, fmt.Errorf("employee not found")
+	}
+	return json.RawMessage(rosterPayloadJSON), nil
+}
+
+func (detailErrRPC) IsConnected() bool { return true }
+
+// M10 pin: Enter on a non-employee roster row fails agents.get. The error
+// path must surface the failure inside the detail view (not an endless
+// "loading agents...") and esc must return to the list.
+func TestAgentsPanel_DetailFetchErrorRendersErrorNotLoading(t *testing.T) {
+	p := NewAgentsPanel(detailErrRPC{})
+	p.SetSize(120, 30)
+
+	// Load the roster through the real fetch chain.
+	if msg := p.fetchAgents(); msg != nil {
+		p.Update(msg)
+	}
+	if len(p.agents) == 0 {
+		t.Fatal("roster did not load")
+	}
+
+	// Enter drills into the first row (a registry agent, type "agent").
+	cmd := p.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("enter produced no fetch command")
+	}
+	p.Update(cmd()) // agentsDetailMsg{err}
+
+	if p.subView != agentsViewDetail {
+		t.Fatalf("subView = %v, want detail after enter", p.subView)
+	}
+	out := p.View()
+	if strings.Contains(out, "loading agents...") {
+		t.Errorf("failed drill-in renders the endless loading state\n%s", out)
+	}
+	if !strings.Contains(out, "employee not found") {
+		t.Errorf("failed drill-in does not surface the RPC error\n%s", out)
+	}
+	if !strings.Contains(out, "esc: back to list") {
+		t.Errorf("failed drill-in does not advertise the esc affordance\n%s", out)
+	}
+
+	// esc keeps its behavior: back to the list with the rows intact.
+	p.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	if p.subView != agentsViewList {
+		t.Fatalf("esc left subView = %v, want list", p.subView)
+	}
+	if p.detail != nil {
+		t.Error("esc did not clear the detail snapshot")
+	}
+	if !strings.Contains(p.View(), "a-1") {
+		t.Errorf("list view lost its roster rows after the failed drill-in\n%s", p.View())
+	}
+}
+
+// M10 variant: a stale detail snapshot from a previous successful drill-in
+// must not mask a later failed one — the error path clears the snapshot.
+func TestAgentsPanel_DetailFetchErrorClearsStaleDetail(t *testing.T) {
+	p := NewAgentsPanel(detailErrRPC{})
+	p.SetSize(120, 30)
+	p.detail = &AgentDetail{Agent: AgentSummary{ID: "old-employee"}}
+	p.subView = agentsViewDetail
+	p.selectedID = "b-1"
+
+	p.Update(agentsDetailMsg{err: fmt.Errorf("employee not found")})
+	if p.detail != nil {
+		t.Fatal("error path kept the stale detail snapshot")
+	}
+	out := p.View()
+	if strings.Contains(out, "old-employee") {
+		t.Errorf("stale snapshot rendered over the error\n%s", out)
+	}
+	if !strings.Contains(out, "employee not found") {
+		t.Errorf("error not rendered in the detail view\n%s", out)
+	}
+}
+
+// L17 pin: below width 30 the panel must not keep the 98-wide default
+// 9-column set installed. The narrow path installs a minimal column set
+// whose widths fit the viewport's content budget, and cached rows are
+// normalized to it without a panic.
+func TestAgentsPanel_NarrowWidthColumnsFit(t *testing.T) {
+	for _, width := range []int{20, 29} {
+		p := NewAgentsPanel(stubAgentsRPC{})
+		p.SetSize(width, 24)
+
+		cols := p.table.Columns()
+		if len(cols) >= 9 {
+			t.Errorf("width %d kept the full %d-column set", width, len(cols))
+		}
+		if sum, budget := columnWidthSum(p.table); sum > budget {
+			t.Errorf("width %d: columns sum %d > content budget %d", width, sum, budget)
+		}
+
+		// Cached roster rows repopulate through tableutil.SetRows and
+		// must match the narrow column count.
+		p.agents = []AgentSummary{{ID: "agent-alpha", Status: "running"}}
+		p.updateAgentsTable()
+		for i, row := range p.table.Rows() {
+			if len(row) != len(cols) {
+				t.Errorf("width %d: row %d has %d cells, table has %d columns", width, i, len(row), len(cols))
+			}
+		}
 	}
 }

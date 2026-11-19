@@ -2,6 +2,7 @@ package models
 
 import (
 	"strconv"
+	"strings"
 
 	"charm.land/bubbles/v2/table"
 	"charm.land/lipgloss/v2"
@@ -88,7 +89,10 @@ func (m *SessionsModel) buildSessionTreeRows() sessionTreeRows {
 		if collapsed {
 			marker = "▸"
 		}
-		label := headerStyle.Render(marker + " " + types.TruncateString(bucket, titleW) + " (" + strconv.Itoa(len(g.sessions)) + ")")
+		// L15 (UI lowercase rule, GUI parity with sessions_list.dart's
+		// bucket.toLowerCase()): lowercase the header label only — the
+		// bucket key itself keeps its raw case for grouping/collapse state.
+		label := headerStyle.Render(marker + " " + types.TruncateString(strings.ToLower(bucket), titleW) + " (" + strconv.Itoa(len(g.sessions)) + ")")
 		addRow(bucket, nil, table.Row{label, "", ""})
 		if collapsed {
 			continue

@@ -231,3 +231,126 @@ func contains(s, substr string) bool {
 // mock error scenarios. This prevents "imported and not used" if no test
 // references errors yet.
 var _ = errors.New
+
+// L14 pin: a refresh (SessionsUpdateMsg) must preserve the user's selected
+// session — the pre-fix GotoTop + reselect-first yanked the cursor back to
+// the first session on every poll.
+func TestSessionsModel_RefreshPreservesSelection(t *testing.T) {
+	rpc := &mockSessionsRPC{connected: true}
+	sessions := []types.Session{
+		{ID: "s1", Name: "one", LastActivity: "2026-06-29T10:00:00Z"},
+		{ID: "s2", Name: "two", LastActivity: "2026-06-29T11:00:00Z"},
+		{ID: "s3", Name: "three", LastActivity: "2026-06-29T09:00:00Z"},
+	}
+	m := newSessionsModelWithSessions(rpc, sessions)
+
+	// Move the cursor down to the second session row (row 0 is the
+	// unbound bucket header; sorted rows are s2, s1, s3).
+	m.Update(tea.KeyPressMsg{Code: tea.KeyDown, Text: "down"})
+	sel := m.selectedSession()
+	if sel == nil {
+		t.Fatal("cursor did not land on a session row")
+	}
+	wantID := sel.ID
+	if wantID == "s2" {
+		t.Fatal("test setup: cursor still on the first session; move it again")
+	}
+
+	// Refresh with the same sessions (a poll): selection must survive.
+	m.Update(SessionsUpdateMsg{Sessions: sessions})
+	if m.selected == nil || m.selected.ID != wantID {
+		t.Errorf("refresh reset selection to %v, want preserved %q", m.selected, wantID)
+	}
+	if got := m.selectedSession(); got == nil || got.ID != wantID {
+		t.Errorf("cursor row after refresh = %v, want the row carrying %q", got, wantID)
+	}
+}
+
+// L14 pin: a resize rebuilds the table too — the selection must survive it.
+func TestSessionsModel_ResizePreservesSelection(t *testing.T) {
+	rpc := &mockSessionsRPC{connected: true}
+	sessions := []types.Session{
+		{ID: "s1", Name: "one", LastActivity: "2026-06-29T10:00:00Z"},
+		{ID: "s2", Name: "two", LastActivity: "2026-06-29T11:00:00Z"},
+	}
+	m := newSessionsModelWithSessions(rpc, sessions)
+	m.Update(tea.KeyPressMsg{Code: tea.KeyDown, Text: "down"})
+	sel := m.selectedSession()
+	if sel == nil {
+		t.Fatal("cursor did not land on a session row")
+	}
+	wantID := sel.ID
+
+	m.SetSize(100, 30)
+	if m.selected == nil || m.selected.ID != wantID {
+		t.Errorf("resize reset selection to %v, want preserved %q", m.selected, wantID)
+	}
+}
+
+// L14 pin: when the selected session disappears from the refreshed list,
+// the cursor falls back to the first session row (never a header).
+func TestSessionsModel_RefreshFallsBackWhenSelectionDeleted(t *testing.T) {
+	rpc := &mockSessionsRPC{connected: true}
+	sessions := []types.Session{
+		{ID: "s1", Name: "one", LastActivity: "2026-06-29T10:00:00Z"},
+		{ID: "s2", Name: "two", LastActivity: "2026-06-29T11:00:00Z"},
+	}
+	m := newSessionsModelWithSessions(rpc, sessions)
+	m.Update(tea.KeyPressMsg{Code: tea.KeyDown, Text: "down"})
+	if s := m.selectedSession(); s == nil || s.ID != "s1" {
+		t.Fatalf("setup: cursor = %v, want s1", s)
+	}
+
+	// s1 was deleted elsewhere; the refresh no longer carries it.
+	m.Update(SessionsUpdateMsg{Sessions: []types.Session{
+		{ID: "s2", Name: "two", LastActivity: "2026-06-29T11:00:00Z"},
+	}})
+	if m.selected == nil || m.selected.ID != "s2" {
+		t.Errorf("fallback selection = %v, want the first remaining session s2", m.selected)
+	}
+	if s := m.selectedSession(); s == nil || s.ID != "s2" {
+		t.Errorf("fallback cursor row = %v, want s2", s)
+	}
+}
+
+// L14 pin: a refresh that keeps the same selection must not refetch its
+// plans on every poll; the first load still fetches.
+func TestSessionsModel_RefreshSameSelectionSkipsPlansRefetch(t *testing.T) {
+	rpc := &mockSessionsRPC{connected: true}
+	sessions := []types.Session{
+		{ID: "s1", Name: "one", LastActivity: "2026-06-29T10:00:00Z"},
+	}
+	m := NewSessionsModel(rpc)
+	m.SetSize(120, 40)
+
+	// First load fetches plans for the auto-selected session.
+	cmd := m.Update(SessionsUpdateMsg{Sessions: sessions})
+	if cmd == nil {
+		t.Fatal("first load did not fetch plans")
+	}
+	if _, ok := cmd().(SessionPlansUpdateMsg); !ok {
+		t.Fatal("first load command was not a plans fetch")
+	}
+
+	// Same-selection refresh: no plans refetch.
+	if cmd := m.Update(SessionsUpdateMsg{Sessions: sessions}); cmd != nil {
+		t.Errorf("same-selection refresh refetched plans (%T)", cmd())
+	}
+}
+
+// L15 pin: the sessions help text advertises the sessions-scoped search,
+// not the stale "global search" label.
+func TestSessionsModel_HelpSearchLabel(t *testing.T) {
+	rpc := &mockSessionsRPC{connected: true}
+	m := newSessionsModelWithSessions(rpc, []types.Session{
+		{ID: "s1", Name: "one", LastActivity: "2026-06-29T10:00:00Z"},
+	})
+	m.Update(tea.KeyPressMsg{Code: '?', Text: "?"})
+	out := m.View()
+	if contains(out, "global search") {
+		t.Errorf("help still says 'global search'\n%s", out)
+	}
+	if !contains(out, "search sessions") {
+		t.Errorf("help missing the sessions-scoped search label\n%s", out)
+	}
+}

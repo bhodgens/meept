@@ -219,9 +219,16 @@ func (m *SessionsModel) Update(msg tea.Msg) tea.Cmd {
 		m.err = nil
 		m.sessions = msg.Sessions
 		m.sortSessions()
-		m.updateSessionsTable()
-		// Fetch plans for the auto-selected session
+		prevID := ""
 		if m.selected != nil {
+			prevID = m.selected.ID
+		}
+		m.updateSessionsTable()
+		// Fetch plans for the selected session — on first load and when
+		// the preserved selection changed (the old row was deleted or
+		// collapsed away). A refresh that keeps the same session must
+		// not refetch its plans on every poll (L14).
+		if m.selected != nil && (prevID == "" || m.selected.ID != prevID) {
 			m.plansLoading = true
 			return m.fetchSessionPlans(m.selected.ID)
 		}
@@ -366,21 +373,40 @@ var archivedRowStyle = sync.OnceValue(func() lipgloss.Style {
 })
 
 func (m *SessionsModel) updateSessionsTable() {
+	// L14: preserve the selected session id across rebuilds (refresh and
+	// resize) — the agents panel's cursor-preservation discipline. An
+	// unconditional GotoTop + reselect-first yanked the user's selection
+	// back to the first session on every poll.
+	prevID := ""
+	if s := m.selectedSession(); s != nil {
+		prevID = s.ID
+	} else if m.selected != nil {
+		prevID = m.selected.ID
+	}
+
 	tree := m.buildSessionTreeRows()
 	m.rowSessions = tree.sessions
 	m.rowBuckets = tree.buckets
 	m.headerRows = tree.headers
 
 	tableutil.SetRows(&m.table, tree.rows)
-	if len(tree.rows) > 0 {
-		m.table.GotoTop()
-	}
 
-	// Auto-select the first session row (plans fetch triggered by caller).
-	// Header rows are non-selectable, so park the cursor on the first child
-	// session: existing key handlers (d/D/enter) act on the cursor target,
-	// and leaving it on a header would make a freshly loaded list inert.
+	// Restore the cursor to the row carrying the previously selected
+	// session; fall back to the first session row only when it is absent
+	// (deleted, or hidden inside a collapsed bucket). Header rows are
+	// non-selectable, so a fresh list parks on the first child session:
+	// existing key handlers (d/D/enter) act on the cursor target, and
+	// leaving it on a header would make a freshly loaded list inert.
 	m.selected = nil
+	if prevID != "" {
+		for i, s := range m.rowSessions {
+			if s != nil && s.ID == prevID {
+				m.selected = s
+				m.table.SetCursor(i)
+				return
+			}
+		}
+	}
 	for i, s := range m.rowSessions {
 		if s != nil {
 			m.selected = s
@@ -773,7 +799,7 @@ func (m *SessionsModel) renderHelp() string {
 	content += keyStyle.Render("D") + descStyle.Render("delete session permanently") + "\n"
 	content += keyStyle.Render("esc") + descStyle.Render("close detail") + "\n"
 	content += keyStyle.Render("r") + descStyle.Render("refresh sessions") + "\n"
-	content += keyStyle.Render("f") + descStyle.Render("global search") + "\n"
+	content += keyStyle.Render("f") + descStyle.Render("search sessions") + "\n"
 	content += keyStyle.Render("?") + descStyle.Render("toggle this help") + "\n"
 
 	content += "\n"
