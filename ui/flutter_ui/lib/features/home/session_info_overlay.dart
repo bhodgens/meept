@@ -1,18 +1,18 @@
 /// Session Info Overlay - Tabbed panel showing session-scoped data
 ///
 /// Opens when clicking the [i] icon next to a session in the sidebar.
-/// Shows four tabs: sessions (2-pane), plans, tasks, agents. The tab bodies
-/// are the SAME canonical widgets used by the main window (see TabContent);
-/// the popup is only a shell (header + lowercase tab bar + IndexedStack).
+/// Shows four tabs: sessions, plans, tasks, agents. The tab bodies are the
+/// SAME canonical widgets used by the main window (see TabContent); the
+/// popup is only a full-window shell (header + lowercase tab bar + IndexedStack).
 ///
 /// ```
 /// ┌─────────────────────────────────────────────────────────────────┐
-/// │  Session: session4                          [X]                 │
+/// │  session: session4                              [X]             │
 /// ├─────────────────────────────────────────────────────────────────┤
 /// │  sessions │ plans │ tasks │ agents                              │
 /// ├───────────┴───────┴───────┴─────────────────────────────────────┤
 /// │                                                                   │
-/// │  [Tab content]                                                  │
+/// │  [canonical tab content]                                         │
 /// │                                                                   │
 /// └─────────────────────────────────────────────────────────────────┘
 /// ```

@@ -35,8 +35,10 @@
 // auto-restart give-up posture, internal/llm/runtime_manager.go).
 //
 // The sidecar is a PROCESS: the daemon passes it its arguments only (daemon
-// unix socket + configured bind + webdir) and never imports internal/kanban
-// or internal/kanbansvc here (contract C7: no board logic is linked).
+// unix socket + configured bind + webdir), and this supervisor file carries
+// no board logic. The package does import internal/kanbansvc from
+// kanban_devkey.go, which only writes the dev-key token store before spawn;
+// no store handle or board logic is linked into the sidecar child (C7).
 
 package daemon
 
