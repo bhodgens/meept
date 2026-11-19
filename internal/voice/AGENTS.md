@@ -113,6 +113,76 @@ that tree's master.md; the invariants below are the as-built form).
   precedes setup: the child answers open with setup, which arms the talk
   loop and triggers the keys emission.
 
+## Latency/endpointing optimization selectors (plan 20261118-voice-tts-stt-optimizations)
+
+All seven keys below are additive `VoiceConfig` fields carried over the
+C1 keys line as omitempty `KeysFrame` selectors. Zero/empty = legacy:
+an old child ignores them and the wire/behavior is byte-identical. They
+are global-only (no `employee_leg` per-row override). Config field ->
+selector mapping (all in `internal/voicechild/keys.go`): `SmartTurnMode`,
+`WhisperServerAddr`, `DeepgramEndpointMs`, `Vocabulary` (from
+`RecognitionVocabulary`), `Qwen3ChunkSize`, `ClipPrewarmDelayMs`,
+`ContextWarmWindowMs`.
+
+- **SmartTurnMode** (int; 0 default): mode 0 = today's behavior - the
+  Smart Turn analyzer is still installed and fed each 20 ms chunk but
+  its `AnalyzeEndOfTurn` verdict has NO production caller (byte-identical);
+  mode 1 = kill switch - no analyzer built or fed, VAD stays intact;
+  mode 2 = at confirm-window expiry consult the verdict under `turnMu`
+  ONLY (never under `playMu`): complete=true dispatches immediately,
+  complete=false defers ONE bounded re-arm. Analyzer calls stay under
+  `turnMu`; the async analyzer-init barrier (`pipeline.analyzerInit`)
+  is the teardown gate. INFO telemetry carries call_id + verdict +
+  probability + decision, no key material. Mode 2 needs paired
+  hesitation fixtures before production; default stays 0.
+- **WhisperServerAddr** (string; "" default): "" = the legacy exec path
+  (`whisper-cli -m ... -f wav -nt` per utterance with the same timeout,
+  ~350 ms cold start). Non-empty = a persistent whisper.cpp server
+  transport with the same `recognizeOne` signature, segmentation, and
+  `FlushNow` semantics; no request outlives the call. WHISPER EMITS
+  FINALS ONLY (no STT partials) by design - this limit is documented,
+  not fixed.
+- **DeepgramEndpointMs** (int; 0 default): 0 = ignore the endpoint, fixed
+  `turn_confirm_ms` timer only (legacy). Positive = a Deepgram
+  `speech_final` / `UtteranceEnd` sets `Transcript.Endpoint=true` and
+  fast-dispatches ALL accumulated parts through the existing echo/mic-hold
+  guards (never only the last response). Requires paired hesitation/
+  backchannel fixtures before production; default stays 0.
+- **Vocabulary / RecognitionVocabulary** ([]string; empty default):
+  empty = both provider wire requests byte-identical. Non-empty =
+  Deepgram `keyterm` params + a Whisper `-p` prompt to bias names,
+  addresses, identifiers, with an over-bias warning past a short list.
+  Needs a paired critical-entity fixture per deployment.
+- **Qwen3ChunkSize** (int; 0 default): 0 = request-body `chunk_size: 4`
+  (legacy); positive = override. The qwen3 `{"text","voice","chunk_size"}`
+  body shape is otherwise unchanged; local 1/2 measurements were noisy,
+  so default stays 4. A/B before changing.
+- **ClipPrewarmDelayMs** (int; 0 default) - TTS CLIP DEFERRAL POLICY:
+  0 = the planner ships the full prewarm pool immediately at EventSetup
+  (legacy). Positive = the clip planner holds `clip_render` frames until
+  the child's first `played` edge plus this delay, so the setup-time
+  render burst leaves the first-audio critical path; played-edge routing
+  releases the pending specs only after the configured delay. Clip
+  identity (`clipstore.ClipKey`) and the cache-miss -> live-synth fallback
+  are UNCHANGED. RENDER-YIELD: a background `renderClip` checks the
+  existing playMu-protected live-synth/speaking state and SKIPS/DEFERS
+  when the pipeline is busy (barge-in or the next answer's live synth
+  never queues behind filler renders); the spec stays queued for the next
+  pass, so a deferral loses no clip. The yield check reads existing
+  playMu-protected fields only - no I/O under `playMu`, no lock nested
+  with `playMu` or `turnMu` (root C4).
+- **Cloud transport split**: qwen3 keeps the no-keepalive transport
+  (stale-uvicorn workaround, byte-identical); cloud `openai` uses a
+  SEPARATE keep-alive transport with a bounded `IdleConnTimeout` so it
+  stops paying a fresh TCP+TLS handshake per sentence. The wire request
+  shapes for both vendors are untouched.
+- **ContextWarmWindowMs** (int; 0 default): 0 = the warmer keeps using
+  the resolved `voice.turn_confirm_ms` (legacy); positive = override the
+  debounce window so the warm lands before confirm-window dispatch.
+  OnFinal cancellation and hit-rate telemetry are unchanged. Whisper's
+  no-partial limit means this only ever fires on partial-streaming STT
+  (Deepgram phone leg); see "Partial context warm" below.
+
 ## Sockets (C2): per-call unix pairs, codec-derived chunks
 
 - `$MEEPT_HOME/voice/sock/<ccid>.in` (daemon->child PCM) and
@@ -1039,7 +1109,10 @@ scope) so the final turn pays decode, not prefill.
   package voice — NEVER imports internal/daemon):** per-call timer whose
   window is the global `voice.turn_confirm_ms` snapshot (no per-employee
   override this wave; 0/legacy mode = fixed 900 ms, the child's shipped
-  default) plus a 150 ms per-session fire
+  default), overridable by `voice.context_warm_window_ms` (opt-in, default
+  0 = use `turn_confirm_ms`; positive = a separate debounce window so the
+  warm lands before confirm-window dispatch; OnFinal cancellation and
+  hit-rate telemetry unchanged), plus a 150 ms per-session fire
   throttle (re-arms for the remainder instead of dropping the text).
   Latest partial wins (gen bump replaces the pending timer); at most one
   IN-FLIGHT warm per session — a new fire cancels the previous request

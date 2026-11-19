@@ -88,6 +88,28 @@ type KeysFrame struct {
 	// material (a hash of public-ish audio); it still never logs (the
 	// redaction posture covers the whole frame).
 	TTSRefHash string
+	// ---- voice TTS/STT optimization selectors (20261118, contract C1) ----
+	// All seven are ADDITIVE and OPTIONAL on the wire (omitempty): zero/
+	// empty = legacy byte-identical behavior. Each later branch consumes
+	// one of these as its single seam.
+	SmartTurnMode int `json:"smart_turn_mode,omitempty"` // 0 = current behavior; 1 = kill switch; 2 = consume verdict
+	// WhisperServerAddr, when non-empty, selects a persistent whisper.cpp
+	// server instead of the per-utterance exec path. Empty = legacy exec.
+	WhisperServerAddr string `json:"whisper_server_addr,omitempty"`
+	// DeepgramEndpointMs > 0 enables the authoritative speech_final
+	// endpoint fast path; 0 keeps the legacy fixed-timer endpointing.
+	DeepgramEndpointMs int `json:"deepgram_endpoint_ms,omitempty"`
+	// Vocabulary primes critical entities on the STT request. Empty =
+	// byte-identical legacy wire.
+	Vocabulary []string `json:"vocabulary,omitempty"`
+	// Qwen3ChunkSize overrides the qwen3 pcm-stream chunk_size; 0 => 4.
+	Qwen3ChunkSize int `json:"qwen3_chunk_size,omitempty"`
+	// ClipPrewarmDelayMs defers a queued clip render by this many ms after
+	// the played edge; 0 = render immediately (legacy).
+	ClipPrewarmDelayMs int `json:"clip_prewarm_delay_ms,omitempty"`
+	// ContextWarmWindowMs overrides the partial-warm debounce window; 0 =
+	// resolve from turn_confirm_ms (legacy).
+	ContextWarmWindowMs int `json:"context_warm_window_ms,omitempty"`
 }
 
 // Redacted is what String prints instead of key material.
@@ -195,6 +217,16 @@ func (p *pipeline) applyKeys(k KeysFrame) {
 	// pipeline constructor seeds the same default so a keys-less call
 	// still aggregates.
 	p.turnConfirm = time.Duration(k.TurnConfirmMs) * time.Millisecond
+	// Deepgram authoritative endpoint (F4): the opt-in knob that enables
+	// fast-dispatch of the accumulated finals when Endpoint arrives. 0
+	// (absent on an old daemon's wire) keeps the fixed-timer path.
+	p.deepgramEndpointMs = k.DeepgramEndpointMs
+	// Smart Turn mode (F1, 02-smart-turn.md): consumed by the async turn
+	// factory gate and by finalConfirmFired. Stored under playMu; the
+	// turn factory goroutine reads it only AFTER keysReady closes (which
+	// happens after this assignment), so it always sees the real mode.
+	p.smartTurnMode = k.SmartTurnMode
+	p.smartTurnDeferred = false
 	// Short-final gate (voice-microfrag): absent-on-wire already decoded
 	// to 0 (disabled) at handleKeysFrame. Same playMu guard as
 	// turnConfirm; applied before any transcript can arrive.
@@ -211,15 +243,19 @@ func (p *pipeline) applyKeys(k KeysFrame) {
 	p.fragmentDecayS = k.FragmentDecayS
 	p.replyExemptS = k.ReplyExemptS
 	p.sttCfg = ProviderConfig{
-		Vendor:  k.STTVendor,
-		Model:   k.STTModel,
-		BaseURL: k.STTBaseURL,
+		Vendor:             k.STTVendor,
+		Model:              k.STTModel,
+		BaseURL:            k.STTBaseURL,
+		WhisperServerAddr:  k.WhisperServerAddr,
+		DeepgramEndpointMs: k.DeepgramEndpointMs,
+		Vocabulary:         k.Vocabulary,
 	}
 	p.ttsCfg = ProviderConfig{
-		Vendor:  k.TTSVendor,
-		Model:   k.TTSModel,
-		BaseURL: k.TTSBaseURL,
-		Voice:   k.TTSVoice,
+		Vendor:         k.TTSVendor,
+		Model:          k.TTSModel,
+		BaseURL:        k.TTSBaseURL,
+		Voice:          k.TTSVoice,
+		Qwen3ChunkSize: k.Qwen3ChunkSize,
 	}
 	p.playMu.Unlock()
 	// Clip renders gate on provider identity, which only exists once the

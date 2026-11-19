@@ -69,6 +69,32 @@ var ttsTransport http.RoundTripper = &http.Transport{
 	ResponseHeaderTimeout: 30 * time.Second,
 }
 
+// ttsCloudIdleConnTimeout bounds how long an idle keep-alive connection is
+// pooled before the transport drops it. The cloud OpenAI endpoint keeps
+// keep-alives open well beyond the ~5 s the local uvicorn server tolerates,
+// so pooling is safe here; the bound prevents leaking idle sockets for the
+// lifetime of the child process (F6).
+const ttsCloudIdleConnTimeout = 90 * time.Second
+
+// ttsCloudTransport is the cloud-OpenAI transport (F6). Unlike the local
+// qwen3 transport above, it enables keep-alives so consecutive Speak calls
+// reuse the TCP+TLS connection instead of paying a fresh handshake per
+// sentence. It mirrors ttsTransport's sane timeouts + env proxy and adds a
+// bounded IdleConnTimeout. A package-level var so the httptest fake can
+// swap it (same seam as ttsTransport).
+var ttsCloudTransport http.RoundTripper = &http.Transport{
+	Proxy: http.ProxyFromEnvironment,
+	DialContext: (&net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}).DialContext,
+	ForceAttemptHTTP2:     true,
+	TLSHandshakeTimeout:   10 * time.Second,
+	ExpectContinueTimeout: 1 * time.Second,
+	ResponseHeaderTimeout: 30 * time.Second,
+	IdleConnTimeout:       ttsCloudIdleConnTimeout,
+}
+
 // ttsMaxSpeakAttempts bounds the transport-error retry: one fresh-dial
 // retry, never more (leaf 04).
 const ttsMaxSpeakAttempts = 2
@@ -188,7 +214,7 @@ func newOpenAITTS(cfg ProviderConfig, key string) (voicechild.TTSProvider, error
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = openAIDefaultBaseURL
 	}
-	return &OpenAITTS{cfg: cfg, apiKey: key, transport: ttsTransport}, nil
+	return &OpenAITTS{cfg: cfg, apiKey: key, transport: ttsCloudTransport}, nil
 }
 
 // newQwen3TTS is the keyless local-vendor construction path (D2): it
@@ -246,10 +272,14 @@ func (t *OpenAITTS) Speak(ctx context.Context, text string) (io.ReadCloser, erro
 	var body []byte
 	var err error
 	if t.usesPCMStream() {
+		chunkSize := t.cfg.Qwen3ChunkSize
+		if chunkSize <= 0 {
+			chunkSize = qwen3PCMChunkSize
+		}
 		body, err = json.Marshal(qwen3PCMStreamRequest{
 			Text:      text,
 			Voice:     t.cfg.Voice,
-			ChunkSize: qwen3PCMChunkSize,
+			ChunkSize: chunkSize,
 		})
 	} else {
 		body, err = json.Marshal(openAITTSRequest{

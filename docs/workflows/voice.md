@@ -99,8 +99,10 @@ voice id (`vc_ce7d47c6`), so voice-clone identity is unchanged.
 - Request body (route's own schema): `{"text": "...", "voice": "...",
   "chunk_size": 4}`. There is NO `stream`, `response_format`, `input`,
   or `model` field; an empty `tts_model` means "use the server's loaded
-  default". Cloud `openai` is untouched and still posts
-  `stream=true, response_format=pcm` to `/v1/audio/speech`.
+  default". The `chunk_size` value is 4 by default and is overridable
+  with `voice.qwen3_chunk_size` (opt-in; 0 = legacy 4). Cloud `openai`
+  is untouched and still posts `stream=true, response_format=pcm` to
+  `/v1/audio/speech`.
 - Response body is a length-prefixed frame stream:
   `[4-byte big-endian uint32 length][length bytes s16le PCM] ...`, with a
   zero-length frame marking the end. The child strips the envelope
@@ -159,6 +161,29 @@ drop and `voicechild: short final exempted` with `reason=phrase|reply|energy`
 whenever an improvement saved a would-be drop - the operator tunes
 `min_turn_words` up/down straight from the log.
 
+## Latency and endpointing tuning knobs (opt-in, plan 20261118-voice-tts-stt-optimizations)
+
+All keys below live under `voice` in meept.json5. Every knob is additive
+and OPT-IN: leaving it unset reproduces pre-change behavior byte-identically.
+All seven cross the C1 keys frame to the child as omitempty selectors (zero
+or empty = legacy). They are global-only (no `employee_leg` per-row override).
+
+| key | type | default | effect |
+|-----|------|---------|--------|
+| `smart_turn_mode` | int | 0 | semantic endpointing mode: 0 = off (legacy, analyzer installed and fed but verdict unused); 1 = kill switch (no analyzer built or fed, VAD stays intact); 2 = consume `AnalyzeEndOfTurn` at confirm-window expiry (complete=true dispatch now, complete=false one bounded re-arm). Mode 2 needs paired hesitation fixtures before production; default stays 0 |
+| `whisper_server_addr` | string | `` (empty string) | empty = exec `whisper-cli` per utterance (legacy, ~350 ms cold start); non-empty = persistent whisper.cpp server transport with the same segmentation and finals-only behavior. The Whisper leg emits finals only, never partials |
+| `deepgram_endpoint_ms` | int | 0 | 0 = endpoint ignored, fixed `turn_confirm_ms` timer only (legacy); positive = a Deepgram `speech_final` / `UtteranceEnd` dispatches accumulated finals immediately. Needs paired hesitation/backchannel fixtures before production; default stays 0 |
+| `recognition_vocabulary` | []string | `[]` | empty = provider wire requests byte-identical; non-empty = forwarded as Deepgram `keyterm` params and a Whisper `-p` prompt to bias names, addresses, and identifiers. Keep the list short; needs a paired critical-entity fixture |
+| `qwen3_chunk_size` | int | 0 | 0 = request body `chunk_size: 4` (legacy); positive = override. Local measurements at 1/2 were noisy; default stays 4. A/B first-audio on the target server before changing |
+| `clip_prewarm_delay_ms` | int | 0 | 0 = render clip fills immediately at call setup (legacy); positive = defer `clip_render` frames until the child's first `played` edge plus this delay, moving the render burst off the first-audio path. A/B on the target box; benefit unmeasured |
+| `context_warm_window_ms` | int | 0 | 0 = use the resolved `turn_confirm_ms` (legacy); positive = override the context-warm debounce window so the warm lands before confirm-window dispatch. See "Partial context warm" |
+
+Notes:
+- `smart_turn_mode` and `deepgram_endpoint_ms` both change WHEN a turn dispatches. Keep paired fixtures (a hesitation/backchannel recording and its clean counterpart) and compare before enabling either in production; both are opt-in with default 0.
+- `recognition_vocabulary` needs a paired critical-entity fixture (the same utterance with and without the terms) to confirm accuracy improves on your names without over-biasing. An over-long list logs a warning.
+- `qwen3_chunk_size` and `clip_prewarm_delay_ms` are latency knobs: A/B first-audio timing on the target server/box; neither default changes current behavior.
+- Whisper emits FINALS ONLY (no STT partials), so `context_warm_window_ms` and the whole context-warm feature affect only providers that stream partials (the phone leg with Deepgram). On the Whisper/local leg the warm path has no partials to debounce and stays inert - this limit is documented, not fixed.
+
 ## Filler audio: pre-rendered clips, lane pools, and the farewell rule
 
 Every short "holding" line the call speaks - the greeting on connect,
@@ -214,7 +239,12 @@ of plan docs/plans/20261113-filler-clips-and-context-warm/ uses it:
   generated or written when the voice sidecar is not configured and
   running (`voice.enabled=false` = the store dir is never even
   created), and clip audio never carries secrets: the store holds PCM
-  + a small JSON manifest per line.
+  + a small JSON manifest per line. By default the render burst fires
+  at call setup; `voice.clip_prewarm_delay_ms` (opt-in, default 0) can
+  defer `clip_render` frames until the child's first `played` edge plus
+  the configured delay, moving setup-time synthesis off the first-audio
+  path. A background render also yields to live synthesis and barge-in
+  (it is idempotent and re-requested, so deferral loses no clip).
 
 ## Partial context warm (opt-in)
 
@@ -231,12 +261,16 @@ debug, and its failures are silently ignored (a failed warm is simply
 the old latency). `voice.context_warm_min_tokens` (default 60) skips
 warming trivial prefixes. The debounce window rides the global
 `voice.turn_confirm_ms` (no per-employee override; 0/legacy mode =
-fixed 900 ms). A final
-transcript or hangup cancels any pending or in-flight warm. The payoff
-is the llama.cpp-family local endpoints (prompt_cache_key + affinity
-header are the existing session-affinity plumbing); the Anthropic and
-Codex clients implement Warm as an explicit no-op. Disabled =
-byte-identical.
+fixed 900 ms) unless `voice.context_warm_window_ms` (opt-in, default 0)
+is set to a positive value, which overrides the window so the warm
+lands before confirm-window dispatch. Whisper emits finals only and
+NO partials, so on the Whisper/local leg the warm path has nothing to
+debounce and stays inert - an honest documented limit, not a bug.
+A final transcript or hangup cancels any pending or in-flight warm.
+The payoff is the llama.cpp-family local endpoints (prompt_cache_key +
+affinity header are the existing session-affinity plumbing); the
+Anthropic and Codex clients implement Warm as an explicit no-op.
+Disabled = byte-identical.
 
 ## The default voice employee
 

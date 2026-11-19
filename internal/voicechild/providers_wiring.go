@@ -21,6 +21,22 @@ type ProviderConfig struct {
 	Voice      string // TTS voice name; empty = vendor default
 	SampleRate int    // negotiated rate (s16le mono PCM)
 	Language   string // BCP-47 tag; empty = vendor default
+	// DeepgramEndpointMs > 0 enables the authoritative speech_final /
+	// UtteranceEnd fast-dispatch path (contract C1, feature F4). 0 keeps
+	// the legacy fixed-timer endpointing byte-identical.
+	DeepgramEndpointMs int
+	// WhisperServerAddr, when non-empty, selects the persistent whisper.cpp
+	// server transport (no per-utterance subprocess). Empty = the legacy
+	// byte-identical exec path. Additive/opt-in (contract C1, feature F2).
+	WhisperServerAddr string
+	// Qwen3ChunkSize overrides the qwen3 pcm-stream chunk_size; 0 => the
+	// default qwen3PCMChunkSize (4, byte-identical legacy). Positive wins.
+	Qwen3ChunkSize int
+	// Vocabulary primes critical entities on the STT request (contract C1,
+	// feature F5). nil/empty keeps both wire requests BYTE-IDENTICAL to
+	// legacy (R4); non-empty adds Deepgram keyterm params and a Whisper
+	// -p prompt. Additive/opt-in.
+	Vocabulary []string
 }
 
 // STTFactory builds the STT adapter for one call from the call's provider
@@ -123,6 +139,17 @@ type keysWire struct {
 	// decoded on the pipeline (p.ttsRefHash) for the byte-equality
 	// contract test between the two key computations.
 	TTSRefHash string `json:"tts_ref_hash"`
+	// ---- voice TTS/STT optimization selectors (20261118, contract C1) ----
+	// All ADDITIVE/OPTIONAL: absent on an old daemon line decodes as the
+	// zero value (= legacy behavior). The daemon sends them omitempty,
+	// so a zero-value frame never carries these keys on the wire.
+	SmartTurnMode       int      `json:"smart_turn_mode"`
+	WhisperServerAddr   string   `json:"whisper_server_addr"`
+	DeepgramEndpointMs  int      `json:"deepgram_endpoint_ms"`
+	Vocabulary          []string `json:"vocabulary"`
+	Qwen3ChunkSize      int      `json:"qwen3_chunk_size"`
+	ClipPrewarmDelayMs  int      `json:"clip_prewarm_delay_ms"`
+	ContextWarmWindowMs int      `json:"context_warm_window_ms"`
 }
 
 // handleKeysFrame decodes one raw keys line into the redacting KeysFrame
@@ -189,6 +216,15 @@ func (c *Child) handleKeysFrame(line string) error {
 		FragmentDecayS: fragmentDecayS,
 		ReplyExemptS:   replyExemptS,
 		TTSRefHash:     w.TTSRefHash,
+		// TTS/STT optimization selectors: absent-on-wire decodes as the
+		// zero value, which is every knob's legacy behavior.
+		SmartTurnMode:       w.SmartTurnMode,
+		WhisperServerAddr:   w.WhisperServerAddr,
+		DeepgramEndpointMs:  w.DeepgramEndpointMs,
+		Vocabulary:          w.Vocabulary,
+		Qwen3ChunkSize:      w.Qwen3ChunkSize,
+		ClipPrewarmDelayMs:  w.ClipPrewarmDelayMs,
+		ContextWarmWindowMs: w.ContextWarmWindowMs,
 	})
 }
 

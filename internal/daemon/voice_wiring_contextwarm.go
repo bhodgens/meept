@@ -96,19 +96,38 @@ type contextWarmSources struct {
 	Dispatch func(ctx context.Context, alias string, messages []llm.ChatMessage, scope string)
 }
 
+// resolveContextWarmWindow returns the debounce window the warmer uses.
+// A positive voice.context_warm_window_ms (F7) overrides the legacy
+// resolved turn_confirm_ms so the warm request lands ahead of the
+// confirm-window dispatch; 0 keeps the legacy window (a zero turn_confirm_ms
+// is left at zero here and clamped to the warmer's 900 ms default).
+func (w *VoiceWiring) resolveContextWarmWindow() time.Duration {
+	if w.cfg.ContextWarmWindowMs > 0 {
+		return time.Duration(w.cfg.ContextWarmWindowMs) * time.Millisecond
+	}
+	return time.Duration(w.cfg.TurnConfirmMs) * time.Millisecond
+}
+
 // newContextWarmer constructs the per-daemon warmer from the resolved C6
 // knobs. A disabled config (the default) returns nil WITHOUT constructing
 // anything — the zero-overhead contract is enforced at this entry point.
-// The debounce window inherits the resolved global voice.turn_confirm_ms;
-// 0/legacy leaves it zero so the warmer applies its 900 ms default (C6:
-// global-only this wave — no employee_leg override for the knob).
+// The debounce window inherits the resolved global voice.turn_confirm_ms
+// unless voice.context_warm_window_ms (F7) is positive, in which case the
+// override is used so the warm lands before the confirm-window dispatch;
+// 0/legacy leaves the inherited window (zero ⇒ the warmer's 900 ms default,
+// C6: global-only this wave — no employee_leg override for the knob).
+// OnFinal cancellation is unchanged: the real turn still abandons any
+// pending/in-flight warm regardless of the window length.
+// NOTE: the Whisper STT leg emits finals only — no partial frames — so
+// partial context warm is a phone/Deepgram-only path. Do not add partial
+// emission to the Whisper leg here.
 // baseCtx parents every warm request so daemon shutdown cancels in-flight
 // warms (the caller passes the subsystem ctx).
 func (w *VoiceWiring) newContextWarmer(baseCtx context.Context, src contextWarmSources) *voice.ContextWarmer {
 	if !w.cfg.ContextWarm {
 		return nil
 	}
-	window := time.Duration(w.cfg.TurnConfirmMs) * time.Millisecond
+	window := w.resolveContextWarmWindow()
 	if baseCtx == nil {
 		baseCtx = context.Background()
 	}
