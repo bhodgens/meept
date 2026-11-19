@@ -62,7 +62,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode/utf8"
 
 	"github.com/caimlas/meept/internal/voice/clipstore"
 )
@@ -1666,10 +1665,15 @@ func (t *TalkLoop) spawnPipeline(ctx context.Context, call Instance, prompt, fil
 		// to split sentences so no speech is ever lost.
 		unit := strings.TrimSpace(reply)
 		if t.cfg.ConnectSentences {
-			if n := utf8.RuneCountInString(unit); n > maxSentenceRunes*3 {
-				r := []rune(unit)
-				unit = string(r[:maxSentenceRunes*3])
-			}
+			// Keep the connected-utterance fast-first-audio split (opening
+			// sentence out first, remainder as one connected utterance) but
+			// NEVER drop text. The old cap truncated the reply at 840 runes
+			// and emitted the cut tail as final, so long answers were silently
+			// cut off mid-sentence. A cap still bounds any single TTS request;
+			// oversize replies become a bounded first chunk plus one or more
+			// bounded continuation chunks, all in order, last one final.
+			const maxUnitRunes = maxSentenceRunes * 3
+			units := splitRunesCapped(unit, maxUnitRunes)
 			// Fast-first-audio: split the FIRST sentence off as its own
 			// (short, fast-to-synthesize) say, then the REMAINDER as the
 			// final connected utterance. The child's depth-2 prefetch
@@ -1679,61 +1683,43 @@ func (t *TalkLoop) spawnPipeline(ctx context.Context, call Instance, prompt, fil
 			// (qwen3 does not stream; the full-utterance synthesis latency
 			// was the dominant post-dispatch delay — measured 2-5.6s in
 			// live call local-fbf9a76ef9357454). A single-sentence reply
-			// stays a single final utterance. Both utterances are checked
-			// once (gate-off = instant allow); delivery splits them.
-			v, err := t.deps.Supervisor.Check(turnCtx, ccid, unit)
+			// stays a single final utterance. Bounded continuation chunks
+			// keep each TTS request finite without dropping any text.
+			emits := make([]string, 0, len(units)+1)
+			first, rest := splitFirstSentence(units[0])
+			if first != "" && rest != "" {
+				emits = append(emits, first, rest)
+			} else {
+				emits = append(emits, units[0])
+			}
+			emits = append(emits, units[1:]...)
+			if t.checkStale(p, turnCtx) {
+				return
+			}
 			defer close(p.checks)
+			v, err := t.deps.Supervisor.Check(turnCtx, ccid, unit)
 			if err != nil {
 				if turnCtx.Err() != nil {
 					return
 				}
-				t.interruptMu.Lock()
-				stale := t.gen != p.gen
-				t.interruptMu.Unlock()
-				if stale {
+				if t.checkStale(p, turnCtx) {
 					return
 				}
 				select {
 				case p.checks <- verdict{fallback: true, final: true}:
 				case <-turnCtx.Done():
-					return
 				}
 				return
 			}
-			first, rest := splitFirstSentence(unit)
-			if first != "" && rest != "" {
-				t.interruptMu.Lock()
-				stale := t.gen != p.gen
-				t.interruptMu.Unlock()
-				if stale {
-					return
-				}
-				// First sentence out first, non-final; the remainder
-				// follows as the final connected utterance.
-				select {
-				case p.checks <- verdict{sentence: first, allowed: v.Allowed, final: false}:
-				case <-turnCtx.Done():
+			for i, u := range emits {
+				if t.checkStale(p, turnCtx) {
 					return
 				}
 				select {
-				case p.checks <- verdict{sentence: rest, allowed: v.Allowed, final: true}:
+				case p.checks <- verdict{sentence: u, allowed: v.Allowed, final: i == len(emits)-1}:
 				case <-turnCtx.Done():
 					return
 				}
-				return
-			}
-			// Single-sentence (or empty rest) reply: one connected final
-			// utterance.
-			t.interruptMu.Lock()
-			stale := t.gen != p.gen
-			t.interruptMu.Unlock()
-			if stale {
-				return
-			}
-			select {
-			case p.checks <- verdict{sentence: unit, allowed: v.Allowed, final: true}:
-			case <-turnCtx.Done():
-				return
 			}
 			return
 		}
@@ -1819,20 +1805,32 @@ func (t *TalkLoop) playVerdict(ccid string, vr verdict) {
 	}
 
 	if vr.allowed {
+		// Latch the filler BEFORE the synchronous socket write. The timer
+		// goroutine checks utteranceOut under interruptMu; if we set it only
+		// AFTER t.say + emitVoicePlay + sayProgress, the timer can win the
+		// race in that window and speak filler behind an answer already on
+		// the wire (the caller hears the answer, then "hold on, let me
+		// check"). Setting the latch first makes any concurrent timer see
+		// utteranceOut and skip. On send failure we roll the latch back so
+		// filler can still cover the dead air.
+		t.interruptMu.Lock()
+		p.utteranceOut = true
+		fillerStopped := p.stopFillerLocked()
+		if fillerStopped {
+			p.fillerSkipped = true
+		}
+		t.interruptMu.Unlock()
 		if err := t.say(ccid, vr.sentence, vr.final); err != nil {
 			t.log.Warn("voice talk loop: say send failed", "ccid", ccid, "error", err)
+			t.interruptMu.Lock()
+			p.utteranceOut = false
+			t.interruptMu.Unlock()
 		} else {
 			t.emitVoicePlay(ccid, p, vr.sentence) // first allowed sentence of the turn
 			t.sayProgress(ccid)
 		}
 		t.interruptMu.Lock()
 		p.said++
-		// Delayed-filler latch: something of THIS turn's reached the
-		// caller, so the grace timer must not speak filler behind it.
-		p.utteranceOut = true
-		if p.stopFillerLocked() {
-			p.fillerSkipped = true
-		}
 		p.replyWords += wordCount(vr.sentence)
 		if vr.final {
 			p.turnEnded = true
@@ -1968,6 +1966,44 @@ func wordCount(text string) int {
 // the first terminal '.?!' or newline) and everything after it, both
 // trimmed. Used by the fast-first-audio connected-utterance path so the
 // opener can synthesize and play while the remainder generates.
+// splitRunesCapped splits s into consecutive rune slices of at most cap
+// runes. It preserves every rune (no text loss) and keeps chunk boundaries at
+// rune boundaries so a multi-byte character is never cut in half. Used by the
+// connected-utterance path to bound a single TTS request while still speaking
+// the whole reply. A non-positive cap yields one chunk with the whole string.
+func splitRunesCapped(s string, cap int) []string {
+	if cap <= 0 {
+		return []string{s}
+	}
+	r := []rune(s)
+	if len(r) <= cap {
+		return []string{s}
+	}
+	parts := make([]string, 0, (len(r)+cap-1)/cap)
+	for start := 0; start < len(r); start += cap {
+		end := start + cap
+		if end > len(r) {
+			end = len(r)
+		}
+		parts = append(parts, string(r[start:end]))
+	}
+	return parts
+}
+
+// checkStale reports whether this draft has been superseded by an interrupt
+// or a newer prompt, or its turn context is done. Shared by both the
+// connected and split-sentence check paths so the staleness gate stays in one
+// place.
+func (t *TalkLoop) checkStale(p *pipeline, turnCtx context.Context) bool {
+	if turnCtx.Err() != nil {
+		return true
+	}
+	t.interruptMu.Lock()
+	stale := t.gen != p.gen
+	t.interruptMu.Unlock()
+	return stale
+}
+
 func splitFirstSentence(text string) (string, string) {
 	t := strings.TrimSpace(text)
 	if t == "" {

@@ -1375,6 +1375,75 @@ func TestTalkLoopConnectSentencesSpeaksOneUtterance(t *testing.T) {
 	<-done
 }
 
+// TestTalkLoopConnectSentencesLongReplyNotTruncated pins the fix for a real
+// local-use defect: with ConnectSentences=true (supervisor off) any reply over
+// 3*maxSentenceRunes runes used to be cut at the cap and the remaining text
+// silently dropped, with the truncated tail emitted as the final utterance.
+// The reply must arrive whole, in order, in bounded chunks.
+func TestTalkLoopConnectSentencesLongReplyNotTruncated(t *testing.T) {
+	// 4 x 280-rune sentences: well over the old 840-rune cap.
+	var b strings.Builder
+	for i := 0; i < 4; i++ {
+		b.WriteString(strings.Repeat("word", 56)) // 224 runes
+		b.WriteString(".")
+		b.WriteString(" ")
+	}
+	long := strings.TrimSpace(b.String())
+	if r := []rune(long); len(r) <= 840 {
+		t.Fatalf("fixture must exceed the old 840-rune cap, got %d", len(r))
+	}
+
+	sink := &recordSink{}
+	sup := &cannedSupervisor{allowed: map[string]bool{}}
+	turns := &cannedTurns{reply: long}
+	loop := newTestTalkLoop(t, sink.Send, sup, turns, TalkLoopConfig{
+		FillerLines:      []string{"One moment."},
+		GreetingLine:     "Hello.",
+		ConnectSentences: true,
+	})
+
+	cancel, done := runLoop(t, loop, "cc-long")
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	loop.frames <- finalPrompt("cc-long", "question")
+	// Wait until the full reply text has been reconstructed from emitted
+	// say frames. A frame-count check races the final frame's arrival.
+	// The connected path trims inter-sentence whitespace by design
+	// (splitFirstSentence), so compare on normalized whitespace. The key
+	// assertion is that no CONTENT rune is dropped by the old 840-rune cap.
+	// Compare the non-space content: splitFirstSentence and the rune-cap
+	// chunker trim whitespace at boundaries by design, so a word-for-word
+	// content comparison is the invariant (no CONTENT is lost).
+	want := strings.ReplaceAll(strings.Join(strings.Fields(long), ""), ".", "")
+	wantRunes := []rune(want)
+	normalize := func(s string) string {
+		return strings.ReplaceAll(strings.Join(strings.Fields(s), ""), ".", "")
+	}
+	waitFor(t, 3*time.Second, "long reply not fully spoken", func() bool {
+		return normalize(reconstructReply(sink.sayTexts())) == want
+	})
+
+	got := normalize(reconstructReply(sink.sayTexts()))
+	if got != want {
+		t.Fatalf("long reply truncated or reordered: got %d content runes, want %d", len([]rune(got)), len(wantRunes))
+	}
+}
+
+// reconstructReply concatenates only the reply frames (those carrying the
+// fixture's "word" token), skipping greeting/filler frames.
+func reconstructReply(texts []string) string {
+	var b strings.Builder
+	for _, tx := range texts {
+		if strings.Contains(tx, "word") {
+			b.WriteString(tx)
+		}
+	}
+	return b.String()
+}
+
 // TestTalkLoopPerSentenceSpeaksSplit pins the byte-identical old path when
 // ConnectSentences is false (supervisor gate on): the split still emits one
 // say frame per allowed sentence — the gate needs per-sentence granularity.

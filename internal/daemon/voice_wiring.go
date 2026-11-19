@@ -608,6 +608,17 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 			FallbackLine: "I cannot confirm that yet.",
 		}, chatter, vlog.With("sub", "supervisor"))
 	} else {
+		// No chatter can be built (no classifier client and no LLM client).
+		// The documented posture (voice_wiring docblock above) is allow-all
+		// WITH A WARNING: an operator who configured the gate on must be told
+		// it is actually off. Constructing the gate as Enabled=false keeps
+		// Check on its allow-all path — passing Enabled=true with a nil
+		// chatter would panic at s.chatter.Ask — so the fix is the missing
+		// warning, not a change to Check's verdict.
+		if cfg.SupervisorEnabled {
+			vlog.Warn("voice wiring: voice.supervisor_enabled is true but no chatter is available; " +
+				"the supervisor gate is INERT (every sentence is allowed unchecked)")
+		}
 		supervisor = voice.NewSupervisor(voice.SupervisorConfig{Enabled: false}, nil, vlog.With("sub", "supervisor"))
 	}
 

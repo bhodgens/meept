@@ -1154,23 +1154,35 @@ func (s *runLocalSplice) HandleInterrupt(ccid string) {
 		s.mu.Unlock()
 		return
 	}
+	// A C1 interrupt frame reaches BOTH entry points in production:
+	// routeFrame calls LatchBargeIn (audio plane) then the talk loop's
+	// handleInterrupt calls HandleInterrupt (control plane). When the
+	// latch already fired for this barge-in, the generation was bumped and
+	// the pump drained there. Doing it again here violated the documented
+	// one-latch-per-barge-in contract and emitted two "local barge-in"
+	// lines. Still send the child clear + CancelDraft below (the control
+	// plane work that LatchBargeIn does NOT do) — only skip the duplicate
+	// latch/bump/drain.
+	alreadyLatched := s.interrupt
 	s.cancelOne = true
-	s.interrupt = true
-	// Stale-audio drain generation (turn-2 leaf 01): bumped under the
-	// same lock as the latch so the pump goroutine's next read
-	// iteration resets its sub-chunk carry before appending fresh PCM.
-	s.drainSeq.Add(1)
-	// Fresh-audio gate (A6, shared bargeGate): every chunk the pump read
-	// BEFORE this point carries an old generation snapshot and can never
-	// re-arm the latch. When a stream was actively flowing at cancel
-	// time (an outbound touch within the residue window — playback
-	// live), the gate also stamps the residue deadline: socket-buffer
-	// backlog read shortly after the cancel is still the interrupted
-	// stream's tail and is discarded until it passes. With NO recent
-	// touch there is no in-flight stream, so no residue is possible —
-	// the next PCM is unconditionally fresh and the immediate re-arm of
-	// the silent-then-say shape is preserved.
-	s.gate.Bump(s.audioLastAct.Load())
+	if !alreadyLatched {
+		s.interrupt = true
+		// Stale-audio drain generation (turn-2 leaf 01): bumped under the
+		// same lock as the latch so the pump goroutine's next read
+		// iteration resets its sub-chunk carry before appending fresh PCM.
+		s.drainSeq.Add(1)
+		// Fresh-audio gate (A6, shared bargeGate): every chunk the pump read
+		// BEFORE this point carries an old generation snapshot and can never
+		// re-arm the latch. When a stream was actively flowing at cancel
+		// time (an outbound touch within the residue window — playback
+		// live), the gate also stamps the residue deadline: socket-buffer
+		// backlog read shortly after the cancel is still the interrupted
+		// stream's tail and is discarded until it passes. With NO recent
+		// touch there is no in-flight stream, so no residue is possible —
+		// the next PCM is unconditionally fresh and the immediate re-arm of
+		// the silent-then-say shape is preserved.
+		s.gate.Bump(s.audioLastAct.Load())
+	}
 	s.mu.Unlock()
 	s.notify() // stop the pacer's in-flight wait now
 
@@ -1181,7 +1193,9 @@ func (s *runLocalSplice) HandleInterrupt(ccid string) {
 	// per 20 ms, so without this drain the resume on the NEXT say paces
 	// the up-to-64-chunk (1.28 s) stale queue out FIRST — the exact
 	// ~1.3 s old-answer tail the operator heard on local-4dcfb291c2094ec9.
-	s.logStaleDrain()
+	if !alreadyLatched {
+		s.logStaleDrain()
+	}
 
 	// Byte-exact clear frame to the CHILD via the text seam (review
 	// checklist pins the exact bytes; there is no carrier playout to
@@ -1204,7 +1218,9 @@ func (s *runLocalSplice) HandleInterrupt(ccid string) {
 	if s.deps.CancelDraft != nil {
 		s.deps.CancelDraft(s.ccid)
 	}
-	s.log.Info("voice: local barge-in")
+	if !alreadyLatched {
+		s.log.Info("voice: local barge-in")
+	}
 }
 
 // itemStale is the pacer-side staleness check (bughunt 2026-11-10 A6 +
