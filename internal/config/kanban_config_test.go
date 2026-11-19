@@ -7,17 +7,19 @@ import (
 	"testing"
 )
 
-// TestConfig_KanbanDefaults pins the [kanban] block of C9: every surface is
-// opt-in (docs/agents/opt-in-defaults.md) — the whole feature is inert at
-// default config.
+// TestConfig_KanbanDefaults pins the [kanban] block: the board projection
+// and its browser gateway sidecar are default-on (plan tree
+// tui-gui-consistency-fixes 04-config-docs/01), while the remaining knobs
+// keep their enforced defaults (loopback bind, warn WIP, no periodic
+// reconcile, GitHub sync off — issue #133).
 func TestConfig_KanbanDefaults(t *testing.T) {
 	cfg := DefaultConfig()
 
-	if cfg.Kanban.Enabled {
-		t.Errorf("Kanban.Enabled = true, want false")
+	if !cfg.Kanban.Enabled {
+		t.Errorf("Kanban.Enabled = false, want true")
 	}
-	if cfg.Kanban.SidecarEnabled {
-		t.Errorf("Kanban.SidecarEnabled = true, want false")
+	if !cfg.Kanban.SidecarEnabled {
+		t.Errorf("Kanban.SidecarEnabled = false, want true")
 	}
 	if got, want := cfg.Kanban.SidecarBind, "127.0.0.1:8790"; got != want {
 		t.Errorf("Kanban.SidecarBind = %q, want %q", got, want)

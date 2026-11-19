@@ -67,13 +67,15 @@
 //	           gates on the board widget/service/nav tests. Declared as
 //	           a manifest row, not a Go test — scripts/e2e-affected.sh
 //	           dispatches it by runner.
-//	kanban-08  (g) live wiring pins: the enabled boot answers
-//	           kanban.board.list with the seeded default board over the
-//	           Unix socket (the real boot firing the real registration —
-//	           guards against a hand-replicated fixture passing while
-//	           07/01 never runs); the DISABLED boot answers
-//	           method-not-found (-32601) for two C4 names while the same
-//	           socket still serves queue.* — the byte-identical posture.
+//	kanban-08  (g) live wiring pins: a DEFAULT boot (no [kanban] block)
+//	           answers kanban.board.list with the seeded default board
+//	           over the Unix socket (both [kanban].enabled and
+//	           [kanban].sidecar_enabled default true, option B) AND seeds
+//	           $MEEPT_HOME/dev_key into the shared sidecar token store
+//	           with all three board grants before spawn; an EXPLICIT
+//	           disabled boot still answers method-not-found (-32601) for
+//	           two C4 names while the same socket serves queue.* — the
+//	           opt-out posture survives the default flip.
 //
 // Hermetic: 127.0.0.1 + unix sockets only; no LLM turn is ever driven.
 // The lease cases use the daemon's REAL queue machinery over its own RPC
@@ -568,28 +570,119 @@ func TestEnabledWiringServesSeededBoard(t *testing.T) {
 	}
 }
 
-func TestDisabledWiringIsMethodNotFound(t *testing.T) {
-	// Default config: no [kanban] block -> Enabled false -> the boot
-	// registers NOTHING: every C4 name answers the pre-kanban daemon's
-	// byte-identical -32601 posture... while the socket itself stays
-	// healthy (the control proves the refusal is per-method registration
-	// absence, not transport failure).
-	s := harness.Start(t)
+// TestKanbanDefaultBoardListed pins option B (kanban defaults on). A default
+// boot — no [kanban] block in meept.json5 — must register the C4 surface and
+// serve the daemon-seeded board. Against the old default-off code this is RED
+// (kanban.board.list answers -32601 method-not-found).
+func TestKanbanDefaultBoardListed(t *testing.T) {
+	s := harness.Start(t) // no config overlay: exercise the shipped defaults
+
+	out := rpcResult(t, s, "kanban.board.list", nil)
+	boards, _ := out["boards"].([]any)
+	if len(boards) == 0 {
+		t.Fatalf("default boot served no boards: %v", out)
+	}
+	found := false
+	for _, b := range boards {
+		if bm, _ := b.(map[string]any); bm != nil && str(bm, "name") == "meept board" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("default boot did not serve the seeded default board %q: %v", "meept board", out)
+	}
+
+	// Control: the same socket serves non-kanban methods normally.
+	rpcResult(t, s, "queue.stats", nil)
+}
+
+// TestKanbanDefaultSeedsDevKeyToken pins the dev-key token seed that must
+// land with the default-on flip. Before spawning the sidecar, the daemon
+// seeds $MEEPT_HOME/dev_key into the shared token store at
+// $MEEPT_HOME/kanban/tokens.json with board.read + board.mutate +
+// board.takeover, so a GUI holding the dev key can drive the board without a
+// separate pairing handshake. The KEY VALUE IS NEVER READ OR LOGGED: only its
+// presence as a map key in tokens.json is asserted. Against current code
+// (no seed, store file absent) this is RED.
+func TestKanbanDefaultSeedsDevKeyToken(t *testing.T) {
+	s := harness.Start(t) // default boot
+
+	// The dev-key file must exist on a default boot (the daemon generates
+	// it first-boot). Read it only to confirm presence/length; never print
+	// or log the contents.
+	keyData, err := os.ReadFile(filepath.Join(s.MeeptHome, "dev_key"))
+	if err != nil {
+		t.Fatalf("default boot did not provision $MEEPT_HOME/dev_key: %v", err)
+	}
+	devKey := strings.TrimSpace(string(keyData))
+	if devKey == "" {
+		t.Fatal("default boot provisioned an empty dev_key")
+	}
+
+	// The shared token store is written before the sidecar spawns. Poll
+	// briefly to absorb the spawn ordering (the seed is a boot-time write,
+	// normally already present by the time the RPC socket answers).
+	tokensPath := filepath.Join(s.MeeptHome, "kanban", "tokens.json")
+	var rec struct {
+		Version int                 `json:"version"`
+		Tokens  map[string][]string `json:"tokens"`
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		data, err := os.ReadFile(tokensPath)
+		if err == nil {
+			if jerr := json.Unmarshal(data, &rec); jerr != nil {
+				t.Fatalf("decode %s: %v", tokensPath, jerr)
+			}
+			if _, ok := rec.Tokens[devKey]; ok {
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			if err != nil {
+				t.Fatalf("default boot did not seed the sidecar token store at %s: %v", tokensPath, err)
+			}
+			t.Fatalf("default boot did not seed the dev key into %s (token count %d)", tokensPath, len(rec.Tokens))
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// The dev key must carry ALL three C5 board grants (order-independent).
+	grants := rec.Tokens[devKey]
+	want := map[string]bool{"board.read": true, "board.mutate": true, "board.takeover": true}
+	for _, g := range grants {
+		delete(want, g)
+	}
+	if len(want) != 0 {
+		t.Fatalf("dev-key token grants missing %v (got %v)", want, grants)
+	}
+}
+
+// TestKanbanExplicitDisabledIsMethodNotFound pins the opt-out contract
+// AFTER the default flip: an explicit [kanban].enabled=false AND
+// [kanban].sidecar_enabled=false must still leave every C4 name unregistered
+// (-32601 method-not-found), while the socket stays healthy. This is the
+// surviving "disabled" posture; only the DEFAULT changed.
+func TestKanbanExplicitDisabledIsMethodNotFound(t *testing.T) {
+	s := harness.Start(t, harness.WithConfigOverlay(map[string]any{
+		"kanban.enabled":         false,
+		"kanban.sidecar_enabled": false,
+	}))
 
 	resp := rpcCall(t, s.SocketPath, "kanban.board.list", nil)
 	errObj, ok := resp["error"].(map[string]any)
 	if !ok || errObj == nil {
-		t.Fatalf("disabled boot ANSWERED kanban.board.list: %v — registration fires without [kanban].enabled", resp["result"])
+		t.Fatalf("explicitly disabled boot ANSWERED kanban.board.list: %v — registration fired despite opt-out", resp["result"])
 	}
 	if code, _ := errObj["code"].(float64); code != -32601 {
-		t.Fatalf("disabled boot error code %v, want -32601 method-not-found: %v", errObj["code"], errObj)
+		t.Fatalf("explicitly disabled boot error code %v, want -32601 method-not-found: %v", errObj["code"], errObj)
 	}
 	if msg, _ := errObj["message"].(string); !strings.Contains(msg, "method not found: kanban.board.list") {
-		t.Fatalf("disabled boot error message %q, want the method-not-found text", errObj["message"])
+		t.Fatalf("explicitly disabled boot error message %q, want the method-not-found text", errObj["message"])
 	}
 	// A second C4-surface name pinned dead while disabled.
 	if resp := rpcCall(t, s.SocketPath, "kanban.pair.mint", map[string]any{}); resp["error"] == nil {
-		t.Fatalf("disabled boot answered kanban.pair.mint: %v", resp)
+		t.Fatalf("explicitly disabled boot answered kanban.pair.mint: %v", resp)
 	}
 
 	// Control: the socket serves non-kanban methods normally on this boot.

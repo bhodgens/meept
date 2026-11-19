@@ -617,7 +617,7 @@
     "daemon.reloaded": [
       {
         "file": "internal/daemon/daemon.go",
-        "line": 3220,
+        "line": 3226,
         "payload_keys": [
           "event"
         ]
@@ -626,7 +626,7 @@
     "daemon.stopping": [
       {
         "file": "internal/daemon/daemon.go",
-        "line": 2844,
+        "line": 2850,
         "payload_keys": [
           "event"
         ]

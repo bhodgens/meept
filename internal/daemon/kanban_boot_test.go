@@ -91,6 +91,28 @@ func readMarker(t *testing.T, marker string) []string {
 	return strings.Fields(line)
 }
 
+// waitForKanbanMarkerFrozen waits until the marker's spawn count has been
+// stable for quietFor, then returns the frozen snapshot. Bounded by timeout.
+func waitForKanbanMarkerFrozen(t *testing.T, marker string, quietFor, timeout time.Duration) []string {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	last := len(readMarker(t, marker))
+	stableSince := time.Now()
+	for time.Now().Before(deadline) {
+		time.Sleep(25 * time.Millisecond)
+		n := len(readMarker(t, marker))
+		if n != last {
+			last, stableSince = n, time.Now()
+			continue
+		}
+		if time.Since(stableSince) >= quietFor {
+			return readMarker(t, marker)
+		}
+	}
+	t.Fatalf("marker %s never froze within %v (last count %d)", marker, timeout, last)
+	return nil
+}
+
 func waitForMarkerLines(t *testing.T, marker string, want int, timeout time.Duration) []string {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -138,9 +160,12 @@ func TestKanbanSidecarDisabledIsByteIdentical(t *testing.T) {
 	if resolved != 0 {
 		t.Fatal("disabled boot must not even resolve the child binary")
 	}
-	// The default config lands here too (byte-identical guarantee).
-	if config.DefaultConfig().Kanban.SidecarEnabled {
-		t.Fatal("[kanban].sidecar_enabled default must be false")
+	// Option B flipped the shipped default to enabled (board + sidecar).
+	// This test keeps its opt-out coverage via the explicit cfg above; pin
+	// the new default so a future flip back cannot silently disable the
+	// board for every install.
+	if !config.DefaultConfig().Kanban.SidecarEnabled {
+		t.Fatal("[kanban].sidecar_enabled default must be true (option B)")
 	}
 }
 
@@ -238,7 +263,13 @@ func TestKanbanSidecarRestartBudgetGivesUp(t *testing.T) {
 		}
 		time.Sleep(80 * time.Millisecond)
 	}
-	count := len(readMarker(t, marker))
+	// The supervisor's give-up is ASYNCHRONOUS relative to this kill loop:
+	// the final (4th) spawn can land just after the loop ends. Wait until
+	// the marker has genuinely stopped growing before snapshotting the
+	// count we assert stays frozen, otherwise a late 4th spawn reads as a
+	// spurious "respawn past the budget" (3 -> 4).
+	frozen := waitForKanbanMarkerFrozen(t, marker, 200*time.Millisecond, 5*time.Second)
+	count := len(frozen)
 	if count > 4 {
 		t.Fatalf("restart budget not enforced: %d spawns (want <= 4 = initial + 3)", count)
 	}

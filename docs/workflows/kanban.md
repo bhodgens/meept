@@ -21,9 +21,11 @@ Store: SQLite WAL + FK cascades, schema in `internal/kanban/store.go`
 
 Everything below is committed and tested. The 07-daemon-wiring/01 pass
 LIVES the wiring: `internal/daemon/kanban_wiring.go` constructs the full
-stack when `[kanban].enabled` (default false = byte-identical boot —
-no store file, no goroutine, no subscriber, no RPC registration). On
-enable it opens the store at `$MEEPT_HOME/kanban/board.db` (migrates on
+stack by default — `[kanban].enabled` is now true (option B), so a default
+daemon boots the board store, projector, publisher gates, and `kanban.*`
+RPC; set `enabled=false` explicitly for the byte-identical pre-kanban boot
+(no store file, no goroutine, no subscriber, no RPC registration). On
+boot it opens the store at `$MEEPT_HOME/kanban/board.db` (migrates on
 open, `MaxOpenConns(1)`), builds Manager + HumanCommands with the real
 C10 `LeaseAuthority` over the queue/task machinery (job claim state +
 task interrupt + plan synthesis lease + goal activity; takeover cancels
@@ -102,15 +104,16 @@ one-liners and test harnesses without a bus never panic.
   publishing a lying `From`. The periodic rebuild/reconcile (leaf
   03/02) is the backstop that re-derives cards from the rows.
 
-## Opt-in gate
+## Publisher gate
 
 Both publishers are gated per machine instance:
 `PersistentQueue.SetKanbanEventPublishing(bool)` and
 `Registry.SetKanbanEventPublishing(bool)` (plus the plan/step/goal
 setters, `internal/plan/manager.go:1826`, `internal/employee/goal.go:720`).
-Default is false: zero events are constructed or published and behavior
-is byte-identical to pre-kanban builds. The daemon turns the gate on
-only when the kanban feature is enabled; that wiring is leaf 07/01.
+The setters default false so a machine constructed outside the daemon is
+byte-identical to pre-kanban builds. With kanban now default-on, the daemon
+turns the gate ON by default through the 07/01 wiring; an explicit
+`[kanban].enabled=false` leaves it off and keeps boot byte-identical.
 Unit tests drive both sides through the setters.
 
 ## Grants (C5, leaf 04/01)
@@ -122,34 +125,55 @@ holds all three. Consumers: the sidecar gateway
 mutate AND takeover) and the `kanban.*` RPC handlers (committed leaf
 05/01, live registration at 07/01).
 
+### Dev-key token seed (default-on GUI access)
+
+With the sidecar default-on, a default GUI install must reach the board
+without a pairing code. Before the child spawns, the daemon seeds the
+existing per-installation `$MEEPT_HOME/dev_key` into the sidecar token
+store at `$MEEPT_HOME/kanban/tokens.json`, granting it all three board
+grants (`board.read`, `board.mutate`, `board.takeover`) via
+`internal/daemon/kanban_devkey.go` (`seedKanbanDevKeyToken`, called from
+`StartKanbanSidecar` only when `enabled && sidecar_enabled`). The seed is
+idempotent (`TokenStore.Grant` replaces that token's grant set) and never
+revokes other tokens. It is the SAME credential the GUI already sends as
+its bearer token to port 8790 — no anonymous/default token is introduced,
+the seed runs only from the daemon (a directly launched `meept-kanban`
+still keeps its documented 401-everything posture until an operator
+pairs), and the key value is never logged. The token file stays 0600 (the
+sidecar still refuses group/other-readable stores). Remote GUI access
+still requires the TLS proxy + `[kanban].allowed_origins` documented below.
+
 ## Config: enabling the feature
 
 All knobs live in the `[kanban]` block of `~/.meept/meept.json5`
 (`KanbanConfig`, `internal/config/schema.go:230-275`; C9 defaults at
-`internal/config/schema.go:5250-5255`; commented template block in
-`config/meept.json5` — an absent block is identical to disabled):
+`internal/config/schema.go:5250-5255`; uncommented template block in
+`config/meept.json5` — an absent block falls back to the same package
+defaults, board + loopback sidecar on):
 
 ```json5
-// drift: commented template block; absent from installed homes by
-// design (default-off: an absent block is identical to disabled).
-// "kanban": {
-//   "enabled": false,            // master switch: store + projector + RPC
-//   "sidecar_enabled": false,    // daemon-spawns meept-kanban (needs enabled
-//                                // + transport.rpc.enabled; spawn doc below)
-//   "sidecar_bind": "127.0.0.1:8790",  // C7: a non-loopback value is the
-//                                // explicit opt-out (loud boot warning; TLS
-//                                // terminates at YOUR proxy, see below)
-//   "wip_mode": "warn",          // C9/C10: "warn" | "block" (any other
-//                                // value fails config validation)
-//   "reconcile_interval": "0s",  // C9: Go duration string; "0s" disables the
-//                                // periodic rebuild (on-demand stays on)
-//   "github_sync": { "enabled": false },   // deferred knob (issue #133)
-// },
+// drift: local-drift: kanban.* -> default-on block added after older installs;
+// absent = package defaults (board + loopback sidecar on, warn WIP, no periodic
+// rebuild). Set enabled/sidecar_enabled to false to opt out.
+"kanban": {
+  "enabled": true,              // master switch (DEFAULT ON): store + projector + RPC
+  "sidecar_enabled": true,      // daemon-spawns meept-kanban (DEFAULT ON; needs enabled
+                                // + transport.rpc.enabled; set false to opt out)
+  "sidecar_bind": "127.0.0.1:8790",  // C7: a non-loopback value is the
+                                // explicit opt-out (loud boot warning; TLS
+                                // terminates at YOUR proxy, see below)
+  "wip_mode": "warn",          // C9/C10: "warn" | "block" (any other
+                                // value fails config validation)
+  "reconcile_interval": "0s",  // C9: Go duration string; "0s" disables the
+                                // periodic rebuild (on-demand stays on)
+  "github_sync": { "enabled": false },   // deferred knob (issue #133)
+},
 ```
 
-`enabled=false` (default): the daemon opens no kanban store, starts no
-projector, registers no `kanban.*` RPC — byte-identical boot.
-`wip_mode` is validated at load (`schema.go:269-275`).
+`enabled=true` (default): the daemon opens the kanban store, starts the
+projector, and registers the `kanban.*` RPC. An explicit `enabled=false`
+restores the byte-identical pre-kanban boot (no store, no projector, no
+RPC). `wip_mode` is validated at load (`schema.go:269-275`).
 `reconcile_interval` is held as a string and parsed at wiring time by
 07/01 (`schema.go:252-257`).
 
@@ -286,9 +310,12 @@ with exponential backoff, capped at 5 attempts in 60s, then one ERROR
 give-up (the gateway stays down until the next daemon start).
 `Daemon.shutdown` stops it gracefully (SIGTERM group, the sidecar's own
 5s HTTP drain, `cmd/meept-kanban/main.go:116`, then SIGKILL) BEFORE the
-RPC socket closes. Disabled (default): no resolve, no process, no pid
-file — byte-identical boot. A spawn failure is non-fatal: the board
-gateway degrades, never the daemon.
+RPC socket closes. With option B the sidecar is ENABLED by default (just
+as `[kanban].enabled`): a default daemon resolves the binary, spawns the
+child, writes its pid/spawn record, and seeds the dev-key token before
+spawn. An explicit `sidecar_enabled=false` restores the old opt-in
+posture — no resolve, no process, no pid file, no token seed. A spawn
+failure is non-fatal: the board gateway degrades, never the daemon.
 
 ## Exposing the sidecar: TLS-termination proxy
 

@@ -2100,6 +2100,40 @@ func (r *AgentRegistry) GetActiveQueueLoop(conversationID string) *AgentLoop {
 	return entry.Loop
 }
 
+// ActiveLoopCount returns the number of currently-active queues owned by
+// loops built for the given agent ID. It is the live per-agent episode count
+// surfaced by the unified agents.roster C1 active_count field (plan tree
+// tui-gui-consistency-fixes, leaf 01-backend/02).
+//
+// The queue entries are snapshotted under activeQueuesMu and that lock is
+// RELEASED before calling GetAgentID (which takes the loop's own mutex).
+// Holding activeQueuesMu while dereferencing a loop would risk a lock-order
+// inversion with the chat path — the registry never nests those two locks.
+// Entries with a nil loop (tests) or an empty agent ID carry no identity and
+// are not counted. Nil receiver and empty agentID are no-ops.
+func (r *AgentRegistry) ActiveLoopCount(agentID string) int {
+	if r == nil || agentID == "" {
+		return 0
+	}
+
+	r.activeQueuesMu.RLock()
+	loops := make([]*AgentLoop, 0, len(r.activeQueues))
+	for _, entry := range r.activeQueues {
+		if entry != nil {
+			loops = append(loops, entry.Loop)
+		}
+	}
+	r.activeQueuesMu.RUnlock()
+
+	n := 0
+	for _, loop := range loops {
+		if loop != nil && loop.GetAgentID() == agentID {
+			n++
+		}
+	}
+	return n
+}
+
 // GetQueueWithVersion performs a version-check after lookup.
 // Returns ErrQueueClosed or ErrGenerationMismatch if the queue is stale.
 func (r *AgentRegistry) GetQueueWithVersion(conversationID string, expectedGen uint64) (*MessageQueue, error) {

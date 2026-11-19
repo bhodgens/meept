@@ -257,6 +257,16 @@ func (d *Daemon) StartKanbanSidecar(ctx context.Context) error {
 	if cfg := d.fullConfig.Kanban; cfg.SidecarBind != "" {
 		bind = cfg.SidecarBind
 	}
+	// Seed the dev key into the shared token store BEFORE the child spawns,
+	// so a GUI holding $MEEPT_HOME/dev_key can open the board without a
+	// pairing handshake. No-op when the sidecar is disabled (the early
+	// gates above returned). A seed failure fails the spawn: the gateway
+	// would be unreachable to a default GUI, so degrade loudly rather than
+	// boot a sidecar that 401s its own client. Never logs the key value.
+	if err := seedKanbanDevKeyToken(d.logger); err != nil {
+		return fmt.Errorf("kanban sidecar: seed dev-key token: %w", err)
+	}
+
 	if bin := kanbanBinaryResolver(""); bin == "" {
 		return errors.New("kanban sidecar: no meept-kanban binary found (build it and place it next to the daemon binary or in $MEEPT_HOME/bin)")
 	}

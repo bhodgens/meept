@@ -18,6 +18,7 @@ import '../features/changes/changes_panel.dart';
 import '../features/prompts/prompt_panel.dart';
 import '../features/calendar/calendar_panel.dart';
 import '../features/metrics/metrics_panel.dart';
+import '../models/api_models.dart';
 import '../theme/colors.dart';
 import '../theme/typography.dart';
 import '../providers/preferences_provider.dart';
@@ -142,7 +143,12 @@ final GoRouter router = GoRouter(
       path: '/tools/search',
       name: 'toolsSearch',
       builder: (context, state) {
-        return const SearchPanel();
+        // Optional scope passed via `extra` (e.g. SearchScope.sessions from
+        // the sessions tree) pre-filters the existing SearchPanel.
+        final scope = state.extra;
+        return SearchPanel(
+          initialScope: scope is SearchScope ? scope : SearchScope.all,
+        );
       },
       onExit: guardRouteExit,
     ),
@@ -402,6 +408,10 @@ extension AppRouterExtension on BuildContext {
 
   /// Navigate to the search tool panel (replace current entry).
   void goToolSearch() => go('/tools/search');
+
+  /// Navigate to search pre-filtered to [scope] (e.g. from the sessions tree).
+  void goToolSearchScoped(SearchScope scope) =>
+      go('/tools/search', extra: scope);
 
   /// Navigate to the branches tool panel (replace current entry).
   void goToolBranches() => go('/tools/branches');

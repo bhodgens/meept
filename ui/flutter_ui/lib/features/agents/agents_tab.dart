@@ -448,6 +448,27 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
                 _AgentStatusChip(status: status),
               ],
             ),
+            // C1 roster line (GUI parity with the TUI agents panel): kind,
+            // active count and daily spend from the agents.list payload.
+            if (agent.type.isNotEmpty ||
+                agent.activeCount > 0 ||
+                agent.dailyCostCents > 0)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  'type: ${agent.type.isEmpty ? 'n/a' : agent.type.toLowerCase()}'
+                  ' · active: ${agent.activeCount}'
+                  ' · cost: \$${(agent.dailyCostCents / 100).toStringAsFixed(2)}',
+                  key: ValueKey('agent-roster-${agent.id}'),
+                  style: CyberpunkTypography.bodySmall.copyWith(
+                    color: CyberpunkColors.midGray,
+                    fontSize: 10,
+                    fontFamily: 'SourceCodePro',
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
             const SizedBox(height: 4),
             Row(
               mainAxisAlignment: MainAxisAlignment.end,

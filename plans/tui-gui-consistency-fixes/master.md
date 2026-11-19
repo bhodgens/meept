@@ -214,29 +214,29 @@ Output: APPROVED or a list of specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-e2e-tests | PENDING | 0 | |
-| 01-backend | PENDING | 0 | |
-| 01/00T-roster-tests | PENDING | 0 | |
-| 01/01-roster-rpc | PENDING | 0 | |
-| 01/02-roster-active-cost | PENDING | 0 | |
-| 02-tui | PENDING | 0 | |
-| 02/00T-tui-tests | PENDING | 0 | |
-| 02/01-agents-data | PENDING | 0 | |
-| 02/02-agents-columns | PENDING | 0 | |
-| 02/03-sessions-tree | PENDING | 0 | |
-| 02/04-kanban-error | PENDING | 0 | |
-| 02/05-search-entry | PENDING | 0 | |
-| 03-gui | PENDING | 0 | |
-| 03/00T-gui-tests | PENDING | 0 | |
-| 03/01-popup-shell | PENDING | 0 | |
-| 03/02-popup-tabs | PENDING | 0 | |
-| 03/03-sessions-tree | PENDING | 0 | |
-| 03/04-search-entry | PENDING | 0 | |
-| 04-config-docs | PENDING | 0 | |
-| 04/00T-e2e-pin | PENDING | 0 | |
-| 04/01-kanban-default | PENDING | 0 | |
-| 04/02-docs-ag | PENDING | 0 | |
-| 01/03-sidecar-devkey | PENDING | 0 | |
+| 00T-e2e-tests | TESTS_VALIDATED | 1 | RED: -32601 for both RPCs, verified in-session |
+| 01-backend | COMPLETE | 1 | 8b847761, b5a70048, 82ae37e5 |
+| 01/00T-roster-tests | TESTS_VALIDATED | 1 | RED: undefined C1 symbols |
+| 01/01-roster-rpc | COMPLETE | 1 | 8b847761 gate green |
+| 01/02-roster-active-cost | COMPLETE | 1 | b5a70048 live wiring + counts + cost |
+| 02-tui | COMPLETE | 1 | a28f36e5, c3b4526b, 56551ce3, 81505736 |
+| 02/00T-tui-tests | TESTS_VALIDATED | 1 | RED: 6 assertion failures, no compile errors |
+| 02/01-agents-data | COMPLETE | 1 | a28f36e5 roster + type/active columns |
+| 02/02-agents-columns | COMPLETE | 1 | columns landed with 02/01 by gate requirement |
+| 02/03-sessions-tree | COMPLETE | 1 | c3b4526b golden regenerated |
+| 02/04-kanban-error | COMPLETE | 1 | 56551ce3 C3 guidance at error source |
+| 02/05-search-entry | COMPLETE | 1 | 81505736 reuses OpenSearchViewMsg |
+| 03-gui | COMPLETE | 2 | 6ebe8f94, 69fc76d6, 58e08238, 45f53d20, 9a22b319 |
+| 03/00T-gui-tests | TESTS_VALIDATED | 1 | RED: 4 assertion failures |
+| 03/01-popup-shell | COMPLETE | 1 | 6ebe8f94 full-window |
+| 03/02-popup-tabs | COMPLETE | 1 | 69fc76d6 canonical tabs + C1 fields |
+| 03/03-sessions-tree | COMPLETE | 1 | 58e08238 ExpansionTile tree |
+| 03/04-search-entry | COMPLETE | 2 | 45f53d20; 9a22b319 menu integration fix |
+| 04-config-docs | COMPLETE | 1 | e4c94ca0, 346d7cc0, 82ae37e5 |
+| 04/00T-e2e-pin | TESTS_VALIDATED | 1 | RED: default-off; opt-out control still passes |
+| 04/01-kanban-default | COMPLETE | 1 | e4c94ca0 board+sidecar on, tools menu |
+| 04/02-docs-ag | COMPLETE | 1 | 346d7cc0 docs synced |
+| 01/03-sidecar-devkey | COMPLETE | 1 | 82ae37e5 dev-key token seed |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS |
 IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
@@ -297,6 +297,32 @@ addenda. Never edit a dispatched leaf document mid-execution.
    bearer, so flipping `enabled` alone leaves the GUI board unreachable.
    Impact: one extra daemon child; no Dart change; remote access still needs
    the documented TLS proxy and `allowed_origins`.
+
+## Execution Record
+
+All 19 leaves COMPLETE; all branches COMPLETE. Validation in the isolation
+worktree at HEAD 8e452444:
+
+- `go build ./...` green
+- `go test -p 2 ./... -count=1` green (no FAIL lines)
+- `go test -p 2 -tags e2e ./e2e/suites/tui-gui-consistency/... ./e2e/suites/kanban/... -count=1` green
+- `flutter analyze --no-pub lib/` 8 pre-existing infos, none in changed files
+- `flutter test --no-pub` 759 pass / 4 fail; the 4 failures reproduce at pristine HEAD
+  (queue_tab x3 + tool_exit_guard x1, viewport overflow) and are outside this tree
+- `make graphs` + `make graphs-check` green (commit 8e452444)
+
+Merge to main was BLOCKED by another session's uncommitted work in the primary
+checkout. Two attempts hit overlapping files: the first by an in-flight session
+rename feature (session_info_overlay.dart, sessions_list.dart), the second by an
+in-flight execution-runs feature (agents_panel.go, app.go, agents_tab.dart).
+No stash or overwrite was performed. Resume merge when main is clean:
+
+  cd /Users/caimlas/git/meept
+  git merge --no-ff plan/tui-gui-consistency-fixes
+
+Then re-run: go build ./..., go test -p 2 ./..., the two e2e suites above,
+flutter test, make graphs-check.
+
 ## Notes
 
 - Two generated files are already modified in the working tree

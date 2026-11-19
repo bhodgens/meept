@@ -54,6 +54,12 @@
     "line": 292
   },
   {
+    "topic": "agents.roster",
+    "handler": "h.handleRoster",
+    "file": "internal/rpc/roster.go",
+    "line": 100
+  },
+  {
     "topic": "backup.list",
     "handler": "h.handleBackupList",
     "file": "internal/rpc/backup_sync.go",

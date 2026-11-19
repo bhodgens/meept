@@ -308,6 +308,21 @@ func (p *KanbanPanel) Init() tea.Cmd {
 	return p.fetchBoards()
 }
 
+// kanbanDisabledHint is the C3 user-facing guidance shown when the daemon
+// has not registered the kanban.* RPC methods ([kanban].enabled=false).
+const kanbanDisabledHint = "kanban board is not enabled; set [kanban].enabled=true"
+
+// kanbanFetchErr maps the daemon's "method not found: kanban.board.list"
+// refusal (returned when the kanban subsystem is disabled) to the short C3
+// guidance string. Every other error is passed through unchanged so the
+// existing error rendering stays intact.
+func kanbanFetchErr(err error) error {
+	if strings.Contains(err.Error(), "method not found: kanban.board.list") {
+		return errors.New(kanbanDisabledHint)
+	}
+	return err
+}
+
 func (p *KanbanPanel) fetchBoards() tea.Cmd {
 	return func() tea.Msg {
 		if p.rpc == nil || !p.rpc.IsConnected() {
@@ -315,7 +330,7 @@ func (p *KanbanPanel) fetchBoards() tea.Cmd {
 		}
 		raw, err := p.rpc.Call("kanban.board.list", nil)
 		if err != nil {
-			return kanbanBoardsMsg{err: err}
+			return kanbanBoardsMsg{err: kanbanFetchErr(err)}
 		}
 		var boards []kanbanBoardRow
 		for _, m := range kanbanDecodeList(raw, "boards", "Boards") {

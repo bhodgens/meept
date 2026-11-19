@@ -103,7 +103,7 @@ as listed in each leaf's Goal.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T | PENDING | 0 | |
+| 00T | TESTS_VALIDATED | 1 | RED default-off; opt-out control green |
 | 01 | PENDING | 0 | |
 | 02 | PENDING | 0 | |
 | 01/03-sidecar-devkey | PENDING | 0 | |

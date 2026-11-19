@@ -5311,13 +5311,13 @@ func DefaultConfig() *Config {
 			GateCommand:     "",
 			ProjectNumber:   0,
 		},
-		// Kanban board projection (opt-in, disabled by default;
-		// plans/kanban-board C9). wip_mode/reconcile_interval are the
-		// enforced defaults of C10/C9; the GitHubSync knob exists for
-		// issue #133 only — no code reads it.
+		// Kanban board projection (default-on; plan tree
+		// tui-gui-consistency-fixes 04-config-docs/01 flips the C9 opt-in).
+		// wip_mode/reconcile_interval are the enforced defaults of C10/C9;
+		// the GitHubSync knob exists for issue #133 only — no code reads it.
 		Kanban: KanbanConfig{
-			Enabled:           false,
-			SidecarEnabled:    false,
+			Enabled:           true,
+			SidecarEnabled:    true,
 			SidecarBind:       "127.0.0.1:8790",
 			WIPMode:           "warn",
 			ReconcileInterval: "0s",

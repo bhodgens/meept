@@ -20,8 +20,12 @@ const searchDebounceDuration = 250 * time.Millisecond
 // searchDefaultLimit is the max number of results requested per query.
 const searchDefaultLimit = 20
 
-// OpenSearchViewMsg requests the app to switch to the global search view.
-type OpenSearchViewMsg struct{}
+// OpenSearchViewMsg requests the app to switch to the search view. Scope may
+// be "sessions" to open scoped to sessions; empty preserves the global search
+// behavior (scope "all").
+type OpenSearchViewMsg struct {
+	Scope string
+}
 
 // CloseSearchViewMsg requests the app to switch back to the sessions view.
 type CloseSearchViewMsg struct{}
@@ -103,7 +107,7 @@ func NewSearchModel(rpc SearchRPCClient, logger *slog.Logger) *SearchModel {
 	return &SearchModel{
 		rpc:    rpc,
 		query:  ti,
-		scopes: []string{"all", "messages", "memories", "tasks", "plans"},
+		scopes: []string{"all", "sessions", "messages", "memories", "tasks", "plans"},
 		logger: logger,
 	}
 }
@@ -116,9 +120,25 @@ func (m *SearchModel) SetSize(width, height int) {
 	m.query.SetWidth(inputWidth)
 }
 
-// Init initializes the search model.
+// Init initializes the search model by focusing the query input.
 func (m *SearchModel) Init() tea.Cmd {
 	return m.query.Focus()
+}
+
+// Open prepares the search view for a fresh entry. An empty or unknown scope
+// selects "all", preserving the global-search behavior. A recognized scope
+// (e.g. "sessions") becomes the active scope selector so the first query is
+// scoped accordingly.
+func (m *SearchModel) Open(scope string) tea.Cmd {
+	m.resetQuery()
+	m.scopeIndex = 0
+	for i, s := range m.scopes {
+		if s == scope {
+			m.scopeIndex = i
+			break
+		}
+	}
+	return m.Init()
 }
 
 // Update handles messages for the search view.

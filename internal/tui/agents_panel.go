@@ -8,7 +8,7 @@
 // loading/error/empty render states.
 //
 // RPC methods consumed (spec §"RPC"):
-//   - agents.list              -> list employees
+//   - agents.roster            -> unified roster (bots + employees + agents)
 //   - agents.get               -> single employee (drill-in)
 //   - agents.goals.list        -> active goals w/ health
 //   - agents.audit.list        -> recent findings by severity
@@ -95,15 +95,21 @@ type AgentsRPCClient interface {
 }
 
 // AgentSummary is the row model used by the agents list. It mirrors the
-// fields the daemon returns for agents.list plus a few values (drift,
-// daily cost) that the manager computes from bot state.
+// fields the daemon returns for agents.roster (C1 RosterEntry) plus a few
+// values (drift, findings, last invocation) that the manager computes from
+// local state and that the roster rows do not carry.
 type AgentSummary struct {
-	ID         string  `json:"id"`
-	Name       string  `json:"name"`
-	Role       string  `json:"role"`
-	Status     string  `json:"status"` // running | paused | error | stopped | quota_wait
-	Tier       string  `json:"tier"`   // tier_1_reactive | tier_2_propose | tier_3_autonomous
-	DriftScore float64 `json:"drift_score"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Role string `json:"role"`
+	// Type is the C1 roster tier discriminator: "agent" | "bot" |
+	// "employee". ActiveCount is the number of live episodes/plans for the
+	// row (C1 active_count).
+	Type        string  `json:"type"`
+	ActiveCount int     `json:"active_count"`
+	Status      string  `json:"status"` // running | paused | error | stopped | quota_wait
+	Tier        string  `json:"tier"`   // tier_1_reactive | tier_2_propose | tier_3_autonomous
+	DriftScore  float64 `json:"drift_score"`
 	// ExecutorAgent names the acp-backed registry agent whose loop this
 	// employee's GoalLoop EXECUTE turns route through (acp-employees
 	// phase 3 display parity; mirrors bot.BotDefinition.ExecutorAgent,
@@ -195,6 +201,8 @@ func NewAgentsPanel(rpc AgentsRPCClient) *AgentsPanel {
 		{Title: "cost", Width: 10},
 		{Title: "findings", Width: 8},
 		{Title: "last run", Width: 12},
+		{Title: "type", Width: 10},
+		{Title: "active", Width: 6},
 	}
 
 	t := table.New(
@@ -276,8 +284,8 @@ func (p *AgentsPanel) resizeColumns() {
 	// budget) and bubbles/table MaxWidth-truncated every cell (M12). All
 	// columns are fitted together - a leftover handed to "last run"
 	// after fixing the others double-counted the space.
-	mins := []int{12, 8, 8, 6, 6, 8, 8}
-	weights := []int{22, 10, 16, 8, 10, 8, 12}
+	mins := []int{12, 8, 8, 6, 6, 8, 8, 6, 5}
+	weights := []int{22, 10, 16, 8, 10, 8, 12, 8, 6}
 	cols := []table.Column{
 		{Title: "id"},
 		{Title: "status"},
@@ -286,6 +294,8 @@ func (p *AgentsPanel) resizeColumns() {
 		{Title: "cost"},
 		{Title: "findings"},
 		{Title: "last run"},
+		{Title: "type"},
+		{Title: "active"},
 	}
 	if p.showExec() {
 		// exec carries weight 8, not its visual 5: at the narrowest permitted
@@ -299,6 +309,30 @@ func (p *AgentsPanel) resizeColumns() {
 		cols = append(cols, table.Column{Title: "exec"})
 	}
 	widths := tableutil.FitWidthsMin(tableutil.ContentBudget(p.table.Width(), len(mins)), mins, weights)
+	// FitWidthsMin's over-subscription fallback clamps zero-width columns up
+	// to 1; with the roster's 9 columns at width 30 (budget 10) that clamp
+	// pushes the sum to 14. Re-enforce the invariant at the single write
+	// boundary: sum <= budget, every column >= 1.
+	budget := max(tableutil.ContentBudget(p.table.Width(), len(mins)), 1)
+	for sum := 0; ; {
+		sum = 0
+		for _, w := range widths {
+			sum += w
+		}
+		if sum <= budget {
+			break
+		}
+		widest := -1
+		for i, w := range widths {
+			if w > tableutil.MinColumnWidth && (widest < 0 || w > widths[widest]) {
+				widest = i
+			}
+		}
+		if widest < 0 {
+			break // budget < column count; nothing left to shrink
+		}
+		widths[widest]--
+	}
 	for i := range cols {
 		cols[i].Width = widths[i]
 	}
@@ -344,7 +378,7 @@ func (p *AgentsPanel) resizeGoalColumns() {
 	})
 }
 
-// Init kicks off the initial agents.list fetch.
+// Init kicks off the initial agents.roster fetch.
 func (p *AgentsPanel) Init() tea.Cmd {
 	return p.fetchAgents
 }
@@ -398,14 +432,17 @@ func (p *AgentsPanel) scheduleQuotaCountdownTick() tea.Cmd {
 	})
 }
 
-// agentsListMsg carries the agents.list response.
+// agentsListMsg carries the agents.roster response.
 type agentsListMsg struct {
 	agents []AgentSummary
 	err    error
 }
 
 func (p *AgentsPanel) fetchAgents() tea.Msg {
-	raw, err := p.rpc.Call("agents.list", nil)
+	// C1: the unified roster returns agents, bots and employees in one
+	// response keyed under "agents". The row shape (id,name,type,status,
+	// active_count,daily_cost_cents,...) decodes straight into AgentSummary.
+	raw, err := p.rpc.Call("agents.roster", nil)
 	if err != nil {
 		return agentsListMsg{err: err}
 	}
@@ -413,7 +450,7 @@ func (p *AgentsPanel) fetchAgents() tea.Msg {
 		Agents []AgentSummary `json:"agents"`
 	}
 	if err := json.Unmarshal(raw, &resp); err != nil {
-		return agentsListMsg{err: fmt.Errorf("unmarshal agents: %w", err)}
+		return agentsListMsg{err: fmt.Errorf("unmarshal agents roster: %w", err)}
 	}
 	return agentsListMsg{agents: resp.Agents}
 }
@@ -923,6 +960,8 @@ func (p *AgentsPanel) updateAgentsTable() {
 			fmt.Sprintf("$%d.%02d", a.DailyCostCents/100, a.DailyCostCents%100),
 			fmt.Sprintf("%d", a.FindingsCount),
 			formatTimeAgoTime(a.LastInvocation),
+			truncate(a.Type, 10),
+			fmt.Sprintf("%d", a.ActiveCount),
 		}
 		if p.execColumn {
 			row = append(row, executorListMarker(a.ExecutorAgent))

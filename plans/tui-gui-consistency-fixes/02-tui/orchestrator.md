@@ -114,7 +114,7 @@ as listed in each leaf's Goal.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T | PENDING | 0 | |
+| 00T | TESTS_VALIDATED | 1 | RED 6 assertions |
 | 01 | PENDING | 0 | |
 | 02 | PENDING | 0 | |
 | 03 | PENDING | 0 | |

@@ -15,7 +15,12 @@ import '../../widgets/tool_panel_shell.dart';
 ///
 /// Features debounced input and grouped results by type.
 class SearchPanel extends ConsumerStatefulWidget {
-  const SearchPanel({super.key});
+  /// Optional initial search scope. Callers that open search from a specific
+  /// surface (e.g. the sessions tree) can pre-filter with [initialScope]; the
+  /// user can still change it via the scope selector.
+  final SearchScope initialScope;
+
+  const SearchPanel({super.key, this.initialScope = SearchScope.all});
 
   @override
   ConsumerState<SearchPanel> createState() => _SearchPanelState();
@@ -45,6 +50,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
   @override
   void initState() {
     super.initState();
+    _scope = widget.initialScope;
     _sdkClient = ref.read(sdkClientProvider);
     _searchListener = () {
       final hasText = _searchController.text.isNotEmpty;
