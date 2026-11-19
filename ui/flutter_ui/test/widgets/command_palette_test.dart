@@ -308,4 +308,107 @@ void main() {
       expect(find.text('agents'), findsOneWidget);
     });
   });
+
+  // M15: arrow-key selection must scroll the selected row into view —
+  // wrapping around the list used to leave the highlight off-screen.
+  group('selection scroll-follow (M15)', () {
+    Future<void> pumpBounded(WidgetTester tester) async {
+      tester.view.devicePixelRatio = 1.0;
+      tester.view.physicalSize = const Size(600, 320);
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Center(
+              child: SizedBox(
+                width: 480,
+                height: 240,
+                child: CommandPalette(
+                  items: CommandPalette.defaultItems,
+                  onSelected: (_) {},
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+    }
+
+    ScrollController controllerOf(WidgetTester tester) =>
+        tester.widget<ListView>(find.byType(ListView)).controller!;
+
+    testWidgets('arrow-down past the viewport scrolls the list', (
+      tester,
+    ) async {
+      await pumpBounded(tester);
+      final controller = controllerOf(tester);
+      expect(controller.offset, 0);
+
+      // 16 items in a ~180px list viewport: walk to the last row.
+      for (var i = 0; i < 15; i++) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.pumpAndSettle();
+      }
+
+      expect(
+        controller.offset,
+        greaterThan(0),
+        reason: 'selection walked off-screen; the list must follow it',
+      );
+      // The selected (last) row is rendered and inside the viewport.
+      final users = find.text('users');
+      expect(users, findsOneWidget);
+      final rowRect = tester.getRect(users);
+      final listRect = tester.getRect(find.byType(ListView));
+      expect(rowRect.top, greaterThanOrEqualTo(listRect.top - 1));
+      expect(rowRect.bottom, lessThanOrEqualTo(listRect.bottom + 1));
+    });
+
+    testWidgets('wrap-around scrolls back to the top', (tester) async {
+      await pumpBounded(tester);
+      final controller = controllerOf(tester);
+
+      for (var i = 0; i < 15; i++) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.pumpAndSettle();
+      }
+      expect(controller.offset, greaterThan(0));
+
+      // One more down wraps to index 0 — the list must scroll back up.
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+      expect(controller.offset, 0);
+      expect(find.text('chat'), findsOneWidget);
+    });
+
+    testWidgets('filter change keeps the selection visible', (tester) async {
+      await pumpBounded(tester);
+      final controller = controllerOf(tester);
+
+      // Walk deep into the list, then filter down to one late item.
+      for (var i = 0; i < 10; i++) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.pumpAndSettle();
+      }
+      await tester.enterText(find.byType(TextField), 'users');
+      await tester.pumpAndSettle();
+
+      // Selection clamps to the single match and stays on screen. Scope
+      // to the ListView: the filter TextField also carries 'users'.
+      final row = find.descendant(
+        of: find.byType(ListView),
+        matching: find.text('users'),
+      );
+      expect(row, findsOneWidget);
+      final rowRect = tester.getRect(row);
+      final listRect = tester.getRect(find.byType(ListView));
+      expect(rowRect.top, greaterThanOrEqualTo(listRect.top - 1));
+      expect(rowRect.bottom, lessThanOrEqualTo(listRect.bottom + 1));
+      expect(
+        controller.offset,
+        lessThanOrEqualTo(controller.position.maxScrollExtent),
+      );
+    });
+  });
 }

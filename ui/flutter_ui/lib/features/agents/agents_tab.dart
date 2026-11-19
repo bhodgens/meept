@@ -404,14 +404,19 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
     AgentQuotaState? quotaState,
     String? executorAgent,
   ) {
-    // Status chip: paused / quota_wait are real states; the default label
-    // is 'online' (presence), NOT 'running' — none of these agents are
-    // necessarily doing work (issue #160 follow-up wording). 'running' is
-    // reserved for the active pulse below, driven by live run counts.
+    // Status chip: paused / quota_wait are real states; a live roster
+    // status (M17: running/paused/error/stopped/quota_wait from the C1
+    // row) wins over the legacy presence default 'online' — none of these
+    // agents are necessarily doing work (issue #160 follow-up wording).
+    // 'running' is reserved for the active pulse below, driven by live
+    // run counts.
     final paused = _pausedLocally.contains(agent.id);
+    final rosterStatus = agent.status.toLowerCase();
     final status = paused
         ? 'paused'
-        : (quotaState != null ? 'quota_wait' : 'online');
+        : (quotaState != null
+              ? 'quota_wait'
+              : (rosterStatus.isNotEmpty ? rosterStatus : 'online'));
 
     final execState = ref.watch(executionRunsProvider);
     final histogram = execState.histograms[agent.id] ?? const <int>[];
@@ -424,6 +429,16 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
     final otherActive = execState.otherActiveCount(agent.id);
 
     final borderRadius = BorderRadius.circular(8);
+    // Card content height grows with the C1 roster line / quota badge so
+    // the fixed-height Column never overflows (the issue-#160 redesign's
+    // 52px box only fits name + histogram). FittedBox still scales the
+    // whole card down when the grid cell is smaller.
+    final hasRosterLine =
+        agent.type.isNotEmpty ||
+        agent.activeCount > 0 ||
+        agent.dailyCostCents > 0;
+    final cardHeight =
+        52.0 + (hasRosterLine ? 14.0 : 0.0) + (quotaState != null ? 20.0 : 0.0);
     return InkWell(
       key: ValueKey('agent-tile-${agent.id}'),
       onTap: () {
@@ -460,7 +475,7 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
             alignment: Alignment.centerLeft,
             child: SizedBox(
               width: 260,
-              height: 52,
+              height: cardHeight,
               child: Row(
                 children: [
                   // 2x icon (20 -> 40) per the redesign spec.
@@ -501,6 +516,37 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
                         const SizedBox(height: 3),
                         // 8-bit token-activity histogram, last hour.
                         TokenHistogram(cells: histogram, height: 18),
+                        // C1 roster line (GUI parity with the TUI agents
+                        // panel, leaf 03/02): tier, active count and daily
+                        // spend from the unified roster (M17). Legacy
+                        // config rows carry no C1 fields and render nothing.
+                        if (agent.type.isNotEmpty ||
+                            agent.activeCount > 0 ||
+                            agent.dailyCostCents > 0)
+                          Text(
+                            'type: ${agent.type.isEmpty ? 'n/a' : agent.type.toLowerCase()}'
+                            ' · active: ${agent.activeCount}'
+                            ' · cost: \$${(agent.dailyCostCents / 100).toStringAsFixed(2)}',
+                            key: ValueKey('agent-roster-${agent.id}'),
+                            style: CyberpunkTypography.bodySmall.copyWith(
+                              color: CyberpunkColors.midGray,
+                              fontSize: 9,
+                              fontFamily: 'SourceCodePro',
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        // Quota episode badge (leaf 04 wait label / I-M8
+                        // give-up): restored after the issue-#160 redesign
+                        // dropped it — the quota_detail_wiring pins require
+                        // the tile label alongside the goals-pane lines.
+                        if (quotaState != null)
+                          QuotaStatusBadge(
+                            quotaState: quotaState,
+                            useDeviceTime: ref
+                                .watch(renderingPrefsProvider)
+                                .useDeviceTimeForQuota,
+                          ),
                       ],
                     ),
                   ),

@@ -145,14 +145,33 @@ class AgentNotifier extends StateNotifier<AgentState> {
 
   final SdkApiClient sdkClient;
 
-  /// Fetch all agents from the daemon configuration
+  /// Fetch the unified agents list for the agents tab (M17).
+  ///
+  /// Primary source: GET /api/v1/agents/roster — the daemon's merged
+  /// agent/bot/employee roster (frozen C1 rows: id, name, type, status,
+  /// active_count, daily_cost_cents, role, description, enabled). Old
+  /// daemons without the route answer 404; fall back to the legacy
+  /// config-dir agent specs (/api/v1/config/agents) so the tab still
+  /// lists agents (without bots/employees or live counters).
   Future<void> loadAgents() async {
     state = state.copyWith(isLoading: true, error: null);
     try {
-      // SdkApiClient.listAgents returns the raw `agents` array — callers
-      // are responsible for deserializing each entry via Agent.fromJson
-      // because the OpenAPI spec leaves the Session entity untyped.
-      final rawAgents = await sdkClient.listAgents();
+      List<Map<String, dynamic>> rawAgents;
+      try {
+        final roster = await sdkClient.getAgentsRoster();
+        final rows = (roster['agents'] as List?) ?? const [];
+        rawAgents = rows
+            .whereType<Map>()
+            .map((r) => Map<String, dynamic>.from(r))
+            .toList(growable: false);
+      } on SdkApiException catch (e) {
+        if (e.statusCode != 404) rethrow;
+        // Old daemon: no roster route — legacy config agents list.
+        rawAgents = await sdkClient.listAgents();
+      }
+      // Agent.fromJson maps the C1 keys onto the model (type/status/role/
+      // active_count/daily_cost_cents decode directly); unknown keys are
+      // ignored, so legacy config rows parse unchanged.
       final agents = rawAgents
           .map((a) => Agent.fromJson(a))
           .toList(growable: false);

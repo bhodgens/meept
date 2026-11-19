@@ -1,8 +1,10 @@
 /// Shared rename-session dialog.
 ///
-/// Returns the trimmed new name, or null when the user cancels or enters an
-/// empty name. Used by both the sessions list and the sidebar session row, so
-/// the two rename surfaces stay identical.
+/// Returns the trimmed new name, or null when the user cancels. An empty
+/// submit keeps the dialog open with an inline error (M12 — it used to
+/// close silently, indistinguishable from cancel). Used by both the
+/// sessions list and the sidebar session row, so the two rename surfaces
+/// stay identical.
 library;
 
 import 'package:flutter/material.dart';
@@ -12,7 +14,8 @@ import '../theme/typography.dart';
 /// Show the rename dialog for a session.
 ///
 /// [currentTitle] pre-fills the text field. The returned future resolves to
-/// the trimmed name, or null on cancel / empty input.
+/// the trimmed name, or null on cancel. Empty input never resolves the
+/// dialog — it shows an inline error and stays open (M12, TUI parity).
 Future<String?> showRenameSessionDialog(
   BuildContext context, {
   required String currentTitle,
@@ -39,6 +42,9 @@ class RenameSessionDialog extends StatefulWidget {
 class _RenameSessionDialogState extends State<RenameSessionDialog> {
   late final TextEditingController _controller;
 
+  /// Inline error shown when the user submits an empty name (M12).
+  String? _errorText;
+
   @override
   void initState() {
     super.initState();
@@ -51,10 +57,16 @@ class _RenameSessionDialogState extends State<RenameSessionDialog> {
     super.dispose();
   }
 
-  String? _submit() {
+  /// Submit the trimmed name. An empty value keeps the dialog open and
+  /// surfaces the inline error instead of closing silently (M12 — parity
+  /// with the TUI rename modal's empty-input refusal).
+  void _submit() {
     final value = _controller.text.trim();
-    if (value.isEmpty) return null;
-    return value;
+    if (value.isEmpty) {
+      setState(() => _errorText = 'name cannot be empty');
+      return;
+    }
+    Navigator.pop(context, value);
   }
 
   @override
@@ -71,11 +83,19 @@ class _RenameSessionDialogState extends State<RenameSessionDialog> {
         controller: _controller,
         autofocus: true,
         style: CyberpunkTypography.bodyMedium,
-        decoration: const InputDecoration(
+        decoration: InputDecoration(
           isDense: true,
-          border: OutlineInputBorder(),
+          border: const OutlineInputBorder(),
+          errorText: _errorText,
+          errorStyle: CyberpunkTypography.bodySmall.copyWith(
+            color: CyberpunkColors.redAlert,
+          ),
         ),
-        onSubmitted: (_) => Navigator.pop(context, _submit()),
+        onChanged: (_) {
+          // Clear the error as soon as the user types again.
+          if (_errorText != null) setState(() => _errorText = null);
+        },
+        onSubmitted: (_) => _submit(),
       ),
       actions: [
         TextButton(
@@ -88,7 +108,7 @@ class _RenameSessionDialogState extends State<RenameSessionDialog> {
           ),
         ),
         FilledButton(
-          onPressed: () => Navigator.pop(context, _submit()),
+          onPressed: _submit,
           child: const Text('rename', style: CyberpunkTypography.bodyMedium),
         ),
       ],

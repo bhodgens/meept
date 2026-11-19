@@ -1873,9 +1873,12 @@ mixin _$Agent {
   bool get enabled => throw _privateConstructorUsedError;
   String? get prompt => throw _privateConstructorUsedError;
   Map<String, dynamic>? get frontmatter =>
-      throw _privateConstructorUsedError; // C1 roster fields (from agents.list / RosterEntry) used for GUI parity
-  // with the TUI agents panel: kind, active count and daily spend.
+      throw _privateConstructorUsedError; // C1 roster fields (from agents.roster / RosterEntry) used for GUI
+  // parity with the TUI agents panel: tier discriminator, live status,
+  // role, active count and daily spend.
   String get type => throw _privateConstructorUsedError;
+  String get status => throw _privateConstructorUsedError;
+  String get role => throw _privateConstructorUsedError;
   @JsonKey(name: 'active_count')
   int get activeCount => throw _privateConstructorUsedError;
   @JsonKey(name: 'daily_cost_cents')
@@ -1899,6 +1902,8 @@ abstract class $AgentCopyWith<$Res> {
     String? prompt,
     Map<String, dynamic>? frontmatter,
     String type,
+    String status,
+    String role,
     @JsonKey(name: 'active_count') int activeCount,
     @JsonKey(name: 'daily_cost_cents') int dailyCostCents,
   });
@@ -1924,6 +1929,8 @@ class _$AgentCopyWithImpl<$Res, $Val extends Agent>
     Object? prompt = freezed,
     Object? frontmatter = freezed,
     Object? type = null,
+    Object? status = null,
+    Object? role = null,
     Object? activeCount = null,
     Object? dailyCostCents = null,
   }) {
@@ -1957,6 +1964,14 @@ class _$AgentCopyWithImpl<$Res, $Val extends Agent>
                 ? _value.type
                 : type // ignore: cast_nullable_to_non_nullable
                       as String,
+            status: null == status
+                ? _value.status
+                : status // ignore: cast_nullable_to_non_nullable
+                      as String,
+            role: null == role
+                ? _value.role
+                : role // ignore: cast_nullable_to_non_nullable
+                      as String,
             activeCount: null == activeCount
                 ? _value.activeCount
                 : activeCount // ignore: cast_nullable_to_non_nullable
@@ -1987,6 +2002,8 @@ abstract class _$$AgentImplCopyWith<$Res> implements $AgentCopyWith<$Res> {
     String? prompt,
     Map<String, dynamic>? frontmatter,
     String type,
+    String status,
+    String role,
     @JsonKey(name: 'active_count') int activeCount,
     @JsonKey(name: 'daily_cost_cents') int dailyCostCents,
   });
@@ -2011,6 +2028,8 @@ class __$$AgentImplCopyWithImpl<$Res>
     Object? prompt = freezed,
     Object? frontmatter = freezed,
     Object? type = null,
+    Object? status = null,
+    Object? role = null,
     Object? activeCount = null,
     Object? dailyCostCents = null,
   }) {
@@ -2044,6 +2063,14 @@ class __$$AgentImplCopyWithImpl<$Res>
             ? _value.type
             : type // ignore: cast_nullable_to_non_nullable
                   as String,
+        status: null == status
+            ? _value.status
+            : status // ignore: cast_nullable_to_non_nullable
+                  as String,
+        role: null == role
+            ? _value.role
+            : role // ignore: cast_nullable_to_non_nullable
+                  as String,
         activeCount: null == activeCount
             ? _value.activeCount
             : activeCount // ignore: cast_nullable_to_non_nullable
@@ -2068,6 +2095,8 @@ class _$AgentImpl implements _Agent {
     this.prompt,
     final Map<String, dynamic>? frontmatter,
     this.type = '',
+    this.status = '',
+    this.role = '',
     @JsonKey(name: 'active_count') this.activeCount = 0,
     @JsonKey(name: 'daily_cost_cents') this.dailyCostCents = 0,
   }) : _frontmatter = frontmatter;
@@ -2097,11 +2126,18 @@ class _$AgentImpl implements _Agent {
     return EqualUnmodifiableMapView(value);
   }
 
-  // C1 roster fields (from agents.list / RosterEntry) used for GUI parity
-  // with the TUI agents panel: kind, active count and daily spend.
+  // C1 roster fields (from agents.roster / RosterEntry) used for GUI
+  // parity with the TUI agents panel: tier discriminator, live status,
+  // role, active count and daily spend.
   @override
   @JsonKey()
   final String type;
+  @override
+  @JsonKey()
+  final String status;
+  @override
+  @JsonKey()
+  final String role;
   @override
   @JsonKey(name: 'active_count')
   final int activeCount;
@@ -2111,7 +2147,7 @@ class _$AgentImpl implements _Agent {
 
   @override
   String toString() {
-    return 'Agent(id: $id, name: $name, description: $description, enabled: $enabled, prompt: $prompt, frontmatter: $frontmatter, type: $type, activeCount: $activeCount, dailyCostCents: $dailyCostCents)';
+    return 'Agent(id: $id, name: $name, description: $description, enabled: $enabled, prompt: $prompt, frontmatter: $frontmatter, type: $type, status: $status, role: $role, activeCount: $activeCount, dailyCostCents: $dailyCostCents)';
   }
 
   @override
@@ -2130,6 +2166,8 @@ class _$AgentImpl implements _Agent {
               _frontmatter,
             ) &&
             (identical(other.type, type) || other.type == type) &&
+            (identical(other.status, status) || other.status == status) &&
+            (identical(other.role, role) || other.role == role) &&
             (identical(other.activeCount, activeCount) ||
                 other.activeCount == activeCount) &&
             (identical(other.dailyCostCents, dailyCostCents) ||
@@ -2147,6 +2185,8 @@ class _$AgentImpl implements _Agent {
     prompt,
     const DeepCollectionEquality().hash(_frontmatter),
     type,
+    status,
+    role,
     activeCount,
     dailyCostCents,
   );
@@ -2172,6 +2212,8 @@ abstract class _Agent implements Agent {
     final String? prompt,
     final Map<String, dynamic>? frontmatter,
     final String type,
+    final String status,
+    final String role,
     @JsonKey(name: 'active_count') final int activeCount,
     @JsonKey(name: 'daily_cost_cents') final int dailyCostCents,
   }) = _$AgentImpl;
@@ -2190,9 +2232,14 @@ abstract class _Agent implements Agent {
   String? get prompt;
   @override
   Map<String, dynamic>? get frontmatter;
-  @override // C1 roster fields (from agents.list / RosterEntry) used for GUI parity
-  // with the TUI agents panel: kind, active count and daily spend.
+  @override // C1 roster fields (from agents.roster / RosterEntry) used for GUI
+  // parity with the TUI agents panel: tier discriminator, live status,
+  // role, active count and daily spend.
   String get type;
+  @override
+  String get status;
+  @override
+  String get role;
   @override
   @JsonKey(name: 'active_count')
   int get activeCount;

@@ -169,6 +169,8 @@ _$AgentImpl _$$AgentImplFromJson(Map<String, dynamic> json) => _$AgentImpl(
   prompt: json['prompt'] as String?,
   frontmatter: json['frontmatter'] as Map<String, dynamic>?,
   type: json['type'] as String? ?? '',
+  status: json['status'] as String? ?? '',
+  role: json['role'] as String? ?? '',
   activeCount: (json['active_count'] as num?)?.toInt() ?? 0,
   dailyCostCents: (json['daily_cost_cents'] as num?)?.toInt() ?? 0,
 );
@@ -182,6 +184,8 @@ Map<String, dynamic> _$$AgentImplToJson(_$AgentImpl instance) =>
       'prompt': instance.prompt,
       'frontmatter': instance.frontmatter,
       'type': instance.type,
+      'status': instance.status,
+      'role': instance.role,
       'active_count': instance.activeCount,
       'daily_cost_cents': instance.dailyCostCents,
     };

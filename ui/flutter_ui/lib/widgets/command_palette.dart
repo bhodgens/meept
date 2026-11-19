@@ -165,6 +165,67 @@ class _CommandPaletteState extends State<CommandPalette> {
   int _selected = 0;
   final _focusNode = FocusNode();
   final _filterController = TextEditingController();
+  final _scrollController = ScrollController();
+
+  /// Per-row keys so the selected row can be scrolled into view even when
+  /// the ListView has not built it yet (M15: arrow navigation wrapped
+  /// without scrolling, leaving the selection off-screen).
+  final Map<int, GlobalKey> _rowKeys = {};
+
+  GlobalKey _rowKey(int index) =>
+      _rowKeys.putIfAbsent(index, () => GlobalKey());
+
+  /// Scroll the selected row into view after a navigation/filter change.
+  /// Runs post-frame so the rebuilt list exists; when the row is outside
+  /// the built cache extent its context is null, so jump by the fixed row
+  /// extent first and ensureVisible on the next frame.
+  void _scheduleEnsureSelectedVisible() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollController.hasClients) return;
+      final index = _selected;
+      if (index < 0 || index >= _filteredItems.length) return;
+      final rowContext = _rowKey(index).currentContext;
+      if (rowContext != null) {
+        Scrollable.ensureVisible(
+          rowContext,
+          alignment: 0.5,
+          duration: const Duration(milliseconds: 100),
+        );
+        return;
+      }
+      // Row not built yet: estimate its offset from a built row's extent
+      // (all rows share the same fixed padding + single-line text style).
+      double rowExtent = 36;
+      for (final key in _rowKeys.values) {
+        final box = key.currentContext?.findRenderObject() as RenderBox?;
+        if (box != null && box.hasSize && box.size.height > 0) {
+          rowExtent = box.size.height;
+          break;
+        }
+      }
+      final target =
+          (index * rowExtent -
+                  _scrollController.position.viewportDimension / 2 +
+                  rowExtent / 2)
+              .clamp(
+                _scrollController.position.minScrollExtent,
+                _scrollController.position.maxScrollExtent,
+              );
+      _scrollController.jumpTo(target);
+      // The jump builds the row; align it precisely next frame.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final ctx = _rowKey(index).currentContext;
+        if (ctx != null) {
+          Scrollable.ensureVisible(
+            ctx,
+            alignment: 0.5,
+            duration: const Duration(milliseconds: 100),
+          );
+        }
+      });
+    });
+  }
 
   /// Items matching the current filter query. Empty query => all items.
   /// Matching is case-insensitive substring against label + description,
@@ -198,6 +259,7 @@ class _CommandPaletteState extends State<CommandPalette> {
         _selected = (_filteredItems.length - 1).clamp(0, 1 << 31);
       }
     });
+    _scheduleEnsureSelectedVisible();
   }
 
   @override
@@ -209,12 +271,14 @@ class _CommandPaletteState extends State<CommandPalette> {
     if (_selected < 0 && widget.items.isNotEmpty) {
       _selected = 0;
     }
+    _scheduleEnsureSelectedVisible();
   }
 
   @override
   void dispose() {
     _filterController.dispose();
     _focusNode.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -233,12 +297,14 @@ class _CommandPaletteState extends State<CommandPalette> {
     }
     if (key == LogicalKeyboardKey.arrowDown) {
       setState(() => _selected = (_selected + 1) % filtered.length);
+      _scheduleEnsureSelectedVisible();
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.arrowUp) {
       setState(
         () => _selected = (_selected - 1 + filtered.length) % filtered.length,
       );
+      _scheduleEnsureSelectedVisible();
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.enter) {
@@ -293,11 +359,13 @@ class _CommandPaletteState extends State<CommandPalette> {
             ),
             Flexible(
               child: ListView.builder(
+                controller: _scrollController,
                 itemCount: filtered.length,
                 itemBuilder: (context, index) {
                   final item = filtered[index];
                   final isSel = index == _selected;
                   return InkWell(
+                    key: _rowKey(index),
                     onTap: () => widget.onSelected(item),
                     onHover: (h) {
                       if (h && mounted) setState(() => _selected = index);

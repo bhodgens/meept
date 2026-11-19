@@ -5,12 +5,21 @@ import 'package:meept_ui/services/sdk_client.dart';
 
 // ===== Stub classes =====
 
+/// Old-daemon roster miss: GET /api/v1/agents/roster answers 404, so
+/// loadAgents must fall back to the legacy /api/v1/config/agents list.
+SdkApiException _roster404() =>
+    SdkApiException(message: 'not found', statusCode: 404);
+
 /// Stub [SdkApiClient] that returns a fixed agents payload.
 ///
 /// Overrides the endpoint method (now a regular instance method on
-/// [SdkApiClient]) so the test doesn't need to hit the network.
+/// [SdkApiClient]) so the test doesn't need to hit the network. The
+/// roster route 404s (old daemon) — loadAgents falls back to listAgents.
 class _StubSdkClient extends SdkApiClient {
   _StubSdkClient() : super(host: 'localhost', port: 8081);
+
+  @override
+  Future<Map<String, dynamic>> getAgentsRoster() async => throw _roster404();
 
   @override
   Future<List<Map<String, dynamic>>> listAgents() async {
@@ -50,6 +59,11 @@ class _FailingSdkClient extends SdkApiClient {
   _FailingSdkClient() : super(host: 'localhost', port: 8081);
 
   @override
+  Future<Map<String, dynamic>> getAgentsRoster() async {
+    throw Exception('network failure');
+  }
+
+  @override
   Future<List<Map<String, dynamic>>> listAgents() async {
     throw Exception('network failure');
   }
@@ -61,6 +75,9 @@ class _FailingSdkClient extends SdkApiClient {
 /// An SDK client that returns an empty agents list.
 class _EmptyAgentsSdkClient extends SdkApiClient {
   _EmptyAgentsSdkClient() : super(host: 'localhost', port: 8081);
+
+  @override
+  Future<Map<String, dynamic>> getAgentsRoster() async => throw _roster404();
 
   @override
   Future<List<Map<String, dynamic>>> listAgents() async {
@@ -76,6 +93,9 @@ class _NullIdAgentSdkClient extends SdkApiClient {
   _NullIdAgentSdkClient() : super(host: 'localhost', port: 8081);
 
   @override
+  Future<Map<String, dynamic>> getAgentsRoster() async => throw _roster404();
+
+  @override
   Future<List<Map<String, dynamic>>> listAgents() async {
     // The notifier will call Agent.fromJson which does json['id'] as String
     // and throws on null, surfacing a TypeError.
@@ -86,6 +106,71 @@ class _NullIdAgentSdkClient extends SdkApiClient {
 
   @override
   Future<List<Map<String, dynamic>>> listEmployees() async => const [];
+}
+
+/// Unified-roster client (M17): GET /api/v1/agents/roster answers frozen
+/// C1 rows merging agents + bots + employees. listAgents must NOT be
+/// consulted when the roster succeeds.
+class _RosterSdkClient extends SdkApiClient {
+  _RosterSdkClient() : super(host: 'localhost', port: 8081);
+
+  bool legacyListCalled = false;
+
+  @override
+  Future<Map<String, dynamic>> getAgentsRoster() async => {
+    'agents': [
+      {
+        'id': 'dispatcher',
+        'name': 'Dispatcher',
+        'type': 'agent',
+        'status': 'running',
+        'active_count': 2,
+        'daily_cost_cents': 0,
+        'role': 'dispatcher',
+        'description': 'Routes tasks',
+        'enabled': true,
+      },
+      {
+        'id': 'news-bot',
+        'name': 'News Bot',
+        'type': 'bot',
+        'status': 'stopped',
+        'active_count': 0,
+        'daily_cost_cents': 0,
+        'role': '',
+        'description': 'posts headlines',
+        'enabled': true,
+      },
+      {
+        'id': 'coder',
+        'name': 'Coder',
+        'type': 'employee',
+        'status': 'running',
+        'active_count': 1,
+        'daily_cost_cents': 1234,
+        'role': 'engineer',
+        'description': 'Writes code',
+        'enabled': true,
+      },
+    ],
+  };
+
+  @override
+  Future<List<Map<String, dynamic>>> listAgents() async {
+    legacyListCalled = true;
+    throw StateError('legacy list must not be called when roster succeeds');
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> listEmployees() async => const [];
+}
+
+/// Roster route exists but fails with a non-404 (e.g. 503 roster service
+/// unavailable): the error must surface, NOT silently fall back.
+class _RosterBrokenSdkClient extends _StubSdkClient {
+  @override
+  Future<Map<String, dynamic>> getAgentsRoster() async =>
+      throw SdkApiException(message: 'roster unavailable', statusCode: 503);
 }
 
 const _mockAgentsResponse = {
@@ -323,6 +408,96 @@ void main() {
       expect(notifier.state.employeeExecutors, isEmpty);
       expect(notifier.state.error, isNull);
     });
+
+    // ===== M17: unified roster wiring =====
+
+    test(
+      'loadAgents prefers the unified roster (agents+bots+employees)',
+      () async {
+        final client = _RosterSdkClient();
+        final notifier = AgentNotifier(sdkClient: client);
+        await notifier.loadAgents();
+
+        expect(notifier.state.error, isNull);
+        expect(
+          client.legacyListCalled,
+          isFalse,
+          reason: 'roster success must not consult the legacy config list',
+        );
+        expect(notifier.state.agents, hasLength(3));
+        expect(notifier.state.agents.map((a) => a.type).toList(), [
+          'agent',
+          'bot',
+          'employee',
+        ]);
+      },
+    );
+
+    test(
+      'roster rows decode the frozen C1 fields onto the Agent model',
+      () async {
+        final notifier = AgentNotifier(sdkClient: _RosterSdkClient());
+        await notifier.loadAgents();
+
+        final coder = notifier.state.agents.firstWhere((a) => a.id == 'coder');
+        expect(coder.name, 'Coder');
+        expect(coder.type, 'employee');
+        expect(coder.status, 'running');
+        expect(coder.activeCount, 1);
+        expect(coder.dailyCostCents, 1234);
+        expect(coder.role, 'engineer');
+        expect(coder.description, 'Writes code');
+        expect(coder.enabled, isTrue);
+
+        final bot = notifier.state.agents.firstWhere((a) => a.id == 'news-bot');
+        expect(bot.type, 'bot');
+        expect(bot.status, 'stopped');
+        expect(bot.activeCount, 0);
+      },
+    );
+
+    test('roster 404 falls back to the legacy config agents list', () async {
+      final notifier = AgentNotifier(sdkClient: _StubSdkClient());
+      await notifier.loadAgents();
+
+      // _StubSdkClient.getAgentsRoster throws 404 (old daemon); the
+      // legacy list still populates the tab, without roster fields.
+      expect(notifier.state.error, isNull);
+      expect(notifier.state.agents, hasLength(3));
+      expect(notifier.state.agents[0].id, 'dispatcher');
+      expect(notifier.state.agents[0].type, '');
+      expect(notifier.state.agents[0].status, '');
+      expect(notifier.state.agents[0].activeCount, 0);
+    });
+
+    test(
+      'non-404 roster failure surfaces as an error (no silent fallback)',
+      () async {
+        final notifier = AgentNotifier(sdkClient: _RosterBrokenSdkClient());
+        await notifier.loadAgents();
+
+        expect(notifier.state.error, isNotNull);
+        expect(notifier.state.error!, contains('503'));
+        expect(notifier.state.agents, isEmpty);
+      },
+    );
+
+    test(
+      'roster load preserves quota episodes and executor enrichment',
+      () async {
+        final notifier = AgentNotifier(sdkClient: _RosterSdkClient());
+        notifier.handleQuotaEvent(
+          agentId: 'coder',
+          to: 'quota_wait',
+          unblockAt: '2026-11-19T12:00:00Z',
+        );
+        await notifier.loadAgents();
+
+        // Quota episode state survives the roster reload.
+        expect(notifier.state.quotaEpisodes.containsKey('coder'), isTrue);
+        expect(notifier.state.agents, hasLength(3));
+      },
+    );
   });
 
   group('Agent model parsing', () {

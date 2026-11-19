@@ -36,6 +36,11 @@ class _FakeSdkClient implements SdkApiClient {
       Future.value(const []);
 
   @override
+  Future<Map<String, dynamic>> getAgentsRoster() async =>
+      // Old-daemon shape: roster 404 -> loadAgents uses listAgents above.
+      throw SdkApiException(message: 'not found', statusCode: 404);
+
+  @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 

@@ -206,6 +206,114 @@ void main() {
       );
     });
   });
+
+  // M17: the unified roster's C1 fields render on the tiles — tier chip,
+  // live status chip and daily cost.
+  group('agents tab unified roster display (M17)', () {
+    testWidgets('roster rows show tier, live status and daily cost', (
+      tester,
+    ) async {
+      tester.view.devicePixelRatio = 1.0;
+      tester.view.physicalSize = const Size(1200, 800);
+      addTearDown(tester.view.reset);
+
+      final fake = _RosterDisplaySdkClient();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            sdkClientProvider.overrideWith((ref) => fake),
+            agentProvider.overrideWith((ref) => AgentNotifier(sdkClient: fake)),
+          ],
+          child: const MaterialApp(home: Scaffold(body: AgentsTab())),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+      await tester.pump(const Duration(milliseconds: 500));
+
+      // All three tiers render as tiles.
+      expect(
+        find.byKey(const ValueKey('agent-tile-roster-agent')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('agent-tile-roster-bot')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('agent-tile-roster-emp')),
+        findsOneWidget,
+      );
+
+      // C1 roster line per tile: type / active / cost (leaf 03/02 shape).
+      expect(
+        find.text('type: agent · active: 0 · cost: \$0.00'),
+        findsOneWidget,
+      );
+      expect(find.text('type: bot · active: 0 · cost: \$0.00'), findsOneWidget);
+      expect(
+        find.text('type: employee · active: 1 · cost: \$12.34'),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('agent-roster-roster-emp')),
+        findsOneWidget,
+      );
+
+      // Live roster status replaces the legacy 'online' presence label.
+      expect(find.text('stopped'), findsOneWidget);
+      expect(find.text('online'), findsNothing);
+    });
+  });
+}
+
+/// Roster-first client for the M17 display pins: agents.roster answers
+/// one row per tier with live status and cost; the legacy list must not
+/// be consulted.
+class _RosterDisplaySdkClient extends _FakeSdkClient {
+  _RosterDisplaySdkClient() : super(agents: const []);
+
+  @override
+  Future<Map<String, dynamic>> getAgentsRoster() async => {
+    'agents': [
+      {
+        'id': 'roster-agent',
+        'name': 'dispatcher',
+        'type': 'agent',
+        'status': 'running',
+        'active_count': 0,
+        'daily_cost_cents': 0,
+        'role': 'dispatcher',
+        'description': 'routes tasks',
+        'enabled': true,
+      },
+      {
+        'id': 'roster-bot',
+        'name': 'news bot',
+        'type': 'bot',
+        'status': 'stopped',
+        'active_count': 0,
+        'daily_cost_cents': 0,
+        'role': '',
+        'description': 'posts headlines',
+        'enabled': true,
+      },
+      {
+        'id': 'roster-emp',
+        'name': 'coder',
+        'type': 'employee',
+        'status': 'running',
+        'active_count': 1,
+        'daily_cost_cents': 1234,
+        'role': 'engineer',
+        'description': 'writes code',
+        'enabled': true,
+      },
+    ],
+  };
+
+  @override
+  Future<List<Map<String, dynamic>>> listEmployees() async => const [];
 }
 
 /// Fake [SdkApiClient] that returns pre-built agent JSON for [listAgents].
@@ -270,9 +378,10 @@ class _FakeSdkClient implements SdkApiClient {
   };
 
   @override
-  Future<Map<String, dynamic>> getAgentsRoster() async => {
-    'agents': <Map<String, dynamic>>[],
-  };
+  Future<Map<String, dynamic>> getAgentsRoster() async =>
+      // Old-daemon shape: the roster route 404s, so loadAgents falls back
+      // to the legacy listAgents payload these tests seed.
+      throw SdkApiException(message: 'not found', statusCode: 404);
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);

@@ -48,12 +48,21 @@ class SessionNotifier extends StateNotifier<SessionState> {
   void _initWebSocket(WebSocketService websocket) {
     _titleSubscription = websocket.subscribeToSessionTitles().listen((message) {
       final sessionId = message['session_id'] as String?;
-      // Backend sends 'name' but Session model uses 'title'
-      final title = message['name'] as String?;
-      final description = message['description'] as String?;
-      if (sessionId != null && title != null && description != null) {
-        _updateSessionTitle(sessionId, title, description);
-      }
+      if (sessionId == null) return;
+      // Route through Session.fromJson so live title refreshes obey the
+      // SAME display precedence as a reload (H5): description wins over
+      // the auto-generated name. Applying the raw name here reverted a
+      // user rename the moment the periodic refresher fired.
+      final refreshed = Session.fromJson({
+        ...message,
+        'id': sessionId,
+        'created_at': message['created_at'] ?? '1970-01-01T00:00:00Z',
+      });
+      _updateSessionTitle(
+        sessionId,
+        refreshed.title,
+        refreshed.description ?? '',
+      );
     });
   }
 

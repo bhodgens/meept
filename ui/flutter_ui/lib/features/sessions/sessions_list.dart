@@ -16,6 +16,7 @@ import '../../providers/session_project_provider.dart';
 import '../../providers/status_message_provider.dart';
 import '../../providers/tab_activation_provider.dart';
 import '../../providers/tool_exit_guard.dart';
+import '../../services/session_notifier.dart' show SessionState;
 import 'session_tree.dart';
 
 /// Sessions list widget - displays all sessions with selection
@@ -27,8 +28,34 @@ class SessionsList extends ConsumerStatefulWidget {
 }
 
 class _SessionsListState extends ConsumerState<SessionsList> {
+  /// Cursor into [_visibleRows] — the bucket-ordered list of rows the
+  /// render actually shows (headers + children of expanded buckets).
   int _selectedIndex = 0;
   final FocusNode _focusNode = FocusNode();
+
+  /// Buckets the user collapsed. ExpansionTile keeps its own expansion
+  /// state; onExpansionChanged mirrors it here so keyboard navigation
+  /// indexes the SAME visible-row order the render uses (M14 — the old
+  /// flat-list indexing could activate a session hidden in a collapsed
+  /// bucket). Mirrors the TUI's collapsed map: collapsed children are
+  /// unreachable by arrows/enter.
+  final Set<String> _collapsedBuckets = {};
+
+  /// Per-bucket ExpansionTile controllers so a keyboard enter on a header
+  /// drives the SAME widget the mouse toggles (one source of truth).
+  final Map<String, ExpansibleController> _bucketControllers = {};
+
+  ExpansibleController _bucketController(String bucket) =>
+      _bucketControllers.putIfAbsent(bucket, ExpansibleController.new);
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    for (final c in _bucketControllers.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -53,35 +80,67 @@ class _SessionsListState extends ConsumerState<SessionsList> {
     }
   }
 
-  @override
-  void dispose() {
-    _focusNode.dispose();
-    super.dispose();
+  /// One navigable row of the sessions tree: a bucket header (session ==
+  /// null) or a session child of an expanded bucket.
+  ///
+  /// Built from the SAME grouping + collapse state the render uses, in
+  /// render order (bucket insertion order, sessions in list order inside
+  /// each bucket).
+  List<({String bucket, Session? session})> _visibleRows(
+    SessionState sessionState,
+  ) {
+    final grouped = groupSessionsByBucket(sessionState.sessions);
+    final rows = <({String bucket, Session? session})>[];
+    for (final entry in grouped.entries) {
+      rows.add((bucket: entry.key, session: null));
+      if (_collapsedBuckets.contains(entry.key)) continue;
+      for (final session in entry.value) {
+        rows.add((bucket: entry.key, session: session));
+      }
+    }
+    return rows;
   }
 
   /// Handle keyboard navigation for the sessions list.
+  ///
+  /// Navigates the VISIBLE rows (M14): arrows move across bucket headers
+  /// and the children of expanded buckets only; enter on a header toggles
+  /// its bucket (TUI parity — collapsed children are unreachable), enter
+  /// on a session activates it.
   KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
     if (event is KeyDownEvent && node.hasFocus) {
-      final sessionState = ref.read(sessionProvider);
-      final maxIndex = sessionState.sessions.length - 1;
-      if (maxIndex < 0) return KeyEventResult.ignored;
+      final rows = _visibleRows(ref.read(sessionProvider));
+      if (rows.isEmpty) return KeyEventResult.ignored;
+      final maxIndex = rows.length - 1;
+      final index = _selectedIndex.clamp(0, maxIndex);
 
       if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
         setState(() {
-          _selectedIndex = (_selectedIndex + 1).clamp(0, maxIndex);
+          _selectedIndex = (index + 1).clamp(0, maxIndex);
         });
         return KeyEventResult.handled;
       }
       if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
         setState(() {
-          _selectedIndex = (_selectedIndex - 1).clamp(0, maxIndex);
+          _selectedIndex = (index - 1).clamp(0, maxIndex);
         });
         return KeyEventResult.handled;
       }
       if (event.logicalKey == LogicalKeyboardKey.enter) {
-        final sessions = sessionState.sessions;
-        if (_selectedIndex >= 0 && _selectedIndex < sessions.length) {
-          _activateSession(context, sessions[_selectedIndex]);
+        final row = rows[index];
+        final session = row.session;
+        if (session == null) {
+          // Header row: toggle the bucket through its ExpansionTile
+          // controller — onExpansionChanged mirrors the state into
+          // _collapsedBuckets and fixes up the cursor.
+          final controller = _bucketController(row.bucket);
+          if (_collapsedBuckets.contains(row.bucket)) {
+            controller.expand();
+          } else {
+            controller.collapse();
+          }
+        } else {
+          _activateSession(context, session);
         }
         return KeyEventResult.handled;
       }
@@ -330,10 +389,14 @@ class _SessionsListState extends ConsumerState<SessionsList> {
     final activeSession = ref.watch(activeSessionProvider);
 
     // C2: group sessions into project buckets for the expandable tree.
-    // Insertion order is preserved so keyboard selection still indexes the
-    // original flat session list.
+    // Keyboard navigation indexes the SAME bucket/collapse state via
+    // _visibleRows (M14), not the flat session list.
     final groupedSessions = groupSessionsByBucket(sessionState.sessions);
     final bucketOrder = groupedSessions.keys.toList();
+    final visibleRows = _visibleRows(sessionState);
+    if (_selectedIndex >= visibleRows.length) {
+      _selectedIndex = visibleRows.isEmpty ? 0 : visibleRows.length - 1;
+    }
 
     // Listen for command-palette "new session" requests. Mirrors the
     // focusInputRequestProvider pattern used by the chat input.
@@ -428,7 +491,7 @@ class _SessionsListState extends ConsumerState<SessionsList> {
                     return _buildBucketGroup(
                       bucket,
                       groupedSessions[bucket]!,
-                      sessionState.sessions,
+                      visibleRows,
                       activeSession,
                     );
                   },
@@ -443,20 +506,58 @@ class _SessionsListState extends ConsumerState<SessionsList> {
   /// Build one C2 project bucket as an expandable group. Headers render the
   /// bucket name (project id, project path, or 'unbound') in lowercase;
   /// children are the existing session tiles indented under it. Groups start
-  /// expanded; `ExpansionTile` owns its own expand/collapse state, keyed by the
-  /// stable bucket key so it survives rebuilds.
+  /// expanded; `ExpansionTile` owns its own expand/collapse state, keyed by
+  /// the stable bucket key so it survives rebuilds — onExpansionChanged
+  /// mirrors that state into [_collapsedBuckets] for keyboard nav (M14).
   Widget _buildBucketGroup(
     String bucket,
     List<Session> bucketSessions,
-    List<Session> allSessions,
+    List<({String bucket, Session? session})> visibleRows,
     Session? activeSession,
   ) {
+    final collapsed = _collapsedBuckets.contains(bucket);
+    final headerIndex = visibleRows.indexWhere(
+      (r) => r.bucket == bucket && r.session == null,
+    );
+    final isHeaderKeyboardSelected =
+        headerIndex >= 0 && _selectedIndex == headerIndex;
     return ExpansionTile(
       key: ValueKey('session-bucket-$bucket'),
-      initiallyExpanded: true,
+      controller: _bucketController(bucket),
+      initiallyExpanded: !collapsed,
+      onExpansionChanged: (expanded) {
+        setState(() {
+          if (expanded) {
+            _collapsedBuckets.remove(bucket);
+          } else {
+            _collapsedBuckets.add(bucket);
+          }
+          // If the cursor sat on a child that just became hidden, move it
+          // to this bucket's header (TUI parity: the cursor returns to
+          // the header after a collapse). Otherwise keep the cursor.
+          final rows = _visibleRows(ref.read(sessionProvider));
+          final cursor = _selectedIndex.clamp(0, rows.length - 1);
+          final row = rows.isEmpty ? null : rows[cursor];
+          if (row == null ||
+              (!expanded && row.session != null && row.bucket == bucket)) {
+            final h = rows.indexWhere(
+              (r) => r.bucket == bucket && r.session == null,
+            );
+            if (h >= 0) _selectedIndex = h;
+          } else {
+            _selectedIndex = cursor;
+          }
+        });
+      },
       tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
       iconColor: CyberpunkColors.orangePrimary,
       collapsedIconColor: CyberpunkColors.orangeDark,
+      backgroundColor: isHeaderKeyboardSelected
+          ? CyberpunkColors.orangePrimary.withValues(alpha: 0.1)
+          : null,
+      collapsedBackgroundColor: isHeaderKeyboardSelected
+          ? CyberpunkColors.orangePrimary.withValues(alpha: 0.1)
+          : null,
       title: Text(
         bucket.toLowerCase(),
         key: ValueKey('session-bucket-label-$bucket'),
@@ -471,21 +572,29 @@ class _SessionsListState extends ConsumerState<SessionsList> {
           color: CyberpunkColors.midGray,
         ),
       ),
-      children: bucketSessions.map((session) {
-        final index = allSessions.indexOf(session);
-        final isSelected = activeSession?.id == session.id;
-        final isKeyboardSelected = _selectedIndex == index;
-        // Indent children under the project header (the tree affordance).
-        return Padding(
-          padding: const EdgeInsets.only(left: 16),
-          child: _buildSessionTile(
-            session,
-            isSelected || isKeyboardSelected,
-            isKeyboardSelected,
+      children: [
+        for (final session in bucketSessions)
+          Padding(
+            padding: const EdgeInsets.only(left: 16),
+            child: _buildSessionTile(
+              session,
+              activeSession?.id == session.id ||
+                  _isKeyboardRow(visibleRows, session.id),
+              _isKeyboardRow(visibleRows, session.id),
+            ),
           ),
-        );
-      }).toList(),
+      ],
     );
+  }
+
+  bool _isKeyboardRow(
+    List<({String bucket, Session? session})> visibleRows,
+    String sessionId,
+  ) {
+    if (_selectedIndex < 0 || _selectedIndex >= visibleRows.length) {
+      return false;
+    }
+    return visibleRows[_selectedIndex].session?.id == sessionId;
   }
 
   Widget _buildSessionTile(

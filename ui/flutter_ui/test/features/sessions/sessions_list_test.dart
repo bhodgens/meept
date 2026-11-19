@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
@@ -458,6 +459,155 @@ void main() {
 
       // Advance past the 2.5s auto-clear Timer.
       await tester.pump(const Duration(seconds: 3));
+    });
+  });
+
+  // M14: keyboard navigation must index the VISIBLE rows (bucket headers +
+  // children of expanded buckets), never the flat session list — arrows /
+  // enter used to reach sessions hidden inside a collapsed bucket.
+  group('SessionsList keyboard navigation (visible rows, M14)', () {
+    /// Two buckets: proj-a (s-a1, s-a2) then proj-b (s-b1). All sessions
+    /// are project-bound so activation takes the no-dialog fast path.
+    final kbSessions = [
+      Session(
+        id: 's-a1',
+        title: 'alpha one',
+        createdAt: DateTime(2026, 1, 1),
+        projectId: 'proj-a',
+        projectPath: '/tmp/a',
+      ),
+      Session(
+        id: 's-a2',
+        title: 'alpha two',
+        createdAt: DateTime(2026, 1, 2),
+        projectId: 'proj-a',
+        projectPath: '/tmp/a',
+      ),
+      Session(
+        id: 's-b1',
+        title: 'beta one',
+        createdAt: DateTime(2026, 1, 3),
+        projectId: 'proj-b',
+        projectPath: '/tmp/b',
+      ),
+    ];
+
+    Future<ProviderContainer> pumpList(WidgetTester tester) async {
+      tester.view.devicePixelRatio = 1.0;
+      tester.view.physicalSize = const Size(600, 900);
+      addTearDown(tester.view.reset);
+
+      final container = ProviderContainer(
+        overrides: [
+          sessionProvider.overrideWith(
+            (ref) => SessionNotifier(
+              sdkClient: _TestSdkClient(kbSessions),
+              websocket: MockWebSocketService(),
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final router = GoRouter(
+        initialLocation: '/sessions',
+        routes: [
+          GoRoute(
+            path: '/sessions',
+            builder: (_, __) => const Scaffold(
+              body: SizedBox(width: 400, child: SessionsList()),
+            ),
+          ),
+          GoRoute(
+            path: '/',
+            builder: (_, __) => const Scaffold(body: SizedBox.shrink()),
+          ),
+        ],
+      );
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp.router(routerConfig: router),
+        ),
+      );
+      await tester.pumpAndSettle();
+      return container;
+    }
+
+    testWidgets('enter on the first row toggles the bucket, not a session', (
+      tester,
+    ) async {
+      final container = await pumpList(tester);
+
+      // Cursor starts on the proj-a HEADER (row 0). Enter collapses it —
+      // the old flat-list code activated sessions[0] here instead.
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+
+      expect(container.read(activeSessionProvider), isNull);
+      expect(container.read(tabActivationProvider), isNot(HomeTab.chat));
+      // Children of the collapsed bucket are gone from the render.
+      expect(find.text('alpha one'), findsNothing);
+      expect(find.text('alpha two'), findsNothing);
+      expect(find.text('beta one'), findsOneWidget);
+    });
+
+    testWidgets('arrows skip children of a collapsed bucket', (tester) async {
+      final container = await pumpList(tester);
+
+      // Collapse proj-a via its header (cursor stays on the header).
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+
+      // Down: proj-b header. Down again: s-b1 (s-a1/s-a2 are hidden and
+      // must be unreachable). Enter activates s-b1, never a hidden row.
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+
+      expect(container.read(activeSessionProvider)?.id, 's-b1');
+      expect(container.read(tabActivationProvider), HomeTab.chat);
+    });
+
+    testWidgets('expanded buckets navigate header then children in order', (
+      tester,
+    ) async {
+      final container = await pumpList(tester);
+
+      // Visible rows: [proj-a header, s-a1, s-a2, proj-b header, s-b1].
+      // Down once -> s-a1; enter activates it.
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+
+      expect(container.read(activeSessionProvider)?.id, 's-a1');
+    });
+
+    testWidgets('mouse collapse is honored by keyboard navigation', (
+      tester,
+    ) async {
+      final container = await pumpList(tester);
+
+      // Collapse proj-a by tapping its header (ExpansionTile owns the
+      // mouse path; onExpansionChanged mirrors it into the nav state).
+      await tester.tap(find.text('proj-a'));
+      await tester.pumpAndSettle();
+      expect(find.text('alpha one'), findsNothing);
+
+      // Cursor stayed on the proj-a header (it was valid before the
+      // collapse). Down -> proj-b header, down -> s-b1, enter activates.
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+
+      expect(container.read(activeSessionProvider)?.id, 's-b1');
     });
   });
 

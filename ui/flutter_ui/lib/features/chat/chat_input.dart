@@ -1818,13 +1818,24 @@ class _ChatInputState extends ConsumerState<ChatInput>
         projectName: projectName,
       );
       final newName = result['name'] as String?;
+      final newDescription = result['description'] as String?;
       if (newName == null || newName.isEmpty) return;
+      // Display precedence must match a reload (H5): the summarizer's
+      // description is the display title; the single-word name is only
+      // the fallback when no description came back.
+      final displayTitle =
+          (newDescription != null && newDescription.trim().isNotEmpty)
+          ? newDescription.trim()
+          : newName;
 
       // Update the active session in place so the sessions list and status
       // bar pick up the new title without a full reload.
       final active = ref.read(activeSessionProvider);
       if (active != null && active.id == sessionId) {
-        final updated = active.copyWith(title: newName);
+        final updated = active.copyWith(
+          title: displayTitle,
+          description: newDescription ?? active.description,
+        );
         ref.read(activeSessionProvider.notifier).state = updated;
       }
 
@@ -1835,7 +1846,12 @@ class _ChatInputState extends ConsumerState<ChatInput>
       final sessionState = ref.read(sessionProvider);
       final sessions = sessionState.sessions
           .map((s) {
-            if (s.id == sessionId) return s.copyWith(title: newName);
+            if (s.id == sessionId) {
+              return s.copyWith(
+                title: displayTitle,
+                description: newDescription ?? s.description,
+              );
+            }
             return s;
           })
           .toList(growable: false);

@@ -13,16 +13,14 @@ import '../../mocks/mock_websocket_service.dart';
 ///
 /// The canonical C1 agent roster line is built from TextSpans, so a plain
 /// `find.text` cannot see it (flutter-agent-testing pitfall: RichText finder).
-Finder findSpanText(String needle) => find.byWidgetPredicate(
-      (Widget w) {
-        if (w is RichText) return w.text.toPlainText().contains(needle);
-        if (w is Text) {
-          return (w.data ?? '').contains(needle) ||
-              (w.textSpan?.toPlainText() ?? '').contains(needle);
-        }
-        return false;
-      },
-    );
+Finder findSpanText(String needle) => find.byWidgetPredicate((Widget w) {
+  if (w is RichText) return w.text.toPlainText().contains(needle);
+  if (w is Text) {
+    return (w.data ?? '').contains(needle) ||
+        (w.textSpan?.toPlainText() ?? '').contains(needle);
+  }
+  return false;
+});
 
 void main() {
   const testWindow = Size(1200, 900);
@@ -77,34 +75,35 @@ void main() {
   }
 
   group('SessionInfoOverlay', () {
-    testWidgets(
-      'T1: popup fills the full window, not a fixed 800x560 box',
-      (tester) async {
-        await pumpOverlay(tester, client: _StubSdkClient());
+    testWidgets('T1: popup fills the full window, not a fixed 800x560 box', (
+      tester,
+    ) async {
+      await pumpOverlay(tester, client: _StubSdkClient());
 
-        expect(find.byType(SessionInfoOverlay), findsOneWidget);
-        expect(find.text('plans'), findsWidgets, reason: 'tab bar visible');
+      expect(find.byType(SessionInfoOverlay), findsOneWidget);
+      expect(find.text('plans'), findsWidgets, reason: 'tab bar visible');
 
-        // The content stack lives inside the popup body. With the old fixed
-        // 800x560 Container it is only ~800 wide and ~480 tall; once the
-        // popup fills the window it grows to nearly 1200x900.
-        final stack = find.byType(IndexedStack);
-        expect(stack, findsOneWidget);
-        final size = tester.getSize(stack);
-        expect(
-          size.width,
-          greaterThan(900),
-          reason: 'popup content must be wider than the old fixed 800px box '
-              '(was ${size.width})',
-        );
-        expect(
-          size.height,
-          greaterThan(600),
-          reason: 'popup content must be taller than the old fixed 560px box '
-              '(was ${size.height})',
-        );
-      },
-    );
+      // The content stack lives inside the popup body. With the old fixed
+      // 800x560 Container it is only ~800 wide and ~480 tall; once the
+      // popup fills the window it grows to nearly 1200x900.
+      final stack = find.byType(IndexedStack);
+      expect(stack, findsOneWidget);
+      final size = tester.getSize(stack);
+      expect(
+        size.width,
+        greaterThan(900),
+        reason:
+            'popup content must be wider than the old fixed 800px box '
+            '(was ${size.width})',
+      );
+      expect(
+        size.height,
+        greaterThan(600),
+        reason:
+            'popup content must be taller than the old fixed 560px box '
+            '(was ${size.height})',
+      );
+    });
 
     testWidgets(
       'T2a: plans tab shows seeded plans via the canonical PlansTab',
@@ -165,47 +164,46 @@ void main() {
       },
     );
 
-    testWidgets(
-      'T2c: agents tab renders C1 type/active/cost text',
-      (tester) async {
-        // C1 RosterEntry-shaped rows: type, active_count, daily_cost_cents.
-        await pumpOverlay(
-          tester,
-          client: _StubSdkClient(
-            agentRows: [
-              {
-                'id': 'bot-1',
-                'name': 'coder',
-                'type': 'bot',
-                'status': 'running',
-                'active_count': 13,
-                'daily_cost_cents': 1234,
-                'enabled': true,
-              },
-            ],
-          ),
-        );
-        await tapTab(tester, 'agents');
-        await tester.pump();
-        await tester.pump(const Duration(milliseconds: 50));
+    testWidgets('T2c: agents tab renders C1 type/active/cost text', (
+      tester,
+    ) async {
+      // C1 RosterEntry-shaped rows: type, active_count, daily_cost_cents.
+      await pumpOverlay(
+        tester,
+        client: _StubSdkClient(
+          agentRows: [
+            {
+              'id': 'bot-1',
+              'name': 'coder',
+              'type': 'bot',
+              'status': 'running',
+              'active_count': 13,
+              'daily_cost_cents': 1234,
+              'enabled': true,
+            },
+          ],
+        ),
+      );
+      await tapTab(tester, 'agents');
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
 
-        expect(
-          findSpanText('bot'),
-          findsWidgets,
-          reason: 'agent type from the C1 row must be rendered',
-        );
-        expect(
-          findSpanText('13'),
-          findsWidgets,
-          reason: 'active_count from the C1 row must be rendered',
-        );
-        expect(
-          findSpanText('12.34'),
-          findsWidgets,
-          reason: 'daily_cost_cents (1234) must be rendered as dollars',
-        );
-      },
-    );
+      expect(
+        findSpanText('bot'),
+        findsWidgets,
+        reason: 'agent type from the C1 row must be rendered',
+      );
+      expect(
+        findSpanText('13'),
+        findsWidgets,
+        reason: 'active_count from the C1 row must be rendered',
+      );
+      expect(
+        findSpanText('12.34'),
+        findsWidgets,
+        reason: 'daily_cost_cents (1234) must be rendered as dollars',
+      );
+    });
   });
 }
 
@@ -217,10 +215,10 @@ class _StubSdkClient extends SdkApiClient {
     List<Plan> plans = const [],
     List<Task> tasks = const [],
     List<Map<String, dynamic>> agentRows = const [],
-  })  : _plans = plans,
-        _tasks = tasks,
-        _agentRows = agentRows,
-        super(host: 'localhost', port: 65432);
+  }) : _plans = plans,
+       _tasks = tasks,
+       _agentRows = agentRows,
+       super(host: 'localhost', port: 65432);
 
   final List<Plan> _plans;
   final List<Task> _tasks;
@@ -248,6 +246,12 @@ class _StubSdkClient extends SdkApiClient {
   @override
   Future<List<Map<String, dynamic>>> listAgents() async =>
       _agentRows.map((a) => Map<String, dynamic>.from(a)).toList();
+
+  @override
+  Future<Map<String, dynamic>> getAgentsRoster() async =>
+      // T2c seeds C1 RosterEntry-shaped rows; serve them on the unified
+      // roster route (M17) that loadAgents now reads first.
+      {'agents': _agentRows.map((a) => Map<String, dynamic>.from(a)).toList()};
 
   @override
   Future<List<Map<String, dynamic>>> listEmployees() async => const [];

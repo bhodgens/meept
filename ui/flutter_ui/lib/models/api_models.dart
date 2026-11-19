@@ -623,21 +623,24 @@ class Session with _$Session {
       _$$SessionImplFromJson(_normaliseSessionJson(json));
 
   /// Normalise backend JSON before freezed parsing.
-  /// Prefer LLM-generated name unless it's generic, then fall back to description.
+  ///
+  /// Display precedence (H5, TUI parity — internal/tui/models/sessions.go
+  /// renders `Description` first and falls back to `Name` only when it is
+  /// empty): a non-empty description WINS over the auto-generated name.
+  /// `description` is the user/summary field — session rename PATCHes it
+  /// (SessionNotifier.renameSession), and the summarizer/refresher write
+  /// the human-readable summary there while `name` stays the single-word
+  /// auto label. Preferring the name made every rename revert on reload.
+  /// Sessions with no description keep the name; a missing/generic name
+  /// with no description still lands on 'Untitled'.
   static Map<String, dynamic> _normaliseSessionJson(Map<String, dynamic> json) {
     final name =
         json['name'] as String? ?? json['title'] as String? ?? 'Untitled';
-    final description = json['description'] as String?;
+    final description = (json['description'] as String?)?.trim();
 
-    // Prefer name (LLM-generated) unless it's generic, then fall back to description.
-    final isGenericName =
-        name == 'default' ||
-        name == 'Untitled' ||
-        name == 'chat' ||
-        name.isEmpty;
-    final displayTitle = (name.isNotEmpty && !isGenericName)
-        ? name // Use LLM-generated name
-        : (description ?? name); // Fall back to description or name
+    final displayTitle = (description != null && description.isNotEmpty)
+        ? description
+        : (name.isEmpty ? 'Untitled' : name);
     return {...json, 'name': displayTitle};
   }
 }
@@ -711,9 +714,12 @@ class Agent with _$Agent {
     @Default(true) bool enabled,
     String? prompt,
     Map<String, dynamic>? frontmatter,
-    // C1 roster fields (from agents.list / RosterEntry) used for GUI parity
-    // with the TUI agents panel: kind, active count and daily spend.
+    // C1 roster fields (from agents.roster / RosterEntry) used for GUI
+    // parity with the TUI agents panel: tier discriminator, live status,
+    // role, active count and daily spend.
     @Default('') String type,
+    @Default('') String status,
+    @Default('') String role,
     @JsonKey(name: 'active_count') @Default(0) int activeCount,
     @JsonKey(name: 'daily_cost_cents') @Default(0) int dailyCostCents,
   }) = _Agent;
