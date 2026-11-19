@@ -793,6 +793,22 @@ class WebSocketService {
     });
   }
 
+  /// Subscribe to execution-result events (issue #160).
+  ///
+  /// Execution-result frames ride the `agent_progress` classification and
+  /// carry NO session_id of their own when the bus message was session-less
+  /// (bot/employee rounds are not tied to the caller's session), so this
+  /// stream filters GLOBALLY by `source_topic`, takes no (channel, session)
+  /// hold, and delivers to the panel that lives outside any chat session's
+  /// lifecycle. A frame WITH a session_id is still relayed by the hub to
+  /// connections that granted it; either shape lands here.
+  Stream<Map<String, dynamic>> subscribeToExecutionResults() {
+    return _messageSubject.stream.where((m) {
+      if (m['type'] != WsEventTypes.agentProgress) return false;
+      return isExecutionResultPayload(m);
+    });
+  }
+
   /// Unsubscribe from agent progress updates for a session.
   ///
   /// Drops ONE progress-channel hold. The wire frame is deferred while the

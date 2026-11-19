@@ -48,6 +48,18 @@
     "line": 179
   },
   {
+    "topic": "agents.executionHistogram",
+    "handler": "func(ctx context.Context, params json.RawMessage",
+    "file": "internal/daemon/execution_runs_rpc.go",
+    "line": 65
+  },
+  {
+    "topic": "agents.executionRuns",
+    "handler": "func(ctx context.Context, params json.RawMessage",
+    "file": "internal/daemon/execution_runs_rpc.go",
+    "line": 37
+  },
+  {
     "topic": "agents.review",
     "handler": "register(func literal)",
     "file": "internal/daemon/activity_rpc.go",

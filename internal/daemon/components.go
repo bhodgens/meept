@@ -523,6 +523,16 @@ type Components struct {
 	// leaf 05 salvage). Unexported: teardown-only.
 	activityBridgeSubs []*bus.Subscriber
 
+	// ExecutionStore is the durable bot/employee execution-run history
+	// (issue #160 follow-up): a SQLite projection fed by bot.result /
+	// employee.result, queryable via agents.executionRuns +
+	// GET /api/v1/executions so clients see runs after reconnect/restart.
+	// Nil when the store failed to open (degraded, never fails boot).
+	ExecutionStore *activity.ExecutionStore
+	// executionProjectorSubs holds the store's bus subscriptions;
+	// stopComponents unsubscribes them. Unexported: teardown-only.
+	executionProjectorSubs []*bus.Subscriber
+
 	// TraceExporter ships chat-turn/task-step spans to an OTLP receiver
 	// (metrics.otlp_traces, leaf 07-langfuse-sink). Non-nil ONLY when
 	// metrics.otlp_traces.enabled=true: the default posture is opt-in --

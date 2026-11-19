@@ -345,13 +345,31 @@ func restartDaemon(t *testing.T, s *harness.Stack) func() {
 		t.Fatal("harness daemon pid not recorded; nothing to restart")
 	}
 	stopDaemonPID(t, oldPID, s.SocketPath)
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(s.SocketPath); os.IsNotExist(err) {
-			break
+	// Wait for the OLD process to be fully dead before rebooting.
+	// stopDaemonPID's proc.Wait() returns ECHILD immediately (the harness
+	// owns the child), so it does NOT actually block on exit; and the
+	// pidfile is removed LAST in shutdown (defer removePIDFile), after the
+	// socket. checkExisting refuses to boot while the old PID answers
+	// signal 0, so a socket-only wait races the reboot into "daemon already
+	// running". Poll signal 0 until it fails, escalating to SIGKILL past a
+	// grace window so a slow drain cannot strand the restart.
+	proc, err := os.FindProcess(oldPID)
+	if err == nil {
+		deadline := time.Now().Add(30 * time.Second)
+		killed := false
+		for time.Now().Before(deadline) {
+			if proc.Signal(syscall.Signal(0)) != nil {
+				break // process is gone
+			}
+			if !killed && time.Now().After(deadline.Add(-15*time.Second)) {
+				_ = proc.Kill()
+				killed = true
+			}
+			time.Sleep(100 * time.Millisecond)
 		}
-		time.Sleep(100 * time.Millisecond)
 	}
+	// Belt-and-braces: drop a stale pidfile so checkExisting cannot refuse.
+	_ = os.Remove(filepath.Join(s.StateDir, "meept.pid"))
 	bootDaemon(t, s)
 	return func() {
 		data, err := os.ReadFile(filepath.Join(s.StateDir, "meept.pid"))
@@ -538,7 +556,7 @@ func clonePayload(src map[string]any) map[string]any {
 // Manifest contract (scenario 01 documents the four coverage claims)
 // ---------------------------------------------------------------------------
 
-func assertManifestDeclaresFourScenarios(t *testing.T) {
+func assertManifestDeclaresFiveScenarios(t *testing.T) {
 	t.Helper()
 	root, err := os.Getwd()
 	if err != nil {
@@ -566,8 +584,8 @@ func assertManifestDeclaresFourScenarios(t *testing.T) {
 			if suite.Dir != "e2e/suites/execution-observability" {
 				t.Errorf("manifest suite dir = %q, want e2e/suites/execution-observability", suite.Dir)
 			}
-			if len(suite.Scenarios) != 4 {
-				t.Errorf("manifest execution-observability declares %d scenarios, want 4", len(suite.Scenarios))
+			if len(suite.Scenarios) != 5 {
+				t.Errorf("manifest execution-observability declares %d scenarios, want 5", len(suite.Scenarios))
 			}
 			return
 		}
@@ -582,7 +600,7 @@ func assertManifestDeclaresFourScenarios(t *testing.T) {
 // TestExecutionObservability (T1, scenario 01) proves the frozen shared
 // payload reaches a live WS subscriber on BOTH result topics, classified
 // agent_progress, with no kind key. Also pins the two topic names and the
-// manifest's four-scenario contract.
+// manifest's five-scenario contract (01-04 from #140, 05 durable history from the #160 follow-up).
 //
 // RED today: agent.ExecutionResultEvent / TopicBotResult / TopicEmployeeResult
 // are undefined (branch 01); once they land, bot.result is not in the WS
@@ -590,7 +608,7 @@ func assertManifestDeclaresFourScenarios(t *testing.T) {
 // delivered count / classification assertions fail until branches 01/02/04
 // land.
 func TestExecutionObservability(t *testing.T) {
-	assertManifestDeclaresFourScenarios(t)
+	assertManifestDeclaresFiveScenarios(t)
 
 	// Compile-time contract pins: the two frozen typed topics and the shared
 	// payload must exist with the exact names from master C1.
@@ -728,18 +746,28 @@ func TestExecutionObservability_TurnState(t *testing.T) {
 // grantChatMessaging patches the seeded chat AGENT.md so the driver turn can
 // call send_agent_message (inter-agent-coord inbox rig shape).
 func grantChatMessaging(st *harness.Stack) error {
-	chatSpec := filepath.Join(st.MeeptHome, "agents", "chat", "AGENT.md")
-	data, err := os.ReadFile(chatSpec)
-	if err != nil {
-		return err
+	// Grant the messaging tools to BOTH the chat agent and the coder agent.
+	// A project-bound session (CreateSession with a project cwd) dispatches
+	// its turns to the coder, not chat — granting only chat left the coder's
+	// filtered registry without send_agent_message ("unknown tool"). The
+	// tool is registered daemon-wide; the per-agent grant is the allow-list.
+	for _, agent := range []string{"chat", "coder"} {
+		spec := filepath.Join(st.MeeptHome, "agents", agent, "AGENT.md")
+		data, err := os.ReadFile(spec)
+		if err != nil {
+			return err
+		}
+		patched := strings.Replace(string(data),
+			"additional_tools:\n",
+			"additional_tools:\n  - send_agent_message\n  - inbox\n", 1)
+		if patched == string(data) {
+			return fmt.Errorf("%s AGENT.md has no additional_tools block to patch", agent)
+		}
+		if err := os.WriteFile(spec, []byte(patched), 0o644); err != nil {
+			return err
+		}
 	}
-	patched := strings.Replace(string(data),
-		"additional_tools:\n",
-		"additional_tools:\n  - send_agent_message\n  - inbox\n", 1)
-	if patched == string(data) {
-		return fmt.Errorf("chat AGENT.md has no additional_tools block to patch")
-	}
-	return os.WriteFile(chatSpec, []byte(patched), 0o644)
+	return nil
 }
 
 // TestExecutionObservability_BotInbox (T4, scenario 04) proves C4 end to end:

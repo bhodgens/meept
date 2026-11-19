@@ -1533,6 +1533,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Process progress events directly to update chat model
 		var cmds []tea.Cmd
 		for _, e := range msg.Events {
+			// execution-result frames (issue #160): route bot.result /
+			// employee.result into the agents panel's runs sub-view.
+			// parseAgentRun validates the payload; a malformed frame is
+			// dropped, never a crash in the Update path.
+			if run, ok := parseAgentRun(e.Topic, e.Payload); ok && a.agents != nil {
+				if cmd := a.agents.Update(executionResultMsg{Run: run}); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+			}
 			switch e.Topic {
 			case "agent.progress":
 				// Extract progress data and update chat directly

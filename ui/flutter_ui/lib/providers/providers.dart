@@ -12,6 +12,7 @@ export 'preferences_provider.dart';
 export 'verbosity_provider.dart';
 export 'rendering_prefs_provider.dart';
 export 'project_provider.dart';
+export 'execution_runs_provider.dart';
 
 import 'dart:async';
 

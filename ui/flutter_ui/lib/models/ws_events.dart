@@ -234,3 +234,140 @@ bool isTurnTerminalPayload(Map<String, dynamic> m) {
       handlerCase is String &&
       handlerCase.isNotEmpty;
 }
+
+/// Parsed `bot.result` / `employee.result` relay (issue #140 / #160).
+///
+/// Arrives as a WS frame classified `agent_progress` whose payload is the
+/// shared `agent.ExecutionResultEvent` (internal/agent/execution_events.go —
+/// CLOSED field set, NO `kind` field; the topic name is the tier
+/// discriminator). Field keys mirror the Go struct's json tags exactly; the
+/// Go drift test (`internal/comm/http/ws_schema_drift_test.go`
+/// TestWSExecutionResultDrift) fails when the struct and
+/// schemas/ws_events.schema.json diverge.
+///
+/// Hand-rolled parser (not freezed): the field set is small and the wire
+/// shape is frozen; no build_runner step is required.
+class ExecutionResultEvent {
+  static const statusCompleted = 'completed';
+  static const statusFailed = 'failed';
+  static const statusSkipped = 'skipped';
+
+  /// Relay-injected source topics. The tier is read from this, never from
+  /// the payload (there is no in-band kind key by design).
+  static const sourceTopicBot = 'bot.result';
+  static const sourceTopicEmployee = 'employee.result';
+
+  final String agentId;
+  final String status;
+  final String output;
+  final int tokensUsed;
+  final String error;
+  final int durationMs;
+  final String stopReason;
+  final String triggerRef;
+  final String sessionId;
+
+  /// Relay-injected classification (`agent_progress`) — always present on
+  /// the wire frame, absent on the raw bus payload.
+  final String type;
+
+  /// Relay-injected source topic (`bot.result` or `employee.result`).
+  final String sourceTopic;
+
+  /// RFC3339 timestamp (relay-injected when the payload carries none).
+  final DateTime? timestamp;
+
+  /// Persisted-row fields (GET /api/v1/executions, issue #160 follow-up).
+  /// The store carries an explicit `tier` and `created_at`; live WS frames
+  /// leave these at their defaults and derive tier from sourceTopic.
+  final int id;
+  final String storedTier;
+  final DateTime? createdAt;
+
+  const ExecutionResultEvent({
+    required this.agentId,
+    required this.status,
+    this.output = '',
+    this.tokensUsed = 0,
+    this.error = '',
+    this.durationMs = 0,
+    this.stopReason = '',
+    this.triggerRef = '',
+    this.sessionId = '',
+    this.type = WsEventTypes.agentProgress,
+    this.sourceTopic = '',
+    this.timestamp,
+    this.id = 0,
+    this.storedTier = '',
+    this.createdAt,
+  });
+
+  /// Tier discriminator: persisted rows carry an explicit `tier`; live WS
+  /// frames derive it from the relay source topic. '' when neither exists.
+  String get tier {
+    if (storedTier.isNotEmpty) return storedTier;
+    switch (sourceTopic) {
+      case sourceTopicBot:
+        return 'bot';
+      case sourceTopicEmployee:
+        return 'employee';
+      default:
+        return '';
+    }
+  }
+
+  /// Best-known event time: persisted created_at, else relay timestamp.
+  DateTime? get effectiveTime => createdAt ?? timestamp;
+
+  bool get isBot => tier == 'bot';
+  bool get isEmployee => tier == 'employee';
+
+  factory ExecutionResultEvent.fromJson(Map<String, dynamic> json) {
+    int coerceInt(dynamic v) {
+      if (v is num) return v.toInt();
+      if (v is String) return int.tryParse(v) ?? 0;
+      return 0;
+    }
+
+    return ExecutionResultEvent(
+      agentId: (json['agent_id'] as String?) ?? '',
+      status: (json['status'] as String?) ?? '',
+      output: (json['output'] as String?) ?? '',
+      tokensUsed: coerceInt(json['tokens_used']),
+      error: (json['error'] as String?) ?? '',
+      durationMs: coerceInt(json['duration_ms']),
+      stopReason: (json['stop_reason'] as String?) ?? '',
+      triggerRef: (json['trigger_ref'] as String?) ?? '',
+      sessionId: (json['session_id'] as String?) ?? '',
+      type: (json['type'] as String?) ?? WsEventTypes.agentProgress,
+      sourceTopic: (json['source_topic'] as String?) ?? '',
+      timestamp: DateTime.tryParse((json['timestamp'] as String?) ?? ''),
+      id: coerceInt(json['id']),
+      storedTier: (json['tier'] as String?) ?? '',
+      createdAt: DateTime.tryParse((json['created_at'] as String?) ?? ''),
+    );
+  }
+}
+
+/// Whether a (flattened) WS message map is an execution-result relay (bot or
+/// employee) rather than an ordinary progress event. Identified by payload
+/// shape: `agent_id` AND `status` present and non-empty, and `source_topic`
+/// is `bot.result` or `employee.result` (or absent — the relay always
+/// stamps it; absent is accepted defensively). A turn.terminal frame also
+/// carries `agent_id`/`status`, so those payloads are excluded explicitly.
+bool isExecutionResultPayload(Map<String, dynamic> m) {
+  final agentId = m['agent_id'];
+  final status = m['status'];
+  if (agentId is! String ||
+      agentId.isEmpty ||
+      status is! String ||
+      status.isEmpty) {
+    return false;
+  }
+  if (isTurnTerminalPayload(m)) return false;
+  final topic = m['source_topic'];
+  if (topic == null) return true;
+  if (topic is! String) return false;
+  return topic == ExecutionResultEvent.sourceTopicBot ||
+      topic == ExecutionResultEvent.sourceTopicEmployee;
+}

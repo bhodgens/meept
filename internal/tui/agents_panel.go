@@ -40,6 +40,7 @@ const (
 	agentsViewApprovals                      // tier-2 plans awaiting user signoff
 	agentsViewAudit                          // severity-colored audit findings
 	agentsViewGoals                          // goal list w/ health for the selected employee
+	agentsViewRuns                           // execution results (bot/employee)
 )
 
 // AgentsPanel is the Bubbletea Model for the employees panel.
@@ -74,8 +75,14 @@ type AgentsPanel struct {
 	// selected employee, health-colored. Sized on both axes via tableutil.Size
 	// alongside the main table (see the table invariant in AGENTS.md).
 	goalsTable table.Model
-	width      int
-	height     int
+	// runsTable backs the runs sub-view (key 5): one row per execution-result
+	// frame (bot.result / employee.result), newest first, capped at 30 rows.
+	// Live-events-only by design (issue #160): the panel shows runs that
+	// arrive while the TUI is attached, not a historical backfill.
+	runsTable table.Model
+	runs      []AgentRun
+	width     int
+	height    int
 
 	// countdownTick gates the 30s countdown refresh (quotaCountdownTickMsg):
 	// while any agent is quota-hit the panel re-renders its cached episode
@@ -186,6 +193,165 @@ type AgentFinding struct {
 	DriftScore   float64    `json:"drift_score,omitempty"`
 }
 
+// AgentRun is one execution-result frame (bot.result or employee.result).
+// Tier is derived from the topic name; the wire payload carries no discriminator.
+type AgentRun struct {
+	Topic      string
+	Tier       string
+	AgentID    string
+	Status     string
+	Output     string
+	TokensUsed int
+	Error      string
+	DurationMS int64
+	StopReason string
+	TriggerRef string
+	SessionID  string
+	Timestamp  time.Time
+}
+
+// parseAgentRun decodes one bot.result/employee.result payload map into an
+// AgentRun. ok is false for other topics, for non-map payloads, and for
+// payloads without the two required wire fields (agent_id, status).
+func parseAgentRun(topic string, payload any) (AgentRun, bool) {
+	r := AgentRun{Topic: topic}
+	switch topic {
+	case "bot.result":
+		r.Tier = "bot"
+	case "employee.result":
+		r.Tier = "employee"
+	default:
+		return AgentRun{}, false
+	}
+	m, ok := payload.(map[string]any)
+	if !ok {
+		return AgentRun{}, false
+	}
+	str := func(k string) string {
+		v, _ := m[k].(string)
+		return v
+	}
+	r.AgentID = str("agent_id")
+	r.Status = str("status")
+	r.Output = str("output")
+	r.Error = str("error")
+	r.StopReason = str("stop_reason")
+	r.TriggerRef = str("trigger_ref")
+	r.SessionID = str("session_id")
+	switch v := m["tokens_used"].(type) {
+	case float64:
+		r.TokensUsed = int(v)
+	case int:
+		r.TokensUsed = v
+	case int64:
+		r.TokensUsed = int(v)
+	case json.Number:
+		n, err := v.Int64()
+		if err == nil {
+			r.TokensUsed = int(n)
+		}
+	}
+	switch v := m["duration_ms"].(type) {
+	case float64:
+		r.DurationMS = int64(v)
+	case int:
+		r.DurationMS = int64(v)
+	case int64:
+		r.DurationMS = v
+	case json.Number:
+		n, err := v.Int64()
+		if err == nil {
+			r.DurationMS = n
+		}
+	}
+	switch v := m["timestamp"].(type) {
+	case time.Time:
+		r.Timestamp = v
+	case string:
+		if ts, parseErr := time.Parse(time.RFC3339, v); parseErr == nil {
+			r.Timestamp = ts
+		}
+	}
+	if r.Timestamp.IsZero() {
+		r.Timestamp = time.Now()
+	}
+	return r, r.AgentID != "" && r.Status != ""
+}
+
+// executionResultMsg injects one bot.result/employee.result frame into the
+// runs sub-view. Built by the app's EventStreamDataMsg handler.
+type executionResultMsg struct {
+	Run AgentRun
+}
+
+// executionRunsMsg carries a page of persisted runs from the
+// agents.executionRuns RPC (issue #160 follow-up: stateful, server-backed
+// history — survives TUI reconnect and daemon restart).
+type executionRunsMsg struct {
+	runs []AgentRun
+	err  error
+}
+
+// executionRunsTickMsg re-polls the server while the runs sub-view is
+// visible (5s cadence, self-perpetuating only in that sub-view).
+type executionRunsTickMsg struct{}
+
+// fetchExecutionRuns pages the durable execution history (newest first).
+func (p *AgentsPanel) fetchExecutionRuns() tea.Msg {
+	raw, err := p.rpc.Call("agents.executionRuns", map[string]any{"limit": 30})
+	if err != nil {
+		return executionRunsMsg{err: err}
+	}
+	var resp struct {
+		Runs []struct {
+			Tier       string `json:"tier"`
+			AgentID    string `json:"agent_id"`
+			Status     string `json:"status"`
+			Output     string `json:"output"`
+			TokensUsed int    `json:"tokens_used"`
+			Error      string `json:"error"`
+			DurationMS int64  `json:"duration_ms"`
+			StopReason string `json:"stop_reason"`
+			TriggerRef string `json:"trigger_ref"`
+			SessionID  string `json:"session_id"`
+			CreatedAt  string `json:"created_at"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return executionRunsMsg{err: fmt.Errorf("unmarshal execution runs: %w", err)}
+	}
+	runs := make([]AgentRun, 0, len(resp.Runs))
+	for _, r := range resp.Runs {
+		ts, _ := time.Parse(time.RFC3339, r.CreatedAt)
+		if ts.IsZero() {
+			ts = time.Now()
+		}
+		runs = append(runs, AgentRun{
+			Topic:      r.Tier + ".result",
+			Tier:       r.Tier,
+			AgentID:    r.AgentID,
+			Status:     r.Status,
+			Output:     r.Output,
+			TokensUsed: r.TokensUsed,
+			Error:      r.Error,
+			DurationMS: r.DurationMS,
+			StopReason: r.StopReason,
+			TriggerRef: r.TriggerRef,
+			SessionID:  r.SessionID,
+			Timestamp:  ts,
+		})
+	}
+	return executionRunsMsg{runs: runs}
+}
+
+// scheduleExecutionRunsTick arms the 5s re-poll while the runs sub-view is
+// open. The tick handler re-arms only while still in that sub-view.
+func (p *AgentsPanel) scheduleExecutionRunsTick() tea.Cmd {
+	return tea.Tick(5*time.Second, func(_ time.Time) tea.Msg {
+		return executionRunsTickMsg{}
+	})
+}
+
 // NewAgentsPanel constructs the panel with default table styling.
 // The agents list starts WITHOUT the exec column: it appears only once a
 // cached agent actually references an acp executor (showExec). An
@@ -237,10 +403,26 @@ func NewAgentsPanel(rpc AgentsRPCClient) *AgentsPanel {
 	)
 	gt.SetStyles(s)
 
+	rt := table.New(
+		table.WithColumns([]table.Column{
+			{Title: "tier", Width: 10},
+			{Title: "agent", Width: 18},
+			{Title: "status", Width: 10},
+			{Title: "stop", Width: 12},
+			{Title: "tokens", Width: 8},
+			{Title: "ms", Width: 9},
+			{Title: "time", Width: 12},
+		}),
+		table.WithFocused(true),
+		table.WithHeight(10),
+	)
+	rt.SetStyles(s)
+
 	return &AgentsPanel{
 		rpc:        rpc,
 		table:      t,
 		goalsTable: gt,
+		runsTable:  rt,
 		subView:    agentsViewList,
 	}
 }
@@ -255,8 +437,10 @@ func (p *AgentsPanel) SetSize(width, height int) {
 	// zero-width viewport renders no rows (header only, blank body).
 	tableutil.Size(&p.table, width, tableHeight)
 	tableutil.Size(&p.goalsTable, width, tableHeight)
+	tableutil.Size(&p.runsTable, width, tableHeight)
 	p.resizeColumns()
 	p.resizeGoalColumns()
+	p.resizeRunColumns()
 
 	// Repopulate rows from cached data so a resize does not blank the table.
 	if len(p.agents) > 0 {
@@ -264,6 +448,9 @@ func (p *AgentsPanel) SetSize(width, height int) {
 	}
 	if len(p.goals) > 0 {
 		p.updateGoalsTable()
+	}
+	if len(p.runs) > 0 {
+		p.updateRunsTable()
 	}
 }
 
@@ -376,6 +563,55 @@ func (p *AgentsPanel) resizeGoalColumns() {
 		{Title: "plan", Width: widths[3]},
 		{Title: "gate", Width: widths[4]},
 	})
+}
+
+// resizeRunColumns fits the runs table to the current width through the
+// same tableutil path as its siblings. Same clear-before-SetColumns
+// discipline as resizeGoalColumns: the runs rows are repopulated from cache.
+func (p *AgentsPanel) resizeRunColumns() {
+	p.runsTable.SetRows([]table.Row{})
+
+	if p.width < 30 {
+		return
+	}
+	mins := []int{6, 10, 8, 8, 6, 6, 9}
+	weights := []int{10, 22, 12, 14, 9, 10, 12}
+	widths := tableutil.FitWidthsMin(tableutil.ContentBudget(p.runsTable.Width(), len(mins)), mins, weights)
+	p.runsTable.SetColumns([]table.Column{
+		{Title: "tier", Width: widths[0]},
+		{Title: "agent", Width: widths[1]},
+		{Title: "status", Width: widths[2]},
+		{Title: "stop", Width: widths[3]},
+		{Title: "tokens", Width: widths[4]},
+		{Title: "ms", Width: widths[5]},
+		{Title: "time", Width: widths[6]},
+	})
+}
+
+// updateRunsTable rebuilds the runs-table rows from the cached runs slice.
+// Rows are written through tableutil.SetRows (the table invariant).
+func (p *AgentsPanel) updateRunsTable() {
+	rows := make([]table.Row, len(p.runs))
+	for i, r := range p.runs {
+		ts := r.Timestamp.Format("15:04:05")
+		rows[i] = table.Row{
+			truncate(r.Tier, 8),
+			truncate(r.AgentID, 20),
+			truncate(r.Status, 10),
+			truncate(r.StopReason, 12),
+			fmt.Sprintf("%d", r.TokensUsed),
+			fmt.Sprintf("%d", r.DurationMS),
+			ts,
+		}
+	}
+	tableutil.SetRows(&p.runsTable, rows)
+	if n := len(rows); n > 0 {
+		if cur := p.runsTable.Cursor(); cur >= 0 && cur < n {
+			p.runsTable.SetCursor(cur)
+		} else {
+			p.runsTable.GotoTop()
+		}
+	}
 }
 
 // Init kicks off the initial agents.roster fetch.
@@ -671,6 +907,34 @@ func (p *AgentsPanel) Update(msg tea.Msg) tea.Cmd {
 		// Refresh the detail view + the list.
 		return tea.Batch(p.fetchDetail, p.fetchAgents)
 
+	case executionResultMsg:
+		// Live frame between polls: prepend, capped at 30 rows. The next
+		// server poll reconciles against the durable history.
+		p.runs = append([]AgentRun{msg.Run}, p.runs...)
+		if len(p.runs) > 30 {
+			p.runs = p.runs[:30]
+		}
+		p.updateRunsTable()
+		return nil
+
+	case executionRunsMsg:
+		// Server history replaces the live-only cache (stateful surface).
+		// An RPC error keeps the last good page and never blanks the view.
+		if msg.err == nil {
+			p.runs = msg.runs
+			p.updateRunsTable()
+		}
+		if p.subView == agentsViewRuns {
+			return p.scheduleExecutionRunsTick()
+		}
+		return nil
+
+	case executionRunsTickMsg:
+		if p.subView != agentsViewRuns {
+			return nil
+		}
+		return p.fetchExecutionRuns
+
 	case quotaStateMsg:
 		// Apply the quota state update to the matching agent in the cache.
 		// A quota_cleared transition (to == "" or "running") resets the
@@ -779,6 +1043,13 @@ func (p *AgentsPanel) Update(msg tea.Msg) tea.Cmd {
 			// here we just consume the key.
 			return nil
 
+		case "5":
+			p.subView = agentsViewRuns
+			p.updateRunsTable()
+			// Stateful surface: pull the durable history immediately and
+			// keep polling while this sub-view is open.
+			return tea.Batch(p.fetchExecutionRuns, p.scheduleExecutionRunsTick())
+
 		case KeyEnter:
 			// Drill into the selected agent.
 			if len(p.agents) == 0 {
@@ -835,18 +1106,25 @@ func (p *AgentsPanel) Update(msg tea.Msg) tea.Cmd {
 
 		case "up", "down", "j", "k":
 			var cmd tea.Cmd
-			p.table, cmd = p.table.Update(msg)
+			if p.subView == agentsViewRuns {
+				p.runsTable, cmd = p.runsTable.Update(msg)
+			} else {
+				p.table, cmd = p.table.Update(msg)
+			}
 			return cmd
 		}
 	}
 
 	// Pass other messages to the table.
 	var cmd tea.Cmd
-	if p.subView == agentsViewGoals {
+	switch p.subView {
+	case agentsViewGoals:
 		p.goalsTable, cmd = p.goalsTable.Update(msg)
-		return cmd
+	case agentsViewRuns:
+		p.runsTable, cmd = p.runsTable.Update(msg)
+	default:
+		p.table, cmd = p.table.Update(msg)
 	}
-	p.table, cmd = p.table.Update(msg)
 	return cmd
 }
 
@@ -1091,6 +1369,9 @@ func (p *AgentsPanel) View() string {
 	if p.subView == agentsViewGoals {
 		return p.renderGoals()
 	}
+	if p.subView == agentsViewRuns {
+		return p.renderRuns()
+	}
 
 	if p.loading && len(p.agents) == 0 {
 		return p.renderLoading()
@@ -1137,6 +1418,7 @@ func (p *AgentsPanel) renderHeader() string {
 		{"approvals", agentsViewApprovals},
 		{"audit", agentsViewAudit},
 		{"goals", agentsViewGoals},
+		{"runs", agentsViewRuns},
 	}
 	var tabParts []string
 	for _, t := range tabs {
@@ -1158,7 +1440,7 @@ func (p *AgentsPanel) renderHelpHint() string {
 	hintStyle := lipgloss.NewStyle().
 		Foreground(Current().TextMuted).
 		MarginTop(1)
-	return hintStyle.Render("r: refresh | enter: details | 1: list | 2: approvals | 3: audit | 4: goals | esc: back")
+	return hintStyle.Render("r: refresh | enter: details | 1: list | 2: approvals | 3: audit | 4: goals | 5: runs | esc: back")
 }
 
 func (p *AgentsPanel) renderLoading() string {
@@ -1602,6 +1884,86 @@ func (p *AgentsPanel) renderGoals() string {
 	b.WriteString("\n")
 	hint := lipgloss.NewStyle().Foreground(Current().TextMuted)
 	b.WriteString(hint.Render("r: refresh | enter: details | 1: list | 4: goals | esc: back"))
+	b.WriteString("\n")
+
+	return b.String()
+}
+
+// renderRuns renders the executions sub-view: one row per bot.result /
+// employee.result frame (newest first, live-events-only). Shows a detail
+// preview for the selected row.
+func (p *AgentsPanel) renderRuns() string {
+	var b strings.Builder
+	b.WriteString(p.renderHeader())
+	b.WriteString("\n\n")
+
+	sectionStyle := lipgloss.NewStyle().
+		Foreground(Current().Warning).
+		Bold(true)
+
+	b.WriteString(sectionStyle.Render(fmt.Sprintf("--- executions (%d) ---", len(p.runs))))
+	b.WriteString("\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(Current().TextMuted).Render("server history (polled every 5s); capped at 30 rows"))
+	b.WriteString("\n\n")
+
+	if len(p.runs) == 0 {
+		empty := lipgloss.NewStyle().
+			Foreground(Current().TextMuted).
+			Italic(true).
+			Width(max(p.width-4, 20)).
+			Align(lipgloss.Center).
+			Padding(2, 0)
+		b.WriteString(empty.Render("no executions recorded yet"))
+		b.WriteString("\n")
+	} else {
+		tableStyle := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(Current().Border)
+		b.WriteString(tableStyle.Render(p.runsTable.View()))
+		b.WriteString("\n")
+
+		// Detail preview for the selected row.
+		if cur := p.runsTable.Cursor(); cur >= 0 && cur < len(p.runs) {
+			r := p.runs[cur]
+			labelStyle := lipgloss.NewStyle().
+				Foreground(Current().TextMuted).
+				Width(14)
+			valueStyle := lipgloss.NewStyle().
+				Foreground(Current().TextPrimary)
+			b.WriteString(labelStyle.Render("agent:"))
+			b.WriteString(valueStyle.Render(r.AgentID))
+			b.WriteString("\n")
+			b.WriteString(labelStyle.Render("status:"))
+			b.WriteString(valueStyle.Render(r.Status))
+			b.WriteString("\n")
+			b.WriteString(labelStyle.Render("stop reason:"))
+			b.WriteString(valueStyle.Render(orNA(r.StopReason)))
+			b.WriteString("\n")
+			b.WriteString(labelStyle.Render("trigger:"))
+			b.WriteString(valueStyle.Render(orNA(r.TriggerRef)))
+			b.WriteString("\n")
+			b.WriteString(labelStyle.Render("tokens:"))
+			b.WriteString(valueStyle.Render(fmt.Sprintf("%d", r.TokensUsed)))
+			b.WriteString("\n")
+			b.WriteString(labelStyle.Render("duration:"))
+			b.WriteString(valueStyle.Render(fmt.Sprintf("%d ms", r.DurationMS)))
+			b.WriteString("\n")
+			if r.Error != "" {
+				b.WriteString(labelStyle.Render("error:"))
+				b.WriteString(valueStyle.Render(truncate(r.Error, 80)))
+				b.WriteString("\n")
+			}
+			if r.Output != "" {
+				b.WriteString(labelStyle.Render("output:"))
+				b.WriteString(valueStyle.Render(truncate(r.Output, 120)))
+				b.WriteString("\n")
+			}
+		}
+	}
+
+	b.WriteString("\n")
+	hint := lipgloss.NewStyle().Foreground(Current().TextMuted)
+	b.WriteString(hint.Render("5: runs | up/down: select | 1: list | esc: back"))
 	b.WriteString("\n")
 
 	return b.String()

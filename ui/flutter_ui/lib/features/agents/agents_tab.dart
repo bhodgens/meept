@@ -11,7 +11,9 @@ import '../../providers/tab_activation_provider.dart'
     show keyboardFocusProvider;
 import '../../models/api_models.dart';
 // agent_provider symbols come via providers.dart (exports agent_provider).
+import 'agent_activity_widgets.dart';
 import 'eval_runs_panel.dart';
+import 'execution_runs_panel.dart';
 import 'facts_panel.dart';
 import 'quota_status.dart';
 
@@ -37,7 +39,12 @@ class AgentsTab extends ConsumerStatefulWidget {
 }
 
 class _AgentsTabState extends ConsumerState<AgentsTab> {
-  int _selectedIndex = 0;
+  /// Keyboard cursor into the agents grid. Selection itself lives in
+  /// activeAgentProvider (single source of truth); this index is kept in
+  /// sync with it so the first tile never stays highlighted after another
+  /// tile is tapped (issue #160 follow-up selection bug). -1 = no
+  /// keyboard cursor until the user arrows or taps.
+  int _selectedIndex = -1;
   final _gridFocusNode = FocusNode();
   List<EmployeeGoal> _goals = const [];
   bool _goalsLoading = false;
@@ -150,32 +157,39 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
       final count = agentState.agents.length;
       if (count == 0) return KeyEventResult.ignored;
 
-      // Calculate columns based on grid delegate (maxCrossAxisExtent: 225)
-      final screenWidth = MediaQuery.of(node.context!).size.width;
-      final cols = (screenWidth / 225).floor().clamp(1, 4);
+      // Seed the cursor from the current selection so arrow keys move
+      // FROM the tapped tile, not from a stale index.
+      if (_selectedIndex < 0 || _selectedIndex >= count) {
+        final selected = ref.read(activeAgentProvider);
+        final idx = selected == null
+            ? -1
+            : agentState.agents.indexWhere((a) => a.id == selected.id);
+        _selectedIndex = idx >= 0 ? idx : 0;
+      }
 
+      // Calculate columns based on grid delegate (maxCrossAxisExtent: 290)
+      final screenWidth = MediaQuery.of(node.context!).size.width;
+      final cols = (screenWidth / 290).floor().clamp(1, 4);
+
+      int? next;
       if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-        setState(() {
-          _selectedIndex = (_selectedIndex + cols).clamp(0, count - 1);
-        });
-        return KeyEventResult.handled;
+        next = (_selectedIndex + cols).clamp(0, count - 1);
+      } else if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+        next = (_selectedIndex - cols).clamp(0, count - 1);
+      } else if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+        next = (_selectedIndex + 1).clamp(0, count - 1);
+      } else if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+        next = (_selectedIndex - 1).clamp(0, count - 1);
       }
-      if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+      if (next != null) {
         setState(() {
-          _selectedIndex = (_selectedIndex - cols).clamp(0, count - 1);
+          _selectedIndex = next!;
         });
-        return KeyEventResult.handled;
-      }
-      if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
-        setState(() {
-          _selectedIndex = (_selectedIndex + 1).clamp(0, count - 1);
-        });
-        return KeyEventResult.handled;
-      }
-      if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-        setState(() {
-          _selectedIndex = (_selectedIndex - 1).clamp(0, count - 1);
-        });
+        // Keyboard selection drives the same provider as taps: one
+        // highlight source, goals pane follows the cursor.
+        final agent = agentState.agents[_selectedIndex];
+        ref.read(activeAgentProvider.notifier).state = agent;
+        _loadGoals(agent.id);
         return KeyEventResult.handled;
       }
     }
@@ -261,17 +275,28 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
               const SizedBox(width: 12),
               SizedBox(
                 width: 300,
-                child: Column(
-                  children: [
-                    // Expanded: the goals pane's own Column uses Expanded
-                    // children (goal list); without a flex parent it would
-                    // receive unbounded height and crash layout.
-                    Expanded(child: _buildGoalsPane(activeAgent)),
-                    const SizedBox(height: 12),
-                    const EvalRunsPanel(),
-                    const SizedBox(height: 12),
-                    const FactsPanel(),
-                  ],
+                // The WHOLE sidebar scrolls as one column (issue #160
+                // follow-up): goals, eval runs, executions and memory facts
+                // are all reachable at any viewport height. This replaces
+                // the nested Expanded/SingleChildScrollView split that
+                // overflowed by 13px at 900x600. Panels render their lists
+                // with shrinkWrap inside the scroll view; the goals list
+                // keeps a bounded height so one long goal list cannot
+                // push the other panels off-screen.
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildGoalsPane(activeAgent),
+                      const SizedBox(height: 12),
+                      const EvalRunsPanel(),
+                      const SizedBox(height: 12),
+                      const ExecutionRunsPanel(),
+                      const SizedBox(height: 12),
+                      const FactsPanel(),
+                      const SizedBox(height: 12),
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -341,23 +366,26 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
               },
               onKeyEvent: _handleKey,
               child: GridView.builder(
+                // Issue #160 follow-up: ~30% wider tiles (225 -> 290) at
+                // roughly half the old height (aspect 0.87 -> 3.6). The
+                // compact card carries a 2x icon, the 8-bit token
+                // histogram and the concurrent-run counter.
                 gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                  maxCrossAxisExtent: 225,
+                  maxCrossAxisExtent: 290,
                   crossAxisSpacing: 8,
                   mainAxisSpacing: 8,
-                  childAspectRatio: 0.87,
+                  childAspectRatio: 3.6,
                 ),
                 itemCount: agentState.agents.length,
                 itemBuilder: (context, index) {
                   final agent = agentState.agents[index];
                   final selected = ref.watch(activeAgentProvider);
                   final isSelected = selected?.id == agent.id;
-                  final isKeyboardSelected = _selectedIndex == index;
                   final quotaState = agentState.quotaEpisodes[agent.id];
                   return _buildAgentCard(
                     agent,
+                    index,
                     isSelected,
-                    isKeyboardSelected,
                     quotaState,
                     agentState.employeeExecutors[agent.id],
                   );
@@ -371,136 +399,153 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
 
   Widget _buildAgentCard(
     Agent agent,
+    int index,
     bool isSelected,
-    bool isKeyboardSelected,
     AgentQuotaState? quotaState,
     String? executorAgent,
   ) {
-    // M9: honor the client-local time toggle (default off — daemon clock).
-    final useDeviceTime = ref
-        .watch(renderingPrefsProvider)
-        .useDeviceTimeForQuota;
-    // Status chip (GUI parity with TUI agents_panel.go statusBadge): the
-    // agents.list payload carries no status field (it returns employee
-    // definitions), so the base state is derived client-side — a quota
-    // episode or locally-paused agent renders its state, everything else
-    // renders 'running'.
+    // Status chip: paused / quota_wait are real states; the default label
+    // is 'online' (presence), NOT 'running' — none of these agents are
+    // necessarily doing work (issue #160 follow-up wording). 'running' is
+    // reserved for the active pulse below, driven by live run counts.
     final paused = _pausedLocally.contains(agent.id);
     final status = paused
         ? 'paused'
-        : (quotaState != null ? 'quota_wait' : 'running');
+        : (quotaState != null ? 'quota_wait' : 'online');
+
+    final execState = ref.watch(executionRunsProvider);
+    final histogram = execState.histograms[agent.id] ?? const <int>[];
+    // Active = doing work right now: roster active_count > 0, or a quota
+    // episode in flight. Drives the pulsing orange border.
+    final ownActive = execState.activeCounts[agent.id] ?? agent.activeCount;
+    final isActive = !paused && (ownActive > 0 || quotaState != null);
+    // Per-card counter: OTHER concurrent active runs org-wide (this
+    // agent's own runs excluded), from the polled roster.
+    final otherActive = execState.otherActiveCount(agent.id);
+
+    final borderRadius = BorderRadius.circular(8);
     return InkWell(
       key: ValueKey('agent-tile-${agent.id}'),
       onTap: () {
+        // Tap and keyboard share one selection source; sync the cursor so
+        // the previously selected tile loses its highlight immediately.
+        setState(() {
+          _selectedIndex = index;
+        });
         ref.read(activeAgentProvider.notifier).state = agent;
         _loadGoals(agent.id);
       },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        decoration: BoxDecoration(
-          color: isKeyboardSelected
-              ? CyberpunkColors.orangeDark.withValues(alpha: 0.3)
-              : (isSelected
-                    ? CyberpunkColors.orangePrimary.withValues(alpha: 0.1)
-                    : CyberpunkColors.black),
-          border: Border.all(
-            color: isKeyboardSelected
-                ? CyberpunkColors.orangeDark
-                : (isSelected
-                      ? CyberpunkColors.orangePrimary
-                      : CyberpunkColors.midGray),
-            width: isKeyboardSelected ? 3 : 1,
+      child: PulsingBorder(
+        active: isActive,
+        borderRadius: borderRadius,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? CyberpunkColors.orangePrimary.withValues(alpha: 0.1)
+                : CyberpunkColors.black,
+            border: Border.all(
+              color: isSelected
+                  ? CyberpunkColors.orangePrimary
+                  : CyberpunkColors.midGray,
+              width: isSelected ? 2 : 1,
+            ),
+            borderRadius: borderRadius,
           ),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  getAgentIcon(agent.id),
-                  color: isSelected
-                      ? CyberpunkColors.orangePrimary
-                      : CyberpunkColors.greenSuccess,
-                  size: 20,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    agent.name.toLowerCase(),
-                    style: CyberpunkTypography.bodySmall.copyWith(
-                      color: isSelected
-                          ? CyberpunkColors.orangePrimary
-                          : CyberpunkColors.greenSuccess,
-                      fontFamily: 'SourceCodePro',
+          // FittedBox scales the whole card content down when the tile is
+          // narrower/shorter than the natural layout (small viewports),
+          // so the compact card NEVER overflows its grid cell.
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: SizedBox(
+              width: 260,
+              height: 52,
+              child: Row(
+                children: [
+                  // 2x icon (20 -> 40) per the redesign spec.
+                  Icon(
+                    getAgentIcon(agent.id),
+                    color: isSelected
+                        ? CyberpunkColors.orangePrimary
+                        : CyberpunkColors.greenSuccess,
+                    size: 40,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                agent.name.toLowerCase(),
+                                style: CyberpunkTypography.bodySmall.copyWith(
+                                  color: isSelected
+                                      ? CyberpunkColors.orangePrimary
+                                      : CyberpunkColors.greenSuccess,
+                                  fontFamily: 'SourceCodePro',
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            if (executorAgent != null &&
+                                executorAgent.isNotEmpty)
+                              const _AcpExecutorBadge(),
+                            _AgentStatusChip(status: status),
+                          ],
+                        ),
+                        const SizedBox(height: 3),
+                        // 8-bit token-activity histogram, last hour.
+                        TokenHistogram(cells: histogram, height: 18),
+                      ],
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
                   ),
-                ),
-                // acp executor badge (acp-employees phase 3 display
-                // parity with the TUI 'exec' column): shown when the
-                // employee roster marks this agent's id with an
-                // executor_agent reference. Lowercase per the UI rule.
-                if (executorAgent != null && executorAgent.isNotEmpty)
-                  const _AcpExecutorBadge(),
-                _AgentStatusChip(status: status),
-              ],
-            ),
-            // C1 roster line (GUI parity with the TUI agents panel): kind,
-            // active count and daily spend from the agents.list payload.
-            if (agent.type.isNotEmpty ||
-                agent.activeCount > 0 ||
-                agent.dailyCostCents > 0)
-              Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Text(
-                  'type: ${agent.type.isEmpty ? 'n/a' : agent.type.toLowerCase()}'
-                  ' · active: ${agent.activeCount}'
-                  ' · cost: \$${(agent.dailyCostCents / 100).toStringAsFixed(2)}',
-                  key: ValueKey('agent-roster-${agent.id}'),
-                  style: CyberpunkTypography.bodySmall.copyWith(
-                    color: CyberpunkColors.midGray,
-                    fontSize: 10,
-                    fontFamily: 'SourceCodePro',
+                  const SizedBox(width: 6),
+                  // Right rail: pause/resume + the concurrent-run counter
+                  // at the bottom-right of the card. Compact 20px buttons
+                  // (no 48px Material touch target inside a 52px card).
+                  Column(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      if (paused)
+                        _CompactIconButton(
+                          tooltip: 'resume agent',
+                          icon: Icons.play_arrow,
+                          color: CyberpunkColors.greenSuccess,
+                          onPressed: () => _togglePause(agent, pause: false),
+                        )
+                      else
+                        _CompactIconButton(
+                          tooltip: 'pause agent',
+                          icon: Icons.pause,
+                          color: CyberpunkColors.orangeDark,
+                          onPressed: () => _togglePause(agent, pause: true),
+                        ),
+                      Tooltip(
+                        message: 'other concurrent active runs (org-wide)',
+                        child: Text(
+                          'runs: $otherActive',
+                          key: ValueKey('agent-runs-${agent.id}'),
+                          style: CyberpunkTypography.bodySmall.copyWith(
+                            color: otherActive > 0
+                                ? CyberpunkColors.orangePrimary
+                                : CyberpunkColors.midGray,
+                            fontSize: 10,
+                            fontFamily: 'SourceCodePro',
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
+                ],
               ),
-            const SizedBox(height: 4),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                if (paused)
-                  IconButton(
-                    tooltip: 'resume agent',
-                    icon: const Icon(Icons.play_arrow, size: 16),
-                    color: CyberpunkColors.greenSuccess,
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                    onPressed: () => _togglePause(agent, pause: false),
-                  )
-                else
-                  IconButton(
-                    tooltip: 'pause agent',
-                    icon: const Icon(Icons.pause, size: 16),
-                    color: CyberpunkColors.orangeDark,
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                    onPressed: () => _togglePause(agent, pause: true),
-                  ),
-              ],
             ),
-            if (quotaState != null) ...[
-              const SizedBox(height: 4),
-              QuotaStatusBadge(
-                quotaState: quotaState,
-                useDeviceTime: useDeviceTime,
-              ),
-            ],
-          ],
+          ),
         ),
       ),
     );
@@ -598,22 +643,28 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
             ),
         ],
         const SizedBox(height: 12),
+        // Bounded goals region inside the scrolling sidebar: the list
+        // shrink-wraps up to 260px, then scrolls internally, so a long
+        // goal list never pushes the panels below it off-screen.
         if (_goalsLoading)
-          const Expanded(child: Center(child: CircularProgressIndicator()))
+          const SizedBox(
+            height: 80,
+            child: Center(child: CircularProgressIndicator()),
+          )
         else if (_goalsError != null)
-          Expanded(
-            child: Text(
-              _goalsError!,
-              style: CyberpunkTypography.bodySmall.copyWith(
-                color: CyberpunkColors.redAlert,
-              ),
+          Text(
+            _goalsError!,
+            style: CyberpunkTypography.bodySmall.copyWith(
+              color: CyberpunkColors.redAlert,
             ),
           )
         else if (_goals.isEmpty)
-          const Expanded(child: Center(child: Text('no goals')))
+          const SizedBox(height: 60, child: Center(child: Text('no goals')))
         else
-          Expanded(
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 260),
             child: ListView.separated(
+              shrinkWrap: true,
               itemCount: _goals.length,
               separatorBuilder: (_, __) => const SizedBox(height: 8),
               itemBuilder: (context, i) {
@@ -644,6 +695,39 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// Compact 20px icon button for the agent card's right rail. The standard
+/// IconButton enforces a 48px Material touch target, which overflows the
+/// ~52px-tall redesigned card; this keeps the tap affordance without the
+/// minimum-size constraint.
+class _CompactIconButton extends StatelessWidget {
+  const _CompactIconButton({
+    required this.tooltip,
+    required this.icon,
+    required this.color,
+    required this.onPressed,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final Color color;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(4),
+        child: Padding(
+          padding: const EdgeInsets.all(2),
+          child: Icon(icon, size: 16, color: color),
+        ),
+      ),
     );
   }
 }
@@ -687,7 +771,7 @@ class _AgentStatusChip extends StatelessWidget {
   const _AgentStatusChip({required this.status});
 
   Color get _color => switch (status) {
-    'running' => CyberpunkColors.greenSuccess,
+    'running' || 'online' => CyberpunkColors.greenSuccess,
     'paused' || 'quota_wait' => CyberpunkColors.yellowWarning,
     'error' => CyberpunkColors.redAlert,
     _ => CyberpunkColors.midGray,
