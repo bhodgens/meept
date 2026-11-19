@@ -73,7 +73,11 @@ Examples:
   meept voice local --list                        # employees you can call
   meept voice local --employee eve --in q.wav --out a.wav
   meept voice local --employee eve --label desk   # live mic + speaker
-  meept voice local --employee eve --record /tmp/local-rec   # + human-leg evidence`,
+  meept voice local --employee eve --record /tmp/local-rec   # + human-leg evidence
+
+Per-call timing overrides (this call only; config and other calls are
+untouched): --turn-confirm-ms N (>=0), --smart-turn-mode 0|1|2, and
+--deepgram-endpoint-ms N (>=0). Absent = the configured/current behavior.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := f.validate(); err != nil {
 				return err
@@ -81,7 +85,9 @@ Examples:
 			if f.list {
 				return runVoiceLocalList()
 			}
-			return runVoiceLocal(f.employee, f.label, f.inPath, f.outPath, f.record)
+			turnConfirmMs, smartTurnMode, deepgramEndpointMs := f.timingOverrides()
+			return runVoiceLocal(f.employee, f.label, f.inPath, f.outPath, f.record,
+				turnConfirmMs, smartTurnMode, deepgramEndpointMs)
 		},
 	}
 
@@ -91,6 +97,9 @@ Examples:
 	cmd.Flags().StringVar(&f.outPath, "out", "", "write the reply to this WAV file (file mode)")
 	cmd.Flags().BoolVar(&f.list, "list", false, "list employees available for local calls")
 	cmd.Flags().StringVar(&f.record, "record", "", "live mode only: record the exact bytes handed to speaker playback into DIR (raw s16le mono 16 kHz + meta JSON)")
+	cmd.Flags().IntVar(&f.turnConfirmMsRaw, "turn-confirm-ms", -1, "per-call: override voice.turn-confirm-ms (ms, >=0; -1 = use config)")
+	cmd.Flags().IntVar(&f.smartTurnModeRaw, "smart-turn-mode", -1, "per-call: override smart-turn mode (0=off, 1=kill switch, 2=verdict; -1 = use config)")
+	cmd.Flags().IntVar(&f.deepgramEndpointMsRaw, "deepgram-endpoint-ms", -1, "per-call: override deepgram endpoint ms (>=0; -1 = use config)")
 	return cmd
 }
 
@@ -104,6 +113,13 @@ type localFlags struct {
 	outPath  string
 	list     bool
 	record   string
+
+	// Per-call timing overrides. Bound to cobra with a -1 sentinel
+	// (= flag absent) so an explicit 0 is distinguishable from no
+	// override. timingOverrides() converts them to *int (nil = absent).
+	turnConfirmMsRaw      int
+	smartTurnModeRaw      int
+	deepgramEndpointMsRaw int
 }
 
 // validate reports the flag errors the leaf pins: --employee required
@@ -117,6 +133,19 @@ func (f localFlags) validate() error {
 	if !f.list && f.employee == "" {
 		return fmt.Errorf("--employee is required (or use --list)")
 	}
+	// Per-call timing overrides: -1 = flag absent (no override).
+	// Anything else is a real override; validate ranges so a negative
+	// ms or an out-of-range smart-turn mode is refused BEFORE any daemon
+	// call. Explicit 0 is valid.
+	if f.turnConfirmMsRaw < -1 {
+		return fmt.Errorf("--turn-confirm-ms: turn_confirm_ms must be >= 0")
+	}
+	if f.deepgramEndpointMsRaw < -1 {
+		return fmt.Errorf("--deepgram-endpoint-ms: deepgram_endpoint_ms must be >= 0")
+	}
+	if f.smartTurnModeRaw < -1 || f.smartTurnModeRaw > 2 {
+		return fmt.Errorf("--smart-turn-mode: smart_turn_mode must be 0, 1, or 2")
+	}
 	if f.record != "" {
 		if f.inPath != "" || f.outPath != "" {
 			return fmt.Errorf("--record requires live mode (no --in/--out): the recorder taps the oto playback path, which file mode never opens")
@@ -126,6 +155,26 @@ func (f localFlags) validate() error {
 		}
 	}
 	return nil
+}
+
+// timingOverrides converts the cobra-bound raw flags into per-call
+// override pointers. -1 (flag absent) -> nil, so the daemon sees the
+// field omitted and applies the current config behavior byte-identically;
+// an explicit 0 -> non-nil pointer to 0 (a real override).
+func (f localFlags) timingOverrides() (turnConfirmMs, smartTurnMode, deepgramEndpointMs *int) {
+	if f.turnConfirmMsRaw >= 0 {
+		v := f.turnConfirmMsRaw
+		turnConfirmMs = &v
+	}
+	if f.smartTurnModeRaw >= 0 {
+		v := f.smartTurnModeRaw
+		smartTurnMode = &v
+	}
+	if f.deepgramEndpointMsRaw >= 0 {
+		v := f.deepgramEndpointMsRaw
+		deepgramEndpointMs = &v
+	}
+	return
 }
 
 // runVoiceLocalList lists employees via agents.list (the same surface
@@ -190,7 +239,9 @@ type voiceLocalOpenResult struct {
 // ("" = off) is live-mode only — localFlags.validate refuses --record
 // with --in/--out — and tees the operator's own speaker playback into
 // DIR/<call-id>.raw for gap analysis (leaf 02, C2).
-func runVoiceLocal(employee, label, inPath, outPath, recordDir string) error {
+// turnConfirmMs/smartTurnMode/deepgramEndpointMs are PER-CALL timing
+// overrides (nil = absent = no override, current behavior preserved).
+func runVoiceLocal(employee, label, inPath, outPath, recordDir string, turnConfirmMs, smartTurnMode, deepgramEndpointMs *int) error {
 	client, err := connectDaemon()
 	if err != nil {
 		return fmt.Errorf("failed to connect to daemon: %w", err)
@@ -200,6 +251,17 @@ func runVoiceLocal(employee, label, inPath, outPath, recordDir string) error {
 	req := map[string]any{"employee_id": employee}
 	if label != "" {
 		req["label"] = label
+	}
+	// Include only explicitly-supplied overrides (absent = field omitted
+	// = the daemon applies the current config behavior byte-identically).
+	if turnConfirmMs != nil {
+		req["turn_confirm_ms"] = *turnConfirmMs
+	}
+	if smartTurnMode != nil {
+		req["smart_turn_mode"] = *smartTurnMode
+	}
+	if deepgramEndpointMs != nil {
+		req["deepgram_endpoint_ms"] = *deepgramEndpointMs
 	}
 	raw, err := client.Call("voice.local.open", req)
 	if err != nil {

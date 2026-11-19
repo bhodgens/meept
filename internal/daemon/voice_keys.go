@@ -246,6 +246,23 @@ func (w *VoiceWiring) sendKeysFrame(ccid string) {
 	if kw.TTSVendor == "" {
 		kw.TTSVendor = defaultTTSVendor
 	}
+	// Per-call timing overrides (`meept voice local --turn-confirm-ms/
+	// --smart-turn-mode/--deepgram-endpoint-ms`) are applied AFTER all
+	// config/employee resolution: a non-nil pointer replaces that wire
+	// selector for this call only, an absent pointer leaves the resolved
+	// value byte-identical. Keyed by employeeID (registry-enforced one
+	// live call per employee). No I/O under the store mutex.
+	if ov := w.callTimingOverride(employeeID); ov != nil {
+		if ov.TurnConfirmMs != nil {
+			kw.TurnConfirmMs = *ov.TurnConfirmMs
+		}
+		if ov.SmartTurnMode != nil {
+			kw.SmartTurnMode = *ov.SmartTurnMode
+		}
+		if ov.DeepgramEndpointMs != nil {
+			kw.DeepgramEndpointMs = *ov.DeepgramEndpointMs
+		}
+	}
 	// STT base URL: when set, the child dials Deepgram (or any
 	// wire-compatible STT) at this endpoint instead of the cloud default
 	// - the same contract TTS honors for tts_base_url.

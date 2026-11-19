@@ -86,3 +86,79 @@ func TestVoiceCmdRegistered(t *testing.T) {
 		t.Fatalf("voice subcommands missing: local=%v status=%v", foundLocal, foundStatus)
 	}
 }
+
+// Per-call timing override flags (voice local): validation + flag wiring.
+// The *Raw fields carry the cobra sentinel (-1 = flag absent); validate()
+// converts them to *int overrides (nil = no override, byte-identical
+// behavior). Negative ms values and smart-turn mode outside 0..2 are
+// refused with named errors.
+
+func TestLocalFlagsTimingOverridesValid(t *testing.T) {
+	f := localFlags{
+		employee:              "eve",
+		turnConfirmMsRaw:      900,
+		smartTurnModeRaw:      2,
+		deepgramEndpointMsRaw: 250,
+	}
+	if err := f.validate(); err != nil {
+		t.Fatalf("valid overrides refused: %v", err)
+	}
+	tc, stm, dg := f.timingOverrides()
+	if tc == nil || *tc != 900 || stm == nil || *stm != 2 || dg == nil || *dg != 250 {
+		t.Fatalf("overrides not converted to pointers: %v %v %v", tc, stm, dg)
+	}
+}
+
+func TestLocalFlagsTimingOverridesAbsent(t *testing.T) {
+	// -1 sentinel = flag absent (cobra default), not an explicit 0.
+	f := localFlags{employee: "eve", turnConfirmMsRaw: -1, smartTurnModeRaw: -1, deepgramEndpointMsRaw: -1}
+	if err := f.validate(); err != nil {
+		t.Fatalf("absent overrides must be valid: %v", err)
+	}
+	tc, stm, dg := f.timingOverrides()
+	if tc != nil || stm != nil || dg != nil {
+		t.Fatal("absent flags must leave overrides nil")
+	}
+}
+
+func TestLocalFlagsTimingOverridesInvalid(t *testing.T) {
+	neg, big, zero := -2, 3, 0
+	tests := []struct {
+		name string
+		f    localFlags
+		want string
+	}{
+		{"negative turn-confirm-ms", localFlags{employee: "e", turnConfirmMsRaw: neg, smartTurnModeRaw: -1, deepgramEndpointMsRaw: -1}, "turn_confirm_ms"},
+		{"negative deepgram-endpoint-ms", localFlags{employee: "e", turnConfirmMsRaw: -1, smartTurnModeRaw: -1, deepgramEndpointMsRaw: neg}, "deepgram_endpoint_ms"},
+		{"smart-turn-mode too high", localFlags{employee: "e", turnConfirmMsRaw: -1, smartTurnModeRaw: big, deepgramEndpointMsRaw: -1}, "smart_turn_mode"},
+		{"smart-turn-mode negative", localFlags{employee: "e", turnConfirmMsRaw: -1, smartTurnModeRaw: neg, deepgramEndpointMsRaw: -1}, "smart_turn_mode"},
+		{"explicit zero ok", localFlags{employee: "e", turnConfirmMsRaw: zero, smartTurnModeRaw: zero, deepgramEndpointMsRaw: zero}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.f.validate()
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("want valid, got %v", err)
+				}
+				tc, stm, dg := tt.f.timingOverrides()
+				if tc == nil || *tc != 0 || stm == nil || *stm != 0 || dg == nil || *dg != 0 {
+					t.Fatal("explicit zero must be a non-nil pointer to 0")
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("want error naming %q, got %v", tt.want, err)
+			}
+		})
+	}
+}
+
+func TestVoiceLocalCmdHasTimingFlags(t *testing.T) {
+	cmd := newVoiceLocalCmd()
+	for _, name := range []string{"turn-confirm-ms", "smart-turn-mode", "deepgram-endpoint-ms"} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Errorf("voice local missing --%s flag", name)
+		}
+	}
+}

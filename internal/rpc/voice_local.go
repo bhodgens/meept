@@ -53,6 +53,17 @@ var (
 	ErrVoiceLocalUnknownCall = errors.New("voice: unknown call")
 )
 
+// VoiceLocalTimingOverrides are PER-CALL timing overrides for one
+// voice.local.open. Pointer fields so absent (nil) is distinguishable from
+// an explicit 0: absent means "no override, use the exact config/current
+// behavior"; a non-nil pointer replaces the resolved value on the keys
+// frame for this call only. Seam-typed (internal/rpc never imports voice).
+type VoiceLocalTimingOverrides struct {
+	TurnConfirmMs      *int `json:"turn_confirm_ms,omitempty"`
+	SmartTurnMode      *int `json:"smart_turn_mode,omitempty"`
+	DeepgramEndpointMs *int `json:"deepgram_endpoint_ms,omitempty"`
+}
+
 // VoiceLocalOpen is the voice.local.open result (CL8 verbatim). The
 // paths are the audio-pair unix socket files under $MEEPT_HOME/voice/sock
 // the client dials (mic writes to in_path, speaker reads from out_path).
@@ -186,7 +197,7 @@ type VoiceLocalSeams struct {
 	// voice.ErrBusy -> ErrVoiceLocalBusy, voice.ErrDuplicateTarget ->
 	// ErrVoiceLocalDuplicate, voice.ErrLocalDisabled ->
 	// ErrVoiceLocalDisabled (the adapter wraps; errors.Is walks it).
-	Open func(ctx context.Context, employeeID, label string) (VoiceLocalOpen, error)
+	Open func(ctx context.Context, employeeID, label string, overrides VoiceLocalTimingOverrides) (VoiceLocalOpen, error)
 	// End ends one call. nil return = idempotent success (double End).
 	// A foreign call id maps to ErrVoiceLocalUnknownCall.
 	End func(callID, reason string) error
@@ -251,8 +262,11 @@ func (h *VoiceLocalHandler) handleOpen(ctx context.Context, params json.RawMessa
 		return nil, ErrVoiceLocalDisabled
 	}
 	var req struct {
-		EmployeeID string `json:"employee_id"`
-		Label      string `json:"label"`
+		EmployeeID         string `json:"employee_id"`
+		Label              string `json:"label"`
+		TurnConfirmMs      *int   `json:"turn_confirm_ms"`
+		SmartTurnMode      *int   `json:"smart_turn_mode"`
+		DeepgramEndpointMs *int   `json:"deepgram_endpoint_ms"`
 	}
 	if len(params) > 0 {
 		if err := json.Unmarshal(params, &req); err != nil {
@@ -271,7 +285,11 @@ func (h *VoiceLocalHandler) handleOpen(ctx context.Context, params json.RawMessa
 			return nil, fmt.Errorf("%w: %s", ErrVoiceLocalUnknownEmployee, req.EmployeeID)
 		}
 	}
-	return h.seams.Open(ctx, req.EmployeeID, req.Label)
+	return h.seams.Open(ctx, req.EmployeeID, req.Label, VoiceLocalTimingOverrides{
+		TurnConfirmMs:      req.TurnConfirmMs,
+		SmartTurnMode:      req.SmartTurnMode,
+		DeepgramEndpointMs: req.DeepgramEndpointMs,
+	})
 }
 
 // handleEnd implements voice.local.end (CL8). A missing call_id refuses

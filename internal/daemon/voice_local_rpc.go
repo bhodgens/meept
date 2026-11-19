@@ -47,9 +47,28 @@ func voiceLocalSeams(w *VoiceWiring, mgr *employee.Manager, logger *slog.Logger)
 	leg := w.Local
 	registry := w.Registry
 
-	open := func(ctx context.Context, employeeID, label string) (rpc.VoiceLocalOpen, error) {
+	open := func(ctx context.Context, employeeID, label string, overrides rpc.VoiceLocalTimingOverrides) (rpc.VoiceLocalOpen, error) {
+		// Register the per-call overrides BEFORE opening the leg: the
+		// child answers the C1 open frame with setup, and setup triggers
+		// sendKeysFrame. Registering after leg.Open returned would race
+		// that setup frame. Keyed by employeeID (the registry enforces
+		// one live call per employee across both legs), so the setup
+		// frame's registry lookup resolves the right entry. Delete is
+		// idempotent on refusal paths (no open happened) and on release.
+		var registered *callTimingOverrides
+		if overrides != (rpc.VoiceLocalTimingOverrides{}) {
+			registered = &callTimingOverrides{
+				TurnConfirmMs:      overrides.TurnConfirmMs,
+				SmartTurnMode:      overrides.SmartTurnMode,
+				DeepgramEndpointMs: overrides.DeepgramEndpointMs,
+			}
+			w.setCallTimingOverride(employeeID, registered)
+		}
 		call, err := leg.Open(ctx, employeeID, label)
 		if err != nil {
+			// Only drop OUR entry — a concurrent refused open for the
+			// same employee must not delete a live call's override.
+			w.deleteCallTimingOverrideIf(employeeID, registered)
 			return rpc.VoiceLocalOpen{}, mapVoiceLocalOpenErr(err)
 		}
 		return rpc.VoiceLocalOpen{

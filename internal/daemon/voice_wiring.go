@@ -144,6 +144,14 @@ type VoiceWiring struct {
 	// evicted per call id, NEVER consulted on any call-path decision.
 	callEvents *voice.TelemetryRing
 
+	// callTimingOverrides holds the per-call timing overrides set by
+	// `meept voice local --turn-confirm-ms/--smart-turn-mode/
+	// --deepgram-endpoint-ms`, keyed by employee id (unique per live
+	// call). Registered before leg.Open (the setup/keys race), applied
+	// in sendKeysFrame AFTER config resolution, deleted on refusal and
+	// on release. Mutex-guarded; no entry = byte-identical behavior.
+	callTimingOverrides timingOverridesByEmployee
+
 	// bus publishes voice.call.ended (typed topic); nil drops events.
 	bus *bus.MessageBus
 
@@ -1630,6 +1638,16 @@ func silenceCallerActiveFor(leg string) func(ccid string, window time.Duration) 
 //  5. registry Release (frees the C8 slot + target)
 //  6. binding OnCallEnd (leaf-12 ReleaseHook: call row + goal hold)
 func (w *VoiceWiring) releaseCall(ccid string, outcome voice.Outcome) {
+	// Per-call timing overrides die with the call: resolve the employee
+	// from the registry BEFORE Release drops the row, then delete the
+	// keyed entry. Idempotent on unknown calls (a release for a call
+	// with no override costs one map miss).
+	for _, inst := range w.Registry.Live() {
+		if inst.CallControlID == ccid {
+			w.deleteCallTimingOverride(inst.EmployeeID)
+			break
+		}
+	}
 	if w.Employee != nil && w.Employee.gates != nil {
 		w.Employee.gates.drop(ccid, string(outcome))
 	}

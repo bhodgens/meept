@@ -16,6 +16,7 @@ import (
 // fakeSeams builds a seam set with recording fakes.
 type fakeSeams struct {
 	openCalls   []string // "employee|label" per call
+	openOpts    []VoiceLocalTimingOverrides
 	endCalls    []string
 	openResult  VoiceLocalOpen
 	openErr     error
@@ -40,8 +41,9 @@ type fakeSeams struct {
 
 func (f *fakeSeams) seams() VoiceLocalSeams {
 	return VoiceLocalSeams{
-		Open: func(_ context.Context, employeeID, label string) (VoiceLocalOpen, error) {
+		Open: func(_ context.Context, employeeID, label string, opts VoiceLocalTimingOverrides) (VoiceLocalOpen, error) {
 			f.openCalls = append(f.openCalls, employeeID+"|"+label)
+			f.openOpts = append(f.openOpts, opts)
 			return f.openResult, f.openErr
 		},
 		End: func(callID, _ string) error {
@@ -115,6 +117,75 @@ func TestVoiceLocalOpenDisabled(t *testing.T) {
 	_, err = h.handleEnd(context.Background(), []byte(`{"call_id":"local-x"}`))
 	if !errors.Is(err, ErrVoiceLocalDisabled) {
 		t.Fatalf("end: want ErrVoiceLocalDisabled, got %v", err)
+	}
+}
+
+// TestVoiceLocalOpenTimingOverrides: per-call timing overrides in the req
+// are forwarded verbatim to the Open seam (pointers preserved so explicit
+// 0 is distinguishable from absent). Absent fields forward as nil.
+func TestVoiceLocalOpenTimingOverrides(t *testing.T) {
+	tc, stm, dg := 1234, 2, 250
+	f := &fakeSeams{employeeOK: true}
+	h := NewVoiceLocalHandler(f.seams())
+	raw, _ := json.Marshal(map[string]any{
+		"employee_id":          "eve",
+		"turn_confirm_ms":      tc,
+		"smart_turn_mode":      stm,
+		"deepgram_endpoint_ms": dg,
+	})
+	if _, err := h.handleOpen(context.Background(), raw); err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if len(f.openOpts) != 1 {
+		t.Fatalf("want 1 seam call, got %d", len(f.openOpts))
+	}
+	o := f.openOpts[0]
+	if o.TurnConfirmMs == nil || *o.TurnConfirmMs != tc {
+		t.Errorf("turn_confirm_ms = %v, want %d", o.TurnConfirmMs, tc)
+	}
+	if o.SmartTurnMode == nil || *o.SmartTurnMode != stm {
+		t.Errorf("smart_turn_mode = %v, want %d", o.SmartTurnMode, stm)
+	}
+	if o.DeepgramEndpointMs == nil || *o.DeepgramEndpointMs != dg {
+		t.Errorf("deepgram_endpoint_ms = %v, want %d", o.DeepgramEndpointMs, dg)
+	}
+}
+
+func TestVoiceLocalOpenTimingOverridesAbsent(t *testing.T) {
+	f := &fakeSeams{employeeOK: true}
+	h := NewVoiceLocalHandler(f.seams())
+	raw, _ := json.Marshal(map[string]any{"employee_id": "eve"})
+	if _, err := h.handleOpen(context.Background(), raw); err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if len(f.openOpts) != 1 {
+		t.Fatalf("want 1 seam call, got %d", len(f.openOpts))
+	}
+	o := f.openOpts[0]
+	if o.TurnConfirmMs != nil || o.SmartTurnMode != nil || o.DeepgramEndpointMs != nil {
+		t.Fatalf("absent req fields must forward nil overrides, got %+v", o)
+	}
+}
+
+// Explicit zero must stay distinct from absent (JSON 0 is a real override).
+func TestVoiceLocalOpenTimingOverridesExplicitZero(t *testing.T) {
+	zero := 0
+	f := &fakeSeams{employeeOK: true}
+	h := NewVoiceLocalHandler(f.seams())
+	raw, _ := json.Marshal(map[string]any{
+		"employee_id":          "eve",
+		"turn_confirm_ms":      0,
+		"smart_turn_mode":      0,
+		"deepgram_endpoint_ms": 0,
+	})
+	if _, err := h.handleOpen(context.Background(), raw); err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	o := f.openOpts[0]
+	if o.TurnConfirmMs == nil || *o.TurnConfirmMs != zero ||
+		o.SmartTurnMode == nil || *o.SmartTurnMode != zero ||
+		o.DeepgramEndpointMs == nil || *o.DeepgramEndpointMs != zero {
+		t.Fatalf("explicit zeros must forward non-nil pointers to 0, got %+v", o)
 	}
 }
 
