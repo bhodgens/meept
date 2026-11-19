@@ -105,11 +105,11 @@ Review IN-SESSION only. Max 3 re-dispatch cycles.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|--------------|
-| 00T-stt-tests | PENDING | 0 | |
-| 01-whisper-persistent | PENDING | 0 | F2 |
-| 02-deepgram-endpoint | PENDING | 0 | F4 |
-| 03-entity-priming | PENDING | 0 | F5; shares files, serialize last |
-| 04-stt-docs | PENDING | 0 | |
+| 00T-stt-tests | COMPLETE | 10 e0475e9d: gate committed; now GREEN |
+| 01-whisper-persistent | COMPLETE | 10 5ebd58b5: F2 opt-in persistent client |
+| 02-deepgram-endpoint | COMPLETE | 10 f10eaf5c: F4 endpoint; gate fixture corrected by delta protocol |
+| 03-entity-priming | COMPLETE | 10 d0041a7f: F5 keyterm + -p; 100-term cap |
+| 04-stt-docs | COMPLETE | 10 5561c999: STT knobs documented |
 
 ## Integration Test Plan
 
@@ -125,9 +125,9 @@ when DeepgramEndpointMs=0; no vocabulary on wire when empty.
 
 | # | Feature | Source | Unit tests | E2E tests | Status |
 |---|---------|--------|-----------|-----------|--------|
-| F2 | Whisper persistent server | 01-whisper-persistent.md | `TestWhisperServerMode`, `TestWhisperExecFallback` | voice_clips | PENDING |
-| F4 | Deepgram endpoint flag | 02-deepgram-endpoint.md | `TestDeepgramEndpointFlag`, `TestEndpointFastDispatch` | voice_clips | PENDING |
-| F5 | Entity priming | 03-entity-priming.md | `TestDeepgramKeytermParams`, `TestWhisperPromptArg` | voice_clips | PENDING |
+| F2 | Whisper persistent server | 01-whisper-persistent.md | `TestWhisperServerMode`, `TestWhisperExecFallback` | voice_clips | VALIDATED |
+| F4 | Deepgram endpoint flag | 02-deepgram-endpoint.md | `TestDeepgramEndpointFlag`, `TestEndpointFastDispatch` | voice_clips | VALIDATED |
+| F5 | Entity priming | 03-entity-priming.md | `TestDeepgramKeytermParams`, `TestWhisperPromptArg` | voice_clips | VALIDATED |
 
 ## Open Questions
 

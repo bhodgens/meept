@@ -167,11 +167,11 @@ contracts + do-not-commit + corruption rules>}]`.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|--------------|
-| 00T-root-e2e | PENDING | 0 | |
-| 01-foundation | PENDING | 0 | owns shared seam; must complete before others |
-| 02-stt-path | PENDING | 0 | gated on foundation |
-| 03-tts-path | PENDING | 0 | gated on foundation |
-| 04-context-warm | PENDING | 0 | gated on foundation |
+| 00T-root-e2e | COMPLETE | 10 e0475e9d: gate committed, RED confirmed, now GREEN |
+| 01-foundation | COMPLETE | 1 | all 4 children COMPLETE; seam + F1 landed (23a908b3, f10eaf5c) owns shared seam; must complete before others |
+| 02-stt-path | COMPLETE | 1 | all 5 children COMPLETE; F2/F4/F5 landed (5ebd58b5, f10eaf5c, d0041a7f) gated on foundation |
+| 03-tts-path | COMPLETE | 1 | all 7 children COMPLETE; F3/F6/F8/F9/F10 landed (52800c19, dd53a70c, 5ebd58b5) gated on foundation |
+| 04-context-warm | COMPLETE | 1 | all 3 children COMPLETE; F7 landed (463b4faf) gated on foundation |
 
 ## Integration Test Plan
 
@@ -197,8 +197,8 @@ implementation dispatch.
 
 | # | Feature | Source | Unit tests | E2E tests | Status |
 |---|---------|--------|-----------|-----------|--------|
-| R1 | Keys/additive config defaults | 01-foundation/01 | `TestKeysFrameLegacyDefaults` | root e2e key wire | PENDING |
-| R2 | All F1-F10 addressed | findings index | branch matrices | branch e2e | PENDING |
+| R1 | Keys/additive config defaults | 01-foundation/01 | `TestKeysFrameLegacyDefaults` | root e2e key wire | VALIDATED |
+| R2 | All F1-F10 addressed | findings index | branch matrices | branch e2e | VALIDATED |
 
 Delta protocol: update the LESSER artifact; coverage converges upward;
 record every resolution here with date, feature ID, direction, reason.

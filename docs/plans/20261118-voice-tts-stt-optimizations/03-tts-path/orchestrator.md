@@ -103,13 +103,13 @@ Review IN-SESSION only. Max 3 re-dispatch cycles.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|--------------|
-| 00T-tts-tests | PENDING | 0 | |
-| 01-clip-deferral | PENDING | 0 | F3 |
-| 02-clip-yield | PENDING | 0 | F10 |
-| 03-transport-split | PENDING | 0 | F6 |
-| 04-resampler-reuse | PENDING | 0 | F8 |
-| 05-chunk-size-knob | PENDING | 0 | F9; shares file with 03 |
-| 06-tts-docs | PENDING | 0 | |
+| 00T-tts-tests | COMPLETE | 10 e0475e9d: gate committed, RED confirmed, now GREEN |
+| 01-clip-deferral | COMPLETE | 10 52800c19: F3 defer past played edge; delay=0 legacy |
+| 02-clip-yield | COMPLETE | 10 52800c19: F10 render yields to live synth; deferred specs retained |
+| 03-transport-split | COMPLETE | 10 dd53a70c: F6 cloud keep-alive; qwen3 no-keepalive unchanged |
+| 04-resampler-reuse | COMPLETE | 10 dd53a70c: F8 scratch reuse; passthrough aliasing staged |
+| 05-chunk-size-knob | COMPLETE | 10 5ebd58b5: F9 override, 0 => 4 |
+| 06-tts-docs | COMPLETE | 10 5561c999: TTS knobs documented |
 
 ## Integration Test Plan
 
@@ -125,11 +125,11 @@ cloud vendor pools, qwen3 does not; resampler output byte-identical.
 
 | # | Feature | Source | Unit tests | E2E tests | Status |
 |---|---------|--------|-----------|-----------|--------|
-| F3 | Clip deferral after played edge | 01-clip-deferral.md | `TestClipPrewarmDeferred` | voice_clips | PENDING |
-| F10 | Render yield to live synth | 02-clip-yield.md | `TestRenderYieldsToLive` | voice_clips | PENDING |
-| F6 | Transport split | 03-transport-split.md | `TestCloudKeepAlive`, `TestQwen3NoKeepAlive` | n/a (internal) | PENDING |
-| F8 | Resampler buffer reuse | 04-resampler-reuse.md | `TestResamplerReuseByteIdentical` | n/a (internal) | PENDING |
-| F9 | Chunk size knob | 05-chunk-size-knob.md | `TestQwen3ChunkSizeOverride` | voice_clips | PENDING |
+| F3 | Clip deferral after played edge | 01-clip-deferral.md | `TestClipPrewarmDeferred` | voice_clips | VALIDATED |
+| F10 | Render yield to live synth | 02-clip-yield.md | `TestRenderYieldsToLive` | voice_clips | VALIDATED |
+| F6 | Transport split | 03-transport-split.md | `TestCloudKeepAlive`, `TestQwen3NoKeepAlive` | n/a (internal) | VALIDATED |
+| F8 | Resampler buffer reuse | 04-resampler-reuse.md | `TestResamplerReuseByteIdentical` | n/a (internal) | VALIDATED |
+| F9 | Chunk size knob | 05-chunk-size-knob.md | `TestQwen3ChunkSizeOverride` | voice_clips | VALIDATED |
 
 ## Open Questions
 

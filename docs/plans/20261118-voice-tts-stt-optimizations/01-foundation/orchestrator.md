@@ -108,10 +108,10 @@ Review in-session only; never a delegated reviewer. Max 3 re-dispatch cycles.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|--------------|
-| 00T-foundation-tests | PENDING | 0 | |
-| 01-keys-contract | PENDING | 0 | owns shared seam |
-| 02-smart-turn | PENDING | 0 | F1 |
-| 03-docs-agents | PENDING | 0 | |
+| 00T-foundation-tests | COMPLETE | 10 e0475e9d: gate committed; now GREEN |
+| 01-keys-contract | COMPLETE | 10 23a908b3: shared additive seam; root e2e GREEN |
+| 02-smart-turn | COMPLETE | 10 f10eaf5c: F1 verdict under turnMu; mode 1 kill switch |
+| 03-docs-agents | COMPLETE | 10 5561c999: foundation docs; root AGENTS.md at merge |
 
 ## Integration Test Plan
 
@@ -126,8 +126,8 @@ byte-identical; mode=1 installs no analyzer.
 
 | # | Feature | Source | Unit tests | E2E tests | Status |
 |---|---------|--------|-----------|-----------|--------|
-| F1 | Smart Turn mode 0/1/2 contracts | 02-smart-turn.md | `TestSmartTurnModes`, `TestAnalyzeEndOfTurnConsumed` | root additive wire | PENDING |
-| K1 | Keys + config additive fields | 01-keys-contract.md | `TestKeysFrameNewFields`, `TestConfigNewDefaults` | root additive wire | PENDING |
+| F1 | Smart Turn mode 0/1/2 contracts | 02-smart-turn.md | `TestSmartTurnModes`, `TestAnalyzeEndOfTurnConsumed` | root additive wire | VALIDATED |
+| K1 | Keys + config additive fields | 01-keys-contract.md | `TestKeysFrameNewFields`, `TestConfigNewDefaults` | root additive wire | VALIDATED |
 
 ## Open Questions
 

@@ -76,9 +76,9 @@ Review IN-SESSION only. Max 3 re-dispatch cycles.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|--------------|
-| 00T-warm-tests | PENDING | 0 | |
-| 01-separate-window | PENDING | 0 | F7 |
-| 02-warm-docs | PENDING | 0 | |
+| 00T-warm-tests | COMPLETE | 10 e0475e9d: gate committed, RED confirmed, now GREEN |
+| 01-separate-window | COMPLETE | 10 463b4faf: F7 warm debounce override; OnFinal unchanged |
+| 02-warm-docs | COMPLETE | 10 5561c999: warm knob + Whisper limit documented |
 
 ## Integration Test Plan
 
@@ -92,7 +92,7 @@ Expected: green; window=0 reproduces 900 ms; OnFinal still cancels.
 
 | # | Feature | Source | Unit tests | E2E tests | Status |
 |---|---------|--------|-----------|-----------|--------|
-| F7 | Separate warm window | 01-separate-window.md | `TestContextWarmWindowOverride` | context_warm | PENDING |
+| F7 | Separate warm window | 01-separate-window.md | `TestContextWarmWindowOverride` | context_warm | VALIDATED |
 
 ## Open Questions
 
