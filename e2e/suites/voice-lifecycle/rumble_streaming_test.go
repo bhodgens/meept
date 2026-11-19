@@ -2,97 +2,111 @@
 
 package voicelifecycle
 
-// RED gate for the Rumble streaming + chat_template_kwargs tree (leaf 00Te).
-// F1: corrected chat.completions request shape (audio_url data URI).
-// F2: provider-agnostic client-side pseudo-stream partials (opt-in).
-// F3: chat_template_kwargs reach the request body.
-// F5: keys-frame selectors carry the additive C2/C4 fields.
+// RED e2e gates for native Rumble WebSocket streaming (plan leaf 00Te).
 //
-// These tests are gates only: they do NOT change implementation. They are RED
-// today (compile-RED on the C2 fields; runtime-RED on the old JSON body path)
-// and turn GREEN when leaves 01 (transport + fields) and 02 (decorator) land.
+// These are gates only: they do NOT change implementation. They exercise the
+// real providers.NewSTT(Vendor="rumble") factory against a hermetic, loopback
+// WS fake that speaks the live server's native protocol
+// (WS /v1/audio/transcriptions/stream):
+//   - binary frames: raw s16le mono 16 kHz PCM
+//   - empty binary frame: flush
+//   - text frames: {"type":"partial"|"final"|"end","text":...}
+//
+// RED today because the Rumble adapter is still the batch HTTP
+// (chat.completions) implementation: it never upgrades the socket, never
+// observes the binary frames, and never maps partial/final/end events.
+// No real socrates, no credentials, no network beyond httptest loopback.
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/caimlas/meept/internal/voicechild"
 	"github.com/caimlas/meept/internal/voicechild/providers"
+	"github.com/coder/websocket"
 )
 
-// rumbleChatRequest is the frozen C3 request shape decoded off the wire.
-type rumbleChatRequest struct {
-	Model    string `json:"model"`
-	Messages []struct {
-		Role    string `json:"role"`
-		Content []struct {
-			Type     string `json:"type"`
-			Text     string `json:"text,omitempty"`
-			AudioURL struct {
-				URL string `json:"url"`
-			} `json:"audio_url"`
-		} `json:"content"`
-	} `json:"messages"`
-	Temperature        float64        `json:"temperature"`
-	ChatTemplateKwargs map[string]any `json:"chat_template_kwargs"`
+const rumbleWSPath = "/v1/audio/transcriptions/stream"
+
+// rumbleFakeCfg controls when the fake answers and which events it sends.
+type rumbleFakeCfg struct {
+	// emitAfter: number of non-empty binary frames after which the fake
+	// emits cfg.events. Use a huge value to emit only on the empty flush
+	// frame.
+	emitAfter int
+	events    []string
 }
 
-// newRumbleChatServer is a hermetic fake vLLM chat.completions endpoint. It
-// asserts the transport contract on every POST and returns one transcript in
-// the C3 response shape. No credentials, no network beyond loopback.
-func newRumbleChatServer(t *testing.T, transcript string, check func(rumbleChatRequest)) *httptest.Server {
+// rumbleFake holds what the fake observed off the wire.
+type rumbleFake struct {
+	frames   chan []byte // every binary frame received, including the flush
+	httpHits chan string // any non-WS request (legacy HTTP path), if any
+}
+
+// newRumbleWSFake starts a hermetic WS vendor on an httptest loopback server.
+// http://<srv.URL> is upgraded to ws:// by the adapter's dialURL helper; the
+// fake accepts only the native stream path so a legacy HTTP POST is visible
+// as an httpHits entry and cannot accidentally satisfy a gate.
+func newRumbleWSFake(t *testing.T, cfg rumbleFakeCfg) (*httptest.Server, *rumbleFake) {
 	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/chat/completions" {
-			t.Errorf("request path = %q, want /v1/chat/completions", r.URL.Path)
+	f := &rumbleFake{
+		frames:   make(chan []byte, 256),
+		httpHits: make(chan string, 32),
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != rumbleWSPath {
+			select {
+			case f.httpHits <- r.Method + " " + r.URL.Path:
+			default:
+			}
+			http.NotFound(w, r)
+			return
 		}
-		if r.Header.Get("Authorization") != "" {
-			t.Errorf("rumble request carried an Authorization header (keyless vendor)")
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Errorf("rumble WS upgrade carried Authorization %q (keyless vendor)", got)
 		}
-		var body rumbleChatRequest
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Errorf("decode request: %v", err)
-		} else if check != nil {
-			check(body)
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"choices":[{"message":{"content":%q}}]}`, transcript)
+		defer conn.Close(websocket.StatusNormalClosure, "")
+		ctx := r.Context()
+		binaryCount, emitted := 0, false
+		for {
+			mt, data, err := conn.Read(ctx)
+			if err != nil {
+				return
+			}
+			if mt != websocket.MessageBinary {
+				continue
+			}
+			frame := append([]byte(nil), data...)
+			select {
+			case f.frames <- frame:
+			default:
+			}
+			binaryCount++
+			// An empty binary frame is the native flush signal; the live
+			// server replies final(s) then end on flush.
+			if !emitted && (binaryCount >= cfg.emitAfter || len(frame) == 0) {
+				emitted = true
+				for _, ev := range cfg.events {
+					if werr := conn.Write(ctx, websocket.MessageText, []byte(ev)); werr != nil {
+						return
+					}
+				}
+			}
+		}
 	}))
+	return srv, f
 }
 
-// assertC3Envelope pins the model-card body shape shared by all three gates.
-func assertC3Envelope(t *testing.T, body rumbleChatRequest) {
-	t.Helper()
-	if body.Model == "" {
-		t.Errorf("request body missing model: %+v", body)
-	}
-	if len(body.Messages) != 1 || len(body.Messages[0].Content) != 1 {
-		t.Errorf("messages shape = %+v, want one message with one content part", body.Messages)
-		return
-	}
-	part := body.Messages[0].Content[0]
-	if part.Type != "audio_url" {
-		t.Errorf("content part type = %q, want audio_url", part.Type)
-	}
-	if !strings.HasPrefix(part.AudioURL.URL, "data:audio/wav;base64,") {
-		t.Errorf("audio_url.url = %q, want data:audio/wav;base64,<WAV>", part.AudioURL.URL)
-	}
-	if body.Temperature != 0 {
-		t.Errorf("temperature = %v, want 0", body.Temperature)
-	}
-}
-
-// newRumbleSTT constructs the real adapter through the C1 factory seam using
-// the decoded C2 selectors. The C2 kwargs/partial fields are intentionally
-// referenced directly: they do not exist on ProviderConfig yet, which is the
-// compile-RED reason for this gate until leaf 01 lands.
-func newRumbleSTT(t *testing.T, baseURL string, cfg providers.ProviderConfig) voicechild.STTProvider {
+// newRumbleNativeSTT builds the real adapter through the C1 factory seam,
+// exactly as the keys-frame path does in cmd/meept-voice. Keyless: "".
+func newRumbleNativeSTT(t *testing.T, baseURL string, cfg providers.ProviderConfig) voicechild.STTProvider {
 	t.Helper()
 	cfg.Vendor = "rumble"
 	if cfg.Model == "" {
@@ -100,93 +114,66 @@ func newRumbleSTT(t *testing.T, baseURL string, cfg providers.ProviderConfig) vo
 	}
 	cfg.BaseURL = baseURL
 	cfg.SampleRate = 16000
-	stt, err := providers.NewSTT(cfg, "" /* keyless */)
+	stt, err := providers.NewSTT(cfg, "")
 	if err != nil {
-		t.Fatalf("NewSTT(rumble) from selectors: %v", err)
+		t.Fatalf("NewSTT(rumble): %v", err)
 	}
 	return stt
 }
 
-const rumbleTranscript = "hello rumble"
-
-// testRumbleBool is a helper for the *bool C2 kwargs selectors.
-func testRumbleBool(b bool) *bool { return &b }
-
-// TestRumbleChatCompletionsE2E gates F1: with selectors absent the corrected
-// adapter POSTs a chat.completions audio_url body to the fake vLLM and exactly
-// one Final transcript reaches the caller. RED until leaf 01 fixes the
-// transport (old code POSTs a JSON {model,file} body to /v1/audio/transcriptions).
-func TestRumbleChatCompletionsE2E(t *testing.T) {
-	vllm := newRumbleChatServer(t, rumbleTranscript, func(body rumbleChatRequest) {
-		assertC3Envelope(t, body)
-	})
-	defer vllm.Close()
-
-	stt := newRumbleSTT(t, vllm.URL, providers.ProviderConfig{})
-
-	pcm := make(chan []byte)
+// feedRumblePCM pumps paced 640-byte/20 ms L16 chunks and closes the channel.
+func feedRumblePCM(pcm chan<- []byte, chunks int, gap time.Duration) {
 	go func() {
-		for range 40 {
+		for i := 0; i < chunks; i++ {
 			pcm <- make([]byte, 640)
+			if gap > 0 {
+				time.Sleep(gap)
+			}
 		}
 		close(pcm)
 	}()
+}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	out, err := stt.Stream(ctx, pcm)
-	if err != nil {
-		t.Fatalf("Stream: %v", err)
-	}
-
-	var finals int
-	deadline := time.NewTimer(3 * time.Second)
-	defer deadline.Stop()
+// collectRumble drains out until it closes or ctx expires.
+func collectRumble(t *testing.T, ctx context.Context, out <-chan voicechild.Transcript) []voicechild.Transcript {
+	t.Helper()
+	var got []voicechild.Transcript
 	for {
 		select {
 		case tr, ok := <-out:
 			if !ok {
-				goto done
+				return got
 			}
-			if tr.Text != rumbleTranscript || !tr.Final {
-				t.Errorf("transcript = %+v, want {%s true}", tr, rumbleTranscript)
-			}
-			finals++
-		case <-deadline.C:
-			t.Fatal("timed out waiting for the stream to close after one Final")
+			got = append(got, tr)
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for the Rumble stream to close (got %d transcripts)", len(got))
+			return got
 		}
-	}
-done:
-	if finals != 1 {
-		t.Fatalf("got %d transcripts, want exactly one Final", finals)
 	}
 }
 
-// TestRumblePartialStreamE2E gates F2: with PartialIntervalMs > 0 the
-// provider-agnostic decorator emits Final=false partials while PCM is still
-// arriving, then exactly one Final=true after the PCM channel closes. RED
-// until leaf 02 lands (today the field is ignored, so no partials appear).
-func TestRumblePartialStreamE2E(t *testing.T) {
-	vllm := newRumbleChatServer(t, rumbleTranscript, func(body rumbleChatRequest) {
-		assertC3Envelope(t, body)
+// TestRumbleNativeStreamE2E (rumble-native-stream-01, F1): with a fake native
+// WS server, feeding PCM must surface the server's partial (Final=false) and
+// final (Final=true) events through the real NewSTT factory. RED today: the
+// batch adapter POSTs chat.completions and never upgrades the socket.
+func TestRumbleNativeStreamE2E(t *testing.T) {
+	const (
+		partialText = "hello"
+		finalText   = "hello rumble"
+	)
+	srv, f := newRumbleWSFake(t, rumbleFakeCfg{
+		emitAfter: 3,
+		events: []string{
+			`{"type":"partial","text":"` + partialText + `"}`,
+			`{"type":"final","text":"` + finalText + `"}`,
+			`{"type":"end","text":"` + finalText + `"}`,
+		},
 	})
-	defer vllm.Close()
+	defer srv.Close()
 
-	stt := newRumbleSTT(t, vllm.URL, providers.ProviderConfig{
-		PartialIntervalMs: 150,
-	})
-
+	stt := newRumbleNativeSTT(t, srv.URL, providers.ProviderConfig{})
 	pcm := make(chan []byte)
-	feedDone := make(chan struct{})
-	go func() {
-		// ~500ms of paced audio gives the 150ms decorator several intermediate
-		// snapshot windows before the channel is closed.
-		for range 10 {
-			pcm <- make([]byte, 640)
-			time.Sleep(50 * time.Millisecond)
-		}
-		close(feedDone)
-	}()
+	feedRumblePCM(pcm, 40, 5*time.Millisecond)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancel()
@@ -194,99 +181,127 @@ func TestRumblePartialStreamE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
+	got := collectRumble(t, ctx, out)
 
-	// A partial must arrive BEFORE pcm is closed.
-	sawPartial := false
-	partialDeadline := time.NewTimer(4 * time.Second)
-	defer partialDeadline.Stop()
-	for !sawPartial {
-		select {
-		case tr, ok := <-out:
-			if !ok {
-				t.Fatal("stream closed with no partial before pcm close")
-			}
-			if tr.Final {
-				t.Errorf("Final transcript arrived before pcm close: %+v", tr)
-			} else {
-				sawPartial = true
-			}
-		case <-partialDeadline.C:
-			t.Fatal("timed out waiting for a non-final partial before pcm close (decorator missing)")
+	var sawPartial, sawFinal bool
+	for _, tr := range got {
+		if tr.Text == partialText && !tr.Final {
+			sawPartial = true
+		}
+		if tr.Text == finalText && tr.Final {
+			sawFinal = true
 		}
 	}
-
-	// Do not close the channel while the feeder may still send.
-	<-feedDone
-	close(pcm)
-
-	// Exactly one Final AFTER pcm close.
-	var finals int
-	finalDeadline := time.NewTimer(4 * time.Second)
-	defer finalDeadline.Stop()
-	for {
-		select {
-		case tr, ok := <-out:
-			if !ok {
-				goto drained
-			}
-			if tr.Final {
-				finals++
-			}
-		case <-finalDeadline.C:
-			t.Fatal("timed out waiting for the Final transcript after pcm close")
-		}
+	if !sawPartial {
+		t.Errorf("no non-final partial %q in transcripts %+v (adapter still batch chat.completions?)", partialText, got)
 	}
-drained:
-	if finals != 1 {
-		t.Fatalf("got %d Final transcripts after close, want exactly 1", finals)
+	if !sawFinal {
+		t.Errorf("no final %q in transcripts %+v", finalText, got)
+	}
+	select {
+	case <-f.frames:
+	default:
+		t.Error("fake WS server saw no binary PCM frames (no native WS dial)")
 	}
 }
 
-// TestRumbleTemplateKwargsE2E gates F3: C2 kwargs selectors are serialized as
-// chat_template_kwargs in the POST body. RED until leaf 01 adds the fields to
-// ProviderConfig and emits them in the Rumble request.
-func TestRumbleTemplateKwargsE2E(t *testing.T) {
-	vllm := newRumbleChatServer(t, rumbleTranscript, func(body rumbleChatRequest) {
-		assertC3Envelope(t, body)
-		got := body.ChatTemplateKwargs
-		if got["language"] != "English" {
-			t.Errorf("chat_template_kwargs.language = %v, want English", got["language"])
-		}
-		if got["digits"] != false {
-			t.Errorf("chat_template_kwargs.digits = %v, want false", got["digits"])
-		}
-		if got["filler"] != true {
-			t.Errorf("chat_template_kwargs.filler = %v, want true", got["filler"])
-		}
-		if got["verbatim"] != false {
-			t.Errorf("chat_template_kwargs.verbatim = %v, want false", got["verbatim"])
-		}
+// TestRumbleNativeFlushE2E (rumble-native-flush-01, F2): closing the PCM
+// channel must send exactly ONE empty binary flush frame; the server's
+// final+end reply must then be honored. RED today: no WS, no flush frame.
+func TestRumbleNativeFlushE2E(t *testing.T) {
+	const finalText = "hello rumble"
+	srv, f := newRumbleWSFake(t, rumbleFakeCfg{
+		emitAfter: 1 << 30, // events fire only on the empty flush frame
+		events: []string{
+			`{"type":"final","text":"` + finalText + `"}`,
+			`{"type":"end","text":"` + finalText + `"}`,
+		},
 	})
-	defer vllm.Close()
+	defer srv.Close()
 
-	stt := newRumbleSTT(t, vllm.URL, providers.ProviderConfig{
-		ChatTemplateLanguage: "English",
-		ChatTemplateDigits:   testRumbleBool(false),
-		ChatTemplateFiller:   testRumbleBool(true),
-		ChatTemplateVerbatim: testRumbleBool(false),
-	})
-
+	stt := newRumbleNativeSTT(t, srv.URL, providers.ProviderConfig{})
 	pcm := make(chan []byte)
-	go func() {
-		for range 40 {
-			pcm <- make([]byte, 640)
-		}
-		close(pcm)
-	}()
+	feedRumblePCM(pcm, 8, 0)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancel()
 	out, err := stt.Stream(ctx, pcm)
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	tr, ok := <-out
-	if !ok || !tr.Final || tr.Text != rumbleTranscript {
-		t.Fatalf("transcript = %+v (ok=%v), want {%s true}", tr, ok, rumbleTranscript)
+	got := collectRumble(t, ctx, out)
+
+	var sawFinal bool
+	for _, tr := range got {
+		if tr.Text == finalText && tr.Final {
+			sawFinal = true
+		}
+	}
+	if !sawFinal {
+		t.Errorf("no final after flush in %+v", got)
+	}
+
+	empty := 0
+	for {
+		select {
+		case fr := <-f.frames:
+			if len(fr) == 0 {
+				empty++
+			}
+		default:
+			goto checked
+		}
+	}
+checked:
+	if empty != 1 {
+		t.Errorf("empty binary flush frames = %d, want exactly 1 (observed %d frames total)", empty, len(f.frames))
+	}
+}
+
+// TestRumbleNativeFactoryE2E (rumble-native-factory-01, F3): a native vendor
+// must never be wrapped in the client-side PseudoStreamSTT decorator. A
+// deliberately large stt_partial_ms would suppress/delay synthetic snapshots,
+// yet the server's OWN partial must still arrive promptly, and no legacy
+// HTTP chat.completions POST may be made. RED today: batch adapter emits no
+// partial and POSTs to the old path.
+func TestRumbleNativeFactoryE2E(t *testing.T) {
+	const finalText = "native rumble"
+	srv, f := newRumbleWSFake(t, rumbleFakeCfg{
+		emitAfter: 2,
+		events: []string{
+			`{"type":"partial","text":"native"}`,
+			`{"type":"final","text":"` + finalText + `"}`,
+			`{"type":"end","text":"` + finalText + `"}`,
+		},
+	})
+	defer srv.Close()
+
+	stt := newRumbleNativeSTT(t, srv.URL, providers.ProviderConfig{
+		PartialIntervalMs: 5000,
+	})
+	pcm := make(chan []byte)
+	feedRumblePCM(pcm, 30, 5*time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	out, err := stt.Stream(ctx, pcm)
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	got := collectRumble(t, ctx, out)
+
+	var sawPartial bool
+	for _, tr := range got {
+		if tr.Text == "native" && !tr.Final {
+			sawPartial = true
+		}
+	}
+	if !sawPartial {
+		t.Errorf("native partial not surfaced with stt_partial_ms=5000; transcripts=%+v (rumble wrapped in pseudo-stream?)", got)
+	}
+	select {
+	case hit := <-f.httpHits:
+		t.Errorf("legacy HTTP request to fake WS server: %s (native vendor must not use chat.completions)", hit)
+	default:
 	}
 }

@@ -33,6 +33,28 @@ func TestNewSTTDefaultNoDecorator(t *testing.T) {
 	}
 }
 
+// TestNewSTTNativeNoDecorator (F3/C4): with a positive PartialIntervalMs the
+// pseudo-stream decorator still wraps batch vendors, but a NATIVE-partial
+// vendor such as rumble must be returned unwrapped (base *RumbleSTT), or the
+// call would double-partial. RED until leaf 02 adds the nativeStreamingVendor
+// guard to NewSTT (today NewSTT wraps on PartialIntervalMs > 0 regardless).
+func TestNewSTTNativeNoDecorator(t *testing.T) {
+	stt, err := NewSTT(ProviderConfig{
+		Vendor: "rumble", Model: "Reson8/Rumble-2-Flash",
+		BaseURL: "http://127.0.0.1:1", SampleRate: 16000,
+		PartialIntervalMs: 50,
+	}, "")
+	if err != nil {
+		t.Fatalf("NewSTT: %v", err)
+	}
+	if _, ok := stt.(*PseudoStreamSTT); ok {
+		t.Fatalf("NewSTT wrapped the native-partial rumble vendor in *PseudoStreamSTT (double-partial); want base *RumbleSTT")
+	}
+	if _, ok := stt.(*RumbleSTT); !ok {
+		t.Fatalf("NewSTT returned %T, want *RumbleSTT (native vendor, no decorator)", stt)
+	}
+}
+
 // ---- source-level gate helpers (keep the package compiling pre-leaf-02) ----
 
 func gateParseProviders(t *testing.T) map[string]*ast.File {

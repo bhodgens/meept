@@ -2,108 +2,92 @@
 
 package voicelifecycle
 
-// F1 gate: a keys line with stt_vendor=rumble constructs the real Rumble
-// adapter and a Final transcript reaches the talk loop. F4 decision record:
-// Rumble is batch-only; vllm stream=True emits output tokens only after the
-// full audio arrives (docs/research/rumble2flash-review.md:45). The
-// streaming probe therefore records that decision with an honest skip.
+// F1 gate: a keys line with stt_vendor=rumble constructs the real native
+// streaming adapter and a Final transcript reaches the talk loop. This is a
+// keys-frame decision gate: the vendor is keyless, so the fake server also
+// asserts no Authorization header is sent on the WS upgrade.
+//
+// The old fake spoke the stale batch chat.completions audio_url shape; it is
+// rewritten here to the native WS protocol (binary PCM in, partial/final/end
+// out) that the live server exposes at /v1/audio/transcriptions/stream.
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/caimlas/meept/internal/voicechild/providers"
 )
 
-// TestVoiceKeysRumble01 drives the real voicechild keys-frame seam:
-// a daemon-style keys line carrying stt_vendor=rumble must select the
-// Rumble adapter through providers.NewSTT, with no key material in the
-// frame (Rumble is keyless). A fake loopback vLLM transcription server
-// answers the adapter's POST with one transcript. The request shape is
-// the model-card chat.completions audio_url body (fixed in the streaming
-// tree); this gate pins that transport.
+// TestVoiceKeysRumble01 drives the keys-frame seam: a daemon-style keys line
+// with stt_vendor=rumble must select the native Rumble adapter through the
+// REAL providers.NewSTT factory, and a server-emitted final must reach the
+// caller. RED today: the batch adapter never upgrades the WS.
 func TestVoiceKeysRumble01(t *testing.T) {
-	vllm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasSuffix(r.URL.Path, "/v1/chat/completions") {
-			t.Errorf("request path = %q, want /v1/chat/completions", r.URL.Path)
-		}
-		authHeader := r.Header.Get("Authorization")
-		if authHeader != "" {
-			t.Errorf("rumble request carried an Authorization header (keyless vendor)")
-		}
-		var body map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Errorf("decode request: %v", err)
-		}
-		msgs, _ := body["messages"].([]any)
-		if len(msgs) == 0 {
-			t.Errorf("chat.completions body missing messages: %v", body)
-		} else {
-			m0, _ := msgs[0].(map[string]any)
-			content, _ := m0["content"].([]any)
-			if len(content) == 0 {
-				t.Errorf("messages[0] missing content: %v", m0)
-			} else {
-				part, _ := content[0].(map[string]any)
-				au, _ := part["audio_url"].(map[string]any)
-				url, _ := au["url"].(string)
-				if !strings.HasPrefix(url, "data:audio/wav;base64,") {
-					t.Errorf("audio_url.url = %q, want data:audio/wav;base64,...", url)
-				}
-			}
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"hello there"}}]}`)
-	}))
-	defer vllm.Close()
+	srv, f := newRumbleWSFake(t, rumbleFakeCfg{
+		emitAfter: 2,
+		events: []string{
+			`{"type":"partial","text":"hello"}`,
+			`{"type":"final","text":"hello there"}`,
+			`{"type":"end","text":"hello there"}`,
+		},
+	})
+	defer srv.Close()
 
-	// The keys line is the contract under test: build the provider from
-	// its decoded fields through the REAL NewSTT factory (the same seam
-	// the C1 keys frame feeds in cmd/meept-voice).
 	stt, err := providers.NewSTT(providers.ProviderConfig{
 		Vendor:     "rumble",
 		Model:      "Reson8/Rumble-2-Flash",
-		BaseURL:    vllm.URL,
+		BaseURL:    srv.URL,
 		SampleRate: 16000,
 	}, "" /* keyless */)
 	if err != nil {
 		t.Fatalf("NewSTT(rumble) from keys-line fields: %v", err)
 	}
 
-	// Pump one voiced window plus trailing silence and close, so the
-	// adapter's segmentation flushes exactly one utterance.
 	pcm := make(chan []byte)
-	go func() {
-		for range 40 {
-			pcm <- make([]byte, 640)
-		}
-		close(pcm)
-	}()
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	feedRumblePCM(pcm, 40, 0)
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancel()
 	out, err := stt.Stream(ctx, pcm)
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	got, ok := <-out
-	if !ok {
-		t.Fatal("stream closed with no transcript")
+	got := collectRumble(t, ctx, out)
+
+	var sawFinal bool
+	for _, tr := range got {
+		if tr.Text == "hello there" && tr.Final {
+			sawFinal = true
+		}
 	}
-	if got.Text != "hello there" || !got.Final {
-		t.Fatalf("transcript = %+v, want {hello there true}", got)
+	if !sawFinal {
+		t.Fatalf("no final {hello there true} in transcripts %+v", got)
+	}
+	select {
+	case <-f.frames:
+	default:
+		t.Error("fake WS server saw no binary PCM frames (no native WS dial)")
 	}
 }
 
-// TestRumbleStreamingProbe is F4's decision record, not a hard requirement.
-// Rumble has no supported incremental-input API: vLLM stream=True streams
-// output tokens only after the full audio is received. Skip with the cited
-// research so the tree never claims partial transcripts for this adapter.
+// TestRumbleStreamingProbe is a decision record, not a hard requirement.
+//
+// UPDATE (2026-11-19): the old "batch-only / vLLM stream=True emits tokens
+// only after the full audio arrives" claim is SUPERSEDED. The live Rumble
+// server on socrates:8000 is FastAPI + transformers v0.2.0 (not vLLM) and
+// exposes WS /v1/audio/transcriptions/stream with genuine incremental
+// streaming, verified by an in-session probe:
+//   - client streams raw s16le mono 16 kHz PCM as binary frames;
+//   - server decodes a growing window (>=1.0 s signal, >=0.8 s since growth);
+//   - self-segmented {"type":"final","text":...} events for stable leading
+//     words, a {"type":"partial","text":...} for the changing tail, and a
+//     terminal {"type":"end","text":...} on flush (empty on silence).
+//
+// See docs/plans/20261119-rumble-native-streaming/master.md C2 and the gate
+// assertions in TestRumbleNativeStreamE2E / TestRumbleNativeFlushE2E above.
+// Consequence: stt_partial_ms is set to 0 for rumble and no client-side
+// PseudoStreamSTT wrapper is used. This skip records the decision; the
+// protocol itself is covered by the real hermetic gates, not deleted.
 func TestRumbleStreamingProbe(t *testing.T) {
-	t.Skip("Rumble batch-only: vllm stream=True emits tokens after full audio; see docs/research/rumble2flash-review.md:45")
+	t.Skip(`decision record: live Rumble server (socrates:8000, FastAPI+transformers v0.2.0) SUPPORTS native streaming via WS /v1/audio/transcriptions/stream — binary s16le 16 kHz PCM in, then partial/final/end JSON events out; stt_partial_ms=0, no PseudoStreamSTT wrapper. Old batch-only claim superseded 2026-11-19.`)
 }
