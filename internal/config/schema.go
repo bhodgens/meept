@@ -5675,8 +5675,17 @@ type VoiceConfig struct {
 	ChatTemplateDigits   *bool `json:"chat_template_digits,omitempty"`
 	ChatTemplateFiller   *bool `json:"chat_template_filler,omitempty"`
 	ChatTemplateVerbatim *bool `json:"chat_template_verbatim,omitempty"`
-	// STTPartialMs > 0 wraps the base STT provider in the pseudo-stream
-	// decorator (partial streaming); 0 = legacy batch behavior.
+	// STTPartialMs is the client-side pseudo-stream proxy interval in ms.
+	// 0 (default) returns the base provider unwrapped: native partial
+	// vendors (rumble, deepgram) stream on their own, and batch vendors
+	// stay byte-identical. A positive value wraps a BATCH vendor (e.g.
+	// whisper) in PseudoStreamSTT, which snapshots a growing PCM buffer
+	// into successive full utterances and emits Final:false partials plus
+	// one Final:true. FUTURE-USE KNOB: those partials are client-side
+	// snapshots, not server incremental input; the proxy re-recognizes a
+	// growing buffer (O(n^2)) and does not reduce time-to-first-word.
+	// It is ignored for native partial vendors. The default config
+	// template leaves it commented out with this rationale.
 	STTPartialMs int `json:"stt_partial_ms"`
 
 	// GreetingLine is the fact-free line spoken once on call connect.

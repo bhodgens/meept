@@ -1429,11 +1429,15 @@
     // over ws://<stt_base_url>/v1/audio/transcriptions/stream. It ignores the chat_template_* keys
     // below; they are kept only for a future vLLM deployment. Rumble and deepgram are NATIVE
     // partial vendors: leave stt_partial_ms = 0 (the pseudo-stream proxy is bypassed for them).
+    // drift: commented template block; absent from installed homes by design
+    // (zero value = native/unwrapped, identical to no-block).
     // "chat_template_language": "English",  // language NAME; INERT on the transformers server (future vLLM only); empty = omit
     // "chat_template_digits": null,         // bool -> chat_template_kwargs.digits; INERT here (future vLLM only); null = omit
     // "chat_template_filler": null,         // bool -> chat_template_kwargs.filler; INERT here (future vLLM only); null = omit
     // "chat_template_verbatim": null,       // bool -> chat_template_kwargs.verbatim; INERT here (future vLLM only); null = omit
-    // "stt_partial_ms": 0,                  // 0 = native STT partials only (rumble/deepgram). >0 wraps a BATCH vendor (whisper) in the client-side pseudo-stream proxy; NEVER set for native-partial vendors.
+    //
+    // FUTURE-USE KNOB: client-side pseudo-stream proxy for BATCH STT vendors only.
+    // "stt_partial_ms": 0,                  // >0 wraps a batch vendor (e.g. whisper) in PseudoStreamSTT: it snapshots a growing PCM buffer into successive full utterances and emits Final:false partials then one Final:true. Gives partial barge-in/context-warm on a batch vendor, but it is NOT server incremental input, re-recognizes the whole buffer (O(n^2)), and does not reduce time-to-first-word. Leave commented/0 for native streaming vendors (rumble, deepgram): the proxy is bypassed for them anyway.
     // ---- Supervised vLLM Rumble STT sidecar (legacy vLLM path; NOT used by the live transformers server) ----
     // "rumble_runtime": {
     //   "gpu_memory_utilization": 0.20,          // EXPLICIT low GPU fraction (safe range 0.20-0.25); vLLM's 0.92 default is UNSAFE alongside qwen3-tts on the RTX 3060
