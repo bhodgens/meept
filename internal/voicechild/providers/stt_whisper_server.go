@@ -113,6 +113,15 @@ func (s *WhisperSTT) recognizeOnServer(ctx context.Context, dir string, seq int,
 	if _, err := part.Write(wav); err != nil {
 		return "", fmt.Errorf("whisper server multipart write: %w", err)
 	}
+	// F5 parity with exec mode (bughunt 2026-11-19 M5): non-empty
+	// Vocabulary primes critical entities via the server's "prompt"
+	// multipart field (whisper.cpp /inference initial prompt). Empty
+	// vocabulary adds NO field — the wire stays byte-identical (R4).
+	if terms := primingTerms(s.cfg.Vocabulary); len(terms) > 0 {
+		if err := mw.WriteField("prompt", strings.Join(terms, " ")); err != nil {
+			return "", fmt.Errorf("whisper server multipart prompt: %w", err)
+		}
+	}
 	if err := mw.Close(); err != nil {
 		return "", fmt.Errorf("whisper server multipart close: %w", err)
 	}
@@ -144,13 +153,16 @@ func (s *WhisperSTT) recognizeOnServer(ctx context.Context, dir string, seq int,
 
 // decodeWhisperServerTranscript returns the plain-text body, or extracts
 // the "text" field when the server answered with its default JSON shape.
+// A successfully-decoded envelope ALWAYS yields its text field — an empty
+// text means silence, never the raw JSON blob (bughunt 2026-11-19 L8).
+// Only an undecodable (non-envelope) body falls back to the raw text.
 func decodeWhisperServerTranscript(raw []byte) string {
 	text := strings.TrimSpace(string(raw))
 	if strings.HasPrefix(text, "{") {
 		var envelope struct {
 			Text string `json:"text"`
 		}
-		if err := json.Unmarshal(raw, &envelope); err == nil && envelope.Text != "" {
+		if err := json.Unmarshal(raw, &envelope); err == nil {
 			return strings.TrimSpace(envelope.Text)
 		}
 	}

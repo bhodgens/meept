@@ -225,6 +225,78 @@ func TestSmartTurnModes(t *testing.T) {
 	})
 }
 
+// TestSmartTurnNoAnalyzerDispatches pins bughunt 2026-11-19 M1: mode 2
+// with NO analyzer installed (phone legs build analyzers for frame.Local
+// only; a failed factory; the kill switch) must dispatch at confirm-window
+// expiry, never defer one extra window on a verdict that cannot exist.
+// Fixture: a PHONE-leg setup (no open/local frame -> no analyzer init),
+// mode 2 on the keys line, short confirm window.
+func TestSmartTurnNoAnalyzerDispatches(t *testing.T) {
+	const ccid = "st-noanalyzer"
+	d, _, p, stt := newAggChildFull(t, ccid, intPtr(60), nil)
+	cap := newCaptureLogger()
+	p.logger = cap.logger()
+	p.playMu.Lock()
+	p.smartTurnMode = 2
+	p.playMu.Unlock()
+	p.turnMu.Lock()
+	installed := p.turn
+	p.turnMu.Unlock()
+	if installed != nil {
+		t.Fatalf("phone-leg fixture has a turn analyzer installed (%T), want nil", installed)
+	}
+
+	stt.emit(Transcript{Text: "are you done yet", Final: true})
+	// One window (60 ms + grace) is enough: a defer would need a second
+	// window. waitFor tolerates load; the log assertion below is the
+	// decisive pin that the no-analyzer fallback ran.
+	waitFor(t, func() bool { return countQueuedPrompts(d) > 0 })
+	if !cap.contains("no analyzer installed") {
+		t.Errorf("mode 2 with nil analyzer did not log the no-analyzer fallback; logs:\n%s", cap.everything())
+	}
+	if n := countQueuedPrompts(d); n != 1 {
+		t.Errorf("prompts = %d, want exactly 1 (one dispatch, no duplicate from a stale defer re-arm)", n)
+	}
+}
+
+// TestSmartTurnFeedIndependentOfVAD pins bughunt 2026-11-19 L9: the audio
+// pump must feed the turn analyzer even when the Silero VAD is NOT
+// installed (VAD factory failed, turn factory succeeded). The old feed
+// sat inside `if vad != nil`, so mode 2 ran AnalyzeEndOfTurn over an
+// empty buffer and deferred every turn. Without a VAD the chunk is fed
+// with isSpeech=false (no probability source); the analyzer still gets
+// the audio.
+func TestSmartTurnFeedIndependentOfVAD(t *testing.T) {
+	const ccid = "st-feed-novad"
+	d, _, p, _ := newAggChildFull(t, ccid, intPtr(2000), nil)
+	// No VAD installed (the factory-failure shape).
+	p.playMu.Lock()
+	vad := p.vad
+	p.playMu.Unlock()
+	if vad != nil {
+		t.Fatalf("fixture has a VAD installed, want nil for this pin")
+	}
+	tr := &trackingTurn{complete: true, prob: 0.9}
+	p.turnMu.Lock()
+	p.turn = tr
+	p.turnMu.Unlock()
+
+	// Drive one mic chunk through the real pump path: the DAEMON side
+	// of the .in pair writes; the child's pumpAudioIn reads and feeds.
+	in, _ := d.acceptAll(ccid)
+	chunk := make([]byte, 640)
+	for i := range chunk {
+		chunk[i] = byte(i % 251)
+	}
+	if _, err := in.Write(chunk); err != nil {
+		t.Fatalf("write mic chunk: %v", err)
+	}
+	waitFor(t, func() bool {
+		appends, _, _ := tr.counts()
+		return appends > 0
+	})
+}
+
 // TestSmartTurnVerdictDefersDispatch is the mode-2 half of the exposed
 // contract: complete=false defers by one bounded re-arm (never an infinite
 // hold) and the verdict is still consulted. Timing bounds are generous to

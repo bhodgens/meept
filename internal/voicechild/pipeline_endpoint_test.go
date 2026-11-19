@@ -152,6 +152,113 @@ func pendingFinalState(p *pipeline) (string, int) {
 	return p.pendingFinal, p.pendingFinalParts
 }
 
+// TestEndpointGuards is the gate named by 02-deepgram-endpoint.md T3
+// (never written until bughunt 2026-11-19 H4): an endpoint final during
+// agent playback must respect the echo guard / speaking-hold semantics.
+// Two arms:
+//
+//  1. Echo: an endpoint final that fuzzy-matches the agent's own recent
+//     speech is the TTS coming back through speaker -> mic. It must be
+//     dropped BEFORE the endpoint fast path — no prompt, no pending
+//     buffer, no latch trip (provenance unchanged).
+//  2. Speaking hold: with playback live and a pending aggregation, an
+//     endpoint final must ride the SAME guarded route as any speaking
+//     final — interrupt on arrival (C5), then ONE merged barge-in-final
+//     dispatch. The endpoint branch must never bypass the
+//     speaking/interruptedLatched branch with an early flush that races
+//     the daemon's clear-for-barge-in.
+func TestEndpointGuards(t *testing.T) {
+	t.Run("echo_endpoint_final_dropped", func(t *testing.T) {
+		const ccid = "ep-guard-echo"
+		d, _, p, stt := newAggChildFull(t, ccid, intPtr(2000), nil)
+		p.playMu.Lock()
+		p.deepgramEndpointMs = 20
+		p.echoWin.add("the quarterly revenue report shows steady growth across every region")
+		p.playMu.Unlock()
+
+		// The endpoint final is the agent's own sentence re-heard
+		// (garbled tail, fuzzy match). It must drop entirely.
+		echo, built := transcriptWithEndpoint("the quarterly revenue report shows steady growth across every region", true, true)
+		if !built {
+			t.Fatal("cannot construct Transcript.Endpoint (contract C2)")
+		}
+		stt.emit(echo)
+		// Give the consumer time to (wrongly) dispatch if the guard is
+		// bypassed, then assert nothing happened.
+		time.Sleep(200 * time.Millisecond)
+		if n := countQueuedPrompts(d); n != 0 {
+			t.Fatalf("echo endpoint final dispatched %d prompt(s), want 0 (echo guard must run before the endpoint fast path)", n)
+		}
+		if text, parts := pendingFinalState(p); text != "" || parts != 0 {
+			t.Fatalf("echo endpoint final seeded the pending buffer (%q, %d), want empty (no aggregation, no evidence)", text, parts)
+		}
+	})
+
+	t.Run("endpoint_during_playback_rides_bargein_route", func(t *testing.T) {
+		const ccid = "ep-guard-speak"
+		d, _, p, stt := newAggChildFull(t, ccid, intPtr(2000), nil)
+		capLog := newCaptureLogger()
+		p.logger = capLog.logger()
+		p.playMu.Lock()
+		p.deepgramEndpointMs = 20
+		p.playMu.Unlock()
+
+		// A pending aggregation is already buffered (idle caller).
+		stt.emit(Transcript{Text: "first part", Final: true})
+		waitFor(t, func() bool {
+			text, parts := pendingFinalState(p)
+			return text != "" && parts == 1
+		})
+
+		// Agent playback goes live; the caller then talks over it with
+		// an authoritative endpoint final.
+		p.playMu.Lock()
+		p.speaking = true
+		p.playMu.Unlock()
+		ep, built := transcriptWithEndpoint("stop and answer me now", true, true)
+		if !built {
+			t.Fatal("cannot construct Transcript.Endpoint (contract C2)")
+		}
+		stt.emit(ep)
+
+		// C5: the interrupt fires on ARRIVAL, before the prompt.
+		f := d.waitFrame(t)
+		if f.Event != voiceframe.EventInterrupt {
+			t.Fatalf("first frame = %q, want interrupt (C5: endpoint final during playback must interrupt on arrival)", f.Event)
+		}
+		f = d.waitFrame(t)
+		if f.Event != voiceframe.EventPrompt {
+			t.Fatalf("second frame = %q, want prompt", f.Event)
+		}
+		joined := strings.ToLower(f.Text)
+		for _, want := range []string{"first part", "stop and answer me now"} {
+			if !strings.Contains(joined, want) {
+				t.Errorf("barge-in dispatch %q missing part %q (endpoint must merge the pending buffer, not flush around it)", f.Text, want)
+			}
+		}
+		if f.Last == nil || !*f.Last {
+			t.Errorf("barge-in dispatch last = %v, want true", f.Last)
+		}
+		if n := countQueuedPrompts(d); n != 0 {
+			t.Errorf("endpoint-during-playback left %d extra prompt(s), want 0 (ONE merged dispatch via the speaking branch)", n)
+		}
+		if text, parts := pendingFinalState(p); text != "" || parts != 0 {
+			t.Errorf("pending buffer after barge-in dispatch = (%q, %d), want empty", text, parts)
+		}
+		// Route pin: the dispatch must ride the barge-in-final branch
+		// (reason=barge-in-final), NOT the endpoint fast flush
+		// (reason=deepgram-endpoint) — the endpoint branch sits AFTER
+		// the speaking/latched guard, so a speaking endpoint final can
+		// never reach it.
+		if !capLog.contains("reason=barge-in-final") {
+			t.Errorf("speaking endpoint final did not dispatch via the barge-in-final branch; logs:\n%s", capLog.everything())
+		}
+		if capLog.contains("reason=deepgram-endpoint") {
+			t.Errorf("speaking endpoint final bypassed the speaking guard via the endpoint fast flush; logs:\n%s", capLog.everything())
+		}
+	})
+}
+
 // TestEndpointFastDispatchDisabled: Given DeepgramEndpointMs=0 (legacy),
 // When an Endpoint=true final is consumed, Then it does NOT fast-dispatch —
 // the confirm-window timer remains the only dispatcher (R4 pin). The

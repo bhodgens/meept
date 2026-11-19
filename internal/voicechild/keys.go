@@ -105,10 +105,16 @@ type KeysFrame struct {
 	// Qwen3ChunkSize overrides the qwen3 pcm-stream chunk_size; 0 => 4.
 	Qwen3ChunkSize int `json:"qwen3_chunk_size,omitempty"`
 	// ClipPrewarmDelayMs defers a queued clip render by this many ms after
-	// the played edge; 0 = render immediately (legacy).
+	// the played edge; 0 = render immediately (legacy). DAEMON-OWNED: the
+	// clip planner (internal/daemon/voice_clip_planner.go) enforces the
+	// deferral; the child decodes this field for wire parity only and has
+	// no consumer - do not double-apply the delay child-side.
 	ClipPrewarmDelayMs int `json:"clip_prewarm_delay_ms,omitempty"`
 	// ContextWarmWindowMs overrides the partial-warm debounce window; 0 =
-	// resolve from turn_confirm_ms (legacy).
+	// resolve from turn_confirm_ms (legacy). DAEMON-OWNED: the context
+	// warmer (internal/daemon/voice_wiring_contextwarm.go) enforces the
+	// window; the child decodes this field for wire parity only and has
+	// no consumer.
 	ContextWarmWindowMs int `json:"context_warm_window_ms,omitempty"`
 	// ---- rumble streaming/kwargs selectors (C4, ADDITIVE) ----
 	// Absent on an old daemon line = zero/nil = legacy.

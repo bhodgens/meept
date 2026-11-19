@@ -150,7 +150,7 @@ selector mapping (all in `internal/voicechild/keys.go`): `SmartTurnMode`,
   backchannel fixtures before production; default stays 0.
 - **Vocabulary / RecognitionVocabulary** ([]string; empty default):
   empty = both provider wire requests byte-identical. Non-empty =
-  Deepgram `keyterm` params + a Whisper `-p` prompt to bias names,
+  Deepgram `keyterm` params + a Whisper `--prompt` initial prompt to bias names,
   addresses, identifiers, with an over-bias warning past a short list.
   Needs a paired critical-entity fixture per deployment.
 - **Qwen3ChunkSize** (int; 0 default): 0 = request-body `chunk_size: 4`

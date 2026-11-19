@@ -350,3 +350,32 @@ func TestWhisperFastStreamNotSplitByIdleTimer(t *testing.T) {
 		t.Fatalf("want 1 final from the silence flush, got %d: %v", len(got), textsOf(got))
 	}
 }
+
+// M4 policy pin (bughunt 2026-11-19): in EXEC mode a recognition failure
+// still ENDS the stream — a dead CLI is unrecoverable. The pcm channel
+// stays OPEN, so only the error path can close the transcript channel.
+// (The server-mode survive-and-continue twin lives in
+// stt_whisper_server_test.go.)
+func TestWhisperExecErrorEndsStream(t *testing.T) {
+	writeFakeBin(t, "whisper-cli", "echo boom >&2\nexit 1\n")
+	s, err := newWhisperSTT(whisperCfg(whisperTestRate))
+	if err != nil {
+		t.Fatalf("construct: %v", err)
+	}
+	pcm := make(chan []byte, 16)
+	trs := streamOf(t, s, pcm)
+	pcm <- chunkOf(speechChunkMs, loudAmplitude)
+	for range minSilenceChunks {
+		pcm <- chunkOf(silenceChunkMs, 0)
+	}
+	// pcm deliberately NOT closed: the stream must end on the error.
+	select {
+	case tr, ok := <-trs:
+		if ok {
+			t.Fatalf("want channel close after exec failure, got transcript %+v", tr)
+		}
+	case <-time.After(streamDrainWait):
+		t.Fatal("exec-mode recognition error did not end the stream (dead CLI must stay stream-ending)")
+	}
+	close(pcm)
+}

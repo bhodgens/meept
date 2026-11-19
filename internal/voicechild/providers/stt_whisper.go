@@ -171,9 +171,11 @@ func newWhisperSTT(cfg ProviderConfig) (voicechild.STTProvider, error) {
 
 // Stream implements voicechild.STTProvider. The returned channel carries
 // one Final Transcript per recognized utterance and closes when pcm
-// closes (with a last flush), the context ends, or a whisper failure ends
-// the stream (a subprocess death that leaves no recoverable segment is a
-// stream-ending error, mirroring the Deepgram adapter's policy).
+// closes (with a last flush) or the context ends. In EXEC mode a whisper
+// failure ends the stream (a subprocess death that leaves no recoverable
+// segment is a stream-ending error, mirroring the Deepgram adapter's
+// policy); in persistent-SERVER mode a transient segment failure is
+// logged and skipped — the stream stays open.
 func (s *WhisperSTT) Stream(ctx context.Context, pcm <-chan []byte) (<-chan voicechild.Transcript, error) {
 	dir, err := os.MkdirTemp("", "whisper-stt-")
 	if err != nil {
@@ -232,10 +234,13 @@ func (s *WhisperSTT) run(ctx context.Context, pcm <-chan []byte, out chan<- voic
 		uttSeq++
 		buf, silenceSamples, voicedSamples, voicedEnd = nil, 0, 0, 0
 		if rerr != nil {
-			// A dead CLI leaves no recoverable segment: end the stream
-			// with the error logged (vendor+model only, never content).
+			// Exec mode: a dead CLI leaves no recoverable segment — end
+			// the stream with the error logged (vendor+model only, never
+			// content). Persistent-server mode: a transient HTTP failure
+			// must NOT kill the transcript stream — log ERROR, skip the
+			// segment, and keep listening (the resident server recovers).
 			slog.Error("whisper segment recognition failed", "model", s.cfg.Model, "error", rerr)
-			return false
+			return s.server != nil
 		}
 		if text == "" {
 			return true
@@ -404,11 +409,13 @@ func (s *WhisperSTT) recognizeOne(ctx context.Context, dir string, seq int, buf 
 	defer cancel()
 	// -m model, -f wav, -nt = no timestamps (plain text on stdout).
 	args := []string{"-m", s.cfg.Model, "-f", wavPath, "-nt"}
-	// F5 (opt-in): non-empty Vocabulary primes critical entities via a
-	// whisper.cpp "-p" prompt. Empty vocabulary leaves args BYTE-IDENTICAL
-	// to legacy (R4) — no -p is appended.
+	// F5 (opt-in): non-empty Vocabulary primes critical entities via the
+	// whisper.cpp "--prompt" flag (initial prompt). NOT "-p": that is
+	// --processors (a NUMBER) and a text value aborts the CLI (exit 134).
+	// Empty vocabulary leaves args BYTE-IDENTICAL to legacy (R4) — no
+	// --prompt is appended.
 	if terms := primingTerms(s.cfg.Vocabulary); len(terms) > 0 {
-		args = append(args, "-p", strings.Join(terms, " "))
+		args = append(args, "--prompt", strings.Join(terms, " "))
 	}
 	cmd := exec.CommandContext(segCtx, s.bin, args...)
 	var stderr bytes.Buffer

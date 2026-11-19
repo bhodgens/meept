@@ -267,6 +267,11 @@ func (s *DeepgramSTT) run(ctx context.Context, pcm <-chan []byte, out chan<- voi
 	// dropped session costs the audio spoken during the gap"); speech
 	// after the reconnect transcribes normally.
 	closeQuiet(sess)
+	// A UtteranceEnd latched on the DROPPED session belongs to the old
+	// utterance: it must not survive the reconnect and promote the next
+	// utterance's first interim to a final/endpoint (bughunt 2026-11-19
+	// H4). The new session starts with a clean latch.
+	s.utteranceEndPending = false
 	sess, err = s.dialSession(ctx)
 	if err != nil {
 		return
@@ -304,6 +309,13 @@ func (s *DeepgramSTT) listenPath() string {
 	}
 	if s.cfg.Language != "" {
 		q = append(q, "language="+s.cfg.Language)
+	}
+	// F4 (opt-in): a positive DeepgramEndpointMs asks Deepgram to emit
+	// UtteranceEnd after this many ms of silence, arming the latch lane
+	// below. Zero adds NOTHING — the wire request stays BYTE-IDENTICAL
+	// to legacy (R4) and Deepgram never emits UtteranceEnd.
+	if s.cfg.DeepgramEndpointMs > 0 {
+		q = append(q, fmt.Sprintf("utterance_end_ms=%d", s.cfg.DeepgramEndpointMs))
 	}
 	// F5 (opt-in): non-empty Vocabulary primes critical entities as
 	// repeated Deepgram keyterm params. Empty vocabulary adds NOTHING —
@@ -377,9 +389,13 @@ func (s *DeepgramSTT) pumpAndRead(ctx context.Context, sess wsSession, pcm <-cha
 }
 
 // emit decodes one vendor text message and forwards Results transcripts.
-// A Results final (is_final / from_finalize / speech_final) and a
-// UtteranceEnd marker set Transcript.Endpoint (contract C2, F4). Metadata
-// and other non-Results frames carry no transcript and emit nothing; a
+// Transcript.Endpoint (contract C2, F4) is set ONLY on an authoritative
+// speech end: a speech_final Results message or a latched UtteranceEnd.
+// A plain is_final/from_finalize segment is a finalized SEGMENT that may
+// precede more speech — it keeps Final=true but Endpoint=false (bughunt
+// 2026-11-19 H4: promoting every is_final made the fast path fire on
+// every segment, defeating the endpoint contract). Metadata and other
+// non-Results frames carry no transcript and emit nothing; a
 // UtteranceEnd is latched onto the NEXT Results transcript so the endpoint
 // signal is preserved without inventing a transcript for the marker.
 func (s *DeepgramSTT) emit(ctx context.Context, data []byte, out chan<- voicechild.Transcript) {
@@ -402,7 +418,7 @@ func (s *DeepgramSTT) emit(ctx context.Context, data []byte, out chan<- voicechi
 	t := voicechild.Transcript{
 		Text:     strings.TrimSpace(m.Channel.Alternatives[0].Transcript),
 		Final:    final,
-		Endpoint: final || s.utteranceEndPending,
+		Endpoint: m.SpeechFinal || s.utteranceEndPending,
 	}
 	s.utteranceEndPending = false
 	if t.Text == "" {

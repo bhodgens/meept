@@ -24,7 +24,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/caimlas/meept/internal/voicechild"
 )
@@ -223,5 +225,171 @@ func TestWhisperExecFallback(t *testing.T) {
 	}
 	if !strings.HasSuffix(args, "-nt") {
 		t.Errorf("exec argv %q must end with -nt (legacy plain-text stdout)", args)
+	}
+}
+
+// TestWhisperServerTransientErrorKeepsStream (bughunt 2026-11-19 M4): in
+// persistent-server mode ONE failed segment (HTTP 500) must NOT end the
+// transcript stream — the segment is skipped and the NEXT utterance still
+// recognizes. Exec-mode stream-ending policy is pinned separately in
+// stt_whisper_test.go (TestWhisperExecErrorEndsStream).
+func TestWhisperServerTransientErrorKeepsStream(t *testing.T) {
+	var mu sync.Mutex
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		calls++
+		n := calls
+		mu.Unlock()
+		if n == 1 {
+			http.Error(w, "transient overload", http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write([]byte("utt 2"))
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg, ok := setWhisperServerAddr(whisperCfg(whisperTestRate), srv.Listener.Addr().String())
+	if !ok {
+		t.Fatalf("cannot set ProviderConfig.WhisperServerAddr: missing selector (contract C1)")
+	}
+	s, err := newWhisperSTT(cfg)
+	if err != nil {
+		t.Fatalf("construct whisper STT in server mode: %v", err)
+	}
+	pcm := make(chan []byte, 64)
+	trs := streamOf(t, s, pcm)
+	// Two utterances, each closed by trailing silence; pcm stays open
+	// until both are fed so a premature stream close is observable.
+	for range 2 {
+		pcm <- chunkOf(speechChunkMs, loudAmplitude)
+		for range minSilenceChunks {
+			pcm <- chunkOf(silenceChunkMs, 0)
+		}
+	}
+	// The failed first segment emits nothing; the second must arrive
+	// while the stream is still open.
+	select {
+	case tr, ok := <-trs:
+		if !ok {
+			t.Fatal("transcript stream closed after ONE transient server error (M4: server mode must skip-and-continue)")
+		}
+		if !tr.Final || tr.Text != "utt 2" {
+			t.Fatalf("want final utt 2 after the skipped segment, got %+v", tr)
+		}
+	case <-time.After(streamDrainWait):
+		t.Fatal("no transcript after a transient server error: stream went deaf (M4)")
+	}
+	close(pcm)
+	if got := drainTranscripts(t, trs); len(got) != 0 {
+		t.Fatalf("unexpected extra transcripts: %v", textsOf(got))
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 2 {
+		t.Fatalf("server saw %d requests, want 2 (failed segment + recovered segment)", calls)
+	}
+}
+
+// TestWhisperServerVocabularyPromptField (bughunt 2026-11-19 M5): a
+// non-empty Vocabulary must ride the /inference multipart "prompt" field
+// (primingTerms-normalized), mirroring exec mode's --prompt. Empty
+// vocabulary adds NO prompt field (R4: byte-identical wire).
+func TestWhisperServerVocabularyPromptField(t *testing.T) {
+	type captured struct {
+		prompt    string
+		hasPrompt bool
+		hasFile   bool
+	}
+	var mu sync.Mutex
+	var got []captured
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		c := captured{}
+		if vals, ok := r.MultipartForm.Value["prompt"]; ok && len(vals) > 0 {
+			c.hasPrompt = true
+			c.prompt = vals[0]
+		}
+		if files, ok := r.MultipartForm.File["file"]; ok && len(files) > 0 {
+			c.hasFile = true
+		}
+		mu.Lock()
+		got = append(got, c)
+		mu.Unlock()
+		_, _ = w.Write([]byte("utt 1"))
+	}))
+	t.Cleanup(srv.Close)
+
+	run := func(vocab []string) {
+		t.Helper()
+		cfg, ok := setWhisperServerAddr(whisperCfg(whisperTestRate), srv.Listener.Addr().String())
+		if !ok {
+			t.Fatalf("cannot set ProviderConfig.WhisperServerAddr: missing selector (contract C1)")
+		}
+		cfg, ok = setVocabulary(cfg, vocab)
+		if !ok {
+			t.Fatalf("cannot set ProviderConfig.Vocabulary: missing selector (contract C3)")
+		}
+		s, err := newWhisperSTT(cfg)
+		if err != nil {
+			t.Fatalf("construct: %v", err)
+		}
+		w, ok := s.(*WhisperSTT)
+		if !ok {
+			t.Fatalf("adapter type = %T, want *WhisperSTT", s)
+		}
+		if _, err := w.recognizeOne(t.Context(), t.TempDir(), len(vocab), chunkOf(speechChunkMs, loudAmplitude)); err != nil {
+			t.Fatalf("recognizeOne: %v", err)
+		}
+	}
+	run(nil)
+	run([]string{"Ada Lovelace", "0xABC123"})
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 2 {
+		t.Fatalf("server saw %d requests, want 2", len(got))
+	}
+	if got[0].hasPrompt {
+		t.Errorf("empty vocabulary sent a prompt field %q (R4: empty = byte-identical wire)", got[0].prompt)
+	}
+	if !got[0].hasFile {
+		t.Errorf("empty-vocabulary request lost the WAV file field")
+	}
+	if !got[1].hasPrompt {
+		t.Fatalf("non-empty vocabulary sent NO prompt field (M5: /inference prompt priming missing)")
+	}
+	if !got[1].hasFile {
+		t.Errorf("vocabulary request lost the WAV file field")
+	}
+	lower := strings.ToLower(got[1].prompt)
+	if !strings.Contains(lower, "ada lovelace") || !strings.Contains(lower, "0xabc123") {
+		t.Errorf("prompt field = %q, want the primingTerms-normalized vocabulary", got[1].prompt)
+	}
+}
+
+// TestWhisperServerEmptyEnvelopeNotRawJSON (bughunt 2026-11-19 L8): a
+// successfully-decoded JSON envelope with EMPTY text must yield "" —
+// never the raw JSON blob as transcript. Non-empty envelopes still yield
+// their text; plain-text bodies pass through.
+func TestWhisperServerEmptyEnvelopeNotRawJSON(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"empty text envelope", `{"text":""}`, ""},
+		{"whitespace text envelope", `{"text":"   "}`, ""},
+		{"missing text envelope", `{"other":1}`, ""},
+		{"normal envelope", `{"text":" hello world "}`, "hello world"},
+		{"plain text", "  utt 1  ", "utt 1"},
+		{"undecodable brace body", "{not json", "{not json"},
+	} {
+		if got := decodeWhisperServerTranscript([]byte(tc.raw)); got != tc.want {
+			t.Errorf("%s: decode(%q) = %q, want %q", tc.name, tc.raw, got, tc.want)
+		}
 	}
 }

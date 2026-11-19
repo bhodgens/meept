@@ -16,8 +16,13 @@ type STTBaseFactory func(cfg ProviderConfig, key string) (voicechild.STTProvider
 // PseudoStreamSTT wraps any batch voicechild.STTProvider and turns it into a
 // client-side pseudo-stream: on every PartialIntervalMs tick the accumulated
 // PCM is snapshotted and recognized by a FRESH base provider, emitted as a
-// Final:false partial; on pcm close or FlushNow exactly one Final:true is
-// emitted. Strictly opt-in (cfg.PartialIntervalMs > 0).
+// Final:false partial. A Final:true is emitted when an utterance closes: on
+// pcm close (with a last flush), on a FlushNow kick, or when the accumulated
+// window hits the pseudoStreamMaxWindowBytes cap. FlushNow is
+// flush-and-keep-streaming (the Whisper/Rumble base FlushNow contract): a
+// kick recognizes and resets the open window, then the loop CONTINUES — it
+// never closes the transcript stream, so repeated barge-in kicks never deafen
+// the call. Strictly opt-in (cfg.PartialIntervalMs > 0).
 type PseudoStreamSTT struct {
 	cfg      ProviderConfig
 	key      string
@@ -45,9 +50,18 @@ func newPseudoStreamSTT(cfg ProviderConfig, key string, base STTBaseFactory) (vo
 	return &PseudoStreamSTT{cfg: cfg, key: key, base: base, interval: interval}, nil
 }
 
-// FlushNow force-finalizes every live stream (early-kick for barge-in). A
-// second pending kick coalesces into the first; with no live stream it is a
-// no-op. No I/O under kickMu.
+// pseudoStreamMaxWindowBytes caps one accumulated PCM window at 10 seconds
+// of 16 kHz s16le mono (the canonical child leg rate: 16000 * 2 * 10). Every
+// tick re-recognizes the WHOLE buffer, so without a cap memory and CPU grow
+// O(n^2) on a never-silent source (bughunt 2026-11-19 M2). On overflow the
+// window force-finalizes and resets — the same path as a FlushNow kick.
+const pseudoStreamMaxWindowBytes = 320000
+
+// FlushNow force-finalizes the open window of every live stream (early-kick
+// for barge-in) WITHOUT closing it: each stream recognizes the open window,
+// emits Final:true when non-empty, resets, and keeps streaming (the base
+// Whisper/Rumble FlushNow contract). A second pending kick coalesces into the
+// first; with no live stream it is a no-op. No I/O under kickMu.
 func (p *PseudoStreamSTT) FlushNow() {
 	p.kickMu.Lock()
 	for ch := range p.kicks {
@@ -77,9 +91,10 @@ func (p *PseudoStreamSTT) registerKick() (chan struct{}, func()) {
 }
 
 // Stream implements voicechild.STTProvider. It returns a channel carrying
-// Final:false partials followed by exactly one Final:true. The channel closes
-// on pcm close (with a final flush), a FlushNow kick, or context cancellation
-// (the latter closes without a final).
+// Final:false partials and a Final:true whenever an utterance closes (pcm
+// close, a FlushNow kick, or the max-window cap). The channel closes ONLY on
+// pcm close (with a final flush) or context cancellation (the latter closes
+// without a final) — a FlushNow kick flushes but never closes the stream.
 func (p *PseudoStreamSTT) Stream(ctx context.Context, pcm <-chan []byte) (<-chan voicechild.Transcript, error) {
 	// Buffered so a partial emission never stalls the run loop: the PCM
 	// feeder must keep being drained even when the downstream consumer
@@ -164,6 +179,17 @@ func (p *PseudoStreamSTT) run(ctx context.Context, pcm <-chan []byte, out chan<-
 		mu.Unlock()
 		return s
 	}
+	resetWindow := func() {
+		mu.Lock()
+		buf = nil
+		mu.Unlock()
+	}
+	bufLen := func() int {
+		mu.Lock()
+		n := len(buf)
+		mu.Unlock()
+		return n
+	}
 
 	// lastText holds the text of the last successful recognition and is
 	// used for the single final emission (empty allowed). It is touched
@@ -182,6 +208,26 @@ func (p *PseudoStreamSTT) run(ctx context.Context, pcm <-chan []byte, out chan<-
 		}
 	}
 
+	// flushWindow recognizes the open window and, when the result is
+	// non-empty, emits Final:true — then RESETS the buffer and lastText
+	// and returns; the run loop keeps streaming. Shared by the FlushNow
+	// kick and the max-window cap (bughunt 2026-11-19 H3/M2). An empty or
+	// failed pass emits nothing (the sttFlusher contract: never fire on
+	// an empty window) but still resets, bounding memory. No lock is
+	// held across recognize or the channel send (mutexio).
+	flushWindow := func() {
+		text := p.recognize(ctx, snapshot())
+		resetWindow()
+		lastText = ""
+		if text == "" {
+			return
+		}
+		select {
+		case out <- voicechild.Transcript{Text: text, Final: true}:
+		case <-ctx.Done():
+		}
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -194,6 +240,12 @@ func (p *PseudoStreamSTT) run(ctx context.Context, pcm <-chan []byte, out chan<-
 				return
 			}
 			appendChunk(chunk)
+			// M2: a never-silent source must not grow the re-recognized
+			// window without bound — at the cap, force the same
+			// finalize-and-reset the kick uses.
+			if bufLen() >= pseudoStreamMaxWindowBytes && ctx.Err() == nil {
+				flushWindow()
+			}
 		case <-ticker.C:
 			if ctx.Err() != nil {
 				return
@@ -209,10 +261,15 @@ func (p *PseudoStreamSTT) run(ctx context.Context, pcm <-chan []byte, out chan<-
 				return
 			}
 		case <-kick:
+			// H3: flush-and-keep-streaming. The pipeline kicks FlushNow on
+			// EVERY sustained-energy window (barge-in attempt); closing
+			// the stream here deafened the call after the first kick
+			// because the transcript consumer never reopens a cleanly
+			// closed channel. Recognize the open window, emit Final:true
+			// if non-empty, reset, and CONTINUE the loop.
 			if ctx.Err() == nil {
-				finalize()
+				flushWindow()
 			}
-			return
 		}
 	}
 }

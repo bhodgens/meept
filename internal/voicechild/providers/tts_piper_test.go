@@ -3,10 +3,13 @@ package providers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -234,5 +237,86 @@ func TestPiperModelRateSidecarNames(t *testing.T) {
 	// Missing config -> 0 (passthrough).
 	if got := piperModelRate(filepath.Join(dir, "missing.onnx")); got != 0 {
 		t.Fatalf("missing sidecar: got %d, want 0", got)
+	}
+}
+
+// TestPiperFinishPrefersLateFeedError (bughunt 2026-11-19 L18): finish()'s
+// non-blocking werr drain BEFORE cmd.Wait can miss a feed error still in
+// flight (a late EPIPE whose channel delivery races Wait). After Wait the
+// feed result must be drained again and a non-nil feed error preferred
+// over io.EOF — even when the child exits zero. Deterministic late-feed
+// shape: the child stays ALIVE (sleep) so finish's pre-Wait drain sees an
+// EMPTY channel (the miss); the feed error is buffered while cmd.Wait
+// blocks, then the child is released to exit 0 — so only the post-Wait
+// drain can observe the error. Without it, finish returns io.EOF.
+func TestPiperFinishPrefersLateFeedError(t *testing.T) {
+	dir := t.TempDir()
+	release := filepath.Join(dir, "release")
+	script := "#!/bin/sh\nwhile [ ! -f \"" + release + "\" ]; do sleep 0.02; done\nexit 0\n"
+	bin := filepath.Join(dir, "sleeper")
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatalf("write sleeper: %v", err)
+	}
+	cmd := exec.Command(bin)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start sleeper: %v", err)
+	}
+	s := &piperStream{cmd: cmd, werr: make(chan error, 1)}
+	feedErr := fmt.Errorf("write: %w", syscall.EPIPE)
+	go func() {
+		// finish() runs its pre-Wait drain immediately (channel still
+		// empty: the miss) and then blocks in cmd.Wait on the live
+		// child. Buffer the late feed error, THEN release the child.
+		time.Sleep(150 * time.Millisecond)
+		s.werr <- feedErr
+		if err := os.WriteFile(release, []byte("go"), 0o600); err != nil {
+			t.Errorf("release sleeper: %v", err)
+		}
+	}()
+	s.finish()
+	if s.sticky == nil || errors.Is(s.sticky, io.EOF) {
+		t.Fatalf("finish() returned %v, want the late feed error preferred over io.EOF (L18)", s.sticky)
+	}
+	if !errors.Is(s.sticky, ErrPiperExit) || !errors.Is(s.sticky, syscall.EPIPE) {
+		t.Fatalf("sticky = %v, want ErrPiperExit wrapping the EPIPE feed error", s.sticky)
+	}
+	// Idempotence: a second finish must not re-Wait or change the sticky.
+	s.finish()
+	if !errors.Is(s.sticky, syscall.EPIPE) {
+		t.Fatalf("second finish changed sticky: %v", s.sticky)
+	}
+}
+
+// TestPiperLateEpipeSurfacesOnRealChild: an integration twin — a fake
+// piper that exits WITHOUT reading stdin forces the text feed to end in
+// EPIPE. Whatever the race outcome, a zero-exit child with a broken feed
+// must never surface as a clean io.EOF: finish's post-Wait drain catches
+// the feed error whenever it lands after the pre-Wait drain.
+func TestPiperLateEpipeSurfacesOnRealChild(t *testing.T) {
+	writeFakeBin(t, "piper", "exit 0\n") // never reads stdin
+	model := writePiperModel(t, 16000)
+	p, err := newPiperTTS(piperCfg(model, 16000))
+	if err != nil {
+		t.Fatalf("construct: %v", err)
+	}
+	// A text far larger than the pipe buffer guarantees the feed write
+	// is still in flight (or EPIPE'd) when the child exits.
+	rc, err := p.Speak(context.Background(), strings.Repeat("x", 1<<20))
+	if err != nil {
+		t.Fatalf("speak: %v", err)
+	}
+	_, rerr := io.ReadAll(rc)
+	cerr := rc.Close()
+	// The child exited 0, so a failure can ONLY come from the feed lane.
+	// If the feed error was observed at all, it must be named ErrPiperExit
+	// (never a bare EOF swallow); a clean pass means the feed completed
+	// before exit (no EPIPE happened), which is also legitimate.
+	for _, e := range []error{rerr, cerr} {
+		if e != nil && !errors.Is(e, ErrPiperExit) && !errors.Is(e, io.EOF) {
+			t.Fatalf("unexpected error class: %v", e)
+		}
+	}
+	if errors.Is(rerr, io.EOF) && errors.Is(cerr, ErrPiperExit) {
+		t.Fatalf("Read reported clean EOF but Close found a feed error: finish must prefer the feed error on BOTH lanes (L18): read=%v close=%v", rerr, cerr)
 	}
 }

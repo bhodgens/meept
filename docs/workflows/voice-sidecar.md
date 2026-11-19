@@ -652,7 +652,7 @@ is byte-identical to the pre-change wire and behavior.
   Needs paired hesitation/backchannel fixtures before production.
 - `recognition_vocabulary` - []string, default empty. Empty = provider
   wire requests byte-identical; non-empty = forwarded as Deepgram
-  `keyterm` params and a Whisper `-p` prompt to bias names, addresses,
+  `keyterm` params and a Whisper `--prompt` initial prompt to bias names, addresses,
   and identifiers. Keep it short (an over-long list warns); needs a
   paired critical-entity fixture to check for over-biasing.
 - `qwen3_chunk_size` - int, default 0. 0 = request-body `chunk_size: 4`

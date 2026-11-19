@@ -4,7 +4,9 @@ package providers
 // entity priming. ProviderConfig.Vocabulary is a NEW additive selector:
 //   - nil/empty -> wire requests BYTE-IDENTICAL to legacy (R4 pin).
 //   - non-empty -> Deepgram "keyterm" params on the listen path and a
-//     Whisper "-p" prompt argument on the exec command.
+//     Whisper "--prompt" prompt argument on the exec command. ("-p" is
+//     whisper-cli --processors, a NUMBER; a text value aborts the CLI —
+//     bughunt 2026-11-19 H2. The fake below enforces that.)
 //
 // RED STYLE (deliberate, matches the foundation gate tests): the selector
 // does not exist yet, so this package MUST keep compiling. The missing
@@ -106,13 +108,26 @@ func TestDeepgramKeytermParams(t *testing.T) {
 }
 
 // captureWhisperArg installs a whisper-cli stub that records argv and
-// prints a fixed transcript. Returns the argv-capture path.
+// prints a fixed transcript. The stub mirrors the REAL CLI's flag
+// semantics (bughunt 2026-11-19 H2): "-p" is --processors and takes a
+// NUMBER — a non-numeric value aborts with exit 134, exactly like the
+// real binary. A text prompt must ride "--prompt". Returns the
+// argv-capture path.
 func captureWhisperArg(t *testing.T) string {
 	t.Helper()
 	binDir := t.TempDir()
 	argsPath := filepath.Join(binDir, "args")
 	script := "#!/bin/sh\n" +
 		"printf '%s\\n' \"$*\" > \"" + argsPath + "\"\n" +
+		"prev=\"\"\n" +
+		"for a in \"$@\"; do\n" +
+		"  if [ \"$prev\" = \"-p\" ]; then\n" +
+		"    case \"$a\" in\n" +
+		"      ''|*[!0-9]*) echo \"-p is --processors (a number); a text prompt must use --prompt\" >&2; exit 134 ;;\n" +
+		"    esac\n" +
+		"  fi\n" +
+		"  prev=\"$a\"\n" +
+		"done\n" +
 		"echo \"utt 1\"\n"
 	if err := os.WriteFile(filepath.Join(binDir, "whisper-cli"), []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake whisper-cli: %v", err)
@@ -122,15 +137,16 @@ func captureWhisperArg(t *testing.T) string {
 }
 
 // TestWhisperPromptArg: Given a vocabulary, When whisper recognizeOne
-// execs, Then a "-p" prompt arg carrying the vocabulary is included. Given
-// an empty vocabulary, args are identical to legacy (-m model -f wav -nt,
-// no -p).
+// execs, Then a "--prompt" argument carrying the vocabulary is included
+// (NOT "-p", which is --processors and aborts the real CLI on text —
+// the fake rejects it with exit 134). Given an empty vocabulary, args
+// are identical to legacy (-m model -f wav -nt, no prompt flag).
 func TestWhisperPromptArg(t *testing.T) {
 	wantVocabularySelector(t)
 
 	baseCfg := ProviderConfig{Vendor: "whisper", Model: "/tmp/fake-model.bin", SampleRate: whisperTestRate}
 
-	// Empty vocabulary: legacy argv (no -p).
+	// Empty vocabulary: legacy argv (no prompt flag at all).
 	legacyArgsPath := captureWhisperArg(t)
 	emptyCfg, ok := setVocabulary(baseCfg, nil)
 	if !ok {
@@ -152,11 +168,16 @@ func TestWhisperPromptArg(t *testing.T) {
 		t.Fatalf("read legacy argv: %v", err)
 	}
 	legacyArgStr := strings.TrimSpace(string(legacyArgs))
-	if strings.Contains(legacyArgStr, " -p ") || strings.HasPrefix(strings.TrimSpace(legacyArgStr), "-p ") {
-		t.Errorf("empty-vocabulary exec argv = %q, want no -p prompt (R4: empty = byte-identical)", legacyArgStr)
+	for _, forbidden := range []string{"-p", "--prompt"} {
+		for _, f := range strings.Fields(legacyArgStr) {
+			if f == forbidden {
+				t.Errorf("empty-vocabulary exec argv = %q, want no %s prompt (R4: empty = byte-identical)", legacyArgStr, forbidden)
+			}
+		}
 	}
 
-	// Non-empty vocabulary: -p prompt required.
+	// Non-empty vocabulary: --prompt required. The fake aborts (exit
+	// 134) on "-p <text>", so a wrong flag fails recognizeOne outright.
 	vocabArgsPath := captureWhisperArg(t)
 	vocabCfg, ok := setVocabulary(baseCfg, []string{"Ada Lovelace", "0xABC123"})
 	if !ok {
@@ -171,7 +192,7 @@ func TestWhisperPromptArg(t *testing.T) {
 		t.Fatalf("adapter type = %T, want *WhisperSTT", vocabS)
 	}
 	if _, err := vw.recognizeOne(t.Context(), t.TempDir(), 1, chunkOf(speechChunkMs, loudAmplitude)); err != nil {
-		t.Fatalf("recognizeOne (vocab): %v", err)
+		t.Fatalf("recognizeOne (vocab): %v (a -p text value aborts the fake like the real CLI)", err)
 	}
 	vocabArgsData, err := os.ReadFile(vocabArgsPath)
 	if err != nil {
@@ -179,15 +200,20 @@ func TestWhisperPromptArg(t *testing.T) {
 	}
 	vocabArgStr := strings.TrimSpace(string(vocabArgsData))
 	fields := strings.Fields(vocabArgStr)
-	hasP := false
-	for _, f := range fields {
+	hasPrompt := false
+	for i, f := range fields {
 		if f == "-p" {
-			hasP = true
-			break
+			t.Errorf("vocabulary exec argv = %q: -p is --processors (a NUMBER), never the prompt flag (H2)", vocabArgStr)
+		}
+		if f == "--prompt" {
+			hasPrompt = true
+			if i+1 >= len(fields) {
+				t.Errorf("vocabulary exec argv = %q: --prompt has no value", vocabArgStr)
+			}
 		}
 	}
-	if !hasP {
-		t.Errorf("vocabulary exec argv = %q, want -p prompt argument (03-entity-priming T2)", vocabArgStr)
+	if !hasPrompt {
+		t.Errorf("vocabulary exec argv = %q, want --prompt argument (03-entity-priming T2, H2)", vocabArgStr)
 	}
 	if !strings.Contains(strings.ToLower(vocabArgStr), "ada") && !strings.Contains(strings.ToLower(vocabArgStr), "0xabc123") {
 		t.Errorf("vocabulary exec argv = %q, want at least one vocabulary term in the prompt", vocabArgStr)

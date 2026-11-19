@@ -194,6 +194,19 @@ func (s *piperStream) finish() {
 		s.sticky = fmt.Errorf("%w: %w (stderr tail: %s)", ErrPiperExit, err, tailBytes(s.stderr.Bytes(), piperStderrTailBytes))
 		return
 	}
+	// Late-feed drain (bughunt 2026-11-19 L18): the pre-Wait drain above is
+	// non-blocking and can miss a feed error still in flight (a late EPIPE
+	// whose delivery races Wait). After Wait the feed goroutine has
+	// finished — the child is reaped, so the stdin write can only have
+	// ended — and the buffered(1) channel holds its result. Drain again
+	// non-blockingly and prefer a non-nil feed error over io.EOF.
+	select {
+	case werr := <-s.werr:
+		if werr != nil {
+			s.stdinFailed(werr)
+		}
+	default:
+	}
 	if s.sticky == nil {
 		s.sticky = io.EOF
 	}

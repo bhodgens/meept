@@ -35,7 +35,7 @@ type ProviderConfig struct {
 	// Vocabulary primes critical entities on the STT request (contract C1,
 	// feature F5). nil/empty keeps both wire requests BYTE-IDENTICAL to
 	// legacy (R4); non-empty adds Deepgram keyterm params and a Whisper
-	// -p prompt. Additive/opt-in.
+	// --prompt initial prompt. Additive/opt-in.
 	Vocabulary []string
 	// ---- rumble streaming/kwargs (plan 20261119, contract C2) ----
 	// All ADDITIVE/OPTIONAL: empty/nil = byte-identical legacy behavior.

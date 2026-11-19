@@ -8,13 +8,18 @@ package providers
 // (TestNewSTTDefaultNoDecorator) uses only today's symbols and passes now.
 
 import (
+	"context"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"io/fs"
 	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	"github.com/caimlas/meept/internal/voicechild"
 )
 
 // TestNewSTTDefaultNoDecorator (F4 guardrail): with no partial interval
@@ -260,5 +265,159 @@ func TestPseudoStreamEmitsPartialsThenFinal(t *testing.T) {
 	}
 	if !hasTrue {
 		t.Errorf("no Transcript{Final:true} final emission found (contract C5: exactly one final)")
+	}
+}
+
+// ---- runtime pins (bughunt 2026-11-19 H3/M2) ----
+
+// pseudoFakeSTT is a batch base for the decorator pins: it drains the
+// snapshot channel, records the total byte count of every recognition
+// pass, and answers one Final:true naming that count ("w<N>"). Empty
+// snapshots answer nothing (mirrors a silent utterance).
+type pseudoFakeSTT struct {
+	mu    sync.Mutex
+	sizes []int
+}
+
+func (f *pseudoFakeSTT) Stream(_ context.Context, pcm <-chan []byte) (<-chan voicechild.Transcript, error) {
+	out := make(chan voicechild.Transcript, 4)
+	go func() {
+		defer close(out)
+		total := 0
+		for chunk := range pcm {
+			total += len(chunk)
+		}
+		f.mu.Lock()
+		f.sizes = append(f.sizes, total)
+		f.mu.Unlock()
+		if total > 0 {
+			out <- voicechild.Transcript{Text: fmt.Sprintf("w%d", total), Final: true}
+		}
+	}()
+	return out, nil
+}
+
+func (f *pseudoFakeSTT) snapshotSizes() []int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]int(nil), f.sizes...)
+}
+
+// newPseudoForPin builds the decorator with a 1-hour tick interval so the
+// partial ticker NEVER fires during a pin — only kicks, the cap, and pcm
+// close drive emissions.
+func newPseudoForPin(t *testing.T, fake *pseudoFakeSTT) *PseudoStreamSTT {
+	t.Helper()
+	p, err := newPseudoStreamSTT(
+		ProviderConfig{Vendor: "whisper", SampleRate: 16000, PartialIntervalMs: 3600000},
+		"",
+		func(ProviderConfig, string) (voicechild.STTProvider, error) { return fake, nil },
+	)
+	if err != nil {
+		t.Fatalf("newPseudoStreamSTT: %v", err)
+	}
+	ps, ok := p.(*PseudoStreamSTT)
+	if !ok {
+		t.Fatalf("decorator type = %T, want *PseudoStreamSTT", p)
+	}
+	return ps
+}
+
+// TestPseudoStreamFlushNowKeepsStreaming (H3): the pipeline kicks FlushNow
+// on EVERY loud RMS window; a kick must flush-and-keep-streaming, never
+// close the transcript channel (the consumer never reopens a cleanly
+// closed channel, so the old finalize-and-return deafened the call after
+// the first barge-in attempt). Two successive kicks must each deliver a
+// Final:true, and the second recognition must see ONLY the post-reset
+// bytes (buffer + lastText reset proof).
+func TestPseudoStreamFlushNowKeepsStreaming(t *testing.T) {
+	fake := &pseudoFakeSTT{}
+	ps := newPseudoForPin(t, fake)
+	// Unbuffered: each send completes only when the run loop RECEIVES the
+	// chunk, and the append finishes before the next select — so a
+	// following FlushNow is guaranteed to see the buffered window.
+	pcm := make(chan []byte)
+	trs := streamOf(t, ps, pcm)
+
+	pcm <- chunkOf(100, loudAmplitude) // 1600 B window
+	ps.FlushNow()
+	select {
+	case tr, ok := <-trs:
+		if !ok {
+			t.Fatal("stream closed on the FIRST FlushNow kick (H3: kick must keep streaming)")
+		}
+		if !tr.Final || tr.Text != "w1600" {
+			t.Fatalf("first kick: want final w1600, got %+v", tr)
+		}
+	case <-time.After(streamDrainWait):
+		t.Fatal("first FlushNow kick never delivered a final")
+	}
+
+	// Second window after the kick: the stream must still be live.
+	pcm <- chunkOf(50, loudAmplitude) // 800 B — NOT 2400 B: reset proof
+	ps.FlushNow()
+	select {
+	case tr, ok := <-trs:
+		if !ok {
+			t.Fatal("stream closed after the first kick: second barge-in attempt went deaf (H3)")
+		}
+		if !tr.Final || tr.Text != "w800" {
+			t.Fatalf("second kick: want final w800 (buffer reset), got %+v", tr)
+		}
+	case <-time.After(streamDrainWait):
+		t.Fatal("second FlushNow kick never delivered a final (stream deaf after first kick, H3)")
+	}
+
+	// pcm close still flushes exactly one final (empty allowed after the
+	// reset) and THEN closes the channel — unchanged close contract.
+	close(pcm)
+	got := drainTranscripts(t, trs)
+	if len(got) != 1 || !got[0].Final {
+		t.Fatalf("pcm close: want exactly one final then close, got %v", got)
+	}
+}
+
+// TestPseudoStreamMaxWindowCap (M2): every tick re-recognizes the WHOLE
+// accumulated buffer, so a never-silent source must hit the 10 s cap
+// (320000 B at 16 kHz s16le) and force a finalize-and-reset — memory and
+// re-recognition cost stay bounded. The cap flush must arrive WITHOUT a
+// pcm close or kick, and no recognition pass may ever see more than the
+// cap (640 B chunks land the cap exactly).
+func TestPseudoStreamMaxWindowCap(t *testing.T) {
+	fake := &pseudoFakeSTT{}
+	ps := newPseudoForPin(t, fake)
+	pcm := make(chan []byte, 1024)
+	trs := streamOf(t, ps, pcm)
+
+	// 500 x 640 B = exactly 320000 B: the cap fires on the last chunk.
+	go func() {
+		for range 500 {
+			pcm <- chunkOf(40, loudAmplitude) // 40 ms @ 8 kHz = 640 B
+		}
+	}()
+	select {
+	case tr, ok := <-trs:
+		if !ok {
+			t.Fatal("stream closed at the window cap (cap must flush-and-reset, not close)")
+		}
+		if !tr.Final || tr.Text != "w320000" {
+			t.Fatalf("cap flush: want final w320000, got %+v", tr)
+		}
+	case <-time.After(streamDrainWait):
+		t.Fatal("320000 B accumulated with no cap flush (M2: unbounded O(n^2) window)")
+	}
+
+	// A small tail after the cap recognizes ONLY the tail (reset proof),
+	// then pcm close delivers the usual single final.
+	pcm <- chunkOf(40, loudAmplitude)
+	close(pcm)
+	got := drainTranscripts(t, trs)
+	if len(got) != 1 || !got[0].Final || got[0].Text != "w640" {
+		t.Fatalf("post-cap tail: want one final w640, got %v", got)
+	}
+	for _, n := range fake.snapshotSizes() {
+		if n > pseudoStreamMaxWindowBytes {
+			t.Fatalf("recognition pass saw %d bytes (> %d cap): window not bounded (M2)", n, pseudoStreamMaxWindowBytes)
+		}
 	}
 }

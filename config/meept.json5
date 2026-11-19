@@ -1380,7 +1380,7 @@
     "smart_turn_mode": 0,                   // smart-turn end-of-turn verdict: 0 = default current behavior, 1 = kill switch (no analyzer installed), 2 = consume AnalyzeEndOfTurn verdict at the confirm window
     "whisper_server_addr": "",              // optional persistent whisper.cpp server address; empty = the legacy per-utterance whisper-cli exec path
     "deepgram_endpoint_ms": 0,              // >0 enables the authoritative speech_final/UtteranceEnd endpoint fast path; 0 = legacy fixed-timer endpointing (byte-identical)
-    "recognition_vocabulary": [],           // critical entities to prime on STT requests (Deepgram keyterm params / Whisper -p prompt); empty = byte-identical wire; also carried to the child as keys-line vocabulary
+    "recognition_vocabulary": [],           // critical entities to prime on STT requests (Deepgram keyterm params / Whisper --prompt initial prompt, exec + persistent-server modes); empty = byte-identical wire; also carried to the child as keys-line vocabulary
     "qwen3_chunk_size": 0,                  // qwen3 pcm-stream request chunk_size override; 0 = 4 (legacy default)
     "clip_prewarm_delay_ms": 0,             // defer a queued clip render by this many ms after the played edge; 0 = render immediately (legacy)
     "context_warm_window_ms": 0,            // partial-context-warm debounce window override; 0 = resolve from turn_confirm_ms (legacy)
@@ -1437,7 +1437,7 @@
     // "chat_template_verbatim": null,       // bool -> chat_template_kwargs.verbatim; INERT here (future vLLM only); null = omit
     //
     // FUTURE-USE KNOB: client-side pseudo-stream proxy for BATCH STT vendors only.
-    // "stt_partial_ms": 0,                  // >0 wraps a batch vendor (e.g. whisper) in PseudoStreamSTT: it snapshots a growing PCM buffer into successive full utterances and emits Final:false partials then one Final:true. Gives partial barge-in/context-warm on a batch vendor, but it is NOT server incremental input, re-recognizes the whole buffer (O(n^2)), and does not reduce time-to-first-word. Leave commented/0 for native streaming vendors (rumble, deepgram): the proxy is bypassed for them anyway.
+    // "stt_partial_ms": 0,                  // >0 wraps a batch vendor (e.g. whisper) in PseudoStreamSTT: it snapshots a growing PCM buffer into successive full utterances and emits Final:false partials; a Final:true lands on pcm close, a barge-in FlushNow kick, or the 10s max-window cap (flush-and-keep-streaming). Gives partial barge-in/context-warm on a batch vendor, but it is NOT server incremental input, re-recognizes the whole open window each tick (bounded O(n^2) within the 10s cap), and does not reduce time-to-first-word. Leave commented/0 for native streaming vendors (rumble, deepgram): the proxy is bypassed for them anyway.
     // ---- Supervised vLLM Rumble STT sidecar (legacy vLLM path; NOT used by the live transformers server) ----
     // "rumble_runtime": {
     //   "gpu_memory_utilization": 0.20,          // EXPLICIT low GPU fraction (safe range 0.20-0.25); vLLM's 0.92 default is UNSAFE alongside qwen3-tts on the RTX 3060

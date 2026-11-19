@@ -625,3 +625,107 @@ func TestRefHashDecodeContract(t *testing.T) {
 		t.Fatalf("ClipKey drifted from the frozen C1 vector: %s", k)
 	}
 }
+
+// TestClipRenderRekickAfterBusyRetire pins bughunt 2026-11-19 L1: when
+// the render worker retires on a busy live-synth lane with specs still
+// queued, a bounded one-shot re-kick must relaunch it once the lane
+// frees — WITHOUT a new clip_render frame. The old code only relaunched
+// on a fresh frame, so a chatty call deferred prewarm for its whole life.
+// The render-yield contract stays intact: no render Speak while the live
+// synth is in flight (the re-kick's busy check re-defers, bounded).
+func TestClipRenderRekickAfterBusyRetire(t *testing.T) {
+	oldDelay := clipRekickDelay
+	clipRekickDelay = 50 * time.Millisecond
+	t.Cleanup(func() { clipRekickDelay = oldDelay })
+
+	const ccid = "clip-rekick"
+	d, _, childConn, p, _, _ := clipFixture(t, ccid)
+	gate := newSerialGateTTS()
+	swapTTS(p, gate)
+	sendKeys(t, childConn, ccid)
+
+	// Live turn: a last:false say enters Speak and blocks -> busy lane.
+	d.sendLine(childConn, voiceframe.Frame{
+		CallID: ccid, Event: voiceframe.EventSay, Text: "live answer", Last: new(false),
+	})
+	waitFor(t, func() bool { entered, _ := gate.snapshot(); return entered >= 1 })
+
+	// Queue a render while busy: the worker must retire WITHOUT a second
+	// Speak (F10 yield), leaving the spec queued.
+	const key = "f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3"
+	d.sendLine(childConn, voiceframe.Frame{
+		CallID: ccid, Event: voiceframe.EventClipRender,
+		Clips: []voiceframe.ClipSpec{{Key: key, Text: "deferred filler"}},
+	})
+	time.Sleep(250 * time.Millisecond) // several re-kick cycles while busy
+	if entered, _ := gate.snapshot(); entered != 1 {
+		t.Fatalf("render started while live synth busy: entered=%d, want 1 (F10 yield; re-kick must re-defer, never render over a live synth)", entered)
+	}
+	p.clipMu.Lock()
+	queued := len(p.clipQueue)
+	p.clipMu.Unlock()
+	if queued != 1 {
+		t.Fatalf("after busy deferral: queued=%d, want 1 (spec stays queued, never lost)", queued)
+	}
+
+	// Free the live lane. NO new clip_render frame is sent: the re-kick
+	// alone must relaunch the worker and render the deferred spec.
+	gate.unblockCurrent()
+	waitFor(t, func() bool { entered, _ := gate.snapshot(); return entered >= 2 })
+	gate.unblockCurrent() // let the render's Speak finish before cleanup
+	waitFor(t, func() bool {
+		p.clipMu.Lock()
+		defer p.clipMu.Unlock()
+		return len(p.clipQueue) == 0 && !p.clipWorkerUp
+	})
+}
+
+// TestClipRekickCancelledOnTeardown pins the L1 teardown arm: a re-kick
+// armed before hangup must not relaunch a worker into a dead pipeline.
+func TestClipRekickCancelledOnTeardown(t *testing.T) {
+	oldDelay := clipRekickDelay
+	clipRekickDelay = 2 * time.Second // long enough to observe the armed timer before it fires
+	t.Cleanup(func() { clipRekickDelay = oldDelay })
+
+	const ccid = "clip-rekick-teardown"
+	d, _, childConn, p, _, _ := clipFixture(t, ccid)
+	gate := newSerialGateTTS()
+	swapTTS(p, gate)
+	sendKeys(t, childConn, ccid)
+
+	d.sendLine(childConn, voiceframe.Frame{
+		CallID: ccid, Event: voiceframe.EventSay, Text: "live answer", Last: new(false),
+	})
+	waitFor(t, func() bool { entered, _ := gate.snapshot(); return entered >= 1 })
+	const key = "a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4"
+	d.sendLine(childConn, voiceframe.Frame{
+		CallID: ccid, Event: voiceframe.EventClipRender,
+		Clips: []voiceframe.ClipSpec{{Key: key, Text: "never rendered"}},
+	})
+	// Wait for the busy retire + armed re-kick.
+	waitFor(t, func() bool {
+		p.clipMu.Lock()
+		defer p.clipMu.Unlock()
+		return !p.clipWorkerUp && p.clipRekickTimer != nil
+	})
+
+	// Teardown: the end frame closes the pipeline (ctx cancel + timer
+	// stop). The live Speak's ctx dies with it.
+	d.sendLine(childConn, voiceframe.Frame{CallID: ccid, Event: voiceframe.EventEnd})
+	waitFor(t, func() bool { return p.ctx.Err() != nil })
+	gate.unblockCurrent() // release the blocked live Speak so cleanup can finish
+
+	// The armed delay is 2 s and close() must have stopped the timer
+	// (nil below): nothing may fire. A short grace confirms no worker
+	// relaunch and no render Speak beyond the single live one.
+	time.Sleep(300 * time.Millisecond)
+	if entered, _ := gate.snapshot(); entered != 1 {
+		t.Fatalf("re-kick rendered after teardown: entered=%d, want 1 (only the live Speak)", entered)
+	}
+	p.clipMu.Lock()
+	workerUp, timer := p.clipWorkerUp, p.clipRekickTimer
+	p.clipMu.Unlock()
+	if workerUp || timer != nil {
+		t.Fatalf("after teardown: workerUp=%v timer=%v, want false/nil", workerUp, timer)
+	}
+}

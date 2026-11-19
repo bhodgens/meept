@@ -422,6 +422,14 @@ type pipeline struct {
 	clipMu       sync.Mutex
 	clipQueue    []voiceframe.ClipSpec
 	clipWorkerUp bool
+	// clipRekickTimer is the one-shot busy-retire re-kick (bughunt
+	// 2026-11-19 L1): when the render worker retires because live synth
+	// is busy with specs still queued, this timer relaunches it after
+	// clipRekickDelay if the queue is still non-empty and the pipeline
+	// alive — a chatty call no longer defers prewarm for its whole life
+	// waiting for a NEW clip_render frame. Guarded by clipMu; stopped
+	// on teardown and whenever the queue empties / a worker takes over.
+	clipRekickTimer *time.Timer
 	// keysReady is closed when the keys frame has been applied (renders
 	// need the provider identity; adjudication A3). Sync.Once so
 	// applyKeys is idempotent on a keys re-send.
@@ -1150,14 +1158,27 @@ func (p *pipeline) finalConfirmFired(firedSeq uint64) {
 	p.playMu.Unlock()
 
 	complete, prob, verdictErr := false, 0.0, error(nil)
+	analyzerPresent := false
 	if mode == 2 {
 		p.turnMu.Lock()
-		if t := p.turn; t != nil {
+		t := p.turn
+		analyzerPresent = t != nil
+		if t != nil {
 			complete, prob, verdictErr = t.AnalyzeEndOfTurn()
 		}
 		p.turnMu.Unlock()
 		decision := "dispatch"
 		switch {
+		case !analyzerPresent:
+			// No analyzer installed (phone legs build analyzers for
+			// frame.Local only; the mode-1 kill switch; a factory that
+			// failed to load): a verdict CANNOT exist, so reading the
+			// zero values as complete=false would defer EVERY turn one
+			// extra window for nothing (bughunt 2026-11-19 M1). Treat
+			// it as the error-fallback lane: dispatch on schedule.
+			decision = "error-fallback"
+			p.logger.Info("voicechild: smart turn mode 2 with no analyzer installed; dispatching",
+				"call_id", p.ccid)
 		case verdictErr != nil:
 			decision = "error-fallback" // degrade to today's behavior
 		case !complete && !deferred:
@@ -1175,8 +1196,11 @@ func (p *pipeline) finalConfirmFired(firedSeq uint64) {
 	}
 	// complete=false defers dispatch by ONE bounded re-arm; the second
 	// expiry (deferred already true) or any complete=true/error result
-	// dispatches. No infinite hold, no caller-cutoff regression.
-	deferDispatch := mode == 2 && verdictErr == nil && !complete && !deferred
+	// dispatches. No infinite hold, no caller-cutoff regression. A nil
+	// analyzer never defers (bughunt M1): defer requires a real verdict.
+	// analyzerPresent was snapshotted in the turnMu section above — no
+	// turnMu acquisition under playMu (lock-order rule).
+	deferDispatch := mode == 2 && analyzerPresent && verdictErr == nil && !complete && !deferred
 	if deferDispatch {
 		p.smartTurnDeferred = true
 		window := p.turnConfirm
@@ -1454,16 +1478,30 @@ func (p *pipeline) consumeTranscripts(trans <-chan Transcript) {
 			// ("one sentence, one turn") and the barge-in contract
 			// (C5 speaking-final path) intact.
 			if p.confirmWindow() > 0 {
-				// Authoritative endpoint (F4): when the vendor says the
-				// utterance ended, flush ALL accumulated finals through
-				// the SAME guarded choke point (dispatchAggregated) in ONE
-				// prompt — never just the last response. The knob and the
-				// flag both have to be on; with ms=0 (default) the flag is
-				// inert and the confirm timer remains the only dispatcher
-				// (byte-identical legacy behavior, R4). Echo/non-speech/
-				// dedupe/short-final guards above already ran per final;
-				// the barge-in/provenance guards below stay intact.
-				if tr.Endpoint && p.endpointEnabled() {
+				// The speaking/mic-hold branch runs FIRST: a final that
+				// lands while playback is live (or the barge-in latch is
+				// tripped) rides the merged barge-in-final dispatch, with
+				// its interrupt already emitted on arrival above. The
+				// endpoint fast path must NOT bypass this branch (bughunt
+				// 2026-11-19 H4 / 02-deepgram-endpoint T3 TestEndpointGuards):
+				// an endpoint final during playback takes the SAME guarded
+				// route as any speaking final — one merged dispatch, never
+				// an early flush that races the daemon's clear-for-barge-in.
+				if speaking || interruptedLatched {
+					agg, parts := p.mergeAndTakeFinal(trimmed)
+					p.dispatchAggregated(p.ctx, agg, parts, "barge-in-final")
+				} else if tr.Endpoint && p.endpointEnabled() {
+					// Authoritative endpoint (F4): when the vendor says the
+					// utterance ended, flush ALL accumulated finals through
+					// the SAME guarded choke point (dispatchAggregated) in ONE
+					// prompt — never just the last response. The knob and the
+					// flag both have to be on; with ms=0 (default) the flag is
+					// inert and the confirm timer remains the only dispatcher
+					// (byte-identical legacy behavior, R4). Echo/non-speech/
+					// dedupe/short-final guards above already ran per final;
+					// this branch is reached only when playback is idle and
+					// the barge-in latch is untripped, so the mic-hold /
+					// speaking semantics are respected.
 					agg, parts, flushed := p.accumulateFinal(trimmed)
 					if flushed {
 						// 8 s age cap already retired the buffer; dispatch
@@ -1474,11 +1512,6 @@ func (p *pipeline) consumeTranscripts(trans <-chan Transcript) {
 						// included), ONE aggregated prompt, off-lock.
 						p.flushPendingFinal(p.ctx, "deepgram-endpoint")
 					}
-					continue
-				}
-				if speaking || interruptedLatched {
-					agg, parts := p.mergeAndTakeFinal(trimmed)
-					p.dispatchAggregated(p.ctx, agg, parts, "barge-in-final")
 				} else if agg, parts, flushed := p.accumulateFinal(trimmed); flushed {
 					// 8 s age cap: dispatch the aggregated buffer NOW
 					// (already cleared) rather than waiting the window.
@@ -1610,32 +1643,44 @@ func (p *pipeline) pumpAudioIn() {
 			p.rmsBargeInCheck(data)
 			// Input-side ML speech discriminator (jargo Silero VAD, local
 			// leg): advance the speaking state each chunk so
-			// rmsBargeInCheck can require real SPEECH, and feed the Smart
-			// Turn complete-thought analyzer the same chunk + speaking
-			// decision. No-op when p.vad is nil (legacy gate). The model
-			// call is sub-ms on the pump goroutine — never under playMu
-			// (mutexio); the turn analyzer is guarded by its own turnMu.
+			// rmsBargeInCheck can require real SPEECH. No-op when p.vad
+			// is nil (legacy gate). The model call is sub-ms on the pump
+			// goroutine — never under playMu (mutexio).
 			// (Restored 2026-11-12: a sibling merge removed the feed.)
 			// Race fix (2026-11-13): the analyzer fields are playMu-
 			// guarded; handleOpen/installVAD write them under playMu, so
-			// the pump SNAPSHOTs both references under playMu and then
+			// the pump SNAPSHOTs the reference under playMu and then
 			// releases before the model I/O — the bare reads used to race
 			// the install. turnMu is taken alone (never nested under
 			// playMu), per the lock-order notes in turn.go.
 			p.playMu.Lock()
 			vad := p.vad
 			p.playMu.Unlock()
+			sp := false
 			if vad != nil {
-				sp := vad.AnalyzeAudio(data)
+				sp = vad.AnalyzeAudio(data)
 				p.playMu.Lock()
 				p.vadSpeaking = sp
 				p.playMu.Unlock()
-				p.turnMu.Lock()
-				if t := p.turn; t != nil {
-					t.AppendAudio(data, sp)
-				}
-				p.turnMu.Unlock()
 			}
+			// Smart Turn feed (bughunt 2026-11-19 L9): the turn analyzer
+			// is fed INDEPENDENTLY of the VAD install. When the VAD
+			// factory failed but the turn factory succeeded, gating the
+			// feed on vad != nil starved the analyzer — mode 2 then ran
+			// AnalyzeEndOfTurn over an EMPTY buffer (jargo returns
+			// Incomplete/nil-metrics for no audio) and deferred every
+			// turn. Without a VAD there is no speech-probability source,
+			// so feed the raw chunk with isSpeech=false: jargo's
+			// smartTurnBase still buffers the audio (pre-speech trimming
+			// bounds growth) and the model judges the buffered turn;
+			// only the silence safety-net stays inert, which is the
+			// documented degradation, never an unfed verdict. turnMu
+			// alone, never under playMu.
+			p.turnMu.Lock()
+			if t := p.turn; t != nil {
+				t.AppendAudio(data, sp)
+			}
+			p.turnMu.Unlock()
 			// Turn aggregation C1 point 4: the LOOSER speaking-floor tap
 			// (bargeInRms/4) stamps lastMicLoudAt so a confirm-window
 			// expiry during a breath can tell "silence resumed" from "the
@@ -2825,6 +2870,12 @@ func (p *pipeline) close(ctx context.Context) {
 	// confirm-timer sees an empty buffer and returns).
 	p.flushPendingFinal(p.ctx, "hangup")
 	p.cancel()
+	// Clip render re-kick (bughunt L1): a busy-retire timer armed before
+	// teardown must not relaunch a worker into a dead pipeline. Stop it
+	// under clipMu; the fire's ctx check is the race backstop.
+	p.clipMu.Lock()
+	p.stopClipRekickLocked()
+	p.clipMu.Unlock()
 	// Analyzer-init barrier: wait for any async ONNX factory that started
 	// in handleOpen to finish installing or closing itself. This MUST run
 	// after cancel (so a late result sees p.ctx.Err() and closes itself)

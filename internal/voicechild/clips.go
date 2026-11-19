@@ -64,6 +64,15 @@ const (
 	clipYieldSettleRetries = 5
 )
 
+// clipRekickDelay bounds the busy-retire deferral (bughunt 2026-11-19
+// L1): after the render worker retires because live synth is busy with
+// specs still queued, a one-shot timer relaunches it this long later if
+// the queue is still non-empty and the pipeline alive. Without it only
+// a NEW clip_render frame relaunched the worker, so on a chatty call
+// prewarm could defer for the whole call. Package var (not const) so
+// tests can shrink the window; production always uses 2 s.
+var clipRekickDelay = 2 * time.Second
+
 // Resampler converts an s16le mono PCM reader from inRate to outRate. The
 // implementation lives in the providers package (jargo's streaming
 // resampler); voicechild cannot import providers (the factory interfaces
@@ -211,12 +220,52 @@ func (p *pipeline) enqueueClipRenders(specs []voiceframe.ClipSpec) {
 	workerUp := p.clipWorkerUp
 	if !workerUp {
 		p.clipWorkerUp = true
+		p.stopClipRekickLocked()
 	}
 	p.clipMu.Unlock()
 
 	if !workerUp {
 		go p.clipRenderWorker()
 	}
+}
+
+// stopClipRekickLocked disarms the busy-retire re-kick timer. Caller
+// holds clipMu; Timer.Stop is pure scheduling, no I/O (mutexio-safe).
+func (p *pipeline) stopClipRekickLocked() {
+	if p.clipRekickTimer != nil {
+		p.clipRekickTimer.Stop()
+		p.clipRekickTimer = nil
+	}
+}
+
+// armClipRekick schedules the one-shot busy-retire relaunch (bughunt
+// 2026-11-19 L1). Called OFF every lock after the worker retired on a
+// busy lane with specs still queued. The fire re-checks under clipMu:
+// empty queue, an already-running worker, or a dead pipeline all cancel
+// the relaunch — the timer never renders, never nests locks, and dies
+// with teardown (close() stops it; the ctx check is the backstop for a
+// fire racing the cancel).
+func (p *pipeline) armClipRekick() {
+	p.clipMu.Lock()
+	defer p.clipMu.Unlock()
+	if p.clipWorkerUp || len(p.clipQueue) == 0 {
+		return
+	}
+	if p.ctx != nil && p.ctx.Err() != nil {
+		return // teardown: never arm into a dead pipeline
+	}
+	p.stopClipRekickLocked()
+	p.clipRekickTimer = time.AfterFunc(clipRekickDelay, func() {
+		p.clipMu.Lock()
+		p.clipRekickTimer = nil
+		if p.clipWorkerUp || len(p.clipQueue) == 0 || p.ctx.Err() != nil {
+			p.clipMu.Unlock()
+			return
+		}
+		p.clipWorkerUp = true
+		p.clipMu.Unlock()
+		go p.clipRenderWorker()
+	})
 }
 
 // clipRenderWorker drains the render queue serially (concurrency ONE) on
@@ -236,6 +285,7 @@ func (p *pipeline) clipRenderWorker() {
 			p.clipMu.Lock()
 			p.clipWorkerUp = false
 			p.clipQueue = nil
+			p.stopClipRekickLocked()
 			p.clipMu.Unlock()
 			return
 		}
@@ -243,6 +293,7 @@ func (p *pipeline) clipRenderWorker() {
 		p.clipMu.Lock()
 		p.clipWorkerUp = false
 		p.clipQueue = nil
+		p.stopClipRekickLocked()
 		p.clipMu.Unlock()
 		return
 	}
@@ -250,6 +301,7 @@ func (p *pipeline) clipRenderWorker() {
 		p.clipMu.Lock()
 		if len(p.clipQueue) == 0 {
 			p.clipWorkerUp = false
+			p.stopClipRekickLocked()
 			p.clipMu.Unlock()
 			return
 		}
@@ -266,10 +318,14 @@ func (p *pipeline) clipRenderWorker() {
 		// A barge-in clear cancels live synths via playGen but never touches
 		// clipQueue, so a deferred spec is never lost by an interrupt.
 		// liveSynthBusy may settle-sleep under playMu only — never clipMu.
+		// Bughunt L1: the retire also arms a bounded one-shot re-kick, so a
+		// chatty call with no new clip_render frames still renders the
+		// queued specs once the lane frees (arm runs OFF every lock).
 		if p.liveSynthBusy() {
 			p.clipMu.Lock()
 			p.clipWorkerUp = false
 			p.clipMu.Unlock()
+			p.armClipRekick()
 			return
 		}
 
@@ -278,6 +334,7 @@ func (p *pipeline) clipRenderWorker() {
 		// re-check keeps the empty-queue exit correct if state ever changes.
 		if len(p.clipQueue) == 0 {
 			p.clipWorkerUp = false
+			p.stopClipRekickLocked()
 			p.clipMu.Unlock()
 			return
 		}
@@ -291,6 +348,7 @@ func (p *pipeline) clipRenderWorker() {
 			// pipeline map entry is already gone.
 			p.clipMu.Lock()
 			p.clipWorkerUp = false
+			p.stopClipRekickLocked()
 			p.clipMu.Unlock()
 			return
 		}
