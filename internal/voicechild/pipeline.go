@@ -224,6 +224,19 @@ type pipeline struct {
 	turn   TurnAnalyzer
 	turnMu sync.Mutex
 
+	// analyzerInit tracks the async ONNX analyzer construction started by
+	// handleOpen (VAD + Smart Turn build on goroutines so the single C1
+	// frame-dispatch loop is never blocked by dlopen/model load). close()
+	// cancels p.ctx then waits on this barrier BEFORE taking/releasing the
+	// analyzer fields, so an in-flight factory result is either installed
+	// (and closed here) or observes p.ctx.Err() and closes itself — no ONNX
+	// session leaks on a fast call teardown. installVAD/installTurn use
+	// installOnce so a late factory result after close can never re-arm a
+	// nil field the teardown already took.
+	analyzerInit  sync.WaitGroup
+	vadInstalled  sync.Once
+	turnInstalled sync.Once
+
 	// Playback state, guarded by playMu.
 	//
 	// playMu is ALSO the single lock regime for p.stt/p.tts: constructProviders
@@ -460,6 +473,68 @@ func (c *Child) newPipeline(frame voiceframe.Frame) (*pipeline, error) {
 // before setup), the transcript session. When keys arrive later, handleKeys
 // calls startTranscripts at the hook point; the once-guard makes both
 // orders behave identically (exactly one Stream + one consumer).
+// initAnalyzersAsync starts the local-leg ONNX analyzer construction off
+// the caller's goroutine. handleOpen calls this AFTER it has registered the
+// pipeline and sent setup, so a slow dlopen/model load cannot head-of-line
+// block the C1 dispatch loop (and every other live call's frames behind it).
+// Each factory result installs under installOnce; after close() cancels the
+// pipeline ctx, a late result closes itself instead of re-arming a field the
+// teardown already took.
+func (p *pipeline) initAnalyzersAsync(vadFactory VADFactory, turnFactory TurnFactory, sampleRate int) {
+	startFactory := func(build func() (io.Closer, error), name string) {
+		p.analyzerInit.Add(1)
+		go func() {
+			defer p.analyzerInit.Done()
+			closer, err := build()
+			if err != nil {
+				p.logger.Info("voicechild: analyzer unavailable; local leg degrades",
+					"analyzer", name, "call_id", p.ccid, "err", err)
+				return
+			}
+			installed := false
+			switch a := closer.(type) {
+			case VADAnalyzer:
+				p.vadInstalled.Do(func() {
+					if p.ctx.Err() != nil {
+						return
+					}
+					p.playMu.Lock()
+					p.vad = a
+					p.playMu.Unlock()
+					installed = true
+				})
+			case TurnAnalyzer:
+				p.turnInstalled.Do(func() {
+					if p.ctx.Err() != nil {
+						return
+					}
+					a.SetSampleRate(sampleRate)
+					p.turnMu.Lock()
+					p.turn = a
+					p.turnMu.Unlock()
+					installed = true
+				})
+			}
+			if !installed {
+				// Pipeline closed before install; close the session here.
+				if cerr := closer.Close(); cerr != nil {
+					p.logger.Warn("voicechild: late analyzer close", "analyzer", name, "err", cerr, "call_id", p.ccid)
+				}
+			}
+		}()
+	}
+	if vadFactory != nil {
+		startFactory(func() (io.Closer, error) {
+			return vadFactory(sampleRate)
+		}, "silero vad")
+	}
+	if turnFactory != nil {
+		startFactory(func() (io.Closer, error) {
+			return turnFactory(sampleRate)
+		}, "smart turn")
+	}
+}
+
 func (p *pipeline) start(ctx context.Context) error {
 	p.pumpOnce.Do(func() { go p.pumpAudioIn() })
 	p.startTranscripts()
@@ -2623,6 +2698,12 @@ func (p *pipeline) close(ctx context.Context) {
 	// confirm-timer sees an empty buffer and returns).
 	p.flushPendingFinal(p.ctx, "hangup")
 	p.cancel()
+	// Analyzer-init barrier: wait for any async ONNX factory that started
+	// in handleOpen to finish installing or closing itself. This MUST run
+	// after cancel (so a late result sees p.ctx.Err() and closes itself)
+	// and before the field take below (so a session installed just before
+	// cancel is still closed here). No ONNX session leaks on fast teardown.
+	p.analyzerInit.Wait()
 	// Teardown escape (defect 2026-11-13): retire any in-flight RMS-trip
 	// handshake NOW — a consumer already parked in awaitPendingInterrupt
 	// releases via the ctx cancel above (the select arms the escape), and

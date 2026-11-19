@@ -8,6 +8,8 @@ package voicechild
 
 import (
 	"context"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -193,4 +195,75 @@ func TestOpenEmptyCallIDFailsCallNotChild(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatalf("handleLine did not log the empty call_id failure; log so far:\n%s", logger.everything())
+}
+
+// slowVAD blocks inside the factory until released, then returns a fake
+// analyzer. It records whether Close ran, for the teardown-race pin below.
+type slowVAD struct {
+	enter   chan struct{}
+	release chan struct{}
+	closed  chan struct{}
+	once    sync.Once
+}
+
+func (s *slowVAD) AnalyzeAudio([]byte) bool { return false }
+func (s *slowVAD) Close() error {
+	s.once.Do(func() { close(s.closed) })
+	return nil
+}
+func (s *slowVAD) factory(int) (VADAnalyzer, error) {
+	close(s.enter)
+	<-s.release
+	return s, nil
+}
+
+// TestOpenSetupNotBlockedBySlowAnalyzer pins the head-of-line fix: with a
+// local VAD factory that blocks for seconds (dlopen/model load), the child
+// must still answer 'setup' immediately. Before the fix, handleOpen invoked
+// the factory synchronously on the single C1 dispatch loop, delaying setup
+// and every other call's frames behind the model load.
+func TestOpenSetupNotBlockedBySlowAnalyzer(t *testing.T) {
+	dir := shortTempDir(t)
+	d := newFakeDaemon(t, dir)
+	d.listenPair("cc-slow")
+	child := newTestChild(t, d, "tok-slow")
+	sv := &slowVAD{enter: make(chan struct{}), release: make(chan struct{}), closed: make(chan struct{})}
+	child.SetVADFactory(sv.factory)
+
+	runDone := make(chan error, 1)
+	go func() { runDone <- child.Run(context.Background()) }()
+	childConn := d.serveText()
+
+	d.sendLine(childConn, voiceframe.Frame{
+		CallID: "cc-slow", Event: voiceframe.EventOpen, Local: true,
+		Codec: "L16", SampleRate: 16000, BargeInRms: 3000,
+	})
+	in, out := d.acceptAll("cc-slow")
+	defer func() { _ = in.Close(); _ = out.Close() }()
+
+	// The factory must actually be entered (async init started).
+	select {
+	case <-sv.enter:
+	case <-time.After(testPollDeadline):
+		t.Fatal("slow VAD factory never invoked")
+	}
+
+	// setup must arrive WITHOUT releasing the factory.
+	line := d.waitRawLine(t)
+	if !strings.Contains(line, `"event":"setup"`) {
+		t.Fatalf("expected setup while analyzer still loading, got %s", line)
+	}
+
+	// Fast teardown while the factory is blocked: close() must wait on the
+	// barrier, so release the factory and prove the session is closed, not
+	// leaked or installed after teardown.
+	d.sendLine(childConn, voiceframe.Frame{CallID: "cc-slow", Event: voiceframe.EventEnd, Reason: "hangup"})
+	close(sv.release)
+	select {
+	case <-sv.closed:
+	case <-time.After(testPollDeadline):
+		t.Fatal("slow VAD session not closed after teardown (leak)")
+	}
+	_ = childConn.Close()
+	_ = <-runDone
 }

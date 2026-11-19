@@ -332,6 +332,17 @@ that tree's master.md; the invariants below are the as-built form).
   local leg degrades to the legacy RMS + STT-evidence gate — never a
   call failure (the "a phone call without barge-in is refused" spec line
   is superseded; see docs/workflows/voice-sidecar.md Tier A as-built).
+  ASYNC ANALYZER INIT (bughunt 2026-11-18): the child's local VAD + Smart
+  Turn factories run on goroutines AFTER `setup` is on the wire — the
+  ONNX dlopen/session load must never block the single C1 frame dispatch
+  loop (it delayed `setup` and queued every other call's say/clear/end
+  behind the load). Until install, the RMS gate and endpointing use their
+  legacy shapes. `pipeline.analyzerInit` (WaitGroup) plus per-analyzer
+  install-once flags are the teardown barrier: `close()` cancels p.ctx
+  then WAITS before taking the analyzer fields, so a late factory result
+  sees ctx.Err() and closes itself instead of leaking a session or
+  re-arming a nil field. Never move the factories back before setup or
+  remove the wait — both were pinned by TestOpenSetupNotBlockedBySlowAnalyzer.
 
 ## Release fan-out
 
