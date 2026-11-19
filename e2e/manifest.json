@@ -5674,6 +5674,27 @@
         "config/meept.json5",
         "internal/daemon/kanban_wiring.go"
       ]
+    },
+    {
+      "id": "voice-keys-rumble-01",
+      "suite": "voice-lifecycle",
+      "diff": "M",
+      "title": "[rumble-stt] keys line stt_vendor=rumble constructs the real adapter; base64 PCM POST reaches fake vLLM and a Final transcript arrives",
+      "paths": [
+        "internal/voicechild/providers/stt_rumble.go",
+        "internal/voicechild/providers/stt_deepgram.go",
+        "internal/daemon/voice_keys.go"
+      ]
+    },
+    {
+      "id": "rumble-streaming-probe",
+      "suite": "voice-lifecycle",
+      "diff": "M",
+      "title": "[rumble-stt] F4 decision record: batch-only (vllm stream=True emits tokens after full audio); honest skip cites research",
+      "paths": [
+        "internal/voicechild/providers/stt_rumble.go",
+        "docs/research/rumble2flash-review.md"
+      ]
     }
   ]
 }
