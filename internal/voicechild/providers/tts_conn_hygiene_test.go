@@ -254,16 +254,18 @@ func TestTTSTransportDisablesKeepAlives(t *testing.T) {
 	}
 }
 
-// H3: the constructors land the shared transport on the provider (the
-// seam must not silently drop it).
+// H3: the constructors land the intended transport on the provider (the
+// seam must not silently drop it). F6 splits this: cloud OpenAI uses the
+// keep-alive ttsCloudTransport, qwen3 keeps the no-keepalive ttsTransport.
 func TestNewTTSUsesSharedTransport(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		cfg  ProviderConfig
-		key  string
+		name      string
+		cfg       ProviderConfig
+		key       string
+		transport http.RoundTripper
 	}{
-		{"openai", ProviderConfig{Vendor: "openai", Model: "gpt-4o-mini-tts"}, "k"}, //nolint:gosec // G101: test-only fake key
-		{"qwen3", ProviderConfig{Vendor: "qwen3", BaseURL: "http://127.0.0.1:1"}, ""},
+		{"openai", ProviderConfig{Vendor: "openai", Model: "gpt-4o-mini-tts"}, "k", ttsCloudTransport}, //nolint:gosec // G101: test-only fake key
+		{"qwen3", ProviderConfig{Vendor: "qwen3", BaseURL: "http://127.0.0.1:1"}, "", ttsTransport},
 	} {
 		p, err := NewTTS(tc.cfg, tc.key)
 		if err != nil {
@@ -273,8 +275,8 @@ func TestNewTTSUsesSharedTransport(t *testing.T) {
 		if !ok {
 			t.Fatalf("%s: got %T, want *OpenAITTS", tc.name, p)
 		}
-		if oai.transport != ttsTransport {
-			t.Fatalf("%s: provider transport is not the shared ttsTransport", tc.name)
+		if oai.transport != tc.transport {
+			t.Fatalf("%s: provider transport is not the expected %T", tc.name, tc.transport)
 		}
 	}
 }

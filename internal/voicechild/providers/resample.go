@@ -34,17 +34,32 @@ const resampleClearAfter = resample.NeverClear
 // a mono rate pair), so the carry below never exceeds one byte.
 const resampleBytesPerFrame = 2
 
+// resampleCarryHeadroom is the spare prefix in the reusable scratch buffer
+// where a carried sub-sample byte is placed just before the input goes to
+// Process. s16le mono carries at most resampleBytesPerFrame-1 == 1 byte, so
+// one spare byte suffices. Verified against jargo v0.6.1: Resampler.Process
+// (sincStream.process) COPIES the input into per-channel []float32 buffers
+// and returns a freshly allocated result - it never retains the input slice.
+// Reusing scratch every pass is therefore safe. The carry itself lives in a
+// SEPARATE tiny buffer so that a rate-pair passthrough (where Process returns
+// the input slice itself) never has its pending output corrupted by the
+// next carry stash.
+const resampleCarryHeadroom = resampleBytesPerFrame - 1
+
 // newResamplingReader wraps src (s16le mono at inRate) in a reader that
 // emits s16le mono at outRate. It uses jargo's stateful streaming Resampler
 // (pure Go), so conversion is chunked and incremental - the caller starts
 // receiving converted audio without the whole stream being buffered.
 type resamplingReader struct {
-	src     io.Reader
-	rs      *resample.Resampler
-	pending []byte // converted audio not yet handed to the caller
-	carry   []byte // sub-sample residue from a short source read (0..bytesPerFrame-1 bytes)
-	srcErr  error  // sticky source error after pending drains
-	done    bool
+	src         io.Reader
+	rs          *resample.Resampler
+	pending     []byte // converted audio not yet handed to the caller
+	scratch     []byte // reusable read/process buffer: source lands at scratch[headroom:], carry is prepended before it
+	carry       []byte // sub-sample residue from a short source read (0..bytesPerFrame-1 bytes); own backing array
+	outBuf      []byte // reusable staging buffer for passthrough output (Process returns `in` when rates match)
+	passthrough bool   // inRate==outRate or resampler failed to build: Process returns the input slice itself
+	srcErr      error  // sticky source error after pending drains
+	done        bool
 }
 
 // ResampleS16Mono is the exported seam for newResamplingReader: it wraps
@@ -60,14 +75,33 @@ func ResampleS16Mono(src io.Reader, inRate, outRate int) (io.ReadCloser, error) 
 }
 
 func newResamplingReader(src io.Reader, inRate, outRate int) *resamplingReader {
+	// Allocate the read scratch, carry and passthrough buffers ONCE per
+	// reader instead of a fresh make([]byte, 640) on every Read pass (F8).
+	r := &resamplingReader{
+		src:     src,
+		scratch: make([]byte, resampleCarryHeadroom+resampleChunkBytes),
+		carry:   make([]byte, 0, resampleBytesPerFrame),
+		outBuf:  make([]byte, resampleChunkBytes+resampleBytesPerFrame),
+	}
 	rs, err := resample.NewWithConfig(inRate, outRate, 1, resample.Config{ClearAfter: resampleClearAfter})
 	if err != nil {
 		// The converter failed to build; degrade to passthrough rather
 		// than fail the call - the rate mismatch surfaces as pitch shift,
 		// which the daemon's rate negotiation prevents in practice.
-		return &resamplingReader{src: src, srcErr: nil, done: false, pending: nil, rs: nil}
+		// rs stays nil; the carry path is inert, but Process-style
+		// passthrough still returns `in`, so mark it accordingly.
+		r.passthrough = true
+		return r
 	}
-	return &resamplingReader{src: src, rs: rs}
+	// jargo's Resampler passes audio through unchanged (returning the input
+	// slice itself) when the rates match (sincStream.f.passthrough). Detect
+	// that case: the output must be copied out of the shared scratch before
+	// the next Read overwrites it, or it corrupts pending audio.
+	if inRate == outRate {
+		r.passthrough = true
+	}
+	r.rs = rs
+	return r
 }
 
 // Read implements io.Reader over the resampled stream.
@@ -108,10 +142,11 @@ func (r *resamplingReader) Read(p []byte) (int, error) {
 		if r.done {
 			return 0, r.srcErr
 		}
-		buf := make([]byte, resampleChunkBytes)
-		n, err := r.src.Read(buf)
+		// Read into the reusable scratch, leaving the carry headroom at the
+		// front. Source bytes land at scratch[headroom:headroom+n].
+		n, err := r.src.Read(r.scratch[resampleCarryHeadroom : resampleCarryHeadroom+resampleChunkBytes])
 		if n > 0 {
-			out := r.convertAligned(buf[:n])
+			out := r.convertAligned(r.scratch[resampleCarryHeadroom : resampleCarryHeadroom+n])
 			if len(out) > 0 {
 				r.pending = out
 				break // hand the caller what we have; the rest stays in pending
@@ -122,7 +157,7 @@ func (r *resamplingReader) Read(p []byte) (int, error) {
 			// Discard a half-sample left at the stream end: Process would
 			// drop it anyway, and keeping it alive would let it misalign a
 			// stream that has already ended.
-			r.carry = nil
+			r.carry = r.carry[:0]
 			if err == io.EOF {
 				r.srcErr = io.EOF
 			} else {
@@ -153,10 +188,14 @@ func (r *resamplingReader) Close() error {
 }
 
 // convert runs one frame-aligned chunk through the streaming resampler
-// (passthrough when the converter never built).
+// (passthrough when the converter never built or the rates match).
 func (r *resamplingReader) convert(in []byte) []byte {
-	if r.rs == nil {
-		return in
+	if r.passthrough {
+		// Process (or the degraded no-resampler path) returns `in` itself,
+		// which aliases the shared scratch. Stage a copy in outBuf so the
+		// next Read cannot overwrite audio still pending for the caller.
+		n := copy(r.outBuf, in)
+		return r.outBuf[:n]
 	}
 	out := r.rs.Process(in)
 	if out == nil {
@@ -176,18 +215,23 @@ func (r *resamplingReader) convertAligned(in []byte) []byte {
 		// is carried.
 		return r.convert(in)
 	}
+	// Prepend any carried residue. The carry lives in its own small buffer;
+	// copy it into the scratch headroom immediately before `in` so the
+	// frame-aligned sequence handed to Process is byte-identical to the old
+	// "joined := carry + in" path, without allocating.
 	if len(r.carry) > 0 {
-		joined := make([]byte, 0, len(r.carry)+len(in))
-		joined = append(joined, r.carry...)
-		joined = append(joined, in...)
-		in = joined
-		r.carry = nil
+		copy(r.scratch[resampleCarryHeadroom-len(r.carry):resampleCarryHeadroom], r.carry)
+		in = r.scratch[resampleCarryHeadroom-len(r.carry) : resampleCarryHeadroom+len(in)]
+		r.carry = r.carry[:0]
 	}
 	rem := len(in) % resampleBytesPerFrame
 	if rem > 0 {
-		// Copy, do not alias: the caller owns `in`'s backing array and may
-		// reuse it for the next source read.
-		r.carry = append(make([]byte, 0, rem), in[len(in)-rem:]...)
+		// Stash the trailing sub-sample byte in the dedicated carry buffer,
+		// never inside `in`: on a rate-pair passthrough Process can return
+		// `in` itself, so writing the carry into it would corrupt the
+		// audio still pending for the caller. append reuses the preallocated
+		// backing array (cap >= rem), so this does not allocate.
+		r.carry = append(r.carry, in[len(in)-rem:]...)
 		in = in[:len(in)-rem]
 	}
 	if len(in) == 0 {
