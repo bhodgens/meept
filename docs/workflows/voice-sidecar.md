@@ -1304,76 +1304,43 @@ spec's frame/config/flow contracts.
   `e2e/suites/context_warm`, both manifest-registered.
 
 
-## As-built (2026-11-19, rumble-stt-provider leaf 02): supervised vLLM Rumble sidecar + explicit GPU cap
+## As-built (2026-11-19, rumble-native-streaming): native Rumble streaming STT
 
 Rumble is an opt-in STT provider for the voice sidecar. Select it with
 `voice.stt_provider = "rumble"`; the whisper default is unchanged, so an
 install that never sets the key is byte-identical.
 
-The sidecar is a supervised vLLM server running `Reson8/Rumble-2-Flash` on
-loopback `127.0.0.1:8091`. It is **batch-only** — it is not a streaming
-provider; the voice child submits a completed audio window and receives a
-transcript.
+Rumble is a NATIVE STREAMING vendor (no pseudo-stream proxy). The child
+opens `ws://<stt_base_url>/v1/audio/transcriptions/stream` and streams s16le
+mono 16 kHz PCM as binary WS frames. The server self-segments and emits
+`final` events (words stable across consecutive decodes), `partial` for the
+changing tail, and `end` to terminate; silence yields no hallucinated text.
+Because finals are server-stable, they drive barge-in and endpointing
+directly and `stt_partial_ms` must be 0 (the proxy is bypassed for rumble
+and deepgram).
 
-### GPU budget (why the cap is explicit)
+### Live server (operator-deployed, no vLLM)
 
-- vLLM defaults to `--gpu-memory-utilization 0.92`. That is **unsafe** on the
-  RTX 3060 that also hosts qwen3-tts: only ~5.2 GB is free, and 0.92 starves
-  the TTS runtime.
-- The Rumble sidecar pins `--gpu-memory-utilization 0.20` (safe range
-  **0.20-0.25**) and `--max-model-len 4096`. The short context keeps the vLLM
-  KV-cache small enough to coexist with qwen3-tts on the same GPU.
-The sidecar config is frozen in `DefaultRumbleRuntimeConfig()` in
-`internal/daemon/rumble_wiring.go` and mirrored in the commented
-`[voice.rumble_runtime]` block of `config/meept.json5`. `SpawnArgs()` renders
-the exact vLLM command, so `--gpu-memory-utilization 0.20` and
-`--max-model-len 4096` come from ONE source of truth. Do not raise the
-fraction toward 0.92.
+The live server is a FastAPI + transformers app on `socrates:8000`, on GPU1
+beside qwen3-tts. There is NO vLLM and NO `Authorization` header (keyless).
+It decodes at roughly a 0.8 s cadence once >=1.0 s of audio has accumulated,
+with a 45 s cap on a single stream. The `chat_template_*` selectors are
+inert on this server; they are kept for a future vLLM deployment.
 
-### Lifecycle (reuses the existing runtime lifecycle, no new spawn path)
-
-`RumbleRuntimeConfig.SpawnArgs()` produces the `vllm serve` command with the
-explicit cap. The daemon spawns and supervises the sidecar using its existing
-runtime-lifecycle machinery when the operator selects
-`voice.stt_provider = "rumble"`. All existing guards apply unchanged:
-
-- **Never spawn into a served endpoint** — `RuntimeProcess.Start` probes the
-  port declared by `spawn_command` and refuses when a listener already exists.
-- **Health requires a live process** — `HealthChecker.SetProcessAliveProbe`;
-  a dead child is unhealthy whatever `/health` answers.
-- **Ownership forbids killing** — `RuntimeProcess.Stop` returns
-  `ErrRuntimeNotOwned` for another instance's runtime.
-- **The startup orphan sweep is the only reaper** — `StartupOrphanSweep`
-  runs before spawn; `auto_stop_on_exit` stops owned runtimes on graceful
-  shutdown (`Daemon.Stop` -> `ContainerManager.StopAll`).
-
-See `internal/daemon/AGENTS.md` for the full contract.
-
-### Operator example: rumble + pseudo-stream + template kwargs
+### Operator example: rumble native streaming
 
 ```json5
 {
   voice: {
     stt_provider: "rumble",             // opt-in; empty keeps whisper = default
-    stt_base_url: "http://127.0.0.1:8091/v1",
-    stt_partial_ms: 300,                // 0 = legacy (no decorator, one Final)
-    chat_template_language: "English",  // language NAME, not a code; omit = server default
-    chat_template_digits: true,
-    chat_template_filler: false,
-    chat_template_verbatim: true,
+    stt_base_url: "http://socrates:8000",
+    stt_partial_ms: 0,                  // native streaming; proxy bypassed for rumble/deepgram
   }
 }
 ```
 
-- Rumble posts `chat.completions` with an `audio_url` data URI; the four
-  `chat_template_*` keys ride ProviderConfig and the keys frame into the
-  request body. `stt_partial_ms` wraps ANY batch vendor in a generic
-  client-side pseudo-stream decorator (partials are snapshots, NOT server
-  incremental input); do NOT enable it on native-partial vendors (deepgram).
-- Partials do NOT reduce time-to-first-word on a batch model; they only let
-  partial barge-in and context warm start earlier. With `stt_partial_ms = 0`
-  a batch vendor has no partials, so those features stay off.
+- No API key is needed (keyless). The child connects over WS and sends
+  binary PCM frames; no base64/WAV, no `chat.completions` re-POST.
 - All keys are additive/omitempty: `stt_partial_ms = 0` and no
   `chat_template_*` keys = byte-identical legacy request and unwrapped
-  provider. The live vLLM pilot is still DEFERRED; gate tests use a fake
-  chat.completions server with the exact model-card body shape.
+  provider on the default (whisper) path.
