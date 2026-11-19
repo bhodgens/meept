@@ -1547,6 +1547,37 @@
   ],
   "scenarios": [
     {
+      "id": "rumble-native-stream-01",
+      "suite": "voice-lifecycle",
+      "diff": "M",
+      "title": "native Rumble WS streaming: fake /v1/audio/transcriptions/stream server + keys stt_vendor=rumble; PCM fed via providers.NewSTT yields server partial (Final=false) and final (Final=true) transcripts",
+      "status": "todo",
+      "paths": [
+        "internal/voicechild/providers/stt_rumble.go",
+        "internal/voicechild/providers/stt_deepgram.go"
+      ]
+    },
+    {
+      "id": "rumble-native-flush-01",
+      "suite": "voice-lifecycle",
+      "diff": "S",
+      "title": "native Rumble flush: closing the PCM channel sends exactly one empty binary frame and the server's final+end reply is honored",
+      "status": "todo",
+      "paths": [
+        "internal/voicechild/providers/stt_rumble.go"
+      ]
+    },
+    {
+      "id": "rumble-native-factory-01",
+      "suite": "voice-lifecycle",
+      "diff": "S",
+      "title": "native vendor not wrapped in PseudoStreamSTT: with stt_partial_ms set, the server's genuine partial still surfaces and no legacy chat.completions POST is made",
+      "status": "todo",
+      "paths": [
+        "internal/voicechild/providers/stt_deepgram.go"
+      ]
+    },
+    {
       "id": "rpc-ping-01",
       "suite": "rpc-ping",
       "diff": "S",

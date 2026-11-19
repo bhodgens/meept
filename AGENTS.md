@@ -515,14 +515,12 @@ session-affinity scope as the imminent turn) so the real turn pays
 decode, not prefill; warm never starts a turn or tools, consumes no
 budget, never touches blocks/metrics, and its failures are silent
 (DEBUG). Full contracts (C1-C6) in `internal/voice/AGENTS.md`. RUMBLE
-STT (invariant): additive/opt-in (default whisper unchanged), batch-only at
-the vendor, keyless; GPU cap 0.20-0.25 on shared 3060. Transport is
-`chat.completions` with an `audio_url` data URI (NOT a `transcriptions` JSON
-body, no auth header). A generic client-side pseudo-stream decorator
-(`stt_partial_ms`, opt-in >0, default 0 = unwrapped) turns ANY batch vendor
-into snapshot partials + one Final (not server incremental input; never
-enable on native-partial vendors like deepgram). All new keys/selectors
-absent = byte-identical legacy request/provider.
+STT (invariant): native streaming vendor (partial/final/end over a WS at
+`/v1/audio/transcriptions/stream`, keyless); the client-side pseudo-stream
+proxy is BYPASSED for native vendors (rumble, deepgram): `stt_partial_ms = 0`,
+and server-stable finals drive barge-in/endpointing. Whisper default and
+its batch proxy opt-in are unchanged. All new keys/selectors absent =
+byte-identical legacy request/provider.
 OPT-IN ENDPOINTING/LATENCY SELECTORS (plan 20261118-voice-tts-stt-optimizations):
 seven additive `VoiceConfig` keys cross the daemon->child C1 keys line as
 omitempty `KeysFrame` selectors (zero/empty = byte-identical legacy), so

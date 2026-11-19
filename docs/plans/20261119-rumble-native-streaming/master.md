@@ -204,11 +204,11 @@ branch to main only after gates are green.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-unit-tests | PENDING | 0 | |
-| 00Te-e2e-tests | PENDING | 0 | |
-| 01-native-ws-adapter | PENDING | 0 | |
-| 02-factory-posture | PENDING | 0 | |
-| 03-config-docs | PENDING | 0 | |
+| 00T-unit-tests | TESTS_VALIDATED | 1 | Commit 26790fa9; native WS RED gates, whisper guardrail PASS. |
+| 00Te-e2e-tests | TESTS_VALIDATED | 1 | Commit 26790fa9; fake WS e2e RED, 3 scenarios registered. |
+| 01-native-ws-adapter | REVIEWED | 1 | Commit e335ea15; native WS protocol, all gates GREEN, hooks green. |
+| 02-factory-posture | REVIEWED | 1 | Commit f5e384a2; native vendors bypass proxy, gate GREEN. |
+| 03-config-docs | REVIEWED | 1 | Commit f6e8d826; docs + AGENTS + template, stale comments reconciled. |
 
 Gate rule: implementation children stay PENDING until 00T + 00Te reach TESTS_VALIDATED.
 
@@ -245,6 +245,37 @@ Leaves freeze at dispatch. Corrections ride dispatch context as dated addenda.
   server; they remain in config for a future vLLM deployment. Documented in 03.
 - The 45 s server cap and 0.8 s decode cadence are operator-side server settings,
   not repo config. No new config fields for them in this tree.
+
+## Completion Report (2026-11-19)
+
+All five children COMPLETE. Commits: eae9a115 (plan), 26790fa9
+(gates), e335ea15 (01 native WS adapter), f5e384a2 (02 factory guard),
+f6e8d826 (03 docs/config).
+
+Integration gates in the worktree at final HEAD:
+- `go build ./cmd/meept-voice ./cmd/meept-daemon` - PASS.
+- `go test -p 2 -count=1 ./internal/voicechild/... ./internal/voice/...
+  ./internal/daemon/... ./internal/config/...` - all 8 packages PASS.
+- Rumble native e2e gates: stream / flush / factory / keys - all PASS.
+- `make e2e-fast-area AREA=voice-local` - PASS.
+- `make e2e-fast-area AREA=voice-lifecycle` - Red ONLY on the PRE-EXISTING
+  `TestVoiceKeysToProviders` (fake qwen3 synthesis timeout), proven at
+  base commit 9157700f in an earlier tree; unrelated, left untouched.
+
+Operator config (~/.meept/meept.json5, orchestrator-owned, outside tree):
+stt_provider=rumble, stt_base_url=http://socrates:8000, stt_partial_ms=0.
+Verified via rebuilt `meept config get` and live /health (model loaded,
+both transcription endpoints live). Binaries rebuilt from current main.
+
+Resolved during execution:
+- Hook fixes: mutexio (header/path reads outside lock in gate fake),
+  error handling (two ignored flush writes now DEBUG-logged).
+- Production const named `rumbleNativeStreamPath` to avoid collision with
+  the gate file's package-level `rumbleStreamPath`.
+- Stale config comments about chat_template keys reconciled: they are
+  inert on the transformers server; native vendors bypass the proxy.
+
+## Notes
 
 ## Notes
 

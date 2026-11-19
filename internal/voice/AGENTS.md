@@ -1092,15 +1092,12 @@ STT partials (`last:false` prompt frames) already reach the daemon; phase
 prompt cache (and the llama.cpp KV slot under the session-affinity
 scope) so the final turn pays decode, not prefill.
 
-- **Rumble STT (invariant):** additive/opt-in (default whisper unchanged),
-  batch-only at the vendor (one Final, no native partials), keyless; GPU cap
-  0.20-0.25 on the shared 3060. Transport is `chat.completions` with an
-  `audio_url` data URI, NOT a `transcriptions` JSON body. A generic
-  client-side pseudo-stream decorator (`stt_partial_ms`, opt-in >0, default 0
-  = unwrapped/legacy) wraps ANY batch vendor into client-side SNAPSHOT
-  partials + one Final (NOT server incremental input; never enable on
-  native-partial vendors like deepgram); with it on, partial context warm and
-  partial barge-in can fire on batch STT too. All new keys/selectors absent =
+- **Rumble STT (invariant):** native streaming vendor (WS
+  `/v1/audio/transcriptions/stream`, binary s16le mono 16k PCM; partial /
+  final / end, keyless). The client-side pseudo-stream proxy is BYPASSED for
+  native vendors (rumble, deepgram): `stt_partial_ms = 0`, no re-POST,
+  server-stable finals drive barge-in/endpointing. Whisper default and its
+  batch proxy opt-in are unchanged. All new keys/selectors absent =
   byte-identical legacy request/provider.
 
 - **Opt-in, default OFF:** `voice.context_warm` false = the warmer is

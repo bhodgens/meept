@@ -1423,14 +1423,18 @@
     "tts_ref_audio": "",                    // path to the qwen3 clone reference WAV; feeds ONLY the clip-key identity (sha256 into tts_ref_hash + voice_clips keys) — never a TTS request field; empty = preset voice
     "stt_model": "",                        // global STT model
     "tts_base_url": "",                     // TTS base URL override (local Qwen3-TTS server); empty = vendor default
-    "stt_base_url": "",                     // STT base URL override (vendor-agnostic: Deepgram-compatible / whisper / Rumble / Kyutai endpoint); empty = provider default (api.deepgram.com for the deepgram backend)
-    // ---- Rumble kwargs + pseudo-stream partials (opt-in, additive; zero/absent = byte-identical legacy) ----
-    // "chat_template_language": "English",  // language NAME (not a BCP-47 code); sent verbatim to chat_template_kwargs.language; empty = model default
-    // "chat_template_digits": null,         // bool -> chat_template_kwargs.digits; null = omit key (server default true)
-    // "chat_template_filler": null,         // bool -> chat_template_kwargs.filler; null = omit key (server default false)
-    // "chat_template_verbatim": null,       // bool -> chat_template_kwargs.verbatim; null = omit key (server default true)
-    // "stt_partial_ms": 0,                  // >0 wraps the base STT provider in the pseudo-stream decorator (partial streaming); 0 = legacy batch (one Final). Generic decorator works on any BATCH vendor but do NOT enable on native-partial vendors (e.g. deepgram); whisper remains the default provider.
-    // ---- Supervised vLLM Rumble STT sidecar (opt-in; active only when stt_provider = "rumble") ----
+    "stt_base_url": "",                     // STT base URL override (vendor-agnostic: Deepgram-compatible / whisper / Rumble / Kyutai endpoint); empty = provider default (api.deepgram.com for the deepgram backend). rumble uses a native WS stream endpoint: ws://<stt_base_url>/v1/audio/transcriptions/stream (s16le mono 16k PCM binary frames)
+    // ---- Rumble native streaming + legacy kwargs (all additive; absent/zero = byte-identical) ----
+    // NOTE: the live Rumble server (FastAPI + transformers on socrates:8000) streams natively
+    // over ws://<stt_base_url>/v1/audio/transcriptions/stream. It ignores the chat_template_* keys
+    // below; they are kept only for a future vLLM deployment. Rumble and deepgram are NATIVE
+    // partial vendors: leave stt_partial_ms = 0 (the pseudo-stream proxy is bypassed for them).
+    // "chat_template_language": "English",  // language NAME; INERT on the transformers server (future vLLM only); empty = omit
+    // "chat_template_digits": null,         // bool -> chat_template_kwargs.digits; INERT here (future vLLM only); null = omit
+    // "chat_template_filler": null,         // bool -> chat_template_kwargs.filler; INERT here (future vLLM only); null = omit
+    // "chat_template_verbatim": null,       // bool -> chat_template_kwargs.verbatim; INERT here (future vLLM only); null = omit
+    // "stt_partial_ms": 0,                  // 0 = native STT partials only (rumble/deepgram). >0 wraps a BATCH vendor (whisper) in the client-side pseudo-stream proxy; NEVER set for native-partial vendors.
+    // ---- Supervised vLLM Rumble STT sidecar (legacy vLLM path; NOT used by the live transformers server) ----
     // "rumble_runtime": {
     //   "gpu_memory_utilization": 0.20,          // EXPLICIT low GPU fraction (safe range 0.20-0.25); vLLM's 0.92 default is UNSAFE alongside qwen3-tts on the RTX 3060
     //   "max_model_len": 4096,                   // context cap: keeps the vLLM KV-cache small enough to coexist with qwen3-tts

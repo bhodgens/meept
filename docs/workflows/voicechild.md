@@ -106,37 +106,45 @@ without touching the main process.
   rides a TTS request. No PCM ever crosses the text socket: clip
   frames carry hex keys + text.
 
-### Rumble STT (opt-in batch provider)
+### Rumble STT (opt-in native streaming provider)
 
 Rumble is an ADDITIVE, opt-in STT vendor: select it with
 `stt_provider: "rumble"` (daemon `stt_vendor` selector); its base URL
 rides the `stt_base_url` keys-frame field. It is KEYLESS (no STT key
-needed), BATCH-ONLY at the vendor, and posts to `chat.completions` with an
-`audio_url` data URI (`data:audio/wav;base64,...`), reading the transcript
-from `choices[0].message.content`; it does NOT use the old `transcriptions`
-JSON body and sends NO Authorization header. Reported English WER is 6.60;
-the project ships under Apache-2.0. Run it against a warm vLLM sidecar
-started with `--gpu-memory-utilization 0.20` beside qwen3-tts on the shared
-GPU. Whisper remains the DEFAULT STT vendor; enabling rumble changes
-nothing unless explicitly selected.
+needed) and a NATIVE STREAMING vendor: the provider opens a websocket at
+`ws://<stt_base_url>/v1/audio/transcriptions/stream` and streams s16le
+mono 16 kHz PCM as BINARY WS frames (no base64, no WAV container). The
+server self-segments: it emits `final` events whose words are stable
+across consecutive decodes, `partial` for the changing tail, and `end`
+to terminate. Silence produces no hallucinated text. Reported English WER
+is 6.60; the project ships under Apache-2.0. The live server is a
+FastAPI + transformers app (see docs/workflows/voice-sidecar.md). Whisper
+remains the DEFAULT STT vendor; enabling rumble changes nothing unless
+explicitly selected.
 
 The model card's `chat_template_kwargs` ride ProviderConfig and the C1 keys
 frame as additive fields: `chat_template_language` (a language NAME, e.g.
 "English"; empty = omit) and pointer bools `chat_template_digits` /
-`chat_template_filler` / `chat_template_verbatim` (nil = omit; server
-defaults true / false / true). Only explicitly set fields reach the request
-body; all absent = the legacy request.
+`chat_template_filler` / `chat_template_verbatim` (nil = omit). These
+selectors are INERT on the transformers server, which ignores them; they
+are kept for a future vLLM deployment. Only explicitly set fields reach the
+request; all absent = the legacy request.
 
-`stt_partial_ms` (keys-frame `stt_partial_ms`, default 0) wraps ANY batch STT
-vendor in a provider-agnostic client-side pseudo-stream decorator: it
-snapshots a growing PCM buffer into successive complete utterances, emitting
+PROXY WORKAROUND CHANGE: `PseudoStreamSTT` used to snapshot + re-POST a
+growing PCM buffer (O(n^2), no real incremental input) to fake partials
+from a batch vendor. With native streaming it is BYPASSED for the native
+vendors (rumble and deepgram): no re-POST, genuine server-stable `final`
+events drive barge-in and endpointing, and `stt_partial_ms` should be 0.
+Whisper can still opt into the proxy: `stt_partial_ms` (keys-frame
+`stt_partial_ms`, default 0) wraps ANY BATCH STT vendor in a
+provider-agnostic client-side pseudo-stream decorator - it snapshots a
+growing PCM buffer into successive complete utterances, emitting
 `Transcript{Final:false}` partials followed by exactly one `Final:true`.
 Those partials are CLIENT-SIDE SNAPSHOTS of a batch result, NOT server
-incremental input; they can feed partial barge-in and context warm on a batch
-vendor but do not reduce time-to-first-word. Do NOT enable it on
-native-partial vendors (deepgram), which already emit partials and would
-double-partial. With `stt_partial_ms = 0` the base provider is returned
-unwrapped, so whisper and every existing vendor stay byte-identical.
+incremental input; they can feed partial barge-in and context warm on a
+batch vendor but do not reduce time-to-first-word. With `stt_partial_ms = 0`
+the base provider is returned unwrapped, so whisper and every existing
+vendor stay byte-identical.
 
 ## Configuration options
 

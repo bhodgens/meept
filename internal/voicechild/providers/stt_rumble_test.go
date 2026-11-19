@@ -1,331 +1,302 @@
 package providers
 
-// F1 gate: the Rumble adapter buffers one voiced PCM window, posts it to a
-// warm vLLM transcription server as base64 audio, and emits exactly one
-// Final transcript. The fake server proves the keyless request shape.
-// RED until leaf 01 lands newRumbleSTT.
+// Unit gate tests (leaf 00T) for the NATIVE Rumble WebSocket streaming
+// protocol. These REPLACE the stale chat.completions / base64-WAV tests.
+//
+// Wire contract (verified from the live server source):
+//   - dial ws://<base>/v1/audio/transcriptions/stream (cfg.BaseURL is http://
+//     and upgraded to ws:// by the shared dialURL helper)
+//   - client sends raw s16le mono 16 kHz PCM as BINARY frames; flush = an
+//     empty binary frame (or text "end")
+//   - server replies with JSON text frames: type partial / final / end
+//   - silence yields only {"type":"end","text":""}
+//   - keyless: NO Authorization header, no base64, no WAV body.
+//
+// RED against the current batch (chat.completions POST) adapter: the fake WS
+// server is never reached and the transcripts do not match.
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/caimlas/meept/internal/voicechild"
+	"github.com/coder/websocket"
 )
 
-func TestRumbleSTTStream(t *testing.T) {
-	var sawAudioURL, sawAuth bool
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasSuffix(r.URL.Path, "/v1/chat/completions") {
-			t.Errorf("request path = %q, want /v1/chat/completions", r.URL.Path)
-		}
-		if r.Header.Get("Authorization") != "" {
-			sawAuth = true
-		}
-		var body map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Errorf("decode request: %v", err)
-		}
-		if uri, ok := audioURLFromBody(body); ok && strings.HasPrefix(uri, "data:audio/wav;base64,") {
-			sawAudioURL = true
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"hello there"}}]}`)
-	}))
-	defer srv.Close()
+const (
+	rumbleStreamPath = "/v1/audio/transcriptions/stream"
 
-	stt, err := newRumbleSTT(ProviderConfig{
-		Vendor:     "rumble",
-		Model:      "Reson8/Rumble-2-Flash",
-		BaseURL:    srv.URL,
-		SampleRate: 16000,
-	})
-	if err != nil {
-		t.Fatalf("newRumbleSTT: %v", err)
-	}
-	var _ voicechild.STTProvider = stt
+	evPartial1 = `{"type":"partial","text":"Yesterday it was"}`
+	evFinal1   = `{"type":"final","text":"Yesterday it was"}`
+	evPartial2 = `{"type":"partial","text":"30 degrees"}`
+	evFinal2   = `{"type":"final","text":"30 degrees"}`
+	evEndFull  = `{"type":"end","text":"Yesterday it was 30 degrees"}`
+	evEndEmpty = `{"type":"end","text":""}`
+)
 
-	pcm := make(chan []byte)
-	go func() {
-		for range 40 {
-			pcm <- make([]byte, 640)
-		}
-		close(pcm)
-	}()
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	out, err := stt.Stream(ctx, pcm)
-	if err != nil {
-		t.Fatalf("Stream: %v", err)
-	}
-	select {
-	case tr, ok := <-out:
-		if !ok {
-			t.Fatal("stream closed with no transcript")
-		}
-		if tr.Text != "hello there" || !tr.Final {
-			t.Fatalf("transcript = %+v, want {hello there true}", tr)
-		}
-	case <-ctx.Done():
-		t.Fatal("timed out waiting for transcript")
-	}
-	if !sawAudioURL {
-		t.Error("request omitted messages[0].content[0].audio_url.url data URI")
-	}
-	if sawAuth {
-		t.Error("keyless Rumble adapter sent an Authorization header")
-	}
+// rumbleFlusher is the barge-in seam the native adapter must expose on the
+// provider returned by NewSTT. The base STTProvider interface has no such
+// method, so the test probes it via a narrow interface (no concrete-type
+// dependency).
+type rumbleFlusher interface {
+	FlushNow()
 }
 
-// ---- F1/F3 gate additions (leaf 00T). TestRumbleSTTStream above is untouched. ----
-
-// audioURLFromBody extracts messages[0].content[0].audio_url.url from a
-// chat.completions request body (contract C3). ok=false when the shape is
-// absent (today's buggy {"model","file"} body).
-func audioURLFromBody(body map[string]any) (string, bool) {
-	msgs, ok := body["messages"].([]any)
-	if !ok || len(msgs) == 0 {
-		return "", false
-	}
-	m, ok := msgs[0].(map[string]any)
-	if !ok {
-		return "", false
-	}
-	content, ok := m["content"].([]any)
-	if !ok || len(content) == 0 {
-		return "", false
-	}
-	part, ok := content[0].(map[string]any)
-	if !ok {
-		return "", false
-	}
-	audio, ok := part["audio_url"].(map[string]any)
-	if !ok {
-		return "", false
-	}
-	u, ok := audio["url"].(string)
-	return u, ok
+// rumbleFake is an httptest WebSocket server speaking the native Rumble
+// protocol. It records the handshake path/auth and counts binary frames,
+// and calls onBinary(empty, size) for each binary frame to decide which JSON
+// text events (if any) to reply with.
+type rumbleFake struct {
+	srv        *httptest.Server
+	mu         sync.Mutex
+	gotAuth    string
+	gotPath    string
+	frames     int // non-empty binary PCM frames
+	empties    int // empty binary flush frames
+	sawBin     chan struct{}
+	sawBinOnce sync.Once
+	onBinary   func(empty bool, n int) []string
 }
 
-// feedRumblePCM sends a few voiced chunks then closes pcm, so the adapter
-// flushes exactly one window on close.
-func feedRumblePCM(pcm chan<- []byte) {
-	for range 3 {
-		pcm <- []byte{1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0}
-	}
-	close(pcm)
-}
-
-// TestRumbleRequestShape (F1/C3): the Rumble adapter must POST a
-// chat.completions request whose messages[0].content[0].audio_url.url is a
-// WAV data URI, send no Authorization header, and read the transcript from
-// choices[0].message.content. RED today: NewSTT posts {"model","file"} to
-// /v1/audio/transcriptions and parses a flat {"text"} response.
-func TestRumbleRequestShape(t *testing.T) {
-	type captured struct {
-		path string
-		auth string
-		body map[string]any
-	}
-	var mu sync.Mutex
-	var got []captured
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		c := captured{path: r.URL.Path, auth: r.Header.Get("Authorization")}
-		if err := json.NewDecoder(r.Body).Decode(&c.body); err != nil {
-			t.Errorf("decode request body: %v", err)
-		}
-		mu.Lock()
-		got = append(got, c)
-		mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"hello there"}}]}`)
-	}))
-	defer srv.Close()
-
-	stt, err := NewSTT(ProviderConfig{
-		Vendor: "rumble", Model: "Reson8/Rumble-2-Flash",
-		BaseURL: srv.URL, SampleRate: 16000,
-	}, "")
-	if err != nil {
-		t.Fatalf("NewSTT: %v", err)
-	}
-	pcm := make(chan []byte)
-	go feedRumblePCM(pcm)
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	out, err := stt.Stream(ctx, pcm)
-	if err != nil {
-		t.Fatalf("Stream: %v", err)
-	}
-	var texts []voicechild.Transcript
-	for tr := range out {
-		texts = append(texts, tr)
-	}
-
-	// Assert the wire shape FIRST so the RED output names the wrong
-	// path/body (the transport bug), not just the empty transcript.
-	mu.Lock()
-	defer mu.Unlock()
-	if len(got) == 0 {
-		t.Fatal("server saw no transcription request")
-	}
-	for i, c := range got {
-		if !strings.HasSuffix(c.path, "/v1/chat/completions") {
-			t.Errorf("request %d path = %q, want suffix /v1/chat/completions", i, c.path)
-		}
-		if c.auth != "" {
-			t.Errorf("request %d carried Authorization header (Rumble is keyless)", i)
-		}
-		uri, ok := audioURLFromBody(c.body)
-		if !ok || !strings.HasPrefix(uri, "data:audio/wav;base64,") {
-			t.Errorf("request %d messages[0].content[0].audio_url.url = %q (present=%v), want data:audio/wav;base64,...", i, uri, ok)
-		}
-	}
-	if len(texts) != 1 {
-		t.Fatalf("transcript count = %d, want exactly 1: %+v", len(texts), texts)
-	}
-	if texts[0].Text != "hello there" || !texts[0].Final {
-		t.Fatalf("transcript = %+v, want {hello there true}", texts[0])
-	}
-}
-
-// setKwargsField sets one C2 field on cfg through reflection so this gate
-// compiles before the fields exist (they land in leaf 01).
-func setKwargsField(t *testing.T, cfg *ProviderConfig, name string, val any) {
+func newRumbleFake(t *testing.T, onBinary func(empty bool, n int) []string) *rumbleFake {
 	t.Helper()
-	f := reflect.ValueOf(cfg).Elem().FieldByName(name)
-	if !f.IsValid() || !f.CanSet() {
-		t.Fatalf("cannot set ProviderConfig.%s", name)
-	}
-	switch v := val.(type) {
-	case string:
-		f.SetString(v)
-	case *bool:
-		if v == nil {
-			f.Set(reflect.Zero(f.Type()))
+	f := &rumbleFake{onBinary: onBinary, sawBin: make(chan struct{})}
+	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader := r.Header.Get("Authorization")
+		reqPath := r.URL.Path
+		f.mu.Lock()
+		f.gotAuth = authHeader
+		f.gotPath = reqPath
+		f.mu.Unlock()
+
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
 			return
 		}
-		p := reflect.New(f.Type().Elem())
-		p.Elem().SetBool(*v)
-		f.Set(p)
-	default:
-		t.Fatalf("unsupported kwargs value type %T", val)
+		defer conn.Close(websocket.StatusNormalClosure, "")
+		ctx := r.Context()
+		for {
+			mt, data, err := conn.Read(ctx)
+			if err != nil {
+				return
+			}
+			if mt != websocket.MessageBinary {
+				continue
+			}
+			empty := len(data) == 0
+			f.mu.Lock()
+			if empty {
+				f.empties++
+			} else {
+				f.frames++
+			}
+			f.mu.Unlock()
+			if !empty {
+				f.sawBinOnce.Do(func() { close(f.sawBin) })
+			}
+			if f.onBinary != nil {
+				for _, ev := range f.onBinary(empty, len(data)) {
+					if werr := conn.Write(ctx, websocket.MessageText, []byte(ev)); werr != nil {
+						return
+					}
+				}
+			}
+		}
+	}))
+	t.Cleanup(f.srv.Close)
+	return f
+}
+
+// baseURL is an http:// httptest URL rewritten to ws://; dialURL (shared
+// with the Deepgram adapter) appends rumbleStreamPath on the dial.
+func (f *rumbleFake) baseURL() string {
+	return strings.Replace(f.srv.URL, "http", "ws", 1)
+}
+
+func (f *rumbleFake) snapshot() (auth, path string, frames, empties int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.gotAuth, f.gotPath, f.frames, f.empties
+}
+
+// drainRumble reads until the transcript channel closes or the timeout fires.
+func drainRumble(t *testing.T, out <-chan voicechild.Transcript, timeout time.Duration) []voicechild.Transcript {
+	t.Helper()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	var got []voicechild.Transcript
+	for {
+		select {
+		case tr, ok := <-out:
+			if !ok {
+				return got
+			}
+			got = append(got, tr)
+		case <-timer.C:
+			t.Fatalf("timed out after %s waiting for transcript stream to close", timeout)
+		}
 	}
 }
 
-// runRumbleRequest drives one Rumble stream against a fresh fake
-// chat.completions server and returns the captured request body + auth.
-func runRumbleRequest(t *testing.T, cfg ProviderConfig) (map[string]any, string) {
+// runRumbleNative builds the STT through the real factory, starts a stream,
+// optionally waits for the first PCM frame then kicks FlushNow, and drains.
+func runRumbleNative(
+	t *testing.T,
+	f *rumbleFake,
+	chunks [][]byte,
+	closePCM bool,
+	kick func(voicechild.STTProvider),
+) []voicechild.Transcript {
 	t.Helper()
-	var mu sync.Mutex
-	var body map[string]any
-	var auth string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var b map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
-			t.Errorf("decode request: %v", err)
-		}
-		authValue := r.Header.Get("Authorization")
-		mu.Lock()
-		body, auth = b, authValue
-		mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"ok"}}]}`)
-	}))
-	defer srv.Close()
-	cfg.Vendor = "rumble"
-	cfg.BaseURL = srv.URL
-	if cfg.SampleRate == 0 {
-		cfg.SampleRate = 16000
-	}
-	stt, err := NewSTT(cfg, "")
+	stt, err := NewSTT(ProviderConfig{
+		Vendor: "rumble", Model: "Reson8/Rumble-2-Flash",
+		BaseURL: f.baseURL(), SampleRate: 16000,
+	}, "")
 	if err != nil {
-		t.Fatalf("NewSTT: %v", err)
+		t.Fatalf("NewSTT(rumble): %v", err)
 	}
-	pcm := make(chan []byte)
-	go feedRumblePCM(pcm)
+
+	pcm := make(chan []byte, len(chunks)+1)
+	for _, c := range chunks {
+		pcm <- c
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	out, err := stt.Stream(ctx, pcm)
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	for range out { // drain so the handler completes
+	if kick != nil {
+		select {
+		case <-f.sawBin:
+		case <-ctx.Done():
+			t.Fatal("server never saw a binary PCM frame before FlushNow")
+		}
+		kick(stt)
 	}
-	mu.Lock()
-	defer mu.Unlock()
-	return body, auth
+	if closePCM {
+		close(pcm)
+	}
+	return drainRumble(t, out, 3*time.Second)
 }
 
-// TestRumbleTemplateKwargs (F3/C2/C3): ProviderConfig's chat_template_*
-// fields must reach the request body's chat_template_kwargs with exact
-// values; an all-nil/empty config must omit the key entirely. RED today:
-// the C2 fields do not exist (named by the reflection preflight) and the
-// transport has no kwargs.
-func TestRumbleTemplateKwargs(t *testing.T) {
-	ct := reflect.TypeFor[ProviderConfig]()
-	type fieldSpec struct {
-		name string
-		want reflect.Kind
-		ptr  bool
-	}
-	spec := []fieldSpec{
-		{"ChatTemplateLanguage", reflect.String, false},
-		{"ChatTemplateDigits", reflect.Bool, true},
-		{"ChatTemplateFiller", reflect.Bool, true},
-		{"ChatTemplateVerbatim", reflect.Bool, true},
-	}
-	for _, s := range spec {
-		f, ok := ct.FieldByName(s.name)
-		if !ok {
-			t.Errorf("missing symbol ProviderConfig.%s (contract C2 F3)", s.name)
-			continue
-		}
-		got := f.Type
-		if s.ptr {
-			if got.Kind() != reflect.Ptr || got.Elem().Kind() != s.want {
-				t.Errorf("ProviderConfig.%s is %s, want *%s", s.name, got, s.want)
+// T1 / F1: partial -> {Final:false}, final -> {Final:true}, one per event in
+// order. The trailing `end` carries the full text already covered by the two
+// finals, so it MUST NOT emit a duplicate final. Handshake is keyless.
+func TestRumbleNativeStreamEvents(t *testing.T) {
+	var once sync.Once
+	f := newRumbleFake(t, func(empty bool, n int) []string {
+		var events []string
+		once.Do(func() {
+			if !empty && n > 0 {
+				events = []string{evPartial1, evFinal1, evPartial2, evFinal2, evEndFull}
 			}
-		} else if got.Kind() != s.want {
-			t.Errorf("ProviderConfig.%s is %s, want %s", s.name, got, s.want)
+		})
+		return events
+	})
+
+	got := runRumbleNative(t, f, [][]byte{
+		pcmS16LE(160), pcmS16LE(160), pcmS16LE(160),
+	}, true, nil)
+
+	want := []voicechild.Transcript{
+		{Text: "Yesterday it was", Final: false},
+		{Text: "Yesterday it was", Final: true},
+		{Text: "30 degrees", Final: false},
+		{Text: "30 degrees", Final: true},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("transcript count = %d, want %d: %+v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("transcript[%d] = %+v, want %+v", i, got[i], want[i])
 		}
 	}
-	if t.Failed() {
-		t.Fatalf("C2 kwargs fields missing - cannot gate request body")
-	}
 
-	falseVal, trueVal := false, true
-	cfg := ProviderConfig{Vendor: "rumble", Model: "Reson8/Rumble-2-Flash"}
-	setKwargsField(t, &cfg, "ChatTemplateLanguage", "English")
-	setKwargsField(t, &cfg, "ChatTemplateDigits", &falseVal)
-	setKwargsField(t, &cfg, "ChatTemplateFiller", &trueVal)
-	setKwargsField(t, &cfg, "ChatTemplateVerbatim", &falseVal)
-
-	body, auth := runRumbleRequest(t, cfg)
+	auth, path, frames, _ := f.snapshot()
 	if auth != "" {
-		t.Errorf("Rumble request carried Authorization header")
+		t.Errorf("keyless Rumble sent Authorization header %q", auth)
 	}
-	kw, ok := body["chat_template_kwargs"].(map[string]any)
-	if !ok {
-		t.Fatalf("request body has no chat_template_kwargs: %v", body)
+	if path != rumbleStreamPath {
+		t.Errorf("handshake path = %q, want %q", path, rumbleStreamPath)
 	}
-	want := map[string]any{"language": "English", "digits": false, "filler": true, "verbatim": false}
-	for k, w := range want {
-		if got, ok := kw[k]; !ok || got != w {
-			t.Errorf("chat_template_kwargs[%q] = %v (present=%v), want %v (body: %v)", k, got, ok, w, body)
-		}
+	if frames == 0 {
+		t.Error("server saw no binary PCM frames (base64/WAV body is not the native protocol)")
 	}
+}
 
-	// All-nil/empty row: the key must be omitted entirely.
-	body2, _ := runRumbleRequest(t, ProviderConfig{Vendor: "rumble", Model: "Reson8/Rumble-2-Flash"})
-	if _, ok := body2["chat_template_kwargs"]; ok {
-		t.Errorf("nil kwargs row still sent chat_template_kwargs: %v", body2)
+// T2 / F2: the server must receive exactly one empty binary flush frame both
+// when the caller closes pcm and when FlushNow() kicks the pump early.
+func TestRumbleNativeFlush(t *testing.T) {
+	cases := []struct {
+		name     string
+		closePCM bool
+		kick     bool
+	}{
+		{name: "pcm close", closePCM: true},
+		{name: "FlushNow", kick: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newRumbleFake(t, func(empty bool, n int) []string {
+				if empty {
+					return []string{evEndEmpty}
+				}
+				return nil
+			})
+			var kickFn func(voicechild.STTProvider)
+			if tc.kick {
+				kickFn = func(stt voicechild.STTProvider) {
+					fl, ok := stt.(rumbleFlusher)
+					if !ok {
+						t.Fatalf("STT %T does not expose FlushNow()", stt)
+					}
+					fl.FlushNow()
+				}
+			}
+			_ = runRumbleNative(t, f, [][]byte{pcmS16LE(160)}, tc.closePCM, kickFn)
+
+			_, path, _, empties := f.snapshot()
+			if path != rumbleStreamPath {
+				t.Errorf("handshake path = %q, want %q", path, rumbleStreamPath)
+			}
+			if empties < 1 {
+				t.Errorf("server saw %d empty binary flush frames, want >=1", empties)
+			}
+		})
+	}
+}
+
+// T4 / F4: silence produces only {"type":"end","text":""}. No partial, no
+// final, and the transcript channel closes cleanly.
+func TestRumbleNativeSilence(t *testing.T) {
+	var mu sync.Mutex
+	var emitted bool
+	f := newRumbleFake(t, func(empty bool, n int) []string {
+		mu.Lock()
+		defer mu.Unlock()
+		if empty && !emitted {
+			emitted = true
+			return []string{evEndEmpty}
+		}
+		return nil
+	})
+
+	got := runRumbleNative(t, f, [][]byte{make([]byte, 640)}, true, nil)
+	if len(got) != 0 {
+		t.Fatalf("silence produced %d transcripts %+v, want zero", len(got), got)
+	}
+	auth, path, _, _ := f.snapshot()
+	if auth != "" {
+		t.Errorf("keyless Rumble sent Authorization header %q", auth)
+	}
+	if path != rumbleStreamPath {
+		t.Errorf("handshake path = %q, want %q", path, rumbleStreamPath)
 	}
 }
