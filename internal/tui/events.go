@@ -88,6 +88,13 @@ func DefaultEventStreamConfig() *EventStreamConfig {
 			"conversation.*",
 			"plan.*",
 			"turn.terminal",
+			// bot.result / employee.result are 2-segment typed topics;
+			// matchWildcard needs equal segment counts, so no wildcard
+			// above sees them. Without exact-topic subscriptions the TUI
+			// never learns a bot/employee round finished (issue #160).
+			// Non-overlapping with every pattern above.
+			"bot.result",
+			"employee.result",
 			// ACP human-permission relay (acp-human-permission-relay
 			// leaf 04, Contract D): acp.permission.requested/.resolved
 			// are 3-segment topics — matchWildcard needs equal segment
