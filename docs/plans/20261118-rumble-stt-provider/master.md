@@ -186,11 +186,11 @@ set children COMPLETE.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-unit-tests | PENDING | 0 | |
-| 00Te-e2e-tests | PENDING | 0 | |
-| 01-rumble-adapter | PENDING | 0 | |
-| 02-sidecar-wiring | PENDING | 0 | |
-| 03-registration-docs | PENDING | 0 | |
+| 00T-unit-tests | TESTS_VALIDATED | 1 | Authored in-session; RED on undefined newRumbleSTT/DefaultRumbleRuntimeConfig, not syntax. Commit 9d3ef25b. |
+| 00Te-e2e-tests | TESTS_VALIDATED | 1 | Authored in-session; keys gate RED on unknown vendor; F4 honest skip cites research:45. Commit 9d3ef25b. |
+| 01-rumble-adapter | PENDING | 0 | dispatched |
+| 02-sidecar-wiring | PENDING | 0 | dispatched |
+| 03-registration-docs | PENDING | 0 | dispatched |
 
 Gate rule: implementation children stay PENDING until 00T + 00Te reach TESTS_VALIDATED.
 
@@ -211,11 +211,11 @@ ships; the gate records whether genuine incremental input exists.
 
 | # | Feature | Source | Unit tests | E2E tests | Status |
 |---|---------|--------|-----------|-----------|--------|
-| F1 | Adapter posts buffered PCM, emits Final:true | 01 Task 2 | TestRumbleSTTStream | rumble-stt-01 | PENDING |
-| F2 | NewSTT constructs rumble from keys frame | 03 Task 1 | TestNewSTT_Rumble | voice-keys-rumble-01 | PENDING |
-| F3 | Whisper default unchanged | 03 Task 2 | TestNewSTT_DefaultUnchanged | existing keys-providers-01 | PENDING |
-| F4 | Streaming capability decision recorded | 00Te T4 | n/a - research | TestRumbleStreamingProbe (skip with reason if unsupported) | PENDING |
-| F5 | GPU memory cap explicit in runtime config | 02 Task 1 | TestRumbleRuntimeConfigCap | n/a - config assertion | PENDING |
+| F1 | Adapter posts buffered PCM, emits Final:true | 01 Task 2 | TestRumbleSTTStream | rumble-stt-01 | VALIDATED |
+| F2 | NewSTT constructs rumble from keys frame | 03 Task 1 | TestNewSTT_Rumble | voice-keys-rumble-01 | VALIDATED |
+| F3 | Whisper default unchanged | 03 Task 2 | TestNewSTT_DefaultUnchanged | existing keys-providers-01 | VALIDATED |
+| F4 | Streaming capability decision recorded | 00Te T4 | n/a - research | TestRumbleStreamingProbe (skip with reason if unsupported) | VALIDATED (batch-only; skip cites research:45) |
+| F5 | GPU memory cap explicit in runtime config | 02 Task 1 | TestRumbleRuntimeConfigCap | n/a - config assertion | VALIDATED |
 
 Statuses: PENDING | DELTA | VALIDATED. Delta log: none yet.
 
