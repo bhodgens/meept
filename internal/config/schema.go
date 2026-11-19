@@ -5848,6 +5848,29 @@ type VoiceConfig struct {
 	Local            LocalConfig         `json:"local"                  toml:"local"`
 	EmployeeLeg      []EmployeeLegConfig `json:"employee_leg"   toml:"employee_leg"`
 	Messaging        MessagingConfig     `json:"messaging"              toml:"messaging"`
+	// ---- voice TTS/STT optimization knobs (20261118, contract C2) ----
+	// All seven are ADDITIVE and OPT-IN: zero/empty (their DefaultConfig
+	// values) reproduces the pre-change wire and behavior byte-identically.
+	// They are carried over the C1 keys line as omitempty selectors so every
+	// later branch consumes one seam.
+	SmartTurnMode int `json:"smart_turn_mode" toml:"smart_turn_mode"` // 0 = current behavior; 1 = kill switch; 2 = consume end-of-turn verdict
+	// WhisperServerAddr, when non-empty, selects a persistent whisper.cpp
+	// server instead of the per-utterance exec path. Empty = legacy exec.
+	WhisperServerAddr string `json:"whisper_server_addr" toml:"whisper_server_addr"`
+	// DeepgramEndpointMs > 0 enables the authoritative speech_final
+	// endpoint fast path; 0 keeps the legacy fixed-timer endpointing.
+	DeepgramEndpointMs int `json:"deepgram_endpoint_ms" toml:"deepgram_endpoint_ms"`
+	// RecognitionVocabulary primes critical entities on the STT request
+	// (Deepgram keyterm params / Whisper -p prompt). Empty = byte-identical.
+	RecognitionVocabulary []string `json:"recognition_vocabulary" toml:"recognition_vocabulary"`
+	// Qwen3ChunkSize overrides the qwen3 pcm-stream chunk_size; 0 => 4.
+	Qwen3ChunkSize int `json:"qwen3_chunk_size" toml:"qwen3_chunk_size"`
+	// ClipPrewarmDelayMs defers a queued clip render by this many ms
+	// after the played edge; 0 = render immediately (legacy).
+	ClipPrewarmDelayMs int `json:"clip_prewarm_delay_ms" toml:"clip_prewarm_delay_ms"`
+	// ContextWarmWindowMs overrides the partial-context-warm debounce
+	// window; 0 = resolve from turn_confirm_ms (legacy).
+	ContextWarmWindowMs int `json:"context_warm_window_ms" toml:"context_warm_window_ms"`
 }
 
 // DefaultUnapprovedCallerAllowedTools is the [voice]

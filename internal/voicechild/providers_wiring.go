@@ -123,6 +123,17 @@ type keysWire struct {
 	// decoded on the pipeline (p.ttsRefHash) for the byte-equality
 	// contract test between the two key computations.
 	TTSRefHash string `json:"tts_ref_hash"`
+	// ---- voice TTS/STT optimization selectors (20261118, contract C1) ----
+	// All ADDITIVE/OPTIONAL: absent on an old daemon line decodes as the
+	// zero value (= legacy behavior). The daemon sends them omitempty,
+	// so a zero-value frame never carries these keys on the wire.
+	SmartTurnMode       int      `json:"smart_turn_mode"`
+	WhisperServerAddr   string   `json:"whisper_server_addr"`
+	DeepgramEndpointMs  int      `json:"deepgram_endpoint_ms"`
+	Vocabulary          []string `json:"vocabulary"`
+	Qwen3ChunkSize      int      `json:"qwen3_chunk_size"`
+	ClipPrewarmDelayMs  int      `json:"clip_prewarm_delay_ms"`
+	ContextWarmWindowMs int      `json:"context_warm_window_ms"`
 }
 
 // handleKeysFrame decodes one raw keys line into the redacting KeysFrame
@@ -189,6 +200,15 @@ func (c *Child) handleKeysFrame(line string) error {
 		FragmentDecayS: fragmentDecayS,
 		ReplyExemptS:   replyExemptS,
 		TTSRefHash:     w.TTSRefHash,
+		// TTS/STT optimization selectors: absent-on-wire decodes as the
+		// zero value, which is every knob's legacy behavior.
+		SmartTurnMode:       w.SmartTurnMode,
+		WhisperServerAddr:   w.WhisperServerAddr,
+		DeepgramEndpointMs:  w.DeepgramEndpointMs,
+		Vocabulary:          w.Vocabulary,
+		Qwen3ChunkSize:      w.Qwen3ChunkSize,
+		ClipPrewarmDelayMs:  w.ClipPrewarmDelayMs,
+		ContextWarmWindowMs: w.ContextWarmWindowMs,
 	})
 }
 

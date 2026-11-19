@@ -35,6 +35,16 @@ func buildVoiceFields() []Field {
 		// (the GUI surface for rows is tracked separately, same
 		// posture as the pre-leaf employee_leg block).
 		NewNumberField("voice.turn_confirm_ms", "turn confirm ms", s.TurnConfirmMs),
+		// Voice TTS/STT optimization knobs (20261118, contract C2): all
+		// additive and opt-in; zero/empty = legacy behavior. Carried to
+		// the child over the C1 keys line as omitempty selectors.
+		NewNumberField("voice.smart_turn_mode", "smart turn mode (0 default, 1 off, 2 consume)", s.SmartTurnMode),
+		NewTextField("voice.whisper_server_addr", "whisper server addr (empty = per-utterance exec)", s.WhisperServerAddr),
+		NewNumberField("voice.deepgram_endpoint_ms", "deepgram endpoint ms (0 = legacy timer)", s.DeepgramEndpointMs),
+		NewTextField("voice.recognition_vocabulary", "recognition vocabulary (comma separated)", voiceJoinSlice(s.RecognitionVocabulary)),
+		NewNumberField("voice.qwen3_chunk_size", "qwen3 chunk size (0 = 4)", s.Qwen3ChunkSize),
+		NewNumberField("voice.clip_prewarm_delay_ms", "clip prewarm delay ms (0 = immediate)", s.ClipPrewarmDelayMs),
+		NewNumberField("voice.context_warm_window_ms", "context warm window ms (0 = turn confirm ms)", s.ContextWarmWindowMs),
 		// Partial context warm (phase2-context-warm leaf 02, C6): the
 		// warm debounce window IS turn_confirm_ms above, so only the
 		// flag + token floor are separate knobs.

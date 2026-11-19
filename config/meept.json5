@@ -1376,6 +1376,14 @@
     "filler": ["Hold on, let me check."],   // spoken filler lines while working
     "filler_grace_ms": 2500,                // wait this long after a prompt before speaking filler (0 = immediate); per-employee override: employee_leg[].filler_grace_ms
     "turn_confirm_ms": 900,                 // child-side turn aggregation: consecutive final transcripts inside this window dispatch ONE employee turn (kills the breath-pause fragment fence); 0 = legacy per-final dispatch; per-employee override: employee_leg[].turn_confirm_ms
+    // ---- voice TTS/STT optimization knobs (all opt-in; 0/empty = byte-identical legacy behavior) ----
+    "smart_turn_mode": 0,                   // smart-turn end-of-turn verdict: 0 = default current behavior, 1 = kill switch (no analyzer installed), 2 = consume AnalyzeEndOfTurn verdict at the confirm window
+    "whisper_server_addr": "",              // optional persistent whisper.cpp server address; empty = the legacy per-utterance whisper-cli exec path
+    "deepgram_endpoint_ms": 0,              // >0 enables the authoritative speech_final/UtteranceEnd endpoint fast path; 0 = legacy fixed-timer endpointing (byte-identical)
+    "recognition_vocabulary": [],           // critical entities to prime on STT requests (Deepgram keyterm params / Whisper -p prompt); empty = byte-identical wire; also carried to the child as keys-line vocabulary
+    "qwen3_chunk_size": 0,                  // qwen3 pcm-stream request chunk_size override; 0 = 4 (legacy default)
+    "clip_prewarm_delay_ms": 0,             // defer a queued clip render by this many ms after the played edge; 0 = render immediately (legacy)
+    "context_warm_window_ms": 0,            // partial-context-warm debounce window override; 0 = resolve from turn_confirm_ms (legacy)
     "context_warm": false,                  // opt-in (phase2-context-warm C6): route live-call STT partials into a max_tokens=1 warm request over the imminent turn's exact prefix (same session-affinity scope) so the provider prompt cache holds it before the final turn; the real turn pays decode, not prefill. false (default) = byte-identical; the debounce window rides turn_confirm_ms (0/legacy mode = fixed 900ms); warm failures are silent (DEBUG) and never start a turn, tools, or effects
     "context_warm_min_tokens": 60,          // token floor (rough 3-chars/token over the rendered prefix) under which a partial is never warmed — warming a trivial prefix is pointless traffic; 0/<=0 falls back to 60
     "min_turn_words": 0,                    // short-final gate: drop finals with fewer than N real words after non-speech stripping - tunes out background-fragment chatter (TV) in loud rooms; exempt_phrases below still passes; 0 = gate off (default); per-employee override: employee_leg[].min_turn_words (explicit 0 = gate off for that row)

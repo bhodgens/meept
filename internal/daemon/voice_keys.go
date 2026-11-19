@@ -102,6 +102,18 @@ type keysWire struct {
 	// the bytes the daemon's planner fed clipstore.ClipKey
 	// (voicechild.decodeTTSRefHash — byte agreement pinned there).
 	TTSRefHash string `json:"tts_ref_hash"`
+	// ---- voice TTS/STT optimization selectors (20261118, C1) ----
+	// ADDITIVE + OMITEMPTY: unlike the older selectors above, zero/empty
+	// MUST leave the wire byte-identical to a pre-change daemon line, so
+	// these carry omitempty. An old child ignores unknown keys; a current
+	// child decodes absent as the legacy zero value.
+	SmartTurnMode       int      `json:"smart_turn_mode,omitempty"`
+	WhisperServerAddr   string   `json:"whisper_server_addr,omitempty"`
+	DeepgramEndpointMs  int      `json:"deepgram_endpoint_ms,omitempty"`
+	Vocabulary          []string `json:"vocabulary,omitempty"`
+	Qwen3ChunkSize      int      `json:"qwen3_chunk_size,omitempty"`
+	ClipPrewarmDelayMs  int      `json:"clip_prewarm_delay_ms,omitempty"`
+	ContextWarmWindowMs int      `json:"context_warm_window_ms,omitempty"`
 }
 
 // Default vendor adapters when the config fields are empty (C4: preserves
@@ -193,6 +205,16 @@ func (w *VoiceWiring) sendKeysFrame(ccid string) {
 		// fed ClipKey for this call ("" = preset/non-clone). The hash
 		// is content-addressed, never the file path or its bytes.
 		TTSRefHash: refHashHex(w.ttsRefHash(vcfg)),
+		// TTS/STT optimization selectors (C1): from the live VoiceConfig
+		// snapshot; all zero/empty by default so the wire stays byte-
+		// identical to a pre-change daemon line (omitempty on each).
+		SmartTurnMode:       vcfg.SmartTurnMode,
+		WhisperServerAddr:   vcfg.WhisperServerAddr,
+		DeepgramEndpointMs:  vcfg.DeepgramEndpointMs,
+		Vocabulary:          vcfg.RecognitionVocabulary,
+		Qwen3ChunkSize:      vcfg.Qwen3ChunkSize,
+		ClipPrewarmDelayMs:  vcfg.ClipPrewarmDelayMs,
+		ContextWarmWindowMs: vcfg.ContextWarmWindowMs,
 	}
 	if kw.STTVendor == "" {
 		kw.STTVendor = defaultSTTVendor

@@ -88,6 +88,28 @@ type KeysFrame struct {
 	// material (a hash of public-ish audio); it still never logs (the
 	// redaction posture covers the whole frame).
 	TTSRefHash string
+	// ---- voice TTS/STT optimization selectors (20261118, contract C1) ----
+	// All seven are ADDITIVE and OPTIONAL on the wire (omitempty): zero/
+	// empty = legacy byte-identical behavior. Each later branch consumes
+	// one of these as its single seam.
+	SmartTurnMode int `json:"smart_turn_mode,omitempty"` // 0 = current behavior; 1 = kill switch; 2 = consume verdict
+	// WhisperServerAddr, when non-empty, selects a persistent whisper.cpp
+	// server instead of the per-utterance exec path. Empty = legacy exec.
+	WhisperServerAddr string `json:"whisper_server_addr,omitempty"`
+	// DeepgramEndpointMs > 0 enables the authoritative speech_final
+	// endpoint fast path; 0 keeps the legacy fixed-timer endpointing.
+	DeepgramEndpointMs int `json:"deepgram_endpoint_ms,omitempty"`
+	// Vocabulary primes critical entities on the STT request. Empty =
+	// byte-identical legacy wire.
+	Vocabulary []string `json:"vocabulary,omitempty"`
+	// Qwen3ChunkSize overrides the qwen3 pcm-stream chunk_size; 0 => 4.
+	Qwen3ChunkSize int `json:"qwen3_chunk_size,omitempty"`
+	// ClipPrewarmDelayMs defers a queued clip render by this many ms after
+	// the played edge; 0 = render immediately (legacy).
+	ClipPrewarmDelayMs int `json:"clip_prewarm_delay_ms,omitempty"`
+	// ContextWarmWindowMs overrides the partial-warm debounce window; 0 =
+	// resolve from turn_confirm_ms (legacy).
+	ContextWarmWindowMs int `json:"context_warm_window_ms,omitempty"`
 }
 
 // Redacted is what String prints instead of key material.
