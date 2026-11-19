@@ -111,14 +111,32 @@ without touching the main process.
 Rumble is an ADDITIVE, opt-in STT vendor: select it with
 `stt_provider: "rumble"` (daemon `stt_vendor` selector); its base URL
 rides the `stt_base_url` keys-frame field. It is KEYLESS (no STT key
-needed) and BATCH-ONLY: it emits ONE Final per utterance and NO partial
-transcripts. Because it produces no partials, `voice.context_warm` and
-partial barge-in stay on whisper/deepgram — do not expect those features
-with rumble. Reported English WER is 6.60; the project ships under
-Apache-2.0. Run it against a warm vLLM sidecar started with
-`--gpu-memory-utilization 0.20` beside qwen3-tts on the shared GPU.
-Whisper remains the DEFAULT STT vendor; enabling rumble changes nothing
-unless explicitly selected.
+needed), BATCH-ONLY at the vendor, and posts to `chat.completions` with an
+`audio_url` data URI (`data:audio/wav;base64,...`), reading the transcript
+from `choices[0].message.content`; it does NOT use the old `transcriptions`
+JSON body and sends NO Authorization header. Reported English WER is 6.60;
+the project ships under Apache-2.0. Run it against a warm vLLM sidecar
+started with `--gpu-memory-utilization 0.20` beside qwen3-tts on the shared
+GPU. Whisper remains the DEFAULT STT vendor; enabling rumble changes
+nothing unless explicitly selected.
+
+The model card's `chat_template_kwargs` ride ProviderConfig and the C1 keys
+frame as additive fields: `chat_template_language` (a language NAME, e.g.
+"English"; empty = omit) and pointer bools `chat_template_digits` /
+`chat_template_filler` / `chat_template_verbatim` (nil = omit; server
+defaults true / false / true). Only explicitly set fields reach the request
+body; all absent = the legacy request.
+
+`stt_partial_ms` (keys-frame `stt_partial_ms`, default 0) wraps ANY batch STT
+vendor in a provider-agnostic client-side pseudo-stream decorator: it
+snapshots a growing PCM buffer into successive complete utterances, emitting
+`Transcript{Final:false}` partials followed by exactly one `Final:true`.
+Those partials are CLIENT-SIDE SNAPSHOTS of a batch result, NOT server
+incremental input; they can feed partial barge-in and context warm on a batch
+vendor but do not reduce time-to-first-word. Do NOT enable it on
+native-partial vendors (deepgram), which already emit partials and would
+double-partial. With `stt_partial_ms = 0` the base provider is returned
+unwrapped, so whisper and every existing vendor stay byte-identical.
 
 ## Configuration options
 

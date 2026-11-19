@@ -1348,3 +1348,32 @@ runtime-lifecycle machinery when the operator selects
   shutdown (`Daemon.Stop` -> `ContainerManager.StopAll`).
 
 See `internal/daemon/AGENTS.md` for the full contract.
+
+### Operator example: rumble + pseudo-stream + template kwargs
+
+```json5
+{
+  voice: {
+    stt_provider: "rumble",             // opt-in; empty keeps whisper = default
+    stt_base_url: "http://127.0.0.1:8091/v1",
+    stt_partial_ms: 300,                // 0 = legacy (no decorator, one Final)
+    chat_template_language: "English",  // language NAME, not a code; omit = server default
+    chat_template_digits: true,
+    chat_template_filler: false,
+    chat_template_verbatim: true,
+  }
+}
+```
+
+- Rumble posts `chat.completions` with an `audio_url` data URI; the four
+  `chat_template_*` keys ride ProviderConfig and the keys frame into the
+  request body. `stt_partial_ms` wraps ANY batch vendor in a generic
+  client-side pseudo-stream decorator (partials are snapshots, NOT server
+  incremental input); do NOT enable it on native-partial vendors (deepgram).
+- Partials do NOT reduce time-to-first-word on a batch model; they only let
+  partial barge-in and context warm start earlier. With `stt_partial_ms = 0`
+  a batch vendor has no partials, so those features stay off.
+- All keys are additive/omitempty: `stt_partial_ms = 0` and no
+  `chat_template_*` keys = byte-identical legacy request and unwrapped
+  provider. The live vLLM pilot is still DEFERRED; gate tests use a fake
+  chat.completions server with the exact model-card body shape.
