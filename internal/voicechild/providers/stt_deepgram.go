@@ -47,6 +47,10 @@ type dgMessage struct {
 	} `json:"channel"`
 	IsFinal      bool `json:"is_final"`
 	FromFinalize bool `json:"from_finalize"`
+	// SpeechFinal is Deepgram's authoritative speech-end marker on a
+	// final Results message. is_final marks a finalized segment but may
+	// precede more speech; speech_final marks the true utterance end.
+	SpeechFinal bool `json:"speech_final"`
 }
 
 // sttDialer opens the vendor WebSocket session. A package-level var so the
@@ -137,6 +141,14 @@ type wsSession interface {
 type DeepgramSTT struct {
 	cfg    ProviderConfig
 	apiKey string
+
+	// utteranceEndPending is set by a UtteranceEnd metadata message (an
+	// authoritative speech-end marker with no transcript). It decorates
+	// the NEXT emitted Results transcript with Endpoint=true so the
+	// endpoint is not lost; nothing is emitted for the metadata itself.
+	// emit is called serially from pumpAndRead's read loop, so no lock is
+	// needed.
+	utteranceEndPending bool
 
 	// dial opens the vendor session (test seam). base is the adapter's
 	// resolved endpoint (cfg.BaseURL; empty = the cloud default) so the
@@ -324,18 +336,34 @@ func (s *DeepgramSTT) pumpAndRead(ctx context.Context, sess wsSession, pcm <-cha
 }
 
 // emit decodes one vendor text message and forwards Results transcripts.
+// A Results final (is_final / from_finalize / speech_final) and a
+// UtteranceEnd marker set Transcript.Endpoint (contract C2, F4). Metadata
+// and other non-Results frames carry no transcript and emit nothing; a
+// UtteranceEnd is latched onto the NEXT Results transcript so the endpoint
+// signal is preserved without inventing a transcript for the marker.
 func (s *DeepgramSTT) emit(ctx context.Context, data []byte, out chan<- voicechild.Transcript) {
 	var m dgMessage
 	if err := json.Unmarshal(data, &m); err != nil {
 		return // a non-JSON frame is skipped, not fatal
 	}
+	// UtteranceEnd carries no transcript: remember the marker, emit
+	// nothing for it. This keeps the "no transcript for metadata" rule.
+	if m.Type == dgMsgUtteranceEnd {
+		s.utteranceEndPending = true
+		return
+	}
 	if m.Type != dgMsgResults || len(m.Channel.Alternatives) == 0 {
-		return // Metadata/SpeechStarted/UtteranceEnd carry no transcript
+		return // Metadata/SpeechStarted carry no transcript
 	}
+	// A latched UtteranceEnd makes the following result a final segment:
+	// an authoritative speech end cannot be an interim preview.
+	final := m.IsFinal || m.FromFinalize || m.SpeechFinal || s.utteranceEndPending
 	t := voicechild.Transcript{
-		Text:  strings.TrimSpace(m.Channel.Alternatives[0].Transcript),
-		Final: m.IsFinal || m.FromFinalize,
+		Text:     strings.TrimSpace(m.Channel.Alternatives[0].Transcript),
+		Final:    final,
+		Endpoint: final || s.utteranceEndPending,
 	}
+	s.utteranceEndPending = false
 	if t.Text == "" {
 		return
 	}

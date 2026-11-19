@@ -64,18 +64,33 @@ func TestEndpointFastDispatch(t *testing.T) {
 	// (2 s) so a dispatch before the window fires is unambiguously the
 	// endpoint fast path, not the legacy timer.
 	const ccid = "ep1"
-	d, _, p, stt := newAggChild(t, ccid, intPtr(2000))
+	d, _, p, stt := newAggChildFull(t, ccid, intPtr(2000), nil)
 	_ = d
 	_ = p
 	_ = stt
+	// Enable the opt-in fast path on the pipeline. The fixture's keys line
+	// carries turn_confirm_ms only; setting the guarded field under playMu
+	// mirrors the keys-frame decode without extending the shared helper.
+	p.playMu.Lock()
+	p.deepgramEndpointMs = 20
+	p.playMu.Unlock()
+
+	// ONE long-lived transcript channel: consumeTranscripts EOF-flushes pending
+	// when its channel closes, so all finals must ride the same open channel.
+	trans := make(chan Transcript, 8)
+	go func() { p.consumeTranscripts(trans) }()
 
 	// Part 1: two finals inside the window accumulate with NO prompt frame.
 	// (The endpoint fast path is what will flush them; pin the accumulation
 	// first so the test cannot pass on an accidental per-final dispatch.)
 	first := Transcript{Text: "first part", Final: true}
 	second := Transcript{Text: "second part", Final: true}
-	driveTranscript(p, ccid, first)
-	driveTranscript(p, ccid, second)
+	trans <- first
+	trans <- second
+	waitFor(t, func() bool {
+		text, parts := pendingFinalState(p)
+		return text != "" && parts == 2
+	})
 	if text, parts := pendingFinalState(p); text == "" || parts != 2 {
 		t.Fatalf("after two finals pending = (%q, %d), want (\"...first part second part\", 2)", text, parts)
 	}
@@ -88,7 +103,7 @@ func TestEndpointFastDispatch(t *testing.T) {
 	if !built {
 		t.Fatal("cannot construct Transcript.Endpoint: missing field (contract C2)")
 	}
-	driveTranscript(p, ccid, ep)
+	trans <- ep
 	f := d.waitFrame(t)
 	if f.Event != voiceframe.EventPrompt {
 		t.Fatalf("frame event = %q, want prompt", f.Event)

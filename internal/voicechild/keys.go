@@ -217,6 +217,16 @@ func (p *pipeline) applyKeys(k KeysFrame) {
 	// pipeline constructor seeds the same default so a keys-less call
 	// still aggregates.
 	p.turnConfirm = time.Duration(k.TurnConfirmMs) * time.Millisecond
+	// Deepgram authoritative endpoint (F4): the opt-in knob that enables
+	// fast-dispatch of the accumulated finals when Endpoint arrives. 0
+	// (absent on an old daemon's wire) keeps the fixed-timer path.
+	p.deepgramEndpointMs = k.DeepgramEndpointMs
+	// Smart Turn mode (F1, 02-smart-turn.md): consumed by the async turn
+	// factory gate and by finalConfirmFired. Stored under playMu; the
+	// turn factory goroutine reads it only AFTER keysReady closes (which
+	// happens after this assignment), so it always sees the real mode.
+	p.smartTurnMode = k.SmartTurnMode
+	p.smartTurnDeferred = false
 	// Short-final gate (voice-microfrag): absent-on-wire already decoded
 	// to 0 (disabled) at handleKeysFrame. Same playMu guard as
 	// turnConfirm; applied before any transcript can arrive.
@@ -233,15 +243,18 @@ func (p *pipeline) applyKeys(k KeysFrame) {
 	p.fragmentDecayS = k.FragmentDecayS
 	p.replyExemptS = k.ReplyExemptS
 	p.sttCfg = ProviderConfig{
-		Vendor:  k.STTVendor,
-		Model:   k.STTModel,
-		BaseURL: k.STTBaseURL,
+		Vendor:             k.STTVendor,
+		Model:              k.STTModel,
+		BaseURL:            k.STTBaseURL,
+		WhisperServerAddr:  k.WhisperServerAddr,
+		DeepgramEndpointMs: k.DeepgramEndpointMs,
 	}
 	p.ttsCfg = ProviderConfig{
-		Vendor:  k.TTSVendor,
-		Model:   k.TTSModel,
-		BaseURL: k.TTSBaseURL,
-		Voice:   k.TTSVoice,
+		Vendor:         k.TTSVendor,
+		Model:          k.TTSModel,
+		BaseURL:        k.TTSBaseURL,
+		Voice:          k.TTSVoice,
+		Qwen3ChunkSize: k.Qwen3ChunkSize,
 	}
 	p.playMu.Unlock()
 	// Clip renders gate on provider identity, which only exists once the

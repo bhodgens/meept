@@ -46,6 +46,12 @@ type TTSProvider interface {
 type Transcript struct {
 	Text  string
 	Final bool
+	// Endpoint is the vendor's authoritative speech-end signal (contract
+	// C2, F4): Deepgram's speech_final / UtteranceEnd. Additive and
+	// optional — false leaves every existing path byte-identical. The
+	// pipeline consumes it as a fast-dispatch trigger only while turn
+	// aggregation is active (a confirm window > 0).
+	Endpoint bool
 }
 
 // STT Stream-open retry policy (audit fix 5): the daemon sends the keys
@@ -175,13 +181,25 @@ type pipeline struct {
 	// the cap-overflow path call flushPendingFinal, which takes playMu,
 	// releases it, THEN emits — the same off-lock emit posture as the
 	// rmsBargeInCheck interrupt goroutine).
-	turnConfirm       time.Duration // confirm window; 0 = legacy per-final dispatch (backward-compat)
-	pendingFinal      string        // aggregated trimmed final texts, single-space joined
-	pendingFinalParts int           // how many finals are in pendingFinal (telemetry)
-	pendingFirstAt    time.Time     // arrival of the FIRST pending part (8 s cap reference)
-	pendingFinalTimer *time.Timer   // armed/re-armed per arriving final; stopped on dispatch/clear
-	pendingFinalSeq   uint64        // timer identity: bumped on every arm AND every retire, so a stale closure that fired just before its Stop sees a mismatch and returns (never dispatches a fresh window early)
-	micHoldRearms     int           // bounded mic-hold re-arms for the current pending (maxMicHoldRearms)
+	turnConfirm time.Duration // confirm window; 0 = legacy per-final dispatch (backward-compat)
+	// deepgramEndpointMs (F4, playMu, keys-frame guarded): 0 keeps the
+	// legacy fixed-timer endpointing; > 0 enables the authoritative
+	// speech_final / UtteranceEnd fast-dispatch path.
+	deepgramEndpointMs int
+	// Smart Turn opt-in mode (C1, from the keys frame): 0 = current
+	// behavior (byte-identical), 1 = kill switch (install NO analyzer),
+	// 2 = consult AnalyzeEndOfTurn at confirm-window expiry. Set in
+	// applyKeys before keysReady closes; read under playMu.
+	smartTurnMode int
+	// smartTurnDeferred is true once mode 2 has used its single bounded
+	// re-arm for the current pending buffer (read/written under playMu).
+	smartTurnDeferred bool
+	pendingFinal      string      // aggregated trimmed final texts, single-space joined
+	pendingFinalParts int         // how many finals are in pendingFinal (telemetry)
+	pendingFirstAt    time.Time   // arrival of the FIRST pending part (8 s cap reference)
+	pendingFinalTimer *time.Timer // armed/re-armed per arriving final; stopped on dispatch/clear
+	pendingFinalSeq   uint64      // timer identity: bumped on every arm AND every retire, so a stale closure that fired just before its Stop sees a mismatch and returns (never dispatches a fresh window early)
+	micHoldRearms     int         // bounded mic-hold re-arms for the current pending (maxMicHoldRearms)
 	// lastMicLoudAt (playMu) is when pumpAudioIn last saw an incoming
 	// mic chunk above the loose speaking floor (bargeInRms/4). Timer
 	// expiry with a fresh stamp (< micLoudHoldWindow) means the operator
@@ -528,10 +546,34 @@ func (p *pipeline) initAnalyzersAsync(vadFactory VADFactory, turnFactory TurnFac
 			return vadFactory(sampleRate)
 		}, "silero vad")
 	}
+	// Smart Turn (F1, 02-smart-turn.md T1): the mode arrives on the keys
+	// frame, which on a live call follows open. Build the turn analyzer
+	// ONLY after keys land, then skip entirely for the mode-1 kill switch
+	// (no analyzer installed; VAD stays intact). Modes 0 and 2 install
+	// exactly as today. The keysReady gate keeps a mode-0 old-daemon line
+	// byte-identical (keys-less calls never build a turn analyzer, same
+	// as a factory that is absent), and never blocks the C1 loop or
+	// close()'s analyzerInit barrier.
 	if turnFactory != nil {
-		startFactory(func() (io.Closer, error) {
-			return turnFactory(sampleRate)
-		}, "smart turn")
+		p.analyzerInit.Add(1)
+		go func() {
+			defer p.analyzerInit.Done()
+			select {
+			case <-p.keysReady:
+			case <-p.ctx.Done():
+				return
+			}
+			p.playMu.Lock()
+			mode := p.smartTurnMode
+			p.playMu.Unlock()
+			if mode == 1 {
+				p.logger.Info("voicechild: smart turn kill switch; analyzer not installed", "call_id", p.ccid)
+				return
+			}
+			startFactory(func() (io.Closer, error) {
+				return turnFactory(sampleRate)
+			}, "smart turn")
+		}()
 	}
 }
 
@@ -997,6 +1039,7 @@ func (p *pipeline) accumulateFinal(text string) (string, int, bool) {
 	if starting {
 		p.pendingFirstAt = now
 		p.micHoldRearms = 0
+		p.smartTurnDeferred = false // fresh window resets the mode-2 defer budget
 	}
 	if starting {
 		p.pendingFinal = text
@@ -1062,6 +1105,7 @@ func (p *pipeline) clearPendingFinalLocked() {
 	p.pendingFinalParts = 0
 	p.pendingFirstAt = time.Time{}
 	p.micHoldRearms = 0
+	p.smartTurnDeferred = false
 }
 
 // finalConfirmFired is the confirm-timer closure (firedSeq is the
@@ -1094,10 +1138,71 @@ func (p *pipeline) finalConfirmFired(firedSeq uint64) {
 		p.playMu.Unlock()
 		return
 	}
+	// Smart Turn (F1, 02-smart-turn.md T3): mode 2 consults the model's
+	// end-of-turn verdict at confirm-window expiry. The verdict is read
+	// under turnMu ONLY — never while holding playMu (turn.go lock rule,
+	// mutexio-safe). Snapshot the policy under playMu, RELEASE it, run the
+	// model, then re-acquire playMu to act — so no analyzer I/O ever
+	// happens under playMu. A concurrent final/clear between the two
+	// playMu sections bumps pendingFinalSeq; the re-check below makes
+	// this closure a no-op in that case (the new window owns the buffer).
+	mode, deferred := p.smartTurnMode, p.smartTurnDeferred
+	p.playMu.Unlock()
+
+	complete, prob, verdictErr := false, 0.0, error(nil)
+	if mode == 2 {
+		p.turnMu.Lock()
+		if t := p.turn; t != nil {
+			complete, prob, verdictErr = t.AnalyzeEndOfTurn()
+		}
+		p.turnMu.Unlock()
+		decision := "dispatch"
+		switch {
+		case verdictErr != nil:
+			decision = "error-fallback" // degrade to today's behavior
+		case !complete && !deferred:
+			decision = "defer" // one bounded re-arm
+		}
+		p.logger.Info("voicechild: smart turn verdict applied",
+			"call_id", p.ccid, "verdict", complete, "probability", prob,
+			"decision", decision, "err", verdictErr)
+	}
+
+	p.playMu.Lock()
+	if p.pendingFinal == "" || p.pendingFinalSeq != firedSeq {
+		p.playMu.Unlock()
+		return
+	}
+	// complete=false defers dispatch by ONE bounded re-arm; the second
+	// expiry (deferred already true) or any complete=true/error result
+	// dispatches. No infinite hold, no caller-cutoff regression.
+	deferDispatch := mode == 2 && verdictErr == nil && !complete && !deferred
+	if deferDispatch {
+		p.smartTurnDeferred = true
+		window := p.turnConfirm
+		if window <= 0 {
+			window = time.Duration(defaultTurnConfirmMs) * time.Millisecond
+		}
+		p.pendingFinalSeq++
+		rearmSeq := p.pendingFinalSeq
+		p.pendingFinalTimer = time.AfterFunc(window+micHoldRecheckExtra, func() { p.finalConfirmFired(rearmSeq) })
+		p.playMu.Unlock()
+		return
+	}
 	agg, parts := p.pendingFinal, p.pendingFinalParts
 	p.clearPendingFinalLocked()
 	p.playMu.Unlock()
 	p.dispatchAggregated(p.ctx, agg, parts, "confirm-window")
+}
+
+// endpointEnabled reports whether the authoritative Deepgram endpoint fast
+// path is opted in (contract C1, F4). 0 (the default and the wire-absent
+// value) keeps the legacy fixed-timer endpointing byte-identical.
+func (p *pipeline) endpointEnabled() bool {
+	p.playMu.Lock()
+	on := p.deepgramEndpointMs > 0
+	p.playMu.Unlock()
+	return on
 }
 
 // flushPendingFinal dispatches any pending aggregated text NOW (EOF of
@@ -1349,6 +1454,28 @@ func (p *pipeline) consumeTranscripts(trans <-chan Transcript) {
 			// ("one sentence, one turn") and the barge-in contract
 			// (C5 speaking-final path) intact.
 			if p.confirmWindow() > 0 {
+				// Authoritative endpoint (F4): when the vendor says the
+				// utterance ended, flush ALL accumulated finals through
+				// the SAME guarded choke point (dispatchAggregated) in ONE
+				// prompt — never just the last response. The knob and the
+				// flag both have to be on; with ms=0 (default) the flag is
+				// inert and the confirm timer remains the only dispatcher
+				// (byte-identical legacy behavior, R4). Echo/non-speech/
+				// dedupe/short-final guards above already ran per final;
+				// the barge-in/provenance guards below stay intact.
+				if tr.Endpoint && p.endpointEnabled() {
+					agg, parts, flushed := p.accumulateFinal(trimmed)
+					if flushed {
+						// 8 s age cap already retired the buffer; dispatch
+						// its captured contents rather than a stale timer.
+						p.dispatchAggregated(p.ctx, agg, parts, "aggregation-cap")
+					} else {
+						// All accumulated parts (this endpoint final
+						// included), ONE aggregated prompt, off-lock.
+						p.flushPendingFinal(p.ctx, "deepgram-endpoint")
+					}
+					continue
+				}
 				if speaking || interruptedLatched {
 					agg, parts := p.mergeAndTakeFinal(trimmed)
 					p.dispatchAggregated(p.ctx, agg, parts, "barge-in-final")
