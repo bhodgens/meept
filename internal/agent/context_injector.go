@@ -105,8 +105,9 @@ func (c *ContextInjector) SetEpisodeTask(taskText string) {
 //
 // Per Phase 4 spec 4.2 + turbo Thread E self-reflection:
 //   - Standing instructions from preferences.Store
-//   - Skills: a no-cap listing of every visible cached skill, one C4 line
-//     each, in alphabetical order. The per-turn base text is NOT a relevance
+//   - Skills: a bounded listing of the visible cached skills, one C4 line
+//     each, capped at maxSkillCatalogBytes (e72b169d), in the episode's
+//     frozen order. The per-turn base text is NOT a relevance
 //     signal (C4: the listing is built once per episode so it is cache-stable
 //     and never churns the cache with per-turn base).
 //
@@ -132,7 +133,8 @@ func (c *ContextInjector) BuildSystemPrompt(ctx context.Context, base string) st
 		instructions = c.instructions.GetActive()
 	}
 
-	// No-cap listing of every visible cached skill. Order: embedding-rank
+	// Listing of the visible cached skills (bounded to maxSkillCatalogBytes
+	// at render time below). Order: embedding-rank
 	// by the episode's task text when a ranker is wired (leaf 02, Q4:
 	// always rank); alphabetical otherwise (cache-stable default).
 	var skillLines []string

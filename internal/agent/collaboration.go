@@ -131,12 +131,17 @@ type SessionConfig struct {
 	SharedTranscript bool `json:"shared_transcript,omitempty" yaml:"shared_transcript,omitempty"`
 }
 
-// DefaultSessionConfig returns sensible defaults.
+// DefaultSessionConfig returns sensible defaults. TokenBudget defaults to
+// 0 (= unlimited): an unconfigured collaboration session must not hit a
+// hidden token ceiling — the same opt-in-cap class 419c9b77 removed from
+// the chat loop's conversation budget. An explicit positive TokenBudget
+// still binds (the pair driver gates on >0); MaxTurns and TimeBudget keep
+// bounding unconfigured sessions.
 func DefaultSessionConfig() SessionConfig {
 	return SessionConfig{
 		MaxTurns:    10,
 		TurnTimeout: 5 * time.Minute,
-		TokenBudget: 50000,
+		TokenBudget: 0,
 		TimeBudget:  30 * time.Minute,
 	}
 }

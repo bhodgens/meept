@@ -3,8 +3,11 @@ package llm
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"os"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // stubChatter returns a preconfigured response or error.
@@ -343,5 +346,126 @@ func TestContextFirewall_DropStrategyUnchanged(t *testing.T) {
 	}
 	if stats.RestartEvents != 0 {
 		t.Errorf("expected RestartEvents == 0 for drop strategy, got %d", stats.RestartEvents)
+	}
+}
+
+// TestBoundOversizedSystemMessages_RuneBoundary pins L10 (bughunt
+// 2026-11-19): the 12 KB byte cut must not split a multi-byte UTF-8 rune.
+// The fixture places a 3-byte rune so the raw cut lands mid-rune; the
+// bounded head must stay valid UTF-8 (the cut walks back to the rune
+// start) and the input must not be mutated.
+func TestBoundOversizedSystemMessages_RuneBoundary(t *testing.T) {
+	// 11998 ASCII bytes + '界' (3 bytes: offsets 11998..12000) + tail.
+	// The raw cut at maxSystemMessageBytes (12000) lands on the rune's
+	// LAST byte — slicing there ships an invalid-UTF-8 head.
+	prefix := strings.Repeat("a", maxSystemMessageBytes-2)
+	content := prefix + "界" + strings.Repeat("b", 500)
+	msgs := []ChatMessage{
+		{Role: RoleUser, Content: "hi"},
+		{Role: RoleSystem, Content: content},
+	}
+	out, changed := boundOversizedSystemMessages(msgs)
+	if !changed {
+		t.Fatal("oversized system message was not bounded")
+	}
+	var sys string
+	for _, m := range out {
+		if m.Role == RoleSystem {
+			sys = m.Content
+		}
+	}
+	if !utf8.ValidString(sys) {
+		t.Fatalf("bounded system message is not valid UTF-8 (cut split a rune): %q…", sys[:64])
+	}
+	if !strings.HasPrefix(sys, prefix) {
+		t.Fatal("bounded head lost the ASCII prefix before the split rune")
+	}
+	if strings.Contains(sys, "界") {
+		t.Fatal("the split rune must be dropped entirely, not kept partially")
+	}
+	if len(sys) > maxSystemMessageBytes+256 {
+		t.Fatalf("bounded message too large: %d bytes", len(sys))
+	}
+	if msgs[1].Content != content {
+		t.Fatal("boundOversizedSystemMessages mutated the input")
+	}
+}
+
+// TestContextFirewall_OversizedSystemBoundOnInertPaths pins L11 (bughunt
+// 2026-11-19): the oversized-system bound is window-independent and must
+// hold BEFORE the inertness early-return — unknown window
+// (ContextLimit==0), nil model, and disabled firewall all previously
+// shipped the oversized system message unbounded. The rest of the inert
+// path stays byte-identical: small messages pass through untouched.
+func TestContextFirewall_OversizedSystemBoundOnInertPaths(t *testing.T) {
+	huge := strings.Repeat("skill line\n", 3000) // ~33 KB > 12 KB bound
+	small := "You are a helpful assistant."
+	cases := []struct {
+		name  string
+		model *ModelConfig
+		cfg   ContextFirewallConfig
+	}{
+		{"unknown window", &ModelConfig{ContextLimit: 0}, ContextFirewallConfig{Enabled: true}},
+		{"nil model", nil, ContextFirewallConfig{Enabled: true}},
+		{"disabled firewall", &ModelConfig{ContextLimit: 32768}, ContextFirewallConfig{Enabled: false}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			inner := &capturingChatter{}
+			f := NewContextFirewall(inner, tc.model, tc.cfg, nil, nil, &HeuristicTokenizer{})
+			msgs := []ChatMessage{
+				{Role: RoleSystem, Content: huge},
+				{Role: RoleUser, Content: "hello"},
+			}
+			if _, err := f.Chat(context.Background(), msgs); err != nil {
+				t.Fatalf("Chat on inert path: %v", err)
+			}
+			if len(inner.got) != 2 {
+				t.Fatalf("inert path changed message count: %d", len(inner.got))
+			}
+			sys := inner.got[0]
+			if sys.Role != RoleSystem || len(sys.Content) > maxSystemMessageBytes+256 {
+				t.Fatalf("oversized system message shipped unbounded on inert path: %d bytes", len(sys.Content))
+			}
+			if !strings.HasPrefix(sys.Content, "skill line\n") {
+				t.Fatal("bounded head lost the original prefix")
+			}
+			if inner.got[1].Content != "hello" {
+				t.Fatalf("non-system message altered on inert path: %q", inner.got[1].Content)
+			}
+			if msgs[0].Content != huge {
+				t.Fatal("inert-path bound mutated the input")
+			}
+		})
+	}
+
+	// Byte-identical inert pass-through for small messages: same slice
+	// content, no truncation marker.
+	inner := &capturingChatter{}
+	f := NewContextFirewall(inner, &ModelConfig{ContextLimit: 0}, ContextFirewallConfig{Enabled: true}, nil, nil, &HeuristicTokenizer{})
+	msgs := []ChatMessage{
+		{Role: RoleSystem, Content: small},
+		{Role: RoleUser, Content: "hello"},
+	}
+	if _, err := f.Chat(context.Background(), msgs); err != nil {
+		t.Fatalf("Chat small inert: %v", err)
+	}
+	if len(inner.got) != 2 || inner.got[0].Content != small || inner.got[1].Content != "hello" {
+		t.Fatalf("small messages not byte-identical on inert path: %+v", inner.got)
+	}
+}
+
+// TestContextFirewall_InertPathZeroValueBounded pins that the
+// window-independent bound also holds on a zero-value firewall (no model,
+// no config) — the inert early-return must not skip it there either.
+func TestContextFirewall_InertPathZeroValueBounded(t *testing.T) {
+	inner := &capturingChatter{}
+	f := &ContextFirewall{inner: inner, logger: slog.New(slog.NewTextHandler(os.Stderr, nil))}
+	huge := strings.Repeat("x", maxSystemMessageBytes+1)
+	if _, err := f.Chat(context.Background(), []ChatMessage{{Role: RoleSystem, Content: huge}}); err != nil {
+		t.Fatalf("zero-value firewall Chat: %v", err)
+	}
+	if len(inner.got) != 1 || len(inner.got[0].Content) > maxSystemMessageBytes+256 {
+		t.Fatalf("zero-value firewall did not bound the oversized system message: %+v", inner.got)
 	}
 }

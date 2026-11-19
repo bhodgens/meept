@@ -5,9 +5,13 @@ package services
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/groups"
 )
@@ -220,4 +224,113 @@ func TestGroupsServiceSatisfiesRPCDiagnosisInterface(t *testing.T) {
 		Explain(ctx context.Context, agentID string) (*groups.ExplainResult, error)
 		Check(ctx context.Context, knownTools map[string]struct{}, overrides groups.OverridesReader) (*groups.CheckResult, error)
 	} = NewGroupsService(fixtureConfig(), "")
+}
+
+// writeDiagnosisAgentDef writes a minimal AGENT.md fixture under dir/<id>.
+func writeDiagnosisAgentDef(t *testing.T, dir, id, extraFrontmatter string) {
+	t.Helper()
+	path := filepath.Join(dir, id)
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", path, err)
+	}
+	body := "---\nid: " + id + "\nname: " + id + "\nrole: executor\n" + extraFrontmatter + "---\n\nBody for " + id + ".\n"
+	if err := os.WriteFile(filepath.Join(path, "AGENT.md"), []byte(body), 0o600); err != nil {
+		t.Fatalf("write %s: %v", id, err)
+	}
+}
+
+// TestGroupsServiceDiagnosisUsesRuntimeGrantVocabulary pins M8 (bughunt
+// 2026-11-19): diagnosis must resolve the SAME tool vocabulary the runtime
+// gate enforces — spec.GrantedToolNames() = BaselineTools + AdditionalTools
+// normalized (registry.go ResolveForAgent). An agent with EMPTY
+// additional_tools under default_managed must diagnose to baseline ∩
+// default-policy — NOT the full default-policy allowlist (the pre-fix
+// diagnosis fed only AdditionalTools, so the empty-spec branch of
+// ResolveDefaultManaged widened it to the whole policy).
+func TestGroupsServiceDiagnosisUsesRuntimeGrantVocabulary(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Security.Groups.DefaultManaged = true
+	cfg.Security.Groups.Policies = []config.GroupsPolicyConfig{{
+		Name: "default",
+		// Includes a baseline tool (memory_search) AND a non-baseline
+		// tool (shell) the empty-additional agent never declared.
+		ToolsAllowed: []string{"memory_search", "shell"},
+	}}
+	// No bindings: the agent routes through default_managed.
+
+	bundled := t.TempDir()
+	writeDiagnosisAgentDef(t, bundled, "baseline-only", "") // no additional_tools
+	svc := NewGroupsService(cfg, bundled)
+
+	// The runtime gate's answer for the same agent: a spec with empty
+	// additional tools resolves through its full grant vocabulary.
+	spec := &agent.AgentSpec{ID: "baseline-only"}
+	runtime := groups.ResolveDefaultManaged(spec.GrantedToolNames(), svc.policies(), &groups.ResolveOptions{})
+	if !runtime.Managed {
+		t.Fatal("fixture: runtime resolution must be managed")
+	}
+	if slices.Contains(runtime.AllowedTools, "shell") {
+		t.Fatal("fixture: the runtime gate must NOT allow shell for an empty-additional agent")
+	}
+	if !slices.Contains(runtime.AllowedTools, "memory_search") {
+		t.Fatal("fixture: baseline memory_search must survive the runtime intersection")
+	}
+
+	// (1) Check input vocabulary: the diagnosis row carries the full
+	// normalized grant set, not just AdditionalTools.
+	rows := svc.diagnosisAgents()
+	var row *groups.DiagnosisAgent
+	for i := range rows {
+		if rows[i].ID == "baseline-only" {
+			row = &rows[i]
+		}
+	}
+	if row == nil {
+		t.Fatalf("discovery missed the fixture agent: %+v", rows)
+	}
+	if !slices.Equal(row.Tools, spec.GrantedToolNames()) {
+		t.Fatalf("diagnosis Tools = %v; want the runtime grant vocabulary %v", row.Tools, spec.GrantedToolNames())
+	}
+
+	// (2) Explain resolves to the SAME allowed set the runtime gate
+	// computes — not the full default-policy allowlist.
+	res, err := svc.Explain(context.Background(), "baseline-only")
+	if err != nil {
+		t.Fatalf("explain: %v", err)
+	}
+	if !slices.Equal(res.AllowedTools, runtime.AllowedTools) {
+		t.Fatalf("explain allowed = %v; runtime gate allowed = %v (diagnosis diverged from enforcement)",
+			res.AllowedTools, runtime.AllowedTools)
+	}
+	if slices.Contains(res.AllowedTools, "shell") {
+		t.Fatalf("explain widened to the full default-policy allowlist: %v", res.AllowedTools)
+	}
+}
+
+// TestGroupsServiceDiagnosisGrantNormalization pins that the diagnosis
+// vocabulary rides the SAME normalization as the runtime gate: a declared
+// shell_execute grant resolves to the registered shell name in both.
+func TestGroupsServiceDiagnosisGrantNormalization(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Security.Groups.Policies = []config.GroupsPolicyConfig{{
+		Name:         "coders",
+		ToolsAllowed: []string{"shell"},
+	}}
+	cfg.Security.Groups.Bindings = []config.GroupsBindingConfig{{
+		Subject: "group:coders", Policy: "coders", Scope: "daemon",
+	}}
+	bundled := t.TempDir()
+	writeDiagnosisAgentDef(t, bundled, "grant-normalize", "groups: [coders]\nadditional_tools:\n  - shell_execute\n")
+	svc := NewGroupsService(cfg, bundled)
+
+	res, err := svc.Explain(context.Background(), "grant-normalize")
+	if err != nil {
+		t.Fatalf("explain: %v", err)
+	}
+	if !slices.Contains(res.AllowedTools, "shell") {
+		t.Fatalf("shell_execute grant not normalized to shell in diagnosis: %v", res.AllowedTools)
+	}
+	if slices.Contains(res.AllowedTools, "shell_execute") {
+		t.Fatalf("raw grant spelling leaked into the allowed set: %v", res.AllowedTools)
+	}
 }

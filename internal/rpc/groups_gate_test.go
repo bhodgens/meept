@@ -238,7 +238,8 @@ func TestGroupsAssignValidatesPolicyToolsBeforePersist(t *testing.T) {
 }
 
 // T1 PASS state: list returns policies+bindings; explain returns the
-// resolution with per-binding sources.
+// resolution with per-binding sources through the wired diagnosis service
+// (the legacy unwired fallback was removed — L19, bughunt 2026-11-19).
 func TestGroupsListAndExplain(t *testing.T) {
 	h, _, _ := newGateHandler(t)
 
@@ -260,16 +261,41 @@ func TestGroupsListAndExplain(t *testing.T) {
 	if len(listBind(list)) == 0 {
 		t.Fatalf("list: bindings empty")
 	}
+	// Wire the diagnosis surface the daemon wires before registration:
+	// explain resolves through the shared groups.Explain engine.
+	h.SetDiagnosisService(&fakeDiagnosis{
+		explainRes: &groups.ExplainResult{
+			AgentID: "coder",
+			Managed: true,
+			Bindings: []groups.ExplainSource{
+				{Subject: "agent:coder", Policy: "coders", Scope: "daemon"},
+			},
+			Resolved: groups.Resolved{Managed: true, AllowedTools: []string{"file_read"}},
+		},
+	})
 	xr, err := h.handleExplain(context.Background(), mustParams(t, map[string]any{"agent_id": "coder"}))
 	if err != nil {
 		t.Fatalf("explain: %v", err)
 	}
 	ex := xr.(map[string]any)
-	if srcs, ok := ex["bindings"].([]map[string]any); !ok || len(srcs) == 0 {
+	if srcs, ok := ex["bindings"].([]groups.ExplainSource); !ok || len(srcs) == 0 {
 		t.Fatalf("explain: no binding sources: %v", ex["bindings"])
 	}
 	if _, ok := ex["resolved"]; !ok {
 		t.Fatalf("explain: resolved record missing")
+	}
+}
+
+// TestGroupsExplainNilServiceDegrades pins L19 (bughunt 2026-11-19): with
+// no diagnosis service wired, groups.explain degrades to a descriptive
+// error — the legacy fallback that resolved with nil spec tools and
+// bypassed default-managed routing is gone (it was unreachable in the
+// daemon, which wires the service before registration).
+func TestGroupsExplainNilServiceDegrades(t *testing.T) {
+	h, _, _ := newGateHandler(t)
+	_, err := h.handleExplain(context.Background(), mustParams(t, map[string]any{"agent_id": "coder"}))
+	if err == nil || !strings.Contains(err.Error(), "diagnosis service not wired") {
+		t.Fatalf("explain without diagnosis service: err=%v; want descriptive not-wired error", err)
 	}
 }
 

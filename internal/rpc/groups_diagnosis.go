@@ -35,8 +35,8 @@ type DiagnosisService interface {
 }
 
 // SetDiagnosisService wires the diagnosis surface (leaf 06). Nil-guarded
-// per the setter convention; nil keeps the legacy resolution-only explain
-// and makes groups.check answer a descriptive error.
+// per the setter convention; nil makes both groups.explain and
+// groups.check answer a descriptive error (no legacy explain fallback).
 func (h *GroupsHandler) SetDiagnosisService(svc DiagnosisService) {
 	if svc != nil {
 		h.checkSvc = svc

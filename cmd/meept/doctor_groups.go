@@ -22,10 +22,17 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/agents"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/groups"
 )
+
+// doctorDiscoveryTiers is the discovery-tier seam for the doctor's roster
+// scan (injected by tests; production uses the default tiers). Mirrors
+// groupsDoctorConfigHook so the hermetic unit pin never reads the host's
+// ~/.meept/agents.
+var doctorDiscoveryTiers = agents.DefaultTiers
 
 // groupsDoctorConfigHook is the config seam the doctor's groups check
 // reads through (injected by tests; production loads the default config).
@@ -181,7 +188,7 @@ func doctorAgents(discover func() []groups.DiagnosisAgent) []groups.DiagnosisAge
 	if discover != nil {
 		return discover()
 	}
-	disc := agents.NewDiscovery(agents.WithBundledPath("config/agents"))
+	disc := agents.NewDiscovery(agents.WithTiers(doctorDiscoveryTiers()), agents.WithBundledPath("config/agents"))
 	defs, err := disc.Discover()
 	if err != nil || defs == nil {
 		return nil
@@ -192,9 +199,15 @@ func doctorAgents(discover func() []groups.DiagnosisAgent) []groups.DiagnosisAge
 			continue
 		}
 		out = append(out, groups.DiagnosisAgent{
-			ID:      def.ID,
-			Groups:  def.Groups,
-			Tools:   def.AdditionalTools,
+			ID:     def.ID,
+			Groups: def.Groups,
+			// Same vocabulary as the runtime gate (registry.go
+			// ResolveForAgent -> spec.GrantedToolNames()): baseline +
+			// additional, normalized. agents.AgentDefinition has no
+			// GrantedToolNames method, so construct the equivalent union
+			// through the exported agent vocabulary — the doctor must
+			// diagnose the SAME allowed set the daemon enforces.
+			Tools:   (&agent.AgentSpec{AdditionalTools: def.AdditionalTools}).GrantedToolNames(),
 			Enabled: def.IsEnabled(),
 		})
 	}

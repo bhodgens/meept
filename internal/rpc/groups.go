@@ -122,8 +122,10 @@ type GroupsHandler struct {
 	// *services.GroupsService — wired at daemon registration) because
 	// internal/rpc can import neither internal/services nor the engine's
 	// service wrapper (services -> scheduler -> rpc cycle, pre-existing).
-	// Nil until SetDiagnosisService; nil keeps the legacy explain shape
-	// and degrades groups.check to a descriptive error.
+	// Nil until SetDiagnosisService; nil degrades BOTH explain and check
+	// to a descriptive error — there is no legacy explain fallback (it
+	// bypassed default-managed routing and was unreachable in the daemon,
+	// which wires the service before registration).
 	checkSvc DiagnosisService
 	// overridesLoader is the leaf-07 reader seam (leaf 07-overrides):
 	// groups.check loads the overrides THROUGH this func at request time
@@ -260,13 +262,13 @@ func (h *GroupsHandler) handleList(ctx context.Context, params json.RawMessage) 
 
 // handleExplain returns the effective resolution for one agent: the
 // subject's bound policies and the layering result with per-entry sources
-// (which binding brought each policy in).
+// (which binding brought each policy in). The diagnosis service owns this
+// path (leaf 06): it resolves through the SHARED groups.Explain engine —
+// the same resolution the gates enforce, including default-managed
+// routing and the spec's full grant vocabulary.
 func (h *GroupsHandler) handleExplain(ctx context.Context, params json.RawMessage) (any, error) {
-	// The diagnosis service owns the explain path (leaf 06); it needs no
-	// handler config (the service carries its own). The legacy shape
-	// below still requires the handler config.
-	if h.checkSvc == nil && h.cfg == nil {
-		return nil, fmt.Errorf("groups.explain: config not available")
+	if h.checkSvc == nil {
+		return nil, fmt.Errorf("groups.explain: diagnosis service not wired (SetDiagnosisService)")
 	}
 	var req struct {
 		AgentID string `json:"agent_id"`
@@ -279,88 +281,28 @@ func (h *GroupsHandler) handleExplain(ctx context.Context, params json.RawMessag
 		return nil, fmt.Errorf("groups.explain: agent_id is required")
 	}
 
-	// Diagnosis service path (leaf 06): per-entry source attribution
-	// through the SHARED groups.Explain engine — the same resolution the
-	// gates enforce. Unwired service (legacy construction sites, unit
-	// tests) falls through to the resolution-only shape below.
-	if h.checkSvc != nil {
-		res, err := h.checkSvc.Explain(ctx, req.AgentID)
-		if err != nil {
-			return nil, fmt.Errorf("groups.explain: %w", err)
-		}
-		// "policy" is a stable F8 RPC key: the FIRST selecting binding's
-		// policy (the subject-matching view; nil when nothing selected).
-		var firstPolicy any
-		for _, src := range res.Bindings {
-			firstPolicy = src.Policy
-			break
-		}
-		return map[string]any{
-			"agent_id":           res.AgentID,
-			"frontmatter_groups": res.Groups,
-			"groups":             res.Groups,
-			"bindings":           res.Bindings,
-			"policy":             firstPolicy,
-			"managed":            res.Managed,
-			"allowed_tools":      res.AllowedTools,
-			"denied_tools":       res.DeniedTools,
-			"grants":             res.Grants,
-			"resolved":           res.Resolved,
-		}, nil
+	res, err := h.checkSvc.Explain(ctx, req.AgentID)
+	if err != nil {
+		return nil, fmt.Errorf("groups.explain: %w", err)
 	}
-
-	policies := h.groupsPolicies()
-	bindings := h.groupsBindings()
-
-	// Frontmatter membership (agent labels).
-	var frontmatterGroups []string
-	if h.registry != nil {
-		if spec, ok := h.registry.GetSpec(req.AgentID); ok && spec != nil {
-			frontmatterGroups = append([]string(nil), spec.Groups...)
-		}
+	// "policy" is a stable F8 RPC key: the FIRST selecting binding's
+	// policy (the subject-matching view; nil when nothing selected).
+	var firstPolicy any
+	for _, src := range res.Bindings {
+		firstPolicy = src.Policy
+		break
 	}
-	if frontmatterGroups == nil {
-		frontmatterGroups = []string{}
-	}
-
-	// Resolution through the shared core (single resolution path rule).
-	agentGroups := append([]string(nil), frontmatterGroups...)
-	resolved := groups.Resolve(nil, req.AgentID, agentGroups, policies, bindings, nil)
-
-	// Sources: every binding that selected this subject, named.
-	subject := "agent:" + req.AgentID
-	member := map[string]struct{}{}
-	for _, g := range frontmatterGroups {
-		member[g] = struct{}{}
-	}
-	sources := []map[string]any{}
-	for _, b := range bindings {
-		match := b.Subject == subject
-		if !match && strings.HasPrefix(b.Subject, "group:") {
-			_, match = member[strings.TrimPrefix(b.Subject, "group:")]
-		}
-		if match {
-			sources = append(sources, map[string]any{
-				"subject": b.Subject,
-				"policy":  b.Policy,
-				"scope":   b.Scope,
-			})
-		}
-	}
-	if resolved.Managed && len(sources) == 0 {
-		sources = append(sources, map[string]any{
-			"subject": subject,
-			"policy":  "default",
-			"scope":   "daemon",
-			"note":    "default_managed routed (no matching binding)",
-		})
-	}
-
 	return map[string]any{
-		"agent_id":           req.AgentID,
-		"frontmatter_groups": frontmatterGroups,
-		"bindings":           sources,
-		"resolved":           resolved,
+		"agent_id":           res.AgentID,
+		"frontmatter_groups": res.Groups,
+		"groups":             res.Groups,
+		"bindings":           res.Bindings,
+		"policy":             firstPolicy,
+		"managed":            res.Managed,
+		"allowed_tools":      res.AllowedTools,
+		"denied_tools":       res.DeniedTools,
+		"grants":             res.Grants,
+		"resolved":           res.Resolved,
 	}, nil
 }
 

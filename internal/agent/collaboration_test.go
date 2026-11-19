@@ -2,6 +2,7 @@ package agent
 
 import (
 	"testing"
+	"time"
 )
 
 func TestSessionState_IsTerminal(t *testing.T) {
@@ -77,5 +78,42 @@ func TestCollaborationSession_StateTransitions(t *testing.T) {
 	sess.MarkConverged()
 	if sess.State != SessionConverged || !sess.State.IsTerminal() {
 		t.Errorf("state = %q, want converged/terminal", sess.State)
+	}
+}
+
+// TestDefaultSessionConfig_TokenBudgetUnlimited pins M7 (bughunt
+// 2026-11-19): an unconfigured collaboration session must not carry a
+// hidden 50k token ceiling — the same opt-in-cap class 419c9b77 removed
+// from the chat loop. TokenBudget 0 = unlimited (the pair driver gates on
+// >0); the other defaults stay unchanged.
+func TestDefaultSessionConfig_TokenBudgetUnlimited(t *testing.T) {
+	cfg := DefaultSessionConfig()
+	if cfg.TokenBudget != 0 {
+		t.Fatalf("DefaultSessionConfig TokenBudget = %d, want 0 (unlimited; no hidden ceiling)", cfg.TokenBudget)
+	}
+	if cfg.MaxTurns != 10 {
+		t.Errorf("MaxTurns = %d, want 10 (unchanged)", cfg.MaxTurns)
+	}
+	if cfg.TurnTimeout != 5*time.Minute {
+		t.Errorf("TurnTimeout = %v, want 5m (unchanged)", cfg.TurnTimeout)
+	}
+	if cfg.TimeBudget != 30*time.Minute {
+		t.Errorf("TimeBudget = %v, want 30m (unchanged)", cfg.TimeBudget)
+	}
+	sess := NewCollaborationSession("pair_programming", "task-m7", []string{"coder", "planner"}, cfg)
+	if sess.TokenBudget != 0 {
+		t.Fatalf("session TokenBudget = %d, want 0 carried from the default config", sess.TokenBudget)
+	}
+}
+
+// TestCollaborationSession_ExplicitTokenBudgetCarried pins that an
+// explicit positive cap still flows through config -> session unchanged
+// (M7 keeps explicit caps working; only the DEFAULT became unlimited).
+func TestCollaborationSession_ExplicitTokenBudgetCarried(t *testing.T) {
+	cfg := DefaultSessionConfig()
+	cfg.TokenBudget = 1234
+	sess := NewCollaborationSession("pair_programming", "task-m7-cap", []string{"coder", "planner"}, cfg)
+	if sess.TokenBudget != 1234 {
+		t.Fatalf("session TokenBudget = %d, want the explicit 1234", sess.TokenBudget)
 	}
 }

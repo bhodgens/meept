@@ -20,6 +20,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/agents"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/groups"
@@ -153,13 +154,33 @@ func (s *GroupsService) diagnosisAgents() []groups.DiagnosisAgent {
 			continue
 		}
 		out = append(out, groups.DiagnosisAgent{
-			ID:      def.ID,
-			Groups:  def.Groups,
-			Tools:   def.AdditionalTools,
+			ID:     def.ID,
+			Groups: def.Groups,
+			// The diagnosis vocabulary must be the SAME grant set the
+			// runtime gate resolves (registry.go ResolveForAgent passes
+			// spec.GrantedToolNames()): baseline + additional, normalized
+			// to registered names. Feeding only AdditionalTools made
+			// diagnosis resolve a different (baseline-less) tool set than
+			// enforcement — under default_managed an empty-additional
+			// agent diagnosed to the full default-policy allowlist while
+			// the gate intersected with its baseline grants.
+			Tools:   diagnosisGrantSet(def.AdditionalTools),
 			Enabled: def.IsEnabled(),
 		})
 	}
 	return out
+}
+
+// diagnosisGrantSet builds the full normalized grant vocabulary for a
+// discovered definition: agents.AgentDefinition carries only the declared
+// additional tools, so the baseline half comes from the exported agent
+// vocabulary and the union rides the SAME GrantedToolNames method the
+// runtime gate uses (internal/agent/spec.go; registry.go ResolveForAgent).
+// No parallel baseline list may live here — the runtime's BaselineTools is
+// the single source of truth.
+func diagnosisGrantSet(additionalTools []string) []string {
+	spec := &agent.AgentSpec{AdditionalTools: additionalTools}
+	return spec.GrantedToolNames()
 }
 
 // findAgent returns the discovered definition for agentID (nil when the
@@ -234,7 +255,7 @@ func (s *GroupsService) Explain(ctx context.Context, agentID string) (*groups.Ex
 		return s.explainEmployee(ctx, agentID)
 	}
 	return groups.Explain(
-		def.AdditionalTools, agentID, def.Groups,
+		diagnosisGrantSet(def.AdditionalTools), agentID, def.Groups,
 		s.policies(), s.bindings(),
 		&groups.ResolveOptions{}, // default normalizer; daemon wiring injects the registry-backed one
 		s.groupsSection().DefaultManaged,

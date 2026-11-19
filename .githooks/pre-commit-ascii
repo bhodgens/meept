@@ -58,6 +58,7 @@ ALLOWLIST=(
   "internal/validator/filter_language_test.go"
   "internal/services/push_channels_telegram_test.go"
   "e2e/suites/output-filters/output_filters_language_test.go"
+  "internal/llm/context_firewall_test.go"
 )
 
 is_allowlisted() {

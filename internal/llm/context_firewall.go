@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"unicode/utf8"
 )
 
 // Context summary boundary markers.
@@ -584,6 +585,19 @@ func (f *ContextFirewall) ContextUtilization(messages []ChatMessage) float64 {
 // - At wrapUpThreshold (50%): logs warning for potential wrap-up
 // - At hardLimit (80%): drops old context if DropContextOnHardLimit is enabled
 func (f *ContextFirewall) processMessages(ctx context.Context, messages []ChatMessage) []ChatMessage {
+	// Window-independent safety net: bound oversized system messages
+	// BEFORE the inertness early-return. The bound does not depend on a
+	// configured context window, so it must hold on every path — including
+	// an unknown window (ContextLimit==0), a nil model, or a disabled
+	// firewall — otherwise an oversized system message (e.g. a full skill
+	// catalog) ships unbounded exactly where no other reduction runs.
+	// Small system messages pass byte-identically.
+	if clipped, changed := boundOversizedSystemMessages(messages); changed {
+		f.logger.Warn("context firewall: truncated oversized system message (window-independent bound)",
+			"messages", len(messages),
+		)
+		messages = clipped
+	}
 	if !f.config.Enabled || f.model == nil || f.model.ContextLimit == 0 {
 		return messages
 	}
@@ -1045,7 +1059,16 @@ func boundOversizedSystemMessages(messages []ChatMessage) ([]ChatMessage, bool) 
 			out = append(out, messages[:i]...)
 		}
 		clipped := msg
-		clipped.Content = msg.Content[:maxSystemMessageBytes] +
+		// Back the byte cut to a rune boundary: a raw slice at
+		// maxSystemMessageBytes can split a multi-byte UTF-8 rune and
+		// ship an invalid-UTF-8 head to the provider. Walk back while
+		// the cut lands on a continuation byte (at most 3 steps —
+		// runes are at most 4 bytes).
+		cut := maxSystemMessageBytes
+		for cut > 0 && !utf8.RuneStart(msg.Content[cut]) {
+			cut--
+		}
+		clipped.Content = msg.Content[:cut] +
 			"\n[... truncated: system message exceeded context bounds; full content available via tools ...]"
 		out = append(out, clipped)
 		truncated = true

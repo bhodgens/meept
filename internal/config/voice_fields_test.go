@@ -16,6 +16,7 @@ package config
 
 import (
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -339,5 +340,107 @@ func TestNormalizeVoiceAcousticDefaultsIdempotent(t *testing.T) {
 	if v.MinTurnWords != before.MinTurnWords || v.MinRMS != before.MinRMS ||
 		v.ReplyExemptS != before.ReplyExemptS || v.FragmentDecayS != before.FragmentDecayS {
 		t.Fatal("NormalizeVoiceAcousticDefaults must be idempotent on valid values")
+	}
+}
+
+// TestNormalizeVoiceRumbleDefaults pins bughunt 2026-11-19 M18/H1: the
+// documented 0.20-0.25 GPU-fraction safe range is ENFORCED at the config
+// boundary (SpawnArgs used to render the value verbatim, so vLLM's unsafe
+// 0.92 default could starve qwen3-tts on the shared RTX 3060).
+func TestNormalizeVoiceRumbleDefaults(t *testing.T) {
+	cases := []struct {
+		name string
+		in   float64
+		want float64
+	}{
+		{"vllm_unsafe_default_clamps_to_max", 0.92, 0.25},
+		{"above_range_clamps_to_max", 0.50, 0.25},
+		{"just_above_max_clamps", 0.2500001, 0.25},
+		{"zero_restores_frozen_default", 0, 0.20},
+		{"negative_restores_frozen_default", -0.1, 0.20},
+		{"in_range_low_passes", 0.20, 0.20},
+		{"in_range_mid_passes", 0.22, 0.22},
+		{"in_range_max_passes", 0.25, 0.25},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// An explicitly configured block: a non-GPU field is set so
+			// the normalizer sees a configured block, not the zero value.
+			r := VoiceRumbleRuntimeConfig{
+				GPUMemoryUtilization: tc.in,
+				MaxModelLen:          4096,
+			}
+			NormalizeVoiceRumbleDefaults(&r)
+			if r.GPUMemoryUtilization != tc.want {
+				t.Fatalf("gpu_memory_utilization %v -> %v, want %v", tc.in, r.GPUMemoryUtilization, tc.want)
+			}
+			if r.MaxModelLen != 4096 {
+				t.Fatalf("normalizer touched an unrelated field: max_model_len = %d", r.MaxModelLen)
+			}
+		})
+	}
+
+	t.Run("nan_and_inf_restore_default", func(t *testing.T) {
+		for _, bad := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+			r := VoiceRumbleRuntimeConfig{GPUMemoryUtilization: bad, MaxModelLen: 4096}
+			NormalizeVoiceRumbleDefaults(&r)
+			if r.GPUMemoryUtilization != RumbleGPUMemoryUtilizationDefault {
+				t.Fatalf("gpu_memory_utilization %v -> %v, want the frozen default", bad, r.GPUMemoryUtilization)
+			}
+		}
+	})
+
+	t.Run("zero_value_block_keeps_frozen_defaults", func(t *testing.T) {
+		// The file omits [voice.rumble_runtime] entirely: the zero-value
+		// block must stay zero (the frozen defaults come from
+		// DefaultConfig / DefaultVoiceRumbleRuntimeConfig, not from an
+		// injection here).
+		var r VoiceRumbleRuntimeConfig
+		NormalizeVoiceRumbleDefaults(&r)
+		if r != (VoiceRumbleRuntimeConfig{}) {
+			t.Fatalf("zero-value block mutated: %+v", r)
+		}
+		// The DefaultConfig block is the frozen safe shape and passes
+		// through untouched.
+		def := DefaultConfig().Voice.RumbleRuntime
+		before := def
+		NormalizeVoiceRumbleDefaults(&def)
+		if def != before {
+			t.Fatalf("DefaultConfig rumble block mutated: %+v -> %+v", before, def)
+		}
+		if def.GPUMemoryUtilization != 0.20 || def.MaxModelLen != 4096 {
+			t.Fatalf("frozen defaults drifted: %+v", def)
+		}
+	})
+
+	t.Run("idempotent", func(t *testing.T) {
+		r := VoiceRumbleRuntimeConfig{GPUMemoryUtilization: 0.92, MaxModelLen: 4096}
+		NormalizeVoiceRumbleDefaults(&r)
+		first := r
+		NormalizeVoiceRumbleDefaults(&r)
+		if r != first {
+			t.Fatal("NormalizeVoiceRumbleDefaults must be idempotent")
+		}
+	})
+
+	t.Run("nil_safe", func(t *testing.T) {
+		NormalizeVoiceRumbleDefaults(nil) // must not panic
+	})
+}
+
+// TestRumbleClampWiredAtDaemonBoundary pins that ValidateAll (the daemon's
+// pre-start validation gate) runs the rumble clamp, so a config that
+// skipped load-boundary normalization still renders safe spawn args.
+func TestRumbleClampWiredAtDaemonBoundary(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Voice.RumbleRuntime = VoiceRumbleRuntimeConfig{
+		GPUMemoryUtilization: 0.92, // vLLM's unsafe default, explicitly configured
+		MaxModelLen:          4096,
+	}
+	if err := cfg.ValidateAll(); err != nil {
+		t.Fatalf("ValidateAll: %v", err)
+	}
+	if got := cfg.Voice.RumbleRuntime.GPUMemoryUtilization; got != 0.25 {
+		t.Fatalf("ValidateAll left gpu_memory_utilization = %v, want the 0.25 clamp", got)
 	}
 }

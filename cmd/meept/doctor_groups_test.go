@@ -6,9 +6,14 @@ package main
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/caimlas/meept/internal/agent"
+	"github.com/caimlas/meept/internal/agents"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/groups"
 )
@@ -167,5 +172,64 @@ func TestDoctorGroupsWiringAdapter(t *testing.T) {
 	checks := checkGroupsDoctorGroups(checkConfiguredGroupsDoctor())
 	if len(checks) == 0 {
 		t.Fatal("adapter produced no checks")
+	}
+}
+
+// TestDoctorAgentsGrantVocabulary pins M8 (bughunt 2026-11-19) on the
+// doctor seam: doctorAgents must feed the engine the SAME grant vocabulary
+// the runtime gate resolves (spec.GrantedToolNames() = baseline +
+// additional, normalized) — not just AdditionalTools. An empty-additional
+// agent under default_managed must diagnose to baseline ∩ default-policy,
+// never the full default-policy allowlist.
+func TestDoctorAgentsGrantVocabulary(t *testing.T) {
+	// Hermetic tiers: the real discovery defaults would read the host's
+	// ~/.meept/agents; pin the bundled tier to a temp fixture instead.
+	bundled := t.TempDir()
+	agentDir := filepath.Join(bundled, "baseline-only")
+	if err := os.MkdirAll(agentDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	body := "---\nid: baseline-only\nname: baseline-only\nrole: executor\n---\n\nNo additional tools.\n"
+	if err := os.WriteFile(filepath.Join(agentDir, "AGENT.md"), []byte(body), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	origTiers := doctorDiscoveryTiers
+	doctorDiscoveryTiers = func() []agents.DiscoveryTier {
+		return []agents.DiscoveryTier{{Path: bundled, Priority: agents.PriorityBundled}}
+	}
+	t.Cleanup(func() { doctorDiscoveryTiers = origTiers })
+
+	rows := doctorAgents(nil)
+	var row *groups.DiagnosisAgent
+	for i := range rows {
+		if rows[i].ID == "baseline-only" {
+			row = &rows[i]
+		}
+	}
+	if row == nil {
+		t.Fatalf("doctor discovery missed the fixture: %+v", rows)
+	}
+	spec := &agent.AgentSpec{ID: "baseline-only"}
+	if !slices.Equal(row.Tools, spec.GrantedToolNames()) {
+		t.Fatalf("doctor Tools = %v; want the runtime grant vocabulary %v", row.Tools, spec.GrantedToolNames())
+	}
+
+	// default_managed with a policy allowing a baseline tool AND a
+	// non-baseline tool: the empty-additional agent must NOT diagnose to
+	// the full policy allowlist.
+	g := config.SecurityGroupsConfig{
+		DefaultManaged: true,
+		Policies: []config.GroupsPolicyConfig{{
+			Name:         "default",
+			ToolsAllowed: []string{"memory_search", "shell"},
+		}},
+	}
+	runtime := groups.ResolveDefaultManaged(spec.GrantedToolNames(), doctorPolicies(g), &groups.ResolveOptions{})
+	got := doctorAllowedTools(g, *row)
+	if !slices.Equal(got, runtime.AllowedTools) {
+		t.Fatalf("doctor allowed = %v; runtime gate allowed = %v (diagnosis diverged from enforcement)", got, runtime.AllowedTools)
+	}
+	if slices.Contains(got, "shell") {
+		t.Fatalf("doctor widened to the full default-policy allowlist: %v", got)
 	}
 }
