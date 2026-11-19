@@ -188,9 +188,9 @@ set children COMPLETE.
 |-------|--------|------------|-------------|
 | 00T-unit-tests | TESTS_VALIDATED | 1 | Authored in-session; RED on undefined newRumbleSTT/DefaultRumbleRuntimeConfig, not syntax. Commit 9d3ef25b. |
 | 00Te-e2e-tests | TESTS_VALIDATED | 1 | Authored in-session; keys gate RED on unknown vendor; F4 honest skip cites research:45. Commit 9d3ef25b. |
-| 01-rumble-adapter | PENDING | 0 | dispatched |
-| 02-sidecar-wiring | PENDING | 0 | dispatched |
-| 03-registration-docs | PENDING | 0 | dispatched |
+| 01-rumble-adapter | REVIEWED | 1 | Commit d83a147a; TestRumbleSTTStream GREEN, hooks green. |
+| 02-sidecar-wiring | REVIEWED | 2 | Commit f8fa6c43; cap pinned 0.20, SpawnArgs single source (dead seam removed), TestRumbleRuntimeConfigCap GREEN. |
+| 03-registration-docs | REVIEWED | 1 | Commit a9676587; NewSTT case + pin + docs/AGENTS; gates GREEN. |
 
 Gate rule: implementation children stay PENDING until 00T + 00Te reach TESTS_VALIDATED.
 
@@ -222,6 +222,33 @@ Statuses: PENDING | DELTA | VALIDATED. Delta log: none yet.
 ## Frozen Documents
 
 Leaves freeze at dispatch. Corrections ride dispatch context as dated addenda.
+
+## Completion Report (2026-11-19)
+
+All five children land COMPLETE. Phase 0 gate commits: 21998eb6
+(evaluation), 9d3ef25b (RED gates), 14d10fb2 (tracking). Phase 1
+commits: d83a147a (01), f8fa6c43 (02), a9676587 (03).
+
+Integration gates run in the worktree at final HEAD:
+- `go build ./cmd/meept-voice ./cmd/meept-daemon` — PASS.
+- `go test -p 2 -count=1 ./internal/voicechild/... ./internal/voice/...
+  ./internal/daemon/... ./internal/config/...` — all 8 packages PASS.
+- `make e2e-fast-area AREA=voice-local` — PASS (40.2 s).
+- Rumble e2e gates: TestVoiceKeysRumble01 PASS, TestRumbleStreamingProbe
+  honest SKIP (F4 batch-only, cites research:45).
+- NOT PASSED (pre-existing, NOT a regression): `TestVoiceKeysToProviders`
+  in voice-lifecycle fails identically at base commit 9157700f in a clean
+  detached worktree (fake qwen3 endpoint never served a synthesis request
+  within 15 s). Owned by another lane; left untouched.
+
+Noticed issue resolved in leaf 02 review: the authored
+`RumbleRuntimeEndpointEntry` was a dead unwired seam (Runtime "vllm" is not
+a valid `llm.RuntimeType`). Replaced with `SpawnArgs()` used by the default
+config, so the GPU cap is one source of truth and no dead code ships.
+
+Live pilot on socrates remains a deferred manual operator step (no vLLM
+install / model downloads performed); tracked in
+`docs/research/rumble2flash-evaluation.md`.
 
 ## Notes
 
