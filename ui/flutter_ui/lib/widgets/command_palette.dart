@@ -293,7 +293,6 @@ class _CommandPaletteState extends State<CommandPalette> {
             ),
             Flexible(
               child: ListView.builder(
-                shrinkWrap: true,
                 itemCount: filtered.length,
                 itemBuilder: (context, index) {
                   final item = filtered[index];
@@ -340,6 +339,8 @@ class _CommandPaletteState extends State<CommandPalette> {
                           Expanded(
                             child: Text(
                               item.description,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                               style: CyberpunkTypography.bodySmall.copyWith(
                                 color: CyberpunkColors.lightGray,
                               ),

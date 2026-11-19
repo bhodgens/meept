@@ -178,15 +178,22 @@ class _QueueListState extends ConsumerState<QueueList> {
             const SizedBox(height: 4),
             Row(
               children: [
-                Text(
-                  '${job.type} · ${job.priorityName}',
-                  style: CyberpunkTypography.bodySmall,
+                Flexible(
+                  child: Text(
+                    '${job.type} · ${job.priorityName}',
+                    style: CyberpunkTypography.bodySmall,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
                 const Spacer(),
                 if (job.createdAt != null)
-                  Text(
-                    timeago.format(job.createdAt!),
-                    style: CyberpunkTypography.bodySmall,
+                  Flexible(
+                    child: Text(
+                      timeago.format(job.createdAt!),
+                      style: CyberpunkTypography.bodySmall,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.right,
+                    ),
                   ),
               ],
             ),
