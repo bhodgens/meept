@@ -5701,6 +5701,51 @@
       ]
     },
     {
+      "id": "rumble-chat-completions-01",
+      "suite": "voice-lifecycle",
+      "diff": "M",
+      "title": "[rumble-streaming F1] adapter POSTs chat.completions with an audio_url data-URI body (no Authorization) to fake vLLM and exactly one Final transcript arrives",
+      "paths": [
+        "internal/voicechild/providers/stt_rumble.go",
+        "internal/voicechild/providers_wiring.go",
+        "internal/daemon/voice_keys.go"
+      ]
+    },
+    {
+      "id": "rumble-partial-stream-01",
+      "suite": "voice-lifecycle",
+      "diff": "M",
+      "title": "[rumble-streaming F2] stt_partial_ms>0 wraps the base STT in a provider-agnostic pseudo-stream decorator: Final=false partials arrive before pcm close and exactly one Final=true after",
+      "paths": [
+        "internal/voicechild/providers/pseudostream.go",
+        "internal/voicechild/providers_wiring.go",
+        "internal/voicechild/providers/stt_deepgram.go"
+      ]
+    },
+    {
+      "id": "rumble-template-kwargs-01",
+      "suite": "voice-lifecycle",
+      "diff": "M",
+      "title": "[rumble-streaming F3] chat_template_kwargs (language, digits, filler, verbatim) from C2 selectors reach the chat.completions request body",
+      "paths": [
+        "internal/voicechild/providers_wiring.go",
+        "internal/voicechild/providers/stt_rumble.go",
+        "internal/daemon/voice_keys.go",
+        "internal/config/schema.go"
+      ]
+    },
+    {
+      "id": "rumble-keys-selectors-01",
+      "suite": "voice-lifecycle",
+      "diff": "M",
+      "title": "[rumble-streaming F5] keys frame carries additive selectors (chat_template_language/digits/filler/verbatim, stt_partial_ms); absent means byte-identical legacy wire",
+      "paths": [
+        "internal/daemon/voice_keys.go",
+        "internal/voicechild/providers_wiring.go",
+        "internal/config/schema.go"
+      ]
+    },
+    {
       "id": "voice-tts-stt-keys-01",
       "suite": "voice_tts_stt",
       "diff": "S",
