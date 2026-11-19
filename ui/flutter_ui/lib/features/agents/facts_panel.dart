@@ -5,8 +5,11 @@ import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../providers/providers.dart';
 
-/// Facts panel - shows active memory facts from the harness-eval leaf 12 store.
-/// Read-only. Blank = no facts, not a layout bug.
+/// Facts panel - shows active memory facts from the harness-eval leaf 12
+/// store (daemon memory facts: preferences, restrictions, accounts,
+/// temporal notes). Read-only, NOT agent-specific. Blank = no facts, not a
+/// layout bug. Renders inside the agents sidebar's single scroll view, so
+/// its list is bounded + shrink-wrapped (no Expanded - unbounded parent).
 class FactsPanel extends ConsumerStatefulWidget {
   const FactsPanel({super.key});
 
@@ -66,7 +69,7 @@ class _FactsPanelState extends ConsumerState<FactsPanel> {
               ),
               const SizedBox(width: 6),
               Text(
-                'facts',
+                'memory facts',
                 style: CyberpunkTypography.label.copyWith(
                   color: CyberpunkColors.orangePrimary,
                 ),
@@ -91,10 +94,13 @@ class _FactsPanelState extends ConsumerState<FactsPanel> {
               child: Text('no facts', style: TextStyle(color: Colors.grey)),
             )
           else
-            Expanded(
+            // Bounded + shrink-wrapped: the sidebar scrolls as a whole;
+            // this list scrolls internally past 180px so facts never
+            // crowd the panels above/below.
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 180),
               child: ListView.builder(
                 shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
                 itemCount: _facts.length,
                 itemBuilder: (context, index) {
                   return _buildFactTile(_facts[index]);

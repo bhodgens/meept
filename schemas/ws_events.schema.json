@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://meept.local/schemas/ws_events.schema.json",
   "title": "meept WS event surface (issue #48 Tier 3)",
-  "description": "Contract for the flattened frames emitted by the daemon's WS relay (internal/comm/http/server.go transformBusEventToWS). Only the two stable typed shapes are specified: chat_message (normalized by the relay) and agent_progress frames carrying the frozen agent.TurnTerminalEvent payload. The Dart models in ui/flutter_ui/lib/models/ws_events.dart mirror this file; internal/comm/http/ws_schema_drift_test.go validates marshaled Go payloads against it and fails on drift.",
+  "description": "Contract for the flattened frames emitted by the daemon's WS relay (internal/comm/http/server.go transformBusEventToWS). Three stable typed shapes are specified: chat_message (normalized by the relay), agent_progress frames carrying the frozen agent.TurnTerminalEvent payload, and agent_progress frames carrying the shared agent.ExecutionResultEvent payload (bot.result / employee.result, issue #140/#160). The Dart models in ui/flutter_ui/lib/models/ws_events.dart mirror this file; internal/comm/http/ws_schema_drift_test.go validates marshaled Go payloads against it and fails on drift.",
   "type": "object",
   "properties": {
     "type": {
@@ -77,11 +77,35 @@
         "duration_ms"
       ],
       "additionalProperties": true
+    },
+    "execution_result": {
+      "type": "object",
+      "description": "agent_progress classification carrying the shared agent.ExecutionResultEvent payload (internal/agent/execution_events.go, bot.result / employee.result topics; CLOSED field set). The topic is the sole tier discriminator; there is deliberately NO kind field. Identified on the client by payload shape: agent_id AND status present, and source_topic is bot.result or employee.result.",
+      "properties": {
+        "agent_id": { "type": "string", "minLength": 1 },
+        "status": {
+          "description": "CLOSED set: completed | failed | skipped.",
+          "enum": ["completed", "failed", "skipped"]
+        },
+        "output": { "type": "string" },
+        "tokens_used": { "type": "integer", "minimum": 0 },
+        "error": { "type": "string" },
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "stop_reason": { "type": "string" },
+        "trigger_ref": { "type": "string" },
+        "session_id": { "type": "string" },
+        "source_topic": { "type": "string" },
+        "timestamp": { "$ref": "#/definitions/rfc3339String" },
+        "type": { "const": "agent_progress" }
+      },
+      "required": ["type", "agent_id", "status", "tokens_used", "duration_ms"],
+      "additionalProperties": true
     }
   },
   "oneOf": [
     { "$ref": "#/definitions/chat_message" },
     { "$ref": "#/definitions/turn_terminal" },
+    { "$ref": "#/definitions/execution_result" },
     {
       "type": "object",
       "description": "Heterogeneous relay shapes (metrics_update, job_update, plan_update, generic event) deliberately left schema-free: only the type key is contractual.",

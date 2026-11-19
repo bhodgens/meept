@@ -2054,6 +2054,35 @@ class SdkApiClient {
     return _get('/api/v1/agents/$employeeId/review');
   }
 
+  /// GET /api/v1/executions (issue #160 follow-up): durable, poll-based
+  /// execution-run history. Returns {"runs":[ExecutionRun],"total":int}.
+  /// Survives client disconnect and daemon restart (server-side store).
+  Future<Map<String, dynamic>> getExecutionRuns({
+    String? agentId,
+    int? limit,
+    String? since,
+  }) async {
+    final query = <String, dynamic>{};
+    if (agentId != null) query['agent_id'] = agentId;
+    if (limit != null) query['limit'] = limit;
+    if (since != null) query['since'] = since;
+    return _get('/api/v1/executions', query: query);
+  }
+
+  /// GET /api/v1/executions/histogram?agent_id=...
+  /// Returns {"agent_id":str,"cells":[8 ints]} - token volume per 7.5-minute
+  /// cell over the last hour, oldest cell first. Drives the 8-bit bars.
+  Future<Map<String, dynamic>> getExecutionHistogram(String agentId) async {
+    return _get('/api/v1/executions/histogram', query: {'agent_id': agentId});
+  }
+
+  /// GET /api/v1/agents/roster - unified agent/bot/employee roster (C1).
+  /// Returns {"agents":[{id,name,type,status,active_count,...}]}. The GUI
+  /// reads active_count here for the per-card concurrent-run counter.
+  Future<Map<String, dynamic>> getAgentsRoster() async {
+    return _get('/api/v1/agents/roster');
+  }
+
   /// GET /api/v1/intake/status (issue #109 GUI parity; bridge to the
   /// intake.status RPC). Returns the frozen cross-surface snapshot:
   /// {enabled, watch_repo, poll_interval, required_labels, done_label,

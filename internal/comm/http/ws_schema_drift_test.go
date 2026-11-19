@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/comm/wsclass"
@@ -27,6 +28,127 @@ import (
 const wsEventsSchemaPath = "../../../schemas/ws_events.schema.json"
 
 var update = flag.Bool("update", false, "rewrite the golden fixture at ui/flutter_ui/test/fixtures/turn_terminal_event.json")
+
+// goExecutionResultJSONTags extracts the json tags of agent.ExecutionResultEvent
+// via reflect, pinning the shared bot/employee payload to its schema exactly
+// like turn_terminal.
+func goExecutionResultJSONTags(t *testing.T) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	typ := reflect.TypeFor[agent.ExecutionResultEvent]()
+	for f := range typ.Fields() {
+		tag := f.Tag.Get("json")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		name, _, _ := strings.Cut(tag, ",")
+		out[name] = tag
+	}
+	return out
+}
+
+func executionResultJSONType(key string) string {
+	switch key {
+	case "tokens_used", "duration_ms":
+		return "integer"
+	default:
+		return "string"
+	}
+}
+
+// TestWSExecutionResultDrift pins the ExecutionResultEvent <-> schema contract.
+// The payload is intentionally untagged; the topic name selects the tier.
+// Both bot.result and employee.result must decode against the same definition.
+func TestWSExecutionResultDrift(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Clean(wsEventsSchemaPath))
+	if err != nil {
+		t.Fatalf("ws event schema missing/unreadable at %s: %v", wsEventsSchemaPath, err)
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		t.Fatalf("schema is not valid JSON: %v", err)
+	}
+	tags := goExecutionResultJSONTags(t)
+	defs, _ := schema["definitions"].(map[string]any)
+	resultDef, ok := defs["execution_result"].(map[string]any)
+	if !ok {
+		t.Fatal("schema definitions missing execution_result")
+	}
+	resultProps := resultDef["properties"].(map[string]any)
+	required := schemaRequired(t, schema, "execution_result")
+
+	for key, tag := range tags {
+		decl, declared := resultProps[key].(map[string]any)
+		if !declared {
+			t.Errorf("ExecutionResultEvent json key %q not declared in schema execution_result — add it to schemas/ws_events.schema.json", key)
+			continue
+		}
+		want := executionResultJSONType(key)
+		// A declared schema type of "" means the key is carried by an $ref
+		// (rfc3339String) or a typed enum; treated as compatible — the value
+		// type is pinned by the enum/$ref body, not by this assertion.
+		if got, _ := decl["type"].(string); got != want && got != "" {
+			t.Errorf("ExecutionResultEvent key %q: Go emits %s, schema declares %s", key, want, got)
+		}
+		if inList(required, key) && strings.Contains(tag, "omitempty") {
+			t.Errorf("schema requires %q but the Go tag is omitempty — make the contract match", key)
+		}
+	}
+	for _, req := range required {
+		if req == "type" || req == "source_topic" || req == "timestamp" {
+			continue
+		}
+		tag, ok := tags[req]
+		if !ok {
+			t.Errorf("schema execution_result requires %q but agent.ExecutionResultEvent has no such json key — schema drift", req)
+			continue
+		}
+		if strings.Contains(tag, "omitempty") {
+			t.Errorf("schema requires %q but the Go tag carries omitempty — contract mismatch", req)
+		}
+	}
+
+	ev := agent.ExecutionResultEvent{
+		AgentID:    "agent-drift-1",
+		Status:     "completed",
+		Output:     "drift gate result",
+		TokensUsed: 42,
+		DurationMS: 1234,
+		StopReason: agent.StopReasonEndTurn,
+		TriggerRef: "trigger-drift-1",
+		SessionID:  "session-drift-1",
+		Timestamp:  time.Date(2026, time.November, 18, 12, 0, 0, 0, time.UTC),
+	}
+	payload, err := json.Marshal(ev)
+	if err != nil {
+		t.Fatalf("marshal ExecutionResultEvent: %v", err)
+	}
+	var wire map[string]any
+	if err := json.Unmarshal(payload, &wire); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if err := validateAgainstDefinition(t, schema, "execution_result", wire, tags); err != nil {
+		t.Fatalf("ExecutionResultEvent payload does not match schema: %v", err)
+	}
+	for _, topic := range []string{agent.TopicBotResult.Name, agent.TopicEmployeeResult.Name} {
+		frame := transformBusEventToWS(&models.BusMessage{
+			Topic:   topic,
+			Payload: payload,
+		})
+		if frame == nil {
+			t.Fatalf("relay dropped the %s frame", topic)
+		}
+		if frame["type"] != wsclass.WSProgress.String() {
+			t.Fatalf("relay classified %s as %v, want agent_progress", topic, frame["type"])
+		}
+		if frame["source_topic"] != topic {
+			t.Fatalf("relay frame source_topic = %v, want %s", frame["source_topic"], topic)
+		}
+		if err := validateAgainstDefinition(t, schema, "execution_result", frame, tags); err != nil {
+			t.Fatalf("%s relay frame does not match schema: %v", topic, err)
+		}
+	}
+}
 
 // goStructJSONTags extracts the json tags of agent.TurnTerminalEvent via
 // reflect, so the drift check compares against the real source of truth

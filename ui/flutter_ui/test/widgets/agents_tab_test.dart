@@ -9,7 +9,9 @@ import 'package:meept_ui/services/sdk_client.dart';
 
 void main() {
   group('AgentsTab tile sizing', () {
-    testWidgets('agent tiles are ~150 wide and ~58 tall', (tester) async {
+    testWidgets('agent tiles are ~250 wide and ~70 tall (redesign)', (
+      tester,
+    ) async {
       tester.view.devicePixelRatio = 1.0;
       tester.view.physicalSize = const Size(800, 600);
       addTearDown(tester.view.resetPhysicalSize);
@@ -38,10 +40,11 @@ void main() {
       expect(tiles, findsOneWidget);
 
       final firstTile = tester.getRect(tiles);
-      // Tile size varies based on screen width, grid layout, and background image wrapper
-      // Width ~150-225, height varies significantly with padding and layout
-      expect(firstTile.width, closeTo(175, 75));
-      expect(firstTile.height, closeTo(120, 100));
+      // Issue #160 follow-up redesign: ~30% wider tiles (maxCrossAxisExtent
+      // 290) at roughly half the old height (childAspectRatio 3.6). At the
+      // 800px test surface the grid yields ~250x70 tiles.
+      expect(firstTile.width, closeTo(250, 60));
+      expect(firstTile.height, closeTo(70, 30));
     });
 
     testWidgets('widening window shows more tiles per row', (tester) async {
@@ -252,6 +255,24 @@ class _FakeSdkClient implements SdkApiClient {
     }
     return [];
   }
+
+  @override
+  Future<Map<String, dynamic>> getExecutionRuns({
+    String? agentId,
+    int? limit,
+    String? since,
+  }) async => {'runs': <Map<String, dynamic>>[], 'total': 0};
+
+  @override
+  Future<Map<String, dynamic>> getExecutionHistogram(String agentId) async => {
+    'agent_id': agentId,
+    'cells': List<int>.filled(8, 0),
+  };
+
+  @override
+  Future<Map<String, dynamic>> getAgentsRoster() async => {
+    'agents': <Map<String, dynamic>>[],
+  };
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);

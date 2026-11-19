@@ -90,10 +90,12 @@ class _EvalRunsPanelState extends ConsumerState<EvalRunsPanel> {
               child: Text('no eval runs', style: TextStyle(color: Colors.grey)),
             )
           else
-            Expanded(
+            // Bounded + shrink-wrapped for the scrolling sidebar (no
+            // Expanded: the parent scroll view gives unbounded height).
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 180),
               child: ListView.builder(
                 shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
                 itemCount: _runs.length,
                 itemBuilder: (context, index) {
                   return _buildRunCard(_runs[index]);
