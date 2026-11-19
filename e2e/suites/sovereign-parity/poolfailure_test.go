@@ -134,6 +134,15 @@ func TestPoolFailure_AccountScopeBlocksSiblings(t *testing.T) {
 func TestPoolFailure_RequestFaultBlocksNothing(t *testing.T) {
 	cfg := poolFailureConfig(t)
 	stubAcct := cfg.providers[1].stub
+	// Pin the classifier to chat (admission/posture pattern) so the
+	// rotation turn stays on the chat agent pinned to the general alias.
+	// Without the pin, "rotate onto the account provider" reads as an
+	// imperative work request and routes to quickplan; with the cheap head
+	// 503ing, the classifier retries (~90s) plus planner endpoint-block
+	// backoff then overrun the turn timeout before rotation can be observed.
+	for _, p := range cfg.providers {
+		p.stub.setClassifierOut(`{"intent":"chat","confidence":0.9,"reasoning":"pool request-fault drive"}`)
+	}
 	s := newParitySandbox(t, cfg)
 
 	sessID := s.createSession(t, "pool-400")
@@ -141,7 +150,7 @@ func TestPoolFailure_RequestFaultBlocksNothing(t *testing.T) {
 	// Force rotation onto provacct (fail the cheap head briefly).
 	stubOther := cfg.providers[0].stub
 	stubOther.setMode("model-other", "status:503")
-	if reply := s.chatTurn(t, sessID, "rotate onto the account provider", 180*time.Second); reply == "" {
+	if reply := s.chatTurn(t, sessID, "what model answers this turn?", 180*time.Second); reply == "" {
 		t.Fatal("rotation turn returned empty reply")
 	}
 	stubOther.setMode("model-other", "ok")

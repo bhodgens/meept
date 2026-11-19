@@ -291,14 +291,13 @@ func stubSystemText(body map[string]any) string {
 // data_posture) — they round-trip through the JSON5 loader untouched,
 // which is exactly the pre-landing state the gate tests exercise.
 type parityModel struct {
-	name       string
-	caps       []string
-	inCost     float64
-	outCost    float64
-	ctxLimit   int // 0 = omit the context_limit key (unknown-limit posture)
-	maxOutput  int
-	extra      map[string]any
-	priceGroup string
+	name      string
+	caps      []string
+	inCost    float64
+	outCost   float64
+	ctxLimit  int // 0 = omit the context_limit key (unknown-limit posture)
+	maxOutput int
+	extra     map[string]any
 }
 
 // parityProvider is one provider block bound to one parityStub.
