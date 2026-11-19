@@ -248,6 +248,7 @@ func (p *pipeline) applyKeys(k KeysFrame) {
 		BaseURL:            k.STTBaseURL,
 		WhisperServerAddr:  k.WhisperServerAddr,
 		DeepgramEndpointMs: k.DeepgramEndpointMs,
+		Vocabulary:         k.Vocabulary,
 	}
 	p.ttsCfg = ProviderConfig{
 		Vendor:         k.TTSVendor,

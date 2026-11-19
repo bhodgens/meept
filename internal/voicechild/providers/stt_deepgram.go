@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"strings"
 	"sync"
 
@@ -271,6 +272,14 @@ func (s *DeepgramSTT) listenPath() string {
 	}
 	if s.cfg.Language != "" {
 		q = append(q, "language="+s.cfg.Language)
+	}
+	// F5 (opt-in): non-empty Vocabulary primes critical entities as
+	// repeated Deepgram keyterm params. Empty vocabulary adds NOTHING —
+	// the URL above stays BYTE-IDENTICAL to legacy (R4).
+	if terms := primingTerms(s.cfg.Vocabulary); len(terms) > 0 {
+		for _, term := range terms {
+			q = append(q, "keyterm="+url.QueryEscape(term))
+		}
 	}
 	return "/v1/listen?" + strings.Join(q, "&")
 }

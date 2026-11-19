@@ -403,7 +403,14 @@ func (s *WhisperSTT) recognizeOne(ctx context.Context, dir string, seq int, buf 
 	segCtx, cancel := context.WithTimeout(ctx, whisperRecognizeTimeout)
 	defer cancel()
 	// -m model, -f wav, -nt = no timestamps (plain text on stdout).
-	cmd := exec.CommandContext(segCtx, s.bin, "-m", s.cfg.Model, "-f", wavPath, "-nt")
+	args := []string{"-m", s.cfg.Model, "-f", wavPath, "-nt"}
+	// F5 (opt-in): non-empty Vocabulary primes critical entities via a
+	// whisper.cpp "-p" prompt. Empty vocabulary leaves args BYTE-IDENTICAL
+	// to legacy (R4) — no -p is appended.
+	if terms := primingTerms(s.cfg.Vocabulary); len(terms) > 0 {
+		args = append(args, "-p", strings.Join(terms, " "))
+	}
+	cmd := exec.CommandContext(segCtx, s.bin, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	stdout, err := cmd.Output()

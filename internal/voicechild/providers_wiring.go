@@ -32,6 +32,11 @@ type ProviderConfig struct {
 	// Qwen3ChunkSize overrides the qwen3 pcm-stream chunk_size; 0 => the
 	// default qwen3PCMChunkSize (4, byte-identical legacy). Positive wins.
 	Qwen3ChunkSize int
+	// Vocabulary primes critical entities on the STT request (contract C1,
+	// feature F5). nil/empty keeps both wire requests BYTE-IDENTICAL to
+	// legacy (R4); non-empty adds Deepgram keyterm params and a Whisper
+	// -p prompt. Additive/opt-in.
+	Vocabulary []string
 }
 
 // STTFactory builds the STT adapter for one call from the call's provider
