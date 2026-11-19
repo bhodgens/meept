@@ -5660,6 +5660,25 @@ type VoiceConfig struct {
 	OnnxRuntimeLib  string `json:"onnx_runtime_lib"       toml:"onnx_runtime_lib"`
 	STTProvider     string `json:"stt_provider"           toml:"stt_provider"`
 	TTSProvider     string `json:"tts_provider"           toml:"tts_provider"`
+
+	// ---- rumble streaming/kwargs selectors (plan 20261119, C6) ----
+	// All ADDITIVE/OPTIONAL: a zero value (empty string / nil / 0) is
+	// byte-identical to legacy. These cross the daemon->child C1 keys
+	// line (internal/daemon/voice_keys.go) and configure the Rumble chat
+	// template plus the pseudo-stream partial decorator child-side.
+	// Absent on an old daemon line they decode as zero/nil.
+	// ChatTemplateLanguage is a language NAME ("English"), not a BCP-47
+	// code; it is sent verbatim as chat_template_kwargs.language.
+	ChatTemplateLanguage string `json:"chat_template_language"`
+	// The three bools are pointers so nil means "omit this key" and the
+	// server default applies (digits true, filler false, verbatim true).
+	ChatTemplateDigits   *bool `json:"chat_template_digits,omitempty"`
+	ChatTemplateFiller   *bool `json:"chat_template_filler,omitempty"`
+	ChatTemplateVerbatim *bool `json:"chat_template_verbatim,omitempty"`
+	// STTPartialMs > 0 wraps the base STT provider in the pseudo-stream
+	// decorator (partial streaming); 0 = legacy batch behavior.
+	STTPartialMs int `json:"stt_partial_ms"`
+
 	// GreetingLine is the fact-free line spoken once on call connect.
 	// Empty falls back to Filler[0] (the greeting is filler-class; an
 	// empty filler list plus empty greeting disables the greeting).

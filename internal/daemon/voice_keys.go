@@ -115,10 +115,9 @@ type keysWire struct {
 	ClipPrewarmDelayMs  int      `json:"clip_prewarm_delay_ms,omitempty"`
 	ContextWarmWindowMs int      `json:"context_warm_window_ms,omitempty"`
 	// ---- rumble streaming/kwargs selectors (C4, ADDITIVE + OMITEMPTY) ----
-	// Absent on the wire = zero/nil = legacy. The emit site waits for
-	// leaf 03's VoiceConfig C6 fields (ChatTemplateLanguage,
-	// ChatTemplateDigits/Filler/Verbatim, STTPartialMs); until then these
-	// stay zero/nil so the daemon line remains byte-identical.
+	// Absent on the wire = zero/nil = legacy. Populated from the resolved
+	// VoiceConfig C6 selectors at the emit site (leaf 03); all default to
+	// zero/nil so an unconfigured daemon line stays byte-identical.
 	ChatTemplateLanguage string `json:"chat_template_language,omitempty"`
 	ChatTemplateDigits   *bool  `json:"chat_template_digits,omitempty"`
 	ChatTemplateFiller   *bool  `json:"chat_template_filler,omitempty"`
@@ -183,6 +182,13 @@ func (w *VoiceWiring) sendKeysFrame(ccid string) {
 	}
 	energyGate := ac.EnergyGate
 	replyExemptS := ac.ReplyExemptS
+	// Rumble partial streaming: a positive STTPartialMs is sent as a
+	// pointer (nonzero on the wire); 0 stays nil/absent = legacy batch.
+	sttPartialMs := vcfg.STTPartialMs
+	var sttPartialMsPtr *int
+	if sttPartialMs > 0 {
+		sttPartialMsPtr = &sttPartialMs
+	}
 	kw := keysWire{
 		CallID:     ccid,
 		Event:      keysEvent,
@@ -225,6 +231,14 @@ func (w *VoiceWiring) sendKeysFrame(ccid string) {
 		Qwen3ChunkSize:      vcfg.Qwen3ChunkSize,
 		ClipPrewarmDelayMs:  vcfg.ClipPrewarmDelayMs,
 		ContextWarmWindowMs: vcfg.ContextWarmWindowMs,
+		// Rumble streaming/kwargs selectors (C6): from the live
+		// VoiceConfig snapshot; all zero/nil by default so the wire
+		// stays byte-identical (omitempty on each C4 field).
+		ChatTemplateLanguage: vcfg.ChatTemplateLanguage,
+		ChatTemplateDigits:   vcfg.ChatTemplateDigits,
+		ChatTemplateFiller:   vcfg.ChatTemplateFiller,
+		ChatTemplateVerbatim: vcfg.ChatTemplateVerbatim,
+		STTPartialMs:         sttPartialMsPtr,
 	}
 	if kw.STTVendor == "" {
 		kw.STTVendor = defaultSTTVendor

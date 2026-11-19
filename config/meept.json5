@@ -1424,6 +1424,12 @@
     "stt_model": "",                        // global STT model
     "tts_base_url": "",                     // TTS base URL override (local Qwen3-TTS server); empty = vendor default
     "stt_base_url": "",                     // STT base URL override (vendor-agnostic: Deepgram-compatible / whisper / Rumble / Kyutai endpoint); empty = provider default (api.deepgram.com for the deepgram backend)
+    // ---- Rumble kwargs + pseudo-stream partials (opt-in, additive; zero/absent = byte-identical legacy) ----
+    // "chat_template_language": "English",  // language NAME (not a BCP-47 code); sent verbatim to chat_template_kwargs.language; empty = model default
+    // "chat_template_digits": null,         // bool -> chat_template_kwargs.digits; null = omit key (server default true)
+    // "chat_template_filler": null,         // bool -> chat_template_kwargs.filler; null = omit key (server default false)
+    // "chat_template_verbatim": null,       // bool -> chat_template_kwargs.verbatim; null = omit key (server default true)
+    // "stt_partial_ms": 0,                  // >0 wraps the base STT provider in the pseudo-stream decorator (partial streaming); 0 = legacy batch (one Final). Generic decorator works on any BATCH vendor but do NOT enable on native-partial vendors (e.g. deepgram); whisper remains the default provider.
     // ---- Supervised vLLM Rumble STT sidecar (opt-in; active only when stt_provider = "rumble") ----
     // "rumble_runtime": {
     //   "gpu_memory_utilization": 0.20,          // EXPLICIT low GPU fraction (safe range 0.20-0.25); vLLM's 0.92 default is UNSAFE alongside qwen3-tts on the RTX 3060
