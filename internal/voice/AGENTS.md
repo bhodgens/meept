@@ -1022,6 +1022,11 @@ STT partials (`last:false` prompt frames) already reach the daemon; phase
 prompt cache (and the llama.cpp KV slot under the session-affinity
 scope) so the final turn pays decode, not prefill.
 
+- **Rumble STT (invariant):** additive/opt-in (default whisper unchanged),
+  batch-only (one Final, no partials), keyless; GPU cap 0.20-0.25 on the
+  shared 3060. With no partials, `voice.context_warm` and partial barge-in
+  stay on whisper/deepgram.
+
 - **Opt-in, default OFF:** `voice.context_warm` false = the warmer is
   never constructed and every entry point is a pure no-op (the partial
   hook costs one atomic load of `ContextWarmRouting()` before doing ANY

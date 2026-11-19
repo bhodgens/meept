@@ -106,6 +106,20 @@ without touching the main process.
   rides a TTS request. No PCM ever crosses the text socket: clip
   frames carry hex keys + text.
 
+### Rumble STT (opt-in batch provider)
+
+Rumble is an ADDITIVE, opt-in STT vendor: select it with
+`stt_provider: "rumble"` (daemon `stt_vendor` selector); its base URL
+rides the `stt_base_url` keys-frame field. It is KEYLESS (no STT key
+needed) and BATCH-ONLY: it emits ONE Final per utterance and NO partial
+transcripts. Because it produces no partials, `voice.context_warm` and
+partial barge-in stay on whisper/deepgram — do not expect those features
+with rumble. Reported English WER is 6.60; the project ships under
+Apache-2.0. Run it against a warm vLLM sidecar started with
+`--gpu-memory-utilization 0.20` beside qwen3-tts on the shared GPU.
+Whisper remains the DEFAULT STT vendor; enabling rumble changes nothing
+unless explicitly selected.
+
 ## Configuration options
 
 Provider selection and model names come from the daemon's voice config

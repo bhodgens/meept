@@ -514,7 +514,9 @@ partials fire `llm.Client.Warm` (max_tokens=1, same rendered prefix +
 session-affinity scope as the imminent turn) so the real turn pays
 decode, not prefill; warm never starts a turn or tools, consumes no
 budget, never touches blocks/metrics, and its failures are silent
-(DEBUG). Full contracts (C1-C6) in `internal/voice/AGENTS.md`.
+(DEBUG). Full contracts (C1-C6) in `internal/voice/AGENTS.md`. RUMBLE
+STT (invariant): additive/opt-in (default whisper unchanged), batch-only
+(one Final, no partials), keyless; GPU cap 0.20-0.25 on shared 3060.
 
 ### The github_* tools register through the tool-provider seam; githubsvc never imports builtin
 

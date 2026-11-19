@@ -71,6 +71,7 @@ var (
 // Compile-time pins: the adapters satisfy the leaf-07 interfaces exactly.
 var (
 	_ voicechild.STTProvider = (*DeepgramSTT)(nil)
+	_ voicechild.STTProvider = (*RumbleSTT)(nil)
 	_ voicechild.TTSProvider = (*OpenAITTS)(nil)
 )
 

@@ -90,9 +90,10 @@ func run(ctx context.Context, textSocket, audioDir string) error {
 	child.SetProviderFactories(
 		func(cfg providers.ProviderConfig, key string) (voicechild.STTProvider, error) {
 			// NewSTT dispatches on cfg.Vendor: "deepgram" (cloud, key
-			// required) or "whisper" (keyless local whisper.cpp
-			// subprocess). A cfg naming anything else fails the call
-			// with the named vendor error.
+			// required), "whisper" (keyless local whisper.cpp
+			// subprocess), or "rumble" (keyless, opt-in batch STT;
+			// one Final per utterance, no partials). A cfg naming
+			// anything else fails the call with the named vendor error.
 			return providers.NewSTT(cfg, key)
 		},
 		func(cfg providers.ProviderConfig, key string) (voicechild.TTSProvider, error) {

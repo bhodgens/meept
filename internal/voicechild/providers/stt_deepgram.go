@@ -166,6 +166,8 @@ func NewSTT(cfg ProviderConfig, key string) (voicechild.STTProvider, error) {
 		return &DeepgramSTT{cfg: cfg, apiKey: key, dial: sttDialer}, nil
 	case "whisper":
 		return newWhisperSTT(cfg)
+	case "rumble":
+		return newRumbleSTT(cfg)
 	default:
 		return nil, fmt.Errorf("%w: stt vendor %q", ErrUnknownVendor, cfg.Vendor)
 	}
