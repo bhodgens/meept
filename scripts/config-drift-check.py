@@ -293,7 +293,8 @@ def main(argv=None):
     optional = set(
         f"{n}.json5" if not n.endswith(".json5") else n
         for n in (args.optional_templates.split(",") if args.optional_templates
-                  else ["ai-infra", "epistemic_tags", "pty", "runtime"])
+                  else ["ai-infra", "epistemic_tags", "pty", "runtime",
+                        "jev-command-gate.contract"])
         if n.strip())
     optional.discard("")
 
