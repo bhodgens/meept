@@ -272,10 +272,14 @@ func (t *OpenAITTS) Speak(ctx context.Context, text string) (io.ReadCloser, erro
 	var body []byte
 	var err error
 	if t.usesPCMStream() {
+		chunkSize := t.cfg.Qwen3ChunkSize
+		if chunkSize <= 0 {
+			chunkSize = qwen3PCMChunkSize
+		}
 		body, err = json.Marshal(qwen3PCMStreamRequest{
 			Text:      text,
 			Voice:     t.cfg.Voice,
-			ChunkSize: qwen3PCMChunkSize,
+			ChunkSize: chunkSize,
 		})
 	} else {
 		body, err = json.Marshal(openAITTSRequest{

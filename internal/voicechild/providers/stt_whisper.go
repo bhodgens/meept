@@ -86,7 +86,12 @@ var ErrWhisperBinMissing = errors.New("voicechild/providers: whisper-cli binary 
 // binary in tests defines the same contract: plain text on stdout.
 type WhisperSTT struct {
 	cfg ProviderConfig
-	bin string // resolved at construction (test seam: PATH)
+	bin string // resolved at construction (test seam: PATH); exec mode only
+
+	// server is the persistent whisper.cpp server client (feature F2).
+	// Non-nil only when cfg.WhisperServerAddr is non-empty; in that mode
+	// recognizeOne dispatches here instead of exec'ing whisper-cli.
+	server *whisperServerClient
 
 	// kickMu guards the per-session flush-kick channels registered by
 	// Stream and retired by run. BARGE-IN CONTRACT (2026-11-11): FlushNow
@@ -147,6 +152,15 @@ func newWhisperSTT(cfg ProviderConfig) (voicechild.STTProvider, error) {
 	}
 	if cfg.SampleRate <= 0 {
 		cfg.SampleRate = 16000
+	}
+	// F2 (opt-in): a non-empty server address selects the persistent
+	// whisper.cpp server transport. No binary lookup is required in this
+	// mode — the model is resident server-side. Exec mode is untouched.
+	if cfg.WhisperServerAddr != "" {
+		return &WhisperSTT{
+			cfg:    cfg,
+			server: newWhisperServerClient(cfg.WhisperServerAddr),
+		}, nil
 	}
 	bin, err := exec.LookPath(defaultWhisperBin)
 	if err != nil {
@@ -372,6 +386,13 @@ func (g *rmsGate) energy(chunk []byte) (samples int, voiced bool) {
 // RIFF/WAVE header (stdlib has no WAV encoder and no new dependency is
 // allowed for one 44-byte header).
 func (s *WhisperSTT) recognizeOne(ctx context.Context, dir string, seq int, buf []byte) (string, error) {
+	// F2: in persistent server mode the WAV is still written exactly as
+	// exec mode (same segmentation, same file), but recognition goes over
+	// the resident server transport instead of a per-utterance subprocess.
+	// The per-segment timeout is applied by recognizeOnServer.
+	if s.server != nil {
+		return s.recognizeOnServer(ctx, dir, seq, buf)
+	}
 	wavPath := filepath.Join(dir, fmt.Sprintf("utt%d.wav", seq))
 	if err := writeWAV16(wavPath, buf, s.cfg.SampleRate); err != nil {
 		return "", fmt.Errorf("write wav: %w", err)

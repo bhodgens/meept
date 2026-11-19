@@ -21,6 +21,17 @@ type ProviderConfig struct {
 	Voice      string // TTS voice name; empty = vendor default
 	SampleRate int    // negotiated rate (s16le mono PCM)
 	Language   string // BCP-47 tag; empty = vendor default
+	// DeepgramEndpointMs > 0 enables the authoritative speech_final /
+	// UtteranceEnd fast-dispatch path (contract C1, feature F4). 0 keeps
+	// the legacy fixed-timer endpointing byte-identical.
+	DeepgramEndpointMs int
+	// WhisperServerAddr, when non-empty, selects the persistent whisper.cpp
+	// server transport (no per-utterance subprocess). Empty = the legacy
+	// byte-identical exec path. Additive/opt-in (contract C1, feature F2).
+	WhisperServerAddr string
+	// Qwen3ChunkSize overrides the qwen3 pcm-stream chunk_size; 0 => the
+	// default qwen3PCMChunkSize (4, byte-identical legacy). Positive wins.
+	Qwen3ChunkSize int
 }
 
 // STTFactory builds the STT adapter for one call from the call's provider
