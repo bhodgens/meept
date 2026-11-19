@@ -1415,7 +1415,15 @@
     "tts_ref_audio": "",                    // path to the qwen3 clone reference WAV; feeds ONLY the clip-key identity (sha256 into tts_ref_hash + voice_clips keys) — never a TTS request field; empty = preset voice
     "stt_model": "",                        // global STT model
     "tts_base_url": "",                     // TTS base URL override (local Qwen3-TTS server); empty = vendor default
-    "stt_base_url": "",                     // STT base URL override (Deepgram-compatible endpoint); empty = api.deepgram.com
+    "stt_base_url": "",                     // STT base URL override (vendor-agnostic: Deepgram-compatible / whisper / Rumble / Kyutai endpoint); empty = provider default (api.deepgram.com for the deepgram backend)
+    // ---- Supervised vLLM Rumble STT sidecar (opt-in; active only when stt_provider = "rumble") ----
+    // "rumble_runtime": {
+    //   "gpu_memory_utilization": 0.20,          // EXPLICIT low GPU fraction (safe range 0.20-0.25); vLLM's 0.92 default is UNSAFE alongside qwen3-tts on the RTX 3060
+    //   "max_model_len": 4096,                   // context cap: keeps the vLLM KV-cache small enough to coexist with qwen3-tts
+    //   "endpoint_key": "rumble:127.0.0.1:8091", // runtime lifecycle endpoint key (loopback only)
+    //   "health_path": "/health",                // health check path; requires a live child process
+    //   "auto_stop_on_exit": true,               // stop the owned sidecar on graceful shutdown; only the startup orphan sweep reaps orphaned runtimes
+    // },
     "local": {                              // local voice leg (mic + speaker on the client device); opt-in
       "enabled": false,                     // local leg master switch
       "stt_provider": "",                   // default "whisper"; empty = voice.stt_provider

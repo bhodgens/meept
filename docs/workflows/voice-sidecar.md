@@ -1256,3 +1256,49 @@ spec's frame/config/flow contracts.
 - **E2E.** Hermetic suites `e2e/suites/voice_clips` (VC-1 pins the R4
   gate: no clip writes with the sidecar disabled) and
   `e2e/suites/context_warm`, both manifest-registered.
+
+
+## As-built (2026-11-19, rumble-stt-provider leaf 02): supervised vLLM Rumble sidecar + explicit GPU cap
+
+Rumble is an opt-in STT provider for the voice sidecar. Select it with
+`voice.stt_provider = "rumble"`; the whisper default is unchanged, so an
+install that never sets the key is byte-identical.
+
+The sidecar is a supervised vLLM server running `Reson8/Rumble-2-Flash` on
+loopback `127.0.0.1:8091`. It is **batch-only** — it is not a streaming
+provider; the voice child submits a completed audio window and receives a
+transcript.
+
+### GPU budget (why the cap is explicit)
+
+- vLLM defaults to `--gpu-memory-utilization 0.92`. That is **unsafe** on the
+  RTX 3060 that also hosts qwen3-tts: only ~5.2 GB is free, and 0.92 starves
+  the TTS runtime.
+- The Rumble sidecar pins `--gpu-memory-utilization 0.20` (safe range
+  **0.20-0.25**) and `--max-model-len 4096`. The short context keeps the vLLM
+  KV-cache small enough to coexist with qwen3-tts on the same GPU.
+The sidecar config is frozen in `DefaultRumbleRuntimeConfig()` in
+`internal/daemon/rumble_wiring.go` and mirrored in the commented
+`[voice.rumble_runtime]` block of `config/meept.json5`. `SpawnArgs()` renders
+the exact vLLM command, so `--gpu-memory-utilization 0.20` and
+`--max-model-len 4096` come from ONE source of truth. Do not raise the
+fraction toward 0.92.
+
+### Lifecycle (reuses the existing runtime lifecycle, no new spawn path)
+
+`RumbleRuntimeConfig.SpawnArgs()` produces the `vllm serve` command with the
+explicit cap. The daemon spawns and supervises the sidecar using its existing
+runtime-lifecycle machinery when the operator selects
+`voice.stt_provider = "rumble"`. All existing guards apply unchanged:
+
+- **Never spawn into a served endpoint** — `RuntimeProcess.Start` probes the
+  port declared by `spawn_command` and refuses when a listener already exists.
+- **Health requires a live process** — `HealthChecker.SetProcessAliveProbe`;
+  a dead child is unhealthy whatever `/health` answers.
+- **Ownership forbids killing** — `RuntimeProcess.Stop` returns
+  `ErrRuntimeNotOwned` for another instance's runtime.
+- **The startup orphan sweep is the only reaper** — `StartupOrphanSweep`
+  runs before spawn; `auto_stop_on_exit` stops owned runtimes on graceful
+  shutdown (`Daemon.Stop` -> `ContainerManager.StopAll`).
+
+See `internal/daemon/AGENTS.md` for the full contract.

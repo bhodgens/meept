@@ -5212,7 +5212,10 @@ func DefaultConfig() *Config {
 			Behavior:  TTSBehaviorConfig{ReadOwnMessages: false, InterruptOnNewMsg: true, QueueMessages: false, MaxQueueSize: 5},
 		},
 		Voice: VoiceConfig{
-			Enabled:              false,
+			Enabled: false,
+			// Rumble vLLM STT sidecar defaults. Opt-in: byte-identical boot
+			// until voice.stt_provider = "rumble" selects the sidecar.
+			RumbleRuntime:        DefaultVoiceRumbleRuntimeConfig(),
 			IdleStopSeconds:      30,
 			Filler:               []string{"Hold on, let me check."},
 			SupervisorEnabled:    true,
@@ -5619,6 +5622,30 @@ type TTSConfig struct {
 	Behavior TTSBehaviorConfig `json:"behavior" toml:"behavior"`
 }
 
+// VoiceRumbleRuntimeConfig pins the supervised vLLM Rumble STT sidecar so it
+// coexists with qwen3-tts on a single RTX 3060. The GPU memory fraction is
+// EXPLICIT (safe range 0.20-0.25); vLLM's 0.92 default is unsafe here. The
+// block is inert unless voice.stt_provider = "rumble" selects the sidecar.
+type VoiceRumbleRuntimeConfig struct {
+	GPUMemoryUtilization float64 `json:"gpu_memory_utilization" toml:"gpu_memory_utilization"`
+	MaxModelLen          int     `json:"max_model_len"          toml:"max_model_len"`
+	EndpointKey          string  `json:"endpoint_key"           toml:"endpoint_key"`
+	HealthPath           string  `json:"health_path"            toml:"health_path"`
+	AutoStopOnExit       bool    `json:"auto_stop_on_exit"      toml:"auto_stop_on_exit"`
+}
+
+// DefaultVoiceRumbleRuntimeConfig returns the frozen safe coexistence defaults
+// used by the commented [voice.rumble_runtime] template block.
+func DefaultVoiceRumbleRuntimeConfig() VoiceRumbleRuntimeConfig {
+	return VoiceRumbleRuntimeConfig{
+		GPUMemoryUtilization: 0.20,
+		MaxModelLen:          4096,
+		EndpointKey:          "rumble:127.0.0.1:8091",
+		HealthPath:           "/health",
+		AutoStopOnExit:       true,
+	}
+}
+
 type VoiceConfig struct {
 	// TurnTimeoutSeconds (json turn_timeout_seconds) is the opt-in hard
 	// cap on one voice turn (final prompt dispatched -> turn-final say
@@ -5816,6 +5843,11 @@ type VoiceConfig struct {
 	STTModel    string `json:"stt_model"             toml:"stt_model"`
 	TTSBaseURL  string `json:"tts_base_url"          toml:"tts_base_url"`
 	STTBaseURL  string `json:"stt_base_url"          toml:"stt_base_url"`
+
+	// RumbleRuntime pins the supervised vLLM Rumble STT sidecar (opt-in via
+	// stt_provider = "rumble"). Zero values when unset keep legacy behavior.
+	RumbleRuntime VoiceRumbleRuntimeConfig `json:"rumble_runtime" toml:"rumble_runtime"`
+
 	// ReaperIntervalS (leaf 02, C3): the dead-air reaper's sweep cadence.
 	// 0 => default 30s (frozen from the uptractor source); NEGATIVE
 	// disables the reaper entirely (opt-out without removing the key).
