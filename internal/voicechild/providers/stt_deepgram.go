@@ -186,12 +186,17 @@ func newBaseSTT(cfg ProviderConfig, key string) (voicechild.STTProvider, error) 
 	}
 }
 
-// NewSTT is the call-site factory (C2/C5). Today it returns the base
-// adapter unchanged; leaf 02 wraps the result in a pseudo-stream
-// decorator when cfg.PartialIntervalMs > 0. Keeping this wrapper thin
-// means the vendor switch above never needs re-editing for that leaf.
+// NewSTT is the call-site factory (C2/C5). It returns the base adapter
+// unchanged on the legacy path (cfg.PartialIntervalMs <= 0); a positive
+// interval wraps it in the provider-agnostic pseudo-stream decorator.
+// Keeping this wrapper thin means the vendor switch above never needs
+// re-editing for that leaf.
 func NewSTT(cfg ProviderConfig, key string) (voicechild.STTProvider, error) {
-	return newBaseSTT(cfg, key)
+	base, err := newBaseSTT(cfg, key)
+	if err != nil || cfg.PartialIntervalMs <= 0 {
+		return base, err
+	}
+	return newPseudoStreamSTT(cfg, key, newBaseSTT)
 }
 
 // dialBase is the endpoint this adapter's dialer targets (cfg.BaseURL;
