@@ -1360,12 +1360,6 @@ Examples:
   meept agents set-gate goal_abc --clear`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := connectDaemon()
-			if err != nil {
-				return fmt.Errorf("failed to connect to daemon: %w", err)
-			}
-			defer client.Close()
-
 			params := map[string]any{"id": args[0]}
 			if clear {
 				params["gate"] = nil
@@ -1386,6 +1380,13 @@ Examples:
 					"skip_when_unchanged": skipUnchanged,
 				}
 			}
+
+			client, err := connectDaemon()
+			if err != nil {
+				return fmt.Errorf("failed to connect to daemon: %w", err)
+			}
+			defer client.Close()
+
 			rawResult, err := client.Call("agents.goals.set_gate", params)
 			if err != nil {
 				return fmt.Errorf("failed to set gate: %w", err)

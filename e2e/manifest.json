@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-17",
+  "generated": "2026-11-19",
   "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage \u2014 behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet. Flutter surface (ui/flutter_ui/**) is covered Dart-side by the gui-flows suite (gui-terminal-01, gui-session-01, gui-quota-01, gui-stream-01, gui-stream-02) against a wire-shape stub: `cd ui/flutter_ui && flutter test test/e2e`. The ui/** path_map keys below make a Flutter change select that suite; scripts/e2e-affected.sh dispatches on suites[].runner to run the Dart command instead of go test (the pre-commit-e2e Go hook does not scan Dart files, so `make e2e-affected-area AREA=gui-flows` / CI's e2e-gui job is the gate). New-package census (pre-commit-e2e): every NEW internal/|pkg/|cmd/ package dir in a commit's staged ADDITIONS must match a path_map key (bidirectional slash-boundary prefix, trailing slashes stripped) or an 'exempt' entry mapping dir -> non-empty reason string; exempt entries are printed as residual risk on every hook run.",
   "path_map": {
     "e2e/suites/smoke": [
@@ -162,8 +162,7 @@
       "voice_tts_stt"
     ],
     "internal/daemon/": [
-      "daemon-lifecycle",
-      "voice_tts_stt"
+      "daemon-lifecycle"
     ],
     "internal/llm/": [
       "daemon-lifecycle",
@@ -656,7 +655,8 @@
       "tool-provider-seam"
     ],
     "internal/daemon/voice_keys.go": [
-      "voice-lifecycle"
+      "voice-lifecycle",
+      "voice_tts_stt"
     ],
     "internal/daemon/voice_wiring.go": [
       "context_warm",
@@ -693,6 +693,15 @@
     ],
     "config/skills/": [
       "office-skills"
+    ],
+    "config/meept.json5": [
+      "tui-gui-consistency"
+    ],
+    "docs/research/rumble2flash-review.md": [
+      "voice-lifecycle"
+    ],
+    "e2e/manifest.json": [
+      "voice_tts_stt"
     ],
     "e2e/suites/employee-markdown": [
       "employee-markdown"
@@ -745,7 +754,8 @@
       "execution-observability"
     ],
     "internal/daemon/kanban_wiring.go": [
-      "kanban"
+      "kanban",
+      "tui-gui-consistency"
     ],
     "internal/rpc/kanban.go": [
       "kanban"

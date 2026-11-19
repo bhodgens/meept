@@ -116,3 +116,77 @@ func TestSearch_EmptyQuery(t *testing.T) {
 		t.Errorf("expected ErrInvalidInput, got %v", err)
 	}
 }
+
+// M9 pin: SearchSemantic with scope=sessions must find a session by its
+// title. The "sessions" alias maps to the messages lane, but the session
+// title/description keyword match must still fire for it (its own comment
+// promises "all/sessions scope"), not only for "all".
+func TestSearchSemantic_SessionsScopeFindsSessionByTitle(t *testing.T) {
+	t.Parallel()
+
+	store := session.NewMemoryStore(nil)
+	svc := NewSearchService(store, nil, nil, nil)
+
+	// The query word appears ONLY in the session title — no message
+	// content can match, so a hit must come from the title lane.
+	sess, err := store.Create("zephyr planning session")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := store.SaveMessages(sess.ID, []session.Message{
+		{Role: "user", Content: "unrelated content"},
+		{Role: "assistant", Content: "still unrelated"},
+	}); err != nil {
+		t.Fatalf("SaveMessages: %v", err)
+	}
+
+	resp, err := svc.SearchSemantic(t.Context(), SemanticSearchRequest{
+		Query: "zephyr",
+		Scope: "sessions",
+	})
+	if err != nil {
+		t.Fatalf("SearchSemantic: %v", err)
+	}
+	found := false
+	for _, r := range resp.Results {
+		if r.Type == "session" && r.ID == sess.ID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("scope=sessions did not return the session titled %q (results=%+v)", sess.Name, resp.Results)
+	}
+}
+
+// The title lane must NOT fire for scope=messages: that scope is message
+// content only, and widening it would change its contract.
+func TestSearchSemantic_MessagesScopeExcludesSessionTitles(t *testing.T) {
+	t.Parallel()
+
+	store := session.NewMemoryStore(nil)
+	svc := NewSearchService(store, nil, nil, nil)
+
+	sess, err := store.Create("quokka planning session")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := store.SaveMessages(sess.ID, []session.Message{
+		{Role: "user", Content: "unrelated content"},
+	}); err != nil {
+		t.Fatalf("SaveMessages: %v", err)
+	}
+
+	resp, err := svc.SearchSemantic(t.Context(), SemanticSearchRequest{
+		Query: "quokka",
+		Scope: "messages",
+	})
+	if err != nil {
+		t.Fatalf("SearchSemantic: %v", err)
+	}
+	for _, r := range resp.Results {
+		if r.Type == "session" {
+			t.Errorf("scope=messages leaked a session-title result: %+v", r)
+		}
+	}
+}

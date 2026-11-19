@@ -300,7 +300,9 @@ func (s *SearchService) SearchSemantic(ctx context.Context, req SemanticSearchRe
 		req.Scope = "all"
 	}
 	// "sessions" and "messages" both map to the session message store;
-	// accept either alias.
+	// accept either alias. Keep the original scope so the session
+	// title/description lane below still fires for "sessions".
+	origScope := req.Scope
 	scope := req.Scope
 	if scope == "sessions" {
 		scope = "messages"
@@ -361,7 +363,7 @@ func (s *SearchService) SearchSemantic(ctx context.Context, req SemanticSearchRe
 		}
 		// Also include session name/description keyword matches for the
 		// "all"/"sessions" scope so users can find a session by title.
-		if scope == "all" && s.sessionStore != nil {
+		if (origScope == "all" || origScope == "sessions") && s.sessionStore != nil {
 			allResults = append(allResults, s.searchSessions(ctx, lowerQuery)...)
 		}
 	}
