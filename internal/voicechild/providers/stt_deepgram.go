@@ -186,15 +186,32 @@ func newBaseSTT(cfg ProviderConfig, key string) (voicechild.STTProvider, error) 
 	}
 }
 
+// nativeStreamingVendor reports whether a vendor already emits genuine
+// partials of its own. Wrapping such a vendor in PseudoStreamSTT would
+// double-partial its output, so NewSTT returns it unwrapped. Batch vendors
+// (whisper, "", unknown) stay eligible for the opt-in decorator.
+func nativeStreamingVendor(vendor string) bool {
+	switch vendor {
+	case "rumble", "deepgram":
+		return true
+	default:
+		return false
+	}
+}
+
 // NewSTT is the call-site factory (C2/C5). It returns the base adapter
-// unchanged on the legacy path (cfg.PartialIntervalMs <= 0); a positive
-// interval wraps it in the provider-agnostic pseudo-stream decorator.
+// unchanged on the legacy path (cfg.PartialIntervalMs <= 0) and on native
+// streaming vendors (rumble/deepgram); a positive interval wraps only true
+// batch vendors in the provider-agnostic pseudo-stream decorator.
 // Keeping this wrapper thin means the vendor switch above never needs
 // re-editing for that leaf.
 func NewSTT(cfg ProviderConfig, key string) (voicechild.STTProvider, error) {
 	base, err := newBaseSTT(cfg, key)
-	if err != nil || cfg.PartialIntervalMs <= 0 {
-		return base, err
+	if err != nil {
+		return nil, err
+	}
+	if cfg.PartialIntervalMs <= 0 || nativeStreamingVendor(cfg.Vendor) {
+		return base, nil
 	}
 	return newPseudoStreamSTT(cfg, key, newBaseSTT)
 }
