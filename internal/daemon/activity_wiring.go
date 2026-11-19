@@ -8,6 +8,7 @@ import (
 	"github.com/caimlas/meept/internal/activity"
 	"github.com/caimlas/meept/internal/auditlog"
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/rpc"
 )
 
@@ -93,6 +94,21 @@ func wireActivityComponents(c *Components, msgBus *bus.MessageBus, server *rpc.S
 	logger.Info("activity RPC handlers registered",
 		"ring_capacity", activityRingCapacity,
 		"chain_wired", chain != nil)
+
+	// Durable execution-run history (issue #160 follow-up): a SQLite
+	// projection of bot.result / employee.result so GUI/TUI can page runs
+	// after reconnect AND daemon restart. Store open failure degrades the
+	// agents.executionRuns surface to a clean RPC error; boot continues.
+	if store, err := activity.OpenExecutionStore(config.MeeptPath("execution_runs.db"), logger); err != nil {
+		logger.Warn("execution store unavailable; agents.executionRuns degraded", "error", err)
+	} else {
+		c.ExecutionStore = store
+		if msgBus != nil {
+			c.executionProjectorSubs = activity.WireExecutionProjector(msgBus, store, logger)
+		}
+		registerExecutionRunsRPC(server, store)
+		logger.Info("execution-run history store wired", "path", config.MeeptPath("execution_runs.db"))
+	}
 }
 
 // activityChainDB extracts the audit-chain DB handle nil-safely (typed-nil
@@ -121,4 +137,22 @@ func stopActivityRing(c *Components, msgBus *bus.MessageBus) {
 	}
 	c.activityBridgeSubs = nil
 	c.ActivityRing = nil
+
+	// Execution-run history: unsubscribe the projector readers and close
+	// the SQLite handle so in-process restarts neither leak goroutines nor
+	// hold the WAL file open.
+	if msgBus != nil {
+		for _, sub := range c.executionProjectorSubs {
+			if sub != nil {
+				msgBus.Unsubscribe(sub)
+			}
+		}
+	}
+	c.executionProjectorSubs = nil
+	if c.ExecutionStore != nil {
+		if err := c.ExecutionStore.Close(); err != nil {
+			slog.Warn("execution store: close failed", "error", err)
+		}
+		c.ExecutionStore = nil
+	}
 }

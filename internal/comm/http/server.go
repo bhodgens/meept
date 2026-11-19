@@ -1730,6 +1730,12 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/activity/findings", s.handleActivityFindings)
 	mux.HandleFunc("GET /api/v1/agents/{id}/review", s.handleAgentsReview)
 
+	// Execution-run history (issue #160 follow-up): durable, poll-based
+	// runs + per-agent token histogram; roster bridge for active counts.
+	mux.HandleFunc("GET /api/v1/executions", s.handleExecutionRuns)
+	mux.HandleFunc("GET /api/v1/executions/histogram", s.handleExecutionHistogram)
+	mux.HandleFunc("GET /api/v1/agents/roster", s.handleAgentsRoster)
+
 	// Intake status endpoint (issue #109 GUI parity; bridge to the
 	// intake.status RPC, read-only, no params).
 	mux.HandleFunc("GET /api/v1/intake/status", s.handleIntakeStatus)
