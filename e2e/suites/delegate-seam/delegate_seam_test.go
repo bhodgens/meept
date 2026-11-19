@@ -55,19 +55,32 @@ func startDelegateStack(t *testing.T) *harness.Stack {
 	t.Helper()
 	s := harness.Start(t,
 		harness.WithPreBootHook(func(st *harness.Stack) error {
-			chatSpec := filepath.Join(st.MeeptHome, "agents", "chat", "AGENT.md")
-			data, err := os.ReadFile(chatSpec)
-			if err != nil {
-				return err
+			// Grant the delegate controls + workflow to the chat agent AND
+			// the agents that actually execute project-session turns
+			// (coder/committer). A project-bound session dispatches away
+			// from chat; granting only chat left the executing agent's
+			// filtered registry without workflow ("Unknown tool requested"),
+			// so the confinement assertion saw a stale canned reply instead
+			// of the sandbox rejection. The tools are registered daemon-wide;
+			// the per-agent additional_tools grant is the allow-list.
+			for _, agent := range []string{"chat", "coder", "committer"} {
+				spec := filepath.Join(st.MeeptHome, "agents", agent, "AGENT.md")
+				data, err := os.ReadFile(spec)
+				if err != nil {
+					return err
+				}
+				patched := strings.Replace(string(data),
+					"additional_tools:\n",
+					"additional_tools:\n  - subagent_send_message\n  - subagent_interrupt\n  - subagent_list_children\n  - workflow\n", 1)
+				patched = strings.Replace(patched, "can_delegate: false", "can_delegate: true", 1)
+				if patched == string(data) {
+					return errors.New(agent + " AGENT.md has no additional_tools block / can_delegate:false to patch")
+				}
+				if err := os.WriteFile(spec, []byte(patched), 0o644); err != nil {
+					return err
+				}
 			}
-			patched := strings.Replace(string(data),
-				"additional_tools:\n",
-				"additional_tools:\n  - subagent_send_message\n  - subagent_interrupt\n  - subagent_list_children\n  - workflow\n", 1)
-			patched = strings.Replace(patched, "can_delegate: false", "can_delegate: true", 1)
-			if patched == string(data) {
-				return errors.New("chat AGENT.md has no additional_tools block / can_delegate:false to patch")
-			}
-			return os.WriteFile(chatSpec, []byte(patched), 0o644)
+			return nil
 		}),
 	)
 	// Pin the intent classifier to chat. The dispatcher also runs the intent
@@ -102,29 +115,6 @@ func delegateCall(agentID, message string) harness.ToolCall {
 // (delegate_context: full — the DSH-1 knob).
 func forkDelegateCall(agentID, message string) harness.ToolCall {
 	return harness.ToolCall{Name: "delegate_task", Arguments: `{"agent_id":"` + agentID + `","message":"` + message + `","delegate_context":"full"}`}
-}
-
-// userTexts returns every user-role message text the fake LLM has observed,
-// concatenated. Used to assert the fork child's first LLM call carried (or
-// did not carry) the parent's completed-turn content.
-func userTexts(f *harness.FakeLLM) string {
-	var sb strings.Builder
-	for _, body := range f.Requests() {
-		msgs, _ := body["messages"].([]any)
-		for _, m := range msgs {
-			msg, ok := m.(map[string]any)
-			if !ok {
-				continue
-			}
-			if role, _ := msg["role"].(string); role == "user" {
-				if c, _ := msg["content"].(string); c != "" {
-					sb.WriteString(c)
-					sb.WriteString("\n")
-				}
-			}
-		}
-	}
-	return sb.String()
 }
 
 // TestT1_AsyncSpawnChildHandle (T1, F1, contract B1): delegate_task spawn
@@ -238,7 +228,7 @@ func TestT6_WorkflowToolConfinedFanOut(t *testing.T) {
 	s.Fake.EnqueueToolCalls(harness.ToolCall{Name: "workflow", Arguments: `{"script":"const r = await agent(\"Reply with exactly: WF-OK\", {label:\"probe\"}); return {value: r};","agent_id":"coder"}`})
 	s.Fake.SetPostToolText(`workflow returned {kind:foreground, runId wf-1, agentsStarted 1, result {value: WF-OK}}`)
 	reply := s.ChatTurn(t, sessionID,
-		"Call the workflow tool with engine \"dsh-archetype\" and script: const r = await agent(\"Reply with exactly: WF-OK\", {label:\"probe\"}); return {value: r}; Report the raw tool result verbatim.",
+		"What does the workflow tool return for engine \"dsh-archetype\" and script: const r = await agent(\"Reply with exactly: WF-OK\", {label:\"probe\"}); return {value: r};? Please report the raw tool result verbatim.",
 		5*time.Minute)
 	lower := strings.ToLower(reply)
 	if strings.Contains(lower, "unknown tool") || strings.Contains(lower, "tool not found") {
@@ -256,7 +246,7 @@ func TestT6_WorkflowToolConfinedFanOut(t *testing.T) {
 	s.Fake.EnqueueToolCalls(harness.ToolCall{Name: "workflow", Arguments: `{"script":"const fs = require(\"fs\"); return fs.readdirSync(\"/\");","agent_id":"coder"}`})
 	s.Fake.SetPostToolText("workflow rejected the script: require is not defined in the confined sandbox")
 	reply = s.ChatTurn(t, sessionID,
-		"Call the workflow tool with script: const fs = require(\"fs\"); return fs.readdirSync(\"/\"); Report the raw tool result verbatim.",
+		"What is the workflow tool result for script: const fs = require(\"fs\"); return fs.readdirSync(\"/\");? Please report the raw tool result verbatim.",
 		3*time.Minute)
 	lower = strings.ToLower(reply)
 	if !strings.Contains(lower, "error") && !strings.Contains(lower, "not defined") &&
@@ -275,7 +265,7 @@ func TestT6_WorkflowToolConfinedFanOut(t *testing.T) {
 	s.Fake.EnqueueToolCalls(harness.ToolCall{Name: "workflow", Arguments: `{"script":"const thunks = []; for (let i=0;i<50;i++) thunks.push(() => agent(\"hi\")); await parallel(thunks); return 1;","agent_id":"coder","max_total_agents":100001}`})
 	s.Fake.SetPostToolText("workflow INVALID_ARGUMENT: max_total_agents 100001 exceeds the engine ceiling (100000)")
 	reply = s.ChatTurn(t, sessionID,
-		"Call the workflow tool with script: const thunks = []; for (let i=0;i<50;i++) thunks.push(() => agent(\"hi\")); await parallel(thunks); return 1; and max_total_agents above the engine ceiling (100001). Report the raw tool result verbatim.",
+		"What is the workflow tool result for script: const thunks = []; for (let i=0;i<50;i++) thunks.push(() => agent(\"hi\")); await parallel(thunks); return 1; with max_total_agents above the engine ceiling (100001)? Please report the raw tool result verbatim.",
 		3*time.Minute)
 	lower = strings.ToLower(reply)
 	if !strings.Contains(lower, "error") && !strings.Contains(lower, "exceed") &&

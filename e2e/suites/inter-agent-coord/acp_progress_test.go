@@ -20,7 +20,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -131,12 +130,6 @@ func planStubBin(t *testing.T) string {
 		t.Fatalf("build planstub: %v\n%s", err, out)
 	}
 	return bin
-}
-
-// repoRoot resolves the module root relative to this file's location.
-func repoRoot() string {
-	_, thisFile, _, _ := runtime.Caller(0) //nolint:dogsled // identity probe
-	return filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", ".."))
 }
 
 // coordAgentDef is the executor: acp roster fixture (acp-persona-route

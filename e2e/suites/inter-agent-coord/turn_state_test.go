@@ -71,19 +71,30 @@ func startDelegateStack(t *testing.T) *harness.Stack {
 			"transport.http.websocket": true,
 		}),
 		harness.WithPreBootHook(func(st *harness.Stack) error {
-			chatSpec := filepath.Join(st.MeeptHome, "agents", "chat", "AGENT.md")
-			data, err := os.ReadFile(chatSpec)
-			if err != nil {
-				return err
+			// Grant the delegate controls + workflow to chat AND the agents
+			// that execute project-session turns (coder/committer). A
+			// project-bound session dispatches away from chat; granting only
+			// chat left the executing agent without delegate_task/workflow
+			// ("unknown tool"). Tools are registered daemon-wide; the
+			// per-agent additional_tools grant + can_delegate is the allow-list.
+			for _, agent := range []string{"chat", "coder", "committer"} {
+				spec := filepath.Join(st.MeeptHome, "agents", agent, "AGENT.md")
+				data, err := os.ReadFile(spec)
+				if err != nil {
+					return err
+				}
+				patched := strings.Replace(string(data),
+					"additional_tools:\n",
+					"additional_tools:\n  - subagent_send_message\n  - subagent_interrupt\n  - subagent_list_children\n  - workflow\n", 1)
+				patched = strings.Replace(patched, "can_delegate: false", "can_delegate: true", 1)
+				if patched == string(data) {
+					return errors.New(agent + " AGENT.md has no additional_tools block / can_delegate:false to patch")
+				}
+				if err := os.WriteFile(spec, []byte(patched), 0o644); err != nil {
+					return err
+				}
 			}
-			patched := strings.Replace(string(data),
-				"additional_tools:\n",
-				"additional_tools:\n  - subagent_send_message\n  - subagent_interrupt\n  - subagent_list_children\n  - workflow\n", 1)
-			patched = strings.Replace(patched, "can_delegate: false", "can_delegate: true", 1)
-			if patched == string(data) {
-				return errors.New("chat AGENT.md has no additional_tools block / can_delegate:false to patch")
-			}
-			return os.WriteFile(chatSpec, []byte(patched), 0o644)
+			return nil
 		}),
 	)
 	// Pin the intent classifier to chat (delegate-seam rationale: an
@@ -278,7 +289,7 @@ func TestT1_DelegateTurnStateObservedOverWS(t *testing.T) {
 	s.Fake.EnqueueToolCalls(delegateCall("coder", "Reply with exactly: COORD-STATE-OK"))
 	s.Fake.SetPostToolText(`delegate_task returned a running child handle; reporting the raw result verbatim.`)
 	reply := s.ChatTurn(t, sessionID,
-		`Use the delegate_task tool to spawn one child with goal "Reply with exactly: COORD-STATE-OK" and report the raw tool result verbatim.`,
+		`What does the delegate_task tool return when it spawns one child with goal "Reply with exactly: COORD-STATE-OK"? Please report the raw tool result verbatim.`,
 		4*time.Minute)
 	lower := strings.ToLower(reply)
 	if strings.Contains(lower, "unknown tool") || strings.Contains(lower, "tool not found") {
@@ -360,7 +371,7 @@ func TestT2_DelegateResultCarriesStopReason(t *testing.T) {
 	s.Fake.EnqueueToolCalls(delegateCall("coder", "Reply with exactly: COORD-STOP-OK"))
 	s.Fake.SetPostToolText(`delegate_task returned a running child handle; reporting the raw result verbatim.`)
 	reply := s.ChatTurn(t, sessionID,
-		`Use the delegate_task tool to spawn one child with goal "Reply with exactly: COORD-STOP-OK" and report the raw tool result verbatim.`,
+		`What does the delegate_task tool return when it spawns one child with goal "Reply with exactly: COORD-STOP-OK"? Please report the raw tool result verbatim.`,
 		4*time.Minute)
 	lower := strings.ToLower(reply)
 	if strings.Contains(lower, "unknown tool") || strings.Contains(lower, "tool not found") {
