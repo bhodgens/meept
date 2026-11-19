@@ -114,6 +114,16 @@ type keysWire struct {
 	Qwen3ChunkSize      int      `json:"qwen3_chunk_size,omitempty"`
 	ClipPrewarmDelayMs  int      `json:"clip_prewarm_delay_ms,omitempty"`
 	ContextWarmWindowMs int      `json:"context_warm_window_ms,omitempty"`
+	// ---- rumble streaming/kwargs selectors (C4, ADDITIVE + OMITEMPTY) ----
+	// Absent on the wire = zero/nil = legacy. The emit site waits for
+	// leaf 03's VoiceConfig C6 fields (ChatTemplateLanguage,
+	// ChatTemplateDigits/Filler/Verbatim, STTPartialMs); until then these
+	// stay zero/nil so the daemon line remains byte-identical.
+	ChatTemplateLanguage string `json:"chat_template_language,omitempty"`
+	ChatTemplateDigits   *bool  `json:"chat_template_digits,omitempty"`
+	ChatTemplateFiller   *bool  `json:"chat_template_filler,omitempty"`
+	ChatTemplateVerbatim *bool  `json:"chat_template_verbatim,omitempty"`
+	STTPartialMs         *int   `json:"stt_partial_ms,omitempty"`
 }
 
 // Default vendor adapters when the config fields are empty (C4: preserves

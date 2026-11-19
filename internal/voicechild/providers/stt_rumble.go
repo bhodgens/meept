@@ -3,8 +3,9 @@ package providers
 // Child-side Rumble STT adapter (leaf 01). Structurally a clone of the
 // Whisper adapter (stt_whisper.go) with an HTTP endpoint in place of a
 // subprocess: buffer one voiced PCM window, POST it as base64 WAV to a
-// keyless vLLM transcription server, and emit exactly one Final transcript.
-// No auth header is ever sent and no request body / base64 audio is logged.
+// keyless vLLM chat.completions server, and emit exactly one Final
+// transcript. No auth header is ever sent and no request body / base64
+// audio is logged.
 
 import (
 	"bytes"
@@ -24,9 +25,10 @@ import (
 )
 
 const (
-	// rumbleTranscriptionsPath is the OpenAI-compatible transcription route
-	// appended to cfg.BaseURL (docs/research/rumble2flash-review.md:31).
-	rumbleTranscriptionsPath = "/v1/audio/transcriptions"
+	// rumbleChatCompletionsPath is the model-card vLLM route appended to
+	// cfg.BaseURL. The earlier /v1/audio/transcriptions POST was the bug
+	// leaf 01 fixes (contract C3).
+	rumbleChatCompletionsPath = "/v1/chat/completions"
 	// rumbleDefaultModel is used when cfg.Model is empty.
 	rumbleDefaultModel = "Reson8/Rumble-2-Flash"
 	// rumbleHTTPTimeout bounds one transcription POST (the caller's ctx is
@@ -37,13 +39,38 @@ const (
 	rumbleMaxWindowS = 8
 )
 
+// rumbleRequest is the model-card chat.completions wire body (C3). The WAV
+// travels as a data URI in messages[0].content[0].audio_url.url; the
+// chat_template_kwargs map is nil when no C2 selector was set, so its key
+// is omitted entirely on the legacy path.
+type rumbleRequest struct {
+	Model              string          `json:"model"`
+	Messages           []rumbleMessage `json:"messages"`
+	Temperature        int             `json:"temperature"`
+	ChatTemplateKwargs map[string]any  `json:"chat_template_kwargs,omitempty"`
+}
+
+type rumbleMessage struct {
+	Role    string              `json:"role"`
+	Content []rumbleContentPart `json:"content"`
+}
+
+type rumbleContentPart struct {
+	Type     string            `json:"type"`
+	AudioURL rumbleAudioURLObj `json:"audio_url"`
+}
+
+type rumbleAudioURLObj struct {
+	URL string `json:"url"`
+}
+
 // ErrMissingRumbleBaseURL is a constructor error: a BaseURL is required
 // because Rumble STT talks to a warm server over HTTP (no cloud default).
 var ErrMissingRumbleBaseURL = errors.New("voicechild/providers: missing Rumble base URL for call")
 
 // RumbleSTT implements voicechild.STTProvider by batching one utterance and
-// POSTing it to a keyless transcription endpoint. It emits exactly one Final
-// Transcript per window and NEVER a partial.
+// POSTing it to a keyless vLLM chat.completions endpoint. It emits exactly
+// one Final Transcript per window and NEVER a partial.
 type RumbleSTT struct {
 	cfg ProviderConfig
 
@@ -227,10 +254,35 @@ func (s *RumbleSTT) run(ctx context.Context, pcm <-chan []byte, out chan<- voice
 	}
 }
 
-// transcribe writes the window as a WAV, POSTs it as base64 JSON to the
-// Rumble endpoint, and returns the trimmed transcript. It never logs the
-// request body, base64 audio, or response content — only vendor+model at
-// DEBUG on failure (the caller handles that).
+// rumbleKwargs builds chat_template_kwargs from the explicitly set C2
+// selectors. An empty map is returned as nil so encoding/json omits the
+// key entirely (server defaults then bind). A language NAME such as
+// "English" is passed verbatim — it is not a BCP-47 tag.
+func (s *RumbleSTT) rumbleKwargs() map[string]any {
+	kwargs := make(map[string]any)
+	if s.cfg.ChatTemplateLanguage != "" {
+		kwargs["language"] = s.cfg.ChatTemplateLanguage
+	}
+	if s.cfg.ChatTemplateDigits != nil {
+		kwargs["digits"] = *s.cfg.ChatTemplateDigits
+	}
+	if s.cfg.ChatTemplateFiller != nil {
+		kwargs["filler"] = *s.cfg.ChatTemplateFiller
+	}
+	if s.cfg.ChatTemplateVerbatim != nil {
+		kwargs["verbatim"] = *s.cfg.ChatTemplateVerbatim
+	}
+	if len(kwargs) == 0 {
+		return nil
+	}
+	return kwargs
+}
+
+// transcribe writes the window as a WAV, POSTs the model-card
+// chat.completions body to the Rumble endpoint, and returns the trimmed
+// transcript from choices[0].message.content. It never logs the request
+// body, base64 audio, or response content — only vendor+model at DEBUG on
+// failure (the caller handles that).
 func (s *RumbleSTT) transcribe(ctx context.Context, dir string, seq int, buf []byte) (string, error) {
 	tmp, err := os.CreateTemp(dir, fmt.Sprintf("utt%d-*.wav", seq))
 	if err != nil {
@@ -248,19 +300,26 @@ func (s *RumbleSTT) transcribe(ctx context.Context, dir string, seq int, buf []b
 		return "", fmt.Errorf("read wav: %w", err)
 	}
 
-	payload := struct {
-		Model string `json:"model"`
-		File  string `json:"file"`
-	}{
+	payload := rumbleRequest{
 		Model: s.cfg.Model,
-		File:  base64.StdEncoding.EncodeToString(wav),
+		Messages: []rumbleMessage{{
+			Role: "user",
+			Content: []rumbleContentPart{{
+				Type: "audio_url",
+				AudioURL: rumbleAudioURLObj{
+					URL: "data:audio/wav;base64," + base64.StdEncoding.EncodeToString(wav),
+				},
+			}},
+		}},
+		Temperature:        0,
+		ChatTemplateKwargs: s.rumbleKwargs(),
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("marshal request: %w", err)
 	}
 
-	url := strings.TrimRight(s.cfg.BaseURL, "/") + rumbleTranscriptionsPath
+	url := strings.TrimRight(s.cfg.BaseURL, "/") + rumbleChatCompletionsPath
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("new request: %w", err)
@@ -277,10 +336,17 @@ func (s *RumbleSTT) transcribe(ctx context.Context, dir string, seq int, buf []b
 		return "", fmt.Errorf("post transcription: status %d", resp.StatusCode)
 	}
 	var parsed struct {
-		Text string `json:"text"`
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
 		return "", fmt.Errorf("decode response: %w", err)
 	}
-	return strings.TrimSpace(parsed.Text), nil
+	if len(parsed.Choices) == 0 {
+		return "", errors.New("decode response: no choices")
+	}
+	return strings.TrimSpace(parsed.Choices[0].Message.Content), nil
 }

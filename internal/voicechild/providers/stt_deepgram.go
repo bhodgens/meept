@@ -157,14 +157,14 @@ type DeepgramSTT struct {
 	dial func(ctx context.Context, base, path string, header wsHeader) (wsSession, error)
 }
 
-// NewSTT builds an STT adapter selected by ProviderConfig.Vendor. Cloud
+// newBaseSTT builds an STT adapter selected by ProviderConfig.Vendor. Cloud
 // vendors (deepgram) take the call's key (C1 keys frame); local vendors
 // (whisper) need none. cfg.BaseURL empty falls back to the cloud default
 // (api.deepgram.com); cfg.Model empty falls back to the vendor default
 // (nova-3). A missing key for a cloud vendor is ErrMissingSTTKey; every
 // failure is a constructor error - the child and other calls are
 // unaffected. Construction logs vendor+model only, never the key.
-func NewSTT(cfg ProviderConfig, key string) (voicechild.STTProvider, error) {
+func newBaseSTT(cfg ProviderConfig, key string) (voicechild.STTProvider, error) {
 	switch cfg.Vendor {
 	case "deepgram":
 		if key == "" {
@@ -184,6 +184,14 @@ func NewSTT(cfg ProviderConfig, key string) (voicechild.STTProvider, error) {
 	default:
 		return nil, fmt.Errorf("%w: stt vendor %q", ErrUnknownVendor, cfg.Vendor)
 	}
+}
+
+// NewSTT is the call-site factory (C2/C5). Today it returns the base
+// adapter unchanged; leaf 02 wraps the result in a pseudo-stream
+// decorator when cfg.PartialIntervalMs > 0. Keeping this wrapper thin
+// means the vendor switch above never needs re-editing for that leaf.
+func NewSTT(cfg ProviderConfig, key string) (voicechild.STTProvider, error) {
+	return newBaseSTT(cfg, key)
 }
 
 // dialBase is the endpoint this adapter's dialer targets (cfg.BaseURL;

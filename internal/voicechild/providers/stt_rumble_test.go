@@ -21,10 +21,10 @@ import (
 )
 
 func TestRumbleSTTStream(t *testing.T) {
-	var sawFile, sawAuth bool
+	var sawAudioURL, sawAuth bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasSuffix(r.URL.Path, "/v1/audio/transcriptions") {
-			t.Errorf("request path = %q, want /v1/audio/transcriptions", r.URL.Path)
+		if !strings.HasSuffix(r.URL.Path, "/v1/chat/completions") {
+			t.Errorf("request path = %q, want /v1/chat/completions", r.URL.Path)
 		}
 		if r.Header.Get("Authorization") != "" {
 			sawAuth = true
@@ -33,11 +33,11 @@ func TestRumbleSTTStream(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Errorf("decode request: %v", err)
 		}
-		if _, ok := body["file"]; ok {
-			sawFile = true
+		if uri, ok := audioURLFromBody(body); ok && strings.HasPrefix(uri, "data:audio/wav;base64,") {
+			sawAudioURL = true
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"text":"hello there"}`)
+		_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"hello there"}}]}`)
 	}))
 	defer srv.Close()
 
@@ -76,8 +76,8 @@ func TestRumbleSTTStream(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for transcript")
 	}
-	if !sawFile {
-		t.Error("request omitted base64 audio field 'file'")
+	if !sawAudioURL {
+		t.Error("request omitted messages[0].content[0].audio_url.url data URI")
 	}
 	if sawAuth {
 		t.Error("keyless Rumble adapter sent an Authorization header")
@@ -232,8 +232,9 @@ func runRumbleRequest(t *testing.T, cfg ProviderConfig) (map[string]any, string)
 		if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
 			t.Errorf("decode request: %v", err)
 		}
+		authValue := r.Header.Get("Authorization")
 		mu.Lock()
-		body, auth = b, r.Header.Get("Authorization")
+		body, auth = b, authValue
 		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"ok"}}]}`)

@@ -37,6 +37,20 @@ type ProviderConfig struct {
 	// legacy (R4); non-empty adds Deepgram keyterm params and a Whisper
 	// -p prompt. Additive/opt-in.
 	Vocabulary []string
+	// ---- rumble streaming/kwargs (plan 20261119, contract C2) ----
+	// All ADDITIVE/OPTIONAL: empty/nil = byte-identical legacy behavior.
+	// ChatTemplateLanguage is a language NAME ("English"), not a BCP-47
+	// code, and is passed verbatim to chat_template_kwargs.language.
+	ChatTemplateLanguage string
+	// The three bools are pointers so nil means "omit this key" (the
+	// server default then applies): digits defaults true, filler false,
+	// verbatim true on the Rumble model card.
+	ChatTemplateDigits   *bool
+	ChatTemplateFiller   *bool
+	ChatTemplateVerbatim *bool
+	// PartialIntervalMs > 0 wraps the base STT provider in the
+	// pseudo-stream decorator (leaf 02); 0 = legacy (no decorator).
+	PartialIntervalMs int
 }
 
 // STTFactory builds the STT adapter for one call from the call's provider
@@ -150,6 +164,13 @@ type keysWire struct {
 	Qwen3ChunkSize      int      `json:"qwen3_chunk_size"`
 	ClipPrewarmDelayMs  int      `json:"clip_prewarm_delay_ms"`
 	ContextWarmWindowMs int      `json:"context_warm_window_ms"`
+	// ---- rumble streaming/kwargs selectors (C4, ADDITIVE + OMITEMPTY) ----
+	// Absent on an old daemon line decodes as zero/nil = legacy.
+	ChatTemplateLanguage string `json:"chat_template_language,omitempty"`
+	ChatTemplateDigits   *bool  `json:"chat_template_digits,omitempty"`
+	ChatTemplateFiller   *bool  `json:"chat_template_filler,omitempty"`
+	ChatTemplateVerbatim *bool  `json:"chat_template_verbatim,omitempty"`
+	STTPartialMs         *int   `json:"stt_partial_ms,omitempty"`
 }
 
 // handleKeysFrame decodes one raw keys line into the redacting KeysFrame
@@ -225,6 +246,12 @@ func (c *Child) handleKeysFrame(line string) error {
 		Qwen3ChunkSize:      w.Qwen3ChunkSize,
 		ClipPrewarmDelayMs:  w.ClipPrewarmDelayMs,
 		ContextWarmWindowMs: w.ContextWarmWindowMs,
+		// Rumble streaming/kwargs selectors: absent-on-wire = zero/nil.
+		ChatTemplateLanguage: w.ChatTemplateLanguage,
+		ChatTemplateDigits:   w.ChatTemplateDigits,
+		ChatTemplateFiller:   w.ChatTemplateFiller,
+		ChatTemplateVerbatim: w.ChatTemplateVerbatim,
+		STTPartialMs:         w.STTPartialMs,
 	})
 }
 

@@ -110,6 +110,13 @@ type KeysFrame struct {
 	// ContextWarmWindowMs overrides the partial-warm debounce window; 0 =
 	// resolve from turn_confirm_ms (legacy).
 	ContextWarmWindowMs int `json:"context_warm_window_ms,omitempty"`
+	// ---- rumble streaming/kwargs selectors (C4, ADDITIVE) ----
+	// Absent on an old daemon line = zero/nil = legacy.
+	ChatTemplateLanguage string `json:"chat_template_language,omitempty"`
+	ChatTemplateDigits   *bool  `json:"chat_template_digits,omitempty"`
+	ChatTemplateFiller   *bool  `json:"chat_template_filler,omitempty"`
+	ChatTemplateVerbatim *bool  `json:"chat_template_verbatim,omitempty"`
+	STTPartialMs         *int   `json:"stt_partial_ms,omitempty"`
 }
 
 // Redacted is what String prints instead of key material.
@@ -201,6 +208,15 @@ func (p *pipeline) SetNormalizePreserve(preserve func(token string) bool) {
 // keys themselves). The setup frame's negotiated sample rate is stamped
 // onto the stored configs by constructProviders, not here (a keys frame
 // may legitimately arrive after setup).
+// sttPartialMs converts the optional wire selector to the ProviderConfig
+// value: nil/absent = 0 (no pseudo-stream decorator), negative clamps to 0.
+func sttPartialMs(v *int) int {
+	if v == nil {
+		return 0
+	}
+	return max(*v, 0)
+}
+
 func (p *pipeline) applyKeys(k KeysFrame) {
 	p.playMu.Lock()
 	p.sttKey = k.STTKey
@@ -249,6 +265,13 @@ func (p *pipeline) applyKeys(k KeysFrame) {
 		WhisperServerAddr:  k.WhisperServerAddr,
 		DeepgramEndpointMs: k.DeepgramEndpointMs,
 		Vocabulary:         k.Vocabulary,
+		// Rumble streaming/kwargs selectors (C2/C4): carry the explicit
+		// chat_template_kwargs fields and the pseudo-stream interval.
+		ChatTemplateLanguage: k.ChatTemplateLanguage,
+		ChatTemplateDigits:   k.ChatTemplateDigits,
+		ChatTemplateFiller:   k.ChatTemplateFiller,
+		ChatTemplateVerbatim: k.ChatTemplateVerbatim,
+		PartialIntervalMs:    sttPartialMs(k.STTPartialMs),
 	}
 	p.ttsCfg = ProviderConfig{
 		Vendor:         k.TTSVendor,
