@@ -76,10 +76,18 @@ func newFakeTTS(t *testing.T) *fakeTTS {
 	t.Helper()
 	f := &fakeTTS{t: t, seen: map[string]int{}}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/audio/speech", func(w http.ResponseWriter, r *http.Request) {
+	// The qwen3 vendor speaks /v1/audio/speech/pcm-stream with a
+	// length-prefixed frame stream; the legacy cloud vendor speaks
+	// /v1/audio/speech with raw PCM. Serve both from one handler so the
+	// fake keeps working after the pcm-stream switch (root cause of the
+	// pre-existing voice_clips e2e red: the fake 404'd the pcm route).
+	synth := func(w http.ResponseWriter, r *http.Request, pcmStream bool) {
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body) //nolint:errcheck // test sink
 		input, _ := body["input"].(string)
+		if input == "" {
+			input, _ = body["text"].(string) // qwen3 pcm-stream body shape
+		}
 		f.mu.Lock()
 		f.seen[input]++
 		f.total++
@@ -97,6 +105,14 @@ func newFakeTTS(t *testing.T) *fakeTTS {
 			for s := 0; s < 960; s++ {
 				binary.LittleEndian.PutUint16(chunk[s*2:], uint16(3000+i))
 			}
+			if pcmStream {
+				// [4-byte BE uint32 length][s16le PCM] frames,
+				// zero-length terminator (pcmstream.go C1 contract).
+				var frame [4 + 1920]byte
+				binary.BigEndian.PutUint32(frame[:4], uint32(len(chunk)))
+				copy(frame[4:], chunk)
+				chunk = frame[:]
+			}
 			if _, err := w.Write(chunk); err != nil {
 				return
 			}
@@ -104,6 +120,15 @@ func newFakeTTS(t *testing.T) *fakeTTS {
 				flusher.Flush()
 			}
 		}
+		if pcmStream {
+			_, _ = w.Write([]byte{0, 0, 0, 0}) //nolint:errcheck // test sink
+		}
+	}
+	mux.HandleFunc("/v1/audio/speech", func(w http.ResponseWriter, r *http.Request) {
+		synth(w, r, false)
+	})
+	mux.HandleFunc("/v1/audio/speech/pcm-stream", func(w http.ResponseWriter, r *http.Request) {
+		synth(w, r, true)
 	})
 	f.srv = httptest.NewServer(mux)
 	t.Cleanup(f.srv.Close)
