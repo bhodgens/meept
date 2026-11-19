@@ -515,6 +515,21 @@ session-affinity scope as the imminent turn) so the real turn pays
 decode, not prefill; warm never starts a turn or tools, consumes no
 budget, never touches blocks/metrics, and its failures are silent
 (DEBUG). Full contracts (C1-C6) in `internal/voice/AGENTS.md`.
+OPT-IN ENDPOINTING/LATENCY SELECTORS (plan 20261118-voice-tts-stt-optimizations):
+seven additive `VoiceConfig` keys cross the daemon->child C1 keys line as
+omitempty `KeysFrame` selectors (zero/empty = byte-identical legacy), so
+the child's turn-taking, STT and TTS adapters receive them per call:
+`smart_turn_mode` (smart turn 0/1/2 semantics; default 0 = off, verdict
+unused; mode 2 consumes Smart Turn under `turnMu` only, never `playMu`),
+`whisper_server_addr` (empty = exec-per-utterance, persistent server when set),
+`deepgram_endpoint_ms` (0 = timer only; positive = authoritative endpoint
+fast path), `recognition_vocabulary` (Deepgram keyterm + Whisper -p),
+`qwen3_chunk_size` (0 => body chunk_size 4), `clip_prewarm_delay_ms`
+(0 = immediate prewarm; positive = defer clip renders past first played
+edge; renders yield to live synth/barge-in), and `context_warm_window_ms`
+(0 => turn_confirm_ms). Whisper emits finals only, so context warm and
+the no-partial limits apply only to partial-streaming STT. Full contract
+in `internal/voice/AGENTS.md`.
 
 ### The github_* tools register through the tool-provider seam; githubsvc never imports builtin
 

@@ -630,6 +630,47 @@ Proposed keys, all under `voice`:
 - `reorder_window_frames` - int, default 10
 - `reorder_gap_ms` - int, default 60
 
+### Latency and endpointing tuning knobs (opt-in, plan 20261118-voice-tts-stt-optimizations)
+
+All under `voice`, global-only (no `employee_leg` override), and additive:
+each crosses the C1 keys frame as an omitempty selector, so zero or empty
+is byte-identical to the pre-change wire and behavior.
+
+- `smart_turn_mode` - int, default 0. Semantic endpointing: 0 = off
+  (legacy: the Smart Turn analyzer is installed and fed but its verdict
+  is unused); 1 = kill switch (no analyzer built or fed, VAD intact);
+  2 = consume `AnalyzeEndOfTurn` at confirm-window expiry (complete=true
+  dispatch immediately, complete=false one bounded re-arm). Mode 2
+  needs paired hesitation fixtures before production; default stays 0.
+- `whisper_server_addr` - string, default "". Empty = exec `whisper-cli`
+  per utterance (legacy, ~350 ms cold start); non-empty = a persistent
+  whisper.cpp server transport with the same segmentation and finals-only
+  behavior. The Whisper leg emits finals only, never partials.
+- `deepgram_endpoint_ms` - int, default 0. 0 = endpoint ignored, fixed
+  `turn_confirm_ms` timer only (legacy); positive = a Deepgram
+  `speech_final` / `UtteranceEnd` dispatches accumulated finals at once.
+  Needs paired hesitation/backchannel fixtures before production.
+- `recognition_vocabulary` - []string, default empty. Empty = provider
+  wire requests byte-identical; non-empty = forwarded as Deepgram
+  `keyterm` params and a Whisper `-p` prompt to bias names, addresses,
+  and identifiers. Keep it short (an over-long list warns); needs a
+  paired critical-entity fixture to check for over-biasing.
+- `qwen3_chunk_size` - int, default 0. 0 = request-body `chunk_size: 4`
+  (legacy); positive = override. Local measurements at 1/2 were noisy;
+  A/B first-audio on the target server before changing.
+- `clip_prewarm_delay_ms` - int, default 0. 0 = render clip fills
+  immediately at call setup (legacy); positive = defer `clip_render`
+  frames until the child's first `played` edge plus this delay, moving
+  the setup-time render burst off the first-audio path. A background
+  render yields to live synthesis and barge-in (idempotent, re-requested,
+  so no clip is lost). Benefit unmeasured; A/B on the target box.
+- `context_warm_window_ms` - int, default 0. 0 = use the resolved
+  `turn_confirm_ms` (legacy); positive = override the context-warm
+  debounce window so the warm request lands before confirm-window
+  dispatch. See the "Partial context warm" as-built note below. Whisper
+  emits no partials, so this only affects partial-streaming STT
+  (the phone leg with Deepgram) - documented, not fixed.
+
 Provider API keys are secrets-broker values. The child asks the daemon
 for a key over the unix socket at start. The daemon reads `Broker.Value`.
 The key is not in the child environment, the command line, or a log. The
@@ -1242,10 +1283,15 @@ spec's frame/config/flow contracts.
 - **Partial context warm (R7/R8).** `voice.context_warm` (opt-in,
   default false; false = the warmer is never constructed and routeFrame
   costs one atomic load per partial). Debounced per call on the global
-  `voice.turn_confirm_ms` window (0/legacy = fixed 900 ms)
-  + a 150 ms fire throttle; latest partial wins; at most one in-flight
-  warm per session (replace-discard); a final prompt or call end
-  cancels the timer AND the in-flight request. The warm request
+  `voice.turn_confirm_ms` window (0/legacy = fixed 900 ms), overridable
+  with `voice.context_warm_window_ms` (opt-in, default 0 = use
+  `turn_confirm_ms`; positive overrides so the warm lands before
+  confirm-window dispatch), plus a 150 ms fire throttle; latest partial
+  wins; at most one in-flight warm per session (replace-discard); a final
+  prompt or call end cancels the timer AND the in-flight request. Whisper
+  emits finals only and NO partials, so on the Whisper/local leg the warm
+  path has nothing to debounce and stays inert - documented, not fixed.
+  The warm request
   (`llm.Client.Warm`) reuses the real turn's serialization path with
   max_tokens=1 and the same session-affinity scope (the turn's
   ACCOUNTING/conversation id, so prompt_cache_key + affinity header
