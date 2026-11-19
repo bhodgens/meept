@@ -719,7 +719,7 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		w.contextWarmer = cw
 		vlog.Info("voice wiring: context warm enabled",
 			"min_tokens", w.cfg.ContextWarmMinTokens,
-			"window_ms", w.cfg.TurnConfirmMs)
+			"window_ms", w.resolveContextWarmWindow().Milliseconds())
 	}
 
 	// -- 7a-b. Call recording (leaf 06, T3): consent gate evaluated at
