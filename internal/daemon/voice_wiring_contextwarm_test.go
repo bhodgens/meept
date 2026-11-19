@@ -381,3 +381,75 @@ func (c *cwFakeWarmChatter) Warm(_ context.Context, _ []llm.ChatMessage, _ ...ll
 	c.mu.Unlock()
 	return nil
 }
+
+// TestContextWarmWindowReloadLive pins bughunt 2026-11-19 M6 at the daemon
+// seam: resolveContextWarmWindow reads the LIVE snapshot (currentVoiceCfg),
+// not the boot w.cfg, and reloadVoiceConfig pushes the resolved window into
+// the constructed-once warmer via SetWindow. The disabled default stays a
+// nil-warmer no-op (byte-identical).
+func TestContextWarmWindowReloadLive(t *testing.T) {
+	w, rec, ccid := cwSetup(t, true, nil)
+	defer func() { w.releaseCall(ccid, voice.OutcomeHangup) }()
+
+	// Boot snapshot: TurnConfirmMs=120 (cwSetup), no override.
+	if got := w.resolveContextWarmWindow(); got != 120*time.Millisecond {
+		t.Fatalf("boot window = %v, want 120ms", got)
+	}
+
+	// Simulate the daemon.reloaded republish: the LIVE snapshot carries a
+	// new override while the boot w.cfg stays untouched (the keys frame
+	// reads the same live value — the warm window must not diverge).
+	live := w.cfg
+	live.ContextWarmWindowMs = 45
+	w.cfgMu.Lock()
+	w.cfgLive = &live
+	w.cfgMu.Unlock()
+	if got := w.resolveContextWarmWindow(); got != 45*time.Millisecond {
+		t.Fatalf("live window = %v, want the 45ms override from cfgLive (boot w.cfg must not win)", got)
+	}
+	if w.cfg.ContextWarmWindowMs != 0 {
+		t.Fatal("test corrupted the boot snapshot")
+	}
+
+	// Push the resolved window into the warmer exactly as reloadVoiceConfig
+	// does, then prove a partial debounces at the NEW window: fire inside
+	// 45ms+slack, well before the boot 120ms window would have fired.
+	w.contextWarmer.SetWindow(w.resolveContextWarmWindow())
+	w.routeFrame(voice.Frame{CallID: ccid, Event: voice.EventPrompt,
+		Text: "ctxwarmnonce reload window probe partial text for the live override"})
+	deadline := time.Now().Add(110 * time.Millisecond)
+	for time.Now().Before(deadline) && rec.count() == 0 {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if rec.count() == 0 {
+		t.Fatal("warm did not fire inside the reloaded 45ms window (SetWindow reload-live broken)")
+	}
+
+	// Override cleared on a later reload: the window falls back to the
+	// live turn_confirm_ms, never the boot value.
+	live2 := live
+	live2.ContextWarmWindowMs = 0
+	live2.TurnConfirmMs = 300
+	w.cfgMu.Lock()
+	w.cfgLive = &live2
+	w.cfgMu.Unlock()
+	if got := w.resolveContextWarmWindow(); got != 300*time.Millisecond {
+		t.Fatalf("fallback window = %v, want the live 300ms turn_confirm_ms", got)
+	}
+}
+
+// TestContextWarmReloadNilWarmerNoOp pins the disabled-default posture:
+// with context_warm false the warmer is nil, and the reload path's
+// SetWindow call is a safe no-op (byte-identical boot, zero overhead).
+func TestContextWarmReloadNilWarmerNoOp(t *testing.T) {
+	w, _ := newVoiceWiringForTest(t)
+	w.cfg.ContextWarm = false
+	if cw := w.newContextWarmer(context.Background(), contextWarmSources{}); cw != nil {
+		t.Fatal("disabled config constructed a warmer")
+	}
+	// The exact call reloadVoiceConfig makes when the feature is off.
+	w.contextWarmer.SetWindow(w.resolveContextWarmWindow())
+	if voice.ContextWarmRouting() != nil {
+		t.Fatal("disabled reload registered a warmer")
+	}
+}

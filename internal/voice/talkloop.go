@@ -1811,8 +1811,10 @@ func (t *TalkLoop) playVerdict(ccid string, vr verdict) {
 		// race in that window and speak filler behind an answer already on
 		// the wire (the caller hears the answer, then "hold on, let me
 		// check"). Setting the latch first makes any concurrent timer see
-		// utteranceOut and skip. On send failure we roll the latch back so
-		// filler can still cover the dead air.
+		// utteranceOut and skip. On send failure we roll the latch back AND
+		// re-arm the grace timer (bughunt 2026-11-19 L5): stopFillerLocked
+		// already stopped it and cleared fillerPending, so without the
+		// re-arm nothing could cover the dead air the failed say left.
 		t.interruptMu.Lock()
 		p.utteranceOut = true
 		fillerStopped := p.stopFillerLocked()
@@ -1824,6 +1826,37 @@ func (t *TalkLoop) playVerdict(ccid string, vr verdict) {
 			t.log.Warn("voice talk loop: say send failed", "ccid", ccid, "error", err)
 			t.interruptMu.Lock()
 			p.utteranceOut = false
+			// Re-arm ONLY when this verdict's pre-latch stop actually
+			// cancelled a pending timer and the draft is still live: a
+			// filler that already fired (fillerFired) or a legacy
+			// grace-0 dispatch must not gain a new filler, and a
+			// superseded/cancelled draft must never emit zombie filler
+			// (the timer closure re-checks t.cur/gen under interruptMu).
+			if fillerStopped && !p.fillerFired && t.cur == p && t.gen == p.gen && p.fillerText != "" {
+				p.fillerSkipped = false // the stop was rolled back; not "answered inside grace"
+				p.fillerPending = true
+				p.fillerTimer = time.AfterFunc(t.cfg.FillerGrace, func() {
+					// Same latch discipline as the dispatch-time timer:
+					// validate under interruptMu BEFORE any I/O.
+					t.interruptMu.Lock()
+					if t.cur != p || !p.fillerPending || p.utteranceOut || p.fillerFired {
+						t.interruptMu.Unlock()
+						return
+					}
+					p.fillerPending = false
+					p.fillerFired = true
+					after := t.now().Sub(p.dispatchedAt).Milliseconds()
+					t.interruptMu.Unlock()
+					if err := t.sayClip(ccid, p.fillerText, t.clipID(p.fillerText), false); err != nil {
+						t.log.Warn("voice talk loop: delayed filler send failed", "ccid", ccid, "error", err)
+						return
+					}
+					t.log.Info("voice talk loop: turn filler",
+						"ccid", ccid, "seq", p.seq, "kind", "filler",
+						"line", p.fillerText, "after_ms", after,
+						"lane", string(LaneFiller), "clip", t.cfg.Identity != nil)
+				})
+			}
 			t.interruptMu.Unlock()
 		} else {
 			t.emitVoicePlay(ccid, p, vr.sentence) // first allowed sentence of the turn

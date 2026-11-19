@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"math"
 	"net"
 	"net/url"
 	"path/filepath"
@@ -229,16 +230,18 @@ type IntakeConfig struct {
 }
 
 // KanbanConfig carries the [kanban] board-projection subsystem block
-// (plans/kanban-board master.md contract C9). Every surface is opt-in
-// (docs/agents/opt-in-defaults.md): with Enabled=false the daemon opens no
-// kanban store, starts no projector, and registers no kanban.* RPC — the
-// boot path stays byte-identical to a config without the block.
+// (plans/kanban-board master.md contract C9). The subsystem is DEFAULT-ON
+// opt-out (DefaultConfig: Enabled=true, SidecarEnabled=true): setting
+// Enabled=false is the opt-out — the daemon opens no kanban store, starts
+// no projector, and registers no kanban.* RPC, and the boot path stays
+// byte-identical to a config without the block.
 type KanbanConfig struct {
 	// Enabled turns on the kanban subsystem: store, projector, RPC
-	// (default: false, opt-in).
+	// (default: true, opt-out — set false for the byte-identical
+	// pre-kanban boot).
 	Enabled bool `json:"enabled" toml:"enabled"`
 	// SidecarEnabled turns on the daemon-spawned meept-kanban gateway
-	// (default: false; requires Enabled).
+	// (default: true, opt-out; requires Enabled).
 	SidecarEnabled bool `json:"sidecar_enabled" toml:"sidecar_enabled"`
 	// SidecarBind is the sidecar's HTTP listen address (default
 	// "127.0.0.1:8790"). A NON-loopback value is the explicit operator
@@ -5646,6 +5649,44 @@ func DefaultVoiceRumbleRuntimeConfig() VoiceRumbleRuntimeConfig {
 	}
 }
 
+// Rumble GPU-fraction safety bounds (the documented coexistence range in
+// the VoiceRumbleRuntimeConfig comment): the sidecar shares one RTX 3060
+// with qwen3-tts, so vLLM's 0.92 default is unsafe. Shared by the config
+// load-boundary normalizer and the daemon spawn renderer so the clamp
+// has ONE source of truth (bughunt 2026-11-19 M18/H1).
+const (
+	// RumbleGPUMemoryUtilizationDefault is the frozen safe fraction.
+	RumbleGPUMemoryUtilizationDefault = 0.20
+	// RumbleGPUMemoryUtilizationMax is the top of the safe range; values
+	// above it clamp down here, never render verbatim into spawn args.
+	RumbleGPUMemoryUtilizationMax = 0.25
+)
+
+// NormalizeVoiceRumbleDefaults enforces the documented GPU-fraction safe
+// range on [voice.rumble_runtime] at the load boundary (bughunt M18/H1:
+// SpawnArgs used to render the value verbatim, so a typo like 0.92 —
+// vLLM's unsafe default — would starve qwen3-tts on the shared GPU).
+// Clamp posture (NormalizeVoiceAcousticDefaults style): > max clamps to
+// 0.25; non-positive, NaN, or Inf restores the frozen 0.20 default. A
+// zero-value block (the file omits rumble_runtime entirely) keeps the
+// frozen defaults untouched. Idempotent on valid values; the block stays
+// inert unless voice.stt_provider = "rumble" selects the sidecar.
+func NormalizeVoiceRumbleDefaults(r *VoiceRumbleRuntimeConfig) {
+	if r == nil {
+		return
+	}
+	if *r == (VoiceRumbleRuntimeConfig{}) {
+		return // zero-value block: the frozen defaults stay frozen
+	}
+	gpu := r.GPUMemoryUtilization
+	switch {
+	case gpu <= 0 || math.IsNaN(gpu) || math.IsInf(gpu, 0):
+		r.GPUMemoryUtilization = RumbleGPUMemoryUtilizationDefault
+	case gpu > RumbleGPUMemoryUtilizationMax:
+		r.GPUMemoryUtilization = RumbleGPUMemoryUtilizationMax
+	}
+}
+
 type VoiceConfig struct {
 	// TurnTimeoutSeconds (json turn_timeout_seconds) is the opt-in hard
 	// cap on one voice turn (final prompt dispatched -> turn-final say
@@ -6436,6 +6477,14 @@ func (c *Config) ValidateAll() error {
 	// config arrived through a path that skipped load-boundary
 	// normalization.
 	NormalizeMemoryTiersDefaults(&c.Memory.Tiers)
+
+	// Clamp the Rumble STT sidecar GPU fraction into the documented
+	// 0.20-0.25 safe range (bughunt 2026-11-19 M18/H1). Same idempotent
+	// pre-start-boundary precedent as the memory.tiers normalize above:
+	// every daemon boot/reload validation pass re-clamps, so a hand-built
+	// config or a reload that skipped load normalization still renders
+	// safe spawn args. Zero-value block keeps the frozen defaults.
+	NormalizeVoiceRumbleDefaults(&c.Voice.RumbleRuntime)
 
 	return nil
 }

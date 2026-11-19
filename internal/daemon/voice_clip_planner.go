@@ -445,6 +445,11 @@ func (w *VoiceWiring) reloadVoiceConfig() {
 	w.cfgMu.Lock()
 	w.cfgLive = &snap
 	w.cfgMu.Unlock()
+	// Context-warm debounce window is reload-live too (bughunt M6): the
+	// warmer was constructed once at boot and resolveContextWarmWindow
+	// now reads the snapshot just swapped above. A nil warmer (feature
+	// disabled — the default) makes this a no-op, byte-identical.
+	w.contextWarmer.SetWindow(w.resolveContextWarmWindow())
 	w.replanLiveClips()
 }
 

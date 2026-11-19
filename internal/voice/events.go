@@ -88,16 +88,29 @@ const (
 // Ring sizing: DefaultCallEvents is the per-call ring capacity the daemon
 // constructs with; DefaultCallEventRings bounds how many (most recent)
 // call ids retain rings at once - an older call id's ring is evicted when
-// a new one appends past the cap. 64 x ~120 B is a few KB per call.
+// a new one appends past the cap. Memory posture (voice-events phase 2):
+// full reply/transcript text rides the ring (stt_final / model_final /
+// said / voice_play carry FULL text, not previews), so an event's cost is
+// dominated by its Text, not the ~120 B fixed fields. The ring caps stored
+// Text at maxEventTextBytes (rune-safe cut + ellipsis marker), bounding a
+// full 64-slot ring at ~256 KiB per call and the 32-ring set at ~8 MiB —
+// bounded even when every slot carries a long reply.
 const (
 	DefaultCallEvents     = 64
 	DefaultCallEventRings = 32
+
+	// maxEventTextBytes caps the Text stored per ring event. Long model
+	// replies / transcripts are cut at a rune boundary and suffixed with
+	// an ellipsis so the operator feed shows the truncation honestly.
+	// Seq/kind/Ms are never touched by the cap.
+	maxEventTextBytes = 4096
 )
 
-// TelemetryEvent is one ring entry. Text is FULL for heard, said,
-// stt_final, model_final and voice_play: the live operator feed is the
-// transcript, not a 40-rune preview. Other kinds carry a PREVIEW
-// (truncated at the emitter by a 40-rune rule) or no Text at all.
+// TelemetryEvent is one ring entry. Text is FULL (up to the
+// maxEventTextBytes storage cap) for heard, said, stt_final, model_final
+// and voice_play: the live operator feed is the transcript, not a
+// 40-rune preview. Other kinds carry a PREVIEW (truncated at the emitter
+// by a 40-rune rule) or no Text at all.
 type TelemetryEvent struct {
 	Seq    uint64    `json:"seq"`
 	Kind   string    `json:"kind"`
@@ -192,7 +205,7 @@ func (r *TelemetryRing) Append(ccid string, in EventInput) uint64 {
 		Seq:    cr.total,
 		Kind:   in.Kind,
 		At:     time.Now(),
-		Text:   in.Text,
+		Text:   capEventText(in.Text),
 		Words:  in.Words,
 		Ms:     in.Ms,
 		Reason: in.Reason,
@@ -202,6 +215,28 @@ func (r *TelemetryRing) Append(ccid string, in EventInput) uint64 {
 		cr.count++
 	}
 	return cr.total
+}
+
+// capEventText bounds one stored event's Text at maxEventTextBytes with a
+// rune-safe cut plus an ellipsis marker (bughunt 2026-11-19 L4: full reply
+// text rides the ring, so an uncapped 64-slot ring could hold megabytes of
+// model output). Text at or under the cap passes through byte-identical.
+// The cut walks back off a UTF-8 continuation byte so a multi-byte rune is
+// never split; the marker itself is 3 bytes, so the kept prefix is at most
+// maxEventTextBytes-3 bytes and the stored string never exceeds the cap.
+// Pure CPU bookkeeping — safe under the ring mutex (no I/O).
+func capEventText(text string) string {
+	const ellipsis = "…"
+	if len(text) <= maxEventTextBytes {
+		return text
+	}
+	cut := maxEventTextBytes - len(ellipsis)
+	// Back off any UTF-8 continuation bytes (10xxxxxx) so the cut lands
+	// on a rune boundary. ASCII and rune-leading bytes stop the walk.
+	for cut > 0 && text[cut]&0xC0 == 0x80 {
+		cut--
+	}
+	return text[:cut] + ellipsis
 }
 
 // Since returns this call's events with Seq > cursor in seq order, capped

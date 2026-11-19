@@ -123,8 +123,9 @@ type Daemon struct {
 	drainOverride atomic.Int64 // requested drain timeout (ns); 0 = ShutdownTimeout default
 
 	// kanbanSidecar supervises the daemon-spawned meept-kanban gateway
-	// ([kanban].sidecar_enabled, default false = nil = no process). Owned
-	// by StartKanbanSidecar, torn down by stopKanbanSidecar in shutdown().
+	// ([kanban].sidecar_enabled, DEFAULT TRUE — opt out with false =
+	// nil = no process). Owned by StartKanbanSidecar, torn down by
+	// stopKanbanSidecar in shutdown().
 	kanbanSidecar *kanbanSupervisor
 
 	// kanban holds the live [kanban].enabled wiring bundle (store,
@@ -1578,8 +1579,9 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	// LeaseAuthority, rule bootstrap, projector over the five
 	// kanban.event.*.state topics, reconciler with the real fetchers,
 	// C4 RPC, tool provider, pairing — constructed ONLY when
-	// [kanban].enabled (default false: wireKanbanServices touches
-	// nothing and the boot stays byte-identical). Registration pattern
+	// [kanban].enabled (DEFAULT TRUE — opt out with false: wireKanbanServices
+	// touches nothing and the boot stays byte-identical to the pre-kanban
+	// shape). Registration pattern
 	// mirrors the intake lane; failures degrade (Warn), never fail boot.
 	kanbanSvc, kanbanWireErr := wireKanbanServices(components, planStoreIF, msgBus, logger)
 	if kanbanWireErr != nil {
@@ -1803,7 +1805,7 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			// Kanban browser pairing (follow-up gap: literal mux hook
 			// for POST /kanban/pair/exchange). Armed ONLY when the
 			// kanban subsystem's pairing store exists: disabled or
-			// degraded ([kanban].enabled=false — the default) leaves
+			// degraded ([kanban].enabled=false — the opt-out) leaves
 			// the option unwired and the chain byte-identical. The
 			// exchanger hands out board tokens in exchange for a
 			// daemon-minted single-use code; loopback + rate-limit +
@@ -2483,8 +2485,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 
 	// Kanban sidecar boot (kanban-board 04/04): supervised spawn of
-	// meept-kanban, gated on [kanban].sidecar_enabled (default false =
-	// no-op, byte-identical). Runs AFTER the orphan sweep above (a leaked
+	// meept-kanban, gated on [kanban].sidecar_enabled (DEFAULT TRUE —
+	// set false to opt out: no-op, byte-identical pre-kanban boot).
+	// Runs AFTER the orphan sweep above (a leaked
 	// sidecar is reaped before we spawn) and after the RPC server started
 	// in registry.StartAll (the sidecar forwards kanban.* over that unix
 	// socket). Non-fatal by contract: a gateway that cannot spawn degrades

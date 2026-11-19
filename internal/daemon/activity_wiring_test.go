@@ -192,6 +192,11 @@ func TestActivityWiring_RingReceivesBusEvents(t *testing.T) {
 		if len(shaped.Records) > 0 {
 			return
 		}
+		// The publish->subscriber->ring hop is async; a tight spin can
+		// exhaust all 100 iterations before the bus goroutine is scheduled
+		// (reproduced on a clean HEAD worktree under load). Yield between
+		// polls; the budget stays ~2s worst case.
+		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("ring stayed empty after agent.progress publish")
 }

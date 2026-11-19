@@ -27,3 +27,44 @@ func TestRumbleRuntimeConfigCap(t *testing.T) {
 		t.Fatal("Rumble sidecar must auto-stop on daemon exit")
 	}
 }
+
+// TestRumbleSpawnArgsClamp pins bughunt 2026-11-19 M18/H1 at the render
+// seam: SpawnArgs must NEVER emit an out-of-range --gpu-memory-utilization,
+// even from a hand-built config that skipped the load-boundary normalizer.
+// The safe range is the documented 0.20-0.25 coexistence window.
+func TestRumbleSpawnArgsClamp(t *testing.T) {
+	gpuArg := func(args []string) string {
+		for i, a := range args {
+			if a == "--gpu-memory-utilization" && i+1 < len(args) {
+				return args[i+1]
+			}
+		}
+		t.Fatalf("spawn args missing --gpu-memory-utilization: %v", args)
+		return ""
+	}
+	cases := []struct {
+		name string
+		in   float64
+		want string
+	}{
+		{"vllm_unsafe_default", 0.92, "0.25"},
+		{"above_range", 0.50, "0.25"},
+		{"zero", 0, "0.20"},
+		{"negative", -0.3, "0.20"},
+		{"in_range_low", 0.20, "0.20"},
+		{"in_range_mid", 0.22, "0.22"},
+		{"in_range_max", 0.25, "0.25"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := RumbleRuntimeConfig{GPUMemoryUtilization: tc.in, MaxModelLen: 4096}
+			if got := gpuArg(cfg.SpawnArgs()); got != tc.want {
+				t.Fatalf("gpu fraction %v rendered %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+	// The frozen default config renders the frozen safe fraction.
+	if got := gpuArg(DefaultRumbleRuntimeConfig().SpawnArgs()); got != "0.20" {
+		t.Fatalf("default spawn args gpu fraction = %q, want 0.20", got)
+	}
+}

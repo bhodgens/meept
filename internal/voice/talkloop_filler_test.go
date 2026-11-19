@@ -6,8 +6,12 @@ package voice
 // cancelled draft must never emit zombie filler after the grace elapses.
 
 import (
+	"context"
+	"errors"
 	"log/slog"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -152,4 +156,141 @@ func TestTalkLoopTurnTelemetryLines(t *testing.T) {
 	}
 	cancel()
 	<-done
+}
+
+// failingSaySink fails the FIRST non-final say carrying wantFailText,
+// then succeeds for everything else (greeting, filler, retries). Models
+// a transient child-socket write failure on the reply's first sentence.
+type failingSaySink struct {
+	mu         sync.Mutex
+	frames     []Frame
+	failText   string
+	failedOnce bool
+}
+
+func (s *failingSaySink) Send(f Frame) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.frames = append(s.frames, f)
+	if f.Event == EventSay && f.Text == s.failText && !s.failedOnce {
+		s.failedOnce = true
+		return errors.New("simulated say write failure")
+	}
+	return nil
+}
+
+func (s *failingSaySink) sayTexts() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []string
+	for _, f := range s.frames {
+		if f.Event == EventSay {
+			out = append(out, f.Text)
+		}
+	}
+	return out
+}
+
+func (s *failingSaySink) failed() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.failedOnce
+}
+
+// gatingSupervisor allows the first sentence immediately but blocks the
+// second Check until release closes — models the generation/supervision
+// gap that keeps a multi-sentence draft LIVE after its first say failed.
+type gatingSupervisor struct {
+	release chan struct{}
+	mu      sync.Mutex
+	calls   int
+}
+
+func (s *gatingSupervisor) Check(_ context.Context, _, sentence string) (Verdict, error) {
+	s.mu.Lock()
+	s.calls++
+	n := s.calls
+	s.mu.Unlock()
+	if n >= 2 {
+		<-s.release
+	}
+	return Verdict{Sentence: sentence, Allowed: true, Reason: "gated"}, nil
+}
+
+// TestTalkLoopSayFailureRearmsFiller pins bughunt 2026-11-19 L5: when an
+// allowed sentence's say write fails mid-turn, the rollback must RE-ARM the
+// grace timer (stopFillerLocked already stopped it), so filler still covers
+// the dead air while the turn keeps generating. Before the fix the latch
+// rolled back but no timer remained — permanent dead air. The reply is
+// multi-sentence and the second Check is gated so the draft is still live
+// when the re-armed grace elapses (a single-sentence instant reply would end
+// the draft and legitimately stop the filler at turn-final).
+func TestTalkLoopSayFailureRearmsFiller(t *testing.T) {
+	sink := &failingSaySink{failText: "First sentence."}
+	sup := &gatingSupervisor{release: make(chan struct{})}
+	turns := &cannedTurns{reply: "First sentence. Second sentence."}
+	loop := newTestTalkLoop(t, sink.Send, sup, turns, TalkLoopConfig{
+		FillerLines:  []string{"One moment please."},
+		GreetingLine: "Hello.",
+		FillerGrace:  80 * time.Millisecond,
+	})
+
+	cancel, done := runLoop(t, loop, "cc-sayfail")
+	defer func() { close(sup.release); cancel(); <-done }()
+	waitFor(t, 2*time.Second, "no greeting", func() bool { return len(sink.sayTexts()) >= 1 })
+
+	last := true
+	loop.frames <- Frame{CallID: "cc-sayfail", Event: EventPrompt, Text: "give me the two-part status?", Last: &last}
+
+	// The failed say must have been attempted...
+	waitFor(t, 2*time.Second, "no failed say attempt", sink.failed)
+	// ...and the re-armed grace timer must then speak the filler while the
+	// second sentence is still gated in supervision (draft still live).
+	waitFor(t, 2*time.Second, "filler never covered the dead air after say failure", func() bool {
+		return slices.Contains(sink.sayTexts(), "One moment please.")
+	})
+	texts := sink.sayTexts()
+	if texts[0] != "Hello." {
+		t.Fatalf("first say = %q, want the greeting", texts[0])
+	}
+	fillerCount := 0
+	for _, tx := range texts {
+		if tx == "One moment please." {
+			fillerCount++
+		}
+	}
+	if fillerCount != 1 {
+		t.Fatalf("filler spoke %d times, want exactly 1: %v", fillerCount, texts)
+	}
+}
+
+// TestTalkLoopSayFailureNoZombieFillerAfterCancel pins the re-arm's safety
+// boundary: a draft cancelled (barge-in/teardown) after a failed say must
+// never emit the re-armed filler — the timer closure re-checks t.cur/gen
+// under interruptMu, same discipline as the dispatch-time timer.
+func TestTalkLoopSayFailureNoZombieFillerAfterCancel(t *testing.T) {
+	sink := &failingSaySink{failText: "First sentence."}
+	sup := &gatingSupervisor{release: make(chan struct{})}
+	turns := &cannedTurns{reply: "First sentence. Second sentence."}
+	loop := newTestTalkLoop(t, sink.Send, sup, turns, TalkLoopConfig{
+		FillerLines:  []string{"One moment."},
+		GreetingLine: "Hello.",
+		FillerGrace:  200 * time.Millisecond,
+	})
+
+	cancel, done := runLoop(t, loop, "cc-sayfail-cancel")
+	defer func() { close(sup.release); cancel(); <-done }()
+	waitFor(t, 2*time.Second, "no greeting", func() bool { return len(sink.sayTexts()) >= 1 })
+
+	last := true
+	loop.frames <- Frame{CallID: "cc-sayfail-cancel", Event: EventPrompt, Text: "status?", Last: &last}
+	waitFor(t, 2*time.Second, "no failed say attempt", sink.failed)
+
+	// Barge-in immediately after the failed say: the draft dies before
+	// the re-armed grace window elapses.
+	loop.frames <- Frame{CallID: "cc-sayfail-cancel", Event: EventInterrupt}
+	time.Sleep(350 * time.Millisecond) // well past the 200ms re-armed grace
+	if slices.Contains(sink.sayTexts(), "One moment.") {
+		t.Fatalf("zombie filler fired after cancel: %v", sink.sayTexts())
+	}
 }

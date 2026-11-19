@@ -57,8 +57,9 @@ row carries the same rule).
   logs a loud boot warning when it passes: exposing the board is never
   accidental, and `-allow-lan` transfers TLS ownership to the operator —
   bearer tokens then ride cleartext HTTP.
-- The daemon spawns this child ONLY when `[kanban].sidecar_enabled`
-  (default false) — supervision contract in
+- The daemon spawns this child when `[kanban].sidecar_enabled`
+  (DEFAULT TRUE, opt-out: set false for the byte-identical pre-kanban
+  boot) AND `[kanban].enabled` — supervision contract in
   `docs/workflows/kanban.md` ("Sidecar spawn supervision", leaf 04/04,
   `internal/daemon/kanban_boot.go`).
 

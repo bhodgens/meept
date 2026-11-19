@@ -1,7 +1,8 @@
 // Kanban sidecar boot (plans/kanban-board 04/04 daemon-spawn-supervision):
 // the daemon-side supervised spawn of cmd/meept-kanban, gated on
-// [kanban].sidecar_enabled (default false = byte-identical boot: no process,
-// no pid file, no record, no goroutine).
+// [kanban].sidecar_enabled (DEFAULT TRUE, opt-out: set false for the
+// byte-identical pre-kanban boot — no process, no pid file, no record,
+// no goroutine).
 //
 // The pattern is the voice child (internal/voice/childproc.go), followed by
 // REUSE not reimplementation: the sidecar is spawned as an llm.RuntimeProcess
@@ -218,8 +219,9 @@ func (w *kanbanLogWriter) Write(p []byte) (int, error) {
 }
 
 // StartKanbanSidecar boots the supervised meept-kanban sidecar when
-// [kanban].sidecar_enabled. Disabled (the default) returns nil immediately
-// and touches nothing — the boot path stays byte-identical.
+// [kanban].sidecar_enabled (default true; set false to opt out). Opted out
+// returns nil immediately and touches nothing — the boot path stays
+// byte-identical to the pre-kanban shape.
 //
 // The first spawn attempt runs synchronously so the caller (Run) reports a
 // missing binary / refused gate at boot; the respawn loop then runs on its

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -12,7 +13,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caimlas/meept/internal/bot"
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/employee"
+	"github.com/caimlas/meept/internal/rpc"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -394,5 +398,96 @@ func TestRPCLoadTest(t *testing.T) {
 
 	if fail > 0 {
 		t.Errorf("Had %d failed requests", fail)
+	}
+}
+
+// TestRosterRPCSingleEmployeeSnapshot pins bughunt 2026-11-19 L12 through
+// the REAL registerRosterRPC wiring: one agents.roster call reads the
+// employee list ONCE (the bot exclusion set and the employee rows derive
+// from the same snapshot), and the bot/employee split stays exclusive.
+// Uses real bot.Store + employee.Manager over throwaway SQLite files.
+func TestRosterRPCSingleEmployeeSnapshot(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	botStore, err := bot.NewStore(filepath.Join(dir, "bots.db"))
+	if err != nil {
+		t.Fatalf("bot store: %v", err)
+	}
+	t.Cleanup(func() { _ = botStore.Close() })
+	botMgr := bot.NewManager(botStore, nil)
+
+	cs, err := employee.NewConstitutionStore(filepath.Join(dir, "constitutions.db"), slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatalf("constitution store: %v", err)
+	}
+	t.Cleanup(func() { _ = cs.Close() })
+	empMgr := employee.NewManagerWithStores(botMgr, botStore, cs, nil, nil, slog.New(slog.DiscardHandler))
+
+	// One plain bot + one hired employee (bot row WITH a constitution).
+	if err := botMgr.CreateBot(ctx, bot.BotDefinition{
+		ID: "plain-bot", Name: "plain bot", Prompt: "p", Enabled: true,
+		Triggers: []bot.BotTrigger{{Type: bot.TriggerTypeWebhook, Enabled: true}},
+	}); err != nil {
+		t.Fatalf("create plain bot: %v", err)
+	}
+	if err := botMgr.CreateBot(ctx, bot.BotDefinition{
+		ID: "hired-emp", Name: "hired employee", Prompt: "p", Enabled: true,
+		Triggers: []bot.BotTrigger{{Type: bot.TriggerTypeWebhook, Enabled: true}},
+	}); err != nil {
+		t.Fatalf("create employee bot row: %v", err)
+	}
+	if err := cs.Put(ctx, "hired-emp", employee.Constitution{Purpose: "roster snapshot probe"}); err != nil {
+		t.Fatalf("put constitution: %v", err)
+	}
+	// Re-prime the manager's constitution cache so ListEmployees sees the
+	// hire (the store was written after construction).
+	empMgr.SetConstitutionStore(cs)
+
+	c := &Components{BotManager: botMgr, EmployeeManager: empMgr}
+	srv := rpc.New(&rpc.Config{SocketPath: ""}, nil, slog.New(slog.DiscardHandler))
+	registerRosterRPC(c, srv, slog.New(slog.DiscardHandler))
+
+	res, err := srv.CallMethod(ctx, "agents.roster", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("agents.roster: %v", err)
+	}
+	env, ok := res.(map[string]any)
+	if !ok {
+		t.Fatalf("roster envelope type %T", res)
+	}
+	rows, ok := env["agents"].([]rpc.RosterEntry)
+	if !ok {
+		t.Fatalf("agents rows type %T", env["agents"])
+	}
+	byID := map[string]rpc.RosterEntry{}
+	for _, row := range rows {
+		if prev, dup := byID[row.ID]; dup {
+			t.Fatalf("duplicate roster row for %q (types %q and %q) — snapshot split broken", row.ID, prev.Type, row.Type)
+		}
+		byID[row.ID] = row
+	}
+	botRow, ok := byID["plain-bot"]
+	if !ok || botRow.Type != rpc.RosterTypeBot {
+		t.Fatalf("plain-bot missing or mistyped: %+v (found=%v)", botRow, ok)
+	}
+	empRow, ok := byID["hired-emp"]
+	if !ok || empRow.Type != rpc.RosterTypeEmployee {
+		t.Fatalf("hired-emp missing or mistyped: %+v (found=%v)", empRow, ok)
+	}
+
+	// Nil-component degrade: the handler still answers a valid envelope.
+	srv2 := rpc.New(&rpc.Config{SocketPath: ""}, nil, slog.New(slog.DiscardHandler))
+	registerRosterRPC(nil, srv2, nil)
+	res2, err := srv2.CallMethod(ctx, "agents.roster", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("nil-components roster: %v", err)
+	}
+	env2, ok := res2.(map[string]any)
+	if !ok {
+		t.Fatalf("nil-components envelope type %T", res2)
+	}
+	if rows2, ok := env2["agents"].([]rpc.RosterEntry); !ok || len(rows2) != 0 {
+		t.Fatalf("nil-components roster = %+v, want an empty non-nil row list", env2["agents"])
 	}
 }

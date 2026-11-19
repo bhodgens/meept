@@ -179,6 +179,28 @@ func (cw *ContextWarmer) Enabled() bool {
 	return cw != nil && cw.cfg.Enabled && cw.deps.Warm != nil && cw.deps.BuildPrefix != nil
 }
 
+// SetWindow updates the debounce window on a config reload (bughunt
+// 2026-11-19 M6): the daemon republishes the live [voice] snapshot on
+// daemon.reloaded and calls this with the resolved window so the warmer
+// tracks voice.turn_confirm_ms / voice.context_warm_window_ms edits
+// without a restart. A non-positive window clamps to the same 900 ms
+// default NewContextWarmer applies. Guarded by cw.mu — the same lock
+// that guards the cfg.Window read in OnPartial — and pure state
+// bookkeeping (no I/O under the lock). Timers already armed keep their
+// scheduled window; the next OnPartial re-arm reads the new value.
+// Nil-safe: a nil warmer (feature disabled) is a no-op.
+func (cw *ContextWarmer) SetWindow(window time.Duration) {
+	if cw == nil {
+		return
+	}
+	if window <= 0 {
+		window = DefaultContextWarmWindowMs * time.Millisecond
+	}
+	cw.mu.Lock()
+	cw.cfg.Window = window
+	cw.mu.Unlock()
+}
+
 // Stats returns the DEBUG-grade counters (dispatched warms, floor/skip
 // discards). The leaf-02 contract keeps telemetry "DEBUG-grade cheap":
 // no new bus topic, no metrics.Store write — the llm_calls table shows

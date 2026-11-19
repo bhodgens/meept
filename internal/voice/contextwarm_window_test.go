@@ -208,3 +208,60 @@ func TestContextWarmWindowOverride(t *testing.T) {
 		}
 	})
 }
+
+// TestContextWarmSetWindowReloadLive pins the M6 reload-live contract
+// (bughunt 2026-11-19): SetWindow updates the debounce window under the
+// warmer's own mutex, clamps non-positive values to the 900 ms default,
+// and is nil-safe (a disabled feature's nil warmer is a no-op). A partial
+// armed AFTER the update must fire inside the NEW window, not the old one.
+func TestContextWarmSetWindowReloadLive(t *testing.T) {
+	// Nil receiver: the disabled-default posture (no warmer constructed)
+	// must never panic on a reload.
+	var nilWarmer *ContextWarmer
+	nilWarmer.SetWindow(50 * time.Millisecond)
+	nilWarmer.SetWindow(0)
+
+	// Clamp: <= 0 takes the same default NewContextWarmer applies.
+	for _, in := range []time.Duration{0, -5 * time.Millisecond} {
+		fires := make(chan struct{}, 4)
+		cw := windowTestWarmer(2*time.Second, fires)
+		cw.SetWindow(in)
+		cw.OnPartial("cc-clamp", "emp", "sess-clamp", "clamp probe partial text here")
+		select {
+		case <-fires:
+			// fired inside the clamped 900 ms default
+		case <-time.After(1500 * time.Millisecond):
+			t.Fatalf("SetWindow(%v) did not clamp to the 900ms default", in)
+		}
+		cw.OnCallEnd("cc-clamp")
+	}
+
+	// Live update: a long boot window shortened by SetWindow must govern
+	// the NEXT partial's debounce (the reload-live behavior the daemon's
+	// reloadVoiceConfig drives).
+	fires := make(chan struct{}, 4)
+	cw := windowTestWarmer(2*time.Second, fires)
+	cw.SetWindow(40 * time.Millisecond)
+	cw.OnPartial("cc-reload", "emp", "sess-reload", "reload probe partial text here")
+	select {
+	case <-fires:
+		// warm landed inside the updated 40 ms window
+	case <-time.After(700 * time.Millisecond):
+		t.Fatal("SetWindow(40ms) did not take effect: partial still debounced at the boot window")
+	}
+	cw.OnCallEnd("cc-reload")
+
+	// Lengthening works too: a short boot window lengthened by SetWindow
+	// must NOT fire inside the old short window.
+	fires2 := make(chan struct{}, 4)
+	cw2 := windowTestWarmer(30*time.Millisecond, fires2)
+	cw2.SetWindow(2 * time.Second)
+	cw2.OnPartial("cc-longer", "emp", "sess-longer", "longer probe partial text here")
+	select {
+	case <-fires2:
+		t.Fatal("SetWindow(2s) leaked: partial fired inside the old 30ms boot window")
+	case <-time.After(200 * time.Millisecond):
+		// the lengthened window is in force
+	}
+	cw2.OnCallEnd("cc-longer")
+}

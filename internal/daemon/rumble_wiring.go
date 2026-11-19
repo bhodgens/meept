@@ -2,7 +2,10 @@ package daemon
 
 import (
 	"fmt"
+	"math"
 	"strconv"
+
+	"github.com/caimlas/meept/internal/config"
 )
 
 // RumbleRuntimeConfig pins the supervised vLLM Rumble STT sidecar: an explicitly
@@ -28,7 +31,7 @@ const rumblePort = "8091"
 // so the GPU cap is emitted from ONE source of truth.
 func DefaultRumbleRuntimeConfig() RumbleRuntimeConfig {
 	cfg := RumbleRuntimeConfig{
-		GPUMemoryUtilization: 0.20,
+		GPUMemoryUtilization: config.RumbleGPUMemoryUtilizationDefault,
 		MaxModelLen:          4096,
 		HealthPath:           "/health",
 		AutoStopOnExit:       true,
@@ -41,17 +44,27 @@ func DefaultRumbleRuntimeConfig() RumbleRuntimeConfig {
 // SpawnArgs renders the vLLM serve command from this config. It is the single
 // source of truth for the explicit GPU cap and context limit: the daemon and
 // operator both use these args so --gpu-memory-utilization can never silently
-// drift back to vLLM's unsafe 0.92 default. The Rumble vLLM process is spawned
-// and supervised by the daemon runtime lifecycle (RuntimeProcess.Start port
-// probe / supervisor / ownership-scoped Stop / startup orphan sweep) once the
-// operator selects voice.stt_provider = "rumble"; this function never spawns.
+// drift back to vLLM's unsafe 0.92 default. The fraction is CLAMPED into the
+// documented 0.20-0.25 safe range here too (bughunt 2026-11-19 M18/H1): the
+// config load boundary normalizes loaded values (config.NormalizeVoiceRumbleDefaults),
+// but a hand-built config must never render an unsafe fraction verbatim.
+// The Rumble vLLM process is spawned and supervised by the daemon runtime
+// lifecycle (RuntimeProcess.Start port probe / supervisor / ownership-scoped
+// Stop / startup orphan sweep) once the operator selects
+// voice.stt_provider = "rumble"; this function never spawns.
 func (c RumbleRuntimeConfig) SpawnArgs() []string {
-	gpu := strconv.FormatFloat(c.GPUMemoryUtilization, 'f', 2, 64)
+	gpu := c.GPUMemoryUtilization
+	switch {
+	case gpu <= 0 || math.IsNaN(gpu) || math.IsInf(gpu, 0):
+		gpu = config.RumbleGPUMemoryUtilizationDefault
+	case gpu > config.RumbleGPUMemoryUtilizationMax:
+		gpu = config.RumbleGPUMemoryUtilizationMax
+	}
 	maxLen := strconv.Itoa(c.MaxModelLen)
 	return []string{
 		"vllm", "serve", rumbleModelID,
 		"--max-model-len", maxLen,
-		"--gpu-memory-utilization", gpu,
+		"--gpu-memory-utilization", strconv.FormatFloat(gpu, 'f', 2, 64),
 		"--port", rumblePort,
 	}
 }

@@ -6,9 +6,11 @@ package voice
 
 import (
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestTelemetryRingAppendAndCursor(t *testing.T) {
@@ -359,4 +361,72 @@ func TestTalkLoopNilOnEventIsNoop(t *testing.T) {
 	})
 	cancel()
 	<-done
+}
+
+// TestTelemetryRingTextCap pins bughunt 2026-11-19 L4: full reply text
+// rides the ring, so stored Text is capped at maxEventTextBytes with a
+// rune-safe cut + ellipsis marker; Seq/kind/Ms stay untouched and short
+// text passes through byte-identical.
+func TestTelemetryRingTextCap(t *testing.T) {
+	r := NewTelemetryRing(0, 0)
+
+	// Short text: byte-identical, no marker.
+	r.Append("cc-short", EventInput{Kind: EventKindSaid, Text: "short reply", Ms: 7})
+	evs, _, _, found := r.Since("cc-short", 0, 0)
+	if !found || len(evs) != 1 {
+		t.Fatalf("short append: found=%v evs=%d", found, len(evs))
+	}
+	if evs[0].Text != "short reply" || evs[0].Seq != 1 || evs[0].Kind != EventKindSaid || evs[0].Ms != 7 {
+		t.Fatalf("short event mutated: %+v", evs[0])
+	}
+
+	// Exactly at the cap: still byte-identical (the cap is inclusive).
+	atCap := strings.Repeat("a", maxEventTextBytes)
+	r.Append("cc-atcap", EventInput{Kind: EventKindModelFinal, Text: atCap})
+	evs, _, _, _ = r.Since("cc-atcap", 0, 0)
+	if evs[0].Text != atCap {
+		t.Fatal("text exactly at the cap must pass through unchanged")
+	}
+
+	// Long ASCII reply: capped, ellipsis-marked, fields untouched.
+	long := strings.Repeat("b", maxEventTextBytes*3)
+	r.Append("cc-long", EventInput{Kind: EventKindModelFinal, Text: long, Words: 99, Ms: 1234})
+	evs, _, _, _ = r.Since("cc-long", 0, 0)
+	got := evs[0].Text
+	if len(got) > maxEventTextBytes {
+		t.Fatalf("stored text %d bytes exceeds the %d cap", len(got), maxEventTextBytes)
+	}
+	if !strings.HasSuffix(got, "…") {
+		t.Fatalf("capped text missing the ellipsis marker: tail=%q", got[len(got)-8:])
+	}
+	if !strings.HasPrefix(long, strings.TrimSuffix(got, "…")) {
+		t.Fatal("capped text is not a prefix of the original")
+	}
+	if evs[0].Seq != 1 || evs[0].Kind != EventKindModelFinal || evs[0].Words != 99 || evs[0].Ms != 1234 {
+		t.Fatalf("cap touched non-Text fields: %+v", evs[0])
+	}
+
+	// Rune-safe cut: a multi-byte rune straddling the cut boundary must
+	// never be split (the stored string stays valid UTF-8).
+	multi := strings.Repeat("é", maxEventTextBytes) // 2 bytes/rune: boundary lands mid-rune
+	r.Append("cc-multi", EventInput{Kind: EventKindSttFinal, Text: multi})
+	evs, _, _, _ = r.Since("cc-multi", 0, 0)
+	got = evs[0].Text
+	if len(got) > maxEventTextBytes {
+		t.Fatalf("multi-byte capped text %d bytes exceeds cap", len(got))
+	}
+	if !utf8.ValidString(got) {
+		t.Fatal("rune-unsafe cut: stored text is not valid UTF-8")
+	}
+	if !strings.HasSuffix(got, "…") || !strings.HasPrefix(multi, strings.TrimSuffix(got, "…")) {
+		t.Fatal("multi-byte capped text lost the marker or prefix property")
+	}
+
+	// A 4-byte rune at the boundary (emoji) is likewise never split.
+	emoji := strings.Repeat("🎙", maxEventTextBytes)
+	r.Append("cc-emoji", EventInput{Kind: EventKindHeard, Text: emoji})
+	evs, _, _, _ = r.Since("cc-emoji", 0, 0)
+	if !utf8.ValidString(evs[0].Text) || len(evs[0].Text) > maxEventTextBytes {
+		t.Fatalf("emoji cut invalid: len=%d valid=%v", len(evs[0].Text), utf8.ValidString(evs[0].Text))
+	}
 }

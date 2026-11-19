@@ -101,11 +101,16 @@ type contextWarmSources struct {
 // resolved turn_confirm_ms so the warm request lands ahead of the
 // confirm-window dispatch; 0 keeps the legacy window (a zero turn_confirm_ms
 // is left at zero here and clamped to the warmer's 900 ms default).
+// Reads the LIVE snapshot (currentVoiceCfg — the daemon.reloaded republish),
+// never the boot w.cfg: the keys frame sends the live value, so a warm
+// window resolved off the boot snapshot would diverge from the child's
+// confirm window after a reload (bughunt 2026-11-19 M6).
 func (w *VoiceWiring) resolveContextWarmWindow() time.Duration {
-	if w.cfg.ContextWarmWindowMs > 0 {
-		return time.Duration(w.cfg.ContextWarmWindowMs) * time.Millisecond
+	cfg := w.currentVoiceCfg()
+	if cfg.ContextWarmWindowMs > 0 {
+		return time.Duration(cfg.ContextWarmWindowMs) * time.Millisecond
 	}
-	return time.Duration(w.cfg.TurnConfirmMs) * time.Millisecond
+	return time.Duration(cfg.TurnConfirmMs) * time.Millisecond
 }
 
 // newContextWarmer constructs the per-daemon warmer from the resolved C6

@@ -23,6 +23,7 @@ import (
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/voice"
 	"github.com/caimlas/meept/internal/voice/clipstore"
 	"github.com/caimlas/meept/internal/voiceframe"
@@ -782,4 +783,93 @@ func TestClipPlannerEmptyModelAtSetupMount(t *testing.T) {
 		t.Fatalf("empty-model greeting key %s != keys-frame-model key %s", greetingKey, wantKey)
 	}
 	f.w.releaseCall(ccid, voice.OutcomeHangup)
+}
+
+// TestReloadVoiceConfigUpdatesWarmWindow pins the M6 reload path end to
+// end (bughunt 2026-11-19): reloadVoiceConfig re-reads the file, swaps the
+// live snapshot, AND pushes the resolved context-warm window into the
+// constructed-once warmer. A nil warmer (feature off) stays a no-op.
+func TestReloadVoiceConfigUpdatesWarmWindow(t *testing.T) {
+	w, _ := newVoiceWiringForTest(t)
+	w.cfg = clipTestVoiceConfig()
+	w.cfg.ContextWarm = true
+	w.cfg.ContextWarmMinTokens = 1
+	w.cfg.TurnConfirmMs = 500
+	w.initClipPlanner()
+
+	rec := &cwWarmRecorder{}
+	// Build a warmer with a rendering prefix builder: the warmer is inert
+	// without BuildPrefix (Enabled() checks Warm AND BuildPrefix), and
+	// newContextWarmer's real builder needs loop/persona sources this clip
+	// fixture does not arm. The window seam under test is independent of the
+	// render content; the boot window comes from resolveContextWarmWindow.
+	cw := voice.NewContextWarmer(voice.ContextWarmConfig{
+		Enabled:   true,
+		MinTokens: 1,
+		Window:    w.resolveContextWarmWindow(),
+	}, voice.ContextWarmDeps{
+		Warm: func(ctx context.Context, alias string, msgs []llm.ChatMessage, scope string) {
+			rec.fn()(ctx, alias, msgs, scope)
+		},
+		BuildPrefix: func(_, sess, partial string) (voice.WarmPrefix, bool) {
+			return voice.WarmPrefix{
+				Messages: []llm.ChatMessage{
+					{Role: llm.RoleSystem, Content: strings.Repeat("x", 200)},
+					{Role: llm.RoleUser, Content: partial},
+				},
+				Scope: sess,
+			}, true
+		},
+		BaseCtx: context.Background(),
+	})
+	w.contextWarmer = cw
+	voice.SetContextWarmRouting(cw)
+	t.Cleanup(func() { voice.SetContextWarmRouting(nil) })
+
+	// Seed the on-disk config with a SHORT warm-window override; the boot
+	// snapshot still says 500ms.
+	home := os.Getenv("MEEPT_HOME")
+	if err := os.MkdirAll(home, 0o755); err != nil { //nolint:gosec // G703: home is t.TempDir()-derived, a fixed test path
+		t.Fatalf("home: %v", err)
+	}
+	body := `{
+  "voice": {
+    "enabled": true,
+    "default_employee": "phone-employee",
+    "context_warm": true,
+    "context_warm_window_ms": 40,
+    "turn_confirm_ms": 500
+  }
+}`
+	if err := os.WriteFile(filepath.Join(home, "meept.json5"), []byte(body), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	w.reloadVoiceConfig()
+	if got := w.resolveContextWarmWindow(); got != 40*time.Millisecond {
+		t.Fatalf("post-reload resolved window = %v, want the live 40ms override", got)
+	}
+
+	// Behavioral proof: a partial must now debounce at the RELOADED 40ms
+	// window, not the boot 500ms one. Drive the warmer directly (the
+	// routeFrame partial path needs a registry row + session binding the
+	// clip fixture does not arm; the reload->SetWindow seam is the pin).
+	cw.OnPartial("cc-reload-window", "emp", "sess-reload-window", "reload window probe partial text")
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for time.Now().Before(deadline) && rec.count() == 0 {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if rec.count() == 0 {
+		t.Fatal("warm did not fire inside the reloaded 40ms window — reloadVoiceConfig never called SetWindow")
+	}
+	cw.OnCallEnd("cc-reload-window")
+
+	// Disabled default: nil warmer, reload stays a safe no-op.
+	w2, _ := newVoiceWiringForTest(t)
+	w2.cfg = clipTestVoiceConfig()
+	w2.initClipPlanner()
+	w2.reloadVoiceConfig() // must not panic with w2.contextWarmer == nil
+	if w2.contextWarmer != nil {
+		t.Fatal("disabled wiring grew a warmer on reload")
+	}
 }
