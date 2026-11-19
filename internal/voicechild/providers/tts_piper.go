@@ -103,25 +103,36 @@ func (p *PiperTTS) Speak(ctx context.Context, text string) (io.ReadCloser, error
 	return r, nil
 }
 
-// piperModelRate reads piper's sidecar config (<model> minus .onnx plus
-// .json, the piper-tts layout) for audio.sample_rate. Missing or unreadable
-// config yields 0, which means passthrough - the daemon's rate negotiation
-// keeps the common case matched.
+// piperModelRate reads piper's sidecar config for audio.sample_rate. The
+// canonical piper layout is <model>.json where <model> is the FULL model
+// path, i.e. voice.onnx -> voice.onnx.json (docs/workflows/tts.md:113 and
+// the piper -c convention at :207). An older layout stripped ".onnx" first
+// (voice.json); it is kept as a fallback so existing deployments keep
+// working. Missing or unreadable config yields 0, which means passthrough -
+// the daemon's rate negotiation keeps the common case matched.
 func piperModelRate(modelPath string) int {
-	base := strings.TrimSuffix(modelPath, ".onnx")
-	data, err := os.ReadFile(base + ".json")
-	if err != nil {
-		return 0
+	paths := []string{modelPath + ".json"}
+	if base := strings.TrimSuffix(modelPath, ".onnx"); base != modelPath {
+		paths = append(paths, base+".json")
 	}
-	var conf struct {
-		Audio struct {
-			SampleRate int `json:"sample_rate"`
-		} `json:"audio"`
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var conf struct {
+			Audio struct {
+				SampleRate int `json:"sample_rate"`
+			} `json:"audio"`
+		}
+		if err := json.Unmarshal(data, &conf); err != nil {
+			continue
+		}
+		if conf.Audio.SampleRate > 0 {
+			return conf.Audio.SampleRate
+		}
 	}
-	if err := json.Unmarshal(data, &conf); err != nil {
-		return 0
-	}
-	return conf.Audio.SampleRate
+	return 0
 }
 
 // piperStream is piper's stdout plus the reaper. cmd.Wait owns the pipe

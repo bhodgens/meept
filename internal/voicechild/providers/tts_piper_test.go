@@ -37,7 +37,7 @@ func writePiperModel(t *testing.T, sampleRate int) string {
 		t.Fatalf("write model: %v", err)
 	}
 	conf := `{"audio": {"sample_rate": ` + strconv.Itoa(sampleRate) + `}}`
-	if err := os.WriteFile(filepath.Join(dir, "model.json"), []byte(conf), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "model.onnx.json"), []byte(conf), 0o600); err != nil {
 		t.Fatalf("write model config: %v", err)
 	}
 	return onnx
@@ -203,4 +203,36 @@ func trimBytes(b []byte) []byte {
 		b = b[:len(b)-1]
 	}
 	return b
+}
+
+// TestPiperModelRateSidecarNames pins the piper sidecar convention: the
+// canonical path is the FULL model path + ".json" (voice.onnx ->
+// voice.onnx.json, docs/workflows/tts.md:113/207). The legacy stripped
+// ".onnx" name is accepted as a fallback for existing deployments.
+// A wrong rate here plays local piper audio at the wrong speed/pitch.
+func TestPiperModelRateSidecarNames(t *testing.T) {
+	dir := t.TempDir()
+	writeRate := func(name string, rate int) string {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(`{"audio":{"sample_rate":`+strconv.Itoa(rate)+`}}`), 0o600); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+		return path
+	}
+	// Canonical: voice.onnx -> voice.onnx.json.
+	writeRate("voice.onnx.json", 22050)
+	if got := piperModelRate(filepath.Join(dir, "voice.onnx")); got != 22050 {
+		t.Fatalf("canonical sidecar: got %d, want 22050", got)
+	}
+	// Legacy fallback: voice.json still works.
+	writeRate("legacy.onnx", 16000)
+	writeRate("legacy.json", 16000)
+	if got := piperModelRate(filepath.Join(dir, "legacy.onnx")); got != 16000 {
+		t.Fatalf("legacy sidecar: got %d, want 16000", got)
+	}
+	// Missing config -> 0 (passthrough).
+	if got := piperModelRate(filepath.Join(dir, "missing.onnx")); got != 0 {
+		t.Fatalf("missing sidecar: got %d, want 0", got)
+	}
 }

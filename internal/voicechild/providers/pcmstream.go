@@ -80,6 +80,13 @@ func (r *pcmStreamFrameReader) Read(p []byte) (int, error) {
 			return n, nil
 		}
 		if err != nil {
+			// A declared frame cut short by the server is a truncated
+			// stream, not a clean end. Reporting io.EOF here would let
+			// the caller treat the last utterance as successfully
+			// delivered and silently drop the undelivered PCM tail.
+			if errors.Is(err, io.EOF) && r.remaining > 0 {
+				err = io.ErrUnexpectedEOF
+			}
 			r.err = err
 			return 0, err
 		}

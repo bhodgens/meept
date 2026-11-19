@@ -97,3 +97,24 @@ func (t *trackingReadCloser) Close() error {
 	t.closed = true
 	return nil
 }
+
+// A declared frame whose payload is cut short by the server must surface as
+// an error, not a clean end. Treating it as EOF silently drops the tail of
+// the last utterance and reports a complete stream.
+func TestPCMStreamFrameReaderRejectsTruncatedPayload(t *testing.T) {
+	// Declare 8 payload bytes but supply only 2.
+	var hdr [4]byte
+	binary.BigEndian.PutUint32(hdr[:], 8)
+	wire := append(hdr[:], 1, 2)
+	r := newPCMStreamFrameReader(bytes.NewReader(wire))
+	got, err := io.ReadAll(r)
+	if err == nil {
+		t.Fatalf("truncated payload must error, got %x", got)
+	}
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("err = %v, want io.ErrUnexpectedEOF", err)
+	}
+	if !bytes.Equal(got, []byte{1, 2}) {
+		t.Fatalf("got %x, want the delivered prefix 0102", got)
+	}
+}
