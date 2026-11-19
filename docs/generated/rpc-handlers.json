@@ -1653,31 +1653,31 @@
     "topic": "voice.local.end",
     "handler": "h.handleEnd",
     "file": "internal/rpc/voice_local.go",
-    "line": 240
+    "line": 251
   },
   {
     "topic": "voice.local.events",
     "handler": "h.handleEvents",
     "file": "internal/rpc/voice_local.go",
-    "line": 242
+    "line": 253
   },
   {
     "topic": "voice.local.open",
     "handler": "h.handleOpen",
     "file": "internal/rpc/voice_local.go",
-    "line": 239
+    "line": 250
   },
   {
     "topic": "voice.local.status",
     "handler": "h.handleStatus",
     "file": "internal/rpc/voice_local.go",
-    "line": 241
+    "line": 252
   },
   {
     "topic": "voice.local.transcript",
     "handler": "h.handleTranscript",
     "file": "internal/rpc/voice_local.go",
-    "line": 243
+    "line": 254
   },
   {
     "topic": "worker.add",

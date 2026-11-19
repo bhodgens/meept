@@ -2577,7 +2577,7 @@
     "voice.call.ended": [
       {
         "file": "internal/daemon/voice_wiring.go",
-        "line": 1747,
+        "line": 1765,
         "payload_keys": [],
         "typed": true
       }
