@@ -67,9 +67,11 @@ func newRumbleFake(t *testing.T, onBinary func(empty bool, n int) []string) *rum
 	t.Helper()
 	f := &rumbleFake{onBinary: onBinary, sawBin: make(chan struct{})}
 	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader := r.Header.Get("Authorization")
+		reqPath := r.URL.Path
 		f.mu.Lock()
-		f.gotAuth = r.Header.Get("Authorization")
-		f.gotPath = r.URL.Path
+		f.gotAuth = authHeader
+		f.gotPath = reqPath
 		f.mu.Unlock()
 
 		conn, err := websocket.Accept(w, r, nil)
