@@ -158,10 +158,12 @@
       "agent-groups",
       "dynamic-tools",
       "llm-serving-tiers",
-      "context_warm"
+      "context_warm",
+      "voice_tts_stt"
     ],
     "internal/daemon/": [
-      "daemon-lifecycle"
+      "daemon-lifecycle",
+      "voice_tts_stt"
     ],
     "internal/llm/": [
       "daemon-lifecycle",
@@ -524,7 +526,8 @@
       "voice-lifecycle",
       "voice-bargein",
       "voice-concurrency",
-      "voice_clips"
+      "voice_clips",
+      "voice_tts_stt"
     ],
     "cmd/meept-voice/": [
       "voice-lifecycle",
@@ -1528,6 +1531,17 @@
         "tui-gui-03 default boot (no kanban overlay) answers kanban.board.list with a boards array"
       ],
       "note": "Cross-branch test gate of the tui-gui-consistency tree (leaf 00T): RED on the unimplemented tree for method-not-found. agents.roster C1 rows + three types (01-backend tree), active/cost fields (01-backend/02), and default-on kanban.board.list (04-config-docs/01). Hermetic: harness scratch daemon, no LLM turn."
+    },
+    {
+      "name": "voice_tts_stt",
+      "dir": "e2e/suites/voice_tts_stt",
+      "status": "implemented",
+      "diff": "S",
+      "scenarios": [
+        "keys-additive-01 zero-value C1 KeysFrame serializes with none of smart_turn_mode/whisper_server_addr/deepgram_endpoint_ms/vocabulary/qwen3_chunk_size/clip_prewarm_delay_ms (R4 byte-identical wire)",
+        "config-defaults-02 DefaultConfig Voice keeps TurnConfirmMs=900, FragmentConfirmMs=3000; every new C2 field is its zero value",
+        "manifest-03 path_map maps internal/voicechild/, internal/config/, internal/daemon/ to this additive-wire gate suite"
+      ]
     }
   ],
   "scenarios": [
@@ -5673,6 +5687,34 @@
         "internal/config/schema.go",
         "config/meept.json5",
         "internal/daemon/kanban_wiring.go"
+      ]
+    },
+    {
+      "id": "voice-tts-stt-keys-01",
+      "suite": "voice_tts_stt",
+      "diff": "S",
+      "title": "legacy C1 keys line carries no new selector keys; omitted when unset (additive wire, R4)",
+      "paths": [
+        "internal/voicechild/keys.go",
+        "internal/daemon/voice_keys.go"
+      ]
+    },
+    {
+      "id": "voice-tts-stt-config-02",
+      "suite": "voice_tts_stt",
+      "diff": "S",
+      "title": "DefaultConfig Voice defaults unchanged (turn_confirm_ms=900, fragment_confirm_ms=3000); new C2 fields zero-valued",
+      "paths": [
+        "internal/config/schema.go"
+      ]
+    },
+    {
+      "id": "voice-tts-stt-manifest-03",
+      "suite": "voice_tts_stt",
+      "diff": "S",
+      "title": "e2e manifest registers the voice_tts_stt suite and maps voicechild/config/daemon prefixes to it",
+      "paths": [
+        "e2e/manifest.json"
       ]
     }
   ]
