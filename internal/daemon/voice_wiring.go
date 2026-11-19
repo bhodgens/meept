@@ -209,6 +209,11 @@ type VoiceWiring struct {
 	// methods guard nil); production arms both via WireVoice.
 	clipPlanner *ClipPlanner
 	refCache    *refHashCache
+	// clipPrewarm is the F3 deferral gate: with voice.clip_prewarm_delay_ms
+	// > 0 the setup-time render burst is held until the call's first played
+	// edge plus the configured delay. nil on hand-built wirings that skip
+	// initClipPlanner; planClipsForCall falls back to an immediate pass.
+	clipPrewarm *clipPrewarmGate
 	// cfgMu guards cfgLive: the LIVE [voice] snapshot republished on
 	// daemon.reloaded (the keys frame, clip identity, and lane pools all
 	// read currentVoiceCfg; w.cfg itself stays the immutable
@@ -1053,6 +1058,11 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 			w.logger.Debug("voice wiring: played edge with no live drain watch",
 				"ccid", f.CallID)
 		}
+		// F3: the first played edge releases any deferred clip prewarm
+		// pass (voice.clip_prewarm_delay_ms > 0). The played edge is a
+		// one-shot per call inside the gate, so later turns never re-arm
+		// it. No-op when the knob is 0 (no call in the gate map).
+		w.clipPrewarm.onPlayed(f.CallID)
 	case voice.EventSetup:
 		// bughunt 2026-11-07 voice F-6: idempotent setup, mirroring the
 		// child's handleSetup ("setup for live call ignored"). Without the
@@ -1633,6 +1643,11 @@ func (w *VoiceWiring) releaseCall(ccid string, outcome voice.Outcome) {
 	// registered; idempotent on unknown ccids (a release for a call
 	// that never received a partial costs one map miss).
 	voice.RouteEnd(ccid)
+	// F3: drop any deferred clip prewarm state for the released call so
+	// a late timer never fires into a torn-down loop. The pass closure
+	// is already bound to the (now cancelled) loop ctx, but forgetting
+	// avoids holding it until the delay elapses. Nil-safe no-op.
+	w.clipPrewarm.forget(ccid)
 	w.sendEndFrame(ccid, outcome)
 	w.ChildProc.NoteCallEnd(ccid)
 

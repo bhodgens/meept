@@ -54,6 +54,16 @@ const clipCanonicalRate = 16000
 // with a WARN (they are re-requested on the next planner pass / reload).
 const clipRenderQueueCap = 256
 
+// F10 yield settle: a clip_render re-request can land in the SAME instant a
+// barge-in clear retires the live synth job. Settle briefly before deciding
+// to defer, so a request that races the clear still renders this pass.
+// Purely a scheduling settle (not a user knob): zero delay on the idle
+// path, and p.ctx.Done() ends it early on teardown. No I/O under any lock.
+const (
+	clipYieldSettlePoll    = 20 * time.Millisecond
+	clipYieldSettleRetries = 5
+)
+
 // Resampler converts an s16le mono PCM reader from inRate to outRate. The
 // implementation lives in the providers package (jargo's streaming
 // resampler); voicechild cannot import providers (the factory interfaces
@@ -243,6 +253,34 @@ func (p *pipeline) clipRenderWorker() {
 			p.clipMu.Unlock()
 			return
 		}
+		p.clipMu.Unlock()
+
+		// F10: never start a background render Speak while the turn lane
+		// is busy — a live synth job is outstanding (head-of-burst Speak or
+		// a prefetch) OR audio is actively speaking. Two concurrent Speaks
+		// on the same provider starve each other (and the shared qwen3
+		// server), and a caller interruption must never queue behind filler.
+		// CHECK BEFORE POPPING: on a busy lane the spec stays at the queue
+		// head and the worker retires, so the daemon's next clip_render pass
+		// re-requests it (renders are idempotent, so deferral loses nothing).
+		// A barge-in clear cancels live synths via playGen but never touches
+		// clipQueue, so a deferred spec is never lost by an interrupt.
+		// liveSynthBusy may settle-sleep under playMu only — never clipMu.
+		if p.liveSynthBusy() {
+			p.clipMu.Lock()
+			p.clipWorkerUp = false
+			p.clipMu.Unlock()
+			return
+		}
+
+		p.clipMu.Lock()
+		// Only this worker pops, so the queue is still non-empty here; the
+		// re-check keeps the empty-queue exit correct if state ever changes.
+		if len(p.clipQueue) == 0 {
+			p.clipWorkerUp = false
+			p.clipMu.Unlock()
+			return
+		}
 		spec := p.clipQueue[0]
 		p.clipQueue = p.clipQueue[1:]
 		p.clipMu.Unlock()
@@ -258,6 +296,46 @@ func (p *pipeline) clipRenderWorker() {
 		}
 		p.renderClip(spec)
 	}
+}
+
+// liveSynthBusy reports whether the turn lane has live synthesis work: an
+// outstanding Speak (head-of-burst or a bounded prefetch in synthJobs) or
+// audio actively playing (speaking). Both flags are read under the SINGLE
+// playMu regime — no new lock, and no I/O under the lock (C3 lock rule).
+// A nil ctx (hand-built pipeline) skips the settle: no live turn can be in
+// flight there, so the idle check below is decisive.
+func (p *pipeline) liveSynthBusy() bool {
+	busy := func() bool {
+		p.playMu.Lock()
+		active := len(p.synthJobs) > 0 || p.speaking
+		p.playMu.Unlock()
+		return active
+	}()
+	if !busy || p.ctx == nil {
+		return busy
+	}
+	// Settle only on the overlap path: a re-request racing a barge-in clear
+	// sees the retired job drain from synthJobs within a frame or two and
+	// renders this pass instead of waiting for a whole extra planner pass.
+	// Teardown ends the settle early; nothing is held across the sleeps.
+	for i := 0; i < clipYieldSettleRetries && busy; i++ {
+		timer := time.NewTimer(clipYieldSettlePoll)
+		select {
+		case <-p.ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return true // teardown: caller never renders
+		case <-timer.C:
+		}
+		busy = func() bool {
+			p.playMu.Lock()
+			active := len(p.synthJobs) > 0 || p.speaking
+			p.playMu.Unlock()
+			return active
+		}()
+	}
+	return busy
 }
 
 // renderClip renders one {key,text} spec into the store. Every failure

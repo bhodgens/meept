@@ -207,6 +207,114 @@ func (p *ClipPlanner) Run(ctx context.Context, ccid, employeeID string, id TTSId
 	return nil
 }
 
+// ---- clip prewarm deferral gate (F3) ----
+
+// clipPrewarmGate holds the per-call deferral state that moves the clip
+// render burst OFF the first-audio critical path when
+// voice.clip_prewarm_delay_ms > 0. With the default 0 the planner still
+// fires at setup (byte-identical legacy path — planClipsForCall calls
+// ClipPlanner.Run directly); with a positive delay the pass is held until
+// the call's FIRST played edge (routeFrame -> onPlayed) and released after
+// the configured ms. The gate only holds a closure with the already-
+// resolved C1 identity, so shipped ClipKeys cannot drift from the keys
+// frame, and the child's cache-miss live-synth fallback is untouched.
+// All state is mutex-guarded; no I/O or timer callback runs under the lock.
+type clipPrewarmGate struct {
+	mu    sync.Mutex
+	calls map[string]*clipPrewarmCall
+}
+
+// clipPrewarmCall is one live call's deferral slot. At most one pending
+// pass is kept: each pass re-sends the FULL pool, so a config-reload
+// re-plan supersedes the setup pass rather than duplicating renders.
+type clipPrewarmCall struct {
+	delay   time.Duration
+	played  bool        // first played edge already seen
+	pending func()      // pass waiting on that edge (nil once released)
+	timer   *time.Timer // armed release timer, stopped on supersede/forget
+}
+
+func newClipPrewarmGate() *clipPrewarmGate {
+	return &clipPrewarmGate{calls: make(map[string]*clipPrewarmCall)}
+}
+
+// deferPass holds pass for ccid until its first played edge plus delay.
+// A played edge that already fired arms the timer immediately. A late
+// re-plan supersedes any pending pass (the latest identity wins) and
+// re-arms the timer when the edge has already happened.
+func (g *clipPrewarmGate) deferPass(ccid string, delay time.Duration, pass func()) {
+	if g == nil || pass == nil {
+		return
+	}
+	g.mu.Lock()
+	st := g.calls[ccid]
+	if st == nil {
+		st = &clipPrewarmCall{}
+		g.calls[ccid] = st
+	}
+	st.delay = delay
+	if st.timer != nil {
+		st.timer.Stop()
+		st.timer = nil
+	}
+	if st.played {
+		st.timer = time.AfterFunc(delay, pass)
+	} else {
+		st.pending = pass
+	}
+	g.mu.Unlock()
+}
+
+// onPlayed is the routeFrame(EventPlayed) hook: it marks the call's first
+// played edge and releases any pending pass after the configured delay.
+// Subsequent played edges on the same call are no-ops (the deferral is
+// a one-shot per call).
+func (g *clipPrewarmGate) onPlayed(ccid string) {
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	st := g.calls[ccid]
+	if st == nil {
+		// A played edge may arrive before this wiring registered any
+		// deferral (e.g. a reload re-plan racing an early first turn, or
+		// a hand-built wiring that calls the route hook directly). Record
+		// the edge so a later deferPass arms its timer immediately rather
+		// than waiting forever for an edge that already happened.
+		st = &clipPrewarmCall{}
+		g.calls[ccid] = st
+	}
+	if st.played {
+		g.mu.Unlock()
+		return
+	}
+	st.played = true
+	pass := st.pending
+	st.pending = nil
+	if pass != nil {
+		st.timer = time.AfterFunc(st.delay, pass)
+	}
+	g.mu.Unlock()
+}
+
+// forget drops a call's deferral state on teardown: the pass closure
+// captures the call's loop ctx, which is cancelled at the same moment, so
+// a late timer fires into a no-op Run; stopping the timer just avoids
+// holding the closure until it would have elapsed.
+func (g *clipPrewarmGate) forget(ccid string) {
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	if st := g.calls[ccid]; st != nil {
+		if st.timer != nil {
+			st.timer.Stop()
+		}
+		delete(g.calls, ccid)
+	}
+	g.mu.Unlock()
+}
+
 // ---- wiring mount ----
 
 // initClipPlanner arms the planner + reference-hash cache on a freshly
@@ -218,6 +326,7 @@ func (w *VoiceWiring) initClipPlanner() {
 	}
 	w.clipPlanner = NewClipPlanner(clipstore.NewStore(), w.lanesFor, w.logger)
 	w.refCache = &refHashCache{}
+	w.clipPrewarm = newClipPrewarmGate()
 }
 
 // lanesFor resolves the C5 lane pools against the LIVE config snapshot
@@ -267,7 +376,7 @@ func (w *VoiceWiring) planClipsForCall(ctx context.Context, ccid, employeeID, le
 	}
 	pl := w.clipPlanner
 	send := textFrameSender{srv: w.TextServer}.Send
-	go func() {
+	run := func() {
 		if err := pl.Run(ctx, ccid, employeeID, id, send); err != nil {
 			if ctx.Err() == nil {
 				// Degrade, never teardown: the next call setup or config
@@ -276,7 +385,23 @@ func (w *VoiceWiring) planClipsForCall(ctx context.Context, ccid, employeeID, le
 					"ccid", ccid, "err", err)
 			}
 		}
-	}()
+	}
+	// F3: voice.clip_prewarm_delay_ms > 0 defers the burst until the call's
+	// first played edge plus the configured delay (moves prewarm off the
+	// first-audio critical path). Delay 0 keeps TODAY's behavior exactly:
+	// the pass runs immediately on this setup/reload goroutine. The gate
+	// stores the resolved identity in the closure, so shipped ClipKeys
+	// cannot drift and the child's cache-miss live-synth fallback stays
+	// untouched. When initClipPlanner was skipped (hand-built test wiring)
+	// clipPrewarm is nil and we keep the immediate pass.
+	delay := time.Duration(vcfg.ClipPrewarmDelayMs) * time.Millisecond
+	if delay > 0 && w.clipPrewarm != nil {
+		w.clipPrewarm.deferPass(ccid, delay, run)
+		w.logger.Debug("voice clip planner: prewarm deferred until first played edge",
+			"ccid", ccid, "delay_ms", vcfg.ClipPrewarmDelayMs)
+		return
+	}
+	go run()
 }
 
 // startClipReloadWatch subscribes the clip planner to the daemon's
