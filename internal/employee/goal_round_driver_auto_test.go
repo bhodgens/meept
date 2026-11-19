@@ -50,7 +50,9 @@ func (h *goalRoundDriverAutoTestHarness) fireAll() {
 
 // newDriverAutoTestManager builds a Manager over a shared temp SQLite DB
 // with a live bot manager (so Manager.Trigger works) and the goal store.
-// The employee row is hired enabled, mirroring the daemon wiring.
+// The employee row is hired enabled, mirroring the daemon wiring. A real
+// constitution is persisted too: ListEmployees now filters out plain bots,
+// so the fixture must carry a constitution like a genuine hire.
 func newDriverAutoTestManager(t *testing.T, employeeID string) *Manager {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "shared.db")
@@ -64,8 +66,13 @@ func newDriverAutoTestManager(t *testing.T, employeeID string) *Manager {
 		t.Fatalf("goal store: %v", err)
 	}
 	t.Cleanup(func() { goalStore.Close() })
+	constStore, err := NewConstitutionStore(dbPath, nil)
+	if err != nil {
+		t.Fatalf("constitution store: %v", err)
+	}
+	t.Cleanup(func() { constStore.Close() })
 
-	mgr := NewManagerWithStores(bot.NewManager(botStore, nil), botStore, nil, goalStore, nil, slog.New(slog.DiscardHandler))
+	mgr := NewManagerWithStores(bot.NewManager(botStore, nil), botStore, constStore, goalStore, nil, slog.New(slog.DiscardHandler))
 
 	// Seed the FK anchor + enabled bot definition so Trigger's GetBot
 	// lookup passes (mirrors the daemon's hired-employee row).
@@ -77,6 +84,11 @@ func newDriverAutoTestManager(t *testing.T, employeeID string) *Manager {
 		Enabled: true,
 	}); err != nil {
 		t.Fatalf("seed employee anchor: %v", err)
+	}
+	// Persist a real constitution so ListEmployees surfaces this row as an
+	// employee (plain bots without one are deliberately filtered out).
+	if err := constStore.Put(ctx, employeeID, validConstitution()); err != nil {
+		t.Fatalf("seed employee constitution: %v", err)
 	}
 	return mgr
 }

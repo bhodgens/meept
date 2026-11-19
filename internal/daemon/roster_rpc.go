@@ -84,10 +84,8 @@ func registerRosterRPC(c *Components, server *rpc.Server, logger *slog.Logger) {
 			}
 
 			// Exclude hired employees from the bot source: they are surfaced
-			// by ListEmployees below. ListEmployees returns EVERY bot row
-			// (it has no constitution filter with an empty status filter),
-			// so the split is by the constitution marker: only rows with a
-			// real constitution are employees; plain bots stay bots.
+			// by ListEmployees below. ListEmployees returns only bot rows with
+			// a real constitution (hired employees); plain bots stay bots.
 			employeeIDs := rosterEmployeeIDs(c, rosterCtx, logger)
 
 			rows := make([]rpc.RosterEntry, 0, len(bots))
@@ -125,11 +123,8 @@ func registerRosterRPC(c *Components, server *rpc.Server, logger *slog.Logger) {
 			}
 			rows := make([]rpc.RosterEntry, 0, len(emps))
 			for _, emp := range emps {
-				// ListEmployees returns every bot row; only rows with a real
-				// constitution are hired employees (the plain-bot split).
-				if !emp.HasConstitution() {
-					continue
-				}
+				// ListEmployees already filters out plain bots (rows without a
+				// constitution), so every row here is a hired employee.
 				row := rpc.RosterEntry{
 					ID:          emp.ID,
 					Name:        emp.Name,
@@ -156,10 +151,11 @@ func registerRosterRPC(c *Components, server *rpc.Server, logger *slog.Logger) {
 	logger.Info("agents.roster RPC handler registered")
 }
 
-// rosterEmployeeIDs returns the set of hired-employee ids (bot rows carrying
-// a real constitution). Used by the bot source to avoid emitting the same
-// row twice — hired employees belong to the employee source, plain bots to
-// the bot source. A missing EmployeeManager yields an empty set.
+// rosterEmployeeIDs returns the set of hired-employee ids. Used by the bot
+// source to avoid emitting the same row twice — hired employees belong to
+// the employee source, plain bots to the bot source. ListEmployees already
+// filters out plain bots, so every returned row is an employee. A missing
+// EmployeeManager yields an empty set.
 func rosterEmployeeIDs(c *Components, ctx context.Context, logger *slog.Logger) map[string]struct{} {
 	ids := make(map[string]struct{})
 	if c == nil || c.EmployeeManager == nil {
@@ -171,9 +167,7 @@ func rosterEmployeeIDs(c *Components, ctx context.Context, logger *slog.Logger) 
 		return ids
 	}
 	for _, emp := range emps {
-		if emp.HasConstitution() {
-			ids[emp.ID] = struct{}{}
-		}
+		ids[emp.ID] = struct{}{}
 	}
 	return ids
 }

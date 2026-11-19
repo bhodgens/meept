@@ -1154,7 +1154,9 @@ func (m *Manager) clearCachedConstitution(employeeID string) {
 
 // ListEmployees lists all employees, optionally filtered by status string.
 // Empty filter returns all employees. Each Employee includes its
-// Constitution (loaded from the cache or the store).
+// Constitution (loaded from the cache or the store). Plain bots without a
+// constitution are not returned — a bot is only an employee once it has
+// been hired with a real constitution.
 //
 // When the Manager has no bot backend (e.g. bots.enabled=false), returns an
 // empty slice and nil error — the Manager is a valid no-op in that state.
@@ -1192,6 +1194,12 @@ func (m *Manager) ListEmployees(ctx context.Context, statusFilter string) ([]Emp
 				m.logger.Warn("list employees: constitution load failed",
 					"employee_id", b.ID, "error", err)
 			}
+		}
+		// A bot without a constitution is a plain bot, not an employee.
+		// ListEmployees lists employees only — skip such rows so callers
+		// don't need a HasConstitution() workaround downstream.
+		if !emp.HasConstitution() {
+			continue
 		}
 		employees = append(employees, emp)
 	}
