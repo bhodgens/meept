@@ -204,12 +204,12 @@ set children COMPLETE.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-unit-tests | PENDING | 0 | |
-| 00Te-e2e-tests | PENDING | 0 | |
-| 01-request-and-wiring | PENDING | 0 | bug fix; Phase 1 |
-| 02-pseudostream | PENDING | 0 | Phase 2 |
-| 03-config | PENDING | 0 | Phase 2 |
-| 04-docs | PENDING | 0 | Phase 2 |
+| 00T-unit-tests | TESTS_VALIDATED | 1 | Commit 0f3cfd69; RED transport/symbols, F4 guardrail PASS. |
+| 00Te-e2e-tests | TESTS_VALIDATED | 1 | Commit 0f3cfd69; compile-RED on C2 fields, 4 scenarios registered. |
+| 01-request-and-wiring | REVIEWED | 1 | Commit abbcd934; chat.completions body + kwargs + keys wiring; all gates GREEN, hooks green. |
+| 02-pseudostream | REVIEWED | 1 | Commit 7637b300; generic decorator, all gates GREEN. |
+| 03-config | REVIEWED | 1 | Commit 627ab169; C6 fields + daemon emit, package tests GREEN. |
+| 04-docs | REVIEWED | 1 | Commit 2edf7e8e; docs + AGENTS invariants updated. |
 
 Gate rule: implementation children stay PENDING until 00T + 00Te reach TESTS_VALIDATED.
 
@@ -249,6 +249,43 @@ Leaves freeze at dispatch. Corrections ride dispatch context as dated addenda.
   gate uses a fake chat.completions server with the exact model-card body shape.
 - Native streaming vendors (deepgram) already emit partials; enabling
   `stt_partial_ms` on them double-partials. Document: opt in only for batch vendors.
+
+## Completion Report (2026-11-19)
+
+All six children land COMPLETE. Commits: c490eaf3 (plan), 0f3cfd69
+(Phase 0 gates), abbcd934 (01 bug fix), 7637b300 (02 decorator),
+627ab169 (03 config), 2edf7e8e (04 docs).
+
+Integration gates run in the worktree at final HEAD:
+- `go build ./cmd/meept-voice ./cmd/meept-daemon` - PASS.
+- `go test -p 2 -count=1 ./internal/voicechild/... ./internal/voice/...
+  ./internal/daemon/... ./internal/config/...` - all 8 packages PASS.
+- Rumble e2e gates: chat-completions / partial-stream / kwargs / keys
+  PASS. The prior tree's `TestVoiceKeysRumble01` fake server was updated
+  from the old transcriptions shape to the corrected chat.completions shape
+  (integration fix; same stale-test class as the unit gate).
+- `make e2e-fast-area AREA=voice-local` - PASS (40.6 s).
+- `make e2e-fast-area AREA=voice-lifecycle` - the Rumble tests all PASS,
+  but the suite is RED on PRE-EXISTING `TestVoiceKeysToProviders` ("fake
+  qwen3 endpoint never served a synthesis request within 15s"). This test
+  was proven to fail identically at base commit 9157700f in the prior tree;
+  it is unrelated to this change and belongs to another lane. Not acted on.
+
+Resolved bugs and observations during execution:
+- ORIGINAL BUG FIXED: the shipped adapter posted JSON to
+  `/v1/audio/transcriptions`; vLLM needs multipart there and the model card
+  documents chat.completions with audio_url. The transport now matches the
+  model card; the prior gate test that encoded the bug was updated.
+- Leaf 01 placed C4 fields in `internal/voicechild/keys.go` (KeysFrame +
+  applyKeys), which the plan mislocated in providers_wiring.go. Accepted as
+  a necessary correction; kwargs now reach the adapter in production.
+- A mutexio gate finding in a gate-test helper (Header.Get under lock) was
+  fixed by moving the read outside the critical section.
+- Leaf 02 buffered the pseudo-stream out-channel (cap 16) to avoid a
+  deadlock when a downstream consumer pauses reading during paced PCM feed.
+- Pseudo-streaming is CLIENT-SIDE snapshots, not server incremental input;
+  it does not reduce time-to-first-word on a batch model. Do not enable on
+  native-partial vendors (deepgram). Live vLLM pilot remains deferred.
 
 ## Notes
 

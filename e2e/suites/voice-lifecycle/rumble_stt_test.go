@@ -25,24 +25,41 @@ import (
 // a daemon-style keys line carrying stt_vendor=rumble must select the
 // Rumble adapter through providers.NewSTT, with no key material in the
 // frame (Rumble is keyless). A fake loopback vLLM transcription server
-// answers the adapter's POST with one transcript.
+// answers the adapter's POST with one transcript. The request shape is
+// the model-card chat.completions audio_url body (fixed in the streaming
+// tree); this gate pins that transport.
 func TestVoiceKeysRumble01(t *testing.T) {
 	vllm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasSuffix(r.URL.Path, "/v1/audio/transcriptions") {
-			t.Errorf("request path = %q, want /v1/audio/transcriptions", r.URL.Path)
+		if !strings.HasSuffix(r.URL.Path, "/v1/chat/completions") {
+			t.Errorf("request path = %q, want /v1/chat/completions", r.URL.Path)
 		}
-		if r.Header.Get("Authorization") != "" {
+		authHeader := r.Header.Get("Authorization")
+		if authHeader != "" {
 			t.Errorf("rumble request carried an Authorization header (keyless vendor)")
 		}
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Errorf("decode request: %v", err)
 		}
-		if _, ok := body["file"]; !ok {
-			t.Errorf("request body missing base64 audio field 'file': %v", body)
+		msgs, _ := body["messages"].([]any)
+		if len(msgs) == 0 {
+			t.Errorf("chat.completions body missing messages: %v", body)
+		} else {
+			m0, _ := msgs[0].(map[string]any)
+			content, _ := m0["content"].([]any)
+			if len(content) == 0 {
+				t.Errorf("messages[0] missing content: %v", m0)
+			} else {
+				part, _ := content[0].(map[string]any)
+				au, _ := part["audio_url"].(map[string]any)
+				url, _ := au["url"].(string)
+				if !strings.HasPrefix(url, "data:audio/wav;base64,") {
+					t.Errorf("audio_url.url = %q, want data:audio/wav;base64,...", url)
+				}
+			}
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"text":"hello there"}`)
+		_, _ = fmt.Fprint(w, `{"choices":[{"message":{"content":"hello there"}}]}`)
 	}))
 	defer vllm.Close()
 
