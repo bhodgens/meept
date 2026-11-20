@@ -249,10 +249,10 @@ func TestEndpointGuards(t *testing.T) {
 		// (reason=barge-in-final), NOT the endpoint fast flush
 		// (reason=deepgram-endpoint) — the endpoint branch sits AFTER
 		// the speaking/latched guard, so a speaking endpoint final can
-		// never reach it.
-		if !capLog.contains("reason=barge-in-final") {
-			t.Errorf("speaking endpoint final did not dispatch via the barge-in-final branch; logs:\n%s", capLog.everything())
-		}
+		// never reach it. The route log fires AFTER emitPrompt
+		// (dispatchAggregated), so the frame can arrive before the log
+		// line — wait for it instead of reading once (flake fix).
+		waitFor(t, func() bool { return capLog.contains("reason=barge-in-final") })
 		if capLog.contains("reason=deepgram-endpoint") {
 			t.Errorf("speaking endpoint final bypassed the speaking guard via the endpoint fast flush; logs:\n%s", capLog.everything())
 		}
