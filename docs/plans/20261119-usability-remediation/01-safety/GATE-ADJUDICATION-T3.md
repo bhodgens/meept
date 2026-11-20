@@ -1,7 +1,18 @@
 # Gate-Design Adjudication: 01-safety T3 TestFreshQueuePerTurn / TestCloneQueueIsolation
 
-Status: OPEN - requires orchestrator/user adjudication. Found 2026-11-20 during
-01-safety/02-queue-lifecycle implementation (child sa-0-3bb321ed).
+Status: RESOLVED - OPTION A APPROVED by user 2026-11-20 and applied.
+The two gate tests now assert the open/steerable contract MID-TURN inside the
+spy hook (where F-NEW-11 applies), keep the distinct-pointer and
+old-queue-stays-closed pins, and ADD a close-on-unregister pin for turn 2
+(harmonized with TestRegistry_UnregisterActiveQueue_ClosesQueue).
+Mutation proof (in-memory overlay, originals untouched):
+- Reverting to shared-l.queue registration -> TestFreshQueuePerTurn FAILS
+  with 'CLOSED mid-turn' + 'SAME queue object'.
+- Re-adding WithMessageQueue(l.queue) to ConfigSnapshot ->
+  TestCloneQueueIsolation FAILS with 'share ONE queue pointer'.
+- Real tree: 10/10 gate battery PASS (fresh/clone/steer/remap x4/
+  unregister x3).
+Below is the original finding, kept for the record.
 
 ## The contradiction (empirically verified)
 The C3 implementation in loop.go RunOnceWithParts (~3490) is FUNCTIONALLY CORRECT:

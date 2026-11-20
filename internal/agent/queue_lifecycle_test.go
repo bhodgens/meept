@@ -47,6 +47,12 @@ func (s *queueSpyChatter) Config() *llm.ModelConfig {
 
 // TestFreshQueuePerTurn pins C3: a cached loop running turn 2 must register
 // a FRESH, OPEN queue -- not the closed turn-1 object (no reopen-in-place).
+// Gate-shape note (2026-11-20 adjudication A): the open/steerable contract
+// is asserted INSIDE the turn via the spy hook, because turn-end
+// UnregisterActiveQueue legitimately CLOSES the registered queue (pinned by
+// TestRegistry_UnregisterActiveQueue_ClosesQueue). The user-visible defect
+// (F-NEW-11) is steering into a turn that is RUNNING, so that is where the
+// queue must be live.
 func TestFreshQueuePerTurn(t *testing.T) {
 	reg := NewAgentRegistry(RegistryConfig{Logger: slogDiscardLogger()})
 	spy := &queueSpyChatter{}
@@ -57,8 +63,22 @@ func TestFreshQueuePerTurn(t *testing.T) {
 	)
 
 	var turn1Queue, turn2Queue *MessageQueue
+	turns := 0
 	spy.hook = func() {
 		q, _ := reg.GetActiveQueue("conv-fresh-q")
+		turns++
+		// Mid-turn: the live registration must be an OPEN queue that
+		// accepts steering -- this is the F-NEW-11 contract.
+		if q == nil {
+			t.Errorf("turn %d: no active queue registered mid-turn", turns)
+			return
+		}
+		if q.IsClosed() {
+			t.Errorf("CURRENT DEFECT: turn %d's registered queue is CLOSED mid-turn; steering on a running turn is dead", turns)
+		}
+		if err := q.Steer(context.Background(), "mid-turn correction", "gate"); err != nil {
+			t.Errorf("steer into turn %d's live queue failed: %v (want accepted)", turns, err)
+		}
 		if turn1Queue == nil {
 			turn1Queue = q
 		} else {
@@ -80,14 +100,11 @@ func TestFreshQueuePerTurn(t *testing.T) {
 	if turn2Queue == turn1Queue {
 		t.Errorf("CURRENT DEFECT: turn 2 re-registered the SAME queue object as turn 1; C3 requires a fresh instance per RunOnce")
 	}
-	if turn2Queue.IsClosed() {
-		t.Errorf("CURRENT DEFECT: turn 2's registered queue is CLOSED (turn 1's Close is one-way); steering on turn 2 is dead")
-	}
-	if err := turn2Queue.Steer(ctx, "mid-turn correction", "gate"); err != nil {
-		t.Errorf("steer into turn 2's live queue failed: %v (want accepted)", err)
-	}
 	if !turn1Queue.IsClosed() {
-		t.Errorf("turn 1's queue object must STAY closed (fresh instance, never reopen-in-place)")
+		t.Errorf("turn 1's queue object must STAY closed after its turn ends (fresh instance, never reopen-in-place)")
+	}
+	if !turn2Queue.IsClosed() {
+		t.Errorf("turn 2's queue must close when turn 2 ends (close-on-unregister contract)")
 	}
 }
 
@@ -117,16 +134,30 @@ func TestCloneQueueIsolation(t *testing.T) {
 
 	// Turn-level proof: run one turn per clone against a shared registry
 	// and capture the queues actually registered. They must be distinct,
-	// and A's turn-end close must leave B's queue usable.
+	// and A's turn-end close must leave B's queue usable WHILE B RUNS
+	// (adjudication A: B's own queue closes legitimately when B's turn
+	// ends; the isolation contract is about the mid-turn window).
 	reg := NewAgentRegistry(RegistryConfig{Logger: slogDiscardLogger()})
 	spy := &queueSpyChatter{}
 	var queueA, queueB *MessageQueue
+	var bSawSharedPointer, bSawClosedQueue bool
 	spy.hook = func() {
 		if q, _ := reg.GetActiveQueue("conv-clone-a"); q != nil {
 			queueA = q
 		}
 		if q, _ := reg.GetActiveQueue("conv-clone-b"); q != nil {
 			queueB = q
+			// Mid-B-turn: A's turn has already ended (and closed A's
+			// queue under the defect). B must still hold a distinct,
+			// open queue.
+			if queueA != nil {
+				if q == queueA {
+					bSawSharedPointer = true
+				}
+				if q.IsClosed() {
+					bSawClosedQueue = true
+				}
+			}
 		}
 	}
 	loopA := NewAgentLoop("sess-a", dir, WithLLMChatter(spy),
@@ -152,11 +183,14 @@ func TestCloneQueueIsolation(t *testing.T) {
 	if queueA == nil || queueB == nil {
 		t.Fatalf("clone turns registered no queues (A=%v B=%v)", queueA, queueB)
 	}
-	if queueA == queueB {
+	if bSawSharedPointer {
 		t.Errorf("CURRENT DEFECT: both session clones registered the SAME queue instance; A's turn-end Close kills B's steering")
 	}
-	if queueB.IsClosed() {
-		t.Errorf("CURRENT DEFECT: clone B's queue is closed after clone A's turn ended (shared pointer)")
+	if bSawClosedQueue {
+		t.Errorf("CURRENT DEFECT: clone B's queue was closed during B's turn (A's turn-end Close hit a shared pointer)")
+	}
+	if !queueA.IsClosed() {
+		t.Errorf("clone A's queue must be closed after A's turn ends (close-on-unregister contract)")
 	}
 }
 

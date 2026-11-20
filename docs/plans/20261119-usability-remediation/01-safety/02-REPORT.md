@@ -33,15 +33,14 @@ contradiction requiring adjudication (see GATE-ADJUDICATION-T3.md).
 - Empirical C3 proof (debug tests, removed): fresh-distinct=true,
   openDuringTurn1=true, openDuringTurn2=true, t1ClosedAfter=true, t2ClosedAfter=true.
 
-## GATE DEFECT (requires adjudication -- GATE-ADJUDICATION-T3.md)
-TestFreshQueuePerTurn:84-87 + TestCloneQueueIsolation:159 assert turn2Queue is
+## GATE DEFECT (RESOLVED 2026-11-20 - option A approved; GATE-ADJUDICATION-T3.md)
+TestFreshQueuePerTurn:84-87 + TestCloneQueueIsolation:159 asserted turn2Queue is
 OPEN and Steer-able AFTER both RunOnce calls return. But the turn-end defer
 legitimately closes the queue, and committed TestRegistry_UnregisterActiveQueue_ClosesQueue
-REQUIRES close-on-unregister. The gate captured the queue mid-turn but asserts
-post-turn open-state -- unsatisfiable alongside the committed contract. The leaf
-INTENT (mid-turn steer on turn 2 accepts) is provably satisfied. Recommended fix:
-move the gate's IsClosed/Steer assertions into the spy hook (mid-turn). NOT done
-here (gate edits forbidden mid-impl without sign-off).
+REQUIRES close-on-unregister. Gate now asserts the open/steerable contract
+MID-TURN (the F-NEW-11 window), keeps distinct-pointer + old-queue-stays-closed
+pins, adds a turn-2 close-on-unregister pin. Mutation-verified: reverts to the
+original defects are caught. Impl was and stays correct.
 
 ## Remaining (leaf-doc extras, NOT gated -- no gate test files exist)
 - DrainFollowUp persisted-row delete (queue.go:348 + persister INSERT-only).
