@@ -173,6 +173,12 @@ _$AgentImpl _$$AgentImplFromJson(Map<String, dynamic> json) => _$AgentImpl(
   role: json['role'] as String? ?? '',
   activeCount: (json['active_count'] as num?)?.toInt() ?? 0,
   dailyCostCents: (json['daily_cost_cents'] as num?)?.toInt() ?? 0,
+  executorAgent: json['executor_agent'] as String? ?? '',
+  driftScore: (json['drift_score'] as num?)?.toDouble() ?? 0.0,
+  findingsCount: (json['findings_count'] as num?)?.toInt() ?? 0,
+  lastInvocation: json['last_invocation'] == null
+      ? null
+      : DateTime.parse(json['last_invocation'] as String),
 );
 
 Map<String, dynamic> _$$AgentImplToJson(_$AgentImpl instance) =>
@@ -188,6 +194,10 @@ Map<String, dynamic> _$$AgentImplToJson(_$AgentImpl instance) =>
       'role': instance.role,
       'active_count': instance.activeCount,
       'daily_cost_cents': instance.dailyCostCents,
+      'executor_agent': instance.executorAgent,
+      'drift_score': instance.driftScore,
+      'findings_count': instance.findingsCount,
+      'last_invocation': instance.lastInvocation?.toIso8601String(),
     };
 
 _$JobImpl _$$JobImplFromJson(Map<String, dynamic> json) => _$JobImpl(

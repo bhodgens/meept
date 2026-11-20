@@ -1882,7 +1882,22 @@ mixin _$Agent {
   @JsonKey(name: 'active_count')
   int get activeCount => throw _privateConstructorUsedError;
   @JsonKey(name: 'daily_cost_cents')
-  int get dailyCostCents => throw _privateConstructorUsedError;
+  int get dailyCostCents => throw _privateConstructorUsedError; // Additive M11 roster keys (bughunt 2026-11-19, internal/rpc/roster.go):
+  // executor_agent + last_invocation ride bots AND employees; drift_score
+  // + findings_count are employee-only; registry agents carry none. All
+  // four are zero-omitted on the wire, so absent keys decode to the
+  // defaults below (legacy config rows parse unchanged). last_invocation
+  // uses omitzero daemon-side: ABSENT = never run = null (never a
+  // '0001-01-01...' zero time). drift_score reads 0 until a production
+  // writer lands — display it honestly, never invent data.
+  @JsonKey(name: 'executor_agent')
+  String get executorAgent => throw _privateConstructorUsedError;
+  @JsonKey(name: 'drift_score')
+  double get driftScore => throw _privateConstructorUsedError;
+  @JsonKey(name: 'findings_count')
+  int get findingsCount => throw _privateConstructorUsedError;
+  @JsonKey(name: 'last_invocation')
+  DateTime? get lastInvocation => throw _privateConstructorUsedError;
 
   Map<String, dynamic> toJson() => throw _privateConstructorUsedError;
   @JsonKey(ignore: true)
@@ -1906,6 +1921,10 @@ abstract class $AgentCopyWith<$Res> {
     String role,
     @JsonKey(name: 'active_count') int activeCount,
     @JsonKey(name: 'daily_cost_cents') int dailyCostCents,
+    @JsonKey(name: 'executor_agent') String executorAgent,
+    @JsonKey(name: 'drift_score') double driftScore,
+    @JsonKey(name: 'findings_count') int findingsCount,
+    @JsonKey(name: 'last_invocation') DateTime? lastInvocation,
   });
 }
 
@@ -1933,6 +1952,10 @@ class _$AgentCopyWithImpl<$Res, $Val extends Agent>
     Object? role = null,
     Object? activeCount = null,
     Object? dailyCostCents = null,
+    Object? executorAgent = null,
+    Object? driftScore = null,
+    Object? findingsCount = null,
+    Object? lastInvocation = freezed,
   }) {
     return _then(
       _value.copyWith(
@@ -1980,6 +2003,22 @@ class _$AgentCopyWithImpl<$Res, $Val extends Agent>
                 ? _value.dailyCostCents
                 : dailyCostCents // ignore: cast_nullable_to_non_nullable
                       as int,
+            executorAgent: null == executorAgent
+                ? _value.executorAgent
+                : executorAgent // ignore: cast_nullable_to_non_nullable
+                      as String,
+            driftScore: null == driftScore
+                ? _value.driftScore
+                : driftScore // ignore: cast_nullable_to_non_nullable
+                      as double,
+            findingsCount: null == findingsCount
+                ? _value.findingsCount
+                : findingsCount // ignore: cast_nullable_to_non_nullable
+                      as int,
+            lastInvocation: freezed == lastInvocation
+                ? _value.lastInvocation
+                : lastInvocation // ignore: cast_nullable_to_non_nullable
+                      as DateTime?,
           )
           as $Val,
     );
@@ -2006,6 +2045,10 @@ abstract class _$$AgentImplCopyWith<$Res> implements $AgentCopyWith<$Res> {
     String role,
     @JsonKey(name: 'active_count') int activeCount,
     @JsonKey(name: 'daily_cost_cents') int dailyCostCents,
+    @JsonKey(name: 'executor_agent') String executorAgent,
+    @JsonKey(name: 'drift_score') double driftScore,
+    @JsonKey(name: 'findings_count') int findingsCount,
+    @JsonKey(name: 'last_invocation') DateTime? lastInvocation,
   });
 }
 
@@ -2032,6 +2075,10 @@ class __$$AgentImplCopyWithImpl<$Res>
     Object? role = null,
     Object? activeCount = null,
     Object? dailyCostCents = null,
+    Object? executorAgent = null,
+    Object? driftScore = null,
+    Object? findingsCount = null,
+    Object? lastInvocation = freezed,
   }) {
     return _then(
       _$AgentImpl(
@@ -2079,6 +2126,22 @@ class __$$AgentImplCopyWithImpl<$Res>
             ? _value.dailyCostCents
             : dailyCostCents // ignore: cast_nullable_to_non_nullable
                   as int,
+        executorAgent: null == executorAgent
+            ? _value.executorAgent
+            : executorAgent // ignore: cast_nullable_to_non_nullable
+                  as String,
+        driftScore: null == driftScore
+            ? _value.driftScore
+            : driftScore // ignore: cast_nullable_to_non_nullable
+                  as double,
+        findingsCount: null == findingsCount
+            ? _value.findingsCount
+            : findingsCount // ignore: cast_nullable_to_non_nullable
+                  as int,
+        lastInvocation: freezed == lastInvocation
+            ? _value.lastInvocation
+            : lastInvocation // ignore: cast_nullable_to_non_nullable
+                  as DateTime?,
       ),
     );
   }
@@ -2099,6 +2162,10 @@ class _$AgentImpl implements _Agent {
     this.role = '',
     @JsonKey(name: 'active_count') this.activeCount = 0,
     @JsonKey(name: 'daily_cost_cents') this.dailyCostCents = 0,
+    @JsonKey(name: 'executor_agent') this.executorAgent = '',
+    @JsonKey(name: 'drift_score') this.driftScore = 0.0,
+    @JsonKey(name: 'findings_count') this.findingsCount = 0,
+    @JsonKey(name: 'last_invocation') this.lastInvocation,
   }) : _frontmatter = frontmatter;
 
   factory _$AgentImpl.fromJson(Map<String, dynamic> json) =>
@@ -2144,10 +2211,30 @@ class _$AgentImpl implements _Agent {
   @override
   @JsonKey(name: 'daily_cost_cents')
   final int dailyCostCents;
+  // Additive M11 roster keys (bughunt 2026-11-19, internal/rpc/roster.go):
+  // executor_agent + last_invocation ride bots AND employees; drift_score
+  // + findings_count are employee-only; registry agents carry none. All
+  // four are zero-omitted on the wire, so absent keys decode to the
+  // defaults below (legacy config rows parse unchanged). last_invocation
+  // uses omitzero daemon-side: ABSENT = never run = null (never a
+  // '0001-01-01...' zero time). drift_score reads 0 until a production
+  // writer lands — display it honestly, never invent data.
+  @override
+  @JsonKey(name: 'executor_agent')
+  final String executorAgent;
+  @override
+  @JsonKey(name: 'drift_score')
+  final double driftScore;
+  @override
+  @JsonKey(name: 'findings_count')
+  final int findingsCount;
+  @override
+  @JsonKey(name: 'last_invocation')
+  final DateTime? lastInvocation;
 
   @override
   String toString() {
-    return 'Agent(id: $id, name: $name, description: $description, enabled: $enabled, prompt: $prompt, frontmatter: $frontmatter, type: $type, status: $status, role: $role, activeCount: $activeCount, dailyCostCents: $dailyCostCents)';
+    return 'Agent(id: $id, name: $name, description: $description, enabled: $enabled, prompt: $prompt, frontmatter: $frontmatter, type: $type, status: $status, role: $role, activeCount: $activeCount, dailyCostCents: $dailyCostCents, executorAgent: $executorAgent, driftScore: $driftScore, findingsCount: $findingsCount, lastInvocation: $lastInvocation)';
   }
 
   @override
@@ -2171,7 +2258,15 @@ class _$AgentImpl implements _Agent {
             (identical(other.activeCount, activeCount) ||
                 other.activeCount == activeCount) &&
             (identical(other.dailyCostCents, dailyCostCents) ||
-                other.dailyCostCents == dailyCostCents));
+                other.dailyCostCents == dailyCostCents) &&
+            (identical(other.executorAgent, executorAgent) ||
+                other.executorAgent == executorAgent) &&
+            (identical(other.driftScore, driftScore) ||
+                other.driftScore == driftScore) &&
+            (identical(other.findingsCount, findingsCount) ||
+                other.findingsCount == findingsCount) &&
+            (identical(other.lastInvocation, lastInvocation) ||
+                other.lastInvocation == lastInvocation));
   }
 
   @JsonKey(ignore: true)
@@ -2189,6 +2284,10 @@ class _$AgentImpl implements _Agent {
     role,
     activeCount,
     dailyCostCents,
+    executorAgent,
+    driftScore,
+    findingsCount,
+    lastInvocation,
   );
 
   @JsonKey(ignore: true)
@@ -2216,6 +2315,10 @@ abstract class _Agent implements Agent {
     final String role,
     @JsonKey(name: 'active_count') final int activeCount,
     @JsonKey(name: 'daily_cost_cents') final int dailyCostCents,
+    @JsonKey(name: 'executor_agent') final String executorAgent,
+    @JsonKey(name: 'drift_score') final double driftScore,
+    @JsonKey(name: 'findings_count') final int findingsCount,
+    @JsonKey(name: 'last_invocation') final DateTime? lastInvocation,
   }) = _$AgentImpl;
 
   factory _Agent.fromJson(Map<String, dynamic> json) = _$AgentImpl.fromJson;
@@ -2246,6 +2349,25 @@ abstract class _Agent implements Agent {
   @override
   @JsonKey(name: 'daily_cost_cents')
   int get dailyCostCents;
+  @override // Additive M11 roster keys (bughunt 2026-11-19, internal/rpc/roster.go):
+  // executor_agent + last_invocation ride bots AND employees; drift_score
+  // + findings_count are employee-only; registry agents carry none. All
+  // four are zero-omitted on the wire, so absent keys decode to the
+  // defaults below (legacy config rows parse unchanged). last_invocation
+  // uses omitzero daemon-side: ABSENT = never run = null (never a
+  // '0001-01-01...' zero time). drift_score reads 0 until a production
+  // writer lands — display it honestly, never invent data.
+  @JsonKey(name: 'executor_agent')
+  String get executorAgent;
+  @override
+  @JsonKey(name: 'drift_score')
+  double get driftScore;
+  @override
+  @JsonKey(name: 'findings_count')
+  int get findingsCount;
+  @override
+  @JsonKey(name: 'last_invocation')
+  DateTime? get lastInvocation;
   @override
   @JsonKey(ignore: true)
   _$$AgentImplCopyWith<_$AgentImpl> get copyWith =>

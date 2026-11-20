@@ -108,10 +108,12 @@ class AgentState {
   /// Per-agent quota episode data keyed by agent id.
   final Map<String, AgentQuotaState> quotaEpisodes;
 
-  /// acp executor references from the employee roster (agents.list rows
-  /// carrying `executor_agent`, acp-employees phase 3 display parity),
-  /// keyed by employee id -> executor agent id. Employees with the
-  /// default local executor are absent.
+  /// acp executor references keyed by agent id -> executor agent id
+  /// (acp-employees phase 3 display parity; additive M11 roster keys,
+  /// bughunt 2026-11-19). On the roster path this derives from each row's
+  /// executor_agent (bots AND employees may carry it); on the legacy
+  /// 404-fallback path it is enriched from the employee list. Agents with
+  /// the default local executor are absent.
   final Map<String, String> employeeExecutors;
 
   const AgentState({
@@ -149,12 +151,17 @@ class AgentNotifier extends StateNotifier<AgentState> {
   ///
   /// Primary source: GET /api/v1/agents/roster — the daemon's merged
   /// agent/bot/employee roster (frozen C1 rows: id, name, type, status,
-  /// active_count, daily_cost_cents, role, description, enabled). Old
-  /// daemons without the route answer 404; fall back to the legacy
+  /// active_count, daily_cost_cents, role, description, enabled, plus the
+  /// additive M11 keys executor_agent, drift_score, findings_count,
+  /// last_invocation — zero-omitted, absent last_invocation = never run).
+  /// Old daemons without the route answer 404; fall back to the legacy
   /// config-dir agent specs (/api/v1/config/agents) so the tab still
   /// lists agents (without bots/employees or live counters).
   Future<void> loadAgents() async {
     state = state.copyWith(isLoading: true, error: null);
+    // True only when the roster route itself is absent (404, old daemon).
+    // Any other failure rethrows: no silent fallback, no enrichment.
+    var rosterAbsent = false;
     try {
       List<Map<String, dynamic>> rawAgents;
       try {
@@ -167,26 +174,49 @@ class AgentNotifier extends StateNotifier<AgentState> {
       } on SdkApiException catch (e) {
         if (e.statusCode != 404) rethrow;
         // Old daemon: no roster route — legacy config agents list.
+        rosterAbsent = true;
         rawAgents = await sdkClient.listAgents();
       }
-      // Agent.fromJson maps the C1 keys onto the model (type/status/role/
-      // active_count/daily_cost_cents decode directly); unknown keys are
-      // ignored, so legacy config rows parse unchanged.
+      // Agent.fromJson maps the C1 + M11 keys onto the model
+      // (type/status/role/active_count/daily_cost_cents/executor_agent/
+      // drift_score/findings_count/last_invocation decode directly);
+      // unknown keys are ignored, so legacy config rows parse unchanged.
       final agents = rawAgents
           .map((a) => Agent.fromJson(a))
           .toList(growable: false);
-      state = state.copyWith(agents: agents, isLoading: false);
+      // The roster carries executor_agent per row (M11), so the exec
+      // badge map derives from the decoded models — no second
+      // listEmployees() round trip on the roster path. Empty/whitespace
+      // references stay absent, matching the TUI's TrimSpace semantics.
+      final executors = <String, String>{
+        for (final a in agents)
+          if (a.executorAgent.trim().isNotEmpty) a.id: a.executorAgent.trim(),
+      };
+      state = state.copyWith(
+        agents: agents,
+        isLoading: false,
+        employeeExecutors: executors,
+      );
     } catch (e) {
       state = state.copyWith(isLoading: false, error: e.toString());
+      return;
     }
-    await _loadEmployeeExecutors();
+    // Legacy-only enrichment: old daemons have no roster route, so their
+    // executor references still come from the employee list. The roster
+    // path above already carries them; non-404 failures never reach here.
+    if (rosterAbsent) {
+      await _loadEmployeeExecutors();
+    }
   }
 
-  /// Best-effort fetch of the employee roster's acp executor references
-  /// (acp-employees phase 3 display parity). The tile badge/detail line
-  /// only renders when an employee id matches a roster agent id; the
-  /// roster call failing (employees disabled, route 404) silently leaves
-  /// the map unchanged — it must never surface as an agents-tab error.
+  /// Legacy-fallback-only fetch of the employee roster's acp executor
+  /// references (acp-employees phase 3 display parity). Called ONLY when
+  /// the unified roster route 404s (old daemon) — the roster path carries
+  /// executor_agent per row and needs no second call. The tile
+  /// badge/detail line only renders when an employee id matches a roster
+  /// agent id; the roster call failing (employees disabled, route 404)
+  /// silently leaves the map unchanged — it must never surface as an
+  /// agents-tab error.
   Future<void> _loadEmployeeExecutors() async {
     Map<String, String> executors;
     try {
@@ -201,7 +231,17 @@ class AgentNotifier extends StateNotifier<AgentState> {
     } catch (_) {
       return;
     }
-    state = state.copyWith(employeeExecutors: executors);
+    // Stamp the references onto the decoded models too: the tile badge
+    // and goals-pane detail line read Agent.executorAgent (the roster
+    // path decodes it directly; legacy config rows carry no M11 keys).
+    final agents = [
+      for (final a in state.agents)
+        if (executors[a.id] case final String ex)
+          a.copyWith(executorAgent: ex)
+        else
+          a,
+    ];
+    state = state.copyWith(agents: agents, employeeExecutors: executors);
   }
 
   /// Apply a quota-status agent_progress event to [state].

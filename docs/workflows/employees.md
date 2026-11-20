@@ -141,9 +141,21 @@ not the local LLM executor — "bob the autonomous employee"
   remote turns. At wiring they log a WARN; enforce intent with
   `max_invocations_per_day` and the permission lane instead.
 - `executor_agent` rides the agents.roster wire (additive M11 keys,
-  bughunt 2026-11-19) and the TUI agents panel renders it. GUI display
-  of executor/drift/findings/last-run is a follow-up wave; drift_score
-  reads 0 until a production writer lands on Manager.driftScores.
+  bughunt 2026-11-19) alongside `drift_score`, `findings_count` and
+  `last_invocation`; both the TUI agents panel and the Flutter GUI render
+  them. GUI as-built: the tile's acp badge and the goals-pane
+  `executor: <id> (acp)` line read the roster row's `executor_agent`
+  (Agent.executorAgent; the legacy 404-fallback still enriches from the
+  employee list), and roster tiles carry a
+  `drift: X.XX · findings: N · last run: HH:MM` stats line mirroring the
+  TUI's drift/findings/last run columns — `last run: never` when
+  `last_invocation` is absent (never run), drift formatted `%.2f`.
+  Deviations: the GUI renders device-local HH:MM (execution-runs panel
+  precedent) where the TUI renders the parsed wire time, and says `never`
+  where the TUI's zero-time cell says `n/a`. drift_score reads 0 until a
+  production writer lands on Manager.driftScores — both surfaces display
+  the honest 0.00, never invented data; findings_count is best-effort
+  (168h audit window, store row cap).
 
 ### Quality gate (completion gating)
 

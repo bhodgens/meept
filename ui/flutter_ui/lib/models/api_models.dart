@@ -722,6 +722,18 @@ class Agent with _$Agent {
     @Default('') String role,
     @JsonKey(name: 'active_count') @Default(0) int activeCount,
     @JsonKey(name: 'daily_cost_cents') @Default(0) int dailyCostCents,
+    // Additive M11 roster keys (bughunt 2026-11-19, internal/rpc/roster.go):
+    // executor_agent + last_invocation ride bots AND employees; drift_score
+    // + findings_count are employee-only; registry agents carry none. All
+    // four are zero-omitted on the wire, so absent keys decode to the
+    // defaults below (legacy config rows parse unchanged). last_invocation
+    // uses omitzero daemon-side: ABSENT = never run = null (never a
+    // '0001-01-01...' zero time). drift_score reads 0 until a production
+    // writer lands — display it honestly, never invent data.
+    @JsonKey(name: 'executor_agent') @Default('') String executorAgent,
+    @JsonKey(name: 'drift_score') @Default(0.0) double driftScore,
+    @JsonKey(name: 'findings_count') @Default(0) int findingsCount,
+    @JsonKey(name: 'last_invocation') DateTime? lastInvocation,
   }) = _Agent;
 
   factory Agent.fromJson(Map<String, dynamic> json) =>

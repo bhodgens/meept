@@ -109,12 +109,15 @@ class _NullIdAgentSdkClient extends SdkApiClient {
 }
 
 /// Unified-roster client (M17): GET /api/v1/agents/roster answers frozen
-/// C1 rows merging agents + bots + employees. listAgents must NOT be
-/// consulted when the roster succeeds.
+/// C1 rows merging agents + bots + employees, plus the additive M11 keys
+/// (executor_agent / drift_score / findings_count / last_invocation,
+/// zero-omitted). listAgents AND listEmployees must NOT be consulted when
+/// the roster succeeds — the roster carries the executor references.
 class _RosterSdkClient extends SdkApiClient {
   _RosterSdkClient() : super(host: 'localhost', port: 8081);
 
   bool legacyListCalled = false;
+  bool employeesListCalled = false;
 
   @override
   Future<Map<String, dynamic>> getAgentsRoster() async => {
@@ -129,6 +132,7 @@ class _RosterSdkClient extends SdkApiClient {
         'role': 'dispatcher',
         'description': 'Routes tasks',
         'enabled': true,
+        // Registry agents carry NO M11 keys (zero-omitted on the wire).
       },
       {
         'id': 'news-bot',
@@ -140,6 +144,9 @@ class _RosterSdkClient extends SdkApiClient {
         'role': '',
         'description': 'posts headlines',
         'enabled': true,
+        // Bots carry executor_agent + last_invocation (no drift/findings).
+        'executor_agent': 'hermes',
+        'last_invocation': '2026-11-19T08:30:00Z',
       },
       {
         'id': 'coder',
@@ -151,6 +158,24 @@ class _RosterSdkClient extends SdkApiClient {
         'role': 'engineer',
         'description': 'Writes code',
         'enabled': true,
+        // Employees carry all four M11 keys.
+        'executor_agent': 'hermes',
+        'drift_score': 0.25,
+        'findings_count': 3,
+        'last_invocation': '2026-11-19T12:00:00Z',
+      },
+      {
+        'id': 'idle-emp',
+        'name': 'Idle Emp',
+        'type': 'employee',
+        'status': 'stopped',
+        'active_count': 0,
+        'daily_cost_cents': 0,
+        'role': '',
+        'description': 'never ran',
+        'enabled': true,
+        // Never-run shape: drift/findings zero-omitted, last_invocation
+        // ABSENT (omitzero) — decodes to null, never a year-1 zero time.
       },
     ],
   };
@@ -162,7 +187,12 @@ class _RosterSdkClient extends SdkApiClient {
   }
 
   @override
-  Future<List<Map<String, dynamic>>> listEmployees() async => const [];
+  Future<List<Map<String, dynamic>>> listEmployees() async {
+    employeesListCalled = true;
+    throw StateError(
+      'employee list must not be called when roster succeeds (M11 keys ride the roster)',
+    );
+  }
 }
 
 /// Roster route exists but fails with a non-404 (e.g. 503 roster service
@@ -395,6 +425,14 @@ void main() {
       // without the field, and a whitespace-only value, stay absent.
       expect(notifier.state.employeeExecutors, {'coder': 'hermes'});
       expect(notifier.state.error, isNull);
+      // Legacy-fallback enrichment also stamps the reference onto the
+      // decoded model: the tile badge / detail line read executorAgent.
+      final coder = notifier.state.agents.firstWhere((a) => a.id == 'coder');
+      expect(coder.executorAgent, 'hermes');
+      final analyst = notifier.state.agents.firstWhere(
+        (a) => a.id == 'analyst',
+      );
+      expect(analyst.executorAgent, '');
     });
 
     test('loadAgents survives a failing employee roster fetch', () async {
@@ -424,10 +462,18 @@ void main() {
           isFalse,
           reason: 'roster success must not consult the legacy config list',
         );
-        expect(notifier.state.agents, hasLength(3));
+        expect(
+          client.employeesListCalled,
+          isFalse,
+          reason:
+              'roster success must not make the second listEmployees call '
+              '(M11 executor_agent rides the roster rows)',
+        );
+        expect(notifier.state.agents, hasLength(4));
         expect(notifier.state.agents.map((a) => a.type).toList(), [
           'agent',
           'bot',
+          'employee',
           'employee',
         ]);
       },
@@ -453,6 +499,66 @@ void main() {
         expect(bot.type, 'bot');
         expect(bot.status, 'stopped');
         expect(bot.activeCount, 0);
+      },
+    );
+
+    // ===== M11: additive roster keys (executor/drift/findings/last-run) =====
+
+    test('roster rows decode all four additive M11 fields', () async {
+      final notifier = AgentNotifier(sdkClient: _RosterSdkClient());
+      await notifier.loadAgents();
+
+      // Employee rows carry all four keys.
+      final coder = notifier.state.agents.firstWhere((a) => a.id == 'coder');
+      expect(coder.executorAgent, 'hermes');
+      expect(coder.driftScore, 0.25);
+      expect(coder.findingsCount, 3);
+      expect(coder.lastInvocation, DateTime.parse('2026-11-19T12:00:00Z'));
+
+      // Bot rows carry executor_agent + last_invocation only; the
+      // employee-only drift/findings keys stay at their defaults.
+      final bot = notifier.state.agents.firstWhere((a) => a.id == 'news-bot');
+      expect(bot.executorAgent, 'hermes');
+      expect(bot.lastInvocation, DateTime.parse('2026-11-19T08:30:00Z'));
+      expect(bot.driftScore, 0.0);
+      expect(bot.findingsCount, 0);
+    });
+
+    test('absent last_invocation decodes to null (never run), zero-omitted '
+        'M11 keys decode to defaults', () async {
+      final notifier = AgentNotifier(sdkClient: _RosterSdkClient());
+      await notifier.loadAgents();
+
+      // Never-run employee: last_invocation ABSENT (omitzero wire shape).
+      final idle = notifier.state.agents.firstWhere((a) => a.id == 'idle-emp');
+      expect(idle.lastInvocation, isNull);
+      expect(idle.executorAgent, '');
+      expect(idle.driftScore, 0.0);
+      expect(idle.findingsCount, 0);
+
+      // Registry agent: no M11 keys at all.
+      final dispatcher = notifier.state.agents.firstWhere(
+        (a) => a.id == 'dispatcher',
+      );
+      expect(dispatcher.executorAgent, '');
+      expect(dispatcher.driftScore, 0.0);
+      expect(dispatcher.findingsCount, 0);
+      expect(dispatcher.lastInvocation, isNull);
+    });
+
+    test(
+      'roster success derives executor refs from the rows (no second call)',
+      () async {
+        final client = _RosterSdkClient();
+        final notifier = AgentNotifier(sdkClient: client);
+        await notifier.loadAgents();
+
+        expect(notifier.state.employeeExecutors, {
+          'news-bot': 'hermes',
+          'coder': 'hermes',
+        });
+        expect(client.employeesListCalled, isFalse);
+        expect(notifier.state.error, isNull);
       },
     );
 
@@ -495,7 +601,9 @@ void main() {
 
         // Quota episode state survives the roster reload.
         expect(notifier.state.quotaEpisodes.containsKey('coder'), isTrue);
-        expect(notifier.state.agents, hasLength(3));
+        expect(notifier.state.agents, hasLength(4));
+        // Executor refs survive too (derived from the M11 roster keys).
+        expect(notifier.state.employeeExecutors['coder'], 'hermes');
       },
     );
   });
@@ -539,6 +647,47 @@ void main() {
       };
       final agent = Agent.fromJson(json);
       expect(agent.frontmatter?['version'], '2.0');
+    });
+
+    // ===== M11 additive roster keys: model-level decode pins =====
+
+    test('Agent.fromJson decodes all four M11 roster keys', () {
+      final agent = Agent.fromJson({
+        'id': 'emp',
+        'name': 'Emp',
+        'type': 'employee',
+        'executor_agent': 'hermes',
+        'drift_score': 0.42,
+        'findings_count': 7,
+        'last_invocation': '2026-11-19T12:34:56Z',
+      });
+      expect(agent.executorAgent, 'hermes');
+      expect(agent.driftScore, 0.42);
+      expect(agent.findingsCount, 7);
+      expect(agent.lastInvocation, DateTime.parse('2026-11-19T12:34:56Z'));
+    });
+
+    test('Agent.fromJson: absent M11 keys decode to defaults / null', () {
+      final agent = Agent.fromJson({'id': 'emp', 'name': 'Emp'});
+      expect(agent.executorAgent, '');
+      expect(agent.driftScore, 0.0);
+      expect(agent.findingsCount, 0);
+      // Absent last_invocation = never run = null (the daemon omitzero
+      // shape; never a '0001-01-01...' zero time on the wire).
+      expect(agent.lastInvocation, isNull);
+    });
+
+    test('Agent.fromJson: zero drift decodes honestly as 0.0', () {
+      // drift_score reads 0 until a production writer lands — an explicit
+      // zero and an absent key both decode to 0.0 (displayed as '0.00').
+      final explicit = Agent.fromJson({
+        'id': 'emp',
+        'name': 'Emp',
+        'drift_score': 0,
+      });
+      expect(explicit.driftScore, 0.0);
+      final absent = Agent.fromJson({'id': 'emp', 'name': 'Emp'});
+      expect(absent.driftScore, 0.0);
     });
   });
 

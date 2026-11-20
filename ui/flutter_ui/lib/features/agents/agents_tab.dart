@@ -382,13 +382,7 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
                   final selected = ref.watch(activeAgentProvider);
                   final isSelected = selected?.id == agent.id;
                   final quotaState = agentState.quotaEpisodes[agent.id];
-                  return _buildAgentCard(
-                    agent,
-                    index,
-                    isSelected,
-                    quotaState,
-                    agentState.employeeExecutors[agent.id],
-                  );
+                  return _buildAgentCard(agent, index, isSelected, quotaState);
                 },
               ),
             ),
@@ -402,8 +396,12 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
     int index,
     bool isSelected,
     AgentQuotaState? quotaState,
-    String? executorAgent,
   ) {
+    // acp executor reference straight off the roster row's M11
+    // executor_agent key (Agent.executorAgent). The provider's legacy
+    // 404-fallback enrichment copies the employee-list reference onto
+    // the same field, so one source covers both daemon generations.
+    final executorAgent = agent.executorAgent.trim();
     // Status chip: paused / quota_wait are real states; a live roster
     // status (M17: running/paused/error/stopped/quota_wait from the C1
     // row) wins over the legacy presence default 'online' — none of these
@@ -429,16 +427,22 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
     final otherActive = execState.otherActiveCount(agent.id);
 
     final borderRadius = BorderRadius.circular(8);
-    // Card content height grows with the C1 roster line / quota badge so
-    // the fixed-height Column never overflows (the issue-#160 redesign's
-    // 52px box only fits name + histogram). FittedBox still scales the
-    // whole card down when the grid cell is smaller.
+    // Card content height grows with the C1 roster line / M11 stats line /
+    // quota badge so the fixed-height Column never overflows (the
+    // issue-#160 redesign's 52px box only fits name + histogram). FittedBox
+    // still scales the whole card down when the grid cell is smaller.
     final hasRosterLine =
         agent.type.isNotEmpty ||
         agent.activeCount > 0 ||
         agent.dailyCostCents > 0;
+    // M11 stats line rides roster rows only (type non-empty): legacy
+    // config rows carry no drift/findings/last-run data and render nothing.
+    final hasStatsLine = agent.type.isNotEmpty;
     final cardHeight =
-        52.0 + (hasRosterLine ? 14.0 : 0.0) + (quotaState != null ? 20.0 : 0.0);
+        52.0 +
+        (hasRosterLine ? 14.0 : 0.0) +
+        (hasStatsLine ? 14.0 : 0.0) +
+        (quotaState != null ? 20.0 : 0.0);
     return InkWell(
       key: ValueKey('agent-tile-${agent.id}'),
       onTap: () {
@@ -507,8 +511,7 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
-                            if (executorAgent != null &&
-                                executorAgent.isNotEmpty)
+                            if (executorAgent.isNotEmpty)
                               const _AcpExecutorBadge(),
                             _AgentStatusChip(status: status),
                           ],
@@ -528,6 +531,28 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
                             ' · active: ${agent.activeCount}'
                             ' · cost: \$${(agent.dailyCostCents / 100).toStringAsFixed(2)}',
                             key: ValueKey('agent-roster-${agent.id}'),
+                            style: CyberpunkTypography.bodySmall.copyWith(
+                              color: CyberpunkColors.midGray,
+                              fontSize: 9,
+                              fontFamily: 'SourceCodePro',
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        // M11 roster stats line (GUI parity with the TUI
+                        // agents panel's drift / findings / last run
+                        // columns, agents_panel.go updateAgentsTable):
+                        // drift formatted %.2f, findings count, last run
+                        // HH:MM — 'never' when last_invocation is absent
+                        // (never-run rows omit the key daemon-side). Rides
+                        // roster rows only; legacy config rows carry no
+                        // M11 data and render nothing.
+                        if (hasStatsLine)
+                          Text(
+                            'drift: ${agent.driftScore.toStringAsFixed(2)}'
+                            ' · findings: ${agent.findingsCount}'
+                            ' · last run: ${_formatLastRun(agent.lastInvocation)}',
+                            key: ValueKey('agent-stats-${agent.id}'),
                             style: CyberpunkTypography.bodySmall.copyWith(
                               color: CyberpunkColors.midGray,
                               fontSize: 9,
@@ -597,11 +622,30 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
     );
   }
 
-  /// acp executor reference for [id] from the employee roster (empty
-  /// when absent). Read during build(); the pane rebuilds whenever
-  /// agentState changes (loadAgents refreshes the executor map).
-  String _executorFor(String id) =>
-      ref.read(agentProvider).employeeExecutors[id] ?? '';
+  /// acp executor reference for [id], read from the agent model's M11
+  /// executor_agent field (empty when absent). The roster decodes it
+  /// directly; the legacy 404-fallback enrichment stamps the employee
+  /// list's reference onto the same field. Read during build(); the pane
+  /// rebuilds whenever agentState changes.
+  String _executorFor(String id) {
+    final agents = ref.read(agentProvider).agents;
+    for (final a in agents) {
+      if (a.id == id) return a.executorAgent.trim();
+    }
+    return '';
+  }
+
+  /// Last-run cell for the M11 stats line: 'never' when the roster row
+  /// carried no last_invocation (never run), else device-local HH:MM.
+  /// The TUI's formatTimeAgoTime renders HH:MM ('n/a' for the zero time);
+  /// the GUI uses 'never' for the absent-key shape and device-local time
+  /// (the execution-runs panel precedent) — documented surface deviation.
+  static String _formatLastRun(DateTime? t) {
+    if (t == null) return 'never';
+    final local = t.toLocal();
+    String pad(int n) => n.toString().padLeft(2, '0');
+    return '${pad(local.hour)}:${pad(local.minute)}';
+  }
 
   Widget _buildGoalsPane(Agent agent) {
     // Quota episode for the selected agent (parity with the TUI detail

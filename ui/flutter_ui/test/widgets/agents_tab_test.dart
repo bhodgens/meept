@@ -3,7 +3,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:meept_ui/features/agents/agents_tab.dart';
 import 'package:meept_ui/models/api_models.dart';
-import 'package:meept_ui/providers/agent_provider.dart';
 import 'package:meept_ui/providers/providers.dart';
 import 'package:meept_ui/services/sdk_client.dart';
 
@@ -261,15 +260,176 @@ void main() {
       );
 
       // Live roster status replaces the legacy 'online' presence label.
-      expect(find.text('stopped'), findsOneWidget);
+      expect(find.text('stopped'), findsNWidgets(2));
       expect(find.text('online'), findsNothing);
+
+      // M11: the acp badge rides every row carrying executor_agent —
+      // the bot AND the employee (bots carry the key too, roster.go).
+      expect(find.text('acp'), findsNWidgets(2));
+    });
+  });
+
+  // M11: drift / findings / last-run display parity with the TUI agents
+  // panel's drift/findings/last run columns (agents_panel.go
+  // updateAgentsTable): drift %.2f, findings count, last run HH:MM with
+  // 'never' for the absent-key (never-run) shape.
+  group('agents tab M11 roster stats display', () {
+    Future<void> pumpRoster(WidgetTester tester) async {
+      tester.view.devicePixelRatio = 1.0;
+      tester.view.physicalSize = const Size(1200, 800);
+      addTearDown(tester.view.reset);
+
+      final fake = _RosterDisplaySdkClient();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            sdkClientProvider.overrideWith((ref) => fake),
+            agentProvider.overrideWith((ref) => AgentNotifier(sdkClient: fake)),
+          ],
+          child: const MaterialApp(home: Scaffold(body: AgentsTab())),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+      await tester.pump(const Duration(milliseconds: 500));
+    }
+
+    String hhmm(DateTime utc) {
+      final local = utc.toLocal();
+      String pad(int n) => n.toString().padLeft(2, '0');
+      return '${pad(local.hour)}:${pad(local.minute)}';
+    }
+
+    testWidgets('employee tile shows drift/findings/last-run stats line', (
+      tester,
+    ) async {
+      await pumpRoster(tester);
+
+      final lastRun = hhmm(DateTime.parse('2026-11-19T12:00:00Z'));
+      expect(
+        find.text('drift: 0.25 · findings: 3 · last run: $lastRun'),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('agent-stats-roster-emp')),
+        findsOneWidget,
+      );
+      // The C1 roster line stays intact alongside the new stats line.
+      expect(
+        find.text('type: employee · active: 1 · cost: \$12.34'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('never-run + zero-drift shape renders never / 0.00 / 0', (
+      tester,
+    ) async {
+      await pumpRoster(tester);
+
+      // All M11 keys zero-omitted on the wire: drift displays an honest
+      // 0.00 (no production writer yet), findings 0, last run 'never'.
+      // (The registry-agent tile renders the same default shape, so
+      // scope the assertion to the idle employee's keyed Text.)
+      expect(
+        find.byWidgetPredicate(
+          (w) =>
+              w is Text &&
+              w.key == const ValueKey('agent-stats-roster-idle') &&
+              w.data == 'drift: 0.00 · findings: 0 · last run: never',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('agent-stats-roster-idle')),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('bot tile shows executor badge and zero-drift stats line', (
+      tester,
+    ) async {
+      await pumpRoster(tester);
+
+      // Bots carry executor_agent + last_invocation only: drift/findings
+      // default to 0 and render honestly.
+      final lastRun = hhmm(DateTime.parse('2026-11-19T08:30:00Z'));
+      expect(
+        find.text('drift: 0.00 · findings: 0 · last run: $lastRun'),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('agent-stats-roster-bot')),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('registry agent tile shows default stats, no acp badge', (
+      tester,
+    ) async {
+      await pumpRoster(tester);
+
+      // Registry agents carry no M11 keys: defaults render (the TUI shows
+      // the same zero columns for them), and no executor badge.
+      expect(
+        find.text('drift: 0.00 · findings: 0 · last run: never'),
+        findsNWidgets(2), // roster-agent + roster-idle
+      );
+      expect(
+        find.byKey(const ValueKey('agent-stats-roster-agent')),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('goals pane executor line reads the roster model field', (
+      tester,
+    ) async {
+      await pumpRoster(tester);
+
+      // Select the acp-backed employee: the detail line lowercases the
+      // id ('Hermes' on the wire) exactly like the TUI executorDetailLine.
+      await tester.tap(find.byKey(const ValueKey('agent-tile-roster-emp')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(find.text('executor: hermes (acp)'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('agent-executor-roster-emp')),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('legacy config rows render no M11 stats line', (tester) async {
+      tester.view.devicePixelRatio = 1.0;
+      tester.view.physicalSize = const Size(1200, 800);
+      addTearDown(tester.view.reset);
+
+      // Old-daemon shape: roster 404 -> legacy listAgents rows carry no
+      // type/M11 keys; the stats line must not render for them.
+      final fake = _FakeSdkClient(
+        agents: [const Agent(id: 'agent-0', name: 'coder', description: 'd')],
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            sdkClientProvider.overrideWith((ref) => fake),
+            agentProvider.overrideWith((ref) => AgentNotifier(sdkClient: fake)),
+          ],
+          child: const MaterialApp(home: Scaffold(body: AgentsTab())),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+      await tester.pump(const Duration(milliseconds: 500));
+
+      expect(find.byKey(const ValueKey('agent-stats-agent-0')), findsNothing);
+      expect(find.textContaining('drift:'), findsNothing);
     });
   });
 }
 
 /// Roster-first client for the M17 display pins: agents.roster answers
-/// one row per tier with live status and cost; the legacy list must not
-/// be consulted.
+/// one row per tier with live status and cost, plus the additive M11 keys
+/// on the employee row (executor/drift/findings/last-run); the legacy list
+/// must not be consulted.
 class _RosterDisplaySdkClient extends _FakeSdkClient {
   _RosterDisplaySdkClient() : super(agents: const []);
 
@@ -286,6 +446,7 @@ class _RosterDisplaySdkClient extends _FakeSdkClient {
         'role': 'dispatcher',
         'description': 'routes tasks',
         'enabled': true,
+        // Registry agents carry no M11 keys.
       },
       {
         'id': 'roster-bot',
@@ -297,6 +458,9 @@ class _RosterDisplaySdkClient extends _FakeSdkClient {
         'role': '',
         'description': 'posts headlines',
         'enabled': true,
+        // Bots carry executor_agent + last_invocation only.
+        'executor_agent': 'hermes',
+        'last_invocation': '2026-11-19T08:30:00Z',
       },
       {
         'id': 'roster-emp',
@@ -308,6 +472,23 @@ class _RosterDisplaySdkClient extends _FakeSdkClient {
         'role': 'engineer',
         'description': 'writes code',
         'enabled': true,
+        // Employees carry all four M11 keys.
+        'executor_agent': 'Hermes',
+        'drift_score': 0.25,
+        'findings_count': 3,
+        'last_invocation': '2026-11-19T12:00:00Z',
+      },
+      {
+        'id': 'roster-idle',
+        'name': 'idle emp',
+        'type': 'employee',
+        'status': 'stopped',
+        'active_count': 0,
+        'daily_cost_cents': 0,
+        'role': '',
+        'description': 'never ran',
+        'enabled': true,
+        // Never-run / zero-drift shape: all M11 keys zero-omitted.
       },
     ],
   };
