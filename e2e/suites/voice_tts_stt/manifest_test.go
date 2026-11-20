@@ -25,8 +25,9 @@ func manifestContains(suites []string, want string) bool {
 // TestManifestRegistersVoiceTtsSttSuite - task T3.
 // Given: the suite directory e2e/suites/voice_tts_stt.
 // When: e2e/manifest.json is parsed.
-// Then: path_map includes internal/voicechild/, internal/config/ and
-// internal/daemon/ mapped to this suite, and the suite is registered.
+// Then: path_map includes internal/voicechild/, internal/config/ mapped to this
+// suite; for internal/daemon/ the catch-all keeps only whole-subject suites and
+// exact-file keys (internal/daemon/voice_keys.go) map voice_tts_stt; the suite is registered.
 func TestManifestRegistersVoiceTtsSttSuite(t *testing.T) {
 	_, self, _, ok := runtime.Caller(0)
 	if !ok {
@@ -51,11 +52,21 @@ func TestManifestRegistersVoiceTtsSttSuite(t *testing.T) {
 		t.Fatalf("T3: parse manifest: %v", err)
 	}
 
-	for _, prefix := range []string{"internal/voicechild/", "internal/config/", "internal/daemon/"} {
+	// internal/voicechild/ and internal/config/ are NOT narrow prefixes — catch-all must include voice_tts_stt
+	for _, prefix := range []string{"internal/voicechild/", "internal/config/"} {
 		if !manifestContains(m.PathMap[prefix], "voice_tts_stt") {
 			t.Errorf("T3: manifest path_map[%q] does not include suite voice_tts_stt", prefix)
 		}
 	}
+	// internal/daemon/ IS a narrow prefix — catch-all keeps only daemon-lifecycle;
+	// exact-file key internal/daemon/voice_keys.go must map voice_tts_stt
+	if manifestContains(m.PathMap["internal/daemon/"], "voice_tts_stt") {
+		t.Error("T3: narrow prefix internal/daemon/ catch-all must not include voice_tts_stt (only daemon-lifecycle)")
+	}
+	if !manifestContains(m.PathMap["internal/daemon/voice_keys.go"], "voice_tts_stt") {
+		t.Error("T3: exact-file key internal/daemon/voice_keys.go must include suite voice_tts_stt")
+	}
+
 	found := false
 	for _, s := range m.Suites {
 		if s.Name == "voice_tts_stt" && s.Dir == "e2e/suites/voice_tts_stt" && s.Status == "implemented" {
