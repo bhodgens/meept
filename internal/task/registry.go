@@ -1143,6 +1143,18 @@ func (h *Handler) handleListExtended(ctx context.Context, _ *models.BusMessage) 
 		if stepStore != nil {
 			steps, err := stepStore.ListByTaskID(t.ID)
 			if err == nil {
+				// Gate T4b (04-clutter/01): this response IS a client
+				// display feed, so each step description goes through
+				// StripPromptScaffolding (planner session-context block +
+				// "## Your Task" header are internal machinery). The
+				// TaskStep rows are freshly scanned from SQLite per call
+				// and the STORE keeps the raw description untouched --
+				// the strip is display-only.
+				for _, st := range steps {
+					if st != nil {
+						st.Description = StripPromptScaffolding(st.Description)
+					}
+				}
 				ext.Steps = steps
 			}
 		}

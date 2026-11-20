@@ -367,6 +367,14 @@ type LLMClassifier struct {
 	// for the whole boot window.
 	bootReadiness *ClassifierBootReadiness
 	bootWait      time.Duration
+
+	// trivialFastLaneDisabled is the inverted latch for the trivial
+	// question fast lane (04-clutter/02): FALSE (the zero value) keeps
+	// the lane active -- default-on per Q2 -- so construction sites the
+	// protected dispatcher.go owns need no wiring for the shipped
+	// default. Set true via SetTrivialFastLane(false) to restore
+	// byte-identical legacy classification.
+	trivialFastLaneDisabled bool
 }
 
 // atomicBool is a sync-compatible boolean backed by atomic.Int32.
@@ -609,7 +617,33 @@ func (c *LLMClassifier) Classify(ctx context.Context, input string, memCtx *Memo
 	// Success: clear the unavailable flag.
 	c.unavailable.Store(false)
 
-	return c.parseResponse(resp.Content, input)
+	intent, err := c.parseResponse(resp.Content, input)
+	if err != nil {
+		return nil, err
+	}
+	// Trivial fast lane (04-clutter/02, F-ORCH-5): a trivial arithmetic
+	// question with a task-creating verdict is rewritten to the inline
+	// chat lane HERE -- inside the same classify -> RouteToAgent chain,
+	// so sanitization (the PII mask already applied to the send),
+	// thread resolution, and session binding (RouteToAgent resolves the
+	// session's loop/working dir for the chat verdict exactly as for any
+	// other) all stay intact. Latch on by default (the inverted field
+	// means the zero value keeps the lane active); flag off returns the
+	// verdict untouched -- byte-identical legacy.
+	if !c.trivialFastLaneDisabled {
+		intent = applyTrivialFastLane(intent, input)
+	}
+	return intent, nil
+}
+
+// SetTrivialFastLane mirrors orchestrator.trivial_fast_lane onto this
+// classifier (04-clutter/02). The Dispatcher-level mirror is
+// Dispatcher.SetTrivialFastLane.
+func (c *LLMClassifier) SetTrivialFastLane(enabled bool) {
+	if c == nil {
+		return
+	}
+	c.trivialFastLaneDisabled = !enabled
 }
 
 // chatWithFailover performs at most two Chat attempts against the underlying

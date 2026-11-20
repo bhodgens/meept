@@ -3,7 +3,7 @@ package agent
 // 02-routing TEST-GATE T5 (W13; R7; session-steering A6/B7; master C3,
 // matrix F8).
 //
-// RecoverPendingFollowUps -> loadAndClear SELECTs the persisted
+// RecoverPendingFollowUps -> loadFollowups SELECTs the persisted
 // follow-up rows and DELETEs them, publishing only a COUNT event
 // (QueueRestorePayload{ConversationID, Count}). The message CONTENT is
 // destroyed at boot: nothing re-enqueues it to the session's inbox, so

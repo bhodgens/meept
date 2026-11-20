@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"regexp"
 	"slices"
 	"strconv"
@@ -217,6 +218,57 @@ type TacticalScheduler struct {
 	// keeps the hint table's route regardless — the warning is advisory only,
 	// never a re-route. Nil = byte-identical legacy routing.
 	health AgentHealthSource
+
+	// Bounded retry for blocked steps (usability remediation 02-routing/04,
+	// W12/F-ORCH-28): semaphore-blocked steps stay ready and EVERY
+	// reschedule caller is event-driven, so a wave that blocks with no
+	// in-flight steps hangs forever. A ticker sweeps ready-but-unscheduled
+	// steps of EXECUTING tasks on a bounded interval.
+	// stepRetryInterval <= 0 means the ticker is not armed.
+	stepRetryInterval time.Duration
+	retryTickerMu     sync.Mutex
+	retryTickerDone   chan struct{}
+
+	// Lease accounting counters (I1 instrumentation, usability
+	// 02-routing/04 T1): every acquireSlotLease success increments
+	// leaseAcquired[agentID]; every slotLease.release() increments
+	// leaseReleased[agentID]. The ledger balances iff
+	// acquired == released + currently-held leases, so a finalize path
+	// that drops a lease without releasing shows as a permanent
+	// imbalance. Protected by leaseStatsMu.
+	leaseStatsMu      sync.Mutex
+	leaseAcquired     map[string]int
+	leaseReleased     map[string]int
+	leaseHoldRequests map[string]int
+}
+
+// LeaseLedger is a snapshot of the slot-lease accounting counters
+// (usability 02-routing/04 T1). Held is the number of leases currently
+// registered against steps; the ledger balances when
+// Acquired == Released + Held for every agent.
+type LeaseLedger struct {
+	Acquired map[string]int
+	Released map[string]int
+	Held     map[string]int
+}
+
+// LeaseLedgerSnapshot returns the current lease accounting. Pure read;
+// safe under concurrency (I1, usability 02-routing/04).
+func (ts *TacticalScheduler) LeaseLedgerSnapshot() LeaseLedger {
+	ts.leaseStatsMu.Lock()
+	acquired := maps.Clone(ts.leaseAcquired)
+	released := maps.Clone(ts.leaseReleased)
+	ts.leaseStatsMu.Unlock()
+
+	ts.slotLeaseMu.Lock()
+	held := make(map[string]int, len(ts.slotLeases))
+	for _, lease := range ts.slotLeases {
+		if lease != nil {
+			held[lease.agentID]++
+		}
+	}
+	ts.slotLeaseMu.Unlock()
+	return LeaseLedger{Acquired: acquired, Released: released, Held: held}
 }
 
 // sessionStoreReader is the narrow session lookup the scheduler needs.
@@ -502,6 +554,97 @@ func NewTacticalScheduler(cfg TacticalSchedulerConfig) *TacticalScheduler {
 	}
 }
 
+// SetStepRetryInterval arms (or re-arms) the bounded retry ticker for
+// semaphore-blocked steps (usability 02-routing/04 T2, W12/F-ORCH-28).
+// interval > 0 starts a sweep every interval; interval <= 0 stops the
+// ticker and disables retry. Idempotent: re-arming with a running
+// ticker is a no-op. Default production interval comes from
+// orchestrator.step_retry_interval (15s); the constructor does NOT
+// auto-start, so schedulers that never opt in behave byte-identically
+// to the pre-ticker event-driven-only reschedule shape.
+func (ts *TacticalScheduler) SetStepRetryInterval(interval time.Duration) {
+	ts.retryTickerMu.Lock()
+	defer ts.retryTickerMu.Unlock()
+	ts.stepRetryInterval = interval
+	if interval <= 0 {
+		if ts.retryTickerDone != nil {
+			close(ts.retryTickerDone) //nolint:channil // sentinel checked via != nil below
+			// retryTickerDone doubles as the armed-sentinel: the two
+			// != nil guards above/below read it, so disarming MUST
+			// re-open the sentinel. Idempotent by the guard, closed
+			// exactly once per arming.
+			ts.retryTickerDone = nil
+		}
+		return
+	}
+	if ts.retryTickerDone != nil {
+		return // already running
+	}
+	done := make(chan struct{})
+	ts.retryTickerDone = done
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				ts.sweepReadyStepsForRetry()
+			case <-done:
+				return
+			}
+		}
+	}()
+	ts.logger.Info("step retry ticker armed", "interval", interval)
+}
+
+// StopStepRetryTicker stops the bounded retry sweep. Safe to call when
+// no ticker is running.
+func (ts *TacticalScheduler) StopStepRetryTicker() {
+	ts.SetStepRetryInterval(0)
+}
+
+// sweepReadyStepsForRetry re-runs ScheduleReadySteps for every task in
+// StateExecuting that still holds ready steps. This is the safety net
+// for the event-driven-only reschedule gap (W12): a wave that blocks on
+// the semaphore with NO in-flight steps left never receives a
+// completion event, so nothing else ever retries it.
+//
+// C7 exempt states are honored by construction: the sweep only lists
+// EXECUTING tasks, never planning or awaiting_approval ones, so parked
+// work is never nudged into execution by the ticker.
+func (ts *TacticalScheduler) sweepReadyStepsForRetry() {
+	if ts.taskStore == nil || ts.stepStore == nil || ts.queue == nil {
+		return
+	}
+	executing := task.StateExecuting
+	tasks, err := ts.taskStore.List(&executing, 200)
+	if err != nil {
+		ts.logger.Warn("step retry sweep: task list failed", "error", err)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	for _, t := range tasks {
+		if t == nil {
+			continue
+		}
+		ready, readyErr := ts.stepStore.GetReadySteps(t.ID)
+		if readyErr != nil || len(ready) == 0 {
+			continue
+		}
+		ts.logger.Info("step retry sweep: rescheduling ready steps",
+			"task_id", t.ID,
+			"ready_steps", len(ready),
+		)
+		if err := ts.ScheduleReadySteps(ctx, t.ID); err != nil {
+			ts.logger.Warn("step retry sweep: reschedule failed",
+				"task_id", t.ID,
+				"error", err,
+			)
+		}
+	}
+}
+
 // GetJobByID retrieves a job from the queue by ID.
 func (ts *TacticalScheduler) GetJobByID(ctx context.Context, jobID string) (*queue.Job, error) {
 	return ts.queue.Get(ctx, jobID)
@@ -605,12 +748,17 @@ func (ts *TacticalScheduler) ScheduleReadySteps(ctx context.Context, taskID stri
 			}
 		}
 	}
+	// Progress visibility (usability 02-routing/04 T2, W12): the blocked
+	// count rides the SAME chat-visible task.progress event, so a
+	// semaphore-blocked wave is never invisible -- previously a Debug-only
+	// line, and the user saw a task "silently stop".
 	ts.publishEvent("task.progress", map[string]any{
-		KeyTaskID:         taskID,
-		"scheduled_steps": scheduledCount,
-		"current_step":    currentStepDesc,
-		KeyChatVisible:    true,
-		KeyTokenUsage:     0, // No token data available at scheduling time
+		KeyTaskID:              taskID,
+		"scheduled_steps":      scheduledCount,
+		"current_step":         currentStepDesc,
+		"blocked_by_semaphore": semaphoreBlockedCount,
+		KeyChatVisible:         true,
+		KeyTokenUsage:          0, // No token data available at scheduling time
 	})
 
 	return nil
@@ -838,9 +986,11 @@ func (ts *TacticalScheduler) scheduleStep(ctx context.Context, step *task.TaskSt
 // call is a no-op, so a release that does not own a lease cannot drain
 // a token another job still holds.
 type slotLease struct {
-	once   sync.Once
-	global chan struct{}
-	agent  chan struct{}
+	once    sync.Once
+	global  chan struct{}
+	agent   chan struct{}
+	agentID string
+	owner   *TacticalScheduler
 }
 
 func (l *slotLease) release() {
@@ -850,7 +1000,21 @@ func (l *slotLease) release() {
 	l.once.Do(func() {
 		<-l.agent
 		<-l.global
+		if l.owner != nil {
+			l.owner.recordLeaseRelease(l.agentID)
+		}
 	})
+}
+
+// recordLeaseRelease increments the per-agent released counter (I1
+// lease instrumentation, usability 02-routing/04 T1).
+func (ts *TacticalScheduler) recordLeaseRelease(agentID string) {
+	ts.leaseStatsMu.Lock()
+	defer ts.leaseStatsMu.Unlock()
+	if ts.leaseReleased == nil {
+		ts.leaseReleased = make(map[string]int)
+	}
+	ts.leaseReleased[agentID]++
 }
 
 // acquireSlots attempts to acquire both global and per-agent semaphore slots.
@@ -903,7 +1067,14 @@ func (ts *TacticalScheduler) acquireSlotLease(agentID string) (*slotLease, bool)
 		return nil, false    // Agent semaphore full
 	}
 
-	return &slotLease{global: ts.globalSemaphore, agent: agentSem}, true
+	lease := &slotLease{global: ts.globalSemaphore, agent: agentSem, agentID: agentID, owner: ts}
+	ts.leaseStatsMu.Lock()
+	if ts.leaseAcquired == nil {
+		ts.leaseAcquired = make(map[string]int)
+	}
+	ts.leaseAcquired[agentID]++
+	ts.leaseStatsMu.Unlock()
+	return lease, true
 }
 
 // releaseSlots releases one global and one per-agent slot this agent
@@ -965,6 +1136,12 @@ func (ts *TacticalScheduler) holdStepSlot(stepID string, lease *slotLease) {
 	}
 	ts.slotLeases[stepID] = lease
 	ts.slotLeaseMu.Unlock()
+	ts.leaseStatsMu.Lock()
+	if ts.leaseHoldRequests == nil {
+		ts.leaseHoldRequests = make(map[string]int)
+	}
+	ts.leaseHoldRequests[lease.agentID]++
+	ts.leaseStatsMu.Unlock()
 }
 
 // releaseStepSlot returns the slot this step acquired, once. A step with

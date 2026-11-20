@@ -365,7 +365,24 @@ func (l *AgentLoop) parkThrottledTurn(ctx context.Context, terr *llm.ThrottleBac
 
 	// Compose the schedule from the failure policy (D8): exponential step
 	// from the throttle base, server RetryAt honored when later, horizon cap.
-	plan := llm.DefaultBackoffPlan(llm.FailureThrottle, now, currentFailurePolicyDefaults())
+	// Gate T8 (01-safety/05): an UNCONFIGURED failure policy is the zero
+	// value (Base=0, Max=0, Horizon=0) -- NextAttempt then pins resumeAt to
+	// now and Park refuses ("already due"), so every park on a daemon (or
+	// test loop) without explicit policy config silently failed and the
+	// turn surfaced as an error/empty success. Fall back to the declared
+	// policy defaults whenever the installed config cannot produce a
+	// future resume time.
+	policy := currentFailurePolicyDefaults()
+	if policy.BaseThrottle <= 0 {
+		policy.BaseThrottle = 30 * time.Second
+	}
+	if policy.PollFloor <= 0 {
+		policy.PollFloor = time.Hour
+	}
+	if policy.Horizon <= 0 {
+		policy.Horizon = 24 * time.Hour
+	}
+	plan := llm.DefaultBackoffPlan(llm.FailureThrottle, now, policy)
 	attempt := terr.Attempt
 	if boost := ThrottleParkAttemptFromContext(ctx); boost > attempt {
 		attempt = boost
@@ -621,6 +638,17 @@ func (l *AgentLoop) resumeThrottledTurn(ctx context.Context, rec ParkedTurnRecor
 		resumeCtx = tools.ContextWithAutonomous(resumeCtx)
 	}
 	reply, err := l.RunOnceWithParts(resumeCtx, turn.Message, turn.Parts, turn.ConversationID)
+	// Gate T8 (01-safety/05): explicit re-park sentinel -- the resumed
+	// turn parked again on the throttle parker (grown attempt already
+	// encoded by parkThrottledTurn). Defer delivery: the NEXT resume
+	// owns persist/send/terminal. Never log this as a resume failure.
+	if errors.Is(err, ErrTurnParked) {
+		l.logger.Info("resumed throttle turn re-parked mid-flight -- deferring delivery",
+			"session_id", rec.SessionID,
+			"conversation_id", rec.ConversationID,
+		)
+		return
+	}
 	if err != nil {
 		// D9 park-not-fail parity (quota resume, handler.go): a classified
 		// provider wait that surfaces DURING the resume must re-park, not

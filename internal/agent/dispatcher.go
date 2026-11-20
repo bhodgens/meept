@@ -40,6 +40,14 @@ var anaphoraForRegex = regexp.MustCompile(`do the same for (.+)`)
 // abc123def456...") matches despite the space between keyword and secret.
 var secretShape = regexp.MustCompile(`(?i)(sk-|api[_-]?key|bearer|token)\s*[^\s]{8,}`)
 
+// scrubSecretShapes masks obvious key/token shapes in dispatch-evidence
+// input text before persist (C5, 02-routing/02: input_summary bounded and
+// never leaking secrets). Each match is replaced with "[redacted]"; the
+// rest of the text survives so the evidence row stays useful.
+func scrubSecretShapes(s string) string {
+	return secretShape.ReplaceAllString(s, "[redacted]")
+}
+
 // reRouteWindow bounds the re-route detector (classifier-outcome-loop leaf 03,
 // Signal A; design.md S2): a classified dispatch is marked 'corrected' only
 // when the same session lands on a DIFFERENT agent within this many turns.
@@ -137,6 +145,12 @@ type Intent struct {
 	// (keyword/heuristic/guard/etc.) and when all LLM candidates failed —
 	// honest provenance: no model, no attribution.
 	Model string `json:"model,omitempty"`
+	// Notice carries user-facing classification-degradation guidance
+	// (20261119-usability-remediation C1, 02-routing leaf 01). Set on
+	// degraded classify lanes from llm.ClassificationUserGuidance for the
+	// observed failure; ClassifyAndRoute copies it to
+	// DispatchResult.ClassificationNotice. Empty on healthy classification.
+	Notice string `json:"classification_notice,omitempty"`
 }
 
 // MemoryContext wraps memory results with conversation metadata.
@@ -177,6 +191,18 @@ type ModelReassignmentDirective struct {
 type DispatchResult struct {
 	// Task is the created task if any.
 	Task *task.Task `json:"task,omitempty"`
+	// ThreadConversationID is the turn's thread-scoped conversation ID,
+	// resolved ONCE in ClassifyAndRoute from the FULL input (02-routing/03
+	// T3). RouteToAgent and every downstream key (memory, queue) reuse it
+	// instead of re-resolving from the truncated Intent.Summary. Empty
+	// means no thread router is wired or resolution failed (session id
+	// remains the key).
+	ThreadConversationID string `json:"thread_conversation_id,omitempty"`
+	// CrossThreadContext is the cross-thread continuity block captured
+	// ONCE in ClassifyAndRoute (02-routing/03 T3). buildContextMessage
+	// renders it verbatim instead of re-consulting the thread router /
+	// session store inside RouteToAgent. Operational metadata.
+	CrossThreadContext string `json:"-"`
 	// AgentID is the agent that will handle the request.
 	AgentID string `json:"agent_id"`
 	// Intent is the classified intent.
@@ -469,6 +495,14 @@ type Dispatcher struct {
 	// SetFenceController setter are REMOVED — zero production callers
 	// (grep-verified).
 	fenceFactory sessionFenceFactory
+
+	// scopedLoops caches the per-conversation loops built by
+	// scopedSessionLoop when the loop manager is unavailable or failed
+	// (usability 02-routing/04 T3). Keyed by conversation id; NEVER
+	// shares state with the registry singleton. scopedLoopsMu protects
+	// the map.
+	scopedLoops   map[string]*AgentLoop
+	scopedLoopsMu sync.Mutex
 }
 
 // mediaURLPattern matches YouTube URL forms (hostnames + path shapes).
@@ -951,6 +985,7 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 	// memory retrieval and routing use the thread-specific ID, while
 	// session-level operations (session tracker) continue using sessionID.
 	conversationID := sessionID
+	threadResolved := false
 	if d.threadRouter != nil {
 		convID, err := d.threadRouter.GetThreadConversationID(ctx, sessionID, input)
 		if err != nil {
@@ -958,8 +993,23 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 				"session", sessionID, "error", err)
 		} else {
 			conversationID = convID
+			threadResolved = true
 		}
 	}
+	// Single thread resolution (02-routing/03 T3): every DispatchResult
+	// this turn returns carries the id resolved here from the FULL input.
+	// The deferred stamp covers the early-return lanes (named-agent,
+	// prefilter, clarification, media guard, continuation) as well as the
+	// main result; RouteToAgent reuses it with zero extra router consults.
+	var turnResult *DispatchResult
+	defer func() {
+		if turnResult != nil && threadResolved && turnResult.ThreadConversationID == "" {
+			turnResult.ThreadConversationID = conversationID
+		}
+		if turnResult != nil && d.threadRouter != nil && turnResult.CrossThreadContext == "" {
+			turnResult.CrossThreadContext = d.threadRouter.CrossThreadContext(sessionID, "")
+		}
+	}()
 
 	if conversationID != sessionID {
 		d.logger.Debug("Thread routing resolved conversation ID",
@@ -975,7 +1025,9 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 			d.logger.Info("Detected clarification follow-up, resuming classification",
 				"session", sessionID,
 			)
-			return d.ResumeAfterClarification(ctx, pending.OriginalInput, input, sessionID)
+			var routeErr error
+			turnResult, routeErr = d.ResumeAfterClarification(ctx, pending.OriginalInput, input, sessionID)
+			return turnResult, routeErr
 		}
 	}
 
@@ -1000,7 +1052,7 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 						// steered text no longer begins with /plan.
 						return d.ClassifyAndRoute(ctx, steer, sessionID, parts, agentOverride, requestModel)
 					}
-					return &DispatchResult{Response: reply}, nil
+					turnResult = &DispatchResult{Response: reply}
 				}
 			}
 			if d.planManager != nil {
@@ -1025,7 +1077,9 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 				// /plan inside a non-general thread was invisible to every
 				// digest/recall lookup. See the thread-isolation contract at
 				// RouteToAgent.
-				return d.routeToPlan(ctx, desc, planIntent, sessionID)
+				var routeErr error
+				turnResult, routeErr = d.routeToPlan(ctx, desc, planIntent, sessionID)
+				return turnResult, routeErr
 			}
 		}
 		skillName, skillInput := d.parseSkillInvocation(input)
@@ -1034,7 +1088,9 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 				"skill", skillName,
 				"session", sessionID,
 			)
-			return d.executeSkill(ctx, skill, skillInput, conversationID)
+			var routeErr error
+			turnResult, routeErr = d.executeSkill(ctx, skill, skillInput, conversationID)
+			return turnResult, routeErr
 		}
 		// Check template registry if no skill matched
 		if d.templateRegistry != nil {
@@ -1077,13 +1133,14 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 		if d.sessionTracker != nil {
 			d.sessionTracker.RecordIntent(sessionID, intent, intent.AgentType)
 		}
-		return &DispatchResult{
+		turnResult = &DispatchResult{
 			ModelDirective:      parseResult.Directive,
 			Intent:              intent,
 			ClarificationReply:  d.buildClarificationQuestion(parseResult.Directive),
 			ClarificationNeeded: true,
 			AgentID:             config.AgentIDChat,
-		}, nil
+		}
+		return turnResult, nil
 	}
 
 	// 3. Build memory context with thread-aware conversation ID
@@ -1134,7 +1191,7 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 				"agent", namedID,
 				"session", sessionID,
 			)
-			return &DispatchResult{
+			turnResult = &DispatchResult{
 				AgentID:              namedID,
 				Intent:               nameIntent,
 				MemoryContext:        memCtx.Results,
@@ -1145,7 +1202,8 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 				ExecutorModelRef:     executorModelRefFromDirective(parseResult.Directive),
 				RequestModel:         requestModel,
 				AgentOverrideApplied: true,
-			}, nil
+			}
+			return turnResult, nil
 		}
 	}
 
@@ -1242,7 +1300,7 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 				"has_task", false,
 				"has_model_override", parseResult.Found,
 			)
-			return &DispatchResult{
+			turnResult = &DispatchResult{
 				AgentID:          pi.AgentType,
 				Intent:           pi,
 				MemoryContext:    memCtx.Results,
@@ -1251,7 +1309,8 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 				Parts:            parts,
 				SuggestedMode:    pi.SuggestedMode,
 				PrefilterVerdict: pfVerdict,
-			}, nil
+			}
+			return turnResult, nil
 		}
 		if pfVerdict != nil && !pfVerdict.Suppressed {
 			// Abstained with a real vote nearby (the margin this leaf
@@ -1280,7 +1339,9 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 			// classification stand; only genuinely context-less inputs
 			// (empty digest) get the clarification prompt.
 			if analysis.IsAmbiguous(d.intentAnalyzer.ambiguityThreshold) && digest.IsEmpty() {
-				return d.buildClarificationResult(input, analysis, sessionID)
+				var routeErr error
+				turnResult, routeErr = d.buildClarificationResult(input, analysis, sessionID)
+				return turnResult, routeErr
 			}
 			// Store analysis for downstream use (e.g. planner interview mode)
 			memCtx.LastIntent = &Intent{
@@ -1301,7 +1362,7 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 	if d.isInstructionInput(resolvedInput) && d.instructionParser != nil {
 		parsed, err := d.instructionParser.Parse(ctx, resolvedInput)
 		if err == nil && parsed.Confidence >= 0.5 {
-			return &DispatchResult{
+			turnResult = &DispatchResult{
 				Intent: &Intent{
 					Type:       string(IntentInstruction),
 					Confidence: parsed.Confidence,
@@ -1311,7 +1372,8 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 				},
 				AgentID:     config.AgentIDChat,
 				Instruction: parsed,
-			}, nil
+			}
+			return turnResult, nil
 		}
 	}
 
@@ -1330,7 +1392,9 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 	// thread-isolated (see RouteToAgent).
 	multiIntent := d.classifyMultiIntent(ctx, resolvedInput, memCtx)
 	if multiIntent.IsCompound {
-		return d.routeCompoundWithModel(ctx, multiIntent, input, sessionID, parseResult.Directive)
+		var routeErr error
+		turnResult, routeErr = d.routeCompoundWithModel(ctx, multiIntent, input, sessionID, parseResult.Directive)
+		return turnResult, routeErr
 	}
 
 	// 4.5b. Media-URL guard: a media-CONSUMPTION request carrying a
@@ -1363,14 +1427,15 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 		if d.sessionTracker != nil {
 			d.sessionTracker.RecordIntent(sessionID, mediaIntent, mediaIntent.AgentType)
 		}
-		return &DispatchResult{
+		turnResult = &DispatchResult{
 			AgentID:       mediaIntent.AgentType,
 			Intent:        mediaIntent,
 			MemoryContext: memCtx.Results,
 			OriginalInput: input,
 			Parts:         parts,
 			SuggestedMode: mediaIntent.SuggestedMode,
-		}, nil
+		}
+		return turnResult, nil
 	}
 
 	// 4. Classify primary intent
@@ -1431,7 +1496,20 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 	// SourceSession, both of which are session-store lookup keys. See the
 	// compound-route comment above.
 	if d.planManager != nil && d.planManager.ShouldCreatePlan(intent.Type, 0) {
-		return d.routeToPlanWithOverride(ctx, input, intent, sessionID, agentOverrideApplied)
+		var routeErr error
+		turnResult, routeErr = d.routeToPlanWithOverride(ctx, input, intent, sessionID, agentOverrideApplied)
+		return turnResult, routeErr
+	}
+
+	// Continuation route (02-routing/03): a non-command follow-up on a
+	// session holding a PARKED PLANNING task with a plan_draft refines
+	// THAT task's draft instead of minting a new task. Explicit new-work
+	// commands fall through to normal task creation.
+	if cont, handled, contErr := d.tryDraftContinuation(ctx, input, sessionID, conversationID, agentOverride); contErr != nil {
+		return nil, contErr
+	} else if handled {
+		turnResult = cont
+		return turnResult, nil
 	}
 
 	// 6. Create task if needed (for trackable work). Task creation is
@@ -1461,12 +1539,21 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 		Parts:            parts,
 		SuggestedMode:    intent.SuggestedMode,
 		ExecutorModelRef: executorModelRefFromDirective(parseResult.Directive),
+		// Single thread resolution (02-routing/03 T3): the id resolved
+		// above from the FULL input rides the result so RouteToAgent and
+		// every downstream key reuse it -- never re-derived from the
+		// truncated Intent.Summary.
+		ThreadConversationID: threadConvIDForResult(d, sessionID, conversationID),
 		// Client-supplied per-request model (chat.request "model").
 		// Rides the result so RouteToAgent applies it to the executor
 		// loop's one-shot override seam. Empty = no request-level model.
 		RequestModel: requestModel,
 
 		AgentOverrideApplied: agentOverrideApplied,
+		// Degraded-lane disclosure (02-routing/01, C1 routing_notice):
+		// the classify chain attaches guidance when the LLM classifier
+		// failed and a fallback lane answered.
+		ClassificationNotice: intent.Notice,
 	}
 
 	// Attach model override to task metadata if task was created
@@ -1523,7 +1610,8 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 	// Record intent in session tracker
 	d.sessionTracker.RecordIntent(sessionID, intent, intent.AgentType)
 
-	return result, nil
+	turnResult = result
+	return turnResult, nil
 }
 
 // 1. Short-message guard: brief inputs route directly to chat (Issues 0006, 0029, 0036)
@@ -1637,6 +1725,11 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 			)
 		}
 	}
+
+	// degradedNotice carries user-facing guidance when the LLM classifier
+	// failed and a later lane answers the turn (02-routing/01, C1
+	// routing_notice). Empty when classification did not degrade.
+	degradedNotice := ""
 
 	// Step 2: Try LLM classifier if available
 	if d.llmClassifier != nil {
@@ -1773,8 +1866,7 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 				d.recordClassificationMethod("platform_action_arbitration")
 			} else if d.gitVerbAgreementVeto &&
 				intent.Type == string(IntentGit) &&
-				!inputContainsGitVerb(input) &&
-				hasLeadingImperativeVerb(input) {
+				!inputContainsGitVerb(input) {
 				// Git-verb agreement veto (issue #46, bench gate
 				// 2026-09-15): the 350M prompt-router scored "Create a
 				// file named X in the repository root …" intent=git
@@ -1782,12 +1874,16 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 				// the git lane (confirmed by direct encoder probing:
 				// "current directory" routes tooluse, "repository root"
 				// routes git, deterministic). A git verdict on an
-				// imperative that names NO git action is a lexical
-				// bias, and the committer runs contextless — worse
-				// than a misroute. Discard the verdict so the chain
-				// continues; the recall branch above keeps its
-				// priority (F41 branch order).
-				d.logger.Info("git verdict vetoed (no git verb in imperative input)",
+				// input that names NO git action is a lexical bias
+				// regardless of grammatical shape (02-routing/01:
+				// the old leading-imperative gate let question-shaped,
+				// declarative, and polite edit requests keep the git
+				// costume and reach the contextless committer). The
+				// bias is shape-independent, so the veto is too.
+				// Discard the verdict so the chain continues; the
+				// recall branch above keeps its priority (F41 branch
+				// order).
+				d.logger.Info("git verdict vetoed (no git verb in input; shape-independent)",
 					"verdict", intent.Type,
 					"llm_confidence", intent.Confidence,
 					"input_len", len(input),
@@ -1919,8 +2015,13 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 					AgentType:  config.AgentIDChat,
 					Summary:    extractSummary(input),
 					Method:     "llm_empty_fallback_chat",
+					Notice:     llm.ClassificationUserGuidance(err),
 				}, nil
 			}
+			// Non-empty failure: the chain degrades to keyword/semantic/
+			// heuristic/fallback below. Carry the guidance so whichever
+			// lane answers discloses the degradation (C1 routing_notice).
+			degradedNotice = llm.ClassificationUserGuidance(err)
 		}
 	}
 
@@ -1936,6 +2037,7 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 			d.recordAgent(intent.AgentType)
 			d.recordIntentType(intent.Type)
 			intent.Method = "keyword"
+			intent.Notice = degradedNotice
 			return d.applyContextWeighting(intent, memCtx, input), nil
 		}
 		if intent != nil {
@@ -1969,6 +2071,7 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 			}
 			d.recordClassificationMethod("semantic")
 			intent.Method = "semantic"
+			intent.Notice = degradedNotice
 			d.recordAgent(intent.AgentType)
 			d.recordIntentType(intent.Type)
 			return d.applyContextWeighting(intent, memCtx, input), nil
@@ -1987,6 +2090,7 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 		d.recordAgent(heuristic.AgentType)
 		d.recordIntentType(heuristic.Type)
 		heuristic.Method = "heuristic_fallback"
+		heuristic.Notice = degradedNotice
 		return d.applyContextWeighting(heuristic, memCtx, input), nil
 	}
 
@@ -2007,6 +2111,7 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 		RequiresPlanning: true,
 		Summary:          "Could not determine intent; planning and executing with clarification as needed",
 		Method:           "fallback",
+		Notice:           degradedNotice,
 	}, nil
 
 }
@@ -2449,12 +2554,13 @@ func (d *Dispatcher) ResumeAfterClarification(ctx context.Context, originalInput
 			}
 
 			result := &DispatchResult{
-				Task:          createdTask,
-				AgentID:       intent.AgentType,
-				Intent:        intent,
-				MemoryContext: memCtx.Results,
-				OriginalInput: combinedInput,
-				SuggestedMode: intent.SuggestedMode,
+				Task:                 createdTask,
+				AgentID:              intent.AgentType,
+				Intent:               intent,
+				MemoryContext:        memCtx.Results,
+				OriginalInput:        combinedInput,
+				SuggestedMode:        intent.SuggestedMode,
+				ClassificationNotice: intent.Notice,
 			}
 
 			d.logger.Info("Clarification resolved, routed normally",
@@ -3092,8 +3198,22 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 	// fell back to the daemon CWD (task-state-04 e2e, verified live
 	// 2026-09-24) — a thread id is not a session key, and thread routing
 	// never has a session-provenance meaning.
-	if d.threadRouter != nil {
-		resolved, err := d.threadRouter.GetThreadConversationID(ctx, conversationID, result.Intent.Summary)
+	if result.ThreadConversationID != "" {
+		// Single resolution (02-routing/03 T3): ClassifyAndRoute already
+		// resolved the thread from the FULL input; reuse it verbatim so
+		// memory and queue keys can never diverge. No router consult.
+		if result.ThreadConversationID != conversationID {
+			conversationID = result.ThreadConversationID
+		}
+	} else if d.threadRouter != nil {
+		// Legacy results without a carried id (hand-built DispatchResults):
+		// resolve ONCE on the FULL original input, never the truncated
+		// summary (topic keywords past char 100 must not change threads).
+		resolveInput := result.OriginalInput
+		if resolveInput == "" {
+			resolveInput = result.Intent.Summary
+		}
+		resolved, err := d.threadRouter.GetThreadConversationID(ctx, conversationID, resolveInput)
 		if err != nil {
 			d.logger.Warn("thread router lookup failed, falling back to conversation ID",
 				"conversation", conversationID,
@@ -3724,16 +3844,18 @@ func (d *Dispatcher) resolveAgent(agentID, conversationID string) *AgentLoop {
 						}
 					}
 				}
-				// Session-scoped loop unavailable or failed; fall back to
-				// mutating the singleton with a warning — this is a known
-				// race that only manifests under concurrent multi-session load.
-				if agent, agentErr := d.registry.Get(agentID); agentErr == nil {
-					d.logger.Warn("resolveAgent: mutating shared singleton workingDir (race risk)",
+				// Session-scoped loop unavailable or failed: bind a
+				// per-turn scoped loop to the session's directory
+				// instead of mutating the shared singleton
+				// (usability 02-routing/04 T3, R5/A2). The singleton
+				// retarget leaked one session's project into every
+				// other session's tools under concurrent load.
+				if scoped := d.scopedSessionLoop(agentID, conversationID, projectPath, sess); scoped != nil {
+					d.logger.Warn("resolveAgent: session loop manager unavailable; using a per-turn scoped loop",
 						"conversation_id", conversationID,
 						"project_path", projectPath,
 					)
-					agent.SetWorkingDir(projectPath)
-					return agent
+					return scoped
 				}
 			}
 		}
@@ -3759,18 +3881,82 @@ func (d *Dispatcher) resolveAgent(agentID, conversationID string) *AgentLoop {
 	return agent
 }
 
+// scopedSessionLoop builds (and caches) a per-conversation loop bound to
+// the session's working directory WITHOUT the loop manager. Used by the
+// resolveAgent fallback when GetOrCreateWired is unavailable or failed:
+// the turn gets a real session-scoped loop instead of retargeting the
+// shared registry singleton, so concurrent sessions never cross
+// directories (usability 02-routing/04 T3, R5/A2). The shared singleton
+// and its workingDir stay untouched; a cached loop with a different
+// workingDir is replaced (project changed mid-session).
+func (d *Dispatcher) scopedSessionLoop(agentID, conversationID, workingDir string, sess *session.Session) *AgentLoop {
+	if conversationID == "" || workingDir == "" {
+		return nil
+	}
+	d.scopedLoopsMu.Lock()
+	var stale *AgentLoop
+	if existing, ok := d.scopedLoops[conversationID]; ok && existing != nil {
+		if existing.GetWorkingDir() == workingDir {
+			d.scopedLoopsMu.Unlock()
+			return existing
+		}
+		stale = existing
+		delete(d.scopedLoops, conversationID)
+	}
+	d.scopedLoopsMu.Unlock()
+	if stale != nil {
+		stale.Close()
+	}
+
+	template, templateErr := d.registry.Get(agentID)
+	if templateErr != nil || template == nil {
+		template, templateErr = d.registry.Get(config.AgentIDChat)
+	}
+	if templateErr != nil || template == nil {
+		d.logger.Warn("resolveAgent: no template loop for scoped session loop; refusing",
+			"conversation_id", conversationID,
+		)
+		return nil
+	}
+	loop := NewAgentLoop(conversationID, workingDir, template.ConfigSnapshot()...)
+	if loop == nil {
+		return nil
+	}
+	if sess != nil {
+		loop.SetProjectID(sess.ProjectID)
+		loop.SetScopeUserID(sess.OwnerID)
+		if sess.DetectionContext != nil {
+			loop.SetDetectionContext(&DetectionContext{
+				CWD:               sess.DetectionContext.CWD,
+				DetectedProjectID: sess.DetectionContext.DetectedProjectID,
+				CLIArgs:           sess.DetectionContext.CLIArgs,
+			})
+		}
+	}
+	if fence := injectSessionFence(template.security, d.fenceFactory, workingDir, sess != nil && sess.NoFence); fence != nil {
+		loop.SetSecurityChecker(fence)
+	}
+
+	d.scopedLoopsMu.Lock()
+	if d.scopedLoops == nil {
+		d.scopedLoops = make(map[string]*AgentLoop)
+	}
+	d.scopedLoops[conversationID] = loop
+	d.scopedLoopsMu.Unlock()
+	return loop
+}
+
 // The primary content is the full original user input (result.OriginalInput);
 // a brief summary is prepended only when it differs from the full input.
 func (d *Dispatcher) buildContextMessage(result *DispatchResult, conversationID string) string {
 	var parts []string
 
-	// Inject cross-thread context so the active thread has continuity with
-	// prior topics. Without this, switching threads loses all context from
-	// inactive threads.
-	if d.threadRouter != nil && conversationID != "" {
-		if crossCtx := d.threadRouter.CrossThreadContext(conversationID, ""); crossCtx != "" {
-			parts = append(parts, crossCtx)
-		}
+	// Cross-thread continuity (02-routing/03 T3: zero extra router/store
+	// consults inside RouteToAgent). ClassifyAndRoute captures the
+	// cross-thread context once per turn on DispatchResult; this render
+	// reuses it verbatim.
+	if result.CrossThreadContext != "" {
+		parts = append(parts, result.CrossThreadContext)
 	}
 
 	// Add relevant memory context. Stable/volatile split (leaf 03 C6,
@@ -4716,13 +4902,43 @@ func (d *Dispatcher) ToolRegistry() *DepthToolRegistry {
 // RecordDispatch logs a dispatch routing decision from the handler switch for
 // debugging and persistent audit trail. This is the public entry point called
 // by ChatHandler after it determines which case handled the result.
+//
+// The legacy 6-arg form is kept for existing callers/tests: it records the
+// S4 privacy shape (empty input_summary, no turn id). Live dispatches go
+// through RecordDispatchCtx, which carries the request context so the row
+// gets the turn id (C5, 02-routing/02) and the bounded full input text.
 func (d *Dispatcher) RecordDispatch(sessionID, handlerCase, inputSummary string, result *DispatchResult, hasParts bool, dispatchErr error) {
 	d.recordDispatch(sessionID, handlerCase, inputSummary, result, hasParts, dispatchErr)
 }
 
+// RecordDispatchCtx is the live-dispatch entry point: the request context
+// supplies the chat.submit turn id (WithChatTurnID seam) and the FULL input
+// text (result.OriginalInput, falling back to inputSummary) is persisted
+// bounded for the dispatch-evidence surface (C5, 02-routing/02 open item).
+func (d *Dispatcher) RecordDispatchCtx(ctx context.Context, sessionID, handlerCase, inputSummary string, result *DispatchResult, hasParts bool, dispatchErr error) {
+	d.recordDispatchEvidence(ctx.Value(dispatchEvidenceKey{}) != nil, ctx, sessionID, handlerCase, inputSummary, result, hasParts, dispatchErr)
+}
+
+// dispatchEvidenceKey marks a request context as a live dispatch whose
+// evidence row carries the bounded full input + turn id (C5).
+type dispatchEvidenceKey struct{}
+
+// withDispatchEvidence stamps the chat.submit turn id AND the evidence
+// marker onto the request context for RecordDispatchCtx.
+func withDispatchEvidence(ctx context.Context) context.Context {
+	return context.WithValue(ctx, dispatchEvidenceKey{}, true)
+}
+
 // recordDispatch logs a dispatch routing decision to both the structured logger
-// (debug level) and the persistent metrics store (if wired).
+// (debug level) and the persistent metrics store (if wired). Legacy shape:
+// empty input_summary, no turn id (S4 privacy pins).
 func (d *Dispatcher) recordDispatch(sessionID, handlerCase, inputSummary string, result *DispatchResult, hasParts bool, dispatchErr error) {
+	d.recordDispatchEvidence(false, context.Background(), sessionID, handlerCase, inputSummary, result, hasParts, dispatchErr)
+}
+
+// recordDispatchEvidence is the shared body; evidence=true marks the live
+// dispatch-evidence path (bounded full input + turn id persisted, C5).
+func (d *Dispatcher) recordDispatchEvidence(evidence bool, ctx context.Context, sessionID, handlerCase, inputSummary string, result *DispatchResult, hasParts bool, dispatchErr error) {
 	intentType := ""
 	agentID := ""
 	confidence := 0.0
@@ -4779,14 +4995,15 @@ func (d *Dispatcher) recordDispatch(sessionID, handlerCase, inputSummary string,
 	)
 
 	if d.metricsStore != nil {
-		// Privacy: the raw input summary is used only for the log line --
-		// it must NOT reach the DB. inputHash of the full raw input
-		// replaces it as the join/dedup key (classifier-observability S4).
-		// The hasher is daemon-injected; nil => "" preserves the
-		// multi-user-disabled (unwired) path invariant. The hash covers
-		// result.OriginalInput (the full raw input, set by the main
-		// routing paths) when present, falling back to the passed input
-		// summary on paths that don't populate it.
+		// Privacy (classifier-observability S4): the raw input summary is
+		// used only for the log line on the legacy path. The live
+		// dispatch-evidence path (C5, 02-routing/02) persists the bounded
+		// FULL input text instead; inputHash of the full raw input remains
+		// the join/dedup key on both paths. The hasher is daemon-injected;
+		// nil => "" preserves the multi-user-disabled (unwired) path
+		// invariant. The hash covers result.OriginalInput (the full raw
+		// input, set by the main routing paths) when present, falling back
+		// to the passed input summary on paths that don't populate it.
 		inputHash := ""
 		if d.inputHasher != nil {
 			hashInput := inputSummary
@@ -4815,9 +5032,23 @@ func (d *Dispatcher) recordDispatch(sessionID, handlerCase, inputSummary string,
 		// first dispatch of a session is turn 1. The COUNT is index-backed
 		// and session rows are bounded by 30-day retention.
 		turnNo := d.metricsStore.CountDispatchRows(sessionID) + 1
+		// Dispatch evidence (C5, 02-routing/02 open item, closed here):
+		// live rows carry the bounded FULL input text and the chat.submit
+		// turn id from the request context. The store bounds the summary
+		// to 200 runes; secret-shaped text is scrubbed before persist.
+		persistSummary := ""
+		turnID := ""
+		if evidence {
+			persistSummary = inputSummary
+			if result != nil && result.OriginalInput != "" {
+				persistSummary = result.OriginalInput
+			}
+			persistSummary = scrubSecretShapes(persistSummary)
+			turnID = ChatTurnIDFromContext(ctx)
+		}
 		d.metricsStore.RecordDispatch(metrics.DispatchEntry{
 			SessionID:        sessionID,
-			InputSummary:     "",
+			InputSummary:     persistSummary,
 			IntentType:       intentType,
 			AgentID:          agentID,
 			Confidence:       confidence,
@@ -4831,6 +5062,7 @@ func (d *Dispatcher) recordDispatch(sessionID, handlerCase, inputSummary string,
 			Margin:           pfMargin,
 			TurnNo:           turnNo,
 			Outcome:          "pending",
+			TurnID:           turnID,
 		})
 
 		// Re-route detector (classifier-outcome-loop leaf 03, Signal A):

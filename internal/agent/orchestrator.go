@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -439,11 +440,24 @@ func (o *Orchestrator) handleJobCompleted(ctx context.Context, msg *models.BusMe
 	// previous ralph-replan early return) left the task non-terminal, so
 	// waitForTaskCompletion blocked until its 10-minute cap — meept-bench
 	// timed out even after answer.txt was written.
+	//
+	// Gate T4a (04-clutter/01, F-ORCH-6): a completion whose job maps to NO
+	// step row is a side job (memory.l1_extract, ambient capture) - an
+	// expected visitor, not an incident. The step-not-found miss logs at
+	// Debug and emits no user-facing event; every other completion failure
+	// stays at ERROR (real step failures keep flowing through
+	// handleJobFailed -> task.error, pinned by the gate).
 	if err := o.tactical.OnJobCompleted(ctx, event.JobID, event.Result, event.ClaimToken); err != nil {
-		o.logger.Error("Failed to handle job completion",
-			"job_id", event.JobID,
-			"error", err,
-		)
+		if errors.Is(err, task.ErrStepNotFound) {
+			o.logger.Debug("Side-job completion (no step mapping); nothing to record",
+				"job_id", event.JobID,
+			)
+		} else {
+			o.logger.Error("Failed to handle job completion",
+				"job_id", event.JobID,
+				"error", err,
+			)
+		}
 	}
 
 	// Check if this was the last active step for the task; if so, release

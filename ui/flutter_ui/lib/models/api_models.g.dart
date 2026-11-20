@@ -21,6 +21,8 @@ _$ChatMessageImpl _$$ChatMessageImplFromJson(Map<String, dynamic> json) =>
               ?.map((e) => ChatMessagePart.fromJson(e as Map<String, dynamic>))
               .toList() ??
           const [],
+      turnId: json['turn_id'] as String? ?? '',
+      taskId: json['task_id'] as String? ?? '',
     );
 
 Map<String, dynamic> _$$ChatMessageImplToJson(_$ChatMessageImpl instance) =>
@@ -32,6 +34,8 @@ Map<String, dynamic> _$$ChatMessageImplToJson(_$ChatMessageImpl instance) =>
       'session_id': instance.sessionId,
       'tool_calls': instance.toolCalls,
       'parts': instance.parts,
+      'turn_id': instance.turnId,
+      'task_id': instance.taskId,
     };
 
 _$DetectionContextImpl _$$DetectionContextImplFromJson(

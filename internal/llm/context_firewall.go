@@ -297,6 +297,14 @@ type ContextFirewall struct {
 	compactionFallbacks   atomic.Uint64
 	compactionTokensSaved atomic.Uint64
 	restartEvents         atomic.Uint64
+	// systemTruncations counts oversized-system-message bounding events
+	// (gate T4c, F-NEW-8): the disclosure counter the turn funnel and
+	// operators read. truncationNoticePending is the one-shot flag behind
+	// TruncationNotice(): set on a truncation, taken by the first reader
+	// so the disclosure lands exactly once per event, never on every
+	// later turn.
+	systemTruncations       atomic.Uint64
+	truncationNoticePending atomic.Bool
 }
 
 // FirewallStats is a snapshot of firewall counters including compression stats.
@@ -319,19 +327,23 @@ type FirewallStats struct {
 	CompactionTokensSaved uint64
 	// Restart stats (overflow strategy: restart)
 	RestartEvents uint64
+	// SystemMessageTruncations counts oversized-system-message bounding
+	// events (gate T4c, F-NEW-8) -- the user-visibility disclosure counter.
+	SystemMessageTruncations uint64
 }
 
 // Stats returns a snapshot of firewall counters. When proactive compression
 // is enabled, compression counters are populated from the internal compressor.
 func (f *ContextFirewall) Stats() FirewallStats {
 	stats := FirewallStats{
-		SummarizationFailures: f.summarizationFailures.Load(),
-		DroppedMessages:       f.droppedMessages.Load(),
-		DropEvents:            f.dropEvents.Load(),
-		CompactionEvents:      f.compactionEvents.Load(),
-		CompactionFallbacks:   f.compactionFallbacks.Load(),
-		CompactionTokensSaved: f.compactionTokensSaved.Load(),
-		RestartEvents:         f.restartEvents.Load(),
+		SummarizationFailures:    f.summarizationFailures.Load(),
+		DroppedMessages:          f.droppedMessages.Load(),
+		DropEvents:               f.dropEvents.Load(),
+		CompactionEvents:         f.compactionEvents.Load(),
+		CompactionFallbacks:      f.compactionFallbacks.Load(),
+		CompactionTokensSaved:    f.compactionTokensSaved.Load(),
+		RestartEvents:            f.restartEvents.Load(),
+		SystemMessageTruncations: f.systemTruncations.Load(),
 	}
 
 	if f.compressor != nil {
@@ -591,11 +603,21 @@ func (f *ContextFirewall) processMessages(ctx context.Context, messages []ChatMe
 	// an unknown window (ContextLimit==0), a nil model, or a disabled
 	// firewall — otherwise an oversized system message (e.g. a full skill
 	// catalog) ships unbounded exactly where no other reduction runs.
-	// Small system messages pass byte-identically.
+	// Small system messages pass byte-identical.
+	//
+	// Gate T4c (04-clutter/01, F-NEW-8): this is the ONE truncation WARN
+	// site. The final safety net below skips messages this pass already
+	// bounded (clippedSystemContents), so an oversized system message logs
+	// exactly one WARN per event instead of the old double. The truncation
+	// is also DISCLOSED, never silent: a per-conversation pending notice
+	// (carrySystemTruncationNotice) rides the turn funnel as user-visible
+	// guidance, and Stats() counts the events.
 	if clipped, changed := boundOversizedSystemMessages(messages); changed {
 		f.logger.Warn("context firewall: truncated oversized system message (window-independent bound)",
 			"messages", len(messages),
 		)
+		f.systemTruncations.Add(1)
+		f.truncationNoticePending.Store(true)
 		messages = clipped
 	}
 	if !f.config.Enabled || f.model == nil || f.model.ContextLimit == 0 {
@@ -1040,16 +1062,41 @@ func (f *ContextFirewall) greedyChunk(parts []string, maxChars int, sep string) 
 // scaffolding/prompt prefix; the rest remains reachable via tools.
 const maxSystemMessageBytes = 12_000
 
+// systemTruncationMarker is appended by boundOversizedSystemMessages. Its
+// presence in a system message marks the message as ALREADY bounded, which
+// makes the bound idempotent: the processMessages window-independent bound
+// and the final safety net share this function, and without the marker
+// check the net re-truncates the clipped head and logs a SECOND WARN for
+// one truncation event (F-NEW-8: 648 double WARNs in one session).
+const systemTruncationMarker = "\n[... truncated: system message exceeded context bounds; full content available via tools ...]"
+
+// TruncationNotice returns the user-visible disclosure for a pending
+// oversized-system truncation and consumes it (one disclosure per event,
+// never on every later turn). "" when nothing is pending. Gate T4c
+// (F-NEW-8): the turn funnel carries this text (C1 routing_notice lane or
+// a brief system note) so a context cut is NEVER silent to the user.
+func (f *ContextFirewall) TruncationNotice() string {
+	if !f.truncationNoticePending.CompareAndSwap(true, false) {
+		return ""
+	}
+	return "note: some background context (for example the skill catalog) exceeded the model's context window and was truncated for this conversation; ask for the full text if you need it."
+}
+
 // boundOversizedSystemMessages truncates any system message longer than
 // maxSystemMessageBytes to its head plus an elision marker. Callers should
 // pass the final reduced slice just before the model call, so no strategy can
 // ship an over-limit oversized-system message. Returns whether anything was
 // truncated. Originals are never mutated (messages are copied on write).
+//
+// Idempotent (gate T4c): a message already carrying systemTruncationMarker is
+// never re-bounded, so the two processMessages bound sites log exactly ONE
+// WARN per truncation event.
 func boundOversizedSystemMessages(messages []ChatMessage) ([]ChatMessage, bool) {
 	var out []ChatMessage
 	truncated := false
 	for i, msg := range messages {
-		if msg.Role != RoleSystem || len(msg.Content) <= maxSystemMessageBytes {
+		if msg.Role != RoleSystem || len(msg.Content) <= maxSystemMessageBytes ||
+			strings.Contains(msg.Content, systemTruncationMarker) {
 			if out != nil {
 				out = append(out, msg)
 			}

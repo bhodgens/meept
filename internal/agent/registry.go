@@ -2061,6 +2061,14 @@ func (r *AgentRegistry) RegisterActiveQueue(conversationID string, q *MessageQue
 	}
 
 	r.activeQueues[conversationID] = entry
+	// Boot-recovery inbox wiring (02-routing/03 T2): a live conversation
+	// queue is the injection target for persisted follow-ups. Recovery
+	// runs again on reconnect/turn start and delivers any rows a previous
+	// boot kept because no inbox was listening.
+	SetBootRecoveryInbox(conversationID, q)
+	if db := r.DB(); db != nil && q != nil {
+		RecoverPendingFollowUps(db, r.bus, r.logger)
+	}
 	return r.nextGen
 }
 
@@ -2075,6 +2083,9 @@ func (r *AgentRegistry) UnregisterActiveQueue(conversationID string) {
 		delete(r.activeQueues, conversationID)
 	}
 	r.activeQueuesMu.Unlock()
+
+	// Drop the boot-recovery inbox registration: the queue is closing.
+	SetBootRecoveryInbox(conversationID, nil)
 
 	if !exists {
 		return

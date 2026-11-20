@@ -140,13 +140,23 @@ func (m *ChatModel) handleTurnTerminal(msg turnTerminalMsg) tea.Cmd {
 
 	if msg.Status == turnStatusCompleted && msg.Error == "" {
 		if msg.Reply != "" {
-			if crossSession {
+			// DEDUPE (04-clutter/02, C1): the card and the terminal
+			// bubble are the same logical reply. A card-first render
+			// bound this turn's summary; the bubble is then suppressed
+			// (the turn still resolves above). A late REAL terminal is
+			// never suppressed -- a stalled notice binds nothing.
+			if !crossSession && m.duplicateTerminalReply(msg.TurnID, msg.Reply, msg.TaskID) {
+				// fall through to the loading/progress bookkeeping
+				// below without rendering the duplicate bubble.
+			} else if crossSession {
 				// Store into the owning session's transcript without
 				// rendering into the currently visible one.
 				m.appendToSessionTranscript(persistSessionID, RoleAssistant, msg.Reply)
+				m.noteTerminalReplyRendered(msg.Reply, msg.TaskID)
 			} else {
 				m.addMessage(RoleAssistant, msg.Reply)
 				m.trackDirtyMessage(RoleAssistant, msg.Reply)
+				m.noteTerminalReplyRendered(msg.Reply, msg.TaskID)
 			}
 		}
 	} else {
@@ -393,6 +403,7 @@ func (m *ChatModel) DeliverTurnTerminal(turnID string, payload map[string]any) {
 			Status:         stringFromPayload(payload, "status"),
 			Error:          stringFromPayload(payload, "error"),
 			DurationMS:     int64FromPayload(payload, "duration_ms"),
+			TaskID:         stringFromPayload(payload, "task_id"),
 		})
 		return
 	}
@@ -419,6 +430,7 @@ func (m *ChatModel) DeliverTurnTerminal(turnID string, payload map[string]any) {
 		Status:         stringFromPayload(payload, "status"),
 		Error:          stringFromPayload(payload, "error"),
 		DurationMS:     int64FromPayload(payload, "duration_ms"),
+		TaskID:         stringFromPayload(payload, "task_id"),
 	})
 }
 

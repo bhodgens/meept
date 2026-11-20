@@ -70,6 +70,13 @@ type turnTerminalMsg struct {
 	Status         string
 	Error          string
 	DurationMS     int64
+	// TaskID is the C1 identity field for the (turn_id, task_id) dedupe
+	// key (04-clutter/02, gate T6): the task the turn dispatched to, when
+	// the daemon's turn.terminal payload carries one. Empty on stalled
+	// verdicts and on relays that predate the field -- the dedupe ledger
+	// keys on turn_id alone for those (defensive shape, pinned in
+	// chat_dedupe_test.go).
+	TaskID string
 }
 
 // stalledTurnText is the honest, lowercase stalled-turn wording (UI text

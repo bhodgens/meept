@@ -31,6 +31,15 @@ var (
 	ErrInterviewPlannerMissing = errors.New("interview skipped: planner agent not available")
 	ErrInterviewGenerationFail = errors.New("interview skipped: LLM question generation failed")
 
+	// ErrPlannerUnavailable marks a planner INFRASTRUCTURE failure (no
+	// registry wired / no planner agent spec) as opposed to an LLM
+	// output problem. Gate T8 (01-safety/05): an unavailable planner can
+	// never produce a plan, so the decomposition lanes must fail the
+	// task honestly instead of degrading to generic fallback steps that
+	// "complete" with a deflection. Degradation to fallback steps stays
+	// for real planner-output failures (parse/transport) only.
+	ErrPlannerUnavailable = errors.New("planner agent unavailable")
+
 	// ErrPlannerEmptyPlan is returned when the planner LLM parses cleanly but
 	// produces zero steps. The empty-plan guard (issue #53 direction 3)
 	// matches on this sentinel with errors.Is to route to the deterministic
@@ -1055,6 +1064,13 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 			if errors.Is(err, ErrPlannerNoPlanNotArtifact) {
 				return err
 			}
+			// Gate T8 (01-safety/05): planner infrastructure failure
+			// (no registry / no planner spec) can never produce a plan;
+			// degrade-to-fallback would "complete" with a deflection.
+			// Propagate so handlePlanRequest terminalizes the task.
+			if errors.Is(err, ErrPlannerUnavailable) {
+				return err
+			}
 			sp.logger.Warn("Single-phase plan failed, using fallback steps",
 				"task_id", req.TaskID, "error", err)
 			sp.recordMetric("strategic_planner.fallback", 1, map[string]string{"intent": req.Intent, "reason": "plan_failed"})
@@ -1630,7 +1646,10 @@ func repairPromptSection(parseErr error) string {
 func (sp *StrategicPlanner) runPlannerOnceWithPrompt(ctx context.Context, req PlanRequest, extraSection string) ([]*task.TaskStep, error) {
 	plannerLoop, err := sp.registry.Get(config.AgentIDPlanner)
 	if err != nil {
-		return nil, fmt.Errorf("planner agent not available: %w", err)
+		// Gate T8 (01-safety/05): wrap with the infrastructure sentinel
+		// so the decomposition lanes fail honestly instead of falling
+		// back to generic steps when no planner can ever run.
+		return nil, fmt.Errorf("%w: planner agent not available: %w", ErrPlannerUnavailable, err)
 	}
 
 	// Build planning context section if available

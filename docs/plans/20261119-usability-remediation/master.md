@@ -251,10 +251,10 @@ green for every submitted turn. Then merge worktree -> main per skill.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|--------------|
-| 01-safety | IMPL_IN_PROGRESS | 6 | 01/04/06 GREEN committed 6c4e17fc; 02 partial committed bf3918e6 (gate-defect GATE-ADJUDICATION-T3.md); 03 bus-GREEN/ring-RED finisher sa-1-b671d901; 05 running (sa-0-0ecabcff); 07 ralph-GREEN finisher sa-0-be1e8017 (chain_stability regression + typednil Get) |
-| 02-routing | IMPL_IN_PROGRESS | 2 | 01-veto+notice COMPLETE+verified (report on disk, uncommitted); 02 metrics-GREEN rpc finisher sa-0-2ef747cc; 03 running (sa-2-d7c65d55); 04 pending |
-| 03-context | IMPL_IN_PROGRESS | 2 | 02-recall GREEN committed bf3918e6; 01 rpc-GREEN finisher sa-2-38f53efe (include_tool_calls + FK787) |
-| 04-clutter | TESTS_VALIDATED | 0 | gate committed 89e996e2 (T1-T8 RED); impl wave C pending |
+| 01-safety | IMPL_IN_PROGRESS | 6 | 01/04/06 committed 6c4e17fc; 02 partial bf3918e6 (gate-defect GATE-ADJUDICATION-T3.md OPEN); 03+07 GREEN committed 2d4cb881; 05 running (sa-0-0ecabcff) |
+| 02-routing | IMPL_IN_PROGRESS | 3 | 01+02(metrics/rpc-trace) committed 2d4cb881; 03 running (sa-2-d7c65d55); 04-scheduler pending |
+| 03-context | IMPL_DONE | 2 | 01+02 GREEN committed (bf3918e6+2d4cb881); T4 resume-contract open in leaf doc (no gate) |
+| 04-clutter | DISPATCH_NEXT | 0 | gate committed 89e996e2 (T1-T8 RED); impl 01/02 to dispatch |
 | 05-navigation | TESTS_VALIDATED | 0 | gate committed f326aef8 (T1-T6 RED; T7 restore e2e PENDING); impl wave C pending |
 | 06-planning | TESTS_VALIDATED | 0 | gate committed f326aef8 (T1-T5 RED, F13c mode badge); impl wave D pending |
 | 07-bench | TESTS_VALIDATED | 0 | gate committed 45c94c0 (meept-bench worktree, checkers RED); integration wave E last |

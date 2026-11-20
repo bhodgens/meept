@@ -2576,10 +2576,12 @@ func (d *Daemon) Run(ctx context.Context) error {
 		}()
 	}
 
-	// Recover pending follow-ups from queue persistence.
-	// This scans queued_followups for conversations that had messages pending
-	// when the daemon last shut down, loads them, and publishes restore events
-	// so that any connected TUI clients are notified.
+	// Recover pending follow-ups from queue persistence (02-routing/03
+	// T2). Rows are re-enqueued into registered session inboxes and
+	// deleted only AFTER injection; with no inbox listening (the usual
+	// boot state) the rows survive and are delivered when the session's
+	// queue registers (AgentRegistry.RegisterActiveQueue re-runs
+	// recovery) or on the next boot.
 	if d.components != nil && d.components.Queue != nil {
 		if pq, ok := d.components.Queue.(*queue.PersistentQueue); ok {
 			db := pq.DB()

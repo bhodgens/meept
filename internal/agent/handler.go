@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -53,13 +54,31 @@ type sessionToolCallSaver interface {
 	SaveMessagesWithToolCalls(sessionID string, messages []session.Message, toolCalls map[int][]session.ToolCall) error
 }
 
+// sessionRowEnsurer is the optional capability the message saver carries
+// when the backing store can upsert the sessions row backing a
+// conversation (03-context leaf 01, C4 / F-ORCH-29): conversation-only
+// submits have no sessions row, so the exchange insert would hit the
+// sessions(id) foreign key (787) and silently vanish. persistExchange
+// calls this BEFORE any message write; a saver without the capability
+// keeps the legacy write path unchanged. session.Store implementations
+// satisfy this structurally; the type assertion keeps test doubles narrow.
+type sessionRowEnsurer interface {
+	EnsureSessionRow(conversationID string) (*session.Session, error)
+}
+
 // ChatHandler bridges the message bus to the AgentLoop.
 // It subscribes to chat.request and publishes responses to chat.response.
 type ChatHandler struct {
-	loop         *AgentLoop
-	dispatcher   *Dispatcher // Optional: if set, routes through multi-agent dispatch
-	bus          *bus.MessageBus
-	logger       *slog.Logger
+	loop       *AgentLoop
+	dispatcher *Dispatcher // Optional: if set, routes through multi-agent dispatch
+	bus        *bus.MessageBus
+	logger     *slog.Logger
+
+	// failureRelayMu guards failureRelayed: task ids whose failure has
+	// already been relayed to the user (F-NEW-10 one-failure-terminal).
+	failureRelayMu sync.Mutex
+	failureRelayed map[string]bool
+
 	metricsStore *metrics.Store  // Optional: metrics store for duration estimates
 	stepStore    *task.StepStore // Optional: step store for fetching step summaries
 	taskStore    *task.Store     // Optional: task store for looking up linked sessions
@@ -319,6 +338,20 @@ type TurnTerminalEvent struct {
 	// in schemas/ws_events.schema.json in the same change; consumers
 	// decoding the frozen key set ignore it.
 	RejectionReason string `json:"rejection_reason,omitempty"`
+	// RoutingNotice (20261119-usability-remediation C1, 02-routing leaf
+	// 01): user-facing classification-degradation guidance, set when the
+	// dispatch chain answered on a degraded lane. Additive optional key,
+	// declared in schemas/ws_events.schema.json in the same change;
+	// consumers decoding the frozen key set ignore it.
+	RoutingNotice string `json:"routing_notice,omitempty"`
+	// ReplySource (20261119-usability-remediation C1, 04-clutter leaf
+	// 01): where the reply text came from -- "loop" (the model's final
+	// answer, the default/empty), "synthesized" (reconstructed from the
+	// turn's tool ledger after a blank-stop completion, F-ORCH-15), or
+	// "task_relay" (relayed from a task completion/failure event).
+	// Additive optional key, declared in schemas/ws_events.schema.json
+	// in the same change; consumers decoding the frozen key set ignore it.
+	ReplySource string `json:"reply_source,omitempty"`
 }
 
 // WSClass implements wsclass.WSClassified: turn lifecycle events render
@@ -621,8 +654,14 @@ func (h *ChatHandler) handleAgentProgress(msg *models.BusMessage) {
 	}
 }
 
-// handleReviewCompleted handles task.review_completed events and pushes
-// review feedback to chat sessions linked to the task.
+// handleReviewCompleted handles task.review_completed events. Gate T3
+// (04-clutter/01, F-ORCH-25): review verdicts are internal scaffolding and
+// NEVER push to the chat stream any more -- the task.review_completed bus
+// event itself is the task-detail feed (the producer publishes it with the
+// verdict + feedback, and the step row carries review_verdict/review_reason),
+// and every consumer that needs the verdict reads THAT. The handler stays
+// subscribed so the verdict is observably logged and the task detail can be
+// enriched later, but no chat.response/chat_message frame is emitted.
 func (h *ChatHandler) handleReviewCompleted(msg *models.BusMessage) {
 	var payload struct {
 		TaskID        string  `json:"task_id"`
@@ -638,41 +677,15 @@ func (h *ChatHandler) handleReviewCompleted(msg *models.BusMessage) {
 		return
 	}
 
-	h.logger.Info("Review completed, pushing feedback to linked sessions",
+	// Task-detail render only: the human-readable verdict line is logged
+	// for operators (Debug), never delivered to a session.
+	h.logger.Debug("Review completed (task-detail feed; not pushed to chat)",
 		"task_id", payload.TaskID,
 		"step_id", payload.StepID,
 		"status", payload.Status,
 		"revision_count", payload.RevisionCount,
+		"detail", h.formatReviewFeedback(payload.StepID, payload.Status, payload.Feedback, payload.RevisionCount, payload.Reviewer),
 	)
-
-	// Look up linked sessions from task store
-	var linkedSessions []string
-	if h.taskStore != nil && payload.TaskID != "" {
-		sessions, err := h.taskStore.GetLinkedSessions(payload.TaskID)
-		if err != nil {
-			h.logger.Warn("Failed to get linked sessions for review feedback", "task_id", payload.TaskID, "error", err)
-		} else {
-			linkedSessions = sessions
-		}
-	}
-
-	// Build human-readable review feedback message
-	reply := h.formatReviewFeedback(payload.StepID, payload.Status, payload.Feedback, payload.RevisionCount, payload.Reviewer)
-
-	response := ChatResponse{
-		Reply: reply,
-	}
-
-	// Send to linked sessions if we have them
-	if len(linkedSessions) > 0 {
-		for _, sessionID := range linkedSessions {
-			response.ConversationID = sessionID
-			h.sendResponse("review-completed-"+payload.StepID, response)
-		}
-	} else {
-		// No linked sessions found - broadcast for any listening client
-		h.sendResponse("review-completed-"+payload.StepID, response)
-	}
 }
 
 // formatReviewFeedback builds a human-readable review feedback message.
@@ -777,6 +790,45 @@ func (h *ChatHandler) Name() string {
 // handleRequest processes a single chat request.
 func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage) {
 	h.logger.Debug("Received chat request", "id", msg.ID)
+
+	// Gate T8 (01-safety/05): panic recovery. A panic mid-turn used to
+	// kill this handler goroutine -- the daemon stayed up but chat was
+	// wedged and the awaiting client never got a terminal. Recover,
+	// log the panic WITH its stack (never swallow programming errors
+	// silently), and terminalize the turn as failed with actionable
+	// copy. Identity is re-derived defensively from the raw payload
+	// (the parsed req may not exist yet at panic time).
+	panicStart := time.Now()
+	defer func() {
+		if r := recover(); r != nil {
+			h.logger.Error("chat handler panicked; turn terminalized as failed",
+				"id", msg.ID,
+				"panic", fmt.Sprintf("%v", r),
+				"stack", string(debug.Stack()),
+			)
+			var preq ChatRequest
+			convID := msg.ID
+			if uerr := json.Unmarshal(msg.Payload, &preq); uerr == nil {
+				if preq.ConversationID != "" {
+					convID = preq.ConversationID
+				}
+				if preq.TurnID != "" {
+					h.completeTurn(preq.TurnID)
+				}
+			}
+			reason := fmt.Sprintf("internal error: the turn crashed (%v)", r)
+			h.publishTurnTerminal(TurnTerminalEvent{
+				ConversationID: convID,
+				SessionID:      preq.SessionID,
+				TurnID:         preq.TurnID,
+				HandlerCase:    "panic_recovered",
+				Status:         "failed",
+				Reply:          "I hit an internal error while processing your message: " + reason + ". Please retry; if it keeps happening, report this conversation.",
+				Error:          reason,
+				DurationMS:     time.Since(panicStart).Milliseconds(),
+			})
+		}
+	}()
 
 	// turn.terminal bookkeeping (async-turn-migration step 1): every
 	// terminal exit path of this function emits exactly one turn.terminal
@@ -1045,6 +1097,11 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 	syncAgentID := ""
 	syncClassifiedBy := ""
 	syncModel := ""
+	syncRoutingNotice := ""
+	// syncReplySource (C1, gate T1): "synthesized" when the completed-turn
+	// seam below reconstructed the reply from the tool ledger; empty means
+	// the loop's own final text (pre-fix behavior, byte-identical).
+	syncReplySource := ""
 
 	if h.dispatcher != nil {
 		// Multi-agent mode: classify and route through dispatcher.
@@ -1056,6 +1113,9 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 
 		inputSummary := extractSummary(req.Message)
 		hasParts := len(req.Parts) > 0
+		if result != nil {
+			syncRoutingNotice = result.ClassificationNotice
+		}
 
 		switch {
 		case result != nil && result.ClarificationReply != "":
@@ -1265,7 +1325,9 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 		}
 
 		// Record the routing decision for debugging and persistent audit trail.
-		h.dispatcher.RecordDispatch(conversationID, handlerCase, inputSummary, result, hasParts, dispatchErr)
+		// Ctx form (C5, 02-routing/02): the row carries the chat.submit turn
+		// id and the bounded full input text for the dispatch-evidence surface.
+		h.dispatcher.RecordDispatchCtx(WithChatTurnID(withDispatchEvidence(ctx), req.TurnID), conversationID, handlerCase, inputSummary, result, hasParts, dispatchErr)
 	} else {
 		// Direct mode: prefer a session-scoped AgentLoop when a manager
 		// is wired and the session has a project path. This isolates
@@ -1289,6 +1351,26 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 			reply += "\n\n" + result.ClassificationNotice
 		} else {
 			reply = result.ClassificationNotice
+		}
+	}
+
+	// Gate T4c (04-clutter/01, F-NEW-8): a firewall context truncation is
+	// NEVER silent. If this conversation's loop firewall bounded an
+	// oversized system message, its one-shot disclosure rides the reply
+	// (the C1 notice lane; the notice self-clears, so it appears once per
+	// truncation event). No firewall / no truncation => byte-identical.
+	if err == nil {
+		if notice := h.truncationDisclosure(conversationID); notice != "" {
+			if reply != "" {
+				reply += "\n\n" + notice
+			} else {
+				reply = notice
+			}
+			if syncRoutingNotice != "" {
+				syncRoutingNotice += "\n" + notice
+			} else {
+				syncRoutingNotice = notice
+			}
 		}
 	}
 
@@ -1379,11 +1461,44 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 					response.Error = ""
 				}
 			}
+		} else if errors.Is(err, ErrTurnParked) || (h.dispatcher == nil && strings.TrimSpace(reply) == throttleParkNotice) {
+			// Gate T8 (01-safety/05): a fresh throttle park surfaces as
+			// ErrTurnParked from RunOnceWithParts (routed lane) or as the
+			// exact park notice from RunOnce (direct lane, chat-turn ctx).
+			// Never an empty success: terminalize "parked"
+			// (accepted-not-finished) with actionable copy naming the cause
+			// and the next action; the parker resumes the turn later and
+			// delivers the real reply under this turn id. The notice-text
+			// match is exact-equality against the loop's own const, scoped
+			// to the direct lane -- machine consumers (step jobs) keep the
+			// ("", nil) sentinel and never see this branch.
+			response.Reply = throttleParkNotice
+			response.Error = ""
 		} else {
 			response.Error = err.Error()
 			response.Reply = reply // AgentLoop returns a user-friendly message even on error
 		}
 	} else {
+		// Gate T1 (04-clutter/01, F-ORCH-15): a completed turn NEVER ships
+		// an empty reply. A tool-only blank-stop turn (the frozen p1 shape)
+		// synthesizes an honest, ledger-bound summary of the RECORDED
+		// effects; with no ledger evidence the honest fallback names none.
+		// Only the live-reply lanes qualify: the async ack terminalizes as
+		// "parked", and error paths keep their own copy. Prose replies are
+		// untouched (the seam only fires when the loop returned blank).
+		if strings.TrimSpace(reply) == "" &&
+			(handlerCase == "route_to_agent" || handlerCase == "direct_mode") {
+			var src string
+			reply, src = h.synthesizeCompletedReply(conversationID)
+			if src != "" {
+				syncReplySource = src
+			}
+			h.logger.Info("completed turn shipped no final reply; synthesized from the tool ledger",
+				"conversation_id", conversationID,
+				"handler_case", handlerCase,
+				"reply_source", src,
+			)
+		}
 		response.Reply = reply
 	}
 	// Single reply choke point (e2e run 5, 2026-09-11 A2/t4): the platform
@@ -1499,6 +1614,8 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 		Error:          turnError,
 		TraceID:        traceID,
 		TurnSpanID:     turnSpanID,
+		RoutingNotice:  syncRoutingNotice,
+		ReplySource:    syncReplySource,
 	})
 
 	// Async-turn completion (leaf 03): the submitted turn leaves the
@@ -1572,6 +1689,21 @@ func (h *ChatHandler) recordExchangeInSessionConv(conversationID, userMsg, reply
 func (h *ChatHandler) persistExchange(sessionID, userMsg string, parts []llm.ContentPart, reply string, agentID string) {
 	if h.messageSaver == nil || sessionID == "" {
 		return
+	}
+
+	// C4 (03-context/01): upsert the backing sessions row BEFORE any
+	// message write so a conversation-only exchange never hits the
+	// sessions(id) foreign key (787). Best-effort: a saver without the
+	// capability keeps the legacy path; a failure here only logs - the
+	// store-level transaction carries the same guarantee for the real
+	// SQLite store, so the write below is the authoritative retry.
+	if ensurer, ok := h.messageSaver.(sessionRowEnsurer); ok {
+		if _, err := ensurer.EnsureSessionRow(sessionID); err != nil {
+			h.logger.Debug("failed to ensure sessions row before exchange persist",
+				"session_id", sessionID,
+				"error", err,
+			)
+		}
 	}
 
 	now := time.Now().UTC()
@@ -2254,6 +2386,9 @@ func (h *ChatHandler) publishTaskTerminalRelay(taskID string, linkedSessions []s
 		// non-empty only on the task_rejected_relay case (omitempty keeps
 		// every other terminal's bytes identical).
 		RejectionReason: rejectionReason,
+		// C1 additive key (04-clutter leaf 01): the relay's reply text
+		// comes from the task event, not a live loop answer.
+		ReplySource: replySourceTaskRelay,
 	})
 	// The task→turn registry edge has served its purpose (the relay
 	// recovered the originating id): drop the entry so the watchdog does
@@ -2344,6 +2479,15 @@ func (h *ChatHandler) handleTaskFailed(msg *models.BusMessage) {
 		return
 	}
 
+	// Relay the failure ONCE per task (F-NEW-10: 43 re-relays under fresh
+	// turn ids in the rerun). Internal cycles re-reporting the SAME
+	// task failure must not re-push notifications or mint a new terminal.
+	if payload.TaskID != "" && !h.claimFailureRelay(payload.TaskID) {
+		h.logger.Info("task.failed re-relay suppressed: failure already relayed for this task",
+			"task_id", payload.TaskID)
+		return
+	}
+
 	h.logger.Warn("Task failed, pushing error to chat",
 		"task_id", payload.TaskID,
 		"name", payload.Name,
@@ -2393,6 +2537,23 @@ func (h *ChatHandler) handleTaskFailed(msg *models.BusMessage) {
 	// "failed" with the error text.
 	h.publishTaskTerminalRelay(payload.TaskID, payload.LinkedSessions,
 		"task_failed_relay", "failed", reply, payload.Error, "")
+}
+
+// claimFailureRelay reports whether this task's failure may be relayed
+// (first claim wins). Subsequent claims return false: the failure was
+// already surfaced and must never re-relay under fresh turn ids
+// (F-NEW-10 one-failure-terminal).
+func (h *ChatHandler) claimFailureRelay(taskID string) bool {
+	h.failureRelayMu.Lock()
+	defer h.failureRelayMu.Unlock()
+	if h.failureRelayed[taskID] {
+		return false
+	}
+	if h.failureRelayed == nil {
+		h.failureRelayed = make(map[string]bool)
+	}
+	h.failureRelayed[taskID] = true
+	return true
 }
 
 // handleTaskRejected relays a user rejection (StrategicPlanner.RejectPlan's
@@ -2919,6 +3080,19 @@ func (h *ChatHandler) resumeQuotaParkedTurn(ctx context.Context, turn QuotaParke
 	// H3 (bughunt 2026-09-03): resumed turns must not re-add the user
 	// message — the parked attempt already placed it in the conversation.
 	reply, err := loop.RunOnceWithParts(WithResumedTurn(ctx), turn.Message, turn.Parts, turn.ConversationID)
+	// Gate T8 (01-safety/05): the parked shape is now EXPLICIT --
+	// RunOnceWithParts returns ErrTurnParked when the resume re-parked
+	// mid-flight on the throttle parker. Defer delivery exactly like
+	// the legacy ("", nil) re-park branch below: the later resume owns
+	// persistExchange + sendResponse + turn.terminal. Never fail the
+	// resume on the park sentinel.
+	if errors.Is(err, ErrTurnParked) {
+		h.logger.Info("quota resume re-parked mid-flight -- deferring delivery",
+			"session_id", turn.SessionID,
+			"conversation_id", turn.ConversationID,
+		)
+		return
+	}
 	if err != nil {
 		// Still quota-blocked (reset drifted) or a new failure: park again
 		// if the error is quota and the window is knowable; otherwise push
@@ -3402,6 +3576,18 @@ func (h *ChatHandler) resumeParkedTurn(ctx context.Context, turn ParkedTurn) {
 	// message — the parked attempt already placed it in the conversation.
 	loop := h.sessionLoop(turn.ConversationID)
 	reply, err := loop.RunOnceWithParts(WithResumedTurn(ctx), turn.Message, turn.Parts, turn.ConversationID)
+
+	// Gate T8 (01-safety/05): explicit re-park sentinel -- the resume
+	// parked again mid-flight on the throttle parker. Defer delivery
+	// (the later resume owns persist/send/terminal); never fail the
+	// resume on the park sentinel. Mirrors the quota resume's branch.
+	if errors.Is(err, ErrTurnParked) {
+		h.logger.Info("budget resume re-parked mid-flight -- deferring delivery",
+			"session_id", turn.SessionID,
+			"conversation_id", turn.ConversationID,
+		)
+		return
+	}
 
 	if err != nil {
 		h.logger.Error("resumed turn failed",

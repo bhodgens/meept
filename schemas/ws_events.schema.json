@@ -65,6 +65,7 @@
         "error": { "type": "string" },
         "rejection_reason": { "type": "string", "description": "Verbatim user rejection reason (20261119-usability-remediation C1, 01-safety leaf 01); set iff handler_case=task_rejected_relay" },
         "routing_notice": { "type": "string", "description": "User-facing classification-degradation guidance (20261119-usability-remediation C1, 02-routing leaf 01); set when the dispatch chain answered on a degraded classification lane" },
+        "reply_source": { "type": "string", "description": "Provenance of the reply text (20261119-usability-remediation C1, 04-clutter leaf 01): omitted/empty = loop final text; synthesized = reconstructed from the turn's tool ledger after a blank-stop completion; task_relay = relayed from a task completion/failure event" },
         "source_topic": { "type": "string" },
         "timestamp": { "$ref": "#/definitions/rfc3339String" },
         "type": { "const": "agent_progress" }

@@ -407,10 +407,24 @@ class ChatMessage with _$ChatMessage {
     @JsonKey(name: 'session_id') String? sessionId,
     @JsonKey(name: 'tool_calls') List<String>? toolCalls,
     @Default([]) List<ChatMessagePart> parts,
+    // C1 dedupe identity (04-clutter/02, gate T7): the turn/task a reply
+    // belongs to, so the GUI keys render-once on (turn_id, task_id)
+    // instead of last-bubble content. Defaults to '' and are ALWAYS
+    // emitted by toJson (round-trip survives the identity).
+    @JsonKey(name: 'turn_id') @Default('') String turnId,
+    @JsonKey(name: 'task_id') @Default('') String taskId,
   }) = _ChatMessage;
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) =>
       _$$ChatMessageImplFromJson(json);
+
+  /// Dedupe identity key (C1): the (turn_id, task_id) pair this message
+  /// carries, or null when it carries no turn identity at all (older
+  /// wire frames -- the notifier then falls back to content pairing).
+  String? get dedupeKey {
+    if (turnId.isEmpty && taskId.isEmpty) return null;
+    return 'turn:$turnId|task:$taskId';
+  }
 
   /// Parse from a backend session.Message (int64 ID, RFC3339 timestamp).
   factory ChatMessage.fromBackendMessage(Map<String, dynamic> json) {
@@ -443,6 +457,10 @@ class ChatMessage with _$ChatMessage {
               .map((p) => p.toJson())
               .toList() ??
           const [],
+      // Defensive identity read (04-clutter/02): the wire fields land
+      // with 05-navigation/01; absent until then = '' = content pairing.
+      'turn_id': json['turn_id'] as String? ?? '',
+      'task_id': json['task_id'] as String? ?? '',
     });
   }
 

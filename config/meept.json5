@@ -980,6 +980,12 @@
     // only if your classifier endpoint is started out of band. Cloud-only
     // classifier chains never trip this gate.
     "classifier_boot_fail_fast": true,
+    // Trivial fast lane (04-clutter/02, F-ORCH-5): simple questions like
+    // "What is 2+2? Answer briefly." answer inline in the chat lane - no
+    // intent task row, no planner loop, one brief reply. Artifact verbs
+    // (create/write/fix/...) still task-route. Default true; set false
+    // for byte-identical legacy classification.
+    "trivial_fast_lane": true,
     // Stage-0 classifier prefilter (docs/workflows/classifier-prefilter.md):
     // embedding cosine gate that direct-routes confident inputs before the
     // analyzer + router LLM calls. Disabled by default; requires a local

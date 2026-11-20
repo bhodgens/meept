@@ -122,6 +122,18 @@ type ChatModel struct {
 	// registration; a tiny ephemeral map keyed by turn id.
 	earlyTerminals *turnRouterEarlyBuffer
 
+	// Task-reply render dedupe (04-clutter/02, C1 key = (turn_id,
+	// task_id)): a task's reply arrives as BOTH a task.completed card AND
+	// the turn.terminal bubble -- whichever renders first wins, the
+	// second is suppressed. renderedTaskIDs holds task ids whose reply
+	// already rendered; lastTerminalReply holds the last terminal bubble
+	// text (interim card-match until the wire carries task_id);
+	// turnCardReplies binds a card-first summary to its pending turn so
+	// the following terminal is recognized. See chat_dedupe.go.
+	renderedTaskIDs   map[string]bool
+	lastTerminalReply string
+	turnCardReplies   map[string]string
+
 	// Progress state for the current pending message
 	progressState *ProgressState
 
@@ -1359,32 +1371,42 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 				)
 				m.addMessage(RoleSystem, content)
 			} else if result := parseTaskResult(msg.Reply); result != nil {
-				// Render as a task result message
-				var content string
-				if result.IsSuccess {
-					content = fmt.Sprintf("┌ task completed ────────────────────────────┐\n"+
-						"│ Task: \"%s\"\n"+
-						"│ Steps: %d/%d completed\n",
-						types.TruncateString(result.Name, 40),
-						result.Completed, result.Total,
-					)
-					if result.Result != "" {
-						content += fmt.Sprintf("│ %s\n", types.TruncateString(result.Result, 45))
+				// Render as a task result message. DEDUPE (C1,
+				// 04-clutter/02): the same first-wins rule as the
+				// ChatTaskResultMsg card -- a JSON relay of a reply that
+				// already rendered (terminal bubble or prior card) is
+				// suppressed.
+				suppress := result.IsSuccess && m.duplicateTaskCard(result.TaskID, result.Result)
+				if !suppress {
+					var content string
+					if result.IsSuccess {
+						content = fmt.Sprintf("┌ task completed ────────────────────────────┐\n"+
+							"│ Task: \"%s\"\n"+
+							"│ Steps: %d/%d completed\n",
+							types.TruncateString(result.Name, 40),
+							result.Completed, result.Total,
+						)
+						if result.Result != "" {
+							content += fmt.Sprintf("│ %s\n", types.TruncateString(result.Result, 45))
+						}
+						content += "└─────────────────────────────────────────────┘"
+					} else {
+						content = fmt.Sprintf("┌ task failed ───────────────────────────────┐\n"+
+							"│ Task: \"%s\"\n"+
+							"│ Steps: %d completed, %d failed of %d\n",
+							types.TruncateString(result.Name, 40),
+							result.Completed, result.Failed, result.Total,
+						)
+						if result.Error != "" {
+							content += fmt.Sprintf("│ Error: %s\n", types.TruncateString(result.Error, 40))
+						}
+						content += "└─────────────────────────────────────────────┘"
 					}
-					content += "└─────────────────────────────────────────────┘"
-				} else {
-					content = fmt.Sprintf("┌ task failed ───────────────────────────────┐\n"+
-						"│ Task: \"%s\"\n"+
-						"│ Steps: %d completed, %d failed of %d\n",
-						types.TruncateString(result.Name, 40),
-						result.Completed, result.Failed, result.Total,
-					)
-					if result.Error != "" {
-						content += fmt.Sprintf("│ Error: %s\n", types.TruncateString(result.Error, 40))
+					m.addMessage(RoleSystem, content)
+					if result.IsSuccess {
+						m.noteTaskCardRendered(result.TaskID, result.Result)
 					}
-					content += "└─────────────────────────────────────────────┘"
 				}
-				m.addMessage(RoleSystem, content)
 			} else {
 				m.addMessage(RoleAssistant, msg.Reply)
 
@@ -1527,7 +1549,14 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		return nil
 
 	case ChatTaskResultMsg:
-		// Render a styled task result message in chat
+		// Render a styled task result message in chat. DEDUPE (C1):
+		// the card and the turn.terminal bubble are the SAME logical
+		// reply - if this reply already rendered (same task id on
+		// either side, or the terminal-first interim match on
+		// summary), the card is suppressed.
+		if msg.State == StateCompleted && m.duplicateTaskCard(msg.TaskID, msg.ResultSummary) {
+			return nil
+		}
 		stateLabel := StateCompleted
 		if msg.State == StateFailed {
 			stateLabel = StateFailed
@@ -1544,6 +1573,9 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		}
 		content += "└─────────────────────────────────────────────┘"
 		m.addMessage(RoleSystem, content)
+		if msg.State == StateCompleted {
+			m.noteTaskCardRendered(msg.TaskID, msg.ResultSummary)
+		}
 		return nil
 
 	case submitTurnResultMsg:

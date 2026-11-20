@@ -29,7 +29,15 @@ mixin _$ChatMessage {
   String? get sessionId => throw _privateConstructorUsedError;
   @JsonKey(name: 'tool_calls')
   List<String>? get toolCalls => throw _privateConstructorUsedError;
-  List<ChatMessagePart> get parts => throw _privateConstructorUsedError;
+  List<ChatMessagePart> get parts =>
+      throw _privateConstructorUsedError; // C1 dedupe identity (04-clutter/02, gate T7): the turn/task a reply
+  // belongs to, so the GUI keys render-once on (turn_id, task_id)
+  // instead of last-bubble content. Defaults to '' and are ALWAYS
+  // emitted by toJson (round-trip survives the identity).
+  @JsonKey(name: 'turn_id')
+  String get turnId => throw _privateConstructorUsedError;
+  @JsonKey(name: 'task_id')
+  String get taskId => throw _privateConstructorUsedError;
 
   Map<String, dynamic> toJson() => throw _privateConstructorUsedError;
   @JsonKey(ignore: true)
@@ -52,6 +60,8 @@ abstract class $ChatMessageCopyWith<$Res> {
     @JsonKey(name: 'session_id') String? sessionId,
     @JsonKey(name: 'tool_calls') List<String>? toolCalls,
     List<ChatMessagePart> parts,
+    @JsonKey(name: 'turn_id') String turnId,
+    @JsonKey(name: 'task_id') String taskId,
   });
 }
 
@@ -75,6 +85,8 @@ class _$ChatMessageCopyWithImpl<$Res, $Val extends ChatMessage>
     Object? sessionId = freezed,
     Object? toolCalls = freezed,
     Object? parts = null,
+    Object? turnId = null,
+    Object? taskId = null,
   }) {
     return _then(
       _value.copyWith(
@@ -106,6 +118,14 @@ class _$ChatMessageCopyWithImpl<$Res, $Val extends ChatMessage>
                 ? _value.parts
                 : parts // ignore: cast_nullable_to_non_nullable
                       as List<ChatMessagePart>,
+            turnId: null == turnId
+                ? _value.turnId
+                : turnId // ignore: cast_nullable_to_non_nullable
+                      as String,
+            taskId: null == taskId
+                ? _value.taskId
+                : taskId // ignore: cast_nullable_to_non_nullable
+                      as String,
           )
           as $Val,
     );
@@ -129,6 +149,8 @@ abstract class _$$ChatMessageImplCopyWith<$Res>
     @JsonKey(name: 'session_id') String? sessionId,
     @JsonKey(name: 'tool_calls') List<String>? toolCalls,
     List<ChatMessagePart> parts,
+    @JsonKey(name: 'turn_id') String turnId,
+    @JsonKey(name: 'task_id') String taskId,
   });
 }
 
@@ -151,6 +173,8 @@ class __$$ChatMessageImplCopyWithImpl<$Res>
     Object? sessionId = freezed,
     Object? toolCalls = freezed,
     Object? parts = null,
+    Object? turnId = null,
+    Object? taskId = null,
   }) {
     return _then(
       _$ChatMessageImpl(
@@ -182,6 +206,14 @@ class __$$ChatMessageImplCopyWithImpl<$Res>
             ? _value._parts
             : parts // ignore: cast_nullable_to_non_nullable
                   as List<ChatMessagePart>,
+        turnId: null == turnId
+            ? _value.turnId
+            : turnId // ignore: cast_nullable_to_non_nullable
+                  as String,
+        taskId: null == taskId
+            ? _value.taskId
+            : taskId // ignore: cast_nullable_to_non_nullable
+                  as String,
       ),
     );
   }
@@ -198,6 +230,8 @@ class _$ChatMessageImpl extends _ChatMessage {
     @JsonKey(name: 'session_id') this.sessionId,
     @JsonKey(name: 'tool_calls') final List<String>? toolCalls,
     final List<ChatMessagePart> parts = const [],
+    @JsonKey(name: 'turn_id') this.turnId = '',
+    @JsonKey(name: 'task_id') this.taskId = '',
   }) : _toolCalls = toolCalls,
        _parts = parts,
        super._();
@@ -236,9 +270,20 @@ class _$ChatMessageImpl extends _ChatMessage {
     return EqualUnmodifiableListView(_parts);
   }
 
+  // C1 dedupe identity (04-clutter/02, gate T7): the turn/task a reply
+  // belongs to, so the GUI keys render-once on (turn_id, task_id)
+  // instead of last-bubble content. Defaults to '' and are ALWAYS
+  // emitted by toJson (round-trip survives the identity).
+  @override
+  @JsonKey(name: 'turn_id')
+  final String turnId;
+  @override
+  @JsonKey(name: 'task_id')
+  final String taskId;
+
   @override
   String toString() {
-    return 'ChatMessage(id: $id, role: $role, content: $content, timestamp: $timestamp, sessionId: $sessionId, toolCalls: $toolCalls, parts: $parts)';
+    return 'ChatMessage(id: $id, role: $role, content: $content, timestamp: $timestamp, sessionId: $sessionId, toolCalls: $toolCalls, parts: $parts, turnId: $turnId, taskId: $taskId)';
   }
 
   @override
@@ -257,7 +302,9 @@ class _$ChatMessageImpl extends _ChatMessage {
               other._toolCalls,
               _toolCalls,
             ) &&
-            const DeepCollectionEquality().equals(other._parts, _parts));
+            const DeepCollectionEquality().equals(other._parts, _parts) &&
+            (identical(other.turnId, turnId) || other.turnId == turnId) &&
+            (identical(other.taskId, taskId) || other.taskId == taskId));
   }
 
   @JsonKey(ignore: true)
@@ -271,6 +318,8 @@ class _$ChatMessageImpl extends _ChatMessage {
     sessionId,
     const DeepCollectionEquality().hash(_toolCalls),
     const DeepCollectionEquality().hash(_parts),
+    turnId,
+    taskId,
   );
 
   @JsonKey(ignore: true)
@@ -294,6 +343,8 @@ abstract class _ChatMessage extends ChatMessage {
     @JsonKey(name: 'session_id') final String? sessionId,
     @JsonKey(name: 'tool_calls') final List<String>? toolCalls,
     final List<ChatMessagePart> parts,
+    @JsonKey(name: 'turn_id') final String turnId,
+    @JsonKey(name: 'task_id') final String taskId,
   }) = _$ChatMessageImpl;
   const _ChatMessage._() : super._();
 
@@ -316,6 +367,15 @@ abstract class _ChatMessage extends ChatMessage {
   List<String>? get toolCalls;
   @override
   List<ChatMessagePart> get parts;
+  @override // C1 dedupe identity (04-clutter/02, gate T7): the turn/task a reply
+  // belongs to, so the GUI keys render-once on (turn_id, task_id)
+  // instead of last-bubble content. Defaults to '' and are ALWAYS
+  // emitted by toJson (round-trip survives the identity).
+  @JsonKey(name: 'turn_id')
+  String get turnId;
+  @override
+  @JsonKey(name: 'task_id')
+  String get taskId;
   @override
   @JsonKey(ignore: true)
   _$$ChatMessageImplCopyWith<_$ChatMessageImpl> get copyWith =>
