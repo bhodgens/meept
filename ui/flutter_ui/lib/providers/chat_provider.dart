@@ -787,6 +787,12 @@ class ChatNotifier extends StateNotifier<ChatState> {
             sessionId: sessionId,
             turnId: event.turnId,
             taskId: event.taskId,
+            // C1 correlation (05-navigation T3): the terminal's dispatch
+            // evidence rides the bubble -- the mode chip, trace expand,
+            // and route popover all key off these.
+            intentType: event.intentType,
+            handlerCase: event.handlerCase,
+            classifiedBy: event.classifiedBy,
           );
           _rememberRenderedReply(_replyKey(event.turnId, event.taskId));
           final newMessages = [...state.messages, reply];

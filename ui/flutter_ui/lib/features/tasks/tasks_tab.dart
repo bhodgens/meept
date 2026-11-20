@@ -19,7 +19,17 @@ class TasksTab extends ConsumerWidget {
 
     return Row(
       children: [
-        const SizedBox(width: 300, child: TasksList()),
+        SizedBox(
+          width: 300,
+          // 05-navigation T2: the list tap must SELECT the task (write
+          // activeTaskProvider) -- without this callback the detail pane
+          // was unreachable (gate tasks_detail_test).
+          child: TasksList(
+            onTaskSelected: (task) {
+              ref.read(activeTaskProvider.notifier).state = task;
+            },
+          ),
+        ),
         const VerticalDivider(width: 1),
         Expanded(
           child: BackgroundImage(

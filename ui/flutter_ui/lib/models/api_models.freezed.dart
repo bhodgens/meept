@@ -27,8 +27,12 @@ mixin _$ChatMessage {
   DateTime get timestamp => throw _privateConstructorUsedError;
   @JsonKey(name: 'session_id')
   String? get sessionId => throw _privateConstructorUsedError;
-  @JsonKey(name: 'tool_calls')
-  List<String>? get toolCalls => throw _privateConstructorUsedError;
+  @JsonKey(
+    name: 'tool_calls',
+    fromJson: _toolCallsFromJson,
+    toJson: _toolCallsToJson,
+  )
+  List<ToolCallRecord>? get toolCalls => throw _privateConstructorUsedError;
   List<ChatMessagePart> get parts =>
       throw _privateConstructorUsedError; // C1 dedupe identity (04-clutter/02, gate T7): the turn/task a reply
   // belongs to, so the GUI keys render-once on (turn_id, task_id)
@@ -37,7 +41,19 @@ mixin _$ChatMessage {
   @JsonKey(name: 'turn_id')
   String get turnId => throw _privateConstructorUsedError;
   @JsonKey(name: 'task_id')
-  String get taskId => throw _privateConstructorUsedError;
+  String get taskId => throw _privateConstructorUsedError; // C1 correlation fields (05-navigation T3, gate chat_correlation):
+  // the terminal's dispatch evidence rides the reply bubble so the
+  // mode chip + trace/route affordances have a key to hang on.
+  // Defaults to '' and are ALWAYS emitted by toJson.
+  @JsonKey(name: 'intent_type')
+  String get intentType => throw _privateConstructorUsedError;
+  @JsonKey(name: 'handler_case')
+  String get handlerCase => throw _privateConstructorUsedError;
+  @JsonKey(name: 'classified_by')
+  String get classifiedBy => throw _privateConstructorUsedError; // 06-planning gate T4 (F13c): the typed mode signal the mode chip
+  // renders (plan / quick_plan / direct / recall). '' when absent.
+  @JsonKey(name: 'suggested_mode')
+  String get suggestedMode => throw _privateConstructorUsedError;
 
   Map<String, dynamic> toJson() => throw _privateConstructorUsedError;
   @JsonKey(ignore: true)
@@ -58,10 +74,19 @@ abstract class $ChatMessageCopyWith<$Res> {
     String content,
     DateTime timestamp,
     @JsonKey(name: 'session_id') String? sessionId,
-    @JsonKey(name: 'tool_calls') List<String>? toolCalls,
+    @JsonKey(
+      name: 'tool_calls',
+      fromJson: _toolCallsFromJson,
+      toJson: _toolCallsToJson,
+    )
+    List<ToolCallRecord>? toolCalls,
     List<ChatMessagePart> parts,
     @JsonKey(name: 'turn_id') String turnId,
     @JsonKey(name: 'task_id') String taskId,
+    @JsonKey(name: 'intent_type') String intentType,
+    @JsonKey(name: 'handler_case') String handlerCase,
+    @JsonKey(name: 'classified_by') String classifiedBy,
+    @JsonKey(name: 'suggested_mode') String suggestedMode,
   });
 }
 
@@ -87,6 +112,10 @@ class _$ChatMessageCopyWithImpl<$Res, $Val extends ChatMessage>
     Object? parts = null,
     Object? turnId = null,
     Object? taskId = null,
+    Object? intentType = null,
+    Object? handlerCase = null,
+    Object? classifiedBy = null,
+    Object? suggestedMode = null,
   }) {
     return _then(
       _value.copyWith(
@@ -113,7 +142,7 @@ class _$ChatMessageCopyWithImpl<$Res, $Val extends ChatMessage>
             toolCalls: freezed == toolCalls
                 ? _value.toolCalls
                 : toolCalls // ignore: cast_nullable_to_non_nullable
-                      as List<String>?,
+                      as List<ToolCallRecord>?,
             parts: null == parts
                 ? _value.parts
                 : parts // ignore: cast_nullable_to_non_nullable
@@ -125,6 +154,22 @@ class _$ChatMessageCopyWithImpl<$Res, $Val extends ChatMessage>
             taskId: null == taskId
                 ? _value.taskId
                 : taskId // ignore: cast_nullable_to_non_nullable
+                      as String,
+            intentType: null == intentType
+                ? _value.intentType
+                : intentType // ignore: cast_nullable_to_non_nullable
+                      as String,
+            handlerCase: null == handlerCase
+                ? _value.handlerCase
+                : handlerCase // ignore: cast_nullable_to_non_nullable
+                      as String,
+            classifiedBy: null == classifiedBy
+                ? _value.classifiedBy
+                : classifiedBy // ignore: cast_nullable_to_non_nullable
+                      as String,
+            suggestedMode: null == suggestedMode
+                ? _value.suggestedMode
+                : suggestedMode // ignore: cast_nullable_to_non_nullable
                       as String,
           )
           as $Val,
@@ -147,10 +192,19 @@ abstract class _$$ChatMessageImplCopyWith<$Res>
     String content,
     DateTime timestamp,
     @JsonKey(name: 'session_id') String? sessionId,
-    @JsonKey(name: 'tool_calls') List<String>? toolCalls,
+    @JsonKey(
+      name: 'tool_calls',
+      fromJson: _toolCallsFromJson,
+      toJson: _toolCallsToJson,
+    )
+    List<ToolCallRecord>? toolCalls,
     List<ChatMessagePart> parts,
     @JsonKey(name: 'turn_id') String turnId,
     @JsonKey(name: 'task_id') String taskId,
+    @JsonKey(name: 'intent_type') String intentType,
+    @JsonKey(name: 'handler_case') String handlerCase,
+    @JsonKey(name: 'classified_by') String classifiedBy,
+    @JsonKey(name: 'suggested_mode') String suggestedMode,
   });
 }
 
@@ -175,6 +229,10 @@ class __$$ChatMessageImplCopyWithImpl<$Res>
     Object? parts = null,
     Object? turnId = null,
     Object? taskId = null,
+    Object? intentType = null,
+    Object? handlerCase = null,
+    Object? classifiedBy = null,
+    Object? suggestedMode = null,
   }) {
     return _then(
       _$ChatMessageImpl(
@@ -201,7 +259,7 @@ class __$$ChatMessageImplCopyWithImpl<$Res>
         toolCalls: freezed == toolCalls
             ? _value._toolCalls
             : toolCalls // ignore: cast_nullable_to_non_nullable
-                  as List<String>?,
+                  as List<ToolCallRecord>?,
         parts: null == parts
             ? _value._parts
             : parts // ignore: cast_nullable_to_non_nullable
@@ -213,6 +271,22 @@ class __$$ChatMessageImplCopyWithImpl<$Res>
         taskId: null == taskId
             ? _value.taskId
             : taskId // ignore: cast_nullable_to_non_nullable
+                  as String,
+        intentType: null == intentType
+            ? _value.intentType
+            : intentType // ignore: cast_nullable_to_non_nullable
+                  as String,
+        handlerCase: null == handlerCase
+            ? _value.handlerCase
+            : handlerCase // ignore: cast_nullable_to_non_nullable
+                  as String,
+        classifiedBy: null == classifiedBy
+            ? _value.classifiedBy
+            : classifiedBy // ignore: cast_nullable_to_non_nullable
+                  as String,
+        suggestedMode: null == suggestedMode
+            ? _value.suggestedMode
+            : suggestedMode // ignore: cast_nullable_to_non_nullable
                   as String,
       ),
     );
@@ -228,10 +302,19 @@ class _$ChatMessageImpl extends _ChatMessage {
     required this.content,
     required this.timestamp,
     @JsonKey(name: 'session_id') this.sessionId,
-    @JsonKey(name: 'tool_calls') final List<String>? toolCalls,
+    @JsonKey(
+      name: 'tool_calls',
+      fromJson: _toolCallsFromJson,
+      toJson: _toolCallsToJson,
+    )
+    final List<ToolCallRecord>? toolCalls,
     final List<ChatMessagePart> parts = const [],
     @JsonKey(name: 'turn_id') this.turnId = '',
     @JsonKey(name: 'task_id') this.taskId = '',
+    @JsonKey(name: 'intent_type') this.intentType = '',
+    @JsonKey(name: 'handler_case') this.handlerCase = '',
+    @JsonKey(name: 'classified_by') this.classifiedBy = '',
+    @JsonKey(name: 'suggested_mode') this.suggestedMode = '',
   }) : _toolCalls = toolCalls,
        _parts = parts,
        super._();
@@ -250,10 +333,14 @@ class _$ChatMessageImpl extends _ChatMessage {
   @override
   @JsonKey(name: 'session_id')
   final String? sessionId;
-  final List<String>? _toolCalls;
+  final List<ToolCallRecord>? _toolCalls;
   @override
-  @JsonKey(name: 'tool_calls')
-  List<String>? get toolCalls {
+  @JsonKey(
+    name: 'tool_calls',
+    fromJson: _toolCallsFromJson,
+    toJson: _toolCallsToJson,
+  )
+  List<ToolCallRecord>? get toolCalls {
     final value = _toolCalls;
     if (value == null) return null;
     if (_toolCalls is EqualUnmodifiableListView) return _toolCalls;
@@ -280,10 +367,28 @@ class _$ChatMessageImpl extends _ChatMessage {
   @override
   @JsonKey(name: 'task_id')
   final String taskId;
+  // C1 correlation fields (05-navigation T3, gate chat_correlation):
+  // the terminal's dispatch evidence rides the reply bubble so the
+  // mode chip + trace/route affordances have a key to hang on.
+  // Defaults to '' and are ALWAYS emitted by toJson.
+  @override
+  @JsonKey(name: 'intent_type')
+  final String intentType;
+  @override
+  @JsonKey(name: 'handler_case')
+  final String handlerCase;
+  @override
+  @JsonKey(name: 'classified_by')
+  final String classifiedBy;
+  // 06-planning gate T4 (F13c): the typed mode signal the mode chip
+  // renders (plan / quick_plan / direct / recall). '' when absent.
+  @override
+  @JsonKey(name: 'suggested_mode')
+  final String suggestedMode;
 
   @override
   String toString() {
-    return 'ChatMessage(id: $id, role: $role, content: $content, timestamp: $timestamp, sessionId: $sessionId, toolCalls: $toolCalls, parts: $parts, turnId: $turnId, taskId: $taskId)';
+    return 'ChatMessage(id: $id, role: $role, content: $content, timestamp: $timestamp, sessionId: $sessionId, toolCalls: $toolCalls, parts: $parts, turnId: $turnId, taskId: $taskId, intentType: $intentType, handlerCase: $handlerCase, classifiedBy: $classifiedBy, suggestedMode: $suggestedMode)';
   }
 
   @override
@@ -304,7 +409,15 @@ class _$ChatMessageImpl extends _ChatMessage {
             ) &&
             const DeepCollectionEquality().equals(other._parts, _parts) &&
             (identical(other.turnId, turnId) || other.turnId == turnId) &&
-            (identical(other.taskId, taskId) || other.taskId == taskId));
+            (identical(other.taskId, taskId) || other.taskId == taskId) &&
+            (identical(other.intentType, intentType) ||
+                other.intentType == intentType) &&
+            (identical(other.handlerCase, handlerCase) ||
+                other.handlerCase == handlerCase) &&
+            (identical(other.classifiedBy, classifiedBy) ||
+                other.classifiedBy == classifiedBy) &&
+            (identical(other.suggestedMode, suggestedMode) ||
+                other.suggestedMode == suggestedMode));
   }
 
   @JsonKey(ignore: true)
@@ -320,6 +433,10 @@ class _$ChatMessageImpl extends _ChatMessage {
     const DeepCollectionEquality().hash(_parts),
     turnId,
     taskId,
+    intentType,
+    handlerCase,
+    classifiedBy,
+    suggestedMode,
   );
 
   @JsonKey(ignore: true)
@@ -341,10 +458,19 @@ abstract class _ChatMessage extends ChatMessage {
     required final String content,
     required final DateTime timestamp,
     @JsonKey(name: 'session_id') final String? sessionId,
-    @JsonKey(name: 'tool_calls') final List<String>? toolCalls,
+    @JsonKey(
+      name: 'tool_calls',
+      fromJson: _toolCallsFromJson,
+      toJson: _toolCallsToJson,
+    )
+    final List<ToolCallRecord>? toolCalls,
     final List<ChatMessagePart> parts,
     @JsonKey(name: 'turn_id') final String turnId,
     @JsonKey(name: 'task_id') final String taskId,
+    @JsonKey(name: 'intent_type') final String intentType,
+    @JsonKey(name: 'handler_case') final String handlerCase,
+    @JsonKey(name: 'classified_by') final String classifiedBy,
+    @JsonKey(name: 'suggested_mode') final String suggestedMode,
   }) = _$ChatMessageImpl;
   const _ChatMessage._() : super._();
 
@@ -363,8 +489,12 @@ abstract class _ChatMessage extends ChatMessage {
   @JsonKey(name: 'session_id')
   String? get sessionId;
   @override
-  @JsonKey(name: 'tool_calls')
-  List<String>? get toolCalls;
+  @JsonKey(
+    name: 'tool_calls',
+    fromJson: _toolCallsFromJson,
+    toJson: _toolCallsToJson,
+  )
+  List<ToolCallRecord>? get toolCalls;
   @override
   List<ChatMessagePart> get parts;
   @override // C1 dedupe identity (04-clutter/02, gate T7): the turn/task a reply
@@ -376,6 +506,22 @@ abstract class _ChatMessage extends ChatMessage {
   @override
   @JsonKey(name: 'task_id')
   String get taskId;
+  @override // C1 correlation fields (05-navigation T3, gate chat_correlation):
+  // the terminal's dispatch evidence rides the reply bubble so the
+  // mode chip + trace/route affordances have a key to hang on.
+  // Defaults to '' and are ALWAYS emitted by toJson.
+  @JsonKey(name: 'intent_type')
+  String get intentType;
+  @override
+  @JsonKey(name: 'handler_case')
+  String get handlerCase;
+  @override
+  @JsonKey(name: 'classified_by')
+  String get classifiedBy;
+  @override // 06-planning gate T4 (F13c): the typed mode signal the mode chip
+  // renders (plan / quick_plan / direct / recall). '' when absent.
+  @JsonKey(name: 'suggested_mode')
+  String get suggestedMode;
   @override
   @JsonKey(ignore: true)
   _$$ChatMessageImplCopyWith<_$ChatMessageImpl> get copyWith =>

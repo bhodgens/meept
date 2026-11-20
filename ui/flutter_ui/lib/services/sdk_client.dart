@@ -625,16 +625,21 @@ class SdkApiClient {
   /// The daemon's `total` field is the full session count (not the page
   /// length), so callers can decide whether older pages exist:
   /// `hasMore = offset + returned.length < total`.
+  ///
+  /// [includeToolCalls] sends the C4 read param
+  /// (`include_tool_calls=true`): the daemon then persists tool-call
+  /// rows ({id,name,args_summary,result_summary,at}) on each message so
+  /// the GUI trace-expand affordance has data to show.
   Future<({List<Map<String, dynamic>> messages, int total})> getMessagesPage(
     String id, {
     int offset = 0,
     int limit = 200,
+    bool includeToolCalls = false,
   }) async {
     try {
-      final raw = await _get(
-        '/api/v1/sessions/$id/messages',
-        query: {'offset': offset, 'limit': limit},
-      );
+      final query = <String, dynamic>{'offset': offset, 'limit': limit};
+      if (includeToolCalls) query['include_tool_calls'] = true;
+      final raw = await _get('/api/v1/sessions/$id/messages', query: query);
       final messagesRaw = raw['messages'] as List? ?? [];
       final messages = messagesRaw
           .whereType<Map>()
@@ -878,6 +883,20 @@ class SdkApiClient {
   Future<Map<String, dynamic>> getTask(String id) async {
     try {
       return await _get('/api/v1/tasks/$id');
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  /// C5 dispatch-trace route: `GET /api/v1/sessions/{id}/dispatch-trace`.
+  ///
+  /// Returns the raw `{entries: [...], count: N}` payload; each row is
+  /// the frozen C5 shape (session_id, turn_id, input_summary,
+  /// intent_type, agent_id, confidence, classifier_method, handler_case,
+  /// task_id). The GUI "why this route" popover renders these directly.
+  Future<Map<String, dynamic>> getDispatchTrace(String sessionId) async {
+    try {
+      return await _get('/api/v1/sessions/$sessionId/dispatch-trace');
     } on DioException catch (e) {
       throw _handleError(e);
     }
