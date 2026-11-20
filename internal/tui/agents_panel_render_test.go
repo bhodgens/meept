@@ -366,3 +366,56 @@ func TestAgentsPanel_NarrowWidthColumnsFit(t *testing.T) {
 		}
 	}
 }
+
+// Regression (P3): a live result that reaches the TUI just before the server
+// poll can be newer than the snapshot the RPC returns (projector lag). A
+// wholesale p.runs = msg.runs made it vanish for one poll and reappear on the
+// next. The reconciler must carry rows newer than the server max timestamp.
+func TestExecutionRunsMsg_PreservesLiveRowsNewerThanServer(t *testing.T) {
+	base := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
+	p := NewAgentsPanel(stubAgentsRPC{})
+	p.SetSize(120, 30)
+
+	// A live frame arrives after the last poll, stamped newer than anything
+	// the server page will contain.
+	live := AgentRun{
+		Topic:     "employee.result",
+		Tier:      "employee",
+		AgentID:   "live-agent",
+		Status:    "ok",
+		Output:    "live result",
+		Timestamp: base.Add(2 * time.Minute),
+	}
+	p.Update(executionResultMsg{Run: live})
+	if len(p.runs) != 1 {
+		t.Fatalf("after live frame: runs = %d, want 1", len(p.runs))
+	}
+
+	// The server page misses the live row: its newest row is the older one.
+	server := []AgentRun{{
+		Topic:     "employee.result",
+		Tier:      "employee",
+		AgentID:   "server-agent",
+		Status:    "ok",
+		Output:    "persisted result",
+		Timestamp: base,
+	}}
+	p.Update(executionRunsMsg{runs: server})
+
+	found := false
+	for _, r := range p.runs {
+		if runKey(r) == runKey(live) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("live row newer than the server snapshot was dropped: runs = %+v", p.runs)
+	}
+	if len(p.runs) != 2 {
+		t.Fatalf("runs = %d, want 2 (live row preserved ahead of server page)", len(p.runs))
+	}
+	if runKey(p.runs[0]) != runKey(live) {
+		t.Fatalf("runs[0] = %+v, want the live row first", p.runs[0])
+	}
+}

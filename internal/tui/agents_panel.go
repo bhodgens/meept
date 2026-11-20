@@ -344,6 +344,73 @@ func (p *AgentsPanel) fetchExecutionRuns() tea.Msg {
 	return executionRunsMsg{runs: runs}
 }
 
+// maxExecutionRunsRows is the shared row ceiling for the runs sub-view: live
+// frames, server pages, and reconciled pages all cap here.
+const maxExecutionRunsRows = 30
+
+// runIdentity is the dedup key for execution rows. AgentRun carries no
+// server-side ID (the durable history RPC does not return one), so identity is
+// the composite Topic+AgentID+Status+Timestamp.
+type runIdentity struct {
+	topic     string
+	agentID   string
+	status    string
+	timestamp time.Time
+}
+
+func runKey(r AgentRun) runIdentity {
+	return runIdentity{topic: r.Topic, agentID: r.AgentID, status: r.Status, timestamp: r.Timestamp}
+}
+
+// mergeLiveRuns reconciles a freshly-fetched server page with the live-only
+// rows cached since the last poll. The execution projector appends a durable
+// run from the bot.result/employee.result bus event in a subscriber goroutine
+// (internal/activity/execution_projector.go), so a result that reaches the
+// TUI just before a poll can be newer than the snapshot that poll returns.
+// Replacing p.runs wholesale in that window made the live row vanish for one
+// poll and reappear on the next — a visible flicker in the runs sub-view.
+//
+// Rows newer than the newest server row (maxServer) and not already in the
+// server page by identity are prepended in their prior newest-first order.
+// An empty server page has a zero maxServer, so every live row survives.
+// No live row newer => the page is returned unchanged (byte-identical).
+func mergeLiveRuns(server, live []AgentRun) []AgentRun {
+	var maxServer time.Time
+	seen := make(map[runIdentity]struct{}, len(server))
+	for _, r := range server {
+		if r.Timestamp.After(maxServer) {
+			maxServer = r.Timestamp
+		}
+		seen[runKey(r)] = struct{}{}
+	}
+
+	var preserved []AgentRun
+	for _, r := range live {
+		if r.Timestamp.IsZero() || !r.Timestamp.After(maxServer) {
+			continue
+		}
+		if _, exists := seen[runKey(r)]; exists {
+			continue
+		}
+		preserved = append(preserved, r)
+	}
+
+	if len(preserved) == 0 {
+		if len(server) > maxExecutionRunsRows {
+			return server[:maxExecutionRunsRows]
+		}
+		return server
+	}
+
+	merged := make([]AgentRun, 0, len(preserved)+len(server))
+	merged = append(merged, preserved...)
+	merged = append(merged, server...)
+	if len(merged) > maxExecutionRunsRows {
+		return merged[:maxExecutionRunsRows]
+	}
+	return merged
+}
+
 // scheduleExecutionRunsTick arms the 5s re-poll while the runs sub-view is
 // open. The tick handler re-arms only while still in that sub-view.
 func (p *AgentsPanel) scheduleExecutionRunsTick() tea.Cmd {
@@ -947,7 +1014,9 @@ func (p *AgentsPanel) Update(msg tea.Msg) tea.Cmd {
 		// Server history replaces the live-only cache (stateful surface).
 		// An RPC error keeps the last good page and never blanks the view.
 		if msg.err == nil {
-			p.runs = msg.runs
+			// Projector lag can make the live row newer than this page;
+			// carry those rows across so it does not blink for one poll.
+			p.runs = mergeLiveRuns(msg.runs, p.runs)
 			p.updateRunsTable()
 		}
 		if p.subView == agentsViewRuns {
