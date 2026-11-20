@@ -839,6 +839,10 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	// Register dispatch trace handlers
 	if rpcServer != nil && metricsStore != nil {
 		rpc.RegisterDispatchHandlers(rpcServer, metricsStore)
+		// C5 dual-key resolution (02-routing/02): session.dispatch_trace
+		// maps a primary session id or thread id to the owning
+		// conversation. nil-safe setter: unset keeps legacy behavior.
+		rpcServer.SetDispatchSessionStore(nilSafeSessionStore(components))
 		logger.Info("Dispatch trace RPC handlers registered")
 	}
 
@@ -3482,9 +3486,14 @@ func nilSafeEvolverPlanManager(c *Components) *plan.PlanManager {
 }
 
 // nilSafeEvolverPlanStore returns the evolver sink plan store (or nil when
-// unavailable) for the HTTP PlanService sink fallback (L6).
-func nilSafeEvolverPlanStore(c *Components) *plan.SQLiteStore {
-	if c == nil {
+// unavailable) for the HTTP PlanService sink fallback (L6). The return type
+// is the INTERFACE plan.PlanStore, not the concrete *plan.SQLiteStore: a
+// nil concrete boxed into the interface field is non-nil, defeats every
+// != nil guard downstream, and GET /api/v1/plans panics (F-NEW-1). The
+// concrete-nil check at this wiring seam yields a TRUE interface nil
+// (internal/daemon/AGENTS.md typed-nil rule).
+func nilSafeEvolverPlanStore(c *Components) plan.PlanStore {
+	if c == nil || c.EvolverPlanStore == nil {
 		return nil
 	}
 	return c.EvolverPlanStore

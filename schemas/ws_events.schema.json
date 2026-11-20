@@ -64,6 +64,7 @@
         "model": { "type": "string" },
         "error": { "type": "string" },
         "rejection_reason": { "type": "string", "description": "Verbatim user rejection reason (20261119-usability-remediation C1, 01-safety leaf 01); set iff handler_case=task_rejected_relay" },
+        "routing_notice": { "type": "string", "description": "User-facing classification-degradation guidance (20261119-usability-remediation C1, 02-routing leaf 01); set when the dispatch chain answered on a degraded classification lane" },
         "source_topic": { "type": "string" },
         "timestamp": { "$ref": "#/definitions/rfc3339String" },
         "type": { "const": "agent_progress" }

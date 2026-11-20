@@ -23,6 +23,27 @@ type Message struct {
 	AgentID    string            `json:"agent_id,omitempty"`
 	Name       string            `json:"name,omitempty"`
 	ToolCallID string            `json:"tool_call_id,omitempty"`
+	// ToolCalls is the additive C4 read surface (03-context/01): populated
+	// ONLY when session.messages.get is called with include_tool_calls=true,
+	// joined by message id from session_tool_calls. nil + omitempty keeps
+	// the default response BYTE-IDENTICAL to the legacy shape (no
+	// tool_calls key anywhere) - the frozen default pin.
+	ToolCalls []MessageToolCall `json:"tool_calls,omitempty"`
+}
+
+// MessageToolCall is the C4 wire shape for a persisted tool call joined
+// onto its message row (session.messages.get include_tool_calls=true):
+// {id, name, args_summary, result_summary, at}. Summaries are bounded
+// (toolCallSummaryLimit runes) so the read surface never streams full
+// tool payloads over RPC; AT is the owning message's RFC3339 timestamp
+// (session_tool_calls carries no own time column - additive-surface
+// scope kept the schema untouched).
+type MessageToolCall struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	ArgsSummary   string `json:"args_summary"`
+	ResultSummary string `json:"result_summary"`
+	At            string `json:"at"`
 }
 
 // ToolCall represents a tool invocation associated with a message.

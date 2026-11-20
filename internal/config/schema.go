@@ -3837,6 +3837,11 @@ type OrchestratorConfig struct {
 	InterviewAmbiguityThreshold float64 `json:"interview_ambiguity_threshold" toml:"interview_ambiguity_threshold"` // planner: conducts interview for plan-mode when >= this
 	MaxStepsPerPhase            int     `json:"max_steps_per_phase"           toml:"max_steps_per_phase"`           // Thread C+F: per-phase step cap
 	MaxPhases                   int     `json:"max_phases"                    toml:"max_phases"`                    // Thread C+F: phase count soft cap
+	// MaxReplanExtensions bounds the Ralph loop's progress-based replan
+	// budget extensions per task (F-NEW-10 replan storm): total replans
+	// stay <= max_iterations + max_replan_extensions. Default 2; 0
+	// disables extensions (the hard cap always sticks).
+	MaxReplanExtensions int `json:"max_replan_extensions" toml:"max_replan_extensions"`
 	// ClassifierFailFast disables classifier alias rotation: when true,
 	// the intent analyzer fails the turn with the primary classifier's
 	// error instead of rotating to weaker alias members. Default false —
@@ -4893,6 +4898,7 @@ func DefaultConfig() *Config {
 			InterviewAmbiguityThreshold: 0.6,
 			MaxStepsPerPhase:            8,
 			MaxPhases:                   12,
+			MaxReplanExtensions:         2,     // F-NEW-10: hard ceiling on Ralph progress extensions per task
 			ClassifierFailFast:          false, // production keeps rotation; fail-fast is a testing mode
 			// ClassifierBootFailFast (F-D8): a local classifier runtime that
 			// never becomes healthy at boot is fatal by default; opt out

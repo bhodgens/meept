@@ -2499,6 +2499,28 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID, jobErr stri
 			}
 			session.MarkFailed()
 
+			// Gate T8 (01-safety/05): the pair branch used to return here
+			// SILENTLY -- step/session marked failed in the stores but no
+			// task.failed, so the parent task and the user's turn never
+			// terminalized. Terminalize the parent task loudly: failed
+			// state + task.failed carrying the job error (the ChatHandler
+			// relay turns it into a failed turn.terminal). Never flip an
+			// already-terminal task (cancellation/recovery may have beaten
+			// us) and never emit a second task.failed.
+			if parent, perr := ts.taskStore.GetByID(step.TaskID); perr == nil && parent != nil && !parent.State.IsTerminal() {
+				parent.SetState(task.StateFailed)
+				if uerr := ts.taskStore.Update(parent); uerr != nil {
+					ts.logger.Error("Failed to set pair parent task failed", KeyTaskID, step.TaskID, "error", uerr)
+				}
+				ts.publishEvent("task.failed", map[string]any{
+					KeyTaskID:                step.TaskID,
+					"name":                   parent.Name,
+					"failed_step":            step.ID,
+					string(MessageTypeError): jobErr,
+					"linked_sessions":        parent.LinkedSessions,
+				})
+			}
+
 			return nil
 		}
 	}
@@ -2913,6 +2935,14 @@ func (ts *TacticalScheduler) publishEvent(topic string, data map[string]any) {
 		return
 	}
 
+	// C6 (01-safety/03): task terminals (completed/failed) are
+	// per-task-once: losing one breaks every awaiting client's state
+	// machine, so they publish blocking (5s bounded wait, Error-logged on
+	// timeout). All other scheduler events stay non-blocking.
+	if bus.IsCriticalTopic(topic) {
+		ts.bus.PublishBlocking(topic, msg)
+		return
+	}
 	ts.bus.Publish(topic, msg)
 }
 

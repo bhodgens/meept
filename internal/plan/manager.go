@@ -1038,7 +1038,7 @@ func releaseSynthesisTo(store PlanStore, ctx context.Context, id string, restore
 // tasks for each phase, and TaskSteps for each parsed step within a phase.
 // This method is idempotent: if the plan already has a TaskID, it returns nil
 // without re-creating tasks.
-func (m *PlanManager) Synthesize(ctx context.Context, planID string) error {
+func (m *PlanManager) Synthesize(ctx context.Context, planID string) (retErr error) {
 	if m.taskCreator == nil {
 		return fmt.Errorf("synthesize plan %s: no task creator configured", planID)
 	}
@@ -1129,6 +1129,22 @@ func (m *PlanManager) Synthesize(ctx context.Context, planID string) error {
 				m.logger.Warn("plan synthesis exceeded max attempts; parking",
 					"plan_id", planID, "attempts", attempts)
 				release(true)
+				// C6 (gate T8): the parked plan is terminal-failed --
+				// publish plan.failed so client surfaces learn the
+				// expansion failed (the error used to live only in
+				// synthesis_error + the log).
+				reason := fresh.SynthesisError
+				if reason == "" && retErr != nil {
+					reason = retErr.Error()
+				}
+				if reason == "" {
+					reason = fmt.Sprintf("plan synthesis failed after %d attempts", attempts)
+				}
+				m.publishEvent("plan.failed", map[string]any{
+					"plan_id":    planID,
+					"session_id": fresh.SourceSession,
+					"reason":     reason,
+				})
 			} else {
 				release(false)
 			}
@@ -1623,9 +1639,10 @@ func (m *PlanManager) completePlan(ctx context.Context, planID string) error {
 // failure sibling of completePlan (leaf 02 T2, audit M-6 / plan F1). The
 // transition rides the table's executing -> failed edge through the same
 // guarded CAS as every other lifecycle move (C-P4), so a concurrent
-// CancelPlan still wins with exactly one winner. No new bus event is
-// published: the leaf contract pins the event surface unchanged (the
-// plan.phase_state failure edges already rode the PhaseFailed writer).
+// CancelPlan still wins with exactly one winner. C6 (01-safety gate T8):
+// the transition publishes plan.failed {plan_id, session_id, reason} --
+// the phase_state failure edges alone never told the plan's owning
+// session the PLAN failed.
 func (m *PlanManager) failPlan(ctx context.Context, planID string) error {
 	plan, err := m.store.GetPlan(ctx, planID)
 	if err != nil {
@@ -1651,6 +1668,21 @@ func (m *PlanManager) failPlan(ctx context.Context, planID string) error {
 	}
 
 	m.logger.Info("plan failed: at least one phase failed", "plan_id", plan.ID)
+
+	// C6: one plan.failed per failed plan, session-scoped, with an
+	// actionable reason naming the failed phase(s).
+	reason := "plan failed: at least one phase failed"
+	for _, ph := range phases {
+		if ph != nil && ph.State == PhaseFailed {
+			reason = fmt.Sprintf("plan failed: phase %q failed", ph.Name)
+			break
+		}
+	}
+	m.publishEvent("plan.failed", map[string]any{
+		"plan_id":    plan.ID,
+		"session_id": plan.SourceSession,
+		"reason":     reason,
+	})
 	return nil
 }
 
@@ -1904,7 +1936,16 @@ func (m *PlanManager) publishEvent(eventType string, payload map[string]any) {
 		return
 	}
 
-	delivered := m.bus.Publish(eventType, msg)
+	// C6 (01-safety/03): per-plan-once terminal events must never be
+	// silently dropped on a full subscriber buffer - route them through
+	// the bounded blocking publish (5s wait, Error-logged on timeout).
+	// Progress chatter stays non-blocking drop-oldest.
+	var delivered int
+	if bus.IsCriticalTopic(eventType) {
+		delivered = m.bus.PublishBlocking(eventType, msg)
+	} else {
+		delivered = m.bus.Publish(eventType, msg)
+	}
 	m.logger.Debug("published event", "event", eventType, "delivered", delivered)
 }
 

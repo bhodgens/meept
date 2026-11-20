@@ -427,6 +427,63 @@ func (sp *StrategicPlanner) validateToolHint(taskID, hint string) string {
 	return ""
 }
 
+// hintResearchVerbRe / hintWebEvidenceRe detect a research-shaped step
+// description (02-routing/01, gate T2): a research operation verb plus
+// web-oriented evidence. Both must fire -- "implement the research
+// module" is code work, not a web-research step.
+var hintResearchVerbRe = regexp.MustCompile(`(?i)\b(?:research|investigate|investigating|look up|browse)\b`)
+var hintWebEvidenceRe = regexp.MustCompile(`(?i)\b(?:web|website|online|internet|https?|release notes|documentation|docs|news)\b`)
+
+// fitToolHint validates a planner hint against the executor's capability
+// fit (20261119-usability-remediation 02-routing/01, audit-routing R4/R6).
+// A research-shaped step whose hint routes to an agent WITHOUT web_fetch
+// (the coder) is remapped through the authoritative hint table
+// (config.ToolHintAgent: research -> researcher) and a routing.warning
+// mismatch event is published -- never a silent coder-without-web_fetch.
+// Capability ground truth is the registry's AgentSpec (AGENT.md tools);
+// when no registry is wired the mismatch cannot be confirmed, so the
+// remap still fires WITH the explicit warning (observable, never silent).
+// Capability-matched hints pass through byte-identical.
+func (sp *StrategicPlanner) fitToolHint(taskID, description, hint string) string {
+	if hint == "" {
+		return hint
+	}
+	if !hintResearchVerbRe.MatchString(description) || !hintWebEvidenceRe.MatchString(description) {
+		return hint
+	}
+	agentID, ok := config.ToolHintAgent(hint)
+	if !ok {
+		return hint
+	}
+	if sp.registry != nil {
+		if spec, found := sp.registry.GetSpec(agentID); found && spec.HasTool("web_fetch") {
+			// Executor already carries the capability: no remap, no warning.
+			return hint
+		}
+	}
+	researchAgent, ok := config.ToolHintAgent("research")
+	if !ok {
+		return hint
+	}
+	sp.logger.Warn("planner tool_hint capability mismatch: research-shaped step routed to agent without web_fetch",
+		"task_id", taskID,
+		"hint", hint,
+		"agent_id", agentID,
+		"remapped_hint", "research",
+		"remapped_agent", researchAgent,
+	)
+	sp.publishEvent("routing.warning", map[string]any{
+		"task_id":        taskID,
+		"hint":           hint,
+		"agent_id":       agentID,
+		"reason":         "hint_capability_mismatch",
+		"required_tool":  "web_fetch",
+		"remapped_hint":  "research",
+		"remapped_agent": researchAgent,
+	})
+	return "research"
+}
+
 // ConductInterview determines whether an interview is needed for the given plan
 // request. If the TrueAnalysis indicates high ambiguity or broad scope, it uses
 // the LLM to generate targeted interview questions. If interview answers are
@@ -1699,7 +1756,7 @@ func (sp *StrategicPlanner) parsePlanOutput(taskID, output string) ([]*task.Task
 	// First pass: create steps and collect IDs
 	for i, ps := range plan.Steps {
 		step := task.NewTaskStep(taskID, ps.Description, i)
-		step.ToolHint = sp.validateToolHint(taskID, ps.ToolHint)
+		step.ToolHint = sp.fitToolHint(taskID, ps.Description, sp.validateToolHint(taskID, ps.ToolHint))
 		steps[i] = step
 		stepIDs[i] = step.ID
 	}
@@ -2472,6 +2529,14 @@ func (sp *StrategicPlanner) publishEvent(topic string, data map[string]any) {
 		return
 	}
 
+	// C6 (01-safety/03): task terminals (completed/failed/rejected) are
+	// per-task-once: losing one breaks every awaiting client's state
+	// machine, so they publish blocking (5s bounded wait, Error-logged on
+	// timeout). All other planner events stay non-blocking.
+	if bus.IsCriticalTopic(topic) {
+		sp.bus.PublishBlocking(topic, msg)
+		return
+	}
 	sp.bus.Publish(topic, msg)
 }
 

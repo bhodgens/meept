@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/plan"
@@ -24,12 +25,31 @@ func NewPlanService(manager *plan.PlanManager, store plan.PlanStore) *PlanServic
 
 // SetEvolverSink wires the evolver sink manager + store. Either argument
 // may be nil; nil values are ignored (setter nil-guard convention).
+// Typed-nil interface values (a nil *plan.SQLiteStore boxed into
+// plan.PlanStore) are ALSO ignored -- the plain != nil guard passed them
+// and List/Get dereferenced the nil receiver (F-NEW-1 GET /plans panic).
 func (s *PlanService) SetEvolverSink(m *plan.PlanManager, store plan.PlanStore) {
 	if m != nil {
 		s.fallbackManager = m
 	}
-	if store != nil {
+	if !isNilPlanStore(store) {
 		s.fallbackStore = store
+	}
+}
+
+// isNilPlanStore reports whether a plan.PlanStore interface value is nil
+// OR holds a typed-nil pointer (reflect-safe; defense in depth behind the
+// wiring-seam fix in daemon.nilSafeEvolverPlanStore).
+func isNilPlanStore(store plan.PlanStore) bool {
+	if store == nil {
+		return true
+	}
+	v := reflect.ValueOf(store)
+	switch v.Kind() {
+	case reflect.Ptr, reflect.Map, reflect.Slice, reflect.Interface, reflect.Func, reflect.Chan:
+		return v.IsNil()
+	default:
+		return false
 	}
 }
 
@@ -95,11 +115,20 @@ func (s *PlanService) Get(ctx context.Context, planID string) (*plan.Plan, error
 		return nil, wrapError("plan", "Get", ErrUnavailable)
 	}
 	p, err := s.store.GetPlan(ctx, planID)
-	if err != nil && s.fallbackStore != nil {
+	if err != nil && !isNilPlanStore(s.fallbackStore) {
 		// Not in the shared store: try the evolver sink store.
 		p, err = s.fallbackStore.GetPlan(ctx, planID)
 	}
 	if err != nil {
+		// Typed-nil guard (F-NEW-1): with the sink disabled the store
+		// miss never falls through to the fallback, so the shared
+		// store's plan.ErrPlanNotFound is the terminal error. Map the
+		// "clean miss" shape to the service sentinel -- the typed-nil
+		// fallback must not turn a not-found into a panic OR leak the
+		// store-specific error as an unclassifiable failure.
+		if errors.Is(err, plan.ErrPlanNotFound) {
+			return nil, wrapError("plan", "Get", ErrNotFound)
+		}
 		return nil, wrapError("plan", "Get", err)
 	}
 	if p == nil {
@@ -123,7 +152,7 @@ func (s *PlanService) List(ctx context.Context, projectID string, limit int) ([]
 	// Merge evolver sink plans so the HTTP surface sees the full set
 	// (mirrors rpc/plan.go handleList). Sink plans are project-less and
 	// only surface when no project filter is applied.
-	if s.fallbackStore != nil && projectID == "" {
+	if !isNilPlanStore(s.fallbackStore) && projectID == "" {
 		if sinkPlans, sinkErr := s.fallbackStore.ListPlans(ctx, "", limit); sinkErr == nil {
 			plans = appendSessionLessSinkPlans(plans, sinkPlans)
 		}
@@ -170,7 +199,7 @@ func (s *PlanService) ListBySession(ctx context.Context, sessionID string) ([]*p
 	// filter alone left the GUI plans tab empty while notifications
 	// advertised it (observed live 2026-10-22). Only PENDING_APPROVAL
 	// merges — the state awaiting operator action.
-	if s.fallbackStore != nil {
+	if !isNilPlanStore(s.fallbackStore) {
 		if sinkPlans, sinkErr := s.fallbackStore.ListPlansByState(ctx, plan.StatePendingApproval, 1000); sinkErr == nil {
 			plans = appendSessionLessSinkPlans(plans, sinkPlans)
 		}

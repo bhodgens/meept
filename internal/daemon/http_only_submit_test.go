@@ -48,9 +48,22 @@ func TestHTTPOnlySubmitConfigServesChatSubmit(t *testing.T) {
 	}
 
 	// --- Part 2: the submitter serves a live ack through its HTTP seam ---
+	// C4 (03-context/01) made chat.submit reject unknown session ids
+	// (accepted:false, never a phantom session), so the live-ack probe
+	// submits against a REAL session the daemon's own store created -
+	// the finding-17 pin is about the HTTP-only submitter seam serving an
+	// ack (never 503), not about accepting fabricated ids.
+	var submitSessionID string
+	if d.components != nil && d.components.SessionStore != nil {
+		sess, sessErr := d.components.SessionStore.Create("http-only-g1")
+		if sessErr != nil {
+			t.Fatalf("create session: %v", sessErr)
+		}
+		submitSessionID = sess.ID
+	}
 	params, err := json.Marshal(map[string]any{
 		"message":    "http-only submit",
-		"session_id": "sess-g1",
+		"session_id": submitSessionID,
 	})
 	if err != nil {
 		t.Fatal(err)

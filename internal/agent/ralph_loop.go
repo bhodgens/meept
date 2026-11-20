@@ -17,19 +17,21 @@ import (
 
 // RalphLoopConfig holds configuration for the Ralph loop.
 type RalphLoopConfig struct {
-	Enabled           bool `json:"enabled"`
-	MaxIterations     int  `json:"max_iterations"`     // Maximum replan cycles per task
-	EvidenceRequired  bool `json:"evidence_required"`  // Require evidence for completion claims
-	ChecklistRequired bool `json:"checklist_required"` // Require checklist completion
+	Enabled             bool `json:"enabled"`
+	MaxIterations       int  `json:"max_iterations"`        // Maximum replan cycles per task
+	MaxReplanExtensions int  `json:"max_replan_extensions"` // Hard ceiling on progress-based budget extensions per task (default 2; <=0 treated as 0)
+	EvidenceRequired    bool `json:"evidence_required"`     // Require evidence for completion claims
+	ChecklistRequired   bool `json:"checklist_required"`    // Require checklist completion
 }
 
 // DefaultRalphLoopConfig returns default Ralph loop configuration.
 func DefaultRalphLoopConfig() RalphLoopConfig {
 	return RalphLoopConfig{
-		Enabled:           true,
-		MaxIterations:     3,
-		EvidenceRequired:  true,
-		ChecklistRequired: true,
+		Enabled:             true,
+		MaxIterations:       3,
+		MaxReplanExtensions: 2,
+		EvidenceRequired:    true,
+		ChecklistRequired:   true,
 	}
 }
 
@@ -53,7 +55,19 @@ type RalphLoop struct {
 	// phase-2 run, 2026-09-20: replay-04/08/18/43 all died at the cap
 	// mid-progress, e.g. "1/8 steps completed" → "4/7" on replay-04).
 	progressSeen map[string]int
-	mu           sync.Mutex
+	// extensionsGranted counts progress-based budget extensions consumed
+	// per task (task_id -> grants). HARD ceiling (F-NEW-10 replan storm):
+	// madeForwardProgress used to grant an UNBOUNDED extension every cycle
+	// the completed-step count grew -- and each replan adds completed
+	// steps, so the storm task extended 144 times. The counter never
+	// resets mid-task; at MaxReplanExtensions the cap sticks.
+	extensionsGranted map[string]int
+	// failedLatched marks tasks that hit failTaskAtCap: a terminal-failed
+	// task NEVER replans again, even when replan-created steps complete
+	// late and grow taskProgress (the shape that bypassed TaskIsTerminal
+	// in the live storm). Reset() clears it for a genuinely new run.
+	failedLatched map[string]bool
+	mu            sync.Mutex
 }
 
 // NewRalphLoop creates a new Ralph loop manager.
@@ -61,16 +75,21 @@ func NewRalphLoop(config RalphLoopConfig, orchestrator *Orchestrator, taskStore 
 	if logger == nil {
 		logger = slog.Default()
 	}
+	if config.MaxReplanExtensions < 0 {
+		config.MaxReplanExtensions = 0
+	}
 	return &RalphLoop{
-		config:       config,
-		orchestrator: orchestrator,
-		taskStore:    taskStore,
-		stepStore:    stepStore,
-		planManager:  planManager,
-		bus:          bus,
-		logger:       *logger,
-		iterations:   make(map[string]int),
-		progressSeen: make(map[string]int),
+		config:            config,
+		orchestrator:      orchestrator,
+		taskStore:         taskStore,
+		stepStore:         stepStore,
+		planManager:       planManager,
+		bus:               bus,
+		logger:            *logger,
+		iterations:        make(map[string]int),
+		progressSeen:      make(map[string]int),
+		extensionsGranted: make(map[string]int),
+		failedLatched:     make(map[string]bool),
 	}
 }
 
@@ -127,11 +146,56 @@ func (rl *RalphLoop) madeForwardProgress(taskID string, current int) bool {
 	return false
 }
 
+// extensionBudgetLeft reports whether the task may consume one more
+// progress-based budget extension. HARD ceiling (F-NEW-10): the grant
+// counter never resets mid-task, so total replans stay bounded by
+// MaxIterations + MaxReplanExtensions no matter how much the completed-
+// step count grows. Callers must NOT hold rl.mu.
+func (rl *RalphLoop) extensionBudgetLeft(taskID string) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	return rl.extensionsGranted[taskID] < rl.config.MaxReplanExtensions
+}
+
+// grantExtension consumes one extension from the hard budget and rolls
+// the iteration counter back below the cap so ordinary replanning
+// continues for one more cycle. Callers must NOT hold rl.mu.
+func (rl *RalphLoop) grantExtension(taskID string) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	rl.extensionsGranted[taskID]++
+	rl.iterations[taskID] = rl.config.MaxIterations - 1
+}
+
+// extensionsGrantedCount returns the extensions consumed for a task
+// (mutex-guarded read for log fields).
+func (rl *RalphLoop) extensionsGrantedCount(taskID string) int {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	return rl.extensionsGranted[taskID]
+}
+
+// taskFailedLatched reports whether failTaskAtCap has terminalized this
+// task as failed. The latch survives replan-created steps completing
+// late (the storm shape) and is only cleared by Reset.
+func (rl *RalphLoop) taskFailedLatched(taskID string) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	return rl.failedLatched[taskID]
+}
+
 // CheckCompletion verifies if a completed task actually achieved its goal.
 // Returns (isComplete bool, evidence []string, needsReplan bool).
 func (rl *RalphLoop) CheckCompletion(ctx context.Context, taskID string, result json.RawMessage) (bool, []string, bool) {
 	if !rl.config.Enabled {
 		return true, nil, false
+	}
+
+	// Terminal-failed latch (F-NEW-10): a task that hit failTaskAtCap
+	// never replans again, even when late replan-created steps grow the
+	// completed-step count. No completion claim, no replan request.
+	if rl.taskFailedLatched(taskID) {
+		return false, nil, false
 	}
 
 	// Get task details
@@ -175,7 +239,7 @@ func (rl *RalphLoop) CheckCompletion(ctx context.Context, taskID string, result 
 			// parsed: nothing verifies the work, so the task fails.
 			rl.logger.Warn("Max Ralph loop iterations reached with an unparseable final result, failing task",
 				"task_id", taskID, "iterations", iteration)
-			rl.failTaskAtCap(taskID, "max ralph loop iterations reached without sufficient evidence")
+			rl.failTaskAtCap(taskID, capFailureUserCopy(rl.config.MaxIterations))
 			return false, nil, false
 		}
 		return false, nil, true // Needs replan due to parse failure
@@ -240,16 +304,15 @@ func (rl *RalphLoop) CheckCompletion(ctx context.Context, taskID string, result 
 		// instead: the counter rolls back below the cap so ordinary
 		// replanning continues, and the NEXT attempt with no further
 		// progress still fails at the cap.
-		if progressed {
+		if progressed && rl.extensionBudgetLeft(taskID) {
 			completed := rl.taskProgress(taskID)
+			rl.grantExtension(taskID)
 			rl.logger.Info("Max Ralph loop iterations reached but the task is making forward progress; extending the replan budget",
 				"task_id", taskID,
 				"iterations", iteration,
 				"completed_steps", completed,
+				"extensions_granted", rl.extensionsGrantedCount(taskID),
 			)
-			rl.mu.Lock()
-			rl.iterations[taskID] = rl.config.MaxIterations - 1
-			rl.mu.Unlock()
 			return false, resultData.Evidence, true
 		}
 		// Cap reached (e2e run 3/8, 2026-09-11): the previous contract
@@ -261,7 +324,7 @@ func (rl *RalphLoop) CheckCompletion(ctx context.Context, taskID string, result 
 		// counter stays armed.
 		rl.logger.Warn("Max Ralph loop iterations reached, failing task",
 			"task_id", taskID, "iterations", iteration)
-		rl.failTaskAtCap(taskID, "max ralph loop iterations reached without sufficient evidence")
+		rl.failTaskAtCap(taskID, capFailureUserCopy(rl.config.MaxIterations))
 		return false, nil, false
 	}
 
@@ -405,6 +468,23 @@ func (rl *RalphLoop) validateChecklists(taskID string) (bool, int, int, []string
 // so once iterations reaches MaxIterations the task is marked failed and
 // no further replan request is published.
 func (rl *RalphLoop) TriggerReplan(ctx context.Context, taskID string, previousEvidence []string) error {
+	// Terminal-failed latch (F-NEW-10): once failTaskAtCap has failed the
+	// task, NO replan ever fires again -- even when replan-created steps
+	// complete late and grow taskProgress (the shape that bypassed the
+	// orchestrator's TaskIsTerminal guard in the live storm). Also refuse
+	// any task the store already reports failed-terminal.
+	if rl.taskFailedLatched(taskID) {
+		rl.logger.Info("Replan refused: task is terminal-failed (latched)", "task_id", taskID)
+		return nil
+	}
+	if t, terr := rl.taskStore.GetByID(taskID); terr == nil && t != nil && t.State == task.StateFailed {
+		rl.mu.Lock()
+		rl.failedLatched[taskID] = true
+		rl.mu.Unlock()
+		rl.logger.Info("Replan refused: task already failed-terminal", "task_id", taskID)
+		return nil
+	}
+
 	rl.mu.Lock()
 	iteration := rl.iterations[taskID] + 1
 	rl.mu.Unlock()
@@ -416,13 +496,15 @@ func (rl *RalphLoop) TriggerReplan(ctx context.Context, taskID string, previousE
 		// Mirrors the CheckCompletion extension so BOTH cap sites agree.
 		// madeForwardProgress takes rl.mu itself, so the outer lock is
 		// released before the store read + progress update.
-		if rl.madeForwardProgress(taskID, rl.taskProgress(taskID)) {
-			rl.mu.Lock()
-			rl.iterations[taskID] = rl.config.MaxIterations - 1
-			rl.mu.Unlock()
+		// HARD ceiling (F-NEW-10): extensions are bounded by
+		// MaxReplanExtensions; past the budget the cap sticks and the
+		// task terminalizes failed (latched).
+		if rl.extensionBudgetLeft(taskID) && rl.madeForwardProgress(taskID, rl.taskProgress(taskID)) {
+			rl.grantExtension(taskID)
 			rl.logger.Info("Replan cap reached but the task is making forward progress; extending the replan budget",
 				"task_id", taskID,
 				"completed_steps", rl.taskProgress(taskID),
+				"extensions_granted", rl.extensionsGrantedCount(taskID),
 			)
 			iteration = rl.config.MaxIterations
 		} else {
@@ -433,7 +515,7 @@ func (rl *RalphLoop) TriggerReplan(ctx context.Context, taskID string, previousE
 				"task_id", taskID,
 				"iterations", iterations,
 				"max_iterations", rl.config.MaxIterations)
-			rl.failTaskAtCap(taskID, "replan iteration cap reached")
+			rl.failTaskAtCap(taskID, capFailureUserCopy(iterations))
 			return nil
 		}
 	}
@@ -530,6 +612,17 @@ func (rl *RalphLoop) Reset(taskID string) {
 	defer rl.mu.Unlock()
 	delete(rl.iterations, taskID)
 	delete(rl.progressSeen, taskID)
+	delete(rl.extensionsGranted, taskID)
+	delete(rl.failedLatched, taskID)
+}
+
+// capFailureUserCopy is the user-facing failure copy for a task the
+// replan cap terminalized (T4, leaf 06-planning/03 contract: names the
+// attempt count, tells the user what to do, never leaks the internal
+// loop vocabulary -- "ralph"/"replan iteration" trip the gate's
+// gateInternalVocab assertion in plan_failure_copy_test.go).
+func capFailureUserCopy(attempts int) string {
+	return fmt.Sprintf("could not verify the work after %d attempts - review the task", attempts)
 }
 
 // failTaskAtCap marks a task failed after TriggerReplan hit MaxIterations
@@ -557,6 +650,11 @@ func (rl *RalphLoop) failTaskAtCap(taskID, reason string) {
 			"task_id", taskID, "error", err)
 		return
 	}
+	// Latch (F-NEW-10): the failure terminalized -- this task never
+	// replans again and the failure is relayed exactly once.
+	rl.mu.Lock()
+	rl.failedLatched[taskID] = true
+	rl.mu.Unlock()
 	if rl.bus == nil {
 		return
 	}
@@ -595,7 +693,10 @@ func (rl *RalphLoop) failTaskAtCap(taskID, reason string) {
 		Topic:   "task.failed",
 		Payload: payload,
 	}
-	rl.bus.Publish("task.failed", msg)
+	// C6 (01-safety/03): task.failed is a per-task-once terminal - it
+	// publishes blocking so a full subscriber buffer cannot silently
+	// lose it (bounded 5s wait; the bus Error-logs on timeout).
+	rl.bus.PublishBlocking("task.failed", msg)
 }
 
 // Cleanup removes iteration entries that haven't been touched within maxAge

@@ -194,6 +194,13 @@ type App struct {
 	statusMessage     string
 	statusMessageTime time.Time
 
+	// lastDroppedNotice is the daemon-side drop counter value at the
+	// moment the last "events dropped" system notice was rendered
+	// (C6, 01-safety/03). The bus.poll `dropped` figure is cumulative,
+	// so comparing against it renders one notice per NEW loss episode
+	// instead of one per poll.
+	lastDroppedNotice int64
+
 	// Double-press tracking for Ctrl-C (Ctrl-D opens the pending changes
 	// modal instead of quitting)
 	lastCtrlC      time.Time
@@ -2032,6 +2039,18 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			}
+		}
+		// C6 (01-safety/03): never-silent loss + reconnect surfacing.
+		// A re-subscribe after a lost subscription and any new daemon-
+		// side drop episode get one system notice each in the chat
+		// transcript; the drop figure is cumulative, so only an
+		// increase over the last-noticed value re-notices.
+		if msg.Resubscribed {
+			a.chat.AddSystemMessage("event feed reconnected after daemon restart")
+		}
+		if msg.Dropped > a.lastDroppedNotice {
+			a.chat.AddSystemMessage(fmt.Sprintf("event feed dropped %d buffered event(s) under load (daemon counter total: %d)", msg.Dropped-a.lastDroppedNotice, msg.Dropped))
+			a.lastDroppedNotice = msg.Dropped
 		}
 		// Also forward to sidebar for activity feed updates
 		if sidebarCmd := a.sidebar.Update(msg); sidebarCmd != nil {

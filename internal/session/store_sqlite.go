@@ -1007,6 +1007,14 @@ func (s *SQLiteStore) SaveMessages(sessionID string, messages []Message) error {
 		}
 	}()
 
+	// C4 (03-context/01): guarantee the sessions row inside the SAME tx as
+	// the inserts, so conversation-only writers never hit the sessions(id)
+	// foreign key (787) and existing sessions are untouched (no-op probe).
+	if err := s.ensureSessionRowInTx(tx, sessionID); err != nil {
+		s.mu.Unlock()
+		return err
+	}
+
 	stmt, err := tx.Prepare(`
 		INSERT INTO session_messages (session_id, role, content, timestamp, parent_id, entry_type, branch_id, model, agent_id, name, tool_call_id, parts)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
@@ -1148,6 +1156,13 @@ func (s *SQLiteStore) SaveMessagesWithToolCalls(sessionID string, messages []Mes
 			slog.Debug("transaction rollback error", "error", rErr)
 		}
 	}()
+
+	// C4 (03-context/01): same sessions-row guarantee as SaveMessages -
+	// the FK 787 gate applies identically to tool-call-bearing writes.
+	if err := s.ensureSessionRowInTx(tx, sessionID); err != nil {
+		s.mu.Unlock()
+		return err
+	}
 
 	msgStmt, err := tx.Prepare(`
 		INSERT INTO session_messages (session_id, role, content, timestamp, parent_id, entry_type, branch_id, model, agent_id, name, tool_call_id, parts)

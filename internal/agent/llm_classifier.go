@@ -319,6 +319,11 @@ type LLMClassifier struct {
 	unavailMu    sync.RWMutex
 
 	cooldown time.Duration // how long to cache "unavailable" (default 60s)
+	// lastFailure is the error that armed the cooldown (02-routing/01):
+	// the cooldown-skip path wraps it so ClassificationUserGuidance sees
+	// the real failure kind instead of an unclassifiable string. Guarded
+	// by unavailMu alongside unavailUntil.
+	lastFailure error
 
 	// tokenCap is the per-classification-call output token budget, derived
 	// from the model's declared max_output (see effectiveClassificationCap).
@@ -534,10 +539,17 @@ func (c *LLMClassifier) Classify(ctx context.Context, input string, memCtx *Memo
 	if c.unavailable.Load() {
 		c.unavailMu.RLock()
 		unavailUntil := c.unavailUntil
+		cause := c.lastFailure
 		c.unavailMu.RUnlock()
 		if time.Now().Before(unavailUntil) {
 			if c.resolver == nil || c.aliasName == "" {
 				// Still within cooldown; skip the connection attempt.
+				// Wrap the arming failure (02-routing/01) so the degraded
+				// lane's ClassificationUserGuidance names the real cause.
+				if cause != nil {
+					return nil, fmt.Errorf("LLM classifier unavailable (cooldown, retry after %s): %w",
+						unavailUntil.Truncate(time.Second).Format(time.TimeOnly), cause)
+				}
 				return nil, fmt.Errorf("LLM classifier unavailable (cooldown, retry after %s)",
 					unavailUntil.Truncate(time.Second).Format(time.TimeOnly))
 			}
@@ -585,6 +597,7 @@ func (c *LLMClassifier) Classify(ctx context.Context, input string, memCtx *Memo
 		c.unavailable.Store(true)
 		c.unavailMu.Lock()
 		c.unavailUntil = time.Now().Add(c.cooldown)
+		c.lastFailure = err
 		c.unavailMu.Unlock()
 		c.logger.Warn("LLM classifier unavailable, falling back to keyword",
 			"error", err,

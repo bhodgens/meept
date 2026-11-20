@@ -2154,6 +2154,10 @@ func (h *Handler) handleGetMessages(msg *models.BusMessage) (any, error) {
 		SessionID string `json:"session_id"`
 		Offset    int    `json:"offset"`
 		Limit     int    `json:"limit"`
+		// IncludeToolCalls (C4, 03-context/01): join persisted tool calls
+		// onto their message rows. Default false = legacy byte-identical
+		// response (the Message.ToolCalls field stays nil + omitempty).
+		IncludeToolCalls bool `json:"include_tool_calls"`
 	}
 	if err := json.Unmarshal(msg.Payload, &params); err != nil {
 		return nil, err
@@ -2168,12 +2172,87 @@ func (h *Handler) handleGetMessages(msg *models.BusMessage) (any, error) {
 		return nil, err
 	}
 
+	if params.IncludeToolCalls {
+		joined, joinErr := h.joinToolCalls(messages)
+		if joinErr != nil {
+			// The opt-in is additive: a join failure never degrades into
+			// an error on a read that worked - log and return the rows
+			// without the tool-call surface.
+			h.logger.Warn("session.messages.get: tool-call join failed",
+				KeySessionID, params.SessionID,
+				"error", joinErr,
+			)
+		} else {
+			messages = joined
+		}
+	}
+
 	count, _ := h.store.GetMessageCount(params.SessionID)
 
 	return map[string]any{
 		"messages": messages,
 		"total":    count,
 	}, nil
+}
+
+// joinToolCalls batch-reads the persisted tool calls for the given rows
+// (GetToolCallsForMessages) and attaches them in the C4 wire shape to the
+// message each call belongs to. Rows without calls are left untouched
+// (their tool_calls key stays absent).
+func (h *Handler) joinToolCalls(messages []Message) ([]Message, error) {
+	if len(messages) == 0 {
+		return messages, nil
+	}
+	ids := make([]int64, len(messages))
+	for i, m := range messages {
+		ids[i] = m.ID
+	}
+	byID, err := h.store.GetToolCallsForMessages(ids)
+	if err != nil {
+		return nil, fmt.Errorf("failed to join tool calls: %w", err)
+	}
+	if len(byID) == 0 {
+		return messages, nil
+	}
+	joined := make([]Message, len(messages))
+	copy(joined, messages)
+	for i := range joined {
+		calls := byID[joined[i].ID]
+		if len(calls) == 0 {
+			continue
+		}
+		at := joined[i].Timestamp.Format(time.RFC3339)
+		wire := make([]MessageToolCall, 0, len(calls))
+		for _, tc := range calls {
+			wire = append(wire, MessageToolCall{
+				ID:            tc.ToolCallID,
+				Name:          tc.ToolName,
+				ArgsSummary:   truncateRunes(tc.Arguments, toolCallSummaryLimit),
+				ResultSummary: truncateRunes(tc.Result, toolCallSummaryLimit),
+				At:            at,
+			})
+		}
+		joined[i].ToolCalls = wire
+	}
+	return joined, nil
+}
+
+// toolCallSummaryLimit bounds args/result summaries on the C4 read
+// surface (same discipline as dispatchInputSummaryLimit in metrics):
+// the RPC carries previews, never full tool payloads.
+const toolCallSummaryLimit = 200
+
+// truncateRunes bounds s to max runes with an ASCII ellipsis, rune-safe
+// so multi-byte content is never split mid-character.
+func truncateRunes(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return string(runes[:max-3]) + "..."
 }
 
 // handleUpdateDescription updates a session's description.

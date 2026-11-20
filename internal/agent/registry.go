@@ -570,6 +570,9 @@ func (r *AgentRegistry) ListSpecs() []*AgentSpec {
 // RPCs, dispatcher). New callers should use GetForTask to get per-task
 // isolation.
 func (r *AgentRegistry) Get(id string) (*AgentLoop, error) {
+	if r == nil {
+		return nil, fmt.Errorf("agent registry not wired (nil registry)")
+	}
 	return r.GetForTask(id, "_default")
 }
 
@@ -582,6 +585,13 @@ func (r *AgentRegistry) Get(id string) (*AgentLoop, error) {
 // calls), so holding the write lock through lazy-create is safe per CLAUDE.md
 // mutex-scope rule.
 func (r *AgentRegistry) GetForTask(agentID, taskID string) (*AgentLoop, error) {
+	// Nil-receiver guard (01-safety/07): the strategic planner can run
+	// with no registry wired (degraded/unit wiring); a nil *AgentRegistry
+	// must surface an actionable error, never a nil-pointer panic at the
+	// mutex lock below.
+	if r == nil {
+		return nil, fmt.Errorf("agent registry not wired (nil registry) for agent %q", agentID)
+	}
 	// Routing-only ids (e.g. "orchestrator") have no AGENT.md spec; resolve
 	// them to a real executor persona so step jobs don't fall back to the
 	// tool-less template loop. Loop keys use the canonical id so aliased and

@@ -3,6 +3,7 @@ package bus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"runtime"
@@ -13,6 +14,11 @@ import (
 
 	"github.com/caimlas/meept/pkg/models"
 )
+
+// ErrBusClosed is returned by the blocking publish paths when the bus has
+// been shut down: a critical event can never be delivered after Close, and
+// the caller must terminalize honestly instead of hanging on the 5s bound.
+var ErrBusClosed = errors.New("bus: message bus closed")
 
 // Agent lifecycle event topics.
 const (
@@ -85,6 +91,12 @@ type MessageBus struct {
 
 	// Subscription tracking for debugging dead subscriptions (Phase 1)
 	subMeta map[string]SubMetadata // key = channel address (%p format)
+
+	// turnOutbox retains C6 critical terminal outcomes for lost-event
+	// recovery (W25). Lazily created on first critical publish; the
+	// turn.result query RPC (01-safety/05 T5) reads it via TurnOutbox().
+	outboxMu   sync.Mutex
+	turnOutbox *TurnOutbox
 }
 
 // panicOnUndrainedSubscription enables error-level logging mode for tests.
@@ -139,7 +151,21 @@ func (b *MessageBus) Publish(topic string, msg *models.BusMessage) int {
 // unacceptable (e.g., approval requests). Returns the number of subscribers
 // the message was delivered to.
 func (b *MessageBus) PublishBlocking(topic string, msg *models.BusMessage) int {
-	return b.publish(topic, msg, false, true)
+	n, err := b.PublishBlockingErr(topic, msg)
+	if err != nil {
+		b.logger.Error("bus: blocking publish failed", "topic", topic, "error", err)
+	}
+	return n
+}
+
+// PublishBlockingErr is PublishBlocking with an explicit error result for
+// the C6 critical-delivery path: it returns ErrBusClosed when the bus is
+// shut down (before or during the bounded wait) so producers can
+// terminalize honestly instead of reporting a silent zero delivery.
+// Per-subscriber timeouts still log at Error and simply do not count as
+// delivered; the bounded-wait contract (5s per subscriber) is unchanged.
+func (b *MessageBus) PublishBlockingErr(topic string, msg *models.BusMessage) (int, error) {
+	return b.publishErr(topic, msg, false, true)
 }
 
 // PublishExternalOnly is like Publish but marks the "no subscribers" debug log
@@ -164,8 +190,19 @@ func (b *MessageBus) PublishExternalOnly(topic string, msg *models.BusMessage) i
 // visible (the demote in d48d89b7 silenced it along with the informational
 // paths).
 func (b *MessageBus) publish(topic string, msg *models.BusMessage, externalOnly, blocking bool) int {
+	n, err := b.publishErr(topic, msg, externalOnly, blocking)
+	if err != nil {
+		b.logger.Error("bus: publish failed", "topic", topic, "error", err)
+	}
+	return n
+}
+
+// publishErr is publish with an explicit error result: a blocking publish
+// onto a closed bus returns ErrBusClosed (C6 honest terminalization) rather
+// than a silent zero delivery.
+func (b *MessageBus) publishErr(topic string, msg *models.BusMessage, externalOnly, blocking bool) (int, error) {
 	if msg == nil {
-		return 0
+		return 0, nil
 	}
 
 	b.mu.RLock()
@@ -215,7 +252,7 @@ func (b *MessageBus) publish(topic string, msg *models.BusMessage, externalOnly,
 					"msg_id", msg.ID,
 				)
 			}
-			return 0
+			return 0, nil
 		}
 	}
 
@@ -237,12 +274,20 @@ func (b *MessageBus) publish(topic string, msg *models.BusMessage, externalOnly,
 	defer b.mu.RUnlock()
 
 	if b.closed {
-		return 0
+		if blocking {
+			return 0, ErrBusClosed
+		}
+		return 0, nil
 	}
 
 	msg.Topic = topic
 	delivered := 0
 	b.messagesSent.Add(1)
+
+	// C6 publish-side capture: retain critical terminals for lost-event
+	// recovery BEFORE delivery attempts, so a full-buffer timeout or a
+	// subscriber-less publish still leaves a recoverable outcome.
+	b.captureTerminalOutbox(topic, msg)
 
 	// Direct topic subscribers
 	for _, sub := range b.subscribers[topic] {
@@ -302,12 +347,30 @@ func (b *MessageBus) publish(topic string, msg *models.BusMessage, externalOnly,
 		}
 	}
 
-	return delivered
+	return delivered, nil
 }
 
 // Subscribe creates a subscription to a topic.
 // The topic can contain wildcards: "agent.*" matches "agent.status", "agent.error".
 func (b *MessageBus) Subscribe(id, topic string) *Subscriber {
+	return b.subscribeWithBuffer(id, topic, b.bufferSize, 3)
+}
+
+// SubscribeWithBuffer creates a subscription with an explicit channel
+// capacity, overriding the bus-wide default BufferSize (bufferSize <= 0
+// falls back to the default). Callers whose consumers drain slower than
+// burst producers - e.g. the rpc poll collectors, C6 - size their own
+// channel so a flood lands in the caller's bounded ring and its explicit
+// drop accounting instead of silently overflowing a default-capacity
+// channel on the bus side.
+func (b *MessageBus) SubscribeWithBuffer(id, topic string, bufferSize int) *Subscriber {
+	if bufferSize <= 0 {
+		bufferSize = b.bufferSize
+	}
+	return b.subscribeWithBuffer(id, topic, bufferSize, 3)
+}
+
+func (b *MessageBus) subscribeWithBuffer(id, topic string, bufferSize, callerDepth int) *Subscriber {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -321,7 +384,7 @@ func (b *MessageBus) Subscribe(id, topic string) *Subscriber {
 	sub := &Subscriber{
 		ID:      id,
 		Topic:   topic,
-		Channel: make(chan *models.BusMessage, b.bufferSize),
+		Channel: make(chan *models.BusMessage, bufferSize),
 	}
 
 	b.subscribers[topic] = append(b.subscribers[topic], sub)
@@ -331,7 +394,7 @@ func (b *MessageBus) Subscribe(id, topic string) *Subscriber {
 	b.subMeta[chAddr] = SubMetadata{
 		Topic:     topic,
 		CreatedAt: time.Now(),
-		Caller:    callerName(2),
+		Caller:    callerName(callerDepth),
 	}
 
 	b.logger.Debug("bus: new subscriber", "id", id, "topic", topic)

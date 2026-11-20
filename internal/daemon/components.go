@@ -4835,6 +4835,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 			// Create Ralph loop for automatic replanning on incomplete tasks
 			ralphLoopCfg := agent.DefaultRalphLoopConfig()
+			ralphLoopCfg.MaxReplanExtensions = cfg.Orchestrator.MaxReplanExtensions
 			ralphLoop := agent.NewRalphLoop(ralphLoopCfg, nil, c.TaskStore, c.StepStore, c.PlanManager, msgBus, logger.With("component", "ralph-loop"))
 			c.RalphLoop = ralphLoop
 

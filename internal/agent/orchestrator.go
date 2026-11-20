@@ -371,6 +371,15 @@ func (o *Orchestrator) handlePlanRequest(ctx context.Context, msg *models.BusMes
 			"task_id", req.TaskID,
 			"error", err,
 		)
+		// Gate T8 (01-safety/05): log-and-return left the task in
+		// planning forever and the user's turn never terminalized.
+		// Fail the task loudly with the actionable planning error;
+		// failTaskWithReason persists StateFailed and publishes
+		// task.failed (the ChatHandler relay emits the failed terminal).
+		if req.TaskID != "" {
+			o.strategic.failTaskWithReason(req.TaskID,
+				"planning failed: "+err.Error()+"; revise the request or retry")
+		}
 		return
 	}
 
@@ -463,18 +472,27 @@ func (o *Orchestrator) handleJobCompleted(ctx context.Context, msg *models.BusMe
 					o.artifacts = newArtifactStore()
 				}
 			} else {
-				isComplete, evidence, needsReplan := o.ralphLoop.CheckCompletion(ctx, taskID, event.Result)
-				if needsReplan && !isComplete {
-					o.logger.Info("Ralph loop: task still running, triggering replan",
-						"task_id", taskID,
-						"step_id", stepID,
-						"iteration", o.ralphLoop.GetIterationCount(taskID))
-					if err := o.ralphLoop.TriggerReplan(ctx, taskID, evidence); err != nil {
-						o.logger.Error("Failed to trigger replan", "error", err)
+				// F-NEW-10: a failed-terminal task NEVER replans, even
+				// if replan-created steps keep it looking non-terminal.
+				// TriggerReplan itself latches, but skip the check too so
+				// no evidence evaluation runs against a dead task.
+				if completed, terminal := o.ralphLoop.TaskOutcome(taskID); terminal && !completed {
+					o.logger.Info("Ralph loop: task terminal-failed; replanning refused",
+						"task_id", taskID)
+				} else {
+					isComplete, evidence, needsReplan := o.ralphLoop.CheckCompletion(ctx, taskID, event.Result)
+					if needsReplan && !isComplete {
+						o.logger.Info("Ralph loop: task still running, triggering replan",
+							"task_id", taskID,
+							"step_id", stepID,
+							"iteration", o.ralphLoop.GetIterationCount(taskID))
+						if err := o.ralphLoop.TriggerReplan(ctx, taskID, evidence); err != nil {
+							o.logger.Error("Failed to trigger replan", "error", err)
+						}
+					} else if isComplete {
+						o.ralphLoop.Reset(taskID)
+						o.artifacts = newArtifactStore()
 					}
-				} else if isComplete {
-					o.ralphLoop.Reset(taskID)
-					o.artifacts = newArtifactStore()
 				}
 			}
 		}

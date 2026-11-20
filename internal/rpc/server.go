@@ -160,6 +160,13 @@ type Server struct {
 	// map so reads in acceptLoop need no synchronization.
 	allowedUIDs map[int]bool
 	peerCredLog bool
+
+	// dispatchTraceMu guards dispatchSessionStore, the optional session
+	// store the session.dispatch_trace handler uses for C5 dual-key
+	// resolution (primary session id / thread id -> owning conversation).
+	// Written once at wiring time, read per request.
+	dispatchTraceMu      sync.RWMutex
+	dispatchSessionStore chatSubmitSessionStore
 }
 
 // Config holds server configuration.
