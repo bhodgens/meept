@@ -836,3 +836,42 @@ func assertEmployeeHoldFree(t *testing.T, w *VoiceWiring, emp string) {
 		t.Fatalf("employee %s hold was not released exactly once", emp)
 	}
 }
+
+// TestSessionForCarriesRealConversationID pins the wave-4 identity fix:
+// sessionFor's handle must carry the session's REAL conversation id, not
+// the session id in both fields (a consumer trusting handle.ConversationID
+// would key the wrong accounting lane). Nil store / store miss keeps the
+// legacy sid/sid shape.
+func TestSessionForCarriesRealConversationID(t *testing.T) {
+	w, _ := newVoiceWiringForTest(t)
+	sessStore := session.NewMemoryStore(testLogger(t))
+	sess, err := sessStore.Create("sessionfor duality pin")
+	if err != nil {
+		t.Fatalf("session create: %v", err)
+	}
+	w.sessions = sessStore
+	ctx := context.Background()
+	if err := w.Employee.store.Start(ctx, voice.CallRecord{
+		CallID:     "cc-sessfor-pin",
+		Number:     "+155****0001",
+		EmployeeID: "phone-employee",
+		Direction:  "incoming",
+		SessionID:  sess.ID,
+		StartedAt:  time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("call store start: %v", err)
+	}
+	inst := voice.Instance{Target: "+155****0001", EmployeeID: "phone-employee"}
+	h := w.sessionFor(inst)
+	if h.ID != sess.ID {
+		t.Fatalf("handle.ID = %q, want %q", h.ID, sess.ID)
+	}
+	if h.ConversationID != sess.ConversationID {
+		t.Fatalf("handle.ConversationID = %q, want the real conversation id %q (sid/sid means the duality was skipped)", h.ConversationID, sess.ConversationID)
+	}
+	// Nil store keeps the legacy shape (hand-built wirings).
+	w.sessions = nil
+	if h2 := w.sessionFor(inst); h2.ConversationID != sess.ID {
+		t.Fatalf("nil-store handle.ConversationID = %q, want the legacy sid shape %q", h2.ConversationID, sess.ID)
+	}
+}

@@ -228,6 +228,10 @@ type VoiceWiring struct {
 	// construction value so pre-leaf readers never race the swap).
 	cfgMu   sync.RWMutex
 	cfgLive *config.VoiceConfig
+	// sessions resolves the session_id/conversation_id pair for
+	// sessionFor's handle (bughunt 2026-11-19 wave 4). Nil on hand-built
+	// test wirings: the handle keeps the legacy sid/sid shape.
+	sessions session.Store
 
 	// contextWarmer is this wiring's registered partial-warm state
 	// machine (phase2-context-warm leaf 02; nil when the feature is
@@ -684,6 +688,7 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		displayLookup:  displayLookup,
 		displayStore:   deps.ContactDisplayStore,
 		cfg:            cfg,
+		sessions:       deps.Sessions,
 		logger:         vlog,
 		caller:         callerSlot,
 		plainOpts: commhttp.PlainListenerOptions{
@@ -1412,6 +1417,18 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 // errors with a nameable message, the call never panics).
 func (w *VoiceWiring) sessionFor(call voice.Instance) voice.SessionHandle {
 	if sid, ok := w.Employee.store.SessionIDFor(call.Target, call.EmployeeID); ok && sid != "" {
+		// Identity duality (bughunt 2026-11-19 wave 4): the handle must
+		// carry the session's REAL conversation id, not the session id in
+		// both fields - a consumer trusting handle.ConversationID (the
+		// turn runner's RunOnce accounting scope shape) would otherwise
+		// key the wrong lane. The store lookup resolves the pair; a nil
+		// store or a miss keeps the legacy sid/sid shape (the production
+		// turn path re-resolves through the binding anyway).
+		if w.sessions != nil {
+			if sess := w.sessions.Get(sid); sess != nil && sess.ConversationID != "" {
+				return voice.SessionHandle{ID: sid, ConversationID: sess.ConversationID}
+			}
+		}
 		return voice.SessionHandle{ID: sid, ConversationID: sid}
 	}
 	return voice.SessionHandle{}
