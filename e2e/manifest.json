@@ -1,7 +1,7 @@
 {
   "version": 1,
   "generated": "2026-11-19",
-  "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage \u2014 behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet. Flutter surface (ui/flutter_ui/**) is covered Dart-side by the gui-flows suite (gui-terminal-01, gui-session-01, gui-quota-01, gui-stream-01, gui-stream-02) against a wire-shape stub: `cd ui/flutter_ui && flutter test test/e2e`. The ui/** path_map keys below make a Flutter change select that suite; scripts/e2e-affected.sh dispatches on suites[].runner to run the Dart command instead of go test (the pre-commit-e2e Go hook does not scan Dart files, so `make e2e-affected-area AREA=gui-flows` / CI's e2e-gui job is the gate). New-package census (pre-commit-e2e): every NEW internal/|pkg/|cmd/ package dir in a commit's staged ADDITIONS must match a path_map key (bidirectional slash-boundary prefix, trailing slashes stripped) or an 'exempt' entry mapping dir -> non-empty reason string; exempt entries are printed as residual risk on every hook run.",
+  "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage - behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet. Flutter surface (ui/flutter_ui/**) is covered Dart-side by the gui-flows suite (gui-terminal-01, gui-session-01, gui-quota-01, gui-stream-01, gui-stream-02) against a wire-shape stub: `cd ui/flutter_ui && flutter test test/e2e`. The ui/** path_map keys below make a Flutter change select that suite; scripts/e2e-affected.sh dispatches on suites[].runner to run the Dart command instead of go test (the pre-commit-e2e Go hook does not scan Dart files, so `make e2e-affected-area AREA=gui-flows` / CI's e2e-gui job is the gate). New-package census (pre-commit-e2e): every NEW internal/|pkg/|cmd/ package dir in a commit's staged ADDITIONS must match a path_map key (bidirectional slash-boundary prefix, trailing slashes stripped) or an 'exempt' entry mapping dir -> non-empty reason string; exempt entries are printed as residual risk on every hook run.",
   "path_map": {
     "e2e/suites/smoke": [
       "smoke"
@@ -13,7 +13,9 @@
       "rpc-ping",
       "chat-submit",
       "session-binding",
-      "acp-wire"
+      "session-storage",
+      "acp-wire",
+      "dispatch-trace"
     ],
     "internal/comm/": [
       "ws-classification",
@@ -46,6 +48,7 @@
       "hitl-notifications",
       "llm-hop-tracing",
       "naive-user-chat",
+      "session-storage",
       "output-filters",
       "planner",
       "quota-park",
@@ -53,7 +56,8 @@
       "skills-refresh-origin",
       "step-pipeline",
       "task-state",
-      "turn-journal"
+      "turn-journal",
+      "dispatch-trace"
     ],
     "internal/validator/": [
       "output-filters",
@@ -297,7 +301,8 @@
     "internal/metrics/": [
       "daemon-lifecycle",
       "llm-hop-tracing",
-      "llm-serving-tiers"
+      "llm-serving-tiers",
+      "dispatch-trace"
     ],
     "internal/pathutil/": [
       "smoke"
@@ -492,7 +497,8 @@
     "internal/comm/http/": [
       "hitl-notifications",
       "intake-status",
-      "execution-observability"
+      "execution-observability",
+      "dispatch-trace"
     ],
     "internal/comm/web/": [
       "hitl-notifications"
@@ -691,6 +697,9 @@
     "e2e/suites/session-storage": [
       "session-storage"
     ],
+    "e2e/suites/naive-user-chat": [
+      "naive-user-chat"
+    ],
     "config/skills/": [
       "office-skills"
     ],
@@ -768,6 +777,18 @@
     ],
     "e2e/suites/tui-gui-consistency": [
       "tui-gui-consistency"
+    ],
+    "e2e/suites/dispatch-trace": [
+      "dispatch-trace"
+    ],
+    "internal/rpc/dispatch_trace.go": [
+      "dispatch-trace"
+    ],
+    "internal/metrics/store.go": [
+      "dispatch-trace"
+    ],
+    "internal/agent/plan_draft.go": [
+      "plan-lifecycle"
     ]
   },
   "exempt": {},
@@ -1003,7 +1024,7 @@
         "memory-scoping-02 chief-of-staff: memory_max_scope=global agent recalls the project-A fact in project B; the default (project) agent does not (F3, C3)",
         "memory-scoping-03 fail-closed cell: multiuser enabled + resolved-empty userID hides user-scope rows while global rows stay visible (Flag 3)"
       ],
-      "note": "RED gate for the memory second-brain tree leaf 00T (memory-scoping half; gates branch 01): drives plant/recall through live chat turns and asserts the C1/C2/C3 scoping behavior. Fails RED today \u2014 the Scope vocabulary, WithScopeFilter predicate, and the memory_max_scope agent declaration do not exist."
+      "note": "RED gate for the memory second-brain tree leaf 00T (memory-scoping half; gates branch 01): drives plant/recall through live chat turns and asserts the C1/C2/C3 scoping behavior. Fails RED today - the Scope vocabulary, WithScopeFilter predicate, and the memory_max_scope agent declaration do not exist."
     },
     {
       "name": "memory-layered-distill",
@@ -1462,7 +1483,7 @@
         "inter-agent-coord-04 typed inbox round-trip: send_agent_message{to, structured} -> inbox returns AgentInboxBody with Structured set; legacy raw-text body stays byte-identical (T4, F6/F7, C4)",
         "inter-agent-coord-05 structured taint scan block/allow: block-mode handoff with a structured file_path carrying a real exfiltration_directive pattern blocks with the FIELD named in the reason; clean structured handoff converges (T5, F8, C7; waits on leaf 03-02)"
       ],
-      "note": "ROOT e2e RED gate of the inter-agent-coordination tree (leaf 00T): hermetic scratch daemons, WS frame collector, live ACP subprocess via the suite's own scripted planstub, send_agent_message/inbox driven through rigged chat turns \u2014 never mocks. Compile-RED today on acp.AgentProgressUpdate (leaf 02-02); runtime-RED on the turn-state publisher (02-01), the WS relay entry (04-01), and the structured scan branch (03-02) until those leaves land. Status flips to implemented by leaf 04-01 when the suite goes GREEN."
+      "note": "ROOT e2e RED gate of the inter-agent-coordination tree (leaf 00T): hermetic scratch daemons, WS frame collector, live ACP subprocess via the suite's own scripted planstub, send_agent_message/inbox driven through rigged chat turns - never mocks. Compile-RED today on acp.AgentProgressUpdate (leaf 02-02); runtime-RED on the turn-state publisher (02-01), the WS relay entry (04-01), and the structured scan branch (03-02) until those leaves land. Status flips to implemented by leaf 04-01 when the suite goes GREEN."
     },
     {
       "status": "implemented",
@@ -1553,6 +1574,12 @@
         "config-defaults-02 DefaultConfig Voice keeps TurnConfirmMs=900, FragmentConfirmMs=3000; every new C2 field is its zero value",
         "manifest-03 path_map maps internal/voicechild/, internal/config/, internal/daemon/ to this additive-wire gate suite"
       ]
+    },
+    {
+      "name": "dispatch-trace",
+      "dir": "e2e/suites/dispatch-trace",
+      "status": "implemented",
+      "note": "02-routing TEST-GATE T7 (C5 dispatch evidence, F7): frozen usability turns through the hermetic stack; session.dispatch_trace dual-key + turn_id + input_summary + HTTP twin. RED until 02-routing/02 lands."
     }
   ],
   "scenarios": [
@@ -3284,10 +3311,44 @@
       "id": "naive-user-chat-05",
       "suite": "naive-user-chat",
       "diff": "M",
-      "title": "reply-guard rewrite retry: a chat lane whose first completion is a raw tool-result JSON dump is recovered by one bounded rewrite nudge \u2014 the reply is the rewritten prose, never the canned apology, and the nudge reaches the model exactly once",
+      "title": "reply-guard rewrite retry: a chat lane whose first completion is a raw tool-result JSON dump is recovered by one bounded rewrite nudge - the reply is the rewritten prose, never the canned apology, and the nudge reaches the model exactly once",
       "paths": [
         "internal/agent/loop.go",
         "internal/agent/reply_guard.go"
+      ]
+    },
+    {
+      "id": "naive-user-chat-06",
+      "suite": "naive-user-chat",
+      "diff": "M",
+      "title": "recall failed-state fidelity: after a genuinely failed task, 'did the change get made?' says failed plainly, never 'still in progress' (F-ORCH-16a)",
+      "paths": [
+        "internal/agent/recall_answer.go",
+        "internal/agent/dispatcher.go",
+        "e2e/suites/naive-user-chat"
+      ]
+    },
+    {
+      "id": "naive-user-chat-07",
+      "suite": "naive-user-chat",
+      "diff": "M",
+      "title": "recall task-set coverage: after hello.txt creation plus an unrelated newer turn, the plural artifact question names hello.txt (session task set), not only the last task (F-ORCH-16b / F-NEW-7)",
+      "paths": [
+        "internal/agent/recall_answer.go",
+        "internal/agent/session_digest.go",
+        "internal/agent/dispatcher.go",
+        "e2e/suites/naive-user-chat"
+      ]
+    },
+    {
+      "id": "naive-user-chat-08",
+      "suite": "naive-user-chat",
+      "diff": "M",
+      "title": "recall fact->memory routing: the planted session codeword ZEBRA-4417 asked back as a fact question is answered from the memory lane - no task_get plumbing, no decomposition prose (F-ORCH-24 / F-NEW-7)",
+      "paths": [
+        "internal/agent/dispatcher.go",
+        "internal/agent/recall_answer.go",
+        "e2e/suites/naive-user-chat"
       ]
     },
     {
@@ -3407,7 +3468,7 @@
       "id": "plan-lifecycle-02",
       "suite": "plan-lifecycle",
       "diff": "M",
-      "title": "approval path: dispatch-path plan parks at pending_approval; plan.approve synthesizes a task and flips the file status to executing through the atomic read-parse-write \u2014 file parses at every observation",
+      "title": "approval path: dispatch-path plan parks at pending_approval; plan.approve synthesizes a task and flips the file status to executing through the atomic read-parse-write - file parses at every observation",
       "paths": [
         "internal/plan/manager.go",
         "internal/plan/filelock.go",
@@ -3651,7 +3712,7 @@
       "id": "goal-completion-01",
       "suite": "goal-completion",
       "diff": "L",
-      "title": "declare-fulfil: tier-3 employee with a gated goal fulfils via agents.trigger \u2014 plan row goal_id stamped, gate command executes, goal health assessed (no longer unknown)",
+      "title": "declare-fulfil: tier-3 employee with a gated goal fulfils via agents.trigger - plan row goal_id stamped, gate command executes, goal health assessed (no longer unknown)",
       "paths": [
         "internal/employee/manager.go",
         "internal/employee/goal_loop.go",
@@ -3736,7 +3797,7 @@
       "id": "memory-turn-capture-02",
       "suite": "memory-turn-capture",
       "diff": "M",
-      "title": "DISPATCHED turn (multiagent task lane) regression proof: relay terminal carries the conversation id (store keys by session id) and the subscriber resolves it via GetByConversationID \u2014 task reply reaches L0 + status=auto claim",
+      "title": "DISPATCHED turn (multiagent task lane) regression proof: relay terminal carries the conversation id (store keys by session id) and the subscriber resolves it via GetByConversationID - task reply reaches L0 + status=auto claim",
       "paths": [
         "internal/daemon/memory_capture.go",
         "internal/agent/handler.go"
@@ -3934,7 +3995,7 @@
       "id": "github-pr-ci-04",
       "suite": "github-pr-ci",
       "diff": "M",
-      "title": "CI-wait park + re-arm: with check-runs always in_progress a 1s github_ci_wait parks at its deadline \u2014 the tool result carries parked=true and a non-empty wait_id, and the re-arm instruction row github_ci_wait-<waitID>.yaml is persisted under the scratch daemon's instruction tier",
+      "title": "CI-wait park + re-arm: with check-runs always in_progress a 1s github_ci_wait parks at its deadline - the tool result carries parked=true and a non-empty wait_id, and the re-arm instruction row github_ci_wait-<waitID>.yaml is persisted under the scratch daemon's instruction tier",
       "paths": [
         "internal/tools/builtin/github_ci.go",
         "internal/githubsvc/rearm.go",
@@ -5174,6 +5235,28 @@
       ]
     },
     {
+      "id": "session-storage-03",
+      "suite": "session-storage",
+      "diff": "M",
+      "title": "conversation-only dialog durability: a conv-only chat.submit turn's user+assistant exchange is readable via session.messages.get after the turn completes (C4 upsert; F-ORCH-29 FK 787)",
+      "paths": [
+        "internal/agent/handler.go",
+        "internal/session/",
+        "e2e/suites/session-storage"
+      ]
+    },
+    {
+      "id": "session-storage-04",
+      "suite": "session-storage",
+      "diff": "M",
+      "title": "chat.submit identity validation over the wire: unknown session/conversation ids rejected with an actionable note (no phantom conv), mismatched both-ids pairs corrected or rejected, legitimate ids keep working (C4; F-ORCH-22)",
+      "paths": [
+        "internal/rpc/chat_submit.go",
+        "internal/agent/handler.go",
+        "e2e/suites/session-storage"
+      ]
+    },
+    {
       "id": "employee-markdown-01",
       "suite": "employee-markdown",
       "diff": "M",
@@ -5474,7 +5557,7 @@
       "id": "kanban-06",
       "suite": "kanban",
       "diff": "M",
-      "title": "(e) pairing lane end-to-end: kanban.pair.mint/exchange over the daemon socket persist $MEEPT_HOME/kanban/tokens.json; the REAL meept-kanban binary loads the same file \u2014 paired token 200 (seeded board forwarded live), no token 401, read-only token on a mutate route 403, code single-use",
+      "title": "(e) pairing lane end-to-end: kanban.pair.mint/exchange over the daemon socket persist $MEEPT_HOME/kanban/tokens.json; the REAL meept-kanban binary loads the same file - paired token 200 (seeded board forwarded live), no token 401, read-only token on a mutate route 403, code single-use",
       "paths": [
         "internal/kanbansvc/",
         "cmd/meept-kanban/main.go",
@@ -5823,6 +5906,116 @@
       "title": "e2e manifest registers the voice_tts_stt suite and maps voicechild/config/daemon prefixes to it",
       "paths": [
         "e2e/manifest.json"
+      ]
+    },
+    {
+      "id": "output-filters-06",
+      "suite": "output-filters",
+      "diff": "M",
+      "title": "04-clutter F11a: task_completed_relay strips the status/accomplished envelope to prose (frozen p6 fixture); raw step result preserved in store (display-only strip)",
+      "paths": [
+        "internal/agent/handler.go",
+        "internal/agent/envelope_prose.go"
+      ]
+    },
+    {
+      "id": "output-filters-07",
+      "suite": "output-filters",
+      "diff": "M",
+      "title": "04-clutter F11a: review verdicts never push '## review:' to chat.response (frozen p2 fixture); task.review_completed detail feed keeps flowing",
+      "paths": [
+        "internal/agent/handler.go"
+      ]
+    },
+    {
+      "id": "output-filters-08",
+      "suite": "output-filters",
+      "diff": "S",
+      "title": "04-clutter F11a: unmapped side-job completion (empty step_id) logs Debug-quiet, never ERROR (F-ORCH-6)",
+      "paths": [
+        "internal/agent/orchestrator.go",
+        "internal/agent/tactical.go"
+      ]
+    },
+    {
+      "id": "naive-user-chat-09",
+      "suite": "naive-user-chat",
+      "diff": "M",
+      "title": "04-clutter F11a: tool-only completed turn ships a non-empty reply naming the written path from the tool ledger (F-ORCH-15, frozen p1 fixture)",
+      "paths": [
+        "internal/agent/handler.go",
+        "internal/agent/loop.go",
+        "internal/agent/dispatcher.go"
+      ]
+    },
+    {
+      "id": "naive-user-chat-10",
+      "suite": "naive-user-chat",
+      "diff": "M",
+      "title": "04-clutter F11b: trivial question takes the config-gated direct chat lane - no task row, one brief reply (F-ORCH-5, frozen 2+2 fixture)",
+      "paths": [
+        "internal/agent/dispatcher.go",
+        "internal/config/schema.go"
+      ]
+    },
+    {
+      "id": "dispatcher-08",
+      "suite": "dispatcher",
+      "diff": "M",
+      "title": "frozen p1 naive edit prompt with a scripted git costume routes to a file-capable executor and lands the edit (W8 shape-independent veto)",
+      "paths": [
+        "internal/agent/dispatcher.go"
+      ]
+    },
+    {
+      "id": "dispatcher-09",
+      "suite": "dispatcher",
+      "diff": "S",
+      "title": "frozen p6 positive-control edit wording routes to the executor and lands the edit (wording-sensitivity control)",
+      "paths": [
+        "internal/agent/dispatcher.go"
+      ]
+    },
+    {
+      "id": "dispatch-trace-01",
+      "suite": "dispatch-trace",
+      "diff": "M",
+      "title": "session.dispatch_trace by primary session id returns the rows recorded under the conversation id (C5 dual-key)",
+      "paths": [
+        "internal/rpc/dispatch_trace.go",
+        "internal/metrics/store.go",
+        "internal/agent/dispatcher.go"
+      ]
+    },
+    {
+      "id": "dispatch-trace-02",
+      "suite": "dispatch-trace",
+      "diff": "M",
+      "title": "trace rows carry turn_id joined to the submitted turn and a non-empty input_summary quoting the frozen input (C5)",
+      "paths": [
+        "internal/metrics/store.go",
+        "internal/agent/dispatcher.go"
+      ]
+    },
+    {
+      "id": "dispatch-trace-03",
+      "suite": "dispatch-trace",
+      "diff": "M",
+      "title": "GET /api/v1/sessions/{id}/dispatch-trace answers 200 with entries for either key; unknown id empty list not 500 (C5 HTTP twin)",
+      "paths": [
+        "internal/comm/http/server.go",
+        "internal/rpc/dispatch_trace.go"
+      ]
+    },
+    {
+      "id": "plan-lifecycle-04",
+      "suite": "plan-lifecycle",
+      "diff": "M",
+      "title": "refinement follow-up to a parked plan-compiler draft SaveDrafts the SAME task (version bump, no new task) and the continuation is trace-observable (W13/F8, C3/C5)",
+      "paths": [
+        "internal/agent/dispatcher.go",
+        "internal/agent/plan_draft.go",
+        "internal/agent/strategic.go"
       ]
     }
   ]
