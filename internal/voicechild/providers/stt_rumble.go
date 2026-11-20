@@ -147,7 +147,7 @@ func (s *RumbleSTT) run(ctx context.Context, sess wsSession, pcm <-chan []byte, 
 			case chunk, ok := <-pcm:
 				if !ok {
 					if werr := sess.Write(readCtx, 2, nil); werr != nil {
-						slog.Debug("rumble flush write failed", "error", werr)
+						slog.Warn("rumble flush write failed", "error", werr)
 					}
 					pcm = nil // disable this case; wait for end/cancel
 					continue
@@ -159,7 +159,7 @@ func (s *RumbleSTT) run(ctx context.Context, sess wsSession, pcm <-chan []byte, 
 				}
 			case <-flushCh:
 				if werr := sess.Write(readCtx, 2, nil); werr != nil {
-					slog.Debug("rumble kick flush write failed", "error", werr)
+					slog.Warn("rumble kick flush write failed", "error", werr)
 				} // one coalesced flush frame
 			case <-readCtx.Done():
 				return
