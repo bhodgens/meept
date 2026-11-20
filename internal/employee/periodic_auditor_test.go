@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caimlas/meept/internal/bot"
 	"github.com/caimlas/meept/internal/llm"
 )
 
@@ -615,6 +616,70 @@ func TestNewPeriodicAuditor_CustomThreshold(t *testing.T) {
 	a := NewPeriodicAuditor(&errorChatter{}, nil, 0.75)
 	if a.driftThreshold != 0.75 {
 		t.Errorf("threshold = %f, want 0.75", a.driftThreshold)
+	}
+}
+
+// TestPeriodicAuditJobWritesDriftScore pins the wave-4 drift writer
+// (bughunt 2026-11-19): runPeriodicAudit computed the drift score and
+// emitted the metric but never stored it on the manager, so
+// DriftScore/Review/the agents.roster drift column read 0 forever.
+// After a successful periodic audit the manager's DriftScore must
+// return the auditor's score; a second cleaner run overwrites it
+// (last-computed semantics per the map comment); Retire deletes it.
+func TestPeriodicAuditJobWritesDriftScore(t *testing.T) {
+	ctx := context.Background()
+	m, _ := newHirePersistenceManager(t)
+
+	const empID = "emp-drift-writer"
+	c := validConstitution()
+	if _, err := m.Hire(ctx, HireRequest{
+		ID:           empID,
+		Name:         "drift writer probe",
+		Prompt:       "test prompt",
+		Enabled:      true,
+		Triggers:     []bot.BotTrigger{{Type: bot.TriggerTypeWebhook, Enabled: true}},
+		Constitution: constitutionToMap(t, c),
+	}); err != nil {
+		t.Fatalf("Hire: %v", err)
+	}
+
+	// The job pulls turns through the wired collector; one turn with a
+	// non-nil constitution is enough for PeriodicAuditor.Audit to run.
+	m.SetTurnCollector(func(id string, _ int, _ time.Duration) []TurnRecord {
+		return []TurnRecord{{
+			EmployeeID:   id,
+			TurnID:       "turn-drift-001",
+			FinalOutput:  "did the work",
+			Constitution: &c,
+		}}
+	})
+
+	// First run: warning-severity finding, drift 0.25 (below the 0.3
+	// threshold, so no auto-pause path interferes with the probe).
+	mc := &mockChatter{
+		response: `{"drift_score":0.25,"findings":[{"severity":"warning","violated_rule":"charter drift","evidence":"probe"}]}`,
+	}
+	m.SetPeriodicAuditor(NewPeriodicAuditor(mc, m.auditStore, 0.3))
+	m.runPeriodicAudit(ctx)
+	if got := m.DriftScore(empID); got != 0.25 {
+		t.Fatalf("DriftScore after periodic audit = %v, want 0.25 (writer not wired)", got)
+	}
+
+	// Second run: clean audit overwrites the previous score with 0
+	// (last-computed semantics; a stale high score must not linger).
+	mc.response = `{"drift_score":0.0,"findings":[]}`
+	m.runPeriodicAudit(ctx)
+	if got := m.DriftScore(empID); got != 0 {
+		t.Fatalf("DriftScore after clean re-audit = %v, want 0 (clean audit must overwrite)", got)
+	}
+
+	// Retire deletes the entry via clearCachedConstitution.
+	m.setDriftScore(empID, 0.5)
+	if err := m.Retire(ctx, empID); err != nil {
+		t.Fatalf("Retire: %v", err)
+	}
+	if got := m.DriftScore(empID); got != 0 {
+		t.Fatalf("DriftScore after retire = %v, want 0 (entry must be deleted)", got)
 	}
 }
 

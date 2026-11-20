@@ -64,9 +64,12 @@ import (
 // Constructed once per agents.roster call; read-only afterwards.
 //
 // findings counts the audit findings per employee id in the detail view's
-// window (M11): ONE unfiltered ListAuditFindings read per invocation,
-// bucketed in memory, instead of a per-row query. A failed/unwired audit
-// read leaves the map empty (keys stay zero and wire-omitted).
+// window (M11): ONE exact COUNT query per employee per invocation
+// (CountAuditFindings -> AuditStore.Count, bughunt 2026-11-19 wave 4).
+// The previous single windowed List read was capped at the store's
+// default 100 rows, so large fleets undercounted; COUNT has no row cap.
+// A failed/unwired audit read leaves the map empty (keys stay zero and
+// wire-omitted).
 type rosterEmployeeSnapshot struct {
 	employees []employee.Employee
 	ids       map[string]struct{}
@@ -97,24 +100,26 @@ func takeRosterEmployeeSnapshot(c *Components, ctx context.Context, logger *slog
 	if len(emps) == 0 {
 		return snap
 	}
-	// M11 findings_count: one windowed audit read for the whole roster
-	// (the audit store caps a listing at its default 100 rows), bucketed
-	// per employee. Cost: ONE indexed SQLite query per agents.roster
-	// call, not one per employee row. AuditQuery has no Limit knob and a
-	// dedicated COUNT aggregate would need a new AuditStore method, so
-	// very large fleets can undercount beyond the store's row cap - the
-	// count is best-effort telemetry, never a correctness surface.
-	findings, err := c.EmployeeManager.ListAuditFindings(ctx, employee.AuditQuery{
-		Since: rosterFindingsWindow,
-	})
-	if err != nil {
-		// ErrNotImplemented (no audit store wired) is the expected
-		// degraded shape; log at Debug like the other roster fail-softs.
-		logger.Debug("agents.roster: list audit findings failed", "error", err)
-		return snap
-	}
-	for _, f := range findings {
-		snap.findings[f.EmployeeID]++
+	// M11 findings_count: exact per-employee COUNT in the detail view's
+	// 168h window (bughunt 2026-11-19 wave 4). The old single windowed
+	// List read truncated at the audit store's default 100-row cap, so
+	// large fleets undercounted; Count runs the same WHERE construction
+	// with no cap. Cost: one indexed SQLite COUNT per employee row per
+	// agents.roster call (idx_audit_employee covers employee_id +
+	// detected_at). ErrNotImplemented (no audit store wired) and other
+	// failures are the expected degraded shape: log at Debug like the
+	// other roster fail-softs and leave the count zero (wire-omitted).
+	for _, emp := range emps {
+		n, err := c.EmployeeManager.CountAuditFindings(ctx, employee.AuditQuery{
+			EmployeeID: emp.ID,
+			Since:      rosterFindingsWindow,
+		})
+		if err != nil {
+			logger.Debug("agents.roster: count audit findings failed",
+				"employee_id", emp.ID, "error", err)
+			continue
+		}
+		snap.findings[emp.ID] = n
 	}
 	return snap
 }
@@ -257,10 +262,10 @@ const rosterFindingsWindow = 168 * time.Hour
 
 // rosterEmployeeEntry overlays the employee-only M11 keys onto the shared
 // bot row: drift score from the manager's in-memory driftScores map (a
-// pure map read under RLock, no I/O) and the findings count bucketed from
-// the snapshot's ONE windowed audit read. Both are fail-soft - an unwired
-// manager or a failed audit read leaves the key zero (omitted on the
-// wire), never invented.
+// pure map read under RLock, no I/O; written by the periodic audit job)
+// and the exact findings count from the snapshot's per-employee windowed
+// COUNT reads. Both are fail-soft - an unwired manager or a failed audit
+// read leaves the key zero (omitted on the wire), never invented.
 func rosterEmployeeEntry(c *Components, ctx context.Context, def bot.BotDefinition, snap rosterEmployeeSnapshot) rpc.RosterEntry {
 	row := rosterBotEntry(c, ctx, def)
 	if c != nil && c.EmployeeManager != nil {

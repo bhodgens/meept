@@ -288,6 +288,11 @@ func (m *Manager) runPeriodicAudit(ctx context.Context) {
 				"employee_id", emp.ID, "error", err)
 			continue
 		}
+		// Record the computed score on the manager (bughunt 2026-11-19
+		// wave 4): DriftScore/Review/the agents.roster drift column read
+		// this map. Last-computed semantics - a clean audit's 0 replaces
+		// a previous high score; Retire deletes the entry.
+		m.setDriftScore(emp.ID, drift)
 		// Emit drift metric (spec line 672).
 		m.emitMetric("employee.drift.score", drift, map[string]string{
 			"employee_id": emp.ID,

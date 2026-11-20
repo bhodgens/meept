@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -2885,6 +2886,29 @@ func (m *Manager) ListAuditFindings(ctx context.Context, q AuditQuery) ([]AuditF
 	return m.auditStore.List(ctx, f)
 }
 
+// CountAuditFindings returns the exact number of findings matching the
+// query, with no row cap. Same filter mapping as ListAuditFindings, so a
+// windowed/severity-filtered count matches what a listing would return
+// beyond List's default 100-row truncation (bughunt 2026-11-19 wave 4:
+// the agents.roster findings_count column undercounted large fleets).
+// The store read runs WITHOUT the manager map lock (no I/O under mutex).
+func (m *Manager) CountAuditFindings(ctx context.Context, q AuditQuery) (int, error) {
+	m.mu.RLock()
+	store := m.auditStore
+	m.mu.RUnlock()
+	if store == nil {
+		return 0, ErrNotImplemented
+	}
+	f := AuditListFilter{
+		EmployeeID: q.EmployeeID,
+		Severity:   q.Severity,
+	}
+	if q.Since > 0 {
+		f.Since = time.Now().UTC().Add(-q.Since)
+	}
+	return store.Count(ctx, f)
+}
+
 // ResolveAuditFinding marks a finding resolved with a specific resolution
 // ("false_positive", "acknowledged", "constitution_amended").
 func (m *Manager) ResolveAuditFinding(ctx context.Context, findingID, resolution, note string) error {
@@ -2904,6 +2928,23 @@ func (m *Manager) DriftScore(id string) float64 {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.driftScores[id]
+}
+
+// setDriftScore records the last computed drift score for an employee
+// (bughunt 2026-11-19 wave 4: runPeriodicAudit computed the score and
+// emitted the metric but never stored it, so DriftScore/Review/roster
+// read 0 forever). Last-computed semantics per the map comment: every
+// successful audit overwrites the previous score, including a clean
+// audit's 0. Retire's clearCachedConstitution deletes the entry. Pure
+// map write under mu; no I/O runs under the lock. An empty id or a
+// non-finite score is ignored rather than poisoning the map.
+func (m *Manager) setDriftScore(id string, score float64) {
+	if id == "" || math.IsNaN(score) || math.IsInf(score, 0) {
+		return
+	}
+	m.mu.Lock()
+	m.driftScores[id] = score
+	m.mu.Unlock()
 }
 
 // Review returns the current state of an employee: definition, status,

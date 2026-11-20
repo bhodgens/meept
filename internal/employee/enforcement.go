@@ -2045,28 +2045,42 @@ type AuditListFilter struct {
 	Limit      int       // 0 = default 100
 }
 
-// List returns findings matching the filter, newest first.
-func (s *AuditStore) List(ctx context.Context, f AuditListFilter) ([]AuditFinding, error) {
+// auditFilterWhere builds the shared WHERE clause and bind args for
+// employee_audit_findings queries from an AuditListFilter. List and Count
+// both call it so their filter semantics cannot diverge (bughunt
+// 2026-11-19 wave 4: the roster findings_count needs the exact total
+// under the same filters List applies). Limit is NOT part of the WHERE;
+// only List applies a row cap.
+func auditFilterWhere(f AuditListFilter) (string, []any) {
 	var (
-		query strings.Builder
+		where strings.Builder
 		args  []any
 	)
-	query.WriteString(`
-		SELECT id, employee_id, goal_id, plan_id, turn_id, severity, checkpoint,
-		       violated_rule, evidence, detected_at, resolved_at, resolution, drift_score
-		FROM employee_audit_findings WHERE 1=1`)
+	where.WriteString(" WHERE 1=1")
 	if f.EmployeeID != "" {
-		query.WriteString(" AND employee_id = ?")
+		where.WriteString(" AND employee_id = ?")
 		args = append(args, f.EmployeeID)
 	}
 	if f.Severity != "" {
-		query.WriteString(" AND severity = ?")
+		where.WriteString(" AND severity = ?")
 		args = append(args, f.Severity)
 	}
 	if !f.Since.IsZero() {
-		query.WriteString(" AND detected_at >= ?")
+		where.WriteString(" AND detected_at >= ?")
 		args = append(args, f.Since.Format(time.RFC3339Nano))
 	}
+	return where.String(), args
+}
+
+// List returns findings matching the filter, newest first.
+func (s *AuditStore) List(ctx context.Context, f AuditListFilter) ([]AuditFinding, error) {
+	var query strings.Builder
+	query.WriteString(`
+		SELECT id, employee_id, goal_id, plan_id, turn_id, severity, checkpoint,
+		       violated_rule, evidence, detected_at, resolved_at, resolution, drift_score
+		FROM employee_audit_findings`)
+	where, args := auditFilterWhere(f)
+	query.WriteString(where)
 	query.WriteString(" ORDER BY detected_at DESC")
 	limit := f.Limit
 	if limit <= 0 {
@@ -2118,6 +2132,22 @@ func (s *AuditStore) List(ctx context.Context, f AuditListFilter) ([]AuditFindin
 		findings = append(findings, f)
 	}
 	return findings, rows.Err()
+}
+
+// Count returns the exact number of findings matching the filter, with no
+// row cap. It shares List's WHERE construction (auditFilterWhere) so the
+// employee_id/severity/since filters behave identically; only List's
+// LIMIT row cap is absent. Callers that need the true total
+// (e.g. the roster findings_count column, which List's default 100-row
+// cap undercounts on large fleets) use Count instead of len(List(...)).
+func (s *AuditStore) Count(ctx context.Context, f AuditListFilter) (int, error) {
+	where, args := auditFilterWhere(f)
+	var n int
+	if err := s.db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM employee_audit_findings"+where, args...).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count audit findings: %w", err)
+	}
+	return n, nil
 }
 
 // Resolve marks a finding as resolved with the given resolution label

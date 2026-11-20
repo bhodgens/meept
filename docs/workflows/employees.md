@@ -152,10 +152,12 @@ not the local LLM executor — "bob the autonomous employee"
   `last_invocation` is absent (never run), drift formatted `%.2f`.
   Deviations: the GUI renders device-local HH:MM (execution-runs panel
   precedent) where the TUI renders the parsed wire time, and says `never`
-  where the TUI's zero-time cell says `n/a`. drift_score reads 0 until a
-  production writer lands on Manager.driftScores — both surfaces display
-  the honest 0.00, never invented data; findings_count is best-effort
-  (168h audit window, store row cap).
+  where the TUI's zero-time cell says `n/a`. drift_score is written by
+  the periodic audit job (last-computed semantics: a clean audit's 0
+  replaces a prior high score; Retire deletes the entry) — an employee
+  never audited yet displays the honest 0.00, never invented data.
+  findings_count is an exact COUNT in the 168h audit window (no row
+  cap; bughunt 2026-11-19 wave 4).
 
 ### Quality gate (completion gating)
 

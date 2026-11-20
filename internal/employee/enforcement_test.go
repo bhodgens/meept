@@ -2,6 +2,7 @@ package employee
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -491,6 +492,107 @@ func TestAuditStore_SinceFilter(t *testing.T) {
 	}
 	if results[0].ID != "audit_new" {
 		t.Errorf("expected audit_new, got %s", results[0].ID)
+	}
+}
+
+// TestAuditStore_Count pins the wave-4 exact-count method (bughunt
+// 2026-11-19): Count shares List's WHERE construction, so under the row
+// cap it equals len(List), and beyond the cap it keeps counting where
+// List truncates at its default 100 rows.
+func TestAuditStore_Count(t *testing.T) {
+	ctx := context.Background()
+	store, err := NewAuditStore(filepath.Join(t.TempDir(), "audit.db"))
+	if err != nil {
+		t.Fatalf("NewAuditStore: %v", err)
+	}
+	defer store.Close()
+
+	now := time.Now().UTC().Truncate(time.Second)
+	since := now.Add(-168 * time.Hour)
+
+	// Phase 1: a small dataset (well under the 100-row cap) so Count
+	// must equal len(List) for every filter shape.
+	small := []AuditFinding{
+		{EmployeeID: "emp-count", Severity: SeverityWarning, Checkpoint: CheckpointPostTurn, DetectedAt: now},
+		{EmployeeID: "emp-count", Severity: SeverityWarning, Checkpoint: CheckpointPostTurn, DetectedAt: now.Add(-time.Hour)},
+		{EmployeeID: "emp-other", Severity: SeverityWarning, Checkpoint: CheckpointPostTurn, DetectedAt: now},
+		{EmployeeID: "emp-count", Severity: SeverityCritical, Checkpoint: CheckpointPostTurn, DetectedAt: now.Add(-200 * time.Hour)},
+		{EmployeeID: "emp-count", Severity: SeverityWarning, Checkpoint: CheckpointPostTurn, DetectedAt: now.Add(-200 * time.Hour)},
+	}
+	for i, f := range small {
+		if err := store.Create(ctx, f); err != nil {
+			t.Fatalf("Create small %d: %v", i, err)
+		}
+	}
+	for name, filter := range map[string]AuditListFilter{
+		"all":             {},
+		"employee":        {EmployeeID: "emp-count"},
+		"severity":        {Severity: "critical"},
+		"since":           {Since: since},
+		"window+employee": {EmployeeID: "emp-count", Since: since},
+	} {
+		list, err := store.List(ctx, filter)
+		if err != nil {
+			t.Fatalf("List %s: %v", name, err)
+		}
+		n, err := store.Count(ctx, filter)
+		if err != nil {
+			t.Fatalf("Count %s: %v", name, err)
+		}
+		if n != len(list) {
+			t.Errorf("Count %s = %d, want len(List) = %d", name, n, len(list))
+		}
+	}
+
+	// Phase 2: bulk-insert 125 in-window warning findings for emp-count
+	// (total in-window: 127) so List truncates at its default 100 rows
+	// while Count keeps the exact total.
+	const total = 125
+	for i := 0; i < total; i++ {
+		f := AuditFinding{
+			ID:           fmt.Sprintf("audit_count_%03d", i),
+			EmployeeID:   "emp-count",
+			Severity:     SeverityWarning,
+			Checkpoint:   CheckpointPostTurn,
+			ViolatedRule: "never[0]",
+			Evidence:     "count probe",
+			DetectedAt:   now.Add(-time.Duration(i) * time.Minute),
+		}
+		if err := store.Create(ctx, f); err != nil {
+			t.Fatalf("Create finding %d: %v", i, err)
+		}
+	}
+	wantWindowed := total + 2 // the two small in-window emp-count rows
+
+	// Beyond the cap: List truncates at the default 100 rows, Count
+	// returns the exact total.
+	windowed := AuditListFilter{EmployeeID: "emp-count", Since: since}
+	list, err := store.List(ctx, windowed)
+	if err != nil {
+		t.Fatalf("List windowed: %v", err)
+	}
+	if len(list) != 100 {
+		t.Fatalf("List windowed returned %d rows, want the 100-row default cap", len(list))
+	}
+	n, err := store.Count(ctx, windowed)
+	if err != nil {
+		t.Fatalf("Count windowed: %v", err)
+	}
+	if n != wantWindowed {
+		t.Errorf("Count windowed = %d, want %d (List truncates at 100)", n, wantWindowed)
+	}
+
+	// A resolved finding still counts (List has no unresolved filter;
+	// Count must not invent one).
+	if err := store.Resolve(ctx, "audit_count_000", "acknowledged"); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	n, err = store.Count(ctx, windowed)
+	if err != nil {
+		t.Fatalf("Count after resolve: %v", err)
+	}
+	if n != wantWindowed {
+		t.Errorf("Count after resolve = %d, want %d (resolved rows still count)", n, wantWindowed)
 	}
 }
 

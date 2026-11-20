@@ -497,9 +497,12 @@ func TestRosterRPCSingleEmployeeSnapshot(t *testing.T) {
 // executor_agent + last_invocation on bot AND employee rows, findings_count
 // on employee rows from the audit store's detail-view window, and all four
 // keys wire-omitted (byte-identical nine-key row) when no data exists.
-// Drift stays zero here: the driftScores map has no production writer yet
-// (Review reads the same zeros); the accessor itself is pinned in
-// internal/employee/manager_test.go TestManagerDriftScoreAccessor.
+// Drift stays zero here because no periodic audit has run for these rows;
+// the writer itself is pinned in internal/employee/periodic_auditor_test.go
+// TestPeriodicAuditJobWritesDriftScore (the accessor in manager_test.go
+// TestManagerDriftScoreAccessor). The findings_count assertions also pin
+// the wave-4 exact COUNT: beyond the audit store's 100-row List cap the
+// roster count stays exact.
 func TestRosterRPCAdditiveM11Keys(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "bots.db")
@@ -572,6 +575,31 @@ func TestRosterRPCAdditiveM11Keys(t *testing.T) {
 			t.Fatalf("create finding %d: %v", i, err)
 		}
 	}
+	// Wave-4 exact-count pin: 105 more in-window findings push the total
+	// (107) past the audit store's default 100-row List cap. The old
+	// bucketed-List snapshot reported 100 here; the COUNT path must
+	// report the exact 107.
+	const extraFindings = 105
+	for i := 0; i < extraFindings; i++ {
+		if err := as.Create(ctx, employee.AuditFinding{
+			EmployeeID: "hired-emp", Severity: employee.SeverityInfo,
+			Checkpoint: employee.CheckpointPostTurn,
+			DetectedAt: now.Add(-3 * time.Hour),
+		}); err != nil {
+			t.Fatalf("create extra finding %d: %v", i, err)
+		}
+	}
+	// Sanity: a windowed List really does truncate for this fixture, so
+	// the exact-count assertion below exercises the cap, not a no-op.
+	windowedList, err := empMgr.ListAuditFindings(ctx, employee.AuditQuery{
+		EmployeeID: "hired-emp", Since: 168 * time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("windowed list: %v", err)
+	}
+	if len(windowedList) != 100 {
+		t.Fatalf("windowed List returned %d rows, want the 100-row default cap", len(windowedList))
+	}
 
 	c := &Components{BotManager: botMgr, EmployeeManager: empMgr}
 	srv := rpc.New(&rpc.Config{SocketPath: ""}, nil, logger)
@@ -615,11 +643,11 @@ func TestRosterRPCAdditiveM11Keys(t *testing.T) {
 	if empRow.ExecutorAgent != "hermes" {
 		t.Errorf("employee executor_agent = %q, want hermes", empRow.ExecutorAgent)
 	}
-	if empRow.FindingsCount != 2 {
-		t.Errorf("employee findings_count = %d, want 2 (168h window excludes the 200h-old finding)", empRow.FindingsCount)
+	if empRow.FindingsCount != 2+extraFindings {
+		t.Errorf("employee findings_count = %d, want %d (exact COUNT beyond the 100-row List cap; 168h window excludes the 200h-old finding)", empRow.FindingsCount, 2+extraFindings)
 	}
 	if empRow.DriftScore != 0 {
-		t.Errorf("employee drift_score = %v, want 0 (no drift writer wired)", empRow.DriftScore)
+		t.Errorf("employee drift_score = %v, want 0 (no periodic audit has run for this row)", empRow.DriftScore)
 	}
 
 	// Wire shape: the data-less bot row marshals to exactly the nine C1
