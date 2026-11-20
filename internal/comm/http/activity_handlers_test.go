@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -232,4 +233,95 @@ func TestActivityHandlers_RPCDelegation(t *testing.T) {
 			t.Errorf("employee_id = %s, want 'emp1'", params.EmployeeID)
 		}
 	})
+}
+
+// sentinelRPCErr proves the fake's error path was never reached on invalid
+// input: without boundary validation the handler calls the fake, which returns
+// this error, and the handler answers 500 instead of 400.
+var sentinelRPCErr = errors.New("rpc should not be called for invalid params")
+
+func TestExecutionHandlers_InvalidSinceIs400(t *testing.T) {
+	fake := &fakeRPCCall{Err: sentinelRPCErr}
+	s := &Server{rpcCall: fake.Call}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/executions?since=not-a-timestamp", nil)
+	w := httptest.NewRecorder()
+	s.handleExecutionRuns(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d (body=%q)", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "since") {
+		t.Errorf("body = %q, want substring 'since'", w.Body.String())
+	}
+	if fake.Method != "" {
+		t.Errorf("rpcCall was invoked with method=%s, want not invoked", fake.Method)
+	}
+}
+
+func TestActivityHandlers_InvalidSinceAndUntilAre400(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+	}{
+		{"invalid since", "/api/v1/activity?since=not-a-timestamp"},
+		{"invalid until", "/api/v1/activity?until=not-a-timestamp"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := &fakeRPCCall{Err: sentinelRPCErr}
+			s := &Server{rpcCall: fake.Call}
+
+			req := httptest.NewRequest(http.MethodGet, tt.url, nil)
+			w := httptest.NewRecorder()
+			s.handleActivityQuery(w, req)
+
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("status = %d, want %d (body=%q)", w.Code, http.StatusBadRequest, w.Body.String())
+			}
+			if fake.Method != "" {
+				t.Errorf("rpcCall was invoked with method=%s, want not invoked", fake.Method)
+			}
+		})
+	}
+}
+
+func TestActivityHandlers_InvalidFindingsSinceIs400(t *testing.T) {
+	fake := &fakeRPCCall{Err: sentinelRPCErr}
+	s := &Server{rpcCall: fake.Call}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/activity/findings?since=not-a-timestamp", nil)
+	w := httptest.NewRecorder()
+	s.handleActivityFindings(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d (body=%q)", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+	if fake.Method != "" {
+		t.Errorf("rpcCall was invoked with method=%s, want not invoked", fake.Method)
+	}
+}
+
+func TestActivityHandlers_ValidFractionalSinceReachesRPC(t *testing.T) {
+	fake := &fakeRPCCall{Result: map[string]any{"records": []any{}, "total": 0}}
+	s := &Server{rpcCall: fake.Call}
+
+	const valid = "2026-11-19T12:34:56.123Z"
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/activity?since="+valid, nil)
+	w := httptest.NewRecorder()
+	s.handleActivityQuery(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d (body=%q)", w.Code, http.StatusOK, w.Body.String())
+	}
+	if fake.Method != "activity.query" {
+		t.Fatalf("method = %q, want 'activity.query'", fake.Method)
+	}
+	var params activityHandlerParams
+	if err := json.Unmarshal(fake.Params, &params); err != nil {
+		t.Fatalf("params JSON unmarshal error: %v", err)
+	}
+	if params.Since != valid {
+		t.Errorf("since = %q, want %q", params.Since, valid)
+	}
 }

@@ -26,6 +26,12 @@ func (s *Server) handleExecutionRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	since, err := parseRFC3339Param(r, "since")
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	params := struct {
 		AgentID string `json:"agent_id"`
 		Limit   int    `json:"limit"`
@@ -33,7 +39,7 @@ func (s *Server) handleExecutionRuns(w http.ResponseWriter, r *http.Request) {
 	}{
 		AgentID: r.URL.Query().Get("agent_id"),
 		Limit:   limit,
-		Since:   r.URL.Query().Get("since"),
+		Since:   since,
 	}
 
 	paramBytes, err := json.Marshal(params)

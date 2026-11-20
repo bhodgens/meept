@@ -178,6 +178,24 @@ func parseIntParam(r *http.Request, key string, defaultValue, min, max int) (int
 	return v, nil
 }
 
+// parseRFC3339Param returns the raw value of an optional RFC3339 query
+// parameter. Absent or empty keys yield "" with no error. A present-but-invalid
+// value yields a descriptive error so the HTTP boundary can answer 400 instead
+// of forwarding a client fault to an RPC that maps every error to 500. The
+// parser matches the RPC boundary exactly (time.Parse(time.RFC3339, ...)), so
+// HTTP and RPC agree on validity; Go's RFC3339 layout also accepts fractional
+// seconds.
+func parseRFC3339Param(r *http.Request, key string) (string, error) {
+	s := r.URL.Query().Get(key)
+	if s == "" {
+		return "", nil
+	}
+	if _, err := time.Parse(time.RFC3339, s); err != nil {
+		return "", fmt.Errorf("invalid %s parameter: use RFC3339 format", key)
+	}
+	return s, nil
+}
+
 // handleServiceError writes appropriate HTTP response based on service error type.
 func (s *Server) handleServiceError(w http.ResponseWriter, err error) {
 	switch {

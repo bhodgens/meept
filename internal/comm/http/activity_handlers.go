@@ -28,8 +28,6 @@ func (s *Server) handleActivityQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse query params
-	since := r.URL.Query().Get("since")
-	until := r.URL.Query().Get("until")
 	sort := r.URL.Query().Get("sort")
 	taskID := r.URL.Query().Get("task_id")
 	planID := r.URL.Query().Get("plan_id")
@@ -41,6 +39,19 @@ func (s *Server) handleActivityQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	offset, err := parseIntParam(r, "offset", 0, 0, 10000)
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// Validate timestamp filters at the boundary. The RPC maps every error
+	// to 500, so a malformed since/until must be rejected here as 400.
+	since, err := parseRFC3339Param(r, "since")
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	until, err := parseRFC3339Param(r, "until")
 	if err != nil {
 		s.writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -149,7 +160,6 @@ func (s *Server) handleActivityFindings(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	since := r.URL.Query().Get("since")
 	severity := r.URL.Query().Get("severity")
 	employeeID := r.URL.Query().Get("employee_id")
 	resolvedParam := r.URL.Query().Get("resolved")
@@ -159,6 +169,13 @@ func (s *Server) handleActivityFindings(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	offset, err := parseIntParam(r, "offset", 0, 0, 10000)
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// Validate the timestamp filter at the boundary (RPC maps every error to 500).
+	since, err := parseRFC3339Param(r, "since")
 	if err != nil {
 		s.writeError(w, http.StatusBadRequest, err.Error())
 		return
