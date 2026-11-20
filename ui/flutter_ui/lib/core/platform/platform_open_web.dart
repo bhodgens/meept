@@ -6,7 +6,7 @@ import 'package:web/web.dart' as web;
 
 /// Open [url] in a new browser tab. window.open returning null (popup
 /// blocked) degrades to false; the deep-link path never throws.
-Future<bool> openExternalWeb(String url) async {
+Future<bool> openExternal(String url) async {
   final web.Window? win = web.window.open(url, '_blank');
   return win != null;
 }
