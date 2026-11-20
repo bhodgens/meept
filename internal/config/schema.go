@@ -5216,8 +5216,11 @@ func DefaultConfig() *Config {
 		},
 		Voice: VoiceConfig{
 			Enabled: false,
-			// Rumble vLLM STT sidecar defaults. Opt-in: byte-identical boot
-			// until voice.stt_provider = "rumble" selects the sidecar.
+			// Rumble legacy-server defaults: GPU coexistence knobs for an
+			// OPERATOR-run vLLM server (never daemon-spawned) plus the
+			// derived default STT dial URL when stt_provider = "rumble"
+			// and stt_base_url is empty. Boot is byte-identical for every
+			// other STT provider.
 			RumbleRuntime:        DefaultVoiceRumbleRuntimeConfig(),
 			IdleStopSeconds:      30,
 			Filler:               []string{"Hold on, let me check."},
@@ -5625,10 +5628,18 @@ type TTSConfig struct {
 	Behavior TTSBehaviorConfig `json:"behavior" toml:"behavior"`
 }
 
-// VoiceRumbleRuntimeConfig pins the supervised vLLM Rumble STT sidecar so it
-// coexists with qwen3-tts on a single RTX 3060. The GPU memory fraction is
-// EXPLICIT (safe range 0.20-0.25); vLLM's 0.92 default is unsafe here. The
-// block is inert unless voice.stt_provider = "rumble" selects the sidecar.
+// VoiceRumbleRuntimeConfig is the [voice.rumble_runtime] block: frozen
+// coexistence knobs for a LEGACY, operator-run vLLM Rumble server, plus the
+// source of the derived default STT dial URL. The daemon NEVER spawns this
+// sidecar: plan 20261118-rumble-stt-provider leaf 02 T2 is SUPERSEDED by the
+// native WS adapter (plan 20261119-rumble-native-streaming) - the live
+// server is FastAPI + transformers, and vLLM cannot serve the native
+// streaming route for this checkpoint. The GPU memory fraction stays
+// EXPLICIT (safe range 0.20-0.25) for operators who run vLLM manually
+// beside qwen3-tts on one RTX 3060; vLLM's 0.92 default is unsafe there.
+// The block's live consumer is BaseURL(): when the resolved STT vendor is
+// "rumble" and voice.stt_base_url is empty, the daemon keys frame derives
+// the dial URL from EndpointKey (internal/daemon/rumble_wiring.go).
 type VoiceRumbleRuntimeConfig struct {
 	GPUMemoryUtilization float64 `json:"gpu_memory_utilization" toml:"gpu_memory_utilization"`
 	MaxModelLen          int     `json:"max_model_len"          toml:"max_model_len"`
@@ -5637,16 +5648,45 @@ type VoiceRumbleRuntimeConfig struct {
 	AutoStopOnExit       bool    `json:"auto_stop_on_exit"      toml:"auto_stop_on_exit"`
 }
 
+// RumbleLoopbackAddr is the frozen loopback host:port of the legacy Rumble
+// STT server. ONE source of truth for the default endpoint key and the
+// BaseURL fallback below (the former daemon-side copy of these defaults
+// was deleted as dead code when leaf 02 T2 was superseded).
+const RumbleLoopbackAddr = "127.0.0.1:8091"
+
 // DefaultVoiceRumbleRuntimeConfig returns the frozen safe coexistence defaults
 // used by the commented [voice.rumble_runtime] template block.
 func DefaultVoiceRumbleRuntimeConfig() VoiceRumbleRuntimeConfig {
 	return VoiceRumbleRuntimeConfig{
-		GPUMemoryUtilization: 0.20,
+		GPUMemoryUtilization: RumbleGPUMemoryUtilizationDefault,
 		MaxModelLen:          4096,
-		EndpointKey:          "rumble:127.0.0.1:8091",
+		EndpointKey:          "rumble:" + RumbleLoopbackAddr,
 		HealthPath:           "/health",
 		AutoStopOnExit:       true,
 	}
+}
+
+// BaseURL returns the STT dial URL derived from this block: the address
+// half of EndpointKey ("rumble:<host>:<port>") over http. A zero-value or
+// malformed block falls back to the frozen loopback default, so a config
+// that omits rumble_runtime entirely still derives a usable URL. This is
+// the production reader of the block's endpoint identity; the daemon
+// never spawns a process from it (leaf 02 T2 SUPERSEDED, see the type
+// comment). An explicit voice.stt_base_url always wins over this value.
+func (r VoiceRumbleRuntimeConfig) BaseURL() string {
+	key := r.EndpointKey
+	if key == "" {
+		key = "rumble:" + RumbleLoopbackAddr
+	}
+	// Key shape "<runtime>:<host>:<port>": the dial address is everything
+	// after the FIRST colon (an IPv6 host keeps its own colons).
+	if i := strings.IndexByte(key, ':'); i >= 0 {
+		addr := key[i+1:]
+		if strings.Contains(addr, ":") {
+			return "http://" + addr
+		}
+	}
+	return "http://" + RumbleLoopbackAddr
 }
 
 // Rumble GPU-fraction safety bounds (the documented coexistence range in
@@ -5664,13 +5704,14 @@ const (
 
 // NormalizeVoiceRumbleDefaults enforces the documented GPU-fraction safe
 // range on [voice.rumble_runtime] at the load boundary (bughunt M18/H1:
-// SpawnArgs used to render the value verbatim, so a typo like 0.92 —
-// vLLM's unsafe default — would starve qwen3-tts on the shared GPU).
+// a typo like 0.92 (vLLM's unsafe default) would starve qwen3-tts on the
+// shared GPU when an operator reuses these knobs for a manual vLLM run).
 // Clamp posture (NormalizeVoiceAcousticDefaults style): > max clamps to
 // 0.25; non-positive, NaN, or Inf restores the frozen 0.20 default. A
 // zero-value block (the file omits rumble_runtime entirely) keeps the
-// frozen defaults untouched. Idempotent on valid values; the block stays
-// inert unless voice.stt_provider = "rumble" selects the sidecar.
+// frozen defaults untouched. Idempotent on valid values. The daemon
+// never spawns from this block (leaf 02 T2 SUPERSEDED); its live reader
+// is BaseURL(), which the keys-frame stt_base_url derivation consumes.
 func NormalizeVoiceRumbleDefaults(r *VoiceRumbleRuntimeConfig) {
 	if r == nil {
 		return
@@ -5913,8 +5954,10 @@ type VoiceConfig struct {
 	TTSBaseURL  string `json:"tts_base_url"          toml:"tts_base_url"`
 	STTBaseURL  string `json:"stt_base_url"          toml:"stt_base_url"`
 
-	// RumbleRuntime pins the supervised vLLM Rumble STT sidecar (opt-in via
-	// stt_provider = "rumble"). Zero values when unset keep legacy behavior.
+	// RumbleRuntime carries the legacy Rumble server's coexistence knobs
+	// and the source of the derived default stt_base_url (vendor "rumble"
+	// only). The daemon never spawns from this block; an explicit
+	// stt_base_url always wins. Zero values keep the frozen defaults.
 	RumbleRuntime VoiceRumbleRuntimeConfig `json:"rumble_runtime" toml:"rumble_runtime"`
 
 	// ReaperIntervalS (leaf 02, C3): the dead-air reaper's sweep cadence.
@@ -6478,12 +6521,12 @@ func (c *Config) ValidateAll() error {
 	// normalization.
 	NormalizeMemoryTiersDefaults(&c.Memory.Tiers)
 
-	// Clamp the Rumble STT sidecar GPU fraction into the documented
+	// Clamp the Rumble legacy-server GPU fraction into the documented
 	// 0.20-0.25 safe range (bughunt 2026-11-19 M18/H1). Same idempotent
 	// pre-start-boundary precedent as the memory.tiers normalize above:
-	// every daemon boot/reload validation pass re-clamps, so a hand-built
-	// config or a reload that skipped load normalization still renders
-	// safe spawn args. Zero-value block keeps the frozen defaults.
+	// every daemon boot/reload validation pass re-clamps, so an operator
+	// who copies these knobs into a manual vLLM invocation never starts
+	// from an unsafe value. Zero-value block keeps the frozen defaults.
 	NormalizeVoiceRumbleDefaults(&c.Voice.RumbleRuntime)
 
 	return nil

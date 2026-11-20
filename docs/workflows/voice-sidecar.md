@@ -1344,3 +1344,47 @@ inert on this server; they are kept for a future vLLM deployment.
 - All keys are additive/omitempty: `stt_partial_ms = 0` and no
   `chat_template_*` keys = byte-identical legacy request and unwrapped
   provider on the default (whisper) path.
+
+### stt_base_url derivation + the legacy rumble_runtime block (2026-11-19, H1 closure)
+
+The child's rumble constructor REQUIRES a base URL
+(`ErrMissingRumbleBaseURL`): before this fix, setting
+`stt_provider: "rumble"` alone sent an empty `stt_base_url` on the keys
+line and failed EVERY call's provider construction. As-built precedence
+(`internal/daemon/rumble_wiring.go` `resolveSTTBaseURL`, emitted from
+`voice_keys.go`):
+
+1. An explicit `voice.stt_base_url` ALWAYS wins, for every vendor - the
+   live transformers deployment (`http://socrates:8000`) is
+   byte-identical.
+2. Resolved vendor `rumble` (global `voice.stt_provider` or
+   `voice.local.stt_provider` through `ResolveProfile`) with an EMPTY
+   `stt_base_url` derives `http://<host>:<port>` from
+   `[voice.rumble_runtime].endpoint_key` (frozen default
+   `rumble:127.0.0.1:8091`; a zero/omitted block derives the same frozen
+   loopback URL). The operator must run a Rumble server at that address.
+3. Every other vendor (unset/whisper/deepgram) sends the configured value
+   unchanged - byte-identical wire, pinned by
+   `TestVoiceKeysEmissionSTTBaseURL` / `...LocalLeg`.
+
+**The vLLM sidecar spawn is SUPERSEDED, not shipped.** Plan
+`20261118-rumble-stt-provider` leaf 02 promised a daemon-supervised vLLM
+sidecar (spawn guards, orphan sweep, `/health`); only its config structs
+landed, never wired (bughunt H1). The native WS adapter above replaced
+the batch client, and vLLM cannot serve
+`/v1/audio/transcriptions/stream` for this checkpoint
+(`docs/research/rumble2flash-review.md`: `stream=True` streams output
+tokens only after the full audio; `/v1/realtime` needs causal encoders,
+Rumble's is bidirectional). Wiring the spawn would have produced a
+health-green server no client can use. Disposition (triple gate:
+unreachable in every main, zero textual callers, plan record): the dead
+daemon spawn helpers were deleted; ONE config source of truth remains -
+`config.VoiceRumbleRuntimeConfig` (`[voice.rumble_runtime]`). The daemon
+NEVER spawns a Rumble server for any provider. The block's surviving
+roles: `endpoint_key` feeds the derivation above, and
+`gpu_memory_utilization` (clamped 0.20-0.25 at load) / `max_model_len`
+are frozen coexistence knobs to copy into a MANUAL vLLM invocation on
+the shared RTX 3060. `health_path` / `auto_stop_on_exit` are legacy
+lifecycle metadata with no daemon consumer. See
+`docs/plans/20261118-rumble-stt-provider/02-sidecar-wiring.md` (status
+banner) for the evidence trail.

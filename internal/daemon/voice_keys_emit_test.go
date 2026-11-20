@@ -459,3 +459,95 @@ func TestVoiceKeysEmissionGateImprovementSelectors(t *testing.T) {
 	}
 	t.Cleanup(func() { f.w.releaseCall(ccid2, voice.OutcomeHangup) })
 }
+
+// TestVoiceKeysEmissionSTTBaseURL pins the bughunt H1 stt_base_url
+// derivation THROUGH the real keys-emission path:
+//   - rumble vendor + empty stt_base_url -> the frozen loopback default
+//     derived from [voice.rumble_runtime] (before H1 the wire sent "" and
+//     the child failed EVERY rumble call's provider construction);
+//   - an explicit operator stt_base_url ALWAYS wins byte-identically
+//     (the live native transformers server path);
+//   - opt-in byte-identity: unset/whisper/deepgram vendors keep the wire
+//     exactly as configured ("" stays ""), so nothing new binds for any
+//     other provider and nothing ever spawns.
+func TestVoiceKeysEmissionSTTBaseURL(t *testing.T) {
+	cases := []struct {
+		name       string
+		provider   string
+		baseURL    string
+		wantURL    string
+		wantVendor string
+	}{
+		{"rumble_empty_derives_loopback", "rumble", "", "http://" + config.RumbleLoopbackAddr, "rumble"},
+		{"rumble_explicit_operator_wins", "rumble", "http://socrates:8000", "http://socrates:8000", "rumble"},
+		{"unset_provider_byte_identical", "", "", "", "deepgram"},
+		{"whisper_byte_identical", "whisper", "", "", "whisper"},
+		{"deepgram_byte_identical", "deepgram", "", "", "deepgram"},
+		{"whisper_explicit_url_unchanged", "whisper", "http://127.0.0.1:9000", "http://127.0.0.1:9000", "whisper"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newKeysEmitFixture(t)
+			ccid := "cc-keys-stturl-" + tc.name
+			f.w.cfg.STTProvider = tc.provider
+			f.w.cfg.STTBaseURL = tc.baseURL
+			f.w.cfg.RumbleRuntime = config.DefaultVoiceRumbleRuntimeConfig()
+			acquireFor(f.w, ccid)
+			f.w.routeFrame(voice.Frame{CallID: ccid, Event: voice.EventSetup})
+			line := readKeysLine(t, f.lines)
+			var wire map[string]any
+			if err := json.Unmarshal([]byte(line), &wire); err != nil {
+				t.Fatalf("keys line not JSON: %v: %s", err, line)
+			}
+			if got, _ := wire["stt_vendor"].(string); got != tc.wantVendor {
+				t.Errorf("stt_vendor = %v, want %q", wire["stt_vendor"], tc.wantVendor)
+			}
+			if got, _ := wire["stt_base_url"].(string); got != tc.wantURL {
+				t.Errorf("stt_base_url = %v, want %q", wire["stt_base_url"], tc.wantURL)
+			}
+			t.Cleanup(func() { f.w.releaseCall(ccid, voice.OutcomeHangup) })
+		})
+	}
+}
+
+// TestVoiceKeysEmissionSTTBaseURLLocalLeg pins the local-leg resolution:
+// voice.local.stt_provider = "rumble" (with the global provider unset)
+// resolves to vendor rumble through ResolveProfile and derives the same
+// loopback default; a global whisper with local unset stays byte-identical.
+func TestVoiceKeysEmissionSTTBaseURLLocalLeg(t *testing.T) {
+	cases := []struct {
+		name        string
+		global      string
+		local       string
+		wantVendor  string
+		wantBaseURL string
+	}{
+		{"local_rumble_derives", "", "rumble", "rumble", "http://" + config.RumbleLoopbackAddr},
+		{"local_empty_inherits_global_whisper", "whisper", "", "whisper", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newKeysEmitFixture(t)
+			ccid := "cc-keys-stturl-local-" + tc.name
+			f.w.cfg.STTProvider = tc.global
+			f.w.cfg.Local.STTProvider = tc.local
+			f.w.cfg.RumbleRuntime = config.DefaultVoiceRumbleRuntimeConfig()
+			if _, err := f.w.Registry.AcquireLeg(ccid, f.w.cfg.DefaultEmployee, "local:"+tc.name, voice.LegLocal); err != nil {
+				t.Fatalf("registry acquire local leg: %v", err)
+			}
+			f.w.routeFrame(voice.Frame{CallID: ccid, Event: voice.EventSetup})
+			line := readKeysLine(t, f.lines)
+			var wire map[string]any
+			if err := json.Unmarshal([]byte(line), &wire); err != nil {
+				t.Fatalf("keys line not JSON: %v: %s", err, line)
+			}
+			if got, _ := wire["stt_vendor"].(string); got != tc.wantVendor {
+				t.Errorf("stt_vendor = %v, want %q (local-leg resolution)", wire["stt_vendor"], tc.wantVendor)
+			}
+			if got, _ := wire["stt_base_url"].(string); got != tc.wantBaseURL {
+				t.Errorf("stt_base_url = %v, want %q", wire["stt_base_url"], tc.wantBaseURL)
+			}
+			t.Cleanup(func() { f.w.releaseCall(ccid, voice.OutcomeHangup) })
+		})
+	}
+}

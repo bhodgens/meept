@@ -1,77 +1,58 @@
 package daemon
 
-import (
-	"fmt"
-	"math"
-	"strconv"
+// Rumble STT base-URL derivation (bughunt 2026-11-19 H1, SUPERSEDED branch).
+//
+// History: plan 20261118-rumble-stt-provider leaf 02 promised a supervised
+// vLLM sidecar (RuntimeProcess spawn guards, orphan sweep, /health). The
+// config structs and spawn-arg renderer landed tested but never wired. The
+// follow-up tree 20261119-rumble-native-streaming then REPLACED the batch
+// adapter with a native WebSocket streaming client against an
+// operator-deployed FastAPI + transformers server. vLLM cannot serve that
+// native route for this checkpoint (see docs/research/rumble2flash-review.md:
+// stream=True is output-token streaming after the FULL audio arrives, and
+// /v1/realtime requires causal encoders while Rumble's is bidirectional),
+// so a daemon-spawned vLLM sidecar would be health-green but unusable by
+// the only shipped client. Leaf 02 T2 is therefore SUPERSEDED, not wired;
+// the dead spawn helpers were deleted per the deadcode-wiring-triage
+// triple gate (unreachable in every main, zero textual callers, plan
+// evidence). ONE config source of truth remains:
+// config.VoiceRumbleRuntimeConfig ([voice.rumble_runtime]).
+//
+// What IS wired here: the missing stt_base_url derivation. The child's
+// newRumbleSTT fails EVERY call's provider construction without a base
+// URL (ErrMissingRumbleBaseURL), so setting stt_provider = "rumble" alone
+// used to leave the leg deaf. resolveSTTBaseURL closes that gap: the
+// operator's explicit voice.stt_base_url always wins byte-identically
+// (the live transformers server path), and only a rumble vendor with an
+// EMPTY stt_base_url derives the frozen loopback default from the config
+// block. Every other vendor keeps today's wire byte-identically: nothing
+// new spawns, ever, for any provider.
 
+import (
 	"github.com/caimlas/meept/internal/config"
 )
 
-// RumbleRuntimeConfig pins the supervised vLLM Rumble STT sidecar: an explicitly
-// low GPU memory fraction (never vLLM's unsafe 0.92 default) so the sidecar can
-// coexist with qwen3-tts on the same RTX 3060 (~5.2 GB free). It is opt-in via
-// voice.stt_provider = "rumble"; the whisper default is unchanged.
-type RumbleRuntimeConfig struct {
-	GPUMemoryUtilization float64  `json:"gpu_memory_utilization"`
-	MaxModelLen          int      `json:"max_model_len"`
-	HealthPath           string   `json:"health_path"`
-	AutoStopOnExit       bool     `json:"auto_stop_on_exit"`
-	EndpointKey          string   `json:"endpoint_key"`
-	SpawnCommand         []string `json:"spawn_command"`
-}
+// rumbleSTTVendor is the C1 keys-line vendor selector for the Rumble
+// native streaming adapter (child: providers.NewSTT case "rumble").
+const rumbleSTTVendor = "rumble"
 
-const rumbleModelID = "Reson8/Rumble-2-Flash"
-const rumblePort = "8091"
-
-// DefaultRumbleRuntimeConfig returns the frozen Rumble vLLM sidecar defaults.
-// gpu_memory_utilization 0.20 and max_model_len 4096 are the safe coexistence
-// values for an RTX 3060 that also runs qwen3-tts; never raise the fraction
-// toward vLLM's unsafe 0.92 default. SpawnCommand is derived from SpawnArgs
-// so the GPU cap is emitted from ONE source of truth.
-func DefaultRumbleRuntimeConfig() RumbleRuntimeConfig {
-	cfg := RumbleRuntimeConfig{
-		GPUMemoryUtilization: config.RumbleGPUMemoryUtilizationDefault,
-		MaxModelLen:          4096,
-		HealthPath:           "/health",
-		AutoStopOnExit:       true,
-		EndpointKey:          "rumble:127.0.0.1:" + rumblePort,
+// resolveSTTBaseURL picks the stt_base_url for the C1 keys line.
+// Precedence:
+//  1. An explicit operator stt_base_url ALWAYS wins, for every vendor
+//     (the live native-streaming deployment sets it to the transformers
+//     server; that path stays byte-identical).
+//  2. stt_vendor == "rumble" with an empty stt_base_url derives the
+//     legacy loopback default from [voice.rumble_runtime].EndpointKey.
+//     The operator must be running a Rumble server there; the daemon
+//     never spawns one (leaf 02 T2 SUPERSEDED, see file comment).
+//  3. Everything else returns the configured value unchanged ("" for
+//     unset), so whisper/deepgram/empty-vendor lines are byte-identical.
+func resolveSTTBaseURL(vendor, configured string, rr config.VoiceRumbleRuntimeConfig) string {
+	if configured != "" {
+		return configured
 	}
-	cfg.SpawnCommand = cfg.SpawnArgs()
-	return cfg
-}
-
-// SpawnArgs renders the vLLM serve command from this config. It is the single
-// source of truth for the explicit GPU cap and context limit: the daemon and
-// operator both use these args so --gpu-memory-utilization can never silently
-// drift back to vLLM's unsafe 0.92 default. The fraction is CLAMPED into the
-// documented 0.20-0.25 safe range here too (bughunt 2026-11-19 M18/H1): the
-// config load boundary normalizes loaded values (config.NormalizeVoiceRumbleDefaults),
-// but a hand-built config must never render an unsafe fraction verbatim.
-// The Rumble vLLM process is spawned and supervised by the daemon runtime
-// lifecycle (RuntimeProcess.Start port probe / supervisor / ownership-scoped
-// Stop / startup orphan sweep) once the operator selects
-// voice.stt_provider = "rumble"; this function never spawns.
-func (c RumbleRuntimeConfig) SpawnArgs() []string {
-	gpu := c.GPUMemoryUtilization
-	switch {
-	case gpu <= 0 || math.IsNaN(gpu) || math.IsInf(gpu, 0):
-		gpu = config.RumbleGPUMemoryUtilizationDefault
-	case gpu > config.RumbleGPUMemoryUtilizationMax:
-		gpu = config.RumbleGPUMemoryUtilizationMax
+	if vendor == rumbleSTTVendor {
+		return rr.BaseURL()
 	}
-	maxLen := strconv.Itoa(c.MaxModelLen)
-	return []string{
-		"vllm", "serve", rumbleModelID,
-		"--max-model-len", maxLen,
-		"--gpu-memory-utilization", strconv.FormatFloat(gpu, 'f', 2, 64),
-		"--port", rumblePort,
-	}
-}
-
-// BaseURL returns the loopback endpoint the Rumble STT adapter dials. It is
-// derived from the same port as the spawn command so the adapter and sidecar
-// stay in sync.
-func (c RumbleRuntimeConfig) BaseURL() string {
-	return fmt.Sprintf("http://127.0.0.1:%s", rumblePort)
+	return configured
 }

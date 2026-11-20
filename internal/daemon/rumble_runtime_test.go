@@ -1,70 +1,77 @@
 package daemon
 
-// F5 gate: the Rumble vLLM sidecar config pins an explicit low GPU memory
-// fraction (0.20-0.25), never vLLM's unsafe 0.92 default, so it coexists
-// with qwen3-tts on the RTX 3060. RED until leaf 02 lands the config.
+// H1 closure pins (bughunt 2026-11-19, SUPERSEDED branch). The former
+// F5 gate (TestRumbleRuntimeConfigCap) and spawn-arg clamp gate
+// (TestRumbleSpawnArgsClamp) targeted the daemon-side spawn config and
+// renderer, both DELETED when leaf 02 T2 was superseded by the native
+// WS adapter (vLLM cannot serve /v1/audio/transcriptions/stream for this
+// checkpoint; the daemon never spawns a Rumble server). The surviving
+// contract lives in config: the GPU-fraction clamp gates stay in
+// internal/config/voice_fields_test.go (TestNormalizeVoiceRumbleDefaults,
+// TestRumbleClampWiredAtDaemonBoundary) and the frozen-defaults + BaseURL
+// gates in TestVoiceRumbleRuntimeConfigDefaults there. Here we pin the
+// LIVE seam: the keys-line stt_base_url derivation, including the opt-in
+// byte-identity rule (nothing changes for any non-rumble vendor, and an
+// explicit operator stt_base_url always wins).
 
-import "testing"
+import (
+	"testing"
 
-func TestRumbleRuntimeConfigCap(t *testing.T) {
-	cfg := DefaultRumbleRuntimeConfig()
-	if cfg.GPUMemoryUtilization <= 0 {
-		t.Fatal("Rumble runtime config must set gpu_memory_utilization explicitly")
-	}
-	if cfg.GPUMemoryUtilization > 0.25 {
-		t.Fatalf("gpu_memory_utilization = %.2f, want <= 0.25 (never 0.92)", cfg.GPUMemoryUtilization)
-	}
-	if cfg.MaxModelLen <= 0 {
-		t.Fatal("Rumble runtime config must set max_model_len explicitly")
-	}
-	if cfg.MaxModelLen > 4096 {
-		t.Fatalf("max_model_len = %d, want <= 4096", cfg.MaxModelLen)
-	}
-	if cfg.HealthPath != "/health" {
-		t.Fatalf("health path = %q, want /health", cfg.HealthPath)
-	}
-	if !cfg.AutoStopOnExit {
-		t.Fatal("Rumble sidecar must auto-stop on daemon exit")
-	}
-}
+	"github.com/caimlas/meept/internal/config"
+)
 
-// TestRumbleSpawnArgsClamp pins bughunt 2026-11-19 M18/H1 at the render
-// seam: SpawnArgs must NEVER emit an out-of-range --gpu-memory-utilization,
-// even from a hand-built config that skipped the load-boundary normalizer.
-// The safe range is the documented 0.20-0.25 coexistence window.
-func TestRumbleSpawnArgsClamp(t *testing.T) {
-	gpuArg := func(args []string) string {
-		for i, a := range args {
-			if a == "--gpu-memory-utilization" && i+1 < len(args) {
-				return args[i+1]
-			}
-		}
-		t.Fatalf("spawn args missing --gpu-memory-utilization: %v", args)
-		return ""
-	}
+// TestResolveSTTBaseURL pins the derivation precedence table.
+func TestResolveSTTBaseURL(t *testing.T) {
+	frozen := config.DefaultVoiceRumbleRuntimeConfig()
 	cases := []struct {
-		name string
-		in   float64
-		want string
+		name       string
+		vendor     string
+		configured string
+		rr         config.VoiceRumbleRuntimeConfig
+		want       string
 	}{
-		{"vllm_unsafe_default", 0.92, "0.25"},
-		{"above_range", 0.50, "0.25"},
-		{"zero", 0, "0.20"},
-		{"negative", -0.3, "0.20"},
-		{"in_range_low", 0.20, "0.20"},
-		{"in_range_mid", 0.22, "0.22"},
-		{"in_range_max", 0.25, "0.25"},
+		// Opt-in byte-identity: unset / whisper / deepgram vendors keep
+		// the configured value verbatim, including empty.
+		{"unset_vendor_empty_url", "", "", frozen, ""},
+		{"whisper_empty_url", "whisper", "", frozen, ""},
+		{"deepgram_empty_url", "deepgram", "", frozen, ""},
+		{"whisper_explicit_url", "whisper", "http://127.0.0.1:9000", frozen, "http://127.0.0.1:9000"},
+		{"deepgram_explicit_url", "deepgram", "https://api.deepgram.com", frozen, "https://api.deepgram.com"},
+		// The H1 fix: rumble with no URL derives the loopback default.
+		{"rumble_empty_url_derives", "rumble", "", frozen, "http://" + config.RumbleLoopbackAddr},
+		{"rumble_zero_block_derives_frozen", "rumble", "", config.VoiceRumbleRuntimeConfig{}, "http://" + config.RumbleLoopbackAddr},
+		// Explicit operator URL ALWAYS wins - the live transformers
+		// server path must stay byte-identical.
+		{"rumble_explicit_url_wins", "rumble", "http://socrates:8000", frozen, "http://socrates:8000"},
+		// A customized endpoint key moves the derived URL with it.
+		{
+			"rumble_custom_endpoint_key",
+			"rumble", "",
+			config.VoiceRumbleRuntimeConfig{EndpointKey: "rumble:127.0.0.1:8099"},
+			"http://127.0.0.1:8099",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := RumbleRuntimeConfig{GPUMemoryUtilization: tc.in, MaxModelLen: 4096}
-			if got := gpuArg(cfg.SpawnArgs()); got != tc.want {
-				t.Fatalf("gpu fraction %v rendered %q, want %q", tc.in, got, tc.want)
+			if got := resolveSTTBaseURL(tc.vendor, tc.configured, tc.rr); got != tc.want {
+				t.Fatalf("resolveSTTBaseURL(%q, %q) = %q, want %q", tc.vendor, tc.configured, got, tc.want)
 			}
 		})
 	}
-	// The frozen default config renders the frozen safe fraction.
-	if got := gpuArg(DefaultRumbleRuntimeConfig().SpawnArgs()); got != "0.20" {
-		t.Fatalf("default spawn args gpu fraction = %q, want 0.20", got)
+}
+
+// TestRumbleSpawnSuperseded pins that the derivation NEVER consults a
+// spawn surface: the config block may carry an unsafe GPU fraction, but
+// resolveSTTBaseURL is pure string derivation - no clamp needed here
+// because nothing renders spawn args anymore (leaf 02 T2 SUPERSEDED).
+// The clamp for operator reuse stays pinned config-side.
+func TestRumbleSpawnSuperseded(t *testing.T) {
+	rr := config.VoiceRumbleRuntimeConfig{
+		GPUMemoryUtilization: 0.92, // unsafe for a MANUAL vLLM run; clamped by config.ValidateAll
+		MaxModelLen:          4096,
+		EndpointKey:          "rumble:" + config.RumbleLoopbackAddr,
+	}
+	if got := resolveSTTBaseURL("rumble", "", rr); got != "http://"+config.RumbleLoopbackAddr {
+		t.Fatalf("derived URL = %q, want the frozen loopback default", got)
 	}
 }

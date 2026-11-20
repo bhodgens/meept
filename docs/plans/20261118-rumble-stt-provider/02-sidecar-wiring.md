@@ -1,5 +1,49 @@
 # Rumble STT sidecar wiring - Implementation Leaf
 
+> **STATUS (2026-11-19, bughunt H1 fix wave): T2 SUPERSEDED - NOT WIRED, BY
+> DESIGN.** The supervised-vLLM-spawn task below was closed COMPLETE at
+> f8fa6c43 but only the config structs + spawn-arg renderer ever landed;
+> no registration with ContainerManager/RuntimeManager was ever written
+> (bughunt 2026-11-19 H1: tested-but-never-wired stub, all three helpers
+> flagged unreachable by deadcode). Before wiring it, the follow-up tree
+> `20261119-rumble-native-streaming` (commits e335ea15 / f5e384a2 /
+> f6e8d826, closed abd1c2d5) REPLACED the batch adapter with a native
+> WebSocket streaming client against an operator-deployed FastAPI +
+> transformers server (`socrates:8000`). vLLM CANNOT serve the native
+> route `/v1/audio/transcriptions/stream` for this checkpoint
+> (`docs/research/rumble2flash-review.md`: `stream=True` is output-token
+> streaming after the FULL audio arrives; `/v1/realtime` requires causal
+> encoders while Rumble's AuT encoder is bidirectional). A daemon-spawned
+> vLLM sidecar would be health-green but unusable by the only shipped
+> client, so wiring T2 as written would ship a broken feature.
+>
+> **As-built disposition (triple gate: unreachable in every main, zero
+> textual callers repo-wide, this plan record):**
+> - T1 (config): LANDED and kept - `config.VoiceRumbleRuntimeConfig`
+>   (`internal/config/schema.go`) is now the ONE source of truth; the
+>   duplicate `daemon.RumbleRuntimeConfig` was deleted.
+> - T2 (supervised spawn): SUPERSEDED. `DefaultRumbleRuntimeConfig`,
+>   `SpawnArgs`, `BaseURL` (daemon copies) deleted from
+>   `internal/daemon/rumble_wiring.go`; the file now carries ONLY the
+>   wired `resolveSTTBaseURL` derivation.
+> - The consumer gap T2 existed to close IS wired: `stt_vendor=rumble`
+>   with an empty `voice.stt_base_url` now derives the dial URL from
+>   `rumble_runtime.endpoint_key`
+>   (`internal/daemon/voice_keys.go` -> `resolveSTTBaseURL`,
+>   `config.VoiceRumbleRuntimeConfig.BaseURL()`); an explicit operator
+>   `stt_base_url` always wins byte-identically (the live transformers
+>   path). Pins: `TestResolveSTTBaseURL`,
+>   `TestVoiceKeysEmissionSTTBaseURL[LocalLeg]` (daemon),
+>   `TestVoiceRumbleRuntimeConfigDefaults`, `TestVoiceRumbleBaseURL`
+>   (config). The F5 GPU-cap gates survive config-side
+>   (`TestNormalizeVoiceRumbleDefaults`, `TestRumbleClampWiredAtDaemonBoundary`).
+> - Opt-in byte-identity: unset/whisper/deepgram vendors send the exact
+>   pre-change wire; NOTHING spawns for ANY provider (pinned).
+> - T3 (docs): as-built truth in `docs/workflows/voice-sidecar.md` and
+>   the `[voice.rumble_runtime]` template comments - the block is
+>   legacy-server knobs (manual vLLM coexistence values + the derived
+>   default dial URL), never a daemon spawn source.
+
 > **For the implementing agent:** Implement ALL tasks using TDD. Gate tests
 > exist. Do NOT delete/skip/weaken gate tests. Do NOT commit. Explore with
 > search_files/terminal. Write once and stop. Follow runtime lifecycle

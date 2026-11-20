@@ -444,3 +444,69 @@ func TestRumbleClampWiredAtDaemonBoundary(t *testing.T) {
 		t.Fatalf("ValidateAll left gpu_memory_utilization = %v, want the 0.25 clamp", got)
 	}
 }
+
+// TestVoiceRumbleRuntimeConfigDefaults carries the surviving F5 gate
+// (formerly daemon TestRumbleRuntimeConfigCap, deleted with the
+// superseded spawn helpers): the ONE config source of truth pins the
+// explicit safe GPU fraction, context cap, health path, and auto-stop
+// default for operators running a legacy vLLM Rumble server manually.
+func TestVoiceRumbleRuntimeConfigDefaults(t *testing.T) {
+	cfg := DefaultVoiceRumbleRuntimeConfig()
+	if cfg.GPUMemoryUtilization <= 0 {
+		t.Fatal("rumble_runtime must set gpu_memory_utilization explicitly")
+	}
+	if cfg.GPUMemoryUtilization > RumbleGPUMemoryUtilizationMax {
+		t.Fatalf("gpu_memory_utilization = %.2f, want <= %.2f (never 0.92)", cfg.GPUMemoryUtilization, RumbleGPUMemoryUtilizationMax)
+	}
+	if cfg.MaxModelLen <= 0 || cfg.MaxModelLen > 4096 {
+		t.Fatalf("max_model_len = %d, want 1..4096", cfg.MaxModelLen)
+	}
+	if cfg.HealthPath != "/health" {
+		t.Fatalf("health path = %q, want /health", cfg.HealthPath)
+	}
+	if !cfg.AutoStopOnExit {
+		t.Fatal("rumble_runtime auto_stop_on_exit default must be true")
+	}
+	if cfg.EndpointKey != "rumble:"+RumbleLoopbackAddr {
+		t.Fatalf("endpoint_key = %q, want rumble:%s", cfg.EndpointKey, RumbleLoopbackAddr)
+	}
+	// DefaultConfig ships the same frozen block.
+	def := DefaultConfig().Voice.RumbleRuntime
+	if def != cfg {
+		t.Fatalf("DefaultConfig rumble block drifted: %+v vs %+v", def, cfg)
+	}
+}
+
+// TestVoiceRumbleBaseURL pins the derived dial URL (bughunt H1): the
+// address half of EndpointKey over http, with a frozen loopback fallback
+// for a zero-value or malformed block. An explicit operator
+// voice.stt_base_url always wins over this value (pinned daemon-side in
+// TestResolveSTTBaseURL / TestVoiceKeysEmissionSTTBaseURL).
+func TestVoiceRumbleBaseURL(t *testing.T) {
+	cases := []struct {
+		name string
+		key  string
+		want string
+	}{
+		{"frozen_default", "rumble:" + RumbleLoopbackAddr, "http://" + RumbleLoopbackAddr},
+		{"empty_key_falls_back", "", "http://" + RumbleLoopbackAddr},
+		{"custom_port", "rumble:127.0.0.1:8099", "http://127.0.0.1:8099"},
+		{"custom_host", "rumble:192.168.1.10:8091", "http://192.168.1.10:8091"},
+		{"malformed_no_port_falls_back", "rumble:localhost", "http://" + RumbleLoopbackAddr},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := VoiceRumbleRuntimeConfig{EndpointKey: tc.key}
+			if got := r.BaseURL(); got != tc.want {
+				t.Fatalf("BaseURL() with key %q = %q, want %q", tc.key, got, tc.want)
+			}
+		})
+	}
+	// A fully zero block (config omits rumble_runtime) derives the frozen
+	// default too - the derivation must never yield an empty URL for a
+	// rumble vendor (the child fails construction on an empty BaseURL).
+	var zero VoiceRumbleRuntimeConfig
+	if got := zero.BaseURL(); got != "http://"+RumbleLoopbackAddr {
+		t.Fatalf("zero block BaseURL() = %q, want the frozen loopback default", got)
+	}
+}

@@ -1423,7 +1423,7 @@
     "tts_ref_audio": "",                    // path to the qwen3 clone reference WAV; feeds ONLY the clip-key identity (sha256 into tts_ref_hash + voice_clips keys) — never a TTS request field; empty = preset voice
     "stt_model": "",                        // global STT model
     "tts_base_url": "",                     // TTS base URL override (local Qwen3-TTS server); empty = vendor default
-    "stt_base_url": "",                     // STT base URL override (vendor-agnostic: Deepgram-compatible / whisper / Rumble / Kyutai endpoint); empty = provider default (api.deepgram.com for the deepgram backend). rumble uses a native WS stream endpoint: ws://<stt_base_url>/v1/audio/transcriptions/stream (s16le mono 16k PCM binary frames)
+    "stt_base_url": "",                     // STT base URL override (vendor-agnostic: Deepgram-compatible / whisper / Rumble / Kyutai endpoint); empty = provider default (api.deepgram.com for the deepgram backend). rumble uses a native WS stream endpoint: ws://<stt_base_url>/v1/audio/transcriptions/stream (s16le mono 16k PCM binary frames). rumble + empty here derives http://127.0.0.1:8091 from rumble_runtime.endpoint_key (you must run a Rumble server there yourself; the daemon never spawns one). An explicit URL always wins.
     // ---- Rumble native streaming + legacy kwargs (all additive; absent/zero = byte-identical) ----
     // NOTE: the live Rumble server (FastAPI + transformers on socrates:8000) streams natively
     // over ws://<stt_base_url>/v1/audio/transcriptions/stream. It ignores the chat_template_* keys
@@ -1438,13 +1438,21 @@
     //
     // FUTURE-USE KNOB: client-side pseudo-stream proxy for BATCH STT vendors only.
     // "stt_partial_ms": 0,                  // >0 wraps a batch vendor (e.g. whisper) in PseudoStreamSTT: it snapshots a growing PCM buffer into successive full utterances and emits Final:false partials; a Final:true lands on pcm close, a barge-in FlushNow kick, or the 10s max-window cap (flush-and-keep-streaming). Gives partial barge-in/context-warm on a batch vendor, but it is NOT server incremental input, re-recognizes the whole open window each tick (bounded O(n^2) within the 10s cap), and does not reduce time-to-first-word. Leave commented/0 for native streaming vendors (rumble, deepgram): the proxy is bypassed for them anyway.
-    // ---- Supervised vLLM Rumble STT sidecar (legacy vLLM path; NOT used by the live transformers server) ----
+    // ---- Rumble legacy-server knobs (operator-run; the daemon NEVER spawns a Rumble server) ----
+    // The supervised-vLLM-sidecar leaf (plan 20261118-rumble-stt-provider leaf 02 T2) is SUPERSEDED
+    // by the native WS adapter (plan 20261119-rumble-native-streaming): the live server is
+    // FastAPI + transformers, and vLLM cannot serve /v1/audio/transcriptions/stream for this
+    // checkpoint. This block now does two things only:
+    //   1. endpoint_key is the source of the DERIVED default stt_base_url when
+    //      stt_provider = "rumble" and stt_base_url is empty (http://<host>:<port> of the key).
+    //   2. gpu_memory_utilization / max_model_len are frozen safe coexistence knobs to copy into
+    //      a MANUAL vLLM invocation on the shared RTX 3060 (clamped 0.20-0.25 at config load).
     // "rumble_runtime": {
-    //   "gpu_memory_utilization": 0.20,          // EXPLICIT low GPU fraction (safe range 0.20-0.25); vLLM's 0.92 default is UNSAFE alongside qwen3-tts on the RTX 3060
-    //   "max_model_len": 4096,                   // context cap: keeps the vLLM KV-cache small enough to coexist with qwen3-tts
-    //   "endpoint_key": "rumble:127.0.0.1:8091", // runtime lifecycle endpoint key (loopback only)
-    //   "health_path": "/health",                // health check path; requires a live child process
-    //   "auto_stop_on_exit": true,               // stop the owned sidecar on graceful shutdown; only the startup orphan sweep reaps orphaned runtimes
+    //   "gpu_memory_utilization": 0.20,          // EXPLICIT low GPU fraction (safe range 0.20-0.25); vLLM's 0.92 default is UNSAFE alongside qwen3-tts on the RTX 3060 (manual vLLM runs only)
+    //   "max_model_len": 4096,                   // context cap: keeps the vLLM KV-cache small enough to coexist with qwen3-tts (manual vLLM runs only)
+    //   "endpoint_key": "rumble:127.0.0.1:8091", // source of the derived default stt_base_url for vendor rumble (loopback default)
+    //   "health_path": "/health",                // legacy lifecycle metadata; no daemon health checker is armed for this block
+    //   "auto_stop_on_exit": true,               // legacy lifecycle metadata; nothing is spawned, so nothing is auto-stopped
     // },
     "local": {                              // local voice leg (mic + speaker on the client device); opt-in
       "enabled": false,                     // local leg master switch

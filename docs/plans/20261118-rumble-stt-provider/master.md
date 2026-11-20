@@ -189,7 +189,7 @@ set children COMPLETE.
 | 00T-unit-tests | TESTS_VALIDATED | 1 | Authored in-session; RED on undefined newRumbleSTT/DefaultRumbleRuntimeConfig, not syntax. Commit 9d3ef25b. |
 | 00Te-e2e-tests | TESTS_VALIDATED | 1 | Authored in-session; keys gate RED on unknown vendor; F4 honest skip cites research:45. Commit 9d3ef25b. |
 | 01-rumble-adapter | REVIEWED | 1 | Commit d83a147a; TestRumbleSTTStream GREEN, hooks green. |
-| 02-sidecar-wiring | REVIEWED | 2 | Commit f8fa6c43; cap pinned 0.20, SpawnArgs single source (dead seam removed), TestRumbleRuntimeConfigCap GREEN. |
+| 02-sidecar-wiring | REVIEWED (T2 later SUPERSEDED) | 2 | Commit f8fa6c43; cap pinned 0.20, SpawnArgs single source (dead seam removed), TestRumbleRuntimeConfigCap GREEN. CORRECTION (bughunt 2026-11-19 H1): the spawn wiring was never landed - helpers were unreachable; T2 is SUPERSEDED by 20261119-rumble-native-streaming (vLLM cannot serve the native WS route). Dead helpers deleted; stt_base_url derivation wired instead. See the leaf's status banner. |
 | 03-registration-docs | REVIEWED | 1 | Commit a9676587; NewSTT case + pin + docs/AGENTS; gates GREEN. |
 
 Gate rule: implementation children stay PENDING until 00T + 00Te reach TESTS_VALIDATED.
@@ -249,6 +249,21 @@ config, so the GPU cap is one source of truth and no dead code ships.
 Live pilot on socrates remains a deferred manual operator step (no vLLM
 install / model downloads performed); tracked in
 `docs/research/rumble2flash-evaluation.md`.
+
+### Correction (2026-11-19, bughunt H1 fix wave)
+
+The COMPLETE claim above was premature for leaf 02: the supervised-spawn
+wiring (T2) never landed - `DefaultRumbleRuntimeConfig` / `SpawnArgs` /
+`BaseURL` had zero production callers (deadcode-flagged; audit H1). The
+follow-up tree `20261119-rumble-native-streaming` then replaced the batch
+adapter entirely with a native WS streaming client, and vLLM cannot serve
+that route for this checkpoint, so T2 is **SUPERSEDED, not wired** (full
+evidence + disposition in `02-sidecar-wiring.md`'s status banner). As-built
+closure: ONE config source of truth (`config.VoiceRumbleRuntimeConfig`),
+dead daemon spawn helpers deleted (triple gate), and the real consumer gap
+wired - `stt_vendor=rumble` + empty `stt_base_url` derives the dial URL
+from `rumble_runtime.endpoint_key`; explicit operator URLs always win;
+non-rumble vendors byte-identical; nothing spawns for any provider.
 
 ## Notes
 

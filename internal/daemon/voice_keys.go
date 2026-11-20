@@ -265,8 +265,12 @@ func (w *VoiceWiring) sendKeysFrame(ccid string) {
 	}
 	// STT base URL: when set, the child dials Deepgram (or any
 	// wire-compatible STT) at this endpoint instead of the cloud default
-	// - the same contract TTS honors for tts_base_url.
-	kw.STTBaseURL = vcfg.STTBaseURL
+	// - the same contract TTS honors for tts_base_url. An explicit
+	// operator URL always wins; a rumble vendor with NO URL derives the
+	// legacy loopback default from [voice.rumble_runtime] (bughunt H1:
+	// without it every rumble call failed provider construction). No
+	// other vendor's line changes (resolveSTTBaseURL, rumble_wiring.go).
+	kw.STTBaseURL = resolveSTTBaseURL(kw.STTVendor, vcfg.STTBaseURL, vcfg.RumbleRuntime)
 	if w.broker == nil {
 		// Loud WARN in the ResolveVoiceSecrets style: a broker-less
 		// install must still run, but every cloud-provider call would
