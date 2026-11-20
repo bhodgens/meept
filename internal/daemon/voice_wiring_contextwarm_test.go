@@ -490,6 +490,12 @@ func TestContextWarmDispatcherResolvesConversationScope(t *testing.T) {
 	}
 	// The employee's persistent model override rides the session loop.
 	loop.SetPersistentModelOverride("emp-override-model")
+	// The prefix fn only warms a MIRRORABLE persona: give the session
+	// loop a system prompt override (the template keeps none, so a
+	// template-fallback resolution would refuse or diverge).
+	sessCfg := loop.GetConfig()
+	sessCfg.SystemPromptOveride = "session persona"
+	loop.SetConfig(sessCfg)
 
 	src := contextWarmSources{Loops: loopMgr, Template: tmpl, Sessions: sessStore}
 
@@ -506,6 +512,22 @@ func TestContextWarmDispatcherResolvesConversationScope(t *testing.T) {
 	// A raw SESSION id still resolves (legacy direct-lookup shape).
 	if d2 := w.resolveContextWarmDispatcher(src, sess.ID); d2 != warmDispatcher(sessionFake) {
 		t.Fatalf("session-id scope dispatcher = %v, want the session loop chatter", d2)
+	}
+
+	// Prefix half parity (bughunt 2026-11-19 wave 4): buildContextWarmPrefix
+	// must resolve the SAME duality - a conversation-id scope reads the
+	// SESSION loop's cfg (employee override), not the template's, or the
+	// prefix diverges from the dispatcher's client and the cache hit dies.
+	// The prefix Alias carries the loop's persistent model override, so
+	// it distinguishes the session loop from the template (ok=true alone
+	// would pass on the template fallback too).
+	prefixFn := w.buildContextWarmPrefix(src)
+	prefix, ok := prefixFn("", sess.ConversationID, "partial speech")
+	if !ok {
+		t.Fatal("prefix fn refused a conversation-id scope with a live session loop")
+	}
+	if prefix.Alias != "emp-override-model" {
+		t.Fatalf("prefix alias = %q, want the session loop's employee override (template cfg means the duality was skipped)", prefix.Alias)
 	}
 }
 

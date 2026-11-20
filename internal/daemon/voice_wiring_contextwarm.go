@@ -206,7 +206,21 @@ func (w *VoiceWiring) buildContextWarmPrefix(src contextWarmSources) voice.WarmP
 		if sessionID == "" || strings.TrimSpace(partialText) == "" {
 			return voice.WarmPrefix{}, false
 		}
-		loop := contextWarmLoopFor(src.Loops, sessionID)
+		// Same identity duality as resolveContextWarmDispatcher (bughunt
+		// 2026-11-19 wave 3): production passes the calls.db session id,
+		// but a conversation-id scope must still resolve the session loop
+		// instead of silently falling to the template cfg while the
+		// dispatcher picks the session chatter (diverged prefix = lost
+		// cache hit). Nil store / miss keeps the raw id.
+		loopKey := sessionID
+		if src.Sessions != nil {
+			if sess := src.Sessions.Get(sessionID); sess != nil && sess.ID != "" {
+				loopKey = sess.ID
+			} else if sess := src.Sessions.GetByConversationID(sessionID); sess != nil && sess.ID != "" {
+				loopKey = sess.ID
+			}
+		}
+		loop := contextWarmLoopFor(src.Loops, loopKey)
 		var cfg agent.AgentConfig
 		haveCfg := false
 		if loop != nil {

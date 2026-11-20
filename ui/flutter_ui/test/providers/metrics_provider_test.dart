@@ -75,8 +75,14 @@ void main() {
       final ws = _TestWebSocket();
       final notifier = MetricsNotifier(sdkClient: client, websocket: ws);
 
-      // Wait for async fetch to complete
-      await Future.delayed(const Duration(milliseconds: 100));
+      // Poll for the async fetch to land instead of a fixed 100ms wait
+      // (load-flaky: the connection-refused error can take longer under
+      // full-suite load; bughunt 2026-11-19 observation).
+      final deadline = DateTime.now().add(const Duration(seconds: 5));
+      while (notifier.state.error == null &&
+          DateTime.now().isBefore(deadline)) {
+        await Future.delayed(const Duration(milliseconds: 20));
+      }
 
       expect(notifier.state.error, isNotNull);
     });
