@@ -251,11 +251,11 @@ green for every submitted turn. Then merge worktree -> main per skill.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|--------------|
-| 01-safety | IMPL_IN_PROGRESS | 6 | 01/04/06 committed 6c4e17fc; 02 partial bf3918e6 (gate-defect GATE-ADJUDICATION-T3.md OPEN); 03+07 GREEN committed 2d4cb881; 05 running (sa-0-0ecabcff) |
-| 02-routing | IMPL_IN_PROGRESS | 3 | 01+02(metrics/rpc-trace) committed 2d4cb881; 03 running (sa-2-d7c65d55); 04-scheduler pending |
+| 01-safety | IMPL_DONE | 7 | 01-07 all GREEN committed (6c4e17fc/bf3918e6/4c986dac/b161d027); 05 non-gated extras in 05-REPORT.md s4 for follow-up |
+| 02-routing | IMPL_DONE | 4 | 01-04 all GREEN committed (2d4cb881/b161d027) |
 | 03-context | IMPL_DONE | 2 | 01+02 GREEN committed (bf3918e6+2d4cb881); T4 resume-contract open in leaf doc (no gate) |
-| 04-clutter | DISPATCH_NEXT | 0 | gate committed 89e996e2 (T1-T8 RED); impl 01/02 to dispatch |
-| 05-navigation | TESTS_VALIDATED | 0 | gate committed f326aef8 (T1-T6 RED; T7 restore e2e PENDING); impl wave C pending |
+| 04-clutter | IMPL_DONE | 2 | 01+02 GREEN committed b161d027 (T1-T7 verified incl dart 7/7) |
+| 05-navigation | IMPL_IN_PROGRESS | 0 | gate f326aef8; impl 01/02/03 running (deleg_534b038c); T1 models gate already green via clutter/02 |
 | 06-planning | TESTS_VALIDATED | 0 | gate committed f326aef8 (T1-T5 RED, F13c mode badge); impl wave D pending |
 | 07-bench | TESTS_VALIDATED | 0 | gate committed 45c94c0 (meept-bench worktree, checkers RED); integration wave E last |
 
