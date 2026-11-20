@@ -6643,8 +6643,8 @@ func (c *Components) Start(ctx context.Context) error {
 		}
 
 		// Wire known agent IDs for hire-time validation (spec line 597,
-		// 621). The agent registry and existing employees form the set
-		// of valid escalation targets.
+		// 621). The agent registry, existing employees, and plain bots form
+		// the set of valid escalation targets.
 		if c.AgentRegistry != nil {
 			ids := make(map[string]struct{})
 			for _, spec := range c.AgentRegistry.ListSpecs() {
@@ -6653,6 +6653,21 @@ func (c *Components) Start(ctx context.Context) error {
 			if emps, err := c.EmployeeManager.ListEmployees(ctx, ""); err == nil {
 				for _, e := range emps {
 					ids[e.ID] = struct{}{}
+				}
+			}
+			// L13 (bughunt 2026-11-19): plain bots are valid escalation
+			// approvers too. isAuthorizedApprover admits any caller ID listed
+			// in escalates_to, but ListEmployees skips constitution-less bots
+			// (4ee85f4b), so the employee roster alone hard-failed a hire whose
+			// constitution names a plain bot. Union the bot roster into the
+			// known set; cycle detection treats these as leaf nodes.
+			if c.BotManager != nil {
+				if bots, err := c.BotManager.ListBots(ctx); err == nil {
+					for _, b := range bots {
+						ids[b.ID] = struct{}{}
+					}
+				} else {
+					c.Logger.Warn("hire-time known agent IDs: bot roster unavailable", "error", err)
 				}
 			}
 			c.EmployeeManager.SetKnownAgentIDs(ids)

@@ -957,7 +957,9 @@ func (m *SessionsModel) getDesignationBadge(sess *types.Session) string {
 
 	priorityBadge := ""
 	if sess.Designation.Priority == "urgent" || sess.Designation.Priority == "high" {
-		priorityBadge = " [" + strings.ToUpper(sess.Designation.Priority) + "]"
+		// UI text is lowercase (AGENTS.md UI Conventions): render the
+		// priority as-is in lowercase, never strings.ToUpper ("[URGENT]").
+		priorityBadge = " [" + strings.ToLower(sess.Designation.Priority) + "]"
 	}
 
 	badgeStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(info.color))

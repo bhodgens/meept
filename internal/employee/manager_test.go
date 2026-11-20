@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -426,4 +427,82 @@ func TestRetireLeavesNoRows(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("re-Hire retired id: %v", err)
 	}
+}
+
+// TestHireEscalationToPlainBotViaKnownSet pins the manager seam behind
+// bughunt 2026-11-19 L13: when the daemon's hire-time known-agent set
+// includes a plain (constitution-less) bot ID, Hire accepts a constitution
+// that names that bot as an escalation target; when the set omits it (the
+// pre-fix ListSpecs+ListEmployees shape, since ListEmployees skips
+// constitution-less bots), the same hire is rejected. The daemon-side union
+// that populates the set is pinned in internal/daemon/components_test.go
+// (TestHireKnownAgentIDsIncludesPlainBots).
+func TestHireEscalationToPlainBotViaKnownSet(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	const botID = "plain-approver-bot"
+	hireReq := func(id string) HireRequest {
+		c := validConstitution()
+		c.EscalatesTo = []string{botID}
+		return HireRequest{
+			ID:           id,
+			Name:         "escalating employee",
+			Prompt:       "test prompt",
+			Enabled:      true,
+			Triggers:     []bot.BotTrigger{{Type: bot.TriggerTypeWebhook, Enabled: true}},
+			Constitution: constitutionToMap(t, c),
+		}
+	}
+
+	t.Run("known set includes the plain bot", func(t *testing.T) {
+		m, _ := newHirePersistenceManager(t)
+		if err := m.botManager.CreateBot(ctx, bot.BotDefinition{
+			ID:       botID,
+			Name:     "plain approver bot",
+			Prompt:   "approve plans",
+			Enabled:  true,
+			Triggers: []bot.BotTrigger{{Type: bot.TriggerTypeWebhook, Enabled: true}},
+		}); err != nil {
+			t.Fatalf("create plain bot: %v", err)
+		}
+		// The plain bot is invisible to the employee roster.
+		emps, err := m.ListEmployees(ctx, "")
+		if err != nil {
+			t.Fatalf("ListEmployees: %v", err)
+		}
+		for _, e := range emps {
+			if e.ID == botID {
+				t.Fatal("plain bot listed as an employee; fixture no longer exercises the seam")
+			}
+		}
+		// Simulate the daemon wiring's bot-roster union (L13 fix).
+		m.SetKnownAgentIDs(map[string]struct{}{botID: {}})
+		if _, err := m.Hire(ctx, hireReq("emp-bot-approver")); err != nil {
+			t.Fatalf("Hire with plain bot in known set failed: %v", err)
+		}
+	})
+
+	t.Run("known set omits the plain bot", func(t *testing.T) {
+		m, _ := newHirePersistenceManager(t)
+		if err := m.botManager.CreateBot(ctx, bot.BotDefinition{
+			ID:       botID,
+			Name:     "plain approver bot",
+			Prompt:   "approve plans",
+			Enabled:  true,
+			Triggers: []bot.BotTrigger{{Type: bot.TriggerTypeWebhook, Enabled: true}},
+		}); err != nil {
+			t.Fatalf("create plain bot: %v", err)
+		}
+		// Pre-fix shape: only registry/employee IDs, no bot union. A
+		// non-empty set keeps the check armed (empty disables it).
+		m.SetKnownAgentIDs(map[string]struct{}{"some-registry-agent": {}})
+		_, err := m.Hire(ctx, hireReq("emp-bot-approver"))
+		if err == nil {
+			t.Fatal("Hire succeeded without the bot in the known set; expected rejection")
+		}
+		if !strings.Contains(err.Error(), "escalation references") {
+			t.Fatalf("expected escalation-references error, got: %v", err)
+		}
+	})
 }

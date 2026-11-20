@@ -3,12 +3,16 @@ package daemon
 import (
 	"context"
 	"log/slog"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/caimlas/meept/internal/agent"
+	"github.com/caimlas/meept/internal/bot"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/employee"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/pkg/models"
 )
@@ -139,5 +143,143 @@ func TestComponentsStart_CancelOnRollback(t *testing.T) {
 		// expected
 	default:
 		t.Error("c.cancel() did not cancel c.ctx")
+	}
+}
+
+// hireTimeBotUnionComponents builds a minimal Components whose Start() runs
+// the real hire-time known-agent-ID wiring (the L13 block): a plain bot
+// (constitution-less), an AgentRegistry, and an employee.Manager over real
+// throwaway SQLite stores. Only the three mandatory handlers plus the
+// employee/bot/registry stack are populated; every other optional component
+// stays nil so its Start block is skipped.
+func hireTimeBotUnionComponents(t *testing.T) *Components {
+	t.Helper()
+	dir := t.TempDir()
+	logger := slog.New(slog.DiscardHandler)
+
+	botStore, err := bot.NewStore(filepath.Join(dir, "bots.db"))
+	if err != nil {
+		t.Fatalf("bot store: %v", err)
+	}
+	botMgr := bot.NewManager(botStore, nil)
+
+	// A plain bot: a bot_definitions row with NO constitution. ListEmployees
+	// skips it (4ee85f4b), so it is invisible to the employee roster.
+	if err := botMgr.CreateBot(context.Background(), bot.BotDefinition{
+		ID:       "plain-approver-bot",
+		Name:     "plain approver bot",
+		Prompt:   "approve plans",
+		Enabled:  true,
+		Triggers: []bot.BotTrigger{{Type: bot.TriggerTypeWebhook, Enabled: true}},
+	}); err != nil {
+		t.Fatalf("create plain bot: %v", err)
+	}
+
+	cs, err := employee.NewConstitutionStore(filepath.Join(dir, "constitutions.db"), logger)
+	if err != nil {
+		t.Fatalf("constitution store: %v", err)
+	}
+	empMgr := employee.NewManagerWithStores(botMgr, botStore, cs, nil, nil, logger)
+
+	msgBus := bus.New(nil, logger)
+	c := &Components{
+		Config: &config.Config{
+			Workers: config.WorkersConfig{PoolSize: 1},
+		},
+		Logger:            logger,
+		BotManager:        botMgr,
+		BotStore:          botStore,
+		EmployeeManager:   empMgr,
+		ConstitutionStore: cs,
+		AgentRegistry:     agent.NewAgentRegistry(agent.RegistryConfig{Logger: logger}),
+	}
+	c.ctx, c.cancel = context.WithCancel(context.Background())
+	c.ChatHandler = agent.NewChatHandler(nil, nil, msgBus, logger)
+	c.StatusHandler = NewStatusHandler(msgBus, logger)
+	c.SessionHandler = session.NewHandler(session.NewMemoryStore(logger), msgBus, logger)
+
+	// Stop closes BotStore + ConstitutionStore and cancels the lifecycle ctx.
+	t.Cleanup(func() { _ = c.Stop(context.Background()) })
+	return c
+}
+
+// TestHireKnownAgentIDsIncludesPlainBots pins bughunt 2026-11-19 L13 through
+// the REAL Components.Start wiring: a constitution that names a plain
+// (constitution-less) bot as an escalation target must pass hire-time
+// validation. Before the fix, knownAgentIDs was ListSpecs + ListEmployees
+// only, and ListEmployees skips constitution-less bots, so CheckEscalationReferences
+// hard-failed the hire with "unknown agent IDs".
+func TestHireKnownAgentIDsIncludesPlainBots(t *testing.T) {
+	c := hireTimeBotUnionComponents(t)
+	ctx := context.Background()
+
+	if err := c.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// The plain bot must NOT appear in the employee roster (proves it is
+	// constitution-less and only reachable via the bot-roster union).
+	emps, err := c.EmployeeManager.ListEmployees(ctx, "")
+	if err != nil {
+		t.Fatalf("ListEmployees: %v", err)
+	}
+	for _, e := range emps {
+		if e.ID == "plain-approver-bot" {
+			t.Fatal("plain bot unexpectedly listed as an employee; fixture no longer exercises L13")
+		}
+	}
+
+	// Hire an employee whose constitution escalates to the plain bot.
+	_, err = c.EmployeeManager.Hire(ctx, employee.HireRequest{
+		ID:       "emp-escalates-to-bot",
+		Name:     "escalating employee",
+		Prompt:   "do work, escalate to the bot",
+		Enabled:  true,
+		Triggers: []bot.BotTrigger{{Type: bot.TriggerTypeWebhook, Enabled: true}},
+		Constitution: map[string]any{
+			"purpose":       "escalate to a plain bot approver",
+			"autonomy_tier": "tier_2_propose",
+			"escalates_to":  []string{"plain-approver-bot"},
+			"amendment_policy": map[string]any{
+				"requires_approval": true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Hire naming a plain bot as escalation target failed (L13 regression): %v", err)
+	}
+}
+
+// TestHireKnownAgentIDsRejectsUnknownID is the negative control for L13: the
+// bot-roster union must not disable escalation-reference validation. An ID
+// that is neither a registry spec, an employee, nor a bot is still rejected.
+func TestHireKnownAgentIDsRejectsUnknownID(t *testing.T) {
+	c := hireTimeBotUnionComponents(t)
+	ctx := context.Background()
+
+	if err := c.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	_, err := c.EmployeeManager.Hire(ctx, employee.HireRequest{
+		ID:       "emp-escalates-to-ghost",
+		Name:     "escalating employee",
+		Prompt:   "do work",
+		Enabled:  true,
+		Triggers: []bot.BotTrigger{{Type: bot.TriggerTypeWebhook, Enabled: true}},
+		Constitution: map[string]any{
+			"purpose":       "escalate to a nonexistent id",
+			"autonomy_tier": "tier_2_propose",
+			"escalates_to":  []string{"no-such-agent-or-bot"},
+			"amendment_policy": map[string]any{
+				"requires_approval": true,
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("Hire with an unknown escalation target succeeded; validation is disabled")
+	}
+	if !strings.Contains(err.Error(), "escalation references") {
+		t.Fatalf("expected an escalation-references error, got: %v", err)
 	}
 }

@@ -3,6 +3,7 @@ package models
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -352,5 +353,49 @@ func TestSessionsModel_HelpSearchLabel(t *testing.T) {
 	}
 	if !contains(out, "search sessions") {
 		t.Errorf("help missing the sessions-scoped search label\n%s", out)
+	}
+}
+
+// TestSessionsModel_DesignationBadgeLowercase pins the lowercase-UI rule for
+// the designation priority badge (bughunt 2026-11-19, L15-adjacent): an
+// urgent/high priority renders "[urgent]"/"[high]", never the strings.ToUpper
+// form "[URGENT]"/"[HIGH]". The badge text is contiguous even though lipgloss
+// wraps it in ANSI color codes.
+func TestSessionsModel_DesignationBadgeLowercase(t *testing.T) {
+	rpc := &mockSessionsRPC{connected: true}
+	m := NewSessionsModel(rpc)
+
+	for _, priority := range []string{"urgent", "high"} {
+		sess := &types.Session{
+			ID:   "s-" + priority,
+			Name: "designated session",
+			Designation: &types.SessionDesignation{
+				Status:   "requires_approval",
+				Priority: priority,
+			},
+		}
+		badge := m.getDesignationBadge(sess)
+		want := "[" + priority + "]"
+		if !contains(badge, want) {
+			t.Errorf("priority %q: badge missing lowercase %q; got %q", priority, want, badge)
+		}
+		upper := "[" + strings.ToUpper(priority) + "]"
+		if contains(badge, upper) {
+			t.Errorf("priority %q: badge still renders uppercase %q (lowercase-UI rule violated); got %q", priority, upper, badge)
+		}
+	}
+
+	// Non-urgent priorities carry no priority badge at all. (Check the
+	// bracketed priority tokens, not a bare "[": ANSI escapes contain one.)
+	normal := &types.Session{
+		ID:   "s-normal",
+		Name: "normal session",
+		Designation: &types.SessionDesignation{
+			Status:   "waiting_human",
+			Priority: "normal",
+		},
+	}
+	if badge := m.getDesignationBadge(normal); contains(badge, "[normal]") || contains(badge, "[NORMAL]") {
+		t.Errorf("normal priority should render no priority badge; got %q", badge)
 	}
 }
