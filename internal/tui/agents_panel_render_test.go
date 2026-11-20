@@ -419,3 +419,351 @@ func TestExecutionRunsMsg_PreservesLiveRowsNewerThanServer(t *testing.T) {
 		t.Fatalf("runs[0] = %+v, want the live row first", p.runs[0])
 	}
 }
+
+// H1 pin (issue #160 audit): the SAME execution arrives twice - once as a
+// live bus frame stamped with nanosecond publish time, once in the server
+// page whose created_at the store truncates to whole seconds. The composite
+// ns-vs-second key never matched, so every poll re-preserved the live copy
+// alongside the persisted row and the runs view doubled every execution
+// permanently. After the merge exactly ONE row must remain, and repeated
+// polls must not accumulate copies.
+func TestExecutionRunsMsg_DedupsLiveRowAgainstServerPage(t *testing.T) {
+	base := time.Date(2026, 11, 19, 12, 0, 5, 0, time.UTC)
+	p := NewAgentsPanel(stubAgentsRPC{})
+	p.SetSize(120, 30)
+
+	live := AgentRun{
+		Topic:     "employee.result",
+		Tier:      "employee",
+		AgentID:   "emp-1",
+		Status:    "completed",
+		Output:    "same execution",
+		Timestamp: base.Add(500 * time.Millisecond), // publish-time ns precision
+	}
+	p.Update(executionResultMsg{Run: live})
+
+	// The store persisted the same execution with a second-truncated stamp.
+	server := []AgentRun{{
+		Topic:     "employee.result",
+		Tier:      "employee",
+		AgentID:   "emp-1",
+		Status:    "completed",
+		Output:    "same execution",
+		Timestamp: base,
+	}}
+	p.Update(executionRunsMsg{runs: server})
+	if len(p.runs) != 1 {
+		t.Fatalf("runs = %d, want 1 (live copy of a persisted execution must dedup)\n%+v", len(p.runs), p.runs)
+	}
+
+	// A second poll of the same page must not re-introduce the live copy.
+	p.Update(executionRunsMsg{runs: server})
+	if len(p.runs) != 1 {
+		t.Fatalf("runs after second poll = %d, want 1 (dedup must be stable across polls)", len(p.runs))
+	}
+}
+
+// H1 companion pin: dedup must not collapse genuinely different executions.
+// Two persisted runs of the SAME agent one second apart, their live copies,
+// plus one live run genuinely newer than the page: exactly three rows.
+func TestExecutionRunsMsg_DistinctExecutionsSurvive(t *testing.T) {
+	base := time.Date(2026, 11, 19, 12, 0, 5, 0, time.UTC)
+	server := []AgentRun{
+		{Topic: "employee.result", Tier: "employee", AgentID: "emp-1", Status: "completed", Timestamp: base.Add(time.Second)},
+		{Topic: "employee.result", Tier: "employee", AgentID: "emp-1", Status: "completed", Timestamp: base},
+	}
+	live := []AgentRun{
+		{Topic: "employee.result", Tier: "employee", AgentID: "emp-1", Status: "completed", Timestamp: base.Add(2*time.Second + 250*time.Millisecond)},
+		{Topic: "employee.result", Tier: "employee", AgentID: "emp-1", Status: "completed", Timestamp: base.Add(time.Second + 500*time.Millisecond)},
+		{Topic: "employee.result", Tier: "employee", AgentID: "emp-1", Status: "completed", Timestamp: base.Add(500 * time.Millisecond)},
+	}
+	merged := mergeLiveRuns(server, live)
+	if len(merged) != 3 {
+		t.Fatalf("merged = %d rows, want 3 (two persisted executions + one genuinely newer live row)\n%+v", len(merged), merged)
+	}
+}
+
+// M2 pin (partial, pre-seam): re-pressing '5' while already in the runs
+// sub-view must not arm another fetch/tick chain.
+func TestAgentsPanel_RunsReentryDoesNotRearm(t *testing.T) {
+	p := NewAgentsPanel(stubAgentsRPC{})
+	p.SetSize(120, 30)
+	p.subView = agentsViewRuns
+
+	if cmd := p.Update(tea.KeyPressMsg{Code: '5', Text: "5"}); cmd != nil {
+		t.Fatalf("re-pressing '5' inside the runs view returned a command (%T); it must not re-arm the poll chain", cmd)
+	}
+}
+
+// L2 pin: an executionRunsMsg error must surface a lowercase error line in
+// the runs view (GUI parity: state.error). Empty cache keeps the empty-state
+// text plus the error hint; a cached page is kept, not blanked.
+func TestAgentsPanel_RunsErrorLine(t *testing.T) {
+	p := NewAgentsPanel(stubAgentsRPC{})
+	p.SetSize(120, 30)
+	p.subView = agentsViewRuns
+
+	// Empty cache + degraded store: empty state AND the error hint.
+	p.Update(executionRunsMsg{err: fmt.Errorf("execution store unavailable")})
+	out := p.View()
+	if !strings.Contains(out, "no executions recorded yet") {
+		t.Errorf("empty runs view lost its empty-state text on error\n%s", out)
+	}
+	if !strings.Contains(out, "error:") || !strings.Contains(out, "execution store unavailable") {
+		t.Errorf("runs view does not surface the RPC error (GUI shows state.error)\n%s", out)
+	}
+
+	// A good page renders rows and clears the error line.
+	base := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
+	p.Update(executionRunsMsg{runs: []AgentRun{{
+		Topic: "bot.result", Tier: "bot", AgentID: "bot-1", Status: "completed", Timestamp: base,
+	}}})
+	out = p.View()
+	if strings.Contains(out, "error:") {
+		t.Errorf("error line survived a successful poll\n%s", out)
+	}
+	if !strings.Contains(out, "bot-1") {
+		t.Errorf("successful page did not render\n%s", out)
+	}
+
+	// A later failure keeps the last page and shows the error line again.
+	p.Update(executionRunsMsg{err: fmt.Errorf("rpc timeout")})
+	out = p.View()
+	if !strings.Contains(out, "bot-1") {
+		t.Errorf("error path blanked the last good page\n%s", out)
+	}
+	if !strings.Contains(out, "error:") || !strings.Contains(out, "rpc timeout") {
+		t.Errorf("error line missing while the last page is shown\n%s", out)
+	}
+}
+
+// runsCountRPC counts agents.executionRuns calls and serves one persisted
+// row carrying the store id (the wire shape the pre-fix decoder dropped).
+type runsCountRPC struct {
+	calls int
+}
+
+func (r *runsCountRPC) Call(method string, _ any) (json.RawMessage, error) {
+	if method == "agents.executionRuns" {
+		r.calls++
+		return json.RawMessage(`{"runs":[{"id":7,"tier":"bot","agent_id":"bot-1","status":"completed","created_at":"2026-11-19T12:00:05Z"}],"total":1}`), nil
+	}
+	return json.RawMessage(`{}`), nil
+}
+
+func (r *runsCountRPC) IsConnected() bool { return true }
+
+// deliverRunsCmd executes one command returned by the panel and feeds every
+// message it produces back through Update, returning the follow-up commands
+// Update produced (tick arming). tea.Tick cmds are one-shot timers: each is
+// invoked exactly once.
+func deliverRunsCmd(t *testing.T, p *AgentsPanel, cmd tea.Cmd) []tea.Cmd {
+	t.Helper()
+	if cmd == nil {
+		return nil
+	}
+	return deliverRunsMsg(t, p, cmd())
+}
+
+func deliverRunsMsg(t *testing.T, p *AgentsPanel, msg tea.Msg) []tea.Cmd {
+	t.Helper()
+	var follow []tea.Cmd
+	switch m := msg.(type) {
+	case tea.BatchMsg:
+		for _, c := range m {
+			follow = append(follow, deliverRunsCmd(t, p, c)...)
+		}
+	case nil:
+	default:
+		if c := p.Update(m); c != nil {
+			follow = append(follow, c)
+		}
+	}
+	return follow
+}
+
+// H1 decode pin: fetchExecutionRuns must decode the store id the RPC
+// returns (execution_store.go ExecutionRun.ID json:"id") onto AgentRun.ID.
+func TestFetchExecutionRuns_DecodesStoreID(t *testing.T) {
+	rpc := &runsCountRPC{}
+	p := NewAgentsPanel(rpc)
+	p.SetSize(120, 30)
+
+	var page *executionRunsMsg
+	var collect func(tea.Msg)
+	collect = func(msg tea.Msg) {
+		switch m := msg.(type) {
+		case tea.BatchMsg:
+			for _, c := range m {
+				collect(c())
+			}
+		case executionRunsMsg:
+			page = &m
+		}
+	}
+	collect(p.fetchExecutionRuns())
+	if page == nil {
+		t.Fatal("fetch produced no executionRunsMsg")
+	}
+	if len(page.runs) != 1 || page.runs[0].ID != 7 {
+		t.Fatalf("decoded runs = %+v, want one row with store ID 7", page.runs)
+	}
+}
+
+// H1 ID-match pin: when both rows carry a store id, identity is the id -
+// even when the timestamps differ (a re-stamped or skewed copy).
+func TestMergeLiveRuns_MatchesByStoreID(t *testing.T) {
+	base := time.Date(2026, 11, 19, 12, 0, 5, 0, time.UTC)
+	server := []AgentRun{{ID: 7, Topic: "bot.result", Tier: "bot", AgentID: "bot-1", Status: "completed", Timestamp: base}}
+	live := []AgentRun{{ID: 7, Topic: "bot.result", Tier: "bot", AgentID: "bot-1", Status: "completed", Timestamp: base.Add(900 * time.Millisecond)}}
+	if merged := mergeLiveRuns(server, live); len(merged) != 1 {
+		t.Fatalf("merged = %d rows, want 1 (same store id is the same execution)", len(merged))
+	}
+	// A different store id on the same agent/second is a different execution.
+	live2 := []AgentRun{{ID: 8, Topic: "bot.result", Tier: "bot", AgentID: "bot-1", Status: "completed", Timestamp: base.Add(900 * time.Millisecond)}}
+	if merged := mergeLiveRuns(server, live2); len(merged) != 2 {
+		t.Fatalf("merged = %d rows, want 2 (different store ids must both survive)", len(merged))
+	}
+}
+
+// M2 pin: entry + response + re-entry must keep exactly ONE fetch/tick
+// chain. Counts real RPC fetches through the panel's Update path. The
+// armed tick cmd is invoked once and its message HELD (not delivered)
+// while the pending-guard assertions run - a fired timer is no longer a
+// pending one.
+func TestAgentsPanel_RunsPollChainSingleArm(t *testing.T) {
+	rpc := &runsCountRPC{}
+	p := NewAgentsPanel(rpc)
+	p.SetSize(120, 30)
+	p.runsPollInterval = time.Millisecond
+
+	// Entry: one immediate fetch + one armed tick.
+	entry := p.Update(tea.KeyPressMsg{Code: '5', Text: "5"})
+	if entry == nil {
+		t.Fatal("entry produced no command")
+	}
+	batch, ok := entry().(tea.BatchMsg)
+	if !ok || len(batch) != 2 {
+		t.Fatalf("entry cmd returned %T, want a 2-cmd batch (fetch + tick)", entry())
+	}
+	// Run the fetch half; hold the tick half.
+	follow := deliverRunsCmd(t, p, batch[0])
+	if rpc.calls != 1 {
+		t.Fatalf("entry fetches = %d, want 1", rpc.calls)
+	}
+	if len(follow) != 0 {
+		t.Fatalf("fetch response armed %d commands while a tick was pending, want 0", len(follow))
+	}
+	tickMsg := batch[1]() // invoke the one-shot timer exactly once; hold the msg
+	if _, ok := tickMsg.(executionRunsTickMsg); !ok {
+		t.Fatalf("tick cmd returned %T, want executionRunsTickMsg", tickMsg)
+	}
+	// While the tick is still armed, the scheduler must not arm another.
+	if c := p.scheduleExecutionRunsTick(); c != nil {
+		t.Fatal("tick scheduler armed a second tick while one was pending")
+	}
+
+	// Re-press '5' while in the runs view: no new fetch, no new tick.
+	if c := p.Update(tea.KeyPressMsg{Code: '5', Text: "5"}); c != nil {
+		t.Fatalf("re-entry returned a command (%T); chain would multiply", c)
+	}
+	if rpc.calls != 1 {
+		t.Fatalf("fetches after re-entry = %d, want 1", rpc.calls)
+	}
+
+	// Deliver the held tick: the handler returns the fetch CMD (it does
+	// not run it); execute that cmd to perform the fetch and deliver its
+	// response, which arms exactly one successor tick. Repeat 3 cycles.
+	for cycle := 0; cycle < 3; cycle++ {
+		fetchCmds := deliverRunsMsg(t, p, tickMsg)
+		if len(fetchCmds) != 1 {
+			t.Fatalf("cycle %d: tick returned %d commands, want exactly 1 fetch cmd", cycle, len(fetchCmds))
+		}
+		next := deliverRunsCmd(t, p, fetchCmds[0])
+		if rpc.calls != 2+cycle {
+			t.Fatalf("cycle %d: fetches = %d, want %d (one fetch per tick)", cycle, rpc.calls, 2+cycle)
+		}
+		if len(next) != 1 {
+			t.Fatalf("cycle %d: %d successor commands, want exactly 1 tick", cycle, len(next))
+		}
+		tickMsg = next[0]()
+		if _, ok := tickMsg.(executionRunsTickMsg); !ok {
+			t.Fatalf("cycle %d: successor returned %T, want executionRunsTickMsg", cycle, tickMsg)
+		}
+		if c := p.scheduleExecutionRunsTick(); c != nil {
+			t.Fatalf("cycle %d: scheduler armed a competing tick", cycle)
+		}
+	}
+}
+
+// M2 inflight pin: a second fetch landing while one RPC is in flight is
+// dropped; the done message released by the first fetch re-opens the gate.
+func TestAgentsPanel_RunsFetchInflightDedup(t *testing.T) {
+	rpc := &runsCountRPC{}
+	p := NewAgentsPanel(rpc)
+	p.SetSize(120, 30)
+
+	first := p.fetchExecutionRuns() // inflight stays set until the done msg lands
+	if first == nil {
+		t.Fatal("first fetch returned nil")
+	}
+	if second := p.fetchExecutionRuns(); second != nil {
+		t.Fatalf("second fetch while inflight returned %T, want nil", second)
+	}
+	if rpc.calls != 1 {
+		t.Fatalf("rpc calls = %d, want 1 (inflight fetch must not double-poll)", rpc.calls)
+	}
+	deliverRunsMsg(t, p, first) // delivers page + done; clears inflight
+	if third := p.fetchExecutionRuns(); third == nil {
+		t.Fatal("fetch after done returned nil; inflight flag stuck")
+	}
+	if rpc.calls != 2 {
+		t.Fatalf("rpc calls after done = %d, want 2", rpc.calls)
+	}
+}
+
+// M2 generation pin: exit and re-entry bump the runs generation; a tick
+// armed by the previous visit must be dropped, not fetch. Exiting the
+// runs view also stops the chain.
+func TestAgentsPanel_RunsStaleGenerationTickDropped(t *testing.T) {
+	rpc := &runsCountRPC{}
+	p := NewAgentsPanel(rpc)
+	p.SetSize(120, 30)
+	p.runsPollInterval = time.Millisecond
+
+	entry := p.Update(tea.KeyPressMsg{Code: '5', Text: "5"})
+	batch, ok := entry().(tea.BatchMsg)
+	if !ok || len(batch) != 2 {
+		t.Fatalf("entry cmd returned %T, want a 2-cmd batch (fetch + tick)", entry())
+	}
+	deliverRunsCmd(t, p, batch[0]) // run the fetch half only
+	staleMsg := batch[1]()         // invoke the one-shot timer exactly once; hold it
+	stale, ok := staleMsg.(executionRunsTickMsg)
+	if !ok {
+		t.Fatalf("tick cmd returned %T, want executionRunsTickMsg", staleMsg)
+	}
+
+	// Exit to the list, then re-enter: the held tick is now stale.
+	p.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	if c := p.Update(stale); c != nil {
+		t.Fatalf("stale tick after exit returned %T, want nil", c)
+	}
+	reentry := p.Update(tea.KeyPressMsg{Code: '5', Text: "5"})
+	rebatch, ok := reentry().(tea.BatchMsg)
+	if !ok || len(rebatch) != 2 {
+		t.Fatalf("re-entry cmd returned %T, want a 2-cmd batch", reentry())
+	}
+	deliverRunsCmd(t, p, rebatch[0])
+	calls := rpc.calls
+	if c := p.Update(stale); c != nil {
+		t.Fatalf("stale-generation tick after re-entry returned %T, want nil (second chain)", c)
+	}
+	if rpc.calls != calls {
+		t.Fatalf("stale tick fetched: calls %d -> %d", calls, rpc.calls)
+	}
+
+	// A current-generation tick still fetches (normal polling intact).
+	if c := p.Update(executionRunsTickMsg{generation: p.runsGeneration}); c == nil {
+		t.Fatal("current-generation tick was dropped; polling broke")
+	}
+}

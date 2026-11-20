@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"charm.land/bubbles/v2/table"
@@ -92,6 +93,25 @@ type AgentsPanel struct {
 
 	loading bool
 	err     error
+
+	// runsErr is the last execution-history poll error (L2). The runs
+	// sub-view renders it as a lowercase error line - GUI parity with
+	// state.error - while keeping the last good page; a successful poll
+	// clears it. Kept separate from p.err so a runs failure never
+	// repaints the agents list's error state.
+	runsErr error
+
+	// Runs poll-chain guards (M2, pattern d298c74c / EventStream). A
+	// one-shot tea.Tick cannot be retracted once armed, so entry stamps
+	// a generation into the tick and every handler drops superseded
+	// generations; the inflight flag stops a second fetch landing while
+	// one RPC is already running. runsTickPending tracks the armed tick
+	// so a response never arms a competing second chain.
+	runsMu           sync.Mutex
+	runsGeneration   uint64
+	runsInflight     bool
+	runsTickPending  bool
+	runsPollInterval time.Duration // zero = 5s; tests shorten it
 }
 
 // AgentsRPCClient is the small interface App satisfies via *RPCClient.
@@ -196,6 +216,11 @@ type AgentFinding struct {
 // AgentRun is one execution-result frame (bot.result or employee.result).
 // Tier is derived from the topic name; the wire payload carries no discriminator.
 type AgentRun struct {
+	// ID is the durable store row id (execution_store.go ExecutionRun.ID,
+	// json "id"). Non-zero on rows decoded from a server page; zero on
+	// live bus frames, which carry no store id yet. A persisted row's
+	// identity is this id, never its timestamp.
+	ID         int64
 	Topic      string
 	Tier       string
 	AgentID    string
@@ -294,16 +319,41 @@ type executionRunsMsg struct {
 
 // executionRunsTickMsg re-polls the server while the runs sub-view is
 // visible (5s cadence, self-perpetuating only in that sub-view).
-type executionRunsTickMsg struct{}
+type executionRunsTickMsg struct {
+	// generation is runsGeneration captured when the tick was armed.
+	// Handlers drop ticks from a superseded generation (sub-view exit
+	// and re-entry bump it) so a stale armed timer cannot revive a
+	// second poll chain.
+	generation uint64
+}
+
+// runsFetchDoneMsg signals that one execution-history fetch finished,
+// whatever its outcome. It clears the inflight flag on the Update
+// goroutine; fetchExecutionRuns returns it wrapped in a tea.Batch with
+// the page (or error) message.
+type runsFetchDoneMsg struct{}
 
 // fetchExecutionRuns pages the durable execution history (newest first).
+// A second fetch landing while one RPC is in flight returns nil (M2):
+// two poll chains must not double-fetch the same page.
 func (p *AgentsPanel) fetchExecutionRuns() tea.Msg {
+	p.runsMu.Lock()
+	if p.runsInflight {
+		p.runsMu.Unlock()
+		return nil
+	}
+	p.runsInflight = true
+	p.runsMu.Unlock()
+	// Every exit path delivers runsFetchDoneMsg so the inflight flag
+	// cannot stick after an RPC or decode failure.
+	done := tea.Cmd(func() tea.Msg { return runsFetchDoneMsg{} })
 	raw, err := p.rpc.Call("agents.executionRuns", map[string]any{"limit": 30})
 	if err != nil {
-		return executionRunsMsg{err: err}
+		return tea.BatchMsg{done, func() tea.Msg { return executionRunsMsg{err: err} }}
 	}
 	var resp struct {
 		Runs []struct {
+			ID         int64  `json:"id"`
 			Tier       string `json:"tier"`
 			AgentID    string `json:"agent_id"`
 			Status     string `json:"status"`
@@ -318,15 +368,20 @@ func (p *AgentsPanel) fetchExecutionRuns() tea.Msg {
 		} `json:"runs"`
 	}
 	if err := json.Unmarshal(raw, &resp); err != nil {
-		return executionRunsMsg{err: fmt.Errorf("unmarshal execution runs: %w", err)}
+		return tea.BatchMsg{done, func() tea.Msg {
+			return executionRunsMsg{err: fmt.Errorf("unmarshal execution runs: %w", err)}
+		}}
 	}
 	runs := make([]AgentRun, 0, len(resp.Runs))
 	for _, r := range resp.Runs {
-		ts, _ := time.Parse(time.RFC3339, r.CreatedAt)
-		if ts.IsZero() {
+		ts, parseErr := time.Parse(time.RFC3339, r.CreatedAt)
+		if parseErr != nil {
+			// A malformed stamp degrades to now for display only; the
+			// store id remains the row's identity either way.
 			ts = time.Now()
 		}
 		runs = append(runs, AgentRun{
+			ID:         r.ID,
 			Topic:      r.Tier + ".result",
 			Tier:       r.Tier,
 			AgentID:    r.AgentID,
@@ -341,16 +396,18 @@ func (p *AgentsPanel) fetchExecutionRuns() tea.Msg {
 			Timestamp:  ts,
 		})
 	}
-	return executionRunsMsg{runs: runs}
+	return tea.BatchMsg{done, func() tea.Msg { return executionRunsMsg{runs: runs} }}
 }
 
 // maxExecutionRunsRows is the shared row ceiling for the runs sub-view: live
 // frames, server pages, and reconciled pages all cap here.
 const maxExecutionRunsRows = 30
 
-// runIdentity is the dedup key for execution rows. AgentRun carries no
-// server-side ID (the durable history RPC does not return one), so identity is
-// the composite Topic+AgentID+Status+Timestamp.
+// runIdentity is the composite dedup key for NOT-YET-PERSISTED live rows
+// (ID == 0): live bus frames carry no store id, so their identity is
+// Topic+AgentID+Status+Timestamp at the store's second precision. Persisted
+// rows (ID != 0) are keyed by their store id instead - the durable history
+// RPC DOES return it (execution_store.go ExecutionRun.ID, json "id").
 type runIdentity struct {
 	topic     string
 	agentID   string
@@ -362,26 +419,47 @@ func runKey(r AgentRun) runIdentity {
 	return runIdentity{topic: r.Topic, agentID: r.AgentID, status: r.Status, timestamp: r.Timestamp}
 }
 
+// liveRunKey is the composite key for a not-yet-persisted live row, with the
+// timestamp truncated to whole seconds in UTC - the store's precision
+// (ExecutionStore.Append truncates CreatedAt). Live frames carry
+// publish-time nanoseconds, so an untruncated key never matches the server
+// row's second stamp and the same execution rendered twice (H1).
+func liveRunKey(r AgentRun) runIdentity {
+	return runIdentity{
+		topic:     r.Topic,
+		agentID:   r.AgentID,
+		status:    r.Status,
+		timestamp: r.Timestamp.UTC().Truncate(time.Second),
+	}
+}
+
 // mergeLiveRuns reconciles a freshly-fetched server page with the live-only
 // rows cached since the last poll. The execution projector appends a durable
 // run from the bot.result/employee.result bus event in a subscriber goroutine
 // (internal/activity/execution_projector.go), so a result that reaches the
 // TUI just before a poll can be newer than the snapshot that poll returns.
 // Replacing p.runs wholesale in that window made the live row vanish for one
-// poll and reappear on the next — a visible flicker in the runs sub-view.
+// poll and reappear on the next - a visible flicker in the runs sub-view.
 //
-// Rows newer than the newest server row (maxServer) and not already in the
-// server page by identity are prepended in their prior newest-first order.
-// An empty server page has a zero maxServer, so every live row survives.
-// No live row newer => the page is returned unchanged (byte-identical).
+// A live row is dropped once the server page carries the same execution:
+// by store id when both rows carry one, otherwise by the composite key with
+// the live timestamp truncated to the store's second precision. Rows newer
+// than the newest server row (maxServer) and not in the page by that
+// identity are prepended in their prior newest-first order. An empty server
+// page has a zero maxServer, so every live row survives. No live row newer
+// => the page is returned unchanged (byte-identical).
 func mergeLiveRuns(server, live []AgentRun) []AgentRun {
 	var maxServer time.Time
-	seen := make(map[runIdentity]struct{}, len(server))
+	seenIDs := make(map[int64]struct{}, len(server))
+	seenKeys := make(map[runIdentity]struct{}, len(server))
 	for _, r := range server {
 		if r.Timestamp.After(maxServer) {
 			maxServer = r.Timestamp
 		}
-		seen[runKey(r)] = struct{}{}
+		if r.ID != 0 {
+			seenIDs[r.ID] = struct{}{}
+		}
+		seenKeys[liveRunKey(r)] = struct{}{}
 	}
 
 	var preserved []AgentRun
@@ -389,7 +467,14 @@ func mergeLiveRuns(server, live []AgentRun) []AgentRun {
 		if r.Timestamp.IsZero() || !r.Timestamp.After(maxServer) {
 			continue
 		}
-		if _, exists := seen[runKey(r)]; exists {
+		if r.ID != 0 {
+			// Both sides carry a store id: identity is the id alone.
+			if _, exists := seenIDs[r.ID]; exists {
+				continue
+			}
+		} else if _, exists := seenKeys[liveRunKey(r)]; exists {
+			// Not-yet-persisted live row: composite key at the store's
+			// second precision.
 			continue
 		}
 		preserved = append(preserved, r)
@@ -411,12 +496,43 @@ func mergeLiveRuns(server, live []AgentRun) []AgentRun {
 	return merged
 }
 
-// scheduleExecutionRunsTick arms the 5s re-poll while the runs sub-view is
-// open. The tick handler re-arms only while still in that sub-view.
+// scheduleExecutionRunsTick arms the next re-poll while the runs sub-view
+// is open, stamped with the current generation. Idempotent: a tick already
+// pending is never armed twice (M2 - entry used to start two self-
+// perpetuating chains and every re-press of '5' added another).
 func (p *AgentsPanel) scheduleExecutionRunsTick() tea.Cmd {
-	return tea.Tick(5*time.Second, func(_ time.Time) tea.Msg {
-		return executionRunsTickMsg{}
+	p.runsMu.Lock()
+	defer p.runsMu.Unlock()
+	if p.runsTickPending {
+		return nil
+	}
+	p.runsTickPending = true
+	gen := p.runsGeneration
+	interval := p.runsPollInterval
+	if interval <= 0 {
+		interval = 5 * time.Second
+	}
+	return tea.Tick(interval, func(_ time.Time) tea.Msg {
+		return executionRunsTickMsg{generation: gen}
 	})
+}
+
+// setAgentsSubView switches the panel's sub-view and maintains the runs
+// poll-chain lifecycle (M2): leaving the runs view advances the generation
+// so any armed one-shot tick becomes stale and dies on delivery; entering
+// it advances the generation too, invalidating ticks a previous visit left
+// armed. A re-press of '5' while already in the runs view is a no-op.
+func (p *AgentsPanel) setAgentsSubView(v agentsSubView) {
+	if p.subView == v {
+		return
+	}
+	if p.subView == agentsViewRuns || v == agentsViewRuns {
+		p.runsMu.Lock()
+		p.runsGeneration++
+		p.runsTickPending = false
+		p.runsMu.Unlock()
+	}
+	p.subView = v
 }
 
 // NewAgentsPanel constructs the panel with default table styling.
@@ -1012,20 +1128,46 @@ func (p *AgentsPanel) Update(msg tea.Msg) tea.Cmd {
 
 	case executionRunsMsg:
 		// Server history replaces the live-only cache (stateful surface).
-		// An RPC error keeps the last good page and never blanks the view.
-		if msg.err == nil {
+		// An RPC error keeps the last good page, never blanks the view,
+		// and surfaces a lowercase error line (L2, GUI state.error parity).
+		if msg.err != nil {
+			p.runsErr = msg.err
+		} else {
+			p.runsErr = nil
 			// Projector lag can make the live row newer than this page;
 			// carry those rows across so it does not blink for one poll.
 			p.runs = mergeLiveRuns(msg.runs, p.runs)
 			p.updateRunsTable()
 		}
 		if p.subView == agentsViewRuns {
+			// Idempotent: arms the next tick only when none is pending,
+			// so the entry fetch and the tick chain never double-arm.
 			return p.scheduleExecutionRunsTick()
 		}
 		return nil
 
+	case runsFetchDoneMsg:
+		p.runsMu.Lock()
+		p.runsInflight = false
+		p.runsMu.Unlock()
+		return nil
+
 	case executionRunsTickMsg:
-		if p.subView != agentsViewRuns {
+		p.runsMu.Lock()
+		stale := msg.generation != p.runsGeneration
+		inflight := p.runsInflight
+		if !stale {
+			// The armed one-shot window is over; the response handler
+			// (or the fetch below) re-arms exactly one successor.
+			p.runsTickPending = false
+		}
+		p.runsMu.Unlock()
+		if stale || p.subView != agentsViewRuns {
+			return nil
+		}
+		if inflight {
+			// A fetch is already running; its executionRunsMsg handler
+			// arms the next tick. Fetching again would double-poll.
 			return nil
 		}
 		return p.fetchExecutionRuns
@@ -1139,10 +1281,17 @@ func (p *AgentsPanel) Update(msg tea.Msg) tea.Cmd {
 			return nil
 
 		case "5":
-			p.subView = agentsViewRuns
+			if p.subView == agentsViewRuns {
+				// Already in the runs view: re-pressing must not arm
+				// another fetch/tick chain (M2).
+				return nil
+			}
+			p.setAgentsSubView(agentsViewRuns)
 			p.updateRunsTable()
 			// Stateful surface: pull the durable history immediately and
-			// keep polling while this sub-view is open.
+			// keep polling while this sub-view is open. The tick scheduler
+			// is idempotent, so the fetch's response never arms a second
+			// chain alongside this one.
 			return tea.Batch(p.fetchExecutionRuns, p.scheduleExecutionRunsTick())
 
 		case KeyEnter:
@@ -1155,16 +1304,16 @@ func (p *AgentsPanel) Update(msg tea.Msg) tea.Cmd {
 				return nil
 			}
 			p.selectedID = p.agents[idx].ID
-			p.subView = agentsViewDetail
+			p.setAgentsSubView(agentsViewDetail)
 			return p.fetchDetail
 
 		case KeyEsc:
-			p.subView = agentsViewList
+			p.setAgentsSubView(agentsViewList)
 			p.detail = nil
 			return nil
 
 		case "1":
-			p.subView = agentsViewList
+			p.setAgentsSubView(agentsViewList)
 			return p.fetchAgents
 
 		case "2":
@@ -1174,7 +1323,7 @@ func (p *AgentsPanel) Update(msg tea.Msg) tea.Cmd {
 					p.selectedID = p.agents[idx].ID
 				}
 			}
-			p.subView = agentsViewApprovals
+			p.setAgentsSubView(agentsViewApprovals)
 			return p.fetchDetail
 
 		case "3":
@@ -1184,7 +1333,7 @@ func (p *AgentsPanel) Update(msg tea.Msg) tea.Cmd {
 					p.selectedID = p.agents[idx].ID
 				}
 			}
-			p.subView = agentsViewAudit
+			p.setAgentsSubView(agentsViewAudit)
 			return p.fetchDetail
 
 		case "4":
@@ -1196,7 +1345,7 @@ func (p *AgentsPanel) Update(msg tea.Msg) tea.Cmd {
 					p.selectedID = p.agents[idx].ID
 				}
 			}
-			p.subView = agentsViewGoals
+			p.setAgentsSubView(agentsViewGoals)
 			return p.fetchGoals
 
 		case "up", "down", "j", "k":
@@ -1226,7 +1375,7 @@ func (p *AgentsPanel) Update(msg tea.Msg) tea.Cmd {
 func (p *AgentsPanel) handleDetailKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case KeyEsc, "q":
-		p.subView = agentsViewList
+		p.setAgentsSubView(agentsViewList)
 		p.detail = nil
 		return nil
 
@@ -2027,7 +2176,17 @@ func (p *AgentsPanel) renderRuns() string {
 	b.WriteString(sectionStyle.Render(fmt.Sprintf("--- executions (%d) ---", len(p.runs))))
 	b.WriteString("\n")
 	b.WriteString(lipgloss.NewStyle().Foreground(Current().TextMuted).Render("server history (polled every 5s); capped at 30 rows"))
-	b.WriteString("\n\n")
+	b.WriteString("\n")
+
+	// L2 (GUI state.error parity): a failed poll surfaces a lowercase
+	// error line. The last good page stays rendered; an empty cache keeps
+	// the empty-state text below alongside this hint.
+	if p.runsErr != nil {
+		b.WriteString(lipgloss.NewStyle().Foreground(Current().ErrorC).
+			Render("error: " + truncate(fmt.Sprintf("%v", p.runsErr), 120)))
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
 
 	if len(p.runs) == 0 {
 		empty := lipgloss.NewStyle().
