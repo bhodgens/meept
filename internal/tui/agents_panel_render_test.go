@@ -404,7 +404,7 @@ func TestExecutionRunsMsg_PreservesLiveRowsNewerThanServer(t *testing.T) {
 
 	found := false
 	for _, r := range p.runs {
-		if runKey(r) == runKey(live) {
+		if liveRunKey(r) == liveRunKey(live) {
 			found = true
 			break
 		}
@@ -415,7 +415,7 @@ func TestExecutionRunsMsg_PreservesLiveRowsNewerThanServer(t *testing.T) {
 	if len(p.runs) != 2 {
 		t.Fatalf("runs = %d, want 2 (live row preserved ahead of server page)", len(p.runs))
 	}
-	if runKey(p.runs[0]) != runKey(live) {
+	if liveRunKey(p.runs[0]) != liveRunKey(live) {
 		t.Fatalf("runs[0] = %+v, want the live row first", p.runs[0])
 	}
 }

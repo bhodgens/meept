@@ -2,10 +2,7 @@ package tui
 
 import (
 	"encoding/json"
-	"fmt"
 	"net"
-	"os"
-	"path/filepath"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -99,16 +96,15 @@ func TestEventStream_GenerationDropsStaleTick(t *testing.T) {
 // Uses the same-package mockServer fake RPCClient seam (rpc_test.go) with a
 // blocking bus.poll handler to make the in-flight window deterministic.
 func TestEventStream_InFlightPollDedup(t *testing.T) {
-	// Build the fake RPC server inline with a SHORT socket path: t.TempDir()
+	// Build the fake RPC server with the shared short-path helper: t.TempDir()
 	// plus a long test name exceeds macOS's 104-byte sun_path limit and
 	// net.Listen("unix", ...) fails with EINVAL.
-	sockPath := filepath.Join(os.TempDir(), fmt.Sprintf("meept-ev-%d.sock", time.Now().UnixNano()))
+	sockPath := newMockSocketPath(t)
 	listener, err := net.Listen("unix", sockPath)
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
 	defer listener.Close()
-	defer os.Remove(sockPath)
 
 	entered := make(chan struct{})
 	release := make(chan struct{})

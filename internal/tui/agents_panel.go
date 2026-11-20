@@ -415,10 +415,6 @@ type runIdentity struct {
 	timestamp time.Time
 }
 
-func runKey(r AgentRun) runIdentity {
-	return runIdentity{topic: r.Topic, agentID: r.AgentID, status: r.Status, timestamp: r.Timestamp}
-}
-
 // liveRunKey is the composite key for a not-yet-persisted live row, with the
 // timestamp truncated to whole seconds in UTC - the store's precision
 // (ExecutionStore.Append truncates CreatedAt). Live frames carry
