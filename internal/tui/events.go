@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"reflect"
 	"sync"
 	"time"
 
@@ -14,7 +15,12 @@ type BusEvent struct {
 	Type      string    `json:"type"` // event, request, response
 	Source    string    `json:"source"`
 	Timestamp time.Time `json:"timestamp"`
-	Payload   any       `json:"payload"`
+	// Seq is the daemon's per-subscription monotonic record sequence
+	// (internal/rpc/proxy.go). It is the authoritative identity for dedupe;
+	// a zero value means an older daemon or a hand-built event, in which
+	// case addToBuffer falls back to a full-field signature.
+	Seq     int64 `json:"seq"`
+	Payload any   `json:"payload"`
 }
 
 // EventStream manages real-time event streaming from the daemon's message bus.
@@ -26,7 +32,16 @@ type EventStream struct {
 	done           chan struct{}
 	mu             sync.Mutex
 	running        bool
-	pollInterval   time.Duration
+	// generation is advanced on every Start. An armed tea.Tick is a one-shot
+	// timer that Stop cannot retract; stamping the generation at arm time and
+	// dropping mismatched ticks in Update prevents a pre-Stop tick from
+	// re-arming a second (or third) poll chain after a fast Stop->Start.
+	generation uint64
+	// inflight is true while a Poll RPC is in progress. A second Poll that
+	// lands while one is already running returns nil so two poll chains
+	// cannot double-deliver the same page into the buffer.
+	inflight     bool
+	pollInterval time.Duration
 	// lastSeq is the daemon-side monotonic cursor: bus.poll(since_seq)
 	// returns records with Seq > lastSeq and the response's next_seq is
 	// stored back here. Unlike the former client-side wall-clock lastPoll
@@ -138,13 +153,19 @@ func (es *EventStream) Start() tea.Cmd {
 	}
 	es.running = true
 	es.done = make(chan struct{})
+	// Invalidate any tick armed by a previous run. A Stop cannot retract an
+	// already-armed one-shot tea.Tick, so a tick from a prior generation that
+	// fires after this Start must be dropped by Update rather than re-arming
+	// a competing poll chain.
+	es.generation++
+	gen := es.generation
 	es.mu.Unlock()
 
 	// Subscribe to topics synchronously to ensure subscription is ready before polling
 	es.subscribe()
 
 	// Return command to start poll loop
-	return es.schedulePoll()
+	return es.schedulePoll(gen)
 }
 
 // subscribe sends subscription request to daemon.
@@ -203,7 +224,12 @@ func (es *EventStream) Stop() {
 }
 
 // EventStreamTickMsg signals time to poll for events.
-type EventStreamTickMsg struct{}
+// generation is the value of EventStream.generation at the moment the tick
+// was armed. Update drops ticks from a superseded generation so a tick
+// armed before Stop cannot re-arm the poll chain after a fast Stop->Start.
+type EventStreamTickMsg struct {
+	generation uint64
+}
 
 // EventStreamDataMsg carries fetched events.
 type EventStreamDataMsg struct {
@@ -211,10 +237,12 @@ type EventStreamDataMsg struct {
 	Err    error
 }
 
-// schedulePoll schedules the next poll.
-func (es *EventStream) schedulePoll() tea.Cmd {
+// schedulePoll schedules the next poll. gen is the generation captured at
+// Start (or the last accepted tick); the resulting msg carries it so an
+// obsolete armed tick can be identified and dropped.
+func (es *EventStream) schedulePoll(gen uint64) tea.Cmd {
 	return tea.Tick(es.pollInterval, func(t time.Time) tea.Msg {
-		return EventStreamTickMsg{}
+		return EventStreamTickMsg{generation: gen}
 	})
 }
 
@@ -226,6 +254,20 @@ func (es *EventStream) Poll() tea.Cmd {
 			es.mu.Unlock()
 			return nil
 		}
+		// A second Poll landing while one RPC is in progress is dropped:
+		// without this guard two chains (e.g. a stale tick from P1 plus the
+		// live one) could each fetch the same page and double-feed the
+		// sidebar's recent-events ring.
+		if es.inflight {
+			es.mu.Unlock()
+			return nil
+		}
+		es.inflight = true
+		defer func() {
+			es.mu.Lock()
+			es.inflight = false
+			es.mu.Unlock()
+		}()
 		subID := es.subscriptionID
 		lastSeq := es.lastSeq
 		es.mu.Unlock()
@@ -270,10 +312,48 @@ func (es *EventStream) Poll() tea.Cmd {
 	}
 }
 
-// addToBuffer adds an event to the circular buffer.
+// busEventEqual reports whether two events are the same for dedupe purposes.
+// A positive daemon Seq (internal/rpc/proxy.go) is the authoritative identity:
+// when either side carries one, the events match only if both share that same
+// positive Seq. This keeps two legitimately identical events distinct when
+// they arrive with different seq values. When Seq is unavailable (0, e.g. an
+// older daemon or a hand-built event), the full field set is the fallback
+// identity; Payload is compared with reflect.DeepEqual because it is an
+// arbitrary decoded-JSON value that is not necessarily comparable.
+func busEventEqual(a, b BusEvent) bool {
+	if a.Seq > 0 || b.Seq > 0 {
+		return a.Seq > 0 && a.Seq == b.Seq
+	}
+	return a.Topic == b.Topic &&
+		a.Type == b.Type &&
+		a.Source == b.Source &&
+		a.Timestamp.Equal(b.Timestamp) &&
+		reflect.DeepEqual(a.Payload, b.Payload)
+}
+
+// isEmptyBusEvent reports whether a circular-buffer slot is unused. Slots are
+// preallocated as zero-value BusEvents, so an all-zero entry is empty; real
+// events always carry at least a topic or a seq.
+func isEmptyBusEvent(e BusEvent) bool {
+	return e.Topic == "" && e.Type == "" && e.Source == "" && e.Seq == 0 &&
+		e.Timestamp.IsZero() && e.Payload == nil
+}
+
+// addToBuffer adds an event to the circular buffer. The same event is never
+// added twice: the existing ring is scanned first (O(bufferSize), 50 entries
+// by default) and a duplicate returns without advancing bufferIdx.
 func (es *EventStream) addToBuffer(event BusEvent) {
 	es.mu.Lock()
 	defer es.mu.Unlock()
+
+	for _, existing := range es.buffer {
+		if isEmptyBusEvent(existing) {
+			continue
+		}
+		if busEventEqual(existing, event) {
+			return // duplicate: do not advance bufferIdx
+		}
+	}
 
 	es.buffer[es.bufferIdx] = event
 	es.bufferIdx = (es.bufferIdx + 1) % es.bufferSize
@@ -304,18 +384,25 @@ func (es *EventStream) RecentEvents(limit int) []BusEvent {
 
 // Update handles event stream messages and returns next poll command.
 func (es *EventStream) Update(msg tea.Msg) tea.Cmd {
-	switch msg.(type) {
+	switch msg := msg.(type) {
 	case EventStreamTickMsg:
 		es.mu.Lock()
 		running := es.running
+		current := es.generation
 		es.mu.Unlock()
 
 		if !running {
 			return nil
 		}
+		// A tick armed by a prior generation (before a Stop -> Start cycle)
+		// is stale. Dropping it here prevents it from re-arming a second
+		// poll chain alongside the current one.
+		if msg.generation != current {
+			return nil
+		}
 
 		// Poll and schedule next tick
-		return tea.Batch(es.Poll(), es.schedulePoll())
+		return tea.Batch(es.Poll(), es.schedulePoll(current))
 
 	case EventStreamDataMsg:
 		// Events have been added to buffer in Poll()
