@@ -246,6 +246,133 @@ func TestRejectsPathTraversalKey(t *testing.T) {
 	}
 }
 
+// TestPutRejectsZeroBytePayload (bughunt 2026-11-19): a zero-length
+// render is NOT a clip. Put refuses it with the typed ErrEmptyClip and
+// leaves NO cache entry (no pcm, no meta), so the render answers
+// clip_ready ok:false and the say lane falls through to live synth.
+func TestPutRejectsZeroBytePayload(t *testing.T) {
+	s := NewStoreAt(filepath.Join(t.TempDir(), "voice_clips"))
+	key := testKey("empty-render")
+	err := s.Put(key, testMeta(key, 0), bytes.NewReader(nil))
+	if !errors.Is(err, ErrEmptyClip) {
+		t.Fatalf("Put zero-byte payload err = %v, want ErrEmptyClip", err)
+	}
+	if s.Has(key) {
+		t.Error("zero-byte Put produced a cache hit")
+	}
+	for _, ext := range []string{".pcm", ".json"} {
+		if _, err := os.Stat(filepath.Join(s.Dir(), key+ext)); !os.IsNotExist(err) {
+			t.Errorf("zero-byte Put left %s behind", ext)
+		}
+	}
+	// No temp files either: the deferred cleanup ran.
+	ents, err := os.ReadDir(s.Dir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range ents {
+		if strings.Contains(e.Name(), ".tmp") {
+			t.Errorf("temp file left behind by refused Put: %s", e.Name())
+		}
+	}
+}
+
+// writeLegacyZeroEntry hand-builds the pre-fix failed-render shape:
+// meta with Bytes=0 beside a 0-byte pcm (bypassing Put, which now
+// refuses it).
+func writeLegacyZeroEntry(t *testing.T, s *Store, key string) {
+	t.Helper()
+	if err := os.MkdirAll(s.Dir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	b, err := json.Marshal(testMeta(key, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(s.Dir(), key+".json"), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(s.Dir(), key+".pcm"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestHasFalseOnLegacyZeroByteEntry: size==meta.Bytes==0 used to read
+// as a hit (silence served as audio). A zero-length entry is a miss.
+func TestHasFalseOnLegacyZeroByteEntry(t *testing.T) {
+	s := NewStoreAt(filepath.Join(t.TempDir(), "voice_clips"))
+	key := testKey("legacy-zero")
+	writeLegacyZeroEntry(t, s, key)
+	if s.Has(key) {
+		t.Error("Has = true for a 0-byte legacy entry (silence cache hit)")
+	}
+	keys, err := s.ListKeys()
+	if err != nil {
+		t.Fatalf("ListKeys: %v", err)
+	}
+	if len(keys) != 0 {
+		t.Errorf("ListKeys = %v, want none (zero-length entry is a miss)", keys)
+	}
+}
+
+// TestGetDeletesLegacyZeroByteEntry: Get treats a 0-byte entry as
+// corrupt - deletes BOTH files and reports os.ErrNotExist, exactly
+// like the length-mismatch path.
+func TestGetDeletesLegacyZeroByteEntry(t *testing.T) {
+	s := NewStoreAt(filepath.Join(t.TempDir(), "voice_clips"))
+	key := testKey("legacy-zero-get")
+	writeLegacyZeroEntry(t, s, key)
+	rc, _, err := s.Get(key)
+	if rc != nil {
+		if cerr := rc.Close(); cerr != nil {
+			t.Errorf("close leaked reader: %v", cerr)
+		}
+		t.Fatal("Get returned a reader for a 0-byte entry")
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Get err = %v, want os.ErrNotExist", err)
+	}
+	for _, ext := range []string{".pcm", ".json"} {
+		if _, err := os.Stat(filepath.Join(s.Dir(), key+ext)); !os.IsNotExist(err) {
+			t.Errorf("corrupt 0-byte %s not deleted by Get", ext)
+		}
+	}
+}
+
+// TestNormalClipUnaffectedByZeroByteRule: the zero-length refusal must
+// not touch valid clips - a normal Put/Has/Get round-trip stays
+// byte-identical after the fix.
+func TestNormalClipUnaffectedByZeroByteRule(t *testing.T) {
+	s := NewStoreAt(filepath.Join(t.TempDir(), "voice_clips"))
+	key := testKey("normal-after-fix")
+	pcm := bytes.Repeat([]byte{0x10, 0x20}, 320) // 640 bytes = 20ms@16k
+	if err := s.Put(key, testMeta(key, len(pcm)), bytes.NewReader(pcm)); err != nil {
+		t.Fatalf("Put normal clip: %v", err)
+	}
+	if !s.Has(key) {
+		t.Fatal("Has = false for a normal clip")
+	}
+	rc, meta, err := s.Get(key)
+	if err != nil {
+		t.Fatalf("Get normal clip: %v", err)
+	}
+	defer func() {
+		if cerr := rc.Close(); cerr != nil {
+			t.Errorf("close: %v", cerr)
+		}
+	}()
+	got, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("read pcm: %v", err)
+	}
+	if !bytes.Equal(got, pcm) {
+		t.Error("normal clip pcm not byte-identical after the zero-byte fix")
+	}
+	if meta.Bytes != int64(len(pcm)) {
+		t.Errorf("meta.Bytes = %d, want %d", meta.Bytes, len(pcm))
+	}
+}
+
 func TestListKeysSkipsCorruptAndJunk(t *testing.T) {
 	s := NewStoreAt(filepath.Join(t.TempDir(), "voice_clips"))
 	good := testKey("good")

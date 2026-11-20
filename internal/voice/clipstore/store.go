@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,14 @@ import (
 
 	"github.com/caimlas/meept/internal/config"
 )
+
+// ErrEmptyClip is the typed refusal for a zero-length clip payload: a
+// failed/empty TTS render produces no audio, and a zero-length clip is
+// NOT a valid cached clip (owner ruling, bughunt 2026-11-19) - serving
+// it would play SILENCE as a cache hit. Put refuses it so the render
+// answers clip_ready ok:false and the say lane falls through to live
+// synth; callers check with errors.Is.
+var ErrEmptyClip = errors.New("clipstore: zero-length clip payload")
 
 // layout constants pinned by Contract C2.
 const (
@@ -53,7 +62,9 @@ func NewStoreAt(dir string) *Store {
 func (s *Store) Dir() string { return s.dir }
 
 // Has reports a cache hit: meta+pcm exist AND the pcm length equals the
-// meta bytes field. It NEVER creates the directory and never deletes
+// meta bytes field AND the clip carries audio (meta.Bytes > 0 and the
+// pcm size > 0 - a zero-length clip is never a valid cached clip, it
+// would play silence). It NEVER creates the directory and never deletes
 // anything — a corrupt entry reads as a miss here and is only cleaned up
 // by Get (or overwritten by Put).
 func (s *Store) Has(key string) bool {
@@ -61,11 +72,11 @@ func (s *Store) Has(key string) bool {
 		return false
 	}
 	meta, status := s.loadMeta(key)
-	if status != metaOK {
+	if status != metaOK || meta.Bytes <= 0 {
 		return false
 	}
 	size, err := s.pcmSize(key)
-	return err == nil && size == meta.Bytes
+	return err == nil && size > 0 && size == meta.Bytes
 }
 
 // Get opens the validated pcm stream for a key. On a length/parse
@@ -85,6 +96,12 @@ func (s *Store) Get(key string) (io.ReadCloser, Meta, error) {
 	}
 	if status == metaAbsent {
 		return nil, Meta{}, fmt.Errorf("clipstore: clip %s not cached: %w", key, os.ErrNotExist)
+	}
+	if meta.Bytes <= 0 {
+		// Zero-length entry (legacy failed render): not a valid clip -
+		// corrupt, delete both files like the mismatch path below.
+		s.removePair(key)
+		return nil, Meta{}, fmt.Errorf("clipstore: clip %s corrupt (zero-length clip): %w", key, os.ErrNotExist)
 	}
 	pcmPath := filepath.Join(s.dir, key+pcmExt)
 	f, err := os.Open(pcmPath)
@@ -108,6 +125,13 @@ func (s *Store) Get(key string) (io.ReadCloser, Meta, error) {
 		return nil, Meta{}, fmt.Errorf("clipstore: clip %s corrupt (pcm %d != meta %d bytes): %w",
 			key, size.Size(), meta.Bytes, os.ErrNotExist)
 	}
+	if size.Size() <= 0 {
+		// Defensive twin of the meta check above: a zero-byte pcm is
+		// never a valid clip even if a future producer stamps Bytes=0.
+		closeIgnoring(f)
+		s.removePair(key)
+		return nil, Meta{}, fmt.Errorf("clipstore: clip %s corrupt (zero-length clip): %w", key, os.ErrNotExist)
+	}
 	return f, meta, nil
 }
 
@@ -115,7 +139,10 @@ func (s *Store) Get(key string) (io.ReadCloser, Meta, error) {
 // store dir, synced, and renamed to <key>.pcm; the meta JSON follows the
 // same temp+rename path. The dir is created (0700) ONLY here, on first
 // write. meta.Bytes is checked against the bytes actually written: a
-// short read is discarded as an error, never a corrupt cache entry.
+// short read is discarded as an error, never a corrupt cache entry. A
+// ZERO-LENGTH payload is refused with ErrEmptyClip before any filesystem
+// write: an empty render is not a clip, and caching it would serve
+// silence as a hit (owner ruling, bughunt 2026-11-19).
 //
 // Put is race-safe without a mutex: two concurrent Puts for one key write
 // distinct temp files and the last rename wins, always with a complete
@@ -146,6 +173,15 @@ func (s *Store) Put(key string, meta Meta, pcm io.Reader) error {
 	if err != nil {
 		closeIgnoring(tmp)
 		return fmt.Errorf("clipstore: write temp for %s: %w", key, err)
+	}
+	if written == 0 {
+		// Zero-length render: refuse BEFORE any rename so no cache
+		// entry (pcm or meta) ever lands for a silent clip. The temp
+		// file is removed by the deferred cleanup; the store dir may
+		// have been created above, which is benign (R4 only pins that
+		// READ paths never create it).
+		closeIgnoring(tmp)
+		return fmt.Errorf("clipstore: put %s: %w", key, ErrEmptyClip)
 	}
 	if meta.Bytes > 0 && written != meta.Bytes {
 		closeIgnoring(tmp)

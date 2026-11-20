@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -538,4 +539,194 @@ func TestClientConcurrencyLimit(t *testing.T) {
 	if maxConcurrent < 2 {
 		t.Errorf("maxConcurrent = %d, want >= 2 (limit was utilized)", maxConcurrent)
 	}
+}
+
+// --- R2 admission gate pins (bughunt 2026-11-19 wave 3) -----------------
+//
+// The bare-client streaming variants (ChatWithProgress,
+// ChatWithDeltaCallback) must carry the SAME pre-dispatch admission gate
+// as Chat: a tiny-context model refuses the request BEFORE any upstream
+// request is made, with the typed NonRetryable *ContextTooSmallError
+// (never parked, never an alias failure). ContextLimit <= 0 (unknown)
+// allows - byte-identical to pre-gate behavior.
+
+// admissionTinyContextClient builds a client whose declared context
+// limit (512) cannot fit admissionOversizedPrompt; contextLimit 0 means
+// "unknown" (the gate must allow).
+func admissionTinyContextClient(t *testing.T, srv *httptest.Server, contextLimit int) *Client {
+	t.Helper()
+	c := NewClient(&ModelConfig{
+		ProviderID:   "openai",
+		ModelID:      "gpt-tiny",
+		BaseURL:      srv.URL,
+		APIKey:       "test",
+		MaxTokens:    16,
+		ContextLimit: contextLimit,
+	}, WithLogger(discardLogger()))
+	c.SetFailurePolicyConfig(fastFailurePolicyCfg)
+	return c
+}
+
+// admissionOversizedPrompt is ~1024 estimated tokens (rune/4), far past
+// a 512-token context limit even before the output reserve.
+func admissionOversizedPrompt() []ChatMessage {
+	return []ChatMessage{{Role: RoleUser, Content: strings.Repeat("x", 4096)}}
+}
+
+// assertAdmissionVerdict checks the typed pre-dispatch verdict shape.
+func assertAdmissionVerdict(t *testing.T, err error, hits int32) {
+	t.Helper()
+	verdict, ok := AsContextTooSmall(err)
+	if !ok {
+		t.Fatalf("err = %v (%T), want *ContextTooSmallError", err, err)
+	}
+	if !errors.Is(err, ErrContextTooSmall) {
+		t.Errorf("errors.Is(err, ErrContextTooSmall) = false")
+	}
+	if !verdict.NonRetryable() {
+		t.Error("admission verdict must be NonRetryable (never retried, never parked)")
+	}
+	if verdict.ProviderID != "openai" || verdict.ModelID != "gpt-tiny" {
+		t.Errorf("verdict attribution = %s/%s, want openai/gpt-tiny", verdict.ProviderID, verdict.ModelID)
+	}
+	if verdict.ContextLimit != 512 || verdict.Reserve != 16 {
+		t.Errorf("verdict limit/reserve = %d/%d, want 512/16 (min(MaxTokens,64))",
+			verdict.ContextLimit, verdict.Reserve)
+	}
+	if verdict.EstInput <= 0 {
+		t.Errorf("verdict EstInput = %d, want a positive estimate", verdict.EstInput)
+	}
+	if hits != 0 {
+		t.Errorf("upstream hits = %d, want 0 (gate fires PRE-dispatch)", hits)
+	}
+}
+
+// TestClientAdmissionGate_TinyContextRefusesAllVariantsPreDispatch: the
+// tiny-context model refuses Chat, ChatWithProgress, and
+// ChatWithDeltaCallback before any upstream request (hits stay 0).
+func TestClientAdmissionGate_TinyContextRefusesAllVariantsPreDispatch(t *testing.T) {
+	var hits int32
+	srv := newScriptedServer(t, []scriptedResponse{
+		{status: http.StatusOK, body: okChatBody()},
+	}, &hits)
+	defer srv.Close()
+
+	msgs := admissionOversizedPrompt()
+
+	c := admissionTinyContextClient(t, srv, 512)
+	_, err := c.Chat(context.Background(), msgs)
+	assertAdmissionVerdict(t, err, atomic.LoadInt32(&hits))
+
+	c = admissionTinyContextClient(t, srv, 512)
+	_, err = c.ChatWithProgress(context.Background(), msgs, func(ProgressStage, string) {})
+	assertAdmissionVerdict(t, err, atomic.LoadInt32(&hits))
+
+	c = admissionTinyContextClient(t, srv, 512)
+	_, err = c.ChatWithDeltaCallback(context.Background(), msgs, func(string) error { return nil })
+	assertAdmissionVerdict(t, err, atomic.LoadInt32(&hits))
+}
+
+// TestClientAdmissionGate_ProgressReportsErrorStage: the progress path
+// surfaces the refusal through the Done stage like its other terminal
+// errors, without ever reaching the thinking/dispatch stages.
+func TestClientAdmissionGate_ProgressReportsErrorStage(t *testing.T) {
+	var hits int32
+	srv := newScriptedServer(t, []scriptedResponse{
+		{status: http.StatusOK, body: okChatBody()},
+	}, &hits)
+	defer srv.Close()
+
+	var stages []ProgressStage
+	c := admissionTinyContextClient(t, srv, 512)
+	_, err := c.ChatWithProgress(context.Background(), admissionOversizedPrompt(),
+		func(stage ProgressStage, _ string) { stages = append(stages, stage) })
+	if _, ok := AsContextTooSmall(err); !ok {
+		t.Fatalf("err = %v, want *ContextTooSmallError", err)
+	}
+	if len(stages) == 0 || stages[len(stages)-1] != ProgressStageDone {
+		t.Errorf("progress stages = %v, want terminal Done", stages)
+	}
+	for _, s := range stages {
+		if s == ProgressStageThinking {
+			t.Error("progress reached the thinking stage despite the pre-dispatch refusal")
+		}
+	}
+	if got := atomic.LoadInt32(&hits); got != 0 {
+		t.Errorf("upstream hits = %d, want 0", got)
+	}
+}
+
+// TestClientAdmissionGate_UnknownLimitAllowsAllVariants: ContextLimit 0
+// (no declared bound) allows every variant - the request dispatches and
+// succeeds byte-identically to the pre-gate client.
+func TestClientAdmissionGate_UnknownLimitAllowsAllVariants(t *testing.T) {
+	var hits int32
+	srv := newScriptedServer(t, []scriptedResponse{
+		{status: http.StatusOK, body: okChatBody()},
+	}, &hits)
+	defer srv.Close()
+
+	msgs := admissionOversizedPrompt()
+
+	c := admissionTinyContextClient(t, srv, 0)
+	resp, err := c.Chat(context.Background(), msgs)
+	if err != nil || resp == nil || resp.Content != "ok" {
+		t.Fatalf("Chat with unknown limit = %v / %+v, want success", err, resp)
+	}
+
+	c = admissionTinyContextClient(t, srv, 0)
+	resp, err = c.ChatWithProgress(context.Background(), msgs, nil)
+	if err != nil || resp == nil || resp.Content != "ok" {
+		t.Fatalf("ChatWithProgress with unknown limit = %v / %+v, want success", err, resp)
+	}
+
+	// Streaming variant needs an SSE body, not the JSON completion.
+	streamHits := int32(0)
+	streamSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&streamHits, 1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"c\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-tiny\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"id\":\"c\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-tiny\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer streamSrv.Close()
+
+	c = admissionTinyContextClient(t, streamSrv, 0)
+	resp, err = c.ChatWithDeltaCallback(context.Background(), msgs, func(string) error { return nil })
+	if err != nil || resp == nil || resp.Content != "ok" {
+		t.Fatalf("ChatWithDeltaCallback with unknown limit = %v / %+v, want success", err, resp)
+	}
+	if got := atomic.LoadInt32(&hits); got != 2 {
+		t.Errorf("non-streaming hits = %d, want 2 (both variants dispatched)", got)
+	}
+	if got := atomic.LoadInt32(&streamHits); got != 1 {
+		t.Errorf("streaming hits = %d, want 1 (dispatched)", got)
+	}
+}
+
+// TestClientAdmissionGate_ChatBehaviorUnchanged: the Chat gate itself is
+// untouched by the streaming fix - a request that FITS the declared
+// limit dispatches normally (1 hit, success), and the refusal shape on
+// an oversized prompt stays the typed verdict with zero hits.
+func TestClientAdmissionGate_ChatBehaviorUnchanged(t *testing.T) {
+	var hits int32
+	srv := newScriptedServer(t, []scriptedResponse{
+		{status: http.StatusOK, body: okChatBody()},
+	}, &hits)
+	defer srv.Close()
+
+	// Fits: "hi" estimates 1 token + reserve 16 <= 512.
+	c := admissionTinyContextClient(t, srv, 512)
+	resp, err := c.Chat(context.Background(), []ChatMessage{{Role: RoleUser, Content: "hi"}})
+	if err != nil || resp == nil || resp.Content != "ok" {
+		t.Fatalf("Chat fitting prompt = %v / %+v, want success", err, resp)
+	}
+	if got := atomic.LoadInt32(&hits); got != 1 {
+		t.Errorf("hits = %d, want 1 (fitting prompt dispatched)", got)
+	}
+
+	// Oversized: same typed refusal as before the streaming fix.
+	c = admissionTinyContextClient(t, srv, 512)
+	_, err = c.Chat(context.Background(), admissionOversizedPrompt())
+	assertAdmissionVerdict(t, err, atomic.LoadInt32(&hits)-1)
 }

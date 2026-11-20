@@ -1124,6 +1124,33 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 		reportProgress(ProgressStageToolCall, fmt.Sprintf("Request includes %d tools", len(chatOpts.tools)))
 	}
 
+	// R2 admission gate (Contract C3, sovereign-router-parity leaf 02;
+	// bughunt 2026-11-19 wave 3): mirror of the Chat() pre-dispatch gate.
+	// The ProviderManager rotation loops carry the same frozen check,
+	// but a BARE client never passes through them. Same frozen rule:
+	// EstInput + min(MaxTokens,64) > ContextLimit -> refuse;
+	// ContextLimit <= 0 (unknown) allows; the typed verdict is
+	// NonRetryable (never retried, never parked, never an alias failure).
+	// Pre-dispatch ONLY: the retry-loop classification below is untouched.
+	if blocked, reserve, limit := admissionGateBlocked(cfg, admissionEstimateFor(messages, opts)); blocked {
+		c.logger.Warn("Context too small: rejecting pre-dispatch (bare client, progress path)",
+			"provider", cfg.ProviderID,
+			"model", cfg.ModelID,
+			"est_input", admissionEstimateFor(messages, opts),
+			"reserve", reserve,
+			"context_limit", limit,
+		)
+		tooSmall := &ContextTooSmallError{
+			ProviderID:   cfg.ProviderID,
+			ModelID:      cfg.ModelID,
+			EstInput:     admissionEstimateFor(messages, opts),
+			Reserve:      reserve,
+			ContextLimit: limit,
+		}
+		reportProgress(ProgressStageDone, fmt.Sprintf("Error: %v", tooSmall))
+		return nil, tooSmall
+	}
+
 	var lastErr error
 
 	// D4 (leaf 03): classify-first policy engine, identical shape to the
@@ -1160,17 +1187,12 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 				reportProgress(ProgressStageDone, fmt.Sprintf("Error: %v", err))
 				return nil, err
 			}
-			// Admission verdict (Contract C3): NonRetryable — a size
-			// verdict never re-enters the retry loop (same rule as the
-			// Chat() path above).
-			if IsContextTooSmall(err) {
-				c.logger.Warn("Context too small: surfacing without retry (progress path)",
-					"provider", cfg.ProviderID,
-					"model", cfg.ModelID,
-				)
-				reportProgress(ProgressStageDone, fmt.Sprintf("Error: %v", err))
-				return nil, err
-			}
+			// (bughunt 2026-11-19 wave 3: the former IsContextTooSmall
+			// branch here was unreachable - doRequest never constructs
+			// a *ContextTooSmallError. The admission verdict now fires
+			// PRE-dispatch above; the post-hoc overflow lane below
+			// (DetectContextOverflowFromBody -> *ContextOverflowError)
+			// is unchanged.)
 			// Context-overflow errors never re-enter the short-retry loop
 			// (F-A1): the payload must be trimmed, not re-sent.
 			if _, ok := errors.AsType[*ContextOverflowError](err); ok {
@@ -2708,6 +2730,30 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 		}
 		if err := c.budget.WaitForRateLimit(ctx); err != nil {
 			return nil, err
+		}
+	}
+
+	// R2 admission gate (Contract C3, sovereign-router-parity leaf 02;
+	// bughunt 2026-11-19 wave 3): mirror of the Chat() pre-dispatch gate
+	// for the streaming-delta variant. Same frozen rule: EstInput +
+	// min(MaxTokens,64) > ContextLimit -> refuse; ContextLimit <= 0
+	// (unknown) allows; the typed verdict is NonRetryable (never
+	// retried, never parked, never an alias failure). Pre-dispatch ONLY:
+	// the retry-loop classification below is untouched.
+	if blocked, reserve, limit := admissionGateBlocked(cfg, admissionEstimateFor(messages, opts)); blocked {
+		c.logger.Warn("Context too small: rejecting pre-dispatch (bare client, streaming delta path)",
+			"provider", cfg.ProviderID,
+			"model", cfg.ModelID,
+			"est_input", admissionEstimateFor(messages, opts),
+			"reserve", reserve,
+			"context_limit", limit,
+		)
+		return nil, &ContextTooSmallError{
+			ProviderID:   cfg.ProviderID,
+			ModelID:      cfg.ModelID,
+			EstInput:     admissionEstimateFor(messages, opts),
+			Reserve:      reserve,
+			ContextLimit: limit,
 		}
 	}
 
