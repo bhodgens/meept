@@ -51,14 +51,14 @@ func TestRPCClientIsConnected(t *testing.T) {
 
 func TestRPCClientIsConnectedLockFree(t *testing.T) {
 	// Verify IsConnected doesn't block even when locks are held
-	// Use shorter socket path to avoid macOS path length limits
-	sockPath := filepath.Join(os.TempDir(), fmt.Sprintf("meept-test-%d.sock", time.Now().UnixNano()))
+	// Use the shared short-path helper: t.TempDir() with a long test name
+	// can exceed macOS's 104-byte sun_path limit.
+	sockPath := newMockSocketPath(t)
 	listener, err := net.Listen("unix", sockPath)
 	if err != nil {
 		t.Fatalf("failed to create listener: %v", err)
 	}
 	defer listener.Close()
-	defer os.Remove(sockPath)
 
 	// Start a simple accept loop
 	go func() {
