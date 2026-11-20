@@ -91,14 +91,56 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       ref.read(agentProvider.notifier).loadAgents();
       _initQuotaListener();
+      // M3: execution-run polling is visibility-gated. Activate on mount;
+      // didChangeDependencies re-checks Visibility.of for hosts that keep
+      // this tab alive while hidden (SessionInfoOverlay's IndexedStack).
+      _syncExecutionPolling();
     });
     _startQuotaTimer();
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _syncExecutionPolling();
+  }
+
+  /// Last synced runs notifier. dispose() must NOT touch `ref`:
+  /// flutter_riverpod 2.x asserts not-disposed inside every ref member
+  /// (consumer.dart _assertNotDisposed), and the element is already
+  /// inactive when State.dispose runs — ref.exists() in dispose threw
+  /// StateError and aborted teardown (pending timers). Holding the
+  /// instance instead also means teardown never resurrects the provider.
+  ExecutionRunsNotifier? _runsNotifier;
+
+  /// Drives the execution-runs poll cadence from this tab's real visibility
+  /// (M3, plan contract: poll while the agents tab is visible). The main
+  /// window unmounts inactive tabs (TabContent switch); the session info
+  /// overlay keeps all four alive in an IndexedStack — IndexedStack wraps
+  /// every child in a Visibility(maintainState: true), where Visibility.of
+  /// reports the hidden ones. With NO Visibility ancestor (plain widget
+  /// tests pump the tab directly) Visibility.of returns true by contract,
+  /// so a bare-mounted tab polls like before.
+  void _syncExecutionPolling() {
+    if (!mounted) return;
+    // read(notifier) creates the provider when it is not yet alive — the
+    // ensure-then-use the exists() guard was reaching for, minus the
+    // dispose-time ref.
+    final notifier = ref.read(executionRunsProvider.notifier);
+    _runsNotifier = notifier;
+    notifier.setPollingActive(Visibility.of(context));
+  }
+
+  @override
   void dispose() {
+    // M3: leaving the tab stops the runs/roster/histogram poll cadence.
+    // The notifier itself may outlive this widget (other hosts), so pause
+    // rather than dispose; the next visible mount re-activates + refreshes.
+    _runsNotifier?.setPollingActive(false);
+    _runsNotifier = null;
     _gridFocusNode.dispose();
     _quotaTimer?.cancel();
     _quotaTimer = null;

@@ -3,8 +3,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:meept_ui/features/agents/agents_tab.dart';
 import 'package:meept_ui/models/api_models.dart';
+import 'package:meept_ui/models/ws_events.dart';
 import 'package:meept_ui/providers/providers.dart';
 import 'package:meept_ui/services/sdk_client.dart';
+
+import '../mocks/mock_websocket_service.dart';
 
 void main() {
   group('AgentsTab tile sizing', () {
@@ -424,6 +427,277 @@ void main() {
       expect(find.textContaining('drift:'), findsNothing);
     });
   });
+
+  // M3 (wave 5, plan master.md "GUI polls ... while the agents tab is
+  // visible"): the constructor arms no timer; the tab's visibility drives
+  // setPollingActive. Pins: no polling until active, activation refreshes
+  // immediately + arms the 5s cadence, deactivation kills the timer (the
+  // WS subscription and cached state survive so re-entry is instant).
+  group('execution runs polling visibility gate (M3)', () {
+    testWidgets('polling does not start until active', (tester) async {
+      final sdk = _CountingRunsSdkClient();
+      final notifier = ExecutionRunsNotifier(
+        sdkClient: sdk,
+        websocket: MockWebSocketService(),
+      );
+      addTearDown(notifier.dispose);
+
+      await tester.pumpWidget(const SizedBox());
+      expect(notifier.isPollingActive, isFalse);
+      // 30s of clock with no activation = zero runs fetches: the hidden/
+      // never-opened tab never pays the runs + roster + histogram cadence.
+      await tester.pump(const Duration(seconds: 30));
+      expect(sdk.runsFetches, 0);
+    });
+
+    testWidgets(
+      'activation refreshes immediately, deactivation stops the timer',
+      (tester) async {
+        final sdk = _CountingRunsSdkClient();
+        final notifier = ExecutionRunsNotifier(
+          sdkClient: sdk,
+          websocket: MockWebSocketService(),
+        );
+        addTearDown(notifier.dispose);
+        await tester.pumpWidget(const SizedBox());
+
+        notifier.setPollingActive(true);
+        await tester.pump();
+        expect(notifier.isPollingActive, isTrue);
+        // Activation fetches now (no wait for the first tick), then ticks
+        // every 5s.
+        expect(sdk.runsFetches, 1);
+        await tester.pump(const Duration(seconds: 5));
+        expect(sdk.runsFetches, 2);
+        await tester.pump(const Duration(seconds: 5));
+        expect(sdk.runsFetches, 3);
+
+        // Deactivation: idempotent no-ops aside, the timer is cancelled and
+        // the clock no longer produces fetches.
+        notifier.setPollingActive(true);
+        notifier.setPollingActive(false);
+        expect(notifier.isPollingActive, isFalse);
+        final frozen = sdk.runsFetches;
+        await tester.pump(const Duration(seconds: 30));
+        expect(sdk.runsFetches, frozen);
+
+        // Re-entry refreshes immediately again (cached-state instant feel).
+        notifier.setPollingActive(true);
+        await tester.pump();
+        expect(sdk.runsFetches, frozen + 1);
+
+        // Leave the gate open for teardown (dispose also cancels, but be
+        // explicit: no pending timer when the widget tree goes away).
+        notifier.setPollingActive(false);
+      },
+    );
+
+    // Widget-level gate: with no Visibility ancestor Visibility.of returns
+    // true (bare pump = visible, the pre-M3 behavior these tests rely on);
+    // inside an IndexedStack host the hidden copy never polls, showing it
+    // activates, hiding it again stops the cadence, and unmounting while
+    // visible pauses the notifier that outlives the widget (the
+    // SessionInfoOverlay close path).
+    testWidgets('tab visibility drives activation, hiding, and unmount pause', (
+      tester,
+    ) async {
+      final sdk = _CountingRunsSdkClient();
+      final container = ProviderContainer(
+        overrides: [
+          sdkClientProvider.overrideWith((ref) => sdk),
+          websocketProvider.overrideWith((ref) => MockWebSocketService()),
+          agentProvider.overrideWith((ref) => AgentNotifier(sdkClient: sdk)),
+        ],
+      );
+      addTearDown(container.dispose);
+      // Hold the provider past the tab's unmount so the dispose-time pause
+      // stays observable (a widget-only ProviderScope would auto-dispose).
+      final keepAlive = container.listen(executionRunsProvider, (_, __) {});
+      addTearDown(keepAlive.close);
+      bool pollingActive() =>
+          container.read(executionRunsProvider.notifier).isPollingActive;
+
+      Future<void> host({required int index, required bool includeTab}) async {
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: container,
+            child: MaterialApp(
+              home: Scaffold(
+                body: IndexedStack(
+                  index: index,
+                  children: [
+                    const SizedBox(key: Key('host-first')),
+                    if (includeTab) const AgentsTab() else const SizedBox(),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+        // Flush the initState post-frame sync.
+        await tester.pump();
+      }
+
+      // 1. Mounted but hidden (IndexedStack keeps it alive): Visibility.of
+      // is false, so the gate stays shut — zero fetches.
+      await host(index: 0, includeTab: true);
+      expect(pollingActive(), isFalse);
+      expect(sdk.runsFetches, 0);
+      await tester.pump(const Duration(seconds: 30));
+      expect(sdk.runsFetches, 0);
+
+      // 2. Switched to the agents tab: activation refreshes immediately
+      // and the 5s cadence arms.
+      await host(index: 1, includeTab: true);
+      expect(pollingActive(), isTrue);
+      final afterShow = sdk.runsFetches;
+      expect(afterShow, greaterThanOrEqualTo(1));
+      await tester.pump(const Duration(seconds: 5));
+      expect(sdk.runsFetches, greaterThan(afterShow));
+
+      // 3. Hidden again: the timer stops, the fetch count freezes.
+      await host(index: 0, includeTab: true);
+      expect(pollingActive(), isFalse);
+      final frozen = sdk.runsFetches;
+      await tester.pump(const Duration(seconds: 30));
+      expect(sdk.runsFetches, frozen);
+
+      // 4. Visible, then unmounted while active (overlay close): dispose
+      // pauses the surviving notifier so no orphan cadence keeps polling.
+      await host(index: 1, includeTab: true);
+      expect(pollingActive(), isTrue);
+      await tester.pump();
+      await host(index: 0, includeTab: false);
+      expect(pollingActive(), isFalse);
+      final afterUnmount = sdk.runsFetches;
+      await tester.pump(const Duration(seconds: 30));
+      expect(sdk.runsFetches, afterUnmount);
+    });
+  });
+
+  // L3 (TUI parity, commit e9fe1926 H1): mergeLiveRuns identity is the
+  // store id when both sides carry one, else the composite key with the
+  // live timestamp truncated to the store's second precision. A live row
+  // strictly newer than the server page survives the poll replace; a live
+  // row the server now carries is dropped exactly once.
+  group('execution runs live merge (L3)', () {
+    ExecutionResultEvent serverRow({
+      required int id,
+      required String agent,
+      required DateTime createdAt,
+      String status = 'completed',
+      String tier = 'employee',
+    }) {
+      return ExecutionResultEvent(
+        agentId: agent,
+        status: status,
+        id: id,
+        storedTier: tier,
+        createdAt: createdAt,
+      );
+    }
+
+    ExecutionResultEvent liveRow({
+      required String agent,
+      required DateTime timestamp,
+      String status = 'completed',
+    }) {
+      return ExecutionResultEvent(
+        agentId: agent,
+        status: status,
+        sourceTopic: ExecutionResultEvent.sourceTopicEmployee,
+        timestamp: timestamp,
+      );
+    }
+
+    test('keeps a live row strictly newer than the server page', () {
+      final t1 = DateTime.utc(2026, 11, 19, 12, 0, 0);
+      final server = [serverRow(id: 5, agent: 'a', createdAt: t1)];
+      // Different composite (other agent) + strictly newer: projector-
+      // lagged live row, must NOT be dropped by the poll replace.
+      final live = [
+        liveRow(
+          agent: 'b',
+          timestamp: t1.add(const Duration(milliseconds: 500)),
+        ),
+      ];
+      final merged = mergeLiveRuns(server, live);
+      expect(merged.length, 2);
+      expect(merged.first.agentId, 'b');
+      expect(merged.last.id, 5);
+    });
+
+    test('drops a live row the server page now carries (ns vs sec + id)', () {
+      // e9fe1926 H1 shape: live frame carries nanosecond publish time, the
+      // persisted row the truncated second + its store id. One execution
+      // must render exactly ONE row.
+      final live = [
+        liveRow(
+          agent: 'coder',
+          timestamp: DateTime.utc(2026, 11, 19, 12, 0, 0, 0, 500),
+        ),
+      ];
+      final server = [
+        serverRow(
+          id: 7,
+          agent: 'coder',
+          createdAt: DateTime.utc(2026, 11, 19, 12),
+        ),
+      ];
+      final merged = mergeLiveRuns(server, live);
+      expect(merged.length, 1);
+      expect(merged.single.id, 7);
+    });
+
+    test(
+      'distinct ids survive; same-composite drop, fresh-key equal-second keep',
+      () {
+        final base = DateTime.utc(2026, 11, 19, 12);
+        final server = [
+          serverRow(id: 2, agent: 'a', createdAt: base),
+          serverRow(id: 1, agent: 'b', createdAt: base),
+        ];
+        final live = [
+          // Same second + same composite as server id 2 -> dropped once the
+          // server carries it (the e9fe1926 H1 window).
+          liveRow(
+            agent: 'a',
+            timestamp: base.add(const Duration(milliseconds: 250)),
+          ),
+          // Same second, DIFFERENT composite (agent c, failed): the time gate
+          // is strict After(maxServer), so it passes and no identity match
+          // drops it -> preserved (exact TUI mergeLiveRuns behavior).
+          liveRow(
+            agent: 'c',
+            timestamp: base.add(const Duration(milliseconds: 900)),
+            status: 'failed',
+          ),
+          // Strictly newer second, fresh composite -> preserved.
+          liveRow(agent: 'd', timestamp: base.add(const Duration(seconds: 1))),
+        ];
+        final merged = mergeLiveRuns(server, live);
+        expect(merged.map((r) => r.agentId).toList(), ['c', 'd', 'a', 'b']);
+        expect(merged[2].id, 2);
+        expect(merged[3].id, 1);
+      },
+    );
+
+    test('empty server page preserves every timestamped live row', () {
+      final live = [
+        liveRow(agent: 'a', timestamp: DateTime.utc(2026, 11, 19, 12, 0, 2)),
+        liveRow(agent: 'b', timestamp: DateTime.utc(2026, 11, 19, 12, 0, 1)),
+        // Untimestamped live row: no identity clock, dropped (TUI parity:
+        // zero Timestamp skips).
+        liveRow(agent: 'c', timestamp: DateTime.utc(1970)),
+      ];
+      // effectiveTime null only when BOTH createdAt and timestamp are
+      // absent; the epoch row above still has a time, so add a real null.
+      const noTime = ExecutionResultEvent(agentId: 'e', status: 'completed');
+      final merged = mergeLiveRuns(const [], [...live, noTime]);
+      expect(merged.length, 3);
+      expect(merged.map((r) => r.agentId), ['a', 'b', 'c']);
+    });
+  });
 }
 
 /// Roster-first client for the M17 display pins: agents.roster answers
@@ -492,6 +766,31 @@ class _RosterDisplaySdkClient extends _FakeSdkClient {
       },
     ],
   };
+
+  @override
+  Future<List<Map<String, dynamic>>> listEmployees() async => const [];
+}
+
+/// Counting runs-poll client (M3 pins): records every getExecutionRuns
+/// call so the tests can assert the visibility gate actually gates the
+/// cadence. Roster 404s (no histogram fan-out), execution fetches succeed.
+class _CountingRunsSdkClient extends _FakeSdkClient {
+  _CountingRunsSdkClient() : super(agents: const []);
+
+  int runsFetches = 0;
+
+  @override
+  Future<Map<String, dynamic>> getExecutionRuns({
+    String? agentId,
+    int? limit,
+    String? since,
+  }) async {
+    runsFetches++;
+    return {'runs': <Map<String, dynamic>>[], 'total': 0};
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> listAgents() async => const [];
 
   @override
   Future<List<Map<String, dynamic>>> listEmployees() async => const [];
