@@ -295,3 +295,74 @@ func TestMemoryStore_UpdateSessionsProjectPath_MultiSession(t *testing.T) {
 		}
 	}
 }
+
+// TestSessionCreate_DescriptionIsUserSet pins the create-time description
+// semantics decision (bughunt 2026-11-19): a description passed to
+// session.create IS user-authored (the only shipped sender is the CLI's
+// `meept session create --description` flag), so handleCreate rides the
+// USER rename lane and stamps description_user_set. The auto-namer lane
+// must then preserve it. A create WITHOUT a description stays unstamped
+// so auto-naming works normally.
+func TestSessionCreate_DescriptionIsUserSet(t *testing.T) {
+	store := NewMemoryStore(slog.Default())
+	handler := NewHandler(store, nil, slog.Default())
+
+	paramsJSON, err := json.Marshal(map[string]any{
+		"name":        "user-described",
+		"description": "my own words",
+	})
+	if err != nil {
+		t.Fatalf("marshal params: %v", err)
+	}
+	result, err := handler.handleCreate(&models.BusMessage{Payload: paramsJSON})
+	if err != nil {
+		t.Fatalf("handleCreate: %v", err)
+	}
+	sess, ok := result.(*Session)
+	if !ok {
+		t.Fatalf("expected *session.Session, got %T", result)
+	}
+	if !sess.DescriptionUserSet {
+		t.Error("create-time description did not stamp DescriptionUserSet on the returned session")
+	}
+	stored := store.Get(sess.ID)
+	if stored == nil {
+		t.Fatal("created session missing from store")
+	}
+	if !stored.DescriptionUserSet || stored.Description != "my own words" {
+		t.Errorf("store row: user_set=%v description=%q, want true / %q",
+			stored.DescriptionUserSet, stored.Description, "my own words")
+	}
+	// The auto-namer lane must preserve the user-authored description.
+	written, err := store.UpdateDescriptionAuto(sess.ID, "auto generated title")
+	if err != nil {
+		t.Fatalf("UpdateDescriptionAuto: %v", err)
+	}
+	if written {
+		t.Error("auto-namer overwrote a create-time user description")
+	}
+	if got := store.Get(sess.ID).Description; got != "my own words" {
+		t.Errorf("description after auto-namer = %q, want the user's text", got)
+	}
+
+	// Control: no description at create -> unstamped, auto-namer writes.
+	plainJSON, err := json.Marshal(map[string]any{"name": "plain"})
+	if err != nil {
+		t.Fatalf("marshal plain params: %v", err)
+	}
+	plainResult, err := handler.handleCreate(&models.BusMessage{Payload: plainJSON})
+	if err != nil {
+		t.Fatalf("handleCreate plain: %v", err)
+	}
+	plain := plainResult.(*Session)
+	if plain.DescriptionUserSet {
+		t.Error("description-less create stamped DescriptionUserSet")
+	}
+	written, err = store.UpdateDescriptionAuto(plain.ID, "auto title")
+	if err != nil {
+		t.Fatalf("UpdateDescriptionAuto plain: %v", err)
+	}
+	if !written {
+		t.Error("auto-namer could not name a description-less session")
+	}
+}

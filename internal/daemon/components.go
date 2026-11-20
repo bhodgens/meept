@@ -6654,6 +6654,8 @@ func (c *Components) Start(ctx context.Context) error {
 				for _, e := range emps {
 					ids[e.ID] = struct{}{}
 				}
+			} else {
+				c.Logger.Warn("hire-time known agent IDs: employee roster unavailable", "error", err)
 			}
 			// L13 (bughunt 2026-11-19): plain bots are valid escalation
 			// approvers too. isAuthorizedApprover admits any caller ID listed

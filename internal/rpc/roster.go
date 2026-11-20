@@ -15,6 +15,7 @@ package rpc
 import (
 	"context"
 	"encoding/json"
+	"time"
 )
 
 // Frozen C1 type discriminator values. The handler stamps these onto every
@@ -26,10 +27,21 @@ const (
 )
 
 // RosterEntry is one row of the unified agents.roster response. It carries
-// EXACTLY the nine frozen C1 JSON keys — no extras leak onto the wire. Role
-// and Description are plain (no omitempty) so a fully-populated row always
-// marshals all nine keys, and an empty one still marshals an empty string
-// rather than dropping the key (predictable for the TUI/GUI consumers).
+// the nine frozen C1 JSON keys plus four ADDITIVE optional keys (bughunt
+// 2026-11-19 M11, owner-approved): executor_agent, drift_score,
+// findings_count, last_invocation. The additive keys are zero-omitted, so
+// a row with no executor/drift/findings/last-run data marshals BYTE-
+// IDENTICALLY to the pre-M11 nine-key shape; old consumers see no change.
+// Role and Description are plain (no omitempty) so a fully-populated row
+// always marshals the nine C1 keys, and an empty one still marshals an
+// empty string rather than dropping the key (predictable for the TUI/GUI
+// consumers).
+//
+// LastInvocation uses omitzero, NOT omitempty: encoding/json's omitempty
+// does not treat a zero time.Time as empty (it would leak
+// "0001-01-01T00:00:00Z" onto every never-run row and break the
+// byte-identical empty-row contract). omitzero (Go 1.24+, the
+// bot.BotWeather precedent) omits exactly the zero time.
 type RosterEntry struct {
 	ID             string `json:"id"`
 	Name           string `json:"name"`
@@ -40,6 +52,16 @@ type RosterEntry struct {
 	Role           string `json:"role"`
 	Description    string `json:"description"`
 	Enabled        bool   `json:"enabled"`
+	// Additive M11 keys. Sources (daemon wiring): ExecutorAgent from
+	// bot.BotDefinition.ExecutorAgent (bots + employees), LastInvocation
+	// from bot.BotState.LastRunAt, DriftScore from
+	// employee.Manager.DriftScore and FindingsCount from the audit store
+	// (employees only). Registry agents have no source for any of the
+	// four and leave them zero (omitted on the wire).
+	ExecutorAgent  string    `json:"executor_agent,omitempty"`
+	DriftScore     float64   `json:"drift_score,omitempty"`
+	FindingsCount  int       `json:"findings_count,omitempty"`
+	LastInvocation time.Time `json:"last_invocation,omitzero"`
 }
 
 // RosterDeps holds the three injected source funcs. Every field is optional:
@@ -65,10 +87,10 @@ func NewRosterHandler(deps RosterDeps) *RosterHandler {
 
 // handleRoster merges the three sources into one roster, stamping Type with
 // the frozen discriminator for each source. Only Type is overwritten; every
-// other field (ID, Name, Status, ActiveCount, DailyCostCents, Role,
-// Description, Enabled) is preserved from the source row. Params are ignored
-// (read-only list), and a nil handler/sources produce an empty (non-nil)
-// slice so the wire shape is always {"agents": []}.
+// other field (the nine C1 fields plus the additive M11 keys) is preserved
+// from the source row. Params are ignored (read-only list), and a nil
+// handler/sources produce an empty (non-nil) slice so the wire shape is
+// always {"agents": []}.
 func (h *RosterHandler) handleRoster(_ context.Context, _ json.RawMessage) (any, error) {
 	rows := make([]RosterEntry, 0)
 	if h == nil {

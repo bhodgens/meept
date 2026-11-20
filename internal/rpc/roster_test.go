@@ -40,13 +40,18 @@ import (
 	"reflect"
 	"sort"
 	"testing"
+	"time"
 )
 
-// TestRosterEntry_JSONKeys pins the C1 row shape end-to-end (leaf 00T T1):
-// every frozen JSON key survives marshal, no extra keys leak, and a
-// marshal/unmarshal round-trip preserves every field. All fields are set to
-// non-zero values so the `omitempty` on role/description cannot hide a key.
+// TestRosterEntry_JSONKeys pins the C1 row shape end-to-end (leaf 00T T1,
+// updated for the additive M11 keys): every frozen JSON key survives
+// marshal, no extra keys leak, and a marshal/unmarshal round-trip preserves
+// every field. All fields are set to non-zero values so the zero-omission
+// on the additive M11 keys cannot hide a key. A zero-valued additive row
+// must stay byte-identical to the pre-M11 nine-key shape
+// (TestRosterEntry_AdditiveKeysOmittedWhenZero below).
 func TestRosterEntry_JSONKeys(t *testing.T) {
+	lastRun := time.Date(2026, 11, 19, 12, 30, 0, 0, time.UTC)
 	entry := RosterEntry{
 		ID:             "eng-7",
 		Name:           "engineer",
@@ -57,6 +62,10 @@ func TestRosterEntry_JSONKeys(t *testing.T) {
 		Role:           "executor",
 		Description:    "ships the work",
 		Enabled:        true,
+		ExecutorAgent:  "hermes",
+		DriftScore:     0.42,
+		FindingsCount:  5,
+		LastInvocation: lastRun,
 	}
 
 	raw, err := json.Marshal(entry)
@@ -72,6 +81,7 @@ func TestRosterEntry_JSONKeys(t *testing.T) {
 	wantKeys := []string{
 		"id", "name", "type", "status", "active_count",
 		"daily_cost_cents", "role", "description", "enabled",
+		"executor_agent", "drift_score", "findings_count", "last_invocation",
 	}
 	gotKeys := make([]string, 0, len(got))
 	for k := range got {
@@ -90,8 +100,59 @@ func TestRosterEntry_JSONKeys(t *testing.T) {
 	if back.ID != entry.ID || back.Name != entry.Name || back.Type != entry.Type ||
 		back.Status != entry.Status || back.ActiveCount != entry.ActiveCount ||
 		back.DailyCostCents != entry.DailyCostCents || back.Role != entry.Role ||
-		back.Description != entry.Description || back.Enabled != entry.Enabled {
+		back.Description != entry.Description || back.Enabled != entry.Enabled ||
+		back.ExecutorAgent != entry.ExecutorAgent || back.DriftScore != entry.DriftScore ||
+		back.FindingsCount != entry.FindingsCount || !back.LastInvocation.Equal(entry.LastInvocation) {
 		t.Errorf("RosterEntry round-trip lost a field: got %+v, want %+v", back, entry)
+	}
+}
+
+// TestRosterEntry_AdditiveKeysOmittedWhenZero pins the M11 additive
+// contract: a row whose four additive fields are all zero marshals
+// BYTE-IDENTICALLY to the pre-M11 nine-key shape (no executor_agent /
+// drift_score / findings_count / last_invocation keys, and in particular
+// no zero-time "0001-01-01T00:00:00Z" leak - last_invocation is omitzero,
+// not omitempty).
+func TestRosterEntry_AdditiveKeysOmittedWhenZero(t *testing.T) {
+	zeroAdditive := RosterEntry{
+		ID: "bot-1", Name: "bot", Type: "bot", Status: "stopped", Enabled: true,
+	}
+	raw, err := json.Marshal(zeroAdditive)
+	if err != nil {
+		t.Fatalf("marshal zero-additive RosterEntry: %v", err)
+	}
+
+	// The pre-M11 nine-key struct: marshaling it must produce identical bytes.
+	type legacyRow struct {
+		ID             string `json:"id"`
+		Name           string `json:"name"`
+		Type           string `json:"type"`
+		Status         string `json:"status"`
+		ActiveCount    int    `json:"active_count"`
+		DailyCostCents int    `json:"daily_cost_cents"`
+		Role           string `json:"role"`
+		Description    string `json:"description"`
+		Enabled        bool   `json:"enabled"`
+	}
+	legacyRaw, err := json.Marshal(legacyRow{
+		ID: zeroAdditive.ID, Name: zeroAdditive.Name, Type: zeroAdditive.Type,
+		Status: zeroAdditive.Status, Enabled: zeroAdditive.Enabled,
+	})
+	if err != nil {
+		t.Fatalf("marshal legacy row: %v", err)
+	}
+	if string(raw) != string(legacyRaw) {
+		t.Errorf("zero-additive row not byte-identical to pre-M11 shape:\n got %s\nwant %s", raw, legacyRaw)
+	}
+
+	var got map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal zero-additive row: %v", err)
+	}
+	for _, k := range []string{"executor_agent", "drift_score", "findings_count", "last_invocation"} {
+		if _, present := got[k]; present {
+			t.Errorf("zero-valued additive key %q leaked onto the wire: %s", k, raw)
+		}
 	}
 }
 

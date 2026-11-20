@@ -140,7 +140,10 @@ not the local LLM executor — "bob the autonomous employee"
   `daily_budget_cents > 0` and `on: "cost"` escalation triggers cannot bind
   remote turns. At wiring they log a WARN; enforce intent with
   `max_invocations_per_day` and the permission lane instead.
-- `executor_agent` display in the TUI/GUI roster is a follow-up wave.
+- `executor_agent` rides the agents.roster wire (additive M11 keys,
+  bughunt 2026-11-19) and the TUI agents panel renders it. GUI display
+  of executor/drift/findings/last-run is a follow-up wave; drift_score
+  reads 0 until a production writer lands on Manager.driftScores.
 
 ### Quality gate (completion gating)
 

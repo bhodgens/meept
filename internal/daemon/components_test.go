@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -282,4 +283,55 @@ func TestHireKnownAgentIDsRejectsUnknownID(t *testing.T) {
 	if !strings.Contains(err.Error(), "escalation references") {
 		t.Fatalf("expected an escalation-references error, got: %v", err)
 	}
+}
+
+// TestHireKnownAgentIDsEmployeeReadFailureWarns pins the hire-wiring
+// error-log fix (bughunt 2026-11-19 wave 3): when the known-agent-ID
+// wiring cannot read the employee roster it must WARN (matching the
+// adjacent bot-roster branch), not silently drop the error. Drives the
+// REAL Components.Start wiring with the shared bot store closed BEFORE
+// Start, so ListEmployees fails inside the wiring block (the bot
+// framework's own start failure is logged, not fatal).
+func TestHireKnownAgentIDsEmployeeReadFailureWarns(t *testing.T) {
+	c := hireTimeBotUnionComponents(t)
+	ctx := context.Background()
+
+	// Break the employee read before the wiring runs: ListEmployees
+	// lists through the bot store. Closing it also breaks the sibling
+	// bot-roster read (its warn is pre-existing); the assertion targets
+	// the employee-branch message specifically.
+	if err := c.BotStore.Close(); err != nil {
+		t.Fatalf("close bot store: %v", err)
+	}
+	if _, err := c.EmployeeManager.ListEmployees(ctx, ""); err == nil {
+		t.Fatal("expected ListEmployees to fail after store close; fixture no longer exercises the error branch")
+	}
+
+	var logMu sync.Mutex
+	var logBuf strings.Builder
+	c.Logger = slog.New(slog.NewTextHandler(&hireWarnSyncWriter{mu: &logMu, w: &logBuf}, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	if err := c.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	logMu.Lock()
+	logs := logBuf.String()
+	logMu.Unlock()
+	if !strings.Contains(logs, "hire-time known agent IDs: employee roster unavailable") {
+		t.Errorf("employee-roster read failure was not warned; logs:\n%s", logs)
+	}
+}
+
+// hireWarnSyncWriter serializes slog writes into a strings.Builder for
+// the hire-wiring warn pin above.
+type hireWarnSyncWriter struct {
+	mu *sync.Mutex
+	w  *strings.Builder
+}
+
+func (s *hireWarnSyncWriter) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.w.Write(p)
 }

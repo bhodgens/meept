@@ -1881,7 +1881,15 @@ func (h *Handler) handleCreate(msg *models.BusMessage) (any, error) {
 		return nil, err
 	}
 
-	// Apply description if provided
+	// Apply description if provided. A create-time description IS
+	// user-authored: the only shipped client that sends one is the CLI's
+	// `meept session create --description` flag (cmd/meept/session.go);
+	// the GUI/TUI/transport create paths never send it, and auto-namers
+	// write post-create through UpdateDescriptionAuto, never through
+	// create params. So this deliberately rides the USER rename lane
+	// (UpdateDescription stamps description_user_set=1) and the
+	// auto-namer must never overwrite it. Pinned by
+	// TestSessionCreate_DescriptionIsUserSet.
 	if params.Description != "" {
 		session.Description = params.Description
 		if err := h.store.UpdateDescription(session.ID, params.Description); err != nil {

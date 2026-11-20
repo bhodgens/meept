@@ -2894,6 +2894,18 @@ func (m *Manager) ResolveAuditFinding(ctx context.Context, findingID, resolution
 	return m.auditStore.Resolve(ctx, findingID, resolution)
 }
 
+// DriftScore returns the last computed drift score for an employee, or 0
+// when no score has been recorded. Read-only accessor over the same
+// driftScores map Review reads (bughunt 2026-11-19 M11: the agents.roster
+// row overlay needs the score without Review's full employee/status/
+// findings/goals fan-out). The lock guards the map read only; no I/O runs
+// under it.
+func (m *Manager) DriftScore(id string) float64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.driftScores[id]
+}
+
 // Review returns the current state of an employee: definition, status,
 // recent findings, drift score, and active goals. Used by Review RPC /
 // HTTP / CLI endpoints.

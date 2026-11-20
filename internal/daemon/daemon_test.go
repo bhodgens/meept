@@ -491,3 +491,170 @@ func TestRosterRPCSingleEmployeeSnapshot(t *testing.T) {
 		t.Fatalf("nil-components roster = %+v, want an empty non-nil row list", env2["agents"])
 	}
 }
+
+// TestRosterRPCAdditiveM11Keys pins the M11 population (bughunt
+// 2026-11-19, owner-approved) through the REAL registerRosterRPC wiring:
+// executor_agent + last_invocation on bot AND employee rows, findings_count
+// on employee rows from the audit store's detail-view window, and all four
+// keys wire-omitted (byte-identical nine-key row) when no data exists.
+// Drift stays zero here: the driftScores map has no production writer yet
+// (Review reads the same zeros); the accessor itself is pinned in
+// internal/employee/manager_test.go TestManagerDriftScoreAccessor.
+func TestRosterRPCAdditiveM11Keys(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "bots.db")
+	logger := slog.New(slog.DiscardHandler)
+
+	botStore, err := bot.NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("bot store: %v", err)
+	}
+	t.Cleanup(func() { _ = botStore.Close() })
+	botMgr := bot.NewManager(botStore, nil)
+
+	cs, err := employee.NewConstitutionStore(dbPath, logger)
+	if err != nil {
+		t.Fatalf("constitution store: %v", err)
+	}
+	t.Cleanup(func() { _ = cs.Close() })
+	as, err := employee.NewAuditStore(dbPath)
+	if err != nil {
+		t.Fatalf("audit store: %v", err)
+	}
+	t.Cleanup(func() { _ = as.Close() })
+	empMgr := employee.NewManagerWithStores(botMgr, botStore, cs, nil, as, logger)
+
+	lastRun := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	if err := botMgr.CreateBot(ctx, bot.BotDefinition{
+		ID: "exec-bot", Name: "exec bot", Prompt: "p", Enabled: true,
+		ExecutorAgent: "hermes",
+		Triggers:      []bot.BotTrigger{{Type: bot.TriggerTypeWebhook, Enabled: true}},
+	}); err != nil {
+		t.Fatalf("create exec bot: %v", err)
+	}
+	if err := botMgr.CreateBot(ctx, bot.BotDefinition{
+		ID: "bare-bot", Name: "bare bot", Prompt: "p", Enabled: true,
+		Triggers: []bot.BotTrigger{{Type: bot.TriggerTypeWebhook, Enabled: true}},
+	}); err != nil {
+		t.Fatalf("create bare bot: %v", err)
+	}
+	if err := botMgr.CreateBot(ctx, bot.BotDefinition{
+		ID: "hired-emp", Name: "hired employee", Prompt: "p", Enabled: true,
+		ExecutorAgent: "hermes",
+		Triggers:      []bot.BotTrigger{{Type: bot.TriggerTypeWebhook, Enabled: true}},
+	}); err != nil {
+		t.Fatalf("create employee bot row: %v", err)
+	}
+	if err := cs.Put(ctx, "hired-emp", employee.Constitution{Purpose: "M11 roster probe"}); err != nil {
+		t.Fatalf("put constitution: %v", err)
+	}
+	empMgr.SetConstitutionStore(cs)
+
+	// Persist a last-run + cost overlay on the exec bot's state row.
+	state, err := botStore.GetState(ctx, "exec-bot")
+	if err != nil {
+		t.Fatalf("get bot state: %v", err)
+	}
+	state.LastRunAt = &lastRun
+	state.TodayCostCents = 77
+	if err := botStore.UpdateState(ctx, *state); err != nil {
+		t.Fatalf("update bot state: %v", err)
+	}
+
+	// Findings: two inside the 168h detail-view window, one outside.
+	now := time.Now().UTC()
+	for i, f := range []employee.AuditFinding{
+		{EmployeeID: "hired-emp", Severity: employee.SeverityWarning, Checkpoint: employee.CheckpointPostTurn, DetectedAt: now.Add(-time.Hour)},
+		{EmployeeID: "hired-emp", Severity: employee.SeverityInfo, Checkpoint: employee.CheckpointPostTurn, DetectedAt: now.Add(-2 * time.Hour)},
+		{EmployeeID: "hired-emp", Severity: employee.SeverityInfo, Checkpoint: employee.CheckpointPeriodic, DetectedAt: now.Add(-200 * time.Hour)},
+	} {
+		if err := as.Create(ctx, f); err != nil {
+			t.Fatalf("create finding %d: %v", i, err)
+		}
+	}
+
+	c := &Components{BotManager: botMgr, EmployeeManager: empMgr}
+	srv := rpc.New(&rpc.Config{SocketPath: ""}, nil, logger)
+	registerRosterRPC(c, srv, logger)
+
+	res, err := srv.CallMethod(ctx, "agents.roster", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("agents.roster: %v", err)
+	}
+	env, ok := res.(map[string]any)
+	if !ok {
+		t.Fatalf("roster envelope type %T", res)
+	}
+	rows, ok := env["agents"].([]rpc.RosterEntry)
+	if !ok {
+		t.Fatalf("agents rows type %T", env["agents"])
+	}
+	byID := map[string]rpc.RosterEntry{}
+	for _, row := range rows {
+		byID[row.ID] = row
+	}
+
+	execBot, ok := byID["exec-bot"]
+	if !ok || execBot.Type != rpc.RosterTypeBot {
+		t.Fatalf("exec-bot missing or mistyped: %+v", execBot)
+	}
+	if execBot.ExecutorAgent != "hermes" {
+		t.Errorf("bot executor_agent = %q, want hermes", execBot.ExecutorAgent)
+	}
+	if !execBot.LastInvocation.Equal(lastRun) {
+		t.Errorf("bot last_invocation = %v, want %v", execBot.LastInvocation, lastRun)
+	}
+	if execBot.FindingsCount != 0 || execBot.DriftScore != 0 {
+		t.Errorf("bot row carries employee-only M11 keys: %+v", execBot)
+	}
+
+	empRow, ok := byID["hired-emp"]
+	if !ok || empRow.Type != rpc.RosterTypeEmployee {
+		t.Fatalf("hired-emp missing or mistyped: %+v", empRow)
+	}
+	if empRow.ExecutorAgent != "hermes" {
+		t.Errorf("employee executor_agent = %q, want hermes", empRow.ExecutorAgent)
+	}
+	if empRow.FindingsCount != 2 {
+		t.Errorf("employee findings_count = %d, want 2 (168h window excludes the 200h-old finding)", empRow.FindingsCount)
+	}
+	if empRow.DriftScore != 0 {
+		t.Errorf("employee drift_score = %v, want 0 (no drift writer wired)", empRow.DriftScore)
+	}
+
+	// Wire shape: the data-less bot row marshals to exactly the nine C1
+	// keys; the populated rows carry their additive keys.
+	for id, wantAdditive := range map[string]bool{"bare-bot": false, "exec-bot": true, "hired-emp": true} {
+		row, ok := byID[id]
+		if !ok {
+			t.Fatalf("row %q missing", id)
+		}
+		raw, err := json.Marshal(row)
+		if err != nil {
+			t.Fatalf("marshal row %q: %v", id, err)
+		}
+		var keys map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &keys); err != nil {
+			t.Fatalf("unmarshal row %q: %v", id, err)
+		}
+		for _, base := range []string{"id", "name", "type", "status", "active_count", "daily_cost_cents", "role", "description", "enabled"} {
+			if _, present := keys[base]; !present {
+				t.Errorf("row %q lost C1 key %q: %s", id, base, raw)
+			}
+		}
+		_, hasExec := keys["executor_agent"]
+		if hasExec != wantAdditive {
+			t.Errorf("row %q executor_agent presence = %v, want %v: %s", id, hasExec, wantAdditive, raw)
+		}
+		if !wantAdditive {
+			if len(keys) != 9 {
+				t.Errorf("data-less row %q not byte-identical nine-key shape: %s", id, raw)
+			}
+			for _, k := range []string{"drift_score", "findings_count", "last_invocation"} {
+				if _, present := keys[k]; present {
+					t.Errorf("data-less row %q leaked additive key %q: %s", id, k, raw)
+				}
+			}
+		}
+	}
+}

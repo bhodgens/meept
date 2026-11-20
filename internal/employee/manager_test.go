@@ -506,3 +506,29 @@ func TestHireEscalationToPlainBotViaKnownSet(t *testing.T) {
 		}
 	})
 }
+
+// TestManagerDriftScoreAccessor pins the M11 read-only drift accessor
+// (bughunt 2026-11-19): an unknown/unscored employee reads 0, a recorded
+// score reads back exactly, and the accessor agrees with Review's
+// driftScores read (same map, same lock).
+func TestManagerDriftScoreAccessor(t *testing.T) {
+	t.Parallel()
+	m := NewManager(nil)
+	if got := m.DriftScore("emp-unknown"); got != 0 {
+		t.Errorf("DriftScore(unknown) = %v, want 0", got)
+	}
+	m.mu.Lock()
+	m.driftScores["emp-scored"] = 0.42
+	m.mu.Unlock()
+	if got := m.DriftScore("emp-scored"); got != 0.42 {
+		t.Errorf("DriftScore(emp-scored) = %v, want 0.42", got)
+	}
+	// Review reads the same map under the same lock; the accessor must
+	// never diverge from it.
+	m.mu.RLock()
+	reviewView := m.driftScores["emp-scored"]
+	m.mu.RUnlock()
+	if got := m.DriftScore("emp-scored"); got != reviewView {
+		t.Errorf("DriftScore accessor diverged from Review's map read: %v vs %v", got, reviewView)
+	}
+}

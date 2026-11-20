@@ -33,6 +33,15 @@ package daemon
 //   - daily_cost_cents = bot state TodayCostCents (bots + employees); agents
 //                        have no per-agent cost source and stay at zero
 //
+// Additive M11 fields (bughunt 2026-11-19, owner-approved; zero-omitted on
+// the wire so empty rows stay byte-identical to the nine-key C1 shape):
+//   - executor_agent   = bot definition ExecutorAgent (bots + employees)
+//   - last_invocation  = bot state LastRunAt (bots + employees)
+//   - drift_score      = EmployeeManager.DriftScore (employees only)
+//   - findings_count   = audit findings in the detail view's 168h window
+//                        (employees only; see rosterEmployeeEntry)
+//
+// Registry agents have no source for any M11 field and leave them zero.
 // Never invent cost data: a missing bot state leaves cost at zero. Every
 // domain handle is nil-guarded at call time so a partially-wired daemon
 // degrades to a valid (possibly partial) roster, never a panic.
@@ -41,6 +50,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"time"
 
 	"github.com/caimlas/meept/internal/bot"
 	"github.com/caimlas/meept/internal/employee"
@@ -52,9 +62,15 @@ import (
 // Both derive from the SAME ListEmployees read, so a concurrent hire/fire
 // can never put a row in both lists or drop it from both (bughunt L12).
 // Constructed once per agents.roster call; read-only afterwards.
+//
+// findings counts the audit findings per employee id in the detail view's
+// window (M11): ONE unfiltered ListAuditFindings read per invocation,
+// bucketed in memory, instead of a per-row query. A failed/unwired audit
+// read leaves the map empty (keys stay zero and wire-omitted).
 type rosterEmployeeSnapshot struct {
 	employees []employee.Employee
 	ids       map[string]struct{}
+	findings  map[string]int
 }
 
 // takeRosterEmployeeSnapshot reads the hired-employee list ONCE. A missing
@@ -62,7 +78,10 @@ type rosterEmployeeSnapshot struct {
 // established fail-soft posture: the roster answers a valid, possibly
 // partial list, never an error).
 func takeRosterEmployeeSnapshot(c *Components, ctx context.Context, logger *slog.Logger) rosterEmployeeSnapshot {
-	snap := rosterEmployeeSnapshot{ids: make(map[string]struct{})}
+	snap := rosterEmployeeSnapshot{
+		ids:      make(map[string]struct{}),
+		findings: make(map[string]int),
+	}
 	if c == nil || c.EmployeeManager == nil {
 		return snap
 	}
@@ -74,6 +93,28 @@ func takeRosterEmployeeSnapshot(c *Components, ctx context.Context, logger *slog
 	snap.employees = emps
 	for _, emp := range emps {
 		snap.ids[emp.ID] = struct{}{}
+	}
+	if len(emps) == 0 {
+		return snap
+	}
+	// M11 findings_count: one windowed audit read for the whole roster
+	// (the audit store caps a listing at its default 100 rows), bucketed
+	// per employee. Cost: ONE indexed SQLite query per agents.roster
+	// call, not one per employee row. AuditQuery has no Limit knob and a
+	// dedicated COUNT aggregate would need a new AuditStore method, so
+	// very large fleets can undercount beyond the store's row cap - the
+	// count is best-effort telemetry, never a correctness surface.
+	findings, err := c.EmployeeManager.ListAuditFindings(ctx, employee.AuditQuery{
+		Since: rosterFindingsWindow,
+	})
+	if err != nil {
+		// ErrNotImplemented (no audit store wired) is the expected
+		// degraded shape; log at Debug like the other roster fail-softs.
+		logger.Debug("agents.roster: list audit findings failed", "error", err)
+		return snap
+	}
+	for _, f := range findings {
+		snap.findings[f.EmployeeID]++
 	}
 	return snap
 }
@@ -153,7 +194,7 @@ func registerRosterRPC(c *Components, server *rpc.Server, logger *slog.Logger) {
 			// The snapshot comes from ListEmployees, which already filters
 			// out plain bots (rows without a constitution): every row here
 			// is a hired employee.
-			rows = append(rows, rosterBotEntry(c, rosterCtx, emp.BotDefinition))
+			rows = append(rows, rosterEmployeeEntry(c, rosterCtx, emp.BotDefinition, snap))
 		}
 		return rows
 	}
@@ -181,15 +222,17 @@ func registerRosterRPC(c *Components, server *rpc.Server, logger *slog.Logger) {
 
 // rosterBotEntry maps one bot/employee definition onto a C1 row with the
 // live status + daily-cost overlay (shared by both sources so the row shape
-// stays identical). A missing/unreadable bot state keeps the stopped
-// fallback and zero cost — never invent data.
+// stays identical), plus the additive M11 executor/last-run keys. A
+// missing/unreadable bot state keeps the stopped fallback, zero cost and a
+// zero (wire-omitted) last invocation - never invent data.
 func rosterBotEntry(c *Components, ctx context.Context, def bot.BotDefinition) rpc.RosterEntry {
 	row := rpc.RosterEntry{
-		ID:          def.ID,
-		Name:        def.Name,
-		Status:      string(botStatusStopped),
-		Description: def.Description,
-		Enabled:     def.Enabled,
+		ID:            def.ID,
+		Name:          def.Name,
+		Status:        string(botStatusStopped),
+		Description:   def.Description,
+		Enabled:       def.Enabled,
+		ExecutorAgent: def.ExecutorAgent,
 	}
 	if c.AgentRegistry != nil {
 		row.ActiveCount = c.AgentRegistry.ActiveLoopCount(def.ID)
@@ -198,8 +241,32 @@ func rosterBotEntry(c *Components, ctx context.Context, def bot.BotDefinition) r
 		if state, stateErr := c.BotManager.GetBotStatus(ctx, def.ID); stateErr == nil && state != nil {
 			row.Status = string(state.Status)
 			row.DailyCostCents = state.TodayCostCents
+			if state.LastRunAt != nil {
+				row.LastInvocation = *state.LastRunAt
+			}
 		}
 	}
+	return row
+}
+
+// rosterFindingsWindow mirrors the TUI detail view's audit query
+// (agents.audit.list since=168h, internal/tui/agents_panel.go fetchDetail):
+// the roster's findings_count column and the drill-in count read the same
+// 7-day window of the same audit store.
+const rosterFindingsWindow = 168 * time.Hour
+
+// rosterEmployeeEntry overlays the employee-only M11 keys onto the shared
+// bot row: drift score from the manager's in-memory driftScores map (a
+// pure map read under RLock, no I/O) and the findings count bucketed from
+// the snapshot's ONE windowed audit read. Both are fail-soft - an unwired
+// manager or a failed audit read leaves the key zero (omitted on the
+// wire), never invented.
+func rosterEmployeeEntry(c *Components, ctx context.Context, def bot.BotDefinition, snap rosterEmployeeSnapshot) rpc.RosterEntry {
+	row := rosterBotEntry(c, ctx, def)
+	if c != nil && c.EmployeeManager != nil {
+		row.DriftScore = c.EmployeeManager.DriftScore(def.ID)
+	}
+	row.FindingsCount = snap.findings[def.ID]
 	return row
 }
 
