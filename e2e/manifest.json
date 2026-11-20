@@ -557,7 +557,8 @@
       "activity-views"
     ],
     "internal/daemon/activity_wiring.go": [
-      "activity-views"
+      "activity-views",
+      "execution-observability"
     ],
     "internal/daemon/bridges_wiring.go": [
       "bridges"
@@ -768,6 +769,15 @@
     ],
     "e2e/suites/tui-gui-consistency": [
       "tui-gui-consistency"
+    ],
+    "internal/activity/execution_store.go": [
+      "execution-observability"
+    ],
+    "internal/activity/execution_projector.go": [
+      "execution-observability"
+    ],
+    "internal/daemon/execution_runs_rpc.go": [
+      "execution-observability"
     ]
   },
   "exempt": {},
@@ -5408,6 +5418,19 @@
         "internal/daemon/employee_message_tools.go",
         "internal/agent/loop_messages.go",
         "internal/daemon/voice_employee.go"
+      ]
+    },
+    {
+      "id": "execution-observability-05",
+      "suite": "execution-observability",
+      "diff": "L",
+      "title": "durable execution history: a real bot round is persisted to execution_runs.db and the SAME run is still returned by agents.executionRuns after a full daemon restart; agents.executionHistogram answers 8 cells (issue #160 follow-up)",
+      "paths": [
+        "internal/activity/execution_store.go",
+        "internal/activity/execution_projector.go",
+        "internal/daemon/execution_runs_rpc.go",
+        "internal/comm/http/execution_handlers.go",
+        "internal/daemon/activity_wiring.go"
       ]
     },
     {

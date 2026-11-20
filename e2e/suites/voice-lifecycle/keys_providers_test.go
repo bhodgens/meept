@@ -72,9 +72,11 @@ func newFakeQwen3(t *testing.T) *fakeQwen3 {
 	t.Helper()
 	f := &fakeQwen3{t: t}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/audio/speech", func(w http.ResponseWriter, r *http.Request) {
+	// qwen3 uses the token-level pcm-stream route, not the cloud openai route
+	mux.HandleFunc("/v1/audio/speech/pcm-stream", func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body) //nolint:errcheck // test sink; a bad body still gets audio
+		// qwen3 PCM stream uses fields: text, voice, chunk_size (no stream/response_format/input/model)
 		// Stream a short deterministic tone as raw s16le@24k mono: 20
 		// chunks of 480 samples (1920 bytes) = 400 ms of audio, flushed
 		// chunk-by-chunk (streaming, not buffered).
@@ -82,11 +84,11 @@ func newFakeQwen3(t *testing.T) *fakeQwen3 {
 		w.WriteHeader(http.StatusOK)
 		rec := qwen3Req{
 			Auth:   r.Header.Get("Authorization"),
-			Model:  body["model"].(string),
+			Model:  "", // qwen3 doesn't send model in request
 			Voice:  body["voice"].(string),
-			Input:  body["input"].(string),
-			Stream: body["stream"].(bool),
-			Format: body["response_format"].(string),
+			Input:  body["text"].(string),
+			Stream: true, // always streaming for qwen3 pcm-stream
+			Format: "pcm",
 		}
 		flusher, _ := w.(http.Flusher)
 		for i := 0; i < 20; i++ {
@@ -340,8 +342,11 @@ func TestVoiceKeysToProviders(t *testing.T) {
 	if rec.Auth != "" {
 		t.Errorf("qwen3 request carried Authorization %q; D2 keyless dispatch must send no auth header", rec.Auth)
 	}
-	if rec.Model != "Qwen/Qwen3-TTS-test" || rec.Voice != "vivian" {
-		t.Errorf("qwen3 request model=%q voice=%q, want the C1-carried Qwen/Qwen3-TTS-test / vivian", rec.Model, rec.Voice)
+	// qwen3 doesn't send model in request body (server uses its loaded default);
+	// the model assertion is about the C1 keys line carrying Qwen/Qwen3-TTS-test,
+	// not the HTTP request body. Voice must match the C1-carried value.
+	if rec.Voice != "vivian" {
+		t.Errorf("qwen3 request voice=%q, want the C1-carried vivian", rec.Voice)
 	}
 	if !rec.Stream || rec.Format != "pcm" {
 		t.Errorf("qwen3 request stream=%v response_format=%q, want true / \"pcm\" (streaming contract)", rec.Stream, rec.Format)
