@@ -104,7 +104,7 @@ func wireActivityComponents(c *Components, msgBus *bus.MessageBus, server *rpc.S
 	} else {
 		c.ExecutionStore = store
 		if msgBus != nil {
-			c.executionProjectorSubs = activity.WireExecutionProjector(msgBus, store, logger)
+			c.executionProjector = activity.WireExecutionProjector(msgBus, store, logger)
 		}
 		registerExecutionRunsRPC(server, store)
 		logger.Info("execution-run history store wired", "path", config.MeeptPath("execution_runs.db"))
@@ -138,17 +138,14 @@ func stopActivityRing(c *Components, msgBus *bus.MessageBus) {
 	c.activityBridgeSubs = nil
 	c.ActivityRing = nil
 
-	// Execution-run history: unsubscribe the projector readers and close
-	// the SQLite handle so in-process restarts neither leak goroutines nor
-	// hold the WAL file open.
-	if msgBus != nil {
-		for _, sub := range c.executionProjectorSubs {
-			if sub != nil {
-				msgBus.Unsubscribe(sub)
-			}
-		}
-	}
-	c.executionProjectorSubs = nil
+	// Execution-run history: STOP the projector - unsubscribe the readers
+	// AND wait for them to drain their buffered events - BEFORE closing the
+	// SQLite handle (issue #160 M5). The old ordering (unsubscribe, then
+	// Close without waiting) let a reader's mid-drain Append hit a closed
+	// handle: the row was lost and only a Warn remained. Stop's Wait makes
+	// the handoff deterministic; nil projector is a no-op.
+	c.executionProjector.Stop(msgBus)
+	c.executionProjector = nil
 	if c.ExecutionStore != nil {
 		if err := c.ExecutionStore.Close(); err != nil {
 			slog.Warn("execution store: close failed", "error", err)

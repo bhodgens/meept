@@ -8,9 +8,11 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/activity"
+	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/rpc"
+	pkgid "github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -199,4 +201,59 @@ func TestActivityWiring_RingReceivesBusEvents(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("ring stayed empty after agent.progress publish")
+}
+
+// TestActivityWiring_StopDrainsExecutionProjector pins the issue #160 M5
+// shutdown ordering on the REAL seam: wireActivityComponents opens the
+// execution store and subscribes the projector; stopActivityRing must
+// drain the projector's buffered events BEFORE closing the store, so every
+// delivered result row survives shutdown. Events are published with
+// PublishBlockingT (channel delivery guaranteed), n exceeds the bus
+// buffer, and the stop path runs immediately - the exact race window the
+// old unsubscribe-then-Close ordering lost rows in. Rows are counted on a
+// fresh handle for this test's unique agent id, isolated from other
+// tests' runs in the shared pinned MEEPT_HOME.
+func TestActivityWiring_StopDrainsExecutionProjector(t *testing.T) {
+	c, msgBus, srv := newActivityWiringFixture(t)
+	wireActivityComponents(c, msgBus, srv, c.Logger)
+	if c.ExecutionStore == nil {
+		t.Skip("execution store did not open in this environment")
+	}
+
+	const n = 120 // above the bus default buffer (100): forces a backlog
+	// Unique per run: the pinned test-home DB survives across runs, so a
+	// stable agent id would double-count on the second run.
+	agentID := pkgid.Generate("m5drain")
+	now := time.Now().UTC().Truncate(time.Second)
+	for i := 0; i < n; i++ {
+		bus.PublishBlockingT(msgBus, agent.TopicBotResult, "bot", agent.ExecutionResultEvent{
+			AgentID: agentID, Status: "completed", TokensUsed: i,
+			DurationMS: 1, Timestamp: now,
+		})
+	}
+
+	// Immediate shutdown seam - the M5 race: stop while the projector
+	// reader may still be mid-drain.
+	stopActivityRing(c, msgBus)
+	if c.ExecutionStore != nil {
+		t.Fatal("stopActivityRing must clear the store handle")
+	}
+
+	reopened, err := activity.OpenExecutionStore(config.MeeptPath("execution_runs.db"), nil)
+	if err != nil {
+		t.Fatalf("reopen execution store: %v", err)
+	}
+	defer func() {
+		if cerr := reopened.Close(); cerr != nil {
+			t.Errorf("reopen close: %v", cerr)
+		}
+	}()
+	_, total, err := reopened.List(context.Background(), activity.ExecutionQuery{AgentID: agentID, Limit: 1})
+	if err != nil {
+		t.Fatalf("list after shutdown: %v", err)
+	}
+	if total != n {
+		t.Fatalf("M5 regression: %d of %d buffered runs survived stopActivityRing (lost=%d)",
+			total, n, n-total)
+	}
 }

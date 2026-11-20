@@ -17,15 +17,11 @@ func TestWireExecutionProjector_PersistsBothTiers(t *testing.T) {
 	b := bus.New(nil, nil)
 	defer b.Close()
 
-	subs := WireExecutionProjector(b, s, nil)
-	if len(subs) != 2 {
-		t.Fatalf("subscribers = %d, want 2", len(subs))
+	proj := WireExecutionProjector(b, s, nil)
+	if proj == nil {
+		t.Fatal("WireExecutionProjector returned nil for a live bus/store")
 	}
-	defer func() {
-		for _, sub := range subs {
-			b.Unsubscribe(sub)
-		}
-	}()
+	defer proj.Stop(b)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	bus.PublishT(b, agent.TopicBotResult, "bot", agent.ExecutionResultEvent{
@@ -71,7 +67,80 @@ func TestWireExecutionProjector_PersistsBothTiers(t *testing.T) {
 }
 
 func TestWireExecutionProjector_NilSafe(t *testing.T) {
-	if subs := WireExecutionProjector(nil, nil, nil); subs != nil {
-		t.Errorf("nil bus/store must return nil subs, got %d", len(subs))
+	if proj := WireExecutionProjector(nil, nil, nil); proj != nil {
+		t.Errorf("nil bus/store must return nil projector, got %+v", proj)
 	}
+	// Stop is nil-safe (the daemon stop path calls it unconditionally).
+	var zero *ExecutionProjector
+	zero.Stop(nil)
+}
+
+// TestExecutionProjector_StopDrainsBeforeClose pins the issue #160 M5 fix:
+// events published immediately before the shutdown seam must ALL persist.
+// The old teardown unsubscribed and closed the store without waiting for
+// the reader goroutines to drain their buffered items, so a buffered
+// Append raced store.Close and the row was lost with only a Warn. The
+// projector's Stop waits for the readers, so the daemon's
+// stop-projector-then-close-store ordering is loss-free.
+func TestExecutionProjector_StopDrainsBeforeClose(t *testing.T) {
+	const n = 150 // above the bus default buffer (100): forces a real backlog
+
+	path := t.TempDir() + "/drain.db"
+	s, err := OpenExecutionStore(path, nil)
+	if err != nil {
+		t.Fatalf("OpenExecutionStore: %v", err)
+	}
+	b := bus.New(nil, nil)
+	defer b.Close()
+
+	proj := WireExecutionProjector(b, s, nil)
+	if proj == nil {
+		t.Fatal("nil projector")
+	}
+
+	// PublishBlocking guarantees channel delivery (no bus-layer drop), so
+	// when the last call returns every event is either appended already or
+	// sitting in the projector's buffered channel awaiting drain - the
+	// exact M5 window.
+	now := time.Now().UTC().Truncate(time.Second)
+	for i := 0; i < n; i++ {
+		bus.PublishBlockingT(b, agent.TopicBotResult, "bot", agent.ExecutionResultEvent{
+			AgentID: "drain-bot", Status: "completed", TokensUsed: i,
+			DurationMS: 1, Timestamp: now,
+		})
+	}
+
+	// Immediate shutdown seam: Stop (unsubscribe + drain), then Close -
+	// exactly the daemon's stopActivityRing ordering.
+	proj.Stop(b)
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Count on a fresh handle (the old one is closed, as after shutdown).
+	s2, err := OpenExecutionStore(path, nil)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer s2.Close()
+	_, total, err := s2.List(context.Background(), ExecutionQuery{Limit: 1})
+	if err != nil {
+		t.Fatalf("List after reopen: %v", err)
+	}
+	if total != n {
+		t.Fatalf("M5 regression: %d of %d published runs survived the Stop+Close seam (lost=%d)",
+			total, n, n-total)
+	}
+}
+
+// TestExecutionProjector_StopIsIdempotent pins the teardown guard: calling
+// Stop twice (or after the bus closed) must not panic or double-unsubscribe.
+func TestExecutionProjector_StopIsIdempotent(t *testing.T) {
+	s := openTestExecutionStore(t)
+	b := bus.New(nil, nil)
+	proj := WireExecutionProjector(b, s, nil)
+	proj.Stop(b)
+	proj.Stop(b) // second call: no-op, must not panic
+	b.Close()
+	proj.Stop(b) // after bus close: still safe
 }

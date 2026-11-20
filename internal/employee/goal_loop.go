@@ -1107,6 +1107,24 @@ func (l *GoalLoop) Execute(ctx context.Context, plan PlanRef) (*bot.BotExecution
 			status = "failed"
 			stopReason = agent.StopReasonError
 		}
+		// Round identity (issue #160 M1): trigger_ref is the active goal's
+		// TriggerRef (intake:<repo>#<ticket>, cron ref, etc.) when this
+		// round pursues a goal; session_id is the round's session identity
+		// (SetSpeakContext at round entry), read under l.mu (no I/O under
+		// the lock). A round with no active goal / no speak context
+		// publishes them absent - never invented values. A goal-lookup
+		// failure degrades to an empty ref with a warn; the result is
+		// never dropped for it.
+		triggerRef := ""
+		if goal, goalErr := l.lookupActiveGoal(ctx); goalErr != nil {
+			logger.Warn("execute: active goal lookup for trigger_ref failed; publishing without trigger_ref",
+				"plan_id", plan.ID, "error", goalErr)
+		} else if goal != nil {
+			triggerRef = goal.TriggerRef
+		}
+		l.mu.Lock()
+		sessionID := l.speakSessionID
+		l.mu.Unlock()
 		resultPayload := agent.ExecutionResultEvent{
 			AgentID:    l.employeeID,
 			Status:     status,
@@ -1115,6 +1133,8 @@ func (l *GoalLoop) Execute(ctx context.Context, plan PlanRef) (*bot.BotExecution
 			Error:      result.Error,
 			DurationMS: int64(result.Duration / time.Millisecond),
 			StopReason: stopReason,
+			TriggerRef: triggerRef,
+			SessionID:  sessionID,
 			Timestamp:  time.Now().UTC(),
 		}
 		if isBot {

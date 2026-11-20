@@ -67,9 +67,15 @@
   },
   {
     "topic": "agents.roster",
+    "handler": "func(ctx context.Context, params json.RawMessage",
+    "file": "internal/daemon/roster_rpc.go",
+    "line": 215
+  },
+  {
+    "topic": "agents.roster",
     "handler": "h.handleRoster",
     "file": "internal/rpc/roster.go",
-    "line": 100
+    "line": 122
   },
   {
     "topic": "backup.list",
@@ -201,7 +207,7 @@
     "topic": "chat.submit",
     "handler": "chatSubmitHandler.Submit",
     "file": "internal/daemon/daemon.go",
-    "line": 353
+    "line": 354
   },
   {
     "topic": "chat.submit",
@@ -405,31 +411,31 @@
     "topic": "groups.assign",
     "handler": "h.handleAssign",
     "file": "internal/rpc/groups.go",
-    "line": 199
+    "line": 201
   },
   {
     "topic": "groups.check",
     "handler": "h.handleCheck",
     "file": "internal/rpc/groups.go",
-    "line": 201
+    "line": 203
   },
   {
     "topic": "groups.explain",
     "handler": "h.handleExplain",
     "file": "internal/rpc/groups.go",
-    "line": 198
+    "line": 200
   },
   {
     "topic": "groups.list",
     "handler": "h.handleList",
     "file": "internal/rpc/groups.go",
-    "line": 197
+    "line": 199
   },
   {
     "topic": "groups.remove",
     "handler": "h.handleRemove",
     "file": "internal/rpc/groups.go",
-    "line": 200
+    "line": 202
   },
   {
     "topic": "instruction.add",

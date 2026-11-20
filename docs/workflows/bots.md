@@ -65,10 +65,15 @@ after daemon restart.
   name), agent_id, status, output, tokens_used, error, duration_ms,
   stop_reason, trigger_ref, session_id, created_at (server-stamped UTC).
 - Projector: `internal/activity/execution_projector.go`
-  (`WireExecutionProjector`) subscribes to both typed topics; wired in
-  `internal/daemon/activity_wiring.go`, torn down with the activity ring.
-  Store-open failure degrades the query surface to a clean RPC error and
-  never fails boot.
+  (`WireExecutionProjector`) subscribes to both typed topics and owns its
+  reader goroutines; wired in `internal/daemon/activity_wiring.go`, torn
+  down with the activity ring. Shutdown ordering is LOSS-FREE (issue #160
+  M5): `stopActivityRing` calls the projector's `Stop` (unsubscribe + wait
+  for the readers to drain buffered events) BEFORE closing the store, so a
+  buffered append can never race `store.Close`. The `agents.executionRuns`
+  `total` is read atomically with its page in one SQLite transaction
+  (issue #160 L4). Store-open failure degrades the query surface to a
+  clean RPC error and never fails boot.
 - RPC: `agents.executionRuns` (`{agent_id?, limit?, since?}` ->
   `{runs: [...], total}` newest-first, total counted before the limit) and
   `agents.executionHistogram` (`{agent_id}` -> `{agent_id, cells: [8 ints]}`,

@@ -529,9 +529,11 @@ type Components struct {
 	// GET /api/v1/executions so clients see runs after reconnect/restart.
 	// Nil when the store failed to open (degraded, never fails boot).
 	ExecutionStore *activity.ExecutionStore
-	// executionProjectorSubs holds the store's bus subscriptions;
-	// stopComponents unsubscribes them. Unexported: teardown-only.
-	executionProjectorSubs []*bus.Subscriber
+	// executionProjector owns the store's bus readers; stopComponents
+	// Stops it (unsubscribe + drain) BEFORE closing the store, so no
+	// buffered Append races store.Close (issue #160 M5). Unexported:
+	// teardown-only.
+	executionProjector *activity.ExecutionProjector
 
 	// TraceExporter ships chat-turn/task-step spans to an OTLP receiver
 	// (metrics.otlp_traces, leaf 07-langfuse-sink). Non-nil ONLY when

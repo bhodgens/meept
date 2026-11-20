@@ -170,13 +170,25 @@ func (s *ExecutionStore) List(ctx context.Context, q ExecutionQuery) ([]Executio
 		clause = " WHERE " + strings.Join(where, " AND ")
 	}
 
+	// Atomic snapshot (issue #160 L4): COUNT and the page SELECT run inside
+	// ONE read transaction. As two separate statements they could interleave
+	// with a concurrent Append or retention trim - the MaxOpenConns(1) pool
+	// serializes statements, not the pair - so the reported total could
+	// disagree with the returned page (count-before-insert or
+	// count-before-trim drift). The tx pins one snapshot across both reads.
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, 0, fmt.Errorf("execution store: begin read tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op once Commit succeeds
+
 	var total int
-	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM execution_runs"+clause, args...).Scan(&total); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM execution_runs"+clause, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("execution store: count runs: %w", err)
 	}
 
 	listArgs := append(append([]any{}, args...), limit)
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := tx.QueryContext(ctx,
 		`SELECT id, tier, agent_id, status, output, tokens_used, error, duration_ms, stop_reason, trigger_ref, session_id, created_at
 		 FROM execution_runs`+clause+` ORDER BY id DESC LIMIT ?`, listArgs...)
 	if err != nil {
@@ -202,6 +214,9 @@ func (s *ExecutionStore) List(ctx context.Context, q ExecutionQuery) ([]Executio
 	}
 	if err := rows.Err(); err != nil {
 		return nil, 0, fmt.Errorf("execution store: iterate runs: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, 0, fmt.Errorf("execution store: commit read tx: %w", err)
 	}
 	return out, total, nil
 }
