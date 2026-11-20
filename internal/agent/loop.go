@@ -3477,9 +3477,25 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 		}
 	}
 
-	// Register queue for external access if both queue and registry are available
+	// Register queue for external access if both queue and registry are available.
+	//
+	// C3 (01-safety/02-queue-lifecycle): register a FRESH queue instance per
+	// turn. The turn-end UnregisterActiveQueue closes the registered queue
+	// (one-way CAS), so re-registering l.queue on turn 2 of a cached loop
+	// would steer into a CLOSED object (F-NEW-11/12). The turn queue inherits
+	// the loop queue's config/bus/agent-id/logger; the loop queue object
+	// itself is never closed or reopened in place, and l.queue is re-pointed
+	// at the live turn queue so the in-turn drain sites observe injections.
 	queueRegistered := false
+	var turnQueue *MessageQueue
 	if l.agentRegistry != nil && l.queue != nil {
+		turnQueue = NewMessageQueue(
+			WithQueueConfig(l.queue.config),
+			WithQueueBus(l.queue.bus),
+			WithQueueAgentID(l.queue.agentID),
+			WithQueueLogger(l.queue.logger),
+		)
+		l.queue = turnQueue
 		// Queue persistence write-side (steering/followup-queues plan):
 		// attach a per-conversation QueuePersister when the registry carries
 		// the shared SQLite DB and persistence is enabled. This restores the
@@ -3489,7 +3505,7 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 		// side was silently dead. The persister flushes + stops and is
 		// cleared when the turn ends (defer below), mirroring the queue
 		// registration lifetime.
-		if db := l.agentRegistry.DB(); db != nil && l.queue.config.PersistFollowUp {
+		if db := l.agentRegistry.DB(); db != nil && turnQueue.config.PersistFollowUp {
 			persister, pErr := NewQueuePersister(db, conversationID, l.logger.With("component", "queue-persister"))
 			if pErr != nil {
 				l.logger.Warn("failed to create queue persister, persistence disabled",
@@ -3500,17 +3516,17 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 				if l.bus != nil {
 					persister.WithBus(l.bus)
 				}
-				l.queue.SetPersister(persister)
+				turnQueue.SetPersister(persister)
 				defer func() {
 					// Flush and stop persister before unregistering the queue.
 					persister.Flush()
 					persister.Stop()
-					l.queue.ClearPersister()
+					turnQueue.ClearPersister()
 				}()
 			}
 		}
 
-		gen := l.agentRegistry.RegisterActiveQueue(conversationID, l.queue, l)
+		gen := l.agentRegistry.RegisterActiveQueue(conversationID, turnQueue, l)
 		queueRegistered = true
 		l.logger.Debug("registered queue for conversation",
 			"conversation_id", conversationID,
@@ -10104,7 +10120,21 @@ func (l *AgentLoop) ConfigSnapshot() []LoopOption {
 
 		// --- Prefetch + queue ---
 		WithPrefetchCallback(l.prefetchCallback),
-		WithMessageQueue(l.queue),
+		// C3 clone isolation (01-safety/02-queue-lifecycle): NEVER carry the
+		// template's queue pointer into a session clone -- one shared
+		// instance meant clone A's turn-end Close killed clone B's steering.
+		// Each clone gets its own instance inheriting config/bus/agent-id/
+		// logger; RunOnce then registers a fresh per-turn queue from it.
+		func(l2 *AgentLoop) {
+			if l.queue != nil {
+				l2.queue = NewMessageQueue(
+					WithQueueConfig(l.queue.config),
+					WithQueueBus(l.queue.bus),
+					WithQueueAgentID(l.queue.agentID),
+					WithQueueLogger(l.queue.logger),
+				)
+			}
+		},
 		WithAgentRegistry(l.agentRegistry),
 
 		// --- Artifacts + detection ---

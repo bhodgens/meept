@@ -2073,14 +2073,21 @@ func (r *AgentRegistry) UnregisterActiveQueue(conversationID string) {
 	entry.Queue.Close()
 }
 
-// GetActiveQueue returns the queue for a running conversation, or nil if not found.
-// Also returns the generation number for version checking.
+// GetActiveQueue returns the queue for a running conversation, or nil if not
+// found. Also returns the generation number for version checking.
+//
+// C3 (01-safety/02-queue-lifecycle): the lookup follows the same resolution
+// order as ResolveActiveQueue -- exact key -> thread-unwrapped base ->
+// session-owned thread keys -- so a session-level id finds the queue RunOnce
+// registered under the thread router's thread-scoped id. An ambiguous
+// multi-thread match resolves to nil here (the error-carrying twin is
+// ResolveActiveQueue); never a silent pick.
 func (r *AgentRegistry) GetActiveQueue(conversationID string) (queue *MessageQueue, generation uint64) {
 	r.activeQueuesMu.RLock()
 	defer r.activeQueuesMu.RUnlock()
 
-	entry, exists := r.activeQueues[conversationID]
-	if !exists {
+	entry, err := r.resolveActiveQueueLocked(conversationID)
+	if err != nil {
 		return nil, 0
 	}
 
@@ -2089,12 +2096,13 @@ func (r *AgentRegistry) GetActiveQueue(conversationID string) (queue *MessageQue
 
 // GetActiveQueueLoop returns the AgentLoop that owns the active queue for a
 // conversation, or nil if no active queue exists or the entry has no loop.
+// Uses the same C3 thread-remap resolution as GetActiveQueue.
 func (r *AgentRegistry) GetActiveQueueLoop(conversationID string) *AgentLoop {
 	r.activeQueuesMu.RLock()
 	defer r.activeQueuesMu.RUnlock()
 
-	entry, exists := r.activeQueues[conversationID]
-	if !exists {
+	entry, err := r.resolveActiveQueueLocked(conversationID)
+	if err != nil {
 		return nil
 	}
 	return entry.Loop

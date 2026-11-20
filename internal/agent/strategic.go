@@ -1052,6 +1052,20 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 		}
 	}
 
+	// Step prompt path fidelity (03-context/02 T3, F-NEW-9): the planner's
+	// decomposition can drop concrete details from the user prompt -- the
+	// live 8B emitted "validate the requested file and report its
+	// contents" for a prompt naming an explicit path, and the executor
+	// answered with a clarification question for info already in the
+	// prompt. When no step carries an explicit path that the full user
+	// input names, append the verbatim user request to the FIRST step so
+	// the executing loop always sees the original details. Idempotent
+	// (marker check) and additive: a decomposition that already carries
+	// the path is untouched.
+	if len(steps) > 0 && steps[0] != nil {
+		sp.ensureStepPromptFidelity(req, steps[0])
+	}
+
 	// Inject parent MemoryRefs to first step (if any exist and steps were created)
 	if len(steps) > 0 && len(parentMemoryRefs) > 0 {
 		for _, ref := range parentMemoryRefs {

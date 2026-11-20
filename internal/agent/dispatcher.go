@@ -1815,6 +1815,34 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 				)
 				d.recordClassificationMethod("chat_imperative_arbitration")
 			} else if ShouldUseLLMResult(intent) &&
+				IntentType(intent.Type).ShouldCreateTask() &&
+				isFactRecallQuestion(input) {
+				// Fact->memory arbitration (03-context/02 T3, F-ORCH-24):
+				// "what was the codeword I told you earlier in this
+				// session?" scored quickplan @0.9 and decomposed into
+				// task_get plumbing. A conversation-fact question is
+				// answered from the scoped memory lane, never by creating
+				// a task. Same posture as platform_recall_arbitration:
+				// replace the untrusted verdict with the recall route
+				// (documented 0.85 confidence, not the discarded number).
+				d.logger.Info("Task-creating verdict overridden by conversation-fact recall",
+					"verdict", intent.Type,
+					"llm_confidence", intent.Confidence,
+					"input_len", len(input),
+				)
+				d.recordClassificationMethod("fact_memory_recall")
+				d.recordAgent(config.AgentIDChat)
+				d.recordIntentType(string(IntentRecall))
+				factRecall := &Intent{
+					Type:       string(IntentRecall),
+					Confidence: 0.85,
+					AgentType:  config.AgentIDChat,
+					Summary:    extractSummary(input),
+					Method:     "fact_memory_recall",
+					Model:      d.llmClassifier.ResolvedModel(),
+				}
+				return d.applyContextWeighting(factRecall, memCtx, input), nil
+			} else if ShouldUseLLMResult(intent) &&
 				quickPlanCueUpgradeApplies(intent.Type, input) {
 				// QuickPlan cue upgrade (#52, campaign 20260918 phase 2):
 				// the 8B scattered 17/20 adjudicated quickplan replay cases
@@ -3176,8 +3204,18 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 			// Determine steering vs follow-up based on heuristic
 			isSteer := shouldSteer(IntentType(result.Intent.Type), result.ExplicitSteerMode)
 
+			// C3 full-text injection (01-safety/02-queue-lifecycle): inject the
+			// FULL original input, never the ~100-char Intent.Summary. A steer
+			// or follow-up that truncates to the summary loses the user's actual
+			// correction (F-NEW-11 / W2). Fall back to Summary only when
+			// OriginalInput was not preserved (legacy callers).
+			injectText := result.OriginalInput
+			if injectText == "" {
+				injectText = result.Intent.Summary
+			}
+
 			if isSteer {
-				if err := queue.Steer(ctx, result.Intent.Summary, config.AgentIDDispatcher); err != nil {
+				if err := queue.Steer(ctx, injectText, config.AgentIDDispatcher); err != nil {
 					if errors.Is(err, ErrQueueClosed) || errors.Is(err, ErrQueueFull) {
 						d.logger.Warn("Queue injection failed, starting new agent",
 							"conversation", conversationID,
@@ -3191,7 +3229,7 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 					return "message queued (steer)", nil
 				}
 			} else {
-				if err := queue.FollowUp(ctx, result.Intent.Summary, config.AgentIDDispatcher); err != nil {
+				if err := queue.FollowUp(ctx, injectText, config.AgentIDDispatcher); err != nil {
 					if errors.Is(err, ErrQueueClosed) || errors.Is(err, ErrQueueFull) {
 						d.logger.Warn("Queue injection failed, starting new agent",
 							"conversation", conversationID,

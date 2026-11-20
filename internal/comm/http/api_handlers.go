@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caimlas/meept/internal/agent"
 	configCli "github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/queue"
 	"github.com/caimlas/meept/internal/services"
@@ -224,6 +225,13 @@ func (s *Server) handleServiceError(w http.ResponseWriter, err error) {
 		// (pass working_dir / bind the session): 400 with the sentinel's
 		// own guidance, not a 500.
 		s.writeError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, agent.ErrQueueNotFound):
+		// C3 (01-safety/02-queue-lifecycle): steering/follow-up into a
+		// conversation with no ACTIVE turn is a client-correctable state
+		// (the turn ended or never started), not a server fault. 404 with
+		// the sentinel's reason so the client can start a new turn instead
+		// of seeing an opaque 500 (F-NEW-11 / W2).
+		s.writeError(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, queue.ErrJobNotClaimable):
 		// Completing a job that is not claimed/processing (pending, failed,
 		// already completed — e.g. requeued for another attempt) is a state
