@@ -42,13 +42,36 @@ type linkTranscriptSource interface {
 
 // voiceLinkState owns the lazily-constructed per-daemon LinkManager.
 type voiceLinkState struct {
-	mu     sync.Mutex
-	mgr    *voice.LinkManager
-	leg    *voice.LocalLeg
-	store  linkTranscriptSource
-	turns  *voice.LinkTurnRegistry
-	cfg    config.VoiceConfig
-	logger *slog.Logger
+	mu    sync.Mutex
+	mgr   *voice.LinkManager
+	leg   *voice.LocalLeg
+	store linkTranscriptSource
+	turns *voice.LinkTurnRegistry
+	cfg   config.VoiceConfig
+	// cfgLive resolves the LIVE [voice] snapshot (wired to
+	// VoiceWiring.currentVoiceCfg): the backchannel-soften resolver must
+	// follow daemon.reloaded republishes, never freeze the boot snapshot
+	// (the manager is constructed once, lazily). nil (hand-built state)
+	// falls back to the cfg snapshot. The seam is a pure RLock-guarded
+	// pointer read - no I/O, safe from any lock context.
+	cfgLive func() config.VoiceConfig
+	logger  *slog.Logger
+}
+
+// voiceCfg returns the [voice] config the link resolvers read: the live
+// snapshot when the seam is armed, the construction snapshot otherwise.
+func (s *voiceLinkState) voiceCfg() config.VoiceConfig {
+	if s.cfgLive != nil {
+		return s.cfgLive()
+	}
+	return s.cfg
+}
+
+// backchannelSoftenFor is the per-employee soften resolver handed to
+// LinkDeps.BackchannelSoftenFor (as this method value, so the lazily
+// constructed-once manager keeps reading the LIVE config on every Open).
+func (s *voiceLinkState) backchannelSoftenFor(empID string) bool {
+	return voice.BackchannelSoftenFor(s.voiceCfg(), empID)
 }
 
 // manager returns the link manager, constructing it on first use. A nil
@@ -75,10 +98,11 @@ func (s *voiceLinkState) manager() *voice.LinkManager {
 			// LinkManager.Open. No row on either side falls
 			// through to the global voice.backchannel_soften
 			// (default false = today's coordinator, byte-
-			// identical).
-			BackchannelSoftenFor: func(empID string) bool {
-				return voice.BackchannelSoftenFor(s.cfg, empID)
-			},
+			// identical). Reads the LIVE snapshot through
+			// voiceCfg (bughunt 2026-11-19 wave 3): the manager
+			// is constructed once, so a boot-snapshot read froze
+			// the toggle across daemon.reloaded republishes.
+			BackchannelSoftenFor: s.backchannelSoftenFor,
 		})
 		if err != nil {
 			s.logger.Error("voice link manager construction failed", "err", err)
@@ -87,6 +111,25 @@ func (s *voiceLinkState) manager() *voice.LinkManager {
 		s.mgr = m
 	}
 	return s.mgr
+}
+
+// newVoiceLinkState builds the per-daemon link state over the wiring.
+// Split out of voiceLinkSeams so the reload-live soften pin can drive the
+// EXACT production construction (cfgLive arming included).
+func newVoiceLinkState(w *VoiceWiring, store linkTranscriptSource, logger *slog.Logger) *voiceLinkState {
+	return &voiceLinkState{
+		leg:   w.Local,
+		store: store,
+		turns: w.linkTurns,
+		cfg:   w.cfg,
+		// Reload-live backchannel soften (bughunt 2026-11-19 wave 3):
+		// the resolver reads the LIVE snapshot seam, so a config swap
+		// via reloadVoiceConfig rebinds the toggle without touching the
+		// constructed-once LinkManager (mirrors the wave-1 SetWindow
+		// precedent; nil-safe: currentVoiceCfg falls back to w.cfg).
+		cfgLive: w.currentVoiceCfg,
+		logger:  logger,
+	}
 }
 
 // voiceLinkSeams adapts the wiring's voice pieces onto the RPC seam set.
@@ -100,13 +143,7 @@ func voiceLinkSeams(w *VoiceWiring, store linkTranscriptSource, mgr *employee.Ma
 	if w == nil || w.Local == nil {
 		return rpc.VoiceLinkSeams{}
 	}
-	state := &voiceLinkState{
-		leg:    w.Local,
-		store:  store,
-		turns:  w.linkTurns,
-		cfg:    w.cfg,
-		logger: logger,
-	}
+	state := newVoiceLinkState(w, store, logger)
 	// Registry rules (busy / duplicate target) surface from inside
 	// LocalLeg.Open as voice.ErrBusy / voice.ErrDuplicateTarget and are
 	// mapped by mapVoiceLinkOpenErr - no registry read needed here.

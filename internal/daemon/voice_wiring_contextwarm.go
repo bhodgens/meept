@@ -344,6 +344,15 @@ func contextWarmEmployeeDef(src contextWarmSources, employeeID string) (*employe
 // resolveContextWarmDispatcher unwraps the session's serving chatter to the
 // concrete warm-capable client, following the SAME chain the turn
 // dispatches through: ContextFirewall.Inner, then the terminal chatter.
+// The incoming id is the warm SCOPE - BuildPrefix resolves it to the
+// session's CONVERSATION id (the turn's accounting lane), while the loop
+// manager keys on the SESSION id. Resolve the duality through src.Sessions
+// BEFORE the loop lookup (the mirror of BuildPrefix's session -> conversation
+// resolution, run in reverse): a conversation-id scope that skipped this
+// step missed both manager lookups and warmed the TEMPLATE chatter instead
+// of the session loop's reconfigured client (employee model override).
+// A nil store or a store miss keeps the legacy direct lookup; an id the
+// manager does not know falls through to the template - never a guess.
 // A *llm.ProviderManager is itself the dispatcher — it is NEVER unwrapped
 // to its primary entry, because the alias the real turn rides (carried on
 // the opts as WithResolvedModel, resolved read-only via
@@ -354,7 +363,20 @@ func contextWarmEmployeeDef(src contextWarmSources, employeeID string) (*employe
 // Returns nil (skip) when the chain holds no warm-aware client — an
 // Anthropic/Codex-terminal deployment no-ops there by C4 contract, and an
 // unresolvable chain never guesses an endpoint.
-func (w *VoiceWiring) resolveContextWarmDispatcher(src contextWarmSources, sessionID string) warmDispatcher {
+func (w *VoiceWiring) resolveContextWarmDispatcher(src contextWarmSources, scopeID string) warmDispatcher {
+	// Identity duality BEFORE the loop lookup: the scope may be the
+	// session's conversation id (BuildPrefix's output), but the loop
+	// manager keys on the session id. Resolve through the session store
+	// the same way BuildPrefix resolves the forward direction; a nil
+	// store or a miss keeps the raw id (the legacy direct-lookup shape).
+	sessionID := scopeID
+	if src.Sessions != nil && scopeID != "" {
+		if sess := src.Sessions.Get(scopeID); sess != nil && sess.ID != "" {
+			sessionID = sess.ID
+		} else if sess := src.Sessions.GetByConversationID(scopeID); sess != nil && sess.ID != "" {
+			sessionID = sess.ID
+		}
+	}
 	var chatter llm.Chatter
 	if loop := contextWarmLoopFor(src.Loops, sessionID); loop != nil {
 		chatter = loop.Chatter()

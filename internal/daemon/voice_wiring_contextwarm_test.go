@@ -382,6 +382,12 @@ func (c *cwFakeWarmChatter) Warm(_ context.Context, _ []llm.ChatMessage, _ ...ll
 	return nil
 }
 
+func (c *cwFakeWarmChatter) count() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.warms
+}
+
 // TestContextWarmWindowReloadLive pins bughunt 2026-11-19 M6 at the daemon
 // seam: resolveContextWarmWindow reads the LIVE snapshot (currentVoiceCfg),
 // not the boot w.cfg, and reloadVoiceConfig pushes the resolved window into
@@ -451,5 +457,172 @@ func TestContextWarmReloadNilWarmerNoOp(t *testing.T) {
 	w.contextWarmer.SetWindow(w.resolveContextWarmWindow())
 	if voice.ContextWarmRouting() != nil {
 		t.Fatal("disabled reload registered a warmer")
+	}
+}
+
+// TestContextWarmDispatcherResolvesConversationScope pins the wave-3
+// identity fix (bughunt 2026-11-19): warmFn receives the warm SCOPE -
+// BuildPrefix resolves the calls.db session id to the session's
+// CONVERSATION id - while the loop manager keys on the SESSION id.
+// resolveContextWarmDispatcher must resolve the duality through
+// src.Sessions BEFORE the loop lookup so the warm rides the SESSION
+// loop's chatter, never the template's. The employee model override
+// travels with that loop identity (BuildPrefix reads GetModelOverride
+// off the same loop).
+func TestContextWarmDispatcherResolvesConversationScope(t *testing.T) {
+	w, _ := newVoiceWiringForTest(t)
+	sessStore := session.NewMemoryStore(testLogger(t))
+	sess, err := sessStore.Create("voice link warm scope")
+	if err != nil {
+		t.Fatalf("session create: %v", err)
+	}
+
+	sessionFake := &cwFakeWarmChatter{}
+	templateFake := &cwFakeWarmChatter{}
+	tmpl := agent.NewAgentLoop("default", t.TempDir(), agent.WithLLMChatter(templateFake))
+	loopMgr := agent.NewManager(agent.ManagerConfig{})
+	// Session loop cloned from a DIFFERENT chatter than the template:
+	// the two fakes are distinguishable dispatcher identities.
+	sessTmpl := agent.NewAgentLoop("default", t.TempDir(), agent.WithLLMChatter(sessionFake))
+	loop, err := loopMgr.GetOrCreateWired(sess.ID, t.TempDir(), sessTmpl)
+	if err != nil {
+		t.Fatalf("GetOrCreateWired: %v", err)
+	}
+	// The employee's persistent model override rides the session loop.
+	loop.SetPersistentModelOverride("emp-override-model")
+
+	src := contextWarmSources{Loops: loopMgr, Template: tmpl, Sessions: sessStore}
+
+	// The scope the warmer actually hands the resolver: the session's
+	// CONVERSATION id (BuildPrefix output shape).
+	d := w.resolveContextWarmDispatcher(src, sess.ConversationID)
+	if d == nil {
+		t.Fatal("conversation-id scope resolved nil; the session loop must win")
+	}
+	if d != warmDispatcher(sessionFake) {
+		t.Fatalf("dispatcher = %T %p, want the SESSION loop chatter %p (template %p means the duality was skipped)", d, d, sessionFake, templateFake)
+	}
+
+	// A raw SESSION id still resolves (legacy direct-lookup shape).
+	if d2 := w.resolveContextWarmDispatcher(src, sess.ID); d2 != warmDispatcher(sessionFake) {
+		t.Fatalf("session-id scope dispatcher = %v, want the session loop chatter", d2)
+	}
+}
+
+// TestContextWarmDispatcherUnknownScopeFallsBackToTemplate pins the
+// graceful miss: a scope the session store does not know (and a nil
+// store) never guesses a session - the lookup keeps the raw id, misses
+// the manager, and falls through to the template chatter. An
+// unresolvable chain stays nil (the existing nil-skip contract).
+func TestContextWarmDispatcherUnknownScopeFallsBackToTemplate(t *testing.T) {
+	w, _ := newVoiceWiringForTest(t)
+	sessStore := session.NewMemoryStore(testLogger(t))
+	templateFake := &cwFakeWarmChatter{}
+	tmpl := agent.NewAgentLoop("default", t.TempDir(), agent.WithLLMChatter(templateFake))
+	src := contextWarmSources{
+		Loops:    agent.NewManager(agent.ManagerConfig{}),
+		Template: tmpl,
+		Sessions: sessStore,
+	}
+	d := w.resolveContextWarmDispatcher(src, "conv-unknown-scope")
+	if d != warmDispatcher(templateFake) {
+		t.Fatalf("unknown scope dispatcher = %v, want the template chatter fallback", d)
+	}
+	// nil store (hand-built wiring): same fallback, never a panic.
+	src.Sessions = nil
+	if d2 := w.resolveContextWarmDispatcher(src, "conv-unknown-scope"); d2 != warmDispatcher(templateFake) {
+		t.Fatalf("nil-store scope dispatcher = %v, want the template chatter fallback", d2)
+	}
+	// No template, no loop: nil-skip contract holds.
+	bare := contextWarmSources{Loops: agent.NewManager(agent.ManagerConfig{})}
+	if d3 := w.resolveContextWarmDispatcher(bare, "conv-unknown-scope"); d3 != nil {
+		t.Fatalf("unresolvable chain returned %v, want nil", d3)
+	}
+}
+
+// TestContextWarmScopeRidesSessionChatterNoTurns is the end-to-end shape
+// of the identity fix through the REAL warmer (no Dispatch override): a
+// partial frame fired on a call whose session loop carries its OWN
+// warm-capable chatter (employee override lane) lands the warm on THAT
+// chatter - not the template's - with the conversation scope, and starts
+// ZERO turns (R8: the warm never touches the turn lane).
+func TestContextWarmScopeRidesSessionChatterNoTurns(t *testing.T) {
+	w, _ := newVoiceWiringForTest(t)
+	w.cfg.ContextWarm = true
+	w.cfg.ContextWarmMinTokens = 1
+	w.cfg.TurnConfirmMs = 120
+
+	const ccid = "cc-ctxwarm-scope"
+	inst := acquireFor(w, ccid)
+
+	sessStore := session.NewMemoryStore(testLogger(t))
+	sess, err := sessStore.Create("voice call scope pin")
+	if err != nil {
+		t.Fatalf("session create: %v", err)
+	}
+	if err := w.Employee.store.Start(context.Background(), voice.CallRecord{
+		CallID:     ccid,
+		Number:     inst.Target,
+		EmployeeID: inst.EmployeeID,
+		Direction:  "incoming",
+		SessionID:  sess.ID,
+	}); err != nil {
+		t.Fatalf("call store start: %v", err)
+	}
+
+	sessionFake := &cwFakeWarmChatter{}
+	templateFake := &cwFakeWarmChatter{}
+	persona := "You are CW-SCOPE, the session-chatter warm probe employee."
+	tmpl := agent.NewAgentLoop("default", t.TempDir(), agent.WithLLMChatter(templateFake))
+	cfgTmpl := tmpl.GetConfig()
+	cfgTmpl.SystemPromptOveride = persona
+	tmpl.SetConfig(cfgTmpl)
+	loopMgr := agent.NewManager(agent.ManagerConfig{})
+	sessTmpl := agent.NewAgentLoop("default", t.TempDir(), agent.WithLLMChatter(sessionFake))
+	loop, err := loopMgr.GetOrCreateWired(sess.ID, t.TempDir(), sessTmpl)
+	if err != nil {
+		t.Fatalf("GetOrCreateWired: %v", err)
+	}
+	cfgLoop := loop.GetConfig()
+	cfgLoop.SystemPromptOveride = persona
+	loop.SetConfig(cfgLoop)
+	loop.SetPersistentModelOverride("emp-override-model")
+
+	cw := w.newContextWarmer(context.Background(), contextWarmSources{
+		Loops:     loopMgr,
+		Template:  tmpl,
+		Employees: cwStubResolver{err: errors.New("no definition needed")},
+		Sessions:  sessStore,
+	})
+	if cw == nil {
+		t.Fatal("enabled=true must construct the warmer")
+	}
+	voice.SetContextWarmRouting(cw)
+	w.contextWarmer = cw
+	t.Cleanup(func() { voice.SetContextWarmRouting(nil) })
+
+	turns := &cwRecordingRunner{}
+	armLoop(w, ccid, inst, turns)
+	w.routeFrame(voice.Frame{
+		CallID: ccid, Event: voice.EventPrompt,
+		Text: "ctxwarmnonce scope probe partial whose warm must ride the session chatter",
+	})
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && sessionFake.count() == 0 {
+		time.Sleep(20 * time.Millisecond)
+	}
+	w.releaseCall(ccid, voice.OutcomeHangup)
+
+	if sessionFake.count() == 0 {
+		t.Fatal("warm never reached the SESSION loop chatter (conversation-id scope missed the loop lookup)")
+	}
+	if n := templateFake.count(); n != 0 {
+		t.Errorf("template chatter warmed %d times; the session loop must own the warm", n)
+	}
+	turns.mu.Lock()
+	n := turns.calls
+	turns.mu.Unlock()
+	if n != 0 {
+		t.Errorf("warm started %d turns; R8 forbids any turn from the warm lane", n)
 	}
 }

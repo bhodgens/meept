@@ -17,6 +17,7 @@ import (
 
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/tools/builtin"
+	"github.com/caimlas/meept/internal/voice"
 )
 
 // TestWireVoiceLocalLegNilWhenDisabled pins T6: without voice.local.enabled
@@ -296,5 +297,82 @@ func TestWireVoiceLocalDisabledRefusalPreserved(t *testing.T) {
 	seams := voiceLocalSeams(w, nil, testLogger(t))
 	if seams.Open != nil {
 		t.Fatal("voice.local.open seam must be nil when the local leg is disabled, so ErrVoiceLocalDisabled keeps firing")
+	}
+}
+
+// TestVoiceLinkBackchannelSoftenReloadLive pins the wave-3 reload fix
+// (bughunt 2026-11-19): the link service's per-employee backchannel
+// soften resolver reads the LIVE [voice] snapshot, never the boot one.
+// The LinkManager is constructed lazily ONCE, so a boot-snapshot closure
+// froze voice.backchannel_soften across daemon.reloaded republishes while
+// the keys frame already read currentVoiceCfg. Drive the EXACT production
+// state construction (newVoiceLinkState, the voiceLinkSeams helper) and
+// swap cfgLive the way reloadVoiceConfig does.
+func TestVoiceLinkBackchannelSoftenReloadLive(t *testing.T) {
+	w, _ := newVoiceWiringForTest(t)
+	// A live local leg is required for the link state (the manager's
+	// construction refuses nil legs); build one over the test wiring's
+	// registry/manager/text server exactly as WireVoice does.
+	leg, err := voice.NewLocalLeg(voice.LocalLegConfig{Enabled: true}, voice.LocalDeps{
+		Registry:   w.Registry,
+		TextServer: w.TextServer,
+		Manager:    w.Manager,
+		Logger:     testLogger(t),
+	})
+	if err != nil {
+		t.Fatalf("NewLocalLeg: %v", err)
+	}
+	w.Local = leg
+	off := false
+	w.cfg.BackchannelSoften = &off
+
+	state := newVoiceLinkState(w, nil, testLogger(t))
+	// Boot read: global false, no rows.
+	if state.backchannelSoftenFor("emp-a") {
+		t.Fatal("boot resolve = true, want the boot global false")
+	}
+	// Construct the manager NOW (the lazy one-shot): the resolver closure
+	// it captures must still follow later config swaps.
+	if m := state.manager(); m == nil {
+		t.Fatal("link manager construction failed on a live leg")
+	}
+
+	// Config swap #1 (reloadVoiceConfig's exact seam): global true plus a
+	// per-employee explicit-false row - row > global must hold live.
+	on := true
+	live := w.cfg
+	live.BackchannelSoften = &on
+	rowOff := false
+	live.EmployeeLeg = []config.EmployeeLegConfig{
+		{Employee: "emp-b", BackchannelSoften: &rowOff},
+	}
+	w.cfgMu.Lock()
+	w.cfgLive = &live
+	w.cfgMu.Unlock()
+
+	if !state.backchannelSoftenFor("emp-a") {
+		t.Fatal("post-swap resolve(emp-a) = false, want the NEW global true (boot snapshot froze the toggle)")
+	}
+	if state.backchannelSoftenFor("emp-b") {
+		t.Fatal("post-swap resolve(emp-b) = true, want the live row's explicit false (row > global)")
+	}
+
+	// Config swap #2: toggle back off live; the boot snapshot is untouched.
+	live2 := live
+	live2.BackchannelSoften = &off
+	w.cfgMu.Lock()
+	w.cfgLive = &live2
+	w.cfgMu.Unlock()
+	if state.backchannelSoftenFor("emp-a") {
+		t.Fatal("second-swap resolve = true, want the live false")
+	}
+	if w.cfg.BackchannelSoften == nil || *w.cfg.BackchannelSoften {
+		t.Fatal("test corrupted the boot snapshot")
+	}
+
+	// Hand-built state without the live seam: falls back to cfg, no panic.
+	bare := &voiceLinkState{cfg: live}
+	if !bare.backchannelSoftenFor("emp-a") {
+		t.Fatal("nil-seam fallback must read the construction cfg snapshot")
 	}
 }
