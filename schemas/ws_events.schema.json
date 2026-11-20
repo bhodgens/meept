@@ -63,6 +63,7 @@
         "classified_by": { "type": "string" },
         "model": { "type": "string" },
         "error": { "type": "string" },
+        "rejection_reason": { "type": "string", "description": "Verbatim user rejection reason (20261119-usability-remediation C1, 01-safety leaf 01); set iff handler_case=task_rejected_relay" },
         "source_topic": { "type": "string" },
         "timestamp": { "$ref": "#/definitions/rfc3339String" },
         "type": { "const": "agent_progress" }

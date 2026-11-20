@@ -477,7 +477,8 @@
       "config-reload",
       "github-intake",
       "agent-groups",
-      "llm-serving-tiers"
+      "llm-serving-tiers",
+      "plan-critic"
     ],
     "internal/agent/plan_critic_child.go": [
       "plan-critic"
@@ -789,6 +790,27 @@
     ],
     "internal/agent/plan_draft.go": [
       "plan-lifecycle"
+    ],
+    "internal/agent/strategic.go": [
+      "plan-critic"
+    ],
+    "internal/agent/handler.go": [
+      "plan-critic"
+    ],
+    "internal/rpc/task_approval.go": [
+      "plan-critic"
+    ],
+    "internal/rpc/plan.go": [
+      "plan-lifecycle"
+    ],
+    "internal/rpc/plan_seal.go": [
+      "plan-lifecycle"
+    ],
+    "e2e/suites/plan-lifecycle": [
+      "plan-lifecycle"
+    ],
+    "e2e/suites/tui-flows": [
+      "tui-flows"
     ]
   },
   "exempt": {},
@@ -3663,6 +3685,38 @@
       ]
     },
     {
+      "id": "tui-approval-01",
+      "suite": "tui-flows",
+      "diff": "M",
+      "title": "approval card in situ (F13a): a gated plan dispatched through a real turn renders a task.pending_approval chat card (task id + approve/reject affordance); the orphan topic is dropped by the App event switch today",
+      "paths": [
+        "internal/tui/app.go",
+        "internal/tui/models/chat.go",
+        "e2e/suites/tui-flows"
+      ]
+    },
+    {
+      "id": "tui-mode-01",
+      "suite": "tui-flows",
+      "diff": "M",
+      "title": "mode badge in situ (F13c): a direct work turn renders a distinguishable mode badge in the chat transcript from the C1 intent_type/handler_case fields (no badge today)",
+      "paths": [
+        "internal/tui/models/chat.go",
+        "internal/tui/app.go",
+        "e2e/suites/tui-flows"
+      ]
+    },
+    {
+      "id": "tui-evolver-01",
+      "suite": "tui-flows",
+      "diff": "S",
+      "title": "evolver document render in situ (F13c): a 0-phase plan.create document proposal renders the planCountLine wording (document proposal) in the plans view, not literal zero counts",
+      "paths": [
+        "internal/tui/models/plans.go",
+        "e2e/suites/tui-flows"
+      ]
+    },
+    {
       "id": "gui-terminal-01",
       "suite": "gui-flows",
       "diff": "M",
@@ -4714,6 +4768,30 @@
       "title": "zero-decision compile rule: a phase with a mutating tool_hint that neither produces nor consumes a decision artifact fails CompileSealed; non-mutating phases and consumers of earlier decisions still compile",
       "paths": [
         "internal/plan/compiler.go",
+        "e2e/suites/plan-critic"
+      ]
+    },
+    {
+      "id": "critic-approval-07",
+      "suite": "plan-critic",
+      "diff": "M",
+      "title": "approval threshold config: orchestrator.task_approval_step_threshold is a live config key (default 5, 0 disables and round-trips); a >=threshold-step plan parks at awaiting_approval and task.approve resumes it (F13a, C2)",
+      "paths": [
+        "internal/config/schema.go",
+        "internal/agent/strategic.go",
+        "internal/rpc/task_approval.go",
+        "e2e/suites/plan-critic"
+      ]
+    },
+    {
+      "id": "critic-approval-08",
+      "suite": "plan-critic",
+      "diff": "M",
+      "title": "reject never executes (C2 load-bearing): task.reject on a gated plan lands rejected with ZERO step jobs run and relays turn.terminal failed handler_case=task_rejected_relay carrying the reason; threshold=0 disables the gate end to end (F13a, C2/C6)",
+      "paths": [
+        "internal/rpc/task_approval.go",
+        "internal/agent/strategic.go",
+        "internal/agent/handler.go",
         "e2e/suites/plan-critic"
       ]
     },
@@ -6016,6 +6094,29 @@
         "internal/agent/dispatcher.go",
         "internal/agent/plan_draft.go",
         "internal/agent/strategic.go"
+      ]
+    },
+    {
+      "id": "plan-lifecycle-05",
+      "suite": "plan-lifecycle",
+      "diff": "M",
+      "title": "plan.failed delivery (C6): a plan whose phase failed terminalizes failed in the store AND publishes plan.failed {plan_id, session_id, reason} so clients learn of the failure directly (failPlan publishes nothing today)",
+      "paths": [
+        "internal/plan/manager.go",
+        "internal/rpc/plan.go",
+        "e2e/suites/plan-lifecycle"
+      ]
+    },
+    {
+      "id": "plan-lifecycle-06",
+      "suite": "plan-lifecycle",
+      "diff": "M",
+      "title": "compiler draft/seal surface contract (F13b): plan_compiler_enabled seeds a plan-dialect draft (plan.draft get returns markdown); plan.seal on the raw scaffold returns compile problems inline (line+message) or an honest error, NEVER auto-seals; the draft stays a draft",
+      "paths": [
+        "internal/agent/plan_draft.go",
+        "internal/rpc/plan_seal.go",
+        "internal/plan/compiler.go",
+        "e2e/suites/plan-lifecycle"
       ]
     }
   ]

@@ -2162,6 +2162,11 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		if rpcServer != nil {
 			approvalHandler := rpc.NewTaskApprovalHandler(
 				components.Orchestrator.Strategic().ApprovePlan)
+			// 01-safety leaf 01 (W1/C2): task.reject must REJECT. Wire
+			// StrategicPlanner.RejectPlan (StateRejected + task.rejected
+			// publication) as the reject seam; previously handleReject
+			// called ApproveFunc and executed the refused plan.
+			approvalHandler.RejectFunc = components.Orchestrator.Strategic().RejectPlan
 			approvalHandler.RegisterTaskApprovalMethods(rpcServer)
 			logger.Info("Task approval RPC handlers registered")
 		}

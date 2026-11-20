@@ -1719,6 +1719,10 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/v1/tasks/{id}", s.handleTaskUpdate)
 	mux.HandleFunc("DELETE /api/v1/tasks/{id}", s.handleTaskDelete)
 	mux.HandleFunc("POST /api/v1/tasks/{id}/cancel", s.handleTaskCancel)
+	// C2 HTTP twins (01-safety leaf 01): same TaskApprovalHandler seams as
+	// the task.approve / task.reject RPC methods, via rpcCall.
+	mux.HandleFunc("POST /api/v1/tasks/{id}/approve", s.handleTaskApprove)
+	mux.HandleFunc("POST /api/v1/tasks/{id}/reject", s.handleTaskReject)
 	mux.HandleFunc("GET /api/v1/tasks/{id}/steps", s.handleTaskSteps)
 	mux.HandleFunc("POST /api/v1/tasks/{id}/link-session", s.handleTaskLinkSession)
 	mux.HandleFunc("POST /api/v1/tasks/{id}/unlink-session", s.handleTaskUnlinkSession)

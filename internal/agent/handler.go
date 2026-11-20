@@ -313,6 +313,12 @@ type TurnTerminalEvent struct {
 	// (20260916-turn-lifecycle-events extension note updated in the same
 	// change).
 	TurnSpanID string `json:"turn_span_id,omitempty"`
+	// RejectionReason (20261119-usability-remediation C1, 01-safety leaf
+	// 01): the verbatim user rejection reason, set iff
+	// HandlerCase=="task_rejected_relay". Additive optional key, declared
+	// in schemas/ws_events.schema.json in the same change; consumers
+	// decoding the frozen key set ignore it.
+	RejectionReason string `json:"rejection_reason,omitempty"`
 }
 
 // WSClass implements wsclass.WSClassified: turn lifecycle events render
@@ -358,6 +364,10 @@ func (h *ChatHandler) Start(ctx context.Context) error {
 	// Subscribe to task completion events for result push-back
 	taskCompletedSub := h.bus.Subscribe(SourceChatHandler, "task.completed")
 	taskFailedSub := h.bus.Subscribe(SourceChatHandler, "task.failed")
+	// 01-safety leaf 01 (C2): task.rejected (StrategicPlanner.RejectPlan)
+	// must terminalize the originating turn; without this subscription the
+	// rejected turn waited for the watchdog to falsely reap it.
+	taskRejectedSub := h.bus.Subscribe(SourceChatHandler, "task.rejected")
 
 	// Async-turn liveness (relay-fix follow-up, bench gate 2026-09-17):
 	// task.progress events fire on task/step transitions — including long
@@ -380,7 +390,7 @@ func (h *ChatHandler) Start(ctx context.Context) error {
 	// Subscribe to collaboration result events to push results back to chat sessions
 	collabResultSub := h.bus.Subscribe(SourceChatHandler, TopicCollabResult)
 
-	h.wg.Add(9)
+	h.wg.Add(10)
 
 	// Chat request handler
 	go func() {
@@ -466,6 +476,25 @@ func (h *ChatHandler) Start(ctx context.Context) error {
 					return
 				}
 				h.handleTaskFailed(msg)
+			}
+		}
+	}()
+
+	// Task rejected handler (01-safety leaf 01, C2): a user rejection
+	// terminalizes the originating turn with the reason - the plan never
+	// executes and the watchdog must not later reap an answered turn.
+	go func() {
+		defer h.wg.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				h.bus.Unsubscribe(taskRejectedSub)
+				return
+			case msg, ok := <-taskRejectedSub.Channel:
+				if !ok {
+					return
+				}
+				h.handleTaskRejected(msg)
 			}
 		}
 	}()
@@ -2162,7 +2191,7 @@ func (h *ChatHandler) handleTaskCompleted(msg *models.BusMessage) {
 	// Session→conversation correlation reuses the live worker map; when no
 	// worker matches, the task_id sentinel keys the event for consumers.
 	h.publishTaskTerminalRelay(payload.TaskID, payload.LinkedSessions,
-		"task_completed_relay", status, relayReply, relayError)
+		"task_completed_relay", status, relayReply, relayError, "")
 }
 
 // publishTaskTerminalRelay emits the turn.terminal event for a task-end
@@ -2170,7 +2199,7 @@ func (h *ChatHandler) handleTaskCompleted(msg *models.BusMessage) {
 // to a live worker's conversation wins; otherwise the first linked session
 // ID is used as the conversation; with no linked sessions at all the
 // "task:<taskID>" sentinel keys the event for consumers (Task 3 contract).
-func (h *ChatHandler) publishTaskTerminalRelay(taskID string, linkedSessions []string, handlerCase, status, reply, errMsg string) {
+func (h *ChatHandler) publishTaskTerminalRelay(taskID string, linkedSessions []string, handlerCase, status, reply, errMsg, rejectionReason string) {
 	conversationID := ""
 	sessionID := ""
 	for _, sID := range linkedSessions {
@@ -2221,6 +2250,10 @@ func (h *ChatHandler) publishTaskTerminalRelay(taskID string, linkedSessions []s
 		Error:          errMsg,
 		TraceID:        relayTraceID,
 		TurnSpanID:     relayTurnSpanID,
+		// C1 additive key (01-safety leaf 01): verbatim rejection reason,
+		// non-empty only on the task_rejected_relay case (omitempty keeps
+		// every other terminal's bytes identical).
+		RejectionReason: rejectionReason,
 	})
 	// The task→turn registry edge has served its purpose (the relay
 	// recovered the originating id): drop the entry so the watchdog does
@@ -2359,7 +2392,53 @@ func (h *ChatHandler) handleTaskFailed(msg *models.BusMessage) {
 	// mirrors the completed-task relay — same correlation, Status
 	// "failed" with the error text.
 	h.publishTaskTerminalRelay(payload.TaskID, payload.LinkedSessions,
-		"task_failed_relay", "failed", reply, payload.Error)
+		"task_failed_relay", "failed", reply, payload.Error, "")
+}
+
+// handleTaskRejected relays a user rejection (StrategicPlanner.RejectPlan's
+// task.rejected publication) to the originating turn as a failed terminal
+// (01-safety leaf 01, C2). The reason reaches the user verbatim in both the
+// error field and the C1 rejection_reason key; the plan never executes.
+func (h *ChatHandler) handleTaskRejected(msg *models.BusMessage) {
+	var payload struct {
+		TaskID string `json:"task_id"`
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		h.logger.Error("Failed to parse task.rejected payload", "error", err)
+		return
+	}
+	if payload.TaskID == "" {
+		h.logger.Warn("task.rejected without task_id; dropping", "topic", msg.Topic)
+		return
+	}
+
+	h.logger.Info("Task rejected by user, terminalizing originating turn",
+		"task_id", payload.TaskID,
+		"reason", payload.Reason,
+	)
+
+	// task.rejected carries only {task_id, reason}; recover the linked
+	// sessions from the task store so session-scoped clients see the
+	// terminal under their own conversation (best effort, nil-safe).
+	var linkedSessions []string
+	if h.taskStore != nil {
+		sessions, err := h.taskStore.GetLinkedSessions(payload.TaskID)
+		if err != nil {
+			h.logger.Warn("failed to resolve linked sessions for rejected task",
+				"task_id", payload.TaskID, "error", err)
+		} else {
+			linkedSessions = sessions
+		}
+	}
+
+	reply := "## plan rejected\n\nThe plan was rejected and will not execute."
+	if payload.Reason != "" {
+		reply += "\n\n**reason:** " + payload.Reason
+	}
+
+	h.publishTaskTerminalRelay(payload.TaskID, linkedSessions,
+		"task_rejected_relay", "failed", reply, payload.Reason, payload.Reason)
 }
 
 // formatTaskFailedMessage builds a human-readable task failure message.

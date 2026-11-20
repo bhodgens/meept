@@ -764,7 +764,7 @@ func TestPublishTaskTerminalRelay_UsesOriginatingTurnID(t *testing.T) {
 	defer h.bus.Unsubscribe(sub)
 
 	h.publishTaskTerminalRelay("task-77", []string{"sess-1"},
-		"task_completed_relay", "completed", "the real result", "")
+		"task_completed_relay", "completed", "the real result", "", "")
 
 	ev := waitTurnTerminal(t, sub)
 	if ev.TurnID != "turn-orig" {
@@ -790,7 +790,7 @@ func TestPublishTaskTerminalRelay_UntrackedTaskGetsFreshID(t *testing.T) {
 	defer h.bus.Unsubscribe(sub)
 
 	h.publishTaskTerminalRelay("task-99", nil,
-		"task_completed_relay", "completed", "result", "")
+		"task_completed_relay", "completed", "result", "", "")
 
 	ev := waitTurnTerminal(t, sub)
 	if ev.TurnID == "" || ev.TurnID == "turn-orig" {

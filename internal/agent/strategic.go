@@ -201,6 +201,10 @@ type StrategicPlanner struct {
 	maxStepsPerPhase      int
 	planPhaseSink         func(taskID string, phases []PlanPhaseSpec)
 	planCompilerEnabled   bool
+	// turnLivenessTouch is the C7 activity heartbeat (01-safety/04):
+	// draft/seal/approval activity Touches the tracked turn via this
+	// registry-edge seam. Set via SetTurnLivenessTouch; nil = no heartbeat.
+	turnLivenessTouch func(taskID string)
 	// TierComplex critique loop (tiered-iteration leaf 02). selfSealEnabled
 	// gates the autonomous seal (plans.self_seal_enabled, default false —
 	// ships dark); maxCritiqueRounds caps the draft-critique-refine rounds
@@ -2227,6 +2231,12 @@ func (sp *StrategicPlanner) awaitUserApproval(ctx context.Context, t *task.Task,
 
 	sp.recordMetric("strategic_planner.approval_gate", 1, nil)
 
+	// C7 activity heartbeat: entering the approval gate is activity on
+	// the tracked turn (the exemption keeps the parked turn safe; this
+	// refreshes liveness so the post-approval executing window starts
+	// fresh).
+	sp.touchTurnLiveness(req.TaskID)
+
 	sp.publishEvent("task.pending_approval", map[string]any{
 		KeyTaskID:    req.TaskID,
 		"session_id": req.SessionID,
@@ -2328,6 +2338,9 @@ func (sp *StrategicPlanner) ApprovePlan(ctx context.Context, taskID string) erro
 	})
 
 	sp.logger.Info("Plan approved and scheduled", "task_id", taskID)
+	// C7 activity heartbeat: the human approval decision is activity;
+	// refresh liveness before the executing phase begins.
+	sp.touchTurnLiveness(taskID)
 	return nil
 }
 
