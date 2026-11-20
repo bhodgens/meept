@@ -1789,6 +1789,14 @@ class _ChatInputState extends ConsumerState<ChatInput>
     try {
       final client = ref.read(sdkClientProvider);
 
+      // L16 race guard (bughunt 2026-11-19 wave 2): snapshot the session's
+      // description BEFORE the async generation so a user rename landing
+      // while the summarizer runs is detectable when the result arrives.
+      // The daemon's auto lane already refuses to overwrite a user-set
+      // description server-side; this guard keeps the LOCAL display from
+      // reverting the rename too.
+      final baselineDescription = _currentSessionDescription(sessionId);
+
       // Name the session from ITS OWN bound project, never the globally
       // active project. The old code used currentProjectProvider (the first
       // status=="active" entry), which named every new session after
@@ -1820,6 +1828,22 @@ class _ChatInputState extends ConsumerState<ChatInput>
       final newName = result['name'] as String?;
       final newDescription = result['description'] as String?;
       if (newName == null || newName.isEmpty) return;
+      if (!mounted) return;
+
+      // L16 race guard: if the session's description changed while the
+      // summarizer was in flight, a user rename intervened. The daemon
+      // already preserved it (auto lane); skip the local patch so the
+      // rename is not visually reverted. The daemon's response also echoes
+      // the user's description when it preserved one, so an unchanged
+      // baseline + echoed user text still lands correctly below.
+      final currentDescription = _currentSessionDescription(sessionId);
+      if (currentDescription != baselineDescription) {
+        debugPrint(
+          '[info] generateSessionDescription: rename intervened, keeping user title',
+        );
+        return;
+      }
+
       // Display precedence must match a reload (H5): the summarizer's
       // description is the display title; the single-word name is only
       // the fallback when no description came back.
@@ -1860,6 +1884,19 @@ class _ChatInputState extends ConsumerState<ChatInput>
       // Best-effort: leave the existing title ("new session") on failure.
       debugPrint('[warn] generateSessionDescription: $e');
     }
+  }
+
+  /// Reads the session's current description from local state (list first,
+  /// active session fallback) - the L16 rename-race baseline source. Null
+  /// when the session is not loaded locally; null == null keeps the guard
+  /// inert for sessions the client has no local row for.
+  String? _currentSessionDescription(String sessionId) {
+    for (final s in ref.read(sessionProvider).sessions) {
+      if (s.id == sessionId) return s.description;
+    }
+    final active = ref.read(activeSessionProvider);
+    if (active != null && active.id == sessionId) return active.description;
+    return null;
   }
 
   void _sendSteer(String text) {

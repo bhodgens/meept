@@ -60,6 +60,7 @@ type MockChatRPCClient struct {
 
 	// Session-naming project resolution tracking (M13)
 	GeneratedProjectNames []string        // projectName per GenerateSessionDescription call
+	GenerateErr           error           // injected GenerateSessionDescription failure (L16 race pins)
 	SessionGetResp        json.RawMessage // session.get payload (nil = empty object)
 	ProjectListResp       json.RawMessage // project.list payload (nil = empty object)
 	CallErr               error           // generic Call failure injection
@@ -142,6 +143,9 @@ func (m *MockChatRPCClient) UpdateSessionDescription(sessionID, description stri
 func (m *MockChatRPCClient) GenerateSessionDescription(sessionID, firstMessage, projectName string) (*types.GenerateDescriptionResult, error) {
 	// Record the resolved project name (M13 pin).
 	m.GeneratedProjectNames = append(m.GeneratedProjectNames, projectName)
+	if m.GenerateErr != nil {
+		return nil, m.GenerateErr
+	}
 	// Simulate LLM-generated description
 	desc := "mock: " + firstMessage
 	if len(desc) > 30 {
@@ -2017,5 +2021,162 @@ func TestChatModel_DescriptionUnboundSessionPassesEmpty(t *testing.T) {
 	cmd()
 	if len(mock.GeneratedProjectNames) != 1 || mock.GeneratedProjectNames[0] != "" {
 		t.Errorf("projectName passed = %v, want [\"\"] for an unbound session", mock.GeneratedProjectNames)
+	}
+}
+
+// TestChatModel_AutoDescriptionRenameRace pins L16 (bughunt 2026-11-19
+// wave 2): a user rename landing while first-exchange auto-naming is in
+// flight must survive the async result. The rename replaces the
+// "summarizing..." placeholder, so the stale generated description is
+// dropped instead of painted over the user's text.
+func TestChatModel_AutoDescriptionRenameRace(t *testing.T) {
+	mock := NewMockChatRPCClient()
+	style := lipgloss.NewStyle()
+	model := NewChatModelWithConfig(mock, style, style, style, "once", InputBehaviorConfig{EnterBehavior: "shift_sends"}, ChatConfig{LivenessTimeout: 120 * time.Second})
+	model.SetSize(80, 24)
+	model.sessionID = "sess-1"
+
+	model.addMessage(RoleUser, "What is the weather like today")
+	model.addMessage(RoleAssistant, "The weather is sunny!")
+	cmd := model.maybeGenerateDescription()
+	if cmd == nil {
+		t.Fatal("first exchange produced no description command")
+	}
+	if model.sessionDescription != "summarizing..." {
+		t.Fatalf("placeholder not armed: %q", model.sessionDescription)
+	}
+	gen := model.descriptionGen
+	if gen == 0 {
+		t.Fatal("generation counter not bumped")
+	}
+
+	// User renames while generation is in flight (the app-level rename
+	// delivers a generation-0 SessionDescriptionUpdatedMsg).
+	model.Update(SessionDescriptionUpdatedMsg{SessionID: "sess-1", Description: "my renamed session"})
+	if model.sessionDescription != "my renamed session" {
+		t.Fatalf("rename did not land: %q", model.sessionDescription)
+	}
+
+	// The async auto result lands afterwards: it must NOT overwrite.
+	model.Update(SessionDescriptionUpdatedMsg{
+		SessionID:   "sess-1",
+		Name:        "weather",
+		Description: "mock: What is the weather like...",
+		Generation:  gen,
+	})
+	if model.sessionDescription != "my renamed session" {
+		t.Fatalf("stale auto result overwrote the rename: %q", model.sessionDescription)
+	}
+}
+
+// TestChatModel_AutoDescriptionSkipMsg pins the explicit Skip lane: the
+// fallback writer detected a user-set description server-side and told the
+// model to keep its current text.
+func TestChatModel_AutoDescriptionSkipMsg(t *testing.T) {
+	mock := NewMockChatRPCClient()
+	style := lipgloss.NewStyle()
+	model := NewChatModelWithConfig(mock, style, style, style, "once", InputBehaviorConfig{EnterBehavior: "shift_sends"}, ChatConfig{LivenessTimeout: 120 * time.Second})
+	model.SetSize(80, 24)
+	model.sessionID = "sess-1"
+	model.sessionDescription = "my renamed session"
+	model.descriptionGen = 3
+
+	model.Update(SessionDescriptionUpdatedMsg{SessionID: "sess-1", Description: "fallback text", Generation: 3, Skip: true})
+	if model.sessionDescription != "my renamed session" {
+		t.Fatalf("Skip message overwrote the rename: %q", model.sessionDescription)
+	}
+}
+
+// TestChatModel_AutoDescriptionStaleGeneration pins the generation guard:
+// a result from a superseded attempt (session reset/switch re-armed the
+// counter) never lands even if the placeholder happens to be armed again.
+func TestChatModel_AutoDescriptionStaleGeneration(t *testing.T) {
+	mock := NewMockChatRPCClient()
+	style := lipgloss.NewStyle()
+	model := NewChatModelWithConfig(mock, style, style, style, "once", InputBehaviorConfig{EnterBehavior: "shift_sends"}, ChatConfig{LivenessTimeout: 120 * time.Second})
+	model.SetSize(80, 24)
+	model.sessionID = "sess-1"
+	model.sessionDescription = "summarizing..."
+	model.descriptionGen = 5
+
+	model.Update(SessionDescriptionUpdatedMsg{SessionID: "sess-1", Description: "old attempt", Generation: 4})
+	if model.sessionDescription != "summarizing..." {
+		t.Fatalf("stale generation landed: %q", model.sessionDescription)
+	}
+	model.Update(SessionDescriptionUpdatedMsg{SessionID: "sess-1", Description: "current attempt", Generation: 5})
+	if model.sessionDescription != "current attempt" {
+		t.Fatalf("current generation dropped: %q", model.sessionDescription)
+	}
+}
+
+// TestChatModel_AutoDescriptionFallbackSkipsUserSet pins the fallback
+// writer's server-side re-check: when GenerateSessionDescription fails and
+// the stored description is already user-set, the fallback must NOT write
+// through session.update_description (the USER lane would stamp the stale
+// text as a rename).
+func TestChatModel_AutoDescriptionFallbackSkipsUserSet(t *testing.T) {
+	mock := NewMockChatRPCClient()
+	mock.GenerateErr = errors.New("summarizer down")
+	mock.SessionGetResp = json.RawMessage(`{"id":"sess-1","description":"my renamed session","description_user_set":true}`)
+	style := lipgloss.NewStyle()
+	model := NewChatModelWithConfig(mock, style, style, style, "once", InputBehaviorConfig{EnterBehavior: "shift_sends"}, ChatConfig{LivenessTimeout: 120 * time.Second})
+	model.SetSize(80, 24)
+	model.sessionID = "sess-1"
+	model.addMessage(RoleUser, "hello there")
+	model.addMessage(RoleAssistant, "hi")
+
+	cmd := model.maybeGenerateDescription()
+	if cmd == nil {
+		t.Fatal("no description command")
+	}
+	raw := cmd()
+	msg, ok := raw.(SessionDescriptionUpdatedMsg)
+	if !ok {
+		t.Fatalf("unexpected msg type %T", raw)
+	}
+	if !msg.Skip {
+		t.Fatal("fallback must skip when the stored description is user-set")
+	}
+	if _, wrote := mock.UpdatedDescriptions["sess-1"]; wrote {
+		t.Fatal("fallback wrote through the user lane despite a user-set description")
+	}
+	model.Update(msg)
+	if model.sessionDescription == "hello there" {
+		t.Fatal("skip message painted fallback text")
+	}
+}
+
+// TestChatModel_AutoDescriptionFallbackStillWorks pins the legacy fallback:
+// generation failure on an UN-renamed session still extracts and writes a
+// description (marker false server-side).
+func TestChatModel_AutoDescriptionFallbackStillWorks(t *testing.T) {
+	mock := NewMockChatRPCClient()
+	mock.GenerateErr = errors.New("summarizer down")
+	mock.SessionGetResp = json.RawMessage(`{"id":"sess-1"}`)
+	style := lipgloss.NewStyle()
+	model := NewChatModelWithConfig(mock, style, style, style, "once", InputBehaviorConfig{EnterBehavior: "shift_sends"}, ChatConfig{LivenessTimeout: 120 * time.Second})
+	model.SetSize(80, 24)
+	model.sessionID = "sess-1"
+	model.addMessage(RoleUser, "hello there friend")
+	model.addMessage(RoleAssistant, "hi")
+
+	cmd := model.maybeGenerateDescription()
+	if cmd == nil {
+		t.Fatal("no description command")
+	}
+	raw := cmd()
+	msg, ok := raw.(SessionDescriptionUpdatedMsg)
+	if !ok {
+		t.Fatalf("unexpected msg type %T", raw)
+	}
+	if msg.Skip {
+		t.Fatal("fallback must still run on an un-renamed session")
+	}
+	if got := mock.UpdatedDescriptions["sess-1"]; got != "hello there friend" {
+		t.Fatalf("fallback description = %q, want the extracted text", got)
+	}
+	model.Update(msg)
+	if model.sessionDescription != "hello there friend" {
+		t.Fatalf("fallback result dropped: %q", model.sessionDescription)
 	}
 }

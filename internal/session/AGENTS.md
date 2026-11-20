@@ -46,3 +46,24 @@ The accounting session id (`session_id` vs `conversation_id` duality, root
 AGENTS.md) is the key every downstream consumer — sticky endpoint map,
 teardown snapshot, budget scopes — shares with the LLM layer; never mint a
 second identity for lifecycle events.
+
+## User renames are durable (description_user_set)
+
+`Session.DescriptionUserSet` (column `description_user_set`, additive
+migration, legacy rows default 0) marks a USER-authored description.
+`Store.UpdateDescription` is the USER rename lane (RPC
+`session.update_description`, services/HTTP PATCH description): it stamps
+the marker. `Store.UpdateDescriptionAuto` is the AUTO-NAMER lane
+(`session.generate_description`, `session.refresh_title`): the SQLite
+guard is ONE statement (`WHERE description_user_set = 0`), so a rename
+landing between an auto-namer's read and write can never be clobbered;
+it returns `(false, nil)` when the rename is preserved and still errors
+on a missing session. Auto namers keep updating `Name` on renamed
+sessions, and when the description write is skipped they report/publish
+the USER's description (never the generated text) so live title events
+and RPC responses cannot visually revert a rename. The agent loop's
+periodic `triggerTitleRefresh` publishes only (no store write) and
+applies the same user-description substitution to its event payload.
+Clients additionally re-check for an intervening rename before painting
+an async auto-name result (TUI generation counter + placeholder guard,
+GUI description-baseline guard).

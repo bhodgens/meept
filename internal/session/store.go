@@ -93,6 +93,12 @@ type Store interface {
 	GetMessages(sessionID string, offset, limit int) ([]Message, error)
 	GetMessageCount(sessionID string) (int, error)
 	UpdateDescription(sessionID, description string) error
+	// UpdateDescriptionAuto is the AUTO-NAMER lane: it writes the description
+	// ONLY when the session's description is not user-set. Returns
+	// (false, nil) when a user rename is preserved (no write). A missing
+	// session still errors. User renames go through UpdateDescription, which
+	// stamps DescriptionUserSet.
+	UpdateDescriptionAuto(sessionID, description string) (bool, error)
 	UpdateName(sessionID, name string) error
 	Archive(sessionID string, archived bool) error
 	HasResponses(sessionID string) (bool, error)

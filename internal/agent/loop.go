@@ -11198,6 +11198,20 @@ func (l *AgentLoop) triggerTitleRefresh(ctx context.Context, conversationID stri
 		return
 	}
 
+	// User-rename durability (bughunt 2026-11-19 wave 2): this path publishes
+	// only (the store write lives in the session handler's refresh_title
+	// lane), but the event feeds live GUI title updates - publishing the
+	// GENERATED description would visually revert a user rename. When the
+	// stored description is user-set, publish the user's text instead. The
+	// auto name still refreshes. A missing store/read keeps legacy behavior.
+	if l.sessionStore != nil {
+		if raw := l.sessionStore.Get(sessionID); raw != nil {
+			if sess, ok := raw.(*session.Session); ok && sess != nil && sess.DescriptionUserSet {
+				result.Description = sess.Description
+			}
+		}
+	}
+
 	// Publish event for GUI updates
 	if l.bus != nil {
 		payload, mErr := json.Marshal(map[string]any{

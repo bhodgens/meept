@@ -752,5 +752,9 @@ func (s *SessionService) UpdateDescription(ctx context.Context, req UpdateDescri
 		return nil, wrapError("session", "UpdateDescription", err)
 	}
 	sess.Description = req.Description
+	// UpdateDescription is the USER rename lane: the store stamps the
+	// user-set marker; mirror it on the returned row (MemoryStore returns
+	// the live pointer, SQLiteStore a fresh scan - keep both consistent).
+	sess.DescriptionUserSet = true
 	return sess, nil
 }

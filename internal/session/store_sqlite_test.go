@@ -1861,3 +1861,124 @@ func TestSQLiteStore_ForkSession_PreservesTraceIDs(t *testing.T) {
 			copied[0].TraceID, traceID, copied[0].SpanID, spanID)
 	}
 }
+
+// TestSQLiteStore_UserRenameDurability pins bughunt 2026-11-19 wave 2: a
+// user rename (UpdateDescription) stamps description_user_set and survives
+// every later auto-namer write (UpdateDescriptionAuto); un-renamed sessions
+// still auto-name; the auto name lane keeps working on renamed sessions.
+func TestSQLiteStore_UserRenameDurability(t *testing.T) {
+	store, _ := testHelper(t)
+	defer store.Close()
+
+	sess, err := store.Create("rename-durability")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	// Fresh session: marker false, auto lane writes.
+	if got := store.Get(sess.ID); got == nil || got.DescriptionUserSet {
+		t.Fatal("fresh session must not be user-set")
+	}
+	written, err := store.UpdateDescriptionAuto(sess.ID, "coding: first auto title")
+	if err != nil || !written {
+		t.Fatalf("auto write on un-renamed session: written=%v err=%v", written, err)
+	}
+	if got := store.Get(sess.ID); got == nil || got.Description != "coding: first auto title" {
+		t.Fatalf("auto description did not land: %+v", got)
+	}
+
+	// User rename stamps the marker.
+	if err := store.UpdateDescription(sess.ID, "my renamed session"); err != nil {
+		t.Fatalf("user rename: %v", err)
+	}
+	got := store.Get(sess.ID)
+	if got == nil || !got.DescriptionUserSet || got.Description != "my renamed session" {
+		t.Fatalf("rename did not stamp marker: %+v", got)
+	}
+
+	// Auto lane must NOT overwrite the rename (repeat = periodic refresher).
+	for i := 0; i < 3; i++ {
+		written, err := store.UpdateDescriptionAuto(sess.ID, "coding: refreshed title")
+		if err != nil {
+			t.Fatalf("auto write %d: %v", i, err)
+		}
+		if written {
+			t.Fatalf("auto write %d overwrote a user-set description", i)
+		}
+	}
+	got = store.Get(sess.ID)
+	if got == nil || got.Description != "my renamed session" || !got.DescriptionUserSet {
+		t.Fatalf("user rename lost after auto refreshes: %+v", got)
+	}
+
+	// The auto NAME lane still works on a renamed session.
+	if err := store.UpdateName(sess.ID, "debugging"); err != nil {
+		t.Fatalf("UpdateName on renamed session: %v", err)
+	}
+	got = store.Get(sess.ID)
+	if got == nil || got.Name != "debugging" || got.Description != "my renamed session" {
+		t.Fatalf("name refresh disturbed the rename: %+v", got)
+	}
+
+	// Missing session keeps the legacy error on BOTH lanes.
+	if err := store.UpdateDescription("session-gone", "x"); err == nil {
+		t.Error("UpdateDescription on missing session must error")
+	}
+	if _, err := store.UpdateDescriptionAuto("session-gone", "x"); err == nil {
+		t.Error("UpdateDescriptionAuto on missing session must error")
+	}
+
+	// Marker survives the updateSession write path (attach/detach round-trip).
+	if err := store.Attach(sess.ID, "client-1"); err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+	if err := store.Detach(sess.ID, "client-1"); err != nil {
+		t.Fatalf("detach: %v", err)
+	}
+	got = store.Get(sess.ID)
+	if got == nil || !got.DescriptionUserSet || got.Description != "my renamed session" {
+		t.Fatalf("marker lost through updateSession: %+v", got)
+	}
+}
+
+// TestSQLiteStore_UserSetMarkerLegacyDefault pins the migration contract:
+// rows written before the marker column existed read back as NOT user-set
+// (legacy auto-naming behavior), and the migration re-run is idempotent.
+func TestSQLiteStore_UserSetMarkerLegacyDefault(t *testing.T) {
+	store, dbPath := testHelper(t)
+
+	sess, err := store.Create("legacy-row")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	// Simulate a pre-marker row: force the marker back to its default.
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open raw db: %v", err)
+	}
+	if _, err := db.Exec("UPDATE sessions SET description_user_set = 0, description = 'old auto' WHERE id = ?", sess.ID); err != nil {
+		t.Fatalf("legacy backfill: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close raw db: %v", err)
+	}
+
+	// Re-open: migration re-runs (idempotent) and the row stays legacy.
+	store2, err := NewSQLiteStore(dbPath, slog.Default())
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer store2.Close()
+	got := store2.Get(sess.ID)
+	if got == nil || got.DescriptionUserSet {
+		t.Fatalf("legacy row must default to not user-set: %+v", got)
+	}
+	written, err := store2.UpdateDescriptionAuto(sess.ID, "new auto")
+	if err != nil || !written {
+		t.Fatalf("legacy row must still auto-name: written=%v err=%v", written, err)
+	}
+}

@@ -136,6 +136,11 @@ type ChatModel struct {
 
 	// Session header data
 	sessionDescription string
+	// descriptionGen counts auto-naming attempts. Every maybeGenerateDescription
+	// bump stamps its async result; a result landing after a newer attempt (or
+	// after a user rename, which the handler detects via the placeholder) is
+	// dropped instead of overwriting the newer state (L16 race).
+	descriptionGen uint64
 
 	// Markdown rendering
 	mdRenderer     *render.MarkdownRenderer
@@ -586,6 +591,13 @@ type SessionDescriptionUpdatedMsg struct {
 	SessionID   string
 	Name        string
 	Description string
+	// Generation stamps the auto-naming attempt that produced this message
+	// (0 = a user rename or other non-auto source). The chat model drops
+	// auto results whose generation no longer matches the latest attempt.
+	Generation uint64
+	// Skip marks an auto result that must NOT touch the description (a user
+	// rename intervened while generation was in flight).
+	Skip bool
 }
 
 // InputHeightChangedMsg signals that the input area height changed.
@@ -1444,7 +1456,19 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 
 	case SessionDescriptionUpdatedMsg:
 		if msg.SessionID == m.sessionID {
-			m.sessionDescription = msg.Description
+			switch {
+			case msg.Skip:
+				// A user rename intervened while auto-naming was in flight:
+				// keep whatever the rename left, never paint over it.
+			case msg.Generation != 0 && msg.Generation != m.descriptionGen:
+				// Stale auto result from a superseded attempt (session was
+				// reset/switched and re-named since): drop it.
+			case msg.Generation != 0 && m.sessionDescription != "summarizing...":
+				// The placeholder is gone - a rename (or session load) landed
+				// while generation was in flight. The user's text wins.
+			default:
+				m.sessionDescription = msg.Description
+			}
 		}
 		return nil
 
@@ -2071,6 +2095,8 @@ func (m *ChatModel) maybeGenerateDescription() tea.Cmd {
 
 	// Set a temporary description while LLM generates
 	m.sessionDescription = "summarizing..."
+	m.descriptionGen++
+	gen := m.descriptionGen
 
 	return func() tea.Msg {
 		// M13 (GUI parity, 025ba662): name the session from ITS OWN
@@ -2080,20 +2106,49 @@ func (m *ChatModel) maybeGenerateDescription() tea.Cmd {
 		// Try LLM-based generation first
 		result, err := rpc.GenerateSessionDescription(sessionID, firstUserContent, projectName)
 		if err != nil {
+			// L16 race guard: generation failed AFTER a user rename may have
+			// landed. The fallback write rides session.update_description -
+			// the USER lane - so it would stamp the rename as user-set and
+			// clobber it. Re-check the stored marker and skip the write when
+			// a rename intervened. A lookup failure degrades to the legacy
+			// fallback (logged inside the helper), never a silent drop.
+			if sessionDescriptionUserSet(rpc, sessionID) {
+				return SessionDescriptionUpdatedMsg{SessionID: sessionID, Generation: gen, Skip: true}
+			}
 			// Fallback to simple extraction
 			desc := extractDescription(firstUserContent)
 			if uerr := rpc.UpdateSessionDescription(sessionID, desc); uerr != nil {
 				slog.Warn("session description update failed", "session_id", sessionID, "error", uerr)
 			}
-			return SessionDescriptionUpdatedMsg{SessionID: sessionID, Description: desc}
+			return SessionDescriptionUpdatedMsg{SessionID: sessionID, Description: desc, Generation: gen}
 		}
-		// The daemon already saved both name and description, so just return the result
+		// The daemon already saved both name and description (the auto lane
+		// preserves a user rename server-side), so just return the result.
 		return SessionDescriptionUpdatedMsg{
 			SessionID:   sessionID,
 			Name:        result.Name,
 			Description: result.Description,
+			Generation:  gen,
 		}
 	}
+}
+
+// sessionDescriptionUserSet reports whether the daemon's stored description
+// for sessionID is user-authored (a rename landed while auto-naming was in
+// flight). Best-effort: any RPC/decode failure returns false so the legacy
+// fallback still runs - the failure is logged, never silent.
+func sessionDescriptionUserSet(rpc RPCClient, sessionID string) bool {
+	raw, err := rpc.Call("session.get", map[string]string{"id": sessionID})
+	if err != nil {
+		slog.Warn("session naming: rename re-check lookup failed", "session_id", sessionID, "error", err)
+		return false
+	}
+	var sess types.Session
+	if err := json.Unmarshal(raw, &sess); err != nil {
+		slog.Warn("session naming: rename re-check decode failed", "session_id", sessionID, "error", err)
+		return false
+	}
+	return sess.DescriptionUserSet
 }
 
 // resolveSessionProjectName resolves the project bound to sessionID for

@@ -230,15 +230,19 @@ type Worker struct {
 
 // Session represents a conversation session that can be shared by multiple clients.
 type Session struct {
-	ID              string   `json:"id"`
-	Name            string   `json:"name"`
-	Description     string   `json:"description,omitempty"`
-	ConversationID  string   `json:"conversation_id"`
-	CreatedAt       string   `json:"created_at"`
-	LastActivity    string   `json:"last_activity"`
-	AttachedClients []string `json:"attached_clients"`
-	WorkerIDs       []string `json:"worker_ids,omitempty"`
-	LeafMessageID   *int64   `json:"leaf_message_id,omitempty"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	// DescriptionUserSet mirrors the daemon's user-rename marker: true when
+	// the description was authored by the user (rename), so auto-naming
+	// results must not overwrite it. Additive; absent = false = legacy.
+	DescriptionUserSet bool     `json:"description_user_set,omitempty"`
+	ConversationID     string   `json:"conversation_id"`
+	CreatedAt          string   `json:"created_at"`
+	LastActivity       string   `json:"last_activity"`
+	AttachedClients    []string `json:"attached_clients"`
+	WorkerIDs          []string `json:"worker_ids,omitempty"`
+	LeafMessageID      *int64   `json:"leaf_message_id,omitempty"`
 
 	// Thread-based context partitioning (NEW)
 	Threads        map[string]Thread `json:"threads,omitempty"`

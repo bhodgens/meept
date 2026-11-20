@@ -163,6 +163,10 @@ func (s *SQLiteStore) migrate() error {
 	// Add description column if not present (migration for existing databases)
 	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN description TEXT DEFAULT ''", "description")
 
+	// User-rename marker (bughunt 2026-11-19 wave 2): DEFAULT 0 back-fills
+	// legacy rows as NOT user-set = pre-marker auto-naming behavior.
+	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN description_user_set BOOLEAN DEFAULT 0", "description_user_set")
+
 	// Add the per-session format version (contract S1, leaf 03/01).
 	//
 	// The column is created with DEFAULT 0 — the pre-v1 LEGACY sentinel,
@@ -652,7 +656,7 @@ func (s *SQLiteStore) GetMostRecent() *Session {
 	defer s.mu.RUnlock()
 
 	row := s.db.QueryRow(`
-		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived, worktree_id, worktree_path, owner_id, foreground, last_user_message_at, detection_context, goal_id, employee_id, plan_mode
+		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived, worktree_id, worktree_path, owner_id, foreground, last_user_message_at, detection_context, goal_id, employee_id, plan_mode, description_user_set
 		FROM sessions
 		ORDER BY last_activity DESC
 		LIMIT 1`) //nolint:mutexio // mutex serializes sqlite connection access
@@ -664,7 +668,7 @@ func (s *SQLiteStore) getByColumn(column, value string) *Session {
 	// #nosec G201 -- column name is hardcoded at call sites, not user input
 	//nolint:gosec // column name is hardcoded at call sites, not user input
 	query := fmt.Sprintf(`
-		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived, worktree_id, worktree_path, owner_id, foreground, last_user_message_at, detection_context, goal_id, employee_id, plan_mode
+		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived, worktree_id, worktree_path, owner_id, foreground, last_user_message_at, detection_context, goal_id, employee_id, plan_mode, description_user_set
 		FROM sessions
 		WHERE %s = ?`, column)
 
@@ -703,9 +707,10 @@ func (s *SQLiteStore) scanSessionRow(scan func(dest ...any) error) *Session {
 		goalID                    sql.NullString
 		employeeID                sql.NullString
 		planMode                  bool
+		descriptionUserSet        bool
 	)
 
-	err := scan(&id, &name, &convID, &createdAt, &lastActivity, &attachedJSON, &workersJSON, &description, &leafMessageID, &projectID, &projectPath, &noFence, &archived, &worktreeID, &worktreePath, &ownerID, &foreground, &lastUserMessageAt, &detectionContextJSON, &goalID, &employeeID, &planMode)
+	err := scan(&id, &name, &convID, &createdAt, &lastActivity, &attachedJSON, &workersJSON, &description, &leafMessageID, &projectID, &projectPath, &noFence, &archived, &worktreeID, &worktreePath, &ownerID, &foreground, &lastUserMessageAt, &detectionContextJSON, &goalID, &employeeID, &planMode, &descriptionUserSet)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			s.logger.Error("Failed to scan session", "error", err)
@@ -714,12 +719,13 @@ func (s *SQLiteStore) scanSessionRow(scan func(dest ...any) error) *Session {
 	}
 
 	session := &Session{
-		ID:             id,
-		Name:           name,
-		ConversationID: convID,
-		NoFence:        noFence,
-		Archived:       archived,
-		Foreground:     foreground,
+		ID:                 id,
+		Name:               name,
+		ConversationID:     convID,
+		NoFence:            noFence,
+		Archived:           archived,
+		Foreground:         foreground,
+		DescriptionUserSet: descriptionUserSet,
 	}
 
 	if description.Valid {
@@ -785,7 +791,7 @@ func (s *SQLiteStore) List() ([]*Session, error) {
 	defer s.mu.RUnlock()
 
 	rows, err := s.db.Query(`
-		SELECT s.id, s.name, s.conversation_id, s.created_at, s.last_activity, s.attached_clients, s.worker_ids, s.description, s.leaf_message_id, s.project_id, s.project_path, s.no_fence, s.archived, s.worktree_id, s.worktree_path, s.owner_id, s.foreground, s.last_user_message_at, s.detection_context, s.goal_id, s.employee_id, s.plan_mode
+		SELECT s.id, s.name, s.conversation_id, s.created_at, s.last_activity, s.attached_clients, s.worker_ids, s.description, s.leaf_message_id, s.project_id, s.project_path, s.no_fence, s.archived, s.worktree_id, s.worktree_path, s.owner_id, s.foreground, s.last_user_message_at, s.detection_context, s.goal_id, s.employee_id, s.plan_mode, s.description_user_set
 		FROM sessions s
 		ORDER BY s.archived ASC, s.last_activity DESC`) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
@@ -1355,12 +1361,14 @@ func (s *SQLiteStore) clearMessagesLocked(sessionID string) (*storage.ChangeEmit
 	return s.storageEvents, nil
 }
 
-// UpdateDescription updates a session's description.
+// UpdateDescription updates a session's description. This is the USER
+// rename lane: it stamps description_user_set so auto-namers never
+// overwrite the user's choice (see UpdateDescriptionAuto).
 func (s *SQLiteStore) UpdateDescription(sessionID, description string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	result, err := s.db.Exec("UPDATE sessions SET description = ? WHERE id = ?", description, sessionID) //nolint:mutexio // mutex serializes sqlite connection access
+	result, err := s.db.Exec("UPDATE sessions SET description = ?, description_user_set = 1 WHERE id = ?", description, sessionID) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
 		return fmt.Errorf("failed to update description: %w", err)
 	}
@@ -1370,6 +1378,39 @@ func (s *SQLiteStore) UpdateDescription(sessionID, description string) error {
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
 	return nil
+}
+
+// UpdateDescriptionAuto is the auto-namer lane: it writes the description
+// only when description_user_set is 0. The WHERE guard makes the check and
+// the write ONE statement, so a user rename landing between an auto-namer's
+// read and write can never be clobbered. Returns (false, nil) when a
+// user-set description is preserved.
+func (s *SQLiteStore) UpdateDescriptionAuto(sessionID, description string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	result, err := s.db.Exec("UPDATE sessions SET description = ? WHERE id = ? AND description_user_set = 0", description, sessionID) //nolint:mutexio // mutex serializes sqlite connection access
+	if err != nil {
+		return false, fmt.Errorf("failed to update description: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("failed to read rows affected: %w", err)
+	}
+	if rows > 0 {
+		return true, nil
+	}
+	// Zero rows: either the session is gone or its description is user-set.
+	// Distinguish so callers keep the legacy missing-session error.
+	var exists int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM sessions WHERE id = ?", sessionID).Scan(&exists); err != nil { //nolint:mutexio // mutex serializes sqlite connection access
+		return false, fmt.Errorf("failed to check session existence: %w", err)
+	}
+	if exists == 0 {
+		return false, fmt.Errorf("session not found: %s", sessionID)
+	}
+	return false, nil
 }
 
 // UpdateName updates a session's name.
@@ -1657,7 +1698,7 @@ func (s *SQLiteStore) getByColumnUnsafe(column, value string) *Session {
 	// #nosec G201 -- column name is hardcoded at call sites, not user input
 	//nolint:gosec // column name is hardcoded at call sites, not user input
 	query := fmt.Sprintf(`
-		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived, worktree_id, worktree_path, owner_id, foreground, last_user_message_at, detection_context, goal_id, employee_id, plan_mode
+		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived, worktree_id, worktree_path, owner_id, foreground, last_user_message_at, detection_context, goal_id, employee_id, plan_mode, description_user_set
 		FROM sessions
 		WHERE %s = ?`, column)
 
@@ -1674,13 +1715,14 @@ func (s *SQLiteStore) updateSession(session *Session) error {
 
 	result, err := s.db.Exec(`
 		UPDATE sessions
-		SET name = ?, attached_clients = ?, worker_ids = ?, last_activity = ?, description = ?, leaf_message_id = ?, project_id = ?, project_path = ?, no_fence = ?, worktree_id = ?, worktree_path = ?, detection_context = ?
+		SET name = ?, attached_clients = ?, worker_ids = ?, last_activity = ?, description = ?, description_user_set = ?, leaf_message_id = ?, project_id = ?, project_path = ?, no_fence = ?, worktree_id = ?, worktree_path = ?, detection_context = ?
 		WHERE id = ?`,
 		session.Name,
 		string(attachedJSON),
 		string(workersJSON),
 		now,
 		session.Description,
+		session.DescriptionUserSet,
 		session.LeafMessageID,
 		session.ProjectID,
 		session.ProjectPath,

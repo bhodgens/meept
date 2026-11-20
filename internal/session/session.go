@@ -86,21 +86,28 @@ type ProjectResolver interface {
 //
 //nolint:revive // stutter with package name is intentional for API clarity
 type Session struct {
-	ID               string            `json:"id"`
-	Name             string            `json:"name"`
-	Description      string            `json:"description,omitempty"`
-	ConversationID   string            `json:"conversation_id"` // DEPRECATED: use thread.ConversationID
-	CreatedAt        time.Time         `json:"created_at"`
-	LastActivity     time.Time         `json:"last_activity"`
-	AttachedClients  []string          `json:"attached_clients"`
-	WorkerIDs        []string          `json:"worker_ids,omitempty"`
-	LeafMessageID    *int64            `json:"leaf_message_id,omitempty"`
-	ProjectID        string            `json:"project_id,omitempty"`
-	ProjectPath      string            `json:"project_path,omitempty"`
-	WorktreeID       string            `json:"worktree_id,omitempty"`
-	WorktreePath     string            `json:"worktree_path,omitempty"`
-	DetectionContext *DetectionContext `json:"detection_context,omitempty"`
-	NoFence          bool              `json:"no_fence,omitempty"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	// DescriptionUserSet marks the description as USER-authored (a rename).
+	// Auto-naming paths (session.generate_description / session.refresh_title)
+	// must never overwrite a user-set description; they may still update Name.
+	// Legacy rows default false = pre-marker behavior. Written only through
+	// Store.UpdateDescription (the user rename lane); Store.UpdateDescriptionAuto
+	// (the auto-namer lane) is a no-op while it is set.
+	DescriptionUserSet bool              `json:"description_user_set,omitempty"`
+	ConversationID     string            `json:"conversation_id"` // DEPRECATED: use thread.ConversationID
+	CreatedAt          time.Time         `json:"created_at"`
+	LastActivity       time.Time         `json:"last_activity"`
+	AttachedClients    []string          `json:"attached_clients"`
+	WorkerIDs          []string          `json:"worker_ids,omitempty"`
+	LeafMessageID      *int64            `json:"leaf_message_id,omitempty"`
+	ProjectID          string            `json:"project_id,omitempty"`
+	ProjectPath        string            `json:"project_path,omitempty"`
+	WorktreeID         string            `json:"worktree_id,omitempty"`
+	WorktreePath       string            `json:"worktree_path,omitempty"`
+	DetectionContext   *DetectionContext `json:"detection_context,omitempty"`
+	NoFence            bool              `json:"no_fence,omitempty"`
 
 	// Archived indicates the session has been soft-archived. Archived sessions
 	// are excluded from the default visible set and sort to the bottom of
@@ -629,7 +636,9 @@ func (s *MemoryStore) ClearMessages(sessionID string) error {
 	return nil
 }
 
-// UpdateDescription updates a session's description.
+// UpdateDescription updates a session's description. This is the USER
+// rename lane: it stamps DescriptionUserSet so auto-namers never overwrite
+// the user's choice (see UpdateDescriptionAuto).
 func (s *MemoryStore) UpdateDescription(sessionID, description string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -639,7 +648,26 @@ func (s *MemoryStore) UpdateDescription(sessionID, description string) error {
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
 	session.Description = description
+	session.DescriptionUserSet = true
 	return nil
+}
+
+// UpdateDescriptionAuto is the auto-namer lane: it writes the description
+// only when the user has not renamed the session. Returns (false, nil)
+// when a user-set description is preserved.
+func (s *MemoryStore) UpdateDescriptionAuto(sessionID, description string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, exists := s.sessions[sessionID]
+	if !exists {
+		return false, fmt.Errorf("session not found: %s", sessionID)
+	}
+	if session.DescriptionUserSet {
+		return false, nil
+	}
+	session.Description = description
+	return true, nil
 }
 
 // UpdateName updates a session's name.
@@ -2245,14 +2273,26 @@ func (h *Handler) handleGenerateDescription(msg *models.BusMessage) (any, error)
 		}
 	}
 
-	// Save the generated description
-	if err := h.store.UpdateDescription(params.SessionID, description); err != nil {
+	// Save the generated description through the AUTO lane: a user rename
+	// (description_user_set) is never overwritten. When the user's rename is
+	// preserved, report IT as the description so clients never paint the
+	// stale generated text over the user's choice.
+	written, err := h.store.UpdateDescriptionAuto(params.SessionID, description)
+	if err != nil {
 		h.logger.Error("Failed to save generated description",
 			"error", err,
 			KeySessionID, params.SessionID,
 			"description", description,
 		)
 		return nil, err
+	}
+	if !written {
+		if sess := h.store.Get(params.SessionID); sess != nil {
+			description = sess.Description
+		}
+		h.logger.Info("User-set description preserved; auto description skipped",
+			KeySessionID, params.SessionID,
+		)
 	}
 
 	h.logger.Info("Session name and description generated and saved",
@@ -2627,14 +2667,27 @@ func (h *Handler) handleRefreshTitle(msg *models.BusMessage) (any, error) {
 		return nil, err
 	}
 
-	// Update the session name and description in the store
+	// Update the session name and description in the store. The description
+	// rides the AUTO lane: a user rename (description_user_set) is never
+	// overwritten; the auto name still refreshes.
 	if err := h.store.UpdateName(params.SessionID, result.Name); err != nil {
 		h.logger.Error("Failed to save refreshed session name", "error", err, "session_id", params.SessionID)
 		return nil, err
 	}
-	if err := h.store.UpdateDescription(params.SessionID, result.Description); err != nil {
+	written, err := h.store.UpdateDescriptionAuto(params.SessionID, result.Description)
+	if err != nil {
 		h.logger.Error("Failed to save refreshed session description", "error", err, "session_id", params.SessionID)
 		return nil, err
+	}
+	if !written {
+		// Publish the USER's description, not the generated one: the event
+		// feeds live GUI/TUI title updates and must not revert a rename.
+		if sess := h.store.Get(params.SessionID); sess != nil {
+			result.Description = sess.Description
+		}
+		h.logger.Info("User-set description preserved; title refresh kept the rename",
+			"session_id", params.SessionID,
+		)
 	}
 
 	h.logger.Info("Session title refreshed",
