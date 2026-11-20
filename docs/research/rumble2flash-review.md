@@ -5,6 +5,12 @@
 
 > **Citation style.** Every external claim carries an inline link to the primary page actually fetched for this review. All latency/WER numbers are vendor-, paper-, or leaderboard-reported; **none were reproduced on socrates or on meept's audio**. Compare within a row, not across rows. Local facts (GPU state, code, config) were read directly from the worktree / host and are marked as such.
 
+## Addendum (2026-11-19): shipped native-streaming adapter
+
+> **Scope correction.** The "no streaming" / "cannot emit partials" verdict in this review is **historical** and applies ONLY to the HF card's documented whole-audio `generate()` / `chat.completions` shapes and to stock vLLM (whose `stream=True` emits output tokens only after the full audio is received, and whose `/v1/realtime` requires causal encoders). It does **not** describe meept's shipped adapter; neither HF nor stock vLLM gained streaming.
+>
+> What ships: `internal/voicechild/providers/stt_rumble.go` is a native WebSocket STT client consuming a custom FastAPI + transformers server's `partial`/`final`/`end` JSON frames (verified live on `socrates:8000`). The drift was already flagged in `docs/plans/20261119-rumble-native-streaming/master.md:283-284` (live-server facts at `:27`, `:74`); native streaming landed in commit `e335ea15`. The body below is preserved verbatim as the original 2026-11-18 research record.
+
 ---
 
 ## Verdict
@@ -45,6 +51,8 @@ Two caveats worth stating explicitly rather than overclaiming:
 2. **vLLM's own `/v1/realtime` WebSocket is not a drop-in here.** It requires architecturally causal models (the documented example is Voxtral); Qwen3-ASR's encoder uses bidirectional attention within windows ([vLLM realtime blog](https://vllm.ai/blog/2026-01-31-streaming-realtime), [Qwen3-ASR MODEL.md](https://github.com/antirez/qwen-asr/blob/main/MODEL.md)). vLLM's `stream=True` on `/v1/audio/transcriptions` streams **output tokens after the full audio is received** — it is a vLLM extension, not incremental input ([vLLM STT docs](https://docs.vllm.ai/en/latest/serving/online_serving/speech_to_text/)).
 
 So the fair statement is: **Rumble-2-Flash is batch/non-streaming as documented and supported; a streaming path exists only in upstream Qwen3-ASR's Python API and is slower than the endpointing policy meept already uses.** Judge it on accuracy and warm-server latency, not on time-to-first-word.
+
+> **Correction (2026-11-19):** this verdict is scoped to the HF card and stock vLLM; meept's shipped `stt_rumble.go` streams natively. See the addendum at the top of this document.
 
 ---
 
