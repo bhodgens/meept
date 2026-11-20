@@ -117,11 +117,36 @@ type mockServer struct {
 	handler  func(method string, params json.RawMessage) (any, error)
 }
 
+// newMockSocketPath returns a short, unique unix socket path that is independent
+// of the test name. macOS caps sun_path at 104 bytes; t.TempDir() embeds the full
+// test name, so a long test name can push the joined path past that limit and
+// make net.Listen("unix", ...) fail with EINVAL. Uniqueness comes from
+// os.MkdirTemp's random suffix, never from the test name or a predictable clock.
+func newMockSocketPath(t *testing.T) string {
+	t.Helper()
+
+	baseDir := "/tmp"
+	if _, err := os.Stat(baseDir); err != nil {
+		baseDir = os.TempDir()
+	}
+
+	dir, err := os.MkdirTemp(baseDir, "meept-tui-")
+	if err != nil {
+		t.Fatalf("failed to create temp dir for mock socket: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(dir); err != nil {
+			t.Logf("cleanup: failed to remove temp dir %s: %v", dir, err)
+		}
+	})
+
+	return filepath.Join(dir, "s.sock")
+}
+
 func newMockServer(t *testing.T) *mockServer {
 	t.Helper()
 
-	tmpDir := t.TempDir()
-	sockPath := filepath.Join(tmpDir, "test.sock")
+	sockPath := newMockSocketPath(t)
 
 	listener, err := net.Listen("unix", sockPath)
 	if err != nil {
@@ -269,6 +294,36 @@ func (w *FrameWriter) WriteFrame(payload []byte) error {
 	}
 	_, err := w.conn.Write(payload)
 	return err
+}
+
+// TestNewMockServer_WorksWithLongTestNameUnderMacOSSunPathLimit pin: the
+// deliberately long name would push t.TempDir()-based socket paths past macOS's
+// 104-byte sun_path limit, so the old helper failed here at net.Listen with EINVAL.
+func TestNewMockServer_WorksWithLongTestNameUnderMacOSSunPathLimit(t *testing.T) {
+	// Uniqueness: two calls must return different paths (MkdirTemp random suffix).
+	pathA := newMockSocketPath(t)
+	pathB := newMockSocketPath(t)
+	if pathA == pathB {
+		t.Fatalf("newMockSocketPath returned the same path twice: %s", pathA)
+	}
+
+	server := newMockServer(t)
+	defer server.Close()
+
+	// macOS sun_path limit is 104 bytes; the helper must stay well under it.
+	if len(server.sockPath) >= 104 {
+		t.Fatalf("mock socket path is %d bytes, want < 104: %s", len(server.sockPath), server.sockPath)
+	}
+
+	client := NewRPCClient(server.sockPath)
+	if err := client.Connect(); err != nil {
+		t.Fatalf("failed to connect to mock server: %v", err)
+	}
+	defer client.Close()
+
+	if !client.IsConnected() {
+		t.Error("expected client to be connected")
+	}
 }
 
 func TestRPCClientWithMockServer(t *testing.T) {
