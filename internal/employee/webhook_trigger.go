@@ -22,7 +22,9 @@ func (m *Manager) RegisterWebhookRoute(mux *http.ServeMux) {
 	if m == nil || mux == nil {
 		return
 	}
-	mux.HandleFunc(WebhookTriggerPattern, m.handleWebhookTrigger)
+	// The path is a string literal so the connectivity-graph scanner can see it.
+	// WebhookTriggerPattern must stay the same text.
+	mux.HandleFunc("POST /api/v1/webhooks/{id}", m.handleWebhookTrigger)
 }
 
 // handleWebhookTrigger looks the bot up by the path id, requires an

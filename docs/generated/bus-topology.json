@@ -29,7 +29,7 @@
     "agent.action": [
       {
         "file": "internal/agent/loop.go",
-        "line": 9596,
+        "line": 9700,
         "payload_keys": [
           "conversation_id",
           "iteration",
@@ -56,7 +56,7 @@
     "agent.iteration.completed": [
       {
         "file": "internal/agent/loop.go",
-        "line": 9833,
+        "line": 9937,
         "payload_keys": [
           "agent_id",
           "conversation_id",
@@ -68,7 +68,7 @@
     "agent.lifecycle.ended": [
       {
         "file": "internal/agent/loop.go",
-        "line": 3566,
+        "line": 3662,
         "payload_keys": [],
         "via_const": true
       }
@@ -76,7 +76,7 @@
     "agent.lifecycle.started": [
       {
         "file": "internal/agent/loop.go",
-        "line": 3476,
+        "line": 3572,
         "payload_keys": [],
         "via_const": true
       }
@@ -112,7 +112,7 @@
       },
       {
         "file": "internal/agent/loop.go",
-        "line": 9661,
+        "line": 9765,
         "payload_keys": [
           "detail",
           "iteration",
@@ -123,7 +123,7 @@
       },
       {
         "file": "internal/agent/loop.go",
-        "line": 9715,
+        "line": 9819,
         "payload_keys": [
           "conversation_id",
           "detail",
@@ -153,7 +153,7 @@
     "agent.queue.followup.injected": [
       {
         "file": "internal/agent/loop.go",
-        "line": 9815,
+        "line": 9919,
         "payload_keys": [
           "conversation_id",
           "count",
@@ -190,7 +190,7 @@
     "agent.queue.steer.injected": [
       {
         "file": "internal/agent/loop.go",
-        "line": 9791,
+        "line": 9895,
         "payload_keys": [
           "conversation_id",
           "count",
@@ -208,7 +208,7 @@
       },
       {
         "file": "internal/agent/loop.go",
-        "line": 2842,
+        "line": 2932,
         "payload_keys": []
       },
       {
@@ -230,14 +230,14 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 11653,
+        "line": 11651,
         "payload_keys": []
       }
     ],
     "agent.result": [
       {
         "file": "internal/agent/loop.go",
-        "line": 9626,
+        "line": 9730,
         "payload_keys": [
           "conversation_id",
           "iteration",
@@ -248,7 +248,7 @@
     "agent.state.changed": [
       {
         "file": "internal/agent/loop.go",
-        "line": 2831,
+        "line": 2921,
         "payload_keys": [],
         "via_const": true
       }
@@ -261,18 +261,6 @@
         "typed": true
       },
       {
-        "file": "internal/bot/bot/runner.go",
-        "line": 177,
-        "payload_keys": [],
-        "typed": true
-      },
-      {
-        "file": "internal/bot/runner.go",
-        "line": 136,
-        "payload_keys": [],
-        "typed": true
-      },
-      {
         "file": "internal/daemon/turnstate_wiring.go",
         "line": 45,
         "payload_keys": [],
@@ -280,13 +268,13 @@
       },
       {
         "file": "internal/employee/goal_loop.go",
-        "line": 1076,
+        "line": 1122,
         "payload_keys": [],
         "typed": true
       },
       {
         "file": "internal/employee/goal_loop.go",
-        "line": 1172,
+        "line": 1219,
         "payload_keys": [],
         "typed": true
       }
@@ -315,20 +303,8 @@
     ],
     "bot.result": [
       {
-        "file": "internal/bot/bot/runner.go",
-        "line": 192,
-        "payload_keys": [],
-        "typed": true
-      },
-      {
-        "file": "internal/bot/runner.go",
-        "line": 151,
-        "payload_keys": [],
-        "typed": true
-      },
-      {
         "file": "internal/employee/goal_loop.go",
-        "line": 1168,
+        "line": 1215,
         "payload_keys": [],
         "typed": true
       }
@@ -629,7 +605,7 @@
     "daemon.reloaded": [
       {
         "file": "internal/daemon/daemon.go",
-        "line": 3229,
+        "line": 3238,
         "payload_keys": [
           "event"
         ]
@@ -638,7 +614,7 @@
     "daemon.stopping": [
       {
         "file": "internal/daemon/daemon.go",
-        "line": 2853,
+        "line": 2862,
         "payload_keys": [
           "event"
         ]
@@ -668,7 +644,7 @@
     "employee.metric": [
       {
         "file": "internal/daemon/components.go",
-        "line": 7107,
+        "line": 7105,
         "payload_keys": [
           "name",
           "tags",
@@ -694,7 +670,7 @@
     "employee.result": [
       {
         "file": "internal/employee/goal_loop.go",
-        "line": 1170,
+        "line": 1217,
         "payload_keys": [],
         "typed": true
       }
@@ -828,7 +804,7 @@
     "llm.tokens.used": [
       {
         "file": "internal/agent/loop.go",
-        "line": 9764,
+        "line": 9868,
         "payload_keys": []
       }
     ],
@@ -1032,7 +1008,7 @@
     "plan.approved": [
       {
         "file": "internal/plan/manager.go",
-        "line": 616,
+        "line": 631,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1040,7 +1016,7 @@
     "plan.cancelled": [
       {
         "file": "internal/plan/manager.go",
-        "line": 916,
+        "line": 931,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1048,7 +1024,7 @@
     "plan.completed": [
       {
         "file": "internal/plan/manager.go",
-        "line": 1609,
+        "line": 1624,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1056,7 +1032,7 @@
     "plan.confirmed": [
       {
         "file": "internal/plan/manager.go",
-        "line": 830,
+        "line": 845,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1064,7 +1040,7 @@
     "plan.created": [
       {
         "file": "internal/plan/manager.go",
-        "line": 517,
+        "line": 532,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1072,7 +1048,7 @@
     "plan.executing": [
       {
         "file": "internal/plan/manager.go",
-        "line": 1320,
+        "line": 1335,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1080,25 +1056,25 @@
     "plan.phase_state": [
       {
         "file": "internal/plan/manager.go",
-        "line": 1296,
+        "line": 1311,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/plan/manager.go",
-        "line": 1375,
+        "line": 1390,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/plan/manager.go",
-        "line": 1419,
+        "line": 1434,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/plan/manager.go",
-        "line": 1514,
+        "line": 1529,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1106,7 +1082,7 @@
     "plan.rejected": [
       {
         "file": "internal/plan/manager.go",
-        "line": 668,
+        "line": 683,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1114,7 +1090,7 @@
     "plan.revised": [
       {
         "file": "internal/plan/manager.go",
-        "line": 728,
+        "line": 743,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1122,7 +1098,7 @@
     "plan.revision_completed": [
       {
         "file": "internal/plan/manager.go",
-        "line": 751,
+        "line": 766,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1130,7 +1106,7 @@
     "plan.submitting": [
       {
         "file": "internal/plan/manager.go",
-        "line": 565,
+        "line": 580,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1823,7 +1799,7 @@
     "session.result": [
       {
         "file": "internal/session/session.go",
-        "line": 1850,
+        "line": 1883,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1891,24 +1867,24 @@
     "session.store": [
       {
         "file": "internal/session/store_sqlite.go",
-        "line": 864,
+        "line": 929,
         "payload_keys": []
       },
       {
         "file": "internal/session/store_sqlite.go",
-        "line": 1091,
+        "line": 1156,
         "payload_keys": []
       },
       {
         "file": "internal/session/store_sqlite.go",
-        "line": 1320,
+        "line": 1385,
         "payload_keys": []
       }
     ],
     "session.title_updated": [
       {
         "file": "internal/agent/loop.go",
-        "line": 11226,
+        "line": 11330,
         "payload_keys": [
           "description",
           "name",
@@ -1917,7 +1893,7 @@
       },
       {
         "file": "internal/session/session.go",
-        "line": 2708,
+        "line": 2741,
         "payload_keys": []
       }
     ],
@@ -2006,7 +1982,7 @@
     "status.response": [
       {
         "file": "internal/daemon/components.go",
-        "line": 10757,
+        "line": 10755,
         "payload_keys": []
       }
     ],
@@ -2531,13 +2507,13 @@
     "team.start": [
       {
         "file": "internal/daemon/components.go",
-        "line": 9246,
+        "line": 9244,
         "payload_keys": [],
         "via_const": true
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 9283,
+        "line": 9281,
         "payload_keys": [],
         "via_const": true
       }
@@ -2720,7 +2696,7 @@
     "worker.stop": [
       {
         "file": "internal/session/session.go",
-        "line": 2351,
+        "line": 2384,
         "payload_keys": [
           "action",
           "worker_id"
@@ -2740,14 +2716,14 @@
     "*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 3338,
+        "line": 3356,
         "subscriber_id": "session.sessionID"
       }
     ],
     "acp.*.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 820,
+        "line": 823,
         "subscriber_id": "slice:topics:acp.*.*",
         "via_topic_slice": true
       }
@@ -2755,7 +2731,7 @@
     "agent.SpeakTopicNotify": [
       {
         "file": "internal/daemon/speak_push_bridge.go",
-        "line": 27,
+        "line": 26,
         "subscriber_id": "speak-push-bridge"
       }
     ],
@@ -2798,7 +2774,7 @@
       },
       {
         "file": "internal/comm/http/server.go",
-        "line": 832,
+        "line": 835,
         "subscriber_id": "http-ws-agent.progress.synthesized"
       }
     ],
@@ -2812,7 +2788,7 @@
     "agent.turn.state": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 820,
+        "line": 823,
         "subscriber_id": "slice:topics:agent.turn.state",
         "via_topic_slice": true
       }
@@ -2835,12 +2811,12 @@
     "bot.result": [
       {
         "file": "internal/activity/execution_projector.go",
-        "line": 91,
+        "line": 104,
         "subscriber_id": "execution-projector-bot"
       },
       {
         "file": "internal/comm/http/server.go",
-        "line": 820,
+        "line": 823,
         "subscriber_id": "slice:topics:bot.result",
         "via_topic_slice": true
       }
@@ -2848,7 +2824,7 @@
     "chat.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 820,
+        "line": 823,
         "subscriber_id": "slice:topics:chat.*",
         "via_topic_slice": true
       }
@@ -2856,7 +2832,7 @@
     "chat.*.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 820,
+        "line": 823,
         "subscriber_id": "slice:topics:chat.*.*",
         "via_topic_slice": true
       }
@@ -2893,7 +2869,7 @@
     "collaboration.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 820,
+        "line": 823,
         "subscriber_id": "slice:topics:collaboration.*",
         "via_topic_slice": true
       }
@@ -2961,7 +2937,7 @@
     "daemon.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 820,
+        "line": 823,
         "subscriber_id": "slice:topics:daemon.*",
         "via_topic_slice": true
       }
@@ -2983,7 +2959,7 @@
     "employee.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 820,
+        "line": 823,
         "subscriber_id": "slice:topics:employee.*",
         "via_topic_slice": true
       }
@@ -2991,19 +2967,19 @@
     "employee.critical_finding": [
       {
         "file": "internal/daemon/components.go",
-        "line": 5472,
+        "line": 5469,
         "subscriber_id": "employee-critical-finding"
       }
     ],
     "employee.result": [
       {
         "file": "internal/activity/execution_projector.go",
-        "line": 92,
+        "line": 105,
         "subscriber_id": "execution-projector-employee"
       },
       {
         "file": "internal/comm/http/server.go",
-        "line": 820,
+        "line": 823,
         "subscriber_id": "slice:topics:employee.result",
         "via_topic_slice": true
       }
@@ -3053,7 +3029,7 @@
     "kanban.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 820,
+        "line": 823,
         "subscriber_id": "slice:topics:kanban.*",
         "via_topic_slice": true
       }
@@ -3061,7 +3037,7 @@
     "kanban.*.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 820,
+        "line": 823,
         "subscriber_id": "slice:topics:kanban.*.*",
         "via_topic_slice": true
       }
@@ -3069,7 +3045,7 @@
     "llm.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 820,
+        "line": 823,
         "subscriber_id": "slice:topics:llm.*",
         "via_topic_slice": true
       }
@@ -3152,7 +3128,7 @@
     "pair.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 820,
+        "line": 823,
         "subscriber_id": "slice:topics:pair.*",
         "via_topic_slice": true
       }
@@ -3206,7 +3182,7 @@
     "plan.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 820,
+        "line": 823,
         "subscriber_id": "slice:topics:plan.*",
         "via_topic_slice": true
       }
@@ -3214,7 +3190,7 @@
     "plan.*.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 820,
+        "line": 823,
         "subscriber_id": "slice:topics:plan.*.*",
         "via_topic_slice": true
       }
@@ -3281,7 +3257,7 @@
     "queue.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 820,
+        "line": 823,
         "subscriber_id": "slice:topics:queue.*",
         "via_topic_slice": true
       }
@@ -3289,7 +3265,7 @@
     "queue.*.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 820,
+        "line": 823,
         "subscriber_id": "slice:topics:queue.*.*",
         "via_topic_slice": true
       }
@@ -3542,7 +3518,7 @@
     "review.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 820,
+        "line": 823,
         "subscriber_id": "slice:topics:review.*",
         "via_topic_slice": true
       }
@@ -3550,7 +3526,7 @@
     "session.attach": [
       {
         "file": "internal/session/session.go",
-        "line": 1629,
+        "line": 1662,
         "subscriber_id": "topics:session.attach",
         "via_handler_table": true
       }
@@ -3558,7 +3534,7 @@
     "session.branch.navigate": [
       {
         "file": "internal/session/session.go",
-        "line": 1629,
+        "line": 1662,
         "subscriber_id": "topics:session.branch.navigate",
         "via_handler_table": true
       }
@@ -3566,7 +3542,7 @@
     "session.branches.list": [
       {
         "file": "internal/session/session.go",
-        "line": 1629,
+        "line": 1662,
         "subscriber_id": "topics:session.branches.list",
         "via_handler_table": true
       }
@@ -3574,7 +3550,7 @@
     "session.create": [
       {
         "file": "internal/session/session.go",
-        "line": 1629,
+        "line": 1662,
         "subscriber_id": "topics:session.create",
         "via_handler_table": true
       }
@@ -3582,7 +3558,7 @@
     "session.delete": [
       {
         "file": "internal/session/session.go",
-        "line": 1629,
+        "line": 1662,
         "subscriber_id": "topics:session.delete",
         "via_handler_table": true
       }
@@ -3590,7 +3566,7 @@
     "session.detach": [
       {
         "file": "internal/session/session.go",
-        "line": 1629,
+        "line": 1662,
         "subscriber_id": "topics:session.detach",
         "via_handler_table": true
       }
@@ -3598,7 +3574,7 @@
     "session.fork": [
       {
         "file": "internal/session/session.go",
-        "line": 1629,
+        "line": 1662,
         "subscriber_id": "topics:session.fork",
         "via_handler_table": true
       }
@@ -3606,7 +3582,7 @@
     "session.generate_description": [
       {
         "file": "internal/session/session.go",
-        "line": 1629,
+        "line": 1662,
         "subscriber_id": "topics:session.generate_description",
         "via_handler_table": true
       }
@@ -3614,7 +3590,7 @@
     "session.get": [
       {
         "file": "internal/session/session.go",
-        "line": 1629,
+        "line": 1662,
         "subscriber_id": "topics:session.get",
         "via_handler_table": true
       }
@@ -3622,7 +3598,7 @@
     "session.get_child_tasks": [
       {
         "file": "internal/session/session.go",
-        "line": 1629,
+        "line": 1662,
         "subscriber_id": "topics:session.get_child_tasks",
         "via_handler_table": true
       }
@@ -3630,7 +3606,7 @@
     "session.get_most_recent": [
       {
         "file": "internal/session/session.go",
-        "line": 1629,
+        "line": 1662,
         "subscriber_id": "topics:session.get_most_recent",
         "via_handler_table": true
       }
@@ -3638,7 +3614,7 @@
     "session.list": [
       {
         "file": "internal/session/session.go",
-        "line": 1629,
+        "line": 1662,
         "subscriber_id": "topics:session.list",
         "via_handler_table": true
       }
@@ -3646,7 +3622,7 @@
     "session.messages.get": [
       {
         "file": "internal/session/session.go",
-        "line": 1629,
+        "line": 1662,
         "subscriber_id": "topics:session.messages.get",
         "via_handler_table": true
       }
@@ -3654,7 +3630,7 @@
     "session.messages.save": [
       {
         "file": "internal/session/session.go",
-        "line": 1629,
+        "line": 1662,
         "subscriber_id": "topics:session.messages.save",
         "via_handler_table": true
       }
@@ -3662,7 +3638,7 @@
     "session.refresh_title": [
       {
         "file": "internal/session/session.go",
-        "line": 1629,
+        "line": 1662,
         "subscriber_id": "topics:session.refresh_title",
         "via_handler_table": true
       }
@@ -3804,7 +3780,7 @@
     "session.set_foreground": [
       {
         "file": "internal/session/session.go",
-        "line": 1629,
+        "line": 1662,
         "subscriber_id": "topics:session.set_foreground",
         "via_handler_table": true
       }
@@ -3812,7 +3788,7 @@
     "session.set_last_user_message": [
       {
         "file": "internal/session/session.go",
-        "line": 1629,
+        "line": 1662,
         "subscriber_id": "topics:session.set_last_user_message",
         "via_handler_table": true
       }
@@ -3820,7 +3796,7 @@
     "session.set_nofence": [
       {
         "file": "internal/session/session.go",
-        "line": 1629,
+        "line": 1662,
         "subscriber_id": "topics:session.set_nofence",
         "via_handler_table": true
       }
@@ -3828,7 +3804,7 @@
     "session.stop": [
       {
         "file": "internal/session/session.go",
-        "line": 1629,
+        "line": 1662,
         "subscriber_id": "topics:session.stop",
         "via_handler_table": true
       }
@@ -3836,7 +3812,7 @@
     "session.thread.current": [
       {
         "file": "internal/session/session.go",
-        "line": 1629,
+        "line": 1662,
         "subscriber_id": "topics:session.thread.current",
         "via_handler_table": true
       }
@@ -3844,7 +3820,7 @@
     "session.thread.delete": [
       {
         "file": "internal/session/session.go",
-        "line": 1629,
+        "line": 1662,
         "subscriber_id": "topics:session.thread.delete",
         "via_handler_table": true
       }
@@ -3852,7 +3828,7 @@
     "session.thread.list": [
       {
         "file": "internal/session/session.go",
-        "line": 1629,
+        "line": 1662,
         "subscriber_id": "topics:session.thread.list",
         "via_handler_table": true
       }
@@ -3860,7 +3836,7 @@
     "session.thread.new": [
       {
         "file": "internal/session/session.go",
-        "line": 1629,
+        "line": 1662,
         "subscriber_id": "topics:session.thread.new",
         "via_handler_table": true
       }
@@ -3868,7 +3844,7 @@
     "session.thread.switch": [
       {
         "file": "internal/session/session.go",
-        "line": 1629,
+        "line": 1662,
         "subscriber_id": "topics:session.thread.switch",
         "via_handler_table": true
       }
@@ -3876,7 +3852,7 @@
     "session.tree.get": [
       {
         "file": "internal/session/session.go",
-        "line": 1629,
+        "line": 1662,
         "subscriber_id": "topics:session.tree.get",
         "via_handler_table": true
       }
@@ -3884,7 +3860,7 @@
     "session.update_description": [
       {
         "file": "internal/session/session.go",
-        "line": 1629,
+        "line": 1662,
         "subscriber_id": "topics:session.update_description",
         "via_handler_table": true
       }
@@ -3892,7 +3868,7 @@
     "status.request": [
       {
         "file": "internal/daemon/components.go",
-        "line": 10683,
+        "line": 10681,
         "subscriber_id": "status-handler"
       }
     ],
@@ -3914,7 +3890,7 @@
     "storage.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 820,
+        "line": 823,
         "subscriber_id": "slice:topics:storage.*",
         "via_topic_slice": true
       }
@@ -4172,7 +4148,7 @@
     "terminal.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 820,
+        "line": 823,
         "subscriber_id": "slice:topics:terminal.*",
         "via_topic_slice": true
       }
@@ -4180,7 +4156,7 @@
     "tool.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 820,
+        "line": 823,
         "subscriber_id": "slice:topics:tool.*",
         "via_topic_slice": true
       }
@@ -4199,7 +4175,7 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 10850,
+        "line": 10848,
         "subscriber_id": "agent-job-processor-evidence"
       }
     ],
@@ -4220,11 +4196,6 @@
         "file": "internal/activity/busbridge.go",
         "line": 60,
         "subscriber_id": "activity-ring"
-      },
-      {
-        "file": "internal/bot/bot/router.go",
-        "line": 66,
-        "subscriber_id": "\"bot-router-\"+topic"
       },
       {
         "file": "internal/bot/router.go",
@@ -4250,7 +4221,7 @@
     "turn.*": [
       {
         "file": "internal/comm/http/server.go",
-        "line": 820,
+        "line": 823,
         "subscriber_id": "slice:topics:turn.*",
         "via_topic_slice": true
       }
@@ -4261,6 +4232,11 @@
         "line": 99,
         "subscriber_id": "activity-ring",
         "typed": true
+      },
+      {
+        "file": "internal/activity/execution_projector.go",
+        "line": 110,
+        "subscriber_id": "execution-projector-specialist"
       },
       {
         "file": "internal/daemon/context_assembler_wiring.go",
