@@ -256,8 +256,8 @@ green for every submitted turn. Then merge worktree -> main per skill.
 | 03-context | IMPL_DONE | 2 | 01+02 GREEN committed (bf3918e6+2d4cb881); T4 resume-contract open in leaf doc (no gate) |
 | 04-clutter | IMPL_DONE | 2 | 01+02 GREEN committed b161d027 (T1-T7 verified incl dart 7/7) |
 | 05-navigation | IMPL_IN_PROGRESS | 0 | gate f326aef8; impl 01/02/03 running (deleg_534b038c); T1 models gate already green via clutter/02 |
-| 06-planning | TESTS_VALIDATED | 0 | gate committed f326aef8 (T1-T5 RED, F13c mode badge); impl wave D pending |
-| 07-bench | TESTS_VALIDATED | 0 | gate committed 45c94c0 (meept-bench worktree, checkers RED); integration wave E last |
+| 06-planning | IMPL_DONE | 3 | 01/02/03 GREEN committed (29e650a4/01ece763/0a5c0b7d); 2 pre-existing agent failures flagged for bench (GuardRetry park, VacuousValidator nil-panic) |
+| 07-bench | IMPL_IN_PROGRESS | 0 | gate 45c94c0 (checkers RED = missing bench impl); 01-harness-hardening running (deleg_a496ea85); 02-integration-run next = acceptance battery |
 
 ## Integration Test Plan
 
