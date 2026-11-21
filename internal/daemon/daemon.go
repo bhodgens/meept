@@ -1722,6 +1722,15 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			// Replaces the legacy /api/v1/bot/{id}/trigger endpoint (spec
 			// line 506). The handler dispatches through rpcCall to the
 			// agents.* RPC methods, so rpcServer must be non-nil.
+			//
+			// The webhook trigger route is separate: it looks the bot up
+			// by the path id and calls Manager.Trigger with source
+			// "webhook". It does not go through agents.trigger, which
+			// must not force that source or 404 a disabled webhook row.
+			if components.EmployeeManager != nil {
+				httpOpts = append(httpOpts, http.WithWebhookRoute(components.EmployeeManager.RegisterWebhookRoute))
+				logger.Info("webhook trigger route enabled", "path", "POST /api/v1/webhooks/{id}")
+			}
 			if rpcServer != nil && components.EmployeeManager != nil {
 				agentHandler := employeepkg.NewAgentAPIHandler(employeepkg.RPCCallback(rpcServer.CallMethod))
 				// Same store HTTP auth already validated against. Nil when

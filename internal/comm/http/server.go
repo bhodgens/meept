@@ -230,6 +230,9 @@ type Server struct {
 	instructionsHandler *InstructionsHandler
 	// Eval handler (optional, set via WithEval)
 	evalHandler *EvalHandler
+	// webhookRoute mounts the bot webhook trigger (routing-funnel C6).
+	// Nil means the route is not registered.
+	webhookRoute func(mux *http.ServeMux)
 	// dispatchSubmitter handles cross-daemon task dispatch (optional).
 	// When nil, dispatch endpoints return 503.
 	dispatchSubmitter DispatchSubmitter
@@ -1270,6 +1273,18 @@ func WithEval(h *EvalHandler) ServerOption {
 	}
 }
 
+// WithWebhookRoute mounts the bot webhook trigger route. register is
+// typically employee.Manager.RegisterWebhookRoute. Nil is ignored.
+// The route inherits the server's auth middleware.
+func WithWebhookRoute(register func(mux *http.ServeMux)) ServerOption {
+	return func(s *Server) {
+		if register == nil {
+			return
+		}
+		s.webhookRoute = register
+	}
+}
+
 // WithInstructions enables user instructions endpoints under /api/v1/instructions/*.
 // Routes inherit the server's authentication middleware when RequireAuth is enabled.
 func WithInstructions(h *InstructionsHandler) ServerOption {
@@ -1916,6 +1931,9 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	// package (spec lines 508-524).
 	if s.agentAPIHandler != nil {
 		s.agentAPIHandler.RegisterRoutes(mux)
+	}
+	if s.webhookRoute != nil {
+		s.webhookRoute(mux)
 	}
 
 	// PTY session endpoints (optional, depends on WithPTY option)

@@ -33,6 +33,7 @@ import (
 	"github.com/caimlas/meept/internal/metrics"
 	idpkg "github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/security"
+	"github.com/robfig/cron/v3"
 
 	_ "modernc.org/sqlite" // sqlite driver registration
 )
@@ -563,7 +564,17 @@ type PlanApprovedLister interface {
 // bot.Manager calls) happens outside the lock per the CLAUDE.md mutex-scope
 // rule. Methods snapshot under the lock, release, then operate.
 type Manager struct {
-	botManager  *bot.Manager
+	botManager *bot.Manager
+
+	// Cron schedules enabled bot cron triggers (routing-funnel C6).
+	// Exported so a gate can fire the registered jobs: unexported
+	// fields are invisible to that gate. Each job calls Trigger with
+	// source "cron". It does not call a runner Execute.
+	Cron *cron.Cron
+
+	cronRegsMu sync.Mutex
+	cronRegs   map[string]struct{} // botID + NUL + schedule; duplicate is a no-op
+
 	botStore    *bot.Store
 	roundBudget *botStoreBudgetChecker // C26: store-backed budget checker (nil = noop default)
 
@@ -1051,7 +1062,13 @@ func (m *Manager) StartAll(ctx context.Context) error {
 // underlying bot.Manager has its own StopAll). Stores are Closed by the
 // daemon's Components.Stop to keep ownership clear.
 func (m *Manager) StopAll() {
-	m.logger.Info("employee manager stopped")
+	if m != nil && m.Cron != nil {
+		stopCtx := m.Cron.Stop()
+		<-stopCtx.Done()
+	}
+	if m != nil && m.logger != nil {
+		m.logger.Info("employee manager stopped")
+	}
 }
 
 // RegisterPreExecCheckers builds a PreExecChecker (wrapped via
@@ -3690,7 +3707,7 @@ func patchConstitution(existing Constitution, patch map[string]any) (Constitutio
 // methods return a clear "bot backend not configured" error. Callers do not
 // need to nil-check the Manager itself.
 func NewManager(bm *bot.Manager) *Manager {
-	return &Manager{
+	m := &Manager{
 		botManager:           bm,
 		constitutions:        make(map[string]Constitution),
 		pendingConstitutions: make(map[string]*pendingConstitution),
@@ -3701,4 +3718,8 @@ func NewManager(bm *bot.Manager) *Manager {
 		assessmentSems:       make(map[string]chan struct{}),
 		logger:               slog.Default(),
 	}
+	// Install before StartAll. The gate constructs the bot manager
+	// first, then this manager, then CreateBot, then bot StartAll.
+	m.installCronScheduler(bm)
+	return m
 }

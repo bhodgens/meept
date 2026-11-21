@@ -632,7 +632,8 @@ New endpoints under `/api/v1/agents/*`. The existing `/api/v1/bot/{id}/trigger` 
 | `/api/v1/agents` | GET | list employees |
 | `/api/v1/agents` | POST | create employee (validates constitution) |
 | `/api/v1/agents/{id}` | GET, PATCH, DELETE | show, update, delete |
-| `/api/v1/agents/{id}/trigger` | POST | webhook trigger (existing semantics) |
+| `/api/v1/agents/{id}/trigger` | POST | operator trigger via agents.trigger (does not force source `webhook`) |
+| `/api/v1/webhooks/{id}` | POST | enabled bot webhook trigger; path id is the bot id; unknown id and a disabled webhook trigger return 404; calls Manager.Trigger with source `webhook` and the raw body as the prompt; logs bot id and byte length only |
 | `/api/v1/agents/{id}/pause` | POST | operator pause |
 | `/api/v1/agents/{id}/resume` | POST | operator resume |
 | `/api/v1/agents/{id}/constitution` | GET, PATCH | view / propose amendment |
