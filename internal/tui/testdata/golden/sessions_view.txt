@@ -4,21 +4,21 @@ sessions  (2)                                          ╭───────�
 │ title       cr…  las… ││alpha session             │  │    unknown, built:    │
 │───────────────────────││                          │  │       unknown)        │
 │ ▾ unbound…            ││id:       sess-alpha      │  │  ▾ status             │
-│ alpha ses…  Ma…  mmm… ││name:     alpha           │  │   daemon:             │
-│ beta sess…  Ma…  mmm… ││created:  mmm 14 HH:MM    │  │ disconnected          │
-│                       ││activity: mmm 14          │  │  ▾ agent activity     │
-│                       ││                          │  │   no active agents    │
-│                       ││--- plans ---             │  │   workers: none       │
-│                       ││no plans                  │  │  ▾ tasks              │
-│                       ││                          │  │   no active tasks     │
-│                       ││                          │  │  ▸ plan               │
-│                       ││                          │  │  ▾ recent memory      │
-╰───────────────────────╯╰──────────────────────────╯  │   ...                 │
+│ alpha ses…  Ma…  mmm… ││name:     alpha           │  │   daemon:   connected │
+│ beta sess…  Ma…  mmm… ││created:  mmm 14 HH:MM    │  │   uptime:   00s       │
+│                       ││activity: mmm 14          │  │   agents:   0 active  │
+│                       ││                          │  │   tasks:    0 pending │
+│                       ││--- plans ---             │  │  ▾ agent activity     │
+│                       ││no plans                  │  │   no active agents    │
+│                       ││                          │  │   workers: none       │
+│                       ││                          │  │  ▾ tasks              │
+│                       ││                          │  │   ...                 │
+╰───────────────────────╯╰──────────────────────────╯  │                       │
+                                                       │ ⢰⣆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢰⡆   │
+n: new | d: archive | D: delete | r: refresh | enter:  │ ⠈⠁⠀⠈⠁⠀⠢⠀⢠⣤⣄⠀⠠⠂⠀⠉⠀⠈⠁   │
+details | up/down: navigate | left/right:              │ ⢀⡀⠀⠀⠀⠀⡠⠀⠘⠛⠓⠀⠠⡀⠀⠀⠀⢀⡀   │
+collapse/expand | f: search | ?: help                  │ ⠸⠗⠀⠈⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠀⠸⠇   │
                                                        │                       │
-n: new | d: archive | D: delete | r: refresh | enter:  │ ⢰⣆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢰⡆   │
-details | up/down: navigate | left/right:              │ ⠈⠁⠀⠈⠁⠀⠢⠀⢠⣤⣄⠀⠠⠂⠀⠉⠀⠈⠁   │
-collapse/expand | f: search | ?: help                  │ ⢀⡀⠀⠀⠀⠀⡠⠀⠘⠛⠓⠀⠠⡀⠀⠀⠀⢀⡀   │
-                                                       │ ⠸⠗⠀⠈⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠀⠸⠇   │
                                                        │                       │
                                                        ╰───────────────────────╯
  ● │ ^X menu │ ^S sessions │ ^P find │ ^C quit │

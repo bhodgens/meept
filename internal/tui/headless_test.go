@@ -310,6 +310,11 @@ func newHeadlessAppSocket(t *testing.T, socketPath string, w, h int) *headlessPr
 	app.queue = models.NewQueueModel(rpc)
 	app.memory = models.NewMemoryModel(rpc)
 	app.plans = models.NewPlansModel(rpc)
+	// Sidebar must ride the LIVE stub client too (06-planning/03): the
+	// placeholder points at a nonexistent socket, so the plan panel never
+	// received plan.list data and every sidebar surface read
+	// "disconnected". Mirror the sub-model re-wiring above.
+	app.sidebar = NewSidebarModel(rpc, nil, app.styles, app.clientConfig.Rendering.SidebarAnimation)
 	// The review modal also holds the client; re-wire it to the live stub
 	// client like every sub-model above (createTestApp built it against the
 	// dead placeholder client before the swap).

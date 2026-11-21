@@ -4610,16 +4610,20 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			})
 
 			strategicPlanner := agent.NewStrategicPlanner(agent.StrategicPlannerConfig{
-				Registry:           c.AgentRegistry,
-				TaskStore:          orchTaskStore,
-				StepStore:          stepStore,
-				Bus:                msgBus,
-				Logger:             logger.With("component", "strategic"),
-				PairManager:        strategicPairMgr,
-				MaxPlanSteps:       cfg.Orchestrator.MaxPlanSteps,
-				PlannerTimeout:     time.Duration(cfg.Orchestrator.PlannerTimeout) * time.Second,
-				InterviewAmbiguity: cfg.Orchestrator.InterviewAmbiguityThreshold,
-				TemplateLoader:     agent.NewDaemonPlannerTemplateLoader("config/prompts"),
+				Registry:     c.AgentRegistry,
+				TaskStore:    orchTaskStore,
+				StepStore:    stepStore,
+				Bus:          msgBus,
+				Logger:       logger.With("component", "strategic"),
+				PairManager:  strategicPairMgr,
+				MaxPlanSteps: cfg.Orchestrator.MaxPlanSteps,
+				// Approval gate threshold (06-planning/03, master Q1):
+				// operator-configurable; 0 disables the gate (the
+				// planner no longer clamps 0 back to the default).
+				ApprovalStepThreshold: cfg.Orchestrator.TaskApprovalStepThreshold,
+				PlannerTimeout:        time.Duration(cfg.Orchestrator.PlannerTimeout) * time.Second,
+				InterviewAmbiguity:    cfg.Orchestrator.InterviewAmbiguityThreshold,
+				TemplateLoader:        agent.NewDaemonPlannerTemplateLoader("config/prompts"),
 			})
 			// Tool-hint validation (issue #58 capability 3): gate the
 			// planner's tool_hint passthrough on the real tool registry.

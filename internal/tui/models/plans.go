@@ -59,6 +59,12 @@ type PlansModel struct {
 	showingDetail bool
 	showingHelp   bool
 	filteredCount int
+
+	// docProposals holds 0-phase/0-step plans (evolver document
+	// proposals) seen by the last table build, so the view can render
+	// the shared document-proposal line (06-planning/03; reuses
+	// planCountLine - no wording fork). Not persisted.
+	docProposals []string
 }
 
 // PlansRPCClient interface for the plans model.
@@ -484,8 +490,22 @@ func (m *PlansModel) updatePlansTable() {
 		m.gateVisible = gateVisible
 	}
 
+	m.docProposals = nil
+
 	for _, plan := range plans {
 		stateIcon := m.getPlanStateIcon(plan.State)
+
+		// Document proposal (06-planning/03): a 0-phase/0-step plan is
+		// an evolver markdown proposal, not a broken/empty plan. Keep it
+		// for the tab's document-proposal status line; the table cells
+		// stay compact.
+		if len(plan.Phases) == 0 && plan.TotalSteps == 0 {
+			title := plan.Title
+			if title == "" {
+				title = plan.ID
+			}
+			m.docProposals = append(m.docProposals, title)
+		}
 
 		// Phases count
 		phasesStr := fmt.Sprintf("%d", len(plan.Phases))
@@ -559,6 +579,15 @@ func (m *PlansModel) View() string {
 
 	b.WriteString(tableStyle.Render(m.table.View()))
 	b.WriteString("\n")
+
+	// Document-proposal status line (06-planning/03): 0-phase/0-step
+	// evolver plans render the shared planCountLine wording instead of
+	// bare zero counts (which the fixed-width table cells cannot carry).
+	docStyle := lipgloss.NewStyle().Foreground(paletteColor("textMuted"))
+	for _, title := range m.docProposals {
+		b.WriteString(docStyle.Render(fmt.Sprintf("%s - %s", types.TruncateString(title, 40), DocumentProposalLine())))
+		b.WriteString("\n")
+	}
 
 	// Detail preview panel
 	if m.selected != nil {
@@ -812,6 +841,16 @@ func (m *PlansModel) renderPlanDetailModal() string {
 	if plan.FilePath != "" {
 		content.WriteString(labelStyle.Render("file:"))
 		content.WriteString(valueStyle.Render(plan.FilePath))
+		content.WriteString("\n")
+	}
+
+	// Document proposal (06-planning/03): a 0-phase/0-step plan is an
+	// evolver markdown proposal. Name it (shared planCountLine wording,
+	// no fork) instead of a bare zero-phase card; the file line above is
+	// the open-file affordance.
+	if len(plan.Phases) == 0 && plan.TotalSteps == 0 {
+		content.WriteString(labelStyle.Render("scope:"))
+		content.WriteString(valueStyle.Render(DocumentProposalLine()))
 		content.WriteString("\n")
 	}
 

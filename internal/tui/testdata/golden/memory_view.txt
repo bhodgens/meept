@@ -4,21 +4,21 @@ memory browser                                     ╭────────�
                                                    │    unknown, built:    │
 ╭─────────────────────────────────────────────────╮│       unknown)        │
 │ > search memory...                              ││  ▾ status             │
-╰─────────────────────────────────────────────────╯│   daemon:             │
-                                                   │ disconnected          │
-                                                   │  ▾ agent activity     │
+╰─────────────────────────────────────────────────╯│   daemon:   connected │
+                                                   │   uptime:   00s       │
+                                                   │   agents:   0 active  │
+                                                   │   tasks:    0 pending │
+ no results. enter a search query and press enter. │  ▾ agent activity     │
                                                    │   no active agents    │
- no results. enter a search query and press enter. │   workers: none       │
+                                                   │   workers: none       │
                                                    │  ▾ tasks              │
-                                                   │   no active tasks     │
-                                                   │  ▸ plan               │
-/ focus search | tab switch focus | enter select   │  ▾ recent memory      │
-                                                   │   ...                 │
+/ focus search | tab switch focus | enter select   │   ...                 │
                                                    │                       │
                                                    │ ⢰⣆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢰⡆   │
                                                    │ ⠈⠁⠀⠈⠁⠀⠢⠀⢠⣤⣄⠀⠠⠂⠀⠉⠀⠈⠁   │
                                                    │ ⢀⡀⠀⠀⠀⠀⡠⠀⠘⠛⠓⠀⠠⡀⠀⠀⠀⢀⡀   │
                                                    │ ⠸⠗⠀⠈⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠀⠸⠇   │
+                                                   │                       │
                                                    │                       │
                                                    ╰───────────────────────╯
  ● │ ^X menu │ ^S sessions │ ^P find │ ^C quit │ j/k

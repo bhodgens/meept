@@ -699,7 +699,7 @@ func (a *App) loadSessionImpl() tea.Msg {
 				if sess.ID == a.targetSessionID {
 					a.sessionMgr.SetSession(&sess)
 					a.armRestoreAwareness(&sess)
-					return SessionLoadedMsg{Session: &sess, IsNew: false}
+					return SessionLoadedMsg{Session: &sess, IsNew: false, AutoResume: true}
 				}
 			}
 		}
@@ -730,17 +730,17 @@ func (a *App) loadSessionImpl() tea.Msg {
 		if err == nil && session != nil && session.ID != "" {
 			a.sessionMgr.SetSession(session)
 			a.armRestoreAwareness(session)
-			return SessionLoadedMsg{Session: session, IsNew: false}
+			return SessionLoadedMsg{Session: session, IsNew: false, AutoResume: true}
 		}
 	}
 
 	// Fall back to creating a new session (same logic as SessionManager would do)
 	session, err := a.rpc.CreateSession(a.clientConfig.Session.DefaultName, a.projectDir)
 	if err != nil {
-		return SessionLoadedMsg{Session: nil, Err: err, IsNew: false}
+		return SessionLoadedMsg{Session: nil, Err: err, IsNew: false, AutoResume: true}
 	}
 	a.sessionMgr.SetSession(session)
-	return SessionLoadedMsg{Session: session, IsNew: true}
+	return SessionLoadedMsg{Session: session, IsNew: true, AutoResume: true}
 }
 
 // armRestoreAwareness arms the pending-turn rebuild for a RESUMED
@@ -771,6 +771,15 @@ type SessionLoadedMsg struct {
 	Session *types.Session
 	IsNew   bool
 	Err     error
+	// AutoResume marks a STARTUP load result (auto-resume /
+	// create-default / target-session load from the ConnectSuccess
+	// init). Resume/create are startup actions only: a stale startup
+	// result landing after an explicit SessionLoadedMsg already bound a
+	// different session must NOT rebind every surface mid-turn
+	// (06-planning/03: the rebind orphaned the live transcript --
+	// "the first SessionLoadedMsg wins", now enforced on the event
+	// loop, not only inside the cmd goroutine).
+	AutoResume bool
 }
 
 // connectDaemon is a command that connects to the daemon.
@@ -1266,6 +1275,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(a.initCurrentView(), a.sidebar.Init(), a.loadSession, a.fetchTemplateNames, a.fetchCurrentProject)
 
 	case SessionLoadedMsg:
+		// Stale startup result guard: an AutoResume-marked load that
+		// lands after an explicit load already bound a DIFFERENT session
+		// is dropped (see the field comment). Idempotent binds (same
+		// session) still pass through.
+		if msg.AutoResume && a.currentSession != nil && msg.Session != nil && msg.Session.ID != a.currentSession.ID {
+			slog.Debug("dropping stale startup session load", "stale", msg.Session.ID, "bound", a.currentSession.ID)
+			return a, nil
+		}
 		if msg.Err != nil {
 			a.statusMessage = fmt.Sprintf("session error: %v", msg.Err)
 			a.statusMessageTime = time.Now()

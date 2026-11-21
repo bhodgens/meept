@@ -290,6 +290,15 @@ type ChatModel struct {
 	// transcript rebuild has happened (06-planning/01: a task-gate card
 	// appended before the load lands is wiped by it).
 	sessionLoadPending bool
+
+	// sessionLoadStarted is stamped when a session.messages.get load is
+	// armed (SetSession). A late load result must never erase activity
+	// that happened AFTER the snapshot was taken (06-planning/03): a
+	// turn submitted while the load was in flight carries
+	// fresher-than-snapshot local state (the user's message and the
+	// resolved terminal bubble); rebuilding from the stale snapshot
+	// would silently drop the reply the user just saw.
+	sessionLoadStarted time.Time
 }
 
 // findMatch points to a span within a rendered message.
@@ -2015,6 +2024,30 @@ func preserveLocalNotices(rebuilt, existing []ChatMessage) []ChatMessage {
 	return out
 }
 
+// mergeFresherThanSnapshot appends to rebuilt the transcript messages
+// created after the session load was armed (fresherThan), deduped by ID
+// against the server truth. A zero fresherThan disables the merge (no
+// arm stamp = the snapshot is fully authoritative).
+func mergeFresherThanSnapshot(rebuilt, existing []ChatMessage, fresherThan time.Time) []ChatMessage {
+	if fresherThan.IsZero() {
+		return rebuilt
+	}
+	seen := make(map[string]bool, len(rebuilt))
+	for _, cm := range rebuilt {
+		seen[cm.ID] = true
+	}
+	out := rebuilt
+	for _, cm := range existing {
+		if cm.ID != "" && seen[cm.ID] {
+			continue
+		}
+		if !cm.Timestamp.Before(fresherThan) {
+			out = append(out, cm)
+		}
+	}
+	return out
+}
+
 // AddParticipantMessage adds a message from a session participant to the chat transcript.
 func (m *ChatModel) AddParticipantMessage(sourceClient, content string) {
 	m.messages = append(m.messages, ChatMessage{
@@ -2491,8 +2524,16 @@ func (m *ChatModel) loadServerMessages(sessionID string, serverMsgs []types.Sess
 	if sessionID == m.sessionID {
 		// Rebuild from the server's truth, then re-append the client's
 		// localOnly notices (C6/W26: a load landing after a notice must
-		// not silently wipe it).
-		m.messages = preserveLocalNotices(chatMsgs, m.messages)
+		// not silently wipe it). A message created AFTER the load was
+		// armed is fresher than the snapshot (a turn submitted while the
+		// load was in flight: the user's message and its resolved
+		// terminal bubble); the snapshot never saw it, so the rebuild
+		// must keep it (06-planning/03: a late load must not erase the
+		// reply the user just watched render).
+		m.messages = preserveLocalNotices(
+			mergeFresherThanSnapshot(chatMsgs, m.messages, m.sessionLoadStarted),
+			m.messages,
+		)
 		m.updateViewport()
 	}
 
@@ -2639,6 +2680,19 @@ func (m *ChatModel) updateViewport() {
 			if trace := m.renderTraceRowsFor(msg); trace != "" {
 				content.WriteString(trace)
 				currentLine += strings.Count(trace, "\n")
+			}
+		}
+
+		// Mode badge (06-planning/03 T2, F13c/W17): a classified reply
+		// carries its execution mode (plan / quickplan / direct / recall)
+		// so the transcript delineates planning from direct execution.
+		// The badge uses mapped labels only -- the raw handler_case enum
+		// never leaks.
+		if msg.Role == RoleAssistant {
+			if badge := renderModeBadge(msg); badge != "" {
+				content.WriteString(badge)
+				content.WriteString("\n")
+				currentLine++
 			}
 		}
 
@@ -2996,6 +3050,7 @@ func (m *ChatModel) SetSession(session *types.Session) tea.Cmd {
 		// Mark the load in-flight: the event pump defers daemon-state
 		// cards (task-gate approvals) until it lands (06-planning/01).
 		m.sessionLoadPending = true
+		m.sessionLoadStarted = time.Now()
 		loadCmd := func() tea.Msg {
 			resp, err := rpc.GetSessionMessages(sessionID, 0, 1000)
 			if err != nil {
@@ -3421,6 +3476,14 @@ func planCountLine(phaseCount, stepCount int) string {
 		stepStr += "s"
 	}
 	return phaseStr + " · " + stepStr
+}
+
+// DocumentProposalLine returns the shared document-proposal wording
+// (planCountLine(0, 0)) for surfaces that render a 0-phase/0-step evolver
+// plan outside the chat card (plans tab/detail, sidebar). Single source
+// of truth: no wording fork (06-planning/03 review checklist).
+func DocumentProposalLine() string {
+	return planCountLine(0, 0)
 }
 
 // renderTaskGateCard renders the approval card for a strategic task gate
