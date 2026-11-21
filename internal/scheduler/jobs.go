@@ -527,6 +527,22 @@ func (j *ShellJob) Execute(ctx context.Context) error {
 		}
 	}
 
+	// A run killed by our cancel/escalation can surface from cmd.Run as a
+	// non-*exec.ExitError: with WaitDelay set and a process-group kill, a
+	// lingering grandchild (e.g. `sleep` under `/bin/sh -c`) can outlive the
+	// direct child, so Wait returns exec.ErrWaitDelay ("wait: delayed") instead
+	// of an *exec.ExitError carrying SIGKILL. exitCodeFromRun maps that generic
+	// error to ExitCodeFailure (1), which would misreport a cancelled run as a
+	// plain failure. When we KNOW the run was cancelled, map any non-ExitError
+	// to the SIGKILL-equivalent code. A real *exec.ExitError is left untouched,
+	// so normal exits (N>1) and real signal deaths keep their exact mapping.
+	if status == JobStatusCancelled {
+		var exitErr *exec.ExitError
+		if !errors.As(runErr, &exitErr) {
+			exitCode = ExitCodeSIGKILL
+		}
+	}
+
 	// Close before stats so the size/hash reflect all writes, then read a
 	// bounded preview for the bus event (the event shape is frozen).
 	_ = spill.Close()

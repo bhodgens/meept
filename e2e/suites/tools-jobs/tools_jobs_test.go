@@ -57,6 +57,30 @@ func toolResultsJoined(f *harness.FakeLLM) string {
 	return strings.Join(toolResultTexts(f), "\n")
 }
 
+// jobStatusSettledResult reports whether any of the given tool-result texts is
+// a real job_status envelope that observed the settled one-shot: the bounded
+// output window contains `settled-output` and the result carries exit_code 0.
+// A `running` observation has neither field, so it can never satisfy this —
+// strictness is preserved: the settle must be observed by an actual tool call.
+func jobStatusSettledResult(texts []string) bool {
+	for _, raw := range texts {
+		var env struct {
+			Result struct {
+				Output   string `json:"output"`
+				ExitCode *int   `json:"exit_code"`
+			} `json:"result"`
+		}
+		if json.Unmarshal([]byte(raw), &env) != nil {
+			continue
+		}
+		if env.Result.ExitCode != nil && *env.Result.ExitCode == 0 &&
+			strings.Contains(env.Result.Output, "settled-output") {
+			return true
+		}
+	}
+	return false
+}
+
 // startJobsStack boots a sandbox and pins both the intent classifier and the
 // task planner to the `schedule` lane. The job tools (job_start/status/stop)
 // are granted to the bundled scheduler specialist via its `additional_tools`
@@ -180,15 +204,45 @@ func TestJobStatusReadsSettledResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal job_status args: %v", err)
 	}
-	s.Fake.EnqueueToolCalls(harness.ToolCall{
-		Name:      "job_status",
-		Arguments: string(statusArgs),
-	})
-	s.ChatTurn(t, sessionID,
-		"Schedule: use job_status to read the settled result of "+handle,
-		120*time.Second)
+
+	// The immediate one-shot is registered a hair in the future (~100ms), so
+	// a job_status turn issued right after job_start can still observe
+	// `running`. Retry REAL job_status calls with a bounded wait until a call
+	// observes the settled result (settled-output + exit_code 0). Never accept
+	// `running`: a settle must be observed by an actual tool call, and both the
+	// attempt count and the per-attempt wait are bounded (<10s added).
+	const (
+		maxAttempts   = 10
+		settleWait    = 300 * time.Millisecond
+		settleTimeout = 20 * time.Second // CLI await budget per turn
+	)
+	settled := false
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if attempt > 1 {
+			time.Sleep(settleWait)
+		}
+		s.Fake.EnqueueToolCalls(harness.ToolCall{
+			Name:      "job_status",
+			Arguments: string(statusArgs),
+		})
+		s.ChatTurn(t, sessionID,
+			"Schedule: use job_status to read the settled result of "+handle,
+			settleTimeout)
+
+		// Earlier attempts observed `running` (no output/exit_code); the
+		// helper only matches a real settled job_status result, so checking
+		// all accumulated texts stays strict.
+		if jobStatusSettledResult(toolResultTexts(s.Fake)) {
+			settled = true
+			break
+		}
+	}
 
 	joined := toolResultsJoined(s.Fake)
+	if !settled {
+		t.Fatalf("job_status never observed the settled result after %d attempts; tool results:\n%s",
+			maxAttempts, joined)
+	}
 	if !strings.Contains(joined, "settled-output") {
 		t.Fatalf("job_status result missing the command output; tool results:\n%s", joined)
 	}
