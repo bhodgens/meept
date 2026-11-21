@@ -318,6 +318,8 @@ jobs:
   # (.githooks/deadcode-baseline.txt for the -test pass,
   #  .githooks/deadcode-baseline-notest.txt for the no-test pass) against
   # every commit, so "implemented with tests but never wired" cannot merge.
+  # The follow-on step refuses a rewritten (grown) allow-list. The reachability
+  # gate cannot see that hole: --rebaseline makes the new lines "known".
   deadcode:
     name: deadcode reachability gate
     runs-on: ubuntu-latest
@@ -326,6 +328,10 @@ jobs:
       MEEPT_DEADCODE_FULL_TREE: "1"
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Growth ratchet diffs against the PR base sha or the push parent.
+          # A depth-1 checkout does not contain that commit.
+          fetch-depth: 0
 
       - name: Set up Go
         # go-version-file pins go1.27.3 (the go.mod toolchain line); the
@@ -350,6 +356,25 @@ jobs:
         # missing (CI=true path) or when any function is unreachable from
         # all five production mains yet absent from the matching baseline.
         run: bash .githooks/pre-commit-deadcode
+
+      - name: Refuse deadcode baseline growth
+        # No env skip. Label exception is pull_request only; push has none.
+        # The script stays free of GitHub label logic so it can run locally.
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            if [ "${{ contains(github.event.pull_request.labels.*.name, 'deadcode-baseline-growth') }}" = "true" ]; then
+              echo "human label deadcode-baseline-growth allowed growth"
+              exit 0
+            fi
+            bash scripts/deadcode-baseline-growth-check.sh "${{ github.event.pull_request.base.sha }}"
+          else
+            before="${{ github.event.before }}"
+            if [ "$before" = "0000000000000000000000000000000000000000" ]; then
+              echo "github.event.before is all zeros (new branch / first push); skipping baseline-growth check"
+              exit 0
+            fi
+            bash scripts/deadcode-baseline-growth-check.sh "$before"
+          fi
 
   # ─── Census-gate regression battery ───────────────────────────────────
   # Pins .githooks/pre-commit-e2e Mode 2 (new-package census) contract via
