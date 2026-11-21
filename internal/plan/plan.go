@@ -84,6 +84,11 @@ type Plan struct {
 	// same-process approve would. Empty on legacy rows (the title/
 	// description mandate fallback stays byte-identical).
 	Prompt string `json:"prompt,omitempty"`
+	// ResultTopic is the execution-result bus topic stamped when the round
+	// starts (routing-funnel C1). Empty on legacy rows means employee.result.
+	// The only other legal value is bot.result. A load miss must not invent
+	// bot.result.
+	ResultTopic string `json:"result_topic,omitempty"`
 	// SynthesisError records the most recent Synthesize failure for this
 	// plan (issue #148 per-goal outcome marking): an approved plan whose
 	// expansion failed carries WHY here until a re-drive succeeds (which

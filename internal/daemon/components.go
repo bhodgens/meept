@@ -6845,6 +6845,7 @@ func (c *Components) Start(ctx context.Context) error {
 					agentLoop: c.AgentLoop,
 					botMgr:    c.BotManager,
 					logger:    c.Logger.With("component", "employee-executor"),
+					sessions:  c.SessionStore,
 				}
 			}
 

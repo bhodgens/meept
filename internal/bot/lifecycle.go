@@ -22,6 +22,12 @@ type Manager struct {
 	mu      sync.RWMutex
 	running map[string]*runningBot
 	logger  *slog.Logger
+
+	// startHook runs from startBot after bus-event registration.
+	// employee.NewManager installs the cron registrar here. Nil is
+	// a no-op. Unexported so a gate cannot fire it in place of the
+	// scheduler the hook registers.
+	startHook func(context.Context, BotDefinition)
 }
 
 // NewManager creates a new bot lifecycle manager.
@@ -161,6 +167,28 @@ func (m *Manager) startBot(ctx context.Context, def BotDefinition) error {
 		m.router.Register(def)
 	}
 
+	// Snapshot the hook and call it without m.mu. The hook registers
+	// cron jobs and must not run under the lifecycle lock.
+	m.mu.RLock()
+	hook := m.startHook
+	m.mu.RUnlock()
+	if hook != nil {
+		hook(botCtx, def)
+	}
+
 	m.logger.Info("started bot", "bot_id", def.ID, "triggers", len(def.Triggers))
 	return nil
+}
+
+// SetStartHook installs fn, called from startBot after bus-event
+// registration. Nil is ignored. employee.NewManager installs the cron
+// registrar so enabled cron triggers reach EmployeeManager.Trigger
+// without this package importing employee.
+func (m *Manager) SetStartHook(fn func(context.Context, BotDefinition)) {
+	if m == nil || fn == nil {
+		return
+	}
+	m.mu.Lock()
+	m.startHook = fn
+	m.mu.Unlock()
 }

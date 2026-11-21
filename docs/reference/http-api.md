@@ -839,7 +839,8 @@ Endpoints under `/api/v1/agents/*` manage AI employees — persistent, constitut
 | GET | `/api/v1/agents/{id}` | Show employee detail |
 | PATCH | `/api/v1/agents/{id}` | Update employee definition |
 | DELETE | `/api/v1/agents/{id}` | Delete employee (stops if running) |
-| POST | `/api/v1/agents/{id}/trigger` | Webhook trigger (existing semantics, moved from `/api/v1/bot/{id}/trigger`) |
+| POST | `/api/v1/agents/{id}/trigger` | Operator trigger via `agents.trigger` (does not force source `webhook`) |
+| POST | `/api/v1/webhooks/{id}` | Enabled bot webhook trigger. Path id is the bot id. Unknown id and a disabled webhook trigger return 404. Calls Manager.Trigger with source `webhook` and the raw body as the prompt. Logs the bot id and the byte length only. |
 | POST | `/api/v1/agents/{id}/pause` | Operator pause |
 | POST | `/api/v1/agents/{id}/resume` | Operator resume (only un-pause path) |
 | GET | `/api/v1/agents/{id}/constitution` | View constitution |

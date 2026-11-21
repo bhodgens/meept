@@ -336,6 +336,39 @@ func (s *MemoryStore) Create(name string) (*Session, error) {
 	return session, nil
 }
 
+// Ensure returns the session row for id, creating it in the same map Create
+// uses when the row is missing. conversation_id equals id so the standing
+// employee session is one identity for both lookup keys. Idempotent.
+func (s *MemoryStore) Ensure(id, name string) (*Session, error) {
+	if id == "" {
+		return nil, fmt.Errorf("session id required")
+	}
+	if name == "" {
+		name = id
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if existing := s.sessions[id]; existing != nil {
+		return existing, nil
+	}
+
+	now := time.Now()
+	sess := &Session{
+		ID:              id,
+		Name:            name,
+		ConversationID:  id,
+		CreatedAt:       now,
+		LastActivity:    now,
+		AttachedClients: []string{},
+		WorkerIDs:       []string{},
+	}
+	s.sessions[id] = sess
+	s.logger.Info("Session ensured", "id", id, "name", name)
+	return sess, nil
+}
+
 // Get returns a session by ID.
 func (s *MemoryStore) Get(id string) *Session {
 	s.mu.RLock()

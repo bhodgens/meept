@@ -5,7 +5,8 @@ package bot
 // IMPLEMENTED in internal/daemon/components.go (NewComponents):
 //   - BotStore and BotManager fields on Components struct
 //   - Bot framework initialization when cfg.Bots.Enabled is true
-//   - BotManager.StartAll() called in Components.Start()
+//   - BotManager.StartAll() called in Components.Start(); employee.NewManager
+//     installs a start hook so enabled cron triggers call Manager.Trigger
 //   - BotManager.StopAll() and BotStore.Close() called in Components.Stop()
 //
 // IMPLEMENTED in internal/daemon/daemon.go:

@@ -153,6 +153,21 @@ func (m *PlanManager) SetPlanPrompt(ctx context.Context, planID, prompt string) 
 	return nil
 }
 
+// SetPlanResultTopic persists the round's result-topic stamp onto a stored
+// plan row (routing-funnel C1). GoalLoop copies the stamp onto the PlanRef
+// at construction and writes it here when a store exists. Resume and
+// ApproveAndExecute load it back. An empty stored value means
+// employee.result; this writer does not invent bot.result.
+func (m *PlanManager) SetPlanResultTopic(ctx context.Context, planID, topic string) error {
+	if err := m.updatePlanColumns(ctx, planID, func(p *Plan) {
+		p.ResultTopic = topic
+		p.UpdatedAt = time.Now().UTC()
+	}); err != nil {
+		return fmt.Errorf("set plan result topic: %w", err)
+	}
+	return nil
+}
+
 // GetPlansForSession returns the plans linked to a session (read-through
 // to the store). Used by the dispatcher's quickplan Session execution
 // context block (quickplan-mode leaf 02).

@@ -28,12 +28,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/bot"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/metrics"
 	idpkg "github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/security"
+	"github.com/robfig/cron/v3"
 
 	_ "modernc.org/sqlite" // sqlite driver registration
 )
@@ -564,7 +564,17 @@ type PlanApprovedLister interface {
 // bot.Manager calls) happens outside the lock per the CLAUDE.md mutex-scope
 // rule. Methods snapshot under the lock, release, then operate.
 type Manager struct {
-	botManager  *bot.Manager
+	botManager *bot.Manager
+
+	// Cron schedules enabled bot cron triggers (routing-funnel C6).
+	// Exported so a gate can fire the registered jobs: unexported
+	// fields are invisible to that gate. Each job calls Trigger with
+	// source "cron". It does not call a runner Execute.
+	Cron *cron.Cron
+
+	cronRegsMu sync.Mutex
+	cronRegs   map[string]struct{} // botID + NUL + schedule; duplicate is a no-op
+
 	botStore    *bot.Store
 	roundBudget *botStoreBudgetChecker // C26: store-backed budget checker (nil = noop default)
 
@@ -1053,7 +1063,13 @@ func (m *Manager) StartAll(ctx context.Context) error {
 // underlying bot.Manager has its own StopAll). Stores are Closed by the
 // daemon's Components.Stop to keep ownership clear.
 func (m *Manager) StopAll() {
-	m.logger.Info("employee manager stopped")
+	if m != nil && m.Cron != nil {
+		stopCtx := m.Cron.Stop()
+		<-stopCtx.Done()
+	}
+	if m != nil && m.logger != nil {
+		m.logger.Info("employee manager stopped")
+	}
 }
 
 // RegisterPreExecCheckers builds a PreExecChecker (wrapped via
@@ -1773,21 +1789,19 @@ func (m *Manager) triggerViaGoalLoop(ctx context.Context, id string, payload map
 	// other I/O happens under this lock.
 	invokeMu := m.acquireInvokeMutex(id)
 	invokeMu.Lock()
-	// Speak context (harness-eval leaf 11): a goal round is session-
-	// detached, so the notify payload carries the employee id as the
-	// session identity and resets the per-round dedup flag. Called here —
-	// the single round-entry site — so every round can notify exactly once.
-	loop.SetSpeakContext(id, "goal-"+id)
-	// Execution-result tier is PER ROUND, not a sticky loop property: a
-	// bus_event trigger (issue-140 bot router) publishes on bot.result;
-	// every other trigger — including goal rounds on the same bot —
-	// publishes on employee.result. Setting this on every round entry
-	// prevents one bot trigger from reclassifying all later rounds.
-	if source == "bus_event" {
-		loop.SetResultTopic(agent.TopicBotResult.Name)
-	} else {
-		loop.SetResultTopic(agent.TopicEmployeeResult.Name)
-	}
+	// Speak context (routing-funnel C4): the notify payload and the
+	// execution-result session id are the standing chat session, not the
+	// raw employee id. The goal conversation argument stays "goal-"+id.
+	// Called here — the single round-entry site — so every round can
+	// notify exactly once.
+	loop.SetSpeakContext(EmployeeChatSessionID(id), "goal-"+id)
+	// Execution-result tier is PER ROUND, stamped onto the PlanRef when
+	// the round builds it (decideTier1 / planWithResultTopic), from this
+	// trigger's source. bus_event stamps bot.result; every other source
+	// stamps employee.result. SetResultTopic still resets the deprecated
+	// loop flag so a later round cannot look sticky to flag readers.
+	// Execute does not read that flag.
+	loop.SetResultTopic(resultTopicForTrigger(source))
 	decideErr := loop.Decide(ctx, trigger)
 	skip := loop.LastDecideSkip()
 	invokeMu.Unlock()
@@ -1911,9 +1925,10 @@ func (m *Manager) SteerEmployee(ctx context.Context, id, content string) (bool, 
 	// path — the trigger re-runs the episode and the assess prompt
 	// carries the steering text.
 	if trigger, ok := loop.drainPendingSteer(); ok {
-		// Speak context (harness-eval leaf 11): same round-entry setup
-		// as triggerViaGoalLoop so a steered round can notify once.
-		loop.SetSpeakContext(id, "goal-"+id)
+		// Speak context (routing-funnel C4): same round-entry setup as
+		// triggerViaGoalLoop. The first argument is the standing chat
+		// session id, not the raw employee id.
+		loop.SetSpeakContext(EmployeeChatSessionID(id), "goal-"+id)
 		loop.decideSteer(ctx, trigger, m.logger)
 	}
 	invokeMu.Unlock()
@@ -2851,7 +2866,10 @@ func (m *Manager) ResumeApprovedPlan(ctx context.Context, planID, callerID strin
 	// same one the parked-episode resume uses). ApproverID is empty, which
 	// CanExecutePlan treats as backward-compat authorized: the plan was
 	// already approved through the signoff system before this resume fired.
-	if _, _, err := loop.ApproveAndExecute(ctx, PlanRef{ID: planID}); err != nil {
+	// Load the stamp persisted at round start before execute. ApproveAndExecute
+	// loads again if the ref is still empty; it does not call SetResultTopic.
+	planRef := loop.loadStampedResultTopic(ctx, PlanRef{ID: planID})
+	if _, _, err := loop.ApproveAndExecute(ctx, planRef); err != nil {
 		return fmt.Errorf("resume plan %s: approve and execute: %w", planID, err)
 	}
 	return nil
@@ -3742,7 +3760,7 @@ func patchConstitution(existing Constitution, patch map[string]any) (Constitutio
 // methods return a clear "bot backend not configured" error. Callers do not
 // need to nil-check the Manager itself.
 func NewManager(bm *bot.Manager) *Manager {
-	return &Manager{
+	m := &Manager{
 		botManager:           bm,
 		constitutions:        make(map[string]Constitution),
 		pendingConstitutions: make(map[string]*pendingConstitution),
@@ -3753,4 +3771,8 @@ func NewManager(bm *bot.Manager) *Manager {
 		assessmentSems:       make(map[string]chan struct{}),
 		logger:               slog.Default(),
 	}
+	// Install before StartAll. The gate constructs the bot manager
+	// first, then this manager, then CreateBot, then bot StartAll.
+	m.installCronScheduler(bm)
+	return m
 }

@@ -562,6 +562,71 @@ func (s *SQLiteStore) Create(name string) (*Session, error) {
 	return session, nil
 }
 
+// Ensure returns the session row for id, inserting it through the same
+// column list as Create when the row is missing. conversation_id equals id
+// so the standing employee session is one identity for both lookup keys.
+// A concurrent insert that loses the unique race re-reads the winner.
+func (s *SQLiteStore) Ensure(id, name string) (*Session, error) {
+	if id == "" {
+		return nil, fmt.Errorf("session id required")
+	}
+	if name == "" {
+		name = id
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if existing := s.getByColumnUnsafe("id", id); existing != nil {
+		return existing, nil
+	}
+
+	now := time.Now().UTC()
+	sess := &Session{
+		ID:              id,
+		Name:            name,
+		ConversationID:  id,
+		CreatedAt:       now,
+		LastActivity:    now,
+		AttachedClients: []string{},
+		WorkerIDs:       []string{},
+	}
+	attachedJSON, err := json.Marshal(sess.AttachedClients)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode attached clients: %w", err)
+	}
+	workersJSON, err := json.Marshal(sess.WorkerIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode worker ids: %w", err)
+	}
+
+	_, err = s.db.Exec(`
+		INSERT INTO sessions (id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, detection_context, schema_version)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, '', '', false, '', ?)`,
+		sess.ID,
+		sess.Name,
+		sess.ConversationID,
+		sess.CreatedAt.Format(time.RFC3339),
+		sess.LastActivity.Format(time.RFC3339),
+		string(attachedJSON),
+		string(workersJSON),
+		sess.Description,
+		SessionFormatVersion,
+	) //nolint:mutexio // mutex serializes sqlite connection access
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE") {
+			if existing := s.getByColumnUnsafe("id", id); existing != nil {
+				return existing, nil
+			}
+		}
+		s.logger.Error("Failed to ensure session", "id", id, "error", err)
+		return nil, fmt.Errorf("failed to ensure session: %w", err)
+	}
+
+	s.logger.Info("Session ensured", "id", id, "name", name)
+	return sess, nil
+}
+
 // CreateForOwner creates a new session stamped with an owner (multi-user
 // mode). An empty OwnerID produces the same result as Create.
 func (s *SQLiteStore) CreateForOwner(_ context.Context, req CreateForOwnerRequest) (*Session, error) {

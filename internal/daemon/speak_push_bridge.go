@@ -16,10 +16,9 @@ import (
 // The WS bridge (internal/comm/http/server.go) independently forwards the
 // same topic to browser clients; this bridge covers everything else.
 //
-// Notifications carry no session binding, so the push goes to all
-// sessions. Best-effort: push failures are logged, never fatal. The
-// subscription lives for the process lifetime; no unsubscribe path is
-// wired.
+// Notifications name one session: the standing employee chat session
+// (payload.SessionID, set by SetSpeakContext) or the voice call's own
+// session. An empty session id is not a broadcast.
 func wireSpeakPushBridge(msgBus *bus.MessageBus, push *services.PushService, logger *slog.Logger) {
 	if msgBus == nil || push == nil {
 		return
@@ -41,8 +40,12 @@ func wireSpeakPushBridge(msgBus *bus.MessageBus, push *services.PushService, log
 			if payload.Text == "" {
 				continue
 			}
+			if payload.SessionID == "" {
+				logger.Warn("speak push bridge: notify has no session; not broadcasting")
+				continue
+			}
 			_, err := push.Push(context.Background(), &services.PushRequest{
-				SessionIDs: nil, // broadcast: detached runs have no session
+				SessionIDs: []string{payload.SessionID},
 				Source:     "employee",
 				Type:       services.PushTypeAlert,
 				Content:    payload.Text,
