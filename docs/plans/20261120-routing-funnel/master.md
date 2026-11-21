@@ -204,13 +204,13 @@ Output: APPROVED or a list of specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-test-gate | TESTS_VALIDATED | 1 | Reviewed 2026-11-20. Six tests compile and fail on old behavior. PlanRef.ResultTopic field added so the stamp test can set the contract field. Execute still ignores it. |
-| 01-result-topic-stamp | PENDING | 0 | |
-| 02-executor-prompt-and-tokens | PENDING | 0 | |
-| 03-detached-chat-session | PENDING | 0 | |
-| 04-specialist-execution-runs | PENDING | 0 | |
-| 05-cron-webhook-trigger | PENDING | 0 | |
-| 06-stale-runner-cleanup | PENDING | 0 | |
+| 00T-test-gate | TESTS_VALIDATED | 1 | Reviewed 2026-11-20. Six tests compile. Stamp, prefix, token, and specialist tests now pass. Session and cron tests stay red until leaves 03 and 05. |
+| 01-result-topic-stamp | REVIEWED | 1 | Commit 700bb3ea. Execute publishes plan.ResultTopic. Re-ran TestPlanRefTopicSurvivesLaterBusEvent: pass. |
+| 02-executor-prompt-and-tokens | REVIEWED | 1 | Commit a9ccf4a4. Prefix is one-shot. Tokens come from the provider total. Re-ran both gate tests: pass. |
+| 03-detached-chat-session | IN_PROGRESS | 0 | Dispatched after 01 and 02 review. |
+| 04-specialist-execution-runs | REVIEWED | 1 | Commit fb86f7a9. turn.terminal appends tier specialist. Re-ran the gate test: pass. |
+| 05-cron-webhook-trigger | PENDING | 0 | Waits for 03. |
+| 06-stale-runner-cleanup | REVIEWED | 1 | Commit bd5def0f. NewBotRunner call removed. Docs name GoalLoop. |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS | IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED
 
