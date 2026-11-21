@@ -10,13 +10,16 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/session"
@@ -393,4 +396,73 @@ func (c *capturingLogger) countContaining(needle string) int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return strings.Count(string(c.buf), needle)
+}
+
+// titleRefreshStore is a sessionStore whose Get returns a user-renamed
+// session. Signatures match *session.SQLiteStore so SetSessionStore wires it;
+// a widened Get(any) leaves the loop's store nil and the pin below fails.
+type titleRefreshStore struct {
+	sess *session.Session
+}
+
+func (s *titleRefreshStore) Get(id string) *session.Session {
+	if s == nil || s.sess == nil || s.sess.ID != id {
+		return nil
+	}
+	return s.sess
+}
+
+func (s *titleRefreshStore) SaveMessages(string, []session.Message) error { return nil }
+
+func (s *titleRefreshStore) UpdateDesignation(string, session.DesignationStatus, string, string) error {
+	return nil
+}
+
+func (s *titleRefreshStore) ClearDesignation(string) error { return nil }
+
+// TestTitleRefreshPublishesUserDescription pins user-rename durability on
+// the periodic title refresh: when Get returns a session with
+// DescriptionUserSet, the published description is the stored text, not the
+// generated fallback.
+func TestTitleRefreshPublishesUserDescription(t *testing.T) {
+	const (
+		sessionID = "sess-user-rename"
+		stored    = "my renamed session"
+		generated = "4 turns" // nil-LLM SessionRefresher fallback for turnCount 4
+	)
+
+	mb := bus.New(nil, slogDiscardLogger())
+	t.Cleanup(mb.Close)
+
+	loop := NewAgentLoop("loop-title", t.TempDir(),
+		WithMessageBus(mb),
+		WithLoopLogger(slogDiscardLogger()),
+		WithSessionID(sessionID),
+	)
+	require.NotNil(t, loop)
+	loop.turnCounter = 4
+	loop.SetSessionRefresher(session.NewSessionRefresher(nil, slogDiscardLogger()))
+	loop.SetSessionStore(&titleRefreshStore{sess: &session.Session{
+		ID:                 sessionID,
+		Description:        stored,
+		DescriptionUserSet: true,
+	}}, nil)
+	require.NotNil(t, loop.sessionStore, "SetSessionStore did not wire a store with the real Get signature")
+
+	sub := mb.Subscribe("title-refresh-pin", "session.title_updated")
+	t.Cleanup(func() { mb.Unsubscribe(sub) })
+
+	loop.triggerTitleRefresh(context.Background(), "conv-unused")
+
+	select {
+	case msg := <-sub.Channel:
+		require.NotNil(t, msg)
+		var payload map[string]string
+		require.NoError(t, json.Unmarshal(msg.Payload, &payload))
+		assert.Equal(t, stored, payload["description"],
+			"published description must be the stored user text, not generated %q", generated)
+		assert.NotEqual(t, generated, payload["description"])
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for session.title_updated")
+	}
 }

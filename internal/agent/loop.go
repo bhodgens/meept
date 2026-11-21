@@ -1235,13 +1235,25 @@ type AgentLoop struct {
 	stateMu sync.Mutex
 }
 
-// sessionStore is an interface for session persistence operations needed by AgentLoop.
+// sessionStore is the persistence surface AgentLoop needs from the session
+// store. Signatures match *session.SQLiteStore (and *session.MemoryStore)
+// exactly. Widened Get/SaveMessages (any) made the daemon's real store fail
+// the SetSessionStore assert, leaving l.sessionStore nil so
+// triggerTitleRefresh never saw DescriptionUserSet and republished a
+// generated title over a user rename.
 type sessionStore interface {
-	Get(id string) any
-	SaveMessages(sessionID string, messages any) error
+	Get(id string) *session.Session
+	SaveMessages(sessionID string, messages []session.Message) error
 	UpdateDesignation(sessionID string, status session.DesignationStatus, reason, priority string) error
 	ClearDesignation(sessionID string) error
 }
+
+// The production stores must satisfy sessionStore. A signature drift here is
+// how a user rename gets overwritten by the periodic title refresh.
+var (
+	_ sessionStore = (*session.SQLiteStore)(nil)
+	_ sessionStore = (*session.MemoryStore)(nil)
+)
 
 // branchManager is an interface for branch navigation operations needed by AgentLoop.
 type branchManager interface {
@@ -10366,6 +10378,12 @@ func (l *AgentLoop) SetSessionStore(store any, sessionCfg any) {
 	if store != nil {
 		if ss, ok := store.(sessionStore); ok {
 			l.sessionStore = ss
+		} else if l.logger != nil {
+			// A non-nil store that misses the interface is a wiring
+			// mismatch, not "no store". Do not return: the
+			// sessionMessageReader wiring below still applies.
+			l.logger.Warn("SetSessionStore: store does not implement sessionStore",
+				"store_type", fmt.Sprintf("%T", store))
 		}
 		// Narrow, optional assertion: stores that can read persisted
 		// messages also power conversation restore on cache miss
@@ -11205,10 +11223,8 @@ func (l *AgentLoop) triggerTitleRefresh(ctx context.Context, conversationID stri
 	// stored description is user-set, publish the user's text instead. The
 	// auto name still refreshes. A missing store/read keeps legacy behavior.
 	if l.sessionStore != nil {
-		if raw := l.sessionStore.Get(sessionID); raw != nil {
-			if sess, ok := raw.(*session.Session); ok && sess != nil && sess.DescriptionUserSet {
-				result.Description = sess.Description
-			}
+		if sess := l.sessionStore.Get(sessionID); sess != nil && sess.DescriptionUserSet {
+			result.Description = sess.Description
 		}
 	}
 
