@@ -852,6 +852,19 @@ type AgentLoop struct {
 	// Protected by mu; read via LastStablePrefixHash().
 	lastStablePrefixHash string
 
+	// turnSystemPrefix is a one-shot prefix for the next RunOnce on this
+	// receiver (routing-funnel C2). Empty means none is armed. Consumed
+	// when that RunOnce starts, then cleared. Never written onto
+	// config.SystemPromptOveride or any other permanent prompt field.
+	turnSystemPrefix string
+
+	// lastTurnTokens is the provider TotalTokens from the turn that just
+	// finished (routing-funnel C3). lastTurnUsageSeen is false when that
+	// turn's provider sent no usage; LastTurnTokens returns 0 only then.
+	// Both guarded by mu.
+	lastTurnTokens    int
+	lastTurnUsageSeen bool
+
 	// Claude artifacts integration
 	artifactManager *ArtifactManager
 
@@ -1961,6 +1974,83 @@ func (l *AgentLoop) PiiRestoreHook() *PiiRestoreHook {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.piiRestore
+}
+
+// SetTurnSystemPrefix arms a one-shot system-prompt prefix for the next
+// RunOnce on this receiver. Empty prefix is a no-op. The prefix is
+// prepended to that turn's system prompt and then cleared. It is never
+// written onto the loop's permanent system prompt.
+func (l *AgentLoop) SetTurnSystemPrefix(prefix string) {
+	if l == nil || prefix == "" {
+		return
+	}
+	l.mu.Lock()
+	l.turnSystemPrefix = prefix
+	l.mu.Unlock()
+}
+
+// consumeTurnSystemPrefix returns the armed one-shot prefix and clears it,
+// so a later RunOnce on this receiver does not see it again.
+func (l *AgentLoop) consumeTurnSystemPrefix() string {
+	if l == nil {
+		return ""
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	prefix := l.turnSystemPrefix
+	l.turnSystemPrefix = ""
+	return prefix
+}
+
+// prependTurnSystemPrefix prepends prefix to a turn's assembled system
+// prompt. It does not mutate the loop's permanent prompt config.
+func prependTurnSystemPrefix(prefix, systemPrompt string) string {
+	if prefix == "" {
+		return systemPrompt
+	}
+	if systemPrompt == "" {
+		return prefix
+	}
+	return prefix + "\n\n" + systemPrompt
+}
+
+// LastTurnTokens returns the provider TotalTokens from the turn that just
+// finished. It is 0 only when that turn's provider sent no usage.
+func (l *AgentLoop) LastTurnTokens() int {
+	if l == nil {
+		return 0
+	}
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	if !l.lastTurnUsageSeen {
+		return 0
+	}
+	return l.lastTurnTokens
+}
+
+// resetLastTurnTokens clears the previous turn's usage so a turn that
+// never receives provider usage reports 0.
+func (l *AgentLoop) resetLastTurnTokens() {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	l.lastTurnTokens = 0
+	l.lastTurnUsageSeen = false
+	l.mu.Unlock()
+}
+
+// recordTurnProviderUsage stores TotalTokens from a provider response on
+// this turn. A zero TokenUsage means the provider sent no usage and is
+// ignored, so an earlier reported count is not clobbered by an absent one.
+func (l *AgentLoop) recordTurnProviderUsage(usage llm.TokenUsage) {
+	if l == nil || usage == (llm.TokenUsage{}) {
+		return
+	}
+	l.mu.Lock()
+	l.lastTurnUsageSeen = true
+	l.lastTurnTokens = usage.TotalTokens
+	l.mu.Unlock()
 }
 
 // SessionID returns the loop's session identifier (the identity the loop was
@@ -3319,6 +3409,12 @@ func voiceClockStampFromContext(ctx context.Context) (string, bool) {
 // Conversation.AddUserMessageWithParts so that provider serializers emit
 // native image blocks.
 func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, parts []llm.ContentPart, conversationID string) (response string, err error) {
+	// C2: the one-shot prefix applies only to this RunOnce, then clears,
+	// even if the turn returns before the prompt is sent.
+	turnPrefix := l.consumeTurnSystemPrefix()
+	// C3: a turn with no provider usage must not report the previous turn.
+	l.resetLastTurnTokens()
+
 	// The reply text is stripped of leaked reasoning before it returns -
 	// history-side stripping (conversation.go) keeps it out of the NEXT
 	// prompt but never sanitizes the CURRENT reply, and the voice talk
@@ -3670,8 +3766,11 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 		)
 	}
 
-	// Build and set system prompt with skill context
+	// Build and set system prompt with skill context. The one-shot turn
+	// prefix is prepended here only — never written onto the permanent
+	// system prompt (routing-funnel C2).
 	systemPrompt := l.buildSystemPromptWithSkills(ctx, discovered)
+	systemPrompt = prependTurnSystemPrefix(turnPrefix, systemPrompt)
 	conv.SetSystemPrompt(systemPrompt)
 
 	// Add user message (sanitized + boundary-wrapped). When multimodal parts
@@ -5767,7 +5866,12 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		l.mu.Lock()
 		l.reasoningForNextTurn = ""
 		l.mu.Unlock()
-		// Track token usage
+		// Track token usage. C3: remember this response's provider
+		// TotalTokens for LastTurnTokens. A zero Usage is absent and
+		// does not overwrite a count already seen this turn.
+		if response != nil {
+			l.recordTurnProviderUsage(response.Usage)
+		}
 		totalTokens += response.Usage.TotalTokens
 		cachedTokens += response.Usage.CachedTokens
 

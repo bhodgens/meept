@@ -271,11 +271,11 @@ func (p employeeBusPublisher) PublishConstitutionValidationError(employeeID, val
 // userMessage) to run a single LLM turn. We delegate to AgentLoop.RunOnce
 // which processes a single user message through the full reasoning loop.
 //
-// Token counts from RunOnce are not directly available (RunOnce returns
-// only the response string); we return 0 for tokensUsed. The per-turn
-// cost is tracked separately by the LLM client's token cache. This keeps
-// the GoalLoop executor path functional without duplicating the metrics
-// infrastructure.
+// systemPrompt is armed as a one-shot turn prefix (routing-funnel C2)
+// and cleared after that RunOnce. It is not written onto the loop's
+// permanent system prompt. tokensUsed is LastTurnTokens() (C3): the
+// provider TotalTokens from the turn that just finished, or 0 when the
+// provider sent no usage. RunOnce's signature stays (string, error).
 //
 // See docs/superpowers/specs/2026-06-23-ai-employee-design.md spec line
 // 304: "The LLM call inside ASSESS uses the existing AgentLoop.RunOnce() —
@@ -286,9 +286,10 @@ type agentLoopBotExecutorAdapter struct {
 	logger    *slog.Logger
 }
 
-// ExecuteBot runs a single turn through the agent loop. The systemPrompt
-// is currently logged but not passed to RunOnce (AgentLoop constructs its
-// own system prompts internally). The userMessage becomes the user turn.
+// ExecuteBot runs a single turn through the agent loop. systemPrompt is
+// armed on this receiver for the next RunOnce only (C2), then cleared.
+// The userMessage becomes the user turn. tokensUsed is the provider
+// TotalTokens from that turn (C3), not a hardcoded 0.
 // Returns (output, tokensUsed, err).
 func (a *agentLoopBotExecutorAdapter) ExecuteBot(ctx context.Context, systemPrompt, userMessage string) (string, int, error) {
 	if a.agentLoop == nil {
@@ -296,16 +297,19 @@ func (a *agentLoopBotExecutorAdapter) ExecuteBot(ctx context.Context, systemProm
 	}
 	// Use a conversation ID scoped to the bot executor so sessions don't
 	// collide with user-driven conversations. The agent loop may override
-	// this internally.
+	// this internally. Leaf 03 owns the standing employee session id;
+	// this path keeps the bot-exec id.
 	conversationID := id.Generate("bot-exec")
+	a.agentLoop.SetTurnSystemPrefix(systemPrompt)
 	response, err := a.agentLoop.RunOnce(ctx, userMessage, conversationID)
+	tokens := a.agentLoop.LastTurnTokens()
 	if err != nil {
 		a.logger.Warn("agent loop execute failed",
 			"error", err,
 			"conversation_id", conversationID)
-		return "", 0, err
+		return "", tokens, err
 	}
-	return response, 0, nil
+	return response, tokens, nil
 }
 
 // Compile-time guard: agentLoopBotExecutorAdapter must satisfy
@@ -340,10 +344,11 @@ type employeeBoundAgentLoopExecutor struct {
 	cloneHook func(*agent.AgentLoop)
 }
 
-// ExecuteBot runs one employee turn on a filtered per-turn clone. Returns
-// (output, 0, err) with the same token-count posture as the inner
-// adapter (RunOnce exposes no token count; cost rides the LLM token
-// cache). A clone that cannot be built (nil shared loop) fails loudly.
+// ExecuteBot runs one employee turn on a filtered per-turn clone.
+// systemPrompt is armed on the clone (never the shared template's
+// permanent prompt) for this RunOnce only. tokensUsed is the clone's
+// LastTurnTokens. A clone that cannot be built (nil shared loop) fails
+// loudly.
 func (a *employeeBoundAgentLoopExecutor) ExecuteBot(ctx context.Context, systemPrompt, userMessage string) (string, int, error) {
 	if a.inner == nil || a.inner.agentLoop == nil {
 		if a.inner != nil {
@@ -360,16 +365,20 @@ func (a *employeeBoundAgentLoopExecutor) ExecuteBot(ctx context.Context, systemP
 	if a.cloneHook != nil {
 		a.cloneHook(clone)
 	}
+	// C2: prefix the clone's next RunOnce only. The template loop's
+	// permanent system prompt is not written.
+	clone.SetTurnSystemPrefix(systemPrompt)
 	response, err := clone.RunOnce(ctx, userMessage, conversationID)
+	tokens := clone.LastTurnTokens()
 	clone.Close()
 	if err != nil {
 		a.inner.logger.Warn("employee-bound agent loop execute failed",
 			"employee_id", a.employeeID,
 			"error", err,
 			"conversation_id", conversationID)
-		return "", 0, err
+		return "", tokens, err
 	}
-	return response, 0, nil
+	return response, tokens, nil
 }
 
 // Compile-time guard: employeeBoundAgentLoopExecutor must satisfy
