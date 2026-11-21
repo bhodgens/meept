@@ -180,6 +180,26 @@ func (r *gateApprovalRecorder) methodNames() []string {
 func gateApprovalWorld(t *testing.T) (*headlessProgram, *gateApprovalRecorder) {
 	t.Helper()
 	rec := newGateApprovalRecorder(t)
+	// Seed the world's RPC answers so every async load path binds a KNOWN
+	// session: App's own loadSession (init cmd) auto-resumes via
+	// session.get_most_recent, and the recorder's default {} answer
+	// unmarshals to an EMPTY session - a late result re-binds the chat to
+	// session "" and wipes the synthetic one the test installed (observed
+	// as a ~1-in-10 transcript wipe under -count stress). The seed uses a
+	// dedicated "sess-gate-world" id, distinct from every per-test
+	// session, and the plans-view gate filter treats an empty current
+	// session filter as show-all so a mid-rebind gate row never
+	// vanishes. Tests' own SessionLoadedMsg stays idempotent.
+	rec.setResult("session.get_most_recent", map[string]any{
+		"id":   "sess-gate-world",
+		"name": "gate world",
+	})
+	// Empty transcript for session.messages.get: the default {} answer
+	// unmarshals into a nil Messages slice, and chat SetSession arms its
+	// deferred load BEFORE any event the gate sends, so the load landing
+	// (SessionMessagesLoadedMsg) is part of the world's settle barrier,
+	// not a race the gate should lose.
+	rec.setResult("session.messages.get", map[string]any{"messages": []any{}, "total": 0})
 	hp := newHeadlessAppSocket(t, rec.socketPath(), 100, 30)
 	// IsConnected is an atomic bool - safe to poll while the loop runs
 	// (same barrier newHeadlessApp uses).

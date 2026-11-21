@@ -282,6 +282,14 @@ type ChatModel struct {
 
 	// Thread indicator (compact header display, no interactive list at this layer)
 	threadIndicator *threadIndicatorState
+
+	// sessionLoadPending tracks an in-flight session.messages.get load:
+	// set by SetSession when it arms the load cmd, cleared when the
+	// SessionMessagesLoadedMsg lands. IsSessionLoadSettled exposes it so
+	// the event pump can defer daemon-state cards until the authoritative
+	// transcript rebuild has happened (06-planning/01: a task-gate card
+	// appended before the load lands is wiped by it).
+	sessionLoadPending bool
 }
 
 // findMatch points to a span within a rendered message.
@@ -713,6 +721,21 @@ type FollowUpResultMsg struct {
 type AgentLifecycleMsg struct {
 	Active         bool
 	ConversationID string
+}
+
+// TaskGateApprovalMsg carries a strategic task-gate approval card for the
+// chat transcript (06-planning/01, F13a). Produced by the App event pump
+// from a task.pending_approval bus event; the card renders the task id,
+// the step count, the pending step summaries, and approve/reject
+// affordances wired to /plan approve|reject (which forward to
+// task.approve / task.reject on the C2 contract - reject never executes).
+// The event pump scopes delivery to the owning session, so anything that
+// reaches this message belongs to the transcript showing it.
+type TaskGateApprovalMsg struct {
+	TaskID    string
+	SessionID string
+	Total     int
+	Steps     []string
 }
 
 // PlanNotificationMsg carries plan lifecycle notifications for inline chat display.
@@ -1517,6 +1540,10 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		return nil
 
 	case SessionMessagesLoadedMsg:
+		// The load has landed (success or error): the authoritative
+		// transcript state is now on screen, so daemon-state cards may
+		// render again (06-planning/01 session-load barrier).
+		m.sessionLoadPending = false
 		if msg.Err != nil || msg.SessionID != m.sessionID {
 			return nil
 		}
@@ -1749,6 +1776,18 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 	case PlanNotificationMsg:
 		content := m.renderPlanNotification(msg)
 		m.addMessage(RoleSystem, content)
+		return nil
+
+	case TaskGateApprovalMsg:
+		// 06-planning/01: render the strategic approval card inline.
+		// The card mirrors DAEMON state (a pending approval gate in
+		// tasks.db), so it is marked localOnly: a session transcript
+		// rebuild (session.messages.get landing late) must re-append it
+		// rather than silently wipe it, and it must never be persisted.
+		// Card state stays pending until task.approved/task.rejected
+		// resolves the gate (those publish their own notifications).
+		m.addMessage(RoleSystem, m.renderTaskGateCard(msg))
+		m.messages[len(m.messages)-1].localOnly = true
 		return nil
 
 	case types.ThreadSwitchMsg:
@@ -2891,6 +2930,16 @@ func (m *ChatModel) Reset() {
 	m.updateViewport()
 }
 
+// sessionLoadSettled reports whether the deferred session.messages.get
+// load (armed by the last SetSession) has landed. 06-planning/01 uses
+// this to keep daemon-state cards (the task-gate approval card) out of
+// the window where a transcript rebuild would wipe them: the load is
+// authoritative server truth, so anything appended before it lands
+// silently disappears.
+func (m *ChatModel) IsSessionLoadSettled() bool {
+	return !m.sessionLoadPending
+}
+
 // SetSession links the chat to a daemon session, preserving messages per session.
 func (m *ChatModel) SetSession(session *types.Session) tea.Cmd {
 	// Always close the find bar on any session change (including nil).
@@ -2944,6 +2993,9 @@ func (m *ChatModel) SetSession(session *types.Session) tea.Cmd {
 	if m.rpc.IsConnected() {
 		rpc := m.rpc
 		sessionID := session.ID
+		// Mark the load in-flight: the event pump defers daemon-state
+		// cards (task-gate approvals) until it lands (06-planning/01).
+		m.sessionLoadPending = true
 		loadCmd := func() tea.Msg {
 			resp, err := rpc.GetSessionMessages(sessionID, 0, 1000)
 			if err != nil {
@@ -3369,6 +3421,30 @@ func planCountLine(phaseCount, stepCount int) string {
 		stepStr += "s"
 	}
 	return phaseStr + " · " + stepStr
+}
+
+// renderTaskGateCard renders the approval card for a strategic task gate
+// (06-planning/01, F13a): task id, step count, per-step summaries, and
+// the approve/reject affordances. The affordances advertise the /plan
+// approve|reject subcommands, which forward to task.approve /
+// task.reject (C2; reject never executes).
+func (m *ChatModel) renderTaskGateCard(msg TaskGateApprovalMsg) string {
+	var b strings.Builder
+
+	b.WriteString("+-- task awaiting approval -----------------------+\n")
+	b.WriteString(fmt.Sprintf("| task: %s\n", msg.TaskID))
+	stepLine := fmt.Sprintf("%d step", msg.Total)
+	if msg.Total != 1 {
+		stepLine += "s"
+	}
+	b.WriteString(fmt.Sprintf("| %s pending your approval\n", stepLine))
+	for i, s := range msg.Steps {
+		b.WriteString(fmt.Sprintf("|   %d. %s\n", i+1, s))
+	}
+	b.WriteString("| approve: /plan approve " + msg.TaskID + "\n")
+	b.WriteString("| reject:  /plan reject " + msg.TaskID + " <reason>\n")
+	b.WriteString("| (reject never executes the task)  |")
+	return b.String()
 }
 
 // renderPlanNotification renders a styled inline notification for plan lifecycle events.

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -210,6 +211,14 @@ type App struct {
 	tabFlash     map[ViewType]bool
 	tabFlashTime time.Time
 
+	// pendingGateCards parks task.pending_approval payloads that arrived
+	// while the chat transcript's session load was still in flight
+	// (06-planning/01): the transcript rebuild wipes cards appended
+	// early, so they re-render on the first settled pump pass. Keyed by
+	// task id; event-loop-goroutine only (the pump is single-threaded).
+	// Lazily built too: test constructors (createTestApp) bypass NewApp.
+	pendingGateCards map[string]map[string]any
+
 	// Slash command handling
 	commandHandler    *CommandHandler
 	slashAutocomplete *SlashAutocomplete
@@ -366,6 +375,7 @@ func NewApp(socketPath string, cwd string) *App {
 		activeModal:      ModalNone,
 		doublePressTTL:   500 * time.Millisecond,
 		tabFlash:         make(map[ViewType]bool),
+		pendingGateCards: make(map[string]map[string]any),
 	}
 
 	// Create modals
@@ -697,10 +707,27 @@ func (a *App) loadSessionImpl() tea.Msg {
 		slog.Warn("target session not found, falling back to default", "session_id", a.targetSessionID)
 	}
 
-	// Auto-resume: try to load most recent session before using default
-	if a.clientConfig.Session.AutoResume {
+	// Auto-resume: try to load most recent session before using default.
+	// The resumed session must LOOK resumed: an empty ID means the
+	// backend answered with an empty shell (unseeded test recorder,
+	// degraded daemon) - binding it would rebind every surface to ""
+	// and orphan the session the caller already loaded. Fall through to
+	// create/default instead.
+	//
+	// NO-resume rule for live transcripts: when a session is ALREADY
+	// loaded and bound (chat has a session id), neither auto-resume nor
+	// the create-default fallback fires again. A late duplicate load
+	// re-binding every surface to another (or empty) session mid-turn
+	// silently orphans live state (observed: an approval card rendered
+	// into a transcript that was re-bound away milliseconds later).
+	// Resume/create are STARTUP actions only: the first SessionLoadedMsg
+	// wins, later dispatches are no-ops.
+	if a.ChatSessionID() != "" {
+		return nil
+	}
+	if a.clientConfig.Session.AutoResume && a.ChatSessionID() == "" {
 		session, err := a.rpc.GetMostRecentSession()
-		if err == nil && session != nil {
+		if err == nil && session != nil && session.ID != "" {
 			a.sessionMgr.SetSession(session)
 			a.armRestoreAwareness(session)
 			return SessionLoadedMsg{Session: session, IsNew: false}
@@ -1966,6 +1993,53 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 
+			// Strategic task-gate approval (06-planning/01, F13a):
+			// the planner parks the task at the approval gate and
+			// publishes task.pending_approval; render an approval card
+			// in the OWNING session's transcript (handlePendingApproval
+			// Event applies the same session-scoping rules as the plan
+			// family above - foreign/empty explicit session ids are
+			// dropped, never flooded into the active chat).
+			case "task.pending_approval":
+				if payloadMap, ok := e.Payload.(map[string]any); ok && a.chat != nil {
+					// Session-load barrier: the chat transcript rebuilds
+					// from session.messages.get as a deferred cmd, and a
+					// card appended before that load lands is wiped by it
+					// (the rebuild is authoritative server truth). While
+					// the load is in flight the payload is parked and
+					// drained by the SessionMessagesLoadedMsg handler
+					// (drainParkedGateCards) once the rebuild has landed;
+					// the plans-view overlay below is NOT deferred (gate
+					// state lives server-side and survives any rebuild).
+					if !a.chat.IsSessionLoadSettled() {
+						if taskID := stringField(payloadMap, "task_id"); taskID != "" {
+							if a.pendingGateCards == nil {
+								a.pendingGateCards = make(map[string]map[string]any)
+							}
+							a.pendingGateCards[taskID] = payloadMap
+						}
+					} else if cmd := a.handlePendingApprovalEvent(payloadMap); cmd != nil {
+						cmds = append(cmds, cmd)
+					}
+					// The plans view merges awaiting-approval task
+					// gates; refresh its snapshot so opening [5] shows
+					// the gate row immediately. Task-gate state lives
+					// server-side, so the overlay survives any
+					// transcript rebuild.
+					if a.currentView != ViewPlans {
+						if a.tabFlash == nil {
+							a.tabFlash = make(map[ViewType]bool)
+						}
+						a.tabFlash[ViewPlans] = true
+						a.tabFlashTime = time.Now()
+					}
+					a.plans.SetPendingTaskGates([]models.TaskGateApprovalMsg{models.TaskGateApprovalMsg{
+						TaskID:    stringField(payloadMap, "task_id"),
+						SessionID: stringField(payloadMap, "session_id"),
+						Total:     intField(payloadMap, "total"),
+					}})
+				}
+
 			// Synthesized progress events (filtered by verbosity)
 			case "agent.progress.synthesized":
 				if payloadMap, ok := e.Payload.(map[string]any); ok {
@@ -2553,6 +2627,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.chat.Update(msg)
 		return a, nil
+
+	case models.SessionMessagesLoadedMsg:
+		// 06-planning/01 session-load barrier: the authoritative
+		// transcript rebuild has landed (or errored), so daemon-state
+		// cards parked during the load window can render safely now.
+		a.chat.Update(msg)
+		a.drainParkedGateCards(msg.SessionID)
+		return a, nil
 	}
 
 	// Handle slash autocomplete filter updates when typing
@@ -2616,6 +2698,36 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return a, tea.Batch(cmds...)
+}
+
+// drainParkedGateCards renders any task.pending_approval payloads that
+// were parked while the chat session load was in flight (06-planning/01
+// session-load barrier). It UNCONDITIONALLY renders parked cards whose
+// session matches - callers that invoke it after the program loop died
+// (headless finish) rely on that, because the in-flight load's
+// SessionMessagesLoadedMsg can never arrive to clear the marker.
+// Called by the SessionMessagesLoadedMsg handler once the authoritative
+// transcript rebuild has landed, so the parked cards are appended AFTER
+// it and survive.
+func (a *App) drainParkedGateCards(sessionID string) {
+	if len(a.pendingGateCards) == 0 {
+		return
+	}
+	keys := make([]string, 0, len(a.pendingGateCards))
+	for k := range a.pendingGateCards {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		parked := a.pendingGateCards[k]
+		// Session scoping still applies at drain time: only cards for
+		// the freshly loaded session render into its transcript.
+		if sid := stringField(parked, "session_id"); sid != "" && sid != sessionID {
+			continue
+		}
+		a.handlePendingApprovalEvent(parked)
+		delete(a.pendingGateCards, k)
+	}
 }
 
 // handleModalKey processes key input when a modal is active.
