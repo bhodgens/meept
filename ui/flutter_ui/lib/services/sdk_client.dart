@@ -888,6 +888,68 @@ class SdkApiClient {
     }
   }
 
+  // ----- C2 task-gate twins (06-planning/02) -----
+  //
+  // Strategic APPROVAL gate lives in tasks.db, not plans.db: these hit
+  // the C2 HTTP twins (POST /api/v1/tasks/{id}/approve|reject,
+  // internal/comm/http/task_approval.go) which dispatch to the SAME
+  // task.approve / task.reject RPC seams. They are deliberately distinct
+  // from [approvePlan]/[rejectPlan] (the plans.db gate) - reject here
+  // can never reach the approve endpoint on any transport.
+
+  /// Approve a task at the strategic gate: POST
+  /// `/api/v1/tasks/{id}/approve` (C2 HTTP twin of task.approve).
+  Future<Map<String, dynamic>> approveTask(String id) async {
+    try {
+      return await _post('/api/v1/tasks/$id/approve');
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  /// Reject a task at the strategic gate with the full reason forwarded:
+  /// POST `/api/v1/tasks/{id}/reject` (C2 HTTP twin of task.reject).
+  Future<Map<String, dynamic>> rejectTask(String id, {String? reason}) async {
+    try {
+      return await _post(
+        '/api/v1/tasks/$id/reject',
+        body: {'reason': reason ?? ''},
+      );
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  // ----- plan.draft / plan.seal HTTP twins (06-planning/02 T2) -----
+  //
+  // Mirror the internal/rpc/plan_seal.go RPC semantics: getDraft is the
+  // GET side of plan.draft (markdown + version); sealTask is plan.seal
+  // (compile + persist + execute). A compile WITH problems is a RESULT
+  // ({status:"problems", problems:[{line,message}]}), not an error - the
+  // draft stays a draft.
+
+  /// Fetch a task's compiler draft: GET `/api/v1/tasks/{id}/draft`
+  /// (HTTP twin of plan.draft, get shape).
+  Future<Map<String, dynamic>> getDraft(String id) async {
+    try {
+      return await _get('/api/v1/tasks/$id/draft');
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
+  /// Seal + compile a task's draft: POST `/api/v1/tasks/{id}/seal`
+  /// (HTTP twin of plan.seal). Returns {status:"sealed",hash,mode,
+  /// warnings} on a clean compile or {status:"problems",problems} when
+  /// the compiler refuses - problems render inline, never as a toast.
+  Future<Map<String, dynamic>> sealTask(String id) async {
+    try {
+      return await _post('/api/v1/tasks/$id/seal');
+    } on DioException catch (e) {
+      throw _handleError(e);
+    }
+  }
+
   /// C5 dispatch-trace route: `GET /api/v1/sessions/{id}/dispatch-trace`.
   ///
   /// Returns the raw `{entries: [...], count: N}` payload; each row is
