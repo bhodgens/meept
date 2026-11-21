@@ -25,16 +25,16 @@
 #
 # Why a baseline: the repo already carries thousands of unreachable
 # functions. A "must be empty" gate would block every commit forever.
-# New-code-only ratchets the count down instead of up; re-baseline
-# deliberately when you INTEND to remove or wire dead code (same policy as
-# the bench regression baseline in .githooks/README.md).
+# New-code-only ratchets the count down instead of up. --rebaseline may
+# shrink or stay equal (drop stale lines after wiring). It refuses net
+# growth: do not use it to absorb new unwired functions into the allow-list.
 #
 # Line numbers are stripped from the comparison key (path + func name only)
 # so pure code motion never produces false new/removed churn.
 #
 # Usage:
 #   .githooks/pre-commit-deadcode               # gate (called from pre-commit)
-#   .githooks/pre-commit-deadcode --rebaseline  # regenerate BOTH baselines
+#   .githooks/pre-commit-deadcode --rebaseline  # shrink-or-equal only; refuses growth
 #
 # Env overrides (testing/CI):
 #   MEEPT_DEADCODE_BASELINE=/path/to/file       -test-mode baseline location
@@ -78,8 +78,10 @@
 # PASSING gate result (both intersections computed, zero NEW-vs-baseline
 # functions) is ever written; a gate failure deletes the entry, so a
 # failure can never replay as a success and a stale entry can never be
-# consulted twice. --rebaseline always does the full analysis and refreshes
-# the cache against the new baselines.
+# consulted twice. --rebaseline always does the full analysis. It writes
+# only when neither intersection grows (comm -13 against the existing file
+# is empty); net growth exits 1 without writing either file. A successful
+# shrink refreshes the cache against the new baselines.
 #
 # Requires GOTOOLCHAIN pinned by the caller (pre-commit does this; standalone
 # runs pin from go.mod below).
@@ -272,13 +274,15 @@ analyze_mode() {
 }
 
 # Baselines must exist before hashing them — EXCEPT in rebaseline mode,
-# which is exactly the flow that creates missing baselines (the analysis
-# runs first and writes them).
+# which still runs the analysis when a file is missing so the growth check
+# can refuse (a missing file is an empty existing set; a non-empty
+# intersection is growth and is not written).
 if [ "$REBASELINE" -eq 0 ]; then
     for BASE in "$BASELINE" "$BASELINE_NOTEST"; do
         if [ ! -f "$BASE" ]; then
             echo -e "${RED}✗ deadcode baseline missing: $BASE${NC}"
-            echo "  Generate it with: .githooks/pre-commit-deadcode --rebaseline"
+            echo "  Restore it from version control. Do not rebaseline."
+            echo "  Do not edit the baseline files."
             exit 1
         fi
     done
@@ -355,7 +359,62 @@ cache_purge() {
     return 0
 }
 
+# rebaseline_growth_lines <existing> <new>
+# Lines in <new> absent from <existing> (comm -13, LC_ALL=C). A missing
+# existing file is an empty set, so every new line is growth. Inputs are
+# sorted here; comm's contract requires LC_ALL=C order.
+rebaseline_growth_lines() {
+    _rg_existing="$1"
+    _rg_new="$2"
+    if [ -f "$_rg_existing" ]; then
+        LC_ALL=C sort -u "$_rg_existing" > "$TMPDIR_CURRENT/growth.old"
+    else
+        : > "$TMPDIR_CURRENT/growth.old"
+    fi
+    LC_ALL=C sort -u "$_rg_new" > "$TMPDIR_CURRENT/growth.new"
+    LC_ALL=C comm -13 "$TMPDIR_CURRENT/growth.old" "$TMPDIR_CURRENT/growth.new"
+}
+
+# Append a capped listing of growth lines. Sets _rg_any=1 when non-empty.
+_rebaseline_note_growth() {
+    _rg_label="$1"
+    _rg_lines="$2"
+    if [ -z "$_rg_lines" ]; then
+        return 0
+    fi
+    _rg_any=1
+    printf '%s\n' "$_rg_lines" > "$TMPDIR_CURRENT/growth.lines"
+    {
+        echo "  $_rg_label:"
+        head -40 "$TMPDIR_CURRENT/growth.lines" | sed 's/^/    /'
+        _rg_total=$(grep -c . "$TMPDIR_CURRENT/growth.lines" || true)
+        if [ "$_rg_total" -gt 40 ]; then
+            echo "    ... and $((_rg_total - 40)) more"
+        fi
+    } >> "$_rg_report"
+}
+
+# refuse_rebaseline_growth — check BOTH baselines before writing EITHER.
+# Net growth (any line in the new intersection absent from the existing
+# file) prints those lines, capped at 40 per baseline, and exits 1.
+# Shrink and equal sets return so the caller can write both files.
+refuse_rebaseline_growth() {
+    _rg_report="$TMPDIR_CURRENT/growth.report"
+    : > "$_rg_report"
+    _rg_any=0
+    _rebaseline_note_growth "-test" "$(rebaseline_growth_lines "$BASELINE" "$TMPDIR_CURRENT/inter.test")"
+    _rebaseline_note_growth "no-test" "$(rebaseline_growth_lines "$BASELINE_NOTEST" "$TMPDIR_CURRENT/inter.notest")"
+    if [ "$_rg_any" -eq 1 ]; then
+        echo -e "${RED}✗ deadcode --rebaseline refused: net growth${NC}"
+        echo "  New lines are absent from the existing baseline. Neither file was written."
+        echo "  A rebaseline may only shrink or stay equal."
+        cat "$_rg_report"
+        exit 1
+    fi
+}
+
 if [ "$REBASELINE" -eq 1 ]; then
+    refuse_rebaseline_growth
     cp "$TMPDIR_CURRENT/inter.test" "$BASELINE"
     cp "$TMPDIR_CURRENT/inter.notest" "$BASELINE_NOTEST"
     # Refresh the cache against the NEW baselines (the digest embeds their
@@ -409,11 +468,10 @@ if [ "$GATE_FAILED" -eq 1 ]; then
     # tree as a prior pass, even if it was stored for an identical earlier
     # digest (it cannot be — same inputs, same verdict — belt-and-braces).
     cache_purge
-    echo "  Fix: wire the code into a production call path, remove it, or gate it"
-    echo "  behind an existing entry point. A function that only its OWN unit"
-    echo "  test calls is NOT wired (the no-test pass exists for exactly this)."
-    echo "  If removal/wiring is the intent, re-baseline:"
-    echo "    .githooks/pre-commit-deadcode --rebaseline && git add .githooks/deadcode-baseline.txt .githooks/deadcode-baseline-notest.txt"
+    echo "  Fix: wire the function into a production call path, or delete it."
+    echo "  A function whose only caller is its own test is not wired."
+    echo "  Do not rebaseline. Do not edit the baseline files."
+    echo "  Do not use git commit --no-verify."
     exit 1
 fi
 

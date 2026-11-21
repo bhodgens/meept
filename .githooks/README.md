@@ -573,15 +573,18 @@ using `golang.org/x/tools/cmd/deadcode`.
   pins the analyzed binary directly (the stub's output format is
   `<path>:<line>:<col>: unreachable func: <Name>`).
 
-**Re-baselining (deliberate, same policy as the bench regression baseline):**
+**Re-baselining (shrink only):**
 ```bash
 .githooks/pre-commit-deadcode --rebaseline
 git add .githooks/deadcode-baseline.txt .githooks/deadcode-baseline-notest.txt
 ```
-Re-baseline when you INTEND to remove dead code or when you wire previously
-unreachable code in (its count drops - keeping the old baseline is harmless,
-re-baselining just shrinks the ratchet). `--rebaseline` regenerates BOTH
-baselines (it needs a tree where every main, tests included, compiles).
+Run this only to drop lines for code you wired or deleted. `--rebaseline`
+refuses net growth and writes neither file. Do not edit the baseline files
+by hand to absorb a new unwired function. Do not use `git commit --no-verify`
+to land that function. CI runs `scripts/deadcode-baseline-growth-check.sh`
+against the push parent. A direct push that grows either file fails the
+`deadcode` job. The only exception is a pull request with the label
+`deadcode-baseline-growth`.
 
 **Notes:**
 - FAILS CLOSED when `deadcode` is not on PATH or `$HOME/go/bin` — install
