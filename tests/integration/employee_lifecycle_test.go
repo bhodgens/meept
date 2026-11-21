@@ -21,7 +21,10 @@ import (
 
 	"github.com/caimlas/meept/internal/bot"
 	"github.com/caimlas/meept/internal/employee"
+	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/pkg/id"
+
+	"log/slog"
 
 	_ "modernc.org/sqlite" // sqlite driver registration for employee/bot stores
 )
@@ -142,6 +145,29 @@ func validConstitutionMap() map[string]any {
 	}
 }
 
+// noCandidateReflector satisfies employee.Reflector for the lifecycle
+// fixture: Manager.Assess gets zero candidates, so Decide is a clean
+// no-op round - the loop exists and settles without execution, the
+// shape boot wiring gives a tier-1 employee with nothing to do.
+type noCandidateReflector struct{}
+
+func (noCandidateReflector) Chat(_ context.Context, _ []llm.ChatMessage, _ ...llm.ChatOption) (*llm.Response, error) {
+	return &llm.Response{Content: `{"candidates":[]}`}, nil
+}
+
+// registerNoopLoop mirrors the daemon boot wiring (components.go
+// registers a GoalLoop for every HasConstitution row) for one hired
+// employee. Manager.Trigger fails loudly without a registered loop
+// since the legacy synthesized "triggered" receipt was removed
+// (bughunt issue #160, decision A), so lifecycle triggers need it.
+func registerNoopLoop(t *testing.T, env *employeeLifecycleEnv, emp *employee.Employee) {
+	t.Helper()
+	loop := employee.NewGoalLoop(emp.ID, &emp.Constitution, env.goalStore,
+		slog.New(slog.DiscardHandler)).
+		WithReflector(noCandidateReflector{})
+	env.empMgr.RegisterGoalLoop(emp.ID, loop)
+}
+
 // hireEmployee is a helper that runs Manager.Hire with a valid
 // constitution and returns the created Employee. Fatals the test on any
 // error so individual subtests can stay focused on post-hire assertions.
@@ -188,6 +214,7 @@ func TestEmployee_Lifecycle(t *testing.T) {
 	var hired *employee.Employee
 	t.Run("create", func(t *testing.T) {
 		hired = hireEmployee(t, env, employeeID)
+		registerNoopLoop(t, env, hired)
 		if hired.ID != employeeID {
 			t.Errorf("hired.ID = %q, want %q", hired.ID, employeeID)
 		}
@@ -217,10 +244,11 @@ func TestEmployee_Lifecycle(t *testing.T) {
 
 	// --- trigger (Manager.Trigger returns a TriggerResult) ---
 	t.Run("trigger", func(t *testing.T) {
-		// Trigger currently returns a synthesized TriggerResult (the
-		// full GoalLoop integration lands with later phases). We
-		// verify the result envelope is well-formed and the invocation
-		// ID is non-empty.
+		// Trigger delegates to the registered GoalLoop (the legacy
+		// synthesized "triggered" receipt was removed - decision A).
+		// The no-candidate stub reflector settles the round without
+		// execution: well-formed envelope, non-empty invocation id,
+		// completed status.
 		res, err := env.empMgr.Trigger(ctx, employeeID, map[string]any{
 			"event": "github.push",
 		})
@@ -230,8 +258,8 @@ func TestEmployee_Lifecycle(t *testing.T) {
 		if res.InvocationID == "" {
 			t.Error("Trigger returned empty InvocationID")
 		}
-		if res.Status != "triggered" {
-			t.Errorf("Status = %q, want 'triggered'", res.Status)
+		if res.Status != "completed" {
+			t.Errorf("Status = %q, want 'completed'", res.Status)
 		}
 	})
 

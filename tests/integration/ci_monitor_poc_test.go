@@ -177,6 +177,7 @@ func TestCIMonitor_POC(t *testing.T) {
 		WithExecutor(executor).
 		WithPlanner(planner).
 		WithReflector(chatter).
+		WithRetryPolicy(employee.RetryPolicy{}). // deterministic single attempt: the failNext stub fails exactly one call
 		WithMaxConsecutiveFailures(2) // lower threshold so failures surface quickly
 
 	// --- Step 1: webhook fires (GitHub push). Decide runs Assess + Plan ---
