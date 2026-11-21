@@ -79,6 +79,7 @@
         "file_read", "file_write", "file_edit", "file_delete", "file_find", "file_grep", "list_directory",
         "shell", "web_fetch", "web_search",
         "schedule_create", "schedule_delete", "schedule_get", "schedule_list", "schedule_pause", "schedule_resume", "schedule_run_now",
+        "job_start", "job_status", "job_stop",
         "cron_create", "voice_call", "delegate_task", "send_agent_message", "workflow",
         "memory_store", "memory_retain", "memory_reflect", "memory_vote",
         "task_create", "task_update", "goal_create", "goal_update",

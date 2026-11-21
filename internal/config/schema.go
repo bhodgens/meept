@@ -2609,6 +2609,10 @@ func DefaultAlwaysFullTools() []string {
 		// of calling it (live smoke, 2026-09-12). 5-param nested-object
 		// schema; only agents with the tool (researcher today) see it.
 		"json_extract",
+		// job-tools: job_start/status/stop all take arguments (command /
+		// job_id) — under indexed schema mode a stubbed discoverer gives
+		// the model no parameter schema and it calls them empty-handed.
+		"job_start", "job_status", "job_stop",
 	}
 }
 
