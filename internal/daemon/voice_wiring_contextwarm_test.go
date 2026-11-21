@@ -359,8 +359,9 @@ func TestContextWarmDispatcherResolution(t *testing.T) {
 
 // cwFakeWarmChatter is a warm-capable llm.Chatter double.
 type cwFakeWarmChatter struct {
-	mu    sync.Mutex
-	warms int
+	mu       sync.Mutex
+	warms    int
+	messages []llm.ChatMessage
 }
 
 func (c *cwFakeWarmChatter) Chat(_ context.Context, _ []llm.ChatMessage, _ ...llm.ChatOption) (*llm.Response, error) {
@@ -375,9 +376,10 @@ func (c *cwFakeWarmChatter) Config() *llm.ModelConfig {
 	return &llm.ModelConfig{ModelID: "cw-fake-model", ContextLimit: 32768}
 }
 
-func (c *cwFakeWarmChatter) Warm(_ context.Context, _ []llm.ChatMessage, _ ...llm.ChatOption) error {
+func (c *cwFakeWarmChatter) Warm(_ context.Context, messages []llm.ChatMessage, _ ...llm.ChatOption) error {
 	c.mu.Lock()
 	c.warms++
+	c.messages = append([]llm.ChatMessage(nil), messages...)
 	c.mu.Unlock()
 	return nil
 }
@@ -386,6 +388,12 @@ func (c *cwFakeWarmChatter) count() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.warms
+}
+
+func (c *cwFakeWarmChatter) lastMessages() []llm.ChatMessage {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]llm.ChatMessage(nil), c.messages...)
 }
 
 // TestContextWarmWindowReloadLive pins bughunt 2026-11-19 M6 at the daemon
@@ -646,5 +654,53 @@ func TestContextWarmScopeRidesSessionChatterNoTurns(t *testing.T) {
 	turns.mu.Unlock()
 	if n != 0 {
 		t.Errorf("warm started %d turns; R8 forbids any turn from the warm lane", n)
+	}
+}
+
+// TestContextWarmBoundsOversizedSystemPrefix pins the unwrap hole: the
+// warm path unwraps ContextFirewall and Warms the inner client, so it must
+// run BoundSystemMessages on the prefix first. An oversized system row is
+// truncated; a small one passes byte-identically.
+func TestContextWarmBoundsOversizedSystemPrefix(t *testing.T) {
+	w, _ := newVoiceWiringForTest(t)
+	fake := &cwFakeWarmChatter{}
+	tmpl := agent.NewAgentLoop("default", t.TempDir(), agent.WithLLMChatter(fake))
+	loopMgr := agent.NewManager(agent.ManagerConfig{})
+	loop, err := loopMgr.GetOrCreateWired("sess-bound", t.TempDir(), tmpl)
+	if err != nil {
+		t.Fatalf("GetOrCreateWired: %v", err)
+	}
+	if _, isFirewall := loop.Chatter().(*llm.ContextFirewall); !isFirewall {
+		t.Fatal("loop chatter is not firewall-wrapped; the warm bound pin has no subject")
+	}
+	src := contextWarmSources{Loops: loopMgr, Template: tmpl}
+
+	oversized := strings.Repeat("s", 20_000)
+	w.dispatchContextWarm(context.Background(), src, "coder", "sess-bound", []llm.ChatMessage{
+		{Role: llm.RoleSystem, Content: oversized},
+		{Role: llm.RoleUser, Content: "partial"},
+	}, nil)
+	got := fake.lastMessages()
+	if len(got) != 2 {
+		t.Fatalf("warmed %d messages, want 2", len(got))
+	}
+	if len(got[0].Content) >= len(oversized) {
+		t.Fatalf("oversized system prefix warmed unbounded (%d bytes)", len(got[0].Content))
+	}
+	if !strings.Contains(got[0].Content, "truncated") {
+		t.Fatal("bounded system prefix missing the elision marker")
+	}
+	if got[1].Content != "partial" {
+		t.Fatalf("user partial = %q, want unchanged", got[1].Content)
+	}
+
+	small := []llm.ChatMessage{
+		{Role: llm.RoleSystem, Content: "short system"},
+		{Role: llm.RoleUser, Content: "hi"},
+	}
+	w.dispatchContextWarm(context.Background(), src, "coder", "sess-bound", small, nil)
+	got = fake.lastMessages()
+	if len(got) != 2 || got[0].Content != "short system" || got[1].Content != "hi" {
+		t.Fatalf("small prefix = %+v, want byte-identical", got)
 	}
 }

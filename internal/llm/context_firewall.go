@@ -591,13 +591,10 @@ func (f *ContextFirewall) processMessages(ctx context.Context, messages []ChatMe
 	// an unknown window (ContextLimit==0), a nil model, or a disabled
 	// firewall — otherwise an oversized system message (e.g. a full skill
 	// catalog) ships unbounded exactly where no other reduction runs.
-	// Small system messages pass byte-identically.
-	if clipped, changed := boundOversizedSystemMessages(messages); changed {
-		f.logger.Warn("context firewall: truncated oversized system message (window-independent bound)",
-			"messages", len(messages),
-		)
-		messages = clipped
-	}
+	// Small system messages pass byte-identically. Warm callers that
+	// unwrap this firewall must run the same BoundSystemMessages before
+	// Warm; this call is the turn path and must stay behavior-identical.
+	messages = f.BoundSystemMessages(messages)
 	if !f.config.Enabled || f.model == nil || f.model.ContextLimit == 0 {
 		return messages
 	}
@@ -1039,6 +1036,29 @@ func (f *ContextFirewall) greedyChunk(parts []string, maxChars int, sep string) 
 // still exceeds the model window. Keeping its head preserves the useful
 // scaffolding/prompt prefix; the rest remains reachable via tools.
 const maxSystemMessageBytes = 12_000
+
+// BoundSystemMessages applies the window-independent oversized-system
+// bound processMessages runs before the inert-firewall return. Warm
+// callers that unwrap this firewall and Warm the inner client must run
+// it on the prefix first; otherwise an oversized system message skips
+// the bound the turn applies. Small system messages pass
+// byte-identically. Nil-safe. Does not run the enabled-firewall
+// compression pipeline — turn behavior when the firewall is enabled is
+// unchanged (processMessages still calls this, then the rest of the
+// pipeline).
+func (f *ContextFirewall) BoundSystemMessages(messages []ChatMessage) []ChatMessage {
+	if f == nil {
+		return messages
+	}
+	clipped, changed := boundOversizedSystemMessages(messages)
+	if !changed {
+		return messages
+	}
+	f.logger.Warn("context firewall: truncated oversized system message (window-independent bound)",
+		"messages", len(messages),
+	)
+	return clipped
+}
 
 // boundOversizedSystemMessages truncates any system message longer than
 // maxSystemMessageBytes to its head plus an elision marker. Callers should

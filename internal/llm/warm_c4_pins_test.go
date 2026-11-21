@@ -329,7 +329,7 @@ func TestPeekAliasForWarm_ReadOnly(t *testing.T) {
 	h := r.getOrCreateHealth("coder")
 	h.CurrentIndex = 1
 
-	mc, ok := r.PeekAliasForWarm("coder", "sess-peek")
+	mc, ok := r.PeekAliasForWarm("coder", "sess-peek", "")
 	if !ok || mc == nil {
 		t.Fatal("PeekAliasForWarm must resolve the coder alias")
 	}
@@ -349,15 +349,15 @@ func TestPeekAliasForWarm_ReadOnly(t *testing.T) {
 	}
 
 	// Unknown alias / empty name: skip, never a guess.
-	if _, ok := r.PeekAliasForWarm("no-such-alias", "s"); ok {
+	if _, ok := r.PeekAliasForWarm("no-such-alias", "s", ""); ok {
 		t.Error("unknown alias resolved")
 	}
-	if _, ok := r.PeekAliasForWarm("", "s"); ok {
+	if _, ok := r.PeekAliasForWarm("", "s", ""); ok {
 		t.Error("empty alias resolved")
 	}
 	// nil resolver is safe.
 	var nilR *Resolver
-	if _, ok := nilR.PeekAliasForWarm("coder", "s"); ok {
+	if _, ok := nilR.PeekAliasForWarm("coder", "s", ""); ok {
 		t.Error("nil resolver resolved")
 	}
 }
@@ -371,10 +371,75 @@ func TestPeekAliasForWarm_ColdAliasNoHealthWrite(t *testing.T) {
 	if _, ok := r.health["coder"]; ok {
 		t.Fatal("test setup: coder already has a health entry")
 	}
-	if _, ok := r.PeekAliasForWarm("coder", "sess-cold"); !ok {
+	if _, ok := r.PeekAliasForWarm("coder", "sess-cold", ""); !ok {
 		t.Fatal("PeekAliasForWarm must resolve a known cold alias")
 	}
 	if _, ok := r.health["coder"]; ok {
 		t.Fatal("PeekAliasForWarm inserted an AliasHealth row for a cold alias")
+	}
+}
+
+// TestPeekAliasForWarm_SensitiveStickySkipsNonCleared pins the warm leak:
+// a sensitive prefix plus a public_only sticky pin must not be returned
+// (ok=false, warm skips). A non-sensitive prompt and an empty prompt still
+// return that pin. The peek must not write the pin.
+func TestPeekAliasForWarm_SensitiveStickySkipsNonCleared(t *testing.T) {
+	r := NewResolver(createTestConfig(), slog.New(slog.DiscardHandler))
+	r.SetPostureScanner(stickyScanner{})
+
+	publicModel := &ModelConfig{ProviderID: "zai", ModelID: "public", DataPosture: PosturePublicOnly}
+	privateModel := &ModelConfig{ProviderID: "zai", ModelID: "private", DataPosture: PosturePrivate}
+	r.aliases["sticky-warm"] = &AliasEntry{
+		Models:                 []*ModelConfig{publicModel, privateModel},
+		BalancedStickyRequests: true,
+	}
+	health := r.getOrCreateHealth("sticky-warm")
+	if health.StickyPins == nil {
+		health.StickyPins = make(map[string]StickyPin)
+	}
+	health.StickyPins["sess-warm"] = StickyPin{Index: 0}
+
+	if _, ok := r.PeekAliasForWarm("sticky-warm", "sess-warm", "SECRET_MARKER in the partial"); ok {
+		t.Fatal("sensitive prompt + public_only sticky pin must return ok=false")
+	}
+	if pin := health.StickyPins["sess-warm"]; pin.Index != 0 {
+		t.Fatalf("sensitive peek wrote sticky pin index %d, want 0", pin.Index)
+	}
+
+	mc, ok := r.PeekAliasForWarm("sticky-warm", "sess-warm", "ordinary partial")
+	if !ok || mc == nil || mc.ModelID != "public" {
+		t.Fatalf("non-sensitive peek = %+v ok=%v, want the public_only pin", mc, ok)
+	}
+	mc, ok = r.PeekAliasForWarm("sticky-warm", "sess-warm", "")
+	if !ok || mc == nil || mc.ModelID != "public" {
+		t.Fatalf("empty prompt peek = %+v ok=%v, want the public_only pin (byte-identical to the pre-posture peek)", mc, ok)
+	}
+	if pin := health.StickyPins["sess-warm"]; pin.Index != 0 {
+		t.Fatalf("non-sensitive peek wrote sticky pin index %d, want 0", pin.Index)
+	}
+
+	// A cleared (private) sticky pin still warms.
+	health.StickyPins["sess-private"] = StickyPin{Index: 1}
+	mc, ok = r.PeekAliasForWarm("sticky-warm", "sess-private", "SECRET_MARKER in the partial")
+	if !ok || mc == nil || mc.ModelID != "private" {
+		t.Fatalf("cleared sticky pin peek = %+v ok=%v, want private", mc, ok)
+	}
+	if health.StickyPins["sess-private"].Index != 1 {
+		t.Fatal("cleared-pin peek wrote the sticky pin")
+	}
+
+	// Non-sticky return: a public_only rotation head is also skipped.
+	r.aliases["warm-rotate"] = &AliasEntry{
+		Models: []*ModelConfig{publicModel},
+	}
+	if _, ok := r.PeekAliasForWarm("warm-rotate", "sess", "SECRET_MARKER"); ok {
+		t.Fatal("sensitive peek of a public_only rotation head must skip")
+	}
+	mc, ok = r.PeekAliasForWarm("warm-rotate", "sess", "ordinary")
+	if !ok || mc == nil || mc.ModelID != "public" {
+		t.Fatalf("non-sensitive rotation peek = %+v ok=%v, want public", mc, ok)
+	}
+	if _, exists := r.health["warm-rotate"]; exists {
+		t.Fatal("non-sticky peek inserted an AliasHealth row")
 	}
 }

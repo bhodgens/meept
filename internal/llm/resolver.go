@@ -1501,7 +1501,16 @@ func (r *Resolver) candidatesJSON(candidates []*ModelConfig) string {
 // alias is unknown, empty, or every candidate is blocked — the warm is
 // then a skip, never a guess. sessionID may be "" (no stickiness
 // preference applied). Read-only: safe under r.mu.
-func (r *Resolver) PeekAliasForWarm(aliasName, sessionID string) (*ModelConfig, bool) {
+//
+// prompt is the warm prefix text (system+user; callers pass
+// PosturePromptText). Before every successful return the candidate is
+// checked with the same read-only posture filter
+// ResolveForAliasDifficulty uses (posturePass). A sensitive prompt
+// whose candidate is not cleared returns ok=false so the warm skips —
+// the peek does not walk to another model and does not write
+// StickyPins, health, blocks, or the ledger. An empty prompt is not
+// sensitive and stays byte-identical to a peek that never saw a prompt.
+func (r *Resolver) PeekAliasForWarm(aliasName, sessionID, prompt string) (*ModelConfig, bool) {
 	if r == nil || aliasName == "" {
 		return nil, false
 	}
@@ -1537,8 +1546,7 @@ func (r *Resolver) PeekAliasForWarm(aliasName, sessionID string) (*ModelConfig, 
 					r.isEndpointBlocked(health, pinned) ||
 					(health.inCooldown(now) && health.failedModelMatches(alias, pinnedIdx))
 				if !blocked {
-					cp := *pinned
-					return &cp, true
+					return r.peekClearedCopy(alias, aliasName, sessionID, prompt, pinnedIdx)
 				}
 			}
 		}
@@ -1564,8 +1572,7 @@ func (r *Resolver) PeekAliasForWarm(aliasName, sessionID string) (*ModelConfig, 
 		if chosen < 0 {
 			return nil, false
 		}
-		cp := *alias.Models[chosen]
-		return &cp, true
+		return r.peekClearedCopy(alias, aliasName, sessionID, prompt, chosen)
 	}
 
 	selectedIdx := health.CurrentIndex
@@ -1645,11 +1652,38 @@ func (r *Resolver) PeekAliasForWarm(aliasName, sessionID string) (*ModelConfig, 
 		}
 		selectedIdx = found
 	}
-	chosen := alias.Models[selectedIdx]
-	if chosen == nil {
+	return r.peekClearedCopy(alias, aliasName, sessionID, prompt, selectedIdx)
+}
+
+// peekClearedCopy copies alias.Models[idx] when that candidate is cleared
+// for prompt under the same read-only posture filter
+// ResolveForAliasDifficulty uses (posturePass). A sensitive prompt whose
+// candidate is not cleared returns ok=false so the warm skips: no walk to
+// another model, no StickyPins / health / block / ledger writes. An empty
+// prompt is not sensitive — the copy is the pre-filter peek. Caller holds r.mu.
+func (r *Resolver) peekClearedCopy(alias *AliasEntry, aliasName, sessionID, prompt string, idx int) (*ModelConfig, bool) {
+	if alias == nil || idx < 0 || idx >= len(alias.Models) || alias.Models[idx] == nil {
 		return nil, false
 	}
-	cp := *chosen
+	if prompt != "" {
+		if sensitive, _ := r.postureSensitive(prompt); sensitive {
+			fc := &FilterCtx{
+				SessionID:  sessionID,
+				PromptText: prompt,
+				Sensitive:  true,
+				Now:        r.clock(),
+			}
+			// posturePass returns idx only when THIS candidate is cleared.
+			// A later cleared index is not a warm target: returning it
+			// would plant the prefix on a different endpoint than the
+			// pin, and adopting it would require the pin write the warm
+			// path is forbidden to make.
+			if r.posturePass(alias, aliasName, fc, idx) != idx {
+				return nil, false
+			}
+		}
+	}
+	cp := *alias.Models[idx]
 	return &cp, true
 }
 

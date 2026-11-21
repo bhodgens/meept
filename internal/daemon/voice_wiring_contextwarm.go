@@ -18,9 +18,13 @@ package daemon
 //   - Warm forwards to the concrete client the voice turn actually rides:
 //     the session's agent loop chatter unwrapped per call (ContextFirewall
 //     -> terminal chatter; a ProviderManager IS the dispatcher and re-
-//     derives the alias routing from the opts), so the warm lands on the
-//     same endpoint + affinity lane as the turn. The alias is resolved
-//     READ-ONLY at this warmer layer via Resolver.PeekAliasForWarm and
+//     derives the alias routing from the opts). The unwrap skips
+//     ContextFirewall.Warm, so the prefix is passed through
+//     ContextFirewall.BoundSystemMessages first — the same
+//     window-independent system-message bound the turn runs before the
+//     inert-firewall return. The alias is resolved
+//     READ-ONLY at this warmer layer via Resolver.PeekAliasForWarm (prompt
+//     = the prefix's posture text) and
 //     carried as WithResolvedModel (C4 rule 1: resolution lives at the
 //     Resolver layer, never on *Client.Warm). The scope is the
 //     session/conversation id — the voice lane sets SessionHandle.ID ==
@@ -146,17 +150,13 @@ func (w *VoiceWiring) newContextWarmer(baseCtx context.Context, src contextWarmS
 		// routing from the same opts.
 		warmOpts := []llm.ChatOption{llm.WithTaskScope("", scope)}
 		if src.Resolver != nil {
-			if mc, ok := src.Resolver.PeekAliasForWarm(alias, scope); ok && mc != nil {
+			// Prefix text is the posture scan of the warm prefix (system
+			// + user, including the partial). Empty prefix is not sensitive.
+			if mc, ok := src.Resolver.PeekAliasForWarm(alias, scope, llm.PosturePromptText(messages)); ok && mc != nil {
 				warmOpts = append(warmOpts, llm.WithResolvedModel(mc))
 			}
 		}
-		if src.Dispatch != nil {
-			src.Dispatch(ctx, alias, messages, scope)
-			return
-		}
-		if d := w.resolveContextWarmDispatcher(src, scope); d != nil {
-			_ = d.Warm(ctx, messages, warmOpts...)
-		}
+		w.dispatchContextWarm(ctx, src, alias, scope, messages, warmOpts)
 	}
 	return voice.NewContextWarmer(
 		voice.ContextWarmConfig{
@@ -355,6 +355,71 @@ func contextWarmEmployeeDef(src contextWarmSources, employeeID string) (*employe
 	return def, true
 }
 
+// dispatchContextWarm is the production warm fire. A test Dispatch override
+// records the prefix unchanged (existing pins compare those bytes). The
+// real path bounds oversized system messages through the session's
+// ContextFirewall — the same window-independent bound the turn runs
+// before the inert-firewall return — THEN unwraps and Warms the inner
+// client. Unwrapping without that bound shipped the full prefix past the
+// bound the turn applies.
+func (w *VoiceWiring) dispatchContextWarm(ctx context.Context, src contextWarmSources, alias, scope string, messages []llm.ChatMessage, warmOpts []llm.ChatOption) {
+	if src.Dispatch != nil {
+		src.Dispatch(ctx, alias, messages, scope)
+		return
+	}
+	messages = boundContextWarmPrefix(src, scope, messages)
+	if d := w.resolveContextWarmDispatcher(src, scope); d != nil {
+		if werr := d.Warm(ctx, messages, warmOpts...); werr != nil && w.logger != nil {
+			// Warm failures are silent by contract (DEBUG only). The
+			// turn still runs. Do not ignore the error: the pre-commit
+			// gate blocks a bare discard.
+			w.logger.Debug("context warm failed", "error", werr)
+		}
+	}
+}
+
+// boundContextWarmPrefix runs ContextFirewall.BoundSystemMessages when the
+// session chatter is firewall-wrapped. No firewall means the turn does not
+// bound either, so the prefix is returned unchanged. A small system message
+// passes byte-identically.
+func boundContextWarmPrefix(src contextWarmSources, scopeID string, messages []llm.ChatMessage) []llm.ChatMessage {
+	fw := contextWarmFirewall(src, scopeID)
+	if fw == nil {
+		return messages
+	}
+	return fw.BoundSystemMessages(messages)
+}
+
+// contextWarmChatter is the session loop's chatter, else the template's.
+// The scope may be the session's conversation id; the loop manager keys on
+// the session id. A nil store or a miss keeps the raw id.
+func contextWarmChatter(src contextWarmSources, scopeID string) llm.Chatter {
+	sessionID := scopeID
+	if src.Sessions != nil && scopeID != "" {
+		if sess := src.Sessions.Get(scopeID); sess != nil && sess.ID != "" {
+			sessionID = sess.ID
+		} else if sess := src.Sessions.GetByConversationID(scopeID); sess != nil && sess.ID != "" {
+			sessionID = sess.ID
+		}
+	}
+	if loop := contextWarmLoopFor(src.Loops, sessionID); loop != nil {
+		if chatter := loop.Chatter(); chatter != nil {
+			return chatter
+		}
+	}
+	if src.Template != nil {
+		return src.Template.Chatter()
+	}
+	return nil
+}
+
+// contextWarmFirewall returns the outermost ContextFirewall on the warm
+// chatter chain, or nil when the chain is not firewall-wrapped.
+func contextWarmFirewall(src contextWarmSources, scopeID string) *llm.ContextFirewall {
+	fw, _ := contextWarmChatter(src, scopeID).(*llm.ContextFirewall)
+	return fw
+}
+
 // resolveContextWarmDispatcher unwraps the session's serving chatter to the
 // concrete warm-capable client, following the SAME chain the turn
 // dispatches through: ContextFirewall.Inner, then the terminal chatter.
@@ -377,27 +442,11 @@ func contextWarmEmployeeDef(src contextWarmSources, employeeID string) (*employe
 // Returns nil (skip) when the chain holds no warm-aware client — an
 // Anthropic/Codex-terminal deployment no-ops there by C4 contract, and an
 // unresolvable chain never guesses an endpoint.
+//
+// The unwrap skips ContextFirewall.Warm, so dispatchContextWarm runs
+// BoundSystemMessages on the prefix before this returns the inner client.
 func (w *VoiceWiring) resolveContextWarmDispatcher(src contextWarmSources, scopeID string) warmDispatcher {
-	// Identity duality BEFORE the loop lookup: the scope may be the
-	// session's conversation id (BuildPrefix's output), but the loop
-	// manager keys on the session id. Resolve through the session store
-	// the same way BuildPrefix resolves the forward direction; a nil
-	// store or a miss keeps the raw id (the legacy direct-lookup shape).
-	sessionID := scopeID
-	if src.Sessions != nil && scopeID != "" {
-		if sess := src.Sessions.Get(scopeID); sess != nil && sess.ID != "" {
-			sessionID = sess.ID
-		} else if sess := src.Sessions.GetByConversationID(scopeID); sess != nil && sess.ID != "" {
-			sessionID = sess.ID
-		}
-	}
-	var chatter llm.Chatter
-	if loop := contextWarmLoopFor(src.Loops, sessionID); loop != nil {
-		chatter = loop.Chatter()
-	}
-	if chatter == nil && src.Template != nil {
-		chatter = src.Template.Chatter()
-	}
+	chatter := contextWarmChatter(src, scopeID)
 	// Bounded unwrap: firewall hops only; a self-referential chain is a
 	// wiring bug we refuse to follow forever.
 	for hop := 0; chatter != nil && hop < 4; hop++ {
