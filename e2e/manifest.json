@@ -1138,14 +1138,14 @@
     {
       "name": "tools-jobs",
       "dir": "e2e/suites/tools-jobs",
-      "status": "todo",
+      "status": "implemented",
       "diff": "M",
       "scenarios": [
         "tools-jobs-01 job_start with a shell command returns an opaque job- prefixed handle and status running|scheduled",
         "tools-jobs-02 job_status reads the settled one-shot result with exit code 0 and a bounded output window from the spill file",
         "tools-jobs-03 job_stop cancels an in-flight sleep and returns status cancelled with exit code 137/143; it does not delete a recurring schedule (schedule_delete does)"
       ],
-      "note": "20261120-job-tools tree (leaf C): job-handle tools on internal/scheduler; RED skip-guarded until leaf D registers job_start/job_status/job_stop."
+      "note": "20261120-job-tools tree (leaf C): job-handle tools on internal/scheduler; active behavioral suite for job_start/job_status/job_stop."
     },
     {
       "name": "tui-flows",

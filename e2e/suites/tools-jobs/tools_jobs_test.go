@@ -14,15 +14,11 @@
 //   - tools-jobs-03: job_stop cancels an in-flight sleep and returns status
 //     cancelled with a unix-style exit code of 137/143; it does NOT delete a
 //     recurring schedule (use schedule_delete — decision 2).
-//
-// RED GATE: the three tools are registered by sibling leaf D (Wave 2) and are
-// NOT present at this worktree HEAD. Every test below is skip-guarded so the
-// suite compiles and reports honestly as pending; remove `pendingLeafD` once
-// leaf D lands to activate the full bodies unchanged.
 package toolsjobs
 
 import (
 	"encoding/json"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -30,9 +26,11 @@ import (
 	"github.com/caimlas/meept/e2e/harness"
 )
 
-// pendingLeafD is the RED skip reason. Activate by deleting the t.Skip guard
-// (and this const) once job_start/job_status/job_stop are registered.
-const pendingLeafD = "TODO(leaf D): job_start/job_status/job_stop tools are not registered at this HEAD; remove this skip when leaf D lands"
+// toolOutputMarkerRE fences every role=tool message (internal/llm/
+// tool_output_markers.go) with `<<<TOOL_OUTPUT:<id>>>...<<<END_TOOL_OUTPUT>>>`.
+// Strip those wrappers so the inner JSON envelope can be parsed by the
+// assertions below.
+var toolOutputMarkerRE = regexp.MustCompile(`<<<TOOL_OUTPUT:[^>]*>>>|<<<END_TOOL_OUTPUT>>>`)
 
 // toolResultTexts collects the content of every role=tool message the daemon
 // has sent back to the fake LLM (same public-turn pattern as tools-tasks).
@@ -47,7 +45,7 @@ func toolResultTexts(f *harness.FakeLLM) []string {
 			}
 			if role, _ := msg["role"].(string); role == "tool" {
 				if c, _ := msg["content"].(string); c != "" {
-					out = append(out, c)
+					out = append(out, strings.TrimSpace(toolOutputMarkerRE.ReplaceAllString(c, "")))
 				}
 			}
 		}
@@ -57,6 +55,24 @@ func toolResultTexts(f *harness.FakeLLM) []string {
 
 func toolResultsJoined(f *harness.FakeLLM) string {
 	return strings.Join(toolResultTexts(f), "\n")
+}
+
+// startJobsStack boots a sandbox and pins both the intent classifier and the
+// task planner to the `schedule` lane. The job tools (job_start/status/stop)
+// are granted to the bundled scheduler specialist via its `additional_tools`
+// (config/agents/scheduler/AGENT.md), NOT to every agent — the default fake
+// classifier heuristic classifies these imperative prompts as `code`, which
+// routes to the coder and yields "unknown tool: job_start" at the executor.
+// Pinning intent=schedule routes the turn to the scheduler specialist so the
+// real job tools are in the agent's granted registry; pinning the planner's
+// step tool_hint=schedule keeps every dispatched step on that same lane.
+func startJobsStack(t *testing.T) *harness.Stack {
+	t.Helper()
+	s := harness.Start(t)
+	s.Fake.SetClassifierOutput(`{"intent":"schedule","confidence":0.95,"reasoning":"pinned schedule"}`)
+	s.Fake.SetPlannerResponse(`{"steps":[{"description":"manage the scheduled job","tool_hint":"schedule","depends_on":[]}]}`)
+	s.RegisterProject(t, "e2e-jobs")
+	return s
 }
 
 // resultObject returns the nested `result` object of the first tool envelope
@@ -84,10 +100,7 @@ func resultObject(f *harness.FakeLLM) map[string]any {
 // scheduled. The command itself writes an artifact so the test can prove the
 // scheduler actually dispatched the job, not just minted an id.
 func TestJobStartReturnsOpaqueHandle(t *testing.T) {
-	t.Skip(pendingLeafD)
-
-	s := harness.Start(t)
-	s.RegisterProject(t, "e2e-jobs")
+	s := startJobsStack(t)
 	sessionID := s.CreateSession(t, "jobs-start", s.ProjectDir)
 
 	artifact := s.ProjectDir + "/job-start-artifact.txt"
@@ -102,7 +115,7 @@ func TestJobStartReturnsOpaqueHandle(t *testing.T) {
 		Arguments: string(arguments),
 	})
 	s.ChatTurn(t, sessionID,
-		"Use job_start to run the shell command that writes the artifact",
+		"Schedule: use job_start to run the shell command that writes the artifact",
 		120*time.Second)
 
 	res := resultObject(s.Fake)
@@ -130,10 +143,7 @@ func TestJobStartReturnsOpaqueHandle(t *testing.T) {
 // limited window of the command's stdout (ruling 3: read back from the spill
 // file, never an unbounded in-memory buffer).
 func TestJobStatusReadsSettledResult(t *testing.T) {
-	t.Skip(pendingLeafD)
-
-	s := harness.Start(t)
-	s.RegisterProject(t, "e2e-jobs")
+	s := startJobsStack(t)
 	sessionID := s.CreateSession(t, "jobs-status", s.ProjectDir)
 
 	startArgs, err := json.Marshal(map[string]any{
@@ -147,7 +157,7 @@ func TestJobStatusReadsSettledResult(t *testing.T) {
 		Arguments: string(startArgs),
 	})
 	s.ChatTurn(t, sessionID,
-		"Use job_start to run the quick shell command",
+		"Schedule: use job_start to run the quick shell command",
 		120*time.Second)
 
 	var handle string
@@ -175,7 +185,7 @@ func TestJobStatusReadsSettledResult(t *testing.T) {
 		Arguments: string(statusArgs),
 	})
 	s.ChatTurn(t, sessionID,
-		"Use job_status to read the settled result of "+handle,
+		"Schedule: use job_status to read the settled result of "+handle,
 		120*time.Second)
 
 	joined := toolResultsJoined(s.Fake)
@@ -198,10 +208,7 @@ func TestJobStatusReadsSettledResult(t *testing.T) {
 // The idempotent second stop reports already_done, and a schedule_delete (not
 // job_stop) is what removes a recurring row (design decision 2).
 func TestJobStopCancelsInFlightRun(t *testing.T) {
-	t.Skip(pendingLeafD)
-
-	s := harness.Start(t)
-	s.RegisterProject(t, "e2e-jobs")
+	s := startJobsStack(t)
 	sessionID := s.CreateSession(t, "jobs-stop", s.ProjectDir)
 
 	startArgs, err := json.Marshal(map[string]any{
@@ -216,7 +223,7 @@ func TestJobStopCancelsInFlightRun(t *testing.T) {
 		Arguments: string(startArgs),
 	})
 	s.ChatTurn(t, sessionID,
-		"Use job_start to run a long sleep",
+		"Schedule: use job_start to run a long sleep",
 		120*time.Second)
 
 	var handle string
@@ -247,7 +254,7 @@ func TestJobStopCancelsInFlightRun(t *testing.T) {
 		Arguments: string(stopArgs),
 	})
 	s.ChatTurn(t, sessionID,
-		"Use job_stop to cancel the in-flight run "+handle,
+		"Schedule: use job_stop to cancel the in-flight run "+handle,
 		120*time.Second)
 
 	joined := toolResultsJoined(s.Fake)

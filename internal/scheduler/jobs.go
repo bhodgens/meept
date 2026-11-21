@@ -441,12 +441,16 @@ func newShellJob(cfg JobConfig, msgBus *bus.MessageBus, guard ShellCommandGuard,
 func (j *ShellJob) Execute(ctx context.Context) error {
 	// Phase 1 (risk classification / permission table) runs before any
 	// work-dir resolution, preserving the 403-before-400 order.
-	command := j.command
+	// Guard-only command source (the raw shell source behind /bin/sh -c) is
+	// used exclusively for risk classification. It MUST NOT replace the
+	// executable: keeping it would make exec.CommandContext try to run the
+	// whole shell script as a binary name ("exec: printf ...: not found").
+	guardSource := j.command
 	if j.guardCommand != "" {
-		command = j.guardCommand
+		guardSource = j.guardCommand
 	}
 	if j.guard != nil {
-		if err := j.guard.CheckCommand(command); err != nil {
+		if err := j.guard.CheckCommand(guardSource); err != nil {
 			return j.settleGuardFailure(ctx, err)
 		}
 	}
@@ -458,7 +462,7 @@ func (j *ShellJob) Execute(ctx context.Context) error {
 	// Phase 2 (fence / Tirith / network class) runs after work-dir
 	// resolution but before spawn. The guard owns the resolution semantics.
 	if j.guard != nil {
-		if err := j.guard.CheckCommandInDir(execCtx, command, j.workDir); err != nil {
+		if err := j.guard.CheckCommandInDir(execCtx, guardSource, j.workDir); err != nil {
 			return j.settleGuardFailure(ctx, err)
 		}
 	}
@@ -481,7 +485,7 @@ func (j *ShellJob) Execute(ctx context.Context) error {
 	defer spill.Close()
 
 	//nolint:gosec // validated input by the guard at execution time
-	cmd := exec.CommandContext(execCtx, command, j.args...)
+	cmd := exec.CommandContext(execCtx, j.command, j.args...)
 	if j.workDir != "" {
 		cmd.Dir = j.workDir
 	}
