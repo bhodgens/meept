@@ -174,8 +174,8 @@ func TestACPEmployeeExecutorAdapter_RoutesToReferencedLoop(t *testing.T) {
 	if call.userMessage != "do the thing" {
 		t.Errorf("userMessage = %q, want %q", call.userMessage, "do the thing")
 	}
-	if !strings.HasPrefix(call.conversationID, "bot-exec") {
-		t.Errorf("conversation id %q should be bot-exec-scoped like the local adapter", call.conversationID)
+	if call.conversationID != employee.EmployeeChatSessionID("alice") {
+		t.Errorf("conversation id %q, want standing session %q", call.conversationID, employee.EmployeeChatSessionID("alice"))
 	}
 }
 
@@ -526,8 +526,8 @@ func TestACPEmployeeExecutorAdapter_AuditAttribution(t *testing.T) {
 	if f.Severity != employee.SeverityInfo || f.Checkpoint != employee.CheckpointPostTurn {
 		t.Errorf("Severity/Checkpoint = %v/%v, want info/post_turn", f.Severity, f.Checkpoint)
 	}
-	if f.TurnID == "" {
-		t.Error("TurnID must carry the bot-exec conversation id")
+	if f.TurnID != employee.EmployeeChatSessionID("alice") {
+		t.Errorf("TurnID = %q, want standing session %q", f.TurnID, employee.EmployeeChatSessionID("alice"))
 	}
 	for _, want := range []string{"bob", "hermes", "borg", "outcome=success"} {
 		if !strings.Contains(f.Evidence, want) {

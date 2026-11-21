@@ -1760,11 +1760,12 @@ func (m *Manager) triggerViaGoalLoop(ctx context.Context, id string, payload map
 	// other I/O happens under this lock.
 	invokeMu := m.acquireInvokeMutex(id)
 	invokeMu.Lock()
-	// Speak context (harness-eval leaf 11): a goal round is session-
-	// detached, so the notify payload carries the employee id as the
-	// session identity and resets the per-round dedup flag. Called here —
-	// the single round-entry site — so every round can notify exactly once.
-	loop.SetSpeakContext(id, "goal-"+id)
+	// Speak context (routing-funnel C4): the notify payload and the
+	// execution-result session id are the standing chat session, not the
+	// raw employee id. The goal conversation argument stays "goal-"+id.
+	// Called here — the single round-entry site — so every round can
+	// notify exactly once.
+	loop.SetSpeakContext(EmployeeChatSessionID(id), "goal-"+id)
 	// Execution-result tier is PER ROUND, stamped onto the PlanRef when
 	// the round builds it (decideTier1 / planWithResultTopic), from this
 	// trigger's source. bus_event stamps bot.result; every other source
@@ -1854,9 +1855,10 @@ func (m *Manager) SteerEmployee(ctx context.Context, id, content string) (bool, 
 	// path — the trigger re-runs the episode and the assess prompt
 	// carries the steering text.
 	if trigger, ok := loop.drainPendingSteer(); ok {
-		// Speak context (harness-eval leaf 11): same round-entry setup
-		// as triggerViaGoalLoop so a steered round can notify once.
-		loop.SetSpeakContext(id, "goal-"+id)
+		// Speak context (routing-funnel C4): same round-entry setup as
+		// triggerViaGoalLoop. The first argument is the standing chat
+		// session id, not the raw employee id.
+		loop.SetSpeakContext(EmployeeChatSessionID(id), "goal-"+id)
 		loop.decideSteer(ctx, trigger, m.logger)
 	}
 	invokeMu.Unlock()

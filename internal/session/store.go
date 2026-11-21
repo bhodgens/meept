@@ -79,6 +79,11 @@ var ErrSemanticUnavailable = errors.New("semantic search unavailable: no embeddi
 // Store defines the interface for session persistence.
 type Store interface {
 	Create(name string) (*Session, error)
+	// Ensure returns the session row for id, creating it through the same
+	// insert path as Create when the row is missing. id is the caller-chosen
+	// primary key. conversation_id is set to the same id so a chat lookup by
+	// either key finds the standing row. Idempotent. An empty id is an error.
+	Ensure(id, name string) (*Session, error)
 	Get(id string) *Session
 	GetByConversationID(conversationID string) *Session
 	GetMostRecent() *Session

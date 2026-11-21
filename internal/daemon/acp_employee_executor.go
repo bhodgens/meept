@@ -8,7 +8,7 @@ import (
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/bot"
 	"github.com/caimlas/meept/internal/employee"
-	"github.com/caimlas/meept/pkg/id"
+	"github.com/caimlas/meept/internal/session"
 )
 
 // acpTurnRunner is the minimal loop seam the acp-backed employee executor
@@ -56,9 +56,8 @@ var _ acpTurnAuditRecorder = (*employee.AuditStore)(nil)
 //
 // Token counts are not available on the acp wire (session/prompt returns
 // stopReason only — docs/workflows/acp-employees-phase3.md D4), so
-// tokensUsed is always 0, mirroring the agentLoopBotExecutorAdapter
-// precedent (employee_service_adapter.go: ExecuteBot returns 0 with the
-// rationale comment).
+// tokensUsed is always 0. The local adapter reports LastTurnTokens; this
+// lane has no usage to report.
 type acpEmployeeExecutorAdapter struct {
 	employeeID string
 	agentID    string
@@ -74,6 +73,8 @@ type acpEmployeeExecutorAdapter struct {
 	// audit persists the per-turn attribution finding; nil = dark.
 	audit  acpTurnAuditRecorder
 	logger *slog.Logger
+	// sessions is the existing session store. Nil is a no-op.
+	sessions session.Store
 }
 
 // ExecuteBot runs a single employee turn through the referenced agent's
@@ -93,9 +94,15 @@ func (a *acpEmployeeExecutorAdapter) ExecuteBot(ctx context.Context, systemPromp
 	if loop == nil {
 		return "", 0, fmt.Errorf("acp employee executor %q: agent %q resolved to a nil loop", a.employeeID, a.agentID)
 	}
-	// Conversation id scoped like the local adapter's so employee sessions
-	// never collide with user-driven conversations.
-	conversationID := id.Generate("bot-exec")
+	// Standing employee chat session (routing-funnel C4). Not a throwaway
+	// bot-exec id. A missing store must not panic.
+	conversationID := employee.EmployeeChatSessionID(a.employeeID)
+	if err := ensureEmployeeChatSession(a.sessions, a.employeeID); err != nil {
+		warnEmployeeSession(a.logger, "standing employee session ensure failed",
+			"employee_id", a.employeeID,
+			"session_id", conversationID,
+			"error", err)
+	}
 	// D6: stamp the turn source on the caller ctx BEFORE RunOnce. The
 	// value survives every ctx derive inside the loop down to
 	// ACPExecutor.Run's single emission point, which tags the
@@ -103,6 +110,7 @@ func (a *acpEmployeeExecutorAdapter) ExecuteBot(ctx context.Context, systemPromp
 	// distinguishing it from a chat-slave turn on the same persona.
 	turnCtx := agent.WithACPTurnSource(ctx, agent.ACPTurnSourceEmployee, a.employeeID)
 	response, err := loop.RunOnce(turnCtx, userMessage, conversationID)
+	persistEmployeeExchange(a.sessions, conversationID, a.employeeID, userMessage, response, a.logger)
 	if err != nil {
 		a.recordTurnAudit(ctx, conversationID, "error")
 		a.logger.Warn("acp employee executor turn failed",
@@ -285,7 +293,19 @@ func employeeBotExecutor(emp employee.Employee, defaultExecutor bot.BotExecutor,
 		resolveLoop:  resolveLoop,
 		audit:        audit,
 		logger:       logger.With("component", "acp-employee-executor", "employee_id", emp.ID),
+		sessions:     sessionsFromExecutor(defaultExecutor),
 	}, false
+}
+
+// sessionsFromExecutor reads the existing session store off the shared
+// local adapter so the acp lane persists into the same store. A foreign
+// or nil executor has no store; a missing store must not panic.
+func sessionsFromExecutor(exec bot.BotExecutor) session.Store {
+	adapter, ok := exec.(*agentLoopBotExecutorAdapter)
+	if !ok || adapter == nil {
+		return nil
+	}
+	return adapter.sessions
 }
 
 // employeeBoundLocalExecutor applies the bug-1 fix to the NON-voice
@@ -310,5 +330,6 @@ func employeeBoundLocalExecutor(emp employee.Employee, defaultExecutor bot.BotEx
 		inner:        inner,
 		employeeID:   emp.ID,
 		constitution: emp.Constitution,
+		sessions:     inner.sessions,
 	}
 }
