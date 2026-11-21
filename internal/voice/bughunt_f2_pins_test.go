@@ -301,11 +301,14 @@ func TestLocalSpliceBargeInStaleBacklogDoesNotReplay(t *testing.T) {
 	// Phase 3: past the residue window, a FRESH write (the new turn's
 	// stream) re-arms and paces out.
 	time.Sleep(localBargeResidueQuiet + 100*time.Millisecond)
+	// Sample the baseline BEFORE the synchronous feed: under full-suite load
+	// the reader can record the fresh chunk before this goroutine resumes,
+	// which would hide it inside freshStart and make the poll wait in vain.
+	freshStart := before()
 	if err := feedChild("ls-stale-1"); err != nil {
 		t.Fatalf("feedChild fresh: %v", err)
 	}
 	deadline = time.Now().Add(3 * time.Second)
-	freshStart := before()
 	for time.Now().Before(deadline) {
 		if before() >= freshStart+640 {
 			break

@@ -261,11 +261,18 @@ func TestLocalSpliceBargeInStaleTaggedChunksNeverReplay(t *testing.T) {
 	}
 
 	// Phase 3: a FRESH feed (post-window) re-arms and paces out.
+	// Sample the baseline BEFORE the feed: feedChild hands the chunk to
+	// the pump synchronously (net.Pipe write), so under full-suite load
+	// the reader goroutine can record the freshly paced 640 bytes before
+	// this goroutine is rescheduled. Capturing the baseline after the
+	// feed then hides those bytes inside freshStart and the bounded poll
+	// below waits 3 s for a second chunk that never comes — the
+	// "client got 1280 bytes, want >= 1920" full-suite flake.
+	freshStart := before()
 	if err := feedChild("ls-c2-tag"); err != nil {
 		t.Fatalf("feedChild fresh: %v", err)
 	}
 	deadline = time.Now().Add(3 * time.Second)
-	freshStart := before()
 	for time.Now().Before(deadline) {
 		if before() >= freshStart+640 {
 			break

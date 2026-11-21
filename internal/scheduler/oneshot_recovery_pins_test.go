@@ -381,6 +381,23 @@ func TestOneShotFutureDueNotFiredAtBoot(t *testing.T) {
 	if _, err := os.Stat(marker); err != nil {
 		t.Fatal("cron entry did not fire the future-due one-shot at due time")
 	}
+
+	// fireOneShotOnce's goroutine keeps writing into dataDir AFTER the
+	// shell `touch` creates the marker: executeJob persists jobs.json +
+	// last_wake.json, then the goroutine stamps and PRUNES the row. The
+	// prune (s.store.Remove) is its final write, so waiting for the row to
+	// disappear is a bounded condition that proves every async file write
+	// has settled before t.TempDir()'s RemoveAll runs.
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, ok := s.store.Get("oneshot-future"); !ok {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, ok := s.store.Get("oneshot-future"); ok {
+		t.Fatal("future-due one-shot row was not pruned after firing (async write tail did not settle)")
+	}
 }
 
 // Pin 7 (S1): a cron-fired one-shot must not re-fire when the next daemon

@@ -1,16 +1,23 @@
 package shadow
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"math"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/caimlas/meept/internal/llm"
 )
+
+// roundTripFunc adapts a function to http.RoundTripper so tests can inject a
+// fake transport without opening a real socket.
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 // teacherUsageResponse is an OpenAI-compatible chat completion body carrying
 // explicit token usage, so tests can pin exact cost expectations.
@@ -28,31 +35,49 @@ type teacherUsageResponse struct {
 	} `json:"usage"`
 }
 
+// teacherUsageResponseForTest builds the canonical 5-in/7-out usage body.
+func teacherUsageResponseForTest() teacherUsageResponse {
+	resp := teacherUsageResponse{}
+	resp.Choices = make([]struct {
+		Message struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"message"`
+	}, 1)
+	resp.Choices[0].Message.Role = "assistant"
+	resp.Choices[0].Message.Content = "hello"
+	resp.Usage.PromptTokens = 5
+	resp.Usage.CompletionTokens = 7
+	resp.Usage.TotalTokens = 12
+	return resp
+}
+
 func TestTeacherClient_CostUsesRealTokenCounts(t *testing.T) {
 	// Prices: $3/M input, $15/M output. The stub returns 5 prompt and 7
 	// completion tokens, so the real cost is (5*3 + 7*15)/1e6 = 1.2e-4 USD.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		resp := teacherUsageResponse{}
-		resp.Choices = make([]struct {
-			Message struct {
-				Role    string `json:"role"`
-				Content string `json:"content"`
-			} `json:"message"`
-		}, 1)
-		resp.Choices[0].Message.Role = "assistant"
-		resp.Choices[0].Message.Content = "hello"
-		resp.Usage.PromptTokens = 5
-		resp.Usage.CompletionTokens = 7
-		resp.Usage.TotalTokens = 12
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			t.Errorf("encode response: %v", err)
-		}
-	}))
-	defer srv.Close()
+	// Avoid a real httptest socket: under a full -p 2 ./... sweep the
+	// ephemeral port range can be exhausted by parallel packages, making
+	// httptest.NewServer fail with "can't assign requested address". The
+	// llm.Client builds its *http.Client with a nil Transport, so it uses
+	// http.DefaultTransport — swap that in a scoped, non-parallel test with
+	// a fake RoundTripper returning the OpenAI-compatible body directly.
+	// No production code changes; the cost assertions stay identical.
+	encoded, err := json.Marshal(teacherUsageResponseForTest())
+	if err != nil {
+		t.Fatalf("marshal stub response: %v", err)
+	}
+	originalTransport := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader(encoded)),
+		}, nil
+	})
+	defer func() { http.DefaultTransport = originalTransport }()
 
 	cfg := &llm.ModelConfig{
-		BaseURL:              srv.URL,
+		BaseURL:              "http://teacher.invalid/v1",
 		ModelID:              "test-model",
 		APIKey:               "test-key",
 		CostPerMillionInput:  3.0,
@@ -73,7 +98,7 @@ func TestTeacherClient_CostUsesRealTokenCounts(t *testing.T) {
 	tc := NewTeacherClient(client, nil, &teacherCfg, WithTeacherLogger(slog.Default()))
 
 	messages := []llm.ChatMessage{{Role: llm.RoleUser, Content: "hi"}}
-	_, _, err := tc.GetResponse(context.Background(), messages)
+	_, _, err = tc.GetResponse(context.Background(), messages)
 	if err != nil {
 		t.Fatalf("GetResponse failed: %v", err)
 	}
