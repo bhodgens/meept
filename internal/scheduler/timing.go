@@ -865,6 +865,14 @@ func (s *Scheduler) sweepOneShotsAtBoot() {
 			continue // paused/disabled rows are never fired or marked
 		}
 		if cfg.OneShotFailed || cfg.OneShotFiredAt != nil {
+			// fireOneShotOnce stamps OneShotFiredAt BEFORE dispatch, so a
+			// daemon crash mid-execution leaves a stamped, unsettled row
+			// that this sweep would otherwise skip forever (silent gap).
+			// Ruling 1: record it FAILED in the result lane for job-
+			// handles (never leave a settled attempt without a status).
+			if strings.HasPrefix(cfg.ID, "job-") {
+				s.recordLostRunIfNeeded(cfg)
+			}
 			continue // already reconciled
 		}
 		due := cfg.Timing.At.UTC()
@@ -1014,6 +1022,31 @@ func (s *Scheduler) fireOneShotOnce(cfg JobConfig, job Job, due, now time.Time) 
 // by sweepOneShotsAtBoot through the shared claim-before-deliver path.
 func (s *Scheduler) fireOverdueOneShot(cfg JobConfig, job Job, due, now time.Time) {
 	s.fireOneShotOnce(cfg, job, due, now)
+}
+
+// recordLostRunIfNeeded writes a FAILED result for a job- one-shot whose
+// OneShotFiredAt was stamped before dispatch but which has no settled result
+// in the lane — the signature of a daemon crash mid-execution (Ruling 1).
+// It is a no-op when the run already settled or a result already exists, so
+// it stays idempotent across repeated boot sweeps.
+func (s *Scheduler) recordLostRunIfNeeded(cfg JobConfig) {
+	if s.store == nil || cfg.OneShotFiredAt == nil {
+		return
+	}
+	if _, ok := s.store.GetResult(cfg.ID); ok {
+		return // already settled (result lane survived the restart)
+	}
+	started := cfg.OneShotFiredAt.UTC()
+	s.store.PutResult(JobExecutionResult{
+		JobID:      cfg.ID,
+		Status:     JobStatusFailed,
+		ExitCode:   ExitCodeFailure,
+		StartedAt:  started,
+		FinishedAt: started,
+		Error:      "run lost to daemon restart",
+	})
+	s.logger.Warn("scheduler: recorded job run lost to daemon restart",
+		"job_id", cfg.ID, "fired_at", started.Format(time.RFC3339))
 }
 
 // markOneShotFailed flips a past-window one-shot into the failed-never-ran

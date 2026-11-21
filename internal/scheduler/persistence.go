@@ -16,13 +16,18 @@ type Store struct {
 	mu       sync.RWMutex
 	filePath string
 	jobs     map[string]JobConfig
+	// results is the bounded FIFO result lane. Persisted with the jobs in
+	// the same jobs.json (currentStoreVersion stays 1; omitempty keeps old
+	// files decoding with an empty lane — no migration).
+	results []JobExecutionResult
 }
 
 // StoreData represents the persisted job data structure.
 type StoreData struct {
-	Version   int         `json:"version"`
-	UpdatedAt time.Time   `json:"updated_at"`
-	Jobs      []JobConfig `json:"jobs"`
+	Version   int                  `json:"version"`
+	UpdatedAt time.Time            `json:"updated_at"`
+	Jobs      []JobConfig          `json:"jobs"`
+	Results   []JobExecutionResult `json:"results,omitempty"`
 }
 
 const (
@@ -153,6 +158,9 @@ func (s *Store) Load() ([]JobConfig, error) {
 	for _, job := range storeData.Jobs {
 		s.jobs[job.ID] = job
 	}
+	// Old jobs.json files have no results field; omitempty decodes to nil
+	// and the lane simply starts empty (no migration, version stays 1).
+	s.results = append([]JobExecutionResult(nil), storeData.Results...)
 
 	return storeData.Jobs, nil
 }
@@ -171,6 +179,7 @@ func (s *Store) saveUnlocked(jobs []JobConfig) error {
 		Version:   currentStoreVersion,
 		UpdatedAt: time.Now().UTC(),
 		Jobs:      jobs,
+		Results:   s.results,
 	}
 
 	data, err := json.MarshalIndent(storeData, "", "  ")
@@ -336,6 +345,7 @@ func (s *Store) Export() ([]byte, error) {
 		Version:   currentStoreVersion,
 		UpdatedAt: time.Now().UTC(),
 		Jobs:      jobs,
+		Results:   s.results,
 	}
 
 	return json.MarshalIndent(storeData, "", "  ") //nolint:mutexio // marshal of snapshotted jobs slice under RLock
@@ -353,11 +363,16 @@ func (s *Store) Import(data []byte, replace bool) error {
 
 	if replace {
 		s.jobs = make(map[string]JobConfig)
+		s.results = nil
 	}
 
 	for _, job := range storeData.Jobs {
 		s.jobs[job.ID] = job
 	}
+	// Import mirrors job replacement for the result lane so Export→Import
+	// round-trips. Imported spill files may not be present locally; the
+	// result rows still carry their path and are harmless until read.
+	s.results = upsertResults(s.results, storeData.Results)
 
 	return s.persistUnlocked()
 }

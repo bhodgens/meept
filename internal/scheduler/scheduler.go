@@ -64,6 +64,11 @@ type Scheduler struct {
 	runNowCancel context.CancelFunc
 	runNowWg     sync.WaitGroup
 
+	// Per-execution cancel registry keyed by handle (job id). Never use
+	// runNowCancel for per-job cancel — that is scheduler-global.
+	execMu     sync.Mutex
+	executions map[string]*executionHandle
+
 	// Crash safety (claim-before-deliver + missed-tick coalescing).
 	claims             *claimStore
 	coalesceMissed     bool // default true: coalesce missed ticks to MAX per job
@@ -152,6 +157,7 @@ func NewScheduler(cfg config.SchedulerConfig, msgBus *bus.MessageBus, opts ...Op
 		entryIDs:    make(map[string]cron.EntryID),
 		runningJobs: make(map[string]bool),
 		location:    loc,
+		executions:  make(map[string]*executionHandle),
 
 		// Crash-safety defaults; options applied below may override.
 		coalesceMissed:     true,
@@ -762,6 +768,29 @@ func (s *Scheduler) executeJob(ctx context.Context, job Job, opts ExecutionOptio
 	// has receipts, with a fresh (dedupe-proof) turn id.
 	ctx = context.WithValue(ctx, claimedTickKey{}, tick)
 
+	// Per-execution cancel handle: derived from THIS run's context, never
+	// from the scheduler-global runNowCancel. CancelJob looks up the handle
+	// by job id, calls cancel(), and escalates to a group kill. Registered
+	// only while this execution is in flight and removed on terminal.
+	execCtx, execCancel := context.WithCancel(ctx)
+	handle := &executionHandle{cancel: execCancel, started: time.Now().UTC(), done: make(chan struct{})}
+	s.execMu.Lock()
+	s.executions[jobID] = handle
+	s.execMu.Unlock()
+	ctx = context.WithValue(execCtx, executionHandleKey{}, handle)
+
+	defer func() {
+		execCancel()
+		s.execMu.Lock()
+		// Only delete our own handle: a newer run of the same job id must
+		// not be removed by an older run's terminal defer.
+		if s.executions[jobID] == handle {
+			delete(s.executions, jobID)
+		}
+		s.execMu.Unlock()
+		close(handle.done)
+	}()
+
 	// Mark as running
 	s.mu.Lock()
 	s.runningJobs[jobID] = true
@@ -967,22 +996,30 @@ func (s *Scheduler) loadPersistedJobs() error {
 // passes jobDeps, so wiring only the legacy path left live agent jobs
 // receipt-less (05-schedule/02-delivery-inbox e2e gate caught this).
 func (s *Scheduler) createJob(cfg JobConfig) (Job, error) {
+	var job Job
 	if s.jobDeps != nil {
-		job, err := CreateJobWithDeps(cfg, s.jobDeps)
+		created, err := CreateJobWithDeps(cfg, s.jobDeps)
 		if err != nil {
 			return nil, err
 		}
-		if aj, ok := job.(*AgentJob); ok {
-			aj.deliveryScheduler = s
+		job = created
+	} else {
+		created, err := CreateJob(cfg, s.bus)
+		if err != nil {
+			return nil, err
 		}
-		return job, nil
+		job = created
 	}
-	job, err := CreateJob(cfg, s.bus)
-	if err != nil {
-		return nil, err
-	}
+	// Back-references are set on BOTH construction paths, mirroring the
+	// deliveryScheduler wiring: the daemon normally passes jobDeps, but a
+	// standalone scheduler must still record results for shell jobs.
 	if aj, ok := job.(*AgentJob); ok {
 		aj.deliveryScheduler = s
+	}
+	if sj, ok := job.(*ShellJob); ok {
+		if sj.resultSink == nil {
+			sj.resultSink = &resultStore{s: s.store}
+		}
 	}
 	return job, nil
 }
