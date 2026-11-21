@@ -27,6 +27,26 @@ Manual task execution lacks automation and reliability. Job scheduling enables:
 | `schedule_run_now` | Trigger immediate execution |
 | `schedule_delete` | Remove jobs |
 | `cron_create` | Human-friendly cron expressions |
+| `job_start` | Start a one-shot or recurring shell job; returns an opaque `job-` handle |
+| `job_status` | Read a settled result and a limited output window from the job's spill file |
+| `job_stop` | Cancel an in-flight run by handle (does not delete a recurring schedule — use `schedule_delete`) |
+
+`job_start` accepts a shell `command` and optional `at` / `every` / `cron` /
+`timeout_seconds`. With no schedule argument it fires an immediate one-shot;
+other arguments create a `TimingAt` one-shot or a recurring job. Every job runs
+under a hard **30-minute timeout cap** — a `timeout_seconds` above 30 minutes
+is silently reduced to 30 minutes (the scheduler's `executeJob` dispatch
+context is capped at three sites).
+
+Handles are opaque scheduler job ids with a frozen **`job-` prefix** (distinct
+from the `sched-` ids used by `schedule_create`). One handle maps to one
+execution attempt; a re-run mints a new handle. `job_status` returns the
+settled `status`, `exit_code`, and a bounded output window read back from an
+on-disk spill file (output is never buffered unbounded in memory). `job_stop`
+cancels only the in-flight run and reports `cancelled` with a unix-style exit
+code of `137` (SIGKILL-equivalent group kill) or `143` (SIGTERM-equivalent
+grace kill); it does **not** delete a recurring schedule — use
+`schedule_delete` for that.
 
 ### Cron Expression Support
 - **Standard Cron**: `0 2 * * *` (2 AM daily)

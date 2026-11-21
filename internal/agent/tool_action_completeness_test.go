@@ -121,6 +121,12 @@ func TestEveryRegisteredToolResolves(t *testing.T) {
 	check("knowledge_impact")
 	check("mcp_servers")
 	check("resolve")
+	// job-tools: constructed in the scheduler provider with a live
+	// scheduler (see the pinned-granted list / schedule_create precedent),
+	// but pinned here too so both completeness lists stay in sync.
+	check("job_start")
+	check("job_status")
+	check("job_stop")
 }
 
 // TestPinnedGrantedToolsResolve covers the tools granted in
@@ -143,6 +149,11 @@ func TestPinnedGrantedToolsResolve(t *testing.T) {
 		"generate_image", "generate_video",
 		"skills_create", "skills_patch",
 		"schedule_create", "schedule_list", "schedule_get", "schedule_delete",
+		// job-tools (job_start/status/stop): constructed in the scheduler
+		// provider with a live *scheduler.Scheduler, which this package
+		// cannot supply — this pinned list is their completeness coverage,
+		// same as schedule_* above (H7 class).
+		"job_start", "job_status", "job_stop",
 		"retain_claim", "retain_decision", "retain_prediction",
 		"mark_superseded", "mark_resolved",
 		"record_review", "reject_claim",

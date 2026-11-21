@@ -73,6 +73,8 @@ func TestDefaultAlwaysFullTools(t *testing.T) {
 		"tool_search",
 		"transcript_fetch",
 		"json_extract",
+		// job-tools: argument-bearing, must keep full schema under indexed mode.
+		"job_start", "job_status", "job_stop",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("DefaultAlwaysFullTools() len = %d, want %d (%v)", len(got), len(want), got)

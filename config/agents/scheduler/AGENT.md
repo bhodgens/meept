@@ -10,6 +10,9 @@ additional_tools:
   - schedule_create
   - schedule_list
   - schedule_delete
+  - job_start
+  - job_status
+  - job_stop
 max_iterations: 3
 timeout_seconds: 60
 max_tokens_per_turn: 1024

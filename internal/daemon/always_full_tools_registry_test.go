@@ -27,8 +27,12 @@ func TestDefaultAlwaysFullToolsAllRegistered(t *testing.T) {
 	//   transcript_fetch — [transcript] enabled
 	//   platform_status  — [multiagent] enabled (registerPlatformTools,
 	//                      components.go, inside `if cfg.MultiAgent.Enabled`)
+	//   job_start/status/stop — [scheduler] enabled: the scheduler provider
+	//                      (components.go, `if c.Scheduler != nil`) is the
+	//                      only registration path for the job tools.
 	cfg.Transcript = config.TranscriptConfig{Enabled: true}
 	cfg.MultiAgent.Enabled = true
+	cfg.Scheduler.Enabled = true
 	comps := newTranscriptWiringComponents(t, cfg)
 	if comps.ToolRegistry == nil {
 		t.Fatal("ToolRegistry nil")
@@ -93,6 +97,15 @@ func TestDefaultAlwaysFullToolsAllRegistered(t *testing.T) {
 func TestDefaultAlwaysFullToolsOnDefaultConfig(t *testing.T) {
 	// Default config: [transcript] and [multiagent] both disabled.
 	cfg, _ := skillToolsTestConfig(t)
+	// [scheduler].enabled defaults TRUE in a real install (schema.go:4738),
+	// and the job tools register only through the scheduler provider
+	// (components.go: `if c.Scheduler != nil` -> SetSchedulerProvider +
+	// toolprov.RegisterAll). skillToolsTestConfig builds a zero-value
+	// Config, so without this the test config is NOT the production default
+	// and the three job tools are absent for a reason that has nothing to do
+	// with the always-full promise. Mirror the real default so the "default
+	// install" claim in this test is accurate.
+	cfg.Scheduler.Enabled = true
 	comps := newTranscriptWiringComponents(t, cfg)
 	if comps.ToolRegistry == nil {
 		t.Fatal("ToolRegistry nil")

@@ -58,6 +58,17 @@ var BuiltinRules = map[string]ActionRule{
 	"task_read":  {Action: "task_read", RiskLevel: RiskSafe, RequiresConfirmation: false},
 	"task_write": {Action: "task_write", RiskLevel: RiskLow, RequiresConfirmation: false},
 
+	// Ad-hoc shell jobs (job-tools design): job_start launches a shell
+	// command as a daemon child process — the same subprocess surface as
+	// shell_execute, so it carries that exact risk class (RiskMedium,
+	// confirmation false: the central gate handles risk). job_status is
+	// read-only (RiskSafe); job_stop cancels a bounded job (RiskLow, like
+	// task_write). Without these rows an unknown action DENY (below)
+	// kills every call despite registration + grant (bughunt H7 class).
+	"job_start":  {Action: "job_start", RiskLevel: RiskMedium, RequiresConfirmation: false},
+	"job_status": {Action: "job_status", RiskLevel: RiskSafe, RequiresConfirmation: false},
+	"job_stop":   {Action: "job_stop", RiskLevel: RiskLow, RequiresConfirmation: false},
+
 	// Goal store (dsh-convergence 02-goals-plans): the model-facing goal
 	// tools read/mutate the persistent employee goal store (a local SQLite
 	// DB) — no filesystem/network/exec surface of their own. goal_read is

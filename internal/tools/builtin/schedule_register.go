@@ -82,6 +82,9 @@ func (p *scheduleProvider) Discover() []tools.Tool {
 		NewScheduleResumeTool(p.sched),
 		NewScheduleRunNowTool(p.sched),
 		NewCronCreateTool(p.sched),
+		NewJobStartTool(p.sched),
+		NewJobStatusTool(p.sched),
+		NewJobStopTool(p.sched),
 	}
 }
 

@@ -585,6 +585,16 @@ var ToolActionMap = map[string]string{
 	"schedule_pause":   "task_write",
 	"schedule_resume":  "task_write",
 	"schedule_run_now": "task_write",
+	// job-tools (job_start/status/stop): dedicated BuiltinRules rows carry
+	// the exact same risk classes as the generic actions below (job_start
+	// RiskMedium like shell_execute, job_status RiskSafe like task_read,
+	// job_stop RiskLow like task_write). Mapping to the dedicated rules
+	// keeps those rules live at runtime and makes the registry-parity gate
+	// reach them through rp2ResolveAction. job_start launches a shell
+	// command as a daemon child process — it is NEVER task_write.
+	"job_start":  "job_start",
+	"job_status": "job_status",
+	"job_stop":   "job_stop",
 	// RP-05 DAP debug: launches/attaches processes, sets breakpoints,
 	// evaluates expressions inside a live inferior — subprocess execution
 	// is the security-relevant surface, so shell_execute (RiskMedium, the

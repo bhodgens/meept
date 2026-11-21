@@ -150,6 +150,13 @@ func rp2BootParityUniverse(t *testing.T) map[string]struct{} {
 	cfg.Agent.Tools.CodemodeEnabled = true
 	cfg.Agent.ToolTimeoutProbeEnabled = true
 	cfg.Skills.Enabled = true
+	// [scheduler].enabled defaults TRUE in a real install (schema.go:4738).
+	// The job tools (job_start/status/stop) register only through the
+	// scheduler provider, which NewComponents arms behind `cfg.Scheduler.Enabled`
+	// -> `c.Scheduler != nil` -> builtin.SetSchedulerProvider(real, broker) ->
+	// toolprov.RegisterAll. Mirror the real default here so the parity walk
+	// exercises the REAL registration path, not a nil-scheduler stub.
+	cfg.Scheduler.Enabled = true
 
 	msgBus := bus.New(nil, testLogger(t))
 	comps, err := NewComponents(context.Background(), cfg, msgBus, testLogger(t))
@@ -173,11 +180,15 @@ func rp2BootParityUniverse(t *testing.T) map[string]struct{} {
 	// dsh_wiring.go's SetGoalProvider(adapter, owner) with an
 	// empty-store adapter; acp_register.go's SetACPProvider(mgr, broker)
 	// with an enabled manager; hermes_register.go's SetHermesProvider with
-	// the nil client the disabled-key posture arms; the scheduler/voice/
-	// delegate binds mirror components.go's deferred wiring sites with nil
+	// the nil client the disabled-key posture arms; the voice/delegate
+	// binds mirror components.go's deferred wiring sites with nil
 	// controllers / stub closures that tolerate nil primitives and fail
 	// closed at Execute — this gate needs Discover()'s names only).
-	builtin.SetSchedulerProvider(nil, nil)
+	// NOTE: the scheduler provider is NOT rebound here. cfg.Scheduler.Enabled
+	// is true (the packaged default), so NewComponents already constructed a
+	// real *scheduler.Scheduler and called builtin.SetSchedulerProvider(real,
+	// broker) before registering the group. A late SetSchedulerProvider(nil,
+	// nil) would clobber that binding and hide the real registration path.
 	builtin.SetDelegateProvider(builtin.NewDelegateController(nil, nil, nil))
 	builtin.SetVoiceProvider(
 		func(context.Context, string, string, string) (string, error) { return "rp2", nil },

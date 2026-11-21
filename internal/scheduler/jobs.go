@@ -2,12 +2,13 @@
 package scheduler
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"os/exec"
-	"strings"
+	"syscall"
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
@@ -113,6 +114,12 @@ type ShellJobConfig struct {
 	Env        map[string]string `json:"env,omitempty"`
 	Timeout    time.Duration     `json:"timeout,omitempty"`
 	CaptureOut bool              `json:"capture_output"`
+	// GuardCommand is the command string checked by the execution-time
+	// guard. When set, it MUST be the full shell source that command/args
+	// will execute (job_start sets it to the user command when command is
+	// /bin/sh and args are ["-c", <user command>]). Empty falls back to
+	// Command for legacy shell jobs.
+	GuardCommand string `json:"guard_command,omitempty"`
 }
 
 // ReminderJobConfig holds configuration for reminder jobs.
@@ -361,10 +368,35 @@ type ShellJob struct {
 	timeout time.Duration
 	capture bool
 	bus     *bus.MessageBus
+	// guardCommand is the shell source checked by the execution-time guard.
+	// It differs from command only for /bin/sh -c launches (job_start).
+	guardCommand string
+
+	// guard is the two-phase execution-time fence. Nil (legacy construction
+	// paths, e.g. standalone tests) skips guard checks; the daemon wires it
+	// through JobDependencies so every scheduler-fired shell job is fenced.
+	guard ShellCommandGuard
+	// resultSink receives the settled result. Nil skips the result lane;
+	// the daemon wires it through JobDependencies.
+	resultSink ResultSink
 }
 
-// NewShellJob creates a new shell job.
+// NewShellJob creates a new shell job. The bus-only form leaves the guard and
+// result sink unset; use NewShellJobWithDeps to wire them.
 func NewShellJob(cfg JobConfig, msgBus *bus.MessageBus) (*ShellJob, error) {
+	return newShellJob(cfg, msgBus, nil, nil)
+}
+
+// NewShellJobWithDeps is NewShellJob with the execution-time guard and result
+// sink wired from JobDependencies.
+func NewShellJobWithDeps(cfg JobConfig, deps *JobDependencies) (*ShellJob, error) {
+	if deps == nil {
+		return newShellJob(cfg, nil, nil, nil)
+	}
+	return newShellJob(cfg, deps.Bus, deps.Guard, deps.ResultSink)
+}
+
+func newShellJob(cfg JobConfig, msgBus *bus.MessageBus, guard ShellCommandGuard, sink ResultSink) (*ShellJob, error) {
 	if cfg.ShellConfig == nil {
 		return nil, fmt.Errorf("shell job requires shell_config")
 	}
@@ -378,49 +410,85 @@ func NewShellJob(cfg JobConfig, msgBus *bus.MessageBus) (*ShellJob, error) {
 	}
 
 	return &ShellJob{
-		id:       cfg.ID,
-		name:     cfg.Name,
-		schedule: cfg.Schedule,
-		jobType:  JobTypeShell,
-		config:   cfg,
-		command:  cfg.ShellConfig.Command,
-		args:     cfg.ShellConfig.Args,
-		workDir:  cfg.ShellConfig.WorkDir,
-		env:      cfg.ShellConfig.Env,
-		timeout:  timeout,
-		capture:  cfg.ShellConfig.CaptureOut,
-		bus:      msgBus,
+		id:           cfg.ID,
+		name:         cfg.Name,
+		schedule:     cfg.Schedule,
+		jobType:      JobTypeShell,
+		config:       cfg,
+		command:      cfg.ShellConfig.Command,
+		guardCommand: cfg.ShellConfig.GuardCommand,
+		args:         cfg.ShellConfig.Args,
+		workDir:      cfg.ShellConfig.WorkDir,
+		env:          cfg.ShellConfig.Env,
+		timeout:      timeout,
+		capture:      cfg.ShellConfig.CaptureOut,
+		bus:          msgBus,
+		guard:        guard,
+		resultSink:   sink,
 	}, nil
 }
 
 // Execute runs the shell command.
 //
-// SECURITY NOTE: The fence check for the working directory and command
-// arguments happens at job CREATION time (in tool_schedule_create.go).
-// There is a TOCTOU (time-of-check-time-of-use) window between creation
-// and execution where:
-//  1. The working directory could be modified
-//  2. Files referenced could be replaced with symlinks to sensitive locations
-//
-// For high-security deployments, consider:
-//   - Storing resolved realpath of workDir at creation and verifying at execution
-//   - Re-validating fence.CheckCommand() at execution time (requires injecting
-//     FenceChecker into ShellJob via NewShellJob)
-//   - Using openat2() with RESOLVE_BENEATH for path operations
+// SECURITY NOTE: execution-time guarding is implemented here via the optional
+// ShellCommandGuard (both phases run BEFORE the command is spawned). The
+// creation-time fence check lives in tool_schedule_create.go; there is a
+// TOCTOU window between creation and execution where the working directory or
+// referenced files could change. The daemon wires the guard through
+// JobDependencies so every scheduler-fired shell job is re-checked at
+// execution time. Standalone construction (tests, tooling) leaves it nil and
+// skips the check, preserving the legacy behavior.
 func (j *ShellJob) Execute(ctx context.Context) error {
-	// Create timeout context
+	// Phase 1 (risk classification / permission table) runs before any
+	// work-dir resolution, preserving the 403-before-400 order.
+	// Guard-only command source (the raw shell source behind /bin/sh -c) is
+	// used exclusively for risk classification. It MUST NOT replace the
+	// executable: keeping it would make exec.CommandContext try to run the
+	// whole shell script as a binary name ("exec: printf ...: not found").
+	guardSource := j.command
+	if j.guardCommand != "" {
+		guardSource = j.guardCommand
+	}
+	if j.guard != nil {
+		if err := j.guard.CheckCommand(guardSource); err != nil {
+			return j.settleGuardFailure(ctx, err)
+		}
+	}
+
+	// Create timeout context (bounded by the caller's already-capped ctx).
 	execCtx, cancel := context.WithTimeout(ctx, j.timeout)
 	defer cancel()
 
-	// Build command
-	//nolint:gosec // validated input
-	cmd := exec.CommandContext(execCtx, j.command, j.args...)
+	// Phase 2 (fence / Tirith / network class) runs after work-dir
+	// resolution but before spawn. The guard owns the resolution semantics.
+	if j.guard != nil {
+		if err := j.guard.CheckCommandInDir(execCtx, guardSource, j.workDir); err != nil {
+			return j.settleGuardFailure(ctx, err)
+		}
+	}
 
+	// Spill output to a file, never an unbounded in-memory buffer. The dir
+	// is created here so standalone construction works too; the daemon's
+	// MEEPT_HOME/spill/tools/ sibling already exists in production.
+	spill, outputPath, err := prepareSpill(j.id)
+	if err != nil {
+		// A spill failure is a settled attempt failure, not silent loss.
+		j.settle(JobExecutionResult{
+			Status:     JobStatusFailed,
+			ExitCode:   ExitCodeFailure,
+			StartedAt:  time.Now().UTC(),
+			FinishedAt: time.Now().UTC(),
+			Error:      err.Error(),
+		})
+		return err
+	}
+	defer spill.Close()
+
+	//nolint:gosec // validated input by the guard at execution time
+	cmd := exec.CommandContext(execCtx, j.command, j.args...)
 	if j.workDir != "" {
 		cmd.Dir = j.workDir
 	}
-
-	// Set environment
 	if len(j.env) > 0 {
 		env := make([]string, 0, len(j.env))
 		for k, v := range j.env {
@@ -428,44 +496,158 @@ func (j *ShellJob) Execute(ctx context.Context) error {
 		}
 		cmd.Env = append(cmd.Environ(), env...)
 	}
+	// Both streams go to the single spill file (stdout then stderr
+	// interleaved as the process writes them).
+	cmd.Stdout = spill
+	cmd.Stderr = spill
+	// Bound the pipe wait: after a kill, a grandchild that inherited the
+	// output file descriptor cannot block Wait indefinitely (mirrors the
+	// local runtime backend). Setpgid lets CancelJob kill the whole group.
+	cmd.WaitDelay = 2 * time.Second
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
-	var stdout, stderr bytes.Buffer
-	if j.capture {
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
+	// Publish the command into the per-execution handle so CancelJob can
+	// escalate from ctx cancel to a group kill. The handle is set by
+	// executeJob when this is a handle-carrying run; nil is a no-op.
+	if h, ok := ctx.Value(executionHandleKey{}).(*executionHandle); ok {
+		h.setCmd(cmd)
 	}
 
-	startTime := time.Now()
-	err := cmd.Run()
-	duration := time.Since(startTime)
+	startTime := time.Now().UTC()
+	runErr := cmd.Run()
+	finished := time.Now().UTC()
 
-	// Publish result event
-	result := JobResult{
-		JobID:     j.id,
-		StartTime: startTime,
-		EndTime:   time.Now(),
-		Duration:  duration,
-		Success:   err == nil,
-	}
-
-	if j.capture {
-		result.Output = strings.TrimSpace(stdout.String())
-		if stderr.Len() > 0 {
-			result.Output += "\n" + strings.TrimSpace(stderr.String())
+	exitCode := exitCodeFromRun(runErr)
+	status := JobStatusSucceeded
+	if runErr != nil {
+		status = JobStatusFailed
+		if errors.Is(execCtx.Err(), context.Canceled) || errors.Is(execCtx.Err(), context.DeadlineExceeded) {
+			// A killed run is reported as cancelled with a unix kill code.
+			status = JobStatusCancelled
 		}
 	}
 
-	if err != nil {
-		result.Error = err.Error()
+	// A run killed by our cancel/escalation can surface from cmd.Run as a
+	// non-*exec.ExitError: with WaitDelay set and a process-group kill, a
+	// lingering grandchild (e.g. `sleep` under `/bin/sh -c`) can outlive the
+	// direct child, so Wait returns exec.ErrWaitDelay ("wait: delayed") instead
+	// of an *exec.ExitError carrying SIGKILL. exitCodeFromRun maps that generic
+	// error to ExitCodeFailure (1), which would misreport a cancelled run as a
+	// plain failure. When we KNOW the run was cancelled, map any non-ExitError
+	// to the SIGKILL-equivalent code. A real *exec.ExitError is left untouched,
+	// so normal exits (N>1) and real signal deaths keep their exact mapping.
+	if status == JobStatusCancelled {
+		var exitErr *exec.ExitError
+		if !errors.As(runErr, &exitErr) {
+			exitCode = ExitCodeSIGKILL
+		}
 	}
 
-	// Publish job completion event
+	// Close before stats so the size/hash reflect all writes, then read a
+	// bounded preview for the bus event (the event shape is frozen).
+	_ = spill.Close()
+	var outputBytes int64
+	var outputSHA256 string
+	outputBytes, outputSHA256, err = spillStats(outputPath)
+	if err != nil {
+		slog.Warn("scheduler: failed to stat job spill file", "job_id", j.id, "error", err)
+	}
+	preview := ""
+	if j.capture {
+		preview = readSpillPreview(outputPath, DefaultJobResultOutputBytes)
+	}
+
+	// Publish result event. Shape is unchanged: external subscribers on
+	// scheduler.job.completed depend on the JobResult fields.
+	result := JobResult{
+		JobID:     j.id,
+		StartTime: startTime,
+		EndTime:   finished,
+		Duration:  finished.Sub(startTime),
+		Success:   runErr == nil,
+		Output:    preview,
+	}
+	if runErr != nil {
+		result.Error = runErr.Error()
+	}
 	if j.bus != nil {
 		msg, _ := models.NewBusMessage(models.MessageTypeEvent, "scheduler."+j.id, result)
 		j.bus.PublishExternalOnly("scheduler.job.completed", msg)
 	}
 
-	return err
+	// Write the settled attempt into the result lane (sink owns its own
+	// locking; no I/O under a mutex here).
+	j.settle(JobExecutionResult{
+		Status:       status,
+		ExitCode:     exitCode,
+		StartedAt:    startTime,
+		FinishedAt:   finished,
+		OutputPath:   outputPath,
+		OutputBytes:  outputBytes,
+		OutputSHA256: outputSHA256,
+		Error:        result.Error,
+	})
+
+	// Terminal error is still returned to executeJob so the existing
+	// UpdateLastRun / completion-event / logging paths behave as before.
+	return runErr
+}
+
+// settleGuardFailure writes a settled failed result for a guard refusal
+// (403 identity preserved by the guard error) and returns that error.
+func (j *ShellJob) settleGuardFailure(ctx context.Context, guardErr error) error {
+	now := time.Now().UTC()
+	j.settle(JobExecutionResult{
+		Status:     JobStatusFailed,
+		ExitCode:   ExitCodeFailure,
+		StartedAt:  now,
+		FinishedAt: now,
+		Error:      guardErr.Error(),
+	})
+	return guardErr
+}
+
+// settle writes a result to the sink when one is wired.
+func (j *ShellJob) settle(result JobExecutionResult) {
+	result.JobID = j.id
+	if j.resultSink != nil {
+		j.resultSink.Put(result)
+	}
+}
+
+// exitCodeFromRun maps a cmd.Run error to a unix-consistent exit code.
+// Non-zero process exits (N>1) are preserved verbatim; kill codes are
+// normalized; an unset/signal death with no mapping is -1.
+func exitCodeFromRun(runErr error) int {
+	if runErr == nil {
+		return ExitCodeOK
+	}
+	var exitErr *exec.ExitError
+	if errors.As(runErr, &exitErr) {
+		if ws, ok := exitErr.Sys().(syscall.WaitStatus); ok {
+			if ws.Signaled() {
+				switch ws.Signal() {
+				case syscall.SIGKILL:
+					return ExitCodeSIGKILL
+				case syscall.SIGTERM:
+					return ExitCodeSIGTERM
+				default:
+					return ExitCodeUnknown
+				}
+			}
+			if code := ws.ExitStatus(); code >= 0 {
+				return code // preserves N>1 verbatim
+			}
+		}
+		if code := exitErr.ExitCode(); code >= 0 {
+			return code
+		}
+		return ExitCodeUnknown
+	}
+	// Context kill/cancel from CommandContext surfaces as a signal death
+	// (SIGKILL) on the ExitError path above; other errors (spawn failure,
+	// etc.) are generic failures.
+	return ExitCodeFailure
 }
 
 // ReminderJob sends a reminder message.
@@ -616,6 +798,13 @@ type JobDependencies struct {
 	MemoryManager    MemoryOptimizer
 	LearningPipeline LearningConsolidator
 	SecurityEngine   SecurityScanner
+
+	// Guard is the two-phase execution-time fence for shell jobs. Nil skips
+	// guard checks (legacy construction paths and standalone tests).
+	Guard ShellCommandGuard
+	// ResultSink receives settled shell-job execution results (the result
+	// lane). Nil skips the lane.
+	ResultSink ResultSink
 }
 
 // OptimizationJob runs memory graph optimization tasks.
@@ -788,7 +977,7 @@ func CreateJobWithDeps(cfg JobConfig, deps *JobDependencies) (Job, error) {
 	case JobTypeAgent:
 		return NewAgentJob(cfg, deps.Bus)
 	case JobTypeShell:
-		return NewShellJob(cfg, deps.Bus)
+		return NewShellJobWithDeps(cfg, deps)
 	case JobTypeReminder:
 		return NewReminderJob(cfg, deps.Bus)
 	case JobTypeOptimization:

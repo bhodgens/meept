@@ -271,25 +271,55 @@ func (t *ShellExecuteTool) SetPermissionTable(pt *intsecurity.PermissionTable) {
 	t.permissionTable = pt
 }
 
-// checkPermissionTable consults the permission table for command. Returns an
-// error when the table denies or requires confirmation; nil when unset,
-// allowed, or unmatched (fall through to existing evaluation).
+// checkPermissionTable consults the permission table for command. It is a
+// thin compatibility wrapper around the shared guard's permission-check
+// helper; the logic lives in internal/security so the builtin tool and
+// scheduler-fired shell jobs cannot drift. Returns an error when the table
+// denies or requires confirmation; nil when unset, allowed, or unmatched.
 func (t *ShellExecuteTool) checkPermissionTable(command string) error {
-	if t.permissionTable == nil {
-		return nil
-	}
-	decision, prefix, ok := t.permissionTable.Evaluate(command)
-	if !ok {
-		return nil
-	}
-	switch decision {
-	case intsecurity.ShellActionDeny:
-		return fmt.Errorf("%w: command denied by shell permission table rule: %s", security.ErrCommandBlocked, prefix)
-	case intsecurity.ShellActionAsk:
-		return fmt.Errorf("%w: command requires user confirmation by shell permission table rule: %s", security.ErrCommandBlocked, prefix)
+	return intsecurity.CheckShellPermission(t.permissionTable, command)
+}
+
+// classifyForGuard adapts the builtin's locally-owned risk classifier to the
+// shared guard's classifier seam. The classifier stays here (rather than in
+// internal/security) because it depends on config-driven knownSafeCommands;
+// the daemon wires this same classifier into scheduler-fired jobs through the
+// shared guard option. The returned base command is used in the block message.
+func (t *ShellExecuteTool) classifyForGuard(command string) (intsecurity.RiskLevel, string) {
+	baseCmd := extractBaseCommand(command)
+	switch t.classifyRisk(command) {
+	case RiskCritical:
+		return intsecurity.RiskCritical, baseCmd
+	case RiskHigh:
+		return intsecurity.RiskHigh, baseCmd
 	default:
-		return nil // allow: tirith still runs below (defense-in-depth)
+		return intsecurity.RiskMedium, baseCmd
 	}
+}
+
+// guard builds a shared two-phase guard from the tool's current state. It is
+// constructed per call so setters (SetPermissionTable, SetFenceChecker,
+// SetSecurityOrchestrator, SetKnownSafeCommands) always take effect without a
+// stale cache. The fence is injected as a function because builtin holds a
+// FenceChecker interface (tests inject doubles), not a *FenceChecker.
+//
+// Network-class application is deliberately NOT configured here: the builtin
+// tool still applies the class at exec time via confineDirect/backend, so
+// doing it in the guard would double-apply. Scheduler-fired jobs, which spawn
+// via exec.CommandContext directly, get the applier wired by the daemon.
+func (t *ShellExecuteTool) guard() *intsecurity.ShellCommandGuardImpl {
+	var fence intsecurity.FenceCheckFunc
+	if t.fenceChecker != nil {
+		fc := t.fenceChecker
+		fence = fc.CheckCommand
+	}
+	return intsecurity.NewShellCommandGuard(
+		nil,
+		t.permissionTable,
+		t.securityOrch,
+		intsecurity.WithShellGuardFenceChecker(fence),
+		intsecurity.WithShellGuardClassifier(t.classifyForGuard),
+	)
 }
 
 // runtimeCommand is the launch record. NetworkClass is resolved here, before
@@ -572,19 +602,14 @@ func (t *ShellExecuteTool) Execute(ctx context.Context, args map[string]any) (an
 	// the guard verdict and the always-denied list stops binding on
 	// unbound lanes.
 	//
-	// Check command risk level (built-in check)
-	risk := t.classifyRisk(command)
-	if risk == RiskCritical {
-		baseCmd := extractBaseCommand(command)
-		return nil, fmt.Errorf("%w: command blocked for safety: %s", security.ErrCommandBlocked, baseCmd)
-	}
+	// Build the shared two-phase guard from the tool's current wiring.
+	guard := t.guard()
 
-	// Declarative permission table ([security.shell_permissions]) consult:
-	// deny blocks outright; ask requires user confirmation; allow falls
-	// through to tirith below. Unset table or unmatched prefix -> legacy
-	// path. Deny/ask short-circuit before tirith; allow (or no match)
-	// falls through; tirith still runs after directory resolution below.
-	if err := t.checkPermissionTable(command); err != nil {
+	// Phase 1 (command-only checks: risk classification + permission table)
+	// runs via the shared guard BEFORE working-directory resolution. A block
+	// is ErrCommandBlocked (-> 403) even on an unbound lane, preserving the
+	// frozen 403-before-400 ordering (see contract above).
+	if err := guard.CheckCommand(command); err != nil {
 		return nil, err
 	}
 
@@ -596,25 +621,12 @@ func (t *ShellExecuteTool) Execute(ctx context.Context, args map[string]any) (an
 		return nil, err
 	}
 
-	// Check fence boundaries (needs the resolved workDir, so it stays after
-	// resolution; a fence refusal is still ErrCommandBlocked -> 403).
-	if t.fenceChecker != nil {
-		if err := t.fenceChecker.CheckCommand(command, workDir); err != nil {
-			return nil, fmt.Errorf("%w: fence: %w", security.ErrCommandBlocked, err)
-		}
-	}
-
-	// Scan command with Tirith via security orchestrator
-	// Security orchestrator should be configured for production use
-	if t.securityOrch == nil {
-		// Security orchestrator not configured - scanning skipped
-	} else {
-		blocked, warning, reason := t.securityOrch.ScanShellCommand(ctx, command)
-		if blocked {
-			return nil, fmt.Errorf("%w: command blocked by security scanner: %s", security.ErrCommandBlocked, reason)
-		}
-		// Warnings are logged by the orchestrator, but we continue execution
-		_ = warning
+	// Phase 2 (needs the resolved workDir: fence + Tirith scan) runs via the
+	// shared guard after resolution but before spawn. A fence refusal is
+	// still ErrCommandBlocked -> 403. Network-class application stays at
+	// exec time below (the guard is not configured with an applier here).
+	if err := guard.CheckCommandInDir(ctx, command, workDir); err != nil {
+		return nil, err
 	}
 
 	// Create context with timeout
@@ -842,15 +854,13 @@ func (t *ShellExecuteTool) ExecuteStreaming(ctx context.Context, args map[string
 	// ErrCommandBlocked (-> 403 at the HTTP layer) even when the caller
 	// has no bound working directory.
 	//
-	// Check command risk level
-	risk := t.classifyRisk(command)
-	if risk == RiskCritical {
-		baseCmd := extractBaseCommand(command)
-		return nil, fmt.Errorf("%w: command blocked for safety: %s", security.ErrCommandBlocked, baseCmd)
-	}
+	// Build the shared two-phase guard from the tool's current wiring.
+	guard := t.guard()
 
-	// Declarative permission table: deny/ask short-circuit before tirith.
-	if err := t.checkPermissionTable(command); err != nil {
+	// Phase 1 (command-only checks: risk classification + permission table)
+	// runs via the shared guard BEFORE working-directory resolution (same
+	// shape as Execute above), preserving the 403-before-400 ordering.
+	if err := guard.CheckCommand(command); err != nil {
 		return nil, err
 	}
 
@@ -862,22 +872,11 @@ func (t *ShellExecuteTool) ExecuteStreaming(ctx context.Context, args map[string
 		return nil, err
 	}
 
-	// Check fence boundaries (needs the resolved workDir, so it stays after
-	// resolution; a fence refusal is still ErrCommandBlocked -> 403).
-	if t.fenceChecker != nil {
-		if err := t.fenceChecker.CheckCommand(command, workDir); err != nil {
-			return nil, fmt.Errorf("%w: fence: %w", security.ErrCommandBlocked, err)
-		}
-	}
-
-	// Scan command with Tirith via security orchestrator
-	if t.securityOrch == nil {
-		// Security orchestrator not configured - scanning skipped
-	} else {
-		blocked, _, reason := t.securityOrch.ScanShellCommand(ctx, command)
-		if blocked {
-			return nil, fmt.Errorf("%w: command blocked by security scanner: %s", security.ErrCommandBlocked, reason)
-		}
+	// Phase 2 (needs the resolved workDir: fence + Tirith scan) runs via the
+	// shared guard after resolution but before spawn. A fence refusal is
+	// still ErrCommandBlocked -> 403.
+	if err := guard.CheckCommandInDir(ctx, command, workDir); err != nil {
+		return nil, err
 	}
 
 	// Emit initial progress
