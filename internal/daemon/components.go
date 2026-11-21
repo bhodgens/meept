@@ -5101,10 +5101,17 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 	// Create job processor that uses the agent loop (with optional multi-agent registry)
 	jobProc := NewAgentJobProcessor(c.AgentLoop, logger)
-	if c.msgBus != nil {
+	// Wire the job processor to the bus. Use the msgBus PARAMETER, not
+	// c.msgBus: the field is only stored at Start-time wiring (line ~5483),
+	// long after this site, so the field-guard here always saw nil in
+	// production and the toolEvidenceCollector never subscribed - envelopes
+	// never carried tool_evidence and the evidence-review gate fail-closed
+	// every file-shaped step (07-bench acceptance run 4, 2026-11-21). The
+	// parameter is the same live bus daemon.go created at line ~230.
+	if msgBus != nil {
 		// Job-level quota surfacing (leaf 06): step jobs failing terminal on
 		// a provider quota block publish the existing agent.quota_wait event.
-		jobProc.WithBus(c.msgBus)
+		jobProc.WithBus(msgBus)
 	}
 	if c.Orchestrator != nil {
 		// Per-phase worktree consumption (phase-frontier-parallel Contract
