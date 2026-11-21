@@ -92,6 +92,31 @@ func newSupervisorForTest(t *testing.T, crashOnce bool) (*Supervisor, string) {
 	return sup, socketPath
 }
 
+// awaitClient polls Client() until it returns a live client or the
+// deadline expires. After a crash-restart the supervisor increments
+// `restarts` as soon as spawnAndWait returns, but that wait only stats
+// the socket path: the crashed child leaves its socket FILE behind, and
+// the replacement unlinks/rebinds it a moment later. In that window the
+// path exists but has no listener, so a single Client() dial gets
+// ECONNREFUSED. Bounded polling removes the race without touching the
+// production supervisor and keeps the crash-restart assertion strict.
+func awaitClient(t *testing.T, sup *Supervisor, timeout time.Duration) *Client {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for {
+		c, err := sup.Client()
+		if err == nil {
+			return c
+		}
+		lastErr = err
+		if time.Now().After(deadline) {
+			t.Fatalf("Client did not become ready within %s: %v", timeout, lastErr)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
 // TestSupervisorStartClientStop covers the canonical T4 loop: Start
 // waits for the socket, Client dials and completes one request, Stop
 // kills the child (process group via RuntimeProcess) and the socket is
@@ -164,11 +189,9 @@ func TestSupervisorRestartOnCrash(t *testing.T) {
 	}
 
 	// A fresh Client dials the NEW child's socket and completes a
-	// request — the crash-recovery contract.
-	c2, err := sup.Client()
-	if err != nil {
-		t.Fatalf("Client after restart: %v", err)
-	}
+	// request — the crash-recovery contract. Poll because the replacement
+	// child may not have rebound the socket yet (see awaitClient).
+	c2 := awaitClient(t, sup, 10*time.Second)
 	if err := c2.Typing("+15550001111", true); err != nil {
 		t.Fatalf("Typing after restart: %v", err)
 	}

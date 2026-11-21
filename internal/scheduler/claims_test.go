@@ -79,6 +79,58 @@ func waitForRuns(t *testing.T, j *countingJob, want int, timeout time.Duration) 
 	return j.runCount()
 }
 
+// handleTrackingJob is a countingJob that also records each execution's
+// *executionHandle.done channel. executeJob stamps that handle on the context
+// before calling Execute and closes done from a defer registered BEFORE the
+// persistence defers, so done closing is the point after which every async
+// file write (UpdateLastRun -> jobs.json, advanceLastWake -> last_wake.json)
+// has completed. Tests that dispatch jobs asynchronously use waitSettled to
+// drain this tail before returning — otherwise t.TempDir()'s RemoveAll races
+// the still-running goroutines ("unlinkat .../001: directory not empty").
+type handleTrackingJob struct {
+	countingJob
+	dones chan chan struct{}
+}
+
+func newHandleTrackingJob(id, sched string) *handleTrackingJob {
+	return &handleTrackingJob{
+		countingJob: *newCountingJob(id, sched),
+		dones:       make(chan chan struct{}, 128),
+	}
+}
+
+func (j *handleTrackingJob) Execute(ctx context.Context) error {
+	if h, ok := ctx.Value(executionHandleKey{}).(*executionHandle); ok && h != nil {
+		j.dones <- h.done
+	}
+	return j.countingJob.Execute(ctx)
+}
+
+// waitSettled waits for want executions to start and then for every captured
+// handle to close its done channel. Bounded by timeout via a context; no
+// arbitrary sleeps. Must be called after the jobs have been dispatched.
+func (j *handleTrackingJob) waitSettled(t *testing.T, want int, timeout time.Duration) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	dones := make([]<-chan struct{}, 0, want)
+	for len(dones) < want {
+		select {
+		case d := <-j.dones:
+			dones = append(dones, d)
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for %d executions to start (got %d)", want, len(dones))
+		}
+	}
+	for i, d := range dones {
+		select {
+		case <-d:
+		case <-ctx.Done():
+			t.Fatalf("execution %d did not settle before deadline", i)
+		}
+	}
+}
+
 func TestClaimStoreClaimTick(t *testing.T) {
 	tmpDir := t.TempDir()
 	cs, err := newClaimStore(filepath.Join(tmpDir, "claims.db"))
@@ -408,7 +460,7 @@ func TestProcessMissedTicksCoalesced(t *testing.T) {
 
 func TestProcessMissedTicksCoalesceDisabled(t *testing.T) {
 	s := newClaimsTestScheduler(t, WithCoalesceMissed(false))
-	job := newCountingJob("job-accumulate", "@every 5m")
+	job := newHandleTrackingJob("job-accumulate", "@every 5m")
 	if _, err := s.Schedule(job); err != nil {
 		t.Fatalf("Schedule failed: %v", err)
 	}
@@ -434,9 +486,12 @@ func TestProcessMissedTicksCoalesceDisabled(t *testing.T) {
 			t.Errorf("MissedCount = %d, want 0 in accumulate mode", r.MissedCount)
 		}
 	}
-	if got := waitForRuns(t, job, 3, 3*time.Second); got != 3 {
+	if got := waitForRuns(t, &job.countingJob, 3, 3*time.Second); got != 3 {
 		t.Errorf("job ran %d times, want 3 (one per missed tick)", got)
 	}
+	// dispatchMissed's goroutines are not tracked by Stop's WaitGroup; drain
+	// their post-Execute file writes before t.TempDir()'s cleanup runs.
+	job.waitSettled(t, 3, 3*time.Second)
 }
 
 func TestProcessMissedTicksNothingDue(t *testing.T) {
