@@ -4,10 +4,7 @@ package tests
 
 import (
 	"context"
-	"encoding/json"
-	"net/http/httptest"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -103,26 +100,9 @@ func TestBotLifecycle_Integration(t *testing.T) {
 		t.Error("bot should be resumed")
 	}
 
-	// Test runner budget check
-	runner := bot.NewBotRunner(def)
-	state := &bot.BotState{
-		TodayCostCents: 50,
-		TodayDate:      time.Now().Format("2006-01-02"),
-	}
-	if !runner.ShouldRun(state) {
-		t.Error("should allow run under budget")
-	}
-	state.TodayCostCents = 100
-	if runner.ShouldRun(state) {
-		t.Error("should deny run at budget cap")
-	}
-
-	// Test invocation cap
-	state.TodayRuns = 50
-	state.TodayCostCents = 0
-	if runner.ShouldRun(state) {
-		t.Error("should deny run at invocation cap")
-	}
+	// BotRunner budget, invocation-cap, and prompt checks left with the
+	// deleted runner lane. The goal-loop path is pinned by
+	// tests/integration/employee_lifecycle_test.go.
 
 	// Test memory namespace
 	ns := bot.NewMemoryNamespace("test-ci-monitor")
@@ -136,12 +116,6 @@ func TestBotLifecycle_Integration(t *testing.T) {
 	sharedQuery := ns.ScopeQuery(bot.MemoryScopeShared, "last CI results")
 	if sharedQuery != "last CI results" {
 		t.Errorf("shared query should pass through: %q", sharedQuery)
-	}
-
-	// Test runner prompt construction
-	prompt := runner.BuildSystemPrompt("CI pipeline check at midnight")
-	if prompt == "" {
-		t.Fatal("expected non-empty system prompt")
 	}
 
 	// Test status
@@ -163,50 +137,6 @@ func TestBotLifecycle_Integration(t *testing.T) {
 	}
 }
 
-func TestBotWebhook_Integration(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-
-	ctx := context.Background()
-
-	dir := t.TempDir()
-	store, _ := bot.NewStore(filepath.Join(dir, "bots.db"))
-	defer store.Close()
-
-	mgr := bot.NewManager(store, nil)
-	handler := bot.NewWebhookHandler(mgr)
-
-	def := bot.BotDefinition{
-		ID:     "webhook-int-test",
-		Name:   "Webhook Integration Test",
-		Prompt: "Handle webhook events",
-		Triggers: []bot.BotTrigger{
-			{Type: bot.TriggerTypeWebhook, Enabled: true, PromptTemplate: "Event: {{.action}} on {{.repo}}"},
-		},
-		MemoryScope: bot.MemoryScopePrivate,
-		Constraints: bot.BotConstraints{
-			MaxIterations: 3,
-			Timeout:       time.Minute,
-		},
-		Enabled: true,
-	}
-	mgr.CreateBot(ctx, def)
-
-	// POST to trigger
-	body := `{"action":"push","repo":"meept"}`
-	req := httptest.NewRequest("POST", "/api/v1/bot/webhook-int-test/trigger", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-
-	if w.Code != 200 {
-		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
-	}
-
-	var resp map[string]any
-	json.NewDecoder(w.Body).Decode(&resp)
-	if resp["status"] != "triggered" {
-		t.Errorf("status = %v, want %q", resp["status"], "triggered")
-	}
-}
+// TestBotWebhook_Integration was removed with the BotRunner webhook lane.
+// It asserted a fabricated status=="triggered" receipt. The live goal-loop
+// trigger path is pinned by tests/integration/employee_lifecycle_test.go.
