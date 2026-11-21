@@ -27,7 +27,7 @@ const (
 // PRAGMA-captured) because the captured-column rebuild would silently drop the
 // column-level REFERENCES/ON DELETE CASCADE that plan_phases/plan_sessions/
 // plan_signoffs depend on. It equals the base schema below PLUS the state
-// CHECK; every column added by storeMigrations v1-v3 is present because the
+// CHECK; every column added by storeMigrations v1-v5 is present because the
 // rebuild runs AFTER those ALTERs (probe makes it a no-op on fresh DBs).
 const rebuiltPlansDDL = `CREATE TABLE plans_new (
 	id TEXT PRIMARY KEY,
@@ -47,6 +47,7 @@ const rebuiltPlansDDL = `CREATE TABLE plans_new (
 	synthesis_lease_until TEXT,
 	goal_id TEXT,
 	prompt TEXT,
+	result_topic TEXT,
 	synthesis_error TEXT,
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL

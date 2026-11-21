@@ -182,10 +182,9 @@ type PlanRef struct {
 	// goal (legacy-legal).
 	GoalID string `json:"goal_id,omitempty"`
 	// ResultTopic is the execution-result bus topic stamped when the round
-	// starts. Empty means employee.result. Execute reads this field, not a
-	// later write to the shared loop flag. Leaf 01 wires the read. The
-	// field exists now so the gate test can set it and fail while Execute
-	// still ignores it.
+	// starts. Empty means employee.result. The only other legal value is
+	// bot.result. Execute and ApproveAndExecute read this field. They do
+	// not read GoalLoop.resultTopic.
 	ResultTopic string `json:"result_topic,omitempty"`
 }
 
@@ -202,6 +201,12 @@ type PlanBrief struct {
 	// carries the EXACT same user message as a same-process approve; empty
 	// on legacy rows falls back to the title/description mandate.
 	Prompt string
+	// ResultTopic is the execution-result bus topic persisted with the plan.
+	// Empty means the lookup did not carry the column (or the row predates
+	// the stamp). Resume and ApproveAndExecute then fall through to the
+	// plan-row getter. A miss uses employee.result and does not invent
+	// bot.result.
+	ResultTopic string
 }
 
 // PlanBriefLookup resolves a plan's title and description by id.
@@ -257,6 +262,21 @@ type PlanGoalSetter interface {
 // prompt (the title/description mandate fallback then applies).
 type PlanPromptSetter interface {
 	SetPlanPrompt(ctx context.Context, planID, prompt string) error
+}
+
+// PlanResultTopicSetter persists the round's result-topic stamp on the
+// stored plan. Implementations that cannot store it are skipped: the live
+// PlanRef still carries the stamp, and a later load miss uses
+// employee.result rather than inventing bot.result.
+type PlanResultTopicSetter interface {
+	SetPlanResultTopic(ctx context.Context, planID, topic string) error
+}
+
+// PlanResultTopicLookup loads the stamp back onto a PlanRef that arrived
+// with only an id (Resume, ApproveAndExecute). ok=false means the plan is
+// unknown. A non-nil error is a lookup failure. Either case is a load miss.
+type PlanResultTopicLookup interface {
+	PlanResultTopic(ctx context.Context, planID string) (topic string, ok bool, err error)
 }
 
 // Reflector is the LLM chatter used for ASSESS and REFLECT prompts. It is
@@ -325,11 +345,10 @@ type GoalLoop struct {
 	// the lock (mutexio invariant).
 	bus *bus.MessageBus
 
-	// resultTopic is the typed topic used for execution-result publication.
-	// Default (zero value) is empty = agent.TopicEmployeeResult. The bot
-	// trigger handler marks a loop with TopicBotResult for bus-triggered
-	// rounds so a bot's execution is observable on bot.result. Guarded by mu;
-	// snapshotted under lock at publish time.
+	// resultTopic is the deprecated per-round loop flag. triggerViaGoalLoop
+	// still writes it so a later round resets the marker. Execute does not
+	// read it: the publish topic is plan.ResultTopic, stamped when the
+	// round's PlanRef is built. Guarded by mu.
 	resultTopic string
 
 	// Configurable thresholds.
@@ -469,11 +488,10 @@ func (l *GoalLoop) SetBus(b *bus.MessageBus) {
 	l.mu.Unlock()
 }
 
-// SetResultTopic selects the typed topic used for execution-result events.
-// Empty (the default) means employee.result; a bot trigger handler sets
-// agent.TopicBotResult.Name so a bus-triggered round is observable on
-// bot.result. The topic name is the sole tier discriminator — no payload
-// discriminator exists. Nil-safe on a nil loop.
+// SetResultTopic writes the deprecated per-round loop flag. Execute does
+// not read it. The publish topic is plan.ResultTopic, stamped when the
+// round's PlanRef is built. Kept so existing callers and the per-round
+// flag test can still reset the marker. Nil-safe on a nil loop.
 func (l *GoalLoop) SetResultTopic(topic string) {
 	if l == nil {
 		return
@@ -906,7 +924,17 @@ func (l *GoalLoop) Assess(ctx context.Context, trigger TriggerEvent) ([]Candidat
 // Plan creates a pending plan from a candidate via the PlanCreator. The plan
 // enters PendingApproval state and routes to the employee's escalates_to for
 // signoff (tier 2+ only). Returns the PlanRef on success.
+//
+// Callers without a trigger stamp employee.result. A bus_event round goes
+// through planWithResultTopic so the stamp is copied at construction, not
+// read off the loop flag later.
 func (l *GoalLoop) Plan(ctx context.Context, candidate CandidatePlan) (PlanRef, error) {
+	return l.planWithResultTopic(ctx, candidate, resultTopicForTrigger(""))
+}
+
+// planWithResultTopic is Plan with the round's result topic copied onto the
+// PlanRef at construction and persisted when the planner can store it.
+func (l *GoalLoop) planWithResultTopic(ctx context.Context, candidate CandidatePlan, topic string) (PlanRef, error) {
 	l.mu.Lock()
 	planner := l.planner
 	logger := l.logger
@@ -988,6 +1016,15 @@ func (l *GoalLoop) Plan(ctx context.Context, candidate CandidatePlan) (PlanRef, 
 		}
 	}
 
+	// Stamp at construction, then persist if a store exists. The value is
+	// the trigger's topic, not a later read of the loop flag.
+	normalized, legal := normalizeResultTopic(topic)
+	if !legal {
+		warnIllegalResultTopic(logger, ref.ID, topic)
+	}
+	ref.ResultTopic = normalized
+	persistResultTopic(ctx, planner, logger, ref.ID, ref.ResultTopic)
+
 	logger.Info("plan created",
 		"plan_id", ref.ID,
 		"plan_state", ref.State,
@@ -1046,12 +1083,15 @@ func (l *GoalLoop) Execute(ctx context.Context, plan PlanRef) (*bot.BotExecution
 	logger := l.logger
 	briefLookup := l.planBriefLookup
 	busRef := l.bus
-	resultTopic := l.resultTopic
 	l.mu.Unlock()
 
-	// A bus-triggered round is marked with TopicBotResult.Name by the bot
-	// trigger handler; every other round keeps the employee default. The
-	// topic name is the sole tier discriminator — no kind field exists.
+	// Publish on the plan stamp. Empty means employee.result. The only
+	// other legal value is bot.result. Do not read l.resultTopic — a
+	// later SetResultTopic must not retarget a round that already started.
+	resultTopic, legalTopic := normalizeResultTopic(plan.ResultTopic)
+	if !legalTopic {
+		warnIllegalResultTopic(logger, plan.ID, plan.ResultTopic)
+	}
 	isBot := resultTopic == agent.TopicBotResult.Name
 	resultSource := "employee"
 	turnSource := "employee"
@@ -1128,11 +1168,12 @@ func (l *GoalLoop) Execute(ctx context.Context, plan PlanRef) (*bot.BotExecution
 			"duration", duration)
 	}
 
-	// Execution observability: emit one result event on the loop's result
-	// topic (employee.result by default, bot.result for a bus-triggered bot
-	// round) plus the matching idle edge. Use the bus snapshotted at entry;
-	// a nil bus makes both emissions no-ops. The topic is the sole tier
-	// discriminator — the payload carries no kind field.
+	// Execution observability: emit one result event on the plan's stamped
+	// topic (employee.result when the stamp is empty, bot.result only when
+	// the round was stamped with that topic) plus the matching idle edge.
+	// Use the bus snapshotted at entry; a nil bus makes both emissions
+	// no-ops. The topic is the sole tier discriminator — the payload
+	// carries no kind field. The live loop flag is not consulted.
 	if busRef != nil {
 		status := "completed"
 		stopReason := agent.StopReasonEndTurn
@@ -1938,10 +1979,11 @@ func (l *GoalLoop) decideTier1(ctx context.Context, trigger TriggerEvent, logger
 	// already (Assess uses the implicit plan prompt for tier-1).
 	candidate := candidates[0]
 	planRef := PlanRef{
-		ID:         id.Generate(goalLoopIDPrefix),
-		State:      "executing",
-		Prompt:     candidate.Prompt,
-		ApproverID: "system",
+		ID:          id.Generate(goalLoopIDPrefix),
+		State:       "executing",
+		Prompt:      candidate.Prompt,
+		ApproverID:  "system",
+		ResultTopic: resultTopicForTrigger(trigger.Source),
 	}
 	result, execErr := l.Execute(ctx, planRef)
 	if execErr != nil {
@@ -2038,7 +2080,7 @@ func (l *GoalLoop) decideTier2(ctx context.Context, trigger TriggerEvent, logger
 			}
 		}
 
-		ref, planErr := l.Plan(ctx, candidate)
+		ref, planErr := l.planWithResultTopic(ctx, candidate, resultTopicForTrigger(trigger.Source))
 		if planErr != nil {
 			logger.Error("tier2 plan creation failed",
 				"candidate", candidate.Title,
@@ -2164,7 +2206,7 @@ func (l *GoalLoop) decideTier3(ctx context.Context, trigger TriggerEvent, logger
 			if escalate {
 				// Escalate to plan signoff (tier-2 path): create a pending
 				// plan and track it in ActivePlanIDs, without executing.
-				ref, planErr := l.Plan(ctx, candidate)
+				ref, planErr := l.planWithResultTopic(ctx, candidate, resultTopicForTrigger(trigger.Source))
 				if planErr != nil {
 					logger.Error("tier3 escalation plan creation failed",
 						"candidate", candidate.Title,
@@ -2216,10 +2258,11 @@ func (l *GoalLoop) decideTier3(ctx context.Context, trigger TriggerEvent, logger
 		// Pure autonomy: execute immediately with system approval
 		// (G3 auto-approval, same as tier-1).
 		planRef := PlanRef{
-			ID:         id.Generate(goalLoopIDPrefix),
-			State:      "executing",
-			Prompt:     candidate.Prompt,
-			ApproverID: "system",
+			ID:          id.Generate(goalLoopIDPrefix),
+			State:       "executing",
+			Prompt:      candidate.Prompt,
+			ApproverID:  "system",
+			ResultTopic: resultTopicForTrigger(trigger.Source),
 		}
 		result, execErr := l.Execute(ctx, planRef)
 		if execErr != nil {
@@ -2280,6 +2323,11 @@ func (l *GoalLoop) ApproveAndExecute(ctx context.Context, planRef PlanRef) (*bot
 			}
 		}
 	}
+
+	// Load the stamp persisted at round start. Do not call SetResultTopic:
+	// a later bus event must not retarget this plan. An empty incoming
+	// ref is a resume; a load miss uses employee.result.
+	planRef = l.loadStampedResultTopic(ctx, planRef)
 
 	result, err := l.Execute(ctx, planRef)
 	if err != nil {

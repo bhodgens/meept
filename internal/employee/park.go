@@ -437,7 +437,8 @@ func (l *GoalLoop) ResumeGoalEpisode(ctx context.Context, rec agent.ParkedTurnRe
 				"employee_id", l.employeeID)
 			return
 		}
-		if _, _, err := l.ApproveAndExecute(ctx, *p.Plan); err != nil {
+		planRef := l.loadStampedResultTopic(ctx, *p.Plan)
+		if _, _, err := l.ApproveAndExecute(ctx, planRef); err != nil {
 			l.logger.Warn("resumed goal episode approve+execute failed",
 				"employee_id", l.employeeID, "error", err)
 		}

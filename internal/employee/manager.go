@@ -28,7 +28,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/bot"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/metrics"
@@ -1766,16 +1765,13 @@ func (m *Manager) triggerViaGoalLoop(ctx context.Context, id string, payload map
 	// session identity and resets the per-round dedup flag. Called here —
 	// the single round-entry site — so every round can notify exactly once.
 	loop.SetSpeakContext(id, "goal-"+id)
-	// Execution-result tier is PER ROUND, not a sticky loop property: a
-	// bus_event trigger (issue-140 bot router) publishes on bot.result;
-	// every other trigger — including goal rounds on the same bot —
-	// publishes on employee.result. Setting this on every round entry
-	// prevents one bot trigger from reclassifying all later rounds.
-	if source == "bus_event" {
-		loop.SetResultTopic(agent.TopicBotResult.Name)
-	} else {
-		loop.SetResultTopic(agent.TopicEmployeeResult.Name)
-	}
+	// Execution-result tier is PER ROUND, stamped onto the PlanRef when
+	// the round builds it (decideTier1 / planWithResultTopic), from this
+	// trigger's source. bus_event stamps bot.result; every other source
+	// stamps employee.result. SetResultTopic still resets the deprecated
+	// loop flag so a later round cannot look sticky to flag readers.
+	// Execute does not read that flag.
+	loop.SetResultTopic(resultTopicForTrigger(source))
 	decideErr := loop.Decide(ctx, trigger)
 	skip := loop.LastDecideSkip()
 	invokeMu.Unlock()
@@ -2798,7 +2794,10 @@ func (m *Manager) ResumeApprovedPlan(ctx context.Context, planID, callerID strin
 	// same one the parked-episode resume uses). ApproverID is empty, which
 	// CanExecutePlan treats as backward-compat authorized: the plan was
 	// already approved through the signoff system before this resume fired.
-	if _, _, err := loop.ApproveAndExecute(ctx, PlanRef{ID: planID}); err != nil {
+	// Load the stamp persisted at round start before execute. ApproveAndExecute
+	// loads again if the ref is still empty; it does not call SetResultTopic.
+	planRef := loop.loadStampedResultTopic(ctx, PlanRef{ID: planID})
+	if _, _, err := loop.ApproveAndExecute(ctx, planRef); err != nil {
 		return fmt.Errorf("resume plan %s: approve and execute: %w", planID, err)
 	}
 	return nil

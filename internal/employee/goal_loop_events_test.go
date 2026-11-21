@@ -295,12 +295,14 @@ func TestGoalLoop_BotTierResultCarriesTriggerIdentity(t *testing.T) {
 			return goal, nil
 		}))
 	loop.SetBus(b)
-	// Per-round tier + identity, exactly as the Manager's round-entry sets
-	// them for a bus_event trigger.
-	loop.SetResultTopic(agent.TopicBotResult.Name)
+	// Identity rides the plan stamp. Execute does not read the loop flag.
 	loop.SetSpeakContext("sess-pin-1", "conv-pin-1")
 
-	if _, err := loop.Execute(context.Background(), PlanRef{ID: "p-gate-id", State: "executing"}); err != nil {
+	if _, err := loop.Execute(context.Background(), PlanRef{
+		ID:          "p-gate-id",
+		State:       "executing",
+		ResultTopic: agent.TopicBotResult.Name,
+	}); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 
