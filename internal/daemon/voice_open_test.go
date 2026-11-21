@@ -30,19 +30,24 @@ func fakeChildAt(t *testing.T, w *VoiceWiring, path string) *bufio.Reader {
 		_ = w.TextServer.Start(ctx)
 		close(ready)
 	}()
+	// Stat success is not listen success. net.Listen creates the socket
+	// file at bind, then calls listen. A dial in that gap gets
+	// "connection refused". The full suite hits this gap; a single
+	// dial does not. Retry until the listener accepts.
 	deadline := time.Now().Add(5 * time.Second)
+	var conn net.Conn
+	var err error
 	for {
-		if _, err := os.Stat(path); err == nil {
-			break
+		if _, statErr := os.Stat(path); statErr == nil {
+			conn, err = net.Dial("unix", path)
+			if err == nil {
+				break
+			}
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("text server socket never appeared at %s", path)
+			t.Fatalf("fake child dial %s: %v", path, err)
 		}
 		time.Sleep(5 * time.Millisecond)
-	}
-	conn, err := net.Dial("unix", path)
-	if err != nil {
-		t.Fatalf("fake child dial %s: %v", path, err)
 	}
 	t.Cleanup(func() {
 		_ = conn.Close()
