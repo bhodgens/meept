@@ -88,7 +88,7 @@ func TestPeriodicAuditor_Audit_Clean(t *testing.T) {
 
 	auditor := NewPeriodicAuditor(mc, store, 0.3)
 
-	findings, driftScore, err := auditor.Audit(context.Background(), turns)
+	findings, driftScore, _, err := auditor.Audit(context.Background(), turns)
 	if err != nil {
 		t.Fatalf("Audit: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestPeriodicAuditor_Audit_CriticalFinding(t *testing.T) {
 	auditor := NewPeriodicAuditor(mc, store, 0.3)
 	auditor.SetAutoPause(pause.fn())
 
-	findings, driftScore, err := auditor.Audit(context.Background(), turns)
+	findings, driftScore, _, err := auditor.Audit(context.Background(), turns)
 	if err != nil {
 		t.Fatalf("Audit: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestPeriodicAuditor_Audit_DriftExceedsThreshold(t *testing.T) {
 	auditor := NewPeriodicAuditor(mc, store, 0.3)
 	auditor.SetAutoPause(pause.fn())
 
-	findings, driftScore, err := auditor.Audit(context.Background(), turns)
+	findings, driftScore, _, err := auditor.Audit(context.Background(), turns)
 	if err != nil {
 		t.Fatalf("Audit: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestPeriodicAuditor_Audit_DriftBelowThreshold(t *testing.T) {
 	auditor := NewPeriodicAuditor(mc, store, 0.3)
 	auditor.SetAutoPause(pause.fn())
 
-	_, _, err = auditor.Audit(context.Background(), turns)
+	_, _, _, err = auditor.Audit(context.Background(), turns)
 	if err != nil {
 		t.Fatalf("Audit: %v", err)
 	}
@@ -221,7 +221,7 @@ func TestPeriodicAuditor_Audit_LLMUnparseable_RetriesThenSkips(t *testing.T) {
 
 	auditor := NewPeriodicAuditor(mc, nil, 0.3)
 
-	findings, driftScore, err := auditor.Audit(context.Background(), turns)
+	findings, driftScore, _, err := auditor.Audit(context.Background(), turns)
 	if err != nil {
 		t.Fatalf("Audit error: %v", err)
 	}
@@ -247,7 +247,7 @@ func TestPeriodicAuditor_Audit_LLMUnparseable_RecoveredOnRetry(t *testing.T) {
 
 	auditor := NewPeriodicAuditor(mc, nil, 0.3)
 
-	findings, driftScore, err := auditor.Audit(context.Background(), turns)
+	findings, driftScore, _, err := auditor.Audit(context.Background(), turns)
 	if err != nil {
 		t.Fatalf("Audit: %v", err)
 	}
@@ -273,7 +273,7 @@ func TestPeriodicAuditor_Audit_NilModel(t *testing.T) {
 	turns := periodicTestTurns()
 	auditor := NewPeriodicAuditor(nil, nil, 0.3)
 
-	findings, driftScore, err := auditor.Audit(context.Background(), turns)
+	findings, driftScore, _, err := auditor.Audit(context.Background(), turns)
 	if err != nil {
 		t.Fatalf("Audit: %v", err)
 	}
@@ -289,7 +289,7 @@ func TestPeriodicAuditor_Audit_EmptyTurns(t *testing.T) {
 	mc := &mockChatter{response: `{"drift_score":0,"findings":[]}`}
 	auditor := NewPeriodicAuditor(mc, nil, 0.3)
 
-	findings, driftScore, err := auditor.Audit(context.Background(), nil)
+	findings, driftScore, _, err := auditor.Audit(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("Audit: %v", err)
 	}
@@ -311,7 +311,7 @@ func TestPeriodicAuditor_Audit_NilConstitution(t *testing.T) {
 	}
 	auditor := NewPeriodicAuditor(mc, nil, 0.3)
 
-	findings, _, err := auditor.Audit(context.Background(), turns)
+	findings, _, _, err := auditor.Audit(context.Background(), turns)
 	if err != nil {
 		t.Fatalf("Audit: %v", err)
 	}
@@ -439,8 +439,11 @@ func TestPeriodicAuditor_BackoffWindow(t *testing.T) {
 	mc := &errorChatter{}
 	auditor := NewPeriodicAuditor(mc, store, 0.3)
 
-	// First failure: hits the LLM, records a failure.
-	_, _, _ = auditor.Audit(context.Background(), turns)
+	// First failure: hits the LLM, records a failure. errorChatter
+	// makes the call fail; a nil error would mean the strike never armed.
+	if _, _, _, aerr := auditor.Audit(context.Background(), turns); aerr == nil {
+		t.Fatal("expected audit error from errorChatter")
+	}
 	if auditor.consecutiveFailures != 1 {
 		t.Fatalf("expected 1 consecutive failure after first audit, got %d", auditor.consecutiveFailures)
 	}
@@ -453,7 +456,7 @@ func TestPeriodicAuditor_BackoffWindow(t *testing.T) {
 	// (the call returned early without hitting the LLM or recording a failure).
 	// The mockChatter's call count is on the mockChatter type, but errorChatter
 	// doesn't track calls. Instead, we verify via the consecutiveFailures counter.
-	_, _, err = auditor.Audit(context.Background(), turns)
+	_, _, _, err = auditor.Audit(context.Background(), turns)
 	if err != nil {
 		t.Fatalf("Audit during backoff should not return error: %v", err)
 	}
@@ -680,6 +683,42 @@ func TestPeriodicAuditJobWritesDriftScore(t *testing.T) {
 	}
 	if got := m.DriftScore(empID); got != 0 {
 		t.Fatalf("DriftScore after retire = %v, want 0 (entry must be deleted)", got)
+	}
+}
+
+// TestDriftScore_SkipDoesNotClobber pins the skip half of last-computed
+// semantics: an unparseable periodic audit returns nil error and drift 0,
+// and that 0 must not replace a real score. Deleting the computed guard
+// in runPeriodicAudit (always calling setDriftScore) makes this fail.
+func TestDriftScore_SkipDoesNotClobber(t *testing.T) {
+	ctx := context.Background()
+	m, _ := newHirePersistenceManager(t)
+
+	const empID = "emp-drift-skip"
+	c := validConstitution()
+	if _, err := m.Hire(ctx, HireRequest{
+		ID:           empID,
+		Name:         "drift skip probe",
+		Prompt:       "test prompt",
+		Enabled:      true,
+		Triggers:     []bot.BotTrigger{{Type: bot.TriggerTypeWebhook, Enabled: true}},
+		Constitution: constitutionToMap(t, c),
+	}); err != nil {
+		t.Fatalf("Hire: %v", err)
+	}
+	m.SetTurnCollector(func(id string, _ int, _ time.Duration) []TurnRecord {
+		return []TurnRecord{{
+			EmployeeID:   id,
+			TurnID:       "turn-drift-skip",
+			FinalOutput:  "did the work",
+			Constitution: &c,
+		}}
+	})
+	m.setDriftScore(empID, 0.42)
+	m.SetPeriodicAuditor(NewPeriodicAuditor(&mockChatter{response: "I cannot produce JSON"}, m.auditStore, 0.3))
+	m.runPeriodicAudit(ctx)
+	if got := m.DriftScore(empID); got != 0.42 {
+		t.Fatalf("DriftScore after unparseable skip = %v, want 0.42 (skip must not clobber)", got)
 	}
 }
 

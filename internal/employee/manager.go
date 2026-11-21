@@ -1001,6 +1001,7 @@ func (m *Manager) RegisterGoalLoop(employeeID string, loop *GoalLoop) {
 	if parkFn != nil {
 		loop.SetGoalGateParker(parkFn)
 	}
+	m.bindRoundSpend(employeeID, loop)
 	m.goalLoopsMu.Lock()
 	m.goalLoops[employeeID] = loop
 	m.goalLoopsMu.Unlock()
@@ -1750,10 +1751,21 @@ func (m *Manager) triggerViaGoalLoop(ctx context.Context, id string, payload map
 			payloadBytes = raw
 		}
 	}
+	ref, topic := triggerIdentity(payload, source)
 	trigger := TriggerEvent{
-		Source:  source,
-		Payload: payloadBytes,
-		FiredAt: time.Now().UTC(),
+		Source:     source,
+		Topic:      topic,
+		TriggerRef: ref,
+		Payload:    payloadBytes,
+		FiredAt:    time.Now().UTC(),
+	}
+
+	// A started round consumes the invocation cap. source "goal" is
+	// already counted by the goal-round driver immediately before this
+	// Trigger; recording it again would halve MaxInvocationsPerDay.
+	// ErrEmployeeNoConstitution never reaches here (no loop registered).
+	if source != "goal" {
+		m.RecordGoalRound(id)
 	}
 
 	// Acquire per-employee serialization mutex (spec line 614). The mutex
@@ -1817,6 +1829,47 @@ func (m *Manager) triggerViaGoalLoop(ctx context.Context, id string, payload map
 	})
 	m.emitBudgetMetric(ctx, id)
 	return result, nil
+}
+
+// triggerIdentity is the round label the handler (or any Trigger caller)
+// already has: an explicit trigger_ref wins, otherwise source plus topic.
+func triggerIdentity(payload map[string]any, source string) (ref, topic string) {
+	if payload != nil {
+		if v, ok := payload["trigger_ref"].(string); ok {
+			ref = v
+		}
+		if v, ok := payload["topic"].(string); ok {
+			topic = v
+		}
+	}
+	if ref != "" {
+		return ref, topic
+	}
+	if source != "" && topic != "" {
+		return source + ":" + topic, topic
+	}
+	if source != "" {
+		return source, topic
+	}
+	return topic, topic
+}
+
+// bindRoundSpend points one loop's completion path at the manager's
+// budget checker. A nil checker is a no-op; SetRoundBudgetChecker rebinds
+// loops that were registered first.
+func (m *Manager) bindRoundSpend(employeeID string, loop *GoalLoop) {
+	if m == nil || loop == nil || employeeID == "" {
+		return
+	}
+	m.mu.RLock()
+	bc := m.roundBudget
+	m.mu.RUnlock()
+	if bc == nil {
+		return
+	}
+	loop.SetSpendRecorder(func(tokens, cents int) {
+		bc.RecordRoundSpend(employeeID, tokens, cents)
+	})
 }
 
 // SteerEmployee delivers user steering to an employee's running goal-loop

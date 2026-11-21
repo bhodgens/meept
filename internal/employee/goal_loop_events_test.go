@@ -398,3 +398,46 @@ func TestGoalLoop_GoalLookupFailureWarnsAndPublishes(t *testing.T) {
 		t.Error("goal lookup failure must log the documented Warn (result kept, ref dropped)")
 	}
 }
+
+// TestTriggerRef_BusRoundWithoutGoal pins a bus trigger with no active
+// goal: the published trigger_ref must be the round's actual trigger,
+// not empty. A one-line deletion of the roundTriggerRef fallback in
+// Execute makes this fail (the field is omitted).
+func TestTriggerRef_BusRoundWithoutGoal(t *testing.T) {
+	b := bus.New(nil, nil)
+	defer b.Close()
+
+	botResults := subscribeGateRaw(t, b, "gate-trigref-bot", gateBotResultTopic)
+	defer bus.Unsubscribe(b, botResults)
+
+	reflector := newStubReflector()
+	reflector.queueResponse(`{"candidates":[{"title":"x","description":"d","prompt":"handle the event"}]}`)
+
+	loop := NewGoalLoop("trigref-bus", testTier1Constitution(), nil, slog.New(slog.DiscardHandler)).
+		WithReflector(reflector).
+		WithExecutor(&emitGoalExecutor{output: "handled", tokens: 4})
+	loop.SetBus(b)
+	// No goal lookup and no goal store: lookupActiveGoal yields (nil, nil).
+
+	m := NewManager(nil)
+	_, err := m.triggerViaGoalLoop(context.Background(), "trigref-bus", map[string]any{
+		"source":      "bus_event",
+		"trigger_ref": "bus_event:alerts.fired",
+		"prompt":      "Event received on topic alerts.fired from bus",
+	}, "tier_1_reactive", loop)
+	if err != nil {
+		t.Fatalf("triggerViaGoalLoop: %v", err)
+	}
+
+	resultMsg := recvGateEventRaw(t, botResults, "bus.result without a goal")
+	var result gateResultShape
+	if err := json.Unmarshal(resultMsg.Payload, &result); err != nil {
+		t.Fatalf("decode bot.result: %v", err)
+	}
+	if result.TriggerRef == "" {
+		t.Fatal("trigger_ref must be non-empty when a bus round has no active goal")
+	}
+	if result.TriggerRef != "bus_event:alerts.fired" {
+		t.Errorf("trigger_ref = %q, want bus_event:alerts.fired", result.TriggerRef)
+	}
+}

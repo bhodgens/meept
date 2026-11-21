@@ -1667,7 +1667,7 @@ func (a *PeriodicAuditor) SetPromptMaskHook(hook PromptMaskHook) {
 // resets after the finding is written so the next 3 failures produce a new
 // finding rather than spamming every call. Backoff: if the last failure was
 // less than 30 seconds ago, the call returns early without hitting the LLM.
-func (a *PeriodicAuditor) Audit(ctx context.Context, turns []TurnRecord) ([]AuditFinding, float64, error) {
+func (a *PeriodicAuditor) Audit(ctx context.Context, turns []TurnRecord) ([]AuditFinding, float64, bool, error) {
 	a.mu.Lock()
 	model := a.model
 	store := a.store
@@ -1678,10 +1678,10 @@ func (a *PeriodicAuditor) Audit(ctx context.Context, turns []TurnRecord) ([]Audi
 	a.mu.Unlock()
 
 	if model == nil || len(turns) == 0 {
-		return nil, 0, nil
+		return nil, 0, false, nil
 	}
 	if turns[0].Constitution == nil {
-		return nil, 0, nil
+		return nil, 0, false, nil
 	}
 
 	// E8: Reservoir sampling. When total turns exceed sampleSize, select
@@ -1698,7 +1698,9 @@ func (a *PeriodicAuditor) Audit(ctx context.Context, turns []TurnRecord) ([]Audi
 	failures := a.consecutiveFailures
 	a.failMu.Unlock()
 	if failures > 0 && sinceLast < 30*time.Second {
-		return nil, 0, nil
+		// Skip, not a computed score. A 0 here must not clobber the
+		// last real drift score.
+		return nil, 0, false, nil
 	}
 
 	userMsg := buildPeriodicPrompt(turns)
@@ -1714,7 +1716,7 @@ func (a *PeriodicAuditor) Audit(ctx context.Context, turns []TurnRecord) ([]Audi
 	resp, err := model.Chat(ctx, messages, llm.WithTemperature(0.1), llm.WithMaxTokens(2048))
 	if err != nil {
 		a.recordPeriodicFailure(store, turns)
-		return nil, 0, fmt.Errorf("periodic audit LLM call failed: %w", err)
+		return nil, 0, false, fmt.Errorf("periodic audit LLM call failed: %w", err)
 	}
 
 	findings, driftScore, parseErr := parsePeriodicResponse(resp.Content, turns)
@@ -1724,14 +1726,15 @@ func (a *PeriodicAuditor) Audit(ctx context.Context, turns []TurnRecord) ([]Audi
 		resp2, err2 := model.Chat(ctx, messages, llm.WithTemperature(0.0), llm.WithMaxTokens(2048))
 		if err2 != nil {
 			a.recordPeriodicFailure(store, turns)
-			return nil, 0, fmt.Errorf("periodic audit retry failed: %w", err2)
+			return nil, 0, false, fmt.Errorf("periodic audit retry failed: %w", err2)
 		}
 		findings, driftScore, parseErr = parsePeriodicResponse(resp2.Content, turns)
 		if parseErr != nil {
 			a.recordPeriodicFailure(store, turns)
 			// Spec line 605: an unparseable periodic response is a skip
-			// (failure recorded above), not an audit error.
-			return nil, 0, nil //nolint:nilerr // deliberate skip path: periodic audit is best-effort, unparseable response just records a failure
+			// (failure recorded above), not an audit error and not a
+			// computed drift score.
+			return nil, 0, false, nil //nolint:nilerr // deliberate skip path: periodic audit is best-effort, unparseable response just records a failure
 		}
 	}
 
@@ -1760,7 +1763,7 @@ func (a *PeriodicAuditor) Audit(ctx context.Context, turns []TurnRecord) ([]Audi
 		_ = autoPause(employeeID, fmt.Sprintf("drift score %.2f exceeds threshold %.2f", driftScore, threshold))
 	}
 
-	return findings, driftScore, nil
+	return findings, driftScore, true, nil
 }
 
 // recordPeriodicFailure increments the consecutive-failure counter and, when

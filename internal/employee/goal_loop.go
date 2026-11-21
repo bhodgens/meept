@@ -150,10 +150,15 @@ func buildImplicitPlanPrompt(trigger TriggerEvent, stateSummary string) string {
 // schedule, webhook path, or bus topic that fired. Payload is the opaque
 // event body (webhook JSON, bus message, etc.).
 type TriggerEvent struct {
-	Source  string    `json:"source"`
-	Topic   string    `json:"topic,omitempty"`
-	Payload []byte    `json:"payload,omitempty"`
-	FiredAt time.Time `json:"fired_at"`
+	Source string `json:"source"`
+	Topic  string `json:"topic,omitempty"`
+	// TriggerRef is the round's actual trigger identity (bus_event plus
+	// topic, cron source, etc.). Execute publishes it when the active
+	// goal has no TriggerRef of its own. Empty means the caller did not
+	// stamp one — Execute must not invent a label.
+	TriggerRef string    `json:"trigger_ref,omitempty"`
+	Payload    []byte    `json:"payload,omitempty"`
+	FiredAt    time.Time `json:"fired_at"`
 }
 
 // CandidatePlan is a potential plan produced by the ASSESS step. The LLM in
@@ -414,6 +419,17 @@ type GoalLoop struct {
 	lastGateState        GateState
 	lastGateFailedOutput string
 
+	// roundTriggerRef is the trigger that started the current round
+	// (TriggerEvent.TriggerRef, set by Decide). Execute publishes it when
+	// the active goal has no TriggerRef. Empty = direct Execute with no
+	// round trigger; the result omits trigger_ref. Guarded by mu.
+	roundTriggerRef string
+
+	// spendRecorder writes a round's token/cent cost onto the bot state
+	// row the daily budget reads. Nil = unwired (tests that never set a
+	// budget checker). Guarded by mu; called outside the lock.
+	spendRecorder func(tokens, cents int)
+
 	// lastDecideSkip carries the skip signal from the most recent Decide
 	// round (goal-completion finding #3): non-nil when the round was
 	// short-circuited before doing work (e.g. MaxActivePlans cap). Cleared
@@ -474,6 +490,19 @@ func (l *GoalLoop) SetResultTopic(topic string) {
 	}
 	l.mu.Lock()
 	l.resultTopic = topic
+	l.mu.Unlock()
+}
+
+// SetSpendRecorder installs the completion-path writer for a round's
+// token and cent cost. Nil is ignored (typed-nil guard) so an unwired
+// loop keeps the previous recorder. The callback must not re-enter the
+// loop (it persists bot state).
+func (l *GoalLoop) SetSpendRecorder(fn func(tokens, cents int)) {
+	if l == nil || fn == nil {
+		return
+	}
+	l.mu.Lock()
+	l.spendRecorder = fn
 	l.mu.Unlock()
 }
 
@@ -875,6 +904,7 @@ func (l *GoalLoop) Assess(ctx context.Context, trigger TriggerEvent) ([]Candidat
 		}
 		return nil, fmt.Errorf("assess LLM call failed: %w", err)
 	}
+	l.recordSpend(responseTokens(resp), 0)
 
 	candidates, parseErr := parseAssessResponse(resp.Content)
 	if parseErr != nil {
@@ -1041,6 +1071,7 @@ func (l *GoalLoop) Execute(ctx context.Context, plan PlanRef) (*bot.BotExecution
 	briefLookup := l.planBriefLookup
 	busRef := l.bus
 	resultTopic := l.resultTopic
+	roundTriggerRef := l.roundTriggerRef
 	l.mu.Unlock()
 
 	// A bus-triggered round is marked with TopicBotResult.Name by the bot
@@ -1100,6 +1131,7 @@ func (l *GoalLoop) Execute(ctx context.Context, plan PlanRef) (*bot.BotExecution
 	// non-retriable. WithRetryPolicy(RetryPolicy{}) opts out.
 	output, tokens, err := l.executeBotWithRetry(ctx, runner, systemPrompt, userMessage)
 	duration := time.Since(start)
+	l.recordSpend(tokens, executionCostCents(runner))
 
 	result := &bot.BotExecutionResult{
 		BotID:      l.employeeID,
@@ -1135,19 +1167,26 @@ func (l *GoalLoop) Execute(ctx context.Context, plan PlanRef) (*bot.BotExecution
 			stopReason = agent.StopReasonError
 		}
 		// Round identity (issue #160 M1): trigger_ref is the active goal's
-		// TriggerRef (intake:<repo>#<ticket>, cron ref, etc.) when this
-		// round pursues a goal; session_id is the round's session identity
-		// (SetSpeakContext at round entry), read under l.mu (no I/O under
-		// the lock). A round with no active goal / no speak context
-		// publishes them absent - never invented values. A goal-lookup
-		// failure degrades to an empty ref with a warn; the result is
-		// never dropped for it.
+		// TriggerRef when this round pursues a goal that has one. A bus
+		// (or other) round with no goal ref stamps the round's actual
+		// trigger instead, so the history row is not an empty worktype.
+		// A direct Execute with neither publishes them absent. A
+		// goal-lookup failure warns and still falls back to the round
+		// trigger when one was stamped; the result is never dropped.
 		triggerRef := ""
 		if goal, goalErr := l.lookupActiveGoal(ctx); goalErr != nil {
-			logger.Warn("execute: active goal lookup for trigger_ref failed; publishing without trigger_ref",
-				"plan_id", plan.ID, "error", goalErr)
+			if roundTriggerRef == "" {
+				logger.Warn("execute: active goal lookup for trigger_ref failed; publishing without trigger_ref",
+					"plan_id", plan.ID, "error", goalErr)
+			} else {
+				logger.Warn("execute: active goal lookup for trigger_ref failed; using round trigger",
+					"plan_id", plan.ID, "error", goalErr)
+			}
 		} else if goal != nil {
 			triggerRef = goal.TriggerRef
+		}
+		if triggerRef == "" {
+			triggerRef = roundTriggerRef
 		}
 		l.mu.Lock()
 		sessionID := l.speakSessionID
@@ -1791,6 +1830,9 @@ func (l *GoalLoop) reflectViaLLM(ctx context.Context, reflector Reflector, c *Co
 	}
 	messages = maskPromptMessages(maskHook, messages, maskScope)
 	resp, err := reflector.Chat(ctx, messages, llm.WithTemperature(0.1), llm.WithMaxTokens(1024))
+	if err == nil {
+		l.recordSpend(responseTokens(resp), 0)
+	}
 	if err != nil {
 		// Tree 03 leaf 03 (D9): a provider wait during the post-execution
 		// REFLECT step parks the episode for scheduled resume. Give-up
@@ -1831,6 +1873,75 @@ func (l *GoalLoop) reflectViaLLM(ctx context.Context, reflector Reflector, c *Co
 func (l *GoalLoop) activePlanRefSnapshot(plan PlanRef) *PlanRef {
 	ref := plan
 	return &ref
+}
+
+// executionCostReporter is an optional extension of bot.BotExecutor.
+// Production adapters return tokens from ExecuteBot and do not implement
+// this; a round that also knows its cent cost reports it so the daily
+// budget row can move. A missing method means cents are unknown (0).
+type executionCostReporter interface {
+	ExecutionCostCents() int
+}
+
+// executionCostCents reads the optional cent cost off the executor that
+// just ran. A nil runner or a plain BotExecutor reports 0.
+func executionCostCents(runner bot.BotExecutor) int {
+	r, ok := runner.(executionCostReporter)
+	if !ok || r == nil {
+		return 0
+	}
+	cents := r.ExecutionCostCents()
+	if cents < 0 {
+		return 0
+	}
+	return cents
+}
+
+// responseTokens is the best token count on a chat response. Providers
+// that leave TotalTokens at 0 still fill the prompt + completion pair.
+func responseTokens(resp *llm.Response) int {
+	if resp == nil {
+		return 0
+	}
+	if resp.Usage.TotalTokens > 0 {
+		return resp.Usage.TotalTokens
+	}
+	n := resp.Usage.PromptTokens + resp.Usage.CompletionTokens
+	if n < 0 {
+		return 0
+	}
+	return n
+}
+
+// recordSpend forwards a round's token/cent cost to the wired recorder.
+// Both <= 0 is a no-op (a zero cell must not look like spend). The
+// callback does store I/O, so it runs outside l.mu.
+func (l *GoalLoop) recordSpend(tokens, cents int) {
+	if l == nil || (tokens <= 0 && cents <= 0) {
+		return
+	}
+	l.mu.Lock()
+	fn := l.spendRecorder
+	l.mu.Unlock()
+	if fn != nil {
+		fn(tokens, cents)
+	}
+}
+
+// roundTriggerIdentity is the label Execute publishes when the goal has
+// no TriggerRef. An explicit TriggerRef wins; otherwise source plus
+// topic (the bus trigger's topic) so the history row is not empty.
+func roundTriggerIdentity(trigger TriggerEvent) string {
+	if trigger.TriggerRef != "" {
+		return trigger.TriggerRef
+	}
+	if trigger.Source == "" {
+		return trigger.Topic
+	}
+	if trigger.Topic == "" {
+		return trigger.Source
+	}
+	return trigger.Source + ":" + trigger.Topic
 }
 
 // lookupActiveGoal retrieves the active goal for this employee, preferring
@@ -1888,9 +1999,11 @@ func (l *GoalLoop) Decide(ctx context.Context, trigger TriggerEvent) error {
 
 	// Clear the skip signal at round entry (finding #3): only the current
 	// round's outcome is observable, never a stale one from an earlier
-	// trigger.
+	// trigger. The round's trigger identity is stamped in the same
+	// critical section so Execute can publish it when the goal has none.
 	l.mu.Lock()
 	l.lastDecideSkip = nil
+	l.roundTriggerRef = roundTriggerIdentity(trigger)
 	l.mu.Unlock()
 
 	tier := constitution.AutonomyTier

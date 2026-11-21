@@ -617,3 +617,86 @@ func TestPostTurnAuditor_PromptMasked(t *testing.T) {
 		t.Fatal("masked form missing from audit prompt")
 	}
 }
+
+// spendRoundExecutor reports both a token count and a cent cost so the
+// live completion path can write the row SpentToday reads.
+type spendRoundExecutor struct {
+	tokens int
+	cents  int
+}
+
+func (e *spendRoundExecutor) ExecuteBot(context.Context, string, string) (string, int, error) {
+	return "spent", e.tokens, nil
+}
+
+func (e *spendRoundExecutor) ExecutionCostCents() int { return e.cents }
+
+// TestBudget_GoalLoopRoundWritesSpentToday pins the dead daily-budget
+// writer: a live goal-loop round that reports tokens and cents must land
+// those numbers on the bot state row, and a positive DailyBudgetCents
+// must then deny. One-line edit that fails this pin: delete
+// `state.TodayCostCents += cents` in RecordRoundSpend.
+func TestBudget_GoalLoopRoundWritesSpentToday(t *testing.T) {
+	const botID = "budget-round-bot"
+	m := newPlainBotTestManager(t, botID)
+	checker := NewBotStoreBudgetChecker(m.BotStore(), slog.New(slog.DiscardHandler))
+	if checker == nil {
+		t.Fatal("checker must construct over the live store")
+	}
+	m.SetRoundBudgetChecker(checker)
+
+	reflector := newStubReflector()
+	reflector.queueResponse(`{"candidates":[{"title":"x","description":"d","prompt":"do the thing"}]}`)
+	loop := NewGoalLoop(botID, testTier1Constitution(), nil, slog.New(slog.DiscardHandler)).
+		WithReflector(reflector).
+		WithExecutor(&spendRoundExecutor{tokens: 120, cents: 50})
+	m.RegisterGoalLoop(botID, loop)
+
+	if _, err := m.Trigger(context.Background(), botID, map[string]any{
+		"source":      "bus_event",
+		"trigger_ref": "bus_event:alerts.fired",
+	}); err != nil {
+		t.Fatalf("Trigger: %v", err)
+	}
+
+	tokens, cents, invocations := checker.SpentToday(botID)
+	if cents < 50 {
+		t.Fatalf("SpentToday cents = %d, want >= 50 (round cost must land on TodayCostCents)", cents)
+	}
+	if tokens < 120 {
+		t.Fatalf("SpentToday tokens = %d, want >= 120", tokens)
+	}
+	if invocations < 1 {
+		t.Fatalf("SpentToday invocations = %d, want >= 1 (Trigger must record the round)", invocations)
+	}
+
+	c := &Constitution{}
+	c.Constraints.DailyBudgetCents = 50
+	p := NewPreExecChecker(botID, c, WithBudgetChecker(checker))
+	dec := p.Check("test", "shell", map[string]string{})
+	if dec.Allowed {
+		t.Fatal("daily budget must deny once the live round's cents are on the state row")
+	}
+	if !strings.Contains(dec.Reason, "daily budget") {
+		t.Fatalf("refusal reason = %q, want the daily budget cap", dec.Reason)
+	}
+}
+
+// TestBudget_NoConstitutionDoesNotRecordRound pins the other half of the
+// invocation counter: Trigger that returns ErrEmployeeNoConstitution
+// must not consume MaxInvocationsPerDay.
+func TestBudget_NoConstitutionDoesNotRecordRound(t *testing.T) {
+	const botID = "budget-noconst"
+	m := newPlainBotTestManager(t, botID)
+	checker := NewBotStoreBudgetChecker(m.BotStore(), slog.New(slog.DiscardHandler))
+	m.SetRoundBudgetChecker(checker)
+
+	_, err := m.Trigger(context.Background(), botID, map[string]any{"source": "bus_event"})
+	if !errors.Is(err, ErrEmployeeNoConstitution) {
+		t.Fatalf("Trigger error = %v, want ErrEmployeeNoConstitution", err)
+	}
+	_, _, invocations := checker.SpentToday(botID)
+	if invocations != 0 {
+		t.Fatalf("invocations = %d, want 0 (no-constitution trigger must not record a round)", invocations)
+	}
+}

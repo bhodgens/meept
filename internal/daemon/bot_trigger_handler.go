@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/caimlas/meept/internal/bot"
 )
@@ -49,8 +50,9 @@ func (h *botTriggerHandler) HandleBotTrigger(ctx context.Context, botID, prompt 
 	}
 
 	payload := map[string]any{
-		"source": "bus_event",
-		"prompt": prompt,
+		"source":      "bus_event",
+		"prompt":      prompt,
+		"trigger_ref": busEventTriggerRef(prompt),
 	}
 
 	// A bus event calls a bot to run one task; it is not an employee looking
@@ -66,4 +68,23 @@ func (h *botTriggerHandler) HandleBotTrigger(ctx context.Context, botID, prompt 
 		return err
 	}
 	return nil
+}
+
+// busEventTriggerRef is the history label for a bus round that has no
+// active goal. The handler already has source bus_event; the default
+// router prompt also carries the topic ("Event received on topic %s
+// from %s"). A custom template has no topic, so the source alone is
+// the label — never empty.
+func busEventTriggerRef(prompt string) string {
+	const prefix = "Event received on topic "
+	if strings.HasPrefix(prompt, prefix) {
+		rest := strings.TrimPrefix(prompt, prefix)
+		if i := strings.Index(rest, " from "); i > 0 {
+			topic := strings.TrimSpace(rest[:i])
+			if topic != "" {
+				return "bus_event:" + topic
+			}
+		}
+	}
+	return "bus_event"
 }

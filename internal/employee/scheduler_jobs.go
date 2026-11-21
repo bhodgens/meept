@@ -282,7 +282,7 @@ func (m *Manager) runPeriodicAudit(ctx context.Context) {
 		if len(turns) == 0 {
 			continue
 		}
-		findings, drift, err := auditor.Audit(ctx, turns)
+		findings, drift, computed, err := auditor.Audit(ctx, turns)
 		if err != nil {
 			m.logger.Warn("periodic audit: auditor error",
 				"employee_id", emp.ID, "error", err)
@@ -291,12 +291,17 @@ func (m *Manager) runPeriodicAudit(ctx context.Context) {
 		// Record the computed score on the manager (bughunt 2026-11-19
 		// wave 4): DriftScore/Review/the agents.roster drift column read
 		// this map. Last-computed semantics - a clean audit's 0 replaces
-		// a previous high score; Retire deletes the entry.
-		m.setDriftScore(emp.ID, drift)
-		// Emit drift metric (spec line 672).
-		m.emitMetric("employee.drift.score", drift, map[string]string{
-			"employee_id": emp.ID,
-		})
+		// a previous high score; Retire deletes the entry. A skip
+		// (backoff, unparseable, empty input) returns computed=false and
+		// must leave the previous entry alone — drift 0 from a skip is
+		// not a clean audit.
+		if computed {
+			m.setDriftScore(emp.ID, drift)
+			// Emit drift metric (spec line 672).
+			m.emitMetric("employee.drift.score", drift, map[string]string{
+				"employee_id": emp.ID,
+			})
+		}
 		// Emit findings count metric (spec line 669).
 		for _, f := range findings {
 			m.emitMetric("employee.audit.findings", 1, map[string]string{

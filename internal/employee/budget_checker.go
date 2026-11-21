@@ -17,13 +17,15 @@ import (
 // the caps.
 //
 // botStoreBudgetChecker is the store-backed BudgetChecker: it reads the
-// per-employee bot_states row the CostTracker already persists on every
-// execution (TodayRuns / TodayCostCents / TotalTokensUsed, with date-rollover
-// reset), so the counters survive restarts by construction. Goal-round
-// triggers that bypass the bot runner are counted through RecordGoalRound,
-// which mirrors the increment into the same persisted row. The noop default
-// stays in force whenever limits are zero/unset (the checker always reports;
-// enforcement step 5 gates on the constitution limits).
+// per-employee bot_states row (TodayRuns / TodayCostCents / TotalTokensUsed,
+// with date-rollover reset), so the counters survive restarts by
+// construction. CostTracker.RecordExecution is not on the live path —
+// RecordRoundSpend is, called from the goal-loop completion path after a
+// round that reported tokens or cents. Goal-round triggers that bypass the
+// bot runner are counted through RecordGoalRound, which mirrors the
+// increment into the same persisted row. The noop default stays in force
+// whenever limits are zero/unset (the checker always reports; enforcement
+// step 5 gates on the constitution limits).
 type botStoreBudgetChecker struct {
 	store *bot.Store
 	mu    sync.Mutex
@@ -127,6 +129,46 @@ func WithBudgetChecker(bc BudgetChecker) PreExecOption {
 	}
 }
 
+// RecordRoundSpend adds a completed goal-loop round's token and cent cost
+// onto the bot_states row SpentToday reads. A round that reported neither
+// (both <= 0) is a no-op — a zero write must not look like a fresh day.
+// Missing state rows are created so the first costly round still lands.
+// Best-effort: persist errors are logged, never returned. Safe for
+// concurrent use with RecordGoalRound (each update is a full-row replace
+// of the snapshot it loaded; the invoke mutex serializes a single
+// employee's rounds).
+func (b *botStoreBudgetChecker) RecordRoundSpend(employeeID string, tokens, cents int) {
+	if b == nil || b.store == nil || employeeID == "" {
+		return
+	}
+	if tokens < 0 {
+		tokens = 0
+	}
+	if cents < 0 {
+		cents = 0
+	}
+	if tokens == 0 && cents == 0 {
+		return
+	}
+	state, err := b.store.GetState(context.Background(), employeeID)
+	if err != nil || state == nil {
+		state = &bot.BotState{DefinitionID: employeeID}
+	}
+	today := time.Now().Format("2006-01-02")
+	if state.TodayDate != today {
+		state.TodayRuns = 0
+		state.TodayCostCents = 0
+		state.TodayDate = today
+	}
+	state.TotalTokensUsed += tokens
+	state.TotalCostCents += cents
+	state.TodayCostCents += cents
+	if err := b.store.UpdateState(context.Background(), *state); err != nil {
+		b.logger.Warn("budget checker: round spend persist failed",
+			"employee_id", employeeID, "error", err)
+	}
+}
+
 // RecordGoalRound counts one goal-round invocation against the persisted
 // budget counters (manager-level passthrough for the round driver's
 // deferred-turn path; nil-checker safe).
@@ -135,6 +177,15 @@ func (m *Manager) RecordGoalRound(employeeID string) {
 		return
 	}
 	m.roundBudget.RecordGoalRound(employeeID)
+}
+
+// RecordRoundSpend writes a completed round's token and cent cost onto the
+// bot state row the constitution's daily budget reads. Nil-checker safe.
+func (m *Manager) RecordRoundSpend(employeeID string, tokens, cents int) {
+	if m == nil || m.roundBudget == nil {
+		return
+	}
+	m.roundBudget.RecordRoundSpend(employeeID, tokens, cents)
 }
 
 // SetRoundBudgetChecker stores the checker the goal-round path records
@@ -146,6 +197,36 @@ func (m *Manager) SetRoundBudgetChecker(bc *botStoreBudgetChecker) {
 	m.mu.Lock()
 	m.roundBudget = bc
 	m.mu.Unlock()
+	// Loops registered before the checker landed (daemon boot order) still
+	// need the completion-path writer, or their rounds never move the row.
+	m.rebindRoundSpend(bc)
+}
+
+// rebindRoundSpend points every registered loop's completion path at bc so
+// a round's token/cent cost lands on the row SpentToday reads. The closure
+// captures the checker by value; a later SetRoundBudgetChecker rebinds.
+// goalLoopsMu is not held across loop.mu (SetSpendRecorder takes it).
+func (m *Manager) rebindRoundSpend(bc *botStoreBudgetChecker) {
+	if m == nil || bc == nil {
+		return
+	}
+	m.goalLoopsMu.RLock()
+	ids := make([]string, 0, len(m.goalLoops))
+	loops := make([]*GoalLoop, 0, len(m.goalLoops))
+	for id, loop := range m.goalLoops {
+		if loop == nil {
+			continue
+		}
+		ids = append(ids, id)
+		loops = append(loops, loop)
+	}
+	m.goalLoopsMu.RUnlock()
+	for i, loop := range loops {
+		empID := ids[i]
+		loop.SetSpendRecorder(func(tokens, cents int) {
+			bc.RecordRoundSpend(empID, tokens, cents)
+		})
+	}
 }
 
 // BotStore exposes the manager's bot store for daemon wiring seams (C26:

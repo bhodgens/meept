@@ -287,3 +287,15 @@ func TestPushServiceRecordsHistoryThroughRealPush(t *testing.T) {
 		t.Error("PreferencesAllowed should default-allow with default prefs")
 	}
 }
+
+func TestBotEventTriggerRef_IncludesTopicOrSource(t *testing.T) {
+	if got := busEventTriggerRef("Event received on topic alerts.fired from bus"); got != "bus_event:alerts.fired" {
+		t.Fatalf("trigger_ref = %q, want bus_event:alerts.fired", got)
+	}
+	if got := busEventTriggerRef("custom template output"); got != "bus_event" {
+		t.Fatalf("trigger_ref = %q, want bus_event", got)
+	}
+	if got := busEventTriggerRef(""); got == "" {
+		t.Fatal("trigger_ref must be non-empty even without a topic")
+	}
+}
