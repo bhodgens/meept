@@ -79,7 +79,8 @@
     ],
     "internal/scheduler/": [
       "goal-loop",
-      "scheduler"
+      "scheduler",
+      "tools-jobs"
     ],
     "internal/skills/": [
       "continuity-regressions",
@@ -94,6 +95,7 @@
       "tools-argvalidate",
       "tools-docs",
       "tools-filesystem",
+      "tools-jobs",
       "tools-mcp",
       "tools-memory",
       "tools-tasks",
@@ -182,7 +184,8 @@
     "internal/security/": [
       "security-fence",
       "security-tls",
-      "agent-groups"
+      "agent-groups",
+      "tools-jobs"
     ],
     "internal/security/pii/": [
       "boundary-hardening"
@@ -1131,6 +1134,18 @@
         "scheduler-06 restart redelivery: a stuck in-flight receipt is re-delivered with the SAME MessageID after a daemon restart (at-least-once, idempotent) (F13b)"
       ],
       "note": "05-schedule branch e2e gate rows (F13a/F13b) live beside scheduler-01..03; timing kind fires exercise the robfigAtSchedule one-shot registration path."
+    },
+    {
+      "name": "tools-jobs",
+      "dir": "e2e/suites/tools-jobs",
+      "status": "todo",
+      "diff": "M",
+      "scenarios": [
+        "tools-jobs-01 job_start with a shell command returns an opaque job- prefixed handle and status running|scheduled",
+        "tools-jobs-02 job_status reads the settled one-shot result with exit code 0 and a bounded output window from the spill file",
+        "tools-jobs-03 job_stop cancels an in-flight sleep and returns status cancelled with exit code 137/143; it does not delete a recurring schedule (schedule_delete does)"
+      ],
+      "note": "20261120-job-tools tree (leaf C): job-handle tools on internal/scheduler; RED skip-guarded until leaf D registers job_start/job_status/job_stop."
     },
     {
       "name": "tui-flows",
