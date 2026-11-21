@@ -90,6 +90,16 @@ func newDriverAutoTestManager(t *testing.T, employeeID string) *Manager {
 	if err := constStore.Put(ctx, employeeID, validConstitution()); err != nil {
 		t.Fatalf("seed employee constitution: %v", err)
 	}
+	// Register a tier-1 GoalLoop, mirroring boot wiring: Trigger now fails
+	// loudly for employees without a loop (the legacy synthesized
+	// "triggered" receipt is gone), so the deferred-turn path must
+	// reach a live loop. A stub reflector returns zero candidates, which
+	// makes every round a clean no-op Decide (the same observable shape
+	// the old fallback gave the driver: round settles, no execution).
+	stub := newStubReflector()
+	loop := NewGoalLoop(employeeID, testTier1Constitution(), goalStore, nil).
+		WithReflector(stub)
+	mgr.RegisterGoalLoop(employeeID, loop)
 	return mgr
 }
 

@@ -329,6 +329,12 @@ type GoalLoop struct {
 	// Configurable thresholds.
 	maxConsecutiveFailures int
 
+	// retryPolicy bounds per-round retries of executor.ExecuteBot inside
+	// Execute (goal_loop_retry.go). Default DefaultRetryPolicy (2 retries,
+	// 1s backoff doubling) — the retired bot runner's semantics. Guarded
+	// by mu; overridden via WithRetryPolicy (zero value = no retry).
+	retryPolicy RetryPolicy
+
 	// External callbacks.
 	pauseFn    PauseFunc
 	goalLookup GoalLookup
@@ -562,9 +568,23 @@ func NewGoalLoop(employeeID string, c *Constitution, store *GoalStore, logger *s
 		goalStore:                       store,
 		logger:                          logger.With("component", "goal-loop", "employee_id", employeeID),
 		maxConsecutiveFailures:          DefaultMaxConsecutiveFailures,
+		retryPolicy:                     DefaultRetryPolicy,
 		consecutiveSuccessesForRecovery: DefaultConsecutiveSuccessesForRecovery,
 		gateEnabled:                     true,
 	}
+}
+
+// WithRetryPolicy overrides the per-round executor retry policy used by
+// Execute (goal_loop_retry.go). Default is DefaultRetryPolicy (2 retries,
+// 1s exponential backoff) — the retired bot runner's semantics. A
+// zero-value policy (MaxRetries=0) disables retry: every ExecuteBot failure
+// feeds ConsecutiveFailures after a single attempt (opt-out lever for tests
+// and latency-sensitive deployments).
+func (l *GoalLoop) WithRetryPolicy(p RetryPolicy) *GoalLoop {
+	l.mu.Lock()
+	l.retryPolicy = p
+	l.mu.Unlock()
+	return l
 }
 
 // WithExecutor injects the BotExecutor used by Execute. Required for the loop
@@ -1071,7 +1091,14 @@ func (l *GoalLoop) Execute(ctx context.Context, plan PlanRef) (*bot.BotExecution
 	}
 
 	start := time.Now()
-	output, tokens, err := runner.ExecuteBot(ctx, systemPrompt, userMessage)
+	// Bounded per-round retry with exponential backoff around the executor
+	// call (usability remediation C, matching the retired bot runner's
+	// DefaultRetryPolicy). A transient failure retried into success never
+	// reaches the failure counter; the FINAL attempt's error is what
+	// Reflect sees, so a persistent failure burns the retries once and
+	// still records exactly one failure per round. Context cancellation is
+	// non-retriable. WithRetryPolicy(RetryPolicy{}) opts out.
+	output, tokens, err := l.executeBotWithRetry(ctx, runner, systemPrompt, userMessage)
 	duration := time.Since(start)
 
 	result := &bot.BotExecutionResult{

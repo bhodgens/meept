@@ -107,7 +107,14 @@ message store and drained at the start of the target's next turn. The drainer is
 wired onto the per-turn loop clone — a message sent to a bot while it is idle
 is visible on that bot's next goal round. Bots can be triggered by bus events
 through the event-action router (`internal/daemon`); the router is started when
-the bot manager starts, so bus-event triggers reach the handler.
+the bot manager starts, so bus-event triggers reach the handler. A trigger now
+REQUIRES a constitution: boot GoalLoop registration skips plain bots without
+one, and `employee.Manager.Trigger` fails loudly with
+`ErrEmployeeNoConstitution` ("run agents migrate (or hire the bot) before
+triggering") instead of the legacy synthesized `triggered` receipt that reported
+success for an invocation that never ran. Run `meept agents migrate --apply
+<bot-id>` to give a legacy bot a constitution (the bot definition's budget /
+invocation constraints are carried into it), or hire it as an employee.
 
 The structured `AgentInboxBody` envelope (`body` plus optional `structured`
 `tool_targets` / `file_paths` / `plan_entries`) applies to bot and employee

@@ -405,7 +405,7 @@ meept agents migrate              # scan and propose
 meept agents migrate --apply <id> # write proposed constitution to disk
 ```
 
-For bots whose prompt is too vague to synthesize constraints, the migrate command writes a minimal conservative constitution and flags it for human review. It never refuses to migrate.
+For bots whose prompt is too vague to synthesize constraints, the migrate command writes a minimal conservative constitution and flags it for human review. It never refuses to migrate. The bot definition's resource-envelope constraints (`daily_budget_cents`, `max_invocations_per_day`, `max_tokens_per_turn`) are copied into the synthesized constitution when declared, so a migrated bot gets live budget/invocation enforcement through the PreExecChecker immediately (zero/unset values keep the conservative "no limit" defaults). Note that triggering a bot that still has NO constitution fails loudly with `ErrEmployeeNoConstitution` — apply the migration (or hire the bot) before triggering.
 
 Legacy `meept bots` commands are removed. Scripts that call `meept bots` get a clear error pointing to `meept agents --help` and this document.
 
@@ -426,7 +426,7 @@ meept agents update <id> <definition.json5>
 meept agents delete <id>                       # stops + deletes; confirms unless --force
 meept agents pause <id>                        # operator pause
 meept agents resume <id>                       # operator resume (only un-pause path)
-meept agents trigger <id> [payload-json]       # invoke the goal loop now; a cap-blocked round prints "employee busy: active plan cap reached (skipped)"
+meept agents trigger <id> [payload-json]       # invoke the goal loop now; a cap-blocked round prints "employee busy: active plan cap reached (skipped)"; a plain bot without a constitution FAILS with "employee has no constitution; run agents migrate (or hire the bot) before triggering"
 meept agents amend <id> --field=<key> <value>  # propose constitution amendment (routes to Plan signoff)
                                                #   --reason "text" attaches an optional justification
                                                #   values that parse as JSON are sent decoded (arrays, numbers, bools)
@@ -656,7 +656,7 @@ New methods under the `agents.` namespace. Existing `bot.*` methods are removed 
 |--------|-------|
 | `agents.list`, `agents.get`, `agents.create`, `agents.update`, `agents.delete` | direct ports of existing `bot.*` lifecycle |
 | `agents.pause`, `agents.resume` | direct ports |
-| `agents.trigger` | programmatic trigger (used internally by webhook handler) |
+| `agents.trigger` | programmatic trigger (used internally by webhook handler). Requires a constitution: a plain bot with none fails with `ErrEmployeeNoConstitution` (run `agents migrate --apply` or hire it) — the legacy synthesized `triggered` receipt for an invocation that never ran is removed. |
 | `agents.amend` | propose constitution amendment, routes to Plan signoff |
 | `agents.goals.list`, `agents.goals.get` | goal listing |
 | `agents.goals.create` | create a goal (params are a `GoalSpec`: `{"employee_id","title","mandate","source","gate"}`; `source` `user|trigger`). Same surface as `meept agents goal-create` / `POST /api/v1/agents/{id}/goals`. |

@@ -34,7 +34,7 @@ func newBotTriggerHandler(c *Components, logger *slog.Logger) *botTriggerHandler
 
 // HandleBotTrigger routes a bus-event trigger to the target bot's GoalLoop.
 // The payload mirrors triggerViaGoalLoop's TriggerEvent shape
-// (internal/employee/manager.go:1712-1745): Manager.Trigger reads the "source"
+// (internal/employee/manager.go): Manager.Trigger reads the "source"
 // key to set TriggerEvent.Source and marshals the whole map into
 // TriggerEvent.Payload, so "bus_event" + "prompt" lands verbatim on the loop.
 // The error is returned unwrapped so the router logs it; it is also logged

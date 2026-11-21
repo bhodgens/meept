@@ -261,8 +261,14 @@
         "typed": true
       },
       {
-        "file": "internal/bot/runner.go",
+        "file": "internal/bot/bot/runner.go",
         "line": 177,
+        "payload_keys": [],
+        "typed": true
+      },
+      {
+        "file": "internal/bot/runner.go",
+        "line": 136,
         "payload_keys": [],
         "typed": true
       },
@@ -274,13 +280,13 @@
       },
       {
         "file": "internal/employee/goal_loop.go",
-        "line": 1056,
+        "line": 1076,
         "payload_keys": [],
         "typed": true
       },
       {
         "file": "internal/employee/goal_loop.go",
-        "line": 1145,
+        "line": 1172,
         "payload_keys": [],
         "typed": true
       }
@@ -309,14 +315,20 @@
     ],
     "bot.result": [
       {
-        "file": "internal/bot/runner.go",
+        "file": "internal/bot/bot/runner.go",
         "line": 192,
         "payload_keys": [],
         "typed": true
       },
       {
+        "file": "internal/bot/runner.go",
+        "line": 151,
+        "payload_keys": [],
+        "typed": true
+      },
+      {
         "file": "internal/employee/goal_loop.go",
-        "line": 1141,
+        "line": 1168,
         "payload_keys": [],
         "typed": true
       }
@@ -682,7 +694,7 @@
     "employee.result": [
       {
         "file": "internal/employee/goal_loop.go",
-        "line": 1143,
+        "line": 1170,
         "payload_keys": [],
         "typed": true
       }
@@ -4208,6 +4220,11 @@
         "file": "internal/activity/busbridge.go",
         "line": 60,
         "subscriber_id": "activity-ring"
+      },
+      {
+        "file": "internal/bot/bot/router.go",
+        "line": 66,
+        "subscriber_id": "\"bot-router-\"+topic"
       },
       {
         "file": "internal/bot/router.go",

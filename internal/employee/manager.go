@@ -57,6 +57,16 @@ var ErrEmployeeNotFound = errors.New("employee not found")
 // load time."
 var ErrConstitutionRequired = errors.New("employee: constitution required; see docs/workflows/employees.md")
 
+// ErrEmployeeNoConstitution is returned by Manager.Trigger when the target
+// has no GoalLoop registered because it is a plain bot without a
+// constitution. Boot GoalLoop registration skips un-constitutioned bots, so
+// there is no live executor for a trigger on one — the legacy path used to
+// fabricate a "triggered" receipt for an invocation that never ran. The
+// constitution is required for bots (owner decision, usability remediation
+// A): triggers now fail loudly and point at `meept agents migrate` (or
+// hiring the bot) as the repair.
+var ErrEmployeeNoConstitution = errors.New("employee has no constitution; run agents migrate (or hire the bot) before triggering")
+
 // ErrFrozenField is returned by AmendConstitution when the amendment patch
 // touches a field listed in the existing constitution's
 // AmendmentPolicy.FrozenFields.
@@ -164,7 +174,9 @@ type TriggerResult struct {
 	Status       string    `json:"status"`
 	// SkipReason explains a Status of "skipped" (e.g. "max_active_plans"
 	// when the employee's plan cap blocked the round). Empty for the
-	// completed/triggered/error statuses.
+	// completed/error statuses. (The legacy synthesized "triggered"
+	// status is gone — un-constitutioned triggers now fail with
+	// ErrEmployeeNoConstitution.)
 	SkipReason string `json:"skip_reason,omitempty"`
 }
 
@@ -1656,10 +1668,12 @@ func (m *Manager) Resume(ctx context.Context, id string) error {
 // REFLECT cycle (tier-dependent) and the returned TriggerResult reflects the
 // actual outcome.
 //
-// When no GoalLoop is registered, Trigger falls back to the legacy path:
-// record the trigger attempt and return a synthesized "triggered"
-// TriggerResult. This keeps backward compatibility for employees without a
-// constitution/loop.
+// When no GoalLoop is registered the employee has no constitution (boot
+// registration skips un-constitutioned bots), so nothing can actually
+// execute. Trigger then fails loudly with ErrEmployeeNoConstitution — the
+// legacy path that fabricated a "triggered" TriggerResult without running
+// anything is gone (usability remediation A: constitution required for
+// triggers).
 func (m *Manager) Trigger(ctx context.Context, id string, payload map[string]any) (*TriggerResult, error) {
 	if m.botManager == nil {
 		return nil, fmt.Errorf("trigger employee %q: bot backend not configured (enable bots.enabled to manage employees)", id)
@@ -1685,32 +1699,38 @@ func (m *Manager) Trigger(ctx context.Context, id string, payload map[string]any
 		tierTag = c.AutonomyTier.String()
 	}
 
-	// Turn start: record the reachability heartbeat so Reachability() reflects
-	// employees whose loops actually fire (in-memory, no I/O).
-	m.MarkSeen(id)
-
-	// GoalLoop path: when a loop is registered, delegate to Decide under
-	// per-employee serialization.
+	// GoalLoop path: when a loop is registered, record the reachability
+	// heartbeat (Reachability() reflects employees whose loops actually
+	// fire — in-memory, no I/O) and delegate to Decide under per-employee
+	// serialization.
 	loop := m.GetGoalLoop(id)
 	if loop != nil {
+		m.MarkSeen(id)
 		return m.triggerViaGoalLoop(ctx, id, payload, tierTag, loop)
 	}
 
-	// Legacy fallback: no GoalLoop registered. Record the trigger attempt
-	// and return a synthesized TriggerResult (keeps the RPC surface
-	// functional for employees without a loop).
-	result := &TriggerResult{
-		InvocationID: idpkg.Generate("trig_"),
-		StartedAt:    time.Now().UTC(),
-		Status:       "triggered",
+	// Constitution-required gate (usability remediation A): no GoalLoop means
+	// boot registration skipped this row (plain bot, no constitution) or
+	// wiring refused the employee. Nothing can execute, so fail LOUDLY —
+	// never fabricate a "triggered" receipt for an invocation that never ran.
+	_, hasConst := m.cachedConstitution(id)
+	if !hasConst {
+		if emp, empErr := m.GetEmployee(ctx, id); empErr == nil && emp != nil && emp.HasConstitution() {
+			hasConst = true
+		}
 	}
 	m.emitMetric("employee.invocations", 1, map[string]string{
 		"employee_id": id,
 		"tier":        tierTag,
-		"outcome":     "success",
+		"outcome":     "error",
 	})
-	m.emitBudgetMetric(ctx, id)
-	return result, nil
+	if hasConst {
+		// A constitution exists but no loop is wired (startup registration
+		// refused or failed): still a dead trigger — surface it, don't fake
+		// success.
+		return nil, fmt.Errorf("trigger employee %q: no goal loop registered (check daemon startup logs for the registration refusal)", id)
+	}
+	return nil, fmt.Errorf("trigger employee %q: %w", id, ErrEmployeeNoConstitution)
 }
 
 // triggerViaGoalLoop is the GoalLoop-backed Trigger path. It acquires the
@@ -3475,6 +3495,16 @@ func extractJSON(s string) string {
 // default. The charter copies the legacy prompt verbatim; the purpose is
 // derived from the description (first sentence) or a fallback string.
 //
+// Usability remediation (B): the legacy bot's resource-envelope
+// constraints (DailyBudgetCents, MaxInvocationsPerDay, MaxTokensPerTurn)
+// are carried into the synthesized constitution so migrated/hired bots get
+// LIVE budget/invocation enforcement through PreExecChecker (which reads
+// constitution.Constraints via the store-backed BudgetChecker). Zero/absent
+// values keep the DefaultConservativeConstitution defaults ("no limit").
+// BotConstraints.MaxIterations and BotConstraints.Timeout have no field on
+// ConstitutionalConstraints and stay on the definition — the goal-loop lane
+// does not read them (contradiction note in the task report).
+//
 // This function never fails — it always returns a usable Constitution.
 func synthesizeConservativeConstitution(def bot.BotDefinition) Constitution {
 	purpose := derivePurpose(def)
@@ -3485,6 +3515,18 @@ func synthesizeConservativeConstitution(def bot.BotDefinition) Constitution {
 	c.Role = "migrated legacy bot"
 	c.Charter = def.Prompt
 	c.AuthoredBy = "migrate"
+	// Propagate the live-enforced subset of the bot's resource envelope.
+	// A zero value means "the bot declared no limit" — leave the
+	// conservative default (also zero) untouched rather than clobbering.
+	if def.Constraints.DailyBudgetCents > 0 {
+		c.Constraints.DailyBudgetCents = def.Constraints.DailyBudgetCents
+	}
+	if def.Constraints.MaxInvocationsPerDay > 0 {
+		c.Constraints.MaxInvocationsPerDay = def.Constraints.MaxInvocationsPerDay
+	}
+	if def.Constraints.MaxTokensPerTurn > 0 {
+		c.Constraints.MaxTokensPerTurn = def.Constraints.MaxTokensPerTurn
+	}
 	return c
 }
 

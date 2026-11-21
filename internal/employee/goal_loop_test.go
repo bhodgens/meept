@@ -1331,7 +1331,13 @@ func TestDecide_Tier3_FailurePath_SyntheticResultAndContinue(t *testing.T) {
 	failures := 0
 	loop := NewGoalLoop("emp-t3-fail", c, nil, nil).
 		WithReflector(reflector).
-		WithExecutor(executor)
+		WithExecutor(executor).
+		// This test pins the single-attempt failure -> synthetic-result ->
+		// continue path; the default per-round retry would recover the
+		// transient first failure (the execFn fails only call 1). Opt out
+		// so the failure path under test stays reachable (retry itself is
+		// pinned by TestGoalLoop_Execute_RetriesTransientFailure...).
+		WithRetryPolicy(RetryPolicy{})
 	loop.SetEmitMetricFunc(func(name string, value float64, tags map[string]string) {
 		if name != "employee.invocations" {
 			return
