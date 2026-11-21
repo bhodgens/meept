@@ -5364,9 +5364,6 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			} else {
 				botRouter := bot.NewEventActionRouter(msgBus, newBotTriggerHandler(c, logger))
 				botManager := bot.NewManager(botStore, botRouter)
-				if msgBus != nil {
-					botManager.SetBus(msgBus)
-				}
 
 				c.BotManager = botManager
 				c.BotStore = botStore

@@ -5394,7 +5394,6 @@
       "diff": "L",
       "title": "a real bot bus-trigger round emits bot.result and a real agents.trigger round emits employee.result, each with status + stop_reason and no kind key",
       "paths": [
-        "internal/bot/runner.go",
         "internal/employee/goal_loop.go",
         "internal/daemon/components.go"
       ]
