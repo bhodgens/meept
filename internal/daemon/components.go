@@ -3904,6 +3904,13 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	if c.TaskRegistry != nil {
 		taskStore = c.TaskRegistry.Store()
 	}
+	// job-tools: capture the declarative shell permission table and the
+	// registered shell tool built inside registerBuiltinTools so the
+	// scheduler's execution-time guard reuses the SAME table and risk
+	// classifier as agent-dispatched shell calls (never a second table).
+	// Both stay nil when no table was configured / no tool registered.
+	var jobGuardPermTable *intsecurity.PermissionTable
+	var jobGuardShellTool *builtin.ShellExecuteTool
 	// Transcript summarize chatter: the dedicated summarize_model client
 	// when one was built, else the summarizer chain default (both nil
 	// when no model resolved -- the tool's config error stays honest).
@@ -3915,7 +3922,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// dedicated directory under the daemon data dir, opened lazily inside
 	// registerBuiltinTools only when enabled.
 	knowledgeDataDir := filepath.Join(cfg.Daemon.DataDir, "knowledge")
-	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, pendingChangesRegistry, changeJournal, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, logger, cfg.Media, c.LLMResolver, cfg.Security.SSRF, cfg.Browser, cfg.Transcript, transcriptChatter, c.SkillWriter, c.SkillRegistry, c.TokenStore, c.MCPManager, cfg.Memory.Knowledge, knowledgeDataDir, c.KnowledgeStore, &c.KnowledgeStore, cfg.Security.ShellPermissions, gateCap, securityEngine, cfg.Agent.ToolTimeoutProbeEnabled)
+	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, pendingChangesRegistry, changeJournal, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, logger, cfg.Media, c.LLMResolver, cfg.Security.SSRF, cfg.Browser, cfg.Transcript, transcriptChatter, c.SkillWriter, c.SkillRegistry, c.TokenStore, c.MCPManager, cfg.Memory.Knowledge, knowledgeDataDir, c.KnowledgeStore, &c.KnowledgeStore, cfg.Security.ShellPermissions, gateCap, securityEngine, cfg.Agent.ToolTimeoutProbeEnabled, &jobGuardPermTable, &jobGuardShellTool)
 
 	// GitHub PR/CI tools ([github] block, github-pr-ci tree): register
 	// next to the other builtin tools, gated on enabled + a resolvable
@@ -5155,6 +5162,28 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		jobDeps := &scheduler.JobDependencies{
 			Bus: msgBus,
 		}
+		// job-tools: inject the shared two-phase shell guard and the job
+		// result sink so scheduler-fired shell jobs are fenced at execution
+		// time and their settled results land in the scheduler's result lane.
+		// All inputs are optional/nil-safe: with no security components the
+		// guard skips every check (legacy behavior); the sink is always the
+		// scheduler's own store adapter, which is the single result-lane
+		// owner. Nothing here runs when [scheduler].enabled=false.
+		guardOpts := make([]intsecurity.ShellGuardOption, 0, 1)
+		if classifier := jobShellGuardClassifier(jobGuardShellTool); classifier != nil {
+			guardOpts = append(guardOpts, intsecurity.WithShellGuardClassifier(classifier))
+		}
+		jobDeps.Guard = intsecurity.NewShellCommandGuard(
+			c.FenceChecker,         // nil today (shared checker retired); guard skips fence
+			jobGuardPermTable,      // the SAME table built for the shell tool
+			c.SecurityOrchestrator, // Tirith shell scan
+			guardOpts...,
+		)
+		// jobDeps.ResultSink stays nil: leaf A's createJob wires the sink
+		// from the scheduler's OWN store (scheduler.go:1019-1023), which is
+		// the single result-lane owner. The scheduler is always built with
+		// this jobDeps via WithJobDependencies below, so every shell job
+		// created through CreateJobWithDeps gets that store-backed sink.
 		if c.MemoryManager != nil {
 			jobDeps.MemoryManager = &scheduler.MemoryOptimizerAdapter{
 				UpdateMetricsFn: c.MemoryManager.UpdateGraphMetrics,
@@ -8576,6 +8605,8 @@ func registerBuiltinTools(
 	gateCap *gateCaptureStore,
 	securityEngine *intsecurity.Engine,
 	probeTimeoutEnabled bool,
+	permTableOut **intsecurity.PermissionTable,
+	shellToolOut **builtin.ShellExecuteTool,
 ) {
 	readCache := builtin.NewReadCache(30)
 
@@ -8666,6 +8697,11 @@ func registerBuiltinTools(
 			logger.Error("shell permission table disabled: config invalid", "error", err)
 		} else {
 			shellTool.SetPermissionTable(permTable)
+			// job-tools: hand the SAME table to the scheduler guard builder;
+			// never build a second permission table.
+			if permTableOut != nil {
+				*permTableOut = permTable
+			}
 			logger.Info("Shell permission table wired",
 				"preset", shellPermCfg.Preset, "rules", len(shellPermCfg.Rules))
 			// CHOKEPOINT 2 (jev-command-gate leaf 02, Contract C4): the
@@ -8723,6 +8759,11 @@ func registerBuiltinTools(
 	// sweep of this tree). Best-effort -- a spill failure never fails a command.
 	shellTool.SetSpillWriter(llm.NewSpillService(""))
 	registry.Register(shellTool)
+	// job-tools: hand the registered shell tool to the scheduler guard builder
+	// so it reuses the tool's exported risk classifier (no duplicated logic).
+	if shellToolOut != nil {
+		*shellToolOut = shellTool
+	}
 
 	// Git tools for commit workflow (workingDir set per-session)
 	gitOverviewTool := builtin.NewGitOverviewTool("")
@@ -12087,6 +12128,26 @@ func (r sessionProjectResolver) CreateOrResolveProject(ctx context.Context, path
 		return nil, err
 	}
 	return &session.ProjectBinding{ID: p.ID, Path: p.LocalPath}, nil
+}
+
+// jobShellGuardClassifier adapts the registered builtin shell tool's exported
+// risk accessor to the shared guard's classifier seam. Both the agent-dispatched
+// shell tool and scheduler-fired shell jobs therefore classify a command with
+// the SAME logic — the execution-time check cannot drift from the tool's.
+func jobShellGuardClassifier(tool *builtin.ShellExecuteTool) intsecurity.ShellGuardClassifier {
+	if tool == nil {
+		return nil
+	}
+	return func(command string) (intsecurity.RiskLevel, string) {
+		switch tool.GetRiskLevel(command) {
+		case security.RiskCritical:
+			return intsecurity.RiskCritical, command
+		case security.RiskHigh:
+			return intsecurity.RiskHigh, command
+		default:
+			return intsecurity.RiskMedium, command
+		}
+	}
 }
 
 // shellRulesFromConfig converts the JSON5 [security.shell_permissions].rules
