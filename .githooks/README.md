@@ -581,8 +581,11 @@ git add .githooks/deadcode-baseline.txt .githooks/deadcode-baseline-notest.txt
 Run this only to drop lines for code you wired or deleted. `--rebaseline`
 refuses net growth and writes neither file. Do not edit the baseline files
 by hand to absorb a new unwired function. Do not use `git commit --no-verify`
-to land that function. CI runs `scripts/deadcode-baseline-growth-check.sh`
-against the push parent. A direct push that grows either file fails the
+to land that function. `.githooks/pre-commit-deadcode` runs
+`scripts/deadcode-baseline-growth-check.sh HEAD` before the no-staged-Go
+early return, so a baseline-only commit cannot pass locally. CI runs the
+same script against the push parent. A zero `github.event.before` is not a
+skip (the script exits 2). A direct push that grows either file fails the
 `deadcode` job. The only exception is a pull request with the label
 `deadcode-baseline-growth`.
 

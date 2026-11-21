@@ -10,9 +10,13 @@
 #
 # Growth is a line present in the working-tree file and absent from
 # `git show <base>:<file>`. Compared with `comm -13` on LC_ALL=C sorted
-# copies. A path missing at <base> is a new file: every current line is
-# growth. Shrink (lines only in the base) is allowed and prints a one-line
-# count. Zero growth exits 0. Any growth exits 1.
+# copies, so a reorder of the same lines is not growth. A path missing
+# at <base> is a new file: every current line is growth. A working-tree
+# baseline path that is missing is an error (exit 2). Do not substitute
+# an empty file — that would report zero growth for a deleted allow-list.
+# Shrink (lines only in the base) is allowed and prints a one-line
+# count. Zero growth exits 0. Any growth exits 1. A base ref that is not
+# a commit exits 2 (including 40 zeros).
 #
 # There is no skip switch and no MEEPT_* override. The only human exception
 # is the pull-request label deadcode-baseline-growth, applied by CI before
@@ -80,11 +84,11 @@ for rel in "${files[@]}"; do
     : > "$base_raw"
   fi
 
-  if [ -f "$rel" ]; then
-    cp "$rel" "$cur_raw"
-  else
-    : > "$cur_raw"
+  if [ ! -f "$rel" ]; then
+    echo "deadcode-baseline-growth-check: working-tree baseline missing: ${rel}" >&2
+    exit 2
   fi
+  cp "$rel" "$cur_raw"
 
   LC_ALL=C sort -o "$base_sorted" "$base_raw"
   LC_ALL=C sort -o "$cur_sorted" "$cur_raw"

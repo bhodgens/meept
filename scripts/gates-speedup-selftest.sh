@@ -87,6 +87,18 @@ scratch_repo() { # scratch_repo DIR
     )
 }
 
+# Plant the growth script plus both baselines so a scratch repo can run
+# pre-commit-deadcode. The hook calls the script before the no-staged-.go
+# return; without these files that call exits non-zero and masks the case.
+plant_growth_gate() { # plant_growth_gate DIR
+    d="$1"
+    mkdir -p "$d/.githooks" "$d/scripts"
+    cp "$REPO_ROOT/scripts/deadcode-baseline-growth-check.sh" "$d/scripts/deadcode-baseline-growth-check.sh"
+    chmod +x "$d/scripts/deadcode-baseline-growth-check.sh"
+    printf 'kept\n' > "$d/.githooks/deadcode-baseline.txt"
+    printf 'kept\n' > "$d/.githooks/deadcode-baseline-notest.txt"
+}
+
 # ==========================================================================
 # [1] Census half of pre-commit-e2e (speedup item 1).
 # ==========================================================================
@@ -220,6 +232,7 @@ check double_failure_still_blocks "$ok" "rc=$rc"
 DC="$WORK/repo-dc"
 scratch_repo "$DC"
 mkdir -p "$DC/cmd/a"
+plant_growth_gate "$DC"
 printf 'module example.com/dc\n\ngo 1.24\n\ntoolchain go1.24.0\n' > "$DC/go.mod"
 printf 'package a\n\nfunc Bar() {}\n\nfunc Baz() {}\n' > "$DC/cmd/a/a.go"
 ( cd "$DC" && git add -A && git commit -q -m base ) >/dev/null 2>&1
@@ -413,6 +426,7 @@ check snapshot_yields_staged_not_worktree "$ok" "checkout-index of staged index 
 ER="$WORK/repo-empty"
 scratch_repo "$ER"
 mkdir -p "$ER/.githooks" "$ER/e2e" "$ER/docs"
+plant_growth_gate "$ER"
 printf '{"path_map": {"internal/agent/": ["smoke"]}, "exempt": {}}\n' > "$ER/e2e/manifest.json"
 cp "$HOOK_E2E" "$ER/.githooks/pre-commit-e2e"
 printf 'x\n' > "$ER/docs/readme.md"
@@ -426,9 +440,38 @@ out="$(cd "$ER" && env MEEPT_DEADCODE_BIN="$WORK/dcstub" MEEPT_DEADCODE_MAINS=".
       MEEPT_DEADCODE_BASELINE="$WORK/dc-baseline-test.txt" \
       MEEPT_DEADCODE_BASELINE_NOTEST="$WORK/dc-baseline-notest.txt" \
       GOTOOLCHAIN=local bash "$HOOK_DEADCODE" 2>&1)"; rc=$?
-# empty staged diff + not FULL_TREE -> early exit 0 BEFORE any analysis
+# empty staged diff + not FULL_TREE -> growth check (no growth) then early
+# exit 0 BEFORE reachability analysis
 [ "$rc" = "0" ] && ok=1 || ok=0
 check gate20_empty_index_noop "$ok" "rc=$rc out=$(printf '%s' "$out" | head -c 150)"
+
+# Missing working-tree baseline must not pass. The old script copied nothing
+# to an empty file and exited 0. The hook calls the script before the
+# no-staged-.go return, so a baseline-only tree with a deleted allow-list
+# exits non-zero even when no .go file is staged.
+MB="$WORK/repo-missing-base"
+scratch_repo "$MB"
+plant_growth_gate "$MB"
+( cd "$MB" && git add -A && git commit -q -m base ) >/dev/null 2>&1
+rm -f "$MB/.githooks/deadcode-baseline.txt"
+out="$(cd "$MB" && env MEEPT_DEADCODE_BIN="$WORK/dcstub" MEEPT_DEADCODE_MAINS="./cmd/a" \
+      MEEPT_DEADCODE_ALLOW_SKIP=1 GOTOOLCHAIN=local bash "$HOOK_DEADCODE" 2>&1)"; rc=$?
+ok=1
+[ "$rc" != "0" ] && printf '%s\n' "$out" | grep -qF "working-tree baseline missing" || ok=0
+check deadcode_missing_baseline_exits_nonzero "$ok" "rc=$rc out=$(printf '%s' "$out" | head -c 200)"
+
+# Baseline-only growth (no staged .go) must not exit 0. The old hook returned
+# before any growth check when git diff --cached had no .go path.
+GR="$WORK/repo-baseline-growth"
+scratch_repo "$GR"
+plant_growth_gate "$GR"
+( cd "$GR" && git add -A && git commit -q -m base ) >/dev/null 2>&1
+printf 'new-unwired\n' >> "$GR/.githooks/deadcode-baseline.txt"
+( cd "$GR" && git add .githooks/deadcode-baseline.txt ) >/dev/null 2>&1
+out="$(cd "$GR" && env MEEPT_DEADCODE_ALLOW_SKIP=1 GOTOOLCHAIN=local bash "$HOOK_DEADCODE" 2>&1)"; rc=$?
+ok=1
+[ "$rc" != "0" ] && printf '%s\n' "$out" | grep -qF "growth" || ok=0
+check deadcode_baseline_only_growth_exits_nonzero "$ok" "rc=$rc out=$(printf '%s' "$out" | head -c 200)"
 
 # ==========================================================================
 # bash -n on every touched shell file.
@@ -436,6 +479,7 @@ check gate20_empty_index_noop "$ok" "rc=$rc out=$(printf '%s' "$out" | head -c 1
 syntax_fail=0
 for f in "$PRE_COMMIT" "$HOOK_DISPATCH_LIB" "$HOOK_E2E" "$HOOK_DEADCODE" \
          "$REPO_ROOT/.githooks/pre-push-e2e" "$AFFECTED" \
+         "$REPO_ROOT/scripts/deadcode-baseline-growth-check.sh" \
          "$SCRIPT_DIR/gates-speedup-selftest.sh"; do
     if ! bash -n "$f" 2>/dev/null; then
         echo "  bash -n FAILED: $f"

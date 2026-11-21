@@ -185,10 +185,20 @@ digest_inputs() {
     } | hash_stream
 }
 
+# Allow-list growth is not a reachability question. A commit that only
+# edits .githooks/deadcode-baseline*.txt used to hit the no-staged-.go
+# return below and exit 0. Run the growth script first — before that
+# return and before the missing-binary skip — so neither path can hide
+# a larger allow-list. Relative path is intentional: when the dispatcher
+# snapshot-gates this hook, cwd and GIT_WORK_TREE are the prepared-commit
+# tree, and the script diffs those staged bytes against HEAD.
+bash scripts/deadcode-baseline-growth-check.sh HEAD
+
 # Locate the deadcode binary. A missing binary FAILS the gate: the whole
 # point is deterministic enforcement, and a silent skip on a machine
 # without the tool is how unwired code lands. The only escape hatch is an
 # explicit opt-out (MEEPT_DEADCODE_ALLOW_SKIP=1), and never on CI.
+# ALLOW_SKIP does not skip the growth check above.
 # MEEPT_DEADCODE_BIN pins the binary directly (fixture seam; skips the PATH
 # search — used by scripts/gates-speedup-selftest.sh with a stub that
 # emulates deadcode's output format offline).
@@ -216,10 +226,18 @@ if [ -z "$DEADCODE_BIN" ]; then
     exit 1
 fi
 
-# No staged Go files → nothing to check (unless CI/full-tree mode is
-# enforcing the whole tree against the baselines).
+# No staged Go files → skip the reachability analysis (unless CI/full-tree
+# mode is enforcing the whole tree). The growth check above already ran.
+# A failing git diff must not look like an empty staged set (that path
+# exits 0). Do not swallow stderr or a non-zero status from git.
 if [ "$FULL_TREE" != "1" ]; then
-    STAGED_GO_FILES=$(git -c color.ui=false -c core.quotepath=false diff --cached --name-only --diff-filter=ACMR 2>/dev/null | grep '\.go$' || true)
+    if ! staged_names=$(git -c color.ui=false -c core.quotepath=false diff --cached --name-only --diff-filter=ACMR); then
+        echo -e "${RED}✗ git diff --cached failed — cannot tell whether Go files are staged${NC}" >&2
+        exit 1
+    fi
+    # grep exits 1 when nothing matches. That is an empty Go set, not a
+    # git failure — do not let it abort under pipefail.
+    STAGED_GO_FILES=$(printf '%s\n' "$staged_names" | grep '\.go$') || STAGED_GO_FILES=""
     if [ -z "$STAGED_GO_FILES" ] && [ "$REBASELINE" -eq 0 ]; then
         exit 0
     fi

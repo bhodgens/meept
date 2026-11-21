@@ -360,6 +360,8 @@ jobs:
       - name: Refuse deadcode baseline growth
         # No env skip. Label exception is pull_request only; push has none.
         # The script stays free of GitHub label logic so it can run locally.
+        # A zero before-sha (new branch / first push) is not a skip: the
+        # script exits 2 when the sha is not a commit.
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             if [ "${{ contains(github.event.pull_request.labels.*.name, 'deadcode-baseline-growth') }}" = "true" ]; then
@@ -369,10 +371,6 @@ jobs:
             bash scripts/deadcode-baseline-growth-check.sh "${{ github.event.pull_request.base.sha }}"
           else
             before="${{ github.event.before }}"
-            if [ "$before" = "0000000000000000000000000000000000000000" ]; then
-              echo "github.event.before is all zeros (new branch / first push); skipping baseline-growth check"
-              exit 0
-            fi
             bash scripts/deadcode-baseline-growth-check.sh "$before"
           fi
 
