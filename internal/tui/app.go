@@ -526,6 +526,22 @@ func (a *App) ChatSessionID() string {
 	return a.chat.SessionID()
 }
 
+// ChatTranscriptExcerpt returns the raw (unstyled) content of every
+// message in the chat transcript - the deterministic text surface for
+// headless assertions (View() output is styled and word-wrapped, which
+// no test wants to match against).
+func (a *App) ChatTranscriptExcerpt() []string {
+	if a.chat == nil {
+		return nil
+	}
+	msgs := a.chat.GetMessages()
+	out := make([]string, 0, len(msgs))
+	for _, m := range msgs {
+		out = append(out, m.Content)
+	}
+	return out
+}
+
 // loadMainConfigForTTS loads the main meept.json5 config and returns TTS settings.
 // Used for config merging: meept.json5 provides Playback and Behavior defaults,
 // while client.json5 can override Enabled, Engine, and Voice.
@@ -672,6 +688,7 @@ func (a *App) loadSessionImpl() tea.Msg {
 			for _, sess := range resp.Sessions {
 				if sess.ID == a.targetSessionID {
 					a.sessionMgr.SetSession(&sess)
+					a.armRestoreAwareness(&sess)
 					return SessionLoadedMsg{Session: &sess, IsNew: false}
 				}
 			}
@@ -685,6 +702,7 @@ func (a *App) loadSessionImpl() tea.Msg {
 		session, err := a.rpc.GetMostRecentSession()
 		if err == nil && session != nil {
 			a.sessionMgr.SetSession(session)
+			a.armRestoreAwareness(session)
 			return SessionLoadedMsg{Session: session, IsNew: false}
 		}
 	}
@@ -696,6 +714,29 @@ func (a *App) loadSessionImpl() tea.Msg {
 	}
 	a.sessionMgr.SetSession(session)
 	return SessionLoadedMsg{Session: session, IsNew: true}
+}
+
+// armRestoreAwareness arms the pending-turn rebuild for a RESUMED
+// session (03-context/01 T4 resume contract consumed client-side;
+// leaf 05-navigation/03 T1). The next tasks fetch reports this
+// session's non-terminal tasks exactly once, and each one is marked
+// interrupted in the chat transcript instead of vanishing silently
+// (F-ORCH-7).
+func (a *App) armRestoreAwareness(session *types.Session) {
+	if a.tasks == nil || a.chat == nil || session == nil {
+		return
+	}
+	a.tasks.ArmRestoreAwareness(func(awareness models.RestoreAwareness) {
+		for _, t := range awareness.Tasks {
+			name := t.Name
+			if name == "" {
+				name = t.ID
+			}
+			a.chat.AddSystemMessage(fmt.Sprintf(
+				"[restore] interrupted work on this session: task %q (%s) was still %s when the daemon stopped; review it in the tasks view or restart it",
+				name, t.ID, t.State))
+		}
+	})
 }
 
 // SessionLoadedMsg indicates a session was loaded or created.
@@ -1239,10 +1280,44 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return StatusMessageClearMsg{}
 			})
 			refreshCmd := a.refreshPendingChangesCount()
-			if sessionCmd != nil {
-				return a, tea.Batch(sessionCmd, clearCmd, refreshCmd)
+			// Restored (not freshly created) session: rebuild pending-turn
+			// awareness from non-terminal task state (T1). The one-shot
+			// sink wired by armRestoreAwareness marks interrupted work.
+			var restoreCmd tea.Cmd
+			if !msg.IsNew && a.tasks != nil {
+				restoreCmd = a.tasks.RestoreFetchCmd()
 			}
-			return a, tea.Batch(clearCmd, refreshCmd)
+			var batch []tea.Cmd
+			if sessionCmd != nil {
+				batch = append(batch, sessionCmd)
+			}
+			batch = append(batch, clearCmd, refreshCmd)
+			if restoreCmd != nil {
+				batch = append(batch, restoreCmd)
+			}
+			return a, tea.Batch(batch...)
+		}
+		return a, nil
+
+	case models.TaskChipNavMsg:
+		// Task-chip navigation (05-navigation T2, W14/W19): Enter on a
+		// task-bearing reply opens the task detail in the tasks view
+		// with fresh steps (OpenTaskDetailByID fires ListTaskSteps).
+		if a.tasks != nil {
+			a.tasks.OpenTaskDetailByID(msg.TaskID)
+		}
+		a.currentView = ViewTasks
+		return a, nil
+
+	case models.TasksUpdateMsg:
+		// A post-restore awareness fetch (leaf 05-navigation/03 T1) is
+		// dispatched while the chat view is up, so the tasks model must
+		// consume it regardless of the active view. The awareness sink
+		// is one-shot, so a tasks-view user sees the same single pass
+		// via the delegation below; routing it here first is what makes
+		// the marker render from any view.
+		if a.tasks != nil {
+			a.tasks.Update(msg)
 		}
 		return a, nil
 
@@ -1766,9 +1841,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// relay chat message AND a turn.terminal event. While
 					// a turn is pending for this conversation, the relay
 					// is suppressed — the turn.terminal path renders the
-					// single result bubble. The ack carries no task_id,
-					// so the rule is conversation-scoped. Sidebar task
-					// handling (task LIST view) is unaffected.
+					// single result bubble. The turn.terminal carries
+					// task_id (see models/chat_turn.go keep-list), so
+					// the suppression rule is conversation-scoped.
+					// Sidebar task handling (task LIST view) is
+					// unaffected.
 					if convID, _ := payloadMap["conversation_id"].(string); convID != "" && a.chat.SuppressTaskCompletedFor(convID) {
 						// Toast still fires below via resultMsg fields; keep
 						// the suppression silent for the transcript only.

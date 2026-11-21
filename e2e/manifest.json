@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-11-19",
+  "generated": "2026-11-20",
   "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage - behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet. Flutter surface (ui/flutter_ui/**) is covered Dart-side by the gui-flows suite (gui-terminal-01, gui-session-01, gui-quota-01, gui-stream-01, gui-stream-02) against a wire-shape stub: `cd ui/flutter_ui && flutter test test/e2e`. The ui/** path_map keys below make a Flutter change select that suite; scripts/e2e-affected.sh dispatches on suites[].runner to run the Dart command instead of go test (the pre-commit-e2e Go hook does not scan Dart files, so `make e2e-affected-area AREA=gui-flows` / CI's e2e-gui job is the gate). New-package census (pre-commit-e2e): every NEW internal/|pkg/|cmd/ package dir in a commit's staged ADDITIONS must match a path_map key (bidirectional slash-boundary prefix, trailing slashes stripped) or an 'exempt' entry mapping dir -> non-empty reason string; exempt entries are printed as residual risk on every hook run.",
   "path_map": {
     "e2e/suites/smoke": [
@@ -6117,6 +6117,37 @@
         "internal/rpc/plan_seal.go",
         "internal/plan/compiler.go",
         "e2e/suites/plan-lifecycle"
+      ]
+    },
+    {
+      "id": "tui-restore-01",
+      "suite": "tui-flows",
+      "diff": "M",
+      "title": "queue_status on a live daemon reports task_states {task_id,state,name} for a session's parked non-terminal tasks with no active loop, session-scoped (B5)",
+      "paths": [
+        "internal/rpc/queue.go",
+        "e2e/suites/tui-flows"
+      ]
+    },
+    {
+      "id": "tui-restore-02",
+      "suite": "tui-flows",
+      "diff": "M",
+      "title": "auto_resume=true boots the TUI onto session.get_most_recent's answer (never a silent fresh session) and an explicit --session target overrides the resume",
+      "paths": [
+        "internal/tui/app.go",
+        "e2e/suites/tui-flows"
+      ]
+    },
+    {
+      "id": "tui-restore-03",
+      "suite": "tui-flows",
+      "diff": "M",
+      "title": "a resumed session carrying a stale executing task surfaces an interrupted-awareness system message in the chat transcript (pending turns are never silently lost; F-ORCH-7)",
+      "paths": [
+        "internal/tui/app.go",
+        "internal/tui/models/tasks.go",
+        "e2e/suites/tui-flows"
       ]
     }
   ]

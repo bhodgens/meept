@@ -155,6 +155,7 @@ func (m *ChatModel) handleTurnTerminal(msg turnTerminalMsg) tea.Cmd {
 				m.noteTerminalReplyRendered(msg.Reply, msg.TaskID)
 			} else {
 				m.addMessage(RoleAssistant, msg.Reply)
+				m.attachTurnCorrelation(msg)
 				m.trackDirtyMessage(RoleAssistant, msg.Reply)
 				m.noteTerminalReplyRendered(msg.Reply, msg.TaskID)
 			}
@@ -404,6 +405,9 @@ func (m *ChatModel) DeliverTurnTerminal(turnID string, payload map[string]any) {
 			Error:          stringFromPayload(payload, "error"),
 			DurationMS:     int64FromPayload(payload, "duration_ms"),
 			TaskID:         stringFromPayload(payload, "task_id"),
+			IntentType:     stringFromPayload(payload, "intent_type"),
+			HandlerCase:    stringFromPayload(payload, "handler_case"),
+			ClassifiedBy:   stringFromPayload(payload, "classified_by"),
 		})
 		return
 	}
@@ -431,7 +435,36 @@ func (m *ChatModel) DeliverTurnTerminal(turnID string, payload map[string]any) {
 		Error:          stringFromPayload(payload, "error"),
 		DurationMS:     int64FromPayload(payload, "duration_ms"),
 		TaskID:         stringFromPayload(payload, "task_id"),
+		IntentType:     stringFromPayload(payload, "intent_type"),
+		HandlerCase:    stringFromPayload(payload, "handler_case"),
+		ClassifiedBy:   stringFromPayload(payload, "classified_by"),
 	})
+}
+
+// attachTurnCorrelation copies the C1 correlation fields (task_id /
+// intent_type / handler_case / classified_by) from a resolved terminal
+// onto the assistant bubble it just rendered. The task chip, the
+// (turn_id, task_id) dedupe ledger and the why-this-route popover all
+// read identity off the message (05-navigation T1; master C1). Called
+// only right after addMessage on the terminal path, so the target is
+// the last message.
+func (m *ChatModel) attachTurnCorrelation(msg turnTerminalMsg) {
+	if msg.TaskID == "" && msg.IntentType == "" && msg.HandlerCase == "" && msg.ClassifiedBy == "" {
+		return
+	}
+	if len(m.messages) == 0 {
+		return
+	}
+	last := &m.messages[len(m.messages)-1]
+	if last.Role != RoleAssistant {
+		return
+	}
+	last.TaskID = msg.TaskID
+	last.IntentType = msg.IntentType
+	last.HandlerCase = msg.HandlerCase
+	last.ClassifiedBy = msg.ClassifiedBy
+	last.rendered = ""
+	m.updateViewport()
 }
 
 // DeliverTurnProgress routes a progress text for a conversation into the
@@ -459,11 +492,13 @@ func (m *ChatModel) DeliverTurnProgress(conversationID, text string) {
 //
 // DOUBLE-RENDER DEDUPE RULE (binding leaf decision): a completed task turn
 // produces BOTH a task.completed relay chat message AND a turn.terminal
-// event. The turn.terminal ack carries no task_id, so the correct rule is
-// conversation-scoped: once a turn is submitted via SubmitChat for a
-// conversation, that conversation's task.completed chat relays are
-// suppressed until turnTerminalMsg arrives. The sidebar's task.completed
-// handling (task LIST view) is unrelated and never suppressed.
+// event. The correct rule is conversation-scoped: once a turn is
+// submitted via SubmitChat for a conversation, that conversation's
+// task.completed chat relays are suppressed until turnTerminalMsg
+// arrives. The turn.terminal DOES carry task_id (internal/agent/handler.go
+// TurnTerminalEvent) and the (turn_id, task_id) ledger keys on it when
+// present. The sidebar's task.completed handling (task LIST view) is
+// unrelated and never suppressed.
 func (m *ChatModel) SuppressTaskCompletedFor(conversationID string) bool {
 	if conversationID == "" {
 		return false

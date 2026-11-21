@@ -35,6 +35,16 @@ func unwrapThreadConversationID(key string) string {
 	return key
 }
 
+// UnwrapThreadConversationID is the exported view of
+// unwrapThreadConversationID for surfaces that key off the session-level
+// conversation base - the task store's session_tasks join is written with
+// session ids, so an RPC that receives a thread-scoped conversation id must
+// strip the thread suffix before a session-scoped lookup
+// (chat.queue_status task_states, leaf 05-navigation/03 T2).
+func UnwrapThreadConversationID(key string) string {
+	return unwrapThreadConversationID(key)
+}
+
 // isThreadKeyFor reports whether key is a thread-scoped registration owned
 // by the session-level base conversation id.
 func isThreadKeyFor(base, key string) bool {

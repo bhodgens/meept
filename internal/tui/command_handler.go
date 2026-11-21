@@ -221,7 +221,7 @@ func (h *CommandHandler) executeBuiltin(cmd *SlashCommand) *CommandResult {
 	case "edit":
 		return h.executeEdit(cmd.Args)
 	case "plan":
-		return h.executePlan()
+		return h.executePlan(cmd.Args)
 	case "review":
 		return h.executeReview()
 	case "project":
@@ -422,11 +422,14 @@ examples:
   /edit main.go       open main.go in editor
   /edit config.yaml   open config.yaml in editor`,
 
-		"plan": `usage: /plan
+		"plan": `usage: /plan [request...]
 
-enter planning mode. the next message you send will be treated as a
-planning request, causing the agent to decompose the task into steps
-before executing.`,
+forward a planning request to the agent through chat.submit: the
+dispatcher's /plan route decomposes the task into steps and presents a
+plan for review instead of executing. Bare /plan forwards the plan-mode
+toggle. Sub-forms act on gated tasks directly:
+  /plan approve <task-id>   approve a task awaiting approval
+  /plan reject <task-id> <reason>  reject it (never executes)`,
 
 		"review": `usage: /review
 
@@ -1621,7 +1624,19 @@ func (h *CommandHandler) executeEdit(args []string) *CommandResult {
 }
 
 // executePlan enters planning mode for the current task.
-func (h *CommandHandler) executePlan() *CommandResult {
+//
+// ROUTING DECISION (05-navigation T4, W20/N5): "session.set_mode" is NOT
+// a registered daemon RPC, so the old local toggle always died with
+// method-not-found. The dispatcher's /plan route is the working path
+// (internal/agent/dispatcher.go), keyed on the message prefix, so the
+// command forwards its text through chat.submit and lets the daemon own
+// the semantics.
+//
+// Sub-argument exception (06-planning C2): "/plan approve <id>" and
+// "/plan reject <id> <reason>" are gated-task actions, not planning
+// requests; they resolve to task.approve / task.reject directly so the
+// approval card's hint works. Any other argument rides the forward.
+func (h *CommandHandler) executePlan(args []string) *CommandResult {
 	if h.rpc == nil || !h.rpc.IsConnected() {
 		return &CommandResult{
 			Output:  ErrNotConnected,
@@ -1629,28 +1644,96 @@ func (h *CommandHandler) executePlan() *CommandResult {
 		}
 	}
 
-	result, err := h.rpc.Call("session.set_mode", map[string]any{
-		"mode": "planning",
+	if len(args) > 0 {
+		switch args[0] {
+		case "approve":
+			return h.executePlanApproval(args, "task.approve")
+		case "reject":
+			return h.executePlanApproval(args, "task.reject")
+		}
+	}
+
+	// Forward the full command text to chat.submit: bare "/plan" or
+	// "/plan <request...>". Reuse the chat view's session binding when
+	// available; an empty session id lets the daemon resolve/create one.
+	sessionID := ""
+	if h.getChatModel != nil {
+		if chat := h.getChatModel(); chat != nil {
+			sessionID = chat.SessionID()
+		}
+	}
+	text := "/plan"
+	if len(args) > 0 {
+		text = "/plan " + strings.Join(args, " ")
+	}
+	result, err := h.rpc.Call("chat.submit", map[string]any{
+		"message":    text,
+		"session_id": sessionID,
 	})
 	if err != nil {
 		return &CommandResult{
-			Output:  fmt.Sprintf("failed to enter planning mode: %v", err),
+			Output:  fmt.Sprintf("failed to forward /plan to chat.submit: %v", err),
 			IsError: true,
 		}
 	}
 
+	var ack struct {
+		TurnID       string `json:"turn_id"`
+		Accepted     bool   `json:"accepted"`
+		Note         string `json:"note"`
+		Conversation string `json:"conversation_id"`
+	}
+	if err := json.Unmarshal(result, &ack); err != nil {
+		return &CommandResult{Output: "planning request forwarded"}
+	}
+	if !ack.Accepted {
+		note := ack.Note
+		if note == "" {
+			note = "submission rejected"
+		}
+		return &CommandResult{Output: note, IsError: true}
+	}
+	if ack.TurnID != "" {
+		return &CommandResult{Output: fmt.Sprintf("planning request forwarded (turn %s); the result arrives in chat", ack.TurnID)}
+	}
+	return &CommandResult{Output: "planning request forwarded; the result arrives in chat"}
+}
+
+// executePlanApproval resolves the gated-task forms of /plan:
+// approve -> task.approve{task_id}; reject -> task.reject{task_id,
+// reason} (reason forwarded verbatim, joined from the remaining args).
+func (h *CommandHandler) executePlanApproval(args []string, method string) *CommandResult {
+	verb := args[0]
+	if len(args) < 2 {
+		hint := fmt.Sprintf("usage: /plan %s <task-id>", verb)
+		if method == "task.reject" {
+			hint += " <reason>"
+		}
+		return &CommandResult{Output: hint, IsError: true}
+	}
+	params := map[string]any{"task_id": args[1]}
+	if method == "task.reject" && len(args) > 2 {
+		params["reason"] = strings.Join(args[2:], " ")
+	}
+	result, err := h.rpc.Call(method, params)
+	if err != nil {
+		return &CommandResult{
+			Output:  fmt.Sprintf("failed to %s task %s: %v", verb, args[1], err),
+			IsError: true,
+		}
+	}
 	var resp struct {
-		Success bool   `json:"success"`
+		Status  string `json:"status"`
+		TaskID  string `json:"task_id"`
 		Message string `json:"message"`
 	}
-	if err := json.Unmarshal(result, &resp); err != nil {
-		return &CommandResult{Output: "planning mode activated"}
+	if err := json.Unmarshal(result, &resp); err != nil || (resp.Status == "" && resp.Message == "") {
+		return &CommandResult{Output: fmt.Sprintf("%sed task %s", args[0], args[1])}
 	}
-
 	if resp.Message != "" {
 		return &CommandResult{Output: resp.Message}
 	}
-	return &CommandResult{Output: "planning mode activated - next message will be treated as a planning request"}
+	return &CommandResult{Output: fmt.Sprintf("task %s: %s", resp.TaskID, resp.Status)}
 }
 
 // executeReview reviews current changes in the working directory.

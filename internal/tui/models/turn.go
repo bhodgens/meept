@@ -77,6 +77,16 @@ type turnTerminalMsg struct {
 	// keys on turn_id alone for those (defensive shape, pinned in
 	// chat_dedupe_test.go).
 	TaskID string
+	// IntentType / HandlerCase / ClassifiedBy are the remaining C1
+	// correlation fields (master C1, 05-navigation T1): what the
+	// dispatcher classified the turn as, which handler branch ran, and
+	// who classified it. The daemon's turn.terminal payload carries all
+	// four (internal/agent/handler.go TurnTerminalEvent); the TUI keep-
+	// list must not drop them -- the task chip, route popover and audit
+	// surfacing read them off the rendered message.
+	IntentType   string
+	HandlerCase  string
+	ClassifiedBy string
 }
 
 // stalledTurnText is the honest, lowercase stalled-turn wording (UI text

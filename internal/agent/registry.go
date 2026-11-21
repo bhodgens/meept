@@ -2115,6 +2115,14 @@ func (r *AgentRegistry) GetActiveQueue(conversationID string) (queue *MessageQue
 	return entry.Queue, entry.Generation
 }
 
+// TaskStore returns the shared task store wired via
+// RegistryConfig.TaskStore, or nil when the registry runs without one.
+// Read-only surfaces (chat.queue_status task_states, leaf 05-navigation/03
+// T2) use this instead of reaching for an unexported field.
+func (r *AgentRegistry) TaskStore() *task.Store {
+	return r.taskStore
+}
+
 // GetActiveQueueLoop returns the AgentLoop that owns the active queue for a
 // conversation, or nil if no active queue exists or the entry has no loop.
 // Uses the same C3 thread-remap resolution as GetActiveQueue.

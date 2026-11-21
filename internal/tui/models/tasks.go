@@ -33,6 +33,76 @@ type TasksModel struct {
 	currentSessionID string                          // Current session ID for FilterMine (for TUI clients)
 	expandedTaskIDs  map[string]bool                 // Track which parent tasks are expanded
 	taskChildren     map[string][]types.TaskExtended // Map parent ID to children
+
+	// detailSteps are the FRESH steps fetched through ListTaskSteps when
+	// the detail modal opens (05-navigation T2; W19: the modal used to
+	// render only whatever the task list carried, which went stale).
+	// Replaced on every modal open (one user Enter = one fetch); the
+	// render reads this cache, never calls RPC per frame.
+	detailSteps []types.TaskStepView
+
+	// Restore awareness (leaf 05-navigation/03 T1): armed after a
+	// session RESUME; the next TasksUpdateMsg (the fetch the App fires
+	// on SessionLoadedMsg) reports this session's non-terminal tasks to
+	// the sink exactly once, so interrupted work can be marked instead
+	// of vanishing. Cleared on SetCurrentSession (a switch re-arms).
+	restorePending bool
+	restoreSink    RestoreAwarenessSink
+}
+
+// nonTerminalTaskStates is the client-side mirror of
+// internal/task.State.IsTerminal plus the in-flight set; a restored
+// task in any OTHER state is interrupted work worth surfacing.
+var nonTerminalTaskStates = map[string]bool{
+	"pending":           true,
+	"planning":          true,
+	"awaiting_approval": true,
+	"executing":         true,
+	"testing":           true,
+}
+
+// ArmRestoreAwareness marks the next tasks fetch as a post-restore
+// rebuild for the given sink (one-shot; nil sink disarms).
+func (m *TasksModel) ArmRestoreAwareness(sink RestoreAwarenessSink) {
+	m.restoreSink = sink
+	m.restorePending = sink != nil
+}
+
+// RestoreFetchCmd returns the tasks-fetch command for the post-restore
+// awareness rebuild (the App fires it on a resumed SessionLoadedMsg so
+// interrupted work surfaces without the user opening the tasks view).
+func (m *TasksModel) RestoreFetchCmd() tea.Cmd {
+	return m.fetchTasks
+}
+
+// consumeRestoreAwareness fires the armed sink with this session's
+// non-terminal tasks on the first fetch after a restore, then disarms.
+// Tasks whose linked-session list is known and excludes the current
+// session are dropped (never surface another session's work); an empty
+// list is "unattributed" and stays visible - the store only omits it
+// for tasks no session owns.
+func (m *TasksModel) consumeRestoreAwareness(tasks []types.TaskExtended) {
+	if !m.restorePending {
+		return
+	}
+	m.restorePending = false
+	sink := m.restoreSink
+	m.restoreSink = nil
+	if sink == nil {
+		return
+	}
+	var stale []types.TaskExtended
+	for _, t := range tasks {
+		if !nonTerminalTaskStates[t.State] {
+			continue
+		}
+		if m.currentSessionID != "" && len(t.LinkedSessions) > 0 &&
+			!slices.Contains(t.LinkedSessions, m.currentSessionID) {
+			continue
+		}
+		stale = append(stale, t)
+	}
+	sink(RestoreAwareness{SessionID: m.currentSessionID, Tasks: stale})
 }
 
 // TaskViewMode selects between jobs, tasks, and lineage view.
@@ -54,6 +124,19 @@ const (
 	FilterCompleted
 	FilterFailed
 )
+
+// RestoreAwareness is the set of non-terminal tasks a restored session
+// carried when the client reconnected - the pending turns the daemon
+// never finished (03-context/01 T4 resume contract consumer).
+type RestoreAwareness struct {
+	SessionID string
+	Tasks     []types.TaskExtended
+}
+
+// RestoreAwarenessSink receives the first post-restore tasks fetch so
+// the App can mark interrupted work in the chat transcript instead of
+// letting pending turns vanish silently (F-ORCH-7).
+type RestoreAwarenessSink func(RestoreAwareness)
 
 // TasksRPCClient interface for the tasks model.
 type TasksRPCClient interface {
@@ -136,6 +219,15 @@ func (m *TasksModel) SetCurrentAgent(agentID string) {
 // SetCurrentSession sets the current session ID for FilterMine filtering.
 // This is used by the TUI to filter tasks linked to the current session.
 func (m *TasksModel) SetCurrentSession(sessionID string) {
+	// A session SWITCH (different id) invalidates an armed restore: a
+	// fetch in flight for the old session must never fire the new
+	// session's notice. Re-setting the SAME id, or the first bind at
+	// startup (previous id empty, right after loadSessionImpl armed
+	// the resume rebuild), keeps the arm.
+	if sessionID != m.currentSessionID && m.currentSessionID != "" {
+		m.restorePending = false
+		m.restoreSink = nil
+	}
 	m.currentSessionID = sessionID
 }
 
@@ -380,6 +472,7 @@ func (m *TasksModel) Update(msg tea.Msg) tea.Cmd {
 		}
 		m.err = nil
 		m.tasks = msg.Tasks
+		m.consumeRestoreAwareness(msg.Tasks)
 		m.buildTaskTree(msg.Tasks)
 		// A tasks fetch can still be in flight when the user switches to the
 		// jobs view. Writing task rows while the 4 jobs columns are installed
@@ -458,6 +551,14 @@ func (m *TasksModel) Update(msg tea.Msg) tea.Cmd {
 					if idx >= 0 && idx < len(filtered) {
 						m.selectedTask = &filtered[idx]
 						m.showingDetail = true
+						// W19 detail freshness (05-navigation T2): open
+						// the modal on FRESH steps through the
+						// ListTaskSteps seam (previously zero callers).
+						// Synchronous on the event-loop goroutine (the
+						// daemon is local IPC; same discipline as the
+						// tasks fetch), fired once per user Enter --
+						// never per render.
+						m.refreshDetailSteps()
 					}
 				}
 			} else {
@@ -1141,6 +1242,50 @@ func (m *TasksModel) renderEmptyDetail() string {
 	return panelStyle.Render(content)
 }
 
+// refreshDetailSteps fetches FRESH steps for the selected task through
+// the ListTaskSteps seam (05-navigation T2; W19). Called once per modal
+// open on the Update goroutine; a fetch error leaves the modal on the
+// task-list copy (honest degradation, no crash).
+func (m *TasksModel) refreshDetailSteps() {
+	m.detailSteps = nil
+	if m.selectedTask == nil || m.rpc == nil || !m.rpc.IsConnected() {
+		return
+	}
+	resp, err := m.rpc.ListTaskSteps(m.selectedTask.ID)
+	if err != nil || resp == nil {
+		return
+	}
+	m.detailSteps = resp.Steps
+}
+
+// OpenTaskDetailByID opens the detail modal for a task id directly
+// (05-navigation T2: the chat task-chip's Enter lands here through the
+// App). The row resolves from the loaded task list; an unknown id
+// still opens the modal and fetches its steps, so the detail is never
+// an empty shell.
+func (m *TasksModel) OpenTaskDetailByID(taskID string) {
+	if taskID == "" {
+		return
+	}
+	m.selectedTask = nil
+	for i := range m.tasks {
+		if m.tasks[i].ID == taskID {
+			m.selectedTask = &m.tasks[i]
+			break
+		}
+	}
+	if m.selectedTask == nil {
+		m.selectedTask = &types.TaskExtended{
+			Task: types.Task{ID: taskID, Name: taskID},
+		}
+	}
+	m.showingDetail = true
+	m.refreshDetailSteps()
+	if m.viewMode != ViewModeTasks {
+		m.SetViewMode(ViewModeTasks)
+	}
+}
+
 func (m *TasksModel) renderTaskDetailModal() string {
 	task := m.selectedTask
 	if task == nil {
@@ -1235,8 +1380,13 @@ func (m *TasksModel) renderTaskDetailModal() string {
 	content.WriteString(failedStyle.Render(fmt.Sprintf("✗ %d failed", task.FailedJobs)))
 	content.WriteString("\n")
 
-	// Steps section
-	if len(task.Steps) > 0 {
+	// Steps section. Fresh ListTaskSteps output (detailSteps) wins;
+	// the task-list copy is the fallback (05-navigation T2; W19).
+	detailSteps := task.Steps
+	if len(m.detailSteps) > 0 {
+		detailSteps = m.detailSteps
+	}
+	if len(detailSteps) > 0 {
 		content.WriteString("\n")
 		content.WriteString(sectionStyle.Render("─── steps ───"))
 		content.WriteString("\n")
@@ -1245,7 +1395,7 @@ func (m *TasksModel) renderTaskDetailModal() string {
 			Foreground(paletteColor("info")).
 			Bold(true)
 
-		for _, step := range task.Steps {
+		for _, step := range detailSteps {
 			// Line 1: seq. [agent] description  state_icon state_label
 			stepIcon := m.getStepStateIcon(step.State)
 			stepLabel := m.getStepStateLabel(step.State)

@@ -28,6 +28,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -37,6 +38,10 @@ type gateStubCall struct {
 	method string
 	params map[string]any
 }
+
+// testStubSeq keeps short unix-socket dirs unique per stub (see
+// newGateCallStub's sun_path workaround).
+var testStubSeq atomic.Int64
 
 // gateCallStub is a unix-socket JSON-RPC stub that RECORDS every call
 // (method + params) and answers from a canned result map. Unknown
@@ -51,7 +56,16 @@ type gateCallStub struct {
 
 func newGateCallStub(t *testing.T) *gateCallStub {
 	t.Helper()
-	dir := t.TempDir()
+	// Short socket dir: t.TempDir() carries the full test name, and
+	// subtest names push the path past the macOS 104-byte sun_path
+	// limit ("bind: invalid argument"). A minimal /tmp path plus a
+	// unique suffix stays under the limit no matter how long the test
+	// is named. Removed explicitly (it lives outside the test's
+	// TempDir cleanup tree).
+	dir := filepath.Join(os.TempDir(), fmt.Sprintf("mts%d", int64(os.Getpid())*1000+testStubSeq.Add(1)))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("gate stub: mkdir: %v", err)
+	}
 	path := filepath.Join(dir, "s.sock")
 	l, err := net.Listen("unix", path)
 	if err != nil {

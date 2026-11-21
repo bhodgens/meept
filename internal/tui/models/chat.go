@@ -80,9 +80,29 @@ type ChatMessage struct {
 	State        MessageState
 	Progress     *ProgressState // Progress state for pending messages
 
+	// C1 terminal correlation fields (master C1; 05-navigation T1). The
+	// daemon's turn.terminal payload carries all four
+	// (internal/agent/handler.go TurnTerminalEvent); the TUI keep-list
+	// copies them onto the rendered assistant bubble so the task chip,
+	// the (turn_id, task_id) dedupe ledger, and the why-this-route
+	// popover all read identity from the message itself. Empty for
+	// messages that did not come from a task-bearing terminal.
+	TaskID       string
+	IntentType   string
+	HandlerCase  string
+	ClassifiedBy string
+
 	// Rendering cache
 	rendered   string // Cached rendered output
 	renderedAt int    // Width when rendered
+
+	// localOnly marks a transcript line that exists only in this client
+	// (system notices like the C6 dropped-event warning, restore
+	// markers). The daemon never stores it, and session loads/switces
+	// rebuild the transcript from the server -- localOnly lines are
+	// re-appended across that rebuild so the warning is not silently
+	// lost (C6/W26; 05-navigation T4).
+	localOnly bool
 }
 
 // ChatModel is the model for the chat view.
@@ -121,6 +141,17 @@ type ChatModel struct {
 	// before the submit ack registered their turn. Consumed on
 	// registration; a tiny ephemeral map keyed by turn id.
 	earlyTerminals *turnRouterEarlyBuffer
+
+	// Task-reply read surfaces (05-navigation T2/T3; C4/C5). Keyed by
+	// ChatMessage.ID, lazily populated by the 'e' trace expand (C4:
+	// session.messages.get include_tool_calls) and the 'w' route
+	// popover (C5: session.dispatch_trace). The expand commands mutate
+	// these maps then emit a refresh msg; the View reads them. Fetched
+	// once per message per session (no per-render RPC storm).
+	messageTraces map[string][]toolCallTrace
+	routeEvidence map[string][]dispatchTraceRow
+	traceFetched  map[string]bool
+	routeFetched  map[string]bool
 
 	// Task-reply render dedupe (04-clutter/02, C1 key = (turn_id,
 	// task_id)): a task's reply arrives as BOTH a task.completed card AND
@@ -1162,7 +1193,9 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		case KeyEnter:
 			// Enter sends message when focused on input.
 			if m.focused != FocusInput {
-				return nil
+				// Task chip navigation (05-navigation T2/W14): Enter on
+				// a selected task-bearing reply opens the task detail.
+				return m.handleChipEnter()
 			}
 			return m.handleEnter()
 
@@ -1215,9 +1248,24 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 			// Expand selected message
 			if m.focused == FocusViewport && m.selectedMsgIdx >= 0 && m.selectedMsgIdx < len(m.messages) {
 				m.messages[m.selectedMsgIdx].State = MessageExpanded
+				// C4 read surface (05-navigation T3): expanding a task
+				// reply lazily loads its persisted tool-call trace once
+				// (bounded: no per-render RPC storm).
+				if m.messages[m.selectedMsgIdx].Role == RoleAssistant {
+					m.fetchTrace(m.messages[m.selectedMsgIdx])
+				}
 				m.updateViewport()
 				return nil
 			}
+
+		case "w":
+			// Why-this-route popover (C5, 05-navigation T3): load +
+			// render the dispatch-trace evidence for the selected reply.
+			if msg, _, ok := m.selectedAssistantMessage(); ok {
+				m.fetchRoute(msg)
+				m.updateViewport()
+			}
+			return nil
 
 		case "q":
 			// Quote selected message into the input (message-quotes leaf 05):
@@ -1898,9 +1946,34 @@ func (m *ChatModel) addMessage(role, content string) {
 	}
 }
 
-// AddSystemMessage adds a system message to the chat transcript.
+// AddSystemMessage adds a system notice to the chat transcript. Notices
+// are client-local: the daemon never persists them, and an async session
+// load can rebuild the transcript under them (C6/W26 silent-loss path),
+// so they are marked localOnly and re-appended by every rebuild
+// (preserveLocalNotices).
 func (m *ChatModel) AddSystemMessage(content string) {
 	m.addMessage(RoleSystem, content)
+	if len(m.messages) > 0 {
+		m.messages[len(m.messages)-1].localOnly = true
+	}
+}
+
+// preserveLocalNotices returns rebuilt with the transcript's localOnly
+// notices re-appended (deduped by ID), so a server-driven transcript
+// rebuild never silently drops them. Order: rebuilt first (the daemon's
+// truth), then the client's notices in arrival order.
+func preserveLocalNotices(rebuilt, existing []ChatMessage) []ChatMessage {
+	seen := make(map[string]bool, len(rebuilt))
+	for _, cm := range rebuilt {
+		seen[cm.ID] = true
+	}
+	out := rebuilt
+	for _, cm := range existing {
+		if cm.localOnly && !seen[cm.ID] {
+			out = append(out, cm)
+		}
+	}
+	return out
 }
 
 // AddParticipantMessage adds a message from a session participant to the chat transcript.
@@ -2377,8 +2450,10 @@ func (m *ChatModel) loadServerMessages(sessionID string, serverMsgs []types.Sess
 
 	m.sessionMessages[sessionID] = chatMsgs
 	if sessionID == m.sessionID {
-		m.messages = make([]ChatMessage, len(chatMsgs))
-		copy(m.messages, chatMsgs)
+		// Rebuild from the server's truth, then re-append the client's
+		// localOnly notices (C6/W26: a load landing after a notice must
+		// not silently wipe it).
+		m.messages = preserveLocalNotices(chatMsgs, m.messages)
 		m.updateViewport()
 	}
 
@@ -2520,6 +2595,26 @@ func (m *ChatModel) updateViewport() {
 			content.WriteString(indicator)
 			content.WriteString("\n")
 			currentLine++
+			// C4 persisted tool-call trace rides the expansion
+			// (05-navigation T3).
+			if trace := m.renderTraceRowsFor(msg); trace != "" {
+				content.WriteString(trace)
+				currentLine += strings.Count(trace, "\n")
+			}
+		}
+
+		// Task chip (05-navigation T2, W14): a task-bearing reply
+		// surfaces which task ran and is Enter-navigable to its detail.
+		if msg.Role == RoleAssistant && msg.TaskID != "" {
+			content.WriteString(renderTaskChip(msg.TaskID))
+			content.WriteString("\n")
+			currentLine++
+		}
+
+		// C5 why-this-route evidence panel (05-navigation T3).
+		if route := m.renderRouteRowsFor(msg); route != "" {
+			content.WriteString(route)
+			currentLine += strings.Count(route, "\n")
 		}
 	}
 
@@ -2839,8 +2934,11 @@ func (m *ChatModel) SetSession(session *types.Session) tea.Cmd {
 		return flushCmd
 	}
 
-	// No local messages - try to load from server
-	m.messages = []ChatMessage{}
+	// No local messages - try to load from server. Client-local system
+	// notices (C6 dropped-event warning, restore markers) survive the
+	// fresh transcript: the daemon never persists them, so this view is
+	// their only home until the session's own buffer takes over.
+	m.messages = preserveLocalNotices([]ChatMessage{}, m.messages)
 	m.updateViewport()
 
 	if m.rpc.IsConnected() {
@@ -3718,7 +3816,7 @@ func (m *ChatModel) hasQueueItems() bool {
 	if m.queueStatus == nil {
 		return false
 	}
-	return m.queueStatus.SteeringDepth > 0 || m.queueStatus.FollowUpDepth > 0
+	return m.queueStatus.SteeringDepth > 0 || m.queueStatus.FollowUpDepth > 0 || len(m.queueStatus.TaskStates) > 0
 }
 
 // isTTSSpeaking returns true if TTS is currently speaking.
@@ -3760,6 +3858,11 @@ func (m *ChatModel) renderQueueIndicator() string {
 		}
 		if m.queueStatus.FollowUpDepth > 0 {
 			badges = append(badges, m.followUpBadgeStyle.Render(fmt.Sprintf("follow-up: %d", m.queueStatus.FollowUpDepth)))
+		}
+		// B5 (leaf 05-navigation/03 T2): parked/planning tasks are part
+		// of "work in flight" even with no active loop - badge them too.
+		if n := len(m.queueStatus.TaskStates); n > 0 {
+			badges = append(badges, m.followUpBadgeStyle.Render(fmt.Sprintf("parked: %d", n)))
 		}
 	}
 
