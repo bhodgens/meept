@@ -1,9 +1,13 @@
 package activity
 
 // execution_projector.go - bus -> ExecutionStore projection (issue #160
-// follow-up). Subscribes to the two typed execution-result topics and
-// appends one durable row per execution. The WS relay keeps its own
-// subscriptions for live frames; this projection is the queryable history.
+// follow-up, routing-funnel C5). Subscribes to the two typed
+// execution-result topics and to turn.terminal. Result topics append one
+// durable row per execution; the tier comes from the topic name. Each
+// turn.terminal event appends one row with tier "specialist" and is not
+// republished on bot.result or employee.result (no kind field; the tier
+// string is the discriminator). The WS relay keeps its own subscriptions
+// for live frames; this projection is the queryable history.
 
 import (
 	"context"
@@ -16,9 +20,10 @@ import (
 )
 
 // ExecutionProjector is the live bus reader for the execution-run history:
-// one subscriber + reader goroutine per result topic. Unlike a bare
-// bus.SubscribeT, the projector OWNS its reader goroutines so the shutdown
-// path can wait for them to exit after their channels close.
+// one subscriber + reader goroutine per subscribed topic (bot.result,
+// employee.result, turn.terminal). Unlike a bare bus.SubscribeT, the
+// projector OWNS its reader goroutines so the shutdown path can wait for
+// them to exit after their channels close.
 //
 // Why this matters (issue #160 M5): the daemon stop path unsubscribes and
 // then closes the ExecutionStore. Unsubscribe closes the subscriber channel
@@ -36,12 +41,20 @@ type ExecutionProjector struct {
 	closed bool
 }
 
-// WireExecutionProjector subscribes the store to bot.result and
-// employee.result. Call Stop on shutdown to unsubscribe and drain the
-// readers BEFORE closing the store. Nil bus or nil store is a no-op
-// returning nil.
+// WireExecutionProjector subscribes the store to bot.result,
+// employee.result, and turn.terminal. Call Stop on shutdown to
+// unsubscribe and drain the readers BEFORE closing the store. Nil bus
+// or nil store is a no-op returning nil. A nil store is logged here:
+// there is no subscriber to drop per event, and the chat turn is not
+// failed.
 func WireExecutionProjector(b *bus.MessageBus, store *ExecutionStore, logger *slog.Logger) *ExecutionProjector {
 	if b == nil || store == nil {
+		if store == nil {
+			if logger == nil {
+				logger = slog.Default()
+			}
+			logger.Warn("execution projector: nil store; dropping execution events")
+		}
 		return nil
 	}
 	if logger == nil {
@@ -90,7 +103,78 @@ func WireExecutionProjector(b *bus.MessageBus, store *ExecutionStore, logger *sl
 	proj := &ExecutionProjector{}
 	proj.startReader(b.Subscribe("execution-projector-bot", "bot.result"), "bot", appendRun, logger)
 	proj.startReader(b.Subscribe("execution-projector-employee", "employee.result"), "employee", appendRun, logger)
+	// Literal topic name so the connectivity graph pairs this subscriber
+	// with turn.terminal publishers. Not bot.result / employee.result:
+	// a specialist row is history only and must not become a second chat
+	// bubble.
+	proj.startSpecialistReader(b.Subscribe("execution-projector-specialist", "turn.terminal"), store, logger)
 	return proj
+}
+
+// specialistTerminal is the turn.terminal slice this projector reads.
+// The frozen TurnTerminalEvent has no tokens or stop_reason; those keys
+// are copied only when a payload actually carries them. Absent tokens
+// stay 0, which is honest only because the event had no usage. Reply is
+// the user-facing output. An explicit "output" key wins when non-empty.
+type specialistTerminal struct {
+	agent.TurnTerminalEvent
+	Output     string `json:"output,omitempty"`
+	TokensUsed int    `json:"tokens_used,omitempty"`
+	Tokens     int    `json:"tokens,omitempty"`
+	StopReason string `json:"stop_reason,omitempty"`
+}
+
+// startSpecialistReader appends one tier=specialist row per turn.terminal
+// event. A nil store or an undecodable payload is logged and dropped; it
+// does not fail the chat turn and does not publish anywhere. The reader
+// is owned like the result readers so Stop drains it before store close.
+func (p *ExecutionProjector) startSpecialistReader(sub *bus.Subscriber, store *ExecutionStore, logger *slog.Logger) {
+	if sub == nil {
+		return
+	}
+	p.mu.Lock()
+	p.subs = append(p.subs, sub)
+	p.mu.Unlock()
+	p.wg.Add(1)
+	go func() {
+		defer p.wg.Done()
+		for m := range sub.Channel {
+			if store == nil {
+				logger.Warn("execution projector: nil store; dropping turn.terminal event",
+					"topic", sub.Topic)
+				continue
+			}
+			var ev specialistTerminal
+			if err := json.Unmarshal(m.Payload, &ev); err != nil {
+				logger.Warn("execution projector: dropping undecodable payload",
+					"topic", sub.Topic, "error", err)
+				continue
+			}
+			tokens := ev.TokensUsed
+			if tokens == 0 {
+				tokens = ev.Tokens
+			}
+			output := ev.Output
+			if output == "" {
+				output = ev.Reply
+			}
+			run := ExecutionRun{
+				Tier:       "specialist",
+				AgentID:    ev.AgentID,
+				Status:     ev.Status,
+				Output:     output,
+				TokensUsed: tokens,
+				Error:      ev.Error,
+				DurationMS: ev.DurationMS,
+				StopReason: ev.StopReason,
+				SessionID:  ev.SessionID,
+			}
+			if err := store.Append(context.Background(), run); err != nil {
+				logger.Warn("execution projector: append failed",
+					"tier", "specialist", "agent_id", ev.AgentID, "error", err)
+			}
+		}
+	}()
 }
 
 // startReader registers a (possibly nil) subscriber and launches its
