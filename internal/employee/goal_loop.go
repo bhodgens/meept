@@ -181,6 +181,12 @@ type PlanRef struct {
 	// loop's active goal at Plan() time; empty when the loop has no active
 	// goal (legacy-legal).
 	GoalID string `json:"goal_id,omitempty"`
+	// ResultTopic is the execution-result bus topic stamped when the round
+	// starts. Empty means employee.result. Execute reads this field, not a
+	// later write to the shared loop flag. Leaf 01 wires the read. The
+	// field exists now so the gate test can set it and fail while Execute
+	// still ignores it.
+	ResultTopic string `json:"result_topic,omitempty"`
 }
 
 // PlanBrief is the title, description, and persisted candidate prompt of a

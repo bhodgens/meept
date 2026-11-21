@@ -204,7 +204,7 @@ Output: APPROVED or a list of specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-test-gate | PENDING | 0 | |
+| 00T-test-gate | TESTS_VALIDATED | 1 | Reviewed 2026-11-20. Six tests compile and fail on old behavior. PlanRef.ResultTopic field added so the stamp test can set the contract field. Execute still ignores it. |
 | 01-result-topic-stamp | PENDING | 0 | |
 | 02-executor-prompt-and-tokens | PENDING | 0 | |
 | 03-detached-chat-session | PENDING | 0 | |
