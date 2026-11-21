@@ -61,12 +61,10 @@ type ShellGuardOption func(*ShellCommandGuardImpl)
 // ShellCommandGuardImpl is the concrete two-phase guard. Construct with
 // NewShellCommandGuard; the zero value is also safe (all checks skipped).
 type ShellCommandGuardImpl struct {
-	fence       FenceCheckFunc
-	table       *PermissionTable
-	orch        *Orchestrator
-	classifier  ShellGuardClassifier
-	netResolver func(context.Context) string
-	netApplier  func(context.Context, string) error
+	fence      FenceCheckFunc
+	table      *PermissionTable
+	orch       *Orchestrator
+	classifier ShellGuardClassifier
 }
 
 var _ ShellCommandGuard = (*ShellCommandGuardImpl)(nil)
@@ -110,33 +108,6 @@ func WithShellGuardFenceChecker(fn FenceCheckFunc) ShellGuardOption {
 	return func(g *ShellCommandGuardImpl) {
 		if fn != nil {
 			g.fence = fn
-		}
-	}
-}
-
-// WithShellGuardNetworkClassResolver installs the function that resolves the
-// network class from the execution context. Security does not import
-// internal/tools, so consumers that stamp the class there inject the resolver
-// (e.g. builtin wraps tools.NetworkClassFromContext). A nil resolver is
-// ignored.
-func WithShellGuardNetworkClassResolver(fn func(context.Context) string) ShellGuardOption {
-	return func(g *ShellCommandGuardImpl) {
-		if fn != nil {
-			g.netResolver = fn
-		}
-	}
-}
-
-// WithShellGuardNetworkClassApplier installs the phase-2 network-class
-// application seam. When a class is resolved and this applier is set, the
-// guard applies the class and refuses the command (wrapping the error with
-// pkg/security.ErrCommandBlocked) when confinement cannot be honored. Builtin
-// applies the class itself at exec time and therefore leaves this unset; the
-// daemon wires an applier for scheduler-fired jobs. A nil applier is ignored.
-func WithShellGuardNetworkClassApplier(fn func(context.Context, string) error) ShellGuardOption {
-	return func(g *ShellCommandGuardImpl) {
-		if fn != nil {
-			g.netApplier = fn
 		}
 	}
 }
@@ -205,14 +176,6 @@ func (g *ShellCommandGuardImpl) CheckCommandInDir(ctx context.Context, command, 
 		blocked, _, reason := g.orch.ScanShellCommand(ctx, command)
 		if blocked {
 			return fmt.Errorf("%w: command blocked by security scanner: %s", pkgsecurity.ErrCommandBlocked, reason)
-		}
-	}
-
-	if g.netResolver != nil && g.netApplier != nil {
-		if class := g.netResolver(ctx); class != "" {
-			if err := g.netApplier(ctx, class); err != nil {
-				return fmt.Errorf("%w: %w", pkgsecurity.ErrCommandBlocked, err)
-			}
 		}
 	}
 
