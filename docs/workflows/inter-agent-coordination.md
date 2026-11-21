@@ -120,7 +120,7 @@ var TopicEmployeeResult = bus.NewTopic[ExecutionResultEvent]("employee.result")
 
 | Topic | Emitter | Source |
 |-------|---------|--------|
-| `bot.result` | `BotRunner` (`internal/bot/runner.go`), via `bot.Manager` | `"bot"` |
+| `bot.result` | `GoalLoop` (`internal/employee/goal_loop.go`), only when the plan stamp is `bot.result` | `"bot"` |
 | `employee.result` | `GoalLoop` (`internal/employee/goal_loop.go`) | `"employee"` |
 
 - The payload has **no `kind` field and no `ExecutionKind` type** — the topic
@@ -129,7 +129,7 @@ var TopicEmployeeResult = bus.NewTopic[ExecutionResultEvent]("employee.result")
   vocabulary above (`end_turn` / `error` / `cancelled` respectively). The shared
   C1 payload also carries `agent_id`, `output`, `tokens_used`, `trigger_ref`,
   `session_id`, `duration_ms`, and `timestamp`.
-- Both emitters also publish the entry/exit turn-state pair on the shared
+- GoalLoop also publishes the entry/exit turn-state pair on the shared
   `agent.turn.state` topic above (C2: `running` at entry, `idle` with the mapped
   stop reason at exit), so result and turn-state surfaces stay on the same #139
   vocabulary. No new turn-state type was introduced.

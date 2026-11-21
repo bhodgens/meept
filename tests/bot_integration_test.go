@@ -13,6 +13,7 @@ import (
 
 	"github.com/caimlas/meept/internal/bot"
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/employee"
 )
 
 func TestBotLifecycle_Integration(t *testing.T) {
@@ -103,25 +104,28 @@ func TestBotLifecycle_Integration(t *testing.T) {
 		t.Error("bot should be resumed")
 	}
 
-	// Test runner budget check
-	runner := bot.NewBotRunner(def)
-	state := &bot.BotState{
-		TodayCostCents: 50,
-		TodayDate:      time.Now().Format("2006-01-02"),
+	// Approved work runs through GoalLoop.Execute, which calls the BotExecutor.
+	exec := &goalLoopExecutor{output: "ci status ok", tokens: 3}
+	loop := employee.NewGoalLoop(def.ID, nil, nil, nil).
+		WithExecutor(exec).
+		WithRetryPolicy(employee.RetryPolicy{})
+	result, err := loop.Execute(ctx, employee.PlanRef{
+		ID:          "plan-ci",
+		Prompt:      def.Prompt,
+		ApproverID:  "system",
+		ResultTopic: "bot.result",
+	})
+	if err != nil {
+		t.Fatalf("GoalLoop.Execute: %v", err)
 	}
-	if !runner.ShouldRun(state) {
-		t.Error("should allow run under budget")
+	if exec.calls != 1 {
+		t.Fatalf("BotExecutor calls = %d, want 1", exec.calls)
 	}
-	state.TodayCostCents = 100
-	if runner.ShouldRun(state) {
-		t.Error("should deny run at budget cap")
+	if result == nil || !result.Success {
+		t.Fatalf("expected successful execution, got %#v", result)
 	}
-
-	// Test invocation cap
-	state.TodayRuns = 50
-	state.TodayCostCents = 0
-	if runner.ShouldRun(state) {
-		t.Error("should deny run at invocation cap")
+	if exec.userMessage != def.Prompt {
+		t.Errorf("executor user message = %q, want plan prompt", exec.userMessage)
 	}
 
 	// Test memory namespace
@@ -136,12 +140,6 @@ func TestBotLifecycle_Integration(t *testing.T) {
 	sharedQuery := ns.ScopeQuery(bot.MemoryScopeShared, "last CI results")
 	if sharedQuery != "last CI results" {
 		t.Errorf("shared query should pass through: %q", sharedQuery)
-	}
-
-	// Test runner prompt construction
-	prompt := runner.BuildSystemPrompt("CI pipeline check at midnight")
-	if prompt == "" {
-		t.Fatal("expected non-empty system prompt")
 	}
 
 	// Test status
@@ -209,4 +207,18 @@ func TestBotWebhook_Integration(t *testing.T) {
 	if resp["status"] != "triggered" {
 		t.Errorf("status = %v, want %q", resp["status"], "triggered")
 	}
+}
+
+// goalLoopExecutor is the BotExecutor GoalLoop.Execute calls. BotRunner is gone.
+type goalLoopExecutor struct {
+	output      string
+	tokens      int
+	calls       int
+	userMessage string
+}
+
+func (e *goalLoopExecutor) ExecuteBot(_ context.Context, _, userMessage string) (string, int, error) {
+	e.calls++
+	e.userMessage = userMessage
+	return e.output, e.tokens, nil
 }

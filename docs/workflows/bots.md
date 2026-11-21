@@ -28,8 +28,12 @@ share one wire payload (`agent.ExecutionResultEvent`, defined in
 
 | Topic | Publisher | Payload |
 |-------|-----------|---------|
-| `bot.result` | `internal/bot/runner.go` (`BotRunner` / `bot.Manager`) | `agent.ExecutionResultEvent` |
+| `bot.result` | `internal/employee/goal_loop.go` (`GoalLoop`), only when the plan stamp is `bot.result` | `agent.ExecutionResultEvent` |
 | `employee.result` | `internal/employee/goal_loop.go` (`GoalLoop`) | `agent.ExecutionResultEvent` |
+
+GoalLoop publishes `bot.result` only when the plan stamp is `bot.result`.
+Every other stamp publishes `employee.result`. There is no `internal/bot/runner.go`
+publisher.
 
 - The payload has **no `kind` field**. The topic name alone is the tier
   discriminator: `bot.result` means a bot, `employee.result` means an employee.

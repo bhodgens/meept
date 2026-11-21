@@ -72,7 +72,7 @@ The loop is tier-aware. Everything else in the system (storage, triggering, sign
 
 **Tier 1 (reactive):** Trigger-driven only. ASSESS on each trigger, EXECUTE the implicit single-step plan, REFLECT via post-turn audit. No self-enqueued work.
 
-**Tier 2 (propose):** Scheduled ASSESS per `Constraints.AssessmentInterval`. The LLM proposes candidate Plans; each goes to `PendingApproval` and routes to the employee's `escalates_to` for signoff via the existing Plan workflow. Once approved, EXECUTE runs `BotRunner.Execute()` with the plan's prompt. REFLECT updates Goal health.
+**Tier 2 (propose):** Scheduled ASSESS per `Constraints.AssessmentInterval`. The LLM proposes candidate Plans; each goes to `PendingApproval` and routes to the employee's `escalates_to` for signoff via the existing Plan workflow. Once approved, EXECUTE runs `GoalLoop.Execute`, which calls the BotExecutor with the plan's prompt. REFLECT updates Goal health.
 
 **Tier 3 (autonomous):** IMPLEMENTED. Same as tier 2 except candidate Plans execute immediately after ASSESS — no `PendingApproval` stop — unless an escalation trigger matches, in which case the candidate is routed to plan signoff like tier 2. Implemented in `GoalLoop.decideTier3` (`internal/employee/goal_loop.go`).
 
@@ -787,7 +787,7 @@ The reference employee ships at [`config/employees/ci-monitor.json5`](../../conf
 
 ### Employee runtime failures
 
-- LLM call fails -> BotRunner's existing retry path. Exhausted retries mark the turn failed; Goal health decays. N consecutive failures (default 3) -> auto-pause with `last_error` populated.
+- LLM call fails -> GoalLoop retries the BotExecutor call. Exhausted retries mark the turn failed; Goal health decays. N consecutive failures (default 3) -> auto-pause with `last_error` populated.
 - Tool call fails -> existing tool error propagation. The REFLECT step sees the error and decides whether to retry, escalate, or give up.
 - ASSESS produces invalid JSON -> fall back to tier-1 behavior for that turn, log audit finding at `warning`, continue.
 - Plan approval times out (default 7d) -> Plan auto-rejected, Goal marked `at_risk`, finding written.
