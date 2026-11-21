@@ -203,6 +203,10 @@ type AmendmentPolicy struct {
 4. Existing prompt-builder output (memory, skills, project context)
 
 This synthesized prompt is what `internal/bot/runner.go` injects as the system prompt.
+*(Superseded as-built: `SynthesizedPrompt` is now injected by the employee
+lane — `internal/employee/goal_loop.go` passes it to `bot.BotExecutor.ExecuteBot`
+(interface in `internal/bot/executor.go`); the `BotRunner` self-scheduling lane
+no longer fronts employee rounds. Citation kept as design history.)*
 
 ### How the security engine consumes it
 

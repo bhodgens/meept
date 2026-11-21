@@ -248,7 +248,7 @@ flowchart LR
 
 6. **Client-side STT** — Speech-to-text runs entirely in the client (TUI or Flutter), not through the platform. The `internal/stt` package provides a `Transcriber` interface with pluggable engines (whisper, parakeet, native). Recording and transcription happen locally; only the resulting text is sent to the platform as a normal chat message.
 
-7. **Employee layer wraps, not duplicates** — The `internal/employee/` package layers constitution, goal loop, and enforcement engine on top of the existing bot runtime (`internal/bot/`). Storage, triggers, and the runner stay shared. Non-employee agents (chat, coder, etc.) skip the employee enforcement stages entirely — no behavior change for existing agents. See [AI Employees](../workflows/employees.md) for the full feature spec.
+7. **Employee layer wraps, not duplicates** — The `internal/employee/` package layers constitution, goal loop, and enforcement engine on top of the existing bot runtime (`internal/bot/`). Storage, triggers, and the shared executor types (`BotExecutor` interface + `BotExecutionResult`, `internal/bot/executor.go` — consumed directly by the GoalLoop, not via the legacy `BotRunner`) stay shared. Non-employee agents (chat, coder, etc.) skip the employee enforcement stages entirely — no behavior change for existing agents. See [AI Employees](../workflows/employees.md) for the full feature spec.
 
 ## Dual-Path Progress Event Architecture
 

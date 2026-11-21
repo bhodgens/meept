@@ -16,7 +16,10 @@ LLM loop — "bob the autonomous employee". The seam already exists:
 `GoalLoop.WithExecutor(r bot.BotExecutor)` (internal/employee/goal_loop.go:477),
 where `bot.BotExecutor` is exactly
 `ExecuteBot(ctx, systemPrompt, userMessage) (output string, tokensUsed int, err error)`
-(internal/bot/runner.go:41–43).
+(internal/bot/executor.go:35–37 — the shared executor types now live in
+executor.go, moved out of runner.go by the type-dedup pass; the `BotRunner`
+lane itself is dormant: `Manager.startBot` builds one but no production path
+calls its `Execute`).
 
 ## Current state (verified)
 
@@ -116,7 +119,10 @@ Verified: ACP `session/prompt` returns `stopReason` only (session.go:279–286);
 no usage read anywhere in internal/acp. The LLM adapter already reports
 `tokensUsed=0` (employee_service_adapter.go:272–276). For an acp employee:
 **enforceable** — `MaxInvocationsPerDay`, `MaxIterations`, `Timeout`, run counts
-(bot/runner.go:82–106); **not enforceable** — `DailyBudgetCents` /
+(internal/employee/enforcement.go:815–843 budget check +
+internal/employee/budget_checker.go round accounting on the live employee
+lane; the dormant `BotRunner` path additionally gated these in
+`ShouldRun`/`Execute`); **not enforceable** — `DailyBudgetCents` /
 `TotalCostCents` (internal/bot/types.go:59, :112) and cost escalation triggers
 (no cost signal to match).
 
