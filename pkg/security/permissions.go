@@ -653,6 +653,23 @@ func (pc *PermissionChecker) CheckPermissionForAgent(action string, details map[
 			} else {
 				fenceErr = fence.CheckCommand(details["command"], workDir)
 			}
+		case "job_start":
+			// job_start schedules a shell job (scheduler.ShellJobConfig
+			// with /bin/sh -c), the same execution surface as
+			// shell_execute — without this case an agent fenced to its
+			// session project could job_start any working_dir and run
+			// outside the boundary. The tool's arg names differ from the
+			// shell tool's: working_dir (not workdir), command (required,
+			// but guarded anyway so a missing key still fences the path).
+			jobDir := details["working_dir"]
+			if jobDir == "" {
+				jobDir = "."
+			}
+			if err := fence.CheckPath(jobDir, "exec"); err != nil {
+				fenceErr = err
+			} else if cmd := details["command"]; cmd != "" {
+				fenceErr = fence.CheckCommand(cmd, jobDir)
+			}
 		}
 		if fenceErr != nil {
 			return CheckResult{
