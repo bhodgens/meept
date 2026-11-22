@@ -7394,6 +7394,10 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 	// overflowRetried gates F-A1's trim-and-retry-once: an overflow retry
 	// has been spent this call, and a second overflow fails honestly.
 	overflowRetried := false
+	// contextTooSmallRetried gates the leaf-06 one-shot compaction retry
+	// for an admission ContextTooSmallError verdict: exactly ONE
+	// trim-and-retry is spent this call, then the verdict surfaces.
+	contextTooSmallRetried := false
 	// saturatedRetried gates the chain-stability saturation path: a
 	// small-request overflow from a busy local endpoint backs off and
 	// retries the same payload up to maxSaturatedOverflowRetries times.
@@ -7912,6 +7916,11 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 		// NonRetryable: surface verbatim so the caller decides (shrink
 		// the request or pick a bigger-context model), mirroring the
 		// tier-floor branch below.
+		// Leaf 06 (graceful errors): ONE compaction/trim-and-retry
+		// attempt runs BEFORE surfacing — the same repair shape the
+		// ContextOverflowError branch uses (F-A1). A still-too-small
+		// request after the single retry (or a no-firewall test rig)
+		// surfaces the original verdict unchanged.
 		if llm.IsContextTooSmall(err) {
 			if admissionErr, ok := llm.AsContextTooSmall(err); ok {
 				l.logger.Warn("request does not fit the model context — surfacing without rotation",
@@ -7922,7 +7931,20 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 					"context_limit", admissionErr.ContextLimit,
 				)
 			}
-			return nil, err
+			if contextTooSmallRetried {
+				return nil, err
+			}
+			contextTooSmallRetried = true
+			compacted, trimmed := l.compactForOverflow(ctx, messages)
+			if !trimmed {
+				return nil, err
+			}
+			l.logger.Warn("Context too small: compacted context, retrying once",
+				"messages_before", len(messages),
+				"messages_after", len(compacted),
+			)
+			messages = compacted
+			continue
 		}
 
 		// Tier-floor verdict (llm-serving-tiers, errors_tier.go): a

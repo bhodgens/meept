@@ -6,6 +6,9 @@
     "e2e/suites/smoke": [
       "smoke"
     ],
+    "e2e/suites/graceful-errors": [
+      "graceful-errors"
+    ],
     "e2e/suites/gui-pairing": [
       "gui-pairing"
     ],
@@ -957,6 +960,11 @@
     {
       "name": "quota-park",
       "dir": "e2e/suites/quota-park",
+      "status": "implemented"
+    },
+    {
+      "name": "graceful-errors",
+      "dir": "e2e/suites/graceful-errors",
       "status": "implemented"
     },
     {
