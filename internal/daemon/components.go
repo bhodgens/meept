@@ -4619,16 +4619,17 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			})
 
 			strategicPlanner := agent.NewStrategicPlanner(agent.StrategicPlannerConfig{
-				Registry:           c.AgentRegistry,
-				TaskStore:          orchTaskStore,
-				StepStore:          stepStore,
-				Bus:                msgBus,
-				Logger:             logger.With("component", "strategic"),
-				PairManager:        strategicPairMgr,
-				MaxPlanSteps:       cfg.Orchestrator.MaxPlanSteps,
-				PlannerTimeout:     time.Duration(cfg.Orchestrator.PlannerTimeout) * time.Second,
-				InterviewAmbiguity: cfg.Orchestrator.InterviewAmbiguityThreshold,
-				TemplateLoader:     agent.NewDaemonPlannerTemplateLoader("config/prompts"),
+				Registry:              c.AgentRegistry,
+				TaskStore:             orchTaskStore,
+				StepStore:             stepStore,
+				Bus:                   msgBus,
+				Logger:                logger.With("component", "strategic"),
+				PairManager:           strategicPairMgr,
+				MaxPlanSteps:          cfg.Orchestrator.MaxPlanSteps,
+				PlannerTimeout:        time.Duration(cfg.Orchestrator.PlannerTimeout) * time.Second,
+				ApprovalStepThreshold: cfg.Orchestrator.TaskApprovalStepThreshold,
+				InterviewAmbiguity:    cfg.Orchestrator.InterviewAmbiguityThreshold,
+				TemplateLoader:        agent.NewDaemonPlannerTemplateLoader("config/prompts"),
 			})
 			// Tool-hint validation (issue #58 capability 3): gate the
 			// planner's tool_hint passthrough on the real tool registry.

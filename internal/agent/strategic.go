@@ -333,9 +333,9 @@ func NewStrategicPlanner(cfg StrategicPlannerConfig) *StrategicPlanner {
 	if cfg.PlannerTimeout <= 0 {
 		cfg.PlannerTimeout = 120 * time.Second
 	}
-	if cfg.ApprovalStepThreshold <= 0 {
-		cfg.ApprovalStepThreshold = 5
-	}
+	// ApprovalStepThreshold: 0 (or negative) DISABLES the complexity gate.
+	// The default of 5 belongs in config.DefaultConfig; defaulting here
+	// would clamp an explicit 0 back to 5 and make the gate undeletable.
 	if cfg.SimpleInputMaxChars <= 0 {
 		cfg.SimpleInputMaxChars = 100
 	}
@@ -1148,6 +1148,18 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 			"task_id", req.TaskID,
 			"refs", len(parentMemoryRefs),
 		)
+	}
+
+	// F13c/P4 (F-ORCH-14): trivial inputs must be capped BEFORE the
+	// approval gate counts steps. An over-decomposed trivial question
+	// (e.g. "what is 2+2?" -> 21 steps) reaches the gate as one step so
+	// it never parks awaiting approval. The cap is conservative: only
+	// the trivial-question shape recognized by isTrivialQuestion.
+	if isTrivialQuestion(req.Input) && len(steps) > 1 {
+		sp.recordMetric("strategic_planner.triviality_cap", 1, map[string]string{
+			"intent": req.Intent,
+		})
+		steps = steps[:1]
 	}
 
 	// Approval gate: tasks that went through an interview (but are not yet

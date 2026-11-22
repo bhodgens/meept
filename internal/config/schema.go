@@ -3941,6 +3941,12 @@ type OrchestratorConfig struct {
 	// with max(120s, this value + 15s)) — the proxy is bumped to match, so
 	// the graceful reply still lands before any transport timeout.
 	SyncWaitMax time.Duration `json:"sync_wait_max" toml:"sync_wait_max"`
+	// TaskApprovalStepThreshold is the minimum number of planned steps that
+	// trips the approval gate (even without an interview). Default 5 — set
+	// here in DefaultConfig, NOT as a clamp in the planner constructor: 0
+	// (or negative) DISABLES the gate for every plan size. The daemon wiring
+	// forwards this value into StrategicPlannerConfig.ApprovalStepThreshold.
+	TaskApprovalStepThreshold int `json:"task_approval_step_threshold" toml:"task_approval_step_threshold"`
 }
 
 // TurnWatchdogConfig is the liveness-reaper knob block (async-turn-
@@ -4919,6 +4925,7 @@ func DefaultConfig() *Config {
 			InterviewAmbiguityThreshold: 0.6,
 			MaxStepsPerPhase:            8,
 			MaxPhases:                   12,
+			TaskApprovalStepThreshold:   5,     // default gate at 5 steps; 0 (operator override) disables
 			MaxReplanExtensions:         2,     // F-NEW-10: hard ceiling on Ralph progress extensions per task
 			StepRetryInterval:           15,    // W12: bounded retry sweep for semaphore-blocked steps (0 disables)
 			ClassifierFailFast:          false, // production keeps rotation; fail-fast is a testing mode
