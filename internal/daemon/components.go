@@ -2816,16 +2816,6 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			"allowed_users", len(c.SlackInteractions.Config().AllowedUserIDs),
 		)
 	}
-	// Effects ledger wiring (effects tree leaf 02): when the ledger opened
-	// successfully, push delivery claims its effect key first so duplicate
-	// pushes are idempotent no-ops. PushService's nil check keeps the
-	// legacy path when the ledger is degraded/absent.
-	c.PushService.SetEffectsLedger(c.EffectsLedger)
-
-	// Backup push ledger wiring: same degradation posture -- when the
-	// ledger is nil the backup scheduler keeps its legacy unclaimed push.
-	bkpkg.SetEffectsLedger(c.EffectsLedger)
-
 	// Quota notifier (quota-reset-resilience): subscribes to agent.quota_wait
 	// and auto-starts its event pump -- no explicit Start call needed. Nil
 	// push service is guarded internally (events still consumed, delivery
@@ -3094,6 +3084,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	c.InstructionContextInjector = instrResult.ContextInjector
 	c.InstructionParser = instrResult.Parser
 	c.InstructionVerifier = instrResult.Verifier
+	// Boot-order fix (07-bench/09 audit F2): the InstructionScheduler is
+	// constructed LATER (wireInstructionScheduler, right after the daemon
+	// scheduler is assigned below) -- c.Scheduler is still nil here, and
+	// constructing it at this point silently disarmed cron-type user
+	// instructions on every boot.
 
 	// Attach the ContextInjector to the agent loop so the system prompt is
 	// enriched with standing instructions and learned patterns.
@@ -3397,6 +3392,24 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		c.EffectsLedger = effectsLedger
 		c.EffectsReconciler = NewEffectsReconciler(effectsLedger, logger.With("component", "effects-reconciler"))
 	}
+
+	// Effects ledger wiring (effects tree leaf 02): when the ledger opened
+	// successfully, push delivery claims its effect key first so duplicate
+	// pushes are idempotent no-ops. PushService's nil check keeps the
+	// legacy path when the ledger is degraded/absent.
+	// Boot-order fix (07-bench/09 audit F1): these two calls used to run
+	// ~570 lines EARLIER (next to PushService construction) where
+	// c.EffectsLedger was still nil on every boot -- push idempotency and
+	// backup-push effect claiming never armed. Both setters are
+	// nil-guarded, so calling them here (after the ledger open, or with a
+	// nil ledger on the degraded path) keeps the same degradation posture;
+	// bkpkg.SetEffectsLedger is a process-wide injection and idempotent
+	// for the same ledger value.
+	c.PushService.SetEffectsLedger(c.EffectsLedger)
+
+	// Backup push ledger wiring: same degradation posture -- when the
+	// ledger is nil the backup scheduler keeps its legacy unclaimed push.
+	bkpkg.SetEffectsLedger(c.EffectsLedger)
 
 	// Centralized execution gate (wave A leaf 02-gate.md): G1 security
 	// scan per category, G2 audit-chain emission, G3 effects reservation
@@ -4694,6 +4707,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				TaskStore: orchTaskStore,
 				Bus:       msgBus,
 				Logger:    logger.With("component", "review"),
+				Policy:    agent.ReviewPolicyFromConfig(cfg.Agent.Review),
 				// #137: the reviewer lane resolves the step's session workdir
 				// through this store (resolveStepWorkingDir). Without it the
 				// resolver returns ("", none) on every real review and the
@@ -5312,6 +5326,13 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			)
 		}
 	}
+
+	// Instruction scheduler wiring (boot-order fix, 07-bench/09 audit F2):
+	// must run AFTER c.Scheduler is assigned above. The old single
+	// wireInstructions call site ran ~2,200 lines earlier where
+	// c.Scheduler was still nil, so the nil guard skipped construction on
+	// EVERY boot and cron-type user instructions were never scheduled.
+	c.wireInstructionScheduler(logger.With("component", "instruction-wiring"))
 
 	// HALO RLM trace-analysis activation (deadcode wave-2 WIRE): the
 	// memory trace-store reader + agent.RLMAnalyzer +

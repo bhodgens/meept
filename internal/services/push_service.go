@@ -136,10 +136,19 @@ func (s *PushService) PushToChannels(ctx context.Context, req *PushRequest) (*Pu
 
 // SetEffectsLedger wires the external-effect ledger. When nil (tests,
 // ledger disabled), Push keeps its legacy behavior exactly — no claiming.
+// Read path for tests/boot-order audits (07-bench/09 F1): the daemon
+// constructor wires this late (after the ledger open); this getter lets a
+// regression test observe that the wiring actually armed instead of
+// silently passing nil.
 func (s *PushService) SetEffectsLedger(l effects.Ledger) {
 	if l != nil {
 		s.effects = l
 	}
+}
+
+// EffectsLedger returns the wired effects ledger (nil when none was set).
+func (s *PushService) EffectsLedger() effects.Ledger {
+	return s.effects
 }
 
 // SetNotificationPreferences attaches the per-user delivery gate (Plan 3

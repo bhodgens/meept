@@ -85,6 +85,34 @@ func DefaultReviewPolicy() *ReviewPolicy {
 	}
 }
 
+// ReviewPolicyFromConfig builds the runtime review policy from [agent.review].
+// Empty fields fall back to DefaultReviewPolicy values, so an installed home
+// with no review block keeps the same posture as before this seam existed.
+// A configured pattern list REPLACES the default list (operator owns it).
+func ReviewPolicyFromConfig(c config.ReviewConfig) *ReviewPolicy {
+	p := DefaultReviewPolicy()
+	// A zero-value bool cannot express "unset". Keep the enabled default;
+	// an operator who wants review off sets [agent] review.enabled=false,
+	// which DefaultConfig already supplies as true on a fresh install.
+	if c.RequireReview != nil || c.SkipReview != nil || c.AutoApprovePatterns != nil ||
+		c.MaxRevisionCycles != 0 {
+		p.Enabled = c.Enabled
+	}
+	if len(c.RequireReview) > 0 {
+		p.RequireReview = append([]string(nil), c.RequireReview...)
+	}
+	if len(c.SkipReview) > 0 {
+		p.SkipReview = append([]string(nil), c.SkipReview...)
+	}
+	if c.MaxRevisionCycles > 0 {
+		p.MaxRevisionCycles = c.MaxRevisionCycles
+	}
+	if c.AutoApprovePatterns != nil {
+		p.AutoApprovePatterns = append([]string(nil), c.AutoApprovePatterns...)
+	}
+	return p
+}
+
 // NeedsReview determines if a step requires review based on policy.
 func (p *ReviewPolicy) NeedsReview(step *task.TaskStep) bool {
 	if !p.Enabled {
