@@ -4,21 +4,21 @@ plans   all   active   pending   completed   (1/1)                              
 │ title           state   pha…  ste…  progre…  updat… │                                                                                   │    unknown, built:    │
 │─────────────────────────────────────────────────────│                                                                                   │       unknown)        │
 │ rewrite the p…  ● dra…  0     1/4   ██░░░░…  HH:MM… │                                                                                   │  ▾ status             │
-│                                                     │                                                                                   │   daemon:             │
-│                                                     │                                                                                   │ disconnected          │
+│                                                     │                                                                                   │   daemon:   connected │
+│                                                     │                                                                                   │   uptime:   00s       │
+│                                                     │                                                                                   │   agents:   0 active  │
+│                                                     │                                                                                   │   tasks:    0 pending │
 │                                                     │                                                                                   │  ▾ agent activity     │
 │                                                     │                                                                                   │   no active agents    │
 │                                                     │                                                                                   │   workers: none       │
-│                                                     │                                                                                   │  ▾ tasks              │
-│                                                     │                                                                                   │   no active tasks     │
-╰─────────────────────────────────────────────────────╯                                                                                   │  ▸ plan               │
-╭─────────────────────────────────────────────────╮                                                                                       │  ▾ recent memory      │
-│                                                 │                                                                                       │   ...                 │
-│  select a plan to view details                  │                                                                                       │                       │
-│                                                 │                                                                                       │ ⢰⣆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢰⡆   │
-╰─────────────────────────────────────────────────╯                                                                                       │ ⠈⠁⠀⠈⠁⠀⠢⠀⢠⣤⣄⠀⠠⠂⠀⠉⠀⠈⠁   │
-r: refresh | /: filter | a: approve | v: revise | c: confirm | enter: details | ?: help                                                   │ ⢀⡀⠀⠀⠀⠀⡠⠀⠘⠛⠓⠀⠠⡀⠀⠀⠀⢀⡀   │
-                                                                                                                                          │ ⠸⠗⠀⠈⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠀⠸⠇   │
+╰─────────────────────────────────────────────────────╯                                                                                   │  ▾ tasks              │
+╭─────────────────────────────────────────────────╮                                                                                       │   ...                 │
+│                                                 │                                                                                       │                       │
+│  select a plan to view details                  │                                                                                       │ ⢰⣆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢰⡆   │
+│                                                 │                                                                                       │ ⠈⠁⠀⠈⠁⠀⠢⠀⢠⣤⣄⠀⠠⠂⠀⠉⠀⠈⠁   │
+╰─────────────────────────────────────────────────╯                                                                                       │ ⢀⡀⠀⠀⠀⠀⡠⠀⠘⠛⠓⠀⠠⡀⠀⠀⠀⢀⡀   │
+r: refresh | /: filter | a: approve | v: revise | c: confirm | enter: details | ?: help                                                   │ ⠸⠗⠀⠈⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠀⠸⠇   │
+                                                                                                                                          │                       │
                                                                                                                                           │                       │
                                                                                                                                           ╰───────────────────────╯
  ● │ ^X menu │ ^S sessions │ ^P find │ ^C quit │ j/k

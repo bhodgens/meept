@@ -18,6 +18,7 @@ import (
 	"github.com/caimlas/meept/internal/sharedclient"
 	"github.com/caimlas/meept/internal/tui/modals"
 	"github.com/caimlas/meept/internal/tui/models"
+	"github.com/caimlas/meept/internal/tui/types"
 )
 
 // headlessProgram is the handle a test drives the running App through.
@@ -38,11 +39,22 @@ type headlessProgram struct {
 	done    chan struct{} // closed when p.Run returns
 	out     *bytes.Buffer
 	stub    *rpcStub
+	// expectedSession is the session the TEST first loaded explicitly
+	// (06-planning/01 rebind-recovery): a late get_most_recent /
+	// create-default load can rebind the app to another session, and
+	// finish() restores this one so assertions read the right transcript.
+	expectedSession string
 }
 
 // send delivers one message to the App's event loop; blocks until the
 // loop has RECEIVED it.
 func (h *headlessProgram) send(msg tea.Msg) {
+	// 06-planning/01 rebind recovery: remember the FIRST session the
+	// test loaded explicitly, so finish() can restore it if a late
+	// get_most_recent / create-default load rebinds the app elsewhere.
+	if slm, ok := msg.(SessionLoadedMsg); ok && slm.Session != nil && slm.Session.ID != "" && h.expectedSession == "" {
+		h.expectedSession = slm.Session.ID
+	}
 	h.program.Send(msg)
 }
 
@@ -66,7 +78,39 @@ func (h *headlessProgram) settle(w, hgt int) {
 // Run returning means that message was already processed, so re-applying
 // here is final. Single-goroutine Update, no race.
 func (h *headlessProgram) finish(w, hgt int) *App {
+	// 06-planning/01 rebind recovery FIRST (loop still alive): a late
+	// get_most_recent / create-default load can rebind the app to
+	// another session after the test installed its fixtures, orphaning
+	// the transcript under assertion. Restore the session the test
+	// loaded BEFORE quitting - SetSession rebinds every surface back,
+	// and the saved per-session chat buffer brings the rendered card
+	// (and every seeded line) back. A world-side rebind to an EMPTY
+	// session id is skipped (nothing to restore from).
+	if h.expectedSession == "" {
+		h.expectedSession = h.app.ActiveSessionID()
+	}
+	if sess := h.expectedSession; sess != "" && sess != h.app.ActiveSessionID() {
+		h.app.Update(SessionLoadedMsg{Session: &types.Session{ID: sess, Name: sess, ConversationID: sess}})
+	}
+
 	h.quit()
+	h.app.Update(tea.WindowSizeMsg{Width: w, Height: hgt})
+	// Session-load barrier: a task-gate card parked while the session
+	// load was in flight must render before assertions read the
+	// transcript. The loop is gone, so deliver ONLY the parked-card
+	// drain here - never a synthetic SessionMessagesLoadedMsg (its
+	// nil-Messages rebuild would wipe non-localOnly transcript lines
+	// the test seeded, e.g. chat.Init's welcome bubble). The drain
+	// bypasses the settled-check on purpose: quitting cancels any
+	// still-in-flight load cmd, so its SessionMessagesLoadedMsg can
+	// never arrive to clear the marker. handlePendingApprovalEvent
+	// re-checks session scoping itself, so a card still cannot cross
+	// sessions. Idempotent: nothing parked means nothing rendered.
+	if sess := h.app.ActiveSessionID(); sess != "" {
+		h.app.drainParkedGateCards(sess)
+	} else {
+		h.app.drainParkedGateCards(h.app.ChatSessionID())
+	}
 	h.app.Update(tea.WindowSizeMsg{Width: w, Height: hgt})
 	return h.app
 }
@@ -266,6 +310,11 @@ func newHeadlessAppSocket(t *testing.T, socketPath string, w, h int) *headlessPr
 	app.queue = models.NewQueueModel(rpc)
 	app.memory = models.NewMemoryModel(rpc)
 	app.plans = models.NewPlansModel(rpc)
+	// Sidebar must ride the LIVE stub client too (06-planning/03): the
+	// placeholder points at a nonexistent socket, so the plan panel never
+	// received plan.list data and every sidebar surface read
+	// "disconnected". Mirror the sub-model re-wiring above.
+	app.sidebar = NewSidebarModel(rpc, nil, app.styles, app.clientConfig.Rendering.SidebarAnimation)
 	// The review modal also holds the client; re-wire it to the live stub
 	// client like every sub-model above (createTestApp built it against the
 	// dead placeholder client before the swap).

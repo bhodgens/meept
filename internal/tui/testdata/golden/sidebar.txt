@@ -3,20 +3,20 @@
 │    unknown, built:    │
 │       unknown)        │
 │  ▾ status             │
-│   daemon:             │
-│ disconnected          │
+│   daemon:   connected │
+│   uptime:   00s       │
+│   agents:   0 active  │
+│   tasks:    0 pending │
 │  ▾ agent activity     │
 │   no active agents    │
 │   workers: none       │
 │  ▾ tasks              │
-│   no active tasks     │
-│  ▸ plan               │
-│  ▾ recent memory      │
 │   ...                 │
 │                       │
 │ ⢰⣆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢰⡆   │
 │ ⠈⠁⠀⠈⠁⠀⠢⠀⢠⣤⣄⠀⠠⠂⠀⠉⠀⠈⠁   │
 │ ⢀⡀⠀⠀⠀⠀⡠⠀⠘⠛⠓⠀⠠⡀⠀⠀⠀⢀⡀   │
 │ ⠸⠗⠀⠈⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠀⠸⠇   │
+│                       │
 │                       │
 ╰───────────────────────╯

@@ -312,7 +312,10 @@ type SidebarDataMsg struct {
 	Memory        []SidebarMemoryItem
 	PlanPhases    []components.PhaseRow
 	PlanTitle     string
-	Err           error
+	// PlanDocNote carries the document-proposal line for a 0-phase plan
+	// (06-planning/03); empty when the plan has phases or none is shown.
+	PlanDocNote string
+	Err         error
 }
 
 func (s *SidebarModel) refreshData() tea.Cmd {
@@ -446,6 +449,7 @@ func (s *SidebarModel) refreshData() tea.Cmd {
 		// refresh tick (2s) which is cheap because plan.list is a SQLite read.
 		var planPhases []components.PhaseRow
 		var planTitle string
+		var planDocNote string
 		if s.rpc.IsConnected() {
 			if raw, err := s.rpc.Call("plan.list", map[string]any{"limit": 10}); err == nil {
 				var resp struct {
@@ -453,12 +457,21 @@ func (s *SidebarModel) refreshData() tea.Cmd {
 				}
 				if json.Unmarshal(raw, &resp) == nil {
 					for _, p := range resp.Plans {
-						if len(p.Phases) == 0 {
-							continue
-						}
+						// Document proposal (06-planning/03): a 0-phase
+						// plan (evolver markdown proposal) is no longer
+						// skipped -- the panel surfaces its title so the
+						// document is visible in the sidebar.
 						planTitle = p.Title
 						if planTitle == "" {
 							planTitle = p.ID
+						}
+						if len(p.Phases) == 0 {
+							// Empty phase list = document proposal; keep
+							// the title, nothing to break down per phase.
+							// Shared wording via models.DocumentProposalLine
+							// (reuses planCountLine - no fork).
+							planDocNote = models.DocumentProposalLine()
+							break
 						}
 						for _, ph := range p.Phases {
 							planPhases = append(planPhases, components.PhaseRow{
@@ -483,6 +496,7 @@ func (s *SidebarModel) refreshData() tea.Cmd {
 			Memory:        memories,
 			PlanPhases:    planPhases,
 			PlanTitle:     planTitle,
+			PlanDocNote:   planDocNote,
 		}
 	}
 }
@@ -517,8 +531,9 @@ func (s *SidebarModel) Update(msg tea.Msg) tea.Cmd {
 			if msg.PlanTitle != "" {
 				s.planView.SetTitle(msg.PlanTitle)
 			}
+			s.planView.SetDocumentNote(msg.PlanDocNote)
 			s.planView.SetPhases(msg.PlanPhases)
-			if len(msg.PlanPhases) > 0 {
+			if len(msg.PlanPhases) > 0 || msg.PlanDocNote != "" {
 				s.expandedPanels[PanelPlan] = true
 			}
 		}

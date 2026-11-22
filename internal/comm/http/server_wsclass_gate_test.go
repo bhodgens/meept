@@ -187,6 +187,28 @@ func discoverWSClassifiedImplementers(t *testing.T) map[string]struct{} {
 			if _, isIface := named.Underlying().(*types.Interface); isIface {
 				continue
 			}
+			// A type that merely INHERITS WSClass() by embedding an
+			// already-classified type is not a new WS class. It has no
+			// topic of its own, is never published to the relay, and
+			// classifies identically to the embedded type. Counting
+			// promoted methods (types.Implements uses the full method
+			// set) produces false positives: e.g. the private decode
+			// DTO activity.specialistTerminal embeds
+			// agent.TurnTerminalEvent purely as a JSON target for the
+			// execution-history projection. Every genuine WS payload
+			// DECLARES its own WSClass() method, so require a direct
+			// declaration here while still checking the full signature
+			// via types.Implements.
+			declaresMarker := false
+			for i := 0; i < named.NumMethods(); i++ {
+				if named.Method(i).Name() == "WSClass" {
+					declaresMarker = true
+					break
+				}
+			}
+			if !declaresMarker {
+				continue
+			}
 			if types.Implements(named, iface) {
 				found[p.PkgPath+"."+name] = struct{}{}
 			}

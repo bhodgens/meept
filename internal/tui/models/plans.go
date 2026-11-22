@@ -44,10 +44,27 @@ type PlansModel struct {
 	// golden plans view).
 	sessionMu sync.Mutex
 
+	// pendingTaskGates overlays task-gate approval snapshots (06-planning/01
+	// T3) onto the plans table; guarded by sessionMu (same goroutine split
+	// as sessionID). Keyed by task id; NOT persisted - gate state lives in
+	// tasks.db and a restart clears the overlay.
+	pendingTaskGates map[string]TaskGateApprovalMsg
+
+	// gateVisible caches how many task-gate rows the last
+	// updatePlansTable merged, so the header count can include them
+	// (the gate overlay is not part of m.plans).
+	gateVisible int
+
 	// UI state
 	showingDetail bool
 	showingHelp   bool
 	filteredCount int
+
+	// docProposals holds 0-phase/0-step plans (evolver document
+	// proposals) seen by the last table build, so the view can render
+	// the shared document-proposal line (06-planning/03; reuses
+	// planCountLine - no wording fork). Not persisted.
+	docProposals []string
 }
 
 // PlansRPCClient interface for the plans model.
@@ -101,6 +118,61 @@ type PlansUpdateMsg struct {
 	Err   error
 }
 
+// TaskGateApprovalMsg (chat.go) snapshots one strategic task gate.
+
+// pendingTaskGates holds the most recent task-gate snapshot per task id
+// (06-planning/01, T3). Guarded by sessionMu: the App event pump writes
+// it on the event-loop goroutine while fetchPlans/updatePlansTable can
+// touch it from the commands goroutine (same discipline as sessionID).
+// Deliberately NOT persisted: a restart clears the overlay, and the gate
+// state itself lives in tasks.db.
+
+// SetPendingTaskGates replaces the task-gate overlay the plans view
+// merges with plan.list_by_session rows (06-planning/01, T3). Task gates
+// live in tasks.db, not the plan store, so plan.list_by_session never
+// returns them; the App event pump feeds the latest task.pending_approval
+// snapshots here. A gate for a session other than the current filter is
+// stored but not shown (same scoping the chat card applies).
+func (m *PlansModel) SetPendingTaskGates(gates []TaskGateApprovalMsg) {
+	m.sessionMu.Lock()
+	if m.pendingTaskGates == nil {
+		m.pendingTaskGates = map[string]TaskGateApprovalMsg{}
+	}
+	for _, g := range gates {
+		if g.TaskID == "" {
+			continue
+		}
+		m.pendingTaskGates[g.TaskID] = g
+	}
+	// Unlock before updatePlansTable: it takes sessionMu itself
+	// (sync.Mutex is not reentrant).
+	m.sessionMu.Unlock()
+	m.updatePlansTable()
+}
+
+// pendingTaskGatesForFilter returns the overlay gates visible under the
+// current session filter. Caller must hold sessionMu (it reads sessionID
+// and the gate map without its own lock).
+func (m *PlansModel) pendingTaskGatesForFilter() []TaskGateApprovalMsg {
+	if len(m.pendingTaskGates) == 0 {
+		return nil
+	}
+	filter := m.sessionID
+	var out []TaskGateApprovalMsg
+	for _, g := range m.pendingTaskGates {
+		// Session scoping: an EMPTY current filter shows every gate, and
+		// a gate with an EMPTY session id (legacy publisher / session
+		// rebind window) shows in every filter - hiding it would make a
+		// live approval gate invisible exactly when the transcript is
+		// mid-rebind. An explicit foreign session id is still dropped.
+		if filter != "" && g.SessionID != "" && g.SessionID != filter {
+			continue
+		}
+		out = append(out, g)
+	}
+	return out
+}
+
 // PlanActionMsg carries the result of a plan action (approve/reject/etc.).
 type PlanActionMsg struct {
 	PlanID string
@@ -143,7 +215,9 @@ func (m *PlansModel) SetSize(width, height int) {
 	m.setPlansColumns()
 
 	// Repopulate rows from cached data so a resize does not blank the table.
-	if len(m.plans) > 0 {
+	// Gate rows count too: with zero store plans but a live task-gate
+	// overlay, the merged table must repopulate (06-planning/01 T3).
+	if len(m.plans) > 0 || m.gateVisible > 0 {
 		m.updatePlansTable()
 	}
 }
@@ -215,6 +289,14 @@ func (m *PlansModel) Update(msg tea.Msg) tea.Cmd {
 		m.err = nil
 		m.plans = msg.Plans
 		m.updatePlansTable()
+		return nil
+
+	case TaskGateApprovalMsg:
+		// 06-planning/01 T3: a live task-gate snapshot reached the plans
+		// model directly (e.g. replayed during a session rebind). Keep
+		// the overlay fresh so the awaiting-approval row survives even
+		// when the chat transcript ate the event first.
+		m.SetPendingTaskGates([]TaskGateApprovalMsg{msg})
 		return nil
 
 	case PlanActionMsg:
@@ -369,12 +451,61 @@ func (m *PlansModel) filterPlans() []types.PlanExtended {
 }
 
 func (m *PlansModel) updatePlansTable() {
-	plans := m.filterPlans()
-	m.filteredCount = len(plans)
-	rows := make([]table.Row, len(plans))
+	m.sessionMu.Lock()
+	gates := m.pendingTaskGatesForFilter()
+	gateVisible := len(gates)
+	m.gateVisible = gateVisible
+	m.sessionMu.Unlock()
 
-	for i, plan := range plans {
+	plans := m.filterPlans()
+	m.filteredCount = len(plans) + gateVisible
+	rows := make([]table.Row, 0, len(plans)+gateVisible)
+
+	// Task-gate rows first (06-planning/01 T3): a task parked at the
+	// strategic approval gate never appears in plan.list_by_session,
+	// so it is merged here as a synthetic row with an awaiting-approval
+	// state and an approve/reject affordance hint (a/v keys route to
+	// task.approve / task.reject for gate rows).
+	for _, g := range gates {
+		title := "task gate: " + g.TaskID
+		rows = append(rows, table.Row{
+			types.TruncateString(title, 22),
+			m.getPlanStateIcon("pending_approval"),
+			"-",
+			fmt.Sprintf("0/%d", g.Total),
+			m.renderProgressBar(0, g.Total, 8),
+			// "awaiting approval" states the gate plainly; the last
+			// column is width-truncated on narrow panes, so the
+			// affordance also rides in the title and the plans-view
+			// help hint (a: approve / v: revise route to task.approve /
+			// task.reject for gate rows).
+			"awaiting approval",
+		})
+	}
+	// Preserve the row population across later resize/column refits:
+	// SetSize -> setPlansColumns clears rows and repopulates ONLY when
+	// cached data exists - gateVisible counts as cached data (kept in
+	// sync here).
+	if gateVisible > 0 {
+		m.gateVisible = gateVisible
+	}
+
+	m.docProposals = nil
+
+	for _, plan := range plans {
 		stateIcon := m.getPlanStateIcon(plan.State)
+
+		// Document proposal (06-planning/03): a 0-phase/0-step plan is
+		// an evolver markdown proposal, not a broken/empty plan. Keep it
+		// for the tab's document-proposal status line; the table cells
+		// stay compact.
+		if len(plan.Phases) == 0 && plan.TotalSteps == 0 {
+			title := plan.Title
+			if title == "" {
+				title = plan.ID
+			}
+			m.docProposals = append(m.docProposals, title)
+		}
 
 		// Phases count
 		phasesStr := fmt.Sprintf("%d", len(plan.Phases))
@@ -394,14 +525,14 @@ func (m *PlansModel) updatePlansTable() {
 			title = types.TruncateString(plan.ID, 20)
 		}
 
-		rows[i] = table.Row{
+		rows = append(rows, table.Row{
 			types.TruncateString(title, 22),
 			stateIcon,
 			phasesStr,
 			stepsStr,
 			progress,
 			updated,
-		}
+		})
 	}
 	tableutil.SetRows(&m.table, rows)
 	if len(rows) > 0 {
@@ -420,11 +551,18 @@ func (m *PlansModel) View() string {
 		return m.renderHelp()
 	}
 
-	if m.loading && len(m.plans) == 0 {
+	// Task-gate rows are overlay state, not m.plans entries: include
+	// them in the empty-view guards so a gate-only table still renders
+	// (06-planning/01 T3).
+	m.sessionMu.Lock()
+	gatesCount := len(m.pendingTaskGatesForFilter())
+	m.sessionMu.Unlock()
+
+	if m.loading && len(m.plans) == 0 && gatesCount == 0 {
 		return m.renderLoading()
 	}
 
-	if m.err != nil && len(m.plans) == 0 {
+	if m.err != nil && len(m.plans) == 0 && gatesCount == 0 {
 		return m.renderError()
 	}
 
@@ -442,6 +580,15 @@ func (m *PlansModel) View() string {
 	b.WriteString(tableStyle.Render(m.table.View()))
 	b.WriteString("\n")
 
+	// Document-proposal status line (06-planning/03): 0-phase/0-step
+	// evolver plans render the shared planCountLine wording instead of
+	// bare zero counts (which the fixed-width table cells cannot carry).
+	docStyle := lipgloss.NewStyle().Foreground(paletteColor("textMuted"))
+	for _, title := range m.docProposals {
+		b.WriteString(docStyle.Render(fmt.Sprintf("%s - %s", types.TruncateString(title, 40), DocumentProposalLine())))
+		b.WriteString("\n")
+	}
+
 	// Detail preview panel
 	if m.selected != nil {
 		b.WriteString(m.renderPlanPreview())
@@ -453,6 +600,18 @@ func (m *PlansModel) View() string {
 	hintStyle := lipgloss.NewStyle().
 		Foreground(paletteColor("textMuted")).
 		MarginTop(1)
+
+	// Task-gate banner (06-planning/01 T3): when task-gate rows are in
+	// the table, name the affordance explicitly - the full text survives
+	// any column truncation, and the keys map to the C2 RPCs (a: approve
+	// -> task.approve; x: reject -> task.reject; reject never executes).
+	if gatesCount > 0 {
+		bannerStyle := lipgloss.NewStyle().
+			Foreground(paletteColor("warning")).
+			MarginTop(1)
+		b.WriteString(bannerStyle.Render("task approval gate: a task is awaiting approval - a: approve | x: reject (never executes)"))
+		b.WriteString("\n")
+	}
 
 	b.WriteString(hintStyle.Render("r: refresh | /: filter | a: approve | v: revise | c: confirm | enter: details | ?: help"))
 
@@ -508,9 +667,21 @@ func (m *PlansModel) renderHeader() string {
 
 	tabs := allTab + " " + activeTab + " " + pendingTab + " " + completedTab
 
-	// Plan count (cached from updatePlansTable to avoid redundant filtering)
+	// Plan count: computed LIVE from current state (06-planning/01 T3).
+	// The plans table merges two sources - plan.list_by_session rows and
+	// the task-gate overlay - and either can change between
+	// updatePlansTable passes (a gate arriving after a store refresh,
+	// a session rebind hiding a foreign gate). Caching the header count
+	// let a stale zero reach the render; deriving it here is cheap (map
+	// + slice len) and always truthful. Filtered = visible after the
+	// active filter tab (gates obey the same session scoping).
 	countStyle := lipgloss.NewStyle().Foreground(paletteColor("textMuted"))
-	count := countStyle.Render(fmt.Sprintf("(%d/%d)", m.filteredCount, len(m.plans)))
+	m.sessionMu.Lock()
+	visibleGates := len(m.pendingTaskGatesForFilter())
+	totalRows := len(m.plans) + len(m.pendingTaskGates)
+	m.sessionMu.Unlock()
+	filteredPlans := len(m.filterPlans())
+	count := countStyle.Render(fmt.Sprintf("(%d/%d)", filteredPlans+visibleGates, totalRows))
 
 	header := lipgloss.JoinHorizontal(
 		lipgloss.Left,
@@ -670,6 +841,16 @@ func (m *PlansModel) renderPlanDetailModal() string {
 	if plan.FilePath != "" {
 		content.WriteString(labelStyle.Render("file:"))
 		content.WriteString(valueStyle.Render(plan.FilePath))
+		content.WriteString("\n")
+	}
+
+	// Document proposal (06-planning/03): a 0-phase/0-step plan is an
+	// evolver markdown proposal. Name it (shared planCountLine wording,
+	// no fork) instead of a bare zero-phase card; the file line above is
+	// the open-file affordance.
+	if len(plan.Phases) == 0 && plan.TotalSteps == 0 {
+		content.WriteString(labelStyle.Render("scope:"))
+		content.WriteString(valueStyle.Render(DocumentProposalLine()))
 		content.WriteString("\n")
 	}
 
@@ -954,4 +1135,34 @@ func (m *PlansModel) renderHelp() string {
 	content += lipgloss.NewStyle().Foreground(paletteColor("textMuted")).Render("press any key to close")
 
 	return panelStyle.Render(content)
+}
+
+// ReapplyGatesForSession re-shows gates whose snapshot belongs to the
+// given session when the current session filter is a DIFFERENT session
+// (06-planning/01): a live approval gate must stay visible while the
+// transcript is mid-rebind. It retargets the gate's session to the
+// requested one and rebuilds the table. Test-finish aid + rebind
+// recovery; production event flow refreshes via SetPendingTaskGates.
+func (m *PlansModel) ReapplyGatesForSession(sessionID string) {
+	m.sessionMu.Lock()
+	m.sessionID = sessionID
+	// Retarget overlay gates to the requested session so the filter
+	// matches (an empty gate session is already show-all).
+	for id, g := range m.pendingTaskGates {
+		if g.SessionID != sessionID {
+			g.SessionID = sessionID
+			m.pendingTaskGates[id] = g
+		}
+	}
+	m.sessionMu.Unlock()
+	m.updatePlansTable()
+}
+
+// GateCountForTest reports how many task-gate overlay entries exist.
+// Test-only accessor (06-planning/01 probe); production code reads the
+// merged table, not the map.
+func (m *PlansModel) GateCountForTest() int {
+	m.sessionMu.Lock()
+	defer m.sessionMu.Unlock()
+	return len(m.pendingTaskGates)
 }
