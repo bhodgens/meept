@@ -401,10 +401,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     // relaunching the UI doesn't accumulate unused "new session" entries.
     if (!_initialLoadDone) {
       _initialLoadDone = true;
+      // Aligned restore policy (03-restore-queue-visibility T1):
+      // session.auto_resume=false means "start with no session selected" -
+      // the user picks one explicitly. Sidebar honors this; top-tabs must
+      // too (the divergence F-ORCH-7 called out).
+      final autoResume = ref.read(renderingPrefsProvider).autoResume;
+      if (!autoResume) return;
       final active = ref.read(activeSessionProvider);
       if (active == null) {
+        // Prefer the most recent session WITH history (the one the user
+        // actually used); only reuse an empty session or create one when
+        // nothing has content.
         final notifier = ref.read(sessionProvider.notifier);
-        final session =
+        var session = notifier.findMostRecentSessionWithHistory();
+        session ??=
             notifier.findReusableEmptySession() ??
             await notifier.createSession('new session');
         if (session != null) {
