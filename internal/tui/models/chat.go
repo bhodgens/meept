@@ -258,6 +258,7 @@ type ChatModel struct {
 	userStyle             lipgloss.Style
 	assistantStyle        lipgloss.Style
 	systemStyle           lipgloss.Style
+	errorStyle            lipgloss.Style // error bubbles: distinct from system notices
 	pendingStyle          lipgloss.Style
 	separatorStyle        lipgloss.Style
 	focusedBorder         lipgloss.Style
@@ -452,6 +453,10 @@ func NewChatModelWithConfig(rpc RPCClient, userStyle, assistantStyle, systemStyl
 		userStyle:         userStyle,
 		assistantStyle:    assistantStyle,
 		systemStyle:       systemStyle,
+		errorStyle: lipgloss.NewStyle().
+			Foreground(paletteColor("error")).
+			Bold(true).
+			PaddingLeft(2),
 		pendingStyle: lipgloss.NewStyle().
 			Foreground(paletteColor("warning")).
 			Italic(true).
@@ -1404,7 +1409,7 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		m.removePendingMessage()
 
 		if msg.Err != nil {
-			m.addMessage(RoleSystem, llm.UserMessage(msg.Err))
+			m.addMessage(RoleError, llm.UserMessage(msg.Err))
 		} else {
 			// Check if the reply is an async task ack
 			if isAsyncAck, taskID, taskMessage := parseAsyncAck(msg.Reply); isAsyncAck {
@@ -1414,8 +1419,8 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 					"│ Task ID: %s\n"+
 					"│ View progress: [ctrl+x 2] tasks\n"+
 					"└─────────────────────────────────────────────┘",
-					types.TruncateString(taskMessage, 45),
-					types.TruncateString(taskID, 40),
+					taskMessage,
+					taskID,
 				)
 				m.addMessage(RoleSystem, content)
 			} else if result := parseTaskResult(msg.Reply); result != nil {
@@ -1431,22 +1436,26 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 						content = fmt.Sprintf("┌ task completed ────────────────────────────┐\n"+
 							"│ Task: \"%s\"\n"+
 							"│ Steps: %d/%d completed\n",
-							types.TruncateString(result.Name, 40),
+							result.Name,
 							result.Completed, result.Total,
 						)
+						// Unbounded: the daemon caps summaries at ~12k
+						// (buildResultSummary); the client renders what
+						// arrived verbatim (leaf 08 truncation fix).
 						if result.Result != "" {
-							content += fmt.Sprintf("│ %s\n", types.TruncateString(result.Result, 45))
+							content += fmt.Sprintf("│ %s\n", result.Result)
 						}
 						content += "└─────────────────────────────────────────────┘"
 					} else {
 						content = fmt.Sprintf("┌ task failed ───────────────────────────────┐\n"+
 							"│ Task: \"%s\"\n"+
 							"│ Steps: %d completed, %d failed of %d\n",
-							types.TruncateString(result.Name, 40),
+							result.Name,
 							result.Completed, result.Failed, result.Total,
 						)
+						// Error text unbounded for the same reason.
 						if result.Error != "" {
-							content += fmt.Sprintf("│ Error: %s\n", types.TruncateString(result.Error, 40))
+							content += fmt.Sprintf("│ Error: %s\n", result.Error)
 						}
 						content += "└─────────────────────────────────────────────┘"
 					}
@@ -1549,8 +1558,8 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 			"│ Task ID: %s\n"+
 			"│ View progress: [ctrl+x 2] tasks\n"+
 			"└─────────────────────────────────────────────┘",
-			types.TruncateString(msg.TaskName, 40),
-			types.TruncateString(msg.TaskID, 40),
+			msg.TaskName,
+			msg.TaskID,
 		)
 		m.addMessage(RoleSystem, content)
 		return nil
@@ -1588,11 +1597,11 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 
 	case ChatSubmitErrorMsg:
 		// The submission never started: clear the pending line and
-		// surface the error honestly.
+		// surface the error honestly (error-styled, leaf 08).
 		m.loading = false
 		m.progressState = nil
 		m.removePendingMessage()
-		m.addMessage(RoleSystem, llm.UserMessage(msg.Err))
+		m.addMessage(RoleError, llm.UserMessage(msg.Err))
 		m.updateViewport()
 		return nil
 
@@ -1613,14 +1622,22 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 			"│ Task: \"%s\"\n"+
 			"│ Steps: %d/%d %s\n",
 			stateLabel,
-			types.TruncateString(msg.TaskName, 40),
+			msg.TaskName,
 			msg.CompletedSteps, msg.TotalSteps, stateLabel,
 		)
+		// Unbounded summary: the daemon caps ResultSummary at ~12k
+		// (buildResultSummary); the client renders what arrived
+		// verbatim (leaf 08 truncation fix - the old 50-char cut
+		// made completed-task answers unreadable).
 		if msg.ResultSummary != "" {
-			content += fmt.Sprintf("│ %s\n", types.TruncateString(msg.ResultSummary, 50))
+			content += fmt.Sprintf("│ %s\n", msg.ResultSummary)
 		}
 		content += "└─────────────────────────────────────────────┘"
-		m.addMessage(RoleSystem, content)
+		role := RoleSystem
+		if msg.State == StateFailed {
+			role = RoleError
+		}
+		m.addMessage(role, content)
 		if msg.State == StateCompleted {
 			m.noteTaskCardRendered(msg.TaskID, msg.ResultSummary)
 		}
@@ -1953,6 +1970,17 @@ func (m *ChatModel) addMessage(role, content string) {
 // (preserveLocalNotices).
 func (m *ChatModel) AddSystemMessage(content string) {
 	m.addMessage(RoleSystem, content)
+	if len(m.messages) > 0 {
+		m.messages[len(m.messages)-1].localOnly = true
+	}
+}
+
+// AddErrorMessage adds an error-styled transcript line (TUI error
+// styling, 20261121-interactive-usability leaf 08): rendered through the
+// model's errorStyle - bold palette-red, visually distinct from ordinary
+// system notices. Client-local like AddSystemMessage.
+func (m *ChatModel) AddErrorMessage(content string) {
+	m.addMessage(RoleError, content)
 	if len(m.messages) > 0 {
 		m.messages[len(m.messages)-1].localOnly = true
 	}
@@ -2497,6 +2525,8 @@ func (m *ChatModel) updateViewport() {
 			style = m.systemStyle
 		case StatePending:
 			style = m.pendingStyle
+		case RoleError:
+			style = m.errorStyle
 		case RoleSystem:
 			style = m.systemStyle
 		}
@@ -4341,6 +4371,8 @@ func (m *ChatModel) styleForRole(role string) lipgloss.Style {
 		return m.assistantStyle
 	case RoleParticipant, RoleSystem:
 		return m.systemStyle
+	case RoleError:
+		return m.errorStyle
 	case StatePending:
 		return m.pendingStyle
 	default:

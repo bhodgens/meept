@@ -453,10 +453,11 @@ func TestChatModel_ReceiveError(t *testing.T) {
 	responseMsg := ChatResponseMsg{Err: errors.New("connection failed")}
 	model.Update(responseMsg)
 
-	// Check error message was added
+	// Check error message was added (RoleError - the leaf 08 error
+	// styling surface; distinct from ordinary system notices)
 	found := false
 	for _, m := range model.messages {
-		if m.Role == "system" && strings.Contains(m.Content, "connection failed") {
+		if m.Role == RoleError && strings.Contains(m.Content, "connection failed") {
 			found = true
 			break
 		}

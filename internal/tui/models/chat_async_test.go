@@ -147,7 +147,7 @@ func TestChatModel_SubmitRejected(t *testing.T) {
 	}
 	found := false
 	for _, m := range model.messages {
-		if m.Role == RoleSystem && strings.Contains(m.Content, "message is required") {
+		if (m.Role == RoleSystem || m.Role == RoleError) && strings.Contains(m.Content, "message is required") {
 			found = true
 		}
 	}
@@ -306,7 +306,7 @@ func TestChatModel_TerminalFailedRendersError(t *testing.T) {
 	}
 	found := false
 	for _, m := range model.messages {
-		if m.Role == RoleSystem && strings.Contains(strings.ToLower(m.Content), "quota exhausted") {
+		if (m.Role == RoleSystem || m.Role == RoleError) && strings.Contains(strings.ToLower(m.Content), "quota exhausted") {
 			found = true
 		}
 	}

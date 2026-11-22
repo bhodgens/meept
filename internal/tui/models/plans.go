@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/table"
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
@@ -38,6 +39,17 @@ type PlansModel struct {
 	filter    PlanFilter
 	sessionID string
 
+	// Reject-reason prompt state (leaf 08): pressing "d" on a
+	// pending_approval plan opens an inline text input; enter submits,
+	// esc cancels.
+	rejectInput       textinput.Model
+	rejectInputActive bool
+	rejectPlanID      string
+
+	// fetchPending gates the debounced refresh: true while a
+	// planDebounceMsg tick is in flight (leaf 08 stale-refresh fix).
+	fetchPending bool
+
 	// sessionMu guards sessionID: SetSession writes it on the event-loop
 	// goroutine while fetchPlans (a tea.Cmd) reads it on the commands
 	// goroutine (bughunt fix-wave 2026-10-06, caught by -race in the
@@ -48,6 +60,27 @@ type PlansModel struct {
 	showingDetail bool
 	showingHelp   bool
 	filteredCount int
+}
+
+// planFetchDebounce is the minimum spacing between two plan list fetches
+// (leaf 08 debounced refresh).
+const planFetchDebounce = 300 * time.Millisecond
+
+// planDebounceMsg clears the fetchPending gate when the debounce window
+// elapses.
+type planDebounceMsg struct{}
+
+// plansRefreshRequestedMsg asks the plans model to refresh (debounced):
+// sent by the app's event pump on plan lifecycle events (leaf 08
+// stale-refresh fix). The model gates duplicate fetches with
+// fetchPending so a burst of events costs one RPC.
+type plansRefreshRequestedMsg struct{}
+
+// RefreshRequested is the exported seam app.go uses on plan lifecycle
+// events: it arms the same debounced fetch as the manual `r` key
+// (leaf 08).
+func (m *PlansModel) RefreshRequested() tea.Cmd {
+	return m.Update(plansRefreshRequestedMsg{})
 }
 
 // PlansRPCClient interface for the plans model.
@@ -88,10 +121,16 @@ func NewPlansModel(rpcClient PlansRPCClient) *PlansModel {
 
 	t.SetStyles(s)
 
+	// Reject-reason prompt (leaf 08): single-line optional-reason input.
+	ti := textinput.New()
+	ti.Placeholder = "reason (optional)"
+	ti.CharLimit = 300
+
 	return &PlansModel{
-		rpc:    rpcClient,
-		table:  t,
-		filter: PlanFilterAll,
+		rpc:         rpcClient,
+		table:       t,
+		filter:      PlanFilterAll,
+		rejectInput: ti,
 	}
 }
 
@@ -106,6 +145,21 @@ type PlanActionMsg struct {
 	PlanID string
 	Action string
 	Err    error
+}
+
+// planRejectInputMsg marks the reject-reason text input as active. While
+// set, keystrokes flow into the input instead of the table (leaf 08:
+// the plans tab had no reject affordance at all - GUI parity gap).
+type planRejectInputMsg struct {
+	active bool
+}
+
+// planRejectSubmittedMsg carries the submitted reject reason off the
+// Update loop into the reject tea.Cmd (the input lives on the event-loop
+// goroutine; the RPC call runs on the commands goroutine).
+type planRejectSubmittedMsg struct {
+	planID string
+	reason string
 }
 
 // SetSession sets the session ID to filter plans for.
@@ -225,7 +279,59 @@ func (m *PlansModel) Update(msg tea.Msg) tea.Cmd {
 		m.loading = true
 		return m.fetchPlans
 
+	case planRejectInputMsg:
+		m.rejectInputActive = msg.active
+		if msg.active {
+			m.rejectInput.Reset()
+			m.rejectInput.Focus()
+		}
+		return nil
+
+	case planRejectSubmittedMsg:
+		m.rejectInputActive = false
+		return m.rejectPlan(msg.planID, msg.reason)
+
+	case planDebounceMsg:
+		// Debounce window elapsed: the next refresh event may fetch again.
+		m.fetchPending = false
+		return nil
+
+	case plansRefreshRequestedMsg:
+		// Plan lifecycle event from the app pump: refresh the list
+		// behind the same debounce gate as the manual `r` key so a
+		// burst of plan events coalesces into one fetch (leaf 08).
+		if !m.fetchPending {
+			m.fetchPending = true
+			return tea.Batch(
+				m.fetchPlans,
+				tea.Tick(planFetchDebounce, func(_ time.Time) tea.Msg {
+					return planDebounceMsg{}
+				}),
+			)
+		}
+		return nil
+
 	case tea.KeyPressMsg:
+		// Reject-reason input captures every keystroke while active.
+		if m.rejectInputActive {
+			switch msg.String() {
+			case KeyEnter:
+				reason := m.rejectInput.Value()
+				planID := m.rejectPlanID
+				m.rejectPlanID = ""
+				return func() tea.Msg {
+					return planRejectSubmittedMsg{planID: planID, reason: reason}
+				}
+			case KeyEsc:
+				m.rejectInputActive = false
+				m.rejectPlanID = ""
+				return nil
+			}
+			var cmd tea.Cmd
+			m.rejectInput, cmd = m.rejectInput.Update(msg)
+			return cmd
+		}
+
 		// Handle detail modal first
 		if m.showingDetail {
 			if msg.String() == KeyEsc || msg.String() == "q" {
@@ -242,9 +348,32 @@ func (m *PlansModel) Update(msg tea.Msg) tea.Cmd {
 
 		switch msg.String() {
 		case "r":
-			// Refresh
-			m.loading = true
-			return m.fetchPlans
+			// Refresh - debounced (leaf 08): a burst of plan lifecycle
+			// events previously fired one fetch per event. Only arm a
+			// fetch when none is already pending; planDebounceMsg lands
+			// ~300ms later and clears the pending flag.
+			if !m.fetchPending {
+				m.fetchPending = true
+				return tea.Batch(
+					m.fetchPlans,
+					tea.Tick(planFetchDebounce, func(_ time.Time) tea.Msg {
+						return planDebounceMsg{}
+					}),
+				)
+			}
+			return nil
+
+		case "d":
+			// Reject selected plan with a reason prompt (GUI parity:
+			// plans_tab.dart shows a reject dialog with an optional
+			// reason field; the TUI had no reject affordance at all).
+			if m.selected != nil && m.selected.State == "pending_approval" {
+				m.rejectPlanID = m.selected.ID
+				return func() tea.Msg {
+					return planRejectInputMsg{active: true}
+				}
+			}
+			return nil
 
 		case "?":
 			m.showingHelp = true
@@ -318,6 +447,20 @@ func (m *PlansModel) approvePlan(planID string) tea.Cmd {
 	return func() tea.Msg {
 		_, err := m.rpc.Call("plan.approve", map[string]any{"plan_id": planID})
 		return PlanActionMsg{PlanID: planID, Action: "approve", Err: err}
+	}
+}
+
+// rejectPlan rejects a pending_approval plan, optionally with a reason
+// (leaf 08: GUI parity - plans_tab.dart sends plan.reject with the dialog
+// text; the TUI previously had no reject affordance).
+func (m *PlansModel) rejectPlan(planID, reason string) tea.Cmd {
+	return func() tea.Msg {
+		params := map[string]any{"plan_id": planID}
+		if reason != "" {
+			params["reason"] = reason
+		}
+		_, err := m.rpc.Call("plan.reject", params)
+		return PlanActionMsg{PlanID: planID, Action: "reject", Err: err}
 	}
 }
 
@@ -411,6 +554,11 @@ func (m *PlansModel) updatePlansTable() {
 
 // View renders the plans view.
 func (m *PlansModel) View() string {
+	// Reject-reason prompt (leaf 08): takes over the view while active.
+	if m.rejectInputActive {
+		return m.renderRejectPrompt()
+	}
+
 	// Detail modal overlay
 	if m.showingDetail && m.selected != nil {
 		return m.renderPlanDetailModal()
@@ -454,8 +602,35 @@ func (m *PlansModel) View() string {
 		Foreground(paletteColor("textMuted")).
 		MarginTop(1)
 
-	b.WriteString(hintStyle.Render("r: refresh | /: filter | a: approve | v: revise | c: confirm | enter: details | ?: help"))
+	b.WriteString(hintStyle.Render("r: refresh | /: filter | a: approve | v: revise | c: confirm | d: reject | enter: details | ?: help"))
 
+	return b.String()
+}
+
+// renderRejectPrompt renders the inline reject-reason prompt (leaf 08).
+func (m *PlansModel) renderRejectPrompt() string {
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(paletteColor("error"))
+
+	promptStyle := lipgloss.NewStyle().
+		Foreground(paletteColor("textPrimary")).
+		MarginTop(1)
+
+	hintStyle := lipgloss.NewStyle().
+		Foreground(paletteColor("textMuted")).
+		MarginTop(1)
+
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("reject plan"))
+	b.WriteString("\n\n")
+	if m.selected != nil {
+		b.WriteString(promptStyle.Render("plan: " + m.selected.Title))
+		b.WriteString("\n")
+	}
+	b.WriteString(m.rejectInput.View())
+	b.WriteString("\n")
+	b.WriteString(hintStyle.Render("enter: reject  ·  esc: cancel"))
 	return b.String()
 }
 
@@ -938,6 +1113,7 @@ func (m *PlansModel) renderHelp() string {
 	content += keyStyle.Render("a") + descStyle.Render("approve selected plan") + "\n"
 	content += keyStyle.Render("v") + descStyle.Render("revise selected plan") + "\n"
 	content += keyStyle.Render("c") + descStyle.Render("confirm completed plan") + "\n"
+	content += keyStyle.Render("d") + descStyle.Render("reject pending plan (with reason prompt)") + "\n"
 
 	content += "\n" + sectionStyle.Render("state icons") + "\n"
 	content += keyStyle.Render("● plan") + descStyle.Render("planning") + "\n"

@@ -2036,6 +2036,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if cmd := a.chat.Update(planMsg); cmd != nil {
 						cmds = append(cmds, cmd)
 					}
+					// Debounced plans refresh (leaf 08 stale-refresh fix): a
+					// plan lifecycle event used to leave the plans tab stale
+					// until a manual `r`; firing a fetch per event made a
+					// burst of events one RPC each. The model's fetchPending
+					// gate coalesces a burst into one fetch.
+					if cmd := a.plans.RefreshRequested(); cmd != nil {
+						cmds = append(cmds, cmd)
+					}
 					// Flash the Plans tab indicator if not currently viewing plans
 					if a.currentView != ViewPlans {
 						a.tabFlash[ViewPlans] = true

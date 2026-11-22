@@ -65,9 +65,9 @@ class AgentProgressIndicator extends StatelessWidget {
     final fontStyle = _getFontStyleForTier(progress.tier, error);
     final agentColor = error ? Colors.red[300]! : CyberpunkColors.orangePrimary;
 
-    final displayMessage = progress.message.length > 60
-        ? '${progress.message.substring(0, 57)}...'
-        : progress.message;
+    // Wrap instead of hard-cutting (leaf 08): the old substring(0, 57)
+    // destroyed long tool summaries mid-word. SoftWrap handles overflow.
+    final displayMessage = progress.message;
 
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 150),
@@ -98,6 +98,7 @@ class AgentProgressIndicator extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text(
                     displayMessage,
+                    softWrap: true,
                     style: CyberpunkTypography.bodySmall.copyWith(
                       color: messageColor,
                       fontStyle: fontStyle,
