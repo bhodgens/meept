@@ -6918,6 +6918,16 @@ func (c *Components) Start(ctx context.Context) error {
 							"employee_id", rec.AgentID, "class", rec.Class)
 						return
 					}
+					// Serialize against trigger rounds (bughunt 2026-11-21):
+					// the same per-employee mutex triggerViaGoalLoop holds
+					// across Decide. Without it, a resume landing mid-trigger
+					// runs two concurrent rounds for one employee and their
+					// persistEmployeeExchange writes interleave in the
+					// standing emp-sess transcript. Leaf-only lock order —
+					// see AcquireInvokeMutexForResume's doc comment.
+					invokeMu := c.EmployeeManager.AcquireInvokeMutexForResume(rec.AgentID)
+					invokeMu.Lock()
+					defer invokeMu.Unlock()
 					loop.ResumeGoalEpisode(ctx, rec)
 				},
 				c.Config.LLM.QuotaRetry.MaxWait,

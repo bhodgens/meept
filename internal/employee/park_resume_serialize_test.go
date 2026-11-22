@@ -11,13 +11,13 @@ package employee
 //     ResumeGoalEpisode (park.go) — the notify then carries an empty
 //     session_id and the speak push bridge drops it.
 //
-//   - (Serialization pin: two concurrent resumes for one agent must not run
-//     concurrently. NOT PINNED HERE — the fix requires the per-employee
-//     invoke mutex, which is reachable only from *Manager methods
-//     (acquireInvokeMutex is unexported on Manager and GoalLoop holds no
-//     manager reference) or the daemon wiring closure in
-//     internal/daemon/components.go. Landed as a reported patch instead per
-//     the task's no-manager.go-edit rule.)
+//   - AcquireInvokeMutexForResume_SharesTheTriggerMutex pins the
+//     serialization seam (bughunt 2026-11-21 deferral, landed by the parent):
+//     the exported resume accessor must return the SAME mutex
+//     triggerViaGoalLoop locks, so a resume queues behind an in-flight
+//     trigger round instead of running concurrently. Failing revert: make
+//     AcquireInvokeMutexForResume return a fresh &sync.Mutex{} instead of
+//     m.acquireInvokeMutex(employeeID).
 
 import (
 	"context"
@@ -79,5 +79,43 @@ func TestResumeSpeaksOnStandingSession(t *testing.T) {
 		if !strings.HasPrefix(c.conversationID, "goal-") {
 			t.Errorf("resumed notify conversation_id = %q, want the \"goal-<id>\" conversation", c.conversationID)
 		}
+	}
+}
+
+// TestAcquireInvokeMutexForResume_SharesTheTriggerMutex pins the identity of
+// the resume serialization seam: the exported accessor must return the same
+// mutex instance acquireInvokeMutex (and therefore triggerViaGoalLoop) hands
+// out for the same employee. The daemon resume callback locks this across
+// ResumeGoalEpisode; a distinct instance would serialize nothing.
+func TestAcquireInvokeMutexForResume_SharesTheTriggerMutex(t *testing.T) {
+	m := NewManager(nil)
+	const id = "emp-resume-mutex"
+
+	trigger := m.acquireInvokeMutex(id)
+	resume := m.AcquireInvokeMutexForResume(id)
+	if trigger != resume {
+		t.Fatal("AcquireInvokeMutexForResume returned a different mutex than acquireInvokeMutex; the resume path would not serialize with trigger rounds")
+	}
+
+	// Behavioral check: while the trigger lane holds the mutex, the resume
+	// lane's Lock blocks until release. This is the ordering that stops a
+	// quota resume from interleaving a live trigger round.
+	trigger.Lock()
+	resumed := make(chan struct{})
+	go func() {
+		resume.Lock()
+		close(resumed)
+	}()
+	select {
+	case <-resumed:
+		t.Fatal("resume acquired the mutex while the trigger lane still held it; serialization is broken")
+	case <-time.After(150 * time.Millisecond):
+		// Expected: still blocked.
+	}
+	trigger.Unlock()
+	select {
+	case <-resumed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("resume never acquired the mutex after trigger release")
 	}
 }
