@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"time"
 
 	"github.com/caimlas/meept/internal/agent"
@@ -328,6 +329,23 @@ func (a *agentLoopBotExecutorAdapter) ExecuteBot(ctx context.Context, systemProm
 // bot.BotExecutor.
 var _ bot.BotExecutor = (*agentLoopBotExecutorAdapter)(nil)
 
+// ExecutionCostCents reports the just-finished turn's provider dollar cost
+// (LastTurnCostUSD, routing-funnel C3) rounded to whole cents, so the
+// goal-loop budget lane can forward it into RecordRoundSpend. Unseen or
+// unconfigured cost reports 0; a negative value clamps to 0.
+func (a *agentLoopBotExecutorAdapter) ExecutionCostCents() int {
+	return dollarsToExecutionCents(a.agentLoop.LastTurnCostUSD())
+}
+
+// dollarsToExecutionCents converts a provider dollar cost into whole cents
+// with round-half-away-from-zero semantics; negatives clamp to 0.
+func dollarsToExecutionCents(costUSD float64) int {
+	if costUSD <= 0 {
+		return 0
+	}
+	return int(math.Round(costUSD * 100))
+}
+
 // employeeBoundAgentLoopExecutor wraps the shared agentLoopBotExecutorAdapter
 // for ONE employee (goal-loop / non-voice lane, bug 1). The plain adapter
 // runs every employee's ExecuteBot directly on the shared daemon loop, so
@@ -357,6 +375,11 @@ type employeeBoundAgentLoopExecutor struct {
 	// state (a bare lastClone field was unguarded on a path that can
 	// in principle run concurrent rounds).
 	cloneHook func(*agent.AgentLoop)
+	// lastCostUSD is the just-finished turn's provider dollar cost,
+	// captured in ExecuteBot for ExecutionCostCents (goal-loop budget
+	// lane). Rounds on one executor are sequential, so a plain field
+	// needs no extra synchronization.
+	lastCostUSD float64
 }
 
 // ExecuteBot runs one employee turn on a filtered per-turn clone.
@@ -395,6 +418,9 @@ func (a *employeeBoundAgentLoopExecutor) ExecuteBot(ctx context.Context, systemP
 	clone.SetTurnSystemPrefix(systemPrompt)
 	response, err := clone.RunOnce(ctx, userMessage, conversationID)
 	tokens := clone.LastTurnTokens()
+	// Goal-loop budget lane: capture the turn's provider dollar cost so
+	// ExecutionCostCents reports it after the round. Unseen cost = 0.
+	a.lastCostUSD = clone.LastTurnCostUSD()
 	persistEmployeeExchange(sessions, conversationID, a.employeeID, userMessage, response, a.inner.logger)
 	clone.Close()
 	if err != nil {
@@ -410,6 +436,17 @@ func (a *employeeBoundAgentLoopExecutor) ExecuteBot(ctx context.Context, systemP
 // Compile-time guard: employeeBoundAgentLoopExecutor must satisfy
 // bot.BotExecutor.
 var _ bot.BotExecutor = (*employeeBoundAgentLoopExecutor)(nil)
+
+// ExecutionCostCents reports the per-turn clone's provider dollar cost
+// (LastTurnCostUSD) rounded to whole cents, mirroring the inner adapter —
+// the goal-loop budget lane reads the executor that ran the round, and
+// that is the clone. Unseen or unconfigured cost reports 0. The value is
+// captured in ExecuteBot; goal-loop rounds on one executor are sequential
+// (ExecuteBot returns before the round's RecordRoundSpend), so a plain
+// field needs no extra synchronization.
+func (a *employeeBoundAgentLoopExecutor) ExecutionCostCents() int {
+	return dollarsToExecutionCents(a.lastCostUSD)
+}
 
 // planCreatorAdapter wraps *plan.PlanManager to satisfy
 // employee.PlanCreator. The GoalLoop calls CreatePlan to route tier-2

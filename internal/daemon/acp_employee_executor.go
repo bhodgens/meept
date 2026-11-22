@@ -79,6 +79,11 @@ type acpEmployeeExecutorAdapter struct {
 	logger *slog.Logger
 	// sessions is the existing session store. Nil is a no-op.
 	sessions session.Store
+	// lastCostUSD is the just-finished turn's provider dollar cost,
+	// captured in ExecuteBot for ExecutionCostCents (goal-loop budget
+	// lane). Rounds on one executor are sequential, so a plain field
+	// needs no extra synchronization.
+	lastCostUSD float64
 }
 
 // ExecuteBot runs a single employee turn through the referenced agent's
@@ -120,6 +125,14 @@ func (a *acpEmployeeExecutorAdapter) ExecuteBot(ctx context.Context, systemPromp
 	loop.SetTurnSystemPrefix(systemPrompt)
 	turnCtx := agent.WithACPTurnSource(ctx, agent.ACPTurnSourceEmployee, a.employeeID)
 	response, err := loop.RunOnce(turnCtx, userMessage, conversationID)
+	// Goal-loop budget lane: capture the serving loop's provider dollar
+	// cost. The seam is the narrow acpTurnRunner interface, but the
+	// production resolver (acpEmployeeLoopResolver) always supplies a
+	// concrete *agent.AgentLoop; a test double without the method
+	// reports 0 (same "no usage on this lane" posture as tokensUsed).
+	if costReader, ok := loop.(interface{ LastTurnCostUSD() float64 }); ok {
+		a.lastCostUSD = costReader.LastTurnCostUSD()
+	}
 	persistEmployeeExchange(a.sessions, conversationID, a.employeeID, userMessage, response, a.logger)
 	if err != nil {
 		a.recordTurnAudit(ctx, conversationID, "error")
@@ -132,6 +145,14 @@ func (a *acpEmployeeExecutorAdapter) ExecuteBot(ctx context.Context, systemPromp
 	}
 	a.recordTurnAudit(ctx, conversationID, "success")
 	return response, 0, nil
+}
+
+// ExecutionCostCents reports the serving loop's provider dollar cost
+// (captured in ExecuteBot) rounded to whole cents, mirroring the local
+// adapters, so the goal-loop budget lane covers acp-backed employees too.
+// Unseen or unconfigured cost reports 0.
+func (a *acpEmployeeExecutorAdapter) ExecutionCostCents() int {
+	return dollarsToExecutionCents(a.lastCostUSD)
 }
 
 // recordTurnAudit writes the D6 attribution finding: one employee audit

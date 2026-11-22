@@ -9,6 +9,7 @@ import (
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/bot"
 	"github.com/caimlas/meept/internal/employee"
+	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tools"
 )
 
@@ -204,6 +205,77 @@ func TestEmployeeToolfilter_BoundTurnNilLoopFailsLoud(t *testing.T) {
 	}
 	if _, _, err := bound.ExecuteBot(context.Background(), "", "x"); err == nil {
 		t.Fatal("nil shared loop must fail loudly, not panic")
+	}
+}
+
+// --- ExecutionCostCents pins (goal-loop budget lane) ---
+
+// costedPersonaChatter is personaChatter carrying a per-turn dollar cost
+// on the response, so a goal-loop round records spend.
+type costedPersonaChatter struct {
+	costUSD float64
+}
+
+func (c *costedPersonaChatter) Chat(_ context.Context, _ []llm.ChatMessage, _ ...llm.ChatOption) (*llm.Response, error) {
+	return &llm.Response{Content: "done", CostUSD: c.costUSD}, nil
+}
+
+func (c *costedPersonaChatter) ChatWithProgress(ctx context.Context, msgs []llm.ChatMessage, p llm.ProgressCallback, opts ...llm.ChatOption) (*llm.Response, error) {
+	return c.Chat(ctx, msgs, opts...)
+}
+
+func (c *costedPersonaChatter) Config() *llm.ModelConfig {
+	return &llm.ModelConfig{ModelID: "costed-persona-stub"}
+}
+
+// TestExecutionCostCents_RoundsDollarsToCents pins the budget lane's cent
+// conversion: a turn whose provider cost is 0.0123 dollars reports 1 cent
+// (round), so DailyBudgetCents enforcement sees real spend.
+// RED before the fix: ExecutionCostCents did not exist on the adapters
+// (compile error); a truncating stub would report 0.
+func TestExecutionCostCents_RoundsDollarsToCents(t *testing.T) {
+	logger := slog.New(slog.DiscardHandler)
+	template := agent.NewAgentLoop("shared-cost-1", t.TempDir(),
+		agent.WithLLMChatter(&costedPersonaChatter{costUSD: 0.0123}))
+	inner := &agentLoopBotExecutorAdapter{agentLoop: template, logger: logger}
+	bound := &employeeBoundAgentLoopExecutor{
+		inner:        inner,
+		employeeID:   "costed-emp",
+		constitution: employee.Constitution{Purpose: "answer"},
+	}
+	if _, _, err := bound.ExecuteBot(context.Background(), "sys", "do the thing"); err != nil {
+		t.Fatalf("ExecuteBot: %v", err)
+	}
+	if got := bound.ExecutionCostCents(); got != 1 {
+		t.Errorf("bound ExecutionCostCents() = %d, want 1 (round(0.0123*100))", got)
+	}
+	if got := inner.ExecutionCostCents(); got != 0 {
+		t.Errorf("shared inner ExecutionCostCents() = %d, want 0 (the turn ran on the clone, not the shared loop)", got)
+	}
+}
+
+// TestExecutionCostCents_ZeroCostReportsZero pins the unconfigured-price
+// posture: a loop whose provider reports no cost (CostUSD 0, the default
+// when prices are unset) reports 0 cents — never a fabricated spend.
+// RED before the fix: ExecutionCostCents did not exist (compile error).
+func TestExecutionCostCents_ZeroCostReportsZero(t *testing.T) {
+	logger := slog.New(slog.DiscardHandler)
+	template := agent.NewAgentLoop("shared-cost-0", t.TempDir(),
+		agent.WithLLMChatter(&personaChatter{reply: "done"}))
+	inner := &agentLoopBotExecutorAdapter{agentLoop: template, logger: logger}
+	bound := &employeeBoundAgentLoopExecutor{
+		inner:        inner,
+		employeeID:   "free-emp",
+		constitution: employee.Constitution{Purpose: "answer"},
+	}
+	if _, _, err := bound.ExecuteBot(context.Background(), "sys", "do the thing"); err != nil {
+		t.Fatalf("ExecuteBot: %v", err)
+	}
+	if got := bound.ExecutionCostCents(); got != 0 {
+		t.Errorf("bound ExecutionCostCents() = %d, want 0 (unseen cost)", got)
+	}
+	if got := inner.ExecutionCostCents(); got != 0 {
+		t.Errorf("inner ExecutionCostCents() = %d, want 0 (unseen cost)", got)
 	}
 }
 
