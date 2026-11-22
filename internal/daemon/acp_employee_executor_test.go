@@ -17,18 +17,37 @@ import (
 // --- stubs (mirror the existing daemon wiring-test style) ---
 
 // stubACPLoop records RunOnce calls (including the ctx it received, so
-// D6 ctx-stamping is assertable) and returns a canned reply.
+// D6 ctx-stamping is assertable) and returns a canned reply. It also
+// records the C2 prefix armed via SetTurnSystemPrefix (latest wins,
+// empty ignored — mirroring the *agent.AgentLoop seam).
 type stubACPLoop struct {
 	mu      sync.Mutex
 	calls   []stubLoopCall
 	reply   string
 	err     error
 	gotCtxs []context.Context
+	prefix  string
 }
 
 type stubLoopCall struct {
 	userMessage    string
 	conversationID string
+}
+
+func (s *stubACPLoop) SetTurnSystemPrefix(prefix string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if prefix == "" {
+		return
+	}
+	s.prefix = prefix
+}
+
+// armedPrefix returns the prefix the executor armed ("" when none).
+func (s *stubACPLoop) armedPrefix() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.prefix
 }
 
 func (s *stubACPLoop) RunOnce(ctx context.Context, userMessage, conversationID string) (string, error) {
@@ -176,6 +195,47 @@ func TestACPEmployeeExecutorAdapter_RoutesToReferencedLoop(t *testing.T) {
 	}
 	if call.conversationID != employee.EmployeeChatSessionID("alice") {
 		t.Errorf("conversation id %q, want standing session %q", call.conversationID, employee.EmployeeChatSessionID("alice"))
+	}
+}
+
+// TestACPEmployeeExecutorAdapter_ArmsConstitutionPrefix pins the C2
+// contract: ExecuteBot arms the systemPrompt as the loop's one-shot turn
+// prefix (SetTurnSystemPrefix) on the loop that runs the turn. RED before
+// the fix: the adapter dropped the param. Mirrors the local-lane posture
+// in employee_service_adapter.go:395 (empty prompt ignored, latest wins).
+func TestACPEmployeeExecutorAdapter_ArmsConstitutionPrefix(t *testing.T) {
+	t.Parallel()
+	loop := &stubACPLoop{reply: "done"}
+	a := &acpEmployeeExecutorAdapter{
+		employeeID:  "alice",
+		agentID:     "bob",
+		resolveLoop: func(string) (acpTurnRunner, error) { return loop, nil },
+		logger:      slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)),
+	}
+	if _, _, err := a.ExecuteBot(context.Background(), "constitution: test safely", "work"); err != nil {
+		t.Fatalf("ExecuteBot: %v", err)
+	}
+	if got := loop.armedPrefix(); got != "constitution: test safely" {
+		t.Errorf("armed prefix = %q, want the constitution prompt", got)
+	}
+}
+
+// TestACPEmployeeExecutorAdapter_EmptyPrefixIgnored: an empty systemPrompt
+// must not arm anything (SetTurnSystemPrefix ignores empty, one-shot seam).
+func TestACPEmployeeExecutorAdapter_EmptyPrefixIgnored(t *testing.T) {
+	t.Parallel()
+	loop := &stubACPLoop{reply: "ok"}
+	a := &acpEmployeeExecutorAdapter{
+		employeeID:  "alice",
+		agentID:     "bob",
+		resolveLoop: func(string) (acpTurnRunner, error) { return loop, nil },
+		logger:      slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)),
+	}
+	if _, _, err := a.ExecuteBot(context.Background(), "", "x"); err != nil {
+		t.Fatalf("ExecuteBot: %v", err)
+	}
+	if got := loop.armedPrefix(); got != "" {
+		t.Errorf("armed prefix = %q, want empty (nothing armed)", got)
 	}
 }
 

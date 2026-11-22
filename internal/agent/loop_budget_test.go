@@ -326,3 +326,55 @@ func TestConversationBudgetEnforcedWhenConfigured(t *testing.T) {
 		t.Fatalf("configured 1000-token budget not enforced, got err=%v", err)
 	}
 }
+
+// --- LastTurnTokens pins (routing-funnel C3) ---
+
+// TestLastTurnTokens_SumsMultiCallToolLoop pins the turn-total fix: a
+// two-call tool loop (call 1 usage 10 + tool call, call 2 usage 10 + stop)
+// must report the SUM (20) as LastTurnTokens, not the final call's total
+// (10). Driven at the recording seam reasoningCycle feeds.
+// RED before the fix: recordTurnProviderUsage kept the LAST provider
+// snapshot, so LastTurnTokens returned 10.
+func TestLastTurnTokens_SumsMultiCallToolLoop(t *testing.T) {
+	loop, conv := newBudgetFloorLoop(t, &sizerTool{
+		MockTool: *NewMockTool("file_read", "fetch", func(ctx context.Context, args map[string]any) (any, error) {
+			return "ok", nil
+		}),
+		floor: 1400,
+	})
+	if _, err := loop.reasoningCycle(context.Background(), conv, "conv-budget-floor"); err != nil {
+		t.Fatalf("reasoningCycle: %v", err)
+	}
+	if got := loop.LastTurnTokens(); got != 20 {
+		t.Errorf("LastTurnTokens() = %d, want 20 (sum of both LLM calls: 10+10)", got)
+	}
+}
+
+// plainChatter answers stop on the first call — a single-LLM-call turn.
+type plainChatter struct{}
+
+func (c *plainChatter) Chat(ctx context.Context, messages []llm.ChatMessage, opts ...llm.ChatOption) (*llm.Response, error) {
+	return &llm.Response{Content: "done", FinishReason: "stop", Usage: llm.TokenUsage{TotalTokens: 10}}, nil
+}
+
+func (c *plainChatter) ChatWithProgress(ctx context.Context, messages []llm.ChatMessage, progress llm.ProgressCallback, opts ...llm.ChatOption) (*llm.Response, error) {
+	return c.Chat(ctx, messages, opts...)
+}
+
+func (c *plainChatter) Config() *llm.ModelConfig {
+	return &llm.ModelConfig{ModelID: "plain-chatter"}
+}
+
+// TestLastTurnTokens_SingleCallTurnUnchanged is the regression guard: a
+// single-call turn (usage 10, no tool calls) still reports exactly that
+// call's total — the sum and the snapshot coincide.
+func TestLastTurnTokens_SingleCallTurnUnchanged(t *testing.T) {
+	loop, conv := newBudgetFloorLoop(t, nil)
+	loop.llm = &plainChatter{}
+	if _, err := loop.reasoningCycle(context.Background(), conv, "conv-budget-floor"); err != nil {
+		t.Fatalf("reasoningCycle: %v", err)
+	}
+	if got := loop.LastTurnTokens(); got != 10 {
+		t.Errorf("LastTurnTokens() = %d, want 10 (single call total)", got)
+	}
+}

@@ -12,13 +12,17 @@ import (
 )
 
 // acpTurnRunner is the minimal loop seam the acp-backed employee executor
-// needs: one user message in, final text out. *agent.AgentLoop satisfies it
-// (RunOnce delegates to RunOnceWithParts, which carries the shared
-// reply-guard / output-filter / security-scan lane — the reason D2-B routes
-// through the loop instead of calling ACPExecutor.Run directly; see
-// docs/workflows/acp-employees-phase3.md).
+// needs: one user message in, final text out, plus the C2 one-shot turn
+// prefix (constitution prompt) armed before that turn. *agent.AgentLoop
+// satisfies it (RunOnce delegates to RunOnceWithParts, which carries the
+// shared reply-guard / output-filter / security-scan lane — the reason
+// D2-B routes through the loop instead of calling ACPExecutor.Run
+// directly; see docs/workflows/acp-employees-phase3.md).
 type acpTurnRunner interface {
 	RunOnce(ctx context.Context, userMessage, conversationID string) (string, error)
+	// SetTurnSystemPrefix arms the one-shot prefix (routing-funnel C2)
+	// consumed by the next RunOnce on this receiver. Empty is ignored.
+	SetTurnSystemPrefix(prefix string)
 }
 
 // acpTurnAuditRecorder is the narrow employee-audit surface the adapter
@@ -78,11 +82,13 @@ type acpEmployeeExecutorAdapter struct {
 }
 
 // ExecuteBot runs a single employee turn through the referenced agent's
-// loop. The systemPrompt is unused-by-design: the loop constructs its own
-// system prompts internally (mirrors the agentLoopBotExecutorAdapter
-// comment in employee_service_adapter.go); the constitution prompt stays
-// advisory for acp employees, matching the phase-3 doc (the persona
-// profile already carries harness voice). Returns (output, 0, err).
+// loop. C2: the constitution/employee systemPrompt is armed as the loop's
+// one-shot turn prefix (SetTurnSystemPrefix) before RunOnce — mirrored
+// from employee_service_adapter.go. Empty prompts are ignored by the
+// seam; the loop's permanent prompt config is never written. The loop
+// constructs its own system prompts internally; the prefix prepends to
+// that assembly for this turn only.
+// Returns (output, 0, err).
 func (a *acpEmployeeExecutorAdapter) ExecuteBot(ctx context.Context, systemPrompt, userMessage string) (string, int, error) {
 	if a.resolveLoop == nil {
 		return "", 0, fmt.Errorf("acp employee executor %q: loop resolver not configured", a.employeeID)
@@ -108,6 +114,10 @@ func (a *acpEmployeeExecutorAdapter) ExecuteBot(ctx context.Context, systemPromp
 	// ACPExecutor.Run's single emission point, which tags the
 	// acp.persona.turns datapoint source=employee + employee_id —
 	// distinguishing it from a chat-slave turn on the same persona.
+	// C2: arm the constitution prefix for THIS turn only, mirroring
+	// employee_service_adapter.go:395 (one-shot; empty ignored by the
+	// seam).
+	loop.SetTurnSystemPrefix(systemPrompt)
 	turnCtx := agent.WithACPTurnSource(ctx, agent.ACPTurnSourceEmployee, a.employeeID)
 	response, err := loop.RunOnce(turnCtx, userMessage, conversationID)
 	persistEmployeeExchange(a.sessions, conversationID, a.employeeID, userMessage, response, a.logger)

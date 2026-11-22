@@ -2065,6 +2065,21 @@ func (l *AgentLoop) recordTurnProviderUsage(usage llm.TokenUsage) {
 	l.mu.Unlock()
 }
 
+// recordTurnTotal stores the loop's ACCUMULATED turn total (routing-funnel
+// C3): the true sum across every LLM call in a multi-step tool loop,
+// replacing the last-provider-snapshot recordTurnProviderUsage writes while
+// the turn is in flight. Called at the reasoningCycle turn-terminal return;
+// zero or absent usage leaves the last snapshot untouched (fallback rule).
+func (l *AgentLoop) recordTurnTotal(total int) {
+	if l == nil || total <= 0 {
+		return
+	}
+	l.mu.Lock()
+	l.lastTurnUsageSeen = true
+	l.lastTurnTokens = total
+	l.mu.Unlock()
+}
+
 // SessionID returns the loop's session identifier (the identity the loop was
 // constructed with). Read-only, used for tool-context session attribution
 // (DSH-6); may be empty on degenerate loops.
@@ -6858,6 +6873,12 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				"conversation", conversationID)
 			return "[incomplete: the turn ended on planned-but-unexecuted work] " + response.Content, nil
 		}
+		// C3: the turn-terminal report is the loop's ACCUMULATED
+		// total, not the final call's. recordTurnProviderUsage keeps
+		// the last non-zero provider snapshot as the fallback for
+		// callers that never see a successful cycle return; a turn
+		// that reached its terminal return always has the true sum.
+		l.recordTurnTotal(totalTokens)
 		return response.Content, nil
 	}
 
