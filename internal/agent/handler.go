@@ -1654,6 +1654,17 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 		response.Meta = provenanceMeta(result.Intent)
 	}
 
+	// Degraded-classifier honesty note (leaf 05 of interactive-usability):
+	// when classification routed via a degraded method (heuristic_fallback,
+	// fallback), append the one-line lowercase note so the user knows the
+	// answer was not LLM-classified. Healthy lanes stay byte-identical.
+	// Sits after provenance (which never mutates the reply) and before
+	// persistence, so every downstream surface (persisted exchange,
+	// turn.terminal relay, sync response) carries the same text.
+	if result != nil && result.Intent != nil && err == nil {
+		response.Reply = appendDegradedClassifierNote(response.Reply, result.Intent)
+	}
+
 	// Persist the user message and assistant reply so HTTP-only clients
 	// (Flutter GUI) can reload conversation history after switching sessions.
 	// Resolve the effective agent ID for message attribution: prefer the
@@ -2371,7 +2382,17 @@ func (h *ChatHandler) handleTaskCompleted(msg *models.BusMessage) {
 	if len(steps) == 0 {
 		steps = h.fetchStepSummaries(payload.TaskID)
 	}
-	reply := h.formatTaskCompletedMessage(payload.Name, steps, payload.ExecutionTime, payload.Result, payload.CompletedJobs, payload.TotalJobs, payload.TokenUsage)
+	// Planning-degraded marker (leaf 05): read the persisted 'plan_quality'
+	// key so a degraded plan discloses itself on the completion card.
+	// Best-effort and bounded: a store miss or unparsable metadata renders
+	// the legacy card byte-identically.
+	planQuality := ""
+	if h.taskStore != nil && payload.TaskID != "" {
+		if tk, tkErr := h.taskStore.GetByID(payload.TaskID); tkErr == nil && tk != nil {
+			planQuality = planQualityFromMetadata(tk.Metadata)
+		}
+	}
+	reply := h.formatTaskCompletedMessage(payload.Name, steps, payload.ExecutionTime, payload.Result, payload.CompletedJobs, payload.TotalJobs, payload.TokenUsage, planQuality)
 
 	// Publish notification (Plan 4.3) — severity follows the honest status.
 	if failed {
@@ -2528,9 +2549,20 @@ func (h *ChatHandler) workerConversationForSession(sessionID string) string {
 }
 
 // formatTaskCompletedMessage builds a human-readable task completion message.
-func (h *ChatHandler) formatTaskCompletedMessage(name string, steps []TaskStepSummary, executionTime, result string, completed, total, tokenUsage int) string {
+// planQuality is the task's persisted 'plan_quality' marker ("" when absent);
+// non-empty markers render the planning-degraded honesty note plus the
+// marker text (leaf 05 of interactive-usability).
+func (h *ChatHandler) formatTaskCompletedMessage(name string, steps []TaskStepSummary, executionTime, result string, completed, total, tokenUsage int, planQuality string) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "## task completed: %s\n\n", strings.ToLower(name))
+
+	// Planning-degraded honesty signal (leaf 05): a plan that degraded to
+	// the deterministic single direct step is disclosed on the completion
+	// card, alongside the persisted marker text.
+	if planQuality != "" {
+		sb.WriteString(planningDegradedNote + "\n\n")
+		fmt.Fprintf(&sb, "plan quality: %s\n\n", strings.ToLower(planQuality))
+	}
 
 	if len(steps) > 0 {
 		sb.WriteString("### steps:\n")

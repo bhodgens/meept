@@ -1004,6 +1004,11 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 				}
 			}
 			steps = sp.createFallbackSteps(req, parentMemoryRefs)
+			// Leaf 05 (degraded-signals): the planner LLM failed here, so
+			// the persisted plan_quality marker discloses the degradation
+			// and the completion card renders the honesty note. Best-effort
+			// (markPlanDegraded logs, never fails the plan).
+			sp.markPlanDegraded(req.TaskID, "degraded: deterministic single-step")
 		}
 	case "plan":
 		// Tiered-iteration leaf 01: same tier computation BEFORE the
@@ -1618,6 +1623,12 @@ func (sp *StrategicPlanner) planSinglePhase(ctx context.Context, req PlanRequest
 				"outcome": "deterministic_single_step",
 			})
 			sp.markPlanDegraded(req.TaskID, "degraded: deterministic single-step")
+			// Leaf 05 (degraded-signals): the degraded-planning disclosure
+			// rides the persisted plan_quality marker; the completion card
+			// (formatTaskCompletedMessage) renders the honesty note from
+			// it. The step description stays the task input verbatim
+			// (pinned by TestEmptyPlanGuard_SingleArtifactDeterministicStep;
+			// the note is user-facing relay copy, never prompt scaffolding).
 			return sp.createDeterministicSingleStep(req), nil
 		}
 		// Honest failure: no artifact shape to lean on, and the historical

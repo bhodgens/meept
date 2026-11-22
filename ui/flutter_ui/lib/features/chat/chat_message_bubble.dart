@@ -316,6 +316,17 @@ class _ChatMessageBubbleState extends ConsumerState<ChatMessageBubble> {
             // C1 correlation chips + C4/C5 expand affordances (rendered
             // below the timestamp so long transcripts keep scanning).
             if (!isUser && _hasCorrelationSurface) _correlationChips(context),
+            // Degraded-classifier footer (leaf 05, degraded-signals): a
+            // reply routed by a fallback classification lane discloses the
+            // method in the bubble footer instead of silently downgrading.
+            if (!isUser && _degradedMethodLabel != null)
+              Text(
+                'routed by $_degradedMethodLabel',
+                style: CyberpunkTypography.bodySmall.copyWith(
+                  color: CyberpunkColors.orangeGlow,
+                  fontSize: 10,
+                ),
+              ),
             if (_traceExpanded) _tracePanel(),
             if (_routeExpanded) _routePanel(),
           ],
@@ -328,6 +339,17 @@ class _ChatMessageBubbleState extends ConsumerState<ChatMessageBubble> {
       message.taskId.isNotEmpty ||
       message.handlerCase.isNotEmpty ||
       message.suggestedMode.isNotEmpty;
+
+  /// Degraded-classifier footer label (leaf 05, degraded-signals): the
+  /// classification_method provenance (classified_by) when the reply was
+  /// routed by a degraded (non-llm) lane; null when absent or llm-served,
+  /// so healthy replies render no footer line.
+  String? get _degradedMethodLabel {
+    if (message.role != 'assistant') return null;
+    final method = message.classifiedBy;
+    if (method.isEmpty || method == 'llm') return null;
+    return method;
+  }
 
   /// Map a raw suggested_mode / handler_case token to its user-facing
   /// chip label. Never leaks the raw underscored enum for the mode

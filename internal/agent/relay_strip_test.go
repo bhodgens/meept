@@ -106,7 +106,7 @@ func TestRelayEnvelopeStrip(t *testing.T) {
 			Result:      p6JobEvidence,
 		}}
 		got := h.formatTaskCompletedMessage("create a file named hello.", steps,
-			"12s", "Completed 1/1 steps: Create a file named hello.txt in the ...", 1, 1, 0)
+			"12s", "Completed 1/1 steps: Create a file named hello.txt in the ...", 1, 1, 0, "")
 		assertNoRawEnvelopeKeys(t, "formatTaskCompletedMessage", got)
 		if !strings.Contains(got, "hello.txt") {
 			t.Errorf("card lost the artifact prose entirely: %q", got)
