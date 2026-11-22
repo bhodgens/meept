@@ -156,7 +156,7 @@ void main() {
           startedAt: DateTime.now(),
           lastProgressAt: DateTime.now(),
           status: PendingTurnStatus.stalled,
-          progressText: 'no progress for 120s — task may still complete',
+          progressText: 'no progress for 120s — task may still be running',
         ),
         'turn-p': PendingTurn(
           turnId: 'turn-p',
@@ -176,7 +176,7 @@ void main() {
 
     expect(find.byType(PendingTurnIndicator), findsNWidgets(2));
     expect(
-      find.text('no progress for 120s — task may still complete'),
+      find.text('no progress for 120s — task may still be running'),
       findsOneWidget,
     );
     expect(

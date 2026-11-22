@@ -1187,7 +1187,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
     final turns = Map<String, PendingTurn>.from(state.pendingTurns);
     turns[turnId] = turn.copyWith(
       status: PendingTurnStatus.stalled,
-      progressText: 'no progress for ${seconds}s — task may still complete',
+      progressText: 'no progress for ${seconds}s — task may still be running',
     );
     state = state.copyWith(pendingTurns: turns);
   }

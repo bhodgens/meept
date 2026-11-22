@@ -286,7 +286,7 @@ void main() {
         );
         expect(
           notifier.state.pendingTurns['turn-1']!.progressText,
-          contains('task may still complete'),
+          contains('task may still be running'),
         );
 
         // Late terminal still renders the reply and clears stalled.
