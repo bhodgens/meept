@@ -257,6 +257,12 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	// double-registered against the sweep's re-registration.
 	s.sweepOneShotsAtBoot()
 
+	// Boot-time job-spill sweep (spill-cap fix): delete crash-orphaned
+	// spill files older than the result-lane horizon. Boot-only, never
+	// per-run — a sweep error logs and moves on like the recovery passes
+	// above.
+	s.sweepAgedJobSpillsAtBoot()
+
 	// Start cron scheduler
 	s.cron.Start()
 	s.running.Store(true)

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
 	"syscall"
 	"time"
@@ -119,7 +120,26 @@ type ShellJobConfig struct {
 	// will execute (job_start sets it to the user command when command is
 	// /bin/sh and args are ["-c", <user command>]). Empty falls back to
 	// Command for legacy shell jobs.
+	//
+	// TRUST BOUNDARY: GuardCommand is legacy persistence data, never
+	// trusted over what actually executes. newShellJob derives the guard
+	// source from command/args for the /bin/sh -c X wrapper shape and
+	// ignores a mismatched field (warn-logged), so a persisted row cannot
+	// present "echo harmless" to the guard while "evil" executes.
 	GuardCommand string `json:"guard_command,omitempty"`
+}
+
+// shellWrapperScript detects the /bin/sh -c X wrapper shape (job_start's
+// launch form) and returns the script X that actually executes. Everything
+// else reports false: the guard source is the command itself.
+func shellWrapperScript(command string, args []string) (string, bool) {
+	if command != "/bin/sh" && command != "sh" && command != "/bin/bash" && command != "bash" {
+		return "", false
+	}
+	if len(args) != 2 || args[0] != "-c" {
+		return "", false
+	}
+	return args[1], true
 }
 
 // ReminderJobConfig holds configuration for reminder jobs.
@@ -409,6 +429,27 @@ func newShellJob(cfg JobConfig, msgBus *bus.MessageBus, guard ShellCommandGuard,
 		timeout = 5 * time.Minute // Default timeout
 	}
 
+	// Guard-source derivation (guard-source-trust fix): for the /bin/sh -c
+	// X wrapper shape the guard source is the actual script X, derived from
+	// command/args — NEVER the persisted GuardCommand, which legacy rows may
+	// have stale, truncated, or attacker-supplied. A mismatching
+	// GuardCommand is warn-logged and ignored (field kept for legacy JSON
+	// round-trips). Non-wrapper shapes (e.g. command=/bin/sh with other
+	// args, or a plain binary) keep the legacy fallback: GuardCommand when
+	// set, else Command.
+	guardSource := cfg.ShellConfig.Command
+	if script, ok := shellWrapperScript(cfg.ShellConfig.Command, cfg.ShellConfig.Args); ok {
+		guardSource = script
+		if gc := cfg.ShellConfig.GuardCommand; gc != "" && gc != script {
+			slog.Warn("scheduler: ignoring mismatched shell GuardCommand (derived from command/args)",
+				"job_id", cfg.ID,
+				"guard_command", gc,
+				"derived_script_len", len(script))
+		}
+	} else if gc := cfg.ShellConfig.GuardCommand; gc != "" {
+		guardSource = gc
+	}
+
 	return &ShellJob{
 		id:           cfg.ID,
 		name:         cfg.Name,
@@ -416,7 +457,7 @@ func newShellJob(cfg JobConfig, msgBus *bus.MessageBus, guard ShellCommandGuard,
 		jobType:      JobTypeShell,
 		config:       cfg,
 		command:      cfg.ShellConfig.Command,
-		guardCommand: cfg.ShellConfig.GuardCommand,
+		guardCommand: guardSource,
 		args:         cfg.ShellConfig.Args,
 		workDir:      cfg.ShellConfig.WorkDir,
 		env:          cfg.ShellConfig.Env,
@@ -470,6 +511,10 @@ func (j *ShellJob) Execute(ctx context.Context) error {
 	// Spill output to a file, never an unbounded in-memory buffer. The dir
 	// is created here so standalone construction works too; the daemon's
 	// MEEPT_HOME/spill/tools/ sibling already exists in production.
+	//
+	// The file is wrapped in a byte-capped writer: a runaway job can no
+	// longer write an unbounded spill file (disk-fill DoS). The cap marks
+	// the settled result truncated (TruncatedTo) and drops the excess.
 	spill, outputPath, err := prepareSpill(j.id)
 	if err != nil {
 		// A spill failure is a settled attempt failure, not silent loss.
@@ -496,10 +541,15 @@ func (j *ShellJob) Execute(ctx context.Context) error {
 		}
 		cmd.Env = append(cmd.Environ(), env...)
 	}
-	// Both streams go to the single spill file (stdout then stderr
-	// interleaved as the process writes them).
-	cmd.Stdout = spill
-	cmd.Stderr = spill
+	// Both streams go through the byte-capped writer into the single spill
+	// file (stdout then stderr interleaved as the process writes them). The
+	// wrapper turns the direct-fd inheritance into a parent-side pipe copy —
+	// which also makes WaitDelay authoritative for grandchildren holding the
+	// output fd (with a bare *os.File a lingering grandchild is invisible to
+	// Wait and the job leaks until its own timeout).
+	capped := newCappedSpillWriter(spill, MaxSpillBytes)
+	cmd.Stdout = capped
+	cmd.Stderr = capped
 	// Bound the pipe wait: after a kill, a grandchild that inherited the
 	// output file descriptor cannot block Wait indefinitely (mirrors the
 	// local runtime backend). Setpgid lets CancelJob kill the whole group.
@@ -519,12 +569,34 @@ func (j *ShellJob) Execute(ctx context.Context) error {
 
 	exitCode := exitCodeFromRun(runErr)
 	status := JobStatusSucceeded
+	truncated := int64(0)
 	if runErr != nil {
 		status = JobStatusFailed
 		if errors.Is(execCtx.Err(), context.Canceled) || errors.Is(execCtx.Err(), context.DeadlineExceeded) {
 			// A killed run is reported as cancelled with a unix kill code.
 			status = JobStatusCancelled
 		}
+	}
+
+	// ErrWaitDelay rescue: with the pipe-capped spill writer, a grandchild
+	// that inherited the output fd can outlive the direct child, so Wait
+	// returns exec.ErrWaitDelay ("wait: delayed") even though the child
+	// itself already exited. When the execution context was NOT
+	// cancelled/timed out, the child's exit state is the truth
+	// (ProcessState is populated even when Wait returns ErrWaitDelay): a
+	// job that exited 0 is a SUCCESS, not the generic failure that
+	// exitCodeFromRun maps a bare ErrWaitDelay to. Mark the spill
+	// truncated so readers know the tail may be missing. A cancelled or
+	// timed-out run falls through to the mapping below.
+	if errors.Is(runErr, exec.ErrWaitDelay) && status != JobStatusCancelled {
+		if ps := cmd.ProcessState; ps != nil {
+			exitCode = exitCodeFromProcessState(ps)
+			if exitCode == ExitCodeOK {
+				status = JobStatusSucceeded
+			}
+			runErr = nil
+		}
+		truncated = MaxSpillBytes
 	}
 
 	// A run killed by our cancel/escalation can surface from cmd.Run as a
@@ -585,6 +657,7 @@ func (j *ShellJob) Execute(ctx context.Context) error {
 		OutputPath:   outputPath,
 		OutputBytes:  outputBytes,
 		OutputSHA256: outputSHA256,
+		TruncatedTo:  truncated,
 		Error:        result.Error,
 	})
 
@@ -648,6 +721,31 @@ func exitCodeFromRun(runErr error) int {
 	// (SIGKILL) on the ExitError path above; other errors (spawn failure,
 	// etc.) are generic failures.
 	return ExitCodeFailure
+}
+
+// exitCodeFromProcessState maps an os.ProcessState (the direct child's
+// settled exit, available even when Wait returned exec.ErrWaitDelay) to a
+// unix-consistent exit code using the same normalization as exitCodeFromRun.
+func exitCodeFromProcessState(ps *os.ProcessState) int {
+	if ps == nil {
+		return ExitCodeUnknown
+	}
+	if ws, ok := ps.Sys().(syscall.WaitStatus); ok {
+		if ws.Signaled() {
+			switch ws.Signal() {
+			case syscall.SIGKILL:
+				return ExitCodeSIGKILL
+			case syscall.SIGTERM:
+				return ExitCodeSIGTERM
+			default:
+				return ExitCodeUnknown
+			}
+		}
+		if code := ws.ExitStatus(); code >= 0 {
+			return code // preserves N>1 verbatim
+		}
+	}
+	return ps.ExitCode()
 }
 
 // ReminderJob sends a reminder message.

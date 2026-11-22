@@ -60,6 +60,63 @@ const (
 // from a spill file on demand.
 const DefaultJobResultOutputBytes = 4096
 
+// MaxSpillBytes caps the stdout/stderr spill file per execution attempt.
+// Writes past the cap are dropped (the writer keeps consuming so the child
+// never blocks on a full pipe) and the settled result is marked truncated.
+const MaxSpillBytes = int64(64) << 20 // 64 MiB
+
+// cappedSpillWriter bounds a spill file: at most limit bytes reach the
+// underlying file; the excess is discarded. It never returns a write error
+// to the exec package (a failing writer would kill the child's stdout with
+// EPIPE mid-run); truncation is reported via Truncated on the settled
+// result instead.
+type cappedSpillWriter struct {
+	w   io.Writer
+	max int64
+
+	mu        sync.Mutex
+	n         int64
+	truncated bool
+}
+
+func newCappedSpillWriter(w io.Writer, max int64) *cappedSpillWriter {
+	return &cappedSpillWriter{w: w, max: max}
+}
+
+// Write implements io.Writer. Over-cap chunks are counted and dropped, not
+// partially written, so the file never contains torn lines from a split
+// write.
+func (c *cappedSpillWriter) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// Always consume the full chunk: a short write or error would surface
+	// io.ErrShortWrite through the exec copy goroutine and misreport the
+	// run. Over-cap bytes are simply discarded (sink behavior).
+	if c.n >= c.max {
+		c.truncated = true
+		return len(p), nil
+	}
+	room := c.max - c.n
+	consumed := len(p)
+	truncating := int64(len(p)) > room
+	if truncating {
+		p = p[:room]
+	}
+	n, err := c.w.Write(p)
+	c.n += int64(n)
+	if err == nil && truncating {
+		c.truncated = true
+	}
+	return consumed, err
+}
+
+// stats returns the bytes written and whether the cap cut anything off.
+func (c *cappedSpillWriter) stats() (int64, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.n, c.truncated
+}
+
 // resultLaneCap bounds the persisted result lane (FIFO eviction). Matches the
 // workflow job cap used elsewhere in the daemon.
 const resultLaneCap = 256
@@ -274,8 +331,12 @@ func (s *Scheduler) CancelJob(handle, reason string) (status string, stopped boo
 	h, ok := s.executions[handle]
 	s.execMu.Unlock()
 	if !ok {
-		if _, settled := s.GetJobResult(handle); settled {
-			return "already_done", false, ExitCodeOK, nil
+		if result, settled := s.GetJobResult(handle); settled {
+			// Already settled: report the job's REAL outcome, never a
+			// hardcoded OK. stopped follows the settled status: a run that
+			// finished by itself (succeeded/failed) was not stopped by this
+			// call; a settled-cancelled handle reports stopped.
+			return result.Status, result.Status == JobStatusCancelled, result.ExitCode, nil
 		}
 		return "not_found", false, ExitCodeUnknown, fmt.Errorf("job not found or not running: %s", handle)
 	}
@@ -302,7 +363,12 @@ func (s *Scheduler) CancelJob(handle, reason string) (status string, stopped boo
 	s.execMu.Unlock()
 
 	if result, settled := s.GetJobResult(handle); settled {
-		return result.Status, true, result.ExitCode, nil
+		// The run settled during the grace window. If it settled as
+		// cancelled (by this stop), stopped=true is accurate. If it
+		// finished by itself (succeeded/failed), nothing was stopped —
+		// report the settled outcome with stopped=false.
+		stopped := result.Status == JobStatusCancelled
+		return result.Status, stopped, result.ExitCode, nil
 	}
 	// Non-shell kinds do not write a result lane entry; synthesize a settled
 	// cancelled result so job_status never shows a silent gap.
@@ -372,4 +438,60 @@ func readSpillPreview(path string, n int) string {
 		return ""
 	}
 	return string(b)
+}
+
+// SweepAgedJobSpills deletes spill files under $MEEPT_HOME/spill/jobs older
+// than the result-lane horizon. The lane keeps at most resultLaneCap entries
+// and prunes claims at DefaultClaimRetentionDays, so a spill older than that
+// horizon can no longer have a lane entry reading it: crash-orphaned files
+// (a result never settled, a lane entry evicted while the daemon was down,
+// or a PutResult that crashed before its best-effort delete) are unreferenced
+// garbage. Called at scheduler Start, not per-run — cheap at boot, and it
+// needs no synchronization with in-flight writes.
+//
+// The horizon follows the claim retention so one knob stays consistent
+// across the scheduler's boot-time sweeps.
+func SweepAgedJobSpills(now time.Time, horizon time.Duration) (int, error) {
+	dir := config.MeeptPath("spill", "jobs")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil // no spill dir yet: nothing to sweep
+		}
+		return 0, fmt.Errorf("read job spill dir: %w", err)
+	}
+	cutoff := now.Add(-horizon)
+	removed := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue // raced with a concurrent remove; skip
+		}
+		if info.ModTime().After(cutoff) {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, e.Name())); err != nil {
+			continue // best-effort: a busy file is reaped next boot
+		}
+		removed++
+	}
+	return removed, nil
+}
+
+// sweepAgedJobSpillsAtBoot logs one boot-time spill sweep pass. Failures are
+// warn-logged, never fatal (mirrors the other boot recovery sweeps).
+func (s *Scheduler) sweepAgedJobSpillsAtBoot() {
+	horizon := time.Duration(s.claimRetentionDays) * 24 * time.Hour
+	removed, err := SweepAgedJobSpills(time.Now().UTC(), horizon)
+	if err != nil {
+		s.logger.Warn("scheduler: job-spill sweep failed", "error", err)
+		return
+	}
+	if removed > 0 {
+		s.logger.Info("scheduler: swept aged job spill files",
+			"removed", removed, "horizon", horizon.String())
+	}
 }
