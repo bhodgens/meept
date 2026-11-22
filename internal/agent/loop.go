@@ -865,6 +865,14 @@ type AgentLoop struct {
 	lastTurnTokens    int
 	lastTurnUsageSeen bool
 
+	// lastTurnCostUSD is the provider dollar cost (llm.Response.CostUSD)
+	// accumulated across the turn that just finished (goal-loop budget
+	// lane). lastTurnCostSeen is false when that turn's provider reported
+	// no cost (unconfigured prices); LastTurnCostUSD returns 0 only then.
+	// Both guarded by mu.
+	lastTurnCostUSD  float64
+	lastTurnCostSeen bool
+
 	// Claude artifacts integration
 	artifactManager *ArtifactManager
 
@@ -2040,6 +2048,21 @@ func (l *AgentLoop) LastTurnTokens() int {
 	return l.lastTurnTokens
 }
 
+// LastTurnCostUSD returns the provider dollar cost (llm.Response.CostUSD)
+// accumulated across the turn that just finished (goal-loop budget lane).
+// It is 0 when that turn's provider reported no cost (unconfigured prices).
+func (l *AgentLoop) LastTurnCostUSD() float64 {
+	if l == nil {
+		return 0
+	}
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	if !l.lastTurnCostSeen {
+		return 0
+	}
+	return l.lastTurnCostUSD
+}
+
 // resetLastTurnTokens clears the previous turn's usage so a turn that
 // never receives provider usage reports 0.
 func (l *AgentLoop) resetLastTurnTokens() {
@@ -2049,6 +2072,8 @@ func (l *AgentLoop) resetLastTurnTokens() {
 	l.mu.Lock()
 	l.lastTurnTokens = 0
 	l.lastTurnUsageSeen = false
+	l.lastTurnCostUSD = 0
+	l.lastTurnCostSeen = false
 	l.mu.Unlock()
 }
 
@@ -2062,6 +2087,20 @@ func (l *AgentLoop) recordTurnProviderUsage(usage llm.TokenUsage) {
 	l.mu.Lock()
 	l.lastTurnUsageSeen = true
 	l.lastTurnTokens = usage.TotalTokens
+	l.mu.Unlock()
+}
+
+// recordTurnCostUSD accumulates a provider response's dollar cost
+// (llm.Response.CostUSD) onto this turn. A zero cost means the provider
+// configured no prices and is ignored, so an unseen cost is never
+// misread as a reported one.
+func (l *AgentLoop) recordTurnCostUSD(costUSD float64) {
+	if l == nil || costUSD <= 0 {
+		return
+	}
+	l.mu.Lock()
+	l.lastTurnCostSeen = true
+	l.lastTurnCostUSD += costUSD
 	l.mu.Unlock()
 }
 
@@ -3026,6 +3065,12 @@ func NewAgentLoop(sessionID string, workingDir string, opts ...LoopOption) *Agen
 			loop.security,
 			executorOpts...,
 		)
+		// MaxTokensPerTurn constitution gate (enforcement.go reads
+		// details["turn_tokens"]): the executor asks the loop for the
+		// accumulated turn total so every tool call in this turn is
+		// checked against the cap. LastTurnTokens is the same sum the
+		// routing-funnel C3 lane reports; it resets each turn.
+		loop.executor.SetTurnTokensProvider(loop.LastTurnTokens)
 		// Loop-carried group resolution (agent-groups leaf 04 T1): the
 		// executor's call-time gate consults the same record the loop
 		// carries (applied AFTER options ran, so WithGroupResolution on
@@ -5951,9 +5996,12 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		l.mu.Unlock()
 		// Track token usage. C3: remember this response's provider
 		// TotalTokens for LastTurnTokens. A zero Usage is absent and
-		// does not overwrite a count already seen this turn.
+		// does not overwrite a count already seen this turn. The
+		// response's CostUSD accumulates the same way so a multi-call
+		// tool loop sums every call's cost for LastTurnCostUSD.
 		if response != nil {
 			l.recordTurnProviderUsage(response.Usage)
+			l.recordTurnCostUSD(response.CostUSD)
 		}
 		totalTokens += response.Usage.TotalTokens
 		cachedTokens += response.Usage.CachedTokens

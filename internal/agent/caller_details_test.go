@@ -206,6 +206,70 @@ func TestCheckPermission_NoCallerMapLengthGolden(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------
+// Turn-token provider seam (details["turn_tokens"] -> constitution
+// MaxTokensPerTurn cap guard, internal/employee/enforcement.go).
+// ---------------------------------------------------------------------
+
+func TestCheckPermission_TurnTokensInjection(t *testing.T) {
+	cases := []struct {
+		name     string
+		provider func() int
+		want     string
+		wantOK   bool
+	}{
+		{
+			name:     "provider returns 9000 -> key present",
+			provider: func() int { return 9000 },
+			want:     "9000",
+			wantOK:   true,
+		},
+		{
+			name:     "provider returns 0 -> key absent",
+			provider: func() int { return 0 },
+			wantOK:   false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cap := &capturePreExec{allowed: true}
+			e := newCallerTestExecutor(t, cap)
+			e.SetTurnTokensProvider(tc.provider)
+
+			e.Execute(context.Background(), makeToolCall("c1", "file_read", `{"file":"x"}`))
+			details := cap.last()
+			if details == nil {
+				t.Fatal("pre-exec checker never invoked")
+			}
+			got, ok := details["turn_tokens"]
+			if ok != tc.wantOK {
+				t.Fatalf("turn_tokens present=%v, want %v (details=%v)", ok, tc.wantOK, details)
+			}
+			if tc.wantOK && got != tc.want {
+				t.Errorf("turn_tokens = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCheckPermission_NoProviderTurnTokensAbsent pins the no-provider
+// default: without SetTurnTokensProvider the key is absent (guard inert,
+// byte-identical to the pre-seam details map).
+func TestCheckPermission_NoProviderTurnTokensAbsent(t *testing.T) {
+	cap := &capturePreExec{allowed: true}
+	e := newCallerTestExecutor(t, cap)
+
+	e.Execute(context.Background(), makeToolCall("c1", "file_read", `{"file":"x"}`))
+	details := cap.last()
+	if details == nil {
+		t.Fatal("pre-exec checker never invoked")
+	}
+	if _, ok := details["turn_tokens"]; ok {
+		t.Errorf("turn_tokens injected without a provider (details=%v)", details)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // §6 — deny propagation: the caller deny reason+text reach the tool-result
 // error the model sees.

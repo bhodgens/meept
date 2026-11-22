@@ -1136,6 +1136,13 @@ type Executor struct {
 	// unmanaged (legacy skip). Guarded by mu; set via WithGroupResolution /
 	// SetGroupResolution.
 	groupResolution *groups.Resolved
+	// turnTokensProvider reports the current turn's token count so
+	// checkPermission can inject details["turn_tokens"] for the employee
+	// constitution's MaxTokensPerTurn cap guard
+	// (internal/employee/enforcement.go). Nil provider = key never
+	// injected (guard inert, pre-seam behavior). Guarded by mu; set via
+	// SetTurnTokensProvider.
+	turnTokensProvider func() int
 	// (dynamic-tools leaf 06 / bughunt agent-core F-3: the per-episode
 	// ExposurePlan no longer lives on the executor. One executor field
 	// cannot adjudicate interleaved conversations on a session-long loop
@@ -1271,6 +1278,22 @@ func (e *Executor) SetSecurityChecker(checker *security.PermissionChecker) {
 	}
 	e.mu.Lock()
 	e.security = checker
+	e.mu.Unlock()
+}
+
+// SetTurnTokensProvider arms the details["turn_tokens"] injection used by
+// the employee constitution's MaxTokensPerTurn cap guard: the provider
+// reports the current turn's token count at each checkPermission call. A
+// provider returning 0 (or no provider at all) leaves the key absent, so
+// the enforcement guard stays inert exactly as before (zero = no cap
+// check). Nil-safe per setter convention (nil is a no-op, mirroring
+// SetSecurityChecker).
+func (e *Executor) SetTurnTokensProvider(fn func() int) {
+	if e == nil || fn == nil {
+		return
+	}
+	e.mu.Lock()
+	e.turnTokensProvider = fn
 	e.mu.Unlock()
 }
 
@@ -2139,6 +2162,20 @@ func (e *Executor) checkPermission(ctx context.Context, toolName string, args ma
 	if info, ok := callerid.From(ctx); ok {
 		details["caller_approved"] = strconv.FormatBool(info.Approved)
 		details["caller_known"] = strconv.FormatBool(info.Known)
+	}
+
+	// Inject the current turn's token count so the employee constitution's
+	// MaxTokensPerTurn cap guard (internal/employee/enforcement.go) can
+	// enforce the cap. Presence-only: a provider that is unset or returns
+	// 0 leaves the key absent, so the guard stays inert exactly as before
+	// (zero = no cap check).
+	e.mu.RLock()
+	ttFn := e.turnTokensProvider
+	e.mu.RUnlock()
+	if ttFn != nil {
+		if v := ttFn(); v > 0 {
+			details["turn_tokens"] = strconv.Itoa(v)
+		}
 	}
 
 	result := e.security.CheckPermission(action, details)

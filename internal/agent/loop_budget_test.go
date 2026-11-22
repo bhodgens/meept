@@ -378,3 +378,85 @@ func TestLastTurnTokens_SingleCallTurnUnchanged(t *testing.T) {
 		t.Errorf("LastTurnTokens() = %d, want 10 (single call total)", got)
 	}
 }
+
+// --- LastTurnCostUSD pins (goal-loop budget lane) ---
+
+// costedScriptChatter is budgetScriptChatter with per-call dollar costs:
+// call 1 costs 0.006 (tool call), call 2 costs 0.0069 (stop).
+type costedScriptChatter struct {
+	calls int
+}
+
+func (c *costedScriptChatter) Chat(ctx context.Context, messages []llm.ChatMessage, opts ...llm.ChatOption) (*llm.Response, error) {
+	c.calls++
+	if c.calls == 1 {
+		return &llm.Response{
+			Content:      "fetching",
+			FinishReason: "tool_calls",
+			Usage:        llm.TokenUsage{TotalTokens: 10},
+			CostUSD:      0.006,
+			ToolCalls: []llm.ToolCall{{
+				ID:   "call-budget-cost-1",
+				Type: "function",
+				Function: llm.ToolCallFunction{
+					Name:      "file_read",
+					Arguments: `{"path":"/tmp/x.txt"}`,
+				},
+			}},
+		}, nil
+	}
+	return &llm.Response{Content: "done", FinishReason: "stop", Usage: llm.TokenUsage{TotalTokens: 10}, CostUSD: 0.0069}, nil
+}
+
+func (c *costedScriptChatter) ChatWithProgress(ctx context.Context, messages []llm.ChatMessage, progress llm.ProgressCallback, opts ...llm.ChatOption) (*llm.Response, error) {
+	return c.Chat(ctx, messages, opts...)
+}
+
+func (c *costedScriptChatter) Config() *llm.ModelConfig {
+	return &llm.ModelConfig{ModelID: "costed-script-chatter"}
+}
+
+// TestLastTurnCostUSD_SumsMultiCallToolLoop pins the cost twin of the
+// turn-total fix: a two-call tool loop must report the SUM of the calls'
+// CostUSD (0.0129 = 0.006+0.0069) as LastTurnCostUSD, so the goal loop's
+// cent conversion sees the whole round, not the last call.
+// RED before the fix: LastTurnCostUSD did not exist (compile error) and a
+// stub returning the final snapshot would report 0.0069.
+func TestLastTurnCostUSD_SumsMultiCallToolLoop(t *testing.T) {
+	loop, conv := newBudgetFloorLoop(t, &sizerTool{
+		MockTool: *NewMockTool("file_read", "fetch", func(ctx context.Context, args map[string]any) (any, error) {
+			return "ok", nil
+		}),
+		floor: 1400,
+	})
+	loop.llm = &costedScriptChatter{}
+	if _, err := loop.reasoningCycle(context.Background(), conv, "conv-budget-floor"); err != nil {
+		t.Fatalf("reasoningCycle: %v", err)
+	}
+	if got := loop.LastTurnCostUSD(); got != 0.0129 {
+		t.Errorf("LastTurnCostUSD() = %v, want 0.0129 (sum of both LLM calls: 0.006+0.0069)", got)
+	}
+}
+
+// TestLastTurnCostUSD_ZeroAfterReset pins the per-turn reset: after
+// resetLastTurnTokens (turn start), an unseen cost reports 0 — the goal
+// loop must never re-charge the previous round's spend.
+// RED before the fix: resetLastTurnTokens did not clear cost state (and
+// LastTurnCostUSD did not exist).
+func TestLastTurnCostUSD_ZeroAfterReset(t *testing.T) {
+	loop, conv := newBudgetFloorLoop(t, nil)
+	loop.llm = &costedScriptChatter{}
+	if _, err := loop.reasoningCycle(context.Background(), conv, "conv-budget-floor"); err != nil {
+		t.Fatalf("reasoningCycle: %v", err)
+	}
+	// The scripted turn is a two-call loop (0.006 + 0.0069) even with no
+	// registered tool: the unregistered file_read call still consumes a
+	// second LLM call to stop.
+	if got := loop.LastTurnCostUSD(); got != 0.0129 {
+		t.Fatalf("LastTurnCostUSD() = %v, want 0.0129 (two-call turn)", got)
+	}
+	loop.resetLastTurnTokens()
+	if got := loop.LastTurnCostUSD(); got != 0 {
+		t.Errorf("LastTurnCostUSD() = %v after reset, want 0", got)
+	}
+}
