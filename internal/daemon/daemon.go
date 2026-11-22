@@ -93,6 +93,11 @@ func agentBudgetEnabled(cfg *config.Config) bool {
 	return cfg.LLM.Budget.Enabled && cfg.Agent.Budget.Total > 0
 }
 
+// defaultPlanSweepInterval mirrors plan.defaultSynthesisReclaimInterval
+// (5m): the stalled-executing sweep shares the synthesis reclaimer's
+// cadence without importing the unexported constant.
+const defaultPlanSweepInterval = 5 * time.Minute
+
 // Daemon manages the meept daemon lifecycle.
 //
 //nolint:revive // stutter with package name is intentional for API clarity
@@ -2574,6 +2579,43 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// Nil-safe: no plan manager (plan system disabled) is a no-op; the
 	// goroutine exits when ctx cancels at shutdown.
 	d.planManager.StartSynthesisReclaimer(ctx, 0)
+
+	// Stalled-executing sweep (leaf 10, 20261121 interactive-usability):
+	// an executing plan whose parent task is missing-or-terminal-failed
+	// beyond plans.stalled_executing_sweep (default 6h; 0 disables) is
+	// failed with a plan.failed publish, so a plan that stopped moving
+	// never sits in executing forever. Shares the reclaimer's cadence
+	// (immediate pass, then the default 5m ticker) and runs on the same
+	// Run-scoped ctx. Nil-safe: no plan manager (plan system disabled) is
+	// a no-op.
+	if d.planManager != nil {
+		sweepWindow := d.fullConfig.Plans.StalledExecutingSweep
+		runStalledSweep := func() {
+			if sweepWindow <= 0 {
+				return
+			}
+			swept, err := d.planManager.SweepStalledExecuting(ctx, sweepWindow)
+			if err != nil {
+				d.logger.Warn("stalled-executing sweep pass failed", "error", err)
+			} else if swept > 0 {
+				d.logger.Info("stalled-executing sweep failed plans",
+					"swept", swept, "window", sweepWindow.String())
+			}
+		}
+		runStalledSweep()
+		go func() {
+			ticker := time.NewTicker(defaultPlanSweepInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					runStalledSweep()
+				}
+			}
+		}()
+	}
 
 	// Sync WireGuard configuration for cluster mesh (best-effort)
 	if d.components != nil && d.components.ClusterWireGuard != nil && d.components.ClusterConfig != nil && d.components.ClusterGitSync != nil {

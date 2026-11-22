@@ -306,6 +306,7 @@ func TestApprovePlanSynthesisErrorKeepsApproval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
+	seedExpandablePhase(t, mgr, plan.ID)
 	if err := mgr.SubmitPlan(ctx, plan.ID); err != nil {
 		t.Fatalf("SubmitPlan: %v", err)
 	}

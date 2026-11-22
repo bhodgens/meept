@@ -164,6 +164,10 @@ func TestPlanPublish_LifecycleEdges(t *testing.T) {
 
 	// ApprovePlan fires the approve edge and then Synthesize: claim
 	// approved->synthesizing and the executing write, in one tail of events.
+	// The lifecycle test expands a REAL phase: seed one so synthesis takes
+	// the expansion path (leaf 10's zero-phase guard completes phase-less
+	// plans honestly instead of synthesizing tasks).
+	seedExpandablePhase(t, mgr, p.ID)
 	if err := mgr.ApprovePlan(ctx, p.ID, "", "tester"); err != nil {
 		t.Fatalf("ApprovePlan: %v", err)
 	}
@@ -278,6 +282,7 @@ func TestPlanPublish_SynthesisReleaseAndPark(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
+	seedExpandablePhase(t, mgr, p.ID)
 	drainPlanEvents(t, sub, 1) // planning -> draft (create)
 	if err := mgr.Synthesize(ctx, p.ID); err == nil {
 		t.Fatal("expected synthesis failure")
@@ -313,6 +318,7 @@ func TestPlanPublish_SynthesisReleaseAndPark(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
+	seedExpandablePhase(t, mgr2, p2.ID)
 	drainPlanEvents(t, sub2, 1)
 	if _, err := mgr2.store.(*SQLiteStore).DB().ExecContext(ctx,
 		"UPDATE plans SET synthesis_attempts = ? WHERE id = ?", MaxSynthesisAttempts-1, p2.ID); err != nil {

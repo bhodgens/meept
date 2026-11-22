@@ -273,25 +273,34 @@ func TestApprovalWiring_ActuatorFailureDoesNotCorruptApprovalState(t *testing.T)
 
 	// Signoff recorded despite actuator failure. The plan advanced past
 	// approval into execution (Synthesize succeeded via the stub task
-	// creator) — the point is that approval was NOT rolled back or corrupted
-	// by the actuator's error.
+	// creator) — or, with leaf 10's zero-phase guard, honestly completed
+	// (a phase-less evolver document creates no orphan parent task). Either
+	// way the approval was NOT rolled back or corrupted by the actuator's
+	// error.
 	p, err := mgr.GetPlan(context.Background(), created.ID)
 	if err != nil {
 		t.Fatalf("GetPlan: %v", err)
 	}
-	if p.State != plan.StateApproved && p.State != plan.StateExecuting {
-		t.Errorf("plan state = %q, want approved-or-executing (approval corrupted by actuator failure)", p.State)
+	if p.State != plan.StateApproved && p.State != plan.StateExecuting && p.State != plan.StateCompleted {
+		t.Errorf("plan state = %q, want approved-or-executing-or-completed (approval corrupted by actuator failure)", p.State)
 	}
-	if p.State == plan.StateApproved && p.ApprovedBy != "reviewer" {
+	if p.ApprovedBy != "reviewer" {
 		t.Errorf("plan approved_by = %q, want %q", p.ApprovedBy, "reviewer")
 	}
 	// The failed application never wrote the applied marker.
+	// Leaf 10 note: the zero-phase guard may honestly COMPLETE a phase-less
+	// evolver plan at synthesis — that is the intended no-orphan behavior,
+	// not approval corruption. The corruption question is answered by the
+	// ApprovedBy stamp (below) and the absent applied marker.
 	data, err := os.ReadFile(created.FilePath) //nolint:gosec // fixture path
 	if err != nil {
 		t.Fatalf("read plan file: %v", err)
 	}
 	if strings.Contains(string(data), "\n- applied: ") {
 		t.Errorf("failed application must not record an applied marker")
+	}
+	if p.ApprovedBy != "reviewer" {
+		t.Errorf("approval corrupted: approved_by = %q, want reviewer (plan state %q)", p.ApprovedBy, p.State)
 	}
 }
 

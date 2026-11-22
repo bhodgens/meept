@@ -783,15 +783,61 @@ type PlansConfig struct {
 	// ON per the 2026-11-02 operator decision; an explicit true falls
 	// interview questions back to plain strings.
 	InterviewOptionsDisabled bool `json:"interview_options_disabled" toml:"interview_options_disabled"`
+
+	// StalledExecutingSweep bounds how long an executing plan may sit with
+	// terminal-or-missing child tasks before the stalled-execution sweep
+	// fails it and publishes plan.failed (leaf 10, 20261121
+	// interactive-usability). Default 6h via DefaultConfig; 0 disables the
+	// sweep. NormalizePlansDefaults never overwrites this field: an
+	// explicit zero is a deliberate off switch, so only DefaultConfig
+	// carries the 6h default and the daemon wiring passes the loaded value
+	// straight through.
+	StalledExecutingSweep time.Duration `json:"stalled_executing_sweep" toml:"stalled_executing_sweep"`
+
+	// requireApprovalSet is the load-boundary sentinel distinguishing an
+	// EXPLICIT approval.require_approval=false from an absent key (an
+	// absent bool and a false bool decode identically). The JSON5/TOML
+	// loader arms it via a post-decode hook; NormalizePlansDefaults reads
+	// it: sentinel down -> default the gate ON (leaf 10 master C-6, a
+	// ratified product decision); sentinel up -> the user's explicit
+	// value wins untouched. Constructed-in-code configs (tests, wiring)
+	// carry a down sentinel, so they too receive the true default unless
+	// they set the field AND arm the sentinel through
+	// ArmRequireApprovalSentinel.
+	requireApprovalSet bool `json:"-" toml:"-"`
+}
+
+// ArmRequireApprovalSentinel marks a PlansConfig as carrying an EXPLICIT
+// approval.require_approval value decoded from a config file. Called by the
+// config loader's post-decode hook; never by feature code.
+func (c *PlansConfig) ArmRequireApprovalSentinel() {
+	if c == nil {
+		return
+	}
+	c.requireApprovalSet = true
 }
 
 // NormalizePlansDefaults clamps the tiered-iteration planning knobs to
 // their defaults (leaf 02 contract: a non-positive round cap means
 // "default 2", never "unbounded" or "zero rounds"). Applied at the load
 // boundary so every consumer sees normalized values.
+//
+// Leaf 10 (20261121 interactive-usability, master C-6, a ratified product
+// decision): plans.approval.require_approval defaults TRUE. The sentinel
+// (armed by the loader only when the config file explicitly named the key)
+// separates "absent" from "false": absent/constructed configs get the
+// human gate; an explicit false still wins. The evolver sink keeps its own
+// unconditional override (components_wiki.go) — machine-origin plans always
+// require approval regardless of this knob.
+//
+// StalledExecutingSweep is deliberately NOT normalized: DefaultConfig
+// carries the 6h default and an explicit 0 is the documented off switch.
 func NormalizePlansDefaults(c *PlansConfig) {
 	if c.ComplexMaxCritiqueRounds <= 0 {
 		c.ComplexMaxCritiqueRounds = 2
+	}
+	if !c.requireApprovalSet {
+		c.Approval.RequireApproval = true
 	}
 }
 
@@ -5316,6 +5362,19 @@ func DefaultConfig() *Config {
 		Ledger: LedgerConfig{
 			AutoRepair:    false,
 			IntervalHours: DefaultLedgerIntervalHours,
+		},
+		// Plans: leaf 10 (20261121 interactive-usability, master C-6,
+		// ratified) flips approval.require_approval to default TRUE — a
+		// fresh install gets the human gate; an explicit false in the
+		// user's config still wins (NormalizePlansDefaults + the loader
+		// sentinel). stalled_executing_sweep defaults 6h; an explicit 0
+		// disables the sweep.
+		Plans: PlansConfig{
+			Approval: PlansApprovalConfig{
+				RequireApproval: true,
+				MaxRevisions:    3,
+			},
+			StalledExecutingSweep: 6 * time.Hour,
 		},
 		Awareness: AwarenessConfig{
 			Enabled:        false, // D1 opt-in (plan 20261110-situational)
