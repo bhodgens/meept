@@ -432,3 +432,67 @@ func TestAffinityHeaderSent(t *testing.T) {
 		}
 	})
 }
+
+// pricedChatHandler is an OpenAI-shaped handler that reports a fixed usage
+// block so the cost pin can assert the exact dollar math.
+func pricedChatHandler(t *testing.T) http.Handler {
+	t.Helper()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]any{
+			"id":      "chatcmpl-cost",
+			"object":  "chat.completion",
+			"created": 1,
+			"model":   "test-model",
+			"choices": []map[string]any{
+				{"index": 0, "finish_reason": "stop", "message": map[string]any{"role": "assistant", "content": "ok"}},
+			},
+			"usage": map[string]any{"prompt_tokens": 1000, "completion_tokens": 100, "total_tokens": 1100},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+}
+
+// TestChatResponseCostUSD pins llm.Response.CostUSD: the serving client must
+// carry the dollar cost it already computes from the model's per-million
+// prices onto every successful response (and leave it 0 when prices are
+// unconfigured).
+func TestChatResponseCostUSD(t *testing.T) {
+	promptTokens, completionTokens := 1000, 100
+	inputPrice, outputPrice := 3.0, 15.0 // dollars per million tokens
+	want := float64(promptTokens)*inputPrice/1_000_000 + float64(completionTokens)*outputPrice/1_000_000
+
+	server := httptest.NewServer(pricedChatHandler(t))
+	defer server.Close()
+
+	client := NewClient(&ModelConfig{
+		BaseURL:              server.URL,
+		ModelID:              "test-model",
+		MaxTokens:            10,
+		CostPerMillionInput:  inputPrice,
+		CostPerMillionOutput: outputPrice,
+	})
+	resp, err := client.Chat(context.Background(),
+		[]ChatMessage{{Role: RoleUser, Content: "hi"}})
+	if err != nil {
+		t.Fatalf("Chat failed: %v", err)
+	}
+	if resp.CostUSD != want {
+		t.Errorf("resp.CostUSD = %v, want %v (prompt*input_price/1e6 + completion*output_price/1e6)", resp.CostUSD, want)
+	}
+
+	// Unconfigured prices: the cost must stay 0 (omitempty), never NaN/garbage.
+	free := NewClient(&ModelConfig{
+		BaseURL:   server.URL,
+		ModelID:   "test-model",
+		MaxTokens: 10,
+	})
+	resp, err = free.Chat(context.Background(),
+		[]ChatMessage{{Role: RoleUser, Content: "hi"}})
+	if err != nil {
+		t.Fatalf("Chat (no prices) failed: %v", err)
+	}
+	if resp.CostUSD != 0 {
+		t.Errorf("resp.CostUSD = %v, want 0 when prices are unconfigured", resp.CostUSD)
+	}
+}

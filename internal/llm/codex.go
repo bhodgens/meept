@@ -414,6 +414,13 @@ func (c *CodexClient) Chat(ctx context.Context, messages []ChatMessage, opts ...
 		return nil, err
 	}
 
+	// Dollars charged for THIS response (same per-million prices the
+	// budget row below records); zero when prices are unconfigured.
+	// Stamped on EVERY success so the response carries its cost even when
+	// no budget is wired.
+	resp.CostUSD = float64(resp.Usage.PromptTokens)*effCfg.CostPerMillionInput/1_000_000 +
+		float64(resp.Usage.CompletionTokens)*effCfg.CostPerMillionOutput/1_000_000
+
 	// Record usage against the budget (mutex-free; Budget locks internally).
 	if c.budget != nil {
 		c.budget.RecordUsageWithScope(resp.Usage, chatOpts.taskID, chatOpts.sessionID)

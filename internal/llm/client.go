@@ -1000,6 +1000,13 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 			}
 		}
 
+		// Dollars charged for THIS response (same per-million prices the
+		// budget/cache/metrics rows below record); zero when prices are
+		// unconfigured. Stamped on EVERY success so the response carries
+		// its cost even when no budget or metrics store is wired.
+		resp.CostUSD = float64(resp.Usage.PromptTokens)*cfg.CostPerMillionInput/1_000_000 +
+			float64(resp.Usage.CompletionTokens)*cfg.CostPerMillionOutput/1_000_000
+
 		// Record usage with scope
 		if c.budget != nil {
 			c.budget.RecordUsageWithScope(resp.Usage, chatOpts.taskID, chatOpts.sessionID)
@@ -1287,6 +1294,12 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 				return nil, err
 			}
 		}
+
+		// Dollars charged for THIS response (same per-million prices the
+		// budget/cache/metrics rows below record); zero when prices are
+		// unconfigured. Stamped on EVERY success.
+		resp.CostUSD = float64(resp.Usage.PromptTokens)*cfg.CostPerMillionInput/1_000_000 +
+			float64(resp.Usage.CompletionTokens)*cfg.CostPerMillionOutput/1_000_000
 
 		// Streaming stage - response received
 		reportProgress(ProgressStageStreaming, "Receiving response...")
@@ -2280,6 +2293,14 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any, cfg *Mod
 	}
 
 	parsedResp, err := c.parseResponseWithTools(&chatResp, hasTools, providerID, modelID, assistantPrefill)
+	if err == nil && parsedResp != nil {
+		// Dollars charged for THIS response (same per-million prices the
+		// budget/metrics rows below record); zero when prices are
+		// unconfigured. Stamped on EVERY success so the response carries
+		// its cost even when no budget or metrics store is wired.
+		parsedResp.CostUSD = float64(chatResp.Usage.PromptTokens)*cfg.CostPerMillionInput/1_000_000 +
+			float64(chatResp.Usage.CompletionTokens)*cfg.CostPerMillionOutput/1_000_000
+	}
 
 	// Tool-call validation (Contract C9, sovereign-router-parity leaf 03,
 	// narrowed by the 2026-11-17 wiring-split fix): AFTER a successful
@@ -2791,6 +2812,14 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 		chatOpts.ttftFirstDelta = time.Time{}
 		resp, httpStatus, err := c.doStreamRequest(ctx, body, onDelta, retryState, cfg, chatOpts.priority, chatOpts.sessionID, chatOpts.assistantPrefill, chatOpts)
 		if err == nil {
+			// Dollars charged for THIS streamed response (same per-million
+			// prices the budget/cache/metrics rows below record); zero when
+			// prices are unconfigured. Stamped on EVERY success.
+			if resp != nil {
+				resp.CostUSD = float64(resp.Usage.PromptTokens)*cfg.CostPerMillionInput/1_000_000 +
+					float64(resp.Usage.CompletionTokens)*cfg.CostPerMillionOutput/1_000_000
+			}
+
 			// Record usage with scope
 			if c.budget != nil && resp != nil {
 				c.budget.RecordUsageWithScope(resp.Usage, chatOpts.taskID, chatOpts.sessionID)

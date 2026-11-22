@@ -565,6 +565,13 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 			}
 		}
 
+		// Dollars charged for THIS response (same per-million prices the
+		// budget/metrics rows below record); zero when prices are
+		// unconfigured. Stamped on EVERY success so the response carries
+		// its cost even when no budget or metrics store is wired.
+		resp.CostUSD = float64(resp.Usage.PromptTokens)*effCfg.CostPerMillionInput/1_000_000 +
+			float64(resp.Usage.CompletionTokens)*effCfg.CostPerMillionOutput/1_000_000
+
 		// Per-provider/per-agent token accounting (metrics.db llm_calls).
 		c.recordUsageStore(effCfg, resp.Usage, false, "", time.Since(start).Milliseconds(), chatOpts, resp)
 
@@ -834,6 +841,12 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 				return nil, err
 			}
 		}
+
+		// Dollars charged for THIS streamed response (same per-million
+		// prices the budget/metrics rows below record); zero when prices
+		// are unconfigured. Stamped on EVERY success.
+		resp.CostUSD = float64(resp.Usage.PromptTokens)*effCfg.CostPerMillionInput/1_000_000 +
+			float64(resp.Usage.CompletionTokens)*effCfg.CostPerMillionOutput/1_000_000
 
 		reportProgress(ProgressStageStreaming, "Receiving response...")
 
@@ -1665,7 +1678,14 @@ func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicReque
 	// Empty-completion classification happens INSIDE parseResponse, so the
 	// sentinel flows through this return and the Chat/ChatWithProgress retry
 	// loops treat it as a flake (bare sentinel on exhaustion).
-	return c.parseResponse(&apiResp)
+	parsed, parseErr := c.parseResponse(&apiResp)
+	if parseErr == nil && parsed != nil {
+		// Stamp the response with the dollars this call charged, using the
+		// same per-million prices the metrics row above records.
+		parsed.CostUSD = float64(apiResp.Usage.InputTokens)*cfg.CostPerMillionInput/1_000_000 +
+			float64(apiResp.Usage.OutputTokens)*cfg.CostPerMillionOutput/1_000_000
+	}
+	return parsed, parseErr
 }
 
 // doStreamingRequest performs a streaming HTTP request to Anthropic's API.
@@ -2015,6 +2035,11 @@ func (c *AnthropicClient) parseStreamingResponse(body io.Reader, progress func(P
 	if err != nil {
 		return nil, err
 	}
+	// Dollars charged for THIS streamed response, priced at the same
+	// per-million rates the caller's success metrics row records; zero
+	// when the model has no price config (local runtimes).
+	resp.CostUSD = float64(usage.InputTokens)*effective.CostPerMillionInput/1_000_000 +
+		float64(usage.OutputTokens)*effective.CostPerMillionOutput/1_000_000
 
 	// Log prompt cache metrics when present.
 	if usage.CacheCreationInputTokens > 0 || usage.CacheReadInputTokens > 0 {

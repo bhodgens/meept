@@ -11,10 +11,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/bus"
@@ -88,7 +90,7 @@ func (s *refusalStub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// The agent loop's streaming path sends "stream": true and the client's
 	// doStreamRequest parses SSE "data:" lines. Non-2xx stays plain JSON;
-	// scripted 200 entries are SSE stream chunks (see openaiChunk).
+	// scripted 200 entries are SSE stream chunks (see openaiCompletion).
 	if body.Stream {
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte(next))
@@ -152,6 +154,41 @@ func openaiCompletion(id, model, content, finishReason string) string {
 	}))
 	b.WriteString("data: [DONE]\n\n")
 	return b.String()
+}
+
+// setRefusalEventPublisher installs the loop's unexported
+// refusalEventPublisher field (loop.go:1077) with the exact
+// verification-escalation bus closure the daemon uses (loop.go:3050).
+//
+// The field has no exported setter: the daemon builds the same closure
+// in-package at wiring time and in-package tests assign the field directly.
+// The former external lane, agent.ExportedRefusalSeams
+// (internal/agent/loop_refusal_export.go), was deleted as dead code
+// (28580cf8) because a production-file accessor reachable only from tests
+// fails this repo's deadcode gate — so this external-package test reaches
+// the unexported field through reflect instead. Test-only helper; no
+// production code changes and no new exported symbol anywhere.
+//
+// The event PAYLOAD contract (keys reason/to_model/fix_loops, one event per
+// arm, none on give-up) is additionally pinned in-package by
+// TestAgentLoop_HandleRefusal_DecisionTable (internal/agent/loop_refusal_test.go,
+// eventCaptureBus); this file's job is the FULL wire path: handleRefusal →
+// publisher closure → real bus → subscriber.
+func setRefusalEventPublisher(loop *agent.AgentLoop, msgBus *bus.MessageBus) {
+	field := reflect.ValueOf(loop).Elem().FieldByName("refusalEventPublisher")
+	if !field.IsValid() {
+		return
+	}
+	// Unexported fields are not directly settable; re-root the value at its
+	// own address to obtain a settable view (read/write stays inside this
+	// test process).
+	settable := reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem()
+	publisher := func(topic string, payload map[string]any) {
+		if msg, err := models.NewBusMessage(models.MessageTypeEvent, "agent", payload); err == nil {
+			msgBus.Publish(topic, msg)
+		}
+	}
+	settable.Set(reflect.ValueOf(agent.EventPublisher(publisher)))
 }
 
 // refusalFallbackLoop wires a loop against the stub with the daemon seam
@@ -222,18 +259,10 @@ func refusalFallbackLoop(
 	// Bus-backed escalation publisher with the SAME closure shape the
 	// daemon installs for verification escalation (loop.go:2186), so the
 	// event assertion proves the FULL bus path, not just a seam call.
-	// refusalEventPublisher is an unexported AgentLoop field, so this
-	// external-package test injects it through the exported
-	// ExportedRefusalSeams accessor (loop_refusal_export_test.go seam)
-	// rather than guessing at setter names.
+	// Installed via setRefusalEventPublisher (see its doc comment for why
+	// the deleted ExportedRefusalSeams accessor is not an option).
 	if msgBus != nil {
-		seams := agent.ExportedRefusalSeams(loop)
-		seams.EventPublisher = func(topic string, payload map[string]any) {
-			if msg, err := models.NewBusMessage(models.MessageTypeEvent, "agent", payload); err == nil {
-				msgBus.Publish(topic, msg)
-			}
-		}
-		seams.Apply()
+		setRefusalEventPublisher(loop, msgBus)
 	}
 	return loop
 }

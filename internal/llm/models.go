@@ -181,6 +181,12 @@ type Response struct {
 	Usage        TokenUsage `json:"usage"`
 	Model        string     `json:"model"`
 	FinishReason string     `json:"finish_reason"`
+	// CostUSD is the dollar amount charged by the provider for THIS
+	// response, computed by the serving client from the model's
+	// per-million token prices (CostPerMillionInput / CostPerMillionOutput).
+	// Zero when prices are unconfigured (e.g. local runtimes) or the call
+	// failed; the budget lane converts it to cents for spend accounting.
+	CostUSD float64 `json:"cost_usd,omitempty"`
 	// Reasoning holds the assistant's chain-of-thought text when the
 	// vendor exposes it as a separate channel (Anthropic thinking,
 	// OpenAI o1-style reasoning, DeepSeek reasons). Empty when not
