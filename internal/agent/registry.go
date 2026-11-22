@@ -2049,7 +2049,14 @@ func (r *AgentRegistry) SetGlobalRules(rules string) {
 // RegisterActiveQueue associates a queue with a running conversation.
 // The loop parameter is the AgentLoop that owns this queue; it may be nil
 // in tests. Returns the generation number for this registration.
-func (r *AgentRegistry) RegisterActiveQueue(conversationID string, q *MessageQueue, loop *AgentLoop) uint64 {
+//
+// Identity canonicalization (20261121-interactive-usability leaf 01):
+// aliasIDs are optional extra keys (e.g. the task's linked session-level
+// conversation id) mapped to the SAME QueueEntry so steer/followup/
+// queue_status addressed by any of the session's identity shapes hit the
+// exact key. Aliases share the primary entry's generation and are
+// unregistered together with it; empty or duplicate ids are skipped.
+func (r *AgentRegistry) RegisterActiveQueue(conversationID string, q *MessageQueue, loop *AgentLoop, aliasIDs ...string) uint64 {
 	r.activeQueuesMu.Lock()
 	defer r.activeQueuesMu.Unlock()
 
@@ -2061,6 +2068,23 @@ func (r *AgentRegistry) RegisterActiveQueue(conversationID string, q *MessageQue
 	}
 
 	r.activeQueues[conversationID] = entry
+	// Identity-canonicalization alias (20261121-interactive-usability leaf
+	// 01, fix 1): task-dispatched turns execute under an EPHEMERAL
+	// step-task-... conversation id, which no session-store lookup can
+	// derive, so steer/followup/queue_status addressed to the session's
+	// identity 404 (the queue-not-found class). Callers that know the
+	// task->session linkage register the SAME QueueEntry under the
+	// session-level conversation id as an exact-key alias: resolution step
+	// 1 hits it directly, no prefix guessing, and two concurrent tasks can
+	// never collide because each alias carries its own live entry.
+	// Generation, lifecycle, and the boot-recovery inbox stay owned by the
+	// PRIMARY key; aliases are unregistered with it (UnregisterActiveQueue).
+	for _, aliasID := range aliasIDs {
+		if aliasID == "" || aliasID == conversationID {
+			continue
+		}
+		r.activeQueues[aliasID] = entry
+	}
 	// Boot-recovery inbox wiring (02-routing/03 T2): a live conversation
 	// queue is the injection target for persisted follow-ups. Recovery
 	// runs again on reconnect/turn start and delivers any rows a previous
@@ -2074,6 +2098,9 @@ func (r *AgentRegistry) RegisterActiveQueue(conversationID string, q *MessageQue
 
 // UnregisterActiveQueue removes the queue when the loop exits.
 // Also closes the queue to reject any in-flight injection attempts.
+// Any alias keys registered alongside the primary (RegisterActiveQueue's
+// aliasIDs) carry the same QueueEntry, so the entry-pointer sweep removes
+// them in the same pass — one lifecycle, no orphaned alias keys.
 func (r *AgentRegistry) UnregisterActiveQueue(conversationID string) {
 	// Snapshot under lock, then close outside to avoid holding the map
 	// mutex across queue shutdown I/O (CLAUDE.md mutex scope rule).
@@ -2081,6 +2108,15 @@ func (r *AgentRegistry) UnregisterActiveQueue(conversationID string) {
 	entry, exists := r.activeQueues[conversationID]
 	if exists {
 		delete(r.activeQueues, conversationID)
+		// Remove alias keys pointing at the SAME entry (identity
+		// canonicalization aliases). A subsequent registration may have
+		// replaced the alias with a newer generation — compare the
+		// pointer before deleting so only THIS registration's aliases go.
+		for key, e := range r.activeQueues {
+			if e == entry {
+				delete(r.activeQueues, key)
+			}
+		}
 	}
 	r.activeQueuesMu.Unlock()
 

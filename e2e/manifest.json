@@ -34,7 +34,8 @@
     "internal/services/": [
       "chat-submit",
       "session-binding",
-      "http-stream"
+      "http-stream",
+      "chat-identity"
     ],
     "internal/agent/": [
       "acp-persona-route",
@@ -57,7 +58,8 @@
       "step-pipeline",
       "task-state",
       "turn-journal",
-      "dispatch-trace"
+      "dispatch-trace",
+      "chat-identity"
     ],
     "internal/validator/": [
       "output-filters",
@@ -883,6 +885,11 @@
     {
       "name": "chat-submit",
       "dir": "e2e/suites/chat-submit",
+      "status": "implemented"
+    },
+    {
+      "name": "chat-identity",
+      "dir": "e2e/suites/chat-identity",
       "status": "implemented"
     },
     {
@@ -6185,6 +6192,39 @@
         "internal/tui/app.go",
         "internal/tui/models/tasks.go",
         "e2e/suites/tui-flows"
+      ]
+    },
+    {
+      "id": "chat-identity-01",
+      "suite": "chat-identity",
+      "diff": "M",
+      "title": "GUI-shaped submit acks canonically (session conv id); steer by the acked id reaches the live queue",
+      "paths": [
+        "internal/agent/registry.go",
+        "internal/agent/queue_resolve.go",
+        "internal/rpc/queue.go"
+      ]
+    },
+    {
+      "id": "chat-identity-02",
+      "suite": "chat-identity",
+      "diff": "M",
+      "title": "chat.followup by the canonical ack id likewise reaches the live queue and drains into the conversation",
+      "paths": [
+        "internal/agent/registry.go",
+        "internal/agent/queue_resolve.go",
+        "internal/rpc/queue.go"
+      ]
+    },
+    {
+      "id": "chat-identity-03",
+      "suite": "chat-identity",
+      "diff": "M",
+      "title": "chat.queue_status by raw session id shows the live queue (session->conversation read-side resolution)",
+      "paths": [
+        "internal/agent/handler.go",
+        "internal/rpc/chat_submit.go",
+        "internal/services/chat_service.go"
       ]
     }
   ]

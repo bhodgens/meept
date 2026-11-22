@@ -445,6 +445,15 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 
 		// Register queue (steer/follow-up) handlers (native Go, calling AgentRegistry directly)
 		queueHandler := rpc.NewQueueHandler(components.AgentRegistry)
+		// Identity canonicalization (20261121-interactive-usability leaf
+		// 01): a raw session id (or thread-scoped conversation id) sent
+		// as conversation_id resolves to the session's owning
+		// conversation id before the queue lookup - the loop registers
+		// under its RESOLVED conv id, so the single-key miss used to 404
+		// every steer/followup from GUI-shaped clients.
+		if components.SessionStore != nil {
+			queueHandler.SetSessionStore(components.SessionStore)
+		}
 		queueHandler.RegisterQueueMethods(rpcServer)
 		if components.AgentRegistry != nil {
 			logger.Info("Queue RPC handlers registered")

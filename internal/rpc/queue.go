@@ -6,19 +6,56 @@ import (
 	"fmt"
 
 	"github.com/caimlas/meept/internal/agent"
+	"github.com/caimlas/meept/internal/session"
 )
+
+// queueSessionStore is the slice of session.Store behavior queue
+// resolution needs (identity canonicalization, 20261121-interactive-usability
+// leaf 01): any of {primary session id, conversation id, thread-scoped
+// conversation id} must find the live queue. Defined locally so the handler
+// keeps no hard dependency on session wiring details; *session.Store
+// satisfies it structurally.
+type queueSessionStore interface {
+	Get(id string) *session.Session
+	GetByConversationID(conversationID string) *session.Session
+}
 
 // QueueHandler provides native RPC methods for steering and follow-up queue
 // operations. It calls MessageQueue directly so that CLI and TUI commands
 // reach active agent loops even when no bus subscriber is running.
 type QueueHandler struct {
-	registry *agent.AgentRegistry
+	registry     *agent.AgentRegistry
+	sessionStore queueSessionStore // optional; nil disables session-id resolution
 }
 
 // NewQueueHandler creates a new handler. If registry is nil the registered
 // methods return "queue feature not enabled" errors.
 func NewQueueHandler(reg *agent.AgentRegistry) *QueueHandler {
 	return &QueueHandler{registry: reg}
+}
+
+// SetSessionStore wires the session store used to resolve a raw session id
+// (or a thread-scoped conversation id) to the session's owning conversation
+// id before the queue lookup. Nil is a no-op.
+func (h *QueueHandler) SetSessionStore(s queueSessionStore) {
+	if s != nil {
+		h.sessionStore = s
+	}
+}
+
+// resolveQueue resolves the live queue for the request's conversation id
+// through the canonical identity chain: exact queue key -> session/conversation
+// resolution -> thread-key remap (C3). Nil store keeps the queue-key-only
+// resolution.
+func (h *QueueHandler) resolveQueue(reg *agent.AgentRegistry, conversationID string) (*agent.MessageQueue, error) {
+	if h.sessionStore != nil {
+		return reg.ResolveActiveQueueWithSession(
+			conversationID,
+			h.sessionStore.GetByConversationID,
+			h.sessionStore.Get,
+		)
+	}
+	return reg.ResolveActiveQueue(conversationID)
 }
 
 // RegisterQueueMethods registers queue RPC methods on the server.
@@ -58,8 +95,8 @@ func (h *QueueHandler) handleSteer(ctx context.Context, params json.RawMessage) 
 		return nil, fmt.Errorf("conversation_id is required")
 	}
 
-	q, _ := reg.GetActiveQueue(req.ConversationID)
-	if q == nil {
+	q, err := h.resolveQueue(reg, req.ConversationID)
+	if err != nil || q == nil {
 		return nil, agent.ErrQueueNotFound
 	}
 
@@ -95,8 +132,8 @@ func (h *QueueHandler) handleFollowUp(ctx context.Context, params json.RawMessag
 		return nil, fmt.Errorf("conversation_id is required")
 	}
 
-	q, _ := reg.GetActiveQueue(req.ConversationID)
-	if q == nil {
+	q, err := h.resolveQueue(reg, req.ConversationID)
+	if err != nil || q == nil {
 		return nil, agent.ErrQueueNotFound
 	}
 
@@ -127,7 +164,20 @@ func (h *QueueHandler) handleStatus(ctx context.Context, params json.RawMessage)
 		return nil, fmt.Errorf("conversation_id is required")
 	}
 
-	q, gen := reg.GetActiveQueue(req.ConversationID)
+	// Identity canonicalization: resolve through the session-aware chain
+	// (raw session id / thread-scoped id -> owning conversation id).
+	// Generation 0 when nothing resolves - the response shape is
+	// unchanged, only the lookup key set widens.
+	q, _ := h.resolveQueue(reg, req.ConversationID)
+	gen := uint64(0)
+	if q != nil {
+		_, gen = reg.GetActiveQueue(req.ConversationID)
+		if gen == 0 {
+			// The registration may live under the resolved canonical
+			// id; the queue is non-nil so report a live generation.
+			gen = 1
+		}
+	}
 
 	// B5 / leaf 05-navigation/03 T2: parked work must be visible even
 	// with no active loop. task_states lists the conversation's
@@ -207,8 +257,8 @@ func (h *QueueHandler) handleRestore(ctx context.Context, params json.RawMessage
 		return nil, fmt.Errorf("conversation_id is required")
 	}
 
-	q, _ := reg.GetActiveQueue(req.ConversationID)
-	if q == nil {
+	q, err := h.resolveQueue(reg, req.ConversationID)
+	if err != nil || q == nil {
 		return map[string]any{
 			"restored": 0,
 			"active":   false,

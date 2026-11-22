@@ -827,6 +827,22 @@ type AgentLoop struct {
 	// reads deep inside its own critical section).
 	armedTurnDifficulty int
 
+	// queueAliasIDs carries THIS turn's session-level conversation aliases
+	// (identity canonicalization, 20261121-interactive-usability leaf 01,
+	// fix 1). Task-dispatched turns execute under the EPHEMERAL
+	// step-task-... conversation id, which no session-store lookup can
+	// derive — so a chat.steer / chat.followup / chat.queue_status
+	// addressed by the session's identity misses the queue registration
+	// (the 404 class). The job processor (AgentJobProcessor.Process) knows
+	// the task->session linkage and arms the alias HERE before the turn;
+	// RunOnceWithParts consumes it at queue-registration time and passes
+	// the ids to RegisterActiveQueue as exact-key aliases (same
+	// QueueEntry, same generation, unregistered together). Empty (every
+	// interactive turn, and task lanes whose processor did not arm) keeps
+	// registration byte-identical. Plain field under l.mu: written before
+	// the turn starts and read once on the turn goroutine.
+	queueAliasIDs []string
+
 	// Conversation management
 	conversations *ConversationStore
 
@@ -2398,6 +2414,42 @@ func (l *AgentLoop) ArmTurnDifficulty(difficulty int) {
 	l.mu.Unlock()
 }
 
+// ArmQueueAliases arms THIS turn's session-level queue alias ids (identity
+// canonicalization, 20261121-interactive-usability leaf 01, fix 1) via the
+// same one-shot seam shape as ArmTurnDifficulty. The task->session linkage
+// lives in the job processor (the task's LinkedSessions), not in the loop —
+// so the processor arms the alias before RunOnce, and RunOnceWithParts
+// consumes it when RegisterActiveQueue runs, registering the SAME queue
+// entry under the session-level conversation id as an exact-key alias.
+// Empty ids are dropped; a no-op with nothing left. Thread-safe (l.mu).
+func (l *AgentLoop) ArmQueueAliases(aliasIDs []string) {
+	filtered := make([]string, 0, len(aliasIDs))
+	for _, id := range aliasIDs {
+		if id != "" {
+			filtered = append(filtered, id)
+		}
+	}
+	if len(filtered) == 0 {
+		return
+	}
+	l.mu.Lock()
+	l.queueAliasIDs = filtered
+	l.mu.Unlock()
+}
+
+// consumeQueueAliases reads and clears the armed session-level queue alias
+// ids for this turn's registration. One-shot: RunOnceWithParts consumes the
+// arm exactly once at queue-registration time so a stale alias can never
+// outlive its turn (the resetTurnGuards class). Callers on the turn
+// goroutine only.
+func (l *AgentLoop) consumeQueueAliases() []string {
+	l.mu.Lock()
+	ids := l.queueAliasIDs
+	l.queueAliasIDs = nil
+	l.mu.Unlock()
+	return ids
+}
+
 // consumeTurnDifficulty reads and clears the armed per-turn difficulty for
 // this resolve. The one-shot contract mirrors the override pin: the value
 // arms for the turn's FIRST alias resolution (the sticky pin's creation or
@@ -3692,6 +3744,14 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	queueRegistered := false
 	var turnQueue *MessageQueue
 	if l.agentRegistry != nil && l.queue != nil {
+		// Identity canonicalization (20261121-interactive-usability leaf
+		// 01, fix 1): consume the one-shot session-level alias arm. A
+		// task-dispatched turn registers under the EPHEMERAL
+		// step-task-... id; the armed alias (the task's linked session
+		// conversation id, set by the job processor) makes the SAME
+		// queue findable by its exact key, closing the steer/followup/
+		// queue_status 404 class without resolver prefix guessing.
+		aliasIDs := l.consumeQueueAliases()
 		turnQueue = NewMessageQueue(
 			WithQueueConfig(l.queue.config),
 			WithQueueBus(l.queue.bus),
@@ -3729,7 +3789,7 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 			}
 		}
 
-		gen := l.agentRegistry.RegisterActiveQueue(conversationID, turnQueue, l)
+		gen := l.agentRegistry.RegisterActiveQueue(conversationID, turnQueue, l, aliasIDs...)
 		queueRegistered = true
 		l.logger.Debug("registered queue for conversation",
 			"conversation_id", conversationID,

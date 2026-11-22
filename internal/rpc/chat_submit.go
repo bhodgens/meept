@@ -194,6 +194,20 @@ func (h *SubmitHandler) buildAck(req ChatSubmitRequest) (any, error) {
 					"owning_conversation_id", sess.ConversationID,
 				)
 			}
+			// GUI-shaped canonicalization (leaf 01,
+			// 20261121-interactive-usability): when the client sent ONLY
+			// conversation_id and it carries the raw PRIMARY session id,
+			// the lookup above already resolved the owning session -
+			// canonicalize the ack (and the turn) to the session's OWN
+			// conversation id, exactly as the session_id-shaped submit
+			// does. Without this the ack echoes session-... while the
+			// loop runs under a minted conv id: steer/followup addressed
+			// to the session's identity miss the queue registration (the
+			// 404 class), and agent_progress rides an id no session
+			// subscriber matches.
+			if sess == nil && convSess.ConversationID != "" {
+				conversationID = convSess.ConversationID
+			}
 		}
 		if sess != nil && sess.ConversationID != "" {
 			// Owning-conversation correction is idempotent for a

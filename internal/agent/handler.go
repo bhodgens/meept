@@ -23,6 +23,7 @@ import (
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
+	"github.com/caimlas/meept/pkg/security"
 )
 
 // SessionStoreReader is the narrow interface ChatHandler needs from a session
@@ -181,6 +182,15 @@ type ChatHandler struct {
 	// Worker tracking
 	workers   map[string]*Worker
 	workersMu sync.RWMutex
+
+	// scopedLoops caches per-conversation chat loops built WITHOUT the
+	// loop manager (scopedChatLoop, the ChatHandler port of the
+	// dispatcher's scopedSessionLoop). Keyed by conversation id; a cached
+	// loop whose workingDir no longer matches is closed and replaced.
+	// Guarded by scopedLoopsMu (mutex scope rule: collect under the lock,
+	// Close outside it).
+	scopedLoops   map[string]*AgentLoop
+	scopedLoopsMu sync.Mutex
 
 	// turnRegistry tracks async-submitted turns (async-turn-migration leaf
 	// 02/03): submit-time Register, per-worker-event Touch, and Complete
@@ -893,20 +903,50 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 		return
 	}
 
-	// Generate conversation ID if not provided. When the submit carried a
-	// session ID, resolve the session's OWN conversation ID first: minting
-	// a fresh conv id here orphans the turn from its session — the session
-	// loop finds no working directory (SessionID resolves nothing) and the
-	// dispatcher's task links to a conversation no session row backs, so
-	// the dispatch step lane can never inject the session working dir into
-	// the tool context (spreadsheet_write hard-refuses without it). Same
-	// dual resolution as ChatService.Chat: session primary id, then its
-	// conversation id.
+	// Canonical conversation identity (C-1, 20261121-interactive-usability
+	// leaf 01): resolve the id ALWAYS, not only when empty. Two shapes
+	// need mapping before anything downstream keys off it:
+	//
+	//   - empty id + a session id: minting a fresh conv id here orphans
+	//     the turn from its session - the session loop finds no working
+	//     directory (SessionID resolves nothing) and the dispatcher's
+	//     task links to a conversation no session row backs, so the
+	//     dispatch step lane can never inject the session working dir
+	//     into the tool context (spreadsheet_write hard-refuses without
+	//     it). Same dual resolution as ChatService.Chat: session primary
+	//     id, then its conversation id.
+	//   - a GUI-shaped id (the raw session-... id sent as
+	//     conversation_id): the turn must execute and register its queue
+	//     under the session's OWN conversation id, or every steer/
+	//     followup addressed to the session's identity misses the
+	//     conv-keyed registration (the 404 class this leaf fixes), and
+	//     agent_progress rides an id no session subscriber matches.
+	//
+	// Resolution order matches the submit path exactly (Get, then
+	// GetByConversationID, then the thread router unwrap via
+	// session.ResolveThreadConversationID). Thread-scoped ids stay INSIDE
+	// the LLM continuity lane: the mapping here only fires when the id is
+	// a session primary id or unwraps to a session whose conversation id
+	// exists; a thread-scoped id that resolves to a session whose
+	// conversation id IS the id's base keeps its continuity lane binding.
+	// Legacy behavior is unchanged when the store is nil or nothing
+	// resolves: an empty id still mints a fresh conversation id, and an
+	// unknown non-empty id passes through untouched.
 	conversationID := req.ConversationID
-	if conversationID == "" && req.SessionID != "" && h.sessionStore != nil {
-		if sess := h.sessionStore.Get(req.SessionID); sess != nil && sess.ConversationID != "" {
+	if req.SessionID != "" && h.sessionStore != nil {
+		if sess := session.ResolveThreadConversationID(req.SessionID,
+			h.sessionStore.GetByConversationID, h.sessionStore.Get); sess != nil && sess.ConversationID != "" {
+			// The submitted session id always wins identity mapping:
+			// the pair belongs to THIS session even when the client
+			// mangled the conversation id (the chat.submit
+			// both-ids-mismatch precedent - correct to the owning
+			// conversation, never mint a split identity).
 			conversationID = sess.ConversationID
-		} else if sess := h.sessionStore.GetByConversationID(req.SessionID); sess != nil && sess.ConversationID != "" {
+		}
+	}
+	if conversationID == "" && h.sessionStore != nil {
+		if sess := session.ResolveThreadConversationID(req.ConversationID,
+			h.sessionStore.GetByConversationID, h.sessionStore.Get); sess != nil && sess.ConversationID != "" {
 			conversationID = sess.ConversationID
 		}
 	}
@@ -3782,32 +3822,108 @@ func (h *ChatHandler) sessionLoop(conversationID string) *AgentLoop {
 	fence := injectSessionFence(h.loop.security, h.fenceFactory, workingPath, sess != nil && sess.NoFence)
 	// Create a session-scoped loop via the manager. This avoids mutating
 	// the shared singleton's workingDir (which races with concurrent
-	// sessions). If manager creation fails, fall back to the singleton
-	// with a warning.
+	// sessions). If manager creation fails, fall back to a per-turn
+	// scoped loop (the dispatcher's scopedSessionLoop pattern, ported in
+	// leaf 01 of 20261121-interactive-usability) instead of mutating the
+	// singleton.
 	h.logger.Debug("chat turn bound to a session working directory",
 		"conversation_id", conversationID,
 		"working_dir", workingPath,
 		"source", wdSource,
 	)
-	loop, err := h.loopManager.GetOrCreateWired(conversationID, workingPath, h.loop)
-	if err != nil {
-		h.logger.Warn("session-scoped loop creation failed; using singleton",
+	if h.loopManager != nil {
+		loop, err := h.loopManager.GetOrCreateWired(conversationID, workingPath, h.loop)
+		if err == nil {
+			return h.wireSessionLoop(loop, fence, sess)
+		}
+		h.logger.Warn("session-scoped loop creation failed; using a per-turn scoped loop",
 			"session", conversationID,
 			"working_path", workingPath,
 			"error", err,
 		)
-		// Last resort: mutate the singleton. This is a known race under
-		// concurrent multi-session load but better than no workingDir.
+	}
+	// No manager, or manager creation failed: build a per-turn scoped
+	// loop bound to THIS session's directory. The shared singleton and
+	// its workingDir stay untouched, so concurrent sessions never cross
+	// directories (the previous last resort mutated h.loop.SetWorkingDir,
+	// which leaked one session's project into every other session's tools
+	// under concurrent load - the same R5/A2 class the dispatcher's
+	// scopedSessionLoop closed). Build BEFORE arming the fence so the
+	// loop exists for the fence wiring.
+	scoped := h.scopedChatLoop(conversationID, workingPath, sess)
+	if scoped == nil {
+		// Could not build a scoped loop (no template): the legacy
+		// singleton fallback stays, with the mutation warning.
+		h.logger.Warn("scoped loop unavailable; mutating the singleton working dir",
+			"session", conversationID,
+		)
 		h.loop.SetWorkingDir(workingPath)
+		if err := fenceSet(h.loop, fence); err != nil {
+			h.logger.Debug("fence wiring on singleton failed", "session", conversationID, "error", err)
+		}
 		return h.loop
 	}
-	// Per-session fence (leaf 01): clone the loop's security checker with
-	// THIS session's fence stage. The fence instance (and the checker
-	// carrying it) is owned by this session loop — never shared, so
-	// concurrent sessions cannot cross fences. The group fence roots
-	// (leaf 04 F6) are composed in the same pass: the loop's resolution
-	// record's fs_roots add an additive fence checked alongside the
-	// session root — armed even when the daemon-wide fence is off.
+	if err := fenceSet(scoped, fence); err != nil {
+		h.logger.Debug("fence wiring on scoped loop failed", "session", conversationID, "error", err)
+	}
+	return scoped
+}
+
+// fenceSet arms a per-session fence on a loop when one was built; nil fence
+// is a no-op (the group-fence else-branch pattern from the manager lane).
+func fenceSet(loop *AgentLoop, fence *security.PermissionChecker) error {
+	if loop == nil {
+		return fmt.Errorf("fenceSet: nil loop")
+	}
+	if fence != nil {
+		loop.SetSecurityChecker(fence)
+	}
+	return nil
+}
+
+// scopedChatLoop builds a per-conversation chat loop bound to the session's
+// working directory WITHOUT the loop manager - the ChatHandler-side port of
+// Dispatcher.scopedSessionLoop (dispatcher.go, usability 02-routing/04 T3).
+// A cached loop with a different workingDir is replaced (project changed
+// mid-session). Returns nil when no template loop is available.
+func (h *ChatHandler) scopedChatLoop(conversationID, workingDir string, sess *session.Session) *AgentLoop {
+	if conversationID == "" || workingDir == "" || h.loop == nil {
+		return nil
+	}
+	h.scopedLoopsMu.Lock()
+	var stale *AgentLoop
+	if existing, ok := h.scopedLoops[conversationID]; ok && existing != nil {
+		if existing.GetWorkingDir() == workingDir {
+			h.scopedLoopsMu.Unlock()
+			return existing
+		}
+		stale = existing
+		delete(h.scopedLoops, conversationID)
+	}
+	h.scopedLoopsMu.Unlock()
+	if stale != nil {
+		stale.Close()
+	}
+
+	loop := NewAgentLoop(conversationID, workingDir, h.loop.ConfigSnapshot()...)
+	if loop == nil {
+		return nil
+	}
+	h.wireSessionIdentity(loop, sess)
+
+	h.scopedLoopsMu.Lock()
+	if h.scopedLoops == nil {
+		h.scopedLoops = make(map[string]*AgentLoop)
+	}
+	h.scopedLoops[conversationID] = loop
+	h.scopedLoopsMu.Unlock()
+	return loop
+}
+
+// wireSessionLoop arms the fence and wires session identity on a
+// manager-created session loop (the tail of the old inline block, shared by
+// both loop-creation lanes so the wiring cannot drift).
+func (h *ChatHandler) wireSessionLoop(loop *AgentLoop, fence *security.PermissionChecker, sess *session.Session) *AgentLoop {
 	if fence != nil {
 		loop.SetSecurityChecker(fence)
 	} else if res := loop.GroupResolution(); res != nil {
@@ -3815,30 +3931,30 @@ func (h *ChatHandler) sessionLoop(conversationID string) *AgentLoop {
 			loop.SetSecurityChecker(gf)
 		}
 	}
-	// Wire session identity + project context onto the loop so the system
-	// prompt's "Session Context" section is populated. ConfigSnapshot
-	// deliberately excludes these per-session fields, so they must be set
-	// here on every lookup (idempotent for an already-cached loop).
-	if sess != nil {
-		loop.SetProjectID(sess.ProjectID)
-		// Memory-scope identity (leaf 03-agent-recall-wiring): the
-		// session's OwnerID is the multiuser identity the scope filter
-		// matches against; empty in single-user installs.
-		loop.SetScopeUserID(sess.OwnerID)
-		if sess.DetectionContext != nil {
-			loop.SetDetectionContext(&DetectionContext{
-				CWD:               sess.DetectionContext.CWD,
-				DetectedProjectID: sess.DetectionContext.DetectedProjectID,
-				CLIArgs:           sess.DetectionContext.CLIArgs,
-			})
-		}
-	}
-	// Note: project_info tool resolution is handled via context injection
-	// in AgentLoop.executeToolCalls (tools.ContextWithWorkingDir), not via
-	// SetWorkingDirFunc here. The context approach avoids a race condition
-	// where multiple sessions sharing the same tool registry pointer would
-	// overwrite each other's working directory resolver.
+	h.wireSessionIdentity(loop, sess)
 	return loop
+}
+
+// wireSessionIdentity wires session identity + project context onto a loop
+// so the system prompt's "Session Context" section is populated.
+// ConfigSnapshot deliberately excludes these per-session fields, so they
+// must be set here on every lookup (idempotent for an already-cached loop).
+func (h *ChatHandler) wireSessionIdentity(loop *AgentLoop, sess *session.Session) {
+	if sess == nil {
+		return
+	}
+	loop.SetProjectID(sess.ProjectID)
+	// Memory-scope identity (leaf 03-agent-recall-wiring): the session's
+	// OwnerID is the multiuser identity the scope filter matches against;
+	// empty in single-user installs.
+	loop.SetScopeUserID(sess.OwnerID)
+	if sess.DetectionContext != nil {
+		loop.SetDetectionContext(&DetectionContext{
+			CWD:               sess.DetectionContext.CWD,
+			DetectedProjectID: sess.DetectionContext.DetectedProjectID,
+			CLIArgs:           sess.DetectionContext.CLIArgs,
+		})
+	}
 }
 
 // effectiveWorkingDir resolves the working directory for a chat turn and a

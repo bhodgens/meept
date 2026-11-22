@@ -12,6 +12,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/caimlas/meept/internal/session"
 )
 
 // ErrAmbiguousQueue is returned when a session-level conversation id matches
@@ -56,6 +58,13 @@ func isThreadKeyFor(base, key string) bool {
 // base+"-thread-*" keys. A single thread match remaps; multiple live thread
 // matches return ErrAmbiguousQueue (never a silent pick); no match returns
 // ErrQueueNotFound (the HTTP layer maps it to 404).
+//
+// Identity canonicalization (leaf 01, 20261121-interactive-usability C-1):
+// the registry cannot reach the session store (import direction - the
+// session package does not know agent), so the SESSION->CONVERSATION half
+// of the resolution lives in ResolveActiveQueueWithSession. The bare
+// resolver keeps the queue-key-only order (exact -> unwrapped base ->
+// thread keys).
 func (r *AgentRegistry) ResolveActiveQueue(conversationID string) (*MessageQueue, error) {
 	r.activeQueuesMu.RLock()
 	defer r.activeQueuesMu.RUnlock()
@@ -65,6 +74,55 @@ func (r *AgentRegistry) ResolveActiveQueue(conversationID string) (*MessageQueue
 		return nil, err
 	}
 	return entry.Queue, nil
+}
+
+// ResolveActiveQueueWithSession resolves the live queue accepting ANY of
+// the session's identity shapes: the primary session id (session-abc123 -
+// the shape the Flutter GUI sends as conversation_id), the session's own
+// conversation id, a thread-scoped conversation id, or a queue key already
+// registered by the loop. Read-only: no registration or store mutation.
+//
+// Resolution order (matches the submit path's Get-then-GetByConversationID
+// precedence, then the C3 thread keys):
+//
+//  1. exact queue key (a live registration under the id as given)
+//  2. session->conversation resolution via session.ResolveThreadConversationID
+//     (session id -> owning conversation id; thread-scoped id -> owning
+//     session -> its conversation id), probing each candidate queue key
+//  3. thread-unwrapped base + session-owned thread keys (C3)
+//
+// byConversationID/byID are the session store's GetByConversationID/Get.
+// A nil store (either func nil) keeps the bare C3 behavior - test
+// registries without a store are unaffected.
+func (r *AgentRegistry) ResolveActiveQueueWithSession(
+	conversationID string,
+	byConversationID func(conversationID string) *session.Session,
+	byID func(id string) *session.Session,
+) (*MessageQueue, error) {
+	r.activeQueuesMu.RLock()
+	entry, err := r.resolveActiveQueueLocked(conversationID)
+	r.activeQueuesMu.RUnlock()
+	if err == nil {
+		return entry.Queue, nil
+	}
+
+	// Session->conversation resolution: the id may be the session's
+	// PRIMARY id or a thread-scoped conversation id; map it to the
+	// session's OWN conversation id (the canonical submit identity) and
+	// re-probe the queue map. Read-only: ResolveThreadConversationID
+	// performs direct lookups + a thread-suffix unwrap only.
+	if sess := session.ResolveThreadConversationID(conversationID, byConversationID, byID); sess != nil {
+		if canonical := sess.ConversationID; canonical != "" {
+			r.activeQueuesMu.RLock()
+			entry, err = r.resolveActiveQueueLocked(canonical)
+			r.activeQueuesMu.RUnlock()
+			if err == nil {
+				return entry.Queue, nil
+			}
+		}
+	}
+
+	return nil, err
 }
 
 // resolveActiveQueueLocked implements the C3 resolution order. Callers must

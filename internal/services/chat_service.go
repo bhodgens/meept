@@ -330,8 +330,8 @@ func (s *ChatService) Steer(ctx context.Context, req SteerRequest) error {
 	if s.agentRegistry == nil {
 		return wrapError("steer", "Steer", ErrUnavailable)
 	}
-	queue, _ := s.agentRegistry.GetActiveQueue(req.ConversationID)
-	if queue == nil {
+	queue, err := s.resolveActiveQueue(req.ConversationID)
+	if err != nil || queue == nil {
 		return fmt.Errorf("no active agent for conversation %s: %w", req.ConversationID, agent.ErrQueueNotFound)
 	}
 	if err := queue.Steer(ctx, req.Message, req.Source); err != nil {
@@ -348,8 +348,8 @@ func (s *ChatService) FollowUp(ctx context.Context, req FollowUpRequest) error {
 	if s.agentRegistry == nil {
 		return wrapError("followup", "FollowUp", ErrUnavailable)
 	}
-	queue, _ := s.agentRegistry.GetActiveQueue(req.ConversationID)
-	if queue == nil {
+	queue, err := s.resolveActiveQueue(req.ConversationID)
+	if err != nil || queue == nil {
 		return fmt.Errorf("no active agent for conversation %s: %w", req.ConversationID, agent.ErrQueueNotFound)
 	}
 	if err := queue.FollowUp(ctx, req.Message, req.Source); err != nil {
@@ -368,8 +368,8 @@ func (s *ChatService) GetQueueStatus(ctx context.Context, req QueueStatusRequest
 			Generation:    0,
 		}, nil
 	}
-	queue, _ := s.agentRegistry.GetActiveQueue(req.ConversationID)
-	if queue == nil {
+	queue, err := s.resolveActiveQueue(req.ConversationID)
+	if err != nil || queue == nil {
 		return &QueueStatusResponse{
 			SteeringDepth: 0,
 			FollowUpDepth: 0,
@@ -385,4 +385,22 @@ func (s *ChatService) GetQueueStatus(ctx context.Context, req QueueStatusRequest
 		IsActive:      status.IsActive,
 		Generation:    status.Generation,
 	}, nil
+}
+
+// resolveActiveQueue resolves the live queue for ANY of the session's
+// identity shapes (primary session id, conversation id, thread-scoped
+// conversation id, or a registered queue key). Identity canonicalization
+// (20261121-interactive-usability leaf 01): the GUI sends the raw session
+// id as conversation_id while the loop registers under its RESOLVED conv
+// id - the session-aware chain closes that gap. A nil session store keeps
+// the queue-key-only resolution (read-only lookups; no mutation).
+func (s *ChatService) resolveActiveQueue(conversationID string) (*agent.MessageQueue, error) {
+	if s.sessionStore == nil {
+		return s.agentRegistry.ResolveActiveQueue(conversationID)
+	}
+	return s.agentRegistry.ResolveActiveQueueWithSession(
+		conversationID,
+		s.sessionStore.GetByConversationID,
+		s.sessionStore.Get,
+	)
 }

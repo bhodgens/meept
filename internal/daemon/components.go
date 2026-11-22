@@ -11472,6 +11472,44 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 		}
 	}
 
+	// Identity canonicalization (20261121-interactive-usability leaf 01,
+	// fix 1): arm the turn's session-level queue aliases BEFORE RunOnce.
+	// The step job executes under the EPHEMERAL step-task-... conversation
+	// id, which no session-store lookup can derive, so chat.steer /
+	// chat.followup / chat.queue_status addressed by the session's identity
+	// missed the queue registration (the 404 class). The task's linked
+	// session(s) are the canonical alias keys: RunOnceWithParts consumes
+	// the arm at RegisterActiveQueue time and registers the SAME queue
+	// entry under them, unregistered with the primary at turn end.
+	// Read-only store lookups; failures are warn-and-continue (steering
+	// must never block a step job).
+	if isStepJob && p.sessionStore != nil && p.taskStore != nil {
+		if tk, tkErr := p.taskStore.GetByID(job.TaskID); tkErr == nil && tk != nil && len(tk.LinkedSessions) > 0 {
+			aliases := make([]string, 0, len(tk.LinkedSessions))
+			for _, link := range tk.LinkedSessions {
+				if link == "" || link == conversationID {
+					continue
+				}
+				aliases = append(aliases, link)
+			}
+			agentLoop.ArmQueueAliases(aliases)
+			if len(aliases) > 0 {
+				p.logger.Debug("Step job queue aliases armed",
+					"job_id", job.ID,
+					"task_id", job.TaskID,
+					"conversation_id", conversationID,
+					"alias_count", len(aliases),
+				)
+			}
+		} else if tkErr != nil {
+			p.logger.Warn("Step job queue alias lookup failed; steering aliases not armed",
+				"job_id", job.ID,
+				"task_id", job.TaskID,
+				"error", tkErr,
+			)
+		}
+	}
+
 	response, err := agentLoop.RunOnce(ctx, prompt, conversationID)
 	if err != nil {
 		// Job-level quota surfacing (leaf 06): the primary loop parks quota

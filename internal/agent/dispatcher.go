@@ -3292,8 +3292,14 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 		//
 		// Use sessionConversationID (pre-thread-router) for session lookup
 		// because the session store only knows session-level conversation IDs.
+		// Identity canonicalization (leaf 01): the lookup runs through
+		// ResolveThreadConversationID so a raw session id or thread-scoped
+		// id resolves its owning session - a single GetByConversationID
+		// silently found nothing for both shapes and the queue lane ran
+		// with no working dir.
 		if d.sessionStore != nil && sessionConversationID != "" {
-			if sess := d.sessionStore.GetByConversationID(sessionConversationID); sess != nil {
+			if sess := session.ResolveThreadConversationID(sessionConversationID,
+				d.sessionStore.GetByConversationID, d.sessionStore.Get); sess != nil {
 				projectPath, wdSource := d.resolveSessionWorkingDir(sess)
 				if projectPath != "" {
 					if qLoop := d.registry.GetActiveQueueLoop(conversationID); qLoop != nil {
@@ -3805,8 +3811,14 @@ func (d *Dispatcher) resolveAgent(agentID, conversationID string) *AgentLoop {
 	// as a template for the session-scoped loop, or as the final return
 	// value) to avoid eagerly creating a task-scoped loop via GetForTask
 	// that is discarded when the session-scoped loop succeeds.
+	// Identity canonicalization (leaf 01): ResolveThreadConversationID
+	// replaces the single GetByConversationID so a raw session primary id
+	// (the GUI's conversation_id shape) or a thread-scoped id still binds
+	// the session's working dir instead of silently degrading to the
+	// registry singleton (med finding, same root as the step-job CWD bug).
 	if d.sessionStore != nil && conversationID != "" {
-		if sess := d.sessionStore.GetByConversationID(conversationID); sess != nil {
+		if sess := session.ResolveThreadConversationID(conversationID,
+			d.sessionStore.GetByConversationID, d.sessionStore.Get); sess != nil {
 			projectPath, wdSource := d.resolveSessionWorkingDir(sess)
 			if projectPath == "" {
 				d.logger.Warn("dispatched turn has no working directory",
@@ -5201,12 +5213,18 @@ func (d *Dispatcher) GetTask(ctx context.Context, taskID string) (*task.Task, er
 
 // SteerActiveAgent sends a steering message to an active agent for the given conversation.
 // This interrupts the current flow. Returns ErrQueueNotFound if no active queue exists.
+//
+// Identity canonicalization (C-1, 20261121-interactive-usability leaf 01):
+// the id may be the session's PRIMARY id, its conversation id, a
+// thread-scoped conversation id, or the queue key itself - resolution
+// mirrors the submit path's precedence instead of missing the conv-keyed
+// registration with a raw session id (the steer/followup 404 class).
 func (d *Dispatcher) SteerActiveAgent(ctx context.Context, conversationID, content, source string) error {
 	if d.registry == nil {
 		return ErrQueueNotFound
 	}
-	queue, _ := d.registry.GetActiveQueue(conversationID)
-	if queue == nil || queue.IsClosed() {
+	queue, err := d.ResolveActiveQueue(conversationID)
+	if err != nil || queue == nil || queue.IsClosed() {
 		return ErrQueueNotFound
 	}
 	return queue.Steer(ctx, content, source)
@@ -5215,15 +5233,41 @@ func (d *Dispatcher) SteerActiveAgent(ctx context.Context, conversationID, conte
 // FollowUpActiveAgent sends a follow-up message to an active agent for the given conversation.
 // This waits for the agent to reach a natural stopping point. Returns ErrQueueNotFound
 // if no active queue exists.
+//
+// Identity canonicalization: see SteerActiveAgent.
 func (d *Dispatcher) FollowUpActiveAgent(ctx context.Context, conversationID, content, source string) error {
 	if d.registry == nil {
 		return ErrQueueNotFound
 	}
-	queue, _ := d.registry.GetActiveQueue(conversationID)
-	if queue == nil || queue.IsClosed() {
+	queue, err := d.ResolveActiveQueue(conversationID)
+	if err != nil || queue == nil || queue.IsClosed() {
 		return ErrQueueNotFound
 	}
 	return queue.FollowUp(ctx, content, source)
+}
+
+// ResolveActiveQueue resolves the live queue for ANY of the session's
+// identity shapes (primary session id, conversation id, thread-scoped
+// conversation id, or a registered queue key). Read-only lookups only.
+// Returns ErrQueueNotFound when nothing live matches; ambiguous
+// multi-thread matches surface agent.ErrAmbiguousQueue to the caller.
+//
+// C-1 export (20261121-interactive-usability leaf 01): steer/followup
+// surfaces route through this instead of a single-key GetActiveQueue, so a
+// GUI-shaped id (the raw session-... id sent as conversation_id) finds the
+// queue the loop registered under its RESOLVED conversation id.
+func (d *Dispatcher) ResolveActiveQueue(conversationID string) (*MessageQueue, error) {
+	if d.registry == nil {
+		return nil, ErrQueueNotFound
+	}
+	if d.sessionStore != nil {
+		return d.registry.ResolveActiveQueueWithSession(
+			conversationID,
+			d.sessionStore.GetByConversationID,
+			d.sessionStore.Get,
+		)
+	}
+	return d.registry.ResolveActiveQueue(conversationID)
 }
 
 // --- Dispatcher heuristics (Issues 0006, 0029, 0036) ---
