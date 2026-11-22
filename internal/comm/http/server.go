@@ -36,6 +36,7 @@ import (
 	"github.com/caimlas/meept/internal/mcp"
 	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/internal/services"
+	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/internal/tools/builtin"
 	"github.com/caimlas/meept/pkg/constants"
 	"github.com/caimlas/meept/pkg/id"
@@ -2195,6 +2196,19 @@ func (lrw *loggingResponseWriter) Flush() {
 
 // writeJSON writes a JSON response.
 func (s *Server) writeJSON(w http.ResponseWriter, status int, data any) {
+	// Gate C-5 (07-scaffolding-payload-strip): this is the ONE choke point
+	// every HTTP JSON response funnels through, so task payloads leaving
+	// over HTTP get the same display strip the RPC surface applies - step
+	// descriptions lose the planner's session-context block + "## Your
+	// Task" header, step results lose the claims/evidence or executor-
+	// report envelope. StripTaskResponseSteps is shape-matched and inert on
+	// every non-task payload (chat replies, session data, kanban events),
+	// and the service layer's step rows come fresh from the store per
+	// call, so the strip is display-only: the STORE keeps the raw text
+	// for the planner. The already-clean chat card paths (which strip at
+	// the loop boundary, internal/agent) are unaffected: their payloads
+	// carry no task-step rows and the strip is a no-op for them.
+	task.StripTaskResponseSteps(data)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(data); err != nil {

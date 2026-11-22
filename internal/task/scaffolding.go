@@ -47,3 +47,67 @@ func StripPromptScaffolding(desc string) string {
 	}
 	return strings.TrimSpace(desc)
 }
+
+// stripTaskResponseSteps display-strips every step row inside a task RPC
+// response payload. Gate C-5 (07-scaffolding-payload-strip): the RPC
+// task.* handlers funnel every client-visible response through the single
+// handleMessage switch, so this one call is the whole RPC-surface choke
+// point - no client (TUI modal, CLI session get, GUI via the HTTP bridge)
+// can receive scaffolding or a machine envelope through task.get /
+// task.list / task.list_extended / task.steps. Step rows returned by the
+// step store are freshly scanned per call, so the in-place strip is
+// display-only: the STORE keeps raw descriptions and results for the
+// planner and the review pipeline.
+//
+// Task-level descriptions (Registry.Create) never carry scaffolding today
+// (the planner injects onto STEP descriptions only), so only step rows are
+// stripped here; a future producer change would extend to the task field
+// at the same single site.
+func stripTaskResponseSteps(response any) {
+	StripTaskResponseSteps(response)
+}
+
+// StripTaskResponseSteps is the exported payload-boundary strip shared by
+// the RPC surface (internal/task registry, via stripTaskResponseSteps) and
+// the HTTP surface (internal/comm/http writeJSON). Gate C-5
+// (07-scaffolding-payload-strip): step descriptions go through
+// StripPromptScaffolding and step results through
+// StripClaimsEvidenceOrProse at ONE choke point per transport. It is
+// shape-matched and inert on every non-task payload: only
+// []*task.TaskStep / *Task / TaskExtendedResponse shapes (directly or
+// nested under the "tasks"/"steps" response keys the task endpoints use)
+// are touched; rows come fresh from the store per call, so the strip is
+// display-only and never mutates stored data.
+func StripTaskResponseSteps(response any) {
+	switch v := response.(type) {
+	case *Task:
+		// The task.get response embeds no step rows (registry.Get reads
+		// the task row only); nothing to strip beyond a future task-level
+		// field.
+		return
+	case []TaskExtendedResponse:
+		for i := range v {
+			for _, st := range v[i].Steps {
+				StripStepForDisplay(st)
+			}
+		}
+	case []*TaskStep:
+		for _, st := range v {
+			StripStepForDisplay(st)
+		}
+	case *TaskStep:
+		StripStepForDisplay(v)
+	case map[string]any:
+		if tasks, ok := v["tasks"].([]TaskExtendedResponse); ok {
+			StripTaskResponseSteps(tasks)
+			return
+		}
+		if tasks, ok := v["tasks"].([]*Task); ok {
+			StripTaskResponseSteps(tasks)
+			return
+		}
+		if steps, ok := v["steps"].([]*TaskStep); ok {
+			StripTaskResponseSteps(steps)
+		}
+	}
+}

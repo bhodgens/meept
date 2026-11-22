@@ -971,6 +971,17 @@ func (h *Handler) handleMessage(ctx context.Context, topic string, msg *models.B
 		err = fmt.Errorf("unknown topic: %s", topic)
 	}
 
+	// Gate C-5 (07-scaffolding-payload-strip): this response IS a client
+	// display feed (task.get / task.list / task.list_extended /
+	// task.steps all funnel through the single switch above), so every
+	// returned step row is display-stripped HERE - descriptions lose the
+	// planner's session-context block + "## Your Task" header and results
+	// lose the claims/evidence or executor-report envelope - at ONE choke
+	// point rather than per-render sites. The rows come fresh from the
+	// store per call, so mutating them cannot reach the database: the
+	// STORE keeps the raw text for the planner (display-only strip).
+	stripTaskResponseSteps(response)
+
 	// ReplyTo carries the proxy's request ID: makeProxy sets the request's
 	// ReplyTo to the RESPONSE TOPIC and correlates responses via
 	// resp.ReplyTo == req.ID, so echoing msg.ID here is the contract
