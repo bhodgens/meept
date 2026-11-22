@@ -368,6 +368,18 @@ func (l *GoalLoop) ResumeGoalEpisode(ctx context.Context, rec agent.ParkedTurnRe
 		"class", rec.Class,
 		"phase", p.Phase,
 	)
+	// Routing-funnel C4 (standing speak session): a daemon restart re-arms
+	// parked episodes into a FRESH loop whose speakSessionID is empty, and
+	// an empty session makes the speak push bridge drop the notify
+	// (speak_push_bridge.go: "notify has no session; not broadcasting") —
+	// resumed-round notifications silently vanished. Arm the standing speak
+	// context BEFORE the phase re-entry, mirroring the round-entry setup
+	// triggerViaGoalLoop and SteerEmployee perform for a triggered round:
+	// the employee.notify payload rides the employee's standing chat
+	// session (emp-sess-<id>), never the raw employee id. SetSpeakContext
+	// also resets the per-round notify dedup flag so the resumed round
+	// notifies exactly once (tool notify + final text = ONE notify).
+	l.SetSpeakContext(EmployeeChatSessionID(l.employeeID), "goal-"+l.employeeID)
 	// H4 (bughunt 2026-09-04): the episode is draining — clear the dedup
 	// claim recorded at park time so a post-resume provider wait parks a
 	// FRESH record instead of being suppressed by the stale one.
