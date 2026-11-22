@@ -360,7 +360,48 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, sp
 			"step_id", step.ID,
 			"tool_hint", step.ToolHint,
 		)
-		if rm.heuristicReviewPasses(step) {
+		// Leaf 02 (20261121-interactive-usability) honesty gate, order
+		// pinned by the contract "errored steps never pass review": the
+		// error check runs FIRST, before the machine-shape check and the
+		// heuristic, so an errored step can never ride the trivial bypass
+		// to an approval. Live defect (probe B, task-...0007): the guard
+		// nudged an unbacked-claim turn, the model replied with literal
+		// tool-call JSON, and THIS heuristic approved it as completed.
+		if rm.stepHasError(step) {
+			rm.logger.Info("Trivial-task heuristic: step execution produced an error; rejecting",
+				"step_id", step.ID,
+				"tool_hint", step.ToolHint,
+			)
+			if err := rm.stepStore.SetState(step.ID, task.StepFailed); err != nil {
+				rm.logger.Error("Failed to set error step to failed", "error", err)
+			}
+			return &ReviewResult{
+				Status:     ReviewRejected,
+				Feedback:   "Rejected: step execution error -- " + truncateString(firstLine(step.Result), 200),
+				Confidence: 1.0,
+			}, nil
+		}
+		// Machine-shaped-result gate: a result that is raw tool-call/tool-
+		// result JSON (the model narrated its tool calls as text) is not an
+		// answer a human can act on. Route it to the full reviewer instead
+		// of auto-approving (the detector reuses the reply guard's shapes;
+		// see stepResultIsMachineShaped).
+		if stepResultIsMachineShaped(step.Result) {
+			rm.logger.Warn("Trivial-task heuristic: result is machine-shaped tool JSON; escalating to full review",
+				"step_id", step.ID,
+				"tool_hint", step.ToolHint,
+			)
+			// Fall through to the full reviewer below -- do NOT reject:
+			// a reviewer may still salvage legitimate work narrated in an
+			// ugly shape. A truly short/vacuous dump stays a rejection.
+			if len(strings.TrimSpace(step.Result)) < 40 {
+				return &ReviewResult{
+					Status:     ReviewRejected,
+					Feedback:   "Heuristic check failed: result is raw tool-call JSON, not a user-facing answer",
+					Confidence: 0.7,
+				}, nil
+			}
+		} else if rm.heuristicReviewPasses(step) {
 			if err := rm.stepStore.SetState(step.ID, task.StepApproved); err != nil {
 				rm.logger.Error("Failed to set step to approved", "error", err)
 			}
@@ -1258,6 +1299,19 @@ func (rm *ReviewManager) heuristicReviewPasses(step *task.TaskStep) bool {
 	}
 	result := strings.TrimSpace(step.Result)
 	if result == "" {
+		return false
+	}
+	// Machine-shaped-result guard (leaf 02, 20261121-interactive-usability,
+	// probe B task-...0007): a result that is raw tool-call/tool-result JSON
+	// is not a user-facing answer -- the model narrated (or echoed) its tool
+	// calls as text. Auto-approving that dump is how the probe reported
+	// "completed" with zero artifacts. Refuse the heuristic pass; the
+	// caller routes the step to the full reviewer.
+	if stepResultIsMachineShaped(result) {
+		rm.logger.Warn("Heuristic review: machine-shaped tool-JSON result; refusing auto-approve",
+			"step_id", step.ID,
+			"tool_hint", step.ToolHint,
+		)
 		return false
 	}
 	// If result is purely whitespace or very short (no meaningful content)

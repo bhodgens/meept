@@ -6886,6 +6886,22 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 					"conversation", conversationID)
 				return "", fmt.Errorf("%w: repeated unbacked claims; giving up this step", ErrNudgeBudgetExhausted)
 			}
+			// Leaf 02 (20261121-interactive-usability, P0-4a): the turn
+			// reached its final iteration claiming file side-effects with
+			// ZERO file-tool executions and no budget left to nudge. The
+			// old behavior annotated the reply and let the step APPROVE on
+			// narration alone (probe B, task-...0007: guard nudged, model
+			// re-claimed, heuristic approved, zero files anywhere). When
+			// the prompt's DELIVERABLE is the file effect, narration is
+			// the run-7 fabrication shape: fail the step honestly — the
+			// same posture the exhausted-budget branch above already
+			// takes. Non-deliverable turns keep the labelled delivery
+			// (their text IS the product).
+			if l.deliverableClaimsFileEffect() {
+				l.logger.Warn("Unbacked file side-effect claims with zero tool executions and no iteration budget; failing the step honestly",
+					"conversation", conversationID)
+				return "", fmt.Errorf("%w: claimed file changes without executing tools; giving up this step", ErrNudgeBudgetExhausted)
+			}
 			l.logger.Warn("Unbacked file side-effect claims with zero tool executions; no iteration budget to nudge, annotating response",
 				"conversation", conversationID)
 			return "[unverified: no tools were executed this turn] " + response.Content, nil
