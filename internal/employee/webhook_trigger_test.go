@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/caimlas/meept/internal/bot"
 	"github.com/caimlas/meept/internal/llm"
@@ -118,8 +119,26 @@ func newWebhookFixture(t *testing.T, id string, triggers []bot.BotTrigger) (*Man
 	return emp, rec, mux
 }
 
+// waitForReflectorPrompt polls the reflector until the detached Trigger
+// goroutine has produced an assess prompt containing want (or the deadline
+// expires). The 202 route runs Trigger in the background, so the test
+// observes completion via this side channel instead of the HTTP response.
+func waitForReflectorPrompt(t *testing.T, rec *webhookSourceReflector, want string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(rec.joined(), want) {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("reflector prompt not observed within 5s; got: %s", rec.joined())
+}
+
 // TestWebhookTriggerCallsManager pins the C6 webhook route. The cron gate
-// does not cover HTTP.
+// does not cover HTTP. BEHAVIOR CHANGE: the valid-POST assertion is now
+// 202 Accepted (async trigger); the previous contract was a synchronous
+// 200 OK after the full goal round.
 func TestWebhookTriggerCallsManager(t *testing.T) {
 	const (
 		botID  = "hook-1"
@@ -137,14 +156,20 @@ func TestWebhookTriggerCallsManager(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/"+botID, strings.NewReader(body))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202, body = %s", w.Code, w.Body.String())
 	}
+	if got := w.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("content-type = %q, want application/json", got)
+	}
+	if !strings.Contains(w.Body.String(), `"accepted"`) {
+		t.Fatalf("body = %s, want accepted status", w.Body.String())
+	}
+
+	// Trigger fires detached: wait on the reflector side channel.
+	waitForReflectorPrompt(t, rec, secret)
 	if got := rec.source(); got != "webhook" {
 		t.Fatalf("Trigger source = %q, want %q", got, "webhook")
-	}
-	if !strings.Contains(rec.joined(), secret) {
-		t.Fatal("assess prompt did not receive the request body as the prompt payload")
 	}
 	logged := logs.String()
 	if strings.Contains(logged, secret) || strings.Contains(logged, body) {
@@ -179,6 +204,57 @@ func TestWebhookTriggerCallsManager(t *testing.T) {
 		disabledMux.ServeHTTP(w, req)
 		if w.Code != http.StatusNotFound {
 			t.Fatalf("status = %d, want 404", w.Code)
+		}
+	})
+
+	t.Run("oversize body 413", func(t *testing.T) {
+		big := strings.Repeat("x", webhookMaxBody+1)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/"+botID, strings.NewReader(big))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code != http.StatusRequestEntityTooLarge {
+			t.Fatalf("status = %d, want 413, body = %s", w.Code, w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), "too large") {
+			t.Fatalf("body = %s, want JSON error", w.Body.String())
+		}
+	})
+
+	t.Run("store error 500", func(t *testing.T) {
+		// Real non-ErrNoRows failure: build a fixture whose store is
+		// closed before the request, so GetBot errors out.
+		store, err := bot.NewStore(filepath.Join(t.TempDir(), "bots.db"))
+		if err != nil {
+			t.Fatalf("NewStore: %v", err)
+		}
+		botMgr := bot.NewManager(store, nil)
+		rec2 := &webhookSourceReflector{}
+		loop2 := NewGoalLoop("hook-storefail", &Constitution{Purpose: "webhook sweep"}, nil, slog.New(slog.DiscardHandler))
+		loop2.WithReflector(rec2)
+		emp2 := NewManager(botMgr)
+		emp2.RegisterGoalLoop("hook-storefail", loop2)
+		if err := botMgr.CreateBot(context.Background(), bot.BotDefinition{
+			ID:       "hook-storefail",
+			Name:     "hook-storefail",
+			Prompt:   "handle the hook",
+			Enabled:  true,
+			Triggers: []bot.BotTrigger{{Type: bot.TriggerTypeWebhook, Enabled: true}},
+		}); err != nil {
+			t.Fatalf("CreateBot: %v", err)
+		}
+		mux2 := http.NewServeMux()
+		emp2.RegisterWebhookRoute(mux2)
+		if err := store.Close(); err != nil {
+			t.Fatalf("store close: %v", err)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/hook-storefail", strings.NewReader(secret))
+		w := httptest.NewRecorder()
+		mux2.ServeHTTP(w, req)
+		if w.Code != http.StatusInternalServerError {
+			t.Fatalf("status = %d, want 500, body = %s", w.Code, w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), "store unavailable") {
+			t.Fatalf("body = %s, want JSON error", w.Body.String())
 		}
 	})
 }

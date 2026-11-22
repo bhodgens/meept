@@ -1,10 +1,13 @@
 package employee
 
 import (
+	"context"
+	"database/sql"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/caimlas/meept/internal/bot"
 )
@@ -15,6 +18,12 @@ import (
 const WebhookTriggerPattern = "POST /api/v1/webhooks/{id}"
 
 const webhookMaxBody = 1 << 20 // 1 MiB
+
+// webhookTriggerTimeout bounds the detached goal round. The route returns
+// 202 immediately; the Trigger run (which serializes under invokeMu and can
+// take minutes) runs in the background with this hard ceiling so an
+// abandoned round cannot outlive the daemon's patience.
+const webhookTriggerTimeout = 10 * time.Minute
 
 // RegisterWebhookRoute mounts WebhookTriggerPattern on mux. Nil manager
 // or mux is a no-op. The daemon calls this from HTTP setup.
@@ -28,10 +37,12 @@ func (m *Manager) RegisterWebhookRoute(mux *http.ServeMux) {
 }
 
 // handleWebhookTrigger looks the bot up by the path id, requires an
-// enabled webhook trigger, and calls Trigger with source "webhook" and
-// the raw request body as the prompt. Unknown id and a disabled (or
-// absent) webhook trigger both return 404. The raw body is never logged;
-// the accepted path logs the bot id and the byte length only.
+// enabled webhook trigger, and returns 202 immediately; the Trigger run
+// (source "webhook", raw request body as the prompt) proceeds in a
+// detached goroutine bounded by webhookTriggerTimeout. Unknown id and a
+// disabled (or absent) webhook trigger both return 404; a bot-store
+// failure returns 500. The raw body is never logged; the accepted path
+// logs the bot id and the byte length only.
 func (m *Manager) handleWebhookTrigger(w http.ResponseWriter, r *http.Request) {
 	if m == nil || m.botManager == nil {
 		http.Error(w, `{"error":"not configured"}`, http.StatusServiceUnavailable)
@@ -46,7 +57,9 @@ func (m *Manager) handleWebhookTrigger(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var maxBytes *http.MaxBytesError
 		if errors.As(err, &maxBytes) {
-			// MaxBytesReader already wrote 413.
+			// MaxBytesReader may have started the response already; the
+			// explicit status here is what clients on a fresh response see.
+			http.Error(w, `{"error":"request body too large"}`, http.StatusRequestEntityTooLarge)
 			return
 		}
 		http.Error(w, `{"error":"read body"}`, http.StatusBadRequest)
@@ -54,24 +67,48 @@ func (m *Manager) handleWebhookTrigger(w http.ResponseWriter, r *http.Request) {
 	}
 
 	def, err := m.botManager.GetBot(r.Context(), id)
-	if err != nil || def == nil || !enabledWebhookTrigger(def) {
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.NotFound(w, r)
+			return
+		}
+		// Store failure, not a missing bot: 500, and log the id only
+		// (error text could echo internal state).
+		logger := m.logger
+		if logger == nil {
+			logger = slog.Default()
+		}
+		logger.Error("webhook trigger lookup failed", "bot_id", id)
+		http.Error(w, `{"error":"store unavailable"}`, http.StatusInternalServerError)
+		return
+	}
+	if def == nil || !enabledWebhookTrigger(def) {
 		http.NotFound(w, r)
 		return
 	}
 
 	m.logWebhook(def.ID, len(body))
-	if _, err := m.Trigger(r.Context(), def.ID, map[string]any{
-		"source": "webhook",
-		"prompt": string(body),
-	}); err != nil {
-		// Error text can echo the body. The accept log above already
-		// recorded bot id and byte length; do not log err.
-		http.Error(w, `{"error":"trigger failed"}`, http.StatusInternalServerError)
-		return
-	}
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), webhookTriggerTimeout)
+		defer cancel()
+		if _, err := m.Trigger(ctx, def.ID, map[string]any{
+			"source": "webhook",
+			"prompt": string(body),
+		}); err != nil {
+			// Error text can echo the body. The accept log above already
+			// recorded bot id and byte length; do not log err.
+			logger := m.logger
+			if logger == nil {
+				logger = slog.Default()
+			}
+			logger.Error("webhook trigger failed", "bot_id", def.ID)
+		}
+	}()
+
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	if _, err := w.Write([]byte("{\"status\":\"triggered\"}\n")); err != nil {
+	w.WriteHeader(http.StatusAccepted)
+	if _, err := w.Write([]byte("{\"status\":\"accepted\"}\n")); err != nil {
 		return
 	}
 }
