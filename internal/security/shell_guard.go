@@ -12,8 +12,8 @@
 //     resolution so a block surfaces as ErrCommandBlocked (HTTP 403) rather
 //     than being shadowed by an unbound-directory refusal (HTTP 400).
 //  2. CheckCommandInDir(ctx, command, workDir) — checks that need the resolved
-//     working directory (fence, Tirith scan) plus optional network-class
-//     application. Runs AFTER resolution but BEFORE the child is spawned.
+//     working directory (fence, Tirith scan). Runs AFTER resolution but
+//     BEFORE the child is spawned.
 //
 // Every dependency is optional and nil-safe: a nil fence/table/orchestrator
 // means that check is skipped, matching the builtin tool's legacy behavior
@@ -45,8 +45,8 @@ type FenceCheckFunc func(command, workDir string) error
 // builtin shell tool and scheduler-fired shell jobs.
 //
 // Phase 1 (CheckCommand) is risk/permission classification and runs before
-// work-dir resolution; phase 2 (CheckCommandInDir) is the fence/Tirith/
-// network-class check and runs after resolution. Both must run BEFORE the
+// work-dir resolution; phase 2 (CheckCommandInDir) is the fence/Tirith
+// check and runs after resolution. Both must run BEFORE the
 // command is spawned. Consumers may declare a matching local interface — Go's
 // structural typing connects them without an import.
 type ShellCommandGuard interface {
@@ -71,8 +71,8 @@ var _ ShellCommandGuard = (*ShellCommandGuardImpl)(nil)
 
 // NewShellCommandGuard builds a two-phase guard from the optional security
 // components. Any of fc/pt/orch may be nil — the corresponding check is then
-// skipped. Functional options inject the classifier and network-class seams
-// that consumers need to preserve their own behavior.
+// skipped. Functional options inject the classifier seam that consumers
+// need to preserve their own behavior.
 func NewShellCommandGuard(fc *FenceChecker, pt *PermissionTable, orch *Orchestrator, opts ...ShellGuardOption) *ShellCommandGuardImpl {
 	g := &ShellCommandGuardImpl{
 		table: pt,
@@ -154,8 +154,8 @@ func CheckShellPermission(pt *PermissionTable, command string) error {
 }
 
 // CheckCommandInDir runs the checks that need the resolved working directory:
-// the fence (delegating to FenceChecker.CheckCommand), the Tirith orchestrator
-// scan, and optional network-class application. It MUST run after resolution
+// the fence (delegating to FenceChecker.CheckCommand) and the Tirith
+// orchestrator scan. It MUST run after resolution
 // but BEFORE the child is spawned. All blocks wrap
 // pkg/security.ErrCommandBlocked.
 func (g *ShellCommandGuardImpl) CheckCommandInDir(ctx context.Context, command, workDir string) error {

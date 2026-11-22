@@ -4,11 +4,15 @@ import (
 	"context"
 	"log/slog"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/caimlas/meept/internal/bot"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/employee"
+	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/scheduler"
 	"github.com/caimlas/meept/internal/services"
 )
@@ -298,4 +302,121 @@ func TestBotEventTriggerRef_IncludesTopicOrSource(t *testing.T) {
 	if got := busEventTriggerRef(""); got == "" {
 		t.Fatal("trigger_ref must be non-empty even without a topic")
 	}
+}
+
+// TestHandleBotTriggerStampsTriggerRef pins the payload link the parser pin
+// cannot see: HandleBotTrigger must put busEventTriggerRef(prompt) into the
+// payload map it hands Manager.Trigger. Deleting the "trigger_ref" key from
+// that map (bot_trigger_handler.go:55) fails this test; the parser pin above
+// stays green without it.
+func TestHandleBotTriggerStampsTriggerRef(t *testing.T) {
+	// End-to-end: HandleBotTrigger -> Manager.Trigger -> triggerViaGoalLoop ->
+	// GoalLoop.Execute. The published result event must carry the trigger_ref
+	// the handler stamped into the payload map. Deleting the "trigger_ref"
+	// key (bot_trigger_handler.go:55) fails this test; the parser pin above
+	// stays green without it.
+	const botID = "ref-stamp-bot"
+	ctx := context.Background()
+
+	store, err := bot.NewStore(filepath.Join(t.TempDir(), "bots.db"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("store close: %v", err)
+		}
+	})
+
+	msgBus := bus.New(nil, nil)
+	t.Cleanup(func() { msgBus.Close() })
+	results := subscribeRefStamped(t, msgBus, "bot.result")
+	defer bus.Unsubscribe(msgBus, results)
+
+	router := bot.NewEventActionRouter(msgBus, nil)
+	botMgr := bot.NewManager(store, router)
+
+	rec := &triggerRefReflector{}
+	loop := employee.NewGoalLoop(botID, &employee.Constitution{Purpose: "ref stamp"}, nil, slog.New(slog.DiscardHandler))
+	loop.WithReflector(rec)
+	loop.SetBus(msgBus)
+	empMgr := employee.NewManager(botMgr)
+	empMgr.RegisterGoalLoop(botID, loop)
+
+	if err := botMgr.CreateBot(ctx, bot.BotDefinition{
+		ID:      botID,
+		Name:    "ref-stamp",
+		Prompt:  "handle events",
+		Enabled: true,
+		Triggers: []bot.BotTrigger{{
+			Type:    bot.TriggerTypeBusEvent,
+			Topic:   "alerts.fired",
+			Enabled: true,
+		}},
+	}); err != nil {
+		t.Fatalf("CreateBot: %v", err)
+	}
+
+	c := &Components{EmployeeManager: empMgr}
+	h := newBotTriggerHandler(c, slog.New(slog.DiscardHandler))
+	if err := h.HandleBotTrigger(ctx, botID, "Event received on topic alerts.fired from bus"); err != nil {
+		t.Fatalf("HandleBotTrigger: %v", err)
+	}
+
+	got := rec.triggerRef()
+	if got != "bus_event:alerts.fired" {
+		t.Fatalf("published trigger_ref = %q, want bus_event:alerts.fired (payload stamp missing?)", got)
+	}
+}
+
+// subscribeRefStamped subscribes to topic on b.
+func subscribeRefStamped(t *testing.T, b *bus.MessageBus, topic string) *bus.Subscriber {
+	t.Helper()
+	sub := b.Subscribe("ref-stamp-"+topic, topic)
+	if sub == nil {
+		t.Fatalf("subscribe %s failed", topic)
+	}
+	return sub
+}
+
+// triggerRefReflector captures the payload JSON the assess prompt renders.
+// Manager.Trigger marshals the whole payload map into TriggerEvent.Payload
+// and the constitution render prints it under **payload:**, so the stamped
+// trigger_ref key is visible in the prompt text. No production change.
+type triggerRefReflector struct {
+	mu   sync.Mutex
+	payloads []string
+}
+
+func (r *triggerRefReflector) Chat(_ context.Context, msgs []llm.ChatMessage, _ ...llm.ChatOption) (*llm.Response, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, m := range msgs {
+		const mark = "**payload:**\n"
+		if i := strings.Index(m.Content, mark); i >= 0 {
+			rest := m.Content[i+len(mark):]
+			line, _, _ := strings.Cut(rest, "\n")
+			r.payloads = append(r.payloads, strings.TrimSpace(line))
+		}
+	}
+	return &llm.Response{Content: `{"candidates":[]}`}, nil
+}
+
+func (r *triggerRefReflector) ChatWithProgress(ctx context.Context, msgs []llm.ChatMessage, _ llm.ProgressCallback, opts ...llm.ChatOption) (*llm.Response, error) {
+	return r.Chat(ctx, msgs, opts...)
+}
+
+func (r *triggerRefReflector) Config() *llm.ModelConfig {
+	return &llm.ModelConfig{ModelID: "ref-stamp-stub"}
+}
+
+func (r *triggerRefReflector) triggerRef() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, p := range r.payloads {
+		if strings.Contains(p, `"trigger_ref":"bus_event:alerts.fired"`) {
+			return "bus_event:alerts.fired"
+		}
+	}
+	return ""
 }
