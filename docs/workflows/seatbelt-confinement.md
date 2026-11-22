@@ -43,6 +43,13 @@ runtime: {
   shell needs (`/dev/null` et al.) stay writable.
 - `deny_exec` must not cover `/bin/sh` or the launch itself; meept refuses
   such a config with a clear error.
+- `deny_exec` is enforced BELOW the shell tool's own risk gate. The gate
+  (`internal/tools/builtin/shell.go` `blockedCommands`) refuses `kill`,
+  `killall`, `pkill` and `sudo` before any confinement is consulted, so a
+  `deny_exec` entry naming one of those binaries can never be observed
+  through the shell tool. Tests and docs that want to prove an exec deny
+  must pick a target the gate lets through, and that binary must exist at
+  that exact path (`/usr/bin/true`, not `/bin/true`, on macOS).
 
 ## How it applies
 

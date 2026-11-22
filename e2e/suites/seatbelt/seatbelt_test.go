@@ -82,7 +82,15 @@ func mustWrite(t *testing.T, p, content string) {
 	}
 }
 
-// runShell drives one shell tool call through a full chat turn.
+// runShell drives one shell tool call through a full chat turn and returns
+// once the turn terminalizes. It deliberately does NOT assert a non-empty
+// CLI reply (unlike harness.ChatTurn): the review layer's file-evidence
+// gate (internal/agent/review_evidence_gate.go) fail-closes shell-only
+// coder steps whose ledger carries no file_* evidence — a designed
+// product behavior for the fabricated-success class, tracked by the
+// 20261119-usability-remediation bench log, not this suite's subject. The
+// tool executes BEFORE the gate runs, so on-disk markers (and the daemon
+// log) remain valid evidence regardless of the review verdict.
 func runShell(t *testing.T, s *harness.Stack, sessionID, command string) {
 	t.Helper()
 	s.Fake.SetClassifierOutput(`{"intent":"code","confidence":0.95,"reasoning":"pinned code"}`)
@@ -91,7 +99,10 @@ func runShell(t *testing.T, s *harness.Stack, sessionID, command string) {
 		Name:      "shell",
 		Arguments: fmt.Sprintf(`{"command":%q}`, command),
 	})
-	s.ChatTurn(t, sessionID, "Run this exact shell command: "+command, 150*time.Second)
+	stdout, stderr := s.RunCLI(t, 150*time.Second, true, "chat", "--session", sessionID, "Run this exact shell command: "+command)
+	if strings.TrimSpace(stdout+stderr) == "" {
+		t.Fatalf("chat turn produced no output at all (CLI dead or session unroutable):\n%s", s.Daemon.LogTail())
+	}
 }
 
 // daemonLog returns the daemon's own meept.log contents (state-dir log,
@@ -200,6 +211,7 @@ func TestSeatbeltWriteConfined(t *testing.T) {
 			return os.MkdirAll(holeDir, 0o755)
 		}),
 		harness.WithConfigHook(func(cfg map[string]any) {
+			applyOverlay(cfg, "runtime.enabled", true)
 			applyOverlay(cfg, "runtime.sandbox_backend_order", "local")
 			applyOverlay(cfg, "runtime.seatbelt.enabled", true)
 			applyOverlay(cfg, "runtime.seatbelt.allow_write", []string{allowDir})
@@ -217,7 +229,7 @@ func TestSeatbeltWriteConfined(t *testing.T) {
 		t.Fatalf("allowed write refused: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "f_outside")); err == nil {
-		t.Fatal("write outside the allow-list succeeded (boundary leak)")
+		t.Fatalf("write outside the allow-list succeeded (boundary leak):\n%s", daemonLog(t, s))
 	}
 	if _, err := os.Stat(filepath.Join(holeDir, "f_hole")); err == nil {
 		t.Fatal("write into deny_write hole succeeded (last-match ordering broken)")
@@ -227,13 +239,27 @@ func TestSeatbeltWriteConfined(t *testing.T) {
 	}
 }
 
-// TestSeatbeltProcessRules arms block_process_info and deny_exec over
-// /bin/kill: ps must fail with EPERM and /bin/kill must be refused, while
-// an ordinary pipeline keeps working. /bin/kill targets pid 99999 (no such
-// process exists on this harness; even if it did, the deny proves itself
-// via stderr), so nothing can be orphaned by this scenario.
+// TestSeatbeltProcessRules arms block_process_info and deny_exec: ps must
+// fail with EPERM, the denied binary must refuse exec, and an ordinary
+// pipeline keeps working.
+//
+// The deny_exec target is /usr/bin/true on purpose. /bin/kill and /usr/bin/sudo
+// are poor scenario choices: the shell tool's own risk gate
+// (internal/tools/builtin/shell.go blockedCommands) classifies those base
+// commands RiskCritical and refuses the whole tool call BEFORE any
+// confinement is consulted, so the sandbox is never reached and the test
+// would silently grade the risk gate instead of the profile. /usr/bin/true is
+// not in blockedCommands, so the command reaches /usr/bin/sandbox-exec and
+// the (deny process-exec* (subpath ...)) rule genuinely binds.
 func TestSeatbeltProcessRules(t *testing.T) {
 	skipUnlessDarwin(t)
+	// The denied binary must exist, or the scenario grades
+	// "No such file or directory" instead of a confinement verdict. macOS
+	// has no /bin/true (it ships /usr/bin/true), which is how this test
+	// first failed red for the wrong reason.
+	if _, err := os.Stat("/usr/bin/true"); err != nil {
+		t.Fatalf("deny_exec target /usr/bin/true missing on this host: %v", err)
+	}
 	var workDir string
 	s := harness.Start(t,
 		harness.WithPreBootHook(func(st *harness.Stack) error {
@@ -242,26 +268,27 @@ func TestSeatbeltProcessRules(t *testing.T) {
 			return os.MkdirAll(workDir, 0o755)
 		}),
 		harness.WithConfigHook(func(cfg map[string]any) {
+			applyOverlay(cfg, "runtime.enabled", true)
 			applyOverlay(cfg, "runtime.sandbox_backend_order", "local")
 			applyOverlay(cfg, "runtime.seatbelt.enabled", true)
 			applyOverlay(cfg, "runtime.seatbelt.block_process_info", true)
-			applyOverlay(cfg, "runtime.seatbelt.deny_exec", []string{"/bin/kill"})
+			applyOverlay(cfg, "runtime.seatbelt.deny_exec", []string{"/usr/bin/true"})
 		}),
 	)
 	s.RegisterProject(t, "e2e-seatbelt")
 	sessionID := s.CreateSession(t, "seatbelt-proc", s.ProjectDir)
 	runShell(t, s, sessionID, fmt.Sprintf(
-		"/bin/kill 99999 2> %s/kill_err.txt; ps > %s/ps_out.txt 2> %s/ps_err.txt; echo ok | /usr/bin/wc -l > %s/pipeline.txt; true",
-		workDir, workDir, workDir, workDir))
+		"/usr/bin/true > %s/true_out.txt 2> %s/true_err.txt; ps > %s/ps_out.txt 2> %s/ps_err.txt; echo ok | /usr/bin/wc -l > %s/pipeline.txt; true",
+		workDir, workDir, workDir, workDir, workDir))
 
+	if data := readOrEmpty(t, filepath.Join(workDir, "true_err.txt")); !strings.Contains(string(data), "not permitted") {
+		t.Fatalf("deny_exec(/usr/bin/true) did not refuse exec: %q\n%s", data, daemonLog(t, s))
+	}
 	if data := readOrEmpty(t, filepath.Join(workDir, "ps_out.txt")); len(data) > 0 {
 		t.Fatalf("block_process_info leaked ps output: %q", data[:min(len(data), 80)])
 	}
 	if data := readOrEmpty(t, filepath.Join(workDir, "ps_err.txt")); !strings.Contains(string(data), "not permitted") {
 		t.Fatalf("ps was not denied with EPERM: %q", data)
-	}
-	if data := readOrEmpty(t, filepath.Join(workDir, "kill_err.txt")); !strings.Contains(string(data), "not permitted") {
-		t.Fatalf("deny_exec(/bin/kill) did not refuse kill: %q", data)
 	}
 	if data := readOrEmpty(t, filepath.Join(workDir, "pipeline.txt")); !strings.Contains(string(data), "1") {
 		t.Fatalf("confinement broke the ordinary pipeline: %q", data)

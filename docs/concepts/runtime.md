@@ -122,6 +122,38 @@ Optional tuning under `[runtime]`:
 Child environments are filtered through the same `[runtime].env_policy`
 (allowlist by default) as every other backend.
 
+## Seatbelt (macOS) Confinement
+
+On darwin, the local backend can confine every child through Apple's
+seatbelt mechanism (`/usr/bin/sandbox-exec`). This is opt-in via the
+`[runtime.seatbelt]` block; with `enabled = false` (default) the local
+backend keeps the legacy network-class-only posture byte-identically.
+Full policy contract, rule ordering, and verification steps:
+`docs/workflows/seatbelt-confinement.md`.
+
+```json5
+{
+  runtime: {
+    seatbelt: {
+      enabled: true,
+      deny_read: [ "~/.ssh" ],              // subtrees the child cannot read
+      allow_write: [ "~/.meept/workspaces" ], // writes confined to these roots
+      deny_write: [ "~/.meept/workspaces/protected" ], // holes inside a root
+      block_process_info: true,              // deny ps / process listing
+      deny_exec: [ "/usr/bin/sudo" ],        // binaries the child cannot exec
+    },
+  },
+}
+```
+
+- Fail-closed: `enabled = true` on a host that cannot enforce (Linux,
+  Windows, missing `sandbox-exec`, invalid policy) wires the shell tool to
+  the **refusing backend** — every command fails; meept never runs
+  commands unconfined under a half-applied policy.
+- `bwrap` and `seatbelt` are platform siblings: the resolver prefers
+  docker > bwrap > local everywhere, and seatbelt upgrades the local
+  backend in place on darwin rather than adding a fourth backend name.
+
 ## Test Harness
 
 Configure automatic validation:

@@ -263,3 +263,36 @@ by default. When off, tool definitions are byte-identical legacy
 
 User-facing how-to: `docs/workflows/dynamic-tools.md`. Design contract:
 `docs/research/dynamic-tools-design.md`.
+
+## Seatbelt (macOS) confinement is opt-in (default OFF)
+
+`[runtime.seatbelt].enabled` is FALSE by default. When off, the local
+backend keeps the legacy network-class-only posture byte-identically:
+no `sandbox-exec` wrap, no profile build, one zero-value field.
+
+- **What flips:** `enabled = true` activates fs/process confinement for
+  every local-backend child on darwin: `deny_read` subtrees, an
+  `allow_write` allow-list (with `deny_write` holes emitted after the
+  allows, last-match-wins), `block_process_info` (`(deny process-info*)`),
+  and `deny_exec` per-path exec denies. Full profile contract:
+  `docs/workflows/seatbelt-confinement.md`; rule ordering and the four
+  probed macOS quirks (last-match-wins, self-exec under process-exec*,
+  fork-kills-the-shell, dyld needs global reads) are documented in
+  `internal/runtime/seatbelt.go`.
+- **Fail-closed (hard rule):** with `enabled = true` on a host that
+  cannot enforce (non-darwin, missing `/usr/bin/sandbox-exec`, any
+  invalid path), wiring refuses the shell tool onto the REFUSING
+  backend (`runtime.ErrSandboxRequired`). A half-applied policy never
+  runs commands unconfined. Relative paths are refused at
+  `SetSeatbelt` time, never at first command.
+- **Platform rule:** seatbelt is darwin-only; `bwrap` is its Linux
+  sibling. The resolver order stays docker > bwrap > local on every
+  platform - seatbelt upgrades the LOCAL backend in place rather than
+  adding a fourth backend name, so `sandbox_backend_order` stays
+  byte-identical for every existing config.
+- **Rollback:** set `enabled = false` - one config key, no data
+  migration, behavior returns to byte-identical legacy.
+
+e2e evidence: `e2e/suites/seatbelt` (flag-off posture all-OS, rule
+enforcement darwin-only, fail-closed all-OS).
+
