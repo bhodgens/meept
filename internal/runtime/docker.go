@@ -9,20 +9,50 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
 	docker "github.com/fsouza/go-dockerclient"
 )
 
-// dockerHostFromEnv returns the Docker host from DOCKER_HOST, or the Unix
-// socket default. This mirrors what docker.NewClientFromEnv does internally.
+// dockerHostFromEnv returns the Docker host from DOCKER_HOST, or the first
+// reachable Unix socket among the well-known per-provider defaults. An
+// explicit DOCKER_HOST always wins untouched.
+//
+// The old default of /var/run/docker.sock alone broke every install that
+// runs OrbStack (socket under ~/.orbstack/run) or Docker Desktop without
+// the CLI on PATH (socket under ~/.docker/run): the resolver would report
+// Docker unavailable and degrade to local/bwrap with no hint why. The
+// probe below is the documented fix; the legacy socket stays first so a
+// plain docker daemon keeps identical behavior.
 func dockerHostFromEnv() string {
 	h := os.Getenv("DOCKER_HOST")
-	if h == "" {
-		return "unix:///var/run/docker.sock"
+	if h != "" {
+		return h
 	}
-	return h
+	for _, sock := range candidateDockerSockets() {
+		if fi, err := os.Stat(sock); err == nil && fi.Mode()&os.ModeSocket != 0 {
+			return "unix://" + sock
+		}
+	}
+	// Nothing found: keep the historical default so the failure message
+	// names the socket an operator would expect.
+	return "unix:///var/run/docker.sock"
+}
+
+// candidateDockerSockets lists the default daemon sockets in precedence
+// order: the classic system socket, Docker Desktop, then OrbStack.
+func candidateDockerSockets() []string {
+	home, _ := os.UserHomeDir()
+	socks := []string{"/var/run/docker.sock"}
+	if home != "" {
+		socks = append(socks,
+			filepath.Join(home, ".docker", "run", "docker.sock"),
+			filepath.Join(home, ".orbstack", "run", "docker.sock"),
+		)
+	}
+	return socks
 }
 
 // socketPath extracts the Unix socket path from a Docker host URL.

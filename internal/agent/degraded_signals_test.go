@@ -106,7 +106,7 @@ func TestPlanQualityFromMetadata(t *testing.T) {
 }
 
 func TestMarkPlanDegradedPersistsMarker(t *testing.T) {
-	sp, _, _ := gateDraftSurfaceWorld(t)
+	sp, _ := gateDraftSurfaceWorld(t)
 	tk := task.NewTask("create a file", "create a file named hello.txt")
 	if err := sp.taskStore.Create(tk); err != nil {
 		t.Fatalf("task create: %v", err)

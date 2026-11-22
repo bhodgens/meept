@@ -290,6 +290,23 @@ type ChatModel struct {
 
 	// Thread indicator (compact header display, no interactive list at this layer)
 	threadIndicator *threadIndicatorState
+
+	// sessionLoadPending tracks an in-flight session.messages.get load:
+	// set by SetSession when it arms the load cmd, cleared when the
+	// SessionMessagesLoadedMsg lands. IsSessionLoadSettled exposes it so
+	// the event pump can defer daemon-state cards until the authoritative
+	// transcript rebuild has happened (06-planning/01: a task-gate card
+	// appended before the load lands is wiped by it).
+	sessionLoadPending bool
+
+	// sessionLoadStarted is stamped when a session.messages.get load is
+	// armed (SetSession). A late load result must never erase activity
+	// that happened AFTER the snapshot was taken (06-planning/03): a
+	// turn submitted while the load was in flight carries
+	// fresher-than-snapshot local state (the user's message and the
+	// resolved terminal bubble); rebuilding from the stale snapshot
+	// would silently drop the reply the user just saw.
+	sessionLoadStarted time.Time
 }
 
 // findMatch points to a span within a rendered message.
@@ -725,6 +742,21 @@ type FollowUpResultMsg struct {
 type AgentLifecycleMsg struct {
 	Active         bool
 	ConversationID string
+}
+
+// TaskGateApprovalMsg carries a strategic task-gate approval card for the
+// chat transcript (06-planning/01, F13a). Produced by the App event pump
+// from a task.pending_approval bus event; the card renders the task id,
+// the step count, the pending step summaries, and approve/reject
+// affordances wired to /plan approve|reject (which forward to
+// task.approve / task.reject on the C2 contract - reject never executes).
+// The event pump scopes delivery to the owning session, so anything that
+// reaches this message belongs to the transcript showing it.
+type TaskGateApprovalMsg struct {
+	TaskID    string
+	SessionID string
+	Total     int
+	Steps     []string
 }
 
 // PlanNotificationMsg carries plan lifecycle notifications for inline chat display.
@@ -1533,6 +1565,10 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		return nil
 
 	case SessionMessagesLoadedMsg:
+		// The load has landed (success or error): the authoritative
+		// transcript state is now on screen, so daemon-state cards may
+		// render again (06-planning/01 session-load barrier).
+		m.sessionLoadPending = false
 		if msg.Err != nil || msg.SessionID != m.sessionID {
 			return nil
 		}
@@ -1775,6 +1811,18 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		m.addMessage(RoleSystem, content)
 		return nil
 
+	case TaskGateApprovalMsg:
+		// 06-planning/01: render the strategic approval card inline.
+		// The card mirrors DAEMON state (a pending approval gate in
+		// tasks.db), so it is marked localOnly: a session transcript
+		// rebuild (session.messages.get landing late) must re-append it
+		// rather than silently wipe it, and it must never be persisted.
+		// Card state stays pending until task.approved/task.rejected
+		// resolves the gate (those publish their own notifications).
+		m.addMessage(RoleSystem, m.renderTaskGateCard(msg))
+		m.messages[len(m.messages)-1].localOnly = true
+		return nil
+
 	case types.ThreadSwitchMsg:
 		// If Reply is set, this is an RPC response — handle it
 		if msg.Reply != nil {
@@ -2005,6 +2053,30 @@ func preserveLocalNotices(rebuilt, existing []ChatMessage) []ChatMessage {
 	out := rebuilt
 	for _, cm := range existing {
 		if cm.localOnly && !seen[cm.ID] {
+			out = append(out, cm)
+		}
+	}
+	return out
+}
+
+// mergeFresherThanSnapshot appends to rebuilt the transcript messages
+// created after the session load was armed (fresherThan), deduped by ID
+// against the server truth. A zero fresherThan disables the merge (no
+// arm stamp = the snapshot is fully authoritative).
+func mergeFresherThanSnapshot(rebuilt, existing []ChatMessage, fresherThan time.Time) []ChatMessage {
+	if fresherThan.IsZero() {
+		return rebuilt
+	}
+	seen := make(map[string]bool, len(rebuilt))
+	for _, cm := range rebuilt {
+		seen[cm.ID] = true
+	}
+	out := rebuilt
+	for _, cm := range existing {
+		if cm.ID != "" && seen[cm.ID] {
+			continue
+		}
+		if !cm.Timestamp.Before(fresherThan) {
 			out = append(out, cm)
 		}
 	}
@@ -2487,8 +2559,16 @@ func (m *ChatModel) loadServerMessages(sessionID string, serverMsgs []types.Sess
 	if sessionID == m.sessionID {
 		// Rebuild from the server's truth, then re-append the client's
 		// localOnly notices (C6/W26: a load landing after a notice must
-		// not silently wipe it).
-		m.messages = preserveLocalNotices(chatMsgs, m.messages)
+		// not silently wipe it). A message created AFTER the load was
+		// armed is fresher than the snapshot (a turn submitted while the
+		// load was in flight: the user's message and its resolved
+		// terminal bubble); the snapshot never saw it, so the rebuild
+		// must keep it (06-planning/03: a late load must not erase the
+		// reply the user just watched render).
+		m.messages = preserveLocalNotices(
+			mergeFresherThanSnapshot(chatMsgs, m.messages, m.sessionLoadStarted),
+			m.messages,
+		)
 		m.updateViewport()
 	}
 
@@ -2637,6 +2717,19 @@ func (m *ChatModel) updateViewport() {
 			if trace := m.renderTraceRowsFor(msg); trace != "" {
 				content.WriteString(trace)
 				currentLine += strings.Count(trace, "\n")
+			}
+		}
+
+		// Mode badge (06-planning/03 T2, F13c/W17): a classified reply
+		// carries its execution mode (plan / quickplan / direct / recall)
+		// so the transcript delineates planning from direct execution.
+		// The badge uses mapped labels only -- the raw handler_case enum
+		// never leaks.
+		if msg.Role == RoleAssistant {
+			if badge := renderModeBadge(msg); badge != "" {
+				content.WriteString(badge)
+				content.WriteString("\n")
+				currentLine++
 			}
 		}
 
@@ -2928,6 +3021,16 @@ func (m *ChatModel) Reset() {
 	m.updateViewport()
 }
 
+// sessionLoadSettled reports whether the deferred session.messages.get
+// load (armed by the last SetSession) has landed. 06-planning/01 uses
+// this to keep daemon-state cards (the task-gate approval card) out of
+// the window where a transcript rebuild would wipe them: the load is
+// authoritative server truth, so anything appended before it lands
+// silently disappears.
+func (m *ChatModel) IsSessionLoadSettled() bool {
+	return !m.sessionLoadPending
+}
+
 // SetSession links the chat to a daemon session, preserving messages per session.
 func (m *ChatModel) SetSession(session *types.Session) tea.Cmd {
 	// Always close the find bar on any session change (including nil).
@@ -2981,6 +3084,10 @@ func (m *ChatModel) SetSession(session *types.Session) tea.Cmd {
 	if m.rpc.IsConnected() {
 		rpc := m.rpc
 		sessionID := session.ID
+		// Mark the load in-flight: the event pump defers daemon-state
+		// cards (task-gate approvals) until it lands (06-planning/01).
+		m.sessionLoadPending = true
+		m.sessionLoadStarted = time.Now()
 		loadCmd := func() tea.Msg {
 			resp, err := rpc.GetSessionMessages(sessionID, 0, 1000)
 			if err != nil {
@@ -3423,6 +3530,38 @@ func (m *ChatModel) planCardKeyHint() string {
 // renders the real key. "" keeps the shipped default "5".
 func (m *ChatModel) SetPlansViewKey(key string) {
 	m.plansViewKey = key
+}
+
+// DocumentProposalLine returns the shared document-proposal wording
+// (planCountLine(0, 0)) for surfaces that render a 0-phase/0-step evolver
+// plan outside the chat card (plans tab/detail, sidebar). Single source
+// of truth: no wording fork (06-planning/03 review checklist).
+func DocumentProposalLine() string {
+	return planCountLine(0, 0)
+}
+
+// renderTaskGateCard renders the approval card for a strategic task gate
+// (06-planning/01, F13a): task id, step count, per-step summaries, and
+// the approve/reject affordances. The affordances advertise the /plan
+// approve|reject subcommands, which forward to task.approve /
+// task.reject (C2; reject never executes).
+func (m *ChatModel) renderTaskGateCard(msg TaskGateApprovalMsg) string {
+	var b strings.Builder
+
+	b.WriteString("+-- task awaiting approval -----------------------+\n")
+	b.WriteString(fmt.Sprintf("| task: %s\n", msg.TaskID))
+	stepLine := fmt.Sprintf("%d step", msg.Total)
+	if msg.Total != 1 {
+		stepLine += "s"
+	}
+	b.WriteString(fmt.Sprintf("| %s pending your approval\n", stepLine))
+	for i, s := range msg.Steps {
+		b.WriteString(fmt.Sprintf("|   %d. %s\n", i+1, s))
+	}
+	b.WriteString("| approve: /plan approve " + msg.TaskID + "\n")
+	b.WriteString("| reject:  /plan reject " + msg.TaskID + " <reason>\n")
+	b.WriteString("| (reject never executes the task)  |")
+	return b.String()
 }
 
 // renderPlanNotification renders a styled inline notification for plan lifecycle events.

@@ -116,12 +116,29 @@ func WireExecutionProjector(b *bus.MessageBus, store *ExecutionStore, logger *sl
 // are copied only when a payload actually carries them. Absent tokens
 // stay 0, which is honest only because the event had no usage. Reply is
 // the user-facing output. An explicit "output" key wins when non-empty.
+//
+// The TurnTerminalEvent fields are INLINED (not embedded): embedding
+// promotes TurnTerminalEvent's WSClass() method, so the repo-wide
+// wsclass sweep reads this private decode struct as a NEW WS-visible
+// wire payload and TestEveryWSClassifiedHasDecoderEntry fails. This type
+// never rides the bus or the WS; it only unmarshals the existing
+// turn.terminal JSON, which the promoted decodeTurnTerminalWSClass
+// already serves.
 type specialistTerminal struct {
-	agent.TurnTerminalEvent
-	Output     string `json:"output,omitempty"`
-	TokensUsed int    `json:"tokens_used,omitempty"`
-	Tokens     int    `json:"tokens,omitempty"`
-	StopReason string `json:"stop_reason,omitempty"`
+	ConversationID string `json:"conversation_id"`
+	SessionID      string `json:"session_id,omitempty"`
+	TurnID         string `json:"turn_id"`
+	TaskID         string `json:"task_id,omitempty"`
+	AgentID        string `json:"agent_id,omitempty"`
+	HandlerCase    string `json:"handler_case"`
+	Status         string `json:"status"`
+	Reply          string `json:"reply"`
+	DurationMS     int64  `json:"duration_ms"`
+	Error          string `json:"error,omitempty"`
+	Output         string `json:"output,omitempty"`
+	TokensUsed     int    `json:"tokens_used,omitempty"`
+	Tokens         int    `json:"tokens,omitempty"`
+	StopReason     string `json:"stop_reason,omitempty"`
 }
 
 // startSpecialistReader appends one tier=specialist row per turn.terminal

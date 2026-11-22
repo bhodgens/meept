@@ -428,6 +428,7 @@ func (m *ChatModel) DeliverTurnTerminal(turnID string, payload map[string]any) {
 	if reply := stringFromPayload(payload, "reply"); reply != "" {
 		pt.progressText = reply
 	}
+	wasDone := pt.done
 	pt.mu.Unlock()
 	pt.notify(turnTerminalMsg{
 		TurnID:         turnID,
@@ -441,6 +442,22 @@ func (m *ChatModel) DeliverTurnTerminal(turnID string, payload map[string]any) {
 		HandlerCase:    stringFromPayload(payload, "handler_case"),
 		ClassifiedBy:   stringFromPayload(payload, "classified_by"),
 	})
+	// 06-planning/03 (F13c determinism): when THIS delivery resolved a
+	// pending turn to a terminal status, render the result bubble
+	// synchronously on the event loop. The await goroutine still wakes
+	// (notify latched done before the waiters fired) but its delayed
+	// turnTerminalMsg finds the turn already removed and is ignored --
+	// so production rendering no longer depends on the goroutine landing
+	// before any subsequent quit/rebind, and the transcript is exact
+	// immediately after the terminal event is processed.
+	if !wasDone {
+		pt.mu.Lock()
+		res := pt.result
+		pt.mu.Unlock()
+		if isTerminalTurnStatus(res.Status) {
+			m.handleTurnTerminal(res)
+		}
+	}
 }
 
 // attachTurnCorrelation copies the C1 correlation fields (task_id /

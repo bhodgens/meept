@@ -34,6 +34,9 @@ type PlanViewConfig struct {
 	Title  string
 	Phases []PhaseRow
 	Width  int
+	// DocumentNote, when set, is rendered for a phase-less plan (the
+	// document-proposal line; 06-planning/03).
+	DocumentNote string
 }
 
 // PlanView is a minimal, read-only rendering widget that renders a list of
@@ -59,10 +62,36 @@ func (m *PlanView) SetTitle(title string) {
 	m.config.Title = title
 }
 
+// SetDocumentNote sets a single-line note rendered when the plan has no
+// phases (the shared document-proposal wording for evolver plans,
+// models.DocumentProposalLine / planCountLine(0,0); 06-planning/03).
+// Empty clears it.
+func (m *PlanView) SetDocumentNote(note string) {
+	m.config.DocumentNote = note
+}
+
 // Render returns the rendered plan view as a string.
 func (m *PlanView) Render() string {
 	if len(m.config.Phases) == 0 {
-		return lipgloss.NewStyle().Faint(true).Render("no phases")
+		if m.config.Title == "" && m.config.DocumentNote == "" {
+			return lipgloss.NewStyle().Faint(true).Render("no phases")
+		}
+		// A titled plan with no phases is a document proposal (evolver
+		// markdown plans): render the title + note instead of the bare
+		// "no phases" placeholder (06-planning/03).
+		var b strings.Builder
+		if m.config.Title != "" {
+			titleStyle := lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("214"))
+			b.WriteString(titleStyle.Render(m.config.Title))
+			b.WriteString("\n")
+		}
+		if m.config.DocumentNote != "" {
+			b.WriteString(lipgloss.NewStyle().Faint(true).Render(m.config.DocumentNote))
+			b.WriteString("\n")
+		}
+		return b.String()
 	}
 
 	var b strings.Builder

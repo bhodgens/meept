@@ -84,12 +84,12 @@ func gateFindTaskNavMsg(msgs []tea.Msg, taskID string) bool {
 func gateCompletedTaskReply(t *testing.T, model *ChatModel) {
 	t.Helper()
 	gateSubmitTurn(t, model)
+	// F13c (06-planning/03): DeliverTurnTerminal now resolves AND renders
+	// the terminal synchronously, then removes the turn from the router.
+	// The reply bubble (carrying the C1 task_id) is already in the
+	// transcript here — no post-delivery mustGet/Update round-trip: the
+	// turn is intentionally gone by the time delivery returns.
 	model.DeliverTurnTerminal("turn-1", gateC1Payload("turn-1", model.conversationID))
-	pt := mustGet(t, model, "turn-1")
-	pt.mu.Lock()
-	res := pt.result
-	pt.mu.Unlock()
-	model.Update(res)
 }
 
 // TestTaskChipNav pins the chip render + Enter navigation contract.

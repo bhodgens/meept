@@ -1046,6 +1046,21 @@ func (m *Manager) acquireInvokeMutex(employeeID string) *sync.Mutex {
 	return mu
 }
 
+// AcquireInvokeMutexForResume exposes the per-employee serialization mutex
+// to the parked-episode resume path (bughunt 2026-11-21 deferral). The resume
+// callback in daemon wiring locks it across loop.ResumeGoalEpisode — the same
+// critical section triggerViaGoalLoop holds across Decide, so a quota resume
+// landing mid-trigger queues instead of running two concurrent rounds for one
+// employee (which interleaved user/assistant pairs in the standing emp-sess
+// transcript). Ordering is leaf-only: the resume callback runs on the
+// parker's drain goroutine holding no other employee lock, and
+// ApproveAndExecute/ResumeApprovedPlan never acquire this mutex while already
+// holding it (ResumeApprovedPlan TryLocks BEFORE ApproveAndExecute;
+// triggerViaGoalLoop locks BEFORE Decide) — no self-deadlock path.
+func (m *Manager) AcquireInvokeMutexForResume(employeeID string) *sync.Mutex {
+	return m.acquireInvokeMutex(employeeID)
+}
+
 // StartAll prepares the employee layer for runtime. It primes the
 // constitution cache and (eventually) launches any per-employee GoalLoops.
 // It does NOT call botManager.StartAll — that's the daemon's responsibility.

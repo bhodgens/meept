@@ -928,6 +928,14 @@ func buildRuntimeConfig(rc config.RuntimeConfig, logger *slog.Logger) runtime.Co
 			ExtraArgs:  rc.Bwrap.ExtraArgs,
 			TmpfsDirs:  rc.Bwrap.TmpfsDirs,
 		},
+		Seatbelt: runtime.SeatbeltConfig{
+			Enabled:          rc.Seatbelt.Enabled,
+			DenyRead:         rc.Seatbelt.DenyRead,
+			AllowWrite:       rc.Seatbelt.AllowWrite,
+			DenyWrite:        rc.Seatbelt.DenyWrite,
+			BlockProcessInfo: rc.Seatbelt.BlockProcessInfo,
+			DenyExec:         rc.Seatbelt.DenyExec,
+		},
 	}
 }
 
@@ -3856,8 +3864,15 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		if mgrErr != nil {
 			logger.Error("Failed to create runtime manager", "error", mgrErr,
 				"hint", "check [runtime] docker configuration; with require_sandbox=true commands will be refused")
+			// Manager errors that belong to the sandbox-required class (a
+			// seatbelt policy armed on a host that cannot enforce it, an
+			// invalid [runtime.seatbelt] block) must fail closed like a
+			// ResolveBackend refusal, not degrade to direct exec. The
+			// startup hint above already promises refusal; this makes the
+			// wiring match it.
 			runtimeWireSandboxLater = &runtimeWire{
 				resolveErr: fmt.Errorf("creating runtime manager: %w", mgrErr),
+				require:    errors.Is(mgrErr, runtime.ErrSandboxRequired),
 				enabled:    true,
 			}
 		} else {
@@ -3971,6 +3986,14 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		return nil, acpErr
 	}
 	c.ACPManager = acpMgr
+	// Dev-setup-safety audit F-02: a permissive posture auto-approves every
+	// external permission request. Warn by name and consequence. Only fires
+	// when ACP is enabled, so the default boot stays byte-identical.
+	if acpMgr != nil && cfg.ACP.PermissionMode == "permissive" {
+		logger.Warn("SECURITY: acp.permission_mode=permissive auto-approves every external permission request; set it to human, deny, or decision",
+			"component", "acp",
+			"permission_mode", cfg.ACP.PermissionMode)
+	}
 	if acpMgr != nil && acpMgr.HasDecisionClient() {
 		// applyACPFromConfig stays log-free (zero-log contract); the single
 		// Info line for the armed lane lives here (acp-permission-decision
@@ -4183,6 +4206,20 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			}(),
 		})
 		logger.Info("Agent registry initialized", "specs", len(c.AgentRegistry.ListSpecs()))
+
+		// Steering queue wiring (steering-fix, 07-bench residual): the daemon
+		// singleton template loop was constructed EARLIER in boot (above) with
+		// neither WithAgentRegistry nor WithMessageQueue, so every direct-mode
+		// chat turn (ChatHandler.sessionLoop -> GetOrCreateWired clone of this
+		// template) ran with a nil registry and nil queue -- RunOnceWithParts'
+		// per-turn queue registration guard never fired and chat.steer /
+		// chat.followup failed with ErrQueueNotFound for every conversation
+		// (production rig p5, runs 4-6). Late-attach the shared registry here,
+		// immediately after construction: SetAgentRegistry also mints the
+		// template's steering/follow-up queue, and ConfigSnapshot carries both
+		// (WithAgentRegistry + queue) onto every session clone at turn time.
+		// Boot-order safe: no turn can be running at this point.
+		c.AgentLoop.SetAgentRegistry(c.AgentRegistry)
 
 		// Wire tool-schema mode for task-scoped loops (chat-dispatch-ux
 		// leaf 04): the registry pushes the resolved mode into the shared
@@ -4619,16 +4656,20 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			})
 
 			strategicPlanner := agent.NewStrategicPlanner(agent.StrategicPlannerConfig{
-				Registry:           c.AgentRegistry,
-				TaskStore:          orchTaskStore,
-				StepStore:          stepStore,
-				Bus:                msgBus,
-				Logger:             logger.With("component", "strategic"),
-				PairManager:        strategicPairMgr,
-				MaxPlanSteps:       cfg.Orchestrator.MaxPlanSteps,
-				PlannerTimeout:     time.Duration(cfg.Orchestrator.PlannerTimeout) * time.Second,
-				InterviewAmbiguity: cfg.Orchestrator.InterviewAmbiguityThreshold,
-				TemplateLoader:     agent.NewDaemonPlannerTemplateLoader("config/prompts"),
+				Registry:       c.AgentRegistry,
+				TaskStore:      orchTaskStore,
+				StepStore:      stepStore,
+				Bus:            msgBus,
+				Logger:         logger.With("component", "strategic"),
+				PairManager:    strategicPairMgr,
+				MaxPlanSteps:   cfg.Orchestrator.MaxPlanSteps,
+				PlannerTimeout: time.Duration(cfg.Orchestrator.PlannerTimeout) * time.Second,
+				// Approval gate threshold (06-planning/03): operator-
+				// configurable; 0 disables the gate (the planner no longer
+				// clamps 0 back to the default).
+				ApprovalStepThreshold: cfg.Orchestrator.TaskApprovalStepThreshold,
+				InterviewAmbiguity:    cfg.Orchestrator.InterviewAmbiguityThreshold,
+				TemplateLoader:        agent.NewDaemonPlannerTemplateLoader("config/prompts"),
 			})
 			// Tool-hint validation (issue #58 capability 3): gate the
 			// planner's tool_hint passthrough on the real tool registry.
@@ -5119,10 +5160,17 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 	// Create job processor that uses the agent loop (with optional multi-agent registry)
 	jobProc := NewAgentJobProcessor(c.AgentLoop, logger)
-	if c.msgBus != nil {
+	// Wire the job processor to the bus. Use the msgBus PARAMETER, not
+	// c.msgBus: the field is only stored at Start-time wiring (line ~5483),
+	// long after this site, so the field-guard here always saw nil in
+	// production and the toolEvidenceCollector never subscribed - envelopes
+	// never carried tool_evidence and the evidence-review gate fail-closed
+	// every file-shaped step (07-bench acceptance run 4, 2026-11-21). The
+	// parameter is the same live bus daemon.go created at line ~230.
+	if msgBus != nil {
 		// Job-level quota surfacing (leaf 06): step jobs failing terminal on
 		// a provider quota block publish the existing agent.quota_wait event.
-		jobProc.WithBus(c.msgBus)
+		jobProc.WithBus(msgBus)
 	}
 	if c.Orchestrator != nil {
 		// Per-phase worktree consumption (phase-frontier-parallel Contract
@@ -6931,6 +6979,16 @@ func (c *Components) Start(ctx context.Context) error {
 							"employee_id", rec.AgentID, "class", rec.Class)
 						return
 					}
+					// Serialize against trigger rounds (bughunt 2026-11-21):
+					// the same per-employee mutex triggerViaGoalLoop holds
+					// across Decide. Without it, a resume landing mid-trigger
+					// runs two concurrent rounds for one employee and their
+					// persistEmployeeExchange writes interleave in the
+					// standing emp-sess transcript. Leaf-only lock order —
+					// see AcquireInvokeMutexForResume's doc comment.
+					invokeMu := c.EmployeeManager.AcquireInvokeMutexForResume(rec.AgentID)
+					invokeMu.Lock()
+					defer invokeMu.Unlock()
 					loop.ResumeGoalEpisode(ctx, rec)
 				},
 				c.Config.LLM.QuotaRetry.MaxWait,

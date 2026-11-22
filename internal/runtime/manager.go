@@ -3,6 +3,7 @@ package runtime
 import (
 	"fmt"
 	"log/slog"
+	goruntime "runtime"
 	"sync"
 )
 
@@ -26,6 +27,24 @@ func NewContainerManager(cfg Config, logger *slog.Logger) (*ContainerManager, er
 
 	// Initialize local backend (always available)
 	local := NewLocalBackend(cfg, nil)
+	// Arm the macOS confinement policy when configured. A bad policy or a
+	// host that cannot enforce it fails construction: the daemon must not
+	// boot claiming a confinement it does not apply.
+	if SeatbeltActive(&cfg.Seatbelt) {
+		if goruntime.GOOS != "darwin" {
+			return nil, fmt.Errorf("%w: runtime.seatbelt.enabled=true is macOS-only (this host is %s)", ErrSandboxRequired, goruntime.GOOS)
+		}
+		if err := local.SetSeatbelt(cfg.Seatbelt); err != nil {
+			return nil, fmt.Errorf("%w: invalid [runtime.seatbelt] config: %w", ErrSandboxRequired, err)
+		}
+		logger.Info("seatbelt confinement armed for local backend",
+			"deny_read", len(cfg.Seatbelt.DenyRead),
+			"allow_write", len(cfg.Seatbelt.AllowWrite),
+			"deny_write", len(cfg.Seatbelt.DenyWrite),
+			"deny_exec", len(cfg.Seatbelt.DenyExec),
+			"block_process_info", cfg.Seatbelt.BlockProcessInfo,
+		)
+	}
 	m.backends["local"] = local
 	m.defaultBackend = "local"
 

@@ -654,6 +654,17 @@ func (ts *TacticalScheduler) GetJobByID(ctx context.Context, jobID string) (*que
 // Steps that cannot be scheduled due to semaphore limits remain in "ready" state
 // and will be retried on the next scheduling cycle.
 func (ts *TacticalScheduler) ScheduleReadySteps(ctx context.Context, taskID string) error {
+	// Nil-queue posture (matches sweepReadyStepsForRetry): a scheduler
+	// wired without a queue (validation-gate/review harnesses drive
+	// OnJobCompleted semantics directly) degrades to a no-op here, never
+	// a nil deref in scheduleStep's Enqueue. The revision-promotion path
+	// (handleReviewResult) reaches this on every rejection, so a
+	// Queue-less scheduler panicking there turned every review rejection
+	// in such a harness into a crash.
+	if ts.queue == nil {
+		ts.logger.Debug("No queue wired - skipping step scheduling", "task_id", taskID)
+		return nil
+	}
 	readySteps, err := ts.stepStore.GetReadySteps(taskID)
 	if err != nil {
 		return fmt.Errorf("failed to get ready steps: %w", err)
@@ -956,7 +967,16 @@ func (ts *TacticalScheduler) scheduleStep(ctx context.Context, step *task.TaskSt
 	job.WithTaskID(step.TaskID).
 		WithAgentID(agentID)
 
-	// Enqueue the job
+	// Enqueue the job. A nil queue is a valid degraded seam (tests and
+	// partial wiring): with no job processor attached there is nothing to
+	// enqueue into, so scheduling is a no-op rather than a nil deref.
+	// Release the lease because the step will never run.
+	if ts.queue == nil {
+		ts.logger.Debug("scheduleStep: no queue wired; skipping enqueue",
+			"step_id", step.ID, "task_id", step.TaskID)
+		lease.release()
+		return nil
+	}
 	if err := ts.queue.Enqueue(ctx, job); err != nil {
 		lease.release()
 		return fmt.Errorf("failed to enqueue job: %w", err)

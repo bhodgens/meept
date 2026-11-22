@@ -25,6 +25,13 @@ func TestTaskApprove_RPC(t *testing.T) {
 		approved = append(approved, taskID)
 		return nil
 	})
+	// task.reject requires its own RejectFunc seam (01-safety reject honesty):
+	// a rejection must never route through ApproveFunc. Wire a no-op reject
+	// seam here, mirroring the daemon's production wiring, so the reject path
+	// below can exercise the handler.
+	h.RejectFunc = func(ctx context.Context, taskID, reason string) error {
+		return nil
+	}
 
 	res, err := dispatchTaskApproval(t, h, "task.approve", map[string]any{"task_id": "task-1"})
 	if err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"strings"
 	"sync"
@@ -348,6 +349,16 @@ func (m *Manager) GetOrCreatePersona(ctx context.Context, agentID, persona, work
 	permMode := m.cfg.PermissionMode
 	if opts.PermissionMode != "" {
 		permMode = opts.PermissionMode
+	} else if entry.PermissionMode != "" {
+		// Per-connection override from acp_agents.json5 (operator-owned).
+		// Precedence: explicit call option > catalog entry > global [acp].
+		permMode = entry.PermissionMode
+	}
+	if permMode == "permissive" && (opts.PermissionMode == "permissive" || entry.PermissionMode == "permissive") {
+		slog.Warn("SECURITY: acp connection runs with permissive permission mode; every external permission request is auto-approved",
+			"component", "acp",
+			"agent", agentID,
+			"permission_mode", permMode)
 	}
 	threshold := m.cfg.DecisionThreshold
 	if opts.DecisionThreshold != 0 {

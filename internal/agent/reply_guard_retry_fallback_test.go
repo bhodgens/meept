@@ -151,8 +151,21 @@ func TestGuardRetry_NoFallbackKeepsCannedLine(t *testing.T) {
 }
 
 // TestGuardRetry_RetryParksSkipsPostTurnPipeline (M3, loop seam): when the
-// rewrite retry parks (blank reply, nil error, StateQuotaWait), the turn
-// returns ("", nil) — no reply text, no post-turn success side effects.
+// rewrite retry parks (blank reply, StateQuotaWait), the turn returns the
+// EXPLICIT parked shape with no post-turn success side effects.
+//
+// CONTRACT UPDATE (residual-fix wave, T8 lane split): 01-safety/05 changed
+// the parked shape at the RunOnceWithParts boundary from ("", nil) to
+// ("", ErrTurnParked) and lane-split the RunOnce translation (autonomous /
+// injected-clock harnesses keep the ("", nil) sentinel; chat lanes get
+// throttleParkNotice). This pin's pre-T8 ("", nil) expectation asserted the
+// retired shape; 05's regression-sweep regex never matched this test name,
+// so the pin was never re-based. M3's actual contract -- the retry park must
+// SKIP the post-turn pipeline (no blank assistant append) and surface a
+// detectable parked shape -- is asserted here at the seam M3 guards
+// (RunOnceWithParts), where the explicit ErrTurnParked sentinel is the
+// contract. RunOnce's chat-lane notice translation is pinned separately by
+// the T8 park tests.
 func TestGuardRetry_RetryParksSkipsPostTurnPipeline(t *testing.T) {
 	chatter := &parkFirstChatter{}
 	loop := newGuardRetryLoop(t, chatter)
@@ -160,12 +173,22 @@ func TestGuardRetry_RetryParksSkipsPostTurnPipeline(t *testing.T) {
 	loop.SetGuardFallback(digestFallbackPin)
 
 	const convID = "conv-guard-retry-park"
-	reply, err := loop.RunOnce(context.Background(), "remember that the build passed", convID)
-	if err != nil {
-		t.Fatalf("parked turn must not surface an error to the loop caller, got: %v", err)
+	reply, err := loop.RunOnceWithParts(context.Background(), "remember that the build passed", nil, convID)
+	if !errors.Is(err, ErrTurnParked) {
+		t.Fatalf("parked retry must return ErrTurnParked from RunOnceWithParts (T8 explicit parked shape), got reply=%q err=%v", reply, err)
 	}
 	if reply != "" {
-		t.Fatalf("reply = %q, want empty for a parked retry (the park contract)", reply)
+		t.Fatalf("RunOnceWithParts reply = %q, want the empty sentinel (the notice belongs to the RunOnce chat lane)", reply)
+	}
+	// The authoritative parked contract is an actionable user notice
+	// (RunOnce lane), never the digest fallback (which would masquerade as
+	// an answer) and never the generic canned reply.
+	chatReply, chatErr := loop.RunOnce(context.Background(), "remember that the build passed", convID)
+	if chatErr != nil || chatReply != throttleParkNotice {
+		t.Fatalf("RunOnce park notice = (%q, %v), want the actionable throttle-park notice", chatReply, chatErr)
+	}
+	if strings.Contains(reply, digestFallbackPin) {
+		t.Errorf("parked reply shipped the digest fallback %q (would masquerade as an answer)", digestFallbackPin)
 	}
 	// The parked shape is detectable: the state machine sits in
 	// StateQuotaWait, mirroring loop.go's first-cycle turnParked guard.

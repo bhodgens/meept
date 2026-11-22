@@ -315,7 +315,13 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, sp
 			"step_id", step.ID,
 			"revision_count", step.RevisionCount,
 		)
-		feedback := fmt.Sprintf("Maximum revision cycles (%d) exceeded. Human intervention required.", policy.MaxRevisionCycles)
+		// User-language failure copy (06-planning/03 T3, F13c): name the
+		// attempt count and the next action. Internal vocabulary ("max
+		// ralph loop", "revision cycles", "human intervention") never
+		// reaches the user.
+		feedback := fmt.Sprintf(
+			"Could not verify the work after %d attempts - please review the task and either add the missing evidence or adjust the step.",
+			policy.MaxRevisionCycles)
 		if spec != nil {
 			var fb strings.Builder
 			for _, c := range spec.Criteria {

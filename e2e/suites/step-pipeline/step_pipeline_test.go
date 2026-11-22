@@ -8,6 +8,7 @@
 //	03 a needs_info review verdict pauses the step for human input
 //	04 parallel steps respect the dependency graph; blocked dependents cascade
 //	05 a vacuous (narration-only) planner result is gated out of auto-approval
+//	06 doc-only auto-approve requires an exact filename token; code tokens veto it
 //
 // Every scenario drives the REAL daemon through the hermetic stack and
 // asserts END STATES in tasks.db, on-disk artifacts, and the daemon log —

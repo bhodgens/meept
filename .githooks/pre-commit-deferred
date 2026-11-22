@@ -67,13 +67,21 @@ if [ -n "$CHANGED_FINDINGS" ]; then
   fi
 fi
 
-# Also check for new findings docs without corresponding deferred plan
+# Also check for new findings docs without corresponding deferred plan.
+# Merge commits are exempt: a merge can only carry docs another session
+# authored and landed on main already; gating the merge re-blocks every
+# merge that brings a findings doc across for the first time.
+IS_MERGE=$(git rev-parse -q --verify MERGE_HEAD 2>/dev/null || true)
 NEW_FINDINGS=$(git diff --cached --name-only 2>/dev/null | grep "docs/plans/.*findings.*\.md$" | grep -v "deferred-implementation" || true)
+if [ -n "$IS_MERGE" ]; then
+  NEW_FINDINGS=""
+fi
 
 for finding in $NEW_FINDINGS; do
   if [ -f "$finding" ]; then
     # Check if the findings doc mentions deferred items
-    HAS_DEFERRED=$(grep -c "deferred" "$finding" 2>/dev/null || echo 0)
+    HAS_DEFERRED=$(grep -c "deferred" "$finding" 2>/dev/null)
+    grep -q "deferred" "$finding" 2>/dev/null || HAS_DEFERRED=0
     if [ "$HAS_DEFERRED" -gt 0 ]; then
       # Look for corresponding deferred implementation plan
       BASENAME=$(basename "$finding" .md)

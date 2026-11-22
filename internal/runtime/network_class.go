@@ -15,6 +15,13 @@ const (
 	NetworkClassNone            = "none"
 )
 
+// noNetworkProfile is the legacy darwin posture: network-class confinement
+// only. BuildSeatbeltProfile returns it byte-identically when no seatbelt
+// policy is armed, and extends it with fs/process rules when one is. The
+// constant lives in the OS-independent file so the profile builder compiles
+// everywhere; the application of it is darwin-only.
+const noNetworkProfile = "(version 1)(allow default)(deny network*)"
+
 // ErrNetworkClassDenied is returned when a container backend cannot honor a
 // restrictive class (its network mode is not already "none").
 var ErrNetworkClassDenied = errors.New("network class denies egress")

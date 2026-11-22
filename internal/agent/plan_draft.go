@@ -159,6 +159,20 @@ func (sp *StrategicPlanner) SaveDraft(taskID, markdown string) error {
 		return err
 	}
 	sp.logger.Info("Plan draft saved", "task_id", taskID, "version", d.Version)
+	// Draft-status chat surface (06-planning/03 T1, F13c/P1): every
+	// save (initial scaffold seed AND refinement via 02-routing/03
+	// continuation) publishes a task.draft_status event keyed by
+	// task_id so the chat surface learns the draft exists and changed.
+	// The event carries the draft state + the seal affordance reference;
+	// sealing itself stays an explicit human action (plan.seal) -- this
+	// event never seals anything.
+	sp.publishEvent("task.draft_status", map[string]any{
+		KeyTaskID:       taskID,
+		"status":        "draft",
+		"draft_version": d.Version,
+		"sealed":        d.SealedHash != "",
+		"action":        "seal",
+	})
 	// C7 activity heartbeat: a draft save is progress on the tracked turn.
 	sp.touchTurnLiveness(taskID)
 	return nil

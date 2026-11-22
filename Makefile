@@ -96,7 +96,8 @@ help:
 	@echo "Service:"
 	@echo "  install-service  Install as a system service (launchd/systemd)"
 	@echo "  uninstall        Remove the system service"
-	@echo "  uninstall-all    Remove ALL binaries, apps, config, and databases"
+	@echo "  uninstall-all    Remove installed binaries and apps (data preserved)"
+	@echo "  uninstall-data   Delete $MEEPT_HOME data (explicit confirmation required)"
 	@echo ""
 	@echo "Documentation:"
 	@echo "  docs-serve       Start local docs dev server"
@@ -1451,7 +1452,7 @@ gui-dev-server:
 webui: gui-web-run 
 
 # =============================================================================
-# Full Uninstall - Remove all binaries, apps, and configurations
+# Full Uninstall - Remove installed binaries and apps (data is preserved)
 # =============================================================================
 
 uninstall-all: uninstall uninstall-gui
@@ -1468,12 +1469,37 @@ uninstall-all: uninstall uninstall-gui
 	rm -rf $(BIN_DIR)/meept-lite
 	rm -rf $(BIN_DIR)/meept_gui.app
 	rm -rf $(BIN_DIR)/meept_ui.app
-	@echo "Removing configuration directory ($(MEEPT_HOME))..."
-	rm -rf $(MEEPT_HOME)
-	@echo "Removed $(MEEPT_HOME) (session/task/queue/plans/metrics/projects databases, memory, bundled skills, cached plugins, workspaces)."
 	@echo ""
-	@echo "Full uninstall complete."
+	@echo "Uninstall complete. Configuration and data were PRESERVED at $(MEEPT_HOME)."
+	@echo "To delete that data, run: make uninstall-data CONFIRM_DELETE_HOME=1"
 	@echo "Note: Flutter build cache not removed. Run 'cd ui/flutter_ui && flutter clean' if needed."
+
+# -----------------------------------------------------------------------------
+# uninstall-data: destructive, explicit opt-in. Refuses an empty, root, home,
+# or otherwise suspicious MEEPT_HOME value and requires CONFIRM_DELETE_HOME=1.
+# -----------------------------------------------------------------------------
+.PHONY: uninstall-data
+uninstall-data:
+	@home="$(MEEPT_HOME)"; \
+	case "$$home" in \
+		""|"/"|"$$HOME"|"$$HOME/"|"."|".."|"/tmp"|"/var"|"/usr"|"/etc") \
+			echo "WARNING: refusing to delete MEEPT_HOME='$$home'; it is empty or a protected path." >&2; \
+			exit 1;; \
+	esac; \
+	case "$$home" in */) home="$${home%/}";; esac; \
+	case "$$home" in \
+		*"/.meept"|*"/meept-home"|*"/meept-e2e") ;; \
+		*) echo "WARNING: MEEPT_HOME='$$home' does not look like a Meept data directory; refusing." >&2; \
+		   exit 1;; \
+	esac; \
+	if [ "$(CONFIRM_DELETE_HOME)" != "1" ]; then \
+		echo "WARNING: this command PERMANENTLY DELETES $$home — sessions, tasks, queue, plans, metrics, projects, memory, skills, plugins, and workspaces." >&2; \
+		echo "Re-run with CONFIRM_DELETE_HOME=1 after backing up any data you need." >&2; \
+		exit 1; \
+	fi; \
+	echo "WARNING: DELETING $$home and ALL Meept data in it. This cannot be undone." >&2; \
+	rm -rf -- "$$home"; \
+	echo "Deleted $$home."
 
 # =============================================================================
 # OpenAPI SDK Generation
@@ -1677,6 +1703,7 @@ e2e-clean-tmp:
 	@if [ -n "$${TMPDIR:-}" ] && [ -d "$$TMPDIR" ]; then \
 		found=$$(find "$$TMPDIR" -maxdepth 1 -name 'meept-e2e-bin*' -type d -mtime +1 2>/dev/null); \
 		if [ -n "$$found" ]; then \
+			echo "WARNING: e2e-clean-tmp removes every $$TMPDIR/meept-e2e-bin* directory older than 1 day; this DELETES stale daemon scratch builds and their sqlite dbs."; \
 			echo "e2e-clean-tmp: removing stale scratch dirs:"; \
 			echo "$$found" | head -5; \
 			printf '%s\n' "$$found" | xargs rm -rf; \

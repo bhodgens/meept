@@ -56,6 +56,9 @@ type Config struct {
 	// Bwrap holds bubblewrap backend settings used when the resolver
 	// constructs a bwrap backend.
 	Bwrap BwrapConfig `json:"bwrap"`
+	// Seatbelt holds the macOS confinement policy applied by the local
+	// backend. Zero value (Enabled=false) keeps the legacy posture.
+	Seatbelt SeatbeltConfig `json:"seatbelt"`
 }
 
 // DockerConfig holds Docker backend configuration.

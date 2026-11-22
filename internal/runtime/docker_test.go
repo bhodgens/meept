@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -16,6 +17,75 @@ import (
 // hasDocker checks if Docker daemon is actually available.
 func hasDocker() bool {
 	return os.Getenv("TEST_DOCKER") != ""
+}
+
+// newTestUnixSocket creates a real Unix socket listener at path (with parent
+// dirs) so candidate socket presence is provable in dockerHostFromEnv tests.
+func newTestUnixSocket(t *testing.T, path string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	l, err := net.Listen("unix", path)
+	require.NoError(t, err)
+	t.Cleanup(func() { l.Close(); os.RemoveAll(path) })
+}
+
+func TestDockerHostFromEnv_ExplicitEnvWins(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "unix:///explicit/sock")
+	assert.Equal(t, "unix:///explicit/sock", dockerHostFromEnv())
+}
+
+func TestDockerHostFromEnv_LegacyDefaultWhenNothingPresent(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "")
+	// Empty home -> no per-user candidates; the historical default is the
+	// answer (CI Linux runners have no /var/run/docker.sock either).
+	t.Setenv("HOME", t.TempDir())
+	got := dockerHostFromEnv()
+	// The historical default is the answer (no per-user sockets exist
+	// under an empty HOME).
+	alt := "unix:///var/run/docker.sock"
+	require.Equal(t, alt, got, "expected legacy default when HOME has no sockets")
+}
+
+func TestDockerHostFromEnv_FindsOrbStackSocket(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "")
+	skipIfSystemDockerSocket(t)
+	home := shortTempDir(t)
+	t.Setenv("HOME", home)
+	orb := filepath.Join(home, ".orbstack", "run", "docker.sock")
+	newTestUnixSocket(t, orb)
+	assert.Equal(t, "unix://"+orb, dockerHostFromEnv())
+}
+
+func TestDockerHostFromEnv_DesktopBeatsOrbStack(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "")
+	skipIfSystemDockerSocket(t)
+	home := shortTempDir(t)
+	t.Setenv("HOME", home)
+	newTestUnixSocket(t, filepath.Join(home, ".orbstack", "run", "docker.sock"))
+	desktop := filepath.Join(home, ".docker", "run", "docker.sock")
+	newTestUnixSocket(t, desktop)
+	assert.Equal(t, "unix://"+desktop, dockerHostFromEnv())
+}
+
+// skipIfSystemDockerSocket skips the candidate-precedence tests on hosts
+// where the system socket exists: it outranks per-user candidates by
+// design, so a real daemon there makes the per-user expectation invalid.
+func skipIfSystemDockerSocket(t *testing.T) {
+	t.Helper()
+	if fi, err := os.Stat("/var/run/docker.sock"); err == nil && fi.Mode()&os.ModeSocket != 0 {
+		t.Skip("/var/run/docker.sock is live on this host; system socket intentionally outranks per-user candidates")
+	}
+}
+
+// shortTempDir returns a temp HOME short enough that "<home>/.orbstack/run/
+// docker.sock" stays under the macOS 104-byte sun_path limit (a Test-prefixed
+// t.TempDir() blows past it).
+func shortTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "dbx")
+	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	return dir
 }
 
 // dockerAvailable checks if the Docker socket is accessible by attempting a ping.

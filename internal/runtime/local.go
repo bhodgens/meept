@@ -23,6 +23,9 @@ type LocalBackend struct {
 	// envPolicy is the resolved child-environment policy applied to every
 	// command this backend runs.
 	envPolicy EnvPolicyConfig
+	// seatbelt is the macOS confinement policy. nil (default) is the
+	// legacy posture: network-class confinement only.
+	seatbelt *SeatbeltConfig
 }
 
 // NewLocalBackend creates a new local execution backend. It captures
@@ -59,6 +62,40 @@ func (b *LocalBackend) SetEnvPolicy(policy EnvPolicyConfig) {
 	b.envPolicy = policy
 }
 
+// SetSeatbelt installs the macOS confinement policy. It takes the policy by
+// VALUE (no typed-nil possible) and validates every path rule up front so a
+// malformed [runtime.seatbelt] config fails at wiring time with a clear
+// error, never at first command. When Enabled is false the backend keeps the
+// legacy network-only posture.
+func (b *LocalBackend) SetSeatbelt(policy SeatbeltConfig) error {
+	if !policy.Enabled {
+		b.seatbelt = nil
+		return nil
+	}
+	for _, p := range policy.DenyRead {
+		if err := ValidateSeatbeltPath(p); err != nil {
+			return fmt.Errorf("seatbelt deny_read: %w", err)
+		}
+	}
+	for _, p := range policy.AllowWrite {
+		if err := ValidateSeatbeltPath(p); err != nil {
+			return fmt.Errorf("seatbelt allow_write: %w", err)
+		}
+	}
+	for _, p := range policy.DenyWrite {
+		if err := ValidateSeatbeltPath(p); err != nil {
+			return fmt.Errorf("seatbelt deny_write: %w", err)
+		}
+	}
+	for _, p := range policy.DenyExec {
+		if err := ValidateSeatbeltPath(p); err != nil {
+			return fmt.Errorf("seatbelt deny_exec: %w", err)
+		}
+	}
+	b.seatbelt = &policy
+	return nil
+}
+
 // Name returns the backend identifier.
 func (b *LocalBackend) Name() string {
 	return "local"
@@ -88,9 +125,11 @@ func (b *LocalBackend) Execute(ctx context.Context, cmd Command) (*CommandResult
 	// Set environment variables
 	command.Env = b.buildEnv(cmd.Env)
 
-	// Network class is applied before Start. A confinement error refuses
-	// the launch; falling through would be unrestricted egress.
-	if err := ApplyNetworkClass(command, cmd.NetworkClass); err != nil {
+	// Confinement is applied before Start: the network class plus, on
+	// macOS, the armed seatbelt policy. A confinement error refuses the
+	// launch; falling through would be unrestricted egress or an
+	// unconfined write.
+	if err := confineLocal(command, cmd.NetworkClass, b.seatbelt); err != nil {
 		return nil, err
 	}
 

@@ -3927,6 +3927,12 @@ type OrchestratorConfig struct {
 	// Default true (Q2 ratified at dispatch); false = byte-identical
 	// legacy classification.
 	TrivialFastLane bool `json:"trivial_fast_lane" toml:"trivial_fast_lane"`
+	// TaskApprovalStepThreshold (06-planning/03, master Q1): the
+	// minimum number of planned steps that triggers the planner's
+	// approval gate. Default 5 (the historical default, preserved
+	// THROUGH config); 0 DISABLES the gate -- the planner must never
+	// resurrect a configured 0 into the default.
+	TaskApprovalStepThreshold int `json:"task_approval_step_threshold" toml:"task_approval_step_threshold"`
 	// Prefilter configures the Stage-0 embedding prefilter
 	// (classifier-observability follow-up): embed the input, cosine-match
 	// against labeled intent centroids, and route directly when confident
@@ -4957,7 +4963,10 @@ func DefaultConfig() *Config {
 			Isolation: true,
 		},
 		Orchestrator: OrchestratorConfig{
-			MaxPlanSteps:                10,
+			MaxPlanSteps: 10,
+			// TaskApprovalStepThreshold (06-planning/03, master Q1):
+			// the historical approval-gate default lives HERE (never in
+			// a planner clamp): 5 steps gate, 0 disables.
 			MaxResearchSteps:            3,
 			PlannerTimeout:              120,
 			TokenBudgetAlert:            5000,
@@ -4965,6 +4974,7 @@ func DefaultConfig() *Config {
 			InterviewAmbiguityThreshold: 0.6,
 			MaxStepsPerPhase:            8,
 			MaxPhases:                   12,
+			TaskApprovalStepThreshold:   5,     // default gate at 5 steps; 0 (operator override) disables
 			MaxReplanExtensions:         2,     // F-NEW-10: hard ceiling on Ralph progress extensions per task
 			StepRetryInterval:           15,    // W12: bounded retry sweep for semaphore-blocked steps (0 disables)
 			ClassifierFailFast:          false, // production keeps rotation; fail-fast is a testing mode
@@ -5586,6 +5596,31 @@ type RuntimeConfig struct {
 	// Bwrap holds bubblewrap backend settings used when the sandbox
 	// resolver selects the bwrap backend.
 	Bwrap BwrapRuntimeConfig `json:"bwrap" toml:"bwrap"`
+	// Seatbelt holds the macOS confinement policy applied to local-backend
+	// children (deny-read roots, write allow-list, process-info/exec
+	// denies). Enabled defaults false: the legacy posture is network-class
+	// confinement only, byte-identical to the pre-seatbelt behavior.
+	Seatbelt SeatbeltRuntimeConfig `json:"seatbelt" toml:"seatbelt"`
+}
+
+// SeatbeltRuntimeConfig is the [runtime.seatbelt] block. Field-mirrors
+// runtime.SeatbeltConfig (same convention as EnvPolicyConfig above;
+// internal/config does not import internal/runtime). Paths must be
+// absolute; a relative path is refused at wiring time.
+type SeatbeltRuntimeConfig struct {
+	// Enabled activates fs/process confinement in addition to the network
+	// class. False (default) ignores every other field.
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// DenyRead lists absolute path subtrees the child cannot read.
+	DenyRead []string `json:"deny_read" toml:"deny_read"`
+	// AllowWrite, when non-empty, confines writes to these subtrees.
+	AllowWrite []string `json:"allow_write" toml:"allow_write"`
+	// DenyWrite carves write-denied holes inside an allowed root.
+	DenyWrite []string `json:"deny_write" toml:"deny_write"`
+	// BlockProcessInfo denies ps-style process inspection.
+	BlockProcessInfo bool `json:"block_process_info" toml:"block_process_info"`
+	// DenyExec lists binaries the child may not exec (e.g. /usr/bin/sudo).
+	DenyExec []string `json:"deny_exec" toml:"deny_exec"`
 }
 
 // EnvPolicyConfig configures child environment construction. This mirrors the

@@ -229,10 +229,13 @@ meept doctor    # report-only: pidfile, socket, config, disk, models, orphans
 
 ```bash
 make uninstall          # stop + remove the service (config preserved)
-make uninstall-all      # also remove binaries and $MEEPT_HOME (config + data)
+make uninstall-all      # remove binaries and apps only (config + data preserved)
+make uninstall-data CONFIRM_DELETE_HOME=1  # delete $MEEPT_HOME explicitly
 ```
 
-`uninstall-all` removes exactly `$MEEPT_HOME` — honor any `MEEPT_HOME`
+`uninstall-all` never deletes `$MEEPT_HOME`. Data stays at that path. Only
+`uninstall-data` deletes it, and that target refuses an empty, root, home, or
+non-Meept path and requires `CONFIRM_DELETE_HOME=1`. Honor any `MEEPT_HOME`
 override you installed with.
 
 ## Optional: Build the Flutter GUI

@@ -1098,6 +1098,50 @@ func TestManager_GetOrCreatePersona_CwdOverride(t *testing.T) {
 	t.Cleanup(m.StopAll)
 }
 
+// TestManager_CatalogEntryPermissionMode pins the per-connection override
+// added by the dev-setup-safety audit (F-02): a catalog entry's
+// permission_mode wins over the global [acp] mode, and an explicit per-call
+// PersonaOpts.PermissionMode wins over the catalog. Precedence is
+// call option > catalog entry > global.
+func TestManager_CatalogEntryPermissionMode(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		globalMode string
+		entryMode  string
+		callMode   string
+		want       string
+	}{
+		{"catalog_overrides_global", "permissive", "human", "", "human"},
+		{"call_overrides_catalog", "permissive", "human", "deny", "deny"},
+		{"empty_entry_inherits_global", "decision", "", "", "decision"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := &startRecorder{}
+			acpCfg := testACPConfig(true, 4)
+			acpCfg.PermissionMode = tc.globalMode
+			acpCfg.DecisionThreshold = 0.5
+			m := NewManager(acpCfg, testAgents(
+				config.ACPAgentEntry{ID: "hermes", Command: []string{"agent"}, Enabled: true, PermissionMode: tc.entryMode},
+			))
+			attachStart(m, rec)
+
+			if _, err := m.GetOrCreatePersona(context.Background(), "hermes", "", "/work",
+				PersonaOpts{PermissionMode: tc.callMode}); err != nil {
+				t.Fatalf("GetOrCreatePersona: %v", err)
+			}
+			rec.mu.Lock()
+			defer rec.mu.Unlock()
+			sc := rec.configs[0]
+			if sc.PermissionMode != tc.want {
+				t.Fatalf("PermissionMode = %q, want %q", sc.PermissionMode, tc.want)
+			}
+		})
+	}
+}
+
 // TestManager_GetOrCreatePersona_PermissionModeOverride pins that the opts
 // override participates in the SAME conditional stamps: a human override on
 // a permissive manager stamps the relay seam; a decision override stamps

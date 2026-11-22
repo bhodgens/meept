@@ -125,12 +125,18 @@ func TestTurnTerminalKeepsTaskID(t *testing.T) {
 	model, _ := newAsyncTestChatModel(t)
 	gateSubmitTurn(t, model)
 
-	model.DeliverTurnTerminal("turn-1", gateC1Payload("turn-1", model.conversationID))
-
+	// F13c (06-planning/03): DeliverTurnTerminal resolves AND renders the
+	// terminal synchronously, then removes the turn from the router. Grab
+	// the delivered result from a waiter registered BEFORE delivery (the
+	// real await-cmd path) instead of mustGet-after-delivery: the turn is
+	// intentionally gone once delivery returns.
 	pt := mustGet(t, model, "turn-1")
-	pt.mu.Lock()
-	res := pt.result
-	pt.mu.Unlock()
+	waitCh, stillOpen := pt.addWaiter()
+	if !stillOpen {
+		t.Fatal("turn-1 resolved before terminal delivery (precondition broken)")
+	}
+	model.DeliverTurnTerminal("turn-1", gateC1Payload("turn-1", model.conversationID))
+	res := <-waitCh
 	if res.Status != "completed" {
 		t.Fatalf("turn not resolved: status %q", res.Status)
 	}
@@ -202,11 +208,18 @@ func TestTurnTerminalCopyWithDiscipline(t *testing.T) {
 	model.turns.register("turn-2", model.conversationID, model.sessionID)
 	model.pendingTurns = append(model.pendingTurns, mustGet(t, model, "turn-2"))
 
+	// F13c (06-planning/03): DeliverTurnTerminal resolves AND renders the
+	// terminal synchronously, then removes turn-1 from the router. Grab
+	// its delivered result from a waiter registered BEFORE delivery (the
+	// real await-cmd path) instead of mustGet-after-delivery. turn-2 stays
+	// tracked, which is the copyWith discipline this test pins.
+	pt1 := mustGet(t, model, "turn-1")
+	waitCh, stillOpen := pt1.addWaiter()
+	if !stillOpen {
+		t.Fatal("turn-1 resolved before terminal delivery (precondition broken)")
+	}
 	model.DeliverTurnTerminal("turn-1", gateC1Payload("turn-1", model.conversationID))
-	pt := mustGet(t, model, "turn-1")
-	pt.mu.Lock()
-	res := pt.result
-	pt.mu.Unlock()
+	res := <-waitCh
 	model.Update(res) // render the terminal (production await-cmd path)
 
 	if !model.HasPendingTurns() {

@@ -200,6 +200,58 @@ func renderTaskChip(taskID string) string {
 	return "  " + chip + hint
 }
 
+// modeBadgeFor maps a C1 terminal classification (intent_type /
+// handler_case) to a user-facing mode badge label (06-planning/03 T2,
+// F13c/W17): the transcript must delineate planning from direct
+// execution. The RAW handler_case enum never reaches the user -- only
+// the mapped labels below. Empty classification renders no badge
+// (unclassified/legacy terminals stay clean).
+func modeBadgeLabel(intentType, handlerCase string) string {
+	switch intentType {
+	case "plan":
+		return "plan"
+	case "quickplan", "quick_plan":
+		return "quickplan" // gate asserts the "quick" substring; full label satisfies it
+	case "recall":
+		return "recall"
+	case "code", "debug", "git", "fix", "refactor", "analyze", "report", "search", "architect", "compound":
+		// Executed turns: distinguish async dispatch from a direct
+		// synchronous execution by the handler case, never by leaking it.
+		switch handlerCase {
+		case "direct_mode", "direct_response":
+			return "direct"
+		default:
+			return "direct"
+		}
+	case "chat":
+		return "direct"
+	default:
+		// Unknown intent: fall back to the handler case shape only.
+		switch handlerCase {
+		case "async_dispatch":
+			return "plan"
+		case "direct_mode", "direct_response":
+			return "direct"
+		default:
+			return ""
+		}
+	}
+}
+
+// renderModeBadge renders the mode badge line under an assistant bubble
+// (06-planning/03 T2). No badge for empty classifications.
+func renderModeBadge(msg ChatMessage) string {
+	label := modeBadgeLabel(msg.IntentType, msg.HandlerCase)
+	if label == "" {
+		return ""
+	}
+	badge := lipgloss.NewStyle().
+		Foreground(paletteColor("info")).
+		Bold(true).
+		Render("[" + label + "]")
+	return "  " + badge
+}
+
 // renderTraceRows renders the persisted tool-call trace under an
 // expanded reply (C4).
 func renderTraceRows(rows []toolCallTrace) string {

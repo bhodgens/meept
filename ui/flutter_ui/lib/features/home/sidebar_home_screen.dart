@@ -238,7 +238,20 @@ class _SidebarHomeScreenState extends ConsumerState<SidebarHomeScreen> {
       final autoResume = ref.read(renderingPrefsProvider).autoResume;
       if (!autoResume) return;
       if (active == null) {
-        await _createInitialSession();
+        // Aligned restore policy (03-restore-queue-visibility T1): prefer
+        // the most recent session WITH history (the one the user actually
+        // used); only reuse an empty session or create one when nothing
+        // has content.
+        final notifier = ref.read(sessionProvider.notifier);
+        var last = notifier.findMostRecentSessionWithHistory();
+        if (last == null) {
+          await _createInitialSession();
+          last = ref.read(activeSessionProvider);
+        }
+        if (last != null && mounted) {
+          setState(() => _selectedSession = last);
+          ref.read(activeSessionProvider.notifier).state = last;
+        }
       } else if (mounted) {
         setState(() => _selectedSession = active);
       }

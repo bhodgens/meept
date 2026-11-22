@@ -384,7 +384,7 @@ func subscribeRefStamped(t *testing.T, b *bus.MessageBus, topic string) *bus.Sub
 // and the constitution render prints it under **payload:**, so the stamped
 // trigger_ref key is visible in the prompt text. No production change.
 type triggerRefReflector struct {
-	mu   sync.Mutex
+	mu       sync.Mutex
 	payloads []string
 }
 

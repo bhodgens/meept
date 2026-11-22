@@ -35,6 +35,22 @@ func errResolver(msg string) ResolverFunc {
 	}
 }
 
+// getWithPortRetry performs client.Get, retrying once on the macOS
+// ephemeral-port-exhaustion error ("can't assign requested address").
+// Under -p 2 full-suite load the local port range transiently empties and
+// a connect fails before any server code runs; sibling packages closing
+// their servers free ports within milliseconds, so a short backoff is
+// enough. Any other error (or a second failure) returns unchanged so
+// assertion logic sees the real result.
+func getWithPortRetry(c *http.Client, url string) (*http.Response, error) {
+	resp, err := c.Get(url)
+	if err == nil || !strings.Contains(err.Error(), "can't assign requested address") {
+		return resp, err
+	}
+	time.Sleep(50 * time.Millisecond)
+	return c.Get(url)
+}
+
 func mustGuard(t *testing.T, cfg GuardConfig) *Guard {
 	t.Helper()
 	g, err := NewGuard(cfg)
@@ -300,7 +316,7 @@ func TestWrapClient_RedirectChainEndToEnd(t *testing.T) {
 
 	client := g.WrapClient(&http.Client{Timeout: 5 * time.Second})
 
-	resp, err := client.Get(srv.URL + "/ok")
+	resp, err := getWithPortRetry(client, srv.URL+"/ok")
 	if err != nil {
 		t.Fatalf("benign redirect chain failed: %v", err)
 	}
@@ -338,7 +354,7 @@ func TestWrapClient_TooManyRedirectsEndToEnd(t *testing.T) {
 	defer srv.Close()
 
 	client := g.WrapClient(&http.Client{Timeout: 5 * time.Second})
-	resp, err := client.Get(srv.URL + "/a")
+	resp, err := getWithPortRetry(client, srv.URL+"/a")
 	if resp != nil {
 		resp.Body.Close()
 	}
