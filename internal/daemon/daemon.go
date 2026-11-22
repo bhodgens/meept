@@ -302,6 +302,19 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		turnRegistry = agent.NewTurnRegistry()
 		components.ChatHandler.SetTurnRegistry(turnRegistry)
 
+		// Leaf 04 (interactive-usability): the strategic planner's C7
+		// liveness heartbeat — interview pauses (and draft/seal activity)
+		// Touch the tracked turn through this seam so a long human wait
+		// never reads as staleness. First production wiring of the seam;
+		// nil-guarded on the orchestrator like every planner wiring site.
+		if sp := components.Orchestrator.Strategic(); sp != nil {
+			sp.SetTurnLivenessTouch(func(taskID string) {
+				if turnID := turnRegistry.TurnIDForTask(taskID); turnID != "" {
+					turnRegistry.Touch(turnID)
+				}
+			})
+		}
+
 		// Liveness watchdog + turn reaper (async-turn-migration leaf 06):
 		// emits turn.terminal failed events for submitted turns that
 		// stopped making progress, so every submitted turn eventually
@@ -315,6 +328,12 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 				components.ChatHandler.EmitTurnTerminal,
 				logger.With("component", "turn-watchdog"),
 			)
+			// Leaf 04 (interactive-usability): the C7 exemption accessor now
+			// also recognizes the planner-interview pause — a task carrying a
+			// fresh planner_interview metadata block reports the
+			// awaiting_interview sentinel and is exempt from staleness
+			// reaping within the interview wait window.
+			watchdog.SetTaskStateFunc(agent.TurnStateFunc(components.TaskStore))
 			watchdog.Start(
 				time.Duration(twCfg.IntervalSeconds)*time.Second,
 				time.Duration(twCfg.StaleAfterSeconds)*time.Second,

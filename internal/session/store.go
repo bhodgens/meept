@@ -29,6 +29,12 @@ type Message struct {
 	// the default response BYTE-IDENTICAL to the legacy shape (no
 	// tool_calls key anywhere) - the frozen default pin.
 	ToolCalls []MessageToolCall `json:"tool_calls,omitempty"`
+	// Metadata is the additive key/value side channel (interactive-usability
+	// leaf 04): marker keys like planner_interview ride here so consumers
+	// can identify special message shapes without content sniffing. nil +
+	// omitempty keeps legacy rows and responses byte-identical; persisted
+	// to the session_messages metadata column (JSON object of strings).
+	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
 // MessageToolCall is the C4 wire shape for a persisted tool call joined

@@ -76,11 +76,15 @@ func (w *TurnWatchdog) taskStateFor(taskID string) (task.TaskState, bool) {
 // state: planning | awaiting_approval | awaiting_seal. The awaiting_seal
 // wait has no dedicated enum value today (planning + draft metadata
 // represents it); the string is matched so a future enum value is covered
-// without touching this loop. Quota/throttle/gate parked turns keep their
-// existing semantics -- only these three states are exempt.
+// without touching this loop. Leaf 04 (interactive-usability) adds the
+// interview-pause sentinel "awaiting_interview", produced by
+// TurnStateFunc when the task's metadata carries a fresh
+// planner_interview block — a human answering design questions is not a
+// stalled turn. Quota/throttle/gate parked turns keep their existing
+// semantics -- only these four states are exempt.
 func exemptFromReap(state task.TaskState) bool {
 	switch state {
-	case task.StatePlanning, task.StateAwaitingApproval, "awaiting_seal":
+	case task.StatePlanning, task.StateAwaitingApproval, "awaiting_seal", "awaiting_interview":
 		return true
 	}
 	return false
