@@ -1,0 +1,8 @@
+#!/bin/bash
+# Pre-commit gate 21: AGENTS.md size, pointer, and package-table ratchet.
+# Pure Python; no Go toolchain. Runs against the working tree, not the prepared
+# commit snapshot: the check reads AGENTS.md and the package directory list,
+# both of which the snapshot materialization already copies verbatim.
+set -u
+cd "$(git rev-parse --show-toplevel)" || exit 1
+exec python3 scripts/agents-check.py

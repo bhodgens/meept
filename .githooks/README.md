@@ -33,11 +33,11 @@ chmod +x .githooks/*
 
 ### pre-commit (Main Hook)
 
-Entry point that runs 20 checks. Since the gates-speedup change the chain
-dispatches INDEPENDENTLY: checks 1-15, 17-20 run CONCURRENTLY (bash
+Entry point that runs 21 checks. Since the gates-speedup change the chain
+dispatches INDEPENDENTLY: checks 1-15, 17-21 run CONCURRENTLY (bash
 background jobs, capped at `MEEPT_HOOKS_PARALLEL` slots, default 6), each
 writing its own output file, and every gate's full output is replayed in
-`[n/20]` numbered order after the join, so the transcript still reads like
+`[n/21]` numbered order after the join, so the transcript still reads like
 the old serial chain. Check 16 (`pre-commit-feature-docs`) is the only
 gate that can PROMPT the user (aider y/n) — it runs serially AFTER the
 parallel join with the real TTY. Check [0/20] (`pre-commit-worktreecfg`)
@@ -602,6 +602,15 @@ skip (the script exits 2). A direct push that grows either file fails the
   high-confidence dead set.
 
 ---
+
+### pre-commit-agents-check
+
+Gate 21. Enforces the root `AGENTS.md` size budget (16 KiB), pointer
+freshness, routing-table completeness, and the package-table coverage ratchet.
+Pure Python (`scripts/agents-check.py`), no Go toolchain. Baseline:
+`scripts/agents-baseline.txt`; `--rebaseline` is a deliberate human step.
+Also runs in CI's `code-quality.yml` generated-artifacts job via
+`make agents-check`.
 
 ## Skipping Hooks
 

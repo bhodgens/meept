@@ -69,6 +69,11 @@ jobs:
           # module's required Go version the way the pinned '1.23' jobs can.
           go-version-file: go.mod
 
+      # AGENTS.md size, pointer, and package-table ratchet (pure Python, no
+      # dependencies): fails on growth past 16 KiB or a new undocumented package.
+      - name: AGENTS.md size and pointer ratchet
+        run: make agents-check
+
       # docs/generated/* (bus topology, RPC handlers, HTTP routes, WSEvent
       # map): pure Python, no dependencies. Red until `make graphs` is run
       # after a bus/RPC/HTTP/WS surface change.

@@ -1,876 +1,161 @@
 # AGENTS.md
 
-Guidance for AI coding agents working in this repository.
+Guidance for AI coding agents working in this repository. Keep this file under
+16 KiB. Global hard rules live here; full text lives in the referenced docs.
+Update a rule and its pointer in the same commit.
 
-**Before touching code in a package, read its invariant doc** — the root file keeps only
-summaries; the full contracts live next to the code:
+## Invariant doc routing table
 
-```
-internal/llm/     -> internal/llm/AGENTS.md     (quota blocks, refusals, alias resolution,
-                                                 session affinity headers, sticky rotation,
-                                                 upstream teardown, serving-tier policy,
-                                                 semantic cache tier, TTFT, context-warm
-                                                 seam (Client.Warm))
-internal/session/ -> internal/session/AGENTS.md (lifecycle hooks, idle reaper)
-internal/daemon/  -> internal/daemon/AGENTS.md  (runtime lifecycle, spawn guards)
-internal/agent/   -> internal/agent/AGENTS.md   (chat contracts, output filters, session IDs)
-internal/comm/    -> internal/comm/AGENTS.md    (WS classification, bus topics)
-internal/kanban/    -> internal/kanban/AGENTS.md    (store-is-projection, import ban,
-                                                    from_state rules, lease rule A,
-                                                    frozen C1 error texts)
-internal/kanbansvc/ -> internal/kanbansvc/AGENTS.md (forward-only gateway, no TLS,
-                                                    no DB, bearer + pairing lanes)
-internal/voice/   -> internal/voice/AGENTS.md   (frames, sockets, splice/barge-in,
-                                                 supervisor gate, release fan-out,
-                                                 secrets lanes, child confinement)
-docs/agents/      -> coding-practices.md | opt-in-defaults.md | projects-and-workdirs.md
-```
-
-Hermes merges every AGENTS.md on the directory chain from git root to cwd, so the
-per-package files load automatically when working inside that directory. Update a rule
-and its summary (or its doc) in the same commit.
-
-**This file must be reviewed and validated for completeness and correctness on
-every commit.** If a commit adds, removes, or renames a package, changes a build
-command, introduces a new convention, or invalidates any statement below, update
-this file in the same commit. Stale agent guidance causes more bugs than no
-guidance at all.
-
-## Build & Development Commands
-
-```bash
-# Build
-go build -o bin/meept-daemon ./cmd/meept-daemon
-go build -o bin/meept ./cmd/meept
-go build -o bin/meept-voice ./cmd/meept-voice  # voice child (phone sidecar)
-make build              # Everything (daemon + CLI + voice child + gendoc + GUI + lite + graphs)
-make build-gui          # Flutter GUI only
-make build-gui-dist     # Flutter GUI with NO embedded dev key (distribution; first-run pairing)
-make menubar-install    # macOS MenuBar app
-make install            # Full install: build + bin + config + GUI + menubar (needs Flutter)
-make install-cli        # Headless install: binaries + config only (no Flutter needed)
-make install-package    # Stage bin + web payload under DESTDIR= for packaging
-# Install destinations (command-line overrides):
-#   PREFIX=/opt/meept -> BINDIR=$(PREFIX)/bin, WEBDIR=$(PREFIX)/share/meept/web
-#   BINDIR (default GOPATH/bin or PREFIX/bin), APPSDIR (default ~/Applications,
-#   NEVER PREFIX-derived), DESTDIR (staging root; MEEPT_HOME is never staged)
-make deps-llama-check   # Enforce the llama.cpp build floor (>= b9660, LFM2.5 tool-call
-                        # parser); wired into `make deps` and `make install`. `make
-                        # deps-llama` installs it into $MEEPT_HOME/deps/llama.cpp
-make deps-models        # Download model weights (LFM catalog); prompts for storage
-                        # path ($MEEPT_MODELS_DIR, default $MEEPT_HOME/models) and
-                        # set (basic = GGUFs any platform; full = + 8B MLX on
-                        # Apple Silicon). Optional — never blocks `make install`.
-make deps-mlx           # mlx-lm into $MEEPT_DEPS/mlx-venv (Apple Silicon only)
-# models.json5 paths use ${MEEPT_MODELS_DIR:-~/.meept/models}; an existing
-# drive-mounted layout keeps working by exporting MEEPT_MODELS_DIR (e.g.
-# /Volumes/LLMs) in the shell or $MEEPT_HOME/env. `meept doctor` reports
-# present/missing per lifecycle endpoint (report-only).
-
-# Test
-#
-# macOS: full-sweep runs MUST bound package parallelism (-p 2). Unbounded
-# `go test ./...` / `./internal/...` opens enough concurrent localhost
-# sockets to exhaust the ephemeral port range (49152-65535) mid-run, and
-# unrelated packages then fail with
-#   dial tcp 127.0.0.1:NNNNN: connect: can't assign requested address
-# `make test` and friends already pass -p 2 (override: make test
-# TEST_PACKAGE_PARALLELISM=N).
-go test -p 2 ./... -v
-go test -p 2 -race ./...
-go test -p 2 ./... -coverprofile=coverage.out && go tool cover -html=coverage.out
-make test            # canonical full suite (short mode, -p 2)
-make test-record     # run the suite and append per-test results to
-                     # $MEEPT_HOME/test-history/results.jsonl (test-efficacy history)
-make test-efficacy   # per-test flake rate / failure count / avg time table
-                     # (scripts/test-efficacy.py over the recorded history)
-
-# Run
-./bin/meept-daemon -f           # Daemon foreground
-./bin/meept chat "message"      # CLI chat
-./bin/meept chat                # Interactive TUI
-agent-tui ./bin/meept chat      # TUI testing
-
-# Config
-./bin/meept config              # Interactive editor
-./bin/meept config get <key>    # Get value
-./bin/meept config set <key> <v> # Set value
-
-# Soul (user-authored persona, ~/.meept/SOUL.md)
-./bin/meept soul show           # Current content + sha256 + size
-./bin/meept soul path           # Resolved path (honors MEEPT_HOME)
-make config-bootstrap           # Copy missing config templates into $MEEPT_HOME
-make dev-key                    # Provision $MEEPT_HOME/dev_key (0600), shared with the GUI
-make build-gui-dist             # Flutter GUI with NO embedded dev key (distribution;
-                                # first-run pairing via the daemon's loopback handshake)
-make gui-connect-setup          # Make an installed home GUI-ready (transport.http + dev key)
-make gui-connect-check          # Static self-check of the installed GUI connect path
-
-# Agents (AI Employees) — not the dispatcher roster in config/agents/
-./bin/meept agents list                 # List employees
-./bin/meept agents show <id>            # Full definition
-./bin/meept agents create <def.json5>   # Register new employee
-./bin/meept agents pause <id> / resume <id>
-./bin/meept agents goals [--employee=<id>]
-./bin/meept agents goal-create <employee-id> --title T --mandate M [--gate-command CMD] [--source user|trigger]
-./bin/meept agents set-gate <goal-id> --command="go test -p 2 ./..."
-./bin/meept agents steer <id> <content...>  # deliver steering to a running episode
-./bin/meept agents audit <id> [--since=6h]
-
-# Plans
-./bin/meept plans list/show/approve/reject/confirm <id>
-
-# Projects
-./bin/meept projects list/add/remove/sync/status <name>
-
-# Connectivity graphs
-make graphs               # Regenerate bus/RPC/HTTP/WS topology (writes docs/generated/*)
-# Both freshness checks below run in CI (code-quality.yml, job
-# "generated-artifacts"). Run `make graphs` after changing bus/RPC/HTTP/WS
-# surfaces; the generator still embeds absolute line offsets (audit F66), so a
-# red graphs-check after an unrelated edit means "regenerate", not "topology
-# changed".
-make graphs-check         # Verify generated files are fresh (CI gate)
-make research-harness      # verify harness catalog evidence + regenerate techniques md
-make research-harness-check # CI: fail if evidence missing or techniques md stale
-
-# Reference docs (magefiles/docs.go)
-make docs-generate        # Regenerate docs/reference/generated/* (needs mage + gomarkdoc)
-make docs-check           # Verify those pages are fresh (CI gate; needs mage + gomarkdoc)
-
-# Classifier-eval guards (tools/classifier-eval)
-make classifier-eval-selftest # CI: corpus/replay guard + coverage-floor self-test
-make e2e-sweep-selftest       # CI: offline sweep grading/completion/CLI regressions
-make e2e-fast                 # CI: full hermetic e2e suite (ci.yml gate member;
-                              #     code-quality.yml advisory)
-
-# Git hooks (bash >= 3.2; sub-hooks run under whatever `bash` is on PATH, so the
-# suite also executes on the Linux CI runner)
-make hooks                # core.hooksPath -> .githooks (20 pre-commit checks +
-                          # pre-push chain: e2e-affected gate, then bench gate)
-# Pre-flight [0/20]: pre-commit-worktreecfg - auto-repairs core.bare=true flips
-# that break go build -buildvcs and git status; logs repairs to
-# .core-bare-repair.log in the repo root (gitignored by the *.log rule). It runs
-# before the numbered chain because the flip breaks gate 1 (pre-commit-build).
-# Dispatch (gates-speedup, .githooks/README.md "pre-commit (Main Hook)"):
-# checks 1-15 and 17-20 run CONCURRENTLY via pre-commit-dispatch-lib (cap
-# MEEPT_HOOKS_PARALLEL=6; verdicts replay in [n/20] order after the join;
-# aggregate exit non-zero iff a blocking gate failed); check 16
-# (feature-docs, the only gate that can prompt) runs serially AFTER the
-# join; MEEPT_PARALLEL_HOOKS=0 restores serial fail-fast. The Go-toolchain
-# gates (1, 2, 4, 5, 6, 8, 20) run against the PREPARED-COMMIT TREE: the
-# staged index is materialized once (index copy + git checkout-index -a +
-# symlinked .git) and those hooks execute with GIT_WORK_TREE/GIT_INDEX_FILE
-# pinned inside it, so an untracked sibling package can no longer make a
-# build gate pass while HEAD stays broken, and sibling edits mid-hook can
-# no longer false-block a self-consistent commit. Snapshot-build failure
-# prints a loud WARN and falls back to working-tree mode — the mechanism
-# never blocks a commit. Check [19] keeps ONLY the cheap new-package census;
-# the affected-suite sweep runs at pre-push-e2e (FULL MEEPT_E2E_SCOPE,
-# forced) + CI e2e-fast, optable back in per-commit with
-# MEEPT_E2E_PRECOMMIT_SWEEP=1 (pair with MEEPT_E2E_SCOPE=direct for the
-# cheap package-dir-only selection). Check [20] result-caches its 5-main
-# x2-mode deadcode analysis under <git-dir>/meept-cache keyed by content
-# digests — HIT requires an identical tree, a FAIL is never stored.
-# Offline regressions: scripts/gates-speedup-selftest.sh +
-# scripts/e2e-census-selftest.sh.
-# Package-classification rule for those hooks: a staged package's state comes
-# from `go list -e` STDOUT only. {{.Error}} prints there, while stderr carries
-# progress noise ("go: downloading ..." on a cold GOMODCACHE) that must never be
-# read as a load failure — folding stderr in (2>&1) blocked healthy commits on
-# any machine with an empty module cache. The classifier detects LOAD failures
-# and nothing else: `broken` is `go list` exiting non-zero with an empty stdout
-# (stderr is captured separately for the reason) or a non-empty {{.Error}} that
-# matches none of the exclusion reasons. A SYNTAX ERROR or an UNRESOLVED IMPORT
-# is NOT `broken`: both give rc=0 with an EMPTY .Error, so the package classifies
-# `ok` and surfaces as a go vet / staticcheck finding instead (go build, for
-# pre-commit-build). A directory with no (non-test) Go files reports `nofiles` —
-# a SKIP, not a failure; that is a deliberate loosening (the pre-68b2338c gate
-# failed there).
-# pre-commit-build's root-artifact check blocks a new root-level entry only when
-# a build can create it: the gitignored binaries (meept, meept-daemon, meept-lite,
-# llmdoc — including a stale one a build clobbers), `*.test`, or the basename of
-# any `package main` directory in the module (a bare `go build ./cmd/gendoc`
-# writes /gendoc), derived from `go list` rather than a fixed list. Any other new
-# root-level path is reported, never blocking.
-
-# Static analyzers
-make analyzers            # mutexio + predid
-make lint-ci              # golangci-lint + analyzers + audit scripts + fmt-check
-                          # + fmt-check-gui (fmt-check runs scripts/fmt-check.sh,
-                          # the gofmt gate scoped to the .golangci.yml `formatters`
-                          # block; fmt-check-gui hard-requires the Dart SDK / Flutter)
-```
-
-See `cmd/meept/`, `cmd/meept-daemon/`, and `Makefile` for full command reference.
-
-## Architecture Overview
-
-Meept is a **Go platform** with skill-based task orchestration, LLM integration,
-memory management, and external integrations.
-
-### Request Flow
+**Before touching code in a package, read its invariant doc.** Hermes merges
+every AGENTS.md on the directory chain from git root to cwd, so per-package
+files load automatically when working inside that directory.
 
 ```
-User Input → CommServer (RPC/HTTP) → MessageBus → AgentLoop → Dispatcher → Planner → Tools → Response
+internal/llm/       -> internal/llm/AGENTS.md
+internal/session/   -> internal/session/AGENTS.md
+internal/daemon/    -> internal/daemon/AGENTS.md
+internal/agent/     -> internal/agent/AGENTS.md
+internal/comm/      -> internal/comm/AGENTS.md
+internal/kanban/    -> internal/kanban/AGENTS.md
+internal/kanbansvc/ -> internal/kanbansvc/AGENTS.md
+internal/voice/     -> internal/voice/AGENTS.md
+docs/agents/        -> commands.md | architecture-overview.md | configuration.md |
+                       static-analyzers.md | invariants.md | ui-and-feature-rules.md |
+                       coding-practices.md | coding-practices-extra.md |
+                       opt-in-defaults.md | projects-and-workdirs.md |
+                       voice-invariants.md (load only for voice work)
 ```
+
+The voice sidecar contract is split out: read `docs/agents/voice-invariants.md`
+only for voice work. User-facing map: `docs/workflows/voice-sidecar.md`.
+
+## Build and Test Commands
+
+Full command list: `docs/agents/commands.md`, `.githooks/README.md`. Hard rules:
+
+- Build: `make build` (daemon, CLI, voice child, GUI, lite, graphs).
+- Test: `make test`; any full sweep MUST use `-p 2` on macOS (port exhaustion
+  otherwise).
+- Run: `./bin/meept-daemon -f`, `./bin/meept chat`, `./bin/meept agents ...`.
+- Hooks: `make hooks` installs 20 pre-commit checks + pre-push e2e/bench gates.
+
+## Architecture
+
+Full component map and request flow: `docs/concepts/architecture.md`,
+`docs/agents/architecture-overview.md`. Generated bus/RPC/HTTP/WS topology:
+`docs/generated/bus-topology.md`. Start there for cross-boundary bugs.
 
 ### Key Components
 
-| Layer | Packages |
-|-------|----------|
-| **Server** | `cmd/meept-daemon`, `internal/daemon`, `internal/rpc`, `internal/bus` (typed topics: `bus.Topic[T]`/`PublishT`/`SubscribeT`, `internal/bus/topic.go`), `internal/comm` (WS classification: `internal/comm/wsclass`; HITL Slack approval channel: `internal/comm/slack`, docs/workflows/hitl-notifications.md) |
-| **Agent** | `internal/agent` (loop, orchestrator, planner, collaborative, workspace, executor, dispatcher) |
-| **LLM** | `internal/llm` (client, resolver, budget, providers, token cache, context firewall; selection chain: quality/posture/admission filters, shadow route, pool-scoped failure, price groups, difficulty derivation, tool-call validation — docs/workflows/llm-routing-quality.md) |
-| **Memory** | `internal/memory` (manager, episodic, task, ftstore, facts) |
-| **Tools** | `internal/tools` (registry, builtin/*, mcp), `internal/acp` (ACP client wire + human permission relay `relay.go` + decision lane + persona lane `GetOrCreatePersona`), `internal/hermes` (Hermes gateway API-server client) |
-| **Codemode** | `internal/codemode` (C3 sandbox: goja eventloop VM, ToolBridge async bridge, hard timeout kill, allocation-counting memory cap, no fs/net — full contract in `docs/workflows/codemode.md`) |
-| **Security** | `internal/security` (engine, sanitizer, tirith, tls, fence), `internal/auth` (multi-user store: users/keys/expiry, quota+permission stubs) |
-| **Employee** | `internal/employee` (constitution, goal, goal_loop, enforcement, authority, manager) |
-| **Audit Chain** | `internal/auditlog` (canonical JSON, hash chain, store, anchoring, verification) |
-| **Session** | `internal/session` (store, store_sqlite, threads, messages) |
-| **Effects** | `internal/effects` (external-effect idempotency ledger) |
-| **GitHub** | `internal/githubsvc` (token sources, per-token client pool, PR status + `ReArmSink` seam; tools themselves are `internal/tools/builtin` github_* registered through the `toolprov` "github" provider (`builtin.SetGitHubProvider` + `toolprov.RegisterAll`), with `githubsvc.ToolFactories` as the mirrored construction seam — `builtin` imports `githubsvc`, so `githubsvc` may NEVER import `builtin`) |
-| **Intake** | `internal/intake` (github-intake-factory: label-gated GitHub Issues poller, ticket→goal identity layer (`Linker.EnsureGoal`, TriggerRef `intake:<repo>#<ticket>`), outcome write-back with the effects storm guard, plan→GitHub-Projects projection (`Projector`, effects receipts as the phase↔issue correlation store, driven by the `plan.executing` + `plan.phase_state` bus topics); daemon wiring `internal/daemon/intake_wiring.go` schedules `intake_poller` only when `[intake].enabled` — disabled by default; rides the `[github]` token sources, no separate token; the read-only `intake.status` RPC (`internal/rpc/intake_status.go`, registered by `internal/daemon/intake_status_rpc.go`) backs the TUI `/intake`, the CLI `meept intake status`, and the GUI's `GET /api/v1/intake/status` bridge + `ui/flutter_ui/lib/features/intake` view (issue #109 parity); docs/workflows/intake.md) |
-| **Kanban** | `internal/kanban` (board/column/card store: rebuildable projection over the work-item machines — one canonical card per work item, provenance fields `goal_id`/`employee_id`/`plan_id`/`trigger_ref`, lease rule A on human moves only, frozen C1 refusal texts parsed by three surfaces; SQLite WAL + FK cascades, `[kanban]` config surface, plan tree `plans/kanban-board/` — full contract in `internal/kanban/AGENTS.md`) ; `internal/kanbansvc` + `cmd/meept-kanban` (sidecar gateway, spawned by the daemon BY DEFAULT (`[kanban].sidecar_enabled` defaults true; set false to opt out): loopback HTTP, NO TLS (operator proxy terminates it — TLS-proxy examples in docs/workflows/kanban.md), REST→`kanban.*` RPC forwarding via `internal/transport` ONLY, ZERO board logic/store handle, bearer lane with single-use pairing codes, conjunctive takeover grants, WS event relay with `bearer.<token>` subprotocol lane + echo fed by `BusPump` (kanbansvc pump.go: bridges the daemon's `bus.subscribe`/`bus.poll` RPC pair over the same transport client; the seven concrete kanban topics; `[kanban].allowed_origins` extends the exact-match WS Origin gate for TLS-proxy deployments, plumbed as repeated `-allow-origin` boot flags — the sidecar stays config-blind), pairing codes have a 10-minute TTL (pairCodeTTL, `internal/kanbansvc/pairing.go:78`): expired codes are refused with the same uniform 401 as an unknown code, Flutter bundle under `/web/`; the daemon-side browser pairing route is `POST /kanban/pair/exchange` (`internal/comm/http/kanban_pairing.go`, loopback-only + rate-limited, code-as-credential per the dev-key precedent); per-IP rate limit on the sidecar pair/exchange route (M3, `internal/kanbansvc/gateway.go:82-113`) prevents remote brute-force in TLS-proxy deployments; known debt: the binary links sqlite transitively via `transport/rpc_adapter`→`internal/tui` — never import `internal/tui` from `internal/kanban`/`kanbansvc`; full contract in `internal/kanbansvc/AGENTS.md`) ; user surfaces committed: CLI `meept kanban` tree, TUI board view (key `b`), GUI `/kanban` route, `kanban_*` tools; daemon wiring live behind `[kanban].enabled` (DEFAULT TRUE; set false for byte-identical pre-kanban boot): `internal/daemon/kanban_wiring.go` constructs store + manager + human lane with the real C10 LeaseAuthority, seeds the default projection rules, runs the projector + reconcile ticker, registers the C4 RPC, and flips the five publisher gates; before sidecar spawn the daemon seeds the dev key into `$MEEPT_HOME/kanban/tokens.json` with board.read/board.mutate/board.takeover grants (`internal/daemon/kanban_devkey.go`); docs/workflows/kanban.md + kanbansvc.md + meept-kanban.md |
-| **Services** | `internal/services` (chat, session, terminal, push, reflection) |
-| **SMS leg** | `internal/sms` (durable inbound/outbound SMS store + typed topics `sms.inbound.received`/`sms.state.changed`, reply classifier + PendingConfirms), `internal/telnyx` SendSMS2/SMSAttempt (DLR wait + consent guard), `internal/voice/telnyx` signature v2 + replay NonceStore + tolerant normalizer, `internal/comm/http/messaging.go` webhook (401-first, 202 processed, 200 ack-noop); daemon arming `internal/daemon/messaging_arming.go` + `sms_reply_glue.go` closes the D6 dead-seam gap; ships fully opt-in (`[voice.messaging].enabled` / `.inbound_enabled`, default false = byte-identical boot); full contract in `docs/workflows/sms.md` (plan tree `docs/plans/20261110-telnyx-texting/`, dependency of #132) |
-| **Project** | `internal/project` (manager, init_deep, detection) |
-| **TUI** | `internal/tui` (app, commands, components, handlers, modals, models, tableutil) |
-| **GUI** | `ui/flutter_ui` (Flutter web + desktop) |
-| **Scheduling** | `internal/scheduler`, `internal/queue`, `internal/worker` |
-| **Voice** | `internal/voice` (daemon side: call manager, splice, supervisor gate, dial, day brief, registry, child proc, local leg `local.go`/`localsplice.go`, filler lane pools `lanes.go`, partial context warm `contextwarm.go`, content-addressed clip cache `internal/voice/clipstore`), `internal/voiceframe` (stdlib-only shared frame codec), `internal/voicechild` + `cmd/meept-voice` (jargo voice child; clip render/playback `clips.go`), `cmd/meept/voice.go` (`voice local`/`voice status` CLI), `internal/rpc/voice_local.go` (`voice.local.*` RPC - full contract in `internal/voice/AGENTS.md`), `internal/llm/warm.go` (`Client.Warm` cache-warming seam) |
-| **Skills** | `internal/skills`, `internal/selfimprove` |
-| **Infra** | `internal/config`, `internal/metrics`, `internal/transport`, `internal/pty`, `internal/process`, `internal/eval`, `internal/gate`, `internal/langcode` (shared ISO-639 vocabulary for config validation + validator output filter; docs/workflows/langcode.md) |
+| Layer | Packages | Contract |
+|-------|----------|----------|
+| Server | `internal/daemon`, `internal/rpc`, `internal/bus`, `internal/comm`, `cmd/meept-daemon` | `internal/daemon/AGENTS.md`, `internal/comm/AGENTS.md` |
+| Agent | `internal/agent` | `internal/agent/AGENTS.md` |
+| LLM | `internal/llm`, `internal/llm/warm.go` | `internal/llm/AGENTS.md`, `docs/workflows/llm-routing-quality.md` |
+| Memory | `internal/memory` | — |
+| Tools | `internal/tools`, `internal/acp`, `internal/hermes` | `docs/workflows/github.md` |
+| Codemode | `internal/codemode` | `docs/workflows/codemode.md` |
+| Security | `internal/security`, `internal/auth`, `pkg/security` | — |
+| Employee | `internal/employee` | — |
+| Audit chain | `internal/auditlog` | — |
+| Session | `internal/session` | `internal/session/AGENTS.md` |
+| Effects | `internal/effects` | — |
+| GitHub | `internal/githubsvc`, github_* tools in `internal/tools/builtin` | `docs/workflows/github.md` |
+| Intake | `internal/intake`, `internal/rpc/intake_status.go` | `docs/workflows/intake.md` |
+| Kanban | `internal/kanban`, `internal/kanbansvc`, `cmd/meept-kanban` | `internal/kanban/AGENTS.md`, `internal/kanbansvc/AGENTS.md`, `docs/workflows/kanban.md` |
+| SMS leg | `internal/sms`, `internal/telnyx`, `internal/voice/telnyx`, `internal/comm/http/messaging.go` | `docs/workflows/sms.md` |
+| Project | `internal/project` | `docs/agents/projects-and-workdirs.md` |
+| Voice | `internal/voice`, `internal/voiceframe`, `internal/voicechild`, `cmd/meept-voice` | `docs/agents/voice-invariants.md` (load only for voice work), `internal/voice/AGENTS.md` |
+| TUI / GUI | `internal/tui`, `ui/flutter_ui` | `docs/workflows/tui.md`, `docs/workflows/flutter_gui.md` |
+| Scheduling | `internal/scheduler`, `internal/queue`, `internal/worker` | — |
+| Skills | `internal/skills`, `internal/selfimprove` | — |
+| Infra | `internal/config`, `internal/metrics`, `internal/transport`, `internal/pty`, `internal/process`, `internal/eval`, `internal/gate`, `internal/langcode` | `docs/workflows/langcode.md` |
 
-See `docs/concepts/architecture.md` for full documentation.
-
-### Connectivity Graph (Bus / RPC / HTTP / WS)
-
-The daemon's components communicate via string-typed bus topics, RPC handlers,
-and HTTP routes — all invisible to the compiler. A generated connectivity graph
-maps every publish/subscribe edge so you can trace cross-boundary data flow
-without reading the code:
-
-- **`docs/generated/bus-topology.md`** — human-readable: every bus topic with
-  publishers, subscribers, payload keys; orphan analysis; WS event
-  classification; RPC handler map; HTTP route map.
-- **`docs/generated/bus-topology.json`** — machine-readable version.
-- **`docs/generated/rpc-handlers.json`**, **`http-routes.json`**,
-  **`ws-event-map.json`** — individual layer exports.
-
-Regenerate with `make graphs` (runs automatically on every `make build`).
-
-**When debugging cross-boundary issues** (events not reaching clients, wrong
-payload fields, orphaned listeners), start with `docs/generated/bus-topology.md`
-before reading source.
+New package? Add a row in the same commit. `make agents-check` enforces this.
 
 ## Critical Invariants
 
-### Chat replies must be honest and user-shaped
+Full text and rationale: `docs/agents/invariants.md`. Hard red lines only here:
 
-The chat path is the user's only window into the daemon. Full contracts (async turns,
-errored steps, per-session working dirs, no global active-project fallback,
-machine-shaped-output guard + one bounded loop-seam rewrite retry, completion
-events deduplicated by queue-job state) live in `internal/agent/AGENTS.md`. Short form: turns are
-async, errored steps never pass review, and projects bind PER SESSION with no global
-fallback. `session_id` and `conversation_id` are distinct; new code handles both.
-
-### Projects, working dirs, and trust boundaries
-
-Full rules live in `docs/agents/projects-and-workdirs.md`. Short form: never use
-`os.Getwd()` as a fallback in `internal/`/`pkg/` daemon code; projects bind PER
-SESSION with no global active-project fallback; `multiuser.enabled=false` preserves
-the legacy flat-key HTTP path byte-identically; Unix RPC stays owner-trusted (no
-token auth on the socket).
-
-### First-run pairing and the dev key
-
-The per-installation dev key ($MEEPT_HOME/dev_key) is generated daemon-side at
-first boot; it must NEVER be baked into a distributed GUI binary. `make
-build-gui-dist` builds with no embedded key; a key-less GUI pairs on first run
-through the daemon's loopback-only handshake (`internal/comm/http/pairing.go`):
-a single-use `crypto/rand` code printed to the daemon console, exchanged once
-at `POST /api/v1/pair/exchange`. Pairing arms ONLY when require_auth is on with
-no explicit api_keys and no auth store. Never log the dev key or pairing code
-at info level; the build-time dart-define path (`make build-gui`/`devbuild`)
-remains dev-workflow-only.
-
-### WS event classification and bus topics
-
-Full rules live in `internal/comm/AGENTS.md`. Short form: only `chat_message` topics
-produce `type: "chat_message"` (everything else is `agent_progress`); `chat.response`
-is never WS-relayed; typed `bus.Topic[T]` for stable payloads, raw `Publish` for
-multi-shape; the kanban board surface (`kanban.card.moved` / `kanban.board.changed`
-/ the five `kanban.event.*.state` topics) classifies as the `WSBoard` wire type
-`board_event`, relayed like progress and never `chat_message` (kanban-board C8).
-Execution results use two typed `Topic[agent.ExecutionResultEvent]` topics —
-`bot.result` (bots) and `employee.result` (employees), issue #140 — with ONE
-shared payload that has NO `kind` field: the topic name is the sole tier
-discriminator. Both marker-classify as `agent_progress`, never `chat_message`.
-Bots are `send_agent_message` targets and drain inbox messages at turn start.
-A
-bus proxy registration needs a live responder on both sides. The
-per-connection session filter is `(channel, session)`-scoped — a chat
-unsubscribe must not silence progress/turn-terminal for the same session, an
-unsubscribe records a suppression rather than deleting the grant, and a
-session-less event broadcasts to every connection.
-
-### Quota errors are not failures (quota-reset-resilience)
-
-Full invariants live in `internal/llm/AGENTS.md` (quota blocks, endpoint cooldowns,
-refusals, alias resolution, universal parking, slot gate). Short form: a
-`*llm.QuotaResetError` is never an alias failure and never short-retried; check
-`ErrAllModelsQuotaBlocked` / `ErrAllEndpointsBlocked` with `errors.Is`. An
-empty/whitespace completion from ANY provider IS an alias failure — every
-client classifies it (openai, anthropic, codex): the client retries it
-immediately within the short budget, then the bare `ErrEmptyResponse`
-sentinel rotates to the fallback (never surfaced as a completed turn).
-
-### Opt-in defaults and evolver wiring
-
-Full rules live in `docs/agents/opt-in-defaults.md`. Short form: `skills.state`,
-`plans.parallel_phases`, and `plans.plan_compiler_enabled` are opt-in with default
-false; flipping a default is a product decision. Kanban is the counter-case:
-`[kanban].enabled` and `[kanban].sidecar_enabled` are now DEFAULT-ON opt-out
-knobs (board projection + loopback sidecar; dev key seeded into the sidecar token
-store with three grants) — set either to `false` for the byte-identical pre-kanban
-boot. Wiki/trace stores are evolver-only,
-never reachable from inference-path prompt builders; wire trace writer + usage
-tracker + learning pipeline on every new loop; construct the evolver after its
-dependencies in daemon startup.
-
-### Local runtime lifecycle: spawn guards and orphan reaping
-
-Full rules live in `internal/daemon/AGENTS.md`. Short form: runtimes are long-lived
-daemon children — never spawn into a served endpoint, never kill another instance's
-runtime, only `StartupOrphanSweep` reaps orphans, sweep before spawn, a local
-classifier that never becomes healthy fails startup (F-D8), and client transports
-(RPC socket, HTTP/WS listener) come up BEFORE the F-D8 gate so clients can connect
-and enqueue during slow model loads (boot-window submits park on
-`ClassifierBootReadiness`). The SIGINT/SIGTERM/SIGHUP handler is installed before
-those listeners: a reload during boot is queued, not fatal. Hang detection
-(inference canary + checker self-watchdog, `VerdictHealthHung`, `runtime.health` bus
-events) adds one rule: HUNG drives restart ONLY through the existing bool
-callback/auto-restart path and the bus seam is `SetHealthEventPublisher` — full
-invariants in `internal/llm/AGENTS.md` (`docs/workflows/runtime-hang-watchdog.md`).
-
-### Session affinity headers and upstream teardown
-
-Full rules live in `internal/llm/AGENTS.md` (header plumbing, sticky rotation,
-teardown adapters; `docs/workflows/session-affinity.md` is the user-facing doc).
-Short form: affinity headers are DEFAULT-ON (`llm.session_affinity`, header
-`session_id`) on the OpenAI-compatible, Anthropic, and Codex clients — an empty
-scope sends NO header, never an empty value; sticky endpoint preference is a
-request-scoped READ whose precedence is quota blocks > endpoint cooldowns >
-alias blocks > stickiness; teardown (KV-cache erase on session archive/delete/
-idle/shutdown) is best-effort with the verified route `POST /slots/0?action=erase`
-and NEVER fails a turn, an archive, or a shutdown; cloud providers are an
-explicit no-op.
-
-### Sovereign-router parity: selection chain, posture, admission, difficulty (tree 20261115-sovereign-router-parity)
-
-Full contract: `docs/workflows/llm-routing-quality.md` + the tree's
-`master.md` (C1-C11) + `DRIFT-AUDIT.md` rulings 1-29. Short form: nine
-routing capabilities (quality floor R1, admission R2, data posture R3,
-shadow route R4, pool-scoped failure R5, advisory budget R6, sticky
-difficulty R7, tool-call validation R8, price groups R9) are additive and
-OPT-IN — with none configured every routing decision is byte-identical to
-pre-change (pinned by the flag-off golden in `e2e/suites/sovereign-parity/`).
-The selection chain (`internal/llm/selection.go`) has a FIXED registration
-order posture -> quality -> admission; posture is a hard compliance
-boundary (a sensitive prompt never reaches a non-cleared model and
-all-non-cleared refuses the turn, never a leak). The frozen precedence
-(quota > endpoint > alias > sticky) is untouched: filters slot around it,
-the difficulty release check sits INSIDE the sticky stage, and the spillway
-(R9) never reorders rotation or touches pins. Admission
-(`*ContextTooSmallError`, NonRetryable) gates pre-dispatch on the
-ProviderManager rotation loops AND the bare-client paths — a size verdict
-is never a `RecordAliasFailure` and never parked. `ClassifyFailure`'s
-5-arg shape (poolID third) and the (scope,target) block keys coexist with
-the legacy `host|credential` endpoint keys; model-scope arming is deduped
-into the alias cooldown; a request-fault (400/413/422) arms nothing.
-`ResolveShadow` is RLock-only with zero side effects (no ledger, no
-budget, no cursor, no pin). `ErrToolCallInvalid` is a bare pointer-identity
-sentinel wired post-parse/pre-executor on all three clients, where the
-transport enforces the ARGUMENTS-SHAPE half only — name membership stays
-with the executor's audited gates (group_deny / unknown-tool / exposure
-recovery); the exported `ValidateToolCalls` keeps the full frozen table; it
-never replaces the empty-completion lane. Advisory-budget `steer` never returns
-`BudgetExceededError` — one `budget_advisory`-class event rides
-`agent.quota_wait` and only the failover TAIL reorders by cost.
-
-### Serving tiers, semantic cache, and TTFT
-
-Full rules live in `internal/llm/AGENTS.md` (llm-serving-tiers tree).
-Short form: `llm.tiers` bounds alias-rotation depth — the `TierFloorError`
-floor consumes DEPTH only (pre-dispatch skips — quota/endpoint/alias
-blocks — never consume depth) and never reorders the frozen resolver
-precedence; degraded-tier signaling rides per-step response metadata
-(`llm_tier*` keys), never a new bus topic. The semantic cache tier
-(`llm.cache.semantic`, opt-in default false) sits strictly BEHIND the
-exact-key miss and BEFORE the budget gate on the three chat-variant
-cache paths, NEVER stores or serves a tool-call-bearing response, and
-degrades silently to exact-only on embedder failure; disabled =
-byte-identical. TTFT (`llm_calls.ttft_ms`, migration v9 via
-captureFirstDelta) is -1 when unmeasured — non-streaming, cache hits,
-and errors never write 0.
-
-### Routing selection chain: quality, posture, admission, spillway
-
-Full rules live in `internal/llm/AGENTS.md` (sovereign-router-parity
-tree); user-facing map: `docs/workflows/llm-routing-quality.md`. Short
-form: the pre-dispatch chain is THREE filters in fixed order (posture ->
-quality -> admission), first non-Allow verdict binds, and it never
-reorders the frozen precedence (quota > endpoint > alias > sticky).
-Every dimension is opt-in: absent `quality`/`data_posture`/`budget.mode`/
-`price_group` config is byte-identical legacy behavior (flag-off golden
-gates it). Admission fires pre-dispatch in all three ProviderManager
-rotation loops (`*ContextTooSmallError`, NonRetryable, never parked);
-shadow routing (`ResolveShadow`, RPC `llm.route.shadow`) is read-only by
-construction — zero ledger/budget/health/pin mutation. Sticky pins carry
-difficulty (`StickyPins` is `map[string]StickyPin`; releases only on a
-strictly-rising difficulty from the pure `DeriveDifficulty` table);
-`ErrToolCallInvalid` keeps the empty/refusal ordering and the bare-
-sentinel pointer rule. Advisory budget is NOT a chain filter; it binds
-at the client budget gate and the tier steer.
-
-### Voice sidecar (phone channel + local leg)
-
-Full rules live in `internal/voice/AGENTS.md` (frames, sockets,
-reorder/pacing/barge-in, release fan-out, secrets lanes, child
-confinement, one-live-call-per-employee, local-leg invariants, filler
-clip cache + lane pools + farewell, partial context warm);
-user-facing docs are
-`docs/workflows/voice-sidecar.md` (spec rev 3 + as-built) and
-`docs/workflows/voice.md`. Short form: C1 text frames are byte-exact
-JSON lines, every frame carries `call_id`, only final prompts
-(`last:true`) start a turn, and `say` goes out only after the
-supervisor allows (fact-free filler/greeting excepted); C2 audio rides
-per-call unix socket pairs with codec-derived 20 ms chunks; barge-in
-`clear` affects the interrupted call only. A voice call is never
-quota-parked - supervisor timeout means fallback line and the call
-continues; hangups fan out release (slot, goal unpark, effects) exactly
-once. The Telnyx token resolves via `Broker.Value` in-daemon only;
-provider keys reach the child over the unix socket and live in child
-memory only. jargo is imported ONLY by `cmd/meept-voice` and
-`internal/voicechild` (compile-time pins); the registry enforces one
-live call per employee and per target number, with outbound dials
-gated by allowlist + effects reservation + audit-before-dial. The
-LOCAL leg (phone + local run concurrently on one child/registry/store)
-never imports telnyx and skips effects + audit by contract; its
-barge-in is RMS VAD gated to `Local==true`; `LocalSplice` has no
-reorder window and negotiates L16@16k only. A LOCAL CALLER IS ALWAYS
-APPROVED: the local leg's turn ctx is stamped Approved/Known so the
-step-1c caller gate is inert and full tool use works; `voice.unapproved_caller_allowed_tools`
-is the allow-list for UNAPPROVED phone/signal callers only, never a
-ceiling on the trusted local operator (detected via the explicit
-`Instance.Leg` field, never a target-prefix heuristic). BARGE-IN CONTRACT
-(2026-11-11): the client-speaker silence lane is a per-call daemon
-LISTENER `<ccid>.c.ev` beside the client pair (JSON-lines, NEVER PCM -
-the pair stays raw-audio-only) carrying `{"event":"clear"}`, emitted
-by `VoiceWiring.routeFrame` once per latch transition and consumed by
-the CLI drain's `sink.Clear()` (post-latch audio must die within one
-oto callback, ~20 ms - the fixed defect was a ~750 ms ghost tail from
-`SpeakerSink.Clear()` having zero production callers); `drainLiveSpeaker`
-must not flush a post-clear EOF tail. Full contract in
-`internal/voice/AGENTS.md` (Sockets section). Operator telemetry:
-each live call carries a fixed per-call event ring
-(`internal/voice/events.go`) fed by the talk loop's optional
-`TalkDeps.OnEvent` hook + the frame router's `heard` append (nil-safe,
-no new bus topic), read over the seam-based `voice.local.events` RPC and
-printed live by `meept voice link` / `voice local`; `voice local` also
-prints the call's stored transcript at call end over the read-only
-`voice.local.transcript` RPC (call-scoped, best-effort). The silence
-nudge's clock is AUDIO-AWARE on local legs via the optional
-`TalkDeps.AudioActive` seam (fire re-arms while the agent's own audio is
-active, bounded at 2 deferrals) and CALLER-AWARE via optional
-`TalkDeps.CallerActive` (a loud inbound chunk inside 1 s re-arms a fresh
-window and does not speak; nil = byte-identical - full contract in
-`internal/voice/AGENTS.md`). The optional SECOND
-cleartext listener (`voice.loopback_plain_addr`, leaf 10 T6) is booted by
-`internal/daemon/voice_plain_boot.go` from `VoiceWiring.Start` when the
-knob is non-empty, rides the voice subsystem's stop context, and MUST
-bind loopback: a non-loopback address (name-checked AND actual-bind
-re-checked) is `ErrNonLoopbackVoiceAddr` and fails the startup loudly,
-never degrades. Its mux carries the same per-IP rate limit + access
-logging as the main listener's voice chain. FILLER CLIP CACHE + LANE
-POOLS (plan 20261113-filler-clips-and-context-warm phase 1): every
-filler-class line (greeting/filler/silence nudge/fragment clarify/
-farewell) belongs to one enumerable C5 lane pool (ladder row list > row
-scalar > global list > global scalar > default; list "set" = non-empty,
-so unset new keys are byte-identical; the farewell pool ships
-non-empty and speaks a goodbye on a detected caller bye, exactly once
-per call); the daemon's clip planner pre-renders misses to the child as
-C3 `clip_render` frames ONLY behind the R4 gate (live child + complete
-resolved TTS identity + voice employee — sidecar disabled writes
-nothing), the child caches PCM under `$MEEPT_HOME/voice_clips/` keyed by
-the frozen C1 sha256 formula, and filler-class `say` frames carry
-`clip_id`; a store hit replaces synth entirely, a miss or an old child
-falls through to live synth byte-identically. TEXT stays the transcript
-source — a clip never makes a second speech path. PARTIAL CONTEXT WARM
-(phase 2, `voice.context_warm` opt-in default false): debounced STT
-partials fire `llm.Client.Warm` (max_tokens=1, same rendered prefix +
-session-affinity scope as the imminent turn) so the real turn pays
-decode, not prefill; warm never starts a turn or tools, consumes no
-budget, never touches blocks/metrics, and its failures are silent
-(DEBUG). Full contracts (C1-C6) in `internal/voice/AGENTS.md`. RUMBLE
-STT (invariant): native streaming vendor (partial/final/end over a WS at
-`/v1/audio/transcriptions/stream`, keyless); the client-side pseudo-stream
-proxy is BYPASSED for native vendors (rumble, deepgram): `stt_partial_ms = 0`,
-and server-stable finals drive barge-in/endpointing. Whisper default and
-its batch proxy opt-in are unchanged. All new keys/selectors absent =
-byte-identical legacy request/provider.
-OPT-IN ENDPOINTING/LATENCY SELECTORS (plan 20261118-voice-tts-stt-optimizations):
-seven additive `VoiceConfig` keys cross the daemon->child C1 keys line as
-omitempty `KeysFrame` selectors (zero/empty = byte-identical legacy), so
-the child's turn-taking, STT and TTS adapters receive them per call:
-`smart_turn_mode` (smart turn 0/1/2 semantics; default 0 = off, verdict
-unused; mode 2 consumes Smart Turn under `turnMu` only, never `playMu`),
-`whisper_server_addr` (empty = exec-per-utterance, persistent server when set),
-`deepgram_endpoint_ms` (0 = timer only; positive = authoritative endpoint
-fast path), `recognition_vocabulary` (Deepgram keyterm + Whisper -p),
-`qwen3_chunk_size` (0 => body chunk_size 4), `clip_prewarm_delay_ms`
-(0 = immediate prewarm; positive = defer clip renders past first played
-edge; renders yield to live synth/barge-in), and `context_warm_window_ms`
-(0 => turn_confirm_ms). Whisper emits finals only, so context warm and
-the no-partial limits apply only to partial-streaming STT. Full contract
-in `internal/voice/AGENTS.md`.
-
-### The github_* tools register through the tool-provider seam; githubsvc never imports builtin
-
-The github PR/CI tools live in `internal/tools/builtin` (which imports
-`internal/githubsvc` for pool / `OwnerRepo` / `ReArmSink`), so
-`githubsvc` may NEVER import `builtin` back — that would be an import
-cycle. Registration runs through the tool-provider seam: the daemon
-(`internal/daemon/github_wiring.go`) binds runtime inputs via
-`builtin.SetGitHubProvider(opts, ledger, sink, broker)`, then
-`toolprov.RegisterAll` walks the compiled-in `"github"` provider whose
-`Discover()` constructs the tools. `builtin`'s `init()` also populates the
-package-level `githubsvc.ToolFactories` construction seam (mirrored
-constructors); the former `githubsvc.RegisterGitHubTools` entry point was
-removed as dead code (zero callers since the provider seam landed —
-`internal/githubsvc/register.go` keeps a tombstone). New github_* tools are
-added to BOTH the provider's Discover list and the factory closure (they
-must stay identical). A `[tool_providers]` `enabled=false` for `github`
-skips registration entirely.
-Token material is NEVER logged — the token source reports presence/length
-only, and a token file with group/other access bits is refused
-(`internal/daemon/github_wiring.go` + `meept github status`). A parked
-`github_ci_wait` persists its re-arm as a user-instruction cron row via
-`githubsvc.InstructionReArmSink` (`Trigger: "cron:..."`,
-`Action: "agent_trigger"`); the daemon re-syncs cron instructions on a
-30s ticker (`Components.startGitHubReArmTicker`) so mid-life parks are
-picked up without a restart. `docs/workflows/github.md` is the user-facing
-doc.
+- Chat: turns are async, errored steps never pass review, projects bind per
+  session, `session_id` and `conversation_id` differ. `internal/agent/AGENTS.md`.
+- Projects: no `os.Getwd()` fallback in `internal/` or `pkg/` daemon code;
+  Unix RPC is owner-trusted. `docs/agents/projects-and-workdirs.md`.
+- Dev key: `$MEEPT_HOME/dev_key` is generated daemon-side; NEVER bake into a
+  distributed GUI; never log key or pairing code. `internal/comm/AGENTS.md`.
+- WS: only `chat_message` topics emit `type: "chat_message"`; `chat.response`
+  is never relayed; kanban events classify as `board_event`.
+  `internal/comm/AGENTS.md`.
+- Quota: a `*llm.QuotaResetError` is never an alias failure; empty completion is
+  an alias failure on every client. `internal/llm/AGENTS.md`.
+- Opt-in: `skills.state`, `plans.parallel_phases`, and
+  `plans.plan_compiler_enabled` default false; kanban defaults true.
+  `docs/agents/opt-in-defaults.md`.
+- Runtime: long-lived daemon children only; `StartupOrphanSweep` alone reaps;
+  transports start before the F-D8 gate. `internal/daemon/AGENTS.md`.
+- Affinity: headers default on; empty scope sends NO header; teardown is
+  best-effort and never fails a turn. `internal/llm/AGENTS.md`.
+- LLM routing: posture -> quality -> admission; quota > endpoint > alias >
+  sticky; posture is a compliance boundary; admission is non-retryable;
+  everything opt-in. `docs/workflows/llm-routing-quality.md`.
+- Voice: load `docs/agents/voice-invariants.md` only for voice work.
+- GitHub: `builtin` imports `githubsvc`, never the reverse; token material is
+  never logged. `docs/workflows/github.md`.
 
 ## Coding Practices
 
-### e2e Testing Policy
+Full rules, code examples, and enforcement details:
+`docs/agents/coding-practices.md` and `docs/agents/coding-practices-extra.md`.
+Hard rules only here:
 
-**All new feature tests go in the hermetic e2e tier — no new unit test files
-for new features.** Existing unit tests may be updated for bug fixes only.
+- All new feature tests go in the hermetic e2e tier. No new unit test files
+  for new features. `docs/workflows/e2e-testing.md`.
+- Never use `time.Now().UnixNano()` or `math/rand` for IDs; use
+  `pkg/id.Generate()` on entropy failure.
+- Prefer early optimization when cost/benefit is reasonable.
+- Every feature needs at least one user surface (CLI, TUI, GUI, or HTTP) and
+  tests. Internal-only code is incomplete.
+- Guard typed-nil interfaces; nil-guard every `Set*`; no I/O under mutex; no
+  ignored errors or bare `panic(err)`; two-value map assertions.
+- Surface unacted observations at the end of every turn, with `file:line`,
+  what, and why not acted on.
+- Fix root causes; never ship a workaround as the final solution.
 
-- Suites: `e2e/suites/<name>/` with the `e2e` build tag; manifest +
-  path→suite mapping in `e2e/manifest.json`. See
-  `docs/workflows/e2e-testing.md` for tiers, manifest format, and the
-  coverage rule.
-- `make e2e-fast` (all suites), `make e2e-fast-area AREA=<name>` (one suite),
-  `make e2e-affected` (suites affected by the working diff, via
-  `scripts/e2e-affected.sh`). The fast tier is hermetic and runs in CI
-  (ci.yml job `e2e-fast`, a required member of the `ci-success` aggregate
-  gate - that is the one blocking merges; code-quality.yml runs the same
-  tier as advisory coverage); `make e2e-chat` is the live-model tier,
-  local-only.
-- Scratch-bin hygiene: the harness builds meept-daemon/meept once per test
-  process into `$TMPDIR/meept-e2e-bin*`. A detached watchdog reaper
-  (`e2e/harness/daemon.go`) removes that dir seconds after the test
-  process exits AND kills any meept-daemon/meept processes running from
-  that dir — the safety net for abnormal test-process exits (panic abort,
-  os.Exit, kill -9), where in-process `t.Cleanup` never runs and suites
-  that spawn daemons via raw `exec.Command` would otherwise leak them (78
-  orphaned scratch daemons observed on one host). A 24h-age sweep runs at
-  first harness use, and `make e2e-clean-tmp` is the standalone/
-  belt-and-braces sweep wired into all three `make e2e-*` Go targets. Do
-  not reintroduce an ownerless
-  `os.MkdirTemp("", "meept-e2e-bin...")` — an earlier version of the
-  harness leaked one ~136 MiB dir per test process (219 GiB observed).
-- Enforcement: pre-commit check [19/20] (`pre-commit-e2e`) runs the new-
-  package census — blocks commits that add files under a NEW package
-  directory without an e2e suite + manifest entry — while the affected-
-  suite sweep moved to the push boundary (`pre-push-e2e`, FULL scope) and
-  CI (`e2e-fast`) after the gates-speedup change; opt it back in per-commit
-  with `MEEPT_E2E_PRECOMMIT_SWEEP=1`. Emergency-only bypass:
-  `MEEPT_SKIP_E2E=1 git commit` (prints a loud warning). When you add a
-  package, add its `path_map` entry + suite to the manifest in the same
-  commit.
+## UI and Flutter Conventions
 
-### Predictable ID Prevention
+Full rules: `docs/agents/ui-and-feature-rules.md`, `docs/workflows/tui.md`,
+`docs/workflows/flutter_gui.md`. Hard rules only here:
 
-**Never use `time.Now().UnixNano()` or `math/rand` for ID generation, even in
-fallback paths.**
-
-When `crypto/rand` fails, use `pkg/id.Generate()` which has a documented
-zero-suffix fallback. The zero suffix indicates catastrophic system failure
-(entropy exhaustion) rather than providing pseudo-random IDs that appear secure
-but are predictable.
-
-**Custom analyzers:** Run `go run ./tools/analyzers/predid/... ./...` to detect
-predictable ID patterns.
-
-### Optimization Posture
-
-**Prefer early optimization over defensible-but-suboptimal defaults.** Pick the
-optimized approach when cost/benefit is reasonable.
-
-- Share genuinely-sharable state (configs, registries, builders) across instances
-- Prefer structural isolation over convention-based isolation
-- Don't over-analyze micro-optimations (<100KB memory, <10ms latency)
-
-### Wiring/Integration Requirement
-
-**Implementations MUST include wiring — data structures without user-facing
-interfaces are INCOMPLETE.**
-
-Every feature must answer: **"How does a user actually use this?"**
-
-**Complete feature checklist:**
-- [ ] **Core logic** — data structures, interfaces, business logic
-- [ ] **At least ONE interface** — CLI (`cmd/meept/`), TUI (`internal/tui/`),
-      GUI (`ui/flutter_ui/`), or HTTP API (`internal/comm/http/`)
-- [ ] **Agent wiring** — dispatcher routing, intent classification, tool
-      exposure (if agents should use it)
-- [ ] **Tests**
-
-**Exception for prototypes:** Experimental features can ship with partial wiring
-if the PR explicitly notes which interfaces are deferred and why.
-
-**Red flags:**
-- Files only in `internal/` with no changes to `cmd/`, `internal/tui/`, `ui/`,
-  or `internal/comm/http/`
-
-### Typed-nil guards, setters, mutex scope, error handling, clean fixes
-
-Full rules with code examples live in `docs/agents/coding-practices.md`. Short form:
-guard typed-nil interface assignments; every `Set*` needs a nil guard (enforced by
-`internal/tools/builtin/setters_test.go`); never hold a mutex across I/O; no ignored
-errors or bare `panic(err)` (pre-commit enforced); two-value map assertions; prefer
-clean architectural fixes over workarounds — never ship a workaround as the final
-solution without user approval.
-
-### Surface Unacted Observations
-
-**At the end of every turn, surface to the user any observations you made but
-did not act on.** Silent discoveries are lost discoveries.
-
-While working on one task, the agent often notices adjacent problems — a
-potential bug in a sibling code path, a misconfiguration, a stale comment, an
-inconsistent pattern, a suspicious value. If the agent decides not to address
-these within the current task scope (out of focus, lacking certainty, or out of
-respect for the task boundary), it MUST still tell the user about them before
-completing the turn.
-
-**Format:** Append a brief **Observations** section at the end of the response.
-List each observation with:
-
-- **Location** — `file:line`
-- **What** — a one-line description
-- **Why not acted on** — the reason it was left out of this turn
-
-Example:
-
-```
-Observations:
-- internal/agent/loop.go:412 — error from planner is swallowed (no log). Not
-  acted on: out of scope for this PR; needs its own investigation.
-- config/models.json5:55 — capability "code" has no provider mapped. Not acted
-  on: unclear if intentional; flagging for the user to confirm.
-```
-
-Do not bury observations inside a wall of prose. If there are no observations,
-omit the section entirely (do not write "No observations.").
-
-### Prefer Clean Architectural Fixes
-
-**Always prefer clean architectural fixes over hacky workarounds, even when the
-clean fix requires more work.** Hacky workarounds accumulate technical debt and
-create fragile systems that are hard to reason about.
-
-Examples of hacky patterns to avoid:
-- **Content comparison for deduplication** — comparing serialized content
-  instead of using proper identity keys (`id`, `session_id`, hash of source).
-- **Suppressing symptoms** — catching/swallowing an error to make a test pass
-  without understanding why the error occurs.
-- **Patching around a root cause** — adding a special case downstream instead
-  of fixing the upstream producer of bad data.
-
-**When fixing a bug:**
-
-1. **Trace the root cause** through the full data flow — from the observed
-   symptom back to its origin. Do not stop at the first place you *could* patch.
-2. **Fix it at the source** — change the code that produces the incorrect
-   behavior, not the code that merely reacts to it.
-3. **If a workaround is temporarily necessary**, add a `TODO` comment with the
-   ticket/reference and a concrete plan for the proper fix:
-
-   ```go
-   // TODO(subagent-1234): Temporary dedup by content string. Replace with
-   // proper id-based dedup once Dispatcher emits stable task IDs.
-   if seen[task.Payload] { continue }
-   ```
-
-**Never ship a workaround as the final solution without explicit user
-approval.** If the clean fix is too large for the current change, say so, get
-approval for the temporary measure, and record the follow-up work as an issue
-or TODO.
-
-## UI Conventions
-
-- **All UI text must be lowercase** (e.g., "switch" not "Switch", "ok" not "OK")
-- For TUI, use bubblezone for positioning
-- Default to clickable elements for context switching
-- **TUI and Flutter GUI features must be kept at parity.** When a feature is
-  added or changed in one surface, the other surface gets the same capability.
-  This includes: status bar elements, command palette items, keyboard shortcuts
-  (prefer identical keys across surfaces — e.g., `Ctrl+V` for verbosity on all
-  platforms, not `Cmd+V` on mac), session/agent/tab semantics (e.g., archive vs
-  delete), and tab affordances. Document surface-specific deviations explicitly
-  with a justification.
-- **TUI tables are sized on both axes.** `bubbles/table` owns a viewport that
-  starts at width 0, and a width-0 viewport renders no lines: a table given only
-  `SetHeight` draws its header over an empty body while cursor navigation still
-  works. Size every table through `internal/tui/tableutil.Size` and write rows
-  through `tableutil.SetRows`, which normalizes each row to the current column
-  count (a row longer than the column list panics inside `bubbles/table`). A
-  column change clears the rows first (`SetColumns` re-renders them) and
-  repopulates from cache afterwards. See `docs/workflows/tui.md`.
-
-## Flutter Multi-Platform (Web + Desktop)
-
-When modifying Flutter UI code, ensure web compatibility alongside desktop
-(macOS/Linux/Windows):
-
-- **Avoid top-level `dart:io` imports in shared code** — use `kIsWeb` guards
-  or conditional imports
-- **Platform detection:** use `bool.fromEnvironment('dart.library.io')` for
-  compile-time checks, `Platform.isMacOS` only in `!kIsWeb` guarded code
-- **File I/O:** wrap in `if (kIsWeb) return;` guards; web uses file pickers,
-  not direct paths
-- **Platform abstraction:** for shared platform abstractions, use a singleton
-  service pattern (e.g., `PlatformService`) that provides safe null/default
-  returns on web
-
-**See also:** `ui/flutter_ui/lib/core/platform/platform_service.dart` and
-`platform_native_helpers.dart` for the platform abstraction layer pattern.
+- All UI text is lowercase. TUI uses bubblezone; default to clickable elements.
+- TUI and Flutter GUI stay at parity: same status elements, commands, keys,
+  session semantics. Document deviations with a reason.
+- Size every TUI table on both axes via `internal/tui/tableutil.Size` and
+  `tableutil.SetRows`.
+- Flutter shared code avoids top-level `dart:io`; guard with `kIsWeb`.
+- Feature code changes need a doc update: `docs/workflows/<pkg>.md`.
 
 ## Configuration
 
-All config uses **JSON5** format. Templates in `config/`, copied on
-`make install`.
+All config is JSON5. Full paths and defaults: `docs/agents/configuration.md`,
+`docs/configuration/`. Hard rules:
 
-- **Main**: `~/.meept/meept.json5`
-- **Kanban**: the `[kanban]` block in `config/meept.json5` ships uncommented with
-  `"enabled": true` and `"sidecar_enabled": true` (board + loopback sidecar
-  default-on; set either to `false` to opt out). Installed homes older than this
-  block lack it and fall back to the same package defaults — see the
-  `// drift:` annotation on the template block and `config-drift-check.py`.
-- **Models**: `config/models.json5` (capability-based resolution)
-- **MCP servers**: `~/.meept/mcp_servers.json5` (22 preconfigured, 8 enabled
-  by default — incl. `obscura` browser MCP, enabled; `excel` xlsx fallback,
-  disabled). Every stdio entry carries `install_hint`; `meept doctor`
-  surfaces it and `meept doctor --fix --install-missing` runs hints
-  opt-in (consent per command). Daemon/launchd/menubar launches augment
-  PATH via `internal/daemon/daemonpath.go` `DaemonPath()` (menubar keeps
-  a synced Swift copy) — keep new guaranteed dirs in both.
-- **Skills**: `config/skills/` ships via `make install` / `make sync-config`
-  into `~/.meept/skills/` (merge, no-clobber: user-modified files are kept,
-  new defaults land as `<file>.new` — see `scripts/install-sync.py`).
-  Frontmatter `requires-tools:` gates
-  execution on tool availability (see docs/workflows/skills.md).
-- **Home dir**: everything meept reads/writes lives under one home —
-  `$MEEPT_HOME` when the env var is set, else `~/.meept`
-  (`config.MeeptHome()` / `MeeptPath()` in internal/config/home.go are THE
-  resolution points; config paths carrying the `~/.meept` prefix are
-  redirected through it too). Set `MEEPT_HOME` consistently for daemon,
-  CLI, and `make sync-config` — they all honor it.
-- **ACP agents**: `~/.meept/acp_agents.json5` (catalog of external ACP
-  agents; `[acp] enabled` defaults false — no subprocesses until opted in)
-- **UI theme** (TUI + GUI): shared tokens in `theme/tokens.json5`; select per
-  client via `rendering.ui_theme` — see `docs/configuration/theming.md`.
-- **Client**: `~/.meept/client.json5` (TUI keybindings)
-- **Log level**: `log_level` field in `~/.meept/meept.json5` (NOT env vars)
-- **Log size cap**: `daemon.log_max_bytes` bounds `~/.meept/meept.log` (default
-  256 MiB, 3 retained generations, worst case 3x). Enforced in-process by
-  `internal/logrotate` — a spawner holds the log fd open for the daemon's whole
-  life, so a parent-side rotate leaves the daemon appending to an unlinked file
-  and the cap stops binding.
-
-See `docs/configuration/` for full reference.
+- Home: `$MEEPT_HOME` else `~/.meept`. Set it for daemon, CLI, and
+  `make sync-config`.
+- Main config: `~/.meept/meept.json5`; log level is a config field, not an env var.
+- Kanban and models ship default-on in `config/meept.json5` and
+  `config/models.json5`; see `docs/agents/configuration.md`.
 
 ## Static Analyzers
 
-Custom analyzers in `tools/analyzers/`:
-
-| Analyzer | Purpose | Run |
-|----------|---------|-----|
-| `mutexio` | Detects I/O under mutex | `make mutexio` |
-| `predid` | Detects predictable ID generation | `make predid` |
-| `fieldguard` | Guards immutable struct fields | `go run ./tools/analyzers/fieldguard/...` |
-| `selflock` | Detects self-deadlocking locks | `go run ./tools/analyzers/selflock/...` |
-
-Audit scripts in `scripts/`:
-
-| Script | Purpose |
-|--------|---------|
-| `audit-dart-enum-name-shadow.py` | Flags Dart extensions shadowing Enum.name/index |
-| `audit-utf8-byte-arithmetic.py` | Flags hand-rolled ASCII case-conversion corrupting UTF-8 |
-| `audit-secrets-value-callers.py` | Pins the secrets in-process-only rule: `Broker.Value`/`resolve` callers must be allowlisted; their results never reach logs, env entries, or `os.Setenv` |
-| `audit-sqlite-dsn-pragmas.py` | Flags modernc-style `sql.Open("sqlite")` DSNs using mattn keys (`_journal_mode`/`_busy_timeout`/`_fk`/`_foreign_keys`) — modernc.org/sqlite silently drops them (only `_pragma=name(value)` reaches SQLite). bughunt 2026-11-07 infra-fixes |
-| `orphan-check.py` | Ratchets unwired bus topics (publisher-without-subscriber and vice versa) from `docs/generated/bus-topology.json` against `scripts/orphan-baseline.txt` — new-only blocks, `--rebaseline` is a deliberate human step for that baseline only. `make orphan-check`; CI step in code-quality.yml generated-artifacts |
-| `deadcode-baseline-growth-check.sh` | Fails if `.githooks/deadcode-baseline.txt` or `deadcode-baseline-notest.txt` gained lines versus a base sha. A missing working-tree baseline exits 2 (no empty-file substitute). Wired in ci.yml job `deadcode` after the full-tree reachability gate, and in `.githooks/pre-commit-deadcode` against HEAD before the no-staged-.go return. No env skip. A zero `github.event.before` is not a skip. Pull-request label `deadcode-baseline-growth` is the only exception, and only on a pull request. |
-| `gen-connectivity-graph.py` | Generates bus/RPC/HTTP/WS topology (`make graphs`) |
-| `fmt-check.sh` | gofmt gate for the Go tree (`make fmt-check` check-only / `make fmt` apply); scope mirrors the `.golangci.yml` `formatters` block (archive/, third_party/, testdata/, vendor/, .worktrees/ + nested modules excluded); a missing gofmt is a HARD ERROR, never a silent pass (issue #138 CI gate) |
-| `ensure-dev-key.sh` | Provision the per-installation dev API key (`$MEEPT_HOME/dev_key`, 0600) |
-| `gui-daemon-connect.py` | Reconcile the installed daemon config with the GUI connect path (`ensure-config` / `endpoint` / `check` / `probe`) |
-| `verify-gui-connect.sh` | Prove a fresh install's GUI reaches the daemon (config, key, TLS pin, WS upgrade) |
-| `research-harness-lit.py` | Verifies harness-technique catalog evidence and markdown freshness (`make research-harness-check`) |
-| `config-drift-check.py` | Diffs config templates vs the installed `$MEEPT_HOME`; classifies drift via `// drift:` annotations; report-only, exit 1 on unclassified drift |
-| `voice-gap-analyze.py` | Measures voice-playback jitter from `meept voice link --record` `.raw` files: silence gaps >=200 ms per side + both-sides talk-over windows (acceptance evidence for the prefetch/turn-taking fixes) |
-| `release.sh` | Release pipeline (DRY_RUN=1 default): clean-tree gate, stamped sanity build, `goreleaser` snapshot/publish per `.goreleaser.yml` (Dockerfile + SBOM included) |
-
-All analyzers and audit scripts run via `make lint-ci`.
-
-## Feature Documentation Requirements
-
-All code changes to feature implementations must have corresponding
-documentation updates.
-
-**Documentation locations:**
-- `docs/workflows/` — Feature specifications
-- `docs/concepts/` — Architecture
-- `docs/reference/` — CLI, API, tools
-- `docs/research/` — living research maps (harness techniques)
-- `docs/generated/` — Auto-generated connectivity graphs (do not edit)
-
-**Feature mapping:** `internal/<pkg>/` → `docs/workflows/<pkg>.md`
+Analyzer and audit script inventory with run commands:
+`docs/agents/static-analyzers.md` (includes `agents-check.py`, the AGENTS.md
+size/pointer/package-table ratchet; `make agents-check`). Run via `make lint-ci`.
 
 ## AGENTS.md Maintenance Rule
 
-**Every commit MUST review this file for completeness and correctness.**
+The root file stays under 16 KiB. It holds global hard rules and pointers. A new
+rule goes in the owning doc; the root gets a one-line pointer. `make
+agents-check` fails the build if the size, the routing table, a broken pointer,
+or a new undocumented package breaks.
 
-Before committing, verify:
-1. **Package table** — any added/removed/renamed packages in `internal/`,
-   `cmd/`, or `pkg/` are reflected in the Key Components table.
-2. **Build commands** — new Makefile targets or changed build steps are listed.
-3. **Invariants** — new cross-boundary contracts (bus topics, session ID
-   semantics, WS event types) are documented under Critical Invariants.
-4. **Analyzers/scripts** — new static analyzers or audit scripts are listed.
-5. **Conventions** — new coding conventions discovered during the change are
-   captured.
-6. **Invariant docs** — a rule whose full text lives in a package
-   `AGENTS.md` (`internal/{llm,daemon,agent,comm,voice,kanban,kanbansvc}/AGENTS.md`) or a
-   `docs/agents/*.md` doc was updated in the same commit as its summary
-   here.
-
-If any item is stale, fix it in the same commit. Do not defer AGENTS.md
-updates to a follow-up.
+Run `make agents-check` before committing. Do not defer pointer fixes.

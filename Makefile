@@ -941,6 +941,12 @@ graphs:
 graphs-check:
 	@python3 scripts/gen-connectivity-graph.py --check
 
+# agents-check is the AGENTS.md size + pointer + package-table ratchet. No Go
+# toolchain needed: pure Python, so it runs in CI's generated-artifacts job.
+.PHONY: agents-check
+agents-check:
+	@python3 scripts/agents-check.py
+
 # orphan-check is the ratchet on top of graphs-check: freshness proves the
 # topology matches source; this proves no NEW orphan topic (published but
 # never subscribed, or subscribed but never published) slipped in without

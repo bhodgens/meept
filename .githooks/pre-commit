@@ -1,7 +1,7 @@
 #!/bin/bash
 # Main pre-commit hook - runs all quality and security checks
 #
-# Runs the following checks (numbered as [n/20] labels below):
+# Runs the following checks (numbered as [n/21] labels below):
 # 1. go build on staged packages (+ clean downstream importers)   [SNAPSHOT]
 # 2. consumer test-compile (clean downstream packages' _test.go vs staged changes) [SNAPSHOT]
 # 3. Deferred item validation (findings docs)
@@ -22,9 +22,10 @@
 # 18. Dart formatting (staged ui/flutter_ui Dart files)
 # 19. e2e new-package census ONLY (suite sweep moved to pre-push + CI)
 # 20. deadcode reachability (blocks NEW unwired functions vs baseline) [SNAPSHOT]
+# 21. AGENTS.md size, pointer, and package-table ratchet
 #
 # Execution model (gates-speedup items 4 + 6):
-#   * Checks 1-15, 17-18, 19-20 are INDEPENDENT and run CONCURRENTLY
+#   * Checks 1-15, 17-21 are INDEPENDENT and run CONCURRENTLY
 #     (background jobs, capped at MEEPT_HOOKS_PARALLEL slots, default 6;
 #     bash >= 3.2: no `wait -n`, concurrency is bounded by polling
 #     `jobs -rp`). Each hook writes its own output file; verdicts are
@@ -232,7 +233,8 @@ ENTRIES="1|pre-commit-build|1|1|Building staged packages...
 17|pre-commit-ascii|1|0|Checking for non-English characters...
 18|pre-commit-dart-format|1|0|Checking Dart formatting (ui/flutter_ui)...
 19|pre-commit-e2e|1|0|Checking e2e new-package census (suite sweep: pre-push + CI)...
-20|pre-commit-deadcode|1|1|Checking code reachability (deadcode gate)..."
+20|pre-commit-deadcode|1|1|Checking code reachability (deadcode gate)...
+21|pre-commit-agents-check|1|0|Checking AGENTS.md size and pointers..."
 
 . "$SCRIPT_DIR/pre-commit-dispatch-lib"
 
