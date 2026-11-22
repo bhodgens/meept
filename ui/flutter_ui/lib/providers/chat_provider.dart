@@ -11,6 +11,7 @@ import '../models/api_models.dart';
 import '../models/ws_events.dart' show TurnTerminalEvent;
 import '../services/sdk_client.dart';
 import '../services/websocket_service.dart' show WebSocketService;
+import '../features/chat/plan_notification_bubble.dart';
 import 'providers.dart'; // exports tts_provider.dart
 
 /// Detect a phase-1 destructive-action confirmation request in a WebSocket
@@ -233,6 +234,12 @@ class ChatState {
   /// session's chat view is opened.
   final int lateFailureCount;
 
+  /// Leaf 03: plan notification bubbles keyed by their chat message id
+  /// (the message itself is a 'system'-role placeholder whose content is
+  /// the bubble's plain-text form). Parsed from plan_update WS frames
+  /// (source_topic discrimination) by ChatNotifier.
+  final Map<String, PlanNotificationData> planNotifications;
+
   const ChatState({
     this.messages = const [],
     this.isLoading = false,
@@ -244,6 +251,7 @@ class ChatState {
     this.pendingTurns = const {},
     this.earlyTerminals = const {},
     this.lateFailureCount = 0,
+    this.planNotifications = const {},
   });
 
   ChatState copyWith({
@@ -256,6 +264,7 @@ class ChatState {
     Object? thinkingStartedAt = _thinkingUnset,
     Map<String, PendingTurn>? pendingTurns,
     int? lateFailureCount,
+    Map<String, PlanNotificationData>? planNotifications,
   }) {
     // Limit messages to prevent memory leaks
     List<ChatMessage> limitedMessages = messages ?? this.messages;
@@ -281,6 +290,7 @@ class ChatState {
           : thinkingStartedAt as DateTime?,
       pendingTurns: pendingTurns ?? this.pendingTurns,
       lateFailureCount: lateFailureCount ?? this.lateFailureCount,
+      planNotifications: planNotifications ?? this.planNotifications,
     );
   }
 }
@@ -383,6 +393,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
   StreamSubscription<Map<String, dynamic>>? _wsChatSubscription;
   StreamSubscription<Map<String, dynamic>>? _progressSubscription;
   StreamSubscription<Map<String, dynamic>>? _turnTerminalSubscription;
+  StreamSubscription<Map<String, dynamic>>? _planSubscription;
 
   /// Per-pending-turn liveness timers (leaf 05): fire once per turn after
   /// the effective liveness timeout (see [_armLivenessTimer]) to mark the
@@ -632,6 +643,44 @@ class ChatNotifier extends StateNotifier<ChatState> {
           if (_disposed) return;
           _handleTurnTerminal(TurnTerminalEvent.fromParse(message));
         });
+
+    // Leaf 03: plan lifecycle notifications render as inline chat bubbles
+    // (TUI parity - plan.submitting/completed/confirmed/rejected/failed
+    // cards). Frames carry source_topic (transformBusEventToWS); the
+    // session-scoping rule mirrors the TUI chat pump: an explicitly EMPTY
+    // session_id is an evolver-sink plan and drops.
+    _planSubscription ??= websocket.subscribeToPlans().listen((message) {
+      if (_disposed) return;
+      final plan = PlanNotificationData.fromFrame(message);
+      if (!plan.shouldRenderIn(sessionId)) return;
+      final lines = <String>[
+        plan.headerLine,
+        if (plan.title.isNotEmpty) 'plan: "${plan.title}"',
+        if (plan.state == 'submitting' || plan.state == 'completed')
+          plan.state == 'completed'
+              ? '${plan.countLine} - awaiting confirmation'
+              : plan.countLine,
+        if (plan.state == 'confirmed')
+          'confirmed by ${plan.by.isEmpty ? 'user' : plan.by}',
+        if (plan.state == 'rejected' || plan.state == 'failed')
+          'reason: ${plan.reason.isEmpty ? 'no reason given' : plan.reason}',
+      ];
+      final msgId =
+          'plan_${plan.planId}_${DateTime.now().millisecondsSinceEpoch}';
+      final plainText = lines.join('\n');
+      state = state.copyWith(
+        messages: [
+          ...state.messages,
+          ChatMessage(
+            id: msgId,
+            role: 'system',
+            content: plainText,
+            timestamp: DateTime.now(),
+          ),
+        ],
+        planNotifications: {...state.planNotifications, msgId: plan},
+      );
+    });
   }
 
   /// Handle a turn.terminal relay for a tracked pending turn (leaf 05
@@ -1832,6 +1881,8 @@ class ChatNotifier extends StateNotifier<ChatState> {
     _progressSubscription = null;
     _turnTerminalSubscription?.cancel();
     _turnTerminalSubscription = null;
+    _planSubscription?.cancel();
+    _planSubscription = null;
     for (final timer in _livenessTimers.values) {
       timer.cancel();
     }

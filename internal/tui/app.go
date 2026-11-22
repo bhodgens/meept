@@ -1982,7 +1982,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 			// Plan lifecycle events - inline chat notifications
-			case "plan.submitting", "plan.completed", "plan.confirmed", "plan.rejected":
+			case "plan.submitting", "plan.completed", "plan.confirmed", "plan.rejected", "plan.failed":
 				if payloadMap, ok := e.Payload.(map[string]any); ok {
 					// Session scoping: render the notification ONLY in the
 					// chat that owns the plan. An explicitly empty
@@ -2034,6 +2034,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						planMsg.State = "confirmed"
 					case "plan.rejected":
 						planMsg.State = "rejected"
+					case "plan.failed":
+						planMsg.State = "failed"
 					}
 					if cmd := a.chat.Update(planMsg); cmd != nil {
 						cmds = append(cmds, cmd)

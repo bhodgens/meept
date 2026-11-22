@@ -9,6 +9,7 @@ import '../../widgets/error_banner.dart';
 import '../../providers/chat_provider.dart';
 import 'agent_progress_indicator.dart';
 import 'chat_message_bubble.dart';
+import 'plan_notification_bubble.dart';
 import 'find_bar.dart';
 import 'find_state.dart';
 import 'scroll_state.dart';
@@ -248,6 +249,18 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
                             message.id,
                             () => GlobalKey(),
                           );
+                          // Leaf 03: plan lifecycle notifications render as
+                          // structured bubbles, not plain text (TUI parity
+                          // with the plan cards). The parsed data lives in
+                          // chatState.planNotifications keyed by message id.
+                          final planData =
+                              chatState.planNotifications[message.id];
+                          if (planData != null) {
+                            return KeyedSubtree(
+                              key: key,
+                              child: PlanNotificationBubble(data: planData),
+                            );
+                          }
                           return KeyedSubtree(
                             key: key,
                             child: ChatMessageBubble(

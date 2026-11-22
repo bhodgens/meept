@@ -3481,6 +3481,25 @@ func (m *ChatModel) renderPlanNotification(msg PlanNotificationMsg) string {
 			"└─────────────────────────────────────────────────┘",
 			title, types.TruncateString(reason, 45))
 
+	case "failed":
+		// Leaf 03 (plan failure visibility): a plan that fails
+		// mid-execution used to be silent in chat — the user only saw the
+		// plan vanish. Render a failure card mirroring the rejected shape,
+		// with the count row (planCountLine keeps evolver document
+		// proposals saying what they ARE instead of "0 phases · 0 steps")
+		// and the failure reason.
+		reason := msg.Reason
+		if reason == "" {
+			reason = "no reason given"
+		}
+		return fmt.Sprintf("┌ plan failed ────────────────────────────────────┐\n"+
+			"│ Plan: \"%s\"\n"+
+			"│ %s\n"+
+			"│ Reason: %s\n"+
+			"└─────────────────────────────────────────────────┘",
+			title, planCountLine(msg.PhaseCount, msg.StepCount),
+			types.TruncateString(reason, 45))
+
 	default:
 		return fmt.Sprintf("┌ plan %s ────────────────────────────────────┐\n"+
 			"│ Plan: \"%s\"\n"+
