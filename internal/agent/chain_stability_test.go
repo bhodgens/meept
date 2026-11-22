@@ -83,6 +83,17 @@ func TestChainStability_RalphLoopProgress(t *testing.T) {
 	rl, _, taskStore, stepStore := newChainStabilityRalphFixture(t)
 	ctx := context.Background()
 
+	// F-NEW-10 raised a HARD ceiling on progress-based extensions
+	// (MaxReplanExtensions, default 2) so a storming task terminalizes.
+	// This pin drives 6 progress rounds (3 original + 3 extension-
+	// granted replans, one grant per round), so it raises the extension
+	// budget in SETUP to keep exercising the progress-aware EXTENSION
+	// PATH itself. The ceiling is pinned at its default by
+	// ralph_storm_test.go/TestReplanHardCeiling; the stalled negative
+	// control below still terminalizes at the cap because the extension
+	// branch requires progress (no growth = no grant at any budget).
+	rl.config.MaxReplanExtensions = 4
+
 	tk := task.NewTask("progress task", "review the meept client for bugs")
 	tk.SetState(task.StateExecuting)
 	if err := taskStore.Create(tk); err != nil {

@@ -92,6 +92,41 @@ class TaskNotifier extends StateNotifier<TaskState> {
       return false;
     }
   }
+
+  // ----- C2 strategic-gate twins (06-planning/02 T1) -----
+  //
+  // The strategic approval gate lives in tasks.db (awaiting_approval
+  // TASKS), NOT in plans.db: these forward to the C2 HTTP twins via
+  // SdkApiClient.approveTask/rejectTask and are deliberately distinct
+  // from PlanNotifier.approvePlan/rejectPlan. rejectTask never reaches
+  // the approve seam on any transport (the daemon maps reject solely to
+  // task.reject); a rejected task lands in its terminal state on the
+  // post-call reload.
+
+  /// Approve an awaiting_approval task through the C2 gate, then reload.
+  Future<bool> approveTask(String id) async {
+    try {
+      await sdkClient.approveTask(id);
+      await loadTasks();
+      return true;
+    } catch (e) {
+      state = state.copyWith(error: e.toString());
+      return false;
+    }
+  }
+
+  /// Reject an awaiting_approval task with the full reason forwarded.
+  /// LOAD-BEARING: reject must never execute/approve the task.
+  Future<bool> rejectTask(String id, {String? reason}) async {
+    try {
+      await sdkClient.rejectTask(id, reason: reason);
+      await loadTasks();
+      return true;
+    } catch (e) {
+      state = state.copyWith(error: e.toString());
+      return false;
+    }
+  }
 }
 
 /// Task state provider

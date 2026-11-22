@@ -1,42 +1,20 @@
 package agent
 
-import "strings"
+import "github.com/caimlas/meept/internal/task"
 
 // Prompt-scaffolding markers injected onto step descriptions by
 // strategic.go (session-context block + "## Your Task" header). The
-// executing loop needs them; USER-FACING renders must never show them
-// (screenshot evidence 2026-10-22: the task-completed card displayed the
-// raw "## Session context ..." instruction block and the machine evidence
-// envelope where the answer belonged).
-const (
-	sessionContextMarker = "## Session context (most recent work in this conversation)"
-	yourTaskMarker       = "## Your Task"
-)
+// canonical implementation moved to internal/task (gate T4b,
+// 04-clutter/01) so the task RPC surfaces can strip step descriptions
+// for client consumption without importing internal/agent - one
+// implementation, no fork. The former marker-name delegates were dead
+// (U1000) and are removed; use task.SessionContextMarker /
+// task.YourTaskMarker directly.
 
 // StripPromptScaffolding removes the injected session-context block and
 // "## Your Task" header from a step description, returning only the real
 // task text. Input without the markers is returned trimmed and unchanged.
-//
-// The injection shape (strategic.go) is always:
-//
-//	<session-context block>\n\n## Your Task\n\n<real description>
-//
-// so when the Your Task marker is present everything after it is the real
-// text. When only the session-context marker is present (a partial/legacy
-// injection), the block is cut at the marker because no task text follows
-// it in that shape.
+// See task.StripPromptScaffolding for the canonical shape contract.
 func StripPromptScaffolding(desc string) string {
-	if desc == "" {
-		return desc
-	}
-	if _, rest, ok := strings.Cut(desc, yourTaskMarker); ok {
-		return strings.TrimSpace(rest)
-	}
-	if before, _, ok := strings.Cut(desc, sessionContextMarker); ok {
-		// No Your Task marker: keep any text BEFORE the block (the
-		// injection prepends, so this is normally empty) and drop the
-		// block itself.
-		return strings.TrimSpace(before)
-	}
-	return strings.TrimSpace(desc)
+	return task.StripPromptScaffolding(desc)
 }

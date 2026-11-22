@@ -31,6 +31,15 @@ var (
 	ErrInterviewPlannerMissing = errors.New("interview skipped: planner agent not available")
 	ErrInterviewGenerationFail = errors.New("interview skipped: LLM question generation failed")
 
+	// ErrPlannerUnavailable marks a planner INFRASTRUCTURE failure (no
+	// registry wired / no planner agent spec) as opposed to an LLM
+	// output problem. Gate T8 (01-safety/05): an unavailable planner can
+	// never produce a plan, so the decomposition lanes must fail the
+	// task honestly instead of degrading to generic fallback steps that
+	// "complete" with a deflection. Degradation to fallback steps stays
+	// for real planner-output failures (parse/transport) only.
+	ErrPlannerUnavailable = errors.New("planner agent unavailable")
+
 	// ErrPlannerEmptyPlan is returned when the planner LLM parses cleanly but
 	// produces zero steps. The empty-plan guard (issue #53 direction 3)
 	// matches on this sentinel with errors.Is to route to the deterministic
@@ -201,6 +210,10 @@ type StrategicPlanner struct {
 	maxStepsPerPhase      int
 	planPhaseSink         func(taskID string, phases []PlanPhaseSpec)
 	planCompilerEnabled   bool
+	// turnLivenessTouch is the C7 activity heartbeat (01-safety/04):
+	// draft/seal/approval activity Touches the tracked turn via this
+	// registry-edge seam. Set via SetTurnLivenessTouch; nil = no heartbeat.
+	turnLivenessTouch func(taskID string)
 	// TierComplex critique loop (tiered-iteration leaf 02). selfSealEnabled
 	// gates the autonomous seal (plans.self_seal_enabled, default false —
 	// ships dark); maxCritiqueRounds caps the draft-critique-refine rounds
@@ -421,6 +434,63 @@ func (sp *StrategicPlanner) validateToolHint(taskID, hint string) string {
 		"hint", hint,
 	)
 	return ""
+}
+
+// hintResearchVerbRe / hintWebEvidenceRe detect a research-shaped step
+// description (02-routing/01, gate T2): a research operation verb plus
+// web-oriented evidence. Both must fire -- "implement the research
+// module" is code work, not a web-research step.
+var hintResearchVerbRe = regexp.MustCompile(`(?i)\b(?:research|investigate|investigating|look up|browse)\b`)
+var hintWebEvidenceRe = regexp.MustCompile(`(?i)\b(?:web|website|online|internet|https?|release notes|documentation|docs|news)\b`)
+
+// fitToolHint validates a planner hint against the executor's capability
+// fit (20261119-usability-remediation 02-routing/01, audit-routing R4/R6).
+// A research-shaped step whose hint routes to an agent WITHOUT web_fetch
+// (the coder) is remapped through the authoritative hint table
+// (config.ToolHintAgent: research -> researcher) and a routing.warning
+// mismatch event is published -- never a silent coder-without-web_fetch.
+// Capability ground truth is the registry's AgentSpec (AGENT.md tools);
+// when no registry is wired the mismatch cannot be confirmed, so the
+// remap still fires WITH the explicit warning (observable, never silent).
+// Capability-matched hints pass through byte-identical.
+func (sp *StrategicPlanner) fitToolHint(taskID, description, hint string) string {
+	if hint == "" {
+		return hint
+	}
+	if !hintResearchVerbRe.MatchString(description) || !hintWebEvidenceRe.MatchString(description) {
+		return hint
+	}
+	agentID, ok := config.ToolHintAgent(hint)
+	if !ok {
+		return hint
+	}
+	if sp.registry != nil {
+		if spec, found := sp.registry.GetSpec(agentID); found && spec.HasTool("web_fetch") {
+			// Executor already carries the capability: no remap, no warning.
+			return hint
+		}
+	}
+	researchAgent, ok := config.ToolHintAgent("research")
+	if !ok {
+		return hint
+	}
+	sp.logger.Warn("planner tool_hint capability mismatch: research-shaped step routed to agent without web_fetch",
+		"task_id", taskID,
+		"hint", hint,
+		"agent_id", agentID,
+		"remapped_hint", "research",
+		"remapped_agent", researchAgent,
+	)
+	sp.publishEvent("routing.warning", map[string]any{
+		"task_id":        taskID,
+		"hint":           hint,
+		"agent_id":       agentID,
+		"reason":         "hint_capability_mismatch",
+		"required_tool":  "web_fetch",
+		"remapped_hint":  "research",
+		"remapped_agent": researchAgent,
+	})
+	return "research"
 }
 
 // ConductInterview determines whether an interview is needed for the given plan
@@ -994,6 +1064,13 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 			if errors.Is(err, ErrPlannerNoPlanNotArtifact) {
 				return err
 			}
+			// Gate T8 (01-safety/05): planner infrastructure failure
+			// (no registry / no planner spec) can never produce a plan;
+			// degrade-to-fallback would "complete" with a deflection.
+			// Propagate so handlePlanRequest terminalizes the task.
+			if errors.Is(err, ErrPlannerUnavailable) {
+				return err
+			}
 			sp.logger.Warn("Single-phase plan failed, using fallback steps",
 				"task_id", req.TaskID, "error", err)
 			sp.recordMetric("strategic_planner.fallback", 1, map[string]string{"intent": req.Intent, "reason": "plan_failed"})
@@ -1046,6 +1123,20 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 				"mode", mode,
 			)
 		}
+	}
+
+	// Step prompt path fidelity (03-context/02 T3, F-NEW-9): the planner's
+	// decomposition can drop concrete details from the user prompt -- the
+	// live 8B emitted "validate the requested file and report its
+	// contents" for a prompt naming an explicit path, and the executor
+	// answered with a clarification question for info already in the
+	// prompt. When no step carries an explicit path that the full user
+	// input names, append the verbatim user request to the FIRST step so
+	// the executing loop always sees the original details. Idempotent
+	// (marker check) and additive: a decomposition that already carries
+	// the path is untouched.
+	if len(steps) > 0 && steps[0] != nil {
+		sp.ensureStepPromptFidelity(req, steps[0])
 	}
 
 	// Inject parent MemoryRefs to first step (if any exist and steps were created)
@@ -1555,7 +1646,10 @@ func repairPromptSection(parseErr error) string {
 func (sp *StrategicPlanner) runPlannerOnceWithPrompt(ctx context.Context, req PlanRequest, extraSection string) ([]*task.TaskStep, error) {
 	plannerLoop, err := sp.registry.Get(config.AgentIDPlanner)
 	if err != nil {
-		return nil, fmt.Errorf("planner agent not available: %w", err)
+		// Gate T8 (01-safety/05): wrap with the infrastructure sentinel
+		// so the decomposition lanes fail honestly instead of falling
+		// back to generic steps when no planner can ever run.
+		return nil, fmt.Errorf("%w: planner agent not available: %w", ErrPlannerUnavailable, err)
 	}
 
 	// Build planning context section if available
@@ -1681,7 +1775,7 @@ func (sp *StrategicPlanner) parsePlanOutput(taskID, output string) ([]*task.Task
 	// First pass: create steps and collect IDs
 	for i, ps := range plan.Steps {
 		step := task.NewTaskStep(taskID, ps.Description, i)
-		step.ToolHint = sp.validateToolHint(taskID, ps.ToolHint)
+		step.ToolHint = sp.fitToolHint(taskID, ps.Description, sp.validateToolHint(taskID, ps.ToolHint))
 		steps[i] = step
 		stepIDs[i] = step.ID
 	}
@@ -2227,6 +2321,12 @@ func (sp *StrategicPlanner) awaitUserApproval(ctx context.Context, t *task.Task,
 
 	sp.recordMetric("strategic_planner.approval_gate", 1, nil)
 
+	// C7 activity heartbeat: entering the approval gate is activity on
+	// the tracked turn (the exemption keeps the parked turn safe; this
+	// refreshes liveness so the post-approval executing window starts
+	// fresh).
+	sp.touchTurnLiveness(req.TaskID)
+
 	sp.publishEvent("task.pending_approval", map[string]any{
 		KeyTaskID:    req.TaskID,
 		"session_id": req.SessionID,
@@ -2328,6 +2428,9 @@ func (sp *StrategicPlanner) ApprovePlan(ctx context.Context, taskID string) erro
 	})
 
 	sp.logger.Info("Plan approved and scheduled", "task_id", taskID)
+	// C7 activity heartbeat: the human approval decision is activity;
+	// refresh liveness before the executing phase begins.
+	sp.touchTurnLiveness(taskID)
 	return nil
 }
 
@@ -2445,6 +2548,14 @@ func (sp *StrategicPlanner) publishEvent(topic string, data map[string]any) {
 		return
 	}
 
+	// C6 (01-safety/03): task terminals (completed/failed/rejected) are
+	// per-task-once: losing one breaks every awaiting client's state
+	// machine, so they publish blocking (5s bounded wait, Error-logged on
+	// timeout). All other planner events stay non-blocking.
+	if bus.IsCriticalTopic(topic) {
+		sp.bus.PublishBlocking(topic, msg)
+		return
+	}
 	sp.bus.Publish(topic, msg)
 }
 

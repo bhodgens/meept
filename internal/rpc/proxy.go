@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -47,6 +48,15 @@ type busSubscription struct {
 	TopicSubs  []*bus.Subscriber // per-topic subscribers
 	Events     []*busEventRecord
 	MaxEvents  int
+	// CriticalEvents is the C6 critical ring: per-task/plan-once terminal
+	// topics (bus.IsCriticalTopic) live here, exempt from the MaxEvents
+	// drop-oldest trim that protects progress polling. Bounded separately
+	// (MaxCriticalEvents) so a critical flood cannot starve the progress
+	// ring either. Seq is assigned from the SAME nextSeq counter as
+	// Events, so a merged poll page stays strictly seq-increasing and a
+	// terminal keeps its original assignment seq across the ring split.
+	CriticalEvents    []*busEventRecord
+	MaxCriticalEvents int
 	// nextSeq is the sequence number assigned to the most recent event
 	// appended to Events (monotonic per subscription). It is the poll
 	// cursor: bus.poll with since_seq returns records with Seq > since_seq,
@@ -56,9 +66,15 @@ type busSubscription struct {
 	// trimmed counts records discarded from the tail of Events by the
 	// MaxEvents drop-oldest trim. Drop accounting: surfaced in the
 	// bus.poll response so buffer overflow is never silent.
-	trimmed    int64
-	mu         sync.Mutex
-	cancelFunc context.CancelFunc // cancels goroutines when client disconnects
+	trimmed int64
+	// criticalTrimmed counts records discarded from the critical ring by
+	// its own (much larger) overflow trim. Kept separate from trimmed so
+	// the C6 accounting invariant holds: progress overflow never counts
+	// critical loss, and a delivered critical event is never counted
+	// dropped. Reported in-band alongside trimmed.
+	criticalTrimmed int64
+	mu              sync.Mutex
+	cancelFunc      context.CancelFunc // cancels goroutines when client disconnects
 }
 
 // busEventRecord is an event captured for polling.
@@ -73,6 +89,13 @@ type busEventRecord struct {
 	// (since_seq / next_seq) is built on it.
 	Seq int64 `json:"seq"`
 }
+
+// collectorChannelSlack is added to the per-topic collector channel
+// capacity on top of the combined ring capacity (MaxEvents +
+// MaxCriticalEvents) so records the collector is mid-trim on, or events
+// that arrive while the channel is momentarily full, still have a landing
+// slot before bus-level drops begin.
+const collectorChannelSlack = 64
 
 // NewProxyHandler creates a new proxy handler.
 func NewProxyHandler(msgBus *bus.MessageBus) *ProxyHandler {
@@ -437,12 +460,14 @@ func (p *ProxyHandler) handleBusSubscribe(ctx context.Context, params json.RawMe
 
 	// Create internal subscription state
 	sub := &busSubscription{
-		ID:         subID,
-		Topics:     req.Topics,
-		Events:     make([]*busEventRecord, 0),
-		MaxEvents:  100, // Keep last 100 events
-		TopicSubs:  make([]*bus.Subscriber, 0, len(req.Topics)),
-		cancelFunc: cancelFunc,
+		ID:                subID,
+		Topics:            req.Topics,
+		Events:            make([]*busEventRecord, 0),
+		MaxEvents:         100, // Keep last 100 progress events
+		CriticalEvents:    make([]*busEventRecord, 0),
+		MaxCriticalEvents: 256, // C6 critical ring: terminals exempt from progress trim
+		TopicSubs:         make([]*bus.Subscriber, 0, len(req.Topics)),
+		cancelFunc:        cancelFunc,
 	}
 
 	// Subscribe to all topics (using wildcard support)
@@ -490,9 +515,20 @@ func (p *ProxyHandler) handleBusSubscribe(ctx context.Context, params json.RawMe
 	}()
 
 	// Start collector goroutines for each topic
+	// C6 channel sizing: the per-topic collector channel is sized ABOVE
+	// the combined ring capacity (MaxEvents 100 + MaxCriticalEvents 256)
+	// so a flood like the observed defect (300 progress events + one
+	// terminal) lands in the caller's bounded rings - where the
+	// drop-oldest trim counts it in `dropped` - instead of overflowing a
+	// default-capacity (100) bus channel and starving seq assignment.
+	// Drops on this channel are still counted (Subscriber.DroppedCount)
+	// and surface in bus.poll, so the buffered+dropped==published
+	// identity holds at ANY flood size; the sizing just moves ordinary
+	// floods into the precisely-accounted ring path.
+	collectorCap := sub.MaxEvents + sub.MaxCriticalEvents + collectorChannelSlack
 	for _, topic := range req.Topics {
 		slog.Debug("Creating bus subscription for TUI", "subscription_id", subID, "topic", topic)
-		topicSub := p.bus.Subscribe(subID+"-"+topic, topic)
+		topicSub := p.bus.SubscribeWithBuffer(subID+"-"+topic, topic, collectorCap)
 
 		sub.mu.Lock()
 		sub.TopicSubs = append(sub.TopicSubs, topicSub)
@@ -538,22 +574,36 @@ func (p *ProxyHandler) handleBusSubscribe(ctx context.Context, params json.RawMe
 					sub.mu.Lock()
 					// Monotonic per-subscription sequence: the poll cursor
 					// (since_seq/next_seq) never skips a buffered event the
-					// way a wall-clock client cursor can.
+					// way a wall-clock client cursor can. ONE counter feeds
+					// both rings (C6) so merged poll pages stay strictly
+					// seq-increasing and records keep their assignment seq.
 					sub.nextSeq++
 					event.Seq = sub.nextSeq
-					sub.Events = append(sub.Events, event)
+					if bus.IsCriticalTopic(msg.Topic) {
+						// C6 critical ring: terminal events are exempt
+						// from the progress drop-oldest trim. Bounded at
+						// MaxCriticalEvents; overflow trims drop-oldest
+						// within the ring and is counted separately.
+						sub.CriticalEvents = append(sub.CriticalEvents, event)
+						if over := len(sub.CriticalEvents) - sub.MaxCriticalEvents; over > 0 {
+							sub.CriticalEvents = sub.CriticalEvents[over:]
+							sub.criticalTrimmed += int64(over)
+						}
+					} else {
+						sub.Events = append(sub.Events, event)
+						// Trim to max size -- drop-oldest, explicitly counted
+						// so buffer overflow shows up in bus.poll responses
+						// ("dropped") instead of vanishing silently.
+						if over := len(sub.Events) - sub.MaxEvents; over > 0 {
+							sub.Events = sub.Events[over:]
+							sub.trimmed += int64(over)
+						}
+					}
 					slog.Debug("Added event to subscription buffer",
 						"subscription_id", subID,
-						"event_count", len(sub.Events),
+						"event_count", len(sub.Events)+len(sub.CriticalEvents),
 						"seq", event.Seq,
 					)
-					// Trim to max size — drop-oldest, explicitly counted
-					// so buffer overflow shows up in bus.poll responses
-					// ("dropped") instead of vanishing silently.
-					if over := len(sub.Events) - sub.MaxEvents; over > 0 {
-						sub.Events = sub.Events[over:]
-						sub.trimmed += int64(over)
-					}
 					sub.mu.Unlock()
 				}
 			}
@@ -619,8 +669,17 @@ func (p *ProxyHandler) handleBusPoll(ctx context.Context, params json.RawMessage
 	defer sub.mu.Unlock()
 
 	useSeq := req.SinceSeq > 0
+	// C6: merge the progress ring and the critical ring into ONE poll
+	// page ordered by the shared assignment seq. Both rings draw from the
+	// same nextSeq counter, so the merged page is strictly seq-increasing
+	// and each record keeps its original seq (the terminal buffered first
+	// stays seq 1 even after a progress flood trims the progress ring).
+	merged := make([]*busEventRecord, 0, len(sub.Events)+len(sub.CriticalEvents))
+	merged = append(merged, sub.Events...)
+	merged = append(merged, sub.CriticalEvents...)
+	sort.Slice(merged, func(i, j int) bool { return merged[i].Seq < merged[j].Seq })
 	events := make([]*busEventRecord, 0)
-	for _, e := range sub.Events {
+	for _, e := range merged {
 		if useSeq {
 			if e.Seq > req.SinceSeq {
 				events = append(events, e)
@@ -630,10 +689,12 @@ func (p *ProxyHandler) handleBusPoll(ctx context.Context, params json.RawMessage
 		}
 	}
 
-	// Dropped = records trimmed from the buffer (drop-oldest overflow) +
-	// messages the bus discarded because a collector channel was full at
-	// publish time. Explicit, in-band accounting; never silent.
-	dropped := sub.trimmed
+	// Dropped = records trimmed from the progress buffer (drop-oldest
+	// overflow) + messages the bus discarded because a collector channel
+	// was full at publish time. Explicit, in-band accounting; never
+	// silent. Critical-ring overflow is counted separately and only ever
+	// reflects critical loss, never progress loss (C6).
+	dropped := sub.trimmed + sub.criticalTrimmed
 	for _, ts := range sub.TopicSubs {
 		dropped += ts.DroppedCount()
 	}

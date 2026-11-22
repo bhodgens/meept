@@ -3343,10 +3343,45 @@ func (l *AgentLoop) FirewallStats() map[string]any {
 	}
 }
 
+// throttleParkNotice is the user-facing copy for a throttle-parked turn
+// (01-safety/05, gate T8): a park must never surface as an empty success.
+// It names the cause (provider rate limiting) and the next action
+// (automatic resume; resend if the reply never arrives).
+const throttleParkNotice = "Your message is queued: the model provider is rate-limiting requests. " +
+	"It will run automatically when the throttle clears -- no action is needed. " +
+	"If the reply never arrives, resend your message."
+
 // RunOnce processes a single user turn through the full reasoning loop.
 // This is a convenience wrapper for callers that have no multimodal parts.
 func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID string) (response string, err error) {
-	return l.RunOnceWithParts(ctx, userMessage, nil, conversationID)
+	response, err = l.RunOnceWithParts(ctx, userMessage, nil, conversationID)
+	if errors.Is(err, ErrTurnParked) {
+		// H1 sentinel contract (daemon AgentJobProcessor + machine
+		// consumers): step-job/autonomous turns detect a park via the
+		// ("", nil) shape plus the loop's StateQuotaWait predicate --
+		// keep that boundary byte-identical for them.
+		if tools.AutonomousFromContext(ctx) {
+			return "", nil
+		}
+		// Gate T8 (01-safety/05): a CHAT turn must surface the park as a
+		// distinct actionable notice, never an empty success. The chat
+		// handler maps the exact notice to a parked terminal.
+		//
+		// Injected-clock exception (tree 03 leaf 02 pin
+		// TestAgentLoop_ThrottleBackoffParksTurn): a loop driven on an
+		// INJECTED clock is a scheduler/harness lane that owns park
+		// detection itself (state predicate + parker schedule asserts)
+		// -- the ("", nil) sentinel stays for it. Chat lanes run on the
+		// wall clock and never inject one.
+		l.mu.RLock()
+		injectedClock := l.nowFunc != nil
+		l.mu.RUnlock()
+		if injectedClock {
+			return "", nil
+		}
+		return throttleParkNotice, nil
+	}
+	return response, err
 }
 
 // stripVoiceContextStamp removes the daemon voice lane's clock-stamp
@@ -3585,9 +3620,25 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 		}
 	}
 
-	// Register queue for external access if both queue and registry are available
+	// Register queue for external access if both queue and registry are available.
+	//
+	// C3 (01-safety/02-queue-lifecycle): register a FRESH queue instance per
+	// turn. The turn-end UnregisterActiveQueue closes the registered queue
+	// (one-way CAS), so re-registering l.queue on turn 2 of a cached loop
+	// would steer into a CLOSED object (F-NEW-11/12). The turn queue inherits
+	// the loop queue's config/bus/agent-id/logger; the loop queue object
+	// itself is never closed or reopened in place, and l.queue is re-pointed
+	// at the live turn queue so the in-turn drain sites observe injections.
 	queueRegistered := false
+	var turnQueue *MessageQueue
 	if l.agentRegistry != nil && l.queue != nil {
+		turnQueue = NewMessageQueue(
+			WithQueueConfig(l.queue.config),
+			WithQueueBus(l.queue.bus),
+			WithQueueAgentID(l.queue.agentID),
+			WithQueueLogger(l.queue.logger),
+		)
+		l.queue = turnQueue
 		// Queue persistence write-side (steering/followup-queues plan):
 		// attach a per-conversation QueuePersister when the registry carries
 		// the shared SQLite DB and persistence is enabled. This restores the
@@ -3597,7 +3648,7 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 		// side was silently dead. The persister flushes + stops and is
 		// cleared when the turn ends (defer below), mirroring the queue
 		// registration lifetime.
-		if db := l.agentRegistry.DB(); db != nil && l.queue.config.PersistFollowUp {
+		if db := l.agentRegistry.DB(); db != nil && turnQueue.config.PersistFollowUp {
 			persister, pErr := NewQueuePersister(db, conversationID, l.logger.With("component", "queue-persister"))
 			if pErr != nil {
 				l.logger.Warn("failed to create queue persister, persistence disabled",
@@ -3608,17 +3659,17 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 				if l.bus != nil {
 					persister.WithBus(l.bus)
 				}
-				l.queue.SetPersister(persister)
+				turnQueue.SetPersister(persister)
 				defer func() {
 					// Flush and stop persister before unregistering the queue.
 					persister.Flush()
 					persister.Stop()
-					l.queue.ClearPersister()
+					turnQueue.ClearPersister()
 				}()
 			}
 		}
 
-		gen := l.agentRegistry.RegisterActiveQueue(conversationID, l.queue, l)
+		gen := l.agentRegistry.RegisterActiveQueue(conversationID, turnQueue, l)
 		queueRegistered = true
 		l.logger.Debug("registered queue for conversation",
 			"conversation_id", conversationID,
@@ -3910,7 +3961,11 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 		l.logger.Info("turn parked on provider wait — skipping post-turn success pipeline",
 			"conversation", conversationID,
 		)
-		return "", nil
+		// Gate T8 (01-safety/05): the parked shape is now EXPLICIT --
+		// ("", ErrTurnParked), never a bare ("", nil) indistinguishable
+		// from an empty completed turn. RunOnce maps it to an actionable
+		// park notice; the handler maps it to status=parked.
+		return "", ErrTurnParked
 	}
 	// Catalog reply guard (leaf 05): classify machine-shaped platform_*
 	// dumps and substitute a short user-language fallback before the text
@@ -4008,7 +4063,8 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 					l.logger.Info("reply-guard rewrite retry parked on provider wait — skipping post-turn success pipeline",
 						"conversation_id", conversationID,
 					)
-					return "", nil
+					// Gate T8 (01-safety/05): explicit parked shape.
+					return "", ErrTurnParked
 				}
 				finalResponse = retryResponse
 			}
@@ -10220,7 +10276,21 @@ func (l *AgentLoop) ConfigSnapshot() []LoopOption {
 
 		// --- Prefetch + queue ---
 		WithPrefetchCallback(l.prefetchCallback),
-		WithMessageQueue(l.queue),
+		// C3 clone isolation (01-safety/02-queue-lifecycle): NEVER carry the
+		// template's queue pointer into a session clone -- one shared
+		// instance meant clone A's turn-end Close killed clone B's steering.
+		// Each clone gets its own instance inheriting config/bus/agent-id/
+		// logger; RunOnce then registers a fresh per-turn queue from it.
+		func(l2 *AgentLoop) {
+			if l.queue != nil {
+				l2.queue = NewMessageQueue(
+					WithQueueConfig(l.queue.config),
+					WithQueueBus(l.queue.bus),
+					WithQueueAgentID(l.queue.agentID),
+					WithQueueLogger(l.queue.logger),
+				)
+			}
+		},
 		WithAgentRegistry(l.agentRegistry),
 
 		// --- Artifacts + detection ---

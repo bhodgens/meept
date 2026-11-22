@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -48,10 +49,15 @@ type EventStream struct {
 	// cursor (strict Timestamp.After comparison), a server-seq cursor can
 	// never skip an event that was buffered before the previous poll
 	// returned — the load-shaped silent-drop bug this replaces.
-	lastSeq    int64
-	buffer     []BusEvent // Circular buffer for recent events
-	bufferSize int
-	bufferIdx  int
+	lastSeq int64
+	// pendingResubscribe is set when a poll found the subscription lost
+	// and subscribe() re-ran successfully; the next successful poll
+	// carries it as EventStreamDataMsg.Resubscribed so the app can tell
+	// the user the feed reconnected (C6).
+	pendingResubscribe bool
+	buffer             []BusEvent // Circular buffer for recent events
+	bufferSize         int
+	bufferIdx          int
 }
 
 // EventStreamConfig configures the event stream.
@@ -169,6 +175,11 @@ func (es *EventStream) Start() tea.Cmd {
 }
 
 // subscribe sends subscription request to daemon.
+//
+// Locking: called synchronously from Start (no poll goroutine running yet)
+// and from the Poll error path while inflight is held, but it mutates
+// shared state (subscriptionID, lastSeq), so it takes es.mu around the
+// assignments. It must NEVER be called with es.mu already held.
 func (es *EventStream) subscribe() {
 	if !es.rpc.IsConnected() {
 		return
@@ -189,7 +200,13 @@ func (es *EventStream) subscribe() {
 	if err := json.Unmarshal(result, &resp); err != nil {
 		return
 	}
+	es.mu.Lock()
 	es.subscriptionID = resp.SubscriptionID
+	// A fresh subscription restarts the daemon-side seq counter at 1.
+	// The cursor must reset with it, or every event on the new ring would
+	// look "already seen" to the since_seq filter (C6 re-subscribe path).
+	es.lastSeq = 0
+	es.mu.Unlock()
 }
 
 // Stop stops the event stream. It is idempotent: the running guard is taken
@@ -235,6 +252,15 @@ type EventStreamTickMsg struct {
 type EventStreamDataMsg struct {
 	Events []BusEvent
 	Err    error
+	// Dropped is the daemon's in-band loss counter for this
+	// subscription (bus.poll "dropped": ring-trim overflow + collector
+	// channel drops). C6 (01-safety/03): loss must never be silent, so
+	// the app renders a one-per-episode system notice when it is > 0.
+	Dropped int64
+	// Resubscribed reports that this poll recovered a lost subscription
+	// (daemon restart / "subscription not found"): the cursor was reset,
+	// so the app can tell the user the feed reconnected.
+	Resubscribed bool
 }
 
 // schedulePoll schedules the next poll. gen is the generation captured at
@@ -284,12 +310,28 @@ func (es *EventStream) Poll() tea.Cmd {
 
 		result, err := es.rpc.Call("bus.poll", params)
 		if err != nil {
+			// C6 (01-safety/03): a lost subscription (daemon restart,
+			// connection churn) is recoverable ONLY by re-running
+			// subscribe(). Before the fix this error was returned and
+			// Update ignored it, so the poll chain kept polling a dead
+			// subscription id and the feed stayed permanently dead.
+			// Re-subscribe right here: we are inside the single in-flight
+			// poll goroutine and hold no lock, so subscribe() is safe to
+			// call; idempotent by construction (one call per detected
+			// loss, and the loss signal only exists while the id is dead).
+			if isSubscriptionLostErr(err) {
+				es.subscribe()
+				es.mu.Lock()
+				es.pendingResubscribe = true
+				es.mu.Unlock()
+			}
 			return EventStreamDataMsg{Events: nil, Err: err}
 		}
 
 		var resp struct {
 			Events  []BusEvent `json:"events"`
 			NextSeq int64      `json:"next_seq"`
+			Dropped int64      `json:"dropped"`
 		}
 		if err := json.Unmarshal(result, &resp); err != nil {
 			return EventStreamDataMsg{Events: nil, Err: err}
@@ -302,14 +344,25 @@ func (es *EventStream) Poll() tea.Cmd {
 		if resp.NextSeq > es.lastSeq {
 			es.lastSeq = resp.NextSeq
 		}
+		resub := es.pendingResubscribe
+		es.pendingResubscribe = false
 		es.mu.Unlock()
 
 		for _, e := range resp.Events {
 			es.addToBuffer(e)
 		}
 
-		return EventStreamDataMsg{Events: resp.Events, Err: nil}
+		return EventStreamDataMsg{Events: resp.Events, Err: nil, Dropped: resp.Dropped, Resubscribed: resub}
 	}
+}
+
+// isSubscriptionLostErr reports whether a bus.poll error means the
+// daemon no longer knows this subscription ("subscription not found:
+// sub-..." from internal/rpc/proxy.go handleBusPoll). That is the only
+// poll failure a re-subscribe can fix; transport errors wait for the
+// next ConnectSuccessMsg-driven Start instead.
+func isSubscriptionLostErr(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "subscription not found")
 }
 
 // busEventEqual reports whether two events are the same for dedupe purposes.

@@ -18,7 +18,7 @@ ChatMessage _userMessage({
     role: 'user',
     content: content,
     timestamp: timestamp ?? DateTime(2024, 1, 1, 12, 30),
-    toolCalls: toolCalls,
+    toolCalls: toolCalls?.map((n) => ToolCallRecord(name: n)).toList(),
   );
 }
 
@@ -33,7 +33,7 @@ ChatMessage _assistantMessage({
     role: 'assistant',
     content: content,
     timestamp: timestamp ?? DateTime(2024, 1, 1, 12, 31),
-    toolCalls: toolCalls,
+    toolCalls: toolCalls?.map((n) => ToolCallRecord(name: n)).toList(),
   );
 }
 

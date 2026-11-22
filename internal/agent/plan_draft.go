@@ -66,6 +66,28 @@ func (sp *StrategicPlanner) SetPlanCompilerEnabled(enabled bool) {
 	sp.planCompilerEnabled = enabled
 }
 
+// SetTurnLivenessTouch wires the C7 activity heartbeat (01-safety/04):
+// draft/seal/approval activity calls fn(taskID), which Touches the turn
+// registry entry that dispatched the task so a long human-in-the-loop
+// drafting/approval session never goes stale between saves. Nil-guarded
+// per the setter convention; a nil func disables the heartbeat (the
+// watchdog exemption still protects parked states).
+func (sp *StrategicPlanner) SetTurnLivenessTouch(fn func(taskID string)) {
+	if sp == nil {
+		return
+	}
+	sp.turnLivenessTouch = fn
+}
+
+// touchTurnLiveness fires the heartbeat nil-safely. Empty taskID and an
+// unwired seam are no-ops.
+func (sp *StrategicPlanner) touchTurnLiveness(taskID string) {
+	if sp == nil || sp.turnLivenessTouch == nil || taskID == "" {
+		return
+	}
+	sp.turnLivenessTouch(taskID)
+}
+
 // planCompilerFlag reads the flag nil-safely.
 func (sp *StrategicPlanner) planCompilerFlag() bool {
 	if sp == nil {
@@ -137,6 +159,8 @@ func (sp *StrategicPlanner) SaveDraft(taskID, markdown string) error {
 		return err
 	}
 	sp.logger.Info("Plan draft saved", "task_id", taskID, "version", d.Version)
+	// C7 activity heartbeat: a draft save is progress on the tracked turn.
+	sp.touchTurnLiveness(taskID)
 	return nil
 }
 
@@ -156,7 +180,12 @@ func (sp *StrategicPlanner) SealDraft(taskID, hash string) error {
 	}
 	d.SealedHash = hash
 	d.UpdatedAt = time.Now().UTC()
-	return sp.storeDraft(t, d)
+	if err := sp.storeDraft(t, d); err != nil {
+		return err
+	}
+	// C7 activity heartbeat: sealing is progress on the tracked turn.
+	sp.touchTurnLiveness(taskID)
+	return nil
 }
 
 // storeDraft merges the draft into the task's metadata and persists the task.

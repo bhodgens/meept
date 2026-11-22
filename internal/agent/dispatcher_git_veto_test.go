@@ -15,6 +15,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/caimlas/meept/internal/config"
 )
 
 // TestGitVerbAgreementVeto_VetoesGitVerbFreeImperative drives the veto
@@ -133,12 +135,15 @@ func TestGitVerbAgreementVeto_NonGitVerdictUntouched(t *testing.T) {
 	}
 }
 
-// TestGitVerbAgreementVeto_NonImperativeGitVerdictKept pins the
-// hasLeadingImperativeVerb conjunct: a git verdict on a NON-imperative input
-// (no leading execution verb) is out of the veto's scope — that is the
-// recall arbitration's territory, and widening this veto there would change
-// behavior the recall tests already pin.
-func TestGitVerbAgreementVeto_NonImperativeGitVerdictKept(t *testing.T) {
+// TestGitVerbAgreementVeto_NonImperativeGitVerdictVetoed pins the widened
+// contract (20261119-usability-remediation 02-routing/01, gate T1): the
+// lexical bias is SHAPE-INDEPENDENT, so a git verdict on a git-verb-free
+// NON-imperative input is vetoed too. This pin previously asserted the
+// old shape gate (verdict kept); that behavior was the defect the
+// committed gate dispatcher_veto_test.go closes -- recall questions keep
+// their F41 priority in the recall branch, everything else falls through
+// the veto to a non-committer lane.
+func TestGitVerbAgreementVeto_NonImperativeGitVerdictVetoed(t *testing.T) {
 	const input = "what is the state of the repository root"
 
 	if hasLeadingImperativeVerb(input) {
@@ -160,8 +165,9 @@ func TestGitVerbAgreementVeto_NonImperativeGitVerdictKept(t *testing.T) {
 	if intent == nil {
 		t.Fatal("nil intent")
 	}
-	if intent.Type != string(IntentGit) {
-		t.Fatalf("intent = %q, want git — non-imperative inputs are out of the veto's scope", intent.Type)
+	if intent.Type == string(IntentGit) || intent.AgentType == config.AgentIDCommitter {
+		t.Fatalf("intent = %q (agent %q, method %q), want non-git: the widened veto must discard a git-verb-free verdict on ANY shape",
+			intent.Type, intent.AgentType, intent.Method)
 	}
 }
 

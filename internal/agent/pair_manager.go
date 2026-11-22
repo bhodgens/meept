@@ -399,6 +399,23 @@ func (pm *PairManager) finalizeTask(ctx context.Context, session *PairSession, s
 			"error", err,
 		)
 	}
+
+	// Gate T8 (01-safety/05): finalizeTask used to write the store and
+	// publish NOTHING -- an exhausted pair left the user's turn hanging.
+	// Emit exactly ONE terminal for the failure: task.failed with the
+	// cause (round exhaustion) and the next action (revise/resubmit).
+	// The success lane already terminalizes via pair.converged's relay;
+	// the terminal-state guard above prevents a second task.failed.
+	if !success {
+		pm.publishEvent("task.failed", map[string]any{
+			KeyTaskID: session.TaskID,
+			"name":    t.Name,
+			string(MessageTypeError): fmt.Sprintf(
+				"pair session exhausted after %d rounds without reviewer approval; revise the request or split it into smaller steps and resubmit",
+				session.MaxRounds),
+			"linked_sessions": t.LinkedSessions,
+		})
+	}
 }
 
 // RemoveSession removes a completed session from the manager.

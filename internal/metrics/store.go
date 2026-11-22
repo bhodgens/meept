@@ -324,7 +324,8 @@ CREATE TABLE IF NOT EXISTS dispatch_log (
     handler_case TEXT NOT NULL DEFAULT '',
     task_id TEXT NOT NULL DEFAULT '',
     has_parts INTEGER NOT NULL DEFAULT 0,
-    error TEXT NOT NULL DEFAULT ''
+    error TEXT NOT NULL DEFAULT '',
+    turn_id TEXT NOT NULL DEFAULT ''
 );
 
 -- Indexes for query performance
@@ -552,6 +553,17 @@ ALTER TABLE llm_calls ADD COLUMN span_id TEXT NOT NULL DEFAULT '';`,
 ALTER TABLE llm_calls ADD COLUMN llm_tier_degraded BOOLEAN NOT NULL DEFAULT 0;
 ALTER TABLE llm_calls ADD COLUMN llm_tier_depth INTEGER NOT NULL DEFAULT -1;`,
 			Guard: migrate.ColumnsMissingGuard("llm_calls", "llm_tier", "llm_tier_degraded", "llm_tier_depth"),
+		},
+		{
+			// Dispatch-evidence surface (02-routing/02, C5): turn_id is
+			// the join key to the terminal turn journal. Existing rows
+			// get DEFAULT '' (legacy: no turn id; readers COALESCE).
+			// Fresh databases get the column inline in the CREATE
+			// script, making the guard a no-op there.
+			Version: 11,
+			Name:    "dispatch_log.turn_id",
+			SQL:     "ALTER TABLE dispatch_log ADD COLUMN turn_id TEXT NOT NULL DEFAULT ''",
+			Guard:   columnMissingGuard("dispatch_log", "turn_id"),
 		},
 	})
 	if err != nil {
@@ -1075,21 +1087,29 @@ type DispatchEntry struct {
 	Error            string  `json:"error" db:"error"`
 
 	// Outcome-loop columns (classifier-observability S1). InputHash is the
-	// salted digest that replaced raw input_summary (privacy: the summary is
-	// still produced for log lines but is no longer persisted). Model is the
-	// classifier LLM provenance ("" for deterministic doors). Margin is the
-	// Door-1 kNN margin; NULL when the dispatch did not come from Door 1.
-	// Outcome/corrected_agent are written by the capture layer; rows start
-	// 'pending'.
+	// salted digest join/dedup key; InputSummary is the bounded (200 chars),
+	// sanitized input text persisted for the dispatch-evidence surface
+	// (C5, 02-routing/02). Model is the classifier LLM provenance ("" for
+	// deterministic doors). Margin is the Door-1 kNN margin; NULL when the
+	// dispatch did not come from Door 1. Outcome/corrected_agent are
+	// written by the capture layer; rows start 'pending'.
 	InputHash      string   `json:"input_hash" db:"input_hash"`
 	Model          string   `json:"model" db:"model"`
 	Margin         *float64 `json:"margin,omitempty" db:"margin"`
 	TurnNo         int      `json:"turn_no" db:"turn_no"`
 	Outcome        string   `json:"outcome" db:"outcome"`
 	CorrectedAgent string   `json:"corrected_agent,omitempty" db:"corrected_agent"`
+
+	// TurnID is the terminal-turn join key (C5, 02-routing/02). Legacy
+	// rows carry '' and readers COALESCE; query surfaces may synthesize
+	// a deterministic fallback key (task_id / session+turn_no) for rows
+	// recorded before the column existed.
+	TurnID string `json:"turn_id" db:"turn_id"`
 }
 
 // RecordDispatch inserts a dispatch routing decision into the audit log.
+// InputSummary is persisted bounded (200 runes) for the dispatch-evidence
+// surface (C5); callers sanitize secret-shaped text before recording.
 func (s *Store) RecordDispatch(entry DispatchEntry) {
 	hasParts := 0
 	if entry.HasParts {
@@ -1097,19 +1117,33 @@ func (s *Store) RecordDispatch(entry DispatchEntry) {
 	}
 	_, err := s.db.Exec(
 		`INSERT INTO dispatch_log
-			(session_id, intent_type, agent_id, confidence,
+			(session_id, input_summary, intent_type, agent_id, confidence,
 			 classifier_method, handler_case, task_id, has_parts, error,
-			 input_hash, model, margin, turn_no, outcome, corrected_agent)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		entry.SessionID, entry.IntentType, entry.AgentID,
+			 input_hash, model, margin, turn_no, outcome, corrected_agent, turn_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		entry.SessionID, truncateRunes(entry.InputSummary, dispatchInputSummaryLimit),
+		entry.IntentType, entry.AgentID,
 		entry.Confidence, entry.ClassifierMethod, entry.HandlerCase,
 		entry.TaskID, hasParts, entry.Error,
 		entry.InputHash, entry.Model, entry.Margin, entry.TurnNo,
-		entry.Outcome, entry.CorrectedAgent,
+		entry.Outcome, entry.CorrectedAgent, entry.TurnID,
 	)
 	if err != nil {
 		s.logger.Error("failed to record dispatch", "error", err, "session", entry.SessionID)
 	}
+}
+
+// dispatchInputSummaryLimit bounds the persisted input summary (C5: the
+// evidence surface shows what was routed, never an unbounded prompt dump).
+const dispatchInputSummaryLimit = 200
+
+// truncateRunes caps s at n runes, preserving UTF-8 boundaries.
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n])
 }
 
 // CountDispatchRows returns the number of dispatch_log rows recorded for a
@@ -1232,7 +1266,8 @@ func (s *Store) QueryDispatchLogBySession(sessionID string, limit int) ([]Dispat
 	err := s.db.Select(&entries,
 		`SELECT session_id, input_summary, intent_type, agent_id, confidence,
 		        classifier_method, handler_case, task_id, has_parts, error,
-		        input_hash, model, margin, turn_no, outcome, corrected_agent
+		        input_hash, model, margin, turn_no, outcome, corrected_agent,
+		        COALESCE(turn_id, '') AS turn_id
 		 FROM dispatch_log
 		 WHERE session_id = ?
 		 ORDER BY id DESC

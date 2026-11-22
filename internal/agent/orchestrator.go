@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -371,6 +372,15 @@ func (o *Orchestrator) handlePlanRequest(ctx context.Context, msg *models.BusMes
 			"task_id", req.TaskID,
 			"error", err,
 		)
+		// Gate T8 (01-safety/05): log-and-return left the task in
+		// planning forever and the user's turn never terminalized.
+		// Fail the task loudly with the actionable planning error;
+		// failTaskWithReason persists StateFailed and publishes
+		// task.failed (the ChatHandler relay emits the failed terminal).
+		if req.TaskID != "" {
+			o.strategic.failTaskWithReason(req.TaskID,
+				"planning failed: "+err.Error()+"; revise the request or retry")
+		}
 		return
 	}
 
@@ -430,11 +440,24 @@ func (o *Orchestrator) handleJobCompleted(ctx context.Context, msg *models.BusMe
 	// previous ralph-replan early return) left the task non-terminal, so
 	// waitForTaskCompletion blocked until its 10-minute cap — meept-bench
 	// timed out even after answer.txt was written.
+	//
+	// Gate T4a (04-clutter/01, F-ORCH-6): a completion whose job maps to NO
+	// step row is a side job (memory.l1_extract, ambient capture) - an
+	// expected visitor, not an incident. The step-not-found miss logs at
+	// Debug and emits no user-facing event; every other completion failure
+	// stays at ERROR (real step failures keep flowing through
+	// handleJobFailed -> task.error, pinned by the gate).
 	if err := o.tactical.OnJobCompleted(ctx, event.JobID, event.Result, event.ClaimToken); err != nil {
-		o.logger.Error("Failed to handle job completion",
-			"job_id", event.JobID,
-			"error", err,
-		)
+		if errors.Is(err, task.ErrStepNotFound) {
+			o.logger.Debug("Side-job completion (no step mapping); nothing to record",
+				"job_id", event.JobID,
+			)
+		} else {
+			o.logger.Error("Failed to handle job completion",
+				"job_id", event.JobID,
+				"error", err,
+			)
+		}
 	}
 
 	// Check if this was the last active step for the task; if so, release
@@ -463,18 +486,27 @@ func (o *Orchestrator) handleJobCompleted(ctx context.Context, msg *models.BusMe
 					o.artifacts = newArtifactStore()
 				}
 			} else {
-				isComplete, evidence, needsReplan := o.ralphLoop.CheckCompletion(ctx, taskID, event.Result)
-				if needsReplan && !isComplete {
-					o.logger.Info("Ralph loop: task still running, triggering replan",
-						"task_id", taskID,
-						"step_id", stepID,
-						"iteration", o.ralphLoop.GetIterationCount(taskID))
-					if err := o.ralphLoop.TriggerReplan(ctx, taskID, evidence); err != nil {
-						o.logger.Error("Failed to trigger replan", "error", err)
+				// F-NEW-10: a failed-terminal task NEVER replans, even
+				// if replan-created steps keep it looking non-terminal.
+				// TriggerReplan itself latches, but skip the check too so
+				// no evidence evaluation runs against a dead task.
+				if completed, terminal := o.ralphLoop.TaskOutcome(taskID); terminal && !completed {
+					o.logger.Info("Ralph loop: task terminal-failed; replanning refused",
+						"task_id", taskID)
+				} else {
+					isComplete, evidence, needsReplan := o.ralphLoop.CheckCompletion(ctx, taskID, event.Result)
+					if needsReplan && !isComplete {
+						o.logger.Info("Ralph loop: task still running, triggering replan",
+							"task_id", taskID,
+							"step_id", stepID,
+							"iteration", o.ralphLoop.GetIterationCount(taskID))
+						if err := o.ralphLoop.TriggerReplan(ctx, taskID, evidence); err != nil {
+							o.logger.Error("Failed to trigger replan", "error", err)
+						}
+					} else if isComplete {
+						o.ralphLoop.Reset(taskID)
+						o.artifacts = newArtifactStore()
 					}
-				} else if isComplete {
-					o.ralphLoop.Reset(taskID)
-					o.artifacts = newArtifactStore()
 				}
 			}
 		}

@@ -138,7 +138,8 @@ func (h *SubmitHandler) buildAck(req ChatSubmitRequest) (any, error) {
 		turnID = id.Generate("turn-")
 	}
 
-	// Conversation id resolution: the client may pass conversation_id
+	// Conversation id resolution + identity validation (C4, 03-context
+	// leaf 01, F-ORCH-22/W11): the client may pass conversation_id
 	// directly, but the common CLI/GUI shape passes ONLY session_id. In
 	// that case resolve the session's OWN conversation id — minting a fresh
 	// conv id here orphans the turn from its session: the session loop
@@ -146,11 +147,58 @@ func (h *SubmitHandler) buildAck(req ChatSubmitRequest) (any, error) {
 	// hard-refuse), the dispatcher's task links to a conversation no
 	// session row backs, and the dispatch step lane can never recover the
 	// session working dir. Mirrors ChatService.Chat's dual resolution.
+	//
+	// When a session store is wired, submit-time ids are VALIDATED before
+	// anything is minted, registered or published: an unknown session or
+	// conversation id is rejected with an actionable note (never a phantom
+	// session), and a both-ids pair is membership-checked and corrected to
+	// the session's owning conversation. Thread-scoped conversation ids
+	// ("<base>-thread-<topic>-<n>") are unwrapped to their owning session
+	// before validation and never rejected. The nil-store path keeps the
+	// legacy resolution/mint shape byte-for-byte.
 	conversationID := req.ConversationID
-	if conversationID == "" && req.SessionID != "" && h.sessionStore != nil {
-		if sess := h.sessionStore.Get(req.SessionID); sess != nil && sess.ConversationID != "" {
-			conversationID = sess.ConversationID
-		} else if sess := h.sessionStore.GetByConversationID(req.SessionID); sess != nil && sess.ConversationID != "" {
+	if h.sessionStore != nil {
+		var sess *session.Session
+		if req.SessionID != "" {
+			sess = session.ResolveThreadConversationID(req.SessionID,
+				h.sessionStore.GetByConversationID, h.sessionStore.Get)
+			if sess == nil {
+				return map[string]any{
+					"turn_id":         "",
+					"conversation_id": req.ConversationID,
+					"session_id":      req.SessionID,
+					"accepted":        false,
+					"note":            fmt.Sprintf("unknown session id %q - create a session first (session.create), then resubmit", req.SessionID),
+				}, nil
+			}
+		}
+		if conversationID != "" {
+			convSess := session.ResolveThreadConversationID(conversationID,
+				h.sessionStore.GetByConversationID, h.sessionStore.Get)
+			if convSess == nil {
+				return map[string]any{
+					"turn_id":         "",
+					"conversation_id": req.ConversationID,
+					"session_id":      req.SessionID,
+					"accepted":        false,
+					"note":            fmt.Sprintf("unknown conversation id %q - create a session first (session.create), then resubmit", conversationID),
+				}, nil
+			}
+			if sess != nil && convSess.ID != sess.ID {
+				// Both-ids membership check: the pair does not belong
+				// together. Correct to the session's owning conversation
+				// rather than silently accepting the submitted pair.
+				h.logger.Warn("chat.submit both-ids mismatch corrected to owning conversation",
+					"session_id", req.SessionID,
+					"submitted_conversation_id", conversationID,
+					"owning_conversation_id", sess.ConversationID,
+				)
+			}
+		}
+		if sess != nil && sess.ConversationID != "" {
+			// Owning-conversation correction is idempotent for a
+			// consistent pair and for thread-scoped ids (the thread id
+			// stays on the session conversation the loop binds).
 			conversationID = sess.ConversationID
 		}
 	}

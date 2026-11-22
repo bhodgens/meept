@@ -6,12 +6,53 @@ import '../../models/api_models.dart';
 import '../../providers/providers.dart';
 import 'tasks_tab.dart' show activeTaskProvider;
 
-/// Task detail pane - displays task info with status controls
-class TasksDetail extends ConsumerWidget {
+/// Task detail pane - displays task info with status controls.
+///
+/// 05-navigation T2: the detail hydrates its steps through the SDK
+/// `getTask` seam (the daemon embeds `steps` on the task document). The
+/// fetch is bounded: at most one attempt per selected task id, so
+/// rebuilds never cause an RPC storm.
+class TasksDetail extends ConsumerStatefulWidget {
   const TasksDetail({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<TasksDetail> createState() => _TasksDetailState();
+}
+
+class _TasksDetailState extends ConsumerState<TasksDetail> {
+  Task? _hydrated;
+  String? _fetchedId;
+  bool _fetchInFlight = false;
+
+  void _hydrateFor(Task active) {
+    if (_fetchedId == active.id && (_hydrated != null || _fetchInFlight)) {
+      return;
+    }
+    _fetchedId = active.id;
+    _hydrated = null;
+    _fetchInFlight = true;
+    final client = ref.read(sdkClientProvider);
+    client
+        .getTask(active.id)
+        .then((raw) {
+          if (!mounted) return;
+          setState(() {
+            _fetchInFlight = false;
+            try {
+              _hydrated = Task.fromJson(raw);
+            } catch (_) {
+              _hydrated = null;
+            }
+          });
+        })
+        .catchError((Object _) {
+          if (!mounted) return;
+          setState(() => _fetchInFlight = false);
+        });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final active = ref.watch(activeTaskProvider);
     if (active == null) {
       return const Center(child: SizedBox.shrink());
@@ -19,7 +60,21 @@ class TasksDetail extends ConsumerWidget {
 
     // Re-resolve task from the live provider so we always show fresh data
     final tasks = ref.watch(taskProvider).tasks;
-    final task = tasks.where((t) => t.id == active.id).firstOrNull ?? active;
+    final listed = tasks.where((t) => t.id == active.id).firstOrNull;
+    // Prefer the hydrated (steps-bearing) document over the list stub.
+    final hydrated = _hydrated;
+    final task = (hydrated != null && hydrated.id == active.id)
+        ? hydrated
+        : (listed ?? active);
+
+    // Detail is reachable from BOTH seams: list tap and reply-chip
+    // selection (activeTaskProvider). The authoritative document (and
+    // its steps) always come through the getTask seam -- the list row
+    // can be stale -- bounded to one fetch per selected id so rebuilds
+    // never storm the RPC.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _hydrateFor(active);
+    });
 
     return Container(
       padding: const EdgeInsets.all(24),
@@ -92,10 +147,74 @@ class TasksDetail extends ConsumerWidget {
             task.description.toLowerCase(),
             style: CyberpunkTypography.bodyMedium,
           ),
+          const SizedBox(height: 24),
+          // 05-navigation T2: hydrated steps render here (title/state/
+          // result per gate tasks_detail_test).
+          ..._buildSteps(task),
           const Spacer(),
         ],
       ),
     );
+  }
+
+  /// Step rows from the hydrated task document.
+  List<Widget> _buildSteps(Task task) {
+    final steps = task.steps;
+    if (steps == null || steps.isEmpty) return const [];
+    return [
+      Text(
+        'steps',
+        style: CyberpunkTypography.label.copyWith(
+          color: CyberpunkColors.orangePrimary,
+        ),
+      ),
+      const SizedBox(height: 8),
+      Flexible(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            for (final step in steps)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildStatusIndicator(step.status),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            step.description.toLowerCase(),
+                            style: CyberpunkTypography.bodySmall.copyWith(
+                              color: CyberpunkColors.greenSuccess,
+                            ),
+                          ),
+                          if (step.output != null && step.output!.isNotEmpty)
+                            Text(
+                              step.output!.toLowerCase(),
+                              style: CyberpunkTypography.bodySmall.copyWith(
+                                color: CyberpunkColors.lightGray,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    Text(
+                      step.status.toLowerCase(),
+                      style: CyberpunkTypography.bodySmall.copyWith(
+                        color: CyberpunkColors.lightGray,
+                        fontFamily: 'SourceCodePro',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    ];
   }
 
   Widget _buildStatusDropdown(BuildContext context, WidgetRef ref, Task task) {

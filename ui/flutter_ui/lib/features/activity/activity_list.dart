@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../services/sdk_client.dart';
 import '../../providers/providers.dart';
+import '../../models/api_models.dart' show Task;
+import '../tasks/tasks_tab.dart' show activeTaskProvider;
 import 'activity_models.dart';
 
 /// Provider for activity data
@@ -59,9 +62,16 @@ class ActivityNotifier extends StateNotifier<ActivityState> {
   }
 }
 
-/// Activity list widget with sort modes
+/// Activity list widget with sort modes.
+///
+/// [sessionFilter] (05-navigation T4): when set (from the deep-link
+/// `?session=` param), the rendered list shows ONLY that session's
+/// records. The notifier state stays unfiltered - the filter is a view
+/// concern so a plain visit (no param) keeps showing all sessions.
 class ActivityList extends ConsumerStatefulWidget {
-  const ActivityList({super.key});
+  const ActivityList({super.key, this.sessionFilter});
+
+  final String? sessionFilter;
 
   @override
   ConsumerState<ActivityList> createState() => _ActivityListState();
@@ -138,11 +148,24 @@ class _ActivityListState extends ConsumerState<ActivityList> {
             const Expanded(child: Center(child: Text('no activity records')))
           else
             Expanded(
-              child: ListView.builder(
-                itemCount: activityState.records.length,
-                itemBuilder: (context, index) {
-                  final record = activityState.records[index];
-                  return _ActivityTile(record: record);
+              child: Builder(
+                builder: (context) {
+                  final filter = widget.sessionFilter;
+                  final visible = filter == null
+                      ? activityState.records
+                      : activityState.records
+                            .where((r) => r.sessionId == filter)
+                            .toList(growable: false);
+                  if (visible.isEmpty) {
+                    return const Center(child: Text('no activity records'));
+                  }
+                  return ListView.builder(
+                    itemCount: visible.length,
+                    itemBuilder: (context, index) {
+                      final record = visible[index];
+                      return _ActivityTile(record: record);
+                    },
+                  );
                 },
               ),
             ),
@@ -235,41 +258,64 @@ class _ActivityTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            record.summary.toLowerCase(),
-            style: const TextStyle(color: Colors.green, fontSize: 14),
-          ),
-          const SizedBox(height: 4),
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.orange.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(3),
-                ),
-                child: Text(
-                  record.kind.toLowerCase(),
-                  style: const TextStyle(
-                    color: Colors.orange,
-                    fontSize: 10,
-                    fontFamily: 'SourceCodePro',
+    // 05-navigation T4: tile tap-through. A task/step record opens its
+    // task detail (activeTaskProvider, the same seam the tasks list and
+    // the reply chip use) and navigates to /tasks.
+    final taskId = record.taskId;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: taskId == null || taskId.isEmpty
+          ? null
+          : () {
+              final ref = ProviderScope.containerOf(context);
+              ref.read(activeTaskProvider.notifier).state = Task(
+                id: taskId,
+                title: taskId,
+                description: '',
+                status: 'pending',
+                createdAt: record.at,
+              );
+              GoRouter.maybeOf(context)?.goNamed('tasks');
+            },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              record.summary.toLowerCase(),
+              style: const TextStyle(color: Colors.green, fontSize: 14),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                  child: Text(
+                    record.kind.toLowerCase(),
+                    style: const TextStyle(
+                      color: Colors.orange,
+                      fontSize: 10,
+                      fontFamily: 'SourceCodePro',
+                    ),
                   ),
                 ),
-              ),
-              const Spacer(),
-              Text(
-                record.at.toLocal().toString().substring(11, 16),
-                style: const TextStyle(color: Colors.grey, fontSize: 10),
-              ),
-            ],
-          ),
-        ],
+                const Spacer(),
+                Text(
+                  record.at.toLocal().toString().substring(11, 16),
+                  style: const TextStyle(color: Colors.grey, fontSize: 10),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

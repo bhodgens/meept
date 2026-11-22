@@ -395,6 +395,62 @@ class Attachment {
   });
 }
 
+/// C4 persisted tool-call row (frozen wire shape: id, name, args_summary,
+/// result_summary, at). Structured objects, never stringified -- the
+/// 05-navigation trace-expand gate pins the row keys through
+/// ChatMessage.toJson()['tool_calls'].
+class ToolCallRecord {
+  final String id;
+  final String name;
+  final String argsSummary;
+  final String resultSummary;
+  final String at;
+
+  const ToolCallRecord({
+    this.id = '',
+    required this.name,
+    this.argsSummary = '',
+    this.resultSummary = '',
+    this.at = '',
+  });
+
+  factory ToolCallRecord.fromJson(Map<String, dynamic> json) {
+    return ToolCallRecord(
+      id: json['id'] as String? ?? '',
+      name: json['name'] as String? ?? '',
+      argsSummary: json['args_summary'] as String? ?? '',
+      resultSummary: json['result_summary'] as String? ?? '',
+      at: json['at'] as String? ?? '',
+    );
+  }
+
+  /// Legacy wire entries arrived as bare name strings; keep them
+  /// parseable (name-only row) so history never drops a call.
+  factory ToolCallRecord.fromLegacy(dynamic v) {
+    if (v is Map) {
+      return ToolCallRecord.fromJson(Map<String, dynamic>.from(v));
+    }
+    return ToolCallRecord(name: v.toString());
+  }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'args_summary': argsSummary,
+    'result_summary': resultSummary,
+    'at': at,
+  };
+}
+
+/// C4 tool_calls list codec: rows serialize as plain structured maps
+/// ({id,name,args_summary,result_summary,at}) and accept both the C4
+/// object shape and legacy bare-name strings on the way in.
+List<ToolCallRecord>? _toolCallsFromJson(List<dynamic>? rows) =>
+    rows?.map(ToolCallRecord.fromLegacy).toList(growable: false);
+
+List<Map<String, dynamic>>? _toolCallsToJson(List<ToolCallRecord>? rows) =>
+    rows?.map((c) => c.toJson()).toList(growable: false);
+
 @freezed
 class ChatMessage with _$ChatMessage {
   const ChatMessage._();
@@ -405,12 +461,41 @@ class ChatMessage with _$ChatMessage {
     required String content,
     required DateTime timestamp,
     @JsonKey(name: 'session_id') String? sessionId,
-    @JsonKey(name: 'tool_calls') List<String>? toolCalls,
+    @JsonKey(
+      name: 'tool_calls',
+      fromJson: _toolCallsFromJson,
+      toJson: _toolCallsToJson,
+    )
+    List<ToolCallRecord>? toolCalls,
     @Default([]) List<ChatMessagePart> parts,
+    // C1 dedupe identity (04-clutter/02, gate T7): the turn/task a reply
+    // belongs to, so the GUI keys render-once on (turn_id, task_id)
+    // instead of last-bubble content. Defaults to '' and are ALWAYS
+    // emitted by toJson (round-trip survives the identity).
+    @JsonKey(name: 'turn_id') @Default('') String turnId,
+    @JsonKey(name: 'task_id') @Default('') String taskId,
+    // C1 correlation fields (05-navigation T3, gate chat_correlation):
+    // the terminal's dispatch evidence rides the reply bubble so the
+    // mode chip + trace/route affordances have a key to hang on.
+    // Defaults to '' and are ALWAYS emitted by toJson.
+    @JsonKey(name: 'intent_type') @Default('') String intentType,
+    @JsonKey(name: 'handler_case') @Default('') String handlerCase,
+    @JsonKey(name: 'classified_by') @Default('') String classifiedBy,
+    // 06-planning gate T4 (F13c): the typed mode signal the mode chip
+    // renders (plan / quick_plan / direct / recall). '' when absent.
+    @JsonKey(name: 'suggested_mode') @Default('') String suggestedMode,
   }) = _ChatMessage;
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) =>
       _$$ChatMessageImplFromJson(json);
+
+  /// Dedupe identity key (C1): the (turn_id, task_id) pair this message
+  /// carries, or null when it carries no turn identity at all (older
+  /// wire frames -- the notifier then falls back to content pairing).
+  String? get dedupeKey {
+    if (turnId.isEmpty && taskId.isEmpty) return null;
+    return 'turn:$turnId|task:$taskId';
+  }
 
   /// Parse from a backend session.Message (int64 ID, RFC3339 timestamp).
   factory ChatMessage.fromBackendMessage(Map<String, dynamic> json) {
@@ -434,15 +519,26 @@ class ChatMessage with _$ChatMessage {
       'content': json['content'] as String? ?? '',
       'timestamp': isoTimestamp,
       'session_id': json['session_id'] as String?,
-      'tool_calls': (json['tool_calls'] as List?)
-          ?.map((e) => e.toString())
-          .toList(),
+      // C4: persisted tool calls stay structured rows
+      // {id,name,args_summary,result_summary,at}; legacy name-string
+      // entries are upgraded to name-only rows instead of being dropped.
+      'tool_calls': json['tool_calls'],
       'parts':
           (json['parts'] as List?)
               ?.map((p) => ChatMessagePart.fromJson(p as Map<String, dynamic>))
               .map((p) => p.toJson())
               .toList() ??
           const [],
+      // Defensive identity read (04-clutter/02): the wire fields land
+      // with 05-navigation/01; absent until then = '' = content pairing.
+      'turn_id': json['turn_id'] as String? ?? '',
+      'task_id': json['task_id'] as String? ?? '',
+      // C1 correlation fields ride the persisted message so restored
+      // transcripts keep their mode chip / trace / route affordances.
+      'intent_type': json['intent_type'] as String? ?? '',
+      'handler_case': json['handler_case'] as String? ?? '',
+      'classified_by': json['classified_by'] as String? ?? '',
+      'suggested_mode': json['suggested_mode'] as String? ?? '',
     });
   }
 

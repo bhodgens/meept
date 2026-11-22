@@ -3841,6 +3841,18 @@ type OrchestratorConfig struct {
 	InterviewAmbiguityThreshold float64 `json:"interview_ambiguity_threshold" toml:"interview_ambiguity_threshold"` // planner: conducts interview for plan-mode when >= this
 	MaxStepsPerPhase            int     `json:"max_steps_per_phase"           toml:"max_steps_per_phase"`           // Thread C+F: per-phase step cap
 	MaxPhases                   int     `json:"max_phases"                    toml:"max_phases"`                    // Thread C+F: phase count soft cap
+	// MaxReplanExtensions bounds the Ralph loop's progress-based replan
+	// budget extensions per task (F-NEW-10 replan storm): total replans
+	// stay <= max_iterations + max_replan_extensions. Default 2; 0
+	// disables extensions (the hard cap always sticks).
+	MaxReplanExtensions int `json:"max_replan_extensions" toml:"max_replan_extensions"`
+	// StepRetryInterval bounds the retry sweep for semaphore-blocked
+	// ready steps (usability remediation 02-routing/04, W12/F-ORCH-28),
+	// in seconds: a wave that blocks with no in-flight steps never
+	// receives a completion event, so without a bounded timer those
+	// steps hang forever. Default 15; 0 disables the ticker (legacy
+	// event-driven-only reschedule).
+	StepRetryInterval int `json:"step_retry_interval" toml:"step_retry_interval"`
 	// ClassifierFailFast disables classifier alias rotation: when true,
 	// the intent analyzer fails the turn with the primary classifier's
 	// error instead of rotating to weaker alias members. Default false —
@@ -3859,6 +3871,16 @@ type OrchestratorConfig struct {
 	// band). Cloud-only classifier chains (no local runtime) never trip
 	// the gate regardless of this setting.
 	ClassifierBootFailFast bool `json:"classifier_boot_fail_fast" toml:"classifier_boot_fail_fast"`
+	// TrivialFastLane (04-clutter/02, F-ORCH-5): routes simple
+	// interrogatives/arithmetic ("What is 2+2? Answer briefly.") straight
+	// to the chat lane before the LLM classifier verdict is consumed --
+	// no task row, one brief reply. The lane is a CLASSIFICATION
+	// shortcut inside the same classify -> RouteToAgent chain: it never
+	// bypasses sanitization, session binding, or the security fence.
+	// Artifact verbs (create/write/fix/plan/...) still task-route.
+	// Default true (Q2 ratified at dispatch); false = byte-identical
+	// legacy classification.
+	TrivialFastLane bool `json:"trivial_fast_lane" toml:"trivial_fast_lane"`
 	// Prefilter configures the Stage-0 embedding prefilter
 	// (classifier-observability follow-up): embed the input, cosine-match
 	// against labeled intent centroids, and route directly when confident
@@ -4897,11 +4919,17 @@ func DefaultConfig() *Config {
 			InterviewAmbiguityThreshold: 0.6,
 			MaxStepsPerPhase:            8,
 			MaxPhases:                   12,
+			MaxReplanExtensions:         2,     // F-NEW-10: hard ceiling on Ralph progress extensions per task
+			StepRetryInterval:           15,    // W12: bounded retry sweep for semaphore-blocked steps (0 disables)
 			ClassifierFailFast:          false, // production keeps rotation; fail-fast is a testing mode
 			// ClassifierBootFailFast (F-D8): a local classifier runtime that
 			// never becomes healthy at boot is fatal by default; opt out
 			// with orchestrator.classifier_boot_fail_fast = false.
 			ClassifierBootFailFast: true,
+			// TrivialFastLane (04-clutter/02): trivial questions answer
+			// inline, no task machinery. Default-on per Q2; set
+			// orchestrator.trivial_fast_lane = false for legacy routing.
+			TrivialFastLane: true,
 			Prefilter: ClassifierPrefilterConfig{
 				Enabled:    false,
 				BaseURL:    "",

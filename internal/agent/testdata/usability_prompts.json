@@ -1,0 +1,14 @@
+{
+  "comment": "FROZEN usability-probe prompts, VERBATIM from /tmp/usability-rig/p1_naive.py and p6_control.py (2026-11-19 review). Never reword these strings to make routing pass; they are the regression fixtures for 02-routing gate T1/T7 (W8, audit-routing R1/R2, master C1/C5).",
+  "p1_naive": [
+    "Create a file named hello.txt in the project directory with the text 'hello world'. Tell me the full path of the file you created.",
+    "Now change hello.txt so it says 'hello meept' instead.",
+    "Did the change get made? Where is the file?",
+    "What files did you make for me in this session?"
+  ],
+  "p6_control": [
+    "Create a file named hello.txt in the project directory with the text 'hello world'. Use file_write with direct:true. Tell me the full path.",
+    "Edit the file hello.txt: replace 'hello world' with 'hello meept'. Use file_edit or file_write with direct:true. This is a file edit, not a git operation.",
+    "Did the change get made? Where is the file?"
+  ]
+}

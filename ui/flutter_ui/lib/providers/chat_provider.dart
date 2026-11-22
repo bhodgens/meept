@@ -623,6 +623,56 @@ class ChatNotifier extends StateNotifier<ChatState> {
   /// [_drainEarlyTerminals] for any turn that became tracked by another route.
   final Map<String, TurnTerminalEvent> _earlyTerminals = {};
 
+  // --- Task-reply render dedupe (04-clutter/02, gate T7) ---
+  //
+  // DEDUPE CONTRACT (C1, pinned in BOTH client halves): a task reply
+  // renders ONCE keyed by (turn_id, task_id) - NOT by last-bubble
+  // content. The chat_message push and the turn.terminal relay are the
+  // same logical reply; whichever arrives first wins, the second is
+  // suppressed. The old content comparison (_lastAssistantContentEquals)
+  // failed in both directions: an interleaved assistant bubble defeated
+  // it (double render), and two DISTINCT turns with identical answer
+  // text ("4") would over-dedupe.
+  //
+  // _renderedReplyKeys holds the identity keys of already-rendered
+  // replies. Because chat_message frames do not carry the turn identity
+  // until 05-navigation/01 lands it on the wire, an identity-less
+  // assistant bubble is recorded in _unattributedAssistantByTurn under
+  // each OPEN turn of this session (the defensive interim keying: a
+  // bubble can only belong to a turn still awaiting its terminal). The
+  // terminal pairs against those only when its reply equals the bubble
+  // AND the turn is the one that received it - never against arbitrary
+  // content elsewhere in the transcript.
+
+  /// Identity keys of already-rendered replies (C1 first-wins ledger).
+  final Set<String> _renderedReplyKeys = <String>{};
+
+  /// Interim (turn_id, content) pairing for identity-less chat_message
+  /// bubbles, per open turn. Drained when a turn resolves.
+  final Map<String, Set<String>> _unattributedAssistantByTurn = {};
+
+  /// C1 key for a (turnId, taskId) pair.
+  static String _replyKey(String turnId, String taskId) =>
+      'turn:$turnId|task:$taskId';
+
+  /// Record [key] in the ledger, bounding its size (a monotonically
+  /// growing session must not leak).
+  void _rememberRenderedReply(String key) {
+    _renderedReplyKeys.add(key);
+    if (_renderedReplyKeys.length > 256) {
+      // Keep the most recent half (insertion order).
+      final drop = _renderedReplyKeys.length - 128;
+      final it = _renderedReplyKeys.iterator;
+      final doomed = <String>[];
+      var n = 0;
+      while (it.moveNext() && n < drop) {
+        doomed.add(it.current);
+        n++;
+      }
+      _renderedReplyKeys.removeAll(doomed);
+    }
+  }
+
   /// Apply every buffered terminal whose turn is now tracked.
   ///
   /// [clearMessages] preserves `pendingTurns` across a `/clear` (TUI parity —
@@ -676,9 +726,17 @@ class ChatNotifier extends StateNotifier<ChatState> {
     // terminal (or the liveness watchdog, which re-arms on progress) drive
     // the next transition.
     if (event.status == TurnTerminalEvent.statusParked) {
+      // Honest pending-state copy per handler_case (leaf contract):
+      // parked != quota unless the park IS quota. The two daemon park
+      // shapes are "duplicate_suppressed" (the submission raced an
+      // in-flight duplicate) and the async-dispatch ack / quota park
+      // (work queued behind provider quota).
+      final bool quotaPark = event.handlerCase != 'duplicate_suppressed';
       final parked = turn.copyWith(
         status: PendingTurnStatus.parked,
-        progressText: 'waiting for provider quota — will resume automatically',
+        progressText: quotaPark
+            ? 'waiting for provider quota -- will resume automatically'
+            : 'turn already submitted; result arrives via turn.terminal',
       );
       turns[event.turnId] = parked;
       _cancelProcessingFallback();
@@ -711,18 +769,32 @@ class ChatNotifier extends StateNotifier<ChatState> {
         );
         return;
       case TurnTerminalEvent.statusCompleted:
-        // Render the reply as an assistant bubble unless the reply already
-        // arrived via the regular chat_message WS push (dedupe by content
-        // against the most recent assistant bubble).
-        if (event.reply.isNotEmpty &&
-            !_lastAssistantContentEquals(event.reply)) {
+        // Render the reply as an assistant bubble unless the same
+        // logical reply already rendered via the chat_message WS push.
+        // DEDUPE (C1): keyed by (turn_id, task_id) identity, NOT by
+        // last-bubble content - an interleaved assistant/system frame no
+        // longer defeats it, and two distinct turns with identical text
+        // are never over-deduped. Identity-less chat_message bubbles are
+        // paired through the per-open-turn interim ledger (see
+        // [_unattributedAssistantByTurn]); a late REAL terminal after a
+        // stalled/parked notice still renders (those record nothing).
+        if (event.reply.isNotEmpty && !_terminalReplyAlreadyRendered(event)) {
           final reply = ChatMessage(
             id: 'turn_${event.turnId}',
             role: 'assistant',
             content: event.reply,
             timestamp: DateTime.now(),
             sessionId: sessionId,
+            turnId: event.turnId,
+            taskId: event.taskId,
+            // C1 correlation (05-navigation T3): the terminal's dispatch
+            // evidence rides the bubble -- the mode chip, trace expand,
+            // and route popover all key off these.
+            intentType: event.intentType,
+            handlerCase: event.handlerCase,
+            classifiedBy: event.classifiedBy,
           );
+          _rememberRenderedReply(_replyKey(event.turnId, event.taskId));
           final newMessages = [...state.messages, reply];
           ttsNotifier.speak(event.reply);
           state = state.copyWith(
@@ -731,8 +803,13 @@ class ChatNotifier extends StateNotifier<ChatState> {
             isAgentProcessing: turns.isEmpty ? false : state.isAgentProcessing,
             thinkingStartedAt: turns.isEmpty ? null : state.thinkingStartedAt,
           );
+          _unattributedAssistantByTurn.remove(event.turnId);
           return;
         }
+        if (event.reply.isNotEmpty) {
+          _rememberRenderedReply(_replyKey(event.turnId, event.taskId));
+        }
+        _unattributedAssistantByTurn.remove(event.turnId);
         break;
       default:
         break;
@@ -745,15 +822,65 @@ class ChatNotifier extends StateNotifier<ChatState> {
     );
   }
 
-  /// True when the most recent assistant message already carries [content]
-  /// (the reply landed via the regular chat_message WS push before the
-  /// terminal event; rendering the terminal reply too would duplicate it).
-  bool _lastAssistantContentEquals(String content) {
-    for (final m in state.messages.reversed) {
-      if (m.role == 'assistant') return m.content == content;
-      if (m.role == 'user') return false;
+  /// True when the terminal's reply is the SECOND delivery of a reply
+  /// that already rendered: either the full (turn_id, task_id) key is in
+  /// the ledger (a chat_message bubble carrying the identity arrived
+  /// first), or the interim per-turn content pairing matches (an
+  /// identity-less bubble arrived while THIS turn was open -- the
+  /// defensive shape until 05-navigation/01 lands the wire identity).
+  /// Never suppresses a late real terminal: stalled/parked notices
+  /// record nothing.
+  bool _terminalReplyAlreadyRendered(TurnTerminalEvent event) {
+    if (_renderedReplyKeys.contains(_replyKey(event.turnId, event.taskId))) {
+      return true;
+    }
+    final interim = _unattributedAssistantByTurn[event.turnId];
+    if (interim != null && interim.contains(event.reply)) {
+      return true;
+    }
+    // Stream-bubble pairing (gui-stream-01): the in-flight accumulation
+    // bubble is the single id-LESS trailing assistant message -- it can
+    // only belong to the turn currently streaming, so an equal terminal
+    // reply is its second delivery. Scoped to the trailing id-less
+    // bubble only: a finalized bubble that got overtaken by an
+    // interleaved frame (the T7 defect) is NOT matched this way.
+    if (state.messages.isNotEmpty) {
+      final last = state.messages.last;
+      if (last.role == 'assistant' &&
+          last.id.isEmpty &&
+          last.content == event.reply) {
+        return true;
+      }
     }
     return false;
+  }
+
+  /// Record a freshly-appended assistant bubble for the dedupe ledger:
+  /// by full identity when the frame carries one, or under every OPEN
+  /// turn when it does not (a bubble can only belong to a turn still
+  /// awaiting its terminal).
+  void _recordAssistantBubbleForDedupe(ChatMessage message) {
+    if (message.role != 'assistant' || message.content.isEmpty) return;
+    final key = message.dedupeKey;
+    if (key != null) {
+      _rememberRenderedReply(key);
+      return;
+    }
+    for (final turnId in state.pendingTurns.keys) {
+      _unattributedAssistantByTurn
+          .putIfAbsent(turnId, () => <String>{})
+          .add(message.content);
+    }
+  }
+
+  /// True when [data] carries a (turn_id[, task_id]) identity that is
+  /// already in the render ledger -- the chat_message is a redelivery of
+  /// a reply the terminal rendered first (suppressed at the door).
+  bool _streamMessageAlreadyRendered(Map<String, dynamic> data) {
+    final turnId = data['turn_id'] as String? ?? '';
+    final taskId = data['task_id'] as String? ?? '';
+    if (turnId.isEmpty && taskId.isEmpty) return false;
+    return _renderedReplyKeys.contains(_replyKey(turnId, taskId));
   }
 
   /// Append a system error bubble and surface the text in the error slot.
@@ -1337,6 +1464,15 @@ class ChatNotifier extends StateNotifier<ChatState> {
 
       final message = ChatMessage.fromBackendMessage(data);
 
+      // DEDUPE (C1, 04-clutter/02): a chat_message whose (turn_id,
+      // task_id) identity is already in the render ledger is the second
+      // delivery of a reply that rendered (the terminal bubble arrived
+      // first) -- suppress it at the door. Frames without identity fall
+      // through to the interim pairing recorded below.
+      if (_streamMessageAlreadyRendered(data)) {
+        return;
+      }
+
       // Trigger TTS for assistant messages
       if (message.role == 'assistant' && message.content.isNotEmpty) {
         ttsNotifier.speak(message.content);
@@ -1408,10 +1544,20 @@ class ChatNotifier extends StateNotifier<ChatState> {
       // c4dc25ee was fixing) and a finalized reply must not be the thing that
       // clears it either — the turn's own terminal owns that.
       //
-      // Note also that the reply the terminal carries is deduped against this
-      // very bubble by [_lastAssistantContentEquals], so no reply is lost by
-      // refusing to read content as a completion signal.
+      // Note also that the reply the terminal carries is deduped against
+      // this very bubble by the (turn_id, task_id) render ledger
+      // (C1, 04-clutter/02), so no reply is lost by refusing to read
+      // content as a completion signal.
       state = state.copyWith(messages: newMessages);
+      // DEDUPE ledger (C1, 04-clutter/02): a finalized assistant bubble
+      // (carries an id) records its identity -- or, while the wire has no
+      // identity, its (open-turn, content) interim pairing -- so the
+      // turn.terminal delivery of the same reply is recognized as the
+      // second delivery and suppressed. Mid-stream deltas (id-less) are
+      // partial text and deliberately not paired.
+      if (message.id.isNotEmpty) {
+        _recordAssistantBubbleForDedupe(message);
+      }
     } catch (e) {
       final errorMessage = ChatMessage(
         id: 'error_${DateTime.now().millisecondsSinceEpoch}',

@@ -1,15 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../providers/rendering_prefs_provider.dart';
+import 'package:go_router/go_router.dart';
+import '../../providers/providers.dart';
+import '../../features/tasks/tasks_tab.dart' show activeTaskProvider;
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../theme/markdown_style.dart';
 import '../../theme/syntax_highlighter.dart';
 import '../../models/api_models.dart';
-import 'find_state.dart';
 
-class ChatMessageBubble extends ConsumerWidget {
+class ChatMessageBubble extends ConsumerStatefulWidget {
   final ChatMessage message;
   final String? highlightQuery;
   final bool caseSensitive;
@@ -32,7 +33,115 @@ class ChatMessageBubble extends ConsumerWidget {
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ChatMessageBubble> createState() => _ChatMessageBubbleState();
+}
+
+class _ChatMessageBubbleState extends ConsumerState<ChatMessageBubble> {
+  // 05-navigation T3: lazily-hydrated C4 trace + C5 route evidence,
+  // fetched once per expand (never eagerly -- the bubble must not
+  // issue an RPC storm while scrolling transcripts).
+  bool _traceExpanded = false;
+  List<ToolCallRecord>? _traceRows;
+  bool _traceLoading = false;
+  bool _routeExpanded = false;
+  List<Map<String, dynamic>>? _routeRows;
+  bool _routeLoading = false;
+
+  ChatMessage get message => widget.message;
+  String? get highlightQuery => widget.highlightQuery;
+  List<FindMatch> get highlightRanges => widget.highlightRanges;
+  List<int> get rangeAbsIndices => widget.rangeAbsIndices;
+  int get currentRangeAbsIndex => widget.currentRangeAbsIndex;
+
+  /// A reply is "correlated" when the terminal's C1 identity rode it --
+  /// the seam that unlocks the trace expand + route popover affordances.
+  bool get _correlated =>
+      message.role == 'assistant' &&
+      message.taskId.isNotEmpty &&
+      message.sessionId != null &&
+      message.sessionId!.isNotEmpty;
+
+  void _toggleTrace() {
+    setState(() => _traceExpanded = !_traceExpanded);
+    if (_traceExpanded && _traceRows == null && !_traceLoading) {
+      _loadTrace();
+    }
+  }
+
+  Future<void> _loadTrace() async {
+    setState(() => _traceLoading = true);
+    final client = ref.read(sdkClientProvider);
+    try {
+      final page = await client.getMessagesPage(
+        message.sessionId!,
+        limit: 200,
+        includeToolCalls: true,
+      );
+      final rows = <ToolCallRecord>[];
+      for (final raw in page.messages) {
+        final calls = raw['tool_calls'];
+        if (calls is! List) continue;
+        // Correlate on the reply content when the message carries it;
+        // otherwise surface every persisted call on the page (bounded).
+        for (final entry in calls.whereType<Object>()) {
+          rows.add(ToolCallRecord.fromLegacy(entry));
+        }
+      }
+      if (!mounted) return;
+      setState(() {
+        _traceLoading = false;
+        _traceRows = rows;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _traceLoading = false);
+    }
+  }
+
+  void _toggleRoute() {
+    setState(() => _routeExpanded = !_routeExpanded);
+    if (_routeExpanded && _routeRows == null && !_routeLoading) {
+      _loadRoute();
+    }
+  }
+
+  Future<void> _loadRoute() async {
+    setState(() => _routeLoading = true);
+    final client = ref.read(sdkClientProvider);
+    try {
+      final raw = await client.getDispatchTrace(message.sessionId!);
+      final entries = (raw['entries'] as List?)?.whereType<Map>() ?? [];
+      final rows = entries.map((e) => Map<String, dynamic>.from(e)).toList();
+      if (!mounted) return;
+      setState(() {
+        _routeLoading = false;
+        _routeRows = rows;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _routeLoading = false);
+    }
+  }
+
+  void _openTaskDetail() {
+    // Reply task chip -> task detail (gate tasks_detail_test chip seam:
+    // the same activeTaskProvider the list tap writes). Navigation is
+    // best-effort: outside a GoRouter context the selection still lands.
+    ref.read(activeTaskProvider.notifier).state = Task(
+      id: message.taskId,
+      title: message.taskId,
+      description: '',
+      status: 'pending',
+      createdAt: message.timestamp,
+    );
+    final router = GoRouter.maybeOf(context);
+    if (router != null) {
+      router.goNamed('tasks');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final isUser = message.role == 'user';
     final isSystem = message.role == 'system';
     // Live rendering prefs: markdown on/off + word wrap toggle.
@@ -127,11 +236,19 @@ class ChatMessageBubble extends ConsumerWidget {
             // highlighting inside MarkdownBody requires a custom builder
             // delegate which is out of scope for the MVP.
             //
-            // TODO: surface mode in ACK bubble when structured ACK fields are
-            // available. The backend includes a `**mode:**` markdown line for
-            // v1 (see handler.go FormatEnhancedAsyncTaskAck + modeToLabel).
-            // When ChatMessage carries a typed `suggestedMode` field, render a
-            // dedicated mode chip here instead of relying on markdown.
+            // 05-navigation T1/T3 (mode-chip TODO closed): a correlated
+            // reply surfaces its C1 dispatch evidence as chips -- task id
+            // (tap -> task detail), the mapped mode from handler_case,
+            // plus the trace-expand (C4) and why-this-route (C5)
+            // affordances -- instead of relying on the markdown
+            // `**mode:**` line.
+            if (!isUser &&
+                (message.taskId.isNotEmpty ||
+                    message.handlerCase.isNotEmpty ||
+                    message.suggestedMode.isNotEmpty)) ...[
+              const SizedBox(height: 6),
+              _correlationChips(context),
+            ],
             if (prefs.markdown)
               MarkdownBody(
                 data: message.content,
@@ -196,8 +313,249 @@ class ChatMessageBubble extends ConsumerWidget {
                 fontSize: 10,
               ),
             ),
+            // C1 correlation chips + C4/C5 expand affordances (rendered
+            // below the timestamp so long transcripts keep scanning).
+            if (!isUser && _hasCorrelationSurface) _correlationChips(context),
+            if (_traceExpanded) _tracePanel(),
+            if (_routeExpanded) _routePanel(),
           ],
         ),
+      ),
+    );
+  }
+
+  bool get _hasCorrelationSurface =>
+      message.taskId.isNotEmpty ||
+      message.handlerCase.isNotEmpty ||
+      message.suggestedMode.isNotEmpty;
+
+  /// Map a raw suggested_mode / handler_case token to its user-facing
+  /// chip label. Never leaks the raw underscored enum for the mode
+  /// signal (06-planning gate T4); the dispatch-evidence chip keeps the
+  /// handler_case verbatim because it IS the evidence string the C1
+  /// correlation gate pins (chat_correlation_test).
+  static String _modeLabel(String mode) {
+    switch (mode) {
+      case 'plan':
+        return 'plan';
+      case 'quick_plan':
+        return 'quick';
+      case 'direct':
+        return 'direct';
+      case 'recall':
+        return 'recall';
+      default:
+        return mode.replaceAll('_', ' ');
+    }
+  }
+
+  Widget _chip({
+    required String label,
+    Color? color,
+    VoidCallback? onTap,
+    String? tooltip,
+  }) {
+    final tint = color ?? CyberpunkColors.lightGray;
+    final chip = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: tint.withValues(alpha: 0.15),
+        border: Border.all(color: tint, width: 1),
+        borderRadius: BorderRadius.circular(3),
+      ),
+      child: Text(
+        label,
+        style: CyberpunkTypography.bodySmall.copyWith(
+          color: tint,
+          fontSize: 10,
+          fontFamily: 'SourceCodePro',
+        ),
+      ),
+    );
+    Widget result = chip;
+    if (onTap != null) {
+      result = InkWell(onTap: onTap, child: chip);
+    }
+    if (tooltip != null) {
+      result = Tooltip(message: tooltip, child: result);
+    }
+    return result;
+  }
+
+  Widget _correlationChips(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 4,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          if (message.taskId.isNotEmpty)
+            _chip(
+              label: 'task ${message.taskId}',
+              color: CyberpunkColors.greenSuccess,
+              onTap: _openTaskDetail,
+              tooltip: 'open task detail',
+            ),
+          if (message.suggestedMode.isNotEmpty)
+            _chip(
+              label: _modeLabel(message.suggestedMode),
+              color: CyberpunkColors.blueInfo,
+              tooltip: 'dispatch mode',
+            ),
+          if (message.handlerCase.isNotEmpty)
+            _chip(
+              label: message.handlerCase,
+              color: CyberpunkColors.yellowWarning,
+              tooltip: 'handler case (dispatch evidence)',
+            ),
+          if (_correlated)
+            _chip(
+              label: _traceExpanded ? 'trace (hide)' : 'trace',
+              color: CyberpunkColors.orangePrimary,
+              onTap: _toggleTrace,
+              tooltip: 'show persisted tool calls (C4)',
+            ),
+          if (_correlated)
+            _chip(
+              label: _routeExpanded ? 'route (hide)' : 'route',
+              color: CyberpunkColors.orangePrimary,
+              onTap: _toggleRoute,
+              tooltip: 'why this route (dispatch trace, C5)',
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _tracePanel() {
+    final rows = _traceRows;
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: CyberpunkColors.darkGray.withValues(alpha: 0.5),
+        border: Border.all(color: CyberpunkColors.lightGray, width: 1),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'tool trace',
+            style: CyberpunkTypography.bodySmall.copyWith(
+              color: CyberpunkColors.orangePrimary,
+            ),
+          ),
+          const SizedBox(height: 4),
+          if (_traceLoading)
+            const Text(
+              'loading trace...',
+              style: TextStyle(color: Colors.white70, fontSize: 11),
+            )
+          else if (rows == null)
+            const Text(
+              'trace unavailable',
+              style: TextStyle(color: Colors.white70, fontSize: 11),
+            )
+          else if (rows.isEmpty)
+            const Text(
+              'no persisted tool calls',
+              style: TextStyle(color: Colors.white70, fontSize: 11),
+            )
+          else
+            for (final call in rows)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 2),
+                child: Text(
+                  '${call.name}  ${call.argsSummary}'
+                  '${call.resultSummary.isEmpty ? '' : ' -> ${call.resultSummary}'}',
+                  style: TextStyle(
+                    color: CyberpunkColors.greenSuccess,
+                    fontSize: 11,
+                    fontFamily: 'SourceCodePro',
+                  ),
+                ),
+              ),
+        ],
+      ),
+    );
+  }
+
+  Widget _routePanel() {
+    final rows = _routeRows;
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: CyberpunkColors.darkGray.withValues(alpha: 0.5),
+        border: Border.all(color: CyberpunkColors.lightGray, width: 1),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'why this route',
+            style: CyberpunkTypography.bodySmall.copyWith(
+              color: CyberpunkColors.orangePrimary,
+            ),
+          ),
+          const SizedBox(height: 4),
+          if (_routeLoading)
+            const Text(
+              'loading dispatch trace...',
+              style: TextStyle(color: Colors.white70, fontSize: 11),
+            )
+          else if (rows == null)
+            const Text(
+              'dispatch trace unavailable',
+              style: TextStyle(color: Colors.white70, fontSize: 11),
+            )
+          else if (rows.isEmpty)
+            const Text(
+              'no dispatch evidence recorded',
+              style: TextStyle(color: Colors.white70, fontSize: 11),
+            )
+          else
+            for (final row in rows)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if ((row['input_summary'] as String? ?? '').isNotEmpty)
+                      Text(
+                        row['input_summary'] as String,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 11,
+                        ),
+                      ),
+                    Text(
+                      'intent: ${row['intent_type'] ?? ''}  '
+                      'method: ${row['classifier_method'] ?? ''}  '
+                      'confidence: ${row['confidence'] ?? ''}',
+                      style: TextStyle(
+                        color: CyberpunkColors.greenSuccess,
+                        fontSize: 11,
+                        fontFamily: 'SourceCodePro',
+                      ),
+                    ),
+                    Text(
+                      'handler: ${row['handler_case'] ?? ''}  '
+                      'task: ${row['task_id'] ?? ''}  '
+                      'turn: ${row['turn_id'] ?? ''}',
+                      style: TextStyle(
+                        color: CyberpunkColors.lightGray,
+                        fontSize: 11,
+                        fontFamily: 'SourceCodePro',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+        ],
       ),
     );
   }

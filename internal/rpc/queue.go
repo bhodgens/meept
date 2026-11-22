@@ -128,12 +128,22 @@ func (h *QueueHandler) handleStatus(ctx context.Context, params json.RawMessage)
 	}
 
 	q, gen := reg.GetActiveQueue(req.ConversationID)
+
+	// B5 / leaf 05-navigation/03 T2: parked work must be visible even
+	// with no active loop. task_states lists the conversation's
+	// non-terminal tasks (session-scoped via the task store's
+	// session_tasks join; a thread-scoped conversation id is unwrapped
+	// to its session-level base first). The lookup is bounded to the
+	// session's linked tasks - never a full task-table scan.
+	taskStates := sessionParkedTaskStates(reg, req.ConversationID)
+
 	if q == nil {
 		return map[string]any{
 			"steering_depth": 0,
 			"followup_depth": 0,
 			"is_active":      false,
 			"generation":     gen,
+			"task_states":    taskStates,
 		}, nil
 	}
 
@@ -143,7 +153,38 @@ func (h *QueueHandler) handleStatus(ctx context.Context, params json.RawMessage)
 		"followup_depth": status.FollowUpDepth,
 		"is_active":      status.IsActive,
 		"generation":     status.Generation,
+		"task_states":    taskStates,
 	}, nil
+}
+
+// sessionParkedTaskStates answers queue_status's task_states rows:
+// {task_id,state,name} for every non-terminal task linked to the
+// session behind conversationID. Returns an empty (non-nil) slice when
+// no task store is wired, the session has no linked tasks, or the
+// lookup fails - parked visibility is additive and must never turn a
+// queue_status poll into an error.
+func sessionParkedTaskStates(reg *agent.AgentRegistry, conversationID string) []map[string]any {
+	states := []map[string]any{}
+	store := reg.TaskStore()
+	if store == nil {
+		return states
+	}
+	base := agent.UnwrapThreadConversationID(conversationID)
+	tasks, err := store.GetTasksForSession(base)
+	if err != nil {
+		return states
+	}
+	for _, t := range tasks {
+		if t == nil || t.State.IsTerminal() {
+			continue
+		}
+		states = append(states, map[string]any{
+			"task_id": t.ID,
+			"state":   string(t.State),
+			"name":    t.Name,
+		})
+	}
+	return states
 }
 
 // handleRestore handles chat.queue.restore RPC calls.

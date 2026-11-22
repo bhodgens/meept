@@ -1734,6 +1734,15 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/v1/tasks/{id}", s.handleTaskUpdate)
 	mux.HandleFunc("DELETE /api/v1/tasks/{id}", s.handleTaskDelete)
 	mux.HandleFunc("POST /api/v1/tasks/{id}/cancel", s.handleTaskCancel)
+	// C2 HTTP twins (01-safety leaf 01): same TaskApprovalHandler seams as
+	// the task.approve / task.reject RPC methods, via rpcCall.
+	mux.HandleFunc("POST /api/v1/tasks/{id}/approve", s.handleTaskApprove)
+	mux.HandleFunc("POST /api/v1/tasks/{id}/reject", s.handleTaskReject)
+	// plan.draft / plan.seal HTTP twins (06-planning leaf 02 T2): the GUI
+	// seal surface drives the same RPC seams via rpcCall; seal is only
+	// ever an explicit POST (never auto-sealed by a GET).
+	mux.HandleFunc("GET /api/v1/tasks/{id}/draft", s.handleTaskDraft)
+	mux.HandleFunc("POST /api/v1/tasks/{id}/seal", s.handleTaskSeal)
 	mux.HandleFunc("GET /api/v1/tasks/{id}/steps", s.handleTaskSteps)
 	mux.HandleFunc("POST /api/v1/tasks/{id}/link-session", s.handleTaskLinkSession)
 	mux.HandleFunc("POST /api/v1/tasks/{id}/unlink-session", s.handleTaskUnlinkSession)

@@ -13,14 +13,18 @@ _$ChatMessageImpl _$$ChatMessageImplFromJson(Map<String, dynamic> json) =>
       content: json['content'] as String,
       timestamp: DateTime.parse(json['timestamp'] as String),
       sessionId: json['session_id'] as String?,
-      toolCalls: (json['tool_calls'] as List<dynamic>?)
-          ?.map((e) => e as String)
-          .toList(),
+      toolCalls: _toolCallsFromJson(json['tool_calls'] as List?),
       parts:
           (json['parts'] as List<dynamic>?)
               ?.map((e) => ChatMessagePart.fromJson(e as Map<String, dynamic>))
               .toList() ??
           const [],
+      turnId: json['turn_id'] as String? ?? '',
+      taskId: json['task_id'] as String? ?? '',
+      intentType: json['intent_type'] as String? ?? '',
+      handlerCase: json['handler_case'] as String? ?? '',
+      classifiedBy: json['classified_by'] as String? ?? '',
+      suggestedMode: json['suggested_mode'] as String? ?? '',
     );
 
 Map<String, dynamic> _$$ChatMessageImplToJson(_$ChatMessageImpl instance) =>
@@ -30,8 +34,14 @@ Map<String, dynamic> _$$ChatMessageImplToJson(_$ChatMessageImpl instance) =>
       'content': instance.content,
       'timestamp': instance.timestamp.toIso8601String(),
       'session_id': instance.sessionId,
-      'tool_calls': instance.toolCalls,
+      'tool_calls': _toolCallsToJson(instance.toolCalls),
       'parts': instance.parts,
+      'turn_id': instance.turnId,
+      'task_id': instance.taskId,
+      'intent_type': instance.intentType,
+      'handler_case': instance.handlerCase,
+      'classified_by': instance.classifiedBy,
+      'suggested_mode': instance.suggestedMode,
     };
 
 _$DetectionContextImpl _$$DetectionContextImplFromJson(

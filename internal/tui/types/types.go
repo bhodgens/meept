@@ -549,6 +549,18 @@ type QueueStatusResponse struct {
 	FollowUpDepth int    `json:"followup_depth"`
 	IsActive      bool   `json:"is_active"`
 	Generation    uint64 `json:"generation"`
+	// TaskStates lists the session's non-terminal tasks (parked,
+	// planning, awaiting approval) even when no loop is active - the
+	// B5 fix (leaf 05-navigation/03 T2): parked work stays visible.
+	// Older daemons omit the key; an empty list is the pre-fix shape.
+	TaskStates []TaskStateRow `json:"task_states"`
+}
+
+// TaskStateRow is one queue_status task_states entry {task_id,state,name}.
+type TaskStateRow struct {
+	TaskID string `json:"task_id"`
+	State  string `json:"state"`
+	Name   string `json:"name"`
 }
 
 // BranchInfo represents a conversation branch (shared between TUI and CLI).

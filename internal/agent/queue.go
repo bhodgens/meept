@@ -150,6 +150,10 @@ type MessageQueue struct {
 
 	persister QueuePersisterOps
 
+	// bootRecovered counts leading follow-up messages injected by boot
+	// recovery (02-routing/03 T2); they drain as one ordered batch.
+	bootRecovered int
+
 	// wg tracks in-flight persistence goroutines so Close can wait for them.
 	wg sync.WaitGroup
 }
@@ -345,6 +349,9 @@ func (q *MessageQueue) DrainSteering() []QueuedMessage {
 // DrainFollowUp returns follow-up messages according to the DrainMode.
 // DrainOne: returns at most one message.
 // DrainAll: returns all pending messages.
+// Boot-recovered messages (02-routing/03 T2) drain as ONE ordered batch:
+// they are the session's persisted backlog, not live one-at-a-time
+// follow-ups, and splitting them across turns would strand the tail.
 func (q *MessageQueue) DrainFollowUp() []QueuedMessage {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -354,6 +361,19 @@ func (q *MessageQueue) DrainFollowUp() []QueuedMessage {
 	}
 
 	var drained []QueuedMessage
+
+	if q.bootRecovered > 0 {
+		n := q.bootRecovered
+		if n > len(q.followUpQueue) {
+			n = len(q.followUpQueue)
+		}
+		drained = make([]QueuedMessage, n)
+		copy(drained, q.followUpQueue[:n])
+		q.followUpQueue = q.followUpQueue[n:]
+		q.bootRecovered -= n
+		q.generation++
+		return drained
+	}
 
 	switch q.config.FollowUpDrain {
 	case DrainOne:

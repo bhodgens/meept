@@ -4337,6 +4337,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// quickplan-session-upgrade/): default off.
 			SessionStateUpgrade: cfg.Orchestrator.Classifier.SessionStateUpgrade,
 		})
+		// Trivial fast lane (04-clutter/02, F-ORCH-5):
+		// orchestrator.trivial_fast_lane defaults true; the setter is
+		// the config mirror (the lane's classifier latch is inverted so
+		// the zero value is already on -- this call only matters to turn
+		// it OFF for byte-identical legacy routing).
+		c.Dispatcher.SetTrivialFastLane(cfg.Orchestrator.TrivialFastLane)
 
 		// Session drift detector (issue #41): watches the per-session
 		// intent-embedding sequence fed by the prefilter's Door-1 path.
@@ -4715,6 +4721,16 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// Interactive stamp origin lookup (tree 04 leaf 02, D11).
 			tacticalScheduler.SetSessionStore(c.SessionStore)
 
+			// Bounded retry ticker for semaphore-blocked steps
+			// (usability 02-routing/04 T2, W12/F-ORCH-28): every
+			// reschedule caller is event-driven, so a wave that blocks
+			// with no in-flight steps never retries. The sweep fires
+			// only for EXECUTING tasks (C7 exempt states stay inert).
+			// orchestrator.step_retry_interval (default 15s; 0 disables).
+			if cfg.Orchestrator.StepRetryInterval > 0 {
+				tacticalScheduler.SetStepRetryInterval(time.Duration(cfg.Orchestrator.StepRetryInterval) * time.Second)
+			}
+
 			// Output-filter chain (output-filters tree, leaf 04): built
 			// from the daemon config snapshot and wired ONLY when
 			// output_filters.enabled -- a disabled config leaves the
@@ -4844,6 +4860,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 			// Create Ralph loop for automatic replanning on incomplete tasks
 			ralphLoopCfg := agent.DefaultRalphLoopConfig()
+			ralphLoopCfg.MaxReplanExtensions = cfg.Orchestrator.MaxReplanExtensions
 			ralphLoop := agent.NewRalphLoop(ralphLoopCfg, nil, c.TaskStore, c.StepStore, c.PlanManager, msgBus, logger.With("component", "ralph-loop"))
 			c.RalphLoop = ralphLoop
 
@@ -11059,12 +11076,13 @@ func (p *AgentJobProcessor) resolveStepWorkingDirFor(job *queue.Job, stepID, ses
 	// session provenance (audit R4) resolved at schedule time. Look it up
 	// by primary ID and conversation ID (LinkedSessions may hold either
 	// form -- same dual lookup as resolveStepWorkingDir's link chain).
+	// Thread-scoped hints ("conv-...-thread-<topic>-<n>", the thread
+	// router's live output shape) unwrap back to the owning session the
+	// same way the LinkedSessions chain does (usability 02-routing/04
+	// T3, R4/A4 -- the payload-hint path used to miss them).
 	if sessionID != "" && p.sessionStore != nil {
-		if sess := p.sessionStore.Get(sessionID); sess != nil {
-			if wd, _ := session.ResolveWorkingDir(sess); wd != "" {
-				return wd
-			}
-		} else if sess := p.sessionStore.GetByConversationID(sessionID); sess != nil {
+		if sess := session.ResolveThreadConversationID(sessionID,
+			p.sessionStore.GetByConversationID, p.sessionStore.Get); sess != nil {
 			if wd, _ := session.ResolveWorkingDir(sess); wd != "" {
 				return wd
 			}
@@ -11219,6 +11237,7 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 	// conversation state. Empty taskID defaults to "_default" inside GetForTask,
 	// preserving the previous single-loop behavior for non-task jobs.
 	var agentLoop *agent.AgentLoop
+	fallbackLoop := false // GetForTask unavailable: the shared-loop fallback
 	if job.AgentID != "" && p.registry != nil {
 		loop, err := p.registry.GetForTask(job.AgentID, job.TaskID)
 		if err != nil {
@@ -11229,6 +11248,7 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 				"error", err,
 			)
 			agentLoop = p.agentLoop
+			fallbackLoop = true
 		} else {
 			// Resolve the working directory from the task's linked session's
 			// project binding (set via project.set). Without this, step-job
@@ -11276,10 +11296,53 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 		}
 	} else {
 		agentLoop = p.agentLoop
+		fallbackLoop = true
 	}
 
 	if agentLoop == nil {
 		return nil, fmt.Errorf("no agent loop available")
+	}
+
+	// Step-job dir binding on the shared-loop fallback (usability
+	// remediation 02-routing/04 T3, R5/A3/A4): dir injection used to live
+	// ONLY inside the GetForTask success branch, so a fallback step job
+	// ran in whatever dir the process-wide interactive loop happened to
+	// carry -- the daemon CWD in production -- writing artifacts outside
+	// the user's project. Three rules, all BEFORE the loop boundary:
+	//  1. the resolved session dir rides the turn context
+	//     (tools.ContextWithWorkingDir);
+	//  2. the turn runs on a per-job scoped loop cloned from the shared
+	//     loop, because executeToolCalls re-injects the LOOP's own dir
+	//     into every tool context -- a ctx-only bind would be overwritten
+	//     at the tool boundary; the shared loop is never mutated;
+	//  3. when the job carries session provenance but NOTHING resolves a
+	//     dir, refuse with the actionable ErrNoWorkingDir sentinel
+	//     instead of silently running unbound.
+	if isStepJob && fallbackLoop {
+		if wd := p.resolveStepWorkingDirFor(job, stepPayload.StepID, stepPayload.SessionID); wd != "" {
+			ctx = tools.ContextWithWorkingDir(ctx, wd)
+			stepConvID := fmt.Sprintf("step-%s-%s", stepPayload.TaskID, stepPayload.StepID)
+			if scoped := agent.NewAgentLoop(stepConvID, wd, agentLoop.ConfigSnapshot()...); scoped != nil {
+				if p.sessionStore != nil && stepPayload.SessionID != "" {
+					sess := session.ResolveThreadConversationID(stepPayload.SessionID,
+						p.sessionStore.GetByConversationID, p.sessionStore.Get)
+					if sess != nil {
+						scoped.SetProjectID(sess.ProjectID)
+						scoped.SetScopeUserID(sess.OwnerID)
+					}
+				}
+				defer scoped.Close()
+				p.logger.Info("Step job fallback bound to session dir",
+					"job_id", job.ID,
+					"task_id", job.TaskID,
+					"working_dir", wd,
+				)
+				agentLoop = scoped
+			}
+		} else if stepPayload.SessionID != "" {
+			return nil, fmt.Errorf("step job %s (task %s, session hint %s) has no resolvable working directory: %w (bind a project to this session with project.set, or re-dispatch from the project directory)",
+				job.ID, stepPayload.TaskID, stepPayload.SessionID, tools.ErrNoWorkingDir)
+		}
 	}
 
 	// Autonomous marker for step jobs (e2e run 8, 2026-09-11): a step job

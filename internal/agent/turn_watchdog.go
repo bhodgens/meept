@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/caimlas/meept/internal/task"
 )
 
 // TurnWatchdog is the async-turn liveness reaper (async-turn-migration
@@ -12,7 +14,7 @@ import (
 // progress is older than the stale threshold and, for each, emits a
 // turn.terminal event with status=failed and handler_case=turn_reaped,
 // then removes the turn from tracking. Mark-and-continue ONLY: the reaper
-// never re-dispatches work and never cancels in-flight goroutines — if
+// never re-dispatches work and never cancels in-flight goroutines -- if
 // late work eventually completes, the normal turn.terminal still fires
 // and clients treat a post-reaped completion as valid.
 //
@@ -35,6 +37,53 @@ type TurnWatchdog struct {
 	stopped bool
 	stopCh  chan struct{}
 	done    chan struct{}
+
+	// taskState is the C7 exemption accessor (01-safety/04): a
+	// registry-edge state lookup supplied via SetTaskStateFunc. It is a
+	// cheap in-memory read, NEVER a per-tick task-store query. nil keeps
+	// the pre-C7 behavior (every stale turn reaps).
+	taskState func(taskID string) task.TaskState
+}
+
+// SetTaskStateFunc wires the C7 exemption state accessor: given the task
+// id attached to a tracked turn, it returns the task's current state from
+// the registry edge (no store query per tick). Turns whose state is
+// planning, awaiting_approval, or awaiting_seal are EXEMPT from staleness
+// reaping -- a human wait is not a stalled turn. Truly stalled executing
+// turns still reap. Nil-guarded per the setter convention; a nil func
+// disables the exemption.
+func (w *TurnWatchdog) SetTaskStateFunc(fn func(taskID string) task.TaskState) {
+	if w == nil {
+		return
+	}
+	w.mu.Lock()
+	w.taskState = fn
+	w.mu.Unlock()
+}
+
+// taskStateFor reads the exemption accessor nil-safely under the mutex.
+func (w *TurnWatchdog) taskStateFor(taskID string) (task.TaskState, bool) {
+	w.mu.Lock()
+	fn := w.taskState
+	w.mu.Unlock()
+	if fn == nil || taskID == "" {
+		return "", false
+	}
+	return fn(taskID), true
+}
+
+// exemptFromReap reports whether a stale record's task sits in a C7 park
+// state: planning | awaiting_approval | awaiting_seal. The awaiting_seal
+// wait has no dedicated enum value today (planning + draft metadata
+// represents it); the string is matched so a future enum value is covered
+// without touching this loop. Quota/throttle/gate parked turns keep their
+// existing semantics -- only these three states are exempt.
+func exemptFromReap(state task.TaskState) bool {
+	switch state {
+	case task.StatePlanning, task.StateAwaitingApproval, "awaiting_seal":
+		return true
+	}
+	return false
 }
 
 // NewTurnWatchdog builds a watchdog over reg. reg or emit nil disables it
@@ -87,7 +136,7 @@ func (w *TurnWatchdog) Stop() {
 // RunOnce executes exactly one reap pass and returns the number of turns
 // reaped. Exported test seam over the unexported reapOnce (the leaf
 // contract offers "RunOnce() exported test seam OR Start with tiny
-// interval" — this is the former; Start-with-tiny-interval is covered by
+// interval" -- this is the former; Start-with-tiny-interval is covered by
 // the lifecycle test too).
 func (w *TurnWatchdog) RunOnce(staleAfter time.Duration) int {
 	return w.reapOnce(staleAfter)
@@ -133,6 +182,16 @@ func (w *TurnWatchdog) reapOnce(staleAfter time.Duration) int {
 	stales := w.reg.Stale(staleAfter)
 	reaped := 0
 	for _, rec := range stales {
+		// C7 exemption: a turn parked in planning / awaiting_approval /
+		// awaiting_seal waits on a human (or the draft/seal lane), not on
+		// stalled work. Skip it WITHOUT Completing -- the task->turn edge
+		// must survive so the later approval relay terminalizes the turn
+		// exactly once. Draft/seal/approval activity Touches liveness
+		// (StrategicPlanner.SetTurnLivenessTouch) so active drafting never
+		// accumulates staleness in the first place.
+		if state, ok := w.taskStateFor(rec.TaskID); ok && exemptFromReap(state) {
+			continue
+		}
 		w.safeEmit(TurnTerminalEvent{
 			ConversationID: rec.ConversationID,
 			TurnID:         rec.TurnID,
@@ -148,7 +207,7 @@ func (w *TurnWatchdog) reapOnce(staleAfter time.Duration) int {
 			TraceID:    rec.TraceID,
 			TurnSpanID: rec.TurnSpanID,
 		})
-		// Observability (leaf-06 task 4): the emit wrapper's Warn line —
+		// Observability (leaf-06 task 4): the emit wrapper's Warn line --
 		// countable in the daemon log alongside the terminal event itself.
 		// The metrics.db schema is deliberately NOT widened.
 		w.logger.Warn("turn reaped",
@@ -167,7 +226,7 @@ func (w *TurnWatchdog) reapOnce(staleAfter time.Duration) int {
 
 // safeEmit isolates a panicking emit func from the loop: the panic is
 // recovered per record, logged, and the pass continues (the turn is still
-// Completed by reapOnce — a broken emitter must not wedge the registry).
+// Completed by reapOnce -- a broken emitter must not wedge the registry).
 func (w *TurnWatchdog) safeEmit(ev TurnTerminalEvent) {
 	defer func() {
 		if r := recover(); r != nil {

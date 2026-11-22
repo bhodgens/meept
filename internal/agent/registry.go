@@ -570,6 +570,9 @@ func (r *AgentRegistry) ListSpecs() []*AgentSpec {
 // RPCs, dispatcher). New callers should use GetForTask to get per-task
 // isolation.
 func (r *AgentRegistry) Get(id string) (*AgentLoop, error) {
+	if r == nil {
+		return nil, fmt.Errorf("agent registry not wired (nil registry)")
+	}
 	return r.GetForTask(id, "_default")
 }
 
@@ -582,6 +585,13 @@ func (r *AgentRegistry) Get(id string) (*AgentLoop, error) {
 // calls), so holding the write lock through lazy-create is safe per CLAUDE.md
 // mutex-scope rule.
 func (r *AgentRegistry) GetForTask(agentID, taskID string) (*AgentLoop, error) {
+	// Nil-receiver guard (01-safety/07): the strategic planner can run
+	// with no registry wired (degraded/unit wiring); a nil *AgentRegistry
+	// must surface an actionable error, never a nil-pointer panic at the
+	// mutex lock below.
+	if r == nil {
+		return nil, fmt.Errorf("agent registry not wired (nil registry) for agent %q", agentID)
+	}
 	// Routing-only ids (e.g. "orchestrator") have no AGENT.md spec; resolve
 	// them to a real executor persona so step jobs don't fall back to the
 	// tool-less template loop. Loop keys use the canonical id so aliased and
@@ -2051,6 +2061,14 @@ func (r *AgentRegistry) RegisterActiveQueue(conversationID string, q *MessageQue
 	}
 
 	r.activeQueues[conversationID] = entry
+	// Boot-recovery inbox wiring (02-routing/03 T2): a live conversation
+	// queue is the injection target for persisted follow-ups. Recovery
+	// runs again on reconnect/turn start and delivers any rows a previous
+	// boot kept because no inbox was listening.
+	SetBootRecoveryInbox(conversationID, q)
+	if db := r.DB(); db != nil && q != nil {
+		RecoverPendingFollowUps(db, r.bus, r.logger)
+	}
 	return r.nextGen
 }
 
@@ -2066,6 +2084,9 @@ func (r *AgentRegistry) UnregisterActiveQueue(conversationID string) {
 	}
 	r.activeQueuesMu.Unlock()
 
+	// Drop the boot-recovery inbox registration: the queue is closing.
+	SetBootRecoveryInbox(conversationID, nil)
+
 	if !exists {
 		return
 	}
@@ -2073,28 +2094,44 @@ func (r *AgentRegistry) UnregisterActiveQueue(conversationID string) {
 	entry.Queue.Close()
 }
 
-// GetActiveQueue returns the queue for a running conversation, or nil if not found.
-// Also returns the generation number for version checking.
+// GetActiveQueue returns the queue for a running conversation, or nil if not
+// found. Also returns the generation number for version checking.
+//
+// C3 (01-safety/02-queue-lifecycle): the lookup follows the same resolution
+// order as ResolveActiveQueue -- exact key -> thread-unwrapped base ->
+// session-owned thread keys -- so a session-level id finds the queue RunOnce
+// registered under the thread router's thread-scoped id. An ambiguous
+// multi-thread match resolves to nil here (the error-carrying twin is
+// ResolveActiveQueue); never a silent pick.
 func (r *AgentRegistry) GetActiveQueue(conversationID string) (queue *MessageQueue, generation uint64) {
 	r.activeQueuesMu.RLock()
 	defer r.activeQueuesMu.RUnlock()
 
-	entry, exists := r.activeQueues[conversationID]
-	if !exists {
+	entry, err := r.resolveActiveQueueLocked(conversationID)
+	if err != nil {
 		return nil, 0
 	}
 
 	return entry.Queue, entry.Generation
 }
 
+// TaskStore returns the shared task store wired via
+// RegistryConfig.TaskStore, or nil when the registry runs without one.
+// Read-only surfaces (chat.queue_status task_states, leaf 05-navigation/03
+// T2) use this instead of reaching for an unexported field.
+func (r *AgentRegistry) TaskStore() *task.Store {
+	return r.taskStore
+}
+
 // GetActiveQueueLoop returns the AgentLoop that owns the active queue for a
 // conversation, or nil if no active queue exists or the entry has no loop.
+// Uses the same C3 thread-remap resolution as GetActiveQueue.
 func (r *AgentRegistry) GetActiveQueueLoop(conversationID string) *AgentLoop {
 	r.activeQueuesMu.RLock()
 	defer r.activeQueuesMu.RUnlock()
 
-	entry, exists := r.activeQueues[conversationID]
-	if !exists {
+	entry, err := r.resolveActiveQueueLocked(conversationID)
+	if err != nil {
 		return nil
 	}
 	return entry.Loop

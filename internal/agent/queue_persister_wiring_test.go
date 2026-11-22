@@ -162,12 +162,29 @@ func TestLoop_QueuePersisterRoundTripThroughRealWiring(t *testing.T) {
 
 	// And through the boot-side reader itself: RecoverPendingFollowUps
 	// loads + clears the conversation's rows (replicated in-package via
-	// loadAndClear, the same function RecoverPendingFollowUps calls).
-	recovered, err := loadAndClear(db, convID)
+	// loadAndClearForTest, the load half of which is the same production
+	// function RecoverPendingFollowUps calls).
+	recovered, err := loadAndClearForTest(db, convID)
 	require.NoError(t, err)
 	require.Len(t, recovered, 1)
 	assert.Equal(t, "remember this", recovered[0].Content)
 	assert.Equal(t, QueueTypeFollowUp, recovered[0].QueueType)
 
 	require.NoError(t, <-turnDone)
+}
+
+// loadAndClearForTest replicates the pre-C3 boot-recovery shape (load +
+// delete) so this pin keeps covering the persister round-trip through the
+// exact table + reader the daemon boot path uses. Production boot recovery
+// deliberately no longer deletes-before-injection (C3: content must survive
+// when no inbox listens); the load half here is the real loadFollowups.
+func loadAndClearForTest(db *sql.DB, convID string) ([]QueuedMessage, error) {
+	msgs, err := loadFollowups(db, convID)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := db.Exec(`DELETE FROM queued_followups WHERE conversation_id = ?`, convID); err != nil {
+		return nil, err
+	}
+	return msgs, nil
 }

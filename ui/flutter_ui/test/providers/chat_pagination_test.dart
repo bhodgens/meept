@@ -39,6 +39,7 @@ class _PagedSdkClient extends SdkApiClient {
     String id, {
     int offset = 0,
     int limit = 200,
+    bool includeToolCalls = false,
   }) async {
     final msgs = _page(offset, limit);
     return (messages: msgs, total: totalMessages);
@@ -154,6 +155,7 @@ class _SmallSessionSdkClient extends _PagedSdkClient {
     String id, {
     int offset = 0,
     int limit = 200,
+    bool includeToolCalls = false,
   }) async {
     return (messages: [for (var i = 0; i < 5; i++) _msg(i)], total: 5);
   }

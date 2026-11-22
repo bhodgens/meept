@@ -45,7 +45,7 @@ type ReviewManager struct {
 	bus              *bus.MessageBus
 	logger           *slog.Logger
 
-	// sessionStore resolves the ORIGIN of a review step — the session whose
+	// sessionStore resolves the ORIGIN of a review step -- the session whose
 	// working directory the reviewer lane must run in (issue #137, the
 	// code-shaped half). Nil = no session context: the reviewer loop keeps
 	// whatever dir it has and the denial log still names the path.
@@ -112,7 +112,7 @@ func (rm *ReviewManager) SetSessionStore(store SessionStoreReader) {
 // reviewerLoop returns the reviewer agent loop for a review step, scoped to
 // the step's task and carrying the resolved working dir. Step-scoping (rather
 // than the registry.Get() "_default" bucket) is what keeps two concurrent
-// tasks on one daemon from sharing — and clobbering — one reviewer dir; and
+// tasks on one daemon from sharing -- and clobbering -- one reviewer dir; and
 // the explicit SetWorkingDir is what gives a freshly created task-scoped loop
 // its dir at all (createLoop leaves it "" for the old two-phase init, which
 // this lane never did).
@@ -135,7 +135,7 @@ func (rm *ReviewManager) reviewerLoop(reviewerID string, step *task.TaskStep, wo
 //
 //	WorktreePath > ProjectPath > DetectionContext.CWD
 //
-// (session.ResolveWorkingDir — the repo-wide precedence). The step's own
+// (session.ResolveWorkingDir -- the repo-wide precedence). The step's own
 // SessionID hint is tried by primary id and by conversation id (the two
 // session keys, cf. handler.go's resolveStepWorkingDir link chain), and an
 // unset hint falls back to the FIRST linked session of the step's task, so a
@@ -143,7 +143,7 @@ func (rm *ReviewManager) reviewerLoop(reviewerID string, step *task.TaskStep, wo
 //
 // Returns ("", WorkingDirFromNone) when nothing resolves. The daemon's own
 // process CWD is never consulted (AGENTS.md: os.Getwd is not a sanctioned
-// fallback) and no global active-project lookup happens here — an unbound
+// fallback) and no global active-project lookup happens here -- an unbound
 // step gets an unbound reviewer, loudly logged by the caller.
 func (rm *ReviewManager) resolveStepWorkingDir(step *task.TaskStep) (string, session.WorkingDirSource) {
 	if rm == nil || step == nil || rm.sessionStore == nil {
@@ -227,7 +227,7 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, sp
 	policy := rm.policy
 	rm.mu.RUnlock()
 
-	// FAIL: Tool execution failed — nothing meaningful to review. The step
+	// FAIL: Tool execution failed -- nothing meaningful to review. The step
 	// must not pass review: an approved error is how "Task completed" stubs
 	// lied to users (2026-09-04 finding F2). This gate runs before every
 	// policy path (needs-review, auto-approve, heuristic) so an error step
@@ -242,9 +242,22 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, sp
 		}
 		return &ReviewResult{
 			Status:     ReviewRejected,
-			Feedback:   "Rejected: step execution error — " + truncateString(firstLine(step.Result), 200),
+			Feedback:   "Rejected: step execution error -- " + truncateString(firstLine(step.Result), 200),
 			Confidence: 1.0,
 		}, nil
+	}
+
+	// 06-evidence-review (W4, F-NEW-2/4/13): a file-shaped step whose tool
+	// ledger shows no successful file-tool execution can never pass review
+	// as completed. The frozen p6-positive-control shape: the committer ran
+	// 3 steps with zero file tools, all auto-approved, hello.txt unchanged.
+	// This gate runs before EVERY policy path (skip-review, auto-approve,
+	// trivial-task heuristic) and judges only tool-issued evidence
+	// (step.Evidence, fed from tool.execution.complete via tactical.go) --
+	// never the model's Claims or narration. Real file evidence falls
+	// through untouched (no over-gating); non-file steps are unaffected.
+	if verdict := rm.fileEvidenceGate(step, policy); verdict != nil {
+		return verdict, nil
 	}
 
 	// F9 (2026-09-17 bughunt): the claim-without-evidence guards must run
@@ -252,7 +265,7 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, sp
 	// skips review for conversational hints ("chat", "report", …), so a
 	// conversational step narrating a fabricated tool execution
 	// ("extraction ran clean") with zero tool evidence was auto-approved
-	// here and heuristicReviewPasses — where the guards live — never
+	// here and heuristicReviewPasses -- where the guards live -- never
 	// ran. The guard is cheap and policy-independent: a step CLAIMING a
 	// specific tool execution it cannot evidence needs a reviewer even
 	// when its hint is on the skip list. Plain conversational answers
@@ -269,8 +282,12 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, sp
 		)
 	}
 
-	// Check if review is needed based on policy
-	if !policy.NeedsReview(step) && rm.heuristicGuardsPass(step) {
+	// Check if review is needed based on policy. A file-shaped step with
+	// no successful file-tool evidence can never ride this shortcut
+	// (06-evidence-review): the gate above either rejected it or forced
+	// the full reviewer lane.
+	fileGateForced := stepIsFileShaped(step) && !hasSuccessfulFileEvidence(step.Evidence)
+	if !policy.NeedsReview(step) && rm.heuristicGuardsPass(step) && !fileGateForced {
 		rm.logger.Debug("Step does not require review", "step_id", step.ID)
 		return &ReviewResult{
 			Status:     ReviewApproved,
@@ -279,8 +296,8 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, sp
 		}, nil
 	}
 
-	// Check auto-approve patterns
-	if policy.ShouldAutoApprove(step) {
+	// Check auto-approve patterns (never for a forced file-evidence step)
+	if policy.ShouldAutoApprove(step) && !fileGateForced {
 		rm.logger.Debug("Step auto-approved", "step_id", step.ID)
 		if err := rm.stepStore.SetState(step.ID, task.StepApproved); err != nil {
 			rm.logger.Error("Failed to set step to approved", "error", err)
@@ -316,7 +333,7 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, sp
 		}, nil
 	}
 
-	// FAIL backstop: Tool execution failed — nothing meaningful to review.
+	// FAIL backstop: Tool execution failed -- nothing meaningful to review.
 	// Unreachable when the pre-policy gate above fires, but kept as a
 	// hard guarantee: no code path in ReviewStep may return ReviewApproved
 	// for an error step (2026-09-04 finding F2).
@@ -330,15 +347,15 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, sp
 		}
 		return &ReviewResult{
 			Status:     ReviewRejected,
-			Feedback:   "Rejected: step execution error — " + truncateString(firstLine(step.Result), 200),
+			Feedback:   "Rejected: step execution error -- " + truncateString(firstLine(step.Result), 200),
 			Confidence: 1.0,
 		}, nil
 	}
 
-	// SKIP: Trivial task — fewer than 3 steps in the task means low
+	// SKIP: Trivial task -- fewer than 3 steps in the task means low
 	// complexity where LLM review cost outweighs benefit. Use a
 	// lightweight heuristic check instead.
-	if rm.isTrivialTask(step) {
+	if rm.isTrivialTask(step) && !fileGateForced {
 		rm.logger.Info("Skipping full review: trivial task (<3 steps), using heuristic",
 			"step_id", step.ID,
 			"tool_hint", step.ToolHint,
@@ -350,7 +367,7 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, sp
 			// F1 (2026-09-12 bughunt): SetState writes the DB only; the
 			// in-memory step still carries its pre-review state, and the
 			// full-row Update below writes `state = step.State`
-			// (internal/task/step.go) — reverting the approval to a
+			// (internal/task/step.go) -- reverting the approval to a
 			// non-terminal state so AreAllCompleted never fires. Assign
 			// the state before the Update (the 2026-09-06 fix shape the
 			// rejection path already uses).
@@ -377,7 +394,7 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, sp
 		// Guard failure vs. meaningless content (sweep e2e, 2026-09-15/16):
 		// the guard refusals (artifact/tool-execution claims with no
 		// captured evidence) describe SUSPICION, not emptiness. A coder
-		// that wrote the file and documented "go test — exit code 0" was
+		// that wrote the file and documented "go test -- exit code 0" was
 		// rejected outright here because shell-run verification produces
 		// no file-tool evidence events. Suspicion must go to the full
 		// reviewer, not reject the step. Only a truly vacuous result
@@ -393,7 +410,7 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, sp
 			"step_id", step.ID,
 			"tool_hint", step.ToolHint,
 		)
-		// Fall through to the full reviewer below — do NOT reject.
+		// Fall through to the full reviewer below -- do NOT reject.
 	}
 
 	// Select reviewer agent
@@ -409,7 +426,7 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, sp
 	// Resolve the working dir the reviewer lane runs in (issue #137): the
 	// step's session origin, WorktreePath > ProjectPath > DetectionContext.CWD.
 	// Before this, registry.Get() handed back the "_default" loop whose dir is
-	// "" — the reviewer's file_read fell through to whatever the daemon CWD
+	// "" -- the reviewer's file_read fell through to whatever the daemon CWD
 	// was and a fence denial named no path, which is exactly the
 	// unattributable WARN captured on the scratch rig.
 	workingDir, wdSource := rm.resolveStepWorkingDir(step)
@@ -431,7 +448,7 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, sp
 		// Fail CLOSED: an unresolvable reviewer must never auto-approve.
 		// The old auto-approve fallback defeated the F9 guard whenever
 		// the reviewer agent spec was missing (e.g. an empty registry on
-		// a fresh checkout) — a guard-flagged step sailed through as
+		// a fresh checkout) -- a guard-flagged step sailed through as
 		// approved. Surface the error like the RunOnce failure below.
 		rm.logger.Error("Failed to get reviewer agent", "reviewer", reviewerID, "error", err)
 		return nil, fmt.Errorf("reviewer %s not available: %w", reviewerID, err)
@@ -453,6 +470,20 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, sp
 
 	// Parse review result
 	result := rm.parseReviewResult(output)
+	// 06-evidence-review: the forced reviewer may reject or ask for info,
+	// but it can never APPROVE a file-shaped step whose ledger still
+	// shows no successful file-tool execution -- the reviewer's narration
+	// is not tool-issued evidence. Convert such an approval into the
+	// deterministic actionable rejection.
+	if result.Status == ReviewApproved && fileGateForced {
+		feedback := fmt.Sprintf(
+			"Rejected: no file operation was executed for this step -- the tool ledger shows zero successful file-tool executions, "+
+				"so the requested file change did not happen. Task: %s. "+
+				"Execute the file edit or write (for example file_edit/file_write on the named file), "+
+				"then verify the file actually changed before reporting completion.",
+			strings.TrimSpace(step.Description))
+		result = &ReviewResult{Status: ReviewRejected, Feedback: feedback, Confidence: 1.0}
+	}
 	result.ReviewerID = reviewerID
 	result.Duration = time.Since(startTime)
 
@@ -705,7 +736,7 @@ func (rm *ReviewManager) HandleReviewResult(ctx context.Context, stepID string, 
 	// Persist the verdict beside the step (tiered-iteration leaf 03): the
 	// ReviewResult was previously ephemeral (bus event only), so the
 	// critic's evidence assembler had nothing to read back per session.
-	// Every terminal verdict — including the auto-approval paths — is
+	// Every terminal verdict -- including the auto-approval paths -- is
 	// written; the reason is bounded at write time (reviewReasonMaxChars)
 	// by SetReviewVerdict. A write failure is non-fatal (logged, surfaced
 	// through outErr alongside the other non-fatal SetResult failures) so
@@ -728,12 +759,12 @@ func (rm *ReviewManager) HandleReviewResult(ctx context.Context, stepID string, 
 		// F1 (2026-09-12 bughunt): SetState writes the DB only; the step
 		// was loaded while still 'reviewing' (SetState at ReviewStep), so
 		// the full-row Update below would serialize that stale state back
-		// over the approval — leaving the step non-terminal and the task
+		// over the approval -- leaving the step non-terminal and the task
 		// unfinalizable. Assign the state FIRST (the 2026-09-06 fix shape
 		// the rejection path below already uses).
 		step.State = task.StepApproved
 		// Reviewer approval IS the platform's judgment that the step is
-		// done (e2e run 13, 2026-09-11) — but only stamp Validated when
+		// done (e2e run 13, 2026-09-11) -- but only stamp Validated when
 		// there is tool-issued evidence for it (F11). An approval with no
 		// evidence verifies nothing, so the record keeps Validated=false;
 		// a standing unverified marker (ValidationError) is never cleared
@@ -761,7 +792,7 @@ func (rm *ReviewManager) HandleReviewResult(ctx context.Context, stepID string, 
 		// Execution-error gate: the step is already failed (terminal).
 		// A revision depending on a failed step can never be promoted
 		// (IsSuccessfullyTerminal blocks on failed deps), so revising is
-		// pointless — keep the failure and record the feedback only.
+		// pointless -- keep the failure and record the feedback only.
 		if step.State == task.StepFailed {
 			rm.logger.Warn("Step rejected after execution error; not creating revision",
 				"step_id", step.ID,
@@ -777,7 +808,7 @@ func (rm *ReviewManager) HandleReviewResult(ctx context.Context, stepID string, 
 		// two-step sequence (SetState(rejected) then Update(step) with the
 		// stale in-memory state) wrote "reviewing" back over "rejected" and
 		// left the revision step depending on a permanently non-terminal
-		// original — revisions never scheduled (2026-09-06 live-run finding).
+		// original -- revisions never scheduled (2026-09-06 live-run finding).
 		step.IncrementRevision()
 		step.State = task.StepRejected
 		if err := rm.stepStore.Update(step); err != nil {
@@ -1124,7 +1155,7 @@ func (rm *ReviewManager) stepHasError(step *task.TaskStep) bool {
 			return true
 		}
 		// Envelope parsed: the processor's success flag is authoritative.
-		// Narrative text inside "response"/"evidence" is not re-scanned —
+		// Narrative text inside "response"/"evidence" is not re-scanned --
 		// agents legitimately describe past failures there.
 		return false
 	}
@@ -1172,7 +1203,7 @@ func (rm *ReviewManager) isTrivialTask(step *task.TaskStep) bool {
 }
 
 // heuristicGuardsPass runs ONLY the claim-without-evidence guards from
-// heuristicReviewPasses — no error/emptiness checks, no full heuristic
+// heuristicReviewPasses -- no error/emptiness checks, no full heuristic
 // verdict. F9 (2026-09-17 bughunt): ReviewStep consults this BEFORE the
 // policy.NeedsReview shortcut, so a step whose hint is on the policy
 // skip list ("chat", "report", …) cannot be auto-approved when it
@@ -1218,7 +1249,7 @@ func (rm *ReviewManager) heuristicGuardsPass(step *task.TaskStep) bool {
 
 // heuristicReviewPasses performs a lightweight, non-LLM check to determine
 // whether a low-risk step should pass review. It returns true when the
-// step has a non-empty, meaningful result — the default state for benign
+// step has a non-empty, meaningful result -- the default state for benign
 // operations that did not fail. Error-shaped results never pass: a long
 // error string is still an error.
 func (rm *ReviewManager) heuristicReviewPasses(step *task.TaskStep) bool {
@@ -1234,7 +1265,7 @@ func (rm *ReviewManager) heuristicReviewPasses(step *task.TaskStep) bool {
 		return false
 	}
 	// Scan scope (sweep e2e, 2026-09-15): for structured step-job envelopes,
-	// scan only the model's RESPONSE narration — not the whole envelope.
+	// scan only the model's RESPONSE narration -- not the whole envelope.
 	// The envelope's evidence[] strings quote the tool-issued items and the
 	// model's report copy, so markers like "file_exists" appear there on
 	// every successful file-tool turn and the artifact/claim guards would
@@ -1251,7 +1282,7 @@ func (rm *ReviewManager) heuristicReviewPasses(step *task.TaskStep) bool {
 	// Reasoning-only guard (2026-09-10, outcome-loop L3 session): the
 	// reasoning-watchdog writes "[reasoning-only turn]" assistant markers
 	// and its terminate path returns the canned "I stopped after extended
-	// thinking" text as the step result. Neither is evidence of work —
+	// thinking" text as the step result. Neither is evidence of work --
 	// both are the loop GIVING UP. A canned no-tool termination must not
 	// ride the trivial-task heuristic to auto-approval.
 	if !reviewHintIsConversational(step.ToolHint) &&
@@ -1266,7 +1297,7 @@ func (rm *ReviewManager) heuristicReviewPasses(step *task.TaskStep) bool {
 	// Claim-without-action guard (e2e run 7, 2026-09-10): the coder returned
 	// a structured report asserting file_exists evidence WITHOUT calling any
 	// tool (iterations=1, zero tool executions) and this heuristic
-	// auto-approved it — a hallucinated completion. An execution step whose
+	// auto-approved it -- a hallucinated completion. An execution step whose
 	// report claims artifacts but which shows no tool activity is not
 	// verifiable; route it to the full reviewer instead of waving it
 	// through. Memory/analysis hints legitimately produce reports without
@@ -1275,7 +1306,7 @@ func (rm *ReviewManager) heuristicReviewPasses(step *task.TaskStep) bool {
 	// F9 (2026-09-12 bughunt): the predicate MUST be the structural one.
 	// The daemon's step-job envelope encodes `evidence` as a []string of
 	// prose, so decoding into []models.Evidence leaves a ONE-element slice
-	// holding a zero-value Evidence — len(step.Evidence) == 0 is therefore
+	// holding a zero-value Evidence -- len(step.Evidence) == 0 is therefore
 	// never true for a job-driven step and this refusal was unreachable.
 	if step.ToolHint != "" && !reviewHintIsConversational(step.ToolHint) && !hasMeaningfulEvidence(step.Evidence) {
 		if claimsArtifacts(scanText) {
@@ -1287,8 +1318,8 @@ func (rm *ReviewManager) heuristicReviewPasses(step *task.TaskStep) bool {
 		}
 	}
 	// Tool-execution-claim guard (agent sweep e2e, 2026-09-15): chat/analyst
-	// steps reported "Extraction ran clean on the first pass" — claiming a
-	// json_extract tool execution — with zero extraction-model calls having
+	// steps reported "Extraction ran clean on the first pass" -- claiming a
+	// json_extract tool execution -- with zero extraction-model calls having
 	// been routed (metrics.db: 0 llm_calls to local-extract). These hints
 	// are conversational, so the artifact guard above does not apply; but a
 	// CONVERSATIONAL agent claiming it RAN a named tool is the same
@@ -1305,7 +1336,7 @@ func (rm *ReviewManager) heuristicReviewPasses(step *task.TaskStep) bool {
 	// 2026-09-18): a planner-hint step whose result is pure first-person
 	// future-intent narration ("I will...", "Let me...") with zero
 	// task-management tool evidence and no structured plan artifact is
-	// VACUOUS — approving it lets a doomed loop continue. The gate is
+	// VACUOUS -- approving it lets a doomed loop continue. The gate is
 	// against SILENT auto-approval: the step routes to the full reviewer,
 	// which may still approve with justification.
 	if planLooksVacuous(step) {
@@ -1351,7 +1382,7 @@ func claimsToolExecution(result string) bool {
 }
 
 // claimsArtifacts reports whether a result string asserts file/artifact
-// creation or existence — the shape the run-7 hallucinated report used.
+// creation or existence -- the shape the run-7 hallucinated report used.
 func claimsArtifacts(result string) bool {
 	lower := strings.ToLower(result)
 	for _, marker := range []string{

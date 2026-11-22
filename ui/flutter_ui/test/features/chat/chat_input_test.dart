@@ -216,6 +216,7 @@ class _RaceSdkClient extends _StubSdkClient {
     String id, {
     int offset = 0,
     int limit = 200,
+    bool includeToolCalls = false,
   }) async => (messages: <Map<String, dynamic>>[], total: 0);
 
   @override

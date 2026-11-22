@@ -19,6 +19,12 @@ type TaskApprovalHandler struct {
 	// ApproveFunc performs the approval. Typically StrategicPlanner.
 	// ApprovePlan; a func field keeps this package free of an agent import.
 	ApproveFunc func(ctx context.Context, taskID string) error
+	// RejectFunc performs the rejection (01-safety leaf 01, W1/C2).
+	// Typically StrategicPlanner.RejectPlan: sets StateRejected and
+	// publishes task.rejected. A rejection must NEVER route through
+	// ApproveFunc: that executed the plan the user just refused.
+	// Nil yields an actionable "rejection service not available" error.
+	RejectFunc func(ctx context.Context, taskID, reason string) error
 }
 
 // NewTaskApprovalHandler creates the handler. A nil ApproveFunc yields
@@ -63,11 +69,11 @@ func (h *TaskApprovalHandler) handleReject(ctx context.Context, params json.RawM
 	if req.TaskID == "" {
 		return nil, fmt.Errorf("task_id is required")
 	}
-	if h.ApproveFunc == nil {
-		return nil, fmt.Errorf("approval service not available")
+	if h.RejectFunc == nil {
+		return nil, fmt.Errorf("rejection service not available")
 	}
-	if err := h.ApproveFunc(ctx, req.TaskID); err != nil {
-		return nil, err
+	if err := h.RejectFunc(ctx, req.TaskID, req.Reason); err != nil {
+		return nil, fmt.Errorf("reject task %s: %w", req.TaskID, err)
 	}
 	return map[string]any{"task_id": req.TaskID, "status": "rejected"}, nil
 }

@@ -839,6 +839,10 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	// Register dispatch trace handlers
 	if rpcServer != nil && metricsStore != nil {
 		rpc.RegisterDispatchHandlers(rpcServer, metricsStore)
+		// C5 dual-key resolution (02-routing/02): session.dispatch_trace
+		// maps a primary session id or thread id to the owning
+		// conversation. nil-safe setter: unset keeps legacy behavior.
+		rpcServer.SetDispatchSessionStore(nilSafeSessionStore(components))
 		logger.Info("Dispatch trace RPC handlers registered")
 	}
 
@@ -2171,6 +2175,11 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		if rpcServer != nil {
 			approvalHandler := rpc.NewTaskApprovalHandler(
 				components.Orchestrator.Strategic().ApprovePlan)
+			// 01-safety leaf 01 (W1/C2): task.reject must REJECT. Wire
+			// StrategicPlanner.RejectPlan (StateRejected + task.rejected
+			// publication) as the reject seam; previously handleReject
+			// called ApproveFunc and executed the refused plan.
+			approvalHandler.RejectFunc = components.Orchestrator.Strategic().RejectPlan
 			approvalHandler.RegisterTaskApprovalMethods(rpcServer)
 			logger.Info("Task approval RPC handlers registered")
 		}
@@ -2576,10 +2585,12 @@ func (d *Daemon) Run(ctx context.Context) error {
 		}()
 	}
 
-	// Recover pending follow-ups from queue persistence.
-	// This scans queued_followups for conversations that had messages pending
-	// when the daemon last shut down, loads them, and publishes restore events
-	// so that any connected TUI clients are notified.
+	// Recover pending follow-ups from queue persistence (02-routing/03
+	// T2). Rows are re-enqueued into registered session inboxes and
+	// deleted only AFTER injection; with no inbox listening (the usual
+	// boot state) the rows survive and are delivered when the session's
+	// queue registers (AgentRegistry.RegisterActiveQueue re-runs
+	// recovery) or on the next boot.
 	if d.components != nil && d.components.Queue != nil {
 		if pq, ok := d.components.Queue.(*queue.PersistentQueue); ok {
 			db := pq.DB()
@@ -3486,9 +3497,14 @@ func nilSafeEvolverPlanManager(c *Components) *plan.PlanManager {
 }
 
 // nilSafeEvolverPlanStore returns the evolver sink plan store (or nil when
-// unavailable) for the HTTP PlanService sink fallback (L6).
-func nilSafeEvolverPlanStore(c *Components) *plan.SQLiteStore {
-	if c == nil {
+// unavailable) for the HTTP PlanService sink fallback (L6). The return type
+// is the INTERFACE plan.PlanStore, not the concrete *plan.SQLiteStore: a
+// nil concrete boxed into the interface field is non-nil, defeats every
+// != nil guard downstream, and GET /api/v1/plans panics (F-NEW-1). The
+// concrete-nil check at this wiring seam yields a TRUE interface nil
+// (internal/daemon/AGENTS.md typed-nil rule).
+func nilSafeEvolverPlanStore(c *Components) plan.PlanStore {
+	if c == nil || c.EvolverPlanStore == nil {
 		return nil
 	}
 	return c.EvolverPlanStore
