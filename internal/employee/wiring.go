@@ -240,6 +240,11 @@ func NewManagerFromConfig(
 	// "component=employee-wiring component=employee-manager ..." into a
 	// single record with duplicated/competing keys.
 	mgr := NewManagerWithStores(botMgr, botStore, cs, gs, as, logger)
+	// Production cron scheduler install. NewManager (test/gate path) does
+	// this itself; the wiring path goes through NewManagerWithStores,
+	// which never saw the scheduler. Without this m.Cron stays nil and
+	// every enabled cron trigger is dead in production.
+	mgr.installCronScheduler(botMgr)
 	// Standalone mode: register the goal/audit DB handles so Hire mirrors
 	// new employees into their bot_definitions stubs (the wiring-time
 	// mirrorRosterIntoStandalone pass only covers the pre-existing roster).
