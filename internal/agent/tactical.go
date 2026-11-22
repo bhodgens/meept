@@ -743,7 +743,12 @@ func (ts *TacticalScheduler) ScheduleReadySteps(ctx context.Context, taskID stri
 	if scheduledCount > 0 {
 		for _, step := range readySteps {
 			if step.State == task.StepScheduled {
-				currentStepDesc = step.Description
+				// Gate C-5 (07-scaffolding-payload-strip): live progress
+				// lines render in chat, so the current_step payload is
+				// display-stripped at the composer (planner
+				// session-context block + "## Your Task" header are
+				// internal machinery).
+				currentStepDesc = StripPromptScaffolding(step.Description)
 				break
 			}
 		}
@@ -2542,7 +2547,11 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 		nextStepDesc := ""
 		readySteps, _ := ts.stepStore.GetReadySteps(step.TaskID)
 		if len(readySteps) > 0 {
-			nextStepDesc = readySteps[0].Description
+			// Gate C-5 (07-scaffolding-payload-strip): the live
+			// task.progress payload is display-stripped at the composer
+			// (planner session-context block + "## Your Task" header are
+			// internal machinery; chat renders this line verbatim).
+			nextStepDesc = StripPromptScaffolding(readySteps[0].Description)
 		}
 
 		// Publish progress update (chat_visible=true so UI shows in chat)
@@ -2983,7 +2992,11 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID, jobErr stri
 		nextStepDesc := ""
 		readySteps, _ := ts.stepStore.GetReadySteps(step.TaskID)
 		if len(readySteps) > 0 {
-			nextStepDesc = readySteps[0].Description
+			// Gate C-5 (07-scaffolding-payload-strip): the live
+			// task.progress payload is display-stripped at the composer
+			// (planner session-context block + "## Your Task" header are
+			// internal machinery; chat renders this line verbatim).
+			nextStepDesc = StripPromptScaffolding(readySteps[0].Description)
 		}
 
 		// Reload counters atomically incremented above so progress events

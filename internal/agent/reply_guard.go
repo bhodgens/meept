@@ -166,6 +166,72 @@ func toolResultJSONKey(reply string) (string, bool) {
 	return "", false
 }
 
+// stepResultIsMachineShaped reports whether a STEP RESULT is raw tool-call /
+// tool-result JSON — the shape a model produces when it narrates its tool
+// calls as text instead of executing them (leaf 02,
+// 20261121-interactive-usability, probe B task-...0007: the trivial-task
+// heuristic auto-approved such a dump and the task reported "completed" with
+// zero artifacts). Fenced JSON or prose-wrapped results pass through
+// untouched.
+//
+// The step-job result envelope ({\"success\": true, \"response\": ...}) is
+// NOT judged as a whole — its \"success\": true alone would trip the reply
+// guard's generic tool-shape keys and reject every healthy step. When the
+// envelope parses and carries a non-empty response narration, the narration
+// itself is what gets classified (same scan scope heuristicReviewPasses
+// uses); the envelope's own machine keys are ignored.
+func stepResultIsMachineShaped(result string) bool {
+	trimmed := strings.TrimSpace(result)
+	if trimmed == "" {
+		return false
+	}
+	// Structured step-job envelope: judge the model's narration only.
+	var envelope struct {
+		Response string `json:"response"`
+	}
+	if err := json.Unmarshal([]byte(trimmed), &envelope); err == nil && strings.TrimSpace(envelope.Response) != "" {
+		return stepNarrationIsMachineShaped(envelope.Response)
+	}
+	return stepNarrationIsMachineShaped(trimmed)
+}
+
+// stepNarrationIsMachineShaped classifies a narration text (either the whole
+// legacy free-text result or the envelope's response field): it is
+// machine-shaped only when it is PURE JSON (starts '{'/'[', ends the
+// matching brace, every non-blank line structural) carrying either the
+// tool-result identity keys the reply guard matches (toolResultJSONKey) or
+// the tool-call narration keys ("tool_calls"/"function"/"name"/"arguments").
+// A prose answer that QUOTES a JSON snippet inside a sentence fails the
+// structural test and passes through.
+func stepNarrationIsMachineShaped(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	if !strings.HasPrefix(trimmed, "{") && !strings.HasPrefix(trimmed, "[") {
+		return false
+	}
+	if !strings.HasSuffix(trimmed, "}") && !strings.HasSuffix(trimmed, "]") {
+		return false
+	}
+	for line := range strings.SplitSeq(trimmed, "\n") {
+		if s := strings.TrimSpace(line); s != "" && !isStructuralLine(s) {
+			return false
+		}
+	}
+	// Tool-result dump (memory_store/schedule_list shapes — the reply
+	// guard's message-field exemption applies here too, so a tool handing
+	// back a ready user-facing answer is not flagged).
+	if _, ok := toolResultJSONKey(trimmed); ok {
+		return true
+	}
+	// Tool-call narration: the model wrote its intended calls as text
+	// (the probe-B shape) instead of executing them.
+	for _, key := range []string{`"tool_calls"`, `"function"`, `"name"`, `"arguments"`} {
+		if strings.Contains(trimmed, key) {
+			return true
+		}
+	}
+	return false
+}
+
 // hasNonEmptyMessageField reports whether the reply is a JSON object whose
 // TOP-LEVEL "message" key carries a non-empty string value — the shape a
 // tool uses to hand the agent a ready user-facing answer alongside its

@@ -77,7 +77,8 @@
       "task-state",
       "step-pipeline",
       "task-queue",
-      "goal-completion"
+      "goal-completion",
+      "payload-strip"
     ],
     "internal/worker/": [
       "goal-loop",
@@ -504,7 +505,8 @@
       "hitl-notifications",
       "intake-status",
       "execution-observability",
-      "dispatch-trace"
+      "dispatch-trace",
+      "payload-strip"
     ],
     "internal/comm/web/": [
       "hitl-notifications"
@@ -1279,6 +1281,18 @@
       "name": "groups-diagnosis",
       "dir": "e2e/suites/groups-diagnosis",
       "status": "implemented"
+    },
+    {
+      "name": "payload-strip",
+      "dir": "e2e/suites/payload-strip",
+      "status": "implemented",
+      "diff": "S",
+      "scenarios": [
+        "rpc-01 task.steps + task.list_extended over the daemon Unix socket carry NEITHER the planner's '## Session context' block, '## Your Task' header, nor a raw claims/evidence or executor-report envelope; the rendered description is the clean text and the result is prose-recovered",
+        "http-02 GET /api/v1/tasks/{id}/steps over the daemon TLS listener passes the same marker-free + clean-text assertion (GUI detail view stays clean WITHOUT client changes); bare task-row endpoints are marker-free",
+        "store-03 the strip is display-only: a fresh store handle rereads the RAW scaffolding + envelope from tasks.db after the daemon served stripped payloads"
+      ],
+      "note": "leaf 07 hermetic acceptance gate of 20261121-interactive-usability (master C-5): models-less scratch boot, fixtures seeded through the real task store via the harness pre-boot hook; RED verified by disabling the two choke-point calls (rpc stripTaskResponseSteps + http writeJSON task.StripTaskResponseSteps) and re-running."
     },
     {
       "name": "cluster-reclaim",
