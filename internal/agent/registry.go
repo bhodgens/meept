@@ -2046,6 +2046,94 @@ func (r *AgentRegistry) SetGlobalRules(rules string) {
 	r.logger.Info("Global rules updated, agent loops invalidated")
 }
 
+// SetAgentRegistry attaches the shared AgentRegistry to an ALREADY-CONSTRUCTED
+// loop and mints the steering/follow-up queue the loop lacks (steering-fix,
+// 07-bench residual): the daemon singleton template (components.go) is built
+// BEFORE NewAgentRegistry, so it can never receive the registry through
+// WithAgentRegistry at construction. Without this late wiring, every
+// direct-mode chat turn clones the unwired template (ChatHandler.sessionLoop
+// -> GetOrCreateWired), RunOnceWithParts' registration guard
+// (l.agentRegistry != nil && l.queue != nil) fails, and chat.steer /
+// chat.followup fail with ErrQueueNotFound for the whole daemon lifetime --
+// exactly the production-rig p5 defect (4/4 acceptance runs).
+//
+// Queue policy mirrors the registry's createLoop construction
+// (queueConfig.Enabled): DefaultQueueConfig-based steering/follow-up queue,
+// bus-attached when the registry carries one, agent-id stamped from the
+// loop. The queue is minted ONLY when the loop has none -- a loop that
+// already carries a queue keeps it (tests, registry-built loops).
+//
+// Not safe for concurrent wiring with in-flight turns: call once during
+// daemon boot, before any turn runs. The l.mu lock protects the field
+// writes against concurrent ConfigSnapshot readers.
+func (l *AgentLoop) SetAgentRegistry(r *AgentRegistry) {
+	if r == nil {
+		return
+	}
+	l.mu.Lock()
+	l.agentRegistry = r
+	if l.queue == nil && r.queueConfig.Enabled {
+		queueCfg := DefaultQueueConfig()
+		if r.queueConfig.MaxSteering > 0 {
+			queueCfg.MaxSteering = r.queueConfig.MaxSteering
+		}
+		if r.queueConfig.MaxFollowUp > 0 {
+			queueCfg.MaxFollowUp = r.queueConfig.MaxFollowUp
+		}
+		if r.queueConfig.SteeringDrain != "" {
+			queueCfg.SteeringDrain = ParseDrainMode(r.queueConfig.SteeringDrain)
+		}
+		if r.queueConfig.FollowUpDrain != "" {
+			queueCfg.FollowUpDrain = ParseDrainMode(r.queueConfig.FollowUpDrain)
+		}
+		queueCfg.PersistFollowUp = r.queueConfig.PersistFollowUp
+		if r.queueConfig.FlushDelayMs > 0 {
+			queueCfg.FlushDelayMs = r.queueConfig.FlushDelayMs
+		}
+		queueOpts := []MessageQueueOption{
+			WithQueueConfig(queueCfg),
+		}
+		if r.bus != nil {
+			queueOpts = append(queueOpts, WithQueueBus(r.bus))
+		}
+		if l.agentID != "" {
+			queueOpts = append(queueOpts, WithQueueAgentID(l.agentID))
+		}
+		queueOpts = append(queueOpts, WithQueueLogger(l.logger))
+		l.queue = NewMessageQueue(queueOpts...)
+	}
+	l.mu.Unlock()
+}
+
+// SteeringQueue returns the loop's steering/follow-up queue (nil when the
+// loop has none). Read-only seam for wiring tests and surfaces that must
+// observe the queue the loop will register per turn.
+func (l *AgentLoop) SteeringQueue() *MessageQueue {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.queue
+}
+
+// SteeringRegistry returns the loop's attached agent registry (nil when
+// unwired -- the pre-fix daemon template shape). Read-only seam.
+func (l *AgentLoop) SteeringRegistry() *AgentRegistry {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.agentRegistry
+}
+
+// SetChatter replaces the loop's LLM chatter. Test/wiring seam: it must run
+// before any turn (concurrent swap mid-turn is not supported -- the executor
+// captures the chatter at call time but reasoning state assumes a stable
+// client). The daemon never calls this on a live loop; it exists so wiring
+// tests can inject a spy into a MANAGER CLONE (GetOrCreateWired returns
+// ready-built loops that cannot be re-optioned).
+func (l *AgentLoop) SetChatter(c llm.Chatter) {
+	l.mu.Lock()
+	l.llm = c
+	l.mu.Unlock()
+}
+
 // RegisterActiveQueue associates a queue with a running conversation.
 // The loop parameter is the AgentLoop that owns this queue; it may be nil
 // in tests. Returns the generation number for this registration.

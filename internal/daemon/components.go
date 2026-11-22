@@ -4175,6 +4175,20 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		})
 		logger.Info("Agent registry initialized", "specs", len(c.AgentRegistry.ListSpecs()))
 
+		// Steering queue wiring (steering-fix, 07-bench residual): the daemon
+		// singleton template loop was constructed EARLIER in boot (above) with
+		// neither WithAgentRegistry nor WithMessageQueue, so every direct-mode
+		// chat turn (ChatHandler.sessionLoop -> GetOrCreateWired clone of this
+		// template) ran with a nil registry and nil queue -- RunOnceWithParts'
+		// per-turn queue registration guard never fired and chat.steer /
+		// chat.followup failed with ErrQueueNotFound for every conversation
+		// (production rig p5, runs 4-6). Late-attach the shared registry here,
+		// immediately after construction: SetAgentRegistry also mints the
+		// template's steering/follow-up queue, and ConfigSnapshot carries both
+		// (WithAgentRegistry + queue) onto every session clone at turn time.
+		// Boot-order safe: no turn can be running at this point.
+		c.AgentLoop.SetAgentRegistry(c.AgentRegistry)
+
 		// Wire tool-schema mode for task-scoped loops (chat-dispatch-ux
 		// leaf 04): the registry pushes the resolved mode into the shared
 		// tool registry so specialist loops inherit the same indexed

@@ -286,8 +286,22 @@ func TestTacticalScheduler_ReviewerErrorDoesNotBlockTask(t *testing.T) {
 // TestTacticalScheduler_VacuousValidatorPassNotValidated pins F10 and F11:
 // a validator that runs over zero/zero-value evidence reports Valid without
 // verifying anything, and an approval with no tool-issued evidence verifies
-// nothing either — neither may be recorded as validated=true. The task must
-// still finalize (the gate must not strand a step with nothing to verify).
+// nothing either -- neither may be recorded as validated=true.
+//
+// CONTRACT UPDATE (residual-fix wave, leaf-06 supersession): this pin was
+// written before 01-safety/06-evidence-review (fileEvidenceGate). Its
+// file_write step claims "produced the artifact" with ZERO tool-issued
+// evidence -- the exact p6 fabricated-success shape that gate now rejects
+// instead of heuristic-approving (T1: a file-shaped step with zero file-tool
+// ToolEvidence can never auto-approve). The old approved-expectation
+// asserted the pre-gate verdict; keeping it would re-open the
+// fabricated-success hole leaf 06 closed. The pin's own contract (F10/F11:
+// a vacuous pass is never recorded as validated=true) is unchanged and is
+// asserted against the rejection flow: the gate's rejection verifies
+// nothing, so Validated stays false, and the bounded-retry revision is
+// promoted to ready -- a Queue-less scheduler must no-op the promotion
+// scheduling instead of panicking (nil-queue deref, fixed in
+// ScheduleReadySteps).
 func TestTacticalScheduler_VacuousValidatorPassNotValidated(t *testing.T) {
 	ts, _, _, cleanup := newGateTestScheduler(t, func(cfg *TacticalSchedulerConfig) {
 		cfg.ValidatorManager = validator.NewValidatorManager()
@@ -302,8 +316,9 @@ func TestTacticalScheduler_VacuousValidatorPassNotValidated(t *testing.T) {
 	parent := newGateTestTask(t, ts, "vacuous-pass", 1)
 	step := newGateTestStep(t, ts, parent.ID, "job-vacuous-1", "file_write", "produced the artifact")
 
-	// No evidence at all: the filesystem validator has nothing to check and
-	// returns Valid. A single-step task takes the heuristic approval path.
+	// No tool evidence at all: the file-evidence gate must reject the
+	// fabricated-success claim (leaf 06 T1) instead of the pre-gate
+	// heuristic approval.
 	resultJSON, err := json.Marshal(map[string]any{"success": true, "result": "produced the artifact"})
 	if err != nil {
 		t.Fatal(err)
@@ -316,19 +331,38 @@ func TestTacticalScheduler_VacuousValidatorPassNotValidated(t *testing.T) {
 	if err != nil || persisted == nil {
 		t.Fatalf("failed to re-read step: %v", err)
 	}
-	if persisted.State != task.StepApproved {
-		t.Fatalf("persisted step state = %q, want %q", persisted.State, task.StepApproved)
+	if persisted.State != task.StepRejected {
+		t.Fatalf("persisted step state = %q, want %q (a file_write claim with zero tool evidence must not be approved: leaf-06 file-evidence gate)", persisted.State, task.StepRejected)
 	}
 	if persisted.Validated {
 		t.Error("persisted validated = true, want false (nothing was verified: no evidence to validate)")
 	}
-
-	got, err := ts.taskStore.GetByID(parent.ID)
-	if err != nil || got == nil {
-		t.Fatalf("failed to re-read task: %v", err)
+	// The rejection reason rides the result column (HandleReviewResult ->
+	// SetResult(feedback)); review_verdict/review_reason are write-only
+	// through the step reads (only ReviewVerdictsForSession reads them).
+	if !strings.Contains(persisted.Result, "no file operation was executed") {
+		t.Errorf("persisted result = %q, want the gate's actionable rejection copy naming the missing file operation", persisted.Result)
 	}
-	if got.State != task.StateCompleted {
-		t.Fatalf("task state = %q, want %q (a step with nothing to verify must not strand the task)", got.State, task.StateCompleted)
+
+	// The rejection creates the bounded-retry revision and the promotion
+	// flow must run cleanly on a Queue-less scheduler (no panic, no
+	// scheduling error): the revision sits ready awaiting a real queue.
+	revs, err := ts.stepStore.ListByTaskID(parent.ID)
+	if err != nil {
+		t.Fatalf("failed to list task steps: %v", err)
+	}
+	var rev *task.TaskStep
+	for _, s := range revs {
+		if task.IsRevisionStep(s.ID) {
+			rev = s
+			break
+		}
+	}
+	if rev == nil {
+		t.Fatal("no revision step created for the zero-evidence rejection (the bounded retry lane must arm)")
+	}
+	if rev.State != task.StepReady {
+		t.Errorf("revision state = %q, want %q (promoted ready past its rejected original)", rev.State, task.StepReady)
 	}
 }
 
@@ -724,6 +758,16 @@ func TestHeuristicReview_ArtifactClaimsWithZeroValueEvidenceRejected(t *testing.
 // TestHeuristicReview_ApprovalWithoutEvidenceNotValidated pins the F11 half
 // that lives in heuristicReviewPasses' caller: an approval over a step with
 // no tool-issued evidence must not be recorded as validated.
+//
+// HARNESS RE-POINT (residual-fix wave, leaf-06 supersession): this pin used
+// a file_write step as its approval vehicle, but 01-safety/06-evidence-review
+// (fileEvidenceGate) now rejects exactly that shape -- a file-shaped step with
+// zero file-tool ToolEvidence can never auto-approve (T1, the fabricated-
+// success fix). The F11 contract is about the VALIDATION stamp on a
+// heuristic approval, not about the file gate, so the vehicle is re-pointed
+// to a conversational hint the gate leaves untouched; the file-shape
+// rejection verdict is pinned separately by the leaf-06 gate tests and by
+// TestTacticalScheduler_VacuousValidatorPassNotValidated.
 func TestHeuristicReview_ApprovalWithoutEvidenceNotValidated(t *testing.T) {
 	stepStore := newTestStepStore(t)
 	rm := NewReviewManager(ReviewManagerConfig{StepStore: stepStore, Logger: testLogger()})
@@ -732,9 +776,9 @@ func TestHeuristicReview_ApprovalWithoutEvidenceNotValidated(t *testing.T) {
 		ID:       "step-heur-noev",
 		TaskID:   "task-heur-noev",
 		Sequence: 0,
-		ToolHint: "file_write",
+		ToolHint: "coder",
 		State:    task.StepScheduled,
-		Result:   "produced the artifact",
+		Result:   "summarized the findings for the user",
 	}
 	if err := stepStore.Create(step); err != nil {
 		t.Fatalf("create step: %v", err)
