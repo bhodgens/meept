@@ -37,6 +37,22 @@ type DeleteSessionRequestedMsg struct {
 	SessionName string
 }
 
+// SessionTraceRequestedMsg signals a dispatch-trace fetch for the
+// selected session (09-cli-affordances task 6, key `t`). The model runs
+// the fetch itself and lands the rows as SessionTraceUpdateMsg.
+type SessionTraceRequestedMsg struct {
+	SessionID string
+}
+
+// SessionTraceUpdateMsg carries the session.dispatch_trace rows for a
+// session (or the fetch error). Rendered in the sessions detail pane as
+// the routing-evidence block.
+type SessionTraceUpdateMsg struct {
+	SessionID string
+	Entries   []dispatchTraceRow
+	Err       error
+}
+
 // SessionsModel is a full-screen model for browsing sessions with a detail pane.
 type SessionsModel struct {
 	rpc          SessionsRPCClient
@@ -51,6 +67,14 @@ type SessionsModel struct {
 	plansLoading bool
 	err          error
 	plansErr     error // Error from fetching plans for selected session
+
+	// Dispatch-trace surfacing (09-cli-affordances task 6): rows fetched
+	// via session.dispatch_trace for the selected session, plus the
+	// fetch error and loading flag. Shown in the detail pane.
+	trace          []dispatchTraceRow
+	traceErr       error
+	traceLoading   bool
+	traceSessionID string // session the current trace rows belong to
 
 	// UI state
 	showingDetail bool
@@ -207,6 +231,27 @@ func (m *SessionsModel) fetchSessionPlans(sessionID string) tea.Cmd {
 	}
 }
 
+// fetchSessionTrace loads the dispatch-trace rows for a session through
+// session.dispatch_trace (09-cli-affordances task 6, same RPC the chat
+// why-this-route popover and the CLI `meept session trace` use).
+func (m *SessionsModel) fetchSessionTrace(sessionID string) tea.Cmd {
+	return func() tea.Msg {
+		raw, err := m.rpc.Call("session.dispatch_trace", map[string]any{"session_id": sessionID})
+		if err != nil {
+			return SessionTraceUpdateMsg{SessionID: sessionID, Err: err}
+		}
+
+		var resp struct {
+			Entries []dispatchTraceRow `json:"entries"`
+		}
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			return SessionTraceUpdateMsg{SessionID: sessionID, Err: fmt.Errorf("unmarshal dispatch trace: %w", err)}
+		}
+
+		return SessionTraceUpdateMsg{SessionID: sessionID, Entries: resp.Entries}
+	}
+}
+
 // Update handles messages for the sessions view.
 func (m *SessionsModel) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
@@ -244,6 +289,30 @@ func (m *SessionsModel) Update(msg tea.Msg) tea.Cmd {
 		// Only update if it's for the currently selected session
 		if m.selected != nil && msg.SessionID == m.selected.ID {
 			m.plans = msg.Plans
+		}
+		return nil
+
+	case SessionTraceRequestedMsg:
+		// 09-cli-affordances task 6: fetch the dispatch trace for the
+		// requested session (key `t` in the sessions view).
+		m.traceLoading = true
+		m.traceErr = nil
+		m.trace = nil
+		return m.fetchSessionTrace(msg.SessionID)
+
+	case SessionTraceUpdateMsg:
+		// 09-cli-affordances task 6: dispatch-trace rows landed for the
+		// selected session. A stale session's rows are dropped.
+		m.traceLoading = false
+		if msg.Err != nil {
+			m.traceErr = msg.Err
+			m.trace = nil
+			return nil
+		}
+		m.traceErr = nil
+		if m.selected != nil && msg.SessionID == m.selected.ID {
+			m.trace = msg.Entries
+			m.traceSessionID = msg.SessionID
 		}
 		return nil
 
@@ -306,6 +375,19 @@ func (m *SessionsModel) Update(msg tea.Msg) tea.Cmd {
 				sessID := s.ID
 				return func() tea.Msg {
 					return DeleteSessionRequestedMsg{SessionID: sessID, SessionName: name}
+				}
+			}
+			return nil
+
+		case "t":
+			// 09-cli-affordances task 6: surface the dispatch trace for
+			// the selected session (why each turn routed the way it did).
+			// The request rides a message (same protocol shape as the
+			// archive/delete flows); the model handles it by fetching.
+			if s := m.selectedSession(); s != nil {
+				sessID := s.ID
+				return func() tea.Msg {
+					return SessionTraceRequestedMsg{SessionID: sessID}
 				}
 			}
 			return nil
@@ -509,7 +591,7 @@ func (m *SessionsModel) View() string {
 		MaxWidth(m.width)
 
 	b.WriteString("\n")
-	b.WriteString(hintStyle.Render("n: new | d: archive | D: delete | r: refresh | enter: details | up/down: navigate | left/right: collapse/expand | f: search | ?: help"))
+	b.WriteString(hintStyle.Render("n: new | d: archive | D: delete | t: trace | r: refresh | enter: details | up/down: navigate | left/right: collapse/expand | f: search | ?: help"))
 
 	return b.String()
 }
@@ -628,7 +710,42 @@ func (m *SessionsModel) renderSessionDetail() string {
 		}
 	}
 
+	// Dispatch trace section (09-cli-affordances task 6): the routing
+	// evidence for the selected session, fetched on demand via `t`.
+	content.WriteString("\n")
+	content.WriteString(sectionStyle.Render("--- dispatch trace ---"))
+	content.WriteString("\n")
+	content.WriteString(m.renderTraceSection(valueStyle))
+
 	return content.String()
+}
+
+// renderTraceSection renders the dispatch-trace block of the detail
+// pane: loading / error / empty / one row per routing decision.
+func (m *SessionsModel) renderTraceSection(valueStyle lipgloss.Style) string {
+	mutedStyle := lipgloss.NewStyle().Foreground(paletteColor("textMuted")).Italic(true)
+	errStyle := lipgloss.NewStyle().Foreground(paletteColor("error")).Italic(true)
+
+	switch {
+	case m.traceLoading:
+		return mutedStyle.Render("loading...")
+	case m.traceErr != nil:
+		return errStyle.Render(fmt.Sprintf("error: %s", types.TruncateString(m.traceErr.Error(), 30)))
+	case len(m.trace) == 0:
+		return mutedStyle.Render("no trace loaded (press t)")
+	default:
+		var b strings.Builder
+		for _, e := range m.trace {
+			b.WriteString(fmt.Sprintf("  intent: %s  case: %s  confidence: %.2f\n",
+				e.IntentType, e.HandlerCase, e.Confidence))
+			if e.InputSummary != "" {
+				summary := types.TruncateString(e.InputSummary, 40)
+				b.WriteString(valueStyle.Render("    " + summary))
+				b.WriteString("\n")
+			}
+		}
+		return b.String()
+	}
 }
 
 func (m *SessionsModel) renderSessionDetailModal() string {
@@ -797,6 +914,7 @@ func (m *SessionsModel) renderHelp() string {
 	content += keyStyle.Render("enter") + descStyle.Render("open session detail") + "\n"
 	content += keyStyle.Render("d") + descStyle.Render("archive session (soft-delete)") + "\n"
 	content += keyStyle.Render("D") + descStyle.Render("delete session permanently") + "\n"
+	content += keyStyle.Render("t") + descStyle.Render("show dispatch trace for selected session") + "\n"
 	content += keyStyle.Render("esc") + descStyle.Render("close detail") + "\n"
 	content += keyStyle.Render("r") + descStyle.Render("refresh sessions") + "\n"
 	content += keyStyle.Render("f") + descStyle.Render("search sessions") + "\n"

@@ -23,6 +23,10 @@ var (
 	chatSessionID string // target specific session by ID
 	chatCwd       string // working directory for session
 	chatAwait     string // "wait" (default) to await turn.terminal, "off" to fire-and-forget
+	// chatSessionCreate (09-cli-affordances task 4): create the named
+	// --session target when it does not exist. Flag-gated so a typo'd
+	// session id fails loudly instead of silently minting a session.
+	chatSessionCreate bool
 )
 
 func newChatCmd() *cobra.Command {
@@ -39,6 +43,7 @@ Examples:
   meept chat "What time is it?"        # Single message (uses oneshot_responses)
   meept chat --session session-abc "msg"  # Send to specific session
   meept chat --session session-abc     # Open TUI to specific session
+  meept chat --session new-name --session-create "msg"  # Create the session if missing
   echo "Hello" | meept chat -          # Read from stdin
   meept chat --project myapp           # Bind session to project
   meept chat --nofence                 # Disable path fencing`,
@@ -49,6 +54,7 @@ Examples:
 	cmd.Flags().StringVar(&chatProject, "project", "", "bind session to named project")
 	cmd.Flags().BoolVar(&chatNoFence, "nofence", false, "disable path fencing for this session")
 	cmd.Flags().StringVar(&chatSessionID, "session", "", "target specific session by ID")
+	cmd.Flags().BoolVar(&chatSessionCreate, "session-create", false, "create the --session target when it does not exist")
 	cmd.Flags().StringVar(&chatCwd, "cwd", "", "set working directory for session")
 	// --await controls the oneshot/session (non-TUI) wait behavior:
 	//   "wait" (default): submit via chat.submit and await the real
@@ -110,14 +116,19 @@ func runChat(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("empty message")
 		}
 		// F-04 FIX: Apply --project and --nofence to the existing session.
-		if projectID != "" {
-			if err := applyProjectToSession(client, chatSessionID, projectID, projectPath); err != nil {
-				return err
+		// 09-cli-affordances: skipped under --session-create — the
+		// session may not exist yet and the create path binds project
+		// and fence at creation time.
+		if !chatSessionCreate {
+			if projectID != "" {
+				if err := applyProjectToSession(client, chatSessionID, projectID, projectPath); err != nil {
+					return err
+				}
 			}
-		}
-		if chatNoFence {
-			if err := applyNoFenceToSession(client, chatSessionID); err != nil {
-				return err
+			if chatNoFence {
+				if err := applyNoFenceToSession(client, chatSessionID); err != nil {
+					return err
+				}
 			}
 		}
 		return chatWithSession(client, chatSessionID, message)
@@ -126,14 +137,19 @@ func runChat(cmd *cobra.Command, args []string) error {
 	// CASE 2: --session without message - open TUI to that session
 	if chatSessionID != "" && message == "" {
 		// F-04 FIX: Apply --project and --nofence to the existing session.
-		if projectID != "" {
-			if err := applyProjectToSession(client, chatSessionID, projectID, projectPath); err != nil {
-				return err
+		// --session-create does not apply here: the TUI-open path has no
+		// create seam, and creating a session just to open a terminal is
+		// not a flagged affordance.
+		if !chatSessionCreate {
+			if projectID != "" {
+				if err := applyProjectToSession(client, chatSessionID, projectID, projectPath); err != nil {
+					return err
+				}
 			}
-		}
-		if chatNoFence {
-			if err := applyNoFenceToSession(client, chatSessionID); err != nil {
-				return err
+			if chatNoFence {
+				if err := applyNoFenceToSession(client, chatSessionID); err != nil {
+					return err
+				}
 			}
 		}
 		return openTUIToSession(chatSessionID)
@@ -353,21 +369,46 @@ func applyNoFenceToSession(client transport.Client, sessionID string) error {
 }
 
 // chatWithSession sends a message to an existing session after validating it exists.
+//
+// 09-cli-affordances task 4: a missing session is a hard error whose text
+// suggests --session-create (typo safety — never auto-create). With the
+// flag set, the named session is created via session.create before send.
 func chatWithSession(client transport.Client, sessionID, message string) error {
 	// Verify session exists
 	getParams := map[string]string{"id": sessionID}
 	rawResult, err := client.Call("session.get", getParams)
 	if err != nil {
-		return fmt.Errorf("failed to get session %s: %w", sessionID, err)
+		// A transport-level failure may mean the daemon has no
+		// session.get responder for unknown ids; fall through to the
+		// same create-or-error decision below.
+		rawResult = nil
 	}
 
-	var resultMap map[string]any
-	if err := json.Unmarshal(rawResult, &resultMap); err != nil {
-		return fmt.Errorf("failed to parse session response: %w", err)
+	sessionExists := false
+	if rawResult != nil {
+		var resultMap map[string]any
+		if json.Unmarshal(rawResult, &resultMap) == nil {
+			if errMsg, ok := resultMap["error"].(string); !ok || errMsg == "" {
+				sessionExists = true
+			}
+		}
 	}
 
-	if errMsg, ok := resultMap["error"].(string); ok && errMsg != "" {
-		return fmt.Errorf("session %q not found", sessionID)
+	if !sessionExists {
+		if !chatSessionCreate {
+			return fmt.Errorf("session %q not found; pass --session-create to create it on first use", sessionID)
+		}
+		sid, cerr := createFlaggedSession(client, sessionID, projectIDForCreate(), projectPathForCreate(), chatNoFence)
+		if cerr != nil {
+			return fmt.Errorf("failed to create session %q (--session-create): %w", sessionID, cerr)
+		}
+		if sid != "" && sid != sessionID {
+			// The daemon minted its own id; the named session was
+			// not created under the requested id. Surface the real
+			// id so the user can target it.
+			sessionID = sid
+			fmt.Printf("created session %s\n", sid)
+		}
 	}
 
 	// Session exists - send the async turn (chat.submit + await turn.terminal).
@@ -376,6 +417,23 @@ func chatWithSession(client transport.Client, sessionID, message string) error {
 		return err
 	}
 	return submitChatTurn(client, message, sessionID, opts)
+}
+
+// projectIDForCreate resolves the --project flag for a --session-create
+// call. Returns "" when --project is unset (the daemon then binds the
+// client CWD per the session-binding contract).
+func projectIDForCreate() string {
+	if chatProject == "" {
+		return ""
+	}
+	return chatProject
+}
+
+// projectPathForCreate mirrors projectIDForCreate for the path half. The
+// real resolution happened in runChat (F-04), which mutates chatCwd; the
+// path is carried through chatCwd, so the create path reuses it.
+func projectPathForCreate() string {
+	return ""
 }
 
 // runChatTurn executes one async chat turn and returns the reply text for

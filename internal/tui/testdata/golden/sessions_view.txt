@@ -10,13 +10,13 @@ sessions  (2)                                          ╭───────�
 │                       ││                          │  │   no active agents    │
 │                       ││--- plans ---             │  │   workers: none       │
 │                       ││no plans                  │  │  ▾ tasks              │
-│                       ││                          │  │   no active tasks     │
-│                       ││                          │  │  ▸ plan               │
+│                       ││--- dispatch trace ---    │  │   no active tasks     │
+│                       ││no trace loaded (press t) │  │  ▸ plan               │
 │                       ││                          │  │  ▾ recent memory      │
 ╰───────────────────────╯╰──────────────────────────╯  │   ...                 │
                                                        │                       │
-n: new | d: archive | D: delete | r: refresh | enter:  │ ⢰⣆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢰⡆   │
-details | up/down: navigate | left/right:              │ ⠈⠁⠀⠈⠁⠀⠢⠀⢠⣤⣄⠀⠠⠂⠀⠉⠀⠈⠁   │
+n: new | d: archive | D: delete | t: trace | r: refresh│ ⢰⣆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢰⡆   │
+| enter: details | up/down: navigate | left/right:     │ ⠈⠁⠀⠈⠁⠀⠢⠀⢠⣤⣄⠀⠠⠂⠀⠉⠀⠈⠁   │
 collapse/expand | f: search | ?: help                  │ ⢀⡀⠀⠀⠀⠀⡠⠀⠘⠛⠓⠀⠠⡀⠀⠀⠀⢀⡀   │
                                                        │ ⠸⠗⠀⠈⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠀⠸⠇   │
                                                        │                       │

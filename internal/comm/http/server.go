@@ -1785,6 +1785,10 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/sessions/{id}/compact", s.handleSessionCompact)
 	mux.HandleFunc("GET /api/v1/sessions/{id}/designation", s.handleSessionDesignationGet)
 	mux.HandleFunc("POST /api/v1/sessions/{id}/acknowledge", s.handleSessionAcknowledge)
+	// Dispatch-trace bridge (09-cli-affordances task 6): same
+	// session.dispatch_trace RPC the TUI sessions view (key `t`) and the
+	// CLI `meept session trace` drive, via rpcCall.
+	mux.HandleFunc("GET /api/v1/sessions/{id}/trace", s.handleSessionTrace)
 
 	// Change review endpoints (containment leaf 07): pending changes staged
 	// by write tools for human review, and the journal of applied changes.

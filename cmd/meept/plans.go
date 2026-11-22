@@ -10,16 +10,23 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// plansConnectDaemon is the CLI's daemon-dial seam for the plans command
+// tree (09-cli-affordances task 5). It mirrors the kanbanConnectDaemon
+// pattern: tests swap it to serve a fake transport client while the real
+// cobra RunE path runs.
+var plansConnectDaemon = connectDaemon
+
 func newPlansCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "plans",
 		Short:   "manage plans",
-		Long:    "List, show, approve, reject, and confirm plans.",
+		Long:    "List, show, revise, approve, reject, and confirm plans.",
 		Aliases: []string{"plan"},
 	}
 
 	cmd.AddCommand(newPlansListCmd())
 	cmd.AddCommand(newPlansShowCmd())
+	cmd.AddCommand(newPlansReviseCmd())
 	cmd.AddCommand(newPlansApproveCmd())
 	cmd.AddCommand(newPlansRejectCmd())
 	cmd.AddCommand(newPlansConfirmCmd())
@@ -37,14 +44,15 @@ func newPlansCmd() *cobra.Command {
 
 func newPlansListCmd() *cobra.Command {
 	var projectID string
+	var stateFilter string
 	var outputJSON bool
 
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "list plans",
-		Long:  "List all plans, optionally filtered by project.",
+		Long:  "List all plans, optionally filtered by project or state.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := connectDaemon()
+			client, err := plansConnectDaemon()
 			if err != nil {
 				return fmt.Errorf("failed to connect to daemon: %w", err)
 			}
@@ -84,6 +92,25 @@ func newPlansListCmd() *cobra.Command {
 			if !ok || len(plansList) == 0 {
 				fmt.Println("No plans found.")
 				return nil
+			}
+
+			// 09-cli-affordances task 5: client-side --state filter. The
+			// --json envelope stays full (scripting wants the complete
+			// payload); the filter applies to the rendered table only.
+			if stateFilter != "" && !outputJSON {
+				filtered := make([]any, 0, len(plansList))
+				for _, p := range plansList {
+					if pm, ok := p.(map[string]any); ok {
+						if getStringOr(pm, "state", "") == stateFilter {
+							filtered = append(filtered, p)
+						}
+					}
+				}
+				plansList = filtered
+				if len(plansList) == 0 {
+					fmt.Printf("No plans in state %q.\n", stateFilter)
+					return nil
+				}
 			}
 
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
@@ -138,9 +165,53 @@ func newPlansListCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&projectID, "project", "", "Filter by project ID")
+	cmd.Flags().StringVar(&stateFilter, "state", "", "Filter by plan state (client-side; e.g. pending_approval, approved, executing, completed)")
 	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output as JSON")
 
 	return cmd
+}
+
+// newPlansReviseCmd returns the `meept plans revise <id>` subcommand
+// (09-cli-affordances task 5): sends a plan back for revision over the
+// plan.revise RPC (same seam the plans tab's revise action uses). The
+// RPC result is the revised plan row; report the new state.
+func newPlansReviseCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "revise <id>",
+		Short: "send a plan back for revision",
+		Long:  "Send a plan back for revision, returning it to the draft state.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			planID := args[0]
+
+			client, err := plansConnectDaemon()
+			if err != nil {
+				return fmt.Errorf("failed to connect to daemon: %w", err)
+			}
+			defer client.Close()
+
+			rawResult, err := client.Call("plan.revise", map[string]any{
+				"plan_id": planID,
+			})
+			if err != nil {
+				return fmt.Errorf("failed to revise plan: %w", err)
+			}
+
+			var resultMap map[string]any
+			if err := json.Unmarshal(rawResult, &resultMap); err != nil {
+				return fmt.Errorf("failed to parse response: %w", err)
+			}
+
+			if errMsg, ok := resultMap["error"].(string); ok && errMsg != "" {
+				return fmt.Errorf("%s", errMsg)
+			}
+
+			title := getStringOr(resultMap, "title", planID)
+			state := getStringOr(resultMap, "state", "draft")
+			fmt.Printf("Plan sent back for revision: %s (state: %s)\n", title, state)
+			return nil
+		},
+	}
 }
 
 func newPlansShowCmd() *cobra.Command {
