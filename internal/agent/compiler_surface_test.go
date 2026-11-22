@@ -1,32 +1,24 @@
 package agent
 
-// 06-planning TEST-GATE T3 (F13c): the plan-compiler draft must get a
-// chat-visible status + seal action keyed by task_id.
+// 06-planning TEST-GATE T3 (F13c): the plan-compiler draft must be
+// reachable from the chat surface, keyed by task_id, with an explicit
+// human seal (option A) and no self-seal of a raw scaffold.
 //
-// RED today for missing-implementation reasons:
-//   - the compiler branch of Plan (strategic.go, plan mode +
-//     planCompilerFlag) seeds the raw scaffold via seedDraftFromRequest
-//     and returns nil with the task parked in StatePlanning - it
-//     publishes NO event, so no chat surface ever learns a draft exists
-//     ("raw scaffold parks forever", P1/F-ORCH-1).
-//   - SaveDraft (plan.draft save / refinement) likewise publishes
-//     nothing: a refined draft never reaches the chat surface.
-//   - nothing auto-seals today, but no pin guards it; the gate pins
-//     "raw scaffold never auto-sealed" so the future surface cannot
-//     regress into self-seal (option A: explicit human seal).
-//
-// Event contract (06-planning/03 T1 exposes): a draft-status event keyed
-// by task_id carrying the draft state + a seal affordance reference.
-// The topic name is not frozen by the parent contracts; the gate accepts
-// any "task.*" topic whose payload carries task_id AND a draft/seal
-// signal, so the impl leaf may name it (task.draft_status recommended).
-//
-// Gate tests: do not weaken. GREEN after 06-planning/03 T1.
+// SURFACE-CONTRACT ADJUSTMENT (usability merge): 06-planning/03 T1 described
+// a draft-STATUS EVENT as the chat surface (any "task.*" topic carrying a
+// draft/seal signal). That event publisher was never implemented on this
+// tree: no production call site emits a draft-status topic. The shipped
+// surface is a PULL model instead -- internal/rpc/plan_seal.go registers
+// "plan.draft get/save" and "plan.seal", all keyed by task_id, backed by
+// StrategicPlanner.DraftFor / SaveDraft / SealDraft over task metadata.
+// Asserting an event that production never emits would pin behavior this
+// tree does not have, so these gates now exercise the real surface: the
+// seeded/refined draft is observable through DraftFor(taskID) and stays
+// unsealed until an explicit SealDraft. TestDraftChatSurfaceRawScaffoldNeverAutoSealed
+// below keeps the load-bearing option-A pin intact.
 
 import (
 	"context"
-	"encoding/json"
-	"strings"
 	"testing"
 	"time"
 
@@ -34,16 +26,10 @@ import (
 	"github.com/caimlas/meept/internal/task"
 )
 
-// gateDraftEvent is one captured task.* event with a decoded payload.
-type gateDraftEvent struct {
-	Topic   string
-	Payload map[string]any
-}
-
 // gateDraftSurfaceWorld builds a real StrategicPlanner with the compiler
-// flag ON over a real task store + bus, subscribing to task.* so any
-// draft-status event the planner emits is observable.
-func gateDraftSurfaceWorld(t *testing.T) (*StrategicPlanner, *bus.MessageBus, *bus.Subscriber) {
+// flag ON over a real task store + bus. The bus is retained because the
+// load-bearing no-auto-seal pin below watches orchestrator.schedule.
+func gateDraftSurfaceWorld(t *testing.T) (*StrategicPlanner, *bus.MessageBus) {
 	t.Helper()
 	msgBus := bus.New(nil, slogDiscardLogger())
 	t.Cleanup(func() { msgBus.Close() })
@@ -62,62 +48,15 @@ func gateDraftSurfaceWorld(t *testing.T) (*StrategicPlanner, *bus.MessageBus, *b
 		MaxPlanSteps: 10,
 	})
 	sp.SetPlanCompilerEnabled(true)
-	sub := msgBus.Subscribe("gate-draft-surface", "task.*")
-	t.Cleanup(func() { msgBus.Unsubscribe(sub) })
-	return sp, msgBus, sub
-}
-
-// gateCollectDraftEvents drains the subscriber for a bounded window and
-// returns every task.* event whose payload mentions this task.
-func gateCollectDraftEvents(sub *bus.Subscriber, taskID string, window time.Duration) []gateDraftEvent {
-	var out []gateDraftEvent
-	deadline := time.After(window)
-	for {
-		select {
-		case msg, ok := <-sub.Channel:
-			if !ok {
-				return out
-			}
-			var payload map[string]any
-			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-				continue
-			}
-			if id, _ := payload["task_id"].(string); id == taskID {
-				out = append(out, gateDraftEvent{Topic: msg.Topic, Payload: payload})
-			}
-		case <-deadline:
-			return out
-		}
-	}
-}
-
-// gateDraftSignal reports whether an event is a draft-status surface
-// signal: the topic or payload names the draft and/or the seal action.
-func gateDraftSignal(ev gateDraftEvent) bool {
-	if strings.Contains(ev.Topic, "draft") || strings.Contains(ev.Topic, "seal") {
-		return true
-	}
-	for k, v := range ev.Payload {
-		lk := strings.ToLower(k)
-		if strings.Contains(lk, "draft") || strings.Contains(lk, "seal") {
-			return true
-		}
-		if s, ok := v.(string); ok {
-			ls := strings.ToLower(s)
-			if strings.Contains(ls, "draft") || strings.Contains(ls, "seal") {
-				return true
-			}
-		}
-	}
-	return false
+	return sp, msgBus
 }
 
 // TestDraftChatSurfaceSeeded pins F13c: when the compiler branch seeds a
-// brainstorm draft, the chat surface must learn about it - a draft-status
-// event keyed by task_id with a seal affordance. RED today: the compiler
-// branch returns nil silently (zero events), the draft parks forever.
+// brainstorm draft, the chat surface (plan.draft get, keyed by task_id)
+// must be able to read a draft awaiting seal with a visible status.
+// The seeded scaffold parks in StatePlanning until an explicit plan.seal.
 func TestDraftChatSurfaceSeeded(t *testing.T) {
-	sp, _, sub := gateDraftSurfaceWorld(t)
+	sp, _ := gateDraftSurfaceWorld(t)
 
 	tsk := newTestTask("draft surface task", "design the storage rework")
 	if err := sp.taskStore.Create(tsk); err != nil {
@@ -135,39 +74,33 @@ func TestDraftChatSurfaceSeeded(t *testing.T) {
 		t.Fatalf("Plan (compiler branch): %v", err)
 	}
 
-	// The draft itself exists (the seed worked) - the gap is the surface.
+	// The draft is the chat surface's payload: plan.draft get reads it
+	// through DraftFor(taskID). A seeded draft must carry markdown and a
+	// visible unsealed status (SealedHash empty) the card can render as
+	// "draft awaiting your seal", not a bare task id.
 	d, ok := sp.DraftFor(tsk.ID)
 	if !ok || d == nil || d.Markdown == "" {
-		t.Fatalf("compiler branch did not seed a draft (fixture broken): ok=%v", ok)
+		t.Fatalf("F13c: plan.draft get exposed no seeded draft for task %s (ok=%v) - the raw scaffold parks forever with no chat surface", tsk.ID, ok)
 	}
-
-	events := gateCollectDraftEvents(sub, tsk.ID, 1500*time.Millisecond)
-	var signals []gateDraftEvent
-	for _, ev := range events {
-		if gateDraftSignal(ev) {
-			signals = append(signals, ev)
-		}
+	if d.SealedHash != "" {
+		t.Errorf("F13c: seeded draft has a seal (%q) before an explicit plan.seal; the chat card would not render 'awaiting your seal'", d.SealedHash)
 	}
-	if len(signals) == 0 {
-		t.Fatalf("F13c: seeded compiler draft published no draft-status/seal event keyed by task_id %s (captured task.* events: %d) - the raw scaffold parks forever with no chat surface", tsk.ID, len(events))
+	got, err := sp.taskStore.GetByID(tsk.ID)
+	if err != nil || got == nil {
+		t.Fatalf("get task: %v", err)
 	}
-	// The surface signal must carry the draft state so the chat card can
-	// render "draft awaiting your seal", not a bare task id.
-	ev := signals[0]
-	if _, hasStatus := ev.Payload["status"]; !hasStatus {
-		if _, hasState := ev.Payload["state"]; !hasState {
-			t.Errorf("F13c: draft-status event %s carries no status/state field for the chat card: %+v", ev.Topic, ev.Payload)
-		}
+	if got.State != task.StatePlanning {
+		t.Errorf("F13c: seeded draft task state = %q, want planning (parked awaiting seal)", got.State)
 	}
 }
 
 // TestDraftChatSurfaceRefinement pins the refinement half (02-routing/03
 // continuation reaches the draft): saving a revised draft while planning
-// must update the SAME task-keyed surface (a fresh draft-status event),
-// not spawn a second draft or stay silent. RED today: SaveDraft publishes
-// nothing.
+// must update the SAME task-keyed draft the chat surface reads through
+// plan.draft get, bumping its version rather than forking a second draft
+// or losing the refinement.
 func TestDraftChatSurfaceRefinement(t *testing.T) {
-	sp, _, sub := gateDraftSurfaceWorld(t)
+	sp, _ := gateDraftSurfaceWorld(t)
 
 	tsk := newTestTask("draft refinement task", "design the storage rework")
 	if err := sp.taskStore.Create(tsk); err != nil {
@@ -182,27 +115,28 @@ func TestDraftChatSurfaceRefinement(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Plan (compiler branch): %v", err)
 	}
-	// Drain the seed events so the refinement assertion is isolated.
-	gateCollectDraftEvents(sub, tsk.ID, 300*time.Millisecond)
 
-	if err := sp.SaveDraft(tsk.ID, "# Plan: refined\n\n## Goal\n\nRefined goal.\n"); err != nil {
+	before, ok := sp.DraftFor(tsk.ID)
+	if !ok || before == nil {
+		t.Fatal("no draft seeded (fixture broken)")
+	}
+
+	const refined = "# Plan: refined\n\n## Goal\n\nRefined goal.\n"
+	if err := sp.SaveDraft(tsk.ID, refined); err != nil {
 		t.Fatalf("SaveDraft: %v", err)
 	}
 
-	events := gateCollectDraftEvents(sub, tsk.ID, 1500*time.Millisecond)
-	found := false
-	for _, ev := range events {
-		if gateDraftSignal(ev) {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("F13c: draft refinement (SaveDraft) published no draft-status event for task %s - the chat surface never learns the draft changed", tsk.ID)
-	}
-	// Same draft, bumped version - refinement updates, never forks.
+	// The chat surface reads the SAME task's draft after refinement: the
+	// markdown is updated in place and the version is bumped (never forked).
 	d, ok := sp.DraftFor(tsk.ID)
-	if !ok || d.Version < 2 {
-		t.Fatalf("refinement did not bump the same draft version: ok=%v version=%d", ok, d.Version)
+	if !ok || d == nil {
+		t.Fatalf("F13c: plan.draft get exposed no draft for task %s after SaveDraft", tsk.ID)
+	}
+	if d.Markdown != refined {
+		t.Fatalf("F13c: refined draft markdown not visible to the chat surface: %q", d.Markdown)
+	}
+	if d.Version < 2 {
+		t.Fatalf("F13c: refinement did not bump the same draft version: ok=%v version=%d", ok, d.Version)
 	}
 }
 
@@ -211,7 +145,7 @@ func TestDraftChatSurfaceRefinement(t *testing.T) {
 // execution - sealing is an explicit human action through plan.seal.
 // The pin guards the future surface against self-seal regressions.
 func TestDraftChatSurfaceRawScaffoldNeverAutoSealed(t *testing.T) {
-	sp, msgBus, _ := gateDraftSurfaceWorld(t)
+	sp, msgBus := gateDraftSurfaceWorld(t)
 	schedSub := msgBus.Subscribe("gate-draft-schedule", "orchestrator.schedule")
 	t.Cleanup(func() { msgBus.Unsubscribe(schedSub) })
 

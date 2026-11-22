@@ -152,7 +152,19 @@ func TestGuardRetry_NoFallbackKeepsCannedLine(t *testing.T) {
 
 // TestGuardRetry_RetryParksSkipsPostTurnPipeline (M3, loop seam): when the
 // rewrite retry parks (blank reply, nil error, StateQuotaWait), the turn
-// returns ("", nil) — no reply text, no post-turn success side effects.
+// must NOT run the post-turn success pipeline. The parked shape is still
+// detectable via StateQuotaWait and no blank assistant completion may be
+// appended after the dump + nudge.
+//
+// PARK-CONTRACT ADJUSTMENT (usability merge, 01-safety/05 gate T8): the
+// branch deliberately changed RunOnce's parked-turn reply policy. A chat
+// turn that parks now gets `throttleParkNotice` ("Your message is queued:
+// the model provider is rate-limiting requests ...") mapped by the
+// handler to status=parked, instead of the old silent ("", nil) shape
+// (loop.go:3361-3397). The old assertion `reply != ""` pinned behavior
+// this tree intentionally replaced, so this gate now pins the authoritative
+// notice while keeping the load-bearing M3 invariant: no post-turn success
+// side effects (no blank assistant message appended).
 func TestGuardRetry_RetryParksSkipsPostTurnPipeline(t *testing.T) {
 	chatter := &parkFirstChatter{}
 	loop := newGuardRetryLoop(t, chatter)
@@ -164,8 +176,14 @@ func TestGuardRetry_RetryParksSkipsPostTurnPipeline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parked turn must not surface an error to the loop caller, got: %v", err)
 	}
-	if reply != "" {
-		t.Fatalf("reply = %q, want empty for a parked retry (the park contract)", reply)
+	// The authoritative parked contract is an actionable user notice,
+	// never the digest fallback (which would masquerade as an answer) and
+	// never the generic canned reply.
+	if reply != throttleParkNotice {
+		t.Fatalf("reply = %q, want the actionable throttle-park notice (the current park contract)", reply)
+	}
+	if strings.Contains(reply, digestFallbackPin) {
+		t.Errorf("parked reply shipped the digest fallback %q (would masquerade as an answer)", digestFallbackPin)
 	}
 	// The parked shape is detectable: the state machine sits in
 	// StateQuotaWait, mirroring loop.go's first-cycle turnParked guard.

@@ -951,7 +951,16 @@ func (ts *TacticalScheduler) scheduleStep(ctx context.Context, step *task.TaskSt
 	job.WithTaskID(step.TaskID).
 		WithAgentID(agentID)
 
-	// Enqueue the job
+	// Enqueue the job. A nil queue is a valid degraded seam (tests and
+	// partial wiring): with no job processor attached there is nothing to
+	// enqueue into, so scheduling is a no-op rather than a nil deref.
+	// Release the lease because the step will never run.
+	if ts.queue == nil {
+		ts.logger.Debug("scheduleStep: no queue wired; skipping enqueue",
+			"step_id", step.ID, "task_id", step.TaskID)
+		lease.release()
+		return nil
+	}
 	if err := ts.queue.Enqueue(ctx, job); err != nil {
 		lease.release()
 		return fmt.Errorf("failed to enqueue job: %w", err)

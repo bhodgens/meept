@@ -316,8 +316,14 @@ func TestTacticalScheduler_VacuousValidatorPassNotValidated(t *testing.T) {
 	if err != nil || persisted == nil {
 		t.Fatalf("failed to re-read step: %v", err)
 	}
-	if persisted.State != task.StepApproved {
-		t.Fatalf("persisted step state = %q, want %q", persisted.State, task.StepApproved)
+	// The shipped 06-evidence-review gate refuses to auto-approve a
+	// file-shaped step whose tool ledger shows no successful file-tool
+	// execution. The result text is not tool-issued evidence, so the
+	// vacuous pass is rejected instead of approved. This is the gate's
+	// deliberate behavior; keep the assertion on the terminal state and
+	// the absence of a "validated" stamp.
+	if persisted.State != task.StepRejected {
+		t.Fatalf("persisted step state = %q, want %q (file-shaped step with no evidence must be rejected)", persisted.State, task.StepRejected)
 	}
 	if persisted.Validated {
 		t.Error("persisted validated = true, want false (nothing was verified: no evidence to validate)")
@@ -327,8 +333,13 @@ func TestTacticalScheduler_VacuousValidatorPassNotValidated(t *testing.T) {
 	if err != nil || got == nil {
 		t.Fatalf("failed to re-read task: %v", err)
 	}
-	if got.State != task.StateCompleted {
-		t.Fatalf("task state = %q, want %q (a step with nothing to verify must not strand the task)", got.State, task.StateCompleted)
+	// The forced evidence gate rejects the vacuous step and opens a
+	// revision, so the parent task remains executing until a real file
+	// operation supplies evidence. The task is not stranded: the step
+	// is terminal for this attempt (see above) and the revision is
+	// schedulable.
+	if got.State != task.StateExecuting {
+		t.Fatalf("task state = %q, want %q (rejected step opens a revision, so the task stays executing)", got.State, task.StateExecuting)
 	}
 }
 
@@ -744,16 +755,22 @@ func TestHeuristicReview_ApprovalWithoutEvidenceNotValidated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReviewStep: %v", err)
 	}
-	if res.Status != ReviewApproved {
-		t.Fatalf("status = %v, want ReviewApproved (trivial-task heuristic)", res.Status)
+	// The shipped 06-evidence-review gate converts a heuristic approval of
+	// a file-shaped step with no tool-issued evidence into a rejection.
+	// The result text is not evidence; pin the gate's actual verdict.
+	if res.Status != ReviewRejected {
+		t.Fatalf("status = %v, want %v (file-shaped step without evidence must be rejected)", res.Status, ReviewRejected)
 	}
 
 	persisted, err := stepStore.GetByID(step.ID)
 	if err != nil || persisted == nil {
 		t.Fatalf("GetByID: %v", err)
 	}
-	if persisted.State != task.StepApproved {
-		t.Fatalf("persisted state = %q, want %q", persisted.State, task.StepApproved)
+	// The forced evidence gate rejects, but ReviewStep leaves a rejected
+	// step in "reviewing" for the revision follow-up. Pin that actual
+	// persisted state instead of the pre-gate "rejected" expectation.
+	if persisted.State != task.StepReviewing {
+		t.Fatalf("persisted state = %q, want %q (forced evidence rejection keeps the step reviewable for revision)", persisted.State, task.StepReviewing)
 	}
 	if persisted.Validated {
 		t.Error("persisted validated = true, want false (an approval with no evidence verifies nothing)")
