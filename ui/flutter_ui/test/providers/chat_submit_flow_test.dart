@@ -330,7 +330,7 @@ void main() {
       );
       expect(
         notifier.state.pendingTurns['turn-1']!.progressText,
-        'waiting for provider quota -- will resume automatically',
+        'waiting for provider quota — will resume automatically',
       );
       expect(notifier.state.error, isNull);
 
