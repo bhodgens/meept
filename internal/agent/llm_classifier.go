@@ -35,6 +35,12 @@ const (
 	// defaultUnavailableCooldown is how long the classifier treats the endpoint
 	// as unavailable after a failure, before retrying.
 	defaultUnavailableCooldown = 60 * time.Second
+	// defaultFirstUnavailableCooldown (leaf 05, degraded-signals) is the
+	// FIRST consecutive-failure cooldown: short (15s) so a transient
+	// classifier blip does not silently degrade routing for a full
+	// minute; consecutive failures regrow exponentially to the 60s cap
+	// (cooldownForAttempt).
+	defaultFirstUnavailableCooldown = 15 * time.Second
 	// defaultClassifierBootWait bounds how long a classification call
 	// waits for the F-D8 boot gate during the startup window before
 	// proceeding to the ordinary attempt/degrade path. It covers the
@@ -318,7 +324,18 @@ type LLMClassifier struct {
 	unavailUntil time.Time
 	unavailMu    sync.RWMutex
 
-	cooldown time.Duration // how long to cache "unavailable" (default 60s)
+	// cooldown time.Duration // how long to cache "unavailable" (default 60s)
+	// cooldownFirst is the FIRST-unavailability cooldown (leaf 05 of
+	// interactive-usability): a transient classifier blip costs one short
+	// fallback window (15s) instead of a blanket 60s; consecutive failures
+	// regrow exponentially to the existing 60s cap. cooldownFirst==0 means
+	// the legacy blanket shape (cooldown used verbatim) — byte-identical
+	// for any constructor that does not opt in.
+	cooldown      time.Duration // cap (default 60s)
+	cooldownFirst time.Duration // first-attempt cooldown (0 = legacy blanket)
+	// failStreak counts consecutive unavailable armings since the last
+	// success/clear; guarded by unavailMu alongside unavailUntil.
+	failStreak int
 	// lastFailure is the error that armed the cooldown (02-routing/01):
 	// the cooldown-skip path wraps it so ClassificationUserGuidance sees
 	// the real failure kind instead of an unclassifiable string. Guarded
@@ -461,6 +478,10 @@ func NewLLMClassifier(cfg LLMClassifierConfig, logger *slog.Logger) *LLMClassifi
 		timeout:  timeout,
 		logger:   l,
 		cooldown: defaultUnavailableCooldown,
+		// Leaf 05 (degraded-signals): first unavailability cools down for
+		// 15s and regrows exponentially to the 60s cap — a transient
+		// blip no longer silently degrades routing for a full minute.
+		cooldownFirst: defaultFirstUnavailableCooldown,
 
 		tokenCap: effectiveClassificationCap(cfg.ModelConfig),
 
@@ -603,19 +624,22 @@ func (c *LLMClassifier) Classify(ctx context.Context, input string, memCtx *Memo
 	if err != nil {
 		// Cache the failure so future requests skip this endpoint.
 		c.unavailable.Store(true)
+		d := c.armCooldownLocked()
 		c.unavailMu.Lock()
-		c.unavailUntil = time.Now().Add(c.cooldown)
 		c.lastFailure = err
 		c.unavailMu.Unlock()
 		c.logger.Warn("LLM classifier unavailable, falling back to keyword",
 			"error", err,
-			"retry_after", c.cooldown,
+			"retry_after", d,
 		)
 		return nil, err
 	}
 
 	// Success: clear the unavailable flag.
 	c.unavailable.Store(false)
+	c.unavailMu.Lock()
+	c.failStreak = 0
+	c.unavailMu.Unlock()
 
 	intent, err := c.parseResponse(resp.Content, input)
 	if err != nil {
@@ -750,18 +774,14 @@ func (c *LLMClassifier) ClassifyMulti(ctx context.Context, input string, ctxMemo
 	)
 	if err != nil {
 		c.unavailable.Store(true)
-		c.unavailMu.Lock()
-		c.unavailUntil = time.Now().Add(c.cooldown)
-		c.unavailMu.Unlock()
+		c.armCooldownLocked()
 		c.logger.Debug("LLM multi-intent classification failed", "error", err)
 		return nil
 	}
 
 	if resp == nil || resp.Content == "" {
 		c.unavailable.Store(true)
-		c.unavailMu.Lock()
-		c.unavailUntil = time.Now().Add(c.cooldown)
-		c.unavailMu.Unlock()
+		c.armCooldownLocked()
 		return nil
 	}
 
@@ -839,9 +859,24 @@ func (c *LLMClassifier) SetBootReadiness(b *ClassifierBootReadiness) {
 // further classification attempts until the cooldown expires.
 func (c *LLMClassifier) MarkUnavailable() {
 	c.unavailable.Store(true)
+	c.armCooldownLocked()
+}
+
+// armCooldownLocked arms the unavailability cooldown (leaf 05): with
+// cooldownFirst>0 the duration is attempt-aware (cooldownForAttempt over
+// the consecutive-failure streak, 15s first, doubling to the 60s cap);
+// cooldownFirst==0 keeps the legacy blanket shape. Increments failStreak
+// only in the attempt-aware shape. Callers must have marked unavailable.
+func (c *LLMClassifier) armCooldownLocked() time.Duration {
 	c.unavailMu.Lock()
-	c.unavailUntil = time.Now().Add(c.cooldown)
-	c.unavailMu.Unlock()
+	defer c.unavailMu.Unlock()
+	d := c.cooldown
+	if c.cooldownFirst > 0 {
+		d = cooldownForAttempt(c.failStreak, c.cooldownFirst, c.cooldown)
+		c.failStreak++
+	}
+	c.unavailUntil = time.Now().Add(d)
+	return d
 }
 
 // buildClassifyMultiPrompt renders the multi-intent detection prompt. The
@@ -871,6 +906,9 @@ If no intents detected, return empty array [].`, laneList(), input)
 // UnmarkUnavailable clears the unavailable flag, allowing immediate retries.
 func (c *LLMClassifier) UnmarkUnavailable() {
 	c.unavailable.Store(false)
+	c.unavailMu.Lock()
+	c.failStreak = 0
+	c.unavailMu.Unlock()
 }
 
 func (c *LLMClassifier) buildClassificationPrompt(input string) string {

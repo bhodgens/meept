@@ -50,7 +50,7 @@ func TestFormatTaskCompletedMessageStripsScaffolding(t *testing.T) {
 		State:       "completed",
 		Result:      `{"evidence":["job job-1 completed by agent coder: ` + answer + `"]}`,
 	}}
-	msg := h.formatTaskCompletedMessage("give me a review of this project", steps, "35s", "", 1, 1, 0)
+	msg := h.formatTaskCompletedMessage("give me a review of this project", steps, "35s", "", 1, 1, 0, "")
 	for _, banned := range []string{"## Session context", "## Your Task", `{"evidence"`} {
 		if strings.Contains(msg, banned) {
 			t.Fatalf("completion card leaks %q:\n%s", banned, msg)
