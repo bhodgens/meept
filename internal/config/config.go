@@ -61,6 +61,20 @@ func Load(path string) (*Config, error) {
 		return nil, wrapTOMLUnmarshalError(err, path)
 	}
 
+	// Leaf 10: the legacy TOML path needs the same explicit-key probe.
+	// go-toml v2 decode into a generic map and walk for key presence,
+	// keeping the JSON5 and TOML paths symmetric; only presence matters.
+	var probe map[string]any
+	if perr := toml.Unmarshal([]byte(content), &probe); perr == nil {
+		if plans, ok := probe["plans"].(map[string]any); ok {
+			if approval, ok := plans["approval"].(map[string]any); ok {
+				if _, ok := approval["require_approval"]; ok {
+					cfg.Plans.ArmRequireApprovalSentinel()
+				}
+			}
+		}
+	}
+
 	return finalizeLoadedConfig(cfg)
 }
 

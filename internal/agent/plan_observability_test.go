@@ -173,6 +173,10 @@ func TestCritiqueFlow_FallbackReasonsComplete(t *testing.T) {
 		"draft_transport":  true, // critique loop: draft call failed
 		"revise_transport": true, // critique loop: revise call failed
 		"flow_error":       true, // Plan(): runCritiqueFlowForPlan returned an error
+		// Leaf 10 (20261121): quick_plan CAN reach await_seal via the
+		// hostile-skip path (contract C5); Plan() degrades honestly and
+		// stops instead of single-shot-planning over the seeded draft.
+		"quick_plan_await_seal": true,
 	}
 	if len(reasons) == 0 {
 		t.Fatal("no tier_complex_fallback emit sites found; the fallback metric sites vanished")

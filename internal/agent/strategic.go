@@ -954,10 +954,25 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 				// published task.planned + orchestrator.schedule. Done.
 				return nil
 			}
-			// await_seal/fallback: fall through to single-shot below —
-			// await_seal cannot happen for quick_plan (only plan mode
-			// waits at the human seal), fallback means the loop could not
-			// run and the legacy path is the degradation the leaf wants.
+			if flowResult.Action == critiqueActionAwaitSeal {
+				// Leaf 10 (20261121 interactive-usability): quick_plan CAN
+				// reach await_seal — the hostile-skip path (contract C5)
+				// returns await_seal even in quick_plan so a skipped-hostile
+				// draft never self-seals. The refined draft is already
+				// stored on the task's metadata (the flow persists it); do
+				// NOT fall through to single-shot, which would plan over it
+				// and leave the seeded draft orphaned. Surface the honest
+				// degradation and stop here.
+				sp.logger.Warn("quick_plan critique flow awaits seal (hostile skip); single-shot skipped",
+					"task_id", req.TaskID,
+					"rounds_used", flowResult.RoundsUsed,
+					"known_risks", flowResult.KnownRisks,
+				)
+				sp.recordMetric("strategic_planner.tier_complex_fallback", 1, map[string]string{"reason": "quick_plan_await_seal"})
+				return nil
+			}
+			// fallback: the loop could not run and the legacy path is the
+			// degradation the leaf wants.
 		} else if tier == TierComplex {
 			sp.logger.Warn("tier complex but self-seal disabled; single-shot",
 				"task_id", req.TaskID,

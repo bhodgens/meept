@@ -183,6 +183,14 @@ func (c *Components) initializeSkillEvolver(cfg *config.Config, logger *slog.Log
 		if sinkMgr, err := c.newEvolverPlanManager(evolverPlanStore, cfg, logger); err == nil {
 			evolverPlanMgr = sinkMgr
 			c.EvolverPlanManager = sinkMgr
+			// Leaf 10 (20261121 interactive-usability, task 4): the evolver
+			// sink manager gets its OWN synthesis reclaimer. daemon.go arms
+			// only the shared manager; without this a sink plan abandoned
+			// mid-expansion sat claimed until a daemon restart — and even a
+			// restart's shared-manager pass reads the OTHER store. Nil-safe
+			// (StartSynthesisReclaimer returns on a nil manager) and riding
+			// the sink lifecycle ctx, so Stop() cancels it.
+			c.EvolverPlanManager.StartSynthesisReclaimer(c.EvolverPlanCtx, 0)
 			logger.Info("Skill evolver wired to dedicated plan sink",
 				"plan_dir", cfg.Skills.Evolver.PlanDir,
 			)

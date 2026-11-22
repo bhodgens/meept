@@ -1045,6 +1045,97 @@ func releaseSynthesisTo(store PlanStore, ctx context.Context, id string, restore
 	return store.ReleasePlanSynthesis(ctx, id)
 }
 
+// TaskLookup is the OPTIONAL read seam behind the stalled-executing sweep:
+// the manager needs "is the parent task terminal?" but the task store lives
+// outside its PlanStore. The daemon's taskCreatorAdapter satisfies it via
+// registry.Get; a creator without the seam simply leaves the missing-task
+// arm disabled (the sweep still covers plans with no task_id).
+type TaskLookup interface {
+	GetTask(ctx context.Context, taskID string) (*task.Task, error)
+}
+
+// ---------------------------------------------------------------------------
+// Stalled-executing sweep (leaf 10, 20261121 interactive-usability)
+// ---------------------------------------------------------------------------
+
+// SweepStalledExecuting fails executing plans whose work has demonstrably
+// stopped: the parent task is MISSING (never recorded or lost to a
+// mid-expansion crash) or terminal-FAILED, and the plan's UpdatedAt sits
+// beyond the `window`. Each swept plan transitions executing -> failed
+// through the guarded CAS and publishes plan.failed {plan_id, session_id,
+// reason} on the existing critical topic — the same payload contract as
+// failPlan, so client surfaces (leaf 03 rendering) light up without a new
+// event. A COMPLETED parent is left alone: OnTaskCompleted owns honest
+// completion, and this sweep must never complete a plan it did not verify
+// phase-by-phase.
+//
+// window <= 0 disables the sweep entirely (0, nil) — the config knob is
+// plans.stalled_executing_sweep, default 6h, and an explicit zero is the
+// documented off switch. Best-effort per plan: one plan's error is logged
+// and does not abort the sweep. Returns the number of plans swept.
+func (m *PlanManager) SweepStalledExecuting(ctx context.Context, window time.Duration) (int, error) {
+	if m == nil || window <= 0 {
+		return 0, nil
+	}
+	cutoff := time.Now().UTC().Add(-window)
+	plans, err := m.store.ListPlansByState(ctx, StateExecuting, 10000)
+	if err != nil {
+		return 0, fmt.Errorf("plan: list executing for stalled sweep: %w", err)
+	}
+	lookup, _ := m.taskCreator.(TaskLookup)
+	swept := 0
+	for _, p := range plans {
+		if p == nil || p.UpdatedAt.After(cutoff) {
+			continue
+		}
+		stalled, reason := m.stalledExecutingReason(ctx, p, lookup)
+		if !stalled {
+			continue
+		}
+		if err := m.transition(ctx, p.ID, StateFailed, kanban.EventReasonFail); err != nil {
+			m.logger.Warn("stalled-executing sweep: transition failed",
+				"plan_id", p.ID, "error", err)
+			continue
+		}
+		swept++
+		m.logger.Info("stalled-executing sweep failed plan",
+			"plan_id", p.ID, "task_id", p.TaskID, "reason", reason)
+		m.publishEvent("plan.failed", map[string]any{
+			"plan_id":    p.ID,
+			"session_id": p.SourceSession,
+			"reason":     reason,
+		})
+	}
+	return swept, nil
+}
+
+// stalledExecutingReason decides whether one executing plan is stalled and
+// returns the actionable reason for its plan.failed payload.
+func (m *PlanManager) stalledExecutingReason(ctx context.Context, p *Plan, lookup TaskLookup) (bool, string) {
+	if p.TaskID == "" {
+		// The parent task was never recorded: the mid-expansion crash
+		// shape. Nothing can advance this plan.
+		return true, "plan stalled in executing: no synthesized task recorded"
+	}
+	if lookup == nil {
+		// No read seam: cannot verify the task; leave the plan alone.
+		return false, ""
+	}
+	tk, err := lookup.GetTask(ctx, p.TaskID)
+	if err != nil || tk == nil {
+		// The recorded task vanished from the store (a hard delete or a
+		// lost database): nothing can complete this plan.
+		return true, fmt.Sprintf("plan stalled in executing: parent task %s is missing", p.TaskID)
+	}
+	if tk.State == task.StateFailed {
+		return true, fmt.Sprintf("plan stalled in executing: parent task %s already failed", p.TaskID)
+	}
+	// A completed parent is OnTaskCompleted's business; every other live
+	// state (pending/planning/executing/testing) is still moving or is
+	// waiting on scheduled steps.
+	return false, ""
+}
+
 // ---------------------------------------------------------------------------
 // Synthesis
 // ---------------------------------------------------------------------------
@@ -1197,6 +1288,69 @@ func (m *PlanManager) Synthesize(ctx context.Context, planID string) (retErr err
 			}
 			phases = append(phases, phase)
 		}
+	}
+
+	// Zero-phase guard (leaf 10, 20261121 interactive-usability): a plan
+	// with NO phases is not expandable work. The evolver approval bridge
+	// has already applied the document by the time a machine-origin plan
+	// reaches synthesis, so executing is a lie and a synthesized parent
+	// task can never complete — the exact orphan-executing-plan pileup the
+	// evolver sink accumulated (12k+ stuck rows). Complete the plan
+	// honestly instead: release the claim, mark completed, stamp the
+	// markdown, publish plan.completed. No task is created.
+	if len(phases) == 0 {
+		m.logger.Info("plan has zero phases; completing without task synthesis",
+			"plan_id", planID, "state", plan.State)
+		// Discharge the claim, then re-claim through the normal CAS so the
+		// row sits in synthesizing with OUR lease — the exact precondition
+		// the lease-discharging completion write below expects. (The
+		// claim is re-win-able: the row's pre-claim state is draft or
+		// approved, both claimable. Losing the re-claim means a concurrent
+		// pass owns the row; that pass now runs the same zero-phase
+		// guard, so skipping is correct.)
+		if plan.State == StateApproved {
+			if err := releaseSynthesisTo(m.store, ctx, planID, StateApproved); err != nil {
+				return fmt.Errorf("release zero-phase synthesis claim: %w", err)
+			}
+		} else if err := m.store.ReleasePlanSynthesis(ctx, planID); err != nil {
+			return fmt.Errorf("release zero-phase synthesis claim: %w", err)
+		}
+		claimed, cerr := m.store.ClaimPlanSynthesis(ctx, planID, synthesisLeaseDuration)
+		if cerr != nil {
+			return fmt.Errorf("re-claim zero-phase plan: %w", cerr)
+		}
+		if !claimed {
+			m.logger.Info("zero-phase completion lost the re-claim; skipping",
+				"plan_id", planID)
+			return nil
+		}
+		// The row is in synthesizing with OUR lease. Complete it with the
+		// same lease-discharge shape as a successful expansion
+		// (updatePlanColumns clears the lease in the same statement).
+		if err := m.updatePlanColumns(ctx, planID, func(p *Plan) {
+			p.State = StateCompleted
+			p.SynthesisLeaseUntil = nil
+			p.SynthesisError = ""
+			p.UpdatedAt = time.Now().UTC()
+		}); err != nil {
+			return fmt.Errorf("complete zero-phase plan: %w", err)
+		}
+		// Publish the committed transition (plan leaf 02/04).
+		m.publishPlanState(planID, StateSynthesizing, StateCompleted, kanban.EventReasonComplete)
+		if plan.FilePath != "" {
+			if err := UpdatePlanStatus(plan.FilePath, StateCompleted, nil); err != nil {
+				m.logger.Warn("failed to update plan.md on zero-phase completion",
+					"plan_id", planID, "error", err)
+			}
+		}
+		m.publishEvent("plan.completed", map[string]any{
+			"plan_id":     planID,
+			"title":       plan.Title,
+			"phase_count": 0,
+			"step_count":  0,
+			"session_id":  plan.SourceSession,
+		})
+		return nil
 	}
 
 	// Create parent task.

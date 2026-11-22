@@ -88,6 +88,32 @@ interview: the one-shot `task.interview` path stays only for the legacy
 pipeline. `plan.seal` and `plan.draft` are RPC-only, never a bus topic.
 See docs/workflows/agent-orchestration.md ("Plan compiler pipeline").
 
+## plans.approval.require_approval defaults TRUE (opt-out, 2026-11-21)
+
+`plans.approval.require_approval` flipped to default TRUE per the
+interactive-usability report decision P1-6 (plan
+`docs/plans/20261121-interactive-usability/10-plan-lifecycle-hardening.md`,
+master C-6 — a ratified product decision): a fresh install without a
+`[plans]` block (or without the approval block) requires explicit human
+approval before a plan executes. This is an OPT-OUT knob: an explicit
+`require_approval: false` in the user's config file still wins — the
+loader records key presence at decode time (the absent-bool and false-bool
+decodes are identical, so the sentinel is what separates them), and
+`NormalizePlansDefaults` only defaults the gate when the key was absent.
+In-code constructed configs behave like absent (gate on). The evolver plan
+sink keeps its own unconditional `RequireApproval = true` override:
+machine-origin plans always require approval regardless of this knob.
+
+## plans.stalled_executing_sweep (duration, default 6h, 0 = off)
+
+`plans.stalled_executing_sweep` bounds how long an EXECUTING plan may sit
+with a missing or terminal-failed parent task before the daemon's
+periodic sweep fails it and publishes `plan.failed {plan_id, session_id,
+reason}` (leaf 10, 20261121). Default 6h; an explicit `0` disables the
+sweep. The sweep never completes a plan — completion belongs to
+OnTaskCompleted — and plans with live (pending/planning/executing/testing)
+parent tasks are never touched. A COMPLETED parent is also left alone.
+
 ## Fresh-context critic flags are on by default (disable-form keys)
 
 The three plan-critic features (`fresh_critic_disabled`,

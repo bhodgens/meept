@@ -31,6 +31,7 @@ func TestApprovePlan_SynthesisFailureMarksRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
+	seedExpandablePhase(t, mgr, p.ID)
 	if err := mgr.SubmitPlan(ctx, p.ID); err != nil {
 		t.Fatalf("SubmitPlan: %v", err)
 	}
@@ -70,6 +71,7 @@ func TestApprovePlan_PartialFailureSiblingsProceed(t *testing.T) {
 		if err != nil {
 			t.Fatalf("CreatePlan(%s): %v", title, err)
 		}
+		seedExpandablePhase(t, mgr, p.ID)
 		if err := mgr.SubmitPlan(ctx, p.ID); err != nil {
 			t.Fatalf("SubmitPlan(%s): %v", title, err)
 		}

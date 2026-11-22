@@ -334,20 +334,22 @@ func TestSynthesizePreservesConcurrentGoalStamp(t *testing.T) {
 	ctx := t.Context()
 	mgr := setupTestManager(t)
 
-	plan, err := mgr.CreatePlan(ctx, "b5-goal-survival", "d", "", "", "")
-	if err != nil {
+	p := NewPlan("b5-goal-survival", "d", "", "", "")
+	p.State = StateApproved
+	if err := mgr.store.CreatePlan(ctx, p); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
-	if err := mgr.store.SetPlanState(ctx, plan.ID, StateApproved); err != nil {
+	seedExpandablePhase(t, mgr, p.ID)
+	if err := mgr.store.SetPlanState(ctx, p.ID, StateApproved); err != nil {
 		t.Fatalf("SetPlanState: %v", err)
 	}
-	mgr.taskCreator = &goalStampingCreator{mgr: mgr, planID: plan.ID, stamp: "goal-b5"}
+	mgr.taskCreator = &goalStampingCreator{mgr: mgr, planID: p.ID, stamp: "goal-b5"}
 
-	if err := mgr.Synthesize(ctx, plan.ID); err != nil {
+	if err := mgr.Synthesize(ctx, p.ID); err != nil {
 		t.Fatalf("Synthesize: %v", err)
 	}
 
-	got, err := mgr.store.GetPlan(ctx, plan.ID)
+	got, err := mgr.store.GetPlan(ctx, p.ID)
 	if err != nil {
 		t.Fatalf("GetPlan: %v", err)
 	}

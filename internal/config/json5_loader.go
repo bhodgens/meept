@@ -56,6 +56,11 @@ func LoadJSON5(path string, v any) error {
 	if err := json.Unmarshal(stdJSON, v); err != nil {
 		return wrapJSONUnmarshalError(err, path)
 	}
+	// Leaf 10: presence-detect plans.approval.require_approval for full
+	// *Config decodes (armRequireApprovalSentinel no-ops otherwise).
+	if cfg, ok := v.(*Config); ok {
+		armRequireApprovalSentinel(cfg, stdJSON)
+	}
 	// Clamp memory.tiers to defaults when the destination is a full
 	// *Config (wiring-gap leaf 03-tierpolicy-daemon T1): LoadJSON5 is
 	// shared by partial unmarshals, so the normalize is type-asserted
@@ -64,6 +69,33 @@ func LoadJSON5(path string, v any) error {
 		NormalizeMemoryTiersDefaults(&cfg.Memory.Tiers)
 	}
 	return nil
+}
+
+// armRequireApprovalSentinel records whether the decoded document EXPLICITLY
+// named plans.approval.require_approval (leaf 10). An absent bool and a
+// false bool decode identically, so NormalizePlansDefaults cannot tell them
+// apart on its own; this presence probe over the standardized JSON arms the
+// sentinel only when the key is present, letting the default-true flip skip
+// configs that deliberately opted out.
+func armRequireApprovalSentinel(cfg *Config, stdJSON []byte) {
+	if cfg == nil {
+		return
+	}
+	var probe struct {
+		Plans struct {
+			Approval struct {
+				RequireApproval *bool `json:"require_approval"`
+			} `json:"approval"`
+		} `json:"plans"`
+	}
+	if err := json.Unmarshal(stdJSON, &probe); err != nil {
+		// The primary decode already reported its own error; the probe
+		// stays silent and the sentinel stays down (default-true wins).
+		return
+	}
+	if probe.Plans.Approval.RequireApproval != nil {
+		cfg.Plans.ArmRequireApprovalSentinel()
+	}
 }
 
 // stringDurationKeys are config keys declared as STRING fields whose values
@@ -526,6 +558,11 @@ func LoadJSON5Bytes(data []byte, v any) error {
 	}
 	if err := json.Unmarshal(stdJSON, v); err != nil {
 		return fmt.Errorf("failed to unmarshal JSON5: %w", err)
+	}
+	// Leaf 10: presence-detect plans.approval.require_approval for full
+	// *Config decodes (LoadJSON5Bytes is Load's JSON5-first branch).
+	if cfg, ok := v.(*Config); ok {
+		armRequireApprovalSentinel(cfg, stdJSON)
 	}
 	return nil
 }

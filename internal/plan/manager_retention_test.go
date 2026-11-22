@@ -26,6 +26,17 @@ func seedPlan(t *testing.T, m *PlanManager, id string, state PlanState, updated 
 	}
 }
 
+// seedExpandablePhase gives a plan one persisted phase so Synthesize takes
+// the EXPANSION path (leaf 10's zero-phase guard completes phase-less plans
+// instead of synthesizing tasks — expansion-path tests must seed this).
+func seedExpandablePhase(t *testing.T, m *PlanManager, planID string) {
+	t.Helper()
+	ph := NewPlanPhase(planID, "Phase A", 1, 1)
+	if err := m.store.CreatePhase(context.Background(), ph); err != nil {
+		t.Fatalf("seedExpandablePhase(%s): %v", planID, err)
+	}
+}
+
 // TestPruneStalePlans deletes old draft/cancelled/failed rows (and their md
 // files), cancels stale pending_approval, and never touches executing or
 // completed plans or plans within the retention window.
