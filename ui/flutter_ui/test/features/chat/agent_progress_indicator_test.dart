@@ -152,31 +152,29 @@ void main() {
       });
     });
 
-    // ===== Message truncation tests =====
+    // ===== Message wrap tests (leaf 08: wrap replaces the 60-char cut) =====
 
-    group('message truncation', () {
-      testWidgets(
-        'truncates messages longer than 60 characters to 57 + "..."',
-        (tester) async {
-          final longMessage = 'A' * 70;
-          final progress = _makeProgress(message: longMessage);
-          await tester.pumpWidget(_buildWidget(progress: progress));
-
-          final texts = _getTextStrings(
-            find.descendant(
-              of: find.byType(AgentProgressIndicator),
-              matching: find.byType(Text),
-            ),
-            tester,
-          );
-          expect(texts.length, 2);
-          expect(texts[1], '${'A' * 57}...');
-        },
-      );
-
-      testWidgets('does not truncate messages 60 characters or shorter', (
+    group('message wrap', () {
+      testWidgets('long messages render untruncated (no 57+... cut)', (
         tester,
       ) async {
+        final longMessage = 'A' * 70;
+        final progress = _makeProgress(message: longMessage);
+        await tester.pumpWidget(_buildWidget(progress: progress));
+
+        final texts = _getTextStrings(
+          find.descendant(
+            of: find.byType(AgentProgressIndicator),
+            matching: find.byType(Text),
+          ),
+          tester,
+        );
+        expect(texts.length, 2);
+        // The full message survives: no substring cut, no ellipsis.
+        expect(texts[1], longMessage);
+      });
+
+      testWidgets('short messages render verbatim', (tester) async {
         const shortMessage = 'This is a short message';
         final progress = _makeProgress(message: shortMessage);
         await tester.pumpWidget(_buildWidget(progress: progress));
@@ -191,7 +189,7 @@ void main() {
         expect(texts[1], shortMessage);
       });
 
-      testWidgets('message exactly 60 characters is not truncated', (
+      testWidgets('message exactly 60 characters is not altered', (
         tester,
       ) async {
         final exactly60 = 'B' * 60;
@@ -208,7 +206,7 @@ void main() {
         expect(texts[1], exactly60);
       });
 
-      testWidgets('messages exactly 61 characters are truncated', (
+      testWidgets('messages over 60 characters are not ellipsized', (
         tester,
       ) async {
         final exactly61 = 'C' * 61;
@@ -222,7 +220,24 @@ void main() {
           ),
           tester,
         );
-        expect(texts[1], '${'C' * 57}...');
+        expect(texts[1], exactly61);
+      });
+
+      testWidgets('message text wraps via softWrap', (tester) async {
+        final longMessage = 'word ' * 30;
+        final progress = _makeProgress(message: longMessage);
+        await tester.pumpWidget(_buildWidget(progress: progress));
+
+        final textWidget = tester.widget<Text>(
+          find
+              .descendant(
+                of: find.byType(AgentProgressIndicator),
+                matching: find.byType(Text),
+              )
+              .at(1),
+        );
+        expect(textWidget.softWrap, isTrue);
+        expect(textWidget.data, longMessage);
       });
     });
 

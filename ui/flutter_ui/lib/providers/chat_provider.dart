@@ -311,6 +311,20 @@ class ChatNotifier extends StateNotifier<ChatState> {
   /// semantics), negative means "fetch has not resolved yet".
   int _livenessTimeoutSeconds = -1;
 
+  /// Current verbosity level (leaf 08). Defaults to normal (1), then
+  /// tracks the persisted client.json5 `chat.verbosity` read in
+  /// [_loadLivenessTimeout] and live changes pushed by the UI via
+  /// [setVerbosityLevel]. Progress frames with tier above this value
+  /// are dropped (mirror of TUI app.go `tier <= a.verbosity`).
+  int _verbosityLevel = VerbosityLevel.normal;
+
+  /// Live verbosity update from the UI (the verbose toggle in the home
+  /// screen / status bar). The provider family is per-session, so each
+  /// open chat notifier is told directly.
+  void setVerbosityLevel(int level) {
+    _verbosityLevel = level;
+  }
+
   /// Fetch `chat.liveness_timeout_seconds` from GET /api/v1/config/client.
   /// Best-effort: any failure (offline, daemon older than the route,
   /// malformed JSON5) silently keeps [kTurnLivenessTimeout].
@@ -324,6 +338,19 @@ class ChatNotifier extends StateNotifier<ChatState> {
       final v = chat['liveness_timeout_seconds'];
       if (v is int && v >= 0) {
         _livenessTimeoutSeconds = v;
+      }
+      // Persisted verbosity (leaf 08): mirror the TUI's startup read of
+      // client.json5 chat.verbosity so the tier filter survives restart.
+      final verb = chat['verbosity'];
+      if (verb is String) {
+        switch (verb.toLowerCase()) {
+          case 'quiet':
+            _verbosityLevel = VerbosityLevel.quiet;
+          case 'verbose':
+            _verbosityLevel = VerbosityLevel.verbose;
+          case 'normal':
+            _verbosityLevel = VerbosityLevel.normal;
+        }
       }
     } catch (_) {
       // Keep the default — liveness is an optimization, not a gate.
@@ -560,7 +587,18 @@ class ChatNotifier extends StateNotifier<ChatState> {
             state = state.copyWith(pendingConfirmation: confirmation);
             return;
           }
+          // Mid-turn step errors and review feedback ride the progress
+          // subscription classified as agent_progress (leaf 08, mirror
+          // of TUI app.go task.error / review_completed handlers): append
+          // a transient error bubble instead of just moving the spinner.
+          if (_handleTaskEventFrame(message)) return;
           final progress = AgentProgress.fromJson(message);
+          // Verbosity tier filter (leaf 08, mirror of TUI app.go
+          // `tier <= a.verbosity`): at quiet only tier-0 frames move the
+          // indicator; the daemon's synthesized feed assigns tier 1
+          // (normal) and 2 (verbose). Confirmation requests and task
+          // events above are never tier-filtered.
+          if (progress.tier > _verbosityLevel) return;
           state = state.copyWith(currentProgress: progress);
           // Liveness refresh (scopes-2 audit MED, 2026-09-18): feed every
           // progress frame into the pending-turn trackers — parity with the
@@ -735,7 +773,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
       final parked = turn.copyWith(
         status: PendingTurnStatus.parked,
         progressText: quotaPark
-            ? 'waiting for provider quota -- will resume automatically'
+            ? 'waiting for provider quota — will resume automatically'
             : 'turn already submitted; result arrives via turn.terminal',
       );
       turns[event.turnId] = parked;
@@ -895,6 +933,77 @@ class ChatNotifier extends StateNotifier<ChatState> {
       messages: [...state.messages, errMessage],
       error: errorText,
     );
+  }
+
+  /// Detect and render mid-turn task events riding the agent_progress
+  /// subscription (leaf 08, GUI half of the TUI's app.go task.error /
+  /// step.review_completed handlers). Returns true when the frame was a
+  /// task event and consumed.
+  ///
+  /// Payload shapes (frozen daemon-side publishers):
+  ///   task.error        -> {task_id, step_id, error, chat_visible}
+  ///                        (internal/agent/tactical.go publishEvent)
+  ///   task.review_completed / step.review_completed
+  ///                     -> {task_id, step_id, status, feedback,
+  ///                         revision_count}
+  ///                        (internal/agent/review_manager.go)
+  /// The WS relay classifies task.* topics as job_update with
+  /// source_topic attached, so discriminate on that key. Only frames
+  /// scoped to this session (or session-less legacy publishers) render.
+  bool _handleTaskEventFrame(Map<String, dynamic> data) {
+    final topic = data['source_topic'] as String?;
+    if (topic == null) return false;
+
+    // Session scoping: prefer an explicit session/conversation match;
+    // a missing key is a legacy publisher (best-effort, like the TUI).
+    final sid = data['session_id'] as String?;
+    final cid = data['conversation_id'] as String?;
+    if (sid != null && sid.isNotEmpty && sid != sessionId && cid != sessionId) {
+      return false;
+    }
+
+    switch (topic) {
+      case 'task.error':
+        final chatVisible = data['chat_visible'];
+        if (chatVisible is bool && !chatVisible) return true; // consumed
+        final errMsg = data['error'] as String? ?? '';
+        if (errMsg.isEmpty) return true;
+        final stepId = data['step_id'] as String? ?? '';
+        _appendErrorBubble('step $stepId failed: $errMsg');
+        return true;
+
+      case 'task.review_completed':
+      case 'step.review_completed':
+        final status = data['status'] as String? ?? '';
+        final feedback = data['feedback'] as String? ?? '';
+        final stepId = data['step_id'] as String? ?? '';
+        final revisionCount = (data['revision_count'] as num?)?.toInt() ?? 0;
+        switch (status) {
+          case 'rejected':
+            var summary = revisionCount > 0
+                ? 'step $stepId: review rejected (revision #$revisionCount)'
+                : 'step $stepId: review rejected';
+            if (feedback.isNotEmpty) summary += ' -- $feedback';
+            _appendErrorBubble(summary);
+          case 'needs_info':
+            var summary = 'step $stepId: review needs more info';
+            if (feedback.isNotEmpty) summary += ' -- $feedback';
+            _appendErrorBubble(summary);
+          case 'approved':
+            // Light touch (TUI parity): just a progress note, no bubble.
+            state = state.copyWith(
+              currentProgress: AgentProgress(
+                agentId: '',
+                message: 'step $stepId approved',
+                tier: VerbosityLevel.quiet,
+                timestamp: DateTime.now(),
+                stage: 'review approved',
+              ),
+            );
+        }
+        return true;
+    }
+    return false;
   }
 
   /// Submit a turn via the async endpoint (leaf 05 Task 3). The ack returns
@@ -1063,6 +1172,34 @@ class ChatNotifier extends StateNotifier<ChatState> {
   /// one code path.
   void debugHandleTurnTerminal(TurnTerminalEvent event) {
     _handleTurnTerminal(event);
+  }
+
+  /// Test seam: route an agent_progress frame through the same handler
+  /// chain the live subscription uses (confirmation detection,
+  /// task-event discrimination, verbosity tier filter, indicator state).
+  /// Public so widget tests exercise the exact production path.
+  void debugHandleProgressFrame(Map<String, dynamic> message) {
+    if (_disposed) return;
+    final confirmation = _extractConfirmationRequest(message);
+    if (confirmation != null) {
+      state = state.copyWith(pendingConfirmation: confirmation);
+      return;
+    }
+    if (_handleTaskEventFrame(message)) return;
+    final progress = AgentProgress.fromJson(message);
+    if (progress.tier > _verbosityLevel) return;
+    state = state.copyWith(currentProgress: progress);
+    final frameTurnId = message['turn_id'] as String?;
+    state.pendingTurns.forEach((pendingId, pt) {
+      if (frameTurnId == null || pt.turnId == frameTurnId) {
+        noteTurnProgress(
+          pt.turnId,
+          progress.stage.isNotEmpty
+              ? progress.stage
+              : (progress.message.isNotEmpty ? progress.message : 'working'),
+        );
+      }
+    });
   }
 
   /// Test seam: simulate a late failure badge bump (the sessions-list

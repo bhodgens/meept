@@ -161,7 +161,9 @@ func (m *ChatModel) handleTurnTerminal(msg turnTerminalMsg) tea.Cmd {
 			}
 		}
 	} else {
-		// failed / timeout / parked: error-styled, honest bubble.
+		// failed / timeout / parked: error-styled, honest bubble
+		// (RoleError renders through the model's errorStyle - leaf 08
+		// TUI error styling).
 		detail := msg.Error
 		if detail == "" {
 			detail = fmt.Sprintf("turn ended with status %q", msg.Status)
@@ -169,7 +171,7 @@ func (m *ChatModel) handleTurnTerminal(msg turnTerminalMsg) tea.Cmd {
 		if crossSession {
 			m.appendToSessionTranscript(persistSessionID, RoleSystem, detail)
 		} else {
-			m.addMessage(RoleSystem, llm.UserMessage(fmt.Errorf("%s", detail)))
+			m.addMessage(RoleError, llm.UserMessage(fmt.Errorf("%s", detail)))
 		}
 	}
 

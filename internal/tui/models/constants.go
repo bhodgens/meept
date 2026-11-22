@@ -25,6 +25,10 @@ const (
 	RoleSystem      = "system"
 	RoleParticipant = "participant"
 	RolePending     = "pending"
+	// RoleError marks an error surface (failed turn terminal, submit
+	// error, task.error card). Rendered with the chat model's errorStyle
+	// - visibly distinct from ordinary system notices.
+	RoleError = "error"
 )
 
 // Color constants for TUI rendering were removed by unified theming (L4):
