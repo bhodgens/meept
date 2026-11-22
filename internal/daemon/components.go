@@ -4207,6 +4207,20 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		})
 		logger.Info("Agent registry initialized", "specs", len(c.AgentRegistry.ListSpecs()))
 
+		// Steering queue wiring (steering-fix, 07-bench residual): the daemon
+		// singleton template loop was constructed EARLIER in boot (above) with
+		// neither WithAgentRegistry nor WithMessageQueue, so every direct-mode
+		// chat turn (ChatHandler.sessionLoop -> GetOrCreateWired clone of this
+		// template) ran with a nil registry and nil queue -- RunOnceWithParts'
+		// per-turn queue registration guard never fired and chat.steer /
+		// chat.followup failed with ErrQueueNotFound for every conversation
+		// (production rig p5, runs 4-6). Late-attach the shared registry here,
+		// immediately after construction: SetAgentRegistry also mints the
+		// template's steering/follow-up queue, and ConfigSnapshot carries both
+		// (WithAgentRegistry + queue) onto every session clone at turn time.
+		// Boot-order safe: no turn can be running at this point.
+		c.AgentLoop.SetAgentRegistry(c.AgentRegistry)
+
 		// Wire tool-schema mode for task-scoped loops (chat-dispatch-ux
 		// leaf 04): the registry pushes the resolved mode into the shared
 		// tool registry so specialist loops inherit the same indexed
@@ -4642,14 +4656,17 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			})
 
 			strategicPlanner := agent.NewStrategicPlanner(agent.StrategicPlannerConfig{
-				Registry:              c.AgentRegistry,
-				TaskStore:             orchTaskStore,
-				StepStore:             stepStore,
-				Bus:                   msgBus,
-				Logger:                logger.With("component", "strategic"),
-				PairManager:           strategicPairMgr,
-				MaxPlanSteps:          cfg.Orchestrator.MaxPlanSteps,
-				PlannerTimeout:        time.Duration(cfg.Orchestrator.PlannerTimeout) * time.Second,
+				Registry:       c.AgentRegistry,
+				TaskStore:      orchTaskStore,
+				StepStore:      stepStore,
+				Bus:            msgBus,
+				Logger:         logger.With("component", "strategic"),
+				PairManager:    strategicPairMgr,
+				MaxPlanSteps:   cfg.Orchestrator.MaxPlanSteps,
+				PlannerTimeout: time.Duration(cfg.Orchestrator.PlannerTimeout) * time.Second,
+				// Approval gate threshold (06-planning/03): operator-
+				// configurable; 0 disables the gate (the planner no longer
+				// clamps 0 back to the default).
 				ApprovalStepThreshold: cfg.Orchestrator.TaskApprovalStepThreshold,
 				InterviewAmbiguity:    cfg.Orchestrator.InterviewAmbiguityThreshold,
 				TemplateLoader:        agent.NewDaemonPlannerTemplateLoader("config/prompts"),
@@ -5130,10 +5147,17 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 	// Create job processor that uses the agent loop (with optional multi-agent registry)
 	jobProc := NewAgentJobProcessor(c.AgentLoop, logger)
-	if c.msgBus != nil {
+	// Wire the job processor to the bus. Use the msgBus PARAMETER, not
+	// c.msgBus: the field is only stored at Start-time wiring (line ~5483),
+	// long after this site, so the field-guard here always saw nil in
+	// production and the toolEvidenceCollector never subscribed - envelopes
+	// never carried tool_evidence and the evidence-review gate fail-closed
+	// every file-shaped step (07-bench acceptance run 4, 2026-11-21). The
+	// parameter is the same live bus daemon.go created at line ~230.
+	if msgBus != nil {
 		// Job-level quota surfacing (leaf 06): step jobs failing terminal on
 		// a provider quota block publish the existing agent.quota_wait event.
-		jobProc.WithBus(c.msgBus)
+		jobProc.WithBus(msgBus)
 	}
 	if c.Orchestrator != nil {
 		// Per-phase worktree consumption (phase-frontier-parallel Contract

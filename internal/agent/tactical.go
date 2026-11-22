@@ -654,6 +654,17 @@ func (ts *TacticalScheduler) GetJobByID(ctx context.Context, jobID string) (*que
 // Steps that cannot be scheduled due to semaphore limits remain in "ready" state
 // and will be retried on the next scheduling cycle.
 func (ts *TacticalScheduler) ScheduleReadySteps(ctx context.Context, taskID string) error {
+	// Nil-queue posture (matches sweepReadyStepsForRetry): a scheduler
+	// wired without a queue (validation-gate/review harnesses drive
+	// OnJobCompleted semantics directly) degrades to a no-op here, never
+	// a nil deref in scheduleStep's Enqueue. The revision-promotion path
+	// (handleReviewResult) reaches this on every rejection, so a
+	// Queue-less scheduler panicking there turned every review rejection
+	// in such a harness into a crash.
+	if ts.queue == nil {
+		ts.logger.Debug("No queue wired - skipping step scheduling", "task_id", taskID)
+		return nil
+	}
 	readySteps, err := ts.stepStore.GetReadySteps(taskID)
 	if err != nil {
 		return fmt.Errorf("failed to get ready steps: %w", err)

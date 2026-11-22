@@ -333,9 +333,10 @@ func NewStrategicPlanner(cfg StrategicPlannerConfig) *StrategicPlanner {
 	if cfg.PlannerTimeout <= 0 {
 		cfg.PlannerTimeout = 120 * time.Second
 	}
-	// ApprovalStepThreshold: 0 (or negative) DISABLES the complexity gate.
-	// The default of 5 belongs in config.DefaultConfig; defaulting here
-	// would clamp an explicit 0 back to 5 and make the gate undeletable.
+	// ApprovalStepThreshold: 0 (or negative) DISABLES the complexity gate
+	// (06-planning/03). The default of 5 lives in config.DefaultConfig as
+	// orchestrator.task_approval_step_threshold; defaulting here would
+	// clamp an explicit 0 back to 5 and make the gate undeletable.
 	if cfg.SimpleInputMaxChars <= 0 {
 		cfg.SimpleInputMaxChars = 100
 	}
@@ -1164,7 +1165,13 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 
 	// Approval gate: tasks that went through an interview (but are not yet
 	// approved) OR plans that exceed the complexity threshold must be
-	// presented to the user for sign-off before execution.
+	// presented to the user for sign-off before execution. ORDERING PIN
+	// (06-planning/03 T4, F13c/P4): the triviality cap runs BEFORE the
+	// gate counts -- a 21-step decomposition of a trivial input reaches
+	// requiresApproval as <= 1 step, never as 21 with a post-gate
+	// truncation. Genuinely complex work is never capped (the heuristic
+	// is conservative; see capTrivialPlanSteps).
+	steps = sp.capTrivialPlanSteps(req, steps)
 	if sp.requiresApproval(req, steps) {
 		return sp.awaitUserApproval(ctx, t, steps, req)
 	}

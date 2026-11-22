@@ -1638,7 +1638,20 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 	var evidence []models.Evidence
 	var terminate bool
 	var label taint.TaintLabel
-	if tr, ok := toolResult.(*tools.ToolResult); ok && tr != nil {
+	// executeToolWithRetry dispatches tool.Execute DIRECTLY (registry
+	// normalization at Registry.Execute never runs on this path), so file
+	// tools that return value-type ToolResult arrive here unboxed. Accept
+	// BOTH shapes or their Evidence/Terminate/TaintLabel is silently
+	// dropped and the evidence-review gate fail-closes every file step
+	// even when the write succeeded (usability acceptance run 3, 07-bench).
+	tr, ok := toolResult.(*tools.ToolResult)
+	if !ok && toolResult != nil {
+		if v, vok := toolResult.(tools.ToolResult); vok {
+			tr = &v
+			ok = true
+		}
+	}
+	if ok && tr != nil {
 		if len(tr.Evidence) > 0 {
 			evidence = tr.Evidence
 			e.logger.Debug("Tool produced evidence",

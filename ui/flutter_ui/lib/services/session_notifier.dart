@@ -119,6 +119,20 @@ class SessionNotifier extends StateNotifier<SessionState> {
     return null;
   }
 
+  /// Find the most recent non-archived session that has real history
+  /// (non-null `leaf_message_id`). This is the restore target for
+  /// auto_resume=true (03-restore-queue-visibility T1: the GUI half of the
+  /// aligned policy - restore the LAST session the user actually used,
+  /// never a leftover empty one). Returns null when no session has
+  /// content; callers then fall back to [findReusableEmptySession].
+  Session? findMostRecentSessionWithHistory() {
+    for (final s in state.sessions) {
+      if (s.archived) continue;
+      if (s.leafMessageId != null) return s;
+    }
+    return null;
+  }
+
   /// Create a new session with the given title.
   ///
   /// Inserts the newly created session into local state immediately so

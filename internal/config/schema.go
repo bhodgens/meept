@@ -3881,6 +3881,12 @@ type OrchestratorConfig struct {
 	// Default true (Q2 ratified at dispatch); false = byte-identical
 	// legacy classification.
 	TrivialFastLane bool `json:"trivial_fast_lane" toml:"trivial_fast_lane"`
+	// TaskApprovalStepThreshold (06-planning/03, master Q1): the
+	// minimum number of planned steps that triggers the planner's
+	// approval gate. Default 5 (the historical default, preserved
+	// THROUGH config); 0 DISABLES the gate -- the planner must never
+	// resurrect a configured 0 into the default.
+	TaskApprovalStepThreshold int `json:"task_approval_step_threshold" toml:"task_approval_step_threshold"`
 	// Prefilter configures the Stage-0 embedding prefilter
 	// (classifier-observability follow-up): embed the input, cosine-match
 	// against labeled intent centroids, and route directly when confident
@@ -3941,12 +3947,6 @@ type OrchestratorConfig struct {
 	// with max(120s, this value + 15s)) — the proxy is bumped to match, so
 	// the graceful reply still lands before any transport timeout.
 	SyncWaitMax time.Duration `json:"sync_wait_max" toml:"sync_wait_max"`
-	// TaskApprovalStepThreshold is the minimum number of planned steps that
-	// trips the approval gate (even without an interview). Default 5 — set
-	// here in DefaultConfig, NOT as a clamp in the planner constructor: 0
-	// (or negative) DISABLES the gate for every plan size. The daemon wiring
-	// forwards this value into StrategicPlannerConfig.ApprovalStepThreshold.
-	TaskApprovalStepThreshold int `json:"task_approval_step_threshold" toml:"task_approval_step_threshold"`
 }
 
 // TurnWatchdogConfig is the liveness-reaper knob block (async-turn-
@@ -4917,7 +4917,10 @@ func DefaultConfig() *Config {
 			Isolation: true,
 		},
 		Orchestrator: OrchestratorConfig{
-			MaxPlanSteps:                10,
+			MaxPlanSteps: 10,
+			// TaskApprovalStepThreshold (06-planning/03, master Q1):
+			// the historical approval-gate default lives HERE (never in
+			// a planner clamp): 5 steps gate, 0 disables.
 			MaxResearchSteps:            3,
 			PlannerTimeout:              120,
 			TokenBudgetAlert:            5000,
