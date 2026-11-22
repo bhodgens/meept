@@ -350,7 +350,6 @@ func NewApp(socketPath string, cwd string) *App {
 			LivenessTimeout:   time.Duration(clientConfig.Chat.LivenessTimeoutSeconds) * time.Second,
 		}),
 		tasks:            models.NewTasksModel(rpc),
-		sessions:         models.NewSessionsModel(rpc),
 		queue:            models.NewQueueModel(rpc),
 		memory:           models.NewMemoryModel(rpc),
 		plans:            models.NewPlansModel(rpc),
@@ -367,6 +366,9 @@ func NewApp(socketPath string, cwd string) *App {
 		doublePressTTL:   500 * time.Millisecond,
 		tabFlash:         make(map[ViewType]bool),
 	}
+	// 09-cli-affordances task 3: the plan card hint must name the real
+	// plans-view key, not a hardcoded "[5]".
+	app.chat.SetPlansViewKey(clientConfig.Keybindings.CommandPalette.ViewPlans)
 
 	// Create modals
 	app.commandPalette = CommandPaletteModal(styles, clientConfig)

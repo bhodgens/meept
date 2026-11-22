@@ -153,6 +153,13 @@ type ChatModel struct {
 	traceFetched  map[string]bool
 	routeFetched  map[string]bool
 
+	// plansViewKey is the configured plans-view keybinding
+	// (client.json5 command_palette.view_plans; 09-cli-affordances
+	// task 3). Zero value renders the shipped default "5" in the plan
+	// card's hint line — the hint used to hardcode "[5]" even when the
+	// operator rebound the key.
+	plansViewKey string
+
 	// Task-reply render dedupe (04-clutter/02, C1 key = (turn_id,
 	// task_id)): a task's reply arrives as BOTH a task.completed card AND
 	// the turn.terminal bubble -- whichever renders first wins, the
@@ -3371,6 +3378,23 @@ func planCountLine(phaseCount, stepCount int) string {
 	return phaseStr + " · " + stepStr
 }
 
+// planCardKeyHint renders the plans-view key hint: the configured
+// ViewPlans keybinding when set, the shipped default "5" otherwise
+// (09-cli-affordances task 3 — the hint used to hardcode "[5]").
+func (m *ChatModel) planCardKeyHint() string {
+	if m.plansViewKey == "" {
+		return "5"
+	}
+	return m.plansViewKey
+}
+
+// SetPlansViewKey injects the configured plans-view keybinding
+// (client.json5 command_palette.view_plans) so the plan card hint
+// renders the real key. "" keeps the shipped default "5".
+func (m *ChatModel) SetPlansViewKey(key string) {
+	m.plansViewKey = key
+}
+
 // renderPlanNotification renders a styled inline notification for plan lifecycle events.
 func (m *ChatModel) renderPlanNotification(msg PlanNotificationMsg) string {
 	title := msg.Title
@@ -3391,18 +3415,19 @@ func (m *ChatModel) renderPlanNotification(msg PlanNotificationMsg) string {
 		return fmt.Sprintf("┌ plan ready for review ──────────────────────────┐\n"+
 			"│ Plan: \"%s\"\n"+
 			"│ %s\n"+
-			"│ [5] plans tab to review  ·  /plan approve %s\n"+
+			"│ [%s] plans tab to review  ·  /plan approve %s\n"+
 			"└─────────────────────────────────────────────────┘",
 			title, countLine,
+			m.planCardKeyHint(),
 			types.TruncateString(msg.PlanID, 16))
 
 	case "completed":
 		return fmt.Sprintf("┌ plan completed ─────────────────────────────────┐\n"+
 			"│ Plan: \"%s\"\n"+
 			"│ %s · awaiting confirmation\n"+
-			"│ [5] plans tab to confirm\n"+
+			"│ [%s] plans tab to confirm\n"+
 			"└─────────────────────────────────────────────────┘",
-			title, planCountLine(msg.PhaseCount, msg.StepCount))
+			title, planCountLine(msg.PhaseCount, msg.StepCount), m.planCardKeyHint())
 
 	case "confirmed":
 		confirmedBy := msg.By

@@ -427,9 +427,10 @@ examples:
 forward a planning request to the agent through chat.submit: the
 dispatcher's /plan route decomposes the task into steps and presents a
 plan for review instead of executing. Bare /plan forwards the plan-mode
-toggle. Sub-forms act on gated tasks directly:
+toggle. Sub-forms act directly:
   /plan approve <task-id>   approve a task awaiting approval
-  /plan reject <task-id> <reason>  reject it (never executes)`,
+  /plan reject <task-id> <reason>  reject it (never executes)
+  /plan confirm <plan-id>   confirm a completed plan`,
 
 		"review": `usage: /review
 
@@ -1650,6 +1651,13 @@ func (h *CommandHandler) executePlan(args []string) *CommandResult {
 			return h.executePlanApproval(args, "task.approve")
 		case "reject":
 			return h.executePlanApproval(args, "task.reject")
+		case "confirm":
+			// 09-cli-affordances task 2: /plan confirm <plan-id>
+			// drives plan.confirm (the plans.db lifecycle action) —
+			// NOT the gated-task task.approve pair and NOT the
+			// planning forward, which silently swallowed "confirm"
+			// as planning prose.
+			return h.executePlanConfirm(args)
 		}
 	}
 
@@ -1734,6 +1742,49 @@ func (h *CommandHandler) executePlanApproval(args []string, method string) *Comm
 		return &CommandResult{Output: resp.Message}
 	}
 	return &CommandResult{Output: fmt.Sprintf("task %s: %s", resp.TaskID, resp.Status)}
+}
+
+// executePlanConfirm resolves the /plan confirm <plan-id> subcommand
+// (09-cli-affordances task 2): the plans.db lifecycle confirm over the
+// plan.confirm RPC (same seam the plans tab's confirmPlan action and the
+// CLI `meept plans confirm` use). The RPC result is the plan row; report
+// the plan title and resulting state.
+func (h *CommandHandler) executePlanConfirm(args []string) *CommandResult {
+	if h.rpc == nil || !h.rpc.IsConnected() {
+		return &CommandResult{
+			Output:  ErrNotConnected,
+			IsError: true,
+		}
+	}
+	if len(args) < 2 {
+		return &CommandResult{
+			Output:  "usage: /plan confirm <plan-id>",
+			IsError: true,
+		}
+	}
+	planID := args[1]
+	result, err := h.rpc.Call("plan.confirm", map[string]any{"plan_id": planID})
+	if err != nil {
+		return &CommandResult{
+			Output:  fmt.Sprintf("failed to confirm plan %s: %v", planID, err),
+			IsError: true,
+		}
+	}
+	var resp struct {
+		ID    string `json:"id"`
+		Title string `json:"title"`
+		State string `json:"state"`
+	}
+	title, state := planID, "confirmed"
+	if err := json.Unmarshal(result, &resp); err == nil {
+		if resp.Title != "" {
+			title = resp.Title
+		}
+		if resp.State != "" {
+			state = resp.State
+		}
+	}
+	return &CommandResult{Output: fmt.Sprintf("plan confirmed: %s (state: %s)", title, state)}
 }
 
 // executeReview reviews current changes in the working directory.
