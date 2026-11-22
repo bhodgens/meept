@@ -1482,6 +1482,15 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 			if unblockAt.IsZero() && quotaErr.RetryAfter > 0 {
 				unblockAt = time.Now().Add(quotaErr.RetryAfter)
 			}
+			// Leaf 06 (graceful errors): an UNKNOWN reset schedule (no
+			// ResetAt and no RetryAfter) used to skip the park entirely —
+			// the queued-note lane was unreachable and the turn failed
+			// without the re-ask guidance. Synthesize a conservative
+			// schedule (three poll intervals) and park as usual; the
+			// watcher's give-up caps (attempts / MaxWait) are unchanged.
+			if unblockAt.IsZero() {
+				unblockAt = time.Now().Add(3 * DefaultQuotaResumePollInterval)
+			}
 			response.Error = quotaErr.UserMessage()
 			response.Reply = quotaErr.UserMessage()
 			if h.quotaResumeWatcher != nil && !unblockAt.IsZero() {
@@ -1515,7 +1524,14 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 			response.Reply = throttleParkNotice
 			response.Error = ""
 		} else {
-			response.Error = err.Error()
+			// Leaf 06 (graceful errors, master C-4): the terminal funnel
+			// maps remaining machine errors to user language via
+			// UserFacingError. The typed lanes above
+			// (BudgetExceededError / QuotaResetError / throttle park)
+			// already claimed their copy; this is the fall-through for
+			// ContextTooSmall, tier-floor, all-quota-blocked,
+			// empty-response, gate blocks, and unknown errors.
+			response.Error = UserFacingError(err)
 			response.Reply = reply // AgentLoop returns a user-friendly message even on error
 		}
 	} else {
@@ -2335,6 +2351,12 @@ func (h *ChatHandler) handleTaskCompleted(msg *models.BusMessage) {
 		if relayError == "" {
 			relayError = payload.Error
 		}
+		// Leaf 06 (master C-4): a failed task's terminal relay error goes
+		// through the user-language mapping, so a machine sentinel from a
+		// step (context-too-small verdict, quota-blocked pool, empty
+		// response, gate block) renders as actionable copy on
+		// turn.terminal / chat_message, never as a raw error string.
+		relayError = UserFacingError(errors.New(relayError))
 		relayReply = "the task failed: " + relayError
 	}
 
@@ -3141,6 +3163,12 @@ func (h *ChatHandler) resumeQuotaParkedTurn(ctx context.Context, turn QuotaParke
 			unblockAt := quotaErr.ResetAt
 			if unblockAt.IsZero() && quotaErr.RetryAfter > 0 {
 				unblockAt = time.Now().Add(quotaErr.RetryAfter)
+			}
+			// Leaf 06: unknown schedule -> conservative synthesized
+			// unblockAt (three poll intervals), matching the
+			// handleChatRequest park branch; give-up caps unchanged.
+			if unblockAt.IsZero() {
+				unblockAt = time.Now().Add(3 * DefaultQuotaResumePollInterval)
 			}
 			if !unblockAt.IsZero() && h.quotaResumeWatcher.Park(QuotaParkedTurn{
 				SessionID:      turn.SessionID,

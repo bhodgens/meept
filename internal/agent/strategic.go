@@ -1584,17 +1584,23 @@ func (sp *StrategicPlanner) planSinglePhase(ctx context.Context, req PlanRequest
 			sp.markPlanDegraded(req.TaskID, "degraded: deterministic single-step")
 			return sp.createDeterministicSingleStep(req), nil
 		}
-		// Honest failure: no artifact shape to lean on, and the historical
-		// generic fallback produced memory_search noise instead of work.
-		sp.logger.Warn("Planner produced no plan; failing task",
+		// No artifact shape to lean on: leaf 06 (graceful errors) still
+		// executes the task — degrade to ONE direct step carrying the
+		// task description verbatim (the createFallbackSteps lane), with
+		// the plan-quality marker recorded so the degraded planning is
+		// visible. The turn completes with whatever the direct step
+		// produces instead of hard-failing on the planner's empty plan;
+		// the sentinel remains for callers that must distinguish the
+		// degraded lane, but Plan no longer propagates it as a failure.
+		sp.logger.Info("Planner produced no plan; degrading to one direct step",
 			"task_id", req.TaskID,
 		)
 		sp.recordMetric("strategic_planner.empty_plan_guard", 1, map[string]string{
 			"intent":  req.Intent,
-			"outcome": "honest_failure",
+			"outcome": "direct_step_fallback",
 		})
-		sp.failTaskWithReason(req.TaskID, ErrPlannerNoPlanNotArtifact.Error())
-		return nil, ErrPlannerNoPlanNotArtifact
+		sp.markPlanDegraded(req.TaskID, "degraded: direct-step fallback (empty plan)")
+		steps = sp.createFallbackSteps(req, nil)
 	}
 	return steps, nil
 }

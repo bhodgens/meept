@@ -186,7 +186,13 @@ func TestEmptyPlanGuard_SingleArtifactDeterministicStep(t *testing.T) {
 // path: an empty plan for a description without a single-artifact shape
 // fails the task immediately with 'planner produced no plan; not a
 // single-artifact task' — zero steps, no generic fallback noise.
-func TestEmptyPlanGuard_NonArtifactTaskFailsHonestly(t *testing.T) {
+// TestEmptyPlanGuard_NonArtifactTaskDegradesToOneDirectStep pins the
+// leaf-06 graceful-errors contract: an empty plan for a NON-artifact
+// description no longer fails the task — it degrades to ONE direct
+// fallback step (input verbatim), records the degraded plan-quality
+// marker, and Plan returns nil (the turn completes through the direct
+// step; the failure surfaces only if the step itself fails).
+func TestEmptyPlanGuard_NonArtifactTaskDegradesToOneDirectStep(t *testing.T) {
 	chatter := &emptyPlanChatter{resp: `{"steps": []}`}
 	sp, msgBus, failedSub := newEmptyPlanTestPlanner(t, chatter)
 	defer msgBus.Unsubscribe(failedSub)
@@ -205,49 +211,44 @@ func TestEmptyPlanGuard_NonArtifactTaskFailsHonestly(t *testing.T) {
 		Intent:    string(IntentQuickPlan),
 		Mode:      "quick_plan",
 	})
-	if err == nil {
-		t.Fatal("Plan must fail for a non-single-artifact task with an empty plan")
-	}
-	if !strings.Contains(err.Error(), "planner produced no plan; not a single-artifact task") {
-		t.Errorf("error = %q, want it to contain the honest failure reason", err.Error())
+	if err != nil {
+		t.Fatalf("Plan err = %v, want nil (leaf 06: empty plan degrades to one direct step)", err)
 	}
 
-	// Exactly one LLM call: the honest failure must not re-enter the planner.
+	// Exactly one LLM call: the degrade must not re-enter the planner.
 	if got := chatter.callCount(); got != 1 {
 		t.Errorf("planner LLM calls = %d, want exactly 1", got)
 	}
 
-	// Zero steps persisted.
+	// Exactly ONE direct fallback step persisted, input verbatim.
 	steps, err := stepStore.ListByTaskID(tsk.ID)
 	if err != nil {
 		t.Fatalf("list steps: %v", err)
 	}
-	if len(steps) != 0 {
-		t.Errorf("persisted steps = %d, want 0", len(steps))
+	if len(steps) != 1 {
+		t.Fatalf("persisted steps = %d, want exactly 1 direct fallback step", len(steps))
+	}
+	if steps[0].Description != "explain the architecture of the project" {
+		t.Errorf("step description = %q, want the task input verbatim", steps[0].Description)
 	}
 
-	// Task must be failed, with the failure published.
+	// Degraded plan-quality marker recorded.
+	if q := sp.readPersistedPlanQuality(tsk.ID); !strings.Contains(q, "degraded") {
+		t.Errorf("plan_quality = %q, want a degraded marker", q)
+	}
+
+	// Task must NOT be failed, and no task.failed event may publish.
 	got, err := taskStore.GetByID(tsk.ID)
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}
-	if got.State != task.StateFailed {
-		t.Errorf("task state = %q, want %q", got.State, task.StateFailed)
+	if got.State == task.StateFailed {
+		t.Errorf("task state = %q, want a planning/scheduled state (degrade, not failure)", got.State)
 	}
 	select {
 	case msg := <-failedSub.Channel:
-		var event map[string]any
-		if err := json.Unmarshal(msg.Payload, &event); err != nil {
-			t.Fatalf("unmarshal task.failed payload: %v", err)
-		}
-		if event["task_id"] != tsk.ID {
-			t.Errorf("task.failed task_id = %v, want %s", event["task_id"], tsk.ID)
-		}
-		if reason, _ := event["error"].(string); !strings.Contains(reason, "not a single-artifact task") {
-			t.Errorf("task.failed error = %q, want the honest reason", reason)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timeout waiting for task.failed event")
+		t.Fatalf("unexpected task.failed event after leaf 06 degrade: %s", string(msg.Payload))
+	case <-time.After(200 * time.Millisecond):
 	}
 }
 

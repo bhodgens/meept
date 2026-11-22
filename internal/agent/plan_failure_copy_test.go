@@ -24,7 +24,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -161,28 +160,31 @@ func TestPlanFailureCopyHonestCompilePath(t *testing.T) {
 		Intent:    string(IntentQuickPlan),
 		Mode:      "quick_plan",
 	})
-	if !errors.Is(err, ErrPlannerNoPlanNotArtifact) {
-		t.Fatalf("Plan err = %v, want the empty-plan sentinel (honest failure path)", err)
+	// Leaf 06 (graceful errors): the empty-plan non-artifact path no
+	// longer fails the task — it degrades to ONE direct step and the
+	// task executes. Plan returns nil; the sentinel stays exported for
+	// callers that must distinguish the degraded lane, but the honest
+	// failure delivery is gone by design.
+	if err != nil {
+		t.Fatalf("Plan err = %v, want nil (empty plan degrades to a direct step since leaf 06)", err)
+	}
+
+	steps, stepErr := sp.stepStore.ListByTaskID(tsk.ID)
+	if stepErr != nil {
+		t.Fatalf("list steps: %v", stepErr)
+	}
+	if len(steps) != 1 {
+		t.Fatalf("persisted steps = %d, want exactly 1 direct fallback step", len(steps))
+	}
+	if q := sp.readPersistedPlanQuality(tsk.ID); !strings.Contains(q, "degraded") {
+		t.Errorf("plan_quality = %q, want a degraded marker", q)
 	}
 
 	select {
 	case msg := <-failedSub.Channel:
-		var payload struct {
-			Error string `json:"error"`
-		}
-		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-			t.Fatalf("task.failed decode: %v", err)
-		}
-		lower := strings.ToLower(payload.Error)
-		for _, w := range gateInternalVocab {
-			if strings.Contains(lower, w) {
-				t.Errorf("honest compile failure copy regressed into internal vocab %q: %q", w, payload.Error)
-			}
-		}
-		if payload.Error == "" {
-			t.Error("honest compile failure carries empty error")
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timeout waiting for the honest task.failed")
+		t.Fatalf("unexpected task.failed event after leaf 06 degrade: %s", string(msg.Payload))
+	case <-time.After(200 * time.Millisecond):
+		// No failure event is the new contract: the turn completes
+		// through the direct step instead of failing honestly.
 	}
 }
