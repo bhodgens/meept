@@ -191,6 +191,33 @@ P2-4 -> 05; P2-5 -> 06; P2-6 -> 06; P2-7 -> 08; P2-8 -> 08;
 P2-9 -> 10; P2-10 -> 08+09; P2-11 -> 09. FI items are out of tree scope
 (recorded in the report for separate investigation).
 
+## Reconciliation Note (2026-11-21, vs sibling tree 20261119-usability-remediation)
+
+A sibling tree covering the same domain is mid-execution in this repo
+(branches 01-safety..07-bench; at last check 01-04 IMPL_DONE, 05 in
+flight, 06/07 gated; commits 6c4e17fc..b161d027 + merge in progress in
+the primary checkout). Orchestrator-verified overlap map (grep at
+b161d027):
+
+| Leaf | Verdict | Evidence |
+|------|---------|----------|
+| 01 identity / steer-404 | STILL_NEEDED | chat_service.go:333,351,371 still single-key GetActiveQueue at b161d027 |
+| 02 completion honesty | PARTIALLY SUPERSEDED | sibling 01-safety/06 landed review_evidence_gate.go: errored file tool -> failed terminal, denied write -> 1 retry then failed, "narration never counts as a result". REMAINING: trivial-review (<3 steps) heuristic machine-shape check; verify guard covers narrated-tool-JSON shape at nudge exhaustion |
+| 03 plan visibility | PARTIALLY SUPERSEDED | sibling 06-planning (gated, wave D pending) carries mode badge F13c + approval visibility. REMAINING after their wave D: plan.failed in TUI chat pump (app.go:1983) + GUI chat bubbles; stalled-turn wording |
+| 04 interview questions | STILL_NEEDED | zero "interview" coverage in sibling tree |
+| 05 degraded signals | VERIFY FIRST | sibling 02-routing/01-veto-and-notice landed a notice lane; verify whether it covers heuristic_fallback + planner-degrade notes before dispatch |
+| 06 graceful errors | STILL_NEEDED | no empty-plan-fallback / UserFacingError / quota-unknown coverage found |
+| 07 scaffolding strip | VERIFY FIRST | sibling 04-clutter/01 landed reply-envelope strip (chat lane); RPC/HTTP task-detail boundary strip NOT found (grep StripPromptScaffolding internal/rpc = 0) |
+| 08 gui/tui parity | VERIFY FIRST | sibling 05-navigation + 04-clutter/02 touch TUI/GUI; verbosity filter + truncation unconfirmed |
+| 09 cli affordances | STILL_NEEDED | no /plan subcommands / --session-create / trace surfacing found |
+| 10 plan lifecycle | STILL_NEEDED | RequireApproval still plain-false-default at b161d027 (schema.go:828) |
+
+Rule for the executing orchestrator: before dispatching each leaf, run
+the leaf's verify-or-apply grep against CURRENT main (not b161d027) and
+re-classify per the hierarchical-planning Reconciliation table. Sequence
+AFTER the sibling tree's merge completes; waves must not run against the
+mid-merge primary checkout.
+
 ## Open Questions
 
 - None blocking. FI-1 (classifier starvation on single-runtime rigs)
