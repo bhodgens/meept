@@ -130,7 +130,16 @@ func TestReviewStep_MaxRevisions_WithoutSpec(t *testing.T) {
 	if result.Status != ReviewNeedsInfo {
 		t.Errorf("expected ReviewNeedsInfo when max revisions exceeded, got %s", result.Status)
 	}
-	if !strings.Contains(result.Feedback, "Maximum revision cycles (2) exceeded") {
-		t.Errorf("feedback should mention max cycles, got: %s", result.Feedback)
+	// 06-planning/03: failure copy speaks user language (names the
+	// attempt count and the next action); internal vocabulary
+	// ("revision cycles", "human intervention") is gone.
+	lower := strings.ToLower(result.Feedback)
+	if !strings.Contains(lower, "2") || !strings.Contains(lower, "review") {
+		t.Errorf("feedback should name the attempt count and tell the user to review, got: %s", result.Feedback)
+	}
+	for _, w := range []string{"revision cycle", "human intervention", "ralph"} {
+		if strings.Contains(lower, w) {
+			t.Errorf("feedback leaks internal vocabulary %q: %s", w, result.Feedback)
+		}
 	}
 }
