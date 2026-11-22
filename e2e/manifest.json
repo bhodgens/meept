@@ -336,7 +336,8 @@
       "smoke"
     ],
     "internal/runtime/": [
-      "smoke"
+      "smoke",
+      "seatbelt"
     ],
     "internal/secrets/": [
       "security-fence"
@@ -879,6 +880,12 @@
       "name": "logrotate",
       "dir": "e2e/suites/logrotate",
       "status": "implemented"
+    },
+    {
+      "name": "seatbelt",
+      "dir": "e2e/suites/seatbelt",
+      "status": "implemented",
+      "note": "[runtime.seatbelt] macOS confinement: flag-off posture (all OS), deny_read / allow_write+deny_write hole / process-info+exec rules (darwin-only, skipped on Linux CI), and fail-closed REFUSING wiring on an invalid policy (all OS)."
     },
     {
       "name": "chat-submit",
@@ -2192,6 +2199,15 @@
       "paths": [
         "internal/agent/review_vacuity.go",
         "internal/agent/review_manager.go"
+      ]
+    },
+    {
+      "id": "step-pipeline-06",
+      "suite": "step-pipeline",
+      "diff": "S",
+      "title": "doc-only auto-approve requires an exact matching filename token; code tokens veto it",
+      "paths": [
+        "internal/agent/review.go"
       ]
     },
     {

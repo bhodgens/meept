@@ -5534,6 +5534,31 @@ type RuntimeConfig struct {
 	// Bwrap holds bubblewrap backend settings used when the sandbox
 	// resolver selects the bwrap backend.
 	Bwrap BwrapRuntimeConfig `json:"bwrap" toml:"bwrap"`
+	// Seatbelt holds the macOS confinement policy applied to local-backend
+	// children (deny-read roots, write allow-list, process-info/exec
+	// denies). Enabled defaults false: the legacy posture is network-class
+	// confinement only, byte-identical to the pre-seatbelt behavior.
+	Seatbelt SeatbeltRuntimeConfig `json:"seatbelt" toml:"seatbelt"`
+}
+
+// SeatbeltRuntimeConfig is the [runtime.seatbelt] block. Field-mirrors
+// runtime.SeatbeltConfig (same convention as EnvPolicyConfig above;
+// internal/config does not import internal/runtime). Paths must be
+// absolute; a relative path is refused at wiring time.
+type SeatbeltRuntimeConfig struct {
+	// Enabled activates fs/process confinement in addition to the network
+	// class. False (default) ignores every other field.
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// DenyRead lists absolute path subtrees the child cannot read.
+	DenyRead []string `json:"deny_read" toml:"deny_read"`
+	// AllowWrite, when non-empty, confines writes to these subtrees.
+	AllowWrite []string `json:"allow_write" toml:"allow_write"`
+	// DenyWrite carves write-denied holes inside an allowed root.
+	DenyWrite []string `json:"deny_write" toml:"deny_write"`
+	// BlockProcessInfo denies ps-style process inspection.
+	BlockProcessInfo bool `json:"block_process_info" toml:"block_process_info"`
+	// DenyExec lists binaries the child may not exec (e.g. /usr/bin/sudo).
+	DenyExec []string `json:"deny_exec" toml:"deny_exec"`
 }
 
 // EnvPolicyConfig configures child environment construction. This mirrors the

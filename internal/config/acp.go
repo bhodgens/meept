@@ -15,7 +15,12 @@ type ACPAgentEntry struct {
 	Env         map[string]string `json:"env,omitempty"`
 	Cwd         string            `json:"cwd,omitempty"`
 	DefaultMode string            `json:"default_mode,omitempty"`
-	Enabled     bool              `json:"enabled"`
+	// PermissionMode overrides the global [acp] permission_mode for this
+	// catalog connection. One of "permissive", "deny", "decision", "human".
+	// Empty = inherit the global mode. Configured by the operator in
+	// acp_agents.json5, never by the agent itself.
+	PermissionMode string `json:"permission_mode,omitempty"`
+	Enabled        bool   `json:"enabled"`
 }
 
 // ACPAgentsConfig is the acp_agents.json5 catalog structure.

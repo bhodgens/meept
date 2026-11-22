@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"path"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -8,6 +10,12 @@ import (
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/task"
 )
+
+// codeFileToken matches a filename token with a SOURCE-CODE extension. A step
+// naming one of these is never auto-approved, even when it also names a doc.
+// Doc/config extensions (.md, .txt, .json, .yaml) are intentionally absent:
+// those are the low-risk shapes in AutoApprovePatterns.
+var codeFileToken = regexp.MustCompile(`(?i)\.(go|py|js|jsx|mjs|cjs|ts|tsx|cc|cpp|hpp|rs|java|kt|kts|rb|php|swift|sh|bash|zsh|sql|vue|svelte|dart|lua|zig|ex|exs|erl|hs|scala|clj|groovy|r|pl)$`)
 
 // ReviewStatus represents the outcome of a review.
 type ReviewStatus string
@@ -153,24 +161,63 @@ func (p *ReviewPolicy) SelectReviewer(step *task.TaskStep) string {
 	return "test-reviewer"
 }
 
-// ShouldAutoApprove checks if a step should auto-approve based on its description.
+// ShouldAutoApprove checks if a step is a low-risk, documentation-only change.
+//
+// Tightened by the dev-setup-safety audit (F-02): the old matcher searched the
+// WHOLE description for a pattern substring plus "update"/"fix", so a step
+// like "fix auth.py and update the handler" matched "*.md" only as a literal
+// substring and could auto-approve a code change. The new rule requires an
+// EXACT filename token: a whitespace-delimited word whose path.Base matches
+// the pattern via path.Match. No token, no approval. A code-shaped token
+// (any token with a source-code extension) vetoes the whole step.
 func (p *ReviewPolicy) ShouldAutoApprove(step *task.TaskStep) bool {
-	desc := strings.ToLower(step.Description)
+	if step == nil {
+		return false
+	}
 
-	// Check for documentation-only changes
-	for _, pattern := range p.AutoApprovePatterns {
-		if strings.Contains(desc, pattern) {
-			// Only auto-approve if it looks like a simple doc change
-			if strings.Contains(desc, "update") || strings.Contains(desc, "fix") {
-				// Check if there are code-related keywords
-				if !strings.Contains(desc, "code") && !strings.Contains(desc, "function") &&
-					!strings.Contains(desc, "class") && !strings.Contains(desc, "implement") {
-					return true
-				}
-			}
+	// Keep original case: configured patterns such as "LICENSE" are
+	// case-sensitive. Action-verb and code-extension checks below are
+	// case-insensitive on their own.
+	tokens := strings.FieldsFunc(step.Description, func(r rune) bool {
+		return r == ' ' || r == '	' || r == '\n' || r == ',' || r == ';' || r == '"' || r == '\'' || r == '`'
+	})
+
+	// Require an explicit low-risk action verb as a whole word. "prefix-fix"
+	// must not count as "fix". Absence fails closed.
+	hasAction := false
+	for _, token := range tokens {
+		switch strings.ToLower(token) {
+		case "update", "fix", "updated", "fixed":
+			hasAction = true
+		}
+	}
+	if !hasAction {
+		return false
+	}
+
+	// A file-shaped step needs real successful file evidence before the
+	// caller may take any shortcut (the review evidence gate). Here we
+	// additionally refuse to auto-approve a step whose tokens name source
+	// code, even when one token is a doc file.
+	for _, token := range tokens {
+		if codeFileToken.MatchString(token) {
+			return false
 		}
 	}
 
+	for _, token := range tokens {
+		base := path.Base(token)
+		// A glob written in prose ("use *.md style") is not a filename.
+		// Only literal basenames may match AutoApprovePatterns.
+		if strings.ContainsAny(base, "*?[]\\") {
+			continue
+		}
+		for _, pattern := range p.AutoApprovePatterns {
+			if ok, err := path.Match(pattern, base); err == nil && ok {
+				return true
+			}
+		}
+	}
 	return false
 }
 

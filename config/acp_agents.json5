@@ -15,6 +15,10 @@
 //   env           extra environment variables for the subprocess
 //   cwd           working directory; empty = inherit the session workdir
 //   default_mode  session mode hint (e.g. "read-only"); empty = agent default
+//   permission_mode  per-connection permission posture; one of "permissive",
+//                    "deny", "decision", "human". empty = inherit [acp].
+//                    "permissive" auto-approves every external permission
+//                    request; prefer "human" or "deny" for production.
 //   enabled       per-agent enable; ships false
 //
 // how to enable an agent:

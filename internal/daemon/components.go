@@ -928,6 +928,14 @@ func buildRuntimeConfig(rc config.RuntimeConfig, logger *slog.Logger) runtime.Co
 			ExtraArgs:  rc.Bwrap.ExtraArgs,
 			TmpfsDirs:  rc.Bwrap.TmpfsDirs,
 		},
+		Seatbelt: runtime.SeatbeltConfig{
+			Enabled:          rc.Seatbelt.Enabled,
+			DenyRead:         rc.Seatbelt.DenyRead,
+			AllowWrite:       rc.Seatbelt.AllowWrite,
+			DenyWrite:        rc.Seatbelt.DenyWrite,
+			BlockProcessInfo: rc.Seatbelt.BlockProcessInfo,
+			DenyExec:         rc.Seatbelt.DenyExec,
+		},
 	}
 }
 
@@ -3856,8 +3864,15 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		if mgrErr != nil {
 			logger.Error("Failed to create runtime manager", "error", mgrErr,
 				"hint", "check [runtime] docker configuration; with require_sandbox=true commands will be refused")
+			// Manager errors that belong to the sandbox-required class (a
+			// seatbelt policy armed on a host that cannot enforce it, an
+			// invalid [runtime.seatbelt] block) must fail closed like a
+			// ResolveBackend refusal, not degrade to direct exec. The
+			// startup hint above already promises refusal; this makes the
+			// wiring match it.
 			runtimeWireSandboxLater = &runtimeWire{
 				resolveErr: fmt.Errorf("creating runtime manager: %w", mgrErr),
+				require:    errors.Is(mgrErr, runtime.ErrSandboxRequired),
 				enabled:    true,
 			}
 		} else {
@@ -3971,6 +3986,14 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		return nil, acpErr
 	}
 	c.ACPManager = acpMgr
+	// Dev-setup-safety audit F-02: a permissive posture auto-approves every
+	// external permission request. Warn by name and consequence. Only fires
+	// when ACP is enabled, so the default boot stays byte-identical.
+	if acpMgr != nil && cfg.ACP.PermissionMode == "permissive" {
+		logger.Warn("SECURITY: acp.permission_mode=permissive auto-approves every external permission request; set it to human, deny, or decision",
+			"component", "acp",
+			"permission_mode", cfg.ACP.PermissionMode)
+	}
 	if acpMgr != nil && acpMgr.HasDecisionClient() {
 		// applyACPFromConfig stays log-free (zero-log contract); the single
 		// Info line for the armed lane lives here (acp-permission-decision
