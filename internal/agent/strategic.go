@@ -143,6 +143,17 @@ type PlanRequest struct {
 	// produced no level (DeriveDifficulty never returns 0 for real
 	// signals; 0 here means unclassified) = R7 inert on the async lane.
 	Difficulty int `json:"difficulty,omitempty"`
+
+	// AutoSeal marks a compound plan+implement request (the user asked
+	// for the plan AND its execution in one prompt, detected by
+	// PlanAutoSealFromIntent over the full user input). When set, the
+	// approval gate in requiresApproval is bypassed: the plan is
+	// AUTO-SEALED after compilation and flows straight to scheduling
+	// (StateExecuting + orchestrator.schedule) with an audit trail
+	// (auto_sealed task metadata + the flag on the task.planned event).
+	// Intent-driven ONLY -- no config knob. Plain plan requests never
+	// carry the flag and keep parking at the approval gate.
+	AutoSeal bool `json:"auto_seal,omitempty"`
 }
 
 // plannerStep is the JSON structure expected from the planner LLM output.
@@ -1208,6 +1219,16 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 		return sp.awaitUserApproval(ctx, t, steps, req)
 	}
 
+	// Intent-driven auto-seal audit trail (20261119-usability-remediation
+	// residual 07): the gate was bypassed by the compound plan+implement
+	// intent -- log it, count it, and stamp the task metadata + the
+	// task.planned event below with the auto_sealed flag so the UI can
+	// show "auto-sealed by intent".
+	autoSealed := req.AutoSeal
+	if autoSealed {
+		sp.autoSealPlanAudit(t, req, len(steps))
+	}
+
 	// Persist steps
 	for _, step := range steps {
 		if err := sp.stepStore.Create(step); err != nil {
@@ -1266,6 +1287,7 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 		"total_steps": len(steps),
 		"ready_steps": len(promoted),
 		"mode":        mode,
+		"auto_sealed": autoSealed,
 	})
 
 	// Publish orchestrator.schedule to trigger tactical scheduling
@@ -2330,10 +2352,177 @@ func (sp *StrategicPlanner) ReplanFailedTask(ctx context.Context, taskID, failur
 	return sp.Plan(ctx, req)
 }
 
+// autoSealPlanAudit stamps the audit trail onto the task metadata and logs
+// the auto-seal decision. Called when the approval gate is bypassed by
+// PlanRequest.AutoSeal (20261119-usability-remediation residual 07) so the
+// UI can show "auto-sealed by intent" and the bus event carries the flag.
+func (sp *StrategicPlanner) autoSealPlanAudit(t *task.Task, req PlanRequest, stepCount int) {
+	sp.logger.Info("Plan auto-sealed by compound plan+implement intent",
+		"task_id", req.TaskID,
+		"steps", stepCount,
+	)
+	sp.recordMetric("strategic_planner.auto_seal", 1, nil)
+	t.Metadata = mergeMetadata(t.Metadata, map[string]json.RawMessage{
+		"auto_sealed":      json.RawMessage(`true`),
+		"auto_seal_reason": json.RawMessage(`"compound plan+implement intent"`),
+	})
+}
+
+// PlanAutoSealFromIntent reports whether a user prompt carries the compound
+// plan-then-implement intent: the user asked for a plan AND its execution in
+// one breath ("create the plan and then implement it"), which is explicit
+// authorization to seal the plan after compilation instead of parking it at
+// the approval gate.
+//
+// Detection is deliberately conservative and ASCII-lowercase lexical:
+//
+//  1. optional explicit seal markers ("implement the plan", "execute the
+//     plan", "and implement it", "then implement it", "implement it
+//     immediately") short-circuit to true;
+//  2. otherwise a plan verb (plan/design/outline/map out/break down/draft)
+//     must co-occur with an execute verb (implement/execute/build/create/
+//     code/write/make/apply) joined by an "and"/"then"/comma connector,
+//     plus a plan noun (plan/approach/design/blueprint/roadmap);
+//  3. a negated execute verb ("don't implement", "do not execute") vetoes.
+//
+// The function answers the LANGUAGE question only; callers gate it behind
+// the compound dispatch lane (Intent==compound), so a plain plan prompt can
+// never auto-seal even if it trips the lexical shape. No config knob: the
+// intent IS the knob.
+func PlanAutoSealFromIntent(input string) bool {
+	if input == "" {
+		return false
+	}
+	lower := strings.ToLower(input)
+	if autoSealExplicitMarker.MatchString(lower) {
+		return true
+	}
+	if autoSealNegatedExecute.MatchString(lower) {
+		return false
+	}
+	if !autoSealPlanVerb(lower) || !autoSealExecuteVerb(lower) {
+		return false
+	}
+	if !autoSealCompoundConnector.MatchString(lower) {
+		return false
+	}
+	return autoSealPlanNoun(lower)
+}
+
+// autoSealPlanVerb reports whether lower carries a whole-word plan verb
+// (plan/design/outline/draft) or the multi-word phrases (map out /
+// break down). Extend the sets here, never at call sites.
+func autoSealPlanVerb(lower string) bool {
+	return autoSealWord(lower, "plan") ||
+		autoSealWord(lower, "design") ||
+		autoSealWord(lower, "outline") ||
+		autoSealWord(lower, "draft") ||
+		strings.Contains(lower, "map out") ||
+		strings.Contains(lower, "break down")
+}
+
+// autoSealExecuteVerb reports whether lower carries a whole-word execute
+// verb (implement/execute/build/create/code/write/apply).
+func autoSealExecuteVerb(lower string) bool {
+	return autoSealWord(lower, "implement") ||
+		autoSealWord(lower, "execute") ||
+		autoSealWord(lower, "build") ||
+		autoSealWord(lower, "create") ||
+		autoSealWord(lower, "code") ||
+		autoSealWord(lower, "write") ||
+		autoSealWord(lower, "apply")
+}
+
+// autoSealPlanNoun reports whether lower carries a whole-word plan noun
+// (plan/approach/design/blueprint/roadmap) -- the thing being sealed.
+func autoSealPlanNoun(lower string) bool {
+	return autoSealWord(lower, "plan") ||
+		autoSealWord(lower, "approach") ||
+		autoSealWord(lower, "design") ||
+		autoSealWord(lower, "blueprint") ||
+		autoSealWord(lower, "roadmap")
+}
+
+// autoSealWord reports whether word appears in lower as a whole word
+// (ASCII word-boundary match). lower MUST already be strings.ToLower'd.
+func autoSealWord(lower, word string) bool {
+	searchFrom := 0
+	for {
+		idx := strings.Index(lower[searchFrom:], word)
+		if idx < 0 {
+			return false
+		}
+		start := searchFrom + idx
+		end := start + len(word)
+		if autoSealWordBoundary(lower, start, end) {
+			return true
+		}
+		searchFrom = start + 1
+	}
+}
+
+// autoSealWordBoundary reports whether lower[start:end] sits on ASCII word
+// boundaries (start at 0 or after a non-letter/digit; end at len or before
+// a non-letter/digit).
+func autoSealWordBoundary(lower string, start, end int) bool {
+	if start > 0 {
+		if c := lower[start-1]; autoSealIsWordChar(c) {
+			return false
+		}
+	}
+	if end < len(lower) {
+		if c := lower[end]; autoSealIsWordChar(c) {
+			return false
+		}
+	}
+	return true
+}
+
+// autoSealIsWordChar is true for [a-z0-9'] -- the apostrophe counts as a
+// word char so the negation scan ("don't") stays one token.
+func autoSealIsWordChar(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '\''
+}
+
+// autoSealExplicitMarker matches prompts that name the plan itself as the
+// execution target ("implement the plan", "execute the plan", "and
+// implement it", "then implement it", "implement it immediately"). These
+// are unambiguous seal commands.
+var autoSealExplicitMarker = regexp.MustCompile(
+	`(?:implement|execute|carry out|build) the (?:plan|roadmap|blueprint)|` +
+		`(?:and|then|,) (?:immediately )?implement it|` +
+		`implement it (?:immediately|right away|without waiting)`,
+)
+
+// autoSealNegatedExecute matches a negated execute verb ("don't implement",
+// "do not execute", "no need to build") -- the user explicitly WITHHELD the
+// execution half, so the plan must still park.
+var autoSealNegatedExecute = regexp.MustCompile(
+	`(don't|do not|not to|no need to|never) (?:implement|execute|build|create|code|write|make|apply)`,
+)
+
+// autoSealCompoundConnector matches the conjunction that joins the plan half
+// to the execute half (" and ", " then ", a comma, " plus ", "after that").
+var autoSealCompoundConnector = regexp.MustCompile(
+	` (?:and|then|plus|after that) |,\s|,\s*$|\bplus\b`,
+)
+
 // requiresApproval returns true when the plan must be paused for user sign-off
 // before execution. Triggers on either an un-approved completed interview OR a
 // plan whose step count exceeds the configured complexity threshold.
 func (sp *StrategicPlanner) requiresApproval(req PlanRequest, steps []*task.TaskStep) bool {
+	// Intent-driven auto-seal (20261119-usability-remediation residual 07):
+	// a compound plan+implement request ("create the plan and then
+	// implement it") carries explicit user authorization to proceed -- the
+	// user already approved the work by asking for it. The gate is
+	// bypassed and the plan auto-seals straight to scheduling. The flag is
+	// wired ONLY on the compound lane (handler.publishPlanRequest reads it
+	// under Intent==compound via PlanAutoSealFromIntent), so plain plan
+	// requests never reach this branch and keep parking below. A sealed
+	// plan still runs evidence review + the full output-filter chain.
+	if req.AutoSeal {
+		return false
+	}
 	// Quickplan executes to completion with no approval pause
 	// (quickplan-mode leaf 02 / master Contract 2). An interview-approved
 	// planning context still blocks when the user has not approved.
