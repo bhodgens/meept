@@ -203,6 +203,10 @@ func (s *SQLiteStore) migrate() error {
 	s.migrationAddColumn("ALTER TABLE session_messages ADD COLUMN name TEXT DEFAULT ''", "name")
 	s.migrationAddColumn("ALTER TABLE session_messages ADD COLUMN tool_call_id TEXT DEFAULT ''", "tool_call_id")
 	s.migrationAddColumn("ALTER TABLE session_messages ADD COLUMN agent_id TEXT DEFAULT ''", "agent_id")
+	// Leaf 04 (interactive-usability): marker-key side channel for special
+	// message shapes (planner interview questions). Nullable JSON object;
+	// legacy rows carry NULL.
+	s.migrationAddColumn("ALTER TABLE session_messages ADD COLUMN metadata TEXT", "metadata")
 
 	// Add parts column for multimodal content (JSON array of ContentPart)
 	s.migrationAddColumn("ALTER TABLE session_messages ADD COLUMN parts TEXT", "parts")
@@ -1081,8 +1085,8 @@ func (s *SQLiteStore) SaveMessages(sessionID string, messages []Message) error {
 	}
 
 	stmt, err := tx.Prepare(`
-		INSERT INTO session_messages (session_id, role, content, timestamp, parent_id, entry_type, branch_id, model, agent_id, name, tool_call_id, parts)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		INSERT INTO session_messages (session_id, role, content, timestamp, parent_id, entry_type, branch_id, model, agent_id, name, tool_call_id, parts, metadata)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		s.mu.Unlock()
 		return fmt.Errorf("failed to prepare statement: %w", err)
@@ -1129,7 +1133,7 @@ func (s *SQLiteStore) SaveMessages(sessionID string, messages []Message) error {
 		}
 
 		_, err := stmt.Exec(sessionID, msg.Role, searchContent, msg.Timestamp.Format(time.RFC3339),
-			msg.ParentID, entryType, branchID, msg.Model, msg.AgentID, msg.Name, msg.ToolCallID, partsJSON) //nolint:mutexio // mutex serializes sqlite connection access
+			msg.ParentID, entryType, branchID, msg.Model, msg.AgentID, msg.Name, msg.ToolCallID, partsJSON, metadataJSON(msg)) //nolint:mutexio // mutex serializes sqlite connection access
 		if err != nil {
 			s.mu.Unlock()
 			return fmt.Errorf("failed to insert message: %w", err)
@@ -1230,8 +1234,8 @@ func (s *SQLiteStore) SaveMessagesWithToolCalls(sessionID string, messages []Mes
 	}
 
 	msgStmt, err := tx.Prepare(`
-		INSERT INTO session_messages (session_id, role, content, timestamp, parent_id, entry_type, branch_id, model, agent_id, name, tool_call_id, parts)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		INSERT INTO session_messages (session_id, role, content, timestamp, parent_id, entry_type, branch_id, model, agent_id, name, tool_call_id, parts, metadata)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		s.mu.Unlock()
 		return fmt.Errorf("failed to prepare statement: %w", err)
@@ -1277,7 +1281,7 @@ func (s *SQLiteStore) SaveMessagesWithToolCalls(sessionID string, messages []Mes
 		}
 
 		res, err := msgStmt.Exec(sessionID, msg.Role, searchContent, msg.Timestamp.Format(time.RFC3339),
-			msg.ParentID, entryType, branchID, msg.Model, msg.AgentID, msg.Name, msg.ToolCallID, partsJSON) //nolint:mutexio // mutex serializes sqlite connection access
+			msg.ParentID, entryType, branchID, msg.Model, msg.AgentID, msg.Name, msg.ToolCallID, partsJSON, metadataJSON(msg)) //nolint:mutexio // mutex serializes sqlite connection access
 		if err != nil {
 			s.mu.Unlock()
 			return fmt.Errorf("failed to insert message: %w", err)
@@ -1306,13 +1310,40 @@ func (s *SQLiteStore) SaveMessagesWithToolCalls(sessionID string, messages []Mes
 	return nil
 }
 
+// metadataJSON serializes a message's marker-key side channel for the
+// session_messages metadata column. nil/empty map -> SQL NULL (legacy
+// rows and legacy writes stay byte-identical).
+func metadataJSON(msg Message) any {
+	if len(msg.Metadata) == 0 {
+		return nil
+	}
+	b, err := json.Marshal(msg.Metadata)
+	if err != nil {
+		return nil
+	}
+	return string(b)
+}
+
+// scanMetadataJSON decodes the metadata column into the Message side
+// channel. NULL and empty columns leave it nil.
+func scanMetadataJSON(raw sql.NullString) map[string]string {
+	if !raw.Valid || raw.String == "" {
+		return nil
+	}
+	var m map[string]string
+	if err := json.Unmarshal([]byte(raw.String), &m); err != nil {
+		return nil
+	}
+	return m
+}
+
 // GetMessages retrieves messages for a session with pagination, ordered by id.
 func (s *SQLiteStore) GetMessages(sessionID string, offset, limit int) ([]Message, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	rows, err := s.db.Query(`
-		SELECT id, session_id, role, content, timestamp, parent_id, entry_type, branch_id, model, agent_id, name, tool_call_id, parts
+		SELECT id, session_id, role, content, timestamp, parent_id, entry_type, branch_id, model, agent_id, name, tool_call_id, parts, metadata
 		FROM session_messages
 		WHERE session_id = ?
 		ORDER BY id
@@ -1327,10 +1358,11 @@ func (s *SQLiteStore) GetMessages(sessionID string, offset, limit int) ([]Messag
 		var msg Message
 		var ts string
 		var parentID sql.NullInt64
-		var entryType, branchID, model, agentID, name, toolCallID, partsJSON sql.NullString
-		if err := rows.Scan(&msg.ID, &msg.SessionID, &msg.Role, &msg.Content, &ts, &parentID, &entryType, &branchID, &model, &agentID, &name, &toolCallID, &partsJSON); err != nil {
+		var entryType, branchID, model, agentID, name, toolCallID, partsJSON, metadataCol sql.NullString
+		if err := rows.Scan(&msg.ID, &msg.SessionID, &msg.Role, &msg.Content, &ts, &parentID, &entryType, &branchID, &model, &agentID, &name, &toolCallID, &partsJSON, &metadataCol); err != nil {
 			return nil, fmt.Errorf("failed to scan message: %w", err)
 		}
+		msg.Metadata = scanMetadataJSON(metadataCol)
 		if t, err := time.Parse(time.RFC3339, ts); err == nil {
 			msg.Timestamp = t
 		}

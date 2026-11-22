@@ -5037,6 +5037,19 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	if c.ChatHandler != nil && c.SessionStore != nil {
 		c.ChatHandler.SetSessionStore(c.SessionStore)
 		c.ChatHandler.SetMessageSaver(c.SessionStore)
+		// Leaf 04 (interactive-usability): interview questions persist as
+		// assistant session messages through the SAME store lane, and the
+		// chat handler routes the next user message in the conversation
+		// into the planner's answer seam. The liveness touch keeps the
+		// tracked turn alive for as long as the interview waits.
+		if c.Orchestrator != nil {
+			if sp := c.Orchestrator.Strategic(); sp != nil {
+				sp.SetInterviewMessageSink(func(sessionID string, msg session.Message) error {
+					return c.SessionStore.SaveMessages(sessionID, []session.Message{msg})
+				})
+				c.ChatHandler.SetPlannerInterview(sp)
+			}
+		}
 	}
 
 	// Turn-start working-directory binding (fresh-rig daemon11, 2026-09-13):

@@ -148,6 +148,12 @@ type ChatHandler struct {
 	// messageSaver persists chat messages to the session store after each
 	// exchange. Wired by the daemon via SetMessageSaver.
 	messageSaver SessionMessageSaver
+	// plannerInterview (interactive-usability leaf 04): the strategic
+	// planner's answer seam. When an interview waits for this
+	// conversation, the next chat message is routed to it instead of
+	// normal dispatch. Wired by the daemon via SetPlannerInterview; nil
+	// keeps the pre-leaf behavior byte-identical.
+	plannerInterview *StrategicPlanner
 
 	// skillCatalogDedup tracks the last materialized skill-catalog digest per
 	// session (dsh 04-tool-surface/03-skill-catalog T3, wiring remediation
@@ -423,7 +429,15 @@ func (h *ChatHandler) Start(ctx context.Context) error {
 	// Subscribe to collaboration result events to push results back to chat sessions
 	collabResultSub := h.bus.Subscribe(SourceChatHandler, TopicCollabResult)
 
-	h.wg.Add(10)
+	// Leaf 04 (interactive-usability): the planner's interview pause.
+	// Consumed here so the SUBMITTED turn terminalizes with the questions
+	// text (status completed, handler_case interview_pause) instead of
+	// waiting for the watchdog to reap it — a one-shot CLI gets the
+	// questions as its turn result and exits 0. No new bus topic: this is
+	// the planner's existing task.interview event.
+	interviewSub := h.bus.Subscribe(SourceChatHandler, "task.interview")
+
+	h.wg.Add(11)
 
 	// Chat request handler
 	go func() {
@@ -492,6 +506,24 @@ func (h *ChatHandler) Start(ctx context.Context) error {
 					return
 				}
 				h.handleTaskProgressLiveness(msg)
+			}
+		}
+	}()
+
+	// Leaf 04 interview handler - terminalize the submitted turn with the
+	// questions so a one-shot CLI gets the questions as its result.
+	go func() {
+		defer h.wg.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				h.bus.Unsubscribe(interviewSub)
+				return
+			case msg, ok := <-interviewSub.Channel:
+				if !ok {
+					return
+				}
+				h.handleTaskInterview(msg)
 			}
 		}
 	}()
@@ -912,6 +944,49 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 	}
 	if conversationID == "" {
 		conversationID = generateConversationID()
+	}
+
+	// Leaf 04 (interactive-usability, master C-3) answer path: when a
+	// planner interview waits for THIS conversation, the next user message
+	// IS the answer — deliver it to the parked planner and terminalize the
+	// turn with the resume ack, before any classification/dispatch. The
+	// waiter is consumed atomically (duplicate answers refused), and a
+	// conversation with no waiting interview falls through to the normal
+	// path byte-identically.
+	if h.plannerInterview != nil {
+		answerScope := req.SessionID
+		if answerScope == "" {
+			answerScope = conversationID
+		}
+		if ack, delivered := h.plannerInterview.DeliverInterviewAnswer(answerScope, req.Message); delivered {
+			handlerCase := "interview_answer"
+			h.logger.Info("Interview answer delivered to waiting planner",
+				"conversation", conversationID,
+				"answer_length", len(req.Message),
+			)
+			response := ChatResponse{
+				Reply:          ack,
+				ConversationID: conversationID,
+				SessionID:      persistSessionID(req.SessionID, conversationID),
+			}
+			// Mirror the exchange into the session conversation so the
+			// history shows the user's answer beside the questions.
+			h.persistExchange(response.SessionID, req.Message, req.Parts, ack, "orchestrator")
+			h.sendResponse(msg.ID, response)
+			h.publishTurnTerminal(TurnTerminalEvent{
+				ConversationID: conversationID,
+				SessionID:      req.SessionID,
+				TurnID:         turnID,
+				HandlerCase:    handlerCase,
+				Status:         "completed",
+				Reply:          ack,
+				DurationMS:     time.Since(start).Milliseconds(),
+			})
+			if req.TurnID != "" {
+				h.completeTurn(req.TurnID)
+			}
+			return
+		}
 	}
 
 	// Async-turn tracking (leaf 03): register the submit-time turn under
@@ -3545,6 +3620,25 @@ func (h *ChatHandler) SetMessageSaver(s SessionMessageSaver) {
 	if s != nil {
 		h.messageSaver = s
 	}
+}
+
+// SetPlannerInterview wires the strategic planner's answer seam
+// (interactive-usability leaf 04): when an interview waits for a
+// conversation, the next chat message in it is delivered to the planner
+// instead of normal dispatch. Nil-guarded per the setter convention.
+func (h *ChatHandler) SetPlannerInterview(sp *StrategicPlanner) {
+	if sp != nil {
+		h.plannerInterview = sp
+	}
+}
+
+// persistSessionID resolves the persistence/session id the same way the
+// request tail does: the client's session id, else the conversation id.
+func persistSessionID(sessionID, conversationID string) string {
+	if sessionID != "" {
+		return sessionID
+	}
+	return conversationID
 }
 
 // ClearConversation removes the in-memory conversation cache for a session.

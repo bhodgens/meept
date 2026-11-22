@@ -198,6 +198,18 @@ type StrategicPlanner struct {
 	pairManager *PairManager
 	routing     *RoutingTable
 
+	// mu serializes the interview-seam fields below (leaf 04): the sink
+	// setter runs at daemon wiring time while DeliverInterviewAnswer and
+	// the pause-point park run on orchestrator goroutines.
+	mu sync.Mutex
+	// interviewMessageSink persists interview questions as a session
+	// message (leaf 04). Wired via SetInterviewMessageSink; nil =
+	// persistence disabled (pause still parks).
+	interviewMessageSink InterviewMessageSink
+	// interviewWaiters parks unresolved interviews by task id, keyed for
+	// the handler's conversation-scoped answer lookup. nil = none.
+	interviewWaiters map[string]*interviewWaiter
+
 	maxPlanSteps          int
 	plannerTimeout        time.Duration
 	approvalStepThreshold int
@@ -1354,6 +1366,15 @@ func (sp *StrategicPlanner) awaitInterviewAnswers(ctx context.Context, t *task.T
 		"task_id", req.TaskID,
 		"question_count", len(pctx.InterviewQuestions),
 	)
+
+	// Leaf 04 (interactive-usability, master C-3): surface the pause on
+	// the chat surfaces — persist the questions as an assistant session
+	// message (metadata planner_interview = task_id), stamp the task's
+	// waiting state, and park the answer waiter that routes the next
+	// user message in this conversation back into Plan. The internal
+	// state machine above is unchanged: the task still waits in
+	// StatePlanning until answers resume it.
+	sp.deliverPlannerInterview(t, req, pctx)
 	return nil
 }
 
