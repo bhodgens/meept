@@ -78,11 +78,13 @@ func TestPlanView_Render_Empty(t *testing.T) {
 }
 
 // TestPlanView_SetPhases verifies SetPhases replaces the phase data and is
-// reflected in subsequent Render calls.
+// reflected in subsequent Render calls. A titled, phase-less plan renders its
+// document-proposal shape (title, no phase rows); SetPhases replaces that with
+// the rendered phase rows.
 func TestPlanView_SetPhases(t *testing.T) {
 	v := NewPlanView(PlanViewConfig{Title: "t"})
-	if out := v.Render(); !strings.Contains(out, "no phases") {
-		t.Fatalf("expected empty initial state, got: %s", out)
+	if out := v.Render(); strings.Contains(out, "alpha") || !strings.Contains(out, "t") {
+		t.Fatalf("expected document-proposal title with no phase rows initially, got: %s", out)
 	}
 
 	v.SetPhases([]PhaseRow{{Name: "alpha", State: "pending", TotalSteps: 1}})
