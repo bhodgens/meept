@@ -337,9 +337,10 @@ class ChatNotifier extends StateNotifier<ChatState> {
   /// Live verbosity update from the UI (the verbose toggle in the home
   /// screen / status bar, wired through `ref.listen(verbosityProvider)` in
   /// [chatProvider]). Called on the EXISTING notifier so progress tier
-  /// filtering (the `progress.tier > _verbosityLevel` guards at :612 and
-  /// :1239) updates immediately — no session swap / notifier recreation
-  /// required (TUI parity: app.go:1109-1113).
+  /// filtering (the `progress.tier > _verbosityLevel` guards in the stream
+  /// handler and `debugHandleProgressFrame`) updates immediately — no
+  /// session swap / notifier recreation required (TUI parity:
+  /// `App.renderStatusBar` / `app.verbosity`).
   void setVerbosityLevel(int level) {
     _verbosityLevel = level;
     _verbosityLiveSet = true;
