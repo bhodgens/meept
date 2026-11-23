@@ -197,6 +197,10 @@ class _MetricsContent extends StatelessWidget {
           _buildModelsSection(),
           const SizedBox(height: 16),
           _buildAgentsSection(),
+          const SizedBox(height: 16),
+          _buildGradesSection('grades by model', state.reviewGrades['model']),
+          const SizedBox(height: 16),
+          _buildGradesSection('grades by judge', state.reviewGrades['judge']),
         ],
       ),
     );
@@ -385,6 +389,36 @@ class _MetricsContent extends StatelessWidget {
                   a.state.isEmpty ? '-' : a.state,
                   _formatCount(a.tasksCompleted),
                   _formatCount(a.tasksFailed),
+                ],
+            ],
+          ),
+      ],
+    );
+  }
+
+  /// One review-verdict grades table. [grades] is null before the first
+  /// fetch lands ('fetching...' note); an entry with zero rows renders the
+  /// 'no reviews recorded' note (the endpoint degrades errors to empty).
+  Widget _buildGradesSection(String title, ReviewGrades? grades) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionLabel(title),
+        if (grades == null)
+          const _SectionNote('fetching grades...')
+        else if (grades.rows.isEmpty)
+          const _SectionNote('no reviews recorded in this window')
+        else
+          _UsageTable(
+            headers: const ['group', 'verdicts', 'defects', 'pass rate'],
+            rows: [
+              // Preserve daemon order - do not re-sort.
+              for (final r in grades.rows)
+                [
+                  r.displayName,
+                  _formatCount(r.verdicts),
+                  _formatCount(r.defects),
+                  _formatPassRate(r.passRate),
                 ],
             ],
           ),
@@ -638,4 +672,11 @@ String _formatCount(int value) {
 String _formatLatency(double ms) {
   if (ms <= 0) return '-';
   return '${ms.toStringAsFixed(1)}ms';
+}
+
+/// Review pass rate as a lowercase percentage; '-' when no verdicts fed
+/// into the rate (matches the latency '-' convention).
+String _formatPassRate(double rate) {
+  if (rate <= 0) return '-';
+  return '${(rate * 100).toStringAsFixed(0)}%';
 }

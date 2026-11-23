@@ -1068,6 +1068,87 @@ class MetricsTotals {
   }
 }
 
+// ===== Review Verdict Grades (GET /api/v1/metrics/reviews) =====
+//
+// C6 (model-rating-metrics-plan): the reviews endpoint returns
+// {window, group_by, rows: [{group, verdicts, defects, pass_rate, label}],
+// workflow_excluded}. Rows degrade to an empty list on any store error,
+// so the panel's grades section can always render (possibly empty).
+
+/// One row of the `rows` array: verdict counts for one group (model,
+/// judge, category, or rubric depending on the request's `group_by`).
+class ReviewGradeRow {
+  final String group;
+  final int verdicts;
+  final int defects;
+  final double passRate;
+
+  /// Human-readable group display name ('' when the daemon sends none).
+  final String label;
+
+  const ReviewGradeRow({
+    required this.group,
+    this.verdicts = 0,
+    this.defects = 0,
+    this.passRate = 0,
+    this.label = '',
+  });
+
+  factory ReviewGradeRow.fromJson(Map<String, dynamic> json) => ReviewGradeRow(
+    group: _metricStringOrEmpty(json['group']),
+    verdicts: _metricIntOrZero(json['verdicts']),
+    defects: _metricIntOrZero(json['defects']),
+    passRate: _metricDoubleOrZero(json['pass_rate']),
+    label: _metricStringOrEmpty(json['label']),
+  );
+
+  /// Parse the `rows` array. Returns null when [raw] is absent or not a
+  /// list (degraded payload) so the panel can show a "not reported" note;
+  /// returns an empty list when the key is present but empty. Rows with
+  /// no usable group are skipped so one malformed entry cannot blank the
+  /// table.
+  static List<ReviewGradeRow>? parseList(Object? raw) {
+    if (raw is! List) return null;
+    final out = <ReviewGradeRow>[];
+    for (final item in raw) {
+      final map = _metricStringMap(item);
+      if (map == null) continue;
+      final row = ReviewGradeRow.fromJson(map);
+      if (row.group.isEmpty) continue;
+      out.add(row);
+    }
+    return out;
+  }
+
+  /// Display name: the daemon-supplied label when present, else the raw
+  /// group key (the CLI/menubar use the same fallback).
+  String get displayName => label.isNotEmpty ? label : group;
+}
+
+/// Decoded GET /api/v1/metrics/reviews response. The window/groupBy echo
+/// and workflowExcluded count ride along so a future window switcher can
+/// reuse the same payload.
+class ReviewGrades {
+  final String window;
+  final String groupBy;
+  final List<ReviewGradeRow> rows;
+  final int workflowExcluded;
+
+  const ReviewGrades({
+    required this.window,
+    required this.groupBy,
+    this.rows = const [],
+    this.workflowExcluded = 0,
+  });
+
+  factory ReviewGrades.fromJson(Map<String, dynamic> json) => ReviewGrades(
+    window: _metricStringOrEmpty(json['window']),
+    groupBy: _metricStringOrEmpty(json['group_by']),
+    rows: ReviewGradeRow.parseList(json['rows']) ?? const [],
+    workflowExcluded: _metricIntOrZero(json['workflow_excluded']),
+  );
+}
+
 // ===== Plan Models =====
 
 @freezed

@@ -1055,6 +1055,23 @@ class SdkApiClient {
     return raw;
   }
 
+  /// GET /api/v1/metrics/reviews — per-group review-verdict grades.
+  ///
+  /// [window] is one of `24h` | `7d` | `30d` | `all`; [groupBy] one of
+  /// `model` | `judge` | `category` | `rubric`. The daemon degrades store
+  /// errors to a 200 with empty rows, so this never intentionally throws
+  /// on the "no data" path.
+  Future<Map<String, dynamic>> getReviewMetrics({
+    String window = '30d',
+    String groupBy = 'model',
+  }) async {
+    final raw = await _get(
+      '/api/v1/metrics/reviews',
+      query: {'window': window, 'group_by': groupBy},
+    );
+    return raw;
+  }
+
   // ===== Memory =====
 
   Future<List<sdk.MemoryResult>> queryMemory({

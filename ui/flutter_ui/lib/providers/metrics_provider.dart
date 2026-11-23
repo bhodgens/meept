@@ -25,6 +25,12 @@ class MetricsState {
   /// 'updated <time>' stamp. Null until the first successful fetch.
   final DateTime? receivedAt;
 
+  /// Review-verdict grades from GET /api/v1/metrics/reviews, keyed by
+  /// group_by (the panel renders a table for `model` and one for `judge`).
+  /// Null until the first fetch lands; an entry may hold null rows absent
+  /// from a degraded payload.
+  final Map<String, ReviewGrades?> reviewGrades;
+
   const MetricsState({
     this.current,
     this.isLoading = false,
@@ -33,6 +39,7 @@ class MetricsState {
     this.agentUsage,
     this.totals,
     this.receivedAt,
+    this.reviewGrades = const {},
   });
 
   MetricsState copyWith({
@@ -42,6 +49,7 @@ class MetricsState {
     Object? modelUsage = _unset,
     Object? agentUsage = _unset,
     Object? totals = _unset,
+    Object? reviewGrades = _unset,
     DateTime? receivedAt,
   }) {
     return MetricsState(
@@ -59,6 +67,11 @@ class MetricsState {
       totals: identical(totals, _unset)
           ? this.totals
           : (totals is MetricsTotals ? totals : null),
+      reviewGrades: identical(reviewGrades, _unset)
+          ? this.reviewGrades
+          : (reviewGrades is Map<String, ReviewGrades?>
+                ? reviewGrades
+                : const {}),
       receivedAt: receivedAt ?? this.receivedAt,
     );
   }
@@ -92,6 +105,8 @@ class MetricsNotifier extends StateNotifier<MetricsState> {
   void _init() {
     // Initial fetch from HTTP
     _fetchMetrics();
+    unawaited(fetchReviewGrades(window: '30d', groupBy: 'model'));
+    unawaited(fetchReviewGrades(window: '30d', groupBy: 'judge'));
 
     // Subscribe to WebSocket metrics updates
     if (websocket.isConnected) {
@@ -129,6 +144,10 @@ class MetricsNotifier extends StateNotifier<MetricsState> {
       receivedAt: DateTime.now(),
       isLoading: false,
       error: null,
+      // Preserve already-fetched review grades: the live payload does not
+      // carry them (separate endpoint), so a fresh state must not reset
+      // the grades sections back to 'fetching...'.
+      reviewGrades: state.reviewGrades,
     );
   }
 
@@ -177,6 +196,41 @@ class MetricsNotifier extends StateNotifier<MetricsState> {
   Future<void> refresh() async {
     state = state.copyWith(isLoading: true);
     await _fetchMetrics();
+    await fetchReviewGrades(window: '30d', groupBy: 'model');
+    await fetchReviewGrades(window: '30d', groupBy: 'judge');
+  }
+
+  /// Fetch review-verdict grades for one group_by and merge the decoded
+  /// payload into [MetricsState.reviewGrades] under that key. Errors
+  /// degrade to an empty-rows entry so the grades section always renders;
+  /// they never fail the live-metrics refresh.
+  Future<void> fetchReviewGrades({
+    String window = '30d',
+    required String groupBy,
+  }) async {
+    try {
+      _checkMounted();
+      final data = await sdkClient.getReviewMetrics(
+        window: window,
+        groupBy: groupBy,
+      );
+      if (_disposed) return;
+      final decoded = ReviewGrades.fromJson(Map<String, dynamic>.from(data));
+      if (_disposed) return;
+      state = state.copyWith(
+        reviewGrades: {...state.reviewGrades, groupBy: decoded},
+      );
+    } catch (e) {
+      if (_disposed) return;
+      // Degraded: an empty-rows payload under the key keeps the panel's
+      // grades section present (a lowercase note) instead of throwing.
+      state = state.copyWith(
+        reviewGrades: {
+          ...state.reviewGrades,
+          groupBy: ReviewGrades(window: window, groupBy: groupBy),
+        },
+      );
+    }
   }
 
   @override

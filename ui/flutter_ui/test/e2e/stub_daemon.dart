@@ -407,6 +407,61 @@ class StubDaemon {
         // handleGetClientConfig: {"content": <json5 text>}
         return _writeJson(req, 200, {'content': ''});
       }
+      if (req.method == 'GET' && path == '/api/v1/metrics/live') {
+        // handleLiveMetrics shape: the base snapshot keys the Flutter
+        // MetricsSnapshot model parses (requests_per_sec is a double).
+        return _writeJson(req, 200, {
+          'timestamp': '2024-01-01T10:00:00Z',
+          'active_agents': 1,
+          'requests_per_sec': 1.0,
+          'queue_depth': 0,
+          'total_jobs': 1,
+          'running_jobs': 0,
+          'pending_jobs': 0,
+        });
+      }
+      if (req.method == 'GET' && path == '/api/v1/metrics/reviews') {
+        // handleReviewsMetrics shape (internal/comm/http/reviews_endpoint.go,
+        // contract C5): {"window", "group_by", "rows": [{group, verdicts,
+        // defects, pass_rate, label}], "workflow_excluded"}. The query is
+        // echoed; rows are frozen wire-shape fixtures so the Flutter grades
+        // section renders from daemon-shaped data.
+        final query = req.uri.queryParameters;
+        final groupBy = query['group_by'] ?? 'model';
+        final rows = switch (groupBy) {
+          'judge' => [
+            {
+              'group': 'code-reviewer',
+              'verdicts': 5,
+              'defects': 2,
+              'pass_rate': 0.6,
+              'label': 'code reviewer',
+            },
+          ],
+          _ => [
+            {
+              'group': 'provider/glm-x',
+              'verdicts': 4,
+              'defects': 2,
+              'pass_rate': 0.5,
+              'label': 'GLM X',
+            },
+            {
+              'group': 'local/llama',
+              'verdicts': 1,
+              'defects': 0,
+              'pass_rate': 1.0,
+              'label': '',
+            },
+          ],
+        };
+        return _writeJson(req, 200, {
+          'window': query['window'] ?? '30d',
+          'group_by': groupBy,
+          'rows': rows,
+          'workflow_excluded': 2,
+        });
+      }
       if (req.method == 'GET' && path == '/api/v1/status') {
         return _writeJson(req, 200, {'status': 'ok'});
       }
