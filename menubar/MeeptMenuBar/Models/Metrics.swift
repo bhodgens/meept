@@ -22,3 +22,20 @@ struct MetricPoint: Codable, Identifiable {
 
     var id: String { "\(name)-\(timestamp)" }
 }
+
+// MARK: - model x category review breakdown (GET /api/v1/metrics/reviews?group_by=model_category)
+
+/// One row of the `breakdown` array. JSON keys are contract — decode verbatim.
+struct ReviewModelCategoryRow: Codable, Identifiable {
+    let model: String
+    let category: String
+    let count: Int
+
+    var id: String { "\(model)-\(category)" }
+}
+
+/// Minimal decode envelope for the model_category group_by mode; the
+/// `breakdown` array is always present in that mode.
+struct ReviewModelCategoryResponse: Codable {
+    let breakdown: [ReviewModelCategoryRow]
+}

@@ -55,6 +55,30 @@ class DashboardService {
         return result["points"] ?? []
     }
 
+    /// Fetches the model x category review breakdown. Best-effort by contract:
+    /// callers keep previous data on failure and never blank the view.
+    func getReviewModelCategoryBreakdown(window: String) async throws -> [ReviewModelCategoryRow] {
+        var components = URLComponents(
+            url: baseURL.appendingPathComponent("/api/v1/metrics/reviews"),
+            resolvingAgainstBaseURL: true
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "window", value: window),
+            URLQueryItem(name: "group_by", value: "model_category")
+        ]
+        guard let url = components?.url else {
+            throw APIError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        if let token = apiToken, !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        let data = try await performData(request: request)
+        let result = try JSONDecoder().decode(ReviewModelCategoryResponse.self, from: data)
+        return result.breakdown
+    }
+
     // MARK: - Backward-compatible completion handler wrappers
 
     func getLiveMetrics(completion: @escaping (Result<LiveMetrics, Error>) -> Void) {
