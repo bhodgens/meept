@@ -20,6 +20,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -159,5 +160,47 @@ func TestDailyDialCapUnlimitedIsByteIdentical(t *testing.T) {
 	}
 	if _, err := os.Stat(counterPath); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("counter file created with cap 0 (want inert): stat err = %v", err)
+	}
+}
+
+// TestDailyDialCapConcurrentTryIncAdmitsExactlyOne pins the counter's
+// cross-call atomicity: 8 goroutines racing at cap=1 admit exactly ONE.
+// A read-check-write split around an in-process mutex fails this test:
+// multiple callers can read the same pre-increment count and all be
+// admitted. The OS file lock must make the whole sequence atomic.
+func TestDailyDialCapConcurrentTryIncAdmitsExactlyOne(t *testing.T) {
+	counterPath := filepath.Join(t.TempDir(), "voice", "daily_counters.json")
+	counter := voice.NewDailyCounter(counterPath)
+
+	const n = 8
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	admitted := 0
+	errs := 0
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, ok, err := counter.TryInc("2026-11-22", "voice.dial", 1)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				errs++
+			}
+			if ok {
+				admitted++
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	if errs != 0 {
+		t.Errorf("concurrent TryInc errors = %d, want 0", errs)
+	}
+	if admitted != 1 {
+		t.Errorf("concurrent TryInc admissions = %d, want exactly 1", admitted)
 	}
 }

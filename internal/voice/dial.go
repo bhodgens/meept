@@ -153,45 +153,52 @@ func writeDailyCounts(path string, counts map[string]int) error {
 }
 
 func (c *DailyCounter) TryInc(day, scope string, cap int) (count int, admitted bool, err error) {
-	// Read the durable map BEFORE taking the lock. Two concurrent TryInc calls
-	// can read the same file; the lock below serializes the increment, and the
-	// second writer replaces the first file atomically with its own count.
-	var counts map[string]int
-	if c.path != "" {
-		counts, err = readDailyCounts(c.path)
-		if err != nil {
-			return 0, false, err
-		}
-	}
-
 	key := day + "|" + scope
-	c.mu.Lock()
+
+	// In-memory counters need only the in-process mutex. Durable counters
+	// take an OS file lock FIRST, so read-check-write is atomic across
+	// processes. No sync.Mutex is held while any file I/O runs.
 	if c.path == "" {
+		c.mu.Lock()
 		if c.mem == nil {
 			c.mem = map[string]int{}
 		}
-		counts = c.mem
+		cur := c.mem[key]
+		if cap > 0 && cur >= cap {
+			c.mu.Unlock()
+			return cur, false, nil
+		}
+		cur++
+		c.mem[key] = cur
+		c.mu.Unlock()
+		return cur, true, nil
+	}
+
+	// Create the parent dir BEFORE the lock file is opened: a fresh
+	// scratch MEEPT_HOME has no voice/ dir yet, and the lock lives beside
+	// the counter file. writeDailyCounts also ensures this for callers
+	// that construct a counter lazily.
+	if err := os.MkdirAll(filepath.Dir(c.path), 0o755); err != nil {
+		return 0, false, fmt.Errorf("voice daily counter: mkdir: %w", err)
+	}
+	release, err := lockDailyCounterFile(c.path + ".lock")
+	if err != nil {
+		return 0, false, fmt.Errorf("voice daily counter: lock: %w", err)
+	}
+	defer release()
+
+	counts, err := readDailyCounts(c.path)
+	if err != nil {
+		return 0, false, err
 	}
 	cur := counts[key]
 	if cap > 0 && cur >= cap {
-		c.mu.Unlock()
 		return cur, false, nil
 	}
 	cur++
 	counts[key] = cur
-	var snapshot map[string]int
-	if c.path != "" {
-		snapshot = make(map[string]int, len(counts))
-		for k, v := range counts {
-			snapshot[k] = v
-		}
-	}
-	c.mu.Unlock()
-
-	if snapshot != nil {
-		if err := writeDailyCounts(c.path, snapshot); err != nil {
-			return 0, false, err
-		}
+	if err := writeDailyCounts(c.path, counts); err != nil {
+		return 0, false, err
 	}
 	return cur, true, nil
 }
