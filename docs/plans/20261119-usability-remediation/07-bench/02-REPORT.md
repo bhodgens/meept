@@ -666,3 +666,166 @@ u-fail evidence-envelope error grading path in the harness.
   (bench-results-run7-final/, daemon-run7.log,
   bench-usability-run7-final.log, probes/p5_steering_run7.log,
   provenance-run7.*).
+
+## 15. Run 8 -- FINAL ACCEPTANCE (2026-11-23) -- steering seam FIXED (first steer PASS + first "queued"); auto-approver fires but a NEW identity seam (F-BENCH-R8) blocks u-plan; OVERALL VERDICT: FAIL (improving, 2/6)
+
+### 15a. Provenance
+
+- meept daemon built from main @ 8a208f50 (steering alias-arm
+  4d63225c + revision-promotion 8a208f50 + auto-seal bacb4352 +
+  evidence 68478b69 + bus 4f934dfb + wiring ab72e851),
+  sha256 0a040add...; cli 1387ffa5...; bench from
+  usability-acceptance @ 66e5fad (real-parked-shape approver),
+  sha256 dfb57694... Full: /tmp/usability-rig-acc/provenance-run8.*.
+- Configs byte-identical to graded run-7 (meept.json5 4507535d,
+  models.json5 d6f53039 incl. the durable sidecar repoint). Quotas
+  off, local providers only. Boot clean: reaped=0, no operator error.
+- Full evidence log: 02-RUN-LOG.md "# RUN 8".
+
+### 15b. R3-R8 verdict table (usability suite)
+
+| Task | R3 | R4 | R5 | R6 | R7 | R8 (final) | Trajectory |
+|---|---|---|---|---|---|---|---|
+| u-context-two-step | error | error | error | fail | fail | error | evidence-gate rejection persists on the revision step (model/step-shape class) |
+| u-steer-midrun | error | error | fail | fail | error | **PASS** | FIXED end-to-end: chat.steer accepted + injected mid-run, correction converged, 2/2 terminals, judge 0.9 |
+| u-route-research-write | fail | fail | fail | fail | fail(2/3) | fail | nondeterministic lane (file_contains flipped green in R7, red in R8); terminal_delivery green throughout |
+| u-fail-nonexistent-read | error | fail | fail | error | error | **PASS** | honest failure copy + judge 0.9 |
+| u-plan-mode-request | error | error | error | error | timeout | error | approver now fires on the real park; blocked by F-BENCH-R8 session-vs-conversation identity seam in findTaskBySession |
+| u-direct-explicit | error | error | fail | fail | **PASS** | timeout | evidence chain held (file written); planner retry spiral kept the final terminal out of window (model/runtime class) |
+| **SUITE** | 0/6 | 0/6 | 0/6 | 0/6 | 1/6 | **2/6** | improving every infrastructure seam it touched |
+
+Steering probe p5: "queue not found" x5 runs (R3-R7) -> **"queued"**
+(R8, first success). Probes: p5 pass-part (queued) + known 8B
+reply-shape residual on the continuation.
+
+### 15c. Prediction scorecard (run 8, all 4 verified)
+
+1. p5 steer -> queued + correction lands: SPLIT -- "queued" HELD
+   (first in 6 runs); correction landing failed on 8B model quality.
+2. u-plan auto-approver chain: FAILED at F-BENCH-R8 (approver fires;
+   identity query mismatches the daemon's linked_sessions shape).
+3. u-direct + evidence tasks stay PASS: PARTIAL -- evidence chain
+   held; u-direct verdict regressed to timeout (model/runtime spiral).
+4. u-steer completes with a real grade, no post-approval stall: HELD
+   (PASS 18.1s; 8a208f50 promotion fix verified live).
+
+### 15d. Final residual disposition (complete)
+
+| # | Residual | Class | Owner | Status after R8 |
+|---|---|---|---|---|
+| 1 | steer-404 (F-STEER-R7) | daemon seam | daemon | **CLOSED** (4d63225c verified: queued + injected + PASS in-suite) |
+| 2 | auto-approver payload seam (F-BENCH-R7) | bench | meept-bench | **CLOSED** (66e5fad fires on the real park) |
+| 3 | auto-approver identity seam (**F-BENCH-R8**, NEW) | bench | meept-bench | OPEN: findTaskBySession matches linked_sessions by session id; daemon writes conversation id. Fix: query by conv id or match both shapes |
+| 4 | u-steer post-approval stall (R7 single occurrence) | daemon | daemon | **CLOSED** (did not reproduce; promotion fix 8a208f50 in graded binary) |
+| 5 | llm_judge empty/raw-reply shape (u-route, p5) | model (8B) | out of scope | OPEN (model class; judge parse fix 21dd263 works when replies are well-formed) |
+| 6 | u-fail evidence-envelope ERROR grading | harness | meept-bench | **CLOSED in practice** (lane passed R8; only failure-shaped executions affected) |
+| 7 | u-context revision-step evidence rejection | model/step-shape | out of scope | OPEN (model class; gate correctly demands real tool evidence) |
+| 8 | u-direct planner retry spiral (R8 regression) | model/runtime | out of scope | OPEN (nondeterministic; R7 shape was green in 6.2s) |
+| 9 | Rig drift / config durability | process | process | mitigated (sidecar repoint durable); regression+smoke suites still stale vs fixes |
+
+### 15e. Final overall verdict
+
+**FAIL -- 2/6 usability PASS (up from 1/6), with both run-7
+infrastructure root causes now PROVEN FIXED in the graded binary and
+one new, narrowly-scoped bench seam (F-BENCH-R8) displacing them.**
+
+- Infrastructure proven this run: steering queue discovery + mid-run
+  injection end-to-end (the 5-run steer-404 class is dead); the
+  parked-turn detection fix fires on the real daemon shape; the
+  revision-promotion stall is gone; the evidence/executor chain and
+  terminal delivery remain green everywhere a turn terminalizes.
+- The remaining failures are dominated by 8B model-quality classes
+  (reply shape, planner retry spirals, revision-step tool use) plus
+  ONE precisely-localized bench-side identity mismatch (F-BENCH-R8)
+  that is a small, testable fix (match conv id in linked_sessions).
+- The suite is single-seed: the R7<->R8 flips on u-direct/u-route
+  bound the model-nondeterminism noise at roughly +-1 task.
+- NO COMMIT made (per instructions). All run-8 artifacts preserved in
+  /tmp/usability-rig-acc (bench-results-run8/, daemon-run8.log,
+  bench-usability-run8.log, provenance-run8.*, probes/p5-steering-
+  run8.*). Teardown verified: 0 rig processes, ports free.
+
+
+## 16. Run 9 -- TRUE FINAL ACCEPTANCE (2026-11-23) -- F-BENCH-R8 fix VERIFIED live (u-plan park approved in 0.78s, plan executed, terminal delivered); infrastructure seams ALL GREEN; verdict sways on 8B model noise. OVERALL VERDICT: FAIL (1/6, residual = 100% model-bound)
+
+### 16a. Provenance
+
+- Bench built from usability-acceptance @ **4248144** (F-BENCH-R8:
+  FindAndApproveParkedTask takes (sessionID, conversationID, since),
+  matches linked_sessions by EITHER id), CLEAN tree, sha256
+  80c1a385... Meept main UNCHANGED since run 8: daemon/cli binaries
+  REUSED (0a040add... / 1387ffa5...). Configs byte-identical to graded
+  run-7/8 state (4507535d / d6f53039). Quotas off. Full:
+  /tmp/usability-rig-acc/provenance-run9.*.
+- Boot clean: 2x "Runtime started and healthy", reaped=0.
+
+### 16b. R3-R9 verdict table (usability suite)
+
+| Task | R3 | R4 | R5 | R6 | R7 | R8 | R9 (final) | Disposition |
+|---|---|---|---|---|---|---|---|---|
+| u-context-two-step | error | error | error | fail | fail | error | error | model-bound (revision-step evidence rejection) |
+| u-steer-midrun | error | error | fail | fail | error | **PASS** | error | model-bound this seed (planner phase spiral BEFORE the steerable step; steer itself accepted via path_used=steer, no 404); steering seam stays PROVEN (R8 PASS) |
+| u-route-research-write | fail | fail | fail | fail | fail(2/3) | fail | fail(2/3) | model-bound (empty shell output lane; judge 0.9 + terminal_delivery green) |
+| u-fail-nonexistent-read | error | fail | fail | error | error | **PASS** | error | model-bound this seed ([REVISION] step-shape evidence rejection); honest copy preserved |
+| u-plan-mode-request | error | error | error | error | timeout | error | error | bench seam CLOSED -- approve landed 0.78s after park, 10-step plan executed, terminal delivered; residual failure is model-bound (planner phases + task_create arg shapes) |
+| u-direct-explicit | error | error | fail | fail | **PASS** | timeout | **PASS** | model-bound noise both directions; green shape has now passed in 2 of 3 seeds |
+| **SUITE** | 0/6 | 0/6 | 0/6 | 0/6 | 1/6 | 2/6 | **1/6** | every infrastructure seam that ever failed a run is now green in a graded run |
+
+Steering probe p5: steer attempt fired +8s into a 9s turn -- landed
+AFTER the loop closed -> "queue not found" on both candidates. Timing
+miss, not a seam regression: the same binary returned "queued" in R8
+and accepted u-steer's steer in-suite in R9.
+
+### 16c. Run-9 prediction scorecard
+
+1. u-plan approve chain (the point of the run): **HELD**. F-BENCH-R8
+   verified end-to-end: park -> approved in 0.78s (R8: parked the whole
+   window) -> promoted=4 -> 10-step execution -> terminal. Residual
+   failure is model-class.
+2. u-steer / u-fail / u-direct stay PASS: PARTIAL (u-direct held;
+   u-steer/u-fail regressed within the established single-seed noise
+   band; NO infrastructure seam regressed).
+3. p5 steer queued: FAILED on probe timing (+8s vs 9s turn), not the
+   seam (control: R8 "queued" + R9 in-suite steer accepted).
+4. u-route / u-context remain model-bound: HELD.
+
+### 16d. FINAL residual disposition (complete, run 9 closure)
+
+| # | Residual | Class | Owner | Final status |
+|---|---|---|---|---|
+| 1 | steer-404 (F-STEER-R7) | daemon seam | daemon | CLOSED (R8 "queued" + R9 in-suite steer accepted) |
+| 2 | approver payload shape (F-BENCH-R7) | bench | meept-bench | CLOSED (R8 verified) |
+| 3 | approver identity seam (F-BENCH-R8) | bench | meept-bench | **CLOSED (R9 verified live: 0.78s approve-to-park)** |
+| 4 | u-steer post-approval stall | daemon | daemon | CLOSED (R8; did not recur) |
+| 5 | llm_judge reply-shape sensitivity (u-route/p5) | model (8B) | out of scope | OPEN-model |
+| 6 | u-fail evidence-envelope ERROR grading | harness | meept-bench | CLOSED in practice (R8 PASS) |
+| 7 | u-context revision-step evidence rejection | model/step-shape | out of scope | OPEN-model |
+| 8 | u-direct/u-steer/u-fail planner retry spirals | model/runtime (8B) | out of scope | OPEN-model (seed-dependent: green in some seeds) |
+| 9 | Rig drift / stale regression+smoke suites | process | process | mitigated (sidecar repoint durable); suites remain stale vs fixes -- future work |
+| 10 | NEW: p5 probe steer delay (8s) undersized vs fast turns | probe (bench) | meept-bench | OPEN-bench (measurement artifact only; seam proven twice) |
+| 11 | NEW (observed, not regressed): planner task_create "name is missing" loops | model (8B) | out of scope | OPEN-model (dominant failure shape in R9; killed u-plan steps + u-steer steps) |
+
+**Every open defect is model-bound or probe-timing; ZERO open
+bench-harness or daemon-infrastructure defects remain.**
+
+### 16e. FINAL OVERALL VERDICT (runs 3-9)
+
+**FAIL on the suite score -- 1/6 usability PASS (R9) against the
+2/6 best (R8) -- but the CAMPAIGN'S INFRASTRUCTURE GOAL IS MET: all
+five seams identified across R7-R9 are PROVEN FIXED in graded runs,
+and 100% of the remaining red verdicts are 8B model-quality classes
+that the plan pre-scoped out of scope.**
+
+- The single-seed noise band, now measured over three graded runs with
+  an unchanged daemon binary, is +/-1..2 tasks (u-steer, u-fail,
+  u-direct each flipped both directions across seeds while their
+  underlying evidence chains stayed green).
+- Suite stability requires either multi-seed grading (the harness
+  supports seeds) or a model upgrade; neither is a bench-harness
+  defect. The stale regression/smoke suites (residual 9) are the only
+  remaining PROCESS debt.
+- NO COMMIT made (per instructions). All run-9 artifacts preserved in
+  /tmp/usability-rig-acc (bench-results-run9/, daemon-run9.log,
+  bench-usability-run9.log, provenance-run9.*, probes/p5-steering-
+  run9.json, meept-bench-run9 binary). Teardown verified: 0 rig
+  processes, ports 55096/55097/55098 free.

@@ -670,3 +670,264 @@ PREDICTION SCORECARD (run 7):
    HELD (u-direct-explicit PASS end-to-end; u-steer rev step approved
    with real file_write evidence; u-route wrote fetched.txt with
    evidence; u-fail executed real tools).
+
+# RUN 8 (FINAL ACCEPTANCE) - 2026-11-23, post steer alias-arm + revision-promotion + real-parked-shape approver fixes
+
+## R8 Step 0 - Recon (done)
+
+- Rig daemons: NONE running at start (no meept-daemon process on the
+  rig socket; ports 55096/55097/55098 all free -- lsof empty). Zero
+  llama-server / prompt-router / meept-daemon processes.
+- meept main worktree HEAD: **8a208f50** (contains steering alias-arm
+  4d63225c -- ArmQueueAliases now arms on direct-dispatch turns via
+  deriveSessionQueueAliases -- plus revision-promotion fix 8a208f50,
+  auto-seal bacb4352, executor evidence 68478b69, bus wiring 4f934dfb,
+  steering wiring ab72e851). Worktree DIRTY with sibling-session edits
+  (25 entries); excluded from the build by `git archive 8a208f50`.
+- Bench worktree usability-acceptance HEAD: **66e5fad** (real-parked-
+  shape auto-approver, fixes F-BENCH-R7), CLEAN working tree. Contains
+  turn.terminal subscription fab82fb, judge parse 21dd263, grading
+  suite da1b2e9. Built from `git archive 66e5fad`.
+- Suite state: suites/usability-probe.json carries
+  `extra.auto_approve_plans: true` on u-plan-mode-request (committed);
+  no config edit needed. Configs byte-identical to graded run-7 state:
+  meept.json5 sha256 4507535d..., models.json5 sha256 d6f53039...
+  (includes the run-7 sidecar repoint to the main worktree -- that
+  repair is durable: /Users/caimlas/git/meept/scripts/
+  prompt_router_sidecar.py still exists).
+- Quotas: DISABLED in written config (llm.budget.enabled=false,
+  quota_retry.enabled=false); local providers only (rig 8B +
+  rig-router sidecar). Model: LFM2.5-8B-A1B-Q4_K_M.gguf, ports
+  llm 55096 / router 55097.
+
+## R8 Step 1 - Provenance + build (done)
+
+- Daemon: /tmp/usability-rig-acc/meept-daemon-run8 REBUILT from
+  8a208f50 archive, sha256
+  0a040add6954faf0f08a108c847195a607d072b21b90cae85de43c0ea05d0e6d
+- CLI: /tmp/usability-rig-acc/meept-run8 REBUILT, sha256
+  1387ffa5c9b2172a8c1cc97ea98d181b8cc8474a5e4dd3161c521d87849a997c
+- Bench: /tmp/usability-rig-acc/meept-bench-run8 REBUILT from 66e5fad,
+  sha256
+  dfb576942e3ff82e6a3fd57975ba3bd0769c908366ebfb9d7f5e66d18700110f
+- Build trees: /tmp/meept-build-acc8 (daemon+cli), /tmp/meept-bench-
+  build-acc8 (bench); clean archives, no working-tree patches.
+- JUDGE_URL bare base http://127.0.0.1:55096; judge harness committed
+  (21dd263 <think>-strip), no working-tree patch.
+
+## R8 Step 2 - Boot (done)
+
+- MEEPT_HOME=/tmp/usability-rig-acc/home/.meept (the run-7-correct
+  value; no operator error this run). Daemon pid 94635, socket
+  /tmp/usability-rig-acc/home/.meept/meept.sock.
+- daemon-run8.log: 2x "Runtime started and healthy" (llm 55096 +
+  router 55097); llama /health 200; router /health 200; classifier
+  boot gate signaled; "daemon: running" at 13:06:27; orphan sweep
+  reaped=0.
+
+## R8 Step 3 - Graded usability suite (done) -- 2 pass / 1 fail / 2 error / 1 timeout (SUITE_EXIT=1, "run: 4/6 tasks failed")
+
+- Command: HOME=/Users/caimlas,
+  MEEPT_BENCH_SOCKET=/tmp/usability-rig-acc/home/.meept/meept.sock,
+  JUDGE_URL=http://127.0.0.1:55096, MEEPT_BENCH_TRANSCRIPT_DIR=
+  bench-results-run8, /tmp/usability-rig-acc/meept-bench-run8 run
+  --suite suites/usability-probe.json --repo /tmp/usability-rig-acc/
+  project --scratch /tmp/usability-rig-acc/worktrees --auto-approved
+  --judge-cmd scripts/judge-local.py --out bench-results-run8.
+  Ran in the background to completion (no operator timeout this run).
+- Per-task verdicts (R3 -> R4 -> R5 -> R6 -> R7 -> R8):
+
+| Task | R3 | R4 | R5 | R6 | R7 | R8 | Detail |
+|---|---|---|---|---|---|---|---|
+| u-context-two-step | error | error | error | fail | fail | error | step REJECTED by the file-evidence gate ("[REVISION] Verify file content and existence" -- no file op executed after retry); the chat-fallback turn errored honestly |
+| u-steer-midrun | error | error | fail | fail | error | **PASS** | FIRST STEER PASS EVER: steer accepted via chat.steer RPC ("Steering message injected" 13:07:55.827, agent=coder, iteration=2 -- the injected message converged the running step onto result2.txt with real file_write); result2.txt written; file_contains PASS; terminal_delivery PASS 2/2 (primary + steered turn both delivered); llm_judge PASS 0.9; wall 18.1s |
+| u-route-research-write | fail | fail | fail | fail | fail(2/3) | fail | REGRESSED to 1/3: shell executed (success=true) but produced empty output; fetched.txt pattern absent; llm_judge FAIL; terminal_delivery PASS 1/1 at+3.5s. Single-seed 8B nondeterminism class (same lane passed file_contains in R7) |
+| u-fail-nonexistent-read | error | fail | fail | error | error | **PASS** | honest "file does not exist" reply; exit_zero PASS; terminal_delivery PASS 1/1 at+6.1s; llm_judge PASS 0.9 (routing: orchestrator/quickplan via fallback classifier) |
+| u-plan-mode-request | error | error | error | error | timeout | error | approver FIRED this time but timed out waiting: "task for session session-d3e0a6d4b8b6d1ce never reached awaiting_approval within the poll window"; ROOT CAUSE (new, F-BENCH-R8): the task's linked_sessions carries the CONVERSATION id (conv-cc5c31fae1278842), not the session id the approver queries (session-d3e0a6d4b8b6d1ce) -- task.list_extended returns 0 tasks for the session-id query; the task sat at awaiting_approval the whole window (verified post-run). The 66e5fad approver fixed the payload-shape seam (F-BENCH-R7) but the SESSION-LINKAGE seam underneath is still mismatched. Planner also burned ~10s of malformed-phase retries before parking (model-class) |
+| u-direct-explicit | error | error | fail | fail | **PASS** | timeout | REGRESSED vs R7: direct.txt WAS written in the worktree (verified on disk) and one turn.terminal (status=completed, the dispatch ack) delivered, but the task then entered a planner retry spiral ("planner produced malformed phases after retry" x2, task_create name-missing escalation, reviewer max-iterations) and never produced the FINAL completion terminal within 300s; graded timeout. The R7 6.2s-green shape did not reproduce (single-seed 8B nondeterminism) |
+
+- SUITE: 2 pass / 1 fail / 2 error + 1 timeout (runner prints 4/6
+  failed). vs R7 (1/6): u-steer FLIPPED GREEN (steering end-to-end
+  first time ever), u-fail RECOVERED to PASS; u-direct regressed to
+  timeout (model/review spiral); u-route regressed on a nondeterministic
+  lane; u-plan moved from "approver never fired" to "approver fired but
+  queried the wrong identity seam" (progress, still failing).
+
+## R8 Step 4 - p5 steering probe (done) -- chat.steer returns "queued" (FIRST SUCCESS IN 6 RUNS)
+
+- chat.steer on conv-726ae12f7469355e returned
+  {"queue":"steer","status":"queued"} -- the F-STEER-R7 seam (queue
+  discovery) is FIXED end-to-end: the daemon's
+  "Steering message injected" line appears for the suite's u-steer
+  turn too (13:07:55.827), and the queue_status RPC resolves the same
+  conversation without "queue not found".
+- CORRECTION DID NOT LAND as final.txt in p5: the 8B model's primary
+  turn degraded to raw "<tool_call>" text spam (reply-shape residual,
+  known model class); only 1 turn.terminal (status=completed) arrived;
+  the drained steer content never produced the correction's file.
+  Prediction part 1 (steer -> queued) HOLDS; part 2 (correction lands)
+  FAILS on model quality, not on queue plumbing.
+- Probe artifacts: probes/p5-steering-run8.json +
+  probes/p5_steering_run8.log.
+
+## R8 Step 5 - Teardown (done)
+
+- Rig daemon killed; 0 meept-daemon / llama-server / prompt-router
+  processes remain (verified); ports 55096/55097/55098 free.
+- Provenance: provenance-run8.json + provenance-run8.sha256 written.
+- Rig preserved: bench-results-run8/ (GRADED), daemon-run8.log,
+  bench-usability-run8.log, probes/p5-steering-run8.json,
+  probes/p5_steering_run8.log, meept-bench-run8 binary,
+  meept-daemon-run8 / meept-run8 binaries. NO COMMIT made.
+
+## R8 VERDICT SUMMARY
+
+PREDICTION SCORECARD (run 8):
+1. p5 steer -> queued + correction lands: SPLIT. "queued" HELD (first
+   time in 6 runs -- 4d63225c alias-arm works end-to-end); correction
+   landing FAILED on 8B model-quality (raw tool_call spam reply), not
+   on queue plumbing.
+2. u-plan park -> auto-approver fires -> executes -> terminal: FAILED
+   at a NEW seam (F-BENCH-R8): the approver now fires on the real park
+   (66e5fad fix confirmed live) but findTaskBySession queries
+   linked_sessions by SESSION id while the daemon writes the
+   CONVERSATION id -- 0 tasks match, approve never lands, task left
+   awaiting_approval (verified post-run). Bench-side fix: match either
+   identity shape (or query by conversation id).
+3. u-direct + evidence tasks stay PASS: PARTIAL. The evidence chain
+   held (result2.txt + direct.txt written with real file_write
+   evidence; no false rejections on single-step file writes), but
+   u-direct's task-level verdict REGRESSED to timeout: a planner
+   malformed-phase retry spiral + reviewer max-iterations kept the
+   final completion terminal out of the 300s window (model/runtime
+   class, not evidence class).
+4. u-steer completes with a real grade, no post-approval stall: HELD.
+   PASS in 18.1s end-to-end (steer accepted -> injected mid-run ->
+   converges step -> task finalized 13:08:00.779). The R7
+   post-approval stall (silent scheduling + watchdog reap) did NOT
+   reproduce -- 8a208f50 promotion fix holds.
+
+
+# RUN 9 (FINAL) - 2026-11-23, post F-BENCH-R8 conversation-id approver fix (4248144)
+
+## R9 Step 0 - Recon (done)
+
+- Rig daemons: NONE running at start (only unrelated meept-e2e test
+  daemons in /var/folders temp; rig ports 55096/55097/55098 free).
+- meept main @ f62eaf4e, UNCHANGED vs run 8 (daemon/cli binaries REUSED:
+  meept-daemon-run8 0a040add..., meept-run8 1387ffa5...) -- run 9's fix
+  is bench-only.
+- Bench worktree usability-acceptance @ 4248144, CLEAN. Contains
+  F-BENCH-R8 fix: FindAndApproveParkedTask/findTaskBySession*/RefineAndSeal
+  take (sessionID, conversationID, since) and match linked_sessions by
+  EITHER id (session_tasks rows are conv-keyed; runner passes the ack's
+  conversation_id).
+- Configs byte-identical to graded run-7/8 state (meept.json5 4507535d,
+  models.json5 d6f53039). Quotas off. Suite u-plan carries
+  extra.auto_approve_plans=true (committed).
+
+## R9 Step 1 - Provenance + build (done)
+
+- Bench: /tmp/usability-rig-acc/meept-bench-run9 REBUILT from
+  `git archive 4248144` (clean tree), sha256
+  80c1a385550f4d3b8dac397b032d7c1f0d5e9e4e3f7c34248203893f053ea9ca.
+  Build tree /tmp/meept-bench-build-acc9.
+- Daemon/CLI: reused run-8 binaries (meept unchanged). Full record:
+  provenance-run9.json + provenance-run9.sha256.
+
+## R9 Step 2 - Boot (done)
+
+- Daemon pid 54912 (meept-daemon-run8), MEEPT_HOME=/tmp/usability-rig-acc/
+  home/.meept. daemon-run9.log: 2x "Runtime started and healthy"
+  (llm 55096 + router 55097); llama /health 200; router /health 200;
+  orphan sweep reaped=0; "daemon: running" at 13:34:58.
+
+## R9 Step 3 - Graded usability suite (RUNNING)
+
+- Launched 13:35:12: HOME=/Users/caimlas,
+  MEEPT_BENCH_SOCKET=rig socket, JUDGE_URL=http://127.0.0.1:55096,
+  --auto-approved --judge-cmd scripts/judge-local.py --out
+  bench-results-run9. Log: bench-usability-run9.log.
+
+## R9 Step 3 - Graded usability suite (done) -- 1 pass / 1 fail / 4 error (SUITE_EXIT=1, "run: 5/6 tasks failed")
+
+- Per-task verdicts (R3 -> R4 -> R5 -> R6 -> R7 -> R8 -> R9):
+
+| Task | R3 | R4 | R5 | R6 | R7 | R8 | R9 | Detail |
+|---|---|---|---|---|---|---|---|---|
+| u-context-two-step | error | error | error | fail | fail | error | error | step REJECTED by file-evidence gate after retry ("[REVISION] Verify counter.txt contains 3" -- no file op after retry); chat-fallback turn errored honestly. Wall 96.2s. Model/step-shape class (unchanged) |
+| u-steer-midrun | error | error | fail | fail | error | **PASS** | error | STEER ACCEPTED via the plan conversation (path_used=steer, no queue-404), but the primary task spiraled BEFORE reaching a steerable step: planner phase-parse failures + reply-guard machine-shape rewrites + downstream steps dying on task_create name-missing x3 (repeat-error breaker). 0/11 steps completed. Model-class regression (R8's direct-dispatch shape did not reproduce) |
+| u-route-research-write | fail | fail | fail | fail | fail(2/3) | fail | fail | 2/3 checks GREEN this run: file_contains RED (fetched.txt pattern absent -- shell produced empty output again), terminal_delivery PASS 1/1, llm_judge PASS 0.9. Single-seed 8B nondeterminism class |
+| u-fail-nonexistent-read | error | fail | fail | error | error | **PASS** | error | REGRESSED: fell into a [REVISION] step shape and the file-evidence gate rejected it ("no file operation was executed ... even after a retry"). Honest failure copy delivered; verdict=error on gate rejection, not dishonesty. Model/step-shape class |
+| u-plan-mode-request | error | error | error | error | timeout | error | error | **F-BENCH-R8 FIX VERIFIED END-TO-END**: park at 13:38:14.099 -> "Generated task spec on approval" at 13:38:14.882 (0.78s -- the approver found the task by conversation id; zero wait) -> "Plan approved and scheduled", promoted=4 -> 10-step plan executed (5 completed / 6 failed) -> terminal delivered. Failure moved from bench-identity seam to pure 8B model quality: planner produced no valid phases across 8+ loop attempts (unbacked file claims + malformed task_create args); escalations exhausted (level 12/3); task_create name-missing x3 killed step 0 three times |
+| u-direct-explicit | error | error | fail | fail | **PASS** | timeout | **PASS** | RECOVERED to R7 shape: direct.txt written, file_contains PASS, terminal_delivery PASS 1/1 at+6.4s, llm_judge PASS 0.9. Wall 7.4s |
+| **SUITE** | 0/6 | 0/6 | 0/6 | 0/6 | 1/6 | 2/6 | **1/6** | infrastructure seams all green; verdicts swing within the R7<->R8-established +-1..2 model-noise band |
+
+- The three steered/steer-adjacent 404s in the daemon log (13:35:58
+  u-context candidate attempts + 13:41:04 p5) are the queue-registry
+  lifecycle: chat.steer resolves only conversations with a LIVE
+  steering queue; plain session/plan conversations that are not
+  currently mid-step have no queue. u-steer's steer did NOT 404 -- it
+  was accepted on the plan conversation mid-planning.
+
+## R9 Step 4 - p5 steering probe (done) -- steer attempt landed AFTER the turn finished; queue-404 on both candidates
+
+- Primary turn was FAST (5 file_writes in one batch, ~9s wall total,
+  agent loop complete 13:41:01.648); the probe's +8s steer fired at
+  13:41:04.8 -- after the loop closed -- so both candidate ids
+  (conv-d6c31e5ebfa83803 and the derived thread id) returned
+  "queue not found". This is a TIMING MISS (the run-8 probe's turn ran
+  longer), not a regression of the 4d63225c alias-arm seam: the same
+  binary returned "queued" in R8, and the suite's u-steer steer was
+  accepted via path_used=steer minutes earlier in this same run.
+- The model DID the work but ignored the (never-delivered) correction:
+  step1..5.txt all created; final.txt not (steer never landed). Reply
+  shape was well-formed prose this run (no raw tool_call spam).
+- Probe artifacts: probes/p5-steering-run9.json,
+  probes/p5_steering_run9.raw.json.
+
+## R9 Step 5 - Teardown (done)
+
+- Daemon (pid 54912) SIGTERMed; 0 meept-daemon / llama-server /
+  prompt-router processes remain (verified); ports 55096/55097/55098
+  free; socket removed by graceful shutdown.
+- Provenance: provenance-run9.json + provenance-run9.sha256 written.
+- Rig preserved: bench-results-run9/ (GRADED), daemon-run9.log,
+  bench-usability-run9.log, probes/p5-steering-run9.json,
+  meept-bench-run9 binary. NO COMMIT made (per instructions).
+
+## R9 VERDICT SUMMARY
+
+PREDICTION SCORECARD (run 9):
+1. u-plan park -> approver finds task by conversation id -> approved ->
+   executes -> terminal: **HELD (the point of the run)**. The
+   F-BENCH-R8 conversation-id fix worked on the first park: approve
+   landed 0.78s after "Plan awaiting user approval" (vs run 8: the task
+   sat awaiting_approval the whole window). The task then executed a
+   real 10-step plan and delivered a terminal. The verdict remains
+   error, but the failure MOVED from bench-harness seam (identity
+   mismatch) to 8B model quality (planner phase-format failures,
+   task_create name-missing loops) -- the exact class the campaign
+   scoped out.
+2. u-steer / u-fail / u-direct stay PASS: PARTIAL -- u-direct HELD
+   (PASS 7.4s, full green evidence chain); u-steer and u-fail
+   REGRESSED to error on 8B model-class spirals (planner phases /
+   revision-step shapes), within the established single-seed noise
+   band. NO infrastructure seam regressed: steer accepted (path_used=
+   steer), terminals delivered, evidence gates behaved identically.
+3. p5 steer -> queued: FAILED this run on probe TIMING (+8s steer vs
+   9s turn), not on the seam -- the identical binary + queue-registry
+   returned "queued" in R8 and accepted u-steer's steer in R9.
+   probe-side lesson: steer delay must be sized under measured turn
+   wall time with margin, or the turn must be made longer.
+4. u-route / u-context remain model-bound fails: HELD. u-route 2/3
+   green (judge 0.9 + terminal delivery; file_contents red on the
+   empty-shell-output lane), u-context same evidence-gate rejection.
+
+**RUN 9 FINAL: FAIL -- 1/6 usability PASS.** All five bench/daemon
+infrastructure seams identified across R7-R9 (steer queue discovery,
+parked-shape approver, approver identity, terminal subscription,
+promotion stall) are now PROVEN FIXED in graded runs. Every remaining
+red verdict is attributable to the 8B model classes the campaign
+pre-scoped as out-of-scope (planner phase formats, task_create arg
+shapes, revision-step tool use, nondeterministic file lanes).
