@@ -782,6 +782,14 @@ func (m *PlansModel) updatePlansTable() {
 	tableutil.SetRows(&m.table, rows)
 	if len(rows) > 0 {
 		m.table.GotoTop()
+		// A refresh resets the cursor to row 0. If a plan was selected,
+		// re-sync it against that row: leaving the old m.selected in place
+		// made a/v/c/d act on a stale plan while the cursor pointed at a
+		// different gate/plan (verifier residual, 2026-11-22). With no
+		// prior selection, keep it nil (no auto-select on first load).
+		if m.selected != nil {
+			m.syncSelectionFromCursor()
+		}
 	}
 }
 

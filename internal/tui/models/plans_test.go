@@ -231,3 +231,33 @@ func TestPlansModel_XOnPlanRowIsInert(t *testing.T) {
 		t.Fatalf("x on a plan row issued RPCs: %v", rpc.methods())
 	}
 }
+
+// A refresh rebuilds the table and calls GotoTop(). Selection must follow
+// the reset cursor (row 0), never keep pointing at the previously selected
+// plan; otherwise a/v/c/d act on a stale plan after a background refresh.
+func TestPlansModel_RefreshResetsSelectionToFirstRow(t *testing.T) {
+	m := newGateOffsetModel(&plansGateRPC{})
+
+	// Cursor on the plan row selects the real plan.
+	m.table.SetCursor(1)
+	m.syncSelectionFromCursor()
+	if m.selected == nil || m.selected.ID != "plan-1" {
+		t.Fatalf("premise: plan row did not select plan-1 (got %v)", m.selected)
+	}
+
+	// A background refresh rebuilds rows and resets the cursor to row 0,
+	// which is the synthetic gate row. Selection must be cleared.
+	m.Update(PlansUpdateMsg{Plans: []types.PlanExtended{
+		{ID: "plan-1", Title: "the real plan", State: "draft"},
+	}})
+
+	if m.table.Cursor() != 0 {
+		t.Fatalf("refresh did not reset cursor to 0: got %d", m.table.Cursor())
+	}
+	if m.selected != nil {
+		t.Fatalf("refresh kept stale selection %q while cursor is on gate row 0", m.selected.ID)
+	}
+	if _, ok := m.selectedGate(); !ok {
+		t.Fatal("premise: row 0 is not a gate row")
+	}
+}
