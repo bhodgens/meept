@@ -405,12 +405,38 @@ func (c *Collector) RecordReviewResult(status, reviewerID string, confidence flo
 }
 
 // recordReviewMetrics extracts review metrics from a bus message.
+//
+// C4 (model-rating-metrics-plan): the enriched payload carries verdicts +
+// identity/cycle/finality keys. Verdict rows persist via
+// Store.RecordReviewVerdict — one row per verdict — and a store failure is a
+// Warn that NEVER fails the review path (the event is fire-and-forget; the
+// collector degrades, the producer does not care). trace_id rides the
+// payload verbatim ("" until leaf 02 stamps it — the column exists from
+// day one).
 func (c *Collector) recordReviewMetrics(msg *models.BusMessage) {
 	var payload struct {
-		Status        string  `json:"status"`
-		Reviewer      string  `json:"reviewer"`
-		Confidence    float64 `json:"confidence"`
-		RevisionCount int     `json:"revision_count"`
+		Status              string  `json:"status"`
+		Reviewer            string  `json:"reviewer"`
+		Confidence          float64 `json:"confidence"`
+		RevisionCount       int     `json:"revision_count"`
+		StepID              string  `json:"step_id"`
+		TaskID              string  `json:"task_id"`
+		ReviewedModelID     string  `json:"reviewed_model_id"`
+		JudgeAgentID        string  `json:"judge_agent_id"`
+		JudgeModelID        string  `json:"judge_model_id"`
+		OrchestratorAgentID string  `json:"orchestrator_agent_id"`
+		OrchestratorModelID string  `json:"orchestrator_model_id"`
+		TraceID             string  `json:"trace_id"`
+		Cycle               int     `json:"cycle"`
+		IsFinal             bool    `json:"is_final"`
+		Verdicts            []struct {
+			RubricID   string  `json:"rubric_id"`
+			Scope      string  `json:"scope"`
+			Category   string  `json:"category"`
+			Severity   string  `json:"severity"`
+			Detail     string  `json:"detail"`
+			Confidence float64 `json:"confidence"`
+		} `json:"verdicts"`
 	}
 	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 		c.logger.Error("failed to unmarshal review metrics payload", "error", err)
@@ -424,6 +450,46 @@ func (c *Collector) recordReviewMetrics(msg *models.BusMessage) {
 		c.store.Record("review.revision_cycles", float64(payload.RevisionCount), map[string]string{
 			DimReviewer: payload.Reviewer,
 		})
+	}
+
+	// C4 persistence: one verdict row per payload verdict, identities
+	// verbatim. The judge agent falls back to the legacy `reviewer` key
+	// (producers that enriched before judge_agent_id existed still
+	// attribute). Lenient rows: an unknown rubric id is kept (RubricID "")
+	// with the raw text preserved in Detail — rows are never dropped.
+	judgeAgent := payload.JudgeAgentID
+	if judgeAgent == "" {
+		judgeAgent = payload.Reviewer
+	}
+	now := time.Now().UTC()
+	for _, v := range payload.Verdicts {
+		rec := ReviewVerdictRecord{
+			StepID:              payload.StepID,
+			TaskID:              payload.TaskID,
+			Cycle:               payload.Cycle,
+			IsFinal:             payload.IsFinal,
+			RubricID:            v.RubricID,
+			Scope:               v.Scope,
+			Category:            v.Category,
+			Severity:            v.Severity,
+			ReviewedModelID:     payload.ReviewedModelID,
+			JudgeAgentID:        judgeAgent,
+			JudgeModelID:        payload.JudgeModelID,
+			OrchestratorAgentID: payload.OrchestratorAgentID,
+			OrchestratorModelID: payload.OrchestratorModelID,
+			Confidence:          v.Confidence,
+			TraceID:             payload.TraceID,
+			Timestamp:           now,
+		}
+		if err := c.store.RecordReviewVerdict(rec); err != nil {
+			// Vocabulary/insert rejection: degrade, never fail the review
+			// path. The producer already returned to the agent loop.
+			c.logger.Warn("review verdict persistence degraded (row not stored)",
+				"error", err,
+				"step_id", rec.StepID,
+				"rubric_id", rec.RubricID,
+			)
+		}
 	}
 
 	c.store.RecordEvent("review.completed", "info",

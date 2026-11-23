@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/modelrating"
 	"github.com/caimlas/meept/internal/task"
 )
 
@@ -34,6 +35,13 @@ type ReviewResult struct {
 	Confidence float64       `json:"confidence"`
 	ReviewerID string        `json:"reviewer_id"`
 	Duration   time.Duration `json:"duration"`
+
+	// Verdicts carries the rubric grades the review pass produced
+	// (model-rating-metrics-plan C4). Additive + omitempty so every
+	// non-emitting producer (pair_manager, inline-review lane) compiles
+	// and serializes unchanged. The evidence gate and the ReviewManager
+	// reviewer lane are the only v1 emitting producers.
+	Verdicts []modelrating.Verdict `json:"verdicts,omitempty"`
 }
 
 // ReviewPolicy determines which steps require review and how.

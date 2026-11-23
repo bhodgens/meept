@@ -25,6 +25,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/caimlas/meept/internal/modelrating"
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/pkg/models"
 )
@@ -94,6 +95,59 @@ func hasSuccessfulFileEvidence(evs []models.Evidence) bool {
 	return false
 }
 
+// fileEvidenceGateVerdicts derives the defect verdict a deterministic
+// evidence-gate rejection attaches (model-rating-metrics-plan C4: the gate
+// is an EMITTING producer). Every gate rejection is a model-scope defect:
+// the reviewed model narrated a file effect no tool ever performed. The
+// rubric ids come from the frozen C1 catalog; the finding class picks the
+// rubric + severity. Rows always Validate() (C1 vocabulary) so the
+// collector's store write never rejects them.
+func fileEvidenceGateVerdicts(reason string) []modelrating.Verdict {
+	detail := fileEvidenceVerdictDetail(reason)
+	rubric := modelrating.RubricID("MR-PD1") // fabrication drift: narrated effect no tool performed
+	severity := modelrating.SeverityFunctional
+	switch reason {
+	case "denied file write after retry":
+		rubric = modelrating.RubricID("MR-LC1") // requested change did not land
+		severity = modelrating.SeverityBlocking
+	case "zero file evidence after retry":
+		rubric = modelrating.RubricID("MR-LC1")
+		severity = modelrating.SeverityBlocking
+	case "errored file tool":
+		rubric = modelrating.RubricID("MR-TD1") // broken operation left behind
+	}
+	return []modelrating.Verdict{{
+		RubricID:   rubric,
+		Scope:      modelrating.ScopeModel,
+		Category:   modelrating.CategoryIncompleteImplementation,
+		Severity:   severity,
+		Detail:     detail,
+		Confidence: 1.0,
+	}}
+}
+
+// fileEvidenceVerdictDetail turns the gate's internal reason token into the
+// verdict detail line (what the judge found).
+func fileEvidenceVerdictDetail(reason string) string {
+	switch reason {
+	case "denied file write after retry":
+		return "the requested file write was denied by the security policy and no file was changed"
+	case "zero file evidence after retry":
+		return "no file operation was executed even after a retry; the narrated file change did not happen"
+	case "errored file tool":
+		return "the file operation errored and no file was changed despite completion narration"
+	default:
+		return "no file operation was executed; the narrated file change did not happen"
+	}
+}
+
+// withGateVerdicts attaches the evidence-gate defect verdicts to a rejection
+// ReviewResult (same shape the ReviewManager lane emits).
+func withGateVerdicts(result *ReviewResult, reason string) *ReviewResult {
+	result.Verdicts = fileEvidenceGateVerdicts(reason)
+	return result
+}
+
 // fileEvidenceGate enforces the file-shaped evidence contract. It returns
 // nil when the gate is silent (non-file step, or real successful file-tool
 // evidence present) so the normal policy/approval paths run unchanged.
@@ -139,7 +193,7 @@ func (rm *ReviewManager) fileEvidenceGate(step *task.TaskStep, policy *ReviewPol
 				"Task: %s. The file tool reported an error (for file_edit, the anchor text must match the file exactly -- "+
 				"read the file first and retry with the exact existing text, or use file_write to replace the whole file). "+
 				"Do not report completion until a file tool succeeds.", taskLabel)
-		return rm.failFileEvidenceStep(step, feedback, "errored file tool")
+		return withGateVerdicts(rm.failFileEvidenceStep(step, feedback, "errored file tool"), "errored file tool")
 	}
 
 	// T1b (F-NEW-4): the write was security-DENIED. One bounded retry with
@@ -150,7 +204,7 @@ func (rm *ReviewManager) fileEvidenceGate(step *task.TaskStep, policy *ReviewPol
 				"Rejected: the file write for this step was denied by the security policy again after a retry. "+
 					"Task: %s. No file was changed; the step cannot be completed. "+
 					"Ask the user to adjust the working directory or permissions if this path is genuinely required.", taskLabel)
-			return rm.failFileEvidenceStep(step, feedback, "denied file write after retry")
+			return withGateVerdicts(rm.failFileEvidenceStep(step, feedback, "denied file write after retry"), "denied file write after retry")
 		}
 		feedback := fmt.Sprintf(
 			"Rejected: the file write for this step was denied by the security policy, so no file was changed. "+
@@ -159,11 +213,11 @@ func (rm *ReviewManager) fileEvidenceGate(step *task.TaskStep, policy *ReviewPol
 				"Do not report completion until the write succeeds.", taskLabel)
 		rm.logger.Warn("File-evidence gate: security-denied file write; one workdir-relative retry allowed",
 			"step_id", step.ID, "task_id", step.TaskID, "revision_count", step.RevisionCount)
-		return &ReviewResult{
+		return withGateVerdicts(&ReviewResult{
 			Status:     ReviewRejected,
 			Feedback:   feedback,
 			Confidence: 1.0,
-		}
+		}, "denied file write (retry allowed)")
 	}
 
 	// T1/T3: zero file-tool ToolEvidence. The step narrates a file effect
@@ -192,7 +246,7 @@ func (rm *ReviewManager) fileEvidenceGate(step *task.TaskStep, policy *ReviewPol
 			"Rejected: no file operation was executed for this step, even after a retry. "+
 				"Task: %s. The file is unchanged; the step cannot be completed. "+
 				"Run the file edit/write tool and verify the change on disk before reporting completion.", taskLabel)
-		return rm.failFileEvidenceStep(step, feedback, "zero file evidence after retry")
+		return withGateVerdicts(rm.failFileEvidenceStep(step, feedback, "zero file evidence after retry"), "zero file evidence after retry")
 	}
 	feedback := fmt.Sprintf(
 		"Rejected: no file operation was executed for this step -- the tool ledger shows zero file-tool executions, "+
@@ -201,11 +255,11 @@ func (rm *ReviewManager) fileEvidenceGate(step *task.TaskStep, policy *ReviewPol
 			"then verify the file actually changed before reporting completion.", taskLabel)
 	rm.logger.Warn("File-evidence gate: file-shaped step with zero file-tool evidence; forced evidence review",
 		"step_id", step.ID, "task_id", step.TaskID, "tool_hint", step.ToolHint)
-	return &ReviewResult{
+	return withGateVerdicts(&ReviewResult{
 		Status:     ReviewRejected,
 		Feedback:   feedback,
 		Confidence: 1.0,
-	}
+	}, "zero file evidence")
 }
 
 // failFileEvidenceStep marks the step failed (terminal) and returns the

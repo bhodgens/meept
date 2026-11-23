@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/modelrating"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/pkg/models"
@@ -906,21 +907,126 @@ func (rm *ReviewManager) HandleReviewResult(ctx context.Context, stepID string, 
 	return revisions, outErr
 }
 
+// verdictWireShape is the FROZEN wire element for one verdict on the
+// review payloads (model-rating-metrics-plan C4). modelrating.Verdict has
+// no JSON tags of its own (the C1 catalog struct is store-facing), so the
+// emitter maps onto these snake_case keys explicitly — marshaling the Go
+// field names instead is a wire defect the gate pins.
+type verdictWireShape struct {
+	RubricID   string  `json:"rubric_id"`
+	Scope      string  `json:"scope"`
+	Category   string  `json:"category"`
+	Severity   string  `json:"severity"`
+	Detail     string  `json:"detail"`
+	Confidence float64 `json:"confidence"`
+}
+
+// verdictsToWire maps the ReviewResult's verdicts onto the frozen C4 wire
+// shape. Lenient by contract: an unknown rubric id keeps its row (RubricID
+// carries the id as-is — catalog membership is NOT enforced on emission;
+// the empty-detail fallback keeps the row rather than dropping it).
+func verdictsToWire(verdicts []modelrating.Verdict) []verdictWireShape {
+	if len(verdicts) == 0 {
+		return nil
+	}
+	out := make([]verdictWireShape, 0, len(verdicts))
+	for _, v := range verdicts {
+		detail := v.Detail
+		if detail == "" {
+			detail = "no detail provided"
+		}
+		out = append(out, verdictWireShape{
+			RubricID:   string(v.RubricID),
+			Scope:      string(v.Scope),
+			Category:   string(v.Category),
+			Severity:   string(v.Severity),
+			Detail:     detail,
+			Confidence: v.Confidence,
+		})
+	}
+	return out
+}
+
+// agentModelRefForSpec resolves an agent's model id through the SAME
+// precedence chain modelRefForAgent uses at loop creation (registry.go):
+// spec.Model > spec.ModelAlias > same-id alias > "". It returns the model
+// REFERENCE (alias or direct ref), "" when nothing binds — the model id is
+// never guessed. Nil-safe: no registry/spec means no identity.
+func (rm *ReviewManager) agentModelRefForSpec(agentID string) string {
+	if rm == nil || rm.registry == nil || agentID == "" {
+		return ""
+	}
+	spec, ok := rm.registry.GetSpec(agentID)
+	if !ok {
+		return ""
+	}
+	return modelRefForAgent(spec, rm.registry.resolver)
+}
+
+// reviewEmitterIdentities gathers the frozen C4 identity fields for a
+// review emission. Everything degrades to "" rather than being guessed:
+//
+//	reviewed_model_id    the step actor's model ref ("" unresolvable)
+//	judge_agent_id       result.ReviewerID (the grading agent)
+//	judge_model_id       the judge's model ref via modelRefForAgent
+//	orchestrator_*       the task's AssignedAgent + its model ref
+func (rm *ReviewManager) reviewEmitterIdentities(stepID, taskID, judgeAgentID string) (reviewedModelID, judgeModelID, orchestratorAgentID, orchestratorModelID string) {
+	// Reviewed actor: the step's AgentID (the implementer being graded).
+	if rm.stepStore != nil && stepID != "" {
+		if step, err := rm.stepStore.GetByID(stepID); err == nil && step != nil {
+			reviewedModelID = rm.agentModelRefForSpec(step.AgentID)
+		}
+	}
+	judgeModelID = rm.agentModelRefForSpec(judgeAgentID)
+	if rm.taskStore != nil && taskID != "" {
+		if t, err := rm.taskStore.GetByID(taskID); err == nil && t != nil {
+			orchestratorAgentID = t.AssignedAgent
+			orchestratorModelID = rm.agentModelRefForSpec(t.AssignedAgent)
+		}
+	}
+	return reviewedModelID, judgeModelID, orchestratorAgentID, orchestratorModelID
+}
+
+// enrichedReviewPayload builds the C4 payload map shared by BOTH review
+// topics (step.review_completed and task.review_completed must carry
+// identical payloads). isFinal is terminal-finality of THIS pass:
+// needs_info is never final; approved/rejected are. trace_id stays ""
+// until leaf 02 stamps it (the key exists from day one).
+func (rm *ReviewManager) enrichedReviewPayload(stepID, taskID string, result *ReviewResult, revisionCount int) map[string]any {
+	isFinal := result.Status != ReviewNeedsInfo
+	reviewedModelID, judgeModelID, orchestratorAgentID, orchestratorModelID := rm.reviewEmitterIdentities(stepID, taskID, result.ReviewerID)
+	return map[string]any{
+		KeyStepID:               stepID,
+		KeyTaskID:               taskID,
+		"status":                string(result.Status),
+		"feedback":              result.Feedback,
+		"confidence":            result.Confidence,
+		"reviewer":              result.ReviewerID,
+		"revision_count":        revisionCount,
+		"verdicts":              verdictsToWire(result.Verdicts),
+		"reviewed_model_id":     reviewedModelID,
+		"judge_agent_id":        result.ReviewerID,
+		"judge_model_id":        judgeModelID,
+		"orchestrator_agent_id": orchestratorAgentID,
+		"orchestrator_model_id": orchestratorModelID,
+		"trace_id":              "",
+		"cycle":                 revisionCount,
+		"is_final":              isFinal,
+	}
+}
+
 // publishReviewEvent publishes a review completion event.
 func (rm *ReviewManager) publishReviewEvent(stepID, taskID string, result *ReviewResult, revisionCount int) {
 	if rm.bus == nil {
 		return
 	}
 
-	msg, err := models.NewBusMessage(models.MessageTypeEvent, "review-manager", map[string]any{
-		KeyStepID:        stepID,
-		KeyTaskID:        taskID,
-		"status":         string(result.Status),
-		"feedback":       result.Feedback,
-		"confidence":     result.Confidence,
-		"reviewer":       result.ReviewerID,
-		"revision_count": revisionCount,
-	})
+	// ONE construction site: both topics carry the identical enriched
+	// payload (C4). The task.* twin exists for subscribers (TUI,
+	// ChatHandler) that listen on task.* but not step.*.
+	payload := rm.enrichedReviewPayload(stepID, taskID, result, revisionCount)
+
+	msg, err := models.NewBusMessage(models.MessageTypeEvent, "review-manager", payload)
 	if err != nil {
 		rm.logger.Error("Failed to create review message", "error", err)
 		return
@@ -930,15 +1036,7 @@ func (rm *ReviewManager) publishReviewEvent(stepID, taskID string, result *Revie
 
 	// Also publish under task.* prefix for backward compatibility with
 	// subscribers (TUI, ChatHandler) that subscribe to task.* but not step.*.
-	taskMsg, taskErr := models.NewBusMessage(models.MessageTypeEvent, "review-manager", map[string]any{
-		KeyStepID:        stepID,
-		KeyTaskID:        taskID,
-		"status":         string(result.Status),
-		"feedback":       result.Feedback,
-		"confidence":     result.Confidence,
-		"reviewer":       result.ReviewerID,
-		"revision_count": revisionCount,
-	})
+	taskMsg, taskErr := models.NewBusMessage(models.MessageTypeEvent, "review-manager", payload)
 	if taskErr != nil {
 		rm.logger.Error("Failed to create task.review_completed message", "error", taskErr)
 		return
