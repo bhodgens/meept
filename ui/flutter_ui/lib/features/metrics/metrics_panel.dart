@@ -201,6 +201,8 @@ class _MetricsContent extends StatelessWidget {
           _buildGradesSection('grades by model', state.reviewGrades['model']),
           const SizedBox(height: 16),
           _buildGradesSection('grades by judge', state.reviewGrades['judge']),
+          const SizedBox(height: 16),
+          _buildBreakdownSection(state.reviewBreakdown),
         ],
       ),
     );
@@ -422,6 +424,38 @@ class _MetricsContent extends StatelessWidget {
                 ],
             ],
           ),
+      ],
+    );
+  }
+
+  /// The model x category breakdown (one compact line per pair). [rows]
+  /// is null before the first fetch lands ('fetching...' note); empty
+  /// rows render the 'no breakdown' note.
+  Widget _buildBreakdownSection(List<ReviewBreakdownRow>? rows) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _SectionLabel('model x category breakdown'),
+        if (rows == null)
+          const _SectionNote('fetching breakdown...')
+        else if (rows.isEmpty)
+          const _SectionNote('no breakdown')
+        else
+          // Preserve daemon order - do not re-sort.
+          for (final r in rows)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 1),
+              child: Text(
+                '${r.model} ${r.category} ${_formatCount(r.count)}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: CyberpunkTypography.bodySmall.copyWith(
+                  fontFamily: 'SourceCodePro',
+                  fontSize: 11,
+                  color: CyberpunkColors.lightGray,
+                ),
+              ),
+            ),
       ],
     );
   }

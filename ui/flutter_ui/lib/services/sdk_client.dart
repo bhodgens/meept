@@ -12,7 +12,12 @@ import 'package:meept_client/meept_client.dart' as sdk;
 
 import '../core/constants.dart';
 import '../models/api_models.dart'
-    show SearchResults, SemanticSearchResults, SearchScope, SearchScopeX;
+    show
+        ReviewBreakdownRow,
+        SearchResults,
+        SemanticSearchResults,
+        SearchScope,
+        SearchScopeX;
 import 'daemon_cert_pinner.dart';
 import 'storage_service.dart';
 
@@ -1070,6 +1075,22 @@ class SdkApiClient {
       query: {'window': window, 'group_by': groupBy},
     );
     return raw;
+  }
+
+  /// GET /api/v1/metrics/reviews?group_by=model_category — the model x
+  /// category `breakdown` array (issue #168 follow-up). [window] is one of
+  /// `24h` | `7d` | `30d` | `all`. In this mode the plain `rows` array
+  /// stays empty; the breakdown is always present and degrades to empty on
+  /// store errors, so this never intentionally throws on the "no data"
+  /// path.
+  Future<List<ReviewBreakdownRow>> getReviewBreakdown({
+    String window = '24h',
+  }) async {
+    final raw = await _get(
+      '/api/v1/metrics/reviews',
+      query: {'window': window, 'group_by': 'model_category'},
+    );
+    return ReviewBreakdownRow.parseList(raw['breakdown']) ?? const [];
   }
 
   // ===== Memory =====

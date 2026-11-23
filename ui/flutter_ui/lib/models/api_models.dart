@@ -1149,6 +1149,46 @@ class ReviewGrades {
   );
 }
 
+/// One row of the `breakdown` array (issue #168 follow-up): review count
+/// for one model x category pair. Returned when the reviews endpoint is
+/// queried with `group_by=model_category`; the plain `rows` array stays
+/// empty in that mode. JSON keys map verbatim.
+class ReviewBreakdownRow {
+  final String model;
+  final String category;
+  final int count;
+
+  const ReviewBreakdownRow({
+    required this.model,
+    required this.category,
+    this.count = 0,
+  });
+
+  factory ReviewBreakdownRow.fromJson(Map<String, dynamic> json) =>
+      ReviewBreakdownRow(
+        model: _metricStringOrEmpty(json['model']),
+        category: _metricStringOrEmpty(json['category']),
+        count: _metricIntOrZero(json['count']),
+      );
+
+  /// Parse the `breakdown` array. Returns null when [raw] is absent or not
+  /// a list (degraded payload); returns an empty list when present but
+  /// empty. Malformed entries are skipped so one bad row cannot blank the
+  /// rest of the section.
+  static List<ReviewBreakdownRow>? parseList(Object? raw) {
+    if (raw is! List) return null;
+    final out = <ReviewBreakdownRow>[];
+    for (final item in raw) {
+      final map = _metricStringMap(item);
+      if (map == null) continue;
+      final row = ReviewBreakdownRow.fromJson(map);
+      if (row.model.isEmpty && row.category.isEmpty) continue;
+      out.add(row);
+    }
+    return out;
+  }
+}
+
 // ===== Plan Models =====
 
 @freezed

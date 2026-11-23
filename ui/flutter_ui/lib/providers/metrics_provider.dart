@@ -31,6 +31,11 @@ class MetricsState {
   /// from a degraded payload.
   final Map<String, ReviewGrades?> reviewGrades;
 
+  /// Model x category review counts from the same endpoint with
+  /// `group_by=model_category`. Null until the first fetch lands; failures
+  /// leave the previous value intact (best-effort, never blanks tiles).
+  final List<ReviewBreakdownRow>? reviewBreakdown;
+
   const MetricsState({
     this.current,
     this.isLoading = false,
@@ -40,6 +45,7 @@ class MetricsState {
     this.totals,
     this.receivedAt,
     this.reviewGrades = const {},
+    this.reviewBreakdown,
   });
 
   MetricsState copyWith({
@@ -50,6 +56,7 @@ class MetricsState {
     Object? agentUsage = _unset,
     Object? totals = _unset,
     Object? reviewGrades = _unset,
+    Object? reviewBreakdown = _unset,
     DateTime? receivedAt,
   }) {
     return MetricsState(
@@ -72,6 +79,11 @@ class MetricsState {
           : (reviewGrades is Map<String, ReviewGrades?>
                 ? reviewGrades
                 : const {}),
+      reviewBreakdown: identical(reviewBreakdown, _unset)
+          ? this.reviewBreakdown
+          : (reviewBreakdown is List<ReviewBreakdownRow>
+                ? reviewBreakdown
+                : null),
       receivedAt: receivedAt ?? this.receivedAt,
     );
   }
@@ -107,6 +119,7 @@ class MetricsNotifier extends StateNotifier<MetricsState> {
     _fetchMetrics();
     unawaited(fetchReviewGrades(window: '30d', groupBy: 'model'));
     unawaited(fetchReviewGrades(window: '30d', groupBy: 'judge'));
+    unawaited(fetchReviewBreakdown());
 
     // Subscribe to WebSocket metrics updates
     if (websocket.isConnected) {
@@ -148,6 +161,7 @@ class MetricsNotifier extends StateNotifier<MetricsState> {
       // carry them (separate endpoint), so a fresh state must not reset
       // the grades sections back to 'fetching...'.
       reviewGrades: state.reviewGrades,
+      reviewBreakdown: state.reviewBreakdown,
     );
   }
 
@@ -198,6 +212,7 @@ class MetricsNotifier extends StateNotifier<MetricsState> {
     await _fetchMetrics();
     await fetchReviewGrades(window: '30d', groupBy: 'model');
     await fetchReviewGrades(window: '30d', groupBy: 'judge');
+    await fetchReviewBreakdown();
   }
 
   /// Fetch review-verdict grades for one group_by and merge the decoded
@@ -230,6 +245,23 @@ class MetricsNotifier extends StateNotifier<MetricsState> {
           groupBy: ReviewGrades(window: window, groupBy: groupBy),
         },
       );
+    }
+  }
+
+  /// Fetch the model x category breakdown (same endpoint, `group_by=
+  /// model_category`) and store the rows. Best-effort: on failure the
+  /// previous value (or null before the first success) is kept, so the
+  /// breakdown section never blanks the existing tiles.
+  Future<void> fetchReviewBreakdown({String window = '24h'}) async {
+    try {
+      _checkMounted();
+      final rows = await sdkClient.getReviewBreakdown(window: window);
+      if (_disposed) return;
+      state = state.copyWith(reviewBreakdown: rows);
+    } catch (_) {
+      // Degraded: keep whatever rows we had; the panel shows the
+      // placeholder until a later poll succeeds.
+      if (_disposed) return;
     }
   }
 
