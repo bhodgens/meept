@@ -1,7 +1,7 @@
 {
   "version": 1,
   "generated": "2026-11-20",
-"comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage \u2014 behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet. Flutter surface (ui/flutter_ui/**) is covered Dart-side by the gui-flows suite (gui-terminal-01, gui-session-01, gui-quota-01, gui-stream-01, gui-stream-02) against a wire-shape stub: `cd ui/flutter_ui && flutter test test/e2e`. The ui/** path_map keys below make a Flutter change select that suite; scripts/e2e-affected.sh dispatches on suites[].runner to run the Dart command instead of go test (the pre-commit-e2e Go hook does not scan Dart files, so `make e2e-affected-area AREA=gui-flows` / CI's e2e-gui job is the gate). New-package census (pre-commit-e2e): every NEW internal/|pkg/|cmd/ package dir in a commit's staged ADDITIONS must match a path_map key (bidirectional slash-boundary prefix, trailing slashes stripped) or an 'exempt' entry mapping dir -> non-empty reason string; exempt entries are printed as residual risk on every hook run.",
+  "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage \u2014 behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet. Flutter surface (ui/flutter_ui/**) is covered Dart-side by the gui-flows suite (gui-terminal-01, gui-session-01, gui-quota-01, gui-stream-01, gui-stream-02) against a wire-shape stub: `cd ui/flutter_ui && flutter test test/e2e`. The ui/** path_map keys below make a Flutter change select that suite; scripts/e2e-affected.sh dispatches on suites[].runner to run the Dart command instead of go test (the pre-commit-e2e Go hook does not scan Dart files, so `make e2e-affected-area AREA=gui-flows` / CI's e2e-gui job is the gate). New-package census (pre-commit-e2e): every NEW internal/|pkg/|cmd/ package dir in a commit's staged ADDITIONS must match a path_map key (bidirectional slash-boundary prefix, trailing slashes stripped) or an 'exempt' entry mapping dir -> non-empty reason string; exempt entries are printed as residual risk on every hook run.",
   "path_map": {
     "e2e/suites/smoke": [
       "smoke"
@@ -488,7 +488,9 @@
       "github-intake",
       "agent-groups",
       "llm-serving-tiers",
-      "plan-critic"
+      "plan-critic",
+      "telnyx-sms",
+      "notification-bot"
     ],
     "internal/agent/plan_critic_child.go": [
       "plan-critic"
@@ -597,7 +599,9 @@
       "state-restart",
       "task-state",
       "tool-provider-seam",
-      "turn-journal"
+      "turn-journal",
+      "step-pipeline",
+      "notification-bot"
     ],
     "internal/daemon/context_assembler_wiring.go": [
       "context-memory-engine"
@@ -717,13 +721,15 @@
       "office-skills"
     ],
     "config/meept.json5": [
-      "tui-gui-consistency"
+      "tui-gui-consistency",
+      "notification-bot"
     ],
     "docs/research/rumble2flash-review.md": [
       "voice-lifecycle"
     ],
     "e2e/manifest.json": [
-      "voice_tts_stt"
+      "voice_tts_stt",
+      "notification-bot"
     ],
     "e2e/suites/employee-markdown": [
       "employee-markdown"
@@ -832,6 +838,52 @@
     ],
     "e2e/suites/tui-flows": [
       "tui-flows"
+    ],
+    "e2e/suites/telnyx-sms/outbound_egress_gates_test.go": [
+      "telnyx-sms"
+    ],
+    "e2e/suites/voice-lifecycle/outbound_allowlist_test.go": [
+      "voice-lifecycle"
+    ],
+    "internal/voice/dial.go": [
+      "voice-lifecycle"
+    ],
+    "pkg/security/permissions.go": [
+      "voice-lifecycle"
+    ],
+    "internal/daemon/messaging_arming.go": [
+      "voice-lifecycle"
+    ],
+    "internal/daemon/contact_wiring.go": [
+      "voice-lifecycle",
+      "telnyx-sms"
+    ],
+    "internal/telnyx/messaging.go": [
+      "telnyx-sms"
+    ],
+    "internal/services/security_notify.go": [
+      "notification-bot"
+    ],
+    "internal/services/quota_notifier.go": [
+      "notification-bot"
+    ],
+    "internal/daemon/notification_bot_wiring.go": [
+      "notification-bot"
+    ],
+    "e2e/suites/telnyx-sms/daily_send_cap_test.go": [
+      "telnyx-sms"
+    ],
+    "e2e/suites/voice-lifecycle/daily_dial_cap_test.go": [
+      "voice-lifecycle"
+    ],
+    "e2e/suites/voice-lifecycle/contact_confirmation_test.go": [
+      "voice-lifecycle"
+    ],
+    "internal/tools/mcp/version_pin.go": [
+      "notification-bot"
+    ],
+    "e2e/suites/notification-bot/mcp_version_pin_test.go": [
+      "notification-bot"
     ]
   },
   "exempt": {},
@@ -1663,6 +1715,12 @@
       "dir": "e2e/suites/dispatch-trace",
       "status": "implemented",
       "note": "02-routing TEST-GATE T7 (C5 dispatch evidence, F7): frozen usability turns through the hermetic stack; session.dispatch_trace dual-key + turn_id + input_summary + HTTP twin. RED until 02-routing/02 lands."
+    },
+    {
+      "name": "notification-bot",
+      "dir": "e2e/suites/notification-bot",
+      "status": "implemented",
+      "note": "Configurable MCP security-alert channel [notifications].security_channel: \"\" emits nothing, \"bot\" routes to TriggerSecurityAlert, \"push\" publishes security.alert via QuotaNotifier/PushService (#166/#167). Hermetic."
     }
   ],
   "scenarios": [
@@ -2715,6 +2773,33 @@
       "title": "remember queues a proposal without applying the change to the target file",
       "paths": [
         "internal/tools/builtin/remember.go"
+      ]
+    },
+    {
+      "id": "tools-jobs-01",
+      "suite": "tools-jobs",
+      "diff": "M",
+      "title": "job_start with a shell command returns an opaque job- prefixed handle and status running|scheduled",
+      "paths": [
+        "internal/tools/builtin/tool_job_start.go"
+      ]
+    },
+    {
+      "id": "tools-jobs-02",
+      "suite": "tools-jobs",
+      "diff": "M",
+      "title": "job_status reads the settled one-shot result with exit code 0 and a bounded output window from the spill file",
+      "paths": [
+        "internal/tools/builtin/tool_job_status.go"
+      ]
+    },
+    {
+      "id": "tools-jobs-03",
+      "suite": "tools-jobs",
+      "diff": "M",
+      "title": "job_stop cancels an in-flight sleep and returns status cancelled with exit code 137/143; it does not delete a recurring schedule (schedule_delete does)",
+      "paths": [
+        "internal/tools/builtin/tool_job_stop.go"
       ]
     },
     {
@@ -6263,6 +6348,248 @@
         "internal/agent/handler.go",
         "internal/rpc/chat_submit.go",
         "internal/services/chat_service.go"
+      ]
+    },
+    {
+      "id": "seatbelt-01",
+      "suite": "seatbelt",
+      "diff": "M",
+      "title": "flag-off local backend runs unconfined with no armed log line (all OS)",
+      "paths": [
+        "internal/runtime/"
+      ]
+    },
+    {
+      "id": "seatbelt-02",
+      "suite": "seatbelt",
+      "diff": "M",
+      "title": "deny_read, allow_write+deny_write, and process rules confine the shell tool on macOS (skipped elsewhere)",
+      "paths": [
+        "internal/runtime/"
+      ]
+    },
+    {
+      "id": "seatbelt-03",
+      "suite": "seatbelt",
+      "diff": "M",
+      "title": "invalid policy fails closed with a REFUSING backend instead of running unconfined (all OS)",
+      "paths": [
+        "internal/runtime/"
+      ]
+    },
+    {
+      "id": "graceful-errors-01",
+      "suite": "graceful-errors",
+      "diff": "M",
+      "title": "empty plan on a non-artifact task degrades to one direct step instead of failing",
+      "paths": [
+        "e2e/suites/graceful-errors/"
+      ]
+    },
+    {
+      "id": "graceful-errors-02",
+      "suite": "graceful-errors",
+      "diff": "M",
+      "title": "ContextTooSmall verdict renders a user-language sentence, never the raw sentinel",
+      "paths": [
+        "e2e/suites/graceful-errors/"
+      ]
+    },
+    {
+      "id": "graceful-errors-03",
+      "suite": "graceful-errors",
+      "diff": "M",
+      "title": "quota error with an unknown schedule still parks with a conservative synthesized unblockAt",
+      "paths": [
+        "e2e/suites/graceful-errors/"
+      ]
+    },
+    {
+      "id": "payload-strip-01",
+      "suite": "payload-strip",
+      "diff": "S",
+      "title": "RPC task steps and list_extended carry no planner scaffolding or raw evidence envelope",
+      "paths": [
+        "internal/task/"
+      ]
+    },
+    {
+      "id": "payload-strip-02",
+      "suite": "payload-strip",
+      "diff": "S",
+      "title": "HTTP task steps endpoint passes the same marker-free assertion",
+      "paths": [
+        "internal/comm/http/"
+      ]
+    },
+    {
+      "id": "payload-strip-03",
+      "suite": "payload-strip",
+      "diff": "S",
+      "title": "strip is display-only; store rows keep the raw scaffolding and envelope",
+      "paths": [
+        "internal/task/"
+      ]
+    },
+    {
+      "id": "step-pipeline-07",
+      "suite": "step-pipeline",
+      "diff": "S",
+      "title": "configured [agent.review] patterns bind into the runtime ReviewPolicy at the daemon seam",
+      "paths": [
+        "internal/agent/review.go",
+        "internal/daemon/components.go"
+      ]
+    },
+    {
+      "id": "telnyx-sms-04",
+      "suite": "telnyx-sms",
+      "diff": "S",
+      "title": "[telnyx-sms] outbound recipient allowlist: an out-of-list E.164 is refused with ErrRecipientNotAllowed BEFORE any Telnyx HTTP POST; in-list send admitted (issue #165 slice 2)",
+      "paths": [
+        "internal/telnyx/messaging.go"
+      ]
+    },
+    {
+      "id": "telnyx-sms-05",
+      "suite": "telnyx-sms",
+      "diff": "S",
+      "title": "[telnyx-sms] unset allowlist + caps keeps backward-compatible all-recipient sends and emits the frozen security warning exactly once at client construction (issue #165 slice 2)",
+      "paths": [
+        "internal/telnyx/messaging.go"
+      ]
+    },
+    {
+      "id": "telnyx-sms-06",
+      "suite": "telnyx-sms",
+      "diff": "S",
+      "title": "[telnyx-sms] per-call cap is enforced before the Telnyx HTTP POST; a refused send consumes no cap budget and returns ErrSendCapExceeded (issue #165 slice 2)",
+      "paths": [
+        "internal/telnyx/messaging.go"
+      ]
+    },
+    {
+      "id": "telnyx-sms-07",
+      "suite": "telnyx-sms",
+      "diff": "S",
+      "title": "[telnyx-sms] per-day cap is enforced before the POST and its thread-safe counter resets on UTC date change via the injected clock (issue #165 slice 2)",
+      "paths": [
+        "internal/telnyx/messaging.go"
+      ]
+    },
+    {
+      "id": "voice-outbound-allowlist-01",
+      "suite": "voice-lifecycle",
+      "diff": "S",
+      "title": "[F03 #165 slice 3] outbound dial to a number outside voice.allowed_numbers returns ErrNumberNotAllowed before any Telnyx POST, audit row, or effect reservation",
+      "paths": [
+        "internal/voice/dial.go",
+        "e2e/suites/voice-lifecycle/outbound_allowlist_test.go"
+      ]
+    },
+    {
+      "id": "voice-outbound-confirmation-01",
+      "suite": "voice-lifecycle",
+      "diff": "S",
+      "title": "[F03 #165 slice 4] contact_out_of_allowlist is RiskHigh with an unconditional NeedsConfirm confirmation gate while the static contact row stays MEDIUM",
+      "paths": [
+        "pkg/security/permissions.go",
+        "e2e/suites/voice-lifecycle/outbound_allowlist_test.go"
+      ]
+    },
+    {
+      "id": "voice-messaging-warning-01",
+      "suite": "voice-lifecycle",
+      "diff": "S",
+      "title": "[F03 #165 slice 5] messaging enabled with no allowlist/cap emits the exact WARNING at arming; disabled default boot emits nothing",
+      "paths": [
+        "internal/daemon/messaging_arming.go"
+      ]
+    },
+    {
+      "id": "sec-notify-01",
+      "suite": "notification-bot",
+      "diff": "S",
+      "title": "security_channel=\"\" (default) emits nothing: no bot event, no bus publish — byte-identical boot",
+      "paths": [
+        "internal/services/security_notify.go",
+        "config/meept.json5"
+      ]
+    },
+    {
+      "id": "sec-notify-02",
+      "suite": "notification-bot",
+      "diff": "M",
+      "title": "security_channel=\"bot\" emits a security-titled NotificationEvent that the real NotificationBot routes to TriggerSecurityAlert; nil publisher seam is inert",
+      "paths": [
+        "internal/services/security_notify.go",
+        "internal/daemon/notification_bot_wiring.go",
+        "internal/config/schema.go"
+      ]
+    },
+    {
+      "id": "sec-notify-03",
+      "suite": "notification-bot",
+      "diff": "M",
+      "title": "security_channel=\"push\" publishes typed security.alert topic and QuotaNotifier delivers via PushService; separate source+message dedup; quota ledger untouched",
+      "paths": [
+        "internal/services/security_notify.go",
+        "internal/services/quota_notifier.go",
+        "internal/daemon/components.go"
+      ]
+    },
+    {
+      "id": "voice-daily-dial-cap-01",
+      "suite": "voice-lifecycle",
+      "diff": "S",
+      "title": "[165-followup] operator-configurable voice.daily_dial_cap binds into DialConfig; cap=1 refuses the second dial with ErrDailyCapReached before any Telnyx POST, audit row, or effect reservation",
+      "paths": [
+        "internal/config/schema.go",
+        "config/meept.json5",
+        "internal/daemon/voice_wiring.go",
+        "internal/voice/dial.go",
+        "e2e/suites/voice-lifecycle/daily_dial_cap_test.go"
+      ]
+    },
+    {
+      "id": "voice-daily-dial-cap-02",
+      "suite": "voice-lifecycle",
+      "diff": "S",
+      "title": "[165-followup] daily dial counter is durable: a fresh Dialer over the same counter file refuses the next dial at the cap after a simulated restart; counter file is 0600 and atomic-rename written",
+      "paths": [
+        "internal/voice/dial.go",
+        "e2e/suites/voice-lifecycle/daily_dial_cap_test.go"
+      ]
+    },
+    {
+      "id": "telnyx-sms-08",
+      "suite": "telnyx-sms",
+      "diff": "S",
+      "title": "[165-followup] outbound SMS per-day cap counter is durable: a fresh telnyx.Client over the same counter file refuses the next send with ErrSendCapExceeded after a simulated restart, before any HTTP POST; UTC rollover resets the durable counter",
+      "paths": [
+        "internal/telnyx/messaging.go",
+        "internal/daemon/contact_wiring.go",
+        "e2e/suites/telnyx-sms/daily_send_cap_test.go"
+      ]
+    },
+    {
+      "id": "voice-outbound-confirmation-02",
+      "suite": "voice-lifecycle",
+      "diff": "S",
+      "title": "[F03 follow-up] contact_out_of_allowlist is RiskHigh/confirm, static contact stays MEDIUM, and the wiring allowlist uses dial normalization",
+      "paths": [
+        "internal/daemon/contact_wiring.go",
+        "e2e/suites/voice-lifecycle/contact_confirmation_test.go"
+      ]
+    },
+    {
+      "id": "mcp-version-pin-01",
+      "suite": "notification-bot",
+      "diff": "S",
+      "title": "[issue #166] unpinned npx/uvx MCP commands are refused with a security error that names the server and the exact fix",
+      "paths": [
+        "internal/tools/mcp/version_pin.go",
+        "e2e/suites/notification-bot/mcp_version_pin_test.go"
       ]
     }
   ]

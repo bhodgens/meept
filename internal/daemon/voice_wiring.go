@@ -193,6 +193,14 @@ type VoiceWiring struct {
 	cfg    config.VoiceConfig
 	logger *slog.Logger
 
+	// dailyCounter is the shared, durable per-day outbound-egress counter
+	// (issue #165 follow-up). Constructed once in WireVoice from the
+	// voice state dir and handed to BOTH the dialer and the telnyx SMS
+	// client in BuildContactChain, so dials and sends share one restart-
+	// safe file but keep distinct (kind, scope) keys. Nil when no cap is
+	// configured (then neither path touches the file).
+	dailyCounter *voice.DailyCounter
+
 	// caller is the inbound caller-authz resolver slot (caller-authz
 	// leaf 02). Nil resolver reads fail-soft to Info{Number} at the
 	// answer site; components.go arms it with the contact-store resolver
@@ -644,6 +652,14 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 	// closed) and the phone side stays visibly disabled while the local
 	// leg lives.
 	var dialer *voice.Dialer
+	// Durable daily egress cap: one shared counter for dial + SMS, path
+	// derived from the voice state dir (no new config field). Constructed
+	// only when a cap is configured so a default/zero boot touches no
+	// file and stays byte-identical.
+	var dailyCounter *voice.DailyCounter
+	if cfg.DailyDialCap > 0 || cfg.Messaging.MaxMessagesPerDay > 0 {
+		dailyCounter = voice.NewDailyCounter(config.MeeptPath("voice", "daily_counters.json"))
+	}
 	if phoneEnabled {
 		var audit voice.AuditWriter
 		if deps.Audit != nil {
@@ -656,6 +672,8 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 			ConnectionID:    cfg.ConnectionID,
 			FromNumber:      cfg.FromNumber,
 			TimeoutSecs:     cfg.TimeoutSecs,
+			DailyDialCap:    cfg.DailyDialCap,
+			Counter:         dailyCounter,
 			// Outbound twin of LocalDeps.Hold. Nil is not used here:
 			// the phone leg is armed, so the hold is wired. A nil
 			// employee cannot happen (WireVoiceEmployee already
@@ -689,6 +707,7 @@ func WireVoice(ctx context.Context, deps WireVoiceDeps) (*VoiceWiring, error) {
 		displayStore:   deps.ContactDisplayStore,
 		cfg:            cfg,
 		sessions:       deps.Sessions,
+		dailyCounter:   dailyCounter,
 		logger:         vlog,
 		caller:         callerSlot,
 		plainOpts: commhttp.PlainListenerOptions{

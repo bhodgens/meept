@@ -5309,13 +5309,17 @@ func DefaultConfig() *Config {
 			// derived default STT dial URL when stt_provider = "rumble"
 			// and stt_base_url is empty. Boot is byte-identical for every
 			// other STT provider.
-			RumbleRuntime:        DefaultVoiceRumbleRuntimeConfig(),
-			IdleStopSeconds:      30,
-			Filler:               []string{"Hold on, let me check."},
-			SupervisorEnabled:    true,
-			SupervisorTimeoutMs:  400,
-			TimeoutSecs:          30,
-			MaxConcurrentCalls:   2,
+			RumbleRuntime:       DefaultVoiceRumbleRuntimeConfig(),
+			IdleStopSeconds:     30,
+			Filler:              []string{"Hold on, let me check."},
+			SupervisorEnabled:   true,
+			SupervisorTimeoutMs: 400,
+			TimeoutSecs:         30,
+			MaxConcurrentCalls:  2,
+			// DailyDialCap 0 = unlimited outbound dials (backward
+			// compatible; issue #165 follow-up). Explicit here so an
+			// operator reading the defaults sees the unit/convention.
+			DailyDialCap:         0,
 			MaxCallMinutes:       15,
 			SilencePromptSeconds: 45,
 			// Dedicated dead-air nudge + the hangup window after it.
@@ -5363,7 +5367,14 @@ func DefaultConfig() *Config {
 			// consumers may mutate without aliasing the default.
 			UnapprovedCallerAllowedTools: DefaultUnapprovedCallerAllowedTools(),
 			Local:                        LocalConfig{Enabled: false, BargeInRms: 3000},
-			Messaging:                    MessagingConfig{Enabled: false, FromNumber: "", ProfileID: "", DLRWaitSeconds: 30},
+			Messaging: MessagingConfig{
+				Enabled: false, FromNumber: "", ProfileID: "", DLRWaitSeconds: 30,
+				AllowedNumbers: nil, // empty = all recipients (backward compatible)
+				// MaxMessagesPerCall / MaxMessagesPerDay are both 0 = unlimited
+				// (backward compatible; issue #165 slices 1-2).
+				MaxMessagesPerCall: 0,
+				MaxMessagesPerDay:  0,
+			},
 		},
 		Contact: ContactConfig{
 			DefaultChannels: []string{"telnyx_voice", "signal_voice", "signal_msg", "telnyx_sms"},
@@ -5555,6 +5566,14 @@ type NotificationsConfig struct {
 	BotRateLimitPerHour int               `json:"bot_rate_limit_per_hour,omitempty" toml:"bot_rate_limit_per_hour"`
 	BotTelegramChatIDs  []string          `json:"bot_telegram_chat_ids,omitempty"   toml:"bot_telegram_chat_ids"`
 	BotTemplates        map[string]string `json:"bot_templates,omitempty"           toml:"bot_templates"`
+
+	// SecurityChannel selects the delivery channel for MCP security alerts
+	// (issues #166/#167): "" (default) emits nothing and preserves the
+	// pre-feature behavior byte-identically; "bot" routes through the
+	// NotificationBot's TriggerSecurityAlert (Telegram); "push" publishes
+	// a security.alert bus event that QuotaNotifier delivers via PushService.
+	// Unknown values are treated as "" (off).
+	SecurityChannel string `json:"security_channel,omitempty" toml:"security_channel"`
 }
 
 // ResolverConfig configures sandboxed-backend selection for [runtime]. It
@@ -6052,18 +6071,25 @@ type VoiceConfig struct {
 	// dead air => nudge at silence_prompt_seconds (S), hangup at S+H.
 	// Default 45 with S default 45 => nudge@45, hangup@90, exactly the
 	// legacy double-window endpoints. 0/negative reuses S (legacy shape).
-	SilenceHangupAfterSeconds int    `json:"silence_hangup_after_seconds" toml:"silence_hangup_after_seconds"`
-	TurnTimeoutSeconds        int    `json:"turn_timeout_seconds"   toml:"turn_timeout_seconds"`
-	MaxConcurrentCalls        int    `json:"max_concurrent_calls"   toml:"max_concurrent_calls"`
-	ReorderWindowFrames       int    `json:"reorder_window_frames"  toml:"reorder_window_frames"`
-	ReorderGapMs              int    `json:"reorder_gap_ms"         toml:"reorder_gap_ms"`
-	TelnyxPublicKey           string `json:"telnyx_public_key"      toml:"telnyx_public_key"`
-	ChildBinaryPath           string `json:"child_binary_path"      toml:"child_binary_path"`
-	LoopbackPlainAddr         string `json:"loopback_plain_addr"    toml:"loopback_plain_addr"`
-	DefaultEmployee           string `json:"default_employee"       toml:"default_employee"`
-	DefaultLeg                string `json:"default_leg"            toml:"default_leg"`
-	TTSModel                  string `json:"tts_model"             toml:"tts_model"`
-	TTSVoice                  string `json:"tts_voice"             toml:"tts_voice"`
+	SilenceHangupAfterSeconds int `json:"silence_hangup_after_seconds" toml:"silence_hangup_after_seconds"`
+	TurnTimeoutSeconds        int `json:"turn_timeout_seconds"   toml:"turn_timeout_seconds"`
+	MaxConcurrentCalls        int `json:"max_concurrent_calls"   toml:"max_concurrent_calls"`
+	// DailyDialCap bounds OUTBOUND DIALS PER LOCAL CALENDAR DAY (the
+	// operator's local day, like the dial counter's day key). Unit: DIALS
+	// PER LOCAL DAY — NOT per hour, NOT per employee. 0 = unlimited
+	// (backward compatible, the default). A positive value is enforced
+	// BEFORE the Telnyx POST, the audit row and the effect reservation;
+	// the counter is durable across a daemon restart. Issue #165 follow-up.
+	DailyDialCap        int    `json:"daily_dial_cap"          toml:"daily_dial_cap"`
+	ReorderWindowFrames int    `json:"reorder_window_frames"  toml:"reorder_window_frames"`
+	ReorderGapMs        int    `json:"reorder_gap_ms"         toml:"reorder_gap_ms"`
+	TelnyxPublicKey     string `json:"telnyx_public_key"      toml:"telnyx_public_key"`
+	ChildBinaryPath     string `json:"child_binary_path"      toml:"child_binary_path"`
+	LoopbackPlainAddr   string `json:"loopback_plain_addr"    toml:"loopback_plain_addr"`
+	DefaultEmployee     string `json:"default_employee"       toml:"default_employee"`
+	DefaultLeg          string `json:"default_leg"            toml:"default_leg"`
+	TTSModel            string `json:"tts_model"             toml:"tts_model"`
+	TTSVoice            string `json:"tts_voice"             toml:"tts_voice"`
 	// TTSRefAudio (json tts_ref_audio) is the path to the CLONE
 	// REFERENCE WAV the qwen3 custom voice is keyed on (plan
 	// 20261113-filler-clips leaf 02). The OpenAI-compatible shim never
@@ -6294,6 +6320,24 @@ type MessagingConfig struct {
 	// behavior stays byte-identical. An explicit false in the doc is
 	// honored (never force-defaulted true at the load boundary).
 	InboundEnabled bool `json:"inbound_enabled" toml:"inbound_enabled"`
+	// AllowedNumbers is the outbound SMS recipient allowlist (E.164).
+	// EMPTY/NIL = all recipients (backward compatible with pre-#165
+	// behavior, where any valid E.164 number was accepted); a non-empty
+	// list permits ONLY exact E.164 matches. The send path
+	// (telnyx.SendSMS2) refuses an out-of-list recipient before any HTTP
+	// POST with ErrRecipientNotAllowed.
+	AllowedNumbers []string `json:"allowed_numbers" toml:"allowed_numbers"`
+	// MaxMessagesPerCall bounds how many messages ONE SendSMS2 call may
+	// dispatch. Unit: MESSAGES PER SEND CALL. 0 = unlimited (backward
+	// compatible). A positive value is enforced before the HTTP POST;
+	// exceeding it returns ErrSendCapExceeded. Slice 1-2 of issue #165.
+	MaxMessagesPerCall int `json:"max_messages_per_call" toml:"max_messages_per_call"`
+	// MaxMessagesPerDay bounds how many messages the client may dispatch
+	// per UTC day. Unit: MESSAGES PER UTC DAY (resets at UTC midnight).
+	// 0 = unlimited (backward compatible). A positive value is enforced
+	// before the HTTP POST; exceeding it returns ErrSendCapExceeded.
+	// Slice 1-2 of issue #165.
+	MaxMessagesPerDay int `json:"max_messages_per_day" toml:"max_messages_per_day"`
 }
 
 // EmployeeLegConfig is one per-agent voice routing default (voice tree

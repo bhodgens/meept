@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/bot"
+	"github.com/caimlas/meept/internal/comm/http"
 	"github.com/caimlas/meept/internal/services"
 )
 
@@ -53,6 +54,60 @@ const defaultPushHistorySize = 1000
 // defaultNotifyRatePerHour is the notification bot's per-hour send cap
 // when [notifications].bot_rate_limit_per_hour is unset.
 const defaultNotifyRatePerHour = 20
+
+// wireSecurityNotifier constructs the configurable MCP security-alert
+// dispatcher (issues #166/#167) from [notifications].security_channel.
+// It is INDEPENDENT of the [notifications].enabled bot kill-switch: the
+// MCP gate seam must exist whenever a channel is selected. With the default
+// "" channel the notifier is off and Notify is a no-op, so boot stays
+// byte-identical. Channel "bot" emits an http.NotificationEvent bearing
+// "security" in the title (NotificationBot.mapEventToTrigger resolves it to
+// TriggerSecurityAlert) through the shared EventEmitter. Channel "push"
+// publishes a typed security.alert bus event consumed by QuotaNotifier.
+//
+// Free function (not a method) per the gate-test convention; tests call
+// wireSecurityNotifier(c) on a minimal Components fixture.
+func wireSecurityNotifier(c *Components) {
+	if c == nil {
+		return
+	}
+	logger := c.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	if c.Config == nil {
+		logger.Debug("security notifier wiring skipped: no config")
+		return
+	}
+	ch := c.Config.Notifications.SecurityChannel
+	sn := services.NewSecurityNotifier(ch, c.msgBus, logger.With("component", "security-notifier"))
+	if sn.Channel() == "bot" {
+		// Typed-nil guard (internal/daemon/AGENTS.md): only assign the
+		// concrete *EventEmitter into the seam when it is non-nil; a
+		// nil emitter would otherwise emit into a dead end silently.
+		if c.NotificationEmitter != nil {
+			emitter := c.NotificationEmitter
+			sn.SetSecurityEventPublisher(func(n services.SecurityNotification) {
+				emitter.Publish(&http.NotificationEvent{
+					ID:        n.ID,
+					Timestamp: n.Timestamp,
+					Type:      http.NotificationType(n.Type),
+					Title:     n.Title,
+					Message:   n.Message,
+				})
+			})
+		} else {
+			logger.Debug("security notifier bot channel has no emitter; alerts will be logged only")
+		}
+	}
+	c.SecurityNotifier = sn
+	// Narrowest seam for the MCP gate (#166): consumers only need a nil
+	// check and a two-string call, never a concrete services dependency.
+	c.SecurityNotify = sn.Notify
+	if sn.Channel() != "" {
+		logger.Info("security alert channel wired", "channel", sn.Channel())
+	}
+}
 
 // wireNotificationBot constructs the notification bot stack when
 // [notifications].enabled=true. Disabled (the default) -> Debug log and

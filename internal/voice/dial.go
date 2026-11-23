@@ -18,6 +18,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -33,11 +35,166 @@ import (
 var (
 	ErrVoiceDisabled    = errors.New("voice: dialing disabled (voice.enabled=false)")
 	ErrNumberNotAllowed = errors.New("voice: target number not in voice.allowed_numbers")
+	ErrDailyCapReached  = errors.New("voice: outbound dial daily cap reached")
 	ErrNoPublicURL      = errors.New("voice: voice.public_stream_url not configured")
 	ErrNoConnectionID   = errors.New("voice: voice.connection_id not configured")
 	ErrBusy             = errors.New("voice: call registry busy (over capacity or employee already live)")
 	ErrDuplicateTarget  = errors.New("voice: a live call to this target already exists")
 )
+
+// DefaultDailyDialCap is retained as a deprecated compile-compatibility
+// alias for the old build-time ceiling. The cap is now operator-configured
+// via VoiceConfig.DailyDialCap (voice.daily_dial_cap); this constant is NOT
+// consulted by Dial any more. 0 means unlimited in both shapes.
+//
+// Deprecated: wire cfg.DailyDialCap through the daemon instead.
+const DefaultDailyDialCap = 0
+
+// DailyCounter is a durable, restart-safe per-day counter. File shape:
+// {"counts":{"<day>|<scope>":count}}. The day is part of the key so a
+// local-day dial scope and a UTC-day SMS scope coexist in one file without
+// one resetting the other at a midnight boundary. Old entries age out
+// lazily (one row per scope per day the daemon is live). The file is
+// written 0600 and replaced by atomic rename, so a crash mid-write leaves
+// either the old file or the new one (never a truncated one). TryInc
+// serializes read-modify-write under mu.
+//
+// WHY FILE-BASED AND NOT A SQLite daily_counters TABLE: the three existing
+// SQLite stores and their schema declarations are all OUTSIDE the file set
+// this change may edit — internal/effects/ledger_sqlite.go:29
+// (effectsLedgerSchema) + internal/effects/effects.go:117 (Ledger interface,
+// implemented by MemoryLedger, SQLiteLedger AND test fakes), internal/voice/
+// callstore.go:40 (callStoreSchema) and internal/sms/store.go:56
+// (smsStoreSchema). The two wiring files in scope are restricted to config
+// pass-through; plumbing a new SQL handle would mean editing components.go
+// and those store packages — a broad change this follow-up must not make.
+// The file path is DERIVED from the state dir (no new config field): the
+// daemon passes config.MeeptPath("voice", "daily_counters.json"). A zero
+// DailyCounter (path == "") keeps an in-memory map: that is the legacy
+// in-process behavior for hand-built dialers, byte-identical when the cap
+// is 0 (no counter I/O happens on any dial path).
+type DailyCounter struct {
+	path string // "" = in-memory only (not durable across a restart)
+	mu   sync.Mutex
+	mem  map[string]int // keyed by "<day>|<scope>"
+}
+
+type dailyCounterFile struct {
+	Counts map[string]int `json:"counts"` // keyed by "<day>|<scope>"
+}
+
+// NewDailyCounter returns a counter persisted at path. The caller owns the
+// lifecycle; the path must be stable across daemon restarts for the cap to
+// survive. An empty path yields an in-memory-only counter.
+func NewDailyCounter(path string) *DailyCounter { return &DailyCounter{path: path} }
+
+// TryInc consumes one unit for (day, scope) unless cap > 0 and the current
+// count already reached cap. It returns the count after the call (unchanged
+// on refusal) and whether the unit was admitted. A refused attempt never
+// writes the file, so it consumes no budget. A corrupt file is an error
+// (fail closed) rather than a silent reset that would reopen the cap.
+// readDailyCounts loads the durable count map outside the mutex: file I/O
+// must never run while a lock is held (root coding-practices rule).
+func readDailyCounts(path string) (map[string]int, error) {
+	counts := map[string]int{}
+	data, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("voice daily counter: read %s: %w", path, err)
+	}
+	if len(data) == 0 {
+		return counts, nil
+	}
+	var f dailyCounterFile
+	if err := json.Unmarshal(data, &f); err != nil {
+		return nil, fmt.Errorf("voice daily counter: corrupt %s: %w", path, err)
+	}
+	if f.Counts != nil {
+		counts = f.Counts
+	}
+	return counts, nil
+}
+
+// writeDailyCounts persists the count map atomically, outside the mutex.
+// The caller must not mutate counts until this function returns.
+func writeDailyCounts(path string, counts map[string]int) error {
+	buf, err := json.Marshal(dailyCounterFile{Counts: counts})
+	if err != nil {
+		return fmt.Errorf("voice daily counter: encode: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("voice daily counter: mkdir: %w", err)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".daily-counter-*")
+	if err != nil {
+		return fmt.Errorf("voice daily counter: temp: %w", err)
+	}
+	tmpName := tmp.Name()
+	cleanup := func() {
+		tmp.Close()
+		os.Remove(tmpName)
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		cleanup()
+		return fmt.Errorf("voice daily counter: chmod: %w", err)
+	}
+	if _, err := tmp.Write(buf); err != nil {
+		cleanup()
+		return fmt.Errorf("voice daily counter: write: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return fmt.Errorf("voice daily counter: close: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		os.Remove(tmpName)
+		return fmt.Errorf("voice daily counter: rename: %w", err)
+	}
+	return nil
+}
+
+func (c *DailyCounter) TryInc(day, scope string, cap int) (count int, admitted bool, err error) {
+	// Read the durable map BEFORE taking the lock. Two concurrent TryInc calls
+	// can read the same file; the lock below serializes the increment, and the
+	// second writer replaces the first file atomically with its own count.
+	var counts map[string]int
+	if c.path != "" {
+		counts, err = readDailyCounts(c.path)
+		if err != nil {
+			return 0, false, err
+		}
+	}
+
+	key := day + "|" + scope
+	c.mu.Lock()
+	if c.path == "" {
+		if c.mem == nil {
+			c.mem = map[string]int{}
+		}
+		counts = c.mem
+	}
+	cur := counts[key]
+	if cap > 0 && cur >= cap {
+		c.mu.Unlock()
+		return cur, false, nil
+	}
+	cur++
+	counts[key] = cur
+	var snapshot map[string]int
+	if c.path != "" {
+		snapshot = make(map[string]int, len(counts))
+		for k, v := range counts {
+			snapshot[k] = v
+		}
+	}
+	c.mu.Unlock()
+
+	if snapshot != nil {
+		if err := writeDailyCounts(c.path, snapshot); err != nil {
+			return 0, false, err
+		}
+	}
+	return cur, true, nil
+}
 
 // DialRequest is one outbound-dial attempt. RequestID is the caller's
 // idempotency key: a retry with the same (employee, target, request_id)
@@ -72,6 +229,14 @@ type DialConfig struct {
 	// races can never disagree about when a ring is dead; 0 falls back
 	// to DefaultNoAnswerSecs on both sides.
 	TimeoutSecs int
+	// DailyDialCap is the operator-configured outbound-dial ceiling per
+	// LOCAL calendar day (voice.daily_dial_cap). 0 = unlimited. It replaces
+	// the old package-level DefaultDailyDialCap build constant.
+	DailyDialCap int
+	// Counter is the durable daily-dial counter. Nil degrades to an
+	// in-process counter (legacy behavior for hand-built dialers); the
+	// daemon passes a counter backed by $MEEPT_HOME/voice/daily_counters.json.
+	Counter     *DailyCounter
 	TestBaseURL string
 	// Hold is the daemon-glue goal-hold seam (AcquireCallHold), the
 	// outbound twin of LocalDeps.Hold. Invoked once after a successful
@@ -95,6 +260,10 @@ type AuditWriter interface {
 // later resolves must pass the same claimant.
 type EffectsLedger interface {
 	Claim(ctx context.Context, key string, meta effects.EffectMeta, who effects.Claimant) (bool, *effects.EffectRecord, error)
+	// Get is the read-only lookup used by the pre-side-effect idempotency
+	// check (issue #165 slice 3). MemoryLedger, SQLiteLedger and the gate
+	// capture wrappers all satisfy it.
+	Get(ctx context.Context, key string) (*effects.EffectRecord, error)
 	RecordReceipt(ctx context.Context, key string, who effects.Claimant, receipt json.RawMessage) error
 	Complete(ctx context.Context, key string, who effects.Claimant) error
 	Abandon(ctx context.Context, key string, who effects.Claimant, reason string) error
@@ -157,6 +326,12 @@ type Dialer struct {
 	answered map[string]bool          // ccid -> answer notification landed (bughunt 2026-11-07 voice F-2)
 	dones    map[string]chan struct{} // ccid -> terminal channel (closed once)
 	fin      map[string]bool          // ccid -> terminal cleanup already ran
+
+	// Durable daily-dial counter (issue #165 follow-up). Nil when the cap
+	// is 0 -> Dial never touches it (byte-identical legacy path). The
+	// counter serializes its own read-modify-write; Dialer.mu is NOT held
+	// across that I/O (root C4: no I/O under a mutex).
+	counter *DailyCounter
 }
 
 // NewDialer returns a Dialer. mgr may be nil (registry-only tests, and the
@@ -187,6 +362,14 @@ func NewDialer(cfg DialConfig, tel DialController, mgr *Manager, reg Registry, f
 		dones:    make(map[string]chan struct{}),
 		fin:      make(map[string]bool),
 	}
+	// Inert when the cap is 0: no counter is built and no counter I/O
+	// happens on any dial path (byte-identical legacy behavior).
+	if cfg.DailyDialCap > 0 {
+		d.counter = cfg.Counter
+		if d.counter == nil {
+			d.counter = NewDailyCounter("") // in-memory fallback for hand-built dialers
+		}
+	}
 	if mgr != nil {
 		mgr.SetAnsweredHook(d.NotifyAnswered)
 	}
@@ -202,17 +385,15 @@ func NewDialer(cfg DialConfig, tel DialController, mgr *Manager, reg Registry, f
 //  3. effects Claim keyed (employee_id, target, request_id) - a completed
 //     prior short-circuits here with the reserved result (retry never
 //     rings twice)
-//  4. remaining policy + registry gates (duplicate live target,
-//     allowlist, public URL, connection id, capacity, one live call per
-//     employee) - typed refusals, zero HTTP; each abandons the claim so
-//     no reservation leaks
 //  5. POST /calls via tel.DialOut
 //  6. TrackOutbound + registry Acquire
 //  7. receipt + Complete, then the no-answer timer
 //
 // Wait - steps 4 and 3: the gate block sits after the claim so the
 // idempotent retry path short-circuits before any refusal; gate refusals
-// abandon the claim (no leaked reservation).
+// abandon the claim (no leaked reservation). The allowlist/cap gate
+// (1b) and the first duplicate-target check run BEFORE steps 2-3 so no
+// refused dial leaves an audit row or effect (issue #165 slice 3).
 func (d *Dialer) Dial(ctx context.Context, req DialRequest) (DialResult, error) {
 	// -- 1. enabled gate --
 	if !d.cfg.Enabled {
@@ -221,6 +402,36 @@ func (d *Dialer) Dial(ctx context.Context, req DialRequest) (DialResult, error) 
 	target := NormalizeE164(req.Target)
 	if req.EmployeeID == "" || req.RequestID == "" {
 		return DialResult{}, fmt.Errorf("voice: dial: employee_id and request_id are required")
+	}
+
+	// -- 1b. OUTBOUND RECIPIENT GATE (issue #165 slice 3): the allowlist
+	// and per-day dial cap fire BEFORE ANY side effect - no audit row, no
+	// new effect reservation, no Telnyx POST. The sibling SendSMS2 path
+	// pins the same ordering. An idempotent retry of an already-completed
+	// effect short-circuits below BEFORE this gate (the ring already
+	// happened; a re-check with a since-changed allowlist must not turn a
+	// completed retry into a refusal). Empty allowlist keeps the historical
+	// fail-closed posture (a dial target must be listed) so existing
+	// deployments with no allowlist keep refusing, matching the C9 gate
+	// tests; the operator-configurable "empty = all" dial posture is a
+	// follow-up and must be decided together with the config owner.
+	key := effects.EffectKey("voice.dial_out", req.EmployeeID, target, req.RequestID)
+	if prior, err := d.fx.Get(ctx, key); err == nil && prior != nil && prior.State == effects.StateCompleted {
+		return d.reservedResult(ctx, prior)
+	}
+	// Duplicate-live-target precedes the allowlist (frozen TestDialRefusals
+	// seeds a live target that is NOT in cfg.AllowedNumbers and expects
+	// ErrDuplicateTarget). It is a read-only registry check - zero side
+	// effects - so it belongs in the pre-effect gate block and keeps that
+	// pinned precedence. A completed retry above already short-circuited,
+	// so its own live target never trips this.
+	for _, inst := range d.reg.Live() {
+		if NormalizeE164(inst.Target) == target {
+			return DialResult{}, fmt.Errorf("%w: %s", ErrDuplicateTarget, target)
+		}
+	}
+	if err := d.outboundPolicyGate(target); err != nil {
+		return DialResult{}, err
 	}
 
 	// -- 2. audit row BEFORE reserve and POST (C9: the attempt is
@@ -239,11 +450,10 @@ func (d *Dialer) Dial(ctx context.Context, req DialRequest) (DialResult, error) 
 
 	// -- 3. effects reserve (C9: keyed (employee_id, target, request_id),
 	// reserved BEFORE the POST; retry never rings twice). The completed-
-	// prior short-circuit runs BEFORE the duplicate-target and allowlist
-	// gates: a legitimate retry of a live call must return the reserved
-	// result, not a refusal. Gate refusals after this point abandon the
+	// prior short-circuit ran BEFORE the audit row and the recipient gate
+	// (step 1b) so a legitimate retry of a live call is not refused by a
+	// since-changed allowlist. Gate refusals after this point abandon the
 	// claim so no reservation leaks. --
-	key := effects.EffectKey("voice.dial_out", req.EmployeeID, target, req.RequestID)
 	payload, err := json.Marshal(map[string]string{
 		"employee_id": req.EmployeeID,
 		"target":      target,
@@ -266,9 +476,10 @@ func (d *Dialer) Dial(ctx context.Context, req DialRequest) (DialResult, error) 
 	}
 
 	// -- 4. remaining policy + registry gates (still zero HTTP): one live
-	// call per target globally (ErrDuplicateTarget, pinned BEFORE the
-	// allowlist check by TestDialRefusals), allowlist, public URL,
-	// connection id, capacity, one live call per employee. Targets are
+	// call per target globally (ErrDuplicateTarget), public URL,
+	// connection id, capacity, one live call per employee. The allowlist
+	// and per-day cap were already enforced in step 1b, BEFORE the audit
+	// row and effect reservation (issue #165 slice 3). Targets are
 	// compared through NormalizeE164 (audit 2026-11-06 M7). --
 	for _, inst := range d.reg.Live() {
 		if NormalizeE164(inst.Target) == target {
@@ -276,17 +487,6 @@ func (d *Dialer) Dial(ctx context.Context, req DialRequest) (DialResult, error) 
 			d.abandonEffect(ctx, key, who, gateErr)
 			return DialResult{}, gateErr
 		}
-	}
-	allowed := false
-	for _, n := range d.cfg.AllowedNumbers {
-		if NormalizeE164(n) == target {
-			allowed = true
-			break
-		}
-	}
-	if !allowed {
-		d.abandonEffect(ctx, key, who, ErrNumberNotAllowed)
-		return DialResult{}, fmt.Errorf("%w: %q", ErrNumberNotAllowed, req.Target)
 	}
 	if d.cfg.PublicStreamURL == "" {
 		d.abandonEffect(ctx, key, who, ErrNoPublicURL)
@@ -371,6 +571,56 @@ func (d *Dialer) Dial(ctx context.Context, req DialRequest) (DialResult, error) 
 	d.logger.Info("voice: outbound dial placed", "ccid", ccid, "target", target, "employee_id", req.EmployeeID)
 	return DialResult{CallControlID: ccid, Done: done}, nil
 }
+
+// outboundPolicyGate is the pre-side-effect recipient gate for an outbound
+// dial (issue #165 slice 3). It runs BEFORE the audit row, the effect
+// reservation, and the Telnyx POST, so a refusal leaves zero trace on any
+// external surface. It is intentionally a pure read (except the in-process
+// daily counter, advanced only AFTER all gates pass). The two gates:
+//
+//  1. allowlist: every cfg.AllowedNumbers entry is normalized through
+//     NormalizeE164 before comparison; the target must match one entry.
+//     The list is deliberately fail-closed: an empty/nil list permits NO
+//     target, matching the frozen C9 gate contract (TestDialRefusals pins
+//     "target not allowed" for a nil list). Reconciling that with the
+//     voice.allowed_numbers `null = all` config comment is a product
+//     decision owned by the config side of issue #165 and requires the
+//     pinned test to be updated by its owner - this slice does not change
+//     the default posture, only the ORDER in which the existing gate runs.
+//  2. per-day cap: operator-configured via VoiceConfig.DailyDialCap with a
+//     DURABLE counter (survives a daemon restart). Dials that pass all
+//     gates increment the counter; refusals do not.
+func (d *Dialer) outboundPolicyGate(target string) error {
+	allowed := false
+	for _, n := range d.cfg.AllowedNumbers {
+		if NormalizeE164(n) == target {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return fmt.Errorf("%w: %q", ErrNumberNotAllowed, target)
+	}
+	if d.cfg.DailyDialCap > 0 && d.counter != nil {
+		day := time.Now().Format("2006-01-02") // operator local day
+		count, admitted, err := d.counter.TryInc(day, dialCounterScope, d.cfg.DailyDialCap)
+		if err != nil {
+			return fmt.Errorf("voice: dial: daily cap counter: %w", err)
+		}
+		if !admitted {
+			return fmt.Errorf("%w: %d/%d today", ErrDailyCapReached, count, d.cfg.DailyDialCap)
+		}
+	}
+	return nil
+}
+
+// dialCounterScope is the (kind, scope) key of the single global outbound
+// dial counter: one ceiling per daemon per local day, matching the
+// "voice.daily_dial_cap = outbound dials per day" operator contract. A
+// per-employee scope would need a different config shape and is not this
+// knob. The `kind` half keeps it distinct from any future SMS counter in
+// a shared file.
+const dialCounterScope = "voice.dial_out"
 
 // reservedResult builds the retry answer from a prior ledger record.
 // completed + receipt -> the reserved ccid, zero additional POSTs.

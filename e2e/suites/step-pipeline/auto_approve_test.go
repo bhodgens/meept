@@ -12,11 +12,45 @@ import (
 	"testing"
 
 	"github.com/caimlas/meept/internal/agent"
+	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/task"
 )
 
 func autoApproveStep(desc string) *task.TaskStep {
 	return &task.TaskStep{Description: desc}
+}
+
+func TestReviewPolicyFromConfigBinding(t *testing.T) {
+	// The daemon now calls ReviewPolicyFromConfig(cfg.Agent.Review) at the
+	// single ReviewManager construction site. Pin that the configured
+	// [agent.review] block actually binds to the runtime policy.
+	custom := config.ReviewConfig{
+		Enabled:             true,
+		RequireReview:       []string{"git"},
+		SkipReview:          []string{"chat"},
+		MaxRevisionCycles:   7,
+		AutoApprovePatterns: []string{"RELEASE_NOTES"},
+	}
+	policy := agent.ReviewPolicyFromConfig(custom)
+
+	if !policy.Enabled || policy.MaxRevisionCycles != 7 {
+		t.Fatalf("config fields not bound: %+v", policy)
+	}
+	if len(policy.AutoApprovePatterns) != 1 || policy.AutoApprovePatterns[0] != "RELEASE_NOTES" {
+		t.Fatalf("configured auto_approve_patterns not bound: %v", policy.AutoApprovePatterns)
+	}
+	if !policy.ShouldAutoApprove(autoApproveStep("update RELEASE_NOTES")) {
+		t.Error("configured pattern must be honored by the tightened matcher")
+	}
+	if policy.ShouldAutoApprove(autoApproveStep("update README.md")) {
+		t.Error("default patterns must be replaced, not merged, when configured")
+	}
+
+	// Zero config falls back to defaults (installed homes without [agent.review]).
+	zero := agent.ReviewPolicyFromConfig(config.ReviewConfig{})
+	if !zero.Enabled || zero.MaxRevisionCycles != 3 || len(zero.AutoApprovePatterns) == 0 {
+		t.Fatalf("zero config must inherit defaults: %+v", zero)
+	}
 }
 
 func TestDocOnlyAutoApproveExactToken(t *testing.T) {

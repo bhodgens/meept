@@ -1372,6 +1372,9 @@
   // (supervisor on, loopback-only, no public URL). Unset telnyx_public_key
   // means voice routes return 503 (fail-closed). E.164 format in
   // allowed_numbers is validated lazily at dial/answer time, not at load.
+  // OUTBOUND-ONLY gate: a null/empty list refuses ALL outbound dials
+  // (fail-closed per the frozen C9 gate); configure explicit E.164 targets
+  // before enabling outbound dial. Inbound calls are NOT gated by this list.
   "voice": {
     "enabled": false,                       // master switch; sidecar absent when false
     "idle_stop_seconds": 30,                // stop the sidecar after this much idle time
@@ -1407,7 +1410,7 @@
     "public_stream_url": "",                // public media stream URL; empty = refusal until configured
     "connection_id": "",                    // Telnyx connection id
     "from_number": "",                      // caller ID number (E.164)
-    "allowed_numbers": null,                // allowed caller numbers (E.164); null = all
+    "allowed_numbers": null,                // outbound dial targets (E.164); null/empty = refuse ALL outbound dials (fail-closed), NOT all
     "timeout_secs": 30,                     // per-step call timeout
     "max_call_minutes": 15,                 // hard cap on call length
     "silence_prompt_seconds": 45,           // silence before prompting the caller; the clock pauses while the employee turn is in flight; per-employee override: employee_leg[].silence_prompt_seconds
@@ -1418,7 +1421,8 @@
     "silence_hangup_after_seconds": 45,     // quiet time AFTER the nudge before hangup: nudge@silence_prompt_seconds, hangup@S+H (45+45 = the legacy 45/90 endpoints; 0 = reuse S); per-employee override: employee_leg[].silence_hangup_after_seconds
     "turn_timeout_seconds": 0,              // optional hard cap on one in-flight voice turn (hung LLM bound); 0 = disabled
     "fresh_session_per_call": false,        // opt-in: each voice call opens a NEW session (no cross-call turn-history snowball); the day brief stays the only cross-call context
-    "max_concurrent_calls": 2,              // concurrent voice instances; 0 = unlimited
+    "daily_dial_cap": 0,                     // cap unit: DIALS PER LOCAL CALENDAR DAY; 0 = unlimited; counter persists at $MEEPT_HOME/voice/daily_counters.json (0600)
+    "max_concurrent_calls": 2,               // concurrent voice instances; 0 = unlimited
     "reorder_window_frames": 10,            // audio reorder window (frames)
     "reorder_gap_ms": 60,                   // audio reorder gap (ms)
     "telnyx_public_key": "",                // base64 Ed25519 public key from Mission Control; unset = routes 503
@@ -1490,6 +1494,11 @@
       "stop_reply": "",                     // reply text for STOP/START consent keywords (empty = package default wording)
       "help_reply": "",                     // reply text for HELP (empty = package default wording)
       "inbound_enabled": false,             // D3 kill switch for inbound SMS leg; default false = byte-identical boot
+      // ---- outbound SMS egress controls (issue #165 slices 1-2) ----
+      // drift: local-drift: voice.messaging.allowed_numbers/max_messages_* -> outbound egress caps added after older installs; absent/empty/0 = pre-#165 behavior (all recipients, unlimited)
+      "allowed_numbers": [],                 // outbound SMS recipient allowlist (E.164 strings); []/null = ALL recipients (backward compatible, but logs a security warning); non-empty = exact-match allowlist only
+      "max_messages_per_call": 0,            // cap unit: MESSAGES PER SEND CALL (one SendSMS2 invocation); 0 = unlimited (backward compatible)
+      "max_messages_per_day": 0,             // cap unit: MESSAGES PER UTC DAY (counter resets at UTC midnight); 0 = unlimited (backward compatible)
     },
   },
 
@@ -1511,6 +1520,14 @@
   "notifications": {
     "enabled": true,
     "retention": 30,
+    // MCP security-alert delivery channel (issues #166/#167). One knob:
+    //   ""     -> off (default). Emits nothing; byte-identical to before.
+    //   "bot"  -> NotificationBot / TriggerSecurityAlert (Telegram chat IDs
+    //             from bot_telegram_chat_ids; requires enabled=true).
+    //   "push" -> QuotaNotifier publishes a security.alert bus event and
+    //             delivers it through PushService (no quota dedup).
+    // Unknown values behave as "" (off).
+    // "security_channel": "",
   },
 
   // AI Employee configuration. See docs/workflows/employees.md.

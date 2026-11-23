@@ -685,6 +685,18 @@ type Components struct {
 	PushHistory             *services.PushHistory
 	PushChannels            *services.ChannelRegistry
 
+	// SecurityNotifier is the configurable MCP security-alert dispatcher
+	// (issues #166/#167): [notifications].security_channel selects "" (off),
+	// "bot" (TriggerSecurityAlert) or "push" (QuotaNotifier/PushService).
+	// Constructed unconditionally by wireSecurityNotifier so the narrow
+	// MCP gate seam (SecurityNotify func field) exists even when the bot
+	// stack kill-switch is off. Nil only when config is nil.
+	SecurityNotifier *services.SecurityNotifier
+	// SecurityNotify is the narrow seam the MCP gate (#166) will call.
+	// It is a bound method value of SecurityNotifier (nil when unavailable)
+	// so consumers need only a nil check, never a concrete dependency.
+	SecurityNotify func(message, source string)
+
 	// Employee framework (AI Employee Design spec). Wraps BotManager with
 	// constitution enforcement, goal loops, and audit semantics. The
 	// underlying bot.Manager is reused as the execution/storage layer.
@@ -2837,6 +2849,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// Telegram push channel ALONGSIDE the existing registrations.
 	wireNotificationBot(c)
 
+	// Configurable MCP security-alert channel (issues #166/#167). Wired
+	// unconditionally and independent of [notifications].enabled so the
+	// MCP gate seam exists whenever security_channel is set; default ""
+	// is a no-op and keeps boot byte-identical.
+	wireSecurityNotifier(c)
+
 	// Start progress synthesizer for tiered agent activity summaries.
 	// Subscribes to all agent events via wildcard and republishes condensed
 	// SynthesizedProgressEvent messages on the "agent.progress.synthesized" topic.
@@ -3790,6 +3808,17 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				// want to log a noisy error for each one.
 				if !serverCfg.IsEnabled() {
 					logger.Debug("skipping disabled MCP server", "name", serverCfg.Name)
+					continue
+				}
+				// Issue #166: a pin refusal is a security event. Log the
+				// exact hazard, then route it through the configured
+				// notification channel (nil seam = log only).
+				pinErr := mcp.ValidateVersionPin(serverCfg.Name, serverCfg.Command)
+				if pinErr != nil {
+					logger.Error(pinErr.Error(), "component", "mcp", "server", serverCfg.Name)
+					if c.SecurityNotify != nil {
+						c.SecurityNotify(pinErr.Error(), "mcp:"+serverCfg.Name)
+					}
 					continue
 				}
 				if err := c.MCPManager.StartServer(ctx, serverCfg); err != nil {
@@ -6214,6 +6243,11 @@ func (c *Components) Start(ctx context.Context) error {
 				if cerr != nil {
 					c.Logger.Warn("contact chain degraded: contact tool unregistered", "error", cerr)
 				} else {
+					// Issue #165 follow-up: arm the out-of-allowlist
+					// confirmation gate through the real security checker.
+					// Nil checker (fail-soft wiring) leaves the in-allowlist
+					// path byte-identical.
+					chain.ContactPermissionChecker = c.SecurityChecker
 					c.Voice.Contact = chain
 					builtin.SetContactChain(chain)
 					// Caller-authz (leaf 02): arm the inbound caller

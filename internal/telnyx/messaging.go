@@ -27,6 +27,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -53,7 +54,41 @@ var (
 	// this process never sent (or already evicted from the bounded
 	// pending table). Best-effort observability only.
 	ErrUnknownMessage = errors.New("telnyx messaging: unknown message id")
+	// ErrRecipientNotAllowed (issue #165 slice 2) is returned by SendSMS2
+	// when a non-empty recipient allowlist is configured and the To
+	// number is not an exact member. errors.Is-checkable; the refusal
+	// happens BEFORE any HTTP POST.
+	ErrRecipientNotAllowed = errors.New("telnyx messaging: recipient not allowed")
+	// ErrSendCapExceeded (issue #165 slice 2) is returned by SendSMS2
+	// when a per-call or per-day message cap would be exceeded. The
+	// refusal happens BEFORE any HTTP POST and does not consume budget.
+	ErrSendCapExceeded = errors.New("telnyx messaging: send cap exceeded")
 )
+
+// DailySendCounter is the narrow durable-counter seam for the outbound
+// SMS day cap (issue #165 follow-up). One file-backed implementation lives
+// in internal/voice (DailyCounter); the daemon wiring passes the SAME
+// counter to both the dialer and this client, so both survive a restart
+// without telnyx importing voice (which would be a dependency inversion).
+// A nil counter keeps the in-process perDayCount fallback for hand-built
+// clients; the production daemon always supplies the durable one.
+type DailySendCounter interface {
+	// TryInc consumes one unit for (day, scope) unless cap > 0 and the
+	// count already reached cap. It returns the post-call count and
+	// whether the unit was admitted.
+	TryInc(day, scope string, cap int) (count int, admitted bool, err error)
+}
+
+// smsDayCounterScope is the (kind, scope) key for the shared counter file:
+// one outbound SMS cap per daemon per UTC day, distinct from the voice dial
+// scope in the same file.
+const smsDayCounterScope = "telnyx.sms_send"
+
+// NoRecipientAllowlistWarning is emitted once per client construction
+// when either the allowlist or the send caps are unset (issue #165 slice
+// 2, acceptance criterion 4). The literal is frozen so log greps and
+// tests pin the same text.
+const NoRecipientAllowlistWarning = "WARNING: outbound messaging has no recipient allowlist or send cap; any E.164 number may be contacted"
 
 // e164Pattern is the strict E.164 gate: leading +, non-zero first digit,
 // 8-15 more digits.
@@ -80,6 +115,14 @@ type Message struct {
 // wiring resolves it via the secrets Broker) and is never logged. baseURL
 // is the injectable HTTP boundary: production uses
 // DefaultMessagingBaseURL, tests pass an httptest URL.
+//
+// Issue #165 slices 1-2: the client also owns the outbound egress gates.
+// allowedNumbers is an exact-match recipient allowlist (empty = all, the
+// backward-compatible default); maxPerCall / maxPerDay bound message
+// volume. sendMu guards the counters: one client instance is one logical
+// send session ("call"), so maxPerCall counts admitted sends over the
+// client's life, and maxPerDay counts them within one UTC day (reset at
+// midnight). All gates run BEFORE the HTTP POST.
 type Client struct {
 	baseURL    string
 	apiKey     string
@@ -88,6 +131,53 @@ type Client struct {
 	clock      func() time.Time // injectable clock (WithMessagingClock); nil = time.Now
 	httpClient *http.Client
 	log        *slog.Logger
+
+	allowedNumbers map[string]struct{} // exact E.164 set; empty = all recipients
+	maxPerCall     int                 // 0 = unlimited
+	maxPerDay      int                 // 0 = unlimited
+
+	sendMu        sync.Mutex
+	perCallCount  int
+	perDayCount   int
+	perDayUTCDate string // "2006-01-02" in UTC; date change resets perDayCount
+
+	dayCounter DailySendCounter // nil = in-process perDayCount fallback
+}
+
+// WithAllowedNumbers installs the outbound SMS recipient allowlist
+// (issue #165). Entries are exact E.164 strings; empty entries are
+// ignored. An empty list keeps the pre-#165 behavior (all recipients)
+// and triggers the construction-time security warning.
+func WithAllowedNumbers(numbers []string) Option {
+	return func(c *Client) {
+		set := make(map[string]struct{}, len(numbers))
+		for _, n := range numbers {
+			if n != "" {
+				set[n] = struct{}{}
+			}
+		}
+		c.allowedNumbers = set
+	}
+}
+
+// WithSendCaps sets the outbound volume caps (issue #165): perCall bounds
+// messages per client send session ("call"), perDay bounds messages per
+// UTC day. Either <= 0 means unlimited (backward compatible). Both are
+// enforced by SendSMS2 before any HTTP POST.
+func WithSendCaps(perCall, perDay int) Option {
+	return func(c *Client) {
+		c.maxPerCall = perCall
+		c.maxPerDay = perDay
+	}
+}
+
+// WithDailySendCounter installs a durable per-day send counter (issue
+// #165 follow-up). The daemon passes the same voice.DailyCounter it hands
+// the dialer; a nil counter (default) keeps the in-process perDayCount
+// fallback so hand-built clients and the existing #165 gate tests are
+// byte-identical. Enforced by checkEgressGates before any HTTP POST.
+func WithDailySendCounter(counter DailySendCounter) Option {
+	return func(c *Client) { c.dayCounter = counter }
 }
 
 // Option customizes a messaging Client at construction.
@@ -146,6 +236,11 @@ func NewClient(baseURL string, opts ...Option) (*Client, error) {
 	for _, opt := range opts {
 		opt(c)
 	}
+	// A nil WithMessagingLogger must not turn a constructor log into a
+	// panic; fall back to the default logger.
+	if c.log == nil {
+		c.log = slog.Default()
+	}
 	// Ported from strategist-usa pkg/services/telnyx_client.go:1799-1819
 	// (validateTelnyxBaseURL), adapted to the fail-safe posture of
 	// strategist-usa pkg/services/telnyx_provider.go:230-242: fall back
@@ -154,6 +249,15 @@ func NewClient(baseURL string, opts ...Option) (*Client, error) {
 		c.log.Error("telnyx messaging: invalid api base url, falling back to default",
 			"base_url", c.baseURL, "default", DefaultMessagingBaseURL, "error", err)
 		c.baseURL = DefaultMessagingBaseURL
+	}
+	// Issue #165 slice 2, acceptance criterion 4: emit the frozen
+	// security warning ONCE per client construction when the allowlist
+	// or either cap is unset. Deterministic (always at construction,
+	// never at first send) and testable via WithMessagingLogger.
+	if len(c.allowedNumbers) == 0 || c.maxPerCall <= 0 || c.maxPerDay <= 0 {
+		c.log.Warn(NoRecipientAllowlistWarning,
+			"allowed_numbers", len(c.allowedNumbers),
+			"max_per_call", c.maxPerCall, "max_per_day", c.maxPerDay)
 	}
 	return c, nil
 }
@@ -345,6 +449,66 @@ type send2Response struct {
 	} `json:"data"`
 }
 
+// checkEgressGates runs the issue #165 slice-2 gates. It must be called
+// at the TOP of SendSMS2, before any HTTP POST and before any counter is
+// consumed. On refusal the counters are left untouched (a rejected send
+// never eats budget). On success the admission is counted atomically so
+// concurrent callers cannot both slip past a cap.
+//
+// The clock is the client's injectable clock (WithMessagingClock, already
+// used for Retry-After resolution), so UTC date rollover is deterministic
+// in tests. The per-day counter resets the first time a UTC date different
+// from the stored one is observed.
+func (c *Client) checkEgressGates(to string) error {
+	// Allowlist: empty set = all recipients (backward compatible).
+	if len(c.allowedNumbers) > 0 {
+		if _, ok := c.allowedNumbers[to]; !ok {
+			return fmt.Errorf("telnyx messaging: to %q: %w", to, ErrRecipientNotAllowed)
+		}
+	}
+	now := time.Now
+	if c.clock != nil {
+		now = c.clock
+	}
+	today := now().UTC().Format("2006-01-02")
+
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
+	if c.perDayUTCDate != today {
+		c.perDayUTCDate = today
+		c.perDayCount = 0
+	}
+	if c.maxPerCall > 0 && c.perCallCount >= c.maxPerCall {
+		return fmt.Errorf("telnyx messaging: per-call cap %d reached: %w", c.maxPerCall, ErrSendCapExceeded)
+	}
+	// The durable counter is the authoritative per-day gate when wired.
+	// It owns its own atomic read-modify-write (no I/O under sendMu —
+	// the counter locks itself), so a restart cannot reopen the cap.
+	// Hand-built clients (dayCounter nil) keep the #165 in-process path
+	// byte-identically.
+	if c.dayCounter != nil && c.maxPerDay > 0 {
+		count, admitted, err := c.dayCounter.TryInc(today, smsDayCounterScope, c.maxPerDay)
+		if err != nil {
+			return fmt.Errorf("telnyx messaging: daily send counter: %w", err)
+		}
+		if !admitted {
+			return fmt.Errorf("telnyx messaging: per-day cap %d reached on %s: %w", c.maxPerDay, today, ErrSendCapExceeded)
+		}
+		c.perCallCount++
+		c.perDayCount = count
+		return nil
+	}
+	if c.maxPerDay > 0 && c.perDayCount >= c.maxPerDay {
+		return fmt.Errorf("telnyx messaging: per-day cap %d reached on %s: %w", c.maxPerDay, today, ErrSendCapExceeded)
+	}
+	// Admitted: consume one unit of both budgets before the POST. A
+	// transport failure is NOT refunded — a failed POST still counts as
+	// an attempted egress, which is the conservative posture for a cap.
+	c.perCallCount++
+	c.perDayCount++
+	return nil
+}
+
 // SendSMS2 posts one message to /v2/messages with the send hardening:
 // Idempotency-Key header (caller key passed through byte-exact, else a
 // fresh uuid), per-message webhook_url only when set, media_urls +
@@ -352,6 +516,10 @@ type send2Response struct {
 // non-2xx errors that carry the status code plus a 512B-truncated body
 // snippet (PII hygiene). Both numbers pass the strict E.164 gate BEFORE
 // any HTTP call; a violation is ErrInvalidE164 (errors.Is-checkable).
+// Issue #165 slice 2 adds the outbound egress gates (recipient allowlist
+// + per-call/per-day caps) at the TOP of this function, before any HTTP
+// POST; violations are ErrRecipientNotAllowed / ErrSendCapExceeded,
+// both errors.Is-checkable. A refused send consumes no cap budget.
 //
 // Idempotency key minting: pkg/id has Generate(prefix)/TraceID (hex, no
 // uuid helper), so this uses github.com/google/uuid (direct dep, used
@@ -362,6 +530,13 @@ type send2Response struct {
 func (c *Client) SendSMS2(ctx context.Context, req SendRequest) (SendResult, error) {
 	if !ValidE164(req.To) {
 		return SendResult{}, fmt.Errorf("telnyx messaging: to %q: %w", req.To, ErrInvalidE164)
+	}
+	// Issue #165 slices 1-2 (F-03): egress gates run at the TOP of the
+	// send path, BEFORE any HTTP POST. Refusals carry errors.Is-checkable
+	// sentinels; no confirmation gate lives here (sibling slice handles
+	// that). A refused send consumes NO cap budget.
+	if err := c.checkEgressGates(req.To); err != nil {
+		return SendResult{}, err
 	}
 	// from is client state (WithFromNumber); when unset the profile
 	// alone routes the send, matching the gate's construction seam.

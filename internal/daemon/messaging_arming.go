@@ -34,10 +34,44 @@ import (
 
 	"github.com/caimlas/meept/internal/bus"
 	commhttp "github.com/caimlas/meept/internal/comm/http"
+	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/sms"
 	"github.com/caimlas/meept/internal/telnyx"
 	voicetelnyx "github.com/caimlas/meept/internal/voice/telnyx"
 )
+
+// messagingUnrestrictedWarning is the exact operator-facing hazard string
+// for issue #165 slice 5. It is a single deterministic Warn at arming time
+// (never per-send): a default-disabled boot never reaches this code, so
+// zero-config startup stays byte-identical.
+const messagingUnrestrictedWarning = "WARNING: outbound messaging has no recipient allowlist or send cap; any E.164 number may be contacted"
+
+// messagingWarnOnce makes the warning idempotent per process. The arming
+// path may call warnIfMessagingUnrestricted from more than one site (the
+// webhook-deps builder and the enabled-block in voice_wiring.go); the
+// operator must see exactly one line, not a duplicate.
+var messagingWarnOnce sync.Once
+
+// warnIfMessagingUnrestricted emits the exact startup warning when outbound
+// messaging is enabled but NEITHER an allowlist NOR any volume cap is
+// configured. Config is passed explicitly (no global/config read here) so
+// the decision is deterministic and the warning cannot fire on a
+// default-disabled boot. A nil logger degrades to slog.Default(). At most
+// one warning is emitted per process regardless of caller count.
+func warnIfMessagingUnrestricted(logger *slog.Logger, cfg config.MessagingConfig) {
+	if !cfg.Enabled {
+		return
+	}
+	if len(cfg.AllowedNumbers) > 0 || cfg.MaxMessagesPerCall > 0 || cfg.MaxMessagesPerDay > 0 {
+		return
+	}
+	messagingWarnOnce.Do(func() {
+		if logger == nil {
+			logger = slog.Default()
+		}
+		logger.Warn(messagingUnrestrictedWarning)
+	})
+}
 
 // webhookArmTimeout bounds a single store write driven by a webhook
 // event. The SQLite handle serializes on one connection with a 5s busy
@@ -158,6 +192,11 @@ func (w *VoiceWiring) setSMSAttempt(a *telnyx.SMSAttempt) {
 	if w == nil {
 		return
 	}
+	// Issue #165 slice 5: BuildContactChain calls this on EVERY production
+	// boot where messaging is armed, AFTER WireVoice stored the resolved
+	// emit the unrestricted-messaging warning through the wiring's own
+	// structured logger (falls back to slog.Default for hand-built wirings).
+	warnIfMessagingUnrestricted(w.logger, w.Config().Messaging)
 	w.dlrSlot.set(a)
 }
 

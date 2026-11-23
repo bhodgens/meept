@@ -81,6 +81,22 @@ and its "Local leg (C11)" section for the local keys:
   (s16 level, default 3000). Local leg only.
 - `local.name` - session label; empty = your hostname.
 
+### Outbound dial allowlist (issue #165)
+
+`voice.allowed_numbers` is an OUTBOUND-ONLY gate. It holds exact E.164
+targets. A null or empty list refuses ALL outbound dials (fail-closed);
+it never means "allow all". Configure explicit targets before using
+outbound dial. Inbound calls are NOT gated by this list: the daemon
+answers every caller. The gate runs inside `internal/voice/dial.go`
+before the audit row, the effect reservation, and the Telnyx POST, so a
+refusal leaves no external trace. `ErrNumberNotAllowed` is
+`errors.Is`-checkable.
+
+The same contact chain used by the `contact` tool also applies this
+gate. A target outside the allowlist needs human confirmation through
+the `contact_out_of_allowlist` action (RiskHigh, RequiresConfirmation).
+The in-allowlist path is unchanged.
+
 Local providers are subprocesses, not libraries: the daemon needs the
 `whisper-cli` (whisper.cpp) and `piper` binaries on PATH. Both are
 keyless - no secrets-broker entry is required for the local leg.

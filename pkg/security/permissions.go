@@ -127,6 +127,15 @@ var BuiltinRules = map[string]ActionRule{
 	// confirmation gate: the real policy lives in the contact chain
 	// runner's per-channel rules, so the gate class only needs to admit
 	// the action for constitution-granted employees.
+	//
+	// Issue #165 (F-03): the static BuiltinRules row CANNOT know the
+	// recipient - whether a number is inside the configured allowlist is
+	// only decidable at call time in the contact runner. Changing the
+	// `contact` row itself would gate EVERY contact call (including
+	// in-allowlist ones), so the runner instead reclassifies a rejected
+	// out-of-allowlist attempt as the dedicated action below. The
+	// confirmation decision belongs to that runner; this table only
+	// classifies the action it reports.
 	"contact": {Action: "contact", RiskLevel: RiskMedium, RequiresConfirmation: false},
 
 	// Employee ledger (plan 20261109-employee-ledger; H7-class gap found
@@ -150,6 +159,32 @@ var BuiltinRules = map[string]ActionRule{
 	// the bughunt H7 class).
 	"kanban_read":  {Action: "kanban_read", RiskLevel: RiskSafe, RequiresConfirmation: false},
 	"kanban_write": {Action: "kanban_write", RiskLevel: RiskLow, RequiresConfirmation: false},
+}
+
+// ContactOutOfAllowlistAction is the dedicated action the contact runner
+// reports when the recipient is NOT inside the configured allowlist
+// (issue #165 slice 4). The static BuiltinRules row for `contact` cannot
+// know the recipient, so changing it would gate EVERY contact attempt;
+// instead the runner reclassifies the out-of-list decision as THIS action
+// and the existing HITL confirmation gate handles it. RiskHigh +
+// RequiresConfirmation:true are unconditional (they do not depend on the
+// require_confirmation_high config toggle) because an out-of-allowlist
+// third-party contact is the exact hazard issue #165 closes.
+const ContactOutOfAllowlistAction = "contact_out_of_allowlist"
+
+// OutOfAllowlistRules holds the dedicated, recipient-aware action rows that
+// cannot live in the static tool-parity BuiltinRules map: that map is
+// swept by a parity gate requiring every key be reachable from a
+// registered tool, and `contact_out_of_allowlist` is a runtime
+// reclassification reported by the contact runner, not a tool name. The
+// row mirrors the BuiltinRules style (ActionRule, RiskHigh, confirmation
+// true) and is consulted first in CheckPermissionForAgent.
+var OutOfAllowlistRules = map[string]ActionRule{
+	ContactOutOfAllowlistAction: {
+		Action:               ContactOutOfAllowlistAction,
+		RiskLevel:            RiskHigh,
+		RequiresConfirmation: true,
+	},
 }
 
 // Dangerous command patterns that elevate shell_execute to HIGH risk.
@@ -566,6 +601,23 @@ func (pc *PermissionChecker) CheckPermissionForAgent(action string, details map[
 						}
 					}
 				}
+			}
+		}
+	}
+
+	// Recipient-aware out-of-allowlist rules (issue #165 slice 4) are
+	// consulted BEFORE the static tool-parity map. They are reported by
+	// the contact runner at call time, not by a registered tool, and carry
+	// an UNCONDITIONAL confirmation requirement: the hazard is exact and
+	// must not depend on require_confirmation_high being enabled.
+	if rule, ok := OutOfAllowlistRules[action]; ok {
+		if rule.RequiresConfirmation {
+			return CheckResult{
+				Allowed:       false,
+				Reason:        "Action requires user confirmation: recipient outside the configured allowlist",
+				RuleSource:    "confirmation_gate",
+				EffectiveRisk: rule.RiskLevel,
+				NeedsConfirm:  true,
 			}
 		}
 	}

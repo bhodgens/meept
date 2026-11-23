@@ -47,6 +47,14 @@ type QuotaNotifier struct {
 	// re-block of the same credential notifies again.
 	seen map[string]bool
 
+	// securitySeen is the SEPARATE dedup ledger for security.alert events,
+	// keyed by source+"|"+message. It must never share the quota `seen`
+	// map: a security alert and a quota event may legitimately collide on
+	// the (credential_key, escalation) shape (issue #166/#167).
+	secMu        sync.Mutex
+	securitySeen map[string]bool
+	securitySub  *bus.Subscriber
+
 	// pump state (created in NewQuotaNotifier, guarded by mu)
 	sub    *bus.Subscriber
 	stopCh chan struct{}
@@ -62,14 +70,18 @@ func NewQuotaNotifier(b *bus.MessageBus, pushSvc *PushService, logger *slog.Logg
 		logger = slog.Default()
 	}
 	qn := &QuotaNotifier{
-		bus:     b,
-		pushSvc: pushSvc,
-		logger:  logger,
-		seen:    make(map[string]bool),
+		bus:          b,
+		pushSvc:      pushSvc,
+		logger:       logger,
+		seen:         make(map[string]bool),
+		securitySeen: make(map[string]bool),
 	}
 
 	if b != nil {
 		qn.sub = b.Subscribe("quota-notifier", "agent.quota_wait")
+		// Channel-B MCP security alerts (issue #166/#167): typed topic,
+		// separate dedup ledger and delivery path from quota events.
+		qn.securitySub = bus.SubscribeT(b, "quota-notifier-security", TopicSecurityAlert, qn.processSecurityAlert)
 	}
 	// Auto-start the pump so callers need zero extra lifecycle calls.
 	qn.start()
@@ -126,6 +138,10 @@ func (qn *QuotaNotifier) Stop() {
 
 	if sub != nil && qn.bus != nil {
 		qn.bus.Unsubscribe(sub)
+	}
+	if qn.securitySub != nil && qn.bus != nil {
+		qn.bus.Unsubscribe(qn.securitySub)
+		qn.securitySub = nil
 	}
 	if doneCh != nil {
 		<-doneCh
@@ -287,6 +303,44 @@ func (qn *QuotaNotifier) processEvent(msg *models.BusMessage) {
 		"provider", providerID,
 		"escalation", escalation,
 	)
+}
+
+// processSecurityAlert handles a typed security.alert bus event (channel B).
+// Dedup is by source+"|"+message in the SEPARATE securitySeen ledger, never
+// the quota `seen` map. Delivery reuses PushService with source="security".
+func (qn *QuotaNotifier) processSecurityAlert(ev SecurityAlertEvent) {
+	if ev.Message == "" {
+		return
+	}
+	source := ev.Source
+	if source == "" {
+		source = "mcp"
+	}
+	dedupKey := source + "|" + ev.Message
+	qn.secMu.Lock()
+	if qn.securitySeen[dedupKey] {
+		qn.secMu.Unlock()
+		return
+	}
+	qn.securitySeen[dedupKey] = true
+	qn.secMu.Unlock()
+
+	if qn.pushSvc == nil {
+		qn.logger.Debug("security alert push skipped: no push service", "source", source)
+		return
+	}
+	_, err := qn.pushSvc.Push(context.Background(), &PushRequest{
+		Content:  ev.Message,
+		Type:     PushTypeAlert,
+		Priority: PushPriorityUrgent,
+		Source:   "security",
+		Extra:    map[string]any{"security_source": source},
+	})
+	if err != nil {
+		qn.logger.Warn("security alert push failed", "error", err)
+		return
+	}
+	qn.logger.Info("security alert delivered", "source", source)
 }
 
 // Cleanup removes old dedup entries (for memory safety on long runs).

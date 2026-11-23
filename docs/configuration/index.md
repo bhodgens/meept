@@ -93,6 +93,7 @@ go build -o bin/meept-daemon ./cmd/meept-daemon
 |-------|------|---------|-------------|
 | `notifications.enabled` | bool | false | Enable desktop notifications |
 | `notifications.retention` | int | 30 | Days to retain notification history |
+| `notifications.security_channel` | string | `""` | Security-alert delivery channel. `""` = off; `"bot"` = NotificationBot/Telegram (`TriggerSecurityAlert`); `"push"` = bus `security.alert` via PushService. Unknown values are off. |
 
 ### Client Configuration (TUI + Flutter GUI)
 

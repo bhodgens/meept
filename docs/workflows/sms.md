@@ -36,6 +36,28 @@ sends; the channel derives `{base}/api/v1/voice/messaging/webhook`),
 `stop_reply`, `help_reply` (zero defaults — reply WORDING defaults live
 in the `sms` pkg), `inbound_enabled`.
 
+### Outbound egress gates (issue #165)
+
+Three more keys bound the outbound send path:
+
+- `allowed_numbers` — exact E.164 recipient allowlist. Empty (default)
+  keeps the pre-#165 behavior (any recipient) and emits a security
+  warning at client construction. Non-empty refuses any other recipient.
+- `max_messages_per_call` — MESSAGES PER SEND CALL (one `SendSMS2`
+  invocation). Zero (default) = unlimited.
+- `max_messages_per_day` — MESSAGES PER UTC DAY. Zero (default) =
+  unlimited. The counter is in-process; it resets on daemon restart.
+
+All three gates run at the TOP of `SendSMS2`, BEFORE the Telnyx HTTP
+POST. `ErrRecipientNotAllowed` and `ErrSendCapExceeded` are
+`errors.Is`-checkable. The production client gets these options from
+`internal/daemon/contact_wiring.go`. When messaging is enabled with no
+allowlist or cap, the arming path logs the exact warning: `WARNING:
+outbound messaging has no recipient allowlist or send cap; any E.164
+number may be contacted`. The outbound voice dial used by the same
+contact chain has its own fail-closed allowlist: `voice.allowed_numbers`
+null/empty refuses ALL outbound dials (inbound calls are not gated).
+
 ## Packages
 
 | Package | Role |

@@ -18,6 +18,7 @@ import (
 	"github.com/caimlas/meept/internal/tools/builtin"
 	"github.com/caimlas/meept/internal/voice"
 	voicetelnyx "github.com/caimlas/meept/internal/voice/telnyx"
+	"github.com/caimlas/meept/pkg/security"
 )
 
 // consentHelpWindow is the per-contact HELP auto-reply throttle window
@@ -48,6 +49,17 @@ type ContactChainWiring struct {
 	// to confirm; the inbound YES reply resolves + acks it on
 	// sms.StateTopic. Nil when the sms channel never armed (messaging
 	// disabled / client failure) — dispatch treats nil as "no ack lane".
+	// ContactPermissionChecker is the narrow seam the out-of-allowlist
+	// gate needs. *security.PermissionChecker satisfies it; nil = no
+	// checker wired (the in-allowlist path stays byte-identical).
+	ContactPermissionChecker interface {
+		CheckPermission(action string, details map[string]string) security.CheckResult
+	}
+
+	// allowedNumbers holds the outbound dial allowlist used by targetAllowed.
+	// Set by BuildContactChain from cfg.Voice.AllowedNumbers; nil = fail closed.
+	allowedNumbers []string
+
 	SMSConfirms *sms.PendingConfirms
 }
 
@@ -63,9 +75,57 @@ func (w *ContactChainWiring) Run(person, message string, channels []string) stri
 	if err != nil {
 		return fmt.Sprintf("contact: unknown contact %q (no record by id, phone, or signal uuid)", person)
 	}
+	// Issue #165 / #2: an out-of-allowlist target needs human confirmation
+	// through the dedicated RiskHigh action. In-allowlist targets take the
+	// unchanged path below (no checker call, no new log line).
+	if w.ContactPermissionChecker != nil && !w.targetAllowed(&rec) {
+		result := w.ContactPermissionChecker.CheckPermission(security.ContactOutOfAllowlistAction, map[string]string{
+			"contact_id": rec.ID,
+			"target":     rec.Phone,
+			"tool_name":  "contact",
+		})
+		if result.NeedsConfirm {
+			return fmt.Sprintf("contact: target %q is outside voice.allowed_numbers and needs human confirmation before any channel is attempted", rec.Phone)
+		}
+		if !result.Allowed {
+			return fmt.Sprintf("contact: target %q refused by permission gate (%s)", rec.Phone, result.Reason)
+		}
+	}
 	override := normalizeChannelOverride(channels)
 	report := w.Runner.Run(ctx, rec, message, override)
 	return renderChainReport(person, report)
+}
+
+// SetAllowedNumbersForTest arms the outbound allowlist for hermetic seam tests.
+// Nil-safe per repo setter rule. Production wiring sets this in BuildContactChain.
+func (w *ContactChainWiring) SetAllowedNumbersForTest(numbers []string) {
+	if w == nil {
+		return
+	}
+	w.allowedNumbers = append([]string(nil), numbers...)
+}
+
+// AllowedTargetForTest is the hermetic seam for the allowlist predicate.
+// Production callers go through Run; tests pin the normalization here.
+func (w *ContactChainWiring) AllowedTargetForTest(target string) bool {
+	return w != nil && w.targetAllowed(&contact.Record{Phone: target})
+}
+
+// targetAllowed reports whether the contact's phone is in the configured
+// outbound dial allowlist. It mirrors internal/voice/dial.go's NormalizeE164
+// comparison without importing voice here (same package is already an
+// import of contact_wiring.go; NormalizeE164 is exported there).
+func (w *ContactChainWiring) targetAllowed(rec *contact.Record) bool {
+	if w == nil || rec == nil {
+		return false
+	}
+	target := voice.NormalizeE164(rec.Phone)
+	for _, n := range w.allowedNumbers {
+		if voice.NormalizeE164(n) == target {
+			return true
+		}
+	}
+	return false
 }
 
 // normalizeChannelOverride maps the tool's string list onto C1
@@ -151,7 +211,16 @@ func BuildContactChain(cfg *config.Config, w *VoiceWiring, ledger effects.Ledger
 		client, cerr := telnyx.NewClient(telnyxBaseURL(),
 			telnyx.WithAPIKey(apiKey),
 			telnyx.WithProfileID(cfg.Voice.Messaging.ProfileID),
-			telnyx.WithFromNumber(cfg.Voice.Messaging.FromNumber))
+			telnyx.WithFromNumber(cfg.Voice.Messaging.FromNumber),
+			// Issue #165: arm the outbound egress gates from the operator's
+			// messaging block. Empty allowlist / zero caps keep the legacy
+			// all/unlimited posture and emit the construction warning.
+			telnyx.WithAllowedNumbers(cfg.Voice.Messaging.AllowedNumbers),
+			telnyx.WithSendCaps(cfg.Voice.Messaging.MaxMessagesPerCall, cfg.Voice.Messaging.MaxMessagesPerDay),
+			// Issue #165 follow-up: share the daemon's durable day counter
+			// with the dialer so the per-day SMS cap survives a restart.
+			// Nil (no capped config) keeps the in-process fallback.
+			telnyx.WithDailySendCounter(w.dailyCounter))
 		if cerr != nil {
 			log.Warn("contact wiring: telnyx messaging client failed; sms channel skipped", "error", cerr)
 		} else {
@@ -241,7 +310,12 @@ func BuildContactChain(cfg *config.Config, w *VoiceWiring, ledger effects.Ledger
 	if ledger != nil || audit != nil {
 		runner = runner.WithSinks(contact.ChainSinks{Effects: ledger, Audit: audit})
 	}
-	return &ContactChainWiring{Store: store, Runner: runner, SMSConfirms: smsConfirms}, nil
+	return &ContactChainWiring{
+		Store:          store,
+		Runner:         runner,
+		SMSConfirms:    smsConfirms,
+		allowedNumbers: cfg.Voice.AllowedNumbers,
+	}, nil
 }
 
 // Close releases the contacts store (daemon Stop path).
