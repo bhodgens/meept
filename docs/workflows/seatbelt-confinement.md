@@ -61,11 +61,20 @@ The local backend wraps every child:
 
 Profile rule order matters: seatbelt rules are last-match-wins, so meept
 emits global denies first, then allow-lists, then hole denies, then process
-rules. The builder and its ordering are pinned by unit tests
-(`internal/runtime/seatbelt.go` / `seatbelt_test.go` profile assertions)
-and end-to-end by `e2e/suites/seatbelt/` (marker files prove which writes
-landed, which reads failed with `Operation not permitted`, and that an
-invalid policy refuses commands entirely).
+rules. The builder and its ordering are pinned by OS-independent unit tests in
+`internal/runtime/seatbelt_test.go` — `TestBuildSeatbeltProfile_RuleOrderAndShape`
+asserts the exact rule sequence by byte offset (global write-deny before the
+allow-list, every `deny_write` hole after it),
+`TestBuildSeatbeltProfile_BadRuleFailsClosed` pins that each malformed rule
+class returns a wrapped error and an empty profile, and
+`TestBuildSeatbeltProfile_InactiveIsLegacy` / `TestValidateSeatbeltPath` /
+`TestSeatbeltActive` pin fail-closed behavior for inactive or invalid config.
+These unit tests are the ONLY tier CI executes: the CI runner is linux
+(`ci.yml` job `e2e-fast`, no macOS runner), where the darwin-only e2e tests
+skip, so the emitted rule shape must stay covered here.
+The same policy is exercised end-to-end by `e2e/suites/seatbelt/` (marker
+files prove which writes landed, which reads failed with `Operation not
+permitted`, and that an invalid policy refuses commands entirely).
 
 ## What it does NOT do
 
