@@ -19,7 +19,72 @@ var (
 	ErrAgentNotFound = errors.New("acp: agent not found")
 	ErrAgentDisabled = errors.New("acp: agent disabled")
 	ErrMaxAgents     = errors.New("acp: max agents")
+	// ErrPermissiveRefused is the fail-closed answer for a caller that has
+	// declared (via WithNoPermissive) that its turn must never run with
+	// permissive permissions but whose effective mode — from ANY of the
+	// three sources (call option, catalog entry, global) — resolved to
+	// permissive. The session is never created/returned in that case, so a
+	// tier-3 employee cannot auto-approve external permission requests via
+	// an operator-owned catalog entry (bughunt H5).
+	ErrPermissiveRefused = errors.New("acp: permissive mode refused for no-permissive caller")
 )
+
+// noPermissiveKey scopes the fail-closed context marker used by a tier-3
+// employee's ACP turn: the marker rides the same ctx that reaches
+// GetOrCreatePersona, so the manager can refuse a permissive session
+// regardless of which source selected permissive.
+type noPermissiveKey struct{}
+
+// WithNoPermissive marks ctx as belonging to a caller whose turns must
+// never run with permissive permissions. Nil-safe and idempotent: an empty
+// context returns ctx unchanged; the value is a boolean marker only.
+func WithNoPermissive(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return context.WithValue(ctx, noPermissiveKey{}, true)
+}
+
+// NoPermissiveFromContext reports whether ctx was stamped by
+// WithNoPermissive. A nil ctx is an unmarked caller.
+func NoPermissiveFromContext(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	marked, _ := ctx.Value(noPermissiveKey{}).(bool)
+	return marked
+}
+
+// turnCostSinkKey scopes the per-turn cost recorder that the daemon
+// employee adapter plants on the ctx. It flows with the ctx down through
+// the agent loop into Session.Send, so an ACP harness that reports cost on
+// its prompt response can forward it to the goal-loop budget lane even
+// though the ACP path bypasses reasoningCycle (bughunt M2, D4 decision C:
+// wire-forward usage iff the harness emits it).
+type turnCostSinkKey struct{}
+
+// WithTurnCostSink returns a ctx carrying sink for this turn's provider
+// cost in dollars. The sink must be non-blocking and additive (it may be
+// called once per cost-bearing response in a turn). Nil sink or nil ctx
+// leaves the ctx cost-dark: cost is then simply not reported.
+func WithTurnCostSink(ctx context.Context, sink func(costUSD float64)) context.Context {
+	if ctx == nil || sink == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, turnCostSinkKey{}, sink)
+}
+
+// ReportTurnCost forwards a reported provider cost to the turn's sink (if
+// any). Non-positive costs are ignored (unconfigured prices / absent data
+// must not look like a reported zero-cost turn).
+func ReportTurnCost(ctx context.Context, costUSD float64) {
+	if costUSD <= 0 || ctx == nil {
+		return
+	}
+	if sink, ok := ctx.Value(turnCostSinkKey{}).(func(costUSD float64)); ok && sink != nil {
+		sink(costUSD)
+	}
+}
 
 type startFunc func(ctx context.Context, cfg SessionConfig) (*Session, error)
 
@@ -312,6 +377,28 @@ func (m *Manager) GetOrCreatePersona(ctx context.Context, agentID, persona, work
 		return nil, ErrAgentDisabled
 	}
 
+	// Resolve the EFFECTIVE permission mode with the exact precedence the
+	// session will run under (call option > catalog entry > global [acp]).
+	// Computing it BEFORE the pending insert lets the no-permissive
+	// fail-closed guard below return without leaving a dangling waiter.
+	permMode := m.effectivePermissionMode(entry, opts.PermissionMode)
+
+	// Fail-closed for no-permissive callers (bughunt H5): a tier-3 acp
+	// employee stamps WithNoPermissive on its turn ctx. Even when the
+	// operator-owned catalog entry (or the global) says permissive while
+	// the wiring-time guard saw only "human", the session is NEVER created
+	// permissive — so acp/session.go's auto-approve branch is unreachable
+	// for that employee regardless of which source selected permissive.
+	if NoPermissiveFromContext(ctx) && permMode == "permissive" {
+		slog.Warn("SECURITY: refusing permissive acp session for no-permissive caller",
+			"component", "acp",
+			"agent", agentID,
+			"call_option", opts.PermissionMode,
+			"catalog_mode", entry.PermissionMode,
+			"global_mode", m.cfg.PermissionMode)
+		return nil, ErrPermissiveRefused
+	}
+
 	key := personaKey(agentID, persona)
 	m.mu.Lock()
 	if s, exists := m.sessions[key]; exists {
@@ -345,14 +432,6 @@ func (m *Manager) GetOrCreatePersona(ctx context.Context, agentID, persona, work
 	}
 	if opts.Cwd != "" {
 		cwd = opts.Cwd
-	}
-	permMode := m.cfg.PermissionMode
-	if opts.PermissionMode != "" {
-		permMode = opts.PermissionMode
-	} else if entry.PermissionMode != "" {
-		// Per-connection override from acp_agents.json5 (operator-owned).
-		// Precedence: explicit call option > catalog entry > global [acp].
-		permMode = entry.PermissionMode
 	}
 	if permMode == "permissive" && (opts.PermissionMode == "permissive" || entry.PermissionMode == "permissive") {
 		slog.Warn("SECURITY: acp connection runs with permissive permission mode; every external permission request is auto-approved",
@@ -529,6 +608,41 @@ func sessionLabel(key string) string {
 		return agentID
 	}
 	return agentID + "/" + persona
+}
+
+// effectivePermissionMode resolves the permission mode a session will
+// actually run under: explicit call option > catalog entry > global [acp].
+// This is the SINGLE precedence used by GetOrCreatePersona and exposed via
+// EffectivePermissionMode for callers (e.g. the daemon's tier-3 D3 guard)
+// that must reason about the same effective value the session sees.
+func (m *Manager) effectivePermissionMode(entry config.ACPAgentEntry, callMode string) string {
+	if callMode != "" {
+		return callMode
+	}
+	if entry.PermissionMode != "" {
+		return entry.PermissionMode
+	}
+	return m.cfg.PermissionMode
+}
+
+// EffectivePermissionMode returns the mode a persona session for agentID
+// would run under given an optional call-level override. It applies the
+// same precedence the session uses (call option > catalog entry > global),
+// so a guard consulting it cannot diverge from the session's real mode.
+// An unknown agent or a nil manager falls back to the global mode (the
+// call option, when set, still wins) — matching the manager's own lookups
+// which error on unknown agents before a session is created.
+func (m *Manager) EffectivePermissionMode(agentID, callMode string) string {
+	if callMode != "" {
+		return callMode
+	}
+	if m == nil {
+		return ""
+	}
+	if entry, ok := m.lookup(agentID); ok && entry.PermissionMode != "" {
+		return entry.PermissionMode
+	}
+	return m.cfg.PermissionMode
 }
 
 func (m *Manager) lookup(id string) (config.ACPAgentEntry, bool) {

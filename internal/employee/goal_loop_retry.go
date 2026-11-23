@@ -57,7 +57,15 @@ var DefaultRetryPolicy = RetryPolicy{
 //
 // All I/O happens outside the loop mutex (mutex-scope rule); the policy is
 // read once under the lock.
-func (l *GoalLoop) executeBotWithRetry(ctx context.Context, runner bot.BotExecutor, systemPrompt, userMessage string) (string, int, error) {
+//
+// The third return value is the SUM of the optional ExecutionCostCents()
+// reported by the executor after EACH attempt (bughunt L9). A failed
+// expensive attempt that is retried into a cheap success must contribute
+// BOTH costs to the round's spend — reading only the final attempt (the
+// old behavior) discarded the failed attempt's provider dollars and let a
+// costly retry storm bypass the daily-budget lane. A plain BotExecutor
+// with no cost reporter contributes 0, byte-identical to before.
+func (l *GoalLoop) executeBotWithRetry(ctx context.Context, runner bot.BotExecutor, systemPrompt, userMessage string) (string, int, int, error) {
 	l.mu.Lock()
 	policy := l.retryPolicy
 	l.mu.Unlock()
@@ -69,13 +77,18 @@ func (l *GoalLoop) executeBotWithRetry(ctx context.Context, runner bot.BotExecut
 	}
 
 	var (
-		output  string
-		tokens  int
-		lastErr error
+		output   string
+		tokens   int
+		lastErr  error
+		totalUSD int // accumulated provider cents across all attempts (L9)
 	)
 retryLoop:
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		output, tokens, lastErr = runner.ExecuteBot(ctx, systemPrompt, userMessage)
+		// Read the cent cost AFTER each attempt (success OR failure): a
+		// failed attempt still burned provider dollars. Additive, so a
+		// retry-recovered round accounts for every attempt's spend.
+		totalUSD += executionCostCents(runner)
 		if lastErr == nil {
 			break
 		}
@@ -101,5 +114,5 @@ retryLoop:
 			backoff *= 2
 		}
 	}
-	return output, tokens, lastErr
+	return output, tokens, totalUSD, lastErr
 }

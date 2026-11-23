@@ -7151,7 +7151,11 @@ func (c *Components) Start(ctx context.Context) error {
 					if c.EmployeeAuditStore != nil {
 						turnAudit = c.EmployeeAuditStore
 					}
-					empExecutor, refuse := employeeBotExecutor(emp, executor, specSrc, globalMode, acpEmployeeLoopResolver(c.AgentRegistry), turnAudit, c.Logger)
+					var modeResolver permissionModeResolver
+					if c.ACPManager != nil {
+						modeResolver = c.ACPManager.EffectivePermissionMode
+					}
+					empExecutor, refuse := employeeBotExecutor(emp, executor, specSrc, globalMode, acpEmployeeLoopResolver(c.AgentRegistry), turnAudit, c.Logger, modeResolver)
 					if refuse {
 						continue
 					}

@@ -351,6 +351,15 @@ func (s *Session) Send(ctx context.Context, text string) (string, StopReason, er
 
 	var res struct {
 		StopReason string `json:"stopReason"`
+		// usage is the optional ACP extension carrying provider cost for
+		// this turn (D4 decision C: wire-forward usage iff present). Harnesses
+		// that emit it let the goal-loop budget lane bind on ACP turns;
+		// harnesses that don't leave cost dark (0). Forwarded to the ctx
+		// sink so the real production caller (the agent loop / employee
+		// adapter, which bypasses reasoningCycle) can record it.
+		Usage *struct {
+			CostUSD float64 `json:"costUsd"`
+		} `json:"usage,omitempty"`
 	}
 	err := s.tr.Call(callCtx, MethodSessionPrompt, map[string]any{
 		"sessionId": s.getSessionID(),
@@ -372,6 +381,12 @@ func (s *Session) Send(ctx context.Context, text string) (string, StopReason, er
 	stopReason := StopReason(res.StopReason)
 	if stopReason == "" {
 		stopReason = "end_turn"
+	}
+	// D4 decision C: forward a harness-reported cost to the turn's ctx
+	// sink. A no-op when the harness reports no usage or no sink is wired.
+	// Uses callCtx so the sink survives the per-call timeout derivation.
+	if res.Usage != nil {
+		ReportTurnCost(callCtx, res.Usage.CostUSD)
 	}
 	// Turn-end projection (branch 02-acp-emit F3): the raw wire stopReason
 	// rides a dedicated SessionEvent so higher layers see the terminal

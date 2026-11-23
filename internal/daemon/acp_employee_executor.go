@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/caimlas/meept/internal/acp"
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/bot"
 	"github.com/caimlas/meept/internal/employee"
@@ -84,6 +85,12 @@ type acpEmployeeExecutorAdapter struct {
 	// lane). Rounds on one executor are sequential, so a plain field
 	// needs no extra synchronization.
 	lastCostUSD float64
+	// noPermissive is set for tier-3 employees: their turn ctx is stamped
+	// with acp.WithNoPermissive so the manager refuses a permissive session
+	// regardless of which source (call option / catalog / global) selected
+	// it. The D3 wiring guard cannot see the catalog entry, so this is the
+	// runtime fail-closed backstop (bughunt H5).
+	noPermissive bool
 }
 
 // ExecuteBot runs a single employee turn through the referenced agent's
@@ -95,6 +102,11 @@ type acpEmployeeExecutorAdapter struct {
 // that assembly for this turn only.
 // Returns (output, 0, err).
 func (a *acpEmployeeExecutorAdapter) ExecuteBot(ctx context.Context, systemPrompt, userMessage string) (string, int, error) {
+	// Per-turn cost reset: ExecutionCostCents reports the just-finished
+	// attempt. The goal loop reads it once per attempt (executeBotWithRetry
+	// accumulates across attempts), so a stale value from a prior attempt
+	// must never be re-counted (bughunt M2/L9).
+	a.lastCostUSD = 0
 	if a.resolveLoop == nil {
 		return "", 0, fmt.Errorf("acp employee executor %q: loop resolver not configured", a.employeeID)
 	}
@@ -124,14 +136,34 @@ func (a *acpEmployeeExecutorAdapter) ExecuteBot(ctx context.Context, systemPromp
 	// seam).
 	loop.SetTurnSystemPrefix(systemPrompt)
 	turnCtx := agent.WithACPTurnSource(ctx, agent.ACPTurnSourceEmployee, a.employeeID)
+	// H5 fail-closed: a tier-3 employee's turn ctx carries the marker that
+	// makes the acp.Manager refuse a permissive session from ANY of the
+	// three mode sources. The value survives every ctx derive down to
+	// GetOrCreatePersona (context.WithCancel derives values).
+	if a.noPermissive {
+		turnCtx = acp.WithNoPermissive(turnCtx)
+	}
+	// M2: plant a per-turn cost sink on the ctx. The ACP wire bypasses
+	// reasoningCycle (the sole production caller of recordTurnCostUSD), so
+	// without this seam ExecutionCostCents() was structurally always 0 and
+	// the daily-budget lane never bound. When the harness reports a cost
+	// on session/prompt, acp.Session forwards it here and we accumulate it
+	// into lastCostUSD (additive: more than one response per turn is safe).
+	turnCtx = acp.WithTurnCostSink(turnCtx, func(costUSD float64) {
+		a.lastCostUSD += costUSD
+	})
 	response, err := loop.RunOnce(turnCtx, userMessage, conversationID)
-	// Goal-loop budget lane: capture the serving loop's provider dollar
-	// cost. The seam is the narrow acpTurnRunner interface, but the
-	// production resolver (acpEmployeeLoopResolver) always supplies a
-	// concrete *agent.AgentLoop; a test double without the method
-	// reports 0 (same "no usage on this lane" posture as tokensUsed).
+	// Goal-loop budget lane: the harness-reported cost was accumulated by
+	// the sink above. Some loops (and test doubles) instead expose the
+	// turn's cost via LastTurnCostUSD; fold that in only when the sink saw
+	// nothing, so a cost reported on the wire is never clobbered by a
+	// second, possibly stale, source.
 	if costReader, ok := loop.(interface{ LastTurnCostUSD() float64 }); ok {
-		a.lastCostUSD = costReader.LastTurnCostUSD()
+		if sinkCost := a.lastCostUSD; sinkCost == 0 {
+			if loopCost := costReader.LastTurnCostUSD(); loopCost > 0 {
+				a.lastCostUSD = loopCost
+			}
+		}
 	}
 	persistEmployeeExchange(a.sessions, conversationID, a.employeeID, userMessage, response, a.logger)
 	if err != nil {
@@ -216,15 +248,32 @@ func acpEmployeeLoopResolver(registry *agent.AgentRegistry) func(agentID string)
 }
 
 // effectiveACPPermissionMode returns the permission mode an acp-backed
-// agent actually runs under: the agent definition's override when set,
-// else the global [acp] permission_mode (precedence per internal/agent
-// ACPSpec.PermissionMode doc + internal/acp/manager.go persona override).
+// agent runs under from the two sources visible here: the agent
+// definition's override when set, else the global [acp] permission_mode.
+//
+// NOTE: this is a conservative LOWER BOUND for the wiring-time guard only.
+// The acp.Manager ALSO applies an operator-owned catalog entry
+// PermissionMode (acp_agents.json5) with precedence call option > catalog
+// > global — a source this function cannot see (bughunt H5). The
+// D3 guard therefore also stamps WithNoPermissive on tier-3 turns so the
+// manager enforces fail-closed at session creation: a tier-3 employee can
+// never run permissive even when the catalog entry is permissive while
+// this function reports "human". A resolver seam may be supplied to make
+// the wiring-time check see the catalog mode too (see permissionModeResolver).
 func effectiveACPPermissionMode(spec *agent.AgentSpec, globalMode string) string {
 	if spec != nil && spec.ACP != nil && spec.ACP.PermissionMode != "" {
 		return spec.ACP.PermissionMode
 	}
 	return globalMode
 }
+
+// permissionModeResolver is the optional seam the wiring guard consults
+// for the FULL effective mode (call option > catalog entry > global). When
+// supplied, the tier-3 D3 guard uses its answer so the refusal decision is
+// made on the same value the session will actually run with. It is
+// satisfied by (*acp.Manager).EffectivePermissionMode from the daemon
+// wiring (via a small closure, keeping this package free of an acp import).
+type permissionModeResolver func(agentID, callMode string) string
 
 // employeeBotExecutor decides which bot.BotExecutor an employee's GoalLoop
 // gets, enforcing the acp-employees phase-3 guards (D1 target validation,
@@ -244,11 +293,20 @@ func effectiveACPPermissionMode(spec *agent.AgentSpec, globalMode string) string
 //     skip-on-load-failure style of this wiring block).
 //   - Healthy acp reference: (acp adapter, false), with WARN for tier-1/2
 //     × permissive (D3) and cost-cap no-ops (D4).
+//
+// modeResolver is an OPTIONAL seam (variadic so existing callers are
+// byte-identical): when supplied it returns the FULL effective permission
+// mode (call option > catalog entry > global) that the session will
+// actually run with, letting the tier-3 D3 guard see the operator-owned
+// catalog entry too. When absent, the guard falls back to spec+global and
+// the runtime no-permissive marker is the fail-closed backstop at session
+// creation (see ExecuteBot / acp.WithNoPermissive).
 func employeeBotExecutor(emp employee.Employee, defaultExecutor bot.BotExecutor,
 	registry acpSpecSource, globalPermissionMode string,
 	resolveLoop func(agentID string) (acpTurnRunner, error),
 	audit acpTurnAuditRecorder,
-	logger *slog.Logger) (bot.BotExecutor, bool) {
+	logger *slog.Logger,
+	modeResolver ...permissionModeResolver) (bot.BotExecutor, bool) {
 
 	if emp.ExecutorAgent == "" {
 		return employeeBoundLocalExecutor(emp, defaultExecutor), false
@@ -276,6 +334,18 @@ func employeeBotExecutor(emp employee.Employee, defaultExecutor bot.BotExecutor,
 	}
 
 	mode := effectiveACPPermissionMode(spec, globalPermissionMode)
+	// H5: when a resolver seam is supplied, use the FULL effective mode
+	// (call option = spec.ACP.PermissionMode > catalog entry > global) that
+	// the session will actually run with. This makes the wiring-time D3
+	// guard see the operator-owned catalog entry it previously missed.
+	// CallMode carries the agent-definition override so the resolver's
+	// precedence mirrors GetOrCreatePersona exactly.
+	if len(modeResolver) > 0 && modeResolver[0] != nil {
+		mode = modeResolver[0](spec.ACP.Agent, spec.ACP.PermissionMode)
+		if mode == "" {
+			mode = globalPermissionMode
+		}
+	}
 	// D3 guard (decision B; phase-3 doc "Security"): a tier-3 acp employee
 	// running permissive means meept stops binding once the prompt is
 	// sent — the plan-level escalation gate is upstream of the turn and
@@ -299,19 +369,26 @@ func employeeBotExecutor(emp employee.Employee, defaultExecutor bot.BotExecutor,
 			"permission_mode", mode)
 	}
 
-	// D4 (decision A+C): the acp wire carries no token usage today
-	// (session/prompt returns stopReason only, docs/workflows/
-	// acp-employees-phase3.md D4), so cost-bound caps are no-ops for
-	// acp employees. Warn, don't refuse — refusing would be hostile to
-	// existing definitions that grew these fields under the local
-	// executor.
+	// H5 fail-closed backstop: a tier-3 employee stamps WithNoPermissive
+	// on its turn ctx so the acp.Manager refuses a permissive session from
+	// any source, even when this wiring guard could only see spec+global.
+	noPermissive := emp.Constitution.AutonomyTier == employee.Tier3Autonomous
+
+	// D4 (decision A+C): the ACP wire does not carry provider usage on
+	// every harness today (session/prompt returns stopReason only,
+	// docs/workflows/acp-employees-phase3.md D4). Cost-bound caps bind only
+	// when the harness reports a cost on the prompt response; a harness
+	// without that extension leaves ExecutionCostCents() at 0, so these
+	// caps remain inert for it. Warn, don't refuse — refusing would be
+	// hostile to existing definitions that grew these fields under the
+	// local executor.
 	if emp.Constraints.DailyBudgetCents > 0 || emp.Constitution.Constraints.DailyBudgetCents > 0 {
-		logger.Warn("employee acp executor: daily_budget_cents cannot bind remote turns (no cost signal on the acp wire)",
+		logger.Warn("employee acp executor: daily_budget_cents binds only when the harness reports cost (no cost signal on some acp wires)",
 			"employee_id", emp.ID, "executor_agent", emp.ExecutorAgent)
 	}
 	for _, trig := range emp.Constitution.Constraints.EscalationTriggers {
 		if trig.On == employee.EscalateOnCost {
-			logger.Warn("employee acp executor: cost escalation trigger cannot fire (no cost signal on the acp wire)",
+			logger.Warn("employee acp executor: cost escalation trigger fires only when the harness reports cost (no cost signal on some acp wires)",
 				"employee_id", emp.ID, "executor_agent", emp.ExecutorAgent, "trigger_match", trig.Match)
 		}
 	}
@@ -323,6 +400,7 @@ func employeeBotExecutor(emp employee.Employee, defaultExecutor bot.BotExecutor,
 		persona:      spec.ACP.Persona,
 		resolveLoop:  resolveLoop,
 		audit:        audit,
+		noPermissive: noPermissive,
 		logger:       logger.With("component", "acp-employee-executor", "employee_id", emp.ID),
 		sessions:     sessionsFromExecutor(defaultExecutor),
 	}, false

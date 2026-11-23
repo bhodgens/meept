@@ -1175,9 +1175,13 @@ func (l *GoalLoop) Execute(ctx context.Context, plan PlanRef) (*bot.BotExecution
 	// Reflect sees, so a persistent failure burns the retries once and
 	// still records exactly one failure per round. Context cancellation is
 	// non-retriable. WithRetryPolicy(RetryPolicy{}) opts out.
-	output, tokens, err := l.executeBotWithRetry(ctx, runner, systemPrompt, userMessage)
+	output, tokens, retryCostCents, err := l.executeBotWithRetry(ctx, runner, systemPrompt, userMessage)
 	duration := time.Since(start)
-	l.recordSpend(tokens, executionCostCents(runner))
+	// L9: record the SUM of per-attempt costs from the retry loop (a failed
+	// costly attempt + a successful cheap retry must both count). The old
+	// code read executionCostCents(runner) once after the loop, capturing
+	// only the final attempt and discarding prior attempts' provider spend.
+	l.recordSpend(tokens, retryCostCents)
 
 	result := &bot.BotExecutionResult{
 		BotID:      l.employeeID,
