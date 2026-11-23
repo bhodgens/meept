@@ -947,6 +947,25 @@ type verdictWireShape struct {
 	Confidence float64 `json:"confidence"`
 }
 
+// passVerdictFor builds the issue-#168-AC1 pass row for an APPROVED review:
+// exactly one verdict-free row (category "pass", empty severity, no rubric)
+// so per-model pass/fail rates use a real denominator. An approved step that
+// already carries defect verdicts (approved-with-findings) gets NO pass row —
+// the pass row exists so a clean approval is countable, not to offset defects.
+func passVerdictFor(result *ReviewResult) []modelrating.Verdict {
+	if result.Status != ReviewApproved || len(result.Verdicts) > 0 {
+		return nil
+	}
+	return []modelrating.Verdict{{
+		RubricID:   "",
+		Scope:      modelrating.ScopeModel,
+		Category:   modelrating.CategoryPass,
+		Severity:   modelrating.SeverityNone,
+		Detail:     "approved: no defects found",
+		Confidence: result.Confidence,
+	}}
+}
+
 // verdictsToWire maps the ReviewResult's verdicts onto the frozen C4 wire
 // shape. Lenient by contract: an unknown rubric id keeps its row (RubricID
 // carries the id as-is — catalog membership is NOT enforced on emission;
@@ -1068,7 +1087,7 @@ func (rm *ReviewManager) enrichedReviewPayload(stepID, taskID string, result *Re
 		"confidence":            result.Confidence,
 		"reviewer":              result.ReviewerID,
 		"revision_count":        revisionCount,
-		"verdicts":              verdictsToWire(result.Verdicts),
+		"verdicts":              verdictsToWire(append(result.Verdicts, passVerdictFor(result)...)),
 		"reviewed_model_id":     reviewedModelID,
 		"judge_agent_id":        result.ReviewerID,
 		"judge_model_id":        judgeModelID,

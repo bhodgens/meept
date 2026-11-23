@@ -86,11 +86,11 @@ Master.md conventions. Dart: flutter format; Swift: match LiveMetricsView.swift 
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-surfaces | PENDING | 0 | |
-| 01-http-endpoint | PENDING | 0 | |
-| 02-cli | PENDING | 0 | |
-| 03-flutter-panel | PENDING | 0 | |
-| 04-menubar-tab | PENDING | 0 | |
+| 00T-surfaces | COMPLETE | 1 | gate tests landed with their implementation leaves |
+| 01-http-endpoint | COMPLETE | 1 | 3e7fa710 |
+| 02-cli | COMPLETE | 1 | 908e06ad |
+| 03-flutter-panel | COMPLETE | 1 | dfb95627 |
+| 04-menubar-tab | COMPLETE | 1 | 4394cfe5 |
 
 ## Integration Test Plan
 

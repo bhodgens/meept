@@ -39,9 +39,12 @@ this feature's new surfaces (table columns, API fields, CLI columns) say judge.
 
 `wrong_language`, `wrong_api_or_dependency`, `logic_error`, `security_defect`,
 `incomplete_implementation`, `unrequested_change`, `build_or_test_failure`,
-`style_bloat`, `convention_violation`. Passing steps record `category='pass'`
-(the pass-rate denominator). Severities: `cosmetic`, `functional`, `blocking`,
-`critical` (empty on pass rows).
+`style_bloat`, `convention_violation`. A CLEAN approval records exactly one
+final `category='pass'` row with empty severity and no rubric id — that row is
+the pass-rate denominator. An approved-with-findings review carries only its
+defect verdicts (a pass row never offsets defects); rejections never carry
+one. Severities: `cosmetic`, `functional`, `blocking`, `critical` (empty on
+pass rows).
 
 ## Storage and retention
 

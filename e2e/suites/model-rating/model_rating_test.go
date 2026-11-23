@@ -53,12 +53,17 @@ func newSuiteStore(t *testing.T) *metrics.Store {
 
 // newSuiteStoreAt is newSuiteStore with an explicit db path (surface-01
 // points it at <MEEPT_HOME>/metrics.db so the CLI reads the same file).
+// RetentionDays is set EXPLICITLY: a zero-valued config disables the 30-day
+// audit purge entirely (store.go guards it behind retentionDays > 0), which
+// would let retention-01 pass vacuously — the purge must be armed to prove
+// verdict rows survive it.
 func newSuiteStoreAt(t *testing.T, dbPath string) *metrics.Store {
 	t.Helper()
 	store, err := metrics.NewStore(&metrics.StoreConfig{
 		DatabasePath:  dbPath,
 		BatchSize:     1,
 		FlushInterval: time.Hour,
+		RetentionDays: metrics.DefaultRetentionDays,
 	})
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
@@ -284,21 +289,14 @@ func TestRetention01(t *testing.T) {
 		}
 	}
 
-	// --- Run the two sweeps with the production SQL ---
-	// Sweep 1: the 24h metrics_live raw purge (store.go aggregateHourly).
-	if _, err := store.DB().Exec(
-		`DELETE FROM metrics_live WHERE timestamp < datetime('now', '-24 hours')`); err != nil {
-		t.Fatalf("metrics_live sweep: %v", err)
-	}
-	// Sweep 2: the retention audit purge over RetentionTables() (store.go
-	// aggregateHourly, retentionDays=DefaultRetentionDays).
-	cutoff := fmt.Sprintf("-%d days", metrics.DefaultRetentionDays)
-	for _, table := range metrics.RetentionTables() {
-		q := fmt.Sprintf(`DELETE FROM %s WHERE timestamp < datetime('now', ?)`, table)
-		if _, err := store.DB().Exec(q, cutoff); err != nil {
-			t.Fatalf("audit purge %s: %v", table, err)
-		}
-	}
+	// --- Run the two sweeps through the REAL production path ---
+	// RunMaintenanceSweepForTest executes aggregateHourly: the 24h
+	// metrics_live raw purge AND the RetentionTables() 30-day audit purge
+	// (retentionDays must be non-zero for the audit purge to run —
+	// newSuiteStore keeps the DefaultRetentionDays default). Running the
+	// production SQL (not a byte-lifted copy) means store.go drift fails
+	// this scenario instead of silently passing.
+	store.RunMaintenanceSweepForTest()
 
 	// --- Then: verdict rows survive; controls are gone ---
 	count := func(table string) int {

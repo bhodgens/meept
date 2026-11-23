@@ -95,9 +95,9 @@ Same as master.md Coding Conventions (Go sections). Leaves are Go-only.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-contracts | PENDING | 0 | |
-| 01-rubric-catalog | PENDING | 0 | |
-| 02-verdict-store | PENDING | 0 | |
+| 00T-contracts | COMPLETE | 1 | gate tests landed with their implementation leaves |
+| 01-rubric-catalog | COMPLETE | 1 | 99e836e5 |
+| 02-verdict-store | COMPLETE | 1 | cbaf210a |
 
 ## Integration Test Plan
 

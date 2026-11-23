@@ -179,6 +179,15 @@ func NewStore(cfg *StoreConfig) (*Store, error) {
 // and will close it in Close().
 func (s *Store) DB() *sqlx.DB { return s.db }
 
+// RunMaintenanceSweepForTest runs one real aggregateHourly maintenance cycle
+// (the hourly aggregation + the 24h metrics_live purge + the 30-day audit
+// purge). Exported for the hermetic e2e tier ONLY: retention scenarios must
+// exercise the production SQL, not byte-lifted copies of it (a lifted copy
+// silently drifts when store.go changes — the exact failure this seam
+// prevents). Production code must never call this; the goroutine in Start
+// remains the only runtime entry into aggregateHourly.
+func (s *Store) RunMaintenanceSweepForTest() { s.aggregateHourly() }
+
 // initSchema creates the database schema if it doesn't exist.
 func (s *Store) initSchema() error {
 	schema := `

@@ -165,6 +165,109 @@ func gatePayloadKeys(m map[string]any) []string {
 	return out
 }
 
+// EM-PASS-1 (issue #168 AC1 / verdict row contract): approved steps record
+// exactly one final category='pass' row with empty severity, so per-model
+// pass/fail rates use a real denominator. Given three review outcomes; When
+// the payload is built; Then ONLY the clean approval carries a pass verdict,
+// and approved-with-findings does not (the pass row counts clean approvals,
+// it does not offset defects).
+func TestEM_PASS_1_ApprovedPassRow(t *testing.T) {
+	msgBus := bus.New(nil, slogDiscardLogger())
+	rm := NewReviewManager(ReviewManagerConfig{
+		StepStore: newTestStepStore(t),
+		Bus:       msgBus,
+		Logger:    slogDiscardLogger(),
+	})
+
+	// Case 1: clean approval — exactly one pass verdict, no rubric, model
+	// scope, empty severity, is_final true.
+	sub := msgBus.Subscribe("em-pass-clean", "step.review_completed")
+	clean := &ReviewResult{
+		Status:     ReviewApproved,
+		Feedback:   "clean approval",
+		Confidence: 0.95,
+		ReviewerID: "test-reviewer",
+	}
+	rm.publishReviewEvent("step-pass-1", "task-pass-1", clean, 0)
+	msg := waitGateBusMsg(t, sub, "clean-approval step.review_completed message")
+
+	var payload map[string]any
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	verdicts, ok := payload["verdicts"].([]any)
+	if !ok {
+		t.Fatalf("verdicts = %v, want an array", payload["verdicts"])
+	}
+	if len(verdicts) != 1 {
+		t.Fatalf("clean approval carries %d verdicts, want exactly 1 pass row", len(verdicts))
+	}
+	elem, _ := verdicts[0].(map[string]any)
+	if got, _ := elem["category"].(string); got != string(modelrating.CategoryPass) {
+		t.Errorf("pass row category = %q, want %q", got, string(modelrating.CategoryPass))
+	}
+	if got, _ := elem["severity"].(string); got != string(modelrating.SeverityNone) {
+		t.Errorf("pass row severity = %q, want empty", got)
+	}
+	if got, _ := elem["rubric_id"].(string); got != "" {
+		t.Errorf("pass row rubric_id = %q, want empty (verdict-free row)", got)
+	}
+	if got, _ := elem["scope"].(string); got != string(modelrating.ScopeModel) {
+		t.Errorf("pass row scope = %q, want %q (a clean approval counts toward the reviewed model)", got, string(modelrating.ScopeModel))
+	}
+	if got, ok := payload["is_final"].(bool); !ok || !got {
+		t.Errorf("approved pass row is_final = %v, want true", payload["is_final"])
+	}
+
+	// Case 2: approved-with-findings — defect verdicts present, so NO pass
+	// row is appended (pass rows count clean approvals, not offsets).
+	sub2 := msgBus.Subscribe("em-pass-findings", "step.review_completed")
+	findings := &ReviewResult{
+		Status:     ReviewApproved,
+		Feedback:   "approved with findings",
+		Confidence: 0.9,
+		ReviewerID: "test-reviewer",
+		Verdicts:   gateVerdicts(),
+	}
+	rm.publishReviewEvent("step-pass-2", "task-pass-2", findings, 1)
+	msg2 := waitGateBusMsg(t, sub2, "approved-with-findings step.review_completed message")
+
+	var payload2 map[string]any
+	if err := json.Unmarshal(msg2.Payload, &payload2); err != nil {
+		t.Fatalf("unmarshal payload2: %v", err)
+	}
+	verdicts2, _ := payload2["verdicts"].([]any)
+	if len(verdicts2) != 2 {
+		t.Errorf("approved-with-findings carries %d verdicts, want 2 (defects only, no pass row appended)", len(verdicts2))
+	}
+	for _, v := range verdicts2 {
+		elem, _ := v.(map[string]any)
+		if got, _ := elem["category"].(string); got == string(modelrating.CategoryPass) {
+			t.Errorf("approved-with-findings payload carries a pass row; pass rows are for clean approvals only")
+		}
+	}
+
+	// Case 3: rejection — defect territory, never a pass row.
+	sub3 := msgBus.Subscribe("em-pass-reject", "step.review_completed")
+	rejected := &ReviewResult{
+		Status:     ReviewRejected,
+		Feedback:   "logic error in the retry loop",
+		Confidence: 0.9,
+		ReviewerID: "test-reviewer",
+	}
+	rm.publishReviewEvent("step-pass-3", "task-pass-3", rejected, 1)
+	msg3 := waitGateBusMsg(t, sub3, "rejected step.review_completed message")
+
+	var payload3 map[string]any
+	if err := json.Unmarshal(msg3.Payload, &payload3); err != nil {
+		t.Fatalf("unmarshal payload3: %v", err)
+	}
+	verdicts3, _ := payload3["verdicts"].([]any)
+	if len(verdicts3) != 0 {
+		t.Errorf("rejection carries %d verdicts, want 0 (rejections without findings produce no rows; a pass row on a rejection would corrupt the denominator)", len(verdicts3))
+	}
+}
+
 // EM-PAYLOAD-1 (00T-capture T1): Given a ReviewResult with verdicts; When
 // publishReviewEvent runs; Then the payload carries verdicts + judge/reviewed/
 // cycle/is_final keys with the exact frozen C4 names — on BOTH the

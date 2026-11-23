@@ -74,9 +74,9 @@ Master.md conventions; e2e fixtures per repo rule (hermetic, no live network).
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-ship | PENDING | 0 | |
-| 01-e2e-suite | PENDING | 0 | |
-| 02-docs | PENDING | 0 | |
+| 00T-ship | COMPLETE | 1 | gate tests landed with their implementation leaves |
+| 01-e2e-suite | COMPLETE | 1 | 9db62b54; post-merge: retention-01 now runs the real aggregateHourly sweep via RunMaintenanceSweepForTest (was byte-lifted SQL; fixture also arm RetentionDays, which a zero-value config silently disabled) |
+| 02-docs | COMPLETE | 1 | fd140e18; post-merge: doc renamed modelrating.md -> model-rating.md (R13 literal, issue + plan filename) |
 
 ## Integration Test Plan
 

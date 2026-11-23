@@ -94,9 +94,9 @@ the existing `step.review_completed` topic; `make graphs-check` stays green.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 00T-capture | PENDING | 0 | |
-| 01-verdict-emission | PENDING | 0 | |
-| 02-trace-stamping | PENDING | 0 | |
+| 00T-capture | COMPLETE | 1 | gate tests landed with their implementation leaves |
+| 01-verdict-emission | COMPLETE | 1 | 334fd9c7; post-merge: EM-PASS-1 pass-row emission ported from the glm53f subagent run |
+| 02-trace-stamping | COMPLETE | 1 | e57a7309 |
 
 ## Integration Test Plan
 

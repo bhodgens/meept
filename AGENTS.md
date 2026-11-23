@@ -70,7 +70,7 @@ Full component map and request flow: `docs/concepts/architecture.md`,
 | Scheduling | `internal/scheduler`, `internal/queue`, `internal/worker` | — |
 | Skills | `internal/skills`, `internal/selfimprove` | — |
 | Infra | `internal/config`, `internal/metrics`, `internal/transport`, `internal/pty`, `internal/process`, `internal/eval`, `internal/gate`, `internal/langcode` | `docs/workflows/langcode.md` |
-| Model rating | `internal/modelrating`, `internal/metrics/review_verdicts.go` | `docs/workflows/modelrating.md` |
+| Model rating | `internal/modelrating`, `internal/metrics/review_verdicts.go` | `docs/workflows/model-rating.md` |
 
 New package? Add a row in the same commit. `make agents-check` enforces this.
 

@@ -242,10 +242,10 @@ Output: APPROVED or a list of specific gaps.
 
 | Child | Status | Iterations | Review Notes |
 |-------|--------|------------|-------------|
-| 01-foundations | PENDING | 0 | |
-| 02-capture | PENDING | 0 | |
-| 03-surfaces | PENDING | 0 | |
-| 04-ship | PENDING | 0 | |
+| 01-foundations | COMPLETE | 1 | 99e836e5 (rubric catalog) + cbaf210a (verdict store); gates MR-*/VR-* green |
+| 02-capture | COMPLETE | 1 | 334fd9c7 (emission+collector) + e57a7309 (trace stamp+blame); gates EM-*/TJ-* green |
+| 03-surfaces | COMPLETE | 1 | 3e7fa710 (HTTP) + 908e06ad (CLI) + dfb95627 (Flutter) + 4394cfe5 (menubar); gates HTTP-*/CLI-* green |
+| 04-ship | COMPLETE | 1 | 9db62b54 (e2e suite+manifest) + fd140e18 (docs) + 7f2fbfd4 (graphs); gates SH-* green. Post-merge port from the glm53f subagent run: pass-row emission (EM-PASS-1), real-sweep retention proof (RunMaintenanceSweepForTest), doc rename modelrating.md -> model-rating.md (R13 literal). |
 
 Status values: PENDING | TESTS_IN_PROGRESS | TESTS_VALIDATED | IN_PROGRESS |
 IMPLEMENTED | REVIEWED | COMPLETE | BLOCKED

@@ -3,7 +3,7 @@
 Step-scoped trace stamp + judge exclusion + blame wiring from
 docs/plans/model-rating-metrics-plan/02-capture/02-trace-stamping.md
 (contract C3), introduced 2026-11-23. Referenced from
-docs/workflows/modelrating.md; the full plan lives in the plan tree.
+docs/workflows/model-rating.md; the full plan lives in the plan tree.
 
 ## Step-scoped stamp lives at the step-job ctx boundary, never on the loop
 
