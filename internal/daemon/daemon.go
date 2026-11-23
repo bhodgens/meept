@@ -324,12 +324,18 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		// Touch the tracked turn through this seam so a long human wait
 		// never reads as staleness. First production wiring of the seam;
 		// nil-guarded on the orchestrator like every planner wiring site.
-		if sp := components.Orchestrator.Strategic(); sp != nil {
-			sp.SetTurnLivenessTouch(func(taskID string) {
-				if turnID := turnRegistry.TurnIDForTask(taskID); turnID != "" {
-					turnRegistry.Touch(turnID)
-				}
-			})
+		// F-NIL-ORCH (harness selftest SIGSEGV): the Orchestrator is only
+		// built when the orchestrator subsystem wires (components.go:4958);
+		// a multiagent-disabled boot leaves it nil and Strategic() on the
+		// nil receiver dereferenced o.strategic. Guard the receiver.
+		if components.Orchestrator != nil {
+			if sp := components.Orchestrator.Strategic(); sp != nil {
+				sp.SetTurnLivenessTouch(func(taskID string) {
+					if turnID := turnRegistry.TurnIDForTask(taskID); turnID != "" {
+						turnRegistry.Touch(turnID)
+					}
+				})
+			}
 		}
 
 		// Liveness watchdog + turn reaper (async-turn-migration leaf 06):
