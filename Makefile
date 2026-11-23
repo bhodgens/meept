@@ -357,7 +357,7 @@ hooks:
 	@echo "Installing git hooks (core.hooksPath -> .githooks)..."
 	@git config core.hooksPath .githooks
 	@chmod +x .githooks/pre-commit .githooks/pre-commit-* .githooks/pre-push .githooks/pre-push-*
-	@echo "Installed 20 pre-commit checks + the pre-push chain (whole-tree vet gate, then e2e-affected gate, then bench gate) via .githooks."
+	@echo "Installed 22 pre-commit checks + the pre-push chain (whole-tree vet gate, then e2e-affected gate, then bench gate) via .githooks."
 	@echo "Requires bash >= 3.2; sub-hooks run under whatever 'bash' resolves to"
 	@echo "on PATH, so the same suite executes on macOS and on a Linux runner."
 	@echo "Bypass with --no-verify (or MEEPT_E2E_SKIP=1 / MEEPT_BENCH_SKIP=1 per gate)."
@@ -814,8 +814,16 @@ gosec:
 # fmt-check-gui for Dart formatting in the Flutter tree, and fmt-check for
 # gofmt formatting across the Go tree (both are check-only, both fail the
 # target when a tree they can see is unformatted).
-lint-ci: lint analyzers audit-scripts fmt-check fmt-check-gui orphan-check e2e-census-selftest
+lint-ci: lint analyzers audit-scripts mcp-pin-check fmt-check fmt-check-gui orphan-check e2e-census-selftest
 	@echo "All CI lint checks passed."
+
+# mcp-pin-check fails any unpinned npx/uvx command in the shipped MCP catalog.
+# Read-only, stdlib-only Python; mirrors the runtime validator in
+# internal/tools/mcp/version_pin.go so the static and launch-time gates agree.
+# Wired into lint-ci and the pre-commit hook chain (pre-commit-mcp-pin-check).
+.PHONY: mcp-pin-check
+mcp-pin-check:
+	@python3 scripts/audit-mcp-pins.py
 
 # Doherty Threshold (IBM ~400ms UX latency budget) enforcement lane: p95
 # synchronous-RPC dispatch latency under 400ms (T1) and state-toggle acks

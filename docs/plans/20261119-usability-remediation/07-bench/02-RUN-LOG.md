@@ -469,3 +469,204 @@ Prediction held. Bench transcripts now carry turn.terminal rows:
 ## R6 VERDICT SUMMARY (runs 3 -> 4 -> 5 -> 6)
 
 See 02-REPORT.md section 13 for the final table.
+
+# RUN 7 (FINAL VALIDATION) - 2026-11-22, post steering-wiring + auto-seal + auto-approver fixes
+
+## R7 Step 0 - Recon (done)
+
+- Rig daemons: NONE running at start (no meept-daemon process on the rig
+  socket; llama /health and router /health both 000 -- no llama-server
+  or prompt-router processes).
+- An UNRELATED live e2e sweep was running in the main meept worktree
+  (another session's `scripts/e2e-affected.sh` + its temp-bin daemons in
+  $TMPDIR). To keep provenance exact, run 7 again built from
+  `git archive <HEAD>` into /tmp/meept-build-acc7 (clean tree), same
+  protocol as run 5. The dirty working tree was NOT built.
+- meept main worktree HEAD: **77fa2184** (past 11eabc94; contains ALL
+  claimed fixes: steering wiring ab72e851 + residual wave, auto-seal
+  bacb4352, executor evidence 68478b69, bus wiring 4f934dfb). Worktree
+  dirty with sibling-session edits; excluded from the build by archive.
+- Bench worktree usability-acceptance HEAD: **a85b074** (auto-approver),
+  CLEAN working tree -- the run-6 judge-local.py <think>-strip patch is
+  now COMMITTED (21dd263). 5 commits past run-6 bench d334cc7.
+- Suite state: suites/usability-probe.json already carries
+  `extra.auto_approve_plans: true` on u-plan-mode-request (line 69) --
+  no config edit needed; the runner-side plan auto-approver is opt-in
+  per task (internal/suite/suite.go:86, internal/runner/runner.go:346).
+
+## R7 Step 1 - Provenance + build (done)
+
+- Daemon: /tmp/usability-rig-acc/meept-daemon REBUILT from 77fa2184
+  archive, sha256 f1a7a97532299c62fb8657f577dddea842a227a15164d414bc2caa95224895b6
+- CLI: /tmp/usability-rig-acc/meept REBUILT, sha256
+  6e369d755dddaf76cc6b26d308c07f86ae8c9cf2772ea5abcd43f309118b1cc3
+- Bench: /tmp/usability-rig-acc/meept-bench-run7 REBUILT from a85b074,
+  sha256 f7eac0b7af04fa239951e1277620c7440bec7fdcc17475c4dc8dcda261e65e91
+- Config: meept.json5 4507535d... + models.json5 53b2c162... --
+  byte-identical to the graded run-3/4/5/6 state (provenance.sha256
+  lines match exactly). Quotas off, thresholds default,
+  approval.require_approval=false, /private/tmp allowlist, JUDGE_URL
+  bare base. Judge harness: committed <think>-strip (21dd263), no
+  working-tree patch this run.
+
+## R7 Step 2 - Boot (done, after one operator error -- disclosed)
+
+- FIRST boot attempt was MISCONFIGURED BY THE OPERATOR: daemon launched
+  without MEEPT_HOME, so it loaded the LIVE ~/.meept home and spawned
+  llama-server children on the live ports 8080/8084. The daemon was
+  killed within ~40s of spawn and its two llama-server children
+  (confirmed parented by the misconfigured daemon via
+  --supervise-parent) were killed as well. No live service was touched:
+  recon had already shown zero pre-existing llama-server processes, and
+  post-kill verification shows ports 8080/8084 free, 0 llama-server /
+  prompt-router processes remaining. Incident logged here per honesty
+  rules.
+- CORRECT boot: MEEPT_HOME=/tmp/usability-rig-acc/home, daemon pid and
+  socket below; config path resolved inside the rig (see log line).
+- Boot attempt 2 (MEEPT_HOME=rig/home) failed: daemon FATAL
+  "models.json5 not found" -- correct MEEPT_HOME for this rig is the
+  .meept dir itself (matches run-6 log: config loaded from
+  home/.meept/models.json5).
+- Boot attempt 3 stalled at the classifier boot gate: rig-router
+  runtime (prompt-router sidecar) never came up. ROOT CAUSE (rig
+  drift, not a daemon defect): models.json5 lifecycle spawn_command
+  points at
+  .hermes/worktrees/usability-remediation/scripts/prompt_router_sidecar.py
+  -- that worktree was DELETED Nov 21 22:14 after its fixes were merged
+  to main. Runs 3-6 booted fine because the worktree still existed
+  then; the "byte-identical config" is no longer runnable in the
+  current environment. Minimal repair: single-line repoint of the
+  spawn_command to the same script in the main worktree
+  (/Users/caimlas/git/meept/scripts/prompt_router_sidecar.py, sha256
+  44a0ed56...). models.json5 sha256 changes 53b2c162 -> d6f53039;
+  disclosed here as a required environment repair. No other config
+  change. MEEPT_HOME recorded for reproducibility:
+  MEEPT_HOME=/tmp/usability-rig-acc/home/.meept.
+
+## R7 Step 2b - Boot (done)
+
+- pid 75491, socket /tmp/usability-rig-acc/home/.meept/meept.sock;
+  daemon-run7.log: 2x "Runtime started and healthy" (llm 55096 +
+  router 55097); llama /health 200; router /health 200; classifier
+  boot gate signaled; "daemon: running". Orphan sweep reaped=0 (rig
+  DBs carried no stale tasks this time -- the runs-4/6 stale-task
+  recovery line does not appear).
+
+## R7 Step 3a - Graded suite, ATTEMPT 1: ABORTED BY OPERATOR TIMEOUT (disclosed)
+
+- The suite was launched via a foreground shell call with a 420s cap;
+  the call TIMED OUT at 420s and killed the bench process mid-run.
+  State at kill: 5/6 tasks complete (u-context FAIL, u-steer ERROR,
+  u-route FAIL, u-fail FAIL, u-plan TIMEOUT-at-240s -- the task-level
+  deadline, not the rig), u-direct-explicit never started.
+  results written: bench-results-run7/ (5 transcripts). This attempt is
+  NOT the graded run; a clean re-run follows (attempt 2). Notable
+  observations from the aborted attempt, all re-verified in attempt 2:
+  - u-steer-midrun: steer turn accepted via chat.steer (steering
+    wiring works), but the steer turn errored with
+    "task_create: name is missing" x3 -- the 8B model misused the
+    task_create schema on the steered continuation.
+  - u-plan-mode-request: plan parked at "Plan awaiting user approval"
+    (23:41:52.928, task ...0005, steps=10) but NO
+    "plan auto-approve" line ever appeared in the bench log before the
+    kill -- the 240s task deadline (u-plan declares timeout_seconds
+    420 but the runner's chat budget for this task was 240s + ext;
+    verdict "timeout ... context canceled") fired BEFORE the park was
+    detected/approved, OR the approver did not detect this park.
+    Attempt 2 verdict decides this prediction.
+
+## R7 Step 3 - Graded usability suite, ATTEMPT 2 = GRADED RUN (done) -- 0 pass / 4 fail / 1 error / 1 timeout... see verdict line
+
+- Command: MEEPT_BENCH_SOCKET=rig socket, JUDGE_URL=http://127.0.0.1:55096
+  (bare base), HOME=/Users/caimlas, /tmp/usability-rig-acc/meept-bench-run7
+  run --suite suites/usability-probe.json --repo project --scratch
+  worktrees --auto-approved --judge-cmd scripts/judge-local.py --out
+  bench-results-run7-final. Ran to completion (SUITE_EXIT=1, "run: 5/6
+  tasks failed"). FIRST USABILITY PASS EVER: u-direct-explicit PASS.
+- Per-task verdicts (R3 -> R4 -> R5 -> R6 -> R7):
+
+| Task | R3 | R4 | R5 | R6 | R7 | Detail |
+|---|---|---|---|---|---|---|
+| u-context-two-step | error | error | error | fail | fail | file_contains FAIL (counter.txt absent -- the steer/chat-fallback turn dispatched a PLAN that parked, task ...0007 awaiting_approval; the "add 4" instruction never executed as a direct write); terminal_delivery 1/2 (primary completed; steer turn missing); llm_judge PASS 0.9 |
+| u-steer-midrun | error | error | fail | fail | error | chat.steer still "queue not found" (-32603) on all 3 candidates at 23:48:18 (runner logged accepted:true via chat-fallback semantics but the transcript carries the steer error; the steered correction NEVER reached the running turn); the daemon instead ran the PRIMARY task's own single-step pipeline: rev step wrote result.txt (not result2.txt) with REAL file_write evidence, approved; then the task STALLED -- no Task finalized, step scheduling went silent at 23:48:28, turn watchdog reaped the primary turn at 23:58:44 ("no progress for 10m"); bench errored on liveness stall at wall 321.8s BEFORE the reap terminal |
+| u-route-research-write | fail | fail | fail | fail | fail(2/3 IMPROVED) | fetched.txt NOW PRESENT with matching pattern (file_contains PASS, first time ever); terminal_delivery PASS 1/1 at+4.4s; llm_judge FAIL (empty reply judged -- the reply-shape residual) |
+| u-fail-nonexistent-read | error | fail | fail | error | error | agent execution failed via the evidence envelope path ("job ... completed by agent coder: Based on the tool execution results..."); harness graded ERROR before checks; terminal_delivery would have passed (failed terminal in-window) |
+| u-plan-mode-request | error | error | error | error | timeout (AUTO-APPROVER DID NOT FIRE) | plan parked at "Plan awaiting user approval" 23:54:57 (task ...0010, steps=10, 6 steps variant in attempt 1); bench stayed silent for the whole 540.7s wall (420s task budget + 120s AutoApproveLivenessExtension), "context deadline exceeded"; task still awaiting_approval NOW; manual task.approve via RPC returns {"status":"approved"} so the DAEMON approval surface works |
+| u-direct-explicit | error | error | fail | fail | **PASS** | file_contains PASS (direct.txt); terminal_delivery PASS 1/1 at+5.5s; llm_judge PASS 0.9; the dispatched 1-step task wrote the file with real evidence (evidence_count=2), heuristic-approved, completed in 6s wall |
+
+- SUITE: 1 pass / 4 fail / 1 error + 1 timeout counted inside the fails
+  (u-plan timeout verdict; runner prints 5/6 failed). Composition:
+  u-direct-explicit FLIPPED GREEN; u-route file_contains + terminal
+  now PASS (only judge shape fails); terminal_delivery green on every
+  task with an in-window terminal.
+
+## R7 Step 4 - p5 steering probe (done) -- STILL "queue not found" (5th consecutive run)
+
+- chat.steer on both candidates (raw conv + derived thread conv):
+  {"code": -32603, "message": "queue not found"} -- IDENTICAL to runs
+  3/4/5/6. The prediction (p5 steer returns "queued") DID NOT HOLD.
+- Primary turn completed normally (all 5 step files created, honest
+  list reply); the steer never arrived, final.txt absent. Probe JSON +
+  log preserved (probes/p5-steering.json, probes/p5_steering_run7.log).
+- Note: the ab72e851 wiring fix + b16b6082 canonical-identity wave are
+  both IN the graded binary (built from 77fa2184), and the step-job
+  alias-arming seam (components.go ArmQueueAliases) still shows ZERO
+  "Step job queue aliases armed" lines in the daemon log across the
+  whole run -- every steer attempt hit resolveQueue -> ErrQueueNotFound.
+  This is now a RUN-7 ROOT-CAUSE CANDIDATE, not just a symptom: either
+  the alias-arming path is not reached on this dispatch shape
+  (isStepJob linked_sessions empty?) or the queue registration window
+  is shorter than the steer delay in ALL probe shapes.
+
+## R7 Step 5 - u-plan auto-approver root-cause (done, from evidence)
+
+- The bench-side auto-approver (a85b074) NEVER FIRED in either attempt:
+  zero "plan auto-approve" lines in both bench logs, while BOTH
+  attempts' plans parked ("Plan awaiting user approval", tasks
+  ...0005 / ...0007 / ...0010, still awaiting_approval in
+  task.list_extended right now).
+- ROOT CAUSE (bench<->daemon contract mismatch, new finding F-BENCH-R7):
+  daemonclient.go:963 gates the approver on
+  strings.Contains(p.Error, "Plan awaiting user approval") -- but the
+  REAL daemon parked turn.terminal payload carries error="" and the
+  marker text only inside the ack REPLY ("## starting task..." ack
+  prose does not even contain the marker; the marker exists only in
+  the daemon log line and task.pending_approval bus event). The
+  a85b074 unit test drove a FAKE whose parked payload carried the
+  marker in the error field -- the fake does not match the real
+  daemon shape, so the seam was never exercised end-to-end.
+- The daemon approval surface itself works: a manual
+  task.approve {task_id: task-...0010} from the probe client returns
+  {"status": "approved", ...} over the same socket.
+- VERDICT for the u-plan prediction: infra path (park detection ->
+  approve RPC -> resume) is UNPROVEN end-to-end; the graded outcome is
+  a timeout (graded fail), but the root cause is the bench seam, not
+  the daemon park.
+
+## R7 Step 6 - Teardown (done)
+
+- Rig daemon killed (SIGTERM via kill of the tracked pid; llama-server
+  + prompt-router confirmed gone; 0 meept-daemon / llama-server /
+  prompt-router processes; ports 55096/55097/55098 free).
+- Provenance: provenance-run7.json + provenance-run7.sha256 written.
+- Rig dir preserved: bench-results-run7/ (aborted attempt),
+  bench-results-run7-final/ (GRADED), daemon-run7.log,
+  bench-usability-run7.log (aborted), bench-usability-run7-final.log,
+  probes/p5_steering_run7.log + p5-steering.json (run-7),
+  meept-bench-run7 binary. NO COMMIT made.
+- The models.json5 repair (d6f53039) and the manual task.approve of the
+  parked u-plan task are rig-side evidence actions, both logged above.
+
+## R7 VERDICT SUMMARY
+
+See 02-REPORT.md section 14 for the runs 3-7 table and final verdict.
+PREDICTION SCORECARD (run 7):
+1. p5 steer returns queued + correction lands: REFUTED (5th consecutive
+   "queue not found"; correction never landed).
+2. u-plan park -> auto-approve -> executes -> terminal: REFUTED as
+   built (approver never fired -- marker-seam mismatch F-BENCH-R7);
+   the daemon-side park + manual task.approve path IS proven working.
+3. File-write tasks pass evidence review with real tool_evidence:
+   HELD (u-direct-explicit PASS end-to-end; u-steer rev step approved
+   with real file_write evidence; u-route wrote fetched.txt with
+   evidence; u-fail executed real tools).

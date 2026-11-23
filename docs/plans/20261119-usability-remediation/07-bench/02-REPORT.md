@@ -546,3 +546,123 @@ auto-seal) and to model quality.
   Rig dir preserved with run-6 artifacts (bench-results-run6/,
   daemon-run6.log, bench-usability-run6.log, probes/p5_steering_run6.log,
   provenance-run6.*).
+
+## 14. Run 7 -- FINAL VALIDATION (2026-11-22/23) -- steering + auto-approver predictions REFUTED; first usability PASS landed; OVERALL VERDICT: FAIL (improving, 1/6)
+
+Re-run scope: full usability suite (all 6) + p5 steering, from fixed
+main. Daemon+CLI rebuilt from git archive of meept main HEAD **77fa2184**
+(all claimed fixes present: steering wiring ab72e851 + canonical-chat-
+identity b16b6082, auto-seal bacb4352, executor evidence 68478b69, bus
+wiring 4f934dfb); bench rebuilt from **a85b074** clean (auto-approver +
+committed judge-parse fix). Full per-step evidence: 02-RUN-LOG.md
+"RUN 7" section.
+
+### 14a. Rig provenance (run 7)
+
+- daemon f1a7a975..., cli 6e369d75..., bench-run7 f7eac0b7...;
+  meept.json5 required a ONE-LINE repair (4507535d -> d6f53039): the
+  prompt-router spawn path pointed into the deleted
+  usability-remediation worktree, so the byte-identical run-3..6 config
+  was unrunnable -- rig drift, disclosed in the run log. Everything
+  else identical to the graded lineage; quotas off; JUDGE_URL bare.
+- Operator incidents disclosed in the run log: one misconfigured boot
+  (missing MEEPT_HOME; killed within ~40s, zero impact on live
+  services, verified ports clean) and one suite attempt aborted by a
+  tool timeout (5/6 tasks done, discarded; graded run re-executed
+  cleanly as bench-results-run7-final).
+
+### 14b. Per-task verdict table, runs 3 -> 7
+
+| Task | R3 | R4 | R5 | R6 | R7 | R7 evidence |
+|---|---|---|---|---|---|---|
+| u-context-two-step | error | error | error | fail | fail | steer turn became a PLAN that parked (task awaiting_approval); "add 4" never executed; counter.txt absent; terminal_delivery 1/2; judge PASS 0.9 |
+| u-steer-midrun | error | error | fail | fail | error | chat.steer STILL -32603 "queue not found" on all candidates; the daemon's own rev step wrote result.txt w/ REAL evidence and approved, then the task STALLED (no Task finalized; turn reaped at +10m); bench liveness error first |
+| u-route-research-write | fail | fail | fail | fail | fail (2/3 IMPROVED) | fetched.txt PRESENT, file_contains PASS (FIRST TIME); terminal 1/1; only llm_judge empty-reply fail remains |
+| u-fail-nonexistent-read | error | fail | fail | error | error | real tools executed (evidence envelope); harness ERROR before checks (same class as R6) |
+| u-plan-mode-request | error | error | error | error | timeout | parked (steps=10) at 23:54:57; auto-approver NEVER fired in 540.7s; task still awaiting_approval; manual task.approve RPC returns approved |
+| u-direct-explicit | error | error | fail | fail | **PASS** | direct.txt written w/ evidence, approved, terminal 1/1, judge 0.9 -- FIRST usability PASS in runs 3-7 |
+
+Suite: R3 0/6, R4 0/6, R5 0/6, R6 0/6, R7 **1/6**.
+
+### 14c. Prediction scorecard (the point of run 7)
+
+1. **p5 steer returns queued and the correction lands: REFUTED.**
+   Identical -32603 "queue not found" on both conv candidates (5th
+   consecutive run, now against the b16b6082 canonical-identity
+   binary). The daemon log shows ZERO "Step job queue aliases armed"
+   lines -- the ArmQueueAliases seam never arms on this dispatch shape,
+   so the session-level steer target never resolves.
+2. **u-plan park -> auto-approve -> executes -> terminal: REFUTED as
+   built (new finding F-BENCH-R7).** The a85b074 approver is gated on
+   the marker text inside the parked terminal's ERROR field; the real
+   daemon parked payload carries error="" (marker lives only in the
+   daemon log line / task.pending_approval event). The a85b074 unit
+   test drove a fake whose parked shape carried the marker in error --
+   fake parity gap, the seam was never exercised end-to-end. The
+   DAEMON side is proven independently: manual task.approve over the
+   same socket returns {"status":"approved"}. Graded verdict is a
+   timeout -- a genuine graded fail, but the root cause is the bench
+   seam, not the daemon park.
+3. **File-write tasks pass evidence review with real tool_evidence:
+   HELD.** u-direct-explicit PASS end-to-end; u-steer rev step approved
+   on real file_write evidence; u-route wrote fetched.txt with
+   evidence. The executor-evidence chain (68478b69 + 4f934dfb) holds.
+
+### 14d. Updated overall verdict
+
+**FAIL -- but measurably improving and now precisely localized.**
+Terminal delivery (R6) stays green everywhere a turn terminalizes in
+window. The evidence/executor chain is proven. One full task passes
+end-to-end for the first time. The two remaining infrastructure
+defects are now pinned to exact seams:
+
+- steer-404 (F-STEER-R7): queue aliases never armed/reachable from
+  chat.steer; fix owner: daemon (components.go alias-arming reach +
+  registry registration window), testable via the existing
+  chat_steering_wiring_test gate plus a rig probe.
+- auto-approve marker seam (F-BENCH-R7): bench-side only; fix owner:
+  meept-bench (match the REAL parked payload shape -- e.g. detect the
+  plan-park via the task's awaiting_approval state in
+  FindAndApproveParkedTask, which already exists, instead of the
+  marker-in-error predicate), testable by updating the fake to the
+  real shape and re-running u-plan.
+
+Model-quality residuals (unchanged classes): u-context 8B plan-instead-
+of-edit behavior; u-steer task stall after rev approval (new: step
+scheduling went silent 23:48:28 -> watchdog reap +10m -- ALSO a daemon
+residual, not pure model); u-route/u-direct empty-reply judge shape;
+u-fail evidence-envelope error grading path in the harness.
+
+### 14e. Honest final residual list
+
+1. steer-404 class (F-STEER-R7) -- daemon seam; 5 runs of evidence.
+2. F-BENCH-R7 auto-approver seam mismatch -- bench fake parity.
+3. u-steer post-approval stall (task 0008: no Task finalized, silent
+   scheduling, watchdog reap) -- daemon residual, single occurrence,
+   needs a pin before it can be called reproducible.
+4. llm_judge empty-reply shape on u-route/u-direct-adjacent lanes.
+5. u-fail evidence-envelope -> harness ERROR grading path.
+6. u-context: 8B routes a follow-up edit into a parked plan.
+7. Rig drift: deleted worktrees invalidate byte-identical configs
+   (process residual: rig configs must reference only durable paths).
+8. GUI pixel-pass verification still operator-pending (section 9).
+9. Regression (2/9) + smoke (0/3) verdicts from run 3 predate all
+   fixes; still unmeasured post-fix.
+
+### 14f. Limitations (run 7)
+
+- Single seed, single graded run; the 8B nondeterminism caveat stands.
+- The one-line config repair means run 7 is NOT config-identical to
+  runs 3-6 (disclosed; the alternative was no run at all).
+- The aborted first attempt means the suite ran twice in one daemon
+  lifetime; cross-attempt state (rig DBs) was present for the graded
+  attempt (recoverable from task.list_extended ordering; grading is
+  per-filename so file residue from attempt 1 could only have helped
+  attempt 1's own verdicts, which were discarded).
+- Run-3 regression/smoke verdicts remain stale relative to all fixes.
+- No commit made, per instructions. Teardown verified: 0 meept-daemon /
+  llama-server / prompt-router processes; ports 55096/55097/55098 free;
+  log ends "daemon: stopped". Rig preserved with run-7 artifacts
+  (bench-results-run7-final/, daemon-run7.log,
+  bench-usability-run7-final.log, probes/p5_steering_run7.log,
+  provenance-run7.*).

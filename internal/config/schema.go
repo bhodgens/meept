@@ -2,6 +2,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math"
@@ -3559,6 +3560,85 @@ type WebConfig struct {
 type MCPConfig struct {
 	Enabled    bool   `json:"enabled"     toml:"enabled"`
 	ConfigFile string `json:"config_file" toml:"config_file"`
+	// CheckUpdates gates the default-on version check against npm/PyPI
+	// (issue #167). Once at boot and every UpdateCheckIntervalHours the
+	// daemon reads every enabled server's pinned npx/uvx command, queries
+	// the matching registry, and notifies via SecurityNotify when the
+	// pinned version is older than the published latest. This is
+	// notification-only: it NEVER rewrites mcp_servers.json5 or upgrades a
+	// pin. Defaults true; an explicit `false` in the config file opts out.
+	// Absent-key defaulting is handled at the load boundary by
+	// NormalizeMCPDefaults, armed with the presence sentinel below.
+	CheckUpdates bool `json:"check_mcp_updates" toml:"check_mcp_updates"`
+	// UpdateCheckIntervalHours is the interval between registry checks
+	// (issue #167). Non-positive values fall back to 24 at the load
+	// boundary; zero is not a valid "disable" (use CheckUpdates=false).
+	UpdateCheckIntervalHours int `json:"mcp_update_check_interval_hours" toml:"mcp_update_check_interval_hours"`
+	// checkUpdatesSet records an EXPLICIT check_mcp_updates key so the
+	// load boundary can honor an opt-out while defaulting an absent key
+	// true (a bare bool cannot distinguish false from missing).
+	checkUpdatesSet bool `json:"-" toml:"-"`
+}
+
+// UnmarshalJSON implements default-on semantics for check_mcp_updates.
+// A bare bool cannot distinguish "absent" from "explicit false", so the
+// decoded document is probed with a *bool: a missing key keeps the true
+// default, an explicit `false` is honored, and a non-positive interval
+// falls back to 24h. This keeps installed homes that omit the whole MCP
+// block (or just the new key) on the same defaults as DefaultConfig()
+// without requiring changes to the shared loader (which is owned by
+// another workstream). Feature code must not call this directly.
+func (c *MCPConfig) UnmarshalJSON(data []byte) error {
+	type plain MCPConfig // avoid recursing into this method
+	// Decode INTO the current value so defaults carried by DefaultConfig()
+	// (ConfigFile in particular) survive a partial MCP block. A fresh
+	// zero value here would silently empty ConfigFile for installed homes.
+	decoded := plain(*c)
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var probe struct {
+		CheckUpdates *bool `json:"check_mcp_updates"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return err
+	}
+	*c = MCPConfig(decoded)
+	if probe.CheckUpdates != nil {
+		c.CheckUpdates = *probe.CheckUpdates
+		c.checkUpdatesSet = true
+	} else {
+		c.CheckUpdates = true
+		c.checkUpdatesSet = false
+	}
+	NormalizeMCPDefaults(c)
+	return nil
+}
+
+// ArmCheckUpdatesSentinel marks an MCPConfig as carrying an explicit
+// check_mcp_updates value. Exposed for loader/TOML paths that need to
+// signal presence separately from the JSON5 unmarshaler above.
+func (c *MCPConfig) ArmCheckUpdatesSentinel() {
+	if c == nil {
+		return
+	}
+	c.checkUpdatesSet = true
+}
+
+// NormalizeMCPDefaults restores the default-on version check for configs
+// that omit check_mcp_updates (absent bool decodes as false) and clamps a
+// non-positive interval to 24h. An explicit false (sentinel armed) is
+// preserved. Safe to call on a zero-value MCPConfig.
+func NormalizeMCPDefaults(c *MCPConfig) {
+	if c == nil {
+		return
+	}
+	if !c.checkUpdatesSet {
+		c.CheckUpdates = true
+	}
+	if c.UpdateCheckIntervalHours <= 0 {
+		c.UpdateCheckIntervalHours = 24
+	}
 }
 
 // ACPConfig holds Agent Client Protocol client settings.
@@ -4850,8 +4930,11 @@ func DefaultConfig() *Config {
 			SecretKey: "",
 		},
 		MCP: MCPConfig{
-			Enabled:    false,
-			ConfigFile: "~/.meept/mcp_servers.json5",
+			Enabled:                  false,
+			ConfigFile:               "~/.meept/mcp_servers.json5",
+			CheckUpdates:             true,  // issue #167: default-on version check, notification only
+			UpdateCheckIntervalHours: 24,    // issue #167: once at boot, then every 24h
+			checkUpdatesSet:          false, // absent key -> default-on; explicit false honored by UnmarshalJSON
 		},
 		ACP: ACPConfig{
 			Enabled:                 false,
