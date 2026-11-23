@@ -49,7 +49,7 @@ logged at info level.
 
 Bottom of every screen (`ui/flutter_ui/lib/widgets/status_bar.dart`). Mirrors `internal/tui/app.go:2236-2289` (`renderStatusBar`). The widget takes `selectedTabIndex` as a constructor param — the rest of the state is read via Riverpod.
 
-**Transient override:** when `statusMessageProvider` is non-null (e.g. "session archived"), the entire bar is replaced by that message and all other segments are hidden (`status_bar.dart:20-23`).
+**Transient override:** when `statusMessageProvider` is non-null (e.g. "session archived"), the transient message replaces the connection/status segments. The `verbosity:` element stays visible in both states — it is invariant across the bar (`status_bar.dart:79-105`, `status_bar_test.dart:111`), matching TUI.
 
 When no transient message is set, segments render in code order, joined by `' · '`:
 

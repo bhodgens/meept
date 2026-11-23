@@ -100,15 +100,16 @@ class PlanNotificationData {
 
   /// Count row, reusing the TUI planCountLine semantics: a plan with no
   /// phases and no steps is a document proposal (evolver skill plans are
-  /// markdown files awaiting approval) and must never read "0 phases -
-  /// 0 steps".
+  /// markdown files awaiting approval) and must never read "0 phases ·
+  /// 0 steps". The middle-dot separator matches the TUI plan card
+  /// (internal/tui/models/chat.go planCountLine).
   String get countLine {
     if (phaseCount == 0 && stepCount == 0) {
-      return 'document proposal - no executable steps';
+      return 'document proposal · no executable steps';
     }
     final phaseStr = phaseCount == 1 ? '1 phase' : '$phaseCount phases';
     final stepStr = stepCount == 1 ? '1 step' : '$stepCount steps';
-    return '$phaseStr - $stepStr';
+    return '$phaseStr · $stepStr';
   }
 
   /// Lowercase header line per state (TUI parity).
@@ -156,7 +157,7 @@ class PlanNotificationBubble extends StatelessWidget {
       detailLines.add(data.countLine);
       detailLines.add('plans tab to review');
     } else if (data.state == 'completed') {
-      detailLines.add('${data.countLine} - awaiting confirmation');
+      detailLines.add('${data.countLine} · awaiting confirmation');
       detailLines.add('plans tab to confirm');
     } else if (data.state == 'confirmed') {
       detailLines.add('confirmed by ${data.by.isEmpty ? 'user' : data.by}');

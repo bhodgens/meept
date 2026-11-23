@@ -5,8 +5,8 @@
 // test").
 //
 // The surface: a submitted GUI turn false-stalls at the per-turn liveness
-// timer (PendingTurnStatus.stalled, "no progress for Ns -- task may still
-// complete") unless progress/terminal traffic re-arms it. This pins both
+// timer (PendingTurnStatus.stalled, "no progress for Ns — task may still
+// be running") unless progress/terminal traffic re-arms it. This pins both
 // halves of the contract at the widget/provider seam:
 //
 //   1. submitTurn arms the timer: with NO progress traffic the pending

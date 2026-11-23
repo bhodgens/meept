@@ -14,10 +14,14 @@ docker > bwrap > local on every host.
 
 ## Configuration (opt-in, default OFF)
 
-`[runtime.seatbelt]` in `~/.meept/meept.json5`:
+`[runtime]` master switch plus `[runtime.seatbelt]` in `~/.meept/meept.json5`.
+Both keys are required: the daemon builds the runtime manager only when
+`runtime.enabled` is true, so enabling seatbelt alone leaves shell children
+unconfined with no warning.
 
 ```json5
 runtime: {
+  enabled: true,                          // master switch: REQUIRED for seatbelt
   seatbelt: {
     enabled: true,
     deny_read: [ "~/.ssh", "~/.aws" ],      // subtrees the child cannot read

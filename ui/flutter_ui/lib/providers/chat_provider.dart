@@ -328,11 +328,21 @@ class ChatNotifier extends StateNotifier<ChatState> {
   /// are dropped (mirror of TUI app.go `tier <= a.verbosity`).
   int _verbosityLevel = VerbosityLevel.normal;
 
+  /// True once a LIVE verbosity change has been applied via
+  /// [setVerbosityLevel] (Ctrl+V cycle or settings dropdown). Once set, the
+  /// best-effort client.json5 read in [_loadLivenessTimeout] must not
+  /// overwrite the user's choice with a stale persisted value.
+  bool _verbosityLiveSet = false;
+
   /// Live verbosity update from the UI (the verbose toggle in the home
-  /// screen / status bar). The provider family is per-session, so each
-  /// open chat notifier is told directly.
+  /// screen / status bar, wired through `ref.listen(verbosityProvider)` in
+  /// [chatProvider]). Called on the EXISTING notifier so progress tier
+  /// filtering (the `progress.tier > _verbosityLevel` guards at :612 and
+  /// :1239) updates immediately — no session swap / notifier recreation
+  /// required (TUI parity: app.go:1109-1113).
   void setVerbosityLevel(int level) {
     _verbosityLevel = level;
+    _verbosityLiveSet = true;
   }
 
   /// Fetch `chat.liveness_timeout_seconds` from GET /api/v1/config/client.
@@ -351,15 +361,21 @@ class ChatNotifier extends StateNotifier<ChatState> {
       }
       // Persisted verbosity (leaf 08): mirror the TUI's startup read of
       // client.json5 chat.verbosity so the tier filter survives restart.
-      final verb = chat['verbosity'];
-      if (verb is String) {
-        switch (verb.toLowerCase()) {
-          case 'quiet':
-            _verbosityLevel = VerbosityLevel.quiet;
-          case 'verbose':
-            _verbosityLevel = VerbosityLevel.verbose;
-          case 'normal':
-            _verbosityLevel = VerbosityLevel.normal;
+      // A live Ctrl+V / dropdown change already applied via
+      // [setVerbosityLevel] wins over this async, best-effort snapshot —
+      // otherwise a slow config fetch could revert the user's mid-session
+      // toggle with a stale persisted value.
+      if (!_verbosityLiveSet) {
+        final verb = chat['verbosity'];
+        if (verb is String) {
+          switch (verb.toLowerCase()) {
+            case 'quiet':
+              _verbosityLevel = VerbosityLevel.quiet;
+            case 'verbose':
+              _verbosityLevel = VerbosityLevel.verbose;
+            case 'normal':
+              _verbosityLevel = VerbosityLevel.normal;
+          }
         }
       }
     } catch (_) {
@@ -658,7 +674,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
         if (plan.title.isNotEmpty) 'plan: "${plan.title}"',
         if (plan.state == 'submitting' || plan.state == 'completed')
           plan.state == 'completed'
-              ? '${plan.countLine} - awaiting confirmation'
+              ? '${plan.countLine} · awaiting confirmation'
               : plan.countLine,
         if (plan.state == 'confirmed')
           'confirmed by ${plan.by.isEmpty ? 'user' : plan.by}',
@@ -1912,12 +1928,25 @@ final chatProvider =
       final client = ref.watch(sdkClientProvider);
       final websocket = ref.watch(websocketProvider);
       final ttsNotifier = ref.read(ttsProvider.notifier);
-      return ChatNotifier(
+      final notifier = ChatNotifier(
         sdkClient: client,
         websocket: websocket,
         ttsNotifier: ttsNotifier,
         sessionId: sessionId,
       );
+      // M6: keep the progress tier filter live. Ctrl+V (home_screen /
+      // sidebar_home_screen) and the settings dropdown cycle
+      // verbosityProvider; without this listener ChatNotifier kept the
+      // level it read at construction and the GUI's status label changed
+      // while filtering stayed stale until a session swap/restart. TUI
+      // applies its verbosity immediately (app.go:1109-1113). No
+      // fireImmediately: the best-effort client.json5 read in
+      // _loadLivenessTimeout owns startup state; only subsequent USER
+      // changes should override it.
+      ref.listen<int>(verbosityProvider, (_, next) {
+        notifier.setVerbosityLevel(next);
+      });
+      return notifier;
     });
 
 /// Current session ID provider

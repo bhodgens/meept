@@ -20,7 +20,7 @@ void main() {
       expect(data.planId, 'plan-abc123');
       expect(data.title, 'refactor the ingest worker');
       expect(data.reason, 'phase 2 compile error');
-      expect(data.countLine, '3 phases - 9 steps');
+      expect(data.countLine, '3 phases · 9 steps');
     });
 
     test('parses every plan lifecycle state', () {
@@ -83,7 +83,7 @@ void main() {
         'phase_count': 1,
         'step_count': 1,
       });
-      expect(data.countLine, '1 phase - 1 step');
+      expect(data.countLine, '1 phase · 1 step');
     });
   });
 
@@ -141,7 +141,7 @@ void main() {
       );
       expect(find.text('plan ready for review'), findsOneWidget);
       expect(
-        find.text('document proposal - no executable steps'),
+        find.text('document proposal · no executable steps'),
         findsOneWidget,
       );
       expect(find.textContaining('0 phase'), findsNothing);
@@ -164,7 +164,7 @@ void main() {
       );
       expect(find.text('plan completed'), findsOneWidget);
       expect(
-        find.text('2 phases - 5 steps - awaiting confirmation'),
+        find.text('2 phases · 5 steps · awaiting confirmation'),
         findsOneWidget,
       );
     });

@@ -77,10 +77,27 @@ class StatusBar extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     // Transient status messages (e.g. "session archived") take precedence
-    // over the multi-part bar and hide all other parts.
+    // over the multi-part bar, but the invariant `verbosity:` element stays
+    // visible during the ~2.5 s window (L15, TUI parity).
     final transient = ref.watch(statusMessageProvider);
     if (transient != null) {
-      return _bar(child: Text(transient, style: _baseStyle));
+      // L15 / TUI parity (internal/tui/app.go:3474-3532): `verbosity:` is an
+      // invariant status element rendered OUTSIDE the transient-message
+      // branch in the TUI. Keep it visible during the ~2.5 s message window
+      // instead of hiding the whole bar behind the message.
+      return _bar(
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(transient, style: _baseStyle),
+            RichText(
+              text: TextSpan(children: [_separator(), _verbositySpan(ref)]),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
+      );
     }
 
     // Build rich text with contextual colors for each part
@@ -105,14 +122,10 @@ class StatusBar extends ConsumerWidget {
       spans.add(TextSpan(text: projectPart, style: _orangeStyle));
     }
 
-    // Verbosity (very light gray)
+    // Verbosity (very light gray) — invariant element, present in both
+    // the normal and transient-message branches (TUI parity).
     spans.add(_separator());
-    spans.add(
-      TextSpan(
-        text: 'verbosity: ${VerbosityLevel.name(ref.watch(verbosityProvider))}',
-        style: _lightStyle,
-      ),
-    );
+    spans.add(_verbositySpan(ref));
 
     final acp = ref.watch(acpStatusProvider).valueOrNull;
     if (acp != null && acp.enabled && acp.liveCount > 0) {
@@ -228,6 +241,13 @@ class StatusBar extends ConsumerWidget {
   InlineSpan _separator() => TextSpan(
     text: ' · ',
     style: TextStyle(color: CyberpunkColors.midGray),
+  );
+
+  /// The invariant `verbosity: <level>` span, shared by both the normal bar
+  /// and the transient-message bar (L15 parity with TUI renderStatusBar).
+  InlineSpan _verbositySpan(WidgetRef ref) => TextSpan(
+    text: 'verbosity: ${VerbosityLevel.name(ref.watch(verbosityProvider))}',
+    style: _lightStyle,
   );
 
   String _sessionPart(WidgetRef ref) {

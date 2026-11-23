@@ -1,7 +1,7 @@
 {
   "version": 1,
   "generated": "2026-11-20",
-  "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage \u2014 behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet. Flutter surface (ui/flutter_ui/**) is covered Dart-side by the gui-flows suite (gui-terminal-01, gui-session-01, gui-quota-01, gui-stream-01, gui-stream-02) against a wire-shape stub: `cd ui/flutter_ui && flutter test test/e2e`. The ui/** path_map keys below make a Flutter change select that suite; scripts/e2e-affected.sh dispatches on suites[].runner to run the Dart command instead of go test (the pre-commit-e2e Go hook does not scan Dart files, so `make e2e-affected-area AREA=gui-flows` / CI's e2e-gui job is the gate). New-package census (pre-commit-e2e): every NEW internal/|pkg/|cmd/ package dir in a commit's staged ADDITIONS must match a path_map key (bidirectional slash-boundary prefix, trailing slashes stripped) or an 'exempt' entry mapping dir -> non-empty reason string; exempt entries are printed as residual risk on every hook run.",
+  "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage — behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet. Flutter surface (ui/flutter_ui/**) is covered Dart-side by the gui-flows suite (gui-terminal-01, gui-session-01, gui-quota-01, gui-stream-01, gui-stream-02) against a wire-shape stub: `cd ui/flutter_ui && flutter test test/e2e`. The ui/** path_map keys below make a Flutter change select that suite; scripts/e2e-affected.sh dispatches on suites[].runner to run the Dart command instead of go test (the pre-commit-e2e Go hook does not scan Dart files, so `make e2e-affected-area AREA=gui-flows` / CI's e2e-gui job is the gate). New-package census (pre-commit-e2e): every NEW internal/|pkg/|cmd/ package dir in a commit's staged ADDITIONS must match a path_map key (bidirectional slash-boundary prefix, trailing slashes stripped) or an 'exempt' entry mapping dir -> non-empty reason string; exempt entries are printed as residual risk on every hook run.",
   "path_map": {
     "e2e/suites/smoke": [
       "smoke"
@@ -884,6 +884,21 @@
     ],
     "e2e/suites/notification-bot/mcp_version_pin_test.go": [
       "notification-bot"
+    ],
+    "e2e/suites/approval-wait": [
+      "approval-wait"
+    ],
+    "e2e/suites/bus-delivery": [
+      "bus-delivery"
+    ],
+    "e2e/suites/failure-paths": [
+      "failure-paths"
+    ],
+    "e2e/suites/task-approval": [
+      "task-approval"
+    ],
+    "e2e/suites/manifest": [
+      "manifest"
     ]
   },
   "exempt": {},
@@ -1721,6 +1736,51 @@
       "dir": "e2e/suites/notification-bot",
       "status": "implemented",
       "note": "Configurable MCP security-alert channel [notifications].security_channel: \"\" emits nothing, \"bot\" routes to TriggerSecurityAlert, \"push\" publishes security.alert via QuotaNotifier/PushService (#166/#167). Hermetic."
+    },
+    {
+      "name": "approval-wait",
+      "dir": "e2e/suites/approval-wait",
+      "status": "implemented",
+      "note": "Usability 01-safety TEST-GATE: hermetic pins for approval-gate park/resume and wait behavior of task approval.",
+      "scenarios": [
+        "approval-wait-01 approval-gated turn survives the watchdog while an unexempt turn is still reaped"
+      ]
+    },
+    {
+      "name": "bus-delivery",
+      "dir": "e2e/suites/bus-delivery",
+      "status": "implemented",
+      "note": "Usability TEST-GATE: hermetic pins for bus event delivery/classification across chat and progress lanes.",
+      "scenarios": [
+        "bus-delivery-01 critical task-completed/terminal events survive a progress flood on the WS relay"
+      ]
+    },
+    {
+      "name": "failure-paths",
+      "dir": "e2e/suites/failure-paths",
+      "status": "implemented",
+      "note": "Usability 01-safety TEST-GATE: hermetic pins for failure terminalization and honest failure copy.",
+      "scenarios": [
+        "failure-paths-01 injected task failure relays the originating turn and plans.list HTTP stays panic-free"
+      ]
+    },
+    {
+      "name": "task-approval",
+      "dir": "e2e/suites/task-approval",
+      "status": "implemented",
+      "note": "Usability 06-planning TEST-GATE: hermetic pins for task approval gate cards and approve/reject routing.",
+      "scenarios": [
+        "task-approval-01 reject does not execute the plan; HTTP twins agree with the RPC approval route"
+      ]
+    },
+    {
+      "name": "manifest",
+      "dir": "e2e/suites/manifest",
+      "status": "implemented",
+      "note": "Self-check suite: manifest completeness and path_map coverage. Meta-suite; not triggered by path_map changes.",
+      "scenarios": [
+        "manifest-01 manifest completeness self-check: suite dirs unique, path_map reachable, scenario coverage, freshness"
+      ]
     }
   ],
   "scenarios": [
@@ -6590,6 +6650,56 @@
       "paths": [
         "internal/tools/mcp/version_pin.go",
         "e2e/suites/notification-bot/mcp_version_pin_test.go"
+      ]
+    },
+    {
+      "id": "approval-wait-01",
+      "suite": "approval-wait",
+      "diff": "S",
+      "title": "approval-gated turn survives the watchdog while an unexempt turn is still reaped",
+      "status": "implemented",
+      "paths": [
+        "internal/agent/handler.go"
+      ]
+    },
+    {
+      "id": "bus-delivery-01",
+      "suite": "bus-delivery",
+      "diff": "S",
+      "title": "critical task-completed/terminal events survive a progress flood on the WS relay",
+      "status": "implemented",
+      "paths": [
+        "internal/comm/http/server.go"
+      ]
+    },
+    {
+      "id": "failure-paths-01",
+      "suite": "failure-paths",
+      "diff": "S",
+      "title": "injected task failure relays the originating turn and plans.list HTTP stays panic-free",
+      "status": "implemented",
+      "paths": [
+        "internal/agent/handler.go"
+      ]
+    },
+    {
+      "id": "task-approval-01",
+      "suite": "task-approval",
+      "diff": "S",
+      "title": "reject does not execute the plan; HTTP twins agree with the RPC approval route",
+      "status": "implemented",
+      "paths": [
+        "internal/agent/handler.go"
+      ]
+    },
+    {
+      "id": "manifest-01",
+      "suite": "manifest",
+      "diff": "S",
+      "title": "manifest completeness self-check: suite dirs unique, path_map reachable, scenario coverage, freshness",
+      "status": "implemented",
+      "paths": [
+        "e2e/manifest.json"
       ]
     }
   ]

@@ -108,7 +108,9 @@ void main() {
     container.read(statusMessageProvider.notifier).state = 'session archived';
     await tester.pump();
     expect(find.text('session archived'), findsOneWidget);
-    expect(findSpanText('verbosity'), findsNothing);
+    // L15: verbosity stays visible during the transient window (TUI keeps
+    // `verbosity:` outside the status-message branch).
+    expect(findSpanText('verbosity'), findsOneWidget);
   });
 
   testWidgets('keybind hint shows sessions-specific text on sessions tab', (

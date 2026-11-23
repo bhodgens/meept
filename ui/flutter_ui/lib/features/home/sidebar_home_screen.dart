@@ -1511,7 +1511,7 @@ class _PlansDialog extends ConsumerWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                plan.title.isEmpty ? 'Untitled Plan' : plan.title,
+                plan.title.isEmpty ? 'untitled plan' : plan.title,
                 style: CyberpunkTypography.bodyMedium.copyWith(
                   color: CyberpunkColors.orangePrimary,
                   fontFamily: 'SourceCodePro',
@@ -1594,7 +1594,7 @@ class _TasksDialog extends ConsumerWidget {
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                  task.title.isEmpty ? 'Untitled Task' : task.title,
+                  task.title.isEmpty ? 'untitled task' : task.title,
                   style: CyberpunkTypography.bodyMedium.copyWith(
                     color: CyberpunkColors.lightGray,
                     fontFamily: 'SourceCodePro',
@@ -1658,7 +1658,7 @@ class _AgentsDialog extends ConsumerWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      agent.name.isEmpty ? 'Unknown Agent' : agent.name,
+                      agent.name.isEmpty ? 'unknown agent' : agent.name,
                       style: CyberpunkTypography.bodyMedium.copyWith(
                         color: CyberpunkColors.orangePrimary,
                         fontFamily: 'SourceCodePro',
