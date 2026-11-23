@@ -1282,7 +1282,7 @@ type AgentLoop struct {
 // triggerTitleRefresh never saw DescriptionUserSet and republished a
 // generated title over a user rename.
 type sessionStore interface {
-	Get(id string) *session.Session
+	SessionStoreReader
 	SaveMessages(sessionID string, messages []session.Message) error
 	UpdateDesignation(sessionID string, status session.DesignationStatus, reason, priority string) error
 	ClearDesignation(sessionID string) error
@@ -2461,6 +2461,62 @@ func (l *AgentLoop) consumeQueueAliases() []string {
 	l.queueAliasIDs = nil
 	l.mu.Unlock()
 	return ids
+}
+
+// deriveSessionQueueAliases derives the owning session's identity keys for
+// THIS turn's queue registration from the loop's session store
+// (direct-dispatch alias arming, 07-bench residual F-STEER-R7). The one-shot
+// ArmQueueAliases arm only fires on the async step-job lane (the daemon's
+// AgentJobProcessor knows the task->session linkage); chat-lane turns --
+// the direct-dispatch shape (ChatHandler.sessionLoop -> GetOrCreateWired
+// clone -> RunOnceWithParts) and the interactive dispatch shape alike --
+// never armed anything, so the queue registered under exactly ONE
+// conversation key and a steer addressed by the session's PRIMARY
+// session-... id 404'd (rig runs 3-7, "queue not found").
+//
+// Resolution mirrors the loop's other session lookups
+// (session.ResolveThreadConversationID): the conversation id may be the
+// session's OWN conversation id, its PRIMARY id, or a thread-scoped id.
+// The derived keys are every stored identity that differs from the
+// registration key -- session.ID and session.ConversationID -- so the SAME
+// QueueEntry is addressable by any shape the surfaces accept. Read-only
+// store reads; a nil store, an unresolvable session, or an empty key arms
+// nothing (byte-identical behavior). Runs on the turn goroutine at
+// registration time only.
+func (l *AgentLoop) deriveSessionQueueAliases(conversationID string) []string {
+	if conversationID == "" || l.sessionStore == nil {
+		return nil
+	}
+	sess := session.ResolveThreadConversationID(conversationID,
+		l.sessionStore.GetByConversationID, l.sessionStore.Get)
+	if sess == nil {
+		return nil
+	}
+	aliases := make([]string, 0, 2)
+	for _, id := range []string{sess.ID, sess.ConversationID} {
+		if id == "" || id == conversationID {
+			continue
+		}
+		dup := false
+		for _, existing := range aliases {
+			if existing == id {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			aliases = append(aliases, id)
+		}
+	}
+	if len(aliases) == 0 {
+		return nil
+	}
+	l.logger.Debug("Direct-dispatch queue aliases derived",
+		"conversation_id", conversationID,
+		"session_id", sess.ID,
+		"alias_count", len(aliases),
+	)
+	return aliases
 }
 
 // consumeTurnDifficulty reads and clears the armed per-turn difficulty for
@@ -3765,6 +3821,21 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 		// queue findable by its exact key, closing the steer/followup/
 		// queue_status 404 class without resolver prefix guessing.
 		aliasIDs := l.consumeQueueAliases()
+		// Direct-dispatch alias arming (07-bench residual, F-STEER-R7):
+		// the one-shot arm above only fires on the ASYNC step-job lane
+		// (components.go AgentJobProcessor), so a CHAT-lane turn -- the
+		// direct-dispatch shape (ChatHandler.sessionLoop ->
+		// GetOrCreateWired clone -> THIS function) and the interactive
+		// dispatch shape alike -- registered its queue under exactly ONE
+		// key. Any other identity shape (the session's PRIMARY
+		// session-... id, which the Flutter GUI sends as conversation_id)
+		// then 404'd in chat.steer/chat.followup: 5 consecutive rig runs
+		// (runs 3-7). Derive the owning session's identity keys from the
+		// loop's session store at registration time so EVERY registered
+		// steering queue carries its session-level aliases no matter
+		// which dispatch shape ran the turn. Read-only lookups; a nil
+		// store or an unresolvable session arms nothing (byte-identical).
+		aliasIDs = append(aliasIDs, l.deriveSessionQueueAliases(conversationID)...)
 		turnQueue = NewMessageQueue(
 			WithQueueConfig(l.queue.config),
 			WithQueueBus(l.queue.bus),

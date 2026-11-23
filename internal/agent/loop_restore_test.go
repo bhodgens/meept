@@ -412,6 +412,16 @@ func (s *titleRefreshStore) Get(id string) *session.Session {
 	return s.sess
 }
 
+// GetByConversationID satisfies the widened sessionStore interface
+// (SessionStoreReader, added by the steering alias-arm work): the loop
+// resolves thread-scoped conversation ids against the store.
+func (s *titleRefreshStore) GetByConversationID(conversationID string) *session.Session {
+	if s == nil || s.sess == nil || s.sess.ID != conversationID {
+		return nil
+	}
+	return s.sess
+}
+
 func (s *titleRefreshStore) SaveMessages(string, []session.Message) error { return nil }
 
 func (s *titleRefreshStore) UpdateDesignation(string, session.DesignationStatus, string, string) error {
