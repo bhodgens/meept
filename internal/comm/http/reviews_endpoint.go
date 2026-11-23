@@ -34,6 +34,15 @@ type reviewVerdictCounter interface {
 	CountReviewVerdicts(q metrics.ReviewVerdictQuery) (int64, error)
 }
 
+// ReviewVerdictBreakdownProvider supplies the model_category breakdown
+// (per-(reviewed model, category) counts). Separate from
+// ReviewVerdictProvider so existing providers keep compiling; *metrics.Store
+// and the daemon's metricsStoreWrapper both implement it, and the ambient
+// MetricsService fallback resolves it the same way.
+type ReviewVerdictBreakdownProvider interface {
+	QueryReviewVerdictBreakdown(since time.Time) ([]metrics.ReviewVerdictBreakdownRow, error)
+}
+
 // reviewMetricWindows maps the frozen window tokens to their lookback.
 // "all" is the zero-Since sentinel handled by the handler.
 var reviewMetricWindows = map[string]time.Duration{
@@ -42,12 +51,16 @@ var reviewMetricWindows = map[string]time.Duration{
 	"30d": 30 * 24 * time.Hour,
 }
 
-// validReviewGroupBys is the frozen group_by whitelist (C5).
+// validReviewGroupBys is the frozen group_by whitelist (C5). "model_category"
+// is the breakdown rollup (one row per reviewed model x category pair — the
+// issue's question 2); its rows carry {model, category, count} instead of the
+// single-dimension aggregate shape.
 var validReviewGroupBys = map[string]bool{
-	"model":    true,
-	"judge":    true,
-	"category": true,
-	"rubric":   true,
+	"model":          true,
+	"judge":          true,
+	"category":       true,
+	"rubric":         true,
+	"model_category": true,
 }
 
 // reviewVerdictRowJSON is one aggregate row of the frozen C5 shape. Label
@@ -60,13 +73,25 @@ type reviewVerdictRowJSON struct {
 	Label    string  `json:"label"`
 }
 
+// reviewVerdictBreakdownRowJSON is one row of the model_category breakdown:
+// a (reviewed model, category) pair and its count.
+type reviewVerdictBreakdownRowJSON struct {
+	Model    string `json:"model"`
+	Category string `json:"category"`
+	Count    int64  `json:"count"`
+}
+
 // reviewsMetricsResponse is the JSON body of GET /api/v1/metrics/reviews.
-// Rows is always emitted as an array (never null).
+// Rows is always emitted as an array (never null) — the frozen C5 shape.
+// When group_by is model_category, Breakdown carries the per-pair rows
+// ({model, category, count}) and Rows stays an empty array: one payload key
+// per mode, both keys always present as arrays.
 type reviewsMetricsResponse struct {
-	Window           string                 `json:"window"`
-	GroupBy          string                 `json:"group_by"`
-	Rows             []reviewVerdictRowJSON `json:"rows"`
-	WorkflowExcluded int64                  `json:"workflow_excluded"`
+	Window           string                          `json:"window"`
+	GroupBy          string                          `json:"group_by"`
+	Rows             []reviewVerdictRowJSON          `json:"rows"`
+	Breakdown        []reviewVerdictBreakdownRowJSON `json:"breakdown"`
+	WorkflowExcluded int64                           `json:"workflow_excluded"`
 }
 
 // WithReviewVerdictProvider wires the review-verdict source used by
@@ -100,9 +125,10 @@ func (s *Server) handleReviewsMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := reviewsMetricsResponse{
-		Window:  window,
-		GroupBy: groupBy,
-		Rows:    []reviewVerdictRowJSON{},
+		Window:    window,
+		GroupBy:   groupBy,
+		Rows:      []reviewVerdictRowJSON{},
+		Breakdown: []reviewVerdictBreakdownRowJSON{},
 	}
 	if s.reviewVerdicts == nil {
 		s.writeJSON(w, http.StatusOK, resp)
@@ -113,6 +139,49 @@ func (s *Server) handleReviewsMetrics(w http.ResponseWriter, r *http.Request) {
 	if d, bounded := reviewMetricWindows[window]; bounded {
 		q.Since = time.Now().Add(-d)
 	}
+
+	// Breakdown mode (group_by=model_category): the per-(model, category)
+	// aggregate. Same degrade posture as the single-dimension mode — provider
+	// miss consults the ambient MetricsService, a store error answers the
+	// empty 200 shape, never 5xx. workflow_excluded stays 0 here: breakdown
+	// rows are model-scope by construction, so there is no excluded set to
+	// count.
+	if groupBy == "model_category" {
+		since := time.Time{}
+		if d, bounded := reviewMetricWindows[window]; bounded {
+			since = time.Now().Add(-d)
+		}
+		var rows []metrics.ReviewVerdictBreakdownRow
+		if p, ok := s.reviewVerdicts.(ReviewVerdictBreakdownProvider); ok {
+			if storeRows, storeErr := p.QueryReviewVerdictBreakdown(since); storeErr != nil {
+				s.logger.Warn("review metrics: verdict breakdown unavailable", "error", storeErr)
+			} else {
+				rows = storeRows
+			}
+		}
+		if rows == nil {
+			if p, ok := s.metricsService.(ReviewVerdictBreakdownProvider); ok {
+				if storeRows, storeErr := p.QueryReviewVerdictBreakdown(since); storeErr != nil {
+					s.logger.Warn("review metrics: fallback verdict breakdown unavailable", "error", storeErr)
+				} else {
+					rows = storeRows
+				}
+			}
+		}
+		if rows != nil {
+			resp.Breakdown = make([]reviewVerdictBreakdownRowJSON, 0, len(rows))
+			for _, row := range rows {
+				resp.Breakdown = append(resp.Breakdown, reviewVerdictBreakdownRowJSON{
+					Model:    row.Model,
+					Category: row.Category,
+					Count:    row.Count,
+				})
+			}
+		}
+		s.writeJSON(w, http.StatusOK, resp)
+		return
+	}
+
 	rows, err := s.reviewVerdicts.QueryReviewVerdicts(q)
 	if err != nil {
 		s.logger.Warn("review metrics: verdict aggregates unavailable", "error", err)

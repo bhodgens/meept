@@ -46,6 +46,27 @@ defect verdicts (a pass row never offsets defects); rejections never carry
 one. Severities: `cosmetic`, `functional`, `blocking`, `critical` (empty on
 pass rows).
 
+## Catalog versioning
+
+Every verdict row stamps the rubric catalog version it was graded under
+(`rubric_version`; current catalog: `internal/modelrating` `RubricCatalogVersion`).
+Rows recorded before the column existed are backfilled to version 1 on first
+open after upgrade. Any future rubric change (add, remove, re-scope, or
+reword a rubric) MUST bump `RubricCatalogVersion` in the same commit, so
+stored history stays interpretable instead of silently mixing into aggregates.
+
+## Breakdown rollup (model x category)
+
+`QueryReviewVerdictBreakdown` (and `group_by=model_category` on the surfaces)
+answers "what kind of bad work did each model do" in one query: one row per
+(reviewed model, category) pair with its count, pass rows included so the
+denominator rides along, workflow rows always excluded. HTTP: rows land under
+the `breakdown` key (the `rows` key stays an empty array in that mode; both
+keys are always present). CLI: `meept analytics reviews --group-by
+model_category` prints a MODEL/CATEGORY/COUNT table; `--json` on any mode
+emits the same shape the HTTP endpoint returns, so scripts can consume both
+identically.
+
 ## Storage and retention
 
 `model_review_verdicts` (in metrics.db) is append-only and NOT in

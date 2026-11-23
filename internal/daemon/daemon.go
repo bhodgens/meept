@@ -3450,6 +3450,17 @@ func (w *metricsStoreWrapper) QueryReviewVerdicts(q metrics.ReviewVerdictQuery) 
 	return w.store.QueryReviewVerdicts(q)
 }
 
+// QueryReviewVerdictBreakdown reports the per-(reviewed model, category)
+// breakdown from the daemon's metrics store, implementing
+// http.ReviewVerdictBreakdownProvider for the group_by=model_category mode.
+// Nil-guarded like QueryReviewVerdicts.
+func (w *metricsStoreWrapper) QueryReviewVerdictBreakdown(since time.Time) ([]metrics.ReviewVerdictBreakdownRow, error) {
+	if w == nil || w.store == nil {
+		return []metrics.ReviewVerdictBreakdownRow{}, nil
+	}
+	return w.store.QueryReviewVerdictBreakdown(since)
+}
+
 // metricsStoreWrapper must also satisfy the review-verdict provider so the
 // daemon can hand the same instance to http.WithReviewVerdictProvider.
 var _ http.ReviewVerdictProvider = (*metricsStoreWrapper)(nil)

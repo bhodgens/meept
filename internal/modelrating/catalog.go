@@ -113,6 +113,14 @@ type Rubric struct {
 	Statement string
 }
 
+// RubricCatalogVersion is the version of the rubric catalog frozen in this
+// file. Verdict rows stamp the version they were graded under (the
+// model_review_verdicts.rubric_version column), so a future catalog revision
+// is distinguishable from stored history instead of silently mixing into
+// aggregates. Bump this constant IN THE SAME COMMIT as any catalog change:
+// adding, removing, re-scoping, or rewording-a-statement-of a rubric.
+const RubricCatalogVersion = "1"
+
 // catalog is the full rubric catalog in stable order. Statements are one
 // sentence each; IDs are frozen once committed.
 var catalog = []Rubric{

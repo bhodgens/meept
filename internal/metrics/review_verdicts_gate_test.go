@@ -8,11 +8,13 @@ package metrics_test
 // All stores are built on t.TempDir(); no daemon, no bus, no network.
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/caimlas/meept/internal/metrics"
+	"github.com/caimlas/meept/internal/modelrating"
 )
 
 func newGateStore(t *testing.T) *metrics.Store {
@@ -24,6 +26,22 @@ func newGateStore(t *testing.T) *metrics.Store {
 	})
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	return store
+}
+
+// newGateStoreAt is newGateStore with an explicit db path (the migration
+// test reopens the SAME file to exercise the schema migration path).
+func newGateStoreAt(t *testing.T, dbPath string) *metrics.Store {
+	t.Helper()
+	store, err := metrics.NewStore(&metrics.StoreConfig{
+		DatabasePath:  dbPath,
+		BatchSize:     1,
+		FlushInterval: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("NewStore(%s): %v", dbPath, err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	return store
@@ -331,5 +349,233 @@ func TestVR_SCOPE_1_WorkflowExclusionExplicit(t *testing.T) {
 	}
 	if total != 2 {
 		t.Errorf("IncludeWorkflow totals = %d verdicts, want 2 (model + workflow rows)", total)
+	}
+}
+
+// VR-VERSION-1: every recorded verdict stamps the current rubric catalog
+// version when RubricVersion is empty on input, and honors an explicit
+// version when set. Purpose: a future catalog bump must be visible in stored
+// history, never silently mixed into aggregates.
+func TestVR_VERSION_1_RubricVersionStamping(t *testing.T) {
+	store := newGateStore(t)
+
+	// Producer path: empty version -> current catalog version.
+	if err := store.RecordReviewVerdict(rec("sv1", 1, true, "glm-x", "judge-a", "MR-LC1", "model", "pass", "")); err != nil {
+		t.Fatalf("RecordReviewVerdict: %v", err)
+	}
+	// Explicit version: pinned verbatim (test/migration path).
+	explicit := rec("sv2", 1, true, "glm-x", "judge-a", "MR-LC1", "model", "logic_error", "blocking")
+	explicit.RubricVersion = "0"
+	if err := store.RecordReviewVerdict(explicit); err != nil {
+		t.Fatalf("RecordReviewVerdict(explicit): %v", err)
+	}
+
+	rows := []struct {
+		StepID        string `db:"step_id"`
+		RubricVersion string `db:"rubric_version"`
+	}{}
+	if err := store.DB().Select(&rows,
+		`SELECT step_id, rubric_version FROM model_review_verdicts ORDER BY step_id`); err != nil {
+		t.Fatalf("select rubric_version: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("rows = %d, want 2", len(rows))
+	}
+	for _, r := range rows {
+		switch r.StepID {
+		case "sv1":
+			if r.RubricVersion != modelrating.RubricCatalogVersion {
+				t.Errorf("sv1 rubric_version = %q, want current catalog version %q (empty input stamps current)", r.RubricVersion, modelrating.RubricCatalogVersion)
+			}
+		case "sv2":
+			if r.RubricVersion != "0" {
+				t.Errorf("sv2 rubric_version = %q, want explicit \"0\"", r.RubricVersion)
+			}
+		}
+	}
+}
+
+// VR-VERSION-2 (migration): a database created by the PRE-rubric_version
+// schema (no column) migrates on open — the column appears, defaults to
+// version 1, and pre-column rows are backfilled so they stay inside
+// version-filtered aggregates instead of silently dropping out.
+func TestVR_VERSION_2_MigrationBackfillsExistingRows(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "metrics.db")
+
+	// Build the store once to create the table with the CURRENT schema and
+	// one recorded verdict, then simulate a legacy database: recreate the
+	// table WITHOUT rubric_version and move the row into it through raw SQL
+	// (the only way to produce a pre-migration row).
+	legacy := newGateStoreAt(t, dbPath)
+	if err := legacy.RecordReviewVerdict(rec("legacy-1", 1, true, "glm-x", "judge-a", "MR-LC1", "model", "logic_error", "blocking")); err != nil {
+		t.Fatalf("RecordReviewVerdict(legacy seed): %v", err)
+	}
+	if _, err := legacy.DB().Exec(`
+		CREATE TABLE IF NOT EXISTS model_review_verdicts_legacy (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+			step_id TEXT NOT NULL DEFAULT '',
+			task_id TEXT NOT NULL DEFAULT '',
+			cycle INTEGER NOT NULL DEFAULT 0,
+			is_final BOOLEAN NOT NULL DEFAULT 0,
+			rubric_id TEXT NOT NULL DEFAULT '',
+			scope TEXT NOT NULL DEFAULT '',
+			category TEXT NOT NULL DEFAULT '',
+			severity TEXT NOT NULL DEFAULT '',
+			reviewed_model_id TEXT NOT NULL DEFAULT '',
+			judge_agent_id TEXT NOT NULL DEFAULT '',
+			judge_model_id TEXT NOT NULL DEFAULT '',
+			orchestrator_agent_id TEXT NOT NULL DEFAULT '',
+			orchestrator_model_id TEXT NOT NULL DEFAULT '',
+			confidence REAL NOT NULL DEFAULT 0,
+			trace_id TEXT NOT NULL DEFAULT ''
+		)`, nil); err == nil {
+		_ = err
+	}
+	// Copy the real table's rows into the legacy shape, drop the real table,
+	// rename the legacy one in: the database now looks exactly like a
+	// pre-rubric_version deployment with one recorded verdict.
+	if _, err := legacy.DB().Exec(`
+		INSERT INTO model_review_verdicts_legacy
+			(timestamp, step_id, task_id, cycle, is_final, rubric_id, scope, category, severity,
+			 reviewed_model_id, judge_agent_id, judge_model_id, confidence, trace_id)
+			SELECT timestamp, step_id, task_id, cycle, is_final, rubric_id, scope, category, severity,
+			       reviewed_model_id, judge_agent_id, judge_model_id, confidence, trace_id
+			FROM model_review_verdicts`, nil); err != nil {
+		t.Fatalf("seed legacy copy: %v", err)
+	}
+	_ = legacy.Close()
+	_ = dbRawExec(t, dbPath, `DROP TABLE model_review_verdicts`)
+	_ = dbRawExec(t, dbPath, `ALTER TABLE model_review_verdicts_legacy RENAME TO model_review_verdicts`)
+
+	// Reopen: the migration must add rubric_version, backfill the legacy row
+	// to version 1, and keep the row queryable.
+	reopened := newGateStoreAt(t, dbPath)
+	rows := []struct {
+		StepID        string `db:"step_id"`
+		RubricVersion string `db:"rubric_version"`
+	}{}
+	if err := reopened.DB().Select(&rows,
+		`SELECT step_id, rubric_version FROM model_review_verdicts`); err != nil {
+		t.Fatalf("select after migration (rubric_version missing?): %v", err)
+	}
+	for _, r := range rows {
+		if r.RubricVersion != "1" {
+			t.Errorf("legacy row %s rubric_version = %q, want backfilled \"1\" (pre-column rows were graded under version 1)", r.StepID, r.RubricVersion)
+		}
+	}
+
+	// The migrated store still aggregates: the legacy row participates in
+	// model rollups (it would vanish from a WHERE rubric_version != '' bug).
+	agg, err := reopened.QueryReviewVerdicts(metrics.ReviewVerdictQuery{GroupBy: "model"})
+	if err != nil {
+		t.Fatalf("QueryReviewVerdicts after migration: %v", err)
+	}
+	found := false
+	for _, a := range agg {
+		if a.Group == "glm-x" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("migrated legacy row missing from model rollup: %+v", agg)
+	}
+}
+
+// dbRawExec runs one statement against a sqlite db path (test helper for the
+// legacy-shape simulation; stores must be closed first).
+func dbRawExec(t *testing.T, dbPath, stmt string) error {
+	t.Helper()
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open %s: %v", dbPath, err)
+	}
+	defer db.Close()
+	_, err = db.Exec(stmt, nil)
+	return err
+}
+
+// VR-BREAKDOWN-1: QueryReviewVerdictBreakdown aggregates per (reviewed
+// model, category), excludes workflow rows structurally, honors the window,
+// and orders model ASC then count DESC then category ASC.
+func TestVR_BREAKDOWN_1_ModelCategoryBreakdown(t *testing.T) {
+	store := newGateStore(t)
+	now := time.Now().UTC()
+	old := now.Add(-40 * 24 * time.Hour)
+
+	mk := func(r metrics.ReviewVerdictRecord) {
+		t.Helper()
+		if err := store.RecordReviewVerdict(r); err != nil {
+			t.Fatalf("RecordReviewVerdict(%s/%s): %v", r.ReviewedModelID, r.Category, err)
+		}
+	}
+	// m-a: 2 logic_error, 1 pass. m-b: 1 logic_error. m-old: 1 old defect
+	// (window exclusion). workflow rows: excluded structurally.
+	mk(rec("b1", 1, true, "m-a", "j", "MR-LC1", "model", "logic_error", "blocking"))
+	mk(rec("b2", 1, true, "m-a", "j", "MR-LC1", "model", "logic_error", "blocking"))
+	mk(rec("b3", 1, true, "m-a", "j", "", "model", "pass", ""))
+	mk(rec("b4", 1, true, "m-b", "j", "MR-LC1", "model", "logic_error", "functional"))
+	mk(rec("b5", 1, true, "", "j", "MR-WF1", "workflow", "incomplete_implementation", "critical"))
+	oldRec := rec("b6", 1, true, "m-a", "j", "MR-LC2", "model", "style_bloat", "cosmetic")
+	oldRec.Timestamp = old
+	mk(oldRec)
+
+	rows, err := store.QueryReviewVerdictBreakdown(now.Add(-24 * time.Hour))
+	if err != nil {
+		t.Fatalf("QueryReviewVerdictBreakdown: %v", err)
+	}
+
+	type pair struct {
+		model, category string
+	}
+	got := map[pair]int64{}
+	var order []pair
+	for _, r := range rows {
+		p := pair{r.Model, r.Category}
+		got[p] = r.Count
+		order = append(order, p)
+	}
+
+	want := map[pair]int64{
+		{"m-a", "logic_error"}: 2,
+		{"m-a", "pass"}:        1,
+		{"m-b", "logic_error"}: 1,
+	}
+	for p, n := range want {
+		if got[p] != n {
+			t.Errorf("breakdown %v = %d, want %d (full rows: %+v)", p, got[p], n, rows)
+		}
+	}
+	if n := len(rows); n != 3 {
+		t.Errorf("breakdown has %d rows, want 3 (workflow rows excluded structurally; old rows outside the window): %+v", n, rows)
+	}
+	if _, ok := got[pair{"m-a", "style_bloat"}]; ok {
+		t.Errorf("breakdown includes the 40-day-old row despite a 24h window: %+v", rows)
+	}
+	// Ordering: model ASC first.
+	if len(order) > 1 && order[0].model != "m-a" {
+		t.Errorf("breakdown ordering: first row %v, want m-a rows first (model ASC)", order[0])
+	}
+
+	// Zero Since = unbounded: the old row appears.
+	all, err := store.QueryReviewVerdictBreakdown(time.Time{})
+	if err != nil {
+		t.Fatalf("QueryReviewVerdictBreakdown(unbounded): %v", err)
+	}
+	foundOld := false
+	for _, r := range all {
+		if r.Category == "style_bloat" && r.Model == "m-a" {
+			foundOld = true
+		}
+	}
+	if !foundOld {
+		t.Errorf("unbounded breakdown missing the old style_bloat row: %+v", all)
+	}
+	// Workflow rows never appear in ANY breakdown window.
+	for _, r := range all {
+		if r.Model == "" {
+			t.Errorf("breakdown carries an empty reviewed_model_id row (workflow exclusion broken): %+v", r)
+		}
 	}
 }

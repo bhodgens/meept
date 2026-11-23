@@ -15,6 +15,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -149,6 +150,150 @@ func TestCLI_WINDOW_1_DaysFlagFiltersWindow(t *testing.T) {
 	out = runAnalyticsReviews(t, "--days", "60")
 	if !strings.Contains(out, "m-old") {
 		t.Errorf("--days 60 output missing m-old (window should include 40-day-old rows):\n%s", out)
+	}
+}
+
+// TestCLI_JSON_1_ReviewsJSONShape asserts `analytics reviews --json` emits
+// the frozen HTTP-mirror shape: window, group_by, and the rows array with
+// {group, verdicts, defects, pass_rate, label} rows — byte-compatible with
+// GET /api/v1/metrics/reviews' single-dimension mode.
+func TestCLI_JSON_1_ReviewsJSONShape(t *testing.T) {
+	seedReviewsDB(t)
+
+	out := runAnalyticsReviews(t, "--json")
+	var payload struct {
+		Window  string `json:"window"`
+		GroupBy string `json:"group_by"`
+		Rows    []struct {
+			Group    string  `json:"group"`
+			Verdicts int64   `json:"verdicts"`
+			Defects  int64   `json:"defects"`
+			PassRate float64 `json:"pass_rate"`
+			Label    string  `json:"label"`
+		} `json:"rows"`
+		Breakdown []struct {
+			Model    string `json:"model"`
+			Category string `json:"category"`
+			Count    int64  `json:"count"`
+		} `json:"breakdown"`
+	}
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("--json output is not valid JSON:\n%s\nerror: %v", out, err)
+	}
+	if payload.GroupBy != "model" {
+		t.Errorf("json group_by = %q, want \"model\" (the flag default)", payload.GroupBy)
+	}
+	if payload.Window == "" {
+		t.Errorf("json window empty, want the --days token form (e.g. \"30d\")")
+	}
+	if len(payload.Rows) == 0 {
+		t.Fatalf("json rows empty for a seeded store:\n%s", out)
+	}
+	// Frozen row keys are pinned by the struct: any key drift (rename, type
+	// change) fails the unmarshal or the value asserts below.
+	byGroup := map[string]int64{}
+	for _, r := range payload.Rows {
+		byGroup[r.Group] = r.Verdicts
+	}
+	// Seed: m-a 3 verdicts / 2 defects, m-b 2/2, m-c 1/0 — from the real
+	// aggregation, sorted defects DESC then group ASC by the command.
+	if byGroup["m-a"] != 3 || byGroup["m-b"] != 2 || byGroup["m-c"] != 1 {
+		t.Errorf("json rows verdict counts wrong: %v (want m-a=3, m-b=2, m-c=1)", byGroup)
+	}
+	// m-c is a single pass row: pass_rate must be 1.
+	for _, r := range payload.Rows {
+		if r.Group == "m-c" && r.PassRate != 1 {
+			t.Errorf("m-c pass_rate = %v, want 1 (one pass row, zero defects)", r.PassRate)
+		}
+	}
+}
+
+// TestCLI_JSON_2_BreakdownJSONShape asserts the model_category + --json
+// combination: the breakdown array carries {model, category, count} rows from
+// the real store aggregation, rows stays empty, and workflow rows are absent.
+func TestCLI_JSON_2_BreakdownJSONShape(t *testing.T) {
+	seedReviewsDB(t)
+
+	out := runAnalyticsReviews(t, "--group-by", "model_category", "--json")
+	var payload struct {
+		Rows      []map[string]any `json:"rows"`
+		Breakdown []struct {
+			Model    string `json:"model"`
+			Category string `json:"category"`
+			Count    int64  `json:"count"`
+		} `json:"breakdown"`
+	}
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("breakdown --json output is not valid JSON:\n%s\nerror: %v", out, err)
+	}
+	if len(payload.Rows) != 0 {
+		t.Errorf("rows populated in breakdown mode (%v); breakdown rows belong under breakdown", payload.Rows)
+	}
+	if len(payload.Breakdown) == 0 {
+		t.Fatalf("breakdown empty for a seeded store:\n%s", out)
+	}
+	got := map[string]int64{}
+	for _, r := range payload.Breakdown {
+		got[r.Model+"/"+r.Category] = r.Count
+		if r.Model == "" {
+			t.Errorf("breakdown row with empty model (workflow exclusion broken): %+v", r)
+		}
+	}
+	// Seed: m-a has 2 logic_error + 1 pass; m-b has 1 logic_error; m-c has
+	// 1 pass. The workflow-scope row in the seed (m-old is model-scope, the
+	// seed has none workflow... m-old IS model scope) — counts from the real
+	// aggregation.
+	want := map[string]int64{
+		"m-a/logic_error":               1,
+		"m-a/pass":                      1,
+		"m-b/logic_error":               1,
+		"m-b/incomplete_implementation": 1,
+		"m-c/pass":                      1,
+	}
+	for k, n := range want {
+		if got[k] != n {
+			t.Errorf("breakdown %s = %d, want %d (full breakdown: %+v)", k, got[k], n, payload.Breakdown)
+		}
+	}
+}
+
+// TestCLI_BREAKDOWN_TABLE_1_ModelCategoryTable asserts the human table for
+// --group-by model_category: MODEL | CATEGORY | COUNT header and the seeded
+// pairs present, sorted model ASC.
+func TestCLI_BREAKDOWN_TABLE_1_ModelCategoryTable(t *testing.T) {
+	seedReviewsDB(t)
+
+	out := runAnalyticsReviews(t, "--group-by", "model_category")
+	if !strings.Contains(out, "MODEL") || !strings.Contains(out, "CATEGORY") || !strings.Contains(out, "COUNT") {
+		t.Errorf("breakdown table missing the MODEL/CATEGORY/COUNT header:\n%s", out)
+	}
+	for _, want := range []string{"m-a", "m-b", "m-c", "pass", "logic_error"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("breakdown table missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "m-old") {
+		t.Errorf("breakdown table includes m-old (default --days 30 excludes the 40-day-old row):\n%s", out)
+	}
+}
+
+// TestCLI_GROUPBY_INVALID_1_RejectedBeforeStore asserts an unknown --group-by
+// fails with a clear message (the whitelist validation runs before the store
+// opens, so a typo fails fast). Runs the command tree directly because the
+// runAnalyticsReviews helper treats a RunE error as fatal.
+func TestCLI_GROUPBY_INVALID_1_RejectedBeforeStore(t *testing.T) {
+	seedReviewsDB(t)
+
+	root := newAnalyticsCmd()
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"reviews", "--group-by", "nonsense"})
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("unknown --group-by accepted; want an error before the store opens")
+	}
+	if !strings.Contains(err.Error(), "invalid --group-by") {
+		t.Errorf("error = %v, want a message containing \"invalid --group-by\"", err)
 	}
 }
 

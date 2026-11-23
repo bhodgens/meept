@@ -308,3 +308,118 @@ func TestHTTP_DEGRADE_1_NilProviderAndStoreErrorReturnEmptyRows(t *testing.T) {
 		}
 	}
 }
+
+// TestHTTP_BREAKDOWN_1_ModelCategoryMode asserts the group_by=model_category
+// mode end to end through the REAL store provider: the breakdown array
+// carries {model, category, count} rows, rows stays an empty array (the
+// frozen single-dimension key is always present), workflow rows are excluded,
+// and the window filter applies. Runs against *metrics.Store directly so the
+// ReviewVerdictBreakdownProvider resolution through the REAL provider type is
+// proven, not a test double.
+func TestHTTP_BREAKDOWN_1_ModelCategoryMode(t *testing.T) {
+	store := newReviewsGateStore(t)
+	_, mux := newReviewsGateServer(t, store, store) // *metrics.Store implements both provider interfaces
+
+	// Seed extra rows to make the breakdown unambiguous. newReviewsGateStore
+	// already seeded model/judge/category/rubric fixtures + one workflow row.
+	now := time.Now().UTC()
+	mk := func(step, model, category, severity string) {
+		t.Helper()
+		rec := metrics.ReviewVerdictRecord{StepID: step, TaskID: "t-bd", IsFinal: true, RubricID: "MR-LC1",
+			Scope: "model", Category: category, Severity: severity, ReviewedModelID: model,
+			JudgeAgentID: "j-1", Timestamp: now}
+		if err := store.RecordReviewVerdict(rec); err != nil {
+			t.Fatalf("seed breakdown row: %v", err)
+		}
+	}
+	mk("bd-1", "bd-model", "logic_error", "blocking")
+	mk("bd-2", "bd-model", "logic_error", "blocking")
+	mk("bd-3", "bd-model", "pass", "")
+
+	code, body := doReviewsGET(t, mux, "?window=30d&group_by=model_category")
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", code)
+	}
+	if body["group_by"] != "model_category" {
+		t.Errorf("echoed group_by = %v, want model_category", body["group_by"])
+	}
+
+	// rows stays an empty array in breakdown mode (frozen key always present).
+	rows, _ := body["rows"].([]any)
+	if rows == nil {
+		t.Errorf("rows is null in breakdown mode, want [] (frozen key always an array)")
+	}
+	if len(rows) != 0 {
+		t.Errorf("rows populated in breakdown mode (%v); breakdown rows belong under breakdown", rows)
+	}
+
+	breakdown, _ := body["breakdown"].([]any)
+	if len(breakdown) == 0 {
+		t.Fatalf("breakdown empty for a seeded store: %v", body)
+	}
+	type pair struct {
+		model, category string
+		count           float64
+	}
+	got := map[pair]bool{}
+	for _, b := range breakdown {
+		row, ok := b.(map[string]any)
+		if !ok {
+			t.Fatalf("breakdown element not an object: %v", b)
+		}
+		for _, key := range []string{"model", "category", "count"} {
+			if _, exists := row[key]; !exists {
+				t.Errorf("breakdown row missing frozen key %q: %v", key, row)
+			}
+		}
+		model, _ := row["model"].(string)
+		category, _ := row["category"].(string)
+		count, _ := row["count"].(float64)
+		got[pair{model, category, count}] = true
+		if model == "" {
+			t.Errorf("breakdown row with empty model (workflow exclusion broken): %v", row)
+		}
+	}
+	// The seeded store's fixtures give these exact pairs; counts from the
+	// real aggregation.
+	wantPairs := []pair{
+		{"bd-model", "logic_error", 2},
+		{"bd-model", "pass", 1},
+	}
+	for _, w := range wantPairs {
+		if !got[w] {
+			t.Errorf("breakdown missing %v (got %v)", w, got)
+		}
+	}
+	// Every workflow-scope fixture row (reviewed_model_id="") must be absent.
+	for p := range got {
+		if p.model == "" {
+			t.Errorf("breakdown carries an empty-model row: %v", p)
+		}
+	}
+
+	// Window filter: a 1-second window excludes everything seeded above.
+	code, body = doReviewsGET(t, mux, "?window=24h&group_by=model_category")
+	if code != http.StatusOK {
+		t.Fatalf("second GET status = %d, want 200", code)
+	}
+	if bd, _ := body["breakdown"].([]any); len(bd) == 0 {
+		t.Errorf("24h window emptied the breakdown (seeded rows are recent): %v", body)
+	}
+}
+
+// TestHTTP_BREAKDOWN_2_BadGroupByStill400 asserts model_category joins the
+// frozen whitelist (accepted) while unknown values stay rejected.
+func TestHTTP_BREAKDOWN_2_BadGroupByStill400(t *testing.T) {
+	store := newReviewsGateStore(t)
+	_, mux := newReviewsGateServer(t, store, okReviewProvider{})
+
+	code, _ := doReviewsGET(t, mux, "?window=all&group_by=model_category")
+	if code != http.StatusOK {
+		t.Errorf("model_category: status = %d, want 200 (whitelist member)", code)
+	}
+	code, _ = doReviewsGET(t, mux, "?window=all&group_by=nonsense")
+	if code != http.StatusBadRequest {
+		t.Errorf("nonsense: status = %d, want 400", code)
+	}
+}

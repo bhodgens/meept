@@ -16,6 +16,7 @@ package metrics
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/caimlas/meept/internal/modelrating"
@@ -40,6 +41,13 @@ func validateVerdictVocab(scope, category, severity string) error {
 // be renamed. Fresh databases get the table from this script; existing
 // databases get it on next open because CREATE TABLE IF NOT EXISTS is
 // idempotent — no migration-registry step is needed for a brand-new table.
+//
+// rubric_version stamps the modelrating.RubricCatalogVersion each row was
+// graded under. Existing databases gain the column via ALTER TABLE (ignored
+// when it already exists) and their pre-column rows are BACKFILLED to
+// version "1": every verdict recorded before version stamping existed was
+// graded under catalog version 1, so stamping keeps them inside
+// version-filtered aggregates instead of silently dropping them.
 func initReviewVerdictSchema(db *sql.DB) error {
 	schema := `
 -- Review verdicts (model-rating-metrics-plan C2): append-only rubric verdicts
@@ -62,15 +70,27 @@ CREATE TABLE IF NOT EXISTS model_review_verdicts (
     orchestrator_agent_id TEXT NOT NULL DEFAULT '',
     orchestrator_model_id TEXT NOT NULL DEFAULT '',
     confidence REAL NOT NULL DEFAULT 0,
-    trace_id TEXT NOT NULL DEFAULT ''
+    trace_id TEXT NOT NULL DEFAULT '',
+    rubric_version TEXT NOT NULL DEFAULT '1'
 );
 CREATE INDEX IF NOT EXISTS idx_mrv_step ON model_review_verdicts(step_id);
 CREATE INDEX IF NOT EXISTS idx_mrv_model_ts ON model_review_verdicts(reviewed_model_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_mrv_trace ON model_review_verdicts(trace_id);
+CREATE INDEX IF NOT EXISTS idx_mrv_breakdown ON model_review_verdicts(reviewed_model_id, category);
 `
-	_, err := db.Exec(schema)
-	if err != nil {
+	if _, err := db.Exec(schema); err != nil {
 		return fmt.Errorf("failed to initialize model_review_verdicts schema: %w", err)
+	}
+	// Migration for databases created before rubric_version existed: add the
+	// column (no-op when present) and stamp the pre-column rows as version 1.
+	// "duplicate column name" is the idempotent path, not an error.
+	if _, err := db.Exec(`ALTER TABLE model_review_verdicts ADD COLUMN rubric_version TEXT NOT NULL DEFAULT '1'`); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("failed to add rubric_version column: %w", err)
+		}
+	}
+	if _, err := db.Exec(`UPDATE model_review_verdicts SET rubric_version = '1' WHERE rubric_version = ''`); err != nil {
+		return fmt.Errorf("failed to backfill rubric_version: %w", err)
 	}
 	return nil
 }
@@ -80,22 +100,27 @@ CREATE INDEX IF NOT EXISTS idx_mrv_trace ON model_review_verdicts(trace_id);
 // ReviewedModelID is empty and OrchestratorAgentID/OrchestratorModelID
 // identify the blamed orchestrator.
 type ReviewVerdictRecord struct {
-	StepID              string    `db:"step_id"`
-	TaskID              string    `db:"task_id"`
-	Cycle               int       `db:"cycle"`
-	IsFinal             bool      `db:"is_final"`
-	RubricID            string    `db:"rubric_id"`
-	Scope               string    `db:"scope"`
-	Category            string    `db:"category"`
-	Severity            string    `db:"severity"`
-	ReviewedModelID     string    `db:"reviewed_model_id"`
-	JudgeAgentID        string    `db:"judge_agent_id"`
-	JudgeModelID        string    `db:"judge_model_id"`
-	OrchestratorAgentID string    `db:"orchestrator_agent_id"`
-	OrchestratorModelID string    `db:"orchestrator_model_id"`
-	Confidence          float64   `db:"confidence"`
-	TraceID             string    `db:"trace_id"`
-	Timestamp           time.Time `db:"timestamp"`
+	StepID              string  `db:"step_id"`
+	TaskID              string  `db:"task_id"`
+	Cycle               int     `db:"cycle"`
+	IsFinal             bool    `db:"is_final"`
+	RubricID            string  `db:"rubric_id"`
+	Scope               string  `db:"scope"`
+	Category            string  `db:"category"`
+	Severity            string  `db:"severity"`
+	ReviewedModelID     string  `db:"reviewed_model_id"`
+	JudgeAgentID        string  `db:"judge_agent_id"`
+	JudgeModelID        string  `db:"judge_model_id"`
+	OrchestratorAgentID string  `db:"orchestrator_agent_id"`
+	OrchestratorModelID string  `db:"orchestrator_model_id"`
+	Confidence          float64 `db:"confidence"`
+	TraceID             string  `db:"trace_id"`
+	// RubricVersion is the modelrating.RubricCatalogVersion the row was
+	// graded under. Empty on input means "stamp the current catalog
+	// version" — the only value producers should ever need. A non-empty
+	// input pins an explicit version (used by tests and future migrations).
+	RubricVersion string    `db:"rubric_version"`
+	Timestamp     time.Time `db:"timestamp"`
 }
 
 // RecordReviewVerdict validates the scope/category/severity combination
@@ -116,18 +141,26 @@ func (s *Store) RecordReviewVerdict(rec ReviewVerdictRecord) error {
 	if rec.IsFinal {
 		isFinal = 1
 	}
+	// Stamp the catalog version the row was graded under. Empty input means
+	// "current catalog version" — the normal producer path. This is captured
+	// per row so a future catalog bump (modelrating.RubricCatalogVersion)
+	// leaves stored history interpretable.
+	version := rec.RubricVersion
+	if version == "" {
+		version = modelrating.RubricCatalogVersion
+	}
 	_, err := s.db.Exec(
 		`INSERT INTO model_review_verdicts
 			(timestamp, step_id, task_id, cycle, is_final, rubric_id, scope,
 			 category, severity, reviewed_model_id, judge_agent_id,
 			 judge_model_id, orchestrator_agent_id, orchestrator_model_id,
-			 confidence, trace_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 confidence, trace_id, rubric_version)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		ts.UTC().Format(time.RFC3339), rec.StepID, rec.TaskID, rec.Cycle,
 		isFinal, rec.RubricID, rec.Scope, rec.Category, rec.Severity,
 		rec.ReviewedModelID, rec.JudgeAgentID, rec.JudgeModelID,
 		rec.OrchestratorAgentID, rec.OrchestratorModelID,
-		rec.Confidence, rec.TraceID,
+		rec.Confidence, rec.TraceID, version,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to record review verdict: %w", err)
@@ -265,7 +298,47 @@ func (s *Store) CountReviewVerdicts(q ReviewVerdictQuery) (int64, error) {
 	return count, nil
 }
 
-// FinalVerdictsForStep returns the verdict rows from the step's LAST recorded
+// ReviewVerdictBreakdownRow is one (reviewed model, category) pair with its
+// verdict count — the "what kind of bad work did THIS model do" aggregate the
+// issue's question 2 asks for, answered in one query instead of one
+// group-by per category. Workflow-scope rows are always excluded (their
+// reviewed_model_id is empty by contract C2). Pass rows appear as
+// Category="pass" so a model's denominator rides in the same result.
+type ReviewVerdictBreakdownRow struct {
+	// Model is the reviewed model id.
+	Model string `json:"model" db:"model"`
+	// Category is the frozen defect category or "pass".
+	Category string `json:"category" db:"category"`
+	// Count is the number of in-window verdict rows for the pair.
+	Count int64 `json:"count" db:"count"`
+}
+
+// QueryReviewVerdictBreakdown aggregates verdicts per (reviewed model,
+// category). Workflow-scope rows are structurally excluded. Zero Since means
+// unbounded. Ordering: model ASC, then count DESC, then category ASC —
+// stable for tables and tests.
+func (s *Store) QueryReviewVerdictBreakdown(since time.Time) ([]ReviewVerdictBreakdownRow, error) {
+	query := `SELECT reviewed_model_id AS model, category, COUNT(*) AS count
+		FROM model_review_verdicts
+		WHERE scope != 'workflow' AND reviewed_model_id != ''`
+	args := []any{}
+	if !since.IsZero() {
+		query += ` AND timestamp >= ?`
+		args = append(args, since.UTC().Format(time.RFC3339))
+	}
+	query += ` GROUP BY reviewed_model_id, category
+		ORDER BY model ASC, count DESC, category ASC`
+	var rows []ReviewVerdictBreakdownRow
+	if err := s.db.Select(&rows, query, args...); err != nil {
+		return nil, fmt.Errorf("failed to query review verdict breakdown: %w", err)
+	}
+	if rows == nil {
+		rows = []ReviewVerdictBreakdownRow{}
+	}
+	return rows, nil
+}
+
+// FinalVerdictsForStep returns the verdict rows for a step's LAST cycle
 // cycle only (earlier cycles are superseded review rounds).
 func (s *Store) FinalVerdictsForStep(stepID string) ([]ReviewVerdictRecord, error) {
 	type storedRow struct {

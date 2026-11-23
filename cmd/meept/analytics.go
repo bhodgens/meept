@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"text/tabwriter"
@@ -527,8 +528,9 @@ Displays:
 	}
 
 	cmd.Flags().Int("days", 30, "look-back window in days")
-	cmd.Flags().String("group-by", "model", "group rows by model, judge, category, or rubric")
+	cmd.Flags().String("group-by", "model", "group rows by model, judge, category, rubric, or model_category")
 	cmd.Flags().Bool("include-workflow", false, "include workflow-scope verdicts")
+	cmd.Flags().Bool("json", false, "emit machine-readable JSON mirroring GET /api/v1/metrics/reviews")
 
 	return cmd
 }
@@ -548,6 +550,17 @@ func runAnalyticsReviewsRunE(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to read include-workflow flag: %w", err)
 	}
+	asJSON, err := cmd.Flags().GetBool("json")
+	if err != nil {
+		return fmt.Errorf("failed to read json flag: %w", err)
+	}
+
+	// Validate group-by BEFORE opening the store so a typo fails fast with a
+	// clear message instead of a confusing store-level error.
+	validGroupBys := map[string]bool{"model": true, "judge": true, "category": true, "rubric": true, "model_category": true}
+	if !validGroupBys[groupBy] {
+		return fmt.Errorf("invalid --group-by %q (want model, judge, category, rubric, or model_category)", groupBy)
+	}
 
 	store, err := metrics.NewStore(&metrics.StoreConfig{
 		DatabasePath:  config.MeeptPath("metrics.db"),
@@ -559,13 +572,47 @@ func runAnalyticsReviewsRunE(cmd *cobra.Command, args []string) error {
 	}
 	defer store.Close()
 
+	since := time.Now().UTC().AddDate(0, 0, -days)
+
+	// Breakdown mode: per-(model, category) counts — the issue's question 2
+	// ("what kind of bad work did each model do") in one query.
+	if groupBy == "model_category" {
+		breakdown, err := store.QueryReviewVerdictBreakdown(since)
+		if err != nil {
+			return fmt.Errorf("failed to query review verdict breakdown: %w", err)
+		}
+		if asJSON {
+			return printAnalyticsReviewsJSON(cmd.OutOrStdout(), days, groupBy, nil, breakdown)
+		}
+		if len(breakdown) == 0 {
+			fmt.Println("(no verdicts recorded)")
+			return nil
+		}
+		w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+		defer w.Flush()
+		fmt.Fprintln(w, "MODEL	CATEGORY	COUNT")
+		fmt.Fprintln(w, "-----	--------	-----")
+		for _, r := range breakdown {
+			model := r.Model
+			if len(model) > 30 {
+				model = model[:27] + "..."
+			}
+			fmt.Fprintf(w, "%-30s	%s	%d\n", model, r.Category, r.Count)
+		}
+		return nil
+	}
+
 	rows, err := store.QueryReviewVerdicts(metrics.ReviewVerdictQuery{
-		Since:           time.Now().UTC().AddDate(0, 0, -days),
+		Since:           since,
 		GroupBy:         groupBy,
 		IncludeWorkflow: includeWorkflow,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to query review verdicts: %w", err)
+	}
+
+	if asJSON {
+		return printAnalyticsReviewsJSON(cmd.OutOrStdout(), days, groupBy, rows, nil)
 	}
 
 	if len(rows) == 0 {
@@ -600,16 +647,77 @@ func runAnalyticsReviewsRunE(cmd *cobra.Command, args []string) error {
 		if len(group) > 30 {
 			group = group[:27] + "..."
 		}
-		line := fmt.Sprintf("%-30s\t%d\t%d\t%.2f", group, r.Verdicts, r.Defects, r.PassRate)
+		line := fmt.Sprintf("%-30s	%d	%d	%.2f", group, r.Verdicts, r.Defects, r.PassRate)
 		if groupBy == "rubric" {
 			label := r.Label
 			if label == "" {
 				label = "-"
 			}
-			line += "\t" + label
+			line += "	" + label
 		}
 		fmt.Fprintln(w, line)
 	}
 
+	return nil
+}
+
+// analyticsReviewsJSON is the --json payload of `meept analytics reviews`.
+// It mirrors GET /api/v1/metrics/reviews' frozen shape: window (the CLI's
+// --days N rendered in the endpoint's token form), group_by, and the two
+// always-present arrays — rows for single-dimension modes, breakdown for
+// model_category. Scripts can consume CLI and HTTP output identically.
+type analyticsReviewsJSON struct {
+	Window           string                             `json:"window"`
+	GroupBy          string                             `json:"group_by"`
+	Rows             []analyticsReviewsRowJSON          `json:"rows"`
+	Breakdown        []analyticsReviewsBreakdownRowJSON `json:"breakdown"`
+	WorkflowExcluded int64                              `json:"workflow_excluded"`
+}
+
+type analyticsReviewsRowJSON struct {
+	Group    string  `json:"group"`
+	Verdicts int64   `json:"verdicts"`
+	Defects  int64   `json:"defects"`
+	PassRate float64 `json:"pass_rate"`
+	Label    string  `json:"label"`
+}
+
+type analyticsReviewsBreakdownRowJSON struct {
+	Model    string `json:"model"`
+	Category string `json:"category"`
+	Count    int64  `json:"count"`
+}
+
+// printAnalyticsReviewsJSON renders the --json payload. Exactly one of rows /
+// breakdown is populated per mode; the other stays an empty array so the
+// shape is stable for consumers.
+func printAnalyticsReviewsJSON(out io.Writer, days int, groupBy string, rows []metrics.ReviewVerdictRow, breakdown []metrics.ReviewVerdictBreakdownRow) error {
+	payload := analyticsReviewsJSON{
+		Window:    fmt.Sprintf("%dd", days),
+		GroupBy:   groupBy,
+		Rows:      []analyticsReviewsRowJSON{},
+		Breakdown: []analyticsReviewsBreakdownRowJSON{},
+	}
+	for _, r := range rows {
+		payload.Rows = append(payload.Rows, analyticsReviewsRowJSON{
+			Group:    r.Group,
+			Verdicts: r.Verdicts,
+			Defects:  r.Defects,
+			PassRate: r.PassRate,
+			Label:    r.Label,
+		})
+	}
+	for _, r := range breakdown {
+		payload.Breakdown = append(payload.Breakdown, analyticsReviewsBreakdownRowJSON{
+			Model:    r.Model,
+			Category: r.Category,
+			Count:    r.Count,
+		})
+	}
+	enc := json.NewEncoder(out)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(payload); err != nil {
+		return fmt.Errorf("failed to encode analytics reviews JSON: %w", err)
+	}
 	return nil
 }
