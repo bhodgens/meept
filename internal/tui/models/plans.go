@@ -3,6 +3,7 @@ package models
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -45,6 +46,10 @@ type PlansModel struct {
 	rejectInput       textinput.Model
 	rejectInputActive bool
 	rejectPlanID      string
+	// rejectGateID is set when the prompt is opened from a task-gate row
+	// via "x" (M4 fix). On submit, a non-empty gate id routes to
+	// task.reject; rejectPlanID routes to plan.reject. Mutually exclusive.
+	rejectGateID string
 
 	// fetchPending gates the debounced refresh: true while a
 	// planDebounceMsg tick is in flight (leaf 08 stale-refresh fix).
@@ -209,7 +214,53 @@ func (m *PlansModel) pendingTaskGatesForFilter() []TaskGateApprovalMsg {
 		}
 		out = append(out, g)
 	}
+	// Stable order: the cursor maps positionally into this list (M3), so
+	// the order used for rendering MUST match the order used for lookup.
+	// Map iteration is randomized; sort by task id for determinism.
+	sort.Slice(out, func(i, j int) bool { return out[i].TaskID < out[j].TaskID })
 	return out
+}
+
+// gatesForCursor returns the visible gate rows in the same sorted order
+// updatePlansTable renders them. Holding sessionMu makes the read safe
+// against the event-pump writer.
+func (m *PlansModel) gatesForCursor() []TaskGateApprovalMsg {
+	m.sessionMu.Lock()
+	defer m.sessionMu.Unlock()
+	return m.pendingTaskGatesForFilter()
+}
+
+// selectedGate reports the synthetic gate row under the current table
+// cursor, if any. Gate rows are the first len(gates) rows of the merged
+// table (M3).
+func (m *PlansModel) selectedGate() (TaskGateApprovalMsg, bool) {
+	gates := m.gatesForCursor()
+	idx := m.table.Cursor()
+	if idx >= 0 && idx < len(gates) {
+		return gates[idx], true
+	}
+	return TaskGateApprovalMsg{}, false
+}
+
+// syncSelectionFromCursor maps the merged-table cursor onto the plan
+// slice. The first len(gates) rows are synthetic task-gate rows that do
+// NOT exist in filterPlans(), so a plan at merged position idx lives at
+// filterPlans()[idx-len(gates)]. When the cursor is on a gate row the
+// plan selection is cleared: a/v/c/d must never act on a plan while a
+// gate row is focused (M3).
+func (m *PlansModel) syncSelectionFromCursor() {
+	gates := m.gatesForCursor()
+	planIdx := m.table.Cursor() - len(gates)
+	if planIdx < 0 {
+		m.selected = nil
+		return
+	}
+	filtered := m.filterPlans()
+	if planIdx >= len(filtered) {
+		m.selected = nil
+		return
+	}
+	m.selected = &filtered[planIdx]
 }
 
 // PlanActionMsg carries the result of a plan action (approve/reject/etc.).
@@ -231,6 +282,7 @@ type planRejectInputMsg struct {
 // goroutine; the RPC call runs on the commands goroutine).
 type planRejectSubmittedMsg struct {
 	planID string
+	gateID string // non-empty => task-gate reject (task.reject), not plan.reject
 	reason string
 }
 
@@ -371,6 +423,9 @@ func (m *PlansModel) Update(msg tea.Msg) tea.Cmd {
 
 	case planRejectSubmittedMsg:
 		m.rejectInputActive = false
+		if msg.gateID != "" {
+			return m.rejectGate(msg.gateID, msg.reason)
+		}
 		return m.rejectPlan(msg.planID, msg.reason)
 
 	case planDebounceMsg:
@@ -400,13 +455,16 @@ func (m *PlansModel) Update(msg tea.Msg) tea.Cmd {
 			case KeyEnter:
 				reason := m.rejectInput.Value()
 				planID := m.rejectPlanID
+				gateID := m.rejectGateID
 				m.rejectPlanID = ""
+				m.rejectGateID = ""
 				return func() tea.Msg {
-					return planRejectSubmittedMsg{planID: planID, reason: reason}
+					return planRejectSubmittedMsg{planID: planID, gateID: gateID, reason: reason}
 				}
 			case KeyEsc:
 				m.rejectInputActive = false
 				m.rejectPlanID = ""
+				m.rejectGateID = ""
 				return nil
 			}
 			var cmd tea.Cmd
@@ -457,6 +515,25 @@ func (m *PlansModel) Update(msg tea.Msg) tea.Cmd {
 			}
 			return nil
 
+		case "x":
+			// Task-gate banner key (06-planning/01, M4 fix): the banner
+			// advertises "x: reject (never executes)" for a gate row, so
+			// pressing x on a gate row must route to task.reject — NOT
+			// plan.reject, and never anything that executes the task.
+			// The gate's reject uses the same optional-reason prompt as
+			// "d"; the submitted message records the gate kind so the
+			// reject command targets the right RPC. On a plan row x is
+			// inert (d remains the plan-reject key).
+			gate, ok := m.selectedGate()
+			if !ok {
+				return nil
+			}
+			m.rejectGateID = gate.TaskID
+			m.rejectPlanID = ""
+			return func() tea.Msg {
+				return planRejectInputMsg{active: true}
+			}
+
 		case "?":
 			m.showingHelp = true
 			return nil
@@ -468,14 +545,20 @@ func (m *PlansModel) Update(msg tea.Msg) tea.Cmd {
 			return nil
 
 		case "a":
-			// Approve selected plan
+			// Approve: route by row kind. A gate row approves the TASK
+			// (task.approve); a plan row approves the PLAN. The cursor
+			// indexes the merged table (gates first), so selecting via
+			// m.selected alone used to act on the wrong target (M3).
+			if gate, ok := m.selectedGate(); ok {
+				return m.approveGate(gate.TaskID)
+			}
 			if m.selected != nil {
 				return m.approvePlan(m.selected.ID)
 			}
 			return nil
 
 		case "v":
-			// Revise selected plan
+			// Revise selected plan (gate rows have no revise action).
 			if m.selected != nil {
 				return m.revisePlan(m.selected.ID)
 			}
@@ -489,14 +572,14 @@ func (m *PlansModel) Update(msg tea.Msg) tea.Cmd {
 			return nil
 
 		case KeyEnter:
-			// Open detail modal
-			if len(m.plans) > 0 {
-				filtered := m.filterPlans()
-				idx := m.table.Cursor()
-				if idx >= 0 && idx < len(filtered) {
-					m.selected = &filtered[idx]
-					m.showingDetail = true
-				}
+			// Open detail modal. The cursor indexes the MERGED table
+			// (gate rows first), so a plain filterPlans()[cursor] picked
+			// the wrong plan whenever gate rows were present (M3).
+			// syncSelectionFromCursor does the offset-aware mapping and
+			// refuses to select a plan while the cursor is on a gate row.
+			m.syncSelectionFromCursor()
+			if m.selected != nil {
+				m.showingDetail = true
 			}
 			return nil
 
@@ -509,12 +592,9 @@ func (m *PlansModel) Update(msg tea.Msg) tea.Cmd {
 			// Let table handle navigation
 			var cmd tea.Cmd
 			m.table, cmd = m.table.Update(msg)
-			// Update selection as we navigate
-			idx := m.table.Cursor()
-			filtered := m.filterPlans()
-			if idx >= 0 && idx < len(filtered) {
-				m.selected = &filtered[idx]
-			}
+			// Update selection as we navigate (offset-aware: gate rows
+			// occupy the first m.gateVisible positions).
+			m.syncSelectionFromCursor()
 			return cmd
 		}
 	}
@@ -529,6 +609,28 @@ func (m *PlansModel) approvePlan(planID string) tea.Cmd {
 	return func() tea.Msg {
 		_, err := m.rpc.Call("plan.approve", map[string]any{"plan_id": planID})
 		return PlanActionMsg{PlanID: planID, Action: "approve", Err: err}
+	}
+}
+
+// approveGate approves the strategic task parked at the gate (06-planning
+// C2): task.approve{task_id}. It never touches the plan store.
+func (m *PlansModel) approveGate(taskID string) tea.Cmd {
+	return func() tea.Msg {
+		_, err := m.rpc.Call("task.approve", map[string]any{"task_id": taskID})
+		return PlanActionMsg{PlanID: taskID, Action: "approve_task", Err: err}
+	}
+}
+
+// rejectGate rejects the strategic task parked at the gate (06-planning
+// C2): task.reject{task_id, reason}. Rejection NEVER executes the task.
+func (m *PlansModel) rejectGate(taskID, reason string) tea.Cmd {
+	return func() tea.Msg {
+		params := map[string]any{"task_id": taskID}
+		if reason != "" {
+			params["reason"] = reason
+		}
+		_, err := m.rpc.Call("task.reject", params)
+		return PlanActionMsg{PlanID: taskID, Action: "reject_task", Err: err}
 	}
 }
 

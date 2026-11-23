@@ -131,7 +131,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 				}
 			}
 		}
-		return chatWithSession(client, chatSessionID, message)
+		return chatWithSessionWithProject(client, chatSessionID, message, projectID, projectPath)
 	}
 
 	// CASE 2: --session without message - open TUI to that session
@@ -368,12 +368,25 @@ func applyNoFenceToSession(client transport.Client, sessionID string) error {
 	return nil
 }
 
-// chatWithSession sends a message to an existing session after validating it exists.
+// chatWithSession sends a message to an existing session after validating it
+// exists. It is the thin no-project wrapper used by callers that have no
+// resolved project binding; the --session-create + --project path goes through
+// chatWithSessionWithProject so the resolved project reaches session.create.
+func chatWithSession(client transport.Client, sessionID, message string) error {
+	return chatWithSessionWithProject(client, sessionID, message, "", "")
+}
+
+// chatWithSessionWithProject is chatWithSession with the project binding
+// resolved by runChat. projectID/projectPath must be the RESOLVED values from
+// resolveProjectByName (not the raw --project flag name); the daemon looks up
+// project_id by ID at session.create, so passing the name silently drops the
+// binding and leaves the session bound to the CWD.
 //
 // 09-cli-affordances task 4: a missing session is a hard error whose text
 // suggests --session-create (typo safety — never auto-create). With the
-// flag set, the named session is created via session.create before send.
-func chatWithSession(client transport.Client, sessionID, message string) error {
+// flag set, the named session is created via session.create before send,
+// carrying both resolved project fields.
+func chatWithSessionWithProject(client transport.Client, sessionID, message, projectID, projectPath string) error {
 	// Verify session exists
 	getParams := map[string]string{"id": sessionID}
 	rawResult, err := client.Call("session.get", getParams)
@@ -398,7 +411,7 @@ func chatWithSession(client transport.Client, sessionID, message string) error {
 		if !chatSessionCreate {
 			return fmt.Errorf("session %q not found; pass --session-create to create it on first use", sessionID)
 		}
-		sid, cerr := createFlaggedSession(client, sessionID, projectIDForCreate(), projectPathForCreate(), chatNoFence)
+		sid, cerr := createFlaggedSession(client, sessionID, projectID, projectPath, chatNoFence)
 		if cerr != nil {
 			return fmt.Errorf("failed to create session %q (--session-create): %w", sessionID, cerr)
 		}
@@ -417,23 +430,6 @@ func chatWithSession(client transport.Client, sessionID, message string) error {
 		return err
 	}
 	return submitChatTurn(client, message, sessionID, opts)
-}
-
-// projectIDForCreate resolves the --project flag for a --session-create
-// call. Returns "" when --project is unset (the daemon then binds the
-// client CWD per the session-binding contract).
-func projectIDForCreate() string {
-	if chatProject == "" {
-		return ""
-	}
-	return chatProject
-}
-
-// projectPathForCreate mirrors projectIDForCreate for the path half. The
-// real resolution happened in runChat (F-04), which mutates chatCwd; the
-// path is carried through chatCwd, so the create path reuses it.
-func projectPathForCreate() string {
-	return ""
 }
 
 // runChatTurn executes one async chat turn and returns the reply text for

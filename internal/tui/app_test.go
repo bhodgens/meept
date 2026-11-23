@@ -59,6 +59,25 @@ func createTestApp() *App {
 	return app
 }
 
+// H1 regression (2026-11-22 bughunt): NewApp used to omit the sessions
+// sub-model, so the first auto-sent tea.WindowSizeMsg dereferenced a nil
+// *SessionsModel in App.Update (a.sessions.SetSize) and crashed startup.
+func TestNewApp_WindowSizeDoesNotPanic(t *testing.T) {
+	app := NewApp("/tmp/meept-test-nonexistent.sock", "")
+	if app == nil {
+		t.Fatal("NewApp returned nil")
+	}
+	if app.sessions == nil {
+		t.Fatal("NewApp left the sessions model uninitialized (H1)")
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("NewApp(...).Update(WindowSizeMsg) panicked: %v", r)
+		}
+	}()
+	app.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+}
+
 func TestApp_Init(t *testing.T) {
 	app := createTestApp()
 

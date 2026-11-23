@@ -358,6 +358,11 @@ func NewApp(socketPath string, cwd string) *App {
 			ScrollSpeed:       clientConfig.Chat.ScrollSpeed,
 			LivenessTimeout:   time.Duration(clientConfig.Chat.LivenessTimeoutSeconds) * time.Second,
 		}),
+		// H1 (2026-11-22 bughunt): this field was dropped by cd3c3962 while
+		// all production uses remained, so the first startup WindowSizeMsg
+		// dereferenced a nil *SessionsModel. Keep it alongside the other
+		// sub-model constructors.
+		sessions:         models.NewSessionsModel(rpc),
 		tasks:            models.NewTasksModel(rpc),
 		queue:            models.NewQueueModel(rpc),
 		memory:           models.NewMemoryModel(rpc),
