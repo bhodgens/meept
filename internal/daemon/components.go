@@ -4753,6 +4753,13 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// the setter, the same pattern the TacticalScheduler uses
 			// just below — the store handle is fully built by this point.
 			reviewManager.SetSessionStore(c.SessionStore)
+			// C3 blame wiring (leaf 02-trace-stamping): the review emitter
+			// resolves reviewed_model_id through Store.ResolveReviewedModel
+			// off the step-scoped trace. Late-armed: MetricsStore is built
+			// earlier in boot (degrading to nil when its open fails) and
+			// this block composes the manager. Nil store => the payload
+			// keeps the configured model ref (fallback-only posture).
+			reviewManager.SetMetricsStore(c.MetricsStore)
 
 			// Create escalation manager for automatic re-planning on failures
 			c.EscalationManager = agent.NewEscalationManager(agent.EscalationManagerConfig{
@@ -11321,13 +11328,34 @@ func (p *AgentJobProcessor) resolveStepWorkingDir(job *queue.Job) string {
 // serves (agent id absent from the registry, or step job without an agent id),
 // and the old `agentLoop.SetAutonomous(true)` was a one-way latch: after a
 // single step job every later interactive chat turn wrote files directly,
-// bypassing the pending-change preview/accept workflow (audit 2026-09-12, F14).
-// Nothing on the loop is mutated, so no cleanup can be missed.
+// bypassing the pending-change preview/accept workflow (audit 2026-09-12,
+// F14). Nothing on the loop is mutated, so no cleanup can be missed.
 func stepJobTurnContext(ctx context.Context, isStepJob bool) context.Context {
 	if !isStepJob {
 		return ctx
 	}
 	return tools.ContextWithAutonomous(ctx)
+}
+
+// stepJobTraceContext stamps the STEP-SCOPED trace id onto a step job's turn
+// context -- leaf 02 of model-rating-metrics-plan (contract C3, the stamping
+// half of the serving-model join). The trace is exactly "stp-"+stepID: the
+// loop's existing seam (internal/agent/loop.go, TraceIDFromContext ->
+// llm.WithTraceID) threads it onto every implementer LLM call, and
+// ReviewManager.enrichedReviewPayload joins the blame rule
+// (metrics.Store.ResolveReviewedModel) against the same id.
+//
+// Request-scoped like its sibling above: the value lives on the JOB'S
+// CONTEXT (agent.WithTraceContext, the same channel the turn mint seam in
+// handler.go uses), never on the loop -- the loop object is shared by
+// concurrent turns and jobs. An empty step id returns ctx unchanged (the
+// tracectx guard: no scope = no sentinel value), mirroring the
+// pre-leaf posture for non-step jobs and payload-less dispatches.
+func stepJobTraceContext(ctx context.Context, stepID string) context.Context {
+	if stepID == "" {
+		return ctx
+	}
+	return agent.WithTraceContext(ctx, "stp-"+stepID)
 }
 
 // Process executes a job using the appropriate agent loop.
@@ -11490,6 +11518,16 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 	// pending-change preview for every later chat turn (audit 2026-09-12,
 	// F14). Context scope is per-turn and cannot leak.
 	ctx = stepJobTurnContext(ctx, isStepJob)
+
+	// Step-scoped trace (leaf 02, model-rating-metrics-plan C3): stamp
+	// "stp-"+stepID on the JOB'S ctx so the loop's seam threads it onto
+	// every implementer LLM call (llm.WithTraceID -> llm_calls.trace_id)
+	// and the review emitter's blame join resolves the serving model from
+	// the same id. Empty step id leaves the ctx unchanged. MUST sit before
+	// the RunOnce below and beside (not inside) stepJobTurnContext: the
+	// judge lane (ReviewStep) never receives this ctx, so its calls stay
+	// structurally excluded from the blame join by agent_id + trace.
+	ctx = stepJobTraceContext(ctx, stepPayload.StepID)
 
 	// Build prompt and conversation ID with context
 	var prompt, conversationID string

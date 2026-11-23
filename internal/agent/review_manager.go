@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/internal/modelrating"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/task"
@@ -51,6 +52,16 @@ type ReviewManager struct {
 	// code-shaped half). Nil = no session context: the reviewer loop keeps
 	// whatever dir it has and the denial log still names the path.
 	sessionStore SessionStoreReader
+
+	// metricsStore is the app-level metrics store the blame wiring (C3,
+	// leaf 02-trace-stamping) resolves reviewed_model_id through:
+	// ResolveReviewedModel(traceID, stepAgentID) reads the implementer's
+	// llm_calls rows off the step-scoped trace. Late-wired via
+	// SetMetricsStore (the same pattern as SetSessionStore) because the
+	// store handle is built before the orchestrator wiring block that
+	// constructs this manager. Nil = the payload falls back to the agent's
+	// configured model ref alone (the pre-leaf posture).
+	metricsStore *metrics.Store
 }
 
 // ReviewManagerConfig holds configuration for creating a ReviewManager.
@@ -107,6 +118,21 @@ func (rm *ReviewManager) SetSessionStore(store SessionStoreReader) {
 	}
 	rm.mu.Lock()
 	rm.sessionStore = store
+	rm.mu.Unlock()
+}
+
+// SetMetricsStore wires (or replaces) the metrics store used by the C3
+// blame wiring (leaf 02-trace-stamping): reviewed_model_id resolves through
+// Store.ResolveReviewedModel off the step-scoped trace. Late-armed by the
+// daemon (components.go) because the store handle exists before this
+// manager but the orchestrator block composes both. Nil-safe per the repo
+// setter convention: nil keeps the current store (fallback-only posture).
+func (rm *ReviewManager) SetMetricsStore(store *metrics.Store) {
+	if rm == nil || store == nil {
+		return
+	}
+	rm.mu.Lock()
+	rm.metricsStore = store
 	rm.mu.Unlock()
 }
 
@@ -990,11 +1016,50 @@ func (rm *ReviewManager) reviewEmitterIdentities(stepID, taskID, judgeAgentID st
 // enrichedReviewPayload builds the C4 payload map shared by BOTH review
 // topics (step.review_completed and task.review_completed must carry
 // identical payloads). isFinal is terminal-finality of THIS pass:
-// needs_info is never final; approved/rejected are. trace_id stays ""
-// until leaf 02 stamps it (the key exists from day one).
+// needs_info is never final; approved/rejected are.
+//
+// C3 blame wiring (leaf 02-trace-stamping): trace_id is the step-scoped
+// stamp "stp-"+stepID — the id the step job's ctx carried (components.go
+// stepJobTraceContext), so the implementer's llm_calls rows are joined by
+// it. reviewed_model_id resolves via Store.ResolveReviewedModel(traceID,
+// stepAgentID) — the FINAL SUCCESSFUL row, never an error row; the
+// modelRefForAgent value is a FALLBACK for when the join returns "" (no
+// stamped rows: legacy steps, metrics store unavailable/nil). The trace id
+// itself is always stamped on the payload verbatim, join hit or not.
 func (rm *ReviewManager) enrichedReviewPayload(stepID, taskID string, result *ReviewResult, revisionCount int) map[string]any {
 	isFinal := result.Status != ReviewNeedsInfo
 	reviewedModelID, judgeModelID, orchestratorAgentID, orchestratorModelID := rm.reviewEmitterIdentities(stepID, taskID, result.ReviewerID)
+	// C3: the step-scoped trace id mirrors the stamp the implementer's
+	// calls ran under. An empty step id keeps "" (never a bare "stp-"
+	// sentinel — the tracectx guard's shape).
+	stepTraceID := ""
+	if stepID != "" {
+		stepTraceID = "stp-" + stepID
+		// Blame rule: the implementer's FINAL SUCCESSFUL row for
+		// (stepTraceID, step.AgentID). Join miss ("" result, store error,
+		// or no store) keeps the configured model ref from
+		// reviewEmitterIdentities — a fallback, never a replacement.
+		if rm.metricsStore != nil {
+			var stepAgentID string
+			if rm.stepStore != nil {
+				if step, err := rm.stepStore.GetByID(stepID); err == nil && step != nil {
+					stepAgentID = step.AgentID
+				}
+			}
+			if stepAgentID != "" {
+				if resolved, err := rm.metricsStore.ResolveReviewedModel(stepTraceID, stepAgentID); err == nil && resolved != "" {
+					reviewedModelID = resolved
+				} else if err != nil {
+					rm.logger.Debug("blame join failed; keeping configured model ref",
+						"step_id", stepID,
+						"trace_id", stepTraceID,
+						"agent_id", stepAgentID,
+						"error", err,
+					)
+				}
+			}
+		}
+	}
 	return map[string]any{
 		KeyStepID:               stepID,
 		KeyTaskID:               taskID,
@@ -1009,7 +1074,7 @@ func (rm *ReviewManager) enrichedReviewPayload(stepID, taskID string, result *Re
 		"judge_model_id":        judgeModelID,
 		"orchestrator_agent_id": orchestratorAgentID,
 		"orchestrator_model_id": orchestratorModelID,
-		"trace_id":              "",
+		"trace_id":              stepTraceID,
 		"cycle":                 revisionCount,
 		"is_final":              isFinal,
 	}
