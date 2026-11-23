@@ -916,6 +916,20 @@ func (s *StepStore) PromoteReadySteps(taskID string) ([]*TaskStep, error) {
 		stateMap[step.ID] = step.State
 	}
 
+	// Rejections already resolved by a successful revision (07-bench/12):
+	// a successfully-terminal revision step resolves the rejection of its
+	// OWN original (the LAST DependsOn entry -- the same CreateRevision
+	// edge M5 keys on). Mirrors AreAllCompleted's resolution rule so
+	// promotion and completion checks cannot disagree: without this set a
+	// plain sibling step depending on the rejected original stays pending
+	// forever after the revision is approved and the task never finalizes.
+	resolvedRejected := make(map[string]bool)
+	for _, step := range allSteps {
+		if step.State.IsSuccessfullyTerminal() && IsRevisionStep(step.ID) && len(step.DependsOn) > 0 {
+			resolvedRejected[step.DependsOn[len(step.DependsOn)-1]] = true
+		}
+	}
+
 	var promoted []*TaskStep
 	for _, step := range allSteps {
 		if step.State != StepPending {
@@ -929,7 +943,7 @@ func (s *StepStore) PromoteReadySteps(taskID string) ([]*TaskStep, error) {
 		// Revision exception (2026-09-07): a revision step depends on its
 		// rejected original BY DESIGN (CreateRevision appends original.ID).
 		// AreAllCompleted already treats a rejected step as resolved once a
-		// successful revision exists, so promotion must too — otherwise the
+		// successful revision exists, so promotion must too -- otherwise the
 		// revision waits on a dep that IsSuccessfullyTerminal never accepts
 		// and the revision chain is unschedulable. Failed deps still block
 		// everything, including revisions.
@@ -943,6 +957,25 @@ func (s *StepStore) PromoteReadySteps(taskID string) ([]*TaskStep, error) {
 		// DIFFERENT, unrelated rejected step stays blocked (per the M5
 		// finding); AreAllCompleted likewise resolves only own-original
 		// rejections. Failed deps still block everything.
+		//
+		// u-steer stall fix (07-bench/12, run 7 task 0008): M5's scoping
+		// resolved the rejection for the REVISION ONLY. A PLAIN sibling
+		// step whose dependency is a rejected original WITH a successful
+		// revision stayed pending forever: IsSuccessfullyTerminal(rejected)
+		// is false for every non-revision dependent, so the step never
+		// promoted, AreAllCompleted stayed false (a pending step is not
+		// terminal), allStepsTerminalWithFailures stayed false, and the
+		// task never finalized -- the turn was reaped by the watchdog at
+		// +10m. Live evidence: run 7 u-steer-midrun (plan steps 1/2 pending
+		// on rejected step-0; rev-1001 approved 23:48:28; no Task
+		// finalized; turn reaped 23:58:44). The rule now mirrors
+		// AreAllCompleted exactly: a rejected dep is resolved when a
+		// successful revision of THAT dep exists, for EVERY dependent.
+		// resolvedRejected below is built from the same own-original edge
+		// M5 uses (last DependsOn entry of a successfully-terminal
+		// revision step), so an unrelated rejected step with no successful
+		// revision still blocks everything, and failed deps still block
+		// everything.
 		// KNOWN LIMITATION (reported): a rev-of-rev chain (rev2 of orig
 		// inherits deps [orig, rev1], both rejected) is blocked by orig —
 		// the current review pipeline is single-shot so this shape does
@@ -957,8 +990,15 @@ func (s *StepStore) PromoteReadySteps(taskID string) ([]*TaskStep, error) {
 		for _, depID := range step.DependsOn {
 			depState, ok := stateMap[depID]
 			if !ok || !depState.IsSuccessfullyTerminal() {
-				if isRevision && ok && depState == StepRejected && depID == lastDep {
-					continue // revision may proceed past its own rejected original
+				if depState == StepRejected {
+					// A rejected dep is passable when a successful revision
+					// of THAT dep exists (any dependent), or when THIS step
+					// is the dep's own revision still waiting to run (the
+					// M5 own-original rule; the revision itself has not
+					// executed yet, so it cannot appear in resolvedRejected).
+					if resolvedRejected[depID] || (isRevision && depID == lastDep) {
+						continue
+					}
 				}
 				allDepsCompleted = false
 				break

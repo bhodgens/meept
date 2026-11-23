@@ -213,3 +213,119 @@ func TestStepStore_PromoteReadySteps_RevisionPastOriginal_WithCompletedExtraDep(
 		t.Fatalf("revision with own-original-last not promoted: %v", promoted)
 	}
 }
+
+// TestStepStore_PromoteReadySteps_SiblingsPastRejectedOriginalWithApprovedRevision
+// is the 07-bench/12 u-steer stall regression (run 7 task 0008): step-0 was
+// rejected, its revision was APPROVED, and the plan's PENDING sibling steps
+// (1 and 2) depending on step-0 were never promoted -- AreAllCompleted and
+// allStepsTerminalWithFailures both resolve the rejection via the successful
+// revision, but promotion (the only thing that can terminalize the siblings)
+// exempted only the revision itself. The siblings stayed pending forever, no
+// step ever terminalized again, and the task never finalized (turn reaped by
+// the watchdog at +10m). Promotion must mirror AreAllCompleted: a rejection
+// with a successful revision is resolved for EVERY dependent.
+func TestStepStore_PromoteReadySteps_SiblingsPastRejectedOriginalWithApprovedRevision(t *testing.T) {
+	store := newTestStepStore(t)
+
+	orig := NewTaskStep("task-stall", "original work", 0)
+	orig.ID = "step-stall-orig"
+	if err := store.Create(orig); err != nil {
+		t.Fatalf("create original: %v", err)
+	}
+	if err := store.SetState(orig.ID, StepRejected); err != nil {
+		t.Fatalf("set rejected: %v", err)
+	}
+
+	// The approved revision of the rejected original (own-original edge last).
+	rev := NewTaskStep("task-stall", "revision work", 1000)
+	rev.ID = "step-task-stall-rev-1001-abc123"
+	rev.DependsOn = []string{orig.ID}
+	if err := store.Create(rev); err != nil {
+		t.Fatalf("create revision: %v", err)
+	}
+	if err := store.SetState(rev.ID, StepApproved); err != nil {
+		t.Fatalf("set revision approved: %v", err)
+	}
+
+	// Sibling plan steps pending on the rejected original -- the stall shape.
+	sib1 := NewTaskStep("task-stall", "downstream work 1", 1)
+	sib1.ID = "step-stall-1"
+	sib1.DependsOn = []string{orig.ID}
+	if err := store.Create(sib1); err != nil {
+		t.Fatalf("create sibling 1: %v", err)
+	}
+	sib2 := NewTaskStep("task-stall", "downstream work 2", 2)
+	sib2.ID = "step-stall-2"
+	sib2.DependsOn = []string{orig.ID}
+	if err := store.Create(sib2); err != nil {
+		t.Fatalf("create sibling 2: %v", err)
+	}
+
+	promoted, err := store.PromoteReadySteps("task-stall")
+	if err != nil {
+		t.Fatalf("PromoteReadySteps: %v", err)
+	}
+	got := map[string]bool{}
+	for _, p := range promoted {
+		got[p.ID] = true
+	}
+	for _, id := range []string{sib1.ID, sib2.ID} {
+		if !got[id] {
+			t.Errorf("sibling %s not promoted past rejection resolved by approved revision (stall shape)", id)
+		}
+	}
+	if got[rev.ID] {
+		t.Errorf("already-approved revision must not be re-promoted: %v", promoted)
+	}
+
+	// And the completion checks now agree with promotion: all terminal.
+	allDone, err := store.AreAllCompleted("task-stall")
+	if err != nil {
+		t.Fatalf("AreAllCompleted: %v", err)
+	}
+	if allDone {
+		t.Errorf("AreAllCompleted must still be false: siblings are ready, not terminal")
+	}
+}
+
+// TestStepStore_PromoteReadySteps_SiblingStillBlockedByRejectedWithoutRevision
+// pins the boundary of the stall fix: without a successful revision, a
+// rejected dep still blocks its dependents (the M5/no-free-promotion rule).
+func TestStepStore_PromoteReadySteps_SiblingStillBlockedByRejectedWithoutRevision(t *testing.T) {
+	store := newTestStepStore(t)
+
+	orig := NewTaskStep("task-norev", "original work", 0)
+	orig.ID = "step-norev-orig"
+	if err := store.Create(orig); err != nil {
+		t.Fatalf("create original: %v", err)
+	}
+	if err := store.SetState(orig.ID, StepRejected); err != nil {
+		t.Fatalf("set rejected: %v", err)
+	}
+
+	sib := NewTaskStep("task-norev", "downstream work", 1)
+	sib.ID = "step-norev-1"
+	sib.DependsOn = []string{orig.ID}
+	if err := store.Create(sib); err != nil {
+		t.Fatalf("create sibling: %v", err)
+	}
+
+	// A REJECTED revision does not resolve anything: only a successful one.
+	rev := NewTaskStep("task-norev", "rejected revision", 1000)
+	rev.ID = "step-task-norev-rev-1001-abc123"
+	rev.DependsOn = []string{orig.ID}
+	if err := store.Create(rev); err != nil {
+		t.Fatalf("create revision: %v", err)
+	}
+	if err := store.SetState(rev.ID, StepRejected); err != nil {
+		t.Fatalf("set revision rejected: %v", err)
+	}
+
+	promoted, err := store.PromoteReadySteps("task-norev")
+	if err != nil {
+		t.Fatalf("PromoteReadySteps: %v", err)
+	}
+	if len(promoted) != 0 {
+		t.Fatalf("sibling promoted past rejection with NO successful revision: %v", promoted)
+	}
+}
