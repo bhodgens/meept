@@ -753,6 +753,12 @@
   "mcp": {
     "enabled": false,
     "config_file": "~/.meept/mcp_servers.json5",
+    // Issue #167: default-on npm/PyPI version check. Once at boot and every
+    // 24h, pinned npx/uvx versions are compared with the latest published;
+    // an outdated pin is reported via the SecurityNotify seam. This never
+    // rewrites mcp_servers.json5 or auto-updates anything. Set false to opt out.
+    "check_mcp_updates": true,
+    "mcp_update_check_interval_hours": 24,
   },
 
   // ACP (Agent Client Protocol) client configuration
@@ -1708,4 +1714,32 @@
       "enabled": false,
     },
   },
+
+  // Runtime execution backends and macOS confinement. The block is shipped
+  // COMMENTED: the zero value (no block at all) is byte-identical to the
+  // legacy posture, where the daemon builds no runtime manager and the shell
+  // tool execs directly (internal/daemon/components.go:3916 gates the whole
+  // manager on cfg.Runtime.Enabled).
+  // seatbelt is darwin-only: enabled=true on Linux/Windows, or a relative
+  // path in any *_read/*_write/deny_exec rule, is a STARTUP error that lands
+  // the shell tool on the REFUSING backend. Rules are absolute paths only.
+  // Docs: docs/workflows/seatbelt-confinement.md, docs/concepts/runtime.md.
+  // drift: commented template block; absent from installed homes by design
+  // (a commented block yields no template leaf, so the parser cannot compare
+  // these keys; the correct-by-schema annotation below is what keeps an
+  // operator who DOES add them from failing the drift run).
+  // drift: correct-by-schema: runtime.seatbelt.* -> opt-in confinement added
+  // after older installs; absent = confinement off, legacy network-class-only
+  // posture. An install that adds these keys is ahead of the template, not
+  // broken (scripts/config-drift-check.py, correct-by-schema classification).
+  // "runtime": {
+  //   "seatbelt": {
+  //     "enabled": false,
+  //     "deny_read": [],               // absolute subtrees the child cannot read
+  //     "allow_write": [],             // non-empty = writes confined to these subtrees
+  //     "deny_write": [],              // write-denied holes inside an allowed root
+  //     "block_process_info": false,   // true denies ps-style process inspection
+  //     "deny_exec": [],               // absolute binaries the child may not exec
+  //   },
+  // },
 }
