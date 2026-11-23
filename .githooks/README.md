@@ -40,7 +40,7 @@ writing its own output file, and every gate's full output is replayed in
 `[n/21]` numbered order after the join, so the transcript still reads like
 the old serial chain. Check 16 (`pre-commit-feature-docs`) is the only
 gate that can PROMPT the user (aider y/n) — it runs serially AFTER the
-parallel join with the real TTY. Check [0/20] (`pre-commit-worktreecfg`)
+parallel join with the real TTY. Check [0/21] (`pre-commit-worktreecfg`)
 stays the serial pre-flight. Any blocking gate failing => exit 1 (gates
 14/15 are report-only and never block). Escape hatches unchanged:
 `--no-verify`, and `MEEPT_PARALLEL_HOOKS=0` restores the old strictly
@@ -64,7 +64,7 @@ blobs via `git show :path` / the index and need no tree. If the snapshot
 cannot be built the dispatcher prints a loud WARN and falls back to
 working-tree mode — the mechanism itself never blocks a commit.
 
-The numbers below are the `[n/20]` labels `.githooks/pre-commit` prints:
+The numbers below are the `[n/21]` labels `.githooks/pre-commit` prints:
 
 | # | Hook | Purpose | Mode |
 |---|------|---------|------|

@@ -51,7 +51,7 @@
 #     It runs AFTER the parallel join, serially, with the real TTY on
 #     stdin — never concurrently with stdin shared.
 #
-# Pre-flight [0/20]: pre-commit-worktreecfg repairs a core.bare=true flip. It
+# Pre-flight [0/21]: pre-commit-worktreecfg repairs a core.bare=true flip. It
 # runs BEFORE everything because that flip breaks `go build -buildvcs`
 # ("error obtaining VCS status: exit status 128"), which would abort gate 1
 # (and the snapshot build).
@@ -129,12 +129,12 @@ fi
 
 # 0. worktree config guard (core.bare=true self-heal) — PRE-FLIGHT, before
 # everything. WHY first: a bare-config flip makes `go build` fail with
-# "error obtaining VCS status: exit status 128", so gate [1/20]
+# "error obtaining VCS status: exit status 128", so gate [1/21]
 # pre-commit-build would abort the chain (and the snapshot build).
-echo -e "\e[34m[0/20]\e[0m Checking worktree configuration (core.bare guard)..."
+echo -e "\e[34m[0/21]\e[0m Checking worktree configuration (core.bare guard)..."
 if ! "$SCRIPT_DIR/pre-commit-worktreecfg"; then
     # Old chain had `set -e`: a failing pre-flight aborted everything.
-    echo -e "\e[31m❌ pre-commit blocked at [0/20] worktree configuration guard\e[0m"
+    echo -e "\e[31m❌ pre-commit blocked at [0/21] worktree configuration guard\e[0m"
     exit 1
 fi
 
@@ -255,7 +255,7 @@ fi
 # drive aider interactively; it must never share stdin concurrently with
 # the parallel batch (gates-speedup item 4: promptable gate stays serial).
 # --------------------------------------------------------------------------
-echo -e "\e[34m[16/20]\e[0m Verifying feature documentation..."
+echo -e "\e[34m[16/21]\e[0m Verifying feature documentation..."
 if ! (cd "$REPO_ROOT" && "$SCRIPT_DIR/pre-commit-feature-docs"); then
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

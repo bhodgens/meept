@@ -120,11 +120,11 @@ EOF
         echo ""
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         if [ "$rc" = "0" ]; then
-            echo -e "${C_BLU}[$idx/20]${C_RST} $label — ${C_GRN}PASS${C_RST}"
+            echo -e "${C_BLU}[$idx/21]${C_RST} $label — ${C_GRN}PASS${C_RST}"
         elif [ "$blocking" = "0" ]; then
-            echo -e "${C_BLU}[$idx/20]${C_RST} $label — ${C_YLW}$verdict${C_RST}"
+            echo -e "${C_BLU}[$idx/21]${C_RST} $label — ${C_YLW}$verdict${C_RST}"
         else
-            echo -e "${C_BLU}[$idx/20]${C_RST} $label — ${C_RED}$verdict${C_RST}"
+            echo -e "${C_BLU}[$idx/21]${C_RST} $label — ${C_RED}$verdict${C_RST}"
         fi
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         cat "$OUT" 2>/dev/null || true
@@ -154,19 +154,19 @@ dispatch_serial() {
     while IFS='|' read -r idx name blocking snapshot label; do
         [ -n "$idx" ] || continue
         echo ""
-        echo -e "\e[34m[$idx/20]\e[0m $label"
+        echo -e "\e[34m[$idx/21]\e[0m $label"
         OUT="$WORK/out.$(_pidx "$idx")"
         run_one_hook "$OUT" "$SDIR" "$ROOT" "$SNAP" "$name" "$snapshot"
         rc="$(cat "$OUT.rc" 2>/dev/null || echo '?')"
         cat "$OUT" 2>/dev/null || true
         if [ "$rc" != "0" ]; then
             if [ "$blocking" = "0" ]; then
-                echo "[$idx/20] (report-only gate failed rc=$rc — not blocking)"
+                echo "[$idx/21] (report-only gate failed rc=$rc — not blocking)"
                 continue
             fi
             echo ""
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo -e "\e[31m❌ pre-commit blocked at [$idx/20] $label (exit $rc)\e[0m"
+            echo -e "\e[31m❌ pre-commit blocked at [$idx/21] $label (exit $rc)\e[0m"
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             return 1
         fi
