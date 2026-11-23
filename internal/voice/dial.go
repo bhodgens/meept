@@ -57,7 +57,10 @@ const DefaultDailyDialCap = 0
 // lazily (one row per scope per day the daemon is live). The file is
 // written 0600 and replaced by atomic rename, so a crash mid-write leaves
 // either the old file or the new one (never a truncated one). TryInc
-// serializes read-modify-write under mu.
+// serializes read-modify-write with an OS file lock (flock/LockFileEx) for
+// durable counters and with mu for in-memory counters. No sync.Mutex is
+// held while file I/O runs; the OS lock makes the whole sequence atomic
+// across processes.
 //
 // WHY FILE-BASED AND NOT A SQLite daily_counters TABLE: the three existing
 // SQLite stores and their schema declarations are all OUTSIDE the file set
