@@ -260,6 +260,12 @@ type Server struct {
 	usageDBMu    sync.Mutex
 	usageDB      *metrics.ReadOnlyStore
 
+	// reviewVerdicts supplies the review-verdict aggregates for
+	// GET /api/v1/metrics/reviews (set via WithReviewVerdictProvider,
+	// model-rating-metrics-plan C5). When nil the endpoint degrades to 200
+	// with empty rows.
+	reviewVerdicts ReviewVerdictProvider
+
 	// pairing is the optional first-run pairing handshake (WithPairing).
 	// When nil the /api/v1/pair/* routes do not exist and the middleware
 	// chain is byte-identical to the pre-pairing behavior.
@@ -1671,6 +1677,7 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	// Metrics
 	mux.HandleFunc("GET /api/v1/metrics/live", s.handleLiveMetrics)
 	mux.HandleFunc("GET /api/v1/metrics/historical", s.handleHistoricalMetrics)
+	mux.HandleFunc("GET /api/v1/metrics/reviews", s.handleReviewsMetrics)
 	mux.HandleFunc("GET /api/v1/metrics/stream", s.handleMetricsStream)
 	mux.HandleFunc("GET /api/v1/metrics/rate-limits", s.handleRateLimitSummary)
 	mux.HandleFunc("GET /api/v1/cluster/metrics", s.handleClusterMetrics)

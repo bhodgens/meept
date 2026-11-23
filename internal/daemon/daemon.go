@@ -1906,6 +1906,10 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 				// than falling back to a read-only <meept home>/metrics.db
 				// handle. No-op when the metrics store is disabled (nil).
 				httpOpts = append(httpOpts, http.WithMetricsUsageProvider(wrapper))
+				// Same store backs GET /api/v1/metrics/reviews (model-rating-
+				// metrics-plan C5): the wrapper satisfies ReviewVerdictProvider
+				// so verdict aggregates read the real store too.
+				httpOpts = append(httpOpts, http.WithReviewVerdictProvider(wrapper))
 			}
 			if ds := components.getDispatchSubmitter(); ds != nil {
 				httpOpts = append(httpOpts, http.WithDispatchSubmitter(&httpDispatchSubmitter{rpc: ds}))
@@ -3435,6 +3439,20 @@ func (w *metricsStoreWrapper) AgentUsageSince(ctx context.Context, since time.Ti
 	}
 	return w.store.AgentUsageSince(ctx, since)
 }
+
+// QueryReviewVerdicts reports review-verdict aggregates (model-rating-metrics-
+// plan C2/C5) from the daemon's metrics store, implementing
+// http.ReviewVerdictProvider. Nil-guarded like the usage methods.
+func (w *metricsStoreWrapper) QueryReviewVerdicts(q metrics.ReviewVerdictQuery) ([]metrics.ReviewVerdictRow, error) {
+	if w == nil || w.store == nil {
+		return []metrics.ReviewVerdictRow{}, nil
+	}
+	return w.store.QueryReviewVerdicts(q)
+}
+
+// metricsStoreWrapper must also satisfy the review-verdict provider so the
+// daemon can hand the same instance to http.WithReviewVerdictProvider.
+var _ http.ReviewVerdictProvider = (*metricsStoreWrapper)(nil)
 
 // runtimeMetricsAdapter adapts metrics.Store to implement llm.MetricsRecorder.
 type runtimeMetricsAdapter struct {

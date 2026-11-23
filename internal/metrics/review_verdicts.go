@@ -201,7 +201,14 @@ func (s *Store) QueryReviewVerdicts(q ReviewVerdictQuery) ([]ReviewVerdictRow, e
 	}
 	args := []any{}
 	if !q.Since.IsZero() {
-		query += " WHERE timestamp >= ?"
+		// The non-workflow base query already carries a WHERE clause
+		// (scope != 'workflow'); the time filter must AND into it rather
+		// than open a second WHERE.
+		if q.IncludeWorkflow {
+			query += " WHERE timestamp >= ?"
+		} else {
+			query += " AND timestamp >= ?"
+		}
 		args = append(args, q.Since.UTC().Format(time.RFC3339))
 	}
 	query += " GROUP BY grp ORDER BY grp"
@@ -234,6 +241,28 @@ func (s *Store) QueryReviewVerdicts(q ReviewVerdictQuery) ([]ReviewVerdictRow, e
 		rows = append(rows, r)
 	}
 	return rows, nil
+}
+
+// CountReviewVerdicts returns the total verdict rows matching q (ignoring
+// groupings) — the COUNT half of contract C5: the HTTP endpoint derives
+// workflow_excluded as CountReviewVerdicts(IncludeWorkflow=true) minus the
+// default (workflow-excluding) count. Unlike QueryReviewVerdicts this is a
+// plain COUNT, not a GROUP BY rollup.
+func (s *Store) CountReviewVerdicts(q ReviewVerdictQuery) (int64, error) {
+	query := `SELECT COUNT(*) FROM model_review_verdicts WHERE scope != 'workflow'`
+	if q.IncludeWorkflow {
+		query = `SELECT COUNT(*) FROM model_review_verdicts WHERE 1=1`
+	}
+	args := []any{}
+	if !q.Since.IsZero() {
+		query += " AND timestamp >= ?"
+		args = append(args, q.Since.UTC().Format(time.RFC3339))
+	}
+	var count int64
+	if err := s.db.Get(&count, query, args...); err != nil {
+		return 0, fmt.Errorf("failed to count review verdicts: %w", err)
+	}
+	return count, nil
 }
 
 // FinalVerdictsForStep returns the verdict rows from the step's LAST recorded
