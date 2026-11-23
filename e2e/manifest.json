@@ -313,6 +313,9 @@
       "llm-serving-tiers",
       "dispatch-trace"
     ],
+    "internal/modelrating/": [
+      "model-rating"
+    ],
     "internal/pathutil/": [
       "smoke"
     ],
@@ -907,6 +910,19 @@
       "name": "smoke",
       "dir": "e2e/suites/smoke",
       "status": "implemented"
+    },
+    {
+      "name": "model-rating",
+      "dir": "e2e/suites/model-rating",
+      "status": "todo",
+      "diff": "M",
+      "scenarios": [
+        "grade-capture-01 review verdict with judged identities -> model_review_verdicts rows (rubric/category/severity/judge/cycle)",
+        "retention-01 24h metrics_live sweep + 30d audit purge leave verdict rows intact; RetentionTables() excludes model_review_verdicts",
+        "surface-01 GET /api/v1/metrics/reviews + meept analytics reviews read the same rows (frozen response keys)",
+        "join-proof-01 llm_calls rotation fixture: final successful implementer row blamed; judge-loop calls excluded by agent_id"
+      ],
+      "note": "issue #168 model-rating metrics tree (model-rating-metrics-plan-glm53f): status flips to implemented when e2e/suites/model-rating/ lands (04-ship leaf 01)."
     },
     {
       "name": "turn-journal",
