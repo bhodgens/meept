@@ -65,15 +65,26 @@ func (s *Server) handleSessionTrace(w http.ResponseWriter, r *http.Request) {
 
 	// Normalize the envelope: the RPC result carries {entries, count};
 	// echo the requested id so a client can correlate the call.
+	//
+	// In-process CallMethod returns the handler's Go value directly (typed
+	// structs, e.g. []metrics.DispatchLogEntry), NOT the JSON-decoded
+	// generic form the socket path yields. A raw m["entries"].([]any)
+	// type-assertion therefore silently fails in-process and the envelope
+	// stays empty (dispatch-trace HTTP twin RED while the RPC twin is
+	// green). Round-trip through JSON so both transports normalize to
+	// map[string]any/[]any before the assertion.
 	envelope := map[string]any{
 		"session_id": id,
 		"entries":    []any{},
 		"count":      0,
 	}
-	if m, ok := result.(map[string]any); ok {
-		if entries, ok := m["entries"].([]any); ok {
-			envelope["entries"] = entries
-			envelope["count"] = len(entries)
+	if raw, mErr := json.Marshal(result); mErr == nil {
+		var m map[string]any
+		if uErr := json.Unmarshal(raw, &m); uErr == nil {
+			if entries, ok := m["entries"].([]any); ok {
+				envelope["entries"] = entries
+				envelope["count"] = len(entries)
+			}
 		}
 	}
 

@@ -1796,6 +1796,10 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	// session.dispatch_trace RPC the TUI sessions view (key `t`) and the
 	// CLI `meept session trace` drive, via rpcCall.
 	mux.HandleFunc("GET /api/v1/sessions/{id}/trace", s.handleSessionTrace)
+	// C5 name alias (05-navigation contract): the GUI (sdk_client.dart
+	// getDispatchTrace) and e2e/suites/dispatch-trace pin the
+	// dispatch-trace spelling of the same route. Same handler, two names.
+	mux.HandleFunc("GET /api/v1/sessions/{id}/dispatch-trace", s.handleSessionTrace)
 
 	// Change review endpoints (containment leaf 07): pending changes staged
 	// by write tools for human review, and the journal of applied changes.
