@@ -449,6 +449,7 @@ export AIDER_MODEL=glm-5.2
 | `internal/selfimprove/` | `docs/workflows/self-improvement.md` |
 | `internal/project/` | `docs/workflows/project-context.md` |
 | `internal/daemon/` | `docs/concepts/architecture.md` |
+| `internal/modelrating/` | `docs/workflows/modelrating.md` |
 
 ---
 

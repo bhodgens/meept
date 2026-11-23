@@ -16,7 +16,9 @@ this feature's new surfaces (table columns, API fields, CLI columns) say judge.
 ## How verdicts are captured
 
 1. The model judge grades a reviewed step against the rubric catalog
-   (`internal/modelrating`): rubric ID, category, severity.
+   (`internal/modelrating`): rubric ID, category, severity. Trace-scoped blame
+   wiring (step trace stamp, judge exclusion):
+   `docs/agents/leaf-02-trace-stamping.md`.
 2. `ReviewResult` carries the verdicts; the enriched `step.review_completed`
    bus event adds judged identities (reviewed model id, judge agent/model ids,
    cycle, is_final, trace id).
@@ -52,7 +54,12 @@ the step's `stp-<stepID>` trace; judge-loop calls are excluded by agent_id.
 ## Surfaces
 
 - `GET /api/v1/metrics/reviews?window=24h|7d|30d|all&group_by=model|judge|category|rubric`
-- `meept analytics reviews [--days N] [--group-by X] [--include-workflow]`
+  (a bad window/group_by answers 400; rows carry `group`, `verdicts`, `defects`,
+  `pass_rate`, `label`, and the response includes `workflow_excluded`, the
+  workflow-scope rows omitted from the aggregate)
+- `meept analytics reviews [--days N] [--group-by model|judge|category|rubric]
+  [--include-workflow]` (defaults: `--days 30`, `--group-by model`; rubric
+  rows add a `label` column with the catalog rubric statement)
 - Flutter metrics panel section at `/tools/metrics` (grades by model, by judge)
 - Menubar analytics tab (same data)
 
