@@ -1052,7 +1052,12 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 						// steered text no longer begins with /plan.
 						return d.ClassifyAndRoute(ctx, steer, sessionID, parts, agentOverride, requestModel)
 					}
-					turnResult = &DispatchResult{Response: reply}
+					// Pure toggle (/plan with no steer text): return the status
+					// reply DIRECTLY. Falling through here into the legacy
+					// force-create branch discarded the "plan mode on" reply
+					// and created a spurious plan (goals-plans-03 RED:
+					// "plan created" instead of "plan mode on").
+					return &DispatchResult{Response: reply}, nil
 				}
 			}
 			if d.planManager != nil {
