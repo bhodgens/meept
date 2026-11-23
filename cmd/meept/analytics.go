@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"text/tabwriter"
+	"time"
 
+	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/metrics"
 	"github.com/spf13/cobra"
 
@@ -23,12 +26,14 @@ Commands:
   summary  Show performance summary by agent
   errors   Show error breakdown by type
   models   Compare model performance
+  reviews  Show review verdict rollups (model rating)
   export   Export raw analytics data as JSON`,
 	}
 
 	cmd.AddCommand(newAnalyticsSummaryCmd())
 	cmd.AddCommand(newAnalyticsErrorsCmd())
 	cmd.AddCommand(newAnalyticsModelsCmd())
+	cmd.AddCommand(newAnalyticsReviewsCmd())
 	cmd.AddCommand(newAnalyticsExportCmd())
 
 	return cmd
@@ -501,4 +506,110 @@ func expandUserPath(path string) string {
 		return homeDir
 	}
 	return homeDir + path[1:]
+}
+
+// newAnalyticsReviewsCmd builds the `analytics reviews` subcommand (plan
+// model-rating-metrics-plan, contract C6): a readable verdict rollup table
+// over a day window, straight from the metrics DB.
+func newAnalyticsReviewsCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "reviews",
+		Short: "Show review verdict rollups by model, judge, category, or rubric",
+		Long: `Show review verdict rollups grouped by model, judge, category, or rubric.
+
+Displays:
+- group: The grouped identifier (model id, judge id, category, or rubric id)
+- verdicts: Total review verdicts in the group
+- defects: Verdicts with a non-pass category
+- pass_rate: Fraction of pass-category verdicts
+- label: Rubric statement (group-by rubric only)`,
+		RunE: runAnalyticsReviewsRunE,
+	}
+
+	cmd.Flags().Int("days", 30, "look-back window in days")
+	cmd.Flags().String("group-by", "model", "group rows by model, judge, category, or rubric")
+	cmd.Flags().Bool("include-workflow", false, "include workflow-scope verdicts")
+
+	return cmd
+}
+
+// runAnalyticsReviewsRunE is the cobra RunE for `analytics reviews`; the
+// gate test's runAnalyticsReviews helper drives it through the command tree.
+func runAnalyticsReviewsRunE(cmd *cobra.Command, args []string) error {
+	days, err := cmd.Flags().GetInt("days")
+	if err != nil {
+		return fmt.Errorf("failed to read days flag: %w", err)
+	}
+	groupBy, err := cmd.Flags().GetString("group-by")
+	if err != nil {
+		return fmt.Errorf("failed to read group-by flag: %w", err)
+	}
+	includeWorkflow, err := cmd.Flags().GetBool("include-workflow")
+	if err != nil {
+		return fmt.Errorf("failed to read include-workflow flag: %w", err)
+	}
+
+	store, err := metrics.NewStore(&metrics.StoreConfig{
+		DatabasePath:  config.MeeptPath("metrics.db"),
+		BatchSize:     metrics.DefaultBatchSize,
+		FlushInterval: metrics.DefaultFlushInterval,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to open metrics database: %w", err)
+	}
+	defer store.Close()
+
+	rows, err := store.QueryReviewVerdicts(metrics.ReviewVerdictQuery{
+		Since:           time.Now().UTC().AddDate(0, 0, -days),
+		GroupBy:         groupBy,
+		IncludeWorkflow: includeWorkflow,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to query review verdicts: %w", err)
+	}
+
+	if len(rows) == 0 {
+		fmt.Println("(no verdicts recorded)")
+		return nil
+	}
+
+	// Contract sort: defects DESC, then group ASC.
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].Defects != rows[j].Defects {
+			return rows[i].Defects > rows[j].Defects
+		}
+		return rows[i].Group < rows[j].Group
+	})
+
+	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+	defer w.Flush()
+
+	header := "GROUP\tVERDICTS\tDEFECTS\tPASS_RATE"
+	if groupBy == "rubric" {
+		header += "\tLABEL"
+	}
+	fmt.Fprintln(w, header)
+	sep := "-----\t--------\t-------\t---------"
+	if groupBy == "rubric" {
+		sep += "\t-----"
+	}
+	fmt.Fprintln(w, sep)
+
+	for _, r := range rows {
+		group := r.Group
+		if len(group) > 30 {
+			group = group[:27] + "..."
+		}
+		line := fmt.Sprintf("%-30s\t%d\t%d\t%.2f", group, r.Verdicts, r.Defects, r.PassRate)
+		if groupBy == "rubric" {
+			label := r.Label
+			if label == "" {
+				label = "-"
+			}
+			line += "\t" + label
+		}
+		fmt.Fprintln(w, line)
+	}
+
+	return nil
 }
