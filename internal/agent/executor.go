@@ -1638,6 +1638,14 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 	var evidence []models.Evidence
 	var terminate bool
 	var label taint.TaintLabel
+	// execSuccess / execErr carry the tool's OWN verdict when it reports
+	// failure through ToolResult{Success:false, Error:...} instead of a
+	// non-nil Go error (file_edit's stale-anchor rejection is this shape).
+	// They default to success so the pre-existing envelope is unchanged for
+	// tools that never set the flag.
+	execSuccess := true
+	var execErr string
+	var resultErrCode string
 	// executeToolWithRetry dispatches tool.Execute DIRECTLY (registry
 	// normalization at Registry.Execute never runs on this path), so file
 	// tools that return value-type ToolResult arrive here unboxed. Accept
@@ -1666,6 +1674,21 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 		}
 		// Propagate the taint label so downstream policy checks apply.
 		label = tr.TaintLabel
+		// Honor the tool's OWN failure verdict. A tool can report failure
+		// via ToolResult{Success:false, Error:...} while returning a nil
+		// Go error (file_edit's stale-anchor rejection is this shape).
+		// Dropping tr.Error here and hardcoding Success:true below
+		// fabricated success at the envelope: the model received
+		// {"success":true} with no error text (tools-filesystem-03 RED;
+		// introduced when value-type unwrapping landed -- pre-unwrap, the
+		// raw struct leaked into Result and the verdict survived by luck).
+		if !tr.Success {
+			execSuccess = false
+			execErr = tr.Error
+			if tr.ErrCode != "" {
+				resultErrCode = tr.ErrCode
+			}
+		}
 		// Use the actual result from ToolResult
 		toolResult = tr.Result
 	}
@@ -1678,7 +1701,7 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 	}
 
 	// Store in cache after successful execution (cache the result, not evidence)
-	if e.cache != nil {
+	if e.cache != nil && execSuccess {
 		e.cache.Put(toolName, args, toolResult)
 		e.logger.Debug("Cached tool result",
 			"agent", e.agentID,
@@ -1688,12 +1711,21 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 
 	result := &ExecutionResult{
 		ToolCallID: toolCall.ID,
-		Success:    true,
+		Success:    execSuccess,
 		Result:     toolResult,
+		Error:      execErr,
 		Cached:     false, // Fresh result, not from cache
 		Evidence:   evidence,
 		Terminate:  terminate,
 		TaintLabel: label,
+	}
+	if execErr != "" {
+		// A tool-internal failure (nil Go error, ToolResult{Success:false}).
+		// Flag it breakable-repeat like the toolErr path so a repeated bad
+		// input trips the repeat-error breaker instead of looping. Carry the
+		// tool's machine-readable class through to the envelope too.
+		result.IsBreakableRepeat = true
+		result.ErrCode = resultErrCode
 	}
 
 	// Publish tool.execution.complete event after successful execution
