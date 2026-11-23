@@ -3,11 +3,37 @@ package rpc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/caimlas/meept/internal/agent"
+	"github.com/caimlas/meept/internal/errcls"
 	"github.com/caimlas/meept/internal/session"
 )
+
+// errAmbiguousQueueParam marks an ErrAmbiguousQueue resolution failure as a
+// caller-correctable parameter error so the JSON-RPC boundary answers
+// -32602 InvalidParams (the RPC analogue of HTTP 400) with the resolver's
+// actionable text. Registered once with errcls; true not-found keeps its
+// ErrQueueNotFound sentinel so clients still see a not-found outcome.
+var errAmbiguousQueueParam = errors.New("ambiguous queue target")
+
+func init() {
+	errcls.RegisterParameterSentinels(errAmbiguousQueueParam)
+}
+
+// queueResolutionError maps a resolveQueue failure to a client-actionable
+// error. An ambiguous multi-thread match is NOT a missing queue: it means the
+// caller addressed the session-level id while several live thread queues
+// match, so it must surface the resolver's "use the full thread id" guidance
+// (as a parameter error) rather than being flattened into ErrQueueNotFound.
+// Any true not-found (or a nil queue with no error) keeps ErrQueueNotFound.
+func queueResolutionError(err error) error {
+	if errors.Is(err, agent.ErrAmbiguousQueue) {
+		return fmt.Errorf("%w: %w", errAmbiguousQueueParam, err)
+	}
+	return agent.ErrQueueNotFound
+}
 
 // queueSessionStore is the slice of session.Store behavior queue
 // resolution needs (identity canonicalization, 20261121-interactive-usability
@@ -97,7 +123,7 @@ func (h *QueueHandler) handleSteer(ctx context.Context, params json.RawMessage) 
 
 	q, err := h.resolveQueue(reg, req.ConversationID)
 	if err != nil || q == nil {
-		return nil, agent.ErrQueueNotFound
+		return nil, queueResolutionError(err)
 	}
 
 	if err := q.Steer(ctx, req.Message, req.Source); err != nil {
@@ -134,7 +160,7 @@ func (h *QueueHandler) handleFollowUp(ctx context.Context, params json.RawMessag
 
 	q, err := h.resolveQueue(reg, req.ConversationID)
 	if err != nil || q == nil {
-		return nil, agent.ErrQueueNotFound
+		return nil, queueResolutionError(err)
 	}
 
 	if err := q.FollowUp(ctx, req.Message, req.Source); err != nil {
@@ -166,17 +192,13 @@ func (h *QueueHandler) handleStatus(ctx context.Context, params json.RawMessage)
 
 	// Identity canonicalization: resolve through the session-aware chain
 	// (raw session id / thread-scoped id -> owning conversation id).
-	// Generation 0 when nothing resolves - the response shape is
-	// unchanged, only the lookup key set widens.
-	q, _ := h.resolveQueue(reg, req.ConversationID)
-	gen := uint64(0)
-	if q != nil {
-		_, gen = reg.GetActiveQueue(req.ConversationID)
-		if gen == 0 {
-			// The registration may live under the resolved canonical
-			// id; the queue is non-nil so report a live generation.
-			gen = 1
-		}
+	// A queue found under a thread-scoped key reports that queue's own
+	// generation via Status() below; no fabricated generation is needed.
+	q, resolveErr := h.resolveQueue(reg, req.ConversationID)
+	if errors.Is(resolveErr, agent.ErrAmbiguousQueue) {
+		// Ambiguous is not "no queue": tell the caller which id shape to
+		// use instead of silently reporting an inactive/zero queue.
+		return nil, queueResolutionError(resolveErr)
 	}
 
 	// B5 / leaf 05-navigation/03 T2: parked work must be visible even
@@ -192,7 +214,7 @@ func (h *QueueHandler) handleStatus(ctx context.Context, params json.RawMessage)
 			"steering_depth": 0,
 			"followup_depth": 0,
 			"is_active":      false,
-			"generation":     gen,
+			"generation":     uint64(0),
 			"task_states":    taskStates,
 		}, nil
 	}

@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -332,7 +333,7 @@ func (s *ChatService) Steer(ctx context.Context, req SteerRequest) error {
 	}
 	queue, err := s.resolveActiveQueue(req.ConversationID)
 	if err != nil || queue == nil {
-		return fmt.Errorf("no active agent for conversation %s: %w", req.ConversationID, agent.ErrQueueNotFound)
+		return queueResolutionError(req.ConversationID, err)
 	}
 	if err := queue.Steer(ctx, req.Message, req.Source); err != nil {
 		return fmt.Errorf("failed to steer: %w", err)
@@ -350,7 +351,7 @@ func (s *ChatService) FollowUp(ctx context.Context, req FollowUpRequest) error {
 	}
 	queue, err := s.resolveActiveQueue(req.ConversationID)
 	if err != nil || queue == nil {
-		return fmt.Errorf("no active agent for conversation %s: %w", req.ConversationID, agent.ErrQueueNotFound)
+		return queueResolutionError(req.ConversationID, err)
 	}
 	if err := queue.FollowUp(ctx, req.Message, req.Source); err != nil {
 		return fmt.Errorf("failed to enqueue follow-up: %w", err)
@@ -369,6 +370,9 @@ func (s *ChatService) GetQueueStatus(ctx context.Context, req QueueStatusRequest
 		}, nil
 	}
 	queue, err := s.resolveActiveQueue(req.ConversationID)
+	if err != nil && errors.Is(err, agent.ErrAmbiguousQueue) {
+		return nil, queueResolutionError(req.ConversationID, err)
+	}
 	if err != nil || queue == nil {
 		return &QueueStatusResponse{
 			SteeringDepth: 0,
@@ -385,6 +389,20 @@ func (s *ChatService) GetQueueStatus(ctx context.Context, req QueueStatusRequest
 		IsActive:      status.IsActive,
 		Generation:    status.Generation,
 	}, nil
+}
+
+// queueResolutionError maps a resolveActiveQueue failure to a client-actionable
+// error. An ambiguous multi-thread match is NOT a missing queue: it means the
+// caller addressed the session-level id while multiple live thread queues
+// match. Surface the resolver's "use the full thread id" guidance with an
+// ErrInvalidInput marker so the HTTP boundary answers 400 (instead of the
+// misleading 404 that ErrQueueNotFound produces); keep true not-found as
+// ErrQueueNotFound so the 404 contract is unchanged.
+func queueResolutionError(conversationID string, err error) error {
+	if errors.Is(err, agent.ErrAmbiguousQueue) {
+		return fmt.Errorf("ambiguous active queue for conversation %s: %w", conversationID, errors.Join(ErrInvalidInput, err))
+	}
+	return fmt.Errorf("no active agent for conversation %s: %w", conversationID, agent.ErrQueueNotFound)
 }
 
 // resolveActiveQueue resolves the live queue for ANY of the session's

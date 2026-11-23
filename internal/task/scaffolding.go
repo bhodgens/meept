@@ -14,7 +14,9 @@ import "strings"
 // surfaces (task.list_extended) strip step descriptions for client
 // consumption, and internal/task must never import internal/agent.
 // internal/agent.StripPromptScaffolding delegates here - the canonical
-// implementation stays single (no parallel fork).
+// implementation stays single (no parallel fork). Shape matching was
+// tightened (audit 2026-11-22 L6) so a literal marker in prose survives;
+// the e2e payload-strip contract for REAL scaffolding is unchanged.
 const (
 	SessionContextMarker = "## Session context (most recent work in this conversation)"
 	YourTaskMarker       = "## Your Task"
@@ -24,28 +26,57 @@ const (
 // "## Your Task" header from a step description, returning only the real
 // task text. Input without the markers is returned trimmed and unchanged.
 //
-// The injection shape (strategic.go) is always:
+// The injection shape (strategic.go) is ALWAYS:
 //
 //	<session-context block>\n\n## Your Task\n\n<real description>
 //
-// so when the Your Task marker is present everything after it is the real
-// text. When only the session-context marker is present (a partial/legacy
-// injection), the block is cut at the marker because no task text follows
-// it in that shape.
+// i.e. both headers sit at the start of their own line and the context block
+// precedes the task header. Only line-start headers are treated as
+// scaffolding: a "## Your Task" mentioned mid-sentence in ordinary prose is
+// NOT a header and must survive untouched. A line-start "## Your Task" is
+// stripped even without the context block (legacy partial-injection shape).
+//
+// When only the session-context marker is present at a line start (a
+// partial/legacy injection), the block is cut at that marker because no
+// task text follows it in that shape.
 func StripPromptScaffolding(desc string) string {
 	if desc == "" {
 		return desc
 	}
-	if _, rest, ok := strings.Cut(desc, YourTaskMarker); ok {
-		return strings.TrimSpace(rest)
+	// The task header is scaffolding only when the session-context block
+	// precedes it AND both are real line-start headers. That is the exact
+	// shape strategic.go injects.
+	if ctxAt := indexHeaderLine(desc, SessionContextMarker); ctxAt >= 0 {
+		if taskAt := indexHeaderLine(desc, YourTaskMarker); taskAt > ctxAt {
+			return strings.TrimSpace(desc[taskAt+len(YourTaskMarker):])
+		}
+		// Partial/legacy injection: context block only.
+		return strings.TrimSpace(desc[:ctxAt])
 	}
-	if before, _, ok := strings.Cut(desc, SessionContextMarker); ok {
-		// No Your Task marker: keep any text BEFORE the block (the
-		// injection prepends, so this is normally empty) and drop the
-		// block itself.
-		return strings.TrimSpace(before)
+	// A "## Your Task" header at a line start is scaffolding even without
+	// the context block (a legacy/partial injection the agent-side render
+	// has always stripped). A mid-line mention is ordinary prose and must
+	// survive.
+	if taskAt := indexHeaderLine(desc, YourTaskMarker); taskAt >= 0 {
+		return strings.TrimSpace(desc[taskAt+len(YourTaskMarker):])
 	}
+	// Any other mention is prose.
 	return strings.TrimSpace(desc)
+}
+
+// indexHeaderLine returns the byte index of marker in s when it occurs at
+// the start of a line (index 0 or immediately after '\n'), else -1. The
+// planner injects headers as whole lines; a mid-line mention is user prose.
+func indexHeaderLine(s, marker string) int {
+	for i := 0; i+len(marker) <= len(s); i++ {
+		if s[i] != marker[0] || !strings.HasPrefix(s[i:], marker) {
+			continue
+		}
+		if i == 0 || s[i-1] == '\n' {
+			return i
+		}
+	}
+	return -1
 }
 
 // stripTaskResponseSteps display-strips every step row inside a task RPC

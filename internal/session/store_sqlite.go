@@ -2128,16 +2128,16 @@ func (s *SQLiteStore) GetMessagePath(sessionID string, leafID int64) ([]Message,
 
 	query := `
 	WITH RECURSIVE path AS (
-		SELECT id, session_id, parent_id, role, content, timestamp, entry_type, branch_id, model, agent_id, name, tool_call_id
+		SELECT id, session_id, parent_id, role, content, timestamp, entry_type, branch_id, model, agent_id, name, tool_call_id, metadata
 		FROM session_messages
 		WHERE id = ? AND session_id = ?
 		UNION ALL
-		SELECT m.id, m.session_id, m.parent_id, m.role, m.content, m.timestamp, m.entry_type, m.branch_id, m.model, m.agent_id, m.name, m.tool_call_id
+		SELECT m.id, m.session_id, m.parent_id, m.role, m.content, m.timestamp, m.entry_type, m.branch_id, m.model, m.agent_id, m.name, m.tool_call_id, m.metadata
 		FROM session_messages m
 		INNER JOIN path p ON m.id = p.parent_id
 		WHERE m.session_id = ?
 	)
-	SELECT id, session_id, parent_id, role, content, timestamp, entry_type, branch_id, model, agent_id, name, tool_call_id
+	SELECT id, session_id, parent_id, role, content, timestamp, entry_type, branch_id, model, agent_id, name, tool_call_id, metadata
 	FROM path
 	ORDER BY id`
 
@@ -2153,9 +2153,11 @@ func (s *SQLiteStore) GetMessagePath(sessionID string, leafID int64) ([]Message,
 		var ts string
 		var parentID sql.NullInt64
 		var entryType, branchID, model, agentID, name, toolCallID sql.NullString
-		if err := rows.Scan(&msg.ID, &msg.SessionID, &parentID, &msg.Role, &msg.Content, &ts, &entryType, &branchID, &model, &agentID, &name, &toolCallID); err != nil {
+		var metadataCol sql.NullString
+		if err := rows.Scan(&msg.ID, &msg.SessionID, &parentID, &msg.Role, &msg.Content, &ts, &entryType, &branchID, &model, &agentID, &name, &toolCallID, &metadataCol); err != nil {
 			return nil, fmt.Errorf("failed to scan message in path: %w", err)
 		}
+		msg.Metadata = scanMetadataJSON(metadataCol)
 		if t, err := time.Parse(time.RFC3339, ts); err == nil {
 			msg.Timestamp = t
 		}
@@ -2381,16 +2383,16 @@ func (s *SQLiteStore) ForkSession(sourceSessionID string, fromMessageID int64, n
 	// form a tree, we use a recursive CTE to collect all ancestors.
 	rows, err := tx.Query(`
 		WITH RECURSIVE ancestors AS (
-			SELECT id, session_id, role, content, timestamp, parent_id, entry_type, branch_id, model, agent_id, name, tool_call_id
+			SELECT id, session_id, role, content, timestamp, parent_id, entry_type, branch_id, model, agent_id, name, tool_call_id, metadata
 			FROM session_messages
 			WHERE id = ? AND session_id = ?
 			UNION ALL
-			SELECT m.id, m.session_id, m.role, m.content, m.timestamp, m.parent_id, m.entry_type, m.branch_id, m.model, m.agent_id, m.name, m.tool_call_id
+			SELECT m.id, m.session_id, m.role, m.content, m.timestamp, m.parent_id, m.entry_type, m.branch_id, m.model, m.agent_id, m.name, m.tool_call_id, m.metadata
 			FROM session_messages m
 			INNER JOIN ancestors a ON m.id = a.parent_id
 			WHERE m.session_id = ?
 		)
-		SELECT id, role, content, timestamp, parent_id, entry_type, branch_id, model, agent_id, name, tool_call_id
+		SELECT id, role, content, timestamp, parent_id, entry_type, branch_id, model, agent_id, name, tool_call_id, metadata
 		FROM ancestors
 		ORDER BY id`, fromMessageID, sourceSessionID, sourceSessionID) //nolint:mutexio // mutex serializes sqlite connection access
 	if err != nil {
@@ -2410,13 +2412,14 @@ func (s *SQLiteStore) ForkSession(sourceSessionID string, fromMessageID int64, n
 		agentID    sql.NullString
 		name       sql.NullString
 		toolCallID sql.NullString
+		metadata   sql.NullString
 	}
 	var sourceMsgs []sourceMsg
 	for rows.Next() {
 		var sm sourceMsg
 		var parentID sql.NullInt64
 		if err := rows.Scan(&sm.oldID, &sm.role, &sm.content, &sm.timestamp, &parentID,
-			&sm.entryType, &sm.branchID, &sm.model, &sm.agentID, &sm.name, &sm.toolCallID); err != nil {
+			&sm.entryType, &sm.branchID, &sm.model, &sm.agentID, &sm.name, &sm.toolCallID, &sm.metadata); err != nil {
 			return nil, fmt.Errorf("failed to scan source message: %w", err)
 		}
 		if parentID.Valid {
@@ -2438,8 +2441,8 @@ func (s *SQLiteStore) ForkSession(sourceSessionID string, fromMessageID int64, n
 	var newLeafID int64
 
 	insertStmt, err := tx.Prepare(`
-		INSERT INTO session_messages (session_id, role, content, timestamp, parent_id, entry_type, branch_id, model, agent_id, name, tool_call_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		INSERT INTO session_messages (session_id, role, content, timestamp, parent_id, entry_type, branch_id, model, agent_id, name, tool_call_id, metadata)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare message insert: %w", err)
 	}
@@ -2480,8 +2483,14 @@ func (s *SQLiteStore) ForkSession(sourceSessionID string, fromMessageID int64, n
 			toolCallID = sm.toolCallID.String
 		}
 
+		var metadata any
+		if sm.metadata.Valid && sm.metadata.String != "" {
+			metadata = sm.metadata.String
+		}
+
 		result, err := insertStmt.Exec(newID, sm.role, sm.content, sm.timestamp,
-			newParentID, entryType, branchID, model, agentID, name, toolCallID) //nolint:mutexio // mutex serializes sqlite connection access
+			newParentID, entryType, branchID, model, agentID, name, toolCallID,
+			metadata) //nolint:mutexio // mutex serializes sqlite connection access
 		if err != nil {
 			return nil, fmt.Errorf("failed to insert copied message: %w", err)
 		}
@@ -2606,8 +2615,8 @@ func (s *SQLiteStore) InsertCompaction(sessionID string, parentID int64, summary
 	}
 
 	result, err := s.db.Exec(`
-		INSERT INTO session_messages (session_id, role, content, timestamp, parent_id, entry_type, branch_id, model, agent_id, name, tool_call_id)
-		VALUES (?, 'system', ?, ?, ?, 'compaction', 'main', '', '', '', '')`,
+		INSERT INTO session_messages (session_id, role, content, timestamp, parent_id, entry_type, branch_id, model, agent_id, name, tool_call_id, metadata)
+		VALUES (?, 'system', ?, ?, ?, 'compaction', 'main', '', '', '', '', NULL)`,
 		sessionID,
 		string(contentJSON),
 		time.Now().UTC().Format(time.RFC3339),

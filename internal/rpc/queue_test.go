@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/errcls"
 )
 
 // newTestQueueHandler creates a QueueHandler with a real AgentRegistry
@@ -460,5 +462,69 @@ func TestQueueHandler_ServerRegistration(t *testing.T) {
 		if handler == nil {
 			t.Errorf("handler for %s is nil", method)
 		}
+	}
+}
+
+// L4 pin: a session-level conversation id matching more than one live
+// thread queue is AMBIGUOUS, not missing. Both RPC handlers must surface
+// ErrAmbiguousQueue's actionable guidance (mapped to a parameter error) and
+// must NOT flatten it into ErrQueueNotFound/404.
+func TestQueueHandler_AmbiguousQueue_IsActionable(t *testing.T) {
+	msgBus := bus.New(nil, nil)
+	reg := agent.NewAgentRegistry(agent.RegistryConfig{MessageBus: msgBus})
+	defer reg.Close()
+
+	reg.RegisterActiveQueue("conv-amb-thread-work-aa01", agent.NewMessageQueue(), nil)
+	reg.RegisterActiveQueue("conv-amb-thread-work-bb02", agent.NewMessageQueue(), nil)
+	h := NewQueueHandler(reg)
+
+	for _, call := range []struct {
+		name   string
+		method func() (any, error)
+	}{
+		{"steer", func() (any, error) {
+			return h.handleSteer(context.Background(), json.RawMessage(`{"message":"change","conversation_id":"conv-amb"}`))
+		}},
+		{"followup", func() (any, error) {
+			return h.handleFollowUp(context.Background(), json.RawMessage(`{"message":"more","conversation_id":"conv-amb"}`))
+		}},
+		{"queue_status", func() (any, error) {
+			return h.handleStatus(context.Background(), json.RawMessage(`{"conversation_id":"conv-amb"}`))
+		}},
+	} {
+		t.Run(call.name, func(t *testing.T) {
+			_, err := call.method()
+			if err == nil {
+				t.Fatal("expected an actionable error for an ambiguous queue")
+			}
+			if !errors.Is(err, agent.ErrAmbiguousQueue) {
+				t.Errorf("error = %v, want it to wrap ErrAmbiguousQueue", err)
+			}
+			if errors.Is(err, agent.ErrQueueNotFound) {
+				t.Errorf("error = %v, ambiguity must NOT be reported as ErrQueueNotFound", err)
+			}
+			if !errcls.IsParameterError(err) {
+				t.Errorf("error = %v, want a parameter error (JSON-RPC -32602)", err)
+			}
+			if !strings.Contains(err.Error(), "thread conversation id") {
+				t.Errorf("error = %q, want the resolver's actionable thread-id guidance", err.Error())
+			}
+		})
+	}
+}
+
+// L4 companion: a genuinely absent queue still maps to ErrQueueNotFound.
+func TestQueueHandler_NotFound_StaysErrQueueNotFound(t *testing.T) {
+	msgBus := bus.New(nil, nil)
+	reg := agent.NewAgentRegistry(agent.RegistryConfig{MessageBus: msgBus})
+	defer reg.Close()
+	h := NewQueueHandler(reg)
+
+	_, err := h.handleSteer(context.Background(), json.RawMessage(`{"message":"x","conversation_id":"conv-nope"}`))
+	if !errors.Is(err, agent.ErrQueueNotFound) {
+		t.Errorf("error = %v, want ErrQueueNotFound for a true miss", err)
+	}
+	if errcls.IsParameterError(err) {
+		t.Errorf("error = %v, a true miss must not be a parameter error", err)
 	}
 }

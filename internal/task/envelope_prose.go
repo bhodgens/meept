@@ -318,7 +318,12 @@ func StripClaimsEvidence(response string) string {
 // returns (start, end, true) with end exclusive. ok=false when no envelope is
 // present. start is the index of the opening '{'.
 //
-// Byte-identical port of agent.findClaimsEnvelopeSpan.
+// Tightened relative to agent.findClaimsEnvelopeSpan (audit 2026-11-22 L6):
+// a brace-balanced span is stripped only when it is a fully-parsing JSON
+// object with a claims/evidence key, so a literal claims-shaped fragment in
+// ordinary prose no longer truncates the display payload. The canonical
+// conversational strip stays in internal/agent; this is the payload-boundary
+// variant it mirrors in semantics for REAL envelopes.
 func findClaimsEnvelopeSpan(s string) (int, int, bool) {
 	for i := range len(s) {
 		if s[i] != '{' {
@@ -350,7 +355,14 @@ func findClaimsEnvelopeSpan(s string) (int, int, bool) {
 			case '}':
 				depth--
 				if depth == 0 {
-					return i, k + 1, true
+					span := s[i : k+1]
+					if isClaimsEnvelopeJSON(span) {
+						return i, k + 1, true
+					}
+					// A brace-balanced fragment that is not a REAL
+					// claims/evidence object is ordinary prose. Keep
+					// scanning instead of truncating the display text.
+					break
 				}
 			}
 		}
@@ -358,6 +370,21 @@ func findClaimsEnvelopeSpan(s string) (int, int, bool) {
 		return 0, 0, false
 	}
 	return 0, 0, false
+}
+
+// isClaimsEnvelopeJSON reports whether raw is a single, fully-parsing JSON
+// object carrying at least one of the claims/evidence keys. The display
+// strip is only allowed to remove a REAL machine envelope: a brace-balanced
+// span that merely starts with the words "claims"/"evidence" in ordinary
+// prose (or a truncated/malformed fragment) must survive intact.
+func isClaimsEnvelopeJSON(raw string) bool {
+	var obj map[string]json.RawMessage
+	if json.Unmarshal([]byte(raw), &obj) != nil {
+		return false
+	}
+	_, hasClaims := obj["claims"]
+	_, hasEvidence := obj["evidence"]
+	return hasClaims || hasEvidence
 }
 
 // skipJSONString returns the index just past the string whose opening quote is

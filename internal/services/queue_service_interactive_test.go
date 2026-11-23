@@ -3,9 +3,12 @@ package services
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/caimlas/meept/internal/agent"
+	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/queue"
 	"github.com/caimlas/meept/internal/session"
 )
@@ -180,5 +183,69 @@ func TestStampInteractive(t *testing.T) {
 	StampInteractive(job, sessions.Get(live.ID), time.Now(), 5*time.Minute)
 	if !job.Interactive {
 		t.Errorf("live session stamped Interactive=false, want true")
+	}
+}
+
+// L4 pin: at the HTTP service layer an ambiguous multi-thread queue match
+// must carry the resolver's actionable guidance with an ErrInvalidInput
+// marker (HTTP 400), NOT ErrQueueNotFound (HTTP 404). A true miss stays 404.
+func TestChatService_AmbiguousQueue_IsActionable(t *testing.T) {
+	msgBus := bus.New(nil, nil)
+	reg := agent.NewAgentRegistry(agent.RegistryConfig{MessageBus: msgBus})
+	defer reg.Close()
+
+	reg.RegisterActiveQueue("conv-amb-thread-work-aa01", agent.NewMessageQueue(), nil)
+	reg.RegisterActiveQueue("conv-amb-thread-work-bb02", agent.NewMessageQueue(), nil)
+	svc := NewChatService(msgBus, reg, nil)
+
+	checks := []struct {
+		name string
+		call func() error
+	}{
+		{"Steer", func() error {
+			return svc.Steer(context.Background(), SteerRequest{Message: "change", ConversationID: "conv-amb"})
+		}},
+		{"FollowUp", func() error {
+			return svc.FollowUp(context.Background(), FollowUpRequest{Message: "more", ConversationID: "conv-amb"})
+		}},
+		{"GetQueueStatus", func() error {
+			_, err := svc.GetQueueStatus(context.Background(), QueueStatusRequest{ConversationID: "conv-amb"})
+			return err
+		}},
+	}
+	for _, check := range checks {
+		t.Run(check.name, func(t *testing.T) {
+			err := check.call()
+			if err == nil {
+				t.Fatal("expected an actionable error for an ambiguous queue")
+			}
+			if !errors.Is(err, agent.ErrAmbiguousQueue) {
+				t.Errorf("error = %v, want it to wrap ErrAmbiguousQueue", err)
+			}
+			if !errors.Is(err, ErrInvalidInput) {
+				t.Errorf("error = %v, want ErrInvalidInput (HTTP 400)", err)
+			}
+			if errors.Is(err, agent.ErrQueueNotFound) {
+				t.Errorf("error = %v, ambiguity must NOT be reported as ErrQueueNotFound (HTTP 404)", err)
+			}
+			if !strings.Contains(err.Error(), "thread conversation id") {
+				t.Errorf("error = %q, want the resolver's actionable thread-id guidance", err.Error())
+			}
+		})
+	}
+}
+
+func TestChatService_NotFound_StaysQueueNotFound(t *testing.T) {
+	msgBus := bus.New(nil, nil)
+	reg := agent.NewAgentRegistry(agent.RegistryConfig{MessageBus: msgBus})
+	defer reg.Close()
+	svc := NewChatService(msgBus, reg, nil)
+
+	err := svc.Steer(context.Background(), SteerRequest{Message: "x", ConversationID: "conv-nope"})
+	if !errors.Is(err, agent.ErrQueueNotFound) {
+		t.Errorf("error = %v, want ErrQueueNotFound for a true miss", err)
+	}
+	if errors.Is(err, ErrInvalidInput) {
+		t.Errorf("error = %v, a true miss must not be ErrInvalidInput (HTTP 400)", err)
 	}
 }
