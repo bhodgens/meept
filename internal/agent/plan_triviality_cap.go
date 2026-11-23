@@ -32,6 +32,9 @@ func (sp *StrategicPlanner) capTrivialPlanSteps(req PlanRequest, steps []*task.T
 	if !isTrivialQuestion(req.Input) {
 		return steps
 	}
+	sp.recordMetric("strategic_planner.triviality_cap", 1, map[string]string{
+		"intent": req.Intent,
+	})
 	sp.logger.Info("Triviality escape: capped over-decomposed plan to a single step",
 		"task_id", req.TaskID,
 		"steps_before", len(steps),

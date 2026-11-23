@@ -25,7 +25,11 @@ import (
 // noopCreator is a TaskCreator that records every parent create and serves
 // seeded tasks back through the TaskLookup seam; used to prove the
 // zero-phase guard never touches the task system and to drive the sweep's
-// terminal-child arm.
+// terminal-child arm in ISOLATION (no real task store). This GetTask method
+// is a test-double stand-in for the production seam; it is NOT proof that
+// the production taskCreatorAdapter implements TaskLookup — that is pinned
+// separately by TestSweepStalledExecuting_ProductionTaskLookupWiring, which
+// uses the real daemon adapter over a real task.Registry.
 type noopCreator struct {
 	parents int
 	tasks   map[string]*task.Task
@@ -44,11 +48,14 @@ func (c *noopCreator) SetTaskJobCount(context.Context, string, int) error   { re
 func (c *noopCreator) ScheduleSteps(context.Context, string) error          { return nil }
 
 // GetTask is the TaskLookup seam the stalled-executing sweep reads.
+// A genuinely absent parent uses the store's ErrTaskNotFound sentinel so the
+// sweep's "missing parent" arm fires; other errors are treated as transient
+// by stalledExecutingReason and leave the plan alone.
 func (c *noopCreator) GetTask(_ context.Context, taskID string) (*task.Task, error) {
 	if tk, ok := c.tasks[taskID]; ok {
 		return tk, nil
 	}
-	return nil, fmt.Errorf("task %s: not found", taskID)
+	return nil, fmt.Errorf("task %s: %w", taskID, task.ErrTaskNotFound)
 }
 
 func (c *noopCreator) seed(tk *task.Task) {
@@ -309,5 +316,22 @@ func TestSweepStalledExecutingTerminalChildren(t *testing.T) {
 	}
 	if kept.State != StateExecuting {
 		t.Fatalf("done-child plan state = %q, want untouched executing", kept.State)
+	}
+}
+
+// transientLookupError is a TaskLookup whose read fails with a non-sentinel
+// error, modeling a locked/lagging store rather than a missing parent.
+type transientLookupError struct{}
+
+func (transientLookupError) GetTask(context.Context, string) (*task.Task, error) {
+	return nil, fmt.Errorf("database is locked")
+}
+
+func TestStalledExecutingReason_TransientLookupErrorLeavesPlanAlone(t *testing.T) {
+	m := &PlanManager{logger: slog.New(slog.DiscardHandler)}
+	p := &Plan{ID: "plan-transient", TaskID: "task-live"}
+	stalled, reason := m.stalledExecutingReason(context.Background(), p, transientLookupError{})
+	if stalled || reason != "" {
+		t.Fatalf("transient lookup error must leave plan alone: stalled=%v reason=%q", stalled, reason)
 	}
 }

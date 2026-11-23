@@ -361,6 +361,29 @@ func TestTacticalScheduler_VacuousValidatorPassNotValidated(t *testing.T) {
 	if got.State != task.StateExecuting {
 		t.Fatalf("task state = %q, want %q (rejected step opens a revision, so the task stays executing)", got.State, task.StateExecuting)
 	}
+
+	// M9 (merge 5b519f8c dropped these): a zero-evidence rejection must
+	// create the bounded-retry revision and promote it to ready. The
+	// revision is the recovery lane that keeps the task from being stranded;
+	// without this pin a regression that silently drops revision creation
+	// (or leaves it pending) goes unnoticed while the task stays executing.
+	revs, err := ts.stepStore.ListByTaskID(parent.ID)
+	if err != nil {
+		t.Fatalf("failed to list task steps: %v", err)
+	}
+	var rev *task.TaskStep
+	for _, s := range revs {
+		if task.IsRevisionStep(s.ID) {
+			rev = s
+			break
+		}
+	}
+	if rev == nil {
+		t.Fatal("no revision step created for the zero-evidence rejection (the bounded retry lane must arm)")
+	}
+	if rev.State != task.StepReady {
+		t.Errorf("revision state = %q, want %q (promoted ready past its rejected original)", rev.State, task.StepReady)
+	}
 }
 
 // TestTacticalScheduler_ValidationExhaustionTerminalizesStep pins F51: once

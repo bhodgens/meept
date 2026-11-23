@@ -317,7 +317,10 @@ type StrategicPlannerConfig struct {
 	MaxPlanSteps   int
 	PlannerTimeout time.Duration
 	// ApprovalStepThreshold is the minimum number of planned steps that
-	// triggers the approval gate (even without an interview). Defaults to 5.
+	// triggers the approval gate (even without an interview). 0 (or
+	// negative) DISABLES the complexity gate; the default of 5 lives in
+	// config.DefaultConfig (wired via OrchestratorConfig), not in the
+	// constructor -- defaulting here would clamp an explicit 0 back to 5.
 	ApprovalStepThreshold int
 	// SimpleInputMaxChars is the threshold below which a request is
 	// considered "simple" and may skip LLM decomposition. Defaults to 100.
@@ -1192,18 +1195,6 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 			"task_id", req.TaskID,
 			"refs", len(parentMemoryRefs),
 		)
-	}
-
-	// F13c/P4 (F-ORCH-14): trivial inputs must be capped BEFORE the
-	// approval gate counts steps. An over-decomposed trivial question
-	// (e.g. "what is 2+2?" -> 21 steps) reaches the gate as one step so
-	// it never parks awaiting approval. The cap is conservative: only
-	// the trivial-question shape recognized by isTrivialQuestion.
-	if isTrivialQuestion(req.Input) && len(steps) > 1 {
-		sp.recordMetric("strategic_planner.triviality_cap", 1, map[string]string{
-			"intent": req.Intent,
-		})
-		steps = steps[:1]
 	}
 
 	// Approval gate: tasks that went through an interview (but are not yet
@@ -2376,14 +2367,17 @@ func (sp *StrategicPlanner) autoSealPlanAudit(t *task.Task, req PlanRequest, ste
 //
 // Detection is deliberately conservative and ASCII-lowercase lexical:
 //
-//  1. optional explicit seal markers ("implement the plan", "execute the
+//  1. a negated execute verb ("don't implement", "do not execute the
+//     plan", "never implement the plan") vetoes FIRST -- it must run before
+//     the explicit marker, or a negated "implement the plan" object would
+//     short-circuit to true and bypass the approval gate (bughunt H2);
+//  2. optional explicit seal markers ("implement the plan", "execute the
 //     plan", "and implement it", "then implement it", "implement it
 //     immediately") short-circuit to true;
-//  2. otherwise a plan verb (plan/design/outline/map out/break down/draft)
+//  3. otherwise a plan verb (plan/design/outline/map out/break down/draft)
 //     must co-occur with an execute verb (implement/execute/build/create/
 //     code/write/make/apply) joined by an "and"/"then"/comma connector,
-//     plus a plan noun (plan/approach/design/blueprint/roadmap);
-//  3. a negated execute verb ("don't implement", "do not execute") vetoes.
+//     plus a plan noun (plan/approach/design/blueprint/roadmap).
 //
 // The function answers the LANGUAGE question only; callers gate it behind
 // the compound dispatch lane (Intent==compound), so a plain plan prompt can
@@ -2394,11 +2388,15 @@ func PlanAutoSealFromIntent(input string) bool {
 		return false
 	}
 	lower := strings.ToLower(input)
-	if autoSealExplicitMarker.MatchString(lower) {
-		return true
-	}
+	// VETO FIRST (bughunt H2): the negated-execute check must precede the
+	// explicit marker, or "don't implement the plan" / "do not execute the
+	// plan" would trip autoSealExplicitMarker's "implement|execute the plan"
+	// branch and seal a plan whose execution the user explicitly withheld.
 	if autoSealNegatedExecute.MatchString(lower) {
 		return false
+	}
+	if autoSealExplicitMarker.MatchString(lower) {
+		return true
 	}
 	if !autoSealPlanVerb(lower) || !autoSealExecuteVerb(lower) {
 		return false

@@ -994,10 +994,18 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 	// conversation with no waiting interview falls through to the normal
 	// path byte-identically.
 	if h.plannerInterview != nil {
-		answerScope := req.SessionID
-		if answerScope == "" {
-			answerScope = conversationID
-		}
+		// Bughunt H3: the answer waiter is parked under the canonical
+		// conversation id (publishPlanRequest(result, conversationID) sets
+		// PlanRequest.SessionID to conv-...; deliverPlannerInterview parks
+		// beginInterviewWait with that value). The raw req.SessionID on a
+		// CLI/TUI turn is the primary session-... id — a DIFFERENT value —
+		// so passing it verbatim to DeliverInterviewAnswer (which compares
+		// w.sessionID == sessionID) never consumes the waiter and the plan
+		// stays parked. Canonicalize BOTH id shapes through the same store
+		// resolution used earlier in handleRequest before delivery; a GUI
+		// turn that already carries the conv id resolves to itself, a
+		// CLI/TUI primary id resolves to its owning session's conv id.
+		answerScope := h.resolveInterviewAnswerScope(req.SessionID, conversationID)
 		if ack, delivered := h.plannerInterview.DeliverInterviewAnswer(answerScope, req.Message); delivered {
 			handlerCase := "interview_answer"
 			h.logger.Info("Interview answer delivered to waiting planner",
@@ -3742,6 +3750,33 @@ func (h *ChatHandler) SetPlannerInterview(sp *StrategicPlanner) {
 	if sp != nil {
 		h.plannerInterview = sp
 	}
+}
+
+// resolveInterviewAnswerScope maps either id shape carried on the answer turn
+// to the canonical conversation id the interview waiter was parked under
+// (bughunt H3). The park key comes from publishPlanRequest(result,
+// conversationID) -> PlanRequest.SessionID and is always conv-...; the answer
+// turn's req.SessionID is the primary session-... id for CLI/TUI clients.
+// ResolveThreadConversationID handles all three shapes (primary id, conv id,
+// thread-scoped id) through the same dual lookup used at the top of
+// handleRequest, so both sides converge on the SAME string. Pass-through
+// when nothing resolves keeps the legacy no-store/no-match behavior intact.
+func (h *ChatHandler) resolveInterviewAnswerScope(sessionID, conversationID string) string {
+	for _, id := range [2]string{sessionID, conversationID} {
+		if id == "" || h.sessionStore == nil {
+			continue
+		}
+		if sess := session.ResolveThreadConversationID(id,
+			h.sessionStore.GetByConversationID, h.sessionStore.Get); sess != nil && sess.ConversationID != "" {
+			return sess.ConversationID
+		}
+	}
+	// Nothing resolved: prefer the raw session id (legacy behavior), then
+	// the already-canonical conversation id minted/resolved this turn.
+	if sessionID != "" {
+		return sessionID
+	}
+	return conversationID
 }
 
 // persistSessionID resolves the persistence/session id the same way the

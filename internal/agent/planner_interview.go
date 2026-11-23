@@ -425,22 +425,6 @@ func (sp *StrategicPlanner) deliverPlannerInterview(t *task.Task, req PlanReques
 	})
 }
 
-// HasPendingInterview reports whether any planner interview currently
-// waits for answers in the given conversation.
-func (sp *StrategicPlanner) HasPendingInterview(sessionID string) bool {
-	if sp == nil || sessionID == "" {
-		return false
-	}
-	sp.mu.Lock()
-	defer sp.mu.Unlock()
-	for _, w := range sp.interviewWaiters {
-		if w.sessionID == sessionID {
-			return true
-		}
-	}
-	return false
-}
-
 // handleTaskInterview consumes the planner's task.interview pause event
 // and terminalizes the SUBMITTED turn with the questions text: status
 // completed, handler_case interview_pause. A one-shot CLI waiting on

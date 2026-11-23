@@ -42,6 +42,14 @@ func TestPlanAutoSealFromIntent(t *testing.T) {
 		{"how should i", "how should I structure the plan for this", false},
 		{"negated execute", "plan the migration but don't implement it yet", false},
 		{"do not execute", "design a plan, do not execute anything", false},
+		// Bughunt H2: negated + explicit "the plan" object. These all
+		// trip autoSealExplicitMarker ("implement|execute|build the plan")
+		// AND autoSealNegatedExecute, so the veto must run FIRST or the
+		// plan gets sealed despite the user withholding execution.
+		{"negated implement the plan", "write a plan but don't implement the plan", false},
+		{"negated execute the plan", "create a plan, do not execute the plan", false},
+		{"never implement the plan", "draft the plan and never implement the plan", false},
+		{"negated build the plan", "make a plan and do not build the plan", false},
 		{"empty", "", false},
 		{"plan verb inside word", "planned communities and citywide codes", false},
 	}

@@ -874,10 +874,13 @@ type AgentLoop struct {
 	// config.SystemPromptOveride or any other permanent prompt field.
 	turnSystemPrefix string
 
-	// lastTurnTokens is the provider TotalTokens from the turn that just
-	// finished (routing-funnel C3). lastTurnUsageSeen is false when that
-	// turn's provider sent no usage; LastTurnTokens returns 0 only then.
-	// Both guarded by mu.
+	// lastTurnTokens is the ACCUMULATED provider TotalTokens for the
+	// current/last turn (routing-funnel C3, bughunt M1): every provider
+	// response ADDS its TotalTokens here as it arrives, so the per-turn
+	// token gate can read the running turn total DURING tool execution
+	// (not just at the terminal return). lastTurnUsageSeen is false when
+	// the turn's provider sent no usage; LastTurnTokens returns 0 only
+	// then. Both guarded by mu.
 	lastTurnTokens    int
 	lastTurnUsageSeen bool
 
@@ -2050,8 +2053,12 @@ func prependTurnSystemPrefix(prefix, systemPrompt string) string {
 	return prefix + "\n\n" + systemPrompt
 }
 
-// LastTurnTokens returns the provider TotalTokens from the turn that just
-// finished. It is 0 only when that turn's provider sent no usage.
+// LastTurnTokens returns the ACCUMULATED provider TotalTokens for the turn
+// that just finished (bughunt M1): the sum of every non-zero provider
+// response in the turn, not the last call's snapshot. It is 0 only when
+// that turn's provider sent no usage. Because usage is added as it arrives,
+// this same value is visible to the per-turn token gate DURING tool
+// execution via the executor's turn-tokens provider (loop.go:3125).
 func (l *AgentLoop) LastTurnTokens() int {
 	if l == nil {
 		return 0
@@ -2079,8 +2086,9 @@ func (l *AgentLoop) LastTurnCostUSD() float64 {
 	return l.lastTurnCostUSD
 }
 
-// resetLastTurnTokens clears the previous turn's usage so a turn that
-// never receives provider usage reports 0.
+// resetLastTurnTokens clears the previous turn's accumulated usage and cost
+// at turn start, so a turn that never receives provider usage reports 0 and
+// a new turn's accumulation starts fresh from zero.
 func (l *AgentLoop) resetLastTurnTokens() {
 	if l == nil {
 		return
@@ -2093,16 +2101,21 @@ func (l *AgentLoop) resetLastTurnTokens() {
 	l.mu.Unlock()
 }
 
-// recordTurnProviderUsage stores TotalTokens from a provider response on
-// this turn. A zero TokenUsage means the provider sent no usage and is
-// ignored, so an earlier reported count is not clobbered by an absent one.
+// recordTurnProviderUsage ACCUMULATES TotalTokens from each provider
+// response onto this turn (bughunt M1). It mirrors recordTurnCostUSD's `+=`:
+// every provider response ADDS its TotalTokens to the running turn total so
+// the per-turn token gate sees the true cumulative count during tool
+// execution, not the last call's snapshot. A zero TokenUsage means the
+// provider sent no usage and is ignored, so an absent report neither
+// clobbers the count nor marks the turn as having reported usage. The turn
+// total is reset at turn start by resetLastTurnTokens.
 func (l *AgentLoop) recordTurnProviderUsage(usage llm.TokenUsage) {
 	if l == nil || usage == (llm.TokenUsage{}) {
 		return
 	}
 	l.mu.Lock()
 	l.lastTurnUsageSeen = true
-	l.lastTurnTokens = usage.TotalTokens
+	l.lastTurnTokens += usage.TotalTokens
 	l.mu.Unlock()
 }
 
@@ -2120,19 +2133,19 @@ func (l *AgentLoop) recordTurnCostUSD(costUSD float64) {
 	l.mu.Unlock()
 }
 
-// recordTurnTotal stores the loop's ACCUMULATED turn total (routing-funnel
-// C3): the true sum across every LLM call in a multi-step tool loop,
-// replacing the last-provider-snapshot recordTurnProviderUsage writes while
-// the turn is in flight. Called at the reasoningCycle turn-terminal return;
-// zero or absent usage leaves the last snapshot untouched (fallback rule).
-func (l *AgentLoop) recordTurnTotal(total int) {
-	if l == nil || total <= 0 {
-		return
-	}
-	l.mu.Lock()
-	l.lastTurnUsageSeen = true
-	l.lastTurnTokens = total
-	l.mu.Unlock()
+// recordTurnTotal is retained as the terminal-return report for the
+// routing-funnel C3 lane. Since bughunt M1 the in-flight accumulation in
+// recordTurnProviderUsage already holds the true sum (every provider
+// response added it as it arrived), so this is intentionally a no-op: the
+// terminal totalTokens local would otherwise clobber a larger accumulated
+// value on turns that re-enter reasoningCycle (reply-guard rewrite retries,
+// skill/task cycles) without going through resetLastTurnTokens between
+// cycles. The final LastTurnTokens read therefore stays the exact sum with
+// no double-counting.
+func (l *AgentLoop) recordTurnTotal(_ int) {
+	// No-op: lastTurnTokens is the authoritative accumulated sum. Kept as a
+	// named seam so callers and tests can still reference the terminal
+	// report point without reintroducing the overwrite bug.
 }
 
 // SessionID returns the loop's session identifier (the identity the loop was
@@ -6054,11 +6067,13 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		l.mu.Lock()
 		l.reasoningForNextTurn = ""
 		l.mu.Unlock()
-		// Track token usage. C3: remember this response's provider
-		// TotalTokens for LastTurnTokens. A zero Usage is absent and
-		// does not overwrite a count already seen this turn. The
-		// response's CostUSD accumulates the same way so a multi-call
-		// tool loop sums every call's cost for LastTurnCostUSD.
+		// Track token usage. C3/M1: ADD this response's provider
+		// TotalTokens to the running turn total for LastTurnTokens, so
+		// the per-turn token gate sees the cumulative count on every
+		// tool call (not the last call's snapshot). A zero Usage is
+		// absent and is ignored. The response's CostUSD accumulates the
+		// same way so a multi-call tool loop sums every call's cost for
+		// LastTurnCostUSD.
 		if response != nil {
 			l.recordTurnProviderUsage(response.Usage)
 			l.recordTurnCostUSD(response.CostUSD)
@@ -6997,11 +7012,12 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				"conversation", conversationID)
 			return "[incomplete: the turn ended on planned-but-unexecuted work] " + response.Content, nil
 		}
-		// C3: the turn-terminal report is the loop's ACCUMULATED
-		// total, not the final call's. recordTurnProviderUsage keeps
-		// the last non-zero provider snapshot as the fallback for
-		// callers that never see a successful cycle return; a turn
-		// that reached its terminal return always has the true sum.
+		// C3/M1: the terminal report is deliberately a no-op —
+		// recordTurnProviderUsage has already accumulated the true sum
+		// as each response arrived, so it is visible both to the gate
+		// during tool execution and here at return. Calling the seam
+		// keeps the terminal report point explicit without clobbering
+		// the accumulated value on re-entrant cycles.
 		l.recordTurnTotal(totalTokens)
 		return response.Content, nil
 	}

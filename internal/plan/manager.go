@@ -1100,6 +1100,21 @@ func (m *PlanManager) SweepStalledExecuting(ctx context.Context, window time.Dur
 		swept++
 		m.logger.Info("stalled-executing sweep failed plan",
 			"plan_id", p.ID, "task_id", p.TaskID, "reason", reason)
+		// Stamp plan.md with the failed outcome, exactly like canonical
+		// failPlan:1835. Without this the status file still says
+		// "executing" while the store row and the bus event say "failed",
+		// so any reader of plan.md sees a lie. Best-effort: a missing or
+		// unwritable plan file must not abort the sweep or undo the
+		// transition already committed above (audit L8).
+		phases, phaseErr := m.store.GetPhases(ctx, p.ID)
+		if phaseErr != nil {
+			m.logger.Warn("stalled-executing sweep: failed to get phases for plan.md update",
+				"plan_id", p.ID, "error", phaseErr)
+		}
+		if updateErr := UpdatePlanStatus(p.FilePath, StateFailed, phasesToValues(phases)); updateErr != nil {
+			m.logger.Warn("stalled-executing sweep: failed to update plan.md on failure",
+				"plan_id", p.ID, "file_path", p.FilePath, "error", updateErr)
+		}
 		m.publishEvent("plan.failed", map[string]any{
 			"plan_id":    p.ID,
 			"session_id": p.SourceSession,
@@ -1122,9 +1137,19 @@ func (m *PlanManager) stalledExecutingReason(ctx context.Context, p *Plan, looku
 		return false, ""
 	}
 	tk, err := lookup.GetTask(ctx, p.TaskID)
-	if err != nil || tk == nil {
-		// The recorded task vanished from the store (a hard delete or a
-		// lost database): nothing can complete this plan.
+	if err != nil {
+		// Distinguish a genuinely missing parent from a transient store
+		// error (locked db, I/O blip). Only ErrTaskNotFound proves the
+		// parent is gone; any other error leaves the plan alone so a
+		// healthy executing plan is not failed by a passing fault.
+		if !errors.Is(err, task.ErrTaskNotFound) {
+			m.logger.Warn("stalled-executing sweep: parent task lookup failed; leaving plan alone",
+				"plan_id", p.ID, "task_id", p.TaskID, "error", err)
+			return false, ""
+		}
+		return true, fmt.Sprintf("plan stalled in executing: parent task %s is missing", p.TaskID)
+	}
+	if tk == nil {
 		return true, fmt.Sprintf("plan stalled in executing: parent task %s is missing", p.TaskID)
 	}
 	if tk.State == task.StateFailed {

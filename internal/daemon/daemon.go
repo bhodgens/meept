@@ -127,6 +127,18 @@ type Daemon struct {
 	shutdownOnce  atomic.Bool  // DAE-H1: per-instance guard (was package-level, broke test isolation)
 	drainOverride atomic.Int64 // requested drain timeout (ns); 0 = ShutdownTimeout default
 
+	// runCtx/runCancel is the lifecycle context for background goroutines
+	// started by Run (the stalled-executing sweep ticker et al.). Derived
+	// from Run's parent at boot and cancelled at the start of shutdown, so
+	// those goroutines exit promptly on the SIGTERM path — the shipped
+	// binary calls Run with context.Background(), which is never cancelled
+	// by the signal handler (it calls shutdown() directly), so without this
+	// the ticker outlives Run and keeps sweeping a closed plan store
+	// (bughunt L7). Written once at Run entry, read only from Run/shutdown
+	// on the same goroutine.
+	runCtx    context.Context
+	runCancel context.CancelFunc
+
 	// kanbanSidecar supervises the daemon-spawned meept-kanban gateway
 	// ([kanban].sidecar_enabled, DEFAULT TRUE — opt out with false =
 	// nil = no process). Owned by StartKanbanSidecar, torn down by
@@ -2350,6 +2362,17 @@ func (d *Daemon) Run(ctx context.Context) error {
 	d.status.Store(models.StatusStarting)
 	d.startTime = time.Now()
 
+	// Derive the run-scoped lifecycle context. The shipped binary passes
+	// context.Background() here (cmd/meept-daemon/main.go), which the signal
+	// handler never cancels — it calls shutdown() directly. Background
+	// goroutines started below (the stalled-executing sweep ticker) must
+	// ride a context that shutdown actually cancels, or they outlive Run
+	// and keep sweeping a closed plan store (bughunt L7). The deferred
+	// cancel is the backstop for every return path; shutdown() cancels
+	// earlier so no tick lands during the drain/stop sequence.
+	d.runCtx, d.runCancel = context.WithCancel(ctx)
+	defer d.runCancel()
+
 	// Arm SIGINT/SIGTERM/SIGHUP before any listener accepts traffic.
 	// HTTP /health starts later in this function, ahead of the wait
 	// loop, so a client can SIGHUP as soon as /health answers. Until
@@ -2608,12 +2631,16 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// Run-scoped ctx. Nil-safe: no plan manager (plan system disabled) is
 	// a no-op.
 	if d.planManager != nil {
+		sweepCtx := d.runCtx
+		if sweepCtx == nil {
+			sweepCtx = ctx // defensive: Run always sets runCtx first
+		}
 		sweepWindow := d.fullConfig.Plans.StalledExecutingSweep
 		runStalledSweep := func() {
 			if sweepWindow <= 0 {
 				return
 			}
-			swept, err := d.planManager.SweepStalledExecuting(ctx, sweepWindow)
+			swept, err := d.planManager.SweepStalledExecuting(sweepCtx, sweepWindow)
 			if err != nil {
 				d.logger.Warn("stalled-executing sweep pass failed", "error", err)
 			} else if swept > 0 {
@@ -2627,7 +2654,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 			defer ticker.Stop()
 			for {
 				select {
-				case <-ctx.Done():
+				case <-sweepCtx.Done():
 					return
 				case <-ticker.C:
 					runStalledSweep()
@@ -2914,6 +2941,13 @@ func (d *Daemon) shutdown() error {
 
 	d.logger.Info("daemon: shutting down")
 	d.status.Store(models.StatusStopping)
+
+	// Cancel the run-scoped lifecycle context FIRST so background
+	// goroutines (the stalled-executing sweep ticker) exit before their
+	// plan store and bus are torn down below (bughunt L7).
+	if d.runCancel != nil {
+		d.runCancel()
+	}
 
 	// Stop accepting new jobs, then drain running jobs up to the drain
 	// timeout (daemon.shutdown's drain_timeout_s if requested, else the
@@ -3604,12 +3638,43 @@ type taskCreatorAdapter struct {
 	registry *task.Registry
 }
 
+// Compile-time pin (bughunt H4): the PRODUCTION adapter must satisfy the
+// stalled-executing sweep's read seam. Before GetTask was added this
+// assertion was impossible, and the m.taskCreator.(TaskLookup) check in
+// SweepStalledExecuting silently failed for every real plan manager.
+var _ plan.TaskLookup = (*taskCreatorAdapter)(nil)
+
 func newTaskCreatorAdapter(registry *task.Registry) *taskCreatorAdapter {
 	return &taskCreatorAdapter{registry: registry}
 }
 
+// NewTaskCreatorAdapter exposes the real daemon task-creator adapter over a
+// task registry. It exists so production-wiring pin tests can drive the
+// actual *taskCreatorAdapter (never a hand-rolled double) and prove the
+// TaskLookup seam is live in production.
+func NewTaskCreatorAdapter(registry *task.Registry) plan.TaskCreator {
+	return newTaskCreatorAdapter(registry)
+}
+
 func (a *taskCreatorAdapter) CreateTask(ctx context.Context, name, description string) (*task.Task, error) {
 	return a.registry.Create(ctx, name, description)
+}
+
+// GetTask implements plan.TaskLookup (the stalled-executing sweep's read
+// seam): the sweep needs to ask whether the synthesized parent task is
+// missing or terminal-failed. Without this method the production adapter
+// silently failed the m.taskCreator.(TaskLookup) assertion in
+// plan.(*PlanManager).SweepStalledExecuting, so the "missing parent" and
+// "parent failed" arms could only ever be driven by a test double that
+// declared GetTask itself. Delegate straight to the registry's read API —
+// the same Registry.Get used for every other task read in this package — and
+// return a clear error on a nil registry (typed-nil guard: the adapter itself
+// may be non-nil while its registry is absent).
+func (a *taskCreatorAdapter) GetTask(ctx context.Context, taskID string) (*task.Task, error) {
+	if a == nil || a.registry == nil {
+		return nil, fmt.Errorf("task creator: no task registry configured for GetTask(%s): %w", taskID, task.ErrTaskNotFound)
+	}
+	return a.registry.Get(ctx, taskID)
 }
 
 // SetGoalID forwards the plan system's TaskGoalSetter seam onto the registry
