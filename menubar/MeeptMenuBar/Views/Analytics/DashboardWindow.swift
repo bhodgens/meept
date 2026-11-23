@@ -29,6 +29,12 @@ struct DashboardWindow: View {
                     Label("agents", systemImage: "person.2")
                 }
                 .tag(2)
+
+            ReviewGradesView()
+                .tabItem {
+                    Label("grades", systemImage: "checkmark.seal")
+                }
+                .tag(3)
         }
         .frame(width: 500, height: 400)
     }
