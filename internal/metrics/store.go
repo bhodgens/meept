@@ -43,6 +43,13 @@ const (
 	DefaultFlushInterval = 10 * time.Second
 )
 
+// retentionTables is the list of audit tables subject to the 30-day time
+// based purge in aggregateHourly. It is the single source of truth; the
+// exported RetentionTables() accessor (review_verdicts.go) returns a copy so
+// tests can assert the append-only invariant. Append-only tables (llm_calls,
+// model_review_verdicts) must NEVER be added here.
+var retentionTables = []string{"events", "error_records", "dispatch_log", "response_quality", "lint_runs", "test_runs"}
+
 // Store manages metrics storage.
 type Store struct {
 	logger        *slog.Logger
@@ -366,6 +373,13 @@ CREATE INDEX IF NOT EXISTS idx_llm_calls_agent_ts ON llm_calls(agent_id, timesta
 	// the same steps as their columns, preserving the old ordering rule:
 	// an index must never be created before its column exists.
 	if err := storeMigrations.Apply(s.db.DB, s.logger); err != nil {
+		return err
+	}
+
+	// Review verdict table (model-rating-metrics-plan C2): brand-new table,
+	// so a plain idempotent CREATE TABLE IF NOT EXISTS covers both fresh and
+	// existing databases — no migration-registry step needed.
+	if err := initReviewVerdictSchema(s.db.DB); err != nil {
 		return err
 	}
 	return nil
@@ -724,8 +738,10 @@ func (s *Store) aggregateHourly() {
 		// llm_calls is exempt from time-based retention: it is tokscale's
 		// ingest source (docs/plans/20260906-tokscale-ingest/master.md,
 		// Contract D) and must persist year-scale history for aggregation.
-		retentionTables := []string{"events", "error_records", "dispatch_log", "response_quality", "lint_runs", "test_runs"}
-		for _, table := range retentionTables {
+		// model_review_verdicts is likewise append-only with indefinite
+		// retention (model-rating-metrics-plan C2) and must NEVER be added
+		// here.
+		for _, table := range RetentionTables() {
 			query := fmt.Sprintf("DELETE FROM %s WHERE timestamp < datetime('now', ?)", table)
 			if _, err := s.db.Exec(query, cutoff); err != nil {
 				s.logger.Warn("failed to prune retention table", "table", table, "error", err)
