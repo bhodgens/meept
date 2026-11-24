@@ -277,12 +277,25 @@ func (cd *cycleDetector) Reset() {
 }
 
 // convergenceDetector tracks LLM responses to detect stagnation.
+//
+// The history is keyed PER CONVERSATION (usability pin, 2026-11-24): one
+// task's step jobs run CONCURRENTLY against the same loop instance (the
+// registry hands out one loop per task), and the fake/repeated answers of
+// distinct step conversations landed in ONE shared history - three
+// identical replies from three different conversations tripped
+// "count=3" at iteration 1 and failed the whole approved task
+// (approval-wait e2e). Convergence is a within-conversation no-progress
+// semantic; a signature recorded under conversation A must never feed
+// conversation B's window. Reset() still clears everything: turn-start
+// hygiene across conversations is conservative (same posture as the
+// pre-keying behavior) and the cross-turn carry-over bug that motivated
+// Reset stays fixed.
 type convergenceDetector struct {
-	mu       sync.Mutex
-	history  []responseSignature
-	config   DetectionConfig
-	logger   *slog.Logger
-	lastWarn time.Time
+	mu        sync.Mutex
+	histories map[string][]responseSignature // conversationID -> window
+	config    DetectionConfig
+	logger    *slog.Logger
+	lastWarn  time.Time
 }
 
 // responseSignature represents a simplified LLM response for convergence detection.
@@ -295,15 +308,17 @@ type responseSignature struct {
 // newConvergenceDetector creates a new convergence detector.
 func newConvergenceDetector(config DetectionConfig, logger *slog.Logger) *convergenceDetector {
 	return &convergenceDetector{
-		history: make([]responseSignature, 0, config.HistorySize),
-		config:  config,
-		logger:  logger,
+		histories: make(map[string][]responseSignature),
+		config:    config,
+		logger:    logger,
 	}
 }
 
-// recordResponse records an LLM response and checks for convergence.
-// Returns true if convergence was detected (without tool calls).
-func (cd *convergenceDetector) recordResponse(content string, hasTools bool) bool {
+// recordResponseFor records an LLM response under conversationID's own
+// window and checks for convergence. Returns true if convergence was
+// detected (without tool calls). Only identical replies WITHIN the same
+// conversation count toward the streak (see the struct doc).
+func (cd *convergenceDetector) recordResponseFor(conversationID, content string, hasTools bool) bool {
 	cd.mu.Lock()
 	defer cd.mu.Unlock()
 
@@ -330,11 +345,12 @@ func (cd *convergenceDetector) recordResponse(content string, hasTools bool) boo
 		timestamp:   time.Now(),
 	}
 
-	// Add to history
-	cd.history = append(cd.history, sig)
-	if len(cd.history) > cd.config.HistorySize {
-		cd.history = cd.history[1:]
+	// Add to THIS conversation's history window.
+	history := append(cd.histories[conversationID], sig)
+	if window := cd.config.HistorySize; window > 0 && len(history) > window {
+		history = history[len(history)-window:]
 	}
+	cd.histories[conversationID] = history
 
 	// Only check convergence if no tools are being used
 	// (responses with tools are expected to vary)
@@ -342,17 +358,19 @@ func (cd *convergenceDetector) recordResponse(content string, hasTools bool) boo
 		return false
 	}
 
-	return cd.detectConvergence()
+	return cd.detectConvergence(conversationID)
 }
 
-// detectConvergence checks if responses are converging without progress.
-func (cd *convergenceDetector) detectConvergence() bool {
-	if len(cd.history) < cd.config.ConvergenceThreshold {
+// detectConvergence checks conversationID's window for a convergence
+// streak. Callers hold cd.mu.
+func (cd *convergenceDetector) detectConvergence(conversationID string) bool {
+	history := cd.histories[conversationID]
+	if len(history) < cd.config.ConvergenceThreshold {
 		return false
 	}
 
 	// Check last N responses
-	recent := cd.history[len(cd.history)-cd.config.ConvergenceThreshold:]
+	recent := history[len(history)-cd.config.ConvergenceThreshold:]
 
 	// All must have no tools and similar content
 	firstHash := recent[0].contentHash
@@ -383,7 +401,7 @@ func (cd *convergenceDetector) detectConvergence() bool {
 // within-turn semantic; resetTurnGuards now clears it per turn.
 func (cd *convergenceDetector) Reset() {
 	cd.mu.Lock()
-	cd.history = cd.history[:0]
+	cd.histories = make(map[string][]responseSignature)
 	cd.mu.Unlock()
 }
 
@@ -6805,7 +6823,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		}
 
 		// Record response for convergence detection
-		if l.convergenceDetector.recordResponse(response.Content, false) {
+		if l.convergenceDetector.recordResponseFor(conversationID, response.Content, false) {
 			// Convergence detected - abort with helpful message
 			l.logger.Warn("Convergence detected, aborting loop",
 				"iteration", iteration,

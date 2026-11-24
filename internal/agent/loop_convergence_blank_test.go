@@ -28,10 +28,10 @@ func TestConvergenceDetector_BlankResponsesDoNotConverge(t *testing.T) {
 	cd := newTestConvergenceDetector()
 
 	for i := range 10 {
-		if cd.recordResponse("", false) {
+		if cd.recordResponseFor("test-conv", "", false) {
 			t.Fatalf("iteration %d: blank responses tripped convergence; blank turns must not converge", i+1)
 		}
-		if cd.recordResponse("   \n\t  ", false) {
+		if cd.recordResponseFor("test-conv", "   \n\t  ", false) {
 			t.Fatalf("iteration %d: whitespace-only responses tripped convergence", i+1)
 		}
 	}
@@ -50,7 +50,7 @@ func TestConvergenceDetector_DistinctRepliesDoNotConverge(t *testing.T) {
 		"Fifth unique response.",
 	}
 	for i, r := range replies {
-		if cd.recordResponse(r, false) {
+		if cd.recordResponseFor("test-conv", r, false) {
 			t.Fatalf("iteration %d: distinct replies tripped convergence", i+1)
 		}
 	}
@@ -63,7 +63,7 @@ func TestConvergenceDetector_IdenticalRepliesStillConverge(t *testing.T) {
 
 	same := "I cannot do that, sorry."
 	for i := range 3 {
-		if cd.recordResponse(same, false) {
+		if cd.recordResponseFor("test-conv", same, false) {
 			// The identical-reply convergence fired at or before the
 			// threshold — but it must fire exactly AT the threshold
 			// (3rd), not before.
@@ -86,23 +86,23 @@ func TestConvergenceDetector_BlankTurnsDoNotFeedIdenticalStreak(t *testing.T) {
 	// invisible and the substantive streak needs its own 3.
 	blank := func(n int) {
 		for range n {
-			if cd.recordResponse("", false) {
+			if cd.recordResponseFor("test-conv", "", false) {
 				t.Fatal("blank-only turns tripped convergence")
 			}
 		}
 	}
 
 	blank(2)
-	if cd.recordResponse("Working on it.", false) {
+	if cd.recordResponseFor("test-conv", "Working on it.", false) {
 		t.Fatal("convergence before any repetition")
 	}
 	blank(2)
-	if cd.recordResponse("Working on it.", false) {
+	if cd.recordResponseFor("test-conv", "Working on it.", false) {
 		t.Fatal("convergence after 2 identical replies (threshold is 3)")
 	}
 	blank(2)
 	// 3rd identical substantive reply → converge (original contract).
-	if !cd.recordResponse("Working on it.", false) {
+	if !cd.recordResponseFor("test-conv", "Working on it.", false) {
 		t.Fatal("3 identical substantive replies did not converge; guard broken")
 	}
 }
@@ -113,7 +113,7 @@ func TestConvergenceDetector_ToolTurnsNeverConverge(t *testing.T) {
 	cd := newTestConvergenceDetector()
 
 	for i := range 6 {
-		if cd.recordResponse("same text every time", true) {
+		if cd.recordResponseFor("test-conv", "same text every time", true) {
 			t.Fatalf("iteration %d: tool-using turns tripped convergence", i+1)
 		}
 	}

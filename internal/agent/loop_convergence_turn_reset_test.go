@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -26,10 +27,10 @@ func TestResetTurnGuards_ClearsConvergenceHistory(t *testing.T) {
 	}
 
 	// Turn N: two identical no-tool replies fill the window.
-	if cd.recordResponse("stale reply from previous turn", false) {
+	if cd.recordResponseFor("test-conv", "stale reply from previous turn", false) {
 		t.Fatal("unexpected convergence on first stale reply")
 	}
-	if cd.recordResponse("stale reply from previous turn", false) {
+	if cd.recordResponseFor("test-conv", "stale reply from previous turn", false) {
 		t.Fatal("unexpected convergence on second stale reply")
 	}
 
@@ -39,7 +40,7 @@ func TestResetTurnGuards_ClearsConvergenceHistory(t *testing.T) {
 	// Turn N+1: one fresh distinct reply — with stale history this is the
 	// third identical entry and would have aborted (run 3's count=3 at
 	// iteration=1).
-	if cd.recordResponse("a genuinely new answer", false) {
+	if cd.recordResponseFor("test-conv", "a genuinely new answer", false) {
 		t.Fatal("stale history tripped convergence in a fresh turn; resetTurnGuards must clear the detector")
 	}
 }
@@ -74,11 +75,11 @@ func TestConvergenceDetector_ResetRestartsStreak(t *testing.T) {
 	cd := newTestConvergenceDetector()
 
 	for i := range 2 {
-		if cd.recordResponse("same old answer", false) {
+		if cd.recordResponseFor("test-conv", "same old answer", false) {
 			t.Fatalf("entry %d: premature convergence", i+1)
 		}
 	}
-	if !cd.recordResponse("same old answer", false) {
+	if !cd.recordResponseFor("test-conv", "same old answer", false) {
 		t.Fatal("expected convergence after threshold identical replies")
 	}
 
@@ -87,11 +88,11 @@ func TestConvergenceDetector_ResetRestartsStreak(t *testing.T) {
 	// Post-reset, a fresh streak must build from zero: the first two new
 	// entries must NOT converge (pre-reset leftovers would make them).
 	for i := range 2 {
-		if cd.recordResponse("same old answer", false) {
+		if cd.recordResponseFor("test-conv", "same old answer", false) {
 			t.Fatalf("post-reset entry %d converged early; Reset must clear history", i+1)
 		}
 	}
-	if !cd.recordResponse("same old answer", false) {
+	if !cd.recordResponseFor("test-conv", "same old answer", false) {
 		t.Fatal("expected convergence after post-reset threshold")
 	}
 }
@@ -174,5 +175,37 @@ func TestChatHandler_WaitForTaskCompletion_CeilingReturnsBestStepResult(t *testi
 	reply := h.waitForTaskCompletion(context.Background(), tk.ID)
 	if reply != "/var/.../project/hello.txt contains hello" {
 		t.Fatalf("reply = %q, want the approved step's result at ceiling", reply)
+	}
+}
+
+// TestConvergenceDetector_IsolatesConversations pins the per-conversation
+// keying (2026-11-24, approval-wait e2e): one loop serves a task's step
+// jobs CONCURRENTLY, each under its own conversation id. Three identical
+// replies from THREE DIFFERENT conversations must never fill one window -
+// the loop-wide history made that happen and failed an approved 6-step
+// task at iteration 1 ("count=3" across separate step conversations).
+// Only identical replies WITHIN one conversation converge.
+func TestConvergenceDetector_IsolatesConversations(t *testing.T) {
+	cd := newConvergenceDetector(DefaultDetectionConfig(), slog.Default())
+	// One identical reply per conversation: never converges.
+	for i, conv := range []string{"step-a", "step-b", "step-c"} {
+		if cd.recordResponseFor(conv, "The requested work is complete.", false) {
+			t.Fatalf("convergence tripped on reply %d of conversation %q (cross-conversation contamination)", i, conv)
+		}
+	}
+	// A full streak WITHIN one conversation still trips.
+	for i := 0; i < DefaultDetectionConfig().ConvergenceThreshold; i++ {
+		tripped := cd.recordResponseFor("step-a", "stuck reply", false)
+		if i < DefaultDetectionConfig().ConvergenceThreshold-1 && tripped {
+			t.Fatalf("convergence tripped early at %d within-conversation replies", i+1)
+		}
+		if i == DefaultDetectionConfig().ConvergenceThreshold-1 && !tripped {
+			t.Fatal("within-conversation streak must still converge")
+		}
+	}
+	// Reset clears every lane.
+	cd.Reset()
+	if cd.recordResponseFor("step-a", "fresh", false) {
+		t.Fatal("post-reset first reply must not converge")
 	}
 }

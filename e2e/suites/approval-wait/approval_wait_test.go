@@ -28,9 +28,18 @@ import (
 // liveness reaper so the exemption window is observable in seconds.
 func waitStack(t *testing.T) *harness.Stack {
 	t.Helper()
+	// The approval pin lives on the STRATEGIC task gate
+	// (orchestrator.task_approval_step_threshold, default 5): a 6-step
+	// plan must park the TASK row at awaiting_approval. plans.mode must
+	// stay OFF for this pin: the dispatcher's plan-manager lane (5.5)
+	// intercepts planning intents whenever mode is "always"/threshold and
+	// synthesizes a docs plan instead of dispatching the strategic
+	// planner, so the scripted 6-step planner response and the task-level
+	// gate are never reached (with mode "always" the plan completes with
+	// zero phases - observed 2026-11-24).
 	return harness.Start(t, harness.WithConfigOverlay(map[string]any{
-		"plans.mode":                                     "always",
-		"plans.approval.require_approval":                true,
+		"plans.mode":                                     "off",
+		"plans.approval.require_approval":                false,
 		"orchestrator.turn_watchdog.enabled":             true,
 		"orchestrator.turn_watchdog.stale_after_seconds": 5,
 		"orchestrator.turn_watchdog.interval_seconds":    2,
@@ -111,7 +120,13 @@ func TestApprovalWaitNotReaped(t *testing.T) {
 		t.Fatalf("bus.subscribe returned no subscription_id: %v", sub)
 	}
 
-	ack := s.SubmitChatHTTP(t, sessionID, marker+": plan and execute the multi-step rework")
+	// The prompt must stay COMPOUND (plan + work halves) so the dispatcher
+	// creates a task whose approval gate the pin tests; a plain plan
+	// prompt now routes to the plan-manager docs lane (no task row).
+	// The "don't implement it" clause vetoes the intent auto-seal
+	// (PlanAutoSealFromIntent, usability residual 07), so the compiled
+	// plan parks at awaiting_approval instead of sealing through.
+	ack := s.SubmitChatHTTP(t, sessionID, marker+": plan the multi-step rework, don't implement it")
 	turnID, _ := ack["turn_id"].(string)
 	if turnID == "" {
 		t.Fatalf("ack missing turn_id: %+v", ack)
