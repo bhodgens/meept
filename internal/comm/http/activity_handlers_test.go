@@ -235,13 +235,13 @@ func TestActivityHandlers_RPCDelegation(t *testing.T) {
 	})
 }
 
-// sentinelRPCErr proves the fake's error path was never reached on invalid
+// errSentinelRPC proves the fake's error path was never reached on invalid
 // input: without boundary validation the handler calls the fake, which returns
 // this error, and the handler answers 500 instead of 400.
-var sentinelRPCErr = errors.New("rpc should not be called for invalid params")
+var errSentinelRPC = errors.New("rpc should not be called for invalid params")
 
 func TestExecutionHandlers_InvalidSinceIs400(t *testing.T) {
-	fake := &fakeRPCCall{Err: sentinelRPCErr}
+	fake := &fakeRPCCall{Err: errSentinelRPC}
 	s := &Server{rpcCall: fake.Call}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/executions?since=not-a-timestamp", nil)
@@ -269,7 +269,7 @@ func TestActivityHandlers_InvalidSinceAndUntilAre400(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fake := &fakeRPCCall{Err: sentinelRPCErr}
+			fake := &fakeRPCCall{Err: errSentinelRPC}
 			s := &Server{rpcCall: fake.Call}
 
 			req := httptest.NewRequest(http.MethodGet, tt.url, nil)
@@ -287,7 +287,7 @@ func TestActivityHandlers_InvalidSinceAndUntilAre400(t *testing.T) {
 }
 
 func TestActivityHandlers_InvalidFindingsSinceIs400(t *testing.T) {
-	fake := &fakeRPCCall{Err: sentinelRPCErr}
+	fake := &fakeRPCCall{Err: errSentinelRPC}
 	s := &Server{rpcCall: fake.Call}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/activity/findings?since=not-a-timestamp", nil)

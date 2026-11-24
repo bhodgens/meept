@@ -322,7 +322,6 @@ func (s *Stack) writeConfigs(sc *startConfig) {
 		workGlob,
 	)
 
-	cfg := []byte(cfgSrc)
 	// The harness always parses, injects its default posture, and
 	// re-serializes. Strip // comments (invalid JSON) and trailing
 	// commas before parsing; the daemon parses JSON5, so plain JSON
@@ -364,10 +363,10 @@ func (s *Stack) writeConfigs(sc *startConfig) {
 		if err != nil {
 			t.Fatalf("harness: serialize overlaid config: %v", err)
 		}
-		cfg = out
-	}
-	if err := os.WriteFile(filepath.Join(s.MeeptHome, "meept.json5"), cfg, 0o600); err != nil {
-		t.Fatalf("harness: write meept.json5: %v", err)
+		cfg := out
+		if err := os.WriteFile(filepath.Join(s.MeeptHome, "meept.json5"), cfg, 0o600); err != nil {
+			t.Fatalf("harness: write meept.json5: %v", err)
+		}
 	}
 
 	fakeV1 := s.Fake.URL() + "/v1"

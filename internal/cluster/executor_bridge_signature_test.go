@@ -17,9 +17,29 @@ import (
 	"encoding/base64"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
+
+// syncBuffer serializes log writes from the bridge's execute goroutine
+// with the test's log read. A plain bytes.Buffer races under -race.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
 
 // staticKeyLookup is a SigningKeyLookup over a fixed nodeID → pubkey map
 // (test double for *GossipEngine's registry).
@@ -299,7 +319,7 @@ func TestExecutorBridge_SetSigningKeyLookup_NilGuard(t *testing.T) {
 // keeps the previous key for the grace window so in-flight signatures
 // still verify. Key bytes must not appear in logs.
 func TestPeerSigningKeyDistribution_SignedRemoteDispatch(t *testing.T) {
-	var logBuf bytes.Buffer
+	var logBuf syncBuffer
 	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	pubA, privA, err := ed25519.GenerateKey(rand.Reader)

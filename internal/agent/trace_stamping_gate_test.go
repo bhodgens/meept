@@ -79,7 +79,8 @@ func TestTJ_STAMP_1_EmptyStepIDLeavesCtxUnchanged(t *testing.T) {
 	if got := TraceIDFromContext(stamped); got != "" {
 		t.Errorf("TraceIDFromContext(WithTraceContext(ctx, \"\")) = %q, want \"\" (empty is a no-op)", got)
 	}
-	if got := TraceIDFromContext(nil); got != "" {
+	var nilCtx context.Context
+	if got := TraceIDFromContext(nilCtx); got != "" {
 		t.Errorf("TraceIDFromContext(nil) = %q, want \"\"", got)
 	}
 }

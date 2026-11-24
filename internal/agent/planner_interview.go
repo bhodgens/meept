@@ -240,9 +240,7 @@ func (sp *StrategicPlanner) beginInterviewWait(taskID, sessionID string, resume 
 		defer ticker.Stop()
 		deadline := time.Now().Add(interviewWaitWindow)
 		for {
-			select {
-			case <-ticker.C:
-			}
+			<-ticker.C
 			if !sp.interviewWaitIsLive(taskID) {
 				return
 			}

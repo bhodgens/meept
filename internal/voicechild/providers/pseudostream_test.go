@@ -13,7 +13,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"io/fs"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -65,17 +65,20 @@ func TestNewSTTNativeNoDecorator(t *testing.T) {
 func gateParseProviders(t *testing.T) map[string]*ast.File {
 	t.Helper()
 	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, ".", func(fi fs.FileInfo) bool {
-		return !fi.IsDir() && strings.HasSuffix(fi.Name(), ".go") && !strings.HasSuffix(fi.Name(), "_test.go")
-	}, 0)
+	matches, err := filepath.Glob("*.go")
 	if err != nil {
-		t.Fatalf("parse providers package source: %v", err)
+		t.Fatalf("list providers package source: %v", err)
 	}
 	out := make(map[string]*ast.File)
-	for _, pkg := range pkgs {
-		for name, f := range pkg.Files {
-			out[name] = f
+	for _, name := range matches {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
 		}
+		f, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatalf("parse providers package source %s: %v", name, err)
+		}
+		out[name] = f
 	}
 	if len(out) == 0 {
 		t.Fatal("no provider source files found to gate")

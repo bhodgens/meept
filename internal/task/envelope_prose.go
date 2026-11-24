@@ -360,9 +360,8 @@ func findClaimsEnvelopeSpan(s string) (int, int, bool) {
 						return i, k + 1, true
 					}
 					// A brace-balanced fragment that is not a REAL
-					// claims/evidence object is ordinary prose. Keep
-					// scanning instead of truncating the display text.
-					break
+					// claims/evidence object is ordinary prose. The inner
+					// walk is at depth zero and ends with no envelope found.
 				}
 			}
 		}

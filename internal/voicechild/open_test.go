@@ -265,5 +265,5 @@ func TestOpenSetupNotBlockedBySlowAnalyzer(t *testing.T) {
 		t.Fatal("slow VAD session not closed after teardown (leak)")
 	}
 	_ = childConn.Close()
-	_ = <-runDone
+	<-runDone
 }

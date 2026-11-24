@@ -271,15 +271,6 @@ func (t *ShellExecuteTool) SetPermissionTable(pt *intsecurity.PermissionTable) {
 	t.permissionTable = pt
 }
 
-// checkPermissionTable consults the permission table for command. It is a
-// thin compatibility wrapper around the shared guard's permission-check
-// helper; the logic lives in internal/security so the builtin tool and
-// scheduler-fired shell jobs cannot drift. Returns an error when the table
-// denies or requires confirmation; nil when unset, allowed, or unmatched.
-func (t *ShellExecuteTool) checkPermissionTable(command string) error {
-	return intsecurity.CheckShellPermission(t.permissionTable, command)
-}
-
 // classifyForGuard adapts the builtin's locally-owned risk classifier to the
 // shared guard's classifier seam. The classifier stays here (rather than in
 // internal/security) because it depends on config-driven knownSafeCommands;

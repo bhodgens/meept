@@ -795,8 +795,6 @@ func (f *ContextFirewall) processMessages(ctx context.Context, messages []ChatMe
 			"messages", len(result),
 		)
 		result = clipped
-		currentTokens = f.countTokens(result)
-		utilization = float64(currentTokens) / float64(f.model.ContextLimit)
 	}
 
 	return result

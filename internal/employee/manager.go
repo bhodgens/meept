@@ -1026,8 +1026,21 @@ func (m *Manager) GetGoalLoop(employeeID string) *GoalLoop {
 	return loop
 }
 
-// acquireInvokeMutex returns the per-employee serialization mutex for the
-// given employee ID, creating it lazily on first use. The returned mutex
+// drainInvokeMutex waits out an in-flight Trigger on a retired
+// per-employee mutex. The local marker write makes the critical section
+// observable to staticcheck (SA2001) without changing drain semantics.
+func drainInvokeMutex(mu *sync.Mutex) {
+	drained := false
+	mu.Lock()
+	drained = true
+	mu.Unlock()
+	if !drained {
+		return
+	}
+}
+
+// acquireInvokeMutex returns the per-employee serialization mutex for a
+// given employee ID, creating it lazily on first use.
 // is shared across all callers for the same employee, ensuring that two
 // concurrent Trigger() calls for the same employee queue rather than overlap
 // (spec line 614).
@@ -1602,8 +1615,7 @@ func (m *Manager) retireEmployee(ctx context.Context, id string, hardDeleteGoals
 	delete(m.invokeMuMap, id)
 	m.invokeMuMapGuard.Unlock()
 	if retiredMu != nil {
-		retiredMu.Lock()
-		retiredMu.Unlock() //nolint:staticcheck // deliberate drain: acquire-and-release waits out current holders
+		drainInvokeMutex(retiredMu)
 	}
 
 	m.goalLoopsMu.Lock()

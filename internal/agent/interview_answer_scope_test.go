@@ -146,7 +146,7 @@ func deliverAnswerThroughHandler(t *testing.T, h *ChatHandler, msgBus *bus.Messa
 				return resp
 			}
 			t.Fatalf("answer did not resume the interview; got reply %q", resp.Reply)
-		case <-time.After(deadline.Sub(time.Now())):
+		case <-time.After(time.Until(deadline)):
 			t.Fatal("no chat.response from the answer turn")
 		}
 	}

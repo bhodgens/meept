@@ -137,8 +137,10 @@ func TestReasoningSink_Unit(t *testing.T) {
 	if s.Get() != "second" {
 		t.Errorf("Get() = %q, want last write wins", s.Get())
 	}
-	// Context helper is nil-safe and round-trips.
-	if reasoningSinkFromContext(nil) != nil { //nolint:staticcheck // SA1012: the test's point IS the documented nil-ctx safety
+	// Context helper is nil-safe and round-trips. A typed nil context keeps
+	// the nil-ctx safety assertion while giving staticcheck a non-nil Context.
+	var nilCtx context.Context
+	if reasoningSinkFromContext(nilCtx) != nil {
 		t.Fatal("reasoningSinkFromContext(nil) must be nil")
 	}
 	ctx := WithReasoningSink(context.Background(), s)

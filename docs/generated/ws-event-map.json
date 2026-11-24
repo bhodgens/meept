@@ -45,6 +45,21 @@
     "event_type": "board_event"
   },
   {
+    "topic_pattern": "task.error",
+    "match": "exact",
+    "event_type": "agent_progress"
+  },
+  {
+    "topic_pattern": "task.review_completed",
+    "match": "exact",
+    "event_type": "agent_progress"
+  },
+  {
+    "topic_pattern": "step.review_completed",
+    "match": "exact",
+    "event_type": "agent_progress"
+  },
+  {
     "topic_pattern": "metrics.*",
     "match": "prefix",
     "event_type": "metrics_update"

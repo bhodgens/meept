@@ -455,24 +455,24 @@ func (s *SidebarModel) refreshData() tea.Cmd {
 				var resp struct {
 					Plans []types.PlanExtended `json:"plans"`
 				}
-				if json.Unmarshal(raw, &resp) == nil {
-					for _, p := range resp.Plans {
-						// Document proposal (06-planning/03): a 0-phase
-						// plan (evolver markdown proposal) is no longer
-						// skipped -- the panel surfaces its title so the
-						// document is visible in the sidebar.
-						planTitle = p.Title
-						if planTitle == "" {
-							planTitle = p.ID
-						}
-						if len(p.Phases) == 0 {
-							// Empty phase list = document proposal; keep
-							// the title, nothing to break down per phase.
-							// Shared wording via models.DocumentProposalLine
-							// (reuses planCountLine - no fork).
-							planDocNote = models.DocumentProposalLine()
-							break
-						}
+				if json.Unmarshal(raw, &resp) == nil && len(resp.Plans) > 0 {
+					// Only the first plan feeds the sidebar.
+					// Document proposal (06-planning/03): a 0-phase
+					// plan (evolver markdown proposal) is no longer
+					// skipped -- the panel surfaces its title so the
+					// document is visible in the sidebar.
+					p := resp.Plans[0]
+					planTitle = p.Title
+					if planTitle == "" {
+						planTitle = p.ID
+					}
+					if len(p.Phases) == 0 {
+						// Empty phase list = document proposal; keep
+						// the title, nothing to break down per phase.
+						// Shared wording via models.DocumentProposalLine
+						// (reuses planCountLine - no fork).
+						planDocNote = models.DocumentProposalLine()
+					} else {
 						for _, ph := range p.Phases {
 							planPhases = append(planPhases, components.PhaseRow{
 								Name:           ph.Name,
@@ -482,7 +482,6 @@ func (s *SidebarModel) refreshData() tea.Cmd {
 								CompletedSteps: ph.CompletedSteps,
 							})
 						}
-						break
 					}
 				}
 			}
