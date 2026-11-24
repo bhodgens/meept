@@ -19614,7 +19614,7 @@ The default fallback topic is "general".
 
 	func (td *TopicDetector) Detect(input string) string
 
-Detect returns the topic label that best matches the given input. It scores every topic by the number of keyword matches \(after lower\-casing the input\) and returns the topic with the highest score. When two topics tie, the first encountered wins; the default topic is returned when all scores are zero.
+Detect returns the topic label that best matches the given input. It scores every topic by the number of keyword matches \(after lower\-casing the input\) and returns the topic with the highest score. When two topics tie, the earlier topic in declaration order wins \- deterministically, never by map iteration order, so the same input always routes to the same thread. The default topic is returned when all scores are zero.
 
 Detect is safe for concurrent use.
 
