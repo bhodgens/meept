@@ -3637,6 +3637,14 @@ func voiceClockStampFromContext(ctx context.Context) (string, bool) {
 // Conversation.AddUserMessageWithParts so that provider serializers emit
 // native image blocks.
 func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, parts []llm.ContentPart, conversationID string) (response string, err error) {
+	// In-flight turn marker (bughunt 2026-11-23 residual 5b): the scoped-loop
+	// caches (ChatHandler.scopedChatLoop, Dispatcher.scopedSessionLoop) defer
+	// closing a stale loop while this flag is set, so a workingDir change
+	// mid-turn can never Close() a loop with a live turn on it. Parked turns
+	// clear the flag on return and re-set it when the resume re-enters here —
+	// a parked loop is safe to close (nothing is executing on it).
+	l.isActive.Store(true)
+	defer l.isActive.Store(false)
 	// C2: the one-shot prefix applies only to this RunOnce, then clears,
 	// even if the turn returns before the prompt is sent.
 	turnPrefix := l.consumeTurnSystemPrefix()
@@ -4532,6 +4540,10 @@ func (l *AgentLoop) RunWithSkill(ctx context.Context, skill *skills.Skill, input
 	if l.llm == nil {
 		return "", ErrNoLLMClient
 	}
+	// In-flight marker (see RunOnceWithParts): scoped-loop caches defer
+	// closing a stale loop while a turn executes on it.
+	l.isActive.Store(true)
+	defer l.isActive.Store(false)
 
 	l.logger.Info("Executing skill through agent loop",
 		"skill", skill.Name,
@@ -8200,6 +8212,10 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 	if l.llm == nil {
 		return "", ErrNoLLMClient
 	}
+	// In-flight marker (see RunOnceWithParts): scoped-loop caches defer
+	// closing a stale loop while a turn executes on it.
+	l.isActive.Store(true)
+	defer l.isActive.Store(false)
 
 	// Use first linked session or task ID as conversation ID
 	conversationID := t.ID

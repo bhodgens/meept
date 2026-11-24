@@ -1181,6 +1181,58 @@ func TestChatHandler_ScopedLoopsWorkingDirChangeClosesStale(t *testing.T) {
 	}
 }
 
+// Bughunt residual 5b (2026-11-23): a workingDir change while a turn is
+// IN FLIGHT on the stale loop must NOT close it inline — Close's rewake/
+// teardown can disturb the running turn. The close is deferred to a bounded
+// waiter that fires as soon as the turn marker clears.
+func TestChatHandler_ScopedLoopsInFlightStaleCloseDeferred(t *testing.T) {
+	singletonLoop := NewAgentLoop("singleton", "/tmp")
+	h := NewChatHandler(singletonLoop, nil, nil, slogDiscardLogger())
+	defer func() {
+		if err := h.Stop(t.Context()); err != nil {
+			t.Fatalf("Stop: %v", err)
+		}
+	}()
+
+	const convID = "conv-scoped-inflight"
+	first := h.scopedChatLoop(convID, "/repos/a", nil)
+	if first == nil {
+		t.Fatal("first scopedChatLoop returned nil")
+	}
+
+	// Simulate a live turn: RunOnceWithParts holds isActive for the turn's
+	// duration; the test arms the same marker directly.
+	first.SetActive(true)
+
+	second := h.scopedChatLoop(convID, "/repos/b", nil)
+	if second == nil {
+		t.Fatal("second scopedChatLoop returned nil")
+	}
+	if first.closed.Load() {
+		t.Fatal("stale loop with an in-flight turn was closed inline; Close must be deferred until the turn ends")
+	}
+
+	// The turn ends: the deferred waiter must close the stale loop.
+	first.SetActive(false)
+	deadline := time.Now().Add(3 * time.Second)
+	for !first.closed.Load() && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !first.closed.Load() {
+		t.Fatal("stale loop never closed after the in-flight turn ended")
+	}
+	// The replacement stays live and cached.
+	if second.closed.Load() {
+		t.Fatal("replacement loop was closed by the deferred waiter")
+	}
+	h.scopedLoopsMu.Lock()
+	cached := h.scopedLoops[convID]
+	h.scopedLoopsMu.Unlock()
+	if cached != second {
+		t.Fatalf("cache holds %p, want the replacement %p", cached, second)
+	}
+}
+
 func TestChatHandler_SetAgentLoopManager_NilSafe(t *testing.T) {
 	h := NewChatHandler(nil, nil, nil, slogDiscardLogger())
 	h.SetAgentLoopManager(nil) // should not panic

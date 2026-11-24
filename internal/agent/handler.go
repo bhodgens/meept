@@ -4134,16 +4134,14 @@ func fenceSet(loop *AgentLoop, fence *security.PermissionChecker) error {
 // does not violate the mutex-scope rule; the stale loop's Close (which
 // waits on background goroutines) still runs OUTSIDE the lock.
 //
-// Residual risk (deliberate, bughunt 2026-11-23): the stale loop's Close
-// on a workingDir change has NO in-flight turn check — AgentLoop exposes
-// no maintained in-flight flag (isActive is only ever stored false in
-// production; SetActive has no live-turn caller), and Close's wg.Wait
-// bounds the teardown to background goroutines, not a running turn. A
-// turn executing on the stale loop while the project changes mid-session
-// keeps its loop object alive for the turn's duration (Go GC), but its
-// workingDir is outdated by definition — that is the replacement's
-// purpose. Adding a lifecycle mechanism for this was judged out of
-// proportion; documented instead.
+// Residual risk CLOSED (bughunt 2026-11-23, residual 5b): the stale loop's
+// Close on a workingDir change now checks the in-flight turn marker —
+// AgentLoop.RunOnceWithParts sets isActive for the turn's duration — and an
+// active stale loop is closed by closeStaleScopedLoop's bounded waiter
+// instead of immediately, so a mid-turn project change can never Close() a
+// loop with a live turn on it. A parked turn clears the marker on park (its
+// resume re-enters RunOnceWithParts and re-sets it), so parked loops close
+// promptly.
 func (h *ChatHandler) scopedChatLoop(conversationID, workingDir string, sess *session.Session) *AgentLoop {
 	if conversationID == "" || workingDir == "" || h.loop == nil {
 		return nil
@@ -4174,9 +4172,42 @@ func (h *ChatHandler) scopedChatLoop(conversationID, workingDir string, sess *se
 	// Close outside the lock: AgentLoop.Close waits on background
 	// goroutines (wg.Wait) — never block the map mutex on it.
 	if stale != nil {
-		stale.Close()
+		closeStaleScopedLoop(stale, h.logger, conversationID)
 	}
 	return loop
+}
+
+// closeStaleScopedLoop closes a loop evicted from a scoped-loop cache.
+// When the evicted loop still has an in-flight turn (isActive — set for the
+// turn's duration by RunOnceWithParts/RunWithTask/RunWithSkill), Close is
+// deferred to a bounded background waiter instead of running inline: Close's
+// rewake/teardown path can disturb a running turn, and the caller (a chat
+// dispatch resolving its loop) must not block on somebody else's turn.
+// The waiter polls the marker, closes as soon as the turn ends, and gives up
+// after scopedLoopCloseTimeout — an abandoned loop then leaks only its
+// background goroutines until process exit, the pre-fix behavior, but the
+// live-turn hazard is gone.
+const scopedLoopCloseTimeout = 5 * time.Minute
+
+func closeStaleScopedLoop(stale *AgentLoop, logger *slog.Logger, conversationID string) {
+	if stale == nil {
+		return
+	}
+	if !stale.IsActive() {
+		stale.Close()
+		return
+	}
+	if logger != nil {
+		logger.Debug("scoped loop replaced while a turn is in flight; deferring close",
+			"conversation_id", conversationID)
+	}
+	go func() {
+		deadline := time.Now().Add(scopedLoopCloseTimeout)
+		for stale.IsActive() && time.Now().Before(deadline) {
+			time.Sleep(100 * time.Millisecond)
+		}
+		stale.Close()
+	}()
 }
 
 // wireSessionLoop arms the fence and wires session identity on a

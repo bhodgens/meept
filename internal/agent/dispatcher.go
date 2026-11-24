@@ -830,6 +830,25 @@ func (d *Dispatcher) Stop() {
 		d.indexCancel()
 	}
 	d.indexWG.Wait()
+
+	// Close every cached scoped loop (bughunt 2026-11-23): scopedSessionLoop
+	// caches per-conversation loops nothing else owns — without this pass
+	// they accumulate unclosed for the dispatcher's lifetime (each holding
+	// its background-goroutine waitgroup and rewake consumer). Collect under
+	// scopedLoopsMu, Close outside it (mutex scope rule: Close waits on
+	// goroutines). Mirrors ChatHandler.Stop's scoped-loop drain.
+	d.scopedLoopsMu.Lock()
+	loops := make([]*AgentLoop, 0, len(d.scopedLoops))
+	for id, loop := range d.scopedLoops {
+		if loop != nil {
+			loops = append(loops, loop)
+		}
+		delete(d.scopedLoops, id)
+	}
+	d.scopedLoopsMu.Unlock()
+	for _, loop := range loops {
+		loop.Close()
+	}
 }
 
 // SetThreadRouter wires a ThreadRouter onto the dispatcher, enabling
@@ -3922,7 +3941,7 @@ func (d *Dispatcher) scopedSessionLoop(agentID, conversationID, workingDir strin
 	}
 	d.scopedLoopsMu.Unlock()
 	if stale != nil {
-		stale.Close()
+		closeStaleScopedLoop(stale, d.logger, conversationID)
 	}
 
 	template, templateErr := d.registry.Get(agentID)
@@ -3957,6 +3976,17 @@ func (d *Dispatcher) scopedSessionLoop(agentID, conversationID, workingDir strin
 	d.scopedLoopsMu.Lock()
 	if d.scopedLoops == nil {
 		d.scopedLoops = make(map[string]*AgentLoop)
+	}
+	// Insert-under-check (bughunt 2026-11-23): this build runs OUTSIDE the
+	// map lock (registry lookup + fence wiring), so two concurrent misses
+	// for one conversation can both reach here. The first insert wins; the
+	// loser closes its own build and returns the winner — an unconditional
+	// overwrite orphaned the first loop (never closed, same class the
+	// ChatHandler cache fixed with build-and-swap under one hold).
+	if existing, ok := d.scopedLoops[conversationID]; ok && existing != nil {
+		d.scopedLoopsMu.Unlock()
+		closeStaleScopedLoop(loop, d.logger, conversationID)
+		return existing
 	}
 	d.scopedLoops[conversationID] = loop
 	d.scopedLoopsMu.Unlock()
