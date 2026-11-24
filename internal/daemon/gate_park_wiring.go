@@ -77,9 +77,13 @@ func (c *Components) wireGateParker() {
 			// Audit HITL-1: goal-kind rows re-enter the owning loop's
 			// completion replay (the goal-gate resume callback resolves
 			// the loop by employee_id from the row's re-entry payload).
-			// Plan rows keep the notify-only path above.
+			// Plan rows keep the notify-only path above. The drain ctx
+			// carries the invoke-mutex-held marker when this callback
+			// rides the manager-routed ResumeGoalGateParked drain (see
+			// goalGateDrainLockedKey); unmarked drains serialize inside
+			// resumeGoalGateFromDrain itself.
 			if data.GateKind == goalGateApprovalKind {
-				c.resumeGoalGateFromDrain(data)
+				c.resumeGoalGateFromDrain(ctx, data)
 			}
 			c.Logger.Info("gate checkpoint resumed",
 				"gate_kind", data.GateKind,

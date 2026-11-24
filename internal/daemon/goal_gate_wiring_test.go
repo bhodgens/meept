@@ -9,12 +9,15 @@ import (
 	"context"
 	"log/slog"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/employee"
+	"github.com/caimlas/meept/internal/llm"
 )
 
 // newGoalGateHarness builds components with a real bus, real park store,
@@ -182,4 +185,227 @@ func TestGoalGateNilWiringNoop(t *testing.T) {
 		t.Fatalf("resume reported success without a parker")
 	}
 	_ = time.Now // keep time import if assertions change
+}
+
+// blockingReflector is a Reflector whose Chat blocks until released, so a
+// test can observe WHEN the goal-gate resume re-entry actually runs.
+type blockingReflector struct {
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+	calls   atomic.Int32
+}
+
+func newBlockingReflector() *blockingReflector {
+	return &blockingReflector{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+}
+
+func (b *blockingReflector) Chat(_ context.Context, _ []llm.ChatMessage, _ ...llm.ChatOption) (*llm.Response, error) {
+	b.calls.Add(1)
+	b.once.Do(func() { close(b.entered) })
+	<-b.release
+	return &llm.Response{Content: `{"health":"healthy","reasoning":"ok"}`}, nil
+}
+
+// TestGoalGatePumpDrainSerializesUnderInvokeMutex pins the bughunt
+// serialization fix on the PUMP drain path: a goal-gate drain that does NOT
+// ride Manager.ResumeGoalGateParked (a direct GateParker.ResumeByKey, the
+// plan.approved pump / restart re-arm shape) must acquire the employee's
+// per-employee invoke mutex before re-entering the loop — while a round
+// holds the mutex, the drain BLOCKS instead of running a concurrent round.
+//
+// Failing revert: drop the AcquireInvokeMutexForResume lock in
+// resumeGoalGateFromDrain — the re-entry runs immediately while the mutex
+// is held and this test fails on the concurrent-entry check.
+func TestGoalGatePumpDrainSerializesUnderInvokeMutex(t *testing.T) {
+	logger := slog.New(slog.DiscardHandler)
+	mb := bus.New(nil, logger)
+	store, err := agent.NewSQLiteParkStore(filepath.Join(t.TempDir(), "parks.db"), logger)
+	if err != nil {
+		t.Fatalf("park store: %v", err)
+	}
+	defer store.Close()
+	goalStore, err := employee.NewGoalStore(filepath.Join(t.TempDir(), "goals.db"), logger)
+	if err != nil {
+		t.Fatalf("goal store: %v", err)
+	}
+	defer goalStore.Close()
+
+	c := &Components{
+		Logger:            logger,
+		msgBus:            mb,
+		ParkStore:         store,
+		EmployeeGoalStore: goalStore,
+	}
+	c.wireGateParker()
+	if c.GateParker == nil {
+		t.Fatalf("gate parker not wired")
+	}
+	c.EmployeeManager = employee.NewManagerWithStores(nil, nil, nil, goalStore, nil, logger)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c.StartGateParkPump(ctx)
+
+	const employeeID = "emp-pump-serial"
+	reflector := newBlockingReflector()
+	loop := employee.NewGoalLoop(employeeID, nil, goalStore, logger).
+		WithReflector(reflector)
+	c.EmployeeManager.RegisterGoalLoop(employeeID, loop)
+
+	// Park a goal gate with a decodable re-entry (plan_id + employee_id +
+	// a SUCCESSFUL result), mirroring parkGateApproval's TurnReentry shape:
+	// the resumed Reflect reaches the reflector only on the success path,
+	// which is what makes the blocking reflector observable.
+	const goalID = "goal-pump-serial"
+	parked := loop.GoalGateParkCheckpoint(agent.GateParkData{
+		GateKind: "goal",
+		GateID:   goalID,
+		TurnReentry: map[string]any{
+			"plan_id":     "plan-pump-serial",
+			"employee_id": employeeID,
+			"result":      map[string]any{"BotID": employeeID, "Success": true, "Output": "done"},
+		},
+		RequestedAt: timeNowUTC(),
+	})
+	if !parked {
+		t.Fatalf("goal gate park refused")
+	}
+
+	// Hold the invoke mutex the way a trigger round does
+	// (triggerViaGoalLoop holds it across Decide).
+	invokeMu := c.EmployeeManager.AcquireInvokeMutexForResume(employeeID)
+	invokeMu.Lock()
+
+	drained := make(chan bool, 1)
+	go func() {
+		drained <- c.GateParker.ResumeByKey(context.Background(), "goal", goalID)
+	}()
+
+	// The parker invokes the resume callback synchronously (wg-wrapped
+	// immediate call in agent resumeByKey), so the drain BLOCKS until the
+	// queued re-entry finishes — which must not happen while the round
+	// holds the mutex.
+	select {
+	case ok := <-drained:
+		t.Fatalf("pump drain completed (resumed=%v) while the invoke mutex "+
+			"was held — the re-entry ran concurrently with the round "+
+			"(serialization regression)", ok)
+	case <-reflector.entered:
+		t.Fatal("resume re-entry ran while the invoke mutex was held " +
+			"(concurrent rounds for one employee — serialization regression)")
+	case <-time.After(200 * time.Millisecond):
+		// Still waiting on the mutex: correct serialization.
+	}
+
+	// Release the round: the queued re-entry must now run (the callback is
+	// still synchronous inside ResumeByKey, so the drain returns only once
+	// the re-entry completes).
+	invokeMu.Unlock()
+	select {
+	case <-reflector.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("queued resume re-entry never ran after the mutex released")
+	}
+	close(reflector.release)
+	select {
+	case ok := <-drained:
+		if !ok {
+			t.Fatalf("pump drain found no parked row")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("drain never completed after the re-entry finished")
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for reflector.calls.Load() < 1 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if n := reflector.calls.Load(); n != 1 {
+		t.Fatalf("resume re-entry ran %d times; want exactly 1 (at-most-once drain)", n)
+	}
+	if n := c.GateParker.PendingGates(); n != 0 {
+		t.Fatalf("pending gates = %d, want 0 after the drain", n)
+	}
+}
+
+// TestGoalGateManagerDrainNoSelfDeadlock pins the other half: the
+// manager-routed RPC drain (ResumeGoalGateParked, which holds the invoke
+// mutex across its resume probe) must NOT re-lock the same non-reentrant
+// mutex inside the callback — the drain completes and the loop re-entry
+// runs exactly once.
+//
+// Failing revert: remove the goalGateDrainLocked ctx marker (or the stamp
+// in the resume probe) — the callback re-locks the held mutex and this
+// test deadlocks/times out.
+func TestGoalGateManagerDrainNoSelfDeadlock(t *testing.T) {
+	logger := slog.New(slog.DiscardHandler)
+	mb := bus.New(nil, logger)
+	store, err := agent.NewSQLiteParkStore(filepath.Join(t.TempDir(), "parks.db"), logger)
+	if err != nil {
+		t.Fatalf("park store: %v", err)
+	}
+	defer store.Close()
+	goalStore, err := employee.NewGoalStore(filepath.Join(t.TempDir(), "goals.db"), logger)
+	if err != nil {
+		t.Fatalf("goal store: %v", err)
+	}
+	defer goalStore.Close()
+
+	c := &Components{
+		Logger:            logger,
+		msgBus:            mb,
+		ParkStore:         store,
+		EmployeeGoalStore: goalStore,
+	}
+	c.wireGateParker()
+	c.EmployeeManager = employee.NewManagerWithStores(nil, nil, nil, goalStore, nil, logger)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c.StartGateParkPump(ctx)
+
+	const employeeID = "emp-mgr-nodeadlock"
+	reflector := newBlockingReflector()
+	close(reflector.release) // non-blocking: the re-entry may run immediately
+	loop := employee.NewGoalLoop(employeeID, nil, goalStore, logger).
+		WithReflector(reflector)
+	c.EmployeeManager.RegisterGoalLoop(employeeID, loop)
+
+	const goalID = "goal-mgr-nodeadlock"
+	if !loop.GoalGateParkCheckpoint(agent.GateParkData{
+		GateKind: "goal",
+		GateID:   goalID,
+		TurnReentry: map[string]any{
+			"plan_id":     "plan-mgr-nodeadlock",
+			"employee_id": employeeID,
+			"result":      map[string]any{"BotID": employeeID, "Success": true, "Output": "done"},
+		},
+		RequestedAt: timeNowUTC(),
+	}) {
+		t.Fatalf("goal gate park refused")
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		resumed, err := c.EmployeeManager.ResumeGoalGateParked(ctx, employeeID, goalID)
+		if err != nil {
+			t.Errorf("manager drain: %v", err)
+		}
+		if !resumed {
+			t.Error("manager drain reported resumed=false for a parked row")
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("manager-routed drain self-deadlocked on the invoke mutex " +
+			"(the callback re-locked a mutex the manager already holds)")
+	}
+	if n := reflector.calls.Load(); n != 1 {
+		t.Fatalf("resume re-entry ran %d times; want exactly 1", n)
+	}
 }

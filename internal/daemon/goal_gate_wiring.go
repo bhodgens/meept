@@ -39,6 +39,26 @@ import (
 // (the parker's key namespace is <gate_kind>|<gate_id>).
 const goalGateApprovalKind = "goal"
 
+// goalGateDrainLockedKey marks a drain context that ALREADY runs under the
+// employee's per-employee invoke mutex (bughunt serialization fix).
+// Manager.ResumeGoalGateParked holds the mutex across its resume probe, and
+// the parker invokes the resume callback SYNCHRONOUSLY on that goroutine
+// (agent resumeByKey's wg-wrapped immediate call), so the loop re-entry on
+// the RPC path is serialized by the manager. Any OTHER drain of a goal row
+// (a direct GateParker.ResumeByKey from a pump or a restart re-arm) carries
+// no marker and the callback acquires the mutex itself. The marker lives on
+// the context because the callback's only link to its initiator is the ctx
+// the parker threads through — sync.Mutex is not reentrant, so a blind lock
+// in the callback would self-deadlock the RPC path.
+type goalGateDrainLockedKey struct{}
+
+// goalGateDrainLocked reports whether ctx was stamped by the manager-routed
+// drain probe (see goalGateDrainLockedKey).
+func goalGateDrainLocked(ctx context.Context) bool {
+	locked, _ := ctx.Value(goalGateDrainLockedKey{}).(bool)
+	return locked
+}
+
 // goalGateParkAdapter wraps the components' GateParker into the
 // Manager.SetGoalGateParker park seam. Nil parker → the seam reports false
 // (parking disabled: approval gates degrade to at_risk in the loop).
@@ -55,7 +75,19 @@ func (c *Components) goalGateParkAdapter(data agent.GateParkData) bool {
 // employee id rides the row's TurnReentry (stamped at park time); a row
 // without it (older park) is logged and dropped — a later round re-raises
 // the gate.
-func (c *Components) resumeGoalGateFromDrain(data agent.GateParkData) {
+//
+// Serialization (bughunt): the loop re-entry runs under the employee's
+// per-employee invoke mutex — the SAME critical section triggerViaGoalLoop
+// holds across Decide (mirrors the quota-resume callback wiring in
+// components.go) — so a drain landing mid-round queues instead of running
+// two concurrent rounds for one employee (interleaved transcript, double
+// counters). Drains that ALREADY hold the mutex are marked on their ctx
+// (goalGateDrainLockedKey): Manager.ResumeGoalGateParked locks across its
+// resume probe and the parker runs this callback synchronously on that
+// goroutine, so re-locking there would self-deadlock (sync.Mutex is not
+// reentrant). The row is already deleted before the callback runs, so a
+// drain that blocks on the mutex never loses the re-entry — it waits.
+func (c *Components) resumeGoalGateFromDrain(ctx context.Context, data agent.GateParkData) {
 	if c == nil || c.EmployeeManager == nil {
 		return
 	}
@@ -73,7 +105,19 @@ func (c *Components) resumeGoalGateFromDrain(data agent.GateParkData) {
 		)
 		return
 	}
-	loop.ResumeGoalGate(context.Background(), data.TurnReentry)
+	resumeCtx := context.Background()
+	if ctx != nil {
+		resumeCtx = ctx
+	}
+	if goalGateDrainLocked(resumeCtx) {
+		// Already under the invoke mutex (manager-routed RPC drain).
+		loop.ResumeGoalGate(resumeCtx, data.TurnReentry)
+		return
+	}
+	invokeMu := c.EmployeeManager.AcquireInvokeMutexForResume(employeeID)
+	invokeMu.Lock()
+	defer invokeMu.Unlock()
+	loop.ResumeGoalGate(resumeCtx, data.TurnReentry)
 }
 
 // wireGoalGateApproval installs the approval-gate park seam on the
@@ -99,7 +143,16 @@ func (c *Components) wireGoalGateApproval() {
 		if c.GateParker == nil {
 			return false
 		}
-		return c.GateParker.ResumeByKey(ctx, goalGateApprovalKind, goalID)
+		// Stamp the invoke-mutex-held marker: the parker runs the resume
+		// callback synchronously on THIS goroutine while
+		// Manager.ResumeGoalGateParked holds the employee's invoke mutex,
+		// so the callback must not re-lock it (see goalGateDrainLockedKey).
+		resumeCtx := ctx
+		if resumeCtx == nil {
+			resumeCtx = context.Background()
+		}
+		resumeCtx = context.WithValue(resumeCtx, goalGateDrainLockedKey{}, true)
+		return c.GateParker.ResumeByKey(resumeCtx, goalGateApprovalKind, goalID)
 	})
 	c.Logger.Info("goal approval gate seams wired",
 		"gate_kind", goalGateApprovalKind,
