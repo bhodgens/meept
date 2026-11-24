@@ -31,3 +31,34 @@ func TestStripClaimsEvidenceOrProse(t *testing.T) {
 		t.Errorf("plain prose altered: %q", got3)
 	}
 }
+
+// TestStripClaimsEvidenceOrProse_MalformedClaimsShapedProseSurvives pins the
+// bughunt-wave2 finding-5 guard port (mirrors internal/task's
+// isClaimsEnvelopeJSON tightening, cccf5b64): a brace-balanced fragment
+// that merely STARTS with a claims/evidence key but is not a fully-parsing
+// JSON envelope must survive — the leading-key prefix check used to
+// truncate the conversational reply at the fragment while the task
+// boundary kept it.
+func TestStripClaimsEvidenceOrProse_MalformedClaimsShapedProseSurvives(t *testing.T) {
+	// Brace-balanced but NOT valid JSON (bare identifiers, unquoted keys
+	// mixed with prose): the prefix check matched, the full parse must not.
+	malformed := `The report said {"claims": we shipped it, "evidence": see the log} and then continued.`
+	got := StripClaimsEvidenceOrProse(malformed)
+	if !strings.Contains(got, "and then continued") {
+		t.Errorf("trailing prose truncated by malformed claims-shaped fragment: %q", got)
+	}
+	if !strings.Contains(got, "The report said") {
+		t.Errorf("leading prose lost: %q", got)
+	}
+
+	// A REAL envelope is still stripped/prose-recovered (guard must not
+	// over-tighten): claims + evidence keys with valid JSON.
+	real := `Done. {"claims":["created"],"evidence":[{"type":"file_exists","path":"/w/hello.txt"}]}`
+	got2 := StripClaimsEvidenceOrProse(real)
+	if strings.Contains(got2, `"claims"`) {
+		t.Errorf("real envelope keys leaked: %q", got2)
+	}
+	if !strings.Contains(got2, "Done.") {
+		t.Errorf("prose before real envelope lost: %q", got2)
+	}
+}
