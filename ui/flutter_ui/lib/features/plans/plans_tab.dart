@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -5,6 +7,7 @@ import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../widgets/background_image.dart';
 import '../../models/api_models.dart';
+import '../../models/ws_events.dart' show WsEventTypes;
 import '../../providers/providers.dart';
 import '../../providers/tab_activation_provider.dart'
     show keyboardFocusProvider;
@@ -20,6 +23,12 @@ class _PlansTabState extends ConsumerState<PlansTab> {
   int _selectedIndex = 0;
   final _listFocusNode = FocusNode();
 
+  /// Live gate refresh: a task.pending_approval bus frame arrives as a
+  /// job_update (source_topic-tagged) while this tab is mounted, so the
+  /// gate card appears without leaving and re-entering the tab (bughunt
+  /// wave2 parity with the TUI, which rebuilds gates on the event).
+  StreamSubscription<Map<String, dynamic>>? _pendingApprovalSub;
+
   @override
   void initState() {
     super.initState();
@@ -31,10 +40,19 @@ class _PlansTabState extends ConsumerState<PlansTab> {
       // render the gate/seal cards alongside the plans.db rows.
       ref.read(taskProvider.notifier).loadTasks();
     });
+    _pendingApprovalSub = ref.read(websocketProvider).messageStream.listen((
+      msg,
+    ) {
+      if (msg['type'] != WsEventTypes.jobUpdate) return;
+      if (msg['source_topic'] != 'task.pending_approval') return;
+      // Cheap full reload; no debounce needed (one frame per gate).
+      ref.read(taskProvider.notifier).loadTasks();
+    });
   }
 
   @override
   void dispose() {
+    _pendingApprovalSub?.cancel();
     _listFocusNode.dispose();
     super.dispose();
   }
@@ -699,13 +717,24 @@ class _TaskGateSection extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final tasks = ref.watch(taskProvider).tasks;
-    final pendingApproval = tasks
+    // Session scoping (TUI parity, internal/tui/models/plans.go
+    // pendingTaskGatesForFilter): an empty filter shows every gate, a
+    // task with an empty/null session id (legacy publisher / rebind
+    // window) shows in every filter, and only an explicit FOREIGN
+    // session id is dropped.
+    final filter = sessionId ?? '';
+    final scoped = tasks.where((t) {
+      if (filter.isEmpty) return true;
+      final taskSession = t.sessionId ?? '';
+      return taskSession.isEmpty || taskSession == filter;
+    });
+    final pendingApproval = scoped
         .where((t) => t.status == 'awaiting_approval')
         .toList(growable: false);
-    final drafts = tasks
+    final drafts = scoped
         .where((t) => t.status == 'planning' && _draftMarkdownOf(t) != null)
         .toList(growable: false);
-    final waiting = tasks
+    final waiting = scoped
         .where((t) => _waitStateCopy(t.status) != null)
         .toList(growable: false);
 
