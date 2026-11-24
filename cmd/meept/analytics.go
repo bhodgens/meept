@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -562,15 +563,31 @@ func runAnalyticsReviewsRunE(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid --group-by %q (want model, judge, category, rubric, or model_category)", groupBy)
 	}
 
-	store, err := metrics.NewStore(&metrics.StoreConfig{
-		DatabasePath:  config.MeeptPath("metrics.db"),
-		BatchSize:     metrics.DefaultBatchSize,
-		FlushInterval: metrics.DefaultFlushInterval,
-	})
+	// Read-only open (bughunt 2026-11-23): the sibling analytics
+	// subcommands query through a read-only handle, but this command used
+	// metrics.NewStore — full schema-init, migrations, and an unconditional
+	// backfill UPDATE against the daemon's LIVE metrics.db (SQLite write
+	// locks while the daemon runs). The verdict rollups are pure SELECTs;
+	// serve them from the query_only handle like the siblings do. The path
+	// stays config.MeeptPath (MEEPT_HOME-aware), unlike openMetricsDB's
+	// fixed DefaultDatabasePath.
+	store, err := metrics.OpenReadOnly(config.MeeptPath("metrics.db"))
 	if err != nil {
+		if os.IsNotExist(errors.Unwrap(err)) {
+			// No metrics DB yet: the rollup is legitimately empty. The
+			// legacy NewStore open CREATED the file (a write on open —
+			// the very thing this fix removes), so an absent DB must
+			// degrade to the empty verdicts line, not an error.
+			fmt.Fprintln(cmd.OutOrStdout(), "(no verdicts recorded)")
+			return nil
+		}
 		return fmt.Errorf("failed to open metrics database: %w", err)
 	}
-	defer store.Close()
+	defer func() {
+		if cerr := store.Close(); cerr != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: failed to close metrics database: %v\n", cerr)
+		}
+	}()
 
 	since := time.Now().UTC().AddDate(0, 0, -days)
 

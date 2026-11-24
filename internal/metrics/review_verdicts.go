@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/modelrating"
+	"github.com/jmoiron/sqlx"
 )
 
 // validateVerdictVocab enforces the C1 vocabulary rules by delegating to the
@@ -214,6 +215,13 @@ func rubricStatements() map[string]string {
 // PassRate = pass-category rows / total rows in the group (0 when empty).
 // Workflow-scope rows are excluded unless q.IncludeWorkflow is set.
 func (s *Store) QueryReviewVerdicts(q ReviewVerdictQuery) ([]ReviewVerdictRow, error) {
+	return queryReviewVerdicts(s.db, q)
+}
+
+// queryReviewVerdicts is the sqlx-level implementation shared by *Store and
+// *ReadOnlyStore (the CLI analytics path must never open the daemon's live
+// metrics.db for writing — bughunt 2026-11-23).
+func queryReviewVerdicts(db *sqlx.DB, q ReviewVerdictQuery) ([]ReviewVerdictRow, error) {
 	col, ok := verdictGroupColumn[q.GroupBy]
 	if !ok {
 		return nil, fmt.Errorf("invalid GroupBy %q (want model, judge, category, or rubric)", q.GroupBy)
@@ -253,7 +261,7 @@ func (s *Store) QueryReviewVerdicts(q ReviewVerdictQuery) ([]ReviewVerdictRow, e
 		Passes   int64  `db:"passes"`
 	}
 	var aggs []aggRow
-	if err := s.db.Select(&aggs, query, args...); err != nil {
+	if err := db.Select(&aggs, query, args...); err != nil {
 		return nil, fmt.Errorf("failed to query review verdict rollups: %w", err)
 	}
 	labels := map[string]string{}
@@ -318,6 +326,12 @@ type ReviewVerdictBreakdownRow struct {
 // unbounded. Ordering: model ASC, then count DESC, then category ASC —
 // stable for tables and tests.
 func (s *Store) QueryReviewVerdictBreakdown(since time.Time) ([]ReviewVerdictBreakdownRow, error) {
+	return queryReviewVerdictBreakdown(s.db, since)
+}
+
+// queryReviewVerdictBreakdown is the sqlx-level implementation shared by
+// *Store and *ReadOnlyStore.
+func queryReviewVerdictBreakdown(db *sqlx.DB, since time.Time) ([]ReviewVerdictBreakdownRow, error) {
 	query := `SELECT reviewed_model_id AS model, category, COUNT(*) AS count
 		FROM model_review_verdicts
 		WHERE scope != 'workflow' AND reviewed_model_id != ''`
@@ -329,13 +343,33 @@ func (s *Store) QueryReviewVerdictBreakdown(since time.Time) ([]ReviewVerdictBre
 	query += ` GROUP BY reviewed_model_id, category
 		ORDER BY model ASC, count DESC, category ASC`
 	var rows []ReviewVerdictBreakdownRow
-	if err := s.db.Select(&rows, query, args...); err != nil {
+	if err := db.Select(&rows, query, args...); err != nil {
 		return nil, fmt.Errorf("failed to query review verdict breakdown: %w", err)
 	}
 	if rows == nil {
 		rows = []ReviewVerdictBreakdownRow{}
 	}
 	return rows, nil
+}
+
+// QueryReviewVerdicts is the read-only twin of (*Store).QueryReviewVerdicts,
+// served from the query_only handle. The CLI analytics path uses it so a
+// verdict rollup can never take SQLite write locks against the daemon's
+// live metrics.db (bughunt 2026-11-23).
+func (r *ReadOnlyStore) QueryReviewVerdicts(q ReviewVerdictQuery) ([]ReviewVerdictRow, error) {
+	if r == nil || r.db == nil {
+		return []ReviewVerdictRow{}, nil
+	}
+	return queryReviewVerdicts(r.db, q)
+}
+
+// QueryReviewVerdictBreakdown is the read-only twin of
+// (*Store).QueryReviewVerdictBreakdown.
+func (r *ReadOnlyStore) QueryReviewVerdictBreakdown(since time.Time) ([]ReviewVerdictBreakdownRow, error) {
+	if r == nil || r.db == nil {
+		return []ReviewVerdictBreakdownRow{}, nil
+	}
+	return queryReviewVerdictBreakdown(r.db, since)
 }
 
 // FinalVerdictsForStep returns the verdict rows for a step's LAST cycle
