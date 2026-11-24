@@ -92,12 +92,15 @@ func TestSteerBySessionIDDuringDirectDispatchTurn(t *testing.T) {
 	}
 	// Create already mints a distinct ConversationID; the gate steers by
 	// BOTH identities (session id + conversation id) mid-turn.
-	var liveQueue *MessageQueue
+	liveQueue := make(chan *MessageQueue, 1)
 	spy := &armSpyChatter{hook: func() {
 		// Steer by the session's PRIMARY id mid-turn -- a shape the
 		// pre-fix path NEVER registered (F-STEER-R7).
 		if q, _ := reg.GetActiveQueue(sess.ID); q != nil {
-			liveQueue = q
+			select {
+			case liveQueue <- q:
+			default:
+			}
 		}
 	}}
 
@@ -141,12 +144,14 @@ func TestSteerBySessionIDDuringDirectDispatchTurn(t *testing.T) {
 	if q == nil {
 		t.Fatal("steer by session PRIMARY id found no queue: direct-dispatch aliases not armed (F-STEER-R7)")
 	}
-	liveQueue = q
+	select {
+	case <-liveQueue:
+	default:
+	}
 
 	if err := <-done; err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
-	_ = liveQueue
 }
 
 // TestSteerByThreadScopedIDDuringDirectDispatchTurn covers the probe's
