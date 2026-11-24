@@ -548,7 +548,20 @@ func TestTurnCapture03FailedTurnRecordsNothing(t *testing.T) {
 	sessionID := s.CreateSession(t, "mtc03", s.ProjectDir)
 
 	const chatReply = "unused: the provider errors before any reply exists"
-	// Chat lane so the failure happens in the direct loop.
+	// Chat lane so the failure happens in the direct loop. The classifier
+	// must STAY healthy or routing degrades to the quickplan task lane and
+	// the task's step jobs park on the endpoint-block lane
+	// (accepted-not-finished; no failed terminal at all) - the classifier's
+	// system prompt is "You are an intent classifier..." (NOT the
+	// analyzer's "intent analysis assistant"), its user message carries the
+	// raw marker, and predicate scripts beat the legacy SetClassifierOutput
+	// pin (fakellm classifyLocked order 0 wins over 1), so the pin rides a
+	// SCRIPT registered before the 500 script: registration order picks the
+	// winner for classifier-shaped requests.
+	s.Fake.Script(
+		harness.IsClassifierRequest(),
+		harness.ClassifierJSONResponse(`{"intent":"chat","confidence":0.95,"reasoning":"pinned chat"}`),
+	)
 	s.Fake.SetClassifierOutput(`{"intent":"chat","confidence":0.95,"reasoning":"pinned chat"}`)
 	s.Fake.SetChatText(chatReply)
 	s.Fake.SetPostToolText(chatReply)

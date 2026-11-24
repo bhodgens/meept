@@ -288,8 +288,18 @@ func (w *SkillWatcher) relevantSkillChange(event fsnotify.Event) (string, bool) 
 		// that directory must sit DIRECTLY under a watched root (the gate
 		// pins "only the canonical paths"; a stray SKILL.md deeper in a
 		// linked-assets tree must not fire).
+		//
+		// Linux (inotify) delivers the bundle-directory Create BEFORE the
+		// following SKILL.md write, so the dir-create branch's stat finds
+		// nothing and the write event must classify HERE: dir is
+		// <root>/<skill>, a child of a watched root. macOS (kqueue) is
+		// slow enough that the file usually exists at the dir event -
+		// accepting both shapes is race-neutral on every platform.
 		slug := filepath.Base(dir)
-		if slug == "." || slug == "/" || !w.watchedRoot(dir) {
+		if slug == "." || slug == "/" {
+			return "", false
+		}
+		if !w.watchedRoot(filepath.Dir(dir)) {
 			return "", false
 		}
 		return slug, true

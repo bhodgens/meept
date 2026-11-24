@@ -2,6 +2,7 @@ package agent
 
 import (
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 
@@ -13,6 +14,7 @@ import (
 type TopicDetector struct {
 	mu           sync.RWMutex
 	keywords     map[string][]string // topic -> keywords
+	topicOrder   []string            // declaration order: the tie-break priority
 	defaultTopic string
 	logger       *slog.Logger
 }
@@ -23,6 +25,9 @@ type TopicDetectorOption func(*TopicDetector)
 // WithTopicKeywords adds keywords for the given topic.
 func WithTopicKeywords(topic string, keywords []string) TopicDetectorOption {
 	return func(td *TopicDetector) {
+		if _, seen := td.keywords[topic]; !seen {
+			td.topicOrder = append(td.topicOrder, topic)
+		}
 		td.keywords[topic] = append(td.keywords[topic], keywords...)
 	}
 }
@@ -64,6 +69,14 @@ func NewTopicDetector(opts ...TopicDetectorOption) *TopicDetector {
 			"personal": {"weekend", "vacation", "hobby", "shopping", "family", "friend", "party", "travel"},
 			"health":   {"workout", "gym", "exercise", "running", "diet", "sleep", "doctor", "medicine"},
 		},
+		// Declaration order doubles as the tie-break priority in Detect
+		// (work > code > food > personal > health). Map iteration order is
+		// deliberately NOT consulted: a tied input used to resolve to a
+		// random topic per call, so two consecutive turns of one session
+		// could land on different threads (different Conversation objects),
+		// silently splitting the transcript and starving the DSH-1 fork
+		// seed (Linux-only e2e flake, TestT8_ForkSeedGate).
+		topicOrder:   []string{"work", "code", "food", "personal", "health"},
 		defaultTopic: "general",
 		logger:       slog.Default(),
 	}
@@ -78,8 +91,10 @@ func NewTopicDetector(opts ...TopicDetectorOption) *TopicDetector {
 // Detect returns the topic label that best matches the given input.
 // It scores every topic by the number of keyword matches (after
 // lower-casing the input) and returns the topic with the highest score.
-// When two topics tie, the first encountered wins; the default topic
-// is returned when all scores are zero.
+// When two topics tie, the earlier topic in declaration order wins -
+// deterministically, never by map iteration order, so the same input
+// always routes to the same thread. The default topic is returned when
+// all scores are zero.
 //
 // Detect is safe for concurrent use.
 func (td *TopicDetector) Detect(input string) string {
@@ -91,7 +106,24 @@ func (td *TopicDetector) Detect(input string) string {
 	bestTopic := td.defaultTopic
 	bestScore := 0
 
-	for topic, keywords := range td.keywords {
+	// Iterate in stable declaration order so a tied score resolves the
+	// same way on every call (the previous map-iteration scan made the
+	// winner random per call on tied inputs). Topics added straight to
+	// the keywords map (test seams, late configuration) are scanned
+	// after the declared ones, in alphabetical order - still deterministic.
+	order := td.topicOrder
+	if len(td.keywords) > len(order) {
+		extra := make([]string, 0, len(td.keywords)-len(order))
+		for topic := range td.keywords {
+			if !slices.Contains(order, topic) {
+				extra = append(extra, topic)
+			}
+		}
+		slices.Sort(extra)
+		order = append(append([]string(nil), order...), extra...)
+	}
+	for _, topic := range order {
+		keywords := td.keywords[topic]
 		score := 0
 		for _, kw := range keywords {
 			// Word-boundary match: substring matching made "create" hit the

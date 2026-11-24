@@ -77,6 +77,13 @@ type throttleParkedTurn struct {
 	Attempt    int
 }
 
+// DefaultThrottleMaxAttempts bounds the throttle re-park generations
+// (endpoint-block parks included): the encode side stamps it onto every
+// throttle record so the drain-side attempt cap (M-4-park machinery in
+// TurnParker.drainDue) gives up instead of replaying an always-blocked
+// turn forever. Hand-built rows keep MaxAttempts=0 (unlimited, legacy).
+const DefaultThrottleMaxAttempts = 5
+
 // throttleTurnToRecord encodes a throttleParkedTurn as a Class=throttle
 // ParkedTurnRecord for the generalized parker.
 func throttleTurnToRecord(turn throttleParkedTurn) (ParkedTurnRecord, error) {
@@ -453,6 +460,18 @@ func (l *AgentLoop) parkThrottledTurn(ctx context.Context, terr *llm.ThrottleBac
 		ResumeAt:       resumeAt,
 		Attempt:        attempt,
 		TurnPayload:    payload,
+		// Honest give-up cap (01-safety/05 posture): throttle records now
+		// carry the SAME attempt-cap machinery the quota lane has (M-4-park,
+		// tree 04 leaf 04): the drain-side split gives up instead of
+		// replaying past the cap. An endpoint-block park re-parks every
+		// drain while the endpoint stays blocked (a 4x-block streak can sit
+		// hours out), and the parked-then-abandoned turn never
+		// terminalized: the chat handler's parked ack stayed the turn's
+		// only terminal. At the cap, the give-up callback wired by
+		// SetThrottleParker emits the failed terminal so the truth reaches
+		// the user. MaxAttempts <= 0 (hand-built rows, bare parkers) keeps
+		// the legacy unlimited-replay behaviour byte-identical.
+		MaxAttempts: DefaultThrottleMaxAttempts,
 		// F14 follow-up: carry the turn's autonomy onto the record (and its
 		// payload copy) so the resume re-applies the marker. A step job's turn
 		// runs under tools.ContextWithAutonomous; without this the resume

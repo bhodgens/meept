@@ -32,7 +32,7 @@ func envelopeProse(raw string) string {
 		var s string
 		if json.Unmarshal(e, &s) == nil && strings.TrimSpace(s) != "" {
 			sb.WriteString("- ")
-			sb.WriteString(strings.TrimSpace(s))
+			sb.WriteString(renderEvidenceProse(s))
 			sb.WriteString("\n")
 			continue
 		}
@@ -43,13 +43,31 @@ func envelopeProse(raw string) string {
 		for _, key := range []string{"description", "detail", "note"} {
 			if s, ok := probe[key].(string); ok && strings.TrimSpace(s) != "" {
 				sb.WriteString("- ")
-				sb.WriteString(strings.TrimSpace(s))
+				sb.WriteString(renderEvidenceProse(s))
 				sb.WriteString("\n")
 				break
 			}
 		}
 	}
 	return strings.TrimSpace(sb.String())
+}
+
+// renderEvidenceProse turns one evidence-entry string into user prose.
+// Plain prose passes through byte-identically (TrimSpace only). A
+// job-relay entry that embeds the machine executor-report envelope
+// ("job <id> completed by agent <x>: {\"status\":...}") has its JSON
+// recovered to prose via the gate-T2 stripper, so raw JSON keys never
+// render in a user reply (F-ORCH-21, output-filters-06: the queue relay
+// evidence from components.go carries exactly this shape).
+func renderEvidenceProse(s string) string {
+	s = strings.TrimSpace(s)
+	if !strings.HasPrefix(s, "job ") || !strings.Contains(s, " completed by agent ") {
+		return s
+	}
+	if recovered := StripClaimsEvidenceOrProse(s); recovered != "" {
+		return recovered
+	}
+	return s
 }
 
 // StripClaimsEvidenceOrProse removes the envelope; when the ENTIRE input was

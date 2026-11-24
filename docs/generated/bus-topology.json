@@ -230,7 +230,7 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 11961,
+        "line": 11962,
         "payload_keys": []
       }
     ],
@@ -312,19 +312,19 @@
     "budget-resume-": [
       {
         "file": "internal/agent/handler.go",
-        "line": 3876,
+        "line": 3945,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/handler.go",
-        "line": 3928,
+        "line": 3997,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/handler.go",
-        "line": 3954,
+        "line": 4023,
         "payload_keys": [],
         "via_helper": true
       }
@@ -397,14 +397,14 @@
     "chat.response": [
       {
         "file": "internal/agent/handler.go",
-        "line": 2225,
+        "line": 2232,
         "payload_keys": []
       }
     ],
     "chat_message": [
       {
         "file": "internal/agent/handler.go",
-        "line": 2273,
+        "line": 2280,
         "payload_keys": []
       }
     ],
@@ -447,7 +447,7 @@
     "collab-result-": [
       {
         "file": "internal/agent/handler.go",
-        "line": 4382,
+        "line": 4451,
         "payload_keys": [],
         "via_helper": true
       }
@@ -877,7 +877,7 @@
     "orchestrator.plan": [
       {
         "file": "internal/agent/handler.go",
-        "line": 2170,
+        "line": 2177,
         "payload_keys": []
       }
     ],
@@ -921,7 +921,7 @@
     "pair-result-": [
       {
         "file": "internal/agent/handler.go",
-        "line": 4428,
+        "line": 4497,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1000,7 +1000,7 @@
     "pair.start": [
       {
         "file": "internal/agent/handler.go",
-        "line": 3721,
+        "line": 3790,
         "payload_keys": [],
         "via_const": true
       }
@@ -1412,13 +1412,13 @@
     "quota-resume-": [
       {
         "file": "internal/agent/handler.go",
-        "line": 3227,
+        "line": 3296,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/handler.go",
-        "line": 3409,
+        "line": 3478,
         "payload_keys": [],
         "via_helper": true
       }
@@ -2008,7 +2008,7 @@
     "status.response": [
       {
         "file": "internal/daemon/components.go",
-        "line": 10950,
+        "line": 10951,
         "payload_keys": []
       }
     ],
@@ -2044,13 +2044,13 @@
     "task-completed-": [
       {
         "file": "internal/agent/handler.go",
-        "line": 2527,
+        "line": 2534,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/handler.go",
-        "line": 2532,
+        "line": 2539,
         "payload_keys": [],
         "via_helper": true
       }
@@ -2058,13 +2058,13 @@
     "task-failed-": [
       {
         "file": "internal/agent/handler.go",
-        "line": 2753,
+        "line": 2760,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/agent/handler.go",
-        "line": 2758,
+        "line": 2765,
         "payload_keys": [],
         "via_helper": true
       }
@@ -2560,10 +2560,18 @@
         ]
       }
     ],
+    "throttle-giveup-": [
+      {
+        "file": "internal/agent/handler.go",
+        "line": 3256,
+        "payload_keys": [],
+        "via_helper": true
+      }
+    ],
     "throttle-resume-": [
       {
         "file": "internal/agent/loop_park.go",
-        "line": 699,
+        "line": 718,
         "payload_keys": [],
         "via_helper": true
       }
@@ -2588,7 +2596,7 @@
     "turn.terminal": [
       {
         "file": "internal/agent/handler.go",
-        "line": 2395,
+        "line": 2402,
         "payload_keys": [],
         "typed": true
       }
@@ -3907,7 +3915,7 @@
     "status.request": [
       {
         "file": "internal/daemon/components.go",
-        "line": 10876,
+        "line": 10877,
         "subscriber_id": "status-handler"
       }
     ],
@@ -4228,7 +4236,7 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 11043,
+        "line": 11044,
         "subscriber_id": "agent-job-processor-evidence"
       }
     ],

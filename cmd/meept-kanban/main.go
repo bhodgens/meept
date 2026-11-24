@@ -133,7 +133,21 @@ func run() error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
-			return fmt.Errorf("shutdown: %w", err)
+			// Drain-window expiry means a client connection is wedged
+			// mid-request (a half-written POST body keeps the server
+			// handler blocked forever; net/http Shutdown waits on it
+			// indefinitely). The operator's SIGTERM outranks one stuck
+			// client: force-close the remainder so the sidecar always
+			// exits cleanly instead of dying with "shutdown: context
+			// deadline exceeded" and a nonzero status.
+			if !errors.Is(err, context.DeadlineExceeded) {
+				return fmt.Errorf("shutdown: %w", err)
+			}
+			slog.Warn("kanban sidecar: shutdown drain timed out with open connections; force-closing",
+				"error", err)
+			if closeErr := srv.Close(); closeErr != nil {
+				slog.Warn("kanban sidecar: forced listener close failed", "error", closeErr)
+			}
 		}
 		slog.Info("kanban sidecar stopped")
 		return nil

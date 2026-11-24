@@ -167,6 +167,26 @@ func TestTopicDetector_MultiMatchPriority(t *testing.T) {
 	}
 }
 
+// TestTopicDetector_DeterministicTie asserts the tie-break is stable:
+// an input scoring 1 for work ("task") and 1 for health ("sleep") must
+// resolve to the SAME topic on every call. Map-iteration-order scanning
+// used to flip the winner per call, splitting one session's turns across
+// two threads (two Conversations) and starving the DSH-1 fork seed
+// (Linux-only e2e flake, TestT8_ForkSeedGate).
+func TestTopicDetector_DeterministicTie(t *testing.T) {
+	detector := NewTopicDetector()
+	input := `Use delegate_task twice with delegate_context "full" on both. Then run the shell command "sleep 1". Return both raw tool results verbatim.`
+	first := detector.Detect(input)
+	for i := range 500 {
+		if got := detector.Detect(input); got != first {
+			t.Fatalf("Detect is not deterministic on tied input: call 0 gave %q, call %d gave %q", first, i+1, got)
+		}
+	}
+	if first == "general" {
+		t.Errorf("expected a scored topic on the tied input, got general")
+	}
+}
+
 // TestTopicDetector_WithNilLogger ensures nil logger doesn't cause panic.
 func TestTopicDetector_NilLogger(t *testing.T) {
 	detector := NewTopicDetector(WithLogger(nil))

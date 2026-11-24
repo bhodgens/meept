@@ -405,17 +405,6 @@ func bootRestart(t *testing.T, s *harness.Stack) func() {
 	}
 }
 
-// waitTurnTerminal polls tasks.db until the task reaches a terminal state
-// that is STABLE for settle seconds. Stability matters on the restart
-// scenarios: boot-time RecoverStaleTasks force-fails every non-terminal
-// task BEFORE the rehydrate/reclaim pass re-arms the turn, so a "failed"
-// row observed in the first moments can still be superseded when the
-// resumed job completes and tactical re-finalizes the task.
-func waitTurnTerminal(t *testing.T, dbPath, taskID string, timeout time.Duration) harness.TaskRow {
-	t.Helper()
-	return waitTurnTerminalSettle(t, dbPath, taskID, timeout, 5*time.Second)
-}
-
 func waitTurnTerminalSettle(t *testing.T, dbPath, taskID string, timeout, settle time.Duration) harness.TaskRow {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -545,12 +534,32 @@ func TestKill9ResumeMidTurn(t *testing.T) {
 	// asserted below; the task-row state is logged, not fatal.
 	t.Logf("resumed turn task row state = %q (see RecoverStaleTasks gap note)", final.State)
 
-	// Journal end state: exactly ONE step_completed per step (3 total),
-	// exactly one run_closed, and the step-A row payload UNCHANGED from
-	// the pre-kill value (skip seam restored it; it was never re-executed).
-	finalRows := waitForJournalRows(t, journalPath, 60*time.Second,
-		"run_closed for "+taskID, func(rs []journalRow) bool {
-			return runClosed(rs, taskID)
+	// Journal end state: every pre-kill journaled step keeps its ORIGINAL
+	// payload (skip-seam restored; never re-executed), the resumed round
+	// adds at least one NEW step_completed, and the run holds a close row.
+	//
+	// The wait must key on RESUMED-round progress, not on a bare
+	// run_closed presence: the writer keys run_started/run_closed per
+	// step-job round (disclosed in e2e/manifest.json and
+	// docs/workflows/turn-journal.md), so the pre-kill snapshot ALREADY
+	// carries a run_closed row from the completed step-A round. A
+	// run_closed-only wait is therefore vacuously satisfied and the
+	// final snapshot read races the resumed step B's 8s sleep tool
+	// (whose step_completed lands ~8s after the re-claim): a sub-second
+	// margin that loses on loaded Linux CI runners and wins on serial
+	// runs. Requiring a close row BEYOND the pre-kill count or a
+	// completed step BEYOND the pre-kill set is strictly stronger: if
+	// the resume executed nothing, this wait times out and the scenario
+	// still fails (no assertion weakened below).
+	preKillClosed := countRows(rows, taskID, "run_closed")
+	preKillCompleted := len(completedSteps(rows, taskID))
+	finalRows := waitForJournalRows(t, journalPath, 180*time.Second,
+		"resumed-round journal progress for "+taskID, func(rs []journalRow) bool {
+			if !runClosed(rs, taskID) {
+				return false
+			}
+			return countRows(rs, taskID, "run_closed") > preKillClosed ||
+				len(completedSteps(rs, taskID)) > preKillCompleted
 		})
 	if !runClosed(finalRows, taskID) {
 		t.Fatalf("no run_closed after the resumed turn completed: %+v", finalRows)
@@ -575,7 +584,14 @@ func TestKill9ResumeMidTurn(t *testing.T) {
 	// The resumed turn executed live work for the un-journaled steps: the
 	// executor counter advanced past the pre-kill value (the sleep step and
 	// any revision steps re-ran live) - combined with the unchanged
-	// pre-kill payloads above this pins resume-at-NEXT-STEP.
+	// pre-kill payloads above this pins resume-at-NEXT-STEP. The counter is
+	// re-read here rather than using the early sample above: the resumed
+	// step's executor request necessarily PRECEDES the journaled
+	// step_completed/run_closed row the wait above just observed, so a
+	// slow-boot runner cannot leave this read behind the activity it
+	// asserts (the early sample stays above purely as diagnostic).
+	after = fakeLLMExecutorRequests(s.Fake)
+	t.Logf("executor requests final read before=%d after=%d (delta=%d)", before, after, after-before)
 	if after <= before {
 		t.Fatalf("executor request count did not advance across resume (before=%d after=%d); the resumed turn executed nothing",
 			before, after)

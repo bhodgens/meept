@@ -121,6 +121,16 @@ func daemonLog(t *testing.T, s *harness.Stack) string {
 // enabled with an explicit local order and NO seatbelt block runs the
 // local backend unconfined (write anywhere works) and never logs an armed
 // seatbelt. Runs on every OS.
+//
+// Key-path warning: the order key is [runtime].sandbox.sandbox_backend_order
+// per docs/concepts/runtime.md. A top-level "runtime.sandbox_backend_order"
+// is silently ignored by the config loader, leaving order="" (auto:
+// docker > bwrap > local). On a Linux host with bwrap installed, auto then
+// selects the bwrap backend: the jail either refuses to start (blocked
+// unprivileged user namespaces) or its default tmpfs over /tmp hides the
+// harness project dir (it lives under TMPDIR); either way the marker
+// write never lands on the real filesystem and this test fails at the file
+// assertion for reasons unrelated to the posture it grades.
 func TestSeatbeltFlagOffLocalBackend(t *testing.T) {
 	s := harness.Start(t,
 		harness.WithPreBootHook(func(st *harness.Stack) error {
@@ -128,8 +138,8 @@ func TestSeatbeltFlagOffLocalBackend(t *testing.T) {
 			return nil
 		}),
 		harness.WithConfigOverlay(map[string]any{
-			"runtime.enabled":               true,
-			"runtime.sandbox_backend_order": "local",
+			"runtime.enabled":                       true,
+			"runtime.sandbox.sandbox_backend_order": "local",
 		}),
 	)
 	s.RegisterProject(t, "e2e-seatbelt")
@@ -164,7 +174,7 @@ func TestSeatbeltDenyRead(t *testing.T) {
 		}),
 		harness.WithConfigHook(func(cfg map[string]any) {
 			applyOverlay(cfg, "runtime.enabled", true)
-			applyOverlay(cfg, "runtime.sandbox_backend_order", "local")
+			applyOverlay(cfg, "runtime.sandbox.sandbox_backend_order", "local")
 			applyOverlay(cfg, "runtime.seatbelt.enabled", true)
 			applyOverlay(cfg, "runtime.seatbelt.deny_read", []string{lockedDir})
 		}),
@@ -212,7 +222,7 @@ func TestSeatbeltWriteConfined(t *testing.T) {
 		}),
 		harness.WithConfigHook(func(cfg map[string]any) {
 			applyOverlay(cfg, "runtime.enabled", true)
-			applyOverlay(cfg, "runtime.sandbox_backend_order", "local")
+			applyOverlay(cfg, "runtime.sandbox.sandbox_backend_order", "local")
 			applyOverlay(cfg, "runtime.seatbelt.enabled", true)
 			applyOverlay(cfg, "runtime.seatbelt.allow_write", []string{allowDir})
 			applyOverlay(cfg, "runtime.seatbelt.deny_write", []string{holeDir})
@@ -269,7 +279,7 @@ func TestSeatbeltProcessRules(t *testing.T) {
 		}),
 		harness.WithConfigHook(func(cfg map[string]any) {
 			applyOverlay(cfg, "runtime.enabled", true)
-			applyOverlay(cfg, "runtime.sandbox_backend_order", "local")
+			applyOverlay(cfg, "runtime.sandbox.sandbox_backend_order", "local")
 			applyOverlay(cfg, "runtime.seatbelt.enabled", true)
 			applyOverlay(cfg, "runtime.seatbelt.block_process_info", true)
 			applyOverlay(cfg, "runtime.seatbelt.deny_exec", []string{"/usr/bin/true"})
@@ -307,10 +317,10 @@ func TestSeatbeltFailClosedBadPath(t *testing.T) {
 			return nil
 		}),
 		harness.WithConfigOverlay(map[string]any{
-			"runtime.enabled":               true,
-			"runtime.sandbox_backend_order": "local",
-			"runtime.seatbelt.enabled":      true,
-			"runtime.seatbelt.deny_read":    []string{"not-an-absolute-path"},
+			"runtime.enabled":                       true,
+			"runtime.sandbox.sandbox_backend_order": "local",
+			"runtime.seatbelt.enabled":              true,
+			"runtime.seatbelt.deny_read":            []string{"not-an-absolute-path"},
 		}),
 	)
 	s.RegisterProject(t, "e2e-seatbelt")

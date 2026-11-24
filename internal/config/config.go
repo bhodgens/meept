@@ -632,6 +632,11 @@ type Model struct {
 	ResponseB64Path  string         `json:"response_b64_json_path,omitempty"`
 	ImageApp         string         `json:"image_app,omitempty"`
 	VideoApp         string         `json:"video_app,omitempty"`
+	// TransientRetries: per-model same-provider re-dial budget for
+	// connection-level failures (proxy worker death: EOF/reset, no HTTP
+	// status). Mirrors llm.ModelDef.transient_retries; consumed by
+	// buildProviderConfigs into llm.ModelConfig.TransientRetries.
+	TransientRetries int `json:"transient_retries,omitempty"`
 }
 
 // LoadModelsConfig loads models configuration from a JSON5 file.

@@ -461,6 +461,30 @@ func (c *Child) newPipeline(frame voiceframe.Frame) (*pipeline, error) {
 		_ = inConn.Close() //nolint:mutexio // error path, no lock held
 		return nil, fmt.Errorf("voicechild: dial audio out %s: %w", outPath, err)
 	}
+	// Paced backpressure on the child->daemon PCM lane (Linux-only bug
+	// class, 2026-11-24 CI green): the kernel unix socket buffer on
+	// Linux is ~229 KB, so playbackStream can hand a whole turn's PCM
+	// (and more) to the socket in microseconds while the daemon pacer
+	// drains it at 20 ms/chunk. Two consequences: (1) a barge-in clear
+	// lands AFTER the stream already reached natural EOF, so the
+	// last:true stream emits a phantom played edge on audio that was
+	// never actually played; (2) up to the buffer bound of the
+	// interrupted turn sits unread in the kernel, past the reach of
+	// clear(). macOS does not show either because its local-stream
+	// socket space is small: writes block until the daemon drains, so
+	// the stream is genuinely mid-flight at a barge-in. Bound the
+	// write buffer here to restore that pacing semantics on every
+	// platform: the writer runs at most a handful of chunks ahead of
+	// the daemon's drain. Best-effort: a platform that ignores the
+	// hint keeps the old shape. pipeline.close closes audioOut, so a
+	// blocked Write always unwinds on teardown (the daemon-side pump
+	// always reads in production; this only bounds the backlog).
+	if wb, ok := outConn.(interface{ SetWriteBuffer(int) error }); ok {
+		if terr := wb.SetWriteBuffer(8192); terr != nil {
+			c.logger.Debug("voicechild: audio out write buffer hint refused",
+				"path", outPath, "err", terr)
+		}
+	}
 
 	pctx, cancel := context.WithCancel(context.Background())
 	p := &pipeline{

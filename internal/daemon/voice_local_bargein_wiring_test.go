@@ -137,6 +137,27 @@ func TestVoiceRouteFrameInterruptLatchesLocalSplice(t *testing.T) {
 		}
 	}
 
+	// Synchronize the backlog INTO the splice's pump queue before the
+	// latch. On Linux the unix socket buffer (~229 KB) holds the whole
+	// 25.6 KB stream, so the read pump may not have queued a single
+	// chunk when routeFrame lands: the latch-time drain then correctly
+	// finds an empty queue (the post-latch reads are discarded by the
+	// stale gate instead) and the "drained stale chunks" line never
+	// appears - a platform artifact, not the queue-drain shape the test
+	// pins. Evidence that chunks ARE in flight: two paced chunks
+	// delivered to the client. The client leg is a net.Pipe (writes
+	// block until the test's reader consumes), so a delivered chunk
+	// proves the pump queued the backlog: two consumed, the remaining
+	// ~38 still sitting in the queue for the drain. Bounded condition
+	// poll, no fixed sleep, assertions unchanged on every platform.
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && paced.Load() < 2*640 {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if paced.Load() < 2*640 {
+		t.Fatalf("splice never paced the child backlog to the client before the latch")
+	}
+
 	// THE SEAM: the child's C1 interrupt frame through routeFrame. No
 	// talk loop is armed for this ccid (the latch runs BEFORE the loop
 	// lookup; the frame itself then rides the no-loop drop path, which

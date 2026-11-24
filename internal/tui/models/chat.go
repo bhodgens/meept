@@ -2641,6 +2641,11 @@ func (m *ChatModel) loadServerMessages(sessionID string, serverMsgs []types.Sess
 		}
 	}
 
+	// Restored transcripts carry no turn.terminal events, so the mode
+	// badge (F13c) needs the persisted dispatch rows: stamp them before
+	// the rebuild lands (06-planning/03).
+	m.hydrateRestoredClassifications(sessionID, chatMsgs)
+
 	m.sessionMessages[sessionID] = chatMsgs
 	if sessionID == m.sessionID {
 		// Rebuild from the server's truth, then re-append the client's
