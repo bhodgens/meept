@@ -1514,26 +1514,6 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 		}
 	}
 
-	// Gate T4c (04-clutter/01, F-NEW-8): a firewall context truncation is
-	// NEVER silent. If this conversation's loop firewall bounded an
-	// oversized system message, its one-shot disclosure rides the reply
-	// (the C1 notice lane; the notice self-clears, so it appears once per
-	// truncation event). No firewall / no truncation => byte-identical.
-	if err == nil {
-		if notice := h.truncationDisclosure(conversationID); notice != "" {
-			if reply != "" {
-				reply += "\n\n" + notice
-			} else {
-				reply = notice
-			}
-			if syncRoutingNotice != "" {
-				syncRoutingNotice += "\n" + notice
-			} else {
-				syncRoutingNotice = notice
-			}
-		}
-	}
-
 	// Terminal worker fields are shared with handleAgentProgress and
 	// GetWorkers, both of which take workersMu. Mutate under that lock,
 	// copy, then log and publish the snapshot — never hold workersMu
@@ -1676,6 +1656,33 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 			)
 		}
 		response.Reply = reply
+	}
+	// Gate T4c (04-clutter/01, F-NEW-8): a firewall context truncation is
+	// NEVER silent. If this conversation's loop firewall bounded an
+	// oversized system message, its one-shot disclosure rides the reply
+	// (the C1 notice lane; the notice self-clears, so it appears once per
+	// truncation event). No firewall / no truncation => byte-identical.
+	//
+	// Order fix (naive-user-chat-09, F-ORCH-15): this block used to run
+	// BEFORE the gate T1 empty-reply synthesis above, and when the loop
+	// shipped a blank reply (the frozen tool-only p1 shape) the notice
+	// REPLACED the empty reply, so synthesis never fired and the user got
+	// the truncation note as the whole answer. The disclosure now appends
+	// to whatever completed reply exists (including the synthesized
+	// ledger reply) and only stands alone when reply is still empty.
+	if err == nil {
+		if notice := h.truncationDisclosure(conversationID); notice != "" {
+			if response.Reply != "" {
+				response.Reply += "\n\n" + notice
+			} else {
+				response.Reply = notice
+			}
+			if syncRoutingNotice != "" {
+				syncRoutingNotice += "\n" + notice
+			} else {
+				syncRoutingNotice = notice
+			}
+		}
 	}
 	// Single reply choke point (e2e run 5, 2026-09-11 A2/t4): the platform
 	// introspection fast path (Dispatcher.RouteToAgent →
