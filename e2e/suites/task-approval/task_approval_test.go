@@ -215,7 +215,14 @@ func TestTaskApprovalHTTPTwins(t *testing.T) {
 		if readErr != nil {
 			t.Fatalf("read tasks/%s body: %v", verb, readErr)
 		}
-		if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed {
+		// The route must EXIST. mux answers a truly unrouted path with a
+		// bodyless 404/405; the handler's honest refusal for an unknown
+		// task carries "task not found" in the body (error mapping in
+		// internal/comm/http/task_approval.go). A handler-shaped 404
+		// therefore PROVES routing; a bodyless 404 proves it absent.
+		routed := strings.Contains(string(respBody), "task not found") ||
+			(resp.StatusCode != http.StatusNotFound && resp.StatusCode != http.StatusMethodNotAllowed)
+		if !routed {
 			t.Errorf("CURRENT DEFECT: POST /api/v1/tasks/{id}/%s answered %d - the C2 HTTP twin is unrouted: %s", verb, resp.StatusCode, string(respBody))
 		}
 	}

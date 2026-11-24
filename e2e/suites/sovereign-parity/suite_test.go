@@ -436,6 +436,11 @@ func (s *paritySandbox) writeDaemonConfig(cfg parityConfig) {
     "allowed_paths": [%q, %q],
   },
   "multiagent": { "enabled": true },
+  // agent.review.enabled=false keeps this suite on the pre-wave posture
+  // (the file-evidence gate fail-closes legacy scripted steps). Gate
+  // suites opt in through harness.Start overlays; this sandbox boots its
+  // own daemon and must declare the posture itself.
+  "agent": { "review": { "enabled": false } },
   "llm": {
     "failure_policy": {
       "base_throttle": "1s",

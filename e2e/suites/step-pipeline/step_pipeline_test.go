@@ -44,7 +44,12 @@ const revisionFeedbackMarker = "REVISION-FEEDBACK-MARKER"
 // and the task StateFailed — never completed. The store's step result
 // carries the honest failure text, not the scripted post-tool narration.
 func TestErroredStepNeverPassesReviewTaskFails(t *testing.T) {
-	s := harness.Start(t)
+	s := harness.Start(t, harness.WithConfigOverlay(map[string]any{
+		// sp01-sp05 grade the review/evidence-gate loop. The harness
+		// default now boots pre-wave (review off), so this suite
+		// declares the posture it tests.
+		"agent.review.enabled": true,
+	}))
 	s.RegisterProject(t, "e2e-project")
 	sessionID := s.CreateSession(t, "sp01", s.ProjectDir)
 
@@ -156,7 +161,12 @@ found:
 // (id carries "-rev-") depending on the rejected original, with the
 // rejection feedback stored on the original.
 func TestReviewRejectionCreatesRevisionStep(t *testing.T) {
-	s := harness.Start(t)
+	s := harness.Start(t, harness.WithConfigOverlay(map[string]any{
+		// sp01-sp05 grade the review/evidence-gate loop. The harness
+		// default now boots pre-wave (review off), so this suite
+		// declares the posture it tests.
+		"agent.review.enabled": true,
+	}))
 	s.RegisterProject(t, "e2e-project")
 	sessionID := s.CreateSession(t, "sp02", s.ProjectDir)
 
@@ -281,7 +291,12 @@ func TestReviewRejectionCreatesRevisionStep(t *testing.T) {
 // session. The observable pause contract: the daemon LOGS the needs_info
 // transition and the task never lies about validation.
 func TestNeedsInfoReviewVerdictPausesForHuman(t *testing.T) {
-	s := harness.Start(t)
+	s := harness.Start(t, harness.WithConfigOverlay(map[string]any{
+		// sp01-sp05 grade the review/evidence-gate loop. The harness
+		// default now boots pre-wave (review off), so this suite
+		// declares the posture it tests.
+		"agent.review.enabled": true,
+	}))
 	s.RegisterProject(t, "e2e-project")
 	sessionID := s.CreateSession(t, "sp03", s.ProjectDir)
 
@@ -385,7 +400,12 @@ func TestNeedsInfoReviewVerdictPausesForHuman(t *testing.T) {
 // does not launder the failure, and the dependent "verify" step never
 // reports success.
 func TestParallelStepsDependencyCascade(t *testing.T) {
-	s := harness.Start(t)
+	s := harness.Start(t, harness.WithConfigOverlay(map[string]any{
+		// sp01-sp05 grade the review/evidence-gate loop. The harness
+		// default now boots pre-wave (review off), so this suite
+		// declares the posture it tests.
+		"agent.review.enabled": true,
+	}))
 	s.RegisterProject(t, "e2e-project")
 	sessionID := s.CreateSession(t, "sp04", s.ProjectDir)
 
@@ -520,7 +540,12 @@ func TestParallelStepsDependencyCascade(t *testing.T) {
 // carries the gate's refusal, the narrated artifact does NOT exist on
 // disk, and no completed/approved step stores the fabrication verbatim.
 func TestVacuousNarrationIsGatedFromAutoApproval(t *testing.T) {
-	s := harness.Start(t)
+	s := harness.Start(t, harness.WithConfigOverlay(map[string]any{
+		// sp01-sp05 grade the review/evidence-gate loop. The harness
+		// default now boots pre-wave (review off), so this suite
+		// declares the posture it tests.
+		"agent.review.enabled": true,
+	}))
 	s.RegisterProject(t, "e2e-project")
 	sessionID := s.CreateSession(t, "sp05", s.ProjectDir)
 

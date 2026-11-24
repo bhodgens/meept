@@ -323,19 +323,43 @@ func (s *Stack) writeConfigs(sc *startConfig) {
 	)
 
 	cfg := []byte(cfgSrc)
+	// The harness always parses, injects its default posture, and
+	// re-serializes. Strip // comments (invalid JSON) and trailing
+	// commas before parsing; the daemon parses JSON5, so plain JSON
+	// output is accepted.
+	stripped := json5Comment.ReplaceAllString(cfgSrc, "")
+	stripped = json5TrailingCommas.ReplaceAllString(stripped, "$1")
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(stripped), &parsed); err != nil {
+		t.Fatalf("harness: parse config template: %v", err)
+	}
+	// Harness default posture: run the PRE-USABILITY-WAVE defaults.
+	// The usability wave (20261121-interactive-usability) flipped
+	// three product defaults via DefaultConfig: the review
+	// file-evidence gate (review.enabled), the plan approval gate
+	// (plans.approval.require_approval, now true unless the loader
+	// saw an explicit key), and orchestrator.task_approval_step_threshold
+	// (default 5 parks any plan with >= 5 steps regardless of
+	// require_approval). Pre-wave scripted suites never accounted
+	// for any of the three. Suites that GRADE the new posture set
+	// these keys explicitly through WithConfigOverlay (approval-wait,
+	// plan-critic, task-approval all do); the user overlay runs AFTER
+	// this default, so explicit values always win.
+	// agent.review is NESTED under AgentConfig (schema.go:2454,2464):
+	// the daemon reads cfg.Agent.Review (components.go:4739). A
+	// top-level "review" key parses nowhere.
+	// NOTE: no orchestrator.task_approval_step_threshold default here.
+	// plan-critic TestApprovalGateThresholdZeroDisables pins the shipped
+	// default of 5 via `config get`; a harness override would grade the
+	// wrong number. Suites that need the gate off set it themselves.
+	applyLocked(parsed, "agent.review.enabled", false)
+	applyLocked(parsed, "plans.approval.require_approval", false)
 	if sc.configOverlay != nil {
-		// Strip // comments (invalid JSON) and trailing commas before
-		// parsing, overlay the parsed tree, and re-serialize. The daemon
-		// parses JSON5, so plain JSON output is accepted.
-		stripped := json5Comment.ReplaceAllString(cfgSrc, "")
-		stripped = json5TrailingCommas.ReplaceAllString(stripped, "$1")
-		var parsed map[string]any
-		if err := json.Unmarshal([]byte(stripped), &parsed); err != nil {
-			t.Fatalf("harness: parse config template: %v", err)
-		}
 		if err := sc.configOverlay(parsed); err != nil {
 			t.Fatalf("harness: config overlay: %v", err)
 		}
+	}
+	{
 		out, err := json.MarshalIndent(parsed, "", "  ")
 		if err != nil {
 			t.Fatalf("harness: serialize overlaid config: %v", err)

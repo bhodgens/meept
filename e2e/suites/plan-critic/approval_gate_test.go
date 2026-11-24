@@ -146,16 +146,27 @@ func gateSubmitPlanTurn(t *testing.T, s *harness.Stack, sessionID, marker string
 	if turnID == "" {
 		t.Fatalf("gate: ack missing turn_id: %+v", ack)
 	}
+	// Poll manually instead of harness.WaitFor: WaitFor fatals with only
+	// "timed out waiting for task row", which hides WHY (classifier
+	// downgrade, refusal, interview park). The marker + daemon-log dump
+	// below is the diagnostic for the park/debugging class.
 	var taskID string
-	harness.WaitFor(t, 30*time.Second, "task row for the planning turn", func() bool {
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
 		for _, row := range harness.Tasks(t, s.TasksDBPath()) {
 			if strings.Contains(row.Name, marker) {
 				taskID = row.ID
-				return true
+				break
 			}
 		}
-		return false
-	})
+		if taskID != "" {
+			break
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	if taskID == "" {
+		t.Fatalf("no task row carries marker %q; daemon log tail:\n%s", marker, s.Daemon.LogTail())
+	}
 	return turnID, taskID
 }
 
