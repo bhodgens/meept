@@ -85,13 +85,22 @@ func TestPlanFailedEventDelivered(t *testing.T) {
 	planID := requireParses(t, filePath, "").PlanID
 	waitForPlanState(t, s, planID, "pending_approval", 30*time.Second)
 
-	// Doom the synthesized task's step: a file write under a blocker FILE
-	// fails at the tool on every retry, exhausting the breaker -> failed step.
+	// The dispatch-path docs plan carries zero phases; under the current
+	// contract the zero-phase guard completes it on approve (no executing,
+	// no synthesized task), so the C6 failure lane could never run. Seed one
+	// real phase whose single step IS the doomed write: synthesis expands
+	// the file (source of truth), the step fails, the phase fails, and
+	// completePlan -> failPlan must publish plan.failed.
 	blocker := s.ProjectDir + "/gate-blocker"
 	if err := os.WriteFile(blocker, []byte("obstacle"), 0o644); err != nil {
 		t.Fatalf("create blocker: %v", err)
 	}
 	doomed := blocker + "/forbidden.txt"
+	seedPlanPhase(t, filePath, planID,
+		"GATEFAIL: create the forbidden file at "+doomed+" containing nope")
+
+	// Doom the synthesized task's step: a file write under a blocker FILE
+	// fails at the tool on every retry, exhausting the breaker -> failed step.
 	s.Fake.SetPlannerResponse(`{"steps":[{"description":"GATEFAIL: create the forbidden file","tool_hint":"file_write","depends_on":[]}]}`)
 	s.Fake.ScriptN(8,
 		harness.And(harness.IsExecutorRequest(), harness.Not(harness.IsPlannerRequest()), harness.MessageContains("GATEFAIL")),
@@ -149,13 +158,34 @@ func TestPlanFailedEventDelivered(t *testing.T) {
 // status event; the seal RPC itself works, so this pins the contract the
 // surface drives (the problems-inline result is the load-bearing shape).
 func TestCompilerDraftSealSurface(t *testing.T) {
+	// Strategic-lane pin (same shape as the sibling continuation test and
+	// the approval-wait/task-approval/plan-critic fixes): with plans.mode
+	// "always" the dispatcher's plan-manager lane (5.5) intercepts every
+	// planning intent and synthesizes a DOCS plan, so the strategic
+	// planner never runs and no draft-bearing TASK row exists for
+	// plan.draft to read. The compiler draft/seal surface lives on the
+	// strategic lane (seedDraftFromRequest), so mode stays OFF and the
+	// classifier is pinned to the code lane (mode "plan") with the
+	// auto-seal veto in the prompt ("don't implement it") keeping the
+	// compound detector from sealing past the gate.
 	s := gateLifecycleStack(t, map[string]any{
-		"plans.plan_compiler_enabled": true,
+		"plans.plan_compiler_enabled":     true,
+		"plans.mode":                      "off",
+		"plans.approval.require_approval": false,
 	})
 	sessionID := s.CreateSession(t, "compiler-seal", s.ProjectDir)
+	s.Fake.Script(harness.IsClassifierRequest(),
+		harness.ClassifierJSONResponse(`{"intent":"code","confidence":0.9}`))
 
-	// A plan-mode request under the compiler flag seeds a draft and parks.
-	s.ChatTurn(t, sessionID, "plan the storage rework as a brainstorm draft", 90*time.Second)
+	// A plan-shaped request under the compiler flag seeds a draft and parks.
+	// Fire-and-forget (sibling continuation-test shape): the parked draft's
+	// turn never finalizes (it awaits plan.seal), so the CLI await path
+	// would block to its ceiling. The draft seed is the end state.
+	ack := s.SubmitChatHTTP(t, sessionID,
+		"plan the storage rework as a brainstorm draft, don't implement it")
+	if tid, _ := ack["turn_id"].(string); tid == "" {
+		t.Fatalf("plan submit ack missing turn_id: %+v", ack)
+	}
 
 	// Find the dispatched task (the draft lives in its metadata).
 	var taskID string

@@ -127,6 +127,33 @@ func planSuite(t *testing.T) *harness.Stack {
 	}))
 }
 
+// seedPlanPhase rewrites a dispatch-path plan markdown with one real
+// phase + step before approval. The plan-manager lane synthesizes
+// zero-phase docs plans straight to completed (leaf 10, 20261121
+// interactive-usability: the zero-phase guard completes instead of
+// faking execution), so a fixture that needs the executing ->
+// completed/failed lifecycle must carry a phase the parser recognizes
+// ("## Phase N: name [state]" + numbered step lines). The file stays
+// the source of truth: this mirrors what the TUI editor writes.
+func seedPlanPhase(t *testing.T, filePath, planID, stepDesc string) {
+	t.Helper()
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("read plan file to seed phase: %v", err)
+	}
+	content := string(data)
+	if strings.Contains(content, "## Phase 1:") {
+		return
+	}
+	content += "\n## Phase 1: rework pass [pending]\n\n1. " + stepDesc + " [pending]\n"
+	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+		t.Fatalf("seed plan phase: %v", err)
+	}
+	// Round-trip pin: the seeded file must still parse and carry the
+	// same plan_id before anything consumes it.
+	requireParses(t, filePath, planID)
+}
+
 // ---------------------------------------------------------------------------
 // plan-lifecycle-01 (S): plan.create lands the file in the project's
 // docs/plans and the store and the file agree
@@ -214,6 +241,14 @@ func TestApprovalPathUpdatesPlanFileAtomically(t *testing.T) {
 		t.Fatalf("plan file %s carries no plan_id", filePath)
 	}
 	waitForPlanState(t, s, planID, "pending_approval", 30*time.Second)
+
+	// The dispatch-path docs plan carries zero phases; under the current
+	// contract (leaf 10, 20261121: the zero-phase guard completes instead
+	// of faking execution) approving it would jump straight to completed
+	// with no synthesized task. This pin drives the executing flip of the
+	// atomic read-parse-write, so the file must carry one real phase the
+	// synthesizer can expand - the same edit the TUI plan editor makes.
+	seedPlanPhase(t, filePath, planID, "map the renewable energy credit lifecycle")
 
 	// Cross-check: the store knows the same plan with a file path that
 	// resolves to the file we found.
