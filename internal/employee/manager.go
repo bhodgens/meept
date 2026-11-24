@@ -1074,13 +1074,39 @@ func (m *Manager) StartAll(ctx context.Context) error {
 	return nil
 }
 
+// cronStopDrainTimeout bounds how long StopAll waits for the cron
+// scheduler's in-flight jobs to drain. cron.Stop() takes no context: it
+// returns a context that closes only when every running job finishes, and a
+// job mid-goal-round holds the employee's invoke mutex across minutes of LLM
+// work — the daemon's ShutdownTimeout never reaches it. The wait is bounded
+// instead: on timeout the scheduler is abandoned best-effort (jobs keep
+// running to completion; nothing is killed) and shutdown proceeds.
+const cronStopDrainTimeout = 5 * time.Second
+
 // StopAll reverses StartAll. Currently a no-op for the Manager itself (the
 // underlying bot.Manager has its own StopAll). Stores are Closed by the
 // daemon's Components.Stop to keep ownership clear.
 func (m *Manager) StopAll() {
 	if m != nil && m.Cron != nil {
-		stopCtx := m.Cron.Stop()
-		<-stopCtx.Done()
+		// Bound the drain wait (bughunt): race cron.Stop's completion
+		// against a timeout so a long goal round cannot wedge daemon
+		// shutdown. The goroutine keeps waiting — Stop's drain context
+		// is never killed, only abandoned — so an in-flight round runs
+		// to completion and the process exit reaps it.
+		drained := make(chan struct{})
+		go func() {
+			defer close(drained)
+			stopCtx := m.Cron.Stop()
+			<-stopCtx.Done()
+		}()
+		select {
+		case <-drained:
+		case <-time.After(cronStopDrainTimeout):
+			if m.logger != nil {
+				m.logger.Warn("employee cron drain timed out — abandoning in-flight job (best-effort, not killed)",
+					"timeout", cronStopDrainTimeout)
+			}
+		}
 	}
 	if m != nil && m.logger != nil {
 		m.logger.Info("employee manager stopped")

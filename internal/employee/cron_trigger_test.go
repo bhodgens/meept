@@ -341,3 +341,57 @@ func TestUpdateBotResyncsCron(t *testing.T) {
 		t.Fatalf("entries after disabling update = %d, want 0 (update must resync cron jobs)", n)
 	}
 }
+
+// TestStopAllBoundsCronDrainWait pins the bughunt shutdown-hang fix: a cron
+// job stuck in a long-running round (the goal-round shape: minutes of LLM
+// work holding invokeMu) must NOT wedge StopAll forever — cron.Stop() takes
+// no context, so the drain wait is raced against cronStopDrainTimeout and
+// abandoned best-effort on expiry. The in-flight job is never killed: it
+// keeps running until its own release.
+//
+// Failing revert: restore `<-stopCtx.Done()` (unbounded) in StopAll — this
+// test then blocks for the job's full runtime and fails on the wall-clock
+// bound.
+func TestStopAllBoundsCronDrainWait(t *testing.T) {
+	botMgr, mgr := newCronTestHarness(t)
+	_ = botMgr
+
+	release := make(chan struct{})
+	started := make(chan struct{})
+	// The job must be fired BY THE SCHEDULER (robfig tracks scheduler-run
+	// jobs in its jobWaiter, which Stop's drain context waits on). @every
+	// fires within milliseconds; the body blocks once, simulating a goal
+	// round running long past the drain bound.
+	if _, err := mgr.Cron.AddFunc("@every 10ms", func() {
+		select {
+		case <-started:
+			return // already blocked once; keep later fires no-op
+		default:
+		}
+		close(started)
+		<-release
+	}); err != nil {
+		t.Fatalf("AddFunc: %v", err)
+	}
+	mgr.Cron.Start()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("cron job never started")
+	}
+
+	// StopAll must return within the drain bound (+ margin), NOT wait for
+	// the blocked job.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		mgr.StopAll()
+	}()
+	select {
+	case <-done:
+	case <-time.After(cronStopDrainTimeout + 3*time.Second):
+		close(release)
+		t.Fatalf("StopAll blocked past cronStopDrainTimeout on an in-flight cron job (unbounded drain wait)")
+	}
+	close(release)
+}
