@@ -57,7 +57,7 @@
       "description": "step-wise reasoning scratchpad, zero-config",
       "install_hint": "npm install -g @modelcontextprotocol/server-sequential-thinking",
       "type": "stdio",
-      "command": ["npx", "-y", "@modelcontextprotocol/server-sequential-thinking"],
+      "command": ["npx", "-y", "@modelcontextprotocol/server-sequential-thinking@2.2.0"],
     },
 
     // zero-config: reference server exercising prompts, resources, tools,
@@ -69,7 +69,7 @@
       "description": "mcp reference test server, exercises all features, zero-config",
       "install_hint": "npm install -g @modelcontextprotocol/server-everything",
       "type": "stdio",
-      "command": ["npx", "-y", "@modelcontextprotocol/server-everything"],
+      "command": ["npx", "-y", "@modelcontextprotocol/server-everything@2.3.1"],
     },
 
     // zero-config: local knowledge graph on disk, no api key.
@@ -80,7 +80,7 @@
       "description": "local knowledge graph store, zero-config",
       "install_hint": "npm install -g @modelcontextprotocol/server-memory",
       "type": "stdio",
-      "command": ["npx", "-y", "@modelcontextprotocol/server-memory"],
+      "command": ["npx", "-y", "@modelcontextprotocol/server-memory@2.2.1"],
     },
 
     // github: needs a personal access token.
@@ -94,7 +94,7 @@
       "description": "github repos, issues, prs (archived upstream, still functional)",
       "install_hint": "npm install -g @modelcontextprotocol/server-github",
       "type": "stdio",
-      "command": ["npx", "-y", "@modelcontextprotocol/server-github"],
+      "command": ["npx", "-y", "@modelcontextprotocol/server-github@2025.4.8"],
       "env": {
         "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}",
       },
@@ -110,7 +110,7 @@
       "description": "slack channels and messages, requires slack bot token (archived upstream)",
       "install_hint": "npm install -g @modelcontextprotocol/server-slack",
       "type": "stdio",
-      "command": ["npx", "-y", "@modelcontextprotocol/server-slack"],
+      "command": ["npx", "-y", "@modelcontextprotocol/server-slack@2025.4.25"],
       "env": {
         "SLACK_BOT_TOKEN": "${SLACK_BOT_TOKEN}",
         "SLACK_TEAM_ID": "${SLACK_TEAM_ID:-}",
@@ -126,7 +126,7 @@
       "description": "brave web + local search, requires brave api key (archived upstream)",
       "install_hint": "npm install -g @modelcontextprotocol/server-brave-search",
       "type": "stdio",
-      "command": ["npx", "-y", "@modelcontextprotocol/server-brave-search"],
+      "command": ["npx", "-y", "@modelcontextprotocol/server-brave-search@0.6.2"],
       "env": {
         "BRAVE_API_KEY": "${BRAVE_API_KEY}",
       },
@@ -140,7 +140,7 @@
       "description": "firecrawl web scrape + search, requires api key",
       "install_hint": "npm install -g firecrawl-mcp",
       "type": "stdio",
-      "command": ["npx", "-y", "firecrawl-mcp"],
+      "command": ["npx", "-y", "firecrawl-mcp@3.41.0"],
       "env": {
         "FIRECRAWL_API_KEY": "${FIRECRAWL_API_KEY}",
       },
@@ -155,7 +155,7 @@
       "description": "context7 up-to-date library docs lookup, anonymous tier or api key",
       "install_hint": "npm install -g @upstash/context7-mcp",
       "type": "stdio",
-      "command": ["npx", "-y", "@upstash/context7-mcp"],
+      "command": ["npx", "-y", "@upstash/context7-mcp@4.7.3"],
       "env": {
         "UPSTASH_CONTEXT7_API_KEY": "${UPSTASH_CONTEXT7_API_KEY:-}",
       },
@@ -170,7 +170,7 @@
       "description": "browser automation via playwright (official microsoft mcp), requires browsers",
       "install_hint": "npm install -g @playwright/mcp",
       "type": "stdio",
-      "command": ["npx", "-y", "@playwright/mcp"],
+      "command": ["npx", "-y", "@playwright/mcp@0.0.86"],
     },
 
     // puppeteer: headless chrome via puppeteer. downloads chromium on first
@@ -183,7 +183,7 @@
       "description": "browser automation via puppeteer, downloads chromium (archived upstream)",
       "install_hint": "npm install -g @modelcontextprotocol/server-puppeteer",
       "type": "stdio",
-      "command": ["npx", "-y", "@modelcontextprotocol/server-puppeteer"],
+      "command": ["npx", "-y", "@modelcontextprotocol/server-puppeteer@2025.5.12"],
     },
 
     // postgres: read-only postgresql access. pass the connection string as a
@@ -196,7 +196,7 @@
       "description": "postgresql read-only query tool, requires connection string (archived upstream)",
       "install_hint": "npm install -g @modelcontextprotocol/server-postgres",
       "type": "stdio",
-      "command": ["npx", "-y", "@modelcontextprotocol/server-postgres", "${POSTGRES_CONNECTION_STRING}"],
+      "command": ["npx", "-y", "@modelcontextprotocol/server-postgres@0.6.2", "${POSTGRES_CONNECTION_STRING}"],
     },
 
     // filesystem: needs allowed directories as positional args. zero-config-ish
@@ -208,7 +208,7 @@
       "description": "filesystem access for allowed directories, configure paths in command",
       "install_hint": "npm install -g @modelcontextprotocol/server-filesystem",
       "type": "stdio",
-      "command": ["npx", "-y", "@modelcontextprotocol/server-filesystem", "${HOME}"],
+      "command": ["npx", "-y", "@modelcontextprotocol/server-filesystem@2.4.0", "${HOME}"],
     },
 
     // google drive: needs oauth credentials. package is server-gdrive (no
@@ -221,7 +221,7 @@
       "description": "google drive search + read, requires oauth credentials (archived upstream)",
       "install_hint": "npm install -g @modelcontextprotocol/server-gdrive",
       "type": "stdio",
-      "command": ["npx", "-y", "@modelcontextprotocol/server-gdrive"],
+      "command": ["npx", "-y", "@modelcontextprotocol/server-gdrive@2025.1.14"],
       "env": {
         "GOOGLE_CLIENT_ID": "${GOOGLE_CLIENT_ID}",
         "GOOGLE_CLIENT_SECRET": "${GOOGLE_CLIENT_SECRET}",
@@ -236,7 +236,7 @@
       "description": "run commands in docker containers, requires docker daemon",
       "install_hint": "npm install -g mcp-server-docker",
       "type": "stdio",
-      "command": ["npx", "-y", "mcp-server-docker"],
+      "command": ["npx", "-y", "mcp-server-docker@1.0.0"],
       "env": {
         "DOCKER_HOST": "${DOCKER_HOST:-}",
       },
@@ -252,7 +252,7 @@
       "description": "general-purpose http fetcher, zero-config, requires uv installed",
       "install_hint": "brew install uv  (or: pip install uv)",
       "type": "stdio",
-      "command": ["uvx", "mcp-server-fetch"],
+      "command": ["uvx", "mcp-server-fetch==2026.11.18"],
     },
 
     // zero-config: local git operations, no api key.
@@ -263,7 +263,7 @@
       "description": "local git repo operations (log, diff, blame), zero-config, requires uv installed",
       "install_hint": "brew install uv  (or: pip install uv)",
       "type": "stdio",
-      "command": ["uvx", "mcp-server-git"],
+      "command": ["uvx", "mcp-server-git==2026.11.18"],
     },
 
     // zero-config: time and timezone conversion via IANA names, no api key.
@@ -274,7 +274,7 @@
       "description": "time and timezone conversion, zero-config, requires uv installed",
       "install_hint": "brew install uv  (or: pip install uv)",
       "type": "stdio",
-      "command": ["uvx", "mcp-server-time"],
+      "command": ["uvx", "mcp-server-time==2026.11.18"],
     },
 
     // sqlite: zero-config with default db path. ad-hoc sqlite operations,
@@ -287,7 +287,7 @@
       "description": "sqlite operations and schema introspection, zero-config, requires uv installed",
       "install_hint": "brew install uv  (or: pip install uv)",
       "type": "stdio",
-      "command": ["uvx", "mcp-server-sqlite", "--db-path", "~/.meept/mcp/sqlite.db"],
+      "command": ["uvx", "mcp-server-sqlite==2025.4.25", "--db-path", "~/.meept/mcp/sqlite.db"],
     },
 
     // searxng: meta-search aggregator. When connected and healthy, the
@@ -303,7 +303,7 @@
       "description": "searxng meta-search, requires local searxng instance at searxng_url",
       "install_hint": "brew install uv  (or: pip install uv)",
       "type": "stdio",
-      "command": ["uvx", "searxng-mcp"],
+      "command": ["uvx", "searxng-mcp==2.4.0"],
       "env": {
         "SEARXNG_URL": "${SEARXNG_URL:-http://127.0.0.1:8889}",
       },
@@ -358,7 +358,7 @@
       "description": "excel-mcp-server fallback: pivot tables, charts, formatting for xlsx when native spreadsheet_write is insufficient",
       "install_hint": "brew install uv  (or: pip install uv)",
       "type": "stdio",
-      "command": ["uvx", "excel-mcp-server", "stdio"],
+      "command": ["uvx", "excel-mcp-server==2.3.3", "stdio"],
     },
   ],
 }
