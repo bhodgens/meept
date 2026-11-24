@@ -242,6 +242,10 @@ func TestVoiceTurnStampUsesEmployeeTimezone(t *testing.T) {
 	r, chatter, sessions := clockStampRunner(t, "noon here")
 	r.employees = stampedEmployeeResolver{tz: "America/Denver"}
 	sess := newVoiceSession(t, sessions)
+	// The Run path resolves the location through sess.EmployeeID; without
+	// it the resolver falls back to time.Local, which is America/Denver on
+	// a developer Mac but UTC on a Linux CI runner.
+	sess.EmployeeID = "emp-tz"
 
 	utcNow := time.Date(2026, 11, 11, 19, 0, 30, 0, time.UTC)
 	stamp := voiceTurnContextStamp(utcNow.In(r.resolveVoiceTurnLocation(context.Background(), "emp-tz")))
