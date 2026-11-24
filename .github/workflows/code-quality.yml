@@ -20,6 +20,13 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # Gate [20/21] is fail-closed on CI when deadcode is absent. The
+      # deadcode job in ci.yml installs it, but this job runs the whole
+      # pre-commit chain directly, so it needs the same binary. Pin to the
+      # x/tools version that matches go.mod (ci.yml uses the same pin).
+      - name: Install deadcode for the pre-commit chain
+        run: go install golang.org/x/tools/cmd/deadcode@v0.52.0
+
       # The sub-hooks begin with `#!/usr/bin/env bash`, so they execute under
       # the runner's bash 5 (this used to fail at step [1/17] because
       # pre-commit-build/pre-commit-ascii/pre-commit-dart-format hard-coded
@@ -68,6 +75,13 @@ jobs:
           # go.mod declares the toolchain, so this job cannot drift from the
           # module's required Go version the way the pinned '1.23' jobs can.
           go-version-file: go.mod
+
+      # MCP catalog version-pin guard: fails any unpinned npx/uvx command in
+      # config/mcp_servers.json5 before a compromised upstream release can be
+      # resolved at launch. Pure Python stdlib; mirrors the runtime validator
+      # in internal/tools/mcp/version_pin.go.
+      - name: MCP command version pins
+        run: make mcp-pin-check
 
       # AGENTS.md size, pointer, and package-table ratchet (pure Python, no
       # dependencies): fails on growth past 16 KiB or a new undocumented package.

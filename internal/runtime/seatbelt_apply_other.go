@@ -14,6 +14,13 @@ import (
 // keeps its network-namespace confinement byte-identically.
 func confineLocal(cmd *exec.Cmd, class string, policy *SeatbeltConfig) error {
 	if SeatbeltActive(policy) {
+		// Keep the profile builder reachable on non-darwin hosts too: the
+		// deadcode gate scans a Linux build, where the darwin-only caller
+		// is invisible. Building the profile here is validation only; the
+		// policy is still refused below.
+		if _, err := BuildSeatbeltProfile(class, policy); err != nil {
+			return fmt.Errorf("%w: invalid seatbelt policy: %w", ErrNetworkClassUnenforceable, err)
+		}
 		return fmt.Errorf("%w: seatbelt confinement is macOS-only", ErrNetworkClassUnenforceable)
 	}
 	return ApplyNetworkClass(cmd, class)
