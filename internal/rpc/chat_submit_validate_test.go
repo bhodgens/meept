@@ -212,3 +212,73 @@ func TestBothIDMismatch(t *testing.T) {
 		}
 	})
 }
+
+// TestChatSubmitPayloadCarriesOwnerPrimarySessionID pins the bughunt-wave2
+// finding-3 fix: the published chat.request payload's session_id must carry
+// the resolved owning session's PRIMARY id. A GUI-shaped submit sends an
+// EMPTY session_id and conversation_id = the session primary id; before the
+// fix the payload kept the empty value, so ChatHandler persisted under
+// persistID=conversationID (session_messages keyed conv-... while history
+// readers query the session primary id — the GUI transcript lost its own
+// turns on reload) and WS frames carried the empty/conv id against grant
+// sets keyed by the session id. The ack's own fields stay unchanged.
+func TestChatSubmitPayloadCarriesOwnerPrimarySessionID(t *testing.T) {
+	h, _, sub := newGateValidateHandler(t)
+
+	// GUI-shaped: no session_id, conversation_id = the session PRIMARY id.
+	ack := gateSubmitAck(t, h, `{"message":"hello gui","conversation_id":"sess-gate-a","turn_id":"turn-gui-1"}`)
+	if accepted, _ := ack["accepted"].(bool); !accepted {
+		t.Fatalf("gui-shaped submit rejected: %v", ack["note"])
+	}
+	// The ack echoes the client's submitted session_id (empty) verbatim —
+	// the fix must not change the ack contract.
+	if sid, _ := ack["session_id"].(string); sid != "" {
+		t.Errorf("ack session_id = %q, want empty (ack fields unchanged)", sid)
+	}
+
+	select {
+	case msg := <-sub.Channel:
+		var payload map[string]any
+		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+			t.Fatalf("chat.request payload unmarshal: %v", err)
+		}
+		if got, _ := payload["session_id"].(string); got != "sess-gate-a" {
+			t.Errorf("chat.request payload session_id = %q, want the owner primary id %q", got, "sess-gate-a")
+		}
+		// The conversation must still be canonicalized to the session's
+		// OWN conv id (leaf 01 contract, unchanged by this fix).
+		if got, _ := payload["conversation_id"].(string); got != "conv-gate-a" {
+			t.Errorf("chat.request payload conversation_id = %q, want conv-gate-a", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no chat.request published for the gui-shaped submit")
+	}
+}
+
+// TestChatSubmitPayloadSessionIDFromExplicitSession: the session_id-shaped
+// submit keeps carrying the resolved primary id in the payload (unchanged
+// behavior — regression guard for the finding-3 stamp).
+func TestChatSubmitPayloadSessionIDFromExplicitSession(t *testing.T) {
+	h, _, sub := newGateValidateHandler(t)
+
+	ack := gateSubmitAck(t, h, `{"message":"hello cli","session_id":"sess-gate-b","turn_id":"turn-cli-1"}`)
+	if accepted, _ := ack["accepted"].(bool); !accepted {
+		t.Fatalf("session-shaped submit rejected: %v", ack["note"])
+	}
+
+	select {
+	case msg := <-sub.Channel:
+		var payload map[string]any
+		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+			t.Fatalf("chat.request payload unmarshal: %v", err)
+		}
+		if got, _ := payload["session_id"].(string); got != "sess-gate-b" {
+			t.Errorf("chat.request payload session_id = %q, want sess-gate-b", got)
+		}
+		if got, _ := payload["conversation_id"].(string); got != "conv-gate-b" {
+			t.Errorf("chat.request payload conversation_id = %q, want conv-gate-b", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no chat.request published for the session-shaped submit")
+	}
+}

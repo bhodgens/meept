@@ -157,6 +157,18 @@ func (h *SubmitHandler) buildAck(req ChatSubmitRequest) (any, error) {
 	// before validation and never rejected. The nil-store path keeps the
 	// legacy resolution/mint shape byte-for-byte.
 	conversationID := req.ConversationID
+	// ownerSessionID is the PRIMARY id of the session that owns this turn,
+	// resolved below whenever a session store is wired (bughunt wave2,
+	// finding 3). The published chat.request payload stamps it into
+	// session_id: a GUI-shaped submit carries an EMPTY req.SessionID
+	// (Flutter sends only conversation_id = the session primary id), and
+	// before this fix the payload kept the empty value — ChatHandler then
+	// persisted under persistID=conversationID, keying session_messages
+	// under conv-... while history readers query the session primary id
+	// (the GUI transcript lost its own turns on reload), and WS frames
+	// carried the empty/conv id against grant sets keyed by the session
+	// id. The ack's own fields stay unchanged (req.SessionID verbatim).
+	ownerSessionID := ""
 	if h.sessionStore != nil {
 		var sess *session.Session
 		if req.SessionID != "" {
@@ -184,7 +196,12 @@ func (h *SubmitHandler) buildAck(req ChatSubmitRequest) (any, error) {
 					"note":            fmt.Sprintf("unknown conversation id %q - create a session first (session.create), then resubmit", conversationID),
 				}, nil
 			}
-			if sess != nil && convSess.ID != sess.ID {
+			if sess == nil {
+				// GUI-shaped submit: conversation_id resolved (possibly
+				// from a raw primary session id) to its owning session —
+				// that session owns the turn's identity (finding 3).
+				sess = convSess
+			} else if convSess.ID != sess.ID {
 				// Both-ids membership check: the pair does not belong
 				// together. Correct to the session's owning conversation
 				// rather than silently accepting the submitted pair.
@@ -215,6 +232,12 @@ func (h *SubmitHandler) buildAck(req ChatSubmitRequest) (any, error) {
 			// stays on the session conversation the loop binds).
 			conversationID = sess.ConversationID
 		}
+		if sess != nil {
+			// The resolved owner's PRIMARY id is what downstream
+			// consumers (persistence keys, WS grant sets) speak in
+			// (finding 3).
+			ownerSessionID = sess.ID
+		}
 	}
 	if conversationID == "" {
 		conversationID = id.Generate("conv-")
@@ -243,10 +266,21 @@ func (h *SubmitHandler) buildAck(req ChatSubmitRequest) (any, error) {
 	// legacy `chat` consumer (ChatHandler) parses this payload — adding
 	// turn_id is additive; every key is set explicitly rather than
 	// marshaling the struct so the wire shape is auditable here.
+	//
+	// session_id carries the RESOLVED owner session's PRIMARY id when a
+	// session store resolved one (finding 3): a GUI-shaped submit has an
+	// empty req.SessionID, and persisting under the empty value keyed
+	// session_messages under the conversation id while history readers
+	// query the session primary id. Falls back to req.SessionID verbatim
+	// when no store is wired or no session resolved (legacy shape).
+	payloadSessionID := req.SessionID
+	if ownerSessionID != "" {
+		payloadSessionID = ownerSessionID
+	}
 	payload := map[string]any{
 		"message":         req.Message,
 		"conversation_id": conversationID,
-		"session_id":      req.SessionID,
+		"session_id":      payloadSessionID,
 		"agent_id":        req.AgentID,
 		"source_client":   req.SourceClient,
 		"model":           req.Model,
