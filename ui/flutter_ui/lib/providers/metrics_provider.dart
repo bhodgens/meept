@@ -8,6 +8,11 @@ import '../services/websocket_service.dart';
 
 const _unset = Object();
 
+/// Single review-window for the whole metrics panel: the grades sections
+/// (model / judge) and the model x category breakdown summarize the SAME
+/// period, so they can render side by side without drift (bughunt wave2).
+const kReviewsWindow = '30d';
+
 /// Metrics state for the live metrics panel.
 ///
 /// The `models`, `agents`, and `totals` sections are nullable so the panel
@@ -117,9 +122,9 @@ class MetricsNotifier extends StateNotifier<MetricsState> {
   void _init() {
     // Initial fetch from HTTP
     _fetchMetrics();
-    unawaited(fetchReviewGrades(window: '30d', groupBy: 'model'));
-    unawaited(fetchReviewGrades(window: '30d', groupBy: 'judge'));
-    unawaited(fetchReviewBreakdown());
+    unawaited(fetchReviewGrades(window: kReviewsWindow, groupBy: 'model'));
+    unawaited(fetchReviewGrades(window: kReviewsWindow, groupBy: 'judge'));
+    unawaited(fetchReviewBreakdown(window: kReviewsWindow));
 
     // Subscribe to WebSocket metrics updates
     if (websocket.isConnected) {
@@ -210,9 +215,9 @@ class MetricsNotifier extends StateNotifier<MetricsState> {
   Future<void> refresh() async {
     state = state.copyWith(isLoading: true);
     await _fetchMetrics();
-    await fetchReviewGrades(window: '30d', groupBy: 'model');
-    await fetchReviewGrades(window: '30d', groupBy: 'judge');
-    await fetchReviewBreakdown();
+    await fetchReviewGrades(window: kReviewsWindow, groupBy: 'model');
+    await fetchReviewGrades(window: kReviewsWindow, groupBy: 'judge');
+    await fetchReviewBreakdown(window: kReviewsWindow);
   }
 
   /// Fetch review-verdict grades for one group_by and merge the decoded
@@ -220,7 +225,7 @@ class MetricsNotifier extends StateNotifier<MetricsState> {
   /// degrade to an empty-rows entry so the grades section always renders;
   /// they never fail the live-metrics refresh.
   Future<void> fetchReviewGrades({
-    String window = '30d',
+    String window = kReviewsWindow,
     required String groupBy,
   }) async {
     try {
@@ -252,7 +257,7 @@ class MetricsNotifier extends StateNotifier<MetricsState> {
   /// model_category`) and store the rows. Best-effort: on failure the
   /// previous value (or null before the first success) is kept, so the
   /// breakdown section never blanks the existing tiles.
-  Future<void> fetchReviewBreakdown({String window = '24h'}) async {
+  Future<void> fetchReviewBreakdown({String window = kReviewsWindow}) async {
     try {
       _checkMounted();
       final rows = await sdkClient.getReviewBreakdown(window: window);
