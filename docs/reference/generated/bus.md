@@ -10,6 +10,7 @@ Package bus provides a channel\-based pub/sub message bus.
 
 - Constants
 - Variables
+- [func IsCriticalTopic\(topic string\) bool](<#IsCriticalTopic>)
 - [func MatchWildcard\(pattern, topic string\) bool](<#MatchWildcard>)
 - [func PublishBlockingT\[T any\]\(b \*MessageBus, t Topic\[T\], source string, payload T\) int](<#PublishBlockingT>)
 - [func PublishT\[T any\]\(b \*MessageBus, t Topic\[T\], source string, payload T\) int](<#PublishT>)
@@ -26,10 +27,13 @@ Package bus provides a channel\-based pub/sub message bus.
   - [func \(b \*MessageBus\) HasSubscribers\(topic string\) bool](<#MessageBus.HasSubscribers>)
   - [func \(b \*MessageBus\) Publish\(topic string, msg \*models.BusMessage\) int](<#MessageBus.Publish>)
   - [func \(b \*MessageBus\) PublishBlocking\(topic string, msg \*models.BusMessage\) int](<#MessageBus.PublishBlocking>)
+  - [func \(b \*MessageBus\) PublishBlockingErr\(topic string, msg \*models.BusMessage\) \(int, error\)](<#MessageBus.PublishBlockingErr>)
   - [func \(b \*MessageBus\) PublishExternalOnly\(topic string, msg \*models.BusMessage\) int](<#MessageBus.PublishExternalOnly>)
   - [func \(b \*MessageBus\) Request\(ctx context.Context, topic string, msg \*models.BusMessage\) \(\*models.BusMessage, error\)](<#MessageBus.Request>)
   - [func \(b \*MessageBus\) Stats\(\) map\[string\]int](<#MessageBus.Stats>)
   - [func \(b \*MessageBus\) Subscribe\(id, topic string\) \*Subscriber](<#MessageBus.Subscribe>)
+  - [func \(b \*MessageBus\) SubscribeWithBuffer\(id, topic string, bufferSize int\) \*Subscriber](<#MessageBus.SubscribeWithBuffer>)
+  - [func \(b \*MessageBus\) TurnOutbox\(\) \*TurnOutbox](<#MessageBus.TurnOutbox>)
   - [func \(b \*MessageBus\) Unsubscribe\(sub \*Subscriber\)](<#MessageBus.Unsubscribe>)
 - [type MessageCallback](<#MessageCallback>)
 - [type SubMetadata](<#SubMetadata>)
@@ -43,6 +47,13 @@ Package bus provides a channel\-based pub/sub message bus.
   - [func \(h \*SubscriptionHandler\) Subscribe\(topic string, callback MessageCallback\)](<#SubscriptionHandler.Subscribe>)
 - [type Topic](<#Topic>)
   - [func NewTopic\[T any\]\(name string\) Topic\[T\]](<#NewTopic>)
+- [type TurnOutbox](<#TurnOutbox>)
+  - [func NewTurnOutbox\(capacity int\) \*TurnOutbox](<#NewTurnOutbox>)
+  - [func \(o \*TurnOutbox\) Lookup\(turnID string\) \(TurnOutboxEntry, bool\)](<#TurnOutbox.Lookup>)
+  - [func \(o \*TurnOutbox\) Record\(turnID, sessionID, topic string, payload \[\]byte\) bool](<#TurnOutbox.Record>)
+  - [func \(o \*TurnOutbox\) Since\(sinceSeq int64\) \[\]TurnOutboxEntry](<#TurnOutbox.Since>)
+  - [func \(o \*TurnOutbox\) Stats\(\) \(retained int, nextSeq int64, trimmed int64\)](<#TurnOutbox.Stats>)
+- [type TurnOutboxEntry](<#TurnOutboxEntry>)
 
 
 ## Constants
@@ -79,6 +90,10 @@ Package bus provides a channel\-based pub/sub message bus.
 	    EventQueueStatus           = "agent.queue.status"
 	)
 
+<a name="DefaultTurnOutboxCapacity"></a>DefaultTurnOutboxCapacity bounds retained terminal outcomes. Matches the C6 critical ring size so a reconnecting client can recover every terminal the poll ring would still hold.
+
+	const DefaultTurnOutboxCapacity = 256
+
 ## Variables
 
 <a name="TopicACPPermissionRequested"></a>TopicACPPermissionRequested fires when a permission\_mode "human" \(or decision\-lane escalated\) session/requestPermission enters the pending registry. TopicACPPermissionResolved fires when the wait terminates \(answered, timeout, or fail\-closed rejections\). Typed Topic\[T\] per internal/comm/AGENTS.md: the payload is stable and single\-shape.
@@ -87,6 +102,21 @@ Package bus provides a channel\-based pub/sub message bus.
 	    TopicACPPermissionRequested = NewTopic[ACPPermissionEvent]("acp.permission.requested")
 	    TopicACPPermissionResolved  = NewTopic[ACPPermissionEvent]("acp.permission.resolved")
 	)
+
+<a name="ErrBusClosed"></a>ErrBusClosed is returned by the blocking publish paths when the bus has been shut down: a critical event can never be delivered after Close, and the caller must terminalize honestly instead of hanging on the 5s bound.
+
+	var ErrBusClosed = errors.New("bus: message bus closed")
+
+<a name="ErrLoopClosed"></a>ErrLoopClosed is the closed\-runtime sentinel for turn submission: a turn handed to a torn\-down loop must terminalize failed with this error instead of running on dead state or vanishing silently. The closed\-loop guard itself \(RunOnceWithParts check \+ stale\-loop rebuild\) is 01\-safety/05 T4; this leaf declares the shared sentinel so the turn outbox and the guard agree on the error identity.
+
+	var ErrLoopClosed = errors.New("agent: loop closed")
+
+<a name="IsCriticalTopic"></a>
+## func IsCriticalTopic
+
+	func IsCriticalTopic(topic string) bool
+
+IsCriticalTopic reports whether topic is in the C6 critical set: a per\-task/plan\-once terminal event that must use the blocking publish path and is exempt from the poll buffer's drop\-oldest trim.
 
 <a name="MatchWildcard"></a>
 ## func MatchWildcard
@@ -236,6 +266,13 @@ Publish sends a message to all subscribers of the topic. It also publishes to wi
 
 PublishBlocking sends a message to all subscribers, blocking until the message is enqueued in every subscriber's channel or a 5\-second timeout elapses. Use this for security\-critical events where message drops are unacceptable \(e.g., approval requests\). Returns the number of subscribers the message was delivered to.
 
+<a name="MessageBus.PublishBlockingErr"></a>
+### func \(\*MessageBus\) PublishBlockingErr
+
+	func (b *MessageBus) PublishBlockingErr(topic string, msg *models.BusMessage) (int, error)
+
+PublishBlockingErr is PublishBlocking with an explicit error result for the C6 critical\-delivery path: it returns ErrBusClosed when the bus is shut down \(before or during the bounded wait\) so producers can terminalize honestly instead of reporting a silent zero delivery. Per\-subscriber timeouts still log at Error and simply do not count as delivered; the bounded\-wait contract \(5s per subscriber\) is unchanged.
+
 <a name="MessageBus.PublishExternalOnly"></a>
 ### func \(\*MessageBus\) PublishExternalOnly
 
@@ -263,6 +300,20 @@ Stats returns current bus statistics.
 	func (b *MessageBus) Subscribe(id, topic string) *Subscriber
 
 Subscribe creates a subscription to a topic. The topic can contain wildcards: "agent.\*" matches "agent.status", "agent.error".
+
+<a name="MessageBus.SubscribeWithBuffer"></a>
+### func \(\*MessageBus\) SubscribeWithBuffer
+
+	func (b *MessageBus) SubscribeWithBuffer(id, topic string, bufferSize int) *Subscriber
+
+SubscribeWithBuffer creates a subscription with an explicit channel capacity, overriding the bus\-wide default BufferSize \(bufferSize \<= 0 falls back to the default\). Callers whose consumers drain slower than burst producers \- e.g. the rpc poll collectors, C6 \- size their own channel so a flood lands in the caller's bounded ring and its explicit drop accounting instead of silently overflowing a default\-capacity channel on the bus side.
+
+<a name="MessageBus.TurnOutbox"></a>
+### func \(\*MessageBus\) TurnOutbox
+
+	func (b *MessageBus) TurnOutbox() *TurnOutbox
+
+TurnOutbox returns the bus's terminal\-outbox store, creating it on first use \(capacity DefaultTurnOutboxCapacity\). Nil\-safe. The store is the C6 recovery seam: critical terminals are captured at publish time even when live delivery drops, and the turn.result query RPC \(01\-safety/05 T5\) reads it for disconnected\-client recovery.
 
 <a name="MessageBus.Unsubscribe"></a>
 ### func \(\*MessageBus\) Unsubscribe
@@ -373,5 +424,65 @@ Topic is a compile\-time\-checked bus topic with a typed payload. Declare topics
 	func NewTopic[T any](name string) Topic[T]
 
 NewTopic declares a typed topic. Name must match the legacy string topic exactly \- typed and raw publishes to the same name interoperate.
+
+<a name="TurnOutbox"></a>
+## type TurnOutbox
+
+TurnOutbox retains per\-turn\-once terminal outcomes so a client that missed the live event \(full buffer timeout, daemon restart, reconnect\) can always recover the turn outcome \(C6 / W25 recovery seam\). It is bounded drop\-oldest with explicit overflow accounting: retention loss is counted, never silent. Safe for concurrent use.
+
+The turn.result query RPC that exposes this store is 01\-safety/05 T5; this leaf owns the store and the publish\-side capture.
+
+	type TurnOutbox struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewTurnOutbox"></a>
+### func NewTurnOutbox
+
+	func NewTurnOutbox(capacity int) *TurnOutbox
+
+NewTurnOutbox creates an outbox retaining at most capacity terminal outcomes. capacity \<= 0 falls back to DefaultTurnOutboxCapacity.
+
+<a name="TurnOutbox.Lookup"></a>
+### func \(\*TurnOutbox\) Lookup
+
+	func (o *TurnOutbox) Lookup(turnID string) (TurnOutboxEntry, bool)
+
+Lookup returns the most recent retained terminal for turnID, or false when the outbox holds none \(never retained or trimmed away\).
+
+<a name="TurnOutbox.Record"></a>
+### func \(\*TurnOutbox\) Record
+
+	func (o *TurnOutbox) Record(turnID, sessionID, topic string, payload []byte) bool
+
+Record retains a terminal outcome for turnID. Only C6 critical topics are retained; anything else is ignored \(returns false\) so progress chatter can never evict terminals. The payload is copied: callers may reuse their buffer after Record returns.
+
+<a name="TurnOutbox.Since"></a>
+### func \(\*TurnOutbox\) Since
+
+	func (o *TurnOutbox) Since(sinceSeq int64) []TurnOutboxEntry
+
+Since returns retained entries with Seq \> sinceSeq in assignment order \(a fresh slice; callers own it\). sinceSeq == 0 returns everything retained.
+
+<a name="TurnOutbox.Stats"></a>
+### func \(\*TurnOutbox\) Stats
+
+	func (o *TurnOutbox) Stats() (retained int, nextSeq int64, trimmed int64)
+
+Stats reports retention accounting: retained entry count, the next assignment seq \(cursor head\), and entries lost to the bounded trim.
+
+<a name="TurnOutboxEntry"></a>
+## type TurnOutboxEntry
+
+TurnOutboxEntry is one retained turn outcome. Payload is the terminal event payload as published \(turn.terminal shape\); Seq is the outbox assignment order \(1\-based, monotonic\) so a recovering client can page deterministically.
+
+	type TurnOutboxEntry struct {
+	    TurnID    string
+	    SessionID string
+	    Topic     string
+	    Payload   []byte
+	    Seq       int64
+	    At        time.Time
+	}
 
 Generated by [gomarkdoc](<https://github.com/princjef/gomarkdoc>)

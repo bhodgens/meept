@@ -85,6 +85,7 @@ Package agent provides the agent loop and related components.
 - [func GetThresholdForIntent\(intentType string\) float64](<#GetThresholdForIntent>)
 - [func HashToolCall\(tool string, argsJSON string\) string](<#HashToolCall>)
 - [func InjectGroupFence\(base \*security.PermissionChecker, res \*groups.Resolved\) \*security.PermissionChecker](<#InjectGroupFence>)
+- [func InterviewWaitingSince\(t \*task.Task\) time.Time](<#InterviewWaitingSince>)
 - [func IsAlwaysProposeOnly\(target string\) bool](<#IsAlwaysProposeOnly>)
 - [func IsFrontierClass\(mc \*llm.ModelConfig\) bool](<#IsFrontierClass>)
 - [func IsRetryable\(err error\) bool](<#IsRetryable>)
@@ -100,6 +101,7 @@ Package agent provides the agent loop and related components.
 - [func PairTopic\(sessionID string\) string](<#PairTopic>)
 - [func ParseVerdict\(output string\) \(Verdict, \[\]CheckResult\)](<#ParseVerdict>)
 - [func PhaseSpecsToPlan\(in \[\]PlanPhaseSpec\) \*plan.CompiledPlan](<#PhaseSpecsToPlan>)
+- [func PlanAutoSealFromIntent\(input string\) bool](<#PlanAutoSealFromIntent>)
 - [func PlanCriticSpawnVerifierCalls\(\) int](<#PlanCriticSpawnVerifierCalls>)
 - [func PresetPrompt\(presetName string, taskDescription string\) \(string, error\)](<#PresetPrompt>)
 - [func PublishLaneAgentIndex\(idx map\[string\]string\)](<#PublishLaneAgentIndex>)
@@ -111,6 +113,7 @@ Package agent provides the agent loop and related components.
 - [func Retryable\(err error, retryable bool, retryAfter time.Duration, reason string\) error](<#Retryable>)
 - [func RunWithRetry\[T any\]\(ctx context.Context, config BackoffConfig, fn func\(\) \(T, error\)\) \(T, error\)](<#RunWithRetry>)
 - [func SeedSoulIfMissing\(path string\) \(bool, error\)](<#SeedSoulIfMissing>)
+- [func SetBootRecoveryInbox\(convID string, q \*MessageQueue\)](<#SetBootRecoveryInbox>)
 - [func SetDefaultBackoffOverride\(cfg BackoffConfig\)](<#SetDefaultBackoffOverride>)
 - [func SetFailurePolicyDefaults\(cfg llm.FailurePolicyConfig\)](<#SetFailurePolicyDefaults>)
 - [func SetPerOperationBackoffOverride\(key string, cfg BackoffConfig\)](<#SetPerOperationBackoffOverride>)
@@ -134,7 +137,10 @@ Package agent provides the agent loop and related components.
 - [func ThrottleParkAttemptFromContext\(ctx context.Context\) int](<#ThrottleParkAttemptFromContext>)
 - [func ToolsWithoutProperties\(reg ToolRegistry\) \[\]string](<#ToolsWithoutProperties>)
 - [func TraceIDFromContext\(ctx context.Context\) string](<#TraceIDFromContext>)
+- [func TurnStateFunc\(store \*task.Store\) func\(taskID string\) task.TaskState](<#TurnStateFunc>)
 - [func UnionFence\(a, b security.FenceStage\) security.FenceStage](<#UnionFence>)
+- [func UnwrapThreadConversationID\(key string\) string](<#UnwrapThreadConversationID>)
+- [func UserFacingError\(err error\) string](<#UserFacingError>)
 - [func ValidateSoul\(content \[\]byte\) error](<#ValidateSoul>)
 - [func VerifyFromToolResults\(results \[\]tools.ToolResult\) bool](<#VerifyFromToolResults>)
 - [func WarnToolsWithoutProperties\(reg ToolRegistry, logger \*slog.Logger\) \[\]string](<#WarnToolsWithoutProperties>)
@@ -192,6 +198,8 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) ACPExecutor\(\) \*ACPExecutor](<#AgentLoop.ACPExecutor>)
   - [func \(l \*AgentLoop\) AdvanceBudgetPhase\(newPhaseID string\) error](<#AgentLoop.AdvanceBudgetPhase>)
   - [func \(l \*AgentLoop\) ApplyRequestModel\(modelRef string\)](<#AgentLoop.ApplyRequestModel>)
+  - [func \(l \*AgentLoop\) ArmQueueAliases\(aliasIDs \[\]string\)](<#AgentLoop.ArmQueueAliases>)
+  - [func \(l \*AgentLoop\) ArmTurnDifficulty\(difficulty int\)](<#AgentLoop.ArmTurnDifficulty>)
   - [func \(l \*AgentLoop\) Chatter\(\) llm.Chatter](<#AgentLoop.Chatter>)
   - [func \(l \*AgentLoop\) ClearConversation\(id string\)](<#AgentLoop.ClearConversation>)
   - [func \(l \*AgentLoop\) ClearModelOverride\(\)](<#AgentLoop.ClearModelOverride>)
@@ -226,8 +234,12 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) IsAgentActive\(\) bool](<#AgentLoop.IsAgentActive>)
   - [func \(l \*AgentLoop\) IsModelOverridePersistent\(\) bool](<#AgentLoop.IsModelOverridePersistent>)
   - [func \(l \*AgentLoop\) LastStablePrefixHash\(\) string](<#AgentLoop.LastStablePrefixHash>)
+  - [func \(l \*AgentLoop\) LastTurnCostUSD\(\) float64](<#AgentLoop.LastTurnCostUSD>)
+  - [func \(l \*AgentLoop\) LastTurnTokens\(\) int](<#AgentLoop.LastTurnTokens>)
   - [func \(l \*AgentLoop\) LoopAutonomousMarker\(\) bool](<#AgentLoop.LoopAutonomousMarker>)
+  - [func \(l \*AgentLoop\) MessageDrainer\(\) MessageDrainer](<#AgentLoop.MessageDrainer>)
   - [func \(l \*AgentLoop\) PiiRestoreHook\(\) \*PiiRestoreHook](<#AgentLoop.PiiRestoreHook>)
+  - [func \(l \*AgentLoop\) ResolveTurnModel\(\)](<#AgentLoop.ResolveTurnModel>)
   - [func \(l \*AgentLoop\) RetryMetricsSnapshot\(\) RetryMetricsSnapshot](<#AgentLoop.RetryMetricsSnapshot>)
   - [func \(l \*AgentLoop\) Run\(ctx context.Context, messages \<\-chan \*AgentMessage, responses chan\<\- \*AgentResponse\) error](<#AgentLoop.Run>)
   - [func \(l \*AgentLoop\) RunOnce\(ctx context.Context, userMessage, conversationID string\) \(response string, err error\)](<#AgentLoop.RunOnce>)
@@ -241,12 +253,14 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) SetACPExecutor\(e \*ACPExecutor\)](<#AgentLoop.SetACPExecutor>)
   - [func \(l \*AgentLoop\) SetActive\(v bool\)](<#AgentLoop.SetActive>)
   - [func \(l \*AgentLoop\) SetAgentID\(id string\)](<#AgentLoop.SetAgentID>)
+  - [func \(l \*AgentLoop\) SetAgentRegistry\(r \*AgentRegistry\)](<#AgentLoop.SetAgentRegistry>)
   - [func \(l \*AgentLoop\) SetAutonomous\(autonomous bool\)](<#AgentLoop.SetAutonomous>)
   - [func \(l \*AgentLoop\) SetBeforeToolCallHook\(name string, priority HookPriority, hook BeforeToolCallHook\)](<#AgentLoop.SetBeforeToolCallHook>)
   - [func \(l \*AgentLoop\) SetBranchManager\(mgr any\)](<#AgentLoop.SetBranchManager>)
   - [func \(l \*AgentLoop\) SetBudgetConfig\(total int, opts BudgetHierarchyOptions\)](<#AgentLoop.SetBudgetConfig>)
   - [func \(l \*AgentLoop\) SetCapabilitiesBuilder\(cb \*CapabilitiesBuilder\)](<#AgentLoop.SetCapabilitiesBuilder>)
   - [func \(l \*AgentLoop\) SetCapabilityIndex\(ci \*skills.CapabilityIndex\)](<#AgentLoop.SetCapabilityIndex>)
+  - [func \(l \*AgentLoop\) SetChatter\(c llm.Chatter\)](<#AgentLoop.SetChatter>)
   - [func \(l \*AgentLoop\) SetClock\(now func\(\) time.Time\)](<#AgentLoop.SetClock>)
   - [func \(l \*AgentLoop\) SetCompactionConfig\(cfg config.CompactionConfig\)](<#AgentLoop.SetCompactionConfig>)
   - [func \(l \*AgentLoop\) SetCompressionPipeline\(pipeline \*compress.Pipeline\)](<#AgentLoop.SetCompressionPipeline>)
@@ -294,15 +308,19 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) SetTierBudgetProvider\(prov contextalloc.TierBudgetProvider\)](<#AgentLoop.SetTierBudgetProvider>)
   - [func \(l \*AgentLoop\) SetToolRegistry\(registry ToolRegistry\)](<#AgentLoop.SetToolRegistry>)
   - [func \(l \*AgentLoop\) SetTurnParker\(parker \*TurnParker\)](<#AgentLoop.SetTurnParker>)
+  - [func \(l \*AgentLoop\) SetTurnSystemPrefix\(prefix string\)](<#AgentLoop.SetTurnSystemPrefix>)
   - [func \(l \*AgentLoop\) SetUploadStore\(store llm.UploadStore\)](<#AgentLoop.SetUploadStore>)
   - [func \(l \*AgentLoop\) SetWorkerID\(wid int\)](<#AgentLoop.SetWorkerID>)
   - [func \(l \*AgentLoop\) SetWorkingDir\(path string\)](<#AgentLoop.SetWorkingDir>)
   - [func \(l \*AgentLoop\) SkillStateRuntime\(\) \*SkillStateRuntime](<#AgentLoop.SkillStateRuntime>)
   - [func \(l \*AgentLoop\) SpawnVerifier\(ctx context.Context, prompt string, modelRef string\) \(string, error\)](<#AgentLoop.SpawnVerifier>)
+  - [func \(l \*AgentLoop\) SteeringQueue\(\) \*MessageQueue](<#AgentLoop.SteeringQueue>)
+  - [func \(l \*AgentLoop\) SteeringRegistry\(\) \*AgentRegistry](<#AgentLoop.SteeringRegistry>)
   - [func \(l \*AgentLoop\) Stop\(\)](<#AgentLoop.Stop>)
   - [func \(l \*AgentLoop\) ThrottleMaxWait\(\) time.Duration](<#AgentLoop.ThrottleMaxWait>)
   - [func \(l \*AgentLoop\) ToolRegistry\(\) ToolRegistry](<#AgentLoop.ToolRegistry>)
   - [func \(l \*AgentLoop\) TurnParker\(\) \*TurnParker](<#AgentLoop.TurnParker>)
+  - [func \(l \*AgentLoop\) TurnPosturePrompt\(\) string](<#AgentLoop.TurnPosturePrompt>)
 - [type AgentMemoryConfig](<#AgentMemoryConfig>)
 - [type AgentMessage](<#AgentMessage>)
 - [type AgentModelBinding](<#AgentModelBinding>)
@@ -310,6 +328,7 @@ Package agent provides the agent loop and related components.
 - [type AgentRegistry](<#AgentRegistry>)
   - [func NewAgentRegistry\(cfg RegistryConfig\) \*AgentRegistry](<#NewAgentRegistry>)
   - [func \(r \*AgentRegistry\) ACPExecutor\(\) \*ACPExecutor](<#AgentRegistry.ACPExecutor>)
+  - [func \(r \*AgentRegistry\) ActiveLoopCount\(agentID string\) int](<#AgentRegistry.ActiveLoopCount>)
   - [func \(r \*AgentRegistry\) CapabilitiesMap\(\) \*CapabilitiesMap](<#AgentRegistry.CapabilitiesMap>)
   - [func \(r \*AgentRegistry\) Close\(\) error](<#AgentRegistry.Close>)
   - [func \(r \*AgentRegistry\) DB\(\) \*sql.DB](<#AgentRegistry.DB>)
@@ -328,9 +347,11 @@ Package agent provides the agent loop and related components.
   - [func \(r \*AgentRegistry\) GlobalRules\(\) string](<#AgentRegistry.GlobalRules>)
   - [func \(r \*AgentRegistry\) ListSpecs\(\) \[\]\*AgentSpec](<#AgentRegistry.ListSpecs>)
   - [func \(r \*AgentRegistry\) MemvidClient\(\) \*memvid.Client](<#AgentRegistry.MemvidClient>)
-  - [func \(r \*AgentRegistry\) RegisterActiveQueue\(conversationID string, q \*MessageQueue, loop \*AgentLoop\) uint64](<#AgentRegistry.RegisterActiveQueue>)
+  - [func \(r \*AgentRegistry\) RegisterActiveQueue\(conversationID string, q \*MessageQueue, loop \*AgentLoop, aliasIDs ...string\) uint64](<#AgentRegistry.RegisterActiveQueue>)
   - [func \(r \*AgentRegistry\) RegisterSpec\(spec \*AgentSpec\) error](<#AgentRegistry.RegisterSpec>)
   - [func \(r \*AgentRegistry\) ReleaseTaskLoops\(taskID string\)](<#AgentRegistry.ReleaseTaskLoops>)
+  - [func \(r \*AgentRegistry\) ResolveActiveQueue\(conversationID string\) \(\*MessageQueue, error\)](<#AgentRegistry.ResolveActiveQueue>)
+  - [func \(r \*AgentRegistry\) ResolveActiveQueueWithSession\(conversationID string, byConversationID func\(conversationID string\) \*session.Session, byID func\(id string\) \*session.Session\) \(\*MessageQueue, error\)](<#AgentRegistry.ResolveActiveQueueWithSession>)
   - [func \(r \*AgentRegistry\) RunAgent\(ctx context.Context, agentID, message, conversationID string\) \(string, error\)](<#AgentRegistry.RunAgent>)
   - [func \(r \*AgentRegistry\) RunAgentWithModelRef\(ctx context.Context, agentID, message, conversationID, modelRef string\) \(string, error\)](<#AgentRegistry.RunAgentWithModelRef>)
   - [func \(r \*AgentRegistry\) SeedChildConversation\(agentID, conversationID string, seed \[\]llm.ChatMessage\)](<#AgentRegistry.SeedChildConversation>)
@@ -346,6 +367,7 @@ Package agent provides the agent loop and related components.
   - [func \(r \*AgentRegistry\) SetTraceWriter\(tw TraceWriter\)](<#AgentRegistry.SetTraceWriter>)
   - [func \(r \*AgentRegistry\) SetUsageTracker\(ut lifecycleUsageTracker\)](<#AgentRegistry.SetUsageTracker>)
   - [func \(r \*AgentRegistry\) Stats\(\) map\[string\]int](<#AgentRegistry.Stats>)
+  - [func \(r \*AgentRegistry\) TaskStore\(\) \*task.Store](<#AgentRegistry.TaskStore>)
   - [func \(r \*AgentRegistry\) UnregisterActiveQueue\(conversationID string\)](<#AgentRegistry.UnregisterActiveQueue>)
   - [func \(r \*AgentRegistry\) UnregisterSpec\(id string\)](<#AgentRegistry.UnregisterSpec>)
 - [type AgentReport](<#AgentReport>)
@@ -540,6 +562,7 @@ Package agent provides the agent loop and related components.
   - [func \(h \*ChatHandler\) SetMessageSaver\(s SessionMessageSaver\)](<#ChatHandler.SetMessageSaver>)
   - [func \(h \*ChatHandler\) SetMetricsStore\(store \*metrics.Store\)](<#ChatHandler.SetMetricsStore>)
   - [func \(h \*ChatHandler\) SetNotificationPublisher\(p NotificationPublisher\)](<#ChatHandler.SetNotificationPublisher>)
+  - [func \(h \*ChatHandler\) SetPlannerInterview\(sp \*StrategicPlanner\)](<#ChatHandler.SetPlannerInterview>)
   - [func \(h \*ChatHandler\) SetQuotaResumeConfig\(maxWait time.Duration\)](<#ChatHandler.SetQuotaResumeConfig>)
   - [func \(h \*ChatHandler\) SetSessionFenceFactory\(factory sessionFenceFactory\)](<#ChatHandler.SetSessionFenceFactory>)
   - [func \(h \*ChatHandler\) SetSessionStore\(s SessionStoreReader\)](<#ChatHandler.SetSessionStore>)
@@ -740,6 +763,7 @@ Package agent provides the agent loop and related components.
 - [type DispatchResult](<#DispatchResult>)
 - [type Dispatcher](<#Dispatcher>)
   - [func NewDispatcher\(cfg DispatcherConfig\) \*Dispatcher](<#NewDispatcher>)
+  - [func \(d \*Dispatcher\) ArmSessionTurnDifficulty\(result \*DispatchResult, conversationID string\)](<#Dispatcher.ArmSessionTurnDifficulty>)
   - [func \(d \*Dispatcher\) BuildPlanSessionContext\(ctx context.Context, sessionID, excludeTaskID string\) string](<#Dispatcher.BuildPlanSessionContext>)
   - [func \(d \*Dispatcher\) BuildSessionDigestForConversation\(sessionID string\) \*SessionContextDigest](<#Dispatcher.BuildSessionDigestForConversation>)
   - [func \(d \*Dispatcher\) BuildSessionExecutionContext\(ctx context.Context, sessionID string\) string](<#Dispatcher.BuildSessionExecutionContext>)
@@ -758,6 +782,8 @@ Package agent provides the agent loop and related components.
   - [func \(d \*Dispatcher\) ProcessAmendment\(ctx context.Context, requestID string\) \(\*task.AmendmentReply, error\)](<#Dispatcher.ProcessAmendment>)
   - [func \(d \*Dispatcher\) RecallAnswer\(ctx context.Context, result \*DispatchResult, conversationID string, wait bool\) \(string, bool\)](<#Dispatcher.RecallAnswer>)
   - [func \(d \*Dispatcher\) RecordDispatch\(sessionID, handlerCase, inputSummary string, result \*DispatchResult, hasParts bool, dispatchErr error\)](<#Dispatcher.RecordDispatch>)
+  - [func \(d \*Dispatcher\) RecordDispatchCtx\(ctx context.Context, sessionID, handlerCase, inputSummary string, result \*DispatchResult, hasParts bool, dispatchErr error\)](<#Dispatcher.RecordDispatchCtx>)
+  - [func \(d \*Dispatcher\) ResolveActiveQueue\(conversationID string\) \(\*MessageQueue, error\)](<#Dispatcher.ResolveActiveQueue>)
   - [func \(d \*Dispatcher\) ResumeAfterClarification\(ctx context.Context, originalInput, userResponse, sessionID string\) \(\*DispatchResult, error\)](<#Dispatcher.ResumeAfterClarification>)
   - [func \(d \*Dispatcher\) RouteToAgent\(ctx context.Context, result \*DispatchResult, conversationID string\) \(string, error\)](<#Dispatcher.RouteToAgent>)
   - [func \(d \*Dispatcher\) SetAgentLoopManager\(m \*Manager\)](<#Dispatcher.SetAgentLoopManager>)
@@ -778,6 +804,7 @@ Package agent provides the agent loop and related components.
   - [func \(d \*Dispatcher\) SetSessionStore\(s SessionStoreReader\)](<#Dispatcher.SetSessionStore>)
   - [func \(d \*Dispatcher\) SetThreadRouter\(tr \*ThreadRouter\)](<#Dispatcher.SetThreadRouter>)
   - [func \(d \*Dispatcher\) SetToolRegistry\(reg \*DepthToolRegistry\)](<#Dispatcher.SetToolRegistry>)
+  - [func \(d \*Dispatcher\) SetTrivialFastLane\(enabled bool\)](<#Dispatcher.SetTrivialFastLane>)
   - [func \(d \*Dispatcher\) ShouldDispatchAsync\(result \*DispatchResult\) bool](<#Dispatcher.ShouldDispatchAsync>)
   - [func \(d \*Dispatcher\) ShouldRouteToCollaborate\(result \*DispatchResult\) bool](<#Dispatcher.ShouldRouteToCollaborate>)
   - [func \(d \*Dispatcher\) ShouldRouteToPair\(result \*DispatchResult\) bool](<#Dispatcher.ShouldRouteToPair>)
@@ -835,6 +862,8 @@ Package agent provides the agent loop and related components.
   - [func \(r \*ExecutionResult\) ToChatMessage\(\) llm.ChatMessage](<#ExecutionResult.ToChatMessage>)
   - [func \(r \*ExecutionResult\) ToCompressedJSON\(maxTokens int\) string](<#ExecutionResult.ToCompressedJSON>)
   - [func \(r \*ExecutionResult\) ToJSON\(\) string](<#ExecutionResult.ToJSON>)
+- [type ExecutionResultEvent](<#ExecutionResultEvent>)
+  - [func \(ExecutionResultEvent\) WSClass\(\) wsclass.WSClass](<#ExecutionResultEvent.WSClass>)
 - [type Executor](<#Executor>)
   - [func NewExecutor\(registry ToolRegistry, permChecker \*security.PermissionChecker, opts ...ExecutorOption\) \*Executor](<#NewExecutor>)
   - [func \(e \*Executor\) Execute\(ctx context.Context, toolCall llm.ToolCall\) \*ExecutionResult](<#Executor.Execute>)
@@ -849,6 +878,7 @@ Package agent provides the agent loop and related components.
   - [func \(e \*Executor\) SetRegistry\(registry ToolRegistry\)](<#Executor.SetRegistry>)
   - [func \(e \*Executor\) SetRetryMetrics\(m \*RetryMetrics\)](<#Executor.SetRetryMetrics>)
   - [func \(e \*Executor\) SetSecurityChecker\(checker \*security.PermissionChecker\)](<#Executor.SetSecurityChecker>)
+  - [func \(e \*Executor\) SetTurnTokensProvider\(fn func\(\) int\)](<#Executor.SetTurnTokensProvider>)
 - [type ExecutorOption](<#ExecutorOption>)
   - [func WithExecutorAgentID\(id string\) ExecutorOption](<#WithExecutorAgentID>)
   - [func WithExecutorBus\(msgBus \*bus.MessageBus\) ExecutorOption](<#WithExecutorBus>)
@@ -1026,6 +1056,7 @@ Package agent provides the agent loop and related components.
   - [func \(t IntentType\) ShouldCreateTask\(\) bool](<#IntentType.ShouldCreateTask>)
   - [func \(t IntentType\) ShouldDispatchAsync\(requiresPlanning bool\) bool](<#IntentType.ShouldDispatchAsync>)
   - [func \(t IntentType\) SuggestedMode\(\) string](<#IntentType.SuggestedMode>)
+- [type InterviewMessageSink](<#InterviewMessageSink>)
 - [type InterviewOption](<#InterviewOption>)
 - [type InterviewOptionQuestion](<#InterviewOptionQuestion>)
 - [type JudgmentResult](<#JudgmentResult>)
@@ -1040,6 +1071,7 @@ Package agent provides the agent loop and related components.
   - [func \(c \*LLMClassifier\) ResolvedModel\(\) string](<#LLMClassifier.ResolvedModel>)
   - [func \(c \*LLMClassifier\) SetBootReadiness\(b \*ClassifierBootReadiness\)](<#LLMClassifier.SetBootReadiness>)
   - [func \(c \*LLMClassifier\) SetPiiMaskHook\(hook \*PiiRestoreHook\)](<#LLMClassifier.SetPiiMaskHook>)
+  - [func \(c \*LLMClassifier\) SetTrivialFastLane\(enabled bool\)](<#LLMClassifier.SetTrivialFastLane>)
   - [func \(c \*LLMClassifier\) UnmarkUnavailable\(\)](<#LLMClassifier.UnmarkUnavailable>)
 - [type LLMClassifierConfig](<#LLMClassifierConfig>)
 - [type LLMMessage](<#LLMMessage>)
@@ -1047,6 +1079,7 @@ Package agent provides the agent loop and related components.
   - [func LaneAgentTable\(\) \[\]LaneRoute](<#LaneAgentTable>)
 - [type LearnedPattern](<#LearnedPattern>)
 - [type LearningPipeline](<#LearningPipeline>)
+- [type LeaseLedger](<#LeaseLedger>)
 - [type LifecycleOutcome](<#LifecycleOutcome>)
 - [type Logger](<#Logger>)
 - [type LoopOption](<#LoopOption>)
@@ -1145,6 +1178,7 @@ Package agent provides the agent loop and related components.
   - [func \(q \*MessageQueue\) HasFollowUp\(\) bool](<#MessageQueue.HasFollowUp>)
   - [func \(q \*MessageQueue\) HasSteering\(\) bool](<#MessageQueue.HasSteering>)
   - [func \(q \*MessageQueue\) IsClosed\(\) bool](<#MessageQueue.IsClosed>)
+  - [func \(q \*MessageQueue\) SetBootRecoveryInbox\(convID string, inbox \*MessageQueue\)](<#MessageQueue.SetBootRecoveryInbox>)
   - [func \(q \*MessageQueue\) SetPersister\(p QueuePersisterOps\)](<#MessageQueue.SetPersister>)
   - [func \(q \*MessageQueue\) Status\(\) QueueStatus](<#MessageQueue.Status>)
   - [func \(q \*MessageQueue\) Steer\(ctx context.Context, content, source string\) error](<#MessageQueue.Steer>)
@@ -1488,6 +1522,7 @@ Package agent provides the agent loop and related components.
   - [func \(rm \*ReviewManager\) GetValidationPolicy\(\) \*ValidationPolicy](<#ReviewManager.GetValidationPolicy>)
   - [func \(rm \*ReviewManager\) HandleReviewResult\(ctx context.Context, stepID string, result \*ReviewResult, spec \*TaskSpec\) \(\[\]\*task.TaskStep, error\)](<#ReviewManager.HandleReviewResult>)
   - [func \(rm \*ReviewManager\) ReviewStep\(ctx context.Context, step \*task.TaskStep, spec \*TaskSpec\) \(\*ReviewResult, error\)](<#ReviewManager.ReviewStep>)
+  - [func \(rm \*ReviewManager\) SetMetricsStore\(store \*metrics.Store\)](<#ReviewManager.SetMetricsStore>)
   - [func \(rm \*ReviewManager\) SetPolicy\(policy \*ReviewPolicy\)](<#ReviewManager.SetPolicy>)
   - [func \(rm \*ReviewManager\) SetSessionStore\(store SessionStoreReader\)](<#ReviewManager.SetSessionStore>)
   - [func \(rm \*ReviewManager\) SetValidationPolicy\(policy \*ValidationPolicy\)](<#ReviewManager.SetValidationPolicy>)
@@ -1495,6 +1530,7 @@ Package agent provides the agent loop and related components.
 - [type ReviewManagerConfig](<#ReviewManagerConfig>)
 - [type ReviewPolicy](<#ReviewPolicy>)
   - [func DefaultReviewPolicy\(\) \*ReviewPolicy](<#DefaultReviewPolicy>)
+  - [func ReviewPolicyFromConfig\(c config.ReviewConfig\) \*ReviewPolicy](<#ReviewPolicyFromConfig>)
   - [func \(p \*ReviewPolicy\) ExceedsMaxRevisions\(step \*task.TaskStep\) bool](<#ReviewPolicy.ExceedsMaxRevisions>)
   - [func \(p \*ReviewPolicy\) NeedsReview\(step \*task.TaskStep\) bool](<#ReviewPolicy.NeedsReview>)
   - [func \(p \*ReviewPolicy\) RequiresHumanIntervention\(step \*task.TaskStep\) bool](<#ReviewPolicy.RequiresHumanIntervention>)
@@ -1654,7 +1690,9 @@ Package agent provides the agent loop and related components.
 - [type StrategicPlanner](<#StrategicPlanner>)
   - [func NewStrategicPlanner\(cfg StrategicPlannerConfig\) \*StrategicPlanner](<#NewStrategicPlanner>)
   - [func \(sp \*StrategicPlanner\) ApprovePlan\(ctx context.Context, taskID string\) error](<#StrategicPlanner.ApprovePlan>)
+  - [func \(sp \*StrategicPlanner\) ClearInterviewState\(taskID string\)](<#StrategicPlanner.ClearInterviewState>)
   - [func \(sp \*StrategicPlanner\) ConductInterview\(ctx context.Context, req PlanRequest\) \(\*plan.PlanningContext, error\)](<#StrategicPlanner.ConductInterview>)
+  - [func \(sp \*StrategicPlanner\) DeliverInterviewAnswer\(sessionID, answer string\) \(string, bool\)](<#StrategicPlanner.DeliverInterviewAnswer>)
   - [func \(sp \*StrategicPlanner\) DraftFor\(taskID string\) \(\*PlanDraft, bool\)](<#StrategicPlanner.DraftFor>)
   - [func \(sp \*StrategicPlanner\) MaxPhases\(\) int](<#StrategicPlanner.MaxPhases>)
   - [func \(sp \*StrategicPlanner\) MaxStepsPerPhase\(\) int](<#StrategicPlanner.MaxStepsPerPhase>)
@@ -1674,6 +1712,7 @@ Package agent provides the agent loop and related components.
   - [func \(sp \*StrategicPlanner\) SetFreshCriticEnabled\(enabled bool\)](<#StrategicPlanner.SetFreshCriticEnabled>)
   - [func \(sp \*StrategicPlanner\) SetHostileCriticChatter\(ch llm.Chatter\)](<#StrategicPlanner.SetHostileCriticChatter>)
   - [func \(sp \*StrategicPlanner\) SetHostileCriticEnabled\(enabled bool\)](<#StrategicPlanner.SetHostileCriticEnabled>)
+  - [func \(sp \*StrategicPlanner\) SetInterviewMessageSink\(sink InterviewMessageSink\)](<#StrategicPlanner.SetInterviewMessageSink>)
   - [func \(sp \*StrategicPlanner\) SetInterviewOptionGates\(enabled bool\)](<#StrategicPlanner.SetInterviewOptionGates>)
   - [func \(sp \*StrategicPlanner\) SetInterviewProbe\(fn func\(\)\)](<#StrategicPlanner.SetInterviewProbe>)
   - [func \(sp \*StrategicPlanner\) SetMetricsStore\(store \*metrics.Store\)](<#StrategicPlanner.SetMetricsStore>)
@@ -1682,7 +1721,9 @@ Package agent provides the agent loop and related components.
   - [func \(sp \*StrategicPlanner\) SetPlanPhaseSink\(fn func\(taskID string, phases \[\]PlanPhaseSpec\)\)](<#StrategicPlanner.SetPlanPhaseSink>)
   - [func \(sp \*StrategicPlanner\) SetRegistry\(reg \*AgentRegistry\)](<#StrategicPlanner.SetRegistry>)
   - [func \(sp \*StrategicPlanner\) SetSelfSealEnabled\(enabled bool\)](<#StrategicPlanner.SetSelfSealEnabled>)
+  - [func \(sp \*StrategicPlanner\) SetTurnLivenessTouch\(fn func\(taskID string\)\)](<#StrategicPlanner.SetTurnLivenessTouch>)
   - [func \(sp \*StrategicPlanner\) SetValidToolNames\(names map\[string\]bool\)](<#StrategicPlanner.SetValidToolNames>)
+  - [func \(sp \*StrategicPlanner\) StoreInterviewState\(t \*task.Task, req PlanRequest, st \*plannerInterviewState\)](<#StrategicPlanner.StoreInterviewState>)
 - [type StrategicPlannerConfig](<#StrategicPlannerConfig>)
 - [type SubagentExecution](<#SubagentExecution>)
 - [type SubmittedTurnRecord](<#SubmittedTurnRecord>)
@@ -1708,6 +1749,7 @@ Package agent provides the agent loop and related components.
   - [func NewTacticalScheduler\(cfg TacticalSchedulerConfig\) \*TacticalScheduler](<#NewTacticalScheduler>)
   - [func \(ts \*TacticalScheduler\) GetJobByID\(ctx context.Context, jobID string\) \(\*queue.Job, error\)](<#TacticalScheduler.GetJobByID>)
   - [func \(ts \*TacticalScheduler\) HandleHandoff\(ctx context.Context, msg \*models.BusMessage\) error](<#TacticalScheduler.HandleHandoff>)
+  - [func \(ts \*TacticalScheduler\) LeaseLedgerSnapshot\(\) LeaseLedger](<#TacticalScheduler.LeaseLedgerSnapshot>)
   - [func \(ts \*TacticalScheduler\) OnJobCompleted\(ctx context.Context, jobID string, result json.RawMessage, claimToken ...string\) error](<#TacticalScheduler.OnJobCompleted>)
   - [func \(ts \*TacticalScheduler\) OnJobFailed\(ctx context.Context, jobID, jobErr string\) error](<#TacticalScheduler.OnJobFailed>)
   - [func \(ts \*TacticalScheduler\) ScheduleReadySteps\(ctx context.Context, taskID string\) error](<#TacticalScheduler.ScheduleReadySteps>)
@@ -1720,6 +1762,8 @@ Package agent provides the agent loop and related components.
   - [func \(ts \*TacticalScheduler\) SetHandoffPropagator\(fn func\(ctx context.Context, completedStep \*task.TaskStep\) error\)](<#TacticalScheduler.SetHandoffPropagator>)
   - [func \(ts \*TacticalScheduler\) SetMetricsStore\(store \*metrics.Store\)](<#TacticalScheduler.SetMetricsStore>)
   - [func \(ts \*TacticalScheduler\) SetSessionStore\(store sessionStoreReader\)](<#TacticalScheduler.SetSessionStore>)
+  - [func \(ts \*TacticalScheduler\) SetStepRetryInterval\(interval time.Duration\)](<#TacticalScheduler.SetStepRetryInterval>)
+  - [func \(ts \*TacticalScheduler\) StopStepRetryTicker\(\)](<#TacticalScheduler.StopStepRetryTicker>)
 - [type TacticalSchedulerConfig](<#TacticalSchedulerConfig>)
 - [type TaintBeforeToolCall](<#TaintBeforeToolCall>)
   - [func NewTaintBeforeToolCall\(tracker \*taint.ExtendedTracker, logger \*slog.Logger, config TaintHookConfig\) \*TaintBeforeToolCall](<#NewTaintBeforeToolCall>)
@@ -1911,6 +1955,7 @@ Package agent provides the agent loop and related components.
 - [type TurnWatchdog](<#TurnWatchdog>)
   - [func NewTurnWatchdog\(reg \*TurnRegistry, emit func\(TurnTerminalEvent\), logger \*slog.Logger\) \*TurnWatchdog](<#NewTurnWatchdog>)
   - [func \(w \*TurnWatchdog\) RunOnce\(staleAfter time.Duration\) int](<#TurnWatchdog.RunOnce>)
+  - [func \(w \*TurnWatchdog\) SetTaskStateFunc\(fn func\(taskID string\) task.TaskState\)](<#TurnWatchdog.SetTaskStateFunc>)
   - [func \(w \*TurnWatchdog\) Start\(interval, staleAfter time.Duration\)](<#TurnWatchdog.Start>)
   - [func \(w \*TurnWatchdog\) Stop\(\)](<#TurnWatchdog.Stop>)
 - [type ValidateCheckpointResult](<#ValidateCheckpointResult>)
@@ -2093,6 +2138,24 @@ Package agent provides the agent loop and related components.
 	    DefaultConversationStoreSize = 1000
 	)
 
+<a name="ErrSentenceContextTooSmall"></a>Sentences for the user\-language error funnel \(master C\-4, 20261121\-interactive\-usability leaf 06\). Exported so leaves 03/05 can reuse the exact wording on card texts; the funnel is the only caller on the live path.
+
+	const (
+	    // ErrSentenceContextTooSmall: a context-too-small verdict means the
+	    // whole conversation no longer fits the served model's window.
+	    ErrSentenceContextTooSmall = "conversation too long for this model; start a new session or ask me to summarize"
+	    // ErrSentenceTierFloor: the tier policy refused every remaining
+	    // rotation hop; the pool degraded past the configured floor.
+	    ErrSentenceTierFloor = "model pool degraded too far while retrying; try again shortly"
+	    // ErrSentenceEmptyResponse: a served-but-blank completion after the
+	    // client's own short empty-retry budget.
+	    ErrSentenceEmptyResponse = "the model returned nothing usable; try resending"
+	    // ErrSentenceQuotaQueued is the EXISTING quota queued sentence from
+	    // the quota-resume park path (handler.go) -- kept byte-identical and
+	    // reused so the funnel and the park path never drift.
+	    ErrSentenceQuotaQueued = "your message is queued and will run automatically when the quota resets."
+	)
+
 <a name="DecisionLogLevelDenyWarn"></a>Decision\-log levels for the C2 permission decision\-audit lines \(agent\-groups branch\-01 leaf 02\). Values match security.groups.decision\_log\_level in the config.
 
 	const (
@@ -2148,9 +2211,11 @@ Package agent provides the agent loop and related components.
 	    // Large tool outputs are compressed to fit this limit
 	    ToolResultMaxTokens = 3000
 	
-	    // DefaultConversationTokenBudget is the total token budget for a single
-	    // conversation turn across all iterations. When exceeded, the agent
-	    // stops gracefully and returns what it has so far.
+	    // DefaultConversationTokenBudget is a legacy reference constant retained
+	    // for the context-allocator documentation that names it. It is NOT used
+	    // as an implicit default: conversationTokenBudget() returns 0 (unlimited)
+	    // when no explicit cap is configured, so an unconfigured turn is never
+	    // aborted at an invented ceiling. Kept exported for compatibility only.
 	    DefaultConversationTokenBudget = 50000
 	
 	    // ConversationBudgetWarningRatio is the fraction of the conversation
@@ -2308,6 +2373,10 @@ DELIVERY CONTRACT: the bus \(internal/bus\) has no latched or buffered topics �
 
 	const ParkClassBudget = "budget"
 
+<a name="PlannerInterviewMetaKey"></a>PlannerInterviewMetaKey is the session\-message metadata key that marks an assistant message as a planner interview pause. The value is the owning task id.
+
+	const PlannerInterviewMetaKey = "planner_interview"
+
 <a name="SoulFileName"></a>SoulFileName is the soul file's name inside the meept home directory.
 
 	const SoulFileName = "SOUL.md"
@@ -2397,6 +2466,15 @@ DELIVERY CONTRACT: the bus \(internal/bus\) has no latched or buffered topics �
 	    ErrInterviewPlannerMissing = errors.New("interview skipped: planner agent not available")
 	    ErrInterviewGenerationFail = errors.New("interview skipped: LLM question generation failed")
 	
+	    // ErrPlannerUnavailable marks a planner INFRASTRUCTURE failure (no
+	    // registry wired / no planner agent spec) as opposed to an LLM
+	    // output problem. Gate T8 (01-safety/05): an unavailable planner can
+	    // never produce a plan, so the decomposition lanes must fail the
+	    // task honestly instead of degrading to generic fallback steps that
+	    // "complete" with a deflection. Degradation to fallback steps stays
+	    // for real planner-output failures (parse/transport) only.
+	    ErrPlannerUnavailable = errors.New("planner agent unavailable")
+	
 	    // ErrPlannerEmptyPlan is returned when the planner LLM parses cleanly but
 	    // produces zero steps. The empty-plan guard (issue #53 direction 3)
 	    // matches on this sentinel with errors.Is to route to the deterministic
@@ -2439,6 +2517,10 @@ DELIVERY CONTRACT: the bus \(internal/bus\) has no latched or buffered topics �
 <a name="ErrACPExecutorNotWired"></a>ErrACPExecutorNotWired is the turn error for an executor: acp agent whose loop never received an ACPExecutor \(\[acp\] enabled kill switch off or wiring skipped\). The branch fails loudly with this sentinel; it never falls back to the local LLM loop.
 
 	var ErrACPExecutorNotWired = errors.New("acp executor not wired")
+
+<a name="ErrAmbiguousQueue"></a>ErrAmbiguousQueue is returned when a session\-level conversation id matches more than one live thread\-scoped queue. Steering must then target the full thread conversation id; silently picking one thread would inject into the wrong work stream.
+
+	var ErrAmbiguousQueue = errors.New("ambiguous active queue: multiple live thread queues match; steer with the full thread conversation id")
 
 <a name="ErrBudgetExceeded"></a>ErrBudgetExceeded is returned when a sub\-session exceeds available token budget.
 
@@ -2716,6 +2798,10 @@ Consumers: prefilter vote\(\) cue guard, LLM\-chain post\-check \(leaf 02, optio
 	    "schedule_resume":  "task_write",
 	    "schedule_run_now": "task_write",
 	
+	    "job_start":  "job_start",
+	    "job_status": "job_status",
+	    "job_stop":   "job_stop",
+	
 	    "debug": "shell_execute",
 	
 	    "git_commit":   "shell_execute",
@@ -2731,6 +2817,14 @@ Consumers: prefilter vote\(\) cue guard, LLM\-chain post\-check \(leaf 02, optio
 	
 	    "tool_search": "platform_read",
 	}
+
+<a name="TopicBotResult"></a>TopicBotResult carries ExecutionResultEvent publishes on the "bot.result" bus topic. The topic name is the tier discriminator \(issue \#140\); the payload carries no kind field.
+
+	var TopicBotResult = bus.NewTopic[ExecutionResultEvent]("bot.result")
+
+<a name="TopicEmployeeResult"></a>TopicEmployeeResult carries ExecutionResultEvent publishes on the "employee.result" bus topic. It shares the exact ExecutionResultEvent wire shape with TopicBotResult \(issue \#140\).
+
+	var TopicEmployeeResult = bus.NewTopic[ExecutionResultEvent]("employee.result")
 
 <a name="TopicTurnState"></a>TopicTurnState carries TurnStateEvent publishes on the "agent.turn.state" bus topic.
 
@@ -3013,6 +3107,13 @@ HashToolCall returns a normalized hash of tool name \+ arguments JSON. JSON args
 
 InjectGroupFence is the exported arm point for daemon\-side fence arming \(agent\-groups leaf 04 F6\): derives a permission checker carrying the record's additive fs\_roots fence. Returns base unchanged when there is nothing to arm \(nil base/record, unmanaged, no roots\).
 
+<a name="InterviewWaitingSince"></a>
+## func InterviewWaitingSince
+
+	func InterviewWaitingSince(t *task.Task) time.Time
+
+InterviewWaitingSince reports when the task's interview was sent \(zero when no interview waits\). Exported for the watchdog exemption's age bound.
+
 <a name="IsAlwaysProposeOnly"></a>
 ## func IsAlwaysProposeOnly
 
@@ -3118,6 +3219,21 @@ ParseVerdict extracts the verdict and individual check results from verifier out
 
 PhaseSpecsToPlan converts agent phase specs back into the pure compiler/emitter shape for the flat\-vs\-tree gate.
 
+<a name="PlanAutoSealFromIntent"></a>
+## func PlanAutoSealFromIntent
+
+	func PlanAutoSealFromIntent(input string) bool
+
+PlanAutoSealFromIntent reports whether a user prompt carries the compound plan\-then\-implement intent: the user asked for a plan AND its execution in one breath \("create the plan and then implement it"\), which is explicit authorization to seal the plan after compilation instead of parking it at the approval gate.
+
+Detection is deliberately conservative and ASCII\-lowercase lexical:
+
+1. a negated execute verb \("don't implement", "do not execute the plan", "never implement the plan"\) vetoes FIRST \-\- it must run before the explicit marker, or a negated "implement the plan" object would short\-circuit to true and bypass the approval gate \(bughunt H2\);
+2. optional explicit seal markers \("implement the plan", "execute the plan", "and implement it", "then implement it", "implement it immediately"\) short\-circuit to true;
+3. otherwise a plan verb \(plan/design/outline/map out/break down/draft\) must co\-occur with an execute verb \(implement/execute/build/create/ code/write/make/apply\) joined by an "and"/"then"/comma connector, plus a plan noun \(plan/approach/design/blueprint/roadmap\).
+
+The function answers the LANGUAGE question only; callers gate it behind the compound dispatch lane \(Intent==compound\), so a plain plan prompt can never auto\-seal even if it trips the lexical shape. No config knob: the intent IS the knob.
+
 <a name="PlanCriticSpawnVerifierCalls"></a>
 ## func PlanCriticSpawnVerifierCalls
 
@@ -3151,9 +3267,7 @@ RecalledSnapshotItems converts prompt\-facing recall results into the C5 snapsho
 
 	func RecoverPendingFollowUps(db *sql.DB, msgBus *bus.MessageBus, logger *slog.Logger)
 
-RecoverPendingFollowUps loads all conversations that have persisted follow\-up messages and publishes a restore event for each one.
-
-This is called once on daemon startup so that any TUI clients listening for agent.queue.followup.restored events are notified that history is available.
+RecoverPendingFollowUps loads all conversations that have persisted follow\-up messages and re\-enqueues their FULL content into the session's live inbox \(02\-routing/03 T2\). Durable rows are deleted only AFTER successful injection; a boot with no registered inbox leaves the rows intact so the next boot / reconnect still delivers them exactly once. The restore event fires only for actually\-injected conversations and its count reflects the injected messages.
 
 <a name="RenderSpawnContext"></a>
 ## func RenderSpawnContext
@@ -3198,6 +3312,13 @@ The function is called at least once. Retries happen only on retryable errors. I
 	func SeedSoulIfMissing(path string) (bool, error)
 
 SeedSoulIfMissing writes the shipped default soul to path when the file does not exist. An existing file is never touched. Returns true when a seed write happened.
+
+<a name="SetBootRecoveryInbox"></a>
+## func SetBootRecoveryInbox
+
+	func SetBootRecoveryInbox(convID string, q *MessageQueue)
+
+SetBootRecoveryInbox registers the session inbox boot recovery re\-enqueues through for convID. A nil queue unregisters the key ONLY when no live inbox is registered \(a turn\-end unregister of an older queue generation must not drop a newer live registration\).
 
 <a name="SetDefaultBackoffOverride"></a>
 ## func SetDefaultBackoffOverride
@@ -3304,19 +3425,14 @@ Brace\-aware rather than regex\-based: the envelope's "evidence" array nests obj
 
 StripClaimsEvidenceOrProse removes the envelope; when the ENTIRE input was the envelope, returns the envelope's own prose \(claims \+ evidence descriptions\) so the user still sees what was done instead of an empty or machine\-shaped reply \(2026\-09\-25 run NKZiEl: the model emitted an evidence\-only envelope whose inner strings held the full user answer\).
 
+Gate T2 \(04\-clutter/01, F\-ORCH\-21\): the executor's step\-result shape \{"status","accomplished","not\_done","issues","observations",...\} is the SAME machine envelope class and is handled HERE, in place \(no parallel stripper\): prose is recovered even from the live truncated job\-prefixed form \("job \<id\> completed by agent \<x\>: \{...\<truncated\>"\), and no raw JSON keys may render in a user reply.
+
 <a name="StripPromptScaffolding"></a>
 ## func StripPromptScaffolding
 
 	func StripPromptScaffolding(desc string) string
 
-StripPromptScaffolding removes the injected session\-context block and "\#\# Your Task" header from a step description, returning only the real task text. Input without the markers is returned trimmed and unchanged.
-
-The injection shape \(strategic.go\) is always:
-
-	<session-context block>\n\n## Your Task\n\n<real description>
-	
-
-so when the Your Task marker is present everything after it is the real text. When only the session\-context marker is present \(a partial/legacy injection\), the block is cut at the marker because no task text follows it in that shape.
+StripPromptScaffolding removes the injected session\-context block and "\#\# Your Task" header from a step description, returning only the real task text. Input without the markers is returned trimmed and unchanged. See task.StripPromptScaffolding for the canonical shape contract.
 
 <a name="StripReport"></a>
 ## func StripReport
@@ -3378,12 +3494,33 @@ Such a tool is a HAZARD for grammar\-constrained / forced tool calls: the tool\-
 
 TraceIDFromContext reports the request's trace ID \("" when the context carries none\). Readers: the loop's tool\-executor hand\-off stamps the same turn trace onto ToolExecutionEndData; leaf 03's span producers subscribe to those events.
 
+<a name="TurnStateFunc"></a>
+## func TurnStateFunc
+
+	func TurnStateFunc(store *task.Store) func(taskID string) task.TaskState
+
+TurnStateFunc adapts a task store into the watchdog's C7 exemption accessor, extended for the interview pause: planning AND any task carrying a fresh waiting\-interview block are exempt \(a human wait is not a stalled turn\). A nil store keeps the handler\-less nil behavior. Pure store read per call — the watchdog calls it only for turns that are already stale, so the per\-tick cost is bounded by the stale set.
+
 <a name="UnionFence"></a>
 ## func UnionFence
 
 	func UnionFence(a, b security.FenceStage) security.FenceStage
 
 UnionFence composes two FenceStages into one: every check runs against BOTH stages and the first denial wins. Either side may be nil.
+
+<a name="UnwrapThreadConversationID"></a>
+## func UnwrapThreadConversationID
+
+	func UnwrapThreadConversationID(key string) string
+
+UnwrapThreadConversationID is the exported view of unwrapThreadConversationID for surfaces that key off the session\-level conversation base \- the task store's session\_tasks join is written with session ids, so an RPC that receives a thread\-scoped conversation id must strip the thread suffix before a session\-scoped lookup \(chat.queue\_status task\_states, leaf 05\-navigation/03 T2\).
+
+<a name="UserFacingError"></a>
+## func UserFacingError
+
+	func UserFacingError(err error) string
+
+UserFacingError maps a terminal turn error to one user\-language sentence. It is the single mapping table for the response.Error funnel: known failure families get actionable copy with no machine ids, paths, or sentinel strings; unknown errors fall through to a sanitized err.Error\(\) \(internal paths and provider prefixes stripped, lowercased\). The existing typed lanes \(BudgetExceededError, QuotaResetError, ThrottleGiveUpError \-\- each with their own UserMessage\(\)\) keep flowing through their dedicated branches in the handler BEFORE this mapping runs; the funnel calls this only for errors they did not claim.
 
 <a name="ValidateSoul"></a>
 ## func ValidateSoul
@@ -3754,7 +3891,7 @@ AgentConfig holds configuration for the agent loop.
 	    Personality             string
 	    SystemPromptOveride     string
 	    GlobalRules             string  // Global rules injected into all agent prompts
-	    MaxConversationTokens   int     // 0 means use DefaultConversationTokenBudget
+	    MaxConversationTokens   int     // >0 = enforced cap; 0 = unlimited (no implicit default)
 	    SkillDiscoveryThreshold float64 // Minimum confidence for skill discovery (default 0.5)
 	    Memory                  AgentMemoryConfig
 	    // ProactiveCompression enables multi-stage context compression inside the
@@ -4043,6 +4180,20 @@ TODO: call from orchestrator\_phases.go startNextPhase\(\) when phase transition
 
 ApplyRequestModel applies a client\-supplied per\-request model ref \(chat.request "model": an alias name or "provider/model\-id"\) through the same one\-shot SetModelOverride seam the dispatcher's parsed user directives use — so it takes the SAME precedence slot: request model / user directive \> alias resolution \> default ordering. It is one\-shot for the turn that carries it: reasoningCycle consumes and clears it, and nothing is written to the config. An empty ref is a no\-op \(the turn runs the alias/default chain unchanged\). Alias names are resolved to their first "provider/model\-id" member here so the in\-cycle override branch \(which resolves via ResolveRef\) can serve the turn; unresolvable refs are logged at Warn and dropped, matching the in\-cycle branch's behavior. Thread\-safe.
 
+<a name="AgentLoop.ArmQueueAliases"></a>
+### func \(\*AgentLoop\) ArmQueueAliases
+
+	func (l *AgentLoop) ArmQueueAliases(aliasIDs []string)
+
+ArmQueueAliases arms THIS turn's session\-level queue alias ids \(identity canonicalization, 20261121\-interactive\-usability leaf 01, fix 1\) via the same one\-shot seam shape as ArmTurnDifficulty. The task\-\>session linkage lives in the job processor \(the task's LinkedSessions\), not in the loop — so the processor arms the alias before RunOnce, and RunOnceWithParts consumes it when RegisterActiveQueue runs, registering the SAME queue entry under the session\-level conversation id as an exact\-key alias. Empty ids are dropped; a no\-op with nothing left. Thread\-safe \(l.mu\).
+
+<a name="AgentLoop.ArmTurnDifficulty"></a>
+### func \(\*AgentLoop\) ArmTurnDifficulty
+
+	func (l *AgentLoop) ArmTurnDifficulty(difficulty int)
+
+ArmTurnDifficulty arms THIS turn's classified routing difficulty \(sovereign\-router\-parity leaf 07 / Contract C11, R7\) on the loop via the same one\-shot seam shape as ApplyRequestModel: set before the turn's reasoning cycle runs, consumed by the FIRST alias resolve, never persisted. Zero \(or a negative level\) is a no\-op — an unclassified turn keeps R7 fully inert \(no arm, byte\-identical resolve\). Thread\-safe \(l.mu\).
+
 <a name="AgentLoop.Chatter"></a>
 ### func \(\*AgentLoop\) Chatter
 
@@ -4283,6 +4434,20 @@ IsModelOverridePersistent returns true if the current override was set via SetPe
 
 LastStablePrefixHash returns the hex sha256 of the stable prefix of the most recently assembled system prompt. Empty before the first build. Intended for logging/metrics hooks that detect prompt\-cache drift \(loop\-economics leaf 01\).
 
+<a name="AgentLoop.LastTurnCostUSD"></a>
+### func \(\*AgentLoop\) LastTurnCostUSD
+
+	func (l *AgentLoop) LastTurnCostUSD() float64
+
+LastTurnCostUSD returns the provider dollar cost \(llm.Response.CostUSD\) accumulated across the turn that just finished \(goal\-loop budget lane\). It is 0 when that turn's provider reported no cost \(unconfigured prices\).
+
+<a name="AgentLoop.LastTurnTokens"></a>
+### func \(\*AgentLoop\) LastTurnTokens
+
+	func (l *AgentLoop) LastTurnTokens() int
+
+LastTurnTokens returns the ACCUMULATED provider TotalTokens for the turn that just finished \(bughunt M1\): the sum of every non\-zero provider response in the turn, not the last call's snapshot. It is 0 only when that turn's provider sent no usage. Because usage is added as it arrives, this same value is visible to the per\-turn token gate DURING tool execution via the executor's turn\-tokens provider \(loop.go:3125\).
+
 <a name="AgentLoop.LoopAutonomousMarker"></a>
 ### func \(\*AgentLoop\) LoopAutonomousMarker
 
@@ -4294,12 +4459,26 @@ It exists for the daemon's wiring pin: since F14 the production job path \(Agent
 
 SetAutonomous itself is retained as the escape hatch for a caller that genuinely owns a headless\-only loop; it is NOT part of the queued\-job path.
 
+<a name="AgentLoop.MessageDrainer"></a>
+### func \(\*AgentLoop\) MessageDrainer
+
+	func (l *AgentLoop) MessageDrainer() MessageDrainer
+
+MessageDrainer returns the currently wired inbox drain source under l.mu, mirroring SetMessageDrainer. Returns nil when injection is disabled. The snapshot is taken under the lock so per\-turn clones can forward the source \(voice/goal/bot lanes\) without reading the field unlocked; no drain I/O happens here.
+
 <a name="AgentLoop.PiiRestoreHook"></a>
 ### func \(\*AgentLoop\) PiiRestoreHook
 
 	func (l *AgentLoop) PiiRestoreHook() *PiiRestoreHook
 
 PiiRestoreHook returns the attached restore lane \(nil when off\). The ConfigSnapshot seam re\-attaches it on per\-session clones.
+
+<a name="AgentLoop.ResolveTurnModel"></a>
+### func \(\*AgentLoop\) ResolveTurnModel
+
+	func (l *AgentLoop) ResolveTurnModel()
+
+ResolveTurnModel runs the session loop's alias resolution at the DISPATCH clock \(sovereign\-router\-parity leaf 07, R7\): async task dispatch never routes through this loop's reasoning cycle \(the step job runs on a task\-scoped loop that may hold no alias\), so without this the escalation turn's difficulty never reaches the sticky predicate keyed by THIS session. The resolve consumes the one\-shot armed difficulty and applies the frozen C8 semantics — a pin created for an easier turn releases and re\-pins at the rotation head with reason sticky\_difficulty\_increase, and the updated pin serves the session's NEXT turn. No alias on the loop \(or no resolver\) is a no\-op. Resolve errors are DEBUG\-logged, never fatal: routing observability and pin state must not break the dispatch.
 
 <a name="AgentLoop.RetryMetricsSnapshot"></a>
 ### func \(\*AgentLoop\) RetryMetricsSnapshot
@@ -4394,6 +4573,17 @@ SetActive atomically sets the has\-pending\-work flag.
 
 SetAgentID rebinds the agent identity on a live loop and forwards it to the loop's executor \(the WithExecutorAgentID lane, snapshotted into details\["agent\_id"\] at every permission check\). The voice turn runner \(caller\-authz leaf 02, O5\) stamps per\-session VOICE clones with the bound employee id so the PreExecChecker routes the employee constitution gate; loops built without an identity or turned with no employee keep their construction\-time id. Rebinding does NOT touch the Manager cache key — that derives from the TEMPLATE's agentID, and the template is never mutated here \(the voice lane clones, the daemon template stays "default"\). Nil\-safe; empty id is a no\-op.
 
+<a name="AgentLoop.SetAgentRegistry"></a>
+### func \(\*AgentLoop\) SetAgentRegistry
+
+	func (l *AgentLoop) SetAgentRegistry(r *AgentRegistry)
+
+SetAgentRegistry attaches the shared AgentRegistry to an ALREADY\-CONSTRUCTED loop and mints the steering/follow\-up queue the loop lacks \(steering\-fix, 07\-bench residual\): the daemon singleton template \(components.go\) is built BEFORE NewAgentRegistry, so it can never receive the registry through WithAgentRegistry at construction. Without this late wiring, every direct\-mode chat turn clones the unwired template \(ChatHandler.sessionLoop \-\> GetOrCreateWired\), RunOnceWithParts' registration guard \(l.agentRegistry \!= nil && l.queue \!= nil\) fails, and chat.steer / chat.followup fail with ErrQueueNotFound for the whole daemon lifetime \-\- exactly the production\-rig p5 defect \(4/4 acceptance runs\).
+
+Queue policy mirrors the registry's createLoop construction \(queueConfig.Enabled\): DefaultQueueConfig\-based steering/follow\-up queue, bus\-attached when the registry carries one, agent\-id stamped from the loop. The queue is minted ONLY when the loop has none \-\- a loop that already carries a queue keeps it \(tests, registry\-built loops\).
+
+Not safe for concurrent wiring with in\-flight turns: call once during daemon boot, before any turn runs. The l.mu lock protects the field writes against concurrent ConfigSnapshot readers.
+
 <a name="AgentLoop.SetAutonomous"></a>
 ### func \(\*AgentLoop\) SetAutonomous
 
@@ -4435,6 +4625,13 @@ SetCapabilitiesBuilder wires the refresh\-capable capabilities builder whose ski
 	func (l *AgentLoop) SetCapabilityIndex(ci *skills.CapabilityIndex)
 
 SetCapabilityIndex sets the capability index for skill discovery. This allows wiring the index after the loop is created when skills are initialized in a specific order.
+
+<a name="AgentLoop.SetChatter"></a>
+### func \(\*AgentLoop\) SetChatter
+
+	func (l *AgentLoop) SetChatter(c llm.Chatter)
+
+SetChatter replaces the loop's LLM chatter. Test/wiring seam: it must run before any turn \(concurrent swap mid\-turn is not supported \-\- the executor captures the chatter at call time but reasoning state assumes a stable client\). The daemon never calls this on a live loop; it exists so wiring tests can inject a spy into a MANAGER CLONE \(GetOrCreateWired returns ready\-built loops that cannot be re\-optioned\).
 
 <a name="AgentLoop.SetClock"></a>
 ### func \(\*AgentLoop\) SetClock
@@ -4765,6 +4962,13 @@ SetToolRegistry replaces the loop's tool registry. Nil is ignored. Voice employe
 
 SetTurnParker wires the class\-agnostic parker onto the loop \(daemon wiring \+ tests\). Nil\-guarded per repo setter convention: a nil parker is refused, keeping the pass\-through behavior. Thread\-safe under l.mu.
 
+<a name="AgentLoop.SetTurnSystemPrefix"></a>
+### func \(\*AgentLoop\) SetTurnSystemPrefix
+
+	func (l *AgentLoop) SetTurnSystemPrefix(prefix string)
+
+SetTurnSystemPrefix arms a one\-shot system\-prompt prefix for the next RunOnce on this receiver. Empty prefix is a no\-op. The prefix is prepended to that turn's system prompt and then cleared. It is never written onto the loop's permanent system prompt.
+
 <a name="AgentLoop.SetUploadStore"></a>
 ### func \(\*AgentLoop\) SetUploadStore
 
@@ -4800,6 +5004,20 @@ SkillStateRuntime returns the configured SKILL.state\-mode runtime, or nil when 
 
 SpawnVerifier implements VerifierSpawner. It creates a child AgentLoop with a restricted tool set and the adversarial verifier prompt, runs it, and returns the raw output.
 
+<a name="AgentLoop.SteeringQueue"></a>
+### func \(\*AgentLoop\) SteeringQueue
+
+	func (l *AgentLoop) SteeringQueue() *MessageQueue
+
+SteeringQueue returns the loop's steering/follow\-up queue \(nil when the loop has none\). Read\-only seam for wiring tests and surfaces that must observe the queue the loop will register per turn.
+
+<a name="AgentLoop.SteeringRegistry"></a>
+### func \(\*AgentLoop\) SteeringRegistry
+
+	func (l *AgentLoop) SteeringRegistry() *AgentRegistry
+
+SteeringRegistry returns the loop's attached agent registry \(nil when unwired \-\- the pre\-fix daemon template shape\). Read\-only seam.
+
 <a name="AgentLoop.Stop"></a>
 ### func \(\*AgentLoop\) Stop
 
@@ -4827,6 +5045,13 @@ ToolRegistry returns the registry this loop sends to the model. Nil if the loop 
 	func (l *AgentLoop) TurnParker() *TurnParker
 
 TurnParker exposes the wired parker \(nil when parking is disabled\).
+
+<a name="AgentLoop.TurnPosturePrompt"></a>
+### func \(\*AgentLoop\) TurnPosturePrompt
+
+	func (l *AgentLoop) TurnPosturePrompt() string
+
+TurnPosturePrompt returns the current turn's raw prompt snapshot \(the seam the posture closure reads; exported for tests and diagnostics\).
 
 <a name="AgentMemoryConfig"></a>
 ## type AgentMemoryConfig
@@ -4893,6 +5118,15 @@ NewAgentRegistry creates a new agent registry.
 
 ACPExecutor returns the wired external acp turn producer \(nil = none\).
 
+<a name="AgentRegistry.ActiveLoopCount"></a>
+### func \(\*AgentRegistry\) ActiveLoopCount
+
+	func (r *AgentRegistry) ActiveLoopCount(agentID string) int
+
+ActiveLoopCount returns the number of currently\-active queues owned by loops built for the given agent ID. It is the live per\-agent episode count surfaced by the unified agents.roster C1 active\_count field \(plan tree tui\-gui\-consistency\-fixes, leaf 01\-backend/02\).
+
+The queue entries are snapshotted under activeQueuesMu and that lock is RELEASED before calling GetAgentID \(which takes the loop's own mutex\). Holding activeQueuesMu while dereferencing a loop would risk a lock\-order inversion with the chat path — the registry never nests those two locks. Entries with a nil loop \(tests\) or an empty agent ID carry no identity and are not counted. Nil receiver and empty agentID are no\-ops.
+
 <a name="AgentRegistry.CapabilitiesMap"></a>
 ### func \(\*AgentRegistry\) CapabilitiesMap
 
@@ -4942,12 +5176,14 @@ Get returns the AgentLoop for the given agent, keyed by the synthetic "\_default
 
 GetActiveQueue returns the queue for a running conversation, or nil if not found. Also returns the generation number for version checking.
 
+C3 \(01\-safety/02\-queue\-lifecycle\): the lookup follows the same resolution order as ResolveActiveQueue \-\- exact key \-\> thread\-unwrapped base \-\> session\-owned thread keys \-\- so a session\-level id finds the queue RunOnce registered under the thread router's thread\-scoped id. An ambiguous multi\-thread match resolves to nil here \(the error\-carrying twin is ResolveActiveQueue\); never a silent pick.
+
 <a name="AgentRegistry.GetActiveQueueLoop"></a>
 ### func \(\*AgentRegistry\) GetActiveQueueLoop
 
 	func (r *AgentRegistry) GetActiveQueueLoop(conversationID string) *AgentLoop
 
-GetActiveQueueLoop returns the AgentLoop that owns the active queue for a conversation, or nil if no active queue exists or the entry has no loop.
+GetActiveQueueLoop returns the AgentLoop that owns the active queue for a conversation, or nil if no active queue exists or the entry has no loop. Uses the same C3 thread\-remap resolution as GetActiveQueue.
 
 <a name="AgentRegistry.GetByRole"></a>
 ### func \(\*AgentRegistry\) GetByRole
@@ -5027,9 +5263,11 @@ MemvidClient returns the shared memvid client.
 <a name="AgentRegistry.RegisterActiveQueue"></a>
 ### func \(\*AgentRegistry\) RegisterActiveQueue
 
-	func (r *AgentRegistry) RegisterActiveQueue(conversationID string, q *MessageQueue, loop *AgentLoop) uint64
+	func (r *AgentRegistry) RegisterActiveQueue(conversationID string, q *MessageQueue, loop *AgentLoop, aliasIDs ...string) uint64
 
 RegisterActiveQueue associates a queue with a running conversation. The loop parameter is the AgentLoop that owns this queue; it may be nil in tests. Returns the generation number for this registration.
+
+Identity canonicalization \(20261121\-interactive\-usability leaf 01\): aliasIDs are optional extra keys \(e.g. the task's linked session\-level conversation id\) mapped to the SAME QueueEntry so steer/followup/ queue\_status addressed by any of the session's identity shapes hit the exact key. Aliases share the primary entry's generation and are unregistered together with it; empty or duplicate ids are skipped.
 
 <a name="AgentRegistry.RegisterSpec"></a>
 ### func \(\*AgentRegistry\) RegisterSpec
@@ -5044,6 +5282,30 @@ RegisterSpec registers an agent specification.
 	func (r *AgentRegistry) ReleaseTaskLoops(taskID string)
 
 ReleaseTaskLoops removes all loops for the given taskID across all agents. Called by the orchestrator on task completion to free memory and reset per\-task conversation state. Empty taskID is a no\-op \(never releases the "\_default" bucket via this path, preserving backward\-compat Get callers\).
+
+<a name="AgentRegistry.ResolveActiveQueue"></a>
+### func \(\*AgentRegistry\) ResolveActiveQueue
+
+	func (r *AgentRegistry) ResolveActiveQueue(conversationID string) (*MessageQueue, error)
+
+ResolveActiveQueue resolves the live queue for a conversation id using the C3 resolution order: exact key \-\> thread\-unwrapped base \-\> session\-owned base\+"\-thread\-\*" keys. A single thread match remaps; multiple live thread matches return ErrAmbiguousQueue \(never a silent pick\); no match returns ErrQueueNotFound \(the HTTP layer maps it to 404\).
+
+Identity canonicalization \(leaf 01, 20261121\-interactive\-usability C\-1\): the registry cannot reach the session store \(import direction \- the session package does not know agent\), so the SESSION\-\>CONVERSATION half of the resolution lives in ResolveActiveQueueWithSession. The bare resolver keeps the queue\-key\-only order \(exact \-\> unwrapped base \-\> thread keys\).
+
+<a name="AgentRegistry.ResolveActiveQueueWithSession"></a>
+### func \(\*AgentRegistry\) ResolveActiveQueueWithSession
+
+	func (r *AgentRegistry) ResolveActiveQueueWithSession(conversationID string, byConversationID func(conversationID string) *session.Session, byID func(id string) *session.Session) (*MessageQueue, error)
+
+ResolveActiveQueueWithSession resolves the live queue accepting ANY of the session's identity shapes: the primary session id \(session\-abc123 \- the shape the Flutter GUI sends as conversation\_id\), the session's own conversation id, a thread\-scoped conversation id, or a queue key already registered by the loop. Read\-only: no registration or store mutation.
+
+Resolution order \(matches the submit path's Get\-then\-GetByConversationID precedence, then the C3 thread keys\):
+
+1. exact queue key \(a live registration under the id as given\)
+2. session\-\>conversation resolution via session.ResolveThreadConversationID \(session id \-\> owning conversation id; thread\-scoped id \-\> owning session \-\> its conversation id\), probing each candidate queue key
+3. thread\-unwrapped base \+ session\-owned thread keys \(C3\)
+
+byConversationID/byID are the session store's GetByConversationID/Get. A nil store \(either func nil\) keeps the bare C3 behavior \- test registries without a store are unaffected.
 
 <a name="AgentRegistry.RunAgent"></a>
 ### func \(\*AgentRegistry\) RunAgent
@@ -5154,12 +5416,19 @@ SetUsageTracker wires the skill usage tracker into every loop this registry crea
 
 Stats returns registry statistics.
 
+<a name="AgentRegistry.TaskStore"></a>
+### func \(\*AgentRegistry\) TaskStore
+
+	func (r *AgentRegistry) TaskStore() *task.Store
+
+TaskStore returns the shared task store wired via RegistryConfig.TaskStore, or nil when the registry runs without one. Read\-only surfaces \(chat.queue\_status task\_states, leaf 05\-navigation/03 T2\) use this instead of reaching for an unexported field.
+
 <a name="AgentRegistry.UnregisterActiveQueue"></a>
 ### func \(\*AgentRegistry\) UnregisterActiveQueue
 
 	func (r *AgentRegistry) UnregisterActiveQueue(conversationID string)
 
-UnregisterActiveQueue removes the queue when the loop exits. Also closes the queue to reject any in\-flight injection attempts.
+UnregisterActiveQueue removes the queue when the loop exits. Also closes the queue to reject any in\-flight injection attempts. Any alias keys registered alongside the primary \(RegisterActiveQueue's aliasIDs\) carry the same QueueEntry, so the entry\-pointer sweep removes them in the same pass — one lifecycle, no orphaned alias keys.
 
 <a name="AgentRegistry.UnregisterSpec"></a>
 ### func \(\*AgentRegistry\) UnregisterSpec
@@ -6994,6 +7263,13 @@ SetMetricsStore sets the metrics store for duration estimates.
 
 SetNotificationPublisher provides the ChatHandler with a notification publisher so it can emit task completion/failure events to the notification system.
 
+<a name="ChatHandler.SetPlannerInterview"></a>
+### func \(\*ChatHandler\) SetPlannerInterview
+
+	func (h *ChatHandler) SetPlannerInterview(sp *StrategicPlanner)
+
+SetPlannerInterview wires the strategic planner's answer seam \(interactive\-usability leaf 04\): when an interview waits for a conversation, the next chat message in it is delivered to the planner instead of normal dispatch. Nil\-guarded per the setter convention.
+
 <a name="ChatHandler.SetQuotaResumeConfig"></a>
 ### func \(\*ChatHandler\) SetQuotaResumeConfig
 
@@ -7734,7 +8010,7 @@ BuildSystemPrompt builds a system prompt with active user instructions and skill
 Per Phase 4 spec 4.2 \+ turbo Thread E self\-reflection:
 
 - Standing instructions from preferences.Store
-- Skills: a no\-cap listing of every visible cached skill, one C4 line each, in alphabetical order. The per\-turn base text is NOT a relevance signal \(C4: the listing is built once per episode so it is cache\-stable and never churns the cache with per\-turn base\).
+- Skills: a bounded listing of the visible cached skills, one C4 line each, capped at maxSkillCatalogBytes \(e72b169d\), in the episode's frozen order. The per\-turn base text is NOT a relevance signal \(C4: the listing is built once per episode so it is cache\-stable and never churns the cache with per\-turn base\).
 
 Line shape \(C4, byte\-exact\):
 
@@ -8776,6 +9052,18 @@ DispatchResult is the result of dispatching a request.
 	type DispatchResult struct {
 	    // Task is the created task if any.
 	    Task *task.Task `json:"task,omitempty"`
+	    // ThreadConversationID is the turn's thread-scoped conversation ID,
+	    // resolved ONCE in ClassifyAndRoute from the FULL input (02-routing/03
+	    // T3). RouteToAgent and every downstream key (memory, queue) reuse it
+	    // instead of re-resolving from the truncated Intent.Summary. Empty
+	    // means no thread router is wired or resolution failed (session id
+	    // remains the key).
+	    ThreadConversationID string `json:"thread_conversation_id,omitempty"`
+	    // CrossThreadContext is the cross-thread continuity block captured
+	    // ONCE in ClassifyAndRoute (02-routing/03 T3). buildContextMessage
+	    // renders it verbatim instead of re-consulting the thread router /
+	    // session store inside RouteToAgent. Operational metadata.
+	    CrossThreadContext string `json:"-"`
 	    // AgentID is the agent that will handle the request.
 	    AgentID string `json:"agent_id"`
 	    // Intent is the classified intent.
@@ -8915,6 +9203,13 @@ Dispatcher handles intake classification and routing of requests.
 
 NewDispatcher creates a new dispatcher.
 
+<a name="Dispatcher.ArmSessionTurnDifficulty"></a>
+### func \(\*Dispatcher\) ArmSessionTurnDifficulty
+
+	func (d *Dispatcher) ArmSessionTurnDifficulty(result *DispatchResult, conversationID string)
+
+ArmSessionTurnDifficulty runs the per\-turn difficulty pipeline for an ASYNC dispatched turn \(sovereign\-router\-parity leaf 07, R7\). The async lane never re\-enters the session loop's reasoning cycle \(the step job runs on a task\-scoped loop that may hold no chat alias\), so without this the session's sticky predicate never sees the escalation's classified level. The CHAT session loop is the pin owner: its alias \(the chat agent's model pin\) is what the session's interactive turns resolve through, so the dispatch\-clock resolve runs the frozen C8 predicate on the SAME key — a pin created for an easier turn releases and re\-pins at the rotation head with reason sticky\_difficulty\_increase, and the updated pin serves the session's next turn. No chat loop, alias, or intent is a no\-op \(R7 inert\).
+
 <a name="Dispatcher.BuildPlanSessionContext"></a>
 ### func \(\*Dispatcher\) BuildPlanSessionContext
 
@@ -8953,6 +9248,8 @@ requestModel carries an optional client\-supplied per\-request model ref \(chat.
 	func (d *Dispatcher) FollowUpActiveAgent(ctx context.Context, conversationID, content, source string) error
 
 FollowUpActiveAgent sends a follow\-up message to an active agent for the given conversation. This waits for the agent to reach a natural stopping point. Returns ErrQueueNotFound if no active queue exists.
+
+Identity canonicalization: see SteerActiveAgent.
 
 <a name="Dispatcher.GetActiveTasks"></a>
 ### func \(\*Dispatcher\) GetActiveTasks
@@ -9044,6 +9341,24 @@ RecallAnswer is the option\-3 continuity answer for a follow\-up question about 
 	func (d *Dispatcher) RecordDispatch(sessionID, handlerCase, inputSummary string, result *DispatchResult, hasParts bool, dispatchErr error)
 
 RecordDispatch logs a dispatch routing decision from the handler switch for debugging and persistent audit trail. This is the public entry point called by ChatHandler after it determines which case handled the result.
+
+The legacy 6\-arg form is kept for existing callers/tests: it records the S4 privacy shape \(empty input\_summary, no turn id\). Live dispatches go through RecordDispatchCtx, which carries the request context so the row gets the turn id \(C5, 02\-routing/02\) and the bounded full input text.
+
+<a name="Dispatcher.RecordDispatchCtx"></a>
+### func \(\*Dispatcher\) RecordDispatchCtx
+
+	func (d *Dispatcher) RecordDispatchCtx(ctx context.Context, sessionID, handlerCase, inputSummary string, result *DispatchResult, hasParts bool, dispatchErr error)
+
+RecordDispatchCtx is the live\-dispatch entry point: the request context supplies the chat.submit turn id \(WithChatTurnID seam\) and the FULL input text \(result.OriginalInput, falling back to inputSummary\) is persisted bounded for the dispatch\-evidence surface \(C5, 02\-routing/02 open item\).
+
+<a name="Dispatcher.ResolveActiveQueue"></a>
+### func \(\*Dispatcher\) ResolveActiveQueue
+
+	func (d *Dispatcher) ResolveActiveQueue(conversationID string) (*MessageQueue, error)
+
+ResolveActiveQueue resolves the live queue for ANY of the session's identity shapes \(primary session id, conversation id, thread\-scoped conversation id, or a registered queue key\). Read\-only lookups only. Returns ErrQueueNotFound when nothing live matches; ambiguous multi\-thread matches surface agent.ErrAmbiguousQueue to the caller.
+
+C\-1 export \(20261121\-interactive\-usability leaf 01\): steer/followup surfaces route through this instead of a single\-key GetActiveQueue, so a GUI\-shaped id \(the raw session\-... id sent as conversation\_id\) finds the queue the loop registered under its RESOLVED conversation id.
 
 <a name="Dispatcher.ResumeAfterClarification"></a>
 ### func \(\*Dispatcher\) ResumeAfterClarification
@@ -9187,6 +9502,13 @@ SetThreadRouter wires a ThreadRouter onto the dispatcher, enabling thread\-aware
 
 SetToolRegistry wires a depth\-based tool registry for structural gating. At maxDepth the agent simply won't have spawn tools in its registry.
 
+<a name="Dispatcher.SetTrivialFastLane"></a>
+### func \(\*Dispatcher\) SetTrivialFastLane
+
+	func (d *Dispatcher) SetTrivialFastLane(enabled bool)
+
+SetTrivialFastLane mirrors orchestrator.trivial\_fast\_lane onto the dispatcher's classification lane \(04\-clutter/02\). It exists as a method \-\- not a DispatcherConfig field \-\- because the NewDispatcher body lives in dispatcher.go \(sibling\-protected this wave\) and the shipped default is ON via the classifier's inverted latch, so the only wiring the flag needs is THIS call when config says otherwise. enabled=false disables the lane on the LLM classifier \(byte\-identical legacy classification\); the daemon wires it from cfg.Orchestrator.TrivialFastLane in components.go.
+
 <a name="Dispatcher.ShouldDispatchAsync"></a>
 ### func \(\*Dispatcher\) ShouldDispatchAsync
 
@@ -9214,6 +9536,8 @@ ShouldRouteToPair returns true if the dispatch result should use channel\-based 
 	func (d *Dispatcher) SteerActiveAgent(ctx context.Context, conversationID, content, source string) error
 
 SteerActiveAgent sends a steering message to an active agent for the given conversation. This interrupts the current flow. Returns ErrQueueNotFound if no active queue exists.
+
+Identity canonicalization \(C\-1, 20261121\-interactive\-usability leaf 01\): the id may be the session's PRIMARY id, its conversation id, a thread\-scoped conversation id, or the queue key itself \- resolution mirrors the submit path's precedence instead of missing the conv\-keyed registration with a raw session id \(the steer/followup 404 class\).
 
 <a name="Dispatcher.Stop"></a>
 ### func \(\*Dispatcher\) Stop
@@ -9783,6 +10107,33 @@ ToCompressedJSON converts the result to a JSON string, compressing if over maxTo
 
 ToJSON converts the result to a JSON string.
 
+<a name="ExecutionResultEvent"></a>
+## type ExecutionResultEvent
+
+ExecutionResultEvent is the shared wire payload for bot and employee execution results, published on TopicBotResult \("bot.result"\) and TopicEmployeeResult \("employee.result"\). The SAME struct serves both tiers: the topic name is the sole tier discriminator and classifies as WSProgress.
+
+Schema note \(issue \#140\): there is deliberately NO \`kind\` field and no ExecutionKind type — per operator decision the wire shape is shared and untagged, and callers discriminate on the topic name, never on an in\-payload discriminator. Status is a plain string carrying completed|failed|skipped.
+
+	type ExecutionResultEvent struct {
+	    AgentID    string     `json:"agent_id"`
+	    Status     string     `json:"status"`
+	    Output     string     `json:"output,omitempty"`
+	    TokensUsed int        `json:"tokens_used"`
+	    Error      string     `json:"error,omitempty"`
+	    DurationMS int64      `json:"duration_ms"`
+	    StopReason StopReason `json:"stop_reason,omitempty"`
+	    TriggerRef string     `json:"trigger_ref,omitempty"`
+	    SessionID  string     `json:"session_id,omitempty"`
+	    Timestamp  time.Time  `json:"timestamp"`
+	}
+
+<a name="ExecutionResultEvent.WSClass"></a>
+### func \(ExecutionResultEvent\) WSClass
+
+	func (ExecutionResultEvent) WSClass() wsclass.WSClass
+
+WSClass marks this event for the WS relay's progress lane.
+
 <a name="Executor"></a>
 ## type Executor
 
@@ -9884,6 +10235,13 @@ SetRetryMetrics sets the retry metrics collector after executor construction. Ni
 	func (e *Executor) SetSecurityChecker(checker *security.PermissionChecker)
 
 SetSecurityChecker swaps the permission checker used by checkPermission \(agent\-groups leaf 01 T2\): session\-loop creation injects a per\-session clone carrying the session's own fence stage. Nil\-safe per setter convention \(nil is a no\-op, keeping the current checker\).
+
+<a name="Executor.SetTurnTokensProvider"></a>
+### func \(\*Executor\) SetTurnTokensProvider
+
+	func (e *Executor) SetTurnTokensProvider(fn func() int)
+
+SetTurnTokensProvider arms the details\["turn\_tokens"\] injection used by the employee constitution's MaxTokensPerTurn cap guard: the provider reports the current turn's token count at each checkPermission call. A provider returning 0 \(or no provider at all\) leaves the key absent, so the enforcement guard stays inert exactly as before \(zero = no cap check\). Nil\-safe per setter convention \(nil is a no\-op, mirroring SetSecurityChecker\).
 
 <a name="ExecutorOption"></a>
 ## type ExecutorOption
@@ -11317,6 +11675,12 @@ Intent represents the classified intent of a user message.
 	    // (keyword/heuristic/guard/etc.) and when all LLM candidates failed —
 	    // honest provenance: no model, no attribution.
 	    Model string `json:"model,omitempty"`
+	    // Notice carries user-facing classification-degradation guidance
+	    // (20261119-usability-remediation C1, 02-routing leaf 01). Set on
+	    // degraded classify lanes from llm.ClassificationUserGuidance for the
+	    // observed failure; ClassifyAndRoute copies it to
+	    // DispatchResult.ClassificationNotice. Empty on healthy classification.
+	    Notice string `json:"classification_notice,omitempty"`
 	}
 
 <a name="Intent.MarshalJSON"></a>
@@ -11560,6 +11924,13 @@ ShouldDispatchAsync returns true if the intent should be dispatched asynchronous
 
 SuggestedMode returns the default planning mode for this intent type. Modes: "direct" \(no LLM decomposition\), "plan" \(single\-phase LLM plan\), "spec\_plan" \(multi\-phase LLM plan with Produces/Consumes\), "spec\_pair" \(pair session\).
 
+<a name="InterviewMessageSink"></a>
+## type InterviewMessageSink
+
+InterviewMessageSink is the session\-persistence lane the planner uses to publish interview questions as chat\-visible history: SaveMessages semantics over one assistant entry. Production wires the session store through SetInterviewMessageSink; tests capture the message.
+
+	type InterviewMessageSink func(sessionID string, msg session.Message) error
+
 <a name="InterviewOption"></a>
 ## type InterviewOption
 
@@ -11671,6 +12042,13 @@ SetBootReadiness wires the daemon's F\-D8 classifier boot\-gate signal onto an a
 
 SetPiiMaskHook attaches the session\-scoped PII mask lane used for the classification side sends \(finding C21\). Nil is a no\-op \(setter nil\-guard rule\): with no hook the raw input passes through byte\-identically.
 
+<a name="LLMClassifier.SetTrivialFastLane"></a>
+### func \(\*LLMClassifier\) SetTrivialFastLane
+
+	func (c *LLMClassifier) SetTrivialFastLane(enabled bool)
+
+SetTrivialFastLane mirrors orchestrator.trivial\_fast\_lane onto this classifier \(04\-clutter/02\). The Dispatcher\-level mirror is Dispatcher.SetTrivialFastLane.
+
 <a name="LLMClassifier.UnmarkUnavailable"></a>
 ### func \(\*LLMClassifier\) UnmarkUnavailable
 
@@ -11780,6 +12158,17 @@ LearningPipeline is the interface for the learning pipeline.
 	    Distill(ctx context.Context, trajectory Trajectory, judgment *JudgmentResult) ([]*LearnedPattern, error)
 	    StorePattern(ctx context.Context, pattern *LearnedPattern) error
 	    Retrieve(ctx context.Context, query string, domain string, k int) ([]*LearnedPattern, error)
+	}
+
+<a name="LeaseLedger"></a>
+## type LeaseLedger
+
+LeaseLedger is a snapshot of the slot\-lease accounting counters \(usability 02\-routing/04 T1\). Held is the number of leases currently registered against steps; the ledger balances when Acquired == Released \+ Held for every agent.
+
+	type LeaseLedger struct {
+	    Acquired map[string]int
+	    Released map[string]int
+	    Held     map[string]int
 	}
 
 <a name="LifecycleOutcome"></a>
@@ -12527,7 +12916,7 @@ Close marks the queue as closed. It persists pending follow\-ups if configured.
 
 	func (q *MessageQueue) DrainFollowUp() []QueuedMessage
 
-DrainFollowUp returns follow\-up messages according to the DrainMode. DrainOne: returns at most one message. DrainAll: returns all pending messages.
+DrainFollowUp returns follow\-up messages according to the DrainMode. DrainOne: returns at most one message. DrainAll: returns all pending messages. Boot\-recovered messages \(02\-routing/03 T2\) drain as ONE ordered batch: they are the session's persisted backlog, not live one\-at\-a\-time follow\-ups, and splitting them across turns would strand the tail.
 
 <a name="MessageQueue.DrainSteering"></a>
 ### func \(\*MessageQueue\) DrainSteering
@@ -12570,6 +12959,13 @@ HasSteering returns true if the steering queue has pending messages.
 	func (q *MessageQueue) IsClosed() bool
 
 IsClosed returns true if the queue has been closed.
+
+<a name="MessageQueue.SetBootRecoveryInbox"></a>
+### func \(\*MessageQueue\) SetBootRecoveryInbox
+
+	func (q *MessageQueue) SetBootRecoveryInbox(convID string, inbox *MessageQueue)
+
+SetBootRecoveryInbox is the per\-queue registration seam: the queue registers itself as the boot inbox for its conversation.
 
 <a name="MessageQueue.SetPersister"></a>
 ### func \(\*MessageQueue\) SetPersister
@@ -14162,6 +14558,27 @@ PlanRequest is the input to the strategic planner.
 	    // user directives use, which AgentLoop consumes one-shot per task run.
 	    // Empty = no request-level model; unchanged behavior.
 	    RequestModel string `json:"request_model,omitempty"`
+	
+	    // Difficulty carries the classified per-turn routing difficulty
+	    // (sovereign-router-parity leaf 07 / Contract C11, R7): the
+	    // dispatch's Intent projected through llm.DeriveDifficulty. It rides
+	    // the plan request the same lane as RequestModel and lands on the
+	    // task's turn_difficulty metadata, which the step-job processor arms
+	    // on the executing loop one-shot (ArmTurnDifficulty). 0 = the intent
+	    // produced no level (DeriveDifficulty never returns 0 for real
+	    // signals; 0 here means unclassified) = R7 inert on the async lane.
+	    Difficulty int `json:"difficulty,omitempty"`
+	
+	    // AutoSeal marks a compound plan+implement request (the user asked
+	    // for the plan AND its execution in one prompt, detected by
+	    // PlanAutoSealFromIntent over the full user input). When set, the
+	    // approval gate in requiresApproval is bypassed: the plan is
+	    // AUTO-SEALED after compilation and flows straight to scheduling
+	    // (StateExecuting + orchestrator.schedule) with an audit trail
+	    // (auto_sealed task metadata + the flag on the task.planned event).
+	    // Intent-driven ONLY -- no config knob. Plain plan requests never
+	    // carry the flag and keep parking at the approval gate.
+	    AutoSeal bool `json:"auto_seal,omitempty"`
 	}
 
 <a name="PrefilterEmbedder"></a>
@@ -14507,6 +14924,12 @@ QueueEntry wraps a MessageQueue with generation tracking.
 	    Queue      *MessageQueue
 	    Loop       *AgentLoop // the loop that owns this queue (may be nil in tests)
 	    Generation uint64
+	    // PrimaryID is the conversation id this entry was registered under as
+	    // its PRIMARY key (RegisterActiveQueue's conversationID argument).
+	    // Alias keys point at the same entry but are never an entry's primary
+	    // key; the shadow guard in RegisterActiveQueue uses this to tell a
+	    // live primary registration apart from a replaceable alias mapping.
+	    PrimaryID string
 	}
 
 <a name="QueueEventPayload"></a>
@@ -15189,10 +15612,11 @@ TriggerReplan creates a new planning step for incomplete tasks. E2E run 3 \(2026
 RalphLoopConfig holds configuration for the Ralph loop.
 
 	type RalphLoopConfig struct {
-	    Enabled           bool `json:"enabled"`
-	    MaxIterations     int  `json:"max_iterations"`     // Maximum replan cycles per task
-	    EvidenceRequired  bool `json:"evidence_required"`  // Require evidence for completion claims
-	    ChecklistRequired bool `json:"checklist_required"` // Require checklist completion
+	    Enabled             bool `json:"enabled"`
+	    MaxIterations       int  `json:"max_iterations"`        // Maximum replan cycles per task
+	    MaxReplanExtensions int  `json:"max_replan_extensions"` // Hard ceiling on progress-based budget extensions per task (default 2; <=0 treated as 0)
+	    EvidenceRequired    bool `json:"evidence_required"`     // Require evidence for completion claims
+	    ChecklistRequired   bool `json:"checklist_required"`    // Require checklist completion
 	}
 
 <a name="DefaultRalphLoopConfig"></a>
@@ -15962,6 +16386,13 @@ HandleReviewResult processes a review result and updates step state. Returns any
 
 ReviewStep initiates review of a completed step.
 
+<a name="ReviewManager.SetMetricsStore"></a>
+### func \(\*ReviewManager\) SetMetricsStore
+
+	func (rm *ReviewManager) SetMetricsStore(store *metrics.Store)
+
+SetMetricsStore wires \(or replaces\) the metrics store used by the C3 blame wiring \(leaf 02\-trace\-stamping\): reviewed\_model\_id resolves through Store.ResolveReviewedModel off the step\-scoped trace. Late\-armed by the daemon \(components.go\) because the store handle exists before this manager but the orchestrator block composes both. Nil\-safe per the repo setter convention: nil keeps the current store \(fallback\-only posture\).
+
 <a name="ReviewManager.SetPolicy"></a>
 ### func \(\*ReviewManager\) SetPolicy
 
@@ -16049,6 +16480,13 @@ DefaultReviewPolicy returns sensible defaults for review policy.
 
 Reviewer routing is dynamic via ReviewPolicy.Registry and the reviews\_domain field on reviewer\-role agents.
 
+<a name="ReviewPolicyFromConfig"></a>
+### func ReviewPolicyFromConfig
+
+	func ReviewPolicyFromConfig(c config.ReviewConfig) *ReviewPolicy
+
+ReviewPolicyFromConfig builds the runtime review policy from \[agent.review\]. Empty fields fall back to DefaultReviewPolicy values, so an installed home with no review block keeps the same posture as before this seam existed. A configured pattern list REPLACES the default list \(operator owns it\).
+
 <a name="ReviewPolicy.ExceedsMaxRevisions"></a>
 ### func \(\*ReviewPolicy\) ExceedsMaxRevisions
 
@@ -16089,7 +16527,9 @@ Resolution order: Dynamic lookup via Registry for a reviewer\-role agent
 
 	func (p *ReviewPolicy) ShouldAutoApprove(step *task.TaskStep) bool
 
-ShouldAutoApprove checks if a step should auto\-approve based on its description.
+ShouldAutoApprove checks if a step is a low\-risk, documentation\-only change.
+
+Tightened by the dev\-setup\-safety audit \(F\-02\): the old matcher searched the WHOLE description for a pattern substring plus "update"/"fix", so a step like "fix auth.py and update the handler" matched "\*.md" only as a literal substring and could auto\-approve a code change. The new rule requires an EXACT filename token: a whitespace\-delimited word whose path.Base matches the pattern via path.Match. No token, no approval. A code\-shaped token \(any token with a source\-code extension\) vetoes the whole step.
 
 <a name="ReviewResult"></a>
 ## type ReviewResult
@@ -16103,6 +16543,13 @@ ReviewResult represents the outcome of a review.
 	    Confidence float64       `json:"confidence"`
 	    ReviewerID string        `json:"reviewer_id"`
 	    Duration   time.Duration `json:"duration"`
+	
+	    // Verdicts carries the rubric grades the review pass produced
+	    // (model-rating-metrics-plan C4). Additive + omitempty so every
+	    // non-emitting producer (pair_manager, inline-review lane) compiles
+	    // and serializes unchanged. The evidence gate and the ReviewManager
+	    // reviewer lane are the only v1 emitting producers.
+	    Verdicts []modelrating.Verdict `json:"verdicts,omitempty"`
 	}
 
 <a name="ReviewStatus"></a>
@@ -16704,7 +17151,7 @@ SessionConfig holds creation\-time configuration.
 
 	func DefaultSessionConfig() SessionConfig
 
-DefaultSessionConfig returns sensible defaults.
+DefaultSessionConfig returns sensible defaults. TokenBudget defaults to 0 \(= unlimited\): an unconfigured collaboration session must not hit a hidden token ceiling — the same opt\-in\-cap class 419c9b77 removed from the chat loop's conversation budget. An explicit positive TokenBudget still binds \(the pair driver gates on \>0\); MaxTurns and TimeBudget keep bounding unconfigured sessions.
 
 <a name="SessionContextDigest"></a>
 ## type SessionContextDigest
@@ -17589,6 +18036,13 @@ NewStrategicPlanner creates a new strategic planner.
 
 ApprovePlan resumes a plan that was paused at the approval gate. It loads the persisted steps, sets UserApproved on the planning context, transitions to StateExecuting, and triggers scheduling.
 
+<a name="StrategicPlanner.ClearInterviewState"></a>
+### func \(\*StrategicPlanner\) ClearInterviewState
+
+	func (sp *StrategicPlanner) ClearInterviewState(taskID string)
+
+ClearInterviewState removes the waiting block after answers arrive.
+
 <a name="StrategicPlanner.ConductInterview"></a>
 ### func \(\*StrategicPlanner\) ConductInterview
 
@@ -17597,6 +18051,13 @@ ApprovePlan resumes a plan that was paused at the approval gate. It loads the pe
 ConductInterview determines whether an interview is needed for the given plan request. If the TrueAnalysis indicates high ambiguity or broad scope, it uses the LLM to generate targeted interview questions. If interview answers are already present, it marks the interview as completed and returns.
 
 Returns a PlanningContext that may or may not have InterviewCompleted set to true. If the interview is incomplete, the caller should present the questions to the user and re\-invoke ConductInterview once answers are collected.
+
+<a name="StrategicPlanner.DeliverInterviewAnswer"></a>
+### func \(\*StrategicPlanner\) DeliverInterviewAnswer
+
+	func (sp *StrategicPlanner) DeliverInterviewAnswer(sessionID, answer string) (string, bool)
+
+DeliverInterviewAnswer routes one user message to the interview parked on sessionID's conversation. Returns \(ack, true\) when delivered \(and the waiter consumed — duplicate answers are refused by construction\), \("", false\) when no interview waits for that conversation.
 
 <a name="StrategicPlanner.DraftFor"></a>
 ### func \(\*StrategicPlanner\) DraftFor
@@ -17731,6 +18192,13 @@ SetHostileCriticChatter wires the hostile pass's own model chatter \(the C2 "hos
 
 SetHostileCriticEnabled gates the hostile second pass \(plans.hostile\_critic\_enabled, default false \- ships dark\). Flag off: the critique loop is byte\-identical to the leaf\-02 loop. Flag on: the pass still runs only under the full C5 gate \(chatter wired AND a different model than the planner\). Nil\-guarded per the repo's setter convention.
 
+<a name="StrategicPlanner.SetInterviewMessageSink"></a>
+### func \(\*StrategicPlanner\) SetInterviewMessageSink
+
+	func (sp *StrategicPlanner) SetInterviewMessageSink(sink InterviewMessageSink)
+
+SetInterviewMessageSink wires the session\-store lane for interview question persistence. Nil\-guarded per the setter convention; nil disables persistence \(the pause still parks and answers still resume\).
+
 <a name="StrategicPlanner.SetInterviewOptionGates"></a>
 ### func \(\*StrategicPlanner\) SetInterviewOptionGates
 
@@ -17787,12 +18255,26 @@ SetRegistry replaces the agent registry after construction \(tests only\).
 
 SetSelfSealEnabled toggles the planner's autonomous self\-seal \(plans.self\_seal\_enabled, default false — ships dark\). Threaded from daemon.go next to the SetPlanCompilerEnabled site. Nil\-guarded per the repo's setter convention.
 
+<a name="StrategicPlanner.SetTurnLivenessTouch"></a>
+### func \(\*StrategicPlanner\) SetTurnLivenessTouch
+
+	func (sp *StrategicPlanner) SetTurnLivenessTouch(fn func(taskID string))
+
+SetTurnLivenessTouch wires the C7 activity heartbeat \(01\-safety/04\): draft/seal/approval activity calls fn\(taskID\), which Touches the turn registry entry that dispatched the task so a long human\-in\-the\-loop drafting/approval session never goes stale between saves. Nil\-guarded per the setter convention; a nil func disables the heartbeat \(the watchdog exemption still protects parked states\).
+
 <a name="StrategicPlanner.SetValidToolNames"></a>
 ### func \(\*StrategicPlanner\) SetValidToolNames
 
 	func (sp *StrategicPlanner) SetValidToolNames(names map[string]bool)
 
 SetValidToolNames installs the set of tool names the planner is allowed to emit in step tool\_hint fields \(issue \#58 capability 3\). When the set is non\-empty, parsePlanOutput drops unknown hints \(with a Warn\) so the executor's tool\-hint table picks instead of routing on a hallucinated hint; a nil or empty set skips validation entirely \(legacy behavior\). Nil\-guarded: a nil receiver or nil map is a no\-op.
+
+<a name="StrategicPlanner.StoreInterviewState"></a>
+### func \(\*StrategicPlanner\) StoreInterviewState
+
+	func (sp *StrategicPlanner) StoreInterviewState(t *task.Task, req PlanRequest, st *plannerInterviewState)
+
+StoreInterviewState writes the waiting\-interview block into the task's metadata and stamps the waiting\-since time. Best\-effort: persistence failures degrade to the in\-memory waiter \(logged, never fatal — the pause itself already happened\).
 
 <a name="StrategicPlannerConfig"></a>
 ## type StrategicPlannerConfig
@@ -17810,7 +18292,10 @@ StrategicPlannerConfig holds configuration for the strategic planner.
 	    MaxPlanSteps   int
 	    PlannerTimeout time.Duration
 	    // ApprovalStepThreshold is the minimum number of planned steps that
-	    // triggers the approval gate (even without an interview). Defaults to 5.
+	    // triggers the approval gate (even without an interview). 0 (or
+	    // negative) DISABLES the complexity gate; the default of 5 lives in
+	    // config.DefaultConfig (wired via OrchestratorConfig), not in the
+	    // constructor -- defaulting here would clamp an explicit 0 back to 5.
 	    ApprovalStepThreshold int
 	    // SimpleInputMaxChars is the threshold below which a request is
 	    // considered "simple" and may skip LLM decomposition. Defaults to 100.
@@ -18057,6 +18542,13 @@ GetJobByID retrieves a job from the queue by ID.
 
 HandleHandoff processes a handoff request: creates a new task step for the target agent, optionally rewires downstream dependencies, and publishes a bus event.
 
+<a name="TacticalScheduler.LeaseLedgerSnapshot"></a>
+### func \(\*TacticalScheduler\) LeaseLedgerSnapshot
+
+	func (ts *TacticalScheduler) LeaseLedgerSnapshot() LeaseLedger
+
+LeaseLedgerSnapshot returns the current lease accounting. Pure read; safe under concurrency \(I1, usability 02\-routing/04\).
+
 <a name="TacticalScheduler.OnJobCompleted"></a>
 ### func \(\*TacticalScheduler\) OnJobCompleted
 
@@ -18140,6 +18632,20 @@ SetMetricsStore installs the metrics store used for failure/replan outcome captu
 	func (ts *TacticalScheduler) SetSessionStore(store sessionStoreReader)
 
 SetSessionStore installs the session lookup used for the interactive stamp. nil is ignored \(leaves session\-less stamping active\).
+
+<a name="TacticalScheduler.SetStepRetryInterval"></a>
+### func \(\*TacticalScheduler\) SetStepRetryInterval
+
+	func (ts *TacticalScheduler) SetStepRetryInterval(interval time.Duration)
+
+SetStepRetryInterval arms \(or re\-arms\) the bounded retry ticker for semaphore\-blocked steps \(usability 02\-routing/04 T2, W12/F\-ORCH\-28\). interval \> 0 starts a sweep every interval; interval \<= 0 stops the ticker and disables retry. Idempotent: re\-arming with a running ticker is a no\-op. Default production interval comes from orchestrator.step\_retry\_interval \(15s\); the constructor does NOT auto\-start, so schedulers that never opt in behave byte\-identically to the pre\-ticker event\-driven\-only reschedule shape.
+
+<a name="TacticalScheduler.StopStepRetryTicker"></a>
+### func \(\*TacticalScheduler\) StopStepRetryTicker
+
+	func (ts *TacticalScheduler) StopStepRetryTicker()
+
+StopStepRetryTicker stops the bounded retry sweep. Safe to call when no ticker is running.
 
 <a name="TacticalSchedulerConfig"></a>
 ## type TacticalSchedulerConfig
@@ -20035,6 +20541,26 @@ TurnTerminalEvent is the frozen payload published on the "turn.terminal" bus top
 	    // (20260916-turn-lifecycle-events extension note updated in the same
 	    // change).
 	    TurnSpanID string `json:"turn_span_id,omitempty"`
+	    // RejectionReason (20261119-usability-remediation C1, 01-safety leaf
+	    // 01): the verbatim user rejection reason, set iff
+	    // HandlerCase=="task_rejected_relay". Additive optional key, declared
+	    // in schemas/ws_events.schema.json in the same change; consumers
+	    // decoding the frozen key set ignore it.
+	    RejectionReason string `json:"rejection_reason,omitempty"`
+	    // RoutingNotice (20261119-usability-remediation C1, 02-routing leaf
+	    // 01): user-facing classification-degradation guidance, set when the
+	    // dispatch chain answered on a degraded lane. Additive optional key,
+	    // declared in schemas/ws_events.schema.json in the same change;
+	    // consumers decoding the frozen key set ignore it.
+	    RoutingNotice string `json:"routing_notice,omitempty"`
+	    // ReplySource (20261119-usability-remediation C1, 04-clutter leaf
+	    // 01): where the reply text came from -- "loop" (the model's final
+	    // answer, the default/empty), "synthesized" (reconstructed from the
+	    // turn's tool ledger after a blank-stop completion, F-ORCH-15), or
+	    // "task_relay" (relayed from a task completion/failure event).
+	    // Additive optional key, declared in schemas/ws_events.schema.json
+	    // in the same change; consumers decoding the frozen key set ignore it.
+	    ReplySource string `json:"reply_source,omitempty"`
 	}
 
 <a name="TurnTerminalEvent.WSClass"></a>
@@ -20047,7 +20573,7 @@ WSClass implements wsclass.WSClassified: turn lifecycle events render as agent\_
 <a name="TurnWatchdog"></a>
 ## type TurnWatchdog
 
-TurnWatchdog is the async\-turn liveness reaper \(async\-turn\-migration leaf 06\). Every pass it asks the TurnRegistry for turns whose last progress is older than the stale threshold and, for each, emits a turn.terminal event with status=failed and handler\_case=turn\_reaped, then removes the turn from tracking. Mark\-and\-continue ONLY: the reaper never re\-dispatches work and never cancels in\-flight goroutines — if late work eventually completes, the normal turn.terminal still fires and clients treat a post\-reaped completion as valid.
+TurnWatchdog is the async\-turn liveness reaper \(async\-turn\-migration leaf 06\). Every pass it asks the TurnRegistry for turns whose last progress is older than the stale threshold and, for each, emits a turn.terminal event with status=failed and handler\_case=turn\_reaped, then removes the turn from tracking. Mark\-and\-continue ONLY: the reaper never re\-dispatches work and never cancels in\-flight goroutines \-\- if late work eventually completes, the normal turn.terminal still fires and clients treat a post\-reaped completion as valid.
 
 The emit func is the injection seam: production passes ChatHandler.EmitTurnTerminal \(wrapped by the daemon composition, which also logs the Warn "turn reaped" line per leaf\-06 task 4\); tests pass a capturing func. This keeps package agent free of any watchdog→ChatHandler construction dependency.
 
@@ -20069,7 +20595,14 @@ NewTurnWatchdog builds a watchdog over reg. reg or emit nil disables it \(Start 
 
 	func (w *TurnWatchdog) RunOnce(staleAfter time.Duration) int
 
-RunOnce executes exactly one reap pass and returns the number of turns reaped. Exported test seam over the unexported reapOnce \(the leaf contract offers "RunOnce\(\) exported test seam OR Start with tiny interval" — this is the former; Start\-with\-tiny\-interval is covered by the lifecycle test too\).
+RunOnce executes exactly one reap pass and returns the number of turns reaped. Exported test seam over the unexported reapOnce \(the leaf contract offers "RunOnce\(\) exported test seam OR Start with tiny interval" \-\- this is the former; Start\-with\-tiny\-interval is covered by the lifecycle test too\).
+
+<a name="TurnWatchdog.SetTaskStateFunc"></a>
+### func \(\*TurnWatchdog\) SetTaskStateFunc
+
+	func (w *TurnWatchdog) SetTaskStateFunc(fn func(taskID string) task.TaskState)
+
+SetTaskStateFunc wires the C7 exemption state accessor: given the task id attached to a tracked turn, it returns the task's current state from the registry edge \(no store query per tick\). Turns whose state is planning, awaiting\_approval, or awaiting\_seal are EXEMPT from staleness reaping \-\- a human wait is not a stalled turn. Truly stalled executing turns still reap. Nil\-guarded per the setter convention; a nil func disables the exemption.
 
 <a name="TurnWatchdog.Start"></a>
 ### func \(\*TurnWatchdog\) Start

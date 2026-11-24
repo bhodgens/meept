@@ -17,6 +17,7 @@ Session mapping: scheduler jobs carry no conversation/session identity \(a timer
 - [func NotifyJobComplete\(publish func\(topic string, msg \*models.BusMessage\) int, msg \*models.BusMessage\) int](<#NotifyJobComplete>)
 - [func RegisterRPCHandlers\(server \*rpc.Server, scheduler \*Scheduler\)](<#RegisterRPCHandlers>)
 - [func RegisterTiming\(c \*cron.Cron, cfg JobConfig, job Job, oneShotWindow time.Duration\) \(cron.EntryID, error\)](<#RegisterTiming>)
+- [func SweepAgedJobSpills\(now time.Time, horizon time.Duration\) \(int, error\)](<#SweepAgedJobSpills>)
 - [func ValidateJobConfig\(cfg JobConfig\) error](<#ValidateJobConfig>)
 - [type AddJobParams](<#AddJobParams>)
 - [type AddJobResult](<#AddJobResult>)
@@ -44,6 +45,7 @@ Session mapping: scheduler jobs carry no conversation/session identity \(a timer
 - [type JobConfig](<#JobConfig>)
   - [func \(c JobConfig\) MarshalJSON\(\) \(\[\]byte, error\)](<#JobConfig.MarshalJSON>)
 - [type JobDependencies](<#JobDependencies>)
+- [type JobExecutionResult](<#JobExecutionResult>)
 - [type JobInfo](<#JobInfo>)
 - [type JobResult](<#JobResult>)
 - [type JobType](<#JobType>)
@@ -90,23 +92,28 @@ Session mapping: scheduler jobs carry no conversation/session identity \(a timer
   - [func \(j \*ReminderJob\) Execute\(ctx context.Context\) error](<#ReminderJob.Execute>)
 - [type ReminderJobConfig](<#ReminderJobConfig>)
 - [type RemoveJobParams](<#RemoveJobParams>)
+- [type ResultSink](<#ResultSink>)
 - [type ResumeJobParams](<#ResumeJobParams>)
 - [type RunJobParams](<#RunJobParams>)
 - [type ScheduleDeliveryReceipt](<#ScheduleDeliveryReceipt>)
 - [type Scheduler](<#Scheduler>)
   - [func NewScheduler\(cfg config.SchedulerConfig, msgBus \*bus.MessageBus, opts ...Option\) \(\*Scheduler, error\)](<#NewScheduler>)
   - [func \(s \*Scheduler\) Bus\(\) \*bus.MessageBus](<#Scheduler.Bus>)
+  - [func \(s \*Scheduler\) CancelJob\(handle, reason string\) \(status string, stopped bool, exitCode int, err error\)](<#Scheduler.CancelJob>)
   - [func \(s \*Scheduler\) ClaimCount\(\) \(int64, error\)](<#Scheduler.ClaimCount>)
   - [func \(s \*Scheduler\) ClaimTick\(jobID string, tick time.Time\) \(claimed bool, err error\)](<#Scheduler.ClaimTick>)
   - [func \(s \*Scheduler\) GetJob\(jobID string\) \(JobInfo, bool\)](<#Scheduler.GetJob>)
+  - [func \(s \*Scheduler\) GetJobResult\(handle string\) \(JobExecutionResult, bool\)](<#Scheduler.GetJobResult>)
   - [func \(s \*Scheduler\) GetLastWake\(\) \(time.Time, error\)](<#Scheduler.GetLastWake>)
   - [func \(s \*Scheduler\) JobCount\(\) int](<#Scheduler.JobCount>)
+  - [func \(s \*Scheduler\) JobResultOutput\(handle string, maxBytes int\) \(\[\]byte, error\)](<#Scheduler.JobResultOutput>)
   - [func \(s \*Scheduler\) ListJobs\(\) \[\]JobInfo](<#Scheduler.ListJobs>)
   - [func \(s \*Scheduler\) Location\(\) \*time.Location](<#Scheduler.Location>)
   - [func \(s \*Scheduler\) Name\(\) string](<#Scheduler.Name>)
   - [func \(s \*Scheduler\) NextRun\(jobID string\) \(time.Time, error\)](<#Scheduler.NextRun>)
   - [func \(s \*Scheduler\) PauseJob\(jobID string\) error](<#Scheduler.PauseJob>)
   - [func \(s \*Scheduler\) ProcessMissedTicks\(now time.Time\) \(\[\]MissedTickRun, error\)](<#Scheduler.ProcessMissedTicks>)
+  - [func \(s \*Scheduler\) PutResult\(result JobExecutionResult\)](<#Scheduler.PutResult>)
   - [func \(s \*Scheduler\) RegisterTimingVia\(cfg JobConfig, job Job\) \(cron.EntryID, error\)](<#Scheduler.RegisterTimingVia>)
   - [func \(s \*Scheduler\) ResumeJob\(jobID string\) error](<#Scheduler.ResumeJob>)
   - [func \(s \*Scheduler\) RunNow\(jobID string\) error](<#Scheduler.RunNow>)
@@ -126,8 +133,10 @@ Session mapping: scheduler jobs carry no conversation/session identity \(a timer
   - [func \(j \*SecurityJob\) Execute\(ctx context.Context\) error](<#SecurityJob.Execute>)
 - [type SecurityJobConfig](<#SecurityJobConfig>)
 - [type SecurityScanner](<#SecurityScanner>)
+- [type ShellCommandGuard](<#ShellCommandGuard>)
 - [type ShellJob](<#ShellJob>)
   - [func NewShellJob\(cfg JobConfig, msgBus \*bus.MessageBus\) \(\*ShellJob, error\)](<#NewShellJob>)
+  - [func NewShellJobWithDeps\(cfg JobConfig, deps \*JobDependencies\) \(\*ShellJob, error\)](<#NewShellJobWithDeps>)
   - [func \(j \*ShellJob\) Execute\(ctx context.Context\) error](<#ShellJob.Execute>)
 - [type ShellJobConfig](<#ShellJobConfig>)
 - [type Store](<#Store>)
@@ -138,9 +147,11 @@ Session mapping: scheduler jobs carry no conversation/session identity \(a timer
   - [func \(s \*Store\) Export\(\) \(\[\]byte, error\)](<#Store.Export>)
   - [func \(s \*Store\) FilePath\(\) string](<#Store.FilePath>)
   - [func \(s \*Store\) Get\(id string\) \(JobConfig, bool\)](<#Store.Get>)
+  - [func \(s \*Store\) GetResult\(handle string\) \(JobExecutionResult, bool\)](<#Store.GetResult>)
   - [func \(s \*Store\) Import\(data \[\]byte, replace bool\) error](<#Store.Import>)
   - [func \(s \*Store\) List\(\) \[\]JobConfig](<#Store.List>)
   - [func \(s \*Store\) Load\(\) \(\[\]JobConfig, error\)](<#Store.Load>)
+  - [func \(s \*Store\) PutResult\(result JobExecutionResult\)](<#Store.PutResult>)
   - [func \(s \*Store\) Remove\(id string\) error](<#Store.Remove>)
   - [func \(s \*Store\) Save\(jobs \[\]JobConfig\) error](<#Store.Save>)
   - [func \(s \*Store\) SetEnabled\(id string, enabled bool\) error](<#Store.SetEnabled>)
@@ -169,9 +180,31 @@ Session mapping: scheduler jobs carry no conversation/session identity \(a timer
 	    SchedulerKeyMissedCount = "missed_count"
 	)
 
+<a name="JobStatusSucceeded"></a>Settled result statuses written to the lane.
+
+	const (
+	    JobStatusSucceeded = "succeeded"
+	    JobStatusFailed    = "failed"
+	    JobStatusCancelled = "cancelled"
+	)
+
+<a name="ExitCodeOK"></a>Unix\-consistent exit codes exposed to other agents \(contract from the job\-tools design\). N\>1 process exits are preserved verbatim.
+
+	const (
+	    ExitCodeOK      = 0
+	    ExitCodeFailure = 1
+	    ExitCodeSIGKILL = 137 // SIGKILL-equivalent: group kill or timeout kill
+	    ExitCodeSIGTERM = 143 // SIGTERM-equivalent: grace-period kill
+	    ExitCodeUnknown = -1  // unset / signal death with no mapping
+	)
+
 <a name="DefaultClaimRetentionDays"></a>DefaultClaimRetentionDays is the default retention for claimed ticks.
 
 	const DefaultClaimRetentionDays = 7
+
+<a name="DefaultJobResultOutputBytes"></a>DefaultJobResultOutputBytes is the bounded window job\_status reads back from a spill file on demand.
+
+	const DefaultJobResultOutputBytes = 4096
 
 <a name="DefaultOneShotCatchUpWindow"></a>DefaultOneShotCatchUpWindow mirrors config.DefaultOneShotWindow \(2h\). It is only a fallback: the live window always comes from the scheduler's cfg.Scheduler.OneShotWindow via effectiveOneShotWindow.
 
@@ -188,6 +221,11 @@ Session mapping: scheduler jobs carry no conversation/session identity \(a timer
 <a name="MaxDeliveryHistoryRecords"></a>MaxDeliveryHistoryRecords bounds the per\-job delivery history length.
 
 	const MaxDeliveryHistoryRecords = 200
+
+<a name="MaxSpillBytes"></a>MaxSpillBytes caps the stdout/stderr spill file per execution attempt. Writes past the cap are dropped \(the writer keeps consuming so the child never blocks on a full pipe\) and the settled result is marked truncated.
+
+	const MaxSpillBytes = int64(64) << 20 // 64 MiB
+	
 
 <a name="MinTimingEverySeconds"></a>MinTimingEverySeconds is the floor for the \`every\` kind, mirroring the dsh MIN\_EVERY\_INTERVAL\_SECONDS constraint. Higher\-frequency recurrences are rejected as frequency\_too\_high.
 
@@ -232,6 +270,15 @@ RegisterRPCHandlers registers all scheduler RPC handlers with the server.
 RegisterTiming registers cfg's Timing spec on the given cron engine in the engine's location so cron.WithLocation DST handling applies. \`at\` specs register as a one\-shot entry that removes itself after firing exactly once. oneShotWindow is the configured scheduling horizon for the at\-kind rejection; callers without a scheduler pass DefaultOneShotCatchUpWindow.
 
 This standalone form has no claim store or jobs.json writer available, so its one\-shot closure executes directly; the scheduler\-backed registerTiming \(RegisterTimingVia\) is the production path and delivers through fireOneShotOnce.
+
+<a name="SweepAgedJobSpills"></a>
+## func SweepAgedJobSpills
+
+	func SweepAgedJobSpills(now time.Time, horizon time.Duration) (int, error)
+
+SweepAgedJobSpills deletes spill files under $MEEPT\_HOME/spill/jobs older than the result\-lane horizon. The lane keeps at most resultLaneCap entries and prunes claims at DefaultClaimRetentionDays, so a spill older than that horizon can no longer have a lane entry reading it: crash\-orphaned files \(a result never settled, a lane entry evicted while the daemon was down, or a PutResult that crashed before its best\-effort delete\) are unreferenced garbage. Called at scheduler Start, not per\-run — cheap at boot, and it needs no synchronization with in\-flight writes.
+
+The horizon follows the claim retention so one knob stays consistent across the scheduler's boot\-time sweeps.
 
 <a name="ValidateJobConfig"></a>
 ## func ValidateJobConfig
@@ -558,6 +605,34 @@ JobDependencies holds dependencies for extended job types.
 	    MemoryManager    MemoryOptimizer
 	    LearningPipeline LearningConsolidator
 	    SecurityEngine   SecurityScanner
+	
+	    // Guard is the two-phase execution-time fence for shell jobs. Nil skips
+	    // guard checks (legacy construction paths and standalone tests).
+	    Guard ShellCommandGuard
+	    // ResultSink receives settled shell-job execution results (the result
+	    // lane). Nil skips the lane.
+	    ResultSink ResultSink
+	}
+
+<a name="JobExecutionResult"></a>
+## type JobExecutionResult
+
+JobExecutionResult is a settled execution attempt in the scheduler's result lane. Output is NOT stored here: it spills to a file under $MEEPT\_HOME/spill/jobs/\<handle\>.out and this row only keeps the small bookkeeping needed to find and bound it. Keys are JobID \(the handle\); a recurring job's successive runs overwrite by design \(job\_status takes only a handle, so it can only report the latest attempt\).
+
+	type JobExecutionResult struct {
+	    JobID        string    `json:"job_id"`
+	    ExitCode     int       `json:"exit_code"`
+	    Status       string    `json:"status"`
+	    StartedAt    time.Time `json:"started_at"`
+	    FinishedAt   time.Time `json:"finished_at"`
+	    OutputPath   string    `json:"output_path,omitempty"`
+	    OutputBytes  int64     `json:"output_bytes,omitempty"`
+	    OutputSHA256 string    `json:"output_sha256,omitempty"`
+	    // TruncatedTo is reserved for a bounded inline view. The file-backed
+	    // lane never truncates the spill file, so writers leave it at 0;
+	    // readers report how many bytes they actually returned.
+	    TruncatedTo int64  `json:"truncated_to,omitempty"`
+	    Error       string `json:"error,omitempty"`
 	}
 
 <a name="JobInfo"></a>
@@ -960,6 +1035,16 @@ RemoveJobParams represents the parameters for removing a job.
 	    JobID string `json:"job_id"`
 	}
 
+<a name="ResultSink"></a>
+## type ResultSink
+
+ResultSink is the minimal result\-lane surface ShellJob needs. \*Store cannot implement it directly because its existing Get\(id\) \(JobConfig, bool\) method collides with Get\(handle\) \(JobExecutionResult, bool\); resultStore adapts it without overloading that method.
+
+	type ResultSink interface {
+	    Put(result JobExecutionResult)
+	    Get(handle string) (JobExecutionResult, bool)
+	}
+
 <a name="ResumeJobParams"></a>
 ## type ResumeJobParams
 
@@ -1023,6 +1108,15 @@ NewScheduler creates a new Scheduler instance.
 
 Bus returns the message bus.
 
+<a name="Scheduler.CancelJob"></a>
+### func \(\*Scheduler\) CancelJob
+
+	func (s *Scheduler) CancelJob(handle, reason string) (status string, stopped bool, exitCode int, err error)
+
+CancelJob cancels the in\-flight execution for handle, waits a 2s grace for it to settle, then escalates to a process\-group kill. It is idempotent: an already\-settled handle returns "already\_done" as a successful no\-op.
+
+status is one of "cancelled"/"succeeded"/"failed" \(settled\), "already\_done" or "not\_found". stopped reports whether an in\-flight run was actually cancelled. exitCode is the settled exit code when available.
+
 <a name="Scheduler.ClaimCount"></a>
 ### func \(\*Scheduler\) ClaimCount
 
@@ -1044,6 +1138,13 @@ ClaimTick atomically claims a tick for a job before delivery. It returns false w
 
 GetJob returns information about a specific job.
 
+<a name="Scheduler.GetJobResult"></a>
+### func \(\*Scheduler\) GetJobResult
+
+	func (s *Scheduler) GetJobResult(handle string) (JobExecutionResult, bool)
+
+GetJobResult returns the latest settled result for a handle. Exported scheduler\-facing accessor used by job\_status \(and crash recovery\).
+
 <a name="Scheduler.GetLastWake"></a>
 ### func \(\*Scheduler\) GetLastWake
 
@@ -1057,6 +1158,13 @@ GetLastWake returns the persisted last wake time \(zero if never set\).
 	func (s *Scheduler) JobCount() int
 
 JobCount returns the number of scheduled jobs.
+
+<a name="Scheduler.JobResultOutput"></a>
+### func \(\*Scheduler\) JobResultOutput
+
+	func (s *Scheduler) JobResultOutput(handle string, maxBytes int) ([]byte, error)
+
+JobResultOutput reads at most maxBytes from a settled job's spill file. A non\-positive maxBytes uses DefaultJobResultOutputBytes. The returned slice is the bounded on\-demand window; the full output stays on disk until the lane entry is evicted.
 
 <a name="Scheduler.ListJobs"></a>
 ### func \(\*Scheduler\) ListJobs
@@ -1101,6 +1209,13 @@ PauseJob pauses a job \(removes from cron but keeps in store\).
 ProcessMissedTicks computes due ticks per job since lastWake and delivers them. With coalesce\_missed enabled \(default\) only the latest tick per job is delivered, once, with missed\_count metadata logged at info level; disabled, every due tick is delivered individually. lastWake is advanced to now after the sweep.
 
 The scheduler must be running. Call this once at startup \(Start does this automatically\) or after known downtime; cron fires continue to use the claim\-before\-deliver path, so double delivery cannot occur either way.
+
+<a name="Scheduler.PutResult"></a>
+### func \(\*Scheduler\) PutResult
+
+	func (s *Scheduler) PutResult(result JobExecutionResult)
+
+PutResult writes a settled result into the scheduler's result lane. Exported for crash\-recovery callers \(markOneShotFailed\) and CancelJob's synthetic cancelled result.
 
 <a name="Scheduler.RegisterTimingVia"></a>
 ### func \(\*Scheduler\) RegisterTimingVia
@@ -1246,6 +1361,16 @@ SecurityScanner is the interface for security scanning operations.
 	    ScanAll(ctx context.Context) ([]SecurityIssue, error)
 	}
 
+<a name="ShellCommandGuard"></a>
+## type ShellCommandGuard
+
+ShellCommandGuard is the two\-phase execution\-time fence for shell jobs. Phase 1 \(CheckCommand\) is risk/permission classification and runs before work\-dir resolution; phase 2 \(CheckCommandInDir\) is the fence/Tirith/ network\-class check and runs after resolution. Both must run BEFORE the command is spawned. The sibling security leaf implements this interface; this package deliberately does not reimplement risk logic.
+
+	type ShellCommandGuard interface {
+	    CheckCommand(command string) error
+	    CheckCommandInDir(ctx context.Context, command, workDir string) error
+	}
+
 <a name="ShellJob"></a>
 ## type ShellJob
 
@@ -1260,7 +1385,14 @@ ShellJob runs a shell command.
 
 	func NewShellJob(cfg JobConfig, msgBus *bus.MessageBus) (*ShellJob, error)
 
-NewShellJob creates a new shell job.
+NewShellJob creates a new shell job. The bus\-only form leaves the guard and result sink unset; use NewShellJobWithDeps to wire them.
+
+<a name="NewShellJobWithDeps"></a>
+### func NewShellJobWithDeps
+
+	func NewShellJobWithDeps(cfg JobConfig, deps *JobDependencies) (*ShellJob, error)
+
+NewShellJobWithDeps is NewShellJob with the execution\-time guard and result sink wired from JobDependencies.
 
 <a name="ShellJob.Execute"></a>
 ### func \(\*ShellJob\) Execute
@@ -1269,16 +1401,7 @@ NewShellJob creates a new shell job.
 
 Execute runs the shell command.
 
-SECURITY NOTE: The fence check for the working directory and command arguments happens at job CREATION time \(in tool\_schedule\_create.go\). There is a TOCTOU \(time\-of\-check\-time\-of\-use\) window between creation and execution where:
-
-1. The working directory could be modified
-2. Files referenced could be replaced with symlinks to sensitive locations
-
-For high\-security deployments, consider:
-
-- Storing resolved realpath of workDir at creation and verifying at execution
-- Re\-validating fence.CheckCommand\(\) at execution time \(requires injecting FenceChecker into ShellJob via NewShellJob\)
-- Using openat2\(\) with RESOLVE\_BENEATH for path operations
+SECURITY NOTE: execution\-time guarding is implemented here via the optional ShellCommandGuard \(both phases run BEFORE the command is spawned\). The creation\-time fence check lives in tool\_schedule\_create.go; there is a TOCTOU window between creation and execution where the working directory or referenced files could change. The daemon wires the guard through JobDependencies so every scheduler\-fired shell job is re\-checked at execution time. Standalone construction \(tests, tooling\) leaves it nil and skips the check, preserving the legacy behavior.
 
 <a name="ShellJobConfig"></a>
 ## type ShellJobConfig
@@ -1292,6 +1415,18 @@ ShellJobConfig holds configuration for shell jobs.
 	    Env        map[string]string `json:"env,omitempty"`
 	    Timeout    time.Duration     `json:"timeout,omitempty"`
 	    CaptureOut bool              `json:"capture_output"`
+	    // GuardCommand is the command string checked by the execution-time
+	    // guard. When set, it MUST be the full shell source that command/args
+	    // will execute (job_start sets it to the user command when command is
+	    // /bin/sh and args are ["-c", <user command>]). Empty falls back to
+	    // Command for legacy shell jobs.
+	    //
+	    // TRUST BOUNDARY: GuardCommand is legacy persistence data, never
+	    // trusted over what actually executes. newShellJob derives the guard
+	    // source from command/args for the /bin/sh -c X wrapper shape and
+	    // ignores a mismatched field (warn-logged), so a persisted row cannot
+	    // present "echo harmless" to the guard while "evil" executes.
+	    GuardCommand string `json:"guard_command,omitempty"`
 	}
 
 <a name="Store"></a>
@@ -1352,6 +1487,13 @@ FilePath returns the path to the jobs file.
 
 Get retrieves a job configuration by ID.
 
+<a name="Store.GetResult"></a>
+### func \(\*Store\) GetResult
+
+	func (s *Store) GetResult(handle string) (JobExecutionResult, bool)
+
+GetResult returns the latest settled result for a handle.
+
 <a name="Store.Import"></a>
 ### func \(\*Store\) Import
 
@@ -1372,6 +1514,13 @@ List returns all job configurations.
 	func (s *Store) Load() ([]JobConfig, error)
 
 Load reads job configurations from the persistent store.
+
+<a name="Store.PutResult"></a>
+### func \(\*Store\) PutResult
+
+	func (s *Store) PutResult(result JobExecutionResult)
+
+PutResult appends or replaces a settled result and persists the lane. When an entry is replaced or evicted past the FIFO cap its spill file is deleted best\-effort AFTER the mutex is released \(no I/O under lock\).
 
 <a name="Store.Remove"></a>
 ### func \(\*Store\) Remove
@@ -1414,9 +1563,10 @@ UpdateLastRun updates the last run time for a job.
 StoreData represents the persisted job data structure.
 
 	type StoreData struct {
-	    Version   int         `json:"version"`
-	    UpdatedAt time.Time   `json:"updated_at"`
-	    Jobs      []JobConfig `json:"jobs"`
+	    Version   int                  `json:"version"`
+	    UpdatedAt time.Time            `json:"updated_at"`
+	    Jobs      []JobConfig          `json:"jobs"`
+	    Results   []JobExecutionResult `json:"results,omitempty"`
 	}
 
 <a name="TimingKind"></a>

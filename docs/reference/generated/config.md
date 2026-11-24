@@ -47,6 +47,7 @@ Package config provides configuration loading and validation for meept.
 - [func NormalizeEvolverDefaults\(e \*SkillsEvolverConfig\) error](<#NormalizeEvolverDefaults>)
 - [func NormalizeFailurePolicyDefaults\(f \*FailurePolicyConfig\)](<#NormalizeFailurePolicyDefaults>)
 - [func NormalizeLedgerDefaults\(c \*LedgerConfig\)](<#NormalizeLedgerDefaults>)
+- [func NormalizeMCPDefaults\(c \*MCPConfig\)](<#NormalizeMCPDefaults>)
 - [func NormalizeMemoryTiersDefaults\(mt \*MemoryTiersConfig\)](<#NormalizeMemoryTiersDefaults>)
 - [func NormalizeOTLPMetricsDefaults\(c \*OTLPMetricsConfig\)](<#NormalizeOTLPMetricsDefaults>)
 - [func NormalizeOTLPTracesDefaults\(c \*OTLPTracesConfig\)](<#NormalizeOTLPTracesDefaults>)
@@ -57,6 +58,7 @@ Package config provides configuration loading and validation for meept.
 - [func NormalizeTierPolicyDefaults\(tp \*TierPolicyConfig\)](<#NormalizeTierPolicyDefaults>)
 - [func NormalizeUnapprovedCallerAllowedTools\(v \*VoiceConfig\)](<#NormalizeUnapprovedCallerAllowedTools>)
 - [func NormalizeVoiceAcousticDefaults\(v \*VoiceConfig\)](<#NormalizeVoiceAcousticDefaults>)
+- [func NormalizeVoiceRumbleDefaults\(r \*VoiceRumbleRuntimeConfig\)](<#NormalizeVoiceRumbleDefaults>)
 - [func ParseLogLevel\(level string\) slog.Level](<#ParseLogLevel>)
 - [func ParseLogLevelValue\(level string\) \(slog.Level, bool\)](<#ParseLogLevelValue>)
 - [func ReadMainConfig\(\) \(string, bool, error\)](<#ReadMainConfig>)
@@ -230,6 +232,8 @@ Package config provides configuration loading and validation for meept.
 - [type LedgerConfig](<#LedgerConfig>)
 - [type LocalConfig](<#LocalConfig>)
 - [type MCPConfig](<#MCPConfig>)
+  - [func \(c \*MCPConfig\) ArmCheckUpdatesSentinel\(\)](<#MCPConfig.ArmCheckUpdatesSentinel>)
+  - [func \(c \*MCPConfig\) UnmarshalJSON\(data \[\]byte\) error](<#MCPConfig.UnmarshalJSON>)
 - [type MCPServersConfig](<#MCPServersConfig>)
   - [func LoadMCPConfig\(path string\) \(\*MCPServersConfig, error\)](<#LoadMCPConfig>)
   - [func LoadMCPConfigDefault\(\) \(\*MCPServersConfig, error\)](<#LoadMCPConfigDefault>)
@@ -288,6 +292,7 @@ Package config provides configuration loading and validation for meept.
 - [type PiperTTSConfig](<#PiperTTSConfig>)
 - [type PlansApprovalConfig](<#PlansApprovalConfig>)
 - [type PlansConfig](<#PlansConfig>)
+  - [func \(c \*PlansConfig\) ArmRequireApprovalSentinel\(\)](<#PlansConfig.ArmRequireApprovalSentinel>)
   - [func \(c \*PlansConfig\) Validate\(\) error](<#PlansConfig.Validate>)
 - [type PlansConfirmationConfig](<#PlansConfirmationConfig>)
 - [type PlansStorageConfig](<#PlansStorageConfig>)
@@ -331,6 +336,7 @@ Package config provides configuration loading and validation for meept.
 - [type SandboxConfig](<#SandboxConfig>)
 - [type SchedulerConfig](<#SchedulerConfig>)
   - [func \(c SchedulerConfig\) EffectiveOneShotWindow\(\) time.Duration](<#SchedulerConfig.EffectiveOneShotWindow>)
+- [type SeatbeltRuntimeConfig](<#SeatbeltRuntimeConfig>)
 - [type SecretSources](<#SecretSources>)
 - [type SecretsConfig](<#SecretsConfig>)
 - [type SecretsProxyConfig](<#SecretsProxyConfig>)
@@ -389,6 +395,9 @@ Package config provides configuration loading and validation for meept.
 - [type VectorHybridConfig](<#VectorHybridConfig>)
 - [type VerificationDefaults](<#VerificationDefaults>)
 - [type VoiceConfig](<#VoiceConfig>)
+- [type VoiceRumbleRuntimeConfig](<#VoiceRumbleRuntimeConfig>)
+  - [func DefaultVoiceRumbleRuntimeConfig\(\) VoiceRumbleRuntimeConfig](<#DefaultVoiceRumbleRuntimeConfig>)
+  - [func \(r VoiceRumbleRuntimeConfig\) BaseURL\(\) string](<#VoiceRumbleRuntimeConfig.BaseURL>)
 - [type WatchdogConfig](<#WatchdogConfig>)
 - [type WebConfig](<#WebConfig>)
 - [type WhisperConfig](<#WhisperConfig>)
@@ -521,6 +530,16 @@ Package config provides configuration loading and validation for meept.
 	    DefaultCfgRepeatErrorLimit = 3
 	)
 
+<a name="RumbleGPUMemoryUtilizationDefault"></a>Rumble GPU\-fraction safety bounds \(the documented coexistence range in the VoiceRumbleRuntimeConfig comment\): the sidecar shares one RTX 3060 with qwen3\-tts, so vLLM's 0.92 default is unsafe. Shared by the config load\-boundary normalizer and the daemon spawn renderer so the clamp has ONE source of truth \(bughunt 2026\-11\-19 M18/H1\).
+
+	const (
+	    // RumbleGPUMemoryUtilizationDefault is the frozen safe fraction.
+	    RumbleGPUMemoryUtilizationDefault = 0.20
+	    // RumbleGPUMemoryUtilizationMax is the top of the safe range; values
+	    // above it clamp down here, never render verbatim into spawn args.
+	    RumbleGPUMemoryUtilizationMax = 0.25
+	)
+
 <a name="AgentIDExplore"></a>AgentIDExplore is the read\-only codebase search specialist \(config/agents/explore, discovered via AGENT.md\).
 
 	const AgentIDExplore = "explore"
@@ -566,6 +585,10 @@ Package config provides configuration loading and validation for meept.
 <a name="EnvScriptName"></a>EnvScriptName is the literal filename of the meept\-home env resolver script \(see internal/llm/envscript.go\). It is defined here too because the config sync exclusion guard needs the same name and internal/config cannot import internal/llm.
 
 	const EnvScriptName = "env"
+
+<a name="RumbleLoopbackAddr"></a>RumbleLoopbackAddr is the frozen loopback host:port of the legacy Rumble STT server. ONE source of truth for the default endpoint key and the BaseURL fallback below \(the former daemon\-side copy of these defaults was deleted as dead code when leaf 02 T2 was superseded\).
+
+	const RumbleLoopbackAddr = "127.0.0.1:8091"
 
 ## Variables
 
@@ -785,6 +808,13 @@ NormalizeFailurePolicyDefaults clamps invalid failure\_policy values to defaults
 
 NormalizeLedgerDefaults clamps invalid \[ledger\] values to defaults at the load boundary so every consumer sees final values: a non\-positive interval\_hours falls back to DefaultLedgerIntervalHours. AutoRepair's zero value \(false\) is the shipped default — no clamping.
 
+<a name="NormalizeMCPDefaults"></a>
+## func NormalizeMCPDefaults
+
+	func NormalizeMCPDefaults(c *MCPConfig)
+
+NormalizeMCPDefaults restores the default\-on version check for configs that omit check\_mcp\_updates \(absent bool decodes as false\) and clamps a non\-positive interval to 24h. An explicit false \(sentinel armed\) is preserved. Safe to call on a zero\-value MCPConfig.
+
 <a name="NormalizeMemoryTiersDefaults"></a>
 ## func NormalizeMemoryTiersDefaults
 
@@ -812,6 +842,10 @@ NormalizeOTLPTracesDefaults clamps invalid metrics.otlp\_traces values to defaul
 	func NormalizePlansDefaults(c *PlansConfig)
 
 NormalizePlansDefaults clamps the tiered\-iteration planning knobs to their defaults \(leaf 02 contract: a non\-positive round cap means "default 2", never "unbounded" or "zero rounds"\). Applied at the load boundary so every consumer sees normalized values.
+
+Leaf 10 \(20261121 interactive\-usability, master C\-6, a ratified product decision\): plans.approval.require\_approval defaults TRUE. The sentinel \(armed by the loader only when the config file explicitly named the key\) separates "absent" from "false": absent/constructed configs get the human gate; an explicit false still wins. The evolver sink keeps its own unconditional override \(components\_wiki.go\) — machine\-origin plans always require approval regardless of this knob.
+
+StalledExecutingSweep is deliberately NOT normalized: DefaultConfig carries the 6h default and an explicit 0 is the documented off switch.
 
 <a name="NormalizeQuotaRetryDefaults"></a>
 ## func NormalizeQuotaRetryDefaults
@@ -854,6 +888,13 @@ NormalizeUnapprovedCallerAllowedTools restores the default list when the loaded 
 	func NormalizeVoiceAcousticDefaults(v *VoiceConfig)
 
 NormalizeVoiceAcousticDefaults clamps invalid \[voice\] acoustic\-gate values at the load boundary so every consumer sees final values \(voice\-peragent leaf 01\): negative min\_turn\_words / min\_rms / fragment\_decay\_s / reply\_exempt\_s clamp to 0 \(their disabled values\), globally and on every employee\_leg row pointer. Zero values are legitimate defaults — nothing here INJECTS defaults \(opt\-in rule\). exempt\_phrases keeps its DefaultConfig value when the file omits the key \(load starts from DefaultConfig\); an explicitly null list lands nil and the daemon\-side resolution falls back to DefaultVoiceExemptPhrases\(\). Idempotent on valid values.
+
+<a name="NormalizeVoiceRumbleDefaults"></a>
+## func NormalizeVoiceRumbleDefaults
+
+	func NormalizeVoiceRumbleDefaults(r *VoiceRumbleRuntimeConfig)
+
+NormalizeVoiceRumbleDefaults enforces the documented GPU\-fraction safe range on \[voice.rumble\_runtime\] at the load boundary \(bughunt M18/H1: a typo like 0.92 \(vLLM's unsafe default\) would starve qwen3\-tts on the shared GPU when an operator reuses these knobs for a manual vLLM run\). Clamp posture \(NormalizeVoiceAcousticDefaults style\): \> max clamps to 0.25; non\-positive, NaN, or Inf restores the frozen 0.20 default. A zero\-value block \(the file omits rumble\_runtime entirely\) keeps the frozen defaults untouched. Idempotent on valid values. The daemon never spawns from this block \(leaf 02 T2 SUPERSEDED\); its live reader is BaseURL\(\), which the keys\-frame stt\_base\_url derivation consumes.
 
 <a name="ParseLogLevel"></a>
 ## func ParseLogLevel
@@ -941,7 +982,12 @@ ACPAgentEntry is one agent in the ACP catalog.
 	    Env         map[string]string `json:"env,omitempty"`
 	    Cwd         string            `json:"cwd,omitempty"`
 	    DefaultMode string            `json:"default_mode,omitempty"`
-	    Enabled     bool              `json:"enabled"`
+	    // PermissionMode overrides the global [acp] permission_mode for this
+	    // catalog connection. One of "permissive", "deny", "decision", "human".
+	    // Empty = inherit the global mode. Configured by the operator in
+	    // acp_agents.json5, never by the agent itself.
+	    PermissionMode string `json:"permission_mode,omitempty"`
+	    Enabled        bool   `json:"enabled"`
 	}
 
 <a name="ACPAgentsConfig"></a>
@@ -3252,14 +3298,15 @@ JevGateConfig configures the \[security.jev\_command\_gate\] section \(graded co
 <a name="KanbanConfig"></a>
 ## type KanbanConfig
 
-KanbanConfig carries the \[kanban\] board\-projection subsystem block \(plans/kanban\-board master.md contract C9\). Every surface is opt\-in \(docs/agents/opt\-in\-defaults.md\): with Enabled=false the daemon opens no kanban store, starts no projector, and registers no kanban.\* RPC — the boot path stays byte\-identical to a config without the block.
+KanbanConfig carries the \[kanban\] board\-projection subsystem block \(plans/kanban\-board master.md contract C9\). The subsystem is DEFAULT\-ON opt\-out \(DefaultConfig: Enabled=true, SidecarEnabled=true\): setting Enabled=false is the opt\-out — the daemon opens no kanban store, starts no projector, and registers no kanban.\* RPC, and the boot path stays byte\-identical to a config without the block.
 
 	type KanbanConfig struct {
 	    // Enabled turns on the kanban subsystem: store, projector, RPC
-	    // (default: false, opt-in).
+	    // (default: true, opt-out — set false for the byte-identical
+	    // pre-kanban boot).
 	    Enabled bool `json:"enabled" toml:"enabled"`
 	    // SidecarEnabled turns on the daemon-spawned meept-kanban gateway
-	    // (default: false; requires Enabled).
+	    // (default: true, opt-out; requires Enabled).
 	    SidecarEnabled bool `json:"sidecar_enabled" toml:"sidecar_enabled"`
 	    // SidecarBind is the sidecar's HTTP listen address (default
 	    // "127.0.0.1:8790"). A NON-loopback value is the explicit operator
@@ -3590,7 +3637,36 @@ MCPConfig holds MCP settings.
 	type MCPConfig struct {
 	    Enabled    bool   `json:"enabled"     toml:"enabled"`
 	    ConfigFile string `json:"config_file" toml:"config_file"`
+	    // CheckUpdates gates the default-on version check against npm/PyPI
+	    // (issue #167). Once at boot and every UpdateCheckIntervalHours the
+	    // daemon reads every enabled server's pinned npx/uvx command, queries
+	    // the matching registry, and notifies via SecurityNotify when the
+	    // pinned version is older than the published latest. This is
+	    // notification-only: it NEVER rewrites mcp_servers.json5 or upgrades a
+	    // pin. Defaults true; an explicit `false` in the config file opts out.
+	    // Absent-key defaulting is handled at the load boundary by
+	    // NormalizeMCPDefaults, armed with the presence sentinel below.
+	    CheckUpdates bool `json:"check_mcp_updates" toml:"check_mcp_updates"`
+	    // UpdateCheckIntervalHours is the interval between registry checks
+	    // (issue #167). Non-positive values fall back to 24 at the load
+	    // boundary; zero is not a valid "disable" (use CheckUpdates=false).
+	    UpdateCheckIntervalHours int `json:"mcp_update_check_interval_hours" toml:"mcp_update_check_interval_hours"`
+	    // contains filtered or unexported fields
 	}
+
+<a name="MCPConfig.ArmCheckUpdatesSentinel"></a>
+### func \(\*MCPConfig\) ArmCheckUpdatesSentinel
+
+	func (c *MCPConfig) ArmCheckUpdatesSentinel()
+
+ArmCheckUpdatesSentinel marks an MCPConfig as carrying an explicit check\_mcp\_updates value. Exposed for loader/TOML paths that need to signal presence separately from the JSON5 unmarshaler above.
+
+<a name="MCPConfig.UnmarshalJSON"></a>
+### func \(\*MCPConfig\) UnmarshalJSON
+
+	func (c *MCPConfig) UnmarshalJSON(data []byte) error
+
+UnmarshalJSON implements default\-on semantics for check\_mcp\_updates. A bare bool cannot distinguish "absent" from "explicit false", so the decoded document is probed with a \*bool: a missing key keeps the true default, an explicit \`false\` is honored, and a non\-positive interval falls back to 24h. This keeps installed homes that omit the whole MCP block \(or just the new key\) on the same defaults as DefaultConfig\(\) without requiring changes to the shared loader \(which is owned by another workstream\). Feature code must not call this directly.
 
 <a name="MCPServersConfig"></a>
 ## type MCPServersConfig
@@ -4037,6 +4113,24 @@ Ops note \(documented, not coded\): application\-to\-person traffic from local n
 	    // behavior stays byte-identical. An explicit false in the doc is
 	    // honored (never force-defaulted true at the load boundary).
 	    InboundEnabled bool `json:"inbound_enabled" toml:"inbound_enabled"`
+	    // AllowedNumbers is the outbound SMS recipient allowlist (E.164).
+	    // EMPTY/NIL = all recipients (backward compatible with pre-#165
+	    // behavior, where any valid E.164 number was accepted); a non-empty
+	    // list permits ONLY exact E.164 matches. The send path
+	    // (telnyx.SendSMS2) refuses an out-of-list recipient before any HTTP
+	    // POST with ErrRecipientNotAllowed.
+	    AllowedNumbers []string `json:"allowed_numbers" toml:"allowed_numbers"`
+	    // MaxMessagesPerCall bounds how many messages ONE SendSMS2 call may
+	    // dispatch. Unit: MESSAGES PER SEND CALL. 0 = unlimited (backward
+	    // compatible). A positive value is enforced before the HTTP POST;
+	    // exceeding it returns ErrSendCapExceeded. Slice 1-2 of issue #165.
+	    MaxMessagesPerCall int `json:"max_messages_per_call" toml:"max_messages_per_call"`
+	    // MaxMessagesPerDay bounds how many messages the client may dispatch
+	    // per UTC day. Unit: MESSAGES PER UTC DAY (resets at UTC midnight).
+	    // 0 = unlimited (backward compatible). A positive value is enforced
+	    // before the HTTP POST; exceeding it returns ErrSendCapExceeded.
+	    // Slice 1-2 of issue #165.
+	    MaxMessagesPerDay int `json:"max_messages_per_day" toml:"max_messages_per_day"`
 	}
 
 <a name="MetricsConfig"></a>
@@ -4241,6 +4335,14 @@ NotificationsConfig holds configuration for desktop notifications.
 	    BotRateLimitPerHour int               `json:"bot_rate_limit_per_hour,omitempty" toml:"bot_rate_limit_per_hour"`
 	    BotTelegramChatIDs  []string          `json:"bot_telegram_chat_ids,omitempty"   toml:"bot_telegram_chat_ids"`
 	    BotTemplates        map[string]string `json:"bot_templates,omitempty"           toml:"bot_templates"`
+	
+	    // SecurityChannel selects the delivery channel for MCP security alerts
+	    // (issues #166/#167): "" (default) emits nothing and preserves the
+	    // pre-feature behavior byte-identically; "bot" routes through the
+	    // NotificationBot's TriggerSecurityAlert (Telegram); "push" publishes
+	    // a security.alert bus event that QuotaNotifier delivers via PushService.
+	    // Unknown values are treated as "" (off).
+	    SecurityChannel string `json:"security_channel,omitempty" toml:"security_channel"`
 	}
 
 <a name="OAuthConfig"></a>
@@ -4325,6 +4427,18 @@ OrchestratorConfig holds hierarchical orchestrator settings.
 	    InterviewAmbiguityThreshold float64 `json:"interview_ambiguity_threshold" toml:"interview_ambiguity_threshold"` // planner: conducts interview for plan-mode when >= this
 	    MaxStepsPerPhase            int     `json:"max_steps_per_phase"           toml:"max_steps_per_phase"`           // Thread C+F: per-phase step cap
 	    MaxPhases                   int     `json:"max_phases"                    toml:"max_phases"`                    // Thread C+F: phase count soft cap
+	    // MaxReplanExtensions bounds the Ralph loop's progress-based replan
+	    // budget extensions per task (F-NEW-10 replan storm): total replans
+	    // stay <= max_iterations + max_replan_extensions. Default 2; 0
+	    // disables extensions (the hard cap always sticks).
+	    MaxReplanExtensions int `json:"max_replan_extensions" toml:"max_replan_extensions"`
+	    // StepRetryInterval bounds the retry sweep for semaphore-blocked
+	    // ready steps (usability remediation 02-routing/04, W12/F-ORCH-28),
+	    // in seconds: a wave that blocks with no in-flight steps never
+	    // receives a completion event, so without a bounded timer those
+	    // steps hang forever. Default 15; 0 disables the ticker (legacy
+	    // event-driven-only reschedule).
+	    StepRetryInterval int `json:"step_retry_interval" toml:"step_retry_interval"`
 	    // ClassifierFailFast disables classifier alias rotation: when true,
 	    // the intent analyzer fails the turn with the primary classifier's
 	    // error instead of rotating to weaker alias members. Default false —
@@ -4343,6 +4457,22 @@ OrchestratorConfig holds hierarchical orchestrator settings.
 	    // band). Cloud-only classifier chains (no local runtime) never trip
 	    // the gate regardless of this setting.
 	    ClassifierBootFailFast bool `json:"classifier_boot_fail_fast" toml:"classifier_boot_fail_fast"`
+	    // TrivialFastLane (04-clutter/02, F-ORCH-5): routes simple
+	    // interrogatives/arithmetic ("What is 2+2? Answer briefly.") straight
+	    // to the chat lane before the LLM classifier verdict is consumed --
+	    // no task row, one brief reply. The lane is a CLASSIFICATION
+	    // shortcut inside the same classify -> RouteToAgent chain: it never
+	    // bypasses sanitization, session binding, or the security fence.
+	    // Artifact verbs (create/write/fix/plan/...) still task-route.
+	    // Default true (Q2 ratified at dispatch); false = byte-identical
+	    // legacy classification.
+	    TrivialFastLane bool `json:"trivial_fast_lane" toml:"trivial_fast_lane"`
+	    // TaskApprovalStepThreshold (06-planning/03, master Q1): the
+	    // minimum number of planned steps that triggers the planner's
+	    // approval gate. Default 5 (the historical default, preserved
+	    // THROUGH config); 0 DISABLES the gate -- the planner must never
+	    // resurrect a configured 0 into the default.
+	    TaskApprovalStepThreshold int `json:"task_approval_step_threshold" toml:"task_approval_step_threshold"`
 	    // Prefilter configures the Stage-0 embedding prefilter
 	    // (classifier-observability follow-up): embed the input, cosine-match
 	    // against labeled intent centroids, and route directly when confident
@@ -4669,7 +4799,25 @@ PlansConfig holds configuration for the plan system.
 	    // ON per the 2026-11-02 operator decision; an explicit true falls
 	    // interview questions back to plain strings.
 	    InterviewOptionsDisabled bool `json:"interview_options_disabled" toml:"interview_options_disabled"`
+	
+	    // StalledExecutingSweep bounds how long an executing plan may sit with
+	    // terminal-or-missing child tasks before the stalled-execution sweep
+	    // fails it and publishes plan.failed (leaf 10, 20261121
+	    // interactive-usability). Default 6h via DefaultConfig; 0 disables the
+	    // sweep. NormalizePlansDefaults never overwrites this field: an
+	    // explicit zero is a deliberate off switch, so only DefaultConfig
+	    // carries the 6h default and the daemon wiring passes the loaded value
+	    // straight through.
+	    StalledExecutingSweep time.Duration `json:"stalled_executing_sweep" toml:"stalled_executing_sweep"`
+	    // contains filtered or unexported fields
 	}
+
+<a name="PlansConfig.ArmRequireApprovalSentinel"></a>
+### func \(\*PlansConfig\) ArmRequireApprovalSentinel
+
+	func (c *PlansConfig) ArmRequireApprovalSentinel()
+
+ArmRequireApprovalSentinel marks a PlansConfig as carrying an EXPLICIT approval.require\_approval value decoded from a config file. Called by the config loader's post\-decode hook; never by feature code.
 
 <a name="PlansConfig.Validate"></a>
 ### func \(\*PlansConfig\) Validate
@@ -5100,6 +5248,11 @@ RuntimeConfig holds configuration for execution backends \(local, Docker\).
 	    // Bwrap holds bubblewrap backend settings used when the sandbox
 	    // resolver selects the bwrap backend.
 	    Bwrap BwrapRuntimeConfig `json:"bwrap" toml:"bwrap"`
+	    // Seatbelt holds the macOS confinement policy applied to local-backend
+	    // children (deny-read roots, write allow-list, process-info/exec
+	    // denies). Enabled defaults false: the legacy posture is network-class
+	    // confinement only, byte-identical to the pre-seatbelt behavior.
+	    Seatbelt SeatbeltRuntimeConfig `json:"seatbelt" toml:"seatbelt"`
 	}
 
 <a name="SSRFConfig"></a>
@@ -5195,6 +5348,27 @@ SchedulerConfig holds scheduler settings.
 	func (c SchedulerConfig) EffectiveOneShotWindow() time.Duration
 
 EffectiveOneShotWindow resolves the one\-shot horizon, falling back to DefaultOneShotWindow \(2h\) when the knob is unset, unparseable, or non\-positive — the zero\-value default per the \[scheduler\] knob contract.
+
+<a name="SeatbeltRuntimeConfig"></a>
+## type SeatbeltRuntimeConfig
+
+SeatbeltRuntimeConfig is the \[runtime.seatbelt\] block. Field\-mirrors runtime.SeatbeltConfig \(same convention as EnvPolicyConfig above; internal/config does not import internal/runtime\). Paths must be absolute; a relative path is refused at wiring time.
+
+	type SeatbeltRuntimeConfig struct {
+	    // Enabled activates fs/process confinement in addition to the network
+	    // class. False (default) ignores every other field.
+	    Enabled bool `json:"enabled" toml:"enabled"`
+	    // DenyRead lists absolute path subtrees the child cannot read.
+	    DenyRead []string `json:"deny_read" toml:"deny_read"`
+	    // AllowWrite, when non-empty, confines writes to these subtrees.
+	    AllowWrite []string `json:"allow_write" toml:"allow_write"`
+	    // DenyWrite carves write-denied holes inside an allowed root.
+	    DenyWrite []string `json:"deny_write" toml:"deny_write"`
+	    // BlockProcessInfo denies ps-style process inspection.
+	    BlockProcessInfo bool `json:"block_process_info" toml:"block_process_info"`
+	    // DenyExec lists binaries the child may not exec (e.g. /usr/bin/sudo).
+	    DenyExec []string `json:"deny_exec" toml:"deny_exec"`
+	}
 
 <a name="SecretSources"></a>
 ## type SecretSources
@@ -6287,6 +6461,34 @@ VerificationDefaults holds daemon\-level verification defaults.
 	    OnnxRuntimeLib  string `json:"onnx_runtime_lib"       toml:"onnx_runtime_lib"`
 	    STTProvider     string `json:"stt_provider"           toml:"stt_provider"`
 	    TTSProvider     string `json:"tts_provider"           toml:"tts_provider"`
+	
+	    // ---- rumble streaming/kwargs selectors (plan 20261119, C6) ----
+	    // All ADDITIVE/OPTIONAL: a zero value (empty string / nil / 0) is
+	    // byte-identical to legacy. These cross the daemon->child C1 keys
+	    // line (internal/daemon/voice_keys.go) and configure the Rumble chat
+	    // template plus the pseudo-stream partial decorator child-side.
+	    // Absent on an old daemon line they decode as zero/nil.
+	    // ChatTemplateLanguage is a language NAME ("English"), not a BCP-47
+	    // code; it is sent verbatim as chat_template_kwargs.language.
+	    ChatTemplateLanguage string `json:"chat_template_language"`
+	    // The three bools are pointers so nil means "omit this key" and the
+	    // server default applies (digits true, filler false, verbatim true).
+	    ChatTemplateDigits   *bool `json:"chat_template_digits,omitempty"`
+	    ChatTemplateFiller   *bool `json:"chat_template_filler,omitempty"`
+	    ChatTemplateVerbatim *bool `json:"chat_template_verbatim,omitempty"`
+	    // STTPartialMs is the client-side pseudo-stream proxy interval in ms.
+	    // 0 (default) returns the base provider unwrapped: native partial
+	    // vendors (rumble, deepgram) stream on their own, and batch vendors
+	    // stay byte-identical. A positive value wraps a BATCH vendor (e.g.
+	    // whisper) in PseudoStreamSTT, which snapshots a growing PCM buffer
+	    // into successive full utterances and emits Final:false partials plus
+	    // one Final:true. FUTURE-USE KNOB: those partials are client-side
+	    // snapshots, not server incremental input; the proxy re-recognizes a
+	    // growing buffer (O(n^2)) and does not reduce time-to-first-word.
+	    // It is ignored for native partial vendors. The default config
+	    // template leaves it commented out with this rationale.
+	    STTPartialMs int `json:"stt_partial_ms"`
+	
 	    // GreetingLine is the fact-free line spoken once on call connect.
 	    // Empty falls back to Filler[0] (the greeting is filler-class; an
 	    // empty filler list plus empty greeting disables the greeting).
@@ -6443,18 +6645,25 @@ VerificationDefaults holds daemon\-level verification defaults.
 	    // dead air => nudge at silence_prompt_seconds (S), hangup at S+H.
 	    // Default 45 with S default 45 => nudge@45, hangup@90, exactly the
 	    // legacy double-window endpoints. 0/negative reuses S (legacy shape).
-	    SilenceHangupAfterSeconds int    `json:"silence_hangup_after_seconds" toml:"silence_hangup_after_seconds"`
-	    TurnTimeoutSeconds        int    `json:"turn_timeout_seconds"   toml:"turn_timeout_seconds"`
-	    MaxConcurrentCalls        int    `json:"max_concurrent_calls"   toml:"max_concurrent_calls"`
-	    ReorderWindowFrames       int    `json:"reorder_window_frames"  toml:"reorder_window_frames"`
-	    ReorderGapMs              int    `json:"reorder_gap_ms"         toml:"reorder_gap_ms"`
-	    TelnyxPublicKey           string `json:"telnyx_public_key"      toml:"telnyx_public_key"`
-	    ChildBinaryPath           string `json:"child_binary_path"      toml:"child_binary_path"`
-	    LoopbackPlainAddr         string `json:"loopback_plain_addr"    toml:"loopback_plain_addr"`
-	    DefaultEmployee           string `json:"default_employee"       toml:"default_employee"`
-	    DefaultLeg                string `json:"default_leg"            toml:"default_leg"`
-	    TTSModel                  string `json:"tts_model"             toml:"tts_model"`
-	    TTSVoice                  string `json:"tts_voice"             toml:"tts_voice"`
+	    SilenceHangupAfterSeconds int `json:"silence_hangup_after_seconds" toml:"silence_hangup_after_seconds"`
+	    TurnTimeoutSeconds        int `json:"turn_timeout_seconds"   toml:"turn_timeout_seconds"`
+	    MaxConcurrentCalls        int `json:"max_concurrent_calls"   toml:"max_concurrent_calls"`
+	    // DailyDialCap bounds OUTBOUND DIALS PER LOCAL CALENDAR DAY (the
+	    // operator's local day, like the dial counter's day key). Unit: DIALS
+	    // PER LOCAL DAY — NOT per hour, NOT per employee. 0 = unlimited
+	    // (backward compatible, the default). A positive value is enforced
+	    // BEFORE the Telnyx POST, the audit row and the effect reservation;
+	    // the counter is durable across a daemon restart. Issue #165 follow-up.
+	    DailyDialCap        int    `json:"daily_dial_cap"          toml:"daily_dial_cap"`
+	    ReorderWindowFrames int    `json:"reorder_window_frames"  toml:"reorder_window_frames"`
+	    ReorderGapMs        int    `json:"reorder_gap_ms"         toml:"reorder_gap_ms"`
+	    TelnyxPublicKey     string `json:"telnyx_public_key"      toml:"telnyx_public_key"`
+	    ChildBinaryPath     string `json:"child_binary_path"      toml:"child_binary_path"`
+	    LoopbackPlainAddr   string `json:"loopback_plain_addr"    toml:"loopback_plain_addr"`
+	    DefaultEmployee     string `json:"default_employee"       toml:"default_employee"`
+	    DefaultLeg          string `json:"default_leg"            toml:"default_leg"`
+	    TTSModel            string `json:"tts_model"             toml:"tts_model"`
+	    TTSVoice            string `json:"tts_voice"             toml:"tts_voice"`
 	    // TTSRefAudio (json tts_ref_audio) is the path to the CLONE
 	    // REFERENCE WAV the qwen3 custom voice is keyed on (plan
 	    // 20261113-filler-clips leaf 02). The OpenAI-compatible shim never
@@ -6470,6 +6679,13 @@ VerificationDefaults holds daemon\-level verification defaults.
 	    STTModel    string `json:"stt_model"             toml:"stt_model"`
 	    TTSBaseURL  string `json:"tts_base_url"          toml:"tts_base_url"`
 	    STTBaseURL  string `json:"stt_base_url"          toml:"stt_base_url"`
+	
+	    // RumbleRuntime carries the legacy Rumble server's coexistence knobs
+	    // and the source of the derived default stt_base_url (vendor "rumble"
+	    // only). The daemon never spawns from this block; an explicit
+	    // stt_base_url always wins. Zero values keep the frozen defaults.
+	    RumbleRuntime VoiceRumbleRuntimeConfig `json:"rumble_runtime" toml:"rumble_runtime"`
+	
 	    // ReaperIntervalS (leaf 02, C3): the dead-air reaper's sweep cadence.
 	    // 0 => default 30s (frozen from the uptractor source); NEGATIVE
 	    // disables the reaper entirely (opt-out without removing the key).
@@ -6502,7 +6718,57 @@ VerificationDefaults holds daemon\-level verification defaults.
 	    Local            LocalConfig         `json:"local"                  toml:"local"`
 	    EmployeeLeg      []EmployeeLegConfig `json:"employee_leg"   toml:"employee_leg"`
 	    Messaging        MessagingConfig     `json:"messaging"              toml:"messaging"`
+	    // ---- voice TTS/STT optimization knobs (20261118, contract C2) ----
+	    // All seven are ADDITIVE and OPT-IN: zero/empty (their DefaultConfig
+	    // values) reproduces the pre-change wire and behavior byte-identically.
+	    // They are carried over the C1 keys line as omitempty selectors so every
+	    // later branch consumes one seam.
+	    SmartTurnMode int `json:"smart_turn_mode" toml:"smart_turn_mode"` // 0 = current behavior; 1 = kill switch; 2 = consume end-of-turn verdict
+	    // WhisperServerAddr, when non-empty, selects a persistent whisper.cpp
+	    // server instead of the per-utterance exec path. Empty = legacy exec.
+	    WhisperServerAddr string `json:"whisper_server_addr" toml:"whisper_server_addr"`
+	    // DeepgramEndpointMs > 0 enables the authoritative speech_final
+	    // endpoint fast path; 0 keeps the legacy fixed-timer endpointing.
+	    DeepgramEndpointMs int `json:"deepgram_endpoint_ms" toml:"deepgram_endpoint_ms"`
+	    // RecognitionVocabulary primes critical entities on the STT request
+	    // (Deepgram keyterm params / Whisper -p prompt). Empty = byte-identical.
+	    RecognitionVocabulary []string `json:"recognition_vocabulary" toml:"recognition_vocabulary"`
+	    // Qwen3ChunkSize overrides the qwen3 pcm-stream chunk_size; 0 => 4.
+	    Qwen3ChunkSize int `json:"qwen3_chunk_size" toml:"qwen3_chunk_size"`
+	    // ClipPrewarmDelayMs defers a queued clip render by this many ms
+	    // after the played edge; 0 = render immediately (legacy).
+	    ClipPrewarmDelayMs int `json:"clip_prewarm_delay_ms" toml:"clip_prewarm_delay_ms"`
+	    // ContextWarmWindowMs overrides the partial-context-warm debounce
+	    // window; 0 = resolve from turn_confirm_ms (legacy).
+	    ContextWarmWindowMs int `json:"context_warm_window_ms" toml:"context_warm_window_ms"`
 	}
+
+<a name="VoiceRumbleRuntimeConfig"></a>
+## type VoiceRumbleRuntimeConfig
+
+VoiceRumbleRuntimeConfig is the \[voice.rumble\_runtime\] block: frozen coexistence knobs for a LEGACY, operator\-run vLLM Rumble server, plus the source of the derived default STT dial URL. The daemon NEVER spawns this sidecar: plan 20261118\-rumble\-stt\-provider leaf 02 T2 is SUPERSEDED by the native WS adapter \(plan 20261119\-rumble\-native\-streaming\) \- the live server is FastAPI \+ transformers, and vLLM cannot serve the native streaming route for this checkpoint. The GPU memory fraction stays EXPLICIT \(safe range 0.20\-0.25\) for operators who run vLLM manually beside qwen3\-tts on one RTX 3060; vLLM's 0.92 default is unsafe there. The block's live consumer is BaseURL\(\): when the resolved STT vendor is "rumble" and voice.stt\_base\_url is empty, the daemon keys frame derives the dial URL from EndpointKey \(internal/daemon/rumble\_wiring.go\).
+
+	type VoiceRumbleRuntimeConfig struct {
+	    GPUMemoryUtilization float64 `json:"gpu_memory_utilization" toml:"gpu_memory_utilization"`
+	    MaxModelLen          int     `json:"max_model_len"          toml:"max_model_len"`
+	    EndpointKey          string  `json:"endpoint_key"           toml:"endpoint_key"`
+	    HealthPath           string  `json:"health_path"            toml:"health_path"`
+	    AutoStopOnExit       bool    `json:"auto_stop_on_exit"      toml:"auto_stop_on_exit"`
+	}
+
+<a name="DefaultVoiceRumbleRuntimeConfig"></a>
+### func DefaultVoiceRumbleRuntimeConfig
+
+	func DefaultVoiceRumbleRuntimeConfig() VoiceRumbleRuntimeConfig
+
+DefaultVoiceRumbleRuntimeConfig returns the frozen safe coexistence defaults used by the commented \[voice.rumble\_runtime\] template block.
+
+<a name="VoiceRumbleRuntimeConfig.BaseURL"></a>
+### func \(VoiceRumbleRuntimeConfig\) BaseURL
+
+	func (r VoiceRumbleRuntimeConfig) BaseURL() string
+
+BaseURL returns the STT dial URL derived from this block: the address half of EndpointKey \("rumble:\<host\>:\<port\>"\) over http. A zero\-value or malformed block falls back to the frozen loopback default, so a config that omits rumble\_runtime entirely still derives a usable URL. This is the production reader of the block's endpoint identity; the daemon never spawns a process from it \(leaf 02 T2 SUPERSEDED, see the type comment\). An explicit voice.stt\_base\_url always wins over this value.
 
 <a name="WatchdogConfig"></a>
 ## type WatchdogConfig

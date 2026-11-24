@@ -48,6 +48,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
 - [func BuildModelsInUse\(agents \[\]AgentModelRef, slots ModelSlots, aliases map\[string\]ModelAliasEntry, disabled \[\]string\) map\[string\]struct\{\}](<#BuildModelsInUse>)
 - [func CatalogSnapshot\(\) map\[string\]\[\]ModelCatalogEntry](<#CatalogSnapshot>)
 - [func ClassificationUserGuidance\(err error\) string](<#ClassificationUserGuidance>)
+- [func ClassifyFailure\(providerID string, modelID string, poolID string, status int, bodyExcerpt string\) \(FailureCategory, FailureScope, string\)](<#ClassifyFailure>)
 - [func ClassifyPromptSections\(sections \[\]string\) \(static \[\]string, dynamic \[\]string\)](<#ClassifyPromptSections>)
 - [func ComputeEndpointKey\(runtime, baseURL string\) string](<#ComputeEndpointKey>)
 - [func ContainsSupportedRuntime\(runtimes \[\]string\) bool](<#ContainsSupportedRuntime>)
@@ -55,10 +56,13 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
 - [func CountToolDefinitionsTokens\(tools \[\]ToolDefinition, tokenizer Tokenizer\) int](<#CountToolDefinitionsTokens>)
 - [func DefaultBudgetTable\(\) map\[string\]int](<#DefaultBudgetTable>)
 - [func DefaultToolSpillRoot\(\) string](<#DefaultToolSpillRoot>)
+- [func DeriveDifficulty\(mode string, requiresPlanning bool, inputLen int\) int](<#DeriveDifficulty>)
 - [func EffectiveTraceID\(opts \[\]ChatOption\) string](<#EffectiveTraceID>)
 - [func EndpointKey\(cfg \*ModelConfig\) string](<#EndpointKey>)
 - [func EstimateChatTokens\(messages \[\]ChatMessage\) int](<#EstimateChatTokens>)
+- [func EstimateInputTokens\(messages \[\]ChatMessage, tools \[\]ToolDefinition\) int](<#EstimateInputTokens>)
 - [func EstimateTokenCountHeuristic\(content string\) int](<#EstimateTokenCountHeuristic>)
+- [func FailureCooldown\(cls FailureCategory\) time.Duration](<#FailureCooldown>)
 - [func FetchLMStudioContexts\(ctx context.Context, client \*http.Client, logger \*slog.Logger, baseURL, apiKey string\) \(map\[string\]int, error\)](<#FetchLMStudioContexts>)
 - [func FetchLocalModelsContexts\(ctx context.Context, client \*http.Client, logger \*slog.Logger, baseURL string, modelKeys \[\]string\) map\[string\]int](<#FetchLocalModelsContexts>)
 - [func FetchOllamaContexts\(ctx context.Context, client \*http.Client, logger \*slog.Logger, baseURL, apiKey string\) \(map\[string\]int, error\)](<#FetchOllamaContexts>)
@@ -69,6 +73,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
 - [func HasImageParts\(parts \[\]ContentPart\) bool](<#HasImageParts>)
 - [func HasUndescribedImages\(parts \[\]ContentPart\) bool](<#HasUndescribedImages>)
 - [func IsContextOverflowError\(err error\) bool](<#IsContextOverflowError>)
+- [func IsContextTooSmall\(err error\) bool](<#IsContextTooSmall>)
 - [func IsLoopbackBaseURL\(baseURL string\) bool](<#IsLoopbackBaseURL>)
 - [func IsNonRetryable\(err error\) bool](<#IsNonRetryable>)
 - [func IsQuotaResetError\(err error\) bool](<#IsQuotaResetError>)
@@ -83,11 +88,16 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
 - [func LogAliasAudit\(logger \*slog.Logger, findings \[\]AliasFinding\)](<#LogAliasAudit>)
 - [func NewMetricsStoreForPacing\(dbPath string\) \(\*metrics.Store, error\)](<#NewMetricsStoreForPacing>)
 - [func NoCacheOf\(opts \[\]ChatOption\) bool](<#NoCacheOf>)
+- [func OfferedToolNames\(tools \[\]ToolDefinition\) \[\]string](<#OfferedToolNames>)
 - [func ParseCommandScore\(answer string\) \(float64, error\)](<#ParseCommandScore>)
 - [func ParsePIDFile\(path string\) \(int, error\)](<#ParsePIDFile>)
 - [func ParseRetryAfter\(header http.Header\) \(date time.Time, delta time.Duration, present bool\)](<#ParseRetryAfter>)
+- [func PoolExhaustionSignal\(providerID string, bodyExcerpt string\) bool](<#PoolExhaustionSignal>)
+- [func PoolIDFor\(providerID string\) string](<#PoolIDFor>)
+- [func PosturePromptText\(messages \[\]ChatMessage\) string](<#PosturePromptText>)
 - [func PriorityOf\(opts \[\]ChatOption\) bool](<#PriorityOf>)
 - [func ProcedureGrammar\(\) string](<#ProcedureGrammar>)
+- [func QualityFloorFor\(difficulty int, capability string\) int](<#QualityFloorFor>)
 - [func QuotaCredentialKey\(providerID string, cfg \*ModelConfig\) string](<#QuotaCredentialKey>)
 - [func RawGrammarOf\(opts \[\]ChatOption\) string](<#RawGrammarOf>)
 - [func ReapRuntimeProcesses\(targets \[\]OrphanRuntime, waitAfterTerm time.Duration, list RuntimeProcLister, signal runtimeSignaler, log \*slog.Logger\) \[\]int](<#ReapRuntimeProcesses>)
@@ -118,6 +128,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
 - [func ToolConstraintSupported\(mode string\) bool](<#ToolConstraintSupported>)
 - [func ToolOutputMarkerStart\(toolCallID string\) string](<#ToolOutputMarkerStart>)
 - [func UserMessage\(err error\) string](<#UserMessage>)
+- [func ValidateToolCalls\(resp \*Response, offered \[\]string\) error](<#ValidateToolCalls>)
 - [func WrapToolOutputMarkers\(toolCallID, output string\) string](<#WrapToolOutputMarkers>)
 - [func WriteSpawnRecord\(rec SpawnRecord\) error](<#WriteSpawnRecord>)
 - [type APIError](<#APIError>)
@@ -224,6 +235,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
 - [type CacheScope](<#CacheScope>)
 - [type CacheStats](<#CacheStats>)
 - [type CanaryConfig](<#CanaryConfig>)
+- [type Candidate](<#Candidate>)
 - [type CapabilityError](<#CapabilityError>)
   - [func \(e \*CapabilityError\) Error\(\) string](<#CapabilityError.Error>)
 - [type ChatMessage](<#ChatMessage>)
@@ -234,6 +246,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func WithAdapter\(path string\) ChatOption](<#WithAdapter>)
   - [func WithAgentScope\(agentID string\) ChatOption](<#WithAgentScope>)
   - [func WithAssistantPrefill\(content string\) ChatOption](<#WithAssistantPrefill>)
+  - [func WithDifficulty\(d int\) ChatOption](<#WithDifficulty>)
   - [func WithFrequencyPenalty\(p float64\) ChatOption](<#WithFrequencyPenalty>)
   - [func WithGrammar\(mode string\) ChatOption](<#WithGrammar>)
   - [func WithMaxTokens\(tokens int\) ChatOption](<#WithMaxTokens>)
@@ -346,6 +359,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
 - [type ContextDiscoveryConfig](<#ContextDiscoveryConfig>)
 - [type ContextFirewall](<#ContextFirewall>)
   - [func NewContextFirewall\(inner Chatter, model \*ModelConfig, cfg ContextFirewallConfig, summaryModel Chatter, logger \*slog.Logger, tokenizer Tokenizer\) \*ContextFirewall](<#NewContextFirewall>)
+  - [func \(f \*ContextFirewall\) BoundSystemMessages\(messages \[\]ChatMessage\) \[\]ChatMessage](<#ContextFirewall.BoundSystemMessages>)
   - [func \(f \*ContextFirewall\) Chat\(ctx context.Context, messages \[\]ChatMessage, opts ...ChatOption\) \(\*Response, error\)](<#ContextFirewall.Chat>)
   - [func \(f \*ContextFirewall\) ChatWithDeltaCallback\(ctx context.Context, messages \[\]ChatMessage, onDelta DeltaCallback, opts ...ChatOption\) \(\*Response, error\)](<#ContextFirewall.ChatWithDeltaCallback>)
   - [func \(f \*ContextFirewall\) ChatWithProgress\(ctx context.Context, messages \[\]ChatMessage, progress ProgressCallback, opts ...ChatOption\) \(\*Response, error\)](<#ContextFirewall.ChatWithProgress>)
@@ -358,6 +372,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func \(f \*ContextFirewall\) Inner\(\) Chatter](<#ContextFirewall.Inner>)
   - [func \(f \*ContextFirewall\) SetCompactor\(compactor \*ContextCompactor, triggerRatio ...float64\)](<#ContextFirewall.SetCompactor>)
   - [func \(f \*ContextFirewall\) Stats\(\) FirewallStats](<#ContextFirewall.Stats>)
+  - [func \(f \*ContextFirewall\) TruncationNotice\(\) string](<#ContextFirewall.TruncationNotice>)
   - [func \(f \*ContextFirewall\) ValidateContextSize\(messages \[\]ChatMessage\) error](<#ContextFirewall.ValidateContextSize>)
   - [func \(f \*ContextFirewall\) Warm\(ctx context.Context, messages \[\]ChatMessage, opts ...ChatOption\) error](<#ContextFirewall.Warm>)
 - [type ContextFirewallConfig](<#ContextFirewallConfig>)
@@ -371,6 +386,11 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func \(e \*ContextSizeExceededError\) Error\(\) string](<#ContextSizeExceededError.Error>)
   - [func \(e \*ContextSizeExceededError\) NonRetryable\(\) bool](<#ContextSizeExceededError.NonRetryable>)
   - [func \(e \*ContextSizeExceededError\) SuggestionsString\(\) string](<#ContextSizeExceededError.SuggestionsString>)
+- [type ContextTooSmallError](<#ContextTooSmallError>)
+  - [func AsContextTooSmall\(err error\) \(\*ContextTooSmallError, bool\)](<#AsContextTooSmall>)
+  - [func \(e \*ContextTooSmallError\) Error\(\) string](<#ContextTooSmallError.Error>)
+  - [func \(e \*ContextTooSmallError\) NonRetryable\(\) bool](<#ContextTooSmallError.NonRetryable>)
+  - [func \(e \*ContextTooSmallError\) Unwrap\(\) error](<#ContextTooSmallError.Unwrap>)
 - [type CoordinatorHook](<#CoordinatorHook>)
   - [func \(h \*CoordinatorHook\) OnSessionEvent\(ctx context.Context, sessionID string, event string\)](<#CoordinatorHook.OnSessionEvent>)
 - [type CostRecord](<#CostRecord>)
@@ -398,8 +418,10 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
 - [type DeltaCallback](<#DeltaCallback>)
 - [type DeltaCallbackWithAttempt](<#DeltaCallbackWithAttempt>)
 - [type Embedder](<#Embedder>)
+- [type FailureCategory](<#FailureCategory>)
 - [type FailureClass](<#FailureClass>)
 - [type FailurePolicyConfig](<#FailurePolicyConfig>)
+- [type FailureScope](<#FailureScope>)
 - [type Fetcher](<#Fetcher>)
   - [func NewLMStudioFetcher\(client \*http.Client, logger \*slog.Logger\) Fetcher](<#NewLMStudioFetcher>)
 - [type FileOperationSet](<#FileOperationSet>)
@@ -407,6 +429,8 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func \(f \*FileOperationSet\) FileCount\(\) int](<#FileOperationSet.FileCount>)
   - [func \(f \*FileOperationSet\) FormatCompact\(\) string](<#FileOperationSet.FormatCompact>)
   - [func \(f \*FileOperationSet\) Merge\(other \*FileOperationSet\)](<#FileOperationSet.Merge>)
+- [type Filter](<#Filter>)
+- [type FilterCtx](<#FilterCtx>)
 - [type FirewallStats](<#FirewallStats>)
 - [type FunctionDef](<#FunctionDef>)
 - [type FunctionParameters](<#FunctionParameters>)
@@ -414,6 +438,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
 - [type HealthCheckConfig](<#HealthCheckConfig>)
 - [type HealthChecker](<#HealthChecker>)
   - [func NewHealthChecker\(cfg \*RuntimeConfig, baseURL string\) \*HealthChecker](<#NewHealthChecker>)
+  - [func \(h \*HealthChecker\) HealthVerdictNow\(\) HealthVerdict](<#HealthChecker.HealthVerdictNow>)
   - [func \(h \*HealthChecker\) IsHealthy\(\) bool](<#HealthChecker.IsHealthy>)
   - [func \(h \*HealthChecker\) OnHealthChange\(cb HealthChangeCallback\)](<#HealthChecker.OnHealthChange>)
   - [func \(h \*HealthChecker\) OnHealthVerdict\(cb HealthVerdictCallback\)](<#HealthChecker.OnHealthVerdict>)
@@ -421,8 +446,9 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func \(h \*HealthChecker\) SetProcessAliveProbe\(fn func\(\) bool\)](<#HealthChecker.SetProcessAliveProbe>)
   - [func \(h \*HealthChecker\) Start\(ctx context.Context\)](<#HealthChecker.Start>)
   - [func \(h \*HealthChecker\) Stop\(\)](<#HealthChecker.Stop>)
-  - [func \(h \*HealthChecker\) VerdictNow\(\) Verdict](<#HealthChecker.VerdictNow>)
   - [func \(h \*HealthChecker\) WaitForHealthy\(ctx context.Context, timeout time.Duration\) error](<#HealthChecker.WaitForHealthy>)
+- [type HealthVerdict](<#HealthVerdict>)
+  - [func \(v HealthVerdict\) String\(\) string](<#HealthVerdict.String>)
 - [type HealthVerdictCallback](<#HealthVerdictCallback>)
 - [type HeuristicTokenizer](<#HeuristicTokenizer>)
   - [func \(h \*HeuristicTokenizer\) CountTokens\(text string\) int](<#HeuristicTokenizer.CountTokens>)
@@ -509,6 +535,11 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
 - [type PolicyVerdict](<#PolicyVerdict>)
   - [func Classify\(statusCode int, header http.Header, body \[\]byte, now time.Time\) PolicyVerdict](<#Classify>)
   - [func VerdictForFailure\(err error\) PolicyVerdict](<#VerdictForFailure>)
+- [type Posture](<#Posture>)
+  - [func ParsePosture\(s string\) Posture](<#ParsePosture>)
+  - [func \(p Posture\) AllowsSensitive\(\) bool](<#Posture.AllowsSensitive>)
+- [type PriceGroup](<#PriceGroup>)
+  - [func ParsePriceGroup\(s string\) PriceGroup](<#ParsePriceGroup>)
 - [type PricingSyncer](<#PricingSyncer>)
   - [func NewPricingSyncer\(cfg PricingSyncerConfig\) \*PricingSyncer](<#NewPricingSyncer>)
   - [func \(ps \*PricingSyncer\) FetchOpenRouter\(ctx context.Context\) \(map\[string\]\*LivePrice, error\)](<#PricingSyncer.FetchOpenRouter>)
@@ -593,6 +624,14 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func LoadProvidersConfig\(path string\) \(\*ProvidersConfig, error\)](<#LoadProvidersConfig>)
   - [func LoadProvidersConfigDefault\(\) \(\*ProvidersConfig, error\)](<#LoadProvidersConfigDefault>)
   - [func MergeProvidersConfig\(base, overlay \*ProvidersConfig\) \*ProvidersConfig](<#MergeProvidersConfig>)
+- [type Quality](<#Quality>)
+  - [func \(q Quality\) IsZero\(\) bool](<#Quality.IsZero>)
+  - [func \(q Quality\) QualityFor\(c QualityClass\) int](<#Quality.QualityFor>)
+- [type QualityClass](<#QualityClass>)
+- [type QualityFloorError](<#QualityFloorError>)
+  - [func \(e \*QualityFloorError\) Error\(\) string](<#QualityFloorError.Error>)
+  - [func \(e \*QualityFloorError\) NonRetryable\(\) bool](<#QualityFloorError.NonRetryable>)
+  - [func \(e \*QualityFloorError\) Unwrap\(\) \[\]error](<#QualityFloorError.Unwrap>)
 - [type QualityMetrics](<#QualityMetrics>)
 - [type QuotaBlockStatus](<#QuotaBlockStatus>)
 - [type QuotaContext](<#QuotaContext>)
@@ -628,9 +667,11 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func \(e \*RefusalError\) Error\(\) string](<#RefusalError.Error>)
   - [func \(e \*RefusalError\) NonRetryable\(\) bool](<#RefusalError.NonRetryable>)
   - [func \(e \*RefusalError\) Unwrap\(\) error](<#RefusalError.Unwrap>)
+- [type ResolvePostureContext](<#ResolvePostureContext>)
 - [type Resolver](<#Resolver>)
   - [func NewResolver\(cfg \*ProvidersConfig, logger \*slog.Logger\) \*Resolver](<#NewResolver>)
   - [func \(r \*Resolver\) ActiveQuotaBlocks\(\) \[\]QuotaBlockStatus](<#Resolver.ActiveQuotaBlocks>)
+  - [func \(r \*Resolver\) AliasesByPriceGroup\(g PriceGroup\) \[\]string](<#Resolver.AliasesByPriceGroup>)
   - [func \(r \*Resolver\) AllModels\(\) \[\]\*ModelConfig](<#Resolver.AllModels>)
   - [func \(r \*Resolver\) BlockQuotaCredential\(aliasName, credentialKey string, unblockAt time.Time\)](<#Resolver.BlockQuotaCredential>)
   - [func \(r \*Resolver\) BlockQuotaEntry\(aliasName, providerID, modelID string, unblockAt time.Time\)](<#Resolver.BlockQuotaEntry>)
@@ -651,7 +692,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func \(r \*Resolver\) HasAlias\(aliasName string\) bool](<#Resolver.HasAlias>)
   - [func \(r \*Resolver\) HasHealthyModels\(aliasName string\) bool](<#Resolver.HasHealthyModels>)
   - [func \(r \*Resolver\) ImageModel\(\) \*ModelConfig](<#Resolver.ImageModel>)
-  - [func \(r \*Resolver\) PeekAliasForWarm\(aliasName, sessionID string\) \(\*ModelConfig, bool\)](<#Resolver.PeekAliasForWarm>)
+  - [func \(r \*Resolver\) PeekAliasForWarm\(aliasName, sessionID, prompt string\) \(\*ModelConfig, bool\)](<#Resolver.PeekAliasForWarm>)
   - [func \(r \*Resolver\) PreferredEndpoint\(sessionID string\) \(string, bool\)](<#Resolver.PreferredEndpoint>)
   - [func \(r \*Resolver\) QuotaBlockedUntil\(credentialKey string\) time.Time](<#Resolver.QuotaBlockedUntil>)
   - [func \(r \*Resolver\) RecordAliasFailure\(aliasName string, err error, failedModel \*ModelConfig\)](<#Resolver.RecordAliasFailure>)
@@ -660,15 +701,21 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func \(r \*Resolver\) RememberSessionEndpoint\(sessionID, endpointKey string\)](<#Resolver.RememberSessionEndpoint>)
   - [func \(r \*Resolver\) ResolveEscalationRef\(ref string\) \(string, error\)](<#Resolver.ResolveEscalationRef>)
   - [func \(r \*Resolver\) ResolveForAlias\(aliasName string, sessionID string\) \(\*ModelConfig, error\)](<#Resolver.ResolveForAlias>)
+  - [func \(r \*Resolver\) ResolveForAliasDifficulty\(aliasName string, sessionID string, difficulty int\) \(\*ModelConfig, error\)](<#Resolver.ResolveForAliasDifficulty>)
   - [func \(r \*Resolver\) ResolveForSkill\(skill \*SkillRequirements, currentModel \*ModelConfig\) \(\*ModelConfig, error\)](<#Resolver.ResolveForSkill>)
   - [func \(r \*Resolver\) ResolveGeneration\(ref, kind string\) \(\*ModelConfig, error\)](<#Resolver.ResolveGeneration>)
   - [func \(r \*Resolver\) ResolveModelTier\(tier string, fallback string\) string](<#Resolver.ResolveModelTier>)
   - [func \(r \*Resolver\) ResolveRef\(ref string\) \*ModelConfig](<#Resolver.ResolveRef>)
+  - [func \(r \*Resolver\) ResolveShadow\(ctx context.Context, req ShadowRequest\) \(\*ShadowDecision, error\)](<#Resolver.ResolveShadow>)
+  - [func \(r \*Resolver\) ResolveSpillway\(ctx context.Context, groups \[\]string, fc \*FilterCtx\) \(\*ModelConfig, string, error\)](<#Resolver.ResolveSpillway>)
   - [func \(r \*Resolver\) RotateToNextModel\(aliasName string\) \(\*ModelConfig, error\)](<#Resolver.RotateToNextModel>)
+  - [func \(r \*Resolver\) RunSelectionFiltersForGate\(c \*Candidate, fc \*FilterCtx, filters \[\]Filter\) \(Verdict, string\)](<#Resolver.RunSelectionFiltersForGate>)
   - [func \(r \*Resolver\) SessionEndpoints\(\) map\[string\]string](<#Resolver.SessionEndpoints>)
   - [func \(r \*Resolver\) SetContextLimits\(discovered map\[string\]int, override bool, logger \*slog.Logger\)](<#Resolver.SetContextLimits>)
+  - [func \(r \*Resolver\) SetPostureScanner\(s SecretScanner\)](<#Resolver.SetPostureScanner>)
   - [func \(r \*Resolver\) SetPricingSyncer\(ps \*PricingSyncer\)](<#Resolver.SetPricingSyncer>)
   - [func \(r \*Resolver\) SetQuotaConfig\(cfg \*QuotaWaitConfig\)](<#Resolver.SetQuotaConfig>)
+  - [func \(r \*Resolver\) SetResolvePostureContext\(fn ResolvePostureContext\)](<#Resolver.SetResolvePostureContext>)
   - [func \(r \*Resolver\) SetRoutingLogger\(rl \*RoutingLogger\)](<#Resolver.SetRoutingLogger>)
   - [func \(r \*Resolver\) SmallModel\(\) \*ModelConfig](<#Resolver.SmallModel>)
   - [func \(r \*Resolver\) VideoModel\(\) \*ModelConfig](<#Resolver.VideoModel>)
@@ -732,6 +779,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func ParseRuntimeType\(s string\) \(RuntimeType, error\)](<#ParseRuntimeType>)
   - [func \(rt RuntimeType\) IsValid\(\) bool](<#RuntimeType.IsValid>)
   - [func \(rt RuntimeType\) String\(\) string](<#RuntimeType.String>)
+- [type SecretScanner](<#SecretScanner>)
 - [type SemanticCache](<#SemanticCache>)
   - [func NewSemanticCache\(embedder Embedder, cfg SemanticCacheConfig\) \*SemanticCache](<#NewSemanticCache>)
   - [func \(s \*SemanticCache\) Enabled\(\) bool](<#SemanticCache.Enabled>)
@@ -739,6 +787,9 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
   - [func \(s \*SemanticCache\) LookupBehindMiss\(ctx context.Context, modelID, prompt string\) \(\*Response, bool, error\)](<#SemanticCache.LookupBehindMiss>)
   - [func \(s \*SemanticCache\) Store\(ctx context.Context, modelID, prompt string, response \*Response\)](<#SemanticCache.Store>)
 - [type SemanticCacheConfig](<#SemanticCacheConfig>)
+- [type ShadowCandidate](<#ShadowCandidate>)
+- [type ShadowDecision](<#ShadowDecision>)
+- [type ShadowRequest](<#ShadowRequest>)
 - [type SkillRequirements](<#SkillRequirements>)
 - [type SpawnRecord](<#SpawnRecord>)
   - [func CollectScratchRigSpawnRecords\(dirs \[\]string\) \(\[\]SpawnRecord, error\)](<#CollectScratchRigSpawnRecords>)
@@ -753,6 +804,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
 - [type StaleRecordReap](<#StaleRecordReap>)
   - [func SweepStaleSpawnRecordsWithAges\(cfgs \[\]\*RuntimeConfig, records \[\]SpawnRecord, maxAge time.Duration, now func\(\) time.Time\) \[\]StaleRecordReap](<#SweepStaleSpawnRecordsWithAges>)
 - [type Status](<#Status>)
+- [type StickyPin](<#StickyPin>)
 - [type StreamAbortedError](<#StreamAbortedError>)
   - [func \(e \*StreamAbortedError\) Error\(\) string](<#StreamAbortedError.Error>)
 - [type StreamingChatter](<#StreamingChatter>)
@@ -816,7 +868,6 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
 - [type UploadStore](<#UploadStore>)
 - [type UsageStoreAttacher](<#UsageStoreAttacher>)
 - [type Verdict](<#Verdict>)
-  - [func \(v Verdict\) String\(\) string](<#Verdict.String>)
 - [type WarmChatter](<#WarmChatter>)
 
 
@@ -877,6 +928,22 @@ Empty means the endpoint accepts no grammar constraint; nothing is attached.
 	    ToolConstraintLlamaCPP  = "llamacpp"
 	    ToolConstraintVLLM      = "vllm"
 	    ToolConstraintJSONSchea = "json_schema"
+	)
+
+<a name="ReasonStickyRequest"></a>
+
+	const (
+	    // ReasonStickyRequest is the reason written when a healthy existing pin
+	    // serves the caller.
+	    ReasonStickyRequest = "sticky_request"
+	    // ReasonStickyRequestNew is the reason written when the caller is
+	    // (re-)pinned at the rotation position.
+	    ReasonStickyRequestNew = "sticky_request_new"
+	    // ReasonStickyDifficultyIncrease is the reason written when the
+	    // caller's per-turn difficulty rose ABOVE the level the pin was
+	    // created for (Contract C8, R7): the pin releases and re-pins at the
+	    // rotation head through the SAME re-pin block as the failure paths.
+	    ReasonStickyDifficultyIncrease = "sticky_difficulty_increase"
 	)
 
 <a name="ProviderIDAnthropic"></a>Provider ID constants used across catalog, registry, and broker.
@@ -1012,6 +1079,10 @@ Empty means the endpoint accepts no grammar constraint; nothing is attached.
 <a name="LocalModelsProviderID"></a>LocalModelsProviderID is the synthetic provider alias that pulled local models register under.
 
 	const LocalModelsProviderID = "local-models"
+
+<a name="MinOutputReserve"></a>MinOutputReserve is the frozen output reserve, quoted from Sovereign Router src/gateway.py MIN\_OUTPUT\_TOKENS = 64 \(src/gateway.py:246\). The gate always holds this much of the context back for the reply; a model with a smaller configured max\_output reserves THAT instead \(the smaller of the two — reserve\(c\) = min\(c.Model.MaxTokens, 64\), master Contract C3\).
+
+	const MinOutputReserve = 64
 
 <a name="PromptCacheBoundary"></a>PromptCacheBoundary is a sentinel marker inserted into system prompt section lists to delineate static \(cacheable across sessions\) content from dynamic \(session\-specific\) content. Sections appearing before the boundary are classified as static; sections after it are classified as dynamic.
 
@@ -1242,9 +1313,27 @@ This gives the context firewall's boundary\-preservation instruction \(structure
 
 	var ErrAllModelsQuotaBlocked = errors.New("all models in alias are quota-blocked")
 
+<a name="ErrAllPoolsBlocked"></a>ErrAllPoolsBlocked is returned by ResolveForAlias when every candidate model in the alias is blocked at POOL scope \(Contract C5, leaf 06 T6\). It is DISTINCT from ErrAllModelsQuotaBlocked and ErrAllEndpointsBlocked \(the failure families have different horizons and clearing rules\) — check with errors.Is, never string matching.
+
+	var ErrAllPoolsBlocked = errors.New("llm: every candidate pool is blocked")
+
+<a name="ErrContextTooSmall"></a>ErrContextTooSmall is the admission sentinel \(Contract C3\). It is a CLASSIFIED terminal error in the ErrTierFloor / ErrQualityFloor family — check with errors.Is, never string matching. It is never retried, never parked, and never surfaces as a completed turn.
+
+ErrProviderLimit was DROPPED from the contract \(drift\-audit ruling \#5, 2026\-11\-16\): rate\-window handling stays with the existing cooldown machinery; no leaf owns this sentinel and none may declare it.
+
+	var ErrContextTooSmall = errors.New("llm: request does not fit the model context")
+
 <a name="ErrEmptyResponse"></a>ErrEmptyResponse is returned when the model replies with an empty body. It is a sentinel so callers \(e.g. ClassifyClassificationFailure\) can identify the failure kind without string matching.
 
 	var ErrEmptyResponse = &ClientError{Message: "empty content"}
+
+<a name="ErrNoEligibleSpillwayGroup"></a>ErrNoEligibleSpillwayGroup is returned by ResolveSpillway when a step's group has zero eligible aliases \(untagged aliases are invisible to every step\). It joins the ErrAll\*Blocked sentinel family — check with errors.Is, never string matching.
+
+	var ErrNoEligibleSpillwayGroup = errors.New("llm: no eligible alias in any spillway group")
+
+<a name="ErrQualityFloor"></a>ErrQualityFloor is the quality\-floor sentinel \(Contract C2, sovereign\-router\-parity leaf 01\): the capability\-escalation path returns it \(wrapped in \*QualityFloorError\) when EVERY candidate scores below QualityFloorFor\(difficulty, capability\) — it never returns the best\-scoring sub\-floor model. It is a CLASSIFIED terminal error in the ErrTierFloor / ErrAllModelsQuotaBlocked family — check with errors.Is, never string matching. It is never retried, never parked, and never surfaces as a completed turn.
+
+	var ErrQualityFloor = errors.New("llm: quality floor not met")
 
 <a name="ErrRuntimeNotOwned"></a>ErrRuntimeNotOwned reports that Stop refused to stop a runtime this instance did not spawn: the PID file names a runtime another meept process owns, which this instance may have adopted as observed\-not\-owned. Operator surfaces that deliberately stop it anyway \(the \`meept runtime stop\` CLI\) must use StopAsOperator instead of ignoring this error — reporting "stopped" while the process keeps running and holding the endpoint port is a false success.
 
@@ -1253,6 +1342,12 @@ This gives the context firewall's boundary\-preservation instruction \(structure
 <a name="ErrTierFloor"></a>ErrTierFloor is the tier\-policy floor sentinel \(llm\-serving\-tiers tree leaf 01, Contract C2\): the alias\-rotation loop returns it \(wrapped in \*TierFloorError\) when the next rotation hop would exceed the configured degradation depth limit. It is a CLASSIFIED terminal error in the ErrAllModelsQuotaBlocked / ErrAllEndpointsBlocked family \- check with errors.Is, never string matching. It is never retried, never surfaced as a completed turn, and never parks a turn.
 
 	var ErrTierFloor = errors.New("llm: tier degradation floor reached")
+
+<a name="ErrToolCallInvalid"></a>ErrToolCallInvalid is returned when an assembled tool call names a function absent from the request's offered list, or carries arguments that do not parse as a JSON object \(Contract C9, sovereign\-router\-parity leaf 03\).
+
+Like ErrEmptyResponse, it is a SENTINEL and every return path surfaces the BARE value: callers pin it by POINTER identity \(err == ErrToolCallInvalid\), never errors.Is through a wrap. The client retry loops classify it as a non\-retryable terminal error \(Classify\(0\) \-\> FailureNone \-\> immediate return\): retrying the SAME model cannot repair a call it already produced, so the verdict belongs to the alias\-rotation layer, not the short\-retry budget. It never parks a turn and never arms a failure record of its own — the generic failure branch records it like any fatal error.
+
+	var ErrToolCallInvalid = errors.New("llm: tool call failed validation")
 
 <a name="GBNFConstrained"></a>GBNFConstrained is the global kill\-switch for grammar\-constrained tool calling \(\[agent.tools\] gbnf\_constrained\). Default FALSE: no grammar is attached anywhere until explicitly enabled. Set via SetGBNFConstrained at daemon wiring time.
 
@@ -1587,6 +1682,15 @@ CatalogSnapshot returns a shallow copy of the provider \-\> models catalog map f
 
 ClassificationUserGuidance returns a user\-friendly message explaining why classification failed and what the user can do about it.
 
+<a name="ClassifyFailure"></a>
+## func ClassifyFailure
+
+	func ClassifyFailure(providerID string, modelID string, poolID string, status int, bodyExcerpt string) (FailureCategory, FailureScope, string)
+
+ClassifyFailure is the frozen classification table \(pools.py:176\-206, verbatim; master Contract C5 — FROZEN 5\-arg shape with poolID in the THIRD position\). providerID/modelID identify the failed attempt, poolID the provider's declared pool \("" = no pool declared: the opt\-in gate — a 429 pool\-phrase still classifies congested but stays MODEL\-scoped, so ScopePool never fires without configuration\). bodyExcerpt is a BOUNDED body preview used only for signal\-phrase matching and then discarded.
+
+Returns \(class, scope, target\): target is the block\-memory key — modelID for model scope, poolID for pool scope, providerID for account scope, "\-" for request scope \(which blocks nothing\).
+
 <a name="ClassifyPromptSections"></a>
 ## func ClassifyPromptSections
 
@@ -1636,6 +1740,24 @@ DefaultBudgetTable returns a copy of the hardcoded tier→budget defaults. Calle
 
 DefaultToolSpillRoot returns the tool\-spill root: $MEEPT\_HOME/spill/tools \(MEEPT\_HOME\-aware, mirroring how SpillService.resolveSpillRoot resolves $MEEPT\_HOME/spill\). The path convention under the root is \<session\_id\>/\<ulid\>.txt \(plan C2\).
 
+<a name="DeriveDifficulty"></a>
+## func DeriveDifficulty
+
+	func DeriveDifficulty(mode string, requiresPlanning bool, inputLen int) int
+
+DeriveDifficulty projects an Intent's routing signals into a 1\-5 level \(Contract C11, sovereign\-router\-parity leaf 07\). Pure function: no classifier call, no I/O. Values come from the values the dispatcher already computed, so there is zero extra inference cost. A caller with no Intent or no derivable signal passes inputs that yield 0 \-\> R7 inert \(a pin created at 0 is never released for difficulty\).
+
+The frozen table \(leaf 07, locked by Q7\):
+
+	requiresPlanning==true               -> level 4
+	mode=="quick_plan"                   -> level 5  (explicit execution phrasing)
+	mode=="spec_plan" && requiresPlan    -> level 4
+	mode=="spec_pair" || mode=="compound" -> level 3
+	otherwise, inputLen<50               -> level 1  (short-input downgrade,
+	                                                 mirrors suggestMode)
+	otherwise                            -> level 2
+	
+
 <a name="EffectiveTraceID"></a>
 ## func EffectiveTraceID
 
@@ -1657,12 +1779,30 @@ EndpointKey returns the cooldown identity for a model's base endpoint: endpoint 
 
 EstimateChatTokens estimates the token cost of a full chat request using the 3\-chars\-per\-token heuristic \(HeuristicTokenizer\) across every message's content plus tool\-call envelopes. Used by the agent loop's saturated\-endpoint overflow classification; a cheap structural estimate is sufficient there because the decision threshold is 50% of the window.
 
+<a name="EstimateInputTokens"></a>
+## func EstimateInputTokens
+
+	func EstimateInputTokens(messages []ChatMessage, tools []ToolDefinition) int
+
+EstimateInputTokens returns a conservative token estimate for a request: a rune/4 character heuristic over every message's content \(plus names, tool\-call envelopes, and assistant prefills\) plus a fixed per\-tool schema allowance, rounded UP.
+
+v1 is deliberately an OVER\-estimate so the gate fails safe: a round trip wasted on a false REJECT costs one local check the caller can retry with a smaller context, but a false PASS wastes a provider round trip that may bill. The heuristic is deterministic \(no dependency, no provider call\) and must never under\-count the true rune/4 total.
+
+The tool allowance covers each tool definition's name \+ description \+ serialized parameter schema on the wire; parameters vary widely, so the allowance is a flat conservative add per tool rather than a second character pass over the schema JSON.
+
 <a name="EstimateTokenCountHeuristic"></a>
 ## func EstimateTokenCountHeuristic
 
 	func EstimateTokenCountHeuristic(content string) int
 
 EstimateTokenCountHeuristic estimates tokens using the 3 chars/token heuristic. This is exported for use by other packages that need a quick estimate.
+
+<a name="FailureCooldown"></a>
+## func FailureCooldown
+
+	func FailureCooldown(cls FailureCategory) time.Duration
+
+FailureCooldown returns the frozen base cooldown for a class, clamped to the 4h cap \(pools.py:222 \+ \_MAX\_COOLDOWN\_S\).
 
 <a name="FetchLMStudioContexts"></a>
 ## func FetchLMStudioContexts
@@ -1743,6 +1883,13 @@ HasUndescribedImages returns true if any image part lacks a Description OR has i
 	func IsContextOverflowError(err error) bool
 
 IsContextOverflowError reports whether err is \(or wraps\) a \*ContextOverflowError.
+
+<a name="IsContextTooSmall"></a>
+## func IsContextTooSmall
+
+	func IsContextTooSmall(err error) bool
+
+IsContextTooSmall reports whether err is \(or wraps\) a \*ContextTooSmallError.
 
 <a name="IsLoopbackBaseURL"></a>
 ## func IsLoopbackBaseURL
@@ -1851,6 +1998,13 @@ NewMetricsStoreForPacing opens a small metrics store dedicated to the pacer's ra
 
 NoCacheOf reports whether the given options mark the call as a cache\-bypass probe \(C4 hard rule 3\). Inspection counterpart of WithNoCache, mirroring PriorityOf: tests and stubs that need the verdict without running the client can read it off the option slice instead of re\-deriving chatOptions.
 
+<a name="OfferedToolNames"></a>
+## func OfferedToolNames
+
+	func OfferedToolNames(tools []ToolDefinition) []string
+
+OfferedToolNames extracts the function names from the request's tool definitions, in declaration order, de\-duplicated. The nil\-tools case returns nil \(not an empty slice\): nil is the caller's "no contract" signal that disables name validation entirely \(see ValidateToolCalls\).
+
 <a name="ParseCommandScore"></a>
 ## func ParseCommandScore
 
@@ -1884,6 +2038,29 @@ Callers compose the schedule as: retryAt = date when non\-zero, else now\+delta.
 
 Try order is spec order first — delta\-seconds, IMF\-fixdate, RFC850, asctime, then RFC3339 — followed by the provider\-specific reset headers preserved verbatim from parseQuotaResetHeader \(anthropic\-ratelimit\-\*\-reset, X\-Codex\-\*\). A standard Retry\-After always beats a provider header.
 
+<a name="PoolExhaustionSignal"></a>
+## func PoolExhaustionSignal
+
+	func PoolExhaustionSignal(providerID string, bodyExcerpt string) bool
+
+PoolExhaustionSignal reports whether a 429 body implicates the whole POOL rather than one model. The two observed shapes \(pools.py \_pool\_exhaustion\_signal, :161\-174\): Cloudflare's daily\-free\-allocation error 4006, and OpenRouter's per\-day free\-pool limit phrasing. The 4006 marker is matched provider\-agnostic in meept's v1: pools are config\-declared, not taxonomy\-derived, so there is no provider→kind table to gate the marker on. Bare 429s stay model\-scoped.
+
+bodyExcerpt is inspected and discarded — never stored, never logged.
+
+<a name="PoolIDFor"></a>
+## func PoolIDFor
+
+	func PoolIDFor(providerID string) string
+
+PoolIDFor returns the pool a provider's models draw from. v1 \(master Q4\): ONE pool per provider, named "provider:\<id\>". The models.json5 \`pool\` field \(ModelDef.Pool\) is reserved so a future config can map two providers onto one shared pool without a migration; an empty declared pool keeps a provider pool\-less \(opt\-in gate — ScopePool never fires\).
+
+<a name="PosturePromptText"></a>
+## func PosturePromptText
+
+	func PosturePromptText(messages []ChatMessage) string
+
+PosturePromptText renders the outbound prompt text the C4 posture gate scans: the concatenation of the request's SYSTEM and USER message text, in message order \(leaf review checklist: only user/system text is scanned\). Tool results are deliberately EXCLUDED — they were already checked at the tool boundary \(internal/tools/builtin filesystem/shell wire the secret scanner over tool input/output\); re\-scanning them here would double\-count and slow every tool turn. Assistant text is excluded for the same boundary reason. Empty when there is nothing to scan.
+
 <a name="PriorityOf"></a>
 ## func PriorityOf
 
@@ -1904,6 +2081,21 @@ ProcedureGrammar returns the GBNF grammar forcing the distill procedure JSON obj
 	
 
 Mirrors LessonGrammar's shape \(bughunt F28\): without it, procedure distillation was forced through the LESSON grammar, so every constrained procedure response failed grammar validation and blocked the distill queue. The system prompt caps steps at 20 \(MaxProcedureSteps\); GBNF cannot count, so the cap stays a post\-parse check. Pair with WithRawGrammar \(llama.cpp wire format, local endpoints only\). Never returns an empty string.
+
+<a name="QualityFloorFor"></a>
+## func QualityFloorFor
+
+	func QualityFloorFor(difficulty int, capability string) int
+
+QualityFloorFor maps a classified difficulty \(1..5\) to the minimum acceptable score for a capability. FROZEN table \(master Contract C2, quoted verbatim — do not paraphrase\):
+
+	difficulty <= 0  -> 0      // unclassified: feature inert
+	difficulty 1..2  -> 1
+	difficulty 3     -> 2
+	difficulty 4     -> 3
+	difficulty 5     -> 4
+	capability not in the five classes -> 0
+	
 
 <a name="QuotaCredentialKey"></a>
 ## func QuotaCredentialKey
@@ -2154,6 +2346,13 @@ ToolOutputMarkerStart returns the START marker for a tool result, anchored on th
 
 UserMessage returns a human\-readable error message from any LLM error type. It unwraps the error chain and tries each known type.
 
+<a name="ValidateToolCalls"></a>
+## func ValidateToolCalls
+
+	func ValidateToolCalls(resp *Response, offered []string) error
+
+ValidateToolCalls returns ErrToolCallInvalid \(the BARE sentinel, pointer identity\) when any tool call in resp names a function absent from offered, or when its arguments do not parse as a JSON object. A response with no tool calls returns nil; an EMPTY offered list returns nil for ANY call \(the caller offered no tools, so there is no contract to violate — a call there is the model hallucinating a tool it was never told about, a different defect this check deliberately does not own\).
+
 <a name="WrapToolOutputMarkers"></a>
 ## func WrapToolOutputMarkers
 
@@ -2396,6 +2595,11 @@ AliasEntry holds the resolved models and configuration for an alias.
 	    MaxFails               int            // Max consecutive failures before rotation
 	    DefaultModel           string         // Optional: revert to this model after cooldown
 	    BalancedStickyRequests bool           // Optional: pin callers to single model
+	    // PriceGroup is the alias routing-tier tag (Contract C10, leaf 01
+	    // declares the config field; leaf 09's spillway reads it here).
+	    // "" = untagged = legacy: resolves only when explicitly selected,
+	    // never participates in a spillway step.
+	    PriceGroup string
 	    // contains filtered or unexported fields
 	}
 
@@ -2435,7 +2639,7 @@ Locking convention \(issue \#29\): Resolver.mu is the SINGLE lock guarding every
 	    ConsecutiveFails int
 	    LastFailure      time.Time
 	    CooldownUntil    time.Time
-	    StickyPins       map[string]int
+	    StickyPins       map[string]StickyPin
 	    // RevertAt arms default-model reversion: when non-zero, rotation reverts
 	    // to AliasEntry.DefaultModel after this deadline (armed by
 	    // RecordAliasFailure when default_model is configured).
@@ -3190,6 +3394,19 @@ CanaryConfig holds the inference\-canary probe configuration \(Contract 1 of the
 	    Prompt          string `json:"prompt"`
 	}
 
+<a name="Candidate"></a>
+## type Candidate
+
+Candidate is one model under selection\-filter consideration.
+
+	type Candidate struct {
+	    Model      *ModelConfig
+	    Alias      string
+	    Capability string
+	    EstInput   int
+	    EstOutput  int
+	}
+
 <a name="CapabilityError"></a>
 ## type CapabilityError
 
@@ -3286,6 +3503,13 @@ Why: the LFM2.5\-8B GGUF is not tool\-trained. Live probes \(2026\-09\-24, issue
 
 Wire format: the prefill rides as a final assistant chat message. The server continues the assistant turn from it. When the model completes the call with native \<|tool\_call\_start|\> markers the existing marker parser recovers it; when it completes with bare JSON \(the LFM2.5 template parser only recognizes markers, so the continuation lands in \`content\` as the tail of the prefill's opened object\) parseLFMPrefillContinuation reconstructs the call — prefill\- and shape\-gated, see lfm\_tool\_calls.go.
 
+<a name="WithDifficulty"></a>
+### func WithDifficulty
+
+	func WithDifficulty(d int) ChatOption
+
+WithDifficulty carries a caller\-derived routing difficulty \(1\-5, leaf 07 / Contract C11; produced by DeriveDifficulty in internal/agent\). It is request\-scoped \(never shared state\): leaf 07's sticky release predicate reads it inside resolveStickyCaller as fc.Difficulty. Zero = unclassified = the feature is inert \(a pin created at 0 is never released for difficulty\).
+
 <a name="WithFrequencyPenalty"></a>
 ### func WithFrequencyPenalty
 
@@ -3312,7 +3536,7 @@ WithMaxTokens sets the max tokens for the chat request.
 
 	func WithModelOverride(mc *ModelConfig) ChatOption
 
-WithModelOverride carries a USER model directive \(model reassignment / PrepareNextTurn ModelOverride\) naming the model that must serve THIS one request. It is the user\-directive twin of WithResolvedModel: precedence is explicit and enforced in requestModelOverride — a user directive beats an alias resolution regardless of option\-append order, because the two travel in separate chatOptions fields and requestModelOverride \(not slice order\) picks the winner. Nil is a no\-op.
+WithModelOverride carries a USER model directive \(model reassignment / PrepareNextTurn ModelOverride\) naming the model that must serve THIS one request. It is the user\-directive twin of WithResolvedModel: precedence is explicit and enforced in requestModelOverride — a user directive beats an alias resolution regardless of option\-append order, because the two travel in separate chatOptions fields and requestModelOverride \(not slice order\) picks the winner. The directive's per\-million prices ride along for CostUSD pricing \(see WithResolvedModel\). Nil is a no\-op.
 
 <a name="WithNoCache"></a>
 ### func WithNoCache
@@ -3354,7 +3578,7 @@ WithReasoning sets the reasoning/thinking effort for the chat request. The confi
 
 	func WithResolvedModel(mc *ModelConfig) ChatOption
 
-WithResolvedModel carries the model the resolver selected for this ONE request \(alias resolution\) alongside the call, instead of mutating shared client state. ProviderManager uses the provider id to route the attempt to the named provider first \(the rest stay as failover tail\); the serving Client uses the model id for the wire payload and for the metrics.db llm\_calls row, so the ledger records the provider/model that actually served the call. Nil is a no\-op. A selection whose ProviderID names a different provider than the client being invoked is ignored by that client \(it cannot serve another provider's endpoint\); see requestModelOverride.
+WithResolvedModel carries the model the resolver selected for this ONE request \(alias resolution\) alongside the call, instead of mutating shared client state. ProviderManager uses the provider id to route the attempt to the named provider first \(the rest stay as failover tail\); the serving Client uses the model id for the wire payload and for the metrics.db llm\_calls row, so the ledger records the provider/model that actually served the call. The model's per\-million PRICES ride along too: the effective config's CostPerMillion\* fields must describe the model that actually serves, or resp.CostUSD \(which now feeds goal\-loop budget enforcement\) is priced with the client's default\-model prices. Nil is a no\-op. A selection whose ProviderID names a different provider than the client being invoked is ignored by that client \(it cannot serve another provider's endpoint\); see requestModelOverride.
 
 <a name="WithStopSequences"></a>
 ### func WithStopSequences
@@ -4248,6 +4472,13 @@ ContextFirewall wraps a Chatter and enforces context budgets.
 
 NewContextFirewall creates a new context firewall. summaryModel may be nil; in that case, inner is used for summaries. tokenizer may be nil; in that case, a heuristic tokenizer is used.
 
+<a name="ContextFirewall.BoundSystemMessages"></a>
+### func \(\*ContextFirewall\) BoundSystemMessages
+
+	func (f *ContextFirewall) BoundSystemMessages(messages []ChatMessage) []ChatMessage
+
+BoundSystemMessages applies the window\-independent oversized\-system bound processMessages runs before the inert\-firewall return. Warm callers that unwrap this firewall and Warm the inner client must run it on the prefix first; otherwise an oversized system message skips the bound the turn applies. Small system messages pass byte\-identically. Nil\-safe.
+
 <a name="ContextFirewall.Chat"></a>
 ### func \(\*ContextFirewall\) Chat
 
@@ -4331,6 +4562,13 @@ SetCompactor sets the ContextCompactor for smart summarization. The write to f.c
 	func (f *ContextFirewall) Stats() FirewallStats
 
 Stats returns a snapshot of firewall counters. When proactive compression is enabled, compression counters are populated from the internal compressor.
+
+<a name="ContextFirewall.TruncationNotice"></a>
+### func \(\*ContextFirewall\) TruncationNotice
+
+	func (f *ContextFirewall) TruncationNotice() string
+
+TruncationNotice returns the user\-visible disclosure for a pending oversized\-system truncation and consumes it \(one disclosure per event, never on every later turn\). "" when nothing is pending. Gate T4c \(F\-NEW\-8\): the turn funnel carries this text \(C1 routing\_notice lane or a brief system note\) so a context cut is NEVER silent to the user.
 
 <a name="ContextFirewall.ValidateContextSize"></a>
 ### func \(\*ContextFirewall\) ValidateContextSize
@@ -4480,6 +4718,53 @@ NonRetryable marks ContextSizeExceededError as non\-retryable
 	func (e *ContextSizeExceededError) SuggestionsString() string
 
 
+
+<a name="ContextTooSmallError"></a>
+## type ContextTooSmallError
+
+ContextTooSmallError is the typed admission verdict: the pre\-dispatch gate measured the request against the candidate's DECLARED context limit and the request cannot fit. Like TierFloorError \(errors\_tier.go\) it is NonRetryable — a size verdict is not a transient provider condition, so every client short\-retry loop must exit immediately \(the NonRetryable lane\), and the verdict is never retried, never parked.
+
+	type ContextTooSmallError struct {
+	    // ModelID/ProviderID identify the candidate the gate refused (it was
+	    // never dispatched; no request reached it).
+	    ModelID    string
+	    ProviderID string
+	    // EstInput is the rune/4 input estimate that failed the gate.
+	    EstInput int
+	    // Reserve is the output reserve applied (min(MaxTokens,
+	    // MinOutputReserve)).
+	    Reserve int
+	    // ContextLimit is the model's declared context limit.
+	    ContextLimit int
+	}
+
+<a name="AsContextTooSmall"></a>
+### func AsContextTooSmall
+
+	func AsContextTooSmall(err error) (*ContextTooSmallError, bool)
+
+AsContextTooSmall returns the \*ContextTooSmallError in err's chain, mirroring AsTierFloorError \(errors\_tier.go\).
+
+<a name="ContextTooSmallError.Error"></a>
+### func \(\*ContextTooSmallError\) Error
+
+	func (e *ContextTooSmallError) Error() string
+
+
+
+<a name="ContextTooSmallError.NonRetryable"></a>
+### func \(\*ContextTooSmallError\) NonRetryable
+
+	func (e *ContextTooSmallError) NonRetryable() bool
+
+NonRetryable returns true so the client short\-retry loops exit immediately: the gate fired BEFORE dispatch — there is nothing to retry against this candidate, and the same payload cannot fit on a retry.
+
+<a name="ContextTooSmallError.Unwrap"></a>
+### func \(\*ContextTooSmallError\) Unwrap
+
+	func (e *ContextTooSmallError) Unwrap() error
+
+Unwrap to the sentinel: errors.Is\(err, ErrContextTooSmall\) must hold through any wrap, and errors.As recovers the typed verdict.
 
 <a name="CoordinatorHook"></a>
 ## type CoordinatorHook
@@ -4722,6 +5007,23 @@ Embedder produces prompt vectors for semantic\-cache lookups \(Contract C5\). Mi
 	    Embed(ctx context.Context, text string) ([]float32, error)
 	}
 
+<a name="FailureCategory"></a>
+## type FailureCategory
+
+FailureCategory is the CLASS dimension of the frozen taxonomy. \(Named FailureCategory, not FailureClass: failure\_policy.go already owns the int\-enum FailureClass for the client retry policy; master C5's type name collided with it. The gate pins the Class\* constant VALUES, not the type name.\)
+
+	type FailureCategory string
+
+<a name="ClassAccountDead"></a>
+
+	const (
+	    ClassAccountDead  FailureCategory = "account_dead"  // 401 / 402 / 403
+	    ClassCongested    FailureCategory = "congested"     // 429
+	    ClassTransient    FailureCategory = "transient"     // 5xx, timeout, transport
+	    ClassRequestFault FailureCategory = "request_fault" // 400 / 413 / 422
+	    ClassEntryMissing FailureCategory = "entry_missing" // 404
+	)
+
 <a name="FailureClass"></a>
 ## type FailureClass
 
@@ -4768,6 +5070,22 @@ FailurePolicyConfig mirrors the canonical config.FailurePolicyConfig \(llm.failu
 	    PacingMinInterval      time.Duration
 	    PacingMaxInterval      time.Duration
 	}
+
+<a name="FailureScope"></a>
+## type FailureScope
+
+FailureScope is the SCOPE dimension: what the failure implicates.
+
+	type FailureScope string
+
+<a name="ScopeModel"></a>
+
+	const (
+	    ScopeModel   FailureScope = "model"   // this model only
+	    ScopePool    FailureScope = "pool"    // the shared upstream quota pool
+	    ScopeAccount FailureScope = "account" // every model on the credential
+	    ScopeRequest FailureScope = "request" // the caller's fault: blocks NOTHING
+	)
 
 <a name="Fetcher"></a>
 ## type Fetcher
@@ -4822,6 +5140,41 @@ NewLMStudioFetcher returns a ContextDiscovery Fetcher \(leaf 01's registered sha
 
 
 
+<a name="Filter"></a>
+## type Filter
+
+Filter is the one interface every pre\-dispatch selection filter implements \(C1\). Name identifies the filter in logs/reasons; Reason is returned alongside a non\-Allow verdict.
+
+	type Filter interface {
+	    Name() string
+	    Filter(c *Candidate, fc *FilterCtx) Verdict
+	    Reason() string
+	}
+
+<a name="FilterCtx"></a>
+## type FilterCtx
+
+FilterCtx carries the per\-request facts a filter judges against. It is request\-scoped and read\-only to filters: no filter may mutate it or touch shared resolver state \(runSelectionFilters is called with the Resolver lock held on the alias path and WITHOUT it on the skill path\).
+
+	type FilterCtx struct {
+	    SessionID  string
+	    Capability string
+	    EstInput   int
+	    EstOutput  int
+	    Sensitive  bool
+	    // PromptText carries the outbound user+system prompt text for the
+	    // position-1 posture filter (leaf 05, R3). It rides FilterCtx — the
+	    // chain's existing request-scoped carrier — rather than a resolver
+	    // field, because sensitivity is a PER-REQUEST fact, not resolver
+	    // state. Empty means the caller supplied no text: the posture gate
+	    // fail-opens (treats the turn as non-sensitive, never errors).
+	    // Callers build it with PosturePromptText; tool/assistant text is
+	    // deliberately excluded (already scanned at the tool boundary).
+	    PromptText string
+	    Difficulty int // 0 = unclassified = difficulty-derived behavior inert
+	    Now        time.Time
+	}
+
 <a name="FirewallStats"></a>
 ## type FirewallStats
 
@@ -4846,6 +5199,9 @@ FirewallStats is a snapshot of firewall counters including compression stats.
 	    CompactionTokensSaved uint64
 	    // Restart stats (overflow strategy: restart)
 	    RestartEvents uint64
+	    // SystemMessageTruncations counts oversized-system-message bounding
+	    // events (gate T4c, F-NEW-8) -- the user-visibility disclosure counter.
+	    SystemMessageTruncations uint64
 	}
 
 <a name="FunctionDef"></a>
@@ -4906,6 +5262,13 @@ HealthChecker performs periodic HTTP health checks on a runtime.
 
 NewHealthChecker creates a new health checker.
 
+<a name="HealthChecker.HealthVerdictNow"></a>
+### func \(\*HealthChecker\) HealthVerdictNow
+
+	func (h *HealthChecker) HealthVerdictNow() HealthVerdict
+
+HealthVerdictNow returns the current tri\-state verdict \(Contract 2\).
+
 <a name="HealthChecker.IsHealthy"></a>
 ### func \(\*HealthChecker\) IsHealthy
 
@@ -4961,13 +5324,6 @@ Stop stops the health checker. Idempotent, and safe against the run goroutine ex
 
 It gates on the CHANNEL, not on the running flag: a superseded goroutine can never leave a newer run's channel here \(finishRun's generation guard\), so whatever h.stopCh names is either the live run or an already\-exited one, and closing it is safe either way — no run ever closes its own channel. Gating on the flag instead \(the old behaviour\) made Stop a no\-op for a run whose flag a stale goroutine had cleared, leaving it live and unstoppable \(finding F60\).
 
-<a name="HealthChecker.VerdictNow"></a>
-### func \(\*HealthChecker\) VerdictNow
-
-	func (h *HealthChecker) VerdictNow() Verdict
-
-VerdictNow returns the current tri\-state verdict \(Contract 2\).
-
 <a name="HealthChecker.WaitForHealthy"></a>
 ### func \(\*HealthChecker\) WaitForHealthy
 
@@ -4975,12 +5331,34 @@ VerdictNow returns the current tri\-state verdict \(Contract 2\).
 
 WaitForHealthy blocks until the runtime becomes healthy or the timeout is reached.
 
+<a name="HealthVerdict"></a>
+## type HealthVerdict
+
+Verdict is the health checker's tri\-state result \(Contract 2 of the llama\-hang\-watchdog tree\). It distinguishes a HUNG runtime \(/health still answering but the inference canary failing\) from the classic UNHEALTHY \(process dead or /health failing\) so operators can tell hang\-restarts from crash\-restarts.
+
+	type HealthVerdict int
+
+<a name="VerdictHealthOK"></a>
+
+	const (
+	    VerdictHealthOK   HealthVerdict = iota // /health answering and no canary failure streak
+	    VerdictHealthBad                       // /health failing or process dead (existing semantics)
+	    VerdictHealthHung                      // /health answering but canary failing >= threshold
+	)
+
+<a name="HealthVerdict.String"></a>
+### func \(HealthVerdict\) String
+
+	func (v HealthVerdict) String() string
+
+String returns the Contract\-2 wire spelling used in runtime.health bus payloads and log fields.
+
 <a name="HealthVerdictCallback"></a>
 ## type HealthVerdictCallback
 
 HealthVerdictCallback is invoked on the SAME transition edges as HealthChangeCallback \(plus the canary\-driven HUNG entry / HUNG recovery edges\), carrying the tri\-state verdict and an operator\-facing detail string \(canary failure count, last canary error, endpoint key\).
 
-	type HealthVerdictCallback func(v Verdict, detail string)
+	type HealthVerdictCallback func(v HealthVerdict, detail string)
 
 <a name="HeuristicTokenizer"></a>
 ## type HeuristicTokenizer
@@ -5410,6 +5788,13 @@ ModelAliasEntry represents a model alias configuration.
 	    MaxFails               int      `json:"max_fails"` // Max consecutive failures before rotation
 	    DefaultModel           string   `json:"default_model,omitempty"`
 	    BalancedStickyRequests bool     `json:"balanced_sticky_requests,omitempty"`
+	    // PriceGroup tags this alias as a routing tier (Contract C10).
+	    // "" | "free" | "paid" | "premium". "" = untagged = legacy behavior
+	    // (this alias resolves only when explicitly selected). Free/paid/
+	    // premium become selectable as a TIER by leaf 09's spillway;
+	    // declaring the field here (leaf 01) is schema-only and INERT —
+	    // nothing reads it until leaf 09 lands.
+	    PriceGroup string `json:"price_group,omitempty"`
 	}
 
 <a name="ModelCatalogEntry"></a>
@@ -5543,6 +5928,25 @@ ModelConfig holds configuration for a specific LLM model endpoint.
 	    Workflow string
 	    // GenerationURL is a full URL for kind=http models.
 	    GenerationURL string
+	    // Quality carries the measured per-class quality scores mapped from
+	    // the models.json5 "quality" block (Contract C2, leaf 01). Zero value
+	    // (no block) = dimension inert: floor never binds, the selection
+	    // comparator's quality term vanishes. Scores come from measurement
+	    // only — never seed from vendor documentation.
+	    Quality Quality
+	    // DataPosture is the EFFECTIVE per-model data posture (Contract C4,
+	    // leaf 05), resolved through ParsePosture at the ModelConfig
+	    // construction site: PosturePrivate unless the config explicitly
+	    // declares "public_only" or "non_sensitive". A config with no
+	    // data_posture key anywhere carries all-Private — the position-1
+	    // posture filter allows everything and routing is byte-identical to
+	    // pre-leaf (flag-off control gate).
+	    DataPosture Posture
+	    // Pool is the declared shared upstream quota pool (Contract C5,
+	    // sovereign-router-parity leaf 06), mirrored from ModelDef.Pool at
+	    // construction. Empty (the default) = pool-less: ScopePool never
+	    // fires for this model (opt-in gate, master Q4).
+	    Pool string
 	    // BodyTemplate is the JSON body template for kind=http models.
 	    BodyTemplate map[string]any
 	    // ResponseURLPath / ResponseB64Path extract the asset from an http response.
@@ -5648,6 +6052,37 @@ ModelDef represents a model definition in the config.
 	    // no provider-level option: the value maps straight through from
 	    // ModelDef.
 	    ToolExposure string `json:"tool_exposure,omitempty"`
+	    // DataPosture is the per-model data-posture label (Contract C4,
+	    // sovereign-router-parity leaf 05): "private" (no-training, cleared
+	    // for sensitive turns), "public_only" (provider may train — sensitive
+	    // barred), or "non_sensitive" (aggregator, posture unclear — barred).
+	    // ABSENT/unknown parses to private at the construction site below
+	    // (ParsePosture), so a config with no data_posture key anywhere is
+	    // byte-identical to pre-leaf (flag-off control gate, master Q3).
+	    DataPosture Posture `json:"data_posture,omitempty"`
+	    // Pool is the shared upstream quota pool this model draws from
+	    // (Contract C5, sovereign-router-parity leaf 06; master Q4: ONE pool
+	    // per provider in v1 — the field is RESERVED, empty default). When
+	    // set, a pool-exhaustion-phrase 429 blocks the whole POOL instead of
+	    // the single model. ABSENT = pool-less: classification still runs
+	    // but ScopePool never fires (opt-in gate, flag-off byte-identical).
+	    Pool string `json:"pool,omitempty"`
+	    // Quality is the MEASURED per-class quality scores (0-5) from probe
+	    // batteries (Contract C2, sovereign-router-parity leaf 01). The
+	    // Sovereign Router selection rule governs seeding: "leaderboards
+	    // nominate, our own probes score" — a score invented from vendor
+	    // documentation must never land here. ABSENT BLOCK = zero Quality =
+	    // the dimension is inert (floor never binds, comparator quality term
+	    // vanishes), which is the shipped config posture (plan Q1: ship
+	    // EMPTY). The shape is documented in config/models.json5; no shipped
+	    // model sets it until an operator measures.
+	    Quality Quality `json:"quality,omitzero"`
+	    // QualitySource is free-text provenance for the quality scores (e.g.
+	    // "tooling-battery:2026-11-15"). Advisory only — never parsed.
+	    QualitySource string `json:"quality_source,omitempty"`
+	    // QualityVerifiedAt is the RFC3339 date the scores were last
+	    // re-measured. Advisory only — never parsed, never enforced.
+	    QualityVerifiedAt string `json:"quality_verified_at,omitempty"`
 	    // ToolChoice overrides the provider-level tool_choice policy for this
 	    // model. Empty inherits the provider setting. See
 	    // ProviderOptionsConfig.ToolChoice.
@@ -5906,6 +6341,60 @@ Leaf scope: RetryAt is always zero, Park and GiveUp always false — schedules a
 VerdictForFailure maps a failure into the leaf\-01 policy vocabulary, adding the transport seam audit M4 requires: status\-bearing errors go through Classify; transport timeouts \(context deadline, net.Error timeout\) reach this path WITHOUT an HTTP status/body and would otherwise never fire endpoint cooldowns — inverting D10's purpose. A wrapped FailureQuota verdict \(QuotaResetError\) unwraps through so the quota class is preserved; anything else is FailureNone \(alias cooldown still applies, but no endpoint block\).
 
 Sticky\-rotation correction \(session\-affinity leaf 07, GAP A\): the unwrapped status now comes from ANY \*APIError in the wrap chain, not just a top\-level one. The streaming client's short\-retry exhaustion wraps the 503 APIError in a ClientError \("streaming failed after N attempts"\); with the top\-level\-only check that failure classified FailureNone, armed NO endpoint block, and the resolve\-time sticky hook re\-pulled the dead endpoint to the front on every resolve — the alias cursor rotated to the healthy member but the next attempt went to the corpse again \(observed end\-to\-end by the session\-affinity rotation proof: A and B alternating new\_index 1/0 while B served zero requests\). Status\-bearing 5xx is FailureServerError under Classify, which the endpoint\-cooldown arm below treats like the throttle class for block purposes — a dead endpoint's whole base URL must lose stickiness until the block expires \(cleared lazily by expiry \+ a later success, the same single pattern as every other block map\).
+
+<a name="Posture"></a>
+## type Posture
+
+Posture is the per\-model data\-posture label. The zero value "" is NOT a valid posture: consumers treat absent/unknown as PosturePrivate \(backward\-compatible default, master Q3\) — leaf 05's ParsePosture owns that mapping.
+
+	type Posture string
+
+<a name="PosturePrivate"></a>
+
+	const (
+	    // PosturePrivate: no-training, cleared for sensitive turns.
+	    PosturePrivate Posture = "private"
+	    // PosturePublicOnly: provider may train -> sensitive turns barred.
+	    PosturePublicOnly Posture = "public_only"
+	    // PostureNonSensitive: aggregator, posture unclear -> sensitive barred.
+	    PostureNonSensitive Posture = "non_sensitive"
+	)
+
+<a name="ParsePosture"></a>
+### func ParsePosture
+
+	func ParsePosture(s string) Posture
+
+ParsePosture maps a config string to a Posture. Empty, unknown, and absent all map to PosturePrivate — the backward\-compatible default \(master Q3\): a config with no data\_posture key anywhere routes byte\-identically to pre\-leaf, which is the tree's flag\-off control gate. Matching is exact \(lowercase wire vocabulary, frozen in shadow.go\).
+
+<a name="Posture.AllowsSensitive"></a>
+### func \(Posture\) AllowsSensitive
+
+	func (p Posture) AllowsSensitive() bool
+
+AllowsSensitive reports whether a SENSITIVE turn may route to a model carrying this posture: true ONLY for PosturePrivate \(no\-training, cleared\). PosturePublicOnly \(provider may train\) and PostureNonSensitive \(aggregator, posture unclear\) bar sensitive turns — Sovereign Router's conservative posture stands \(docs/ROUTING\-PRINCIPLES.md rule 7\): a flag also covers every route whose data policy is not auditable, so UNCLEAR is treated as BARRED, never as cleared.
+
+<a name="PriceGroup"></a>
+## type PriceGroup
+
+PriceGroup is the alias routing\-tier label \(leaf 01 declares the ModelAliasEntry.PriceGroup field; this leaf owns the vocabulary\).
+
+	type PriceGroup string
+
+<a name="PriceGroupFree"></a>
+
+	const (
+	    PriceGroupFree    PriceGroup = "free"
+	    PriceGroupPaid    PriceGroup = "paid"
+	    PriceGroupPremium PriceGroup = "premium"
+	)
+
+<a name="ParsePriceGroup"></a>
+### func ParsePriceGroup
+
+	func ParsePriceGroup(s string) PriceGroup
+
+ParsePriceGroup maps a config string to the tier vocabulary. "" and unknown map to PriceGroup\(""\) \(untagged = legacy: this alias resolves only when explicitly selected and never participates in a spillway step\).
 
 <a name="PricingSyncer"></a>
 ## type PricingSyncer
@@ -6703,6 +7192,92 @@ LoadProvidersConfigDefault loads providers config from the default locations. Bu
 
 MergeProvidersConfig overlays user config on bundled config. Non\-empty user slots win. User aliases replace by name. User providers merge: new providers are added; existing providers keep bundled models unless the user defines the same model id.
 
+<a name="Quality"></a>
+## type Quality
+
+Quality carries the five measured scores \(0\-5\), one per class. The JSON tags are the config surface inside a models.json5 per\-model "quality" block; the zero value is the shipped default \(no model declares quality, so the dimension is inert\).
+
+	type Quality struct {
+	    Chat        int `json:"chat"`
+	    Code        int `json:"code"`
+	    Reasoning   int `json:"reasoning"`
+	    Tooling     int `json:"tooling"`
+	    LongContext int `json:"long-context"`
+	}
+
+<a name="Quality.IsZero"></a>
+### func \(Quality\) IsZero
+
+	func (q Quality) IsZero() bool
+
+IsZero reports whether no class carries a score. Every selection path treats an all\-zero Quality as "dimension not measured": the floor never binds and the comparator's quality term vanishes \(flag\-off byte\-identical, Contract C2 inertness rule\).
+
+<a name="Quality.QualityFor"></a>
+### func \(Quality\) QualityFor
+
+	func (q Quality) QualityFor(c QualityClass) int
+
+QualityFor returns the measured score for class. Unknown class \-\> 0 \(an unmeasured or unrecognized class can never pass a non\-zero floor\).
+
+<a name="QualityClass"></a>
+## type QualityClass
+
+QualityClass names one measured quality dimension. The five classes are the frozen C2 vocabulary and match the Sovereign Router registry's quality shape.
+
+	type QualityClass string
+
+<a name="QualityChat"></a>
+
+	const (
+	    QualityChat        QualityClass = "chat"
+	    QualityCode        QualityClass = "code"
+	    QualityReasoning   QualityClass = "reasoning"
+	    QualityTooling     QualityClass = "tooling"
+	    QualityLongContext QualityClass = "long-context"
+	)
+
+<a name="QualityFloorError"></a>
+## type QualityFloorError
+
+QualityFloorError is the typed quality\-floor verdict: the candidate set was measured, the floor bound, and every candidate \(including the current/default model\) scored below it. Like TierFloorError \(errors\_tier.go\) it is NonRetryable — a floor verdict is a policy decision, not a transient provider condition, so client short\-retry loops must exit immediately.
+
+	type QualityFloorError struct {
+	    // Capability names the quality class the floor was derived from (the
+	    // raw skill requirement string, e.g. "code").
+	    Capability string
+	    // Difficulty is the classified difficulty the floor was evaluated at.
+	    Difficulty int
+	    // Floor is the minimum acceptable score (QualityFloorFor result).
+	    Floor int
+	    // Best is the highest score any candidate achieved (0 when none was
+	    // measured).
+	    Best int
+	    // Candidates is how many models were evaluated before the floor
+	    // blocked them all.
+	    Candidates int
+	}
+
+<a name="QualityFloorError.Error"></a>
+### func \(\*QualityFloorError\) Error
+
+	func (e *QualityFloorError) Error() string
+
+
+
+<a name="QualityFloorError.NonRetryable"></a>
+### func \(\*QualityFloorError\) NonRetryable
+
+	func (e *QualityFloorError) NonRetryable() bool
+
+NonRetryable returns true so the client short\-retry loops exit immediately: a measured\-quality floor is not a transient provider condition.
+
+<a name="QualityFloorError.Unwrap"></a>
+### func \(\*QualityFloorError\) Unwrap
+
+	func (e *QualityFloorError) Unwrap() []error
+
+Unwrap to the sentinel \(Go 1.20\+ multi\-unwrap shape, matching TierFloorError\): errors.Is\(err, ErrQualityFloor\) must hold through any wrap, and errors.As recovers the typed verdict.
+
 <a name="QualityMetrics"></a>
 ## type QualityMetrics
 
@@ -7012,6 +7587,13 @@ NonRetryable returns true so the client short\-retry loops exit immediately.
 
 
 
+<a name="ResolvePostureContext"></a>
+## type ResolvePostureContext
+
+ResolvePostureContext is the resolve\-time prompt seam \(leaf 05\). The daemon installs one closure at construction; the resolver reads it on the alias path to obtain the outbound prompt text for the position\-1 posture gate. Nil \(test resolvers, unit suites\) = no text = the gate fail\-opens. Text is per\-request scope, never persisted by the resolver, and NEVER logged \(only scanner rule names/counts may be\).
+
+	type ResolvePostureContext func(sessionID string) string
+
 <a name="Resolver"></a>
 ## type Resolver
 
@@ -7034,6 +7616,13 @@ NewResolver creates a new model resolver.
 	func (r *Resolver) ActiveQuotaBlocks() []QuotaBlockStatus
 
 ActiveQuotaBlocks returns all active quota block statuses.
+
+<a name="Resolver.AliasesByPriceGroup"></a>
+### func \(\*Resolver\) AliasesByPriceGroup
+
+	func (r *Resolver) AliasesByPriceGroup(g PriceGroup) []string
+
+AliasesByPriceGroup returns the names of aliases whose PriceGroup == g, sorted for determinism \(leaf 09 T9: Go map iteration is random, so an unsorted return would make spillway selection order nondeterministic\). A nil receiver returns nil.
 
 <a name="Resolver.AllModels"></a>
 ### func \(\*Resolver\) AllModels
@@ -7124,7 +7713,7 @@ FindByProvider returns all models from a specific provider.
 
 	func (r *Resolver) FindCheapest(caps []string) *ModelConfig
 
-FindCheapest finds the cheapest model with the specified capabilities.
+FindCheapest finds the cheapest model with the specified capabilities. Quality\-aware \(leaf 01\): the shared comparator orders by \(cost, higher quality, lower latency\); an all\-unmeasured set reduces to the exact legacy pure\-cost order, byte\-identical to the pre\-leaf behavior.
 
 <a name="Resolver.ForgetSessionEndpoint"></a>
 ### func \(\*Resolver\) ForgetSessionEndpoint
@@ -7183,11 +7772,13 @@ ImageModel returns the configured image\-generation model, if any.
 <a name="Resolver.PeekAliasForWarm"></a>
 ### func \(\*Resolver\) PeekAliasForWarm
 
-	func (r *Resolver) PeekAliasForWarm(aliasName, sessionID string) (*ModelConfig, bool)
+	func (r *Resolver) PeekAliasForWarm(aliasName, sessionID, prompt string) (*ModelConfig, bool)
 
 PeekAliasForWarm reports aliasName's serving candidate WITHOUT any of the side effects ResolveForAlias carries \(no rotation, no sticky pin writes, no routing\-decision log, no cooldown/block re\-evaluation writes\): the context\-warm seam \(C4, plan 20261113\-filler\-clips\-and\-context\-warm\) needs to know which provider/model would serve the imminent turn — to stamp WithResolvedModel for the warm — but a warm must never perturb the alias state the real turn will read.
 
 It applies the SAME read\-side filters ResolveForAlias applies \(alias\-level cooldown order, quota blocks, endpoint blocks, the re\-validation pass, and the session's sticky\-endpoint preference, in that precedence\) in a fully request\-local form. ok=false when the alias is unknown, empty, or every candidate is blocked — the warm is then a skip, never a guess. sessionID may be "" \(no stickiness preference applied\). Read\-only: safe under r.mu.
+
+prompt is the warm prefix text \(system\+user; callers pass PosturePromptText\). Before every successful return the candidate is checked with the same read\-only posture filter ResolveForAliasDifficulty uses \(posturePass\). A sensitive prompt whose candidate is not cleared returns ok=false so the warm skips — the peek does not walk to another model and does not write StickyPins, health, blocks, or the ledger. An empty prompt is not sensitive and stays byte\-identical to a peek that never saw a prompt.
 
 <a name="Resolver.PreferredEndpoint"></a>
 ### func \(\*Resolver\) PreferredEndpoint
@@ -7261,6 +7852,13 @@ ResolveEscalationRef resolves an escalation target — an alias name or a "provi
 
 ResolveForAlias resolves an alias to a specific model, handling rotation. It returns the currently active model for the given alias. When callerKey is non\-empty and BalancedStickyRequests is true, the caller is pinned to a single model within the alias.
 
+<a name="Resolver.ResolveForAliasDifficulty"></a>
+### func \(\*Resolver\) ResolveForAliasDifficulty
+
+	func (r *Resolver) ResolveForAliasDifficulty(aliasName string, sessionID string, difficulty int) (*ModelConfig, error)
+
+ResolveForAliasDifficulty is ResolveForAlias with the per\-turn routing difficulty \(Contract C11, sovereign\-router\-parity leaf 07\). The parameter is the narrowest request\-scoped channel: model resolution happens BEFORE any chat call exists, so a ChatOption physically cannot reach the resolver here — leaf 05's resolve\-time seam precedent \(SetResolvePostureContext\) would add shared resolver state for a value the caller already holds. difficulty 0 \(= DeriveDifficulty inert value: unclassified turn, no Intent signal\) keeps R7 fully inert — byte\-identical to ResolveForAlias.
+
 <a name="Resolver.ResolveForSkill"></a>
 ### func \(\*Resolver\) ResolveForSkill
 
@@ -7294,6 +7892,20 @@ If the tier is empty, unknown, or the tier's model is not configured, the fallba
 
 ResolveRef resolves a "provider/model\-id" reference.
 
+<a name="Resolver.ResolveShadow"></a>
+### func \(\*Resolver\) ResolveShadow
+
+	func (r *Resolver) ResolveShadow(ctx context.Context, req ShadowRequest) (*ShadowDecision, error)
+
+ResolveShadow runs the full selection pipeline \(health filters, sticky simulation, selection chain, cost estimate\) and returns the decision with ZERO side effects. The whole computation is map reads \+ arithmetic under r.mu.RLock — no I/O under the lock, and the single Debug log line fires after it is released.
+
+<a name="Resolver.ResolveSpillway"></a>
+### func \(\*Resolver\) ResolveSpillway
+
+	func (r *Resolver) ResolveSpillway(ctx context.Context, groups []string, fc *FilterCtx) (*ModelConfig, string, error)
+
+ResolveSpillway selects the cheapest capable alias across the given groups, in group order: groups=\["free"\] then, after exhaustion/failure, \["paid","premium"\] implements free\-first\-then\-paid. For each group the eligible aliases are those whose PriceGroup is in groups AND whose member models all pass runSelectionFilters \(posture \+ quality \+ admission, the same chain the live path uses\) for this request's FilterCtx. Eligible aliases sort by the frozen key \(cost asc, quality desc; epsilon\-compare on cost\). Returns the chosen config, the alias name that produced it, and an error. Read\-only: no rotation cursor, no pin, no block map, no health field is touched.
+
 <a name="Resolver.RotateToNextModel"></a>
 ### func \(\*Resolver\) RotateToNextModel
 
@@ -7304,6 +7916,13 @@ RotateToNextModel forces rotation to the next model in an alias and resets failu
 Lock discipline: the entire rotation runs under the single Resolver.mu regime, so cursor mutation is atomic — no torn reads between the index check and the write \(stress\-verified by TestResolver\_RotateToNextModel\_ConcurrentStress under \-race\).
 
 Concurrent\-session design limitation: the rotation cursor \(AliasHealth.CurrentIndex\) is PER\-ALIAS, not per\-session or per\-caller. Two concurrent sessions resolving the same alias share one cursor, so a rotation issued by session A moves the next resolve for every other un\-pinned session on that alias. This is accepted, documented behavior — rotation is best\-effort failover, and callers must treat the returned model as "a healthy candidate now", not "a stable model across calls". Callers that need a stable model use sticky pins \(BalancedStickyRequests \+ a callerKey to ResolveForAlias\), which pin per\-caller and are released by model identity on rotation.
+
+<a name="Resolver.RunSelectionFiltersForGate"></a>
+### func \(\*Resolver\) RunSelectionFiltersForGate
+
+	func (r *Resolver) RunSelectionFiltersForGate(c *Candidate, fc *FilterCtx, filters []Filter) (Verdict, string)
+
+RunSelectionFiltersForGate is the test seam for the chain's first\-non\- Allow semantics \(gate contract test TestContract\_C1\_SelectionChain\): it runs the GIVEN filters over the candidate — not the registered chain — so the gate can pin the iteration contract without depending on which leaves have registered production filters. Production callers use runSelectionFilters; this exists for the e2e suite only.
 
 <a name="Resolver.SessionEndpoints"></a>
 ### func \(\*Resolver\) SessionEndpoints
@@ -7323,6 +7942,13 @@ SetContextLimits applies discovered context lengths to the resolver's model poin
 2. a 0/absent value accepts the discovered value; when the model's own value is 0 but the display catalog carries one \(catalog\-only cell\), the catalog value is treated as current;
 3. \`override\` \(allow\_context\_override\) additionally lets a discovered value replace that non\-zero value.
 
+<a name="Resolver.SetPostureScanner"></a>
+### func \(\*Resolver\) SetPostureScanner
+
+	func (r *Resolver) SetPostureScanner(s SecretScanner)
+
+SetPostureScanner wires the C4 secret scanner \(daemon wiring; the narrow structural seam — see the SecretScanner doc\). Nil is a no\-op \(typed\-nil setter rule\): the gate stays fail\-open inert until a real scanner lands. Called once at daemon construction, before any request can resolve.
+
 <a name="Resolver.SetPricingSyncer"></a>
 ### func \(\*Resolver\) SetPricingSyncer
 
@@ -7336,6 +7962,13 @@ SetPricingSyncer sets the pricing syncer for live cost enrichment on resolved mo
 	func (r *Resolver) SetQuotaConfig(cfg *QuotaWaitConfig)
 
 SetQuotaConfig attaches quota\-aware retry settings. Pass nil to disable quota blocking; a zero\-value QuotaWaitConfig also means DISABLED \(callers that want enabled\-with\-defaults must populate the fields — see ConfigFromSchema\). No\-op on a nil receiver to honor the typed\-nil setter rule \(AGENTS.md\).
+
+<a name="Resolver.SetResolvePostureContext"></a>
+### func \(\*Resolver\) SetResolvePostureContext
+
+	func (r *Resolver) SetResolvePostureContext(fn ResolvePostureContext)
+
+SetResolvePostureContext installs the prompt seam. Nil is a no\-op \(typed\-nil setter rule\). Called once from daemon wiring.
 
 <a name="Resolver.SetRoutingLogger"></a>
 ### func \(\*Resolver\) SetRoutingLogger
@@ -7369,6 +8002,12 @@ Response represents a parsed response from the LLM API.
 	    Usage        TokenUsage `json:"usage"`
 	    Model        string     `json:"model"`
 	    FinishReason string     `json:"finish_reason"`
+	    // CostUSD is the dollar amount charged by the provider for THIS
+	    // response, computed by the serving client from the model's
+	    // per-million token prices (CostPerMillionInput / CostPerMillionOutput).
+	    // Zero when prices are unconfigured (e.g. local runtimes) or the call
+	    // failed; the budget lane converts it to cents for spend accounting.
+	    CostUSD float64 `json:"cost_usd,omitempty"`
 	    // Reasoning holds the assistant's chain-of-thought text when the
 	    // vendor exposes it as a separate channel (Anthropic thinking,
 	    // OpenAI o1-style reasoning, DeepSeek reasons). Empty when not
@@ -7996,6 +8635,16 @@ IsValid checks if the runtime type string is valid.
 
 String returns a human\-readable representation of the runtime type.
 
+<a name="SecretScanner"></a>
+## type SecretScanner
+
+SecretScanner is the narrow structural seam over internal/security.SecretScanner \(see the import\-cycle note above\). The concrete \*security.SecretScanner satisfies it without any adapter: the only member the posture gate needs is Scan. Methods return RULE NAMES — never the matched text — which is what makes the T9 log discipline structurally easy to keep.
+
+	type SecretScanner interface {
+	    // Scan returns the names of all rules that match the given text.
+	    Scan(text string) []string
+	}
+
 <a name="SemanticCache"></a>
 ## type SemanticCache
 
@@ -8071,6 +8720,63 @@ SemanticCacheConfig is the llm\-side shape of Contract C4 \(json5 key llm.cache.
 	    // Values >= Threshold are clamped to 0 (a useless band) at
 	    // construction; negative values are clamped to 0 as well.
 	    VerifyFloor float64
+	}
+
+<a name="ShadowCandidate"></a>
+## type ShadowCandidate
+
+ShadowCandidate is one alias member's preview row: every candidate of the alias appears exactly once, either Selected or carrying a SkipReason.
+
+	type ShadowCandidate struct {
+	    ModelID    string  `json:"model_id"`
+	    ProviderID string  `json:"provider_id"`
+	    Selected   bool    `json:"selected"`
+	    SkipReason string  `json:"skip_reason,omitempty"`
+	    Quality    int     `json:"quality"`
+	    EstCostUSD float64 `json:"est_cost_usd"`
+	}
+
+<a name="ShadowDecision"></a>
+## type ShadowDecision
+
+ShadowDecision is the decision\-only preview. Reason is one of the frozen vocabulary "shadow\_alias" | "shadow\_direct" | "shadow\_default". When nothing is routable the identity fields stay empty, Selected is false on every candidate, and the error is nil \(a legitimately\-unroutable request is a decision, not a failure\).
+
+	type ShadowDecision struct {
+	    ModelID    string            `json:"model_id"`
+	    ProviderID string            `json:"provider_id"`
+	    Alias      string            `json:"alias"`
+	    Reason     string            `json:"reason"`
+	    EstInput   int               `json:"est_input_tokens"`
+	    EstOutput  int               `json:"est_output_tokens"`
+	    EstCostUSD float64           `json:"est_cost_usd"`
+	    Quality    int               `json:"quality"`
+	    Posture    Posture           `json:"posture"`
+	    Candidates []ShadowCandidate `json:"candidates"`
+	}
+
+<a name="ShadowRequest"></a>
+## type ShadowRequest
+
+ShadowRequest names the request to preview. It is a pure input: nothing derived from it is ever persisted.
+
+	type ShadowRequest struct {
+	    // Alias is an alias name OR a "provider/model" ref; empty resolves the
+	    // default model (Reason "shadow_default").
+	    Alias string `json:"alias,omitempty"`
+	    // Messages is the prompt to estimate. The codebase's real message type
+	    // is ChatMessage (the C4/C6 sketch says []Message; same substitution
+	    // the context-warm seam made and documented in internal/llm/warm.go).
+	    Messages []ChatMessage `json:"messages,omitempty"`
+	    // Tools contributes to the input-token estimate (schema overhead).
+	    // The codebase's tool type is ToolDefinition (sketch: []ToolDef).
+	    Tools []ToolDefinition `json:"tools,omitempty"`
+	    // SessionID optionally drives sticky-pin SIMULATION for a
+	    // balanced_sticky alias; it is never written — no pin is created and
+	    // no existing pin is released or rewritten.
+	    SessionID string `json:"session_id,omitempty"`
+	    // Difficulty is the classified difficulty (0 = unclassified). It feeds
+	    // the selection-chain filters (quality floor); 0 keeps them inert.
+	    Difficulty int `json:"difficulty,omitempty"`
 	}
 
 <a name="SkillRequirements"></a>
@@ -8225,6 +8931,17 @@ Status represents a snapshot of current budget status.
 	    HourlyCostUsed         float64 `json:"hourly_cost_used"`
 	    HourlyCostLimit        float64 `json:"hourly_cost_limit"`
 	    WithinCostBudget       bool    `json:"within_cost_budget"`
+	}
+
+<a name="StickyPin"></a>
+## type StickyPin
+
+StickyPin is one sticky\-pinned caller's rotation position plus the routing context the pin was created under \(Contract C8, sovereign\- router\-parity leaf 07\). Index keeps the pre\-existing semantics \(an alias.Models rotation index; resolve identity at release time via the alias\). Difficulty records the classified difficulty \(Contract C11, 0 = unclassified\) the pin was created FOR: a later resolve whose difficulty rises strictly above it releases the pin \(R7\). CreatedAt is the write instant \(diagnostics only — the pin has NO TTL by contract; sticky state is a cache\-affinity optimisation, not correctness state\).
+
+	type StickyPin struct {
+	    Index      int
+	    Difficulty int
+	    CreatedAt  time.Time
 	}
 
 <a name="StreamAbortedError"></a>
@@ -8819,24 +9536,20 @@ UsageStoreAttacher is implemented by LLM clients that can record per\-provider/p
 <a name="Verdict"></a>
 ## type Verdict
 
-Verdict is the health checker's tri\-state result \(Contract 2 of the llama\-hang\-watchdog tree\). It distinguishes a HUNG runtime \(/health still answering but the inference canary failing\) from the classic UNHEALTHY \(process dead or /health failing\) so operators can tell hang\-restarts from crash\-restarts.
+Verdict is one filter's decision for a candidate.
 
 	type Verdict int
 
-<a name="VerdictHealthy"></a>
+<a name="VerdictAllow"></a>
 
 	const (
-	    VerdictHealthy   Verdict = iota // /health answering and no canary failure streak
-	    VerdictUnhealthy                // /health failing or process dead (existing semantics)
-	    VerdictHung                     // /health answering but canary failing >= threshold
+	    // VerdictAllow lets the candidate through.
+	    VerdictAllow Verdict = iota
+	    // VerdictSkip skips this candidate; the filter's reason is recorded.
+	    VerdictSkip
+	    // VerdictFloor is terminal: NO candidate may serve this turn.
+	    VerdictFloor
 	)
-
-<a name="Verdict.String"></a>
-### func \(Verdict\) String
-
-	func (v Verdict) String() string
-
-String returns the Contract\-2 wire spelling used in runtime.health bus payloads and log fields.
 
 <a name="WarmChatter"></a>
 ## type WarmChatter

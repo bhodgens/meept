@@ -10,6 +10,17 @@ The pattern set is deliberately narrow and PHRASE\-LEVEL \(OWASP prompt injectio
 
 Callers scan only UNTRUSTED\-SEGMENT content \(raw peer output\). Driver framing text is never passed here, so legitimate instructions the driver itself authored can never trip a pattern.
 
+Package security: shared two\-phase shell command guard.
+
+This is the single execution\-time guard used by both the builtin shell tool \(internal/tools/builtin\) and scheduler\-fired shell jobs \(internal/scheduler\). Putting it here — rather than in either consumer — is the only cycle\-safe home: builtin imports scheduler, and pkg/security cannot import internal/.
+
+The two phases mirror the frozen ordering of the builtin shell tool:
+
+1. CheckCommand\(command\) — command\-only checks \(risk classification and the declarative permission table\). Runs BEFORE work\-directory resolution so a block surfaces as ErrCommandBlocked \(HTTP 403\) rather than being shadowed by an unbound\-directory refusal \(HTTP 400\).
+2. CheckCommandInDir\(ctx, command, workDir\) — checks that need the resolved working directory \(fence, Tirith scan\). Runs AFTER resolution but BEFORE the child is spawned.
+
+Every dependency is optional and nil\-safe: a nil fence/table/orchestrator means that check is skipped, matching the builtin tool's legacy behavior when those components are not wired.
+
 Package security: declarative shell command permission tables.
 
 The permission table provides prefix\-keyed allow/ask/deny policy that is evaluated BEFORE tirith pattern scanning. Tirith detects dangerous PATTERNS; the table expresses operator POLICY \("git push always asks; rm \-rf always denies"\). A table match short\-circuits; an "allow" still runs tirith as defense\-in\-depth.
@@ -24,6 +35,7 @@ Package security provides the security engine with SQLite\-backed decision makin
 
 - Constants
 - Variables
+- [func CheckShellPermission\(pt \*PermissionTable, command string\) error](<#CheckShellPermission>)
 - [func CheckTirithAvailable\(ctx context.Context, binary string\) bool](<#CheckTirithAvailable>)
 - [func ClientTLSConfig\(cfg TLSConfig\) \(\*tls.Config, error\)](<#ClientTLSConfig>)
 - [func CountRules\(\) int](<#CountRules>)
@@ -70,6 +82,7 @@ Package security provides the security engine with SQLite\-backed decision makin
   - [func \(e \*Engine\) SetGateAskCapture\(c GateAskCapture\)](<#Engine.SetGateAskCapture>)
   - [func \(e \*Engine\) SetPermissionTable\(pt \*PermissionTable\)](<#Engine.SetPermissionTable>)
   - [func \(e \*Engine\) SetPreExecChecker\(agentID string, checker PreExecChecker\)](<#Engine.SetPreExecChecker>)
+- [type FenceCheckFunc](<#FenceCheckFunc>)
 - [type FenceChecker](<#FenceChecker>)
   - [func NewFenceChecker\(cfg FenceConfig, logger \*slog.Logger\) \*FenceChecker](<#NewFenceChecker>)
   - [func \(fc \*FenceChecker\) CheckCommand\(cmd string, workDir string\) error](<#FenceChecker.CheckCommand>)
@@ -175,6 +188,15 @@ Package security provides the security engine with SQLite\-backed decision makin
 - [type SeedFinancialPattern](<#SeedFinancialPattern>)
 - [type SeedPathRule](<#SeedPathRule>)
 - [type SeedToolRule](<#SeedToolRule>)
+- [type ShellCommandGuard](<#ShellCommandGuard>)
+- [type ShellCommandGuardImpl](<#ShellCommandGuardImpl>)
+  - [func NewShellCommandGuard\(fc \*FenceChecker, pt \*PermissionTable, orch \*Orchestrator, opts ...ShellGuardOption\) \*ShellCommandGuardImpl](<#NewShellCommandGuard>)
+  - [func \(g \*ShellCommandGuardImpl\) CheckCommand\(command string\) error](<#ShellCommandGuardImpl.CheckCommand>)
+  - [func \(g \*ShellCommandGuardImpl\) CheckCommandInDir\(ctx context.Context, command, workDir string\) error](<#ShellCommandGuardImpl.CheckCommandInDir>)
+- [type ShellGuardClassifier](<#ShellGuardClassifier>)
+- [type ShellGuardOption](<#ShellGuardOption>)
+  - [func WithShellGuardClassifier\(fn ShellGuardClassifier\) ShellGuardOption](<#WithShellGuardClassifier>)
+  - [func WithShellGuardFenceChecker\(fn FenceCheckFunc\) ShellGuardOption](<#WithShellGuardFenceChecker>)
 - [type ShellRule](<#ShellRule>)
 - [type StrictnessLevel](<#StrictnessLevel>)
   - [func ParseStrictnessLevel\(s string\) StrictnessLevel](<#ParseStrictnessLevel>)
@@ -310,6 +332,13 @@ Package security provides the security engine with SQLite\-backed decision makin
 The message names both the jail root and the offending path so the model can correct the call instead of retrying it verbatim.
 
 	var ErrOutsideSessionRoot = errors.New("outside the session worktree")
+
+<a name="CheckShellPermission"></a>
+## func CheckShellPermission
+
+	func CheckShellPermission(pt *PermissionTable, command string) error
+
+CheckShellPermission consults a declarative shell permission table and returns a guard block for deny/ask. Shared by the guard's phase 1 and by the builtin tool's compatibility wrapper so the two cannot drift.
 
 <a name="CheckTirithAvailable"></a>
 ## func CheckTirithAvailable
@@ -687,6 +716,13 @@ SetPermissionTable installs the declarative shell permission table. Pass nil to 
 SetPreExecChecker registers a PreExecChecker for the given agent/employee ID. The checker is called between Stage 3 \(context analysis\) and Stage 4 \(override check\) during CheckForAgent. An empty agentID is a no\-op.
 
 IMPORTANT: The checker's Check method is invoked while Engine.mu is held as an RLock. Implementations MUST NOT call any Engine methods that acquire mu \(Check, RecordOverride, etc.\) — see PreExecChecker interface doc.
+
+<a name="FenceCheckFunc"></a>
+## type FenceCheckFunc
+
+FenceCheckFunc is the fence\-check seam for phase 2. It is a function rather than a \*FenceChecker so consumers that hold a fence interface \(and inject test doubles\) can delegate without this package taking on that interface. When the real \*FenceChecker is passed to NewShellCommandGuard, the default calls FenceChecker.CheckCommand — it never reimplements fence logic.
+
+	type FenceCheckFunc func(command, workDir string) error
 
 <a name="FenceChecker"></a>
 ## type FenceChecker
@@ -1638,6 +1674,76 @@ SeedToolRule defines a pre\-populated tool rule.
 	    RequiresConfirmation bool
 	    Immutable            bool
 	}
+
+<a name="ShellCommandGuard"></a>
+## type ShellCommandGuard
+
+ShellCommandGuard is the two\-phase execution\-time fence shared by the builtin shell tool and scheduler\-fired shell jobs.
+
+Phase 1 \(CheckCommand\) is risk/permission classification and runs before work\-dir resolution; phase 2 \(CheckCommandInDir\) is the fence/Tirith check and runs after resolution. Both must run BEFORE the command is spawned. Consumers may declare a matching local interface — Go's structural typing connects them without an import.
+
+	type ShellCommandGuard interface {
+	    CheckCommand(command string) error
+	    CheckCommandInDir(ctx context.Context, command, workDir string) error
+	}
+
+<a name="ShellCommandGuardImpl"></a>
+## type ShellCommandGuardImpl
+
+ShellCommandGuardImpl is the concrete two\-phase guard. Construct with NewShellCommandGuard; the zero value is also safe \(all checks skipped\).
+
+	type ShellCommandGuardImpl struct {
+	    // contains filtered or unexported fields
+	}
+
+<a name="NewShellCommandGuard"></a>
+### func NewShellCommandGuard
+
+	func NewShellCommandGuard(fc *FenceChecker, pt *PermissionTable, orch *Orchestrator, opts ...ShellGuardOption) *ShellCommandGuardImpl
+
+NewShellCommandGuard builds a two\-phase guard from the optional security components. Any of fc/pt/orch may be nil — the corresponding check is then skipped. Functional options inject the classifier seam that consumers need to preserve their own behavior.
+
+<a name="ShellCommandGuardImpl.CheckCommand"></a>
+### func \(\*ShellCommandGuardImpl\) CheckCommand
+
+	func (g *ShellCommandGuardImpl) CheckCommand(command string) error
+
+CheckCommand runs the command\-only checks: risk classification \(RiskCritical blocks\) and the declarative permission table \(deny/ask block\). It MUST run before work\-directory resolution to preserve the 403\-before\-400 ordering. All blocks wrap pkg/security.ErrCommandBlocked.
+
+<a name="ShellCommandGuardImpl.CheckCommandInDir"></a>
+### func \(\*ShellCommandGuardImpl\) CheckCommandInDir
+
+	func (g *ShellCommandGuardImpl) CheckCommandInDir(ctx context.Context, command, workDir string) error
+
+CheckCommandInDir runs the checks that need the resolved working directory: the fence \(delegating to FenceChecker.CheckCommand\) and the Tirith orchestrator scan. It MUST run after resolution but BEFORE the child is spawned. All blocks wrap pkg/security.ErrCommandBlocked.
+
+<a name="ShellGuardClassifier"></a>
+## type ShellGuardClassifier
+
+ShellGuardClassifier classifies a shell command for the shared guard. It returns the risk level and the base command name \(the latter is used in the block message\). Keeping the classifier behind an option lets consumers with config\-driven allowlists \(notably the builtin tool's knownSafeCommands\) supply their own logic without this package importing them.
+
+	type ShellGuardClassifier func(command string) (risk RiskLevel, baseCommand string)
+
+<a name="ShellGuardOption"></a>
+## type ShellGuardOption
+
+ShellGuardOption configures a ShellCommandGuardImpl. Options are applied in order at construction; nil options are ignored.
+
+	type ShellGuardOption func(*ShellCommandGuardImpl)
+
+<a name="WithShellGuardClassifier"></a>
+### func WithShellGuardClassifier
+
+	func WithShellGuardClassifier(fn ShellGuardClassifier) ShellGuardOption
+
+WithShellGuardClassifier installs the risk classifier used by phase 1. A nil classifier is ignored \(risk classification is then skipped\).
+
+<a name="WithShellGuardFenceChecker"></a>
+### func WithShellGuardFenceChecker
+
+	func WithShellGuardFenceChecker(fn FenceCheckFunc) ShellGuardOption
+
+WithShellGuardFenceChecker installs the phase\-2 fence seam. It overrides the \*FenceChecker passed to NewShellCommandGuard. A nil checker is ignored.
 
 <a name="ShellRule"></a>
 ## type ShellRule
