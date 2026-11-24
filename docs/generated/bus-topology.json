@@ -230,7 +230,7 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 11977,
+        "line": 11961,
         "payload_keys": []
       }
     ],
@@ -623,7 +623,7 @@
     "dispatcher.stats.result": [
       {
         "file": "internal/daemon/components.go",
-        "line": 4686,
+        "line": 4673,
         "payload_keys": []
       }
     ],
@@ -644,7 +644,7 @@
     "employee.metric": [
       {
         "file": "internal/daemon/components.go",
-        "line": 7304,
+        "line": 7288,
         "payload_keys": [
           "name",
           "tags",
@@ -2008,7 +2008,7 @@
     "status.response": [
       {
         "file": "internal/daemon/components.go",
-        "line": 10966,
+        "line": 10950,
         "payload_keys": []
       }
     ],
@@ -2538,13 +2538,13 @@
     "team.start": [
       {
         "file": "internal/daemon/components.go",
-        "line": 9455,
+        "line": 9439,
         "payload_keys": [],
         "via_const": true
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 9492,
+        "line": 9476,
         "payload_keys": [],
         "via_const": true
       }
@@ -2983,7 +2983,7 @@
     "dispatcher.stats": [
       {
         "file": "internal/daemon/components.go",
-        "line": 4664,
+        "line": 4651,
         "subscriber_id": "dispatcher-stats-handler"
       }
     ],
@@ -2998,7 +2998,7 @@
     "employee.critical_finding": [
       {
         "file": "internal/daemon/components.go",
-        "line": 5646,
+        "line": 5633,
         "subscriber_id": "employee-critical-finding"
       }
     ],
@@ -3907,7 +3907,7 @@
     "status.request": [
       {
         "file": "internal/daemon/components.go",
-        "line": 10892,
+        "line": 10876,
         "subscriber_id": "status-handler"
       }
     ],
@@ -4228,7 +4228,7 @@
       },
       {
         "file": "internal/daemon/components.go",
-        "line": 11059,
+        "line": 11043,
         "subscriber_id": "agent-job-processor-evidence"
       }
     ],
