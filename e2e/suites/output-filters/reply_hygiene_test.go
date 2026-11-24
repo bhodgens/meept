@@ -158,8 +158,13 @@ func TestOutputFilters06RelayEnvelopeStripped(t *testing.T) {
 		t.Errorf("output-filters-06: relay reply lost the artifact prose: %q", term.Reply)
 	}
 
-	// Display-only strip: the STORE keeps the raw envelope. GREEN today,
-	// must survive the fix (the strip must not rewrite the stored result).
+	// Display-only strip: the STORE keeps the raw envelope. The step
+	// result row is the daemon job envelope re-serialized, so the p6
+	// envelope survives JSON-escaped inside it (the string field carries
+	// \"accomplished\", never raw quotes) - the escaped form is the
+	// correct preservation check (an unescaped search can never match a
+	// JSON string field by construction). GREEN must survive the fix (the
+	// strip must not rewrite the stored result).
 	var taskID string
 	for _, row := range harness.Tasks(t, s.TasksDBPath()) {
 		taskID = row.ID
@@ -169,7 +174,7 @@ func TestOutputFilters06RelayEnvelopeStripped(t *testing.T) {
 	}
 	rawPreserved := false
 	for _, st := range harness.Steps(t, s.TasksDBPath(), taskID) {
-		if strings.Contains(st.Result, `"accomplished"`) {
+		if strings.Contains(st.Result, `\"accomplished\"`) || strings.Contains(st.Result, `"accomplished"`) {
 			rawPreserved = true
 		}
 	}
@@ -188,7 +193,15 @@ func TestOutputFilters06RelayEnvelopeStripped(t *testing.T) {
 // RED today: handleReviewCompleted pushes "## review:" to chat.response
 // (F-ORCH-25, frozen p2 events[111]).
 func TestOutputFilters07ReviewFeedbackNotChat(t *testing.T) {
-	s := newStack(t)
+	// This gate grades the REVIEW lane (scripted reviewer verdict ->
+	// task.review_completed feed). The harness default now boots the
+	// pre-usability-wave posture with agent.review.enabled=false
+	// (46e0eead), which skips the review flow entirely, so the suite
+	// declares the posture it tests - the step-pipeline precedent.
+	s := harness.Start(t, harness.WithConfigOverlay(map[string]any{
+		"agent.review.enabled": true,
+	}))
+	s.RegisterProject(t, "e2e-project")
 	sessionID := s.CreateSession(t, "of07", s.ProjectDir)
 
 	artifact := filepath.Join(s.ProjectDir, "of07.txt")
