@@ -2167,8 +2167,17 @@ func (p *pipeline) playbackWorker() {
 		// goroutine, so the daemon can never see played before the last
 		// PCM byte was handed off.
 		if drained && item.frame.Last != nil && *item.frame.Last && p.child != nil {
-			if perr := p.child.emitPlayed(p.ctx, p.ccid); perr != nil {
-				p.logger.Warn("voicechild: emit played frame", "err", perr, "call_id", p.ccid)
+			// A clear may land between playbackStream's natural EOF and
+			// this emit (Linux scheduling makes that window observable).
+			// Re-check the generation: an interrupted turn must not emit
+			// a phantom played edge on dead audio.
+			p.playMu.Lock()
+			stillLive := p.playGen == item.gen && !p.dropQueued
+			p.playMu.Unlock()
+			if stillLive {
+				if perr := p.child.emitPlayed(p.ctx, p.ccid); perr != nil {
+					p.logger.Warn("voicechild: emit played frame", "err", perr, "call_id", p.ccid)
+				}
 			}
 		}
 	}

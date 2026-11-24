@@ -136,9 +136,23 @@ func TestWriteToClientWedgedReaderIsBounded(t *testing.T) {
 
 	writeDone := make(chan error, 1)
 	go func() {
-		chunk := bytes.Repeat([]byte{0x11}, 64*1024) // > the default unix buffer
-		_, werr := p.WriteToClient(chunk)
-		writeDone <- werr
+		chunk := bytes.Repeat([]byte{0x11}, 64*1024)
+		// Linux unix-socket send buffers are often ~212 KB, larger than
+		// a single chunk. Keep writing until WriteToClient actually
+		// blocks against the full buffer; only then can the deadline
+		// fire. Bounded so a broken path fails instead of hanging.
+		deadline := time.Now().Add(clientWriteTimeout + 3*time.Second)
+		for time.Now().Before(deadline) {
+			n, werr := p.WriteToClient(chunk)
+			if werr != nil {
+				writeDone <- werr
+				return
+			}
+			if n < len(chunk) {
+				continue
+			}
+		}
+		writeDone <- nil
 	}()
 
 	select {

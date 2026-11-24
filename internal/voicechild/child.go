@@ -17,6 +17,7 @@ import (
 	"log/slog"
 	"net"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/caimlas/meept/internal/voice/clipstore"
@@ -352,6 +353,17 @@ func (c *Child) serve(ctx context.Context, conn net.Conn) error {
 			}
 		}
 		if err := br.Err(); err != nil {
+			// Linux reports a peer that closes with unread data as
+			// ECONNRESET where macOS reports a clean EOF. Both mean the
+			// daemon closed the text socket; normal teardown must not
+			// surface it as a child error.
+			if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) || errors.Is(err, syscall.ECONNRESET) {
+				select {
+				case errCh <- nil:
+				case <-readCtx.Done():
+				}
+				return
+			}
 			select {
 			case errCh <- fmt.Errorf("voicechild: read text socket: %w", err):
 			case <-readCtx.Done():
