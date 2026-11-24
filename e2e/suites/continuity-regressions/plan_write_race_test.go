@@ -150,8 +150,18 @@ func TestPlanWriteSerialization_ApproveRaceKeepsOriginAndAppliedMarker(t *testin
 		if !strings.Contains(content, "\n- applied: ") {
 			t.Fatalf("iter %d: plan file lost the applied marker (actuator write clobbered):\n%s", i, content)
 		}
-		if !strings.Contains(content, "- status: executing") {
-			t.Fatalf("iter %d: plan file lost the executing status (actuator write clobbered the synthesis rewrite):\n%s", i, content)
+		// The synthesis rewrite's terminal status must survive alongside
+		// the actuator's applied marker (the lost-update class 9f503122
+		// pins). Accept BOTH executing and completed: the zero-phase
+		// guard (d01cb475) completes an evolver archive plan -- which
+		// has no phases -- immediately after Synthesize, so on this tree
+		// the rewrite lands completed, not executing. A lost update
+		// still fails either way: whichever writer loses, the file
+		// carries the OLDER status (approved/pending_approval), which
+		// matches neither accepted value.
+		if !strings.Contains(content, "- status: executing") &&
+			!strings.Contains(content, "- status: completed") {
+			t.Fatalf("iter %d: plan file lost the synthesis status rewrite (actuator write clobbered it):\n%s", i, content)
 		}
 
 		// 10. The actuator actually archived the skill (leaf-02 semantics —
