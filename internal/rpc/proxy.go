@@ -63,9 +63,15 @@ type busSubscription struct {
 	// which — unlike the legacy wall-clock `since` filter — can never skip
 	// an event that was buffered before the client observed its cursor.
 	nextSeq int64
+	// polledSeq is the highest seq the client has actually consumed via
+	// bus.poll. Trim accounting in handleBusPoll must not count a record
+	// that was already delivered as dropped — doing so double-counts it
+	// and breaks the buffered+dropped==published identity.
+	polledSeq int64
 	// trimmed counts records discarded from the tail of Events by the
-	// MaxEvents drop-oldest trim. Drop accounting: surfaced in the
-	// bus.poll response so buffer overflow is never silent.
+	// MaxEvents drop-oldest trim that the client never polled. Drop
+	// accounting: surfaced in the bus.poll response so buffer overflow is
+	// never silent.
 	trimmed int64
 	// criticalTrimmed counts records discarded from the critical ring by
 	// its own (much larger) overflow trim. Kept separate from trimmed so
@@ -591,12 +597,18 @@ func (p *ProxyHandler) handleBusSubscribe(ctx context.Context, params json.RawMe
 						}
 					} else {
 						sub.Events = append(sub.Events, event)
-						// Trim to max size -- drop-oldest, explicitly counted
-						// so buffer overflow shows up in bus.poll responses
-						// ("dropped") instead of vanishing silently.
+						// Trim to max size -- drop-oldest. Count only records
+						// the client has NOT already polled; a delivered
+						// record evicted from the ring is not a drop.
 						if over := len(sub.Events) - sub.MaxEvents; over > 0 {
+							lost := 0
+							for _, ev := range sub.Events[:over] {
+								if ev.Seq > sub.polledSeq {
+									lost++
+								}
+							}
 							sub.Events = sub.Events[over:]
-							sub.trimmed += int64(over)
+							sub.trimmed += int64(lost)
 						}
 					}
 					slog.Debug("Added event to subscription buffer",
@@ -689,11 +701,24 @@ func (p *ProxyHandler) handleBusPoll(ctx context.Context, params json.RawMessage
 		}
 	}
 
-	// Dropped = records trimmed from the progress buffer (drop-oldest
-	// overflow) + messages the bus discarded because a collector channel
-	// was full at publish time. Explicit, in-band accounting; never
-	// silent. Critical-ring overflow is counted separately and only ever
-	// reflects critical loss, never progress loss (C6).
+	// Advance the consumed cursor to the highest seq this poll actually
+	// returns. Only the seq cursor has consumed-once semantics: a legacy
+	// since=0 poll returns ALL buffered events every time, so it must not
+	// advance this cursor. A record with Seq <= polledSeq that later gets
+	// trimmed was already delivered, so it is not a drop.
+	if useSeq {
+		for _, e := range events {
+			if e.Seq > sub.polledSeq {
+				sub.polledSeq = e.Seq
+			}
+		}
+	}
+
+	// Dropped = records trimmed from the progress ring that the client
+	// never consumed + bus-level drops from a full collector channel.
+	// A trimmed record with Seq <= polledSeq was already delivered and
+	// is NOT a drop — counting it here double-counts it and breaks the
+	// delivered+dropped==published identity under a slow poller.
 	dropped := sub.trimmed + sub.criticalTrimmed
 	for _, ts := range sub.TopicSubs {
 		dropped += ts.DroppedCount()
