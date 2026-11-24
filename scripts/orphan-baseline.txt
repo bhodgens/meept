@@ -49,13 +49,12 @@ published-not-subscribed sms.inbound.received
 published-not-subscribed sms.state.changed
 published-not-subscribed task.approved
 published-not-subscribed task.cancelled
+published-not-subscribed task.draft_status
 published-not-subscribed task.error
 published-not-subscribed task.filter_retry
 published-not-subscribed task.handoff_created
-published-not-subscribed task.interview
 published-not-subscribed task.pending_approval
 published-not-subscribed task.planned
-published-not-subscribed task.rejected
 published-not-subscribed task.review_requested
 published-not-subscribed task.validation_retry
 published-not-subscribed voice.call.ended
