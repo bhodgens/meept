@@ -498,8 +498,10 @@ func TestClipBargeInClearsLikeSynth(t *testing.T) {
 	fake := newRecordingTTS()
 	swapTTS(p, fake)
 
-	// Long cached clip: 40 chunks of 640 B at the paced 2 ms drain.
-	pcm := putClip(t, store, clipKeyHex, 0x42, 40)
+	// Long cached clip: enough chunks to exceed a Linux unix-socket send
+	// buffer (~212 KB), so the clear lands mid-stream on every platform.
+	// 400 chunks x 640 B = 256 KB; 4 paced reads then leave it in flight.
+	pcm := putClip(t, store, clipKeyHex, 0x42, 400)
 	_ = pcm
 
 	d.sendLine(childConn, voiceframe.Frame{
