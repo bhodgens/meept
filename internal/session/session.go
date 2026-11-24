@@ -389,18 +389,33 @@ func (s *MemoryStore) GetByConversationID(conversationID string) *Session {
 	return nil
 }
 
-// GetMostRecent returns the most recently active session.
+// GetMostRecent returns the restore-policy session (aligned restore
+// policy, bughunt wave2 finding 4 — see Store.GetMostRecent): the most
+// recent NON-ARCHIVED session WITH history (LeafMessageID set), falling
+// back to the most recent non-archived session, nil when only archived
+// sessions exist. Mirrors the GUI's findMostRecentSessionWithHistory →
+// findReusableEmptySession chain (commit b7a20820) and SQLiteStore.
 func (s *MemoryStore) GetMostRecent() *Session {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	var mostRecent *Session
+	var mostRecentWithHistory, mostRecentEmpty *Session
 	for _, session := range s.sessions {
-		if mostRecent == nil || session.LastActivity.After(mostRecent.LastActivity) {
-			mostRecent = session
+		if session.Archived {
+			continue
+		}
+		if session.LeafMessageID != nil {
+			if mostRecentWithHistory == nil || session.LastActivity.After(mostRecentWithHistory.LastActivity) {
+				mostRecentWithHistory = session
+			}
+		} else if mostRecentEmpty == nil || session.LastActivity.After(mostRecentEmpty.LastActivity) {
+			mostRecentEmpty = session
 		}
 	}
-	return mostRecent
+	if mostRecentWithHistory != nil {
+		return mostRecentWithHistory
+	}
+	return mostRecentEmpty
 }
 
 // List returns all sessions that have assistant responses.

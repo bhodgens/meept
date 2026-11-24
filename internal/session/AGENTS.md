@@ -47,6 +47,20 @@ AGENTS.md) is the key every downstream consumer — sticky endpoint map,
 teardown snapshot, budget scopes — shares with the LLM layer; never mint a
 second identity for lifecycle events.
 
+## GetMostRecent is the aligned restore policy
+
+`Store.GetMostRecent` (both `SQLiteStore` and `MemoryStore`) returns the
+AUTO-RESUME restore target under the policy the GUI ships (commit b7a20820,
+`findMostRecentSessionWithHistory` → `findReusableEmptySession`): the most
+recent NON-ARCHIVED session WITH history (`leaf_message_id` set), falling
+back to the most recent non-archived session when none has history, nil
+when only archived sessions exist (callers then create a session). It is
+NOT a raw `ORDER BY last_activity DESC LIMIT 1` — a soft-archived or empty
+leftover session must never win (bughunt wave2 finding 4; the TUI
+auto-resume in `internal/tui/app.go` consumes `session.get_most_recent`
+and previously bound exactly those). Pinned by
+`TestGetMostRecentRestorePolicy` / `TestMemoryStoreGetMostRecentRestorePolicy`.
+
 ## User renames are durable (description_user_set)
 
 `Session.DescriptionUserSet` (column `description_user_set`, additive

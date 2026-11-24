@@ -1982,3 +1982,131 @@ func TestSQLiteStore_UserSetMarkerLegacyDefault(t *testing.T) {
 		t.Fatalf("legacy row must still auto-name: written=%v err=%v", written, err)
 	}
 }
+
+// TestGetMostRecentRestorePolicy pins the bughunt-wave2 finding-4 aligned
+// restore policy on the SQLite store (mirrors the GUI's
+// findMostRecentSessionWithHistory → findReusableEmptySession chain,
+// commit b7a20820): history > empty > never archived. Before the fix the
+// TUI auto-resume bound whatever had the freshest last_activity — an
+// archived or empty leftover session the GUI would skip.
+func TestGetMostRecentRestorePolicy(t *testing.T) {
+	store, _ := testHelper(t)
+	defer store.Close()
+
+	// empty-old: no history, oldest activity.
+	emptyOld, err := store.Create("empty-old")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	// with-history: has leaf_message_id.
+	withHistory, err := store.Create("with-history")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := store.SetLeafMessageID(withHistory.ID, 42); err != nil {
+		t.Fatalf("SetLeafMessageID: %v", err)
+	}
+	// empty-new: no history, FRESHEST activity — the old ORDER BY
+	// last_activity DESC returned this one.
+	emptyNew, err := store.Create("empty-new")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	// last_activity is second-resolution RFC3339; Create calls in the same
+	// second tie and make ORDER BY nondeterministic. Stamp explicit,
+	// strictly increasing timestamps instead.
+	setActivity := func(id, ts string) {
+		if _, err := store.db.Exec("UPDATE sessions SET last_activity = ? WHERE id = ?", ts, id); err != nil {
+			t.Fatalf("set last_activity: %v", err)
+		}
+	}
+	setActivity(emptyOld.ID, "2026-01-01T00:00:00Z")
+	setActivity(withHistory.ID, "2026-01-02T00:00:00Z")
+	setActivity(emptyNew.ID, "2026-01-03T00:00:00Z")
+
+	// Preference: history beats a fresher empty session.
+	got := store.GetMostRecent()
+	if got == nil || got.ID != withHistory.ID {
+		t.Fatalf("GetMostRecent = %v, want the session WITH history (%s)", gotID(got), withHistory.ID)
+	}
+
+	// A freshest-but-ARCHIVED session must never win over history.
+	archivedNew, err := store.Create("archived-new")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := store.SetLeafMessageID(archivedNew.ID, 7); err != nil {
+		t.Fatalf("SetLeafMessageID: %v", err)
+	}
+	setActivity(archivedNew.ID, "2026-01-04T00:00:00Z")
+	if err := store.Archive(archivedNew.ID, true); err != nil {
+		t.Fatalf("Archive: %v", err)
+	}
+	if got := store.GetMostRecent(); got == nil || got.ID != withHistory.ID {
+		t.Fatalf("GetMostRecent = %v, want %s (archived session must never be returned)", gotID(got), withHistory.ID)
+	}
+
+	// Fallback: with every history session archived, the most recent
+	// NON-ARCHIVED empty session wins.
+	if err := store.Archive(withHistory.ID, true); err != nil {
+		t.Fatalf("Archive: %v", err)
+	}
+	got = store.GetMostRecent()
+	if got == nil || got.ID != emptyNew.ID {
+		t.Fatalf("GetMostRecent = %v, want freshest non-archived empty session (%s)", gotID(got), emptyNew.ID)
+	}
+
+	// Nil when every session is archived.
+	for _, id := range []string{emptyOld.ID, emptyNew.ID} {
+		if err := store.Archive(id, true); err != nil {
+			t.Fatalf("Archive: %v", err)
+		}
+	}
+	if got := store.GetMostRecent(); got != nil {
+		t.Fatalf("GetMostRecent = %v, want nil when only archived sessions exist", gotID(got))
+	}
+}
+
+func gotID(s *Session) string {
+	if s == nil {
+		return "<nil>"
+	}
+	return s.ID
+}
+
+// TestMemoryStoreGetMostRecentRestorePolicy pins the same aligned restore
+// policy on the in-memory store (the two Store implementations must agree).
+func TestMemoryStoreGetMostRecentRestorePolicy(t *testing.T) {
+	store := NewMemoryStore(slog.Default())
+
+	emptyOld, err := store.Create("empty-old")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	withHistory, err := store.Create("with-history")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := store.SetLeafMessageID(withHistory.ID, 42); err != nil {
+		t.Fatalf("SetLeafMessageID: %v", err)
+	}
+	emptyNew, err := store.Create("empty-new")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := store.UpdateActivity(emptyNew.ID); err != nil {
+		t.Fatalf("UpdateActivity: %v", err)
+	}
+
+	if got := store.GetMostRecent(); got == nil || got.ID != withHistory.ID {
+		t.Fatalf("GetMostRecent = %v, want the session WITH history (%s)", gotID(got), withHistory.ID)
+	}
+
+	if err := store.Archive(withHistory.ID, true); err != nil {
+		t.Fatalf("Archive: %v", err)
+	}
+	if got := store.GetMostRecent(); got == nil || got.ID != emptyNew.ID {
+		t.Fatalf("GetMostRecent = %v, want %s (history archived, freshest empty wins)", gotID(got), emptyNew.ID)
+	}
+	_ = emptyOld
+}

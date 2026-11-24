@@ -719,7 +719,15 @@ func (s *SQLiteStore) GetByConversationID(conversationID string) *Session {
 	return s.getByColumn("conversation_id", conversationID)
 }
 
-// GetMostRecent returns the most recently active session.
+// GetMostRecent returns the most recently active session under the
+// ALIGNED RESTORE POLICY (bughunt wave2, finding 4; mirrors the GUI's
+// findMostRecentSessionWithHistory → findReusableEmptySession chain from
+// commit b7a20820): prefer the most recent NON-ARCHIVED session WITH
+// history (leaf_message_id set), fall back to the most recent
+// non-archived session when nothing has history, and NEVER return an
+// archived session (the TUI auto-resume used to bind a soft-archived or
+// empty leftover session the GUI would skip). Nil when no non-archived
+// session exists — callers fall back to session creation.
 func (s *SQLiteStore) GetMostRecent() *Session {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -727,7 +735,8 @@ func (s *SQLiteStore) GetMostRecent() *Session {
 	row := s.db.QueryRow(`
 		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence, archived, worktree_id, worktree_path, owner_id, foreground, last_user_message_at, detection_context, goal_id, employee_id, plan_mode, description_user_set
 		FROM sessions
-		ORDER BY last_activity DESC
+		WHERE archived = 0
+		ORDER BY (leaf_message_id IS NOT NULL) DESC, last_activity DESC
 		LIMIT 1`) //nolint:mutexio // mutex serializes sqlite connection access
 
 	return s.scanSession(row)

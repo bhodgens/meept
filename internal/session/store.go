@@ -113,6 +113,11 @@ type Store interface {
 	Ensure(id, name string) (*Session, error)
 	Get(id string) *Session
 	GetByConversationID(conversationID string) *Session
+	// GetMostRecent returns the restore-policy session: the most recent
+	// NON-ARCHIVED session WITH history (leaf_message_id set), falling
+	// back to the most recent non-archived session when none has history,
+	// nil when no non-archived session exists (aligned restore policy,
+	// bughunt wave2 finding 4 — mirrors the GUI's auto-resume predicate).
 	GetMostRecent() *Session
 	List() ([]*Session, error)
 	Delete(id string) bool
