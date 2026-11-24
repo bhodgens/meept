@@ -26,6 +26,24 @@ boundaries:
   transport failure through `codexErrorFromResponse` in one place and
   has no per-status retry loop, so it needs no such early-exit; its one
   retry wrapper re-dispatches ONLY the empty-completion lane.)
+- **Transient-transport re-dial lane (per-model `transient_retries`).**
+  A connection-level death (EOF/reset with NO HTTP status - the proxy
+  worker-kill shape) re-dials the SAME provider inside one outer attempt,
+  up to `ModelConfig.TransientRetries` (models.json5 `transient_retries`,
+  default 0 = byte-identical to the pre-feature single-shot transport
+  handling). The lane lives in the three OpenAI retry loops via
+  `doRequestRetryTransport` / `doStreamRequestRetryTransport` (client.go):
+  it funds ONLY the no-status transport class after the refusal/quota/
+  overflow/empty early-exits, never a dead ctx, and the streaming twin
+  carries a DUPLICATION GUARD — a stream that already delivered content
+  or tool-call deltas is never re-dialed (a second answer would
+  concatenate; the B-03 resume path owns that shape). A re-dial does NOT
+  consume a shortRetries attempt and does NOT record an alias failure
+  while budget remains; exhaustion returns the raw transport error to the
+  classification switch, which returns it (default branch) exactly as the
+  pre-feature code did. Pinned by `client_transient_retry_test.go` (unit)
+  and `e2e/suites/continuity-regressions/transient_retry_test.go`
+  (manifest continuity-regressions-11/12).
 - **Empty/whitespace completions are provider flakes, not fatal errors.**
   EVERY client classifies them, not just the openai ones: a 200-OK body
   that produces no answer — blank or whitespace-only text, no tool call,

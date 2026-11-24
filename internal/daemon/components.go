@@ -9715,6 +9715,7 @@ func buildProviderConfigs(cfg *config.ModelsConfig, logger *slog.Logger, loopbac
 			Temperature:          model.Temperature,
 			ContextLimit:         model.ContextLimit,
 			Capabilities:         caps,
+			TransientRetries:     model.TransientRetries,
 		})
 
 		logger.Debug("Added provider config",
