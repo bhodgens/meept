@@ -28,6 +28,12 @@ type QueueEntry struct {
 	Queue      *MessageQueue
 	Loop       *AgentLoop // the loop that owns this queue (may be nil in tests)
 	Generation uint64
+	// PrimaryID is the conversation id this entry was registered under as
+	// its PRIMARY key (RegisterActiveQueue's conversationID argument).
+	// Alias keys point at the same entry but are never an entry's primary
+	// key; the shadow guard in RegisterActiveQueue uses this to tell a
+	// live primary registration apart from a replaceable alias mapping.
+	PrimaryID string
 }
 
 // AgentRegistry manages agent specifications and instantiated agent loops.
@@ -2153,6 +2159,7 @@ func (r *AgentRegistry) RegisterActiveQueue(conversationID string, q *MessageQue
 		Queue:      q,
 		Loop:       loop,
 		Generation: r.nextGen,
+		PrimaryID:  conversationID,
 	}
 
 	r.activeQueues[conversationID] = entry
@@ -2169,6 +2176,30 @@ func (r *AgentRegistry) RegisterActiveQueue(conversationID string, q *MessageQue
 	// PRIMARY key; aliases are unregistered with it (UnregisterActiveQueue).
 	for _, aliasID := range aliasIDs {
 		if aliasID == "" || aliasID == conversationID {
+			continue
+		}
+		// Shadow guard (bughunt, 2026-11-23): an alias key may collide
+		// with a LIVE registration's PRIMARY key (normal shape: a
+		// step-job turn aliases the session conversation id while an
+		// interactive chat turn is registered under that same id as its
+		// primary). Overwriting that entry silently orphaned it —
+		// UnregisterActiveQueue then found the wrong entry under the
+		// key, deleted every key pointing at it, and closed a live
+		// queue mid-turn (steer/followup 404 + injection into a closed
+		// queue), or the real owner's unregister leaked its queue. A
+		// primary registration can never be shadowed by an alias: skip
+		// when the entry currently under aliasID owns that key as its
+		// primary. Alias-vs-alias replacement (a newer turn re-arming
+		// the same session alias) is unaffected — the pointer-compare
+		// sweep in UnregisterActiveQueue already keeps the older
+		// registration's unregister from deleting the newer alias.
+		if existing, ok := r.activeQueues[aliasID]; ok && existing != nil &&
+			existing != entry && existing.PrimaryID == aliasID {
+			r.logger.Debug("skipping active-queue alias: key is another registration's primary",
+				"alias_id", aliasID,
+				"primary_id", conversationID,
+				"existing_primary", existing.PrimaryID,
+			)
 			continue
 		}
 		r.activeQueues[aliasID] = entry

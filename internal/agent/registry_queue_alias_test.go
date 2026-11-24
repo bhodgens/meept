@@ -76,6 +76,55 @@ func TestAliasLifecycleNewerRegistrationWins(t *testing.T) {
 	}
 }
 
+// Bughunt (2026-11-23): an alias key that equals another LIVE
+// registration's PRIMARY key must NOT shadow it. Shape: an interactive
+// chat turn registers primary K; a step-job turn then registers with
+// alias K. Before the shadow guard the alias overwrote K's entry, so the
+// step job's unregister deleted K and closed the LIVE chat queue
+// mid-turn (steer/followup 404 + injection into a closed queue).
+func TestRegisterActiveQueueAliasCannotShadowLivePrimary(t *testing.T) {
+	r := NewAgentRegistry(RegistryConfig{
+		Queues: config.AgentQueuesConfig{Enabled: true},
+	})
+	defer r.Close()
+
+	// A: interactive chat turn, primary "conv-K".
+	qA := NewMessageQueue(WithQueueAgentID("chat"))
+	r.RegisterActiveQueue("conv-K", qA, nil)
+
+	// B: step-job turn under an ephemeral id aliasing "conv-K".
+	qB := NewMessageQueue(WithQueueAgentID("step"))
+	r.RegisterActiveQueue("step-task-shadow-step-1", qB, nil, "conv-K")
+
+	// The live primary still owns its key.
+	got, _ := r.GetActiveQueue("conv-K")
+	if got != qA {
+		t.Fatalf("alias shadowed a live primary: conv-K resolves to %v, want the primary queue", got)
+	}
+
+	// B's unregister must leave A's registration (and queue) intact.
+	r.UnregisterActiveQueue("step-task-shadow-step-1")
+	got, _ = r.GetActiveQueue("conv-K")
+	if got != qA {
+		t.Fatalf("conv-K after alias unregister: got %v, want the primary queue", got)
+	}
+	if qA.IsClosed() {
+		t.Fatal("alias owner's unregister closed the LIVE primary queue")
+	}
+	if !qB.IsClosed() {
+		t.Fatal("unregistering B must close B's own queue")
+	}
+
+	// A's own unregister removes the key and closes its queue.
+	r.UnregisterActiveQueue("conv-K")
+	if got, _ := r.GetActiveQueue("conv-K"); got != nil {
+		t.Fatalf("primary key survived its own unregister: %v", got)
+	}
+	if !qA.IsClosed() {
+		t.Fatal("primary queue not closed after its own unregister")
+	}
+}
+
 // Empty and duplicate alias ids are skipped, and a queue with NO aliases
 // behaves byte-identically (the interactive-turn shape).
 func TestRegisterActiveQueueAliasSkipsEmptyAndDupes(t *testing.T) {
