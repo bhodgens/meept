@@ -609,8 +609,14 @@ func TestKanbanDefaultSeedsDevKeyToken(t *testing.T) {
 
 	// The dev-key file must exist on a default boot (the daemon generates
 	// it first-boot). Read it only to confirm presence/length; never print
-	// or log the contents.
-	keyData, err := os.ReadFile(filepath.Join(s.MeeptHome, "dev_key"))
+	// or log the contents. Poll like the token-store check below: the seed
+	// rides StartKanbanSidecar, which boots LATE in Run (after the
+	// classifier boot gate), while harness.Start returns as soon as the
+	// RPC socket answers -- on a slow boot the first-boot write can land
+	// after socket readiness, and the flake rate showed it routinely does
+	// (2/4 isolated runs). A regression that removes provisioning still
+	// fails at the deadline.
+	keyData, err := waitForFile(t, filepath.Join(s.MeeptHome, "dev_key"), 15*time.Second)
 	if err != nil {
 		t.Fatalf("default boot did not provision $MEEPT_HOME/dev_key: %v", err)
 	}
@@ -655,6 +661,28 @@ func TestKanbanDefaultSeedsDevKeyToken(t *testing.T) {
 	}
 	if len(want) != 0 {
 		t.Fatalf("dev-key token grants missing %v (got %v)", want, grants)
+	}
+}
+
+// waitForFile polls until path exists and reads non-empty, or errors at
+// the deadline. Used where the harness returns at socket readiness but
+// the write lands later in boot (dev-key first-boot provisioning rides
+// the late kanban sidecar boot).
+func waitForFile(t *testing.T, path string, timeout time.Duration) ([]byte, error) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		data, err := os.ReadFile(path)
+		if err == nil && len(data) > 0 {
+			return data, nil
+		}
+		if time.Now().After(deadline) {
+			if err != nil {
+				return nil, err
+			}
+			return nil, fmt.Errorf("%s exists but is empty", path)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
