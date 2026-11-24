@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -247,7 +248,7 @@ func Start(t testing.TB, opts ...StartOption) *Stack {
 
 	s.Daemon = newDaemon(t, s)
 	s.writeConfigs(sc)
-	s.Daemon.boot()
+	s.Daemon.boot(sc)
 
 	// Defensive teardown even though Daemon.boot registers its own.
 	t.Cleanup(func() { s.Daemon.stop() })
@@ -709,7 +710,35 @@ func e2eBootTimeout() time.Duration {
 
 // boot starts the daemon with cwd deliberately different from any project
 // dir (the bash rig's A4 rule) and waits for /health.
-func (d *Daemon) boot() {
+//
+// Port-conflict retry (2026-11-24 CI class): FreePort probes by
+// listen+close, then the daemon binds LATER - a parallel test binary (or
+// any process) can claim the probed port in that window ("bind: address
+// already in use"). The daemon logs the failure and idles un-healthy, so
+// the boot poll burns its whole budget and the suite dies on a flake.
+// When the poll sees a bind conflict in the daemon log, kill the process,
+// re-provision a fresh port + config, and retry (bounded).
+func (d *Daemon) boot(sc *startConfig) {
+	for attempt := 0; ; attempt++ {
+		err := d.bootOnce(sc, attempt)
+		if err == nil {
+			return
+		}
+		if attempt >= portConflictRetries {
+			t := d.t
+			t.Fatalf("harness: daemon boot: %v", err)
+		}
+	}
+}
+
+// bootOnce starts one daemon process and polls /health. It returns a
+// non-nil error describing why boot failed WITHOUT calling t.Fatal, so
+// boot() can retry on the port-conflict class. A port conflict is
+// detected from the daemon's own log (the process stays alive after the
+// failed bind, so the exited-process check alone never catches it).
+const portConflictRetries = 3
+
+func (d *Daemon) bootOnce(sc *startConfig, attempt int) error {
 	t := d.t
 	s := d.stack
 
@@ -718,13 +747,19 @@ func (d *Daemon) boot() {
 	default:
 		// Bound concurrent daemons; fail loudly rather than queueing
 		// into port exhaustion.
-		t.Fatal("harness: too many concurrent scratch daemons (slot cap 2); a prior test leaked its daemon")
+		return errors.New("too many concurrent scratch daemons (slot cap 2); a prior test leaked its daemon")
 	}
 
 	bin := DaemonPath(t)
+	if attempt > 0 {
+		// Retry on a fresh port: writeConfigs re-probes FreePort and
+		// rewrites the pinned config with it (the only port consumer in
+		// the template is the transport http addr).
+		d.stack.writeConfigs(sc)
+	}
 	logFile, err := os.OpenFile(d.logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
-		t.Fatalf("harness: open daemon log: %v", err)
+		return fmt.Errorf("open daemon log: %w", err)
 	}
 
 	cmd := exec.Command(bin,
@@ -745,7 +780,7 @@ func (d *Daemon) boot() {
 	if err := cmd.Start(); err != nil {
 		logFile.Close()
 		<-daemonSlots
-		t.Fatalf("harness: start daemon: %v", err)
+		return fmt.Errorf("start daemon: %w", err)
 	}
 	d.cmd = cmd
 	logFile.Close()
@@ -765,26 +800,42 @@ func (d *Daemon) boot() {
 	healthURL := "https://" + d.httpAddr + "/health"
 	for {
 		if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
-			t.Fatalf("harness: daemon exited during boot; log tail:\n%s", d.logTail())
+			return fmt.Errorf("daemon exited during boot; log tail:\n%s", d.logTail())
 		}
 		resp, err := client.Get(healthURL) //nolint:noctx // bounded poll in test harness
 		if err == nil {
 			io.Copy(io.Discard, resp.Body) //nolint:errcheck
 			resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
-				return
+				return nil
 			}
 		}
+		// Port-conflict class: the daemon logged a bind failure for its
+		// assigned port but stays alive. Kill it and let boot() retry on
+		// a fresh port instead of burning the full boot budget.
+		if log, lerr := os.ReadFile(d.logPath); lerr == nil &&
+			strings.Contains(string(log), "bind: address already in use") {
+			if kerr := cmd.Process.Kill(); kerr != nil {
+				t.Logf("harness: port-conflict kill failed: %v", kerr)
+			}
+			if _, werr := cmd.Process.Wait(); werr != nil {
+				t.Logf("harness: port-conflict wait failed: %v", werr)
+			}
+			return errPortConflict
+		}
 		if time.Now().After(deadline) {
-			t.Fatalf("harness: daemon not healthy within %s (%s); log tail:\n%s", e2eBootTimeout(), healthURL, d.logTail())
+			return fmt.Errorf("daemon not healthy within %s (%s); log tail:\n%s", e2eBootTimeout(), healthURL, d.logTail())
 		}
 		// A dead daemon never becomes healthy.
 		if err := cmd.Process.Signal(syscall.Signal(0)); err != nil {
-			t.Fatalf("harness: daemon process died during boot; log tail:\n%s", d.logTail())
+			return fmt.Errorf("daemon process died during boot; log tail:\n%s", d.logTail())
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
 }
+
+// errPortConflict signals boot() to retry with a freshly probed port.
+var errPortConflict = errors.New("daemon could not bind its probed port (address already in use)")
 
 // stop terminates the daemon (SIGTERM, then SIGKILL) exactly once. Safe to
 // call from tests (A6 lifecycle checks) AND from t.Cleanup teardown — the
