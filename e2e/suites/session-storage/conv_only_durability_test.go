@@ -121,16 +121,43 @@ func gateMessagesGet(t *testing.T, s *harness.Stack, sessionID string) map[strin
 
 // TestConvOnlyDialogDurability pins C4 history durability over the live
 // daemon: a conversation-only submit's exchange must be readable after
-// the turn completes (F-ORCH-29: FK 787 silently drops it today).
+// the turn completes (F-ORCH-29: FK 787 silently dropped it).
+//
+// Contract alignment (03-context/01 T1, landed): chat.submit VALIDATES ids
+// - an unknown conversation id is rejected accepted:false ("create a
+// session first"), never a fabricated phantom session (F-ORCH-22, pinned
+// by internal/rpc/chat_submit_validate_test.go TestUnknownIDRejected). The
+// durability scenario is therefore the GUI/bench shape that actually
+// reaches the daemon: conversation_id ONLY (no session_id) for an EXISTING
+// session. The finding-3 owner resolution persists the exchange under the
+// session's primary id, so session.messages.get on the primary id must see
+// user + assistant rows (the upsert-before-persist lane, never FK 787).
 func TestConvOnlyDialogDurability(t *testing.T) {
 	s := harness.Start(t)
 	s.RegisterProject(t, "e2e-project")
 
-	// A conversation id with NO session row - the bench/GUI conv-only
-	// shape. The fake LLM answers chat turns deterministically.
-	const convID = "conv-gate-durability-only"
+	// The real session behind the conversation id, then read its own conv
+	// id back (the shape the Flutter GUI sends as conversation_id).
+	sessionID := s.CreateSession(t, "gate-conv-only", s.ProjectDir)
+	rpc := harness.DialRPC(t, s.SocketPath)
+	sess := rpc.CallResult("session.get", map[string]any{"id": sessionID})
+	convID, _ := sess["conversation_id"].(string)
+	if convID == "" {
+		t.Fatalf("session.get returned no conversation_id: %v", sess)
+	}
+
 	const userMsg = "hello from a conversation-only submit, please reply"
+	// The direct chat loop's completion request carries tool schemas, so
+	// the fake serves it through the executor arm: pin BOTH shapes to the
+	// same reply (chat text for tool-less calls, post-tool text once the
+	// scripted tool queue is empty).
 	s.Fake.SetChatText("hello back from the assistant")
+	s.Fake.SetPostToolText("hello back from the assistant")
+	// Pin the chat lane (direct loop): the bare message otherwise drifts
+	// into the dispatched task lane and the persisted assistant row is the
+	// async ack, not the chat reply this durability pin reads back.
+	s.Fake.Script(harness.IsClassifierRequest(),
+		harness.ClassifierJSONResponse(`{"intent":"chat","confidence":0.95,"reasoning":"pinned chat"}`))
 
 	coll := gateNewTerminalCollector(t, s)
 	code, ack := gatePostSubmit(t, s, map[string]any{
@@ -142,7 +169,7 @@ func TestConvOnlyDialogDurability(t *testing.T) {
 		t.Fatalf("conv-only submit status %d: %v", code, ack)
 	}
 	if accepted, _ := ack["accepted"].(bool); !accepted {
-		t.Fatalf("conv-only submit rejected: %v", ack)
+		t.Fatalf("conv-only submit rejected for a KNOWN session's conversation id: %v", ack)
 	}
 	turnID, _ := ack["turn_id"].(string)
 	if turnID == "" {
@@ -155,21 +182,32 @@ func TestConvOnlyDialogDurability(t *testing.T) {
 	}
 
 	// The exchange must be durable: user + assistant rows readable via
-	// session.messages.get keyed on the conversation id.
-	harness.WaitFor(t, 15*time.Second, "conv-only history rows", func() bool {
-		res := gateMessagesGet(t, s, convID)
-		msgs, _ := res["messages"].([]any)
-		return len(msgs) >= 2
-	})
-	res := gateMessagesGet(t, s, convID)
-	raw, err := json.Marshal(res)
-	if err != nil {
-		t.Fatalf("marshal messages: %v", err)
+	// session.messages.get keyed on the session's primary id (finding-3
+	// owner stamping). Read both id shapes defensively - the durable rows
+	// must land under exactly one of them, never vanish to FK 787.
+	readable := func() (string, int) {
+		for _, key := range []string{sessionID, convID} {
+			res := gateMessagesGet(t, s, key)
+			msgs, _ := res["messages"].([]any)
+			if len(msgs) >= 2 {
+				raw, err := json.Marshal(res)
+				if err != nil {
+					t.Fatalf("marshal messages: %v", err)
+				}
+				return string(raw), len(msgs)
+			}
+		}
+		return "", 0
 	}
-	if !strings.Contains(string(raw), userMsg) {
+	harness.WaitFor(t, 15*time.Second, "conv-only history rows", func() bool {
+		_, n := readable()
+		return n >= 2
+	})
+	raw, _ := readable()
+	if !strings.Contains(raw, userMsg) {
 		t.Fatalf("RED (F-ORCH-29): conv-only user message lost from history (FK 787): %s", raw)
 	}
-	if !strings.Contains(string(raw), "hello back from the assistant") {
+	if !strings.Contains(raw, "hello back from the assistant") {
 		t.Fatalf("RED (F-ORCH-29): conv-only assistant reply lost from history (FK 787): %s", raw)
 	}
 }
