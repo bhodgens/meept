@@ -358,3 +358,92 @@ func TestRequestModelOverridePrecedence(t *testing.T) {
 		})
 	}
 }
+
+// TestWithRequestModelOverrideCarriesPrices pins the bughunt CostUSD fix:
+// when a request-scoped selection (user directive or alias resolution)
+// replaces the serving model, the effective config's per-million prices —
+// the source resp.CostUSD is computed from — must be the OVERRIDE's prices,
+// not the client's default-model prices. An unpriced override (local
+// runtime) correctly zeroes the cost.
+//
+// Failing revert: drop the lane switch in withRequestModelOverride — the
+// effective config keeps the client's prices and the assertions below fail.
+func TestWithRequestModelOverrideCarriesPrices(t *testing.T) {
+	promptTokens, completionTokens := 1000, 100
+	server := httptest.NewServer(pricedChatHandlerFor(t))
+	defer server.Close()
+
+	client := NewClient(&ModelConfig{
+		BaseURL:              server.URL,
+		ProviderID:           "prov",
+		ModelID:              "client-default",
+		MaxTokens:            10,
+		CostPerMillionInput:  3.0,
+		CostPerMillionOutput: 15.0,
+	})
+
+	msgs := []ChatMessage{{Role: RoleUser, Content: "price me"}}
+
+	// User-directive lane: the override's prices win.
+	overrideCfg := &ModelConfig{
+		ProviderID:           "prov",
+		ModelID:              "user-choice",
+		CostPerMillionInput:  30.0,
+		CostPerMillionOutput: 60.0,
+	}
+	want := float64(promptTokens)*30.0/1_000_000 + float64(completionTokens)*60.0/1_000_000
+	resp, err := client.Chat(context.Background(), msgs, WithModelOverride(overrideCfg))
+	if err != nil {
+		t.Fatalf("Chat with override: %v", err)
+	}
+	if resp.CostUSD != want {
+		t.Errorf("override-lane CostUSD = %v, want %v (the OVERRIDE's prices, not the client's)", resp.CostUSD, want)
+	}
+
+	// Alias lane: the resolved model's prices win.
+	aliasCfg := &ModelConfig{
+		ProviderID:           "prov",
+		ModelID:              "alias-choice",
+		CostPerMillionInput:  1.0,
+		CostPerMillionOutput: 2.0,
+	}
+	wantAlias := float64(promptTokens)*1.0/1_000_000 + float64(completionTokens)*2.0/1_000_000
+	resp, err = client.Chat(context.Background(), msgs,
+		WithResolvedModel(aliasCfg), WithNoCache())
+	if err != nil {
+		t.Fatalf("Chat with resolved: %v", err)
+	}
+	if resp.CostUSD != wantAlias {
+		t.Errorf("alias-lane CostUSD = %v, want %v (the RESOLVED model's prices)", resp.CostUSD, wantAlias)
+	}
+
+	// Unpriced override (local runtime): cost is 0, NOT the client's price.
+	freeCfg := &ModelConfig{ProviderID: "prov", ModelID: "local-free"}
+	resp, err = client.Chat(context.Background(), msgs,
+		WithModelOverride(freeCfg), WithNoCache())
+	if err != nil {
+		t.Fatalf("Chat with free override: %v", err)
+	}
+	if resp.CostUSD != 0 {
+		t.Errorf("unpriced-override CostUSD = %v, want 0 (zero is the local model's correct price)", resp.CostUSD)
+	}
+
+	// No selection at all: the client's own prices still apply (byte-identical
+	// legacy posture).
+	wantClient := float64(promptTokens)*3.0/1_000_000 + float64(completionTokens)*15.0/1_000_000
+	resp, err = client.Chat(context.Background(), msgs, WithNoCache())
+	if err != nil {
+		t.Fatalf("Chat without selection: %v", err)
+	}
+	if resp.CostUSD != wantClient {
+		t.Errorf("no-selection CostUSD = %v, want %v (client's own prices)", resp.CostUSD, wantClient)
+	}
+}
+
+// pricedChatHandlerFor serves the fixed usage shape pricedChatHandler uses
+// (1000 prompt / 100 completion tokens) via the sibling test file's handler
+// factory; kept as a named alias so this file stays self-documenting.
+func pricedChatHandlerFor(t *testing.T) http.Handler {
+	t.Helper()
+	return pricedChatHandler(t)
+}

@@ -1423,6 +1423,13 @@ type chatOptions struct {
 	// manager's shared configuration.
 	resolvedProviderID string
 	resolvedModelID    string
+	// resolvedCostInput/resolvedCostOutput carry the RESOLVED model's
+	// per-million prices alongside its identity (bughunt CostUSD fix):
+	// resp.CostUSD must price the model that actually served, not the
+	// client's default-model prices. Zero means the resolved model is
+	// unpriced (e.g. a local runtime) — which is the correct price for it.
+	resolvedCostInput  float64
+	resolvedCostOutput float64
 	// overrideProviderID/overrideModelID carry a USER directive (model
 	// reassignment) naming the model that must serve THIS request, set with
 	// WithModelOverride. PRECEDENCE (explicit, enforced in
@@ -1436,6 +1443,10 @@ type chatOptions struct {
 	// channel.
 	overrideProviderID string
 	overrideModelID    string
+	// overrideCostInput/overrideCostOutput carry the USER-directive
+	// model's per-million prices (twin of resolvedCost*).
+	overrideCostInput  float64
+	overrideCostOutput float64
 	// difficulty is the caller's per-turn routing difficulty (1-5,
 	// leaf 07 / Contract C11), set with WithDifficulty and consumed by
 	// leaf 07's sticky difficulty predicate. Zero (the default) =
@@ -1542,9 +1553,13 @@ func WithAgentScope(agentID string) ChatOption {
 // the named provider first (the rest stay as failover tail); the serving
 // Client uses the model id for the wire payload and for the metrics.db
 // llm_calls row, so the ledger records the provider/model that actually
-// served the call. Nil is a no-op. A selection whose ProviderID names a
-// different provider than the client being invoked is ignored by that client
-// (it cannot serve another provider's endpoint); see requestModelOverride.
+// served the call. The model's per-million PRICES ride along too: the
+// effective config's CostPerMillion* fields must describe the model that
+// actually serves, or resp.CostUSD (which now feeds goal-loop budget
+// enforcement) is priced with the client's default-model prices. Nil is a
+// no-op. A selection whose ProviderID names a different provider than the
+// client being invoked is ignored by that client (it cannot serve another
+// provider's endpoint); see requestModelOverride.
 func WithResolvedModel(mc *ModelConfig) ChatOption {
 	return func(o *chatOptions) {
 		if mc == nil {
@@ -1552,6 +1567,8 @@ func WithResolvedModel(mc *ModelConfig) ChatOption {
 		}
 		o.resolvedProviderID = mc.ProviderID
 		o.resolvedModelID = mc.ModelID
+		o.resolvedCostInput = mc.CostPerMillionInput
+		o.resolvedCostOutput = mc.CostPerMillionOutput
 	}
 }
 
@@ -1561,7 +1578,8 @@ func WithResolvedModel(mc *ModelConfig) ChatOption {
 // explicit and enforced in requestModelOverride — a user directive beats an
 // alias resolution regardless of option-append order, because the two travel
 // in separate chatOptions fields and requestModelOverride (not slice order)
-// picks the winner. Nil is a no-op.
+// picks the winner. The directive's per-million prices ride along for
+// CostUSD pricing (see WithResolvedModel). Nil is a no-op.
 func WithModelOverride(mc *ModelConfig) ChatOption {
 	return func(o *chatOptions) {
 		if mc == nil {
@@ -1569,6 +1587,8 @@ func WithModelOverride(mc *ModelConfig) ChatOption {
 		}
 		o.overrideProviderID = mc.ProviderID
 		o.overrideModelID = mc.ModelID
+		o.overrideCostInput = mc.CostPerMillionInput
+		o.overrideCostOutput = mc.CostPerMillionOutput
 	}
 }
 
@@ -1647,14 +1667,30 @@ func (o *chatOptions) requestModelOverride(cfg *ModelConfig) (providerID, modelI
 // > alias resolution > the client's default, see requestModelOverride). It
 // returns a COPY: the client's stored config is never mutated (the selection
 // is per-turn state, and the client may be shared by concurrent sessions).
+//
+// The winning lane's per-million PRICES ride into the copy too (bughunt
+// CostUSD fix): resp.CostUSD is computed from the effective config, so a
+// request served by a different model must be priced at THAT model's rates
+// — pricing it with the client's default-model prices mis-charges the goal
+// loop's daily-budget enforcement. A selection carrying zero prices (an
+// unpriced local runtime) zeroes the copy's prices, which is its correct
+// cost, not a fallback to the client's.
 func withRequestModelOverride(cfg *ModelConfig, o *chatOptions) *ModelConfig {
-	providerID, modelID, _, ok := o.requestModelOverride(cfg)
+	providerID, modelID, lane, ok := o.requestModelOverride(cfg)
 	if !ok || cfg == nil {
 		return cfg
 	}
 	eff := *cfg
 	eff.ProviderID = providerID
 	eff.ModelID = modelID
+	switch lane {
+	case "user-directive":
+		eff.CostPerMillionInput = o.overrideCostInput
+		eff.CostPerMillionOutput = o.overrideCostOutput
+	case "alias":
+		eff.CostPerMillionInput = o.resolvedCostInput
+		eff.CostPerMillionOutput = o.resolvedCostOutput
+	}
 	return &eff
 }
 
