@@ -493,10 +493,23 @@ var binReaperGrace = 3 * time.Second
 // SIGKILL for daemons orphaned by an abnormal test-process exit.
 const daemonKillGrace = 10
 
-// binSweepAge is the age beyond which a meept-e2e-bin* dir in $TMPDIR is
+// binSweepAge is the age beyond which a /tmp/meept* scratch dir is
 // considered orphaned (no live test process can still be using it). The
 // fallback layer for dirs whose watchdog died with its process group.
 const binSweepAge = 24 * time.Hour
+
+// scratchSweepPrefixes is the set of scratch-dir name prefixes swept by the
+// age-floored stale-dir reaper. It covers every known /tmp/meept* scratch
+// writer: e2e binary builds, build/branch/bench scratch dirs, and the
+// scratch rig. The 24h age floor is the sole safety gate — a concurrently
+// live run's dir has a fresh mtime and is never touched.
+var scratchSweepPrefixes = []string{
+	"meept-e2e-",
+	"meept-build-",
+	"meept-branch-",
+	"meept-bench-",
+	"meept-scratch-rig.",
+}
 
 var (
 	// repoRoot is resolved once, at the first harness use, from this
@@ -513,11 +526,15 @@ var (
 // sweepOnce runs the stale-dir sweep at most once per process.
 var sweepOnce sync.Once
 
-// sweepStaleBinDirs removes meept-e2e-bin* dirs in tmpDir older than
-// olderThan. Best-effort: per-entry errors are ignored; the return is the
-// removed count (informational). Never touches dirs inside the age floor,
-// so a concurrently live test run is safe.
-func sweepStaleBinDirs(tmpDir string, olderThan time.Duration) int {
+// sweepStaleBinDirs removes /tmp/meept* scratch dirs in tmpDir whose name
+// starts with one of prefixes and which are older than olderThan. If no
+// prefixes are given, scratchSweepPrefixes is used. Best-effort: per-entry
+// errors are ignored; the return is the removed count (informational). Never
+// touches dirs inside the age floor, so a concurrently live test run is safe.
+func sweepStaleBinDirs(tmpDir string, olderThan time.Duration, prefixes ...string) int {
+	if len(prefixes) == 0 {
+		prefixes = scratchSweepPrefixes
+	}
 	entries, err := os.ReadDir(tmpDir)
 	if err != nil {
 		return 0
@@ -525,7 +542,14 @@ func sweepStaleBinDirs(tmpDir string, olderThan time.Duration) int {
 	cutoff := time.Now().Add(-olderThan)
 	removed := 0
 	for _, e := range entries {
-		if !strings.HasPrefix(e.Name(), "meept-e2e-bin") {
+		matched := false
+		for _, prefix := range prefixes {
+			if strings.HasPrefix(e.Name(), prefix) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
 			continue
 		}
 		info, err := e.Info()
@@ -596,7 +620,7 @@ func spawnBinReaper(dir string, ownerPid int) {
 // old sync.OnceValues semantics. The build runs WITHOUT the lock held
 // (mutexio): concurrent acquirers wait on the done channel.
 func (b *binDirManager) acquire(t testing.TB) (string, error) {
-	sweepOnce.Do(func() { sweepStaleBinDirs(os.TempDir(), binSweepAge) }) // best-effort orphan cleanup
+	sweepOnce.Do(func() { sweepStaleBinDirs(os.TempDir(), binSweepAge, scratchSweepPrefixes...) }) // best-effort orphan cleanup
 
 	b.mu.Lock()
 	if b.dir != "" || b.err != nil {

@@ -99,6 +99,31 @@ join, snapshot env pinning, ordered replay) — not a standalone gate.
 Offline regressions for all of this live in `scripts/gates-speedup-selftest.sh`
 (and `scripts/e2e-census-selftest.sh` for the census contract).
 
+### pre-commit-worktree-closeout (informational — never blocks)
+
+Unnumbered, non-blocking closeout reminder invoked by `pre-commit` once near
+the end of the chain (after the feature-docs gate). It runs
+`git worktree list --porcelain`, skips the primary worktree, and for each
+linked worktree runs `git merge-base --is-ancestor <HEAD> main`. When the
+worktree's HEAD is already merged into `main` but its directory still exists,
+it prints a line like:
+
+```
+WARN: merged worktree still present: /path/to/worktree (HEAD <sha>)
+```
+
+**Informational, never blocks:** it never deletes anything, modifies no state,
+and always exits 0. Its exit status is explicitly ignored by `pre-commit`, so
+a warning can never fail a commit. It is deliberately kept out of the numbered
+`[n/21]` dispatch batch so the 1-21 verdict replay and numbering stay intact.
+It is fast (one `git worktree list` plus one `merge-base` per linked worktree,
+no per-line subprocesses) and safe to run directly:
+
+```bash
+.githooks/pre-commit-worktree-closeout
+```
+
+
 ---
 
 ### pre-commit-deferred

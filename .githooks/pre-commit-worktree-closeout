@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# pre-commit-worktree-closeout
+#
+# INFORMATIONAL / NON-BLOCKING. Warns about linked (non-primary) git worktrees
+# whose HEAD is already merged into `main` but whose directory still exists on
+# disk. This is a closeout reminder only: it never deletes a worktree, never
+# modifies anything, and ALWAYS exits 0 so it can never block a commit.
+#
+# Kept fast (<1s typical for a handful of worktrees): one `git worktree list`
+# plus one `git merge-base --is-ancestor` per linked worktree, all in bash with
+# no per-line subprocesses.
+
+set +e
+set +u
+
+# `git worktree list --porcelain` lists the MAIN (primary) worktree first,
+# followed by each linked worktree. Skip the primary (block 1); inspect the
+# rest. Blocks are separated by blank lines; each begins with "worktree PATH"
+# and contains a "HEAD <sha>" line.
+worktrees="$(git worktree list --porcelain 2>/dev/null)"
+[ -n "$worktrees" ] || exit 0
+
+path=""
+head=""
+n=0
+check_current=0
+
+# Emit a WARN line for the current block only if it is a linked worktree whose
+# HEAD is an ancestor of `main`. A missing/invalid `main` or a bad sha simply
+# yields "not merged" (no warning) — never an error.
+check_block() {
+    [ "$check_current" = "1" ] && [ -n "$path" ] && [ -n "$head" ] || return 0
+    if git merge-base --is-ancestor "$head" main 2>/dev/null; then
+        printf 'WARN: merged worktree still present: %s (HEAD %s)\n' "$path" "$head"
+    fi
+}
+
+while IFS= read -r line; do
+    case "$line" in
+        "worktree "*)
+            check_block                 # flush the previous block
+            n=$((n + 1))
+            path="${line#worktree }"
+            head=""
+            if [ "$n" -eq 1 ]; then check_current=0; else check_current=1; fi
+            ;;
+        "HEAD "*)
+            head="${line#HEAD }"
+            ;;
+    esac
+done <<EOF
+$worktrees
+EOF
+check_block                             # flush the final block
+
+# Informational only: success regardless of warnings (or of git errors above).
+exit 0

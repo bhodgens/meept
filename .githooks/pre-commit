@@ -264,6 +264,20 @@ if ! (cd "$REPO_ROOT" && "$SCRIPT_DIR/pre-commit-feature-docs"); then
     exit 1
 fi
 
+# --------------------------------------------------------------------------
+# Informational: warn about merged-but-not-removed worktrees.
+# pre-commit-worktree-closeout is deliberately NOT in the ENTRIES dispatch
+# batch: the dispatch lib hardcodes the "[n/21]" denominator in every verdict
+# banner, so registering it as idx 22 would print a broken "[22/21]" label and
+# disturb the ordered 1-21 verdict replay. It is purely advisory — it always
+# exits 0, deletes nothing, and its output is informational only. Invoke it
+# once, near the end, and explicitly ignore its exit status so it can never
+# block a commit (blocking=0 semantics without touching the chain structure).
+# --------------------------------------------------------------------------
+if [ -x "$SCRIPT_DIR/pre-commit-worktree-closeout" ]; then
+    "$SCRIPT_DIR/pre-commit-worktree-closeout" || true
+fi
+
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo -e "\e[32m✅ All pre-commit checks passed\e[0m"

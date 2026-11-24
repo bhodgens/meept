@@ -1707,24 +1707,37 @@ e2e-chat:
 #   make e2e-affected              # only suites affected by the working diff
 #                                  # (scripts/e2e-affected.sh --from-diff)
 #
-# e2e-clean-tmp removes $TMPDIR/meept-e2e-bin* scratch-build dirs older than
-# 1 day (crash leftovers; live harness dirs have fresh mtimes and survive).
-# The refcounted harness (e2e/harness/daemon.go) cleans up after itself;
-# this is the belt-and-braces sweep, run automatically before each e2e
-# target and standalone when needed.
+# e2e-clean-tmp removes $TMPDIR/meept* scratch dirs older than 1 day
+# (crash leftovers; live harness dirs have fresh mtimes and survive). It
+# covers every known scratch prefix: meept-e2e-*, meept-build-*,
+# meept-branch-*, meept-bench-*, meept-scratch-rig.*. The refcounted harness
+# (e2e/harness/daemon.go) cleans up after itself; this is the belt-and-braces
+# sweep, run automatically before each e2e target and standalone when needed.
 .PHONY: e2e-clean-tmp
 e2e-clean-tmp:
 	@if [ -n "$${TMPDIR:-}" ] && [ -d "$$TMPDIR" ]; then \
-		found=$$(find "$$TMPDIR" -maxdepth 1 -name 'meept-e2e-bin*' -type d -mtime +1 2>/dev/null); \
+		found=$$(find "$$TMPDIR" -maxdepth 1 \( -name 'meept-e2e-*' -o -name 'meept-build-*' -o -name 'meept-branch-*' -o -name 'meept-bench-*' -o -name 'meept-scratch-rig.*' \) -type d -mtime +1 2>/dev/null); \
 		if [ -n "$$found" ]; then \
-			echo "WARNING: e2e-clean-tmp removes every $$TMPDIR/meept-e2e-bin* directory older than 1 day; this DELETES stale daemon scratch builds and their sqlite dbs."; \
+			echo "WARNING: e2e-clean-tmp removes every $$TMPDIR/meept* scratch dir older than 1 day (meept-e2e-*, meept-build-*, meept-branch-*, meept-bench-*, meept-scratch-rig.*); this DELETES stale scratch builds and their sqlite dbs."; \
 			echo "e2e-clean-tmp: removing stale scratch dirs:"; \
 			echo "$$found" | head -5; \
 			printf '%s\n' "$$found" | xargs rm -rf; \
 		else \
-			echo "e2e-clean-tmp: no stale meept-e2e-bin* dirs"; \
+			echo "e2e-clean-tmp: no stale meept* scratch dirs"; \
 		fi; \
 	fi
+
+# tmp-status is read-only: it prints a table of every /tmp/meept* entry with
+# its human-readable size, age in days, and whether a live process references
+# it — nothing is deleted. tmp-clean is interactive: the helper prints the
+# list, asks for confirmation in its own UI, and deletes only approved entries
+# (guarded by age and live-process checks).
+.PHONY: tmp-status tmp-clean
+tmp-status:
+	@python3 scripts/meept-tmp-audit.py --status
+
+tmp-clean:
+	@python3 scripts/meept-tmp-audit.py --clean
 
 .PHONY: e2e-fast e2e-fast-area e2e-affected e2e-affected-area
 # -count=1 on both Go targets: the tier is hermetic and cheap to re-run, so
