@@ -3201,6 +3201,12 @@ func (h *ChatHandler) BudgetResumeWatcher() *BudgetResumeWatcher {
 // records re-enter the loop via resumeThrottledTurn; quota records (when a
 // parker other than the handler's own quota watcher is shared) delegate to
 // the existing quota resume callback. Nil-guarded.
+//
+// Honest-terminal lane (01-safety/05 posture): the parker's attempt-cap
+// give-up callback marks a capped parked turn failed-terminal, mirroring
+// the quota lane's SetGiveUpFunc wiring (giveUpQuotaParkedTurn). Without
+// it a capped throttle record was deleted from the parker and the
+// submitting client's turn kept its parked ack forever.
 func (h *ChatHandler) SetThrottleParker(parker *TurnParker) {
 	if h == nil || parker == nil {
 		return
@@ -3208,6 +3214,62 @@ func (h *ChatHandler) SetThrottleParker(parker *TurnParker) {
 	if loop := h.loop; loop != nil {
 		loop.SetThrottleParker(h, parker)
 	}
+	parker.SetGiveUpFunc(h.giveUpThrottleParkedTurn)
+}
+
+// giveUpThrottleParkedTurn is the attempt-cap give-up callback for
+// throttle-class records (endpoint-block/throttle parks). The parker
+// already deleted the persisted row and published the give-up event on
+// agent.quota_wait; the handler's job is the user-visible half: a failed
+// turn.terminal under the turn's acked id (payload-carried TurnID), the
+// same shape as the quota give-up. Records without a TurnID (legacy or
+// task-scoped parks the relay owns) stay silent.
+func (h *ChatHandler) giveUpThrottleParkedTurn(_ context.Context, rec ParkedTurnRecord) {
+	// Class gate (C-K1 discipline): this callback lives on the throttle
+	// parker; a foreign-class row (quota re-armed onto a shared parker)
+	// must never be decoded as a throttle payload nor terminalized here -
+	// the quota watcher's own give-up lane owns those rows.
+	if rec.Class != llm.FailureThrottle {
+		return
+	}
+	var turn throttleParkedTurn
+	if len(rec.TurnPayload) > 0 {
+		if err := json.Unmarshal(rec.TurnPayload, &turn); err != nil {
+			h.logger.Warn("throttle give-up: park payload undecodable — no terminal emitted",
+				"session_id", rec.SessionID,
+				"error", err,
+			)
+			return
+		}
+	}
+	if turn.TurnID == "" {
+		return
+	}
+	h.logger.Warn("throttle-parked turn reached the attempt cap — giving up",
+		"session_id", rec.SessionID,
+		"conversation_id", turn.ConversationID,
+		"turn_id", turn.TurnID,
+		"attempt", rec.Attempt,
+		"max_attempts", rec.MaxAttempts,
+	)
+	errText := fmt.Sprintf("provider wait cap reached after %d parked attempts; turn abandoned", rec.Attempt)
+	h.sendResponse("throttle-giveup-"+rec.SessionID, ChatResponse{
+		ConversationID: turn.ConversationID,
+		Error:          "Auto-resume failed: " + errText,
+	})
+	traceID, turnSpanID := h.turnRegistry.TraceForTurn(turn.TurnID)
+	h.publishTurnTerminal(TurnTerminalEvent{
+		ConversationID: turn.ConversationID,
+		SessionID:      rec.SessionID,
+		TurnID:         turn.TurnID,
+		HandlerCase:    "throttle_resume",
+		Status:         "failed",
+		Reply:          "I encountered an error: Auto-resume failed: " + errText,
+		Error:          errText,
+		TraceID:        traceID,
+		TurnSpanID:     turnSpanID,
+	})
+	h.completeTurn(turn.TurnID)
 }
 
 // resumeRouterDefault is the non-throttle resume fallback: a quota (or
