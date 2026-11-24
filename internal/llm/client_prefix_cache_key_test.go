@@ -177,3 +177,80 @@ func TestLiveCacheKeySplitsOnBoundarySentinel(t *testing.T) {
 		t.Fatalf("dynamic hash identical for different dynamic tails: %q", keyA.PromptHash)
 	}
 }
+
+// TestCacheHitZeroesCostUSD pins the bughunt budget-double-count fix: a
+// prefix-cache serve must return CostUSD==0 — the stored response carries
+// the ORIGINAL call's dollar cost, and the agent loop accumulates
+// Response.CostUSD into LastTurnCostUSD on every serve, so returning the
+// stored cost re-charges the original call against the daily budget each
+// time the cache hits. Token counts stay intact; the cached entry itself
+// must not be mutated (the copy is returned, later readers see the stored
+// cost).
+//
+// Failing revert: return cached.Response directly from the cache-hit site —
+// the hit below then reports the seeded CostUSD and this test fails.
+func TestCacheHitZeroesCostUSD(t *testing.T) {
+	var serverCalls atomic.Int64
+	server := newMockChatServer(t, &serverCalls)
+	defer server.Close()
+
+	cacheCfg := CacheConfig{
+		L1MaxEntries: 100,
+		L2Enabled:    false,
+		DefaultTTL:   5 * time.Minute,
+		CleanupFreq:  time.Minute,
+		Enabled:      true,
+	}
+	coordinator, err := NewTokenCacheCoordinator(cacheCfg)
+	if err != nil {
+		t.Fatalf("NewTokenCacheCoordinator: %v", err)
+	}
+	defer coordinator.Close()
+
+	client := NewClient(&ModelConfig{
+		BaseURL:   server.URL,
+		ModelID:   "test-model",
+		MaxTokens: 10,
+	}, WithTokenCache(coordinator))
+
+	messages := []ChatMessage{
+		{Role: RoleSystem, Content: "COST SYSTEM"},
+		{Role: RoleUser, Content: "cost question"},
+	}
+
+	// Seed a stored response carrying a nonzero original cost + usage.
+	keyBuilder := NewCacheKeyBuilder(true)
+	key := keyBuilder.BuildPrefixAwareKey("test-model",
+		[]string{"COST SYSTEM"}, messages)
+	seeded := &Response{
+		Content: "seeded-answer",
+		CostUSD: 0.1234,
+		Usage:   TokenUsage{PromptTokens: 500, CompletionTokens: 42, TotalTokens: 542},
+	}
+	coordinator.Put(context.Background(), key, seeded)
+
+	resp, err := client.Chat(context.Background(), messages)
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if n := serverCalls.Load(); n != 0 {
+		t.Fatalf("cache hit reached the server (%d calls)", n)
+	}
+	if resp.CostUSD != 0 {
+		t.Errorf("cache-hit CostUSD = %v, want 0 (a cached serve costs ~nothing; "+
+			"returning the stored cost re-charges it against the daily budget)", resp.CostUSD)
+	}
+	// Token counts stay intact.
+	if resp.Usage.PromptTokens != 500 || resp.Usage.CompletionTokens != 42 || resp.Usage.TotalTokens != 542 {
+		t.Errorf("cache-hit usage = %+v, want the stored token counts intact", resp.Usage)
+	}
+	// The stored entry must NOT be mutated in place.
+	if seeded.CostUSD != 0.1234 {
+		t.Errorf("cache-hit return mutated the stored response (CostUSD = %v)", seeded.CostUSD)
+	}
+	if entry, found := coordinator.Get(context.Background(), key); !found {
+		t.Fatal("stored entry disappeared after the hit")
+	} else if entry.Response.CostUSD != 0.1234 {
+		t.Errorf("cache entry CostUSD = %v, want the stored 0.1234 (the hit must return a copy)", entry.Response.CostUSD)
+	}
+}

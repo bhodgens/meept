@@ -405,7 +405,7 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 	if c.tokenCache != nil && c.keyBuilder != nil {
 		cacheKey := c.keyBuilder.Build("", effCfg.ModelID, messages)
 		if cached, found := c.tokenCache.Get(ctx, cacheKey); found {
-			return cached.Response, nil
+			return cacheHitResponse(cached.Response), nil
 		}
 	}
 
@@ -659,7 +659,7 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 		cacheKey := c.keyBuilder.Build("", effCfg.ModelID, messages)
 		if cached, found := c.tokenCache.Get(ctx, cacheKey); found {
 			reportProgress(ProgressStageDone, "Cache hit")
-			return cached.Response, nil
+			return cacheHitResponse(cached.Response), nil
 		}
 	}
 

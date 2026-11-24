@@ -406,6 +406,26 @@ func (c *Client) semanticLookupBehindMiss(ctx context.Context, cfg *ModelConfig,
 	return resp, true
 }
 
+// cacheHitResponse returns a COPY of a stored cache response with CostUSD
+// zeroed (bughunt budget-double-count fix): a prefix-cache or semantic-cache
+// serve costs ~nothing at the provider, but the stored response carries the
+// ORIGINAL call's dollar cost — and the agent loop accumulates
+// Response.CostUSD into LastTurnCostUSD on every serve, re-charging the
+// original call against the daily budget each time the cache hits. Token
+// counts stay intact (usage telemetry is unaffected); only the dollar field
+// is zeroed. The copy matters: the cache entry is a shared pointer, and
+// mutating it in place would corrupt the stored response for every later
+// reader. A nil response passes through nil (callers only reach this on a
+// hit, but the guard keeps the helper standalone-safe).
+func cacheHitResponse(resp *Response) *Response {
+	if resp == nil {
+		return nil
+	}
+	cp := *resp
+	cp.CostUSD = 0
+	return &cp
+}
+
 // semanticStoreAfterSuccess records a completed LIVE response into the
 // semantic tier after the exact-key Put. Best-effort: embedder failure is
 // silent; tool-call-bearing responses are skipped entirely so they can
@@ -804,14 +824,14 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 	if !chatOpts.noCache && c.tokenCache != nil && c.keyBuilder != nil {
 		cacheKey := c.keyBuilder.BuildPrefixAwareKeyWithFiles(cfg.ModelID, SystemPromptSections(SystemPromptOf(messages)), messages)
 		if cached, found := c.tokenCache.Get(ctx, cacheKey); found {
-			return cached.Response, nil
+			return cacheHitResponse(cached.Response), nil
 		}
 		// Semantic tier (llm-serving-tiers leaf 02): strictly BEHIND
 		// the exact-key miss, BEFORE the budget gate. Silent
 		// exact-only degradation on any embedder failure; a hit never
 		// carries tool calls (guard inside the seam).
 		if semHit, ok := c.semanticLookupBehindMiss(ctx, cfg, chatOpts, messages); ok {
-			return semHit, nil
+			return cacheHitResponse(semHit), nil
 		}
 	}
 
@@ -1096,7 +1116,7 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 		cacheKey := c.keyBuilder.BuildPrefixAwareKeyWithFiles(cfg.ModelID, SystemPromptSections(SystemPromptOf(messages)), messages)
 		if cached, found := c.tokenCache.Get(ctx, cacheKey); found {
 			reportProgress(ProgressStageDone, "Cache hit")
-			return cached.Response, nil
+			return cacheHitResponse(cached.Response), nil
 		}
 		// Semantic tier (llm-serving-tiers leaf 02): strictly BEHIND
 		// the exact-key miss, BEFORE the budget gate. Silent
@@ -1104,7 +1124,7 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 		// carries tool calls (guard inside the seam).
 		if semHit, ok := c.semanticLookupBehindMiss(ctx, cfg, chatOpts, messages); ok {
 			reportProgress(ProgressStageDone, "Semantic cache hit")
-			return semHit, nil
+			return cacheHitResponse(semHit), nil
 		}
 	}
 
@@ -2762,10 +2782,10 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 	if !chatOpts.noCache && c.tokenCache != nil && c.keyBuilder != nil {
 		cacheKey := c.keyBuilder.BuildPrefixAwareKeyWithFiles(cfg.ModelID, SystemPromptSections(SystemPromptOf(messages)), messages)
 		if cached, found := c.tokenCache.Get(ctx, cacheKey); found {
-			return cached.Response, nil
+			return cacheHitResponse(cached.Response), nil
 		}
 		if semHit, ok := c.semanticLookupBehindMiss(ctx, cfg, chatOpts, messages); ok {
-			return semHit, nil
+			return cacheHitResponse(semHit), nil
 		}
 	}
 
