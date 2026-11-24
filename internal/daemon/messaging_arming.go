@@ -194,8 +194,12 @@ func (w *VoiceWiring) setSMSAttempt(a *telnyx.SMSAttempt) {
 	}
 	// Issue #165 slice 5: BuildContactChain calls this on EVERY production
 	// boot where messaging is armed, AFTER WireVoice stored the resolved
-	// emit the unrestricted-messaging warning through the wiring's own
-	// structured logger (falls back to slog.Default for hand-built wirings).
+	// daily send counter (w.dailyCounter, built from the voice state dir)
+	// and the structured logger (w.logger) on the wiring — so this is the
+	// earliest reliable site to check the messaging config once with the
+	// wiring's own state. Emit the unrestricted-messaging warning through
+	// the wiring's structured logger (falls back to slog.Default for
+	// hand-built wirings); warnIfMessagingUnrestricted is process-once.
 	warnIfMessagingUnrestricted(w.logger, w.Config().Messaging)
 	w.dlrSlot.set(a)
 }
