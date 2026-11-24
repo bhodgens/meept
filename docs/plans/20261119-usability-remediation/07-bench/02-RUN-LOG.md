@@ -931,3 +931,47 @@ promotion stall) are now PROVEN FIXED in graded runs. Every remaining
 red verdict is attributable to the 8B model classes the campaign
 pre-scoped as out-of-scope (planner phase formats, task_create arg
 shapes, revision-step tool use, nondeterministic file lanes).
+
+## RUN 10: socrates-litellm flashnext planner + subagent-model coder (2026-11-23)
+
+Rig config switched per user request: planner alias -> socrates-litellm/flashnext,
+coder alias -> socrates-litellm/subagent-model, model timeouts 300s, planner alias
+timeout 600s, max_fails 4, strategic planner_timeout 900s. Both endpoints
+smoke-tested live before booting. Same isolated rig (/tmp/usability-rig-acc),
+quotas disabled, judge-local.
+
+u-plan gate iterations (each run fixed one budget link):
+- run2: approved at 138s, old 2m extension expired during execution.
+- run3: plan parked at ~302s, poll window expired 28s earlier.
+- run4: approved at 299s, steps executed + reviewed, 10-step plan > 900s wall.
+- run6/7: approved (317/320s); review-lane planner calls hit the ALIAS timeout
+  (120s/attempt, max_fails 2) -> endpoint cooldown -> task failed. ROOT CAUSE:
+  alias per-attempt timeout binds before strategic planner_timeout; reasoning
+  models exceed 120s on phase calls. Fixed in rig config (600s/4).
+- run8 (full budgets): approval at 139s, terminal delivered, but phase parse
+  failed twice: socrates stream EOF mid-retry ("stream read failed: unexpected
+  EOF" at 17:47:01, 17:47:11, 18:06:18, 18:06:50) -> failover to local 8B ->
+  "planner produced no valid phases" -> degraded single-step fallback ->
+  plan_artifact check failed.
+
+Full suite on flashnext (bench-results-flashfull):
+- u-direct-explicit PASS (30s). First green u-* task with this model routing.
+- u-fail-nonexistent-read: timeout 300s (stale worktree blocked first attempt;
+  rerun: coder step read the missing file correctly, task stayed open past the
+  liveness window).
+- u-plan: cycle guard (project_info x4) after EOF failover to 8B.
+- u-context-two-step: revision step rejected (no file op) - 8B-lane behavior.
+- u-steer-midrun: FAIL, judge PASSED; file_contains + terminal_delivery
+  (steer followup got no non-parked terminal within window).
+
+Findings:
+1. subagent-model is fast and clean for implementation steps (READY smoke ~10s).
+2. flashnext plans well but the LiteLLM stream EOFs on long reasoning passes
+   (~2 min in). When the daemon fails over to the 8B, the 8B produces the
+   same malformed phase JSON already filed as out-of-scope model-class work.
+   Fix candidates (daemon-side, future): retry socrates before failover;
+   or disable streaming for reasoning-heavy phase calls; or ask LiteLLM to
+   raise proxy stream timeouts on socrates.
+3. Timing math for reasoning planners: alias timeout >= 600s, max_fails >= 4,
+   auto-approve poll window >= 900s, stall extension >= 15m (committed as
+   108efc8 + 812e7a0 in meept-bench).
