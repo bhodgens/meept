@@ -124,6 +124,23 @@ func TestTrivialReviewRejectsMachineShapedResult(t *testing.T) {
 	if stepResultIsMachineShaped(envelope) {
 		t.Fatal("stepResultIsMachineShaped = true for a success envelope, want false")
 	}
+	// Bughunt 2026-11-23: a legitimate SHORT structured answer carrying a
+	// bare "name" key is NOT tool-call narration -- the bare-name key used
+	// to over-fire and the <40-char machine-shaped result was rejected
+	// outright by the ReviewStep escalation path.
+	shortAnswer := `{"name": "svc", "version": "2"}`
+	if stepResultIsMachineShaped(shortAnswer) {
+		t.Fatal("stepResultIsMachineShaped = true for a bare-name structured answer, want false")
+	}
+	// The unambiguous tool-call narration shapes still classify.
+	fnShape := `{"function": {"name": "x", "arguments": {}}}`
+	if !stepResultIsMachineShaped(fnShape) {
+		t.Fatal("stepResultIsMachineShaped = false for a function/name/arguments shape, want true")
+	}
+	argsShape := `{"name": "file_write", "arguments": {"path": "x"}}`
+	if !stepResultIsMachineShaped(argsShape) {
+		t.Fatal("stepResultIsMachineShaped = false for a name+arguments shape, want true")
+	}
 
 	// Heuristic-level pin: the machine-shaped result must not ride the
 	// trivial bypass to an approval.

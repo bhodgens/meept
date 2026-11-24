@@ -200,7 +200,9 @@ func stepResultIsMachineShaped(result string) bool {
 // machine-shaped only when it is PURE JSON (starts '{'/'[', ends the
 // matching brace, every non-blank line structural) carrying either the
 // tool-result identity keys the reply guard matches (toolResultJSONKey) or
-// the tool-call narration keys ("tool_calls"/"function"/"name"/"arguments").
+// the unambiguous tool-call narration keys
+// ("tool_calls"/"function"/"arguments"; a bare "name" does not count —
+// bughunt 2026-11-23).
 // A prose answer that QUOTES a JSON snippet inside a sentence fails the
 // structural test and passes through.
 func stepNarrationIsMachineShaped(text string) bool {
@@ -223,8 +225,15 @@ func stepNarrationIsMachineShaped(text string) bool {
 		return true
 	}
 	// Tool-call narration: the model wrote its intended calls as text
-	// (the probe-B shape) instead of executing them.
-	for _, key := range []string{`"tool_calls"`, `"function"`, `"name"`, `"arguments"`} {
+	// (the probe-B shape) instead of executing them. The bare key "name"
+	// is NOT sufficient (bughunt 2026-11-23): a legitimate short
+	// structured answer like {"name": "svc", "version": "2"} was rejected
+	// outright by the ReviewStep escalation path (machine-shaped results
+	// under 40 chars never reach the full reviewer). "name" only counts
+	// inside an unambiguous tool-call shape — "tool_calls", "function",
+	// or a co-occurring "arguments" key all fire on their own below, and
+	// every real tool-call narration carries at least one of them.
+	for _, key := range []string{`"tool_calls"`, `"function"`, `"arguments"`} {
 		if strings.Contains(trimmed, key) {
 			return true
 		}
