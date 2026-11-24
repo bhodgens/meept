@@ -1586,9 +1586,25 @@ func (m *Manager) retireEmployee(ctx context.Context, id string, hardDeleteGoals
 	m.clearCachedConstitution(id)
 
 	// Prune per-employee maps to prevent unbounded growth on retire.
+	// Drain-before-delete (bughunt): the mutex is REMOVED under the map
+	// guard, then Lock+Unlock'd once OUTSIDE the guard so an in-flight
+	// parked-resume callback holding it (0d62dadb serialization) can
+	// finish before the mutex is dropped. The drain happens off-guard so a
+	// minutes-long goal round never blocks other employees' lazy mutex
+	// creation (no long waits under the map guard). A same-id re-hire
+	// after the delete lazily creates a FRESH mutex — acceptable
+	// post-retire: the old holder finishes against the drained mutex and
+	// every new acquisition serializes on the new one (the only gap is a
+	// resume that re-acquired between drain and re-hire, which is the
+	// same window the pre-fix delete had, minus the dropped-holder case).
 	m.invokeMuMapGuard.Lock()
+	retiredMu := m.invokeMuMap[id]
 	delete(m.invokeMuMap, id)
 	m.invokeMuMapGuard.Unlock()
+	if retiredMu != nil {
+		retiredMu.Lock()
+		retiredMu.Unlock() //nolint:staticcheck // deliberate drain: acquire-and-release waits out current holders
+	}
 
 	m.goalLoopsMu.Lock()
 	delete(m.goalLoops, id)
