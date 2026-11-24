@@ -1090,6 +1090,97 @@ func TestChatHandler_SessionLoop_CachesLoopAcrossCalls(t *testing.T) {
 	}
 }
 
+// Bughunt (2026-11-23) scopedLoops cache pins:
+//   - concurrent misses for one conversation must not orphan a loop
+//     (build-and-swap now runs under one scopedLoopsMu hold);
+//   - ChatHandler.Stop closes every cached scoped loop (previously they
+//     accumulated unclosed for the handler's lifetime).
+func TestChatHandler_ScopedLoopsConcurrentMissNoOrphan(t *testing.T) {
+	singletonLoop := NewAgentLoop("singleton", "/tmp")
+	h := NewChatHandler(singletonLoop, nil, nil, slogDiscardLogger())
+
+	const convID = "conv-scoped-race"
+	const workDir = "/repos/scoped"
+
+	const n = 16
+	loops := make([]*AgentLoop, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			loops[idx] = h.scopedChatLoop(convID, workDir, nil)
+		}(i)
+	}
+	wg.Wait()
+
+	h.scopedLoopsMu.Lock()
+	cached, ok := h.scopedLoops[convID]
+	h.scopedLoopsMu.Unlock()
+	if !ok || cached == nil {
+		t.Fatal("no cached loop after concurrent misses")
+	}
+	for i, l := range loops {
+		if l == nil {
+			t.Fatalf("caller %d got a nil loop", i)
+		}
+		if l != cached {
+			t.Fatalf("caller %d got an orphaned loop (build-and-swap race): %p != cached %p", i, l, cached)
+		}
+	}
+
+	// Stop closes every cached scoped loop.
+	if err := h.Stop(t.Context()); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if !cached.closed.Load() {
+		t.Fatal("cached scoped loop not closed after Stop")
+	}
+	h.scopedLoopsMu.Lock()
+	remaining := len(h.scopedLoops)
+	h.scopedLoopsMu.Unlock()
+	if remaining != 0 {
+		t.Fatalf("scopedLoops not drained by Stop: %d entries remain", remaining)
+	}
+}
+
+// A workingDir change replaces (and closes) the cached loop, and the cache
+// keeps exactly one entry for the conversation.
+func TestChatHandler_ScopedLoopsWorkingDirChangeClosesStale(t *testing.T) {
+	singletonLoop := NewAgentLoop("singleton", "/tmp")
+	h := NewChatHandler(singletonLoop, nil, nil, slogDiscardLogger())
+	defer func() {
+		if err := h.Stop(t.Context()); err != nil {
+			t.Fatalf("Stop: %v", err)
+		}
+	}()
+
+	const convID = "conv-scoped-replace"
+	first := h.scopedChatLoop(convID, "/repos/a", nil)
+	if first == nil {
+		t.Fatal("first scopedChatLoop returned nil")
+	}
+	second := h.scopedChatLoop(convID, "/repos/b", nil)
+	if second == nil {
+		t.Fatal("second scopedChatLoop returned nil")
+	}
+	if second == first {
+		t.Fatal("workingDir change returned the stale cached loop")
+	}
+	if !first.closed.Load() {
+		t.Fatal("stale loop not closed on workingDir change")
+	}
+	if second.GetWorkingDir() != "/repos/b" {
+		t.Errorf("replacement workingDir = %q, want /repos/b", second.GetWorkingDir())
+	}
+	h.scopedLoopsMu.Lock()
+	count := len(h.scopedLoops)
+	h.scopedLoopsMu.Unlock()
+	if count != 1 {
+		t.Fatalf("scopedLoops holds %d entries, want 1", count)
+	}
+}
+
 func TestChatHandler_SetAgentLoopManager_NilSafe(t *testing.T) {
 	h := NewChatHandler(nil, nil, nil, slogDiscardLogger())
 	h.SetAgentLoopManager(nil) // should not panic

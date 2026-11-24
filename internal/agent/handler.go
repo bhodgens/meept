@@ -816,12 +816,34 @@ func (h *ChatHandler) Stop(ctx context.Context) error {
 		close(done)
 	}()
 
+	var waitErr error
 	select {
 	case <-done:
-		return nil
 	case <-ctx.Done():
-		return ctx.Err()
+		waitErr = ctx.Err()
 	}
+
+	// Close every cached scoped loop (bughunt 2026-11-23): scopedChatLoop
+	// caches per-conversation loops that nothing else owns — without this
+	// pass they accumulated unclosed for the handler's lifetime (each
+	// holding its background-goroutine waitgroup, rewake consumer, and
+	// conversation store). Collect under scopedLoopsMu, Close outside it
+	// (mutex scope rule: Close waits on goroutines). Runs after the wg
+	// wait so in-flight turns release their loops first.
+	h.scopedLoopsMu.Lock()
+	loops := make([]*AgentLoop, 0, len(h.scopedLoops))
+	for id, loop := range h.scopedLoops {
+		if loop != nil {
+			loops = append(loops, loop)
+		}
+		delete(h.scopedLoops, id)
+	}
+	h.scopedLoopsMu.Unlock()
+	for _, loop := range loops {
+		loop.Close()
+	}
+
+	return waitErr
 }
 
 // Name returns the component name for the registry.
@@ -4102,6 +4124,26 @@ func fenceSet(loop *AgentLoop, fence *security.PermissionChecker) error {
 // Dispatcher.scopedSessionLoop (dispatcher.go, usability 02-routing/04 T3).
 // A cached loop with a different workingDir is replaced (project changed
 // mid-session). Returns nil when no template loop is available.
+//
+// Bughunt (2026-11-23): the map check, build, and insert run under ONE
+// scopedLoopsMu hold. The old shape unlocked across NewAgentLoop, so two
+// concurrent misses for one conversation each built a loop and the second
+// insert silently replaced the first — an orphaned AgentLoop nobody ever
+// closed. NewAgentLoop + ConfigSnapshot + wireSessionIdentity are pure
+// in-memory construction (no I/O), so holding the map mutex across them
+// does not violate the mutex-scope rule; the stale loop's Close (which
+// waits on background goroutines) still runs OUTSIDE the lock.
+//
+// Residual risk (deliberate, bughunt 2026-11-23): the stale loop's Close
+// on a workingDir change has NO in-flight turn check — AgentLoop exposes
+// no maintained in-flight flag (isActive is only ever stored false in
+// production; SetActive has no live-turn caller), and Close's wg.Wait
+// bounds the teardown to background goroutines, not a running turn. A
+// turn executing on the stale loop while the project changes mid-session
+// keeps its loop object alive for the turn's duration (Go GC), but its
+// workingDir is outdated by definition — that is the replacement's
+// purpose. Adding a lifecycle mechanism for this was judged out of
+// proportion; documented instead.
 func (h *ChatHandler) scopedChatLoop(conversationID, workingDir string, sess *session.Session) *AgentLoop {
 	if conversationID == "" || workingDir == "" || h.loop == nil {
 		return nil
@@ -4116,23 +4158,24 @@ func (h *ChatHandler) scopedChatLoop(conversationID, workingDir string, sess *se
 		stale = existing
 		delete(h.scopedLoops, conversationID)
 	}
+
+	// Build-and-swap under the SAME lock hold (see doc comment): a
+	// concurrent caller cannot miss the map and build a second loop.
+	loop := NewAgentLoop(conversationID, workingDir, h.loop.ConfigSnapshot()...)
+	if loop != nil {
+		h.wireSessionIdentity(loop, sess)
+		if h.scopedLoops == nil {
+			h.scopedLoops = make(map[string]*AgentLoop)
+		}
+		h.scopedLoops[conversationID] = loop
+	}
 	h.scopedLoopsMu.Unlock()
+
+	// Close outside the lock: AgentLoop.Close waits on background
+	// goroutines (wg.Wait) — never block the map mutex on it.
 	if stale != nil {
 		stale.Close()
 	}
-
-	loop := NewAgentLoop(conversationID, workingDir, h.loop.ConfigSnapshot()...)
-	if loop == nil {
-		return nil
-	}
-	h.wireSessionIdentity(loop, sess)
-
-	h.scopedLoopsMu.Lock()
-	if h.scopedLoops == nil {
-		h.scopedLoops = make(map[string]*AgentLoop)
-	}
-	h.scopedLoops[conversationID] = loop
-	h.scopedLoopsMu.Unlock()
 	return loop
 }
 
