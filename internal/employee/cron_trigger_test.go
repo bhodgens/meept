@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -394,4 +395,100 @@ func TestStopAllBoundsCronDrainWait(t *testing.T) {
 		t.Fatalf("StopAll blocked past cronStopDrainTimeout on an in-flight cron job (unbounded drain wait)")
 	}
 	close(release)
+}
+
+// promptCaptureProbe records the raw ASSESS user-prompt text of every
+// reflector call so a test can assert WHICH prompt the cron fire delivered.
+type promptCaptureProbe struct {
+	mu       sync.Mutex
+	prompts  []string
+	responses chan string
+}
+
+func (p *promptCaptureProbe) Chat(_ context.Context, msgs []llm.ChatMessage, _ ...llm.ChatOption) (*llm.Response, error) {
+	text := ""
+	for _, m := range msgs {
+		if m.Role == llm.RoleUser {
+			text = m.Content
+		}
+	}
+	p.mu.Lock()
+	p.prompts = append(p.prompts, text)
+	p.mu.Unlock()
+	content := `{"candidates":[]}`
+	if p.responses != nil {
+		select {
+		case c := <-p.responses:
+			content = c
+		default:
+		}
+	}
+	return &llm.Response{Content: content}, nil
+}
+
+func (p *promptCaptureProbe) captured() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string(nil), p.prompts...)
+}
+
+// TestCronFireUsesFreshPromptAfterUpdate pins the bughunt stale-prompt fix:
+// UpdateBot changing prompt_template while KEEPING the schedule must fire
+// the NEW prompt — resyncCronHook keys claims on schedule only, so the
+// registration is not dropped/re-added and the closure's captured prompt is
+// stale; fireCronTrigger must re-read the prompt from the fetched
+// BotDefinition at fire time.
+//
+// Failing revert: drop the cronTriggerPrompt re-read in fireCronTrigger —
+// the second fire carries the ORIGINAL "run the sweep" prompt and this test
+// fails on the payload assertion.
+func TestCronFireUsesFreshPromptAfterUpdate(t *testing.T) {
+	botMgr, mgr := newCronTestHarness(t)
+
+	probe := &promptCaptureProbe{}
+	loop := NewGoalLoop("editable-prompt", &Constitution{Purpose: "sweep"}, nil, slog.New(slog.DiscardHandler))
+	loop.WithReflector(probe)
+	mgr.RegisterGoalLoop("editable-prompt", loop)
+
+	ctx := context.Background()
+	if err := botMgr.CreateBot(ctx, cronDef("editable-prompt", "0 4 * * *", true)); err != nil {
+		t.Fatalf("CreateBot: %v", err)
+	}
+	if err := botMgr.StartAll(ctx); err != nil {
+		t.Fatalf("StartAll: %v", err)
+	}
+	entries := mgr.Cron.Entries()
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(entries))
+	}
+	entries[0].Job.Run()
+	prompts := probe.captured()
+	if len(prompts) != 1 {
+		t.Fatalf("first fire: %d reflector calls, want 1", len(prompts))
+	}
+	if !strings.Contains(prompts[0], "run the sweep") {
+		t.Fatalf("first fire did not carry the original prompt: %q", prompts[0])
+	}
+
+	// Update prompt_template ONLY — same schedule, still enabled. The
+	// claim dedupe keeps the original registration (and its captured
+	// stale prompt) alive.
+	updated := cronDef("editable-prompt", "0 4 * * *", true)
+	updated.Triggers[0].PromptTemplate = "run the NEW sweep"
+	if err := botMgr.UpdateBot(ctx, updated); err != nil {
+		t.Fatalf("UpdateBot: %v", err)
+	}
+	if n := len(mgr.Cron.Entries()); n != 1 {
+		t.Fatalf("entries after update = %d, want 1 (schedule unchanged)", n)
+	}
+
+	entries = mgr.Cron.Entries()
+	entries[0].Job.Run()
+	prompts = probe.captured()
+	if len(prompts) != 2 {
+		t.Fatalf("second fire: %d reflector calls, want 2", len(prompts))
+	}
+	if !strings.Contains(prompts[1], "run the NEW sweep") {
+		t.Fatalf("second fire carried the STALE prompt %q — UpdateBot with the same schedule must take effect without a restart", prompts[1])
+	}
 }

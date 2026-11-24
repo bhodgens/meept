@@ -127,6 +127,15 @@ func (m *Manager) registerEnabledCronTriggers(_ context.Context, def bot.BotDefi
 // that the bot still exists, is enabled, and still carries THIS cron
 // trigger enabled — a job registered before a DeleteBot/PauseBot/UpdateBot
 // (or one that survived a claim leak) must not call Trigger.
+//
+// Prompt freshness (bughunt): the prompt is RE-READ from the fetched
+// BotDefinition at fire time, not taken from the registration-captured
+// prompt. resyncCronHook keys claims on schedule only, so an UpdateBot
+// that changed prompt_template while keeping the schedule would otherwise
+// keep firing the STALE captured prompt until a daemon restart. The
+// registration-time prompt is kept only as a fallback for the (should-not-
+// happen) case where the fire-time definition no longer carries this
+// schedule — cronTriggerEnabled above already refuses that shape.
 func (m *Manager) fireCronTrigger(botID, schedule, prompt string) {
 	if m == nil {
 		return
@@ -145,12 +154,31 @@ func (m *Manager) fireCronTrigger(botID, schedule, prompt string) {
 		m.logCronSkip("cron trigger skipped: bot or trigger disabled", botID)
 		return
 	}
+	// Read the prompt fresh from the current definition (the closure's
+	// captured prompt is only the stale-registration fallback).
+	if fresh := cronTriggerPrompt(def, schedule); fresh != "" {
+		prompt = fresh
+	}
 	if _, err := m.Trigger(ctx, botID, map[string]any{
 		"source": "cron",
 		"prompt": prompt,
 	}); err != nil {
 		m.logCron("cron trigger failed", botID, err)
 	}
+}
+
+// cronTriggerPrompt returns the PromptTemplate of def's enabled cron
+// trigger with this exact schedule ("" when absent).
+func cronTriggerPrompt(def *bot.BotDefinition, schedule string) string {
+	if def == nil {
+		return ""
+	}
+	for _, t := range def.Triggers {
+		if t.Type == bot.TriggerTypeCron && t.Enabled && t.Schedule == schedule {
+			return t.PromptTemplate
+		}
+	}
+	return ""
 }
 
 // cronTriggerEnabled reports whether def still has an ENABLED cron trigger
