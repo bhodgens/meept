@@ -8,6 +8,7 @@ package models
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -260,4 +261,67 @@ func TestPlansModel_RefreshResetsSelectionToFirstRow(t *testing.T) {
 	if _, ok := m.selectedGate(); !ok {
 		t.Fatal("premise: row 0 is not a gate row")
 	}
+}
+
+// TestPlansModel_RemovePendingTaskGate pins the bughunt-wave2 finding-2
+// fix: SetPendingTaskGates only upserts, so a decided gate row survived
+// until restart. RemovePendingTaskGate must drop the overlay row, and the
+// PlanActionMsg success path (approve_task/reject_task) must call it.
+func TestPlansModel_RemovePendingTaskGate(t *testing.T) {
+	m := newGateOffsetModel(&plansGateRPC{})
+
+	// Precondition: the gate row is in the overlay.
+	if len(m.pendingTaskGatesForFilterLocked()) != 1 {
+		t.Fatal("precondition: expected 1 overlay gate")
+	}
+
+	m.RemovePendingTaskGate("task-gate-1")
+
+	if gates := m.pendingTaskGatesForFilterLocked(); len(gates) != 0 {
+		t.Fatalf("overlay still holds %d gate(s) after RemovePendingTaskGate", len(gates))
+	}
+	// The merged table must shrink back to just the real plan.
+	if rows := m.table.Rows(); len(rows) != 1 {
+		t.Fatalf("table has %d rows after gate removal, want 1 (the real plan)", len(rows))
+	}
+
+	// Unknown/empty ids are inert.
+	m.RemovePendingTaskGate("nope")
+	m.RemovePendingTaskGate("")
+}
+
+// TestPlansModel_PlanActionMsgRemovesGateOnSuccess pins the PlanActionMsg
+// success path: approve_task / reject_task results drop the overlay row;
+// an errored action keeps it (the gate is still pending server-side).
+func TestPlansModel_PlanActionMsgRemovesGateOnSuccess(t *testing.T) {
+	cases := []struct {
+		name   string
+		action string
+		err    error
+		want   int
+	}{
+		{"approve success removes", "approve_task", nil, 0},
+		{"reject success removes", "reject_task", nil, 0},
+		{"approve failure keeps", "approve_task", errStub, 1},
+		{"plain plan approve keeps gate", "approve", nil, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newGateOffsetModel(&plansGateRPC{})
+			m.Update(PlanActionMsg{PlanID: "task-gate-1", Action: tc.action, Err: tc.err})
+			if got := len(m.pendingTaskGatesForFilterLocked()); got != tc.want {
+				t.Fatalf("overlay gates = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+var errStub = errors.New("rpc failed")
+
+// pendingTaskGatesForFilterLocked is a test helper: the production
+// accessor requires the caller to hold sessionMu.
+func (m *PlansModel) pendingTaskGatesForFilterLocked() []TaskGateApprovalMsg {
+	m.sessionMu.Lock()
+	defer m.sessionMu.Unlock()
+	return m.pendingTaskGatesForFilter()
 }

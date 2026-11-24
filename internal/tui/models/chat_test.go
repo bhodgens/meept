@@ -2181,3 +2181,75 @@ func TestChatModel_AutoDescriptionFallbackStillWorks(t *testing.T) {
 		t.Fatalf("fallback result dropped: %q", model.sessionDescription)
 	}
 }
+
+// TestChatModel_TaskGateResolvedRemovesCard pins the bughunt-wave2
+// finding-2 chat half: a task.approved/task.rejected resolution must
+// REMOVE the pending approval card from the transcript (it used to
+// persist until restart) and record the outcome as a system line.
+func TestChatModel_TaskGateResolvedRemovesCard(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		approved   bool
+		reason     string
+		wantMarker string
+	}{
+		{"approved", true, "", "[task] gate approved: task-9"},
+		{"rejected with reason", false, "too risky", "[task] gate rejected: task-9 -- too risky"},
+		{"rejected bare", false, "", "[task] gate rejected: task-9"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newTestChatModel()
+			m.Update(TaskGateApprovalMsg{TaskID: "task-9", SessionID: "sess-1", Total: 2})
+
+			// Precondition: the card rendered.
+			found := false
+			for _, cm := range m.messages {
+				if strings.Contains(cm.Content, "task awaiting approval") && cm.gateTaskID == "task-9" {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatal("precondition: gate card not rendered")
+			}
+
+			m.Update(TaskGateResolvedMsg{TaskID: "task-9", Approved: tc.approved, Reason: tc.reason})
+
+			for _, cm := range m.messages {
+				if cm.gateTaskID == "task-9" {
+					t.Fatal("gate card survived TaskGateResolvedMsg")
+				}
+			}
+			marker := false
+			for _, cm := range m.messages {
+				if cm.Content == tc.wantMarker && cm.localOnly {
+					marker = true
+				}
+			}
+			if !marker {
+				contents := make([]string, 0, len(m.messages))
+				for _, cm := range m.messages {
+					contents = append(contents, cm.Content)
+				}
+				t.Fatalf("outcome line %q not found in transcript: %v", tc.wantMarker, contents)
+			}
+		})
+	}
+}
+
+// TestChatModel_TaskGateResolvedForeignCardUntouched: a resolution for a
+// different task must leave this card pending.
+func TestChatModel_TaskGateResolvedForeignCardUntouched(t *testing.T) {
+	m := newTestChatModel()
+	m.Update(TaskGateApprovalMsg{TaskID: "task-9", SessionID: "sess-1", Total: 2})
+	m.Update(TaskGateResolvedMsg{TaskID: "other-task", Approved: true})
+
+	found := false
+	for _, cm := range m.messages {
+		if cm.gateTaskID == "task-9" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("a foreign task resolution removed this task's pending gate card")
+	}
+}

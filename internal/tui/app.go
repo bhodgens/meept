@@ -2072,6 +2072,36 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}})
 				}
 
+			// Task-gate resolution (bughunt wave2, finding 2): the daemon
+			// publishes task.approved / task.rejected (strategic.go
+			// ApprovePlan/RejectPlan) when a parked gate is decided — from
+			// ANY client, including the /plan approve command path and the
+			// GUI. Remove the plans-view overlay row, drop any parked
+			// (session-load-barrier) payloads for the task, and resolve the
+			// chat approval card the way chat.go's TaskGateApprovalMsg
+			// contract expects. Payloads carry task_id (+reason on reject)
+			// but no session_id — the card itself is session-scoped by
+			// gateTaskID stamping, so no extra scoping is needed here.
+			case "task.approved", "task.rejected":
+				if payloadMap, ok := e.Payload.(map[string]any); ok {
+					taskID := stringField(payloadMap, "task_id")
+					if taskID == "" {
+						break
+					}
+					delete(a.pendingGateCards, taskID)
+					a.plans.RemovePendingTaskGate(taskID)
+					if a.chat != nil {
+						resolved := models.TaskGateResolvedMsg{
+							TaskID:   taskID,
+							Approved: e.Topic == "task.approved",
+							Reason:   stringField(payloadMap, "reason"),
+						}
+						if cmd := a.chat.Update(resolved); cmd != nil {
+							cmds = append(cmds, cmd)
+						}
+					}
+				}
+
 			// Synthesized progress events (filtered by verbosity)
 			case "agent.progress.synthesized":
 				if payloadMap, ok := e.Payload.(map[string]any); ok {

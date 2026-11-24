@@ -434,3 +434,54 @@ func TestPlansViewTaskGate(t *testing.T) {
 		t.Fatalf("F13a (01 T3): task-gate row lacks an awaiting-approval state affordance:\n%s", gateTailLines(plansView, 30))
 	}
 }
+
+// TestTaskApprovedClearsGateCard pins the bughunt-wave2 finding-2 App
+// pump half: task.approved / task.rejected (strategic.go ApprovePlan /
+// RejectPlan) must resolve the pending chat approval card — before the
+// fix the App event switch had no case for either topic and the card
+// (plus the plans-view overlay row) persisted until restart.
+func TestTaskApprovedClearsGateCard(t *testing.T) {
+	for _, tc := range []struct {
+		topic   string
+		outcome string
+	}{
+		{"task.approved", "gate approved"},
+		{"task.rejected", "gate rejected"},
+	} {
+		t.Run(tc.topic, func(t *testing.T) {
+			hp, _ := gateApprovalWorld(t)
+
+			const sessID = "sess-gate-resolve"
+			const taskID = "task-gate-resolve-01"
+			hp.send(SessionLoadedMsg{Session: &types.Session{ID: sessID, Name: "resolve", ConversationID: "conv-resolve"}})
+			hp.settle(100, 30)
+			hp.send(EventStreamDataMsg{Events: []BusEvent{gatePendingApprovalEvent(taskID, sessID, 3)}})
+			hp.settle(100, 30)
+
+			// The daemon's resolution event (task.approved payload:
+			// task_id/total_steps/ready_steps; task.rejected: task_id/reason).
+			payload := map[string]any{"task_id": taskID}
+			if tc.topic == "task.rejected" {
+				payload["reason"] = "not now"
+			}
+			hp.send(EventStreamDataMsg{Events: []BusEvent{{
+				Topic:   tc.topic,
+				Type:    "event",
+				Payload: payload,
+			}}})
+			hp.settle(100, 30)
+
+			app := hp.finish(100, 30)
+			view := app.View().Content
+			if strings.Contains(view, "task awaiting approval") {
+				t.Fatalf("%s did not remove the pending gate card:\n%s", tc.topic, gateTailLines(view, 25))
+			}
+			if !strings.Contains(view, tc.outcome) {
+				t.Fatalf("%s did not record the outcome line (%q):\n%s", tc.topic, tc.outcome, gateTailLines(view, 25))
+			}
+			if !strings.Contains(view, taskID) {
+				t.Fatalf("%s outcome line missing the task id:\n%s", tc.topic, gateTailLines(view, 25))
+			}
+		})
+	}
+}

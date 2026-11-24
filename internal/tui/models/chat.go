@@ -103,6 +103,12 @@ type ChatMessage struct {
 	// re-appended across that rebuild so the warning is not silently
 	// lost (C6/W26; 05-navigation T4).
 	localOnly bool
+
+	// gateTaskID marks a task-gate approval card and keys it to its task
+	// (bughunt wave2, finding 2): TaskGateResolvedMsg removes every card
+	// stamped with the resolved task id so the pending card cannot survive
+	// the approve/reject decision. Empty for all other messages.
+	gateTaskID string
 }
 
 // ChatModel is the model for the chat view.
@@ -757,6 +763,20 @@ type TaskGateApprovalMsg struct {
 	SessionID string
 	Total     int
 	Steps     []string
+}
+
+// TaskGateResolvedMsg resolves a pending gate card in the transcript
+// (bughunt wave2, finding 2). Produced by the App pump from the daemon's
+// task.approved / task.rejected bus events (internal/agent/strategic.go
+// ApprovePlan/RejectPlan). The chat card's contract comment (chat.go
+// TaskGateApprovalMsg case) says the card stays pending until exactly
+// these events resolve it. The card message is REMOVED — the daemon's
+// gate state is authoritative, and a stale pending card after the
+// decision is what this fixes. A short system line records the outcome.
+type TaskGateResolvedMsg struct {
+	TaskID   string
+	Approved bool
+	Reason   string // rejection reason, when known
 }
 
 // PlanNotificationMsg carries plan lifecycle notifications for inline chat display.
@@ -1818,8 +1838,24 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		// rebuild (session.messages.get landing late) must re-append it
 		// rather than silently wipe it, and it must never be persisted.
 		// Card state stays pending until task.approved/task.rejected
-		// resolves the gate (those publish their own notifications).
+		// resolves the gate via TaskGateResolvedMsg (bughunt wave2), which
+		// removes the card stamped with this task id.
 		m.addMessage(RoleSystem, m.renderTaskGateCard(msg))
+		m.messages[len(m.messages)-1].localOnly = true
+		m.messages[len(m.messages)-1].gateTaskID = msg.TaskID
+		return nil
+
+	case TaskGateResolvedMsg:
+		// The gate was decided (from any client): drop the pending card(s)
+		// for this task and record the outcome in one system line.
+		m.removeTaskGateCards(msg.TaskID)
+		if msg.Approved {
+			m.addMessage(RoleSystem, fmt.Sprintf("[task] gate approved: %s", msg.TaskID))
+		} else if msg.Reason != "" {
+			m.addMessage(RoleSystem, fmt.Sprintf("[task] gate rejected: %s -- %s", msg.TaskID, msg.Reason))
+		} else {
+			m.addMessage(RoleSystem, fmt.Sprintf("[task] gate rejected: %s", msg.TaskID))
+		}
 		m.messages[len(m.messages)-1].localOnly = true
 		return nil
 
@@ -2011,6 +2047,56 @@ func (m *ChatModel) addMessage(role, content string) {
 		Timestamp: time.Now(),
 		State:     MessageNormal,
 	})
+	if m.findBarVisible && m.findInput.Value() != "" {
+		m.recomputeFindMatches()
+	} else {
+		m.updateViewport()
+	}
+}
+
+// removeTaskGateCards drops every transcript message stamped with the
+// resolved gate task id (TaskGateResolvedMsg path, bughunt wave2). It also
+// scrubs the per-session message storage so a session switch/reload cannot
+// resurrect the decided card, and drops any parked gate card payloads the
+// App pump has not drained yet (handled App-side). Selection indices are
+// re-clamped after removal.
+func (m *ChatModel) removeTaskGateCards(taskID string) {
+	if taskID == "" {
+		return
+	}
+	kept := m.messages[:0:0]
+	removed := 0
+	for _, cm := range m.messages {
+		if cm.gateTaskID == taskID {
+			removed++
+			continue
+		}
+		kept = append(kept, cm)
+	}
+	if removed == 0 {
+		return
+	}
+	m.messages = kept
+	if m.selectedMsgIdx >= len(m.messages) {
+		m.selectedMsgIdx = len(m.messages) - 1
+	}
+	for sid, msgs := range m.sessionMessages {
+		if msgs == nil {
+			continue
+		}
+		filtered := msgs[:0:0]
+		hit := false
+		for _, cm := range msgs {
+			if cm.gateTaskID == taskID {
+				hit = true
+				continue
+			}
+			filtered = append(filtered, cm)
+		}
+		if hit {
+			m.sessionMessages[sid] = filtered
+		}
+	}
 	if m.findBarVisible && m.findInput.Value() != "" {
 		m.recomputeFindMatches()
 	} else {

@@ -194,6 +194,28 @@ func (m *PlansModel) SetPendingTaskGates(gates []TaskGateApprovalMsg) {
 	m.updatePlansTable()
 }
 
+// RemovePendingTaskGate drops one task's gate from the overlay (bughunt
+// wave2, finding 2): SetPendingTaskGates only upserts, so before this the
+// gate row survived approval/rejection until restart. Called from the
+// PlanActionMsg success path (immediate local removal after task.approve /
+// task.reject) and from the App pump's task.approved/task.rejected cases
+// (authoritative removal for decisions made from ANY client, including the
+// /plan approve command path which bypasses PlanActionMsg).
+func (m *PlansModel) RemovePendingTaskGate(taskID string) {
+	if taskID == "" {
+		return
+	}
+	m.sessionMu.Lock()
+	_, had := m.pendingTaskGates[taskID]
+	if had {
+		delete(m.pendingTaskGates, taskID)
+	}
+	m.sessionMu.Unlock()
+	if had {
+		m.updatePlansTable()
+	}
+}
+
 // pendingTaskGatesForFilter returns the overlay gates visible under the
 // current session filter. Caller must hold sessionMu (it reads sessionID
 // and the gate map without its own lock).
@@ -409,6 +431,14 @@ func (m *PlansModel) Update(msg tea.Msg) tea.Cmd {
 		// After an action completes, refresh plans
 		if msg.Err != nil {
 			m.err = msg.Err
+		} else if msg.Action == "approve_task" || msg.Action == "reject_task" {
+			// Gate decision succeeded: drop the overlay row immediately
+			// (bughunt wave2, finding 2). The daemon's task.approved /
+			// task.rejected bus events also remove it in the App pump —
+			// that covers decisions from other clients and the /plan
+			// command path; this covers the plans-view key path without
+			// waiting on a bus round trip.
+			m.RemovePendingTaskGate(msg.PlanID)
 		}
 		m.loading = true
 		return m.fetchPlans
