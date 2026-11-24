@@ -27,14 +27,18 @@ import (
 	"github.com/caimlas/meept/e2e/harness"
 )
 
-// gatedStack boots a daemon whose plans always require approval, so the
-// scripted 6-step plan trips the strategic approval gate (default
-// threshold 5).
+// gatedStack boots a daemon whose STRATEGIC task gate (default threshold
+// 5) parks the scripted 6-step plan at awaiting_approval. plans.mode
+// stays OFF: with mode "always" the dispatcher's plan-manager lane (5.5)
+// intercepts planning intents and synthesizes a docs plan, so the
+// strategic planner never runs and no TASK row parks at
+// awaiting_approval - the object both pins in this suite watch (observed
+// 2026-11-24, same shape as approval-wait).
 func gatedStack(t *testing.T) *harness.Stack {
 	t.Helper()
 	return harness.Start(t, harness.WithConfigOverlay(map[string]any{
-		"plans.mode":                      "always",
-		"plans.approval.require_approval": true,
+		"plans.mode":                      "off",
+		"plans.approval.require_approval": false,
 	}))
 }
 
@@ -144,7 +148,7 @@ func TestRejectDoesNotExecutePlan(t *testing.T) {
 		t.Fatalf("bus.subscribe returned no subscription_id: %v", sub)
 	}
 
-	ack := s.SubmitChatHTTP(t, sessionID, marker+": plan and execute the multi-step rework")
+	ack := s.SubmitChatHTTP(t, sessionID, marker+": plan the multi-step rework, don't implement it")
 	turnID, _ := ack["turn_id"].(string)
 	if turnID == "" {
 		t.Fatalf("ack missing turn_id: %+v", ack)

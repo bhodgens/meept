@@ -28,13 +28,19 @@ import (
 	"github.com/caimlas/meept/internal/tui"
 )
 
-// gateTUIPlanStack boots a daemon whose plans always require approval and
-// whose strategic threshold is low enough to gate a scripted 6-step plan.
+// gateTUIPlanStack boots a daemon whose strategic task gate parks a
+// scripted 6-step plan at awaiting_approval (threshold 3). plans.mode
+// stays OFF: the dispatcher's plan-manager lane (5.5) intercepts planning
+// intents whenever mode != off and synthesizes a docs plan instead of
+// dispatching the strategic planner, so the task-level gate the F13a pin
+// asserts on never runs (observed 2026-11-24, same shape as
+// approval-wait). The prompt veto ("don't implement it") keeps the
+// intent auto-seal from bypassing the gate.
 func gateTUIPlanStack(t *testing.T) *harness.Stack {
 	t.Helper()
 	return harness.Start(t, harness.WithConfigOverlay(map[string]any{
-		"plans.mode":                                "always",
-		"plans.approval.require_approval":           true,
+		"plans.mode":                                "off",
+		"plans.approval.require_approval":           false,
 		"orchestrator.task_approval_step_threshold": 3,
 	}))
 }
@@ -65,7 +71,7 @@ func TestTUIApprovalCardRenders(t *testing.T) {
 	gateScriptSixStepPlan(stack, marker)
 
 	// Dispatch the gated plan through a real turn.
-	stack.SubmitChatHTTP(t, sessionID, marker+": plan and execute the multi-step rework")
+	stack.SubmitChatHTTP(t, sessionID, marker+": plan the multi-step rework, don't implement it")
 
 	// Wait until the task parks at awaiting_approval (the gate is real).
 	var taskID string

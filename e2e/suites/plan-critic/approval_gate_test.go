@@ -112,14 +112,18 @@ func gateConfigGet(t *testing.T, s *harness.Stack, key string) (string, bool) {
 	return out, ok
 }
 
-// gatePlanStack boots a daemon whose plans always require approval and
-// whose strategic approval threshold is low enough that a scripted
-// multi-step plan trips the gate.
+// gatePlanStack boots a daemon whose strategic task gate (the threshold
+// argument) parks a scripted multi-step plan at awaiting_approval.
+// plans.mode stays OFF: with mode "always" the dispatcher's plan-manager
+// lane (5.5) intercepts planning intents and synthesizes a docs plan, so
+// the strategic planner never runs and no TASK row reaches
+// awaiting_approval - the object every pin here watches (observed
+// 2026-11-24, same shape as approval-wait/task-approval).
 func gatePlanStack(t *testing.T, threshold int) *harness.Stack {
 	t.Helper()
 	return harness.Start(t, harness.WithConfigOverlay(map[string]any{
-		"plans.mode":                                "always",
-		"plans.approval.require_approval":           true,
+		"plans.mode":                                "off",
+		"plans.approval.require_approval":           false,
 		"orchestrator.task_approval_step_threshold": threshold,
 	}))
 }
@@ -141,7 +145,7 @@ func gateSubmitPlanTurn(t *testing.T, s *harness.Stack, sessionID, marker string
 	s.Fake.SetPlannerResponse(string(planJSON))
 	s.Fake.SetPostToolText("The requested work is complete.")
 
-	ack := s.SubmitChatHTTP(t, sessionID, marker+": plan and execute the multi-step rework")
+	ack := s.SubmitChatHTTP(t, sessionID, marker+": plan the multi-step rework, don't implement it")
 	turnID, _ := ack["turn_id"].(string)
 	if turnID == "" {
 		t.Fatalf("gate: ack missing turn_id: %+v", ack)
