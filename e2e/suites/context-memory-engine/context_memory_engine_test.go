@@ -95,14 +95,20 @@ func cmeRequestsText(s *harness.Stack) string {
 
 // cmeHugeCLAUDEMD bytes. At the scenario window (20000 tokens) the
 // allocator's SystemDynamicDocs share is 10% of (20000 - max(9%, 4096))
-// = 1590 tokens ~= 4770 heuristic chars, so a 24000-char doc is ~2.5x over
-// budget and must truncate deterministically. The tail marker is a unique
-// sentence asserted PRESENT in the disabled path (verbatim) and ABSENT
-// from the enabled path (trimmed head).
+// = 1590 tokens ~= 4770 heuristic chars, so a ~6600-char doc is ~1.4x
+// over budget and must truncate deterministically on the enabled path.
+// Sized so the DISABLED-path system prompt (builder baseline ~4.4KB +
+// doc verbatim) stays UNDER the llm context firewall's window-independent
+// 12KB oversized-system-message bound (added in a6608719 after this
+// suite was authored: any larger fixture is clipped at the LLM boundary,
+// NOT by the assembler, and the verbatim-tail assertion cannot hold for
+// any doc past ~7.5KB). The tail marker is a unique sentence asserted
+// PRESENT in the disabled path (verbatim) and ABSENT from the enabled
+// path (trimmed head).
 func cmeHugeCLAUDEMD() string {
 	var sb strings.Builder
 	sb.WriteString("# CLAUDE.md\n\n")
-	for i := 0; i < 800; i++ {
+	for i := 0; i < 110; i++ {
 		sb.WriteString("filler line with ordinary words to pad the token count steadily\n")
 	}
 	sb.WriteString("the unique unbounded-tail sentinel sentence lives here\n")
