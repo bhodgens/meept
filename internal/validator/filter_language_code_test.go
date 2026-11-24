@@ -2,6 +2,7 @@ package validator
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -359,5 +360,60 @@ func TestLanguageFilter_UserTableLoadedBeforeConstruction(t *testing.T) {
 	}
 	if res := f.Process(context.Background(), &task.TaskStep{}, englishFixture); res.Outcome != FilterFail {
 		t.Fatalf("english prose under a loaded fr table: %+v, want fail (the table-backed filter must filter)", res)
+	}
+}
+
+// TestLanguageFilter_EnvelopeResponseIsTheJudgedText pins the
+// output-filters French-rejection regression. The tactical scheduler
+// hands the chain step.Result, the step-job RESULT ENVELOPE JSON; the
+// envelope's plumbing keys (file paths, SHA-256 hex, conversation ids)
+// are ASCII noise that dilutes a genuine French reply below the 0.5
+// reject threshold, so the filter passed wrong-language output to an
+// English-expecting user. With an empty expected language the default
+// expectation is English, so the same French prose the e2e suite feeds
+// must reject when wrapped in an envelope, exactly as it does bare.
+func TestLanguageFilter_EnvelopeResponseIsTheJudgedText(t *testing.T) {
+	ctx := context.Background()
+	step := &task.TaskStep{}
+	french := "le fichier est dans la table avec les donnees du client et il a ete fait par notre equipe pour vous avec plus de soins et de tres bons resultats dans la verification"
+
+	// Mirror the e2e harness posture: the fr word table is armed, so
+	// detection can actually NAME french; the expectation stays the
+	// frozen default English (empty code). Without the table the
+	// detector cannot name fr at all and the filter correctly declines
+	// to judge -- which is why this pin loads it first.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "fr.txt"), []byte(frenchCSV), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := LoadLanguageWordTables(dir); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	t.Cleanup(func() { _ = LoadLanguageWordTables(filepath.Join(t.TempDir(), "absent")) })
+
+	f := NewLanguageFilter("") // empty = frozen default "en"
+
+	if res := f.Process(ctx, step, french); res.Outcome != FilterFail {
+		t.Fatalf("bare french prose with an armed fr table: %+v, want fail", res)
+	}
+
+	envelope, err := json.Marshal(map[string]any{
+		"status":   "completed",
+		"success":  true,
+		"response": french,
+		"tool_evidence": []any{map[string]any{
+			"type":    "file_hash",
+			"subject": "/tmp/lang-en.txt",
+			"value":   "d41852293ee0e17d2362b21a90381422d765ca47e4117a2fd51d028537dd9f8b",
+		}},
+		"tool_invocations":          []any{map[string]any{"tool_name": "file_write", "success": true}},
+		"execution_conversation_id": "step-task-x",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := f.Process(ctx, step, string(envelope))
+	if res.Outcome != FilterFail {
+		t.Fatalf("french wrapped in a step-job envelope: %+v, want fail (plumbing keys must not dilute the model's own response)", res)
 	}
 }

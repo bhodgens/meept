@@ -2,6 +2,7 @@ package validator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"iter"
@@ -463,13 +464,47 @@ func (f *LanguageFilter) Process(_ context.Context, _ *task.TaskStep, output str
 		return FilterResult{Outcome: FilterPass, Filter: f.Name(),
 			Reason: fmt.Sprintf("no language detection for %s; not filtering", f.undetectable)}
 	}
-	if strings.TrimSpace(output) == "" {
+	judged := languageJudgedText(output)
+	if strings.TrimSpace(judged) == "" {
 		return FilterResult{Outcome: FilterPass, Filter: f.Name()}
 	}
-	detected, confidence := detectedLanguage(output)
+	detected, confidence := detectedLanguage(judged)
 	if detected != "" && detected != f.expected && confidence >= 0.5 {
 		return FilterResult{Outcome: FilterFail, Filter: f.Name(),
 			Reason: fmt.Sprintf("lang=%s confidence=%.2f expected=%s", detected, confidence, f.expected)}
 	}
 	return FilterResult{Outcome: FilterPass, Filter: f.Name()}
+}
+
+// languageJudgedText narrows the filter input to what the MODEL authored.
+// The tactical scheduler hands the chain step.Result, which for a
+// step-job is the RESULT ENVELOPE JSON: {"status","success","evidence",
+// "response","tool_evidence":[{"type","subject","value"}],
+// "tool_invocations":[...], "execution_conversation_id", ...}. Detecting
+// language over that blob lets system plumbing outvote the model's prose:
+// a file path and a SHA-256 hex string are pure ASCII noise that
+// dilutes the non-English signal below the 0.5 reject threshold
+// (output-filters French rejection regression -- upstream rejected the
+// SAME French prose at confidence=0.50 exactly; the envelope keys added
+// by the claim-vs-evidence projection pushed it under and the filter
+// began passing French output to an English-expecting user). The model
+// writes its answer into the "response" field, so when the input is a
+// JSON object carrying a string "response", that is the text we judge.
+// Every other shape -- plain prose, non-object JSON, object without a
+// usable "response" -- is judged as-is, so the filter's legacy behavior
+// is byte-identical for non-envelope callers.
+func languageJudgedText(output string) string {
+	trimmed := strings.TrimSpace(output)
+	if len(trimmed) < 2 || trimmed[0] != '{' {
+		return output
+	}
+	var envelope map[string]any
+	if err := json.Unmarshal([]byte(trimmed), &envelope); err != nil {
+		return output
+	}
+	response, ok := envelope["response"].(string)
+	if !ok || strings.TrimSpace(response) == "" {
+		return output
+	}
+	return response
 }
