@@ -80,7 +80,10 @@ func TestPlayedFrameEmittedAfterFinalStreamOnly(t *testing.T) {
 func TestNoPlayedOnBargeInAbort(t *testing.T) {
 	const ccid = "pl2"
 	d, _, childConn, p, out := newPaceChild(t, ccid)
-	tts := newPacedTTS(10*time.Millisecond, 40) // long stream: clear lands mid-audio
+	// 400 chunks x 640 B = 256 KB exceeds a Linux unix-socket send buffer
+	// (~212 KB), so the clear lands mid-audio on every platform. The
+	// 10 ms Speak delay keeps the one-shot provider shape unchanged.
+	tts := newPacedTTS(10*time.Millisecond, 400)
 	swapTTS(p, tts)
 
 	d.sendLine(childConn, voiceframe.Frame{CallID: ccid, Event: voiceframe.EventSay, Text: "sentence 0", Last: new(true)})
