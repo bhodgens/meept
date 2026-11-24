@@ -263,8 +263,7 @@ func isTransientTransportError(err error) bool {
 	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
 		return true
 	}
-	var opErr *net.OpError
-	if errors.As(err, &opErr) {
+	if _, ok := errors.AsType[*net.OpError](err); ok {
 		return true // reset/refused/pipe at the socket layer
 	}
 	// http2 / transport wrappers that carry no typed cause (rare): the
