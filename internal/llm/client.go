@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"maps"
+	"net"
 	"net/http"
 	"sort"
 	"strconv"
@@ -230,6 +231,138 @@ func (c *Client) policyCfg() FailurePolicyConfig {
 		BaseThrottle: 30 * time.Second,
 		PollFloor:    time.Hour,
 	}
+}
+
+// isTransientTransportError reports whether err is a CONNECTION-level
+// failure (the socket died: EOF mid-body, reset, broken pipe) rather than
+// anything the provider answered. This is the shape a proxy leaves behind
+// when its serving process is killed mid-stream (socrates litellm
+// uvicorn-worker storm, 2026-11-23: "stream read failed: unexpected EOF"
+// while the upstream kept generating at full speed). The transport-retry
+// lane (ModelConfig.TransientRetries) funds one same-provider re-dial for
+// exactly this class.
+//
+// Deliberately EXCLUDED: context deadline/cancel (the caller's budget —
+// re-dialing into a dead ctx burns the alias timeout for nothing), and
+// anything carrying an HTTP status (throttle/server/client lanes own
+// those). The Cause chain is unwrapped via errors.Is, so a ClientError
+// wrapping io.ErrUnexpectedEOF or a net.(*OpError) matching
+// syscall.ECONNRESET/ EPIPE classifies; a wrapped context error does not.
+func isTransientTransportError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Caller-budget errors are never transport flakes.
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	// An HTTP status means the provider ANSWERED — the status lanes own it.
+	if status, _ := errorStatusAndHeader(err); status != 0 {
+		return false
+	}
+	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
+		return true
+	}
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		return true // reset/refused/pipe at the socket layer
+	}
+	// http2 / transport wrappers that carry no typed cause (rare): the
+	// client's own wrappers stamp these message prefixes at the read and
+	// dial sites.
+	msg := err.Error()
+	for _, marker := range []string{
+		"stream read failed",
+		"failed to read response",
+		"request failed: Post", // dial/round-trip wrapper (Go http client)
+		"EOF",
+		"connection reset",
+		"broken pipe",
+	} {
+		if strings.Contains(msg, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// doRequestRetryTransport wraps a dispatch closure with the per-model
+// transient-transport re-dial lane (ModelConfig.TransientRetries). A
+// connection-level failure (proxy worker killed mid-request: EOF/reset)
+// re-dials the SAME provider immediately, up to cfg.TransientRetries
+// times, WITHOUT consuming a shortRetries attempt and without surfacing
+// to the rotation/alias-failure layer while budget remains. Zero budget
+// (the default) makes this a transparent pass-through: byte-identical to
+// the pre-feature single-dispatch behavior.
+//
+// The lane funds ONLY the transport class: every other error (status-
+// carrying, quota, refusal, overflow, empty sentinel) returns to the
+// caller's classification loop untouched. A dead caller ctx also returns
+// immediately — re-dialing into a cancelled context cannot succeed.
+func (c *Client) doRequestRetryTransport(
+	ctx context.Context,
+	cfg *ModelConfig,
+	call func() (*Response, error),
+) (*Response, error) {
+	resp, err := call()
+	left := 0
+	if cfg != nil {
+		left = cfg.TransientRetries
+	}
+	for left > 0 && err != nil && ctx.Err() == nil && isTransientTransportError(err) {
+		left--
+		c.logger.Warn("Transient transport failure, re-dialing same provider",
+			"provider", cfg.ProviderID,
+			"model", cfg.ModelID,
+			"redials_remaining", left,
+			"error", err,
+		)
+		resp, err = call()
+	}
+	return resp, err
+}
+
+// doStreamRequestRetryTransport is the streaming twin. Same lane, plus the
+// DUPLICATION GUARD: a stream that already delivered user-visible deltas
+// (content or partial tool-call arguments captured into retryState) is
+// NEVER re-dialed — the server restarts generation from scratch, so a
+// second partial answer would concatenate with the first (the same
+// duplicated-content defect the attempt-tagged PM callback solves at the
+// rotation layer, internal/llm AGENTS.md / provider_manager.go
+// "accumulate with attempt tagging"). The partial state lives in
+// retryState only after savePartialState ran (every doStreamRequest error
+// path calls it before returning), so the zero-content check is: no
+// accumulated content AND no tool-call accumulators.
+func (c *Client) doStreamRequestRetryTransport(
+	ctx context.Context,
+	cfg *ModelConfig,
+	retryState *streamRetryState,
+	call func() (*Response, int, error),
+) (*Response, int, error) {
+	resp, status, err := call()
+	left := 0
+	if cfg != nil {
+		left = cfg.TransientRetries
+	}
+	for left > 0 && err != nil && ctx.Err() == nil && isTransientTransportError(err) {
+		if retryState != nil && (retryState.accumulated.Len() > 0 || len(retryState.toolCallAccums) > 0) {
+			c.logger.Warn("Mid-stream transport failure with delivered deltas: not re-dialing (duplication guard)",
+				"provider", cfg.ProviderID,
+				"model", cfg.ModelID,
+				"error", err,
+			)
+			return resp, status, err
+		}
+		left--
+		c.logger.Warn("Stream transport failure before first delta, re-dialing same provider",
+			"provider", cfg.ProviderID,
+			"model", cfg.ModelID,
+			"redials_remaining", left,
+			"error", err,
+		)
+		resp, status, err = call()
+	}
+	return resp, status, err
 }
 
 // shortThrottleSleep is the ONE throttle wait policy for all five retry
@@ -888,7 +1021,14 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 	plan := DefaultBackoffPlan(FailureThrottle, now, c.policyCfg())
 
 	for attempt := 1; attempt <= shortRetries; attempt++ {
-		resp, err := c.doRequest(ctx, payload, cfg, chatOpts.priority, chatOpts.sessionID, chatOpts.assistantPrefill)
+		// Per-model transient-transport re-dial lane (TransientRetries):
+		// EOF/reset re-dials the SAME provider before the error enters the
+		// classification switch, so a proxy hop-death never consumes a
+		// shortRetries attempt nor reaches the rotation/alias-failure
+		// layer while budget remains. Zero budget = pass-through.
+		resp, err := c.doRequestRetryTransport(ctx, cfg, func() (*Response, error) {
+			return c.doRequest(ctx, payload, cfg, chatOpts.priority, chatOpts.sessionID, chatOpts.assistantPrefill)
+		})
 		if err != nil {
 			// Refusal errors never re-enter the short-retry loop: the
 			// serving model declined by policy — retrying the SAME model
@@ -1194,7 +1334,10 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 			reportProgress(ProgressStageThinking, "Model is thinking...")
 		}
 
-		resp, err := c.doRequest(ctx, payload, cfg, chatOpts.priority, chatOpts.sessionID, chatOpts.assistantPrefill)
+		// Transient-transport re-dial lane (see the Chat() site).
+		resp, err := c.doRequestRetryTransport(ctx, cfg, func() (*Response, error) {
+			return c.doRequest(ctx, payload, cfg, chatOpts.priority, chatOpts.sessionID, chatOpts.assistantPrefill)
+		})
 		if err != nil {
 			// ChatWithProgress retry loop: same classification contract
 			// as Chat() above.
@@ -2866,7 +3009,14 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 		chatOpts.ttftStart = time.Now()
 		chatOpts.ttftCaptured = false
 		chatOpts.ttftFirstDelta = time.Time{}
-		resp, httpStatus, err := c.doStreamRequest(ctx, body, onDelta, retryState, cfg, chatOpts.priority, chatOpts.sessionID, chatOpts.assistantPrefill, chatOpts)
+		// Transient-transport re-dial lane (streaming twin): a stream that
+		// died before delivering ANY content re-dials the same provider
+		// inside this one outer attempt; a stream that already delivered
+		// deltas keeps the outer loop's tested B-03 resume path (see
+		// doStreamRequestRetryTransport).
+		resp, httpStatus, err := c.doStreamRequestRetryTransport(ctx, cfg, retryState, func() (*Response, int, error) {
+			return c.doStreamRequest(ctx, body, onDelta, retryState, cfg, chatOpts.priority, chatOpts.sessionID, chatOpts.assistantPrefill, chatOpts)
+		})
 		if err == nil {
 			// Dollars charged for THIS streamed response (same per-million
 			// prices the budget/cache/metrics rows below record); zero when

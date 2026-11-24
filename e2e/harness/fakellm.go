@@ -123,11 +123,23 @@ type ScriptedResponse struct {
 	ToolCalls []ToolCall // OpenAI tool calls (finish "tool_calls")
 	Status    int        // non-zero: reply with this HTTP status + Body (error injection)
 	Body      string     // error body for Status
-	Raw       *ChatCompletionResponse
-	Usage     map[string]int
+	// KillConnection: accept the request, then hard-close the TCP
+	// connection without answering - the proxy-worker-death shape (EOF, no
+	// HTTP status) that drives the transient-retry lane
+	// (ModelConfig.TransientRetries).
+	KillConnection bool
+	Raw            *ChatCompletionResponse
+	Usage          map[string]int
 
 	MaxServes int // 0 = unlimited; otherwise consumed after N matches
 }
+
+// KillConnectionResponse scripts a proxy-worker death: the fake accepts
+// the request then closes the TCP connection without answering (EOF, no
+// HTTP status). Drives the per-model transient_retries lane
+// (ModelConfig.TransientRetries): with budget the client re-dials the
+// SAME fake; with none it rotates to the next alias model.
+func KillConnectionResponse() ScriptedResponse { return ScriptedResponse{KillConnection: true} }
 
 // TextResponse scripts a plain completion reply.
 func TextResponse(text string) ScriptedResponse { return ScriptedResponse{Text: text} }
@@ -489,12 +501,25 @@ func (f *FakeLLM) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	resp, rawStatus := f.classifyLocked(body)
 	f.mu.Unlock()
 
-	// Raw HTTP error injection (ScriptedResponse.Status).
+	// Raw HTTP error injection (ScriptedResponse.Status). Status == -1 is
+	// the KILL shape: hijack and close, no answer (proxy-worker death).
 	if rawStatus != nil {
 		if f.debugPath != "" {
 			if raw, err := json.Marshal(map[string]any{"injected_status": rawStatus.Status, "request": body}); err == nil {
 				f.appendDebugLocked(raw)
 			}
+		}
+		if rawStatus.Status == -1 {
+			if hj, ok := w.(http.Hijacker); ok {
+				if conn, _, err := hj.Hijack(); err == nil {
+					if cerr := conn.Close(); cerr != nil {
+						log.Printf("fake-llm: kill-close: %v", cerr)
+					}
+					return
+				}
+			}
+			http.Error(w, "kill unavailable", http.StatusInternalServerError)
+			return
 		}
 		http.Error(w, rawStatus.Body, rawStatus.Status)
 		return
@@ -522,7 +547,9 @@ func (f *FakeLLM) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// injectedStatus is a scripted raw HTTP error reply.
+// injectedStatus is a scripted raw HTTP error reply. Status == -1 is the
+// KILL shape: accept the connection, hijack it, close without answering
+// (the proxy-worker-death EOF the transient-retry lane absorbs).
 type injectedStatus struct {
 	Status int
 	Body   string
@@ -531,6 +558,9 @@ type injectedStatus struct {
 // scriptReplyLocked renders a ScriptedResponse into the wire reply
 // (result, isRawHTTPError). Caller holds f.mu.
 func scriptReplyLocked(s ScriptedResponse) (any, bool) {
+	if s.KillConnection {
+		return &injectedStatus{Status: -1}, true
+	}
 	if s.Status != 0 {
 		return &injectedStatus{Status: s.Status, Body: s.Body}, true
 	}
