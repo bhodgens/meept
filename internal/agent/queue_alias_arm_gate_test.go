@@ -38,12 +38,16 @@ import (
 // armSpyChatter answers every turn with a fixed reply and runs a hook
 // while the turn is live (mirrors steerSpyChatter in the services gate).
 type armSpyChatter struct {
-	hook func()
+	hook    func()
+	release chan struct{} // non-nil: hook blocks until the test releases it
 }
 
 func (s *armSpyChatter) Chat(ctx context.Context, messages []llm.ChatMessage, opts ...llm.ChatOption) (*llm.Response, error) {
 	if s.hook != nil {
 		s.hook()
+	}
+	if s.release != nil {
+		<-s.release
 	}
 	return &llm.Response{Content: "arm-gate turn done"}, nil
 }
@@ -93,7 +97,8 @@ func TestSteerBySessionIDDuringDirectDispatchTurn(t *testing.T) {
 	// Create already mints a distinct ConversationID; the gate steers by
 	// BOTH identities (session id + conversation id) mid-turn.
 	liveQueue := make(chan *MessageQueue, 1)
-	spy := &armSpyChatter{hook: func() {
+	release := make(chan struct{})
+	spy := &armSpyChatter{release: release, hook: func() {
 		// Steer by the session's PRIMARY id mid-turn -- a shape the
 		// pre-fix path NEVER registered (F-STEER-R7).
 		if q, _ := reg.GetActiveQueue(sess.ID); q != nil {
@@ -148,6 +153,7 @@ func TestSteerBySessionIDDuringDirectDispatchTurn(t *testing.T) {
 	case <-liveQueue:
 	default:
 	}
+	close(release)
 
 	if err := <-done; err != nil {
 		t.Fatalf("RunOnce: %v", err)
@@ -177,8 +183,9 @@ func TestSteerByThreadScopedIDDuringDirectDispatchTurn(t *testing.T) {
 		t.Fatal("created session has no conversation id")
 	}
 
+	release2 := make(chan struct{})
 	template := NewAgentLoop("sess-template-arm2", t.TempDir(),
-		WithLLMChatter(&armSpyChatter{}),
+		WithLLMChatter(&armSpyChatter{release: release2}),
 		WithMessageQueue(NewMessageQueue()),
 		WithAgentRegistry(reg),
 	)
@@ -225,6 +232,8 @@ func TestSteerByThreadScopedIDDuringDirectDispatchTurn(t *testing.T) {
 	}
 	_ = other
 	_ = probe
+
+	close(release2)
 
 	if err := <-done; err != nil {
 		t.Fatalf("RunOnce: %v", err)
