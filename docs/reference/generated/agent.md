@@ -2338,6 +2338,10 @@ DELIVERY CONTRACT: the bus \(internal/bus\) has no latched or buffered topics â€
 
 	const DefaultQuotaResumePollInterval = DefaultTurnParkerPollInterval
 
+<a name="DefaultThrottleMaxAttempts"></a>DefaultThrottleMaxAttempts bounds the throttle re\-park generations \(endpoint\-block parks included\): the encode side stamps it onto every throttle record so the drain\-side attempt cap \(M\-4\-park machinery in TurnParker.drainDue\) gives up instead of replaying an always\-blocked turn forever. Hand\-built rows keep MaxAttempts=0 \(unlimited, legacy\).
+
+	const DefaultThrottleMaxAttempts = 5
+
 <a name="DefaultTurnParkerPollInterval"></a>DefaultTurnParkerPollInterval is the re\-check cadence for parked turn records. It is the canonical source for DefaultQuotaResumePollInterval \(quota\_resume.go\), which remains the exported quota\-facing alias.
 
 	const DefaultTurnParkerPollInterval = 10 * time.Minute
@@ -7327,6 +7331,8 @@ SetTaskStore sets the task store for looking up linked sessions.
 	func (h *ChatHandler) SetThrottleParker(parker *TurnParker)
 
 SetThrottleParker wires the loop's throttle\-resume parker \(tree 03 leaf 02 Task 3\): the parker's resume callback routes by record class â€” throttle records re\-enter the loop via resumeThrottledTurn; quota records \(when a parker other than the handler's own quota watcher is shared\) delegate to the existing quota resume callback. Nil\-guarded.
+
+Honest\-terminal lane \(01\-safety/05 posture\): the parker's attempt\-cap give\-up callback marks a capped parked turn failed\-terminal, mirroring the quota lane's SetGiveUpFunc wiring \(giveUpQuotaParkedTurn\). Without it a capped throttle record was deleted from the parker and the submitting client's turn kept its parked ack forever.
 
 <a name="ChatHandler.SetTurnRegistry"></a>
 ### func \(\*ChatHandler\) SetTurnRegistry
