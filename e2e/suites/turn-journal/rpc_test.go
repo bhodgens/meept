@@ -116,47 +116,6 @@ type tb interface {
 // dialRPCS is the dialRPCF for *testing.T call sites in the suite.
 func dialRPCS(t tb, socketPath string) *rpcSession { return dialRPCF(t, socketPath) }
 
-// drainCompletionEvents polls bus.poll on sub for the drain window and
-// counts turn.terminal successes for turnID and queue.job.completed events.
-func drainCompletionEvents(s *rpcSession, subID, turnID string, window time.Duration) (int, int) {
-	deadline := time.Now().Add(window)
-	terminal, queued := 0, 0
-	for time.Now().Before(deadline) {
-		raw, err := s.call("bus.poll", map[string]string{"subscription_id": subID})
-		if err == nil {
-			var resp struct {
-				Events []struct {
-					Topic   string          `json:"topic"`
-					Payload json.RawMessage `json:"payload"`
-				} `json:"events"`
-			}
-			if json.Unmarshal(raw, &resp) == nil {
-				for _, ev := range resp.Events {
-					switch ev.Topic {
-					case "turn.terminal":
-						var p struct {
-							TurnID string `json:"turn_id"`
-							Status string `json:"status"`
-						}
-						if json.Unmarshal(ev.Payload, &p) == nil && p.TurnID == turnID && p.Status != "parked" && p.Status != "failed" {
-							terminal++
-						}
-					case "queue.job.completed":
-						var p struct {
-							TaskID string `json:"task_id"`
-						}
-						if json.Unmarshal(ev.Payload, &p) == nil && (p.TaskID == "" || p.TaskID == turnID) {
-							queued++
-						}
-					}
-				}
-			}
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	return terminal, queued
-}
-
 // queueJobRow mirrors one row of the persistent queue's jobs table
 // (internal/queue/store.go baseSchema - the columns the dedup scenario
 // asserts on).
