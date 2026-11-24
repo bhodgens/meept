@@ -810,6 +810,9 @@
     "internal/daemon/execution_runs_rpc.go": [
       "execution-observability"
     ],
+    "e2e/suites/model-rating": [
+      "model-rating"
+    ],
     "e2e/suites/dispatch-trace": [
       "dispatch-trace"
     ],
@@ -3931,7 +3934,7 @@
       "id": "tui-mode-01",
       "suite": "tui-flows",
       "diff": "M",
-      "title": "mode badge in situ (F13c): a direct work turn renders a distinguishable mode badge in the chat transcript from the C1 intent_type/handler_case fields (no badge today)",
+      "title": "mode badge in situ (F13c): a direct work turn renders a distinguishable mode badge in the chat transcript from the C1 intent_type/handler_case fields - live from turn.terminal, restored from the session.dispatch_trace hydration",
       "paths": [
         "internal/tui/models/chat.go",
         "internal/tui/app.go",
@@ -6707,6 +6710,54 @@
       "status": "implemented",
       "paths": [
         "internal/agent/handler.go"
+      ]
+    },
+    {
+      "id": "grade-capture-01",
+      "suite": "model-rating",
+      "diff": "M",
+      "title": "grade capture: an enriched step.review_completed through the real collector bus subscription persists model_review_verdicts rows with rubric/category/severity/judge/cycle intact, and the model rollup groups them",
+      "status": "implemented",
+      "paths": [
+        "internal/metrics/review_verdicts.go",
+        "internal/modelrating/",
+        "e2e/suites/model-rating/"
+      ]
+    },
+    {
+      "id": "retention-01",
+      "suite": "model-rating",
+      "diff": "M",
+      "title": "retention: the real maintenance sweep (24h metrics_live purge + 30d audit purge) leaves verdict rows intact; RetentionTables() never lists model_review_verdicts (append-only invariant)",
+      "status": "implemented",
+      "paths": [
+        "internal/metrics/store.go",
+        "internal/metrics/review_verdicts.go",
+        "e2e/suites/model-rating/"
+      ]
+    },
+    {
+      "id": "surface-01",
+      "suite": "model-rating",
+      "diff": "M",
+      "title": "surface parity: GET /api/v1/metrics/reviews on the real TLS route table and the built `meept analytics reviews` CLI read the same seeded verdict rows; the HTTP response carries the frozen C5 shape keys",
+      "status": "implemented",
+      "paths": [
+        "internal/comm/http/reviews_endpoint.go",
+        "cmd/meept/analytics.go",
+        "internal/metrics/review_verdicts.go",
+        "e2e/suites/model-rating/"
+      ]
+    },
+    {
+      "id": "join-proof-01",
+      "suite": "model-rating",
+      "diff": "M",
+      "title": "blame join: an llm_calls rotation fixture resolves to the final successful implementer model on the trace; judge-loop calls are excluded by agent_id; an unknown trace never blames",
+      "status": "implemented",
+      "paths": [
+        "internal/metrics/store.go",
+        "e2e/suites/model-rating/"
       ]
     },
     {
