@@ -207,6 +207,16 @@ class WebSocketService {
   /// Incoming messages stream (PublishSubject — no replay).
   Stream<Map<String, dynamic>> get messageStream => _messageSubject.stream;
 
+  /// Test seam: deliver a frame as if it arrived on the wire, so tests
+  /// can exercise the LIVE subscription filters (subscribeToAgentProgress
+  /// type/session checks) without a real WebSocket connection. Frames
+  /// bypass _flattenWSMessage — inject the flat relay shape directly
+  /// (the shape transformBusEventToWS produces server-side).
+  @visibleForTesting
+  void debugInjectFrame(Map<String, dynamic> frame) {
+    _messageSubject.addSafe(frame);
+  }
+
   /// Error stream (PublishSubject — no replay).
   Stream<String> get errorStream => _errorSubject.stream;
 
@@ -759,15 +769,30 @@ class WebSocketService {
 
     return _messageSubject.stream.where((m) {
       final type = m['type'] as String?;
+      if (type != WsEventTypes.agentProgress) return false;
       // Dual-ID invariant: raw agent.progress payloads carry only
       // conversation_id (the loop publishes progress before a session_id is
       // normalized), so accept either identifier — mirrors the daemon's
       // session_id->conversation_id WS filter fallback.
       final sid = m['session_id'] as String?;
       final cid = m['conversation_id'] as String?;
-      final sameSession = sid == sessionId || cid == sessionId;
-      if (!sameSession) return false;
-      return type == WsEventTypes.agentProgress;
+      if (sid == sessionId || cid == sessionId) return true;
+      // Session-less mid-turn task events (bughunt wave2, finding 1):
+      // task.error and the review_completed pair are published WITHOUT a
+      // session_id/conversation_id (tactical.go / review_manager.go), so
+      // the daemon broadcasts them to every connection (empty-session
+      // bypass) and the session match above can never hit. Let them reach
+      // ChatNotifier._handleTaskEventFrame, whose own scoping treats a
+      // missing session key as best-effort legacy — the TUI renders these
+      // globally too, so this keeps parity. Any OTHER session-less frame
+      // still drops here.
+      if (sid == null && cid == null) {
+        final topic = m['source_topic'] as String?;
+        return topic == 'task.error' ||
+            topic == 'task.review_completed' ||
+            topic == 'step.review_completed';
+      }
+      return false;
     });
   }
 

@@ -1095,6 +1095,16 @@ func transformBusEventToWS(msg *models.BusMessage) map[string]any {
 			// posture. Board events are NEVER chat_message (blank-bubble
 			// invariant).
 			eventType = "board_event"
+		// task.error and the review_completed pair are mid-turn chat-visible
+		// task events: the Flutter GUI renders them via _handleTaskEventFrame
+		// (chat_provider.dart) on the agent_progress stream ONLY — the legacy
+		// prefix table's job_update classification made them unreachable in
+		// the GUI while the TUI rendered them (parity break, bughunt wave2).
+		// Exact match BEFORE the task./step. prefix case, mirroring the
+		// agent.progress exact-match posture. agent_progress is the correct
+		// class: these must never become chat_message bubbles.
+		case topic == "task.error" || topic == "task.review_completed" || topic == "step.review_completed":
+			eventType = "agent_progress"
 		case strings.HasPrefix(topic, "metrics."):
 			eventType = "metrics_update"
 		case strings.HasPrefix(topic, "task.") || strings.HasPrefix(topic, "step.") || strings.HasPrefix(topic, "job.") ||

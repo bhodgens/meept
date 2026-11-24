@@ -2888,3 +2888,104 @@ func TestWSBridgeClassifiesModelEscalatedAsProgress(t *testing.T) {
 		t.Errorf("source_topic = %v, want %q", frontendData["source_topic"], "agent.model_escalated")
 	}
 }
+
+// TestWSBridgeClassifiesMidTurnTaskEventsAsProgress pins the bughunt-wave2
+// classification fix: task.error and the review_completed pair are
+// mid-turn chat-visible task events that the Flutter GUI renders via
+// _handleTaskEventFrame on the agent_progress stream ONLY. The legacy
+// prefix table classified task.*/step.* as job_update, which the GUI's
+// subscribeToAgentProgress filter drops — the events rendered in the TUI
+// but never in the GUI (parity break). They must classify as
+// agent_progress via exact match before the prefix case, never
+// chat_message (blank-bubble invariant), and keep source_topic for the
+// Dart handler's discrimination. Sibling task.* topics (task.completed,
+// task.progress) stay job_update.
+func TestWSBridgeClassifiesMidTurnTaskEventsAsProgress(t *testing.T) {
+	msgBus := bus.New(nil, slog.Default())
+	defer msgBus.Close()
+
+	cfg := DefaultServerConfig()
+	cfg.Addr = ":0"
+	srv := NewServer(cfg, nil, nil, nil, nil, nil, WithWebSocket(msgBus, "/ws"))
+	if srv == nil {
+		t.Fatal("failed to create server with WebSocket option")
+	}
+
+	cases := []struct {
+		topic   string
+		want    string
+		payload map[string]any
+	}{
+		{
+			topic: "task.error",
+			want:  "agent_progress",
+			payload: map[string]any{
+				"task_id": "task-1", "step_id": "step-3",
+				"error": "tool exited 1", "chat_visible": true,
+			},
+		},
+		{
+			topic: "step.review_completed",
+			want:  "agent_progress",
+			payload: map[string]any{
+				"task_id": "task-1", "step_id": "step-3",
+				"status": "rejected", "feedback": "needs tests", "revision_count": 1,
+			},
+		},
+		{
+			topic: "task.review_completed",
+			want:  "agent_progress",
+			payload: map[string]any{
+				"task_id": "task-1", "step_id": "step-3",
+				"status": "approved", "feedback": "", "revision_count": 0,
+			},
+		},
+		// The prefix table still owns every other task.*/step.* topic.
+		{topic: "task.completed", want: "job_update", payload: map[string]any{"task_id": "task-1"}},
+		{topic: "task.progress", want: "job_update", payload: map[string]any{"task_id": "task-1"}},
+		{topic: "step.started", want: "job_update", payload: map[string]any{"step_id": "step-3"}},
+	}
+
+	for _, tc := range cases {
+		msg, err := models.NewBusMessage(models.MessageTypeEvent, "test", tc.payload)
+		if err != nil {
+			t.Fatalf("topic %q: NewBusMessage: %v", tc.topic, err)
+		}
+		if got := msgBus.Publish(tc.topic, msg); got < 1 {
+			t.Errorf("topic %q: Publish delivered to %d subscribers, want >= 1 (WS bridge not subscribed)", tc.topic, got)
+			continue
+		}
+
+		frontendData := transformBusEventToWS(msg)
+		if frontendData == nil {
+			t.Errorf("topic %q: transformBusEventToWS returned nil, want payload", tc.topic)
+			continue
+		}
+		if frontendData["type"] != tc.want {
+			t.Errorf("topic %q: frontend type = %v, want %q", tc.topic, frontendData["type"], tc.want)
+		}
+		if frontendData["type"] == "chat_message" {
+			t.Errorf("topic %q: classified as chat_message; task events must never render as chat bubbles", tc.topic)
+		}
+		// The Dart _handleTaskEventFrame discriminates on source_topic.
+		if frontendData["source_topic"] != tc.topic {
+			t.Errorf("topic %q: source_topic = %v, want %q", tc.topic, frontendData["source_topic"], tc.topic)
+		}
+		// Bus payload keys must survive the transform (the Dart handler
+		// reads error/status/feedback/step_id/revision_count/chat_visible).
+		// Compare after a JSON round-trip: the transform unmarshals, so
+		// ints surface as float64.
+		wantPayload := map[string]any{}
+		for k, v := range tc.payload {
+			b, _ := json.Marshal(v)
+			var norm any
+			_ = json.Unmarshal(b, &norm)
+			wantPayload[k] = norm
+		}
+		for k, v := range wantPayload {
+			if got, ok := frontendData[k]; !ok || got != v {
+				t.Errorf("topic %q: payload key %q = %v (present %v), want %v", tc.topic, k, got, ok, v)
+			}
+		}
+	}
+}

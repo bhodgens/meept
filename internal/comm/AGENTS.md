@@ -61,6 +61,20 @@ Future agents adding new bus topics: declare stable, single-shape topics as
 `internal/agent/topics.go`) and publish via `bus.PublishT` / subscribe via
 `bus.SubscribeT`. Give any WS-visible payload a `WSClass()` method.
 
+Mid-turn chat-visible task events are an exact-match EXCEPTION to the
+`task.*`/`step.*` → `job_update` prefix bucket: `task.error`,
+`task.review_completed` and `step.review_completed` classify as
+`agent_progress` (added bughunt wave2, 2026-11-23; pinned by
+TestWSBridgeClassifiesMidTurnTaskEventsAsProgress and the Dart
+live-filter tests in chat_task_events_test.dart). The Flutter GUI renders
+them ONLY via `ChatNotifier._handleTaskEventFrame` on the progress
+stream — `job_update` frames are dropped by `subscribeToAgentProgress`,
+so the prefix classification made them GUI-unreachable while the TUI
+rendered them (parity break). Their publishers stamp no session_id, so
+the relay broadcasts them (empty-session bypass) and the Dart progress
+filter passes these three source_topics on a session-less frame; every
+other session-less progress frame still requires a session match.
+
 ## The per-connection session filter is (channel, session)-scoped
 
 `WebSocketHub` keeps one entry per connection (`wsConnSubs`): `sessions` is the

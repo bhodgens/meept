@@ -44,6 +44,20 @@ class _ConnectedWebSocket extends MockWebSocketService {
   bool get isConnected => true;
 }
 
+/// A WebSocketService with a no-op connect but the REAL
+/// subscribeToAgentProgress filter and message subject: the live-path tests
+/// below inject wire-shaped frames via debugInjectFrame and need the
+/// production type/session filter to run, without opening a socket.
+class _RealFilterWebSocket extends WebSocketService {
+  _RealFilterWebSocket() : super(host: 'localhost', port: 65440);
+
+  @override
+  Future<void> connect({String? path}) async {}
+
+  @override
+  Future<void> disconnect() async {}
+}
+
 class _NoopTts extends StateNotifier<TtsState> implements TtsNotifier {
   _NoopTts() : super(TtsState.idle);
   @override
@@ -350,5 +364,173 @@ void main() {
       expect(n.state.messages, isEmpty);
       expect(n.state.currentProgress?.stage, 'review approved');
     });
+  });
+
+  /// Live-filter-path gate (bughunt wave2, finding 1): the frames above ride
+  /// the debugHandleProgressFrame seam, which bypasses the real
+  /// subscribeToAgentProgress filter (websocket_service.dart). These tests
+  /// inject wire-shaped frames into a REAL WebSocketService message subject
+  /// so the production type/session filter must pass them before the
+  /// notifier's handler chain runs — proving the daemon's new
+  /// task.error/review_completed agent_progress classification is actually
+  /// reachable end-to-end in the GUI.
+  group('GUI mid-turn task events through the LIVE stream filter (bughunt wave2)', () {
+    test(
+      'task.error agent_progress frame survives the filter and renders',
+      () async {
+        final sdk = _StubSdk();
+        final ws = _RealFilterWebSocket();
+        // Plain ChatNotifier: _L08ChatNotifier's no-op loadMessages would skip
+        // _ensureSubscriptions — these tests need the REAL subscription armed.
+        final n = ChatNotifier(
+          sdkClient: sdk,
+          websocket: ws,
+          ttsNotifier: _NoopTts(),
+          sessionId: 'test-session',
+        );
+        await pumpEventQueue(times: 20);
+
+        // Wire shape as transformBusEventToWS emits it post-fix.
+        ws.debugInjectFrame({
+          'type': 'agent_progress',
+          'source_topic': 'task.error',
+          'task_id': 'task-1',
+          'step_id': 'step-3',
+          'error': 'tool exited 1: permission denied',
+          'chat_visible': true,
+          'session_id': 'test-session',
+        });
+        await pumpEventQueue(times: 5);
+
+        expect(
+          _systemBubbles(n, 'step step-3 failed: tool exited 1'),
+          1,
+          reason:
+              'the live subscribeToAgentProgress filter must pass the '
+              'relay-classified task.error frame to _handleTaskEventFrame',
+        );
+      },
+    );
+
+    test(
+      'step.review_completed rejected frame survives the filter and renders',
+      () async {
+        final sdk = _StubSdk();
+        final ws = _RealFilterWebSocket();
+        // Plain ChatNotifier: _L08ChatNotifier's no-op loadMessages would skip
+        // _ensureSubscriptions — these tests need the REAL subscription armed.
+        final n = ChatNotifier(
+          sdkClient: sdk,
+          websocket: ws,
+          ttsNotifier: _NoopTts(),
+          sessionId: 'test-session',
+        );
+        await pumpEventQueue(times: 20);
+
+        ws.debugInjectFrame({
+          'type': 'agent_progress',
+          'source_topic': 'step.review_completed',
+          'task_id': 'task-1',
+          'step_id': 'step-2',
+          'status': 'rejected',
+          'feedback': 'missing error handling',
+          'revision_count': 2,
+          'session_id': 'test-session',
+        });
+        await pumpEventQueue(times: 5);
+
+        expect(
+          _systemBubbles(
+            n,
+            'step step-2: review rejected (revision #2) -- missing error handling',
+          ),
+          1,
+        );
+      },
+    );
+
+    test(
+      'session-less task.error (the real publisher shape) renders',
+      () async {
+        // Publishers (tactical.go / review_manager.go) stamp no
+        // session_id: the relay broadcasts, and the progress filter must
+        // pass these three topics on source_topic alone.
+        final sdk = _StubSdk();
+        final ws = _RealFilterWebSocket();
+        final n = ChatNotifier(
+          sdkClient: sdk,
+          websocket: ws,
+          ttsNotifier: _NoopTts(),
+          sessionId: 'test-session',
+        );
+        await pumpEventQueue(times: 20);
+
+        ws.debugInjectFrame({
+          'type': 'agent_progress',
+          'source_topic': 'task.error',
+          'task_id': 'task-1',
+          'step_id': 'step-9',
+          'error': 'session-less publisher',
+          'chat_visible': true,
+        });
+        await pumpEventQueue(times: 5);
+
+        expect(_systemBubbles(n, 'step step-9 failed: session-less'), 1);
+      },
+    );
+
+    test('session-less NON-task agent_progress frame still drops', () async {
+      final sdk = _StubSdk();
+      final ws = _RealFilterWebSocket();
+      final n = ChatNotifier(
+        sdkClient: sdk,
+        websocket: ws,
+        ttsNotifier: _NoopTts(),
+        sessionId: 'test-session',
+      );
+      await pumpEventQueue(times: 20);
+
+      ws.debugInjectFrame({
+        'type': 'agent_progress',
+        'source_topic': 'agent.progress',
+        'agent_id': 'coder',
+        'message': 'session-less progress',
+        'tier': 0,
+      });
+      await pumpEventQueue(times: 5);
+
+      expect(n.state.currentProgress, isNull);
+    });
+
+    test(
+      'pre-fix job_update classification would be dropped by the filter',
+      () async {
+        // Pin the regression: a frame still classified job_update (old daemon)
+        // never reaches the handler — this is the bug the daemon fix closes.
+        final sdk = _StubSdk();
+        final ws = _RealFilterWebSocket();
+        // Plain ChatNotifier: _L08ChatNotifier's no-op loadMessages would skip
+        // _ensureSubscriptions — these tests need the REAL subscription armed.
+        final n = ChatNotifier(
+          sdkClient: sdk,
+          websocket: ws,
+          ttsNotifier: _NoopTts(),
+          sessionId: 'test-session',
+        );
+        await pumpEventQueue(times: 20);
+
+        ws.debugInjectFrame({
+          'type': 'job_update',
+          'source_topic': 'task.error',
+          'task_id': 'task-1',
+          'step_id': 'step-3',
+          'error': 'old-daemon classification',
+          'session_id': 'test-session',
+        });
+        await pumpEventQueue(times: 5);
+
+        expect(n.state.messages, isEmpty);
+      },
+    );
   });
 }

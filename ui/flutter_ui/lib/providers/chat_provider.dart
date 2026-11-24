@@ -1013,8 +1013,11 @@ class ChatNotifier extends StateNotifier<ChatState> {
   ///                     -> {task_id, step_id, status, feedback,
   ///                         revision_count}
   ///                        (internal/agent/review_manager.go)
-  /// The WS relay classifies task.* topics as job_update with
-  /// source_topic attached, so discriminate on that key. Only frames
+  /// The WS relay classifies these three topics as agent_progress via an
+  /// exact-match case before the task./step. prefix table (bughunt wave2),
+  /// with source_topic attached, so discriminate on that key. Publishers
+  /// stamp no session_id, so the relay broadcasts them and the progress
+  /// stream filter passes them on source_topic alone. Only frames
   /// scoped to this session (or session-less legacy publishers) render.
   bool _handleTaskEventFrame(Map<String, dynamic> data) {
     final topic = data['source_topic'] as String?;
