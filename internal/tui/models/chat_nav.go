@@ -186,6 +186,106 @@ func (m *ChatModel) renderRouteRowsFor(msg ChatMessage) string {
 	return renderRouteRows(m.routeEvidence[key])
 }
 
+// hydrateRestoredClassifications stamps the C1 mode-badge fields
+// (intent_type / handler_case) onto restored assistant bubbles from the
+// session's persisted dispatch rows (session.dispatch_trace, the same
+// RPC the 'w' route popover reads). A live turn badges from the
+// turn.terminal event (attachTurnCorrelation); a transcript restored
+// from the server has no terminal events, so without this pass a
+// reopened session renders no mode badges (F13c, 06-planning/03).
+// Fail-soft by design: an RPC error, an empty log, or a row that does
+// not join to a user message leaves the bubble unclassified -- an
+// unclassified bubble renders NO badge, never a wrong one. Runs inside
+// Update on the event-loop goroutine like fetchTrace/fetchRoute
+// (loopback IPC, once per load).
+func (m *ChatModel) hydrateRestoredClassifications(sessionID string, msgs []ChatMessage) {
+	if m.rpc == nil || !m.rpc.IsConnected() {
+		return
+	}
+	need := false
+	for _, msg := range msgs {
+		if msg.Role == RoleAssistant && msg.IntentType == "" && msg.HandlerCase == "" {
+			need = true
+			break
+		}
+	}
+	if !need {
+		return
+	}
+	result, err := m.rpc.Call("session.dispatch_trace", map[string]any{
+		"session_id": sessionID,
+	})
+	if err != nil {
+		return
+	}
+	var resp struct {
+		Entries []dispatchTraceRow `json:"entries"`
+	}
+	if json.Unmarshal(result, &resp) != nil {
+		return
+	}
+	if len(resp.Entries) == 0 {
+		return
+	}
+	// The RPC answers newest-first (ORDER BY id DESC); turns join in
+	// arrival order.
+	rows := make([]dispatchTraceRow, len(resp.Entries))
+	for i, e := range resp.Entries {
+		rows[len(resp.Entries)-1-i] = e
+	}
+	consumed := make([]bool, len(rows))
+	lastUser := ""
+	for i := range msgs {
+		msg := &msgs[i]
+		if msg.Role == RoleUser {
+			lastUser = msg.Content
+			continue
+		}
+		if msg.Role != RoleAssistant {
+			continue
+		}
+		if msg.IntentType != "" || msg.HandlerCase != "" {
+			continue
+		}
+		if lastUser == "" {
+			continue
+		}
+		for j, e := range rows {
+			if consumed[j] {
+				continue
+			}
+			if e.IntentType == "" && e.HandlerCase == "" {
+				continue
+			}
+			if dispatchInputMatches(e.InputSummary, lastUser) {
+				msg.IntentType = e.IntentType
+				msg.HandlerCase = e.HandlerCase
+				msg.rendered = ""
+				consumed[j] = true
+				lastUser = ""
+				break
+			}
+		}
+	}
+}
+
+// dispatchInputMatches reports whether a dispatch row's bounded input
+// summary identifies the same turn as a restored user message. The
+// daemon persists either the first sentence (<= 100 chars) or the
+// bounded full input (the evidence path, capped at 200 runes), so one
+// side is a prefix of the other whenever they name the same turn. An
+// empty summary NEVER matches: legacy S4-privacy rows carry no input
+// text and stay unbadged rather than badge by guessing.
+func dispatchInputMatches(summary, userText string) bool {
+	if summary == "" || userText == "" {
+		return false
+	}
+	if len(userText) >= len(summary) {
+		return strings.HasPrefix(userText, summary)
+	}
+	return strings.HasPrefix(summary, userText)
+}
+
 // renderTaskChip renders the tappable chip line for a task-bearing
 // assistant reply (W14: the reply must surface which task ran).
 func renderTaskChip(taskID string) string {

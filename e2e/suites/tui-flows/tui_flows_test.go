@@ -31,6 +31,8 @@
 package tuiflows
 
 import (
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -248,9 +250,17 @@ func openAgentsView(t *testing.T, stack *harness.Stack, opts ...tuiOption) *tui.
 //
 //   - the header ("agents" + the list/approvals/audit tab strip) and
 //     the column titles come ONLY from AgentsPanel.View → renderHeader /
-//     the table — nothing else in the app emits them;
-//   - the employee row can only come from the agents.list RPC, so it is
-//     a cross-boundary assertion, not a rendering echo;
+//     the table — nothing else in the app emits them; column titles are
+//     accepted in the fitted-truncation form the tableutil budget renders
+//     at the fixed size (05d24dd2 precedent: the fitted form IS the
+//     correct render, not a missing column);
+//   - the employee row can only come from the agents.roster RPC (the
+//     unified fleet: seeded registry agents + bots + hired employees),
+//     so it is a cross-boundary assertion, not a rendering echo; the
+//     count badge asserts the seeded-minus-empty DELTA, never a
+//     hardcoded fleet size, and the marker row renders at a viewport
+//     tall enough to hold the whole fleet (the last roster row lives
+//     below the fold at 100x30);
 //   - the absence check pins that these markers are agents-view-specific
 //     rather than incidental to any view;
 //   - the compact leg is the zero-width-viewport regression class itself:
@@ -263,38 +273,14 @@ func TestAgentTabRendersTableRows(t *testing.T) {
 	_ = stack.CreateSession(t, "agents-session", stack.MeeptHome)
 	seedEmployee(t, stack, marker, marker)
 
-	// Leg 1: the default fixed size (100x30).
-	app := openAgentsView(t, stack)
-	view := app.View().Content
-
-	// The panel's own identifying content — all three render only from
-	// AgentsPanel.View().
-	for _, want := range []string{
-		"agents",                      // renderHeader title
-		"list",                        // active sub-view tab
-		"approvals",                   // sub-view tabs
-		"audit",                       // sub-view tabs
-		"id",                          // column title
-		"drift",                       // column title
-		"findings",                    // column title
-		"last run",                    // column title
-		"r: refresh | enter: details", // renderHelpHint
-		marker,                        // the store-backed row
-	} {
-		if !strings.Contains(view, want) {
-			t.Fatalf("agents view missing %q — the panel did not render its own "+
-				"content (zero-width-viewport regression class):\n%s", want, view)
-		}
-	}
-	// The count badge proves the ROW COUNT reached the model, not just a
-	// hardcoded header: renderHeader prints "(N agents)".
-	if !strings.Contains(view, "(1 agents)") {
-		t.Fatalf("agents view header count is not \"(1 agents)\" — the "+
-			"agents.list fetch did not populate the panel:\n%s", view)
-	}
-
-	// Absence: the same view with NO employee cannot carry the row, so
-	// the marker above came from the fetch and not from the shell.
+	// Absence FIRST on its own stack: the same view with NO employee
+	// cannot carry the row, so the marker below comes from the fetch and
+	// not from the shell. The hermetic harness seeds the repo roster
+	// (config/agents -> MEEPT_HOME, seedRoster), and the panel serves
+	// the UNIFIED roster (agents.roster: registry agents + bots +
+	// employees, a28f36e5), so the empty stack is not literally zero
+	// rows: the load-bearing count assertion is seeded minus empty ==
+	// exactly one employee.
 	emptyStack := harness.Start(t)
 	_ = emptyStack.CreateSession(t, "agents-empty", emptyStack.MeeptHome)
 	emptyApp := openAgentsView(t, emptyStack)
@@ -303,8 +289,61 @@ func TestAgentTabRendersTableRows(t *testing.T) {
 		t.Fatalf("agents view shows the employee row %q without any employee "+
 			"hired — the assertion above is not load-bearing:\n%s", marker, emptyView)
 	}
-	if !strings.Contains(emptyView, "(0 agents)") {
-		t.Fatalf("empty agents view header count is not \"(0 agents)\":\n%s", emptyView)
+	emptyCount := mustAgentCount(t, emptyView)
+
+	// Leg 1: the default fixed size (100x30).
+	app := openAgentsView(t, stack)
+	view := app.View().Content
+
+	// The panel's own identifying content — all render only from
+	// AgentsPanel.View(). Column titles are asserted in either the
+	// full or the fitted-truncation form (05d24dd2 precedent): at the
+	// 100-cell default the tableutil budget leaves the 5+ char titles
+	// ellipsized (drift -> "dri…"), and that is the CORRECT rendered
+	// form, not a missing column.
+	for _, want := range []string{
+		"agents",                      // renderHeader title
+		"list",                        // active sub-view tab
+		"approvals",                   // sub-view tabs
+		"audit",                       // sub-view tabs
+		"r: refresh | enter: details", // renderHelpHint
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("agents view missing %q — the panel did not render its own "+
+				"content (zero-width-viewport regression class):\n%s", want, view)
+		}
+	}
+	for _, title := range [][2]string{
+		{"id", "id"},            // column title (full at any fitted width)
+		{"drift", "dri…"},       // column title
+		{"findings", "fin…"},    // column title
+		{"last run", "last r…"}, // column title
+	} {
+		if !strings.Contains(view, title[0]) && !strings.Contains(view, title[1]) {
+			t.Fatalf("agents view missing column title %q (fitted form %q) — the "+
+				"panel did not render its own content:\n%s", title[0], title[1], view)
+		}
+	}
+	// The count badge proves the ROW COUNT reached the model, not just a
+	// hardcoded header: renderHeader prints "(N agents)", and the seeded
+	// stack carries exactly one more row than the empty stack.
+	seededCount := mustAgentCount(t, view)
+	if seededCount != emptyCount+1 {
+		t.Fatalf("agents view header count = %d, want empty(%d)+1 — the "+
+			"agents.roster fetch did not include the hired employee:\n%s", seededCount, emptyCount, view)
+	}
+
+	// Leg 1b: the marker ROW. The unified roster is the seeded repo
+	// fleet (config/agents) plus the hired employee, so the row is the
+	// LAST of the fleet and below the fold at 100x30. Render at a
+	// viewport tall enough to hold the whole fleet (the panel sizes its
+	// table height through the same tableutil path): the row's presence
+	// in any fitted truncation form is the cross-boundary assertion —
+	// only the roster RPC can put quartzwatcher on screen.
+	tall := openAgentsView(t, stack, WithSize(100, 80)).View().Content
+	if !containsAnyForm(tall, marker) {
+		t.Fatalf("agents view at 100x80 does not show the employee row %q (or a fitted "+
+			"truncation form) with the whole fleet on screen:\n%s", marker, tall)
 	}
 
 	// Absence in a DIFFERENT view: the sessions view renders neither the
@@ -325,67 +364,98 @@ func TestAgentTabRendersTableRows(t *testing.T) {
 		}
 	}
 
-	// Leg 2: a COMPACT viewport (width < 80 → LayoutCompact, sidebar
+	// Leg 2: a COMPACT viewport (width < 80 -> LayoutCompact, sidebar
 	// hidden) still renders the header and the row — the panel sizes its
-	// table on both axes and must not fall off a size cliff. At 40 columns
-	// the id column's fitted width is 6 (FitWidthsMin over a 24-cell
-	// budget), so bubbles' MaxWidth truncation renders the marker as
-	// "quart…" (5 chars + the ellipsis) — NOT "quartzwatch…": the
-	// cell-level truncate(str, 18) never fires because the column is
-	// narrower than 18. The compact leg asserts against the fitted form
-	// and stays marker-anchored (the ellipsis form is the ROW's presence,
-	// not a specific truncation width — probe-verified 2026-10-14).
-	compact := openAgentsView(t, stack, WithSize(40, 20)).View().Content
-	compactMarkers := []string{marker, marker[:11] + "…", marker[:5] + "…"}
-	compactHit := false
-	for _, form := range compactMarkers {
-		if strings.Contains(compact, form) {
-			compactHit = true
-			break
-		}
+	// table on both axes and must not fall off a size cliff. At 40
+	// columns the id column's fitted width is 6 (FitWidthsMin over a
+	// 24-cell budget), so bubbles' MaxWidth truncation renders the
+	// marker as "quart…" (5 chars + the ellipsis) — the compact leg
+	// asserts against the fitted form and stays marker-anchored
+	// (05d24dd2 precedent). Height 60 puts the whole seeded fleet on
+	// one page: the regression class under test is the WIDTH cliff, and
+	// a 20-row viewport would clip the last row at the default cursor
+	// for an unrelated (height) reason.
+	compact := openAgentsView(t, stack, WithSize(40, 60)).View().Content
+	if !containsAnyForm(compact, marker) {
+		t.Fatalf("agents view at 40x60 dropped the employee row %q (checked forms %v) "+
+			"(degenerate-resize regression class):\n%s", marker, truncForms(marker), compact)
 	}
-	if !compactHit {
-		t.Fatalf("agents view at 40x20 dropped the employee row %q (checked forms %v) "+
-			"(degenerate-resize regression class):\n%s", marker, compactMarkers, compact)
-	}
-	if !strings.Contains(compact, "agents") || !strings.Contains(compact, "(1 agents)") {
-		t.Fatalf("agents view at 40x20 lost its header/count:\n%s", compact)
+	if mustAgentCount(t, compact) != emptyCount+1 {
+		t.Fatalf("agents view at 40x60 lost its header/count:\n%s", compact)
 	}
 
-	// Leg 3: the resize ROUND TRIP — boot compact, then grow back to the
-	// fixed size and re-render. SetSize repopulates the table from the
-	// cached agents; a regression that only clears rows would show an
-	// empty body here while the header still renders.
-	hp := startTUIAgainst(t, stack, WithSize(40, 20))
+	// Leg 3: the resize ROUND TRIP — boot compact, then grow back to
+	// the wide size and re-render. SetSize repopulates the table from
+	// the cached agents; a regression that only clears rows would show
+	// an empty body here while the header still renders. Both sizes
+	// keep the whole fleet on one page so the marker assertion stays
+	// about the repopulation, not the viewport fold.
+	rtHP := startTUIAgainst(t, stack, WithSize(40, 60))
 	settleAsync()
-	hp.sendKey("ctrl+x")
-	hp.settle()
-	hp.sendKey("e") // palette action: agents view
+	rtHP.sendKey("ctrl+x")
+	rtHP.settle()
+	rtHP.sendKey("e") // palette action: agents view
 	settleAsync()
 	settleAsync()
-	hp.program.Send(tea.WindowSizeMsg{Width: 100, Height: 30}) // grow back
+	rtHP.program.Send(tea.WindowSizeMsg{Width: 100, Height: 60}) // grow back
 	settleAsync()
-	roundTrip := hp.finish().View().Content
-	// The row must SURVIVE the round-trip in SOME truncation form — the
-	// compact form at this flow renders "quart…" (the 6-wide fitted id
-	// column), and whether the grow lands before finish() is timing- and
-	// layout-dependent, so all three forms are accepted (probe-verified
+	roundTrip := rtHP.finish().View().Content
+	// The row must SURVIVE the round-trip in SOME truncation form —
+	// whether the grow lands before finish() is timing- and
+	// layout-dependent, so all fitted forms are accepted (probe-verified
 	// 2026-10-14; the header-count assertion below pins the fetch state).
-	roundTripOK := false
-	for _, form := range []string{marker, marker[:11] + "…", marker[:5] + "…"} {
-		if strings.Contains(roundTrip, form) {
-			roundTripOK = true
-			break
-		}
+	if !containsAnyForm(roundTrip, marker) {
+		t.Fatalf("agents view lost the employee row %q (checked forms %v) after a compact→wide "+
+			"resize round-trip:\n%s", marker, truncForms(marker), roundTrip)
 	}
-	if !roundTripOK {
-		t.Fatalf("agents view lost the employee row %q after a compact→wide "+
-			"resize round-trip:\n%s", marker, roundTrip)
-	}
-	if !strings.Contains(roundTrip, "(1 agents)") {
+	if mustAgentCount(t, roundTrip) != emptyCount+1 {
 		t.Fatalf("agents view header count lost after the resize round-trip:\n%s",
 			roundTrip)
 	}
+}
+
+// mustAgentCount extracts the renderHeader "(N agents)" count. The
+// unified roster is seeded by the harness (config/agents), so the count
+// is environment-shaped: the assertions are seeded-minus-empty deltas,
+// never a hardcoded fleet size.
+func mustAgentCount(t *testing.T, view string) int {
+	t.Helper()
+	re := regexp.MustCompile(`\((\d+) agents\)`)
+	m := re.FindStringSubmatch(view)
+	if m == nil {
+		t.Fatalf("agents view carries no \"(N agents)\" header badge:\n%s", view)
+	}
+	n, err := strconv.Atoi(m[1])
+	if err != nil {
+		t.Fatalf("parse agents count %q: %v", m[1], err)
+	}
+	return n
+}
+
+// truncForms lists the accepted fitted truncation forms of a row marker:
+// the full text plus the ellipsis forms bubbles/table renders for
+// columns narrower than the marker. The fleet is 9 columns wide, so at
+// 40 cells the id column fits to 4 (renders "qua…") and at 100 cells it
+// fits to ~12 ("quartzwatch…"); a 13+ cell column renders the full
+// marker. Forms probed against the live render (05d24dd2 precedent:
+// accept the fitted form, anchor on the row's presence).
+func truncForms(marker string) []string {
+	forms := []string{marker}
+	for _, n := range []int{11, 5, 3} {
+		if len(marker) > n {
+			forms = append(forms, marker[:n]+"…")
+		}
+	}
+	return forms
+}
+
+func containsAnyForm(view, marker string) bool {
+	for _, form := range truncForms(marker) {
+		if strings.Contains(view, form) {
+			return true
+		}
+	}
+	return false
 }
 
 // openViewWithKey boots the TUI, runs one palette action key, and returns

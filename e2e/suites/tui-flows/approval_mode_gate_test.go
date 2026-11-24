@@ -7,9 +7,12 @@
 // RED today for missing-implementation reasons:
 //   - the TUI App event switch has no task.pending_approval case (orphan
 //     topic), so a gated plan never renders an approval card in chat.
-//   - the chat transcript renders no mode badge from the C1 terminal
-//     fields (intent_type/handler_case); plan/direct turns are
-//     indistinguishable.
+//   - (resolved 2026-11-24) the chat transcript renders no mode badge for
+//     RESTORED turns: live turn.terminal events badge, and loads now
+//     hydrate intent_type/handler_case from session.dispatch_trace in
+//     loadServerMessages (chat_nav.go
+//     hydrateRestoredClassifications), so TestTUIModeBadgeDistinguishes
+//     pins the restored-transcript badge.
 //   - the plans view renders literal zero counts for evolver document
 //     proposals instead of reusing planCountLine.
 //
