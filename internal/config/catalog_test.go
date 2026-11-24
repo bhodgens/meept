@@ -94,7 +94,7 @@ func TestCatalogObscuraEntry(t *testing.T) {
 
 // TestCatalogExcelEntry verifies the shipped catalog parses and the excel
 // fallback entry is present, disabled by default, and launches
-// "uvx excel-mcp-server stdio" over stdio in the data category.
+// "uvx excel-mcp-server==<pinned> stdio" over stdio in the data category.
 func TestCatalogExcelEntry(t *testing.T) {
 	cfg, err := LoadMCPConfig("../../config/mcp_servers.json5")
 	if err != nil {
@@ -119,7 +119,9 @@ func TestCatalogExcelEntry(t *testing.T) {
 	if found.IsEnabled() {
 		t.Error("excel must ship enabled: false")
 	}
-	wantCmd := []string{"uvx", "excel-mcp-server", "stdio"}
+	// Issue #166: every uvx command ships pinned. The version suffix is
+	// required by mcp.ValidateVersionPin at server start.
+	wantCmd := []string{"uvx", "excel-mcp-server==2.3.3", "stdio"}
 	if got := found.Command; len(got) != 3 || got[0] != wantCmd[0] || got[1] != wantCmd[1] || got[2] != wantCmd[2] {
 		t.Errorf("command = %v, want %v", got, wantCmd)
 	}
