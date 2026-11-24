@@ -138,10 +138,10 @@ func TestRetireDrainsInvokeMutexBeforeDelete(t *testing.T) {
 	const id = "emp-retire-drain"
 	// A bot row must exist for Retire's DeleteBot to succeed.
 	if err := m.botManager.CreateBot(ctx, bot.BotDefinition{
-		ID:      id,
-		Name:    "retire drain",
-		Prompt:  "p",
-		Enabled: true,
+		ID:       id,
+		Name:     "retire drain",
+		Prompt:   "p",
+		Enabled:  true,
 		Triggers: []bot.BotTrigger{{Type: bot.TriggerTypeWebhook, Enabled: true}},
 	}); err != nil {
 		t.Fatalf("CreateBot: %v", err)

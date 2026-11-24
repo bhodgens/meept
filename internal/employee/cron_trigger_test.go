@@ -400,8 +400,8 @@ func TestStopAllBoundsCronDrainWait(t *testing.T) {
 // promptCaptureProbe records the raw ASSESS user-prompt text of every
 // reflector call so a test can assert WHICH prompt the cron fire delivered.
 type promptCaptureProbe struct {
-	mu       sync.Mutex
-	prompts  []string
+	mu        sync.Mutex
+	prompts   []string
 	responses chan string
 }
 
