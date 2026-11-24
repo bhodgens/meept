@@ -352,7 +352,7 @@ env MEEPT_HOOKS_SELFTEST=1 \
 rc_c=$?
 ok=1
 [ "$rc_c" = "1" ] || ok=0
-grep -qF "blocked at [1/20]" "$WORK/dispatch-c.out" || ok=0
+grep -qF "blocked at [1/21]" "$WORK/dispatch-c.out" || ok=0
 # fail-stop: the second hook must NOT have run.
 if grep -qF "MARK_ONE" "$WORK/dispatch-c.out"; then ok=0; fi
 check dispatch_serial_failstop "$ok" "rc=$rc_c"
