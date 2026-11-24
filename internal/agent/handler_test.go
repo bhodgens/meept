@@ -874,6 +874,61 @@ func TestHandleRequestNoBroadcastWithoutSourceClient(t *testing.T) {
 	}
 }
 
+// Bughunt (2026-11-23): a THREAD-scoped id sent in session_id must NOT be
+// rewritten to the parent session's base conversation id. The canonical
+// identity mapping (handleRequest, C-1) resolves req.SessionID through
+// session.ResolveThreadConversationID, which unwraps
+// '<conv>-thread-<topic>-<n>' to the base conv id — collapsing the
+// thread's LLM continuity lane and contradicting the mapping comment's
+// own contract. Observed via the chat.processing event's conversation_id
+// (published right after the canonical mapping).
+func TestHandleRequestThreadScopedSessionIDKeepsThreadIdentity(t *testing.T) {
+	msgBus := bus.New(nil, slogDiscardLogger())
+	loop := NewAgentLoop("test-session", "/tmp")
+	handler := NewChatHandler(loop, nil, msgBus, slogDiscardLogger())
+
+	const baseConv = "conv-base"
+	threadID := baseConv + session.ThreadIDSeparator + "general-1"
+	store := &stubSessionStore{
+		sessions: map[string]*session.Session{
+			baseConv: {ID: "session-primary", ConversationID: baseConv},
+		},
+	}
+	handler.SetSessionStore(store)
+
+	sub := msgBus.Subscribe("test-thread-id", "chat.processing")
+	defer msgBus.Unsubscribe(sub)
+
+	payload, _ := json.Marshal(ChatRequest{
+		Message:        "hello thread",
+		SessionID:      threadID,
+		ConversationID: threadID,
+	})
+	reqMsg := &models.BusMessage{
+		ID:        "req-thread",
+		Type:      models.MessageTypeRequest,
+		Source:    "test",
+		Timestamp: time.Now().UTC(),
+		Payload:   payload,
+	}
+
+	handler.handleRequest(context.Background(), reqMsg)
+
+	select {
+	case msg := <-sub.Channel:
+		var event map[string]any
+		if err := json.Unmarshal(msg.Payload, &event); err != nil {
+			t.Fatalf("unmarshal event: %v", err)
+		}
+		if event["conversation_id"] != threadID {
+			t.Errorf("conversation_id = %v, want the thread-scoped id %q (thread identity collapsed to the parent session)",
+				event["conversation_id"], threadID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for chat.processing")
+	}
+}
+
 func TestChatVisibilityEventTypes(t *testing.T) {
 	if AgentEventChatMessageReceived != "chat_message_received" {
 		t.Errorf("AgentEventChatMessageReceived = %q, want %q", AgentEventChatMessageReceived, "chat_message_received")

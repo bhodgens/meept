@@ -965,7 +965,14 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 	// resolves: an empty id still mints a fresh conversation id, and an
 	// unknown non-empty id passes through untouched.
 	conversationID := req.ConversationID
-	if req.SessionID != "" && h.sessionStore != nil {
+	if req.SessionID != "" && h.sessionStore != nil &&
+		!strings.Contains(req.SessionID, session.ThreadIDSeparator) {
+		// Thread-scoped session ids ('<conv>-thread-<topic>-<n>') are
+		// EXEMPT from the rewrite (bughunt 2026-11-23): mapping one
+		// through ResolveThreadConversationID unwraps it to the parent
+		// session's BASE conversation id, collapsing the thread's LLM
+		// continuity lane and contradicting the contract above. Only
+		// primary-id / base-conv-id shapes get canonicalized.
 		if sess := session.ResolveThreadConversationID(req.SessionID,
 			h.sessionStore.GetByConversationID, h.sessionStore.Get); sess != nil && sess.ConversationID != "" {
 			// The submitted session id always wins identity mapping:
@@ -975,6 +982,14 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 			// conversation, never mint a split identity).
 			conversationID = sess.ConversationID
 		}
+	}
+	if conversationID == "" && req.SessionID != "" &&
+		strings.Contains(req.SessionID, session.ThreadIDSeparator) {
+		// Thread-scoped session id with no conversation id: the thread id
+		// IS the canonical identity (its continuity lane keys off the
+		// full thread-scoped string). Minting a fresh id here would
+		// orphan the turn from the thread.
+		conversationID = req.SessionID
 	}
 	if conversationID == "" && h.sessionStore != nil {
 		if sess := session.ResolveThreadConversationID(req.ConversationID,
