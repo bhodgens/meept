@@ -99,19 +99,23 @@ func TestRecentsStore_PruneOlderThan(t *testing.T) {
 	ctx := context.Background()
 	s := NewRecentsStore(db)
 
-	// Touch /path/one, wait, then touch /path/two. The 250ms gap gives
-	// the TTL a wide margin — a CI scheduler stall between the two touches
-	// must not age /path/two past the cutoff (50ms wall-clock flake).
-	if err := s.TouchRecent(ctx, "/path/one"); err != nil {
+	// Deterministic ages: insert the old row with an explicit timestamp
+	// one hour in the past instead of sleeping between two touches. The
+	// sleep-based version relied on wall-clock margin and flaked on CI
+	// (run 45518029344: deleted=2, nothing survived - under runner load
+	// the second touch's stored age collided with the cutoff).
+	oldTs := time.Now().Add(-time.Hour).UTC().Format(rfc3339NanoFixed)
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO project_recents (project_path, last_used_at) VALUES (?, ?)`,
+		"/path/one", oldTs); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(250 * time.Millisecond)
 	if err := s.TouchRecent(ctx, "/path/two"); err != nil {
 		t.Fatal(err)
 	}
 
-	// Prune entries older than 120ms — should remove /path/one only.
-	deleted, err := s.PruneOlderThan(ctx, 120*time.Millisecond)
+	// Prune entries older than 60s — removes only /path/one (an hour old).
+	deleted, err := s.PruneOlderThan(ctx, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
