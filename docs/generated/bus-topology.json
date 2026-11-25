@@ -1024,13 +1024,13 @@
     "plan.completed": [
       {
         "file": "internal/plan/manager.go",
-        "line": 1371,
+        "line": 1422,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/plan/manager.go",
-        "line": 1819,
+        "line": 1870,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1054,7 +1054,7 @@
     "plan.executing": [
       {
         "file": "internal/plan/manager.go",
-        "line": 1530,
+        "line": 1581,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1062,19 +1062,19 @@
     "plan.failed": [
       {
         "file": "internal/plan/manager.go",
-        "line": 1118,
+        "line": 1128,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/plan/manager.go",
-        "line": 1274,
+        "line": 1319,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/plan/manager.go",
-        "line": 1875,
+        "line": 1937,
         "payload_keys": [],
         "via_helper": true
       }
@@ -1082,25 +1082,25 @@
     "plan.phase_state": [
       {
         "file": "internal/plan/manager.go",
-        "line": 1506,
+        "line": 1557,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/plan/manager.go",
-        "line": 1585,
+        "line": 1636,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/plan/manager.go",
-        "line": 1629,
+        "line": 1680,
         "payload_keys": [],
         "via_helper": true
       },
       {
         "file": "internal/plan/manager.go",
-        "line": 1724,
+        "line": 1775,
         "payload_keys": [],
         "via_helper": true
       }
@@ -2015,7 +2015,7 @@
     "step.review_completed": [
       {
         "file": "internal/agent/review_manager.go",
-        "line": 1119,
+        "line": 1137,
         "payload_keys": []
       }
     ],
@@ -2417,7 +2417,7 @@
     "task.review_completed": [
       {
         "file": "internal/agent/review_manager.go",
-        "line": 1128,
+        "line": 1146,
         "payload_keys": []
       }
     ],
