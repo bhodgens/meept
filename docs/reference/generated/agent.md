@@ -1521,7 +1521,7 @@ Package agent provides the agent loop and related components.
   - [func \(rm \*ReviewManager\) GetPolicy\(\) \*ReviewPolicy](<#ReviewManager.GetPolicy>)
   - [func \(rm \*ReviewManager\) GetValidationPolicy\(\) \*ValidationPolicy](<#ReviewManager.GetValidationPolicy>)
   - [func \(rm \*ReviewManager\) HandleReviewResult\(ctx context.Context, stepID string, result \*ReviewResult, spec \*TaskSpec\) \(\[\]\*task.TaskStep, error\)](<#ReviewManager.HandleReviewResult>)
-  - [func \(rm \*ReviewManager\) ReviewStep\(ctx context.Context, step \*task.TaskStep, spec \*TaskSpec\) \(\*ReviewResult, error\)](<#ReviewManager.ReviewStep>)
+  - [func \(rm \*ReviewManager\) ReviewStep\(ctx context.Context, step \*task.TaskStep, spec \*TaskSpec\) \(result \*ReviewResult, err error\)](<#ReviewManager.ReviewStep>)
   - [func \(rm \*ReviewManager\) SetMetricsStore\(store \*metrics.Store\)](<#ReviewManager.SetMetricsStore>)
   - [func \(rm \*ReviewManager\) SetPolicy\(policy \*ReviewPolicy\)](<#ReviewManager.SetPolicy>)
   - [func \(rm \*ReviewManager\) SetSessionStore\(store SessionStoreReader\)](<#ReviewManager.SetSessionStore>)
@@ -16388,9 +16388,9 @@ HandleReviewResult processes a review result and updates step state. Returns any
 <a name="ReviewManager.ReviewStep"></a>
 ### func \(\*ReviewManager\) ReviewStep
 
-	func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, spec *TaskSpec) (*ReviewResult, error)
+	func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, spec *TaskSpec) (result *ReviewResult, err error)
 
-ReviewStep initiates review of a completed step.
+ReviewStep initiates review of a completed step. ReviewStep runs the full review pipeline for one step. Every TERMINAL verdict \(approved/rejected/needs\-info, from ANY return path\) publishes step.review\_completed via the deferred emit below — bughunt 2026\-11\-24 H1/H2: the evidence gate and 8 other early returns previously returned before the single tail publish, so the model\-rating panel never saw gate rejections and pass rates were biased toward LLM\-judged steps. The two infrastructure\-error returns \(reviewer unresolvable, RunOnce failure\) carry \(nil, err\) and deliberately publish nothing: they are not verdicts, and the step's failed state is recorded by the caller.
 
 <a name="ReviewManager.SetMetricsStore"></a>
 ### func \(\*ReviewManager\) SetMetricsStore
