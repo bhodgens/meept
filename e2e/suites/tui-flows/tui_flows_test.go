@@ -31,6 +31,7 @@
 package tuiflows
 
 import (
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -86,6 +87,35 @@ func TestPaletteFlowOpensExecutesAndIssuesRPC(t *testing.T) {
 	}
 }
 
+// activityStamps reads the last_activity strings of two sessions from the
+// daemon's session.list payload — the exact sort key the sessions picker
+// consumes. RFC3339 (as emitted by the store) compares chronologically as
+// plain strings.
+func activityStamps(t testing.TB, rpc *harness.RPCClient, idA, idB string) (string, string) {
+	t.Helper()
+	res := rpc.CallResult("session.list", nil)
+	list, _ := res["sessions"].([]any)
+	stampA, stampB := "", ""
+	for _, s := range list {
+		m, ok := s.(map[string]any)
+		if !ok {
+			continue
+		}
+		id, _ := m["id"].(string)
+		la, _ := m["last_activity"].(string)
+		switch id {
+		case idA:
+			stampA = la
+		case idB:
+			stampB = la
+		}
+	}
+	if stampA == "" || stampB == "" {
+		t.Fatalf("session.list missing a seeded session (A=%q B=%q): %v", idA, idB, res)
+	}
+	return stampA, stampB
+}
+
 // TestSessionSwitchReloadsTranscript covers tui-session-switch-01: two
 // sessions exist; switching via the picker keys fires the switch effect
 // and the chat view re-targets the picked session (transcript reload).
@@ -105,34 +135,83 @@ func TestSessionSwitchReloadsTranscript(t *testing.T) {
 	}
 
 	// Create B now and bump its activity with a real chat turn. The
-	// sessions view sorts by last activity (newest first): B's bump must
-	// land AFTER the boot attach touched A (so B is cursor row 0, the row
-	// Enter switches to) but BEFORE the picker's session.list fetch. The
-	// fetch is an async RPC whose landing time the TUI-side cannot observe
-	// safely mid-loop (reads race the event loop), so instead of a
-	// condition poll we give it a bounded settle ladder — and the steer
-	// flow's topic subscriptions (4f92b6ca) increased bus volume enough
-	// that the old single 250ms settle stopped covering it.
+	// sessions view sorts by last activity (newest first), so the picker
+	// must land with B as row 0 — the row Enter switches to.
 	idB := stack.CreateSession(t, "switch-beta", stack.MeeptHome)
 	stack.Fake.SetPostToolText("activity bump turn")
 	stack.Fake.SetClassifierOutput(`{"intent":"chat","confidence":0.95,"reasoning":"tui-flows bump pin"}`)
 	stack.ChatTurn(t, idB, "bump activity", 60*time.Second)
+
+	// Determinism guard on the ORDERING, not on timing: the daemon stores
+	// last_activity at RFC3339 SECOND precision (store_sqlite.go
+	// updateSession/UpdateActivity) and the sessions model sorts those
+	// strings (models/sessions.go sortSessions). When A's stamp and B's
+	// bump truncate to the same wall-clock second — routine on fast
+	// runners, where the boot wait leaves A stamped ~0.9s before B — the
+	// sort ties and SQLite's ORDER BY falls back to creation order: row 0
+	// is A, Enter "switches" to A (a visible no-op), and no number of
+	// Enter retries can converge (CI run 45523252285's signature: active
+	// stayed on A through every retry; locally reproduced 3/3 by forcing
+	// a tie via session.attach). Re-touch B through the real session.attach
+	// write path (a distinct client_id bumps last_activity to now) until
+	// its stamp is STRICTLY later than A's, read back from the very
+	// session.list payload the picker will fetch. Nothing re-touches A
+	// afterwards (verified: boot attach path, sidebar/changes polls are
+	// read-only), so strict order then holds for the whole picker flow.
+	probe := harness.DialRPC(t, stack.SocketPath)
+	if stampA, stampB := activityStamps(t, probe, idA, idB); stampB <= stampA {
+		resolved := false
+		for attempt := 0; attempt < 5 && !resolved; attempt++ {
+			// Cross a second boundary BEFORE the next write so the new
+			// stamp cannot truncate back onto A's second.
+			time.Sleep(1100 * time.Millisecond)
+			probe.CallResult("session.attach", map[string]any{
+				"session_id": idB, "client_id": fmt.Sprintf("e2e-order-guard-%d", attempt),
+			})
+			stampA, stampB = activityStamps(t, probe, idA, idB)
+			resolved = stampB > stampA
+		}
+		if !resolved {
+			t.Fatalf("could not force B's last_activity strictly after A's: A=%q B=%q", stampA, stampB)
+		}
+	}
 
 	// Sessions tab via palette, then Enter = the picker's documented
 	// switch flow (enter: switch) on row 0 = B.
 	hp.sendKey("ctrl+x")
 	hp.settle()
 	hp.sendKey("s")
-	// The sessions view fetches session.list via an async RPC; a single
-	// 250ms settle stopped covering that round-trip once the TUI
-	// subscribed to the 3/4-segment agent topics (extra bus volume).
-	// Wait boundedly: ~2s of settle cycles before enter. No safe mid-loop
-	// read exists (reads race the event loop), so this is a bounded
-	// settle ladder, not a condition poll.
-	for range 8 {
-		settleAsync()
+	// The sessions view fetches session.list via an async RPC, and Enter
+	// on a not-yet-populated table is a SILENT no-op (selectedSession()
+	// returns nil — internal/tui/models/sessions.go). The old fixed
+	// 8x250ms settle ladder then one Enter therefore only worked while
+	// the ladder happened to outlast the fetch; under CI runner load it
+	// intermittently did not, leaving the switch un-fired. No bound on
+	// the ladder can promise that, so the wait is poll-until-converged:
+	// each cycle retries Enter, uses the settle barrier (Send blocks
+	// until the loop receives it, so every earlier message is handled),
+	// and reads the accessors mid-poll — the same discipline the
+	// pre-switch ActiveSessionID check above uses. Retrying Enter is
+	// safe: before the fetch lands it is a no-op, and with the ordering
+	// guard above every populated-table Enter targets B, so the loop
+	// breaks on the first cycle that observes the switch. The 30s bound
+	// is a failure detector, not a timing assumption.
+	switched := false
+	for i := 0; i < 60 && !switched; i++ {
+		hp.sendKey("enter")
+		hp.settle()
+		time.Sleep(100 * time.Millisecond)
+		if hp.app.ActiveSessionID() == idB {
+			switched = true
+			break
+		}
 	}
-	hp.sendKey("enter")
+	if !switched {
+		t.Logf("session switch did not converge after 60 Enter retries (last active %q)",
+			hp.app.ActiveSessionID())
+	}
+	// Give any async transcript reload (chat.SetSession cmd) one settle
+	// cycle before finish() asserts on the finished model.
 	settleAsync()
 
 	app := hp.finish()
