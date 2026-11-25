@@ -130,8 +130,14 @@ func (m *Manager) GetOrCreateWired(sessionID, workingDir string, template *Agent
 
 	// Close the stale loop outside the mutex — Close() calls wg.Wait() which blocks.
 	// The mutexio analyzer is static and can't see the IIFE scope boundary, so suppress.
+	// BUGHUNT 2026-11-24 H8: this used to be an unconditional inline
+	// Close(). GetOrCreateWired is the PRODUCTION chat path
+	// (ChatHandler:4142), so a /project set mid-turn closed the loop the
+	// turn was executing on — the exact hazard 8af54fe5 fixed in the two
+	// fallback scoped caches but missed here. The shared helper closes
+	// inline when idle and defers (bounded waiter) when a turn is active.
 	if staleLoop != nil {
-		staleLoop.Close() //nolint:mutexio // staleLoop is collected outside lock scope; Close runs after IIFE releases mutex
+		closeStaleScopedLoop(staleLoop, slog.Default(), sessionID) //nolint:mutexio // staleLoop is collected outside lock scope
 	}
 
 	m.mu.Lock()
