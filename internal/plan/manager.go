@@ -1952,15 +1952,26 @@ func (m *PlanManager) RestoreMappings(ctx context.Context) error {
 	// the executing transition strands the plan in synthesizing with durable
 	// child task ids on the phase rows — restoring only executing plans
 	// left those mappings missing until the reclaimer moved the plan
-	// forward. Cover both task-bearing in-flight states. (Limit 100 per
-	// state kept: the reclaim path bounds synthesizing backlog separately.)
-	plans, err := m.store.ListPlansByState(ctx, StateExecuting, 100)
+	// forward. Cover both task-bearing in-flight states.
+	// BUGHUNT 2026-11-24 H5: the per-state cap of 100 silently dropped the
+	// oldest executing plans (updated_at freezes at synthesis, so the SAME
+	// 100 won every restart and the rest never completed). The scan now
+	// uses the production-scan bound (10000, matching PruneStalePlans and
+	// the stalled sweep) and WARNs if the page comes back full, which
+	// means plans beyond it still lost their mappings.
+	plans, err := m.store.ListPlansByState(ctx, StateExecuting, 10000)
 	if err != nil {
 		return fmt.Errorf("list executing plans for mapping restore: %w", err)
 	}
-	synthPlans, err := m.store.ListPlansByState(ctx, StateSynthesizing, 100)
+	if len(plans) == 10000 {
+		m.logger.Warn("restore-mappings: executing-plan page full; plans beyond 10000 lost their mappings", "count", len(plans))
+	}
+	synthPlans, err := m.store.ListPlansByState(ctx, StateSynthesizing, 10000)
 	if err != nil {
 		return fmt.Errorf("list synthesizing plans for mapping restore: %w", err)
+	}
+	if len(synthPlans) == 10000 {
+		m.logger.Warn("restore-mappings: synthesizing-plan page full; plans beyond 10000 lost their mappings", "count", len(synthPlans))
 	}
 	plans = append(plans, synthPlans...)
 
