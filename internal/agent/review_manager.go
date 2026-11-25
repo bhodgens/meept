@@ -1389,8 +1389,13 @@ func (rm *ReviewManager) stepHasError(step *task.TaskStep) bool {
 	}
 
 	// Structured envelope path (preferred): authoritative success flag.
+	// Success is *bool: an ABSENT field is not a failure (JSON zero-value
+	// would make every legacy envelope that omits the key an error).
+	// Bughunt 2026-11-24 M9: the field was decoded but never read, so an
+	// explicit {"success":false} passed review as long as status/error
+	// were clean.
 	var envelope struct {
-		Success bool   `json:"success"`
+		Success *bool  `json:"success"`
 		Status  string `json:"status"`
 		Error   string `json:"error"`
 	}
@@ -1402,6 +1407,9 @@ func (rm *ReviewManager) stepHasError(step *task.TaskStep) bool {
 			return true
 		}
 		// Envelope parsed: the processor's success flag is authoritative.
+		if envelope.Success != nil && !*envelope.Success {
+			return true
+		}
 		// Narrative text inside "response"/"evidence" is not re-scanned --
 		// agents legitimately describe past failures there.
 		return false
