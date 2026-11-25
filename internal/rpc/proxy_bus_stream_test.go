@@ -219,18 +219,25 @@ func TestBusPollDropAccounting(t *testing.T) {
 
 	// Settle: wait until the collection identity balances (the collector
 	// may still be draining the channel backlog when the burst returns).
-	// published = buffered + dropped(trim + bus-level channel drops) —
-	// every published event is in exactly one bucket, never unaccounted.
+	// Identity: published = unique events delivered across settle pages
+	// + dropped (trim of never-delivered + bus-level channel drops).
+	// A cursor-0 poll is a delivery, not a peek: delivered-then-trimmed
+	// records are consumed, never counted in dropped (the double-count
+	// was the CI race-tier regression on 1be09f21).
 	deadline := time.Now().Add(5 * time.Second)
+	seenSeqs := map[int64]bool{}
 	var resp pollResp
 	for {
 		resp = f.poll(subID, 0)
-		if int64(len(resp.Events))+resp.Dropped == burst {
+		for _, e := range resp.Events {
+			seenSeqs[e.Seq] = true
+		}
+		if int64(len(seenSeqs))+resp.Dropped == burst && resp.NextSeq >= burst {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("collection never balanced: buffered=%d dropped=%d published=%d",
-				len(resp.Events), resp.Dropped, burst)
+			t.Fatalf("collection never balanced: delivered=%d dropped=%d published=%d next_seq=%d",
+				len(seenSeqs), resp.Dropped, burst, resp.NextSeq)
 		}
 		time.Sleep(2 * time.Millisecond)
 	}

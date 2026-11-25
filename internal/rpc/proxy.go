@@ -702,15 +702,19 @@ func (p *ProxyHandler) handleBusPoll(ctx context.Context, params json.RawMessage
 	}
 
 	// Advance the consumed cursor to the highest seq this poll actually
-	// returns. Only the seq cursor has consumed-once semantics: a legacy
-	// since=0 poll returns ALL buffered events every time, so it must not
-	// advance this cursor. A record with Seq <= polledSeq that later gets
-	// trimmed was already delivered, so it is not a drop.
-	if useSeq {
-		for _, e := range events {
-			if e.Seq > sub.polledSeq {
-				sub.polledSeq = e.Seq
-			}
+	// returns, in BOTH cursor modes. Only the seq cursor has
+	// consumed-once semantics for the RESPONSE filter, but polledSeq
+	// feeds the drop-accounting filter (collector trim), and a record
+	// delivered by a legacy since=0 first poll is just as consumed as
+	// one delivered by a seq poll. Gating this on useSeq made the first
+	// (cursor 0 -> legacy path) page's 100 delivered records count as
+	// drops when later trimmed: delivered=200 + dropped=400 for 500
+	// published, the exact CI race-tier failure of
+	// TestBusPollStressFastProducerSlowPoller on 1be09f21 (twice,
+	// identical numbers).
+	for _, e := range events {
+		if e.Seq > sub.polledSeq {
+			sub.polledSeq = e.Seq
 		}
 	}
 
