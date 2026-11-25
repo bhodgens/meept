@@ -223,15 +223,45 @@ func (s *Server) handleReviewsMetrics(w http.ResponseWriter, r *http.Request) {
 	// default (workflow-excluding) count. A count failure degrades to 0 like
 	// every other store failure on this endpoint.
 	if hasCounter {
+		// L5 (bughunt 2026-11-24): one COUNT per request instead of two.
+		// The workflow-excluded base needs no second scan:
+		// QueryReviewVerdicts partitions EVERY in-window non-workflow row
+		// into exactly one group (GroupBy is a fixed whitelist column), so
+		// summing the rows already fetched equals
+		// CountReviewVerdicts(IncludeWorkflow=false) — previously issued
+		// as a second full COUNT on an append-only table (VR-RET-1).
+		// The clamped difference also fixes the old race where a
+		// non-workflow row appended between the two COUNTs made
+		// workflow_excluded negative.
 		all := q
 		all.IncludeWorkflow = true
 		total, totalErr := counter.CountReviewVerdicts(all)
-		defaultN, defaultErr := counter.CountReviewVerdicts(q)
-		if totalErr != nil || defaultErr != nil {
+		if totalErr != nil {
 			s.logger.Warn("review metrics: workflow exclusion count unavailable",
-				"total_error", totalErr, "default_error", defaultErr)
+				"total_error", totalErr)
 		} else {
-			resp.WorkflowExcluded = total - defaultN
+			var defaultN int64
+			if rows == nil {
+				// Degenerate seam case: the provider answered (nil, nil) and
+				// no fallback produced rows, so there is no sum to derive the
+				// default count from — issue the explicit count (this is the
+				// only path that still spends a second query).
+				explicit, explicitErr := counter.CountReviewVerdicts(q)
+				if explicitErr != nil {
+					s.logger.Warn("review metrics: workflow exclusion count unavailable",
+						"total_error", totalErr, "default_error", explicitErr)
+					s.writeJSON(w, http.StatusOK, resp)
+					return
+				}
+				defaultN = explicit
+			} else {
+				for _, row := range rows {
+					defaultN += row.Verdicts
+				}
+			}
+			if total > defaultN {
+				resp.WorkflowExcluded = total - defaultN
+			}
 		}
 	}
 	s.writeJSON(w, http.StatusOK, resp)

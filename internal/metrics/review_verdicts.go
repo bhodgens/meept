@@ -78,6 +78,16 @@ CREATE INDEX IF NOT EXISTS idx_mrv_step ON model_review_verdicts(step_id);
 CREATE INDEX IF NOT EXISTS idx_mrv_model_ts ON model_review_verdicts(reviewed_model_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_mrv_trace ON model_review_verdicts(trace_id);
 CREATE INDEX IF NOT EXISTS idx_mrv_breakdown ON model_review_verdicts(reviewed_model_id, category);
+-- idx_mrv_breakdown_window serves the windowed model x category breakdown
+-- read (queryReviewVerdictBreakdown): GROUP BY equality columns first
+-- (reviewed_model_id, category), the window range column last
+-- (timestamp), and a partial-index predicate on the structural scope filter.
+-- Without it the windowed read plans through idx_mrv_model_ts and pays a
+-- temp B-tree for the GROUP BY on a table that grows forever by design
+-- (VR-RET-1); with it the plan is index-only (skip SEARCH when ANALYZE
+-- stats exist, covering scan otherwise) and the GROUP BY stays sorted.
+-- Pin: TestVR_BREAKDOWN_PLAN_1_WindowedBreakdownUsesIndex.
+CREATE INDEX IF NOT EXISTS idx_mrv_breakdown_window ON model_review_verdicts(reviewed_model_id, category, timestamp) WHERE scope != 'workflow';
 `
 	if _, err := db.Exec(schema); err != nil {
 		return fmt.Errorf("failed to initialize model_review_verdicts schema: %w", err)
@@ -332,6 +342,23 @@ func (s *Store) QueryReviewVerdictBreakdown(since time.Time) ([]ReviewVerdictBre
 // queryReviewVerdictBreakdown is the sqlx-level implementation shared by
 // *Store and *ReadOnlyStore.
 func queryReviewVerdictBreakdown(db *sqlx.DB, since time.Time) ([]ReviewVerdictBreakdownRow, error) {
+	query, args := reviewVerdictBreakdownSQL(since)
+	var rows []ReviewVerdictBreakdownRow
+	if err := db.Select(&rows, query, args...); err != nil {
+		return nil, fmt.Errorf("failed to query review verdict breakdown: %w", err)
+	}
+	if rows == nil {
+		rows = []ReviewVerdictBreakdownRow{}
+	}
+	return rows, nil
+}
+
+// reviewVerdictBreakdownSQL builds the windowed model x category breakdown SQL
+// and its ?-bound args. Extracted from queryReviewVerdictBreakdown so the
+// EXPLAIN QUERY PLAN pin (review_verdicts_plan_test.go) reads the exact
+// statement the read path executes — if the two could drift, the pin would be
+// testing a query that never runs.
+func reviewVerdictBreakdownSQL(since time.Time) (string, []any) {
 	query := `SELECT reviewed_model_id AS model, category, COUNT(*) AS count
 		FROM model_review_verdicts
 		WHERE scope != 'workflow' AND reviewed_model_id != ''`
@@ -342,14 +369,7 @@ func queryReviewVerdictBreakdown(db *sqlx.DB, since time.Time) ([]ReviewVerdictB
 	}
 	query += ` GROUP BY reviewed_model_id, category
 		ORDER BY model ASC, count DESC, category ASC`
-	var rows []ReviewVerdictBreakdownRow
-	if err := db.Select(&rows, query, args...); err != nil {
-		return nil, fmt.Errorf("failed to query review verdict breakdown: %w", err)
-	}
-	if rows == nil {
-		rows = []ReviewVerdictBreakdownRow{}
-	}
-	return rows, nil
+	return query, args
 }
 
 // QueryReviewVerdicts is the read-only twin of (*Store).QueryReviewVerdicts,
