@@ -615,6 +615,10 @@ func (rm *ReviewManager) buildReviewPrompt(step *task.TaskStep, spec *TaskSpec) 
 	sb.WriteString(`"issues": ["issue1", "issue2"], `)
 	sb.WriteString(`"confidence": 0.0-1.0}\n\n`)
 
+	// M5: ask (optionally) for the rubric verdicts the emission path already
+	// understands; defect grades only, never a "pass" verdict row.
+	sb.WriteString("OPTIONAL: include a \"verdicts\" array grading specific defects. Each verdict: {\"rubric_id\": \"catalog id or free string\", \"scope\": \"model|workflow\", \"category\": one defect grade of wrong_language, wrong_api_or_dependency, logic_error, security_defect, incomplete_implementation, unrequested_change, build_or_test_failure, style_bloat, convention_violation (never \"pass\"), \"severity\": \"cosmetic|functional|blocking|critical\", \"detail\": \"one sentence\", \"confidence\": 0.0-1.0}. Omit verdicts entirely when the work is clean.\n\n")
+
 	sb.WriteString("If approving, keep feedback brief. If rejecting, provide specific actionable feedback.\n")
 
 	// Include acceptance criteria from spec if available
@@ -650,6 +654,10 @@ func (rm *ReviewManager) parseReviewResult(output string) *ReviewResult {
 			Feedback   string   `json:"feedback"`
 			Issues     []string `json:"issues"`
 			Confidence float64  `json:"confidence"`
+			// M5: the reviewer's optional rubric grades. Same element shape
+			// as the frozen C4 wire (verdictWireShape); absent/null keeps
+			// the legacy verdict-free posture.
+			Verdicts []verdictWireShape `json:"verdicts"`
 		}
 
 		if err := json.Unmarshal([]byte(jsonStr), &parsed); err == nil {
@@ -672,6 +680,7 @@ func (rm *ReviewManager) parseReviewResult(output string) *ReviewResult {
 			if parsed.Confidence > 0 {
 				result.Confidence = parsed.Confidence
 			}
+			result.Verdicts = parseReviewerVerdicts(rm.logger, parsed.Verdicts)
 		}
 	}
 
@@ -963,6 +972,37 @@ type verdictWireShape struct {
 	Severity   string  `json:"severity"`
 	Detail     string  `json:"detail"`
 	Confidence float64 `json:"confidence"`
+}
+
+// parseReviewerVerdicts (M5) maps the reviewer JSON's optional verdicts
+// entries onto modelrating.Verdict, dropping rows that violate the frozen
+// C1 vocabulary (scope/category/severity combos) via Verdict.Validate. The
+// collector re-validates at persist and would reject an invalid row anyway;
+// dropping at parse keeps the VALID siblings alive instead of poisoning the
+// batch. An unknown rubric_id is KEPT — the emitter is lenient by contract
+// (see verdictsToWire), only the vocab is enforced. A nil/empty input yields
+// nil, so the legacy verdict-free reviewer shape parses byte-identically.
+func parseReviewerVerdicts(logger *slog.Logger, raw []verdictWireShape) []modelrating.Verdict {
+	if len(raw) == 0 {
+		return nil
+	}
+	var out []modelrating.Verdict
+	for _, v := range raw {
+		verdict := modelrating.Verdict{
+			RubricID:   modelrating.RubricID(v.RubricID),
+			Scope:      modelrating.RubricScope(v.Scope),
+			Category:   modelrating.Category(v.Category),
+			Severity:   modelrating.Severity(v.Severity),
+			Detail:     v.Detail,
+			Confidence: v.Confidence,
+		}
+		if err := verdict.Validate(); err != nil {
+			logger.Debug("Dropping invalid reviewer verdict", "error", err, "rubric_id", v.RubricID)
+			continue
+		}
+		out = append(out, verdict)
+	}
+	return out
 }
 
 // passVerdictFor builds the issue-#168-AC1 pass row for an APPROVED review:
