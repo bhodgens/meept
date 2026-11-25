@@ -177,8 +177,13 @@ func (t *CronCreateTool) Execute(ctx context.Context, args map[string]any) (any,
 				Error:   "command is required for shell jobs",
 			}, nil
 		}
+		// Wrap the user's shell line the way tool_job_start does
+		// (bughunt 2026-11-24 P2): exec.CommandContext treats Command
+		// as a binary NAME, so a raw multi-word line here failed every
+		// fire with "exec: not found".
 		cfg.ShellConfig = &scheduler.ShellJobConfig{
-			Command:    command,
+			Command:    "/bin/sh",
+			Args:       []string{"-c", command},
 			CaptureOut: true,
 		}
 
