@@ -67,8 +67,13 @@ func isFileToolEvidence(e models.Evidence) bool {
 // "ok", "errored", or "denied". Tool ledgers record failures as value
 // prose (error:/denied: prefixes); a successful entry carries a hash,
 // byte count, or confirmation instead.
+// BUGHUNT 2026-11-24 H3: the classifier used to match e.Value + " " +
+// e.Subject, but Subject is the resolved absolute PATH — a successful
+// edit to errors_user.go classified "errored" and hard-rejected the step
+// with a fabricated Confidence-1.0 defect verdict. The path is not a
+// verdict: only the tool-authored VALUE prose is judged.
 func fileEvidenceOutcome(e models.Evidence) string {
-	lower := strings.ToLower(e.Value + " " + e.Subject)
+	lower := strings.ToLower(e.Value)
 	switch {
 	case strings.Contains(lower, "denied"),
 		strings.Contains(lower, "permission"),

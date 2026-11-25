@@ -47,6 +47,54 @@ func gateFileStep(t *testing.T, rm *ReviewManager, id, taskID string, evidence [
 	return step
 }
 
+// TestFileEvidenceOutcomeJudgesValueNotPath pins bughunt 2026-11-24 H3:
+// fileEvidenceOutcome used to substring-match e.Value + " " + e.Subject,
+// and Subject is the resolved absolute PATH. A successful edit to a real
+// file named errors_user.go classified "errored" and hard-rejected the
+// step with a Confidence-1.0 fabricated defect verdict. The classifier
+// must judge the tool's VALUE prose only; the path is not a verdict.
+func TestFileEvidenceOutcomeJudgesValueNotPath(t *testing.T) {
+	cases := []struct {
+		name string
+		ev   models.Evidence
+		want string
+	}{
+		{"error-named path with success value classifies ok", models.Evidence{
+			Type: models.EvidenceFileHash, Source: "file_edit",
+			Subject: "/repo/internal/agent/errors_user.go", Value: "sha256=abcd1234",
+		}, "ok"},
+		{"failed-named path with byte-count value classifies ok", models.Evidence{
+			Type: models.EvidenceFileExists, Source: "file_write",
+			Subject: "/repo/src/retry_failed_jobs.go", Value: "size=123",
+		}, "ok"},
+		{"not_found-named path classifies ok", models.Evidence{
+			Type: models.EvidenceFileExists, Source: "file_read",
+			Subject: "/repo/handlers/not_found_handler.go", Value: "size=8",
+		}, "ok"},
+		{"permission-named path classifies ok", models.Evidence{
+			Type: models.EvidenceFileExists, Source: "file_edit",
+			Subject: "/repo/src/permissions/registry.py", Value: "sha256=ff00",
+		}, "ok"},
+		{"failure prose in value still errored", models.Evidence{
+			Type: models.EvidenceFileExists, Source: "file_write",
+			Subject: "/repo/ok.txt", Value: "error: permission denied",
+		}, "denied"},
+		{"errored prose in value still errored", models.Evidence{
+			Type: models.EvidenceFileExists, Source: "file_edit",
+			Subject: "/repo/ok.txt", Value: "error: disk full",
+		}, "errored"},
+		{"benign value still ok", models.Evidence{
+			Type: models.EvidenceFileHash, Source: "file_edit",
+			Subject: "/repo/ok.txt", Value: "sha256=deadbeef",
+		}, "ok"},
+	}
+	for _, tc := range cases {
+		if got := fileEvidenceOutcome(tc.ev); got != tc.want {
+			t.Errorf("%s: got %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
 // TestFileStepZeroEvidenceGate is the load-bearing pin: a file-edit step
 // with ZERO file-tool evidence must NOT auto-approve.
 func TestFileStepZeroEvidenceGate(t *testing.T) {
