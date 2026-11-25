@@ -235,8 +235,25 @@ func (rm *ReviewManager) resolveStepWorkingDir(step *task.TaskStep) (string, ses
 }
 
 // ReviewStep initiates review of a completed step.
-func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, spec *TaskSpec) (*ReviewResult, error) {
+// ReviewStep runs the full review pipeline for one step. Every TERMINAL
+// verdict (approved/rejected/needs-info, from ANY return path) publishes
+// step.review_completed via the deferred emit below — bughunt 2026-11-24
+// H1/H2: the evidence gate and 8 other early returns previously returned
+// before the single tail publish, so the model-rating panel never saw
+// gate rejections and pass rates were biased toward LLM-judged steps.
+// The two infrastructure-error returns (reviewer unresolvable, RunOnce
+// failure) carry (nil, err) and deliberately publish nothing: they are
+// not verdicts, and the step's failed state is recorded by the caller.
+func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, spec *TaskSpec) (result *ReviewResult, err error) {
 	startTime := time.Now()
+
+	// One deferred emit covers every terminal verdict return path below.
+	// (nil, err) infrastructure failures are not verdicts and stay silent.
+	defer func() {
+		if err == nil && result != nil {
+			rm.publishReviewEvent(step.ID, step.TaskID, result, step.RevisionCount)
+		}
+	}()
 
 	rm.logger.Info("Starting review",
 		"step_id", step.ID,
@@ -542,8 +559,8 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, sp
 		return nil, fmt.Errorf("reviewer agent failed: %w", err)
 	}
 
-	// Parse review result
-	result := rm.parseReviewResult(output)
+	// Parse review result (named result: the deferred emit publishes it).
+	result = rm.parseReviewResult(output)
 	// 06-evidence-review: the forced reviewer may reject or ask for info,
 	// but it can never APPROVE a file-shaped step whose ledger still
 	// shows no successful file-tool execution -- the reviewer's narration
@@ -568,8 +585,9 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, sp
 		"duration", result.Duration,
 	)
 
-	// Publish review event
-	rm.publishReviewEvent(step.ID, step.TaskID, result, step.RevisionCount)
+	// Publish review event happens via the deferred emit at function entry
+	// (bughunt 2026-11-24 H1/H2): it covered ONLY this tail path before,
+	// leaving the gate and 8 early-return paths unpublished.
 
 	return result, nil
 }
