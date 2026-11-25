@@ -756,6 +756,13 @@ type Manager struct {
 	invokeMuMap      map[string]*sync.Mutex
 	invokeMuMapGuard sync.Mutex
 
+	// retiredEmployees records ids whose retirement has begun (bughunt
+	// M15). A trigger round that raced a retirement executed against a
+	// deleted bot; the marker makes that round fail CLOSED at its end
+	// instead of reporting success. Guarded by retiredEmployeesMu.
+	retiredEmployees   map[string]struct{}
+	retiredEmployeesMu sync.Mutex
+
 	// G5: assessment semaphores prevent overlapping scheduled assessments.
 	// When a scheduler tick fires for an employee whose previous assessment
 	// is still running, the non-blocking send fails and the tick is skipped
@@ -1039,6 +1046,67 @@ func drainInvokeMutex(mu *sync.Mutex) {
 	}
 }
 
+// retireDrainWait bounds how long Retire waits for an in-flight round to
+// release the retired employee's invoke mutex (bughunt M15). Holder shapes
+// include triggerViaGoalLoop's full LLM rounds (minutes), so the previous
+// unbounded plain Lock() let the retiring RPC block for the whole round.
+// Order stays delete-then-drain (option b): a bounded drain never strands
+// a mid-round writer — the round keeps its retired mutex, finishes or
+// fails closed against the deleted bot (see the retirement race check in
+// triggerViaGoalLoop), and is never retried forever. Drain-before-delete
+// (option a) was rejected: a bounded pre-delete wait would delete the bot
+// anyway on expiry while implying a quiescence that was never observed.
+const retireDrainWait = 2 * time.Second
+
+// drainInvokeMutexBounded waits up to retireDrainWait for mu to be
+// released and reports whether the drain completed inside the bound. The
+// wait runs OFF the map guard (f2772f21 semantics preserved): the mutex
+// has already been removed from invokeMuMap, so other employees' lazy
+// mutex creation is never blocked behind this wait.
+func (m *Manager) drainInvokeMutexBounded(mu *sync.Mutex, id string) bool {
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		drainInvokeMutex(mu)
+	}()
+	select {
+	case <-drained:
+		return true
+	case <-time.After(retireDrainWait):
+		m.logger.Warn("retire: invoke mutex still held past the drain bound — the in-flight round keeps the retired mutex and fails closed against the deleted bot",
+			"employee_id", id, "bound", retireDrainWait)
+		return false
+	}
+}
+
+// markRetired records that retirement of id has begun (bughunt M15).
+// Lazily creates the set; guarded by its own mutex so the check on the
+// Trigger hot path stays contention-free.
+func (m *Manager) markRetired(id string) {
+	m.retiredEmployeesMu.Lock()
+	if m.retiredEmployees == nil {
+		m.retiredEmployees = make(map[string]struct{})
+	}
+	m.retiredEmployees[id] = struct{}{}
+	m.retiredEmployeesMu.Unlock()
+}
+
+// clearRetired drops the retirement marker (same-id re-hire: a fresh bot
+// must not inherit the old bot's fail-closed retirement race flag).
+func (m *Manager) clearRetired(id string) {
+	m.retiredEmployeesMu.Lock()
+	delete(m.retiredEmployees, id)
+	m.retiredEmployeesMu.Unlock()
+}
+
+// isRetired reports whether retirement of id has begun.
+func (m *Manager) isRetired(id string) bool {
+	m.retiredEmployeesMu.Lock()
+	defer m.retiredEmployeesMu.Unlock()
+	_, ok := m.retiredEmployees[id]
+	return ok
+}
+
 // acquireInvokeMutex returns the per-employee serialization mutex for a
 // given employee ID, creating it lazily on first use.
 // is shared across all callers for the same employee, ensuring that two
@@ -1116,7 +1184,7 @@ func (m *Manager) StopAll() {
 		case <-drained:
 		case <-time.After(cronStopDrainTimeout):
 			if m.logger != nil {
-				m.logger.Warn("employee cron drain timed out — abandoning in-flight job (best-effort, not killed)",
+				m.logger.Warn("employee cron drain timed out — abandoning in-flight job",
 					"timeout", cronStopDrainTimeout)
 			}
 		}
@@ -1547,7 +1615,13 @@ func (m *Manager) retireEmployee(ctx context.Context, id string, hardDeleteGoals
 		return fmt.Errorf("retire employee %q: bot backend not configured (enable bots.enabled to manage employees)", id)
 	}
 	// Delete bot (stops triggers if running via botManager.DeleteBot).
+	// Mark retired BEFORE the delete: a trigger round that raced the
+	// retirement and already holds the invoke mutex executes against a
+	// deleted bot — the isRetired check in triggerViaGoalLoop makes that
+	// round fail CLOSED instead of reporting success (bughunt M15).
+	m.markRetired(id)
 	if err := m.botManager.DeleteBot(ctx, id); err != nil {
+		m.clearRetired(id)
 		return fmt.Errorf("retire: delete bot: %w", err)
 	}
 	// Cascade clean: constitution, goals, findings, standalone mirrors,
@@ -1604,18 +1678,20 @@ func (m *Manager) retireEmployee(ctx context.Context, id string, hardDeleteGoals
 	// parked-resume callback holding it (0d62dadb serialization) can
 	// finish before the mutex is dropped. The drain happens off-guard so a
 	// minutes-long goal round never blocks other employees' lazy mutex
-	// creation (no long waits under the map guard). A same-id re-hire
-	// after the delete lazily creates a FRESH mutex — acceptable
-	// post-retire: the old holder finishes against the drained mutex and
-	// every new acquisition serializes on the new one (the only gap is a
-	// resume that re-acquired between drain and re-hire, which is the
-	// same window the pre-fix delete had, minus the dropped-holder case).
+	// creation (no long waits under the map guard). M15: the drain is now
+	// BOUNDED (drainInvokeMutexBounded) — a minutes-long LLM round no
+	// longer blocks the retiring RPC for its whole duration. The round
+	// keeps the retired mutex either way: when the bound expires it
+	// finishes on the drained mutex and fails closed against the deleted
+	// bot via the isRetired check in triggerViaGoalLoop; a same-id re-hire
+	// after the delete lazily creates a FRESH mutex (the documented
+	// re-hire shape is unchanged).
 	m.invokeMuMapGuard.Lock()
 	retiredMu := m.invokeMuMap[id]
 	delete(m.invokeMuMap, id)
 	m.invokeMuMapGuard.Unlock()
 	if retiredMu != nil {
-		drainInvokeMutex(retiredMu)
+		m.drainInvokeMutexBounded(retiredMu, id)
 	}
 
 	m.goalLoopsMu.Lock()
@@ -1871,6 +1947,25 @@ func (m *Manager) triggerViaGoalLoop(ctx context.Context, id string, payload map
 	// loop flag so a later round cannot look sticky to flag readers.
 	// Execute does not read that flag.
 	loop.SetResultTopic(resultTopicForTrigger(source))
+	// M15 fail-closed: a round that raced a retirement executed against a
+	// deleted bot (its statusFn reads a deleted row). Skip the round
+	// entirely — logged, reported as skipped, never retried.
+	if m.isRetired(id) {
+		invokeMu.Unlock()
+		m.logger.Warn("trigger skipped: employee retired mid-flight — failing the raced round closed",
+			"employee_id", id, "source", source)
+		m.emitMetric("employee.invocations", 1, map[string]string{
+			"employee_id": id,
+			"tier":        tierTag,
+			"outcome":     "skipped",
+		})
+		return &TriggerResult{
+			InvocationID: idpkg.Generate("trig_"),
+			StartedAt:    trigger.FiredAt,
+			Status:       "skipped",
+			SkipReason:   "employee retired mid-flight",
+		}, nil
+	}
 	decideErr := loop.Decide(ctx, trigger)
 	skip := loop.LastDecideSkip()
 	invokeMu.Unlock()
