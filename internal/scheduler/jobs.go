@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -160,6 +161,38 @@ func shellGuardSource(command string, args []string) string {
 	parts = append(parts, command)
 	parts = append(parts, args...)
 	return strings.Join(parts, " ")
+}
+
+// shellGuardSourceWithEnv extends shellGuardSource with the job's Env map
+// (M18, bughunt 2026-11-24): Execute injects ShellConfig.Env into the child
+// (cmd.Env = append(cmd.Environ(), env...)), and shell-sourcing variables
+// (BASH_ENV, ENV, PYTHONSTARTUP, PERL5OPT, NODE_OPTIONS, LD_PRELOAD, ...)
+// make the interpreter execute code the command+args-only derivation never
+// sees. Every entry is appended as a " KEY=VALUE" suffix (sorted by key for
+// determinism) so the EXISTING guard policy — risk classifier, permission
+// table, fence path-token validation — decides on the whole effective
+// command surface; the fence's tokenizer treats /tmp/evil.sh in
+// "BASH_ENV=/tmp/evil.sh" as a path-like token like any other. A job with
+// NO Env derives a byte-identical source to shellGuardSource.
+func shellGuardSourceWithEnv(command string, args []string, env map[string]string) string {
+	source := shellGuardSource(command, args)
+	if len(env) == 0 {
+		return source
+	}
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	b.WriteString(source)
+	for _, k := range keys {
+		b.WriteString(" ")
+		b.WriteString(k)
+		b.WriteString("=")
+		b.WriteString(env[k])
+	}
+	return b.String()
 }
 
 // ReminderJobConfig holds configuration for reminder jobs.
@@ -459,9 +492,12 @@ func newShellJob(cfg JobConfig, msgBus *bus.MessageBus, guard ShellCommandGuard,
 	//     (a row with command='curl', args=[...] must classify the FULL
 	//     invocation, not just the binary name and not a stale
 	//     guard_command='echo harmless').
+	// M18: the job's Env entries are appended as KEY=VALUE (see
+	// shellGuardSourceWithEnv) so shell-sourcing variables like BASH_ENV
+	// are classified with everything else the child actually receives.
 	// A GuardCommand that mismatches the derived source is warn-logged
 	// and ignored for EVERY shape (field kept for legacy JSON round-trips).
-	guardSource := shellGuardSource(cfg.ShellConfig.Command, cfg.ShellConfig.Args)
+	guardSource := shellGuardSourceWithEnv(cfg.ShellConfig.Command, cfg.ShellConfig.Args, cfg.ShellConfig.Env)
 	if gc := cfg.ShellConfig.GuardCommand; gc != "" && gc != guardSource {
 		slog.Warn("scheduler: ignoring mismatched shell GuardCommand (derived from command/args)",
 			"job_id", cfg.ID,
