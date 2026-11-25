@@ -121,6 +121,30 @@ func TestStripClaimsEvidenceOrProse_MalformedThenRealEnvelopeStripped(t *testing
 	}
 }
 
+func TestEnvelopeProse_JobRelayEvidenceRecoversProse_M10(t *testing.T) {
+	// M10 pin: a job-relay evidence string embedding the machine
+	// executor-report envelope ("job <id> completed by agent <x>: {json}")
+	// must render as prose, not raw JSON — the same F-ORCH-21 leak the
+	// agent copy fixes via renderEvidenceProse (cb00f03e).
+	raw := `{"claims":["shipped"],"evidence":["job j-9 completed by agent coder: {\"status\":\"success\",\"accomplished\":[\"summary written\"]}"]}`
+	got := envelopeProse(raw)
+	if strings.Contains(got, `"accomplished"`) || strings.Contains(got, `"status"`) {
+		t.Fatalf("job-relay evidence leaked raw JSON keys: %q", got)
+	}
+	if !strings.Contains(got, "summary written") {
+		t.Fatalf("job-relay evidence prose not recovered: %q", got)
+	}
+	if !strings.Contains(got, "- shipped") {
+		t.Fatalf("plain claim lost: %q", got)
+	}
+
+	// Plain evidence prose passes through byte-identically (no regression).
+	plain := `{"claims":["c"],"evidence":["  the file exists  "]}`
+	if got2 := envelopeProse(plain); got2 != "- c\n- the file exists" {
+		t.Fatalf("plain evidence prose altered: %q", got2)
+	}
+}
+
 func TestStripStepForDisplay_DisplayOnlyNoStoreMutation(t *testing.T) {
 	step := &TaskStep{
 		ID:          "st-l6",
