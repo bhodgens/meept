@@ -763,6 +763,16 @@ type Manager struct {
 	retiredEmployees   map[string]struct{}
 	retiredEmployeesMu sync.Mutex
 
+	// shutdownCtx is cancelled by StopAll after its cron drain bound
+	// (bughunt M17). fireCronTrigger derives its context from it and
+	// triggerViaGoalLoop fans the cancellation into the round context, so
+	// a round in flight at shutdown fails fast instead of running against
+	// LLM runtimes the daemon has already killed. Created lazily via
+	// ShutdownContext; guarded by shutdownOnce.
+	shutdownCtx    context.Context
+	shutdownCancel context.CancelFunc
+	shutdownOnce   sync.Once
+
 	// G5: assessment semaphores prevent overlapping scheduled assessments.
 	// When a scheduler tick fires for an employee whose previous assessment
 	// is still running, the non-blocking send fails and the tick is skipped
@@ -1107,6 +1117,29 @@ func (m *Manager) isRetired(id string) bool {
 	return ok
 }
 
+// shutdownCtxKey marks the manager shutdown context (bughunt M17). It lets
+// same-package pins verify that fireCronTrigger derived its context from
+// ShutdownContext() rather than context.Background() — WithCancel children
+// preserve the value.
+type shutdownCtxKey struct{}
+
+// ShutdownContext returns the manager's shutdown context: cancelled by
+// StopAll after its drain bound (bughunt M17), it lets fireCronTrigger and
+// triggerViaGoalLoop fail an abandoned round fast instead of running it to
+// a dead backend. Lazily created so zero-value and test managers work.
+func (m *Manager) ShutdownContext() context.Context {
+	m.shutdownOnce.Do(func() {
+		m.shutdownCtx, m.shutdownCancel = context.WithCancel(
+			context.WithValue(context.Background(), shutdownCtxKey{}, true))
+	})
+	return m.shutdownCtx
+}
+
+// isShutdown reports whether StopAll has cancelled the shutdown context.
+func (m *Manager) isShutdown() bool {
+	return m.ShutdownContext().Err() != nil
+}
+
 // acquireInvokeMutex returns the per-employee serialization mutex for a
 // given employee ID, creating it lazily on first use.
 // is shared across all callers for the same employee, ensuring that two
@@ -1188,6 +1221,19 @@ func (m *Manager) StopAll() {
 					"timeout", cronStopDrainTimeout)
 			}
 		}
+	}
+	// M17: after the drain bound, cancel the shutdown context so any
+	// still-running cron round fails fast instead of continuing against
+	// LLM runtimes the daemon has already killed. fireCronTrigger derives
+	// its context from this ctx and triggerViaGoalLoop fans it into an
+	// in-flight round; post-bound Triggers are refused outright. Cancel on
+	// the clean-drain path too, and unconditionally (even without a cron
+	// scheduler — every production constructor and NewManagerWithStores
+	// reach this): StopAll means the daemon is going down and no further
+	// round can complete meaningfully.
+	if m != nil {
+		m.ShutdownContext() // lazily create before cancelling
+		m.shutdownCancel()
 	}
 	if m != nil && m.logger != nil {
 		m.logger.Info("employee manager stopped")
@@ -1840,6 +1886,13 @@ func (m *Manager) Trigger(ctx context.Context, id string, payload map[string]any
 	if m.botManager == nil {
 		return nil, fmt.Errorf("trigger employee %q: bot backend not configured (enable bots.enabled to manage employees)", id)
 	}
+	// M17: refuse triggers once shutdown has passed StopAll's drain bound
+	// — dispatching into a backend the daemon has already killed can only
+	// fabricate failures. checkShutdown follows the exported ctx so a
+	// caller cancelling their own ctx still takes the normal path.
+	if ctx.Err() == nil && m.isShutdown() {
+		return nil, fmt.Errorf("trigger employee %q: manager is shut down: %w", id, context.Canceled)
+	}
 	// Verify the employee exists and is not paused.
 	def, err := m.botManager.GetBot(ctx, id)
 	if err != nil {
@@ -1966,7 +2019,21 @@ func (m *Manager) triggerViaGoalLoop(ctx context.Context, id string, payload map
 			SkipReason:   "employee retired mid-flight",
 		}, nil
 	}
-	decideErr := loop.Decide(ctx, trigger)
+	// M17: fan the manager shutdown context into the round so a round in
+	// flight at shutdown observes cancellation and fails fast instead of
+	// running to a dead backend. The caller's ctx still cancels the round;
+	// shutdownCtx cancellation is ADDITIONAL.
+	roundCtx, cancelRound := context.WithCancel(ctx)
+	defer cancelRound()
+	stopOnShutdown := func() {
+		select {
+		case <-m.ShutdownContext().Done():
+			cancelRound()
+		case <-roundCtx.Done():
+		}
+	}
+	go stopOnShutdown()
+	decideErr := loop.Decide(roundCtx, trigger)
 	skip := loop.LastDecideSkip()
 	invokeMu.Unlock()
 

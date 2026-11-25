@@ -144,7 +144,18 @@ func (m *Manager) fireCronTrigger(botID, schedule, prompt string) {
 		m.logCronSkip("cron trigger skipped: no bot backend", botID)
 		return
 	}
-	ctx := context.Background()
+	// M17: derive the trigger context from the manager's shutdown context
+	// instead of context.Background(). daemon.go kills the LLM runtimes
+	// BEFORE StopAll, and StopAll only waits cronStopDrainTimeout — a
+	// round started on Background() ran to a dead backend after shutdown.
+	// On this ctx a StopAll past the drain bound cancels the GetBot
+	// lookup and the whole Decide round; triggerViaGoalLoop additionally
+	// fans this ctx into an already-running round.
+	ctx := m.ShutdownContext()
+	if ctx.Err() != nil {
+		m.logCronSkip("cron trigger skipped: manager shut down", botID)
+		return
+	}
 	def, err := m.botManager.GetBot(ctx, botID)
 	if err != nil || def == nil {
 		m.logCronSkip("cron trigger skipped: bot gone", botID)
