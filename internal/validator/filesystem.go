@@ -77,6 +77,12 @@ func (v *FilesystemValidator) Validate(ctx context.Context, step *task.TaskStep)
 			} else if err := v.validateFileHash(ev.Subject, ev.Value); err != nil {
 				result.Errors = append(result.Errors, fmt.Sprintf("hash mismatch: %s", ev.Subject))
 			}
+		case models.EvidenceFileDeleted:
+			if err := v.isPathAllowed(ev.Subject); err != nil {
+				result.Errors = append(result.Errors, err.Error())
+			} else if err := v.validateFileDeleted(ev.Subject); err != nil {
+				result.Errors = append(result.Errors, err.Error())
+			}
 		default:
 			// Not a filesystem evidence type, skip
 			continue
@@ -85,6 +91,21 @@ func (v *FilesystemValidator) Validate(ctx context.Context, step *task.TaskStep)
 
 	result.Valid = len(result.Errors) == 0
 	return result
+}
+
+// validateFileDeleted asserts the NEGATIVE fact behind file_deleted: the
+// path must be gone. A path that still exists means the delete did not
+// take, so the evidence is false. Any stat error other than IsNotExist
+// (permission, I/O) is reported as-is rather than treated as success.
+func (v *FilesystemValidator) validateFileDeleted(path string) error {
+	_, err := os.Stat(path)
+	if err == nil {
+		return fmt.Errorf("file still exists: %s", path)
+	}
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return fmt.Errorf("stat %s: %w", path, err)
 }
 
 // validateFileExists checks if a path exists on disk. A directory
@@ -143,6 +164,12 @@ func (v *FilesystemValidator) ValidateEvidence(ctx context.Context, ev models.Ev
 			result.Errors = append(result.Errors, err.Error())
 		} else if err := v.validateFileHash(ev.Subject, ev.Value); err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("hash mismatch: %s", ev.Subject))
+		}
+	case models.EvidenceFileDeleted:
+		if err := v.isPathAllowed(ev.Subject); err != nil {
+			result.Errors = append(result.Errors, err.Error())
+		} else if err := v.validateFileDeleted(ev.Subject); err != nil {
+			result.Errors = append(result.Errors, err.Error())
 		}
 	default:
 		// Not a filesystem evidence type, pass through

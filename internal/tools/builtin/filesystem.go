@@ -844,11 +844,15 @@ func (t *DeleteFileTool) Execute(ctx context.Context, args map[string]any) (any,
 
 	// Verify deletion
 	_, verifyErr := os.Stat(resolved)
+	// The evidence asserts the NEGATIVE fact (path is gone). Emitting
+	// file_exists here failed every file_delete step at validation
+	// ("file not found") and burned the tactical retry budget
+	// (bughunt 2026-11-24 P1).
 	evidence := []models.Evidence{
 		models.NewEvidence(
-			models.EvidenceFileExists,
+			models.EvidenceFileDeleted,
 			resolved,
-			"deleted",
+			fmt.Sprintf("removed bytes=%d", fileSize),
 			t.Name(),
 		),
 	}

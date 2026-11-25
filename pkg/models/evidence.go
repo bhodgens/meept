@@ -13,6 +13,12 @@ const (
 	EvidenceFileExists EvidenceType = "file_exists"
 	// EvidenceFileHash indicates a file's SHA256 hash.
 	EvidenceFileHash EvidenceType = "file_hash"
+	// EvidenceFileDeleted indicates a path no longer exists on disk. Subject
+	// is the removed path; Value is free prose ("removed"). Emitted by
+	// file_delete so the validator can assert the NEGATIVE fact — the tool
+	// used to emit file_exists for the path it had just removed, which
+	// failed every file_delete step as "file not found" (bughunt 2026-11-24).
+	EvidenceFileDeleted EvidenceType = "file_deleted"
 	// EvidenceAPIResponse indicates an API response was received.
 	EvidenceAPIResponse EvidenceType = "api_response"
 	// EvidenceDatabaseRow indicates a database row was found/modified.
