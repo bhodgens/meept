@@ -1161,9 +1161,41 @@ func (m *PlanManager) stalledExecutingReason(ctx context.Context, p *Plan, looku
 	if tk.State == task.StateFailed {
 		return true, fmt.Sprintf("plan stalled in executing: parent task %s already failed", p.TaskID)
 	}
-	// A completed parent is OnTaskCompleted's business; every other live
-	// state (pending/planning/executing/testing) is still moving or is
-	// waiting on scheduled steps.
+	// A completed parent is OnTaskCompleted's business; a failed parent is
+	// handled above. Every other live state (pending/planning/executing) is
+	// normally still moving — BUT the synthesized parent is NEVER scheduled
+	// (Synthesize creates it with taskCreator.CreateTask and no
+	// ScheduleSteps), so it sits at `pending` forever while the plan's own
+	// phases record the real progress. BUGHUNT 2026-11-24 H4: the sweep
+	// only caught missing/failed parents and missed its own target shape —
+	// "all children terminal, OnTaskCompleted lost". When the parent is
+	// live, consult the PLAN's phase records: if every phase has all its
+	// steps terminal (completed or failed, no zero-step phases), nothing
+	// can advance this plan and it is stalled.
+	if tk.State != task.StateFailed {
+		phases, phaseErr := m.store.GetPhases(ctx, p.ID)
+		if phaseErr != nil {
+			m.logger.Warn("stalled-executing sweep: phase lookup failed; leaving plan alone",
+				"plan_id", p.ID, "error", phaseErr)
+			return false, ""
+		}
+		allTerminal, totalSteps := true, 0
+		for _, ph := range phases {
+			if ph == nil {
+				continue
+			}
+			totalSteps += ph.TotalSteps
+			if ph.CompletedSteps+ph.FailedSteps < ph.TotalSteps {
+				allTerminal = false
+				break
+			}
+		}
+		// A zero-step plan has no phase record of progress; leave it to
+		// the zero-phase guard / reclaimer, not the stall sweep.
+		if totalSteps > 0 && allTerminal {
+			return true, fmt.Sprintf("plan stalled in executing: all %d steps terminal but the parent task %s never finalized (%s state)", totalSteps, p.TaskID, tk.State)
+		}
+	}
 	return false, ""
 }
 
