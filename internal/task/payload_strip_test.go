@@ -1,6 +1,9 @@
 package task
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // L6 pins: display-only stripping must require the EXACT scaffolding shape.
 // Legitimate content that merely contains the marker substrings must survive;
@@ -95,6 +98,26 @@ func TestStripClaimsEvidenceOrProse_RealEnvelopeStillStripped(t *testing.T) {
 	wantProse := "- wrote the report\n- the report exists"
 	if got := StripClaimsEvidenceOrProse(whole); got != wantProse {
 		t.Fatalf("whole envelope prose = %q, want %q", got, wantProse)
+	}
+}
+
+func TestStripClaimsEvidenceOrProse_MalformedThenRealEnvelopeStripped(t *testing.T) {
+	// M16 pin (composition): a malformed claims-shaped fragment EARLY in
+	// the reply must not abort the scan — a REAL envelope later in the
+	// same reply is still stripped. Pre-fix, the first failed candidate
+	// fell out of findClaimsEnvelopeSpan entirely (d1f0cfe1's `break` was
+	// a no-op: it broke the switch, not the loop), so the real envelope
+	// survived the strip and the reply guard nuked the whole answer.
+	raw := `The report said {"claims": we shipped it} then {"claims":["x"],"evidence":["y"]} done.`
+	got := StripClaimsEvidenceOrProse(raw)
+	if strings.Contains(got, `"claims":["x"]`) {
+		t.Fatalf("real envelope after a malformed fragment leaked raw: %q", got)
+	}
+	if !strings.Contains(got, "we shipped it") {
+		t.Fatalf("malformed claims-shaped prose lost: %q", got)
+	}
+	if !strings.Contains(got, "then") || !strings.Contains(got, "done.") {
+		t.Fatalf("surrounding prose lost: %q", got)
 	}
 }
 

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -285,4 +286,30 @@ func TestAgentReport_Methods(t *testing.T) {
 			t.Error("expected HasIssues() = true")
 		}
 	})
+}
+
+// TestFindClaimsEnvelopeSpan_MalformedThenReal_M16 pins the scan re-anchor:
+// a malformed claims-shaped fragment EARLY in the reply must not abort the
+// scan — a REAL envelope later in the same reply is still found and stripped
+// (bughunt M16: d1f0cfe1's `break` broke the switch, not the loop, so the
+// first failed candidate fell out of findClaimsEnvelopeSpan entirely and the
+// real envelope survived the strip before the reply guard nuked the answer).
+func TestFindClaimsEnvelopeSpan_MalformedThenReal_M16(t *testing.T) {
+	raw := `The report said {"claims": we shipped it} then {"claims":["x"],"evidence":["y"]} done.`
+	start, end, ok := findClaimsEnvelopeSpan(raw)
+	if !ok {
+		t.Fatalf("findClaimsEnvelopeSpan missed the real envelope after a malformed fragment: %q", raw)
+	}
+	span := raw[start:end]
+	if span != `{"claims":["x"],"evidence":["y"]}` {
+		t.Fatalf("span = %q, want the real envelope only", span)
+	}
+
+	got := StripClaimsEvidence(raw)
+	if strings.Contains(got, `"claims":["x"]`) {
+		t.Fatalf("real envelope after a malformed fragment leaked raw: %q", got)
+	}
+	if !strings.Contains(got, "we shipped it") {
+		t.Fatalf("malformed claims-shaped prose lost: %q", got)
+	}
 }

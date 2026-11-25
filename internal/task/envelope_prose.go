@@ -360,13 +360,19 @@ func findClaimsEnvelopeSpan(s string) (int, int, bool) {
 						return i, k + 1, true
 					}
 					// A brace-balanced fragment that is not a REAL
-					// claims/evidence object is ordinary prose. The inner
-					// walk is at depth zero and ends with no envelope found.
+					// claims/evidence object is ordinary prose:
+					// abandon this candidate and re-anchor the scan
+					// from i+1 (bughunt M16: falling out of the
+					// whole scan here hid a REAL envelope later in
+					// the same reply — d1f0cfe1's `break` broke the
+					// switch, not the loop, and 3c1c9ae4 deleted it).
+					k = len(s) - 1
 				}
 			}
 		}
-		// Unbalanced: no envelope here.
-		return 0, 0, false
+		// Unbalanced or a failed candidate: no envelope starts inside
+		// this fragment; keep scanning from i+1.
+		continue
 	}
 	return 0, 0, false
 }
