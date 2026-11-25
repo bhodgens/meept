@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/caimlas/meept/internal/bot"
@@ -24,6 +25,63 @@ const webhookMaxBody = 1 << 20 // 1 MiB
 // take minutes) runs in the background with this hard ceiling so an
 // abandoned round cannot outlive the daemon's patience.
 const webhookTriggerTimeout = 10 * time.Minute
+
+// webhookMaxInFlight caps concurrently running detached webhook rounds
+// (bughunt L11). An unauthenticated burst (RequireAuth=false) used to spawn
+// one minutes-long round per POST with no ceiling, all serializing behind
+// per-employee invoke mutexes. Past the cap the handler answers 503 +
+// Retry-After — an explicit refusal, never a silent queue.
+const webhookMaxInFlight = 8
+
+// webhookRetryAfter is the Retry-After advertised on a saturated 503. Rounds
+// are minutes-long, so a short retry is a hint, not a promise; the client
+// that matters (an alerting webhook) sees the refusal and can back off.
+const webhookRetryAfter = "5"
+
+// webhookGate holds the per-manager concurrency cap and the in-flight round
+// WaitGroup (bughunt L11). Manager fields live in manager.go (off-limits to
+// this fix), so the gate lives in this file-local registry keyed by Manager
+// pointer — the same shape cron_trigger.go's cronClaims registry uses:
+// one Manager per process, confined to this file's helpers.
+type webhookGate struct {
+	sem    chan struct{}
+	rounds sync.WaitGroup
+}
+
+var (
+	webhookGatesMu sync.Mutex
+	webhookGates   = make(map[*Manager]*webhookGate)
+)
+
+func webhookGateFor(m *Manager) *webhookGate {
+	webhookGatesMu.Lock()
+	defer webhookGatesMu.Unlock()
+	gate, ok := webhookGates[m]
+	if !ok {
+		gate = &webhookGate{sem: make(chan struct{}, webhookMaxInFlight)}
+		webhookGates[m] = gate
+	}
+	return gate
+}
+
+// drainWebhookRounds waits up to d for every detached webhook round to
+// leave the gate. StopAll's shutdown cancellation makes the rounds fail
+// fast, so a bounded drain proves nothing leaked. Returns false on timeout.
+// Exported to same-package pins only (this file's seam).
+func (m *Manager) drainWebhookRounds(d time.Duration) bool {
+	gate := webhookGateFor(m)
+	done := make(chan struct{})
+	go func() {
+		gate.rounds.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return true
+	case <-time.After(d):
+		return false
+	}
+}
 
 // RegisterWebhookRoute mounts WebhookTriggerPattern on mux. Nil manager
 // or mux is a no-op. The daemon calls this from HTTP setup.
@@ -87,10 +145,47 @@ func (m *Manager) handleWebhookTrigger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// L11 (1): the round is tied to the manager's shutdown context — the
+	// same seam 7b7ab262 threads into fireCronTrigger — so StopAll past its
+	// drain bound cancels it instead of letting it run to a dead backend,
+	// and a POST landing after shutdown fails fast without spawning.
+	roundCtx := m.ShutdownContext()
+	if roundCtx.Err() != nil {
+		logger := m.logger
+		if logger == nil {
+			logger = slog.Default()
+		}
+		logger.Warn("webhook trigger refused: manager shut down", "bot_id", def.ID)
+		http.Error(w, `{"error":"shutting down"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	// L11 (2): bounded in-flight cap. Past webhookMaxInFlight concurrent
+	// rounds the request is REFUSED out loud (503 + Retry-After) rather than
+	// queued silently behind minutes-long rounds.
+	gate := webhookGateFor(m)
+	select {
+	case gate.sem <- struct{}{}:
+	default:
+		logger := m.logger
+		if logger == nil {
+			logger = slog.Default()
+		}
+		logger.Warn("webhook trigger refused: in-flight cap reached", "bot_id", def.ID, "cap", webhookMaxInFlight)
+		w.Header().Set("Retry-After", webhookRetryAfter)
+		http.Error(w, `{"error":"webhook rounds busy"}`, http.StatusServiceUnavailable)
+		return
+	}
+
 	m.logWebhook(def.ID, len(body))
 
+	// L11 (3): the round is tracked in the gate's WaitGroup so a drain
+	// (drainWebhookRounds) can prove none leaked past shutdown.
+	gate.rounds.Add(1)
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), webhookTriggerTimeout)
+		defer gate.rounds.Done()
+		defer func() { <-gate.sem }()
+		ctx, cancel := context.WithTimeout(roundCtx, webhookTriggerTimeout)
 		defer cancel()
 		if _, err := m.Trigger(ctx, def.ID, map[string]any{
 			"source": "webhook",
