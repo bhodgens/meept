@@ -1119,6 +1119,12 @@ func (m *PlanManager) SweepStalledExecuting(ctx context.Context, window time.Dur
 			"plan_id":    p.ID,
 			"session_id": p.SourceSession,
 			"reason":     reason,
+			// Render keys for the TUI/GUI failure cards (bughunt
+			// 2026-11-24 M7): without them the card falls back to the
+			// plan id and "document proposal - no executable steps".
+			"title":       p.Title,
+			"phase_count": len(p.Phases),
+			"step_count":  p.TotalSteps(),
 		})
 	}
 	return swept, nil
@@ -1275,6 +1281,12 @@ func (m *PlanManager) Synthesize(ctx context.Context, planID string) (retErr err
 					"plan_id":    planID,
 					"session_id": fresh.SourceSession,
 					"reason":     reason,
+					// Render keys for the TUI/GUI failure cards (bughunt
+					// 2026-11-24 M7). fresh is synthesizing: phases carry
+					// no counts yet, so both are 0 by design.
+					"title":       fresh.Title,
+					"phase_count": len(fresh.Phases),
+					"step_count":  fresh.TotalSteps(),
 				})
 			} else {
 				release(false)
@@ -1872,10 +1884,24 @@ func (m *PlanManager) failPlan(ctx context.Context, planID string) error {
 			break
 		}
 	}
+	// Render keys for the TUI/GUI failure cards (bughunt 2026-11-24
+	// M7): the card renders "Plan: <id> / document proposal - no
+	// executable steps" without them, even for a failed multi-phase
+	// plan. Counts come from the FETCHED phases (the GetPlan row does
+	// not carry the Phases slice), summing per-phase step counts.
+	totalSteps := 0
+	for _, ph := range phases {
+		if ph != nil {
+			totalSteps += ph.TotalSteps
+		}
+	}
 	m.publishEvent("plan.failed", map[string]any{
-		"plan_id":    plan.ID,
-		"session_id": plan.SourceSession,
-		"reason":     reason,
+		"plan_id":     plan.ID,
+		"session_id":  plan.SourceSession,
+		"reason":      reason,
+		"title":       plan.Title,
+		"phase_count": len(phases),
+		"step_count":  totalSteps,
 	})
 	return nil
 }
