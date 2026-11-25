@@ -1115,16 +1115,23 @@ func (m *PlanManager) SweepStalledExecuting(ctx context.Context, window time.Dur
 			m.logger.Warn("stalled-executing sweep: failed to update plan.md on failure",
 				"plan_id", p.ID, "file_path", p.FilePath, "error", updateErr)
 		}
+		// Render keys for the TUI/GUI failure cards (bughunt 2026-11-24
+		// M7). Counts come from the phases fetched above for plan.md:
+		// the ListPlansByState row does not carry the Phases slice, so
+		// p.Phases/p.TotalSteps() would always be 0 here.
+		sweepSteps := 0
+		for _, ph := range phases {
+			if ph != nil {
+				sweepSteps += ph.TotalSteps
+			}
+		}
 		m.publishEvent("plan.failed", map[string]any{
-			"plan_id":    p.ID,
-			"session_id": p.SourceSession,
-			"reason":     reason,
-			// Render keys for the TUI/GUI failure cards (bughunt
-			// 2026-11-24 M7): without them the card falls back to the
-			// plan id and "document proposal - no executable steps".
+			"plan_id":     p.ID,
+			"session_id":  p.SourceSession,
+			"reason":      reason,
 			"title":       p.Title,
-			"phase_count": len(p.Phases),
-			"step_count":  p.TotalSteps(),
+			"phase_count": len(phases),
+			"step_count":  sweepSteps,
 		})
 	}
 	return swept, nil
