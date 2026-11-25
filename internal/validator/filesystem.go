@@ -87,17 +87,20 @@ func (v *FilesystemValidator) Validate(ctx context.Context, step *task.TaskStep)
 	return result
 }
 
-// validateFileExists checks if a file exists at the given path.
+// validateFileExists checks if a path exists on disk. A directory
+// passes: the file_exists evidence type asserts existence, and
+// list_directory legitimately issues it with a directory subject.
 func (v *FilesystemValidator) validateFileExists(path string) error {
-	info, err := os.Stat(path)
-	if os.IsNotExist(err) {
+	if _, err := os.Stat(path); err != nil {
+		// NOTE: a directory SATISFIES file_exists - the claim is "this
+		// path exists". list_directory issues file_exists evidence with
+		// the listed DIRECTORY as subject (builtin/filesystem.go); the
+		// old explicit IsDir rejection here failed a legitimate plan
+		// step as "file not found" (bench run 45514312978: smoke
+		// repo-inventory). Only non-existence or stat errors fail.
+		// validateFileHash below still fails naturally if handed a
+		// directory, since hashing a directory is nonsense.
 		return err
-	}
-	if err != nil {
-		return err
-	}
-	if info.IsDir() {
-		return fmt.Errorf("path is a directory, not a file")
 	}
 	return nil
 }
