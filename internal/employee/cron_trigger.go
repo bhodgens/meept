@@ -2,6 +2,8 @@ package employee
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"log/slog"
 	"sync"
 
@@ -157,7 +159,24 @@ func (m *Manager) fireCronTrigger(botID, schedule, prompt string) {
 		return
 	}
 	def, err := m.botManager.GetBot(ctx, botID)
-	if err != nil || def == nil {
+	if err != nil {
+		// L12: split the error class. Only a genuine not-found (the bot
+		// store wraps sql.ErrNoRows, see bot.Store.Get) means the bot is
+		// gone; a transient store blip (locked DB, I/O) must NOT be
+		// reported as "bot gone" — it drops one scheduled fire with a
+		// debug line and, worse, invites gone-path cleanup for a bot that
+		// still exists. Transient: Warn naming bot id + error, skip THIS
+		// tick without touching the schedule claims, so the next tick
+		// retries naturally.
+		if !errors.Is(err, sql.ErrNoRows) {
+			m.logCronTransientGetBot(botID, err)
+			return
+		}
+		m.logCronSkip("cron trigger skipped: bot gone", botID)
+		return
+	}
+	if def == nil {
+		// nil def + nil err is the store's other gone shape: gone path.
 		m.logCronSkip("cron trigger skipped: bot gone", botID)
 		return
 	}
@@ -298,6 +317,20 @@ func (m *Manager) logCron(msg, botID string, err error) {
 		logger = slog.Default()
 	}
 	logger.Error(msg, "bot_id", botID, "error", err)
+}
+
+// logCronTransientGetBot (bughunt L12) reports a fire-time GetBot failure
+// that is NOT a not-found: the fire is skipped for THIS tick only, so it is
+// a Warn, not an Error — the next tick retries naturally. Names the bot id
+// and the error so a store blip is visible instead of silently dropping a
+// scheduled fire at DEBUG.
+func (m *Manager) logCronTransientGetBot(botID string, err error) {
+	logger := m.logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	logger.Warn("cron trigger skipped: transient bot lookup failure, retrying next tick",
+		"bot_id", botID, "error", err)
 }
 
 // logCronSkip reports a skipped fire at DEBUG: a stale job colliding with a
