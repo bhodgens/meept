@@ -366,3 +366,53 @@ func TestStreamRunEvents_RequiresRunID(t *testing.T) {
 		t.Errorf("empty input: want error + nil channel, got (%v, %v)", ch, err)
 	}
 }
+
+// TestStreamRunEvents_ScanErrorDropsPartialFrame pins A6-14: when the
+// scanner dies mid-frame (bufio.ErrTooLong on a line above sseMaxLine),
+// the accumulated data lines are a TRUNCATED frame — the pump must DROP
+// them, not dispatch truncated JSON as a complete event. Pre-fix, the
+// post-loop flush delivered {"a":1, as a valid-looking tool.completed.
+func TestStreamRunEvents_ScanErrorDropsPartialFrame(t *testing.T) {
+	orig := sseMaxLine
+	sseMaxLine = 1024
+	defer func() { sseMaxLine = orig }()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		f := sseFlusher(w)
+		// One complete frame (must still be delivered).
+		_, _ = io.WriteString(w, "event: assistant.delta\ndata: {\"ok\":true}\n\n")
+		f.Flush()
+		// A frame whose second data line busts the scanner: bufio's
+		// Buffer initial slot is 64 KiB, so a line longer than that with
+		// maxTokenSize=1024 fills the buffer and Scan stops with
+		// ErrTooLong. The first data line sits accumulated and
+		// half-complete.
+		_, _ = io.WriteString(w, "event: tool.completed\ndata: {\"a\":1,\n")
+		f.Flush()
+		_, _ = io.WriteString(w, "data: "+strings.Repeat("x", 130*1024))
+		f.Flush()
+		// Stream ends WITHOUT the blank-line terminator: the pre-fix
+		// tolerant-close dispatch() would emit the partial frame.
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "test-key", 30*time.Second)
+	ch, err := c.StreamRunEvents(context.Background(), "run-h9")
+	if err != nil {
+		t.Fatalf("StreamRunEvents: %v", err)
+	}
+	events := drainEvents(t, ch)
+	for _, ev := range events {
+		if ev.Type == "tool.completed" {
+			t.Fatalf("partial frame dispatched as complete after scan error: Data=%q", string(ev.Data))
+		}
+		if !json.Valid(ev.Data) {
+			t.Fatalf("delivered event carries invalid JSON (truncated): type=%q data=%q", ev.Type, string(ev.Data))
+		}
+	}
+	if len(events) != 1 || events[0].Type != "assistant.delta" {
+		t.Fatalf("events = %+v, want exactly the one complete assistant.delta frame", events)
+	}
+}

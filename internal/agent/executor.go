@@ -1445,32 +1445,18 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 		}
 	}
 
-	// Check cache BEFORE tool lookup (only if tool is enabled for caching)
-	if e.cache != nil {
-		if cachedResult, hit := e.cache.Get(toolName, args); hit {
-			e.logger.Debug("Tool result cache hit",
-				"agent", e.agentID,
-				"tool", toolName,
-			)
-			// Emit synthetic cache-hit progress event
-			e.publishToolProgress(ctx, toolCall.ID, toolName, tools.ProgressUpdate{
-				Message:    "cache hit",
-				Percent:    100,
-				ToolCallID: toolCall.ID,
-			})
-			cachedExecResult := &ExecutionResult{
-				ToolCallID: toolCall.ID,
-				Success:    true,
-				Result:     cachedResult,
-				Cached:     true,
-			}
-			e.publishToolComplete(toolCall.ID, toolName, cachedExecResult)
-			return cachedExecResult
-		}
-	}
-
-	// Look up tool
+	// Snapshot the mutable executor fields ONCE per call under the lock
+	// (bughunt A2-2): e.security is written by SetSecurityChecker (per-
+	// session fence clone swap) and was previously read bare both at the
+	// fail-closed nil-check below and again inside checkPermission — a
+	// data race whenever a swap landed mid-call, and worse, one call
+	// could mix two different checkers. The locals thread through every
+	// use in this call (same posture as the e.agentID snapshot in
+	// checkPermission). The cache field is only set at construction, but
+	// it rides the same snapshot so the read sites stay uniform.
 	e.mu.RLock()
+	securityChecker := e.security
+	cache := e.cache
 	registry := e.registry
 	e.mu.RUnlock()
 
@@ -1543,7 +1529,7 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 	}
 
 	// Security check - FAIL CLOSED: require security to be configured
-	if e.security == nil {
+	if securityChecker == nil {
 		// Fail-closed: security not configured, block all tool execution except safe introspection
 		allowedSafeTools := map[string]bool{
 			ToolPlatformStatus:   true,
@@ -1565,7 +1551,7 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 			}
 		}
 	} else {
-		result := e.checkPermission(ctx, toolName, args)
+		result := e.checkPermission(ctx, toolName, args, securityChecker)
 		if !result.Allowed {
 			// Include the path (and args) in the deny log: an opaque deny
 			// reason cost a full e2e debugging run (2026-09-10) because the
@@ -1576,7 +1562,9 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 				"tool", toolName,
 				"reason", result.Reason,
 				"risk", result.EffectiveRisk.String(),
-				"path", args["path"],
+				// H9 class: lsp_*/ast_* tools carry the path under file_path;
+				// log whichever key the call actually used.
+				"path", firstNonEmptyArg(args, "path", "file_path"),
 				"args_summary", summarizeArgs(args),
 			)
 			return &ExecutionResult{
@@ -1594,6 +1582,38 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 				Success:    false,
 				Error:      "action requires user confirmation",
 			}
+		}
+	}
+
+	// Result-cache lookup (agent.cache.enabled, opt-in, default off).
+	// bughunt A2-5: this block USED to sit at the very top of Execute,
+	// before the exposure-plan hard gate, the group gate, and
+	// checkPermission — a poisoned/earlier cache entry let a tool that
+	// the agent is NOT allowed to call return a success verdict without
+	// ever touching a permission check. The read now runs only after
+	// every gate the miss path runs (fail-closed security check,
+	// exposure plan gate, registry lookup, permission/group gate above),
+	// so a cache hit can never bypass authorization.
+	if cache != nil {
+		if cachedResult, hit := cache.Get(toolName, args); hit {
+			e.logger.Debug("Tool result cache hit",
+				"agent", e.agentID,
+				"tool", toolName,
+			)
+			// Emit synthetic cache-hit progress event
+			e.publishToolProgress(ctx, toolCall.ID, toolName, tools.ProgressUpdate{
+				Message:    "cache hit",
+				Percent:    100,
+				ToolCallID: toolCall.ID,
+			})
+			cachedExecResult := &ExecutionResult{
+				ToolCallID: toolCall.ID,
+				Success:    true,
+				Result:     cachedResult,
+				Cached:     true,
+			}
+			e.publishToolComplete(toolCall.ID, toolName, cachedExecResult)
+			return cachedExecResult
 		}
 	}
 
@@ -1701,8 +1721,8 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 	}
 
 	// Store in cache after successful execution (cache the result, not evidence)
-	if e.cache != nil && execSuccess {
-		e.cache.Put(toolName, args, toolResult)
+	if cache != nil && execSuccess {
+		cache.Put(toolName, args, toolResult)
 		e.logger.Debug("Cached tool result",
 			"agent", e.agentID,
 			"tool", toolName,
@@ -1732,6 +1752,17 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 	e.publishToolComplete(toolCall.ID, toolName, result)
 
 	return result
+}
+
+// firstNonEmptyArg returns the first of the named string args that is
+// non-empty (used by the deny log to surface path-or-file_path, H9 class).
+func firstNonEmptyArg(args map[string]any, keys ...string) string {
+	for _, k := range keys {
+		if s, ok := args[k].(string); ok && s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 // toolTimeoutErrCode is the machine-readable ErrCode stamped on the
@@ -2159,8 +2190,16 @@ func (e *Executor) ExecuteSequential(ctx context.Context, toolCalls []llm.ToolCa
 	return results
 }
 
-// checkPermission checks if a tool call is permitted.
-func (e *Executor) checkPermission(ctx context.Context, toolName string, args map[string]any) security.CheckResult {
+// checkPermission checks if a tool call is permitted. checker is the
+// per-call snapshot of the executor's security checker (bughunt A2-2 —
+// never read e.security bare here); a nil checker falls back to a locked
+// snapshot so any future caller keeps fail-closed semantics.
+func (e *Executor) checkPermission(ctx context.Context, toolName string, args map[string]any, checker *security.PermissionChecker) security.CheckResult {
+	if checker == nil {
+		e.mu.RLock()
+		checker = e.security
+		e.mu.RUnlock()
+	}
 	// Map tool name to action category
 	action, ok := ToolActionMap[toolName]
 	if !ok {
@@ -2223,7 +2262,7 @@ func (e *Executor) checkPermission(ctx context.Context, toolName string, args ma
 		}
 	}
 
-	result := e.security.CheckPermission(action, details)
+	result := checker.CheckPermission(action, details)
 	result = e.applyGroupGate(result, action, toolName)
 	e.logPermissionDecision(ctx, result, action, toolName, agentID, args)
 	return result

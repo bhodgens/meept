@@ -127,13 +127,30 @@ func (t *OfficeWorkbookTool) Execute(ctx context.Context, args map[string]any) (
 	if err != nil {
 		return nil, fmt.Errorf("office_workbook: cannot resolve session working directory: %w", err)
 	}
+	// The resolved path from resolvePathSecure follows symlinks, so the
+	// jail root must be symlink-normalized too (macOS /var -> /private/var
+	// would otherwise false-refuse every in-session path).
+	jailRoot := absSession
+	if real, rerr := filepath.EvalSymlinks(absSession); rerr == nil {
+		jailRoot = real
+	}
+	// A6-2: the fence check runs on the SYMLINK-RESOLVED form (the
+	// posture filesystem.go's resolvePathSecure exists for — resolvePath
+	// lets a symlink inside the session dir escape to /etc etc.). The
+	// RETURNED path keeps the legacy unresolved form so tool results and
+	// callers stay byte-identical; an escaping link was just refused.
 	resolved, err := resolvePath(ctx, path)
 	if err != nil {
 		return nil, fmt.Errorf("office_workbook: invalid path %q: %w", path, err)
 	}
 	resolved = filepath.Clean(resolved)
-	if resolved != absSession && !strings.HasPrefix(resolved, absSession+string(filepath.Separator)) {
-		return nil, fmt.Errorf("office_workbook: path %q resolves to %s, which is outside the session working directory %s: refusing", path, resolved, absSession)
+	secure, err := resolvePathSecure(ctx, path)
+	if err != nil {
+		return nil, fmt.Errorf("office_workbook: invalid path %q: %w", path, err)
+	}
+	secure = filepath.Clean(secure)
+	if secure != jailRoot && !strings.HasPrefix(secure, jailRoot+string(filepath.Separator)) {
+		return nil, fmt.Errorf("office_workbook: path %q resolves to %s, which is outside the session working directory %s: refusing", path, secure, absSession)
 	}
 	if strings.ToLower(filepath.Ext(resolved)) != ".xlsx" {
 		return nil, fmt.Errorf("office_workbook: %q is not an .xlsx workbook", path)

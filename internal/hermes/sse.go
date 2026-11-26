@@ -67,7 +67,9 @@ const sseChanBuffer = 32
 // sseMaxLine bounds a single SSE line (one data: line of a large frame).
 // 4 MiB is far above any upstream event payload and prevents bufio's
 // 64 KiB default from killing a stream on a big tool.completed frame.
-const sseMaxLine = 4 << 20
+// A var (not const) so the ErrTooLong partial-frame pin (A6-14) can shrink
+// the bound without shipping a 4 MiB test body.
+var sseMaxLine = 4 << 20
 
 // sseHTTPClient performs stream requests. It deliberately has NO timeout:
 // the caller's ctx bounds the stream, not the sync-turn timeout on
@@ -248,13 +250,23 @@ func ssePump(ctx context.Context, ch chan<- Event, resp *http.Response, endpoint
 	}
 	if err := scanner.Err(); err != nil {
 		// EOF is a nil error; anything else is an upstream/transport
-		// failure mid-stream. The channel closes either way — consumers
-		// see the stream end, matching the ctx-cancel path.
+		// failure mid-stream. A6-14: on a scan error the accumulated
+		// buffer is a TRUNCATED frame — bufio stops at the failure point
+		// (e.g. ErrTooLong on a >sseMaxLine line), so the pending data:
+		// lines are missing their tail. Dispatching it here would deliver
+		// invalid JSON as if it were a complete event. DROP the partial
+		// buffer instead; the channel closes either way, so consumers see
+		// the stream end without the corrupt frame.
 		if ctx.Err() == nil {
 			hermesDebugLog(fmt.Sprintf("hermes %s: stream read", endpoint), err)
 		}
+		if eventType != "" || haveData {
+			hermesDebugLog(fmt.Sprintf("hermes %s: dropping partial SSE frame after scan error", endpoint), err)
+		}
+		return
 	}
-	// Stream ended without a terminal event: flush a trailing frame that
-	// arrived without its blank-line terminator (tolerant close).
+	// Stream ended cleanly (EOF) without a terminal event: flush a
+	// trailing frame that arrived without its blank-line terminator
+	// (tolerant close).
 	dispatch()
 }

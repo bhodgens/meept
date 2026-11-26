@@ -381,6 +381,21 @@ func (pc *PermissionChecker) CheckPath(path string) bool {
 	return allowed
 }
 
+// filePathArg normalizes the file-path argument of a tool call for the
+// central path/fence checks (bughunt H9/A6-7 class). The filesystem tools
+// use key "path"; the 18 code-intelligence tools (internal/code/tools —
+// ast_*, lsp_* — plus internal/tools/builtin/lsp_navigate.go) pass their
+// file under SchemaPropFilePath = "file_path". Precedence is deliberate:
+// "path" wins whenever it is non-empty, so every existing call that
+// carries "path" — or both keys — produces byte-identical verdicts; only
+// calls where "path" is absent/empty fall through to "file_path".
+func filePathArg(details map[string]string) string {
+	if p := details["path"]; p != "" {
+		return p
+	}
+	return details["file_path"]
+}
+
 // CheckPathFence consults ONLY the fence stage for path under op
 // (agent-groups branch-01 leaf 02 T4): it is the revert-path seam — a
 // journal revert is a file write that bypasses CheckPermissionForAgent's
@@ -660,7 +675,13 @@ func (pc *PermissionChecker) CheckPermissionForAgent(action string, details map[
 
 	// Path-based checks for file actions
 	if action == "file_read" || action == "file_write" || action == "file_delete" {
-		if path, ok := details["path"]; ok && path != "" {
+		// bughunt H9/A6-7 class: the code-intelligence tools (ast_*,
+		// lsp_*, internal/code/tools SchemaPropFilePath) pass their file
+		// path under key file_path, not path — reading only details["path"]
+		// left every blocked/allowed glob check blind to them. filePathArg
+		// normalizes: path wins when present (byte-identical legacy),
+		// file_path is consulted only when path is empty.
+		if path := filePathArg(details); path != "" {
 			allowed, reason := pc.checkPathWithReason(path)
 			if !allowed {
 				return CheckResult{
@@ -681,7 +702,9 @@ func (pc *PermissionChecker) CheckPermissionForAgent(action string, details map[
 		var fenceErr error
 		switch action {
 		case "file_read", "file_write", "file_delete":
-			if path := details["path"]; path != "" {
+			// H9/A6-7: same path normalization as the glob check above —
+			// file_path-only calls (ast_*, lsp_* tools) are fenced too.
+			if path := filePathArg(details); path != "" {
 				op := "read"
 				switch action {
 				case "file_write":
@@ -723,6 +746,25 @@ func (pc *PermissionChecker) CheckPermissionForAgent(action string, details map[
 				fenceErr = fence.CheckCommand(cmd, jobDir)
 			}
 		}
+		// bughunt F8 (same class as the job_start case above): the git
+		// family (git_validate -> file_read, git_overview -> file_read,
+		// git_commit/git_split -> shell_execute) execs `git` with
+		// cmd.Dir = details["working_dir"]. The switch keys on the ACTION,
+		// and no action branch consults working_dir (the file arms read
+		// path/file_path, the shell arm reads workdir), so the fence was
+		// blind to the directory git runs in. Gated on the injected
+		// tool_name prefix so every other call path stays byte-identical;
+		// an absent working_dir means the tool runs in its own
+		// session-bound cwd (nothing central to police).
+		if fenceErr == nil && strings.HasPrefix(details["tool_name"], "git_") {
+			if dir := details["working_dir"]; dir != "" {
+				if err := fence.CheckPath(dir, "exec"); err != nil {
+					fenceErr = err
+				} else if cmd := details["command"]; cmd != "" {
+					fenceErr = fence.CheckCommand(cmd, dir)
+				}
+			}
+		}
 		if fenceErr != nil {
 			return CheckResult{
 				Allowed:    false,
@@ -746,7 +788,9 @@ func (pc *PermissionChecker) CheckPermissionForAgent(action string, details map[
 		var bsErr error
 		switch action {
 		case "file_write", "file_delete":
-			bsErr = pc.config.GroupsBackstop.check(agentID, details["path"])
+			// filePathArg: an ast_edit/lsp_rename carrying only
+			// file_path must hit the membership surfaces too (H9 class).
+			bsErr = pc.config.GroupsBackstop.check(agentID, filePathArg(details))
 		case "shell_execute":
 			bsErr = pc.config.GroupsBackstop.checkCommand(agentID, details["command"])
 		}

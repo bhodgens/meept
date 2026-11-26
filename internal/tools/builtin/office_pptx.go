@@ -139,15 +139,32 @@ func (t *OfficePptxTool) resolveFenced(ctx context.Context, path string) (string
 	if err != nil {
 		return "", fmt.Errorf("office_pptx: cannot resolve session working directory: %w", err)
 	}
-	resolved, err := resolvePath(ctx, path)
+	// The resolved path from resolvePathSecure follows symlinks, so the
+	// jail root must be symlink-normalized too (macOS /var -> /private/var
+	// would otherwise false-refuse every in-session path).
+	jailRoot := absSession
+	if real, rerr := filepath.EvalSymlinks(absSession); rerr == nil {
+		jailRoot = real
+	}
+	// A6-2: the fence check runs on the SYMLINK-RESOLVED form (the
+	// posture filesystem.go's resolvePathSecure exists for — resolvePath
+	// lets a symlink inside the session dir escape to /etc etc.). The
+	// RETURNED path keeps the legacy unresolved form so tool results and
+	// callers stay byte-identical; an escaping link was just refused.
+	legacy, err := resolvePath(ctx, path)
 	if err != nil {
 		return "", fmt.Errorf("office_pptx: invalid path %q: %w", path, err)
 	}
-	resolved = filepath.Clean(resolved)
-	if resolved != absSession && !strings.HasPrefix(resolved, absSession+string(filepath.Separator)) {
-		return "", fmt.Errorf("office_pptx: path %q resolves to %s, which is outside the session working directory %s: refusing", path, resolved, absSession)
+	legacy = filepath.Clean(legacy)
+	secure, err := resolvePathSecure(ctx, path)
+	if err != nil {
+		return "", fmt.Errorf("office_pptx: invalid path %q: %w", path, err)
 	}
-	return resolved, nil
+	secure = filepath.Clean(secure)
+	if secure != jailRoot && !strings.HasPrefix(secure, jailRoot+string(filepath.Separator)) {
+		return "", fmt.Errorf("office_pptx: path %q resolves to %s, which is outside the session working directory %s: refusing", path, secure, absSession)
+	}
+	return legacy, nil
 }
 
 // resolveImageFenced confines a slide's image_path the same way as path
@@ -365,7 +382,10 @@ func (t *OfficePptxTool) doEdit(ctx context.Context, path string, args map[strin
 		if err := tmpl.Save(&buf); err != nil {
 			return nil, fmt.Errorf("office_pptx: save %s: %w", out, err)
 		}
-		if err := os.WriteFile(out, buf.Bytes(), 0o644); err != nil {
+		// A6-9: atomic write (tmp+rename, the package's writeFileAtomic
+		// pattern from change_journal.go) — a plain os.WriteFile left a
+		// truncated .pptx zip on disk if the write died mid-flight.
+		if err := pptxWriteFile(out, buf.Bytes()); err != nil {
 			return nil, fmt.Errorf("office_pptx: write %s: %w", out, err)
 		}
 		// The spliced intermediate IS the reopen-and-verify base for the
@@ -432,6 +452,14 @@ func (t *OfficePptxTool) doEdit(ctx context.Context, path string, args map[strin
 	return t.verifyAndResult(out, slides, "edited")
 }
 
+// pptxWriteFile is the deck-bytes-to-disk seam (A6-9). Production binds it
+// to writeFileAtomic (tmp+rename in the same directory), so a mid-write
+// failure — ENOSPC, EIO, anything between open and rename — never leaves a
+// truncated .pptx at the final path: the original bytes survive. Tests may
+// inject a failing writer to prove the failure path leaves the target
+// untouched.
+var pptxWriteFile = writeFileAtomic
+
 // writeDeck saves a Presentation and fails loudly on any builder error.
 // Staged raw parts (copied slide bytes, media) are spliced into the saved
 // zip before it hits disk; [Content_Types].xml gains an Override per staged
@@ -450,7 +478,11 @@ func writeDeck(pres *pptx.Presentation, out string) error {
 		}
 		delete(stagedParts, pres)
 	}
-	if err := os.WriteFile(out, data, 0o644); err != nil {
+	// A6-9: atomic write — writeDeck is the edit-in-place/create seam and
+	// a partial os.WriteFile of the zip bytes yields a corrupt deck that
+	// reopen-verify then reports as missing content; tmp+rename keeps the
+	// original bytes intact on any mid-write failure.
+	if err := pptxWriteFile(out, data); err != nil {
 		return fmt.Errorf("office_pptx: write %s: %w", out, err)
 	}
 	return nil
