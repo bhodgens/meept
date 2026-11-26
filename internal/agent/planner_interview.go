@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/caimlas/meept/internal/plan"
@@ -12,6 +14,21 @@ import (
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/pkg/models"
 )
+
+// coldInterviewScanLimit bounds the planning-task scan the restart-miss
+// answer path runs per unmatched message (bughunt L8). Planning-state
+// tasks are a handful in practice; the cap keeps the fallback query cost
+// bounded on pathological stores.
+const coldInterviewScanLimit = 200
+
+// coldInterviewClaims guards the restart-miss cold-resume path against
+// double delivery: the in-memory waiter map is empty after a restart, so
+// the atomic consume that protects the hot path does not cover the cold
+// path. Keyed by task id, valued at the claim time; claims older than the
+// wait window are stale (a fresh interview re-arm after a second restart
+// within the window falls through like the pre-fix shape — documented
+// limitation of this LOW-finding fix, not a regression).
+var coldInterviewClaims sync.Map
 
 // Interview pause surfacing + answer seam (interactive-usability leaf 04,
 // master contract C-3): the planner's design-interview pause becomes
@@ -181,6 +198,22 @@ func ReadInterviewState(t *task.Task) *plannerInterviewState {
 			return nil
 		}
 		return &st
+	case map[string]any:
+		// Bughunt L8: this is the shape that actually occurs — json
+		// decoding a nested object into map[string]any yields
+		// map[string]any, NOT json.RawMessage, so the RawMessage arm
+		// above never fires for store-read metadata. Re-marshal through
+		// the struct. (The hot answer path masked this by using the
+		// in-memory waiter map; the cold-restart lane depends on it.)
+		b, err := json.Marshal(v)
+		if err != nil {
+			return nil
+		}
+		var st plannerInterviewState
+		if err := json.Unmarshal(b, &st); err != nil || st.TaskID == "" {
+			return nil
+		}
+		return &st
 	default:
 		return nil
 	}
@@ -268,6 +301,16 @@ func (sp *StrategicPlanner) interviewWaitIsLive(taskID string) bool {
 // on sessionID's conversation. Returns (ack, true) when delivered (and
 // the waiter consumed — duplicate answers are refused by construction),
 // ("", false) when no interview waits for that conversation.
+//
+// Restart-miss recovery (bughunt L8): the waiter map is in-memory, so a
+// daemon restart drops it while the task's persisted interview state says
+// an interview is still open. Before falling through — which silently
+// swallowed the answer as an ordinary chat turn and left the task parked
+// in planning until the watchdog window — consult the store: a fresh
+// open interview on this conversation is resumed through the same Plan
+// re-entry the hot waiter uses (the planning context is persisted at the
+// pause point, so the answer has a real consumer again). The fallback is
+// loud: Warn naming the abandoned interview on every non-silent branch.
 func (sp *StrategicPlanner) DeliverInterviewAnswer(sessionID, answer string) (string, bool) {
 	if sp == nil || sessionID == "" {
 		return "", false
@@ -283,7 +326,7 @@ func (sp *StrategicPlanner) DeliverInterviewAnswer(sessionID, answer string) (st
 	}
 	if waiter == nil {
 		sp.mu.Unlock()
-		return "", false
+		return sp.deliverColdInterviewAnswer(sessionID, answer)
 	}
 	delete(sp.interviewWaiters, taskID)
 	sp.mu.Unlock()
@@ -293,6 +336,147 @@ func (sp *StrategicPlanner) DeliverInterviewAnswer(sessionID, answer string) (st
 	ack := "Thanks — resuming the plan with your answers."
 	go waiter.resume([]string{answer})
 	return ack, true
+}
+
+// deliverColdInterviewAnswer is the restart-miss half of the answer seam
+// (bughunt L8): no in-memory waiter matched sessionID, so scan the
+// persisted interview state for an open interview on this conversation.
+// Returns (ack, true) when the answer was routed into the task-resume
+// path; ("", false) when nothing waits (normal chat fallthrough, the
+// pre-fix behavior for genuinely-absent interviews). Duplicate-answer
+// protection on this lane is the coldInterviewClaims map, since there is
+// no waiter to consume atomically.
+func (sp *StrategicPlanner) deliverColdInterviewAnswer(sessionID, answer string) (string, bool) {
+	if sp == nil || sp.taskStore == nil {
+		return "", false
+	}
+	t, st, ok := sp.findOpenInterviewTask(sessionID)
+	if !ok {
+		return "", false
+	}
+	// Claim the task before delivering: the consume-delete that makes the
+	// hot path duplicate-safe does not exist here, so two answer turns
+	// hitting the cold path in the same window must not double-resume.
+	if prev, loaded := coldInterviewClaims.LoadOrStore(t.ID, time.Now()); loaded {
+		if age, isTime := prev.(time.Time); isTime && time.Since(age) < interviewWaitWindow {
+			sp.logger.Warn("Interview answer dropped: already delivered after restart",
+				"task_id", t.ID, "session_id", sessionID)
+			return "", false
+		}
+		coldInterviewClaims.Store(t.ID, time.Now())
+	}
+	sp.logger.Warn("Resuming interview answer through the cold restart path (in-memory waiter lost to a daemon restart)",
+		"task_id", t.ID, "session_id", sessionID)
+
+	sp.ClearInterviewState(t.ID)
+	go sp.resumeColdInterview(t, st, answer)
+	return "Thanks — resuming the plan with your answers.", true
+}
+
+// findOpenInterviewTask locates a task with a persisted, not-yet-expired
+// interview block whose conversation matches sessionID. List(planning) is
+// the indexed lane (idx_tasks_state); each candidate is re-read so the
+// decision uses the freshest row rather than the scan snapshot.
+func (sp *StrategicPlanner) findOpenInterviewTask(sessionID string) (*task.Task, *plannerInterviewState, bool) {
+	planning := task.StatePlanning
+	tasks, err := sp.taskStore.List(&planning, coldInterviewScanLimit)
+	if err != nil {
+		sp.logger.Warn("Interview answer miss: planning-task scan failed",
+			"session_id", sessionID, "error", err)
+		return nil, nil, false
+	}
+	for _, cand := range tasks {
+		if cand == nil {
+			continue
+		}
+		fresh, err := sp.taskStore.GetByID(cand.ID)
+		if err != nil || fresh == nil {
+			continue
+		}
+		st := ReadInterviewState(fresh)
+		if st == nil {
+			continue
+		}
+		if sentAt, perr := time.Parse(time.RFC3339, st.SentAt); perr != nil || time.Since(sentAt) >= interviewWaitWindow {
+			// Expired wait: leave it to the watchdog semantics (the
+			// exemption already lapsed); the message is an ordinary turn.
+			continue
+		}
+		if st.SessionID == sessionID || slices.Contains(fresh.LinkedSessions, sessionID) {
+			return fresh, st, true
+		}
+	}
+	return nil, nil, false
+}
+
+// resumeColdInterview rebuilds the resume request from the persisted row
+// after a restart (no in-memory PlanRequest survived). The pause point
+// wrote the PlanningContext fields at the TOP level of the task metadata
+// (awaitInterviewAnswers) and then merged the planner_interview block via
+// StoreInterviewState, so questions/distillation fields are recovered from
+// either the interview block or the top-level pctx shape. Answers ride
+// the same PlanningCtx.InterviewAnswers channel as the hot resume, and
+// because that channel renders only distillation fields (not the raw
+// answer text), the cold path also appends the paired question/answer
+// block to the task input so the planner LLM actually sees the answers.
+func (sp *StrategicPlanner) resumeColdInterview(t *task.Task, st *plannerInterviewState, answer string) {
+	questions := st.Questions
+	resumeCtx := &plan.PlanningContext{InterviewQuestions: questions}
+	if len(t.Metadata) > 0 {
+		// The metadata doubles as the serialized PlanningContext at the
+		// pause point (awaitInterviewAnswers marshals pctx whole, then
+		// StoreInterviewState merges the planner_interview block on top);
+		// unmarshal directly — the extra key is ignored.
+		var persisted plan.PlanningContext
+		if json.Unmarshal(t.Metadata, &persisted) == nil {
+			resumeCtx = &persisted
+			if len(resumeCtx.InterviewQuestions) > 0 {
+				questions = resumeCtx.InterviewQuestions
+			}
+		}
+	}
+	if len(questions) == 0 {
+		questions = st.Questions
+	}
+	resumeCtx.InterviewQuestions = questions
+	resumeCtx.InterviewAnswers = splitInterviewAnswer([]string{answer}, len(questions))
+	resumeCtx.InterviewCompleted = true
+
+	req := PlanRequest{
+		TaskID:        t.ID,
+		SessionID:     st.SessionID,
+		Input:         t.Description,
+		AssignedAgent: t.AssignedAgent,
+		// Intent/Mode are not persisted on the task row; leaving them
+		// empty lets Plan fall through inferLegacyMode (input-length
+		// heuristic) — the same degradation any legacy caller gets.
+	}
+
+	// Make the answers visible to the planner prompt: pair them with the
+	// questions positionally (blank entries are "(no answer)").
+	var qa strings.Builder
+	qa.WriteString(req.Input)
+	qa.WriteString("\n\n## Interview answers\n")
+	for i, q := range questions {
+		a := ""
+		if i < len(resumeCtx.InterviewAnswers) {
+			a = strings.TrimSpace(resumeCtx.InterviewAnswers[i])
+		}
+		if a == "" {
+			a = "(no answer)"
+		}
+		fmt.Fprintf(&qa, "Q%d: %s\nA%d: %s\n", i+1, q, i+1, a)
+	}
+	req.Input = qa.String()
+	req.PlanningCtx = resumeCtx
+
+	if err := sp.Plan(context.Background(), req); err != nil {
+		sp.logger.Error("Cold interview resume planning failed",
+			"task_id", t.ID, "error", err)
+		sp.failTaskWithReason(t.ID, "planning failed after restart interview answers: "+err.Error())
+		return
+	}
+	sp.logger.Info("Cold interview resume planning succeeded", "task_id", t.ID)
 }
 
 // reqAmbiguities recovers the original ambiguity list for the resume
@@ -349,6 +533,13 @@ func (sp *StrategicPlanner) resumeInterview(taskID string, req PlanRequest, ques
 // count: one reply line per question when the counts line up, otherwise
 // the whole text rides as the single first answer (the resume prompt
 // carries both slices, so the pairing survives either way).
+//
+// Bughunt L8: blank lines are POSITIONAL markers ("no answer to that
+// question"), not noise to drop. The old filter-then-truncate skewed a
+// skipped-middle reply onto the wrong question (user answers Q3 on line 3
+// with Q2 blank -> Q2 received Q3's text). Lines are now kept in place;
+// only trailing blanks are stripped, so answer[i] stays aligned with
+// question[i]. All-lines-filled replies behave byte-identically to before.
 func splitInterviewAnswer(answers []string, questionCount int) []string {
 	joined := strings.Join(answers, "\n")
 	if len(answers) >= questionCount && questionCount > 0 {
@@ -357,19 +548,37 @@ func splitInterviewAnswer(answers []string, questionCount int) []string {
 	if questionCount <= 1 {
 		return []string{joined}
 	}
-	// Non-empty lines as answers when the user replied with several.
-	var lines []string
+	// Positional lines: every reply line (blank lines kept as markers).
+	var pos []string
+	nonEmpty := 0
 	for _, a := range answers {
 		for _, line := range strings.Split(a, "\n") {
-			if strings.TrimSpace(line) != "" {
-				lines = append(lines, strings.TrimSpace(line))
+			t := strings.TrimSpace(line)
+			pos = append(pos, t)
+			if t != "" {
+				nonEmpty++
 			}
 		}
 	}
-	if len(lines) >= questionCount {
-		return lines[:questionCount]
+	if nonEmpty == 0 {
+		// Whitespace-only reply: the whole text rides as one answer.
+		return []string{joined}
 	}
-	return append(lines, joined)
+	if len(pos) >= questionCount {
+		out := append([]string{}, pos[:questionCount]...)
+		for len(out) > 1 && out[len(out)-1] == "" {
+			out = out[:len(out)-1]
+		}
+		return out
+	}
+	// Fewer reply lines than questions: positional lines (trailing
+	// blanks stripped), then the whole text so nothing is lost —
+	// today's fallback shape.
+	out := append([]string{}, pos...)
+	for len(out) > 1 && out[len(out)-1] == "" {
+		out = out[:len(out)-1]
+	}
+	return append(out, joined)
 }
 
 // deliverPlannerInterview is the pause-point entry called from
