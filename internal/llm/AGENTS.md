@@ -355,7 +355,10 @@ pinned by the tree's gate tests (`health_checker_verdict_internal_test.go`,
   re-embeds candidates scoring in [VerifyFloor, Threshold) and serves
   only on direct-cosine >= Threshold; 0 (the default) disables the
   band, and values at/above Threshold clamp to 0 at the load boundary
-  (`NormalizeSemanticCacheDefaults`, schema.go:1341-1344). Disabled =
+  (`NormalizeSemanticCacheDefaults`, schema.go:1341-1344). Band
+  selection is DETERMINISTIC (A3-7): the best in-band candidate wins by
+  score desc, then key asc — never by Go map iteration order — and
+  tool-call-bearing rows are skipped as band candidates too. Disabled =
   structurally unreachable path, byte-identical responses.
 - **TTFT is the first content delta; -1 means unmeasured.** Migration
   v9 adds `llm_calls.ttft_ms INTEGER NOT NULL DEFAULT -1` via

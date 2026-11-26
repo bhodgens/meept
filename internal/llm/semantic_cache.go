@@ -188,7 +188,9 @@ func (s *SemanticCache) LookupBehindMiss(ctx context.Context, modelID, prompt st
 	// stored embedding. The stage-2 re-embed happens OUTSIDE the lock
 	// (mutexio) below.
 	verifyFloor := float32(s.cfg.VerifyFloor)
-	var inBandVec []float32
+	var inBandKey string
+	var inBandScore float32
+	var inBandFound bool
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -218,23 +220,31 @@ func (s *SemanticCache) LookupBehindMiss(ctx context.Context, modelID, prompt st
 			bestScore = score
 			bestKey = key
 			bestResp = e.response
-		} else if bestResp == nil && verifyFloor > 0 && score >= verifyFloor && score < float32(s.cfg.Threshold) && len(e.vector) == len(vec) {
-			// Stage-1 in-band candidate: remember the embedding for the
-			// stage-2 direct verify. Ties resolve by the map range; the
-			// bound on entries keeps the ambiguity cost-free.
-			inBandVec = e.vector
-			bestKey = key
+		} else if bestResp == nil && verifyFloor > 0 && score >= verifyFloor && score < float32(s.cfg.Threshold) && len(e.vector) == len(vec) &&
+			e.response != nil && !e.response.HasToolCalls() {
+			// Stage-1 in-band candidate (A3-7 determinism fix): track the
+			// BEST in-band candidate — score desc, then key asc on exact
+			// ties — instead of whichever entry the Go map range happens
+			// to visit last. Ties by map order made the stage-2 verify
+			// candidate nondeterministic across identical requests.
+			// Tool-call-bearing entries are skipped here (never
+			// servable), mirroring the stage-1 serve-side exemption.
+			if !inBandFound || score > inBandScore || (score == inBandScore && key < inBandKey) {
+				inBandKey = key
+				inBandScore = score
+				inBandFound = true
+			}
 		}
 	}
 	if bestResp == nil {
-		if inBandVec == nil {
+		if !inBandFound {
 			return nil, false, nil
 		}
 		// STAGE 2 (leaf 03 two-stage verifier): the re-embed must run
 		// OUTSIDE the lock (mutexio -- no I/O under mutex). verifyBehindBand
 		// unlocks, embeds, re-locks, and re-checks the candidate before
 		// serving (entries may change during the window).
-		return s.verifyBehindBand(ctx, modelID, prompt, part, bestKey)
+		return s.verifyBehindBand(ctx, modelID, prompt, part, inBandKey)
 	}
 	s.touchLocked(bestKey)
 	return bestResp, true, nil

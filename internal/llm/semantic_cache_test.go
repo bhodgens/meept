@@ -12,6 +12,7 @@ package llm
 import (
 	"context"
 	"errors"
+	"math"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -427,5 +428,95 @@ func TestSemanticCacheAboveThresholdNoExtraEmbed(t *testing.T) {
 	}
 	if got := emb.count(); got != 1 {
 		t.Fatalf("embedder calls = %d, want 1; above-threshold path must not re-embed", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// A3-7 determinism pins: the VerifyFloor band must pick its stage-2
+// candidate by (score desc, key asc), never by Go map iteration order.
+// Run the package with -count=5 to prove stability across the randomized
+// map range; the old shape (last-visited wins) flakes these pins.
+// ---------------------------------------------------------------------------
+
+// bandVec returns the unit vector at the given angle (degrees) in the
+// x-y plane of the 8-dim embedding space.
+func bandVec(deg float64) []float32 {
+	const d2r = 3.14159265358979323846 / 180
+	v := make([]float32, 8)
+	v[0] = float32(math.Cos(deg * d2r))
+	v[1] = float32(math.Sin(deg * d2r))
+	return v
+}
+
+// TestSemanticCacheVerifyBandDeterministicWinner pins A3-7: three in-band
+// candidates (query at 0 deg; candidates at 18.5 / 25 / 31.5 deg inside
+// the [0.85, 0.95) band) plus one tool-call-bearing entry with the BEST
+// band score. The verify re-embed (call 1) direct-cosines at/above 0.95
+// ONLY against the best NON-tool-call candidate (c at 18.5 deg, verify
+// vector at 5 deg: cos 13.5 deg = 0.972 serve; cos 20 deg = 0.940 miss;
+// cos 26.5 deg = 0.895 miss), so a deterministic winner is the only way
+// this test passes on EVERY repeated run. The old map-order selection
+// verified a random candidate: two of three picks miss, and a tool-call
+// row could shadow the servable winner entirely.
+func TestSemanticCacheVerifyBandDeterministicWinner(t *testing.T) {
+	emb := &seqEmbedder{embed: func(call int) ([]float32, error) {
+		if call == 0 {
+			return bandVec(0), nil // query direction
+		}
+		return bandVec(5), nil // verify direction: clears c only
+	}}
+	cache := NewSemanticCache(emb, SemanticCacheConfig{Enabled: true, Threshold: 0.95, VerifyFloor: 0.85})
+	toolResp := &Response{ToolCalls: []ToolCall{{ID: "tc-1", Type: "function", Function: ToolCallFunction{Name: "x"}}}}
+	wantResp := &Response{Content: "winner-c"}
+	cache.mu.Lock()
+	cache.entries["m c"] = &semanticEntry{vector: bandVec(18.5), response: wantResp, partition: "m", expiresAt: time.Now().Add(time.Hour)}
+	cache.entries["m b"] = &semanticEntry{vector: bandVec(25), response: &Response{Content: "loser-b"}, partition: "m", expiresAt: time.Now().Add(time.Hour)}
+	cache.entries["m a"] = &semanticEntry{vector: bandVec(31.5), response: &Response{Content: "loser-a"}, partition: "m", expiresAt: time.Now().Add(time.Hour)}
+	cache.entries["m t"] = &semanticEntry{vector: bandVec(18.2), response: toolResp, partition: "m", expiresAt: time.Now().Add(time.Hour)}
+	cache.mu.Unlock()
+
+	for i := range 20 {
+		resp, hit, err := cache.LookupBehindMiss(context.Background(), "m", "determinism probe")
+		if err != nil {
+			t.Fatalf("iteration %d: LookupBehindMiss errored: %v", i, err)
+		}
+		if !hit {
+			t.Fatalf("iteration %d: band lookup missed — map-order selection picked a non-verify-passing candidate (A3-7 nondeterminism)", i)
+		}
+		if resp != wantResp {
+			t.Fatalf("iteration %d: served %+v, want the best direct-cosine candidate's response (A3-7 winner instability)", i, resp)
+		}
+	}
+}
+
+// TestSemanticCacheVerifyBandExactTieKeyAsc pins the tie half of the
+// ordering rule: two candidates at identical band scores (+/-31.5 deg)
+// resolve by key ASC — the verify vector (20 deg) direct-cosines at/above
+// threshold only against "m tie-a" (+31.5), so a key-desc (or random)
+// tie-break selects "m tie-b" and the verify misses.
+func TestSemanticCacheVerifyBandExactTieKeyAsc(t *testing.T) {
+	emb := &seqEmbedder{embed: func(call int) ([]float32, error) {
+		if call == 0 {
+			return bandVec(0), nil
+		}
+		return bandVec(20), nil
+	}}
+	cache := NewSemanticCache(emb, SemanticCacheConfig{Enabled: true, Threshold: 0.95, VerifyFloor: 0.85})
+	wantResp := &Response{Content: "tie-a"}
+	// bandVec uses +sin for the angle; the mirror for "m tie-b" negates y.
+	flipB := bandVec(-31.5)
+	cache.mu.Lock()
+	cache.entries["m tie-a"] = &semanticEntry{vector: bandVec(31.5), response: wantResp, partition: "m", expiresAt: time.Now().Add(time.Hour)}
+	cache.entries["m tie-b"] = &semanticEntry{vector: flipB, response: &Response{Content: "tie-b"}, partition: "m", expiresAt: time.Now().Add(time.Hour)}
+	cache.mu.Unlock()
+
+	for i := range 20 {
+		resp, hit, err := cache.LookupBehindMiss(context.Background(), "m", "tie probe")
+		if err != nil {
+			t.Fatalf("iteration %d: LookupBehindMiss errored: %v", i, err)
+		}
+		if !hit || resp != wantResp {
+			t.Fatalf("iteration %d: hit=%v resp=%v, want key-asc tie winner tie-a served (A3-7 tie rule)", i, hit, resp)
+		}
 	}
 }
