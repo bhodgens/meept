@@ -1551,6 +1551,38 @@ type goalGateResumePayload struct {
 	Result *bot.BotExecutionResult `json:"result,omitempty"`
 }
 
+// normalizeReentryBlob coerces the outer TurnReentry map's "reentry" value
+// into raw JSON bytes for the inner goalGateResumePayload decode (A6-10).
+// The shape depends on the round-trip: json.RawMessage inline-marshals to a
+// JSON object (decoded here as map[string]any), a persisted-then-decoded row
+// may deliver it as a plain string holding JSON text, and direct in-process
+// callers may pass []byte or a map. Anything unrecognizable yields nil (the
+// outer-map fallback then decides).
+func normalizeReentryBlob(v any) []byte {
+	switch t := v.(type) {
+	case nil:
+		return nil
+	case []byte:
+		return t
+	case json.RawMessage:
+		return t
+	case string:
+		trimmed := strings.TrimSpace(t)
+		if trimmed == "" {
+			return nil
+		}
+		return []byte(trimmed)
+	case map[string]any:
+		raw, err := json.Marshal(t)
+		if err != nil {
+			return nil
+		}
+		return raw
+	default:
+		return nil
+	}
+}
+
 // SetPiiPromptMaskHook attaches the session-scoped PII mask lane used for
 // the reflector-bound sends (bughunt C20). Nil is a no-op (setter
 // nil-guard rule): with no hook the Assess/Reflect prompts pass through
@@ -1599,14 +1631,61 @@ func (l *GoalLoop) ResumeGoalGateApproval(ctx context.Context, reentry map[strin
 
 	var p goalGateResumePayload
 	if len(reentry) > 0 {
+		// A6-10: parkGateApproval persists the INNER goalGateResumePayload
+		// (the one carrying Result) nested under the "reentry" key of the
+		// OUTER TurnReentry map. Decoding the outer map straight into the
+		// payload shape always yielded Result=nil — the recorded execution
+		// result (success/failure, output, tokens) was silently dropped and
+		// Reflect replayed a FAILURE verdict for a round the human just
+		// approved. Decode the nested payload first; a row whose inner
+		// blob is missing or undecodable falls back to the outer map so
+		// older parks (plan_id/prompt only) still resume with the shape
+		// they carry (dual-read).
 		raw, err := json.Marshal(reentry)
 		if err != nil {
 			logger.Warn("goal gate resume re-entry encode failed — dropping", "error", err)
 			return
 		}
-		if err := json.Unmarshal(raw, &p); err != nil {
+		var outer struct {
+			PlanID string          `json:"plan_id,omitempty"`
+			Prompt string          `json:"prompt,omitempty"`
+			Result json.RawMessage `json:"result,omitempty"`
+			// Reentry is the nested payload. It arrives as json.RawMessage
+			// on an in-process round-trip and as a plain JSON string after
+			// the park row persists through SQLite, so it is decoded
+			// leniently below.
+			Reentry any `json:"reentry,omitempty"`
+		}
+		if err := json.Unmarshal(raw, &outer); err != nil {
 			logger.Warn("goal gate resume payload undecodable — dropping", "error", err)
 			return
+		}
+		inner := normalizeReentryBlob(outer.Reentry)
+		if len(inner) > 0 {
+			if err := json.Unmarshal(inner, &p); err != nil {
+				logger.Warn("goal gate resume inner payload undecodable — falling back to outer map",
+					"error", err)
+				p = goalGateResumePayload{}
+			}
+		}
+		if p.PlanID == "" {
+			// Legacy/fallback row: the fields ride the outer map directly.
+			p.PlanID = outer.PlanID
+			p.Prompt = outer.Prompt
+			if len(outer.Result) > 0 {
+				var res bot.BotExecutionResult
+				if err := json.Unmarshal(outer.Result, &res); err == nil {
+					p.Result = &res
+				} else {
+					logger.Debug("goal gate resume outer result undecodable — resuming without result",
+						"error", err)
+				}
+			}
+		} else if p.Prompt == "" {
+			// Inner payload carries no prompt override; prefer the outer
+			// stamp (park writes both, identical — the fallback covers a
+			// trimmed inner blob).
+			p.Prompt = outer.Prompt
 		}
 	}
 	if p.PlanID == "" {

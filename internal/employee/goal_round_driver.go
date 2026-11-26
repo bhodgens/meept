@@ -28,10 +28,14 @@ package employee
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"sync"
 	"time"
+
+	"github.com/caimlas/meept/internal/tools/builtin"
 )
 
 // GoalRoundOutcome is the result of a driver settlement step.
@@ -101,10 +105,45 @@ type GoalRoundDriver struct {
 	armed        map[string]*bool
 	inflight     map[string]bool   // employeeID -> deferred turn not yet settled
 	deferredGoal map[string]string // employeeID -> goal id of its last deferred turn (C27 disarm key)
-	pollCancel   context.CancelFunc
-	pollDone     chan struct{} // closed when the poll loop exits
-	pollStopping bool
+	// goalOwner maps goal id -> employee id (goal.EmployeeID at Arm time) so
+	// the tracking GC (A6-13) can re-resolve a tracked goal's live state
+	// without scanning every employee's goal list.
+	goalOwner map[string]string
+	// reserveFails counts CONSECUTIVE transient reserve failures per
+	// employee (A6-5). Cleared on a successful reserve; capped so a
+	// permanently broken store cannot hot-loop re-reservations (the C27
+	// concern) — at driverReserveFailureCap the goal disarms like the old
+	// unconditional behavior did on the first error.
+	reserveFails map[string]int
+	// reserveWriteHook is a TEST-ONLY seam (same pattern as
+	// employeeBoundAgentLoopExecutor.cloneHook): when non-nil,
+	// OnRoundSettled consults it INSTEAD of relying solely on the store
+	// write so pins can deterministically inject transient (CAS/BUSY) and
+	// terminal (not-found/transition) reserve write failures. Production
+	// never sets it (the setter lives in a _test.go file), so the
+	// production path is unchanged.
+	reserveWriteHook func(g *Goal) error
+	pollCancel       context.CancelFunc
+	pollDone         chan struct{} // closed when the poll loop exits
+	pollStopping     bool
 }
+
+// reserveWriteFailure consults the test-only hook. nil hook (every
+// production path) means "no injected failure" and the real store write
+// proceeds.
+func (d *GoalRoundDriver) reserveWriteFailure(goal *Goal) error {
+	d.mu.Lock()
+	hook := d.reserveWriteHook
+	d.mu.Unlock()
+	if hook == nil {
+		return nil
+	}
+	return hook(goal)
+}
+
+// driverReserveFailureCap bounds consecutive transient reserve failures
+// before the driver gives up and disarms (A6-5 retry-with-backstop).
+const driverReserveFailureCap = 5
 
 // DefaultGoalRoundPollInterval is the driver's settlement-check cadence when
 // Start is called without an explicit interval (WithPollInterval).
@@ -143,6 +182,8 @@ func NewGoalRoundDriver(mgr *Manager, log *slog.Logger) *GoalRoundDriver {
 		armed:        make(map[string]*bool),
 		inflight:     make(map[string]bool),
 		deferredGoal: make(map[string]string),
+		goalOwner:    make(map[string]string),
+		reserveFails: make(map[string]int),
 		autoAdvance:  true,
 		pollInterval: DefaultGoalRoundPollInterval,
 	}
@@ -186,9 +227,13 @@ func (d *GoalRoundDriver) WithPollInterval(interval time.Duration) *GoalRoundDri
 	return d
 }
 
-// WithAutonomousRoundSetter binds the leaf-02 authority bridge (nil is
-// ignored, typed-nil guard per CLAUDE.md). The daemon passes
-// builtin.SetGoalAutonomousRound.
+// WithAutonomousRoundSetter binds the leaf-02 authority bridge.
+//
+// OBSERVER-ONLY since H8/A6-1: the goal tools' authority verdict now
+// rides the ROUND CONTEXT (builtin.WithGoalAutonomous, stamped by
+// scheduleDeferredTurn), never a process-global. The setter is kept so the
+// daemon wiring and existing pins compile; the value it records has NO
+// effect on tool authority. nil is ignored (typed-nil guard per CLAUDE.md).
 func (d *GoalRoundDriver) WithAutonomousRoundSetter(fn func(bool)) *GoalRoundDriver {
 	if fn != nil && d != nil {
 		d.setAutonomous = fn
@@ -196,11 +241,10 @@ func (d *GoalRoundDriver) WithAutonomousRoundSetter(fn func(bool)) *GoalRoundDri
 	return d
 }
 
-// MarkAutonomousRound records whether the current round is an autonomous
-// continuation (no human in the loop). It forwards to the bound
-// builtin.SetGoalAutonomousRound seam so complete/blocked are legal during a
-// continuation; a nil setter means nothing is set (fail-safe direct-human).
-// It is idempotent and safe for concurrent use.
+// MarkAutonomousRound forwards to the bound observer seam (see
+// WithAutonomousRoundSetter). It is idempotent and safe for concurrent
+// use, but — post H8/A6-1 — it is pure observability: the authority that
+// the goal tools enforce is the ctx stamp applied in scheduleDeferredTurn.
 func (d *GoalRoundDriver) MarkAutonomousRound(on bool) {
 	if d == nil || d.setAutonomous == nil {
 		return
@@ -287,6 +331,10 @@ func (d *GoalRoundDriver) settleQuietEmployees(ctx context.Context) {
 		}
 		d.settleEmployeeIfQuiet(ctx, emp.ID)
 	}
+	// A6-13: after every roster pass, sweep the per-goal tracking maps so
+	// entries for goals that retired/blocked/paused through any surface
+	// (tool, RPC, human) do not accumulate for the process lifetime.
+	d.gcGoalTracking(ctx)
 }
 
 // settleEmployeeIfQuiet runs one settlement step for a quiet employee. The
@@ -316,6 +364,23 @@ func (d *GoalRoundDriver) settleEmployeeIfQuietOutcome(ctx context.Context, empl
 	// OnRoundSettled schedules the deferred turn on the advance edge; the
 	// only other settlement outcome is the cap auto-block (nothing to run).
 	return outcome, nil
+}
+
+// goalReserveErrorTerminal classifies a Manager.UpdateGoal reserve failure
+// for the driver's disarm decision (A6-5). TERMINAL errors — the row is
+// gone (ErrGoalNotFound) or the state-transition fence refuses the write
+// (ErrGoalTransition, which no retry changes while the row stays in the
+// refusing state) — disarm the goal exactly like the old unconditional
+// behavior. Everything else is TRANSIENT (C29's ErrGoalRevisionConflict
+// CAS race with a concurrent human/tool write, SQLite BUSY/locked, I/O or
+// deadline blips) and retries on the next poll tick up to
+// driverReserveFailureCap. ErrGoalRevisionConflict is deliberately NOT
+// terminal: it is the routine concurrent-update shape.
+func goalReserveErrorTerminal(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, ErrGoalNotFound) || errors.Is(err, ErrGoalTransition)
 }
 
 // isQuiet applies the bound quiescence predicate; nil (unwired) is fail-open.
@@ -360,17 +425,26 @@ const goalRoundDeferredJobPrefix = "employee.goal-round."
 // round's goal_id + revision). The registration is keyed per employee so a
 // re-schedule replaces the prior one instead of stacking duplicates. With no
 // scheduler bound (reserve-only mode) the reservation stays for the manual
-// RPC/CLI advance to pick up.
-func (d *GoalRoundDriver) scheduleDeferredTurn(employeeID string) {
+// RPC/CLI advance to pick up — the returned bool reports that shape so the
+// caller never leaves the employee stuck inflight (A6-4).
+//
+// H8/A6-1: the round's autonomy is stamped on the TRIGGER CONTEXT
+// (builtin.WithGoalAutonomous) instead of a process-global flag. The ctx
+// rides Manager.Trigger → triggerViaGoalLoop → GoalLoop.Decide → Execute →
+// the bound executor → the agent loop → tools/builtin Execute, so ONLY this
+// round sees autonomous authority: a concurrent cron/webhook/plain turn
+// keeps direct-human rules, and one employee's round settling can never
+// flip another employee's round back to direct-human mid-flight.
+func (d *GoalRoundDriver) scheduleDeferredTurn(employeeID string) bool {
 	if d.deferred == nil {
-		return
+		return false
 	}
 	name := goalRoundDeferredJobPrefix + employeeID
 	d.deferred.ScheduleOneShot(name, func() {
-		// C31: the DEFERRED round is the autonomous continuation — raise
-		// the goal-tools flag for this turn's execution window and clear
-		// it when the turn settles (success or failure), so complete/
-		// blocked are legal exactly while the driver-driven round runs.
+		// C31: the DEFERRED round is the autonomous continuation — the
+		// observer seam is raised for this turn's execution window (kept
+		// for the daemon's observability wiring) and the authority itself
+		// rides the stamped ctx, cleared implicitly when the turn returns.
 		d.MarkAutonomousRound(true)
 		defer d.MarkAutonomousRound(false)
 		defer d.markInflight(employeeID, false)
@@ -382,7 +456,8 @@ func (d *GoalRoundDriver) scheduleDeferredTurn(employeeID string) {
 		// persisted budget counters so MaxInvocationsPerDay survives
 		// restarts (nil checker = unwired, no-op).
 		d.mgr.RecordGoalRound(employeeID)
-		if _, err := d.mgr.Trigger(context.Background(), employeeID, payload); err != nil {
+		roundCtx := builtin.WithGoalAutonomous(d.mgr.ShutdownContext())
+		if _, err := d.mgr.Trigger(roundCtx, employeeID, payload); err != nil {
 			// An errored round disarms the goal (leaf T4): no further
 			// autonomous advance until something re-arms it.
 			// C27 (bughunt): the disarm keys on the GOAL id (Arm/isArmed
@@ -402,6 +477,7 @@ func (d *GoalRoundDriver) scheduleDeferredTurn(employeeID string) {
 		d.log.Debug("goal round driver: deferred round settled",
 			"employee_id", employeeID)
 	})
+	return true
 }
 
 // goalRoundPayload builds the source:"goal" trigger payload carrying the
@@ -438,7 +514,11 @@ func (d *GoalRoundDriver) lastDeferredGoalID(employeeID string) string {
 }
 
 // Arm marks the goal for automatic continuation in this process. It mirrors
-// the Goal.armed flag that cannot span a store reload.
+// the Goal.armed flag that cannot span a store reload. A6-13: every armed
+// entry records its owning employee so the periodic tracking GC can
+// re-resolve the goal's live state and delete entries for goals that
+// retired, were blocked, or no longer exist — without that, the map grows
+// one entry per goal the process ever drove.
 func (d *GoalRoundDriver) Arm(goal *Goal) {
 	if d == nil || goal == nil {
 		return
@@ -446,6 +526,10 @@ func (d *GoalRoundDriver) Arm(goal *Goal) {
 	d.mu.Lock()
 	v := true
 	d.armed[goal.ID] = &v
+	if d.goalOwner == nil {
+		d.goalOwner = make(map[string]string)
+	}
+	d.goalOwner[goal.ID] = goal.EmployeeID
 	d.mu.Unlock()
 }
 
@@ -459,6 +543,92 @@ func (d *GoalRoundDriver) disarm(goalID string) {
 	v := false
 	d.armed[goalID] = &v
 	d.mu.Unlock()
+}
+
+// recordReserveFailure increments the consecutive transient reserve-failure
+// count for an employee and returns the new count (A6-5 backstop).
+func (d *GoalRoundDriver) recordReserveFailure(employeeID string) int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.reserveFails == nil {
+		d.reserveFails = make(map[string]int)
+	}
+	d.reserveFails[employeeID]++
+	return d.reserveFails[employeeID]
+}
+
+// clearReserveFailures resets an employee's transient reserve-failure streak
+// after a successful reservation (A6-5).
+func (d *GoalRoundDriver) clearReserveFailures(employeeID string) {
+	if d == nil || employeeID == "" {
+		return
+	}
+	d.mu.Lock()
+	delete(d.reserveFails, employeeID)
+	d.mu.Unlock()
+}
+
+// purgeGoalTracking removes the driver's per-goal tracking entries for a
+// goal that has SETTLED out of continuation (A6-13): the auto-block edge
+// calls it inline, and gcGoalTracking catches goals retired/paused/blocked
+// through other surfaces (goal_update tool, human RPC). An entry whose
+// override is armed=false on a STILL-ACTIVE goal is deliberately kept — it
+// is the C27 errored-round brake, and deleting it would re-arm the goal
+// from isArmed's "active default" on the next tick.
+func (d *GoalRoundDriver) purgeGoalTracking(goalID, employeeID string) {
+	if d == nil || goalID == "" {
+		return
+	}
+	d.mu.Lock()
+	delete(d.armed, goalID)
+	delete(d.goalOwner, goalID)
+	if d.deferredGoal[employeeID] == goalID {
+		delete(d.deferredGoal, employeeID)
+	}
+	d.mu.Unlock()
+}
+
+// gcGoalTracking sweeps the armed/goalOwner registries against the live
+// store and drops entries for goals that left controllable state (retired,
+// blocked, paused) or no longer exist (A6-13: the maps used to grow one
+// entry per goal ever driven by the process). Goals still GoalActive keep
+// their entry — armed=true is the continuation registration and armed=false
+// is the C27 brake. A store read that fails transiently skips the goal for
+// this pass; the next tick retries. Runs once per settle pass over the
+// roster, so its cost is one GetGoal per tracked goal per poll tick.
+func (d *GoalRoundDriver) gcGoalTracking(ctx context.Context) {
+	if d == nil || d.mgr == nil {
+		return
+	}
+	d.mu.Lock()
+	tracked := maps.Clone(d.goalOwner)
+	if tracked == nil {
+		tracked = make(map[string]string)
+	}
+	// Goal ids disarmed (brake entries) but never recorded in goalOwner
+	// (disarm without a prior Arm — defensive) also need sweeping.
+	for goalID := range d.armed {
+		if _, ok := tracked[goalID]; !ok {
+			tracked[goalID] = ""
+		}
+	}
+	d.mu.Unlock()
+
+	for goalID, empID := range tracked {
+		if ctx.Err() != nil {
+			return
+		}
+		g, err := d.mgr.GetGoal(ctx, goalID)
+		if err != nil {
+			if errors.Is(err, ErrGoalNotFound) {
+				d.purgeGoalTracking(goalID, empID)
+			}
+			continue
+		}
+		if g != nil && g.State != GoalActive {
+			d.purgeGoalTracking(goalID, empID)
+		}
+	}
 }
 
 // isArmed reports whether the driver considers the goal drivable for
@@ -550,6 +720,16 @@ func (d *GoalRoundDriver) OnRoundSettled(ctx context.Context, employeeID string)
 	if employeeID == "" {
 		return GoalRoundIdle, nil
 	}
+	// A6-4: round.advance phantom-reserve leg — the autonomous loop dedups
+	// through settleEmployeeIfQuiet, but the manual RPC/CLI calls
+	// OnRoundSettled directly. Without this gate, an advance landing while
+	// a deferred round is still in flight reserved a second round nobody
+	// runs yet (RoundsStarted inflated past the rounds actually executed).
+	if d.isInflight(employeeID) {
+		d.log.Debug("goal round: advance refused, employee round already in flight",
+			"employee_id", employeeID)
+		return GoalRoundIdle, nil
+	}
 	goal, err := d.drivableGoal(ctx, employeeID)
 	if err != nil {
 		return GoalRoundIdle, err
@@ -566,6 +746,12 @@ func (d *GoalRoundDriver) OnRoundSettled(ctx context.Context, employeeID string)
 			return GoalRoundIdle, err
 		}
 		d.disarm(goal.ID)
+		// A6-13: the blocked goal never becomes drivable again from the
+		// store's perspective (ListActive excludes nothing by state, but
+		// drivableGoal filters on GoalActive) — retire the driver's
+		// per-goal tracking entries with it so armed cannot grow one
+		// entry per goal forever.
+		d.purgeGoalTracking(goal.ID, employeeID)
 		d.log.Info("goal auto-blocked at round cap", "goal_id", goal.ID, "employee_id", employeeID, "rounds", goal.RoundsStarted, "max", cap)
 		return GoalRoundBlocked, nil
 	}
@@ -578,10 +764,43 @@ func (d *GoalRoundDriver) OnRoundSettled(ctx context.Context, employeeID string)
 	// (available API surface).
 	goal.StartRound()
 	d.Arm(goal)
-	if err := d.mgr.UpdateGoal(ctx, goal); err != nil {
-		d.disarm(goal.ID)
+	// Test-only fail-injection seam: a non-nil error from the hook replaces
+	// the store write (deterministic transient/terminal error pins); the
+	// production path never sets a failing hook, so the real UpdateGoal
+	// runs identically.
+	if hookErr := d.reserveWriteFailure(goal); hookErr != nil {
+		err = hookErr
+	} else {
+		err = d.mgr.UpdateGoal(ctx, goal)
+	}
+	if err != nil {
+		// A6-5: only a TERMINAL write failure (the goal row is gone or the
+		// transition fence refuses it permanently) disarms the goal. A
+		// transient failure (revision CAS conflict, SQLite BUSY/locked,
+		// I/O blip, ctx deadline) must NOT kill continuation — C29's CAS
+		// makes exactly the human-interleave case a routine conflict, and
+		// disarming on it silently strands live goals. Transient errors
+		// retry on the next poll tick; a persistent blip storm is bounded
+		// by driverReserveFailureCap so a broken store cannot hot-loop
+		// re-reservations forever (the C27 concern).
+		if goalReserveErrorTerminal(err) {
+			d.disarm(goal.ID)
+			d.log.Warn("goal round reserve failed terminally; goal disarmed",
+				"goal_id", goal.ID, "employee_id", employeeID, "error", err)
+			return GoalRoundIdle, fmt.Errorf("reserve goal round: %w", err)
+		}
+		strikes := d.recordReserveFailure(employeeID)
+		if strikes >= driverReserveFailureCap {
+			d.disarm(goal.ID)
+			d.log.Warn("goal round reserve kept failing; goal disarmed",
+				"goal_id", goal.ID, "employee_id", employeeID, "strikes", strikes, "error", err)
+		} else {
+			d.log.Debug("goal round reserve hit a transient error; retrying next tick",
+				"goal_id", goal.ID, "employee_id", employeeID, "strikes", strikes, "error", err)
+		}
 		return GoalRoundIdle, fmt.Errorf("reserve goal round: %w", err)
 	}
+	d.clearReserveFailures(employeeID)
 	d.log.Info("goal round reserved", "goal_id", goal.ID, "employee_id", employeeID, "rounds_started", goal.RoundsStarted, "max", cap)
 	// Deferred turn (leaf T2): schedule the one-shot re-entry into
 	// Manager.Trigger with the reserved round's identity so the round runs
@@ -594,10 +813,20 @@ func (d *GoalRoundDriver) OnRoundSettled(ctx context.Context, employeeID string)
 	// deferred turn's window, so the flag read false during the actual
 	// autonomous continuation (inverting the fail-safe contract:
 	// complete/blocked stayed refused on continuation turns). The flag is
-	// now raised by scheduleDeferredTurn at job execution and cleared when
-	// the turn settles (see the deferred closure and markInflight(false)).
+	// now carried by the deferred turn's CONTEXT (H8/A6-1) — stamped by
+	// scheduleDeferredTurn when the job runs.
+	//
+	// A6-4: markInflight(true) BEFORE scheduling only makes sense if the
+	// schedule can actually land. With no scheduler bound (reserve-only
+	// mode) the deferred turn never runs and the clear never fires — the
+	// employee would stay inflight forever, wedging both the poll loop and
+	// the round.advance dedup. Unmark immediately in that shape.
 	d.markInflight(employeeID, true)
-	d.scheduleDeferredTurn(employeeID)
+	if !d.scheduleDeferredTurn(employeeID) {
+		d.markInflight(employeeID, false)
+		d.log.Debug("goal round: no deferred scheduler bound; reservation left for the manual advance path",
+			"employee_id", employeeID, "goal_id", goal.ID)
+	}
 	return GoalRoundAdvanced, nil
 }
 

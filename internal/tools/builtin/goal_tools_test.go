@@ -90,11 +90,12 @@ func goalOwnerStatic(id string) goalOwner {
 	return func(context.Context) string { return id }
 }
 
-// setAutonomous restores the round knob after each mutation.
-func setAutonomous(t *testing.T, v bool) {
-	t.Helper()
-	SetGoalAutonomousRound(v)
-	t.Cleanup(func() { SetGoalAutonomousRound(false) })
+// setAutonomous returns a context whose round is marked autonomous
+// (H8/A6-1: the authority knob rides the CONTEXT, no longer a process-
+// global). Autonomous ctx = refused create/edit/pause/resume + blocked
+// threshold binding; a plain ctx = direct human (fail-safe default).
+func autonomousCtx() context.Context {
+	return WithGoalAutonomous(context.Background())
 }
 
 func TestGoalTools_RegisteredThroughProviderSeam(t *testing.T) {
@@ -176,8 +177,7 @@ func TestGoalCreate_RequiresDirectHuman(t *testing.T) {
 	tool := NewGoalCreateTool(newFakeGoalManager(), goalOwnerStatic("emp_1"))
 
 	// Autonomous round (no direct human): refused with an authority message.
-	setAutonomous(t, true)
-	res, err := tool.Execute(context.Background(), map[string]any{"objective": "probe objective"})
+	res, err := tool.Execute(autonomousCtx(), map[string]any{"objective": "probe objective"})
 	if err != nil {
 		t.Fatalf("goal_create errored: %v", err)
 	}
@@ -192,7 +192,6 @@ func TestGoalCreate_RequiresDirectHuman(t *testing.T) {
 }
 
 func TestGoalCreate_DirectHumanPersists(t *testing.T) {
-	setAutonomous(t, false)
 	m := newFakeGoalManager()
 	tool := NewGoalCreateTool(m, goalOwnerStatic("emp_1"))
 	res, err := tool.Execute(context.Background(), map[string]any{"objective": "ship the convergence", "max_rounds": float64(4)})
@@ -214,7 +213,6 @@ func TestGoalCreate_DirectHumanPersists(t *testing.T) {
 }
 
 func TestGoalUpdate_DirectHumanActionsAndCAS(t *testing.T) {
-	setAutonomous(t, false)
 	m := newFakeGoalManager()
 	g, _ := m.CreateGoal(context.Background(), GoalCreateSpec{Owner: "emp_1", Objective: "orig", MaxRounds: 3})
 	tool := NewGoalUpdateTool(m, goalOwnerStatic("emp_1"))
@@ -249,21 +247,23 @@ func TestGoalUpdate_DirectHumanActionsAndCAS(t *testing.T) {
 	}
 
 	// edit/pause/resume refused during an autonomous round.
-	setAutonomous(t, true)
-	res = ctxArgs(tool.Execute, context.Background(), map[string]any{
+	res = ctxArgs(tool.Execute, autonomousCtx(), map[string]any{
 		"goal_id": g.ID, "revision": float64(4), "action": "pause"})
 	if !errors.Is(toErr(res), ErrGoalToolDirectHumanRequired) {
 		t.Errorf("pause in autonomous round not gated: %T %s", toErr(res), resultText(res))
 	}
-	setAutonomous(t, false)
+	res = ctxArgs(tool.Execute, autonomousCtx(), map[string]any{
+		"goal_id": g.ID, "revision": float64(4), "action": "resume"})
+	if !errors.Is(toErr(res), ErrGoalToolDirectHumanRequired) {
+		t.Errorf("resume in autonomous round not gated: %T %s", toErr(res), resultText(res))
+	}
 }
 
 func TestGoalUpdate_CompleteAllowedInAutonomous(t *testing.T) {
-	setAutonomous(t, true)
 	m := newFakeGoalManager()
 	g, _ := m.CreateGoal(context.Background(), GoalCreateSpec{Owner: "emp_1", Objective: "done work", MaxRounds: 3})
 	tool := NewGoalUpdateTool(m, goalOwnerStatic("emp_1"))
-	res, err := tool.Execute(context.Background(), map[string]any{
+	res, err := tool.Execute(autonomousCtx(), map[string]any{
 		"goal_id": g.ID, "revision": float64(1), "action": "complete"})
 	if err != nil {
 		t.Fatalf("goal_update complete errored: %v", err)
@@ -293,8 +293,7 @@ func TestGoalUpdate_BlockedThreshold(t *testing.T) {
 	}
 
 	// Autonomous self-block before threshold: rejected.
-	setAutonomous(t, true)
-	res = ctxArgs(tool.Execute, context.Background(), map[string]any{
+	res = ctxArgs(tool.Execute, autonomousCtx(), map[string]any{
 		"goal_id": g.ID, "revision": float64(1), "action": "blocked", "blocked_reason": "early"})
 	if !errors.Is(toErr(res), ErrGoalToolBlockThreshold) {
 		t.Errorf("autonomous block before threshold not gated: %T %s", toErr(res), resultText(res))
@@ -303,13 +302,12 @@ func TestGoalUpdate_BlockedThreshold(t *testing.T) {
 	// At threshold (roundsStarted=3): autonomous block succeeds.
 	g = &GoalRecord{ID: "goal_b", Objective: "at cap", Phase: string(goalPhaseActive), RoundsStarted: 3, Revision: 1, Armed: true}
 	m.goals[g.ID] = cloneGoal(g)
-	res, _ = tool.Execute(context.Background(), map[string]any{
+	res, _ = tool.Execute(autonomousCtx(), map[string]any{
 		"goal_id": g.ID, "revision": float64(1), "action": "blocked", "blocked_reason": "reached cap"})
 	vv, ok := res.(map[string]any)["goal"].(goalValue)
 	if !ok || vv.Phase != "blocked" || vv.BlockedReason == nil || *vv.BlockedReason != "reached cap" {
 		t.Errorf("blocked at threshold result mismatch: %+v", res)
 	}
-	setAutonomous(t, false)
 
 	// Direct human may block at any round (operator authority).
 	g = &GoalRecord{ID: "goal_c", Objective: "operator", Phase: string(goalPhaseActive), RoundsStarted: 0, Revision: 1, Armed: true}

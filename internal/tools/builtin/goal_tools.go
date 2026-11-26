@@ -23,7 +23,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync/atomic"
 
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tools"
@@ -161,28 +160,54 @@ var (
 	ErrGoalToolOwnerUnresolved = errors.New("goal owner not resolved for this turn")
 )
 
-// goalAutonomousRound is the process-local authority knob leaf 03 (the round
-// driver) sets on a continuation turn so complete/blocked are permitted.
-// Default false = fail-safe: an unknown/absent flag requires a direct human
-// turn. It is the exported seam this leaf and the driver meet on without
-// coordination (process-global; the drive runs one continuation at a time).
-var goalAutonomousRound atomic.Bool
+// goalAutonomousRoundCtxKey is the context key marking an autonomous
+// continuation round (H8/A6-1). The round driver stamps the ROUND's context
+// and the stamp rides Trigger → Decide → Execute → the agent loop down to
+// tool Execute, so the authority verdict is per-turn instead of per-process.
+//
+// This replaced a process-global atomic.Bool that leaked human-only
+// authority to every concurrently running turn (cron / webhook / another
+// employee's driver round all read the same flag) and let the first round
+// to finish clear the flag mid-flight for the others.
+type goalAutonomousRoundCtxKey struct{}
 
-// SetGoalAutonomousRound records whether the current round is an autonomous
-// continuation round (no human in the loop). The round driver calls this at
-// the top/bottom of each continuation turn. When false or never set, the
-// goal tools treat the turn as requiring direct human authority (fail-safe).
-func SetGoalAutonomousRound(v bool) { goalAutonomousRound.Store(v) }
+// WithGoalAutonomous returns a context marking the round as an autonomous
+// continuation round (no human in the loop): create/edit/pause/resume are
+// refused and the self-block threshold binds. The round driver stamps the
+// trigger ctx with this. A false value stamps nothing (fail-safe: absent =
+// direct human).
+func WithGoalAutonomous(ctx context.Context) context.Context {
+	return context.WithValue(ctx, goalAutonomousRoundCtxKey{}, true)
+}
 
-// goalAutonomousRoundActive reports whether the current round is autonomous.
-func goalAutonomousRoundActive() bool { return goalAutonomousRound.Load() }
+// GoalAutonomousFromContext reports whether ctx was stamped as an autonomous
+// continuation round via WithGoalAutonomous. Absent marker = direct human
+// (fail-safe default). Exported so the daemon wiring and the employee-side
+// round driver's pins can observe the stamp without duplicating the key.
+func GoalAutonomousFromContext(ctx context.Context) bool {
+	v, ok := ctx.Value(goalAutonomousRoundCtxKey{}).(bool)
+	return ok && v
+}
+
+// SetGoalAutonomousRound is the retired process-global seam (H8/A6-1). It
+// is now an intentional NO-OP kept so the daemon wiring (dsh_wiring.go) and
+// existing caller pins compile unchanged: authority no longer lives in a
+// process-wide knob — it rides the round context via WithGoalAutonomous.
+// Do not restore global semantics here; the per-ctx gate is the mechanism.
+func SetGoalAutonomousRound(bool) {}
+
+// goalAutonomousRoundActive reports whether the current round is autonomous
+// for the given tool-call context (H8/A6-1: per-round ctx, never global).
+func goalAutonomousRoundActive(ctx context.Context) bool {
+	return GoalAutonomousFromContext(ctx)
+}
 
 // requireDirectHuman enforces the create/edit/pause/resume gate: those
 // actions need a direct human turn, so they are refused during an autonomous
-// continuation round. This is deliberately NOT a no-op default — an unset
-// flag (false) means direct human, which is the safe default.
-func requireDirectHuman() error {
-	if goalAutonomousRoundActive() {
+// continuation round. This is deliberately NOT a no-op default — an absent
+// ctx flag means direct human, which is the safe default.
+func requireDirectHuman(ctx context.Context) error {
+	if goalAutonomousRoundActive(ctx) {
 		return ErrGoalToolDirectHumanRequired
 	}
 	return nil
@@ -307,7 +332,7 @@ func (t *GoalCreateTool) Execute(ctx context.Context, args map[string]any) (any,
 	if t.mgr == nil {
 		return tools.NewErrorResult("goal store not available"), nil
 	}
-	if err := requireDirectHuman(); err != nil {
+	if err := requireDirectHuman(ctx); err != nil {
 		return tools.NewErrorResultErr(fmt.Errorf(
 			"goal_create denied: %w (creating a goal outside a direct human request requires permission)", err)), nil
 	}
@@ -435,7 +460,7 @@ func (t *GoalUpdateTool) Execute(ctx context.Context, args map[string]any) (any,
 	next := *cur // copy — no shared mutation with the store's copy
 	switch action {
 	case "edit":
-		if err := requireDirectHuman(); err != nil {
+		if err := requireDirectHuman(ctx); err != nil {
 			return tools.NewErrorResultErr(fmt.Errorf("goal_update edit denied: %w", err)), nil
 		}
 		changed := false
@@ -458,14 +483,14 @@ func (t *GoalUpdateTool) Execute(ctx context.Context, args map[string]any) (any,
 		}
 
 	case "pause":
-		if err := requireDirectHuman(); err != nil {
+		if err := requireDirectHuman(ctx); err != nil {
 			return tools.NewErrorResultErr(fmt.Errorf("goal_update pause denied: %w", err)), nil
 		}
 		next.Phase = string(goalPhasePaused)
 		next.Armed = false
 
 	case "resume":
-		if err := requireDirectHuman(); err != nil {
+		if err := requireDirectHuman(ctx); err != nil {
 			return tools.NewErrorResultErr(fmt.Errorf("goal_update resume denied: %w", err)), nil
 		}
 		next.Phase = string(goalPhaseActive)
@@ -483,7 +508,7 @@ func (t *GoalUpdateTool) Execute(ctx context.Context, args map[string]any) (any,
 		}
 		// A self-report during an autonomous round must reach the
 		// consecutive-round threshold; a direct human may block at any round.
-		if goalAutonomousRoundActive() && next.RoundsStarted < defaultBlockedAfterConsecutiveRounds {
+		if goalAutonomousRoundActive(ctx) && next.RoundsStarted < defaultBlockedAfterConsecutiveRounds {
 			return tools.NewErrorResultErr(fmt.Errorf("%w: roundsStarted %d < %d",
 				ErrGoalToolBlockThreshold, next.RoundsStarted, defaultBlockedAfterConsecutiveRounds)), nil
 		}
