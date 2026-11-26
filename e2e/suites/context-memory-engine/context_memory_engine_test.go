@@ -667,7 +667,21 @@ func TestPolicyActions(t *testing.T) {
 	}
 
 	// --- Pass 2: hard band (over ceiling) => compress + evict on the
-	// REAL stores. Ceiling 1 forces both bands with 8 episodic rows. ---
+	// REAL stores. Ceiling 1 forces both bands with 8 episodic rows.
+	//
+	// H7/A3-1 contract change: same-pass evict now EXCLUDES the rows
+	// this pass queued for compression (evicting content the async
+	// distill job has not read yet is the exact data-loss class the
+	// fix closes); only HARMFUL rows (net votes <= HarmfulVoteThreshold
+	// = -2, R-B2) survive the exclusion. The fixture therefore casts -3
+	// net votes on two filler rows so the hard band has an evict
+	// target under the new contract — the OLD shape (all-zero votes,
+	// evict still selecting compress rows) was the defect. ---
+	for i := 0; i < 4; i++ {
+		if err := mgr.RecordVote(episodicIDs[i%2], -1, "cme-policy-01 harmful drill vote"); err != nil {
+			t.Fatalf("record harmful vote: %v", err)
+		}
+	}
 	bandActs, err := eng.Evaluate(ctx, []tierpolicy.TierState{
 		{Tier: "episodic", Tokens: 1000, Items: 9, Ceiling: 1},
 	})
@@ -685,6 +699,28 @@ func TestPolicyActions(t *testing.T) {
 	}
 	if !compressSeen || !evictSeen {
 		t.Fatalf("cme-policy-01: hard-band plan missing actions (compress=%v evict=%v): %+v", compressSeen, evictSeen, bandActs)
+	}
+	// H7/A3-1 exclusion pin: every evict target must be one of the two
+	// harmfully-voted rows (never a row this pass queued for compress).
+	{
+		var compressIDs, evictIDs []string
+		for _, act := range bandActs {
+			if act.Kind == tierpolicy.KindCompress {
+				compressIDs = act.TargetIDs
+			}
+			if act.Kind == tierpolicy.KindEvict {
+				evictIDs = act.TargetIDs
+			}
+		}
+		cset := map[string]bool{}
+		for _, id := range compressIDs {
+			cset[id] = true
+		}
+		for _, id := range evictIDs {
+			if cset[id] && id != episodicIDs[0] && id != episodicIDs[1] {
+				t.Fatalf("cme-policy-01: evict re-selected a compress-queued non-harmful row %s (H7 exclusion regression)", id)
+			}
+		}
 	}
 	repBand, err := eng.Execute(ctx, bandActs)
 	if err != nil {
