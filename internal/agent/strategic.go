@@ -144,15 +144,12 @@ type PlanRequest struct {
 	// signals; 0 here means unclassified) = R7 inert on the async lane.
 	Difficulty int `json:"difficulty,omitempty"`
 
-	// AutoSeal marks a compound plan+implement request (the user asked
-	// for the plan AND its execution in one prompt, detected by
-	// PlanAutoSealFromIntent over the full user input). When set, the
-	// approval gate in requiresApproval is bypassed: the plan is
-	// AUTO-SEALED after compilation and flows straight to scheduling
-	// (StateExecuting + orchestrator.schedule) with an audit trail
-	// (auto_sealed task metadata + the flag on the task.planned event).
-	// Intent-driven ONLY -- no config knob. Plain plan requests never
-	// carry the flag and keep parking at the approval gate.
+	// AutoSeal marks a compound plan+implement request. Historical
+	// detection was PlanAutoSealFromIntent (lexical); that regex verdict is
+	// DEAD (M6/D3) and the handler.go producer now always sets false until
+	// its deletion follow-up lands. The flag + the requiresApproval bypass
+	// stay plumbed (tree ruling: req.AutoSeal plumbing remains for now);
+	// intent-driven approval (Intent.ApprovalRequested) is the live gate.
 	AutoSeal bool `json:"auto_seal,omitempty"`
 }
 
@@ -2359,151 +2356,24 @@ func (sp *StrategicPlanner) autoSealPlanAudit(t *task.Task, req PlanRequest, ste
 	})
 }
 
-// PlanAutoSealFromIntent reports whether a user prompt carries the compound
-// plan-then-implement intent: the user asked for a plan AND its execution in
-// one breath ("create the plan and then implement it"), which is explicit
-// authorization to seal the plan after compilation instead of parking it at
-// the approval gate.
+// PlanAutoSealFromIntent is the DEAD regex verdict (bughunt 2026-11-24 M6,
+// owner decision D3: "the regex dies"). The lexical plan-verb / execute-verb
+// / connector machinery that decided seal-vs-park from phrasing — with the
+// M6 polarity escapes (doc-only requests sealed; the approval-request
+// question never answered honestly) — is DELETED. The verdict now comes from
+// model adjudication: TrueIntentAnalysis.ApprovalRequested plus the bounded
+// veto-suspect fallback (intent_analyzer.go, plan-contract tree
+// 20261125-plan-contract-quickplan leaf 03).
 //
-// Detection is deliberately conservative and ASCII-lowercase lexical:
+// This stub returns false so the still-standing handler.go AutoSeal plumbing
+// (sibling-owned at plan time; its deletion is listed as a follow-up)
+// compiles while the req.AutoSeal flag itself stays plumbed per the tree:
+// the compound lane's seal bypass is INERT, so compound plans park at the
+// approval gate until leaf 02 routes them onto the quickplan lane (D4).
+// Do NOT reimplement lexical detection here — intent drives approval.
 //
-//  1. a negated execute verb ("don't implement", "do not execute the
-//     plan", "never implement the plan") vetoes FIRST -- it must run before
-//     the explicit marker, or a negated "implement the plan" object would
-//     short-circuit to true and bypass the approval gate (bughunt H2);
-//  2. optional explicit seal markers ("implement the plan", "execute the
-//     plan", "and implement it", "then implement it", "implement it
-//     immediately") short-circuit to true;
-//  3. otherwise a plan verb (plan/design/outline/map out/break down/draft)
-//     must co-occur with an execute verb (implement/execute/build/create/
-//     code/write/make/apply) joined by an "and"/"then"/comma connector,
-//     plus a plan noun (plan/approach/design/blueprint/roadmap).
-//
-// The function answers the LANGUAGE question only; callers gate it behind
-// the compound dispatch lane (Intent==compound), so a plain plan prompt can
-// never auto-seal even if it trips the lexical shape. No config knob: the
-// intent IS the knob.
-func PlanAutoSealFromIntent(input string) bool {
-	if input == "" {
-		return false
-	}
-	lower := strings.ToLower(input)
-	// VETO FIRST (bughunt H2): the negated-execute check must precede the
-	// explicit marker, or "don't implement the plan" / "do not execute the
-	// plan" would trip autoSealExplicitMarker's "implement|execute the plan"
-	// branch and seal a plan whose execution the user explicitly withheld.
-	if autoSealNegatedExecute.MatchString(lower) {
-		return false
-	}
-	if autoSealExplicitMarker.MatchString(lower) {
-		return true
-	}
-	if !autoSealPlanVerb(lower) || !autoSealExecuteVerb(lower) {
-		return false
-	}
-	if !autoSealCompoundConnector.MatchString(lower) {
-		return false
-	}
-	return autoSealPlanNoun(lower)
-}
-
-// autoSealPlanVerb reports whether lower carries a whole-word plan verb
-// (plan/design/outline/draft) or the multi-word phrases (map out /
-// break down). Extend the sets here, never at call sites.
-func autoSealPlanVerb(lower string) bool {
-	return autoSealWord(lower, "plan") ||
-		autoSealWord(lower, "design") ||
-		autoSealWord(lower, "outline") ||
-		autoSealWord(lower, "draft") ||
-		strings.Contains(lower, "map out") ||
-		strings.Contains(lower, "break down")
-}
-
-// autoSealExecuteVerb reports whether lower carries a whole-word execute
-// verb (implement/execute/build/create/code/write/apply).
-func autoSealExecuteVerb(lower string) bool {
-	return autoSealWord(lower, "implement") ||
-		autoSealWord(lower, "execute") ||
-		autoSealWord(lower, "build") ||
-		autoSealWord(lower, "create") ||
-		autoSealWord(lower, "code") ||
-		autoSealWord(lower, "write") ||
-		autoSealWord(lower, "apply")
-}
-
-// autoSealPlanNoun reports whether lower carries a whole-word plan noun
-// (plan/approach/design/blueprint/roadmap) -- the thing being sealed.
-func autoSealPlanNoun(lower string) bool {
-	return autoSealWord(lower, "plan") ||
-		autoSealWord(lower, "approach") ||
-		autoSealWord(lower, "design") ||
-		autoSealWord(lower, "blueprint") ||
-		autoSealWord(lower, "roadmap")
-}
-
-// autoSealWord reports whether word appears in lower as a whole word
-// (ASCII word-boundary match). lower MUST already be strings.ToLower'd.
-func autoSealWord(lower, word string) bool {
-	searchFrom := 0
-	for {
-		idx := strings.Index(lower[searchFrom:], word)
-		if idx < 0 {
-			return false
-		}
-		start := searchFrom + idx
-		end := start + len(word)
-		if autoSealWordBoundary(lower, start, end) {
-			return true
-		}
-		searchFrom = start + 1
-	}
-}
-
-// autoSealWordBoundary reports whether lower[start:end] sits on ASCII word
-// boundaries (start at 0 or after a non-letter/digit; end at len or before
-// a non-letter/digit).
-func autoSealWordBoundary(lower string, start, end int) bool {
-	if start > 0 {
-		if c := lower[start-1]; autoSealIsWordChar(c) {
-			return false
-		}
-	}
-	if end < len(lower) {
-		if c := lower[end]; autoSealIsWordChar(c) {
-			return false
-		}
-	}
-	return true
-}
-
-// autoSealIsWordChar is true for [a-z0-9'] -- the apostrophe counts as a
-// word char so the negation scan ("don't") stays one token.
-func autoSealIsWordChar(c byte) bool {
-	return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '\''
-}
-
-// autoSealExplicitMarker matches prompts that name the plan itself as the
-// execution target ("implement the plan", "execute the plan", "and
-// implement it", "then implement it", "implement it immediately"). These
-// are unambiguous seal commands.
-var autoSealExplicitMarker = regexp.MustCompile(
-	`(?:implement|execute|carry out|build) the (?:plan|roadmap|blueprint)|` +
-		`(?:and|then|,) (?:immediately )?implement it|` +
-		`implement it (?:immediately|right away|without waiting)`,
-)
-
-// autoSealNegatedExecute matches a negated execute verb ("don't implement",
-// "do not execute", "no need to build") -- the user explicitly WITHHELD the
-// execution half, so the plan must still park.
-var autoSealNegatedExecute = regexp.MustCompile(
-	`(don't|do not|not to|no need to|never) (?:implement|execute|build|create|code|write|make|apply)`,
-)
-
-// autoSealCompoundConnector matches the conjunction that joins the plan half
-// to the execute half (" and ", " then ", a comma, " plus ", "after that").
-var autoSealCompoundConnector = regexp.MustCompile(
-	` (?:and|then|plus|after that) |,\s|,\s*$|\bplus\b`,
-)
+// Deprecated: remove together with the handler.go caller.
+func PlanAutoSealFromIntent(input string) bool { return false }
 
 // requiresApproval returns true when the plan must be paused for user sign-off
 // before execution. Triggers on either an un-approved completed interview OR a

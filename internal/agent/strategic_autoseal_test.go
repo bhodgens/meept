@@ -17,48 +17,34 @@ import (
 	"github.com/caimlas/meept/internal/task"
 )
 
-func TestPlanAutoSealFromIntent(t *testing.T) {
-	cases := []struct {
-		name  string
-		input string
-		want  bool
-	}{
-		// Compound plan+implement: auto-seal.
-		{"explicit command", "create the plan and then implement it", true},
-		{"plan and implement it", "plan the migration and implement it", true},
-		{"comma connector", "design the auth flow, then implement it", true},
-		{"implement the plan", "write up a plan and implement the plan right away", true},
-		{"map out and execute", "map out the approach and execute it", true},
-		{"break down and build", "break down the work into a plan and build it", true},
-		{"outline plus code", "outline the refactor plan plus code it", true},
-		{"plan then execute", "plan the rollout and then execute the plan", true},
-
-		// Plain plans: still park.
-		{"plain plan", "create a plan for the migration", false},
-		{"design only", "design the auth flow", false},
-		{"break down only", "break down the work into steps", false},
-		{"plan and design", "plan and design the approach", false},
-		{"draft roadmap", "draft the roadmap for the refactor", false},
-		{"how should i", "how should I structure the plan for this", false},
-		{"negated execute", "plan the migration but don't implement it yet", false},
-		{"do not execute", "design a plan, do not execute anything", false},
-		// Bughunt H2: negated + explicit "the plan" object. These all
-		// trip autoSealExplicitMarker ("implement|execute|build the plan")
-		// AND autoSealNegatedExecute, so the veto must run FIRST or the
-		// plan gets sealed despite the user withholding execution.
-		{"negated implement the plan", "write a plan but don't implement the plan", false},
-		{"negated execute the plan", "create a plan, do not execute the plan", false},
-		{"never implement the plan", "draft the plan and never implement the plan", false},
-		{"negated build the plan", "make a plan and do not build the plan", false},
-		{"empty", "", false},
-		{"plan verb inside word", "planned communities and citywide codes", false},
+// TestPlanAutoSealFromIntent_IsDeadStub pins the M6/D3 ruling: the lexical
+// seal verdict is DELETED. The stub answers false for every phrasing —
+// including the former compound hits — so the compound lane's AutoSeal
+// bypass is inert and approval gating is driven ONLY by model
+// adjudication (Intent.ApprovalRequested; probe-sentence behavior table:
+// approval_adjudication_test.go). When the handler.go caller lands its
+// deletion follow-up this function goes with it.
+func TestPlanAutoSealFromIntent_IsDeadStub(t *testing.T) {
+	cases := []string{
+		// Former true hits: dead.
+		"create the plan and then implement it",
+		"plan the migration and implement it",
+		"design the auth flow, then implement it",
+		"write up a plan and implement the plan right away",
+		"map out the approach and execute it",
+		// M6 escapes (wrongly true before): also false now.
+		"Plan X and implement it only after I approve",
+		"Write a plan for X and create a markdown file",
+		"dont implement it",
+		// Former park cases: unchanged false.
+		"create a plan for the migration",
+		"plan the migration but don't implement it yet",
+		"",
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := PlanAutoSealFromIntent(tc.input); got != tc.want {
-				t.Errorf("PlanAutoSealFromIntent(%q) = %v, want %v", tc.input, got, tc.want)
-			}
-		})
+	for _, input := range cases {
+		if got := PlanAutoSealFromIntent(input); got != false {
+			t.Errorf("PlanAutoSealFromIntent(%q) = %v, want false (regex verdict is dead, D3)", input, got)
+		}
 	}
 }
 
