@@ -286,10 +286,15 @@ func (cd *cycleDetector) Reset() {
 // "count=3" at iteration 1 and failed the whole approved task
 // (approval-wait e2e). Convergence is a within-conversation no-progress
 // semantic; a signature recorded under conversation A must never feed
-// conversation B's window. Reset() still clears everything: turn-start
-// hygiene across conversations is conservative (same posture as the
-// pre-keying behavior) and the cross-turn carry-over bug that motivated
-// Reset stays fixed.
+// conversation B's window.
+//
+// L2 (bughunt 2026-11-24): turn-start hygiene is scoped to the starting
+// turn's conversation via ResetConversation — the old whole-map Reset ran
+// at every turn start and silently wiped SIBLING conversations' live
+// windows on shared loops, undoing the keying above. Stale windows are
+// bounded by per-key overwrite, window length (HistorySize), expiry, and
+// a map-size cap (pruneStaleWindowsLocked); Reset() remains for the
+// conversation-agnostic posture.
 type convergenceDetector struct {
 	mu        sync.Mutex
 	histories map[string][]responseSignature // conversationID -> window
@@ -345,6 +350,10 @@ func (cd *convergenceDetector) recordResponseFor(conversationID, content string,
 		timestamp:   time.Now(),
 	}
 
+	// L2: bound storage now that turn-start resets are per-key (the
+	// whole-map Reset used to implicitly recycle keys every turn).
+	cd.pruneStaleWindowsLocked()
+
 	// Add to THIS conversation's history window.
 	history := append(cd.histories[conversationID], sig)
 	if window := cd.config.HistorySize; window > 0 && len(history) > window {
@@ -393,16 +402,100 @@ func (cd *convergenceDetector) detectConvergence(conversationID string) bool {
 	return true
 }
 
-// Reset clears recorded response history. E2E run 3 (2026-09-10): the
-// detector lived on the session-persistent chat loop, so entries from
-// previous turns/tasks carried into the next turn and an unrelated fresh
-// response tripped "count=3" convergence at iteration=1 — aborting T2's
-// quickplan handoff and cascading into the replan storm. Convergence is a
-// within-turn semantic; resetTurnGuards now clears it per turn.
+// Reset clears recorded response history for EVERY conversation. E2E run 3
+// (2026-09-10): the detector lived on the session-persistent chat loop, so
+// entries from previous turns/tasks carried into the next turn and an
+// unrelated fresh response tripped "count=3" convergence at iteration=1 —
+// aborting T2's quickplan handoff and cascading into the replan storm.
+// Convergence is a within-turn semantic.
+//
+// L2 (bughunt 2026-11-24): the turn-start hygiene now goes through
+// ResetConversation for the current turn's conversation instead of this
+// whole-map clear. One loop serves a task's step jobs CONCURRENTLY, each
+// under its own step-<task>-<step> key (registry.GetForTask loop + the
+// daemon step-job conversation id), and a sibling step starting while
+// another step's window was live wiped that window under the whole-map
+// reset — the per-conversation keying added by 47977f93 was silently
+// undone at every turn boundary. ResetConversation clears only the
+// starting turn's own key, which is exactly the within-turn semantic the
+// original fix wanted: a fresh turn on conversation X must never inherit
+// X's stale window, and it must not touch conversation Y's live window.
+// This Reset (whole-map) is kept for the conservative no-conversation
+// posture (resetTurnGuards called without a turn id) and for tests.
 func (cd *convergenceDetector) Reset() {
 	cd.mu.Lock()
 	cd.histories = make(map[string][]responseSignature)
 	cd.mu.Unlock()
+}
+
+// ResetConversation clears ONLY conversationID's recorded window (L2).
+// A turn starting on a conversation must not inherit that conversation's
+// stale window from a previous turn on the same loop, but it must also
+// not wipe the live windows of sibling conversations running concurrently
+// on that loop (task step jobs share one loop, each keyed by its own
+// step conversation id). Empty conversationID clears everything, same
+// posture as Reset.
+func (cd *convergenceDetector) ResetConversation(conversationID string) {
+	if conversationID == "" {
+		cd.Reset()
+		return
+	}
+	cd.mu.Lock()
+	delete(cd.histories, conversationID)
+	cd.mu.Unlock()
+}
+
+// Convergence-window storage bounds (L2): the whole-map Reset used to
+// bound the map's lifetime; per-key resets leave keys in place, so the
+// map self-bounds instead — stale windows (no reply recorded within the
+// TTL) are pruned on write, with a hard count cap as the backstop.
+// Windows are already length-bounded per key by HistorySize.
+const (
+	maxConvergenceWindows   = 256
+	convergenceWindowExpiry = time.Hour
+)
+
+// pruneStaleWindowsLocked drops windows whose newest entry is older than
+// convergenceWindowExpiry; if the map is still over the cap it drops the
+// oldest-touch keys down to it. Callers hold cd.mu.
+func (cd *convergenceDetector) pruneStaleWindowsLocked() {
+	now := time.Now()
+	type touch struct {
+		key  string
+		seen time.Time
+	}
+	var touches []touch
+	for key, window := range cd.histories {
+		if len(window) == 0 {
+			delete(cd.histories, key)
+			continue
+		}
+		last := window[len(window)-1].timestamp
+		if now.Sub(last) > convergenceWindowExpiry {
+			delete(cd.histories, key)
+			continue
+		}
+		touches = append(touches, touch{key: key, seen: last})
+	}
+	if len(cd.histories) <= maxConvergenceWindows {
+		return
+	}
+	// Over the cap even after expiry: evict oldest-touched keys.
+	slices.SortFunc(touches, func(a, b touch) int {
+		if a.seen.Before(b.seen) {
+			return -1
+		}
+		if b.seen.Before(a.seen) {
+			return 1
+		}
+		return 0
+	})
+	for _, t := range touches {
+		if len(cd.histories) <= maxConvergenceWindows {
+			break
+		}
+		delete(cd.histories, t.key)
+	}
 }
 
 // hashArgs creates a hash of tool arguments for cycle comparison.
@@ -3690,7 +3783,9 @@ func (l *AgentLoop) RunOnceWithParts(ctx context.Context, userMessage string, pa
 	// ladder, rollback ring, reasoning watchdog, and streak-breach flag are
 	// per-turn semantics — a veto-warm ladder or a mid-streak watchdog from
 	// the previous turn would nudge/veto this turn's first tool calls.
-	l.resetTurnGuards()
+	// L2: convergence hygiene is scoped to this turn's conversation so a
+	// sibling step job on this loop keeps its live window.
+	l.resetTurnGuards(conversationID)
 
 	// Chain-stability phase-2 (replay-01/47): the final-text guards need
 	// the turn's prompt to distinguish a file-DELIVERABLE turn (unbacked
@@ -4631,9 +4726,10 @@ func (l *AgentLoop) RunWithSkill(ctx context.Context, skill *skills.Skill, input
 	// Truncate if needed
 	conv.Truncate()
 
-	// D-H3 (latent hardening, bughunt 2026-09-08): skill runs must not
-	// inherit guard state from the preceding interactive/task turn.
-	l.resetTurnGuards()
+	// SKILL.state: skill runs must not inherit guard state from the
+	// preceding interactive/task turn. L2: scoped to this skill run's
+	// conversation so sibling step windows on this loop survive.
+	l.resetTurnGuards(conversationID)
 
 	// Run reasoning cycle with skill constraints
 	response, err := l.reasoningCycle(ctx, conv, conversationID)
@@ -5374,6 +5470,20 @@ func (l *AgentLoop) nudgeBudgetExhausted(class string) bool {
 // ... count=3" at iteration=1 because two stale entries from earlier turns
 // pre-filled the window. Detection is a within-turn semantic; both reset.
 //
+// L2 (bughunt 2026-11-24): the optional conversationID scopes the
+// convergence hygiene. The detector's window is keyed per conversation
+// because one task-scoped loop serves its step jobs CONCURRENTLY, each
+// under its own step-<task>-<step> key (usability pin, 2026-11-24). The
+// whole-map Reset ran at every turn start and silently wiped SIBLING
+// conversations' live windows — a step starting while another step's
+// window was live killed that step's no-progress detection, undoing the
+// keying. Turn entries now pass their conversation id, so a turn clears
+// ONLY its own key's stale window; sibling windows stay live. Called with
+// no conversation (tests, or any entry that genuinely has no turn id), the
+// conservative whole-map posture — the original e2e-run-3 behavior —
+// applies. All other guard state is conversation-agnostic and resets
+// exactly as before.
+//
 // repeatErr (repeat_error_breaker.go) is DELIBERATELY NOT reset here: its
 // memory is per logical WORK SCOPE, not per turn. The abort→escalation→
 // replan cycle (orchestrator.handlePlanRequest → strategic.ReplanFailedTask
@@ -5383,7 +5493,11 @@ func (l *AgentLoop) nudgeBudgetExhausted(class string) bool {
 // were cleared here, each fresh replan generation would repeat the doomed
 // identical call forever (the 2026-09-18 e2e's 45-call failure mode). Only a
 // NEW loop instance (new session/task scope) starts with a clean breaker.
-func (l *AgentLoop) resetTurnGuards() {
+func (l *AgentLoop) resetTurnGuards(conversationID ...string) {
+	turnConversationID := ""
+	if len(conversationID) > 0 {
+		turnConversationID = conversationID[0]
+	}
 	if l.noProgress != nil {
 		l.noProgress.Reset()
 	}
@@ -5397,7 +5511,7 @@ func (l *AgentLoop) resetTurnGuards() {
 		l.cycleDetector.Reset()
 	}
 	if l.convergenceDetector != nil {
-		l.convergenceDetector.Reset()
+		l.convergenceDetector.ResetConversation(turnConversationID)
 	}
 	// Refusal lifecycle (scopes-3 finding B): resetTurnGuards runs at the
 	// TOP of every turn generation — fresh or resumed — while
@@ -8427,7 +8541,10 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 
 	// D-H3 (latent hardening, bughunt 2026-09-08): task runs must not
 	// inherit guard state from the preceding interactive/skill turn.
-	l.resetTurnGuards()
+	// L2: scoped to this task run's conversation — the step-job lane runs
+	// concurrent steps under distinct step-<task>-<step> keys on this same
+	// loop, and the whole-map reset used to wipe a sibling's live window.
+	l.resetTurnGuards(conversationID)
 	defer func() {
 		// Cleanup budget tracking entries for completed task
 		l.mu.Lock()
