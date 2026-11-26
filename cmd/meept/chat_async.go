@@ -28,7 +28,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -298,9 +297,14 @@ func subscribeTurnTopics(client transport.Client) (string, error) {
 // received can never be re-counted as drops, and buffered events are never
 // skipped the way a wall-clock cursor can skip them under load.
 func pollTurnEvents(client transport.Client, subID string, sinceSeq int64) ([]busEvent, int64, error) {
-	raw, err := client.Call("bus.poll", map[string]string{
+	// since_seq is a JSON NUMBER: the server decodes SinceSeq int64
+	// strictly (internal/rpc/proxy.go). A string-encoded cursor ("0")
+	// fails the whole poll — the exact regression leaf-04 caught in
+	// c5d54c9e, where the legacy map[string]string shape was kept when
+	// the cursor switched from the wall-clock string to the seq number.
+	raw, err := client.Call("bus.poll", map[string]any{
 		"subscription_id": subID,
-		"since_seq":       strconv.FormatInt(sinceSeq, 10),
+		"since_seq":       sinceSeq,
 	})
 	if err != nil {
 		return nil, 0, err

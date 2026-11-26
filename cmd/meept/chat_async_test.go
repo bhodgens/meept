@@ -23,11 +23,17 @@ type fakeAsyncClient struct {
 	mu        sync.Mutex
 	responses map[string]func(params any) (any, error)
 	order     []string
+	// pollParams records the params of every bus.poll call (for
+	// cursor-contract assertions).
+	pollParams []any
 }
 
 func (f *fakeAsyncClient) Call(method string, params any) (json.RawMessage, error) {
 	f.mu.Lock()
 	f.order = append(f.order, method)
+	if method == "bus.poll" {
+		f.pollParams = append(f.pollParams, params)
+	}
 	fn, ok := f.responses[method]
 	f.mu.Unlock()
 	if !ok {
@@ -487,5 +493,49 @@ func TestSubmitAndAwait_UnsubscribeAfterTerminal(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected bus.unsubscribe after the turn; order=%v", f.order)
+	}
+}
+
+// TestSubmitAndAwait_PollsUseSeqCursor pins the M13 leg-(c) contract: the
+// CLI await loop must drive bus.poll with the monotonic since_seq cursor
+// (echoing next_seq from the previous response), never only the lossy
+// legacy wall-clock `since` cursor. The seq cursor is what gives the
+// daemon's drop accounting its delivered-once semantics; a legacy-only
+// poller re-downloads the whole buffer every poll and its already-
+// delivered records can be miscounted as drops by older daemons.
+func TestSubmitAndAwait_PollsUseSeqCursor(t *testing.T) {
+	var out bytes.Buffer
+	f := newFakeAsyncClient(terminalEvent("turn-123", "completed", "done", "", 10), nil)
+
+	if _, err := submitAndAwait(context.Background(), f, "msg", "sess-1", testChatOpts(&out)); err != nil {
+		t.Fatalf("submitAndAwait: %v", err)
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.pollParams) == 0 {
+		t.Fatal("await loop never polled")
+	}
+	seenSeq := int64(-1)
+	for i, raw := range f.pollParams {
+		// Wire contract (chat_async_cursor_pin_test.go): params ride as
+		// map[string]any with since_seq a JSON NUMBER. The server decodes
+		// SinceSeq int64 strictly; the pre-fix map[string]string shape
+		// failed every poll ("cannot unmarshal string into ... int64").
+		p, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("poll %d: params type %T, want map[string]any", i, raw)
+		}
+		if _, hasSince := p["since"]; hasSince {
+			t.Errorf("poll %d sends legacy `since` cursor (%v); await loop must use since_seq only", i, p["since"])
+		}
+		seq, ok := p["since_seq"].(int64)
+		if !ok {
+			t.Fatalf("poll %d: since_seq type %T (%v), want int64 (JSON number)", i, p["since_seq"], p["since_seq"])
+		}
+		if i > 0 && seq <= seenSeq {
+			t.Errorf("poll %d: since_seq %d did not advance (previous %d) — cursor must be monotonic", i, seq, seenSeq)
+		}
+		seenSeq = seq
 	}
 }
