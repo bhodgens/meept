@@ -185,6 +185,18 @@ func expiredLocked(row storeRow, now int64) bool {
 
 // Put records a swap mapping for sessionID. Re-Putting the same
 // (session, token) pair is an idempotent update.
+//
+// Bughunt A3-10 fix:
+//   - the write handle is captured UNDER the lock, after the closed check,
+//     and nil-guarded: Close sets st.db=nil together with st.closed under
+//     the same lock, so a Put that passed the check can never dereference
+//     a nil handle, and a racing Close yields the documented sql "closed"
+//     error (handled by the mirror rollback below), never a panic.
+//   - expired rows are swept from the in-memory mirrors on every Put
+//     (lazy TTL eviction; the disk DELETE runs outside the lock per the
+//     mutexio rule). Before this, the restore window was honoured only by
+//     Resolve while raw PII values accumulated in st.mem/st.fwd (and on
+//     disk) for the process lifetime.
 func (st *SwapStore) Put(sessionID, token, value, class string) error {
 	st.mu.Lock()
 	if st.closed {
@@ -192,8 +204,9 @@ func (st *SwapStore) Put(sessionID, token, value, class string) error {
 		return ErrStoreClosed
 	}
 	var expiry int64
+	now := time.Now().Unix()
 	if st.ttlSec > 0 {
-		expiry = time.Now().Unix() + st.ttlSec
+		expiry = now + st.ttlSec
 	}
 	mkey := storeKey(sessionID, token)
 	fkey := forwardKey(sessionID, class, value)
@@ -202,7 +215,55 @@ func (st *SwapStore) Put(sessionID, token, value, class string) error {
 	st.mem[mkey] = storeRow{Token: token, Value: value, Class: class, Expiry: expiry}
 	st.fwd[fkey] = token
 	db := st.db
+	// Collect the expired rows (never the one just inserted) for eviction.
+	var expMem []string
+	var expFwd []string
+	var expDisk [][2]string // {sessionID, token}
+	if st.ttlSec > 0 {
+		for k, row := range st.mem {
+			if k != mkey && expiredLocked(row, now) {
+				expMem = append(expMem, k)
+				sid, _, ok := splitStoreKey(k)
+				if ok {
+					expDisk = append(expDisk, [2]string{sid, row.Token})
+				}
+			}
+		}
+		for k, tok := range st.fwd {
+			sid, _, ok := splitStoreKey(k)
+			if !ok {
+				continue
+			}
+			if row, has := st.mem[storeKey(sid, tok)]; !has || expiredLocked(row, now) {
+				expFwd = append(expFwd, k)
+			}
+		}
+	}
 	st.mu.Unlock()
+
+	// Defensive: db is captured under the same lock that Close uses to nil
+	// it alongside st.closed, so this branch is unreachable today; keep it
+	// so a future reopen/reset path can never dereference a nil handle.
+	if db == nil {
+		return ErrStoreClosed
+	}
+
+	// Disk eviction of the swept rows: best-effort, outside the lock.
+	for _, p := range expDisk {
+		if _, err := db.Exec(`DELETE FROM pii_swaps WHERE session_id = ? AND token = ?`, p[0], p[1]); err != nil {
+			break // store likely closed/busy; mirrors below are still pruned
+		}
+	}
+	if len(expDisk) > 0 {
+		st.mu.Lock()
+		for _, k := range expMem {
+			delete(st.mem, k)
+		}
+		for _, k := range expFwd {
+			delete(st.fwd, k)
+		}
+		st.mu.Unlock()
+	}
 
 	if _, err := db.Exec(`INSERT INTO pii_swaps (session_id, token, value, class, expiry)
 		VALUES (?, ?, ?, ?, ?)
