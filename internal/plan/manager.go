@@ -1210,6 +1210,245 @@ func (m *PlanManager) stalledExecutingReason(ctx context.Context, p *Plan, looku
 // Synthesis
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Quick-plan adoption (plan-contract tree 20261125-plan-contract-quickplan,
+// leaf 01, master C-1; decisions D1/D2; closes bughunt 2026-11-24 M11)
+// ---------------------------------------------------------------------------
+
+// SubmitForApproval moves a draft plan to pending_approval for HUMAN
+// sign-off, skipping the require_approval-config auto-approve tail that
+// SubmitPlan would fire. This is the C-3 true posture: the intent (the user
+// explicitly asked to approve before execution) gates the park, not the
+// config. Idempotent for crash re-drive: an already-parked or already-
+// approved row returns nil; any other state is refused with
+// ErrPlanNotModifiable so a completed/cancelled row can never be re-parked.
+func (m *PlanManager) SubmitForApproval(ctx context.Context, planID string) error {
+	plan, err := m.store.GetPlan(ctx, planID)
+	if err != nil {
+		return fmt.Errorf("submit for approval: %w", err)
+	}
+	switch plan.State {
+	case StatePendingApproval, StateApproved:
+		// Already past the draft gate (re-drive after a mid-sequence crash).
+		return nil
+	case StateDraft, StatePlanning:
+		// Planning rows re-enter draft via the same rescue SubmitPlan uses.
+		if err := m.CompletePlanningRevision(ctx, planID); err != nil && !errors.Is(err, ErrPlanNotFound) {
+			m.logger.Debug("submit-for-approval: plan not in planning — normal submit path", "plan_id", planID)
+		}
+		if err := m.transitionFrom(ctx, planID, []PlanState{StateDraft}, StatePendingApproval, kanban.EventReasonSubmit); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("%w: plan %s is in state %s, SubmitForApproval needs draft", ErrPlanNotModifiable, planID, plan.State)
+	}
+
+	phases, err := m.store.GetPhases(ctx, planID)
+	if err != nil {
+		m.logger.Warn("failed to get phases for submit event", "plan_id", planID, "error", err)
+	}
+	totalSteps := 0
+	for _, ph := range phases {
+		totalSteps += ph.TotalSteps
+	}
+	m.publishEvent("plan.submitting", map[string]any{
+		"plan_id":     planID,
+		"title":       plan.Title,
+		"phase_count": len(phases),
+		"step_count":  totalSteps,
+		"session_id":  plan.SourceSession,
+	})
+	m.logger.Info("plan submitted for approval", "plan_id", planID)
+	return nil
+}
+
+// SubmitAndApproveNoSynthesis is the quick_plan submit posture: draft ->
+// pending_approval -> approved (CAS chain identical to SubmitPlan's
+// auto-approve tail) with the approval signoff recorded by="system", but
+// WITHOUT invoking Synthesize. The quick_plan decomposition lives in the
+// strategic planner task, not in the plan machine — and Synthesize on a
+// zero-phase draft completes the plan instantly, the exact M11 zombie/lie
+// trap. The caller follows with AdoptTask to bind the already-running task.
+//
+// Concurrency contract: every step is the existing CAS writer (a concurrent
+// TUI approve/reject loses or wins exactly one edge cleanly, never both);
+// no synthesis lease is taken because no expansion runs here. A mid-sequence
+// failure leaves the row at the last committed state for a re-drive, and the
+// method is idempotent against that re-drive: an already-approved row
+// returns nil. Any other starting state (executing, completed, cancelled)
+// is refused with ErrPlanNotModifiable.
+func (m *PlanManager) SubmitAndApproveNoSynthesis(ctx context.Context, planID string) error {
+	plan, err := m.store.GetPlan(ctx, planID)
+	if err != nil {
+		return fmt.Errorf("submit and approve: %w", err)
+	}
+	switch plan.State {
+	case StateApproved:
+		return nil // crash re-drive: the approve half already committed
+	case StateDraft, StatePlanning:
+		if err := m.SubmitForApproval(ctx, planID); err != nil {
+			return err
+		}
+	case StatePendingApproval:
+		// Parked by the plain SubmitPlan path; approve straight through.
+	default:
+		return fmt.Errorf("%w: plan %s is in state %s, SubmitAndApproveNoSynthesis needs draft/pending_approval", ErrPlanNotModifiable, planID, plan.State)
+	}
+	return m.approveNoSynthesis(ctx, planID, "", "system")
+}
+
+// approveNoSynthesis is ApprovePlan's committed-approval sequence with the
+// best-effort Synthesize call withheld. ApprovePlan is the thin wrapper that
+// adds synthesis; both share the exact same CAS/signoff/columns/event body
+// so an operator approve and the system quick-plan approve stay byte-
+// equivalent up to the expansion trigger.
+func (m *PlanManager) approveNoSynthesis(ctx context.Context, planID, sessionID, by string) error {
+	if err := m.transitionFrom(ctx, planID, []PlanState{StatePendingApproval}, StateApproved, kanban.EventReasonApprove); err != nil {
+		return err
+	}
+
+	signoff := NewPlanSignoff(planID, "", sessionID, by, "approved", "")
+	if err := m.store.CreateSignoff(ctx, signoff); err != nil {
+		return fmt.Errorf("create signoff: %w", err)
+	}
+
+	// T4 targeted update (same seam ApprovePlan uses): stamp the approval
+	// columns on the CURRENT row, re-read after the CAS won.
+	now := time.Now().UTC()
+	if err := m.updatePlanColumns(ctx, planID, func(p *Plan) {
+		p.ApprovedAt = &now
+		p.ApprovedBy = by
+		p.UpdatedAt = now
+	}); err != nil {
+		return err
+	}
+
+	m.publishEvent("plan.approved", map[string]any{
+		"plan_id": planID,
+		"by":      by,
+	})
+	m.logger.Info("plan approved", "plan_id", planID, "by", by)
+	return nil
+}
+
+// ErrTaskAlreadyBound reports that the plan already carries a DIFFERENT
+// task; the adopter's task must not replace it.
+var ErrTaskAlreadyBound = errors.New("plan already bound to a different task")
+
+// AdoptTask binds an externally-created task (the strategic planner's
+// quick_plan task) to an approved plan as its PRIMARY task and moves the
+// row approved -> synthesizing -> executing. This is the X2 linkage: the
+// decomposition already happened in the task, so the plan machine adopts it
+// instead of re-expanding it. The in-memory taskPlanMap entry is populated
+// so OnTaskCompleted rolls the plan up from its bound task (D2), and the
+// durable plan.TaskID column lets RestoreMappings rebuild that entry after
+// a restart.
+//
+// No zero-phase Synthesize run happens here — that would complete the
+// brief instantly (M11). No child phase tasks are created either: the
+// adopted task IS the execution.
+//
+// Concurrency contract (simpler than Synthesize's lease by design — keep it
+// that way): the exclusive bind is the store's ClaimPlanSynthesis CAS
+// (moves the row to synthesizing ONLY while task_id IS NULL and the lease
+// is free), so two concurrent adopters race on one UPDATE and exactly one
+// wins; the loser is told via ErrTaskAlreadyBound/ErrPlanNotModifiable,
+// never through a silent double-bind. The task_id + state + lease-clear
+// land in ONE updatePlanColumns statement, mirroring Synthesize's success
+// write, so there is no window where the row is claimed but unbound. Map
+// inserts take m.mu (the same lock OnTaskCompleted reads under) and happen
+// only after the durable write commits.
+func (m *PlanManager) AdoptTask(ctx context.Context, planID, taskID string) error {
+	if planID == "" || taskID == "" {
+		return fmt.Errorf("%w: adopt requires plan id and task id", ErrPlanNotModifiable)
+	}
+
+	// Pre-check for the non-racing paths BEFORE touching the claim:
+	// idempotent re-adopt (same task, row already executing) returns nil;
+	// a foreign bound task or a not-yet-approved row is refused without
+	// spending a claim attempt.
+	plan, err := m.store.GetPlan(ctx, planID)
+	if err != nil {
+		return fmt.Errorf("adopt task: %w", err)
+	}
+	if plan.TaskID == taskID {
+		return nil // re-drive after a mid-sequence crash: already adopted
+	}
+	if plan.TaskID != "" {
+		return fmt.Errorf("%w: plan %s bound to %s, refusing %s", ErrTaskAlreadyBound, planID, plan.TaskID, taskID)
+	}
+	if plan.State != StateApproved {
+		return fmt.Errorf("%w: plan %s is in state %s, AdoptTask needs an approved unbound plan", ErrPlanNotModifiable, planID, plan.State)
+	}
+
+	// Exclusive bind: the claim CAS refuses a plan that already carries a
+	// task_id (or a live lease), so this is the "task_id empty -> set" gate.
+	claimed, err := m.store.ClaimPlanSynthesis(ctx, planID, synthesisLeaseDuration)
+	if err != nil {
+		return fmt.Errorf("claim plan for adoption: %w", err)
+	}
+	if !claimed {
+		// A concurrent adopter won the row (or a stale lease is mid-
+		// reclaim). Surface the outcome honestly, never a double-bind.
+		fresh, gerr := m.store.GetPlan(ctx, planID)
+		if gerr == nil && fresh.TaskID == taskID {
+			return nil
+		}
+		if gerr == nil && fresh.TaskID != "" {
+			return fmt.Errorf("%w: plan %s bound to %s, refusing %s", ErrTaskAlreadyBound, planID, fresh.TaskID, taskID)
+		}
+		return fmt.Errorf("%w: plan %s lost the adoption claim (state %s)", ErrPlanNotModifiable, planID, fresh.StateLabel())
+	}
+	m.publishPlanState(planID, plan.State, StateSynthesizing, kanban.EventReasonSynthesize)
+
+	// The row is synthesizing with OUR lease. Commit task_id + executing +
+	// lease discharge in one statement (Synthesize's success shape), then
+	// publish, then register the rollup mapping.
+	if err := m.updatePlanColumns(ctx, planID, func(p *Plan) {
+		p.TaskID = taskID
+		p.State = StateExecuting
+		p.SynthesisLeaseUntil = nil
+		p.SynthesisError = ""
+		p.UpdatedAt = time.Now().UTC()
+	}); err != nil {
+		// Release back to approved so the reclaimer/dispatcher can re-drive.
+		if rerr := releaseSynthesisTo(m.store, ctx, planID, StateApproved); rerr != nil {
+			m.logger.Error("failed to release adoption claim after bind failure", "plan_id", planID, "error", rerr)
+		}
+		return fmt.Errorf("bind adopted task: %w", err)
+	}
+	m.publishPlanState(planID, StateSynthesizing, StateExecuting, kanban.EventReasonExecuting)
+	m.publishEvent("plan.executing", map[string]any{
+		"plan_id":    planID,
+		"title":      plan.Title,
+		"task_id":    taskID,
+		"session_id": plan.SourceSession,
+	})
+
+	// Rollup mapping (D2): OnTaskCompleted(taskID) finds the plan and, as
+	// the PARENT task (no phaseTaskMap entry), completes it through
+	// completePlan's honest phase check.
+	m.mu.Lock()
+	m.taskPlanMap[taskID] = planID
+	m.mu.Unlock()
+
+	m.logger.Info("plan adopted its task",
+		"plan_id", planID,
+		"task_id", taskID,
+		"state", StateExecuting,
+	)
+	return nil
+}
+
+// StateLabel renders the plan's state for error text, tolerating a nil
+// receiver-free read failure path (fresh may be nil when GetPlan errored).
+func (p *Plan) StateLabel() string {
+	if p == nil {
+		return "<unknown>"
+	}
+	return string(p.State)
+}
+
 // Synthesize creates the task hierarchy from the plan: a parent task with child
 // tasks for each phase, and TaskSteps for each parsed step within a phase.
 // This method is idempotent: if the plan already has a TaskID, it returns nil
