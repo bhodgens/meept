@@ -450,7 +450,7 @@ func TestTitleRefreshPublishesUserDescription(t *testing.T) {
 		WithSessionID(sessionID),
 	)
 	require.NotNil(t, loop)
-	loop.turnCounter = 4
+	loop.turnCounter.Store(4)
 	loop.SetSessionRefresher(session.NewSessionRefresher(nil, slogDiscardLogger()))
 	loop.SetSessionStore(&titleRefreshStore{sess: &session.Session{
 		ID:                 sessionID,

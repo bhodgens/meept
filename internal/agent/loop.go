@@ -1182,8 +1182,11 @@ type AgentLoop struct {
 	// Session refresher for periodic title updates (wired after construction)
 	sessionRefresher *session.SessionRefresher
 
-	// Turn counter for periodic title refresh
-	turnCounter int
+	// Turn counter for periodic title refresh.
+	// A2-3 (bughunt 2026-11-25): atomic — readers hold l.mu (triggerTitle-
+	// Refresh) and stateMu (GetStateSnapshot.CurrentTurn); an unguarded int
+	// raced both. Guarded by neither map, only by its own atomic.
+	turnCounter atomic.Int64
 
 	// MCP server awareness for system prompt context
 	mcpServerLister func() []MCPServerInfo
@@ -7365,7 +7368,7 @@ func (l *AgentLoop) GetStateSnapshot() AgentStateSnapshot {
 		IsActive:       l.stateMachine.IsActive(),
 		ConversationID: l.sessionID,
 		AgentID:        l.agentID,
-		CurrentTurn:    l.turnCounter,
+		CurrentTurn:    int(l.turnCounter.Load()),
 		History:        l.stateMachine.History(),
 		Timestamp:      time.Now(),
 	}
@@ -10434,14 +10437,18 @@ func (l *AgentLoop) publishTurnEndEvent(ctx context.Context, conversationID stri
 		return
 	}
 
-	// Increment turn counter and trigger periodic title refresh
-	l.turnCounter++
+	// Increment turn counter and trigger periodic title refresh.
+	// A2-3 (bughunt 2026-11-25): counter is atomic; the refresh decision
+	// fires on the exact multiple. A2-4: the goroutine rides l.wg so
+	// Stop()/Close() cannot return while its LLM call is in flight
+	// (the loop's own use-after-close contract).
+	turn := l.turnCounter.Add(1)
 	const titleRefreshInterval = 5 // Refresh title every 5 turns
 	l.mu.RLock()
 	identitySession := l.currentSessionID
 	l.mu.RUnlock()
-	if l.sessionRefresher != nil && l.turnCounter%titleRefreshInterval == 0 && identitySession != "" {
-		go l.triggerTitleRefresh(ctx, conversationID)
+	if l.sessionRefresher != nil && turn%titleRefreshInterval == 0 && identitySession != "" {
+		l.wg.Go(func() { l.triggerTitleRefresh(ctx, conversationID) })
 	}
 
 	l.eventEmitter.EmitWithFields(ctx, AgentEvent{
@@ -11764,8 +11771,8 @@ func (l *AgentLoop) triggerTitleRefresh(ctx context.Context, conversationID stri
 	// id (AUDIT FIX H11 — 'session not found' warns).
 	l.mu.RLock()
 	sessionID := l.currentSessionID
-	turnCount := l.turnCounter
 	l.mu.RUnlock()
+	turnCount := int(l.turnCounter.Load()) // A2-3: atomic, not under l.mu
 	if l.sessionRefresher == nil || sessionID == "" {
 		return
 	}

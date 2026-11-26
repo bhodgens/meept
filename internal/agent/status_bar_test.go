@@ -267,9 +267,7 @@ func TestAssembleSystemPromptStablePrefixIgnoresStatus(t *testing.T) {
 
 	// Bump ONLY the loop's TurnStatus input (turn index): no stable-section
 	// state changes between builds.
-	loop.mu.Lock()
-	loop.turnCounter = 4
-	loop.mu.Unlock()
+	loop.turnCounter.Store(4)
 
 	second := loop.assembleSystemPrompt(newBuilder())
 	hashAfterSecond := loop.LastStablePrefixHash()

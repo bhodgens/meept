@@ -142,8 +142,8 @@ func (l *AgentLoop) turnStatus() TurnStatus {
 
 	l.mu.RLock()
 	reg := l.registry
-	turns := l.turnCounter
 	l.mu.RUnlock()
+	turns := int(l.turnCounter.Load())
 
 	var toolCount int
 	if reg != nil {
