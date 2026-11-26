@@ -829,8 +829,22 @@ func (e *Engine) lookupBaseRule(action, toolName string) (RiskLevel, bool) {
 		return RiskLevel(brRisk), false
 	}
 
-	e.logger.Warn("No rule found for action; defaulting to MEDIUM", "action", action, "tool", toolName)
-	return RiskMedium, false
+	// Bughunt A3-8 fix: unknown action fails CLOSED. The sibling engine in
+	// pkg/security/permissions.go denies unknown actions outright
+	// ("Unknown action: ...", RuleSource "unknown_action"); this SQLite
+	// engine used to default them to MEDIUM/Permitted, so the two engines
+	// disagreed on the repo's fail-closed rule and any live wiring of this
+	// engine would inherit the fail-open. CRITICAL plus the Stage-5
+	// confirmation gate is the documented most-restrictive fallback the
+	// engine's own contract offers (the seed's system_modify rule is the
+	// CRITICAL+confirm exemplar): with the default config
+	// (require_confirmation_critical=true) the check yields
+	// Allowed=false; needsConfirmation only relaxes it when the operator
+	// has explicitly disabled confirmation for CRITICAL risk, where the
+	// choice is deliberate. RuleSource is set at the caller's base_rule
+	// site; the deny reason is explicit below.
+	e.logger.Warn("No rule found for action; failing closed to CRITICAL", "action", action, "tool", toolName)
+	return RiskCritical, true
 }
 
 // evaluateCommand evaluates a shell command against compiled patterns.
@@ -1063,7 +1077,20 @@ func (e *Engine) checkOverrides(action string, details map[string]string) *Decis
 		WHERE action = ? AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
 		ORDER BY created_at DESC`, action)
 	if err != nil {
-		return nil
+		// Bughunt A3-9 fix: a query error used to return nil, which the
+		// Stage-4 caller reads as "no override applies" and proceeds to
+		// the confirmation gate / permitted — silently skipping a stored
+		// DENY override. Fail conservative instead: report a deny (not an
+		// allow — an allow would be worse) so the action is blocked while
+		// the override state is unknowable, and surface the DB error.
+		e.logger.Warn("permission override query failed; failing closed (deny)",
+			"action", action, "error", err)
+		return &Decision{
+			Allowed:    false,
+			Reason:     "Permission override state unavailable (query error) — denied fail-closed",
+			RiskLevel:  RiskHigh,
+			RuleSource: "override_query_error",
+		}
 	}
 
 	type overrideCandidate struct {

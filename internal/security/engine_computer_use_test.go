@@ -51,8 +51,10 @@ func TestEngineCheckComputerUse(t *testing.T) {
 		// Fail-closed: unknown cua-driver actions classify HIGH.
 		{"unknown action", "cua-driver.hover_unicorn", false, RiskHigh, true},
 
-		// Non-matching tools keep the existing MEDIUM fallback.
-		{"non-cua tool", "github.create_issue", true, RiskMedium, false},
+		// Bughunt A3-8 fix: a non-matching, unseeded action no longer keeps
+		// the old MEDIUM/Permitted fallback — it fails closed to CRITICAL
+		// + confirmation-gate (the documented most-restrictive fallback).
+		{"non-cua tool", "github.create_issue", false, RiskCritical, true},
 	}
 
 	for _, tt := range tests {
