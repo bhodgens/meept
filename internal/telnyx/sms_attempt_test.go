@@ -41,7 +41,10 @@ func newStubSMSClient(t *testing.T, st *stubSMSClient) *Client {
 		_, _ = w.Write([]byte(body))
 	}))
 	t.Cleanup(srv.Close)
-	c, err := NewClient(srv.URL)
+	// M14: fail-closed allowlist — the helper admits the canonical
+	// testRecord() recipient so the attempt-path tests keep reaching
+	// the stub.
+	c, err := NewClient(srv.URL, WithAllowedNumbers([]string{testRecord().Phone}))
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}

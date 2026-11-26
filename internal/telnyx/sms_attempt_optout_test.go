@@ -71,7 +71,7 @@ func TestSMSAttemptUsesSendSMS2Pins(t *testing.T) {
 	st := &captureSMS{}
 	srv := httptest.NewServer(st.handler())
 	t.Cleanup(srv.Close)
-	client, err := NewClient(srv.URL, WithFromNumber("+15559001"))
+	client, err := NewClient(srv.URL, WithFromNumber("+15559001"), WithAllowedNumbers([]string{"+15559002"}))
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestSMSAttemptOmitsWebhookWhenUnset(t *testing.T) {
 	st := &captureSMS{}
 	srv := httptest.NewServer(st.handler())
 	t.Cleanup(srv.Close)
-	client, err := NewClient(srv.URL)
+	client, err := NewClient(srv.URL, WithAllowedNumbers([]string{"+15559004"}))
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}

@@ -1500,9 +1500,9 @@
       "stop_reply": "",                     // reply text for STOP/START consent keywords (empty = package default wording)
       "help_reply": "",                     // reply text for HELP (empty = package default wording)
       "inbound_enabled": false,             // D3 kill switch for inbound SMS leg; default false = byte-identical boot
-      // ---- outbound SMS egress controls (issue #165 slices 1-2) ----
-      // drift: local-drift: voice.messaging.allowed_numbers/max_messages_* -> outbound egress caps added after older installs; absent/empty/0 = pre-#165 behavior (all recipients, unlimited)
-      "allowed_numbers": [],                 // outbound SMS recipient allowlist (E.164 strings); []/null = ALL recipients (backward compatible, but logs a security warning); non-empty = exact-match allowlist only
+      // ---- outbound SMS egress controls (issue #165 slices 1-2; fail-closed since M14) ----
+      // drift: local-drift: voice.messaging.allowed_numbers/max_messages_* -> outbound egress caps added after older installs; absent/0 = unlimited caps; absent/empty allowed_numbers = refuse ALL sends (fail-closed since M14; was pre-#165 all-recipient behavior)
+      "allowed_numbers": [],                 // outbound SMS recipient allowlist (E.164 strings); []/null = refuse ALL outbound SMS (fail-closed, voice parity) — list E.164 recipients to enable sends; non-empty = exact-match allowlist only
       "max_messages_per_call": 0,            // cap unit: MESSAGES PER SEND CALL (one SendSMS2 invocation); 0 = unlimited (backward compatible)
       "max_messages_per_day": 0,             // cap unit: MESSAGES PER UTC DAY (counter resets at UTC midnight); 0 = unlimited (backward compatible)
     },

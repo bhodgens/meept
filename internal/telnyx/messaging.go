@@ -54,10 +54,11 @@ var (
 	// this process never sent (or already evicted from the bounded
 	// pending table). Best-effort observability only.
 	ErrUnknownMessage = errors.New("telnyx messaging: unknown message id")
-	// ErrRecipientNotAllowed (issue #165 slice 2) is returned by SendSMS2
-	// when a non-empty recipient allowlist is configured and the To
-	// number is not an exact member. errors.Is-checkable; the refusal
-	// happens BEFORE any HTTP POST.
+	// ErrRecipientNotAllowed (issue #165 slice 2; fail-closed since
+	// M14) is returned by SendSMS2 when the To number is not an exact
+	// member of the recipient allowlist — including the empty-allowlist
+	// case, which refuses EVERY recipient (voice dial-gate parity).
+	// errors.Is-checkable; the refusal happens BEFORE any HTTP POST.
 	ErrRecipientNotAllowed = errors.New("telnyx messaging: recipient not allowed")
 	// ErrSendCapExceeded (issue #165 slice 2) is returned by SendSMS2
 	// when a per-call or per-day message cap would be exceeded. The
@@ -86,9 +87,11 @@ const smsDayCounterScope = "telnyx.sms_send"
 
 // NoRecipientAllowlistWarning is emitted once per client construction
 // when either the allowlist or the send caps are unset (issue #165 slice
-// 2, acceptance criterion 4). The literal is frozen so log greps and
-// tests pin the same text.
-const NoRecipientAllowlistWarning = "WARNING: outbound messaging has no recipient allowlist or send cap; any E.164 number may be contacted"
+// 2, acceptance criterion 4; M14 posture). The literal is frozen so log
+// greps and tests pin the same text. Since M14 the empty-allowlist case
+// is fail-CLOSED: outbound sends WILL be refused until the operator
+// lists E.164 recipients.
+const NoRecipientAllowlistWarning = "WARNING: outbound messaging has no recipient allowlist or send cap; outbound SMS will be refused until allowed_numbers lists E.164 recipients"
 
 // e164Pattern is the strict E.164 gate: leading +, non-zero first digit,
 // 8-15 more digits.
@@ -117,9 +120,11 @@ type Message struct {
 // DefaultMessagingBaseURL, tests pass an httptest URL.
 //
 // Issue #165 slices 1-2: the client also owns the outbound egress gates.
-// allowedNumbers is an exact-match recipient allowlist (empty = all, the
-// backward-compatible default); maxPerCall / maxPerDay bound message
-// volume. sendMu guards the counters: one client instance is one logical
+// allowedNumbers is an exact-match recipient allowlist — FAIL-CLOSED
+// since M14: an empty list refuses every recipient, matching the voice
+// dial gate (internal/voice/dial.go outboundPolicyGate); maxPerCall /
+// maxPerDay bound message volume. sendMu guards the counters: one client
+// instance is one logical
 // send session ("call"), so maxPerCall counts admitted sends over the
 // client's life, and maxPerDay counts them within one UTC day (reset at
 // midnight). All gates run BEFORE the HTTP POST.
@@ -132,7 +137,7 @@ type Client struct {
 	httpClient *http.Client
 	log        *slog.Logger
 
-	allowedNumbers map[string]struct{} // exact E.164 set; empty = all recipients
+	allowedNumbers map[string]struct{} // exact E.164 set; empty = refuse ALL (fail-closed, M14)
 	maxPerCall     int                 // 0 = unlimited
 	maxPerDay      int                 // 0 = unlimited
 
@@ -145,9 +150,11 @@ type Client struct {
 }
 
 // WithAllowedNumbers installs the outbound SMS recipient allowlist
-// (issue #165). Entries are exact E.164 strings; empty entries are
-// ignored. An empty list keeps the pre-#165 behavior (all recipients)
-// and triggers the construction-time security warning.
+// (issue #165; fail-closed posture since M14). Entries are exact E.164
+// strings; empty entries are ignored. An empty list refuses EVERY
+// recipient (ErrRecipientNotAllowed before any HTTP POST, matching the
+// voice dial gate) and triggers the construction-time security warning;
+// list the recipients to enable sends.
 func WithAllowedNumbers(numbers []string) Option {
 	return func(c *Client) {
 		set := make(map[string]struct{}, len(numbers))
@@ -460,11 +467,14 @@ type send2Response struct {
 // in tests. The per-day counter resets the first time a UTC date different
 // from the stored one is observed.
 func (c *Client) checkEgressGates(to string) error {
-	// Allowlist: empty set = all recipients (backward compatible).
-	if len(c.allowedNumbers) > 0 {
-		if _, ok := c.allowedNumbers[to]; !ok {
-			return fmt.Errorf("telnyx messaging: to %q: %w", to, ErrRecipientNotAllowed)
+	// Allowlist (M14): FAIL-CLOSED — an empty set refuses EVERY
+	// recipient, matching the voice dial gate (voice/dial.go
+	// outboundPolicyGate). Non-empty set: exact E.164 membership only.
+	if _, ok := c.allowedNumbers[to]; !ok {
+		if len(c.allowedNumbers) == 0 {
+			return fmt.Errorf("telnyx messaging: to %q: recipient allowlist unset (fail-closed): %w", to, ErrRecipientNotAllowed)
 		}
+		return fmt.Errorf("telnyx messaging: to %q: %w", to, ErrRecipientNotAllowed)
 	}
 	now := time.Now
 	if c.clock != nil {

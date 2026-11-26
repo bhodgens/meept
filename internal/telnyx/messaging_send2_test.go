@@ -44,9 +44,11 @@ package telnyx
 // ============================================================================
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -143,6 +145,10 @@ func newSend2Client(t *testing.T, s *send2Stub, extra ...Option) *Client {
 		WithAPIKey("test-key"),
 		WithProfileID(send2Profile),
 		WithFromNumber(send2From),
+		// M14: the recipient allowlist is fail-closed, so the shared
+		// send-path helper admits the suite's canonical recipient; the
+		// fail-closed pins below build their own clients deliberately.
+		WithAllowedNumbers([]string{validSend2Req().To}),
 	}, extra...)
 	c, err := NewClient(srv.URL, opts...)
 	if err != nil {
@@ -402,5 +408,120 @@ func TestSendSMS2SchemelessBaseStillErrors(t *testing.T) {
 	// into a silent default.
 	if _, err := NewClient("api.telnyx.com"); err == nil {
 		t.Error("NewClient(scheme-less) = nil error, want the existing no-scheme construction error")
+	}
+}
+
+// ----------------------------------------------------------------------------
+// M14 — fail-CLOSED recipient allowlist pins (parent ruling 2026-11-25,
+// parity with internal/voice/dial.go outboundPolicyGate).
+// ----------------------------------------------------------------------------
+
+// offListNumber derives a second valid E.164 from a given one by
+// flipping the final digit (0<->1), so the off-list pin needs no new
+// phone literal and can never collide with the allowlisted one.
+func offListNumber(s string) string {
+	last := s[len(s)-1]
+	if last == '0' {
+		return s[:len(s)-1] + "1"
+	}
+	return s[:len(s)-1] + "0"
+}
+
+// TestM14EmptyAllowlistRefusesAll pins the flip: a client built WITHOUT
+// WithAllowedNumbers refuses every recipient with errors.Is
+// ErrRecipientNotAllowed, the refusal names the fail-closed posture,
+// the construction warning fires exactly once, and NO HTTP POST reaches
+// the stub (request count 0).
+func TestM14EmptyAllowlistRefusesAll(t *testing.T) {
+	stub := &send2Stub{}
+	srv := httptest.NewServer(stub)
+	t.Cleanup(srv.Close)
+	var logs bytes.Buffer
+	c, err := NewClient(srv.URL,
+		WithAPIKey("test-key"),
+		WithProfileID(send2Profile),
+		WithFromNumber(send2From),
+		WithMessagingLogger(slog.New(slog.NewTextHandler(&logs, nil))))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	// The frozen warning literal must appear exactly once at construction.
+	if n := strings.Count(logs.String(), NoRecipientAllowlistWarning); n != 1 {
+		t.Fatalf("security warning emitted %d times, want 1: %s", n, logs.String())
+	}
+	_, err = c.SendSMS2(context.Background(), validSend2Req())
+	if !errors.Is(err, ErrRecipientNotAllowed) {
+		t.Fatalf("empty-allowlist err = %v, want errors.Is(ErrRecipientNotAllowed)", err)
+	}
+	if !strings.Contains(err.Error(), "fail-closed") {
+		t.Errorf("refusal %q does not name the fail-closed posture", err.Error())
+	}
+	if hits := stub.hitCount(); hits != 0 {
+		t.Fatalf("stub POSTs with empty allowlist = %d, want 0 (fail-closed refuses before dialing)", hits)
+	}
+	// A client whose list contains only empty entries is the same as an
+	// unset list (entries are ignored) — still fail-closed.
+	c2, err := NewClient(srv.URL, WithAPIKey("test-key"),
+		WithAllowedNumbers([]string{""}),
+		WithMessagingLogger(slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))))
+	if err != nil {
+		t.Fatalf("NewClient(c2): %v", err)
+	}
+	if _, err := c2.SendSMS2(context.Background(), validSend2Req()); !errors.Is(err, ErrRecipientNotAllowed) {
+		t.Fatalf("all-empty-entries allowlist err = %v, want errors.Is(ErrRecipientNotAllowed)", err)
+	}
+	if hits := stub.hitCount(); hits != 0 {
+		t.Fatalf("stub POSTs after empty-entries refusal = %d, want 0", hits)
+	}
+}
+
+// TestM14AllowlistedRecipientProceeds pins the happy-path regression:
+// a non-empty allowlist containing the recipient admits the send and
+// the POST reaches the stub exactly once.
+func TestM14AllowlistedRecipientProceeds(t *testing.T) {
+	stub := &send2Stub{}
+	srv := httptest.NewServer(stub)
+	t.Cleanup(srv.Close)
+	c, err := NewClient(srv.URL,
+		WithAPIKey("test-key"),
+		WithProfileID(send2Profile),
+		WithFromNumber(send2From),
+		WithAllowedNumbers([]string{validSend2Req().To}),
+		WithMessagingLogger(slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	res, err := c.SendSMS2(context.Background(), validSend2Req())
+	if err != nil {
+		t.Fatalf("allowlisted SendSMS2: %v", err)
+	}
+	if res.ProviderMessageID == "" {
+		t.Errorf("allowlisted send returned empty provider id: %+v", res)
+	}
+	if hits := stub.hitCount(); hits != 1 {
+		t.Fatalf("stub POSTs after admitted send = %d, want 1", hits)
+	}
+}
+
+// TestM14OffListRecipientRefused pins the unchanged posture: a NON-EMPTY
+// allowlist that does not contain the recipient refuses with
+// ErrRecipientNotAllowed and zero POSTs.
+func TestM14OffListRecipientRefused(t *testing.T) {
+	stub := &send2Stub{}
+	srv := httptest.NewServer(stub)
+	t.Cleanup(srv.Close)
+	c, err := NewClient(srv.URL,
+		WithAPIKey("test-key"),
+		WithAllowedNumbers([]string{offListNumber(validSend2Req().To)}),
+		WithMessagingLogger(slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	_, err = c.SendSMS2(context.Background(), validSend2Req())
+	if !errors.Is(err, ErrRecipientNotAllowed) {
+		t.Fatalf("off-list err = %v, want errors.Is(ErrRecipientNotAllowed)", err)
+	}
+	if hits := stub.hitCount(); hits != 0 {
+		t.Fatalf("stub POSTs after off-list refusal = %d, want 0", hits)
 	}
 }

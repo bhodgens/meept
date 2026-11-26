@@ -36,13 +36,18 @@ sends; the channel derives `{base}/api/v1/voice/messaging/webhook`),
 `stop_reply`, `help_reply` (zero defaults — reply WORDING defaults live
 in the `sms` pkg), `inbound_enabled`.
 
-### Outbound egress gates (issue #165)
+### Outbound egress gates (issue #165; fail-closed since M14)
 
 Three more keys bound the outbound send path:
 
-- `allowed_numbers` — exact E.164 recipient allowlist. Empty (default)
-  keeps the pre-#165 behavior (any recipient) and emits a security
-  warning at client construction. Non-empty refuses any other recipient.
+- `allowed_numbers` — exact E.164 recipient allowlist. **Default
+  changed (M14, 2026-11-25): empty (the shipped default) now refuses
+  ALL outbound SMS** with `ErrRecipientNotAllowed` before any HTTP
+  POST, matching the voice dial gate (`voice.allowed_numbers` null/
+  empty refuses all outbound dials). List E.164 recipients to enable
+  sends. The pre-M14 posture (empty = all recipients, warning only) is
+  retired. A construction-time security warning is still emitted when
+  the allowlist (or a cap) is unset.
 - `max_messages_per_call` — MESSAGES PER SEND CALL (one `SendSMS2`
   invocation). Zero (default) = unlimited.
 - `max_messages_per_day` — MESSAGES PER UTC DAY. Zero (default) =
@@ -52,11 +57,14 @@ All three gates run at the TOP of `SendSMS2`, BEFORE the Telnyx HTTP
 POST. `ErrRecipientNotAllowed` and `ErrSendCapExceeded` are
 `errors.Is`-checkable. The production client gets these options from
 `internal/daemon/contact_wiring.go`. When messaging is enabled with no
-allowlist or cap, the arming path logs the exact warning: `WARNING:
-outbound messaging has no recipient allowlist or send cap; any E.164
-number may be contacted`. The outbound voice dial used by the same
-contact chain has its own fail-closed allowlist: `voice.allowed_numbers`
-null/empty refuses ALL outbound dials (inbound calls are not gated).
+allowlist or cap, the arming path logs a single startup warning
+(`messagingUnrestrictedWarning`, internal/daemon/messaging_arming.go);
+note that under the M14 posture an unset allowlist no longer means
+"any number may be contacted" — sends are refused until
+`allowed_numbers` lists recipients. The outbound voice dial used by
+the same contact chain has always had this fail-closed allowlist:
+`voice.allowed_numbers` null/empty refuses ALL outbound dials (inbound
+calls are not gated).
 
 ## Packages
 
