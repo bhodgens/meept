@@ -42,12 +42,14 @@ func (p *planIndex) size() int {
 // stampPlanIDs stamps PlanID on task_step records whose TaskID belongs to a
 // plan. The resolver answers plan -> tasks; plan IDs to resolve come from
 // (1) plan IDs already carried by other records in the batch (findings and
-// audit records carry their own plan_id) and (2) a.pendingPlanIDs — plan
-// IDs the caller declared interest in via Query.PlanID. Resolutions are
-// memoized so a later plan-less query still groups previously-seen tasks.
-func (a *Aggregator) stampPlanIDs(ctx context.Context, records []ActivityRecord) {
+// audit records carry their own plan id) and (2) pendingPlanIDs — plan IDs
+// the caller declared interest in via Query.PlanID, passed in per-query (it
+// used to be a shared Aggregator field, which raced between concurrent RPC
+// handlers, bughunt H2/A1-2). Resolutions are memoized so a later plan-less
+// query still groups previously-seen tasks.
+func (a *Aggregator) stampPlanIDs(ctx context.Context, records []ActivityRecord, pendingPlanIDs map[string]bool) {
 	planIDs := make(map[string]bool)
-	for planID := range a.pendingPlanIDs {
+	for planID := range pendingPlanIDs {
 		planIDs[planID] = true
 	}
 	for _, r := range records {

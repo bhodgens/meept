@@ -252,6 +252,19 @@ func (s *Server) RegisterHandler(method string, handler Handler) {
 	s.logger.Debug("rpc: registered handler", "method", method)
 }
 
+// HasMethod reports whether a handler is registered for method. It is a
+// pure lookup: unlike CallMethod it never dispatches the handler and never
+// logs. Use it for duplicate-registration probes (bughunt A1-11 — the
+// activity RPC register() probe used CallMethod, which executed the real
+// handler with nil params on every boot and logged a spurious
+// "method not found" Warn for the absent case).
+func (s *Server) HasMethod(method string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, ok := s.handlers[method]
+	return ok
+}
+
 // CallMethod dispatches a method call through the handler registry.
 // This is the exported entry point for HTTP-to-RPC bridging.
 func (s *Server) CallMethod(ctx context.Context, method string, params json.RawMessage) (any, error) {

@@ -1,6 +1,7 @@
 package activity
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -102,5 +103,46 @@ func TestRing_CapacityOne(t *testing.T) {
 	}
 	if dropped != 2 {
 		t.Errorf("expected dropped=2, got %d", dropped)
+	}
+}
+
+// TestRing_Tail_WrappedRing_NewestN pins bughunt H1/A1-1: with a WRAPPED
+// ring and n < size, Tail must return the NEWEST n records in chronological
+// (ascending) order — not the oldest n. The old implementation iterated
+// from head (oldest) and stopped at n, so a full ring of capacity 8 with
+// 20 appends and Tail(3) returned records 13,14,15 instead of 17,18,19.
+func TestRing_Tail_WrappedRing_NewestN(t *testing.T) {
+	r := NewRing(8)
+	base := time.Now()
+	for i := range 20 { // wraps twice; survivors are indices 12..19
+		r.Append(ActivityRecord{
+			Kind:    "test",
+			At:      base.Add(time.Duration(i) * time.Second),
+			Summary: fmt.Sprintf("rec-%d", i),
+		})
+	}
+
+	tail, dropped := r.Tail(3)
+	if len(tail) != 3 {
+		t.Fatalf("expected 3 records, got %d", len(tail))
+	}
+	if dropped != 12 {
+		t.Errorf("expected dropped=12, got %d", dropped)
+	}
+	// Newest 3 are 17,18,19, chronological ascending.
+	want := []string{"rec-17", "rec-18", "rec-19"}
+	for i, w := range want {
+		if tail[i].Summary != w {
+			t.Errorf("tail[%d] = %q, want %q (Tail must return the NEWEST n, oldest-of-window first)", i, tail[i].Summary, w)
+		}
+	}
+	if !(tail[0].At.Before(tail[1].At) && tail[1].At.Before(tail[2].At)) {
+		t.Errorf("order must be chronological ascending: %v, %v, %v", tail[0].At, tail[1].At, tail[2].At)
+	}
+
+	// n exactly at the boundary (n == size) still returns the full window.
+	full, _ := r.Tail(8)
+	if len(full) != 8 || full[0].Summary != "rec-12" || full[7].Summary != "rec-19" {
+		t.Errorf("Tail(size) window wrong: len=%d first=%v last=%v", len(full), full[0].Summary, full[7].Summary)
 	}
 }

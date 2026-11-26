@@ -58,9 +58,17 @@ func (r *Ring) Tail(n int) ([]ActivityRecord, int) {
 		return []ActivityRecord{}, r.dropped
 	}
 
-	// Collect up to n newest records in chronological order (oldest first)
-	result := make([]ActivityRecord, 0)
-	for i := 0; i < r.size && len(result) < n; i++ {
+	// Collect the n newest records in chronological order (oldest first).
+	// Iterating from head walks OLDEST-first, so the window must start at
+	// offset size-min(n,size): starting at head and breaking at n returned
+	// the OLDEST n once the ring wrapped (bughunt H1/A1-1 — activity.recent
+	// froze on the oldest 50 events).
+	count := n
+	if count > r.size {
+		count = r.size
+	}
+	result := make([]ActivityRecord, 0, count)
+	for i := r.size - count; i < r.size; i++ {
 		idx := (r.head + i) % r.capacity
 		result = append(result, r.buf[idx])
 	}

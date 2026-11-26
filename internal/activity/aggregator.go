@@ -38,11 +38,6 @@ type Aggregator struct {
 	findings FindingLister
 	opts     Options
 
-	// pendingPlanIDs carries plan IDs declared via Query.PlanID for the
-	// current query so stampPlanIDs can resolve them even when no record
-	// in the batch carries a plan id. Reset per Query call.
-	pendingPlanIDs map[string]bool
-
 	// plans memoizes plan -> task resolutions across queries.
 	plans planIndex
 }
@@ -82,13 +77,12 @@ func NewAggregator(tasks *task.Registry, steps *task.StepStore, sessions session
 // NewAggregator.
 func newAggregator(tasks TaskLister, steps StepLister, sessions SessionReader, chain ChainLister, findings FindingLister, opts Options) *Aggregator {
 	return &Aggregator{
-		tasks:          tasks,
-		steps:          steps,
-		sessions:       sessions,
-		chain:          chain,
-		findings:       findings,
-		opts:           opts,
-		pendingPlanIDs: map[string]bool{},
+		tasks:    tasks,
+		steps:    steps,
+		sessions: sessions,
+		chain:    chain,
+		findings: findings,
+		opts:     opts,
 	}
 }
 
@@ -100,10 +94,13 @@ func newAggregator(tasks TaskLister, steps StepLister, sessions SessionReader, c
 func (a *Aggregator) Query(ctx context.Context, q Query) ([]ActivityRecord, int, error) {
 	// Register the caller's plan interest BEFORE collect so the stamp pass
 	// can resolve plan -> tasks for steps with no plan-bearing sibling.
+	// Per-query LOCAL value (bughunt H2/A1-2): this used to be a shared
+	// field written here and ranged by stampPlanIDs — one Aggregator is
+	// shared by concurrent RPC handlers, so that was an unsynchronised
+	// map write/read race and plan interest could be wiped mid-query.
+	var pendingPlanIDs map[string]bool
 	if q.PlanID != "" {
-		a.pendingPlanIDs = map[string]bool{q.PlanID: true}
-	} else {
-		a.pendingPlanIDs = map[string]bool{}
+		pendingPlanIDs = map[string]bool{q.PlanID: true}
 	}
 
 	records, err := a.collect(ctx, q)
@@ -114,7 +111,7 @@ func (a *Aggregator) Query(ctx context.Context, q Query) ([]ActivityRecord, int,
 	// Plan stamping for task_step records (plan filter/sort need it;
 	// harmless and useful for the other modes too).
 	if a.opts.PlanResolver != nil {
-		a.stampPlanIDs(ctx, records)
+		a.stampPlanIDs(ctx, records, pendingPlanIDs)
 	}
 
 	records = applyFilters(a, records, q)

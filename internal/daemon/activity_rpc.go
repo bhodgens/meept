@@ -33,10 +33,12 @@ func registerActivityRPC(server *rpc.Server, agg *activity.Aggregator,
 	}
 
 	register := func(method string, handler rpc.Handler) {
-		if _, err := server.CallMethod(context.Background(), method, nil); err == nil {
-			// CallMethod returns "method not found: ..." for unregistered
-			// methods; a nil error means some handler already owns the
-			// name. Log and skip - no panic, no clobber.
+		if server.HasMethod(method) {
+			// Lookup-only probe (bughunt A1-11): this used to call
+			// CallMethod, which DISPATCHES the real handler with nil
+			// params when a same-named handler exists (and logs a
+			// "method not found" Warn when it doesn't — five spurious
+			// Warn lines per boot). HasMethod never executes a handler.
 			slog.Warn("activity rpc: method already registered; skipping duplicate",
 				"method", method)
 			return
