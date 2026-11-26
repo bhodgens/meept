@@ -212,11 +212,20 @@ func (s *OTLPTraceHTTPSink) Close() error { return nil }
 // crossing that OPENS the circuit logs exactly one Warn line; intermediate
 // failures stay at Debug. A dead receiver therefore produces one circuit
 // line per cooldown window at most — never steady-state noise.
+//
+// Bughunt A1-8 fix: the previous branch armed only on consecFails==3
+// exactly. After a cooldown expiry the streak keeps counting (4, 5, ...)
+// and the circuit NEVER re-armed — every batch became a network probe with
+// a full timeout block (probe-per-batch forever on a dead receiver). The
+// circuit now re-arms on EVERY failure at or above the threshold: while
+// open, circuitBlocked drops batches before noteFailure ever runs, so a
+// dead receiver sees exactly one probe per cooldown window, then the
+// circuit reopens for the next window.
 func (s *OTLPTraceHTTPSink) noteFailure(err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.consecFails++
-	if s.consecFails == traceCircuitThreshold {
+	if s.consecFails >= traceCircuitThreshold {
 		s.circuitOpenUntil = time.Now().Add(traceCircuitCooldown)
 		s.logger.Warn("otlp trace export failing; circuit open, dropping batches until cooldown elapses",
 			"endpoint", s.endpoint,
@@ -225,9 +234,7 @@ func (s *OTLPTraceHTTPSink) noteFailure(err error) {
 			"error", err)
 		return
 	}
-	if s.consecFails < traceCircuitThreshold {
-		s.logger.Debug("otlp trace export failed", "endpoint", s.endpoint, "error", err)
-	}
+	s.logger.Debug("otlp trace export failed", "endpoint", s.endpoint, "error", err)
 }
 
 // noteSuccess resets the failure streak and closes the circuit, logging one
