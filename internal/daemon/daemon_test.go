@@ -79,11 +79,15 @@ func TestDaemonStartup(t *testing.T) {
 	}
 
 	// Wait for status to be "running" with retry (race-free check)
-	// This ensures we read the status after Run() has set it
+	// This ensures we read the status after Run() has set it.
+	// 2026-11-26 sweep flake: under the full -p 2 sweep the boot path
+	// (transports before the F-D8 gate + component wiring) can exceed the
+	// old 500ms window; poll 5s and fail with the LAST status.
 	var status models.DaemonStatus
-	for range 10 {
+	statusDeadline := time.Now().Add(5 * time.Second)
+	for {
 		status = d.Status()
-		if status == models.StatusRunning {
+		if status == models.StatusRunning || !time.Now().Before(statusDeadline) {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)

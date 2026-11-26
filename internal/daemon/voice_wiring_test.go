@@ -770,9 +770,9 @@ func TestPhoneHoldReleaseMarksEnded(t *testing.T) {
 		t.Fatalf("inbound row state = %q, want live (OnCallStart)", got)
 	}
 	w.releaseCall(inCCID, voice.OutcomeHangup)
-	if got := phoneCallState(t, dbPath, inCCID); got != "ended" {
-		t.Fatalf("inbound row state = %q, want ended", got)
-	}
+	// A4-2 moved the release fan-out (ReleaseHook -> publishCallEnded) off
+	// the webhook goroutine, so the ended write is async: poll, don't race.
+	awaitPhoneRowState(t, dbPath, inCCID, "ended")
 	w.releaseCall(inCCID, voice.OutcomeHangup)
 	if got := phoneCallState(t, dbPath, inCCID); got != "ended" {
 		t.Fatalf("second inbound release changed state to %q", got)
