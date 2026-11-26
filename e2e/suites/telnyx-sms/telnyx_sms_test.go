@@ -68,7 +68,11 @@ func TestTelnyxSMSWebhookInboundAndDLR(t *testing.T) {
 	}))
 	defer stubAPI.Close()
 
-	client, err := telnyx.NewClient(stubAPI.URL, telnyx.WithAPIKey("test-key"))
+	// M14 fail-closed: the DLR attempt sends to the seeded contact
+	// record phone (+15550000777, below); allowlist it.
+	client, err := telnyx.NewClient(stubAPI.URL,
+		telnyx.WithAPIKey("test-key"),
+		telnyx.WithAllowedNumbers([]string{"+15550000777"}))
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}

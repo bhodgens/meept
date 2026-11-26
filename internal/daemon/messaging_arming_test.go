@@ -346,7 +346,11 @@ func TestArmedFinalizedResolvesDLR(t *testing.T) {
 		_, _ = w.Write([]byte(`{"data":{"id":"msg-dlr-1"}}`))
 	}))
 	t.Cleanup(srv.Close)
-	client, err := telnyx.NewClient(srv.URL, telnyx.WithAPIKey("gate-token"))
+	// M14 fail-closed: the DLR send targets armingPhone(301) (seeded
+	// contact record below); the recipient must be allowlisted.
+	client, err := telnyx.NewClient(srv.URL,
+		telnyx.WithAPIKey("gate-token"),
+		telnyx.WithAllowedNumbers([]string{armingPhone(301)}))
 	if err != nil {
 		t.Fatalf("telnyx.NewClient: %v", err)
 	}

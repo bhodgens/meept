@@ -6404,11 +6404,12 @@ type MessagingConfig struct {
 	// honored (never force-defaulted true at the load boundary).
 	InboundEnabled bool `json:"inbound_enabled" toml:"inbound_enabled"`
 	// AllowedNumbers is the outbound SMS recipient allowlist (E.164).
-	// EMPTY/NIL = all recipients (backward compatible with pre-#165
-	// behavior, where any valid E.164 number was accepted); a non-empty
-	// list permits ONLY exact E.164 matches. The send path
-	// (telnyx.SendSMS2) refuses an out-of-list recipient before any HTTP
-	// POST with ErrRecipientNotAllowed.
+	// EMPTY/NIL = refuse ALL outbound SMS (fail-closed since M14,
+	// 2026-11-25, matching voice.allowed_numbers parity): list E.164
+	// recipients to enable sends. A non-empty list permits ONLY exact
+	// E.164 matches. The send path (telnyx.SendSMS2) refuses an
+	// out-of-list or unset-list recipient before any HTTP POST with
+	// ErrRecipientNotAllowed.
 	AllowedNumbers []string `json:"allowed_numbers" toml:"allowed_numbers"`
 	// MaxMessagesPerCall bounds how many messages ONE SendSMS2 call may
 	// dispatch. Unit: MESSAGES PER SEND CALL. 0 = unlimited (backward

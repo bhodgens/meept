@@ -194,9 +194,15 @@ func newRplGlue(t *testing.T, stopReply, helpReply string) *rplGlue {
 	b := newArmingBus(t)
 	contacts := openRplContacts(t)
 	capture := newRplCapture(t)
+	// M14 fail-closed: the consent glue replies to each test's inbound
+	// `from` number; allowlist the full 401-408 range the suite uses.
 	sender, err := telnyx.NewClient(capture.srv.URL,
 		telnyx.WithAPIKey("gate-token"),
-		telnyx.WithFromNumber(armingPhone(900)))
+		telnyx.WithFromNumber(armingPhone(900)),
+		telnyx.WithAllowedNumbers([]string{
+			armingPhone(401), armingPhone(402), armingPhone(403), armingPhone(404),
+			armingPhone(405), armingPhone(406), armingPhone(407), armingPhone(408),
+		}))
 	if err != nil {
 		t.Fatalf("telnyx.NewClient: %v", err)
 	}

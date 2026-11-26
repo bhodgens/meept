@@ -134,10 +134,16 @@ func TestTelnyxSMSOutboundUnsetConfigWarning(t *testing.T) {
 	if n := strings.Count(logs.String(), telnyx.NoRecipientAllowlistWarning); n != 1 {
 		t.Fatalf("security warning emitted %d times, want 1: %s", n, logs.String())
 	}
-	mustSend(t, client, "+15551230001")
-	mustSend(t, client, "+15551239999")
-	if hits := stub.hitCount(); hits != 2 {
-		t.Fatalf("stub POSTs with unset config = %d, want 2 (backward compatible)", hits)
+	// M14 fail-closed flip (was: backward-compatible sends to any E.164):
+	// an unset allowlist now REFUSES every recipient, before any POST.
+	if _, err := client.SendSMS2(context.Background(), telnyx.SendRequest{To: "+15551230001", Text: "hello"}); !errors.Is(err, telnyx.ErrRecipientNotAllowed) {
+		t.Fatalf("unset-allowlist send err = %v, want errors.Is(ErrRecipientNotAllowed) (fail-closed, M14)", err)
+	}
+	if _, err := client.SendSMS2(context.Background(), telnyx.SendRequest{To: "+15551230001", Text: "hello"}); !errors.Is(err, telnyx.ErrRecipientNotAllowed) {
+		t.Fatalf("unset-allowlist send err = %v, want ErrRecipientNotAllowed (fail-closed, M14)", err)
+	}
+	if hits := stub.hitCount(); hits != 0 {
+		t.Fatalf("stub POSTs with unset config = %d, want 0 (fail-closed, M14)", hits)
 	}
 	if n := strings.Count(logs.String(), telnyx.NoRecipientAllowlistWarning); n != 1 {
 		t.Fatalf("security warning emitted %d times after sends, want 1 (construction only)", n)
