@@ -62,27 +62,6 @@ func newSessionFenceFactory(logger *slog.Logger) sessionFenceFactory {
 	}
 }
 
-// injectSessionFence returns a per-session PermissionChecker for the loop:
-// a lightweight clone of base that carries the session's own fence stage.
-// When no factory is wired (fencing disabled), the session has no working
-// directory, the session carries --nofence, or the factory yields no
-// fence, base is returned unchanged — the shared checker without any
-// fence, byte-identical to the legacy path.
-//
-// Per-session isolation is the POINT: two concurrent sessions each get a
-// checker fenced to ITS OWN root (regression pin:
-// TestSessionFence_ConcurrentSessionsIsolated), replacing the old
-// shared-RootPath mutation race.
-//
-// ARM-SITE NOTE (bughunt H6/A2-1): a non-nil result does NOT prove a
-// session fence was installed — base itself is non-nil on every "nothing
-// to add" path, which is why the old `if fence != nil {...} else if group`
-// shape made the group branch dead. Sites that must also arm the group
-// fence call composeLoopFence instead.
-func injectSessionFence(base *security.PermissionChecker, factory sessionFenceFactory, rootPath string, noFence bool) *security.PermissionChecker {
-	return injectSessionFenceStage(base, factoryMint(factory, rootPath, noFence))
-}
-
 // injectSessionFenceStage clones base and installs the given session fence
 // stage. A nil stage returns base unchanged (byte-identical legacy path).
 func injectSessionFenceStage(base *security.PermissionChecker, stage security.FenceStage) *security.PermissionChecker {

@@ -74,8 +74,8 @@ func TestSessionFence_ConcurrentSessionsIsolated(t *testing.T) {
 	}
 
 	base := security.NewPermissionChecker(security.Config{AllowedPaths: []string{"/"}})
-	pcA := injectSessionFence(base, factory, rootA, false)
-	pcB := injectSessionFence(base, factory, rootB, false)
+	pcA := composeLoopFence(base, factory, rootA, false, nil)
+	pcB := composeLoopFence(base, factory, rootB, false, nil)
 
 	if pcA == base || pcB == base {
 		t.Fatalf("injectSessionFence must return per-session clones, not the shared base checker")
@@ -149,17 +149,17 @@ func TestSessionFence_ConcurrentSessionsIsolated(t *testing.T) {
 // unchanged — the legacy path, no fence stage.
 func TestSessionFence_NilFactoryAndNoFencePassthrough(t *testing.T) {
 	base := security.NewPermissionChecker(security.Config{})
-	if got := injectSessionFence(base, nil, t.TempDir(), false); got != base {
+	if got := composeLoopFence(base, nil, t.TempDir(), false, nil); got != base {
 		t.Fatalf("nil factory must pass the base checker through unchanged")
 	}
 	factory := func(string, bool) security.FenceStage { return &fakeSessionFence{id: "x", root: "/"} }
-	if got := injectSessionFence(base, factory, t.TempDir(), true); got != base {
+	if got := composeLoopFence(base, factory, t.TempDir(), true, nil); got != base {
 		t.Fatalf("noFence session must pass the base checker through unchanged (no fence)")
 	}
-	if got := injectSessionFence(base, factory, "", false); got != base {
+	if got := composeLoopFence(base, factory, "", false, nil); got != base {
 		t.Fatalf("empty root must pass the base checker through unchanged (no fence)")
 	}
-	if injectSessionFence(nil, factory, t.TempDir(), false) != nil {
+	if composeLoopFence(nil, factory, t.TempDir(), false, nil) != nil {
 		t.Fatalf("nil base must yield nil (typed-nil guard)")
 	}
 }

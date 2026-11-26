@@ -4126,7 +4126,18 @@ func (h *ChatHandler) sessionLoop(conversationID string) *AgentLoop {
 	// ONE shared FenceChecker per turn, so session A's root applied to
 	// session B's checks under load). The per-session --nofence override
 	// (persisted on the session) still disables fencing for the session.
-	fence := injectSessionFence(h.loop.security, h.fenceFactory, workingPath, sess != nil && sess.NoFence)
+	//
+	// Bughunt H6 (chat lane): compose through composeLoopFence so the
+	// group fs_roots fence rides the SAME checker as the session fence —
+	// the old injectSessionFence + `if fence != nil ... else if group`
+	// shape was dead (injectSessionFence returns non-nil base whenever it
+	// has nothing to add, so the group branch never armed). The template
+	// carries the group record (three-site rule site 2; ConfigSnapshot
+	// propagates it to every manager clone and scoped fallback loop, so
+	// h.loop.GroupResolution() == the resolved loop's record). Without a
+	// managed record the call is byte-identical to the old
+	// injectSessionFence shape.
+	fence := composeLoopFence(h.loop.security, h.fenceFactory, workingPath, sess != nil && sess.NoFence, h.loop.GroupResolution())
 	// Create a session-scoped loop via the manager. This avoids mutating
 	// the shared singleton's workingDir (which races with concurrent
 	// sessions). If manager creation fails, fall back to a per-turn
@@ -4282,13 +4293,18 @@ func closeStaleScopedLoop(stale *AgentLoop, logger *slog.Logger, conversationID 
 // wireSessionLoop arms the fence and wires session identity on a
 // manager-created session loop (the tail of the old inline block, shared by
 // both loop-creation lanes so the wiring cannot drift).
+//
+// Bughunt H6 (chat lane): the caller composes the session fence with the
+// group fs_roots fence via composeLoopFence (evaluated on the template's
+// group record — ConfigSnapshot site 2 carries it onto every clone), so
+// this arm installs the ONE composed checker unconditionally when present.
+// The old `if fence != nil {...} else if group` shape was dead:
+// injectSessionFence returns non-nil base whenever it has nothing to add,
+// so the else-branch group arm never ran. Same posture as the three
+// dispatcher composeLoopFence sites.
 func (h *ChatHandler) wireSessionLoop(loop *AgentLoop, fence *security.PermissionChecker, sess *session.Session) *AgentLoop {
 	if fence != nil {
 		loop.SetSecurityChecker(fence)
-	} else if res := loop.GroupResolution(); res != nil {
-		if gf := injectGroupFence(loop.security, res); gf != loop.security && gf != nil {
-			loop.SetSecurityChecker(gf)
-		}
 	}
 	h.wireSessionIdentity(loop, sess)
 	return loop

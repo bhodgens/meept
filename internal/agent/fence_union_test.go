@@ -112,7 +112,7 @@ func TestComposeLoopFence_SessionFenceOnlyByteIdentical(t *testing.T) {
 	base := security.NewPermissionChecker(security.Config{})
 
 	viaCompose := composeLoopFence(base, factory, sessionRoot, false, &groups.Resolved{Managed: true})
-	viaLegacy := injectSessionFence(base, factory, sessionRoot, false)
+	viaLegacy := composeLoopFence(base, factory, sessionRoot, false, nil)
 	for _, path := range []string{filepath.Join(sessionRoot, "f"), filepath.Join(other, "f")} {
 		e1 := viaCompose.CheckPathFence(path, "write")
 		e2 := viaLegacy.CheckPathFence(path, "write")
