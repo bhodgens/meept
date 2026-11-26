@@ -826,6 +826,17 @@ func (p *TurnParker) SetParkKey(keyFn func(rec ParkedTurnRecord) string) {
 	p.parkKeyOverride = keyFn
 }
 
+// DefaultLegacyThrottleMaxAttempts is the L14 migration-at-load cap: the
+// attempt ceiling stamped onto class=throttle records re-armed from
+// persistence with MaxAttempts==0 (rows written before the encode-side
+// DefaultThrottleMaxAttempts stamp existed). It mirrors the park-site cap
+// (loop_park.go) so a legacy row terminalizes exactly like a modern one.
+// Deliberately a separate constant: the reArm migration lives in the
+// parker (this file, the load seam shared by the store path and the C-A1
+// backend path), not at any one encode site, and it must stay wired even
+// if the encode-side constant moves.
+const DefaultLegacyThrottleMaxAttempts = 5
+
 // reArm loads this parker's kind from the persistence store and queues
 // every surviving record (expired rows are pruned by Load itself). Called
 // from Start before the polling goroutine spawns, so records whose resume
@@ -885,6 +896,40 @@ func (p *TurnParker) reArm(ctx context.Context) {
 	}
 	if len(records) == 0 {
 		return
+	}
+	// L14 (bughunt 2026-11-24): migration-at-load for pre-cap throttle
+	// rows. The encode-side stamp of the throttle cap only covers parks
+	// made AFTER it landed; rows persisted before it carry MaxAttempts=0,
+	// so the drain-side give-up split (drainDue: MaxAttempts > 0 &&
+	// Attempt >= MaxAttempts) never fires and an always-blocked endpoint
+	// replays the turn forever — the exact silent-forever shape the cap
+	// exists to kill. Stamping at re-arm feeds those legacy rows into the
+	// EXISTING M-4-park machinery (give-up event + SetGiveUpFunc callback,
+	// the lane handler.go's giveUpThrottleParkedTurn subscribes to)
+	// instead of replaying. CLASS-GATED to FailureThrottle: quota rows
+	// keep their own lane semantics (giveUpQuotaParkedTurn + the quota
+	// park-site cap) byte-identically, and none/unknown rows are never
+	// reinterpreted (C-K1 strict-class discipline). Log once per stamped
+	// row at Debug: this is a boot-time migration, not a steady-state
+	// signal.
+	stamped := 0
+	for i := range records {
+		if records[i].Class == llm.FailureThrottle && records[i].MaxAttempts == 0 {
+			records[i].MaxAttempts = DefaultLegacyThrottleMaxAttempts
+			stamped++
+			p.logger.Debug("park persistence: legacy throttle row stamped with the attempt cap",
+				"kind", string(p.parkKind),
+				"session_id", records[i].SessionID,
+				"attempt", records[i].Attempt,
+				"max_attempts", records[i].MaxAttempts,
+			)
+		}
+	}
+	if stamped > 0 {
+		p.logger.Info("park persistence: stamped the attempt cap on legacy throttle rows",
+			"kind", string(p.parkKind),
+			"rows", stamped,
+		)
 	}
 	p.mu.Lock()
 	for i, rec := range records {
