@@ -70,12 +70,43 @@ type ContactChainWiring struct {
 
 // Run implements builtin.ContactChainRunner (the string-shaped seam:
 // resolve -> chain -> rendered lowercase report, one line per attempt).
+// Kept as the context-free shim for the plain seam contract: it caps the
+// chain at 10 minutes internally (the historical behavior — the chain
+// takes no caller ctx on this path).
 func (w *ContactChainWiring) Run(person, message string, channels []string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), contactChainBudget)
+	defer cancel()
+	return w.run(ctx, person, message, channels)
+}
+
+// RunCtx is the ctx-aware optional capability (A6-12): the contact tool
+// prefers it via type assertion so the CALLER's context (turn
+// cancellation, shutdown) bounds the chain, with the same 10-minute
+// budget cap layered on top (context.WithTimeout over the caller ctx —
+// the caller's deadline wins when it is earlier, cancellation propagates
+// mid-chain, and an already-cancelled ctx stops the chain before the
+// first channel attempt). ChainRunner internals honor ctx between
+// channels (the ctx.Err() pre-check), during hop delays (sleepCtx), and
+// per-attempt (each ChannelAttempt.Attempt takes ctx), so cancellation
+// takes effect within one hop of the boundary.
+func (w *ContactChainWiring) RunCtx(ctx context.Context, person, message string, channels []string) string {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, contactChainBudget)
+	defer cancel()
+	return w.run(ctx, person, message, channels)
+}
+
+// contactChainBudget is the Run/RunCtx wall-clock cap for one chain run.
+const contactChainBudget = 10 * time.Minute
+
+// run is the shared body: it NEVER mints its own background context —
+// the caller (Run / RunCtx) owns the ctx and its cancel.
+func (w *ContactChainWiring) run(ctx context.Context, person, message string, channels []string) string {
 	if w == nil || w.Store == nil || w.Runner == nil {
 		return "contact: contact chain is not wired (contact feature disabled)"
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
 	rec, err := w.Store.Resolve(ctx, person)
 	if err != nil {
 		return fmt.Sprintf("contact: unknown contact %q (no record by id, phone, or signal uuid)", person)
@@ -346,6 +377,7 @@ type brokerValue func(key string) (string, error)
 // Compile-time pins: the wiring satisfies the tool seam; the landed
 // adapters satisfy the chain seam (leaf 11a/11b/12 surfaces).
 var (
-	_ builtin.ContactChainRunner = (*ContactChainWiring)(nil)
-	_ contact.ChannelAttempt     = (*telnyx.SMSAttempt)(nil)
+	_ builtin.ContactChainRunner    = (*ContactChainWiring)(nil)
+	_ builtin.ContactCtxChainRunner = (*ContactChainWiring)(nil)
+	_ contact.ChannelAttempt        = (*telnyx.SMSAttempt)(nil)
 )

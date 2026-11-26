@@ -97,6 +97,12 @@ gate. A target outside the allowlist needs human confirmation through
 the `contact_out_of_allowlist` action (RiskHigh, RequiresConfirmation).
 The in-allowlist path is unchanged.
 
+The chain honors the caller's context (A6-12): the `contact` tool prefers
+the `ContactCtxChainRunner` optional capability, so `RunCtx` bounds the
+chain by the turn's ctx — cancelling the turn stops further channel
+attempts at the next hop — under the same 10-minute wall-clock cap the
+plain `Run` shim carries for context-free callers.
+
 Local providers are subprocesses, not libraries: the daemon needs the
 `whisper-cli` (whisper.cpp) and `piper` binaries on PATH. Both are
 keyless - no secrets-broker entry is required for the local leg.

@@ -141,3 +141,84 @@ func TestContactToolMissingPersonFails(t *testing.T) {
 		t.Errorf("chain invoked with person %q despite missing arg", chain.gotPerson)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// A6-12: the tool's Execute prefers the OPTIONAL ctx-aware seam. A runner
+// that also implements ContactCtxChainRunner must be invoked through
+// RunCtx with the CALLER's ctx (turn cancellation reaches the chain);
+// a plain-only runner keeps the exact context-free Run call.
+// ---------------------------------------------------------------------------
+
+// fakeCtxChainRunner implements BOTH seams: it records which path
+// Execute chose and whether the ctx was threaded (cancelled detection).
+type fakeCtxChainRunner struct {
+	fakeChainRunner
+	gotCtxCancelled bool
+	usedRunCtx      bool
+	// cancelOnCall: the fake cancels the derived probe after seeing ctx
+	probe func(ctx context.Context)
+}
+
+func (f *fakeCtxChainRunner) Run(person, message string, channels []string) string {
+	f.usedRunCtx = false
+	return f.fakeChainRunner.Run(person, message, channels)
+}
+
+func (f *fakeCtxChainRunner) RunCtx(ctx context.Context, person, message string, channels []string) string {
+	f.usedRunCtx = true
+	f.gotCtxCancelled = ctx.Err() != nil
+	if f.probe != nil {
+		f.probe(ctx)
+	}
+	return f.fakeChainRunner.Run(person, message, channels)
+}
+
+// TestContactToolPrefersCtxSeam pins the optional-capability dispatch:
+// a runner implementing ContactCtxChainRunner is called via RunCtx with
+// the Execute ctx (a cancelled Execute ctx reaches the runner as
+// cancelled — the chain stops), and the plain seam is never used.
+func TestContactToolPrefersCtxSeam(t *testing.T) {
+	chain := &fakeCtxChainRunner{
+		fakeChainRunner: fakeChainRunner{report: "telnyx_voice: no_answer"},
+	}
+	tool := NewContactTool(chain)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // the turn was cancelled before the tool ran
+	res, err := tool.Execute(ctx, map[string]any{"person": "c-ada", "message": "m"})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	tr, _ := res.(*tools.ToolResult)
+	if tr == nil || !tr.Success {
+		t.Fatalf("result = %+v, want success", res)
+	}
+	if !chain.usedRunCtx {
+		t.Fatal("A6-12 regression: Execute used the plain Run seam despite a ctx-capable runner")
+	}
+	if !chain.gotCtxCancelled {
+		t.Fatal("Execute did not thread the caller ctx into RunCtx")
+	}
+}
+
+// TestContactToolCtxCapableButPlainOnlyFallback pins the other direction:
+// a runner that ONLY implements ContactChainRunner keeps the old
+// context-free call (byte-identical posture, no panic, no RunCtx).
+func TestContactToolCtxCapableButPlainOnlyFallback(t *testing.T) {
+	chain := &fakeChainRunner{report: "telnyx_voice: answered"}
+	tool := NewContactTool(chain)
+	if _, isCtx := any(chain).(ContactCtxChainRunner); isCtx {
+		t.Fatal("test fixture must NOT implement the ctx seam (plain-runner case)")
+	}
+	res, err := tool.Execute(context.Background(), map[string]any{"person": "c-bob", "message": "m"})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if chain.gotPerson != "c-bob" {
+		t.Fatalf("plain seam not invoked: chain saw person %q", chain.gotPerson)
+	}
+	tr, _ := res.(*tools.ToolResult)
+	if tr == nil || !tr.Success {
+		t.Fatalf("result = %+v, want success via plain seam", res)
+	}
+}

@@ -22,6 +22,21 @@ type ContactChainRunner interface {
 	Run(person, message string, channels []string) string
 }
 
+// ContactCtxChainRunner is the OPTIONAL ctx-aware capability (A6-12): a
+// chain runner that also implements it is invoked with the tool call's
+// context, so turn cancellation / shutdown stops the chain between
+// channel attempts instead of running uncancellable for its full budget.
+// The tool prefers it via type assertion over the plain seam (the
+// optional-capability pattern — a runner that only implements
+// ContactChainRunner keeps the old context-free call, byte-identical).
+// Semantics: returns the same rendered report as Run; the ctx bounds the
+// chain, it does not widen it.
+type ContactCtxChainRunner interface {
+	// RunCtx resolves and walks the chain under ctx. A cancelled ctx
+	// must stop the chain before the next channel attempt.
+	RunCtx(ctx context.Context, person, message string, channels []string) string
+}
+
 // ContactTool is the policy-driven contact path: ONE employee action
 // ("reach this person with this message") that tries the configured
 // channels in order and reports per-channel outcomes. The raw channel
@@ -106,6 +121,17 @@ func (t *ContactTool) Execute(ctx context.Context, args map[string]any) (any, er
 		}
 	}
 
+	// A6-12 (optional-capability pattern): prefer the ctx-aware seam so
+	// the tool call's context (turn cancellation, shutdown) bounds the
+	// chain. A runner that only implements ContactChainRunner keeps the
+	// exact context-free call — byte-identical fallback posture.
+	if cx, ok := t.chain.(ContactCtxChainRunner); ok {
+		report := cx.RunCtx(ctx, person, message, channels)
+		if report == "" {
+			report = fmt.Sprintf("contact: no channels attempted for %s (no configured channels)", person)
+		}
+		return tools.NewSuccessResult(report), nil
+	}
 	report := t.chain.Run(person, message, channels)
 	if report == "" {
 		report = fmt.Sprintf("contact: no channels attempted for %s (no configured channels)", person)
