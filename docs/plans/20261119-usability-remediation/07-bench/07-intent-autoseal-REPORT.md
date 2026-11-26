@@ -80,3 +80,91 @@ an audit trail. Plain plans still park.
 - The audit-trail metadata keys (auto_sealed / auto_seal_reason) and the
   task.planned auto_sealed field are new UI surfaces; no UI code was changed
   in this leaf (the flag is additive and self-describing).
+
+---
+
+# Addendum: F-BENCH-R7 fix (bench repo, not committed)
+
+Worktree: /Users/caimlas/git/meept-bench/.hermes/worktrees/usability-acceptance
+(base a85b074 + da1b2e9; no commit made, per instructions).
+
+## Root cause (confirmed from run-7 artifacts)
+
+The REAL parked turn.terminal payload, captured from
+/tmp/usability-rig-acc/bench-results-run7-final/transcripts/
+usability-u-plan-mode-request-a1.json (turn-e77fa1b4e0fb3b2f), carries
+status="parked", handler_case="async_dispatch", error ABSENT (the key is
+not present at all), and no marker text anywhere in the 13-key payload.
+The "Plan awaiting user approval" line exists ONLY in the daemon log and
+the task.pending_approval bus event (internal/agent/strategic.go
+awaitUserApproval). Worse, EVERY async_dispatch ack parks with this same
+terminal shape (u-steer, u-context, u-direct all show identical parked
+payloads), so the terminal payload alone cannot distinguish an
+approval-gate park from any other async ack. The a85b074 gate
+(strings.Contains(p.Error, planParkMarker)) could therefore never fire on
+a real daemon, and the unit fake -- which carried the marker inside
+error -- masked the gap (fake parity defect).
+
+## Fix (meept-bench, 3 files)
+
+1. internal/daemonclient/daemonclient.go: the auto-approver predicate is
+   now just status=="parked" + opt-in (one attempt per turn). The REAL
+   gate moved to where the true signal lives: FindAndApproveParkedTask
+   approves only after task.list_extended observes the session task in
+   state awaiting_approval (strategic.go StateAwaitingApproval).
+   planParkMarker const removed; stale doc comments updated. Non-opt-in
+   behavior is byte-identical to before (park stalls exactly as in run 7).
+
+2. internal/daemonclient/daemonclient_async_test.go (fake parity, two
+   defects):
+   - The harness's scripted parked terminal now uses the REAL run-7
+     payload shape (no error key, full 13-key fixture), via
+     realParkedTerminalFixture() in plan_approve_test.go.
+   - The fake daemon kept a single shared bufio reader slot (f.buf) for
+     ALL connections; the approval harness's forked approver connection
+     stole the main connection's request frames and answered them on the
+     wrong socket, hanging ChatAsync forever in readFrame (the approval
+     tests deadlocked -- deterministic under load; reproduced on
+     PRISTINE a85b074 in a scratch copy, so pre-existing, not introduced
+     here). serve() now uses a per-connection reader; cleanup closes all
+     accepted connections. This matches the runner topology, which forks
+     a second connection for the approver by design.
+
+3. internal/daemonclient/plan_approve_test.go:
+   - realParkedTerminalFixture(): the actual run-7 parked JSON, only
+     turn_id/task_id parameterized for harness matching.
+   - TestApproveFiresOnRealParkedShape: real-shape park -> exactly one
+     task.approve -> post-approval completed terminal. The old
+     marker-in-error gate fires NOTHING on this shape, so this test
+     would have caught the F-BENCH-R7 seam gap.
+   - TestNoApproveWithoutOptInOnRealShape: same real shape without
+     opt-in -> stall, zero task.approve (gate stays default-off).
+
+## Verification (all real runs, -count=1)
+
+- go build ./... -> exit 0
+- go test ./internal/daemonclient/ -run 'TestApprove|TestChatAsyncAutoApprove|
+  TestFindAndApprove|TestNoApprove|TestChatAsync' -count=1
+  -> ok 7.635s (real-shape pass, fake-shape pass, wire pass, failure-keeps-
+  park, disabled-by-default, resolved-state no-op, never-parked timeout,
+  all ChatAsync async suite) -- NOTE: the full package now runs in ~8s;
+  the >380s real-time park awaits in the task brief no longer reproduce
+  because the shared-reader deadlock (which the waits were masking) is
+  fixed.
+- go test ./internal/daemonclient/ -count=1 -> ok 8.343s (full package)
+- go test ./internal/runner/ ./internal/suite/ ./internal/checkers/
+  -count=1 -> ok 11.4s / 0.9s / 1.2s (no regressions)
+- gofmt: clean on all three touched files; git diff carries zero non-ASCII
+  additions (one pre-existing em-dash comment line rewritten to "--" in
+  passing).
+
+## Honest residuals
+
+- The fake's awaiting_approval task state is scripted; the daemon-side
+  park -> approve -> execute sequence remains proven only by the run-7
+  manual task.approve probe, not by this unit tier. An end-to-end u-plan
+  re-run is still the definitive closure for the F-BENCH-R7 graded
+  timeout verdict.
+- startApprovalHarness's re-arm watcher reads approveCalls from a
+  buffered respCh signal; harmless here, but a longer-lived fake might
+  want an explicit state machine.
