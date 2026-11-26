@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"runtime/debug"
 	"time"
 
 	"github.com/caimlas/meept/internal/llm"
@@ -69,7 +70,10 @@ func (c *Components) startToolSpillSweep() {
 				func() {
 					defer func() {
 						if r := recover(); r != nil {
-							c.Logger.Error("tool-spill ticker panic recovered", "recovered", r)
+							// A1-12: debug.Stack() per internal/daemon/AGENTS.md
+							// — stack-less recover logs make the typed-nil
+							// panic class undiagnosable.
+							c.Logger.Error("tool-spill ticker panic recovered", "recovered", r, "stack", string(debug.Stack()))
 						}
 					}()
 					c.runToolSpillSweep()

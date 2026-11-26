@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -194,7 +195,10 @@ func pollIntakeTickets(ctx context.Context, c *Components, poller *intake.GitHub
 	// job goroutine (same posture as the github re-arm ticker).
 	defer func() {
 		if r := recover(); r != nil {
-			logger.Error("intake poll tick panic recovered", "recovered", r)
+			// A1-12: capture debug.Stack() per internal/daemon/AGENTS.md — a
+			// recover that logs no stack makes typed-nil/wiring panics
+			// undiagnosable from the log.
+			logger.Error("intake poll tick panic recovered", "recovered", r, "stack", string(debug.Stack()))
 		}
 	}()
 
@@ -309,7 +313,9 @@ func projectPlanFromEvent(ctx context.Context, c *Components, cfg config.IntakeC
 	logger *slog.Logger, msg *models.BusMessage) {
 	defer func() {
 		if r := recover(); r != nil {
-			logger.Error("intake projection handler panic recovered", "recovered", r)
+			// A1-12: debug.Stack() per internal/daemon/AGENTS.md (typed-nil
+			// panic class is undiagnosable from a stack-less recover log).
+			logger.Error("intake projection handler panic recovered", "recovered", r, "stack", string(debug.Stack()))
 		}
 	}()
 
