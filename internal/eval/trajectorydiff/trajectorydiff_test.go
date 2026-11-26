@@ -357,11 +357,30 @@ func TestCompareThresholdBoundaryPasses(t *testing.T) {
 	}
 }
 
-func TestCompareEmptyGoldenPasses(t *testing.T) {
+// TestCompareEmptyGoldenFailsClosed pins bughunt 2026-11-25 A7-9: an
+// EMPTY golden must FAIL under every mode — previously in_order/any_order
+// returned PASS (score 1.0) against ANY actual sequence, so a fixture
+// that lost its steps vacuously passed the gate. The old test pinned the
+// defective behavior and was honestly replaced (2026-11-24 L10 precedent).
+func TestCompareEmptyGoldenFailsClosed(t *testing.T) {
 	a := []NormalizedCall{mustNorm(t, "tool_a", `{}`)}
-	r := Compare(nil, a, Options{Mode: MatchInOrder})
-	if !r.Passed {
-		t.Fatalf("got %+v, want Passed for empty golden", r)
+	for _, mode := range []MatchMode{MatchExact, MatchInOrder, MatchAnyOrder, "" /* default in_order */} {
+		r := Compare(nil, a, Options{Mode: mode})
+		if r.Passed {
+			t.Errorf("mode %q: empty golden must FAIL, got PASS %+v", mode, r)
+		}
+		if r.Score != 0.0 {
+			t.Errorf("mode %q: score = %v, want 0.0", mode, r.Score)
+		}
+		if !strings.Contains(r.Summary, "empty") {
+			t.Errorf("mode %q: summary must name the empty-golden reason, got %q", mode, r.Summary)
+		}
+	}
+	// Empty golden AND empty actual: still fail-closed — "nothing
+	// recorded" must never read as "everything matched".
+	r := Compare(nil, nil, Options{})
+	if r.Passed {
+		t.Errorf("empty golden vs empty actual must FAIL, got %+v", r)
 	}
 }
 

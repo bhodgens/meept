@@ -235,6 +235,75 @@ func TestMetricsEscapeRateAlwaysAllowSplit(t *testing.T) {
 	}
 }
 
+// TestMetricsEscapeRateIncludesAlwaysDerivedDirectly pins bughunt
+// 2026-11-25 A7-6: escape_rate_includes_always was built by inverting the
+// per-class rate and then OVERWRITTEN by maps.Copy of the excludes-always
+// map, so (a) shared classes reported includes == excludes and (b) a class
+// whose only action was always-attributed held the inverted 1-rate. The
+// fixture below makes the two rates DIFFER (immutable: 2 blocked / 4
+// actions = 0.5 includes, 1 blocked / 3 non-always = 1/3 excludes) and adds
+// an always-only class where the maps differ too.
+func TestMetricsEscapeRateIncludesAlwaysDerivedDirectly(t *testing.T) {
+	start := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+	acts := []ActionRecord{
+		{Seq: 1, At: start, Tool: "shell", Outcome: "success", Key: "K1", RiskClass: "immutable"},
+		{Seq: 2, At: start.Add(time.Second), Tool: "shell", Outcome: "success", Key: "K2", RiskClass: "immutable"},
+		{Seq: 3, At: start.Add(2 * time.Second), Tool: "shell", Outcome: "success", Key: "K3", RiskClass: "immutable"},
+		{Seq: 4, At: start.Add(3 * time.Second), Tool: "shell", Outcome: "success", Key: "K4", RiskClass: "immutable"},
+		{Seq: 5, At: start.Add(4 * time.Second), Tool: "shell", Outcome: "success", Key: "K5", RiskClass: "always_only"},
+	}
+	// Index 1 is the always-allow attribution (immutable); index 4 is the
+	// always-only class's single action. Verdicts cover every action.
+	spot := &SpotCheckResult{
+		Rate:             1.0,
+		Seed:             1,
+		Sampled:          []int{0, 1, 2, 3, 4},
+		EscapeCandidates: map[string]int{"immutable": 2, "always_only": 1},
+		Verdicts: []SpotCheckVerdict{
+			{Index: 0, WouldBlock: true, RiskClass: "immutable", Basis: BasisOracleDeny},
+			{Index: 1, WouldBlock: true, RiskClass: "immutable", Basis: BasisOracleDeny},
+			{Index: 2, WouldBlock: false, RiskClass: "immutable", Basis: BasisClear},
+			{Index: 3, WouldBlock: false, RiskClass: "immutable", Basis: BasisClear},
+			{Index: 4, WouldBlock: true, RiskClass: "always_only", Basis: BasisOracleDeny},
+		},
+	}
+	m := Compute(RegimeAutonomousSampled, Scenario{ID: "auto"}, ComputeOptions{
+		Terminal:         TerminalState{Attempts: 1, Completeds: 1, Recorded: true}, //nolint:misspell // field name is public
+		Actions:          acts,
+		Sample:           spot,
+		AlwaysAttributed: map[int]bool{1: true, 4: true},
+	})
+
+	// includes-always = blocked_all / denoms_all over EVERY action:
+	// immutable 2/4, always_only 1/1.
+	if !FloatEq(m.EscapeRateIncludesAlways["immutable"], 2.0/4.0) {
+		t.Errorf("includes[immutable] = %v, want 0.5 (2 blocked / 4 actions)", m.EscapeRateIncludesAlways["immutable"])
+	}
+	if !FloatEq(m.EscapeRateIncludesAlways["always_only"], 1.0) {
+		t.Errorf("includes[always_only] = %v, want 1.0 (old bug wrote the inverted 1-rate or dropped the class)", m.EscapeRateIncludesAlways["always_only"])
+	}
+	// excludes-always = over non-always actions only: immutable 1/3, and
+	// always_only has NO denominator (its only action is always-attributed)
+	// so it must be absent, never a fabricated 0.
+	if !FloatEq(m.EscapeRateExcludesAlways["immutable"], 1.0/3.0) {
+		t.Errorf("excludes[immutable] = %v, want 1/3", m.EscapeRateExcludesAlways["immutable"])
+	}
+	if _, ok := m.EscapeRateExcludesAlways["always_only"]; ok {
+		t.Errorf("excludes[always_only] present with an empty non-always denominator — fabricated row")
+	}
+	// The two maps must DIFFER for the shared class — the A7-6 failure mode
+	// was maps.Copy silently equalizing them.
+	if FloatEq(m.EscapeRateIncludesAlways["immutable"], m.EscapeRateExcludesAlways["immutable"]) {
+		t.Errorf("includes == excludes (%v) — the A7-6 overwrite regression is back", m.EscapeRateIncludesAlways["immutable"])
+	}
+	// Includes must equal the plain per-class rate for every class (R0 B.3).
+	for c, v := range m.EscapeRateIncludesAlways {
+		if !FloatEq(v, m.EscapeRate[c]) {
+			t.Errorf("includes[%s] = %v, want EscapeRate[%s] = %v", c, v, c, m.EscapeRate[c])
+		}
+	}
+}
+
 func TestMetricsEmptyEscapeFeedsStayEmpty(t *testing.T) {
 	m := Compute(RegimePerAction, Scenario{ID: "S"}, ComputeOptions{
 		Terminal: TerminalState{Attempts: 1, Completeds: 1, Recorded: true}, //nolint:misspell // field name is public

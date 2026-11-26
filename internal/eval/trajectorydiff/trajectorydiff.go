@@ -187,7 +187,9 @@ func StepsFromGolden(calls []NormalizedCall) []eval.Step {
 // Compare scores the actual tool-call sequence against the golden one
 // under opts and returns the verdict plus per-step diagnostics. Compare
 // never mutates its inputs and never fails: an imperfect match is a low
-// Score, not an error.
+// Score, not an error. An EMPTY golden fails closed under every mode
+// (bughunt A7-9): a vacuous golden is a lost/truncated fixture, never a
+// pass.
 func Compare(golden, actual []NormalizedCall, opts Options) Result {
 	mode := opts.Mode
 	if mode == "" {
@@ -200,6 +202,25 @@ func Compare(golden, actual []NormalizedCall, opts Options) Result {
 
 	golden = applyIgnoreCallSet(golden, opts.IgnoreCallSet)
 	actual = applyIgnoreCallSet(actual, opts.IgnoreCallSet)
+
+	// Fail-closed on an empty golden (bughunt 2026-11-25 A7-9): a vacuous
+	// golden — a fixture that lost its steps or a caller that failed to
+	// load them — must NEVER pass under in_order/any_order/exact. The
+	// comparator returns an explicit FAIL with a named reason instead.
+	if len(golden) == 0 {
+		steps := make([]StepDiff, 0, len(actual))
+		for j := range actual {
+			a := actual[j]
+			steps = append(steps, StepDiff{Actual: &a, Matched: false})
+		}
+		return Result{
+			Passed:  false,
+			Score:   0.0,
+			Mode:    mode,
+			Steps:   steps,
+			Summary: fmt.Sprintf("%s: FAIL — golden sequence is empty; a vacuous golden never passes (fail-closed)", mode),
+		}
+	}
 
 	var score float64
 	var steps []StepDiff

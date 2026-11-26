@@ -2405,6 +2405,17 @@ func nullableRawJSON(j json.RawMessage) any {
 
 // ClaimNextByID attempts to claim a specific job by ID.
 // Returns the job if successfully claimed, nil if already claimed or not found.
+//
+// A5-7 (bughunt 2026-11-25): the claim UPDATE carries the same due_at /
+// next_retry_at predicates as ClaimNextForAgent's SELECT. The slow claim
+// path (PersistentQueue.Claim) filtered future-due/backoff rows only in
+// Go, between the SELECT page and this claim — a job claimed, failed, and
+// re-queued into backoff in that window was claimed by the first worker
+// despite next_retry_at, bypassing the retry delay and the parked-row
+// sentinel. Folding the predicate into the UPDATE makes the claim atomic
+// against requeue/backoff races: a row that moved out of "claimable now"
+// between select and claim is refused (RowsAffected 0), exactly like the
+// state='pending' gate already refuses a concurrent claim.
 func (s *Store) ClaimNextByID(jobID, workerID string) (*Job, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -2419,11 +2430,14 @@ func (s *Store) ClaimNextByID(jobID, workerID string) (*Job, error) {
 	// must present.
 	claimToken := newClaimToken()
 
-	// Try to claim the specific job
+	// Try to claim the specific job — only while it is still pending AND
+	// due (no future due_at, no live retry backoff). See A5-7 above.
 	result, err := tx.Exec(`
 		UPDATE jobs SET state = 'claimed', claimed_by = ?, claim_token = ?, updated_at = ?
-		WHERE id = ? AND state = 'pending'`,
-		workerID, claimToken, now, jobID)
+		WHERE id = ? AND state = 'pending'
+		  AND (due_at IS NULL OR due_at <= ?)
+		  AND (next_retry_at IS NULL OR next_retry_at <= ?)`,
+		workerID, claimToken, now, jobID, now, now)
 	if err != nil {
 		return nil, fmt.Errorf("failed to claim job: %w", err)
 	}

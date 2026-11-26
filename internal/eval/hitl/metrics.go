@@ -34,7 +34,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"maps"
 	"math"
 	"sort"
 	"strings"
@@ -337,17 +336,15 @@ func computeEscapeRates(m *RegimeMetrics, opts ComputeOptions) {
 			m.EscapeRateExcludesAlways[c] = float64(blockedExAlways[c]) / float64(denomsExAlways[c])
 		}
 	}
-	for c := range blocked {
-		if _, ok := m.EscapeRateIncludesAlways[c]; !ok {
-			m.EscapeRateIncludesAlways[c] = m.EscapeRate[c]
-		}
+	// R0 B.3 "report both": includes-always is the plain per-class escape
+	// rate over EVERY classified action (bughunt 2026-11-25 A7-6: the old
+	// code inverted blocked-not-in-denoms into it and then maps.Copy'd the
+	// EXCLUDES values over the whole map, so includes silently equalled
+	// excludes for shared classes and held 1-rate for always-only classes).
+	// It is computed directly: blocked_all[c] / denoms_all[c] == EscapeRate[c].
+	for _, c := range classes {
+		m.EscapeRateIncludesAlways[c] = m.EscapeRate[c]
 	}
-	for c := range blockedExAlways {
-		if _, ok := m.EscapeRateExcludesAlways[c]; ok {
-			m.EscapeRateIncludesAlways[c] = m.EscapeRateExcludesAlways[c]
-		}
-	}
-	maps.Copy(m.EscapeRateIncludesAlways, m.EscapeRateExcludesAlways)
 }
 
 // ---------------------------------------------------------------------------

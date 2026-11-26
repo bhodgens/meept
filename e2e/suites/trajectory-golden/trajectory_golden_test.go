@@ -33,15 +33,13 @@ const fixtureName = "trajectory-golden-basic"
 // trajectoryGoldenBasicScript is the canonical suite scenario:
 // read_file -> file_write -> read_file verify. It is the EXACT script
 // both the fixture-authoring dispatch and every suite replay run, so a
-// regenerated fixture and a live replay can never drift apart.
-func trajectoryGoldenBasicScript(f *harness.FakeLLM) {
-	f.SetPostToolText("scenario finished")
-	f.EnqueueToolCalls(
-		harness.ToolCall{Name: "read_file", Arguments: `{"path":"/tmp/meept-trajectory-golden-basic/input.txt"}`},
-		harness.ToolCall{Name: "file_write", Arguments: `{"path":"/tmp/meept-trajectory-golden-basic/out.txt","content":"golden","direct":true}`},
-		harness.ToolCall{Name: "read_file", Arguments: `{"path":"/tmp/meept-trajectory-golden-basic/out.txt"}`},
-	)
-}
+// regenerated fixture and a live replay can never drift apart. The
+// script itself lives in e2e/harness/golden_scenarios.go and is
+// registered into the golden-regenerate registry there (bughunt
+// 2026-11-25 A7-8: the suite-local copy meant the regen registry stayed
+// empty and `make golden-regenerate` always refused); this alias keeps
+// the suite call sites readable.
+var trajectoryGoldenBasicScript = harness.TrajectoryGoldenBasicScript
 
 // committedFixturePath resolves the committed fixture from the repo root
 // (walked up from the test's working directory -- go test runs a package

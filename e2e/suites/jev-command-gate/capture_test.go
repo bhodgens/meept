@@ -247,6 +247,55 @@ func TestGateCapture02e_UnansweredAskEvictsNeverFabricates(t *testing.T) {
 	}
 }
 
+// TestGateCapture02e2_ResolveIsChokepointBound pins bughunt 2026-11-25
+// A7-10: Store.resolve consumed ANY pending for the command regardless of
+// which chokepoint armed it, and a lost pending landed a row with an EMPTY
+// command. Two failure shapes:
+//   - a permission_table_ask armed for command X must NOT be consumed (or
+//     mislabeled under decision_gate_deny) by a chokepoint-1 resolution;
+//     the ask stays armed for its own resolution;
+//   - a chokepoint-1 resolution with no armed pending (restart/eviction)
+//     is dropped with a warn, never a row whose Command is "".
+func TestGateCapture02e2_ResolveIsChokepointBound(t *testing.T) {
+	store := openCaptureStore(t)
+	ctx := context.Background()
+	cmd := "git push origin main"
+
+	// Arm at chokepoint 2 only (the permission-table ask).
+	store.PermissionTableAsk(cmd)
+
+	// A chokepoint-1 resolution for the SAME command must not steal the
+	// ask's pending nor land a mislabeled row.
+	store.DecisionGateResolved(ctx, cmd, gatecapture.DecisionAllowed, "peercred:pid=1,uid=1")
+	recs, _ := store.ListRecords(ctx, gatecapture.ListOptions{})
+	if len(recs) != 0 {
+		t.Fatalf("cross-chokepoint resolution must record nothing; got %d rows: %+v", len(recs), recs)
+	}
+
+	// The ask is still armed and resolves correctly under its own chokepoint.
+	store.PermissionTableResolved(ctx, cmd, gatecapture.DecisionDenied, "slack:U9")
+	recs, _ = store.ListRecords(ctx, gatecapture.ListOptions{})
+	if len(recs) != 1 {
+		t.Fatalf("want exactly 1 record after the bound ask resolution, got %d", len(recs))
+	}
+	if recs[0].Chokepoint != gatecapture.ChokepointPermissionTableAsk || recs[0].Command != cmd {
+		t.Fatalf("row mislabeled: chokepoint=%q command=%q", recs[0].Chokepoint, recs[0].Command)
+	}
+
+	// Lost pending (never armed at chokepoint 1): dropped, never an
+	// empty-command row.
+	store.DecisionGateResolved(ctx, "rm -rf /tmp/evicted", gatecapture.DecisionAllowed, "peercred:pid=2,uid=2")
+	recs, _ = store.ListRecords(ctx, gatecapture.ListOptions{})
+	if len(recs) != 1 {
+		t.Fatalf("resolution with no pending must not land a row; got %d rows", len(recs))
+	}
+	for _, r := range recs {
+		if r.Command == "" {
+			t.Fatal("empty-command row landed — the A7-10 defect")
+		}
+	}
+}
+
 // ---------- DPO export + near-miss ----------
 
 // TestGateCapture02f_DPOExportShapeAndNearMiss covers T4+T5: the frozen

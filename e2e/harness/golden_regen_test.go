@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/caimlas/meept/internal/eval/trajectorydiff"
 )
 
 // TestGoldenRegenRefusesWhenSuiteMissing (T3 refusal case): the suite
@@ -134,6 +136,29 @@ func TestGoldenRegenSuiteGateRunsFirst(t *testing.T) {
 	}
 	if string(data) != "{\"schema_version\":1}\n" {
 		t.Fatalf("fixture was overwritten on suite failure:\n%s", data)
+	}
+}
+
+// TestGoldenRegenRegistryHasCanonicalScenario pins bughunt 2026-11-25
+// A7-8: the regen registry used to be empty at runtime (zero callers of
+// RegenerateScenarioScript), so `make golden-regenerate SCENARIO=...`
+// ALWAYS refused after the suite gate had already run green. The
+// canonical trajectory-golden-basic scenario must now be registered via
+// golden_scenarios.go's init, with the exact script + match the suite
+// replays.
+func TestGoldenRegenRegistryHasCanonicalScenario(t *testing.T) {
+	script, ok := regenRegistry[ScenarioTrajectoryGoldenBasic]
+	if !ok {
+		t.Fatalf("scenario %q not registered for regeneration (A7-8 regression: golden-regenerate would refuse)", ScenarioTrajectoryGoldenBasic)
+	}
+	if script.Script == nil {
+		t.Fatal("registered script has nil FakeLLM script")
+	}
+	if script.Match.Mode != trajectorydiff.MatchInOrder {
+		t.Fatalf("match mode = %v, want in_order (the fixture's block)", script.Match.Mode)
+	}
+	if got := sortedRegenScenarios(); len(got) == 0 || got[0] != ScenarioTrajectoryGoldenBasic {
+		t.Fatalf("sortedRegenScenarios = %v, want the canonical scenario present", got)
 	}
 }
 

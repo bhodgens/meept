@@ -114,6 +114,7 @@ const (
 // resolution to land the row.
 type pendingGate struct {
 	command         string
+	chokepoint      string // the chokepoint that armed it ("" = unattributed prior from the score gate)
 	contextBlob     string
 	hasPrior        bool
 	priorScore      float64
@@ -273,7 +274,7 @@ func (s *Store) PermissionTableResolved(_ context.Context, command, decision, ap
 		return
 	}
 	s.mu.Lock()
-	p := s.popPendingLocked(command)
+	p := s.popPendingForLocked(command, ChokepointPermissionTableAsk)
 	s.mu.Unlock()
 	if p == nil {
 		slog.Debug("gatecapture: ask resolution without an armed ask; dropped",
@@ -286,8 +287,10 @@ func (s *Store) PermissionTableResolved(_ context.Context, command, decision, ap
 // ---- internals ----
 
 // armPendingFor arms (or refreshes) the pending for command without
-// disturbing an already-stashed prior.
-func (s *Store) armPendingFor(command, _ string) {
+// disturbing an already-stashed prior. The chokepoint is stamped so a
+// later resolve can only consume a pending attributable to its own
+// chokepoint (A7-10).
+func (s *Store) armPendingFor(command, chokepoint string) {
 	if s == nil || strings.TrimSpace(command) == "" {
 		return
 	}
@@ -298,9 +301,13 @@ func (s *Store) armPendingFor(command, _ string) {
 	}
 	if p, ok := s.pending[command]; ok {
 		p.ts = time.Now() // refresh; keep the prior
+		// Last arm wins the attribution: an unattributed prior (score
+		// gate seam) gains the chokepoint; a re-arm by the other
+		// chokepoint reclaims attribution for the currently live gate.
+		p.chokepoint = chokepoint
 		return
 	}
-	s.insertPendingLocked(&pendingGate{command: command, ts: time.Now()})
+	s.insertPendingLocked(&pendingGate{command: command, chokepoint: chokepoint, ts: time.Now()})
 }
 
 // armPending inserts p, evicting the oldest entry past maxPending and
@@ -351,10 +358,17 @@ func (s *Store) insertPendingLocked(p *pendingGate) {
 	s.pending[p.command] = p
 }
 
-// popPending removes and returns the pending for command. Caller holds s.mu.
-func (s *Store) popPendingLocked(command string) *pendingGate {
+// popPendingForLocked removes and returns the pending for command ONLY if
+// it is attributable to the resolving chokepoint (or is the unattributed
+// prior stashed by the score-gate Recorder seam). Binds resolve to the
+// specific pending record so a chokepoint-2 ask can never be consumed by a
+// chokepoint-1 resolution (bughunt 2026-11-25 A7-10). Caller holds s.mu.
+func (s *Store) popPendingForLocked(command, chokepoint string) *pendingGate {
 	p, ok := s.pending[command]
 	if !ok {
+		return nil
+	}
+	if p.chokepoint != "" && p.chokepoint != chokepoint {
 		return nil
 	}
 	delete(s.pending, command)
@@ -362,9 +376,12 @@ func (s *Store) popPendingLocked(command string) *pendingGate {
 }
 
 // resolve lands the record for a chokepoint resolution (chokepoint 1). The
-// pending is consumed when present; a lost pending (restart, eviction)
-// still lands the record with the bare-command C2 serialization and the
-// documented zero-value prior - never a guessed context.
+// pending is consumed only when it is armed for THIS chokepoint (or is the
+// score gate's unattributed prior). A lost pending (restart, eviction) or a
+// pending armed by the other chokepoint is dropped with a Warn: the record
+// never lands with an EMPTY command, because an empty command is not a
+// context (bughunt 2026-11-25 A7-10; the package doc's "never a guessed
+// context" contract).
 func (s *Store) resolve(chokepoint, command, decision, approver string) {
 	if s == nil {
 		return
@@ -377,8 +394,13 @@ func (s *Store) resolve(chokepoint, command, decision, approver string) {
 		return
 	}
 	s.mu.Lock()
-	p := s.popPendingLocked(command)
+	p := s.popPendingForLocked(command, chokepoint)
 	s.mu.Unlock()
+	if p == nil {
+		slog.Warn("gatecapture: resolution without an armed pending for this chokepoint; dropped",
+			"chokepoint", chokepoint)
+		return
+	}
 	s.land(chokepoint, p, decision, approver)
 }
 

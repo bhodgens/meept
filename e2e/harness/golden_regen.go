@@ -17,9 +17,22 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
+
+// sortedRegenScenarios lists the registered regeneration scenarios in
+// stable order for the refusal message (A7-8: the refusal must name
+// which suites support regeneration).
+func sortedRegenScenarios() []string {
+	out := make([]string, 0, len(regenRegistry))
+	for name := range regenRegistry {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
 
 // Golden regen env keys (read by GoldenRegenFromEnv, set by the
 // Makefile golden-regenerate targets).
@@ -75,7 +88,7 @@ func RegenerateGolden(t testing.TB, opts RegenOptions) error {
 	}
 	script, ok := regenRegistry[opts.Scenario]
 	if !ok {
-		return fmt.Errorf("golden-regenerate: scenario %q has no registered regeneration script; the owning suite must register one via RegenerateScenarioScript", opts.Scenario)
+		return fmt.Errorf("golden-regenerate: scenario %q has no registered regeneration script; scenarios with one: %v (the owning suite must register via RegenerateScenarioScript — see golden_scenarios.go)", opts.Scenario, sortedRegenScenarios())
 	}
 
 	// 1. Suite first: the suite replays the script and compares against
