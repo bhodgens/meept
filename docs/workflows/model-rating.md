@@ -23,6 +23,10 @@ this feature's new surfaces (table columns, API fields, CLI columns) say judge.
    bus event adds judged identities (reviewed model id, judge agent/model ids,
    cycle, is_final, trace id).
 3. The metrics collector persists one `model_review_verdicts` row per verdict.
+4. Rollups (HTTP/CLI/breakdown/counts) aggregate `is_final = 1` rows only
+   (L7, bughunt 2026-11-24): a `needs_info` round is superseded by a later
+   cycle of the same step, so its rows would double-count transient defects.
+   `FinalVerdictsForStep` stays full-fidelity (raw last-cycle rows).
 
 ## Rubric scopes and attribution
 

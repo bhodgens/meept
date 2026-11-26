@@ -352,6 +352,102 @@ func TestVR_SCOPE_1_WorkflowExclusionExplicit(t *testing.T) {
 	}
 }
 
+// VR-L7-1 (bughunt 2026-11-24 L7): rollups count FINAL cycles only. A
+// needs_info review round (is_final=0) is superseded by a later cycle of the
+// same step; counting its rows inflated defect totals and deflated pass
+// rates. Applies to QueryReviewVerdicts (both scope variants),
+// CountReviewVerdicts, and QueryReviewVerdictBreakdown. FinalVerdictsForStep
+// stays full-fidelity — it reads the last cycle's raw rows regardless of the
+// finality flag.
+func TestVR_L7_1_RollupsCountFinalCyclesOnly(t *testing.T) {
+	store := newGateStore(t)
+	now := time.Now().UTC()
+
+	mk := func(r metrics.ReviewVerdictRecord) {
+		t.Helper()
+		r.Timestamp = now
+		if err := store.RecordReviewVerdict(r); err != nil {
+			t.Fatalf("RecordReviewVerdict(%s/%s final=%v): %v", r.ReviewedModelID, r.Category, r.IsFinal, err)
+		}
+	}
+	// l-m: one FINAL defect + one FINAL pass, plus two NON-FINAL (needs_info)
+	// defect rows that must not appear in any rollup.
+	mk(rec("l1", 1, true, "l-m", "j", "MR-LC1", "model", "logic_error", "blocking"))
+	mk(rec("l2", 1, true, "l-m", "j", "", "model", "pass", ""))
+	mk(rec("l1", 0, false, "l-m", "j", "MR-LC1", "model", "logic_error", "blocking"))
+	mk(rec("l1", 0, false, "l-m", "j", "MR-HD1", "model", "security_defect", "critical"))
+	// Non-final workflow row: excluded from totals too (both filters AND in).
+	mk(rec("l3", 0, false, "", "j", "MR-WF1", "workflow", "incomplete_implementation", "blocking"))
+	mk(rec("l4", 1, true, "", "j", "MR-WF1", "workflow", "incomplete_implementation", "blocking"))
+
+	rows, err := store.QueryReviewVerdicts(metrics.ReviewVerdictQuery{GroupBy: "model"})
+	if err != nil {
+		t.Fatalf("QueryReviewVerdicts(model): %v", err)
+	}
+	rl, ok := findRow(t, rows, "l-m")
+	if !ok {
+		t.Fatalf("no group row for l-m in %v", rows)
+	}
+	// 2 finals (1 defect + 1 pass); the 2 non-final defects are gone.
+	wantCounts(t, rl, 2, 1, 0.5)
+
+	incl, err := store.QueryReviewVerdicts(metrics.ReviewVerdictQuery{GroupBy: "model", IncludeWorkflow: true})
+	if err != nil {
+		t.Fatalf("QueryReviewVerdicts(model, IncludeWorkflow): %v", err)
+	}
+	var total int64
+	for _, r := range incl {
+		total += r.Verdicts
+	}
+	// 3 finals total (l-m 2 + workflow 1 final); the non-final workflow row
+	// and l-m's two non-final rows are excluded.
+	if total != 3 {
+		t.Errorf("IncludeWorkflow finals total = %d, want 3 (rows: %+v)", total, incl)
+	}
+
+	cnt, err := store.CountReviewVerdicts(metrics.ReviewVerdictQuery{})
+	if err != nil {
+		t.Fatalf("CountReviewVerdicts: %v", err)
+	}
+	if cnt != 2 {
+		t.Errorf("CountReviewVerdicts (non-workflow) = %d, want 2 finals", cnt)
+	}
+	cntAll, err := store.CountReviewVerdicts(metrics.ReviewVerdictQuery{IncludeWorkflow: true})
+	if err != nil {
+		t.Fatalf("CountReviewVerdicts(IncludeWorkflow): %v", err)
+	}
+	if cntAll != 3 {
+		t.Errorf("CountReviewVerdicts(IncludeWorkflow) = %d, want 3 finals", cntAll)
+	}
+
+	breakdown, err := store.QueryReviewVerdictBreakdown(now.Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("QueryReviewVerdictBreakdown: %v", err)
+	}
+	bd := map[string]int64{}
+	for _, r := range breakdown {
+		if r.Model == "l-m" {
+			bd[r.Category] = r.Count
+		}
+	}
+	if bd["logic_error"] != 1 {
+		t.Errorf("breakdown l-m/logic_error = %d, want 1 (non-final cycle-0 row excluded): %+v", bd["logic_error"], breakdown)
+	}
+	if bd["security_defect"] != 0 {
+		t.Errorf("breakdown l-m/security_defect = %d, want 0 (non-final-only category): %+v", bd["security_defect"], breakdown)
+	}
+
+	// Full-fidelity raw read: FinalVerdictsForStep still returns the LAST
+	// cycle's rows untouched by the rollup filter (l1's final cycle is 1).
+	raw, err := store.FinalVerdictsForStep("l1")
+	if err != nil {
+		t.Fatalf("FinalVerdictsForStep(l1): %v", err)
+	}
+	if len(raw) != 1 || raw[0].Category != "logic_error" || !raw[0].IsFinal {
+		t.Errorf("FinalVerdictsForStep(l1) = %+v, want the single final-cycle row", raw)
+	}
+}
+
 // VR-VERSION-1: every recorded verdict stamps the current rubric catalog
 // version when RubricVersion is empty on input, and honors an explicit
 // version when set. Purpose: a future catalog bump must be visible in stored

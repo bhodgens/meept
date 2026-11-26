@@ -224,6 +224,13 @@ func rubricStatements() map[string]string {
 // QueryReviewVerdicts aggregates model_review_verdicts into per-group counts.
 // PassRate = pass-category rows / total rows in the group (0 when empty).
 // Workflow-scope rows are excluded unless q.IncludeWorkflow is set.
+//
+// L7 (bughunt 2026-11-24): rollups count FINAL cycles only (is_final = 1).
+// A needs_info review round is never terminal — the step stays under review
+// and is re-reviewed on a later cycle, so its verdict rows are superseded.
+// Counting them made one step's transient findings inflate a model's defect
+// totals and deflate its pass rate. Raw per-step reads (FinalVerdictsForStep)
+// stay full-fidelity; the is_final=0 rows remain queryable there.
 func (s *Store) QueryReviewVerdicts(q ReviewVerdictQuery) ([]ReviewVerdictRow, error) {
 	return queryReviewVerdicts(s.db, q)
 }
@@ -242,24 +249,21 @@ func queryReviewVerdicts(db *sqlx.DB, q ReviewVerdictQuery) ([]ReviewVerdictRow,
 			SUM(CASE WHEN category != 'pass' THEN 1 ELSE 0 END) AS defects,
 			SUM(CASE WHEN category = 'pass' THEN 1 ELSE 0 END) AS passes
 		FROM model_review_verdicts
-		WHERE scope != 'workflow'`, col) //nolint:gosec // col is from a fixed whitelist
+		WHERE scope != 'workflow' AND is_final = 1`, col) //nolint:gosec // col is from a fixed whitelist
 	if q.IncludeWorkflow {
 		query = fmt.Sprintf(`SELECT %[1]s AS grp,
 			COUNT(*) AS verdicts,
 			SUM(CASE WHEN category != 'pass' THEN 1 ELSE 0 END) AS defects,
 			SUM(CASE WHEN category = 'pass' THEN 1 ELSE 0 END) AS passes
-		FROM model_review_verdicts`, col) //nolint:gosec // col is from a fixed whitelist
+		FROM model_review_verdicts
+		WHERE is_final = 1`, col) //nolint:gosec // col is from a fixed whitelist
 	}
 	args := []any{}
 	if !q.Since.IsZero() {
-		// The non-workflow base query already carries a WHERE clause
-		// (scope != 'workflow'); the time filter must AND into it rather
-		// than open a second WHERE.
-		if q.IncludeWorkflow {
-			query += " WHERE timestamp >= ?"
-		} else {
-			query += " AND timestamp >= ?"
-		}
+		// The base query always carries a WHERE clause now (either the
+		// scope filter plus is_final, or is_final alone); the time filter
+		// must AND into it rather than open a second WHERE.
+		query += " AND timestamp >= ?"
 		args = append(args, q.Since.UTC().Format(time.RFC3339))
 	}
 	query += " GROUP BY grp ORDER BY grp"
@@ -300,9 +304,9 @@ func queryReviewVerdicts(db *sqlx.DB, q ReviewVerdictQuery) ([]ReviewVerdictRow,
 // default (workflow-excluding) count. Unlike QueryReviewVerdicts this is a
 // plain COUNT, not a GROUP BY rollup.
 func (s *Store) CountReviewVerdicts(q ReviewVerdictQuery) (int64, error) {
-	query := `SELECT COUNT(*) FROM model_review_verdicts WHERE scope != 'workflow'`
+	query := `SELECT COUNT(*) FROM model_review_verdicts WHERE scope != 'workflow' AND is_final = 1`
 	if q.IncludeWorkflow {
-		query = `SELECT COUNT(*) FROM model_review_verdicts WHERE 1=1`
+		query = `SELECT COUNT(*) FROM model_review_verdicts WHERE is_final = 1`
 	}
 	args := []any{}
 	if !q.Since.IsZero() {
@@ -359,9 +363,12 @@ func queryReviewVerdictBreakdown(db *sqlx.DB, since time.Time) ([]ReviewVerdictB
 // statement the read path executes — if the two could drift, the pin would be
 // testing a query that never runs.
 func reviewVerdictBreakdownSQL(since time.Time) (string, []any) {
+	// L7 (bughunt 2026-11-24): final cycles only, matching the other
+	// rollups; superseded (is_final=0) needs-info rounds must not inflate
+	// per-(model, category) counts.
 	query := `SELECT reviewed_model_id AS model, category, COUNT(*) AS count
 		FROM model_review_verdicts
-		WHERE scope != 'workflow' AND reviewed_model_id != ''`
+		WHERE scope != 'workflow' AND reviewed_model_id != '' AND is_final = 1`
 	args := []any{}
 	if !since.IsZero() {
 		query += ` AND timestamp >= ?`
