@@ -277,6 +277,25 @@ func (h *SubmitHandler) buildAck(req ChatSubmitRequest) (any, error) {
 	if ownerSessionID != "" {
 		payloadSessionID = ownerSessionID
 	}
+	// Bughunt 11-24 H9: the canonicalization/validation above resolves a
+	// thread-scoped id ("<base>-thread-<topic>-<n>") to its OWNING
+	// session, so both conversation_id and session_id in this payload are
+	// the collapsed BASE shapes. ChatHandler.handleRequest carries a
+	// 2026-11-23 exemption for '-thread-' ids (the thread's LLM
+	// continuity lane is keyed by the full thread id) — but it never
+	// sees one coming from chat.submit: the exemption was structurally
+	// unreachable through this path and thread submits collapsed to the
+	// parent conversation (live class: GUI/TUI submits into a thread).
+	// Stamp the ORIGINAL thread-scoped id (whichever input carried it,
+	// session_id preferred) into thread_session_id so handleRequest can
+	// restore the lane. Additive + omitted unless present: a NON-thread
+	// submit's payload bytes stay byte-identical.
+	threadScoped := ""
+	if strings.Contains(req.SessionID, session.ThreadIDSeparator) {
+		threadScoped = req.SessionID
+	} else if strings.Contains(req.ConversationID, session.ThreadIDSeparator) {
+		threadScoped = req.ConversationID
+	}
 	payload := map[string]any{
 		"message":         req.Message,
 		"conversation_id": conversationID,
@@ -285,6 +304,9 @@ func (h *SubmitHandler) buildAck(req ChatSubmitRequest) (any, error) {
 		"source_client":   req.SourceClient,
 		"model":           req.Model,
 		"turn_id":         turnID,
+	}
+	if threadScoped != "" {
+		payload["thread_session_id"] = threadScoped
 	}
 	if len(req.Parts) > 0 {
 		payload["parts"] = req.Parts

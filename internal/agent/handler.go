@@ -295,6 +295,15 @@ type ChatRequest struct {
 	// TurnRegistry (Register/Touch/Complete); the legacy `chat` path
 	// leaves it empty and stays UNTRACKED.
 	TurnID string `json:"turn_id,omitempty"`
+	// ThreadSessionID is the ORIGINAL thread-scoped id ('<conv>-thread-
+	// <topic>-<n>') the submit carried, stamped by rpc.chat.submit when
+	// either input id contained the thread separator (bughunt 11-24 H9).
+	// The canonical conversation_id/session_id fields carry the RESOLVED
+	// (base) shapes — the thread id would otherwise never reach the
+	// 2026-11-23 exemption below and thread submits collapsed onto the
+	// parent conversation's continuity lane. Additive + omitempty: legacy
+	// publishers and non-thread submits leave it empty (unchanged shape).
+	ThreadSessionID string `json:"thread_session_id,omitempty"`
 }
 
 // ChatResponse is the payload for chat.response messages.
@@ -987,8 +996,26 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 	// resolves: an empty id still mints a fresh conversation id, and an
 	// unknown non-empty id passes through untouched.
 	conversationID := req.ConversationID
+	// Bughunt 11-24 H9: a thread-scoped chat.submit arrives here with the
+	// COLLAPSED base ids — rpc/chat_submit.go resolves '<conv>-thread-…'
+	// through ResolveThreadConversationID, so neither conversation_id nor
+	// session_id carries the thread separator and the 11-23 exemption was
+	// structurally unreachable through the submit path (GUI/TUI submits
+	// into a thread collapsed onto the parent's continuity lane). The
+	// submit now stamps the ORIGINAL thread id into thread_session_id;
+	// when present it IS the canonical identity (same shape a direct
+	// caller passes, pinned by
+	// TestHandleRequestThreadScopedSessionIDKeepsThreadIdentity) and it
+	// suppresses the base-rewrite below. Absent (legacy publishers,
+	// non-thread submits) everything is byte-identical to the old shape.
+	threadScoped := ""
+	if strings.Contains(req.ThreadSessionID, session.ThreadIDSeparator) {
+		threadScoped = req.ThreadSessionID
+		conversationID = req.ThreadSessionID
+	}
 	if req.SessionID != "" && h.sessionStore != nil &&
-		!strings.Contains(req.SessionID, session.ThreadIDSeparator) {
+		!strings.Contains(req.SessionID, session.ThreadIDSeparator) &&
+		threadScoped == "" {
 		// Thread-scoped session ids ('<conv>-thread-<topic>-<n>') are
 		// EXEMPT from the rewrite (bughunt 2026-11-23): mapping one
 		// through ResolveThreadConversationID unwraps it to the parent
