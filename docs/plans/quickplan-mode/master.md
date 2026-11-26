@@ -86,6 +86,20 @@ IntentQuickPlan IntentType = "quickplan"
 // Consumers: internal/plan manager mode switch
 ```
 
+> **AMENDED-BY:** docs/plans/20261125-plan-contract-quickplan/ (owner
+> rulings D1-D5, contracts C-1..C-5; landed ed3d182d..90c5f993). The mode
+> string and decomposition semantics above stay, but Contract 2's
+> EXECUTION posture is superseded: a quick_plan dispatch is now one
+> recorded contract — the brief plan row runs draft -> approved ->
+> executing through the plan machine (SubmitAndApproveNoSynthesis +
+> AdoptTask), the plan's single task IS the execution (no separate
+> createTask orphan), completion is the task rollup (OnTaskCompleted ->
+> completePlan), oneshot is the default with `approval_requested`
+> (model-adjudicated, never regex) as the only pause, and sequential
+> compound intents ride this same lane (`Method:
+> "compound_quickplan"`). RequiresPlanning stays true. See
+> docs/workflows/plans.md "Quick Plan" for the shipped contract.
+
 ### Contract 3: Orchestration-cue guard (shared regex)
 
 ```go

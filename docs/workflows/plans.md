@@ -26,6 +26,62 @@ When mode is `threshold`, a plan is triggered when any of these conditions are m
 
 Use `/plan <description>` in chat to force plan creation regardless of mode setting.
 
+## Quick Plan (`quick_plan`)
+
+The quickplan lane (intent `quickplan`, mode `quick_plan`) turns a
+"plan it and just do it" request into ONE executed contract. Plan-contract
+tree `docs/plans/20261125-plan-contract-quickplan/` (owner rulings D1-D5,
+tree `docs/plans/quickplan-mode/` remains the intent/mode taxonomy
+reference) fixed its execution semantics:
+
+- **The plan row IS the recorded contract.** Dispatch creates the brief
+  plan row and drives it through the full plan machine — `draft ->
+  pending_approval -> approved` (system-approved, signoff `by="system"`,
+  via `SubmitAndApproveNoSynthesis`) — then binds the dispatched task to
+  it with `AdoptTask`, moving the row to `executing`. The row never
+  parks at `pending_approval` on the default lane and no plan row is
+  ever left as a zombie beside an unlinked task.
+- **One or more tasks per plan; rollup completion.** Task progress is
+  tracked inside the task; plan completion is the rollup of its
+  task(s): the plan's bound task completes -> `OnTaskCompleted` ->
+  `completePlan` -> row `completed` (and `plan.completed` on the bus).
+  A quick_plan dispatch produces exactly ONE primary task row — the
+  old shape (plan lane + separate orphan task) is deleted.
+- **Oneshot is the default.** No approval pause, no phase-by-phase
+  check-ins: the strategic planner decomposes and the executor runs to
+  completion. Review validates steps against the plan (D1).
+- **`approval_requested` is the single exception (D3).** The intent
+  analyzer carries an `approval_requested` attribute (model verdict,
+  with one bounded small-model adjudication as the fallback when a
+  veto-like phrase is suspected — adjudication failure keeps oneshot,
+  it can never park a turn). When it is true, dispatch parks the row at
+  `pending_approval` with the "plan created: ... (status:
+  pending_approval)" reply and creates no task; the operator's
+  `plan.approve` releases it. The phrasing-based regex veto
+  (`autoSealNegatedExecute`) is deleted.
+- **Sequential compound intents ride the same lane (D4).** "Plan X and
+  then implement it" is ONE task — plan-and-execute, aka quickplan. The
+  dispatcher converts a sequential compound verdict into
+  `IntentQuickPlan` with `Method: "compound_quickplan"` (visible as
+  `classified_by` on the turn's provenance) and routes it through the
+  same contract branch. Parallel compounds keep the compound
+  parent-task shape; spec_pair survives as an executor concern inside
+  synthesized steps, not as a dispatch lane.
+- **Adopt-failure posture (C-5/D5).** A transient `AdoptTask` failure is
+  retried once; on second failure the row stays `approved` carrying an
+  `adopt task failed: ...` SynthesisError stamp while the dispatched
+  task proceeds — the contract row is degraded, the turn is not. The
+  synthesis reclaimer skips adopt-stamped approved rows (re-driving
+  zero-phase Synthesize would complete the brief while its task runs).
+- **Known edge:** a row parked by `approval_requested` carries zero
+  phases, so today the operator `plan.approve` runs `Synthesize`'s
+  zero-phase guard and completes the brief instantly WITHOUT executing
+  it (pinned by e2e scenario plan-lifecycle-09; owner ruling pending on
+  phase-seeding vs exemption).
+
+Gated by e2e scenarios plan-lifecycle-07/08/09
+(`e2e/suites/plan-lifecycle/quickplan_contract_test.go`).
+
 ## Approval Workflow
 
 Plans go through a review-and-approval workflow before execution begins:
