@@ -110,3 +110,32 @@ All 19 commits passed the 22-gate pre-commit chain; no --no-verify used.
   golden_scenarios.go, capture_test.go, trajectory_golden_test.go WERE
   committed with 4b038f7d. If manifest wiring is missing, the pre-push e2e
   gate is the catcher.
+
+## Addendum — tree-resolution phase (2026-11-26 afternoon)
+
+The "lot of uncommitted work" was a bulk partial revert of PR #171.
+Triage (4 read-only subagents) + parent execution resolved it:
+- RESTORED to HEAD (collateral, contradicts committed fixes): handler.go
+  T4c removal, loop_park const, topic_detector tie-break, envelope_prose
+  TrimSpace, chat_nav/chat hydration, voicechild SetWriteBuffer, skills
+  watcher, kanban drain, e2e suite reverts. Restoring re-activates M12
+  (badge misjoin) as an OPEN finding — targeted fix, not feature deletion.
+- COMMITTED (intentional/forward), split surgically from the mixed diff:
+  e85696d0 transient_retries lane revert (operator ruling; fixes the
+  long-red internal/llm test build; moots 11-24 H7/M1-M4);
+  fed4a8fe A1-4 production half + SecurityNotify trio + MCP pin cluster
+  (#166/#167; doctor mcp-pin-updates lane added by parent when the
+  deadcode gate caught CheckUpdates unwired); 215e578b steer-arming docs;
+  6a72b597 audit reports; 7222a70c H6 chat-lane + injectSessionFence
+  removal + the _arm filename build-constraint discovery; 482576ec A5-5;
+  c3662088 11-24 H9; 60d0a1c6 A6-12; 19ec8d27 A3-5 + nil-bus stop guard;
+  7433ee5a A3-7; b4c40dcd + 676f8d60 e2e fixture honesty updates (both
+  pinned the pre-fix double-selection / race shapes).
+- PUSH: rejected twice (upstream divergence + pre-push e2e gate); resolved
+  by rebase on upstream 0a2762f8 (595ceb17 supersedes c5d54c9e's proxy.go
+  legs — took upstream, kept the chat_async seq-cursor leg), gate failures
+  fixed, third push in flight.
+- Held list: now EMPTY. All 12 patches landed. New issue: bhodgens/meept#182
+  (agents.create never registers a GoalLoop at runtime — the goals-plans rig
+  root cause; product fix pending). Disk note: go-build cache filled the
+  volume mid-phase (100%); go clean -cache; df before heavy waves.
