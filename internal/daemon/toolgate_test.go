@@ -194,7 +194,7 @@ func TestExecGateLedger(t *testing.T) {
 	for _, key := range []string{} {
 		_ = key
 	}
-	rec, gerr := ledger.Get(context.Background(), effects.EffectKey("gate.tool", "mut_tool", argsHashForTest(map[string]any{})))
+	rec, gerr := ledger.Get(context.Background(), effects.EffectKey("gate.tool", "gate-sess", "gate-agent", "mut_tool", argsHashForTest(map[string]any{})))
 	if gerr != nil {
 		t.Fatalf("mutating tool left no ledger record: %v", gerr)
 	}
@@ -206,7 +206,7 @@ func TestExecGateLedger(t *testing.T) {
 		t.Fatal("unreachable")
 	}
 
-	if _, err := ledger.Get(context.Background(), effects.EffectKey("gate.tool", "ro_tool", argsHashForTest(map[string]any{}))); !errors.Is(err, effects.ErrUnknownKey) {
+	if _, err := ledger.Get(context.Background(), effects.EffectKey("gate.tool", "gate-sess", "gate-agent", "ro_tool", argsHashForTest(map[string]any{}))); !errors.Is(err, effects.ErrUnknownKey) {
 		t.Errorf("read-only tool reserved a ledger record (want none): rec=%+v err=%v", mustRecord(rec), err)
 	}
 }
@@ -249,7 +249,7 @@ func TestUndeclaredPostureMutating(t *testing.T) {
 	if _, err := reg.Execute(ctx, "claim_ro", map[string]any{}); err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
-	if _, err := ledger.Get(context.Background(), effects.EffectKey("gate.tool", "claim_ro", argsHashForTest(map[string]any{}))); err != nil {
+	if _, err := ledger.Get(context.Background(), effects.EffectKey("gate.tool", "gate-sess", "gate-agent", "claim_ro", argsHashForTest(map[string]any{}))); err != nil {
 		t.Fatalf("posture miss did not reserve the ledger (mutating treatment missing): %v", err)
 	}
 }

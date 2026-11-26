@@ -183,7 +183,7 @@ func (g *ExecGateImpl) BeforeExecute(ctx context.Context, tool tools.Tool, args 
 	if g.starts == nil {
 		g.starts = make(map[string]time.Time)
 	}
-	g.starts[effectsGateKey(name, args)] = time.Now()
+	g.starts[effectsGateKey(ctx, name, args)] = time.Now()
 	g.startsMu.Unlock()
 
 	return nil
@@ -281,7 +281,7 @@ func (g *ExecGateImpl) reserve(ctx context.Context, name string, args map[string
 	if g.cfg.Ledger == nil {
 		return nil
 	}
-	key := effectsGateKey(name, args)
+	key := effectsGateKey(ctx, name, args)
 	payload, perr := json.Marshal(args)
 	if perr != nil {
 		payload = nil
@@ -328,7 +328,7 @@ func (g *ExecGateImpl) AfterExecute(ctx context.Context, tool tools.Tool, args m
 	// success path, Abandon on the failure path. The tool body itself is
 	// responsible for nothing here; the gate owns the reservation.
 	if g.cfg.Ledger != nil {
-		key := effectsGateKey(name, args)
+		key := effectsGateKey(ctx, name, args)
 		who := effects.Claimant{
 			AgentID:   tools.AgentIDFromContext(ctx),
 			SessionID: tools.SessionIDFromContext(ctx),
@@ -369,7 +369,7 @@ func (g *ExecGateImpl) AfterExecute(ctx context.Context, tool tools.Tool, args m
 			"category":    categoryOf(tool),
 			"args_hash":   gateArgsHash(args),
 			"outcome":     outcome,
-			"duration_ms": g.durationMS(name, args),
+			"duration_ms": g.durationMS(ctx, name, args),
 		}),
 	}
 	if aerr := g.cfg.Audit.Emit(rec); aerr != nil {
@@ -379,11 +379,31 @@ func (g *ExecGateImpl) AfterExecute(ctx context.Context, tool tools.Tool, args m
 }
 
 // effectsGateKey derives the G3 reservation key with the documented
-// EffectKey convention: EffectKey(toolName, sessionID, argsHash...) - here
-// (gate.tool, name, argsHash). Pure and content-derived, stable across
-// restarts like every effects key.
-func effectsGateKey(name string, args map[string]any) string {
-	return effects.EffectKey("gate.tool", name, gateArgsHash(args))
+// EffectKey convention: EffectKey(toolName, sessionID, argsHash...) — here
+// (gate.tool, sessionID, agentID, name, argsHash). Pure and content-derived,
+// stable across restarts like every effects key.
+//
+// Bughunt H5/A1-5 fix (owner ruling D2): the key carries BOTH the session
+// id and the agent id from the CLAIMANT context, so each per-loop execution
+// lane dedupes on its OWN rows. The old key omitted them: two sessions
+// running the same (tool, args) collided on one ledger row — session B's
+// success logged a false claimant-mismatch Warn (Claimant.Matches is a full
+// struct compare), B's run was allowed WHILE A's claim was in flight
+// (duplicate concurrent execution of the same "effect"), and a crashed A
+// left a stuck claimed row the reconciler Error-logs at every boot. The
+// loop stamps both values per execution lane (internal/agent/loop.go
+// executeToolCallsUngated: ContextWithSessionID(l.SessionID()) — the
+// conversation identity, distinct per session loop — and
+// ContextWithAgentID(l.agentID), which is the SAME for two concurrent
+// loops of one agent, so the session half is what separates the lanes).
+// A legacy caller with no attribution keeps keying on (tool, args) alone:
+// the empty pair hashes deterministically, and the empty claimant still
+// fails closed at Claim (who.Zero() -> error -> block), unchanged.
+func effectsGateKey(ctx context.Context, name string, args map[string]any) string {
+	return effects.EffectKey("gate.tool",
+		tools.SessionIDFromContext(ctx),
+		tools.AgentIDFromContext(ctx),
+		name, gateArgsHash(args))
 }
 
 // categoryOf reads the tool's category through the tools-package helper's
@@ -425,8 +445,8 @@ func gateErrText(err error, res *tools.ToolResult) string {
 // durationMS reports the BeforeExecute -> AfterExecute wall time for the
 // execution keyed by (tool, args hash). Missing entry (After without a
 // completed Before, e.g. a blocked call) reports 0.
-func (g *ExecGateImpl) durationMS(name string, args map[string]any) int64 {
-	key := effectsGateKey(name, args)
+func (g *ExecGateImpl) durationMS(ctx context.Context, name string, args map[string]any) int64 {
+	key := effectsGateKey(ctx, name, args)
 	g.startsMu.Lock()
 	start, ok := g.starts[key]
 	delete(g.starts, key)
