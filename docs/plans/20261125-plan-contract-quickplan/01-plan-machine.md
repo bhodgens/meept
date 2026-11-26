@@ -44,3 +44,11 @@ internal/agent/dispatcher_quickplan_plan_contract_test.go (new).
 go build ./internal/plan/ ./internal/agent/; go test -count=1
 ./internal/plan/ + targeted dispatcher pins; full agent suite ~100s;
 gofmt. Commit per concern naming M11/D1/D2.
+
+## Status: landed
+
+Commits: ed3d182d (C-1 seams: SubmitAndApproveNoSynthesis + AdoptTask +
+SubmitForApproval in internal/plan + pins), 70f50dfc (C-2 dispatcher
+quick_plan branch rewrite: false => submit+approve+createTask+AdoptTask,
+true => park), f182dea6 (autoSeal regex machinery deleted;
+PlanAutoSealFromIntent is a false stub pending handler.go).

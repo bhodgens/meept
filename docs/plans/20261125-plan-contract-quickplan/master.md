@@ -112,14 +112,24 @@ never blocks the plain "plan and do it" case.
 
 ## Leaves (dispatch order; groups are file-disjoint)
 
-1. 01-plan-machine.md — C-1, C-2 quickplan half. Wave A.
+1. 01-plan-machine.md — C-1, C-2 quickplan half. Wave A. LANDED
+   (ed3d182d, 70f50dfc, f182dea6).
 2. 02-compound-oneshot.md — C-4 + C-2 compound half. Wave B (after 01).
+   DONE (01fcd703 C-5+L1, 90c5f993 D4 compound routing; see the leaf's
+   Status section for the follow-up: the inert handler.go:2158
+   req.AutoSeal = PlanAutoSealFromIntent(result.Task.Description) call
+   deletion — false-stub since f182dea6, handler.go sibling-owned).
 3. 03-approval-adjudication.md — C-3. Wave A (parallel to 01; disjoint
    files except the C-1 call site, which 01 leaves a boolean branch for).
+   LANDED (2c07dff4, call site 70f50dfc).
 4. 04-surfaces-docs-e2e.md — ack copy, TUI/GUI quickplan visibility,
    docs/workflows/plans.md + quickplan-mode contract amendment note,
    e2e gates (plan row reaches executing->completed; no zombie rows;
-   approval_requested holds a plan pending). Wave C.
+   approval_requested holds a plan pending). Wave C. Leaf 02 note:
+   sequential compounds now land on the quickplan lane with
+   Intent.Method "compound_quickplan" and SuggestedMode quick_plan —
+   surfaces/e2e must treat them as quickplan rows; parallel compounds
+   keep the compound parent-task shape unchanged.
 
 ## Execution notes
 

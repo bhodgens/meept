@@ -41,3 +41,29 @@ internal/agent/dispatcher_compound_oneshot_test.go (new).
 
 full agent suite; e2e/suites/plan-lifecycle scenario addition; gofmt.
 ONE commit naming H6/D4.
+
+## Status: landed
+
+Commits: ed3d182d, 2c07dff4, 70f50dfc, f182dea6 (leaf 01/03 foundation),
+01fcd703 (C-5 adopt-failure retry+stamp + reclaimer skip; L1 /plan-toggle
+provenance intent threading), 90c5f993 (C-4/D4 core: sequential compound
+=> quickplan contract route; parallel compound keeps the pair-parent
+lane; spec_pair retained for non-dispatch callers).
+
+Shape found: routeCompoundWithModel never branched on CompoundType —
+every compound built the parent-task/steps result and spec_pair was
+decided downstream at strategic.inferLegacyMode. The conversion landed
+at the ClassifyAndRoute compound seam (sequential + plan manager =>
+IntentQuickPlan => routeToPlanWithOverride quick_plan branch).
+
+Follow-up (NOT edited here; handler.go is sibling-owned): at
+git show HEAD:internal/agent/handler.go the dead wiring remains at
+handler.go:2158 —
+
+    if result.Task != nil {
+        req.AutoSeal = PlanAutoSealFromIntent(result.Task.Description)
+    }
+
+PlanAutoSealFromIntent is already a false stub (f182dea6), so the call
+is inert; deleting this block + its comment (handler.go ~:2147-2159) is
+listed for leaf 04 / the handler owner.

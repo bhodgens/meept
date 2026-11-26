@@ -44,3 +44,13 @@ the call site; sequence AFTER 01 or coordinate in-tree).
 ## Gates
 
 full agent suite; gofmt. ONE commit naming M6/D3.
+
+## Status: landed
+
+Commits: 2c07dff4 (C-3: TrueIntentAnalysis.ApprovalRequested +
+vetoSuspectTrigger + adjudicateApproval in intent_analyzer.go),
+70f50dfc (C-1 call site: the quick_plan branch reads
+intent.ApprovalRequested — park vs auto-approve), ed3d182d, f182dea6
+(regex verdict deletion). Remaining handler.go AutoSeal-wiring deletion
+is listed in 02-compound-oneshot.md Status (handler.go:2158, inert
+false-stub call).
