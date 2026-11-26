@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"time"
 
@@ -22,6 +23,14 @@ type TrueIntentAnalysis struct {
 	SuggestedQuestions []string `json:"suggested_questions"`
 	Confidence         float64  `json:"confidence"`
 	SuggestedMode      string   `json:"suggested_mode,omitempty"`
+	// ApprovalRequested is the C-3 (plan-contract tree
+	// 20261125-plan-contract-quickplan, decision D3) pre-execution approval
+	// flag: true ONLY when the user explicitly asked to review/approve the
+	// plan BEFORE any execution happens ("implement it only after I
+	// approve"). Absent/false is the legacy oneshot posture — a quickplan
+	// turn auto-approves and executes immediately. omitempty keeps the
+	// re-marshaled JSON of a false analysis byte-identical to pre-C-3.
+	ApprovalRequested bool `json:"approval_requested,omitempty"`
 }
 
 // IsAmbiguous returns true if the ambiguity score meets or exceeds the threshold.
@@ -180,6 +189,7 @@ Rules:
 - scope must be exactly "narrow", "medium", or "broad"
 - category must be exactly one of the allowed values
 - suggested_mode must be exactly one of the allowed values
+- approval_requested (boolean, optional): set it true ONLY when the user explicitly asks to review or approve the plan BEFORE any execution happens. Examples: "plan the refactoring and implement it only after I approve" => true. Requests to plan and then act, and document-only requests, are false: "write a plan for X and create a markdown file" => false, "plan X then implement it" => false. When in doubt, omit it (false).
 - Keep the response concise.
 - Recent session activity may be provided with the input. Use it to resolve pronouns and references ('the change', 'the file', 'it') against what was just done.
 - If the input is a short follow-up question about the recent activity and the activity makes the referent clear, set ambiguity LOW and proceed — do not ask the user to re-specify.`
@@ -292,7 +302,109 @@ func (ia *IntentAnalyzer) AnalyzeTrueIntent(ctx context.Context, input string, s
 		return nil, fmt.Errorf("intent analysis failed: %w", err)
 	}
 
-	return ia.parseAnalysis(resp.Content)
+	analysis, err := ia.parseAnalysis(resp.Content)
+	if err != nil {
+		return nil, err
+	}
+	// C-3 B-fallback (decision D3): when the input looks like an explicit
+	// pre-execution approval request (cheap trigger, never a verdict) but
+	// the primary analysis degraded to the default false, ask the same
+	// endpoint ONE bounded yes/no adjudication. Any failure keeps false
+	// (oneshot); adjudication never parks or fails the turn. A primary
+	// true vote short-circuits: the model already answered, no second
+	// spend.
+	if !analysis.ApprovalRequested && vetoSuspectTrigger(input) {
+		if ia.adjudicateApproval(ctx, input) {
+			analysis.ApprovalRequested = true
+			ia.logger.Debug("approval adjudication overrode the degraded false vote",
+				"trigger", "veto_suspect")
+		}
+	}
+	return analysis, nil
+}
+
+// approvalAdjudicationTimeout bounds the C-3 B-fallback call: one small
+// yes/no question on the classifier endpoint. A slow adjudicator must never
+// stall the turn — the deadline expiring keeps the oneshot posture.
+const approvalAdjudicationTimeout = 5 * time.Second
+
+// vetoSuspectApprovalRe is half of the C-3 veto-suspect TRIGGER: the
+// approval vocabulary ("approve", "sign-off", "go-ahead"). It is a cheap
+// prefilter that decides whether to SPEND one bounded adjudication call —
+// it never produces a verdict itself (D3: the regex dies, adjudication
+// decides).
+var vetoSuspectApprovalRe = regexp.MustCompile(`(?i)\b(approve|approv\w*|sign[-\s]?off|go[-\s]?ahead|green[-\s]?light|authoriz\w*)\b`)
+
+// vetoSuspectTimingRe is the trigger's other half: pre-execution ordering
+// vocabulary (before/wait/until/only after/hold off/first). Both halves
+// must co-occur; approval words alone ("is approval enabled?") or timing
+// words alone ("wait for the build") do not fire the adjudication.
+var vetoSuspectTimingRe = regexp.MustCompile(`(?i)\b(before|first|wait|holding?\s+off|until|only\s+after)\b`)
+
+// vetoSuspectTrigger reports whether an input carries the SHAPE of an
+// explicit pre-execution approval request: approval vocabulary joined to
+// pre-execution timing vocabulary. Trigger only — the verdict comes from
+// the analyzer's own approval_requested field or, when that degraded to
+// false, one bounded adjudication call.
+func vetoSuspectTrigger(input string) bool {
+	if input == "" {
+		return false
+	}
+	return vetoSuspectApprovalRe.MatchString(input) && vetoSuspectTimingRe.MatchString(input)
+}
+
+// approvalAdjudicationSystemPrompt is the B-fallback's whole job: answer the
+// single LANGUAGE question the deleted autoSeal regexes used to answer
+// (badly: bughunt M6 polarity escapes) with one JSON boolean.
+const approvalAdjudicationSystemPrompt = `You are a phrasing adjudicator. Decide ONE question about the user's request: does the user explicitly ask to review or approve the plan BEFORE any execution happens (e.g. "implement it only after I approve", "hold off until I sign off")?
+Return ONLY this JSON object: {"approval_required": true|false}
+Rules:
+- true ONLY for an explicit pre-execution approval request by the user.
+- Planning-then-acting ("plan X then implement it") is false.
+- Document-only or plain execution requests are false.
+- Negation alone ("don't implement it") is false: it refuses execution, it does not request an approval gate.
+- When in doubt, return false.`
+
+// adjudicateApproval performs the bounded B-fallback call (C-3/D3): reuses
+// the analyzer's own client, a derived ctx deadline, and the same side-send
+// mask lane as the primary analysis. ANY failure (transport, empty,
+// unparseable) keeps the oneshot posture (false) with one Debug line — the
+// adjudication never parks or fails a turn.
+func (ia *IntentAnalyzer) adjudicateApproval(ctx context.Context, input string) bool {
+	if ia.client == nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(ctx, approvalAdjudicationTimeout)
+	defer cancel()
+
+	messages := []llm.ChatMessage{
+		{Role: llm.RoleSystem, Content: approvalAdjudicationSystemPrompt},
+		{Role: llm.RoleUser, Content: input},
+	}
+	messages = maskSideSendMessages(ia.piiMask, messages, sideSendSessionID(ia.scopeProvider))
+
+	resp, err := ia.client.Chat(ctx, messages,
+		llm.WithMaxTokens(64),
+		llm.WithTemperature(0.0),
+		noThinkingOpt(),
+	)
+	if err != nil || resp == nil || strings.TrimSpace(resp.Content) == "" {
+		ia.logger.Debug("approval adjudication degraded; keeping oneshot posture", "error", err)
+		return false
+	}
+	jsonStr := extractJSONFromLLM(resp.Content)
+	if jsonStr == "" {
+		ia.logger.Debug("approval adjudication: no JSON in reply; keeping oneshot posture")
+		return false
+	}
+	var verdict struct {
+		ApprovalRequired bool `json:"approval_required"`
+	}
+	if err := json.Unmarshal([]byte(jsonStr), &verdict); err != nil {
+		ia.logger.Debug("approval adjudication: unparseable verdict; keeping oneshot posture", "error", err)
+		return false
+	}
+	return verdict.ApprovalRequired
 }
 
 // chatWithFailover performs at most two Chat attempts against the underlying
