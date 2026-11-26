@@ -58,10 +58,11 @@ type SupervisorConfig struct {
 
 const (
 	defaultSupervisorTimeout = 400 * time.Millisecond
-	// maxSentenceRunes caps a single sentence's length before checking;
-	// maxSplitSentences caps how many sentences one draft expands to. Both
-	// bound pathological drafts so a runaway generator cannot turn into an
-	// unbounded Ask loop.
+	// maxSentenceRunes bounds one supervisor CHECK unit: an oversize
+	// sentence splits into bounded continuation chunks (never a cut —
+	// A7-5). maxSplitSentences is only the initial slice capacity now
+	// (the old 16-sentence drop ceiling was removed with the never-drop
+	// port; a pathological long draft expands fully, in bounded pieces).
 	maxSentenceRunes   = 280
 	maxSplitSentences  = 16
 	defaultDenyReason  = "deny"
@@ -407,11 +408,17 @@ func parseReason(reply string) string {
 }
 
 // SplitSentences splits a draft on sentence boundaries (. ! ? newline),
-// keeping the terminator with its sentence and dropping empties. Each
-// sentence is capped at maxSentenceRunes and a draft yields at most
-// maxSplitSentences sentences, in order.
+// keeping the terminator with its sentence and dropping empties.
+//
+// NEVER-DROP (bughunt 2026-11-25 A7-5, porting the ConnectSentences fix of
+// 1ebdced0): each sentence is capped at maxSentenceRunes per CHECK unit —
+// but a cap now SPLITS an oversize sentence into bounded continuation
+// chunks (splitRunesCapped) instead of cutting the tail away, and the
+// old 16-sentence ceiling (which silently dropped the rest of a long
+// draft) is gone. The caller hears the whole reply in bounded, individually
+// supervisor-checked pieces; only the per-TTS-request size stays bounded.
 func SplitSentences(draft string) []string {
-	out := make([]string, 0, 4)
+	out := make([]string, 0, maxSplitSentences)
 	var current strings.Builder
 	flush := func() {
 		s := strings.TrimSpace(current.String())
@@ -419,19 +426,14 @@ func SplitSentences(draft string) []string {
 		if s == "" {
 			return
 		}
-		if utf8.RuneCountInString(s) > maxSentenceRunes {
-			r := []rune(s)
-			s = string(r[:maxSentenceRunes])
-		}
-		out = append(out, s)
+		// A7-5: bounded chunks, never a truncation. Text below the cap
+		// is a single unit (the historical shape TestSplitSentences pins).
+		out = append(out, splitRunesCapped(s, maxSentenceRunes)...)
 	}
 	for _, r := range draft {
 		if r == '.' || r == '!' || r == '?' || r == '\n' {
 			current.WriteRune(r)
 			flush()
-			if len(out) >= maxSplitSentences {
-				return out
-			}
 			continue
 		}
 		current.WriteRune(r)

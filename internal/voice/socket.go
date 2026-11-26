@@ -58,6 +58,20 @@ type TextServer struct {
 	handler func(Frame)
 	closed  bool
 
+	// writeMu serializes the WHOLE daemon->child text write: deadline
+	// set, conn.Write, deadline clear (bughunt 2026-11-25 A4-3/A7-4).
+	// Snapshotting s.child under mu and releasing it before the write
+	// (the old shape) let two concurrent Senders interleave partial JSON
+	// lines on the single child conn, and let a sibling writer's
+	// success-clear strip an in-flight writer's deadline — the exact
+	// teardown hang the 2 s bound exists to prevent. mu guards
+	// connection state; writeMu guards the byte stream. The deadline
+	// keeps every writeMu hold bounded by textWriteTimeout, so a wedged
+	// child costs senders one timeout, never a deadlock (and the
+	// talk-loop/end-frame contract holds: best-effort, bounded, error
+	// surfaced).
+	writeMu sync.Mutex
+
 	// expectedToken is the one-time start token the connecting child must
 	// prove on its first line (guarded by mu; nil = no enforcement).
 	expectedToken []byte
@@ -81,13 +95,17 @@ const textAuthTimeoutDefault = 5 * time.Second
 
 // textWriteTimeout bounds a single daemon->child text-socket write
 // (bughunt 2026-11-10 A4): the daemon's Send/SendRaw serialize on the
-// snapshot mutex by necessity (whole JSON lines must not interleave), so
-// the safety property comes from the deadline, matching the child's
-// voicechild.textWriteTimeout posture. A wedged child conn (kernel buffer
-// full because the child never reads) would otherwise block the talk loop
-// and releaseCall's best-effort end-frame send FOREVER — the release
-// contract says the end-frame send must NEVER block teardown.
-const textWriteTimeout = 2 * time.Second
+// write mutex (bughunt 2026-11-25 A4-3/A7-4: the serialization is now
+// REAL — writeMu is held across the deadline set + conn.Write + deadline
+// clear, so whole JSON lines can never interleave and a sibling writer
+// can never clear an in-flight deadline), and the 2 s deadline keeps the
+// mutex I/O-bounded. A wedged child conn (kernel buffer full because the
+// child never reads) would otherwise block the talk loop and
+// releaseCall's best-effort end-frame send FOREVER — the release contract
+// sender waits textWriteTimeout, errors, and moves on. var (not const):
+// the same test seam posture as supervisorCacheTTL — package tests run
+// sequentially and only pin tests shrink it (restore via t.Cleanup).
+var textWriteTimeout = 2 * time.Second
 
 // SetExpectedToken arms the start-token authentication gate: a connecting
 // child must send token as its FIRST newline-terminated line before any C1
@@ -315,10 +333,15 @@ func (s *TextServer) SetHandler(fn func(Frame)) {
 }
 
 // Send writes one frame to the connected child. Safe for concurrent use:
-// the single write is mutex-serialized so JSON lines never interleave. The
-// mutex here exists to serialize connection access (repo mutex-scope rule)
-// and is released before the write. Returns an error (never panics) when
-// no child is connected or the child connection is closed.
+// the write (deadline set + conn.Write + deadline clear) is serialized
+// end-to-end on writeMu (bughunt 2026-11-25 A4-3/A7-4 — the old shape
+// released the snapshot mutex before the write, which interleaved partial
+// JSON lines between concurrent senders and let a sibling's success-clear
+// strip an in-flight writer's deadline). writeMu is held across the I/O by
+// design — the same posture the child's textWrite path takes — bounded by
+// textWriteTimeout so a wedged child turns the hold into a write error,
+// never an unbounded block. Returns an error (never panics) when no child
+// is connected or the child connection is closed.
 func (s *TextServer) Send(f Frame) error {
 	b, err := EncodeFrame(f)
 	if err != nil {
@@ -339,7 +362,18 @@ func (s *TextServer) Send(f Frame) error {
 // the write is logged and surfaced as a write error — the same path a dead
 // conn takes, so readLoop's clearing of s.child and the caller's
 // error handling both behave identically.
+//
+// A4-3/A7-4: the whole write runs under s.writeMu. Setting the deadline,
+// issuing conn.Write, and clearing the deadline must be ATOMIC with
+// respect to other writers: two unlocked writers could interleave half a
+// JSON line each on the stream, and one writer's success-time clear could
+// strip a deadline out from under another writer still blocked in Write
+// (its Write would then hang unbounded — the teardown block A4 removed,
+// reintroduced under concurrency). The 2 s deadline bounds the lock hold,
+// so a wedged conn costs callers one timeout each, never a deadlock.
 func (s *TextServer) writeChild(conn net.Conn, b []byte, callID, event string) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	if err := conn.SetWriteDeadline(time.Now().Add(textWriteTimeout)); err != nil {
 		return fmt.Errorf("voice: set child write deadline: %w", err)
 	}
@@ -356,7 +390,11 @@ func (s *TextServer) writeChild(conn net.Conn, b []byte, callID, event string) e
 		return fmt.Errorf("voice: write to child: %w", err)
 	}
 	// Clear the deadline so a later writer never inherits a stale bound.
-	_ = conn.SetWriteDeadline(time.Time{})
+	// Safe: writeMu is held, no sibling write is in flight to clear over.
+	//nolint:mutexio // writeMu-guarded stream op, bounded by the deadline above
+	if derr := conn.SetWriteDeadline(time.Time{}); derr != nil {
+		s.logger.Debug("voice: clear child text write deadline failed", "error", derr)
+	}
 	return nil
 }
 
@@ -364,9 +402,10 @@ func (s *TextServer) writeChild(conn net.Conn, b []byte, callID, event string) e
 // to the connected child, bypassing the Frame codec. It exists for the C1
 // keys frame (voice-tierA leaf 03): keys material must not live in the
 // shared Frame struct, so the daemon marshals its own keysWire and ships
-// the line through this seam. Same mutex-serialized single write as Send;
-// returns an error (never panics) when no child is connected or the child
-// connection is closed.
+// the line through this seam. Same fully writeMu-serialized, deadline-
+// bounded single write as Send (the whole write is under the lock, not
+// just the connection snapshot); returns an error (never panics) when no
+// child is connected or the child connection is closed.
 func (s *TextServer) SendRaw(line []byte) error {
 	s.mu.Lock()
 	conn := s.child

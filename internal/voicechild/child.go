@@ -312,7 +312,14 @@ func (c *Child) Run(ctx context.Context) error {
 	c.mu.Lock()
 	c.conn = nil
 	c.mu.Unlock()
-	// Tear down every live pipeline with the connection gone.
+	// Tear down every live pipeline with the connection gone. A4-1
+	// (bughunt 2026-11-25): close() waits on the transcript-consumer
+	// exit (5 s bound) and the analyzer-init barrier — it must never
+	// block the thing that still needs to move. At THIS site serve() has
+	// ended, so nothing else is being dispatched; the closes fan out
+	// concurrently and the process exit waits them with one bounded
+	// grace (a hung ONNX factory delays the exit by the bound, never
+	// forever — the child is a daemon-managed process, exit is terminal).
 	c.pipelineMu.Lock()
 	live := make([]*pipeline, 0, len(c.pipelines))
 	for _, p := range c.pipelines {
@@ -320,10 +327,53 @@ func (c *Child) Run(ctx context.Context) error {
 	}
 	c.pipelines = make(map[string]*pipeline)
 	c.pipelineMu.Unlock()
+	var wg sync.WaitGroup
 	for _, p := range live {
-		p.close(context.Background())
+		wg.Add(1)
+		go func(p *pipeline) {
+			defer wg.Done()
+			p.close(context.Background())
+		}(p)
+	}
+	doneAll := make(chan struct{})
+	go func() { wg.Wait(); close(doneAll) }()
+	select {
+	case <-doneAll:
+	case <-time.After(pipelineCloseGrace):
+		c.logger.Warn("voicechild: pipeline teardown grace exceeded at exit",
+			"pipelines", len(live), "grace", pipelineCloseGrace.String())
 	}
 	return readErr
+}
+
+// pipelineCloseGrace bounds how long the child waits for its teardown
+// goroutines when the text socket dies (A4-1). Per-pipeline close()
+// already carries its own 5 s transcript-consumer bound; this caps the
+// AGGREGATE exit wait so a hung analyzer factory cannot strand process
+// teardown.
+const pipelineCloseGrace = 6 * time.Second
+
+// closePipelineAsync tears one pipeline down OFF the C1 dispatch loop
+// (bughunt 2026-11-25 A4-1). pipeline.close waits on the async ONNX
+// analyzer-init barrier and up to 5 s on the transcript consumer; run
+// synchronously from handleLine (the old shape) it froze the single
+// dispatch goroutine, so every OTHER live call's say/clear/end frames
+// sat in lineCh for the duration — a barge-in clear delayed by seconds
+// defeats the 375 ms recall contract, the exact class the analyzer INIT
+// was moved off the loop for (82400e5b). The pipeline is already dropped
+// from the routing map by the caller (dropPipeline is the once-guard:
+// the map delete under pipelineMu makes each close dispatch exactly
+// once per ccid across handleEnd/failCall and the socket-exit sweep), so
+// the only ordering left to keep is per-pipeline — none: close cancels
+// the pipeline ctx first, and late frames for a dropped ccid never
+// reach it. Teardown failures only ever log (close's posture), so the
+// goroutine cannot strand an error the caller needed.
+func (c *Child) closePipelineAsync(p *pipeline, reason string) {
+	go func() {
+		p.close(context.Background())
+		c.logger.Debug("voicechild: async pipeline teardown complete",
+			"call_id", p.ccid, "reason", reason)
+	}()
 }
 
 // serve reads newline-delimited frames until ctx is cancelled or the text
@@ -446,7 +496,7 @@ func (c *Child) failCall(ccid string, err error, op string) {
 		return
 	}
 	if p, ok := c.dropPipeline(ccid); ok {
-		p.close(context.Background())
+		c.closePipelineAsync(p, "frame-failure")
 	}
 }
 
@@ -499,5 +549,11 @@ func (c *Child) handleEnd(frame voiceframe.Frame) {
 		return
 	}
 	c.logger.Info("voicechild: pipeline torn down", "call_id", frame.CallID, "reason", frame.Reason)
-	p.close(context.Background())
+	// A4-1 (bughunt 2026-11-25): the teardown waits (analyzer-init
+	// barrier, the 5 s transcript-consumer bound) run OFF the single C1
+	// dispatch loop — a synchronous close here stalled every OTHER live
+	// call's say/clear/end frames behind it. dropPipeline above is the
+	// once-guard: the routing-map delete makes double-close across
+	// handleEnd / failCall / the socket-exit sweep impossible.
+	c.closePipelineAsync(p, "end-frame")
 }

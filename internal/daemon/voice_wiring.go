@@ -66,6 +66,11 @@ type VoiceWiring struct {
 	Registry voice.Registry
 	// Dialer places outbound calls (C9).
 	Dialer *voice.Dialer
+	// releaseWg joins the off-webhook release-hook goroutines (A4-2)
+	// before Stop closes the stores they read/write (the D2 no-stranded-
+	// rows contract survives the async hop: Stop waits, callers who need
+	// the ended row poll their own deadline).
+	releaseWg sync.WaitGroup
 	// Binding is the employee phone binding (leaf 12).
 	Binding *voice.Binding
 	// ChildProc manages the meept-voice child (leaf 13).
@@ -1387,17 +1392,23 @@ func (w *VoiceWiring) routeFrame(f voice.Frame) {
 			}
 			return
 		}
-		// Leaf 03 (T3 raw-capture): a FINAL prompt's From field carries
-		// the RAW (un-normalized) transcript. The talk loop must dispatch
-		// the NORMALIZED Text (that is what the LLM turn runs on), so the
-		// frame is rewritten here with raw text in From, normalized in
-		// Text — the binding's RunTurn then appends the RAW text to the
-		// call transcript (AppendTranscript keeps RAW) while the turn
-		// prompt stays normalized. Partials keep Text as-is (preview
-		// traffic) and carry no From payload.
-		if f.Event == voice.EventPrompt && f.Last != nil && *f.Last && f.From != "" && f.From != f.Text {
-			f.Text, f.From = f.From, ""
-		}
+		// Leaf 03 (T3 raw-capture) — AS-BUILT CONTRACT + DEAD ARM REMOVED
+		// (bughunt 2026-11-25 A4-5). The child sends a FINAL prompt with
+		// NORMALIZED transcript in Text and the RAW (un-normalized)
+		// transcript in From; the frame rides to the talk loop UNMODIFIED
+		// (the loop dispatches Text — the LLM turn runs on the normalized
+		// text — and the daemon binding stores the RAW via the
+		// WithRawTranscript ctx seam; AppendTranscript keeps RAW so eval
+		// replays see the un-normalized audio transcript). The block that
+		// used to follow this comment swapped From/Text on the daemon
+		// side: it was unreachable (every final prompt RETURNS inside the
+		// heard-text block above) AND inverted relative to its own comment
+		// (the swap would have put RAW into Text, exactly what the loop
+		// must not dispatch). Deleting it changes no behavior; a future
+		// refactor must NOT re-add a swap here. The heard append above
+		// reads From BEFORE the frame is forwarded (pinned by
+		// TestRouteFrameHeardFallsBackToTextWhenFromEmpty). Partials keep
+		// Text as-is (preview traffic) and carry no From payload.
 		// Context warm (phase2 leaf 02): a PARTIAL prompt (last !=
 		// true — the same shape the talk loop treats as preview
 		// traffic) feeds the debounced warm lane. The identity fields
@@ -1743,8 +1754,25 @@ func (w *VoiceWiring) releaseCall(ccid string, outcome voice.Outcome) {
 	}
 
 	w.Registry.Release(ccid)
-	w.Employee.ReleaseHook(ccid, outcome)
-	w.publishCallEnded(ccid, outcome)
+	// A4-2 (bughunt 2026-11-25): Employee.ReleaseHook runs the call-brief
+	// LLM (<=5 s) + OnCallEnd DB writes (<=5 s) + the relay read (<=5 s)
+	// — and on the phone leg its caller is Telnyx's WEBHOOK goroutine
+	// (comm/http HandleCallEvent -> fireRelease -> this hook), where that
+	// blocking is exactly the shape the repo forbids for the spawn seam
+	// (internal/voice/AGENTS.md release fan-out: stalling HandleCallEvent
+	// pins the carrier webhook until Telnyx times the POST out and
+	// redelivers). Move the whole hook off the request goroutine onto one
+	// bounded worker per release, keeping the documented event ordering
+	// intact INSIDE the goroutine (ReleaseHook teardown -> voice.call.ended
+	// publish). releaseWg is the join Stop runs before the stores close,
+	// so the drain/Stop contract ("no stranded live rows after Stop",
+	// D2) still holds synchronously for anything waiting on Stop.
+	w.releaseWg.Add(1)
+	go func() {
+		defer w.releaseWg.Done()
+		w.Employee.ReleaseHook(ccid, outcome)
+		w.publishCallEnded(ccid, outcome)
+	}()
 }
 
 // sendEndFrame ships the C1 end frame (finding 10: teardown parity — the
@@ -2123,6 +2151,22 @@ func (w *VoiceWiring) Stop(ctx context.Context) {
 		w.reaperCancel()
 	}
 	w.drainLiveCalls(stopCtx)
+	// A4-2: join the off-webhook release-hook workers BEFORE the stores
+	// close below — the hook writes calls.db (OnCallEnd/ended row) and the
+	// brief ledger, and the D2 contract ("no stranded live rows after
+	// Stop", pinned by the drain tests) must still hold synchronously for
+	// anything waiting on Stop. Bounded per hook by its own 5 s contexts;
+	// the wait rides stopCtx's remaining budget only in the sense that a
+	// wedged hook surfaces via the stop-timeout Warn below, never hangs
+	// Stop forever: join on a channel with the stop budget.
+	done := make(chan struct{})
+	go func() { w.releaseWg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-stopCtx.Done():
+		w.logger.Warn("voice wiring: stop budget exceeded waiting for release hooks",
+			"budget", "10s")
+	}
 	StopSignalLeg(stopCtx, w.Signal)
 	if w.ChildProc != nil {
 		if err := w.ChildProc.Stop(stopCtx); err != nil {

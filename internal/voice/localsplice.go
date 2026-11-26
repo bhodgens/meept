@@ -741,8 +741,11 @@ func (s *runLocalSplice) outboundLoop(ctx context.Context) error {
 				// pending are touched, so the watch can never read a
 				// quiet window over a just-filled backlog). The carry
 				// residue is stored accurately after the chunk-forming
-				// loop below.
-				s.audioLastAct.Store(time.Now().UnixNano())
+				// loop below. A7-3: every audioLastAct producer stamps
+				// through the gate clock so the touch and the residue
+				// deadline Bump compares it against share ONE (anchored
+				// monotonic) domain.
+				s.audioLastAct.Store(s.gate.TouchNano())
 				if pumpFirst.IsZero() {
 					pumpFirst = time.Now()
 					s.log.Info("voice: localsplice first child PCM", "ccid", s.ccid)
@@ -869,9 +872,9 @@ func (s *runLocalSplice) outboundLoop(ctx context.Context) error {
 			// is audio the pacer now OWNS (either written to the client
 			// or abandoned at the latch — either way it is no longer
 			// backlog). The activity stamp records the consume; paceOne
-			// stamps again after the socket write.
+			// stamps again after the socket write (gate domain, A7-3).
 			s.audioPending.Add(-1)
-			s.audioLastAct.Store(time.Now().UnixNano())
+			s.audioLastAct.Store(s.gate.TouchNano())
 			if s.itemStale(item) {
 				// Interrupted-stream audio (A6): discarded, never
 				// written to the client.
@@ -904,7 +907,7 @@ func (s *runLocalSplice) outboundLoop(ctx context.Context) error {
 			continue
 		case item := <-pump:
 			s.audioPending.Add(-1)
-			s.audioLastAct.Store(time.Now().UnixNano())
+			s.audioLastAct.Store(s.gate.TouchNano())
 			if s.itemStale(item) {
 				// Interrupted-stream audio (A6): discarded, never
 				// written to the client.
@@ -985,8 +988,9 @@ func (s *runLocalSplice) paceOne(ctx context.Context, chunk []byte) error {
 	}
 	// Drain evidence: this chunk has LEFT the pacer for the client
 	// socket. Stamp AFTER the write so a slow client socket write keeps
-	// the quiet window open (conservative: late, never early).
-	s.audioLastAct.Store(time.Now().UnixNano())
+	// the quiet window open (conservative: late, never early). A7-3:
+	// gate domain (anchored monotonic), same clock Bump reads.
+	s.audioLastAct.Store(s.gate.TouchNano())
 	// Jitter instrumentation: the pacer's client-write cadence. A gap of
 	// more than 2x the pace interval means the pacer STARVED waiting for
 	// child PCM (upstream jitter) rather than paced deliberately.
@@ -1306,7 +1310,7 @@ func (s *runLocalSplice) ArmDrainWatch() bool {
 	// arm time) would let the very first tick read "audio touched long
 	// ago, now quiet" and fire BEFORE this turn's last say even reached
 	// the child - the early-release bug this watch exists to kill.
-	s.drainArmedAtNano.Store(time.Now().UnixNano())
+	s.drainArmedAtNano.Store(s.gate.TouchNano())
 	// watchRunning and drainArmed flip in the SAME critical section as
 	// any exit transition: an arm can never observe a stale
 	// watch-running slot whose goroutine already decided to return.
@@ -1407,8 +1411,10 @@ func (s *runLocalSplice) MarkFinalPlayed() bool {
 	s.drainExpectFinal = true
 	// The played edge IS the post-arm touch: stamp activity first, then
 	// store the floor so the watch's `last < armedAt` guard can never
-	// strand a genuinely drained silent stream.
-	now := time.Now().UnixNano()
+	// strand a genuinely drained silent stream. A7-3: gate domain — the
+	// edge stamp must be comparable with the audioLastAct touches the
+	// pacer stamps through the same anchored clock.
+	now := s.gate.TouchNano()
 	s.audioLastAct.Store(now)
 	if s.drainArmed {
 		// A final arm is already live: re-stamp the floor to the new

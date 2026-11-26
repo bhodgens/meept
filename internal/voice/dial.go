@@ -206,6 +206,30 @@ func (c *DailyCounter) TryInc(day, scope string, cap int) (count int, admitted b
 	return cur, true, nil
 }
 
+// Peek reads the current count for (day, scope) WITHOUT consuming a unit.
+// Used by the dialer's outage telemetry to report the remaining daily
+// budget in the provider-failure Warn (bughunt 2026-11-25 A7-2). File I/O
+// runs outside any sync.Mutex the caller holds; DailyCounter serializes
+// its own read with the same OS lock TryInc takes.
+func (c *DailyCounter) Peek(day, scope string) (int, error) {
+	key := day + "|" + scope
+	if c.path == "" {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return c.mem[key], nil
+	}
+	release, err := lockDailyCounterFile(c.path + ".lock")
+	if err != nil {
+		return 0, fmt.Errorf("voice daily counter: lock: %w", err)
+	}
+	defer release()
+	counts, err := readDailyCounts(c.path)
+	if err != nil {
+		return 0, err
+	}
+	return counts[key], nil
+}
+
 // DialRequest is one outbound-dial attempt. RequestID is the caller's
 // idempotency key: a retry with the same (employee, target, request_id)
 // returns the reserved result and never dials twice.
@@ -335,7 +359,29 @@ type Dialer struct {
 	timers   map[string]*time.Timer   // ccid -> no-answer timer (stopped on answered)
 	answered map[string]bool          // ccid -> answer notification landed (bughunt 2026-11-07 voice F-2)
 	dones    map[string]chan struct{} // ccid -> terminal channel (closed once)
-	fin      map[string]bool          // ccid -> terminal cleanup already ran
+	fin      map[string]bool          // ccid -> terminal cleanup already ran (bughunt 2026-11-25 A7-1: dropped with a TTL sweep — the latch only has to outlive a terminal-fire race, not the daemon)
+	// finSeenNano pairs with fin: ccid -> unix-nano the latch was set, so
+	// the bounded sweep can age entries out.
+	finSeenNano map[string]int64
+
+	// Provider-outage observability (bughunt 2026-11-25 D4/A7-2). The
+	// daily cap stays attempt-based (owner ruling: the unit is NOT
+	// refunded when a dial fails after the gate consumed it), but the
+	// failure must never be silent: providerFailuresToday counts today's
+	// cap-consuming dial failures (DialOut/empty-ccid/TrackOutbound),
+	// consecutiveProviderFailures is the outage signal, and
+	// lastProviderFailure carries the most recent error string. All
+	// three ride mu.
+	providerFailuresToday       int
+	consecutiveProviderFailures int
+	lastProviderFailure         string
+	providerFailureDay          string // "2006-01-02" the today-count belongs to
+
+	// outageSuspectThreshold is the consecutive provider-failure count at
+	// which a dial logs "Telnyx provider outage suspected" (bughunt
+	// 2026-11-25 A7-2): one isolated carrier error is noise, a streak is
+	// an outage. var (not const) so tests can lower it.
+	outageSuspectThreshold int
 
 	// Durable daily-dial counter (issue #165 follow-up). Nil when the cap
 	// is 0 -> Dial never touches it (byte-identical legacy path). The
@@ -371,6 +417,10 @@ func NewDialer(cfg DialConfig, tel DialController, mgr *Manager, reg Registry, f
 		answered: make(map[string]bool),
 		dones:    make(map[string]chan struct{}),
 		fin:      make(map[string]bool),
+		// A7-1: fin latch set-times ride the paired map the terminal
+		// sweep prunes against finLatchRetention.
+		finSeenNano:            make(map[string]int64),
+		outageSuspectThreshold: defaultOutageSuspectThreshold,
 	}
 	// Inert when the cap is 0: no counter is built and no counter I/O
 	// happens on any dial path (byte-identical legacy behavior).
@@ -519,13 +569,18 @@ func (d *Dialer) Dial(ctx context.Context, req DialRequest) (DialResult, error) 
 		if err == nil {
 			err = errors.New("telnyx dial out returned an empty call_control_id")
 		}
+		// A7-2: the cap unit this dial consumed stays consumed (owner
+		// ruling: attempt-based), but the failure is now loud and
+		// counted — Warn + outage counters + the streak Warn at threshold.
+		d.recordProviderFailure(err)
 		d.abandonEffect(ctx, key, who, err)
-		return DialResult{}, fmt.Errorf("voice: dial: %w", err)
+		return DialResult{}, fmt.Errorf("voice: dial: %w (provider failures contributed %d today)", err, d.ProviderFailureCount())
 	}
 
 	// -- 6. TrackOutbound + registry Acquire --
 	if d.mgr != nil {
 		if err := d.mgr.TrackOutbound(ccid); err != nil {
+			d.recordProviderFailure(err)
 			d.abandonEffect(ctx, key, who, err)
 			return DialResult{}, fmt.Errorf("voice: dial: track outbound: %w", err)
 		}
@@ -561,6 +616,10 @@ func (d *Dialer) Dial(ctx context.Context, req DialRequest) (DialResult, error) 
 	// return above this line and must not hold. Release rides the
 	// manager hook; do not release here.
 	d.holdCall(ccid, req.EmployeeID)
+	// A7-2: a dial that reached the registry proves the provider is
+	// answering — reset the consecutive-outage streak (the today count
+	// stays as the outage's cost record).
+	d.clearProviderFailureOnSuccess()
 
 	// -- 7. receipt + Complete: the irreversible effect (one ring) happened.
 	// A later retry of this request_id returns this ccid without dialing. --
@@ -599,7 +658,13 @@ func (d *Dialer) Dial(ctx context.Context, req DialRequest) (DialResult, error) 
 //     the default posture, only the ORDER in which the existing gate runs.
 //  2. per-day cap: operator-configured via VoiceConfig.DailyDialCap with a
 //     DURABLE counter (survives a daemon restart). Dials that pass all
-//     gates increment the counter; refusals do not.
+//     gates increment the counter; refusals do not. NOTE (bughunt
+//     2026-11-25 D4/A7-2): a dial that PASSES this gate and then fails at
+//     the POST keeps its consumed unit — the cap is attempt-based by
+//     owner ruling. That makes a provider outage silently eat the budget,
+//     so the refusal below reports how many of today's consumed units came
+//     from provider failures, and every provider-failing dial logs a Warn
+//     and advances the outage counters (recordProviderFailure).
 func (d *Dialer) outboundPolicyGate(target string) error {
 	allowed := false
 	for _, n := range d.cfg.AllowedNumbers {
@@ -615,13 +680,139 @@ func (d *Dialer) outboundPolicyGate(target string) error {
 		day := time.Now().Format("2006-01-02") // operator local day
 		count, admitted, err := d.counter.TryInc(day, dialCounterScope, d.cfg.DailyDialCap)
 		if err != nil {
+			d.logger.Warn("voice: dial: daily cap counter error", "target", target, "err", err)
 			return fmt.Errorf("voice: dial: daily cap counter: %w", err)
 		}
 		if !admitted {
+			// Loud, queryable refusal (A7-2): one Warn per refusal with
+			// the remaining budget visible, and the error text names how
+			// many consumed units were provider failures rather than
+			// real rings — the operator/agent sees WHY the cap is gone.
+			d.mu.Lock()
+			failures := d.providerFailuresLocked(day)
+			d.mu.Unlock()
+			d.logger.Warn("voice: dial: outbound daily cap exhausted (dial refused)",
+				"target", target, "used", count, "cap", d.cfg.DailyDialCap,
+				"remaining", 0, "provider_failures_today", failures)
+			if failures > 0 {
+				return fmt.Errorf("%w: %d/%d today (provider failures contributed %d today)",
+					ErrDailyCapReached, count, d.cfg.DailyDialCap, failures)
+			}
 			return fmt.Errorf("%w: %d/%d today", ErrDailyCapReached, count, d.cfg.DailyDialCap)
 		}
 	}
 	return nil
+}
+
+// providerFailuresLocked returns today's provider-failure count under d.mu
+// (day rollover reads as zero — yesterday's outage did not consume today's
+// budget). Caller holds d.mu.
+func (d *Dialer) providerFailuresLocked(day string) int {
+	if d.providerFailureDay != day {
+		return 0
+	}
+	return d.providerFailuresToday
+}
+
+// recordProviderFailure accounts one cap-consuming dial failure (DialOut
+// error / empty ccid / TrackOutbound error) for outage visibility
+// (bughunt 2026-11-25 D4/A7-2). Per the owner ruling the consumed daily
+// unit is NOT refunded — the spend stays attempt-based. What must never
+// happen again is SILENCE: every failure logs one Warn with the error and
+// the remaining daily budget, bumps the today/consecutive counters, and
+// at outageSuspectThreshold consecutive failures in the window logs the
+// explicit "Telnyx provider outage suspected" line the status surfaces
+// (and the agent seeing the Dial error) can key on. A successful dial
+// resets the consecutive streak (clearProviderFailureOnSuccess).
+func (d *Dialer) recordProviderFailure(err error) {
+	day := time.Now().Format("2006-01-02")
+	d.mu.Lock()
+	if d.providerFailureDay != day {
+		d.providerFailureDay = day
+		d.providerFailuresToday = 0
+	}
+	d.providerFailuresToday++
+	d.consecutiveProviderFailures++
+	d.lastProviderFailure = err.Error()
+	consecutive := d.consecutiveProviderFailures
+	threshold := d.outageThreshold()
+	lastErr := d.lastProviderFailure
+	d.mu.Unlock()
+
+	// remaining budget: the durable counter holds the consumed count; the
+	// Warn carries cap - consumed so the operator sees what the outage
+	// has cost today. Reading the counter is file I/O — keep it OUTSIDE
+	// d.mu (root C4: no I/O under a mutex); the refusal text above uses
+	// the in-process failure count instead.
+	remaining := 0
+	if d.cfg.DailyDialCap > 0 && d.counter != nil {
+		if count, cErr := d.counter.Peek(day, dialCounterScope); cErr == nil {
+			remaining = d.cfg.DailyDialCap - count
+			if remaining < 0 {
+				remaining = 0
+			}
+		}
+	}
+	d.logger.Warn("voice: dial: provider failure after cap unit consumed (no refund per policy)",
+		"err", err.Error(), "cap", d.cfg.DailyDialCap,
+		"remaining_budget", remaining, "provider_failures_today", d.ProviderFailureCount(),
+		"consecutive", consecutive)
+	if consecutive >= threshold {
+		d.logger.Warn("voice: Telnyx provider outage suspected",
+			"consecutive_failures", consecutive,
+			"threshold", threshold,
+			"last_error", lastErr)
+	}
+}
+
+// clearProviderFailureOnSuccess resets the consecutive-outage streak when
+// a dial's POST + track succeed: the outage (if any) is over. The TODAY
+// count stays — it is the outage's cost record for the day.
+func (d *Dialer) clearProviderFailureOnSuccess() {
+	d.mu.Lock()
+	d.consecutiveProviderFailures = 0
+	d.mu.Unlock()
+}
+
+func (d *Dialer) outageThreshold() int {
+	if d.outageSuspectThreshold > 0 {
+		return d.outageSuspectThreshold
+	}
+	return defaultOutageSuspectThreshold
+}
+
+// defaultOutageSuspectThreshold is the consecutive provider-failure count
+// that trips the outage-suspected Warn (bughunt 2026-11-25 A7-2).
+const defaultOutageSuspectThreshold = 3
+
+// ProviderFailureCount reports today's cap-consuming dial failures
+// (provider POST/track errors after the daily cap unit was consumed).
+// Day-keyed: a new operator-local day resets to zero. Exported so the
+// daemon's status surfaces (TUI/GUI voice status, the voice RPC) can
+// surface the outage signal without reaching into Dialer internals
+// (bughunt 2026-11-25 A7-2: make outages queryable, not silent).
+func (d *Dialer) ProviderFailureCount() int {
+	day := time.Now().Format("2006-01-02")
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.providerFailuresLocked(day)
+}
+
+// ConsecutiveProviderFailures reports the current provider-failure streak
+// (reset by any dial that reaches the registry). >= outageSuspectThreshold
+// means the "Telnyx provider outage suspected" Warn has fired.
+func (d *Dialer) ConsecutiveProviderFailures() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.consecutiveProviderFailures
+}
+
+// LastProviderFailure returns the most recent cap-consuming dial failure
+// string ("" when none). Best-effort diagnostics for status surfaces.
+func (d *Dialer) LastProviderFailure() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.lastProviderFailure
 }
 
 // dialCounterScope is the (kind, scope) key of the single global outbound
@@ -845,13 +1036,41 @@ func (d *Dialer) NotifyAnswered(ccid string) {
 
 // finishCall runs the terminal cleanup exactly once per ccid: release the
 // registry slot and close the Done channel (late observers see closure).
+//
+// The fin latch must stay live long enough to absorb the terminal-fire
+// races it guards (the no-answer timer vs. a late answered webhook, the
+// double finishCall from the timer's mgrDone branch) — the longest such
+// window is the no-answer timer, bounded by timeout_secs (default 30 s).
+// bughunt 2026-11-25 A7-1: the latch used to be permanent, one entry per
+// dialed call for the daemon's whole life. finishCall now stamps the set
+// time and prunes entries older than finLatchRetention on every call,
+// mirroring the per-call delete of the adjacent answered map: the map is
+// size-stable (bounded by dials-within-the-retention-window) while every
+// race the latch exists to absorb stays covered.
 func (d *Dialer) finishCall(ccid string) {
+	now := time.Now()
 	d.mu.Lock()
 	if d.fin[ccid] {
 		d.mu.Unlock()
 		return
 	}
 	d.fin[ccid] = true
+	if d.finSeenNano == nil {
+		d.finSeenNano = make(map[string]int64)
+	}
+	d.finSeenNano[ccid] = now.UnixNano()
+	for id, seen := range d.finSeenNano {
+		if now.Sub(time.Unix(0, seen)) > d.finRetention() {
+			delete(d.finSeenNano, id)
+			delete(d.fin, id)
+			// A pruned latch can no longer block a LATE NotifyAnswered
+			// from re-marking the ccid (the fin[ccid] guard in
+			// NotifyAnswered reads the latch); drop any straggler
+			// answered marker in the same sweep so neither map grows
+			// across the dial history.
+			delete(d.answered, id)
+		}
+	}
 	ch := d.dones[ccid]
 	delete(d.dones, ccid)
 	delete(d.timers, ccid)
@@ -865,6 +1084,18 @@ func (d *Dialer) finishCall(ccid string) {
 	if ch != nil {
 		close(ch)
 	}
+}
+
+// finRetention is the effective TTL of a fin latch entry (a var-backed
+// seam so tests can shrink the window and prove the prune fires; the
+// default comfortably outlives the no-answer timer's race window).
+var finLatchRetention = time.Hour
+
+func (d *Dialer) finRetention() time.Duration {
+	if finLatchRetention > 0 {
+		return finLatchRetention
+	}
+	return time.Hour
 }
 
 // ---- C8 voice instance registry ----

@@ -1113,7 +1113,12 @@ func (s *runSplice) paceOne(ctx context.Context) error {
 	// Paced outbound touch (A6 residue decision): a successful Telnyx
 	// write is the "a stream was flowing" evidence bargeIn consults.
 	// Stamped AFTER the write, pacer-only (single writer, read lock-free).
-	s.lastPacedWriteNano.Store(time.Now().UnixNano())
+	// A7-3: the stamp rides the GATE's clock (anchored monotonic pace in
+	// the unix-nano neighborhood), not raw time.Now — Bump compares this
+	// touch against clockNano, and stamping in the wall domain let a
+	// mid-call NTP step mis-decide the 250 ms residue window in both
+	// directions (tail replay, or a clipped reply start).
+	s.lastPacedWriteNano.Store(s.gate.TouchNano())
 	return nil
 }
 

@@ -143,6 +143,16 @@ type resampler struct {
 	dstRate int
 
 	pos int64 // fractional read position in SOURCE samples (fixed-point 32.32)
+	// rem carries the UN-CONSUMED input tail of the previous Write
+	// (bughunt 2026-11-25 A4-4): a chunk boundary lands mid-step for
+	// non-dividing rate ratios (48k->16k on a 320-sample chunk leaves 2
+	// samples unconsumed), and the old shape dropped them — a ~0.6 %
+	// permanent sample loss plus a per-chunk phase jump (every chunk
+	// re-started interpolation at its own sample 0). The tail is
+	// prepended to the next Write, so the fixed-point position advances
+	// continuously across chunks and the output equals a single-Write
+	// pass over the same stream.
+	rem []byte
 	// carry holds the odd tail byte of the previous Write (A1): an s16
 	// sample a stream Read split across two Writes must survive - the
 	// byte is prepended to the next Write instead of being dropped
@@ -167,15 +177,30 @@ func (r *resampler) passthrough() bool { return r.srcRate == r.dstRate }
 // samples); a trailing odd byte is HELD in the resampler and prepended
 // to the next Write (s16le chunks are always even on the wire, but a
 // stream Read can split a sample across reads).
+//
+// A4-4 (bughunt 2026-11-25): the un-consumed input TAIL of each chunk is
+// now carried the same way (r.rem). Before the fix, a non-integer number
+// of steps per chunk (48k->16k on a 320-sample chunk leaves 2 samples)
+// dropped those tail samples and re-zeroed the fixed-point position, so
+// every chunk re-interpolated from its own sample 0: ~0.6 % permanent
+// sample loss and a per-chunk phase discontinuity (a mid-stream click on
+// the Signal leg). With the carry, chunked Writes reproduce a single
+// Write over the same stream exactly (same output positions, same values
+// at every non-final position).
 func (r *resampler) Write(pcm []byte) []byte {
-	if r.hasCarry {
-		// Fold the held odd tail byte in front of the new data: the
-		// s16 sample it belongs to spans two Writes.
-		joined := make([]byte, 0, len(pcm)+1)
-		joined = append(joined, r.carry)
+	if len(r.rem) > 0 || r.hasCarry {
+		// Prepend the carried state: whole samples from the previous
+		// chunk first (they predate the odd tail byte in stream order),
+		// then the held odd byte completing its split sample.
+		joined := make([]byte, 0, len(r.rem)+len(pcm)+1)
+		joined = append(joined, r.rem...)
+		r.rem = nil
+		if r.hasCarry {
+			joined = append(joined, r.carry)
+			r.hasCarry = false
+		}
 		joined = append(joined, pcm...)
 		pcm = joined
-		r.hasCarry = false
 	}
 	if len(pcm) == 0 {
 		return nil
@@ -209,24 +234,29 @@ func (r *resampler) Write(pcm []byte) []byte {
 			s1 := sampleAt(pcm, idx+1)
 			s = lerp(s0, s1, frac)
 		} else {
-			// Last input sample: interpolate against the previous
-			// chunk's final sample state (prev) only when frac is past
-			// the sample; otherwise emit it. At chunk boundaries the
-			// next Write continues from prev so the stream is smooth.
+			// Last input sample: emit it (the historical clamp shape —
+			// kept for upsampling streams whose integer steps land on
+			// chunk boundaries exactly; the A4-4 sample-count loss that
+			// this fix targets is gone because the UN-CONSUMED tail now
+			// rides r.rem instead of being dropped).
 			s = s0
 		}
 		//nolint:gosec // G115: byte(s)/byte(s>>8) IS the s16le encode — truncation is the codec contract
 		out = append(out, byte(s), byte(s>>8))
 		r.pos += step
 	}
-	// Carried state: how many WHOLE input samples the position advanced
-	// past (the next Write drops them from ITS perspective - the caller
-	// hands fresh chunks, so the resampler keeps the last sample value
-	// as interpolation context only).
+	// Carry state: samples from the integer position onward were not
+	// (fully) consumed — hand them to the next Write and re-base the
+	// fixed-point position onto them, so pos always stays sub-sample
+	// relative to the carried tail's first sample.
 	consumed := int(r.pos >> 32)
-	if consumed > 0 {
-		r.pos -= int64(consumed) << 32
+	if consumed > inSamples {
+		consumed = inSamples
 	}
+	if tail := pcm[2*consumed:]; len(tail) > 0 {
+		r.rem = append(make([]byte, 0, len(tail)), tail...)
+	}
+	r.pos -= int64(consumed) << 32
 	return out
 }
 

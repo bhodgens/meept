@@ -145,6 +145,26 @@ func (g *bargeGate) clockNano() int64 {
 // computes deltas against (a zero time.Time yields the zero duration).
 var processStartMono = time.Now()
 
+// TouchNano is the value OUTBOUND-ACTIVITY producers must stamp their
+// touches with (bughunt 2026-11-25 A7-3). Bump compares a touch against
+// clockNano — the anchored monotonic clock — so a producer that stamps
+// raw time.Now().UnixNano() straddles two clock domains: a wall-clock
+// step mid-call (NTP correction, laptop sleep/wake) makes the residue
+// decision wrong in BOTH directions (backward step: the tail of the
+// interrupted stream replays over the new turn; forward step: every
+// post-barge-in reply loses its first 250 ms). Every Bump feed therefore
+// stamps through THIS method, keeping touch and deadline in one domain.
+// The value stays numerically in the unix-nano neighborhood (the anchor
+// carries the wall base), so time.Since(time.Unix(0, v)) consumers keep
+// working. Nil gate: raw unix nanos (a gateless caller keeps its own
+// single-domain wall arithmetic).
+func (g *bargeGate) TouchNano() int64 {
+	if g == nil {
+		return time.Now().UnixNano()
+	}
+	return g.clockNano()
+}
+
 // Snapshot returns the pre-read view the pump stamps onto each chunk:
 // the current generation and the residue deadline (0 when none) live at
 // snapshot time. Nil gate: (0, 0).
