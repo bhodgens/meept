@@ -1,6 +1,7 @@
 package services
 
 import (
+	"container/list"
 	"log/slog"
 	"strings"
 	"sync"
@@ -61,9 +62,24 @@ type SecurityNotifier struct {
 	// seenPush is the channel-B dedup ledger, keyed by source+"|"+message.
 	// It is deliberately separate from QuotaNotifier.seen: a security alert
 	// must never be suppressed by a quota event with the same key.
-	seenMu   sync.Mutex
-	seenPush map[string]bool
+	//
+	// P3 (bughunt 2026-11-24): bounded LRU, not an ever-growing map. The
+	// daemon is long-lived and the notifier sat on a map with no eviction —
+	// one permanent entry per distinct source+message, unbounded for the
+	// process lifetime. seenOrder holds the keys most-recently-seen at the
+	// front; once seenPush exceeds seenPushCap the back (oldest) entry is
+	// evicted. Accepted consequence: an alert that falls out of the window
+	// can notify again if re-fired — bounded memory in exchange for exact
+	// dedup forever was never the contract.
+	seenMu    sync.Mutex
+	seenPush  map[string]*list.Element
+	seenOrder *list.List // elements hold string keys
 }
+
+// seenPushCap bounds the channel-B dedup ledger (P3). 1024 distinct
+// source+message pairs is far beyond any realistic alert storm while
+// keeping the resident cost (~tens of KB) negligible.
+const seenPushCap = 1024
 
 // NewSecurityNotifier constructs a notifier for the given channel value.
 // Unknown/empty channels are normalized to "" (off) so Notify is a no-op.
@@ -77,10 +93,11 @@ func NewSecurityNotifier(channel string, b *bus.MessageBus, logger *slog.Logger)
 		channel = ""
 	}
 	return &SecurityNotifier{
-		channel:  channel,
-		b:        b,
-		logger:   logger,
-		seenPush: make(map[string]bool),
+		channel:   channel,
+		b:         b,
+		logger:    logger,
+		seenPush:  make(map[string]*list.Element),
+		seenOrder: list.New(),
 	}
 }
 
@@ -146,11 +163,33 @@ func (sn *SecurityNotifier) notifyPush(message, source string) {
 	}
 	dedupKey := source + "|" + message
 	sn.seenMu.Lock()
-	if sn.seenPush[dedupKey] {
+	// Belt-and-braces: NewSecurityNotifier is the only construction site,
+	// but a zero-value struct must not panic on the LRU list (root AGENTS.md
+	// nil-guard rule).
+	if sn.seenPush == nil {
+		sn.seenPush = make(map[string]*list.Element)
+	}
+	if sn.seenOrder == nil {
+		sn.seenOrder = list.New()
+	}
+	if el, ok := sn.seenPush[dedupKey]; ok {
+		// LRU touch: a re-seen alert is now the most-recently-seen entry,
+		// so eviction order tracks recency, not first-insertion.
+		sn.seenOrder.MoveToFront(el)
 		sn.seenMu.Unlock()
 		return
 	}
-	sn.seenPush[dedupKey] = true
+	sn.seenPush[dedupKey] = sn.seenOrder.PushFront(dedupKey)
+	// P3: evict the least-recently-seen entries until the ledger fits the
+	// cap (normally zero or one evictions per call).
+	for sn.seenOrder.Len() > seenPushCap {
+		oldest := sn.seenOrder.Back()
+		if oldest == nil {
+			break
+		}
+		sn.seenOrder.Remove(oldest)
+		delete(sn.seenPush, oldest.Value.(string))
+	}
 	sn.seenMu.Unlock()
 
 	bus.PublishT(sn.b, TopicSecurityAlert, source, SecurityAlertEvent{
