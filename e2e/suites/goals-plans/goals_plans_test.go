@@ -31,8 +31,15 @@
 package goals_plans
 
 import (
+	"crypto/tls"
+	"fmt"
+	"io"
+	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -90,6 +97,137 @@ func grantCoderTool(t testing.TB, st *harness.Stack, tool string) {
 	if err := os.WriteFile(path, []byte(s), 0o644); err != nil {
 		t.Fatalf("write coder AGENT.md: %v", err)
 	}
+}
+
+// stopDaemon sends SIGTERM and waits for exit (SIGKILL after 10s), then
+// removes the socket. Mirrors e2e/suites/goal-completion/helpers_test.go.
+func stopDaemon(t testing.TB, pid int, socketPath string) {
+	t.Helper()
+	if pid <= 0 {
+		return
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return
+	}
+	_ = proc.Signal(syscall.SIGTERM)
+	done := make(chan struct{})
+	go func() { _, _ = proc.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		_ = proc.Kill()
+		<-done
+	}
+	_ = os.Remove(socketPath)
+}
+
+// bootDaemon spawns a fresh scratch daemon against the stack's sandbox and
+// waits for /health. Same flags and env as the harness boot.
+func bootDaemon(t testing.TB, s *harness.Stack) {
+	t.Helper()
+
+	bin := harness.DaemonPath(t)
+	logPath := filepath.Join(s.Work, "daemon.log")
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		t.Fatalf("open daemon log: %v", err)
+	}
+	defer logFile.Close()
+
+	cmd := exec.Command(bin,
+		"-c", filepath.Join(s.MeeptHome, "meept.json5"),
+		"-d", s.StateDir,
+		"-s", s.SocketPath,
+	)
+	cmd.Dir = s.Work
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.Env = s.Env()
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start daemon: %v", err)
+	}
+
+	client := &http.Client{
+		Timeout: 2 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig:   &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // self-signed scratch cert
+			ForceAttemptHTTP2: false,
+		},
+	}
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		resp, err := client.Get(s.HTTPBaseURL() + "/health") //nolint:noctx // bounded poll in test harness
+		if err == nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			_ = cmd.Process.Kill()
+			t.Fatalf("re-booted daemon not healthy within 60s; log tail:\n%s", s.Daemon.LogTail())
+		}
+		if err := cmd.Process.Signal(syscall.Signal(0)); err != nil {
+			t.Fatalf("re-booted daemon died during boot; log tail:\n%s", s.Daemon.LogTail())
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
+// restartDaemon stops the harness-booted daemon and re-boots a fresh daemon
+// against the SAME sandbox home. GoalLoops register ONLY at Components.Start
+// (internal/daemon/components.go, "Employee GoalLoops registered");
+// agents.create does not register one at runtime. Employees hired via RPC
+// therefore need one restart before the round driver's deferred turn can
+// reach Manager.Trigger -> the loop path (same requirement documented in
+// e2e/suites/goal-completion/helpers_test.go). The returned func stops the
+// re-booted daemon via the pidfile; the harness's own cleanup stays a safe
+// no-op afterwards.
+func restartDaemon(t testing.TB, s *harness.Stack) func() {
+	t.Helper()
+
+	oldPID := s.Daemon.Pid()
+	if oldPID == 0 {
+		t.Fatal("harness daemon pid not recorded; nothing to restart")
+	}
+	stopDaemon(t, oldPID, s.SocketPath)
+
+	// Wait for the old process to release the socket path before re-binding.
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(s.SocketPath); os.IsNotExist(err) {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	bootDaemon(t, s)
+
+	return func() {
+		data, err := os.ReadFile(filepath.Join(s.StateDir, "meept.pid"))
+		if err != nil {
+			return
+		}
+		var pid int
+		if _, err := fmt.Sscanf(strings.TrimSpace(string(data)), "%d", &pid); err == nil {
+			stopDaemon(t, pid, s.SocketPath)
+		}
+	}
+}
+
+// assessReply builds a tier-1 ASSESS LLM reply with one candidate (mirrors
+// the goal-completion suite helper of the same name).
+func assessReply(title, description, prompt string) string {
+	return fmt.Sprintf(`{"candidates":[{"title":%q,"description":%q,"prompt":%q}]}`, title, description, prompt)
+}
+
+// reflectReply builds a REFLECT LLM reply marking the goal healthy — the
+// round neither completes nor blocks the goal, so the round-cap auto-block
+// stays the only blocker.
+func reflectReply() string {
+	return `{"health":"healthy","reasoning":"the round ran; mandate still open"}`
 }
 
 // rpcCreateEmployee registers a fixture employee through agents.create so the
@@ -190,9 +328,43 @@ func TestGoalTools_RegisteredAndAuthorityGated(t *testing.T) {
 // surface: goal-create with --max-rounds, advance past the cap, and observe
 // the auto-block (code "round-limit") at MaxRounds with zero human turns into
 // the round.
+//
+// Rig contract (A6-4, bughunt 2026-11-25): round.advance is DEDUPED against
+// an in-flight deferred round — an advance landing while round N's deferred
+// turn is still running answers 'idle' instead of reserving a phantom round
+// (the phantom-reserve shape is pinned directly in
+// internal/employee/goal_authority_pins_test.go). The rig's scheduler IS
+// bound, so every accepted advance schedules a REAL deferred round through
+// Manager.Trigger. For the deferred round to actually run (not fail and
+// disarm the goal — leaf T4), the employee must have a registered GoalLoop,
+// and loops register ONLY at Components.Start. The rig therefore hires the
+// employee via agents.create and restarts the daemon once before driving
+// rounds (the documented goal-completion-suite pattern; agents.create not
+// registering a loop at runtime is a known product gap, NOT papered over
+// here). The test then waits for each round to settle between advances
+// instead of hammering synchronously — the old synchronous expectation was
+// exactly the double-reserve shape A6-4 removes.
 func TestRoundDriver_AutonomousContinuationAndAutoBlock(t *testing.T) {
 	s := harness.Start(t)
 	rpcCreateEmployee(t, s, "rounds-worker")
+
+	// GoalLoops register at boot only: restart so the runtime-created
+	// rounds-worker actually has a loop and the driver's deferred rounds
+	// run for real (advance -> real round -> cap -> auto-block).
+	stop := restartDaemon(t, s)
+	defer stop()
+
+	// Script the tier-1 round turns: ASSESS returns one candidate, the
+	// executor turn finishes plain (no tool calls needed), REFLECT reports
+	// the goal healthy so the ONLY blocker ever reached is the round cap.
+	s.Fake.ScriptN(10, harness.MessageContains("# trigger event"),
+		harness.TextResponse(assessReply(
+			"advance probe", "e2e round probe", "perform the scripted round step.")))
+	s.Fake.ScriptN(10, harness.MessageContains("# execution outcome"),
+		harness.TextResponse(reflectReply()))
+	s.Fake.SetPostToolText("round step complete.")
+	s.Fake.SetChatText("ok")
+
 	s.RegisterProject(t, "rounds-e2e")
 
 	// Create a goal with a 2-round cap via the CLI --max-rounds surface.
@@ -202,22 +374,65 @@ func TestRoundDriver_AutonomousContinuationAndAutoBlock(t *testing.T) {
 		t.Fatalf("agents goal-create failed:\nstdout:%s\nstderr:%s", out, errOut)
 	}
 
-	// Drive the round driver: rounds 0→1, 1→2 advance; the 3rd settlement
-	// (rounds_started 2 ≥ max_rounds 2) auto-blocks with code round-limit.
-	for i := 0; i < 2; i++ {
-		out, _ := s.RunCLI(t, 60*time.Second, false, "agents", "goals", "advance", "rounds-worker")
-		if !strings.Contains(out, "advanced") {
-			t.Fatalf("round advance %d did not reserve a round:\n%s", i, out)
+	// Drive the round driver: rounds 0→1, 1→2 advance; the settlement at
+	// rounds_started 2 ≥ max_rounds 2 auto-blocks with code round-limit.
+	// Advance #1 is deterministically the manual leg's win (the autonomous
+	// poll only ticks at boot+60s; the manual sequence starts seconds after
+	// boot). From round 2 on, the manual retry leg and the autonomous poll
+	// tick RACE to settle — accept either landing the block: pressing
+	// advance until the CLI reports blocked/round-limit, with the goals
+	// table checked each turn for the autonomous leg having already
+	// blocked the goal.
+	advanceUntil := func(round int, wants ...string) string {
+		t.Helper()
+		deadline := time.Now().Add(150 * time.Second)
+		for {
+			out, _ := s.RunCLI(t, 60*time.Second, false, "agents", "goals", "advance", "rounds-worker")
+			all := true
+			for _, w := range wants {
+				if !strings.Contains(out, w) {
+					all = false
+					break
+				}
+			}
+			if all {
+				return out
+			}
+			if !strings.Contains(out, "idle") || time.Now().After(deadline) {
+				t.Fatalf("round advance %d never observed %v (last output):\n%s", round, wants, out)
+			}
+			time.Sleep(2 * time.Second) // previous round still in flight; settle + retry
 		}
 	}
-	out, _ := s.RunCLI(t, 60*time.Second, false, "agents", "goals", "advance", "rounds-worker")
-	if !strings.Contains(out, "blocked") || !strings.Contains(out, "round-limit") {
-		t.Fatalf("3rd round advance did not auto-block at the round cap (round-limit):\n%s", out)
+	advanceUntil(1, "advanced")
+
+	deadline := time.Now().Add(150 * time.Second)
+	for {
+		out, _ := s.RunCLI(t, 60*time.Second, false, "agents", "goals", "advance", "rounds-worker")
+		if strings.Contains(out, "blocked") {
+			if !strings.Contains(out, "round-limit") {
+				t.Fatalf("cap auto-block did not report round-limit:\n%s", out)
+			}
+			break
+		}
+		if !strings.Contains(out, "advanced") && !strings.Contains(out, "idle") {
+			t.Fatalf("unexpected round advance output:\n%s", out)
+		}
+		// The autonomous poll leg may have settled/blocked the goal between
+		// manual presses; the table is the durable source of truth.
+		tbl, _ := s.RunCLI(t, 60*time.Second, false, "agents", "goals", "--employee=rounds-worker")
+		if strings.Contains(strings.ToLower(tbl), "blocked") && strings.Contains(tbl, "2/2") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("goal never auto-blocked at the 2-round cap (last advance):\n%s\n(last table):\n%s", out, tbl)
+		}
+		time.Sleep(2 * time.Second)
 	}
 
 	// The goals table must surface the blocked state + rounds/max (2/2),
 	// making the cap auto-block user-visible.
-	out, _ = s.RunCLI(t, 60*time.Second, false, "agents", "goals", "--employee=rounds-worker")
+	out, _ := s.RunCLI(t, 60*time.Second, false, "agents", "goals", "--employee=rounds-worker")
 	if !strings.Contains(strings.ToLower(out), "blocked") {
 		t.Fatalf("goals table did not show the blocked state after the round-limit auto-block:\n%s", out)
 	}
