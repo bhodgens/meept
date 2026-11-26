@@ -2091,6 +2091,26 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		kanbanPairHandler = rateLimitMiddleware(s.kanbanPairing)
 	}
 
+	// Webhook early-dispatch branches (slack / voice / messaging) below are
+	// bearer-auth exempt but MUST carry the rate limiter (bughunt H3/A1-3):
+	// they used to dispatch the raw handlers and return before `handler`,
+	// so the comments claiming "Rate limiting still applies" were false —
+	// unauthenticated floods reached the HMAC/Ed25519 verification at full
+	// speed. Wrap each at compose time (kanbanPairHandler precedent); nil
+	// when the subsystem is disabled, so the branch does not exist at all.
+	var slackInteractionHandler http.Handler
+	if s.slackInteractions != nil {
+		slackInteractionHandler = rateLimitMiddleware(s.slackInteractions)
+	}
+	var voiceRouteHandler http.Handler
+	if s.voiceRoutes != nil {
+		voiceRouteHandler = rateLimitMiddleware(http.HandlerFunc(s.voiceRoutes.serveVoiceRoute))
+	}
+	var messagingRouteHandler http.Handler
+	if s.messagingRoutes != nil {
+		messagingRouteHandler = rateLimitMiddleware(http.HandlerFunc(s.messagingRoutes.serveMessagingRoute))
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 
@@ -2139,33 +2159,35 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		if s.slackInteractions != nil && r.Method == http.MethodPost && r.URL.Path == "/api/v1/slack/interactions" {
+		if slackInteractionHandler != nil && r.Method == http.MethodPost && r.URL.Path == "/api/v1/slack/interactions" {
 			// Slack interaction callback: Slack cannot present a bearer
 			// API key, so the credential is the verified v0 request
 			// signature + allowed_user_ids check enforced INSIDE the
-			// handler (research-notes.md A.1/A.2). Rate limiting still
-			// applies (the handler runs under the ordinary chain).
-			s.slackInteractions.ServeHTTP(lrw, r)
+			// handler (research-notes.md A.1/A.2). Rate limiting applies
+			// via the wrapper (bughunt H3/A1-3: the raw dispatch skipped
+			// the limiter the comment promised).
+			slackInteractionHandler.ServeHTTP(lrw, r)
 			return
 		}
 
-		if s.voiceRoutes != nil && s.voiceRoutes.HandlesPath(r.URL.Path) {
+		if voiceRouteHandler != nil && s.voiceRoutes.HandlesPath(r.URL.Path) {
 			// Telnyx voice endpoints (leaf 10): Telnyx cannot present a
 			// bearer API key, so the credential is the mandatory Ed25519
 			// signature verified INSIDE the handlers (webhook body /
 			// stream_url). Never signature-optional: an unset public key
-			// fail-closes to 503 inside the handlers. Rate limiting still
-			// applies (the handlers run under the ordinary chain).
-			s.voiceRoutes.serveVoiceRoute(lrw, r)
+			// fail-closes to 503 inside the handlers. Rate limiting
+			// applies via the wrapper (bughunt H3/A1-3).
+			voiceRouteHandler.ServeHTTP(lrw, r)
 			return
 		}
 
-		if s.messagingRoutes != nil && s.messagingRoutes.HandlesPath(r.URL.Path) {
+		if messagingRouteHandler != nil && s.messagingRoutes.HandlesPath(r.URL.Path) {
 			// Telnyx SMS messaging webhook (contact-channels leaf 12):
 			// same posture - the mandatory Ed25519 signature verified
 			// inside the handler is the credential; a bad signature is a
-			// 401 before the body is parsed.
-			s.messagingRoutes.serveMessagingRoute(lrw, r)
+			// 401 before the body is parsed. Rate limiting applies via
+			// the wrapper (bughunt H3/A1-3).
+			messagingRouteHandler.ServeHTTP(lrw, r)
 			return
 		}
 
