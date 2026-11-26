@@ -373,8 +373,15 @@ func (p *TraceProducer) RecordStepSpan(ev StepSpanSpec) {
 			"step_id": ev.StepID,
 			"state":   state,
 		},
-		// No session id rides on task.step_completed; the task id is the
-		// trace grouping key for step spans.
+		// Bughunt A1-7 fix: the task id IS the trace grouping key for step
+		// spans (no session id rides on task.step_completed), so derive a
+		// STABLE TraceID from it. Without this the span reached the sampler
+		// with the zero TraceID (v=0 < any threshold) and sampling was a
+		// no-op — every step span was kept at any rate. Deriving from the
+		// task id makes the decision deterministic per trace: all steps of
+		// one task sample together. Empty TaskID yields the zero ID, which
+		// the exporter fills from crypto/rand (random trace, sampled once).
+		TraceID:   deriveTraceID(ev.TaskID),
 		SessionID: ev.TaskID,
 		AgentID:   ev.AgentID,
 		IsError:   state == "failed",
