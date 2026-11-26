@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/caimlas/meept/internal/config"
@@ -306,6 +307,16 @@ func queueAsEnqueuer(q *queue.PersistentQueue) tierpolicy.JobEnqueuer {
 // BuildTierPolicyEngine constructs the memory-tier policy engine from
 // daemon components (leaf T4).
 //
+// Optional trailing args: work *working.Store — the context-assembler
+// ring store (c.workingStore). When supplied (and a non-nil manager),
+// the engine's tick drains the ring's bounded eviction queue into
+// episodic recall via working.Store.Flush + the episodic sink adapter
+// (A3-5: Flush/EpisodicSinkAdapter had zero production callers, so
+// evicted ring turns silently drop-oldest past the queue bound; the
+// engine tick is the only same-cadence background owner, per the leaf
+// contract that the background tick is Evaluate/Execute's sole
+// owner). Omitted / nil = byte-identical engine posture to before.
+//
 // GATING + PLACEMENT: call this AFTER the memory manager and the
 // persistent queue exist (the same AFTER-queue rule the L0 distill
 // wiring follows - a nil enqueuer means compression jobs are never
@@ -332,7 +343,7 @@ func queueAsEnqueuer(q *queue.PersistentQueue) tierpolicy.JobEnqueuer {
 // c.Queue are already live. components.go is outside this leaf's
 // ownership, so the call-site insertion is left to the orchestrator
 // merge; TiersWiringTest pins the seam contract this function provides.
-func BuildTierPolicyEngine(tiers TiersConfigAdapter, workCfg working.Config, mmgr *memory.Manager, q *queue.PersistentQueue, logger *slog.Logger) (*tierpolicy.Engine, bool, error) {
+func BuildTierPolicyEngine(tiers TiersConfigAdapter, workCfg working.Config, mmgr *memory.Manager, q *queue.PersistentQueue, logger *slog.Logger, opts ...*working.Store) (*tierpolicy.Engine, bool, error) {
 	if !tiers.Enabled {
 		return nil, false, nil
 	}
@@ -341,6 +352,12 @@ func BuildTierPolicyEngine(tiers TiersConfigAdapter, workCfg working.Config, mmg
 	}
 	if mmgr == nil {
 		return nil, false, ErrTiersNoManager
+	}
+	var ringStore *working.Store
+	for _, w := range opts {
+		if w != nil {
+			ringStore = w
+		}
 	}
 	// Leaf T2: a non-positive retention must never reach the cutoff
 	// arithmetic (a zero-time cutoff matches nothing - the live defect
@@ -372,6 +389,19 @@ func BuildTierPolicyEngine(tiers TiersConfigAdapter, workCfg working.Config, mmg
 		Demotion:       &managerDemotion{mgr: mmgr},
 		Logger:         logger,
 	}
+	if ringStore != nil {
+		// A3-5: drain the ring's eviction queue on every engine tick
+		// (deferred inside tickOnce, so it rides passes that plan
+		// nothing too). Sink errors never fail the pass: Flush
+		// restores the batch to the queue front for the next tick.
+		epi := mmgr.Episodic()
+		deps.Flush = func(ctx context.Context) error {
+			if epi == nil {
+				return nil
+			}
+			return ringStore.Flush(ctx, working.NewEpisodicSink(epi))
+		}
+	}
 	cfg := tiers.ToEngineConfig(workCfg)
 	cfg.Demotion = tierpolicy.DemotionConfig{StaleDays: staleDays, MinUsefulness: minUsefulness}
 	// Eviction knob set from the SAME resolved [memory.usefulness] the
@@ -392,10 +422,61 @@ const DefaultTiersRetentionDays = 30
 // memory manager is missing (typed-nil/wiring guard rule).
 var ErrTiersNoManager = errors.New("memory.tiers enabled but memory manager is nil")
 
+// StartWorkingTierFlush arms the standalone A3-5 drain loop for the
+// case where the context-assembler ring exists but the tier-policy
+// engine does NOT (memory.tiers disabled or wiring failed): the ring
+// still evicts into its bounded queue and drop-oldest still bites, so
+// the drain must run on its own cadence. Returns the stop function
+// (call on shutdown; idempotent) or nil when nothing was armed (nil
+// inputs = inert, the opt-in posture). components.go owns the call
+// site; keeping it behind this helper keeps the background-tick
+// discipline in this file.
+func StartWorkingTierFlush(ctx context.Context, work *working.Store, mmgr *memory.Manager, interval time.Duration, logger *slog.Logger) (stop func()) {
+	if work == nil || mmgr == nil {
+		return nil
+	}
+	if interval <= 0 {
+		interval = tierpolicy.DefaultInterval
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	epi := mmgr.Episodic()
+	if epi == nil {
+		return nil
+	}
+	sink := working.NewEpisodicSink(epi)
+	done := make(chan struct{})
+	var once sync.Once
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-done:
+				return
+			case <-ticker.C:
+				if err := work.Flush(context.Background(), sink); err != nil {
+					logger.Warn("working-tier eviction flush failed", "error", err)
+				}
+			}
+		}
+	}()
+	return func() { once.Do(func() { close(done) }) }
+}
+
 // EngineHandle is the daemon-facing lifecycle handle over the engine:
 // it carries Start/Stop/Running only, keeping the daemon from touching
 // Evaluate/Execute directly (the background tick is their ONLY owner -
 // never chat-path code).
+//
+// The A3-5 working-tier drain rides the ENGINE tick itself
+// (tierpolicy.Deps.Flush, wired in BuildTierPolicyEngine when a
+// working store is provided) — no separate goroutine: the engine
+// already owns the cadence, and Execute's compress/evict pass is
+// exactly when ring overflow pressure matters.
 type EngineHandle struct {
 	eng *tierpolicy.Engine
 }

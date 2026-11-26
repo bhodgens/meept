@@ -136,20 +136,48 @@ func (s *Store) HeartbeatClaim(ctx context.Context, nodeID, jobID string, claimT
 	return n > 0, nil
 }
 
+// parseLeaseStamp parses a claim-lease timestamp column written by ANY
+// generation of this store: RFC3339Nano (heartbeat/claim writes, with or
+// without sub-second digits — Go drops an all-zero nanosecond fraction
+// on format) or RFC3339 (the older seconds-granularity writes). String
+// comparison of the two vocabularies is WRONG — "12:00:05Z" sorts after
+// "12:00:05.500Z" because 'Z'(0x5A) > '.'(0x2E) — so every lease check
+// parses to time first (A3-12). ok=false means the column holds a value
+// neither vocabulary can read (never treat it as expired: an
+// unparseable lease must not silently free a live claim).
+func parseLeaseStamp(s string) (time.Time, bool) {
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02T15:04:05.999999999Z07:00", "2006-01-02 15:04:05.999999999-07:00"} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
+}
+
 // ReclaimRemoteStale resets to pending every job claimed by a node OTHER
 // than localNodeID whose timeout_at has expired. Returns the reclaimed job
 // IDs. The caller (ClusterQueue sweeper) records reclaim events + wakes
 // waiters. Local claims are NOT touched here - ReclaimIfStale owns those
 // (it has in-flight claim tokens and per-attempt bookkeeping).
+//
+// A3-12: the expiry test runs in Go on PARSED times, not as a SQL
+// string compare. timeout_at is written RFC3339Nano while the sweep's
+// now was RFC3339, and ISO-8601 string ordering only holds when both
+// sides carry the SAME fraction syntax: a lease written this second
+// with sub-second digits ("...:05.123Z") vs "...:05Z" compares lexically
+// GREATER ('.' < 'Z'), so the sweeper would call it expired up to a
+// full second early and steal a live claim; conversely a lease exactly
+// on a whole second stored WITHOUT fraction is indistinguishable from
+// an expired one. Parse-then-compare is vocabulary-independent.
 func (s *Store) ReclaimRemoteStale(ctx context.Context, localNodeID string) ([]string, error) {
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := time.Now().UTC()
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, claimed_by_node FROM jobs
+		SELECT id, claimed_by_node, timeout_at FROM jobs
 		WHERE state IN ('claimed', 'processing')
 		  AND claimed_by_node IS NOT NULL AND claimed_by_node != ''
 		  AND claimed_by_node != ?
-		  AND timeout_at IS NOT NULL AND timeout_at < ?`,
-		localNodeID, now)
+		  AND timeout_at IS NOT NULL`,
+		localNodeID)
 	if err != nil {
 		return nil, fmt.Errorf("remote reclaim: query: %w", err)
 	}
@@ -158,8 +186,19 @@ func (s *Store) ReclaimRemoteStale(ctx context.Context, localNodeID string) ([]s
 		id, node string
 	}
 	for rows.Next() {
-		var id, node string
-		if err := rows.Scan(&id, &node); err == nil {
+		var id, node, timeoutAt string
+		if err := rows.Scan(&id, &node, &timeoutAt); err != nil {
+			continue
+		}
+		expiry, ok := parseLeaseStamp(timeoutAt)
+		if !ok {
+			// Unparseable lease: fail closed (never reclaim a live
+			// claim on a format we cannot read).
+			s.logger.Warn("remote reclaim: unparseable timeout_at, skipping",
+				"job_id", id, "timeout_at", timeoutAt)
+			continue
+		}
+		if expiry.Before(now) {
 			stale = append(stale, struct{ id, node string }{id, node})
 		}
 	}
@@ -167,14 +206,15 @@ func (s *Store) ReclaimRemoteStale(ctx context.Context, localNodeID string) ([]s
 		return nil, fmt.Errorf("remote reclaim: iterate: %w", err)
 	}
 
+	nowStr := now.Format(time.RFC3339)
 	var reclaimed []string
 	for _, st := range stale {
 		res, err := s.db.ExecContext(ctx, `
 			UPDATE jobs
 			SET state = 'pending', claimed_by = NULL, claimed_by_node = NULL,
 			    timeout_at = NULL, last_heartbeat_at = NULL, claim_token = NULL, updated_at = ?
-			WHERE id = ? AND claimed_by_node = ? AND state IN ('claimed', 'processing')`,
-			now, st.id, st.node)
+			    WHERE id = ? AND claimed_by_node = ? AND state IN ('claimed', 'processing')`,
+			nowStr, st.id, st.node)
 		if err != nil {
 			s.logger.Warn("remote reclaim: reset failed", "job_id", st.id, "error", err)
 			continue

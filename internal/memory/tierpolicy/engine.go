@@ -173,6 +173,14 @@ type Deps struct {
 	// Nil falls back to the chars/4 estimator used by the working-tier
 	// tests. Optional.
 	CountTokens func(string) int
+	// Flush is the optional post-pass drain seam (A3-5): the tier
+	// policy tick is the engine's cadence owner, so the working-tier
+	// eviction queue (bounded, drop-oldest, never otherwise drained
+	// in production) rides this tick. Called ONCE per tickOnce on
+	// every exit path after execute; nil = no-op. The daemon wires it
+	// to working.Store.Flush with an episodic sink via
+	// SetFlush/BuildTierPolicyEngineWithWorking (tiers_engine.go).
+	Flush func(ctx context.Context) error
 	// Logger is optional; nil falls back to slog.Default().
 	Logger *slog.Logger
 }
@@ -396,17 +404,31 @@ func (e *Engine) Evaluate(ctx context.Context, states []TierState) ([]Action, er
 		// Hard band (R-B2/R-B4): compress FIRST, down to the evict
 		// threshold; evict only what compression cannot fit, in a
 		// batch sized ~50% of the overage.
+		//
+		// H7/A3-1 exclusion: the evict pool must NOT include the IDs
+		// the compress action just selected. Compression lands
+		// ASYNC (queue job -> distill worker); an evict executed in
+		// the same pass deletes those rows BEFORE the worker reads
+		// them, voiding R-B4 ("compression is recoverable; eviction
+		// of un-distilled content is the last resort") and the D3
+		// count-truth. Distilled rows (flagged by the worker) become
+		// evictable on a LATER pass.
 		overage := float64(st.Tokens) - evictAt
 		rec.Outcome = OutcomeNoop
 		compressAct, err := e.planCompress(ctx, st, overage)
 		if err != nil && !errors.Is(err, ErrNoAction) {
 			errs = append(errs, err)
 		}
+		var exclude map[string]struct{}
 		if compressAct != nil {
 			actions = append(actions, *compressAct)
 			rec.Outcome = OutcomeCompress
+			exclude = make(map[string]struct{}, len(compressAct.TargetIDs))
+			for _, id := range compressAct.TargetIDs {
+				exclude[id] = struct{}{}
+			}
 		}
-		evictAct, err := e.planEvict(ctx, st, overage/2)
+		evictAct, err := e.planEvict(ctx, st, overage/2, exclude)
 		if err != nil && !errors.Is(err, ErrNoAction) {
 			errs = append(errs, err)
 		}
@@ -444,6 +466,7 @@ func (e *Engine) planCompress(ctx context.Context, st TierState, targetTokens fl
 	if err != nil {
 		return nil, fmt.Errorf("tierpolicy: candidates for tier %q: %w", st.Tier, err)
 	}
+	cands = excludeDemotedCopies(cands)
 	var (
 		ids  []string
 		toks int
@@ -475,7 +498,11 @@ func (e *Engine) planCompress(ctx context.Context, st TierState, targetTokens fl
 // floor, then survivors in ascending usefulness (PlanUsefulEviction's
 // Survivors order reversed), bounded by MaxBatch. Under MinBatch with
 // nothing harmful, the pass is skipped (nil).
-func (e *Engine) planEvict(ctx context.Context, st TierState, targetTokens float64) (*Action, error) {
+//
+// exclude (H7/A3-1) drops IDs already selected for compression in THIS
+// pass: compression is async, so same-pass eviction would delete rows
+// the distill job has not read yet. nil = no exclusion (middle band).
+func (e *Engine) planEvict(ctx context.Context, st TierState, targetTokens float64, exclude map[string]struct{}) (*Action, error) {
 	if e.deps.Candidates == nil || e.deps.Votes == nil {
 		return nil, ErrNoAction
 	}
@@ -483,6 +510,7 @@ func (e *Engine) planEvict(ctx context.Context, st TierState, targetTokens float
 	if err != nil {
 		return nil, fmt.Errorf("tierpolicy: candidates for tier %q: %w", st.Tier, err)
 	}
+	cands = excludeDemotedCopies(cands)
 	if len(cands) == 0 {
 		return nil, ErrNoAction
 	}
@@ -493,6 +521,23 @@ func (e *Engine) planEvict(ctx context.Context, st TierState, targetTokens float
 	votes, err := e.deps.Votes.NetVotes(ctx, ids)
 	if err != nil {
 		return nil, fmt.Errorf("tierpolicy: net votes for tier %q: %w", st.Tier, err)
+	}
+	if len(exclude) > 0 {
+		// H7/A3-1: never same-pass-evict a row this pass just queued
+		// for compression - except harmful ones, which R-B2 evicts
+		// regardless (a harmful vote outranks the async-compress
+		// protection; deleting harmful content IS the point).
+		filtered := make([]memory.MemoryResult, 0, len(cands))
+		for _, c := range cands {
+			if _, dup := exclude[c.Memory.ID]; dup && votes[c.Memory.ID] > memory.HarmfulVoteThreshold {
+				continue
+			}
+			filtered = append(filtered, c)
+		}
+		cands = filtered
+		if len(cands) == 0 {
+			return nil, ErrNoAction
+		}
 	}
 	now := e.now()
 	useCfg := e.cfg.Usefulness
@@ -591,6 +636,41 @@ func reason(st TierState, targetTokens float64) string {
 		st.Tier, st.Tokens, st.Ceiling, st.Items, targetTokens)
 }
 
+// excludeDemotedCopies drops demotion's episodic copies from a
+// candidate pool (A3-2). CopyToEpisodic writes a plain episodic row
+// whose only marker is demoted_from (demote.go:103-105 MetaDemotedFrom;
+// tiers_engine.go stamps it). Without this filter the "lossless"
+// demotion copy re-enters GetOldMemories after retention_days and the
+// SAME engine that promised to preserve the content destroys it — the
+// flag-not-delete contract (D1/D2) would hold for exactly one
+// retention window. The flag is permanent and already exists on every
+// copy, so the selector skips flag-set rows outright (owner ruling on
+// A3-2: "if a flag exists, make Candidates skip flag-set rows").
+// Content reclamation of demoted copies is an explicit admin/eviction
+// surface decision, never a silent tier-policy default.
+//
+// Rows without the flag pass through untouched (zero cost for the
+// overwhelmingly common pool). Nil-safe.
+func excludeDemotedCopies(cands []memory.MemoryResult) []memory.MemoryResult {
+	var out []memory.MemoryResult
+	for _, c := range cands {
+		if from, ok := c.Memory.Metadata[MetaDemotedFrom].(string); ok && from != "" {
+			continue
+		}
+		if out == nil {
+			// First copy found: start a fresh slice (never mutate
+			// the caller's backing array - the daemon adapter hands
+			// us its own result slice).
+			out = make([]memory.MemoryResult, 0, len(cands))
+		}
+		out = append(out, c)
+	}
+	if out == nil {
+		return cands
+	}
+	return out
+}
+
 // Start launches the background tick loop. Single-start guarantee: a
 // second call while running returns ErrAlreadyStarted (T4); after Stop a
 // restart is allowed (Consolidator tickerActive pattern,
@@ -635,7 +715,19 @@ func (e *Engine) loop(ctx context.Context, stopCh chan struct{}) {
 
 // tickOnce runs one evaluate+execute pass off the chat path. Errors are
 // logged, never fatal - the next tick retries.
+//
+// The working-tier flush (A3-5) rides EVERY pass via the deferred
+// deps.Flush seam: the eviction queue is drained even when this tier
+// engine plans nothing, because the working ring overflows independently
+// of the episodic band posture. Flush is nil-safe (no seam = no-op).
 func (e *Engine) tickOnce(ctx context.Context) {
+	if e.deps.Flush != nil {
+		defer func() {
+			if err := e.deps.Flush(ctx); err != nil {
+				e.logger.Warn("tierpolicy: working-tier flush failed", "error", err)
+			}
+		}()
+	}
 	if e.deps.States == nil {
 		return
 	}
@@ -691,6 +783,29 @@ func (e *Engine) Running() bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.tickerActive
+}
+
+// FlushNow invokes the optional post-pass drain seam (Deps.Flush,
+// A3-5) directly. Test seam for the wired flush contract and a
+// shutdown helper for callers that want a final drain after Stop.
+// Nil-safe: no seam = nil.
+func (e *Engine) FlushNow(ctx context.Context) error {
+	if e == nil || e.deps.Flush == nil {
+		return nil
+	}
+	return e.deps.Flush(ctx)
+}
+
+// TickOnceNow runs one evaluate+execute+flush pass SYNCHRONOUSLY -
+// identical code path to the background tick (the tick's only owner
+// stays the loop or this explicit call; chat-path code must never use
+// it). Test seam for daemon wiring pins; admin/manual-pass surfaces
+// may adopt it later.
+func (e *Engine) TickOnceNow(ctx context.Context) {
+	if e == nil {
+		return
+	}
+	e.tickOnce(ctx)
 }
 
 // TiersConfig is the user-facing [memory.tiers] knob set. It is a plain

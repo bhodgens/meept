@@ -129,15 +129,21 @@ func (e *Engine) Execute(ctx context.Context, actions []Action) (ExecutionReport
 // batch through the REAL distill pipeline. The payload reuses
 // memory.L1ExtractPayload verbatim (SHARED-CONVENTIONS 2.2): TierPolicy
 // compression IS extraction-to-claims, not free-text re-summarization
-// (R-B4). The L0Path carries the tier-scoped selection (populated by the
-// daemon's tier adapter); SessionID scopes the job. A nil Enqueuer is an
-// honest wiring error, reported per action.
+// (R-B4). Owner ruling D3 (H7/A3-1): the payload carries the engine's
+// EXACT target row IDs in MemoryIDs (the row shape) — the previous
+// L0Path-less payload was rejected unconditionally by the worker while
+// Execute counted the batch as compressed, and the hard band evicted
+// the same rows in the same pass. SessionID stays the tier-scoped
+// label; it is NOT a day-file session here, so MemoryIDs takes
+// precedence in the worker and the l0 marker path is never entered.
+// A nil Enqueuer is an honest wiring error, reported per action.
 func (e *Engine) enqueueCompress(ctx context.Context, act Action) (int, error) {
 	if e.deps.Enqueuer == nil {
 		return 0, fmt.Errorf("compress %d ids: no queue Enqueuer wired", len(act.TargetIDs))
 	}
 	payload := memory.L1ExtractPayload{
 		SessionID: tierJobPrefix + ":" + sessionFromReason(act.Reason),
+		MemoryIDs: append([]string(nil), act.TargetIDs...),
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {

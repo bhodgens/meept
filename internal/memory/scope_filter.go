@@ -132,9 +132,19 @@ func (f *scopeRecallFilter) visible(mem Memory) bool {
 		}
 		return scopeRowOwner(mem.Metadata, "user_id") == f.userID
 	default:
-		// Unknown scope value: treat as global (legacy/default backfill
-		// vocabulary). Never hide rows whose scope the writer did not set.
-		return true
+		// Unknown NON-EMPTY scope value: fail CLOSED (A3-6, this
+		// file's own Flag 3 rule — "an identity resolution gap must
+		// never widen recall"). The legacy "writer did not set a
+		// scope" case is already served above: mem.Scope == "" falls
+		// through scopeFromMetadata, whose MISSING/empty marker
+		// resolves to ScopeGlobal (the documented backfill,
+		// types.go:88-97). A row whose scope IS set but names a value
+		// outside {global, project, user} — a writer typo, a future
+		// vocabulary word, a hand-edited record — is NOT a legacy
+		// global row; treating it as global made it recallable by
+		// every caller, including cross-project callers under
+		// multiuser. Unknown vocabulary must narrow, never widen.
+		return false
 	}
 }
 

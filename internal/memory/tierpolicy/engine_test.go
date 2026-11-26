@@ -359,6 +359,12 @@ func (failingCandidates) Candidates(context.Context, string, int) ([]memory.Memo
 //	lowest (age penalty Ws/day) and leads the floor; the age-only lane
 //	preserves source order, so A leads. Enabled=true -> E first;
 //	Enabled=false -> A first.
+//
+// Driven through planEvict DIRECTLY (nil exclude): the five 1-token
+// candidates are exactly what this tier's compress lane selects, and
+// H7/A3-1 makes same-pass evict skip compress-selected IDs (see
+// TestEvaluateHardBandNoEvictOverlapForCompressed). The ranking lanes
+// are what this test pins, not the band interaction.
 func TestPlanEvictHonorsUsefulnessConfig(t *testing.T) {
 	stub := map[string][]memory.MemoryResult{"episodic": {
 		mem("A", "x", 10), mem("B", "x", 30), mem("C", "x", 30),
@@ -370,19 +376,16 @@ func TestPlanEvictHonorsUsefulnessConfig(t *testing.T) {
 	firstEvict := func(t *testing.T, cfg Config, want string) {
 		t.Helper()
 		e := New(cfg, Deps{Candidates: &stubCandidates{byTier: stub}, Votes: votes})
-		act, err := e.Evaluate(context.Background(), []TierState{st})
+		act, err := e.planEvict(context.Background(), st, 7.5, nil)
 		if err != nil {
-			t.Fatalf("Evaluate: %v", err)
+			t.Fatalf("planEvict: %v", err)
 		}
-		for i := range act {
-			if act[i].Kind == KindEvict {
-				if act[i].TargetIDs[0] != want {
-					t.Errorf("evict first id = %q, want %q (full=%v)", act[i].TargetIDs[0], want, act[i].TargetIDs)
-				}
-				return
-			}
+		if act == nil || act.Kind != KindEvict {
+			t.Fatalf("no evict action (got %+v)", act)
 		}
-		t.Fatalf("no evict action in hard band (actions=%d)", len(act))
+		if act.TargetIDs[0] != want {
+			t.Errorf("evict first id = %q, want %q (full=%v)", act.TargetIDs[0], want, act.TargetIDs)
+		}
 	}
 
 	enabled := enabledCfg()

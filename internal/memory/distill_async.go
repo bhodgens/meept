@@ -42,11 +42,32 @@ const (
 const markerCategory = "l0_progress"
 
 // L1ExtractPayload is the memory.l1_extract payload (SHARED-CONVENTIONS §2.2).
+//
+// Two shapes ride this one payload (owner ruling D3, H7/A3-1):
+//   - Day-file shape (the capture path, daemon memory_capture.go): L0Path
+//     points at the session's L0 JSONL day file and SinceMsgID marks the
+//     window start. This shape is byte-identical to the pre-D3 contract and
+//     its per-session l0_progress marker semantics are unchanged.
+//   - Row shape (tier-policy compression): MemoryIDs carries the EXACT
+//     memory row ids the engine planned. When non-empty it takes precedence
+//     over L0Path; the worker distills exactly those rows (no second
+//     lookup, no day-file read) and idempotence lives on the rows
+//     themselves (the compressed flag below), not on the marker.
 type L1ExtractPayload struct {
 	SessionID  string `json:"session_id"`
 	L0Path     string `json:"l0_path"`
 	SinceMsgID string `json:"since_msg_id,omitempty"`
+	// MemoryIDs is the row-based compress selection (tierpolicy
+	// planCompress Action.TargetIDs). Empty for the day-file shape, so
+	// pre-D3 payloads marshal byte-identically (omitempty).
+	MemoryIDs []string `json:"memory_ids,omitempty"`
 }
+
+// RowCompressedKey is the metadata flag stamped in place on a memory row
+// once a row-shape compress job has distilled it (D3 idempotence: rows
+// already distilled must not re-emit claims). Mirrors the day-file
+// marker's "window already covered -> suppressed" semantics.
+const RowCompressedKey = "l1_compressed"
 
 // L2ScenePayload is the memory.l2_scene payload (SHARED-CONVENTIONS §2.2).
 type L2ScenePayload struct {
@@ -236,11 +257,21 @@ func (w *DistillWorker) handleL1Extract(ctx context.Context, payload []byte) (an
 	if p.SessionID == "" {
 		return nil, errors.New("distill: l1 payload missing session_id")
 	}
-	if p.L0Path == "" {
+	if p.L0Path == "" && len(p.MemoryIDs) == 0 {
 		return nil, errors.New("distill: l1 payload missing l0_path")
 	}
 	if w.manager == nil {
 		return nil, errors.New("distill: l1 worker has no memory manager")
+	}
+	if len(p.MemoryIDs) > 0 {
+		// Row shape (owner ruling D3, H7/A3-1): tier-policy compression
+		// carries the engine's EXACT target row ids and the worker
+		// distills exactly those rows. The per-session l0 marker is the
+		// day-file shape's idempotence device; this shape must not touch
+		// it (a tierpolicy: pseudo-session marker would poison real
+		// sessions' suppression). Idempotence lives on the rows
+		// themselves (RowCompressedKey).
+		return w.handleL1RowCompress(ctx, p)
 	}
 	if w.llm == nil {
 		// Models-less host (memory-defaults leaf 02 T4): default-on L0
@@ -316,6 +347,158 @@ func (w *DistillWorker) handleL1Extract(ctx context.Context, payload []byte) (an
 		"conflict_merged": merged,
 		"l0_progress":     lastID,
 	}, nil
+}
+
+// handleL1RowCompress distills the payload's EXACT memory rows into L1
+// claims (owner ruling D3: "compress jobs must carry the engine's EXACT
+// target row IDs; the worker compresses exactly those rows"). One
+// extraction call is made over the selected row contents using the SAME
+// ambientExtractionPromptTemplate as the day-file shape, so extraction
+// quality is shape-independent.
+//
+// Shape differences from handleL1Extract are deliberate:
+//   - No l0_progress marker read or write. The marker contract is for
+//     day-file window reads; a tierpolicy:<tier> pseudo-session marker
+//     must never join the marker namespace (real session suppression is
+//     keyed by session_id; the prefix keeps them disjoint anyway, but
+//     touching markers here would still be wrong for row semantics).
+//   - Idempotence lives on the rows: each distilled row is flagged in
+//     place with RowCompressedKey (the status-flag mirror of what the
+//     marker does for windows — "rows already distilled must not
+//     re-emit claims"). Rows already flagged are excluded from the
+//     prompt; a retried job that failed before flagging re-reads the
+//     same window (claims are content-deduped downstream, same posture
+//     as the day-file retry).
+//   - Missing rows (evicted between planning and processing) are
+//     skipped, not fatal — the engine counts the enqueue, not the
+//     landing; dead rows carrying a live claim are not a distill error.
+func (w *DistillWorker) handleL1RowCompress(ctx context.Context, p L1ExtractPayload) (any, error) {
+	if w.llm == nil {
+		// Same models-less posture as the day-file shape: Warn once,
+		// leave the job queued (rows are NOT flagged, so a later
+		// model-driven cycle re-distills exactly the same rows).
+		w.warnNoModelOnce("l1")
+		return map[string]any{
+			"status":     "skipped_no_model",
+			"session_id": p.SessionID,
+		}, nil
+	}
+	epi := w.manager.Episodic()
+	if epi == nil {
+		return nil, errors.New("distill: episodic store unavailable for row compress")
+	}
+
+	type pendingRow struct {
+		id   string
+		meta map[string]any
+	}
+	var (
+		lines   []string
+		pending []pendingRow
+		flagged int
+		missing int
+	)
+	for _, id := range p.MemoryIDs {
+		if id == "" {
+			continue
+		}
+		res, err := epi.GetByID(ctx, id)
+		if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				missing++
+				continue
+			}
+			return nil, fmt.Errorf("distill l1 row %s: load: %w", id, err)
+		}
+		if res == nil {
+			missing++
+			continue
+		}
+		if metaStringFlag(res.Memory.Metadata, RowCompressedKey) {
+			flagged++ // already compressed: must not re-emit claims
+			continue
+		}
+		lines = append(lines, res.Memory.Content)
+		pending = append(pending, pendingRow{id: id, meta: res.Memory.Metadata})
+	}
+	if len(pending) == 0 {
+		// Nothing left to distill: every row is flagged or gone. The
+		// row-shape analogue of the day-file "suppressed" duplicate.
+		return map[string]any{
+			"status":          "suppressed",
+			"session_id":      p.SessionID,
+			"rows_total":      len(p.MemoryIDs),
+			"rows_compressed": flagged,
+			"rows_missing":    missing,
+		}, nil
+	}
+
+	prompt := fmt.Sprintf(ambientExtractionPromptTemplate, strings.Join(lines, "\n"))
+	raw, err := w.llm.DistillComplete(ctx, prompt)
+	if err != nil {
+		return nil, fmt.Errorf("distill l1: llm extraction: %w", err)
+	}
+	candidates, err := ParseAmbientCandidates(raw)
+	if err != nil {
+		return nil, fmt.Errorf("distill l1: parse candidates: %w", err)
+	}
+	stored, merged, err := w.storeCandidates(ctx, candidates)
+	if err != nil {
+		return nil, err
+	}
+
+	// Flag the source rows ONLY after a full successful pass (the
+	// marker-advances-on-success contract, row form). Partial progress
+	// from an error mid-loop is safe: flagging is idempotent and a
+	// re-run of already-flagged rows suppresses (no duplicate claims).
+	for _, r := range pending {
+		if r.meta == nil {
+			r.meta = map[string]any{}
+		}
+		meta := make(map[string]any, len(r.meta)+1)
+		for k, v := range r.meta {
+			meta[k] = v
+		}
+		meta[RowCompressedKey] = true
+		meta[RowCompressedAtKey] = w.now().UTC().Format(time.RFC3339)
+		// In-place metadata stamp (the DemoteClaim/MarkResolved
+		// precedent): ID-stable, no new version row, no delete.
+		if err := w.manager.stampMetadataInPlace(ctx, &Memory{ID: r.id, Metadata: meta}); err != nil {
+			return nil, fmt.Errorf("distill l1: flag row %s: %w", r.id, err)
+		}
+	}
+	return map[string]any{
+		"status":          "ok",
+		"session_id":      p.SessionID,
+		"rows_total":      len(p.MemoryIDs),
+		"rows_distilled":  len(pending),
+		"rows_compressed": flagged + len(pending),
+		"rows_missing":    missing,
+		"claims_stored":   stored,
+		"conflict_merged": merged,
+	}, nil
+}
+
+// RowCompressedAtKey records the RFC3339 instant a row was compressed
+// (observability; the suppression check reads only RowCompressedKey).
+const RowCompressedAtKey = "l1_compressed_at"
+
+// metaStringFlag reads a boolean metadata flag in every shape a
+// JSON-round-tripped SQLite map can carry (bool, "true", float64 1),
+// mirroring demotedFromMeta's shape tolerance.
+func metaStringFlag(meta map[string]any, key string) bool {
+	if meta == nil {
+		return false
+	}
+	switch v := meta[key].(type) {
+	case bool:
+		return v
+	case string:
+		return v == "true"
+	case float64:
+		return v != 0
+	}
+	return false
 }
 
 // storeCandidates stores the extraction candidates, applying the conflict
