@@ -1448,6 +1448,27 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 	// thread-isolated (see RouteToAgent).
 	multiIntent := d.classifyMultiIntent(ctx, resolvedInput, memCtx)
 	if multiIntent.IsCompound {
+		// D4 (plan-contract tree 20261125-plan-contract-quickplan, H6):
+		// a SEQUENTIAL compound — "plan X then implement it" — is one
+		// quick_plan contract: ONE task, oneshot, through the plan-
+		// contract lane (routeToPlanWithOverride quick_plan branch:
+		// SubmitAndApproveNoSynthesis + createTask + AdoptTask). The
+		// legacy spec_pair dispatch lane is bypassed for this shape;
+		// it survives for parallel compounds and for direct pair
+		// intents. approval_requested (D3) is carried from the step-3.5
+		// analysis into the park posture. With plans disabled (no plan
+		// manager / mode off) the compound keeps its legacy lane —
+		// conversion needs a plan machine to route into.
+		if multiIntent.CompoundType == "sequential" && d.planManager != nil &&
+			d.planManager.ShouldCreatePlan(string(IntentQuickPlan), 0) {
+			var analysis *TrueIntentAnalysis
+			if memCtx != nil && memCtx.LastIntent != nil {
+				analysis = memCtx.LastIntent.TrueAnalysis
+			}
+			var seqErr error
+			turnResult, seqErr = d.routeSequentialCompoundAsQuickPlan(ctx, multiIntent, input, sessionID, analysis, parseResult.Directive)
+			return turnResult, seqErr
+		}
 		var routeErr error
 		turnResult, routeErr = d.routeCompoundWithModel(ctx, multiIntent, input, sessionID, parseResult.Directive)
 		return turnResult, routeErr
@@ -3099,6 +3120,70 @@ func (d *Dispatcher) routeCompoundWithModel(ctx context.Context, multi *MultiInt
 		OriginalInput: input,
 		Steps:         steps,
 	}, nil
+}
+
+// routeSequentialCompoundAsQuickPlan converts a SEQUENTIAL compound verdict
+// ("plan X then implement it") into the quick_plan contract posture (owner
+// ruling D4, tree 20261125-plan-contract-quickplan; closes bughunt H6): the
+// compound is ONE task — plan-and-execute, aka quickplan — dispatched
+// through routeToPlanWithOverride's quick_plan branch (brief becomes the
+// system-approved contract row, the strategic task is adopted onto it, the
+// row completes as a rollup of its task). The legacy spec_pair dispatch
+// lane is bypassed: pair-session machinery stays an EXECUTOR concern for
+// synthesized steps (master C-4), not a lane compound intents take.
+//
+// The conversion is intent-level, not task-level: a fresh Intent with
+// Type=IntentQuickPlan carrying the compound's summary, the D3
+// approval_requested attribute from the step-3.5 analysis (the park-posture
+// exception — D4 says no approval gate is added BY PHRASING; the adjudicated
+// attribute stays the single intent-driven exception), RequiresPlanning
+// true (the async gate must open for the task dispatch), and the
+// directive-derived ExecutorModelRef so a user model override still reaches
+// the executor. The compound's individual step intents are preserved on
+// the row's plan Steps metadata via the task description — createTask
+// receives the FULL input, matching what the legacy compound parent task
+// already guaranteed (e2e T1 full-input contract).
+//
+// Sequential compounds with plans DISABLED never reach here: the caller
+// gates on the plan manager, so those keep the legacy pair-parent lane.
+func (d *Dispatcher) routeSequentialCompoundAsQuickPlan(ctx context.Context, multi *MultiIntent, input, sessionID string, analysis *TrueIntentAnalysis, modelDirective *ModelReassignmentDirective) (*DispatchResult, error) {
+	d.logger.Info("Sequential compound routed as quick_plan contract (D4)",
+		"intents", len(multi.Intents),
+		"session", sessionID,
+	)
+	// Stats parity with the legacy lane: the compound dispatch count stays
+	// truthful (the classification method is recorded by routeToPlan's
+	// quickplan branch via the intent below).
+	d.recordCompoundDispatch(len(multi.Intents))
+
+	intent := &Intent{
+		Type:             string(IntentQuickPlan),
+		Confidence:       0.9,
+		AgentType:        "orchestrator",
+		Summary:          multi.Summary,
+		RequiresPlanning: true,
+		Method:           "compound_quickplan",
+		TrueAnalysis:     analysis,
+		OriginalInput:    input,
+		SuggestedMode:    IntentQuickPlan.SuggestedMode(),
+	}
+	if analysis != nil {
+		intent.ApprovalRequested = analysis.ApprovalRequested
+	}
+	res, err := d.routeToPlanWithOverride(ctx, input, intent, sessionID, false)
+	if err != nil {
+		return nil, err
+	}
+	// Model-directive carry: the quick_plan branch does not consult the
+	// compound directive, so attach the executor ref here (the same value
+	// executorModelRefFromDirective feeds the direct-dispatch lanes).
+	if res.ExecutorModelRef == "" {
+		res.ExecutorModelRef = executorModelRefFromDirective(modelDirective)
+	}
+	if res.OriginalInput == "" {
+		res.OriginalInput = input
+	}
+	return res, nil
 }
 
 // classifyMultiIntent runs classification to detect all potential intents.
