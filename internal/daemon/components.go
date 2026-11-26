@@ -414,6 +414,16 @@ type Components struct {
 	// before WireWorkingProducer in NewComponents.
 	workingStore *working.Store
 
+	// A3-5: the standalone working-tier eviction drain for the
+	// tiers-disabled branch. workingTierFlushSetup is armed at wiring
+	// time (only when the ring exists and the engine does NOT) and
+	// invoked in Components.Start with the daemon lifecycle ctx;
+	// workingTierFlushStop is joined in stopComponents before the memory
+	// manager closes. Both nil on every boot without the ring (the
+	// flag-off posture is byte-identical: no closure, no goroutine).
+	workingTierFlushSetup func(ctx context.Context)
+	workingTierFlushStop  func()
+
 	// KnowledgeStore is the consolidation-side knowledge-asset store
 	// (tree 04): opened by wireKnowledgeAssets when memory.knowledge is
 	// enabled with ingest_dir or code_dirs configured, holding the
@@ -3703,6 +3713,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			c.MemoryManager,
 			pq,
 			logger.With("component", "tierpolicy"),
+			c.workingStore, // A3-5: the engine tick drains the ring's eviction queue
 		)
 		if engErr != nil {
 			logger.Warn("memory.tiers engine wiring failed -- policy tick disabled",
@@ -3714,6 +3725,13 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				"retention_days", cfg.Memory.Tiers.RetentionDays,
 				"dry_run", cfg.Memory.Tiers.DryRun,
 			)
+		} else if c.workingStore != nil && c.MemoryManager != nil {
+			// A3-5 (tiers-disabled branch): the context-assembler ring
+			// exists but the tier-policy engine does NOT (memory.tiers
+			// off — the shipped default — or wiring declined). The ring
+			// still evicts into its bounded queue and drop-oldest still
+			// bites, so the drain must run on its own cadence.
+			armWorkingTierFlush(c, cfg, logger)
 		}
 	}
 
@@ -6204,6 +6222,11 @@ func (c *Components) Start(ctx context.Context) error {
 				if c.TiersEngine != nil {
 					c.TiersEngine.Stop()
 				}
+			case "working_tier_flush":
+				// A3-5: join the standalone drain's stop on rollback.
+				if c.workingTierFlushStop != nil {
+					c.workingTierFlushStop()
+				}
 			}
 			if stopErr != nil {
 				c.Logger.Warn("component stop error during rollback", "handler", name, "error", stopErr)
@@ -6235,6 +6258,14 @@ func (c *Components) Start(ctx context.Context) error {
 		startedHandlers = append(startedHandlers, "tierpolicy")
 		c.Logger.Info("memory.tiers engine started",
 			"running", c.TiersEngine.Running())
+	} else if c.workingTierFlushSetup != nil {
+		// A3-5: tiers off but the ring exists — the standalone eviction
+		// drain rides the daemon lifecycle ctx (c.cancel + the rollback
+		// case below reap it). The setup closure arms the loop and parks
+		// its stop func on the component.
+		c.workingTierFlushSetup(ctx)
+		startedHandlers = append(startedHandlers, "working_tier_flush")
+		c.Logger.Info("working-tier eviction flush started (tiers disabled)")
 	}
 
 	// Voice sidecar Start (leaf 14): text server up + voice_call tool
@@ -8021,6 +8052,18 @@ func (c *Components) stopComponents(ctx context.Context) error {
 		c.Logger.Info("memory.tiers engine stopped")
 	}
 
+	// A3-5: stop the standalone working-tier eviction drain BEFORE the
+	// memory manager closes (same rule as the engine above: the flush
+	// writes episodic rows). The lifecycle ctx cancel already unblocks
+	// the loop; this closes it deterministically. Nil on every boot
+	// without the ring — no-op there (flag-off byte-identical).
+	if c.workingTierFlushStop != nil {
+		c.workingTierFlushStop()
+		c.workingTierFlushStop = nil
+		c.Logger.Info("working-tier eviction flush stopped")
+	}
+	c.workingTierFlushSetup = nil
+
 	// Unsubscribe the working-tier producer (leaf T5) before the session
 	// store and the agent loop tear down: the producer reads the store
 	// from its goroutine, so a terminal event arriving mid-shutdown could
@@ -8028,7 +8071,13 @@ func (c *Components) stopComponents(ctx context.Context) error {
 	// goroutine; in-flight appends are best-effort and safe (the ring is
 	// process-local and dies with it).
 	if c.WorkingProducer != nil {
-		c.msgBus.Unsubscribe(c.WorkingProducer)
+		// nil-guard: c.msgBus is only parked on Components inside the
+		// employee wiring branch; a boot with the assembler on and
+		// employees off would panic here (the A3-5 production pin found
+		// this). The bus Unsubscribe is a no-op with no bus to unsubscribe from.
+		if c.msgBus != nil {
+			c.msgBus.Unsubscribe(c.WorkingProducer)
+		}
 		c.WorkingProducer = nil
 		c.Logger.Info("working-tier producer unsubscribed")
 	}

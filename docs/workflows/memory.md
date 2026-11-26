@@ -73,6 +73,19 @@ ws = 0.005
 - **Periodic Updates**: Refreshed every N conversations
 - **Response Style Influence**: Adapts to user preferences
 
+### Working-Tier Eviction Drain (A3-5, production-wired)
+
+With `[agent] context_assembler.enabled`, every completed turn appends to
+the working-tier ring; over-budget turns queue for `Flush` into episodic
+recall (bounded queue, drop-oldest past the cap). The drain now has a
+production owner on BOTH branches: tiers ON — the tier-policy engine tick
+(`Deps.Flush`, `BuildTierPolicyEngine` passed `c.workingStore`); tiers OFF
+— the standalone loop `StartWorkingTierFlush`, armed by
+`armWorkingTierFlush` in `NewComponents`, started in `Components.Start` on
+the daemon lifecycle ctx, stop joined in `stopComponents` before the
+memory manager closes. Ring absent (assembler off) or manager nil arms
+nothing — the flag-off boot stays byte-identical.
+
 ### Ambient Candidate Confidence Disposal (three bands)
 
 Ambient extraction (`memory.epistemic.ambient_extraction`) defaults **on**

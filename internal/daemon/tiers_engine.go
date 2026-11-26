@@ -418,6 +418,23 @@ func BuildTierPolicyEngine(tiers TiersConfigAdapter, workCfg working.Config, mmg
 // even for hand-built adapters.
 const DefaultTiersRetentionDays = 30
 
+// armWorkingTierFlush (A3-5) parks the standalone drain's setup closure
+// on the Components (invoked in Start with the daemon lifecycle ctx;
+// stop joined in stopComponents). Nil store / nil manager arms nothing.
+// Exposed as a helper so the daemon-level pin drives the EXACT shape the
+// production call site arms.
+func armWorkingTierFlush(c *Components, cfg *config.Config, logger *slog.Logger) {
+	if c == nil || c.workingStore == nil || c.MemoryManager == nil {
+		return
+	}
+	c.workingTierFlushSetup = func(ctx context.Context) {
+		c.workingTierFlushStop = StartWorkingTierFlush(
+			ctx, c.workingStore, c.MemoryManager,
+			time.Duration(cfg.Memory.Tiers.IntervalSeconds)*time.Second,
+			logger.With("component", "working-tier-flush"))
+	}
+}
+
 // ErrTiersNoManager is returned when memory.tiers is enabled but the
 // memory manager is missing (typed-nil/wiring guard rule).
 var ErrTiersNoManager = errors.New("memory.tiers enabled but memory manager is nil")
