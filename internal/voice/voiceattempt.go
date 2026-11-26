@@ -46,6 +46,17 @@ type telnyxVoiceAttempt struct {
 // Channel pins the seam key (C1 vocabulary).
 func (a *telnyxVoiceAttempt) Channel() contact.Channel { return contact.ChannelTelnyxVoice }
 
+// OutcomeTimeout is the DISTINCT attempt outcome for an outcome wait that
+// hit its deadline (A5-1/A6-12 leg): the wiring's chain-run cap (the 10-min
+// context.WithTimeout in the daemon's contact chain runner) expires while the
+// call is still live — frequently one the callee ALREADY ANSWERED (the outcome
+// registry only records at call teardown). Recording that as no_answer made
+// the chain report a connected long call as unanswered and advance to the next
+// channel; "timeout" names what actually happened (the wait, not the callee).
+// Like no_answer/busy it is non-terminal for the chain (advances), but honest
+// in the report line.
+const OutcomeTimeout Outcome = "timeout"
+
 // Attempt places the call and classifies the terminal outcome.
 // request_id comes from pkg/id (the chain supplies per-attempt
 // identity; the effects ledger's retry protection rides the dial path's
@@ -66,7 +77,12 @@ func (a *telnyxVoiceAttempt) Attempt(ctx context.Context, rec contact.Record, me
 	}
 	out, ok := a.outcome(ctx, ccid)
 	if !ok {
-		return string(OutcomeNoAnswer), errOutcomeUnknown
+		// Lookup answers false ONLY on ctx expiry/cancellation (it polls
+		// otherwise), so this is the call-cap leg, not an unanswered
+		// call: the call may be live (or answered) with no terminal
+		// record yet. Report the distinct 'timeout' outcome instead of
+		// misreporting no_answer (A5-1).
+		return string(OutcomeTimeout), errOutcomeWaitTimeout
 	}
 	switch out {
 	case OutcomeAnswered, OutcomeHangup:
@@ -81,8 +97,12 @@ func (a *telnyxVoiceAttempt) Attempt(ctx context.Context, rec contact.Record, me
 // outcome is the C2 contract (err == nil means CONNECTED/DELIVERED).
 var (
 	errVoiceAttemptUnwired = errors.New("voiceattempt: dial seam not wired")
-	errOutcomeUnknown      = errors.New("voiceattempt: call outcome unavailable")
 	errOutcomeAdvanced     = errors.New("voiceattempt: outcome advanced the chain")
+	// errOutcomeWaitTimeout names the call-cap leg: the outcome wait hit
+	// its deadline while the call had no terminal record yet. The call
+	// itself may still be live — the report must not claim it went
+	// unanswered (A5-1).
+	errOutcomeWaitTimeout = errors.New("voiceattempt: outcome wait hit its deadline (call cap); terminal outcome unknown, call may still be live")
 )
 
 // OutcomeRegistry is the wiring-side terminal-outcome collector: the
@@ -112,7 +132,8 @@ func (r *OutcomeRegistry) Record(ccid string, out Outcome) {
 }
 
 // Lookup waits (bounded by ctx) for one terminal outcome. False on ctx
-// expiry - the attempt classifies that as no_answer and advances.
+// expiry — the attempt classifies that as the distinct 'timeout' outcome
+// (A5-1) and advances.
 func (r *OutcomeRegistry) Lookup(ctx context.Context, ccid string) (Outcome, bool) {
 	if r == nil || ccid == "" {
 		return "", false

@@ -204,13 +204,26 @@ type PlanGateManager interface {
 // Approve / Keep planning decision and, on Approve, exits plan mode and lands
 // the plan on the existing durable gate. It is only available (progressive
 // disclosure) while plan mode is active for the bound session.
+//
+// Concurrency (A6-6): ONE instance is shared across every loop in the tool
+// registry, and the agent loop injects the per-turn responder + session
+// binding through the ResponseFuncSetter seam (speak.go wireResponseSetters).
+// Two concurrent session loops mutating plain struct fields is a data race
+// and leaks cross-session plan-mode state. The fields are therefore mutex-
+// guarded, and Execute resolves the SESSION from the per-turn tool context
+// (tools.SessionIDFromContext, injected by executeToolCallsUngated) — the
+// authoritative per-call identity — falling back to the last-injected field
+// only when the ctx carries none (legacy direct callers).
 type ExitPlanModeTool struct {
 	tools.ToolDefaults
-	ctrl      *PlanModeController
+	ctrl *PlanModeController
+
+	mu        sync.RWMutex
 	askUser   ResponseFunc
-	planGate  PlanGateManager
 	sessionID string
-	approver  string
+
+	planGate PlanGateManager
+	approver string
 }
 
 // NewExitPlanModeTool creates the tool bound to a plan-mode controller. The
@@ -224,33 +237,61 @@ func NewExitPlanModeTool(ctrl *PlanModeController) *ExitPlanModeTool {
 }
 
 // SetResponseFunc wires the ask channel used to present Approve / Keep
-// planning. Nil-safe (typed-nil guard).
+// planning. Nil-safe (typed-nil guard). Race-safe (A6-6): the shared tool
+// instance is injected per-turn by EVERY session loop, so the store runs
+// under the mutex.
 func (t *ExitPlanModeTool) SetResponseFunc(fn ResponseFunc) {
-	if fn != nil {
-		t.askUser = fn
+	if fn == nil {
+		return
 	}
+	t.mu.Lock()
+	t.askUser = fn
+	t.mu.Unlock()
 }
 
 // SetPlanGate wires the existing durable plan gate used to land approved
 // plans. Nil-safe.
 func (t *ExitPlanModeTool) SetPlanGate(g PlanGateManager) {
 	if g != nil {
+		t.mu.Lock()
 		t.planGate = g
+		t.mu.Unlock()
 	}
 }
 
-// SetSessionID binds the tool to a session. exit_plan_mode is session-scoped:
-// this is usually set by the session-scoped loop wiring, once per session.
+// SetSessionID binds the tool to a session (legacy fallback binding).
+// exit_plan_mode is session-scoped, but the tool INSTANCE is shared across
+// loops, so per-turn execution reads the session from the tool context
+// (tools.SessionIDFromContext — injected per turn by the agent loop) and
+// consults this field only when the ctx carries no session. Race-safe
+// under the mutex (A6-6).
 func (t *ExitPlanModeTool) SetSessionID(sessionID string) {
+	t.mu.Lock()
 	t.sessionID = sessionID
+	t.mu.Unlock()
 }
 
 // SetApprover sets the human identifier recorded as the approver on the plan
 // gate signoff. Defaults to "user".
 func (t *ExitPlanModeTool) SetApprover(by string) {
 	if by != "" {
+		t.mu.Lock()
 		t.approver = by
+		t.mu.Unlock()
 	}
+}
+
+// sessionFor resolves the executing session: the per-turn tool context is
+// authoritative (one shared instance, many concurrent loops — A6-6); the
+// last-injected field is the legacy fallback for direct callers whose ctx
+// carries no session.
+func (t *ExitPlanModeTool) sessionFor(ctx context.Context) string {
+	if sid := tools.SessionIDFromContext(ctx); sid != "" {
+		return sid
+	}
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.sessionID
 }
 
 // Name implements tools.Tool.
@@ -283,10 +324,28 @@ func (t *ExitPlanModeTool) Parameters() llm.FunctionParameters {
 // the plan on the existing durable gate (CreatePlan -> SubmitPlan ->
 // ApprovePlan) before leaving plan mode.
 func (t *ExitPlanModeTool) Execute(ctx context.Context, args map[string]any) (any, error) {
-	sessionID := t.sessionID
+	// A6-6: session from the per-turn context (authoritative for loop
+	// turns), field fallback for legacy direct callers.
+	sessionID := t.sessionFor(ctx)
 	if sessionID == "" || t.ctrl == nil || !t.ctrl.PlanMode(sessionID) {
 		return tools.NewErrorResult("exit_plan_mode is only available while plan mode is active for this session"), nil
 	}
+
+	// The responder/gate/approver are snapshotted under the mutex — a
+	// concurrent session loop's per-turn injection can never race this
+	// read (A6-6). A ctx-carried responder (tools.TurnResponderFromContext,
+	// stamped by loops that support it) outranks the last-injected field.
+	var askUser ResponseFunc
+	if r := tools.TurnResponderFromContext(ctx); r != nil {
+		askUser = ResponseFunc(r)
+	}
+	t.mu.RLock()
+	if askUser == nil {
+		askUser = t.askUser
+	}
+	planGate := t.planGate
+	approver := t.approver
+	t.mu.RUnlock()
 
 	rawPlan, _ := args["plan"].(string)
 	planText := strings.TrimSpace(rawPlan)
@@ -297,12 +356,12 @@ func (t *ExitPlanModeTool) Execute(ctx context.Context, args map[string]any) (an
 		return tools.NewErrorResult("plan must be markdown that starts with a '# ' heading"), nil
 	}
 
-	if t.askUser == nil {
+	if askUser == nil {
 		return tools.NewErrorResult("presentation channel is not available: no user response callback configured"), nil
 	}
 
 	const present = "A plan has been prepared and presented for review. Approve it to leave plan mode and land it on the plan gate, or keep planning."
-	answer, err := t.askUser(ctx, present, []string{"Approve", "Keep planning"})
+	answer, err := askUser(ctx, present, []string{"Approve", "Keep planning"})
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -320,18 +379,18 @@ func (t *ExitPlanModeTool) Execute(ctx context.Context, args map[string]any) (an
 	}
 
 	// Approve: land the plan on the existing durable gate, then leave plan mode.
-	if t.planGate == nil {
+	if planGate == nil {
 		return tools.NewErrorResult("plan approval gate is not available"), nil
 	}
 	title := planTitle(planText)
-	created, err := t.planGate.CreatePlan(ctx, title, planText, "", "", sessionID)
+	created, err := planGate.CreatePlan(ctx, title, planText, "", "", sessionID)
 	if err != nil {
 		return tools.NewErrorResult("create plan: " + err.Error()), nil //nolint:nilerr // tool contract: failures surface via the result envelope, not the Go error
 	}
-	if err := t.planGate.SubmitPlan(ctx, created.ID); err != nil {
+	if err := planGate.SubmitPlan(ctx, created.ID); err != nil {
 		return tools.NewErrorResult("submit plan: " + err.Error()), nil //nolint:nilerr // tool contract: failures surface via the result envelope, not the Go error
 	}
-	if err := t.planGate.ApprovePlan(ctx, created.ID, sessionID, t.approver); err != nil {
+	if err := planGate.ApprovePlan(ctx, created.ID, sessionID, approver); err != nil {
 		return tools.NewErrorResult("approve plan: " + err.Error()), nil //nolint:nilerr // tool contract: failures surface via the result envelope, not the Go error
 	}
 	_ = t.ctrl.SetPlanMode(sessionID, false)
@@ -355,12 +414,99 @@ const (
 // planning decision. "approve" matches the Approve option; everything else
 // (including "keep planning") is treated as keep-planning feedback so the
 // model revises and presents again.
+//
+// A6-11: the original shape substring-matched "approve", so "do not
+// approve", "don't approve", and "disapprove" all returned approvePlan —
+// the negated reply silently approved the plan. The match is now
+// anchored: an explicit negation denylist is checked FIRST and forces
+// keep-planning, then a word-boundary positive set must match (the
+// standalone word "approve"/"approved"/"approve it"/"lgtm"/"yes, approve"
+// shapes), so a plan approves only when the reply is a clear affirmative.
+// Everything unmatched stays keep-planning (fail-closed default: an
+// ambiguous reply returns feedback to the model, never lands a plan).
+// The responder currently fails closed upstream (speak.go delivers an
+// error, so no production reply reaches this classifier yet) — the fix is
+// still required for the moment an interactive sink lands.
 func classifyDecision(answer string) decision {
 	lower := strings.ToLower(strings.TrimSpace(answer))
-	if strings.Contains(lower, "approve") {
-		return approvePlan
+	if lower == "" {
+		return keepPlanning
+	}
+	// Negations first: any of these forces keep-planning even when the
+	// affirmative word also appears ("do not approve" contains
+	// "approve").
+	for _, neg := range decisionNegations {
+		if strings.Contains(lower, neg) {
+			return keepPlanning
+		}
+	}
+	for _, pos := range decisionAffirmatives {
+		if matchWordBoundary(lower, pos) {
+			return approvePlan
+		}
 	}
 	return keepPlanning
+}
+
+// decisionNegations are the explicit refusal shapes (checked before the
+// affirmatives so a negated sentence never approves).
+var decisionNegations = []string{
+	"do not approve",
+	"don't approve",
+	"dont approve",
+	"don t approve",
+	"not approve",
+	"never approve",
+	"cannot approve",
+	"can't approve",
+	"cant approve",
+	"won't approve",
+	"wont approve",
+	"disapprove",
+	"reject",
+	"keep planning",
+	"not yet",
+	"not now",
+	"hold off",
+	"hold on",
+}
+
+// decisionAffirmatives are the word-boundary positive shapes that mean
+// "approve the plan".
+var decisionAffirmatives = []string{
+	"approve",
+	"approved",
+	"approving",
+	"lgtm",
+	"ok to proceed",
+	"go ahead",
+	"proceed",
+}
+
+// matchWordBoundary reports whether word occurs in s delimited by
+// non-alphanumeric boundaries ("" counts at the string edges). This keeps
+// "disapprove"/"unapproved" from matching "approve" while allowing
+// "approve it" / "i approve" / "approved!" (negations already ran).
+func matchWordBoundary(s, word string) bool {
+	for i := 0; i+len(word) <= len(s); {
+		idx := strings.Index(s[i:], word)
+		if idx < 0 {
+			return false
+		}
+		start := i + idx
+		end := start + len(word)
+		startOK := start == 0 || !isAlnum(s[start-1])
+		endOK := end == len(s) || !isAlnum(s[end])
+		if startOK && endOK {
+			return true
+		}
+		i = end
+	}
+	return false
+}
+
+func isAlnum(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
 }
 
 // planTitle derives a plan title from the required leading '# ' heading, e.g.

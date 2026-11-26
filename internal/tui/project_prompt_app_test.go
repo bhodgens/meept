@@ -169,3 +169,90 @@ func TestSessionNeedsProjectPrompt_ParityWithGUI(t *testing.T) {
 	assert.True(t, sessionNeedsProjectPrompt(&types.Session{ID: "s"}))
 	assert.False(t, sessionNeedsProjectPrompt(nil))
 }
+
+// ---------------------------------------------------------------------------
+// M1/A6-3 end-to-end pin: a placeholder session (no detection context) that
+// presses Enter must NEVER issue the project.set RPC — the daemon's
+// CreateOrResolve would mkdir + git-init "(no project detected)/" and mark it
+// active. The modal arms No (decline) instead of Yes, so Enter takes the skip
+// path; the App's placeholder guard is the last line if a confirm arrives
+// anyway.
+// ---------------------------------------------------------------------------
+
+func TestApp_ProjectPrompt_PlaceholderEnterIssuesNoProjectSet(t *testing.T) {
+	app := newProjectPromptTestApp()
+
+	// Open the prompt exactly as the session-switch wiring does for a
+	// session with no detection context: the placeholder path.
+	newModel, _ := app.Update(modals.OpenProjectPromptMsg{
+		SessionID:   "sess-placeholder",
+		DefaultPath: modals.NoProjectPlaceholder,
+	})
+	app = newModel.(*App)
+	require.Equal(t, ModalProjectPrompt, app.activeModal)
+
+	// Enter through the real key dispatch (handleModalKey -> modal.Update).
+	// Pre-fix: Enter on the pre-selected Yes emitted Accepted=true and the
+	// App fired rpc.SetProjectPath with the literal placeholder.
+	newModel, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	app = newModel.(*App)
+
+	if cmd != nil {
+		drainCmd(cmd, func(m tea.Msg) bool {
+			if pc, ok := m.(modals.ProjectConfirmedMsg); ok && pc.Accepted {
+				t.Fatal("Enter on the placeholder must never confirm acceptance")
+			}
+			return false
+		})
+		// A decline confirm is the skip path: it must NOT produce the
+		// project.set command — drive it through App.Update and assert.
+		if pc, ok := cmd().(modals.ProjectConfirmedMsg); ok {
+			require.False(t, pc.Accepted, "placeholder Enter must decline (skip path)")
+			_, inner := app.Update(pc)
+			if inner != nil {
+				im := inner()
+				if _, isSet := im.(SetProjectResultMsg); isSet {
+					t.Fatal("declined placeholder confirm must not issue project.set")
+				}
+			}
+		}
+	}
+
+	// App-level guard: even a SYNTHETIC Accepted=true with the placeholder
+	// armed (e.g. a future regression bypassing the modal gate) must not
+	// reach the RPC — no SetProjectResultMsg command may be produced.
+	app2 := newProjectPromptTestApp()
+	_, _ = app2.Update(modals.OpenProjectPromptMsg{
+		SessionID:   "sess-placeholder",
+		DefaultPath: modals.NoProjectPlaceholder,
+	})
+	_, cmd = app2.Update(modals.ProjectConfirmedMsg{SessionID: "sess-placeholder", Accepted: true})
+	if cmd != nil {
+		m := cmd()
+		if _, isSet := m.(SetProjectResultMsg); isSet {
+			t.Fatal("App must refuse project.set with the placeholder path")
+		}
+	}
+}
+
+func TestApp_ProjectPrompt_RealPathEnterStillBinds(t *testing.T) {
+	// Non-vacuity: with a real detected cwd, Enter keeps the pre-existing
+	// accept path (issues project.set) — the guard only blocks the
+	// placeholder.
+	app := newProjectPromptTestApp()
+	newModel, _ := app.Update(modals.OpenProjectPromptMsg{
+		SessionID:   "sess-real",
+		DefaultPath: "/tmp/real-proj",
+	})
+	app = newModel.(*App)
+	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.NotNil(t, cmd, "real-path Enter must still confirm")
+	pc, ok := cmd().(modals.ProjectConfirmedMsg)
+	require.True(t, ok)
+	require.True(t, pc.Accepted, "real cwd Enter must accept (parity with GUI)")
+	_, inner := app.Update(pc)
+	require.NotNil(t, inner, "accept must produce the project.set command")
+	if _, isSet := inner().(SetProjectResultMsg); !isSet {
+		t.Fatal("real accept must issue the path-based project.set RPC")
+	}
+}

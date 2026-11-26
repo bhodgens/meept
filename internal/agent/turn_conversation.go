@@ -16,6 +16,8 @@ package agent
 
 import (
 	"context"
+
+	"github.com/caimlas/meept/internal/tools"
 )
 
 // setTurnConversation arms the per-turn parent-conversation handle with the
@@ -25,6 +27,27 @@ func (l *AgentLoop) setTurnConversation(conv *Conversation) {
 	l.mu.Lock()
 	l.turnConversation = conv
 	l.mu.Unlock()
+}
+
+// setTurnResponder arms this loop's per-turn plan-mode responder (A6-6,
+// bughunt 2026-11-25). wireResponseSetters calls it every turn; nil clears.
+func (l *AgentLoop) setTurnResponder(fn tools.TurnResponder) {
+	l.mu.Lock()
+	l.turnResponder = fn
+	l.mu.Unlock()
+}
+
+// turnResponderSnapshot reads the armed responder (nil when never armed).
+// executeToolCallsUngated stamps it onto the tool context so concurrent
+// loops sharing one exit_plan_mode instance never answer through another
+// loop's router.
+func (l *AgentLoop) turnResponderSnapshot() tools.TurnResponder {
+	if l == nil {
+		return nil
+	}
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.turnResponder
 }
 
 // turnConversationHandle reads the armed handle (nil when no turn is armed

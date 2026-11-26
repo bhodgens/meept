@@ -278,3 +278,85 @@ func TestProjectPromptModalUpdateNonKeyMsg(t *testing.T) {
 		t.Errorf("non-key msg should return nil cmd, got %v", cmd)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// M1/A6-3 parity pins: with the "(no project detected)" placeholder there is
+// no real cwd, so Yes must be disabled and the accept path must never emit
+// Accepted=true (which the App turns into a project.set RPC with the literal
+// placeholder — the daemon then mkdirs + git-inits "(no project detected)/").
+// Mirrors the GUI's cwd.isNotEmpty guard (session_project_provider.dart).
+// ---------------------------------------------------------------------------
+
+func TestProjectPromptModalPlaceholderArmsOnNo(t *testing.T) {
+	m := NewProjectPromptModal("s1", NoProjectPlaceholder)
+	if m.selected != 1 {
+		t.Errorf("placeholder prompt must pre-select No, got selected=%d", m.selected)
+	}
+	// View labels Yes as unavailable.
+	if !strings.Contains(m.View().Content, "unavailable") {
+		t.Errorf("placeholder view should mark Yes unavailable, got: %s", m.View().Content)
+	}
+	// Show() re-arms the same way on re-entry.
+	m.Show("s1", "/real/path")
+	if m.selected != 0 {
+		t.Errorf("real path should re-arm Yes (0), got %d", m.selected)
+	}
+	m.Show("s1", NoProjectPlaceholder)
+	if m.selected != 1 {
+		t.Errorf("placeholder should re-arm No (1), got %d", m.selected)
+	}
+}
+
+func TestProjectPromptModalPlaceholderYesDisabled(t *testing.T) {
+	m := NewProjectPromptModal("s1", NoProjectPlaceholder)
+	m.Show("s1", NoProjectPlaceholder)
+	// 'y' is ignored entirely while the placeholder shows.
+	_, cmd := m.Update(tea.KeyPressMsg{Text: "y"})
+	if cmd != nil {
+		t.Fatal("'y' on placeholder must NOT emit a confirm command")
+	}
+	if !m.IsVisible() {
+		t.Error("'y' must not hide the modal")
+	}
+	// Arrow up from No cannot reach Yes.
+	m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	if m.selected != 1 {
+		t.Errorf("up from No on placeholder must clamp at 1, got %d", m.selected)
+	}
+	// Enter on the (unreachable) Yes position: force it and confirm Enter
+	// still refuses (belt-and-braces branch).
+	m.selected = 0
+	_, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd != nil {
+		msg := cmd()
+		if pc, ok := msg.(ProjectConfirmedMsg); ok && pc.Accepted {
+			t.Fatal("Enter with placeholder must never emit Accepted=true")
+		}
+	}
+	// Down still reaches Pick; 'p' still opens the picker.
+	m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	if m.selected != 2 {
+		t.Errorf("Pick must remain reachable, got %d", m.selected)
+	}
+	_, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("Enter on Pick must emit a command")
+	}
+	if _, ok := cmd().(ProjectPickRequestedMsg); !ok {
+		t.Errorf("Enter on Pick must emit ProjectPickRequestedMsg, got %T", cmd())
+	}
+}
+
+func TestProjectPromptModalPlaceholderNoPathStillDeclines(t *testing.T) {
+	// 'n' keeps working on placeholder sessions (GUI skip path).
+	m := NewProjectPromptModal("s1", NoProjectPlaceholder)
+	_, cmd := m.Update(tea.KeyPressMsg{Text: "n"})
+	if cmd == nil {
+		t.Fatal("'n' must still emit a command on placeholder")
+	}
+	pc, ok := cmd().(ProjectConfirmedMsg)
+	if !ok || pc.Accepted {
+		t.Errorf("expected declined confirm, got %T %+v", cmd(), pc)
+	}
+}

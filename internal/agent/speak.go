@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -304,6 +305,10 @@ func (l *AgentLoop) wireResponseSetters(conversationID string) {
 		deliver(question)
 		return "", fmt.Errorf("plan approval requires an interactive user response, which the current chat surface does not provide; present the decision directly to the user and continue planning")
 	}
+	// A6-6 (bughunt 2026-11-25): arm the loop-held responder so
+	// executeToolCallsUngated stamps it onto the tool context; the tool
+	// prefers the ctx value over the shared-instance field.
+	l.setTurnResponder(tools.TurnResponder(responder))
 	for _, tool := range l.registry.List() {
 		if setter, ok := tool.(ResponseFuncSetter); ok {
 			setter.SetSessionID(l.sessionID)

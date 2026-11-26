@@ -79,7 +79,12 @@ func (a *signalVoiceAttempt) Attempt(ctx context.Context, rec contact.Record, me
 	}
 	out, ok := a.outcome(ctx, h.CCID)
 	if !ok {
-		return string(voice.OutcomeNoAnswer), errSignalOutcomeUnknown
+		// Lookup answers false only on ctx expiry/cancellation (the
+		// wiring's call-cap leg): the call may be live or ANSWERED with
+		// no teardown record yet — reporting no_answer here misled the
+		// chain into falling through to the next channel mid-call
+		// (A5-1). Name the wait timeout instead.
+		return string(voice.OutcomeTimeout), errSignalOutcomeTimeout
 	}
 	switch out {
 	case voice.OutcomeAnswered, voice.OutcomeHangup:
@@ -93,7 +98,7 @@ func (a *signalVoiceAttempt) Attempt(ctx context.Context, rec contact.Record, me
 // is the C2 contract (err == nil means CONNECTED/DELIVERED).
 var (
 	errSignalAttemptUnwired  = errors.New("signalleg: voice attempt not wired")
-	errSignalOutcomeUnknown  = errors.New("signalleg: call outcome unavailable")
+	errSignalOutcomeTimeout  = errors.New("signalleg: outcome wait hit its deadline (call cap); terminal outcome unknown, call may still be live")
 	errSignalOutcomeAdvanced = errors.New("signalleg: outcome advanced the chain")
 )
 

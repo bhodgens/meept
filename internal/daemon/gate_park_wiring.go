@@ -257,6 +257,82 @@ func (c *Components) pumpGateReleases(ctx context.Context, subRejected, subCance
 	}
 }
 
+// handleGoalStateRelease processes one kanban.event.goal.state
+// StateEvent (A5-2, bughunt 2026-11-25): a goal parked at its approval
+// gate (key goal|<goalID>, parked by the employee goal loop through the
+// GateParker) must not outlive the goal leaving the active phase. When
+// the goal transitions to paused / blocked / retired — any non-active
+// To — the park row is DISCARDED without resuming (same release shape
+// as plan.rejected), so a late agents.goals.approve_gate finds nothing
+// and no-ops instead of re-running Reflect on a dead goal.
+//
+// The event source is the goal store's own opt-in publisher
+// (SetKanbanEventPublishing, armed by the kanban wiring, default-on);
+// same-state field updates and the resume edge (To=active) never
+// release: active is the gate's live namespace, and an approval-driven
+// resume rides the plan.approved / approve_gate paths.
+func (c *Components) handleGoalStateRelease(msg *models.BusMessage) {
+	if msg == nil || c.GateParker == nil {
+		return
+	}
+	// Local decode of the frozen kanban.StateEvent wire shape — the
+	// daemon must not import internal/kanban here just for the struct
+	// (identity keys only; provenance is never read).
+	var ev struct {
+		Kind   string `json:"kind"`
+		ID     string `json:"id"`
+		From   string `json:"from"`
+		To     string `json:"to"`
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal(msg.Payload, &ev); err != nil {
+		c.Logger.Warn("goal gate release: undecodable goal state payload", "error", err)
+		return
+	}
+	if ev.Kind != "goal" || ev.ID == "" {
+		return
+	}
+	if ev.To == "active" || ev.To == "" {
+		// Back to active (resume) or an unlabelled update: the gate is
+		// live again / nothing decided — keep the park.
+		return
+	}
+	reason := ev.Reason
+	if reason == "" {
+		reason = "goal_" + ev.To
+	}
+	released, err := c.GateParker.ReleaseByKey(ev.ID, reason)
+	if err != nil {
+		c.Logger.Warn("goal gate release failed",
+			"goal_id", ev.ID, "to", ev.To, "error", err)
+		return
+	}
+	if released {
+		c.Logger.Info("goal gate park released on goal leaving active",
+			"goal_id", ev.ID,
+			"to_state", ev.To,
+			"reason", reason,
+		)
+	}
+}
+
+// pumpGoalState drains the goal-machine StateEvent subscription and
+// releases goal gate parks on every non-active transition (A5-2).
+func (c *Components) pumpGoalState(ctx context.Context, sub *bus.Subscriber) {
+	for {
+		select {
+		case <-ctx.Done():
+			c.msgBus.Unsubscribe(sub)
+			return
+		case msg, ok := <-sub.Channel:
+			if !ok {
+				return
+			}
+			c.handleGoalStateRelease(msg)
+		}
+	}
+}
+
 // StartGateParkPump subscribes the gate park/resume pumps on the
 // components lifecycle context and Starts the gate parker (its re-arm
 // loads gate rows parked before this boot). Called from Components.Start
@@ -277,6 +353,13 @@ func (c *Components) StartGateParkPump(ctx context.Context) {
 	subRejected := c.msgBus.Subscribe("gate-release-pump", "plan.rejected")
 	subCancelled := c.msgBus.Subscribe("gate-release-pump", "plan.cancelled")
 	go func() { c.pumpGateReleases(ctx, subRejected, subCancelled) }()
+	// A5-2 (bughunt 2026-11-25): a goal approval-gate park (goal|<goalID>)
+	// must not outlive the goal leaving active — the goal-machine state
+	// topic (published by the goal store's transition fence on pause /
+	// block / retire) releases the row without resuming, so a late
+	// approve_gate no-ops instead of re-running Reflect on a dead goal.
+	subGoalState := c.msgBus.Subscribe("goal-gate-release-pump", "kanban.event.goal.state")
+	go func() { c.pumpGoalState(ctx, subGoalState) }()
 	// C-A2 (tree 20261110 leaf 02): opt-in queue park backend for the
 	// gate parker — wired here (not in wireGateParker) because the job
 	// queue only exists after NewComponents; flag off returns nil and
@@ -293,7 +376,7 @@ func (c *Components) StartGateParkPump(ctx context.Context) {
 	c.Logger.Info("gate checkpoint pump wired",
 		"park_topic", "plan.submitting",
 		"resume_topic", "plan.approved",
-		"release_topics", "plan.rejected,plan.cancelled",
+		"release_topics", "plan.rejected,plan.cancelled,kanban.event.goal.state",
 	)
 }
 

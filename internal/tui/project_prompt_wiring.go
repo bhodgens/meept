@@ -35,7 +35,7 @@ func projectPromptDefaultPath(sess *types.Session) string {
 	if sess != nil && sess.DetectionContext != nil && sess.DetectionContext.CWD != "" {
 		return sess.DetectionContext.CWD
 	}
-	return "(no project detected)"
+	return modals.NoProjectPlaceholder
 }
 
 // maybePromptProject returns an OpenProjectPromptMsg command when the session

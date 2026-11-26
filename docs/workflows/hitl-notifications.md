@@ -98,6 +98,14 @@ no second park machinery exists.
   publishes it) and the `agents.goals.approve` RPC path. Resume is
   event-driven (`ResumeByKey`), never time-driven: gate parks schedule a
   ten-year horizon so the parker's drain can never auto-approve a gate.
+- **Releases discard without resuming.** `plan.rejected` /
+  `plan.cancelled` release the plan's gate row; goal approval-gate rows
+  (`goal|<goalID>`) additionally release on every non-active goal
+  transition — `paused` / `blocked` / `retired` — via the goal machine's
+  `kanban.event.goal.state` StateEvents (bughunt A5-2: previously nothing
+  released goal rows, so a late `approve_gate` re-ran Reflect on a dead
+  goal). A released row means a late approval no-ops (`ResumeByKey` finds
+  nothing).
 - **Restart re-arm.** `TurnParker.Start` (run in components startup after
   goal-loop registration) re-arms surviving gate rows, so an approval
   that arrives after a daemon restart still resumes the parked turn

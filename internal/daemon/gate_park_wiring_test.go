@@ -7,6 +7,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"path/filepath"
 	"strings"
@@ -212,5 +213,117 @@ func TestGateNotificationCopyKindAware(t *testing.T) {
 	}
 	if strings.Contains(goalTitle+goalBody, "plan") {
 		t.Errorf("goal copy must not be plan-worded: %q / %q", goalTitle, goalBody)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// A5-2 (bughunt 2026-11-25): a goal approval-gate park (goal|<goalID>) must
+// be released when the goal leaves the active phase (paused / blocked /
+// retired) — previously NOTHING released goal rows, so they outlived the goal
+// and a late approve_gate re-ran Reflect on a dead goal. The release rides
+// the goal machine's kanban.event.goal.state StateEvents (published by the
+// goal store's transition fence).
+// ---------------------------------------------------------------------------
+
+func goalStateBusMessage(t *testing.T, id, from, to, reason string) *models.BusMessage {
+	t.Helper()
+	payload, err := json.Marshal(map[string]any{
+		"kind": "goal", "id": id, "from": from, "to": to, "reason": reason,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg, err := models.NewBusMessage(models.MessageTypeEvent, "goal-store", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg.Payload = payload
+	msg.Topic = "kanban.event.goal.state"
+	return msg
+}
+
+func TestGateWiringGoalParkReleasedOnGoalPauseRetire(t *testing.T) {
+	c, mb, cleanup := newGateWiringHarness(t)
+	defer cleanup()
+
+	// Park a goal gate exactly like the goal-loop park seam does.
+	if !c.GateParker.ParkGate(agent.GateParkData{
+		GateKind:  "goal",
+		GateID:    "goal-rel-1",
+		SessionID: "session-rel-1",
+		TurnReentry: map[string]any{
+			"employee_id": "emp-1",
+			"plan_id":     "plan-rel-1",
+		},
+	}) {
+		t.Fatal("goal gate park refused")
+	}
+	if n := c.GateParker.PendingGates(); n != 1 {
+		t.Fatalf("pending gates = %d, want 1", n)
+	}
+
+	// Non-active transitions release WITHOUT resuming.
+	mb.Publish("kanban.event.goal.state", goalStateBusMessage(t, "goal-rel-1", "active", "paused", "park"))
+	waitForGateRows(t, c, 0)
+
+	// Late approve_gate: the resume probe finds nothing (no-op), which is
+	// exactly the pinned contract — before the fix it re-ran Reflect.
+	if c.GateParker.ResumeByKey(context.Background(), "goal", "goal-rel-1") {
+		t.Fatal("late approval resumed a released goal gate (park outlived the goal transition)")
+	}
+}
+
+func TestGateWiringGoalParkSurvivesActiveAndForeignEvents(t *testing.T) {
+	c, mb, cleanup := newGateWiringHarness(t)
+	defer cleanup()
+
+	if !c.GateParker.ParkGate(agent.GateParkData{
+		GateKind: "goal", GateID: "goal-rel-2", SessionID: "s2",
+		TurnReentry: map[string]any{"employee_id": "emp-2"},
+	}) {
+		t.Fatal("goal gate park refused")
+	}
+
+	// Foreign-kind event: untouched.
+	foreign, err := json.Marshal(map[string]any{
+		"kind": "task", "id": "goal-rel-2", "from": "active", "to": "retired",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg, err := models.NewBusMessage(models.MessageTypeEvent, "task-registry", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg.Payload = foreign
+	msg.Topic = "kanban.event.goal.state"
+	mb.Publish("kanban.event.goal.state", msg)
+
+	// Goal RESUME edge (to=active): the gate is live again — keep the row.
+	mb.Publish("kanban.event.goal.state", goalStateBusMessage(t, "goal-rel-2", "blocked", "active", "resume"))
+	time.Sleep(100 * time.Millisecond)
+	if n := c.GateParker.PendingGates(); n != 1 {
+		t.Fatalf("pending gates = %d, want 1 (foreign/active events must not release)", n)
+	}
+
+	// Non-vacuity: the SAME shape with to=retired DOES release.
+	mb.Publish("kanban.event.goal.state", goalStateBusMessage(t, "goal-rel-2", "active", "retired", "retire"))
+	waitForGateRows(t, c, 0)
+}
+
+func TestGateWiringGoalBlockTransitionAlsoReleases(t *testing.T) {
+	c, mb, cleanup := newGateWiringHarness(t)
+	defer cleanup()
+
+	if !c.GateParker.ParkGate(agent.GateParkData{
+		GateKind: "goal", GateID: "goal-rel-3", SessionID: "s3",
+		TurnReentry: map[string]any{"employee_id": "emp-3"},
+	}) {
+		t.Fatal("goal gate park refused")
+	}
+	mb.Publish("kanban.event.goal.state", goalStateBusMessage(t, "goal-rel-3", "active", "blocked", "block"))
+	waitForGateRows(t, c, 0)
+	if c.GateParker.HasParkedGate("goal", "goal-rel-3") {
+		t.Fatal("blocked-goal park still present")
 	}
 }

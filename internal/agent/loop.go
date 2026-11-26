@@ -867,6 +867,16 @@ type AgentLoop struct {
 	// brief). Guarded by l.mu.
 	turnConversation *Conversation
 
+	// turnResponder is the A6-6 per-turn plan-mode responder (bughunt
+	// 2026-11-25): the closure built by wireResponseSetters is armed on
+	// the LOOP and stamped onto the tool-execution context
+	// (tools.ContextWithTurnResponder) so concurrent session loops sharing
+	// one exit_plan_mode registry instance can never answer through
+	// another loop's router. Re-armed per turn by wireResponseSetters;
+	// stale values are unreachable between turns (the stamp only fires
+	// inside executeToolCalls). Guarded by l.mu.
+	turnResponder tools.TurnResponder
+
 	// terminateGuardRetried is the TERMINATING-TOOL lane's copy of the
 	// reply-guard rewrite budget. reasoningCycle short-circuits to
 	// buildTerminateResponse the moment a terminating tool's result
@@ -9749,6 +9759,13 @@ func (l *AgentLoop) executeToolCallsUngated(ctx context.Context, toolCalls []llm
 	// before this injection — empty stays the no-session posture.
 	ctx = tools.ContextWithSessionID(ctx, l.SessionID())
 	ctx = tools.ContextWithAgentID(ctx, l.agentID)
+
+	// A6-6 (bughunt 2026-11-25): the per-turn plan-mode responder armed by
+	// wireResponseSetters rides the tool context so the shared
+	// exit_plan_mode instance answers through THIS loop's router even when
+	// concurrent loops mutate its legacy fields. Unarmed (legacy callers)
+	// = no stamp = the field fallback, byte-identical.
+	ctx = tools.ContextWithTurnResponder(ctx, l.turnResponderSnapshot())
 
 	// Parent-conversation carrier (DSH-1 fork-seed): the loop's LIVE
 	// conversation rides the tool context so delegate_task's fork spawn can

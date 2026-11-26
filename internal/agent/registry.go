@@ -95,6 +95,27 @@ type AgentRegistry struct {
 	activeQueuesMu sync.RWMutex
 	nextGen        uint64
 
+	// routeLocks serializes RunAgentWithModelRef per agent (A5-3, bughunt
+	// 2026-11-25): the one-shot model override lives on the SHARED
+	// per-agent loop (loop.modelOverride under l.mu), so two concurrent
+	// delegate children of the same agent arming/clearing it race — one
+	// child's route silently runs the other's turn, and either child's
+	// deferred clear can wipe the other's unconsumed arm (silently
+	// dropping the C10 allowlist-gated route enforcement). A full
+	// context-carried override does not exist on the RunOnce API (the
+	// consumption site reads loop state in reasoningCycle), so the
+	// minimal safe shape is to serialize the arm→run→clear window per
+	// agent: children of one agent run their routed turns sequentially,
+	// each seeing its OWN ref. Lazily created under mu; never removed
+	// (bounded by distinct agent ids).
+	//
+	// Known bounded interaction: a workflow engine sync-join
+	// (delegate_workflow runAgent + Join, SyncTimeout default 5s) waiting
+	// on a SAME-agent nested child from inside a child's own routed run
+	// resolves the join by timeout (childFail outcome), never deadlocks —
+	// the wait is bounded and the lock is only held by RunAgentWithModelRef.
+	routeLocks map[string]*sync.Mutex
+
 	// Queues config from config file (overrides code defaults)
 	queueConfig config.AgentQueuesConfig
 
@@ -1234,11 +1255,21 @@ func (r *AgentRegistry) RunAgent(ctx context.Context, agentID, message, conversa
 // full per-turn context-carried mechanism does not exist on the RunOnce API
 // (the consumption site reads loop state in reasoningCycle), so the
 // defer-clear shape is the turn-scoping mechanism chosen here.
+//
+// A5-3 (concurrent children): the defer-clear above races concurrent runs on
+// one agent loop — child A's return clears the shared field while child B's
+// arm is still unconsumed, and each side can serve the other's route. Since
+// the consumption site is loop state, not context, the minimal safe shape is
+// the per-agent routeLocks gate: the whole arm→run→clear window is serialized
+// per agent, so concurrent delegate children of one agent run their routed
+// turns sequentially, each seeing its OWN ref (see routeLocks).
 func (r *AgentRegistry) RunAgentWithModelRef(ctx context.Context, agentID, message, conversationID, modelRef string) (string, error) {
 	loop, err := r.Get(agentID)
 	if err != nil {
 		return "", err
 	}
+	unlock := r.lockAgentRoute(agentID)
+	defer unlock()
 	// Turn-scoped (R3-2): no transient override survives past THIS run —
 	// armed here by ApplyRequestModel below, or left stuck by an earlier
 	// child run that parked/errored before consumption (which would
@@ -1254,6 +1285,24 @@ func (r *AgentRegistry) RunAgentWithModelRef(ctx context.Context, agentID, messa
 		loop.ApplyRequestModel(modelRef)
 	}
 	return loop.RunOnce(ctx, message, conversationID)
+}
+
+// lockAgentRoute takes the per-agent route gate (A5-3). Lazily creates the
+// agent's mutex under the registry lock; the returned func releases it.
+func (r *AgentRegistry) lockAgentRoute(agentID string) func() {
+	agentID = canonicalAgentID(agentID)
+	r.mu.Lock()
+	if r.routeLocks == nil {
+		r.routeLocks = make(map[string]*sync.Mutex)
+	}
+	mu, ok := r.routeLocks[agentID]
+	if !ok {
+		mu = &sync.Mutex{}
+		r.routeLocks[agentID] = mu
+	}
+	r.mu.Unlock()
+	mu.Lock()
+	return mu.Unlock
 }
 
 // Close shuts down all agent loops and releases resources.

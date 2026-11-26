@@ -1605,6 +1605,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Accepted {
 			sessionID := msg.SessionID
 			path := a.projectPrompt.SessionDefaultPath()
+			// Parity guard (M1/A6-3): never send project.set with the
+			// "(no project detected)" placeholder — the daemon's
+			// CreateOrResolve would mkdir + git-init a directory with
+			// that literal name and mark it active. The GUI's accept
+			// path is guarded the same way (cwd.isNotEmpty in
+			// session_project_provider.dart). The modal already blocks
+			// Yes while the placeholder shows; this is the last line.
+			if path == "" || path == modals.NoProjectPlaceholder {
+				a.statusMessage = "no current directory to bind — pick a project or continue without"
+				a.statusMessageTime = time.Now()
+				return a, tea.Tick(2*time.Second, func(_ time.Time) tea.Msg {
+					return StatusMessageClearMsg{}
+				})
+			}
 			return a, func() tea.Msg {
 				err := a.rpc.SetProjectPath(sessionID, path)
 				return SetProjectResultMsg{Err: err}

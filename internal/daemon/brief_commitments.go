@@ -215,14 +215,29 @@ func (f *ledgerCommitmentFiler) FileCommitment(ctx context.Context, row voice.Co
 
 // HasCommitment implements the dedupe query: a commitment row already
 // filed for (ccid, index). Rows are scoped by employee (QueryLog
-// requirement), filtered to kind=commitment, then matched on
-// source_ref=ccid + payload idx.
+// requirement) AND by the exact subject the filer writes for this call
+// ("call:<ccid>", indexed by idx_ledger_emp_subject), then filtered to
+// kind=commitment and matched on source_ref=ccid + payload idx.
+//
+// A5-4 (bughunt 2026-11-25): the original shape queried the OLDEST 1000
+// commitment rows for the employee (QueryLog is ORDER BY id ASC LIMIT n),
+// so once an employee passed 1000 commitment rows every NEW (ccid, idx)
+// fell outside the window, HasCommitment answered false for genuine
+// duplicates, and the C7 "exactly-once per (ccid, index)" contract failed
+// open — replayed hangups/re-arms duplicated commitment rows. The
+// subject-exact query is bounded by one call's commitment count (a
+// handful of rows), so no window can overflow it; the generous 1000
+// limit stays as a belt-and-braces cap on pathological rows-per-call.
 func (f *ledgerCommitmentFiler) HasCommitment(ctx context.Context, ccid string, index int) (bool, error) {
 	if f == nil || f.store == nil {
 		return false, fmt.Errorf("voice commitments: no ledger store wired")
 	}
+	if ccid == "" {
+		return false, nil
+	}
 	rows, err := f.store.QueryLog(ctx, ledger.LogQuery{
 		EmployeeID: f.employeeID,
+		Subject:    "call:" + ccid,
 		Kinds:      []ledger.Kind{ledger.KindCommitment},
 		Limit:      1000,
 	})
