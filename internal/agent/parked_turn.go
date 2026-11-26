@@ -455,6 +455,76 @@ func (p *TurnParker) HasPendingForConversation(conversationID string) bool {
 	return false
 }
 
+// HasPendingForTurn is the TURN-scoped form of the parked-presence probe
+// the C3 resume guards consult (bughunt 11-25 A5-5). The conversation
+// probe over-matches: park rows for OTHER turns of the same conversation
+// (an unrelated throttle park that outlived this resume) make an
+// absorbed-failure (”, nil) resume look like a genuine re-park, and the
+// guard defers forever with no turn.terminal — the exact R2-2 hang it was
+// written to prevent, resurrected across turns. Matching the resumed
+// turn's own identity closes that: a record counts only when it carries
+// THIS turnID.
+//
+// Legacy rows (no TurnID — parked before C-K2, or re-armed from
+// pre-C-K2 persistence) cannot prove turn identity, so they fall back to
+// the conversation test: a legacy park row for this conversation still
+// defers delivery (the pre-A5-5 behavior), never a hang.
+func (p *TurnParker) HasPendingForTurn(turnID, conversationID string) bool {
+	if p == nil {
+		return false
+	}
+	if turnID == "" {
+		// The guard's own turn is legacy (no identity to match): keep the
+		// conversation-scoped posture byte-identically.
+		return p.HasPendingForConversation(conversationID)
+	}
+	if conversationID == "" {
+		// No conversation to fall back on for legacy rows: match the
+		// turn id only.
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		for _, turn := range p.parked {
+			if parkRecordTurnID(turn) == turnID {
+				return true
+			}
+		}
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, turn := range p.parked {
+		recTurn := parkRecordTurnID(turn)
+		if recTurn == turnID {
+			return true
+		}
+		if recTurn == "" && turn.ConversationID == conversationID {
+			// Legacy row: conversation-scoped fallback (see above).
+			return true
+		}
+	}
+	return false
+}
+
+// parkRecordTurnID extracts the chat.submit turn identity a park record
+// carries. The generalized ParkedTurnRecord has no TurnID column (the
+// park store's frozen schema persists turn_payload byte-for-byte), so the
+// id rides the class payload: decode it tolerantly (a malformed payload
+// simply contributes no turn id). Records whose class carries no TurnID
+// key (gate, episode) or fail to decode return "" and keep the legacy
+// conversation-fallback posture.
+func parkRecordTurnID(rec ParkedTurnRecord) string {
+	if len(rec.TurnPayload) == 0 {
+		return ""
+	}
+	var probe struct {
+		TurnID string `json:"turn_id,omitempty"`
+	}
+	if err := json.Unmarshal(rec.TurnPayload, &probe); err != nil {
+		return ""
+	}
+	return probe.TurnID
+}
+
 // Next returns the earliest resume time among parked records of the given
 // failure class (leaf 04's per-class surface), and whether any exist.
 func (p *TurnParker) Next(class llm.FailureClass) (time.Time, bool) {

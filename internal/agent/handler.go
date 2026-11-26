@@ -3450,8 +3450,14 @@ func (h *ChatHandler) resumeQuotaParkedTurn(ctx context.Context, turn QuotaParke
 	// Disambiguate by PARKED-RECORD PRESENCE: defer ONLY when a park row for
 	// THIS conversation actually exists on the loop's parker (a genuine
 	// re-park); otherwise terminalize honestly (failed, user-visible).
+	//
+	// A5-5 (bughunt 11-25): the probe is TURN-scoped, not conversation-
+	// scoped — an unrelated throttle park on the SAME conversation (a
+	// different turn that outlived this resume) used to make the absorbed
+	// shape look like a genuine re-park and defer forever with no
+	// terminal. Legacy rows (no turn_id) keep the conversation fallback.
 	if strings.TrimSpace(reply) == "" && err == nil {
-		if loop.TurnParker().HasPendingForConversation(turn.ConversationID) {
+		if loop.TurnParker().HasPendingForTurn(turn.TurnID, turn.ConversationID) {
 			h.logger.Info("quota resume re-parked mid-flight — deferring delivery",
 				"session_id", turn.SessionID,
 				"conversation_id", turn.ConversationID,
@@ -3979,8 +3985,13 @@ func (h *ChatHandler) resumeParkedTurn(ctx context.Context, turn ParkedTurn) {
 	// LLM failure (no park row anywhere). Defer ONLY on a real park row for
 	// this conversation; otherwise emit the honest failed terminal instead
 	// of hanging the client.
+	//
+	// A5-5 (bughunt 11-25): TURN-scoped probe (see the quota guard) — an
+	// unrelated same-conversation park must not defer this resume forever.
+	// The budget park site (handler.go) stamps TurnID onto the record
+	// payload, so a genuine mid-flight re-park of THIS turn matches.
 	if strings.TrimSpace(reply) == "" && err == nil {
-		if loop.TurnParker().HasPendingForConversation(turn.ConversationID) {
+		if loop.TurnParker().HasPendingForTurn(turn.TurnID, turn.ConversationID) {
 			h.logger.Info("budget resume re-parked mid-flight — deferring delivery",
 				"session_id", turn.SessionID,
 				"conversation_id", turn.ConversationID,

@@ -741,7 +741,13 @@ func (l *AgentLoop) resumeThrottledTurn(ctx context.Context, rec ParkedTurnRecor
 		// conversation now sits on the parker; an empty completion from
 		// an absorbed failure has no park row and must terminalize or
 		// the awaiting client hangs forever.
-		if !l.TurnParker().HasPendingForConversation(turn.ConversationID) {
+		//
+		// A5-5 (bughunt 11-25): TURN-scoped probe — a re-park of THIS
+		// generation carries the same TurnID (resumeCtx above stamped it),
+		// so it matches; an unrelated same-conversation park row (a
+		// different turn) no longer defers this resume forever. Legacy
+		// rows (no turn_id) keep the conversation fallback.
+		if !l.TurnParker().HasPendingForTurn(turn.TurnID, turn.ConversationID) {
 			l.logger.Warn("resumed throttle turn produced an empty reply with no park row — terminalizing",
 				"session_id", rec.SessionID,
 				"conversation_id", turn.ConversationID,
