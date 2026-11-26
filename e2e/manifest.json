@@ -840,6 +840,9 @@
     "internal/rpc/plan_seal.go": [
       "plan-lifecycle"
     ],
+    "internal/agent/intent_analyzer.go": [
+      "plan-lifecycle"
+    ],
     "e2e/suites/plan-lifecycle": [
       "plan-lifecycle"
     ],
@@ -6381,6 +6384,40 @@
         "internal/agent/plan_draft.go",
         "internal/rpc/plan_seal.go",
         "internal/plan/compiler.go",
+        "e2e/suites/plan-lifecycle"
+      ]
+    },
+    {
+      "id": "plan-lifecycle-07",
+      "suite": "plan-lifecycle",
+      "diff": "M",
+      "title": "dispatched quick_plan runs the plan contract (M11/D1/D2): row draft->approved->executing (never parked), task_id == the dispatched task, exactly ONE task row (no orphan twin), task completion rolls the plan to completed; no 'plan created' text on the async lane",
+      "paths": [
+        "internal/agent/dispatcher.go",
+        "internal/plan/manager.go",
+        "e2e/suites/plan-lifecycle"
+      ]
+    },
+    {
+      "id": "plan-lifecycle-08",
+      "suite": "plan-lifecycle",
+      "diff": "M",
+      "title": "sequential compound ('plan X and then implement it') rides the quickplan contract lane (H6/D4): same single-task/executing->completed rollup shape as plan-lifecycle-07 with intent_type quickplan and classified_by compound_quickplan on the ack's turn.terminal",
+      "paths": [
+        "internal/agent/dispatcher.go",
+        "internal/plan/manager.go",
+        "e2e/suites/plan-lifecycle"
+      ]
+    },
+    {
+      "id": "plan-lifecycle-09",
+      "suite": "plan-lifecycle",
+      "diff": "M",
+      "title": "approval_requested parks the quick_plan contract (M6/D3): row pending_approval with 'plan created: ... (status: pending_approval)' reply and ZERO tasks; operator plan.approve leaves the gate (current zero-phase instant-complete shape pinned - D5-adjacent owner edge)",
+      "paths": [
+        "internal/agent/dispatcher.go",
+        "internal/agent/intent_analyzer.go",
+        "internal/plan/manager.go",
         "e2e/suites/plan-lifecycle"
       ]
     },
