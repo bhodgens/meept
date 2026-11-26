@@ -47,21 +47,47 @@ type GroupsBackstopConfig struct {
 // protected returns whether path is one of the C5 backstop surfaces:
 // the users store file, the agent-definitions directory
 // (<home>/agents/**), or the daemon main config file (the groups config
-// section carrier). All comparisons are lexically cleaned; the caller
-// (executor) already resolved symlinks for file paths, and shell targets
-// are best-effort substring probes (documented limitation: variable
-// expansion bypasses the shell lane — the file-tool lane is the hard
-// guarantee, same posture as credentialPathPattern).
+// section carrier). Bughunt A3-4 fix: the old comment claimed the caller
+// (executor) had already resolved symlinks — it has NOT (the executor
+// hands the RAW path to checkPermission). Both sides are now resolved
+// here before the containment comparison, so a symlink inside the project
+// pointing at ~/.meept/meept.json5 is caught. The resolver is stdlib-only
+// (filepath.EvalSymlinks with a longest-existing-prefix walk) because
+// pkg/security must not import internal/security; when a resolution
+// cannot be established the lexical comparison still runs (a truncated
+// resolution must not become an escape hatch), and the resolved pass runs
+// FIRST so the symlink-escape case denies.
+// Shell targets remain best-effort substring probes (documented
+// limitation: variable expansion bypasses the shell lane — the file-tool
+// lane is the hard guarantee, same posture as credentialPathPattern).
 func (g GroupsBackstopConfig) protected(path string) bool {
 	if !g.Enabled || g.Home == "" || path == "" {
 		return false
 	}
-	clean := filepath.Clean(path)
-	home := filepath.Clean(g.Home)
+	clean, ok := resolveProtectedPath(path)
+	if !ok {
+		// Fail closed: a path we cannot resolve against the filesystem
+		// still gets the lexical comparison (a truncated resolution
+		// must not become an escape hatch).
+		clean = filepath.Clean(path)
+	}
+	homeClean := filepath.Clean(g.Home)
+	home, hok := resolveProtectedPath(g.Home)
+	if !hok {
+		home = homeClean
+	}
+	usersFile := ""
+	if g.UsersFile != "" {
+		if uf, uok := resolveProtectedPath(g.UsersFile); uok {
+			usersFile = uf
+		} else {
+			usersFile = filepath.Clean(g.UsersFile)
+		}
+	}
 
 	// The users store file (the F4 fixture gap: not covered by the
 	// unconditional config_guard name list).
-	if g.UsersFile != "" && clean == filepath.Clean(g.UsersFile) {
+	if usersFile != "" && clean == usersFile {
 		return true
 	}
 
@@ -77,7 +103,74 @@ func (g GroupsBackstopConfig) protected(path string) bool {
 	if within(home) && (clean == filepath.Join(home, "meept.json5") || clean == filepath.Join(home, "meept.toml")) {
 		return true
 	}
+	// Lexical pass (A3-4 defense-in-depth): the resolved comparison can
+	// miss when the protection surfaces are not yet on disk or a bind/
+	// mount asymmetry resolves the project path away from home while the
+	// literal home path stays equal. Re-run the ORIGINAL cleaned path
+	// against the ORIGINAL cleaned surfaces so a symlink whose textual
+	// form lands on a protected surface is still protected.
+	if clean != filepath.Clean(path) {
+		lc := filepath.Clean(path)
+		if usersFile != "" && lc == filepath.Clean(g.UsersFile) {
+			return true
+		}
+		lwithin := func(root string) bool {
+			return lc == root || strings.HasPrefix(lc, root+string(filepath.Separator))
+		}
+		if lwithin(filepath.Join(homeClean, "agents")) {
+			return true
+		}
+		if lwithin(homeClean) && (lc == filepath.Join(homeClean, "meept.json5") || lc == filepath.Join(homeClean, "meept.toml")) {
+			return true
+		}
+	}
 	return false
+}
+
+// resolveProtectedPath resolves symlinks in an absolute path by walking
+// the longest-existing prefix (stdlib-only inlined variant of the
+// internal/security resolver — pkg/security cannot import internal). A
+// non-existent tail is appended verbatim (common for write targets);
+// ok=false only when even the base cannot be established.
+func resolveProtectedPath(path string) (string, bool) {
+	path = filepath.Clean(path)
+	if !filepath.IsAbs(path) {
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			return "", false
+		}
+		path = abs
+	}
+	if evaled, err := filepath.EvalSymlinks(path); err == nil {
+		return filepath.Clean(evaled), true
+	}
+	parts := splitProtectedPath(path)
+	resolvedSoFar := "/"
+	for i, part := range parts {
+		candidate := filepath.Join(resolvedSoFar, part)
+		if evaled, err := filepath.EvalSymlinks(candidate); err == nil {
+			resolvedSoFar = filepath.Clean(evaled)
+		} else {
+			remaining := filepath.Join(parts[i:]...)
+			if resolvedSoFar == "/" {
+				return filepath.Clean("/" + remaining), true
+			}
+			return filepath.Clean(resolvedSoFar + "/" + remaining), true
+		}
+	}
+	return resolvedSoFar, true
+}
+
+// splitProtectedPath splits an absolute path into components.
+func splitProtectedPath(path string) []string {
+	path = filepath.Clean(path)
+	if path == "/" {
+		return nil
+	}
+	if len(path) > 0 && path[0] == '/' {
+		path = path[1:]
+	}
+	return strings.Split(path, "/")
 }
 
 // check denies file/shell actions by NON-ADMIN agents against the C5

@@ -4016,18 +4016,17 @@ func (d *Dispatcher) resolveAgent(agentID, conversationID string) *AgentLoop {
 						// into every tool context.
 						loop.SetWorkingDir(workingDir)
 						// Per-session fence (leaf 01 T2): this dispatched
-						// session loop gets its OWN fence stage rooted at the
-						// session's working directory — the shared-RootPath
-						// mutation (configureFence) is retired. The group
-						// fence roots (leaf 04 F6) arm in the else-branch:
-						// additive fs_roots from the loop's record, checked
-						// even when the daemon-wide session fence is off.
-						if fence := injectSessionFence(template.security, d.fenceFactory, workingDir, sess.NoFence); fence != nil {
-							loop.SetSecurityChecker(fence)
-						} else if res := loop.GroupResolution(); res != nil {
-							if gf := injectGroupFence(loop.security, res); gf != loop.security && gf != nil {
-								loop.SetSecurityChecker(gf)
-							}
+						// session loop gets its OWN fence stage rooted at
+						// the session's working directory — the shared-
+						// RootPath mutation (configureFence) is retired.
+						// Group fence roots (leaf 04 F6, bughunt H6/A2-1):
+						// composeLoopFence arms BOTH the session fence and
+						// the additive fs_roots fence from the loop's
+						// record in one pass (the old `if fence != nil
+						// {...} else if group` shape was dead — base is
+						// always non-nil, so the group branch never ran).
+						if gfence := composeLoopFence(template.security, d.fenceFactory, workingDir, sess.NoFence, loop.GroupResolution()); gfence != nil {
+							loop.SetSecurityChecker(gfence)
 						}
 						if sess.DetectionContext != nil {
 							loop.SetDetectionContext(&DetectionContext{
@@ -4086,13 +4085,11 @@ func (d *Dispatcher) resolveAgent(agentID, conversationID string) *AgentLoop {
 							// Per-session fence (leaf 01 T2): same injection
 							// as the primary site above — BOTH loop-creation
 							// sites bind the fence per session. Group fence
-							// roots (leaf 04 F6) arm in the else-branch.
-							if fence := injectSessionFence(template.security, d.fenceFactory, projectPath, sess.NoFence); fence != nil {
-								loop.SetSecurityChecker(fence)
-							} else if res := loop.GroupResolution(); res != nil {
-								if gf := injectGroupFence(loop.security, res); gf != loop.security && gf != nil {
-									loop.SetSecurityChecker(gf)
-								}
+							// roots (leaf 04 F6, bughunt H6/A2-1) compose in
+							// the same pass via composeLoopFence (the old
+							// else-branch never ran: base is always non-nil).
+							if gfence := composeLoopFence(template.security, d.fenceFactory, projectPath, sess.NoFence, loop.GroupResolution()); gfence != nil {
+								loop.SetSecurityChecker(gfence)
 							}
 							return loop
 						}
@@ -4187,8 +4184,13 @@ func (d *Dispatcher) scopedSessionLoop(agentID, conversationID, workingDir strin
 			})
 		}
 	}
-	if fence := injectSessionFence(template.security, d.fenceFactory, workingDir, sess != nil && sess.NoFence); fence != nil {
-		loop.SetSecurityChecker(fence)
+	// Per-session fence (leaf 01 T2) plus the group fs_roots fence (leaf 04
+	// F6, bughunt H6/A2-1: this site previously had NO group branch at all).
+	// composeLoopFence arms both stances in one pass; the scoped loop is
+	// built from the template snapshot, which carries the group resolution
+	// record (three-site rule site 2), so GroupResolution() is valid here.
+	if gfence := composeLoopFence(template.security, d.fenceFactory, workingDir, sess != nil && sess.NoFence, loop.GroupResolution()); gfence != nil {
+		loop.SetSecurityChecker(gfence)
 	}
 
 	d.scopedLoopsMu.Lock()

@@ -322,6 +322,18 @@ type assignRequest struct {
 	Policy     *groups.Policy `json:"policy"`
 	PolicyName string         `json:"policy_name"`
 	Scope      string         `json:"scope"`
+	// FSRoots amends the NAMED policy's additive fence roots (owner
+	// ruling D1 feature, bughunt H6 follow-on): with groups.assign these
+	// roots are ADDED to policy_name's fs_roots (deduped); with
+	// groups.remove they are REMOVED. The mutation lands on the policy
+	// entry, persists through the same atomic config save as bindings,
+	// and passes the SAME C5 write gate (admin agent or admin-user
+	// identity), so a planner/orchestrator that is a groups admin can
+	// amend fs_roots for the agents bound to that policy. The daemon's
+	// resolver reads this same config table at boot (M9-known boot
+	// snapshot: a daemon restart picks the change up for already-built
+	// loops — no hot-reload is built here, by ruling).
+	FSRoots []string `json:"fs_roots,omitempty"`
 }
 
 // callerAgentOK reports whether the request may carry a trusted
@@ -475,6 +487,29 @@ func (h *GroupsHandler) handleAssign(ctx context.Context, params json.RawMessage
 		return map[string]any{"assigned": true, "subject": subject, "groups": labels}, nil
 	}
 
+	// fs_roots AMEND lane (owner ruling D1 feature): an fs_roots list on
+	// the request ADDS those roots to the named policy's additive fence
+	// roots (the policy the subject is bound to / about to be bound to).
+	// Gated identically (past resolveCaller), persisted through the same
+	// atomic save path as bindings. With a policy OBJECT riding the
+	// request the roots merge into the object being upserted (one save);
+	// with a bare policy_name the existing entry is amended directly. The
+	// binding lane below still runs — an assign with fs_roots both
+	// amends the policy and binds it.
+	if len(req.FSRoots) > 0 {
+		if policyName == "" {
+			return nil, fmt.Errorf("groups.assign: fs_roots amendment requires policy_name (roots live on the policy bundle)")
+		}
+		if req.Policy != nil {
+			req.Policy.FSRoots = mergeFSRoots(req.Policy.FSRoots, req.FSRoots)
+		} else {
+			if _, err := h.amendPolicyFSRoots(policyName, req.FSRoots, true); err != nil {
+				return nil, fmt.Errorf("groups.assign: %w", err)
+			}
+		}
+		h.emitAudit(ctx, "groups.assign.fs_roots", subject, fmt.Sprintf("%s:+%v", policyName, req.FSRoots))
+	}
+
 	// Binding lane: policy must be named (validated above) and known.
 	if policyName == "" {
 		return nil, fmt.Errorf("groups.assign: policy or policy_name is required")
@@ -520,6 +555,22 @@ func (h *GroupsHandler) handleRemove(ctx context.Context, params json.RawMessage
 		}
 		h.emitAudit(ctx, "groups.remove", subject, "cleared")
 		return map[string]any{"removed": true, "subject": subject}, nil
+	}
+
+	// fs_roots REMOVE lane (owner ruling D1 feature, mirror of the
+	// assign amendment): remove the listed roots from the named policy
+	// WITHOUT touching the subject's binding. Requires a policy_name —
+	// roots live on the policy bundle, not the binding.
+	if len(req.FSRoots) > 0 {
+		if policyName == "" {
+			return nil, fmt.Errorf("groups.remove: fs_roots removal requires policy_name (roots live on the policy bundle)")
+		}
+		removed, err := h.amendPolicyFSRoots(policyName, req.FSRoots, false)
+		if err != nil {
+			return nil, fmt.Errorf("groups.remove: %w", err)
+		}
+		h.emitAudit(ctx, "groups.remove.fs_roots", subject, fmt.Sprintf("%s:-%v", policyName, req.FSRoots))
+		return map[string]any{"removed": true, "subject": subject, "policy": policyName, "fs_roots_removed": removed}, nil
 	}
 
 	if err := h.applyPolicyBinding(subject, policyName, nil, req.Scope, false); err != nil {
@@ -664,6 +715,79 @@ func (h *GroupsHandler) applyPolicyBinding(subject, policyName string, policy *g
 		}
 	}
 	return nil
+}
+
+// mergeFSRoots unions two fs_root lists preserving order, trimming blanks
+// and deduplicating (exact-string dedup — config roots are the operator's
+// spellings; the fence side normalizes at check time).
+func mergeFSRoots(existing, add []string) []string {
+	out := make([]string, 0, len(existing)+len(add))
+	seen := make(map[string]struct{}, len(existing)+len(add))
+	for _, r := range append(append([]string{}, existing...), add...) {
+		r = strings.TrimSpace(r)
+		if r == "" {
+			continue
+		}
+		if _, dup := seen[r]; dup {
+			continue
+		}
+		seen[r] = struct{}{}
+		out = append(out, r)
+	}
+	return out
+}
+
+// amendPolicyFSRoots mutates the named policy's fs_roots in the in-memory
+// config table and persists atomically (same save path as bindings).
+// add=true unions the roots in; add=false removes every exact match. An
+// unknown policy is an error (mirrors the binding lane: no silent entry
+// creation through the amendment path — define the policy first). Returns
+// the number of roots added/removed. cfgPath empty keeps the mutation
+// in-memory only (test shape).
+func (h *GroupsHandler) amendPolicyFSRoots(policyName string, roots []string, add bool) (int, error) {
+	if h.cfg == nil {
+		return 0, fmt.Errorf("config not available")
+	}
+	g := &h.cfg.Security.Groups
+	idx := -1
+	for i := range g.Policies {
+		if g.Policies[i].Name == policyName {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return 0, fmt.Errorf("policy %q does not exist; define it before amending fs_roots", policyName)
+	}
+	before := len(g.Policies[idx].FSRoots)
+	if add {
+		g.Policies[idx].FSRoots = mergeFSRoots(g.Policies[idx].FSRoots, roots)
+	} else {
+		drop := make(map[string]struct{}, len(roots))
+		for _, r := range roots {
+			if r = strings.TrimSpace(r); r != "" {
+				drop[r] = struct{}{}
+			}
+		}
+		kept := make([]string, 0, before)
+		for _, r := range g.Policies[idx].FSRoots {
+			if _, gone := drop[r]; gone {
+				continue
+			}
+			kept = append(kept, r)
+		}
+		g.Policies[idx].FSRoots = kept
+	}
+	changed := len(g.Policies[idx].FSRoots) - before
+	if changed < 0 {
+		changed = -changed
+	}
+	if h.cfgPath != "" {
+		if err := saveConfigAtomic(h.cfgPath, h.cfg); err != nil {
+			return 0, fmt.Errorf("persist groups config: %w", err)
+		}
+	}
+	return changed, nil
 }
 
 // emitAudit lands one hash-chained membership-change record. Best-effort:

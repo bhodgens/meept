@@ -150,8 +150,15 @@ before the child starts. Empty and `unrestricted` are unchanged.
   and before confirmation gating. Every session-scoped loop gets a fresh,
   session-owned fence rooted at the session working directory. On top of
   that, a managed resolution with `fs_roots` arms a `GroupFenceStage`
-  (additive: the subject may act inside ANY group root, nothing outside),
-  composed with the session fence via `UnionFence` (first denial wins).
+  (additive: the subject may act inside ANY group root OR the session
+  root, nothing outside), composed with the session fence via
+  `UnionFence` — `CheckPath` admits when EITHER stage allows (the additive
+  D1 boundary), `CheckCommand` keeps first-denial-wins so the session
+  fence's command scanning is never overridden. Both fences arm in one
+  pass on the chat and dispatch lanes (`composeLoopFence`); the step-job
+  lane arms the group fence alone (no session-fence site there). Path
+  comparisons resolve symlinks before the containment test on both fence
+  types (a link inside a root pointing outside it is refused).
 - **Groups file backstop** (`groups_backstop`): when
   `default_managed=true`, non-admin agents are denied file/shell access to
   the membership surfaces: the users store, `<home>/agents/**`, and the
@@ -309,7 +316,18 @@ meept users update usr_01ABC --groups ""         # clears membership
 ## Membership governance (who may mutate)
 
 Group membership is mutated ONLY through the daemon's `groups.assign` /
-`groups.remove` RPC. The write gate (C5) accepts exactly two caller kinds:
+`groups.remove` RPC. The same lanes also AMEND a policy's `fs_roots`
+(owner ruling D1): `groups.assign` with `policy_name` + `fs_roots` adds
+those roots to the named policy (deduped union) and binds it;
+`groups.remove` with `policy_name` + `fs_roots` removes exactly those
+roots without touching the binding. A planner/orchestrator agent that is
+a groups admin can therefore widen or narrow the fence roots of the
+policies other agents run under. The mutation persists through the same
+atomic config save as bindings and passes the identical C5 write gate.
+Note: the daemon's resolver reads the config table at BOOT — an amended
+`fs_roots` list applies to loops built after a daemon restart (the
+M9-known boot snapshot posture; no hot-reload). The write gate (C5) accepts
+exactly two caller kinds:
 
 1. **Admin agent**: a kernel-verified daemon-descendant socket peer whose
    declared agent id is in `security.groups.admin_agents`
