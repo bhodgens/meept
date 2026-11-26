@@ -126,6 +126,13 @@ type Intent struct {
 	OriginalInput string `json:"original_input,omitempty"`
 	// TrueAnalysis holds the IntentGate-style pre-classification analysis if available.
 	TrueAnalysis *TrueIntentAnalysis `json:"true_analysis,omitempty"`
+	// ApprovalRequested mirrors TrueAnalysis.ApprovalRequested (master
+	// C-3): the user explicitly asked to review/approve the plan BEFORE
+	// execution. Threaded at the classification seam from the analyzer.
+	// false (the default, and every deterministic/keyword lane) keeps the
+	// quickplan oneshot posture (D1/D4); true parks the plan row at
+	// pending_approval instead of auto-approving.
+	ApprovalRequested bool `json:"approval_requested,omitempty"`
 	// SuggestedMode is the synthesized planning mode (Thread D complexity routing).
 	// Populated by suggestMode in ClassifyAndRoute. Empty means no suggestion.
 	SuggestedMode string `json:"suggested_mode,omitempty"`
@@ -1369,11 +1376,12 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 			}
 			// Store analysis for downstream use (e.g. planner interview mode)
 			memCtx.LastIntent = &Intent{
-				Type:         analysis.Category,
-				Confidence:   analysis.Confidence,
-				AgentType:    analysis.Category,
-				Summary:      analysis.Goal,
-				TrueAnalysis: analysis,
+				Type:              analysis.Category,
+				Confidence:        analysis.Confidence,
+				AgentType:         analysis.Category,
+				Summary:           analysis.Goal,
+				TrueAnalysis:      analysis,
+				ApprovalRequested: analysis.ApprovalRequested,
 			}
 		}
 	}
@@ -1488,6 +1496,16 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 	// structs via classifiers that don't read memCtx.LastIntent.TrueAnalysis.
 	if intent.TrueAnalysis == nil && memCtx.LastIntent != nil {
 		intent.TrueAnalysis = memCtx.LastIntent.TrueAnalysis
+	}
+	// 5.1a. Thread the C-3 approval attribute along with the analysis
+	// (plan-contract tree 20261125-plan-contract-quickplan): every Intent
+	// that carries a TrueAnalysis — analyzer lane, LastIntent propagation —
+	// exposes ApprovalRequested as a first-class field so the quick_plan
+	// route branch (C-2) reads ONE field, never a struct chain.
+	// Deterministic lanes (keyword/heuristic/fallback) leave it false:
+	// oneshot is the default posture (D1/D4).
+	if intent.TrueAnalysis != nil {
+		intent.ApprovalRequested = intent.TrueAnalysis.ApprovalRequested
 	}
 	// 5.2. Synthesize planning mode (Thread D complexity routing).
 	intent.SuggestedMode = suggestMode(IntentType(intent.Type), intent.TrueAnalysis, input)
@@ -2319,19 +2337,25 @@ func (d *Dispatcher) routeToPlanWithOverride(ctx context.Context, input string, 
 
 	// Advance the lifecycle past draft (issue #40 item 1): plans created on
 	// the daemon dispatch path previously stayed in state='draft' forever
-	// because SubmitPlan was only reachable from the TUI/HTTP paths. Submit
-	// immediately — when plans.approval.require_approval is false the plan
-	// auto-approves (pending_approval -> approved -> synthesized task
-	// hierarchy); when true it parks at pending_approval for the operator's
-	// approve/reject decision. A submit failure must not fail the dispatch:
-	// the plan row exists and the approval paths can still act on it.
-	if err := d.planManager.SubmitPlan(ctx, p.ID); err != nil {
-		d.logger.Warn("failed to submit plan after creation",
-			"plan_id", p.ID,
-			"error", err,
-		)
-	} else if refreshed, err := d.planManager.GetPlan(ctx, p.ID); err == nil {
-		p = refreshed
+	// because SubmitPlan was only reachable from the TUI/HTTP paths. The
+	// quick_plan lane (plan-contract tree 20261125-plan-contract-quickplan,
+	// M11/D1/D2) no longer auto-approves-and-synthesizes here: the brief is
+	// the recorded contract and the STRATEGIC task below is the execution,
+	// adopted onto the plan row after creation (zero-phase Synthesize would
+	// complete the brief instantly — the M11 zombie/lie trap). Non-quickplan
+	// intents keep the SubmitPlan posture: auto-approve when
+	// plans.approval.require_approval is false, park at pending_approval
+	// when true. A submit failure must not fail the dispatch: the plan row
+	// exists and the approval paths can still act on it.
+	if IntentType(intent.Type) != IntentQuickPlan {
+		if err := d.planManager.SubmitPlan(ctx, p.ID); err != nil {
+			d.logger.Warn("failed to submit plan after creation",
+				"plan_id", p.ID,
+				"error", err,
+			)
+		} else if refreshed, err := d.planManager.GetPlan(ctx, p.ID); err == nil {
+			p = refreshed
+		}
 	}
 
 	d.logger.Info("Routed request to plan",
@@ -2341,16 +2365,78 @@ func (d *Dispatcher) routeToPlanWithOverride(ctx context.Context, input string, 
 		"session", sessionID,
 	)
 
-	// Quickplan carry-through (bughunt 2026-09-10 M3): a quickplan intent
-	// routed here (plans config always-plan, or threshold) must keep
-	// executing, not strand the draft behind a "plan created" text reply.
-	// Create the task and leave Response empty so the handler's
-	// async_dispatch gate (ShouldDispatchAsync && Task != nil) publishes
-	// orchestrator.plan with SuggestedMode quick_plan; RequiresPlanning on
-	// the intent makes that gate reachable. Non-quickplan intents keep the
-	// legacy text response.
+	// Quickplan carry-through (bughunt 2026-09-10 M3) rewritten by the
+	// plan-contract tree 20261125-plan-contract-quickplan (leaf 01 C-2,
+	// decisions D1/D2; closes M11): a quick_plan dispatch is ONE executed
+	// contract, not a zombie plan row beside an unlinked orphan task.
+	//
+	// approval_requested=false (the default posture, D1/D4):
+	//   SubmitAndApproveNoSynthesis (the brief becomes the recorded,
+	//   system-approved contract WITHOUT the zero-phase Synthesize
+	//   completion trap) -> createTask (the strategic planner decomposition,
+	//   byte-compatible with the pre-existing carry-through, override
+	//   handling kept) -> AdoptTask (the plan row binds the task and moves
+	//   to executing; OnTaskCompleted rolls the plan up from its task, D2).
+	//   The async ack carries the task (Response stays empty).
+	// approval_requested=true (D3's single exception): SubmitForApproval
+	// parks the row at pending_approval for the operator's sign-off and NO
+	// task is created yet; the legacy "plan created" text reply informs the
+	// user (the plan is awaiting their approval, execution starts on
+	// approve).
+	//
+	// A submit/approve/adopt failure never fails the dispatch: the task
+	// (false branch) still executes and the plan row stays re-drivable by
+	// the approval/reclaim paths.
 	if IntentType(intent.Type) == IntentQuickPlan {
+		if intent.ApprovalRequested {
+			if err := d.planManager.SubmitForApproval(ctx, p.ID); err != nil {
+				d.logger.Warn("failed to park quick_plan plan for approval",
+					"plan_id", p.ID,
+					"error", err,
+				)
+			} else if refreshed, err := d.planManager.GetPlan(ctx, p.ID); err == nil {
+				p = refreshed
+			}
+			d.logger.Info("Quick_plan plan parked for approval (approval_requested)",
+				"plan_id", p.ID,
+				"state", p.State,
+				"session", sessionID,
+			)
+			return &DispatchResult{
+				AgentID:  config.AgentIDPlanner,
+				Intent:   intent,
+				Response: fmt.Sprintf("plan created: %s (status: %s)", p.Title, p.State),
+				Plan:     p,
+			}, nil
+		}
+
+		if err := d.planManager.SubmitAndApproveNoSynthesis(ctx, p.ID); err != nil {
+			d.logger.Warn("failed to auto-approve quick_plan contract",
+				"plan_id", p.ID,
+				"error", err,
+			)
+		}
 		created := d.createTask(ctx, input, intent, sessionID, intent.AgentType)
+		if created != nil {
+			if err := d.planManager.AdoptTask(ctx, p.ID, created.ID); err != nil {
+				// The task executes regardless; the row (approved,
+				// unbound) is re-drivable by the synthesis reclaimer and
+				// the plan machine never double-binds.
+				d.logger.Warn("failed to bind quick_plan task to its contract",
+					"plan_id", p.ID,
+					"task_id", created.ID,
+					"error", err,
+				)
+			} else if refreshed, err := d.planManager.GetPlan(ctx, p.ID); err == nil {
+				p = refreshed
+			}
+		}
+		d.logger.Info("Executing quick_plan contract",
+			"plan_id", p.ID,
+			"title", p.Title,
+			"state", p.State,
+			"session", sessionID,
+		)
 		// Preserve a client agent override (researcher-extract e2e,
 		// 2026-09-15): the quickplan path previously hard-coded the
 		// planner as the DispatchResult agent, discarding the override —
@@ -2552,6 +2638,10 @@ func (d *Dispatcher) ResumeAfterClarification(ctx context.Context, originalInput
 			}
 			intent.MemoryRefs = d.extractMemoryRefs(memCtx.Results)
 			intent.TrueAnalysis = analysis
+			// C-3 threading on the clarification-resume lane too: the
+			// pre-clarification analysis carried the approval verdict and
+			// the resumed turn must honor it (same seam as 5.1a).
+			intent.ApprovalRequested = analysis.ApprovalRequested
 
 			// Preserve the pre-clarification mode (quickplan-mode leaf
 			// 02): a pending quickplan clarification resumes in
