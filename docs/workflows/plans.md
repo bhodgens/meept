@@ -81,8 +81,9 @@ plan.approved bus event
 `synthesizing` is a lease state, not a lifecycle stage. Synthesis creates a task
 BEFORE it can record `task_id`, so a plan that failed mid-pass used to be left
 at `draft` with an empty `task_id` — indistinguishable from a plan that had never
-been expanded. With `plans.approval.require_approval: false` (the default) the
-auto-approver re-submitted exactly those plans on every pass, and each pass
+been expanded. With `plans.approval.require_approval: false` — the default at
+the time; the shipped default is TRUE now, see docs/agents/opt-in-defaults.md —
+the auto-approver re-submitted exactly those plans on every pass, and each pass
 created a fresh parent task plus one child per phase. This is not theoretical:
 797 draft plans produced 20.7M orphan tasks at ~14k/s and a 145 GB log.
 
