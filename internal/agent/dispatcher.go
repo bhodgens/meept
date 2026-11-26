@@ -1083,7 +1083,31 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 					// force-create branch discarded the "plan mode on" reply
 					// and created a spurious plan (goals-plans-03 RED:
 					// "plan created" instead of "plan mode on").
-					return &DispatchResult{Response: reply}, nil
+					//
+					// L1 (bughunt 2026-11-24 LOW): the bare
+					// DispatchResult{Response} carried no Intent, so the
+					// handler's provenance seam (handler.go:1721, gated on
+					// result.Intent != nil) skipped classification Meta for
+					// the toggle turn. Thread a plan-toggle intent shaped
+					// exactly like the legacy force-create path's
+					// (Type=plan, planner agent). NO async dispatch risk:
+					// ShouldDispatchAsync short-circuits to false whenever
+					// Response != "" (dispatcher.go:4799), so the handler's
+					// direct_response case (handler.go:1287) still matches
+					// first and the async gate (handler.go:1340) never
+					// sees this result. Method is the honest lane name —
+					// no classifier ran on this turn.
+					return &DispatchResult{
+						AgentID:  config.AgentIDPlanner,
+						Response: reply,
+						Intent: &Intent{
+							Type:       string(IntentPlan),
+							Confidence: 1.0,
+							AgentType:  config.AgentIDPlanner,
+							Summary:    extractSummary(strings.TrimSpace(input)),
+							Method:     "plan_command",
+						},
+					}, nil
 				}
 			}
 			if d.planManager != nil {
@@ -2418,14 +2442,33 @@ func (d *Dispatcher) routeToPlanWithOverride(ctx context.Context, input string, 
 		}
 		created := d.createTask(ctx, input, intent, sessionID, intent.AgentType)
 		if created != nil {
-			if err := d.planManager.AdoptTask(ctx, p.ID, created.ID); err != nil {
-				// The task executes regardless; the row (approved,
-				// unbound) is re-drivable by the synthesis reclaimer and
-				// the plan machine never double-binds.
-				d.logger.Warn("failed to bind quick_plan task to its contract",
+			// C-5 (parent ruling D5): a transient AdoptTask failure gets
+			// exactly one retry; a second failure stamps the row with an
+			// adopt-prefixed SynthesisError (the reclaimer's approved-scan
+			// skips that prefix — internal/plan AdoptFailurePrefix) and the
+			// TURN PROCEEDS. The task is live; the contract row is
+			// degraded, not the user's work.
+			adoptErr := d.planManager.AdoptTask(ctx, p.ID, created.ID)
+			if adoptErr != nil {
+				d.logger.Warn("quick_plan adopt failed; retrying once",
 					"plan_id", p.ID,
 					"task_id", created.ID,
-					"error", err,
+					"error", adoptErr,
+				)
+				adoptErr = d.planManager.AdoptTask(ctx, p.ID, created.ID)
+			}
+			if adoptErr != nil {
+				if markErr := d.planManager.MarkAdoptFailure(ctx, p.ID, adoptErr); markErr != nil {
+					d.logger.Warn("failed to stamp quick_plan adopt failure on contract row",
+						"plan_id", p.ID,
+						"task_id", created.ID,
+						"error", markErr,
+					)
+				}
+				d.logger.Warn("quick_plan task remains unbound after adopt retry; turn proceeds",
+					"plan_id", p.ID,
+					"task_id", created.ID,
+					"error", adoptErr,
 				)
 			} else if refreshed, err := d.planManager.GetPlan(ctx, p.ID); err == nil {
 				p = refreshed

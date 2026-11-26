@@ -292,6 +292,7 @@ type synthesisReclaimCounts struct {
 	reclaimed int // expired-lease synthesizing rows flipped back to approved
 	redriven  int // Synthesize calls the pass issued (reclaim + approved scan)
 	failed    int // Synthesize calls that returned an error
+	skipped   int // approved rows left alone (C-5 adopt-failure guard)
 }
 
 // runSynthesisReclaimPass performs ONE full reclaimer pass (C-P2): (a) the
@@ -351,6 +352,17 @@ func (m *PlanManager) runSynthesisReclaimPass(ctx context.Context) (synthesisRec
 		}
 		for _, p := range approved {
 			if p.TaskID != "" || seen[p.ID] {
+				continue
+			}
+			// C-5 (D5): a quick_plan row whose binding failed twice
+			// stays approved UNBOUND on purpose — the real task is
+			// already running unlinked. Re-driving Synthesize here
+			// would hit the zero-phase completion guard and mark the
+			// brief complete while its execution is live (the M11
+			// lie). An ordinary synthesis error is NOT this shape and
+			// still re-drives.
+			if carriesAdoptFailure(p) {
+				counts.skipped++
 				continue
 			}
 			seen[p.ID] = true
@@ -1334,6 +1346,51 @@ func (m *PlanManager) approveNoSynthesis(ctx context.Context, planID, sessionID,
 // ErrTaskAlreadyBound reports that the plan already carries a DIFFERENT
 // task; the adopter's task must not replace it.
 var ErrTaskAlreadyBound = errors.New("plan already bound to a different task")
+
+// AdoptFailurePrefix marks a SynthesisError written by MarkAdoptFailure
+// (plan-contract tree 20261125-plan-contract-quickplan, master C-5 / parent
+// ruling D5): the quick_plan dispatcher retried AdoptTask once and the
+// second attempt also failed, so the contract row stays APPROVED and
+// UNBOUND carrying this error text while the real task runs unlinked.
+// The distinction that matters to the synthesis reclaimer: an ordinary
+// SynthesisError means "expansion failed, re-drive it"; an
+// adopt-prefixed one means "the plan machine already approved this brief —
+// the only unbound-approved shape it must NOT touch, because re-driving
+// Synthesize on a zero-phase quick_plan row would complete the brief while
+// its task is still executing (the M11 lie)".
+const AdoptFailurePrefix = "adopt task failed:"
+
+// MarkAdoptFailure records a failed quick_plan task binding on the plan row
+// (C-5/D5). The row keeps its committed state (approved) and every other
+// column — updatePlanColumns is the T4 targeted-write seam, State is out of
+// bounds by design — only SynthesisError/UpdatedAt move. Best-effort by
+// contract: the dispatcher logs the write failure but the TURN proceeds
+// regardless; the dispatched task is live, the contract row is degraded,
+// not the turn.
+func (m *PlanManager) MarkAdoptFailure(ctx context.Context, planID string, adoptErr error) error {
+	if planID == "" {
+		return errors.New("plan: MarkAdoptFailure requires a plan id")
+	}
+	if adoptErr == nil {
+		return nil
+	}
+	msg := fmt.Sprintf("%s %s", AdoptFailurePrefix, adoptErr.Error())
+	if err := m.updatePlanColumns(ctx, planID, func(p *Plan) {
+		p.SynthesisError = msg
+		p.UpdatedAt = time.Now().UTC()
+	}); err != nil {
+		return fmt.Errorf("plan: mark adopt failure %s: %w", planID, err)
+	}
+	m.logger.Warn("quick_plan contract degraded: task binding failed twice",
+		"plan_id", planID, "error", adoptErr)
+	return nil
+}
+
+// carriesAdoptFailure reports whether an approved row is a degraded
+// quick_plan contract the reclaimer must leave alone (C-5).
+func carriesAdoptFailure(p *Plan) bool {
+	return p != nil && strings.HasPrefix(p.SynthesisError, AdoptFailurePrefix)
+}
 
 // AdoptTask binds an externally-created task (the strategic planner's
 // quick_plan task) to an approved plan as its PRIMARY task and moves the
