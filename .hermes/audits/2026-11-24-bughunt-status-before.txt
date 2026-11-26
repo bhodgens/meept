@@ -1,0 +1,63 @@
+M  .githooks/README.md
+MM .githooks/pre-commit
+ M .githooks/pre-commit-dispatch-lib
+D  .githooks/pre-commit-worktree-closeout
+M  Makefile
+ M cmd/meept-kanban/main.go
+D  docs/agents/tmp-scratch-policy.md
+ M docs/configuration/llm.md
+ M docs/generated/bus-topology.json
+ M docs/generated/bus-topology.md
+ M docs/plans/20261119-usability-remediation/07-bench/07-intent-autoseal-REPORT.md
+ M docs/reference/generated/agent.md
+ M docs/reference/generated/config.md
+ M docs/reference/generated/llm.md
+ M docs/workflows/external-integrations.md
+ M docs/workflows/tui.md
+MM e2e/harness/daemon.go
+ M e2e/harness/fakellm.go
+ M e2e/manifest.json
+ M e2e/suites/context-memory-engine/context_memory_engine_test.go
+ M e2e/suites/memory-turn-capture/memory_turn_capture_test.go
+ M e2e/suites/output-filters/reply_hygiene_test.go
+ M e2e/suites/plan-lifecycle/failure_seal_gate_test.go
+ M e2e/suites/plan-lifecycle/plan_lifecycle_test.go
+ M e2e/suites/seatbelt/seatbelt_test.go
+ M e2e/suites/session-storage/conv_only_durability_test.go
+ M e2e/suites/tui-flows/approval_mode_gate_test.go
+ M e2e/suites/tui-flows/tui_flows_test.go
+ M e2e/suites/turn-journal/main_test.go
+ M e2e/suites/turn-journal/rpc_test.go
+ M internal/agent/envelope_prose.go
+ M internal/agent/handler.go
+ M internal/agent/loop_park.go
+ M internal/agent/topic_detector.go
+ M internal/agent/topic_detector_test.go
+ M internal/config/config.go
+ M internal/daemon/components.go
+ M internal/daemon/contact_wiring.go
+ M internal/daemon/notification_bot_wiring.go
+ M internal/daemon/voice_local_bargein_wiring_test.go
+ M internal/llm/AGENTS.md
+ M internal/llm/client.go
+ M internal/llm/models.go
+ M internal/llm/providers.go
+ M internal/skills/watcher.go
+ M internal/tools/mcp/manager.go
+ M internal/tools/mcp/version_pin.go
+ M internal/tui/models/chat.go
+ M internal/tui/models/chat_nav.go
+ M internal/voicechild/pipeline.go
+D  scripts/meept-tmp-audit.py
+?? .githooks/pre-commit-mcp-pin-check
+?? .hermes/audits/2026-11-24-bughunt-status-before.txt
+?? .hermes/model-rating-issue.md
+?? .hermes/tree-a-correction.md
+?? .hermes/tree-b-issue.md
+?? docs/plans/20261119-usability-remediation/07-bench/11-steer-arming-PROGRESS.md
+?? docs/plans/20261119-usability-remediation/07-bench/11-steer-arming-REPORT.md
+?? e2e/suites/notification-bot/mcp_version_check_test.go
+?? e2e/suites/notification-bot/mcp_version_pin_test.go
+?? internal/tools/mcp/version_check.go
+?? internal/tools/mcp/version_check_test.go
+?? internal/tools/mcp/version_pin_test.go
