@@ -107,7 +107,11 @@ func armRequireApprovalSentinel(cfg *Config, stdJSON []byte) {
 //
 // IMPORTANT: when adding a duration-STRING config field, register it here —
 // otherwise a quoted value like "5m" silently becomes an integer and config
-// load fails. Known members:
+// load fails. convertQuotedDurations keys on the BARE field name globally,
+// so registration is required for EVERY `string`-typed config field whose
+// value parses as a Go duration (search the schema for
+// `(interval|duration|window|_ttl|timeout|expiry|margin)` string fields
+// whenever this map changes — bughunt A3-11). Known members:
 //
 //	interactive_window          — held as string, parsed at use site
 //	oauth.refresh_interval            — time.ParseDuration at wiring (components.go)
@@ -115,6 +119,10 @@ func armRequireApprovalSentinel(cfg *Config, stdJSON []byte) {
 //	agent.worker_pool.idle_timeout    — time.ParseDuration (agent_manager_wiring.go)
 //	intake.poll_interval              — time.ParseDuration at wiring (leaf 05)
 //	kanban.reconcile_interval         — time.ParseDuration at wiring (07/01-daemon-wiring)
+//	scheduler.one_shot_window         — time.ParseDuration (EffectiveOneShotWindow,
+//	                                    schema.go; A3-11: a quoted "2h"/"30m"
+//	                                    here used to be rewritten to nanoseconds
+//	                                    and the string field failed to unmarshal)
 var stringDurationKeys = map[string]bool{
 	"interactive_window": true,
 	"refresh_interval":   true,
@@ -122,6 +130,7 @@ var stringDurationKeys = map[string]bool{
 	"idle_timeout":       true,
 	"poll_interval":      true,
 	"reconcile_interval": true,
+	"one_shot_window":    true,
 }
 
 // preprocessDurations applies the shared duration preprocessing used by both
