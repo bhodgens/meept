@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -186,8 +187,10 @@ func submitAndAwait(ctx context.Context, client transport.Client, msg, sessionID
 	defer func() {
 		_, _ = client.Call("bus.unsubscribe", map[string]string{"subscription_id": subID})
 	}()
-	// Only events recorded after the subscription exists are ours to read.
-	since := time.Now()
+	// Only events buffered after the subscription exists are ours to read;
+	// the seq cursor starts at 0 (first poll returns the whole buffer, and
+	// next_seq drives every later poll).
+	cursor := int64(0)
 
 	ack, err := callChatSubmit(client, msg, sessionID)
 	if err != nil {
@@ -211,7 +214,7 @@ func submitAndAwait(ctx context.Context, client transport.Client, msg, sessionID
 		case <-time.After(opts.PollInterval):
 		}
 
-		events, err := pollTurnEvents(client, subID, since)
+		events, nextSeq, err := pollTurnEvents(client, subID, cursor)
 		if err != nil {
 			// A persistent poll failure (e.g. a subscription the daemon no
 			// longer knows) must fail fast rather than masquerade as a stall.
@@ -223,10 +226,12 @@ func submitAndAwait(ctx context.Context, client transport.Client, msg, sessionID
 			continue
 		}
 		pollErrors = 0
+		if nextSeq > cursor {
+			cursor = nextSeq
+		}
 
 		if len(events) > 0 {
 			lastProgress = time.Now()
-			since = events[len(events)-1].Timestamp
 		}
 		for _, ev := range events {
 			if ev.Topic != "turn.terminal" {
@@ -287,14 +292,18 @@ func subscribeTurnTopics(client transport.Client) (string, error) {
 	return resp.SubscriptionID, nil
 }
 
-// pollTurnEvents fetches events recorded after the given timestamp.
-func pollTurnEvents(client transport.Client, subID string, since time.Time) ([]busEvent, error) {
+// pollTurnEvents fetches events after the given seq cursor. The monotonic
+// since_seq cursor (never the legacy wall-clock `since`) is what gives the
+// daemon's bus.poll delivered-once semantics: records the client already
+// received can never be re-counted as drops, and buffered events are never
+// skipped the way a wall-clock cursor can skip them under load.
+func pollTurnEvents(client transport.Client, subID string, sinceSeq int64) ([]busEvent, int64, error) {
 	raw, err := client.Call("bus.poll", map[string]string{
 		"subscription_id": subID,
-		"since":           since.Format(time.RFC3339Nano),
+		"since_seq":       strconv.FormatInt(sinceSeq, 10),
 	})
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	var resp struct {
 		Events []struct {
@@ -302,15 +311,19 @@ func pollTurnEvents(client transport.Client, subID string, since time.Time) ([]b
 			Timestamp time.Time       `json:"timestamp"`
 			Payload   json.RawMessage `json:"payload"`
 		} `json:"events"`
+		NextSeq int64 `json:"next_seq"`
 	}
 	if err := json.Unmarshal(raw, &resp); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	events := make([]busEvent, 0, len(resp.Events))
 	for _, e := range resp.Events {
 		events = append(events, busEvent{Topic: e.Topic, Timestamp: e.Timestamp, Payload: e.Payload})
 	}
-	return events, nil
+	if resp.NextSeq <= 0 {
+		resp.NextSeq = sinceSeq
+	}
+	return events, resp.NextSeq, nil
 }
 
 // callChatSubmit sends the chat.submit RPC (never the legacy blocking "chat").
