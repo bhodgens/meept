@@ -665,3 +665,37 @@ func TestMcpDependencyEntriesMirror(t *testing.T) {
 		t.Errorf("nil config gave %d entries, want 0", len(entries))
 	}
 }
+
+// TestMcpUpdateChecksDoctor pins the issue-#167 doctor lane (companion of
+// the daemon StartUpdateCheckerIfEnabled boot block, and the production
+// consumer of mcp.CheckUpdates): the [mcp].check_updates=false opt-out
+// must report 'skipped' WITHOUT touching the network, and an enabled pass
+// over a catalog with no parseable pins must render the all-current line.
+// Failing revert: delete mcpUpdateChecksDoctor (deadcode-blocked) or drop
+// the enabled-gate (the first subtest would issue registry requests for a
+// non-boolean config shape and hang/fail the hermetic run).
+func TestMcpUpdateChecksDoctor(t *testing.T) {
+	home := withMeeptHome(t)
+	writeCfg := func(meeptBody, catalog string) {
+		if err := os.WriteFile(filepath.Join(home, "meept.json5"), []byte(meeptBody), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(home, "mcp_servers.json5"), []byte(catalog), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	unpinned := `{servers: [{name: "no-pin-fixture", command: ["npx", "@nope/server-x"], type: "stdio", enabled: true}]}`
+
+	writeCfg(`{mcp: {check_mcp_updates: false}}`, unpinned)
+	checks := mcpUpdateChecksDoctor()
+	if len(checks) != 1 || checks[0].name != "mcp-pin-updates" || !checks[0].ok ||
+		!strings.Contains(checks[0].detail, "skipped") {
+		t.Fatalf("opt-out lane must report skipped, got %+v", checks)
+	}
+
+	writeCfg(`{mcp: {check_mcp_updates: true}}`, unpinned)
+	checks = mcpUpdateChecksDoctor()
+	if len(checks) != 1 || !checks[0].ok || !strings.Contains(checks[0].detail, "current or uncheckable") {
+		t.Fatalf("no-parseable-pin catalog must report all-current, got %+v", checks)
+	}
+}

@@ -177,6 +177,14 @@ func runDoctor(fix, installMissing bool) error {
 	mcpChecks, mcpEntries := mcpDependencyChecksDoctor()
 	checks = append(checks, mcpChecks...)
 
+	// --- mcp pin currency (issue #167 companion) ---
+	// Offline counterpart of the daemon's StartUpdateCheckerIfEnabled
+	// boot lane: one check line per outdated pin. Respects the same
+	// [mcp].check_updates opt-out (false = registry untouched, the lane
+	// reports as skipped). Doctor is explicit-invocation, so the offline
+	// single pass is safe even at boot intervals.
+	checks = append(checks, mcpUpdateChecksDoctor()...)
+
 	// --- origin-backfill gap counter (branch 02, C4) ---
 	// Report-only: the counts surface the origin backfill gap; the check
 	// is always ok and never blocks doctor or writes anything.
@@ -632,6 +640,49 @@ func mcpDependencyChecksDoctor() ([]doctorCheck, []mcpDepEntry) {
 	}
 	entries := mcpDependencyEntries(cfg)
 	return mcpDependencyChecks(cfg), entries
+}
+
+// mcpUpdateChecksDoctor is the offline CheckUpdates consumer (issue #167
+// companion): a single registry pass over the loaded catalog, honoring the
+// same [mcp].check_updates opt-out the daemon boot lane applies through
+// StartUpdateCheckerIfEnabled. Outdated pins produce one non-blocking warn
+// line each; a fully current catalog reports ok. A registry outage degrades
+// to no notices (CheckUpdates skips unparseable/failed lookups internally),
+// so this check never fails doctor on network flakiness.
+func mcpUpdateChecksDoctor() []doctorCheck {
+	mcpCfg, err := config.LoadMCPConfigDefault()
+	if err != nil || mcpCfg == nil {
+		return nil
+	}
+	enabled := true
+	if cfg, cfgErr := config.LoadDefault(); cfgErr == nil {
+		enabled = cfg.MCP.CheckUpdates
+	}
+	if !enabled {
+		return []doctorCheck{{
+			name:   "mcp-pin-updates",
+			ok:     true,
+			detail: "skipped ([mcp].check_updates=false)",
+		}}
+	}
+	notices := mcp.CheckUpdates(context.Background(), mcpCfg.Servers)
+	if len(notices) == 0 {
+		return []doctorCheck{{
+			name:   "mcp-pin-updates",
+			ok:     true,
+			detail: "all pinned versions current or uncheckable",
+		}}
+	}
+	checks := make([]doctorCheck, 0, len(notices))
+	for _, n := range notices {
+		checks = append(checks, doctorCheck{
+			name:   "mcp-pin-updates",
+			ok:     true, // report-only: an outdated pin never fails doctor
+			detail: n.String(),
+			warn:   true,
+		})
+	}
+	return checks
 }
 
 // mcpDependencyChecks builds one check per enabled stdio catalog entry.

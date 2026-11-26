@@ -56,6 +56,11 @@ type ContactChainWiring struct {
 		CheckPermission(action string, details map[string]string) security.CheckResult
 	}
 
+	// SecurityNotify is the configured operator notification channel
+	// (nil = log only). Used to surface the deferred HITL confirmation
+	// omission without changing this runner's text contract.
+	SecurityNotify func(message, source string)
+
 	// allowedNumbers holds the outbound dial allowlist used by targetAllowed.
 	// Set by BuildContactChain from cfg.Voice.AllowedNumbers; nil = fail closed.
 	allowedNumbers []string
@@ -85,6 +90,15 @@ func (w *ContactChainWiring) Run(person, message string, channels []string) stri
 			"tool_name":  "contact",
 		})
 		if result.NeedsConfirm {
+			// Decision 3: HITL pause is deferred. Surface the omission
+			// through the configured operator channel (channel A) so a
+			// refused contact is never silent. The runner text stays the
+			// same: the agent still sees the refusal.
+			if w.SecurityNotify != nil {
+				w.SecurityNotify(
+					"SECURITY: contact to "+rec.Phone+" is outside voice.allowed_numbers and needs human confirmation; interactive HITL pause is not wired in the contact chain runner. Add the number to voice.allowed_numbers or implement the relay wait.",
+					"contact:out_of_allowlist:"+rec.ID)
+			}
 			return fmt.Sprintf("contact: target %q is outside voice.allowed_numbers and needs human confirmation before any channel is attempted", rec.Phone)
 		}
 		if !result.Allowed {

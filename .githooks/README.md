@@ -33,14 +33,14 @@ chmod +x .githooks/*
 
 ### pre-commit (Main Hook)
 
-Entry point that runs 21 checks. Since the gates-speedup change the chain
-dispatches INDEPENDENTLY: checks 1-15, 17-21 run CONCURRENTLY (bash
+Entry point that runs 22 checks. Since the gates-speedup change the chain
+dispatches INDEPENDENTLY: checks 1-15, 17-22 run CONCURRENTLY (bash
 background jobs, capped at `MEEPT_HOOKS_PARALLEL` slots, default 6), each
 writing its own output file, and every gate's full output is replayed in
-`[n/21]` numbered order after the join, so the transcript still reads like
+`[n/22]` numbered order after the join, so the transcript still reads like
 the old serial chain. Check 16 (`pre-commit-feature-docs`) is the only
 gate that can PROMPT the user (aider y/n) — it runs serially AFTER the
-parallel join with the real TTY. Check [0/21] (`pre-commit-worktreecfg`)
+parallel join with the real TTY. Check [0/22] (`pre-commit-worktreecfg`)
 stays the serial pre-flight. Any blocking gate failing => exit 1 (gates
 14/15 are report-only and never block). Escape hatches unchanged:
 `--no-verify`, and `MEEPT_PARALLEL_HOOKS=0` restores the old strictly
@@ -64,7 +64,7 @@ blobs via `git show :path` / the index and need no tree. If the snapshot
 cannot be built the dispatcher prints a loud WARN and falls back to
 working-tree mode — the mechanism itself never blocks a commit.
 
-The numbers below are the `[n/21]` labels `.githooks/pre-commit` prints:
+The numbers below are the `[n/22]` labels `.githooks/pre-commit` prints:
 
 | # | Hook | Purpose | Mode |
 |---|------|---------|------|
@@ -88,9 +88,11 @@ The numbers below are the `[n/21]` labels `.githooks/pre-commit` prints:
 | 18 | pre-commit-dart-format | Staged Dart blob (index content) is dart-format clean | parallel |
 | 19 | pre-commit-e2e | New-package census ONLY (affected-suite sweep moved to pre-push + CI; opt back in with `MEEPT_E2E_PRECOMMIT_SWEEP=1`) | parallel |
 | 20 | pre-commit-deadcode | Blocks NEW unwired functions (deadcode vs committed baseline; result-cached) | snapshot |
+| 21 | pre-commit-agents-check | AGENTS.md size, pointer, and package-table ratchet | parallel |
+| 22 | pre-commit-mcp-pin-check | Every `npx`/`uvx` command in `config/mcp_servers.json5` pins an exact version | parallel |
 
 Steps 14 and 15 are reported but never block the commit. Steps 1-13,
-16-18, and 19-20 do.
+16-18, and 19-22 do.
 `pre-commit-staticcheck` is not in this list: it is standalone (run it directly,
 or via your editor) and additionally analyzes the tag-gated `magefiles` package
 with `-tags mage`.
@@ -637,6 +639,18 @@ Pure Python (`scripts/agents-check.py`), no Go toolchain. Baseline:
 `scripts/agents-baseline.txt`; `--rebaseline` is a deliberate human step.
 Also runs in CI's `code-quality.yml` generated-artifacts job via
 `make agents-check`.
+
+---
+
+### pre-commit-mcp-pin-check
+
+Gate 22. Fails any `npx`/`uvx` command in the shipped MCP catalog
+(`config/mcp_servers.json5`) that does not pin an exact package version,
+matching the runtime refusal in `internal/tools/mcp/version_pin.go`
+(issue #166). Pure Python (`scripts/audit-mcp-pins.py`), no Go toolchain,
+read-only. Same check available via `make mcp-pin-check` (a `lint-ci`
+member) and in the `Code Quality Detection` CI workflow. Point it at a
+different catalog with `--catalog <path>`.
 
 ## Skipping Hooks
 

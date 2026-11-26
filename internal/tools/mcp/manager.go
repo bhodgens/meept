@@ -297,6 +297,13 @@ func (m *Manager) StartServer(ctx context.Context, cfg ServerConfig) error {
 		return fmt.Errorf("server name is required")
 	}
 
+	// Issue #166: refuse unpinned npx/uvx commands before any process
+	// spawn or network call. The error text names the server and the
+	// exact command so the daemon log is actionable.
+	if pinErr := ValidateVersionPin(cfg.Name, cfg.Command); pinErr != nil {
+		return pinErr
+	}
+
 	// Validate enabled state. Disabled servers should not be started; treat
 	// as a programmer error rather than silently no-op'ing so callers get
 	// clear feedback.

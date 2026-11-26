@@ -1,0 +1,9 @@
+#!/bin/bash
+# Pre-commit gate: MCP command version-pin guard.
+# Pure Python, no Go toolchain. Reads the shipped MCP catalog and fails any
+# npx/uvx command that does not pin an exact version, matching the runtime
+# refusal in internal/tools/mcp/version_pin.go.
+# Mirrors .githooks/pre-commit-agents-check (working-tree read, exec python).
+set -u
+cd "$(git rev-parse --show-toplevel)" || exit 1
+exec python3 scripts/audit-mcp-pins.py

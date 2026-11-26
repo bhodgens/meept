@@ -53,6 +53,28 @@ meept mcp-chat-server
 
 See [Agent Lateral Interrogation Howto](agent-lateral-interrogation-howto.md) for detailed usage patterns.
 
+### MCP command version-pin guard
+
+Every `npx`/`uvx` command in the shipped MCP catalog (`config/mcp_servers.json5`)
+must pin an exact package version, so a compromised upstream release cannot be
+resolved at launch in the daemon's environment. Native binaries (`cua-driver`,
+`obscura`, …) and HTTP servers need no pin. This mirrors the runtime refusal in
+`internal/tools/mcp/version_pin.go`: `npx` accepts `@scope/pkg@version` or
+`pkg@version` (leading flags like `-y` are skipped), `uvx` accepts `pkg==version`.
+
+Run the guard locally with:
+
+```bash
+make mcp-pin-check
+# or directly: python3 scripts/audit-mcp-pins.py
+```
+
+It is a read-only, stdlib-only Python check wired into `make lint-ci`, the
+`pre-commit-mcp-pin-check` hook, and the `Code Quality Detection` CI workflow.
+A violation prints `FILE:LINE: unpinned MCP command: <command>` and exits 1;
+a clean catalog prints a one-line OK count. To audit a different catalog, pass
+`--catalog <path>` (e.g. `python3 scripts/audit-mcp-pins.py --catalog ~/.meept/mcp_servers.json5`).
+
 ### ACP Client Agents
 
 Meept can *drive* external coding agents (codex-acp, opencode acp) over the

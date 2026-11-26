@@ -1,7 +1,7 @@
 #!/bin/bash
 # Main pre-commit hook - runs all quality and security checks
 #
-# Runs the following checks (numbered as [n/21] labels below):
+# Runs the following checks (numbered as [n/22] labels below):
 # 1. go build on staged packages (+ clean downstream importers)   [SNAPSHOT]
 # 2. consumer test-compile (clean downstream packages' _test.go vs staged changes) [SNAPSHOT]
 # 3. Deferred item validation (findings docs)
@@ -23,9 +23,10 @@
 # 19. e2e new-package census ONLY (suite sweep moved to pre-push + CI)
 # 20. deadcode reachability (blocks NEW unwired functions vs baseline) [SNAPSHOT]
 # 21. AGENTS.md size, pointer, and package-table ratchet
+# 22. MCP command version pins (npx/uvx exact versions in the catalog)
 #
 # Execution model (gates-speedup items 4 + 6):
-#   * Checks 1-15, 17-21 are INDEPENDENT and run CONCURRENTLY
+#   * Checks 1-15, 17-22 are INDEPENDENT and run CONCURRENTLY
 #     (background jobs, capped at MEEPT_HOOKS_PARALLEL slots, default 6;
 #     bash >= 3.2: no `wait -n`, concurrency is bounded by polling
 #     `jobs -rp`). Each hook writes its own output file; verdicts are
@@ -51,7 +52,7 @@
 #     It runs AFTER the parallel join, serially, with the real TTY on
 #     stdin — never concurrently with stdin shared.
 #
-# Pre-flight [0/21]: pre-commit-worktreecfg repairs a core.bare=true flip. It
+# Pre-flight [0/22]: pre-commit-worktreecfg repairs a core.bare=true flip. It
 # runs BEFORE everything because that flip breaks `go build -buildvcs`
 # ("error obtaining VCS status: exit status 128"), which would abort gate 1
 # (and the snapshot build).
@@ -129,12 +130,12 @@ fi
 
 # 0. worktree config guard (core.bare=true self-heal) — PRE-FLIGHT, before
 # everything. WHY first: a bare-config flip makes `go build` fail with
-# "error obtaining VCS status: exit status 128", so gate [1/21]
+# "error obtaining VCS status: exit status 128", so gate [1/22]
 # pre-commit-build would abort the chain (and the snapshot build).
-echo -e "\e[34m[0/21]\e[0m Checking worktree configuration (core.bare guard)..."
+echo -e "\e[34m[0/22]\e[0m Checking worktree configuration (core.bare guard)..."
 if ! "$SCRIPT_DIR/pre-commit-worktreecfg"; then
     # Old chain had `set -e`: a failing pre-flight aborted everything.
-    echo -e "\e[31m❌ pre-commit blocked at [0/21] worktree configuration guard\e[0m"
+    echo -e "\e[31m❌ pre-commit blocked at [0/22] worktree configuration guard\e[0m"
     exit 1
 fi
 
@@ -234,7 +235,8 @@ ENTRIES="1|pre-commit-build|1|1|Building staged packages...
 18|pre-commit-dart-format|1|0|Checking Dart formatting (ui/flutter_ui)...
 19|pre-commit-e2e|1|0|Checking e2e new-package census (suite sweep: pre-push + CI)...
 20|pre-commit-deadcode|1|1|Checking code reachability (deadcode gate)...
-21|pre-commit-agents-check|1|0|Checking AGENTS.md size and pointers..."
+21|pre-commit-agents-check|1|0|Checking AGENTS.md size and pointers...
+22|pre-commit-mcp-pin-check|1|0|Checking MCP command version pins..."
 
 . "$SCRIPT_DIR/pre-commit-dispatch-lib"
 
@@ -255,7 +257,7 @@ fi
 # drive aider interactively; it must never share stdin concurrently with
 # the parallel batch (gates-speedup item 4: promptable gate stays serial).
 # --------------------------------------------------------------------------
-echo -e "\e[34m[16/21]\e[0m Verifying feature documentation..."
+echo -e "\e[34m[16/22]\e[0m Verifying feature documentation..."
 if ! (cd "$REPO_ROOT" && "$SCRIPT_DIR/pre-commit-feature-docs"); then
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

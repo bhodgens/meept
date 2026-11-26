@@ -1,7 +1,7 @@
 {
   "version": 1,
   "generated": "2026-11-20",
-  "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage \u2014 behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet. Flutter surface (ui/flutter_ui/**) is covered Dart-side by the gui-flows suite (gui-terminal-01, gui-session-01, gui-quota-01, gui-stream-01, gui-stream-02) against a wire-shape stub: `cd ui/flutter_ui && flutter test test/e2e`. The ui/** path_map keys below make a Flutter change select that suite; scripts/e2e-affected.sh dispatches on suites[].runner to run the Dart command instead of go test (the pre-commit-e2e Go hook does not scan Dart files, so `make e2e-affected-area AREA=gui-flows` / CI's e2e-gui job is the gate). New-package census (pre-commit-e2e): every NEW internal/|pkg/|cmd/ package dir in a commit's staged ADDITIONS must match a path_map key (bidirectional slash-boundary prefix, trailing slashes stripped) or an 'exempt' entry mapping dir -> non-empty reason string; exempt entries are printed as residual risk on every hook run.",
+  "comment": "Maps repo path prefixes to e2e suites and lists the e2e scenario inventory. Consumed by scripts/e2e-affected.sh (path->suite mapping) and the pre-commit-e2e hook (coverage requirement). status: todo|implemented|deferred. diff: S|M|L. Coverage policy: every internal/ package maps to at least one suite. Thin smoke-only mappings (registry, resources, templates, preferences, pathutil, util, version, errcls, context, compress, sharedclient, shadow, gate, lint, debug, configui, integration, repomap, learning, selfimprove, agents, benchmark, bot, calendar, cluster, code, runtime, tui, placement) are deliberately thin coverage — behavioral suites welcome. stt/tts/browser/pty map to smoke only because no behavioral suite exists yet. Flutter surface (ui/flutter_ui/**) is covered Dart-side by the gui-flows suite (gui-terminal-01, gui-session-01, gui-quota-01, gui-stream-01, gui-stream-02) against a wire-shape stub: `cd ui/flutter_ui && flutter test test/e2e`. The ui/** path_map keys below make a Flutter change select that suite; scripts/e2e-affected.sh dispatches on suites[].runner to run the Dart command instead of go test (the pre-commit-e2e Go hook does not scan Dart files, so `make e2e-affected-area AREA=gui-flows` / CI's e2e-gui job is the gate). New-package census (pre-commit-e2e): every NEW internal/|pkg/|cmd/ package dir in a commit's staged ADDITIONS must match a path_map key (bidirectional slash-boundary prefix, trailing slashes stripped) or an 'exempt' entry mapping dir -> non-empty reason string; exempt entries are printed as residual risk on every hook run.",
   "path_map": {
     "e2e/suites/smoke": [
       "smoke"
@@ -908,6 +908,18 @@
       "task-approval"
     ],
     "e2e/suites/manifest": [
+      "manifest"
+    ],
+    "internal/tools/mcp/version_check.go": [
+      "notification-bot"
+    ],
+    "internal/tools/mcp/version_check_test.go": [
+      "notification-bot"
+    ],
+    "e2e/suites/notification-bot/mcp_version_check_test.go": [
+      "notification-bot"
+    ],
+    "scripts/audit-mcp-pins.py": [
       "manifest"
     ]
   },
@@ -6627,7 +6639,7 @@
       "id": "sec-notify-01",
       "suite": "notification-bot",
       "diff": "S",
-      "title": "security_channel=\"\" (default) emits nothing: no bot event, no bus publish \u2014 byte-identical boot",
+      "title": "security_channel=\"\" (default) emits nothing: no bot event, no bus publish — byte-identical boot",
       "paths": [
         "internal/services/security_notify.go",
         "config/meept.json5"
@@ -6805,6 +6817,51 @@
       "status": "implemented",
       "paths": [
         "e2e/manifest.json"
+      ]
+    },
+    {
+      "id": "mcp-pin-guard-01",
+      "suite": "manifest",
+      "diff": "S",
+      "title": "static guard rejects unpinned npx/uvx commands in config/mcp_servers.json5 (exit 1, FILE:LINE violation), passes on the pinned catalog",
+      "status": "implemented",
+      "paths": [
+        "scripts/audit-mcp-pins.py"
+      ]
+    },
+    {
+      "id": "mcp-update-check-01",
+      "suite": "notification-bot",
+      "diff": "M",
+      "title": "[issue #167] default-on npm/PyPI version check: an outdated pin produces one notice with exact name/current/latest, delivered via SecurityNotify with source mcp-update:<name>; no auto-update",
+      "paths": [
+        "internal/tools/mcp/version_check.go",
+        "internal/tools/mcp/version_pin.go",
+        "internal/config/schema.go",
+        "internal/daemon/components.go",
+        "e2e/suites/notification-bot/mcp_version_check_test.go"
+      ]
+    },
+    {
+      "id": "mcp-update-check-02",
+      "suite": "notification-bot",
+      "diff": "S",
+      "title": "[issue #167] check_mcp_updates=false disables the version checker entirely — zero registry requests, no notification",
+      "paths": [
+        "internal/tools/mcp/version_check.go",
+        "config/meept.json5",
+        "e2e/suites/notification-bot/mcp_version_check_test.go"
+      ]
+    },
+    {
+      "id": "mcp-update-check-03",
+      "suite": "notification-bot",
+      "diff": "S",
+      "title": "[issue #167] a registry network error or unparseable version is DEBUG-logged and skipped: no notice and no panic; boot and turns never fail",
+      "paths": [
+        "internal/tools/mcp/version_check.go",
+        "internal/tools/mcp/version_check_test.go",
+        "e2e/suites/notification-bot/mcp_version_check_test.go"
       ]
     }
   ]

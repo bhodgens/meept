@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/bot"
+	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/comm/http"
 	"github.com/caimlas/meept/internal/services"
 )
@@ -67,9 +68,22 @@ const defaultNotifyRatePerHour = 20
 //
 // Free function (not a method) per the gate-test convention; tests call
 // wireSecurityNotifier(c) on a minimal Components fixture.
-func wireSecurityNotifier(c *Components) {
+func wireSecurityNotifier(c *Components, b ...*bus.MessageBus) {
 	if c == nil {
 		return
+	}
+	var msgBus *bus.MessageBus
+	for _, candidate := range b {
+		if candidate != nil {
+			msgBus = candidate
+			break
+		}
+	}
+	// Fallback for older fixtures that call wireSecurityNotifier(c):
+	// the production caller passes the real bus explicitly because
+	// c.msgBus is only assigned much later in NewComponents.
+	if msgBus == nil {
+		msgBus = c.msgBus
 	}
 	logger := c.Logger
 	if logger == nil {
@@ -80,7 +94,7 @@ func wireSecurityNotifier(c *Components) {
 		return
 	}
 	ch := c.Config.Notifications.SecurityChannel
-	sn := services.NewSecurityNotifier(ch, c.msgBus, logger.With("component", "security-notifier"))
+	sn := services.NewSecurityNotifier(ch, msgBus, logger.With("component", "security-notifier"))
 	if sn.Channel() == "bot" {
 		// Typed-nil guard (internal/daemon/AGENTS.md): only assign the
 		// concrete *EventEmitter into the seam when it is non-nil; a

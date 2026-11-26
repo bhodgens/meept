@@ -2853,7 +2853,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// unconditionally and independent of [notifications].enabled so the
 	// MCP gate seam exists whenever security_channel is set; default ""
 	// is a no-op and keeps boot byte-identical.
-	wireSecurityNotifier(c)
+	wireSecurityNotifier(c, msgBus)
 
 	// Start progress synthesizer for tiered agent activity summaries.
 	// Subscribes to all agent events via wildcard and republishes condensed
@@ -3831,6 +3831,19 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				started++
 			}
 
+			// Issue #167: default-on, notification-only npm/PyPI
+			// version check. Runs once at boot, then every configured
+			// interval on the daemon-lifetime context. The gate is
+			// applied inside StartUpdateCheckerIfEnabled: when
+			// check_mcp_updates is false the checker returns without
+			// issuing any registry request. c.SecurityNotify is nil
+			// when the configured channel is off, in which case the
+			// checker logs only.
+			mcp.StartUpdateCheckerIfEnabled(ctx, cfg.MCP.CheckUpdates,
+				mcpCfg.Servers,
+				time.Duration(cfg.MCP.UpdateCheckIntervalHours)*time.Hour,
+				c.SecurityNotify, logger.With("component", "mcp"))
+
 			// Register MCP tools with the tool registry whenever at least
 			// one server started. The registry is safe to call with zero
 			// active servers but we preserve the existing conditional
@@ -3979,7 +3992,15 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// dedicated directory under the daemon data dir, opened lazily inside
 	// registerBuiltinTools only when enabled.
 	knowledgeDataDir := filepath.Join(cfg.Daemon.DataDir, "knowledge")
-	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, pendingChangesRegistry, changeJournal, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, logger, cfg.Media, c.LLMResolver, cfg.Security.SSRF, cfg.Browser, cfg.Transcript, transcriptChatter, c.SkillWriter, c.SkillRegistry, c.TokenStore, c.MCPManager, cfg.Memory.Knowledge, knowledgeDataDir, c.KnowledgeStore, &c.KnowledgeStore, cfg.Security.ShellPermissions, gateCap, securityEngine, cfg.Agent.ToolTimeoutProbeEnabled, &jobGuardPermTable, &jobGuardShellTool)
+	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, pendingChangesRegistry, changeJournal, containerMgr, c.PTYManager, c.LLMClient, c.LLMProvider, logger, cfg.Media, c.LLMResolver, cfg.Security.SSRF, cfg.Browser, cfg.Transcript, transcriptChatter, c.SkillWriter, c.SkillRegistry, c.TokenStore, c.MCPManager, cfg.Memory.Knowledge, knowledgeDataDir, c.KnowledgeStore, &c.KnowledgeStore, cfg.Security.ShellPermissions, &gateCap, securityEngine, cfg.Agent.ToolTimeoutProbeEnabled, &jobGuardPermTable, &jobGuardShellTool)
+	// Bughunt A1-4: registerBuiltinTools may have OPENED the capture store
+	// lazily (permission table wired without a decision gate — the default
+	// opt-in shape). Adopt the threaded-out handle onto Components so the
+	// shutdown path owns and closes it; the decision-gate path already
+	// assigned c.GateCapture at construction.
+	if gateCap != nil && c.GateCapture == nil {
+		c.GateCapture = gateCap
+	}
 
 	// GitHub PR/CI tools ([github] block, github-pr-ci tree): register
 	// next to the other builtin tools, gated on enabled + a resolvable
@@ -4065,6 +4086,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// the permission-table ask's human answer arrives through the ACP
 		// relay resolve path. Match armed asks against the pending request's
 		// summary (which carries the command text) at resolve time.
+		//
+		// Bughunt A1-4: with registerBuiltinTools threading its lazily
+		// opened store back through the out-param, this branch now fires on
+		// the DEFAULT boot shape (permission table configured, no decision
+		// gate): before the fix gateCap stayed nil here and the resolver
+		// lane never armed — asks armed but nothing resolved them.
 		wireGateCaptureResolve(acpMgr, gateCap)
 	}
 
@@ -6255,6 +6282,9 @@ func (c *Components) Start(ctx context.Context) error {
 					// Nil checker (fail-soft wiring) leaves the in-allowlist
 					// path byte-identical.
 					chain.ContactPermissionChecker = c.SecurityChecker
+					// Decision 3: surface the deferred HITL confirmation
+					// omission through the operator notification channel.
+					chain.SecurityNotify = c.SecurityNotify
 					c.Voice.Contact = chain
 					builtin.SetContactChain(chain)
 					// Caller-authz (leaf 02): arm the inbound caller
@@ -8036,6 +8066,18 @@ func (c *Components) stopComponents(ctx context.Context) error {
 		c.KnowledgeStore = nil
 	}
 
+	// Bughunt A1-4 fix (shutdown leg): the gate-capture store handle is
+	// now threaded back to NewComponents (and onto c.GateCapture for BOTH
+	// construction paths), so shutdown owns and closes it — the lazily
+	// opened permission-table-only store used to be an orphaned sqlite
+	// handle that never saw Close. Nil on capture-disabled boots.
+	if c.GateCapture != nil {
+		if err := c.GateCapture.Close(); err != nil {
+			c.Logger.Warn("Failed to close gate capture store", "error", err)
+		}
+		c.GateCapture = nil
+	}
+
 	// Stop managed per-session AgentLoops and the agent worker pool before
 	// stopping the singleton loop. Managed loops are created on demand by
 	// AgentLoopManager.GetOrCreate; drain them so in-flight work completes.
@@ -8757,7 +8799,7 @@ func registerBuiltinTools(
 	knowledgeConsolidationStore *knowledge.Store,
 	knowledgeStoreOut **knowledge.Store,
 	shellPermCfg config.ShellPermissionsConfig,
-	gateCap *gateCaptureStore,
+	gateCap **gateCaptureStore,
 	securityEngine *intsecurity.Engine,
 	probeTimeoutEnabled bool,
 	permTableOut **intsecurity.PermissionTable,
@@ -8863,18 +8905,27 @@ func registerBuiltinTools(
 			// permission-table ask arm. The store is opened lazily here too
 			// (a table without a decision gate is a valid capture source).
 			// Best-effort: open failure logs and capture stays disabled.
-			if gateCap == nil && securityEngine != nil {
+			//
+			// Bughunt A1-4 fix: gateCap is an OUT-_PARAM pointer (like the
+			// neighbouring knowledgeStoreOut), not a by-value sink. Assigned
+			// by value, this lazy open never reached the NewComponents
+			// caller: gateCap at the call site stayed nil on the default
+			// (permission-table-only) boot, wireGateCaptureResolve never
+			// ran, no permission_table_ask row was ever RESOLVED, and the
+			// orphan store was never Closed. Threading it back keeps the
+			// chokepoint-2 lane wired and the handle owned.
+			if *gateCap == nil && securityEngine != nil {
 				gc, gcErr := newGateCaptureStore(gatecapture.DefaultDBPath(), logger)
 				if gcErr != nil {
 					logger.Warn("gate capture store unavailable; capture disabled",
 						"error", gcErr, "path", gatecapture.DefaultDBPath())
 				} else {
-					gateCap = gc
+					*gateCap = gc
 					logger.Info("gate capture store open", "path", gatecapture.DefaultDBPath())
 				}
 			}
-			if gateCap != nil && securityEngine != nil {
-				securityEngine.SetGateAskCapture(gateCap)
+			if *gateCap != nil && securityEngine != nil {
+				securityEngine.SetGateAskCapture(*gateCap)
 			}
 		}
 	}
