@@ -20,6 +20,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/caimlas/meept/internal/acp"
 	"github.com/caimlas/meept/internal/gatecapture"
@@ -50,9 +51,81 @@ type gateCaptureStore struct {
 	// command text. The store keeps its own pending map for prior-score
 	// pairing; this set gates which resolutions CONSUME an ask (so a
 	// decision-gate approval never lands a permission_table_ask row).
-	askArmed sync.Map // map[string]struct{}
+	//
+	// Bughunt A1-4 fix (bound): this used to be a bare sync.Map that grew
+	// without limit whenever asks armed but nothing resolved them (the
+	// pre-fix default boot never armed the resolver lane). It now mirrors
+	// the store's pending-map discipline (internal/gatecapture/store.go
+	// maxPending/pendingTTL): entries carry an arm timestamp, stale entries
+	// are dropped lazily on insert, and the map is capped oldest-first.
+	// The engine calls PermissionTableAsk under its RLock, so this mutex
+	// only ever guards an in-memory insert — never I/O (mutexio rule).
+	askMu    sync.Mutex
+	askArmed map[string]time.Time
 
 	logger *slog.Logger
+}
+
+const (
+	// askArmedMax bounds the armed-ask set (mirrors gatecapture maxPending).
+	askArmedMax = 256
+	// askArmedTTL drops stale armed asks lazily on insert (mirrors the
+	// store's pendingTTL): an ask unresolved this long is dead state.
+	askArmedTTL = time.Hour
+)
+
+// armAsk records an armed ask with the bounded/TTL discipline above.
+func (g *gateCaptureStore) armAsk(command string) {
+	g.askMu.Lock()
+	defer g.askMu.Unlock()
+	if g.askArmed == nil {
+		g.askArmed = make(map[string]time.Time)
+	}
+	now := time.Now()
+	for k, ts := range g.askArmed {
+		if now.Sub(ts) > askArmedTTL {
+			delete(g.askArmed, k)
+		}
+	}
+	if _, exists := g.askArmed[command]; !exists && len(g.askArmed) >= askArmedMax {
+		// Oldest-first eviction so an unbounded arm storm stays capped.
+		var oldestKey string
+		var oldest time.Time
+		first := true
+		for k, ts := range g.askArmed {
+			if first || ts.Before(oldest) {
+				oldestKey, oldest, first = k, ts, false
+			}
+		}
+		if oldestKey != "" {
+			delete(g.askArmed, oldestKey)
+		}
+	}
+	g.askArmed[command] = now
+}
+
+// consumeAsk reports whether command was armed and removes its mark
+// (exactly-one-record-per-ask semantics, same as the old LoadAndDelete).
+func (g *gateCaptureStore) consumeAsk(command string) bool {
+	g.askMu.Lock()
+	defer g.askMu.Unlock()
+	if _, ok := g.askArmed[command]; !ok {
+		return false
+	}
+	delete(g.askArmed, command)
+	return true
+}
+
+// armedAsks snapshots the current armed set (resolution matching iterates
+// the snapshot outside the lock).
+func (g *gateCaptureStore) armedAsks() []string {
+	g.askMu.Lock()
+	defer g.askMu.Unlock()
+	out := make([]string, 0, len(g.askArmed))
+	for k := range g.askArmed {
+		out = append(out, k)
+	}
+	return out
 }
 
 // newGateCaptureStore opens the capture store at path (beside the shadow
@@ -104,7 +177,7 @@ func (g *gateCaptureStore) Escalated(ctx context.Context, command, reason string
 // security engine calls this under its RLock; the store's arm path is a
 // mutex-guarded map insert that never touches sqlite).
 func (g *gateCaptureStore) PermissionTableAsk(command string) {
-	g.askArmed.Store(command, struct{}{})
+	g.armAsk(command)
 	g.store.PermissionTableAsk(command)
 }
 
@@ -114,7 +187,7 @@ func (g *gateCaptureStore) PermissionTableAsk(command string) {
 // resolution (store restarted, ask raced an eviction) is dropped rather
 // than fabricating a context.
 func (g *gateCaptureStore) PermissionTableResolved(ctx context.Context, command, decision, approver string) {
-	if _, ok := g.askArmed.LoadAndDelete(command); !ok {
+	if !g.consumeAsk(command) {
 		g.logger.Debug("gatecapture: ask resolution without an armed ask; dropped",
 			"decision", decision)
 		return
@@ -127,6 +200,12 @@ func (g *gateCaptureStore) Close() error {
 	if g == nil || g.store == nil {
 		return nil
 	}
+	// Drop the armed-ask marks with the store (Close resets the store's
+	// own pending map; an armed ask without its store pending can never
+	// land a context-bearing record anyway).
+	g.askMu.Lock()
+	g.askArmed = make(map[string]time.Time)
+	g.askMu.Unlock()
 	return g.store.Close()
 }
 
@@ -141,15 +220,13 @@ func (g *gateCaptureStore) wireGateAskResolution(ctx context.Context, summary, d
 	}
 	decision := gateAskDecision(decisionVerb)
 	matched := 0
-	g.askArmed.Range(func(key, _ any) bool {
-		cmd, _ := key.(string)
+	for _, cmd := range g.armedAsks() {
 		if cmd == "" || !strings.Contains(summary, cmd) {
-			return true
+			continue
 		}
 		matched++
 		g.PermissionTableResolved(ctx, cmd, decision, approver)
-		return true
-	})
+	}
 	if matched > 0 {
 		g.logger.Debug("gatecapture: permission-table ask resolved",
 			"decision", decision, "matched", matched)
