@@ -294,22 +294,6 @@ type ModelConfig struct {
 	// to this model/provider. When 0, no limit is enforced (unlimited).
 	// Use this to prevent overwhelming rate-limited APIs or local LLMs.
 	MaxConcurrency int
-	// TransientRetries is the per-model same-provider re-dial budget for
-	// transient TRANSPORT failures (connection dropped mid-request: EOF,
-	// connection reset, broken pipe) — the shape a proxy whose worker died
-	// leaves behind (socrates litellm worker-kill storm, 2026-11-23). The
-	// re-dial goes to the SAME provider and consumes NO alias failure, so
-	// a single flaky hop does not burn an endpoint-cooldown strike or
-	// rotate the request to a different model. It lives OUTSIDE the
-	// shortRetries budget (attempts = shortRetries + TransientRetries) and
-	// funds ONLY the transport lane: throttle/server-error semantics stay
-	// pinned to shortRetries. Zero (the default) is byte-identical to the
-	// pre-feature behavior. Streaming guard: a mid-stream transport death
-	// re-dials ONLY when zero content deltas were delivered (the server
-	// restarts generation from scratch; replaying delivered deltas would
-	// duplicate text — the delta-skip resume needs Last-Event-ID support
-	// that local runtimes do not have).
-	TransientRetries int
 	// ConfiguredTimeout records whether the ORIGINATING config declared a
 	// nonzero timeout: for this alias (tree 02 leaf 04, DECISIONS.md D10).
 	// It is set for every model built from that alias's entry and mirrors
