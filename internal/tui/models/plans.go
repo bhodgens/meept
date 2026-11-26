@@ -810,17 +810,59 @@ func (m *PlansModel) updatePlansTable() {
 		})
 	}
 	tableutil.SetRows(&m.table, rows)
-	if len(rows) > 0 {
-		m.table.GotoTop()
-		// A refresh resets the cursor to row 0. If a plan was selected,
-		// re-sync it against that row: leaving the old m.selected in place
-		// made a/v/c/d act on a stale plan while the cursor pointed at a
-		// different gate/plan (verifier residual, 2026-11-22). With no
-		// prior selection, keep it nil (no auto-select on first load).
-		if m.selected != nil {
+	// L10 (2026-11-24 bughunt): selection/cursor discipline on refresh,
+	// mirroring the tasks.go restoreCursor / sessions.go prev-id pattern.
+	// The old block only ran when len(rows) > 0 and always called
+	// GotoTop(), which had two defects:
+	//   (a) an EMPTY refresh left m.selected pointing at a plan that is no
+	//       longer listed, so a/v/c/d acted on an unlisted plan;
+	//   (b) every background refresh yanked a mid-scroll user back to row
+	//       0 even when the selected plan was still present.
+	// Now: empty list clears the selection (syncSelectionFromCursor maps
+	// "no row under the cursor" to nil; on zero rows the cursor sits at -1,
+	// so planIdx < 0 and the same null-handling applies). Non-empty: if the
+	// selected plan is still listed, restore the cursor to ITS merged row
+	// (gate rows occupy the first gateVisible positions, so merged row =
+	// planIdx + gateVisible); only when it is gone fall back to the top and
+	// re-sync. No prior selection stays nil (no auto-select on first load).
+	if len(rows) == 0 {
+		m.selected = nil
+		return
+	}
+	prevID := ""
+	if m.selected != nil {
+		prevID = m.selected.ID
+	}
+	if prevID != "" {
+		if planIdx := indexOfPlanID(plans, prevID); planIdx >= 0 {
+			m.table.SetCursor(planIdx + gateVisible) // clamps to row count
+			// Re-point m.selected at the refreshed snapshot: the cursor is
+			// exactly on the plan's row, so the offset-aware mapping yields
+			// the same plan with CURRENT fields (e.g. State, which the 'd'
+			// reject guard reads) instead of a stale pointer.
 			m.syncSelectionFromCursor()
+			return
 		}
 	}
+	m.table.GotoTop()
+	// The selected plan disappeared (or there was a prior selection and the
+	// refresh rebuilt rows): re-sync so a/v/c/d never act on a stale plan
+	// (verifier residual, 2026-11-22). With no prior selection, keep it nil.
+	if m.selected != nil {
+		m.syncSelectionFromCursor()
+	}
+}
+
+// indexOfPlanID returns the position of planID in the filtered plan slice,
+// or -1 when absent. L10: the refresh restore maps the surviving selection
+// back onto its merged row.
+func indexOfPlanID(plans []types.PlanExtended, planID string) int {
+	for i, p := range plans {
+		if p.ID == planID {
+			return i
+		}
+	}
+	return -1
 }
 
 // View renders the plans view.

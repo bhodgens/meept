@@ -164,6 +164,12 @@ Each session shows plan count with state-colored indicators:
 
 The plans tab provides a full plan list with filtering, approval actions, and detail navigation:
 
+Background refreshes keep your place: a refresh that still lists the selected
+plan restores the cursor to its row (gate rows first, so merged row = plan
+index + visible gates), a refresh that empties the list clears the selection
+so a/v/c/d cannot act on an unlisted plan, and a refresh where the selected
+plan disappeared falls back to the top row with the selection re-synced.
+
 ```
  plans for: auth-overhaul                              filter: [all] active completed pending
 

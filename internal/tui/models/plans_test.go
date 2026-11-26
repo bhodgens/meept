@@ -233,33 +233,162 @@ func TestPlansModel_XOnPlanRowIsInert(t *testing.T) {
 	}
 }
 
-// A refresh rebuilds the table and calls GotoTop(). Selection must follow
-// the reset cursor (row 0), never keep pointing at the previously selected
-// plan; otherwise a/v/c/d act on a stale plan after a background refresh.
-func TestPlansModel_RefreshResetsSelectionToFirstRow(t *testing.T) {
+// L10 (a): a refresh that empties the merged list must clear m.selected.
+// Before the fix the whole cursor block was skipped when len(rows)==0, so
+// m.selected kept pointing at a plan that is no longer listed and a/v/c/d
+// acted on it from an empty table.
+func TestPlansModel_RefreshToEmptyListClearsSelection(t *testing.T) {
+	rpc := &plansGateRPC{}
+	m := NewPlansModel(rpc)
+	m.SetSize(100, 30)
+	m.Update(PlansUpdateMsg{Plans: []types.PlanExtended{
+		{ID: "plan-1", Title: "first", State: "draft"},
+		{ID: "plan-2", Title: "second", State: "draft"},
+	}})
+	m.table.SetCursor(1)
+	m.syncSelectionFromCursor()
+	if m.selected == nil || m.selected.ID != "plan-2" {
+		t.Fatalf("premise: cursor 1 did not select plan-2 (got %v)", m.selected)
+	}
+
+	// Background refresh reports zero plans.
+	m.Update(PlansUpdateMsg{Plans: []types.PlanExtended{}})
+
+	if m.selected != nil {
+		t.Fatalf("refresh to empty list kept stale selection %q", m.selected.ID)
+	}
+	// Gate/action keys must be inert on the emptied view: no RPC, no cmd.
+	for _, key := range []rune{'a', 'v', 'c'} {
+		if cmd := m.Update(tea.KeyPressMsg{Code: key}); cmd != nil {
+			t.Fatalf("%q on emptied list produced a cmd (%T); stale selection is still actionable", key, cmd())
+		}
+	}
+	if len(rpc.calls) != 0 {
+		t.Fatalf("keys on emptied list issued RPCs: %v", rpc.methods())
+	}
+}
+
+// L10 (b): a refresh that still lists the selected plan must RESTORE the
+// cursor to that plan's merged row instead of resetting to row 0 (the
+// tasks.go restoreCursor / sessions.go prev-id discipline). Gate rows
+// occupy the first len(gates) merged rows, so the restore math is
+// planIdx + gateVisible — pinned here with a live gate row.
+func TestPlansModel_RefreshPreservesSelectedPlanRow(t *testing.T) {
 	m := newGateOffsetModel(&plansGateRPC{})
 
-	// Cursor on the plan row selects the real plan.
+	// Merged table: row 0 = gate, row 1 = plan-1. Select the plan.
 	m.table.SetCursor(1)
 	m.syncSelectionFromCursor()
 	if m.selected == nil || m.selected.ID != "plan-1" {
 		t.Fatalf("premise: plan row did not select plan-1 (got %v)", m.selected)
 	}
 
-	// A background refresh rebuilds rows and resets the cursor to row 0,
-	// which is the synthetic gate row. Selection must be cleared.
+	// Background refresh that keeps plan-1 and the gate row.
 	m.Update(PlansUpdateMsg{Plans: []types.PlanExtended{
 		{ID: "plan-1", Title: "the real plan", State: "draft"},
 	}})
 
+	if m.table.Cursor() != 1 {
+		t.Fatalf("refresh yanked the cursor off the selected plan: got %d, want 1", m.table.Cursor())
+	}
+	if m.selected == nil || m.selected.ID != "plan-1" {
+		t.Fatalf("refresh lost the still-listed selection: got %v, want plan-1", m.selected)
+	}
+	// Selection must stay cursor-consistent (the M3 invariant): the cursor
+	// is NOT on a gate row, so selectedGate must report false.
+	if _, ok := m.selectedGate(); ok {
+		t.Fatal("cursor reports a gate row after restoring onto the plan row")
+	}
+}
+
+// L10 (b), multi-row boundary: the restore must land exactly on the last
+// merged row (planIdx = len-1) and stay inside the viewport clamp.
+func TestPlansModel_RefreshPreservesSelectedPlanLastRow(t *testing.T) {
+	m := NewPlansModel(&plansGateRPC{})
+	m.SetSize(100, 30)
+	plans := []types.PlanExtended{
+		{ID: "plan-1", Title: "one", State: "draft"},
+		{ID: "plan-2", Title: "two", State: "draft"},
+		{ID: "plan-3", Title: "three", State: "draft"},
+	}
+	m.Update(PlansUpdateMsg{Plans: plans})
+	m.table.SetCursor(2) // no gates: merged row 2 == filterPlans()[2]
+	m.syncSelectionFromCursor()
+	if m.selected == nil || m.selected.ID != "plan-3" {
+		t.Fatalf("premise: last row did not select plan-3 (got %v)", m.selected)
+	}
+
+	m.Update(PlansUpdateMsg{Plans: plans})
+
+	if m.table.Cursor() != 2 {
+		t.Fatalf("refresh reset a mid-scroll cursor: got %d, want 2", m.table.Cursor())
+	}
+	if m.selected == nil || m.selected.ID != "plan-3" {
+		t.Fatalf("refresh lost the last-row selection: got %v", m.selected)
+	}
+}
+
+// L10 (iii): when the previously selected plan disappears from the refresh
+// (deleted or filtered out), the view falls back to the top row and the
+// selection follows the cursor (syncSelectionFromCursor) — it must NEVER
+// keep pointing at the disappeared plan.
+func TestPlansModel_RefreshSelectedPlanGoneFallsBackToTop(t *testing.T) {
+	rpc := &plansGateRPC{}
+	m := NewPlansModel(rpc)
+	m.SetSize(100, 30)
+	m.Update(PlansUpdateMsg{Plans: []types.PlanExtended{
+		{ID: "plan-1", Title: "one", State: "draft"},
+		{ID: "plan-2", Title: "two", State: "pending_approval"},
+	}})
+	m.table.SetCursor(1)
+	m.syncSelectionFromCursor()
+	if m.selected == nil || m.selected.ID != "plan-2" {
+		t.Fatalf("premise: cursor 1 did not select plan-2 (got %v)", m.selected)
+	}
+
+	// Refresh drops plan-2; only plan-1 remains.
+	m.Update(PlansUpdateMsg{Plans: []types.PlanExtended{
+		{ID: "plan-1", Title: "one", State: "draft"},
+	}})
+
+	if m.selected != nil && m.selected.ID == "plan-2" {
+		t.Fatal("refresh kept selection of the disappeared plan-2")
+	}
 	if m.table.Cursor() != 0 {
-		t.Fatalf("refresh did not reset cursor to 0: got %d", m.table.Cursor())
+		t.Fatalf("fallback did not reset cursor to top: got %d", m.table.Cursor())
 	}
+	// The selection follows the cursor: row 0 lists plan-1.
+	if m.selected == nil || m.selected.ID != "plan-1" {
+		t.Fatalf("fallback selection = %v, want plan-1 (cursor-consistent top row)", m.selected)
+	}
+	// 'd' keys off m.selected.State — it must not arm the reject prompt for
+	// the disappeared pending_approval plan (plan-1 is a draft).
+	if cmd := m.Update(tea.KeyPressMsg{Code: 'd'}); cmd != nil {
+		t.Fatal("d armed the reject prompt after the pending_approval plan disappeared")
+	}
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	if len(rpc.calls) != 0 {
+		t.Fatalf("keys issued RPCs after the selection disappeared: %v", rpc.methods())
+	}
+}
+
+// No prior selection must stay nil across a refresh (initial-load
+// discipline: a background poll must not auto-select a plan).
+func TestPlansModel_RefreshWithoutPriorSelectionDoesNotAutoSelect(t *testing.T) {
+	m := newGateOffsetModel(&plansGateRPC{})
+
 	if m.selected != nil {
-		t.Fatalf("refresh kept stale selection %q while cursor is on gate row 0", m.selected.ID)
+		t.Fatalf("premise: fresh model pre-selected %+v", m.selected)
 	}
-	if _, ok := m.selectedGate(); !ok {
-		t.Fatal("premise: row 0 is not a gate row")
+	m.Update(PlansUpdateMsg{Plans: []types.PlanExtended{
+		{ID: "plan-1", Title: "the real plan", State: "draft"},
+	}})
+
+	if m.selected != nil {
+		t.Fatalf("refresh auto-selected %q with no prior selection", m.selected.ID)
+	}
+	if m.table.Cursor() != 0 {
+		t.Fatalf("refresh without prior selection moved the cursor: got %d, want 0", m.table.Cursor())
 	}
 }
 
