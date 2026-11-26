@@ -99,6 +99,17 @@ never blocks the plain "plan and do it" case.
     // phases/steps express.
     // Owner: 02-compound-oneshot.md.
 
+### C-5 quick_plan adopt-failure posture (parent ruling D5, 2026-11-25)
+
+    // AdoptTask transient failure at dispatch: dispatcher retries once; on
+    // second failure records SynthesisError on the row ("adopt task
+    // failed: <err>") and the row stays approved. The reclaimer's
+    // approved-scan must SKIP approved rows carrying a quick-plan
+    // SynthesisError (never re-drive them through Synthesize: the
+    // zero-phase guard would falsely complete the brief while the real
+    // task runs). The dispatched task proceeds unchanged — the contract
+    // row is degraded, not the turn. Leaf 02 carries the plan-side guard.
+
 ## Leaves (dispatch order; groups are file-disjoint)
 
 1. 01-plan-machine.md — C-1, C-2 quickplan half. Wave A.
