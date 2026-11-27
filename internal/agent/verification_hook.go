@@ -65,6 +65,15 @@ type VerificationAutoTrigger struct {
 	publishEvent EventPublisher
 	// agentIDSource supplies the agent id for bus payloads; nil → "".
 	agentIDSource AgentIDSource
+
+	// --- L6 verdict-emission seams (set at the loop wiring site; nil =
+	// the hook stays non-emitting, byte-identical to the pre-L6 posture) ---
+	// verdicts publishes the adversarial PASS/FAIL/PARTIAL verdict onto
+	// the collector's step.review_completed lane.
+	verdicts ReviewVerdictPublisher
+	// taskIDSource supplies the parent task id when the loop runs a task
+	// turn (currentTaskID); nil → "" (the row rides trace/step only).
+	taskIDSource func() string
 }
 
 // NewVerificationAutoTrigger wires a tracker and verification config into a
@@ -133,6 +142,115 @@ func (h *VerificationAutoTrigger) SetEventPublisher(publish EventPublisher) {
 func (h *VerificationAutoTrigger) SetAgentIDSource(source AgentIDSource) {
 	if h != nil && source != nil {
 		h.agentIDSource = source
+	}
+}
+
+// SetReviewVerdictEmitter attaches the L6 verdict-emission seam (the
+// daemon's ReviewManager, propagated registry -> loops -> hook).
+// Nil/typed-nil is a no-op per repo setter rules; unset means parsed
+// adversarial verdicts stay unpublished (byte-identical pre-L6).
+func (h *VerificationAutoTrigger) SetReviewVerdictEmitter(pub ReviewVerdictPublisher) {
+	if h != nil && pub != nil {
+		h.verdicts = pub
+	}
+}
+
+// SetTaskIDSource attaches the loop seam supplying the parent task id for
+// emitted verdict payloads (AgentLoop.currentTaskID under its mutex).
+// Nil/typed-nil is a no-op; unset emits task_id "".
+func (h *VerificationAutoTrigger) SetTaskIDSource(source func() string) {
+	if h != nil && source != nil {
+		h.taskIDSource = source
+	}
+}
+
+// adversarialJudgeAgentID is the stable identity of the ephemeral verifier
+// subloop on the verdict lane. It is NOT a registry agent (SpawnVerifier
+// builds a throwaway child loop), so the judge-agent id names the role
+// rather than pretending a registry agent graded the work; the judge
+// MODEL is the real serving ref, carried separately.
+const adversarialJudgeAgentID = "adversarial-verifier"
+
+// emitAdversarialVerdict publishes one parsed adversarial verdict to the
+// collector lane (L6). Identities reflect the ACTUAL judging context:
+// judge = the ephemeral verifier (agent role id + the real verifier model
+// ref passed to SpawnVerifier), reviewed = the executing agent's loop
+// (agent id from the loop seam, model ref from the turn state, blame
+// join through the step-job trace when the ctx carries one). Unknown
+// verdicts never emit (nothing was graded). A FAIL inside the fix budget
+// is non-final — the fix loop's re-verification supersedes it (L7
+// final-only rollups must not double-count); PASS/PARTIAL and an
+// exhausted-fix FAIL are final for the hook lane.
+func (h *VerificationAutoTrigger) emitAdversarialVerdict(ctx context.Context, state TurnState, verdict Verdict, checks []CheckResult, verifierModelRef string, failTerminal bool) {
+	if h == nil || h.verdicts == nil {
+		return
+	}
+	if verdict != VerdictPass && verdict != VerdictPartial && verdict != VerdictFail {
+		return // VerdictUnknown grades nothing — honesty over invented rows.
+	}
+	var agentID string
+	if h.agentIDSource != nil {
+		agentID = h.agentIDSource()
+	}
+	var taskID string
+	if h.taskIDSource != nil {
+		taskID = h.taskIDSource()
+	}
+	// The step-job lane stamps "stp-"+stepID on the turn ctx
+	// (stepJobTraceContext); recover the step id from it so the row
+	// binds to the step the way the step-review lane's rows do. An
+	// interactive turn's trace is NOT step-scoped — keep it on the
+	// payload's trace_id only (never a fabricated step binding).
+	trace := TraceIDFromContext(ctx)
+	stepID := ""
+	if strings.HasPrefix(trace, "stp-") {
+		stepID = strings.TrimPrefix(trace, "stp-")
+	}
+	var status ReviewStatus
+	switch verdict {
+	case VerdictPass:
+		status = ReviewApproved
+	case VerdictPartial:
+		status = ReviewApproved // pass-with-warning: defect rows, no pass row
+	default:
+		status = ReviewRejected
+	}
+	result := &ReviewResult{
+		Status:     status,
+		Feedback:   fmt.Sprintf("adversarial verification verdict: %s (%d checks)", verdict, len(checks)),
+		Confidence: adversarialVerdictConfidence(verdict, checks),
+		ReviewerID: adversarialJudgeAgentID,
+		Verdicts:   adversarialReviewVerdicts(verdict, checks, adversarialVerdictConfidence(verdict, checks)),
+	}
+	h.verdicts.PublishReviewVerdictFromProducer(stepID, taskID, result, 0, ReviewVerdictSource{
+		Source:          ReviewSourceVerificationHook,
+		ReviewedAgentID: agentID,
+		ReviewedModelID: state.ModelRef,
+		JudgeModelID:    verifierModelRef,
+		TraceID:         trace,
+		NonFinal:        verdict == VerdictFail && !failTerminal,
+	})
+}
+
+// adversarialVerdictConfidence derives the row confidence: the share of
+// executed checks that agreed with the verdict (a PASS with 5/5 checks
+// is 1.0; a PARTIAL with 1 of 5 failing is 0.8). No checks parsed =>
+// 0.5 — the verdict line alone is weaker evidence than a check matrix.
+func adversarialVerdictConfidence(verdict Verdict, checks []CheckResult) float64 {
+	if len(checks) == 0 {
+		return 0.5
+	}
+	failed := 0
+	for _, c := range checks {
+		if !c.Passed {
+			failed++
+		}
+	}
+	switch verdict {
+	case VerdictPass:
+		return float64(len(checks)-failed) / float64(len(checks))
+	default: // FAIL / PARTIAL: the failed share backs the defect row
+		return float64(failed) / float64(len(checks))
 	}
 }
 
@@ -211,14 +329,26 @@ func (h *VerificationAutoTrigger) PrepareNextTurn(ctx context.Context, state Tur
 	case VerdictPass:
 		slog.Info("verification passed", "checks", len(checks))
 		h.fixCount = 0
+		h.emitAdversarialVerdict(ctx, state, verdict, checks, modelRef, false)
 		return TurnModification{} // continue normally
 
 	case VerdictPartial:
 		slog.Info("verification partial", "checks", len(checks))
 		h.fixCount = 0
+		h.emitAdversarialVerdict(ctx, state, verdict, checks, modelRef, false)
 		return TurnModification{} // treat as pass with warning
 
 	case VerdictFail:
+		// L6: emit BEFORE handleFail mutates fixCount, computing the
+		// terminal flag from the SAME budget handleFail applies, so the
+		// row's finality matches whether the fix loop consumes it
+		// (non-final, superseded by the re-verify) or exhausts on it
+		// (final).
+		maxLoops := h.config.MaxFixLoops
+		if maxLoops < 1 {
+			maxLoops = 3
+		}
+		h.emitAdversarialVerdict(ctx, state, verdict, checks, modelRef, h.fixCount+1 > maxLoops)
 		return h.handleFail(result, checks)
 
 	default: // VerdictUnknown

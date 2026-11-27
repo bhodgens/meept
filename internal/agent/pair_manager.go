@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/modelrating"
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/pkg/id"
 	"github.com/caimlas/meept/pkg/models"
@@ -37,6 +38,12 @@ type PairManager struct {
 	stepStore *task.StepStore
 	bus       *bus.MessageBus
 	logger    *slog.Logger
+
+	// verdicts is the L6 emission seam (nil = non-emitting, the pre-L6
+	// posture): set via SetReviewVerdictEmitter at daemon wiring so every
+	// parsed round review publishes its verdict row to the collector
+	// lane. See review_verdicts_producers.go.
+	verdicts ReviewVerdictPublisher
 }
 
 // PairManagerConfig holds configuration for creating a PairManager.
@@ -62,6 +69,76 @@ func NewPairManager(cfg PairManagerConfig) *PairManager {
 		bus:       cfg.Bus,
 		logger:    cfg.Logger,
 	}
+}
+
+// SetReviewVerdictEmitter attaches the L6 verdict-emission seam (the
+// daemon wires the ReviewManager). Nil/typed-nil is a no-op per the repo
+// setter convention; unset means pair rounds stay non-emitting, exactly
+// the pre-L6 behavior.
+func (pm *PairManager) SetReviewVerdictEmitter(pub ReviewVerdictPublisher) {
+	if pm == nil || pub == nil {
+		return
+	}
+	pm.mu.Lock()
+	pm.verdicts = pub
+	pm.mu.Unlock()
+}
+
+// reviewVerdictEmitter is the getter snapshot (no I/O under the write
+// lock; the publish happens outside any lock).
+func (pm *PairManager) reviewVerdictEmitter() ReviewVerdictPublisher {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+	return pm.verdicts
+}
+
+// emitRoundVerdict publishes one pair round's review verdict to the
+// collector lane (L6). The judging context is the PAIR REVIEWER, not the
+// step reviewer: reviewer agent -> judge ids, actor agent -> reviewed
+// side. The round's step binding gives the payload a real step id (the
+// planner's planPairSession registers the actor step first, so
+// StepIDs[0] is the actor step; sessions created without steps emit
+// under the task only). Non-terminal rounds (more rounds expected) mark
+// is_final=false so the L7 final-only rollups never double-count a
+// step's superseded rounds.
+func (pm *PairManager) emitRoundVerdict(session *PairSession, result *ReviewResult, round int, terminal bool) {
+	if pm == nil || session == nil || result == nil {
+		return
+	}
+	emitter := pm.reviewVerdictEmitter()
+	if emitter == nil {
+		return
+	}
+	// Lane tag: rejected rounds carry the pair-review defect verdict,
+	// approved rounds lean on passVerdictFor's pass row. The verdicts
+	// ride a COPY of the result so the recorded attempt stays exactly as
+	// the reviewer produced it (pairReviewVerdicts is nil for approved
+	// rounds, where the copy is a no-op shape-wise).
+	emitted := *result
+	emitted.Verdicts = append(append([]modelrating.Verdict(nil), result.Verdicts...), pairReviewVerdicts(result)...)
+	stepID := ""
+	if len(session.StepIDs) > 0 {
+		stepID = session.StepIDs[0]
+	}
+	src := ReviewVerdictSource{
+		Source:          ReviewSourcePair,
+		ReviewedAgentID: session.ActorAgentID,
+		JudgeAgentID:    session.ReviewerAgentID,
+		NonFinal:        !terminal,
+	}
+	// The judge model for the pair lane is the reviewer agent's own
+	// model binding; resolve through the registry the manager holds.
+	if pm.registry != nil && session.ReviewerAgentID != "" {
+		if spec, ok := pm.registry.GetSpec(session.ReviewerAgentID); ok {
+			src.JudgeModelID = modelRefForAgent(spec, pm.registry.resolver)
+		}
+	}
+	if pm.registry != nil && session.ActorAgentID != "" {
+		if spec, ok := pm.registry.GetSpec(session.ActorAgentID); ok {
+			src.ReviewedModelID = modelRefForAgent(spec, pm.registry.resolver)
+		}
+	}
+	emitter.PublishReviewVerdictFromProducer(stepID, session.TaskID, &emitted, round, src)
 }
 
 // CreateSession creates a new pair session for a task and registers it.
@@ -240,6 +317,9 @@ func (pm *PairManager) RunRound(ctx context.Context, sessionID string) (*Attempt
 	// Check convergence
 	if session.Context.HasConverged() {
 		session.MarkConverged()
+		// L6: the converging round is the step's final review pass —
+		// emit the verdict row with final semantics.
+		pm.emitRoundVerdict(session, reviewResult, round, true)
 		pm.publishEvent("pair.converged", map[string]any{
 			"session_id": sessionID,
 			KeyTaskID:    session.TaskID,
@@ -252,6 +332,9 @@ func (pm *PairManager) RunRound(ctx context.Context, sessionID string) (*Attempt
 	// Check exhaustion
 	if session.IsExhausted() {
 		session.MarkExhausted()
+		// L6: the exhausted round is the last review this session will
+		// ever run for the step — final semantics apply.
+		pm.emitRoundVerdict(session, reviewResult, round, true)
 		pm.publishEvent("pair.exhausted", map[string]any{
 			"session_id": sessionID,
 			KeyTaskID:    session.TaskID,
@@ -263,6 +346,10 @@ func (pm *PairManager) RunRound(ctx context.Context, sessionID string) (*Attempt
 	}
 
 	// Round completed but more rounds needed
+	// L6: emit the round's verdict with non-final semantics — a later
+	// round supersedes it, so the L7 final-only rollups ignore it while
+	// the raw per-step read keeps full fidelity.
+	pm.emitRoundVerdict(session, reviewResult, round, false)
 	pm.publishEvent("pair.round_completed", map[string]any{
 		"session_id":        sessionID,
 		KeyTaskID:           session.TaskID,

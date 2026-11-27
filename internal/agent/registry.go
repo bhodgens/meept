@@ -139,6 +139,13 @@ type AgentRegistry struct {
 	usageTracker     lifecycleUsageTracker
 	learningPipeline LearningPipeline
 
+	// reviewVerdicts is the L6 emission seam (nil = not wired): registry-
+	// created loops hand it to the adversarial verification hook so the
+	// hook's PASS/FAIL/PARTIAL verdicts publish as model_review_verdicts
+	// rows. Set via SetReviewVerdictEmitter after construction (the
+	// ReviewManager is composed after the registry in daemon boot).
+	reviewVerdicts ReviewVerdictPublisher
+
 	// db is the SQLite connection for queue persistence (may be nil).
 	db *sql.DB
 
@@ -943,6 +950,13 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
 	if r.traceWriter != nil {
 		opts = append(opts, WithTraceWriter(r.traceWriter))
 	}
+	// L6 (audit ruling 2026-11-27): registry-built loops inherit the
+	// review-verdict emitter so the adversarial verification hook's
+	// PASS/FAIL/PARTIAL verdicts publish to the collector lane. Nil =
+	// the hook stays non-emitting (byte-identical pre-L6 behavior).
+	if r.reviewVerdicts != nil {
+		opts = append(opts, WithReviewVerdictEmitter(r.reviewVerdicts))
+	}
 	if r.usageTracker != nil {
 		opts = append(opts, WithUsageTracker(r.usageTracker))
 	}
@@ -1412,6 +1426,21 @@ func (r *AgentRegistry) SetUsageTracker(ut lifecycleUsageTracker) {
 	}
 	r.mu.Lock()
 	r.usageTracker = ut
+	r.mu.Unlock()
+}
+
+// SetReviewVerdictEmitter wires the L6 verdict-emission seam into every
+// loop this registry creates (daemon calls it after composing the
+// ReviewManager, which is built later in boot than the registry). The
+// loops hand it to their adversarial verification hook, so SpawnVerifier
+// PASS/FAIL/PARTIAL verdicts publish to the collector's review lane.
+// Nil is a no-op; unset = the hook stays non-emitting.
+func (r *AgentRegistry) SetReviewVerdictEmitter(pub ReviewVerdictPublisher) {
+	if pub == nil {
+		return
+	}
+	r.mu.Lock()
+	r.reviewVerdicts = pub
 	r.mu.Unlock()
 }
 

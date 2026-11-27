@@ -1073,10 +1073,11 @@ func (rm *ReviewManager) agentModelRefForSpec(agentID string) string {
 //	judge_agent_id       result.ReviewerID (the grading agent)
 //	judge_model_id       the judge's model ref via modelRefForAgent
 //	orchestrator_*       the task's AssignedAgent + its model ref
-func (rm *ReviewManager) reviewEmitterIdentities(stepID, taskID, judgeAgentID string) (reviewedModelID, judgeModelID, orchestratorAgentID, orchestratorModelID string) {
+func (rm *ReviewManager) reviewEmitterIdentities(stepID, taskID, judgeAgentID string) (reviewedModelID, judgeModelID, orchestratorAgentID, orchestratorModelID, stepAgentID string) {
 	// Reviewed actor: the step's AgentID (the implementer being graded).
 	if rm.stepStore != nil && stepID != "" {
 		if step, err := rm.stepStore.GetByID(stepID); err == nil && step != nil {
+			stepAgentID = step.AgentID
 			reviewedModelID = rm.agentModelRefForSpec(step.AgentID)
 		}
 	}
@@ -1087,7 +1088,7 @@ func (rm *ReviewManager) reviewEmitterIdentities(stepID, taskID, judgeAgentID st
 			orchestratorModelID = rm.agentModelRefForSpec(t.AssignedAgent)
 		}
 	}
-	return reviewedModelID, judgeModelID, orchestratorAgentID, orchestratorModelID
+	return reviewedModelID, judgeModelID, orchestratorAgentID, orchestratorModelID, stepAgentID
 }
 
 // enrichedReviewPayload builds the C4 payload map shared by BOTH review
@@ -1104,37 +1105,152 @@ func (rm *ReviewManager) reviewEmitterIdentities(stepID, taskID, judgeAgentID st
 // stamped rows: legacy steps, metrics store unavailable/nil). The trace id
 // itself is always stamped on the payload verbatim, join hit or not.
 func (rm *ReviewManager) enrichedReviewPayload(stepID, taskID string, result *ReviewResult, revisionCount int) map[string]any {
-	isFinal := result.Status != ReviewNeedsInfo
-	reviewedModelID, judgeModelID, orchestratorAgentID, orchestratorModelID := rm.reviewEmitterIdentities(stepID, taskID, result.ReviewerID)
+	return rm.enrichedReviewPayloadWithSource(stepID, taskID, result, revisionCount, "", ReviewVerdictSource{})
+}
+
+// PublishReviewVerdict is the L6 emission seam for the non-step review
+// producers (pair_manager's actor→reviewer rounds and the adversarial
+// verification hook). It is a thin, nil-safe wrapper over
+// publishReviewEvent: the verdict rows land on the SAME
+// step.review_completed/task.review_completed lane the metrics collector
+// consumes. Producers must attach their own lane-tagged verdicts
+// (rubric_id distinguishes the lane — see pairReviewVerdicts /
+// adversarialReviewVerdicts) and set result.ReviewerID to the ACTUAL
+// judging agent, never the step reviewer.
+func (rm *ReviewManager) PublishReviewVerdict(stepID, taskID string, result *ReviewResult, revisionCount int) {
+	if rm == nil || result == nil {
+		if rm != nil {
+			rm.logger.Debug("PublishReviewVerdict skipped: nil review result",
+				"step_id", stepID, "task_id", taskID)
+		}
+		return
+	}
+	rm.publishReviewEvent(stepID, taskID, result, revisionCount)
+}
+
+// ReviewVerdictSource carries a producer lane's identities and payload
+// tags for PublishReviewVerdictFromProducer. Every field is a
+// fill-only-when-empty overlay on top of what enrichedReviewPayload
+// derives from the stores, so a producer that knows the real judging
+// context (e.g. the adversarial hook, which has no step row) never
+// mislabels it, and a producer with a real step row keeps the
+// store-derived values (blame join wins).
+type ReviewVerdictSource struct {
+	// Source names the producer lane for the "review_source" payload key
+	// ("pair-review", "verification-hook"). Empty = the step-review lane.
+	Source string
+	// ReviewedAgentID is the EXECUTING agent being graded (threaded into
+	// the payload as "reviewed_agent_id" for the L6 model x agent
+	// dimension).
+	ReviewedAgentID string
+	// ReviewedModelID / JudgeModelID fill the identity fields when the
+	// store-derived resolution yields "" (no step row, verifier child
+	// with no spec). They never override a derived value.
+	ReviewedModelID string
+	JudgeModelID    string
+	// JudgeAgentID overrides the judge when the producer's judge is not
+	// result.ReviewerID (never set by the step lane).
+	JudgeAgentID string
+	// TraceID supplies the trace stamp for lanes without a
+	// "stp-"+stepID relationship the builder can derive (the hook reads
+	// the loop's turn ctx trace). Only used when stepID is empty.
+	TraceID string
+	// NonFinal forces is_final=false: this emission is a review round a
+	// later cycle is expected to supersede (a continuing pair round, an
+	// adversarial FAIL awaiting its fix re-check). The L7 rollups count
+	// final rows only (bughunt 2026-11-24 c8d3f868 posture), so marking
+	// a superseded round final would inflate a model's defect totals
+	// exactly like the needs-info shape did.
+	NonFinal bool
+}
+
+// PublishReviewVerdictFromProducer publishes one producer-lane review
+// verdict emission with explicit identities (L6). Nil-safe and logged.
+func (rm *ReviewManager) PublishReviewVerdictFromProducer(stepID, taskID string, result *ReviewResult, revisionCount int, src ReviewVerdictSource) {
+	if rm == nil || result == nil {
+		if rm != nil {
+			rm.logger.Debug("PublishReviewVerdictFromProducer skipped: nil review result",
+				"step_id", stepID, "task_id", taskID, "source", src.Source)
+		}
+		return
+	}
+	if src.Source == "" {
+		src.Source = "review-producer"
+	}
+	rm.logger.Info("Publishing producer review verdict",
+		"step_id", stepID,
+		"task_id", taskID,
+		"source", src.Source,
+		"status", string(result.Status),
+		"verdicts", len(result.Verdicts),
+	)
+	payload := rm.enrichedReviewPayloadWithSource(stepID, taskID, result, revisionCount, src.Source, src)
+	rm.publishReviewPayload(payload)
+}
+
+// enrichedReviewPayloadWithSource is the single payload builder for every
+// emitting review producer (L6). source names the producer lane for the
+// "review_source" payload key ("" = the step-review lane) and src overlays
+// the identity fields; unknown payload keys are ignored by existing
+// consumers, so both keys are additive.
+func (rm *ReviewManager) enrichedReviewPayloadWithSource(stepID, taskID string, result *ReviewResult, revisionCount int, source string, src ReviewVerdictSource) map[string]any {
+	// L7 posture (bughunt 2026-11-24): needs_info is never terminal and
+	// producer rounds explicitly marked NonFinal are superseded by a
+	// later cycle — neither may be counted as final by the rollups.
+	isFinal := result.Status != ReviewNeedsInfo && !src.NonFinal
+	reviewedModelID, judgeModelID, orchestratorAgentID, orchestratorModelID, stepAgentID := rm.reviewEmitterIdentities(stepID, taskID, result.ReviewerID)
+	// L6 agent dimension: the EXECUTING agent of the graded work. The
+	// step lane takes it from the step row the identity gather already
+	// read; producer lanes that have no step row (pair sessions built
+	// outside the step store) supply it on the overlay. Never guessed.
+	reviewedAgentID := stepAgentID
+	if reviewedAgentID == "" {
+		reviewedAgentID = src.ReviewedAgentID
+	}
+	// Fill-only-when-empty overlays: a producer that knows the real
+	// judging context supplies ids the store lookup cannot resolve (no
+	// registry spec for an ephemeral verifier child); a derived value
+	// always wins so the step lane never lets a caller mislabel it.
+	if reviewedModelID == "" {
+		reviewedModelID = src.ReviewedModelID
+	}
+	if judgeModelID == "" {
+		judgeModelID = src.JudgeModelID
+	}
+	judgeAgentID := result.ReviewerID
+	if src.JudgeAgentID != "" {
+		judgeAgentID = src.JudgeAgentID
+	}
 	// C3: the step-scoped trace id mirrors the stamp the implementer's
 	// calls ran under. An empty step id keeps "" (never a bare "stp-"
-	// sentinel — the tracectx guard's shape).
+	// sentinel — the tracectx guard's shape), unless the producer lane
+	// carries its own turn trace on the overlay.
 	stepTraceID := ""
 	if stepID != "" {
 		stepTraceID = "stp-" + stepID
-		// Blame rule: the implementer's FINAL SUCCESSFUL row for
-		// (stepTraceID, step.AgentID). Join miss ("" result, store error,
-		// or no store) keeps the configured model ref from
-		// reviewEmitterIdentities — a fallback, never a replacement.
-		if rm.metricsStore != nil {
-			var stepAgentID string
-			if rm.stepStore != nil {
-				if step, err := rm.stepStore.GetByID(stepID); err == nil && step != nil {
-					stepAgentID = step.AgentID
-				}
-			}
-			if stepAgentID != "" {
-				if resolved, err := rm.metricsStore.ResolveReviewedModel(stepTraceID, stepAgentID); err == nil && resolved != "" {
-					reviewedModelID = resolved
-				} else if err != nil {
-					rm.logger.Debug("blame join failed; keeping configured model ref",
-						"step_id", stepID,
-						"trace_id", stepTraceID,
-						"agent_id", stepAgentID,
-						"error", err,
-					)
-				}
-			}
+	} else if src.TraceID != "" {
+		stepTraceID = src.TraceID
+	}
+	// Blame rule: the implementer's FINAL SUCCESSFUL row for
+	// (traceID, agent). The step lane uses the step row's agent;
+	// producer lanes join on their overlay agent when no step row
+	// exists. Join miss ("" result, store error, or no store) keeps the
+	// configured model ref from reviewEmitterIdentities — a fallback,
+	// never a replacement.
+	joinAgentID := stepAgentID
+	if joinAgentID == "" {
+		joinAgentID = src.ReviewedAgentID
+	}
+	if stepTraceID != "" && rm.metricsStore != nil && joinAgentID != "" {
+		if resolved, err := rm.metricsStore.ResolveReviewedModel(stepTraceID, joinAgentID); err == nil && resolved != "" {
+			reviewedModelID = resolved
+		} else if err != nil {
+			rm.logger.Debug("blame join failed; keeping configured model ref",
+				"step_id", stepID,
+				"trace_id", stepTraceID,
+				"agent_id", joinAgentID,
+				"error", err,
+			)
 		}
 	}
 	return map[string]any{
@@ -1143,30 +1259,39 @@ func (rm *ReviewManager) enrichedReviewPayload(stepID, taskID string, result *Re
 		"status":                string(result.Status),
 		"feedback":              result.Feedback,
 		"confidence":            result.Confidence,
-		"reviewer":              result.ReviewerID,
+		"reviewer":              judgeAgentID,
 		"revision_count":        revisionCount,
 		"verdicts":              verdictsToWire(append(result.Verdicts, passVerdictFor(result)...)),
 		"reviewed_model_id":     reviewedModelID,
-		"judge_agent_id":        result.ReviewerID,
+		"reviewed_agent_id":     reviewedAgentID,
+		"judge_agent_id":        judgeAgentID,
 		"judge_model_id":        judgeModelID,
 		"orchestrator_agent_id": orchestratorAgentID,
 		"orchestrator_model_id": orchestratorModelID,
 		"trace_id":              stepTraceID,
 		"cycle":                 revisionCount,
 		"is_final":              isFinal,
+		// L6 producer-lane tag (additive; unknown keys are ignored by the
+		// existing consumers — collector, TUI, ChatHandler).
+		"review_source": source,
 	}
 }
 
 // publishReviewEvent publishes a review completion event.
 func (rm *ReviewManager) publishReviewEvent(stepID, taskID string, result *ReviewResult, revisionCount int) {
-	if rm.bus == nil {
-		return
-	}
-
 	// ONE construction site: both topics carry the identical enriched
 	// payload (C4). The task.* twin exists for subscribers (TUI,
 	// ChatHandler) that listen on task.* but not step.*.
-	payload := rm.enrichedReviewPayload(stepID, taskID, result, revisionCount)
+	rm.publishReviewPayload(rm.enrichedReviewPayload(stepID, taskID, result, revisionCount))
+}
+
+// publishReviewPayload sends one already-enriched review payload on both
+// review topics (the step lane's C4 twin-subscription contract, reused by
+// the L6 producer lanes).
+func (rm *ReviewManager) publishReviewPayload(payload map[string]any) {
+	if rm.bus == nil {
+		return
+	}
 
 	msg, err := models.NewBusMessage(models.MessageTypeEvent, "review-manager", payload)
 	if err != nil {

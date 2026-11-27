@@ -4806,6 +4806,15 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// keeps the configured model ref (fallback-only posture).
 			reviewManager.SetMetricsStore(c.MetricsStore)
 
+			// L6 (owner ruling 2026-11-27): the non-step review producers
+			// publish their verdicts through the same collector lane as
+			// the step review. The registry seam propagates to every
+			// loop's adversarial verification hook; the strategic pair
+			// manager emits its round reviews (collabPairMgr is wired at
+			// its own construction site below).
+			strategicPairMgr.SetReviewVerdictEmitter(reviewManager)
+			c.AgentRegistry.SetReviewVerdictEmitter(reviewManager)
+
 			// Create escalation manager for automatic re-planning on failures
 			c.EscalationManager = agent.NewEscalationManager(agent.EscalationManagerConfig{
 				Config:    agent.DefaultEscalationConfig(),
@@ -4945,6 +4954,8 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				Bus:       msgBus,
 				Logger:    logger.With("component", "collab-pair-manager"),
 			})
+			// L6: collab pair rounds emit verdicts like the strategic lane.
+			collabPairMgr.SetReviewVerdictEmitter(reviewManager)
 
 			collabWorkspace := agent.NewWorkspaceManager(agent.DefaultWorkspaceConfig(), logger.With("component", "collab-workspace"))
 

@@ -789,6 +789,11 @@ type AgentLoop struct {
 
 	// Skill usage tracker for closed-loop skill evolution.
 	usageTracker lifecycleUsageTracker
+	// reviewVerdicts is the L6 emission seam handed to the adversarial
+	// verification hook at registration (nil = the hook stays
+	// non-emitting). Registry-created loops inherit it via
+	// WithReviewVerdictEmitter.
+	reviewVerdicts ReviewVerdictPublisher
 	// traceWriter persists an immutable trace for every learning-eligible
 	// turn (success AND failure) via the TraceWriter hook (WikiSkill raw
 	// layer). Nil when unset; guarded by mu (set via WithTraceWriter).
@@ -1697,6 +1702,17 @@ func WithUsageTracker(ut lifecycleUsageTracker) LoopOption {
 	return func(l *AgentLoop) {
 		if ut != nil {
 			l.usageTracker = ut
+		}
+	}
+}
+
+// WithReviewVerdictEmitter sets the L6 adversarial-verdict emission seam
+// for the verification hook this loop registers (nil guard per setter
+// convention: a typed-nil publisher leaves the hook non-emitting).
+func WithReviewVerdictEmitter(pub ReviewVerdictPublisher) LoopOption {
+	return func(l *AgentLoop) {
+		if pub != nil {
+			l.reviewVerdicts = pub
 		}
 	}
 }
@@ -3375,6 +3391,18 @@ func NewAgentLoop(sessionID string, workingDir string, opts ...LoopOption) *Agen
 				})
 			}
 			trigger.SetAgentIDSource(func() string { return loop.agentID })
+			// L6: adversarial verdicts publish to the collector lane via
+			// the registry-propagated ReviewManager seam (nil = stays
+			// non-emitting). Task id comes from the loop's mutex-guarded
+			// current task.
+			if loop.reviewVerdicts != nil {
+				trigger.SetReviewVerdictEmitter(loop.reviewVerdicts)
+				trigger.SetTaskIDSource(func() string {
+					loop.mu.RLock()
+					defer loop.mu.RUnlock()
+					return loop.currentTaskID
+				})
+			}
 			loop.hookRegistry.RegisterPrepareNextTurn("verification_auto_trigger", HookPriorityNormal, trigger)
 		}
 	}
