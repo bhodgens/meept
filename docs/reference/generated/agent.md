@@ -65,6 +65,7 @@ Package agent provides the agent loop and related components.
 - [func CanonicalToolName\(name string\) string](<#CanonicalToolName>)
 - [func ChatTurnIDFromContext\(ctx context.Context\) string](<#ChatTurnIDFromContext>)
 - [func ClearPerOperationBackoffOverrideForTest\(key string\)](<#ClearPerOperationBackoffOverrideForTest>)
+- [func ComposeSessionFence\(base \*security.PermissionChecker, factory func\(rootPath string, noFence bool\) security.FenceStage, rootPath string, noFence bool, res \*groups.Resolved\) \*security.PermissionChecker](<#ComposeSessionFence>)
 - [func ContextWithToolRegistry\(ctx context.Context, reg ToolRegistry\) context.Context](<#ContextWithToolRegistry>)
 - [func ContinuationDescription\(desc string, k, n int\) string](<#ContinuationDescription>)
 - [func CosineSimilarity\(a, b \[\]float64\) float64](<#CosineSimilarity>)
@@ -97,11 +98,11 @@ Package agent provides the agent loop and related components.
 - [func LoadSoul\(path string\) \(string, error\)](<#LoadSoul>)
 - [func MarshalChildDescriptor\(d ChildDescriptor\) \(\[\]byte, error\)](<#MarshalChildDescriptor>)
 - [func MarshalTurnResult\(envelope any\) \[\]byte](<#MarshalTurnResult>)
+- [func NewSessionFenceStage\(rootPath string, allowRead \[\]string, noFence bool, logger \*slog.Logger\) security.FenceStage](<#NewSessionFenceStage>)
 - [func NewSkillRankingEmbedder\(baseURL, model string, timeout time.Duration\) skills.Embedder](<#NewSkillRankingEmbedder>)
 - [func PairTopic\(sessionID string\) string](<#PairTopic>)
 - [func ParseVerdict\(output string\) \(Verdict, \[\]CheckResult\)](<#ParseVerdict>)
 - [func PhaseSpecsToPlan\(in \[\]PlanPhaseSpec\) \*plan.CompiledPlan](<#PhaseSpecsToPlan>)
-- [func PlanAutoSealFromIntent\(input string\) bool](<#PlanAutoSealFromIntent>)
 - [func PlanCriticSpawnVerifierCalls\(\) int](<#PlanCriticSpawnVerifierCalls>)
 - [func PresetPrompt\(presetName string, taskDescription string\) \(string, error\)](<#PresetPrompt>)
 - [func PublishLaneAgentIndex\(idx map\[string\]string\)](<#PublishLaneAgentIndex>)
@@ -288,6 +289,7 @@ Package agent provides the agent loop and related components.
   - [func \(l \*AgentLoop\) SetPiiRestoreHook\(hook \*PiiRestoreHook\)](<#AgentLoop.SetPiiRestoreHook>)
   - [func \(l \*AgentLoop\) SetPrefetchCallback\(callback func\(query string, maxItems int\)\)](<#AgentLoop.SetPrefetchCallback>)
   - [func \(l \*AgentLoop\) SetProjectID\(pid string\)](<#AgentLoop.SetProjectID>)
+  - [func \(l \*AgentLoop\) SetPromptSectionRecorder\(rec TurnMetricRecorder\)](<#AgentLoop.SetPromptSectionRecorder>)
   - [func \(l \*AgentLoop\) SetReasoningForNextTurn\(effort string\)](<#AgentLoop.SetReasoningForNextTurn>)
   - [func \(l \*AgentLoop\) SetReasoningOverride\(rc \*llm.ReasoningConfig\)](<#AgentLoop.SetReasoningOverride>)
   - [func \(l \*AgentLoop\) SetRepoMapGenerator\(gen \*repomap.RepoMapGenerator\)](<#AgentLoop.SetRepoMapGenerator>)
@@ -361,6 +363,7 @@ Package agent provides the agent loop and related components.
   - [func \(r \*AgentRegistry\) SetGlobalRules\(rules string\)](<#AgentRegistry.SetGlobalRules>)
   - [func \(r \*AgentRegistry\) SetLearningPipeline\(lp LearningPipeline\)](<#AgentRegistry.SetLearningPipeline>)
   - [func \(r \*AgentRegistry\) SetPiiRestoreHook\(hook \*PiiRestoreHook\)](<#AgentRegistry.SetPiiRestoreHook>)
+  - [func \(r \*AgentRegistry\) SetReviewVerdictEmitter\(pub ReviewVerdictPublisher\)](<#AgentRegistry.SetReviewVerdictEmitter>)
   - [func \(r \*AgentRegistry\) SetSchemaModeConfig\(cfg config.AgentToolsConfig\)](<#AgentRegistry.SetSchemaModeConfig>)
   - [func \(r \*AgentRegistry\) SetSkillLoader\(loader \*skills.LazySkillLoader\)](<#AgentRegistry.SetSkillLoader>)
   - [func \(r \*AgentRegistry\) SetTTSRManager\(mgr \*TTSRManager\)](<#AgentRegistry.SetTTSRManager>)
@@ -1121,6 +1124,7 @@ Package agent provides the agent loop and related components.
   - [func WithPrefetchCallback\(callback func\(query string, maxItems int\)\) LoopOption](<#WithPrefetchCallback>)
   - [func WithProgressEnabled\(enabled bool\) LoopOption](<#WithProgressEnabled>)
   - [func WithProjectID\(pid string\) LoopOption](<#WithProjectID>)
+  - [func WithPromptSectionRecorder\(rec TurnMetricRecorder\) LoopOption](<#WithPromptSectionRecorder>)
   - [func WithQuotaTracker\(tracker \*QuotaEpisodeTracker\) LoopOption](<#WithQuotaTracker>)
   - [func WithReflectionCollector\(rc \*ReflectionCollector\) LoopOption](<#WithReflectionCollector>)
   - [func WithRepeatErrorBudget\(n int\) LoopOption](<#WithRepeatErrorBudget>)
@@ -1128,6 +1132,7 @@ Package agent provides the agent loop and related components.
   - [func WithResolver\(resolver \*llm.Resolver\) LoopOption](<#WithResolver>)
   - [func WithResponseAnalyzer\(ra \*metrics.ResponseAnalyzer\) LoopOption](<#WithResponseAnalyzer>)
   - [func WithResultCache\(cache \*ResultCache\) LoopOption](<#WithResultCache>)
+  - [func WithReviewVerdictEmitter\(pub ReviewVerdictPublisher\) LoopOption](<#WithReviewVerdictEmitter>)
   - [func WithSecurityChecker\(checker \*security.PermissionChecker\) LoopOption](<#WithSecurityChecker>)
   - [func WithSecurityOrchestrator\(orch \*intsecurity.Orchestrator\) LoopOption](<#WithSecurityOrchestrator>)
   - [func WithSessionAttached\(attached bool\) LoopOption](<#WithSessionAttached>)
@@ -1158,6 +1163,7 @@ Package agent provides the agent loop and related components.
   - [func \(m \*Manager\) LoopsForTask\(taskID string\) \[\]\*AgentLoop](<#Manager.LoopsForTask>)
   - [func \(m \*Manager\) Remove\(sessionID string\)](<#Manager.Remove>)
   - [func \(m \*Manager\) ResolveProjectPath\(ctx context.Context, projectID string\) string](<#Manager.ResolveProjectPath>)
+  - [func \(m \*Manager\) SetSessionFenceFactory\(factory sessionFenceFactory\)](<#Manager.SetSessionFenceFactory>)
 - [type ManagerConfig](<#ManagerConfig>)
 - [type MatchResult](<#MatchResult>)
 - [type MemberStatus](<#MemberStatus>)
@@ -1257,6 +1263,7 @@ Package agent provides the agent loop and related components.
   - [func \(pm \*PairManager\) RemoveSession\(sessionID string\)](<#PairManager.RemoveSession>)
   - [func \(pm \*PairManager\) RunAllRounds\(ctx context.Context, sessionID string\) \(\*PairSession, error\)](<#PairManager.RunAllRounds>)
   - [func \(pm \*PairManager\) RunRound\(ctx context.Context, sessionID string\) \(\*Attempt, error\)](<#PairManager.RunRound>)
+  - [func \(pm \*PairManager\) SetReviewVerdictEmitter\(pub ReviewVerdictPublisher\)](<#PairManager.SetReviewVerdictEmitter>)
 - [type PairManagerConfig](<#PairManagerConfig>)
 - [type PairOrchestrator](<#PairOrchestrator>)
   - [func NewPairOrchestrator\(deps PairOrchestratorDeps\) \*PairOrchestrator](<#NewPairOrchestrator>)
@@ -1341,6 +1348,7 @@ Package agent provides the agent loop and related components.
   - [func NewPromptBuilder\(\) \*PromptBuilder](<#NewPromptBuilder>)
   - [func NewPromptBuilderFromConfig\(cfg PromptConfig\) \*PromptBuilder](<#NewPromptBuilderFromConfig>)
   - [func \(b \*PromptBuilder\) AddSection\(title, content string\) \*PromptBuilder](<#PromptBuilder.AddSection>)
+  - [func \(b \*PromptBuilder\) AddSectionWithKind\(title, content, kind string\) \*PromptBuilder](<#PromptBuilder.AddSectionWithKind>)
   - [func \(b \*PromptBuilder\) AddSectionWithStability\(title, content string, stable bool\) \*PromptBuilder](<#PromptBuilder.AddSectionWithStability>)
   - [func \(b \*PromptBuilder\) AddTool\(tool ToolDescription\) \*PromptBuilder](<#PromptBuilder.AddTool>)
   - [func \(b \*PromptBuilder\) AddUserPreference\(key, value string\) \*PromptBuilder](<#PromptBuilder.AddUserPreference>)
@@ -1483,6 +1491,9 @@ Package agent provides the agent loop and related components.
   - [func \(t ReflectionTrajectory\) JSON\(\) \(\[\]byte, error\)](<#ReflectionTrajectory.JSON>)
 - [type ReflectionTrajectoryStep](<#ReflectionTrajectoryStep>)
 - [type RegistryConfig](<#RegistryConfig>)
+- [type RelayError](<#RelayError>)
+  - [func \(r \*RelayError\) Error\(\) string](<#RelayError.Error>)
+  - [func \(r \*RelayError\) Unwrap\(\) error](<#RelayError.Unwrap>)
 - [type ReplyFuncSetter](<#ReplyFuncSetter>)
 - [type ReportCapture](<#ReportCapture>)
 - [type ReportRouter](<#ReportRouter>)
@@ -1521,6 +1532,8 @@ Package agent provides the agent loop and related components.
   - [func \(rm \*ReviewManager\) GetPolicy\(\) \*ReviewPolicy](<#ReviewManager.GetPolicy>)
   - [func \(rm \*ReviewManager\) GetValidationPolicy\(\) \*ValidationPolicy](<#ReviewManager.GetValidationPolicy>)
   - [func \(rm \*ReviewManager\) HandleReviewResult\(ctx context.Context, stepID string, result \*ReviewResult, spec \*TaskSpec\) \(\[\]\*task.TaskStep, error\)](<#ReviewManager.HandleReviewResult>)
+  - [func \(rm \*ReviewManager\) PublishReviewVerdict\(stepID, taskID string, result \*ReviewResult, revisionCount int\)](<#ReviewManager.PublishReviewVerdict>)
+  - [func \(rm \*ReviewManager\) PublishReviewVerdictFromProducer\(stepID, taskID string, result \*ReviewResult, revisionCount int, src ReviewVerdictSource\)](<#ReviewManager.PublishReviewVerdictFromProducer>)
   - [func \(rm \*ReviewManager\) ReviewStep\(ctx context.Context, step \*task.TaskStep, spec \*TaskSpec\) \(result \*ReviewResult, err error\)](<#ReviewManager.ReviewStep>)
   - [func \(rm \*ReviewManager\) SetMetricsStore\(store \*metrics.Store\)](<#ReviewManager.SetMetricsStore>)
   - [func \(rm \*ReviewManager\) SetPolicy\(policy \*ReviewPolicy\)](<#ReviewManager.SetPolicy>)
@@ -1538,6 +1551,8 @@ Package agent provides the agent loop and related components.
   - [func \(p \*ReviewPolicy\) ShouldAutoApprove\(step \*task.TaskStep\) bool](<#ReviewPolicy.ShouldAutoApprove>)
 - [type ReviewResult](<#ReviewResult>)
 - [type ReviewStatus](<#ReviewStatus>)
+- [type ReviewVerdictPublisher](<#ReviewVerdictPublisher>)
+- [type ReviewVerdictSource](<#ReviewVerdictSource>)
 - [type RewakePayload](<#RewakePayload>)
 - [type RosterGate](<#RosterGate>)
   - [func NewRosterGate\(cfg RosterGateConfig\) \*RosterGate](<#NewRosterGate>)
@@ -1916,6 +1931,7 @@ Package agent provides the agent loop and related components.
   - [func \(p \*TurnParker\) EmitParkEvent\(rec ParkedTurnRecord, modelID, providerID string\)](<#TurnParker.EmitParkEvent>)
   - [func \(p \*TurnParker\) EmitResumeEvent\(rec ParkedTurnRecord, trueParkAt time.Time\)](<#TurnParker.EmitResumeEvent>)
   - [func \(p \*TurnParker\) HasPendingForConversation\(conversationID string\) bool](<#TurnParker.HasPendingForConversation>)
+  - [func \(p \*TurnParker\) HasPendingForTurn\(turnID, conversationID string\) bool](<#TurnParker.HasPendingForTurn>)
   - [func \(p \*TurnParker\) Next\(class llm.FailureClass\) \(time.Time, bool\)](<#TurnParker.Next>)
   - [func \(p \*TurnParker\) Park\(turn ParkedTurnRecord\) bool](<#TurnParker.Park>)
   - [func \(p \*TurnParker\) Pending\(\) int](<#TurnParker.Pending>)
@@ -1979,7 +1995,9 @@ Package agent provides the agent loop and related components.
   - [func \(h \*VerificationAutoTrigger\) SetEventPublisher\(publish EventPublisher\)](<#VerificationAutoTrigger.SetEventPublisher>)
   - [func \(h \*VerificationAutoTrigger\) SetOverrideApplier\(applier func\(modelRef string\)\)](<#VerificationAutoTrigger.SetOverrideApplier>)
   - [func \(h \*VerificationAutoTrigger\) SetResolver\(resolver ModelResolver\)](<#VerificationAutoTrigger.SetResolver>)
+  - [func \(h \*VerificationAutoTrigger\) SetReviewVerdictEmitter\(pub ReviewVerdictPublisher\)](<#VerificationAutoTrigger.SetReviewVerdictEmitter>)
   - [func \(h \*VerificationAutoTrigger\) SetSpawner\(s VerifierSpawner\)](<#VerificationAutoTrigger.SetSpawner>)
+  - [func \(h \*VerificationAutoTrigger\) SetTaskIDSource\(source func\(\) string\)](<#VerificationAutoTrigger.SetTaskIDSource>)
 - [type VerificationConfig](<#VerificationConfig>)
   - [func DefaultVerificationConfig\(\) VerificationConfig](<#DefaultVerificationConfig>)
   - [func \(v VerificationConfig\) EffectiveModel\(agentModel string\) string](<#VerificationConfig.EffectiveModel>)
@@ -2301,6 +2319,21 @@ DELIVERY CONTRACT: the bus \(internal/bus\) has no latched or buffered topics �
 	    ReportStatusNeedsInput = "needs_input"
 	)
 
+<a name="ReviewSourceStep"></a>Producer\-lane source labels for the payload's "review\_source" key.
+
+	const (
+	    // ReviewSourceStep is the step-review lane (the pre-L6 emitter; its
+	    // payloads carry the empty string for backward byte-compat of
+	    // existing consumers — the label exists for documentation and the
+	    // gate's zero-value assertion).
+	    ReviewSourceStep = ""
+	    // ReviewSourcePair names pair_manager's actor→reviewer rounds.
+	    ReviewSourcePair = "pair-review"
+	    // ReviewSourceVerificationHook names the adversarial verification
+	    // hook's SpawnVerifier verdicts.
+	    ReviewSourceVerificationHook = "verification-hook"
+	)
+
 <a name="ACPTurnsMetric"></a>ACPTurnsMetric is the per\-persona acp turn counter emitted once per completed ACP turn. Tags: agent \(catalog agent id, spec.ACP.Agent\), persona \(spec.ACP.Persona — an empty string is a valid tag value, the bindingless persona lane\), outcome \(success|error|cancelled\), and source \(chat|employee, acp\-employees phase\-3 D6\): chat\-slave turns carry source=chat; employee\-driven turns carry source=employee plus an employee\_id tag. The source rides a context value the employee adapter injects before RunOnce, so the executor stays the single emission site \(no adapter\-side datapoint, no double counting\).
 
 	const ACPTurnsMetric = "acp.persona.turns"
@@ -2312,6 +2345,10 @@ DELIVERY CONTRACT: the bus \(internal/bus\) has no latched or buffered topics �
 <a name="DefaultEnhancerModelAlias"></a>DefaultEnhancerModelAlias is the model alias used when EnhancerModel is empty.
 
 	const DefaultEnhancerModelAlias = "small"
+
+<a name="DefaultLegacyThrottleMaxAttempts"></a>DefaultLegacyThrottleMaxAttempts is the L14 migration\-at\-load cap: the attempt ceiling stamped onto class=throttle records re\-armed from persistence with MaxAttempts==0 \(rows written before the encode\-side DefaultThrottleMaxAttempts stamp existed\). It mirrors the park\-site cap \(loop\_park.go\) so a legacy row terminalizes exactly like a modern one. Deliberately a separate constant: the reArm migration lives in the parker \(this file, the load seam shared by the store path and the C\-A1 backend path\), not at any one encode site, and it must stay wired even if the encode\-side constant moves.
+
+	const DefaultLegacyThrottleMaxAttempts = 5
 
 <a name="DefaultPairMaxRounds"></a>
 
@@ -2381,6 +2418,10 @@ DELIVERY CONTRACT: the bus \(internal/bus\) has no latched or buffered topics �
 
 	const PlannerInterviewMetaKey = "planner_interview"
 
+<a name="PromptSectionBytesMetric"></a>PromptSectionBytesMetric is the per\-section system\-prompt size gauge \(issue \#193\). Tags: section \(the PromptSection name, e.g. "agents\-context", "custom\-Skills\-N"\), stable \("true"/"false"\), turn \(loop turn counter\), session\_id. One point per non\-empty section per assembly; the value is the section body's byte length.
+
+	const PromptSectionBytesMetric = "agent.prompt_section.bytes"
+
 <a name="SoulFileName"></a>SoulFileName is the soul file's name inside the meept home directory.
 
 	const SoulFileName = "SOUL.md"
@@ -2390,6 +2431,10 @@ DELIVERY CONTRACT: the bus \(internal/bus\) has no latched or buffered topics �
 	const (
 	    SourceChatHandler = "chat-handler"
 	)
+
+<a name="SourcePlanApproveResumer"></a>SourcePlanApproveResumer is the bus message Source on orchestrator.plan requests published by the approve resumer \(distinguishes approve\-driven dispatches from chat\-dispatch ones in bus forensics\).
+
+	const SourcePlanApproveResumer = "dispatcher-plan-approve"
 
 <a name="SpeakTopicNotify"></a>SpeakTopicNotify is the bus topic carrying detached\-run notifications. The WS bridge forwards it as the generic "event" type — NEVER as chat\_message \(AGENTS.md invariant: only chat\_message/chat.response produce type chat\_message\).
 
@@ -2950,6 +2995,13 @@ ChatTurnIDFromContext reads the turn identity stamped by the handler seam; "" wh
 
 ClearPerOperationBackoffOverrideForTest removes the per\-operation backoff override under the given key.
 
+<a name="ComposeSessionFence"></a>
+## func ComposeSessionFence
+
+	func ComposeSessionFence(base *security.PermissionChecker, factory func(rootPath string, noFence bool) security.FenceStage, rootPath string, noFence bool, res *groups.Resolved) *security.PermissionChecker
+
+ComposeSessionFence is the exported daemon\-side arm point of composeLoopFence \(issue \#137\): the step\-job lane \(AgentJobProcessor\) arms the per\-task worktree jail on its task\-scoped loops here, because the session\-loop seam \(dispatcher/handler\) never runs for queued step jobs. Same semantics as composeLoopFence: the session jail is the resolved step working dir, the group fs\_roots stay additive, a nil factory or empty root leaves the base checker untouched \(byte\- identical legacy posture\).
+
 <a name="ContextWithToolRegistry"></a>
 ## func ContextWithToolRegistry
 
@@ -3195,6 +3247,15 @@ MarshalChildDescriptor serializes a descriptor to its durable JSON form. It is s
 
 MarshalTurnResult serializes the step result envelope the journal stores. Falls back to an empty JSON object when the envelope is not marshalable \(journaling is best\-effort and never fails the turn\).
 
+<a name="NewSessionFenceStage"></a>
+## func NewSessionFenceStage
+
+	func NewSessionFenceStage(rootPath string, allowRead []string, noFence bool, logger *slog.Logger) security.FenceStage
+
+NewSessionFenceStage mints the production per\-session fence stage: a FRESH FenceChecker rooted at the session's working directory, wrapped so the stage itself enforces the \#138 jail narrowing \(issue \#157\). Every session lane \(daemon components.go factory closures, this package's sessionFenceFactory\) must mint through this one function so the jail posture cannot drift between call sites.
+
+A nil stage \(no fence\) is returned for an empty rootPath or a \-\-nofence session, matching the legacy posture byte\-for\-byte: unbound sessions and explicit no\-fence overrides outrank the jail, exactly as FenceConfig.NoFence outranks it inside CheckPathJailed.
+
 <a name="NewSkillRankingEmbedder"></a>
 ## func NewSkillRankingEmbedder
 
@@ -3222,21 +3283,6 @@ ParseVerdict extracts the verdict and individual check results from verifier out
 	func PhaseSpecsToPlan(in []PlanPhaseSpec) *plan.CompiledPlan
 
 PhaseSpecsToPlan converts agent phase specs back into the pure compiler/emitter shape for the flat\-vs\-tree gate.
-
-<a name="PlanAutoSealFromIntent"></a>
-## func PlanAutoSealFromIntent
-
-	func PlanAutoSealFromIntent(input string) bool
-
-PlanAutoSealFromIntent reports whether a user prompt carries the compound plan\-then\-implement intent: the user asked for a plan AND its execution in one breath \("create the plan and then implement it"\), which is explicit authorization to seal the plan after compilation instead of parking it at the approval gate.
-
-Detection is deliberately conservative and ASCII\-lowercase lexical:
-
-1. a negated execute verb \("don't implement", "do not execute the plan", "never implement the plan"\) vetoes FIRST \-\- it must run before the explicit marker, or a negated "implement the plan" object would short\-circuit to true and bypass the approval gate \(bughunt H2\);
-2. optional explicit seal markers \("implement the plan", "execute the plan", "and implement it", "then implement it", "implement it immediately"\) short\-circuit to true;
-3. otherwise a plan verb \(plan/design/outline/map out/break down/draft\) must co\-occur with an execute verb \(implement/execute/build/create/ code/write/make/apply\) joined by an "and"/"then"/comma connector, plus a plan noun \(plan/approach/design/blueprint/roadmap\).
-
-The function answers the LANGUAGE question only; callers gate it behind the compound dispatch lane \(Intent==compound\), so a plain plan prompt can never auto\-seal even if it trips the lexical shape. No config knob: the intent IS the knob.
 
 <a name="PlanCriticSpawnVerifierCalls"></a>
 ## func PlanCriticSpawnVerifierCalls
@@ -3510,7 +3556,12 @@ TurnStateFunc adapts a task store into the watchdog's C7 exemption accessor, ext
 
 	func UnionFence(a, b security.FenceStage) security.FenceStage
 
-UnionFence composes two FenceStages into one: every check runs against BOTH stages and the first denial wins. Either side may be nil.
+UnionFence composes the session fence stage with the additive group fence stage \(owner ruling D1, bughunt H6/A2\-1\):
+
+- CheckPath — the ADDITIVE boundary: a path passes when EITHER stage admits it \(fs\_roots widen the writable set with the listed roots; the session root and the session stage's system AllowRead lanes stay admitted; a denial requires BOTH stages to refuse\).
+- CheckCommand — first denial wins \(the strict surface stays strict\): the session FenceChecker's substitution refusal and command token scan can never be overridden by the group stage's more permissive workdir answer, and a workdir the group fence refuses \(outside every root including the session dir\) is denied even when the session stage would allow it.
+
+Either side may be nil \(the other stage's verdict applies verbatim — byte\-identical to the single\-fence postures\).
 
 <a name="UnwrapThreadConversationID"></a>
 ## func UnwrapThreadConversationID
@@ -3931,6 +3982,35 @@ AgentConfig holds configuration for the agent loop.
 	    // sections are hoisted before volatile ones via AssembleOrdered and
 	    // LastStablePrefixHash() is updated on every build.
 	    StablePrefixDisabled bool
+	    // AgentsContextWholeTree restores the pre-#193 ambient AGENTS.md
+	    // behavior: a whole-tree LoadAllAgentsMD walk instead of the default
+	    // root -> workingDir chain scoping. Zero value (false) = chain-scoped.
+	    // Escape hatch for audits that genuinely need every package's
+	    // invariant doc in every turn's prompt.
+	    AgentsContextWholeTree bool
+	    // SkillContextIndexOnly flips the eager skill-injection default OFF
+	    // (bughunt H5/A-3, 2026-11-27): the DEFAULT posture loads up to 3
+	    // matched skills' FULL bodies into the system prompt (bounded by
+	    // MaxSkillContextTokens) — the pre-#193-increment-2 behavior. The
+	    // #193 index-only default shipped prompts instructing the model to
+	    // `file_read` each [load:] path, and every tier path lives OUTSIDE
+	    // the per-session jail the fence now enforces by default (fence.go
+	    // refuses out-of-root reads unconditionally) — the default prompt
+	    // pointed at an action the tool layer denies. Setting this flag
+	    // restores the index-only posture as an explicit opt-out: surfaced
+	    // skills ride the prompt as name/description entries with the
+	    // [load: file_read <SKILL.md path>] pointer. (Do not re-enable as a
+	    // default without also admitting skill paths through the jail — the
+	    // two defaults are coupled.)
+	    SkillContextIndexOnly bool
+	    // ArtifactContextWholeDoc restores the pre-#193-increment-2 verbatim
+	    // CLAUDE.md dump: the seam-off path calls BuildFullArtifactContext
+	    // with no bound. The zero value (false) routes every artifact-context
+	    // assembly through BuildFullArtifactContextBudgeted instead — the
+	    // allocator's SystemDynamicDocs share when the context-assembler seam
+	    // is enabled, else DefaultDocBudgetTokens — so a huge CLAUDE.md can
+	    // no longer eat the window on the default path.
+	    ArtifactContextWholeDoc bool
 	    // OmitEvidenceFormatTemplate slims the Validation & Escalation anchor:
 	    // the anchor's JSON evidence-format TEMPLATE is dropped (the prose
 	    // rules stay) for employees with no file/tool that produces evidence.
@@ -4826,6 +4906,13 @@ SetPrefetchCallback sets the callback for prefetching memory context. This is us
 
 SetProjectID sets the bound project identifier for this loop's session. Safe to call concurrently.
 
+<a name="AgentLoop.SetPromptSectionRecorder"></a>
+### func \(\*AgentLoop\) SetPromptSectionRecorder
+
+	func (l *AgentLoop) SetPromptSectionRecorder(rec TurnMetricRecorder)
+
+SetPromptSectionRecorder wires the per\-section prompt telemetry sink after loop creation \(the daemon builds metrics.Store after the template loop; SetTaskCollector precedent\). Nil\-guarded.
+
 <a name="AgentLoop.SetReasoningForNextTurn"></a>
 ### func \(\*AgentLoop\) SetReasoningForNextTurn
 
@@ -5329,6 +5416,8 @@ RunAgentWithModelRef sends a single message to an agent with a per\-run model ov
 
 R3\-2 \(turn\-scoped override\): the override is armed on the SHARED per\-agent loop, so a child run that parks or errors BEFORE the reasoning cycle consumes it used to leave the override stuck — the next unrelated turn on that loop silently ran the child's route. The override is cleared as soon as this run returns \(defer ClearModelOverride\-style\): if the turn consumed it, the one\-shot clear already ran and this is a no\-op; if it never did, nothing leaks to the next turn. The armed window \(arm → RunOnce\) is the same slot the dispatcher's ApplyRequestModel uses for user directives; a full per\-turn context\-carried mechanism does not exist on the RunOnce API \(the consumption site reads loop state in reasoningCycle\), so the defer\-clear shape is the turn\-scoping mechanism chosen here.
 
+A5\-3 \(concurrent children\): the defer\-clear above races concurrent runs on one agent loop — child A's return clears the shared field while child B's arm is still unconsumed, and each side can serve the other's route. Since the consumption site is loop state, not context, the minimal safe shape is the per\-agent routeLocks gate: the whole arm→run→clear window is serialized per agent, so concurrent delegate children of one agent run their routed turns sequentially, each seeing its OWN ref \(see routeLocks\).
+
 <a name="AgentRegistry.SeedChildConversation"></a>
 ### func \(\*AgentRegistry\) SeedChildConversation
 
@@ -5377,6 +5466,13 @@ SetLearningPipeline wires the learning pipeline \(Judge/Distill\) into every loo
 	func (r *AgentRegistry) SetPiiRestoreHook(hook *PiiRestoreHook)
 
 SetPiiRestoreHook wires the shared PII\-unmasking restore lane into every loop this registry creates \(bughunt C19\): registry\-built loops \(delegate children via RunAgent, specialists\) then mask provider\-bound context and restore \[PII:\*\] tokens exactly like the daemon template lane. Nil is a no\-op. Loops already created keep their wiring \(the lane is stateless per call, scoped by the sessionID argument\); loops created afterwards inherit the hook at construction.
+
+<a name="AgentRegistry.SetReviewVerdictEmitter"></a>
+### func \(\*AgentRegistry\) SetReviewVerdictEmitter
+
+	func (r *AgentRegistry) SetReviewVerdictEmitter(pub ReviewVerdictPublisher)
+
+SetReviewVerdictEmitter wires the L6 verdict\-emission seam into every loop this registry creates \(daemon calls it after composing the ReviewManager, which is built later in boot than the registry\). The loops hand it to their adversarial verification hook, so SpawnVerifier PASS/FAIL/PARTIAL verdicts publish to the collector's review lane. Nil is a no\-op; unset = the hook stays non\-emitting.
 
 <a name="AgentRegistry.SetSchemaModeConfig"></a>
 ### func \(\*AgentRegistry\) SetSchemaModeConfig
@@ -6140,7 +6236,7 @@ LoadAgentsContext loads hierarchical AGENTS.md files relative to filePath and re
 
 	func (am *ArtifactManager) ScanDirectory(dir string) (*artifactcontext.Artifacts, error)
 
-ScanDirectory scans a directory for Claude artifacts and caches the results.
+ScanDirectory scans a directory for Claude artifacts and caches the results for am.cacheExpiry \(A2\-11 i: the expiry was once reported in stats but never enforced, so a mid\-session CLAUDE.md edit was served from the cache forever\).
 
 <a name="ArtifactManager.WithProjectRoot"></a>
 ### func \(\*ArtifactManager\) WithProjectRoot
@@ -7390,6 +7486,15 @@ ChatRequest is the expected payload for chat.request messages.
 	    // TurnRegistry (Register/Touch/Complete); the legacy `chat` path
 	    // leaves it empty and stays UNTRACKED.
 	    TurnID string `json:"turn_id,omitempty"`
+	    // ThreadSessionID is the ORIGINAL thread-scoped id ('<conv>-thread-
+	    // <topic>-<n>') the submit carried, stamped by rpc.chat.submit when
+	    // either input id contained the thread separator (bughunt 11-24 H9).
+	    // The canonical conversation_id/session_id fields carry the RESOLVED
+	    // (base) shapes — the thread id would otherwise never reach the
+	    // 2026-11-23 exemption below and thread submits collapsed onto the
+	    // parent conversation's continuity lane. Additive + omitempty: legacy
+	    // publishers and non-thread submits leave it empty (unchanged shape).
+	    ThreadSessionID string `json:"thread_session_id,omitempty"`
 	}
 
 <a name="ChatResponse"></a>
@@ -10864,7 +10969,9 @@ GoalAnchorStore is the narrow surface the dispatcher needs to resolve a session'
 <a name="GroupFenceStage"></a>
 ## type GroupFenceStage
 
-GroupFenceStage is a FenceStage that checks a path/command against EVERY root in its list and denies when NO root accepts it \(agent\-groups leaf 04, F6\): the group policy's fs\_roots are ADDITIVE fence roots — the subject may write inside any of them, nothing outside. It is consulted IN ADDITION to the session fence \(whichever denies first wins\).
+GroupFenceStage is a FenceStage that checks a path/command against EVERY root in its list and denies when NO root accepts it \(agent\-groups leaf 04, F6\): the group policy's fs\_roots are ADDITIVE fence roots — the subject may write inside any of them, nothing outside. It is consulted IN ADDITION to the session fence \(see UnionFence for the exact composition; per owner ruling D1 the path boundary is the union of both root sets\).
+
+Bughunt A2\-6/M12 fix: comparisons resolve symlinks before the prefix test \(same fail\-hard shape as internal/security/fence.go resolveSymlinks\), so a link inside a root pointing outside it is refused instead of admitted lexically.
 
 	type GroupFenceStage struct {
 	    // contains filtered or unexported fields
@@ -10884,12 +10991,14 @@ NewGroupFenceStage builds the additive group fence over the \(non\-empty\) root 
 
 CheckCommand validates the working directory against the group roots \(the command surface is owned by the session fence; the group gate's fs\_roots contract is path\-boundary scoped\).
 
+workDir == "" or "." is treated as INSIDE: the executor injects the loop's real working directory before the tool runs \(isEffectiveWorkDir\). When the command embeds shell substitutions the path checks cannot see through \($\(\), backticks, \<\(\) / \>\(\)\) — the same patterns the session FenceChecker refuses outright — the group lane refuses instead of admitting the whole command on the strength of its workdir.
+
 <a name="GroupFenceStage.CheckPath"></a>
 ### func \(\*GroupFenceStage\) CheckPath
 
 	func (g *GroupFenceStage) CheckPath(path, op string) error
 
-CheckPath allows the path when it sits inside ANY group root.
+CheckPath allows the path when it sits inside ANY group root \(plus the additive session root, D1\). Symlinks are resolved on both sides before the containment test \(A2\-6/M12\). An empty/"." path denotes the effective workdir and is admitted \(see isEffectiveWorkDir\).
 
 <a name="GuardConfig"></a>
 ## type GuardConfig
@@ -11662,6 +11771,13 @@ Intent represents the classified intent of a user message.
 	    OriginalInput string `json:"original_input,omitempty"`
 	    // TrueAnalysis holds the IntentGate-style pre-classification analysis if available.
 	    TrueAnalysis *TrueIntentAnalysis `json:"true_analysis,omitempty"`
+	    // ApprovalRequested mirrors TrueAnalysis.ApprovalRequested (master
+	    // C-3): the user explicitly asked to review/approve the plan BEFORE
+	    // execution. Threaded at the classification seam from the analyzer.
+	    // false (the default, and every deterministic/keyword lane) keeps the
+	    // quickplan oneshot posture (D1/D4); true parks the plan row at
+	    // pending_approval instead of auto-approving.
+	    ApprovalRequested bool `json:"approval_requested,omitempty"`
 	    // SuggestedMode is the synthesized planning mode (Thread D complexity routing).
 	    // Populated by suggestMode in ClassifyAndRoute. Empty means no suggestion.
 	    SuggestedMode string `json:"suggested_mode,omitempty"`
@@ -12480,6 +12596,13 @@ WithProgressEnabled enables or disables progress event publishing.
 
 WithProjectID sets the bound project identifier for the loop's session.
 
+<a name="WithPromptSectionRecorder"></a>
+### func WithPromptSectionRecorder
+
+	func WithPromptSectionRecorder(rec TurnMetricRecorder) LoopOption
+
+WithPromptSectionRecorder wires the per\-section prompt telemetry sink \(issue \#193\). Nil\-safe per the Set\*/option convention.
+
 <a name="WithQuotaTracker"></a>
 ### func WithQuotaTracker
 
@@ -12528,6 +12651,13 @@ WithResponseAnalyzer sets the response analyzer for quality metrics.
 	func WithResultCache(cache *ResultCache) LoopOption
 
 WithResultCache sets the result cache for the agent loop.
+
+<a name="WithReviewVerdictEmitter"></a>
+### func WithReviewVerdictEmitter
+
+	func WithReviewVerdictEmitter(pub ReviewVerdictPublisher) LoopOption
+
+WithReviewVerdictEmitter sets the L6 adversarial\-verdict emission seam for the verification hook this loop registers \(nil guard per setter convention: a typed\-nil publisher leaves the hook non\-emitting\).
 
 <a name="WithSecurityChecker"></a>
 ### func WithSecurityChecker
@@ -12719,6 +12849,8 @@ GetOrCreateWired returns an existing loop for \(sessionID, template\-agent\), or
 
 workingDir is the project directory for the new loop; it overrides any value on the template \(per\-session isolation\). All other config is copied via template.ConfigSnapshot\(\).
 
+Bughunt H4/S\-3: a newly created loop arms the per\-session fence through composeLoopFence when a factory is wired \(SetSessionFenceFactory\) — the same compose the chat/dispatch lanes run, so the session jail AND the additive group fs\_roots fence engage on voice/employee lanes too. The per\-session \-\-nofence override is honored from the session row when the session store is wired; an unwired store or an unknown session id falls back to the fence\-on posture \(fail closed, never open\). Cached loops are returned untouched: they were armed at creation under the same rule.
+
 <a name="Manager.List"></a>
 ### func \(\*Manager\) List
 
@@ -12746,6 +12878,13 @@ Remove deletes a loop from the manager.
 	func (m *Manager) ResolveProjectPath(ctx context.Context, projectID string) string
 
 ResolveProjectPath looks up a project's LocalPath by its ID using the project manager wired into the Manager. Returns empty string if the project manager is nil, the project ID is empty, or the lookup fails. This is used to recover the working directory for legacy sessions that have a ProjectID but no ProjectPath \(pre\-fix sessions\).
+
+<a name="Manager.SetSessionFenceFactory"></a>
+### func \(\*Manager\) SetSessionFenceFactory
+
+	func (m *Manager) SetSessionFenceFactory(factory sessionFenceFactory)
+
+SetSessionFenceFactory wires the factory that mints a FRESH, session\-owned fence stage for every loop GetOrCreateWired builds \(bughunt H4/S\-3\): the voice lane and the employee clone path take their loops from this manager, so the \#138 per\-session jail must arm HERE, at the shared construction point, exactly like the ChatHandler and Dispatcher sites. A nil factory \(the default\) keeps the legacy posture: GetOrCreateWired installs no fence itself. Mirrors ChatHandler.SetSessionFenceFactory / Dispatcher.SetSessionFenceFactory.
 
 <a name="ManagerConfig"></a>
 ## type ManagerConfig
@@ -13651,6 +13790,13 @@ RunAllRounds runs the full loop until convergence, exhaustion, or error.
 	func (pm *PairManager) RunRound(ctx context.Context, sessionID string) (*Attempt, error)
 
 RunRound executes one actor\-\>reviewer round for the given session. It runs the actor agent, then the reviewer agent, and records the attempt. Returns the attempt and an error if the round could not complete.
+
+<a name="PairManager.SetReviewVerdictEmitter"></a>
+### func \(\*PairManager\) SetReviewVerdictEmitter
+
+	func (pm *PairManager) SetReviewVerdictEmitter(pub ReviewVerdictPublisher)
+
+SetReviewVerdictEmitter attaches the L6 verdict\-emission seam \(the daemon wires the ReviewManager\). Nil/typed\-nil is a no\-op per the repo setter convention; unset means pair rounds stay non\-emitting, exactly the pre\-L6 behavior.
 
 <a name="PairManagerConfig"></a>
 ## type PairManagerConfig
@@ -14574,17 +14720,6 @@ PlanRequest is the input to the strategic planner.
 	    // produced no level (DeriveDifficulty never returns 0 for real
 	    // signals; 0 here means unclassified) = R7 inert on the async lane.
 	    Difficulty int `json:"difficulty,omitempty"`
-	
-	    // AutoSeal marks a compound plan+implement request (the user asked
-	    // for the plan AND its execution in one prompt, detected by
-	    // PlanAutoSealFromIntent over the full user input). When set, the
-	    // approval gate in requiresApproval is bypassed: the plan is
-	    // AUTO-SEALED after compilation and flows straight to scheduling
-	    // (StateExecuting + orchestrator.schedule) with an audit trail
-	    // (auto_sealed task metadata + the flag on the task.planned event).
-	    // Intent-driven ONLY -- no config knob. Plain plan requests never
-	    // carry the flag and keep parking at the approval gate.
-	    AutoSeal bool `json:"auto_seal,omitempty"`
 	}
 
 <a name="PrefilterEmbedder"></a>
@@ -14670,6 +14805,13 @@ NewPromptBuilderFromConfig creates a PromptBuilder from a configuration.
 	func (b *PromptBuilder) AddSection(title, content string) *PromptBuilder
 
 AddSection adds a custom section to the prompt. Custom sections are classified as unstable \(volatile\) by BuildSystemPromptOrdered; use AddSectionWithStability for content that is byte\-invariant across turns.
+
+<a name="PromptBuilder.AddSectionWithKind"></a>
+### func \(\*PromptBuilder\) AddSectionWithKind
+
+	func (b *PromptBuilder) AddSectionWithKind(title, content, kind string) *PromptBuilder
+
+AddSectionWithKind adds an unstable custom section with an explicit telemetry taxonomy name \(\#193 increment 2\). The section renders and classifies exactly like AddSection \(same prompt bytes, same stable=false\); only the per\-section name in agent.prompt\_section.bytes differs: the given kind \("skills", "artifact\-context"\) instead of the positional "custom\-\<title\>\-N". Use for ambient sections whose size must be aggregated across turns regardless of their assembly position.
 
 <a name="PromptBuilder.AddSectionWithStability"></a>
 ### func \(\*PromptBuilder\) AddSectionWithStability
@@ -15079,7 +15221,7 @@ PersistSync immediately inserts a message into SQLite.
 
 	func (p *QueuePersister) Stop()
 
-Stop halts the flush timer and flushes any remaining pending messages.
+Stop halts the flush timer and flushes any remaining pending messages. The timer stop runs under p.mu: flushPending and EnqueueAsync arm and reset the field under the same lock \(A2\-9\), and reading it unlocked here was a data race once the field became lazily created.
 
 <a name="QueuePersister.WithBus"></a>
 ### func \(\*QueuePersister\) WithBus
@@ -16053,6 +16195,35 @@ RegistryConfig holds configuration for creating an AgentRegistry.
 	    DynamicExposureEnabled bool
 	}
 
+<a name="RelayError"></a>
+## type RelayError
+
+RelayError \(bughunt 2026\-11\-24 M8\) carries a user\-facing sentence together with the typed error the relay lost on the way here.
+
+The task\-relay boundary turns failures into strings: handleTaskCompleted \(handler.go\) takes payload.Result / payload.Error off JSON and does UserFacingError\(errors.New\(relayError\)\), so every typed lane inside UserFacingError \(llm.IsContextTooSmall, llm.IsTierFloorError, the errors.Is quota/empty checks\) sees a brand\-new \*errors.errorString and dies — the user gets the sanitized raw text instead of the actionable sentence. Error\(\) returns Text verbatim, so user copy is unchanged; Unwrap exposes Cause so errors.As/Is classifiers survive the hop.
+
+	type RelayError struct {
+	    // Text is the user-facing sentence (what the wire carries today).
+	    Text string
+	    // Cause is the typed error recovered from the relayed text, or nil
+	    // when the text carried no recognizable machine sentinel.
+	    Cause error
+	}
+
+<a name="RelayError.Error"></a>
+### func \(\*RelayError\) Error
+
+	func (r *RelayError) Error() string
+
+Error returns the user sentence, never the raw sentinel internals.
+
+<a name="RelayError.Unwrap"></a>
+### func \(\*RelayError\) Unwrap
+
+	func (r *RelayError) Unwrap() error
+
+Unwrap exposes the typed cause so errors.As / errors.Is reach it.
+
 <a name="ReplyFuncSetter"></a>
 ## type ReplyFuncSetter
 
@@ -16385,6 +16556,20 @@ GetValidationPolicy returns the current validation policy.
 
 HandleReviewResult processes a review result and updates step state. Returns any newly\-created revision step\(s\) so that callers with scheduling responsibilities \(e.g. TacticalScheduler\) can enqueue them.
 
+<a name="ReviewManager.PublishReviewVerdict"></a>
+### func \(\*ReviewManager\) PublishReviewVerdict
+
+	func (rm *ReviewManager) PublishReviewVerdict(stepID, taskID string, result *ReviewResult, revisionCount int)
+
+PublishReviewVerdict is the L6 emission seam for the non\-step review producers \(pair\_manager's actor→reviewer rounds and the adversarial verification hook\). It is a thin, nil\-safe wrapper over publishReviewEvent: the verdict rows land on the SAME step.review\_completed/task.review\_completed lane the metrics collector consumes. Producers must attach their own lane\-tagged verdicts \(rubric\_id distinguishes the lane — see pairReviewVerdicts / adversarialReviewVerdicts\) and set result.ReviewerID to the ACTUAL judging agent, never the step reviewer.
+
+<a name="ReviewManager.PublishReviewVerdictFromProducer"></a>
+### func \(\*ReviewManager\) PublishReviewVerdictFromProducer
+
+	func (rm *ReviewManager) PublishReviewVerdictFromProducer(stepID, taskID string, result *ReviewResult, revisionCount int, src ReviewVerdictSource)
+
+PublishReviewVerdictFromProducer publishes one producer\-lane review verdict emission with explicit identities \(L6\). Nil\-safe and logged.
+
 <a name="ReviewManager.ReviewStep"></a>
 ### func \(\*ReviewManager\) ReviewStep
 
@@ -16572,6 +16757,49 @@ ReviewStatus represents the outcome of a review.
 	    ReviewRejected  ReviewStatus = "rejected"
 	    ReviewNeedsInfo ReviewStatus = "needs_info"
 	)
+
+<a name="ReviewVerdictPublisher"></a>
+## type ReviewVerdictPublisher
+
+ReviewVerdictPublisher is the L6 emission seam the producer lanes \(PairManager, VerificationAutoTrigger\) publish through. It exists so those producers never hold the whole \*ReviewManager — the daemon wires the ReviewManager itself \(its PublishReviewVerdictFromProducer method satisfies this interface\) via SetReviewVerdictEmitter on each producer. Nil \(unset\) = the producer stays non\-emitting, byte\-identical to the pre\-L6 posture.
+
+	type ReviewVerdictPublisher interface {
+	    PublishReviewVerdictFromProducer(stepID, taskID string, result *ReviewResult, revisionCount int, src ReviewVerdictSource)
+	}
+
+<a name="ReviewVerdictSource"></a>
+## type ReviewVerdictSource
+
+ReviewVerdictSource carries a producer lane's identities and payload tags for PublishReviewVerdictFromProducer. Every field is a fill\-only\-when\-empty overlay on top of what enrichedReviewPayload derives from the stores, so a producer that knows the real judging context \(e.g. the adversarial hook, which has no step row\) never mislabels it, and a producer with a real step row keeps the store\-derived values \(blame join wins\).
+
+	type ReviewVerdictSource struct {
+	    // Source names the producer lane for the "review_source" payload key
+	    // ("pair-review", "verification-hook"). Empty = the step-review lane.
+	    Source string
+	    // ReviewedAgentID is the EXECUTING agent being graded (threaded into
+	    // the payload as "reviewed_agent_id" for the L6 model x agent
+	    // dimension).
+	    ReviewedAgentID string
+	    // ReviewedModelID / JudgeModelID fill the identity fields when the
+	    // store-derived resolution yields "" (no step row, verifier child
+	    // with no spec). They never override a derived value.
+	    ReviewedModelID string
+	    JudgeModelID    string
+	    // JudgeAgentID overrides the judge when the producer's judge is not
+	    // result.ReviewerID (never set by the step lane).
+	    JudgeAgentID string
+	    // TraceID supplies the trace stamp for lanes without a
+	    // "stp-"+stepID relationship the builder can derive (the hook reads
+	    // the loop's turn ctx trace). Only used when stepID is empty.
+	    TraceID string
+	    // NonFinal forces is_final=false: this emission is a review round a
+	    // later cycle is expected to supersede (a continuing pair round, an
+	    // adversarial FAIL awaiting its fix re-check). The L7 rollups count
+	    // final rows only (bughunt 2026-11-24 c8d3f868 posture), so marking
+	    // a superseded round final would inflate a model's defect totals
+	    // exactly like the needs-info shape did.
+	    NonFinal bool
+	}
 
 <a name="RewakePayload"></a>
 ## type RewakePayload
@@ -18047,7 +18275,7 @@ ApprovePlan resumes a plan that was paused at the approval gate. It loads the pe
 
 	func (sp *StrategicPlanner) ClearInterviewState(taskID string)
 
-ClearInterviewState removes the waiting block after answers arrive.
+ClearInterviewState removes the waiting block after answers arrive. A successful delete disarms this task's contribution to the cold\-scan gate \(both the hot consume and the cold delivery land here\), keeping the counter aligned with the persisted blocks that remain.
 
 <a name="StrategicPlanner.ConductInterview"></a>
 ### func \(\*StrategicPlanner\) ConductInterview
@@ -18064,6 +18292,8 @@ Returns a PlanningContext that may or may not have InterviewCompleted set to tru
 	func (sp *StrategicPlanner) DeliverInterviewAnswer(sessionID, answer string) (string, bool)
 
 DeliverInterviewAnswer routes one user message to the interview parked on sessionID's conversation. Returns \(ack, true\) when delivered \(and the waiter consumed — duplicate answers are refused by construction\), \("", false\) when no interview waits for that conversation.
+
+Restart\-miss recovery \(bughunt L8\): the waiter map is in\-memory, so a daemon restart drops it while the task's persisted interview state says an interview is still open. Before falling through — which silently swallowed the answer as an ordinary chat turn and left the task parked in planning until the watchdog window — consult the store: a fresh open interview on this conversation is resumed through the same Plan re\-entry the hot waiter uses \(the planning context is persisted at the pause point, so the answer has a real consumer again\). The fallback is loud: Warn naming the abandoned interview on every non\-silent branch.
 
 <a name="StrategicPlanner.DraftFor"></a>
 ### func \(\*StrategicPlanner\) DraftFor
@@ -18280,7 +18510,7 @@ SetValidToolNames installs the set of tool names the planner is allowed to emit 
 
 	func (sp *StrategicPlanner) StoreInterviewState(t *task.Task, req PlanRequest, st *plannerInterviewState)
 
-StoreInterviewState writes the waiting\-interview block into the task's metadata and stamps the waiting\-since time. Best\-effort: persistence failures degrade to the in\-memory waiter \(logged, never fatal — the pause itself already happened\).
+StoreInterviewState writes the waiting\-interview block into the task's metadata and stamps the waiting\-since time. Best\-effort: persistence failures degrade to the in\-memory waiter \(logged, never fatal — the pause itself already happened\). A SUCCESSFUL write arms the cold\-scan gate \(coldInterviewArmed\): the persisted block is exactly what the restart\-miss scan matches, so arming at the write keeps the gate and the store truthful together.
 
 <a name="StrategicPlannerConfig"></a>
 ## type StrategicPlannerConfig
@@ -19815,6 +20045,14 @@ TrueIntentAnalysis represents a deep analysis of the user's actual intent.
 	    SuggestedQuestions []string `json:"suggested_questions"`
 	    Confidence         float64  `json:"confidence"`
 	    SuggestedMode      string   `json:"suggested_mode,omitempty"`
+	    // ApprovalRequested is the C-3 (plan-contract tree
+	    // 20261125-plan-contract-quickplan, decision D3) pre-execution approval
+	    // flag: true ONLY when the user explicitly asked to review/approve the
+	    // plan BEFORE any execution happens ("implement it only after I
+	    // approve"). Absent/false is the legacy oneshot posture — a quickplan
+	    // turn auto-approves and executes immediately. omitempty keeps the
+	    // re-marshaled JSON of a false analysis byte-identical to pre-C-3.
+	    ApprovalRequested bool `json:"approval_requested,omitempty"`
 	}
 
 <a name="TrueIntentAnalysis.IsAmbiguous"></a>
@@ -20186,6 +20424,15 @@ EmitResumeEvent is the exported resume\-event hook, symmetric to EmitParkEvent: 
 	func (p *TurnParker) HasPendingForConversation(conversationID string) bool
 
 HasPendingForConversation reports whether any parked record targets the given conversation \(ParkedTurnRecord.ConversationID\). This is the parked\- presence probe the C3 resume guards consult \(regression\-review R2, 2026\-11\-11\): the parked shape \("", nil\) from RunOnceWithParts is ambiguous between a genuine mid\-flight re\-park \(a record for THIS conversation now sits on the parker\) and a state layer that silently ABSORBED an LLM failure \(no park row at all\). Only the former may defer delivery; the latter must terminalize or the awaiting client hangs forever.
+
+<a name="TurnParker.HasPendingForTurn"></a>
+### func \(\*TurnParker\) HasPendingForTurn
+
+	func (p *TurnParker) HasPendingForTurn(turnID, conversationID string) bool
+
+HasPendingForTurn is the TURN\-scoped form of the parked\-presence probe the C3 resume guards consult \(bughunt 11\-25 A5\-5\). The conversation probe over\-matches: park rows for OTHER turns of the same conversation \(an unrelated throttle park that outlived this resume\) make an absorbed\-failure \(”, nil\) resume look like a genuine re\-park, and the guard defers forever with no turn.terminal — the exact R2\-2 hang it was written to prevent, resurrected across turns. Matching the resumed turn's own identity closes that: a record counts only when it carries THIS turnID.
+
+Legacy rows \(no TurnID — parked before C\-K2, or re\-armed from pre\-C\-K2 persistence\) cannot prove turn identity, so they fall back to the conversation test: a legacy park row for this conversation still defers delivery \(the pre\-A5\-5 behavior\), never a hang.
 
 <a name="TurnParker.Next"></a>
 ### func \(\*TurnParker\) Next
@@ -20825,12 +21072,26 @@ SetOverrideApplier attaches the loop seam that arms the PERSISTENT model overrid
 
 SetResolver attaches the model resolver used to resolve the escalation target. Nil \(or a typed\-nil carrier\) is a no\-op per repo setter rules; without a resolver the escalation decision degrades to the legacy user\-escalation path.
 
+<a name="VerificationAutoTrigger.SetReviewVerdictEmitter"></a>
+### func \(\*VerificationAutoTrigger\) SetReviewVerdictEmitter
+
+	func (h *VerificationAutoTrigger) SetReviewVerdictEmitter(pub ReviewVerdictPublisher)
+
+SetReviewVerdictEmitter attaches the L6 verdict\-emission seam \(the daemon's ReviewManager, propagated registry \-\> loops \-\> hook\). Nil/typed\-nil is a no\-op per repo setter rules; unset means parsed adversarial verdicts stay unpublished \(byte\-identical pre\-L6\).
+
 <a name="VerificationAutoTrigger.SetSpawner"></a>
 ### func \(\*VerificationAutoTrigger\) SetSpawner
 
 	func (h *VerificationAutoTrigger) SetSpawner(s VerifierSpawner)
 
 SetSpawner sets the verifier spawner for full adversarial verification. When nil, the hook operates in nudge\-only mode.
+
+<a name="VerificationAutoTrigger.SetTaskIDSource"></a>
+### func \(\*VerificationAutoTrigger\) SetTaskIDSource
+
+	func (h *VerificationAutoTrigger) SetTaskIDSource(source func() string)
+
+SetTaskIDSource attaches the loop seam supplying the parent task id for emitted verdict payloads \(AgentLoop.currentTaskID under its mutex\). Nil/typed\-nil is a no\-op; unset emits task\_id "".
 
 <a name="VerificationConfig"></a>
 ## type VerificationConfig

@@ -42,6 +42,7 @@ Package memory provides memory storage and retrieval for meept.
 - [func LocalDayKey\(t time.Time\) string](<#LocalDayKey>)
 - [func LocalDayStart\(t time.Time\) time.Time](<#LocalDayStart>)
 - [func MemoryFreshnessText\(ageDays int\) string](<#MemoryFreshnessText>)
+- [func MetaStringFlag\(meta map\[string\]any, key string\) bool](<#MetaStringFlag>)
 - [func MigrateToDualDB\(dataDir string, nodeID string, logger \*slog.Logger\) error](<#MigrateToDualDB>)
 - [func ParseMetadata\(jsonStr string\) map\[string\]any](<#ParseMetadata>)
 - [func ReasonHash\(reason string\) string](<#ReasonHash>)
@@ -650,6 +651,14 @@ Lessons are distilled principles \("always X before Y because Z"\); procedures a
 
 	const ReportArtifactType = "report_markdown"
 
+<a name="RowCompressedAtKey"></a>RowCompressedAtKey records the RFC3339 instant a row was compressed \(observability; the suppression check reads only RowCompressedKey\).
+
+	const RowCompressedAtKey = "l1_compressed_at"
+
+<a name="RowCompressedKey"></a>RowCompressedKey is the metadata flag stamped in place on a memory row once a row\-shape compress job has distilled it \(D3 idempotence: rows already distilled must not re\-emit claims\). Mirrors the day\-file marker's "window already covered \-\> suppressed" semantics.
+
+	const RowCompressedKey = "l1_compressed"
+
 <a name="VerdictAction"></a>VerdictAuditPayloadKeys are the canonical payload keys of a memory.claim.verdict audit entry \(frozen contract, leaf T03\-L1\):
 
 	{action: "memory.claim.verdict", claim_id, verdict, reason_hash}
@@ -837,6 +846,13 @@ LocalDayStart returns midnight of t's LOCAL calendar day, stamped in UTC so day 
 	func MemoryFreshnessText(ageDays int) string
 
 MemoryFreshnessText returns a staleness caveat for memories older than one day. Fresh memories \(age \<= 1 day\) return an empty string.
+
+<a name="MetaStringFlag"></a>
+## func MetaStringFlag
+
+	func MetaStringFlag(meta map[string]any, key string) bool
+
+MetaStringFlag reads a boolean metadata flag in every shape a JSON\-round\-tripped SQLite map can carry \(bool, "true", float64 1\), mirroring demotedFromMeta's shape tolerance. Exported for cross\-package flag readers \(tierpolicy's L15 compressed\-row selector\); metaStringFlag remains the in\-package alias.
 
 <a name="MigrateToDualDB"></a>
 ## func MigrateToDualDB
@@ -2577,10 +2593,19 @@ KnowledgeGraphConfig holds configuration for the knowledge graph.
 
 L1ExtractPayload is the memory.l1\_extract payload \(SHARED\-CONVENTIONS §2.2\).
 
+Two shapes ride this one payload \(owner ruling D3, H7/A3\-1\):
+
+- Day\-file shape \(the capture path, daemon memory\_capture.go\): L0Path points at the session's L0 JSONL day file and SinceMsgID marks the window start. This shape is byte\-identical to the pre\-D3 contract and its per\-session l0\_progress marker semantics are unchanged.
+- Row shape \(tier\-policy compression\): MemoryIDs carries the EXACT memory row ids the engine planned. When non\-empty it takes precedence over L0Path; the worker distills exactly those rows \(no second lookup, no day\-file read\) and idempotence lives on the rows themselves \(the compressed flag below\), not on the marker.
+
 	type L1ExtractPayload struct {
 	    SessionID  string `json:"session_id"`
 	    L0Path     string `json:"l0_path"`
 	    SinceMsgID string `json:"since_msg_id,omitempty"`
+	    // MemoryIDs is the row-based compress selection (tierpolicy
+	    // planCompress Action.TargetIDs). Empty for the day-file shape, so
+	    // pre-D3 payloads marshal byte-identically (omitempty).
+	    MemoryIDs []string `json:"memory_ids,omitempty"`
 	}
 
 <a name="L2ScenePayload"></a>

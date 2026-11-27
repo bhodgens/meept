@@ -111,6 +111,7 @@ Package security provides the security engine with SQLite\-backed decision makin
   - [func \(b \*InterAgentBoundary\) InspectHandoffContent\(content string\) \[\]InterAgentBoundaryMatch](<#InterAgentBoundary.InspectHandoffContent>)
 - [type InterAgentBoundaryMatch](<#InterAgentBoundaryMatch>)
 - [type InterAgentBoundaryPattern](<#InterAgentBoundaryPattern>)
+- [type JailedFenceChecker](<#JailedFenceChecker>)
 - [type Message](<#Message>)
 - [type Orchestrator](<#Orchestrator>)
   - [func NewOrchestrator\(cfg OrchestratorConfig, logger \*slog.Logger\) \*Orchestrator](<#NewOrchestrator>)
@@ -767,7 +768,7 @@ CheckPathJailed validates a path against the fence AND against the caller's per\
 
 A FenceChecker is one process\-wide object whose RootPath is the rig's static allowlist: any tree it admits is reachable by ABSOLUTE path, so a session bound to worktree A could write into worktree B and the tool still reported success \(observed in the bench: file\_write returned success:true into the rig's repo clone, then the task failed its checker with no error anywhere\). Relative paths were already session\-bound by resolvePathSecure; this closes the absolute\-path half.
 
-jailRoot is the SESSION's working directory, supplied per call by the caller \(tools.WorkingDirFromContext\) — deliberately NOT a field on FenceConfig, because FenceChecker is shared by every tool and session: storing the jail on the config would reintroduce the cross\-session mutation race that per\-session fence instances were introduced to remove \(internal/agent/fence\_stage.go\). The jail is a per\-CALL argument, so the same checker can serve two sessions with different roots concurrently.
+jailRoot is the SESSION's working directory, supplied per call by the caller. In production that caller is the re\-homed session FenceStage \(internal/agent/fence\_stage.go, NewSessionFenceStage — issue \#157\), which freezes the stage's own session root as the jail; the builtin tools' per\-call path \(tools.WorkingDirFromContext\) survives only on lanes that still wire a per\-tool checker \(terminal\_service's shell tool\). It is deliberately NOT a field on FenceConfig, because FenceChecker is shared by every tool and session: storing the jail on the config would reintroduce the cross\-session mutation race that per\-session fence instances were introduced to remove \(internal/agent/fence\_stage.go\). The jail is a per\-CALL argument, so the same checker can serve two sessions with different roots concurrently.
 
 Contract:
 
@@ -976,6 +977,17 @@ InterAgentBoundaryPattern is one compiled deny pattern with its class \(D2 taxon
 	    Re     *regexp.Regexp
 	    Class  string
 	    Reason string
+	}
+
+<a name="JailedFenceChecker"></a>
+## type JailedFenceChecker
+
+JailedFenceChecker is the capability a fence must expose for the per\-session path jail \(\#138 semantics, re\-homed onto the session FenceStage per issue \#157\): the plain CheckPath/CheckCommand surface plus CheckPathJailed, which applies the jail narrowing. The internal/agent/fence\_stage.go factory mints \*FenceChecker instances that satisfy it; the capability probe keeps plain FenceChecker doubles valid.
+
+	type JailedFenceChecker interface {
+	    CheckPath(path string, op string) error
+	    CheckCommand(command string, workDir string) error
+	    CheckPathJailed(path string, op string, jailRoot string) error
 	}
 
 <a name="Message"></a>

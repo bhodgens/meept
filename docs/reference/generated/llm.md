@@ -807,6 +807,7 @@ Lock\-order rule: the coordinator never holds its own mutex while calling into t
 - [type StickyPin](<#StickyPin>)
 - [type StreamAbortedError](<#StreamAbortedError>)
   - [func \(e \*StreamAbortedError\) Error\(\) string](<#StreamAbortedError.Error>)
+  - [func \(e \*StreamAbortedError\) NonRetryable\(\) bool](<#StreamAbortedError.NonRetryable>)
 - [type StreamingChatter](<#StreamingChatter>)
   - [func AsStreamingChatter\(c Chatter\) \(StreamingChatter, bool\)](<#AsStreamingChatter>)
 - [type SummaryExtract](<#SummaryExtract>)
@@ -5921,11 +5922,12 @@ ModelConfig holds configuration for a specific LLM model endpoint.
 	    // attempt on transport deaths alone. The budget funds ONLY the
 	    // transport lane: throttle/server-error semantics stay pinned to
 	    // shortRetries. Zero (the default) is byte-identical to the
-	    // pre-feature behavior. Streaming guard: a mid-stream transport death
-	    // re-dials ONLY when zero content OR reasoning deltas were delivered
-	    // (the server restarts generation from scratch; replaying delivered
-	    // deltas would duplicate text — the delta-skip resume needs
-	    // Last-Event-ID support that local runtimes do not have).
+	    // pre-feature behavior. Streaming guard: a mid-stream transport
+	    // death re-dials ONLY when zero content, reasoning, OR tool-call
+	    // deltas were delivered (the server restarts generation from
+	    // scratch; replaying delivered deltas would duplicate text — the
+	    // delta-skip resume needs Last-Event-ID support that local runtimes
+	    // do not have).
 	    TransientRetries int
 	    // ConfiguredTimeout records whether the ORIGINATING config declared a
 	    // nonzero timeout: for this alias (tree 02 leaf 04, DECISIONS.md D10).
@@ -8721,9 +8723,11 @@ Store records the prompt vector \+ response after a LIVE exact\-miss response co
 SemanticCacheConfig is the llm\-side shape of Contract C4 \(json5 key llm.cache.semantic\). internal/config carries the identical JSON5 shape \(config.SemanticCacheConfig\) and converts at wiring time.
 
 	type SemanticCacheConfig struct {
-	    // Enabled turns the tier on. Default FALSE (opt-in per
-	    // docs/agents/opt-in-defaults.md): when false every method returns
-	    // the miss immediately without touching the embedder.
+	    // Enabled turns the tier on. Default TRUE (opt-out per
+	    // docs/agents/opt-in-defaults.md; the audit-P4 owner ruling flipped
+	    // the shipped default from the original opt-in posture — a727464e):
+	    // when false every method returns the miss immediately without
+	    // touching the embedder.
 	    Enabled bool
 	    // Threshold is the cosine similarity floor for serving. Default 0.95
 	    // (research addendum; supersedes master C4's 0.92).
@@ -8987,6 +8991,13 @@ StreamAbortedError indicates that a TTSR rule triggered mid\-stream, requiring t
 	func (e *StreamAbortedError) Error() string
 
 
+
+<a name="StreamAbortedError.NonRetryable"></a>
+### func \(\*StreamAbortedError\) NonRetryable
+
+	func (e *StreamAbortedError) NonRetryable() bool
+
+NonRetryable \(bughunt M2\): a TTSR abort is a caller\-policy decision, not a transport flake — the transient re\-dial lane must never re\-dial it. The Error\(\) text embeds the user\-authored rule condition verbatim, so without this a rule like \\bEOF\\b classified as a transport death and the re\-dial bypassed the already\-fired MarkInjected. Pinned by TestTransientTransportError\_StreamAbortedErrorNeverTransient.
 
 <a name="StreamingChatter"></a>
 ## type StreamingChatter
