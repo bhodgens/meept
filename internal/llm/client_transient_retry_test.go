@@ -9,10 +9,13 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/caimlas/meept/internal/llm/metrics"
 )
 
 // Transient-transport retry lane (ModelConfig.TransientRetries): a proxy
@@ -352,5 +355,385 @@ func TestChatWithDeltaCallback_MidStreamKillDoesNotRedial(t *testing.T) {
 	// once. The outer loop's default branch then returns the error.
 	if got.String() != "part" {
 		t.Fatalf("callback deltas = %q, want exactly %q (no duplicated text, no second answer)", got.String(), "part")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Bughunt 2026-11-24 fix pins (H7, M1, M3, L3, L4) — landed WITH the restore.
+// ---------------------------------------------------------------------------
+
+// nonRetryableTransportStringError carries a transport substring marker in
+// its message AND declares NonRetryable() (the L3 shape: QuotaResetError and
+// friends expose NonRetryable; a synthetic string-matching error proves the
+// guard runs BEFORE the substring block).
+type nonRetryableTransportStringError struct{}
+
+func (nonRetryableTransportStringError) Error() string {
+	return "stream read failed: unexpected EOF"
+}
+func (nonRetryableTransportStringError) NonRetryable() bool { return true }
+
+// Pin L3: a NonRetryable error whose message matches the substring markers
+// must NOT classify as transient — the explicit NonRetryable() guard exits
+// before the substring block.
+func TestTransientTransportError_NonRetryableBeatsSubstringMarkers(t *testing.T) {
+	err := nonRetryableTransportStringError{}
+	if isTransientTransportError(err) {
+		t.Fatal("NonRetryable error with EOF/stream markers classified transient (L3 guard missing)")
+	}
+	// wrapped: errors.AsType must see it through a ClientError wrapper
+	if isTransientTransportError(&ClientError{Message: "wrap", Cause: err}) {
+		t.Fatal("wrapped NonRetryable error classified transient (L3 guard does not unwrap)")
+	}
+	// control: the same message without NonRetryable() still classifies
+	if !isTransientTransportError(&ClientError{Message: "stream read failed: unexpected EOF", Cause: io.ErrUnexpectedEOF}) {
+		t.Fatal("control: plain transport error must still classify transient")
+	}
+}
+
+// redialProbeClient wraps a dispatch closure in the streaming lane wrapper so
+// a pin can count calls without an HTTP server (unit-level guard proof).
+func TestStreamLane_ReasoningOnlyDeathNotRedialed(t *testing.T) {
+	// Pin H7 (unit): the duplication guard must fire on REASONING-only
+	// partial state. Build retryState exactly as savePartialState leaves it
+	// after a reasoning-then-death attempt (no content, no tool calls).
+	var calls atomic.Int32
+	state := &streamRetryState{toolCallAccums: map[int]*toolCallAccum{}}
+	state.reasoning.WriteString("deep thought...") // delivered reasoning deltas
+	c := NewClient(&ModelConfig{ModelID: "m", TransientRetries: 3})
+	_, _, err := c.doStreamRequestRetryTransport(context.Background(),
+		&ModelConfig{ModelID: "m", TransientRetries: 3}, state,
+		func() (*Response, int, error) {
+			calls.Add(1)
+			return nil, 0, &ClientError{Message: "stream read failed", Cause: io.ErrUnexpectedEOF}
+		})
+	if err == nil {
+		t.Fatal("want transport error surfaced")
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("lane dialed %d times, want 1: reasoning-only stream must NOT be re-dialed (H7)", calls.Load())
+	}
+}
+
+// reasoningKillHandler delivers ONE reasoning delta per request, then dies.
+// killCount requests die; after that, streams a clean content answer.
+func reasoningKillHandler(kills *atomic.Int32, killCount int32, reasoning, full string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		n := kills.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		chunk := func(o map[string]any) {
+			b, _ := json.Marshal(o)
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", b)
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		chunk(map[string]any{"id": "x", "choices": []any{map[string]any{"delta": map[string]any{"role": "assistant"}}}})
+		if n <= killCount {
+			// reasoning delta (the H7 shape: thinking tokens, no content)
+			chunk(map[string]any{"id": "x", "choices": []any{map[string]any{"delta": map[string]any{"reasoning_content": reasoning}}}})
+			if hj, ok := w.(http.Hijacker); ok {
+				if conn, _, err := hj.Hijack(); err == nil {
+					_ = conn.Close()
+				}
+			}
+			return
+		}
+		chunk(map[string]any{"id": "x", "choices": []any{map[string]any{"delta": map[string]any{"content": full}}}})
+		chunk(map[string]any{"id": "x", "choices": []any{map[string]any{"delta": map[string]any{}, "finish_reason": "stop"}}})
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}
+}
+
+// Pin H7 (e2e-through-client): a stream that delivered REASONING deltas then
+// died on the transport is NOT re-dialed by the transient lane.
+func TestChatWithDeltaCallback_ReasoningStreamKillDoesNotRedial(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(reasoningKillHandler(&hits, 1, "pondering", "whole"))
+	defer srv.Close()
+
+	cfg := &ModelConfig{
+		ModelID:          "m",
+		BaseURL:          srv.URL,
+		APIKey:           "k",
+		MaxTokens:        64,
+		TransientRetries: 2,
+	}
+	c := NewClient(cfg)
+	_, err := c.ChatWithDeltaCallback(context.Background(),
+		[]ChatMessage{{Role: RoleUser, Content: "hi"}},
+		func(d string) error { return nil })
+	if err == nil {
+		t.Fatal("reasoning-stream kill must surface the transport error")
+	}
+	// Pre-H7 the guard only checked content+tool calls: the lane would have
+	// burned the re-dial (2 hits). Post-H7: exactly one dial, error surfaces.
+	if hits.Load() != 1 {
+		t.Fatalf("provider hit %d times, want 1 (H7: reasoning-only deltas block the re-dial)", hits.Load())
+	}
+}
+
+// Pin H7 (replay): saved reasoning carries into the resumed attempt's
+// Response.Reasoning via the pre-populate twin (mirrors the content replay).
+func TestDoStreamRequest_ResumedAttemptReplaysSavedReasoning(t *testing.T) {
+	// green stream that ends cleanly with content + usage
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: " + `{"id":"x","choices":[{"index":0,"delta":{"content":"tail"}}]}` + "\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+	cfg := &ModelConfig{ModelID: "m", BaseURL: srv.URL, MaxTokens: 64}
+	c := NewClient(cfg)
+	body, err := json.Marshal(map[string]any{"model": "m", "messages": []any{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := &streamRetryState{
+		toolCallAccums: map[int]*toolCallAccum{},
+		isResume:       true,
+	}
+	state.reasoning.WriteString("saved-thought")
+	resp, _, err := c.doStreamRequest(context.Background(), body, func(string) error { return nil }, state, cfg, false, "", "", &chatOptions{})
+	if err != nil {
+		t.Fatalf("doStreamRequest: %v", err)
+	}
+	if !strings.Contains(resp.Reasoning, "saved-thought") {
+		t.Fatalf("resumed response lost saved reasoning: %q", resp.Reasoning)
+	}
+}
+
+// Pin M1: an alias-selected model's transient_retries governs the lane —
+// withRequestModelOverride must carry the budget into the effective copy
+// (pre-fix, only costs rode along, so the client DEFAULT model's budget
+// silently applied to alias-served calls).
+func TestWithRequestModelOverride_CarriesTransientRetries(t *testing.T) {
+	clientCfg := &ModelConfig{ProviderID: "p", ModelID: "default", TransientRetries: 0}
+	alias := &ModelConfig{ProviderID: "p", ModelID: "flaky", TransientRetries: 3, CostPerMillionInput: 1, CostPerMillionOutput: 2}
+
+	// alias lane (WithResolvedModel)
+	var o chatOptions
+	WithResolvedModel(alias)(&o)
+	eff := withRequestModelOverride(clientCfg, &o)
+	if eff.TransientRetries != 3 {
+		t.Fatalf("alias-selected budget = %d, want 3 (M1: key is a no-op without the carry)", eff.TransientRetries)
+	}
+	if eff.ModelID != "flaky" {
+		t.Fatal("override did not apply")
+	}
+
+	// user-directive lane (WithModelOverride)
+	var o2 chatOptions
+	WithModelOverride(alias)(&o2)
+	eff2 := withRequestModelOverride(clientCfg, &o2)
+	if eff2.TransientRetries != 3 {
+		t.Fatalf("directive-selected budget = %d, want 3 (M1 user lane)", eff2.TransientRetries)
+	}
+
+	// zero-is-real: alias declaring no budget must NOT inherit the client's
+	clientFlaky := &ModelConfig{ProviderID: "p", ModelID: "default", TransientRetries: 5}
+	var o3 chatOptions
+	WithResolvedModel(&ModelConfig{ProviderID: "p", ModelID: "calm"})(&o3)
+	eff3 := withRequestModelOverride(clientFlaky, &o3)
+	if eff3.TransientRetries != 0 {
+		t.Fatalf("unbudgeted alias inherited client budget %d, want 0", eff3.TransientRetries)
+	}
+}
+
+// Pin M1 (behavioural): with the client default budget ZERO and the
+// alias-selected model budget 2, an alias-served call re-dials once and
+// succeeds. Pre-M1 this pins red: the lane read the default's 0 and
+// surfaced the EOF instead of re-dialing.
+func TestChatWithDeltaCallback_AliasSelectedBudgetGovernsLane(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(flakySSEHandler(&hits, 1))
+	defer srv.Close()
+
+	// client cfg has NO transient budget; the RESOLVED model carries it.
+	cfg := &ModelConfig{ProviderID: "p", ModelID: "default", BaseURL: srv.URL, MaxTokens: 64, TransientRetries: 0}
+	c := NewClient(cfg)
+	aliasMC := &ModelConfig{ProviderID: "p", ModelID: "flaky-alias", TransientRetries: 2}
+	_, err := c.ChatWithDeltaCallback(context.Background(),
+		[]ChatMessage{{Role: RoleUser, Content: "hi"}},
+		func(string) error { return nil },
+		WithResolvedModel(aliasMC))
+	if err != nil {
+		t.Fatalf("alias budget (2) must fund the re-dial of the pre-first-delta kill: %v", err)
+	}
+	if hits.Load() != 2 {
+		t.Fatalf("provider hit %d times, want 2 (1 death + 1 re-dial funded by the ALIAS model's key)", hits.Load())
+	}
+}
+
+// Pin M3: a streaming attempt that dies mid-body writes a failure-shaped
+// metrics row (provider_requests), mirroring the non-streaming doRequest
+// failure row. Pre-M3 the streaming death wrote NOTHING.
+func TestChatWithDeltaCallback_StreamDeathWritesMetricsRow(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(midStreamKillHandler(&hits, 99, "part", "whole"))
+	defer srv.Close()
+
+	store, err := newTestMetricsStore(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	cfg := &ModelConfig{
+		ProviderID: "p",
+		ModelID:    "m",
+		BaseURL:    srv.URL,
+		APIKey:     "k",
+		MaxTokens:  64,
+		// budget 0 + mid-stream deltas: guard blocks the re-dial, error
+		// surfaces — exactly the died-attempt shape the row must capture.
+	}
+	c := NewClient(cfg, WithMetricsStore(store))
+	_, err = c.ChatWithDeltaCallback(context.Background(),
+		[]ChatMessage{{Role: RoleUser, Content: "hi"}},
+		func(string) error { return nil })
+	if err == nil {
+		t.Fatal("permanent mid-stream kill must surface an error")
+	}
+
+	// Record() is async; poll the row count up.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := store.RefreshStats(context.Background()); err != nil {
+			t.Fatalf("RefreshStats: %v", err)
+		}
+		stats, err := store.GetStats(context.Background(), "p", "m", 1)
+		if err != nil {
+			t.Fatalf("GetStats: %v", err)
+		}
+		if stats != nil && stats.RequestCount > 0 && stats.ErrorCount > 0 {
+			return // the died streaming attempt ledgered a failure row
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("no provider_requests failure row for the died streaming attempt (M3)")
+}
+
+func newTestMetricsStore(t *testing.T) (*metrics.Store, error) {
+	t.Helper()
+	storeCfg := metrics.StoreConfig{
+		DBPath:           filepath.Join(t.TempDir(), "metrics.db"),
+		RetentionDays:    1,
+		StatsWindowHours: 1,
+		RefreshInterval:  time.Minute,
+	}
+	store, err := metrics.NewStore(storeCfg)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	if err := store.Initialize(context.Background()); err != nil {
+		store.Close()
+		t.Fatalf("Initialize: %v", err)
+	}
+	// recordWorker consumes Record() only after StartBackground (mirrors
+	// the anthropic_test metrics harness).
+	store.StartBackground(context.Background())
+	return store, nil
+}
+
+// Pin L4: the outer short-retry loop must hand each attempt a FRESH
+// retryState, so deltas saved by a CANCELLED/partial earlier attempt cannot
+// suppress a later legitimate pre-first-delta re-dial. Sequence through the
+// real client: attempt 1 serves an empty completion (the loop continues,
+// retryState still live), attempt 2 dies BEFORE its first delta
+// (legitimate re-dial), attempt 3 answers. With a shared/stale retryState
+// carrying deltas, the guard would block the attempt-2 re-dial.
+func TestChatWithDeltaCallback_EmptyRetryThenTransportDeathRedialed(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := hits.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		chunk := func(o map[string]any) {
+			b, _ := json.Marshal(o)
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", b)
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		switch n {
+		case 1:
+			// empty completion: role chunk + [DONE], no content
+			chunk(map[string]any{"id": "x", "choices": []any{map[string]any{"delta": map[string]any{"role": "assistant"}}}})
+			_, _ = w.Write([]byte("data: [DONE]\n\n"))
+		case 2:
+			// pre-first-delta transport death (would be blocked by stale
+			// partial state under the pre-L4 shared-retryState shape)
+			chunk(map[string]any{"id": "x", "choices": []any{map[string]any{"delta": map[string]any{"role": "assistant"}}}})
+			if hj, ok := w.(http.Hijacker); ok {
+				if conn, _, err := hj.Hijack(); err == nil {
+					_ = conn.Close()
+				}
+			}
+		default:
+			// clean answer
+			chunk(map[string]any{"id": "x", "choices": []any{map[string]any{"delta": map[string]any{"content": "at-last"}}}})
+			chunk(map[string]any{"id": "x", "choices": []any{map[string]any{"delta": map[string]any{}, "finish_reason": "stop"}}})
+			_, _ = w.Write([]byte("data: [DONE]\n\n"))
+		}
+	}))
+	defer srv.Close()
+
+	cfg := &ModelConfig{
+		ModelID:          "m",
+		BaseURL:          srv.URL,
+		APIKey:           "k",
+		MaxTokens:        64,
+		TransientRetries: 2,
+	}
+	c := NewClient(cfg)
+	var got strings.Builder
+	resp, err := c.ChatWithDeltaCallback(context.Background(),
+		[]ChatMessage{{Role: RoleUser, Content: "hi"}},
+		func(d string) error { got.WriteString(d); return nil })
+	if err != nil {
+		t.Fatalf("empty-retry then transport death must recover via re-dial: %v", err)
+	}
+	if resp.Content != "at-last" || got.String() != "at-last" {
+		t.Fatalf("content=%q callback=%q, want at-last once", resp.Content, got.String())
+	}
+}
+
+// Pin L4 (unit twin): the wrapper's guard reads ONLY the state it is handed,
+// so the loop's fresh-per-attempt construction is what makes a stale saved
+// page invisible to the next attempt. Directly: stale accumulated state
+// blocks (the B-03/H7 correctness), fresh zeroed state re-dials (L4's loop
+// invariant).
+func TestStreamLane_StaleStateBlocksButFreshAttemptStateRedialed(t *testing.T) {
+	cfg := &ModelConfig{ModelID: "m", TransientRetries: 2}
+	c := NewClient(cfg)
+
+	// stale accumulated (a prior attempt's delivered page) — the guard must
+	// block THIS state's lane:
+	stale := &streamRetryState{toolCallAccums: map[int]*toolCallAccum{}}
+	stale.accumulated.WriteString("prior page")
+	var calls atomic.Int32
+	_, _, _ = c.doStreamRequestRetryTransport(context.Background(), cfg, stale,
+		func() (*Response, int, error) {
+			calls.Add(1)
+			return nil, 0, &ClientError{Message: "stream read failed", Cause: io.ErrUnexpectedEOF}
+		})
+	if calls.Load() != 1 {
+		t.Fatalf("stale-state lane dialed %d times, want 1 (duplication guard)", calls.Load())
+	}
+
+	// fresh state (what the loop now builds per attempt) — the lane must
+	// spend its budget:
+	fresh := &streamRetryState{toolCallAccums: map[int]*toolCallAccum{}}
+	calls.Store(0)
+	_, _, _ = c.doStreamRequestRetryTransport(context.Background(), cfg, fresh,
+		func() (*Response, int, error) {
+			calls.Add(1)
+			return nil, 0, &ClientError{Message: "stream read failed", Cause: io.ErrUnexpectedEOF}
+		})
+	if calls.Load() != 3 { // 1 dial + 2 re-dials
+		t.Fatalf("fresh-state lane dialed %d times, want 3 (budget re-armed on fresh state — L4)", calls.Load())
 	}
 }

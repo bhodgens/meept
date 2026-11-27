@@ -5912,14 +5912,20 @@ ModelConfig holds configuration for a specific LLM model endpoint.
 	    // re-dial goes to the SAME provider and consumes NO alias failure, so
 	    // a single flaky hop does not burn an endpoint-cooldown strike or
 	    // rotate the request to a different model. It lives OUTSIDE the
-	    // shortRetries budget (attempts = shortRetries + TransientRetries) and
-	    // funds ONLY the transport lane: throttle/server-error semantics stay
-	    // pinned to shortRetries. Zero (the default) is byte-identical to the
+	    // shortRetries budget but is re-armed per OUTER attempt (bughunt M2):
+	    // the worst-case provider dials are shortRetries x (1 + N), NOT
+	    // shortRetries + N. Pure connection-death storms cost 1 + N in
+	    // practice: once the lane exhausts, the transport error hits the
+	    // classification switch's default branch (Classify(0) -> FailureNone)
+	    // which RETURNS immediately, so the outer loop never reaches a second
+	    // attempt on transport deaths alone. The budget funds ONLY the
+	    // transport lane: throttle/server-error semantics stay pinned to
+	    // shortRetries. Zero (the default) is byte-identical to the
 	    // pre-feature behavior. Streaming guard: a mid-stream transport death
-	    // re-dials ONLY when zero content deltas were delivered (the server
-	    // restarts generation from scratch; replaying delivered deltas would
-	    // duplicate text — the delta-skip resume needs Last-Event-ID support
-	    // that local runtimes do not have).
+	    // re-dials ONLY when zero content OR reasoning deltas were delivered
+	    // (the server restarts generation from scratch; replaying delivered
+	    // deltas would duplicate text — the delta-skip resume needs
+	    // Last-Event-ID support that local runtimes do not have).
 	    TransientRetries int
 	    // ConfiguredTimeout records whether the ORIGINATING config declared a
 	    // nonzero timeout: for this alias (tree 02 leaf 04, DECISIONS.md D10).

@@ -34,14 +34,27 @@ boundaries:
   handling). The lane lives in the three OpenAI retry loops via
   `doRequestRetryTransport` / `doStreamRequestRetryTransport` (client.go):
   it funds ONLY the no-status transport class after the refusal/quota/
-  overflow/empty early-exits, never a dead ctx, and the streaming twin
-  carries a DUPLICATION GUARD — a stream that already delivered content
-  or tool-call deltas is never re-dialed (a second answer would
-  concatenate; the B-03 resume path owns that shape). A re-dial does NOT
-  consume a shortRetries attempt and does NOT record an alias failure
-  while budget remains; exhaustion returns the raw transport error to the
-  classification switch, which returns it (default branch) exactly as the
-  pre-feature code did. Pinned by `client_transient_retry_test.go` (unit)
+  overflow/empty early-exits (and never a `NonRetryable()`-declaring
+  error, the L3 belt-and-braces guard), never a dead ctx, and the
+  streaming twin carries a DUPLICATION GUARD — a stream that already
+  delivered content, REASONING, or tool-call deltas is never re-dialed
+  (a second answer would concatenate; the B-03 resume path owns that
+  shape — H7: reasoning deltas count, savePartialState saves them).
+  A re-dial does NOT consume a shortRetries attempt and does NOT record
+  an alias failure while budget remains; exhaustion returns the raw
+  transport error to the classification switch, which returns it (default
+  branch) exactly as the pre-feature code did. BUDGET MATH (M2): the
+  lane re-arms every outer attempt, so the worst case is
+  shortRetries x (1 + TransientRetries) provider dials, NOT
+  shortRetries + TransientRetries; pure transport storms cost 1 + N in
+  practice because the exhausted error exits at the default branch. The
+  budget is the SERVING model's (M1): `WithResolvedModel`/
+  `WithModelOverride` carry TransientRetries alongside identity/prices and
+  `withRequestModelOverride` folds it into the effective copy. The
+  streaming retryState is re-created per outer attempt (L4) so stale
+  partial state from a cancelled attempt cannot suppress a later
+  legitimate re-dial, and a died streaming attempt writes a failure-shaped
+  metrics row (M3). Pinned by `client_transient_retry_test.go` (unit)
   and `e2e/suites/continuity-regressions/transient_retry_test.go`
   (manifest continuity-regressions-11/12).
 - **Empty/whitespace completions are provider flakes, not fatal errors.**

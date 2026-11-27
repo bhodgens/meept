@@ -170,9 +170,17 @@ Each model declares capabilities and limits:
 a connection-level error and no HTTP status. Each such death normally
 consumes a rotation strike and can push the request to a fallback model.
 Set this to 1-3 to re-dial the SAME provider first; the budget never
-funds a retry when content deltas already reached the caller (no
-duplicated streaming text) and never touches throttle/quota/refusal
-lanes.
+funds a retry when content OR reasoning deltas already reached the caller
+(no duplicated streaming text) and never touches throttle/quota/refusal
+lanes. Budget math: the re-dial lane re-arms inside every short-retry
+attempt, so the worst-case provider dials are
+`shortRetries x (1 + transient_retries)`; in practice a pure
+connection-death storm costs `1 + transient_retries`, because once the
+lane exhausts, the transport error exits the short loop immediately. The
+budget follows the model that actually serves the request (the alias- or
+directive-selected model's value, not the client default's). A stream
+that dies mid-body also records a failure-shaped metrics row with the
+usage chunks it captured before the death.
 
 **Use case for `max_concurrency`:** Set this limit to prevent overwhelming:
 - Local LLM servers (llama.cpp, MLX, Ollama) that have limited GPU memory

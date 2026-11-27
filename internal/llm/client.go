@@ -256,6 +256,15 @@ func isTransientTransportError(err error) bool {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
+	// Bughunt L3 (belt-and-braces): a typed error that declares itself
+	// NonRetryable is never a transport flake, even when its message
+	// happens to carry a transport substring ("... EOF"). Today every
+	// typed NonRetryable error carries an HTTP status and already exits
+	// via the status check below; this guard makes that safety explicit
+	// instead of a side effect of construction.
+	if nr, ok := errors.AsType[NonRetryableError](err); ok && nr.NonRetryable() {
+		return false
+	}
 	// An HTTP status means the provider ANSWERED — the status lanes own it.
 	if status, _ := errorStatusAndHeader(err); status != 0 {
 		return false
@@ -323,15 +332,16 @@ func (c *Client) doRequestRetryTransport(
 
 // doStreamRequestRetryTransport is the streaming twin. Same lane, plus the
 // DUPLICATION GUARD: a stream that already delivered user-visible deltas
-// (content or partial tool-call arguments captured into retryState) is
-// NEVER re-dialed — the server restarts generation from scratch, so a
-// second partial answer would concatenate with the first (the same
-// duplicated-content defect the attempt-tagged PM callback solves at the
-// rotation layer, internal/llm AGENTS.md / provider_manager.go
+// (content, reasoning (bughunt H7), or partial tool-call arguments captured
+// into retryState) is NEVER re-dialed — the server restarts generation from
+// scratch, so a second partial answer would concatenate with the first (the
+// same duplicated-content defect the attempt-tagged PM callback solves at
+// the rotation layer, internal/llm AGENTS.md / provider_manager.go
 // "accumulate with attempt tagging"). The partial state lives in
 // retryState only after savePartialState ran (every doStreamRequest error
-// path calls it before returning), so the zero-content check is: no
-// accumulated content AND no tool-call accumulators.
+// path calls it before returning), so the zero-delta check is: no
+// accumulated content AND no accumulated reasoning AND no tool-call
+// accumulators.
 func (c *Client) doStreamRequestRetryTransport(
 	ctx context.Context,
 	cfg *ModelConfig,
@@ -344,7 +354,13 @@ func (c *Client) doStreamRequestRetryTransport(
 		left = cfg.TransientRetries
 	}
 	for left > 0 && err != nil && ctx.Err() == nil && isTransientTransportError(err) {
-		if retryState != nil && (retryState.accumulated.Len() > 0 || len(retryState.toolCallAccums) > 0) {
+		// Bughunt H7: the guard must also see REASONING deltas — a thinking
+		// model that delivered reasoning tokens then died has
+		// accumulated.Len()==0, and re-dialing would discard the dead
+		// attempt's reasoning (the server restarts from scratch, so the
+		// reasoning the caller already got is lost either way, and usage
+		// under-counts). reasoning is now saved by savePartialState.
+		if retryState != nil && (retryState.accumulated.Len() > 0 || len(retryState.toolCallAccums) > 0 || retryState.reasoning.Len() > 0) {
 			c.logger.Warn("Mid-stream transport failure with delivered deltas: not re-dialing (duplication guard)",
 				"provider", cfg.ProviderID,
 				"model", cfg.ModelID,
@@ -418,6 +434,11 @@ type streamRetryState struct {
 	lastEventID string
 	// accumulated content from prior attempts
 	accumulated strings.Builder
+	// reasoning from prior attempts (bughunt H7): savePartialState used to
+	// skip reasoningBuilder, so a thinking model that emitted reasoning
+	// tokens then died looked "zero-delta" to the transient re-dial guard
+	// and got re-dialed, discarding the dead attempt's reasoning + usage.
+	reasoning strings.Builder
 	// tool call accumulators from prior attempts
 	toolCallAccums map[int]*toolCallAccum
 	// usage from prior attempts
@@ -1609,6 +1630,17 @@ type chatOptions struct {
 	// model's per-million prices (twin of resolvedCost*).
 	overrideCostInput  float64
 	overrideCostOutput float64
+	// resolvedTransientRetries/overrideTransientRetries carry the SELECTED
+	// model's same-provider re-dial budget alongside its identity/prices
+	// (bughunt M1) — twins of the cost fields, set by WithResolvedModel /
+	// WithModelOverride and folded by withRequestModelOverride: with a
+	// selection active, eff.TransientRetries is the BUDGET OF THE MODEL
+	// THAT ACTUALLY SERVES, not the client default model's. Without it,
+	// setting transient_retries on a flaky alias member is a no-op for
+	// every alias/directive-served call. Zero is the selected model's real
+	// budget (byte-identical pre-feature handling), never "unset".
+	resolvedTransientRetries int
+	overrideTransientRetries int
 	// difficulty is the caller's per-turn routing difficulty (1-5,
 	// leaf 07 / Contract C11), set with WithDifficulty and consumed by
 	// leaf 07's sticky difficulty predicate. Zero (the default) =
@@ -1731,6 +1763,10 @@ func WithResolvedModel(mc *ModelConfig) ChatOption {
 		o.resolvedModelID = mc.ModelID
 		o.resolvedCostInput = mc.CostPerMillionInput
 		o.resolvedCostOutput = mc.CostPerMillionOutput
+		// Bughunt M1: the re-dial budget rides with the selection, mirroring
+		// the cost fields — the lane must spend the ALIAS MEMBER's
+		// transient_retries, not the client default model's.
+		o.resolvedTransientRetries = mc.TransientRetries
 	}
 }
 
@@ -1751,6 +1787,9 @@ func WithModelOverride(mc *ModelConfig) ChatOption {
 		o.overrideModelID = mc.ModelID
 		o.overrideCostInput = mc.CostPerMillionInput
 		o.overrideCostOutput = mc.CostPerMillionOutput
+		// Bughunt M1: budget rides with the directive too (twin of the
+		// resolved channel above).
+		o.overrideTransientRetries = mc.TransientRetries
 	}
 }
 
@@ -1849,9 +1888,15 @@ func withRequestModelOverride(cfg *ModelConfig, o *chatOptions) *ModelConfig {
 	case "user-directive":
 		eff.CostPerMillionInput = o.overrideCostInput
 		eff.CostPerMillionOutput = o.overrideCostOutput
+		// Bughunt M1: the selected model's re-dial budget replaces the
+		// client default's, exactly like the costs — transient_retries set
+		// on an alias member must govern the calls that member serves.
+		// Zero is that member's real budget (lane inert), never "inherit".
+		eff.TransientRetries = o.overrideTransientRetries
 	case "alias":
 		eff.CostPerMillionInput = o.resolvedCostInput
 		eff.CostPerMillionOutput = o.resolvedCostOutput
+		eff.TransientRetries = o.resolvedTransientRetries
 	}
 	return &eff
 }
@@ -2985,14 +3030,22 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 	// retries surfaces as ThrottleBackoffError only when no tokens flowed;
 	// a mid-stream failure returns its own error (existing behavior).
 	var lastErr error
-	retryState := &streamRetryState{
-		toolCallAccums: make(map[int]*toolCallAccum),
-	}
+	// L4 (bughunt 2026-11-24): retryState is RE-CREATED per outer attempt.
+	// It used to persist across the short-retry loop: after a ctx-cancel
+	// (or any B-03 savePartialState) left accumulated content, a LATER
+	// legitimate pre-first-delta transport death on a fresh outer attempt
+	// was suppressed by the duplication guard reading stale partial state.
+	// Fresh-per-attempt keeps the guard honest: it only ever sees the
+	// CURRENT attempt's delivered deltas.
+	var retryState *streamRetryState
 	shortRetries := c.shortRetryBudget()
 	now := time.Now()
 	plan := DefaultBackoffPlan(FailureThrottle, now, c.policyCfg())
 
 	for attempt := range shortRetries {
+		retryState = &streamRetryState{
+			toolCallAccums: make(map[int]*toolCallAccum),
+		}
 		if attempt > 0 {
 			// D4: Set resume flag for retry attempts
 			retryState.isResume = true
@@ -3373,6 +3426,15 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 		accumulated.WriteString(retryState.accumulated.String())
 		usage = retryState.usage
 	}
+	// Bughunt H7 (mirrors the content replay above): reasoning from a prior
+	// partial attempt carries into this attempt's builder so a resumed
+	// stream's final Response keeps the full reasoning. NOTE: reasoning
+	// deltas are never re-sent through onDelta (the callback is content-
+	// only), so the operative protection for already-delivered reasoning
+	// is the transient lane's no-re-dial guard, not this replay.
+	if retryState != nil && retryState.reasoning.Len() > 0 {
+		reasoningBuilder.WriteString(retryState.reasoning.String())
+	}
 
 	scanner := bufio.NewScanner(resp.Body)
 	// B-05 FIX: Raise scanner buffer to 10 MiB so large SSE lines
@@ -3395,15 +3457,18 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 		deltasSent = retryState.deltasSent
 	}
 
-	// savePartialState copies accumulated content, tool calls, usage, and
-	// deltasSent into retryState so a retry attempt can skip already-delivered
-	// deltas (B-03 fix).
+	// savePartialState copies accumulated content, reasoning, tool calls,
+	// usage, and deltasSent into retryState so a retry attempt can skip
+	// already-delivered deltas (B-03 fix) and so the transient re-dial guard
+	// sees delivered reasoning (bughunt H7).
 	savePartialState := func() {
 		if retryState == nil {
 			return
 		}
 		retryState.accumulated = strings.Builder{}
 		retryState.accumulated.WriteString(accumulated.String())
+		retryState.reasoning = strings.Builder{}
+		retryState.reasoning.WriteString(reasoningBuilder.String())
 		retryState.usage = usage
 		retryState.deltasSent = deltasSent
 		retryState.toolCallAccums = make(map[int]*toolCallAccum, len(toolCallAccums))
@@ -3553,6 +3618,49 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 	if err := scanner.Err(); err != nil {
 		// B-03 FIX: Save partial state so retry can skip delivered deltas.
 		savePartialState()
+		// Bughunt M3: a stream that died mid-body previously wrote NO
+		// metrics row at all (the non-streaming doRequest failure site
+		// records one) — the provider answered 200 and burned tokens, but
+		// the observability ledger saw zero requests for the attempt.
+		// Mirror the doRequest failure-row shape: Success:false, tokens
+		// from the usage chunks captured before the death, HTTP 200 (the
+		// status the server actually sent), transport class for the
+		// connection-death shape (ClassifyError alone would bucket EOF as
+		// "other").
+		if c.metricsStore != nil {
+			errType := metrics.ClassifyError(err, 0)
+			if isTransientTransportError(err) {
+				errType = metrics.ErrorTypeNetwork
+			}
+			latencyMs := int64(0)
+			if chatOpts != nil && !chatOpts.ttftStart.IsZero() {
+				latencyMs = time.Since(chatOpts.ttftStart).Milliseconds()
+			}
+			promptTokens := usage.PromptTokens
+			completionTokens := usage.CompletionTokens
+			cachedTokens := usage.CachedTokens
+			status := resp.StatusCode
+			//nolint:gosec // goroutine outlives request context
+			go func() {
+				record := metrics.RequestRecord{
+					Timestamp:        time.Now(),
+					ProviderID:       providerID,
+					ModelID:          modelID,
+					PromptTokens:     promptTokens,
+					CompletionTokens: completionTokens,
+					CachedTokens:     cachedTokens,
+					LatencyMs:        latencyMs,
+					HTTPStatus:       status,
+					ErrorType:        errType,
+					ErrorMessage:     "stream transport death",
+					Success:          false,
+					CostUSD:          0, // no completed-answer cost on error path
+				}
+				if rerr := c.metricsStore.Record(context.Background(), record); rerr != nil {
+					c.logger.Debug("stream-death metrics record failed", "error", rerr)
+				}
+			}()
+		}
 		// S3-9 FIX: body is already closed above; don't return resp.
 		return nil, 0, &ClientError{Message: "stream read failed", Cause: err}
 	}
