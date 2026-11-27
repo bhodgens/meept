@@ -354,6 +354,16 @@ func (m *PlanManager) runSynthesisReclaimPass(ctx context.Context) (synthesisRec
 			if p.TaskID != "" || seen[p.ID] {
 				continue
 			}
+			// Ruling B (issue #177): a quick-plan-tagged approved row is
+			// driven by the APPROVE RESUMER (createTask + AdoptTask),
+			// never by this pass — re-driving Synthesize on a zero-phase
+			// brief hits the completion guard and marks the contract done
+			// while its execution never ran (the M11 lie). The tag makes
+			// the posture explicit even before an adopt failure stamps it.
+			if p.Kind == QuickPlanKind {
+				counts.skipped++
+				continue
+			}
 			// C-5 (D5): a quick_plan row whose binding failed twice
 			// stays approved UNBOUND on purpose — the real task is
 			// already running unlinked. Re-driving Synthesize here
@@ -618,6 +628,16 @@ func (m *PlanManager) SubmitPlan(ctx context.Context, planID string) error {
 // The from-set stays pinned to pending_approval — the table's
 // synthesizing->approved row exists for the reclaimer's stranded-lease path,
 // and a normal approve must never fire it (that would stomp a live expander).
+//
+// Issue #177 owner ruling B: a QUICK-PLAN-TAGGED row (Plan.Kind ==
+// QuickPlanKind, no bound task) never runs the Synthesize tail. Its brief
+// carries zero phases by construction, so Synthesize's zero-phase guard
+// would complete the contract instantly WITHOUT executing it — the M11 lie
+// at approve time. The tagged row instead routes to the execution resumer
+// (daemon-wired createTask + AdoptTask + orchestrator dispatch, the SAME
+// lane as the dispatcher's auto-approve branch). No resumer wired => the
+// row stays approved unbound (never completed): honest degradation, and the
+// synthesis reclaimer is kind-guarded so it can never silently expand it.
 func (m *PlanManager) ApprovePlan(ctx context.Context, planID, sessionID, by string) error {
 	if err := m.transitionFrom(ctx, planID, []PlanState{StatePendingApproval}, StateApproved, kanban.EventReasonApprove); err != nil {
 		return err
@@ -1234,14 +1254,35 @@ func (m *PlanManager) stalledExecutingReason(ctx context.Context, p *Plan, looku
 // config. Idempotent for crash re-drive: an already-parked or already-
 // approved row returns nil; any other state is refused with
 // ErrPlanNotModifiable so a completed/cancelled row can never be re-parked.
-func (m *PlanManager) SubmitForApproval(ctx context.Context, planID string) error {
+//
+// The kind argument stamps the PARKING LANE onto the row's Plan.Kind
+// column (issue #177 owner ruling B): the quick_plan dispatcher passes
+// QuickPlanKind so a later operator plan.approve can branch the parked
+// brief into execution instead of Synthesize's zero-phase completion
+// guard; every other parker passes "" (the legacy, non-quick-plan shape).
+// The stamp rides the same targeted-column write that already carries the
+// park, so a pre-column database never sees it and a stamped park cannot
+// half-park (state CAS committed, stamp lost).
+func (m *PlanManager) SubmitForApproval(ctx context.Context, planID string, kind string) error {
 	plan, err := m.store.GetPlan(ctx, planID)
 	if err != nil {
 		return fmt.Errorf("submit for approval: %w", err)
 	}
 	switch plan.State {
 	case StatePendingApproval, StateApproved:
-		// Already past the draft gate (re-drive after a mid-sequence crash).
+		// Already past the draft gate (re-drive after a mid-sequence
+		// crash). A re-park carrying a lane kind still stamps it: the
+		// quick_plan crash re-drive may reach this branch with the
+		// column write of the first park lost between the CAS and the
+		// stamp, and approve's branch depends on the marker surviving.
+		if kind != "" && plan.Kind != kind {
+			if err := m.updatePlanColumns(ctx, planID, func(p *Plan) {
+				p.Kind = kind
+				p.UpdatedAt = time.Now().UTC()
+			}); err != nil {
+				return err
+			}
+		}
 		return nil
 	case StateDraft, StatePlanning:
 		// Planning rows re-enter draft via the same rescue SubmitPlan uses.
@@ -1253,6 +1294,20 @@ func (m *PlanManager) SubmitForApproval(ctx context.Context, planID string) erro
 		}
 	default:
 		return fmt.Errorf("%w: plan %s is in state %s, SubmitForApproval needs draft", ErrPlanNotModifiable, planID, plan.State)
+	}
+
+	// Park-time lane stamp (ruling B): only rows parked BY THE QUICKPLAN
+	// LANE carry the marker, and only a non-empty kind writes. Plain
+	// parks (kind "") leave the column at its committed value untouched
+	// — no UPDATE at all on the legacy path, so non-quick-plan parks stay
+	// byte-identical to the pre-ruling shape.
+	if kind != "" {
+		if err := m.updatePlanColumns(ctx, planID, func(p *Plan) {
+			p.Kind = kind
+			p.UpdatedAt = time.Now().UTC()
+		}); err != nil {
+			return err
+		}
 	}
 
 	phases, err := m.store.GetPhases(ctx, planID)
@@ -1298,7 +1353,10 @@ func (m *PlanManager) SubmitAndApproveNoSynthesis(ctx context.Context, planID st
 	case StateApproved:
 		return nil // crash re-drive: the approve half already committed
 	case StateDraft, StatePlanning:
-		if err := m.SubmitForApproval(ctx, planID); err != nil {
+		// The quick_plan auto-approve lane stamps its own park (ruling B
+		// posture symmetry: every row this method mints is a quick-plan
+		// contract, tagged or not).
+		if err := m.SubmitForApproval(ctx, planID, QuickPlanKind); err != nil {
 			return err
 		}
 	case StatePendingApproval:

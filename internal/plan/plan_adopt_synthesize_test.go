@@ -57,7 +57,7 @@ func TestSubmitForApproval_ParksRegardlessOfConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
-	if err := mgr.SubmitForApproval(ctx, p.ID); err != nil {
+	if err := mgr.SubmitForApproval(ctx, p.ID, QuickPlanKind); err != nil {
 		t.Fatalf("SubmitForApproval: %v", err)
 	}
 	got, err := store.GetPlan(ctx, p.ID)
@@ -67,9 +67,20 @@ func TestSubmitForApproval_ParksRegardlessOfConfig(t *testing.T) {
 	if got.State != StatePendingApproval {
 		t.Errorf("state after SubmitForApproval: got %q, want %q", got.State, StatePendingApproval)
 	}
-	// Idempotent re-submit on an already-parked row: no-op success.
-	if err := mgr.SubmitForApproval(ctx, p.ID); err != nil {
+	// Ruling B park-time tag pin: a park carrying QuickPlanKind stamps the
+	// lane onto the row so the later operator approve can branch.
+	if got.Kind != QuickPlanKind {
+		t.Errorf("kind after quick-plan park: got %q, want %q", got.Kind, QuickPlanKind)
+	}
+	// Idempotent re-submit on an already-parked row: no-op success, and an
+	// empty kind must never CLOBBER the existing lane tag.
+	if err := mgr.SubmitForApproval(ctx, p.ID, ""); err != nil {
 		t.Errorf("SubmitForApproval on parked row: got %v, want nil", err)
+	}
+	if reg, rerr := store.GetPlan(ctx, p.ID); rerr != nil {
+		t.Fatalf("re-read after empty-kind re-park: %v", rerr)
+	} else if reg.Kind != QuickPlanKind {
+		t.Errorf("empty-kind re-park clobbered the lane tag: kind=%q, want %q", reg.Kind, QuickPlanKind)
 	}
 }
 
@@ -204,7 +215,7 @@ func TestAdoptTask_RejectsUnapprovedStates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
-	if err := mgr.SubmitForApproval(ctx, parked.ID); err != nil {
+	if err := mgr.SubmitForApproval(ctx, parked.ID, ""); err != nil {
 		t.Fatalf("SubmitForApproval: %v", err)
 	}
 	if err := mgr.AdoptTask(ctx, parked.ID, "task-y"); err == nil {

@@ -2434,7 +2434,12 @@ func (d *Dispatcher) routeToPlanWithOverride(ctx context.Context, input string, 
 	// the approval/reclaim paths.
 	if IntentType(intent.Type) == IntentQuickPlan {
 		if intent.ApprovalRequested {
-			if err := d.planManager.SubmitForApproval(ctx, p.ID); err != nil {
+			// Ruling B (issue #177): the park carries the quick-plan lane
+			// tag so the operator's plan.approve branches into EXECUTION
+			// (createTask + AdoptTask via the plan-approve resumer seam)
+			// instead of Synthesize's zero-phase guard, which used to
+			// complete the brief instantly without ever running it.
+			if err := d.planManager.SubmitForApproval(ctx, p.ID, plan.QuickPlanKind); err != nil {
 				d.logger.Warn("failed to park quick_plan plan for approval",
 					"plan_id", p.ID,
 					"error", err,

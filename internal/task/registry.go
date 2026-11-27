@@ -746,6 +746,17 @@ func (r *Registry) Store() *Store {
 	return r.store
 }
 
+// Bus returns the registry's message bus — the same instance every task
+// event publishes on. Components that were handed the registry (rather than
+// the bus) by the daemon use this to dispatch on the bus the registry is
+// already bound to, so the two can never diverge across bus instances
+// (issue #177 ruling B: the plan-approve resumer publishes orchestrator.plan
+// on the daemon's one real bus). Nil when the registry was built without a
+// bus (nil-bus no-op rule); callers must nil-guard.
+func (r *Registry) Bus() *bus.MessageBus {
+	return r.bus
+}
+
 // InterruptManager returns the interrupt manager.
 func (r *Registry) InterruptManager() *InterruptManager {
 	return r.interruptMgr

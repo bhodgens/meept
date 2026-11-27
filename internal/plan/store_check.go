@@ -49,6 +49,7 @@ const rebuiltPlansDDL = `CREATE TABLE plans_new (
 	prompt TEXT,
 	result_topic TEXT,
 	synthesis_error TEXT,
+	kind TEXT,
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL
 )`

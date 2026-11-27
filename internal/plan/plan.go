@@ -93,12 +93,27 @@ type Plan struct {
 	// plan (issue #148 per-goal outcome marking): an approved plan whose
 	// expansion failed carries WHY here until a re-drive succeeds (which
 	// clears it). Empty means no outstanding synthesis failure.
-	SynthesisError  string           `json:"synthesis_error,omitempty"`
+	SynthesisError string `json:"synthesis_error,omitempty"`
+	// Kind stamps the lane that minted the plan row. Empty is a plain
+	// docs/plan-machine plan; QuickPlanKind marks a row created by the
+	// quick_plan dispatch lane (issue #177 owner ruling B). The lane
+	// identity must survive the park: an operator plan.approve branches
+	// on it to route a parked brief into execution instead of the
+	// zero-phase Synthesize tail (which would complete the brief without
+	// ever running it — the M11 lie at approve time). Legacy rows and
+	// non-quick-plan parks keep "" (the pre-column NULL scans to empty).
+	Kind            string           `json:"kind,omitempty"`
 	SourceSession   string           `json:"source_session,omitempty"`
 	RevisionCount   int              `json:"revision_count,omitempty"`
 	Phases          []PlanPhase      `json:"phases,omitempty"`
 	PlanningContext *PlanningContext `json:"planning_context,omitempty"`
 }
+
+// QuickPlanKind is the Plan.Kind stamp for rows created by the quick_plan
+// dispatch lane (issue #177 ruling B). The value deliberately matches
+// IntentQuickPlan's SuggestedMode string so surfaces can correlate a plan row
+// with the mode that minted it without a second lookup.
+const QuickPlanKind = "quick_plan"
 
 // PlanPhase represents a named phase within a plan.
 type PlanPhase struct {
