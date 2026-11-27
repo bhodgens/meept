@@ -1539,6 +1539,14 @@ func (m *Manager) Hire(ctx context.Context, req HireRequest) (*Employee, error) 
 	if err := m.botManager.CreateBot(ctx, def); err != nil {
 		return nil, fmt.Errorf("hire: create bot: %w", err)
 	}
+	// Same-id re-hire (T-1/H6): a retired employee's fail-closed marker must
+	// not leak onto the fresh bot — clearRetired's doc comment promises
+	// exactly this, and without it every post-re-hire round is skipped as
+	// "employee retired mid-flight" until daemon restart. Clear here, at
+	// the hire-commit point (the CreateBot success boundary), NOT on the
+	// rollback path: rollbackHiredBot re-marks via retireEmployee, so a
+	// rolled-back hire correctly stays flagged until a REAL re-hire lands.
+	m.clearRetired(req.ID)
 	// From here on, every step that can fail must roll the bot rows back
 	// (see rollbackHiredBot) so a partial hire never permanently burns the
 	// id.
@@ -2058,6 +2066,23 @@ func (m *Manager) triggerViaGoalLoop(ctx context.Context, id string, payload map
 		// (goal-completion finding #3).
 		result.Status = "skipped"
 		result.SkipReason = skip.Reason
+		m.emitMetric("employee.invocations", 1, map[string]string{
+			"employee_id": id,
+			"tier":        tierTag,
+			"outcome":     "skipped",
+		})
+		m.emitBudgetMetric(ctx, id)
+		return result, nil
+	}
+	// T-2/M9 post-Decide re-check: the M15 fail-closed check ran at round
+	// ENTRY only, and Retire's invoke-mutex drain is BOUNDED — a round
+	// already past the entry check when the retire lands keeps running on
+	// the drained mutex and would otherwise execute against the deleted
+	// bot and report "completed". Re-check after Decide, before anything
+	// is published; fail the round closed with the same SkipReason shape.
+	if m.isRetired(id) {
+		result.Status = "skipped"
+		result.SkipReason = "employee retired mid-flight"
 		m.emitMetric("employee.invocations", 1, map[string]string{
 			"employee_id": id,
 			"tier":        tierTag,
