@@ -147,6 +147,27 @@ type Client struct {
 	perDayUTCDate string // "2006-01-02" in UTC; date change resets perDayCount
 
 	dayCounter DailySendCounter // nil = in-process perDayCount fallback
+
+	// consentReplyBypass skips ONLY the M14 recipient-allowlist gate in
+	// checkEgressGates (WithConsentReplyBypass). The daemon's consent hook
+	// opts in at construction: TCPA STOP/START/HELP confirmations must
+	// reach arbitrary inbound senders the operator cannot pre-list. Caps
+	// and every other gate are UNCHANGED on this path.
+	consentReplyBypass bool
+}
+
+// WithConsentReplyBypass opts the client's SendConsentReply path out of the
+// M14 recipient-allowlist gate ONLY. It exists for the daemon's TCPA
+// consent-reply hook (internal/daemon/sms_reply_glue.go): STOP/START/HELP
+// confirmations are solicited replies to arbitrary inbound numbers, so the
+// static outbound allowlist can never contain them. The per-call/per-day
+// caps, the E.164 validation, and every other egress gate still run; only
+// allowlist membership is skipped, and each bypassed send logs one loud
+// Warn naming the sender so the operator sees out-of-allowlist traffic.
+// Regular SendSMS2 calls on a bypass-enabled client keep the full M14
+// fail-closed posture.
+func WithConsentReplyBypass() Option {
+	return func(c *Client) { c.consentReplyBypass = true }
 }
 
 // WithAllowedNumbers installs the outbound SMS recipient allowlist
@@ -466,15 +487,26 @@ type send2Response struct {
 // used for Retry-After resolution), so UTC date rollover is deterministic
 // in tests. The per-day counter resets the first time a UTC date different
 // from the stored one is observed.
-func (c *Client) checkEgressGates(to string) error {
+//
+// skipAllowlist (M10 / WithConsentReplyBypass) exempts the recipient from
+// the M14 allowlist membership check ONLY — the TCPA consent-reply path.
+// Every other gate (both volume caps, the durable day counter, atomic
+// admission) runs byte-identically, and the bypassed admission still
+// consumes cap budget.
+func (c *Client) checkEgressGates(to string, skipAllowlist bool) error {
 	// Allowlist (M14): FAIL-CLOSED — an empty set refuses EVERY
 	// recipient, matching the voice dial gate (voice/dial.go
 	// outboundPolicyGate). Non-empty set: exact E.164 membership only.
-	if _, ok := c.allowedNumbers[to]; !ok {
-		if len(c.allowedNumbers) == 0 {
-			return fmt.Errorf("telnyx messaging: to %q: recipient allowlist unset (fail-closed): %w", to, ErrRecipientNotAllowed)
+	// M10: the consent-reply path skips this check entirely (TCPA
+	// courtesy confirmations go to senders the operator cannot
+	// pre-list); caps below are NOT skipped.
+	if !skipAllowlist {
+		if _, ok := c.allowedNumbers[to]; !ok {
+			if len(c.allowedNumbers) == 0 {
+				return fmt.Errorf("telnyx messaging: to %q: recipient allowlist unset (fail-closed): %w", to, ErrRecipientNotAllowed)
+			}
+			return fmt.Errorf("telnyx messaging: to %q: %w", to, ErrRecipientNotAllowed)
 		}
-		return fmt.Errorf("telnyx messaging: to %q: %w", to, ErrRecipientNotAllowed)
 	}
 	now := time.Now
 	if c.clock != nil {
@@ -519,6 +551,39 @@ func (c *Client) checkEgressGates(to string) error {
 	return nil
 }
 
+// SendConsentReply is the M10 consent-reply send variant: TCPA
+// STOP/START/HELP confirmations must reach the inbound sender even when
+// that number is not on (or absent from) the recipient allowlist — the
+// operator cannot pre-list arbitrary inbound numbers. The recipient
+// allowlist gate is skipped ONLY when the client opted in via
+// WithConsentReplyBypass (otherwise SendConsentReply keeps the exact M14
+// fail-closed posture); every other gate — E.164 validation, both volume
+// caps, the durable day counter, atomic admission — runs identically to
+// SendSMS2, and a bypassed admission consumes cap budget. Each send that
+// actually bypassed the allowlist logs ONE loud Warn (sender + reply
+// kind) so the operator sees out-of-allowlist traffic.
+//
+// Everything else is the SendSMS2 hardened path verbatim (Idempotency-Key
+// header, base-URL scheme policy, typed errors, PII-hygienic error body).
+func (c *Client) SendConsentReply(ctx context.Context, req SendRequest, kind string) (SendResult, error) {
+	if !ValidE164(req.To) {
+		return SendResult{}, fmt.Errorf("telnyx messaging: to %q: %w", req.To, ErrInvalidE164)
+	}
+	// M10: skip ONLY the allowlist check, and only when opted in. A
+	// client without WithConsentReplyBypass refuses exactly like
+	// SendSMS2 — the bypass is an explicit construction choice, never a
+	// per-call escape hatch.
+	skipAllowlist := c.consentReplyBypass
+	if err := c.checkEgressGates(req.To, skipAllowlist); err != nil {
+		return SendResult{}, err
+	}
+	if skipAllowlist {
+		c.log.Warn("telnyx messaging: consent reply sent outside recipient allowlist (WithConsentReplyBypass)",
+			"to", req.To, "kind", kind)
+	}
+	return c.postSendSMS2(ctx, req)
+}
+
 // SendSMS2 posts one message to /v2/messages with the send hardening:
 // Idempotency-Key header (caller key passed through byte-exact, else a
 // fresh uuid), per-message webhook_url only when set, media_urls +
@@ -544,8 +609,10 @@ func (c *Client) SendSMS2(ctx context.Context, req SendRequest) (SendResult, err
 	// Issue #165 slices 1-2 (F-03): egress gates run at the TOP of the
 	// send path, BEFORE any HTTP POST. Refusals carry errors.Is-checkable
 	// sentinels; no confirmation gate lives here (sibling slice handles
-	// that). A refused send consumes NO cap budget.
-	if err := c.checkEgressGates(req.To); err != nil {
+	// that). A refused send consumes NO cap budget. The allowlist gate
+	// is NOT bypassable through SendSMS2 — only SendConsentReply opts
+	// out of it (M10).
+	if err := c.checkEgressGates(req.To, false); err != nil {
 		return SendResult{}, err
 	}
 	// from is client state (WithFromNumber); when unset the profile
@@ -553,6 +620,24 @@ func (c *Client) SendSMS2(ctx context.Context, req SendRequest) (SendResult, err
 	if c.fromNumber != "" && !ValidE164(c.fromNumber) {
 		return SendResult{}, fmt.Errorf("telnyx messaging: from %q: %w", c.fromNumber, ErrInvalidE164)
 	}
+	return c.postSendSMS2(ctx, req)
+}
+
+// postSendSMS2 is the shared hardened POST body behind SendSMS2 and
+// SendConsentReply (all egress gates have already run by the time a
+// caller reaches this): Idempotency-Key header (caller key passed
+// through byte-exact, else a fresh uuid), per-message webhook_url only
+// when set, media_urls + type "MMS" for media sends, a typed
+// *RateLimitError on HTTP 429, and non-2xx errors that carry the status
+// code plus a 512B-truncated body snippet (PII hygiene).
+//
+// Idempotency key minting: pkg/id has Generate(prefix)/TraceID (hex, no
+// uuid helper), so this uses github.com/google/uuid (direct dep, used
+// in-repo already) — the fresh-key-per-call posture is ported from
+// strategist-usa pkg/services/telnyx_provider.go:307-318 (a caller-side
+// retry is a new logical send, never a replay; Telnyx dedupes on
+// Idempotency-Key).
+func (c *Client) postSendSMS2(ctx context.Context, req SendRequest) (SendResult, error) {
 	key := req.IdempotencyKey
 	if key == "" {
 		key = uuid.NewString()

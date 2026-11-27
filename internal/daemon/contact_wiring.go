@@ -265,7 +265,15 @@ func BuildContactChain(cfg *config.Config, w *VoiceWiring, ledger effects.Ledger
 			// Issue #165 follow-up: share the daemon's durable day counter
 			// with the dialer so the per-day SMS cap survives a restart.
 			// Nil (no capped config) keeps the in-process fallback.
-			telnyx.WithDailySendCounter(w.dailyCounter))
+			telnyx.WithDailySendCounter(w.dailyCounter),
+			// M10: this same client doubles as the consent hook's DIRECT
+			// sender (sms_reply_glue.go). TCPA STOP/START/HELP
+			// confirmations go to arbitrary inbound senders the operator
+			// cannot pre-list, so the recipient-allowlist gate must be
+			// skippable for that path: WithConsentReplyBypass exempts ONLY
+			// SendConsentReply from the allowlist (caps and every other
+			// gate unchanged; each bypassed send logs a Warn).
+			telnyx.WithConsentReplyBypass())
 		if cerr != nil {
 			log.Warn("contact wiring: telnyx messaging client failed; sms channel skipped", "error", cerr)
 		} else {

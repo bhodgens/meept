@@ -32,11 +32,16 @@ package daemon
 //	ReplyOther -> no side effects.
 //
 // CONFIRMATION SENDS ARE DIRECT (02-glue task 2): the STOP/START/HELP
-// confirmations go through telnyx.Client.SendSMS2 on the hook's own
-// sender, NEVER the contact channel — the channel consults the D5
+// confirmations go through telnyx.Client.SendConsentReply on the hook's
+// own sender, NEVER the contact channel — the channel consults the D5
 // MessagingOptOut guard and would refuse to deliver the very STOP
 // confirmation that must reach an just-opted-out number (TCPA courtesy-
-// confirmation exception). Every send-failure leg is best-effort: the
+// confirmation exception). The client is built with
+// WithConsentReplyBypass (contact_wiring.go), which exempts ONLY the M14
+// recipient-allowlist gate on this path: consent senders are arbitrary
+// inbound numbers the operator cannot pre-list (M10). The caps and every
+// other egress gate still run, and each out-of-allowlist consent send
+// logs a Warn client-side. Every send-failure leg is best-effort: the
 // consent STATE change already landed durably in contacts.db, so a
 // returned error logs at Warn and the hook continues to the next leg
 // (and the seam itself swallows hook errors regardless — §K3).
@@ -160,7 +165,7 @@ func consentStop(d consentReplyDeps, log *slog.Logger, msg voicetelnyx.Message) 
 			firstErr = fmt.Errorf("daemon: consent STOP contact lookup: %w", err)
 		}
 	}
-	if err := consentSend(d, log, msg.From, text); err != nil && firstErr == nil {
+	if err := consentSend(d, log, msg.From, text, "stop"); err != nil && firstErr == nil {
 		firstErr = err
 	}
 	return firstErr
@@ -197,7 +202,7 @@ func consentStart(d consentReplyDeps, log *slog.Logger, msg voicetelnyx.Message)
 			firstErr = fmt.Errorf("daemon: consent START contact lookup: %w", err)
 		}
 	}
-	if err := consentSend(d, log, msg.From, text); err != nil && firstErr == nil {
+	if err := consentSend(d, log, msg.From, text, "start"); err != nil && firstErr == nil {
 		firstErr = err
 	}
 	return firstErr
@@ -217,7 +222,7 @@ func consentHelp(d consentReplyDeps, log *slog.Logger, msg voicetelnyx.Message) 
 		log.Debug("daemon: HELP throttled; no reply", "event_id", msg.EventID)
 		return nil
 	}
-	return consentSend(d, log, msg.From, d.HelpReply)
+	return consentSend(d, log, msg.From, d.HelpReply, "help")
 }
 
 // consentYes implements the #132 dispatch-ack leg: resolve the pending
@@ -245,13 +250,19 @@ func consentYes(d consentReplyDeps, log *slog.Logger, msg voicetelnyx.Message) e
 }
 
 // consentSend is the DIRECT courtesy send (02-glue task 2). It goes
-// through the hook's own telnyx.Client.SendSMS2 — NEVER the contact
-// channel — because the channel consults the D5 MessagingOptOut guard
-// BEFORE dialing and would refuse to deliver the confirmation to the
-// number that just opted out. The TCPA courtesy-confirmation exception
-// is exactly this path. Failures return the error for the seam to log;
-// E.164-invalid senders are skipped (SendSMS2 would refuse anyway).
-func consentSend(d consentReplyDeps, log *slog.Logger, to, text string) error {
+// through the hook's own telnyx.Client.SendConsentReply — NEVER the
+// contact channel — because the channel consults the D5 MessagingOptOut
+// guard BEFORE dialing and would refuse to deliver the confirmation to
+// the number that just opted out. The TCPA courtesy-confirmation
+// exception is exactly this path, and (M10) the sender number is an
+// arbitrary inbound party the M14 recipient allowlist can never
+// pre-list, so the daemon-built client opts in to WithConsentReplyBypass
+// at construction: the allowlist gate is skipped for this send (with a
+// Warn logged client-side) while the caps and every other gate still
+// run. Failures return the error for the seam to log; E.164-invalid
+// senders are skipped (SendConsentReply would refuse anyway). `kind` is
+// the consent leg label (stop/start/help) carried into the bypass Warn.
+func consentSend(d consentReplyDeps, log *slog.Logger, to, text, kind string) error {
 	if d.Sender == nil || text == "" || to == "" {
 		return nil
 	}
@@ -261,8 +272,8 @@ func consentSend(d consentReplyDeps, log *slog.Logger, to, text string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if _, err := d.Sender.SendSMS2(ctx, telnyx.SendRequest{To: to, Text: text}); err != nil {
-		log.Warn("daemon: consent confirmation send failed", "error", err)
+	if _, err := d.Sender.SendConsentReply(ctx, telnyx.SendRequest{To: to, Text: text}, kind); err != nil {
+		log.Warn("daemon: consent confirmation send failed", "kind", kind, "error", err)
 		return fmt.Errorf("daemon: consent confirmation send: %w", err)
 	}
 	return nil

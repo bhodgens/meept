@@ -3391,6 +3391,38 @@ func (c *Client) doStreamRequest(ctx context.Context, body []byte, onDelta Delta
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		c.logger.Debug("stream request failed", "error", err)
+		// Bughunt L10: a transport death BEFORE the response headers used
+		// to write no provider_requests row at all (the M3 mid-body branch
+		// covers only scanner.Err) — the exact shape this lane exists for
+		// (proxy worker killed before answering) was dark in the ledger.
+		// Mirror the doRequest failure-row shape: no status (the server
+		// never answered), transport class for the dial-death shape, zero
+		// tokens (nothing streamed).
+		if c.metricsStore != nil {
+			errType := metrics.ClassifyError(err, 0)
+			if isTransientTransportError(err) {
+				errType = metrics.ErrorTypeNetwork
+			}
+			providerID, modelID := cfg.ProviderID, cfg.ModelID
+			ms := c.metricsStore
+			logger := c.logger
+			//nolint:gosec // goroutine outlives request context
+			go func() {
+				record := metrics.RequestRecord{
+					Timestamp:    time.Now(),
+					ProviderID:   providerID,
+					ModelID:      modelID,
+					HTTPStatus:   0,
+					ErrorType:    errType,
+					ErrorMessage: "stream request failed before response",
+					Success:      false,
+					CostUSD:      0, // nothing streamed
+				}
+				if rerr := ms.Record(context.Background(), record); rerr != nil {
+					logger.Debug("pre-response stream-death metrics record failed", "error", rerr)
+				}
+			}()
+		}
 		return nil, 0, &ClientError{Message: "request failed", Cause: err}
 	}
 

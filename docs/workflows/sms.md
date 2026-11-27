@@ -58,10 +58,11 @@ POST. `ErrRecipientNotAllowed` and `ErrSendCapExceeded` are
 `errors.Is`-checkable. The production client gets these options from
 `internal/daemon/contact_wiring.go`. When messaging is enabled with no
 allowlist or cap, the arming path logs a single startup warning
-(`messagingUnrestrictedWarning`, internal/daemon/messaging_arming.go);
-note that under the M14 posture an unset allowlist no longer means
-"any number may be contacted" — sends are refused until
-`allowed_numbers` lists recipients. The outbound voice dial used by
+(`messagingUnrestrictedWarning`, internal/daemon/messaging_arming.go) —
+the warning text states the M14 posture: sends are refused fail-closed
+until `allowed_numbers` lists recipients ("any E.164 number may be
+contacted" was the retired pre-M14 text and no longer appears). The
+outbound voice dial used by
 the same contact chain has always had this fail-closed allowlist:
 `voice.allowed_numbers` null/empty refuses ALL outbound dials (inbound
 calls are not gated).
@@ -109,8 +110,16 @@ degraded sidecar). Nil on every disabled boot.
 ## Consent semantics
 
 - STOP from a KNOWN contact sets `messaging_opt_out`; the confirmation
-  reply rides the documented TCPA exception (it deliberately bypasses
-  the opt-out guard — an opted-out contact solicited the reply).
+  reply rides the documented TCPA exception on two gates at once: it
+  deliberately bypasses the opt-out guard (an opted-out contact
+  solicited the reply), and — since the M10 fix — the M14 recipient
+  allowlist too: consent senders are arbitrary inbound numbers the
+  operator cannot pre-list, so the consent hook's client opts in to
+  `WithConsentReplyBypass` (telnyx.Client.SendConsentReply). ONLY the
+  allowlist gate is skipped; the volume caps and every other egress gate
+  still run, and each out-of-allowlist consent send logs one Warn naming
+  the sender. A regular outbound send keeps the full fail-closed
+  posture.
   Known gaps (accepted at review): STOP from an UNKNOWN number is not
   persisted (no ghost row — the opt-out is lost if the contact is
   seeded later), and HELP auto-replies go to opted-out contacts too.
