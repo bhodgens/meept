@@ -65,9 +65,11 @@ type Embedder interface {
 // llm.cache.semantic). internal/config carries the identical JSON5 shape
 // (config.SemanticCacheConfig) and converts at wiring time.
 type SemanticCacheConfig struct {
-	// Enabled turns the tier on. Default FALSE (opt-in per
-	// docs/agents/opt-in-defaults.md): when false every method returns
-	// the miss immediately without touching the embedder.
+	// Enabled turns the tier on. Default TRUE (opt-out per
+	// docs/agents/opt-in-defaults.md; the audit-P4 owner ruling flipped
+	// the shipped default from the original opt-in posture — a727464e):
+	// when false every method returns the miss immediately without
+	// touching the embedder.
 	Enabled bool
 	// Threshold is the cosine similarity floor for serving. Default 0.95
 	// (research addendum; supersedes master C4's 0.92).

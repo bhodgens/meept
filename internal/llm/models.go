@@ -310,11 +310,12 @@ type ModelConfig struct {
 	// attempt on transport deaths alone. The budget funds ONLY the
 	// transport lane: throttle/server-error semantics stay pinned to
 	// shortRetries. Zero (the default) is byte-identical to the
-	// pre-feature behavior. Streaming guard: a mid-stream transport death
-	// re-dials ONLY when zero content OR reasoning deltas were delivered
-	// (the server restarts generation from scratch; replaying delivered
-	// deltas would duplicate text — the delta-skip resume needs
-	// Last-Event-ID support that local runtimes do not have).
+	// pre-feature behavior. Streaming guard: a mid-stream transport
+	// death re-dials ONLY when zero content, reasoning, OR tool-call
+	// deltas were delivered (the server restarts generation from
+	// scratch; replaying delivered deltas would duplicate text — the
+	// delta-skip resume needs Last-Event-ID support that local runtimes
+	// do not have).
 	TransientRetries int
 	// ConfiguredTimeout records whether the ORIGINATING config declared a
 	// nonzero timeout: for this alias (tree 02 leaf 04, DECISIONS.md D10).

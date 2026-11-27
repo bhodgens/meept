@@ -374,25 +374,25 @@ pinned by the tree's gate tests (`health_checker_verdict_internal_test.go`,
   opt-out, see docs/agents/opt-in-defaults.md) is a second-chance
   lookup: exact-key `Get` first, semantic `LookupBehindMiss` second,
   budget gate third — wired on the three chat-variant cache paths
-  (client.go:986 non-streaming, :1285 with-progress, :2974
-  streaming-delta; the other exact-key cache paths client.go:996,
-  :1266, :2650 stay exact-only). The tier consults the semantic store
+  (client.go:1007 non-streaming, :1306 with-progress, :2995
+  streaming-delta; the other exact-key cache paths client.go:1000,
+  :1298, :2992 stay exact-only). The tier consults the semantic store
   only inside the exact-key-cache gate (`!chatOpts.noCache &&
   c.tokenCache != nil`), so on a default install (llm.cache.enabled
   false) it never runs at all — one more reason default-on is inert.
   Contracts (owner-accepted, P4):
   (1) READERS/WRITERS: only the chat completion paths may read or
   write the tier (semanticLookupBehindMiss client.go:536,
-  semanticStoreAfterSuccess client.go:586; Warm never puts — see the
+  semanticStoreAfterSuccess client.go:607; Warm never puts — see the
   context-warm R8 rule). NEVER SERVED: requests/answers carrying tool
   calls are exempt at three layers — store-side skip
-  (semantic_cache.go:293 `response.HasToolCalls()`), serve-side skip
-  (semantic_cache.go:217 store walk, :276 verify-band recheck), and the
+  (semantic_cache.go:294 `response.HasToolCalls()`), serve-side skip
+  (semantic_cache.go:219 store walk, :278 verify-band recheck), and the
   client seam guard (client.go:556 `resp.HasToolCalls()` → fall
   through to the live path; the tool call IS the answer).
   (2) VERIFY-FLOOR BAND: candidates scoring in [VerifyFloor, Threshold)
   are stage-2 re-embedded and direct-cosined; any verify failure
-  degrades to a miss (verifyBehindBand, semantic_cache.go:260). Default
+  degrades to a miss (verifyBehindBand, semantic_cache.go:262). Default
   threshold 0.95 (`DefaultSemanticCacheThreshold`, schema.go:1487-1488).
   `NormalizeSemanticCacheDefaults` (schema.go:1501) clamps values at or
   above Threshold (and negatives) to 0 = band disabled. Band selection

@@ -136,8 +136,10 @@ func semanticCacheConfigFromSchema(sc config.SemanticCacheConfig, defaultTTLMin 
 func buildSemanticCacheTier(cfg *config.Config, memoryEmbedder vector.Provider, logger *slog.Logger) *llm.SemanticCache {
 	sc := cfg.LLM.Cache.Semantic
 	if !sc.Enabled {
-		// Opt-in default false: zero behavior, no embedder call, no log
-		// (byte-identical to pre-leaf boot).
+		// Explicitly disabled: zero behavior, no embedder call, no log
+		// (byte-identical to pre-leaf boot). NOTE: the SHIPPED default is
+		// opt-OUT (true) since the audit-P4 ruling — this branch runs only
+		// on an explicit `enabled: false`.
 		return nil
 	}
 	embedder, source := resolveSemanticEmbedder(sc, memoryEmbedder, logger)
