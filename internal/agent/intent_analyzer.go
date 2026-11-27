@@ -383,11 +383,19 @@ func (ia *IntentAnalyzer) adjudicateApproval(ctx context.Context, input string) 
 	}
 	messages = maskSideSendMessages(ia.piiMask, messages, sideSendSessionID(ia.scopeProvider))
 
-	resp, err := ia.client.Chat(ctx, messages,
+	// Fixwave 2026-11-27 (bughunt A-7/L3): the adjudication side-send
+	// resolves the session scope exactly like the primary call above —
+	// per-call scopes attached via WithScopeOptions win, else the wired
+	// provider's scope. Without this the adjudication request crossed to
+	// the provider WITHOUT the session-affinity header its primary call
+	// carried (empty scope sends no header, per the affinity contract).
+	// The bounded 64-token best-effort posture is unchanged; only the
+	// scope options are threaded.
+	resp, err := ia.client.Chat(ctx, messages, resolveCallScope(ctx, ia.scopeProvider, []llm.ChatOption{
 		llm.WithMaxTokens(64),
 		llm.WithTemperature(0.0),
 		noThinkingOpt(),
-	)
+	})...)
 	if err != nil || resp == nil || strings.TrimSpace(resp.Content) == "" {
 		ia.logger.Debug("approval adjudication degraded; keeping oneshot posture", "error", err)
 		return false
