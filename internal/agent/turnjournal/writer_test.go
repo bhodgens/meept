@@ -268,20 +268,26 @@ func TestJournalWriterRingKeepsLegacySemanticsBelowCap(t *testing.T) {
 	}
 }
 
-func TestJournalWriterFailedCloseKeepsDedupMarkers(t *testing.T) {
+func TestJournalWriterFailedCloseClearsDedupMarker(t *testing.T) {
+	// A2-7 (issue #189): the legacy posture kept the closedRuns marker even
+	// when CloseRun FAILED — so the Warn's promise "run stays open for
+	// rehydrate" was false in-process: every later OnRunClose for that turn
+	// was a silent no-op until daemon restart. The marker is now written
+	// only after a successful close; this test pins the corrected posture
+	// (it previously asserted the bug).
 	store := &failingStore{}
 	w := NewJournalWriter(store, slog.New(slog.DiscardHandler))
 	ctx := context.Background()
 
 	w.OnRunStart(ctx, "turn-f", "s", []byte("p"))
-	w.OnRunClose(ctx, "turn-f") // CloseRun fails -> keep markers
+	w.OnRunClose(ctx, "turn-f") // CloseRun fails -> closed marker must NOT persist
 
 	w.runStartedMu.Lock()
 	defer w.runStartedMu.Unlock()
-	if !w.runStartedRuns["turn-f"] || !w.closedRuns["turn-f"] {
-		t.Fatal("failed close must keep BOTH dedup markers (legacy posture; boot rehydrate settles the run)")
+	if w.closedRuns["turn-f"] {
+		t.Fatal("failed close kept the closedRuns marker: the run could never be re-closed in-process")
 	}
-	if len(w.closedOrder) != 1 {
-		t.Fatalf("closedOrder should track the marked close: %v", w.closedOrder)
+	if len(w.closedOrder) != 0 {
+		t.Fatalf("closedOrder tracked a FAILED close: %v", w.closedOrder)
 	}
 }

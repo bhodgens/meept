@@ -671,6 +671,16 @@ func (sp *StrategicPlanner) PlanCritiqueFlow(ctx context.Context, req PlanReques
 		// it: the draft stays at the human seal.
 		outcome = critiqueOutcomeHostileSkipped
 	}
+	// A2-8 (bughunt 2026-11-25 gaps, 02-agent-plan.md): the review-failed
+	// self-seal asymmetry. A critic transport/unparsable failure zeroes the
+	// objections, so a quick_plan draft reached the autonomous self-seal
+	// with ZERO review while a merely-skipped hostile pass (C5) was refused
+	// one — a plan with no review at all got MORE autonomy than a plan with
+	// a missing second reader. The fail-open promise stands: the plan is
+	// still never BLOCKED, the draft survives with outcome=critic_fail, and
+	// the flow falls to the human seal (the same lane plan mode already
+	// uses, and the documented posture when self-seal is off).
+	reviewFailed := criticFailed || hostileSkipped
 	if len(blocking) > 0 {
 		outcome = critiqueOutcomeExhausted
 	} else if criticFailed {
@@ -741,10 +751,11 @@ func (sp *StrategicPlanner) PlanCritiqueFlow(ctx context.Context, req PlanReques
 	//                         leaf 01's single-shot fallback).
 	if req.Mode != "quick_plan" {
 		provenance := sealProvenanceUser
-		if sp.selfSealFlag() && !hostileSkipped {
-			// Contract C5: a skipped-hostile draft is never handed a
-			// planner-self default - it is treated like a draft with an
-			// open blocking item and stays at the human seal.
+		if sp.selfSealFlag() && !reviewFailed {
+			// Contract C5 + A2-8: a draft whose hostile pass was skipped
+			// OR whose critic never returned a parseable verdict is never
+			// handed a planner-self default - it is treated like a draft
+			// with an open blocking item and stays at the human seal.
 			provenance = sealProvenancePlannerSelf
 		}
 		if err := sp.stampSealProvenance(req.TaskID, provenance); err != nil {
@@ -764,10 +775,16 @@ func (sp *StrategicPlanner) PlanCritiqueFlow(ctx context.Context, req PlanReques
 	// Self-seal: stamp provenance planner-self, then seal through the
 	// existing seal pipeline (SealDraft's sealed-hash pattern, then
 	// SealPlan: persist steps → spec → executing → promote → schedule).
-	// Contract C5: a skipped-hostile draft does NOT self-seal - it stays
-	// at the human seal (plan mode path above), stamped hostile_skipped.
-	if hostileSkipped {
-		sp.recordMetric("strategic_planner.seal_provenance", 1, map[string]string{"by": sealProvenanceUser, "stage": "hostile_skipped"})
+	// Contract C5 + A2-8: a draft whose hostile pass was skipped OR whose
+	// critic review failed does NOT self-seal - it stays at the human seal
+	// (plan mode path above) with its failure outcome stamped. The plan is
+	// never blocked: the draft survives and the seal request awaits a human.
+	if reviewFailed {
+		stage := "review_failed"
+		if hostileSkipped {
+			stage = "hostile_skipped"
+		}
+		sp.recordMetric("strategic_planner.seal_provenance", 1, map[string]string{"by": sealProvenanceUser, "stage": stage})
 		return &critiqueFlowResult{
 			Action:          critiqueActionAwaitSeal,
 			CompiledPhases:  compiled.Phases,

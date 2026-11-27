@@ -1697,19 +1697,19 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 	// the truncation note as the whole answer. The disclosure now appends
 	// to whatever completed reply exists (including the synthesized
 	// ledger reply) and only stands alone when reply is still empty.
+	// L13 (bughunt 2026-11-24): the notice used to be appended HERE,
+	// ahead of the single reply choke point below. Appending it to a pure
+	// tool-result JSON reply broke the guard's suffix test
+	// (toolResultJSONKey requires the trimmed reply to END in the matching
+	// brace), so the machine dump shipped to the user unguarded with the
+	// notice glued on the end. The disclosure is now stashed and re-applied
+	// AFTER applyReplyGuardWithFallback: the guard sees the reply as it was
+	// written, and the notice's user-visible position is unchanged (still
+	// the tail of the final reply; the empty-reply standalone case is
+	// preserved).
+	var truncNotice string
 	if err == nil {
-		if notice := h.truncationDisclosure(conversationID); notice != "" {
-			if response.Reply != "" {
-				response.Reply += "\n\n" + notice
-			} else {
-				response.Reply = notice
-			}
-			if syncRoutingNotice != "" {
-				syncRoutingNotice += "\n" + notice
-			} else {
-				syncRoutingNotice = notice
-			}
-		}
+		truncNotice = h.truncationDisclosure(conversationID)
 	}
 	// Single reply choke point (e2e run 5, 2026-09-11 A2/t4): the platform
 	// introspection fast path (Dispatcher.RouteToAgent →
@@ -1739,6 +1739,24 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 		SessionID:      req.SessionID,
 		ConversationID: conversationID,
 	}, guardFallback)
+
+	// L13: re-apply the truncation disclosure after the guard (see the
+	// stash site above). The guard has now seen the reply as written, so a
+	// pure tool-result JSON reply is replaced BEFORE the notice rides on
+	// the tail; a genuine prose reply gets the notice appended exactly as
+	// before, and the empty-reply case still stands the notice alone.
+	if truncNotice != "" {
+		if response.Reply != "" {
+			response.Reply += "\n\n" + truncNotice
+		} else {
+			response.Reply = truncNotice
+		}
+		if syncRoutingNotice != "" {
+			syncRoutingNotice += "\n" + truncNotice
+		} else {
+			syncRoutingNotice = truncNotice
+		}
+	}
 
 	// Classification provenance (leaf 01 of classifier-observability):
 	// attach metadata describing how this reply was classified — method,

@@ -367,10 +367,14 @@ func TestCritiqueLoop_ExhaustedSealsWithKnownRisks(t *testing.T) {
 	}
 }
 
-// TestCritiqueLoop_MalformedCriticFailOpen pins pin 4: malformed critic
-// output → fail-open (zero objections that round → clean seal) + the
-// critic_fail metric. A plan is never blocked because the critic
-// misformatted.
+// TestCritiqueLoop_MalformedCriticFailOpen pins pin 4 as revised by
+// A2-8: malformed critic output → fail-open for the PLAN (zero
+// objections that round, no revise call, no error, draft survives with
+// outcome=critic_fail) but the self-seal is REFUSED - a plan reviewed by
+// nobody does not seal itself autonomously. The flow lands at the human
+// seal (await_seal) exactly like the C5 hostile-skip lane. The old pin
+// asserted critiqueActionHandled here; that asserted the asymmetry A2-8
+// removes.
 func TestCritiqueLoop_MalformedCriticFailOpen(t *testing.T) {
 	store := newCritiqueMetricStore(t)
 	chatter := &repairCaptureChatter{
@@ -387,8 +391,8 @@ func TestCritiqueLoop_MalformedCriticFailOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlanCritiqueFlow: %v", err)
 	}
-	if res.Action != critiqueActionHandled {
-		t.Fatalf("action = %q, want %q (fail-open still seals)", res.Action, critiqueActionHandled)
+	if res.Action != critiqueActionAwaitSeal {
+		t.Fatalf("action = %q, want %q (A2-8: review failure waits at the human seal)", res.Action, critiqueActionAwaitSeal)
 	}
 	if res.RoundsUsed != 1 {
 		t.Errorf("rounds_used = %d, want 1 (malformed critic = zero objections)", res.RoundsUsed)
@@ -396,7 +400,20 @@ func TestCritiqueLoop_MalformedCriticFailOpen(t *testing.T) {
 	if got := critiqueMetricTotal(t, store, "strategic_planner.critique_outcome", map[string]string{"outcome": critiqueOutcomeCriticFail}); got != 1 {
 		t.Errorf("critique_outcome{outcome=critic_fail} = %d, want 1", got)
 	}
-	// Zero objections: no revise call.
+	// A2-8: the refusal must not stamp planner-self anywhere, and the
+	// seal_provenance metric records the human handoff with the critic-fail
+	// review stage.
+	fresh, err := sp.taskStore.GetByID(tsk.ID)
+	if err != nil || fresh == nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got := metadataStringForTest(t, fresh, sealProvenanceMetadataKey); got == sealProvenancePlannerSelf {
+		t.Errorf("sealed_by = %q; a critic-failed draft must never carry %q", got, sealProvenancePlannerSelf)
+	}
+	if got := critiqueMetricTotal(t, store, "strategic_planner.seal_provenance", map[string]string{"by": sealProvenanceUser, "stage": "review_failed"}); got != 1 {
+		t.Errorf("seal_provenance{by=user,stage=review_failed} = %d, want 1", got)
+	}
+	// Zero objections: no revise call (fail-open promise intact).
 	if got := chatter.callCount(); got != 2 {
 		t.Errorf("LLM calls = %d, want 2 (fail-open skips the revise)", got)
 	}

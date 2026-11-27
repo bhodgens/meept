@@ -66,10 +66,11 @@ func NewQueuePersister(db *sql.DB, conversationID string, logger *slog.Logger) (
 		maxPending:     DefaultQueuePersisterConfig().MaxPending,
 	}
 
-	// Start the flush timer.
-	p.flushTimer = time.AfterFunc(defaultFlushDelay, func() {
-		p.Flush()
-	})
+	// A2-9 (bughunt 2026-11-25 gaps, 02-agent-plan.md): the constructor
+	// used to arm a 5s flush timer here. Persisters are created per turn
+	// (loop.go) and production only calls PersistSync, so every turn armed
+	// a timer that fired once into an empty flush before Stop(). The timer
+	// is now armed lazily by EnqueueAsync, the only path that buffers.
 
 	// Initialize schema.
 	if err := p.initSchema(); err != nil {
@@ -121,18 +122,17 @@ func (p *QueuePersister) flushPending(pending []QueuedMessage) {
 		// Re-enqueue everything
 		p.mu.Lock()
 		p.pending = append(p.pending, pending...)
-		if !p.flushTimer.Stop() {
-			select {
-			case <-p.flushTimer.C:
-			default:
-			}
-		}
-		p.flushTimer.Reset(p.flushDelay)
+		p.resetFlushTimerLocked()
 		p.mu.Unlock()
 		return
 	}
 
 	var failed []QueuedMessage
+	// A2-9: the event publish used to fire inside the open transaction, so
+	// a later rollback announced EventQueuePersisted for rows that never
+	// landed (phantom persist). Publishes now queue up here and go out only
+	// after a successful Commit.
+	var committed []QueuedMessage
 	now := time.Now().UTC().Format(time.RFC3339)
 	for _, msg := range pending {
 		_, err := tx.Exec(`
@@ -152,7 +152,7 @@ func (p *QueuePersister) flushPending(pending []QueuedMessage) {
 			p.logger.Warn("queue persister: failed to persist follow-up in batch", "id", msg.ID, "err", err)
 			failed = append(failed, msg)
 		} else {
-			p.publishPersistedEvent(msg)
+			committed = append(committed, msg)
 		}
 	}
 
@@ -161,28 +161,22 @@ func (p *QueuePersister) flushPending(pending []QueuedMessage) {
 		// All messages may or may not have been written; re-enqueue everything
 		p.mu.Lock()
 		p.pending = append(p.pending, pending...)
-		if !p.flushTimer.Stop() {
-			select {
-			case <-p.flushTimer.C:
-			default:
-			}
-		}
-		p.flushTimer.Reset(p.flushDelay)
+		p.resetFlushTimerLocked()
 		p.mu.Unlock()
 		return
+	}
+
+	// Commit succeeded: the rows landed, so announce them now. A failed
+	// commit above returns early with zero events published.
+	for _, msg := range committed {
+		p.publishPersistedEvent(msg)
 	}
 
 	// Re-enqueue only the individual failures
 	if len(failed) > 0 {
 		p.mu.Lock()
 		p.pending = append(p.pending, failed...)
-		if !p.flushTimer.Stop() {
-			select {
-			case <-p.flushTimer.C:
-			default:
-			}
-		}
-		p.flushTimer.Reset(p.flushDelay)
+		p.resetFlushTimerLocked()
 		p.mu.Unlock()
 	}
 }
@@ -210,11 +204,36 @@ func (p *QueuePersister) publishPersistedEvent(msg QueuedMessage) {
 	_ = p.bus.Publish(bus.EventQueuePersisted, ev)
 }
 
+// resetFlushTimerLocked (re)arms the debounced flush timer. The timer is
+// created on first use because NewQueuePersister no longer arms one per
+// turn (A2-9: PersistSync is the only live production path, and an armed
+// timer per turn only ever fired into an empty flush). Caller holds p.mu.
+func (p *QueuePersister) resetFlushTimerLocked() {
+	if p.flushTimer == nil {
+		p.flushTimer = time.AfterFunc(p.flushDelay, func() {
+			p.Flush()
+		})
+		return
+	}
+	if !p.flushTimer.Stop() {
+		select {
+		case <-p.flushTimer.C:
+		default:
+		}
+	}
+	p.flushTimer.Reset(p.flushDelay)
+}
+
 // Stop halts the flush timer and flushes any remaining pending messages.
+// The timer stop runs under p.mu: flushPending and EnqueueAsync arm and
+// reset the field under the same lock (A2-9), and reading it unlocked here
+// was a data race once the field became lazily created.
 func (p *QueuePersister) Stop() {
+	p.mu.Lock()
 	if p.flushTimer != nil {
 		p.flushTimer.Stop()
 	}
+	p.mu.Unlock()
 	p.Flush()
 }
 
@@ -308,13 +327,7 @@ func (p *QueuePersister) EnqueueAsync(msg QueuedMessage) {
 
 	// Reset the flush timer (debounce) — must be inside the lock to prevent
 	// concurrent manipulation from the timer goroutine in flushPending.
-	if !p.flushTimer.Stop() {
-		select {
-		case <-p.flushTimer.C:
-		default:
-		}
-	}
-	p.flushTimer.Reset(p.flushDelay)
+	p.resetFlushTimerLocked()
 
 	p.mu.Unlock()
 }

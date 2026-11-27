@@ -12,6 +12,25 @@ import (
 	"github.com/caimlas/meept/internal/project"
 )
 
+// artifactCacheEntry pairs the scanned artifacts with the context builder
+// built from them, plus the scan time. A2-11 (bughunt 2026-11-25 gaps,
+// 02-agent-plan.md): the builder used to be ONE shared field where the
+// last-scanned directory won, so a scan of directory B made session A's
+// next BuildContext answer from B. The builder now rides its directory's
+// entry. cachedAt makes am.cacheExpiry actually enforced: entries older
+// than the expiry are re-scanned, so a CLAUDE.md edited mid-session is
+// eventually re-read instead of served forever.
+type artifactCacheEntry struct {
+	artifacts *artifactcontext.Artifacts
+	builder   *artifactcontext.ContextBuilder
+	cachedAt  time.Time
+}
+
+// artifactCacheCap bounds am.artifactCache so long-lived managers cannot
+// grow one unevicted entry per scanned directory forever (A2-11 ii). On
+// insert at capacity the oldest entry is evicted.
+const artifactCacheCap = 64
+
 // ArtifactManager integrates Claude artifact detection and context building
 // with the agent loop. It automatically detects and utilizes CLAUDE.md and
 // .claude/ artifacts to enhance agent prompts with project-specific context.
@@ -19,11 +38,9 @@ type ArtifactManager struct {
 	// Claude artifact manager for detection and parsing
 	claudeManager *artifactcontext.ArtifactManager
 
-	// Context builder for task-aware context
-	contextBuilder *artifactcontext.ContextBuilder
-
-	// Cache of scanned artifacts per directory
-	artifactCache map[string]*artifactcontext.Artifacts
+	// Cache of scanned artifacts per directory; each entry owns the
+	// context builder for THAT directory (A2-11 iii).
+	artifactCache map[string]*artifactCacheEntry
 	mu            sync.RWMutex
 
 	// Cache expiry
@@ -44,21 +61,24 @@ func NewArtifactManager(logger *slog.Logger) *ArtifactManager {
 	}
 
 	return &ArtifactManager{
-		claudeManager:  artifactcontext.NewArtifactManager(5 * time.Minute),
-		contextBuilder: nil, // Will be created on first scan
-		artifactCache:  make(map[string]*artifactcontext.Artifacts),
-		cacheExpiry:    5 * time.Minute,
-		logger:         logger,
+		claudeManager: artifactcontext.NewArtifactManager(5 * time.Minute),
+		artifactCache: make(map[string]*artifactCacheEntry),
+		cacheExpiry:   5 * time.Minute,
+		logger:        logger,
 	}
 }
 
-// ScanDirectory scans a directory for Claude artifacts and caches the results.
+// ScanDirectory scans a directory for Claude artifacts and caches the
+// results for am.cacheExpiry (A2-11 i: the expiry was once reported in
+// stats but never enforced, so a mid-session CLAUDE.md edit was served from
+// the cache forever).
 func (am *ArtifactManager) ScanDirectory(dir string) (*artifactcontext.Artifacts, error) {
-	// Check cache first
+	// Check cache first (only fresh entries).
 	am.mu.RLock()
-	if cached, ok := am.artifactCache[dir]; ok {
+	if cached, ok := am.artifactCache[dir]; ok && time.Since(cached.cachedAt) < am.cacheExpiry {
+		artifacts := cached.artifacts
 		am.mu.RUnlock()
-		return cached, nil
+		return artifacts, nil
 	}
 	am.mu.RUnlock()
 
@@ -68,12 +88,22 @@ func (am *ArtifactManager) ScanDirectory(dir string) (*artifactcontext.Artifacts
 		return nil, fmt.Errorf("failed to scan directory: %w", err)
 	}
 
-	// Cache results and update context builder under lock to prevent
-	// data races with concurrent readers of am.contextBuilder.
-	am.mu.Lock()
-	am.artifactCache[dir] = artifacts
+	// Cache the scan with a context builder OWNED BY THIS DIRECTORY. The
+	// builder used to be a single shared field, so scanning directory B
+	// silently redirected session A's next BuildContext to B (A2-11 iii).
+	// Insertion runs under one write lock; no I/O is taken while locked.
+	builder := (*artifactcontext.ContextBuilder)(nil)
 	if artifacts.Available {
-		am.contextBuilder = artifactcontext.NewContextBuilder(artifacts)
+		builder = artifactcontext.NewContextBuilder(artifacts)
+	}
+	am.mu.Lock()
+	if len(am.artifactCache) >= artifactCacheCap {
+		am.evictOldestLocked()
+	}
+	am.artifactCache[dir] = &artifactCacheEntry{
+		artifacts: artifacts,
+		builder:   builder,
+		cachedAt:  time.Now(),
 	}
 	am.mu.Unlock()
 
@@ -97,20 +127,42 @@ func (am *ArtifactManager) ScanDirectory(dir string) (*artifactcontext.Artifacts
 	return artifacts, nil
 }
 
-// getContextBuilder returns the current context builder under a read lock.
-// Callers must use the returned pointer rather than reading am.contextBuilder
-// directly to avoid data races with ScanDirectory which writes the field.
-func (am *ArtifactManager) getContextBuilder() *artifactcontext.ContextBuilder {
+// evictOldestLocked removes the entry with the oldest cachedAt. Caller
+// holds am.mu for writing. Cache entries are cheap to rebuild (one
+// directory scan), so losing the oldest on overflow is the honest bound.
+func (am *ArtifactManager) evictOldestLocked() {
+	var oldestKey string
+	var oldest time.Time
+	first := true
+	for dir, entry := range am.artifactCache {
+		if first || entry.cachedAt.Before(oldest) {
+			oldestKey, oldest, first = dir, entry.cachedAt, false
+		}
+	}
+	if !first {
+		delete(am.artifactCache, oldestKey)
+	}
+}
+
+// getContextBuilder returns the context builder owned by dir under a read
+// lock, or nil when the directory is uncached, expired, or holds no
+// artifacts. A2-11 iii: this replaced a single shared builder field whose
+// value was whatever directory scanned last.
+func (am *ArtifactManager) getContextBuilder(dir string) *artifactcontext.ContextBuilder {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
-	return am.contextBuilder
+	entry, ok := am.artifactCache[dir]
+	if !ok || time.Since(entry.cachedAt) >= am.cacheExpiry {
+		return nil
+	}
+	return entry.builder
 }
 
 // BuildContext builds relevant context for a task based on Claude artifacts.
 func (am *ArtifactManager) BuildContext(taskDesc, workingDir string) (string, bool) {
 	// Ensure directory is scanned
 	artifacts, err := am.ScanDirectory(workingDir)
-	cb := am.getContextBuilder()
+	cb := am.getContextBuilder(workingDir)
 	if err != nil || !artifacts.Available || cb == nil {
 		return "", false
 	}
@@ -133,7 +185,7 @@ func (am *ArtifactManager) BuildContext(taskDesc, workingDir string) (string, bo
 func (am *ArtifactManager) GetRelevantCommands(taskDesc, workingDir string) []artifactcontext.BuildCommand {
 	// Ensure directory is scanned
 	artifacts, err := am.ScanDirectory(workingDir)
-	cb := am.getContextBuilder()
+	cb := am.getContextBuilder(workingDir)
 	if err != nil || !artifacts.Available || cb == nil {
 		return nil
 	}
@@ -145,7 +197,7 @@ func (am *ArtifactManager) GetRelevantCommands(taskDesc, workingDir string) []ar
 func (am *ArtifactManager) FindSkillForTask(taskDesc, workingDir string) *artifactcontext.Skill {
 	// Ensure directory is scanned
 	artifacts, err := am.ScanDirectory(workingDir)
-	cb := am.getContextBuilder()
+	cb := am.getContextBuilder(workingDir)
 	if err != nil || !artifacts.Available || cb == nil {
 		return nil
 	}
@@ -157,7 +209,7 @@ func (am *ArtifactManager) FindSkillForTask(taskDesc, workingDir string) *artifa
 func (am *ArtifactManager) FindAgentForTask(taskDesc, workingDir string) *artifactcontext.AgentDefinition {
 	// Ensure directory is scanned
 	artifacts, err := am.ScanDirectory(workingDir)
-	cb := am.getContextBuilder()
+	cb := am.getContextBuilder(workingDir)
 	if err != nil || !artifacts.Available || cb == nil {
 		return nil
 	}
@@ -188,7 +240,7 @@ func (am *ArtifactManager) InvalidateCache(dir string) {
 // InvalidateAll clears all cached artifacts.
 func (am *ArtifactManager) InvalidateAll() {
 	am.mu.Lock()
-	am.artifactCache = make(map[string]*artifactcontext.Artifacts)
+	am.artifactCache = make(map[string]*artifactCacheEntry)
 	am.mu.Unlock()
 	am.claudeManager.InvalidateAll()
 }
@@ -197,7 +249,11 @@ func (am *ArtifactManager) InvalidateAll() {
 func (am *ArtifactManager) GetArtifacts(dir string) *artifactcontext.Artifacts {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
-	return am.artifactCache[dir]
+	entry, ok := am.artifactCache[dir]
+	if !ok {
+		return nil
+	}
+	return entry.artifacts
 }
 
 // BuildArtifactContextSection builds a context section for inclusion in system prompts.
