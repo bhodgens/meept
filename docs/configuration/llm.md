@@ -162,7 +162,17 @@ Each model declares capabilities and limits:
 | `temperature` | Sampling temperature | 0.7 |
 | `top_p` | Nucleus sampling parameter | - |
 | `max_concurrency` | Max concurrent requests to this model | 0 (unlimited) |
+| `transient_retries` | Same-provider re-dials for connection deaths (EOF/reset mid-request) before the error rotates to the next alias model | 0 (disabled) |
 | `extra_headers` | Extra HTTP headers (see [Extra HTTP Headers](#extra-http-headers-extra_headers)) | - |
+
+**Use case for `transient_retries`:** A model behind a flaky proxy hop
+(for example, LiteLLM workers that die mid-stream under load) fails with
+a connection-level error and no HTTP status. Each such death normally
+consumes a rotation strike and can push the request to a fallback model.
+Set this to 1-3 to re-dial the SAME provider first; the budget never
+funds a retry when content deltas already reached the caller (no
+duplicated streaming text) and never touches throttle/quota/refusal
+lanes.
 
 **Use case for `max_concurrency`:** Set this limit to prevent overwhelming:
 - Local LLM servers (llama.cpp, MLX, Ollama) that have limited GPU memory

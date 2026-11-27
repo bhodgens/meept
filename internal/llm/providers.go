@@ -81,6 +81,10 @@ type ModelDef struct {
 	Temperature    float64  `json:"temperature"`
 	TopP           float64  `json:"top_p"`
 	MaxConcurrency int      `json:"max_concurrency"` // Max concurrent requests (0 = unlimited)
+	// TransientRetries is the per-model same-provider re-dial budget for
+	// transient transport failures (proxy hop-death: EOF/reset mid-request).
+	// 0 (default) = today's behavior (byte-identical). See ModelConfig.
+	TransientRetries int `json:"transient_retries,omitempty"`
 	// API overrides the provider transport for this model. Use for image/video
 	// models on a chat provider, or for comfyui/gemini/infsh/http backends.
 	API             string         `json:"api,omitempty"`
@@ -781,31 +785,32 @@ func modelConfigFrom(providerID, mapKey string, provider ProviderConfig, modelDe
 		// absent/unknown keys become PosturePrivate (the backward-
 		// compatible default, master Q3) instead of leaking the zero
 		// value into the gate.
-		DataPosture:     ParsePosture(string(modelDef.DataPosture)),
-		Pool:            modelDef.Pool,
-		MaxTokens:       modelDef.MaxOutput,
-		Temperature:     modelDef.Temperature,
-		TopP:            modelDef.TopP,
-		ContextLimit:    modelDef.ContextLimit,
-		Capabilities:    caps,
-		ProviderID:      providerID,
-		CatalogRef:      providerID + "/" + mapKey,
-		ToolConstraint:  mode,
-		SchemaMode:      schemaMode,
-		ToolExposure:    toolExposure,
-		ToolChoice:      toolChoice,
-		ExtraHeaders:    extraHeaders,
-		Timeout:         time.Duration(opts.Timeout) * time.Second,
-		MaxConcurrency:  modelDef.MaxConcurrency,
-		ProviderAPI:     provider.API,
-		GenerationAPI:   modelDef.API,
-		Workflow:        workflow,
-		GenerationURL:   modelDef.GenerationURL,
-		BodyTemplate:    modelDef.BodyTemplate,
-		ResponseURLPath: modelDef.ResponseURLPath,
-		ResponseB64Path: modelDef.ResponseB64Path,
-		ImageApp:        modelDef.ImageApp,
-		VideoApp:        modelDef.VideoApp,
-		OAuthProvider:   modelDef.OAuthProvider,
+		DataPosture:      ParsePosture(string(modelDef.DataPosture)),
+		Pool:             modelDef.Pool,
+		MaxTokens:        modelDef.MaxOutput,
+		Temperature:      modelDef.Temperature,
+		TopP:             modelDef.TopP,
+		ContextLimit:     modelDef.ContextLimit,
+		Capabilities:     caps,
+		ProviderID:       providerID,
+		CatalogRef:       providerID + "/" + mapKey,
+		ToolConstraint:   mode,
+		SchemaMode:       schemaMode,
+		ToolExposure:     toolExposure,
+		ToolChoice:       toolChoice,
+		ExtraHeaders:     extraHeaders,
+		Timeout:          time.Duration(opts.Timeout) * time.Second,
+		MaxConcurrency:   modelDef.MaxConcurrency,
+		TransientRetries: modelDef.TransientRetries,
+		ProviderAPI:      provider.API,
+		GenerationAPI:    modelDef.API,
+		Workflow:         workflow,
+		GenerationURL:    modelDef.GenerationURL,
+		BodyTemplate:     modelDef.BodyTemplate,
+		ResponseURLPath:  modelDef.ResponseURLPath,
+		ResponseB64Path:  modelDef.ResponseB64Path,
+		ImageApp:         modelDef.ImageApp,
+		VideoApp:         modelDef.VideoApp,
+		OAuthProvider:    modelDef.OAuthProvider,
 	}
 }
