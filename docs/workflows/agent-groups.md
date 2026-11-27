@@ -156,7 +156,12 @@ before the child starts. Empty and `unrestricted` are unchanged.
   D1 boundary), `CheckCommand` keeps first-denial-wins so the session
   fence's command scanning is never overridden. Both fences arm in one
   pass on the chat and dispatch lanes (`composeLoopFence`); the step-job
-  lane arms the group fence alone (no session-fence site there). Path
+  lane composes the same pair through the exported `ComposeSessionFence`
+  arm point, rooted at the resolved per-task worktree (issue #137: the
+  step loops are what the bench regression tasks run on, and the jail —
+  not just the wide allowed_paths glob — must bound them). With no
+  session fence factory wired the step lane falls back to the group-only
+  arm byte-identically. Path
   comparisons resolve symlinks before the containment test on both fence
   types (a link inside a root pointing outside it is refused).
   The session stage also carries the #138 per-session PATH JAIL

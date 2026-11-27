@@ -2219,6 +2219,29 @@ func (e *Executor) checkPermission(ctx context.Context, toolName string, args ma
 		}
 	}
 
+	// Issue #137 mechanism-1 shape: the path the CHECKER judges must be the
+	// path the TOOL writes. pkg/security.checkPathWithReason Abs-anchors
+	// relative arguments against the DAEMON PROCESS CWD, while the
+	// filesystem tools resolve them against the turn's session working
+	// dir (internal/tools/builtin/filesystem.go resolvePath) — so on the
+	// bench rig a relative "transcript-check.txt" was fenced against
+	// $DAEMON_CWD (inside the rig allowlist -> allowed) and then written
+	// into the session dir, or a stale-dir relative write passed while an
+	// equivalent absolute path failed. The divergence is the same class as
+	// the wrong-root writes in the issue transcripts, and it made the
+	// decision log's attribution (deniedPath) describe a different
+	// resolution than the verdict it annotated. Normalize path/file_path
+	// against tools.WorkingDirFromContext before the check — byte-
+	// identical whenever the arg is already absolute or no turn dir is
+	// bound.
+	if wd := tools.WorkingDirFromContext(ctx); wd != "" {
+		for _, key := range []string{"path", "file_path"} {
+			if raw := details[key]; raw != "" && !filepath.IsAbs(raw) {
+				details[key] = filepath.Join(wd, raw)
+			}
+		}
+	}
+
 	// Inject the tool name so the pre-exec checker (employee constitution
 	// gate) can match against tools_allowed / tools_forbidden entries that
 	// use tool names rather than action categories. The PreExecChecker

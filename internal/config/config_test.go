@@ -248,6 +248,16 @@ func TestDefaultConfig(t *testing.T) {
 		t.Error("Default block_financial should be true")
 	}
 
+	// Issue #137: the #138 per-session path jail arms only when
+	// security.fence_enabled is on. It defaulted OFF everywhere (this
+	// struct literal, the shipped config, the rig), which left the jail
+	// dead in production and the wrong-root bench writes unpoliced. The
+	// default is now ON; flipping it back to false must be a deliberate,
+	// greppable decision, hence this pin.
+	if !cfg.Security.FenceEnabled {
+		t.Error("Default security.fence_enabled should be true (the #138 session path jail must engage by default — #137)")
+	}
+
 	if cfg.Memory.Episodic.Enabled != true {
 		t.Error("Default episodic memory should be enabled")
 	}

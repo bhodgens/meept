@@ -626,6 +626,12 @@
     "require_confirmation_high": true,
     "require_confirmation_critical": true,
     "block_financial": true,
+    // Issue #137: arms the #138 per-session path jail (session FenceStage,
+    // minted via agent.NewSessionFenceStage on the chat, dispatch, and
+    // step-job lanes). A bound session's file tools are restricted to the
+    // session's worktree/project dir; --nofence and unbound sessions keep
+    // the legacy posture. Set false to opt out daemon-wide.
+    "fence_enabled": true,
     "allowed_paths": ["~/*"],
     "blocked_paths": ["~/.ssh/*", "~/.gnupg/*", "~/.meept/meept.toml"],
     "enable_audit_log": true,   // Security audit capture — default-ON (decision 2026-11-06); set false to opt out

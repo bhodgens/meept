@@ -4878,10 +4878,22 @@ func DefaultConfig() *Config {
 			BlockFinancial:              true,
 			AllowedPaths:                []string{"~/*"},
 			BlockedPaths:                []string{"~/.ssh/*", "~/.gnupg/*", "~/.meept/meept.toml"},
-			MonitorOutput:               true,
-			RedactOutput:                true,
-			ScanShellCommands:           true,
-			TirithBinary:                "tirith",
+			// Issue #137: the #138 per-session path jail (re-homed in
+			// 9f17e855/#157) armed only when this switch is on, and it was
+			// off everywhere — DefaultConfig, the shipped config, the bench
+			// rig, and the live daemon config — so the jail stayed dead in
+			// production and a hallucinated absolute write (e.g. into the
+			// rig clone dir) still succeeded through the wide
+			// allowed_paths glob. The jail only NARROWS (in-session-root
+			// allowed, outside refused; --nofence and unbound sessions
+			// exempt), so it is the documented default posture:
+			// "Restrict tools to project worktree path". Set
+			// security.fence_enabled=false to opt out daemon-wide.
+			FenceEnabled:      true,
+			MonitorOutput:     true,
+			RedactOutput:      true,
+			ScanShellCommands: true,
+			TirithBinary:      "tirith",
 			// Audit capture default-ON (user decision 2026-11-06, closing
 			// bughunt 2026-11-06 security F-2).
 			EnableAuditLog: true,
