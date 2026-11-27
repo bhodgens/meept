@@ -448,7 +448,10 @@ func (d *GoalRoundDriver) scheduleDeferredTurn(employeeID string) bool {
 		d.MarkAutonomousRound(true)
 		defer d.MarkAutonomousRound(false)
 		defer d.markInflight(employeeID, false)
-		payload := d.goalRoundPayload(context.Background(), employeeID)
+
+		// Use the driver's cancellation context instead of context.Background()
+		// to ensure per-employee cancellation reaches the deferred turn.
+		payload := d.goalRoundPayload(d.mgr.ShutdownContext(), employeeID)
 		if payload == nil {
 			return
 		}

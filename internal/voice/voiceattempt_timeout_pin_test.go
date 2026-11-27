@@ -1,80 +1,114 @@
 package voice
 
-// Bughunt 2026-11-25 A5-1 leg pin: the contact chain's outcome wait runs
-// under the wiring's call cap (the daemon chain runner's 10-minute context).
-// The OutcomeRegistry only records a terminal outcome at call TEARDOWN, so an
-// over-cap call — frequently one the callee already ANSWERED — used to be
-// misreported as no_answer, which made the chain fall through to the next
-// channel (SMS/Signal) while the person was still on the phone. The attempt
-// now reports the DISTINCT 'timeout' outcome with an honest error text
-// (contact_wiring.go is sibling-dirty, so the ctx-threading half of A6-12 is
-// a paired patch; this pin covers the misreport leg).
+// Bughunt 2026-11-25 A5-6 pins: OutcomeRegistry.outcomes grew one entry per
+// phone call for the daemon's lifetime (Record only writes; nothing evicted).
+// Record now caps the map (default 1024) with oldest-first FIFO eviction over
+// an insertion-order ring. The two pre-existing A5-1 Telnyx call-cap pins
+// that used to live in this file moved verbatim to
+// bughunt_1126_voiceattempt_existing_pins_test.go.
 
 import (
 	"context"
-	"errors"
-	"strings"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
-
-	"github.com/caimlas/meept/internal/contact"
 )
 
-func TestTelnyxVoiceAttempt_CallCapReportsTimeoutNotNoAnswer(t *testing.T) {
-	dial := func(_ context.Context, _, _, _ string) (string, error) {
-		return "ccid-cap-1", nil
-	}
-	// Observer with NOTHING ever recorded (the answered-but-still-live call
-	// at cap: no teardown record exists yet).
-	outcomes := NewOutcomeRegistry()
-	attempt := NewTelnyxVoiceAttempt(dial, outcomes.Lookup)
+// A5-6 pins below: OutcomeRegistry.outcomes used to grow one entry per phone
+// call for the daemon's lifetime with no eviction path.
 
-	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+// TestOutcomeRegistry_CapEvictsOldest: recording cap+1 distinct keys must
+// bound the map at cap and drop the OLDEST entry, keeping the newest.
+func TestOutcomeRegistry_CapEvictsOldest(t *testing.T) {
+	reg := NewOutcomeRegistry()
+	reg.cap = 4
+
+	for i := 0; i < 5; i++ {
+		reg.Record(fmt.Sprintf("ccid-%d", i), "answered")
+	}
+
+	reg.mu.Lock()
+	got := len(reg.outcomes)
+	orderLen := len(reg.order)
+	reg.mu.Unlock()
+	if got != 4 {
+		t.Errorf("outcomes len = %d, want cap 4 (A5-6: unbounded growth)", got)
+	}
+	if orderLen != 4 {
+		t.Errorf("order len = %d, want 4 (eviction must shrink the ring too)", orderLen)
+	}
+
+	lookupCtx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
-	outcome, err := attempt.Attempt(ctx, contact.Record{Phone: "+15550000001"}, "hello")
-	if outcome == string(OutcomeNoAnswer) {
-		t.Fatalf("over-cap call reported no_answer — the A5-1 misreport: the chain would fall through to SMS mid-call (err=%v)", err)
+
+	// ccid-0 (oldest) evicted: Lookup must time out false, not block forever.
+	if _, ok := reg.Lookup(lookupCtx, "ccid-0"); ok {
+		t.Errorf("ccid-0 survived eviction; oldest must be dropped first")
 	}
-	if outcome != string(OutcomeTimeout) {
-		t.Fatalf("outcome = %q, want %q", outcome, string(OutcomeTimeout))
-	}
-	if err == nil {
-		t.Fatal("non-terminal outcome must carry an error (C2 contract)")
-	}
-	if !errors.Is(err, errOutcomeWaitTimeout) {
-		t.Fatalf("err = %v, want errOutcomeWaitTimeout", err)
-	}
-	// The error text must NOT claim the call went unanswered.
-	if msg := strings.ToLower(err.Error()); strings.Contains(msg, "no answer") || strings.Contains(msg, "unanswered") {
-		t.Errorf("timeout error text misreports the call state: %q", msg)
-	}
-	// Non-vacuity: the same registry WITH a recorded answered outcome still
-	// stops the chain (answered, nil err) — only the no-record cap leg
-	// changed.
-	rec := NewOutcomeRegistry()
-	rec.Record("ccid-cap-1", OutcomeAnswered)
-	attempt2 := NewTelnyxVoiceAttempt(dial, rec.Lookup)
-	outcome2, err2 := attempt2.Attempt(context.Background(), contact.Record{Phone: "+15550000001"}, "hello")
-	if outcome2 != string(OutcomeAnswered) || err2 != nil {
-		t.Fatalf("answered leg regressed: outcome=%q err=%v", outcome2, err2)
-	}
-	// And a recorded no_answer still reports no_answer (unchanged).
-	rec2 := NewOutcomeRegistry()
-	rec2.Record("ccid-cap-1", OutcomeNoAnswer)
-	attempt3 := NewTelnyxVoiceAttempt(dial, rec2.Lookup)
-	outcome3, err3 := attempt3.Attempt(context.Background(), contact.Record{Phone: "+15550000001"}, "hello")
-	if outcome3 != string(OutcomeNoAnswer) || err3 == nil {
-		t.Fatalf("recorded no_answer leg changed: outcome=%q err=%v", outcome3, err3)
+	// ccid-4 (newest) must still resolve immediately.
+	out, ok := reg.Lookup(lookupCtx, "ccid-4")
+	if !ok || out != "answered" {
+		t.Errorf("ccid-4 = %q/%v, want answered/true", out, ok)
 	}
 }
 
-func TestTelnyxVoiceAttempt_DialFailureStillFailed(t *testing.T) {
-	dialErr := errors.New("allowlist refused")
-	attempt := NewTelnyxVoiceAttempt(func(_ context.Context, _, _, _ string) (string, error) {
-		return "", dialErr
-	}, NewOutcomeRegistry().Lookup)
-	outcome, err := attempt.Attempt(context.Background(), contact.Record{Phone: "+15550000001"}, "hi")
-	if outcome != string(OutcomeFailed) || !errors.Is(err, dialErr) {
-		t.Fatalf("dial failure shape changed: outcome=%q err=%v", outcome, err)
+// TestOutcomeRegistry_ReRecordDoesNotGrowOrder: re-Recording the same key
+// must update the outcome without appending a second order entry (a double
+// append would evict live entries early).
+func TestOutcomeRegistry_ReRecordDoesNotGrowOrder(t *testing.T) {
+	reg := NewOutcomeRegistry()
+	reg.cap = 8
+
+	for i := 0; i < 5; i++ {
+		reg.Record("same-ccid", "answered")
+	}
+
+	reg.mu.Lock()
+	orderLen := len(reg.order)
+	mapLen := len(reg.outcomes)
+	reg.mu.Unlock()
+	if orderLen != 1 || mapLen != 1 {
+		t.Errorf("re-Record grew state: order=%d map=%d, want 1/1", orderLen, mapLen)
+	}
+
+	// The survivor must be the LATEST outcome, not the first write.
+	reg.Record("same-ccid", "no_answer")
+	lookupCtx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	if out, ok := reg.Lookup(lookupCtx, "same-ccid"); !ok || out != "no_answer" {
+		t.Errorf("re-Record lost the update: %q/%v, want no_answer/true", out, ok)
+	}
+}
+
+// TestOutcomeRegistry_EvictionSafeUnderConcurrentWaiters: eviction while a
+// concurrent Record+Lookup churn runs must not panic or corrupt state, and
+// the cap must hold at the end.
+func TestOutcomeRegistry_EvictionSafeUnderConcurrentWaiters(t *testing.T) {
+	reg := NewOutcomeRegistry()
+	reg.cap = 32
+
+	var wg sync.WaitGroup
+	for w := 0; w < 4; w++ {
+		wg.Add(1)
+		go func(base int) {
+			defer wg.Done()
+			for i := 0; i < 100; i++ {
+				ccid := fmt.Sprintf("ccid-%d-%d", base, i)
+				reg.Record(ccid, "answered")
+				lookupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+				_, _ = reg.Lookup(lookupCtx, ccid)
+				cancel()
+			}
+		}(w)
+	}
+	wg.Wait()
+
+	reg.mu.Lock()
+	got := len(reg.outcomes)
+	orderLen := len(reg.order)
+	reg.mu.Unlock()
+	if got > reg.cap || orderLen > reg.cap {
+		t.Errorf("post-churn len map=%d order=%d, want <= cap %d", got, orderLen, reg.cap)
 	}
 }
