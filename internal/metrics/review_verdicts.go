@@ -137,6 +137,25 @@ CREATE INDEX IF NOT EXISTS idx_mrv_breakdown_window ON model_review_verdicts(rev
 		WHERE agent_id = '' AND trace_id != '' AND reviewed_model_id != ''`); err != nil {
 		return fmt.Errorf("failed to backfill agent_id: %w", err)
 	}
+	// M11 (bughunt 2026-11-27, T-5): agent-dimension twin of the L5 window
+	// index. The windowed model x agent breakdown (queryReviewVerdictBreakdown
+	// dim=agent) GROUPs BY (reviewed_model_id, agent_id) and ranges on
+	// timestamp; the only indexes covering the table before this were
+	// idx_mrv_model_ts (model, timestamp — no agent column) and the category
+	// window index, so the agent plan paid a temp B-tree re-sort for the
+	// GROUP BY on a table that grows forever by design (VR-RET-1). Same
+	// shape and posture as the L5 index: equality columns first, window
+	// range last, partial on the structural scope filter.
+	//
+	// It lives AFTER the agent_id ALTER (not in the DDL block above)
+	// deliberately: existing databases reopen through this same function
+	// with a pre-agent_id table, and a DDL-block CREATE INDEX on agent_id
+	// would fail with "no such column" before the migration runs. Placed
+	// here it is additive and idempotent (IF NOT EXISTS) on every open,
+	// fresh or legacy. Pin: TestVR_BREAKDOWN_PLAN_3.
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_mrv_breakdown_agent_window ON model_review_verdicts(reviewed_model_id, agent_id, timestamp) WHERE scope != 'workflow'`); err != nil {
+		return fmt.Errorf("failed to create idx_mrv_breakdown_agent_window: %w", err)
+	}
 	return nil
 }
 
