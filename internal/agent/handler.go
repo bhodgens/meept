@@ -2190,11 +2190,6 @@ func (h *ChatHandler) publishPlanRequest(result *DispatchResult, sessionID strin
 				}
 			}
 		}
-		// M6/D3 follow-up (2026-11-27): the dead AutoSeal producer is
-		// deleted (the lexical verdict died with f182dea6). Approval
-		// posture is decided by model adjudication
-		// (TrueIntentAnalysis.ApprovalRequested) and the plan-contract
-		// routing (tree 20261125-plan-contract-quickplan).
 	}
 
 	payload, err := json.Marshal(req)
