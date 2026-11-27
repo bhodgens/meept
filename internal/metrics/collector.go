@@ -444,10 +444,19 @@ func (c *Collector) recordReviewMetrics(msg *models.BusMessage) {
 		return
 	}
 
-	c.RecordReviewResult(payload.Status, payload.Reviewer, payload.Confidence)
+	// L1 (bughunt 2026-11-27): the legacy counter lane counts FINAL review
+	// cycles only. 713b26e4 routes pair rounds and adversarial hook verdicts
+	// onto this same bus lane with is_final=false (superseded rounds,
+	// re-verifications); the L7 SQL rollups already honour is_final, so the
+	// counters must not count what the rollups exclude. The verdict
+	// persistence below keeps every row (final or not) verbatim.
+	if payload.IsFinal {
+		c.RecordReviewResult(payload.Status, payload.Reviewer, payload.Confidence)
+	}
 
-	// Track average revision cycles
-	if payload.RevisionCount > 0 {
+	// Track average revision cycles — same L1 filter as the counters
+	// above: superseded rounds' revision counts must not enter the lane.
+	if payload.IsFinal && payload.RevisionCount > 0 {
 		c.store.Record("review.revision_cycles", float64(payload.RevisionCount), map[string]string{
 			DimReviewer: payload.Reviewer,
 		})
