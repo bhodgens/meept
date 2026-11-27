@@ -21,6 +21,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/caimlas/meept/internal/skills"
 )
 
 // writeAgentsTree builds a fake project root containing a .git marker (so
@@ -189,6 +191,186 @@ func TestPromptSectionTelemetry(t *testing.T) {
 	}
 	if b, ok := seen["agents-context"]; !ok || b <= 0 {
 		t.Errorf("expected nonzero agents-context section record, got present=%v bytes=%v", ok, b)
+	}
+}
+
+// --- Increment 2 pins (issue #193): bounded skill bodies + CLAUDE.md ------
+
+// writeSkillFixture builds a temp dir with one real SKILL.md (frontmatter +
+// a recognizable body marker) and a lazy loader over an index entry that
+// points at it. Returns (loader, entry).
+func writeSkillFixture(t *testing.T) (*skills.LazySkillLoader, *skills.SkillIndexEntry) {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pin-skill.md")
+	content := "---\nname: pin-skill\ndescription: A skill pinned by #193 increment 2\n---\n\nEAGER SKILL BODY MARKER\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write skill file: %v", err)
+	}
+	idx := skills.NewSkillIndex()
+	entry := &skills.SkillIndexEntry{
+		Name:        "pin-skill",
+		Description: "A skill pinned by #193 increment 2",
+		Path:        path,
+	}
+	idx.Index(entry)
+	return skills.NewLazySkillLoader(idx), entry
+}
+
+// TestSkillContextIndexOnlyDefault pins the #193 increment-2 default
+// posture: a surfaced skill rides the prompt as an index entry with the
+// [load: file_read <path>] pointer and its body is NEVER read from the
+// loader (zero Loads in loader stats proves the eager dump is gone).
+func TestSkillContextIndexOnlyDefault(t *testing.T) {
+	loader, entry := writeSkillFixture(t)
+	loop := NewAgentLoop("skill-index-session", "/tmp",
+		WithAgentConfig(DefaultAgentConfig()),
+		WithSkillLoader(loader),
+	)
+	if loop == nil {
+		t.Fatal("NewAgentLoop returned nil")
+	}
+	discovered := []*DiscoveredSkill{{Entry: entry, Confidence: 0.9}}
+
+	section := loop.buildSkillContextSection(context.Background(), discovered)
+	if section == "" {
+		t.Fatal("index-only posture must still surface the skill")
+	}
+	if strings.Contains(section, "EAGER SKILL BODY MARKER") {
+		t.Errorf("default posture leaked a full skill body into the prompt: %q", tail(section, "EAGER"))
+	}
+	pointer := "[load: file_read " + entry.Path + "]"
+	if !strings.Contains(section, pointer) {
+		t.Errorf("index entry must carry the load pointer %q, got %q", pointer, section)
+	}
+	if !strings.Contains(section, entry.Name) || !strings.Contains(section, entry.Description) {
+		t.Errorf("index entry must carry name + description, got %q", section)
+	}
+	if stats := loader.Stats(); stats.Loads != 0 {
+		t.Errorf("index-only posture must not read bodies: loader Loads=%d", stats.Loads)
+	}
+
+	// End-to-end: the section rides the assembled prompt and telemetry
+	// classifies it under the "skills" kind (#193 increment 2 taxonomy).
+	rec := &fakeTurnMetricRecorder{}
+	loop.SetPromptSectionRecorder(rec)
+	conv := NewConversation()
+	prompt := loop.buildSystemPromptWithContextAndSkills(context.Background(), conv, discovered)
+	if !strings.Contains(prompt, pointer) {
+		t.Errorf("assembled prompt missing skill index entry: %q", tail(prompt, "Relevant Skills"))
+	}
+	var skillsBytes float64
+	var haveSkills bool
+	for _, m := range rec.records {
+		if m.name == PromptSectionBytesMetric && m.tags["section"] == "skills" {
+			skillsBytes, haveSkills = m.value, true
+		}
+	}
+	if !haveSkills || skillsBytes <= 0 {
+		t.Errorf("expected nonzero 'skills' section telemetry record, got present=%v bytes=%v", haveSkills, skillsBytes)
+	}
+}
+
+// TestSkillContextEagerBodiesEscapeHatch pins the opt-in restore: with
+// AgentConfig.SkillContextEagerBodies the loader reads full bodies and
+// the prompt carries them, exactly as pre-increment-2.
+func TestSkillContextEagerBodiesEscapeHatch(t *testing.T) {
+	loader, entry := writeSkillFixture(t)
+	cfg := DefaultAgentConfig()
+	cfg.SkillContextEagerBodies = true
+	loop := NewAgentLoop("skill-eager-session", "/tmp",
+		WithAgentConfig(cfg),
+		WithSkillLoader(loader),
+	)
+	if loop == nil {
+		t.Fatal("NewAgentLoop returned nil")
+	}
+	discovered := []*DiscoveredSkill{{Entry: entry, Confidence: 0.9}}
+
+	section := loop.buildSkillContextSection(context.Background(), discovered)
+	if !strings.Contains(section, "EAGER SKILL BODY MARKER") {
+		t.Errorf("escape hatch must restore eager bodies, got %q", section)
+	}
+	if stats := loader.Stats(); stats.Loads == 0 {
+		t.Errorf("escape hatch must read the body via the loader: Loads=%d", stats.Loads)
+	}
+}
+
+// TestArtifactContextCLAUDEMDBudgeted pins the #193 increment-2 CLAUDE.md
+// posture end-to-end: an over-budget CLAUDE.md produces a BOUNDED
+// "Artifact Context" section in the system prompt, and the telemetry
+// record shows the shrink versus the whole verbatim dump. The
+// ArtifactContextWholeDoc escape hatch restores the unbounded bytes.
+func TestArtifactContextCLAUDEMDBudgeted(t *testing.T) {
+	dir := t.TempDir()
+	// ~120KB of CLAUDE.md: far over DefaultDocBudgetTokens under any
+	// reasonable counter.
+	huge := "CLAUDE DOC HEAD MARKER\n" + strings.Repeat("binding project instruction line\n", 4000)
+	if err := os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte(huge), 0o644); err != nil {
+		t.Fatalf("write CLAUDE.md: %v", err)
+	}
+
+	am := NewArtifactManager(nil)
+	whole := am.BuildFullArtifactContext("", dir) // pre-increment-2 dump (escape hatch shape)
+	if !strings.Contains(whole, "CLAUDE DOC HEAD MARKER") {
+		t.Fatal("fixture: whole dump must carry the doc")
+	}
+
+	rec := &fakeTurnMetricRecorder{}
+	loop := NewAgentLoop("claude-budget-session", dir,
+		WithAgentConfig(DefaultAgentConfig()),
+		WithArtifactManager(am),
+		WithPromptSectionRecorder(rec),
+	)
+	if loop == nil {
+		t.Fatal("NewAgentLoop returned nil")
+	}
+	conv := NewConversation()
+	prompt := loop.buildSystemPromptWithContextAndSkills(context.Background(), conv, nil)
+
+	if !strings.Contains(prompt, "CLAUDE DOC HEAD MARKER") {
+		t.Errorf("budgeted artifact section must still lead with the doc head: %q", tail(prompt, "CLAUDE.md"))
+	}
+	if !noticeRe.MatchString(prompt) {
+		t.Errorf("over-budget CLAUDE.md must carry the truncation notice in the prompt")
+	}
+	if strings.Contains(prompt, strings.Repeat("binding project instruction line\n", 200)) {
+		t.Error("prompt still carries the unbounded verbatim dump")
+	}
+
+	// Telemetry shows the shrink: the artifact-context section record is
+	// present, nonzero, and materially smaller than the whole dump.
+	var artifactBytes float64
+	var have bool
+	for _, m := range rec.records {
+		if m.name == PromptSectionBytesMetric && m.tags["section"] == "artifact-context" {
+			artifactBytes, have = m.value, true
+		}
+	}
+	if !have || artifactBytes <= 0 {
+		t.Fatalf("expected nonzero 'artifact-context' telemetry record, got present=%v bytes=%v", have, artifactBytes)
+	}
+	if artifactBytes >= float64(len(whole))/2 {
+		t.Errorf("telemetry does not show the shrink: section=%d whole dump=%d bytes",
+			int(artifactBytes), len(whole))
+	}
+
+	// Escape hatch: ArtifactContextWholeDoc restores the verbatim dump.
+	cfg := DefaultAgentConfig()
+	cfg.ArtifactContextWholeDoc = true
+	loopHatch := NewAgentLoop("claude-hatch-session", dir,
+		WithAgentConfig(cfg),
+		WithArtifactManager(NewArtifactManager(nil)),
+	)
+	if loopHatch == nil {
+		t.Fatal("NewAgentLoop returned nil")
+	}
+	promptHatch := loopHatch.buildSystemPromptWithContextAndSkills(context.Background(), NewConversation(), nil)
+	if !strings.Contains(promptHatch, strings.Repeat("binding project instruction line\n", 200)) {
+		t.Error("escape hatch must restore the whole verbatim CLAUDE.md dump")
+	}
+	if noticeRe.MatchString(promptHatch) {
+		t.Error("escape hatch must NOT truncate")
 	}
 }
 
