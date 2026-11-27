@@ -113,11 +113,16 @@ var (
 type OutcomeRegistry struct {
 	mu       sync.Mutex
 	outcomes map[string]Outcome
+	order    []string
+	cap      int
 }
 
 // NewOutcomeRegistry constructs the collector.
 func NewOutcomeRegistry() *OutcomeRegistry {
-	return &OutcomeRegistry{outcomes: make(map[string]Outcome)}
+	return &OutcomeRegistry{
+		outcomes: make(map[string]Outcome),
+		cap:      1024,
+	}
 }
 
 // Record is the release-hook adapter target (call once per terminal
@@ -127,8 +132,18 @@ func (r *OutcomeRegistry) Record(ccid string, out Outcome) {
 		return
 	}
 	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if len(r.order) >= r.cap {
+		oldest := r.order[0]
+		r.order = r.order[1:]
+		delete(r.outcomes, oldest)
+	}
+
+	if _, exists := r.outcomes[ccid]; !exists {
+		r.order = append(r.order, ccid)
+	}
 	r.outcomes[ccid] = out
-	r.mu.Unlock()
 }
 
 // Lookup waits (bounded by ctx) for one terminal outcome. False on ctx
