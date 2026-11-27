@@ -23,6 +23,18 @@ import (
 // can correct the call instead of retrying it verbatim.
 var ErrOutsideSessionRoot = errors.New("outside the session worktree")
 
+// JailedFenceChecker is the capability a fence must expose for the
+// per-session path jail (#138 semantics, re-homed onto the session
+// FenceStage per issue #157): the plain CheckPath/CheckCommand surface plus
+// CheckPathJailed, which applies the jail narrowing. The
+// internal/agent/fence_stage.go factory mints *FenceChecker instances that
+// satisfy it; the capability probe keeps plain FenceChecker doubles valid.
+type JailedFenceChecker interface {
+	CheckPath(path string, op string) error
+	CheckCommand(command string, workDir string) error
+	CheckPathJailed(path string, op string, jailRoot string) error
+}
+
 // FenceConfig controls path fencing for a session.
 type FenceConfig struct {
 	Enabled   bool     // Whether fencing is active
@@ -198,8 +210,13 @@ func (fc *FenceChecker) CheckPath(path string, op string) error {
 // this closes the absolute-path half.
 //
 // jailRoot is the SESSION's working directory, supplied per call by the
-// caller (tools.WorkingDirFromContext) — deliberately NOT a field on
-// FenceConfig, because FenceChecker is shared by every tool and session:
+// caller. In production that caller is the re-homed session FenceStage
+// (internal/agent/fence_stage.go, NewSessionFenceStage — issue #157), which
+// freezes the stage's own session root as the jail; the builtin tools'
+// per-call path (tools.WorkingDirFromContext) survives only on lanes that
+// still wire a per-tool checker (terminal_service's shell tool). It is
+// deliberately NOT a field on FenceConfig, because FenceChecker is shared
+// by every tool and session:
 // storing the jail on the config would reintroduce the cross-session
 // mutation race that per-session fence instances were introduced to remove
 // (internal/agent/fence_stage.go). The jail is a per-CALL argument, so the

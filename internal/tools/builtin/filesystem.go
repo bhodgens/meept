@@ -69,6 +69,12 @@ type jailedFenceChecker interface {
 // checkPathJailed is the shared session-jail fence call for the filesystem
 // tools (issue #138, second half).
 //
+// NOTE (issue #157): the daemon does NOT wire per-tool fence checkers (leaf
+// 01 T3), so this helper is inert on daemon-built fs tools. The #138 jail
+// semantics are enforced centrally on every session loop by the re-homed
+// session FenceStage (internal/agent/fence_stage.go NewSessionFenceStage);
+// do not treat a nil fenceChecker here as "no jail".
+//
 // The jail root is the SESSION's working directory taken from ctx on EVERY
 // call — never a field on the tool, never a mutation of the process-wide
 // fence config. That is the whole point: one FenceChecker is shared by every

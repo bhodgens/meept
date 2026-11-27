@@ -159,6 +159,12 @@ before the child starts. Empty and `unrestricted` are unchanged.
   lane arms the group fence alone (no session-fence site there). Path
   comparisons resolve symlinks before the containment test on both fence
   types (a link inside a root pointing outside it is refused).
+  The session stage also carries the #138 per-session PATH JAIL
+  (issue #157 re-home, `agent.NewSessionFenceStage`): inside the session
+  root a path short-circuits to allowed past the fence allowlist, and
+  outside it the read/write is refused even when `fence_allow_read` (or
+  the wildcard path globs) would admit it. The jail engages centrally —
+  the retired per-tool `SetFenceChecker` wiring is not restored.
 - **Groups file backstop** (`groups_backstop`): when
   `default_managed=true`, non-admin agents are denied file/shell access to
   the membership surfaces: the users store, `<home>/agents/**`, and the

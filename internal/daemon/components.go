@@ -5214,15 +5214,13 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	if c.ChatHandler != nil && cfg.Security.FenceEnabled {
 		fenceAllowRead := cfg.Security.FenceAllowRead
 		c.ChatHandler.SetSessionFenceFactory(func(rootPath string, noFence bool) security.FenceStage {
-			if noFence {
-				return nil
-			}
-			fc := intsecurity.NewFenceChecker(intsecurity.FenceConfig{
-				Enabled:   true,
-				RootPath:  rootPath,
-				AllowRead: fenceAllowRead,
-			}, logger)
-			return security.NewFenceStageAdapter(fc)
+			// Issue #157: mint through agent.NewSessionFenceStage so the
+			// per-session FenceStage carries the #138 jail narrowing
+			// (in-jail short-circuits the allowlist; out-of-jail is
+			// refused even if AllowRead admits it). This replaces the
+			// retired per-tool fenceChecker wiring that left the jail
+			// dead in production.
+			return agent.NewSessionFenceStage(rootPath, fenceAllowRead, noFence, logger)
 		})
 		logger.Info("Per-session fence factory wired (root set per session loop)")
 	}
@@ -5241,15 +5239,9 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	if c.Dispatcher != nil && cfg.Security.FenceEnabled {
 		fenceAllowRead := cfg.Security.FenceAllowRead
 		c.Dispatcher.SetSessionFenceFactory(func(rootPath string, noFence bool) security.FenceStage {
-			if noFence {
-				return nil
-			}
-			fc := intsecurity.NewFenceChecker(intsecurity.FenceConfig{
-				Enabled:   true,
-				RootPath:  rootPath,
-				AllowRead: fenceAllowRead,
-			}, logger)
-			return security.NewFenceStageAdapter(fc)
+			// Issue #157: same re-homed mint as the ChatHandler site —
+			// the session FenceStage carries the #138 jail narrowing.
+			return agent.NewSessionFenceStage(rootPath, fenceAllowRead, noFence, logger)
 		})
 	}
 
@@ -8871,6 +8863,15 @@ func registerBuiltinTools(
 	// security.PermissionChecker.CheckPermissionForAgent (pkg/security).
 	// Every loop's executor consults the fence centrally, so tools no
 	// longer each need (or get) a fence checker instance.
+	//
+	// Issue #157: the #138 per-session path jail that originally hung off
+	// this per-tool field is NOT dead anymore -- it was RE-HOMED onto the
+	// session FenceStage (agent.NewSessionFenceStage, wired at the
+	// SetSessionFenceFactory sites above), so the jail semantics (in-jail
+	// short-circuit, out-of-jail refusal past AllowRead) engage centrally
+	// on every session loop without any per-tool wiring. The tools'
+	// checkPathJailed helpers stay nil-safe and inert here BY DESIGN; do
+	// not re-add per-tool fence checkers.
 	secretScanner := intsecurity.NewSecretScanner()
 	readFileTool := builtin.NewReadFileTool(checker, readCache)
 	readFileTool.SetSecretScanner(secretScanner)
