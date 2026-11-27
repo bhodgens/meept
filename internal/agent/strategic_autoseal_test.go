@@ -1,10 +1,12 @@
 package agent
 
-// Unit tests for intent-driven plan auto-seal (20261119-usability-remediation
-// residual 07). A compound plan+implement prompt ("create the plan and then
-// implement it") must seal the plan after compilation -- skip the approval
-// park and proceed straight to scheduling with an audit trail. Plain plan
-// prompts still park at the approval gate.
+// Unit tests for the approval gate after the M6/D3 auto-seal removal
+// (2026-11-27). The lexical seal verdict (PlanAutoSealFromIntent regexes),
+// the PlanRequest.AutoSeal field, its requiresApproval bypass, and the
+// autoSealPlanAudit trail are DELETED: approval posture is intent-driven
+// (TrueIntentAnalysis.ApprovalRequested parks the plan; the plan-contract
+// lanes in tree 20261125-plan-contract-quickplan execute; probe-sentence
+// behavior table lives in approval_adjudication_test.go).
 
 import (
 	"context"
@@ -17,59 +19,24 @@ import (
 	"github.com/caimlas/meept/internal/task"
 )
 
-// TestPlanAutoSealFromIntent_IsDeadStub pins the M6/D3 ruling: the lexical
-// seal verdict is DELETED. The stub answers false for every phrasing —
-// including the former compound hits — so the compound lane's AutoSeal
-// bypass is inert and approval gating is driven ONLY by model
-// adjudication (Intent.ApprovalRequested; probe-sentence behavior table:
-// approval_adjudication_test.go). When the handler.go caller lands its
-// deletion follow-up this function goes with it.
-func TestPlanAutoSealFromIntent_IsDeadStub(t *testing.T) {
-	cases := []string{
-		// Former true hits: dead.
-		"create the plan and then implement it",
-		"plan the migration and implement it",
-		"design the auth flow, then implement it",
-		"write up a plan and implement the plan right away",
-		"map out the approach and execute it",
-		// M6 escapes (wrongly true before): also false now.
-		"Plan X and implement it only after I approve",
-		"Write a plan for X and create a markdown file",
-		"dont implement it",
-		// Former park cases: unchanged false.
-		"create a plan for the migration",
-		"plan the migration but don't implement it yet",
-		"",
-	}
-	for _, input := range cases {
-		if got := PlanAutoSealFromIntent(input); got != false {
-			t.Errorf("PlanAutoSealFromIntent(%q) = %v, want false (regex verdict is dead, D3)", input, got)
-		}
-	}
-}
-
-func TestRequiresApproval_AutoSealBypassesGate(t *testing.T) {
+// TestRequiresApproval_ThresholdGate pins the surviving gate shape after
+// the AutoSeal bypass was deleted: past the complexity threshold a plan
+// parks; below it, it does not. (Formerly
+// TestRequiresApproval_AutoSealBypassesGate — the bypass arm died with
+// M6/D3; the baselines it also pinned stay load-bearing.)
+func TestRequiresApproval_ThresholdGate(t *testing.T) {
 	sp := &StrategicPlanner{approvalStepThreshold: 5, logger: slogDiscardLogger()}
 	steps := make([]*task.TaskStep, 6)
 	for i := range steps {
 		steps[i] = task.NewTaskStep("t1", "step", i)
 	}
 
-	// Compound plan+implement intent: gate bypassed even past threshold.
-	autoSealReq := PlanRequest{AutoSeal: true, IsCompound: true}
-	if sp.requiresApproval(autoSealReq, steps) {
-		t.Error("requiresApproval with AutoSeal = true, want false (gate bypass)")
+	req := PlanRequest{}
+	if !sp.requiresApproval(req, steps) {
+		t.Error("requiresApproval past threshold = false, want true")
 	}
-
-	// Plain plan (no AutoSeal): gate still applies past threshold.
-	plainReq := PlanRequest{}
-	if !sp.requiresApproval(plainReq, steps) {
-		t.Error("requiresApproval without AutoSeal past threshold = false, want true")
-	}
-
-	// Plain plan below threshold: no park either (unchanged baseline).
-	if sp.requiresApproval(plainReq, steps[:2]) {
-		t.Error("requiresApproval without AutoSeal below threshold = true, want false")
+	if sp.requiresApproval(req, steps[:2]) {
+		t.Error("requiresApproval below threshold = true, want false")
 	}
 }
 
@@ -120,139 +87,11 @@ func autoSealSteps(taskID string) []*task.TaskStep {
 	return steps
 }
 
-// TestAutoSealSkipsApprovalPark proves the compound plan+implement path:
-// AutoSeal bypasses the gate, the task goes straight to executing, the
-// steps are persisted + promoted, and the audit trail (auto_sealed metadata
-// + auto_sealed=true on task.planned) is published -- with NO
-// task.pending_approval event.
-func TestAutoSealSkipsApprovalPark(t *testing.T) {
-	sp, taskStore, msgBus := newAutoSealTestPlanner(t)
-
-	plannedSub := msgBus.Subscribe("test-observer", "task.planned")
-	defer msgBus.Unsubscribe(plannedSub)
-	schedSub := msgBus.Subscribe("test-observer", "orchestrator.schedule")
-	defer msgBus.Unsubscribe(schedSub)
-	pendingSub := msgBus.Subscribe("test-observer", "task.pending_approval")
-	defer msgBus.Unsubscribe(pendingSub)
-
-	tsk := newAutoSealTask(t, taskStore, "task-autoseal-skip", "create the plan and then implement it", task.StatePlanning)
-	steps := autoSealSteps(tsk.ID)
-
-	req := PlanRequest{
-		TaskID:     tsk.ID,
-		SessionID:  "session-autoseal",
-		Input:      "create the plan and then implement it",
-		Intent:     "compound",
-		IsCompound: true,
-		AutoSeal:   true,
-	}
-
-	// The shared gate: requiresApproval routes to the park; AutoSeal
-	// routes to the normal scheduling tail. Replicate the Plan() gate
-	// branch inline (the planner LLM is not wired in this harness).
-	if sp.requiresApproval(req, steps) {
-		t.Fatalf("requiresApproval = true for AutoSeal request, gate must be bypassed")
-	}
-	for _, step := range steps {
-		if err := sp.stepStore.Create(step); err != nil {
-			t.Fatalf("failed to persist step: %v", err)
-		}
-	}
-	sp.autoSealPlanAudit(tsk, req, len(steps))
-	if err := sp.taskStore.SetPlanCounters(req.TaskID, len(steps), 0, 0); err != nil {
-		t.Fatalf("failed to set plan counters: %v", err)
-	}
-	tsk.SetState(task.StateExecuting)
-	if err := sp.taskStore.UpdateWithoutCounters(tsk); err != nil {
-		t.Fatalf("failed to update task: %v", err)
-	}
-	promoted, err := sp.stepStore.PromoteReadySteps(req.TaskID)
-	if err != nil {
-		t.Fatalf("failed to promote steps: %v", err)
-	}
-	sp.publishEvent("task.planned", map[string]any{
-		KeyTaskID:     req.TaskID,
-		"session_id":  req.SessionID,
-		"total_steps": len(steps),
-		"ready_steps": len(promoted),
-		"auto_sealed": true,
-	})
-	sp.publishEvent("orchestrator.schedule", map[string]any{
-		KeyTaskID: req.TaskID,
-	})
-
-	updated, err := taskStore.GetByID(tsk.ID)
-	if err != nil {
-		t.Fatalf("failed to get task: %v", err)
-	}
-	if updated.State != task.StateExecuting {
-		t.Errorf("task state = %q, want %q (auto-sealed straight to executing)", updated.State, task.StateExecuting)
-	}
-
-	var meta map[string]json.RawMessage
-	if err := json.Unmarshal(updated.Metadata, &meta); err != nil {
-		t.Fatalf("failed to parse metadata: %v", err)
-	}
-	if _, ok := meta["pending_steps"]; ok {
-		t.Error("'pending_steps' present: auto-sealed task must not park")
-	}
-	if sealed, ok := meta["auto_sealed"]; !ok || string(sealed) != "true" {
-		t.Errorf("auto_sealed metadata = %s (present=%v), want true", string(sealed), ok)
-	}
-
-	// Audit trail on the bus: task.planned carries auto_sealed=true.
-	select {
-	case msg := <-plannedSub.Channel:
-		var event map[string]any
-		if err := json.Unmarshal(msg.Payload, &event); err != nil {
-			t.Fatalf("failed to unmarshal task.planned payload: %v", err)
-		}
-		if sealed, ok := event["auto_sealed"].(bool); !ok || !sealed {
-			t.Errorf("task.planned auto_sealed = %v (present=%v), want true", event["auto_sealed"], ok)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timeout waiting for task.planned event")
-	}
-
-	select {
-	case msg := <-schedSub.Channel:
-		if msg.Topic != "orchestrator.schedule" {
-			t.Errorf("expected orchestrator.schedule, got %q", msg.Topic)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timeout waiting for orchestrator.schedule event")
-	}
-
-	// The gate must NOT have fired.
-	select {
-	case msg := <-pendingSub.Channel:
-		t.Fatalf("unexpected task.pending_approval event: %s", msg.Payload)
-	case <-time.After(200 * time.Millisecond):
-	}
-
-	// Steps persisted and root steps promoted.
-	stepStore := taskStore.StepStore()
-	persisted, err := stepStore.ListByTaskID(tsk.ID)
-	if err != nil {
-		t.Fatalf("failed to list steps: %v", err)
-	}
-	if len(persisted) != 4 {
-		t.Errorf("persisted steps = %d, want 4", len(persisted))
-	}
-	ready, err := stepStore.GetReadySteps(tsk.ID)
-	if err != nil {
-		t.Fatalf("failed to list ready steps: %v", err)
-	}
-	if len(ready) != 3 {
-		t.Errorf("ready steps = %d, want 3 (roots + first dependent promoted)", len(ready))
-	}
-}
-
-// TestAutoSeal_PlainPlanStillParks proves the baseline: a plain plan with
-// enough steps (past the complexity threshold, no AutoSeal) still parks at
-// the approval gate with pending_steps + task.pending_approval, and no
-// auto_sealed audit trail appears.
-func TestAutoSeal_PlainPlanStillParks(t *testing.T) {
+// TestPlainPlanParksAndNoSealTrail proves the baseline: a plain plan past
+// the complexity threshold parks at the approval gate with pending_steps +
+// task.pending_approval, and the deleted auto-seal machinery leaves NO
+// auto_sealed metadata behind anywhere.
+func TestPlainPlanParksAndNoSealTrail(t *testing.T) {
 	sp, taskStore, msgBus := newAutoSealTestPlanner(t)
 
 	pendingSub := msgBus.Subscribe("test-observer", "task.pending_approval")
@@ -272,7 +111,6 @@ func TestAutoSeal_PlainPlanStillParks(t *testing.T) {
 		},
 	}
 
-	// Plain plan: the gate must fire and the task must park.
 	if !sp.requiresApproval(req, steps) {
 		t.Fatalf("requiresApproval = false for plain plan past threshold, want true")
 	}
@@ -296,7 +134,7 @@ func TestAutoSeal_PlainPlanStillParks(t *testing.T) {
 		t.Error("expected 'pending_steps' metadata on parked plan")
 	}
 	if _, ok := meta["auto_sealed"]; ok {
-		t.Error("'auto_sealed' metadata present on parked plain plan, want absent")
+		t.Error("'auto_sealed' metadata present after M6/D3 deletion, want gone")
 	}
 
 	select {

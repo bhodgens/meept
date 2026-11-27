@@ -123,9 +123,12 @@ func TestApprovalWaitNotReaped(t *testing.T) {
 	// The prompt must stay COMPOUND (plan + work halves) so the dispatcher
 	// creates a task whose approval gate the pin tests; a plain plan
 	// prompt now routes to the plan-manager docs lane (no task row).
-	// The "don't implement it" clause vetoes the intent auto-seal
-	// (PlanAutoSealFromIntent, usability residual 07), so the compiled
-	// plan parks at awaiting_approval instead of sealing through.
+	// M6/D3 (2026-11-27): the auto-seal bypass is DELETED - the lexical
+	// PlanAutoSealFromIntent verdict died and no phrasing bypasses the
+	// gate any more. Approval posture is intent-driven
+	// (TrueIntentAnalysis.ApprovalRequested); every compiled plan past the
+	// complexity threshold parks at awaiting_approval, which is what this
+	// pin observes.
 	ack := s.SubmitChatHTTP(t, sessionID, marker+": plan the multi-step rework, don't implement it")
 	turnID, _ := ack["turn_id"].(string)
 	if turnID == "" {

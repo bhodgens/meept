@@ -2172,18 +2172,11 @@ func (h *ChatHandler) publishPlanRequest(result *DispatchResult, sessionID strin
 				}
 			}
 		}
-		// Intent-driven auto-seal (20261119-usability-remediation
-		// residual 07): a compound prompt that asks for the plan AND its
-		// execution ("create the plan and then implement it") carries the
-		// user's approval -- seal the plan after compilation instead of
-		// parking it at the approval gate. Detection reads the FULL user
-		// input (the compound parent task's description is deliberately
-		// the full input -- dispatcher routeCompoundWithModel) and is
-		// gated behind the compound lane ONLY, so a plain plan prompt can
-		// never trip it. No config knob: the intent IS the knob.
-		if result.Task != nil {
-			req.AutoSeal = PlanAutoSealFromIntent(result.Task.Description)
-		}
+		// M6/D3 follow-up (2026-11-27): the dead AutoSeal producer is
+		// deleted (the lexical verdict died with f182dea6). Approval
+		// posture is decided by model adjudication
+		// (TrueIntentAnalysis.ApprovalRequested) and the plan-contract
+		// routing (tree 20261125-plan-contract-quickplan).
 	}
 
 	payload, err := json.Marshal(req)

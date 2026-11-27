@@ -144,13 +144,12 @@ type PlanRequest struct {
 	// signals; 0 here means unclassified) = R7 inert on the async lane.
 	Difficulty int `json:"difficulty,omitempty"`
 
-	// AutoSeal marks a compound plan+implement request. Historical
-	// detection was PlanAutoSealFromIntent (lexical); that regex verdict is
-	// DEAD (M6/D3) and the handler.go producer now always sets false until
-	// its deletion follow-up lands. The flag + the requiresApproval bypass
-	// stay plumbed (tree ruling: req.AutoSeal plumbing remains for now);
-	// intent-driven approval (Intent.ApprovalRequested) is the live gate.
-	AutoSeal bool `json:"auto_seal,omitempty"`
+	// M6/D3 (2026-11-27): the AutoSeal field and its requiresApproval
+	// bypass are DELETED. The lexical verdict died with f182dea6; the
+	// handler producer died with the M6 follow-up. Approval posture is
+	// intent-driven: TrueIntentAnalysis.ApprovalRequested parks the plan,
+	// the plan-contract lanes (quick_plan / compound-oneshot, tree
+	// 20261125-plan-contract-quickplan) execute.
 }
 
 // plannerStep is the JSON structure expected from the planner LLM output.
@@ -1207,16 +1206,6 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 		return sp.awaitUserApproval(ctx, t, steps, req)
 	}
 
-	// Intent-driven auto-seal audit trail (20261119-usability-remediation
-	// residual 07): the gate was bypassed by the compound plan+implement
-	// intent -- log it, count it, and stamp the task metadata + the
-	// task.planned event below with the auto_sealed flag so the UI can
-	// show "auto-sealed by intent".
-	autoSealed := req.AutoSeal
-	if autoSealed {
-		sp.autoSealPlanAudit(t, req, len(steps))
-	}
-
 	// Persist steps
 	for _, step := range steps {
 		if err := sp.stepStore.Create(step); err != nil {
@@ -1275,7 +1264,6 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 		"total_steps": len(steps),
 		"ready_steps": len(promoted),
 		"mode":        mode,
-		"auto_sealed": autoSealed,
 	})
 
 	// Publish orchestrator.schedule to trigger tactical scheduling
@@ -2340,57 +2328,10 @@ func (sp *StrategicPlanner) ReplanFailedTask(ctx context.Context, taskID, failur
 	return sp.Plan(ctx, req)
 }
 
-// autoSealPlanAudit stamps the audit trail onto the task metadata and logs
-// the auto-seal decision. Called when the approval gate is bypassed by
-// PlanRequest.AutoSeal (20261119-usability-remediation residual 07) so the
-// UI can show "auto-sealed by intent" and the bus event carries the flag.
-func (sp *StrategicPlanner) autoSealPlanAudit(t *task.Task, req PlanRequest, stepCount int) {
-	sp.logger.Info("Plan auto-sealed by compound plan+implement intent",
-		"task_id", req.TaskID,
-		"steps", stepCount,
-	)
-	sp.recordMetric("strategic_planner.auto_seal", 1, nil)
-	t.Metadata = mergeMetadata(t.Metadata, map[string]json.RawMessage{
-		"auto_sealed":      json.RawMessage(`true`),
-		"auto_seal_reason": json.RawMessage(`"compound plan+implement intent"`),
-	})
-}
-
-// PlanAutoSealFromIntent is the DEAD regex verdict (bughunt 2026-11-24 M6,
-// owner decision D3: "the regex dies"). The lexical plan-verb / execute-verb
-// / connector machinery that decided seal-vs-park from phrasing — with the
-// M6 polarity escapes (doc-only requests sealed; the approval-request
-// question never answered honestly) — is DELETED. The verdict now comes from
-// model adjudication: TrueIntentAnalysis.ApprovalRequested plus the bounded
-// veto-suspect fallback (intent_analyzer.go, plan-contract tree
-// 20261125-plan-contract-quickplan leaf 03).
-//
-// This stub returns false so the still-standing handler.go AutoSeal plumbing
-// (sibling-owned at plan time; its deletion is listed as a follow-up)
-// compiles while the req.AutoSeal flag itself stays plumbed per the tree:
-// the compound lane's seal bypass is INERT, so compound plans park at the
-// approval gate until leaf 02 routes them onto the quickplan lane (D4).
-// Do NOT reimplement lexical detection here — intent drives approval.
-//
-// Deprecated: remove together with the handler.go caller.
-func PlanAutoSealFromIntent(input string) bool { return false }
-
 // requiresApproval returns true when the plan must be paused for user sign-off
 // before execution. Triggers on either an un-approved completed interview OR a
 // plan whose step count exceeds the configured complexity threshold.
 func (sp *StrategicPlanner) requiresApproval(req PlanRequest, steps []*task.TaskStep) bool {
-	// Intent-driven auto-seal (20261119-usability-remediation residual 07):
-	// a compound plan+implement request ("create the plan and then
-	// implement it") carries explicit user authorization to proceed -- the
-	// user already approved the work by asking for it. The gate is
-	// bypassed and the plan auto-seals straight to scheduling. The flag is
-	// wired ONLY on the compound lane (handler.publishPlanRequest reads it
-	// under Intent==compound via PlanAutoSealFromIntent), so plain plan
-	// requests never reach this branch and keep parking below. A sealed
-	// plan still runs evidence review + the full output-filter chain.
-	if req.AutoSeal {
-		return false
-	}
 	// Quickplan executes to completion with no approval pause
 	// (quickplan-mode leaf 02 / master Contract 2). An interview-approved
 	// planning context still blocks when the user has not approved.
