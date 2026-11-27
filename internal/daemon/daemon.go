@@ -3470,6 +3470,17 @@ func (w *metricsStoreWrapper) QueryReviewVerdictBreakdown(since time.Time) ([]me
 	return w.store.QueryReviewVerdictBreakdown(since)
 }
 
+// QueryReviewVerdictModelAgentBreakdown reports the per-(reviewed model,
+// executing agent) L6 breakdown from the daemon's metrics store,
+// implementing the http endpoint's reviewVerdictModelAgentProvider seam
+// for the group_by=agent mode. Nil-guarded like QueryReviewVerdicts.
+func (w *metricsStoreWrapper) QueryReviewVerdictModelAgentBreakdown(since time.Time) ([]metrics.ReviewVerdictBreakdownRow, error) {
+	if w == nil || w.store == nil {
+		return []metrics.ReviewVerdictBreakdownRow{}, nil
+	}
+	return w.store.QueryReviewVerdictModelAgentBreakdown(since)
+}
+
 // metricsStoreWrapper must also satisfy the review-verdict provider so the
 // daemon can hand the same instance to http.WithReviewVerdictProvider.
 var _ http.ReviewVerdictProvider = (*metricsStoreWrapper)(nil)

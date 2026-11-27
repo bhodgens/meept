@@ -12,20 +12,23 @@ package agent
 // review_evidence_gate.go).
 //
 // Rubric selection: the internal/modelrating catalog (frozen C1) has no
-// dedicated pair-review or adversarial-hook rubric, and the catalog is
-// frozen — a new id requires re-freezing it (issue #168 scope). Both
-// lanes therefore emit with the CATALOG-NEAREST id plus a detail string
-// that names the producing lane verbatim, exactly the lenient-store
-// fallback the task ruling allows ("emit with a detail string naming the
-// hook"): the row is identifiable by rubric_id + the detail prefix, and
-// the payload carries the machine-readable "review_source" key too.
-//   - pair-review rejected round  -> MR-LC1 (requested change did not
-//     land) — the reviewer says the work is not done; that is the
-//     gate lane's own mapping for "work didn't land".
+// dedicated pair-review or adversarial-hook (adversarial-scope) rubric.
+// Per the L6 ruling's explicit fallback, both lanes emit defect rows
+// with an EMPTY rubric_id plus a detail string naming the producing lane
+// (the store is lenient: unknown/empty ids are kept, never dropped).
+// Empty-rubric defect rows are structurally distinguishable at the DB
+// level from every existing lane: the gate lane always tags a catalog
+// id (MR-LC1/MR-PD1/MR-TD1), the step-reviewer lane carries whatever the
+// judge graded, and pass rows (the other empty-rubric shape) carry
+// category='pass'. The hook lane additionally identifies itself through
+// its unique judge_agent_id ("adversarial-verifier"), and both lanes
+// carry the machine-readable "review_source" payload key for consumers
+// that read the bus rather than the table.
+//   - pair-review rejected round  -> one incomplete_implementation row.
 //   - pair-review approved round   -> no defect verdicts; passVerdictFor
 //     supplies the pass row (same denominator rule as the step lane).
-//   - hook VerdictFail / Partial   -> MR-LC1 (verification found the
-//     work did not land / only partially landed).
+//   - hook VerdictFail / Partial   -> one incomplete_implementation row
+//     (verification found the work did not / only partially land).
 //   - hook VerdictPass             -> pass row via passVerdictFor.
 
 import (
@@ -75,7 +78,7 @@ func pairReviewVerdicts(result *ReviewResult) []modelrating.Verdict {
 		detail = fmt.Sprintf("pair-review rejection: %s", result.Issues[0])
 	}
 	return []modelrating.Verdict{{
-		RubricID:   modelrating.RubricID("MR-LC1"),
+		RubricID:   modelrating.RubricID(""),
 		Scope:      modelrating.ScopeModel,
 		Category:   modelrating.CategoryIncompleteImplementation,
 		Severity:   modelrating.SeverityFunctional,
@@ -109,7 +112,7 @@ func adversarialReviewVerdicts(verdict Verdict, checks []CheckResult, confidence
 		detail = fmt.Sprintf("adversarial verification hook: verdict PARTIAL (%d checks failed of %d)", failed, len(checks))
 	}
 	return []modelrating.Verdict{{
-		RubricID:   modelrating.RubricID("MR-LC1"),
+		RubricID:   modelrating.RubricID(""),
 		Scope:      modelrating.ScopeModel,
 		Category:   category,
 		Severity:   severity,

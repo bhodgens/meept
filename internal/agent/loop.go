@@ -10793,6 +10793,10 @@ func (l *AgentLoop) ConfigSnapshot() []LoopOption {
 		WithAdapterRouter(l.adapterRouter),
 		WithReflectionCollector(l.reflectionCollector),
 		WithUsageTracker(l.usageTracker),
+		// L6: the adversarial-verdict emitter rides the snapshot too, so
+		// per-session clones (and their verification hooks) publish the
+		// same lane as the template loop.
+		WithReviewVerdictEmitter(l.reviewVerdicts),
 		WithShadowManager(l.shadowMgr),
 		WithSkillStateRuntime(l.skillStateRuntime),
 

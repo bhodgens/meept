@@ -516,11 +516,13 @@ func expandUserPath(path string) string {
 func newAnalyticsReviewsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "reviews",
-		Short: "Show review verdict rollups by model, judge, category, or rubric",
-		Long: `Show review verdict rollups grouped by model, judge, category, or rubric.
+		Short: "Show review verdict rollups by model, judge, category, rubric, or agent",
+		Long: `Show review verdict rollups grouped by model, judge, category, rubric,
+or agent (model x agent breakdown; L6), or model_category.
 
 Displays:
-- group: The grouped identifier (model id, judge id, category, or rubric id)
+- group: The grouped identifier (model id, judge id, category, rubric id,
+  or executing agent id)
 - verdicts: Total review verdicts in the group
 - defects: Verdicts with a non-pass category
 - pass_rate: Fraction of pass-category verdicts
@@ -529,7 +531,7 @@ Displays:
 	}
 
 	cmd.Flags().Int("days", 30, "look-back window in days")
-	cmd.Flags().String("group-by", "model", "group rows by model, judge, category, rubric, or model_category")
+	cmd.Flags().String("group-by", "model", "group rows by model, judge, category, rubric, agent, or model_category")
 	cmd.Flags().Bool("include-workflow", false, "include workflow-scope verdicts")
 	cmd.Flags().Bool("json", false, "emit machine-readable JSON mirroring GET /api/v1/metrics/reviews")
 
@@ -558,9 +560,9 @@ func runAnalyticsReviewsRunE(cmd *cobra.Command, args []string) error {
 
 	// Validate group-by BEFORE opening the store so a typo fails fast with a
 	// clear message instead of a confusing store-level error.
-	validGroupBys := map[string]bool{"model": true, "judge": true, "category": true, "rubric": true, "model_category": true}
+	validGroupBys := map[string]bool{"model": true, "judge": true, "category": true, "rubric": true, "agent": true, "model_category": true}
 	if !validGroupBys[groupBy] {
-		return fmt.Errorf("invalid --group-by %q (want model, judge, category, rubric, or model_category)", groupBy)
+		return fmt.Errorf("invalid --group-by %q (want model, judge, category, rubric, agent, or model_category)", groupBy)
 	}
 
 	// Read-only open (bughunt 2026-11-23): the sibling analytics
@@ -591,10 +593,18 @@ func runAnalyticsReviewsRunE(cmd *cobra.Command, args []string) error {
 
 	since := time.Now().UTC().AddDate(0, 0, -days)
 
-	// Breakdown mode: per-(model, category) counts — the issue's question 2
-	// ("what kind of bad work did each model do") in one query.
-	if groupBy == "model_category" {
-		breakdown, err := store.QueryReviewVerdictBreakdown(since)
+	// Breakdown modes: per-(model, category) counts — the issue's question 2
+	// ("what kind of bad work did each model do") in one query — and the L6
+	// per-(model, agent) counts (--group-by agent: "is this model good for
+	// THIS agent's work?" — the model x agent grading dimension).
+	if groupBy == "model_category" || groupBy == "agent" {
+		var breakdown []metrics.ReviewVerdictBreakdownRow
+		var err error
+		if groupBy == "agent" {
+			breakdown, err = store.QueryReviewVerdictModelAgentBreakdown(since)
+		} else {
+			breakdown, err = store.QueryReviewVerdictBreakdown(since)
+		}
 		if err != nil {
 			return fmt.Errorf("failed to query review verdict breakdown: %w", err)
 		}
@@ -607,6 +617,25 @@ func runAnalyticsReviewsRunE(cmd *cobra.Command, args []string) error {
 		}
 		w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 		defer w.Flush()
+		if groupBy == "agent" {
+			// L6: the second key is the executing agent; agent:"" is the
+			// documented unknown-agent bucket (legacy rows the best-effort
+			// backfill could not resolve) — shown as "-".
+			fmt.Fprintln(w, "MODEL	AGENT	COUNT")
+			fmt.Fprintln(w, "-----	-----	-----")
+			for _, r := range breakdown {
+				model := r.Model
+				if len(model) > 30 {
+					model = model[:27] + "..."
+				}
+				agent := r.Agent
+				if agent == "" {
+					agent = "-"
+				}
+				fmt.Fprintf(w, "%-30s	%s	%d\n", model, agent, r.Count)
+			}
+			return nil
+		}
 		fmt.Fprintln(w, "MODEL	CATEGORY	COUNT")
 		fmt.Fprintln(w, "-----	--------	-----")
 		for _, r := range breakdown {
@@ -702,7 +731,10 @@ type analyticsReviewsRowJSON struct {
 type analyticsReviewsBreakdownRowJSON struct {
 	Model    string `json:"model"`
 	Category string `json:"category"`
-	Count    int64  `json:"count"`
+	// Agent mirrors the endpoint's L6 key (omitempty keeps
+	// model_category payloads byte-identical).
+	Agent string `json:"agent,omitempty"`
+	Count int64  `json:"count"`
 }
 
 // printAnalyticsReviewsJSON renders the --json payload. Exactly one of rows /
@@ -728,6 +760,7 @@ func printAnalyticsReviewsJSON(out io.Writer, days int, groupBy string, rows []m
 		payload.Breakdown = append(payload.Breakdown, analyticsReviewsBreakdownRowJSON{
 			Model:    r.Model,
 			Category: r.Category,
+			Agent:    r.Agent,
 			Count:    r.Count,
 		})
 	}

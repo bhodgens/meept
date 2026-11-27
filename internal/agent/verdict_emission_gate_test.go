@@ -13,10 +13,16 @@ package agent
 // names (C4) — they are wire values persisted by the collector.
 //
 // Producer-site rule (C4 / issue #168): ReviewManager + review_evidence_gate.go
-// EMIT; pair_manager.go (and the inline-review lane) are EXCLUDED in v1.
+// EMIT; pair_manager.go (and the inline-review lane) were EXCLUDED in v1.
+// The L6 owner ruling (2026-11-27) REVISED that: pair_manager and the
+// adversarial verification hook are now EMITTING producers via
+// ReviewManager.PublishReviewVerdict[FromProducer]. The frozen C4 payload
+// keys below are unchanged — the L6 additions (reviewed_agent_id,
+// review_source) are additive keys, and the key-name pins stay verbatim.
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -354,13 +360,29 @@ func TestEM_PRODUCER_1_ProducerScopeExclusions(t *testing.T) {
 		}
 	}
 
-	// Excluded site (v1): the pair manager's review parse must NOT attach
-	// verdicts. (review_tools.go does not exist in this tree; pair_manager.go
-	// is the pinned exclusion surface.)
+	// Excluded-site rule REVISED by the L6 owner ruling (2026-11-27):
+	// pair_manager is now an EMITTING producer, but at the PUBLISH site,
+	// not the parse site — parseReviewOutput still attaches no verdicts
+	// (the raw reviewer parse stays verdict-free; pairReviewVerdicts tags
+	// the emitted copy so the recorded attempt is untouched).
 	pm := NewPairManager(PairManagerConfig{})
 	pairResult := pm.parseReviewOutput("approved: all requirements met")
 	if len(pairResult.Verdicts) != 0 {
-		t.Errorf("pair_manager ReviewResult carries %d verdicts; pair_manager is a v1-EXCLUDED producer (C4) and must emit none",
+		t.Errorf("pair_manager parse attaches %d verdicts; verdict tagging belongs to the L6 emit path, not parseReviewOutput",
 			len(pairResult.Verdicts))
+	}
+	// L6 positive half: a rejected parse gains exactly one lane-tagged
+	// defect verdict at emit time (empty rubric_id + lane-naming detail,
+	// the ruling's fallback because the frozen catalog has no
+	// pair/adversarial rubric), and an approved parse gains none (the
+	// pass row comes from passVerdictFor).
+	rejected := pm.parseReviewOutput("missing tests and broken build")
+	tagged := pairReviewVerdicts(rejected)
+	if len(tagged) != 1 || tagged[0].Category != modelrating.CategoryIncompleteImplementation ||
+		tagged[0].RubricID != "" || !strings.HasPrefix(tagged[0].Detail, "pair-review") {
+		t.Errorf("pairReviewVerdicts on a rejected parse = %+v, want one empty-rubric lane-tagged defect row", tagged)
+	}
+	if pairReviewVerdicts(pairResult) != nil {
+		t.Errorf("pairReviewVerdicts on an approved parse must be nil (passVerdictFor owns the pass row)")
 	}
 }

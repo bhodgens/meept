@@ -314,6 +314,27 @@
       "dispatch-trace",
       "model-rating"
     ],
+    "internal/metrics/collector.go": [
+      "model-rating"
+    ],
+    "internal/agent/pair_manager.go": [
+      "model-rating"
+    ],
+    "internal/agent/verification_hook.go": [
+      "model-rating"
+    ],
+    "internal/agent/review_manager.go": [
+      "model-rating"
+    ],
+    "internal/agent/review_verdicts_producers.go": [
+      "model-rating"
+    ],
+    "internal/comm/http/reviews_endpoint.go": [
+      "model-rating"
+    ],
+    "cmd/meept/analytics.go": [
+      "model-rating"
+    ],
     "internal/modelrating/": [
       "model-rating"
     ],
@@ -939,7 +960,8 @@
         "grade-capture-01 review verdict with judged identities -> model_review_verdicts rows (rubric/category/severity/judge/cycle)",
         "retention-01 24h metrics_live sweep + 30d audit purge leave verdict rows intact; RetentionTables() excludes model_review_verdicts",
         "surface-01 GET /api/v1/metrics/reviews + meept analytics reviews read the same rows (frozen response keys)",
-        "join-proof-01 llm_calls rotation fixture: final successful implementer row blamed; judge-loop calls excluded by agent_id"
+        "join-proof-01 llm_calls rotation fixture: final successful implementer row blamed; judge-loop calls excluded by agent_id",
+        "producer-lane-01 L6 pair-review + adversarial-hook verdicts land in model_review_verdicts with agent_id via the real collector; endpoint/CLI group_by=agent parity"
       ],
       "note": "issue #168 model-rating metrics tree (model-rating-metrics-plan-glm53f): status flips to implemented when e2e/suites/model-rating/ lands (04-ship leaf 01)."
     },
@@ -6824,6 +6846,24 @@
       "status": "implemented",
       "paths": [
         "internal/metrics/store.go",
+        "e2e/suites/model-rating/"
+      ]
+    },
+    {
+      "id": "producer-lane-01",
+      "suite": "model-rating",
+      "diff": "M",
+      "title": "L6 producer lanes: a pair-review round and an adversarial verification-hook verdict publish through the real ReviewManager seam + real collector into model_review_verdicts rows carrying agent_id (actor/loop agent) and lane-true judge identities; group_by=agent answers on the endpoint and the CLI with the pre-L6 payload keys byte-identical",
+      "status": "implemented",
+      "paths": [
+        "internal/agent/pair_manager.go",
+        "internal/agent/verification_hook.go",
+        "internal/agent/review_manager.go",
+        "internal/agent/review_verdicts_producers.go",
+        "internal/metrics/collector.go",
+        "internal/metrics/review_verdicts.go",
+        "internal/comm/http/reviews_endpoint.go",
+        "cmd/meept/analytics.go",
         "e2e/suites/model-rating/"
       ]
     },

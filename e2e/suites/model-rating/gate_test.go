@@ -86,14 +86,16 @@ func modelRatingRow(t *testing.T, m gateManifest) (row struct {
 	return row, false
 }
 
-// frozenScenarios are the four registered scenario ids (manifest suites[]
-// row + master.md Test Gate F1-F6 outcomes). Order matters: the row's
-// scenarios array must declare all four.
-var frozenScenarios = [4]string{
+// frozenScenarios are the registered scenario ids (manifest suites[]
+// row + master.md Test Gate F1-F6 outcomes; producer-lane-01 added by the
+// L6 ruling 2026-11-27). Order matters: the row's scenarios array must
+// declare all of them.
+var frozenScenarios = [5]string{
 	"grade-capture-01",
 	"retention-01",
 	"surface-01",
 	"join-proof-01",
+	"producer-lane-01",
 }
 
 // TestSH_MANIFEST_1_RowRegistered pins the manifest registration that must
@@ -218,4 +220,14 @@ func TestSH_SURFACE_1_SurfaceScenario(t *testing.T) {
 // excluded by agent_id.
 func TestSH_JOIN_1_JoinProofScenario(t *testing.T) {
 	TestJoinProof01(t)
+}
+
+// TestSH_PRODUCER_1_LaneEmissionScenario is the producer-lane-01 gate
+// (L6 ruling 2026-11-27): given a pair round, an adversarial hook
+// verdict, and a step-lane review through the REAL collector, when the
+// verdicts persist, then every model_review_verdicts row carries the
+// executing agent_id and the lane-true judge identities, and the
+// group_by=agent endpoint/CLI surfaces answer the model x agent pairs.
+func TestSH_PRODUCER_1_LaneEmissionScenario(t *testing.T) {
+	TestProducerLane01(t)
 }

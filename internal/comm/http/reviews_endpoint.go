@@ -3,8 +3,8 @@
 //
 // Frozen response shape:
 //
-//	GET /api/v1/metrics/reviews?window=24h|7d|30d|all&group_by=model|judge|category|rubric
-//	200 {"window","group_by","rows":[{group,verdicts,defects,pass_rate,label}],"workflow_excluded"}
+//	GET /api/v1/metrics/reviews?window=24h|7d|30d|all&group_by=model|judge|category|rubric|agent|model_category
+//	200 {"window","group_by","rows":[{group,verdicts,defects,pass_rate,label}],"breakdown":[{model,category,agent?,count}],"workflow_excluded"}
 //
 // Degrade posture mirrors live_metrics_usage.go buildLiveMetricsResponse: a nil
 // provider or a store error answers 200 with empty rows and
@@ -54,12 +54,16 @@ var reviewMetricWindows = map[string]time.Duration{
 // validReviewGroupBys is the frozen group_by whitelist (C5). "model_category"
 // is the breakdown rollup (one row per reviewed model x category pair — the
 // issue's question 2); its rows carry {model, category, count} instead of the
-// single-dimension aggregate shape.
+// single-dimension aggregate shape. L6 (owner ruling 2026-11-27) adds "agent":
+// the model x AGENT breakdown (reviewed_model_id stays always in the GROUP BY,
+// per the existing breakdown shape), served in the same "breakdown" array with
+// rows carrying an added "agent" key.
 var validReviewGroupBys = map[string]bool{
 	"model":          true,
 	"judge":          true,
 	"category":       true,
 	"rubric":         true,
+	"agent":          true,
 	"model_category": true,
 }
 
@@ -78,7 +82,19 @@ type reviewVerdictRowJSON struct {
 type reviewVerdictBreakdownRowJSON struct {
 	Model    string `json:"model"`
 	Category string `json:"category"`
-	Count    int64  `json:"count"`
+	// Agent is the L6 executing-agent key (model x agent breakdown mode,
+	// group_by=agent). omitempty keeps the model_category rows byte-
+	// identical to the frozen C5 shape.
+	Agent string `json:"agent,omitempty"`
+	Count int64  `json:"count"`
+}
+
+// reviewVerdictModelAgentProvider supplies the L6 model x agent breakdown
+// (per-(reviewed model, executing agent) counts). Optional seam like
+// ReviewVerdictBreakdownProvider: providers that do not implement it make
+// group_by=agent answer the empty-200 degrade shape, never 5xx.
+type reviewVerdictModelAgentProvider interface {
+	QueryReviewVerdictModelAgentBreakdown(since time.Time) ([]metrics.ReviewVerdictBreakdownRow, error)
 }
 
 // reviewsMetricsResponse is the JSON body of GET /api/v1/metrics/reviews.
@@ -120,7 +136,7 @@ func (s *Server) handleReviewsMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !validReviewGroupBys[groupBy] {
-		s.writeError(w, http.StatusBadRequest, "invalid group_by (want model, judge, category, or rubric)")
+		s.writeError(w, http.StatusBadRequest, "invalid group_by (want model, judge, category, rubric, agent, or model_category)")
 		return
 	}
 
@@ -175,6 +191,50 @@ func (s *Server) handleReviewsMetrics(w http.ResponseWriter, r *http.Request) {
 					Model:    row.Model,
 					Category: row.Category,
 					Count:    row.Count,
+				})
+			}
+		}
+		s.writeJSON(w, http.StatusOK, resp)
+		return
+	}
+
+	// L6 agent mode (group_by=agent): the model x AGENT breakdown —
+	// per-(reviewed model, executing agent) counts, reviewed_model_id
+	// always in the GROUP BY per the existing breakdown shape. Same
+	// degrade posture as model_category: optional provider seam, ambient
+	// MetricsService fallback, empty-200 on miss, never 5xx. Rows whose
+	// agent is unknown (legacy rows the best-effort backfill could not
+	// resolve) appear as agent:"" — the documented GROUPED bucket, never
+	// dropped (docs/workflows/model-rating.md).
+	if groupBy == "agent" {
+		since := time.Time{}
+		if d, bounded := reviewMetricWindows[window]; bounded {
+			since = time.Now().Add(-d)
+		}
+		var rows []metrics.ReviewVerdictBreakdownRow
+		if p, ok := s.reviewVerdicts.(reviewVerdictModelAgentProvider); ok {
+			if storeRows, storeErr := p.QueryReviewVerdictModelAgentBreakdown(since); storeErr != nil {
+				s.logger.Warn("review metrics: model-agent breakdown unavailable", "error", storeErr)
+			} else {
+				rows = storeRows
+			}
+		}
+		if rows == nil {
+			if p, ok := s.metricsService.(reviewVerdictModelAgentProvider); ok {
+				if storeRows, storeErr := p.QueryReviewVerdictModelAgentBreakdown(since); storeErr != nil {
+					s.logger.Warn("review metrics: fallback model-agent breakdown unavailable", "error", storeErr)
+				} else {
+					rows = storeRows
+				}
+			}
+		}
+		if rows != nil {
+			resp.Breakdown = make([]reviewVerdictBreakdownRowJSON, 0, len(rows))
+			for _, row := range rows {
+				resp.Breakdown = append(resp.Breakdown, reviewVerdictBreakdownRowJSON{
+					Model: row.Model,
+					Agent: row.Agent,
+					Count: row.Count,
 				})
 			}
 		}
